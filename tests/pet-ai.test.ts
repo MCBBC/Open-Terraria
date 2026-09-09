@@ -25,25 +25,30 @@ const frames = framesJson as Record<string, number>;
 const PET_PROJ_IDS = [...new Set(Object.values(pets).map((e) => e.proj))].sort((a, b) => a - b);
 
 describe('vanilla-petai：aiStyle 覆盖统计', () => {
-  it('宠物 proj 全覆盖（61 款，无缺条目/无 aiStyle 缺失）', () => {
-    expect(T.meta.petProjCount).toBe(61);
-    expect(PET_PROJ_IDS).toHaveLength(61);
+  // ★SW-FX2（2026-09-09）：61→62 —— vanilla-pets.json 3855 行勘误（buff201/proj702
+  //  → buff200/proj703,Item.cs:34017-34022 共享块缺省臂 3855→200/703,原行与 3856
+  //  重复 201/702）后唯一 proj 集 +1;703 DD2PetGato = AI_144 悬停族（1456
+  //  Projectile.cs:66784 逐臂:vector.Y+=cos(localAI·π/30)·2/num=3/num2=4/num3=2/
+  //  num4=4 帧钳,Main.cs:8765 projFrames[703]=8）,条目按 702 同构补入
+  it('宠物 proj 全覆盖（62 款，无缺条目/无 aiStyle 缺失）', () => {
+    expect(T.meta.petProjCount).toBe(62);
+    expect(PET_PROJ_IDS).toHaveLength(62);
     for (const id of PET_PROJ_IDS) {
       expect(T.pets[String(id)], `proj ${id} 缺条目`).toBeDefined();
       expect(T.pets[String(id)].aiStyle, `proj ${id} 缺 aiStyle`).toBe(projs[String(id)]?.aiStyle);
     }
   });
 
-  it('aiStyle 分布 = {26:48, 67:5, 144:4, 124:2, 90:1, 11:1}（任务预期"19 为主"实勘为 26）', () => {
+  it('aiStyle 分布 = {26:48, 67:5, 144:5, 124:2, 90:1, 11:1}（任务预期"19 为主"实勘为 26）', () => {
     const dist: Record<string, number> = {};
     for (const id of PET_PROJ_IDS) {
       const k = String(T.pets[String(id)].aiStyle);
       dist[k] = (dist[k] ?? 0) + 1;
     }
-    expect(dist).toEqual({ '11': 1, '26': 48, '67': 5, '90': 1, '124': 2, '144': 4 });
+    expect(dist).toEqual({ '11': 1, '26': 48, '67': 5, '90': 1, '124': 2, '144': 5 });
   });
 
-  it('家族分派覆盖 61 款：ground 43 / fly 10 / hover 8，且 aiStyle→家族映射合法', () => {
+  it('家族分派覆盖 62 款：ground 43 / fly 10 / hover 9，且 aiStyle→家族映射合法', () => {
     const counts: Record<string, number> = { ground: 0, fly: 0, hover: 0 };
     for (const id of PET_PROJ_IDS) {
       const e = T.pets[String(id)];
@@ -54,7 +59,7 @@ describe('vanilla-petai：aiStyle 覆盖统计', () => {
       else if (e.aiStyle === 67) expect(e.family).toBe('ground');
       else expect(e.family).toBe('hover');
     }
-    expect(counts).toEqual({ ground: 43, fly: 10, hover: 8 });
+    expect(counts).toEqual({ ground: 43, fly: 10, hover: 9 });
     expect(T.meta.familyCounts).toEqual(counts);
   });
 

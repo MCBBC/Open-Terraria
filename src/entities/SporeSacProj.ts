@@ -1,0 +1,279 @@
+// 孢子囊 3336 配饰弹族（★SW-FX1 2026-09-09,item-audit 配饰节 ❌ 清偿）：
+//   · 孢子云 567/568（aiStyle 105 = AI_105_SporeSac）
+//   · 云消亡迸气 569-571（aiStyle 106）
+// 原版真值 = Terarria1457/Terraria（1457 终值；掷定扫描链在 Game.updateSporeSacTick）：
+//   · 云 SetDefaults（:6187-6202）: 567=14×14、568=16×16（提取器漏嵌套 if,json 缺差
+//     由 vanillaProjectiles DATA_PATCH 补）、aiStyle 105、friendly、penetrate 1、
+//     alpha 255、timeLeft 3600、tileCollide false、ignoreWater true、
+//     UseGroupStaticImmunity(567)（:6201 → :10678-10683 = IDStatic 10t 组键 567,
+//     双型共用一张组表——多云同拍不连击同敌）。
+//   · AI_105（:40768-40905）逐拍：
+//       光 0.2/0.275/0.075 × num（num=(1−α/255)×scale,:40770-40772,本仓 lightRGB 位）
+//       localAI[0] ±90 振荡、≥0 拍 scale+0.003 否则 −0.003（:40774-40783）
+//       rotation += 0.0025×scale（:40784）
+//       IndexForVisuals%6 漂移向表 num2/num3（:40786-40801）
+//       localAI[1] >60 → 重置 −180;≥−60 拍 v += 0.002×dir 否则 −（:40803-40814）
+//       ai[0]++;>5400 → damage=0、ai[1]=1、α+5 至 255 拍 Kill（:40815-40830）
+//       否则 num4=dist(玩家)/100 且 >4..10 逐档 ×1.1..×1.7（:40832-40863）;
+//         owner 无 sporeSac 旗 → num4 += 100（:40874-40876,卸饰加速消散）;
+//         ai[0] += num4;α>50 → α−10 钳 50（:40882-40889 渐显,α 起 255）
+//       索敌：曼哈顿 <340 最近 CanBeChasedBy → v=(v×40+dir×4)/41（:40891-40905）;
+//         无目标且 |v|>0.2 → v×0.98（:40906-40908）
+//   · GetAlpha（:80862-80864）(255−α,255−α,255−α,255−α) → 画布 globalAlpha
+//     = (255−α)/255（预乘等价,ChloroSporeCloud 同惯例）。
+//   · Kill（:74317-74323）owner 本地 && ai[1]==0（非寿终,即命中耗穿透）→
+//     迸 569+Next(3) 同伤气团（vel = 随机单位向量×0.3,position=云心）。
+//   · 气团 SetDefaults（:6204-6213,569-571）: 32×32、aiStyle 106、friendly、
+//     penetrate −1、alpha 255、timeLeft 3600、tileCollide false、ignoreWater true。
+//     AI_106（:34144-34168）: rotation += vx×0.02,vx<0 再 −|vy|×0.02 否则 +
+//     |vy|×0.02;v×0.98;ai[0]++ ≥60 → α+5 至 255 拍消亡;否则 α>80 → α−30 钳 80
+//     （稳态 (255−80)/255≈0.686 不透明度）。penetrate −1 = 全局免疫窗冷却
+//     （原版 npc.immune[owner]=10）→ HitCdImpl 冷却 10t。
+//   · 无 Kill 尘/音分支（Kill :74317 前后无 567/568 专属支）→ 静默消亡。
+// 联机面：玩家本地自持实体（远端代理不跑 fixedUpdate）,可见面偏差登记同 ChloroSporeCloud。
+import { Entity } from './Entity';
+import type { GameHooks } from './types';
+import type { Renderer } from '../render/Renderer';
+import type { Camera } from '../render/Camera';
+import { dealContacts, HitCdImpl } from './proj1457';
+import { canBeChasedBy } from './projTargets';
+import { projSprite } from './Arrow';
+
+/** 孢子云双型（567 绿 / 568 变体,567 盒 14×14、568 盒 16×16） */
+export const SPORE_CLOUD_A = 567;
+export const SPORE_CLOUD_B = 568;
+/** 迸气团三变体（NewProjectile rand.Next(569, 572)） */
+export const SPORE_GAS_IDS = [569, 570, 571] as const;
+
+/** 云消亡迸气回调（Game 侧注入：NewProjectile(云心, 569+Next(3), 同伤) 出射口） */
+export type SporeGasSpawn = (x: number, y: number, vx: number, vy: number, dmg: number) => void;
+
+/** 孢子云 567/568（AI_105）——玩家装备 3336 周期掷定的驻场云,命中即消亡并迸气团 */
+export class SporeSacCloud extends Entity {
+  damage: number;
+  knockback: number;
+  critChance = 0;          // SetDefaults 无 melee/ranged/magic 类别旗 ⇒ 暴击掷不触发
+  armorPen = 0;
+  dead = false;
+  readonly projId: number;
+  /** 弹体点光（AI_105 :40770-40772,Game 实体光扫读 lightRGB——同 Enemy/Arrow 约定） */
+  lightRGB: [number, number, number] | null = null;
+  /** SetDefaults alpha=255 → AI 淡入钳 50（:40882-40889） */
+  private alpha = 255;
+  /** AI_105 scale 振荡（±0.003/拍,基准 1） */
+  private scale = 1;
+  private rotation = 0;
+  /** localAI[0]（:40774 ±90 振荡相位） */
+  private osc = 0;
+  /** localAI[1]（:40803 漂移相位 −180..>60） */
+  private drift = 0;
+  /** ai[0]（寿命计数,近玩家加速/远玩家加速更猛） */
+  private life = 0;
+  /** ai[1]（0=活跃 1=寿终淡出——寿终不迸气不结算） */
+  private dying = false;
+  /** IndexForVisuals = key.Index（:554）——实体自增 id 近似出生序,漂移向 6 档取模 */
+  private readonly visualIndex: number;
+  private readonly spawnGasCb: SporeGasSpawn | null;
+  /** 组共享 IDStatic 免疫（UseGroupStaticImmunity(567) :6201——双型同组键） */
+  private static readonly GROUP_CD = new HitCdImpl();
+
+  constructor(x: number, y: number, type: number, damage: number, knockback: number,
+    visualIndex: number, spawnGas?: SporeGasSpawn) {
+    super();
+    this.projId = type;
+    this.w = type === SPORE_CLOUD_A ? 14 : 16;   // :6189-6196
+    this.h = this.w;
+    this.x = x; this.y = y;                       // 原版传 center 进 NewProjectile 位置形参=盒左上（quirk 保留）
+    this.vx = 0; this.vy = 0;
+    this.damage = damage;                         // NewProjectile 字面 70（:42739）
+    this.knockback = knockback;                   // 1.5（:42740）
+    this.visualIndex = visualIndex;
+    this.spawnGasCb = spawnGas ?? null;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    const st = game.world.store;
+    const tw = st.w * 16, th = st.h * 16;
+    // ---- AI_105（:40768-40905）----
+    {
+      const n = (1 - this.alpha / 255) * this.scale;              // :40770-40772 光强因子
+      this.lightRGB = [0.2 * n, 0.275 * n, 0.075 * n];            // 光 0.2/0.275/0.075 × num
+    }
+    this.osc += 1;                                                // :40774
+    if (this.osc >= 90) this.osc *= -1;                           // :40776-40778
+    if (this.osc >= 0) this.scale += 0.003;                       // :40780-40782
+    else this.scale -= 0.003;
+    this.rotation += 0.0025 * this.scale;                         // :40784
+    {                                                             // IndexForVisuals%6 漂移向（:40786-40801）
+      let num2 = 1, num3 = 1;
+      const m = ((this.visualIndex % 6) + 6) % 6;
+      if (m === 0) num3 *= -1;
+      else if (m === 1) num2 *= -1;
+      else if (m === 2) { num3 *= -1; num2 *= -1; }
+      else if (m === 3) num3 = 0;
+      else if (m === 4) num2 = 0;
+      this.drift += 1;                                            // :40803
+      if (this.drift > 60) this.drift = -180;                     // :40805-40807
+      if (this.drift >= -60) {                                    // :40809-40814
+        this.vx += 0.002 * num3; this.vy += 0.002 * num2;
+      } else {
+        this.vx -= 0.002 * num3; this.vy -= 0.002 * num2;
+      }
+    }
+    this.life += 1;                                               // :40816
+    if (this.life > 5400) {                                       // :40817-40830 寿终段
+      this.damage = 0;
+      this.dying = true;
+      if (this.alpha < 255) {
+        this.alpha = Math.min(255, this.alpha + 5);
+      } else {
+        this.dead = true;                                          // :40828 Kill()（ai1==1 → 不迸气）
+        return;
+      }
+    } else {                                                      // :40831-40889 活跃段
+      const p = game.player;
+      let num4 = Math.hypot(this.cx - p.cx, this.cy - p.cy) / 100;   // :40832
+      if (num4 > 4) num4 *= 1.1;                                     // :40834-40863 逐档乘
+      if (num4 > 5) num4 *= 1.2;
+      if (num4 > 6) num4 *= 1.3;
+      if (num4 > 7) num4 *= 1.4;
+      if (num4 > 8) num4 *= 1.5;
+      if (num4 > 9) num4 *= 1.6;
+      if (num4 > 10) num4 *= 1.7;
+      if (!p.equipStats.sporeSac) num4 += 100;                       // :40874-40876 卸饰加速消散
+      this.life += num4;                                             // :40878
+      if (this.alpha > 50) this.alpha = Math.max(50, this.alpha - 10);   // :40882-40889 渐显
+    }
+    // ---- 索敌（:40891-40905：曼哈顿 <340 最近 CanBeChasedBy,无 LOS 门）----
+    let found = false, tx = 0, ty = 0, best = 340;
+    for (const ent of game.enemies()) {
+      const e = ent as { x: number; y: number; w: number; h: number; dead?: boolean };
+      if (!e || e.dead || !canBeChasedBy(ent)) continue;
+      const dx = Math.abs((this.x + this.w / 2) - (e.x + e.w / 2));
+      const dy = Math.abs((this.y + this.h / 2) - (e.y + e.h / 2));
+      const d = dx + dy;
+      if (d < best) { best = d; tx = e.x + e.w / 2; ty = e.y + e.h / 2; found = true; }
+    }
+    if (found) {                                                    // :40906-40912
+      const vx0 = tx - this.cx, vy0 = ty - this.cy;
+      const l = Math.hypot(vx0, vy0) || 1;
+      this.vx = (this.vx * 40 + (vx0 / l) * 4) / 41;
+      this.vy = (this.vy * 40 + (vy0 / l) * 4) / 41;
+    } else if (Math.hypot(this.vx, this.vy) > 0.2) {                // :40913-40915
+      this.vx *= 0.98; this.vy *= 0.98;
+    }
+    // 位移（tileCollide=false 直推,:6188 块）;出界静默消亡（:16787 同式）
+    this.x += this.vx; this.y += this.vy;
+    if (this.x <= 0 || this.y <= 0 || this.x + this.w >= tw || this.y + this.h >= th) {
+      this.dead = true;
+      return;
+    }
+    // ---- Damage（penetrate 1 → 首命中即 Kill;寿终段 damage=0 不结算）----
+    if (!this.dying) {
+      let hit = false;
+      dealContacts(this, game, SporeSacCloud.GROUP_CD, 10, () => { hit = true; });
+      if (hit) { this.burst(); return; }                            // Kill :74317（ai1==0 → 迸气）
+    }
+  }
+
+  /** Kill 迸气支（:74317-74323）：569+Next(3) 同伤,vel=随机单位向量×0.3,position=云心 */
+  private burst(): void {
+    this.dead = true;
+    if (!this.spawnGasCb) return;
+    const a = Math.random() * Math.PI * 2;
+    this.spawnGasCb(this.cx, this.cy, Math.cos(a) * 0.3, Math.sin(a) * 0.3, this.damage);
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(this.projId);
+    const opacity = (255 - this.alpha) / 255;           // GetAlpha :80862-80864 预乘等价
+    if (opacity <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rotation);
+    ctx.imageSmoothingEnabled = false;
+    if (img && img.width > 0) {
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    } else {
+      ctx.fillStyle = '#7A8F3A';
+      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+    }
+    ctx.restore();
+  }
+}
+
+/** 迸气团 569-571（aiStyle 106）——云消亡时同伤气团,驻场 ~1s 渐显渐隐 */
+export class SporeGasCloud extends Entity {
+  damage: number;
+  knockback = 0;           // NewProjectile kb=0（:74321）
+  critChance = 0;
+  armorPen = 0;
+  dead = false;
+  readonly projId: number;
+  /** SetDefaults alpha=255 → AI 渐显钳 80（:34158-34164） */
+  private alpha = 255;
+  private rotation = 0;
+  /** ai[0]（:34153 ≥60 转淡出） */
+  private t = 0;
+  private readonly hitCd = new HitCdImpl();
+
+  constructor(x: number, y: number, vx: number, vy: number, type: number, damage: number) {
+    super();
+    this.projId = type;
+    this.w = 32; this.h = 32;                    // :6204-6213
+    this.x = x; this.y = y;                      // 原版传云心进位置形参=盒左上（quirk 保留）
+    this.vx = vx; this.vy = vy;
+    this.damage = damage;                        // 同伤透传
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    // AI_106（:34144-34168）
+    this.rotation += this.vx * 0.02;
+    if (this.vx < 0) this.rotation -= Math.abs(this.vy) * 0.02;
+    else this.rotation += Math.abs(this.vy) * 0.02;
+    this.vx *= 0.98; this.vy *= 0.98;            // :34151
+    this.t += 1;                                 // :34152
+    const fading = this.t >= 60;                 // :34153-34168
+    if (fading) {
+      if (this.alpha < 255) this.alpha = Math.min(255, this.alpha + 5);
+      else { this.dead = true; return; }         // :34159-34163（owner==myPlayer 单机恒真）
+    } else if (this.alpha > 80) {
+      this.alpha = Math.max(80, this.alpha - 30);
+    }
+    // 位移（tileCollide=false）;出界静默消亡
+    this.x += this.vx; this.y += this.vy;
+    const tw = game.world.store.w * 16, th = game.world.store.h * 16;
+    if (this.x <= 0 || this.y <= 0 || this.x + this.w >= tw || this.y + this.h >= th) {
+      this.dead = true;
+      return;
+    }
+    // penetrate −1 = 全局免疫窗冷却（原版 npc.immune[owner]=10）;淡出段 damage 未清
+    //（原版 AI_106 无 damage=0 支）→ 保持结算
+    dealContacts(this, game, this.hitCd, 10);
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(this.projId);
+    const opacity = (255 - this.alpha) / 255;
+    if (opacity <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rotation);
+    ctx.imageSmoothingEnabled = false;
+    if (img && img.width > 0) {
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    } else {
+      ctx.fillStyle = '#6F8F49';
+      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+    }
+    ctx.restore();
+  }
+}

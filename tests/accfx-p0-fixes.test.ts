@@ -130,12 +130,12 @@ describe('配饰审计 P0：单件批', () => {
     expect(p.equipStats.mana).toBe(0);
   });
 
-  it('953 攀爬爪 / 975 鞋钉 → spikedBoots（:14489-14496 各 +1）', () => {
+  it('953 攀爬爪 / 975 鞋钉 → spikedBoots（:14489-14496 各 +1；★SW-FX1 档位还原 int 计数）', () => {
     const p = new Player(0, 0, new Inventory());
     p.inv.armor[3] = { id: _iid(953), stack: 1 };
-    expect(p.equipStats.spikedBoots).toBe(true);
+    expect(p.equipStats.spikedBoots).toBe(1);
     p.inv.armor[3] = { id: _iid(975), stack: 1 };
-    expect(p.equipStats.spikedBoots).toBe(true);
+    expect(p.equipStats.spikedBoots).toBe(1);
   });
 
   it('3224 蠕虫围巾 endurance +0.17（:14532-14535 → enduranceEq 消费通道）', () => {

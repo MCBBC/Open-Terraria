@@ -283,9 +283,26 @@ export class World {
    *  2147-2150——同日读档不重置，与原版一致）。多人=每名玩家各限一次 */
   anglerWhoFinishedToday: string[] = [];
   /** 今日任务是否已交（Main.anglerQuestFinished，Main.cs:1841）。运行时态**不存档**
-   *  ——原版读档 loadTempInfo 重置 false（WorldFile.cs:628-629）；黎明重掷时清零
-   *  （AnglerQuestSwap :3806） */
+   *  ——原版读档 WorldFile.ResetTemps 先重置 false（WorldFile.cs:628-629），读档装配
+   *  完成后由 playWorldCallBack 重构（WorldGen.cs:6781-6784，见下方
+   *  reconstructAnglerFinished）；黎明重掷时清零（AnglerQuestSwap :3806） */
   anglerQuestFinished = false;
+
+  /** ★SW-BJ45 2026-09-09：单人读档渔夫任务完成旗重构（WorldGen.cs:6781-6784
+   *  playWorldCallBack 装配尾：`if (Main.netMode == 0 &&
+   *  Main.anglerWhoFinishedToday.Contains(Main.player[Main.myPlayer].name))
+   *  Main.anglerQuestFinished = true;`）。ResetTemps（WorldFile.cs:628-629）先清 false，
+   *  名单随世界档回填（WF:2147-2161）后于此重构——曾整缺 → 同日读档后旗=false 而
+   *  交付名单 gate（Main.cs:39660 双门之名单门）仍拦 → 感叹号/鱼角标/任务台词俱在、
+   *  点「任务」静默无效（用户实报「有任务鱼也提交不了」）。联机不重构（原版
+   *  netMode!=0 由 msg74 按玩家名下发 finished，MessageBuffer.cs:3145-3152；本仓
+   *  联机 quest sync 债登记 BJ45）。调用点 = Game.afterWorldLoad 装配尾 */
+  reconstructAnglerFinished(playerName: string, isMultiplayer: boolean): void {
+    if (!isMultiplayer && this.anglerWhoFinishedToday.includes(playerName)) {
+      this.anglerQuestFinished = true;
+    }
+  }
+
   weatherToSave(): import('./weather/Weather').WeatherSave | undefined {
     return weatherToSave(this.weather);
   }

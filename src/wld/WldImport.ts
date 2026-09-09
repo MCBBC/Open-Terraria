@@ -954,6 +954,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     //  锚=2×2 左上,与 openSignEditor 反解锚同口径）
     signs: wld.signs.map((sg) => ({ x: sg.x, y: sg.y, text: sg.text })),
     flags: { downedEyeOfCthulhu: false, ...wld.flags },
+    // ★SW-BJ45（2026-09-09）：渔夫任务链段透传（SaveData.angler 同形，消费面
+    //  save/SaveFile.ts loadSaveData 回填 World.anglerQuest/anglerWhoFinishedToday，
+    //  完成旗由 World.reconstructAnglerFinished 于装配尾重构——WorldGen.cs:6781-6784）
+    angler: { quest: wld.anglerQuest, whoFinishedToday: wld.anglerWhoFinishedToday },
   };
   const toEntries = (m: Map<number, number>, names: Record<string, string>): CompatEntry[] =>
     [...m.entries()].map(([id, count]) => ({ id, name: names[String(id)] ?? null, count, action: '' }))

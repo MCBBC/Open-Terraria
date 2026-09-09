@@ -108,12 +108,6 @@ export interface MusicInput {
   /** 玩家中心（px） */
   centerX: number;
   centerY: number;
-  /** ★IIIII230：SceneMetrics.EvilTileCount/BloodTileCount（SceneMetrics.cs:614-615
-   *  ZoneScanSize 169×124 窗计数终值——互减+钳位后）。TOW 链双邪恶共存支
-   *  （:12141-12146 `ZoneCrimson && BloodTileCount > EvilTileCount`）消费；
-   *  经典链双邪恶支为已登记简化态,不读本字段（非 drunk 零扰动） */
-  evilTileCount?: number;
-  bloodTileCount?: number;
   /** oceanDepths 结果（与背景共用；缺省内部重算近似） */
   ocean?: boolean;
   state: MusicState;
@@ -538,9 +532,12 @@ export function pickTowMusic(inp: MusicInput): number {
   if (s.zoneDungeon) return MUSIC.OtherworldDungeon;
   // 蘑菇（:12137 bgStyle==9 地表 ∪ undergroundBackground==2——本仓由 ZoneGlowshroom 驱动,经典链同款近似）
   if (s.zoneGlowshroom) return MUSIC.OtherworldMushroom;
-  // 腐化/猩红（:12141-12171：双邪恶共存按 BloodTileCount>EvilTileCount 分主,深度分地表/地下曲）
+  // 腐化/猩红（:12141-12171：双邪恶共存按 BloodTileCount>EvilTileCount 分主,深度分
+  //  地表/地下曲。计数=SceneMetrics 同对象域（ZoneScanSize 169×124 窗互减+钳位终值,
+  //  SceneFlags.evilTileCount/bloodTileCount）,与 zoneCorrupt/zoneCrimson 同源——
+  //  经典链双邪恶支为已登记简化态,不消费计数（非 drunk 零扰动））
   if (s.zoneCorrupt) {
-    if (s.zoneCrimson && (inp.bloodTileCount ?? 0) > (inp.evilTileCount ?? 0)) {
+    if (s.zoneCrimson && (s.bloodTileCount ?? 0) > (s.evilTileCount ?? 0)) {
       return belowHalf ? MUSIC.OtherworldUndergroundCrimson : MUSIC.OtherworldCrimson;
     }
     return belowHalf ? MUSIC.OtherworldUndergroundCorruption : MUSIC.OtherworldCorruption;

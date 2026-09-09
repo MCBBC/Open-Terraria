@@ -315,7 +315,10 @@ const IMMUNE_ACC: Record<number, number[]> = {
  *  `return tile.wallColor() >= 16`——wallColor≥16（进度分层涂装档,染色的才计入
  *  包围判定；双地牢未上漆/低色阶档不截断也不命中,且该方向立即停扫）。
  *  （2026-08-31 台账清偿⑥落地：旧"墙 350 即命中"过宽判定退役） */
-function insideUnbreakableWallsScan(st: import('../world/TileStore').TileStore, px: number, py: number): boolean {
+/** ★SW-BJ48 2026-09-09 改导出：传送药水随机落点（Game.requestTeleportationPotionSpot）
+ *  双地牢臂须按【落点格】重扫（Utils.cs:641-645 传 new Point(num9,num10)）——
+ *  Player.insideUnbreakableWalls 缓存旗只代表玩家现位,不可代读 */
+export function insideUnbreakableWallsScan(st: import('../world/TileStore').TileStore, px: number, py: number): boolean {
   const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
   let num = 0;
   for (let i = 0; i < 8; i++) {
@@ -359,7 +362,15 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     jumpOpts: string[];
     wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean; hidden: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
-    jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
+    jumpSpd: number; flipper: boolean; longInvince: boolean;
+    /** ★SW-FX1 档位还原（2026-09-09）：原版 spikedBoots 是 int 计数（Player.cs:1075），
+     *  非布尔——953/975 各 +1（:15154/:15158）、976 +=2（:15162）、3995/3996 +=2
+     *  （:14549/:14555）、984 【=2 赋值】（:15180,同槽覆盖前积——1:1 quirk）。
+     *  档位消费分档：WallslideMovement 头门 `spikedBoots <= 0`（:21935）= >0 可贴墙；
+     *  `spikedBoots >= 2`（:21955）= 驻停档（控制下 4 速滑落、否则 −gravity+1e-5
+     *  缓慢上攀）；单件档（:21991 else-if）只缓降 0.5（按 ↓ 4）。曾布尔化 1/2 同档
+     *  =976/984 与裸 953/975 无差别（item-audit ⚠️ 档位塌缩，本批还原）。 */
+    spikedBoots: number;
     canFloat: boolean;   // canFloatInWater（字段 :2711——仅两源：甲件 4404 水上漂靴 :13364-67 ∪ buff265 Flamingo 坐骑 :9982-86；脚蹼药 109 只授 ignoreWater+accFlipper 不置此位 :10257-59、flipper 饰品亦不授——旧注":9592 脚蹼药水"系 1456 期 ignoreWater 面错锚，R1-F1 勘误 2026-09-03）
     shimmerImmune: boolean;   // Player.shimmerImmune（:15643-46 幻彩斗篷 5355 且未按住下 45t——浮液/微光 buff 双消费 :23641/:27944）
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
@@ -537,6 +548,19 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     mysticSashDodge: boolean;        // 6189（:14739）——受击闪避（批 1 段登记位）
     accTimerCrit: boolean;           // 6170（:14604——消费端 Game 近战 tryConsumingTimerCrit 已接）
     shinyStone: boolean;             // 3337（:14874-14876）——生命再生 ×1.1 + 静止整段
+    /** ★SW-FX1（2026-09-09）单件批四旗——全部 UpdateEquips if-chain 装备位：
+     *  jellyfishNecklace 1303（:15339-15348 双支 AddLight !wet 0.225/0.05/0.15、
+     *    wet 1.8/0.4/1.2——与 1860 :15343-15358 同值对,消费 Game 光照段）；
+     *  boneGlove 3245（:14660-14662 boneGloveItem=currentItem;挥击掷骨弹 532
+     *    25 伤 5 kb 10 速 60t 冷却 :43961-43968,Game tick 段承载）;
+     *  sporeSac 3336（:14884-14886 SporeSac(currentItem)+sporeSac——1/15 每拍掷
+     *    孢子云 567/568（AI_105),云寿加速旗在 AI_105 :40874 读 player.sporeSac）;
+     *  volatileGelatin 4987（:14888-14890 VolatileGelatin+volatileGelatin——
+     *    40t 计数掷 937 凝胶弹 65 伤 7 kb :42820-42857） */
+    jellyfishNecklace: boolean;
+    boneGlove: boolean;
+    sporeSac: boolean;
+    volatileGelatin: boolean;
     /** 老猩红甲套装（Crimson,ArmorSetBonuses.cs:433 items 792/793/794=槽 57|37|35）：
      *  再生三面（1458 :19233 eRT+1、:19362 num5×1.5、:19412 脉搏回血红粒十粒/HP）。 */
     crimsonRegen: boolean;
@@ -719,6 +743,14 @@ export class Player extends Entity {
   /** 叶绿水晶叶锚体出手冷却（Player.crystalLeafCooldown :1367,Projectile aiStyle42
    *  :28254 写 40、:25664-25667 每 tick 递减——fixedUpdate 减位点在本类同段） */
   crystalLeafCooldown = 0;
+  /** ★SW-FX1 骨头手套掷骨冷却（Player.boneGloveTimer :1169）：:43961 命中置 60、
+   *  :25662-25664 每 tick 递减（原版递减位在 shadowDodge 之后、crystalLeaf cd
+   *  之前——本类 fixedUpdate 同段承接） */
+  boneGloveTimer = 0;
+  /** ★SW-FX1 挥发明胶 40t 计数（Player.volatileGelatinCounter :1981）：仅装备期
+   *  逐 tick 递增（VolatileGelatin :42826-42831 在 UpdateEquips 内被调,卸下即冻结
+   *  不清零——1:1 保留;>40 拍清零掷 937） */
+  volatileGelatinCounter = 0;
 
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
   taxTimer = 0;
@@ -994,7 +1026,12 @@ export class Player extends Entity {
    *  ★原版语义定谳:眼睛图标只挂功能配饰段,"虚荣槽 13-19 也可隐藏"与原版不符,
    *  审计登记回写不改码 */
   hideVisibleAccessory: boolean[] = new Array(10).fill(false);
-  /** 击杀计数行"最近击杀"(Player.lastCreatureHit :2458;命中写入 :20175/:43750) */
+  /** 击杀计数行"最近击杀"——值域 = 旗种 banner id（Player.cs:2575 `public int
+   *  lastCreatureHit = -1;` 1:1;写位存 `BannerSystem.NPCtoBanner(...)` 结果,未映射
+   *  = 0 → 行灰"杀敌数不可用",非 NPC id 域）。写入面 = 玩家致伤命中即写非击杀写：
+   *  Player.cs:20609-20619（ApplyDamageToNPC）/:44769-44775（ItemCheck 近战命中）/
+   *  Projectile.cs:13382-13389（ownedBySomeone 弹）——仓内单漏斗 Enemy.hurt(fromPlayer)
+   *  （SW-BJ47 2026-09-09,原击杀时写已摘除）。非持久玩家态,读档回 -1=原版本相 */
   lastCreatureHit = -1;
   /** 渔情行粘性缓存(Player.displayedFishingInfo :2498;浮漂在水时保持旧值) */
   displayedFishingInfo = '';
@@ -1411,7 +1448,10 @@ export class Player extends Entity {
     let shroomiteSet = false, vortexSet = false, nebulaSet = false, beetleOff = false;
     let beetleDef = false;
     let spaceGun = false;   // R27：陨石套（123/124/125,ArmorSetBonuses :436）
-    let flipper = false, longInvince = false, spikedBoots = false;
+    let flipper = false, longInvince = false;
+    let spikedBoots = 0;   // ★SW-FX1：int 计数（Player.cs:1075；984 为 =2 赋值 quirk,见 vid 门）
+    // ★SW-FX1 单件批四旗（jellyfishNecklace/boneGlove/sporeSac/volatileGelatin）
+    let jellyfishNecklace = false, boneGlove = false, sporeSac = false, volatileGelatin = false;
     let canFloat = false;   // canFloatInWater（4404 甲件；buff265 在消费侧并集）
     let shimmerImmune = false;   // Player.shimmerImmune（5355 幻彩斗篷 :15643-46）
     let bobberOverride = -1;   // Player.overrideFishingBobber（:1920 初值 -1；浮漂饰品覆写）
@@ -1553,6 +1593,14 @@ export class Player extends Entity {
       if (accVid === 4404) canFloat = true;   // 水上漂靴（ApplyEquipFunctional :12842-12846）
       if (accVid === 5355 && !this.controlDownHold) shimmerImmune = true;   // 幻彩斗篷（:15643-46——按住下 45t 例外 = 主动浸微光）
       if (accVid === 3068) cordage = true;   // 绳索宝典（UpdateEquips :14461-14463 currentItem.type==3068 → cordage=true）
+      // ---- ★SW-FX1 单件批四件（2026-09-09,均 UpdateEquips if-chain 装备位）----
+      if (accVid === 1303) jellyfishNecklace = true;                 // 水母项链（:15339-15348,双支 AddLight——Game 光照段）
+      if (accVid === 3245) boneGlove = true;                         // 骨头手套（:14660-14662 case 3245 boneGloveItem=currentItem）
+      if (accVid === 3336) sporeSac = true;                          // 孢子囊（:14884-14886 SporeSac(currentItem)+sporeSac=true）
+      if (accVid === 4987) volatileGelatin = true;                   // 挥发明胶（:14888-14890 VolatileGelatin(currentItem)+volatileGelatin=true）
+      // 984 老虎攀爬档【赋值】quirk（:15176-15181 blackBelt/dashType=1 走 accfx,
+      // spikedBoots = 2 原文是赋值非 +=——覆盖此前 953/975/976 累积）
+      if (accVid === 984) spikedBoots = 2;
       if (accVid === 4341 || accVid === 5126) stepStool = true;   // 折叠凳/造物之手（:14077-14080，Player 侧 SetStats 非物品字段）
       // 天界石复合门（1457 :15531-15535 / 1458 :15529-15533 双版同值）：太阳石 899
       // `Main.dayTime`（日食中 dayTime 仍真 → 日食期关闭）、月亮石 900
@@ -1754,7 +1802,10 @@ export class Player extends Entity {
         if (fx.brainOfConfusion) boc = true;
         if (fx.flipper) flipper = true;
         if (fx.longInvince) longInvince = true;
-        if (fx.spikedBoots) spikedBoots = true;
+        // ★SW-FX1：+= 计数（953/975 :15154/:15158 各+1、976 :15162 与 3995/3996
+        //  :14549/:14555 各+2）——984 是【赋值】=2（:15180）不走本支（vid 门直赋,
+        //  同槽覆盖前积=原版 quirk：976 先 984 后终值 2、984 先 976 后终值 4）
+        if (fx.spikedBoots && accVid !== 984) spikedBoots += fx.spikedBoots;
         if (fx.treasureMagnet) treasureMagnet = true;
         if (fx.goldRing) goldRing = true;
         if (fx.luckyCoin) luckyCoin = true;
@@ -2205,6 +2256,7 @@ export class Player extends Entity {
       wing, dash, blackBelt, bees, carpet,
       strongBees,   // 蜂巢背包 3333（beeType 566 档/强蜂伤/kb——Game 1121 蜂枪分支消费）
       jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots, canFloat, shimmerImmune,
+      jellyfishNecklace, boneGlove, sporeSac, volatileGelatin,   // ★SW-FX1 单件批四旗
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       deadMansSweater,   // SW-AC1：死人毛衣 5007 胸甲件(SelfHurtPlayers 自伤 cap 面)
@@ -3170,8 +3222,9 @@ export class Player extends Entity {
     if (this.shadowDodgeTimer > 0) this.shadowDodgeTimer--;
     // 金花/叶绿共享 on-hit 计时（petalTimer :25652-25655）+ 叶绿锚体出手冷却
     // （crystalLeafCooldown :25664-25667——原版同段位次：petal 在 shadowDodge 之前、
-    //  cd 在 boneGloveTimer 之后；本仓无 boneGlove 位,cd 承接其后语义）
+    //  cd 在 boneGloveTimer 之后；★SW-FX1 boneGloveTimer 位已补=:25662-25664 原位）
     if (this.petalTimer > 0) this.petalTimer--;
+    if (this.boneGloveTimer > 0) this.boneGloveTimer--;   // :25662-25664（原版位次=shadowDodge 后、叶绿 cd 前）
     if (this.crystalLeafCooldown > 0) this.crystalLeafCooldown--;
     // environmentBuffImmunityTimer 每 tick 递减（Player.cs:24778——Teleport :37701
     // 置 4 的环境 buff 免疫窗;消费位=专家雪原 Chilled 门 :28209）
@@ -5273,14 +5326,44 @@ export class Player extends Entity {
             this.cy, '#B0907A', 1, 0.5, { life: 20 });
         }
       }
-      if (!this.onGround && eq.spikedBoots && this.hitWall && this.inputX !== 0 && this.vy > 0) {
-        this.vy = Math.min(this.vy, 1.5); // 贴墙缓降（:21963 velocity 钳）
-        this.fallStartY = null;           // fallStart 重置（:21958 WallslideMovement 同支）
-        this.wallCling = true;            // sliding=true 仓内承载位 → 起跳统一走
-                                          // 上方 JumpMovement 门（外门 sliding 支 +
-        // autoJump 抑制 ：20805-20808）。★2026-08-31 台账清偿⑤：旧内嵌 inputJump
-        // 直写蹬墙跳退役——原版 WallslideMovement 自身不处理跳键，滑行起跳一律经
-        // JumpMovement 外门（releaseJump 边沿、无 vx 反踢项），单路权归一。
+      // ★SW-FX1 档位分档（WallslideMovement :21955-22016 双支 1:1）：
+      //  ≥2 驻停档（:21955-21990,976/984/3995/3996）——头门 vy>0 即挂墙（:21957）；
+      //  按 ↓ vy=4*gravDir 快滑（:21960），否则 vy=(−gravity+1e-5)*gravDir
+      //  （:21988-21997 num3=gravity,slowFall 时 /3——TryingToHoverUp /10 档本仓
+      //  无翼悬停升键建模,登记偏差）= 缓慢上攀驻停;尘 31 只在 ↓ 支（:21961）。
+      //  ==1 缓降档（:21991-22016 else-if,裸 953/975）——门 vy>0.5（:21991）；
+      //  按 ↓ 4、否则 0.5 缓滑（:21995-21999）,尘 31 恒出（:22002）。曾布尔化
+      //  1/2 同档 vy=min(vy,1.5)——按 ↓ 快滑/驻停上攀两语义整缺。
+      //  蹬墙跳仍统一走 JumpMovement 外门（wallCling=sliding 仓内承载位）。
+      if (!this.onGround && eq.spikedBoots > 0 && this.hitWall && this.inputX !== 0 && !this.mount.active) {
+        // ★mount.Active 排除（WallslideMovement 头门 :21935——坐骑中贴墙滑/驻停整段不跑;
+        //  老鼠坐骑 55 爬墙走上方 ratClimb 专属支,非 55 坐骑两支皆拒）
+        const slideDirSign = Math.sign(this.inputX);
+        if (eq.spikedBoots >= 2 && this.vy > 0) {
+          // ≥2 驻停档（:21955-21990）：↓ 快滑 4 / 否则 (−gravity+1e-5) 缓慢上攀
+          if (this.inputDown) {
+            this.vy = 4;                    // :21960 velocity.Y = 4f*gravDir（gravDir 恒 1 域）
+            this.spawnWallSlideDust(game, slideDirSign);       // :21961-21975 尘 31
+          } else {
+            // :21960-21968：num3 = slowFall ? gravity/3 : gravity（TryingToHoverUp
+            // /10 档未建模=登记偏差）;:21988-21997 vy = (−num3+1e-5)*gravDir
+            const num3 = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
+            this.vy = -num3 + 1e-5;
+          }
+          this.fallStartY = null;           // :21959 fallStart 重置
+          this.wallCling = true;            // :21989 sliding=true 仓内承载位
+        } else if (eq.spikedBoots < 2 && this.vy > 0.5) {
+          // ==1 缓降档（:21991-22016 else-if,裸 953/975）：↓ 4 / 否则 0.5 缓滑
+          if (this.inputDown) this.vy = 4;                     // :21996
+          else this.vy = 0.5;                                  // :21998 velocity.Y = 0.5f*gravDir
+          this.spawnWallSlideDust(game, slideDirSign);         // :22002 尘 31 恒出
+          this.fallStartY = null;           // :21992 fallStart 重置
+          this.wallCling = true;            // :22015 sliding=true
+        }
+        // 起跳统一走 JumpMovement 外门（外门 sliding 支 + autoJump 抑制 :20805-20808）。
+        // ★2026-08-31 台账清偿⑤：旧内嵌 inputJump 直写蹬墙跳退役——原版
+        // WallslideMovement 自身不处理跳键，滑行起跳一律经 JumpMovement 外门
+        // （releaseJump 边沿、无 vx 反踢项），单路权归一。
       }
       // 翅膀滑翔（:27015-27027）：wingTime 尽后按住跳 = 重力/3 + 终端 maxFallSpeed/3
       // （!hoverDown）——原版此段在 else-if 链替换常规重力，此处以等价条件并入；
@@ -7704,6 +7787,23 @@ export class Player extends Entity {
   }
   /** 贴墙缓降中（spikedBoots 攀壁） */
   wallCling = false;
+  /** ★SW-FX1：WallslideMovement 尘 31（1457 :21961-21975 ≥2 ↓ 支 / :22002-22015
+   *  tier1 恒出支 1:1）——出生盒 = (position.X+width/2+(width/2-4)*slideDir,
+   *  position.Y+height/2+(height/2-4)*gravDir) 8×8;slideDir<0 时 position.X −10
+   *  （:21966-21968,gravDir<0 的 −12 支本仓无倒挂域=不接）、vel×0.1、scale×1.2、
+   *  noGravity。cShoe 染料 shader 面（:21975 GetSecondaryShader）染尘未建模=登记。 */
+  spawnWallSlideDust(game: GameHooks, slideDir: number): void {
+    const vd = game.vanillaDust;
+    if (!vd) return;
+    const px = this.x + this.w / 2 + (this.w / 2 - 4) * slideDir;
+    const py = this.y + this.h / 2 + this.h / 2 - 4;   // gravDir 恒 1 域
+    const d = vd.spawn(px, py, 8, 8, 31);
+    if (!d) return;
+    if (slideDir < 0) d.x -= 10;
+    d.vx *= 0.1; d.vy *= 0.1;
+    d.scale *= 1.2;
+    d.noGravity = true;
+  }
   /** 老鼠坐骑 55 爬墙钉速（WallClimbMovement :21329-21450 非 spiked 支：-2/4/0.5；null=未爬） */
   ratClimbVy: number | null = null;
   // ---- 拾取半径族（★⑧ 台账清偿 2026-08-31；P.cs GetItemGrabRange :35405-35455

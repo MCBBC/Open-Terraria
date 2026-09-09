@@ -6623,6 +6623,25 @@ export class Arrow extends Entity {
           if (d) { d.x = tx; d.y = ty; d.vx = 0; d.vy = 0; }
         }
       }
+      // ★SW-FX1 937 挥发凝胶尾尘（AI_001 per-type 段 :56018-56052）：α==0（渐显完成）
+      //  后 1/3 子步掷尘 4（QueenSlime 凝胶色 lerp((0,160,255), lerp((200,200,200),
+      //  (255,80,255),r1),r2) A=150、α50、scale1.2、vel×0.3 后 += 弹速×0.3、noGravity
+      //  ——原文 noGravity 缺省 true,num72=0 盒不加宽）
+      if (this.projId === 937 && this.alpha === 0 && Math.floor(Math.random() * 3) === 0) {
+        const r1 = Math.random(), r2 = Math.random();
+        const l1 = 200 + (255 - 200) * r1, g1 = 200 + (80 - 200) * r1, b1 = 200 + (255 - 200) * r1;
+        const c937 = {
+          r: Math.round(0 + (l1 - 0) * r2),
+          g: Math.round(160 + (g1 - 160) * r2),
+          b: Math.round(255 + (b1 - 255) * r2),
+          a: 150,
+        };
+        const d937 = game.spawnDust?.(this.x, this.y, this.w, this.h, 4, 0, 0, 50, c937, 1.2, true);
+        if (d937) {
+          d937.vx = d937.vx * 0.3 + this.vx * 0.3;
+          d937.vy = d937.vy * 0.3 + this.vy * 0.3;
+        }
+      }
       this.alpha = Math.max(0, this.alpha - AI001_FADE_RATE[this.projId]);
       // ---- ★2026-09-02 观感面缺口批（同表键的配套尘/消亡段,原位次=fade 后）----
       // 710 空中祸害（:56348-56380）：1/4 子步掷——1/2 再掷 d31 烟（α100,scale1.6,
@@ -7439,6 +7458,73 @@ export class Arrow extends Entity {
           }
           this.sbAx = this.cx; this.sbAy = this.cy;
           return;
+        }
+        // ---- ★SW-FX1 532 骨手套骨弹撞块弹反（HandleMovement type 段
+        //      Projectile.cs:18259-18278）：X 撞 velocity.X = lastX×−0.75;Y 撞
+        //      （lastY>2f ∨ 截后 Y==0——「轴被截停」语境下后项恒真）velocity.Y =
+        //      lastY×−0.75;任一命中 → num18=|last|/|v|（0 守卫 1,vel=0 时 C#
+        //      float=Inf→v 归零同语义）velocity /= num18 + HitTiles + penetrate--。
+        //      原版按 velocity!=lastVelocity 分轴反射;本仓单点碰撞无轴信息 →
+        //      按速度主轴反射（294/蜂族档同法,登记）。回退步=脱离嵌入（bounceOff
+        //      契约:回退失败=嵌入过深 → 交还通用消亡口）。pierce 归零消亡
+        //      （蜂族档同语义;穿透 3 = 最多 3 次弹反）----
+        if (this.projId === 532 && this.pierce > 0) {
+          const lastVx532 = this.vx, lastVy532 = this.vy;   // 本仓无截断回写 → 入撞速≙lastVelocity
+          const solidCenter = () => {
+            const t0 = Math.floor((this.x + this.w / 2) / TILE), t1 = Math.floor((this.y + this.h / 2) / TILE);
+            return world.store.inBounds(t0, t1) && world.store.isSolid(t0, t1);
+          };
+          let nvx = lastVx532, nvy = lastVy532, flag10 = false;
+          if (Math.abs(lastVx532) >= Math.abs(lastVy532)) {       // X 撞臂（:18262-18265 无速门）
+            this.x -= lastVx532;                                  // 回退脱离（单点碰撞模型位置已入撞）
+            if (!solidCenter()) { nvx = lastVx532 * -0.75; flag10 = true; }
+            else this.x += lastVx532;                             // 回退无效=嵌入过深 → 通用消亡
+          } else {                                                // Y 撞臂（:18266-18269）
+            this.y -= lastVy532;
+            if (!solidCenter()) { nvy = lastVy532 * -0.75; flag10 = true; }
+            else this.y += lastVy532;
+          }
+          if (flag10) {
+            const lastLen = Math.hypot(lastVx532, lastVy532);
+            const velLen = Math.hypot(nvx, nvy);
+            const num18 = lastLen === 0 ? 1 : lastLen / velLen;     // :18271-18276（vel=0→Inf→v/Inf=0 同 C# float）
+            this.vx = nvx / num18;
+            this.vy = nvy / num18;
+            this.pierce--;
+            game.hitTilesFx?.(this.x, this.y, this.w, this.h, lastVx532, lastVy532);   // :18277 HitTiles(position,lastVelocity,…)
+            if (this.pierce <= 0) { this.killNow(game); return; }
+            return;
+          }
+        }
+        // ---- ★SW-FX1 937 挥发凝胶撞块弹反（HandleMovement type 段 :18602-18613,
+        //      921||926||937 共支）:X 撞 |lastX|>1 → ×−0.4;Y 撞 |lastY|>1 → ×−0.95;
+        //      penetrate--（归零落通用消亡口=穿透 3 → 最多 3 次弹反）。分轴反射按
+        //      速度主轴近似 + 回退脱离（532 档同法,登记）----
+        if (this.projId === 937 && this.pierce > 0) {
+          const lastVx937 = this.vx, lastVy937 = this.vy;
+          const solidCenter937 = () => {
+            const t0 = Math.floor((this.x + this.w / 2) / TILE), t1 = Math.floor((this.y + this.h / 2) / TILE);
+            return world.store.inBounds(t0, t1) && world.store.isSolid(t0, t1);
+          };
+          let bounced937 = false;
+          if (Math.abs(lastVx937) >= Math.abs(lastVy937)) {
+            this.x -= lastVx937;
+            if (!solidCenter937()) {
+              if (Math.abs(lastVx937) > 1) this.vx = -lastVx937 * 0.4;    // |lastX|>1 门
+              bounced937 = true;
+            } else this.x += lastVx937;
+          } else {
+            this.y -= lastVy937;
+            if (!solidCenter937()) {
+              if (Math.abs(lastVy937) > 1) this.vy = -lastVy937 * 0.95;   // |lastY|>1 门
+              bounced937 = true;
+            } else this.y += lastVy937;
+          }
+          if (bounced937) {
+            this.pierce--;
+            if (this.pierce <= 0) { this.killNow(game); return; }
+            return;
+          }
         }
         // ---- 496 暗影炎箭撞块（HandleMovement type 段 :18822-18843）——★R2-01 翻案
         //      （2026-09-03 蓝队）：原版以 `velocity != lastVelocity` 检被撞轴

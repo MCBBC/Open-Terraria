@@ -190,6 +190,7 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
+import { insideUnbreakableWallsScan } from '../entities/Player';   // ★SW-BJ48 传送药水落点双地牢不可破墙重扫（UnbreakableWallScan.cs:47-66）
 import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, npcTypeNoAggro } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster, spawnVanillaEnemy } from '../entities/bossAI';
@@ -224,6 +225,7 @@ import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from
 import { VAN_TILE_FRAME_IMPORTANT } from '../world/gen/vanilla/VanillaTileFlags';
 import { surviveHardcoreDeath } from '../world/gen/SeedEasterEggs';
 import type { GenState } from '../world/gen/vanilla/GenState';
+import { checkForGoodTeleportationSpot } from '../world/gen/vanilla/TeleportSpotCheck';   // ★SW-BJ48 传送药水随机落点（Utils.CheckForGoodTeleportationSpot 1:1 核,IIIII110b 建）
 import { spawnEmote, tickEmotes, checkForNPCsToReactToEmoteBubble, makeLocalPlayerEmote } from '../render/EmoteBubble';
 // M3 聊天命令系统（Terraria.Chat.Commands 全目录）+ Boss 伤害统计（/boss伤害）
 import { createOutgoingMessage, executeCommand, chatColorOfDifficulty, type OutgoingChatMessage } from '../chat/ChatCommands';
@@ -424,6 +426,12 @@ import { ChloroLeafCrystalAnchor, ChloroLeafShot,
   CHLORO_LEAF_SHOT_SIZE, getChaseResults as getChaseResultsJit } from '../entities/ChloroLeafCrystalProj';
 // 山铜套装 on-hit 花瓣弹 221（终零波批,2026-09-01——Player.OnHit :6963-6985）
 import { OrichalcumPetal } from '../entities/OrichalcumPetalProj';
+// ★SW-FX1 孢子囊 3336 弹族（567/568 云 aiStyle105 + 569-571 迸气 aiStyle106,2026-09-09）
+import { SporeSacCloud, SporeGasCloud, SPORE_CLOUD_A, SPORE_CLOUD_B, SPORE_GAS_IDS } from '../entities/SporeSacProj';
+/** 骨头手套 3245 掷骨弹型（Player.cs:43966 NewProjectile 字面 532） */
+const BONE_GLOVE_PROJ = 532;
+/** 挥发明胶 4987 凝胶弹型（Player.cs:42854 NewProjectile 字面 937） */
+const VOLATILE_GEL_PROJ = 937;
 // Spawn_LeafCrystalShot 视觉收编本体（L5 收编池惯例）；别名=netApply 分支内旧名
 import { leafCrystalShotFx as leafCrystalShotFxLocal, rainbowRodHitFx, paladinsHammerShockwaveFx, slapHandFx, waffleIronFx, flyMealFx, classyCaneFx, deadCellsFlintFx, deadCellsDownDashExplosionFx, deadCellsBarnacleShotFiringFx, deadCellsBarrelExplosionFx, deadCellsBeheadedHeadFx, stellarTuneFx, shadowbeamLineFx, keybrandFx, gasTrapFx, shimmerArrowFx, shimmerBlockFx, townSlimeTransformFx, cattivaHitFx, rainbowBoulderFx, bestReforgeFx, silverBulletSparkleFx, itemTransferFx, blockedChestFx, pooFlyFx, inScreenDungeonSpawnFx, heroicisSetSpawnSoundFx, playerVoiceOverrideSoundFx, natureFlyFx, lakeSparkleFx, ufoLaserTrailFx, magnetSphereBoltTrailFx, heatRayTrailFx, blackLightningSmallFx, blackLightningHitFx, lightningSmallOrchestra, blueLightningSmallLongFx, stormLightningWindupFx, arcSurgeFx, nightsEdgeFx, trueNightsEdgeFx, excaliburFx, trueExcaliburFx, terraBladeFx, moonLordWhipHitFx, moonLordWhipEyeFx, stardustPunchFx, princessWeaponFx, formatCFx, snappingStoneRingFx, snappingStoneRechargeFx, harpyCharmFamilyFx, orchestraPlayerAnchor, paladinsShieldHitFx } from '../fx/orchestraFx';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
@@ -1318,6 +1326,19 @@ function exposed8ForPlant(st: TileStore, x: number, y: number): boolean {
 // 门槛 100（地下）。★481-483 裂砖不在 tileDungeon（肉前地牢薄弱墙设计,无镐门槛无 ÷2,
 // 2026-08-23 审计勘误——曾误收）；677-679 古砖在表（曾漏收）
 const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
+// ★SW-RB9c（2026-09-09）：条件镐力门族（GetPickaxeDamage,Player.cs:54553-54604）——
+// 门槛随深度/帧档变化的零伤门族,已在 tileHitDamage 中段逐支 1:1（:18929-18958）。
+// 尾段通用 d.pick 门（:19032）对本族必须【跳过】：原版 GetPickaxeDamage 只有条件门、
+// 无二次通用归零,通用门按 d.pick 一刀切会把原版豁免域整个抹掉=详链条件支死码。
+//  · 22/204 魔金/猩红矿：仅 y>worldSurface 才要 55（:54565-54568）
+//  · 77 地狱熔炉：仅 y>=UnderworldLayer(=maxTilesY-200,Main.cs:2886) 才要 65
+//    （:54577-54579）——地狱层以上任意镐可挖（地表摆放熔炉低镐可拆=原版本相;
+//    SW-BJ40 多格批后地表熔炉成常态面,通用门抹平曾被本审计定谳）
+//  · 地牢砖 41/43/44/677-679：仅 y>worldSurface 且 X 在中带(35%~65%)外才要 100
+//    （:54599-54604）——地表下/中带低镐可拆
+//  · 137 陷阱：仅 frameY/18∈[1,4] 档才要 210（:54589-54596;def.pick=0 本门本就不拦,
+//    入表防未来回填 pick 值时复活同病）
+const PICK_CONDITIONAL_GATE_SHEETS = new Set<number>([22, 204, 77, 137, ...TILE_DUNGEON_SHEETS]);
 // Main.wallDungeon 墙表（Main.cs:10507-10515：7/8/9/94-99）——KillWall_CheckFailure
 // （WorldGen.cs:60436=1456 行号,1457=60901-60912）未败骷髅王时地牢墙不可锤/不可被
 // TileReplacement 替换。SW-BF1 2026-09-06：改引 wallDrops.ts 同表单源（拆墙 fail 门/掉落共用）
@@ -1735,8 +1756,13 @@ const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
  *  回忆药水 2350/传送药水 2351/魔海螺 4263/恶魔海螺 4819/贝壳手机·出生点 5359/
  *  贝壳手机·海洋 5360/贝壳手机·地狱 5361 */
 const TELEPORT_ITEM_VIDS = new Set([50, 3124, 3199, 5358, 2350, 2351, 4263, 4819, 5359, 5360, 5361]);
-/** 传送目的地分类 */
-type RecallKind = 'spawn' | 'ocean' | 'hell';
+/** vanilla TileID.Sets.Platforms（WorldGen.SolidOrSlopedTile includePlatforms 臂消费；
+ *  ★SW-BJ43 海螺落位面复刻——与 VanillaTiler VANILLA_PLATFORM_SHEETS 同表） */
+const CONCH_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** 传送目的地分类（★SW-BJ48 2026-09-09：补 'random'=传送药水 2351 随机落点支——
+ *  Player.TeleportationPotion（Player.cs:56922-56968）→ Utils.CheckForGoodTeleportationSpot
+ *  （Utils.cs:518-647，1458 同域 diff=same）；此前 2351 误落 'spawn' 支=与回忆药水同路） */
+type RecallKind = 'spawn' | 'ocean' | 'hell' | 'random';
 /** 永久升级/特殊消耗品使用集(UpdatePermanentBoosters 族+特殊单品) */
 const PERMANENT_USE_VIDS = new Set([
   3335, 5337, 5338, 5339, 5340, 5341, 5342, 5043, 2756, 4870, 678, 1326, 5335, 1133, 4988, 3601,
@@ -6693,6 +6719,13 @@ export class Game implements GameHooks {
     // 五静态位不落盘、初值全 0——原版每次读档都重掷，白昼存读当夜值随之刷新）
     setFireFlyChance(this.world);
     this._lastClockT = this.world.clock.timeOfDay;
+    // ★SW-BJ45 2026-09-09：单人读档渔夫任务完成旗重构（WorldGen.cs:6781-6784
+    //   playWorldCallBack：netMode==0 && anglerWhoFinishedToday.Contains(player.name)
+    //   → anglerQuestFinished=true；ResetTemps WorldFile.cs:628-629 先清、名单回填后
+    //   于此重构）——曾缺 → 同日读档后 finished=false 而名单门（Main.cs:39660）仍拦：
+    //   感叹号+鱼角标+任务台词俱在，点「任务」静默无效（用户实报「持鱼提交不了」）。
+    //   新世界名单恒空=无操作；联机不重构（原版走 msg74 下发，本仓债登记 BJ45）
+    this.world.reconstructAnglerFinished(this.playerName(), !!this.net?.active);
     // 成就：解锁弹窗（原版 InGamePopups.AchievementUnlockedPopup,InGameNotificationsTracker
     // 底部居中锚 screenHeight-40、300t 寿命——非 Steam 专属;UI 无 popup 钩子时回退 toast）
     // + 进世界基线
@@ -7600,7 +7633,6 @@ export class Game implements GameHooks {
         remix: !!w.seedFlags?.remix,                // Main.remixWorld（:12818-13154 remix 分支）
         centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
-        evilTileCount: this.scene.evilTileCount, bloodTileCount: this.scene.bloodTileCount,
         weather: {
           storm: w.weather.shouldUseStormMusic,
           rain: w.weather.cloudAlpha > 0,
@@ -7949,6 +7981,16 @@ export class Game implements GameHooks {
         || !!(tf.createTile || tf.createWall)
         || tf.useTurn === 1);
     }
+    // ---- ★SW-FX1 配饰单件批 tick 段（2026-09-09,item-audit 配饰节 ❌ 清偿）----
+    // 骨头手套 3245（Player.cs:43961-43968,ItemCheck 内每拍结算）：boneGloveItem
+    // 在栏 && boneGloveTimer==0 && itemAnimation>0 && sItem.damage>0 → 置 60t 冷却
+    // + 朝 ApplyRangeCompensation(0.2) 修正后鼠标掷骨弹 532（25 伤 5 kb 10 速）。
+    // 递减位在 Player.fixedUpdate（:25662-25664 原位承接）。
+    this.boneGloveTick();
+    // 挥发明胶 4987 + 孢子囊 3336（UpdateEquips 内逐拍调用 :42820/:42735——
+    // 本仓映射到玩家 tick 段,等同 UpdateEquips 的每拍语义）
+    this.volatileGelatinTick();
+    this.sporeSacTick();
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
     // ★IIIII61 SkyblockRuntime：30t/列滚动巡检（WorldGen.UpdateWorld :72065-72072
@@ -10241,10 +10283,36 @@ export class Game implements GameHooks {
         if (this.world.store.inBounds(tx2, ty2)) this.lighting.addLight(tx2, ty2, l[0], l[1], l[2]);
       }
     }
-    // 水母潜水装备浸水发光（Player.cs:14682-14688：wet 时中心 AddLight 1.8/0.4/1.2）
-    if (this.player.inWater && this.player.equipStats.jellyfishGlow) {
-      this.lighting.addLight(
-        Math.floor(this.player.cx / TILE), Math.floor(this.player.cy / TILE), 1.8, 0.4, 1.2);
+    // 水母潜水装备 1860 浸水发光（Player.cs:15343-15358：!wet 微光 0.225/0.05/0.15、
+    // wet 亮光 1.8/0.4/1.2——原版双支,wet=任意液体粘滞位。★SW-FX1 勘误补干支:
+    // 曾只接 wet 支且误用 inWater 窄化位（岩浆/蜂蜜/微光不入）,本批按 1457 原文
+    // 还原为 wet 全液体位+补 !wet 支）
+    if (this.player.equipStats.jellyfishGlow) {
+      const wetJelly = this.player.inWater || this.player.inLava
+        || this.player.inHoney || this.player.inShimmer;
+      if (!wetJelly) {
+        this.lighting.addLight(
+          Math.floor(this.player.cx / TILE), Math.floor(this.player.cy / TILE), 0.225, 0.05, 0.15);
+      }
+      if (wetJelly) {
+        this.lighting.addLight(
+          Math.floor(this.player.cx / TILE), Math.floor(this.player.cy / TILE), 1.8, 0.4, 1.2);
+      }
+    }
+    // 水母项链 1303（★SW-FX1 2026-09-09,item-audit 配饰节 ❌ 清偿;Player.cs:15339-15348
+    // UpdateEquips if-chain：!wet AddLight 0.225/0.05/0.15、wet AddLight 1.8/0.4/1.2
+    // ——与 1860 同值对,wet=任意液体粘滞位。装备门=equipStats.jellyfishNecklace）
+    if (this.player.equipStats.jellyfishNecklace) {
+      const wetNeck = this.player.inWater || this.player.inLava
+        || this.player.inHoney || this.player.inShimmer;
+      if (!wetNeck) {
+        this.lighting.addLight(
+          Math.floor(this.player.cx / TILE), Math.floor(this.player.cy / TILE), 0.225, 0.05, 0.15);
+      }
+      if (wetNeck) {
+        this.lighting.addLight(
+          Math.floor(this.player.cx / TILE), Math.floor(this.player.cy / TILE), 1.8, 0.4, 1.2);
+      }
     }
     // gore 16/17 火苗点光（Gore.Update 尾段 :1078-1101：light>0 时以中心格 AddLight
     // light*scale，16 号通道 (1,0.8,0.3)、17 号 (0.3,0.6,1)——衰减通道在 GorePiece 内算好）
@@ -12154,11 +12222,13 @@ export class Game implements GameHooks {
         const eq = this.player.inv.miscEquips;
         if (held && eq[0] && eq[0].id === held.id) {
           eq[0] = null;                               // 已在场 → 收回（TogglePet hideMisc 翻转）
+          this.playUseSound(ptVid, 'tink');           // ★SW-FX2：收回臂专属音（UseSound Item_2
+          //   :9208）——召唤臂不再预放,音归 UpdatePet 补挂面（Player.cs:17422）次帧
+          //   承载,防同帧双声;表值命中不走 fallback
         } else if (held) {
           eq[0] = { id: held.id, stack: 1 };          // 召唤（管理器按 projId 换款重生）
           this.petHidden = false;
         }
-        this.playUseSound(ptVid, 'tink');             // UseSound Item_2（:9208，表值命中不走 fallback）
         this.player.useTime = 20;                     // useTime=useAnimation=20（:9209-9210）
         this.input.mouseDown = false;
         return;
@@ -13733,15 +13803,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
         && (ff.healLife || ff.healMana || (ff.buffType && ff.buffType > 0))) {
         if (ff.healLife && this.player.buffs.healBlocked) {
-          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
-          this.player.useTime = 30;
+          // ★SW-FX2：原版静默拒用——ItemCheck_CheckCanUse Player.cs:52856-52858
+          //  `sItem.potion && potionDelay > 0 → flag = false`（无动画/无音/无提示/无消耗;
+          //  本仓 healBlocked ⟺ 药水病 21 在栏）。曾按项目惯例 toast+useTime30
+          //  （📋 微差登记,docs/audit/item-audit-2026-08-22.md D 节「使用门」）——本批收口
         } else {
           const fvid = fm ? +fm[1] : -1;
           // 原版 buff id → BuffType（BUFF_DEFS 反查；耐药性 21 是治疗副作用不主动施加）
           if (ff.buffType && ff.buffType > 0) {
             const bt = BUFF_BY_VANILLA.get(ff.buffType);
             if (bt !== undefined && bt !== BuffType.Resistance) {
-              this.player.buffs.apply(bt, Math.round((ff.buffTime ?? 7200) / 60)); // tick→秒
+              // ★SW-FX2：缺省 7200→3600——原版通用补挂缺省 = `num = item.buffTime;
+              //  if (num == 0) num = 3600`（ItemCheck_UsePotionStuff Player.cs:5518-5524;
+              //  7200 仅 BrokenArmor 36/Weak 33/SugarRush 192 三条独立 AddBuff :22748/
+              //  :22756/:32848,非通用缺省）。曾与 quickBuff 链 :10990/:11019 的 3600 分歧
+              //  （📋 登记微差——现网可饮件全带 buffTime,缺省臂死码,统一防未来踩雷）
+              this.player.buffs.apply(bt, Math.round((ff.buffTime ?? 3600) / 60)); // tick→秒
             }
           }
           if (ff.healLife) {
@@ -15235,8 +15312,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 传送药水 2351:itemTime==2 随机传送+消耗;海螺族 4263/5360 海洋、4819/5361 地狱:螺旋水尘+半程传送
       const tvid = viIdFromKey(heldDef.key);
       const useTime = itemCombat(tvid)?.useTime ?? 90;
+      // ★SW-BJ48：2351=传送药水随机落点支（Player.cs:43504-43522 itemTime==2 →
+      //   TeleportationPotion :56922）——旧刀缺 'random' 分支使其落 'spawn'=回出生点
+      //  （用户实报「与回忆药水类似被传回出生点」根因）
       const kind: RecallKind = tvid === 4263 || tvid === 5360 ? 'ocean'
-        : tvid === 4819 || tvid === 5361 ? 'hell' : 'spawn';
+        : tvid === 4819 || tvid === 5361 ? 'hell'
+        : tvid === 2351 ? 'random' : 'spawn';
       const triggerAt = tvid === 2350 ? 20 : tvid === 2351 ? 2 : Math.floor(useTime / 2);
       this.player.useTime = useTime;                    // ApplyItemTime
       this.player.itemAnimTicks = useTime;              // 引导姿势(useStyle 4/6/9 holdup)
@@ -15248,8 +15329,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.sfx.play('drink');                         // SoundID.Item3(:42432)
         this.recallDust(this.player, 10);               // 10 青尘(:42434)
       } else {
-        // 标准使用音:魔镜族/贝壳手机 Item6、海螺族 Item64(Item.cs UseSound)
-        this.sfx.play(kind === 'spawn' ? 'mirror' : 'conch');
+        // 标准使用音全族=SoundID.Item6（★SW-BJ43 核对 Item.cs SetDefaults：case 4263
+        //  :36665/case 4819 :39459/case 5360/case 5361 均 UseSound=Item6——旧注「海螺族
+        //  Item64」系误提取；Item64 非海螺族 UseSound）
+        this.sfx.play('mirror');
       }
       this.input.mouseDown = false;
     } else if (heldDef && [205, 206, 207, 1128, 3031, 3032, 4820, 4872, 5302, 5303, 5304, 5364]
@@ -15390,7 +15473,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               () => owner,   // ★F5：AI_061 :54604-54623 的 dead→Kill 门在 Bobber.fixedUpdate 本体内建模
             );
             bob.poleVid = fm ? +fm[1] : 0; // 血肉抛竿 4325 敌怪概率判定用
-            bob.baitVid = baitVid;          // IsLavaBait 三源判定用（Projectile.cs:19230）
+            bob.baitVid = baitVid;          // IsLavaBait 三源判定用（Projectile.cs:20758,1457——SW-BJ44 订正旧 1456 行号）
             // 弹型 = 浮漂饰品覆写优先（ItemCheck :46551-46553：fishingPole>0 且
             // overrideFishingBobber>-1 → projToShoot = 覆写值），否则竿自带 shoot
             bob.projId = this.player.equipStats.overrideFishingBobber > -1
@@ -18937,7 +19020,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       else if (sheet === 37 && power < 50) dmg = 0;                            // 陨石 50
       else if ((sheet === 22 || sheet === 204) && underSurf && power < 55) dmg = 0; // 魔金/猩红矿（地表下）
       else if (sheet === 56 && power < 55) dmg = 0;                            // 黑曜石 55
-      else if (sheet === 77 && power < 65 && ty >= (this.world.lavaLine || this.world.h - 200)) dmg = 0;
+      // ★SW-RB9c（2026-09-09）：深度线=Main.UnderworldLayer（=maxTilesY-200 恒定,
+      // Main.cs:2886 属性直译）——曾 `(lavaLine || h-200)`：remix 世界 world.lavaLine
+      // =GenVars.lavaLine（TerrainPass.cs:214-218 ≈(rockLayer+maxTilesY)/2+掷,岩浆带
+      // 概念）≠UnderworldLayer → remix 门线深了 ~110 行（890 vs 1000,y∈[890,1000) 带
+      // 低镐被误拒）;标准世界 lavaLine=0 回落 h-200 本就正确,故统一取 h-200。
+      else if (sheet === 77 && power < 65 && ty >= this.world.h - 200) dmg = 0;
       else if (sheet === 58 && power < 65) dmg = 0;                            // 狱岩 65
       else if ((sheet === 226 || sheet === 237) && power < 210) dmg = 0;       // 蜥蜴砖/神庙祭坛 210（:54585）
       else if (sheet === 137 && power < 210) {                                 // 陷阱六档（Player.cs:54589-54596）
@@ -19030,7 +19118,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 通用镐力门槛（数据侧 d.pick 表 = 原版 GetPickaxeDamage 逐 tile 需求的
     // 等价物）：镐力不足 → damage=0（每击仍播击打音+尘，不积累——原版 num2=0
     // 也走 KillTile(fail:true) → PlaySounds，Player.cs:45148）
-    if (toolType === 'pick' && dmg > 0 && power < d.pick) dmg = 0;
+    // ★SW-RB9c（2026-09-09）：只兜【无条件】门槛——条件门族（PICK_CONDITIONAL_GATE_
+    //  SHEETS,表注见 :1321）已由中段详链逐支零伤,本门若再按 d.pick 归零会把原版
+    //  深度/帧档豁免域抹平（77 地表熔炉低镐不可挖/22·204 地表上不可挖/地牢砖地表下
+    //  不可挖）。原版 GetPickaxeDamage（Player.cs:54540-54700）全文无二次通用门。
+    if (toolType === 'pick' && dmg > 0 && !PICK_CONDITIONAL_GATE_SHEETS.has(sheet) && power < d.pick) dmg = 0;
     // SW-G1 2026-09-03 CanKillTile 全函数门（1457 :62716-62810；Player.cs:46058 锤/
     // :46104 斧/:46108/:54474 PickTile `if (!WorldGen.CanKillTile) num2=0`）：此前仅
     // 上邻保护子件（tileAboveProtected）+ 锁门单挂两门，缺 wall350 / Boulders+
@@ -27637,10 +27729,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  ① num8=400×(worldSurface-10)（循环上限与深度挂钩）②下沉到 worldSurface-40
    *  即回卷 Y=50、X 进 crawlOffsetX（③末支 `!lowTiles && !SolidOrSlopedTile(below)`
    *  的继续爬行臂被去门）④落点深度扫描 num13=20→10+左右邻列两支。
-   *  物理探针近似面（登记）：IsInSolidTilesExtended 的 TileCollision 四向 ±16px
-   *  探测以「玩家盒±16px 实心覆盖」近似（坡度/半砖细粒度差异, Collision.cs
-   *  TileCollision 全量未建模）;CanTileHurt 走 TouchDamage.canTileHurt。
-   *  失败 = 原版 canSpawn=false（原地不传送、不消耗）。 */
+   *  物理探针（★SW-BJ43 收敛为精确面）：IsInSolidTilesExtended 定谳 = Lava∨Hurting∨
+   *  SolidCollision @ 锚盒 20×42（TileCollision 四探针 start=P∓16px、velocity=±16px →
+   *  终点盒恒=锚盒,Collision.cs:2299）→ boxBlocked 锚盒 9 格逐格判=精确非近似
+   *  （旧刀外扩 px−2 列/py−3 行=假性失败根因,见 boxBlocked 注）。CanTileHurt 走
+   *  TouchDamage.canTileHurt。失败 = 原版 canSpawn=false（原地不传送、不消耗）。 */
   private requestMagicConchTeleportPosition(rightOcean: boolean): { x: number; y: number } | null {
     const st = this.world.store;
     const p = this.player;
@@ -27654,9 +27747,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!st.flags[i]) return false;
       if (st.wire[i] & TileStore.WIRE_ACTUATED) return false;   // inActive()
       const d = TILE_DEFS[st.type[i]];
-      if (!d?.solid) return false;
-      const solidTop = !!d.platform || TILE_SOLID_TOP_FAMILY.has(st.type[i]);
-      if (solidTop && !d.platform) return false;                // tileSolidTop 非平台位=false
+      if (!d) return false;
+      // SolidOrSlopedTile(tile, includePlatforms:true)（WorldGen.cs:23724-23749,IL_004c
+      // `return !tile.inActive()`）：active && Main.tileSolid[type] && (tileSolidTop ?
+      // TileID.Sets.Platforms[type] : true)。本仓平台 d.solid=false（原版
+      // tileSolid[19]=true 由 platform 旗代偿）→ 平台族={19,427,435-439}
+      // （VanillaTiler VANILLA_PLATFORM_SHEETS 同表）。★SW-BJ43：旧刀 `!d.solid 先行
+      // 返回` 使平台臂死码 → includePlatforms 语义整缺（平台不作合法落位面）。
+      const isPlat = !!d.platform && CONCH_PLATFORM_SHEETS.has(d.vanilla?.sheet ?? -1);
+      if (!d.solid && !isPlat) return false;                    // Main.tileSolid[type]
+      if (TILE_SOLID_TOP_FAMILY.has(st.type[i]) && !isPlat) return false;  // tileSolidTop 非平台=false
       return true;
     };
     const fireWalk = p.equipStats.fireWalk || !!p.buffs?.obsidianSkin;   // :9576 黑曜石皮并档
@@ -27668,20 +27768,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (WALL_DUNGEON_SHEETS.has(st.wall[i]) && y > this.world.groundLevel && !downedBoss3) return true;
       return !!st.flags[i] && canTileHurt(st.type[i], fireWalk, sf);
     };
-    // 玩家盒实心/岩浆/触伤覆盖。盒 = Collision.SolidCollision 语义：anchor
-    // (px*16+8, py*16+15) − (w/2, h) → x 覆盖 tile px−1(2px)…px+1(2px)、
-    // y 覆盖 tile py−2(5px)…py（脚底=py 格底）；off = IsInSolidTilesExtended
-    // 的 TileCollision 四向 ±16px 探针 → 各向再外扩一格。
-    const boxBlocked = (tx: number, ty: number, off = false): boolean => {
-      // 探针方向谱（TileCollision 四向实扫位）：left=px−2 列、right=px+1 列、
-      // up=py−3 行、down 探针=盒内自扫（无脚下外扩）——**不含 py+1**（脚底以下
-      // 不探测,否则岸线列与实心底永久对峙燃烧迭代帽）
-      const dx0 = off ? -2 : -1, dx1 = 1;
-      const dy0 = off ? -3 : -2, dy1 = 0;
-      for (let dx = dx0; dx <= dx1; dx++) {
-        for (let dy = dy0; dy <= dy1; dy++) {
+    // 玩家盒实心/岩浆/触伤覆盖 = IsInSolidTilesExtended（TeleportHelpers.cs:263-298）。
+    // ★SW-BJ43 定谳：TileCollision 四探针 start=P∓16px、velocity=±16px → 终点盒恒 =
+    // P 锚盒（Collision.cs:2299 `vector2 = Position + Velocity` 只测终点盒；侧/上臂
+    // 均 `!tileSolidTop`、DOWN 臂被 fallThrough+fall2 豁免 → 平台四向永不拦）⇒ 四探针
+    // 几何覆盖 ≡ 锚盒本体，合取面 = LavaCollision ∨ AnyHurtingTiles ∨ SolidCollision
+    // @ 锚盒 (px*16+8, py*16+15)−(w/2,h) = 20×42 → tile px−1(2px)…px+1(2px) ×
+    // py−2(11px)…py(15px)。9 格逐格判 ≡ 像素判（各格重叠带 ≥2px 非空；半砖=上半盒
+    // SolidCollision 原文，重叠带仍非空 → 逐格判等价）。旧刀外扩 px−2 列/py−3 行 =
+    // 比 vanilla 严格：海滩沙柱面「弹升↔下落」垂直振荡（弹/落零 num10 消耗）烧穿
+    // num7=5000 → 尝试假性失败（实机 6 种子 12 尝试 ≥4 败、bj43-c 双洋全败=原地不动，
+    // 即用户实报「不一定传送到海边」；_bj43-crawl-probe 轨迹对拍铁证）。
+    const boxBlocked = (tx: number, ty: number): boolean => {
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -2; dy <= 0; dy++) {
           const cx0 = tx + dx, cy0 = ty + dy;
-          if (!st.inBounds(cx0, cy0)) return true;
+          if (!st.inBounds(cx0, cy0)) continue;   // SolidCollision 扫描域 Clamp（Collision.cs 原文）→ 越域格跳过
           const i = st.idx(cx0, cy0);
           if (st.liquid[i] > 0 && st.liquidType[i] === 2) return true;
           if (!st.flags[i] || (st.wire[i] & TileStore.WIRE_ACTUATED)) continue;
@@ -27717,7 +27819,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           continue;
         }
       }
-      if (boxBlocked(px, py, true)) {
+      if (boxBlocked(px, py)) {
         py += flag ? 1 : -1;
         continue;
       }
@@ -27726,7 +27828,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         continue;
       }
       flag = false;
-      if (!boxBlocked(px, py + 1, true) && !flag3 && py < this.world.groundLevel) {
+      if (!boxBlocked(px, py + 1) && !flag3 && py < this.world.groundLevel) {
         py++;
         if (low && py >= num3) { py = y0; px += crawlOffsetX; num10++; }
         continue;
@@ -27770,7 +27872,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     if (!flag7) return null;
-    return { x: px * TILE + 6, y: py * TILE };
+    // 落位 = landingPoint.ToWorldCoordinates(8f,16f) − (width/2, height)
+    // （Player.cs:56811-56813）= 脚底钉 py 格底（站 py+1 实心面）+ 盒心钉 px 格心。
+    // ★SW-BJ43：旧刀 {px*16+6, py*16} 沿用 findTeleportSpot 的「头格顶」惯例——
+    // py 在本爬行体里是「脚底格」不是「头格」→ Y +26px 把玩家埋进实心 py+1
+    // （靠 unembedPass 15t 自愈=落地半埋闪烁）、X +8px 半格偏海侧。
+    return { x: px * TILE + 8 - p.w / 2, y: py * TILE + 16 - p.h };
   }
 
   /** 传送族触发（引导到期）：音效+尘+落点+消耗。语义对标 Player.cs:42297-42516 */
@@ -27810,6 +27917,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private fireRecallTeleport(c: { vid: number; kind: RecallKind; triggerAt: number; consume: boolean }): void {    const p = this.player;
     const st = this.world.store;
     let dest: { x: number; y: number } | null = null;
+    let conchFailBoth = false;   // ★SW-BJ43：海螺双洋全败 → velocity=(0,0.001f)（Player.cs:56824）
     if (c.kind === 'spawn') {
       // ★SW-BC1 2026-09-06：Spawn(RecallFromItem)（魔镜族半程 :43324/回忆药水 itemTime==20
       //  :43459 → Player.Spawn 三分支全流程——床复验+世界点扫位链+全堵兜底,与 respawnPlayer
@@ -27823,14 +27931,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  双败 → Teleport(position,5) 原地（音/尘/消耗照走,:56817-56830）——
       //  旧实现单次失败即取消通道不消耗（偏离原文）。
       const leftHalf = p.x / TILE < st.w / 2;
-      dest = this.requestMagicConchTeleportPosition(leftHalf)
-        ?? this.requestMagicConchTeleportPosition(!leftHalf)
-        ?? { x: p.x, y: p.y };
-    } else {
+      const hit = this.requestMagicConchTeleportPosition(leftHalf)
+        ?? this.requestMagicConchTeleportPosition(!leftHalf);
+      dest = hit ?? { x: p.x, y: p.y };
+      conchFailBoth = !hit;
+    } else if (c.kind === 'hell') {
       // DemonConch：中心 ±50，[UnderworldLayer+20, +100]，实心底/避液
       const cx = Math.floor(st.w / 2);
       const y0 = Math.floor((this.world.lavaLine || st.h - 200)) + 20;
       dest = this.findTeleportSpot(cx - 50, cx + 50, y0, y0 + 80);
+    } else {
+      // ★SW-BJ48 传送药水 2351（Player.TeleportationPotion :56922-56968，1458 同域
+      //  diff=same）：Utils.CheckForGoodTeleportationSpot（Utils.cs:518-647）随机落点
+      //  X 掷域 [100,maxTilesX-99]（rect Right=L+W=XNA 半开,Next(L,R+1) 上界独占;
+      //  strictRange=false 不拒多出列）Y 掷域 [100,maxTilesY-99]（rangeY=
+      //  UnderworldLayer=maxTilesY-200,Main.cs:2886）+下坠≤99 格;
+      //  avoidLava/avoidHurtTiles/尝试 1000——失败 fallback=Teleport(position,2)
+      //  【原地】照走（非取消非出生点,:56956-56966）。
+      dest = this.requestTeleportationPotionSpot() ?? { x: p.x, y: p.y };
     }
     if (!dest) {
       // 原版找点失败保持原地（canSpawn=false 分支）；消耗品不消耗
@@ -27838,15 +27956,83 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     if (c.vid === 2350) this.sfx.play('mirror');      // HeldItem.UseSound（:42444）
-    else if (c.kind !== 'spawn') this.sfx.play('conch'); // 海螺族传送瞬间（MagicConch 内 Teleport 音）
-    this.recallDust(p, 70, c.vid === 2350);            // 传送前 70 尘
+    else if (c.kind === 'ocean') this.sfx.play('splash'); // TeleportEffect case 5：SoundID.Splash=legacy 19（Main.cs:13524,SoundID.cs:60）
+    else if (c.kind === 'hell') this.sfx.play('conch');   // case 7=SoundID.Item8（Main.cs:13542）——Sfx 无 Item8 kind,暂以 conch 顶位=登记债（SW-BJ43）
+    // ★SW-BJ48：TeleportEffect style 2 无 PlaySound 臂（Main.cs:13454-13462）——
+    //   2351 触发拍零音效（饮用音 Item6 已在进入通道时播放）
+    if (c.kind === 'random') this.teleportStyle2Dust(p.x, p.y);   // Entry 尘（:37724 TeleportEffect Entry）
+    else this.recallDust(p, 70, c.vid === 2350);            // 传送前 70 尘
+    if (c.kind === 'random') {
+      p.removeAllGrapplingHooks();                     // Teleport Style!=10（:37704-37707）
+      this.setSpectating(-1);                          // SetOrRequestSpectating(-1)（:37719）
+    }
     const keepIframes = p.iframes;                     // 回忆药水保留无敌帧（:42449-42451）
-    p.x = dest.x; p.y = dest.y; p.vx = 0; p.vy = 0;
+    p.x = dest.x; p.y = dest.y; p.vx = 0; p.vy = conchFailBoth ? 0.001 : 0;   // ★SW-BJ43 双败 0.001f（:56824）
     if (c.vid === 2350) p.iframes = keepIframes;
-    this.recallDust(p, 70, c.vid === 2350);            // 传送后 70 尘
+    if (c.kind === 'random') p.fallStartY = null;      // fallStart 重置（Teleport :37730；同 wormholeTeleportTo 惯例）
+    if (c.kind === 'random') this.teleportStyle2Dust(p.x, p.y);   // Exit 尘（:37752 TeleportEffect Exit）
+    else this.recallDust(p, 70, c.vid === 2350);            // 传送后 70 尘
     if (c.consume) p.inv.removeHeld(1);
     this.camera.x = p.cx; this.camera.y = p.cy;        // 相机直跟（无缓动瞬移）
     this.cb.onInventoryChanged?.();
+  }
+
+  /** ★SW-BJ48 传送药水随机落点（Player.TeleportationPotion Player.cs:56922-56956，1458
+   *  同域 diff=same）：Utils.CheckForGoodTeleportationSpot（Utils.cs:518-647）——
+   *  X 掷域 [100, maxTilesX-99]（rect L=100 W=maxTilesX-199;XNA Right=L+W,Next(L,R+1)
+   *  上界独占→值域含 Right;strictRange=false 不拒多出列）、
+   *  Y 掷域 [100, maxTilesY-99]（rangeY=Main.UnderworldLayer=maxTilesY-200,Main.cs:2886）、
+   *  Clamp(·,45,max-45)、avoidLava/avoidHurtTiles、下坠搜索≤100 格、尝试 1000 次、
+   *  strictRange=false/avoidWalls=false/mostlySolidFloor=false/allowSolidTopFloor=false。
+   *  wall87(蜥蜴神庙)/地牢墙∧y>worldSurface 两臂不受 avoidWalls 门（:552 无条件）。
+   *  算法本体 = IIIIII110b 逐句移植核（world/gen/vanilla/TeleportSpotCheck.ts,与
+   *  RandomizeWorldSpawn 同源）——本方法只负责运行时取参：TileStore/世界面/旗标。
+   *  Main.rand.Next(L,R+1) 语义 = [L,R-1]：nextIntRange(a,b)=a+⌊rnd·(b-a)⌋。
+   *  返回 null = 1000 次全败（调用方 fallback=Teleport(position,2) 原地,:56956-56966） */
+  private requestTeleportationPotionSpot(): { x: number; y: number } | null {
+    const st = this.world.store;
+    const p = this.player;
+    const sf = this.world.seedFlags ?? {};
+    const res = checkForGoodTeleportationSpot(st,
+      { nextIntRange: (a, b) => a + Math.floor(Math.random() * (b - a)) },
+      {
+        teleporteeW: p.w, teleporteeH: p.h,          // teleporteeSize=Size（20×42）
+        avoidLava: true,                             // :56933
+        avoidHurtTiles: true,                        // :56934
+        maximumFallDistanceFromOrignalPoint: 100,    // :56935
+        attemptsBeforeGivingUp: 1000,                // :56936
+      },
+      100, st.w - 200, 100, st.h - 200,              // startX=100/rangeX=maxTilesX-200/startY=100/rangeY=UnderworldLayer（:56925-56928）
+      {
+        worldSurface: this.world.groundLevel,
+        rockLevel: this.world.rockLevel,
+        downedPlantBoss: !!this.world.flags['downed_262'],                    // Plantera（Utils.cs:552,SW-BJ43 同参）
+        downedBoss3: !!(this.world.flags.downedSkeletron || this.world.flags['downed_35']),  // Skeletron（Utils.cs:552）
+        dualDungeonsSeed: !!sf.dualDungeons,
+        getGoodWorld: !!sf.getGoodWorld,
+        dontStarveWorld: !!sf.theConstant,
+        // 双地牢不可破墙臂（Utils.cs:641-645 UnbreakableWallScan）——运行时逐点重扫
+        //（Player.insideUnbreakableWalls 缓存旗=玩家现位,落点须按目标点重扫;
+        //  insideUnbreakableWallsScan 入参=格坐标,Player.updateUnbreakableWallScan :1177 同参）
+        unbreakableWallAt: sf.dualDungeons
+          ? (x, y) => insideUnbreakableWallsScan(st, x, y)
+          : undefined,
+      });
+    return res.canSpawn ? { x: res.x, y: res.y } : null;
+  }
+
+  /** ★SW-BJ48 TeleportEffect style 2（Main.cs:13454-13462）：50×尘 58（GhostWhite/
+   *  α150/scale1.2）velocity×0.5——传送药水 Teleport(newPos,2) Entry/Exit 双份
+   *  （Player.cs:56952/56960）；无音效臂。recallDust 的青尘 15 面是回忆药水专用面 */
+  private teleportStyle2Dust(x: number, y: number): void {
+    const D = this.vanillaDust;
+    if (!D) return;
+    for (let i = 0; i < 50; i++) {
+      const d = D.spawn(x, y, this.player.w, this.player.h, 58, 0, 0, 150,
+        { r: 248 / 255, g: 248 / 255, b: 1, a: 150 / 255 }, 1.2);   // Color.GhostWhite,α150
+      if (!d) continue;
+      d.vx *= 0.5; d.vy *= 0.5;                        // velocity *= 0.5f（:13460）
+    }
   }
 
   /** 门交互：开门按玩家朝向、失败换反向（原版 Player.cs L20965-20974）；
@@ -33690,12 +33876,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (scene && scene.bestOreSheet >= 0) {
       oreText = Lang.tileName(scene.bestOreSheet);
     }
-    // 击杀数(BannerSystem.BannerToNPC + GetKillCount :46421-46430)
+    // 击杀数(Main.cs:47845-47853 1:1,SW-BJ47)：lastCreatureHit = 旗种 banner id 域
+    // （Player.cs:2575;写位 Enemy.hurt 命中即写,原版三写位 :20609/:44769/:13382）——
+    // 显示名 = BannerToNPC 规范名（BannerSystem.cs:1156,同旗多 NPC 统一代表名,非被杀
+    // 变体名）+ GetKillCount 终身计数（BannerSystem.killCount,与旗/横幅同账本,装备无关）
     let killText: string | null = null;
     if (p.lastCreatureHit > 0) {
-      const banner = bannerOfNpc(p.lastCreatureHit);
-      const kills = banner != null ? (w.bannerKills[banner] ?? 0) : 0;
-      killText = `${Lang.npcName(p.lastCreatureHit)}: ${kills}`;
+      killText = `${Lang.npcName(bannerToNpcOf(p.lastCreatureHit))}: ${w.bannerKills[p.lastCreatureHit] ?? 0}`;
     }
     // ctx
     r.infoAccCtx = {
@@ -37853,11 +38040,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 旗帜击杀记账（BannerSystem.AddNPCKillBy :193-216——达标公告+掉一面旗;原版
     // claimable+对话领取,本仓自动授予近似,登记）
     if (enemy && enemy.vanillaId != null) {
-      // 计数器行"最近击杀"(Player.lastCreatureHit :2458;写入点 Player.cs:20175/:43750)
-      // ——石化旁路（H2-2）不写：原版石化不经致伤/击杀路径,无此写入
-      if (!opts?.petrifyBypassInteractionGate) {
-        this.player.lastCreatureHit = enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId;
-      }
+      // ★SW-BJ47（2026-09-09）：击杀计数行 lastCreatureHit 的【击杀时写】已摘除——
+      // 原版无此写入（Player.cs:20609/:44769/Projectile.cs:13382 三写位均为命中即写,
+      // 击杀结算 CountKillForBannersAndDropThem :80627-80637 只管旗数）。写位已移至
+      // Enemy.hurt fromPlayer 命中尾段（=原版三写位并集;石化 624 旁路不经 hurt 不写
+      // =H2-2 语义自然保持,opts.petrifyBypassInteractionGate 只剩旗杀门职责）
       // ★GetWereThereAnyInteractions 门（NPC.cs:80640-80647；消费点 :79652-79661
       // `if (GetWereThereAnyInteractions()) { bestiary…; CountKillForBannersAndDropThem(); }`
       // ——雕像产怪等无玩家交互死亡不计旗）。本体 = AnyInteractions（:79535-79551
@@ -38722,6 +38909,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private updatePetSlot(slot: 0 | 1, visible: boolean, cur: PetFollower | null): PetFollower | null {
     const item = this.player.inv.miscEquips[slot];
     const info = item ? petInfoOfVid(vanillaIdOfItem(item.id)) : null;
+    // ★SW-FX2：UpdatePet/UpdatePetLight 补挂面（1457 Player.cs:17414-17425 / :17427-17445）——
+    // 装备槽在位（petInfo 反查 = Main.vanityPet/lightPet 成员集 :17417/:17430）+ 未隐藏
+    //（!hideMisc = visible :17418/:17431）+ FindBuffIndex==-1（:17420/:17442）→
+    // AddBuff(num,3600)=60s + 物品 UseSound（:17422/:17445）。宠物 buff 60s 到期自然
+    // 掉 → 次帧重挂（buffNoTimeDisplay 隐字表成员 → 玩家只见图标常驻）。★原版无死亡
+    // 门——死亡帧照常补挂（跟随体死亡消散由下方 !dead 槽门承载 = 弹侧 petFlag/AI Kill
+    // 等价面）。603 收藏版门（:17421/:17433 runningCollectorsEdition）本仓恒真（CE 判定
+    // 无载体;且 603 未入仓,登记）。消费面 = SW-FX2 58 缺口重项 40/41/42/127/202 +
+    // pets 表对拍 217/219/259/261/268 的 buff 图标显示链
+    if (info && visible && item) {
+      const pk = Game.petBuffKinds();
+      if (pk.light.has(info.buff) || pk.vanity.has(info.buff)) {
+        let vb = info.buff;
+        // UpdatePetLight :17436-17441：仙灵铃 27 须三色全缺才重掷（27/102/101 均匀）
+        if (slot === 1 && vb === 27 && !this.player.buffs.has(BuffType.FairyBlue)
+          && !this.player.buffs.has(BuffType.FairyRed) && !this.player.buffs.has(BuffType.FairyGreen)) {
+          vb = [27, 102, 101][Math.floor(Math.random() * 3)];   // Utils.SelectRandom(27,102,101)
+        }
+        const bt = BUFF_BY_VANILLA.get(vb);
+        if (bt !== undefined && !this.player.buffs.has(bt)) {
+          this.player.buffs.apply(bt, 60);                        // AddBuff(num, 3600t)
+          this.playUseSound(vanillaIdOfItem(item.id), 'tink');    // miscEquips.UseSound（:17422）
+        }
+      }
+    }
     const want = info && visible && !this.player.dead;
     if (!want) {
       if (cur && !cur.dead) cur.dead = true;
@@ -38753,6 +38965,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.player.inv.miscEquips[slot]) return;
     if (slot === 0) this.petHidden = !this.petHidden;
     else this.lightPetHidden = !this.lightPetHidden;
+    // ★SW-FX2：TogglePet/ToggleLight 隐藏臂 ClearBuff（1457 Player.cs:17447-17463：
+    //  `if (hideMisc[N]) ClearBuff(miscEquips[N].buffType)`；ToggleLight 另清仙灵
+    //  三色 102/101 :17458-17462）——隐藏即清宠物 buff，解除隐藏由 UpdatePet 补挂面
+    //  次帧重挂（updatePetSlot,音/时长原版语义）
+    if ((slot === 0 && this.petHidden) || (slot === 1 && this.lightPetHidden)) {
+      const eq = this.player.inv.miscEquips[slot]!;
+      const vb = petInfoOfVid(vanillaIdOfItem(eq.id))?.buff;
+      const bt = vb !== undefined ? BUFF_BY_VANILLA.get(vb) : undefined;
+      if (bt !== undefined) this.player.buffs.remove(bt);
+      if (slot === 1 && vb === 27) {
+        for (const fv of [102, 101]) {
+          const ft = BUFF_BY_VANILLA.get(fv);
+          if (ft !== undefined) this.player.buffs.remove(ft);
+        }
+      }
+    }
     this.sfx.play('menuTick', 1);   // UI 点击 Sound 12（Main.cs:40688）
   }
 
@@ -38857,8 +39085,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (slot < 0) return;
     if (kind === 'heal' && p.buffs.healBlocked) {
-      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
-      p.useTime = 30;
+      // ★SW-FX2：原版 QuickHeal 门静默——Player.cs:5495 `statLife == statLifeMax2 ||
+      //  potionDelay > 0` 直接早退（无 toast 无冷却;:5495 为 QuickHeal 拒用总门,
+      //  手动使用同走 :52856 静默拒用）。曾 toast+30t（📋 微差登记）——本批收口
       return;
     }
     const s = p.inv.slots[slot]!;
@@ -38866,7 +39095,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (ff.buffType && ff.buffType > 0) {
       const bt = BUFF_BY_VANILLA.get(ff.buffType);
       if (bt !== undefined && bt !== BuffType.Resistance) {
-        p.buffs.apply(bt, Math.round((ff.buffTime ?? 7200) / 60));
+        // ★SW-FX2：缺省 7200→3600（ItemCheck_UsePotionStuff Player.cs:5518-5524,主链同批注）
+        p.buffs.apply(bt, Math.round((ff.buffTime ?? 3600) / 60));
       }
     }
     if (ff.healLife) {
@@ -43871,6 +44101,135 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     const k = 24 / Math.max(len, 1e-8);
     vx *= k; vy *= k;
     this.entities.add(new OrichalcumPetal(ox, oy, vx, vy), 'projectiles');     // :6984 dmg36/kb0 实体内部定值
+  }
+
+  // ================= ★SW-FX1 配饰单件批（2026-09-09,item-audit 配饰节 ❌ 清偿） =================
+
+  /** 骨头手套 3245 掷骨（Player.cs:43961-43968,ItemCheck 内每拍结算 1:1）：
+   *  boneGloveTimer==0 && itemAnimation>0 && sItem.damage>0 → boneGloveTimer=60 +
+   *  NewProjectile(center, DirectionTo(ApplyRangeCompensation(0.2f,center,MouseWorld))
+   *  ×10, 532, 25, 5)。冷却递减位 = Player.fixedUpdate（:25662-25664 原位承接）。
+   *  sItem.damage 终值近似 = itemCombat 基伤（词缀面差异不改变 >0 判定,登记） */
+  private boneGloveTick(): void {
+    const p = this.player;
+    if (!p.equipStats.boneGlove || p.boneGloveTimer !== 0 || p.dead) return;
+    if (!(p.itemAnimTicks > 0)) return;
+    const held = p.inv.heldItem();
+    const heldDef = held ? ITEM_DEFS[held.id] : undefined;
+    const vid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+    if (vid < 0 || (itemCombat(vid)?.damage ?? 0) <= 0) return;
+    p.boneGloveTimer = 60;                                                    // :43963
+    const cam = this.camera;
+    const zoom = cam.zoom || 1;
+    const [mwx, mwy] = cam.screenToWorld(this.input.mouseX, this.input.mouseY);
+    // ApplyRangeCompensation(0.2, center, target)（Player.cs:42909-42919 1:1）：
+    // v=target−start、n̂=normalize(v)、n̂.Y−=1、d=(|v|/700)²×700 →
+    // target.Y += n̂.Y×d×0.2、target.X += −n̂.X×d×0.2
+    const vcx = mwx - p.cx, vcy = mwy - p.cy;
+    const vl = Math.hypot(vcx, vcy) || 1;
+    const nx = vcx / vl, ny = vcy / vl - 1;
+    const d = Math.pow(vl / 700, 2) * 700;
+    const tX = mwx + -nx * d * 0.2;
+    const tY = mwy + ny * d * 0.2;
+    const dl = Math.hypot(tX - p.cx, tY - p.cy) || 1;
+    const a = new Arrow(p.cx, p.cy, (tX - p.cx) / dl * 10, (tY - p.cy) / dl * 10,
+      25, 5, BONE_GLOVE_PROJ, null);
+    this.entities.add(a, 'projectiles');                                      // :43966-43967
+  }
+
+  /** 挥发明胶 4987（Player.VolatileGelatin :42820-42857,UpdateEquips 逐拍 1:1）：
+   *  volatileGelatinCounter++ >40 → 清零 + 640px 内 CanBeChasedBy∧CanHit 最近敌 →
+   *  NewProjectile(center, SafeNormalize(dir)×12 + (0,−1.3), 937, 65, 7)。
+   *  计数仅装备期递增（卸下即冻结不清零=原版 quirk,1:1） */
+  private volatileGelatinTick(): void {
+    const p = this.player;
+    if (!p.equipStats.volatileGelatin) return;                                // :42823-42825（本地玩家门单机恒真）
+    p.volatileGelatinCounter++;                                               // :42826
+    if (p.volatileGelatinCounter <= 40) return;                               // :42827-42830
+    p.volatileGelatinCounter = 0;                                             // :42831
+    let best: Enemy | null = null;                                            // :42832-42845
+    let bestD = 640;
+    for (const ent of this.entities.enemies) {
+      const e = ent as Enemy;
+      if (e.dead || !canBeChasedBy(e)) continue;
+      if (!canHit(this.world.store, p.x, p.y, p.w, p.h, e.x, e.y, e.w, e.h)) continue;
+      const d = Math.hypot(e.cx - p.cx, e.cy - p.cy);
+      if (d < bestD) { bestD = d; best = e; }
+    }
+    if (!best) return;                                                        // :42846-42848
+    const vx0 = best.cx - p.cx, vy0 = best.cy - p.cy;                         // :42849-42853
+    const l = Math.hypot(vx0, vy0) || 1;
+    const g = new Arrow(p.cx, p.cy, (vx0 / l) * 12, (vy0 / l) * 12 - 1.3,
+      65, 7, VOLATILE_GEL_PROJ, null);
+    g.idStaticGroup = VOLATILE_GEL_PROJ;                                      // :8910-8911 IDStatic 10t 组键 937
+    g.idStaticCdMs = 167;
+    this.entities.add(g, 'projectiles');
+  }
+
+  /** 孢子囊 3336（Player.SporeSac :42735-42817,UpdateEquips 逐拍 1:1）：
+   *  每拍 1/15 掷 → 567/568 存活数 Next(15)<num∨num≥10 顶 → 50 次落点扫描
+   *  （24×24 盒须非实心非液 → 盒心+12 → 玩家顶心/上方50 双 CanHit → 1/3 带墙
+   *  直挂 ∨ 90×90 实心（回移盒心）∨ tile 19 平台（不回移=spawn 位 −45 quirk））
+   *  → 48px 同伴去重 → 567+Next(2)（70 伤 1.5 kb）。云/气团实体在 SporeSacProj */
+  private sporeSacTick(): void {
+    const p = this.player;
+    if (!p.equipStats.sporeSac) return;                                       // :42737-42739
+    if (Math.floor(Math.random() * 15) !== 0) return;                         // :42741
+    let num = 0;                                                              // :42744-42750
+    for (const ent of this.entities.projectiles) {
+      const pr = ent as { projId?: number; dead?: boolean };
+      if (pr && !pr.dead && (pr.projId === SPORE_CLOUD_A || pr.projId === SPORE_CLOUD_B)) num++;
+    }
+    if (Math.floor(Math.random() * 15) < num || num >= 10) return;            // :42753-42756
+    const st = this.world.store;
+    for (let j = 0; j < 50; j++) {                                            // :42758 num2=50
+      const lo = 200 - j * 2, hi = 400 + j * 2;                               // :42759 num5
+      const num5 = lo + Math.floor(Math.random() * (hi - lo));                // Next(lo,hi) 上界不含
+      let cx = p.cx + (Math.floor(Math.random() * (2 * num5 + 1)) - num5);    // :42760-42764 Next(-n,n+1)
+      let cy = p.cy + (Math.floor(Math.random() * (2 * num5 + 1)) - num5);
+      if (solidCollisionBox(st, cx, cy, 24, 24)) continue;                    // :42766-42767
+      if (wetCollision(st, cx, cy, 24, 24)) continue;                         // :42768（SmartSelect wetCollision=布尔湿探针）
+      cx += 12; cy += 12;                                                     // :42770-42771 num3/2
+      const hitA = canHit(st, p.cx, p.y, 1, 1, cx, cy, 1, 1);                 // :42773-42777
+      const hitB = canHit(st, p.cx, p.y - 50, 1, 1, cx, cy, 1, 1);
+      if (!hitA && !hitB) continue;
+      const tx = Math.floor(cx / 16), ty = Math.floor(cy / 16);               // :42779-42780
+      let flag = false;
+      let fx = cx, fy = cy;
+      if (Math.floor(Math.random() * 3) === 0 && this.wallAtTile(tx, ty) > 0) {  // :42782-42785
+        flag = true;
+      } else {
+        if (solidCollisionBox(st, cx - 45, cy - 45, 90, 90)) {                  // :42788-42797 num4=90
+          fx = cx; fy = cy;                                                     // 回移盒心
+          flag = true;
+        } else if (sheetAt(st, tx, ty) === 19) {                                // :42798-42803 平台 19
+          fx = cx - 45; fy = cy - 45;                                           // 原版不回移 quirk
+          flag = true;
+        }
+      }
+      if (!flag) continue;
+      for (const ent of this.entities.projectiles) {                            // :42808-42816 48px 去重
+        const pr = ent as { projId?: number; dead?: boolean; x: number; y: number; w: number; h: number };
+        if (!pr || pr.dead || (pr.projId !== SPORE_CLOUD_A && pr.projId !== SPORE_CLOUD_B)) continue;
+        if (Math.hypot(fx - (pr.x + pr.w / 2), fy - (pr.y + pr.h / 2)) < 48) { flag = false; break; }
+      }
+      if (flag) {
+        const type = Math.random() < 0.5 ? SPORE_CLOUD_A : SPORE_CLOUD_B;       // :42817-42819
+        this.entities.add(new SporeSacCloud(fx, fy, type, 70, 1.5, this.entities.nextId,
+          (gx, gy, gvx, gvy, dmg) => {
+            const gasType = SPORE_GAS_IDS[Math.floor(Math.random() * SPORE_GAS_IDS.length)];   // :74320
+            this.entities.add(new SporeGasCloud(gx, gy, gvx, gvy, gasType, dmg), 'projectiles');
+          }), 'projectiles');
+        break;                                                                  // :42821 成功即出
+      }
+    }
+  }
+
+  /** 格墙 id 探针（SporeSac :42783 `Main.tile[num6,num7].wall > 0`） */
+  private wallAtTile(tx: number, ty: number): number {
+    const st = this.world.store;
+    if (!st.inBounds(tx, ty)) return 0;
+    return st.wall[st.idx(tx, ty)];
   }
 
   /** GameHooks.spawnFriendlyProj（★α-H3④：玩家命中后效真弹出口——WeaponProj

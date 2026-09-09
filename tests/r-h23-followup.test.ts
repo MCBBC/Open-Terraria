@@ -177,13 +177,18 @@ describe('H2-2 onEnemyKilled 石化旁路（petrifyBypassInteractionGate）', ()
     expect(k.drops.length).toBe(0);
   });
 
-  it('无旁路但有交互：死亡路径旗杀/通知/计数器行全保留', () => {
+  it('无旁路但有交互：死亡路径旗杀/通知全保留（计数器行不写——SW-BJ47 命中写位迁移）', () => {
     const k = killShell();
     (k.enemyLike as { playerInteracted: boolean }).playerInteracted = true;
     k.g.onEnemyKilled('gnome', k.enemyLike);
     expect(k.w.bannerKills[k.banner]).toBe(50);
     expect(k.drops.length).toBe(1);
-    expect(k.player.lastCreatureHit).toBe(624);
+    // ★SW-BJ47（2026-09-09）：lastCreatureHit 击杀时写已摘除——原版击杀结算
+    //   CountKillForBannersAndDropThem（NPC.cs:80627-80637）不写此位,三写位均为
+    //   【命中即写】（Player.cs:20609-20619/:44769-44775 + Projectile.cs:13382-13389）,
+    //   仓内写位 = Enemy.hurt fromPlayer 尾段（tests/sw-bj47-tally-counter.test.ts 锁）。
+    //   旧断言 `toBe(624)` 锁的是击杀写偏差,随迁移一并更正。
+    expect(k.player.lastCreatureHit).toBe(0);
     expect(k.notified).toContain(624);
   });
 });

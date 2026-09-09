@@ -137,7 +137,7 @@ import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, type NpcButtonId, 
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot } from '../items/Inventory';
-import { chestSettingsAllowsVault, lootAllFromContainer } from '../stats/QuickStacking';
+import { chestSettingsAllowsVault, lootAllFromContainer, quickStackIntoContainer } from '../stats/QuickStacking';   // ★SW-BJ46 quickStackIntoContainer=ChestUI.QuickStack 纯函数（bank MoveCoins 前置/两遍语义/匹配域在内）
 import {
   slotContext, planAlternateClick, chestCanTakeJustCheck, canTakeToPersonalInventory,
   chestContainerContext, canMergeStack, quickTrashOptionsOf,
@@ -4408,8 +4408,26 @@ export class UI {
   /** 宠物 buff 显示通道（key = 装备槽 0=宠物 / 1=光宠）。不进 buffBlocks：
    *  BuffType 未扩 62 个宠物成员，宠物 buff 也不在 BuffState.active 里——
    *  原版 UpdatePet/UpdatePetLight（Player.cs:17147-17187）装备槽 buffType 经
-   *  AddBuff(buff,3600) 恒刷新入 buff 槽即"宠物存在标志"，UI 直接由装备槽派生 */
+   *  AddBuff(buff,3600) 恒刷新入 buff 槽即"宠物存在标志"，UI 直接由装备槽派生。
+   *  ★SW-FX2（2026-09-09）：宠物 buff 已入 BuffState（UpdatePet 补挂面 →
+   *  Game.updatePetSlot），通道注中「不在 BuffState.active 里」已失效——普通循环
+   *  对宠物 buff 一律跳过（petVanillaBuffs 哨兵集），图标仍由本通道独家承载，
+   *  防同一 Buff_42 出现双图标；右键收宠（CheckBuffHideMisc）语义在通道块 */
   petBuffBlocks = new Map<0 | 1, { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement }>();
+  /** vanilla-pets.json 全表伴生 buff 集（普通循环跳过哨兵；懒建一次，同
+   *  Game.petBuffKinds 口径） */
+  private static _petVanillaBuffs: Set<number> | null = null;
+  private static petVanillaBuffs(): Set<number> {
+    if (!UI._petVanillaBuffs) {
+      const s = new Set<number>();
+      for (let vid = 1; vid <= 5700; vid++) {
+        const pi = petInfoOfVid(vid);
+        if (pi) s.add(pi.buff);
+      }
+      UI._petVanillaBuffs = s;
+    }
+    return UI._petVanillaBuffs;
+  }
 
   /** 槽位当前应显示的宠物 buff：装备在槽 + 跟随体存活（hideMisc/玩家死亡时
    *  Game.updatePetSlot 即灭跟随体，等价原版 TogglePet 的 ClearBuff） */
@@ -4467,6 +4485,10 @@ export class UI {
     const seen = new Set<BuffType>();
     for (const [t, left] of buffs.active) {
       seen.add(t);
+      // ★SW-FX2：宠物 buff（UpdatePet 补挂面入 BuffState）图标由上方宠物通道独家
+      //  承载（无倒计时+右键收宠,原版 TryRemovingBuff→CheckBuffHideMisc :42788/:42808
+      //  同面）——普通循环跳过,防同 buff 双图标
+      if (UI.petVanillaBuffs().has(BUFF_DEFS[t].vanillaBuff)) continue;
       let ui = this.buffBlocks.get(t);
       if (!ui) {
         // 动态建块：无白名单，任何激活 buff 都显示（原版按 buff 槽序）
@@ -4843,26 +4865,17 @@ export class UI {
     this.refreshAll();
   }
 
-  /** Quick Stack（ChestUI.QuickStack :651：只堆箱内已存在类型；收藏禁转移） */
+  /** Quick Stack（ChestUI.QuickStack :651-812，★SW-BJ46 1:1 重写抽纯函数）：只堆
+   *  「箱内已存在类型」;收藏禁转移。算法体=QuickStacking.quickStackIntoContainer
+   *  （段序/源窗/两遍语义/匹配域=itemMatchKey 注释全在彼处）;bank 面（chest.x≤-2）
+   *  的 MoveCoins 前置与尾 flag 支音效也在彼处。音效单次收尾播=与 LootAll/
+   *  DepositAll 同形登记形差（原版逐事件 PlaySound(7)）。 */
   private chestQuickStack(): void {
     const chest = this.openChest;
     if (!chest) return;
-    const inv = this.game.player.inv;
-    const movedChest = new Map<number, number>(); // 箱格 → 物品 id（glow 分层用）
-    for (let i = 0; i < 54; i++) { // 0-53（含钱币栏堆叠）
-      const cur = inv.slots[i];
-      if (!cur || cur.favorited) continue;
-      for (let k = 0; k < chest.items.length; k++) {
-        const cs = chest.items[k];
-        if (!cs || cs.id !== cur.id) continue;
-        const max = ITEM_DEFS[cur.id].maxStack;
-        const put = Math.min(max - cs.stack, cur.stack);
-        cs.stack += put;
-        cur.stack -= put;
-        if (put > 0 && !movedChest.has(k)) movedChest.set(k, cur.id);
-        if (cur.stack <= 0) { inv.slots[i] = null; break; }
-      }
-    }
+    const cue: { playSound7?: boolean } = {};
+    const { movedChest } = quickStackIntoContainer(this.game.player.inv, chest.items, chest.x <= -2, cue);
+    if (cue.playSound7) this.game.sfx.play('pickup');   // MoveCoins 尾 flag 支（ChestUI.cs:1196-1198）
     // 转移脉冲（ItemSorting :1513-1529：按类型分层 hue=(层+0.5)/层数 渐进彩虹）
     if (movedChest.size) {
       const order = new Map<number, number>();
@@ -6189,7 +6202,9 @@ export class UI {
     const st = document.createElement('style');
     st.id = 'sw-vinv-style';
     st.textContent = `
-.sw-vinv { font-family:inherit; }
+.sw-vinv { font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif; }
+/* ★2026-09-09 用户实测(Windows):继承 body 栈(Segoe UI→YaHei 逐字回退) =
+   指示器文字多字体度量混排/叠加感——显式声明与 .sw-panel 同款像素字体栈 */
 .sw-vinv .sw-slot { position:absolute; width:52px; height:52px; background-image:none;
   isolation:isolate; transform-origin:top left; touch-action:none; }
 .sw-vinv .sw-slot::after { content:''; position:absolute; inset:0; z-index:-1;

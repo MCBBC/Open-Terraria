@@ -87,9 +87,13 @@ export const ANGLER_QUEST_ITEMS: number[] = data.anglerQuest.items;
 /** 任务奖励里程碑道具（Player.cs:55374-55393 switch：5/10/15/20/25/30 次阶梯） */
 export const ANGLER_REWARD_MILESTONES = data.rewardMilestones;
 
-/** ItemID.Sets.CanFishInLava（ItemID.cs:1072）——岩浆可钓竿 = {热线钓钩 2422} */
+/** ItemID.Sets.CanFishInLava（ItemID.cs:1078,1458 同值）——岩浆可钓竿 = {热线钓钩 2422} */
 export const CAN_FISH_IN_LAVA_POLES = new Set([2422]);
-/** ItemID.Sets.IsLavaBait（ItemID.cs:1074）——岩浆鱼饵 = {地狱蝶 4849/熔岩蝇 4845/岩浆蜗牛 4847} */
+/** ItemID.Sets.IsLavaBait（ItemID.cs:1080,1458 同值）——岩浆鱼饵 = {地狱蝴蝶 4845/bait15、
+ *  熔岩蝇 4847/bait25、岩浆蜗牛 4849/bait35}（vid↔名锚链：NPCID.cs:12377-12381
+ *  653/654/655 → NPC.cs:17295/17310/17325 catchItem=4845/4847/4849 → Item.cs
+ *  :39570-39595 DefaultToCapturedCritter(653/654/655)+bait 15/25/35。SW-BJ44 2026-09-09
+ *  订正旧注「地狱蝶 4849/熔岩蝇 4845/岩浆蜗牛 4847」名↔id 错位——集合内容不变） */
 export const IS_LAVA_BAIT = new Set([4849, 4845, 4847]);
 
 // ==================== 咬钩前的档位掷骰（Projectile.cs:20106-20168）====================

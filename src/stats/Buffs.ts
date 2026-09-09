@@ -308,8 +308,10 @@ export enum BuffType {
   StardustMinion = 234,        // 星尘细胞(182,←3474 星尘细胞法杖)：召唤物伴生
   StardustDragonMinion = 235,  // 星尘之龙(188,←3531 星尘之龙法杖)：召唤物伴生
   SuspiciousTentacle = 236,    // 可疑眼球(190,←3577 月总掉落)：光宠（自动攻击标记层）
-  PetDD2Gato = 237,            // 飞翔Gato(200,←3857 DD2 宠物)：宠物
-  PetDD2Ghost = 238,           // 闪烁灯芯(201,←3856 DD2 宠物)：宠物
+  PetDD2Gato = 237,            // 飞翔Gato(200,←3855 DD2 宠物 Item.cs:34017-34022 共享块缺省臂)：
+                               //   宠物（★SW-FX2 勘误：←3857 系审计原文沿袭 itemfunc 提取器
+                               //   内层 switch 漏——3855→200/703、3856→201/702、3857→202/701）
+  PetDD2Ghost = 238,           // 闪烁灯芯(201,←3856 DD2 宠物)：宠物（lightPet[201] Main.cs:9435）
   BatOfLight = 239,            // 血红蝙蝠(213,←4269 吸血鬼小蝙蝠杖)：召唤物伴生
   VampireFrog = 240,           // 吸血鬼青蛙(214,←4273 吸血鬼青蛙法杖)：召唤物伴生
   BabyBird = 241,              // 雀宝宝(216,←4281)：宠物
@@ -410,6 +412,58 @@ export enum BuffType {
   OgreSpit = 323,              // 分泌物(197)：DD2 巨魔喷吐团 Death 近身施加(:74093)
   Merfolk = 324,               // 人鱼(34)：纯指示 buff——Player.AddBuff(34,2) 每帧续钉
                                //   （:25780），效果面全在 merman 字段（呼吸/物理/accFlipper）
+  // ---- SW-FX2（2026-09-09）58 缺口重项收尾 + vanilla-pets 表对拍缺口 ----
+  // 重 4 件 = 40/41/42/127：item-audit-2026-08-22「重 12 件另批」清单里最后未落批的
+  // 残余（125/126/139/140/322/325/385/386 已随随从杖伴生泛化批、376 已随 TorchGodPotion
+  // 批落位）。施加链 = ItemCheck_ApplyPetBuffs（1457 Player.cs:53729-53896）逐件
+  // AddBuff(buffType, 3600)；消费面 = UpdatePet/UpdatePetLight（:17414-17445）装备槽
+  // 每帧补挂（Game.updatePetSlot 同批接线）。
+  // 202 = 审计四键①：itemfunc 3857 buffType 内层 switch（Item.cs:34018-34021）已修
+  // 202 后 DEFS 缺收口位 → BUFF_BY_VANILLA.get(202) 反查落空。
+  // 217/219/259/261/268 = vanilla-pets.json 在仓五件（4365/4425/4604/4551/4737）伴生
+  // buff——UpdatePet 面接通后反查落空 = 装备宠物无图标，同债同修。
+  // 原版 Main.cs vanityPet/lightPet 行号逐条锚定（buffNoSave 全名单不含以下任何 id）
+  PetBunny = 325,        // 宠物兔兔(40,←603 胡萝卜：53731-53733 收藏版门 runningCollectorsEdition)：
+                         //   vanityPet[40]（Main.cs:9353）
+  BabyPenguin = 326,     // 企鹅宝宝(41,←669 鱼：53734-53736)：vanityPet[41]（Main.cs:9354）
+  PetTurtle = 327,       // 宠物海龟(42,←753 海草：53813-53815)：vanityPet[42]（Main.cs:9355）
+  ZephyrFish = 328,      // 和风鱼(127,←2420 卷心菜：53894-53896)：vanityPet[127]（Main.cs:9374）；
+                         //   ★唯一不在 Main.buffNoTimeDisplay 表内的宠物 buff（40/41/42 在）
+  PetDD2Dragon = 329,    // Hoardagron(202,←3857 龙蛋 Item.cs:34018-34021 内层 switch)：
+                         //   vanityPet[202]（Main.cs:9377）
+  UpbeatStar = 330,      // 埃斯蒂(217,←4365 CelestialWand)：vanityPet[217]（Main.cs:9381）
+  SharkPup = 331,        // 小鲨鱼(219,←4425 SharkBait)：vanityPet[219]（Main.cs:9380）
+  FennecFox = 332,       // 耳廓狐(259,←4604 ExoticEasternChewToy)：vanityPet[259]（Main.cs:9383）
+  BabyImp = 333,         // 小鬼宝宝(261,←4551 HellCake)：vanityPet[261]（Main.cs:9385）
+  ShadowMimic = 334,     // 暗影宝箱怪(268,←4737 OrnateShadowKey)：vanityPet[268]（Main.cs:9390）
+  // ---- SW-FX2 续：vanilla-pets.json 全表反查零落空收尾（表内其余 25 行的伴生 buff;
+  //      同为纯注册位,物品面多数未入仓——先行入档使「新宠物件入仓即图标可达」,
+  //      表外仅余 1.4.5 boss 宠 284-304（无 pets 行,itemfunc 侧,剩债登记））----
+  SugarGlider = 335,         // 蜜袋鼯(218,←4366)
+  LilHarpy = 336,            // 小鸟妖(258,←4603)
+  GlitteryButterfly = 337,   // 闪光蝴蝶(260,←4605)
+  BabyRedPanda = 338,        // 小熊猫宝宝(262,←4550)
+  Plantero = 339,            // 微型世纪之花(264,←4701)
+  DynamiteKitten = 340,      // 雷管小猫(266,←4735)
+  BabyWerewolf = 341,        // 狼人宝宝(267,←4736)
+  VoltBunny = 342,           // 伏特兔(274,←4777)
+  QueenSlimePet = 343,       // 史莱姆公主(317,←4960)
+  BerniePet = 344,           // 伯尼(327,←5088)
+  GlommerPet = 345,          // 咕噜咪(328,←5089)
+  DeerclopsPet = 346,        // 小独眼巨鹿(329,←5090)
+  PigPet = 347,              // 猪(330,←5091)
+  ChesterPet = 348,          // 切斯特(331,←5098)
+  DualSlimePet = 349,        // 皇家史莱姆(341,←5131)
+  JunimoPet = 350,           // 祝尼魔(345,←5276)
+  BlueChickenPet = 351,      // 蓝鸡(349,←5297)
+  Spiffo = 352,              // Spiffo(351,←5332)
+  CavelingGardener = 353,    // 洞穴园丁(352,←5333)
+  DirtiestBlock = 354,       // 最土的块(354,←5400)
+  DeadCellsSwarmBiter = 355, // 虫群啃噬者(356,←5466)
+  Pufferfish = 356,          // 河豚(371,←5513)
+  AxeFairyPet = 357,         // 塞纳克斯(372,←5517)
+  BoulderPet = 358,          // 友好巨石(373,←5523)
+  RainbowBoulderPet = 359,   // 友好彩虹巨石(382,←5654)
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -708,6 +762,45 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // ——名称 Dazed/`OgreSpit`=Oozed）
   [BuffType.Dazed]: { vanillaBuff: 160, descKey: 'BuffDescription.Dazed', fallbackName: '眩晕' },
   [BuffType.OgreSpit]: { vanillaBuff: 197, descKey: 'BuffDescription.OgreSpit', fallbackName: '分泌物' },
+  // ---- SW-FX2：58 缺口重项 40/41/42/127 + 四键① 202 + pets 表对拍 217/219/259/261/268
+  //      （枚举尾注即总账;名称/描述走原版 BuffName/BuffDescription 键,12 语言现成,
+  //      图标 Buff_N.png 全在盘）----
+  [BuffType.PetBunny]: { vanillaBuff: 40, descKey: 'BuffDescription.PetBunny', fallbackName: '宠物兔兔' },
+  [BuffType.BabyPenguin]: { vanillaBuff: 41, descKey: 'BuffDescription.BabyPenguin', fallbackName: '企鹅宝宝' },
+  [BuffType.PetTurtle]: { vanillaBuff: 42, descKey: 'BuffDescription.PetTurtle', fallbackName: '宠物海龟' },
+  [BuffType.ZephyrFish]: { vanillaBuff: 127, descKey: 'BuffDescription.ZephyrFish', fallbackName: '和风鱼' },
+  [BuffType.PetDD2Dragon]: { vanillaBuff: 202, descKey: 'BuffDescription.PetDD2Dragon', fallbackName: 'Hoardagron' },
+  [BuffType.UpbeatStar]: { vanillaBuff: 217, descKey: 'BuffDescription.UpbeatStar', fallbackName: '埃斯蒂' },
+  [BuffType.SharkPup]: { vanillaBuff: 219, descKey: 'BuffDescription.SharkPup', fallbackName: '小鲨鱼' },
+  [BuffType.FennecFox]: { vanillaBuff: 259, descKey: 'BuffDescription.FennecFox', fallbackName: '耳廓狐' },
+  [BuffType.BabyImp]: { vanillaBuff: 261, descKey: 'BuffDescription.BabyImp', fallbackName: '小鬼宝宝' },
+  [BuffType.ShadowMimic]: { vanillaBuff: 268, descKey: 'BuffDescription.ShadowMimic', fallbackName: '暗影宝箱怪' },
+  // ---- SW-FX2 续：vanilla-pets.json 全表收尾 25 件（枚举尾注即总账;图标/l10n 全在位）----
+  [BuffType.SugarGlider]: { vanillaBuff: 218, descKey: 'BuffDescription.SugarGlider', fallbackName: '蜜袋鼯' },
+  [BuffType.LilHarpy]: { vanillaBuff: 258, descKey: 'BuffDescription.LilHarpy', fallbackName: '小鸟妖' },
+  [BuffType.GlitteryButterfly]: { vanillaBuff: 260, descKey: 'BuffDescription.GlitteryButterfly', fallbackName: '闪光蝴蝶' },
+  [BuffType.BabyRedPanda]: { vanillaBuff: 262, descKey: 'BuffDescription.BabyRedPanda', fallbackName: '小熊猫宝宝' },
+  [BuffType.Plantero]: { vanillaBuff: 264, descKey: 'BuffDescription.Plantero', fallbackName: '微型世纪之花' },
+  [BuffType.DynamiteKitten]: { vanillaBuff: 266, descKey: 'BuffDescription.DynamiteKitten', fallbackName: '雷管小猫' },
+  [BuffType.BabyWerewolf]: { vanillaBuff: 267, descKey: 'BuffDescription.BabyWerewolf', fallbackName: '狼人宝宝' },
+  [BuffType.VoltBunny]: { vanillaBuff: 274, descKey: 'BuffDescription.VoltBunny', fallbackName: '伏特兔' },
+  [BuffType.QueenSlimePet]: { vanillaBuff: 317, descKey: 'BuffDescription.QueenSlimePet', fallbackName: '史莱姆公主' },
+  [BuffType.BerniePet]: { vanillaBuff: 327, descKey: 'BuffDescription.BerniePet', fallbackName: '伯尼' },
+  [BuffType.GlommerPet]: { vanillaBuff: 328, descKey: 'BuffDescription.GlommerPet', fallbackName: '咕噜咪' },
+  [BuffType.DeerclopsPet]: { vanillaBuff: 329, descKey: 'BuffDescription.DeerclopsPet', fallbackName: '小独眼巨鹿' },
+  [BuffType.PigPet]: { vanillaBuff: 330, descKey: 'BuffDescription.PigPet', fallbackName: '猪' },
+  [BuffType.ChesterPet]: { vanillaBuff: 331, descKey: 'BuffDescription.ChesterPet', fallbackName: '切斯特' },
+  [BuffType.DualSlimePet]: { vanillaBuff: 341, descKey: 'BuffDescription.DualSlimePet', fallbackName: '皇家史莱姆' },
+  [BuffType.JunimoPet]: { vanillaBuff: 345, descKey: 'BuffDescription.JunimoPet', fallbackName: '祝尼魔' },
+  [BuffType.BlueChickenPet]: { vanillaBuff: 349, descKey: 'BuffDescription.BlueChickenPet', fallbackName: '蓝鸡' },
+  [BuffType.Spiffo]: { vanillaBuff: 351, descKey: 'BuffDescription.Spiffo', fallbackName: 'Spiffo' },
+  [BuffType.CavelingGardener]: { vanillaBuff: 352, descKey: 'BuffDescription.CavelingGardener', fallbackName: '洞穴园丁' },
+  [BuffType.DirtiestBlock]: { vanillaBuff: 354, descKey: 'BuffDescription.DirtiestBlock', fallbackName: '最土的块' },
+  [BuffType.DeadCellsSwarmBiter]: { vanillaBuff: 356, descKey: 'BuffDescription.DeadCellsSwarmBiter', fallbackName: '虫群啃噬者' },
+  [BuffType.Pufferfish]: { vanillaBuff: 371, descKey: 'BuffDescription.Pufferfish', fallbackName: '河豚' },
+  [BuffType.AxeFairyPet]: { vanillaBuff: 372, descKey: 'BuffDescription.AxeFairyPet', fallbackName: '塞纳克斯' },
+  [BuffType.BoulderPet]: { vanillaBuff: 373, descKey: 'BuffDescription.BoulderPet', fallbackName: '友好巨石' },
+  [BuffType.RainbowBoulderPet]: { vanillaBuff: 382, descKey: 'BuffDescription.RainbowBoulderPet', fallbackName: '友好彩虹巨石' },
 };
 
 /** BuffType → vanilla buff id 反查（BUFF_DEFS 驱动；新入档 buff 自动可见） */

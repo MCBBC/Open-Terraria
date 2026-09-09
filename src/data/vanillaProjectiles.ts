@@ -122,6 +122,12 @@ const TABLE: Record<string, ProjectileData> = { ...projJson } as Record<string, 
 const DATA_PATCH: Record<string, Partial<ProjectileData>> = {
   // 496 暗影炎箭（暗影炎弓 3053 载荷;1457 P.cs:5694-5705）
   '496': { alpha: 255, usesLocalNPCImmunity: true, localNPCHitCooldown: -1 },
+  // ★SW-FX1（2026-09-09）骨头手套 3245 掷骨 532（:5986-5997）——提取器盲区①
+  // （usesLocalNPCImmunity+localNPCHitCooldown 不入 NUM_FIELDS）：同敌 5t 局部免疫窗
+  '532': { usesLocalNPCImmunity: true, localNPCHitCooldown: 5 },
+  // ★SW-FX1 孢子云 567 盒径（:6189-6196 嵌套 if：567=14×14、568=16×16）——提取器
+  // 只读共享块漏嵌套支,json 恒 16×16;567 按 1457 原文补 14×14（568 与 json 同值不动）
+  '567': { width: 14, height: 14 },
 };
 for (const k of Object.keys(DATA_PATCH)) {
   TABLE[k] = { ...TABLE[k], ...DATA_PATCH[k] };

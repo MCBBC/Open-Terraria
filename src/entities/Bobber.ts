@@ -149,7 +149,8 @@ export class Bobber extends Entity {
   /** 原版弹型（鱼竿→浮标映射，bobberProjIdFor；ProjLight 光由 Game 标量循环结算：
    *  987-993 七色浮漂 light=1×各乘区——曾在无 projId 下整族无光） */
   projId = 360;
-  /** 鱼饵原版 id（IsLavaBait / CanFishInLava 三源判定用，:19230/:19371-19382） */
+  /** 鱼饵原版 id（IsLavaBait / CanFishInLava 三源判定用，1457: Projectile.cs:20758
+   *  与空咬加速 :20896-20911;旧注 :19230/:19371-19382 系 1456 行号,SW-BJ44 订正） */
   baitVid = 0;
   private baitSlot: number;
   private baitPower: number;
@@ -347,9 +348,18 @@ export class Bobber extends Entity {
         // 入水溅花/音已上移通用湿段（10 粒四液花 + Splash_1 原版 style1）——旧
         // playSfx('splash') 六变体乱掷近似退役（2026-09-06 残差清偿,见字段块注）
       } else if (liqType === 'lava') {
-        // 岩浆：无熔线钓钩配饰则浮标烧毁（accLavaFishing 门）
-        const canLava = this.ownerLavaOk();
-        if (!canLava) { this.dead = true; return; }
+        // ★SW-BJ44（2026-09-09）：岩浆入浮——原版浮标【不】因岩浆销毁：AI_061 浮支
+        // 三液对称（Projectile.cs:54684-54753 wet 浮支对岩浆同效;GetWaterLine
+        // :54805-54833 液体类型无关），共享湿段 LavaCollision 只置 lavaWet 恒不 Kill
+        // （:16906-16911;Projectile.AI 内 lavaWet→Kill 唯一支 :26071 属 aiStyle 22,
+        // 与 aiStyle 61 浮标无关;1458 :16907-16912/:26072/:54599 同构）。岩浆钓合法性
+        // 由 fishingCheck 三源门裁决（Projectile.cs:20758 CanFishInLava[竿 2422]
+        // ||IsLavaBait[饵 4845/4847/4849]||accLavaFishing[4881/5064 → Player.cs
+        // :14774-14776/:14787-14790]）+ 渔获表 LavaDrops AddStopper(InLava)
+        // （GameContentFishDropPopulator.cs:247）——三源皆无 = 浮标永浮、渔获表全空 =
+        // 永不咬钩（原版即静默无提示）。旧「无配饰即烧毁」为自创机制（IsLavaBait
+        // 岩浆饵 4845/4847/4849 无配饰整族被拒 = 用户实报「地狱鱼饵也没能在岩浆钓鱼」
+        // 根因），退役。
         this.floating = true;
         this.liquidKind = 'lava';
       } else if (++this.airT > 600) {

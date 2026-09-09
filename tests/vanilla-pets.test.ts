@@ -4,22 +4,25 @@ import { petInfoOfVid } from '../src/data/vanillaPets';
 import equipJson from '../src/data/vanilla-equip.json';
 
 describe('vanilla-pets 提取表', () => {
-  it('总数与 vanity/light 分布（62 = 55 vanity + 7 light；damage>0 召唤杖已排除）', () => {
+  // ★SW-FX2（2026-09-09）：55+7→56+6 —— 3855 行勘误（原 201/702/light=1 与 3856
+  //  整行重复;vanilla Item.cs:34017-34022 共享块缺省臂 = 200/703,Main.cs:9378
+  //  vanityPet[200]=true、lightPet 无 200）→ 飞翔Gato 回归 vanity 侧
+  it('总数与 vanity/light 分布（62 = 56 vanity + 6 light；damage>0 召唤杖已排除）', () => {
     let vanity = 0, light = 0;
     for (const k of Object.keys(require0())) {
       const p = petInfoOfVid(+k)!;
       if (p.light) light++; else vanity++;
     }
-    expect(vanity).toBe(55);
-    expect(light).toBe(7);
+    expect(vanity).toBe(56);
+    expect(light).toBe(6);
   });
 
   it('抽检：603 胡萝卜→兔子（buff40/proj111）；光宠标记', () => {
     const carrot = petInfoOfVid(603);
     expect(carrot).toEqual({ buff: 40, proj: 111, light: false });
     // 4952 Fairy Bell 族光宠（buff 156? 按表断言 light=true 即可——抽任一 light 项）
-    const lights = Object.entries(require0()).filter(([, v]) => v.light);
-    expect(lights.length).toBe(7);
+    const lights = Object.entries(require0()).filter(([, v]) => (v as { light: boolean }).light);
+    expect(lights.length).toBe(6);
   });
 
   it('★ 不变量：每条 buff ∈ Main.vanityPet ∪ lightPet（假阳性防线——曾混入 24 件召唤杖）', () => {

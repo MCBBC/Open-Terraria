@@ -299,8 +299,10 @@ describe('Game.ts 接线锁（④b GetWereThereAnyInteractions 门 + ⑦ 公告�
     const anchorAt = s.indexOf('★GetWereThereAnyInteractions 门');   // 门锚注释（全文件唯一）
     expect(anchorAt).toBeGreaterThan(-1);
     const seg = s.slice(anchorAt, anchorAt + 2400);
-    expect(seg).toContain('if (enemy.playerInteracted === true) {'); // 门（先于记账）
-    expect(seg.indexOf('if (enemy.playerInteracted === true) {'))
+    // SW-BJ47（2026-09-09）：H2-2 石化旁路（opts.petrifyBypassInteractionGate）并入
+    // 同一守卫（原版石化路径无交互门直通旗杀,NPC.cs:56456-56462 不经 NPCLoot :79653）
+    expect(seg).toContain('if (enemy.playerInteracted === true || opts?.petrifyBypassInteractionGate === true) {'); // 门（先于记账）
+    expect(seg.indexOf('if (enemy.playerInteracted === true || opts?.petrifyBypassInteractionGate === true) {'))
       .toBeLessThan(seg.indexOf('recordBannerKill('));               // 门内才调记账（曾无门=环境/雕像杀也计）
   });
 

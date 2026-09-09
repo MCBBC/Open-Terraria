@@ -168,7 +168,10 @@ describe('F4｜挖掘冷却下限钳（Player.cs:4221-4226 max(val,1)）', () =>
     // 修复前 Math.max(8,…) 强制 8t（慢 100%）
     expect(itemCombat(2176)!.useTime).toBe(4);
     expect(itemCombat(2774)!.useTime).toBe(4);
-    const src = 'Math.max(1, Math.round((useTime ?? speed) * pickSpeed))';
+    // ★SW-RB9c（2026-09-09）随 SW-BJ12 pickSpeed 单源化刷新锚文本（pickSpeedMult()）：
+    //   :18837 现式 `Math.max(1, Math.round((useTime ?? speed) * this.pickSpeedMult()))`
+    //   ——钳位 max(1,…) 语义不变,静态锚同步（旧字面 `* pickSpeed` 已不存在=恒红假锚）
+    const src = 'Math.max(1, Math.round((useTime ?? speed) * this.pickSpeedMult()))';
     // 静态锚：tryMine 冷却表达式唯一、无 8t 残留（读源码防回归）
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('node:fs') as typeof import('node:fs');

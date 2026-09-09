@@ -2,11 +2,11 @@
  "meta": {
   "source": "Terarria1456/Terraria/Projectile.cs",
   "generatedBy": "tools/extract-petai.mjs",
-  "petProjCount": 61,
+  "petProjCount": 62,
   "familyCounts": {
    "ground": 43,
    "fly": 10,
-   "hover": 8
+   "hover": 9
   },
   "fallback": "hover-legacy",
   "methodLines": {
@@ -477,6 +477,25 @@
    "flipSign": -1,
    "line": 66748,
    "frames": 4
+  },
+  "703": {
+   "name": "DD2PetGato",
+   "aiStyle": 144,
+   "family": "hover",
+   "hoverX": 30,
+   "hoverY": -20,
+   "snap": 3,
+   "velLerp": 0.1,
+   "teleport": 1000,
+   "idleRate": 4,
+   "moveRate": 2,
+   "bob": 2,
+   "bobPeriod": 60,
+   "faceFrom": "player",
+   "flipSign": -1,
+   "line": 66784,
+   "frames": 8,
+   "frameTo": 4
   },
   "764": {
    "name": "UpbeatStar",

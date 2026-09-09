@@ -151,10 +151,25 @@ function packQuickStackable(
   return { slots, items, blocked };
 }
 
+/** ★SW-BJ46 匹配键唯一化（实报「快速堆叠吞物/无同物箱被收」根因刀）：
+ *  原版比对域 = Item.type（QuickStacking.cs:490 `item2.type != item.type`、
+ *  :500 CanStack 门;Item.cs:49870 CanStack=同 type+同 prefix）。仓库
+ *  vanillaIdOfItem 对 678 个 place_v_* def（items.ts:984 起逐 v_ 图块自动注册,
+ *  键数字=tile sheet id 非物品 vid,键不带 vi_ 前缀 → viIdFromKey 正则不中）
+ *  返回 -1 哨兵 → 直接比 vid 会把任意两个不同 place_v 物品判成同物：
+ *  FillStack 跨物并叠（物品身份湮灭=吞物）+ 登记/B 阶段跨物直送（「附近宝箱
+ *  没有同样的东西也被收进去了」）。修法 = vid≥0 取 vid（原版域真值,跨代同物
+ *  归一）;vid<0 以负域编码内部 id（每 def 唯一,与 vid 空间永不相交）。
+ *  消费端定域修法与向导槽 vid/iid 双域碰撞先例同构（不改 vanillaIdOfItem
+ *  全局 -1 哨兵语义,免伤其余消费面）。 */
+export const itemMatchKey = (id: number): number => {
+  const vid = vanillaIdOfItem(id);
+  return vid >= 0 ? vid : -1 - id;
+};
+
 const canStack = (a: SrcItem, b: SrcItem): boolean => {
   if (!a || !b) return false;
-  const at = vanillaIdOfItem(a.id), bt = vanillaIdOfItem(b.id);
-  return at === bt && (a.prefix ?? 0) === (b.prefix ?? 0);
+  return itemMatchKey(a.id) === itemMatchKey(b.id) && (a.prefix ?? 0) === (b.prefix ?? 0);
 };
 
 interface DestHelper {
@@ -224,10 +239,12 @@ export function quickStackToChests(
     d.mutated = true;                                 // VisualizeChestTransfer 等价记录
   };
   // ---- B 阶段：同型空位直送（:423-431 / 1456 :412-420）----
+  //   ★SW-BJ46 查表键=itemMatchKey（vid≥0:vid;否则内部 id 负域编码,place_v 族
+  //   不再借 -1 哨兵互相命中）
   for (let i = 0; i < src.items.length; i++) {
     const it = src.items[i];
     if (!it) continue;
-    const vid = vanillaIdOfItem(it.id);
+    const vid = itemMatchKey(it.id);
     let hit: DestHelper | null = null;
     for (const d of typesToList.get(vid) ?? []) {
       if (d.freeStart < d.freeSlots.length) { hit = d; break; }   // Lookup：首个有空位者
@@ -290,7 +307,8 @@ function buildDestinationMetrics(
     d.categoryScores.set(cat, (d.categoryScores.get(cat) ?? 0) + 1);
     for (let j = 0; j < src.items.length; j++) {
       const s = src.items[j];
-      if (!s || vanillaIdOfItem(s.id) !== vanillaIdOfItem(cs.id)) continue;
+      // ★SW-BJ46 比对/登记键=itemMatchKey（原文 type 域;vid<0 族以内部 id 负域编码）
+      if (!s || itemMatchKey(s.id) !== itemMatchKey(cs.id)) continue;
       if (d.locked) { src.blocked[j] = true; d.transferBlocked = true; continue; }
       const max = ITEM_DEFS[cs.id]?.maxStack ?? 1;
       if (canStack(s, cs) && cs.stack < max) {
@@ -308,11 +326,12 @@ function buildDestinationMetrics(
         // 免得残余同型件被 B 阶段 Lookup 二次送入空格（Q-F8 边窗回归见批测试）
         if (!src.items[j]) continue;
       }
-      if (!d.listedTypes.has(vanillaIdOfItem(cs.id))) {
-        d.listedTypes.add(vanillaIdOfItem(cs.id));
-        const list = typesToList.get(vanillaIdOfItem(cs.id)) ?? [];
+      const mkey = itemMatchKey(cs.id);
+      if (!d.listedTypes.has(mkey)) {
+        d.listedTypes.add(mkey);
+        const list = typesToList.get(mkey) ?? [];
         list.push(d);
-        typesToList.set(vanillaIdOfItem(cs.id), list);
+        typesToList.set(mkey, list);
       }
     }
   }
@@ -331,6 +350,111 @@ function consolidate(src: { items: SrcItem[] }, i: number): void {
     b.stack -= n;
     if (b.stack <= 0) src.items[k] = null;
   }
+}
+
+// ============ 开箱面板 Quick Stack（ChestUI.QuickStack :651-812;★SW-BJ46 抽纯函数）============
+
+/** ChestUI.QuickStack（ChestUI.cs:651-812）1:1：只堆「箱内已存在类型」;收藏禁转移。
+ *  段序按原文：
+ *  ① isBank（player.chest ≤ -2 面）先 MoveCoins 合币（:660-669 四支;真箱无此段）;
+ *  ② 建账（:699-709）：箱内非币（71-74）非空=受理型（list）+槽序（list2）,
+ *     空格=list3（第二遍自由格支）;
+ *  ③ 源窗（:711-719）：真箱=背包 10-49（num2=10,num=50）,bank=10-53（num+=4——
+ *     币型不进 list 故币永不入 dictionary,窗含币列无害;旧 UI 实现全域 0-53 迭代
+ *     把热栏 0-9 一并卷入=SW-BJ46 已修）;
+ *     dictionary=源槽序入账（:721-726,list.Contains(type) && !favorited）;
+ *  ④ 第一遍（:728-756）：按箱槽序逐槽吃源（CanStack=同型+同词缀 Item.cs:49870;
+ *     旧实现无词缀门=异词缀互融吞词缀,已修）,箱槽满（num5==0）→ break 该槽;
+ *  ⑤ 并尽源出账（:758-766）后第二遍（:768-805）：余件按空格序整件落格（flag 首
+ *     件直落免 CanStack,后续须与落格件 CanStack 才续并,num8==0 break;旧实现整段
+ *     缺失=满叠同型件不进箱,已修）。
+ *  匹配域：原文 type 域的仓库等价 = itemMatchKey（place_v_* def 的 vid 哨兵 -1
+ *  碰撞面在 list.Contains/dictionary 双侧同病）。
+ *  音效：原版逐事件 PlaySound(7)（:741/:776/:789）;调用方（UI.chestQuickStack）
+ *  与 LootAll/DepositAll 同形单次收尾播（登记形差）。
+ *  @param isBank bank 容器面（源窗 10-53 + MoveCoins 前置）
+ *  @param out.playSound7 MoveCoins 尾 flag 支（ChestUI.cs:1196-1198,Q-F6 出参形）
+ *  @returns movedChest=有变动的箱槽 → 落定物品 id（UI glow 分层用） */
+export function quickStackIntoContainer(
+  inv: Inventory,
+  containerItems: SlotArray,
+  isBank: boolean,
+  out?: { playSound7?: boolean },
+): { movedChest: Map<number, number> } {
+  const movedChest = new Map<number, number>();
+  const sameStack = (a: NonNullable<SlotArray[number]>, b: NonNullable<SlotArray[number]>): boolean =>
+    itemMatchKey(a.id) === itemMatchKey(b.id) && (a.prefix ?? 0) === (b.prefix ?? 0);
+  const isCoin = (id: number): boolean => { const v = vanillaIdOfItem(id); return v >= 71 && v <= 74; };
+  // ① bank 先合币（:660-669）——containerItems 即 banks[bi] 本尊（Game :24300 直通）
+  if (isBank) moveCoinsIntoBank(inv, containerItems, out);
+  // ② 建账（:699-709）
+  const chestSlots: number[] = [];      // list2：非币非空槽序
+  const chestTypes = new Set<number>(); // list：受理型
+  const freeSlots: number[] = [];       // list3：空格序
+  for (let i = 0; i < containerItems.length; i++) {
+    const it = containerItems[i];
+    if (it && it.stack > 0 && !isCoin(it.id)) {
+      chestSlots.push(i);
+      chestTypes.add(itemMatchKey(it.id));
+    } else if (!it || it.stack <= 0) {
+      freeSlots.push(i);
+    }
+  }
+  // ③ 源窗（:711-719）+ dictionary（:721-726,插入序=槽序）
+  const srcEnd = isBank ? 54 : 50;
+  const dict: number[] = [];
+  for (let j = 10; j < srcEnd; j++) {
+    const s = inv.slots[j];
+    if (s && s.stack > 0 && !s.favorited && chestTypes.has(itemMatchKey(s.id))) dict.push(j);
+  }
+  // ④ 第一遍：箱槽序吃源（:728-756）
+  for (const num3 of chestSlots) {
+    const cs = containerItems[num3]!;
+    const csMax = ITEM_DEFS[cs.id]?.maxStack ?? 999;
+    for (const j of dict) {
+      const s = inv.slots[j];
+      if (!s || !sameStack(s, cs)) continue;
+      const room = csMax - cs.stack;
+      if (room === 0) break;                       // num5==0 → 该槽收工（:737-739）
+      const n = Math.min(s.stack, room);
+      if (n > 0) {
+        cs.stack += n;
+        s.stack -= n;
+        if (s.stack <= 0) inv.slots[j] = null;
+        if (!movedChest.has(num3)) movedChest.set(num3, cs.id);
+      }
+    }
+  }
+  // ⑤ 并尽源出账（:758-766）→ 第二遍自由格支（:768-805）
+  for (let k = dict.length - 1; k >= 0; k--) {
+    const s = inv.slots[dict[k]];
+    if (!s || s.stack <= 0) dict.splice(k, 1);
+  }
+  for (const num6 of freeSlots) {
+    let flag = true;
+    for (const j of dict) {
+      const s = inv.slots[j];
+      if (!s || s.stack <= 0) continue;            // stack==0 → continue（:774）
+      const placed = containerItems[num6];
+      if (flag) {
+        containerItems[num6] = s;                  // item[num6] = array[item5.Key] 整件落格（:776-778）
+        inv.slots[j] = null;
+        movedChest.set(num6, s.id);
+      } else {
+        if (!placed) continue;
+        if (!sameStack(s, placed)) continue;       // !CanStack → continue（:774）
+        const room = (ITEM_DEFS[placed.id]?.maxStack ?? 999) - placed.stack;
+        if (room === 0) break;                     // num8==0 → break（:786-788）
+        const n = Math.min(s.stack, room);
+        placed.stack += n;
+        s.stack -= n;
+        if (s.stack <= 0) inv.slots[j] = null;
+        movedChest.set(num6, placed.id);
+      }
+      flag = false;
+    }
+  }
+  return { movedChest };
 }
 
 // ============ bank 存币段（QuickStackToNearbyBanks :238-250 / 1456 :230-242）============

@@ -128,6 +128,10 @@ export interface WldWorld {
    *  combatBook/2、shadowOrbSmashed、spawnMeteor、vampireSeed/infectedSeed、
    *  teamBasedSpawnsSeed。曾读位即弃 → 导入肉后世界=肉前玩法。 */
   flags: Record<string, boolean>;
+  /** ★SW-BJ45（2026-09-09）：渔夫任务链段（WF:1335-1341/2159-2173）——当日任务鱼索引
+   *  + 今日已交付玩家名单。曾读位即弃 → 导入世界任务恒索引 0=蝙蝠鱼且名单清空 */
+  anglerQuest: number;
+  anglerWhoFinishedToday: string[];
   /** ★R16-2：signs 段（pointers[3]，WF57:2841-2885 LoadSigns：i16 数量 ×
    *  {string text, i32 x, i32 y}）——坐标=2×2 牌左上锚（Sign.ReadSign :24-31 同款
    *  frameX/18 反解）。曾整段跳过 → 导入图牌全灭（连同 tile 55 被 null 清空）。 */
@@ -316,13 +320,17 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const desertBG = r.u8(); // WF:1330 沙漠背景样式（setBG case 6 值域 0-4/51-53）
   const oceanBG = r.u8();  // WF:1331 海洋背景贴图变体（setBG case 7 值域 0-7）
   const cloudBGActive = r.i32(); const numClouds = r.i16(); const windSpeedTarget = r.f32(); // clouds/wind
-  // angler
+  // angler（★SW-BJ45 2026-09-09：名单+任务索引读位即收，曾整段丢弃 → 导入世界
+  //   anglerQuest 恒 0=蝙蝠鱼(2450=ANGLER_QUEST_ITEMS[0]) 且交付名单清空。原版
+  //   WF:1335-1341 Save / WF:2159-2173 Load（名单 v>=95、savedAngler v>=99、
+  //   anglerQuest v>=101——本仓支持版本域全过门，读序同位））
+  const anglerWhoFinishedToday: string[] = [];
   {
     const n = r.i32();
-    for (let i = 0; i < n; i++) r.string();
+    for (let i = 0; i < n; i++) anglerWhoFinishedToday.push(r.string());
   }
   if (r.boolean()) flags.savedAngler = true;
-  r.i32(); // anglerQuest
+  const anglerQuest = r.i32();
   if (r.boolean()) flags.savedStylist = true;
   // ★R16-7①：tax collector 门 = 129（WF57:2179），非 140
   if (version >= 129 && r.boolean()) flags.savedTaxCollector = true;
@@ -584,6 +592,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     bannerKills,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
+    anglerQuest, anglerWhoFinishedToday,
     bgMushroom, bgUnderworld, bg10, bg11, bg12,
     treeBG1, treeBG2: bg10, treeBG3: bg11, treeBG4: bg12, corruptBG, jungleBG, snowBG, hallowBG, crimsonBG, desertBG, oceanBG,
     tileEntities, teSkipped,

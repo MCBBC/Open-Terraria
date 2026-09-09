@@ -15,6 +15,7 @@ import { liquidCollision, drownCollision } from '../stats/TouchDamage';
 import { updateNpcLiquid, getWaterLine } from './npcLiquid';
 import type { GameHooks, LootPlayerCtx } from './types';
 import { Clock } from '../world/World';
+import { bannerOfNpc } from '../world/Banners';   // SW-BJ47 lastCreatureHit 命中写位（旗种 id 域）
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
 import { vanillaNpc, vanillaSoundFiles, NPC_STATIC_ALPHA, type VanillaNpc } from '../data/vanillaNpcs';
@@ -13727,6 +13728,9 @@ export class Enemy extends Entity {
         const pl = game.player as Player | null;
         pl?.addDPS(dmg);
         this.playerInteracted = true;
+        // ★SW-BJ47 计数器"最近击杀"命中写位（假人分支——原版 ApplyDamageToNPC 对
+        // 488 同样走全管线写 lastCreatureHit;NPCtoBanner(488)=0 → 行灰"杀敌数不可用"）
+        if (pl) pl.lastCreatureHit = bannerOfNpc(this.vanillaNetId !== 0 ? this.vanillaNetId : (this.vanillaId ?? 0));
         const net = (game as unknown as { net?: { active: boolean; mySlot: number } }).net;
         if (net?.active) this.applyNetInteraction(net.mySlot, game);
       }
@@ -13786,6 +13790,16 @@ export class Enemy extends Entity {
       const pl = game.player as Player | null;
       pl?.addDPS(dmg);
       this.playerInteracted = true;  // AnyInteractions（playerInteraction 位）——雕像门 :79651
+      // ★SW-BJ47 计数器"最近击杀"命中写位（1:1 命中即写,非击杀写）：原版三写位
+      //  Player.cs:20609-20619（ApplyDamageToNPC）/:44769-44775（ItemCheck 近战命中）/
+      //  Projectile.cs:13382-13389（ownedBySomeone 弹）——并集 = 仓内 hurt(fromPlayer)
+      //  单漏斗（近战/玩家弹/召唤物全经此）。值域 = 旗种 banner id（Player.cs:2575,
+      //  写 `BannerSystem.NPCtoBanner(BannerID())`,未映射 = 0 → 行灰"杀敌数不可用"
+      //  Main.cs:47845-47853）;非击杀路径（岩浆/陷阱/石化 624）不写 = 原版本相。
+      //  免疫帧/无伤早退在 hurt() 头部 = 原版免疫门先行等价（须实扣命中才写）。
+      //  MP 远端访客弹（remoteOwner,fromPlayer=false）不写 = 原版 ownedBySomeone
+      //  写 Main.player[myPlayer] 的 host 聚合面登记未建模（与旗杀 MP credit 同族债）。
+      if (pl) pl.lastCreatureHit = bannerOfNpc(this.vanillaNetId !== 0 ? this.vanillaNetId : (this.vanillaId ?? 0));
       // MP：本地玩家交互登记（ApplyInteraction 等价——per-client 掉落发放门;
       //  单人无 net 净空,interactionSlots 恒空不参与结算）
       const net = (game as unknown as { net?: { active: boolean; mySlot: number } }).net;
