@@ -207,6 +207,13 @@ export interface SceneFlags {
   bestOreSheet: number;
   bestOreX: number;
   bestOreY: number;
+  /** ★IIIII230：EvilTileCount/BloodTileCount（SceneMetrics.cs:614-615 ZoneScanSize
+   *  169×124 窗,AggregateTileCounts 互减+钳位后终值——TOW 选曲链双邪恶共存支
+   *  Main.cs:12143 `ZoneCrimson && BloodTileCount > EvilTileCount` 的判据源。
+   *  可视域计数（scanBiomeLightCounts,VisualScanArea 窗）不同源勿混用：vanilla
+   *  ScanOnScreenTiles 不写 _tileCounts（SceneMetrics.cs:453-470 只扫器件帧态）） */
+  evilTileCount: number;
+  bloodTileCount: number;
 }
 
 export const EMPTY_SCENE: SceneFlags = {
@@ -227,6 +234,7 @@ export const EMPTY_SCENE: SceneFlags = {
   surfaceAtmospherics: false, zoneRain: false, zoneSandstorm: false,
   undergroundForShimmering: false, zoneShimmer: false,
   bestOreSheet: -1, bestOreX: 0, bestOreY: 0,
+  evilTileCount: 0, bloodTileCount: 0,
 };
 
 /** tileOreFinderPriority(Main.cs:6355-6391 全 34 条字面量) */
@@ -479,6 +487,9 @@ export function scanScene(
     honeyBlockCount,
     partyMonolithCount,
     bestOreSheet: bestOreS, bestOreX: bestOrePx, bestOreY: bestOrePy,
+    // ★IIIII230：互减+钳位后的终值（TOW 选曲链双邪恶分主判据;vanilla 同值域
+    //  SceneMetrics.EvilTileCount/BloodTileCount）
+    evilTileCount: evil, bloodTileCount: blood,
   };
 }
 

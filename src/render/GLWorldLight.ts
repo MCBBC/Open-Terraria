@@ -42,6 +42,7 @@ uniform sampler2D uWorld;
 uniform sampler2D uLight;
 uniform vec2 uCanvas;
 uniform vec4 uLightRect;          // 光照栅格在画布像素空间的 (x,y,w,h)
+uniform float uDarkSkip;          // ★SW-BJ41：1=以太域零光 α→0（0=恒等,原语义）
 varying vec2 vUv;
 void main() {
   vec4 w = texture2D(uWorld, vUv);
@@ -51,11 +52,16 @@ void main() {
   vec2 lu = (px - uLightRect.xy) / uLightRect.zw;
   lu = clamp(lu, vec2(0.0), vec2(1.0));
   vec3 l = texture2D(uLight, lu).rgb;
+  // ★SW-BJ41 2026-09-09：以太域零光跳过（Main.DrawBlack :58831 shimmerAlpha==1f
+  //   早退 + TileDrawing.cs:1053/WallDrawing.cs:102 零光图格不画）——光照三通道
+  //   全零(<1/255)的像素 α 清零,露出其后(主画布)的黑幕+人工星空。mix 对 uDarkSkip=0
+  //   恒等,gate=1 保原语义逐位不变
+  float gate = mix(1.0, step(1.0 / 255.0, max(max(l.r, l.g), l.b)), uDarkSkip);
   // ★预乘管线(canvas 源):pixelStorei(UNPACK_PREMULTIPLY=true) 上传即预乘 rgb·a,
   //   再乘光 (rgb·a)·l ≡ (rgb·l)·a 输出恰为预乘语义——曾漏设 UNPACK 声明
   //   (默认 false=期望非预乘)而 Chrome/Mac 对 canvas 源保持预乘直拷,shader 又
   //   手动 ×a → 半透明像素 α² 双重变暗(史莱姆 0.58²≈42% 暗化,2026-08-20 实测)
-  gl_FragColor = vec4(w.rgb * l, w.a);
+  gl_FragColor = vec4(w.rgb * l, w.a * gate);
 }`;
 
   constructor() {
@@ -118,7 +124,7 @@ void main() {
       this.unavailable = true; this.diedAt = performance.now(); return;
     }
     this.prog = prog;
-    for (const n of ['uCanvas', 'uWorld', 'uLight', 'uLightRect']) {
+    for (const n of ['uCanvas', 'uWorld', 'uLight', 'uLightRect', 'uDarkSkip']) {
       this.uni[n] = gl.getUniformLocation(prog, n);
     }
     // 单位 quad(三角带 4 顶点)
@@ -147,8 +153,9 @@ void main() {
    *  账本语义不变:上传恒记带宽;仅 key 变化时补记一笔 新分配(隐式 realloc)。 */
   private _texKeyWorld = '';
   private _texKeyLight = '';
-  /** 每帧合成:world(worldCanvas) × light(lightCanvas @ lightRect 像素矩形) → this.canvas */
-  composite(world: HTMLCanvasElement, light: HTMLCanvasElement, lightRect: readonly [number, number, number, number]): boolean {
+  /** 每帧合成:world(worldCanvas) × light(lightCanvas @ lightRect 像素矩形) → this.canvas
+   *  darkSkip（★SW-BJ41 2026-09-09）：1 = 以太域零光 α→0（shimmerAlpha≥1 时传入） */
+  composite(world: HTMLCanvasElement, light: HTMLCanvasElement, lightRect: readonly [number, number, number, number], darkSkip = 0): boolean {
     const gl = this.gl;
     if (!gl || !this.prog || this.diedAt) return false;
     const w = world.width, h = world.height;
@@ -191,6 +198,7 @@ void main() {
     gl.uniform2f(this.uni.uCanvas, w, h);
     gl.uniform4f(this.uni.uLightRect, lightRect[0], lightRect[1],
       Math.max(1, lightRect[2]), Math.max(1, lightRect[3]));
+    gl.uniform1f(this.uni.uDarkSkip, darkSkip);   // ★SW-BJ41：零光 α 门（0=恒等）
     glStatDraw('worldLight', 4);   // #perf-gpulog
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     // WebGL 错误哨兵:上下文丢失即判死,调用方回退 2D

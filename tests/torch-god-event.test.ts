@@ -47,6 +47,9 @@ function makeHarness(opts?: { unlocked?: boolean; holdingFavor?: boolean }) {
     store: w.store,
     worldSurface: w.groundLevel,
     playerTile: () => ptile,
+    // SW-RB9a 补桩：门锚顶边/死亡态——旧用例 ptile 同时充当中心与顶边（语义不变）
+    playerTopY: () => ptile.y,
+    dead: () => false,
     unlockedBiomeTorches: () => unlocked,
     hasVanillaItem: (vid) => vid === 5043 && holdingFavor,
     spawnTorchBolt: (x, y, vx, vy, range, dust) => bolts.push({ x, y, vx, vy, range, dust }),

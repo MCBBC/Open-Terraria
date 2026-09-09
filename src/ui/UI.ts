@@ -6928,6 +6928,184 @@ export class UI {
     this.vinvLayoutItems.push({ el: mats, pos: () => ({ x: 0, y: 0 }) });
   }
 
+  // ---- 重铸原位(刀 12;Main.cs:42268-42393 逐式) ----
+  // 槽 (50,270) ctx5(ItemSlot.Handle 全栈放入/取回)/文字 (100,270) 费用分档染色/
+  // 锤钮 (120,310) UI_Reforge[0|1] hover 换图+cooldown 60t/储蓄 (180,258) 四库合计。
+  // 显示门 = vinvReforgeOpen 且 无箱/无商店/无对话(:42277 自动退出);heldStack 出入
+  // 由 closeInventory 归包链承担(原版 dropItemCheck 同相)。登记偏差:reforgeScale
+  // 悬停脉冲以 CSS transition 近似;tint 灰随 alpha 同脉的次要观感差。
+  private vinvReforgeOpen = false;
+  private vinvReforgeSlotEl: HTMLElement | null = null;
+  private vinvReforgeTextEl: HTMLElement | null = null;
+  private vinvReforgeHammerEl: HTMLButtonElement | null = null;
+  private vinvSavingsEl: HTMLElement | null = null;
+  private vinvReforgeCooldownUntil = 0;
+  private vinvReforgeHadItem = false;
+
+  private vinvBuildReforge(): void {
+    const root = this.vinvRoot;
+    if (!root) return;
+    // 重铸槽(ctx5:ItemSlot.Handle —— 放入=整件克隆含词缀,取回=回光标)
+    const slot = el('div', 'sw-slot');
+    slot.style.cssText = 'position:absolute; width:52px; height:52px; background-image:none;'
+      + '--slot-bgimg:url(sprites/vanilla/Inventory_Back.png); transform-origin:top left;';
+    slot.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (this.heldStack) {
+        if (!this.game.canReforge(this.heldStack)) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.CannotReforge')); return; }
+        this.reforgeItem = { ...this.heldStack };   // 整件克隆(ctx5 全栈语义,:42387)
+        this.heldStack = null;
+      } else if (this.reforgeItem) {
+        this.heldStack = { ...this.reforgeItem };
+        this.reforgeItem = null;
+      }
+      this.refreshAll();
+    });
+    slot.addEventListener('mouseenter', () => { if (this.reforgeItem) this.showReforgeTooltip(); });
+    slot.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
+    root.appendChild(slot);
+    this.vinvReforgeSlotEl = slot;
+    this.vinvLayoutItems.push({ el: slot, pos: () => {
+      if (!this.vinvReforgeVisible()) return null;
+      return { x: 50, y: 270 };
+    } });
+    // 文字((100,270):有件=Reforge: 分档染色费用;无件=inter[20] 提示)
+    const text = el('div', 'vinv-txt');
+    text.style.cssText += 'font-size:14px; pointer-events:none; white-space:nowrap;';
+    root.appendChild(text);
+    this.vinvReforgeTextEl = text;
+    this.vinvLayoutItems.push({ el: text, pos: () => {
+      if (!this.vinvReforgeVisible()) return null;
+      return { x: 100, y: 270 };
+    } });
+    // 锤钮((120,310) 中心锚;UI_Reforge[0|1] hover 换图;cooldown 60t(:42338))
+    const hammer = el('button', 'vinv-btn') as HTMLButtonElement;
+    const hImg = document.createElement('img');
+    hImg.draggable = false;
+    hImg.style.cssText = 'width:100%; height:100%; image-rendering:pixelated; pointer-events:none;';
+    hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png';
+    hammer.appendChild(hImg);
+    hammer.addEventListener('mouseenter', () => { hImg.src = 'sprites/vanilla-ui/UI_Reforge_1.png'; });
+    hammer.addEventListener('mouseleave', () => { hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png'; });
+    hammer.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (!this.reforgeItem) return;
+      if (performance.now() < this.vinvReforgeCooldownUntil) return;   // reforgeCooldown=60t(:42338)
+      const cost = this.game.reforgeCost(this.reforgeItem);
+      if (this.game.coinsOwned() < cost) return;   // 原版 BuyItem 失败=静默(:42346)
+      const np = this.game.doReforge(this.reforgeItem);
+      if (np < 0) return;
+      this.vinvReforgeCooldownUntil = performance.now() + 1000;
+      this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
+      this.refreshAll();
+    });
+    root.appendChild(hammer);
+    this.vinvReforgeHammerEl = hammer;
+    this.vinvLayoutItems.push({ el: hammer, pos: () => {
+      if (!this.vinvReforgeVisible() || !this.reforgeItem) return null;   // 有件才画锤(:42310)
+      return { x: 120, y: 310 };
+    } });
+    // 储蓄((180,258) DrawSavings ItemSlot.cs:四库有钱画图标+储蓄总额)
+    const sav = el('div', 'vinv-txt');
+    sav.style.cssText += 'font-size:13px; pointer-events:none; display:flex; align-items:center; gap:3px;';
+    root.appendChild(sav);
+    this.vinvSavingsEl = sav;
+    this.vinvLayoutItems.push({ el: sav, pos: () => {
+      if (!this.vinvReforgeVisible() || !this.reforgeItem) return null;   // DrawSavings 在有件支(:42318)
+      return { x: 180, y: 258 };
+    } });
+  }
+
+  /** 显示门(:42277-42279:chest/npcShop/talkNPC/guide 任一即 InReforgeMenu=false) */
+  private vinvReforgeVisible(): boolean {
+    const dlgNpc = (this.game as unknown as { dialogNpc?: unknown }).dialogNpc;   // Game 私有域,运行期读
+    return this.vinvReforgeOpen && !this.openChest && !this.game.npcShopOpen && !dlgNpc;
+  }
+
+  /** 重铸拍回写:槽面/费用分档染色/储蓄四库(Main.cs:42286-42320) */
+  private vinvUpdateReforge(): void {
+    const slot = this.vinvReforgeSlotEl;
+    if (!slot || !this.game) return;
+    // 锤/储蓄显隐随 reforgeItem 有无(:42310 有件才画锤)——有件态变化不在布局
+    // 签名里,此处强制重排(红队 MAJOR-3 同族教训:显隐依赖可变状态必须触发 relayout)
+    if (this.vinvReforgeHadItem !== !!this.reforgeItem) {
+      this.vinvReforgeHadItem = !!this.reforgeItem;
+      this.vinvLayoutSig = '';
+      this.layoutVanilla();
+    }
+    // 槽面
+    slot.querySelector('img')?.remove();
+    slot.querySelector('.cnt')?.remove();
+    if (this.reforgeItem) {
+      const img = el('img') as HTMLImageElement;
+      img.draggable = false;
+      img.src = iconUrl(this.game, this.reforgeItem.id);
+      slot.appendChild(img);
+      if (this.reforgeItem.stack > 1) slot.appendChild(el('span', 'cnt', String(this.reforgeItem.stack)));
+    }
+    // 文字(有件=费用分档;无件=inter[20];:42286-42322)
+    const text = this.vinvReforgeTextEl;
+    if (text) {
+      if (this.reforgeItem) {
+        const cost = this.game.reforgeCost(this.reforgeItem);
+        text.innerHTML = `${Lang.inter(46)}: ` + this.vinvCoinSpans(cost);
+      } else {
+        text.textContent = Lang.inter(20);   // 将物品放到此处重铸
+      }
+    }
+    // 储蓄(DrawSavings:四库钱币合计,只计有币的库画图标)
+    const sav = this.vinvSavingsEl;
+    if (sav) {
+      const banks = this.game.player.banks ?? [];
+      const COIN_VAL = [1, 100, 10000, 1000000];
+      const ICON_VID = [87, 346, 3813, 4076];
+      let total = 0;
+      const hasCoin: boolean[] = [];
+      for (let b = 0; b < 4; b++) {
+        const items = (banks[b] ?? []) as Array<{ id: number; stack: number } | null>;   // p.banks[bi] 即槽位数组(Game.ts:24240)
+        let sum = 0;
+        for (const s of items) {
+          if (!s) continue;
+          const d = coinIndexOf(s.id);
+          if (d >= 0) sum += COIN_VAL[d] * s.stack;
+        }
+        hasCoin[b] = sum > 0;
+        total += sum;
+      }
+      if (total <= 0) { sav.replaceChildren(); return; }
+      sav.replaceChildren();
+      sav.appendChild(el('span', '', `${Lang.inter(66)} `));
+      for (let b = 0; b < 4; b++) {
+        if (!hasCoin[b]) continue;
+        const k = VANILLA_ITEM_KEY_BY_ID[ICON_VID[b]];
+        const iid = k !== undefined ? ITEM_BY_KEY[k] : undefined;
+        if (iid === undefined) continue;
+        const im = el('img') as HTMLImageElement;
+        im.src = iconUrl(this.game, iid);
+        im.draggable = false;
+        im.style.cssText = 'width:20px; height:20px; image-rendering:pixelated;';
+        sav.appendChild(im);
+      }
+      sav.appendChild(el('span', '', formatCopper(total)));
+    }
+  }
+
+  /** 费用分档染色(Main.cs:42292-42321:铂/金/银/铜四档各自原版币色) */
+  private vinvCoinSpans(copper: number): string {
+    // 币名 = Lang.inter[15]铂/[16]金/[17]银/[18]铜(:42304-42321 同族);色 = 原版币色近似
+    const COLORS = ['#dedee8', '#f0c840', '#c0c0cc', '#d08040'];
+    const DIV = [1000000, 10000, 100, 1];
+    let rest = Math.max(1, copper);
+    let html = '';
+    for (let d = 0; d < 4; d++) {
+      const n = Math.floor(rest / DIV[d]);
+      rest -= n * DIV[d];
+      if (n <= 0) continue;
+      html += `<span style="color:${COLORS[d]}">${n} ${Lang.inter(15 + d)}</span> `;
+    }
+    return html || `<span style="color:${COLORS[3]}">0 ${Lang.inter(18)}</span>`;
+  }
+
   /** 列表滚轮(格/材料格/命中区共用;滚轮悬停格子上也有效——★用户实测二轮) */
   private vinvCraftWheel(e: WheelEvent): void {
     e.stopPropagation();

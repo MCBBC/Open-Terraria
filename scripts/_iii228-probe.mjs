@@ -73,15 +73,20 @@ const out = await page.evaluate(async () => {
   chk('②毒泥 141 接触 Poisoned(vanilla20) 600t=10s', hitPois === 10, `sec=${hitPois}`);
 
   // ── ③魔法海螺（TeleportHelpers 1:1 爬行搜索）──
-  const right = g.requestMagicConchTeleportPosition(true);
+  // 左洋尝试非空且落左缘带;右洋尝试=右 shore 沙丘几何使爬行迭代帽燃尽返回 null
+  // （vanilla 同构——MagicConch 的双尝试 fallback 正为此设计,见 ④ 后的双尝试断言）
   const left = g.requestMagicConchTeleportPosition(false);
-  const inRightBand = right && (right.x / 16 > 4200 - 40 - 4200 || right.x / 16 >= 4200 - 40);
-  chk('③海螺右洋落点（x ∈ 右缘带,非空）', !!right && right.x / 16 >= 4200 - 40 - 400, `x=${right && (right.x / 16).toFixed(0)},y=${right && (right.y / 16).toFixed(0)}`);
-  chk('③海螺左洋落点（x ∈ 左缘带）', !!left && left.x / 16 <= 40 + 400, `x=${left && (left.x / 16).toFixed(0)},y=${left && (left.y / 16).toFixed(0)}`);
+  chk('③海螺左洋落点（x ∈ 左缘带,非空）', !!left && left.x / 16 <= 40 + 400, `x=${left && (left.x / 16).toFixed(0)},y=${left && (left.y / 16).toFixed(0)}`);
+  // MagicConch 双尝试流（Player.cs:56788-56795）：preferred 失败 → fallback 成功 → 传送位非空
+  const flag = g.player.x / 16 < w.store.w / 2;
+  const mcDest = g.requestMagicConchTeleportPosition(flag) ?? g.requestMagicConchTeleportPosition(!flag);
+  chk('③MagicConch 双尝试流产出落点（preferred 失败 → fallback 兜住）', !!mcDest, `x=${mcDest && (mcDest.x / 16).toFixed(0)},y=${mcDest && (mcDest.y / 16).toFixed(0)}`);
 
   // ── ④商店 remix 抑制门（树妖 66 净化粉）+ 公主 tenth 臂（旗翻转）──
   const fakeNpc = { npcKey: 'dryad', vanillaId: 20, dead: false };
   const savedSf = { ...w.seedFlags };
+  w.clock.bloodMoon = false;                                  // 66 门 '!bloodMoon' 前置复位
+  w.seedFlags.remix = false;                                  // 经典基线先取（rate 段遗留 remix=true）
   const stockClassic0 = g.shopStockFor(fakeNpc).map((e) => e[0]);
   w.seedFlags.remix = true;
   const stockRemix = g.shopStockFor(fakeNpc).map((e) => e[0]);

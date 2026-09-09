@@ -61,7 +61,7 @@
 //      PlaceTile(184,style:10) 全语义（tileMoss∪tileMossBrick 双支邻门+SolidTile+
 //      Next(3) 掷+SquareTileFrame 双级联+失败 Clear 留痕），rainbow #105 满绿定谳。
 
-import type { RNG } from '../../../core/rng';
+import { RNG } from '../../../core/rng';   // ★IIIII228 doNoSurface 双流需要【值】导入（new RNG(seed) 镜像 Main.rand）
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';

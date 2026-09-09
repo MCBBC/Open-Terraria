@@ -3304,6 +3304,9 @@ export class Renderer {
       const aurPhase = (clock as { moonPhase?: number }).moonPhase ?? 0;
       setFrameAurora(aurSt ? { rgb: aurSt.rgb, opacity: aurSt.opacity, phase: aurPhase } : null);
     }
+    // ★SW-BJ41 2026-09-09：自然星微光衰减输入（SkyRenderer.draw 内 :63034 门 +
+    //  :64003-64007 天空色衰减——monoFilters.update 已在本帧早段推进完毕）
+    this.sky.shimmerAlpha = this.monoFilters.shimmerAlpha;
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
@@ -15049,6 +15052,16 @@ export class Renderer {
     //        ——不透明像素精确;半透明像素留 (1-α)·光 洗色(GL 路径无此项) ====
     if (this.worldLayerActive && this.worldCtxLayer && this.lightMaskCtxLayer) {
       const lw = tilesX * ts * z, lh = tilesY * ts * z;
+      // ★SW-BJ41 2026-09-09：以太域零光跳过（darkSkip）——原版两半机制合一：
+      //  ① Main.DrawBlack :58831 `if (shimmerAlpha == 1f ...) return;`（黑幕罩整缺）
+      //  ② 零光图格本就不画：TileDrawing.cs:988-995/:1053 `tileLight.R/G/B ≥ 1 才置
+      //     flag … if (!flag) return;`、WallDrawing.cs:102-104 `color 全零 && i<地狱层
+      //     → continue`。本仓暗处黑=世界层乘光到黑（无独立 DrawBlack），故 shimmerAlpha
+      //  到 1 时以「零光像素 α→0」等效替代两机制之和：零光区露出主画布的黑幕+人工
+      //  星空 = wiki「完全黑暗之中的图格上也显示星空」。门=shimmerAlpha≥1 精确镜像
+      //  原版 `== 1f` 二值开关（MoveTowards 必达 1）；粒度逐像素平滑 vs 原版逐格
+      //  16px——登记渲染粒度债（与本层双线性光照架构一致）
+      const darkSkip = this.monoFilters.shimmerAlpha >= 1 ? 1 : 0;
       const gl = this.worldLightLayer();
       // 低清档(#perf-gpulog):world 纹理已 K 缩,lightRect 同比缩(world-layer 像素系)
       const k = this._worldLowK;
@@ -15067,7 +15080,7 @@ export class Renderer {
       const lx1 = oxW + Math.round(((tx0 + tilesX) * ts - camRXl) * zzL);
       const ly1 = oyW + Math.round(((ty0 + tilesY) * ts - camRYl) * zzL);
       void lw; void lh; void sx; void sy;
-      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0])) {
+      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip)) {
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
         //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/
@@ -15135,11 +15148,14 @@ export class Renderer {
             const o01 = (lyj * w2 + lxi) * 4, o11 = (lyj * w2 + lxj) * 4;
             const w00 = (1 - fx2) * (1 - fy), w10 = fx2 * (1 - fy);
             const w01 = (1 - fx2) * fy, w11 = fx2 * fy;
+            let lSum = 0;   // ★SW-BJ41：零光判定和（三通道同 tap 同权,和=0 ⇔ 全零）
             for (let c = 0; c < 3; c++) {
               const l = img.data[o00 + c] * w00 + img.data[o10 + c] * w10
                 + img.data[o01 + c] * w01 + img.data[o11 + c] * w11;
+              lSum += l;
               wd[i + c] = Math.min(255, (wd[i + c] * l) / 255);
             }
+            if (darkSkip && lSum <= 0) wd[i + 3] = 0;   // 零光 α→0（见 darkSkip 注）
           }
         }
       } else {
@@ -15191,11 +15207,15 @@ export class Renderer {
           const wx0 = cWX0[px], wx1 = cWX1[px];
           const w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
           let l = ld[o00] * w00 + ld[o10] * w10 + ld[o01] * w01 + ld[o11] * w11;
+          let lSum = l;   // ★SW-BJ41：零光判定和（见 darkSkip 注）
           wd[i] = Math.min(255, (wd[i] * l) / 255);
           l = ld[o00 + 1] * w00 + ld[o10 + 1] * w10 + ld[o01 + 1] * w01 + ld[o11 + 1] * w11;
+          lSum += l;
           wd[i + 1] = Math.min(255, (wd[i + 1] * l) / 255);
           l = ld[o00 + 2] * w00 + ld[o10 + 2] * w10 + ld[o01 + 2] * w01 + ld[o11 + 2] * w11;
+          lSum += l;
           wd[i + 2] = Math.min(255, (wd[i + 2] * l) / 255);
+          if (darkSkip && lSum <= 0) wd[i + 3] = 0;   // 零光 α→0
         }
       }
       }

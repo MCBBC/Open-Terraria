@@ -1180,7 +1180,9 @@ export class SkyRenderer {
   /** Main.DrawStar(:62481-62604)逐式:亮度=(255−bg.R−100)·twinkle·(1−fadeIn)
    *  三通道均值×1.4 钳 255;位置 (pos/1920,·/1200)×屏+(0,bgTopY),X/Y 环绕;
    *  坠星带 8 段尾迹(fallTime 钳 30,逐段 ×0.4 位移衰减)。shimmer 分支
-   *  (:62521-62542)依赖 shimmerAlpha>0——本仓无微光天空态,恒 0=原版跳过=1:1
+   *  (:62521-62542→1457 :64032-64057)已随 SW-BJ41(2026-09-09)接线——shimmerAlpha
+   *  由 Renderer 注入,旧注「本仓无微光天空态」误判作废(判定链 SceneMetrics
+   *  zoneShimmer 本就健在,断点只在驱动 env 漏喂)
    *  ★变换走 setTransform(2026-08-24 trace 热点修复):夜空 ~300 星 ×
    *  save/translate/rotate/restore 每星 4 次状态机往返(trace:save 187ms+
    *  rotate 129+restore 91+translate 90 ≈ 0.5s/54s)——改为调用方(draw 星环)
@@ -1191,10 +1193,16 @@ export class SkyRenderer {
     ctx: CanvasRenderingContext2D, i: number, starOpacity: number,
     viewW: number, viewH: number, bgTopY: number,
     bt: DOMMatrix,
+    shimmerAlpha = 0, artificial = false,
+    cotsOverride?: readonly number[] | null,
   ): void {
     const s = this.stars[i];
     if (!s || s.hidden) return;
-    const cots = this.cots;
+    // ★SW-BJ41 2026-09-09：微光域两 pass 同吃衰减天空色（Main.DrawStarsInBackground
+    //  :64003-64007 `if (shimmerAlpha > 0f) colorOfTheSkies *= 1f - shimmerAlpha;`
+    //  ——自然/人工星共用同一局部色,基色越暗星越亮;shimmerAlpha=1 时基色→0,
+    //  地下/白昼亮度门(:64015)恒开 = 以太星空浮现的机制本体）
+    const cots = cotsOverride ?? this.cots;
     const bgR = cots ? cots[0] : 255, bgG = cots ? cots[1] : 255, bgB = cots ? cots[2] : 255;
     const num2 = 1 - s.fadeIn;
     const r0 = (255 - bgR - 100) * s.twinkle * num2;
@@ -1203,7 +1211,18 @@ export class SkyRenderer {
     let lum = Math.floor((r0 + g0 + b0) / 3);
     if (lum <= 0) return;
     lum = Math.min(255, Math.floor(lum * 1.4));
-    const alpha = Math.max(0, Math.min(1, (lum / 255) * starOpacity));
+    let alpha = Math.max(0, Math.min(1, (lum / 255) * starOpacity));
+    if (shimmerAlpha > 0) {
+      // ★SW-BJ41：DrawStar 微光 tint（Main.cs:64032-64057）——value = color 单通道
+      // (i%3: 0→G / 1→B / 2→R) ×twinkle²（原式 (1f−num·0f)≡1 为反编译保留项）,
+      // color = Lerp(color, value, num);artificial → color ×= num,:64057-64058
+      // else color ×= (1−num)。三通道初值全等(由 :62492-62496 均值化) → 通道均值
+      // 因子 = 1 − num·(1−twinkle²)/3;canvas 单 alpha 管线以均值因子承载亮度,
+      // 单通道色相偏移登记债（同 TileShine 顶点色域管线限制）
+      const tw2 = s.twinkle * s.twinkle;
+      const meanF = 1 - shimmerAlpha * (1 - tw2) / 3;
+      alpha *= artificial ? shimmerAlpha * meanF : (1 - shimmerAlpha) * meanF;
+    }
     // 位置映射(:62544-62549)
     let px = s.x / 1920 * viewW;
     let py = s.y / 1200 * viewH + bgTopY;
@@ -1235,6 +1254,44 @@ export class SkyRenderer {
     ctx.globalAlpha = alpha;
     this.starXform(ctx, bt, cs, sn, s.scale * s.twinkle, px, py);
     ctx.drawImage(tex, -tex.width / 2, -tex.height / 2, tex.width, tex.height);
+  }
+
+  /** ★SW-BJ41 2026-09-09：Main.shimmerAlpha（SceneState.UpdateShimmer :332-357
+   *  逐帧推进值；Renderer 每帧自 monoFilters.shimmerAlpha 注入）。
+   *  消费面：自然星衰减/停画门（Main.cs:63034/:64005/:64057）+ 人工星 pass 门
+   *  （:63147 `if (shimmerAlpha > 0f)`） */
+  shimmerAlpha = 0;
+  /** draw() 暂存的本帧 SceneArea.bgTopY（人工星与自然星同一映射,Main.cs:63036/
+   *  :63151 同传 sceneArea） */
+  private _lastStarBgTopY = 0;
+
+  /** 人工星空 pass（Main.DoDraw :63147-63153 `if (shimmerAlpha > 0f)
+   *  DrawStarsInBackground(sceneArea, artificial: true)`——画在黑幕之后、地下
+   *  分层背景/墙/tile 之前；同源 Star[] 重绘一遍,tint 与 alpha 走 DrawStar
+   *  :64032-64057 微光支）。调用位 = Renderer.render 主画布段收尾（本仓管线中
+   *  与原版「黑幕→背景水→人工星→地下背景」层序的对应,见 Renderer 侧注） */
+  drawShimmerStars(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camY: number, shim: number): void {
+    if (shim <= 0 || this.numStars <= 0) return;
+    const gyIntensity = this.weatherRef?.graveyardVisual ?? 0;
+    const starDim = Math.max(0, 1 - gyIntensity * 1.4);          // :62471-62479 同式
+    if (starDim <= 0) return;
+    // 衰减天空色（:64003-64007 同式——人工/自然同源）+ 可见性门（:64015；
+    // shim→1 时 cots→0 门恒开 = 地下/白昼均见星）
+    const kShim = 1 - shim;
+    const cotsFaded: readonly number[] | null = this.cots
+      ? [this.cots[0] * kShim, this.cots[1] * kShim, this.cots[2] * kShim]
+      : [255, 255, 255];
+    const cotsR = cotsFaded[0];
+    const remixWorldForDraw = !!this.frameCtx?.world?.seedFlags?.remix;
+    const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
+    if (!remixWorldForDraw && visGate <= 0) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    const bt = ctx.getTransform();
+    for (let i = 0; i < this.numStars; i++) {
+      this.drawStar(ctx, i, starDim, viewW, viewH, this._lastStarBgTopY, bt, shim, true, cotsFaded);
+    }
+    ctx.restore();
   }
   private cloudTexs: Array<ImageBitmap | HTMLImageElement | null> = new Array(41).fill(null);
   private vclouds: VanillaCloud[] = [];
@@ -3783,6 +3840,10 @@ export class SkyRenderer {
     const skyBgTopY = !this.frameCtx ? 0
       : this.fx.surfaceY > 30
         ? -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200 : 0;
+    // ★SW-BJ41 2026-09-09：人工星空 pass（drawShimmerStars,Renderer 在黑幕后调）
+    // 与自然星共用同一 SceneArea.bgTopY 映射（原版两 pass 同传 sceneArea,
+    // Main.cs:63036/:63151）——本帧值暂存复用
+    this._lastStarBgTopY = skyBgTopY;
     // 镜头光斑可见性复用（drawWorldFx）
     this.lastDayTimeTicks = isDay ? dayTimeTicks : 0;
     this.lastEclipse = !!clock.eclipse;
@@ -3921,20 +3982,31 @@ export class SkyRenderer {
     {
       // 墓园雾吞(:62471-62479):×(1−1.4·I),≤0 整群跳过
       const starDim = Math.max(0, 1 - gyIntensity * 1.4);
+      // ★SW-BJ41 2026-09-09：微光域天空色衰减（Main.DrawStarsInBackground
+      //  :64003-64007 `colorOfTheSkies *= 1f - shimmerAlpha`）——自然星亮度基与
+      //  可见性门同吃衰减色；:63034 调用门 `if (shimmerAlpha != 1f)` = 全衰时
+      //  自然星整批停画（人工星接管,:63147）
+      const shim = this.shimmerAlpha;
+      const kShim = 1 - shim;
+      const cotsFaded: readonly number[] | null = shim > 0
+        ? (this.cots ? [this.cots[0] * kShim, this.cots[1] * kShim, this.cots[2] * kShim] : [255, 255, 255])
+        : this.cots;
       // 可见性门(:62491-62493):天空够暗才画——
       // 255·(1−cloudAlpha·atmo) − ColorOfTheSkies.R − 25 > 0
       // ★IIIII224：remix 世界恒画（:64015 `if (remixWorld || !(…))`）
-      const cotsR = this.cots ? this.cots[0] : 255;
+      const cotsR = cotsFaded ? cotsFaded[0] : 255;
       const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
       const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
       if (!this.frameCtx?.paused) this.updateStars(dayRate, isDay, dayTimeTicks);   // Star.UpdateStars 同门(:17198)——暂停冻结
-      if (starDim > 0 && (remixWorldForDraw || visGate > 0)) {
+      if (starDim > 0 && shim < 1 && (remixWorldForDraw || visGate > 0)) {
         // ★环外一次性状态(2026-08-24):save/getTransform/smoothing 各一次,
         //   逐星 setTransform(见 drawStar 注)——restore 收尾还原全部
         ctx.save();
         ctx.imageSmoothingEnabled = true;   // 星为软边贴图
         const bt = ctx.getTransform();
-        for (let i = 0; i < this.numStars; i++) this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY, bt);
+        for (let i = 0; i < this.numStars; i++) {
+          this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY, bt, shim, false, cotsFaded);
+        }
         ctx.restore();
       }
     }

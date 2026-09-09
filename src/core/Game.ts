@@ -212,7 +212,7 @@ import { damageVarRoll } from '../stats/DamageVar';
 import {
   bindJourneyPowers, journeyPowers, shouldDisableSpawns, spawnRateMultiplier,
 } from '../world/JourneyPowers';
-import { pickMusic, newMusicState, MUSIC_SLOT, resolveEventMusic, isOldOnesArmy, type MusicState } from '../data/Music';
+import { pickMusic, pickTowMusic, newMusicState, MUSIC_SLOT, TOW_MUSIC_SLOT, resolveEventMusic, resolveTowEventMusic, isOldOnesArmy, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { resetGorePool, liveGorePieces, setGoreScreen, GorePiece } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
@@ -6301,6 +6301,10 @@ export class Game implements GameHooks {
       store: w.store,
       worldSurface: w.groundLevel,
       playerTile: () => ({ x: this.player.cx / TILE, y: this.player.cy / TILE }),
+      // SW-RB9a：触发/中止门锚=hitbox 顶边（原版 position.Y,Player.cs:18182/:17934;
+      // 中心会把门界错位 h/2=21px）+ 死亡态门（:17860 dead 早退）
+      playerTopY: () => this.player.y / TILE,
+      dead: () => this.player.dead,
       unlockedBiomeTorches: () => !!w.flags.unlockedBiomeTorches,   // :17924 门
       hasVanillaItem: (vid) => {
         const key = VANILLA_ITEM_KEY_BY_ID[vid];
@@ -7546,7 +7550,13 @@ export class Game implements GameHooks {
       //  ⑤ num3==0 skip;盒 = NPC 中心对屏盒求交（:12297-12302,cx/cy 对玩家中心近似）。
       const sfMusic = w.seedFlags ?? {};
       const mechdusaMusicWorld = (!!sfMusic.remix && !!sfMusic.getGoodWorld) || !!sfMusic.everything;
+      // ★IIIII230：TOW 链派发旗（UpdateAudio :11211 `flag = drunkWorld && !remixWorld &&
+      //  !getGoodWorld`）——drunk 世界游戏内走 pickTowMusic,其余世界经典链零改动。
+      //  swapMusic（派对女孩换乐 :40748）本仓未实装=恒 false;gameMenu 标题域走
+      //  IIII225 Audio 车道,不在此面。
+      const drunkTow = !!sfMusic.drunkWorld && !sfMusic.remix && !sfMusic.getGoodWorld;
       const eventSlots = new Set<number>();
+      const towEventSlots = new Set<number>();
       for (const e of this.entities.enemies) {
         const en = e as unknown as { cx: number; cy: number; def?: { boss?: boolean }; vanillaId?: number | null; ai1?: number; ai3?: number; dead?: boolean };
         if (en.dead || en.vanillaId == null) continue;
@@ -7556,13 +7566,21 @@ export class Game implements GameHooks {
         if (isOldOnesArmy(id)) slot = 12;   // ② OOA 覆写（事件未开时雕像产怪同切曲,原版无 ongoing 门）
         if (slot === 0 && !!en.def?.boss && id !== 578) slot = 1;   // ③ Boss1 兜底
         if (mechdusaMusicWorld && (id === 125 || id === 126 || id === 127 || id === 134)) slot = 17;  // ④
-        if (slot === 0) continue;           // ⑤
+        // ★IIIII230：TOW 槽并行收集（UpdateAudio_DecideOnTOWMusic :11819-11968 同构
+        //  循环——type→num2 表编号与经典 num3 不同域;骷髅王/史王/Prime 四臂/毁灭者
+        //  体节不在 TOW 表 → 落 ③ 兜底 num2=1→81,vanilla 原样）
+        let towSlot = id === 438 || id === 379 ? (ceremony ? 2 : 0) : TOW_MUSIC_SLOT[id] ?? 0;
+        if (isOldOnesArmy(id)) towSlot = 12;
+        if (towSlot === 0 && !!en.def?.boss && id !== 578) towSlot = 1;
+        if (mechdusaMusicWorld && (id === 125 || id === 126 || id === 127 || id === 134)) towSlot = 17;
+        if (slot === 0 && towSlot === 0) continue;   // ⑤
         const box = ceremony ? 1600 : 5000;
         if (Math.abs(en.cx - this.player.cx) < box && Math.abs(en.cy - this.player.cy) < box) {
-          eventSlots.add(slot);
+          if (slot !== 0) eventSlots.add(slot);
+          if (towSlot !== 0) towEventSlots.add(towSlot);
         }
       }
-      const eventMusic = resolveEventMusic(eventSlots);
+      const eventMusic = drunkTow ? resolveTowEventMusic(towEventSlots) : resolveEventMusic(eventSlots);
       // 月事件 BGM（Main.cs:12914-12921，链尾最高优先级）：相机在地表
       // worldSurface+10 格带内时覆盖一切（含 Boss 曲）；南瓜月 30 / 霜月 32。
       // ★IIIII224：门 = (screenY/16 < worldSurface+10 || remixWorld)（:13150/:13154）
@@ -7570,7 +7588,10 @@ export class Game implements GameHooks {
         : w.moonEvent.kind === MOON_KIND_FROST ? 32 : 0;
       const moonMusicGated = moonMusic && (this.player.cy / TILE < w.groundLevel + 10
         || !!w.seedFlags?.remix) ? moonMusic : 0;
-      const music = pickMusic({
+      // ★IIIII230：选曲整域派发（UpdateAudio :11212-11230 语义——drunk 游戏内
+      //  TOW 链,其余经典链）。月事件入参对 TOW 链经 pickTowMusic 映射为 82
+      //  （:12327-12333 南瓜/霜月覆写曲,门同 moonMusicGated）。
+      const musicInput = {
         scene: this.scene, isDay, eventMusic, moonMusic: moonMusicGated,
         musicBox: this.scene.musicBoxStyle,
         torchGod: this.torchGod?.active ?? false,   // InTorchGodMinigame（Main.cs:12477-12480 → 101）
@@ -7579,13 +7600,15 @@ export class Game implements GameHooks {
         remix: !!w.seedFlags?.remix,                // Main.remixWorld（:12818-13154 remix 分支）
         centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
+        evilTileCount: this.scene.evilTileCount, bloodTileCount: this.scene.bloodTileCount,
         weather: {
           storm: w.weather.shouldUseStormMusic,
           rain: w.weather.cloudAlpha > 0,
           windy: w.weather.shouldUseWindyDayMusic,
           timeOfDay01: w.clock.timeOfDay,
         },
-      });
+      };
+      const music = drunkTow ? pickTowMusic(musicInput) : pickMusic(musicInput);
       // ★选曲滞回(2026-09-07 用户拍板「确保稳定,可偏离原版」):群系判定是
       //  15t 计数阈值域(ZoneGlowshroom 等),洞穴边缘格数波动 → 环境曲快速交替
       //  (蘑菇曲 29↔地下曲 31,2-3 秒一轮,bgm 环实录;原版边缘同样交替=交叉淡化

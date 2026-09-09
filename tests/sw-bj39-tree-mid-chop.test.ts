@@ -205,9 +205,38 @@ describe('SW-BJ39 ④导入树族同核（fellImportedTree 委托同一级联）
   });
 });
 
+describe('SW-BJ39 ⑥ DECOR 派发面（邻域变化 → tree kind → tileFrameCascadeAt → CheckTree）', () => {
+  // ★SW-RB9b（2026-09-09 审计补）：批次原 8 测只盖 fellTree/fellImportedTree 直调与
+  // 「存活」方向——变异试验（撤 DECOR_SUPPORT_KIND `5: 'tree'` 一行）全 72 测仍绿
+  // =Game 侧派发接线零判别力（kill 方向盲区）。本组补 DECOR 扫双方向。
+  it('★变异证红锚：树基失撑（无登记表路径）→ 3×3 扫过即整树上行坍塌+逐格账', () => {
+    const drops: Array<{ key: string; n: number }> = [];
+    const w = ground(new World(60, 60, 30, 'open'));
+    buildTree(w, 30, 40, 6);                           // 树 34..39,基座草 (30,40)
+    const g = shell(w, drops);
+    w.store.setTileSilent(30, 40, 0);                  // 挖基座（静默=模拟外域写不经监听）
+    g.checkDecorSquareFrame(30, 40);                   // onTileChanged 3×3 扫等价
+    for (let y = 34; y <= 39; y++) {                   // CheckTree 臂1/5c 上行整杀
+      expect(tid(w, 30, y), `tree@${y}`).toBe(0);
+    }
+    expect(woodCount(drops)).toBe(12);                 // 6 格 ×2（壳斧力 35 → bonus 恒真）
+  });
+
+  it('存活方向：邻域扫过合法树（基座在）→ 零杀零掉（幂等复检）', () => {
+    const drops: Array<{ key: string; n: number }> = [];
+    const w = ground(new World(60, 60, 30, 'open'));
+    buildTree(w, 30, 40, 6);
+    shell(w, drops).checkDecorSquareFrame(30, 40);
+    for (let y = 34; y <= 39; y++) expect(tid(w, 30, y), `tree@${y}`).toBe(TREE);
+    expect(drops).toEqual([]);
+  });
+});
+
 describe('SW-BJ39 ⑤变异对照：旧路径断言在新实现下的判别力（红→绿复核）', () => {
   it('行号锚：Game 砍伐面消费 killTileCascadeAt；演化域公共入口在位', () => {
-    const { readFileSync } = require('node:fs') as { readFileSync: (p: string) => string };
+    // ★SW-RB9b：签名标注补 encoding 形参（原 (p:string)=>string 与 'utf8' 实参不符
+    //   =TS2554×2,tsc 基线噪声;仅类型面,运行时不变）
+    const { readFileSync } = require('node:fs') as { readFileSync: (p: string, enc?: string) => string };
     const game = readFileSync('src/core/Game.ts', 'utf8');
     expect(game).toContain('this.evolution.killTileCascadeAt(x, y);');
     expect(game).toContain("5: 'tree',");

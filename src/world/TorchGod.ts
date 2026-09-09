@@ -32,6 +32,14 @@ export interface TorchGodHost {
   /** 玩家 tile 坐标（中心像素/TILE 的浮点值）——扫描窗口由消费端 floor
    *  （原版 (int)Center/16 :17867-17869/:17949-17951）,弹道 aim 用浮点原值 */
   playerTile: () => { x: number; y: number } | null;
+  /** SW-RB9a：玩家 hitbox 顶边 tile Y（position.Y/TILE,浮点）——触发/中止门锚。
+   *  原版两门都读 position.Y（Entity 左上角,Player.cs:18182/:17934）,非 Center——
+   *  中心锚会把门界下移 h/2=21px（1.3125 tile,Player.height=42）。 */
+  playerTopY: () => number;
+  /** SW-RB9a：玩家死亡态——原版 TryRecalculatingTorchLuck :17860 dead 进 Consume
+   *  早退（nearbyTorches 每轮末清零→死中永不触发）;仓库死屏期间 update() 照跑,
+   *  缺此门可在死屏触发事件（原版不可能）。 */
+  dead: () => boolean;
   /** :17924 门——unlockedBiomeTorches（5043 已用过）后事件永不再触发 */
   unlockedBiomeTorches: () => boolean;
   /** 背包是否持有原版物品（5043 Torch God's Favor） */
@@ -46,6 +54,11 @@ export interface TorchGodHost {
 
 const TORCH_UNLIT_OFFSET = 66;
 const MAX_ATTACKS = 200;
+/** SW-RB9a：攻击盒收集容量 = _torchAttackPosX.Length = 400（Player.cs:3063,1456
+ *  :2944 同值,1458 :3063 同值）——曾与 maxTorchAttacks=200（:3057 攻击上限,另一
+ *  常量）混同写成 200：盒内 >200 支点燃时熄炬候选集被削半（列序扫,只剩西 200 列）,
+ *  随机分布/终幕 num==1 分支相位全偏 */
+const COLLECT_CAP = 400;
 
 export class TorchGodEvent {
   active = false;
@@ -67,7 +80,12 @@ export class TorchGodEvent {
     // 81×81 带（num2=40,:17611-17612）点燃计数；这里每 60t 直扫等价节流）
     if (++this.scanTick % 60 !== 0) return;
     const p = this.host.playerTile();
-    if (!p || p.y <= this.host.worldSurface) return;
+    // SW-RB9a 两门补：①dead 早退（:17860 `| (dead ? 1u : 0u)`——死中 Consume 时
+    //   nearbyTorches 恒 0 → 永不触发;仓库死屏 update() 照跑,曾可在死屏触发）;
+    //   ②门锚=position.Y 顶边（:18182 `(double)position.Y > Main.worldSurface*16.0`
+    //   严格大于）——曾用中心锚=门界浅了 21px（头还在地表线上方就触发）。
+    if (!p || this.host.dead()) return;
+    if (this.host.playerTopY() <= this.host.worldSurface) return;
     // :17924 门——已解锁（用过 5043）永不再触发（★曾缺此门=解锁后摆满火把仍反复触发）
     if (this.host.unlockedBiomeTorches()) return;
     // :17928-17935 背包扫描——持有 5043 则不开事件（拿到奖励未用也压门）
@@ -88,7 +106,9 @@ export class TorchGodEvent {
     if (lit > 100) {
       this.active = true;
       this.attacks = 0;
-      this.funTimer = 0;
+      // SW-RB9a：funTimer 不清零（原版触发块 :18195-18197 只置 happyFunTorchTime/
+      // numberOfTorchAttacksMade=0——torchFunTimer 无触发位重置,上一事件残留值
+      // （abort 中途 1..20 或终幕 -180）直接带进下一事件=首轮攻击时序本相）
       this.unlit.length = 0;
       this.host.setBlackout(true);
     }
@@ -105,7 +125,9 @@ export class TorchGodEvent {
   private step(): void {
     const p = this.host.playerTile();
     // 回到地表 → EndOngoingTorchGodEvent（:17664-17668;1457 :TorchAttack surface 支 :17935-17939）
-    if (!p || p.y <= this.host.worldSurface) { this.end(); return; }
+    // SW-RB9a：门锚=position.Y 顶边（:17934 `(double)position.Y < Main.worldSurface*16.0`
+    // 严格小于）——曾用中心锚,升回地表的中止晚 21px（事件多活 1.3 tile 深度带）
+    if (!p || this.host.playerTopY() < this.host.worldSurface) { this.end(); return; }
     // AddBuff(80, 2)（每 tick 刷新的 Blackout）
     this.host.setBlackout(true);
     // TorchAttack 主体（:17669-17677）：funTimer ≤20 直接返回；>20 清零走一轮
@@ -113,8 +135,9 @@ export class TorchGodEvent {
     if (this.funTimer <= 20) return;
     this.funTimer = 0;
     const st = this.host.store;
-    // 扫 ±100 tile 盒内点燃火把（:17683-17705；容量=_torchAttackPosX.Length=
-    // maxTorchAttacks=200 :2938——★曾写 500 与原版容量不符）
+    // 扫 ±100 tile 盒内点燃火把（:17683-17705；收集容量=_torchAttackPosX.Length=
+    // 400 :3063——SW-RB9a 修正:曾与 maxTorchAttacks=200（:3057 攻击上限,另一常量）
+    // 混同写 200,盒内 >200 支时候选集削半）
     // 盒基同触发窗取整：(int)Center/16 ±100（TorchAttack :17949-17952）——
     // SW-BJ38 floor 修复（下方 aim 仍用浮点 p,原版 base.Center 不取整 :18012）
     const px = Math.floor(p.x), py = Math.floor(p.y);
@@ -124,10 +147,10 @@ export class TorchGodEvent {
         const i = st.idx(x, y);
         if (st.flags[i] && TILE_DEFS[st.type[i]]?.vanilla?.sheet === 4 && st.frameX[i] < TORCH_UNLIT_OFFSET) {
           lit.push([x, y]);
-          if (lit.length >= MAX_ATTACKS) break;
+          if (lit.length >= COLLECT_CAP) break;
         }
       }
-      if (lit.length >= MAX_ATTACKS) break;
+      if (lit.length >= COLLECT_CAP) break;
     }
     if (lit.length === 0 || this.attacks >= MAX_ATTACKS) {
       this.end(true);

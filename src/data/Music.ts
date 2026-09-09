@@ -3,6 +3,10 @@
 // 未实现的系统（天气/血月/事件/音乐盒/Shimmer/大多数 Boss）分支自然跳过；
 // Boss 判定用 VANILLA_BOSS_IDS 近似原版 5000px 判定盒（:12363-12400 boss flag → 兜底 5 Boss1，
 // EoC 原版即 Boss1）。
+// ★IIIII230（2026-09-09）：TOW(Otherworld) 选曲链移植（UpdateAudio_DecideOnTOWMusic
+//  1458 Main.cs:11789-12336 逐支 1:1）——drunk 世界（drunkWorld && !remix && !getGood,
+//  Main.cs:11211 派发旗）在游戏内由 pickTowMusic 接管,经典链 pickMusic 零改动;
+//  派发面见 pickTowMusic 尾注与 Game.ts。
 import type { SceneFlags } from '../world/SceneMetrics';
 import { MB_STYLE_TO_MUSIC } from '../world/wiring/devices';
 
@@ -21,7 +25,18 @@ export const MUSIC = {
   SlimeRain: 48, OverworldDayRemix: 49, TitleIntro: 50, Title: 51, Storm: 52,
   Graveyard: 53, UndergroundJungle: 54, JungleNight: 55, QueenSlime: 56,
   EmpressOfLight: 57, DukeFishron: 58, MorningRain: 59, TitleAlt: 60,
-  UndergroundDesert: 61, JourneysEnd: 89, Deerclops: 90, Aether: 91,
+  UndergroundDesert: 61,
+  // ★IIIII230：TOW(Otherworld) 族 62-88（MusicID.cs:207-261 逐名对拍；vanilla 枚举名
+  //  63 拼写为 OtherworlddDay——此处用正名,值 1:1）。音频面 Music_62..88.mp3 已全量
+  //  在盘,Audio.ts tickFade 对 62-88 ×0.9 音量修正（Main.cs:11701-11702）已接
+  OtherworldRain: 62, OtherworldDay: 63, OtherworldNight: 64, OtherworldUnderground: 65,
+  OtherworldDesert: 66, OtherworldOcean: 67, OtherworldMushroom: 68, OtherworldDungeon: 69,
+  OtherworldSpace: 70, OtherworldUnderworld: 71, OtherworldSnow: 72, OtherworldCorruption: 73,
+  OtherworldUndergroundCorruption: 74, OtherworldCrimson: 75, OtherworldUndergroundCrimson: 76,
+  OtherworldIce: 77, OtherworldUndergroundHallow: 78, OtherworldEerie: 79, OtherworldBoss2: 80,
+  OtherworldBoss1: 81, OtherworldInvasion: 82, OtherworldLunarPillars: 83, OtherworldMoonLord: 84,
+  OtherworldPlantera: 85, OtherworldJungle: 86, OtherworldWallOfFlesh: 87, OtherworldHallow: 88,
+  JourneysEnd: 89, Deerclops: 90, Aether: 91,
   Destroyer: 92, KingSlime: 93, LunaticCultist: 94, QueenBee: 96, Twins: 97,
   SkeletronPrime: 98, EaterOfWorlds: 99, TorchGodVocals: 100,
   TorchGodInstrumental: 101, Skeletron: 104,
@@ -93,6 +108,12 @@ export interface MusicInput {
   /** 玩家中心（px） */
   centerX: number;
   centerY: number;
+  /** ★IIIII230：SceneMetrics.EvilTileCount/BloodTileCount（SceneMetrics.cs:614-615
+   *  ZoneScanSize 169×124 窗计数终值——互减+钳位后）。TOW 链双邪恶共存支
+   *  （:12141-12146 `ZoneCrimson && BloodTileCount > EvilTileCount`）消费；
+   *  经典链双邪恶支为已登记简化态,不读本字段（非 drunk 零扰动） */
+  evilTileCount?: number;
+  bloodTileCount?: number;
   /** oceanDepths 结果（与背景共用；缺省内部重算近似） */
   ocean?: boolean;
   state: MusicState;
@@ -228,7 +249,8 @@ export function spaceFactor(centerY: number, maxTilesX: number, worldSurface: nu
 }
 
 /** 按环境选曲（优先级链 1:1 对照 Main.cs:12363-13157；
- *  沙尘暴40(:12848)/微光91(:12836)/史莱姆雨48(:12824) 省略=真实缺口(R22 登记)，
+ *  沙尘暴40(:12848)/史莱姆雨48(:12824) 省略=真实缺口(R22 登记)；微光91(:12834)
+ *  已由 ★SW-BJ41(2026-09-09) 补入=清偿 R22 台账该项，
  *  月事件（链尾最高优先级）见函数首 moonMusic 分支）。
  *  ★IIIII224（2026-09-09）：补全 remixWorld 分支（:12818/:12826/:12830/:12921/
  *  :12960/:12983/:12987/:13025/:13052/:13094/:13129/:13150-13154）——remix 世界
@@ -278,6 +300,13 @@ export function pickMusic(inp: MusicInput): number {
   if (remix && bloodMoon && inp.centerY > underworldLayer * 16
       && inp.centerX / 16 > inp.maxTilesX * 0.37 + 50
       && inp.centerX / 16 < inp.maxTilesX * 0.63) return MUSIC.Eerie;
+
+  // ★SW-BJ41 2026-09-09：以太曲（Main.cs:12834 `else if (SceneMetrics.ZoneShimmer)
+  //  newMusic = 91;`，MusicID.cs:194 Aether=91）——槽位在 remix 血月支之后、
+  //  城镇昼曲 :12840 之前（链序 1:1）。R22 台账"微光91 省略"清偿;
+  //  TOW(Otherworld) 链的 ZoneShimmer→72 支（Main.cs:12113-12115）已随 ★IIIII230
+  //  移植进 pickTowMusic（drunk 世界专用链,经典链不混入）
+  if (s.zoneShimmer) return MUSIC.Aether;
 
   // 城镇曲（昼 :12840 / 夜 :12844：≥3 城镇 NPC 且非暗影烛;白天需(无云且无风)或地下带,
   //  夜晚需(非血月且无云)或地下带——本仓缺「|| belowHalf」地下带支(R22 登记中项))
@@ -378,4 +407,192 @@ export function pickMusic(inp: MusicInput): number {
   if (bloodMoon) return MUSIC.Eerie;
   if (rain) return MUSIC.Rain;
   return MUSIC.OverworldNight;
+}
+
+// ============================================================================
+// ★IIIII230：TOW(Otherworld) 选曲链（UpdateAudio_DecideOnTOWMusic,1458
+// Main.cs:11789-12336 逐支 1:1）。drunk 世界（Main.drunkWorld && !remixWorld &&
+// !getGoodWorld,UpdateAudio :11211 派发旗）游戏内选曲走本链;经典链（pickMusic）
+// 不混入——两链是**整域替换**关系,非叠加（vanilla 派发：!swapMusic && !gameMenu &&
+// flag → TOW 链;swapMusic=派对女孩音乐切换 :40748,本仓未实装=恒 false;
+// gameMenu 标题曲覆写走 IIII225/IIIRS225 Audio 车道）。
+// 链内无粘性随机槽（63/64/65 全判定,无 dayMusic/ugMusic 等价物）、无城镇曲、
+// 无海洋昼夜 22/43、无八音盒外的独立系统——musicBox 覆写沿用经典链同款表
+// （vanilla 音乐盒覆写在 DecideOn* 两链之后 :11232+,链无关）。
+// ============================================================================
+
+/** TOW 弹幕旗槽表（:11819-11959 switch 逐 type→num2,与经典链 MUSIC_SLOT **编号不同域**：
+ *  骷髅王 35/36、史王 50、Prime 四臂 128-131、毁灭者体节 135/136 **不在表**→落
+ *  boss 兜底 num2=1→81（经典链各走 104/93/98/92——TOW 域无专属曲, vanilla 原样）；
+ *  438/379 仅仪式态（ai[1]==1 / ai[3]>=0,num=1600 盒）入槽 2。
+ *  覆写序（:11961-11968）：OOA 成员→12 压原槽；remix+getGood 125/126/127/134→17；
+ *  num2==0 && boss→1 兜底。首命中 NPC break（:12012,first-wins 同经典链） */
+export const TOW_MUSIC_SLOT: Record<number, number> = {
+  13: 1, 14: 1, 15: 1,                                      // EoW 族
+  26: 11, 27: 11, 28: 11, 29: 11, 111: 11, 471: 11, 472: 11, // 哥布林
+  113: 3, 114: 3,                                           // 血肉墙+眼
+  125: 2, 126: 2,                                           // 双子
+  127: 2, 134: 2,                                           // Prime 头 / 毁灭者探针（仅此二）
+  143: 11, 144: 11, 145: 11,                                // 雪地三军团
+  266: 1,                                                   // 克脑
+  212: 8, 213: 8, 214: 8, 215: 8, 216: 8, 252: 8, 491: 8, 662: 8, // 海盗
+  245: 2,                                                   // 石巨人
+  222: 1,                                                   // 蜂后
+  262: 6, 263: 6, 264: 6,                                   // 世花+钩蔓
+  381: 9, 382: 9, 383: 9, 384: 9, 385: 9, 386: 9, 387: 9, 388: 9, 389: 9,
+  390: 9, 391: 9, 392: 9, 395: 9, 520: 9,                   // 火星 Madness
+  398: 7,                                                   // 月总核心
+  422: 10, 493: 10, 507: 10, 517: 10,                       // 星璇四塔
+  439: 2,                                                   // 邪教徒
+  657: 13,                                                  // 史后
+  636: 14,                                                  // 光女
+  370: 15,                                                  // 猪鲨
+  668: 16,                                                  // 鹿角怪
+};
+
+/** num2 → MusicID（:12029-12095 flag 链逐支；每帧至多一 flag（:12012 break）→
+ *  else-if 链序为死序,裁决=输入序首个可映射槽（first-wins,同经典链勘误）。
+ *  flag5/flag6（num2=4/5）全表无来源=死支,保留映射仅备案 vanilla 原文 81 */
+const TOW_SLOT_MUSIC: Record<number, number> = {
+  1: 81,   // flag（EoW/克脑/蜂后/表外 boss）→ OtherworldBoss1
+  2: 80,   // flag3（双子/Prime 头/毁灭者探针/石巨人/邪教徒族）→ OtherworldBoss2
+  3: 87,   // flag4（血肉墙）→ OtherworldWallOfFlesh
+  4: 81,   // flag5（死支,无来源）
+  5: 81,   // flag6（死支,无来源）
+  6: 85,   // flag7（世花）→ OtherworldPlantera
+  7: 84,   // flag8（月总）→ OtherworldMoonLord
+  8: 82,   // flag9（海盗）→ OtherworldInvasion
+  9: 82,   // flag10（火星）
+  10: 83,  // flag11（星璇塔）→ OtherworldLunarPillars
+  11: 82,  // flag12（哥布林/雪地军团）
+  12: 82,  // flag13（OOA）
+  13: 80,  // flag14（史后）
+  14: 80,  // flag15（光女）
+  15: 80,  // flag16（猪鲨）
+  16: 80,  // flag2（鹿角怪）
+  17: 81,  // flag17（Mechdusa remix+getGood 覆写）
+};
+
+/** TOW 事件旗槽集合 → MusicID（0=无）。语义与 resolveEventMusic 同构：输入序
+ *  （NPC 数组序）首个可映射槽独占 */
+export function resolveTowEventMusic(slots: Iterable<number>): number {
+  for (const slot of slots) {
+    const music = TOW_SLOT_MUSIC[slot];
+    if (music !== undefined) return music;
+  }
+  return 0;
+}
+
+/** TOW（Otherworld）选曲链——drunk 世界游戏内专用。逐支锚（1458 Main.cs）：
+ *  :12021 制作组名单 89（本仓 CreditsRollEvent 未实装,登记缺口）
+ *  :12025 火把神 87 → :12029-12095 boss flag 域 → :12097-12103 日食 79 →
+ *  :12105-12111 remix 血月 79 → :12113 微光 72 → :12117 沙尘暴 66 →
+ *  :12121 地狱 71 → :12125 太空 70 → :12129 墙87/神庙 69 → :12133 地牢 69 →
+ *  :12137 蘑菇 68 → :12141-12160 腐化 73/74（双邪恶按 BloodTileCount>EvilTileCount
+ *  分主 → 75/76）→ :12163 猩红 75/76 → :12174 陨石 79 → :12178 墓园 79 →
+ *  :12182 丛林 86（remix 地表带 70）→ :12193 雪原 72/77（remix 三带 70/77/72）→
+ *  :12222 地下带 65/66/78/88/62（remix 深带变体）→ :12260 神圣昼 88/62 →
+ *  :12271 风暴 62/79 → :12282 海洋深渊 67/79 → :12293 沙漠 66 →
+ *  :12297 remix 70 → :12301 昼 63/62 → :12312 夜 64/79 →
+ *  :12327-12333 链尾月事件覆写 82（南瓜月/霜月,门=screenY/16<worldSurface+10 || remix,
+ *  由 Game 侧 moonMusicGated 同门传入）。 */
+export function pickTowMusic(inp: MusicInput): number {
+  const s = inp.scene;
+  // 八音盒覆写（:11232+ 链后覆盖,两链同表——style→经典 MusicID 原样,drunk 不变域）
+  const mb = inp.musicBox ?? -1;
+  if (mb >= 0 && mb <= 99 && MB_STYLE_TO_MUSIC[mb] !== undefined) return MB_STYLE_TO_MUSIC[mb]!;
+  if (mb === 100) return MUSIC.None;
+  const halfScreen = 400;   // 同经典链登记：近似 screenHeight/2（1080p≈540）
+  const underworldLayer = (inp.maxTilesY ?? 0) - 200;   // Main.UnderworldLayer（:12121/:12105 域）
+  const belowHalf = inp.centerY > inp.worldSurface * 16 + halfScreen;   // Center.Y > worldSurface*16+half
+  const rain = !!inp.weather?.rain;        // 原文本链不读 raining,直读 cloudAlpha>0f（:12262/:12302）——Game 侧同源
+  const storm = !!inp.weather?.storm;      // Main._shouldUseStormMusic（:12271）
+  const bloodMoon = !!inp.bloodMoon;
+  const remix = !!inp.remix;
+  // 链尾月事件（:12327-12333 在整链之后覆写=最高优先级,先判等价）
+  if (inp.moonMusic && inp.moonMusic > 0) return MUSIC.OtherworldInvasion;
+  // 火把神小游戏（:12025-12027 → 87,先于 boss flag 域）
+  if (inp.torchGod) return MUSIC.OtherworldWallOfFlesh;
+  // boss flag 域（resolveTowEventMusic 已按 TOW num2 表解析,first-wins）
+  if (inp.eventMusic && inp.eventMusic > 0) return inp.eventMusic;
+  // 日食（:12097-12103：地表半屏带 79；remix 恒 79——两支合并覆盖,非 remix 地下不吃）
+  if (inp.eclipse && inp.centerY < inp.worldSurface * 16 + halfScreen) return MUSIC.OtherworldEerie;
+  if (inp.eclipse && remix) return MUSIC.OtherworldEerie;
+  // remix 血月（:12105-12111：岩层下~地狱层非双邪恶 79；地狱层 X 居中带 79）
+  if (remix && bloodMoon && !s.zoneCrimson && !s.zoneCorrupt
+      && inp.centerY > inp.rockLevel * 16 && inp.centerY <= underworldLayer * 16) return MUSIC.OtherworldEerie;
+  if (remix && bloodMoon && inp.centerY > underworldLayer * 16
+      && inp.centerX / 16 > inp.maxTilesX * 0.37 + 50
+      && inp.centerX / 16 < inp.maxTilesX * 0.63) return MUSIC.OtherworldEerie;
+  // 微光（:12113-12115 ★交办锚支：ZoneShimmer → 72 OtherworldSnow）
+  if (s.zoneShimmer) return MUSIC.OtherworldSnow;
+  // 沙尘暴（:12117）
+  if (s.zoneSandstorm) return MUSIC.OtherworldDesert;
+  // 地狱（:12121 UnderworldLayer=maxTilesY-200）
+  if (inp.centerY > underworldLayer * 16) return MUSIC.OtherworldUnderworld;
+  // 太空（:12125 num4<1）
+  if (spaceFactor(inp.centerY, inp.maxTilesX, inp.worldSurface) < 1) return MUSIC.OtherworldSpace;
+  // 神庙墙（:12129 tile.wall==87——本仓 zoneTemple 同源中心格 wall,经典链同款近似）
+  if (s.zoneTemple) return MUSIC.OtherworldDungeon;
+  // 地牢（:12133）
+  if (s.zoneDungeon) return MUSIC.OtherworldDungeon;
+  // 蘑菇（:12137 bgStyle==9 地表 ∪ undergroundBackground==2——本仓由 ZoneGlowshroom 驱动,经典链同款近似）
+  if (s.zoneGlowshroom) return MUSIC.OtherworldMushroom;
+  // 腐化/猩红（:12141-12171：双邪恶共存按 BloodTileCount>EvilTileCount 分主,深度分地表/地下曲）
+  if (s.zoneCorrupt) {
+    if (s.zoneCrimson && (inp.bloodTileCount ?? 0) > (inp.evilTileCount ?? 0)) {
+      return belowHalf ? MUSIC.OtherworldUndergroundCrimson : MUSIC.OtherworldCrimson;
+    }
+    return belowHalf ? MUSIC.OtherworldUndergroundCorruption : MUSIC.OtherworldCorruption;
+  }
+  if (s.zoneCrimson) return belowHalf ? MUSIC.OtherworldUndergroundCrimson : MUSIC.OtherworldCrimson;
+  // 陨石/墓园（:12174/:12178）
+  if (s.zoneMeteor) return MUSIC.OtherworldEerie;
+  if (s.zoneGraveyard) return MUSIC.OtherworldEerie;
+  // 丛林（:12182-12191：remix 地表带 70,其余 86——TOW 无丛林昼夜/深地 54 分域）
+  if (s.zoneJungle) {
+    return remix && inp.centerY < inp.worldSurface * 16 + halfScreen
+      ? MUSIC.OtherworldSpace
+      : MUSIC.OtherworldJungle;
+  }
+  // 雪原（:12193-12220：remix 三带 70/77/72；普通 地表 72 / 地下 77）
+  if (s.zoneSnow) {
+    if (remix) {
+      if (inp.centerY < inp.rockLevel * 16 + halfScreen) {
+        return inp.centerY <= inp.worldSurface * 16 + halfScreen
+          ? MUSIC.OtherworldSpace
+          : MUSIC.OtherworldIce;
+      }
+      return MUSIC.OtherworldSnow;
+    }
+    return belowHalf ? MUSIC.OtherworldIce : MUSIC.OtherworldSnow;
+  }
+  // 地下带（:12222-12258：Center.Y >= worldSurface*16+half 且非海洋深渊）
+  const ocean = inp.ocean ?? s.zoneBeach;
+  if (inp.centerY >= inp.worldSurface * 16 + halfScreen && !ocean) {
+    if (remix && inp.centerY >= inp.rockLevel * 16 + halfScreen) {
+      if (s.zoneUndergroundDesert) return MUSIC.OtherworldDesert;
+      if (rain) return MUSIC.OtherworldRain;      // cloudAlpha>0f
+      if (s.zoneHallow) return MUSIC.OtherworldHallow;
+      if (s.zoneDesert) return MUSIC.OtherworldDesert;
+      return MUSIC.OtherworldRain;
+    }
+    if (s.zoneHallow) return MUSIC.OtherworldUndergroundHallow;
+    if (s.zoneUndergroundDesert) return MUSIC.OtherworldDesert;
+    return MUSIC.OtherworldUnderground;
+  }
+  // 神圣地表昼（:12260-12268：cloudAlpha>0 → 62,否则 88；神圣夜不在此域,落链尾夜曲）
+  if (inp.isDay && s.zoneHallow) return rain ? MUSIC.OtherworldRain : MUSIC.OtherworldHallow;
+  // 风暴（:12271-12279：血月 79 > 62）
+  if (storm) return bloodMoon ? MUSIC.OtherworldEerie : MUSIC.OtherworldRain;
+  // 海洋深渊（:12282-12290：血月 79 > 67）
+  if (ocean) return bloodMoon ? MUSIC.OtherworldEerie : MUSIC.OtherworldOcean;
+  // 沙漠（:12293）
+  if (s.zoneDesert) return MUSIC.OtherworldDesert;
+  // remix 默认臂（:12297-12299）
+  if (remix) return MUSIC.OtherworldSpace;
+  // 森林昼（:12301-12309：cloudAlpha>0 → 62,否则 63）
+  if (inp.isDay) return rain ? MUSIC.OtherworldRain : MUSIC.OtherworldDay;
+  // 夜（:12312-12324：血月 79 > 64——cloud 两支同值 64,原文如此）
+  return bloodMoon ? MUSIC.OtherworldEerie : MUSIC.OtherworldNight;
 }

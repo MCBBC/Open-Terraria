@@ -7,27 +7,22 @@ await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5284') + '/', { wait
 await page.waitForFunction(() => window.__swFlow && window.__swFlow.newWorld, { timeout: 120000, polling: 500 });
 await page.evaluate(() => { window.__swFlow.newWorld('12345', 4200, 1200); });
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000, polling: 1000 });
-await page.evaluate(() => { globalThis.__III228DBG = true; });
-const out = await page.evaluate(() => {
-  const w = window.__swGame.world;
-  const st = w.store;
+const out = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const w = g.world;
   const R = [];
-  // 洋面普查：x=40 与 x=4159 两列首个液体
-  for (const x of [40, 45, 50, 4159, 4150]) {
-    let firstLiq = -1, firstSolid = -1;
-    for (let y = 40; y < 600; y++) {
-      const i = st.idx(x, y);
-      if (firstLiq < 0 && st.liquid[i] > 0) firstLiq = y;
-      if (firstSolid < 0 && st.isSolid(x, y)) firstSolid = y;
-    }
-    R.push(`x=${x} firstLiquid=${firstLiq} firstSolid=${firstSolid}`);
-  }
-  // 直接跑一次搜索并埋点
-  const sp = window.__swGame.vanillaSpawner ?? window.__swGame;
-  const r = window.__swGame.requestMagicConchTeleportPosition(false);
-  R.push('conch left = ' + JSON.stringify(r));
-  const r2 = window.__swGame.requestMagicConchTeleportPosition(true);
-  R.push('conch right = ' + JSON.stringify(r2));
+  w.clock.bloodMoon = false;
+  const sf = w.seedFlags;
+  R.push(`DBG remix=${sf?.remix} bloodMoon=${w.clock.bloodMoon}`);
+  const stock = g.shopStockFor({ npcKey: 'dryad', vanillaId: 20, dead: false }).map((e) => e[0]);
+  R.push(`DBG classic stock n=${stock.length} has66=${stock.includes(66)}`);
+  sf.remix = true;
+  const stock2 = g.shopStockFor({ npcKey: 'dryad', vanillaId: 20, dead: false }).map((e) => e[0]);
+  R.push(`DBG remix stock n=${stock2.length} has66=${stock2.includes(66)}`);
+  sf.remix = false;
+  const conchL = g.requestMagicConchTeleportPosition(false);
+  const conchR = g.requestMagicConchTeleportPosition(true);
+  R.push(`DBG conch L=${JSON.stringify(conchL)} R=${JSON.stringify(conchR)}`);
   return R;
 });
 console.log(out.join('\n'));
