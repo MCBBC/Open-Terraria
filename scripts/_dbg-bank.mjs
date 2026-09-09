@@ -1,0 +1,21 @@
+import puppeteer from 'puppeteer-core';
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', protocolTimeout: 600000, defaultViewport: { width: 1600, height: 1000 } });
+const page = await browser.newPage();
+await page.goto(process.env.SW_ORIGIN ?? 'http://localhost:5202' + '/?play=small&invlayout=vanilla', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swUI, { timeout: 280000, polling: 1000 });
+await page.waitForFunction(() => document.querySelector('.sw-vinv'), { timeout: 300000, polling: 1000 });
+await new Promise((r) => setTimeout(r, 800));
+console.log(await page.evaluate(async () => {
+  const g = window.__swGame;
+  const { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } = await import('/src/data/items.ts');
+  const iid = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[71]];
+  const before = JSON.stringify(g.player.banks[0]?.[0]);
+  g.player.banks[0][0] = { id: iid, stack: 500 };
+  const after = JSON.stringify(g.player.banks[0]?.[0]);
+  await new Promise((r) => setTimeout(r, 600));
+  const later = JSON.stringify(g.player.banks[0]?.[0]);
+  const uiOpen = window.__swUI.openChest;
+  return JSON.stringify({ iid, before, after, later, isArr: Array.isArray(g.player.banks), l0: g.player.banks[0]?.length });
+}));
+await browser.close();

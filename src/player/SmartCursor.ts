@@ -1044,9 +1044,16 @@ export class SmartCursor {
         if (!st.inBounds(i, j)) continue;
         // :1335 鼠标指向该格的八方向量化
         const dir = this.getDesiredDirectionFrom({ x: env.mouse.x - (i * 16 + 8), y: env.mouse.y - (j * 16 + 8) });
-        let flag = !isPlatformSheet(st, i, j); // :1336
-        // :1337-1340 该格非实心且左右已有平台 → 不作为续铺源（:1347 active() 口径）
-        if (!flag && dir.y === 0 && hasTileAt(st, i, j) && !solidTile(st, i, j)
+        let flag = !isPlatformSheet(st, i, j); // :1346
+        // ★SW-BJ49 2026-09-09：:1347-1350 臂条件是【flag】——flag 语义=「跳过此源」
+        //  （:1351 `if (flag) continue;`）,该臂把「鼠标水平对齐 ∧ 活动格 ∧ 非实心
+        //  （草/杂/藤等,WorldGen.SolidTile 口径）∧ 左右任一为平台」的【非平台】格
+        //  收编为续铺源（flag=false→不跳过）。曾反写成 `!flag` ⇒ 臂只命中平台格
+        //  （flag 已 false,二次置 false=零动作）⇒ 非平台格恒被跳过=平台行中断格
+        //  （割草/踩草重铺面）两侧无法智能续铺,原版本相丢失。实报域
+        //  "开智能可放/关智能不可放"主根=原版 Step_Platforms 目标重定位面本身
+        //  （本臂为该面精度缺口,同批修正）。
+        if (flag && dir.y === 0 && hasTileAt(st, i, j) && !solidTile(st, i, j)
           && (isPlatformSheet(st, i - 1, j) || isPlatformSheet(st, i + 1, j))) {
           flag = false;
         }

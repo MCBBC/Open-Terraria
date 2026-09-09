@@ -140,7 +140,7 @@ import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFill
 import { chestSettingsAllowsVault, lootAllFromContainer, quickStackIntoContainer } from '../stats/QuickStacking';   // ★SW-BJ46 quickStackIntoContainer=ChestUI.QuickStack 纯函数（bank MoveCoins 前置/两遍语义/匹配域在内）
 import {
   slotContext, planAlternateClick, chestCanTakeJustCheck, canTakeToPersonalInventory,
-  chestContainerContext, canMergeStack, quickTrashOptionsOf,
+  chestContainerContext, canMergeStack, quickTrashOptionsOf, onlyNeedOneInInventory,
   CAN_FAVORITE_AT, CAN_LOADOUT_SHARE_AT, CAN_SHARE_AT, RETAIN_FAVORITE_ON_MOVE_AT,
   blockedFromTransferIntoChest,
   selectEquipPageOf, equipPageCapOf,
@@ -162,6 +162,7 @@ import {
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
 import { housingHeadRows } from './HousingPanel';   // ★刀3:住房页头像行(与 HousingPanel 同源)
+import { sortingLayerIndex } from '../data/vanillaItemSorting';   // ★刀13:排列物品层序数据
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
@@ -4890,6 +4891,133 @@ export class UI {
     this.game.sfx.play('pickup');
     this.refreshAll();
   }
+
+
+  /** Restock 补货（ChestUI.Restock ChestUI.cs:867-992 1:1）：容器内无词缀件向
+   *  背包同类未满堆补满；容器件清空后入空格（ammo 门）。背包扫描 57..0 降序、
+   *  跳钱币(50-53)、stackable 门（!favorited ∥ !OnlyNeedOneInInventory）。
+   *  flag=实际搬移 → SoundID 7(Grab)。 */
+  chestRestock(): void {
+    const chest = this.openChest;
+    if (!chest) return;
+    const inv = this.game.player.inv.slots;
+    const hashSet = new Set<number>();
+    const list: number[] = [];      // 未满堆格
+    const list2: number[] = [];     // 空格
+    for (let num = 57; num >= 0; num--) {
+      const it = inv[num];
+      if ((num < 50 || num >= 54) && (!it || it.id < 71 || it.id > 74)) {
+        if (!it || it.stack <= 0) {
+          list2.push(num);
+        } else if ((ITEM_DEFS[it.id]?.maxStack ?? 999) > 1 && (!it.favorited || !onlyNeedOneInInventory(it.id))) {
+          hashSet.add(it.id);
+          if (it.stack < (ITEM_DEFS[it.id]?.maxStack ?? 999)) list.push(num);
+        }
+      }
+    }
+    let flag = false;
+    const items = chest.items as Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>;
+    for (let i = 0; i < items.length; i++) {
+      const ci = items[i];
+      if (!ci || ci.stack < 1 || (ci.prefix ?? 0) !== 0 || !hashSet.has(ci.id)) continue;
+      let emptied = false;
+      for (let j = 0; j < list.length; j++) {
+        const num2 = list[j];
+        const target = inv[num2];
+        if (!target || !canMergeStack(target, ci)) continue;
+        if (num2 >= 54 && !ammoSlotAccepts(ci.id)) continue;
+        let move = ci.stack;
+        if ((ITEM_DEFS[target.id]?.maxStack ?? 999) - target.stack < move) {
+          move = (ITEM_DEFS[target.id]?.maxStack ?? 999) - target.stack;
+        }
+        target.stack += move;
+        ci.stack -= move;
+        flag = true;
+        if (target.stack === (ITEM_DEFS[target.id]?.maxStack ?? 999)) {
+          list.splice(j, 1); j--;
+        }
+        if (ci.stack <= 0) {
+          items[i] = null;
+          emptied = true;
+          break;
+        }
+      }
+      // 原版 :966 flag2||list2 空||item.ammo==0 → continue(空格换入仅弹药件)
+      if (emptied || list2.length <= 0 || !ammoSlotAccepts(ci.id)) continue;
+      for (let k = 0; k < list2.length; k++) {
+        const slotIdx = list2[k];
+        if (slotIdx >= 54 && !canFillEmptyAmmoSlot(ci.id)) continue;
+        const tmp = inv[slotIdx];
+        inv[slotIdx] = ci;
+        items[i] = tmp;
+        list.push(slotIdx);
+        list2.splice(k, 1);
+        flag = true;
+        break;
+      }
+    }
+    if (flag) this.game.sfx.play('pickup');   // SoundID 7(Grab :988)
+    this.refreshAll();
+  }
+
+  /** 排列物品（ChestUI.ButtonID 4 → ItemSorting.SortChest :ItemSorting.cs——
+   *  ①未收藏件并堆 ②按 sortingLayerIndex 层序分组(层内稳定) ③按可用槽升序回填；
+   *  收藏格保持原位(不在 availableSortingSlots)。登记偏差:层内细排序规则
+   *  (各层 SortingMethod 谓词)以层内稳定序近似;Glow 反馈未移植。 */
+  chestSortChest(): void {
+    const chest = this.openChest;
+    if (!chest) return;
+    const items = chest.items as Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>;
+    const maxStackOf = (id: number): number => ITEM_DEFS[id]?.maxStack ?? 999;
+    // ① itemsToSort = 非空未收藏
+    const toSort: number[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it && it.stack > 0 && !it.favorited) toSort.push(i);
+    }
+    // ② 并堆(vanilla j/k 双环 :Sort 1496-1520)
+    for (let j = 0; j < toSort.length; j++) {
+      const a = items[toSort[j]];
+      if (!a || a.stack >= maxStackOf(a.id)) continue;
+      let room = maxStackOf(a.id) - a.stack;
+      for (let k = j + 1; k < toSort.length; k++) {
+        const b = items[toSort[k]];
+        if (!b || b.stack >= maxStackOf(b.id)) continue;
+        if (canMergeStack(a, b)) {
+          const move = Math.min(room, b.stack);
+          a.stack += move;
+          b.stack -= move;
+          room -= move;
+          if (b.stack <= 0) { items[toSort[k]] = null; toSort.splice(k, 1); j--; break; }
+          if (room <= 0) break;
+        }
+      }
+    }
+    // ③ 层序分组(层内稳定;sortingLayerIndex=vanilla 层白名单提取面)
+    const ordered = toSort
+      .map((idx) => {
+        const it = items[idx]!;
+        const vid = ITEM_DEFS[it.id]?.vid ?? (ITEM_DEFS[it.id]?.key.startsWith('vi_') ? parseInt(ITEM_DEFS[it.id]!.key.slice(3), 10) : -1);
+        return { idx, layer: vid >= 0 ? sortingLayerIndex(vid) : 0 };
+      })
+      .sort((x, y) => x.layer - y.layer || x.idx - y.idx)
+      .map((e) => e.idx);
+    // ④ 可用槽 = 未收藏件槽 + 空槽,升序回填
+    const available: number[] = [];
+    for (let l = 0; l < items.length; l++) {
+      if (items[l] && !items[l]!.favorited) available.push(l);
+      else if (!items[l]) available.push(l);
+    }
+    available.sort((a, b) => a - b);
+    const cache = ordered.map((idx) => items[idx]!);
+    for (const idx of ordered) items[idx] = null;
+    let at = 0;
+    for (const slotIdx of available) {
+      if (at >= cache.length) break;
+      items[slotIdx] = cache[at++];
+    }
+    this.refreshAll();
+  }
   private chestTitle!: HTMLElement;
   private chestGrid!: HTMLElement;
 
@@ -5352,6 +5480,20 @@ export class UI {
         if (slotEl) {
           this.paintSlot(slotEl, this.openChest.items[i]);
           this.paintSlotChrome(slotEl, 'chest', i);
+        }
+      }
+    }
+    // ★2026-09-09 刀 13 守卫(共享区第 8 处):宝箱槽贴图按容器
+    // (ItemSlot.cs :2200 区:ctx3 世界箱=Back5;ctx4 银行/ctx32 虚空=Back2 黄;
+    //  收藏=Back10 paintSlotChrome 已设;经典 chestPanel 无此分=既存偏差)
+    if (this._builtLayout === 'vanilla' && this.openChest) {
+      const backTex = this.openChest.x < 0 ? 'Inventory_Back2' : 'Inventory_Back5';
+      for (let i = 0; i < 40; i++) {
+        const s = this.vinvSlots.get(`chest:${i}`);
+        if (!s) continue;
+        const cur = s.style.getPropertyValue('--slot-bgimg');
+        if (!cur.includes('Inventory_Back10') && !cur.includes(backTex)) {
+          s.style.setProperty('--slot-bgimg', `url(sprites/vanilla/${backTex}.png)`);
         }
       }
     }
@@ -7181,9 +7323,10 @@ export class UI {
       const y = Math.trunc(258 + row * 56 * 0.755);
       this.vinvLayoutItems.push({ el: s, pos: () => (this.openChest ? { x, y } : null) });
     }
-    // 按钮列(DrawButtons :182-188 + DrawButton :190-250:Loot All/Deposit All/
-    // Quick Stack;Rename 等后续=债;文本 0.75 缩放 hover 1)
-    const mkChestBtn = (labelKey: string, act: () => void): void => {
+    // 按钮列(DrawButtons :182-188:Y=invBottom+40+ID·26,ID 跳号位保留;
+    // ID0 拿走全部/1 存放全部/2 快速堆叠/3 补货(inter[82])/4 排列物品(inter[122]);
+    // ID5 重命名/6 取消 = 真箱+editChest 域=债;文本 0.75 缩放 hover 1)
+    const mkChestBtn = (id: number, labelKey: string, act: () => void): void => {
       const b = el('button', 'vinv-txt') as HTMLButtonElement;
       b.style.cssText = 'left:506px; font-size:13px; pointer-events:auto; cursor:pointer;'
         + 'background:none; border:none; padding:0; color:#fff; text-shadow:1px 1px 0 #000;';
@@ -7194,14 +7337,15 @@ export class UI {
       this.vinvRoot?.appendChild(b);
       this.vinvLayoutItems.push({ el: b, pos: () => {
         if (!this.openChest) return null;
-        const idx = this.vinvChestBtnEls.length;
-        return { x: 506, y: 258 + 40 + idx * 26 };
+        return { x: 506, y: 258 + 40 + id * 26 };
       } });
       this.vinvChestBtnEls.push(b);
     };
-    mkChestBtn('LegacyInterface.29', () => this.chestLootAll());
-    mkChestBtn('LegacyInterface.30', () => this.chestDepositAll());
-    mkChestBtn('LegacyInterface.31', () => this.chestQuickStack());
+    mkChestBtn(0, 'LegacyInterface.29', () => this.chestLootAll());
+    mkChestBtn(1, 'LegacyInterface.30', () => this.chestDepositAll());
+    mkChestBtn(2, 'LegacyInterface.31', () => this.chestQuickStack());
+    mkChestBtn(3, 'LegacyInterface.82', () => this.chestRestock());      // 补货
+    mkChestBtn(4, 'LegacyInterface.122', () => this.chestSortChest());   // 排列物品
   }
 
   /** 宝箱名回写(DrawName :102-180:bank x<0=官译物品名,真箱=chest.name/类型名) */

@@ -84,13 +84,70 @@ const boot = async (pg, url) => {
     };
     // 原位开箱 → 重铸自动退出(:42277 chest≠-1 → InReforgeMenu=false)
     ui.vinvReforgeOpen = true;
-    // 直接设 ui.openChest(测显示门;游戏开箱链的 tickChestAutoClose 会关掉不在
-    // 世界箱列表里的假箱——首跑实测)
-    ui.openChest = { x: Math.floor(g.player.x / 16) + 2, y: Math.floor(g.player.y / 16), items: new Array(40).fill(null) };
+    // 真 chest tile + 世界箱登记(tickChestAutoClose 校验原位 tile=21,假数据秒关)
+    const st = g.world.store;
+    const tx = Math.min(st.w - 2, Math.floor(g.player.x / 16) + 2);
+    const ty = Math.min(st.h - 2, Math.floor(g.player.y / 16));
+    const { TILE_BY_KEY } = await import('/src/data/tiles.ts');
+    const chestTile = TILE_BY_KEY['chest'];   // 内部 tile id(vanilla sheet=21)
+    st.type[st.idx(tx, ty)] = chestTile;
+    let chest = g.world.chests.find((c) => c.x === tx && c.y === ty);
+    if (!chest) {
+      chest = { x: tx, y: ty, items: new Array(40).fill(null) };
+      g.world.chests.push(chest);
+    }
+    g.openChest(chest);
     await sleep(100);
     out.reforgeExitOnChest = ui.vinvReforgeOpen === false;
     out.chestStrip = [...document.querySelectorAll('.sw-slot')].filter((s) => s.offsetLeft >= 73 && s.offsetLeft <= 120 && s.offsetTop >= 258 && s.offsetTop <= 400 && s.offsetParent !== null).map((s) => ({ x: s.offsetLeft, y: s.offsetTop, d: s.style.display }));
     out.chestStripShown = out.chestStrip.length >= 10;
+    // ★宝箱对齐(2026-09-09 用户要求):五钮/贴图/补货/排列
+    out.buttons = [...document.querySelectorAll('.vinv-txt')].filter((b) => {
+      const t = (b.textContent || '').trim();
+      return ['拿走全部', '存放全部', '快速堆叠', '补货', '排列物品'].includes(t) && b.offsetParent !== null;
+    }).map((b) => ({ t: b.textContent?.trim(), y: b.offsetTop }));
+    out.dbgAll = [...document.querySelectorAll('.vinv-txt')].map((b) => ({ t: (b.textContent || '').slice(0, 6), x: b.offsetLeft, y: b.offsetTop, d: b.style.display || '(default)', op: !!b.offsetParent }));
+    out.dbgBuilt = ui._builtLayout;
+    out.buttonsOk = (() => {
+      const want = [['拿走全部', 298], ['存放全部', 324], ['快速堆叠', 350], ['补货', 376], ['排列物品', 402]];
+      return want.every(([t, y]) => out.buttons.some((b) => b.t === t && b.y === y));
+    })();
+    // 贴图:bank(ctx4) = Back2
+    const bankSlot = [...document.querySelectorAll('.sw-slot')].find((s) => s.offsetLeft === 73 && s.offsetTop === 258);
+    out.bankTexture = bankSlot ? (bankSlot.style.getPropertyValue('--slot-bgimg').match(/Inventory_Back\d+/)?.[0] ?? null) : null;
+    // 补货:背包未满堆 + 箱内同型无词缀件 → 补满
+    const { ITEM_BY_KEY: IBK2, VANILLA_ITEM_KEY_BY_ID: VK2 } = await import('/src/data/items.ts');
+    const torK = VK2[9];   // Wood
+    const woodId = torK !== undefined ? IBK2[torK] : undefined;
+    if (woodId !== undefined) {
+      g.player.inv.slots[10] = { id: woodId, stack: 10 };   // 背包木头 10/99
+      const chestData = ui.openChest;
+      if (chestData) chestData.items[0] = { id: woodId, stack: 50 };   // 箱内木头 50
+      await ui.refreshAllAsync();
+      const restockBtn = [...document.querySelectorAll('.vinv-txt')].find((b) => (b.textContent || '').trim() === '补货');
+      restockBtn?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await ui.refreshAllAsync();
+      out.restockInv = g.player.inv.slots[10]?.stack;   // 应 59(10+49 补满)
+      out.restockChest = chestData.items[0]?.stack;     // 应 1(50-49)
+    }
+    // 排列物品:乱序箱件 → 层序重排(长度/总量守恒)
+    const chestData2 = ui.openChest;
+    if (chestData2) {
+      const before = chestData2.items.filter(Boolean).length;
+      const totalBefore = chestData2.items.filter(Boolean).reduce((s2, i2) => s2 + (i2?.stack ?? 0), 0);
+      const sortBtn = [...document.querySelectorAll('.vinv-txt')].find((b) => (b.textContent || '').trim() === '排列物品');
+      sortBtn?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      await ui.refreshAllAsync();
+      const after = chestData2.items.filter(Boolean).length;
+      const totalAfter = chestData2.items.filter(Boolean).reduce((s2, i2) => s2 + (i2?.stack ?? 0), 0);
+      out.sortKeeps = after === before && totalAfter === totalBefore;
+      // 排列后物品聚前(可用槽升序回填)
+      let gap = false;
+      for (let i2 = 0; i2 < chestData2.items.length; i2++) {
+        if (!chestData2.items[i2]) { gap = chestData2.items.slice(i2).some(Boolean); break; }
+      }
+      out.sortCompacted = !gap;
+    }
     out.dbgChest = {
       openChest: !!ui.openChest,
       chestSlotCount: document.querySelectorAll('.sw-slot[data-where="chest"]').length,
@@ -115,9 +172,14 @@ const boot = async (pg, url) => {
       `vanilla:点锤=扣费+词缀 前=${v.prefixBefore} 后=${v.prefixAfter} 花=${v.coinsSpent}铜`);
     console.log('[dbg-save]', JSON.stringify({ ...v.dbgSave, cop: v.dbgCop }));
     console.log('[dbg-chest]', JSON.stringify(v.dbgChest));
+    console.log('[dbg-btns]', JSON.stringify({ built: v.dbgBuilt, all: v.dbgAll.filter((b) => b.t.length <= 4 && b.y > 250) }));
     ok(v.savingsShown, `vanilla:储蓄显示 got ${v.savingsShown}`);
     ok(v.reforgeExitOnChest, `vanilla:开箱自动退出重铸(:42277) got ${v.reforgeExitOnChest}`);
     ok(v.chestStripShown, `vanilla:宝箱条叠背包下方 got ${JSON.stringify((v.chestStrip || []).slice(0, 3))}`);
+    ok(v.buttonsOk, `宝箱:五钮原版位(拿走/存放/快速/补货/排列) got ${JSON.stringify(v.buttons)}`);
+    ok(v.bankTexture === 'Inventory_Back2', `宝箱:bank 贴图=Back2(黄,ctx4) got ${v.bankTexture}`);
+    ok(v.restockInv === 59 && v.restockChest === 1, `宝箱:补货=箱→包补满(包 10→59,箱 50→1) got 包=${v.restockInv} 箱=${v.restockChest}`);
+    ok(v.sortKeeps && v.sortCompacted, `宝箱:排列=守恒+聚前 got ${v.sortKeeps}/${v.sortCompacted}`);
     ok(v.chestStripHiddenAfterClose, `vanilla:关包宝箱条隐藏 got ${v.chestStripHiddenAfterClose}`);
   }
   ok(errs.length === 0, `vanilla:无页面错误 ${errs.length ? JSON.stringify(errs.slice(0, 2)) : ''}`);

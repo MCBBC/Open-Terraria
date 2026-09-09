@@ -8902,17 +8902,17 @@ export class Renderer {
     });
   }
 
-  /** 668 鹿角怪（Main.cs DrawNPCDirect_Deerclops :26211-26295 全层 + FindFrame case 668
-   *  :67390-67501）：NPC_668.png 1090×1200 = 5 列×5 行（218×240/格），
-   *  Frame(5,5,idx/5,idx%5,2,2) 2px padding；锚 Bottom、origin(106 或 214-106, 236-4)、
-   *  贴图朝右（spriteDirection==1 → origin.X=106）。
-   *  全层 1:1：①localAI[3]>0 出生红雾双环绕（半径 (lai3/36)²×20，角速 GT×10，
-   *  色值 (80,0,0)×0.5、alpha×(1-r²/2)，:26235-26253）②本体（紫电 tint：
-   *  Lerp(白,(50,0,160),Remap(lai3,0,20,0,1))，alpha×(1-r²)，:26255-26262）③ai0∈{7,8}
-   *  消散：num7=Remap(ai1,20,60,0,2) 三角波再 lerp 紫 ×(1-num7)，5 层重影（双轨道
-   *  80n² 与 80n²+30j·n²，角速 GT×6 / GT×3·j·0.5，色 ×0.5，:26263-26283）
-   *  ④Extra_245 前层红雾（(255,30,30,66)×Opacity×num12×0.25×(1-num7)，环绕半径
-   *  r²×4，:26285-26295）。GT=GlobalTimeWrappedHourly（进程秒%3600，Main.cs:16777） */
+  /** 668 鹿角怪（1457 Main.cs DrawNPCDirect_Deerclops :26714-26800 全层 + FindFrame case 668
+   *  NPC.cs:67543-67612；1456↔1457 绘制逐字全等,1458 未动）：NPC_668.png 1090×1200
+   *  = 5 列×5 行（218×240/格），Frame(5,5,idx/5,idx%5,2,2) 2px padding；锚 Bottom、
+   *  origin(106 或 214-106, 236-4)、贴图朝右（spriteDirection==1 → origin.X=106）。
+   *  全层 1:1（★层序=原版 z 序,SW-BJ51 校正）：①localAI[3]>0 出生红雾双环绕
+   *  （半径 (lai3/36)²×20，角速 GT×10，色值 (80,0,0)×0.5、alpha×(1-r²/2)，
+   *  :26735-26753）②ai0∈{7,8} 消散五重影【画在本体之下】（:26764-26787 五连 Draw
+   *  在 :26790 主绘前；曾画在本体之上=叠脸重影）③本体（紫电 tint：
+   *  Lerp(白,(50,0,160),Remap(lai3,0,20,0,1))，alpha×(1-r²)，:26755-26762+:26790）
+   *  ④Extra_245 前层红雾【源矩形=本体同格帧 rect】（:26792-26800 第 3 参 rectangle；
+   *  曾整图压缩进帧格）。GT=GlobalTimeWrappedHourly（进程秒%3600，Main.cs:16777） */
   private drawDeerclopsGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
@@ -8954,7 +8954,7 @@ export class Renderer {
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       ctx.drawImage(c.c, c.x, c.y, c.w, c.h, -originX + dx, -originY + dy, sw, sh);
     };
-    // ① 出生红雾双环绕（:26245-26253）：num2=2 层,(0,1).Rot(i·π + GT·10) × r²·20
+    // ① 出生红雾双环绕（1457 Main.cs:26735-26753）：num2=2 层,(0,1).Rot(i·π + GT·10) × r²·20
     //    → 偏移 = (-sinθ, cosθ)·R；色 value2=(80,0,0)×0.5,alpha×(1-r²/2)
     if (lai3 > 0) {
       const red = this.lerpSprite('deer-red', frame, [40, 0, 0], 1);
@@ -8965,10 +8965,9 @@ export class Renderer {
         drawFrame(red, -Math.sin(th) * R, Math.cos(th) * R, a);
       }
     }
-    // ② 本体（紫电 tint 链）:26284
+    // ② ai0∈{7,8} 五层重影（1457 Main.cs:26764-26787）——★SW-BJ51：原版画在【本体之下】
+    //    （:26764-26787 五连 Draw 在 :26790 主绘 Draw 之前）,曾画在本体之上=叠脸重影
     const body = this.lerpSprite('deer-body', frame, [50, 0, 160], tPurple);
-    drawFrame(body, 0, 0, bodyAlpha);
-    // ③ ai0∈{7,8} 五层重影（:26272-26282）：双轨道,角速 GT·6 / GT·3·(j·0.5)
     if (e.ai0 === 7 || e.ai0 === 8) {
       const n9 = num7 * num7;
       for (let j = 0; j < 5; j++) {
@@ -8980,14 +8979,18 @@ export class Renderer {
         drawFrame(body, dx, dy, bodyAlpha * 0.5);       // color2 × 0.5
       }
     }
-    // ④ Extra_245 前层红雾（:26285-26295）：(255,30,30,66)×Opacity×num12×0.25×(1-num7),
-    //    num2 层环绕半径 r²×4——原版以【本体帧 rect】画 Extra_245 贴图（整图按帧矩形缩放）
+    // ③ 本体（紫电 tint 链）1457 Main.cs:26790
+    drawFrame(body, 0, 0, bodyAlpha);
+    // ④ Extra_245 前层红雾（1457 Main.cs:26792-26800）：(255,30,30,66)×Opacity×num12×0.25×(1-num7),
+    //    num2 层环绕半径 r²×4——★SW-BJ51：原版以【本体同格帧 rect】为 Extra_245 的
+    //    源矩形（:26793 Draw 第 3 参=rectangle,即 NPC_668 帧网格同坐标子矩形;
+    //    Extra_245 与 NPC_668 同为 1090×1200 才容得下该采样窗）,曾整图压缩进帧格
     if (lai3 > 0) {
       const fog = this.atlas!.ensureVImage('vanilla/Extra_245.png');
       if (fog) {
         const num12 = Math.max(0, Math.min(1, lai3 / 20));   // Remap(lai3,0,20,0,1)
         const fa = (66 / 255) * opacity * num12 * 0.25 * (1 - num7);
-        const fogT = this.lerpSprite('deer-fog', { img: fog, sx: 0, sy: 0, sw: fog.width, sh: fog.height }, [255, 30, 30], 1);
+        const fogT = this.lerpSprite('deer-fog', { img: fog, sx: frame.sx, sy: frame.sy, sw: frame.sw, sh: frame.sh }, [255, 30, 30], 1);
         for (let k = 0; k < 2; k++) {
           const th = k * Math.PI + GT * 10;
           const R = r2 * 4;

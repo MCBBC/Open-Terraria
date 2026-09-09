@@ -1176,6 +1176,20 @@ const PLACE_STYLE_BACKFILL_1458: ReadonlyArray<readonly [number, string, number]
   // 配方侧 vanilla-recipes.json 5467-5470 已在册（Recipe.cs:14689-14709）。SW-C1 2026-09-03。
   [5467, 'v_695_replica_demon_altar', 0], [5468, 'v_695_replica_demon_altar', 1],
   [5469, 'v_696_replica_shadow_orb', 0], [5470, 'v_696_replica_shadow_orb', 1],
+  // 篝火族十三件（SW-BJ50,2026-09-09）：Item.cs 三段共享 case 算式——
+  //  :28181-28193 `case 3046:…case 3050: createTile=215; placeStyle = 1 + type - 3046;`
+  //  :33002-33011 `case 3723: case 3724: placeStyle = 6 + type - 3723;`
+  //  :38599-38612 `case 4689:…case 4694: placeStyle = 8 + type - 4689;`
+  //  算式形态提取器解不开 ⇒ itemfunc 3046-3049/3723/4689-4693 整条目缺失、
+  //  3050/3724/4694 只余 createTile 无 placeStyle ⇒ 放置恒 style0=普通篝火帧
+  //  （挖掉→GetCampfireItemDrop(style0)=966——用户实报"特殊篝火挖掉变普通篝火"真根;
+  //   掉落侧反函数 styleFromFrame[215]=fx/54 S2 批已在册, tests/sw-bj50 全 16 档矩阵）。
+  //  5299/5357 显式档 itemfunc 已带 placeStyle 14/15（Item.cs:42033/:42501）不在补列。
+  [3046, 'v_215_campfires', 1], [3047, 'v_215_campfires', 2], [3048, 'v_215_campfires', 3],
+  [3049, 'v_215_campfires', 4], [3050, 'v_215_campfires', 5],
+  [3723, 'v_215_campfires', 6], [3724, 'v_215_campfires', 7],
+  [4689, 'v_215_campfires', 8], [4690, 'v_215_campfires', 9], [4691, 'v_215_campfires', 10],
+  [4692, 'v_215_campfires', 11], [4693, 'v_215_campfires', 12], [4694, 'v_215_campfires', 13],
 ];
 for (const [vid, tk, ps] of PLACE_STYLE_BACKFILL_1458) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];

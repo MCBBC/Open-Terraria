@@ -11456,7 +11456,14 @@ export class Game implements GameHooks {
     const controlUseItem = !!inp.mouseHeld && !inp.blockMouse
       && !inp.uiBlocking && !this.inpOverDomUi();
     if (sc.updateWanted(controlSmart, controlUseItem, s)) this.sfx.play('menuTick');
-    const blocked = inp.uiBlocking || this.inpOverDomUi() || this.player.dead || !!this.minecart
+    // ★SW-BJ49 2026-09-09：blocked 表摘除 `!!this.minecart`——原版 SmartCursorLookup
+    //  调用点（Player.cs:25640-25645）只有 whoAmI/IsCameraTrackingObject 两门,乘矿车
+    //  不豁免（矿车也不拦使用链,本文件 :11831 注）→ 曾在车帧整支跳过 lookup,智能开
+    //  +持平台+按住时 lookupSkipped 按原文条件不清连通锁 ⇒ showing 恒 false ⇒
+    //  TileTargetDesired 门（:22474）拦死车上的平台放置=「开智能反放不了」的状态
+    //  依赖变体（实报对称面）。dead/fullMap/timeUi/weatherUi/annotate 维持 BJ29 登记
+    //  的刻意分叉（该帧使用链同被拦,仅预览面差）。
+    const blocked = inp.uiBlocking || this.inpOverDomUi() || this.player.dead
       || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover
       || this.annotateMode;
     if (blocked || !sc.wanted) {
