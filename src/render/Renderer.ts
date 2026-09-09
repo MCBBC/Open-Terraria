@@ -3208,6 +3208,12 @@ export class Renderer {
       // SceneMetrics.cs:739-763 全场 NPC 扫描，核心屏外也激活）：取首个在场
       // 核心（vanillaId 398）中心；drawScreenFilterChain 同源取其屏幕位
       moonLordCore: this._moonLordFilterTarget(entities),
+      // ★SW-BJ41 2026-09-09：以太域驱动位（SceneState.UpdateShimmer :331
+      // `metrics.ZoneShimmer` 项——SceneMetrics.cs:712 ZoneShimmer 判定链产位）。
+      // 此前 env 漏喂该位 → flag 恒只剩独石支 → shimmerAlpha 恒 0 →
+      // 以太星空/黑幕/音乐门（Main.cs:63132/:63147/:12834）整类不生效（用户实报
+      // "站在微光湖旁却没有以太环境"主根因；MonolithFilters.ts:568 读 env.zoneShimmer）
+      zoneShimmer: !!this.scene?.zoneShimmer,
     });
     this._monoFrameMs = this._liquidNow;
 
@@ -3385,6 +3391,24 @@ export class Renderer {
     let wK = this.effectiveRenderScale();
     if (wK < 1 && this._waveLiquidInView && waterWaves.quality > 0 && this.waterWarp.active()) wK = 1;
     this._worldLowK = wK;
+    // ★SW-BJ41 2026-09-09：以太域背景黑幕 + 人工星空（Main.DoDraw
+    //  :63132-63133 `if (shimmerAlpha > 0f) spriteBatch.Draw(MagicPixel, Color.Black
+    //  * shimmerAlpha, 全屏)` → :63147-63153 `if (shimmerAlpha > 0f)
+    //  DrawStarsInBackground(sceneArea, artificial: true)`——原版层序 = 地表群系背景
+    //  /黑填充之后、背景水/地下分层背景/墙/tile 之前。本仓管线对应位 = 主画布段收
+    //  尾（天空+地表 bg+云+环境实体之后）、世界层切换之前：黑幕盖天空与地表 bg，
+    //  星空垫在地下分层背景与零光跳过的墙/tile 后面透出（DrawBlack 跳过见
+    //  compositeLight darkSkip）。人工星同源 Star[]（DrawStar :64032-64057 微光
+    //  三通道 tint + ×shimmerAlpha），自然星在 shimmerAlpha=1 整批停画（:63034）
+    const shimA0 = this.monoFilters.shimmerAlpha;
+    if (shimA0 > 0) {
+      ctx.save();
+      ctx.globalAlpha = shimA0;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, viewW, viewH);
+      ctx.restore();
+      this.sky.drawShimmerStars(ctx, viewW, viewH, cam.y, shimA0);
+    }
     const worldLayer = this.beginWorldLayer(viewW, viewH, wK);
     if (worldLayer) ctx = worldLayer;
 
@@ -3442,7 +3466,17 @@ export class Renderer {
       mainCtx2.translate(camRX, camRY);
       mainCtx2.scale(1 / (z * wK), 1 / (z * wK));
       mainCtx2.translate(-Math.round(lw / 2), -Math.round(lh / 2));
-      this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [1, 1, 1], 0, 'underground');
+      // ★SW-BJ41 2026-09-09：以太域地下背景淡出/整层跳过（Main.DrawBackground
+      //  :53608-53612 `float num = shimmerAlpha; if (num == 1f) { ugBackTransition
+      //  = 0f; return; }` + 泥土/岩石/表面过渡三段 `color *= 1f - localShimmerAlpha`
+      //  :54134/:54453/:54573）——shimmerAlpha=1 整层不画（露出其后的黑幕+人工星
+      //  空），过渡期按 (1−shimmerAlpha) 染色淡出。tint 乘子作用于 biomeBg 三层染
+      //  色 = 原版逐段 color 乘同语义
+      const shimA = this.monoFilters.shimmerAlpha;
+      if (shimA < 1) {
+        const k = 1 - shimA;
+        this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [k, k, k], 0, 'underground');
+      }
       mainCtx2.restore();
     }
 

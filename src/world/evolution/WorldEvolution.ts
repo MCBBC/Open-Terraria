@@ -348,6 +348,31 @@ export class WorldEvolution {
     this.frameDependents(x, y);
   }
 
+  // ================= ★SW-BJ39（2026-09-09）：树砍伐面单源化公共入口 =================
+  //  用户实报「不从根部砍会留下这些砍不掉」：Game 玩家砍伐面（fellTree/fellImportedTree）
+  //  手工整段清除 + 树干族误落 Game.checkFurnitureSupport 通用家具支撑校验（tree def
+  //  framed+非 solid → 中段干格判「无支撑家具」被腰斩），与演化域 CheckTree 级联核
+  //  （treeCheckCore 1:1,evolution-tree-cascade.test）双轨分叉。本批把玩家砍伐面与
+  //  TileFrame 派发面统一委托到本域：掉落（killDropFace=KillTile_GetTreeDrops :66710
+  //  逐格账）/杀臂（:55045-55256）/重帧臂（切口风格 :55125/:55193）/3×3 续推全单源。
+
+  /** KillTile 默认参等价（带掉落）+ 尾 SquareTileFrame 级联——玩家砍伐/破坏链入口
+   *  （原版 Player.cs:46120 `WorldGen.KillTile(x,y)` → WorldGen.cs:64432）。
+   *  @returns 是否真的发生了击杀 */
+  killTileCascadeAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    if (!st.inBounds(x, y) || !st.hasTile(x, y)) return false;
+    this.kill(x, y);
+    return true;
+  }
+
+  /** SquareTileFrame 3×3 等价（WorldGen.cs:81462-81473 列优先含中心格）——TileFrame
+   *  派发面依存物复检入口（Game 装饰支撑链 'tree'/'treebase' kind 委托）。
+   *  队列预算 4096 同 frameDependents（杀空格幂等,重复派发无行为差）。 */
+  tileFrameCascadeAt(cx: number, cy: number): void {
+    this.frameDependents(cx, cy);
+  }
+
   /** ★⑤（2026-09-04 掉落族批,★② 2026-09-05 扩展）：kill 位次的 KillTile 掉落面 =
    *  KillTile_GetItemDrops（cs:64477 起 switch(tileCache.type)）在本域可达型的逐支
    *  移植。可达性（演化域 kill()/级联 killFlat 的全部杀位次 × case 表）：

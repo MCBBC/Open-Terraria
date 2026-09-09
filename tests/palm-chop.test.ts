@@ -19,6 +19,7 @@ import { TILE } from '../src/core/constants';
 import { TILE_BY_KEY, TILE_DEFS, T } from '../src/data/tiles';
 import { Game } from '../src/core/Game';
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { WorldEvolution } from '../src/world/evolution/WorldEvolution';
 
 interface FellShell {
   world: World; chunks: { markDirtyArea: () => void };
@@ -29,9 +30,13 @@ interface FellShell {
   fellCactus: (x: number, y: number) => void;
   breakTile: (x: number, y: number, byPlayer?: boolean) => void;
   sfx: { play: () => void }; playSfxFile: () => void;
+  evolution: WorldEvolution;
+  spawnKillDropItem: (vid: number, x: number, y: number, stack: number) => void;
 }
 
-/** 原型壳直调（private 仅编译期；vitest 环境无 DOM 不走构造器） */
+/** 原型壳直调（private 仅编译期；vitest 环境无 DOM 不走构造器）。
+ *  ★SW-BJ39：砍伐面统一委托演化域级联（killTileCascadeAt）→ 壳须挂真
+ *  WorldEvolution（killDropFace=KillTile_GetTreeDrops 1:1 单源掉落账） */
 function shell(w: World, drops: Array<[string, number]>): FellShell {
   const g = Object.create(Game.prototype) as unknown as FellShell;
   g.world = w;
@@ -40,6 +45,14 @@ function shell(w: World, drops: Array<[string, number]>): FellShell {
   g.sfx = { play: () => {} };
   g.playSfxFile = () => {};
   g.spawnDrop = (_x, _y, key, n) => { drops.push([key, n]); };
+  g.evolution = new WorldEvolution({
+    store: w.store,
+    seed: 7, worldSurface: 40, rockLevel: 200, dungeonX: 60, difficulty: 0,
+    flags: {}, crimson: false, isDay: true, raining: false, maxRaining: 0,
+    windSpeedCurrent: 0, playerTile: () => null,
+    spawnKillDrop: (vid, x, y, stack) => g.spawnKillDropItem(vid, x, y, stack),
+    selectedAxePower: () => 35,
+  });
   return g;
 }
 
@@ -200,9 +213,12 @@ describe('树族二审：KillTile_GetTreeDrops 1:1（:66245-66309）', () => {
       shrooms += d.filter(([k]) => k.includes('vi_183')).reduce((a, [, n]) => a + n, 0);
       tiles += w === w ? 5 : 0;
     }
-    // 30 格掷 50%：全部为空 P=1/2^30，全部都有也几乎不可能
+    // 30 格掷 50%：全部为空 P=1/2^30，全部都有也几乎不可能。
+    // ★SW-BJ39 重校：bonusWood 骰在树型 switch 之后（WorldGen.cs:66762-66768,
+    // :66738 `if (dropItem != 9) return;` 对 tile 5 恒活码——dropItem 此处恒 9），
+    // 壳斧力 35 → Next(35)<=35 恒真 → 命中 183 的格 stack 恒 2 → 上限 2×tiles
     expect(shrooms).toBeGreaterThan(0);
-    expect(shrooms).toBeLessThan(tiles);
+    expect(shrooms).toBeLessThan(tiles * 2);
   });
 
   it('树桩语义：拦腰砍 → 下方保留 + 登记表收缩', () => {

@@ -94,6 +94,7 @@ import {
   positionHasEnoughNpcs, pylonIconHit, pylonDustHex,
   type TeleportPylonInfo, type NpcHomeLike, type PylonTeleportCheck,
 } from '../world/TeleportPylons';
+import { WALL_DUNGEON_SHEETS } from '../world/DungeonDualZones';   // ★IIIII228 海螺 TileIsDangerous wallDungeon 集
 import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
@@ -1009,7 +1010,7 @@ type DecorSupportKind =
   // docs/audit/tile-audit-2026-08-23.md「TileFrame 全量派发对照」）——
   | 'jungleplant' | 'oasisplant' | 'wallhang' | 'stalactite' | 'moss'
   | 'pile' | 'deco3x2' | 'deco3x1' | 'dyeplant' | 'waterplant' | 'sandplant'
-  | 'hangtop' | 'gnome' | 'treebase' | 'stinkbug' | 'xmas' | 'support2x2' | 'drip'
+  | 'hangtop' | 'gnome' | 'treebase' | 'tree' | 'stinkbug' | 'xmas' | 'support2x2' | 'drip'
   // —— 2026-09-01 三批：放置清格豁免面多格件 Check* 族（tileCut 免除件原版
   // KillTile 尾 SquareTileFrame→TileFrame 级联的整件裁决,探针 _pile-place.mjs 四场景）——
   | 'pumpkin' | 'super' | 'larva3x3'
@@ -1169,6 +1170,13 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   583: 'treebase', 584: 'treebase', 585: 'treebase', 586: 'treebase', 587: 'treebase',
   588: 'treebase', 589: 'treebase', 596: 'treebase', 616: 'treebase', 634: 'treebase',
   323: 'treebase',
+  // ★SW-BJ39（2026-09-09）：普通树干 5（case 5 → CheckTree :87152-87154/:55045）补入
+  // 派发表——此前缺席=树干格落入 checkFurnitureSupport 通用家具支撑校验（tree def
+  // framed+非 solid 1×1 → 下方非实心即杀）：中段砍的残桩顶格、枝砍旁的干格全被
+  // 家具链腰斩（用户实报「不从根部砍会留下这些砍不掉」链），且 CheckTree 重帧臂
+  // 永不运行。委托演化域 treeCheckCore（杀臂+重帧臂+3×3 续推单源）。
+  // 72 蘑菇树已有专支 'shroomtree'（:1035），勿重复键
+  5: 'tree',
   // CheckStinkbugBlocker（:87207-87210 派发 630/631;函数 :54373——锚向失效重定向,
   // 全失效杀;ValidateOrAttemptReorientingAnchor :54299）
   630: 'stinkbug', 631: 'stinkbug',
@@ -1677,6 +1685,33 @@ export function multiTileDropKey(
   // 滴水装饰:drop=null 是【原文本相】(无 tile-drop),不走 place_ 回收
   if (def.vanilla?.sheet !== undefined && NO_RETURN_RECYCLE_SHEETS.has(def.vanilla.sheet)) return '';
   return def.key.startsWith('v_') && placeableTiles.has(def.key) ? 'place_' + def.key : '';
+}
+
+/** ★SW-BJ40（2026-09-09）：多格件玩家挖掘路径的掉落弹出格 = 原版 Check* 触发格。
+ *  1457 权威：破坏格 KillTile 尾 SquareTileFrame（WorldGen.cs:64445→:81462-81472）以
+ *  破坏格为中心【列优先】扫 3×3 邻域（x 外层 y 内层：(-1,-1),(-1,0),(-1,1),(0,-1),
+ *  (0,0),(0,1),(1,-1),(1,0),(1,1)），首个仍 active 的同类型格派发 TileFrameImportant→
+ *  Check3x2 等（:87240-87270 case 14/17/26/77…→:49617）；整件销毁+单次掉落在该触发格
+ *  坐标弹出（Check3x2 :50119-50121 case 77 `Item.NewItem(…, i*16, j*16, 32, 32, 221)`）。
+ *  两个闸：①中心格=被挖格（此刻已 inactive，跳过）；②相邻同型【他件】格虽先被扫到，
+ *  其 Check* 完整性通过（flag=false :49843）→ 不销毁不掉落——故只认「属被破坏物件盒」
+ *  的格（盒=锚扫描所得 (bx,by,bw,bh)）。窗口内无合格格（残件尾格）→ null，调用方回落
+ *  锚格（原版残件尾格无 Check* 触发=零掉落；本仓整件单掉语义保留，备案）。 */
+export function multiTileDropTriggerCell(
+  typeAt: (x: number, y: number) => number,
+  activeAt: (x: number, y: number) => boolean,
+  mx: number, my: number, type: number,
+  bx: number, by: number, bw: number, bh: number,
+): { x: number; y: number } | null {
+  for (let sx = -1; sx <= 1; sx++) {
+    for (let sy = -1; sy <= 1; sy++) {
+      if (sx === 0 && sy === 0) continue;
+      const nx = mx + sx, ny = my + sy;
+      if (nx < bx || nx >= bx + bw || ny < by || ny >= by + bh) continue;
+      if (typeAt(nx, ny) === type && activeAt(nx, ny)) return { x: nx, y: ny };
+    }
+  }
+  return null;
 }
 /** IsVine（TileID.cs:237）：八种垂藤（CheckVines 全族同构，见 Game.checkVineAt）；
  *  sheet → 内部 id 映射（变型用，首个命中者） */
@@ -20270,6 +20305,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         }
       }
+      // ★SW-BJ40（2026-09-09）掉落弹出格 = 原版 Check* 触发格（见 multiTileDropTriggerCell
+      //  注——SquareTileFrame WorldGen.cs:81462-81472 列优先窗扫首格派发 Check3x2，掉落于
+      //  触发格 (i*16,j*16,32,32) 单次弹出，非锚格）。整件盒（ax,ay,ow,oh）由上方锚扫描给出；
+      //  残件（hasCandidate=false，无 phase 锚）回落锚格近似。清格【前】计算——清格后
+      //  activeAt 恒 false。墓碑/告示牌/宝箱注销仍用锚格 (ax,ay)（登记面与原版
+      //  Sign.KillSign/Chest.DestroyChest 锚系一致）。
+      let dropX = ax, dropY = ay;
+      if (hasCandidate) {
+        const trig = multiTileDropTriggerCell(
+          (nx, ny) => (st.inBounds(nx, ny) ? st.type[st.idx(nx, ny)] : 0),
+          (nx, ny) => st.inBounds(nx, ny) && st.hasTile(nx, ny),
+          x, y, type, ax, ay, ow, oh,
+        );
+        if (trig) { dropX = trig.x; dropY = trig.y; }
+      }
       for (let dx = 0; dx < ow; dx++) {
         for (let dy = 0; dy < oh; dy++) {
           // ★同类型门（2026-08-20 用户实报"打掉沙上花草连沙块一起消失"）：锚点盒
@@ -20382,7 +20432,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const ev = echoResourceDropVid(framedSheet, preFrameX, preFrameY);
         dropKey = ev > 0 ? (VANILLA_ITEM_KEY_BY_ID[ev] ?? '') : '';
       }
-      if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, dropCount);
+      // ★SW-BJ40：掉落坐标 = Check* 触发格（dropX/dropY，见上）——非锚格
+      if (dropKey) this.spawnDrop(dropX * TILE + 8, dropY * TILE, dropKey, dropCount);
       // 告示牌族（Main.tileSign {55,85,425,573}，Main.cs:9990-9993）破坏 → 注销
       // 牌面文本登记（WorldGen.cs:43733 Sign.KillSign，帧检分支）
       if (framedSheet === 55 || framedSheet === 85 || framedSheet === 425 || framedSheet === 573) {
@@ -20952,104 +21003,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack);
   }
 
-  /** v_5 族树掉落 1:1（KillTile_GetTreeDrops :66245-66309 + GetTreeType :63106）：
-   *  ①木材种类按基座草族——丛林草→红木 620/腐化→乌木 619/猩红→阴森木 911/
-   *  雪原→针叶木 2503/神圣→珍珠木 621/灰烬草→灰烬木 5215/蘑菇草 70→每格 50%
-   *  发光蘑菇 183 或无掉落；②每 killed 格 1 木材 + bonusWood（:66306-66308
-   *  genRand.Next(35)<=手持斧力 || 1/3 → 该格 2）；③橡实仅树冠标记格
-   *  （X≥22 && Y≥198，即树顶 12/13 帧）50% ×1，TreeTypeDropsAcorns :63140 门
-   *  （None/Mushroom/Jungle 不掉橡实）。★帧必须在清格前捕获（调用方已做） */
-  private dropVanillaTreeLoot(
-    st: TileStore, x: number, groundFromY: number, treeType: number,
-    killed: Array<[number, number]>, crownFX: number, crownFY: number, crownY: number,
-  ) {
-    // 基座 = 干列向下穿过树格/空格后的第一个活性格（GetTreeBottom :63519-63523
-    // `while (!active || IsATreeTrunk || type==72) y++`——砍侧枝时也能溯源基座草族）
-    let gy = groundFromY;
-    while (gy < st.h) {
-      const t = st.get(x, gy);
-      if (t !== 0 && t !== treeType) break;
-      gy++;
-    }
-    const ground = gy < st.h ? st.get(x, gy) : 0;
-    const gs = ground !== 0 ? TILE_DEFS[ground]?.vanilla?.sheet ?? -1 : -1;
-    let vid = 9, acorns = false, mushroomRoll = false;
-    if (gs === 23 || gs === 661) { vid = 619; acorns = true; }            // Corrupt → Ebonwood
-    else if (gs === 199 || gs === 662) { vid = 911; acorns = true; }      // Crimson → Shadewood
-    else if (gs === 60) { vid = 620; }                                    // Jungle → Rich Mahogany（不掉橡实）
-    else if (gs === 70) { mushroomRoll = true; }                          // Mushroom → 50% 发光蘑菇/无
-    else if (gs === 147) { vid = 2503; acorns = true; }                   // Snow → Boreal Wood
-    else if (gs === 109 || gs === 492) { vid = 621; acorns = true; }      // Hallowed → Pearlwood
-    else if (gs === 633) { vid = 5215; acorns = true; }                   // Ash → Ash Wood
-    else if (gs === 2 || gs === 477 || gs === 53 || gs === 112 || gs === 116 || gs === 234) { acorns = true; } // Forest/Palm 族基座
-    const axePower = this.heldAxePower();
-    // ★IIIII61 SpecialSeedFeatures.ShouldDropExtraWood（SpecialSeedFeatures.cs:15-24 =
-    //  tenth && drunk && !remix && !ntb）：普通树族木材堆叠 ×2（KillTile_GetItemDrops
-    //  普通树 case 尾段 WorldGen.cs:65742）
-    const sfExtraWood = !!(this.world.seedFlags?.tenthAnniversary && this.world.seedFlags?.drunkWorld
-      && !this.world.seedFlags?.remix && !this.world.seedFlags?.notTheBees);
-    for (const [kx, ky] of killed) {
-      if (mushroomRoll && Math.random() >= 0.5) continue;                 // 50% 无掉落
-      const key = VANILLA_ITEM_KEY_BY_ID[mushroomRoll ? 183 : vid];
-      if (!key || ITEM_BY_KEY[key] === undefined) continue;
-      const bonus = Math.floor(Math.random() * 35) <= axePower || Math.floor(Math.random() * 3) === 0;
-      let stack = bonus ? 2 : 1;
-      if (sfExtraWood && !mushroomRoll) stack *= 2;   // dropIsWood 门（蘑菇格非木）
-      this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 14, ky * TILE, key, stack,
-        (Math.random() - 0.5) * 2, -2 - Math.random());
-    }
-    if (crownFX >= 22 && crownFY >= 198 && acorns && Math.random() < 0.5) {
-      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 2.5, crownY * TILE, VI_KEY.ACORN, 1,
-        (Math.random() - 0.5) * 3, -3 - Math.random());
-    }
-  }
+  // ★SW-BJ39（2026-09-09）：dropVanillaTreeLoot 手工树掉落账退役——树砍伐面（fellTree/
+  // fellImportedTree）与演化域级联（frameDependents→killDependentAt→killFlat）统一后,
+  // 掉落由演化域 killDropFace 单源承载（KillTile_GetTreeDrops :66710-66768 1:1,含
+  // GetTreeTypeAndTreeBottom 基座溯源/逐格冠帧橡实门/bonusWood 斧骰/SpecialSeed ×2·×3;
+  // 同核回归=evolution-tree-cascade.test + sw-bj39-tree-mid-chop.test）。
 
   private fellTree(x: number, y: number) {
-    // 原版砍伐语义（Player.cs:45120 单格 KillTile → SquareTileFrame 3×3 → CheckTree
-    // :54598 逐格上行级联）：被砍格及其以上整段倒下，切口以下的树桩保留（其下方
-    // 仍是树干/草 → CheckTree 存活门通过）——旧实现整列连桩清除（含切口以下）非原版
+    // ★SW-BJ39（2026-09-09）砍伐面单源化：单格 KillTile（默认参=带掉落）→ 尾
+    // SquareTileFrame 3×3（WorldGen.cs:64432）→ TileFrame case 5 → CheckTree
+    // （:87152-87154 → :55045-55256）逐格上行级联+重帧。被砍格及以上整段倒下
+    // （每格经 killDropFace 逐格账 KillTile_GetTreeDrops :66710——冠/枝标记格
+    // frameX>=22&&frameY>=198 各掷 50% 橡实、bonusWood 斧骰逐格），切口以下残桩
+    // 保留并由 CheckTree 臂3/5d 重帧为切口风格。
+    // 旧实现（手工整段清除 [top..cut] + dropVanillaTreeLoot）三偏差（探针
+    // scripts/_bj39-tree-chop.mjs 实证）：
+    //  ① 侧邻清除支把「枝砍」连带杀干（s=±1 命中切口行干格）→ 上段悬空；
+    //  ② 残桩顶格不重帧（原版臂3/5d → (110,0) 切口风格,陈旧帧=悬空残件观感）;
+    //  ③ 橡实只按倒下段顶格掷 1 次（原版逐格掷,枝帧格同门）。
+    //  现掉落/级联/重帧统一走演化域（killTileCascadeAt=killDropFace+frameDependents
+    //  队列,与 evolution-tree-cascade.test 同核）。
     const st = this.world.store;
     let top = y;
     while (st.get(x, top - 1) === T.TREE) top--;
-    const bottom = y;
-    this.chunks.markDirtyArea(x - 4, top - 4, x + 4, bottom + 1);
-    // ★清格前捕获干列逐格 frame（树冠橡实门读帧；setTile(0) 双轴清零）
-    const trunkFX: number[] = [];
-    const trunkFY: number[] = [];
-    for (let yy = top; yy <= bottom; yy++) {
-      const fi = st.idx(x, yy);
-      trunkFX.push(st.frameX[fi]);
-      trunkFY.push(st.frameY[fi]);
-    }
-    // 清除倒下段：干列 + 两侧枝/根（支干只在紧邻树干处，不会误伤邻树；根在基座行
-    // ±1，随整段倒下同清——切口以下不动）
-    const killed: Array<[number, number]> = [];
-    for (let yy = top; yy <= bottom; yy++) {
-      st.setTile(x, yy, 0);
-      killed.push([x, yy]);
-      for (const s of [-1, 1]) {
-        if (st.get(x + s, yy) === T.TREE) {
-          st.setTile(x + s, yy, 0);
-          killed.push([x + s, yy]);
-        }
-      }
-    }
     // 清除旧树冠（T.LEAVES 遗留系统的树叶，世界生成树无此项）
     for (let dx = -3; dx <= 3; dx++) {
       for (let dy = -4; dy <= 1; dy++) {
         if (st.get(x + dx, top + dy) === T.LEAVES) st.setTile(x + dx, top + dy, 0);
       }
     }
-    // 掉落（KillTile_GetTreeDrops 1:1，见 dropVanillaTreeLoot）
-    this.dropVanillaTreeLoot(st, x, bottom + 1, T.TREE, killed, trunkFX[0] ?? 0, trunkFY[0] ?? 0, top);
+    this.evolution.killTileCascadeAt(x, y);
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
-    // 登记表：砍到基座（整棵倒）→ 移除；拦腰砍 → 收缩为树桩段（y=切口下格起）
+    // 登记表：砍到基座（整棵倒）→ 移除；拦腰砍 → 收缩为残桩段（y=切口下格起）
     const t = this.world.trees.findIndex((tr) => tr.x === x && y >= tr.y && y < tr.y + tr.h);
     if (t >= 0) {
       const tr = this.world.trees[t];
       const oldBottom = tr.y + tr.h - 1;
-      if (bottom >= oldBottom) this.world.trees.splice(t, 1);
-      else { tr.y = bottom + 1; tr.h = oldBottom - bottom; }
+      if (y >= oldBottom) this.world.trees.splice(t, 1);
+      else { tr.y = y + 1; tr.h = oldBottom - y; }
     }
   }
 
@@ -21118,120 +21109,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   private fellImportedTree(x: number, y: number, type: number) {
-    // 原版砍伐语义同 fellTree：单格 KillTile → CheckTree/CheckTreeWithSettings
-    // （tile 5/583-589/596/616/634，TileFrameImportant :86608+）/ 蘑菇树 case 72
-    // （:86582-86606）/ 棕榈 323 逐格上行级联——切口以下树桩保留
-    const st = this.world.store;
-    const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? 0;
-    let top = y;
-    while (st.get(x, top - 1) === type) top--;
-    const bottom = y;
-    this.chunks.markDirtyArea(x - 6, top - 7, x + 6, bottom + 1);
-    // ★清格前捕获干列逐格 frame（setTile(0) 双轴清零——棕榈树冠橡实门 X 88-132
-    // 与宝石树树冠 gemcorn 门 X≥22/Y≥198 都依赖；2026-08-17 棕榈砍伐审计修复）
-    const trunkFX: number[] = [];
-    const trunkFY: number[] = [];
-    for (let yy = top; yy <= bottom; yy++) {
-      const fi = st.idx(x, yy);
-      trunkFX.push(st.frameX[fi]);
-      trunkFY.push(st.frameY[fi]);
-    }
-    // 清倒下段：干列 + 紧邻侧枝/根（±1，切口以下不动）
-    const killed: Array<[number, number]> = [];
-    for (let yy = top; yy <= bottom; yy++) {
-      st.setTile(x, yy, 0);
-      killed.push([x, yy]);
-      for (const s of [-1, 1]) {
-        if (st.get(x + s, yy) === type) {
-          st.setTile(x + s, yy, 0);
-          killed.push([x + s, yy]);
-        }
-      }
-    }
-    // 蘑菇树（sheet 72）：不走树干木材/橡实——原版 KillTile_GetTreeDrops 仅覆盖
-    // tile 5/596/616/634（WorldGen.cs:65267），72 走 case 71/72 掷骰（:66162-66172）：
-    //   每格 1/40 蘑菇草种子(194) / 否则 1/2 发光蘑菇(183) / 否则无掉落
-    if (sheet === 72) {
-      const roll = new RNG((Math.random() * 1e9) | 0);
-      for (const [kx, ky] of killed) {
-        const key = roll.nextInt(40) === 0 ? VI_KEY.MUSHROOM_GRASS_SEEDS
-          : roll.nextInt(2) === 0 ? 'vi_183_glowing_mushroom' : null;
-        if (key && ITEM_BY_KEY[key] !== undefined) {
-          this.spawnDrop(kx * TILE + 8, ky * TILE + 8, key, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
-        }
-      }
-      this.spawnParticles(x * TILE + 8, top * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#2E8B3D', 14, 2.2);
-      return;
-    }
-    // 宝石树（sheet 583-589；GetItemDrops :65754-65802 + SetGemTreeDrops :66149-66163）：
-    // 每格 1/10 对应宝石×1 / 否则石块 Next(1,3)；gemcorn 门 = 树冠标记格（X≥22 &&
-    // Y≥198——growTreeWithSettings 树顶覆写帧 cs:30932-30967，★是树顶不是干基，
-    // 2026-08-17 二审修正：旧查干底格实际树恒 132-176 基座帧 → 仍永假）50% ×1
-    if (sheet >= 583 && sheet <= 589) {
-      const isCrown = trunkFX[0] >= 22 && trunkFY[0] >= 198;
-      const gemOf: Record<number, [number, number]> = {
-        583: [180, 4851], 584: [181, 4852], 585: [177, 4853],
-        586: [179, 4854], 587: [178, 4855], 588: [182, 4856], 589: [999, 4857],
-      };
-      const [gemId, seedId] = gemOf[sheet];
-      for (const [kx, ky] of killed) {
-        const dropId = Math.random() < 0.1 ? gemId : 3;   // 1/10 宝石 / 9/10 石块
-        const stack = dropId === 3 ? 1 + Math.floor(Math.random() * 2) : 1;
-        const key = dropId === 3 ? VI_KEY.STONE : VANILLA_ITEM_KEY_BY_ID[dropId];
-        if (key && ITEM_BY_KEY[key] !== undefined) {
-          this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 14, ky * TILE,
-            key, stack, (Math.random() - 0.5) * 2, -2 - Math.random());
-        }
-      }
-      if (isCrown && Math.random() < 0.5) {
-        const seedKey = VANILLA_ITEM_KEY_BY_ID[seedId];
-        if (seedKey && ITEM_BY_KEY[seedKey] !== undefined) {
-          this.spawnDrop(x * TILE + 8, top * TILE, seedKey, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
-        }
-      }
-      this.spawnParticles(x * TILE + 8, top * TILE + 8, '#B46BD8', 14, 2.2);
-      return;
-    }
-    // 棕榈（sheet 323，GetItemDrops case 323 :65277-65317）：每干格掉棕榈木 2504
-    // （邪恶沙地变体：crimsand 234→Shadewood 911 / pearlsand 116→Pearlwood 621 /
-    // ebonsand 112→Ebonwood 619）；树冠格（frameX 88-132）附橡实 secondaryItem=27
-    if (sheet === 323) {
-      // 地面变体：干列之下第一个实性格（cs:65298 `for (j=y; !active || !solid; j++)`
-      // ——★非实心活性格（火把/草饰等）跳过继续下扫，旧实现 break 致变体漏判）
-      let gs = -1;
-      for (let yy = bottom + 1; yy < st.h; yy++) {
-        const t = st.get(x, yy);
-        if (t !== 0 && st.isSolid(x, yy)) { gs = TILE_DEFS[t]?.vanilla?.sheet ?? -1; break; }
-      }
-      const palmWood = gs === 234 ? VANILLA_ITEM_KEY_BY_ID[911]
-        : gs === 116 ? VANILLA_ITEM_KEY_BY_ID[621]
-          : gs === 112 ? VANILLA_ITEM_KEY_BY_ID[619]
-            : VANILLA_ITEM_KEY_BY_ID[2504];
-      // ★IIIII61：ShouldDropExtraWood 棕榈 ×3（GetItemDrops case 323 尾段 :65778）
-      const sfExtraPalm = !!(this.world.seedFlags?.tenthAnniversary
-        && this.world.seedFlags?.drunkWorld && !this.world.seedFlags?.remix
-        && !this.world.seedFlags?.notTheBees);
-      for (let yy = top; yy <= bottom; yy++) {
-        if (palmWood && ITEM_BY_KEY[palmWood] !== undefined) {
-          this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, yy * TILE,
-            palmWood, sfExtraPalm ? 3 : 1, (Math.random() - 0.5) * 2, -2 - Math.random());
-        }
-        // 树冠格橡实（frameX 88-132 → secondaryItem=27，:65285-65287）——读清格前
-        // 捕获段 trunkFX（清格后帧恒 0）
-        const fx = trunkFX[yy - top];
-        if (fx >= 88 && fx <= 132) {
-          this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 10, yy * TILE,
-            VI_KEY.ACORN, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
-        }
-      }
-      this.spawnParticles(x * TILE + 8, top * TILE + 8, '#B68D56', 14, 2.2);
-      return;
-    }
-    // 普通树族（5/596/616/634，KillTile_GetItemDrops case :65267-65275 →
-    // KillTile_GetTreeDrops）：与 fellTree 共用 dropVanillaTreeLoot（基座草族
-    // → 群系木材 + 每格 1 木 + bonusWood + 树冠橡实门）——旧实现恒掉普通木材
-    this.dropVanillaTreeLoot(st, x, bottom + 1, type, killed, trunkFX[0] ?? 0, trunkFY[0] ?? 0, top);
-    this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
+    // ★SW-BJ39（2026-09-09）砍伐面单源化（同 fellTree）：单格 KillTile（默认参=带掉落）
+    // → 尾 SquareTileFrame 3×3（WorldGen.cs:64432）→ TileFrame 按型派发（:87106-87191）：
+    // 普通树 5 → CheckTree（:55045）/ 蘑菇树 72 内联（:87106-87140）/ 宝石树 583-589 →
+    // CheckTreeWithSettings（:54877）/ 棕榈 323 → CheckPalmTree（:54821）——被砍格及以上
+    // 整段倒下（每格 killDropFace 逐格账：72→1/40 蘑菇草种子 194 ∥ 1/2 发光蘑菇 183
+    // （:66162-66172）；583-589→SetGemTreeDrops 1/10 宝石 ∥ 石块 Next(1,3)+冠帧 1/2
+    // Gemcorn（:66614-66624）；323→棕榈木 2504 基座沙族变体+冠帧 fx88-132 橡实
+    // （:65748-65778）），切口以下残桩保留并由 CheckTree 族重帧臂落切口风格。
+    // 旧实现手工整段清除+分支掉落账与演化域 killDropFace 双轨分叉（枝砍连带杀干/
+    // 残桩不重帧/橡实掷面窄,见 fellTree 注）；现全委托演化域单源。
+    this.evolution.killTileCascadeAt(x, y);
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#2E8B3D', 14, 2.2);
   }
 
   /** CheckCactus :54132 单格失撑判定（三规则忠实版）：
@@ -27747,19 +27636,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (solidTop && !d.platform) return false;                // tileSolidTop 非平台位=false
       return true;
     };
+    const fireWalk = p.equipStats.fireWalk || !!p.buffs?.obsidianSkin;   // :9576 黑曜石皮并档
     const dangerous = (x: number, y: number): boolean => {
       if (!st.inBounds(x, y)) return false;
       const i = st.idx(x, y);
       if (st.liquid[i] > 0 && st.liquidType[i] === 2) return true;   // lava()
       if (st.wall[i] === 87 && y > this.world.groundLevel && !downedPlant) return true;
       if (WALL_DUNGEON_SHEETS.has(st.wall[i]) && y > this.world.groundLevel && !downedBoss3) return true;
-      return st.flags[i] && canTileHurt(st.type[i], p.fireWalk, sf);
+      return !!st.flags[i] && canTileHurt(st.type[i], fireWalk, sf);
     };
-    // 玩家盒（20×42）实心/岩浆/触伤覆盖；off = IsInSolidTilesExtended 四向 ±16px 探针近似
+    // 玩家盒实心/岩浆/触伤覆盖。盒 = Collision.SolidCollision 语义：anchor
+    // (px*16+8, py*16+15) − (w/2, h) → x 覆盖 tile px−1(2px)…px+1(2px)、
+    // y 覆盖 tile py−2(5px)…py（脚底=py 格底）；off = IsInSolidTilesExtended
+    // 的 TileCollision 四向 ±16px 探针 → 各向再外扩一格。
     const boxBlocked = (tx: number, ty: number, off = false): boolean => {
-      const ox = off ? Math.round(p.w / 2 / TILE) : 0;
-      for (let dx = -ox; dx <= 1 + ox; dx++) {
-        for (let dy = -1; dy <= 2; dy++) {
+      // 探针方向谱（TileCollision 四向实扫位）：left=px−2 列、right=px+1 列、
+      // up=py−3 行、down 探针=盒内自扫（无脚下外扩）——**不含 py+1**（脚底以下
+      // 不探测,否则岸线列与实心底永久对峙燃烧迭代帽）
+      const dx0 = off ? -2 : -1, dx1 = 1;
+      const dy0 = off ? -3 : -2, dy1 = 0;
+      for (let dx = dx0; dx <= dx1; dx++) {
+        for (let dy = dy0; dy <= dy1; dy++) {
           const cx0 = tx + dx, cy0 = ty + dy;
           if (!st.inBounds(cx0, cy0)) return true;
           const i = st.idx(cx0, cy0);
@@ -27767,7 +27664,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!st.flags[i] || (st.wire[i] & TileStore.WIRE_ACTUATED)) continue;
           const d = TILE_DEFS[st.type[i]];
           if (d?.solid && !d.platform && !TILE_SOLID_TOP_FAMILY.has(st.type[i])) return true;
-          if (canTileHurt(st.type[i], p.fireWalk, sf)) return true;
+          if (canTileHurt(st.type[i], fireWalk, sf)) return true;
         }
       }
       return false;
@@ -27898,10 +27795,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const [px, py] = this.spawnPlacementCoords(p);
       dest = { x: px, y: py };
     } else if (c.kind === 'ocean') {
-      // ★IIIII228：TeleportHelpers.RequestMagicConchTeleportPosition 1:1 移植
-      //  （含 lowTiles 空岛四臂）——替换旧「两缘 380 格带随机掷位」近似（226 登记债）
-      const right = p.x / TILE < st.w / 2;
-      dest = this.requestMagicConchTeleportPosition(right);
+      // ★IIIII228 Player.MagicConch（Player.cs:56760-56830）双尝试 1:1：
+      //  玩家在左半 → 先右洋（crawl −1）→ 失败再左洋（crawl +1）；右半镜像。
+      //  双败 → Teleport(position,5) 原地（音/尘/消耗照走,:56817-56830）——
+      //  旧实现单次失败即取消通道不消耗（偏离原文）。
+      const leftHalf = p.x / TILE < st.w / 2;
+      dest = this.requestMagicConchTeleportPosition(leftHalf)
+        ?? this.requestMagicConchTeleportPosition(!leftHalf)
+        ?? { x: p.x, y: p.y };
     } else {
       // DemonConch：中心 ±50，[UnderworldLayer+20, +100]，实心底/避液
       const cx = Math.floor(st.w / 2);
@@ -41584,6 +41485,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         return;
       }
+      case 'tree': {
+        // ★SW-BJ39（2026-09-09）：TileFrame case 5 → CheckTree（WorldGen.cs:87152-87154
+        // → :55045-55256）——普通树干原版派发面（72 蘑菇树另有专支 'shroomtree'）。
+        // 此前本表缺席 5 → 树干格落入下方通用家具支撑校验（framed+非 solid 1×1
+        // 下方非实心即杀）：①中段砍的残桩顶格、②枝砍旁的干格、③悬空树干段全被
+        // 家具链腰斩（用户实报「不从根部砍会留下这些砍不掉」的机制根因之一），
+        // 且 CheckTree 的重帧臂永不运行（残桩顶格帧陈旧,原版切口风格 (110, fy%66)）。
+        // 杀臂/重帧臂/掉落/3×3 续推全委托演化域 treeCheckCore 单源（KillTile 默认参
+        // 带掉落 :64375-64432 同位次）；演化域未初始化（测试壳）时静默跳过。
+        this.evolution?.tileFrameCascadeAt(x, y);
+        return;
+      }
       case 'treebase': {
         // 树基族：583-589/596/616/634 → CheckTreeWithSettings（:54877）杀支——
         // 基格（frameX 0|22|44 且 fy<=130）地基失效且下方非同型 → 杀（:54916-54920）;
@@ -41991,6 +41904,17 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     // multiTileDropKey 兜底（曾 def.drop??null → 失撑恒无掉落,雕像/画/旗失撑蒸发）；
     // ★样式还原（⚠️2）同破坏链：按破坏前帧掉 GetItemDrop_* 真物品
     const afx = st.frameX[st.idx(ax, ay)], afy = st.frameY[st.idx(ax, ay)];
+    // ★SW-BJ40：掉落弹出格 = 原版 Check* 触发格（multiTileDropTriggerCell 注）。
+    //  失撑面触发窗 = 变更格（监听位换算恒为 (x, y+1)，唯一消费 :6409）的 3×3 列优先
+    //  窗扫（WorldGen.cs:81462-81472 SquareTileFrame(KillTile 尾 :64445)）内首个
+    //  active∧同类∧属本件盒的格——Check* 于该格派发并在其坐标单次 Item.NewItem。
+    //  完整性已过 ⇒ (x,y) 本体必在窗内（offset (0,-1)）,扫描恒有解;仍留锚格兜底。
+    //  清格【前】计算（清格后 activeAt 恒 false）。
+    const dropCell = multiTileDropTriggerCell(
+      (nx, ny) => (st.inBounds(nx, ny) ? st.type[st.idx(nx, ny)] : 0),
+      (nx, ny) => st.inBounds(nx, ny) && st.hasTile(nx, ny),
+      x, y + 1, st.type[st.idx(x, y)], ax, ay, w, h,
+    ) ?? { x: ax, y: ay };
     for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) st.setTile(ax + dx, ay + dy, 0);
     if (isBoulder) {
       // 巨石/滚石仙人掌失撑 → 滚石弹（cs:48766-48801 逐 sheet 弹种/伤害表,见
@@ -42030,7 +41954,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
         const ev = echoResourceDropVid(sheet, afx, afy);
         dropKey = ev > 0 ? (VANILLA_ITEM_KEY_BY_ID[ev] ?? '') : '';
       }
-      if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
+      // ★SW-BJ40：弹出坐标 = 触发格 dropCell（见上,原版 Check* 派发格 :50120 同构）
+      if (dropKey) this.spawnDrop(dropCell.x * TILE + 8, dropCell.y * TILE, dropKey, 1);
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.4);
     this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);

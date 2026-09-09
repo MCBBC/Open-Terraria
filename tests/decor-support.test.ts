@@ -9,6 +9,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
+import { WorldEvolution } from '../src/world/evolution/WorldEvolution';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { LIQUID_TYPE } from '../src/world/TileStore';
@@ -49,6 +50,15 @@ function mkShell(w: World, drops: Drop[], opts: { cordage?: boolean } = {}) {
   g.scene = null;
   // 最小玩家桩（killTileShouldDropSeeds 背包门 / cordage 装备位）
   g.player = { inv: { countOf: () => 0 }, equipStats: { cordage: !!opts.cordage }, cx: 0, cy: 0 };
+  // ★SW-BJ39：树砍伐面单源化后 fellTree/fellImportedTree/'tree' kind 委托演化域级联
+  g.evolution = new WorldEvolution({
+    store: w.store,
+    seed: 7, worldSurface: 40, rockLevel: 200, dungeonX: 60, difficulty: 0,
+    flags: {}, crimson: false, isDay: true, raining: false, maxRaining: 0,
+    windSpeedCurrent: 0, playerTile: () => null,
+    spawnKillDrop: () => {},
+    selectedAxePower: () => 35,
+  });
   return g;
 }
 

@@ -2733,7 +2733,10 @@ export class UI {
     this.moveGhost();
     // ★2026-09-07 刀 2 守卫(共享区第 5 处):vanilla 布局关包须解除热键栏隐藏
     // (refreshHotbar 开包早退的还原面;classic 关包链无刷新点,main.ts:427 直调)
-    if (this._builtLayout === 'vanilla') this.refreshAll();
+    if (this._builtLayout === 'vanilla') {
+      this.vinvReforgeOpen = false;   // 原版重铸菜单随背包关闭退出(DrawInventory 域内)
+      this.refreshAll();
+    }
     // ★2026-09-02：不再清 uiBlocking——背包自 2026-09-02 起不置位（世界输入解锁）,
     // 无条件清会打翻其他模态面板（手册/表情/图鉴）的 wasBlocking 恢复语义
   }
@@ -2929,8 +2932,17 @@ export class UI {
   private reforgeCostEl: HTMLElement | null = null;
   private reforgeSlotEl: HTMLElement | null = null;
 
-  /** 打开重铸面板：物品槽（放 1 件）+ 费用 + 重铸按钮 */
+  /** 打开重铸面板：物品槽（放 1 件）+ 费用 + 重铸按钮。
+   *  ★2026-09-09 刀 12(vanilla 原位化):vanilla 布局=直接在背包界面画重铸
+   *  (Main.cs:42268-42393:槽 (50,270) ctx5/文字 (100,270)/锤 (120,310) cooldown60/
+   *  储蓄 (180,258));modal 保留给 classic */
   showReforge(): void {
+    if (this._builtLayout === 'vanilla') {
+      this.vinvReforgeOpen = true;
+      this.openInventory(true);   // 原版 NPCChatText_TinkererReforge → OpenInventory
+      this.refreshAll();
+      return;
+    }
     this.closeReforge();
     const overlay = el('div') as HTMLDivElement;
     overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:1150; display:flex; align-items:center; justify-content:center;';
@@ -4880,6 +4892,7 @@ export class UI {
     };
     // ★2026-09-08 vanilla 布局:宝箱条直接叠背包下方(vinvBuildChest),无独立 modal
     if (this._builtLayout === 'vanilla') {
+      this.vinvReforgeOpen = false;   // 原版 :42277 chest≠-1 → InReforgeMenu=false
       this.openInventory(true);
       this.refreshAll();
       return;
@@ -6567,6 +6580,8 @@ export class UI {
 
     // ---- 宝箱条(直接叠背包下方;显示随 openChest) ----
     this.vinvBuildChest();
+    // ---- 重铸原位(Main.cs:42268-42393;显示随 vinvReforgeOpen+自动退出条件) ----
+    this.vinvBuildReforge();
 
     // ---- 住房页(EquipPage==1 DrawNPCHousesInUI Main.cs:42709-42822) ----
     // 查询器 0 号位(NPC_Head_0)+ 在场 NPC 头像槽列;x=sw-92,超 sh-80 换列 -48;
@@ -6764,6 +6779,7 @@ export class UI {
     this.vinvRefreshHousing();
     this.vinvRefreshCraft();
     this.vinvUpdateChestName();
+    this.vinvUpdateReforge();
     this.paintVanillaDefense();
   }
 
@@ -7308,6 +7324,11 @@ export class UI {
     this.vinvCraftMatSig = '';
     this.vinvChestNameEl = null;
     this.vinvChestBtnEls = [];
+    this.vinvReforgeOpen = false;
+    this.vinvReforgeSlotEl = null;
+    this.vinvReforgeTextEl = null;
+    this.vinvReforgeHammerEl = null;
+    this.vinvSavingsEl = null;
     if (this.vinvPulseRaf) { cancelAnimationFrame(this.vinvPulseRaf); this.vinvPulseRaf = 0; }
     this.vinvLayoutItems = [];
     this.vinvRowMap.clear();

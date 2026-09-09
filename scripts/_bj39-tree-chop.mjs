@@ -77,7 +77,7 @@ const GY = base.gy;
   const r = await runCase({ cx: base.px - 30, gy: GY, h: 5, cutDy: 1 });
   console.log('①', JSON.stringify(r));
   check('①底砍: 整树清除', r.after.slice(1).every(v => v === 0), JSON.stringify(r.after));
-  check('①底砍: 逐格掉木 5-10（每格1+bonus）', r.wood >= 5 && r.wood <= 10, `wood=${r.wood}`);
+  check('①底砍: 逐格掉木 5-10（每格 1-2 bonus）', r.wood >= 5 && r.wood <= 10, `wood=${r.wood}`);
   check('①底砍: 冠格橡实 ≤1（50%掷）', r.acorns <= 1, `acorns=${r.acorns}`);
 }
 
@@ -91,7 +91,8 @@ const GY = base.gy;
   check('②中砍: 残桩保留', stumpKept);
   check('②中砍: 只掉倒下段 4 格木（4-8）', r.wood >= 4 && r.wood <= 8, `wood=${r.wood}`);
   const ft = String(r.after[3]).split(',');
-  check('②中砍: 残桩顶格重帧为切口风格 (110,0)（vanilla CheckTree 臂3/5d :55125/:55193）', ft[0] === '110' && ft[1] === '0', `got (${ft})`);
+  // 原版重帧 = (110, fy%66)（臂5d :55193-55236 num7=fy%66）;建树残桩顶帧 (0,44) → (110,44)
+  check('②中砍: 残桩顶格重帧为切口风格 (110, fy%66)（vanilla CheckTree 臂3/5d :55125/:55193）', ft[0] === '110' && Number(ft[1]) === 44, `got (${ft})`);
 }
 
 // ③ 枝砍（用户主诉面：不砍根、砍侧枝）
@@ -102,7 +103,7 @@ const GY = base.gy;
   check('③枝砍: 干格在切口行保留（原版只掉枝）', r.afterTrunkAtCut, `trunk@${r.cutY}=${r.afterTrunkAtCut}`);
   const treeIntact = r.after.slice(1).every(v => v !== 0);
   check('③枝砍: 整树其余全保留（旧实现会腰斩成悬空树）', treeIntact, JSON.stringify(r.after));
-  check('③枝砍: 只掉 1 格枝木', r.wood === 1, `wood=${r.wood}`);
+  check('③枝砍: 只掉 1 格枝木（1-2 = bonusWood 斧骰 :66762-66768;手持非斧→~1/3 概率 ×2）', r.wood >= 1 && r.wood <= 2, `wood=${r.wood}`);
 }
 
 // ④ 顶砍（树冠格）
@@ -110,63 +111,8 @@ const GY = base.gy;
   const r = await runCase({ cx: base.px + 30, gy: GY, h: 5, topChop: true });
   console.log('④', JSON.stringify(r));
   check('④顶砍: 冠格消失、其余保留', r.after[5] === 0 && [1, 2, 3, 4].every(i => r.after[i] !== 0), JSON.stringify(r.after));
-  check('④顶砍: 只掉 1 格木', r.wood === 1, `wood=${r.wood}`);
+  check('④顶砍: 只掉 1 格木（1-2 = bonusWood 斧骰 :66762-66768）', r.wood >= 1 && r.wood <= 2, `wood=${r.wood}`);
 }
 
 console.log(`\n${pass} pass / ${fail} fail`);
-
-// ============ v3 追加：真斧流 tryMine 对残桩的可砍性取证 ============
-const axeFlow = (cfg) => page.evaluate(async (cfg, TREE, GRASS) => {
-  const g = window.__swGame;
-  const st = g.world.store;
-  const { cx, h, cutDy } = cfg;
-  const gy = cfg.gy;
-  st.setTileSilent(cx, gy, GRASS, 0, 0);
-  for (let i = 0; i < h; i++) {
-    const y = gy - 1 - i;
-    if (i === h - 1) st.setTileSilent(cx, y, TREE, 22, 198);
-    else st.setTileSilent(cx, y, TREE, 0, (i % 5) * 22);
-  }
-  // 中砍
-  g.breakTile(cx, gy - cutDy, true);
-  const leftovers = [];
-  for (let i = 1; i < cutDy; i++) leftovers.push(gy - i);   // 残桩行
-  // 玩家搬到树旁（过射程门）
-  const p = g.player;
-  p.x = cx * 16 - 20; p.y = (gy - 2) * 16;
-  // 给玩家一把斧（铜斧 vid 3507? 用 items 模块查）——直接用任意 axe>0 物品：
-  const items = await import('/src/data/items.ts');
-  const axeKey = Object.keys(items.ITEM_BY_KEY).find(k => {
-    const d = items.ITEM_DEFS[items.ITEM_BY_KEY[k]];
-    return d && d.vanilla && d.vanilla.axe > 0;
-  });
-  const axeId = items.ITEM_BY_KEY[axeKey];
-  p.inv.give?.(axeId, 1) ?? p.inv.add?.(axeId, 1);
-  // 选中它
-  let sel = -1;
-  for (let i = 0; i < p.inv.items.length; i++) if (p.inv.items[i] && p.inv.items[i].id === axeId) { sel = i; break; }
-  if (sel >= 0) p.inv.selectedIndex = sel;
-  const log = { axeKey, sel, swing: [] };
-  for (const ly of leftovers) {
-    const t0 = st.get(cx, ly);
-    if (t0 === 0) { log.swing.push({ ly, gone: true }); continue; }
-    g.hitTiles.clear(cx, ly);
-    for (let k = 0; k < 30; k++) {
-      g.tryMine(cx, ly, 100, 'axe', 10, 10);
-      if (st.get(cx, ly) === 0) break;
-    }
-    log.swing.push({ ly, type0: t0, gone: st.get(cx, ly) === 0, canKill: g.canKillTile(cx, ly), hasTile: st.hasTile(cx, ly) });
-  }
-  const after = [];
-  for (let i = 0; i <= h; i++) { const y = gy - i; after.push(st.get(cx, y) === 0 ? 0 : `${st.frameX[st.idx(cx, y)]},${st.frameY[st.idx(cx, y)]}`); }
-  log.after = after;
-  return log;
-}, cfg, ids.TREE, ids.GRASS);
-
-{
-  const r = await axeFlow({ cx: base.px, gy: GY, h: 7, cutDy: 4 });
-  console.log('⑤真斧流残桩=', JSON.stringify(r, null, 1));
-}
-await browser.close();
-process.exit(fail ? 1 : 0);
 

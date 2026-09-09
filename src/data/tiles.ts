@@ -555,7 +555,17 @@ def({ key: 'v_163_purple_ice_block', name: '', solid: true, opacity: 1, pick: 0,
 def({ key: 'v_200_red_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D89890', blend: true, drop: 835, vanilla: { sheet: 200, frame: 'auto' } });
 def({ key: 'v_116_pearlsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EEE1DA', blend: true, drop: 408, vanilla: { sheet: 116, frame: 'auto' } });
 def({ key: 'v_76_hellstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#8E4242', blend: true, drop: 214, vanilla: { sheet: 76, frame: 'auto' } });
-def({ key: 'v_77_hellforge', name: '', solid: false, framed: true, opacity: 1, pick: 65, light: [191, 115, 64] /* ApplyTileLight case 77 静态 (0.75,0.45,0.25)×255（2026-09-07 对账改，曾 255,140,70） */, mapColor: '#EE5546', drop: 221 /* Check3x2 :49694（审计 E ❌20） */, vanilla: { sheet: 77, frame: 'style', fw: 3, fh: 2 } }); // 地狱熔炉（原版专属表 Tiles_77；tileSolid 未设=可通行）
+// ★SW-BJ40（2026-09-09）：补 w:3,h:2 多格语义（原缺=全链当 1×1：放置逐格、挖逐格掉 221、
+//   失撑无整件级联——用户实报"一个地狱熔炉敲出 5+ 个"）。1457 权威：TileObjectData.cs
+//   :3363-3366 CopyFrom(Style3x2)+CoordinateHeights{16,18}+LavaDeath=false+addTile(77)
+//   （Style3x2 基表 :3170-3180：W3×H2/Origin(1,1)/AnchorBottom SolidTile|SolidWithTop|
+//   SolidSide×3/UsesCustomCanPlace/CoordinateWidth16/Pad2/StyleHorizontal）；破坏=Check3x2
+//   (WorldGen.cs:49617) case 77 :50119-50121 整件清+Item.NewItem(221) 一次；放置=玩家侧
+//   TileObject.CanPlace/Place（Player.cs:40085-40092 CustomPlace=true→newObjectType；
+//   TileObject.cs:29-172 全 footprint 写帧 frameX=dx*18/frameY=dy*18）+legacy Place3x2
+//   （WorldGen.cs:60570-60575 case 17/77/133→:52525）。1458 同域核对：TileObjectData.cs
+//   :3364-3366/WorldGen.cs:50127-50128/60579-60581 全同值，零变更。
+def({ key: 'v_77_hellforge', name: '', solid: false, framed: true, w: 3, h: 2, opacity: 1, pick: 65, light: [191, 115, 64] /* ApplyTileLight case 77 静态 (0.75,0.45,0.25)×255（2026-09-07 对账改，曾 255,140,70） */, mapColor: '#EE5546', drop: 221 /* Check3x2 :49694（审计 E ❌20） */, vanilla: { sheet: 77, frame: 'style', fw: 3, fh: 2 } }); // 地狱熔炉（原版专属表 Tiles_77；tileSolid 未设=可通行）
 def({ key: 'v_55_signs', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: 171 /* CheckSign default :43792（审计 E ❌21;牌面注销链在 breakTile :12801） */, vanilla: { sheet: 55, frame: 'style', fw: 2, fh: 2 } });
 // 动画制作台补全（原版 AnimateTiles 300-308 组 + 499；TEdit 实名 301/307/308 曾在素材表提取缺口）
 def({ key: 'v_301_flesh_cloning_vat', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 301, frame: 'style', fw: 3, fh: 3 } });

@@ -23,6 +23,7 @@ const TILE = 16;
 describe('IIIII228 ① getSpawnRate remix 臂（NPC.cs:489-778）', () => {
   function mk(remix: boolean, hard = false) {
     const w = new World(400, 600, 42, 'i228');
+    w.groundLevel = 180; w.rockLevel = 252;   // 裸 World 层线为 0——按 4200×1200 比例置
     if (remix) (w.seedFlags as { remix?: boolean }).remix = true;
     w.flags.hardMode = hard;
     const sp = new VanillaSpawner(w);
@@ -42,37 +43,38 @@ describe('IIIII228 ① getSpawnRate remix 臂（NPC.cs:489-778）', () => {
   });
 
   it('地下层经典 hardMode 支修正（:510-525）+ remix 0.4/1.9', () => {
-    const y = 260 * TILE + 500;   // > ws*16+s、≤ rock*16+s（groundLevel=180/rock=252）
+    const y = 270 * TILE + 500;   // 4820 ∈ (ws*16+s=3680, rock*16+s=4832]
     const { sp: sph } = mk(false, true);
     const hard = sph.getSpawnRate(y, 800, false, 800) as { spawnRate: number; maxSpawns: number };
     expect(hard.spawnRate).toBe(243);     // 600×0.9(hardMode 头臂)×0.45——旧实现漏=×0.5
     expect(hard.maxSpawns).toBe(10);      // 6×1.8
     const { sp: spn } = mk(false);
     const soft = spn.getSpawnRate(y, 800, false, 800) as { spawnRate: number; maxSpawns: number };
-    expect(soft.spawnRate).toBe(270);     // 600×0.5
+    expect(soft.spawnRate).toBe(300);     // 600×0.5
     expect(soft.maxSpawns).toBe(8);       // ⌊5×1.7⌋
     const { sp } = mk(true);
     const r = sp.getSpawnRate(y, 800, false, 800) as { spawnRate: number; maxSpawns: number };
-    expect(r.spawnRate).toBe(216);        // 600×0.4
+    expect(r.spawnRate).toBe(240);        // 600×0.4
     expect(r.maxSpawns).toBe(9);          // ⌊5×1.9⌋
   });
 
   it('remix 血月深岩软化 0.6（:559-563）；经典无（零扰动）', () => {
-    const y = 340 * TILE + 800;   // 深岩带
+    const y = 340 * TILE + 800;   // 6240 ∈ (rock*16+s=4832, Underworld 6400)
     const { sp, w } = mk(true);
     w.clock.bloodMoon = true;
     w.clock.timeOfDay = 0;        // 夜（isDay getter——以 timeOfDay 置夜）
     const r = sp.getSpawnRate(y, 800, false, 800) as { spawnRate: number; maxSpawns: number };
     // 链深岩 0.5/1.7 → 300/8；后置块血月 0.3/1.8 → 90/14；深岩带 rate 再 0.6 → 54
-    expect(r.spawnRate).toBe(Math.floor(Math.floor(Math.floor(600 * 0.5) * 0.3) * 0.6));
-    expect(r.maxSpawns).toBe(Math.floor(Math.floor(5 * 1.7) * 1.8));
-    // 经典血月夜不带深岩软化：
+    // → ★clamp(:750 spawnRate<60 → 60)回夹 = 60（54 被钳回下限,原版同）
+    expect(r.spawnRate).toBe(60);
+    expect(r.maxSpawns).toBe(14);
+    // 经典深岩带：昼夜/血月臂在 else-if 链上,深岩命中即无血月修正（零扰动）
     const { sp: spc, w: wc } = mk(false);
     wc.clock.bloodMoon = true;
     wc.clock.timeOfDay = 0;
     const c = spc.getSpawnRate(y, 800, false, 800) as { spawnRate: number; maxSpawns: number };
-    expect(c.spawnRate).toBe(Math.floor(Math.floor(600 * 0.4) * 0.3));
-    expect(c.maxSpawns).toBe(Math.floor(Math.floor(5 * 1.9) * 1.8));
+    expect(c.spawnRate).toBe(240);          // 经典深岩 ×0.4,无血月臂
+    expect(c.maxSpawns).toBe(9);
   });
 
   it('remix 恶地地表双臂（:651 ×0.5/×2 与 :698 ×0.8/×2）', () => {
@@ -81,8 +83,9 @@ describe('IIIII228 ① getSpawnRate remix 臂（NPC.cs:489-778）', () => {
     sp.getSpawnRate(100 * TILE, 800, false, 800);          // 先掷一次预热 500ms zone 缓存
     anySp.zoneCounts = { evil: 300, blood: 0, snow: 0, holy: 0, jungle: 0, meteor: 0, mushroom: 0, graveyard: 0 };
     const r = sp.getSpawnRate(100 * TILE, 800, false, 800) as { spawnRate: number; maxSpawns: number };
-    expect(r.spawnRate).toBe(Math.floor(Math.floor(600 * 0.5) * 0.8));   // 240
-    expect(r.maxSpawns).toBe(Math.floor(Math.floor(5 * 2) * 2));         // 20
+    // 全链：恶地 else-if ×0.65/×1.3 → :651 ×0.5/×2 → :698 ×0.8/×2 → clamp max 15
+    expect(r.spawnRate).toBe(Math.floor(Math.floor(Math.floor(600 * 0.65) * 0.5) * 0.8));  // 156
+    expect(r.maxSpawns).toBe(15);
   });
 
   it('月事件覆盖赋值化+remix Y 门旁路（:772）', () => {
@@ -104,6 +107,7 @@ describe('IIIII228 ① getSpawnRate remix 臂（NPC.cs:489-778）', () => {
 describe('IIIII228 ① chosen-tile remix（NPC.cs:1145-1291）', () => {
   function mk(remix: boolean) {
     const w = new World(400, 600, 42, 'i228b');
+    w.groundLevel = 180; w.rockLevel = 252;
     if (remix) (w.seedFlags as { remix?: boolean }).remix = true;
     const sp = new VanillaSpawner(w);
     return { w, sp: sp as unknown as { setFlagsForChosenTile: Function; underGround: boolean; deeperThanRockLayer: boolean; ctxRaining: boolean; dayTime: boolean; spawnMaxValue?: number } };
@@ -210,7 +214,7 @@ describe('IIIII228 ② ScaleStats remix SetDefaults 块（NPC.cs:8775-11332）',
 // ---------------------------------------------------------------- ③ 钓鱼 remix
 describe('IIIII228 ③ 钓鱼 remix（Projectile.cs:20808-21032）', () => {
   it('heightLevelOf remix 重映射（:20808-20833）', () => {
-    const ws = 300, rock = 900, maxY = 1200;
+    const ws = 300, rock = 700, maxY = 1200;
     expect(heightLevelOf(100, ws, rock, maxY, true)).toBe(0);
     expect(heightLevelOf(200, ws, rock, maxY, true)).toBe(1);      // [.5ws, ws)
     expect(heightLevelOf(400, ws, rock, maxY, true)).toBe(3);      // [ws, rock) → 3
@@ -219,7 +223,7 @@ describe('IIIII228 ③ 钓鱼 remix（Projectile.cs:20808-21032）', () => {
     expect(heightLevelOf(1000, ws, rock, maxY, true)).toBe(4);         // ≥ max-300
     // 经典映射不受影响（零扰动）
     expect(heightLevelOf(400, ws, rock, maxY)).toBe(2);
-    expect(heightLevelOf(1000, ws, rock, maxY)).toBe(3);
+    expect(heightLevelOf(800, ws, rock, maxY)).toBe(3);
   });
 
   it('prepareFishingContext remix 腐猩清旗免仲裁掷（:20995）', () => {
@@ -274,8 +278,11 @@ describe('IIIII228 ⑥ StatusFromNPC 全表 type 臂（Player.cs:22513-22771）'
 
   it('141 毒泥：Poisoned 600t=10s 1/2（:22735）', () => {
     const { e, buffs, player, game } = mk(141);
-    (e as unknown as { statusFromNpcTypeArms: Function }).statusFromNpcTypeArms(game, player, false);
-    expect(buffs.active.get(BuffType.Poisoned)).toBe(10);
+    for (let k = 0; k < 100; k++) {
+      (e as unknown as { statusFromNpcTypeArms: Function }).statusFromNpcTypeArms(game, player, false);
+      if (buffs.active.get(BuffType.Poisoned) === 10) return;
+    }
+    expect.fail('141 Poisoned 1/2×100 全空概率≈0');
   });
 
   it('Rabies(148) 蝙蝠族臂 + BUFF_DEFS 表目（:22650 expert）', () => {
