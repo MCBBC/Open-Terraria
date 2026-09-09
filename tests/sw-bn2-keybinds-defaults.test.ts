@@ -213,13 +213,13 @@ describe('SW-BN2 ③操作说明/欢迎语标注活绑表驱动', () => {
 describe('SW-BN2 结构锁（源文本锚,防执行器/接线静默回退）', () => {
   const read = (p: string): string => readFileSync(`${srcRoot}/${p}`, 'utf8');
 
-  it('main.ts 执行器挂 resolveEscapeChain 决策核,closePause 只收浮层不动背包（SW-BN3 :4978-4986）', () => {
+  it('main.ts 执行器挂 resolveEscapeChain 决策核,closePause=closeInGamePause 统一出口（SW-BN3 :4978-4986;★SW-RB8c 勘误:Close 置 playerInventory=true IngameOptions.cs:108=收浮层回背包）', () => {
     const main = read('main.ts');
     expect(main).toContain("from './ui/escapeChain'");
     expect(main).toContain('resolveEscapeChain({');
     const closePause = /case 'closePause':[\s\S]*?break;/.exec(main)?.[0] ?? '';
-    expect(closePause).not.toContain('ui.closeInventory()');   // 「收两层」已退役
-    expect(closePause).toContain('game.paused = false');
+    expect(closePause).not.toContain('ui.closeInventory()');   // 「收两层」退役不变（:108 是回背包非关背包）
+    expect(closePause).toContain('closeInGamePause(game)');
   });
 
   it('SW-BN3 背包内设置钮在位（原版 playerInventory 态设置入口 Main.cs:46287-46301）', () => {

@@ -20,7 +20,7 @@ import { Lang } from '../i18n/Lang';
 /** 日耀碑牌（ItemID.SolarTablet） */
 export const SOLAR_TABLET_ITEM = 2767;
 
-/** ChatColors.World（50,255,130）——日食公告（misc[20]，remix 世界 misc[106] 本仓无对应） */
+/** ChatColors.World（50,255,130）——日食公告（misc[20]，remix 公告 misc[106] 已接） */
 export const ECLIPSE_ANNOUNCE_COLOR = [50, 255, 130] as const;
 
 /** Game 侧宿主回调（公告/成就——避免本模块反向依赖 Game） */
@@ -76,7 +76,8 @@ export function dawnEclipseRoll(
   w.sundialCooldown = 0;                     // :64901
   w.moondialCooldown = 0;                    // :64902
   host.notifyProgressionEvent(2);            // :64904
-  host.broadcast(Lang.misc(20), ...ECLIPSE_ANNOUNCE_COLOR);   // :64909-64913
+  // ★IIIII224（:64910-64914）：remix 世界公告 misc[106]「恐怖来袭！」替代 misc[20]
+  host.broadcast(Lang.misc(!!w.seedFlags?.remix ? 106 : 20), ...ECLIPSE_ANNOUNCE_COLOR);
   return 'eclipse';
 }
 
@@ -94,7 +95,8 @@ export function canUseSolarTablet(w: World): boolean {
 export function useSolarTablet(w: World, host: EclipseHost): boolean {
   if (!canUseSolarTablet(w)) return false;
   w.clock.eclipse = true;                    // :43314
-  host.broadcast(Lang.misc(20), ...ECLIPSE_ANNOUNCE_COLOR);   // :43317-43321
+  // ★IIIII224（:43317-43321 同 remix misc[106] 分支）
+  host.broadcast(Lang.misc(!!w.seedFlags?.remix ? 106 : 20), ...ECLIPSE_ANNOUNCE_COLOR);
   return true;
 }
 

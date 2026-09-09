@@ -3,7 +3,10 @@
 //     Player.cs:5026,原版无触发面区分）;BN2「暂停浮层叠于背包」的 Esc 路径退役,
 //     openPause 可达面仅剩 {无面板+暂停钮面} 与 {死亡态 RB6b
 //     （TryOpeningInGameOptionsBasedOnInput :17391-17410)};pauseOpen 支
-//     （:4978-4986 IngameOptions.Close）只收浮层不动背包。
+//     （:4978-4986 IngameOptions.Close）收浮层——★SW-RB8c 2026-09-08 勘误:
+//     Close() 置 playerInventory=true（IngameOptions.cs:108）=执行器面回背包
+//     （closeInGamePause）;Open() 置 playerInventory=false（:70）=开浮层收背包,
+//     原版设置窗与背包两态互斥,BN3「叠于背包/Open 不清背包」系误读。
 //   ②autoPause 两态暂停断言——CanPauseGame（Main.cs:17493-17508;1458 同位零漂移）
 //     autoPause 臂（:17500-17504 playerInventory ∨ sign ∨ InGameUI）= 本仓
 //     Game.applyAutoPauseUI 逐帧重算：开∧背包开→paused / 背包关→恢复 / 开关关→
@@ -54,8 +57,8 @@ describe('SW-BN3 ①Esc 链矩阵（对齐原版 ToggleInv Player.cs:4961-5057�
   it('pauseOpen 支优先且只收浮层：任何状态/触发面 Esc=closePause,背包态字段不被链吞', () => {
     for (const intent of ALL_INTENTS) {
       expect(resolveEscapeChain(s({ pauseOpen: true }), intent)).toBe('closePause');
-      // 浮层叠于背包（经设置钮进入的原版本相）：Esc 收浮层回背包态,不关背包
-      // （执行器不动 inventoryOpen 的结构锁在 tests/sw-bn2 + 本文件 ③）
+      // 链核只出 closePause 决策;背包开合是执行器面（★SW-RB8c:closeInGamePause
+      // 按 IngameOptions.Close :108 回背包——链核不建模 inventoryOpen 写位）
       expect(resolveEscapeChain(s({ pauseOpen: true, inventoryOpen: true }), intent))
         .toBe('closePause');
       // 死亡+浮层=closePause（ingameOptionsWindow ? Close : Open 的 Close 臂）
@@ -160,8 +163,8 @@ describe('SW-BN3 ③结构锁（源文本锚,防链语义/暂停面静默回退�
     const main = readSrc('main.ts');
     expect(main).toContain('ui.onPauseMenu = () => {');
     const wiring = /ui\.onPauseMenu = \(\) => \{[\s\S]*?\n\};/.exec(main)?.[0] ?? '';
-    expect(wiring).toContain('openInGamePause(g);');           // Open 臂
-    expect(wiring).toContain('g.paused = false;');             // Close 臂（toggle :46294-46299）
+    expect(wiring).toContain('openInGamePause(g);');           // Open 臂（:70 收背包）
+    expect(wiring).toContain('closeInGamePause(g);');          // Close 臂（:108 回背包,SW-RB8c）
   });
 
   it('浮层暂停=ingameOptionsWindow 臂（:17496 析取第一支）事件驱动：开即 paused/收即恢复', () => {

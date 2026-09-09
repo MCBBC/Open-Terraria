@@ -219,5 +219,9 @@ describe('SW-BJ33 公主 663 魔法阵 950（AI_186 域内专类）', () => {
     const entitySrc = readFileSync(join(import.meta.dirname, '../src/entities/Entity.ts'), 'utf8');
     expect(entitySrc).toContain('m.npcProj !== true');
     expect(townShotSrc).toContain('npcProj = true');
+    // 微光红阵 color6 脸面染色（Main.cs:28740-45 Color(255,0,30,180)——★SW-RB8c
+    // 2026-09-08 勘误:加法分量按 (255,0,30) 染色,非白;A=180 erase 分量=A=0 家族登记债）
+    expect(townShotSrc).toContain("tintedRing(img, 'rgb(255,0,30)')");
+    expect(townShotSrc).toContain('layer(face,');
   });
 });

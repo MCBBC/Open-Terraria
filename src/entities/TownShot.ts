@@ -358,11 +358,14 @@ export class TownShot extends Entity {
 //     （scale/2、fadeIn×0.85,:43499-43503/:43520-35）+ PrincessWeapon 编排粒子
 //     ¼掷（:43538-43552,for(0..0.8) 单迭代;本仓 1:1 站 = orchestraFx.princessWeaponFx）
 //     + t==50 四正交收束爆发 ×2 档速度 ×4 向（:43554-43572,PositionInWorld=Center）;
-//   · 绘制 Main.cs:28735-28755：128 贴图四层叠画（白 inner=localAI[0]/粉 inner×0.95/
-//     白 outer=scale/粉 outer×0.95）,A=0 纯加法惯用法 → canvas 'lighter';色=
+//   · 绘制 Main.cs:28735-28755：128 贴图四层叠画（白脸 inner=localAI[0]/粉 inner×0.95/
+//     白脸 outer=scale/粉 outer×0.95）,A=0 纯加法惯用法 → canvas 'lighter';色=
 //     hslToRgb(0.92,1,0.5)=(255,0,122)（Main.cs:48689-48724 hue2rgb 折算）;
-//     微光变体 ai2==1 → hue 0.96=(255,0,61) + 白面 (255,0,30,180)（其 A=180 erase
-//     分量 ≈ globalAlpha×180/255 折算——A=0 家族既有口径,登记 VanillaDust.ts 同债）;
+//     ★SW-RB8c 2026-09-08 勘误：微光分支 color6=Color(255,0,30,180)（Main.cs:28740-45）
+//     是【染色面】非白——常态白脸=(255,255,255,A0)、微光白脸 rgb=(255,0,30)（加法
+//     分量 (153op,0,18op);曾误画白 (108op×3) 绿虚/红欠）;其 A=180 的 erase 分量
+//     （dest×(1−0.42op)）canvas 'lighter' 单 pass 不可承载=A=0 家族既有口径登记
+//     （VanillaDust.ts 同账）,加法分量按 1:1 修;
 //   · 命中面 Damage_PVE_Inner P.cs:12615：penetrate=-1 → :14189 `penetrate>0` 减命
 //     支不可达 = 命中【不亡】;:14182-14186 `penetrate!=1` → NPC.immune[owner]=10 =
 //     同弹对同敌 10t 再命中窗（HitCdImpl 承接,每敌独立）;:13575-13577 case 950
@@ -511,9 +514,13 @@ export class PrincessAuraShot extends TownShot {
     if (!img || img.width <= 0) return;    // 环贴图缺失 → 静默（尘/编排粒子仍可见;不用通用兜底盒——104 判定盒≠128 贴图）
     const pink = tintedRing(img, this.red ? 'rgb(255,0,61)' : 'rgb(255,0,122)');   // hue 0.92 / 0.96
     // Main.cs:28752-28755 四层叠画,A=0 纯加法 → 'lighter';×0.6 亮度 ×Opacity 进 globalAlpha。
-    // 微光白面 (255,0,30,180) 的 A=180 erase 分量 ≈ globalAlpha×(180/255) 折算（A=0 家族口径,登记）
+    // color6 脸面：常态=白 A0;微光分支=Color(255,0,30,180)（:28740-45）→ ★SW-RB8c
+    // 2026-09-08 勘误：加法分量按 rgb(255,0,30) 染色画(153op,0,18op)（曾画白=绿虚红欠）;
+    // A=180 的 erase 分量（dest×(1−0.42op) 贴图 α 域）'lighter' 单 pass 不可承载
+    // =A=0 家族登记债（VanillaDust.ts 同账）
+    const face = this.red ? tintedRing(img, 'rgb(255,0,30)') : img;
     const op = Math.max(0, this.opacity);
-    const whiteA = (this.red ? 180 / 255 : 1) * op * 0.6;
+    const whiteA = op * 0.6;
     const pinkA = op * 0.6;
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
@@ -525,9 +532,9 @@ export class PrincessAuraShot extends TownShot {
       const d = img.width * s;             // 128 贴图 × scale（origin=Size/2 中心 :28740）
       ctx.drawImage(tex, -d / 2, -d / 2, d, d);
     };
-    layer(img, this.sclInner, whiteA);     // :28752 白 inner
+    layer(face, this.sclInner, whiteA);    // :28752 color6 脸 inner（常态白/微光 255,0,30）
     layer(pink, this.sclInner * 0.95, pinkA);   // :28753 粉 inner
-    layer(img, this.scl, whiteA);          // :28754 白 outer
+    layer(face, this.scl, whiteA);         // :28754 color6 脸 outer
     layer(pink, this.scl * 0.95, pinkA);   // :28755 粉 outer
     ctx.restore();
   }

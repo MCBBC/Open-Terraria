@@ -15,6 +15,7 @@ import {
   DECOR_LEFT_DOWN, DECOR_RIGHT_DOWN, DECOR_BOUNCY_BUMPER, DECOR_REGULAR_BUMPER,
 } from '../world/MinecartTrack';
 import { cageFamilyOf, drawCageCell } from './CritterCage';
+import { tintedVanillaRegion } from './TileTint';
 import { inAPlaceWithWindTiles } from '../entities/Mounts';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, TILE_ANIM_RATE } from './TileAnim';
@@ -655,8 +656,24 @@ export function drawTreeCell(
   sway = 0,
   /** 冠样式直覆（tree-inspect 解剖台专用；缺省=原版 crownStyleFor 派生，游戏路径不受影响） */
   crownOverride?: number,
+  /** ★IIIII227 四涂装世界：本格油漆 id（WindSway 摆动层/第四遍烘焙外扩遍传入）。
+   *  树族大贴图不进烘焙油漆 pass（冠=摆动层逐帧、棕榈干/蘑菇顶=油漆 pass 之后的
+   *  第四遍外扩遍）→ 绘制时按源矩形 tintedVanillaRegion 染色（TileTint 共享模块，
+   *  applyPaintTint 同一真值）。0=直通（普通世界逐字节原路径,零扰动）。
+   *  树族 1-12 特判组（getTreeFoliageSettings）接线仍为 Paint.ts 头注登记债——
+   *  本通道暂走普通组 pass（对 13-30 漆/四涂装世界 26/27/30 恒等精确）。 */
+  paint = 0,
 ): void {
   const style = TREE_SHEET_STYLES[sheet] ?? 0;
+  // ★IIIII227 油漆源染色直通（paint=0 → 与原 drawImage 逐参数同路径,零扰动）
+  const blit = (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw = sw, dh = sh): void => {
+    if (paint > 0) {
+      const t = tintedVanillaRegion(img, sx, sy, sw, sh, paint);
+      if (t) { ctx.drawImage(t, 0, 0, sw, sh, dx, dy, dw, dh); return; }
+    }
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+  };
   // 棕榈树（tile 323）：树冠帧藏在树干列内（frameX 88-132，无独立标记格）。
   //  TEdit：Tree_Tops_15（80×80、82px 步长），srcX = 变体×82、srcY = 沙型×82，
   //  底部锚定 + X 偏移 frameY/16 格；沙型 = 下方沙块种类（普通0/猩红1/珍珠2/腐化3）
@@ -697,10 +714,10 @@ export function drawTreeCell(
           ctx.translate(dx21 + w21 / 2, dy21 + h21);
           ctx.rotate(sway * 0.08);
           ctx.translate(-(dx21 + w21 / 2), -(dy21 + h21));
-          ctx.drawImage(img21, sx21, sy21, 114, 98, dx21, dy21, w21, h21);
+          blit(img21, sx21, sy21, 114, 98, dx21, dy21, w21, h21);
           ctx.restore();
         } else {
-          ctx.drawImage(img21, sx21, sy21, 114, 98, px - 48 + lean21, py + TILE + 2 - 98, 114, 98);
+          blit(img21, sx21, sy21, 114, 98, px - 48 + lean21, py + TILE + 2 - 98, 114, 98);
         }
         return;
       }
@@ -716,10 +733,10 @@ export function drawTreeCell(
         ctx.translate(dx15 + w15 / 2, dy15 + h15);
         ctx.rotate(sway * 0.08);
         ctx.translate(-(dx15 + w15 / 2), -(dy15 + h15));
-        ctx.drawImage(img15, sx15, sy15, 80, 80, dx15, dy15, w15, h15);
+        blit(img15, sx15, sy15, 80, 80, dx15, dy15, w15, h15);
         ctx.restore();
       } else {
-        ctx.drawImage(img15, sx15, sy15, 80, 80,
+        blit(img15, sx15, sy15, 80, 80,
           px + (TILE - 80) / 2 + leanCrown, py + TILE - 80, 80, 80);
       }
       return;
@@ -730,7 +747,7 @@ export function drawTreeCell(
     const img323 = atlas.ensureVImage('vanilla/Tiles_323.png');
     if (!img323 || fx + 20 > img323.width) return;
     const lean = fy >= 32768 ? fy - 65536 : fy; // 原版 vector2.X += frameY
-    ctx.drawImage(img323, fx, 0, 20, 20, px - 2 + lean, py, 20, 20);
+    blit(img323, fx, 0, 20, 20, px - 2 + lean, py, 20, 20);
     return;
   }
   // 蘑菇树（tile 72）：独立渲染路径——U≥36 标记帧 = 巨蘑菇顶（Shroom_Tops，60×42、62px 步长、底部锚定）
@@ -742,7 +759,7 @@ export function drawTreeCell(
         // TEdit：source.X = (V/18)*62；60×42 底部锚定居中
         const sx72 = Math.floor(fy / 18) * 62;
         if (sx72 + 60 <= img72.width) {
-          ctx.drawImage(img72, sx72, 0, 60, 42, px + (TILE - 60) / 2, py + TILE - 42, 60, 42);
+          blit(img72, sx72, 0, 60, 42, px + (TILE - 60) / 2, py + TILE - 42, 60, 42);
         }
       }
       return;
@@ -750,7 +767,7 @@ export function drawTreeCell(
     // 干身：Tiles_72 直取（54×54 表，2×2 帧 18px 网格）
     const img72 = atlas.ensureVImage('vanilla/Tiles_72.png');
     if (img72 && fx + 16 <= img72.width && fy + 16 <= img72.height) {
-      ctx.drawImage(img72, fx, fy, 16, 16, px, py, TILE, TILE);
+      blit(img72, fx, fy, 16, 16, px, py, TILE, TILE);
     }
     return;
   }
@@ -818,11 +835,11 @@ export function drawTreeCell(
       ctx.translate(rdx + rw2 / 2, rdy + rh2);
       ctx.rotate(rot);
       ctx.translate(-(rdx + rw2 / 2), -(rdy + rh2));
-      ctx.drawImage(img, sx, sy, sw, sh, rdx, rdy, rw2, rh2);
+      blit(img, sx, sy, sw, sh, rdx, rdy, rw2, rh2);
       drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, rdx, rdy, rw2, rh2);
       ctx.restore();
     } else {
-      ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+      blit(img, sx, sy, sw, sh, dx, dy, sw, sh);
       drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, dx, dy);
     }
     return;
@@ -852,7 +869,7 @@ export function drawTreeCell(
     // 20×20 精灵**顶锚定**、X 居中 -2((20-16)/2)——向下溢出 4px 压住下方格顶,
     // 干底与草块的接缝由下溢覆盖。此前按测量美术高度底锚定,整体上移 4px,
     // 干底停在格边界 → wld 导入出现透明接缝(用户标注)
-    ctx.drawImage(img, fx, fy, 20, 20, px - 2, py, 20, 20);
+    blit(img, fx, fy, 20, 20, px - 2, py, 20, 20);
   }
 }
 

@@ -67,6 +67,18 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number, bl
       const p = (t / 32400 - 0.5) * 2;
       r = 20 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
     }
+    // ★IIIII224 dontStarve 夜色黑化（DontStarveSeed.ModifyNightColor :9-24）：
+    //  非满月夜 bg 向黑 lerp（前半夜入黑 from/0.5、后半夜出黑回快照），满月免。
+    //  value2 快照 = 夜曲线结果（改写前的 r/g/b）；位置 = 夜曲线后、云压暗前
+    if (frameDontStarve && phase !== 0) {
+      const from = Math.max(0, Math.min(1, t / 32400));
+      const a1 = Math.max(0, Math.min(1, from / 0.5));
+      const a2 = Math.max(0, Math.min(1, (from - 0.5) / 0.5));
+      const r0 = r, g0 = g, b0 = b;
+      r = (r + (0 - r) * a1) + (r0 - (r + (0 - r) * a1)) * a2;
+      g = (g + (0 - g) * a1) + (g0 - (g + (0 - g) * a1)) * a2;
+      b = (b + (0 - b) * a1) + (b0 - (b + (0 - b) * a1)) * a2;
+    }
   }
   // 云量压暗(:62990-62999,三通道同乘;地板之前)
   if (cloudDim < 1) { r *= cloudDim; g *= cloudDim; b *= cloudDim; }
@@ -80,8 +92,16 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number, bl
     applyBiomeToBg(bg2, biome);
     r = bg2[0]; g = bg2[1]; b = bg2[2];
   }
-  // 月相地板(Main.cs:63230-63266):每通道下限；血月恒 25（:63266-63277）
-  const floor = bloodMoon ? 25 : MOON_FLOOR[phase % 8];
+  // 月相地板(Main.cs:64758-64777 minimalLight 月相表 + :64835-64847 血月 25)
+  // ★IIIII224（:64781-64783 + DontStarveSeed.ModifyMinimumLightColorAtNight :27-49）：
+  //  dontStarve 世界地板改写 = 非满月 1 / 满月 45，血月抬 ≥35
+  let floor: number;
+  if (frameDontStarve) {
+    floor = phase % 8 === 0 ? 45 : 1;
+    if (bloodMoon) floor = Math.max(floor, 35);
+  } else {
+    floor = bloodMoon ? 25 : MOON_FLOOR[phase % 8];
+  }
   r = Math.max(r, floor); g = Math.max(g, floor); b = Math.max(b, floor);
   return [Math.min(255, r), Math.min(255, g), Math.min(255, b)];
 }
@@ -114,6 +134,25 @@ export function getFrameHorizon(): { sunrise: number; sunset: number; phase: num
 let frameCloudDim = 1;
 export function setFrameCloudDim(v: number): void {
   frameCloudDim = v;
+}
+// ★IIIII224 remix 帧状态（Main.remixWorld 消费面，Renderer 每帧写入；菜单/普通世界
+// 不写=缺省 false 零扰动）：
+//  · world=true → 云压暗跳过（:64513 `cloudAlpha>0f && !remixWorld`）+
+//    墓园压暗跳过（:64520 `GraveyardInfluence>0f && !remixWorld`）
+//  · blackSky=true（(remixWorld && !gameMenu) || WorldGen.remixWorldGen，:64867）
+//    → bgColor 置 1,1,1（remix 世界天幕纯黑,在 minLight 后/闪电白前）
+let frameRemixWorld = false;
+let frameRemixBlackSky = false;
+export function setFrameRemix(world: boolean, blackSky: boolean): void {
+  frameRemixWorld = world;
+  frameRemixBlackSky = blackSky;
+}
+// ★IIIII224：Main.dontStarveWorld（the constant）帧状态——夜间黑化 lerp
+//  （DontStarveSeed.ModifyNightColor :9-24）与月相地板改写
+//  （ModifyMinimumLightColorAtNight :27-49,非满月 1/满月 45/血月 ≥35）
+let frameDontStarve = false;
+export function setFrameDontStarve(v: boolean): void {
+  frameDontStarve = v;
 }
 // 闪电白帧状态(Main.cs:63346-63355:bgColor 三通道向 1 lerp lightning——
 // 闪白走 ColorOfTheSkies 链:天空贴图/远景/光种子同步闪亮;由 Renderer 写入。
@@ -182,7 +221,8 @@ export function setFrameBiome(v: BiomeInfluence | null): void {
  *  在云暗后/月相地板前)。in place 修改。 */
 function applyBiomeToBg(bg: [number, number, number], bio: BiomeInfluence): void {
   const m255 = (v: number) => Math.max(15, v);   // 各块 min 15
-  if (bio.graveyard > 0) {
+  // ★IIIII224：remix 世界墓园压暗整块跳过（:64520 `info.GraveyardInfluence > 0f && !remixWorld`）
+  if (bio.graveyard > 0 && !frameRemixWorld) {
     const k = 1 - bio.graveyard * 0.6;           // :63003-63010
     bg[0] *= k; bg[1] *= k; bg[2] *= k;
   }
@@ -261,6 +301,9 @@ export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bl
   const t = toVanillaTime(timeOfDay, isDay);
   void dayCount;
   let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim, frameBiome);
+  // ★IIIII224（:64867）：remix 世界（游戏内/世界生成期）天幕底色 = 1,1,1 纯黑
+  //  ——在 minLight 后、闪电白前；eclipse/闪电块在其后照常叠加
+  if (frameRemixBlackSky) bg = [1, 1, 1];
   if (eclipse && isDay) {
     const L = Math.min(1, t / 1242);
     bg = [
@@ -292,6 +335,8 @@ export function colorOfTheSkies(
   const t = toVanillaTime(timeOfDay, isDay);
   void dayCount;
   let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim, frameBiome, inMenuNight);
+  // ★IIIII224（:64867）：remix 黑天幕（同 skySeed 注）
+  if (frameRemixBlackSky) bg = [1, 1, 1];
   if (eclipse && isDay) {
     const L = Math.min(1, t / 1242);
     bg = [

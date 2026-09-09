@@ -29,6 +29,13 @@
 //   SW-BN4(2026-09-08)全域三视角多 def=0 复算+锁扩面（本批,BN1 归一化的永久守卫升级,
 //   零 items.ts 改动——归一化结构 BANNER_VID_RUNS/SWBN1_MISC5_KEYS/SWBN1_F_FALLBACK_VIDS/
 //   4851-4857 跳过支已在盘上,本批仅把抽验级守卫升为全域守卫）。
+//   SW-RB8d(2026-09-08)红蓝对抗审计:三重零/域扫 7430/banner 290/f35 独立探针复算全证实;
+//   补三锁=①无权威豁免集单点钉（恰 vi_4143_manacloakstar 一件——vanilla.json 全量无
+//   vid 4143,邻位 4142/4144 在;ItemID.cs:9832 ManaCloakStar=纯 pickup 件无 SetDefaults
+//   case,2026-08-27 手注册未按 6153/4058 惯例回填权威表）②byKey 值域锁（悬空索引防;
+//   alias 键 def.key≠键串 1255 件是设计态,勿键面比对）③banner st91 在域锁（关失配
+//   比对盲窗:BANNER_VID_RUNS 290 vid ⊆ BANNERS 316 探针实证,段缩即红）。三锁判别力
+//   经对象级变异探针验证必红。
 import { describe, it, expect } from 'vitest';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_STABLE_OF_INTERNAL } from '../src/data/items';
 import { BANNER_STYLE_BY_VID } from '../src/data/vanillaStyleDrops';
@@ -96,20 +103,56 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
     expect(dups, `同 stable id 多 def ${dups.length} 组:\n${dups.join('\n')}`).toEqual([]);
   });
 
+  // ★SW-RB8b 2026-09-09 补钉：第三锁盲窗——ITEM_STABLE_OF_INTERNAL 构建对缺稳定 id
+  //  的 def 只 console.error（items.ts:2121 `[stable-id] item 缺稳定 id`）并留 0,
+  //  上方 defsByStable `if (!s) return` 静默跳过 = 「stable 0 多 def」三锁全盲
+  //  （构建期日志测试零红）。断言：任何 def 稳定 id 必须非 0（vi_/place_v_/PRIV 三
+  //  派生支之一命中）——新键漏表即在此过闸。
+  it('终态：stable id 全域可解析 = 0 缺失（SW-RB8b 补第三锁 stable-0 盲窗）', () => {
+    const missing: string[] = [];
+    ITEM_STABLE_OF_INTERNAL.forEach((s, i) => {
+      if (!s) missing.push(`#${i} ${ITEM_DEFS[i]?.key ?? '?'}`);
+    });
+    expect(missing, `缺稳定 id def ${missing.length} 件:\n${missing.join('\n')}`).toEqual([]);
+  });
+
+  // ★SW-RB8b 2026-09-09 台账一致性钉：BN1 终态三账（ITEM_DEFS 7195→6854、byKey
+  //  8109 键零丢失、VANILLA_ITEM_KEY_BY_ID 6175 vid）——隐式漂移（误注册/批量重放
+  //  踩踏）在此显形； legit 扩容须有意识改本钉（同 banner 290/f 35 过闸惯例）。
+  it('台账一致性：ITEM_DEFS 6854 / byKey 8109 / 权威反查 6175（BN1 终态三账）', () => {
+    expect(ITEM_DEFS.length, 'ITEM_DEFS 基数漂移（BN1 台账 6854）').toBe(6854);
+    expect(Object.keys(ITEM_BY_KEY).length, 'byKey 键数漂移（BN1 台账 8109）').toBe(8109);
+    expect(Object.keys(VANILLA_ITEM_KEY_BY_ID).length, '权威 vid 反查键数漂移（BN1 台账 6175）').toBe(6175);
+  });
+
   it('全域别名一致性域扫：byKey 每个 vi_ 键与 VANILLA_ITEM_KEY_BY_ID[vid] 同靶（SW-BN4,替代代表抽验）', () => {
     const fail: string[] = [];
+    const skipped: string[] = [];
     let swept = 0;
     for (const k of Object.keys(ITEM_BY_KEY)) {
       const m = VID_RE.exec(k);
       if (!m) continue;
       const aKey = VANILLA_ITEM_KEY_BY_ID[Number(m[1])];
-      if (aKey === undefined) continue; // 无权威反查件（探针定谳唯 vi_4143_manacloakstar,显式手注册）
+      if (aKey === undefined) { skipped.push(k); continue; }
       swept++;
       if (ITEM_BY_KEY[k] !== ITEM_BY_KEY[aKey]) {
         fail.push(`${k} → def#${ITEM_BY_KEY[k]} ≠ 权威 ${aKey} → def#${ITEM_BY_KEY[aKey]}`);
       }
     }
     expect(fail, `别名失靶 ${fail.length}/${swept} 键:\n${fail.slice(0, 20).join('\n')}`).toEqual([]);
+    // ★SW-RB8d 2026-09-08 豁免单点断言：无权威反查 vi_ 键必须恰为 vi_4143_manacloakstar
+    //   一件（vanilla.json 无 vid 4143 → 自动循环无 def,2026-08-27 显式手注册;BN4 曾
+    //   静默 continue——豁免集无界增长不红。fallback 支复活/新无权威手注册均在此过闸）
+    expect(skipped, '无权威反查 vi_ 键集漂移（vi_4143_manacloakstar 外新增?）').toEqual([
+      'vi_4143_manacloakstar',
+    ]);
+    // ★SW-RB8d byKey 值域锁：全键值必须落在 ITEM_DEFS 下标域（悬空索引=消费端 undefined
+    //   崩;注意 alias 键 def.key≠键串本身是设计态 1255 件,勿做键面全等比对）
+    const oob: string[] = [];
+    for (const [k, idx] of Object.entries(ITEM_BY_KEY)) {
+      if (!Number.isInteger(idx) || idx < 0 || idx >= ITEM_DEFS.length) oob.push(`${k}→${String(idx)}`);
+    }
+    expect(oob, `byKey 越界值 ${oob.length} 组:\n${oob.slice(0, 10).join('\n')}`).toEqual([]);
     // 覆盖面地板 = VANILLA_ITEM_KEY_BY_ID vid 数（每 vid 至少 1 个 vi_ 键可扫;
     // 现值 7430 = 6175 vid + 1255 影子/别名键）——别名机制或键空间塌缩即破地板
     expect(swept, '域扫覆盖面塌缩（vi_ 键/权威反查大幅减少?）').toBeGreaterThanOrEqual(
@@ -123,6 +166,7 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
     const noAuth: string[] = [];
     const psMissing: string[] = [];
     const psMismatch: string[] = [];
+    const stMissing: string[] = [];
     for (const k of keys) {
       const vid = Number(VID_RE.exec(k)![1]);
       const aKey = VANILLA_ITEM_KEY_BY_ID[vid];
@@ -130,10 +174,14 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
       const ps = ITEM_DEFS[ITEM_BY_KEY[k]].placeStyle;
       if (ps === undefined) { psMissing.push(k); continue; }
       const st91 = BANNER_STYLE_BY_VID[vid];
-      if (st91 !== undefined && ps !== st91) psMismatch.push(`${k}: ${ps} ≠ ${st91}`);
+      // ★SW-RB8d：先钉 st91 在域再比对（原 st91!==undefined 条件会把「BANNERS 表丢段」
+      //   变成静默跳过=失配比对盲窗;BANNER_VID_RUNS 290 vid ⊆ BANNERS 316 已探针实证）
+      if (st91 === undefined) { stMissing.push(k); continue; }
+      if (ps !== st91) psMismatch.push(`${k}: ${ps} ≠ ${st91}`);
     }
     expect(noAuth, 'banner 兜底注册必须为 0（290/290 有权威 def;vanilla.json 缺件才走兜底支）').toEqual([]);
     expect(psMissing, 'banner placeStyle 缺失（类级回填循环未刷到权威 def?）').toEqual([]);
+    expect(stMissing, 'banner vid 逸出 BANNER_STYLE_BY_VID（vanillaStyleDrops BANNERS 表缩段?）').toEqual([]);
     expect(psMismatch, 'banner placeStyle 与 BANNER_STYLE_BY_VID 失配').toEqual([]);
   });
 
@@ -204,5 +252,107 @@ describe('双键清理批次A：字段搬移抽验（键继续解析,语义保�
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_509_red_wrench']].wireTool).toEqual({ place: 1 });
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_4379_wyvern_kite']].tile).toBe('v_723_kite_anchor');
     expect(ITEM_DEFS[ITEM_BY_KEY['vi_4375_rat']].tile).toBe('v_724_critter_anchor');
+  });
+});
+
+// ★SW-RB8b 2026-09-09 判别力矩阵（六行注入,对象级内存变异——零 items.ts 触碰）：
+//   把三锁分组算法（与上方模块级 defsByVid/defsByKeyStr/defsByStable 同式）跑在
+//   变异副本上,证明三锁非同义反复且各有独占捕获域：
+//     行1 同 vid 异键 vi_ 双 def        → 锁1红（锁3同红:vi_ 键 stable=key 内嵌 vid）
+//     行2 同键串重复 def                → 锁2红（ITEM_BY_KEY 静默覆写类,4851-4857 同族）
+//     行3 place_v_ 同 N 异键双 def      → 仅锁3红（20000+N 派生,vid/键串视角全盲=独占域）
+//     行4 vi_ 键×PRIV 键同 stable 双 def → 仅锁3红（跨形态,vid 锁看不见 PRIV 键）
+//     行5 stable 0 缺失 def             → 三锁全静默=盲窗（上方 stable-0 补钉锁专捕）
+//     行6 vi_ 键 vid 谎报指向他档 def    → 域扫红（有权威反查时）/豁免集钉兜底（无反查时）
+//   即「同 vid 分组=key 内嵌 vid 派生,与 stable id 分组会否漏不同形态的重复」的
+//   实证回答：vi_ 域内两锁同构冗余,跨形态重复只有锁3可捕,缺派生键只有补钉可捕。
+function groupingsOf(defs: ReadonlyArray<{ key: string }>, stable: ReadonlyArray<number>) {
+  const byVid = new Map<number, number[]>();
+  const byKey = new Map<string, number[]>();
+  const byStable = new Map<number, number[]>();
+  defs.forEach((d, i) => {
+    const vm = /^vi_(\d+)_/.exec(d.key);
+    if (vm) {
+      const v = Number(vm[1]);
+      if (!byVid.has(v)) byVid.set(v, []);
+      byVid.get(v)!.push(i);
+    }
+    if (!byKey.has(d.key)) byKey.set(d.key, []);
+    byKey.get(d.key)!.push(i);
+    const s = stable[i];
+    if (s) {
+      if (!byStable.has(s)) byStable.set(s, []);
+      byStable.get(s)!.push(i);
+    }
+  });
+  const dupCount = (m: Map<unknown, number[]>): number => [...m.values()].filter((a) => a.length > 1).length;
+  return {
+    vidDup: dupCount(byVid),
+    keyDup: dupCount(byKey),
+    stableDup: dupCount(byStable),
+  };
+}
+
+describe('SW-RB8b 判别力矩阵（六行注入,内存变异）', () => {
+  it('行1-4：三锁各守独占捕获域（行3/4 仅 stable 锁可捕=第三视角独立性实证）', () => {
+    // 行1 同 vid 异键 vi_ 双 def
+    {
+      const defs = [{ key: 'vi_777_alpha' }, { key: 'vi_777_beta' }];
+      const g = groupingsOf(defs, [777, 777]);
+      expect(g.vidDup).toBe(1);
+      expect(g.stableDup).toBe(1);
+      expect(g.keyDup).toBe(0);
+    }
+    // 行2 同键串重复（def 键同串;byKey 后写覆盖前写=静默覆写面）
+    {
+      const defs = [{ key: 'vi_888_dup' }, { key: 'vi_888_dup' }];
+      const g = groupingsOf(defs, [888, 888]);
+      expect(g.keyDup).toBe(1);
+      expect(g.vidDup).toBe(1);
+    }
+    // 行3 place_v_ 同 N 异键双 def：键串不同/无 vi_ 前缀 → 只有 stable 视角红
+    {
+      const defs = [{ key: 'place_v_42_x' }, { key: 'place_v_42_y' }];
+      const g = groupingsOf(defs, [20042, 20042]);
+      expect(g.stableDup).toBe(1);
+      expect(g.vidDup).toBe(0);
+      expect(g.keyDup).toBe(0);
+    }
+    // 行4 vi_ 键 × PRIV 键 同 stable：跨形态,vid 锁对 PRIV 键不可见
+    {
+      const defs = [{ key: 'vi_901_vishape' }, { key: 'privshape_item' }];
+      const g = groupingsOf(defs, [901, 901]);
+      expect(g.stableDup).toBe(1);
+      expect(g.vidDup).toBe(0);
+      expect(g.keyDup).toBe(0);
+    }
+  });
+
+  it('行5：stable 0 缺失 def 三锁全静默（=stable-0 补钉锁的立锁依据）', () => {
+    const defs = [{ key: 'mystery_orphan' }, { key: 'mystery_orphan2' }];
+    const g = groupingsOf(defs, [0, 0]);
+    expect(g).toEqual({ vidDup: 0, keyDup: 0, stableDup: 0 });
+    // 两件异键缺派生 def 并存,任何双 def 锁都不红——上方「stable id 全域可解析」
+    // 断言是唯一防线（真实注册表若出现即红）。
+  });
+
+  it('行6：vi_ 键 vid 谎报 → 域扫红;无权威反查 → 豁免集单点钉兜底', () => {
+    // 有权威反查：vi_56_lies 键值指向 vid 55 的权威 def（vid 56 另有真身键）→ 同靶比对失败
+    {
+      const defs = [{ key: 'vi_55_auth' }, { key: 'vi_56_auth' }, { key: 'vi_56_lies' }];
+      const byKey: Record<string, number> = { vi_55_auth: 0, vi_56_auth: 1, vi_56_lies: 0 };   // 谎报键同靶 55 档
+      const auth: Record<number, string> = { 55: 'vi_55_auth', 56: 'vi_56_auth' };
+      const fail: string[] = [];
+      for (const k of Object.keys(byKey)) {
+        const m = /^vi_(\d+)_/.exec(k);
+        if (!m) continue;
+        const aKey = auth[Number(m[1])];
+        if (aKey === undefined) continue;
+        if (byKey[k] !== byKey[aKey]) fail.push(k);
+      }
+      expect(fail).toEqual(['vi_56_lies']);
+    }
+    // 无权威反查：域扫只能静默 continue → 由豁免集单点断言（恰 vi_4143_manacloakstar）
+    // 拦「无界增长」——本仓真实表已钉（上方全域别名一致性域扫尾段）。
   });
 });

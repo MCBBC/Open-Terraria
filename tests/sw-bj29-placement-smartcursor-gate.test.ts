@@ -95,6 +95,11 @@ function shell(w: World, o: ShellOpts = {}) {
     uiBlocking: false,
     mouseX: m.x, mouseY: m.y,
     mouseDown: !!o.mouseDown,
+    // ★SW-RB8a 2026-09-08：updateSmartCursor 的 controlUseItem 改电平面
+    // （TriggersSet.cs:835-841 MouseLeft∧!blockMouse∧!mouseInterface;Game 头注）——
+    // shell 的 mouseDown 语义就是"按住",电平镜像到 mouseHeld/blockMouse。
+    mouseHeld: !!o.mouseDown,
+    blockMouse: false,
   };
   const slots: Array<{ id: number; stack: number; favorited: boolean } | null> = [
     { id: ITEM_DEFS.indexOf(o.held ?? PLAT_ITEM), stack: 99, favorited: false },
@@ -239,6 +244,7 @@ describe('SW-BJ29 生命周期：智能开置锁 → 智能关（曾整支跳过
     // 目标并重写新锁（Step_Platforms 命中拍即锁——锁清断言归 A 组/lookup 级）,门放行,
     // 放置落智能目标位（非智能态无此段——skip 臂只跑前奏不重锁）
     g.input.mouseDown = false;
+    g.input.mouseHeld = false;   // ★SW-RB8a：controlUseItem 读电平面,松键两字段同步
     g.player.useTime = 0;
     g.updateSmartCursor();
     const sx = g.smartCursor.x, sy = g.smartCursor.y;
@@ -255,6 +261,7 @@ describe('SW-BJ29 生命周期：智能开置锁 → 智能关（曾整支跳过
     primeLock(g);
     g.renderer.fullMap.open = true;                     // blocked 帧（lookup 整支跳过,前奏仍跑）
     g.input.mouseDown = false;
+    g.input.mouseHeld = false;   // ★SW-RB8a：电平面同步
     g.updateSmartCursor();
     expect(g.smartCursor.lockedContinuity).toBeNull();
   });

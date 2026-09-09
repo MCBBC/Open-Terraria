@@ -62,6 +62,10 @@ export interface MusicInput {
   };
   /** 血月（夜晚森林/海洋/风暴分支 2 号曲） */
   bloodMoon?: boolean;
+  /** ★IIIII224：Main.remixWorld（don't dig up）——remix 专用分支（:12818-13154） */
+  remix?: boolean;
+  /** ★IIIII224：Main.maxTilesY（UnderworldLayer = maxTilesY-200，remix 血月深带判 :12826/:12830） */
+  maxTilesY?: number;
   /** 日食（Main.cs:12814-12820：非 remix 且相机在地表半屏带内 → Eclipse 27，
    *  优先级在 Boss/入侵曲之后、城镇/群系曲之前） */
   eclipse?: boolean;
@@ -223,9 +227,13 @@ export function spaceFactor(centerY: number, maxTilesX: number, worldSurface: nu
   return (centerY / 16 - (65 + 10 * (maxTilesX / 4200) ** 2)) / (worldSurface / 5);
 }
 
-/** 按环境选曲（优先级链 1:1 对照 Main.cs:12363-13157；remixWorld 分支省略成立,
+/** 按环境选曲（优先级链 1:1 对照 Main.cs:12363-13157；
  *  沙尘暴40(:12848)/微光91(:12836)/史莱姆雨48(:12824) 省略=真实缺口(R22 登记)，
  *  月事件（链尾最高优先级）见函数首 moonMusic 分支）。
+ *  ★IIIII224（2026-09-09）：补全 remixWorld 分支（:12818/:12826/:12830/:12921/
+ *  :12960/:12983/:12987/:13025/:13052/:13094/:13129/:13150-13154）——remix 世界
+ *  地表带播太空曲 42/15（"don't dig up" 世界地表层=太空）、血月深岩层播 2、
+ *  神圣地下深带播 9、风日 44 在 remix 地表带全部禁用。
  *  天气曲嵌在原版槽位内：44 风日只覆盖森林白天曲与神圣地表，19 雨只在森林
  *  白天/夜晚/神圣地表，52 风暴只在丛林/神圣地表与非特殊地表尾槽 */
 export function pickMusic(inp: MusicInput): number {
@@ -245,6 +253,9 @@ export function pickMusic(inp: MusicInput): number {
   const rain = !!inp.weather?.rain;
   const windy = !!inp.weather?.windy;
   const bloodMoon = !!inp.bloodMoon;
+  // ★IIIII224：remix 世界旗（Main.remixWorld）+ 地狱层界（Main.UnderworldLayer = maxTilesY-200）
+  const remix = !!inp.remix;
+  const underworldLayer = (inp.maxTilesY ?? 0) - 200;
   // 我们白天 timeOfDay∈[0.25,0.75] ↔ 原版 time∈[0,54000]（晨雨 59 判定 time<10800 用）
   const vanillaTime = ((inp.weather?.timeOfDay01 ?? 0.5) - 0.25) / 0.5 * 54000;
 
@@ -258,8 +269,15 @@ export function pickMusic(inp: MusicInput): number {
   //  见 resolveEventMusic;先于日食/群系分支）
   if (inp.eventMusic && inp.eventMusic > 0) return inp.eventMusic;
   if (inp.lunarMusic && inp.lunarMusic > 0) return inp.lunarMusic;   // 兼容旧字段（塔曲已并入 eventMusic）
-  // 日食（:12814-12820：eclipse 且相机在地表半屏带内 → 27；remix 分支省略）
-  if (inp.eclipse && !belowHalf) return MUSIC.Eclipse;
+  // 日食（:12814-12820：非 remix 相机在地表半屏带内 → 27；remix 相机在岩层下 → 27）
+  if (inp.eclipse && !remix && !belowHalf) return MUSIC.Eclipse;
+  if (inp.eclipse && remix && inp.centerY > inp.rockLevel * 16) return MUSIC.Eclipse;
+  // remix 血月（:12826/:12830）：岩层下~地狱层且非双邪恶 → 2；地狱层且 X 居中带 → 2
+  if (remix && bloodMoon && !s.zoneCrimson && !s.zoneCorrupt
+      && inp.centerY > inp.rockLevel * 16 && inp.centerY <= underworldLayer * 16) return MUSIC.Eerie;
+  if (remix && bloodMoon && inp.centerY > underworldLayer * 16
+      && inp.centerX / 16 > inp.maxTilesX * 0.37 + 50
+      && inp.centerX / 16 < inp.maxTilesX * 0.63) return MUSIC.Eerie;
 
   // 城镇曲（昼 :12840 / 夜 :12844：≥3 城镇 NPC 且非暗影烛;白天需(无云且无风)或地下带,
   //  夜晚需(非血月且无云)或地下带——本仓缺「|| belowHalf」地下带支(R22 登记中项))
@@ -294,26 +312,47 @@ export function pickMusic(inp: MusicInput): number {
   // 丛林（:12940-12958：岩石层下 54 深地丛林；表层风暴 52 在昼夜曲前；昼 7 夜 55。
   //  原版另有爬升滞回支 :12944——54 在播且相机在 rockLayer-50 格带内不切表曲,本仓缺,R22 登记)
   if (s.zoneJungle) {
+    // ★IIIII224 丛林 remix（:12921-12935）：岩层下 7；地表带 42/15（太空曲）；中间带 54。
+    //  滞回支（:12927 newMusic==7 且 (rock-50) 格带内保持 7）与原版非 remix 54 滞回同属
+    //  R22 登记缺口（需上一帧曲状态），此处省略=非粘滞
+    if (remix) {
+      if (inp.centerY > inp.rockLevel * 16 + halfScreen) return MUSIC.UndergroundJungle;
+      if (inp.centerY < inp.worldSurface * 16 + halfScreen) return inp.isDay ? MUSIC.SpaceDay : MUSIC.SpaceNight;
+      return MUSIC.UndergroundJungle;
+    }
     if (inp.centerY > inp.rockLevel * 16 + halfScreen) return MUSIC.UndergroundJungle;
     if (storm && atSurface) return MUSIC.Storm;
     return inp.isDay ? MUSIC.JungleDay : MUSIC.JungleNight;
   }
-  // 雪原（:12961-12981：地下 20 冰雪，地表 14）
-  if (s.zoneSnow) return belowHalf ? MUSIC.Ice : MUSIC.Snow;
-  // 地下分支（:12983-13040：y ≥ surface+half 且非海洋）
+  // 雪原（:12960-12981：地下 20 冰雪，地表 14；★IIIII224 remix：岩层下 14、
+  //  地表带 42/15 太空曲、普通地下 20）
+  if (s.zoneSnow) {
+    if (belowHalf) return remix && inp.centerY > inp.rockLevel * 16 + halfScreen ? MUSIC.Snow : MUSIC.Ice;
+    if (remix) return inp.isDay ? MUSIC.SpaceDay : MUSIC.SpaceNight;
+    return MUSIC.Snow;
+  }
+  // 地下分支（:12983-13040：y ≥ surface+half 且（remix 或非海洋深渊））
   const ocean = inp.ocean ?? s.zoneBeach;
-  if (belowHalf && !ocean) {
-    if (s.zoneHallow) return MUSIC.UndergroundHallow;
+  if (belowHalf && (remix || !ocean)) {
+    // ★IIIII224 remix 神圣地下（:12987）：岩层下带 → 9（地表神圣曲），否则 11
+    if (s.zoneHallow) return remix && inp.centerY >= inp.rockLevel * 16 + halfScreen ? MUSIC.Hallow : MUSIC.UndergroundHallow;
     // 普通地下 4/31 随机（原版 :13002 仅当两曲都不在播时重掷 + 重掷清另一首 fade
     //  :13016/:13020;本仓 state 一经掷出整局粘死=R22 登记中项,需 IsTrackPlaying 语义配合）
     if (inp.state.ugMusic === 0) inp.state.ugMusic = Math.random() < 0.5 ? MUSIC.Underground : MUSIC.UndergroundAlt;
+    // ★IIIII224 remix 地下覆写（:13025-13033）：岩层~maxTilesY-350 格带内
+    //  雨天 19 > 地下沙漠 21 > 风日 44，压过 ugMusic 粘性随机
+    if (remix && inp.centerY / 16 > inp.rockLevel && inp.centerY / 16 < (inp.maxTilesY ?? 0) - 350) {
+      if (rain) return MUSIC.Rain;
+      if (s.zoneDesert) return MUSIC.Desert;
+      if (windy) return MUSIC.WindyDay;
+    }
     return inp.state.ugMusic;
   }
-  // 神圣地表（:13042-13059：仅白天分支；风暴 52 > 雨 19 > 风日 44 > 神圣 9）
+  // 神圣地表（:13042-13059：仅白天分支；风暴 52 > 雨 19 > 风日 44(!remix :13052) > 神圣 9）
   if (inp.isDay && s.zoneHallow) {
     if (storm) return MUSIC.Storm;
     if (rain) return MUSIC.Rain;
-    if (windy) return MUSIC.WindyDay;
+    if (windy && !remix) return MUSIC.WindyDay;
     return MUSIC.Hallow;
   }
   // 风暴尾槽（:13061-13071：非神圣地表；血月优先 2）
@@ -324,13 +363,16 @@ export function pickMusic(inp: MusicInput): number {
     if (town) return inp.isDay ? MUSIC.TownDay : MUSIC.TownNight;
     return inp.isDay ? MUSIC.OceanDay : MUSIC.OceanNight;
   }
+  // ★IIIII224 remix 默认臂（:13094-13097）：remix 世界森林/其余地表带播太空昼夜曲
+  //  （排位在海洋分支后、森林昼夜前）
+  if (remix) return inp.isDay ? MUSIC.SpaceDay : MUSIC.SpaceNight;
   // 森林昼夜（:13098-13133）
   if (inp.isDay) {
     // 雨天：晨雨 59（time<10800）否则 19（:13102-13108）
     if (rain) return vanillaTime < 10800 ? MUSIC.MorningRain : MUSIC.Rain;
-    // 白天 1/18 随机粘性；风日覆盖为 44（:13113-13133）
+    // 白天 1/18 随机粘性；风日覆盖为 44（:13113-13133，!remixWorld 门 :13129）
     if (inp.state.dayMusic === 0) inp.state.dayMusic = Math.random() < 0.5 ? MUSIC.OverworldDay : MUSIC.OverworldDayAlt;
-    return windy ? MUSIC.WindyDay : inp.state.dayMusic;
+    return windy && !remix ? MUSIC.WindyDay : inp.state.dayMusic;
   }
   // 夜晚（:13135-13149：血月 2 > 雨 19 > 夜曲 3）
   if (bloodMoon) return MUSIC.Eerie;

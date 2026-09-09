@@ -304,10 +304,14 @@ export class WeatherRenderer {
       const ty = Math.max(0, Math.min(world.h - 1, Math.floor(y / TILE)));
       // 起点须非 SolidTile 实心且无墙（Rain.cs:86：WorldGen.SolidTile 排除半砖/斜坡——
       // ★曾用 isSolid 类型位 → 斜坡/半砖屋顶正上方一列不生成雨）
+      // ★IIIII224：remix 世界逐滴门恒真（Rain.cs:86 `Main.remixWorld || Main.gameMenu
+      //  || (!SolidTile && wall<=0)`）——remix 天落雨穿层,实心/带墙格照生成
       const st = world.store;
-      const solid = solidTileExact(st, tx, ty);
-      const wall = st.wall[st.idx(tx, ty)];
-      if (solid || wall > 0) continue;
+      if (!world.seedFlags?.remix) {
+        const solid = solidTileExact(st, tx, ty);
+        const wall = st.wall[st.idx(tx, ty)];
+        if (solid || wall > 0) continue;
+      }
       this.spawnRain(x, y);
     }
   }
@@ -374,6 +378,12 @@ export class WeatherRenderer {
       d.y += d.vy;
       // 消亡门（Rain.Update :120）：SolidCollision(pos,2,2)（半砖下 8px 才算）‖
       // 液面感知 WetCollision(pos,2,2)（浅水上缘干）‖ 屏底 +100
+      // ★IIIII224（Rain.cs:113-129）：remix 世界雨滴只按屏底消亡——不撞实心/湿面、
+      //  不出溅花尘（remix 雨穿透地形直落,直到坠出屏底）
+      if (world.seedFlags?.remix) {
+        if (d.y > camY + viewH + 100) d.active = false;
+        continue;
+      }
       const solid = solidCollisionBox(st, d.x, d.y, 2, 2);
       const wet = wetCollisionBox(st, d.x, d.y, 2, 2);
       if (solid || wet || d.y > camY + viewH + 100) {

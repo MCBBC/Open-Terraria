@@ -28,7 +28,7 @@ import { SettingsPanel } from './ui/Settings';
 import { BestiaryPanel } from './ui/BestiaryPanel';
 import { CharSelectPanel } from './ui/CharSelect';
 import { WorldSelectPanel } from './ui/WorldSelect';
-import { WorldCreationPanel } from './ui/WorldCreation';
+import { WorldCreationPanel, applyHalloweenSeasonSeed } from './ui/WorldCreation';
 import { CharCreation } from './ui/CharCreation';
 import { UIWorldLoadState } from './vui/states/UIWorldLoadState';
 import { MenuBackground } from './render/MenuBackground';
@@ -173,6 +173,27 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   let menuRunning = false;
   let titleMenu: TitleMenu | null = null;
   let devMode = false;
+  // IIII225：标题曲种子覆写（Main.cs:12626-12656 gameMenu 选曲支 1:1）——
+  // 会话闩 = 最近一次【创建世界】的种子表现旗（cs WorldGen.drunkWorldGen 等生成期旗
+  // 只在下次生成 Reset 时清零,读档不改旗 → 读档流不触本闩）。默认 undefined =
+  // 本仓 TitleIntro 50（TitleMusicStyle 子系统未建模,50/51 档登记）。
+  let lastGenScreenFlags: import('./vui/states/UIWorldLoadState').GenScreenSeedFlags | null = null;
+  const seedMenuMusicId = (): number | undefined => {
+    const f = lastGenScreenFlags;
+    if (!f) return undefined;
+    if (f.drunkWorldGen) {
+      if (f.remixWorldGen) return 70;                   // :12638-12641 remix
+      // onlyShimmerOceanWorldsGeneration（Main.cs:2775-2782）= drunk×tenth×!remix
+      // ×!everything → !notTheBees（getGoodWorldGen 不在 getter 里,cs 原文无）
+      if (f.tenthAnniversaryWorldGen && !f.zenithWorld && !f.notTheBees) return 72;
+      if (f.vampireSeed) return 75;                     // :12646-12649
+      if (f.notTheBees) return 86;                      // :12650-12653
+      return 60;                                        // :12654-12657
+    }
+    if (f.remixWorldGen) return 8;                      // :12659-12662
+    if (f.tenthAnniversaryWorldGen) return 11;          // :12667-12670
+    return undefined;
+  };
   // 设置项加载 + 下发（M6）
   void options.load();
   options.onChange((d) => {
@@ -1074,11 +1095,18 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 创建新世界：原版生成页（双进度条+实时地图预览）→ 注册槽位 → 进游戏 */
   async function createWorldFlow(cfg: { name: string; seed: string; w: number; h: number; size: number; difficulty: number; evil: -1 | 0 | 1 }) {
+    // ★IIIII226 halloweenGen 日期臂（vanilla FinishCreatingWorld UIWorldCreation.cs:984-986
+    //   → WorldFileData.SetSeedToRandomWithCurrentEvents WorldFileData.cs:417-425）：种子为空
+    //   或特殊种子文本时,现实万圣日期窗（Main.isHalloweenDateNow Main.cs:13313-13327）
+    //   ⇒ halloweenGen 启用 + 种子文本前缀 "pumpkinseason|"（gen 期南瓜铺面
+    //   pumpkinSeasonArm 与存档 seedText 双消费）；窗外/普通种子原样（零触碰）。
+    //   空种子随机推导维持本仓原位（String(Date.now())），vanilla 为 SetSeedToRandom。
+    const seedFinal = applyHalloweenSeasonSeed(cfg.seed || String(Date.now()));
     // ★IIIII215b：seedText 下传 → 生成屏彩蛋旗标派生（drunk 乱码/蜜蜂文案/FTW 反写/
     //   十周年 HotPink/醉酒帧闪；UI 层私有 UnifiedRandom,零世界 RNG 耦合）；
     //   genSounds=true → 生成流首尾双 MenuOpen（WorldGen.cs:6541/:6551 1:1）。
     //   读档三路（loadFromKey/quickload/导入）不传 seed → 彩蛋全关（原版加载路径同态）。
-    const loadState = new UIWorldLoadState(cfg.evil, { seedText: cfg.seed, genSounds: true });
+    const loadState = new UIWorldLoadState(cfg.evil, { seedText: seedFinal, genSounds: true });
     (window as unknown as { __swGenUi?: UIWorldLoadState }).__swGenUi = loadState; // 探针句柄(同 __swMenuBg 判例)
     VUI.setState(loadState);
     // ★IIIII218 生成屏背景动效接线（CXCI §6② 移交三支）：logo remix 倒置摆动/
@@ -1087,6 +1115,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     //   生成即置 + Main.cs:20051-20053 生成期每帧恒置——背景组重掷冻结）
     titleMenu?.setGenFlags(loadState.screenFlags);
     menuBg?.setGenFlags(loadState.screenFlags);
+    // IIII225：生成期起标题曲随种子切（cs gameMenu 选曲支在生成期同样生效——
+    // WorldGen.drunkWorldGen 置位后 gameMenu 仍真）。会话闩同步更新。
+    lastGenScreenFlags = loadState.screenFlags;
+    audio.play('title', seedMenuMusicId());
     menuBg?.setBGLock(true);
     // ★宏任务让路(#三开压测批续,与 newWorld 同纪律):makeGame 的 Game ctor 冷兜底
     // buildAssets(~1.2s)必须发生在点击 EventDispatch 之外的独立 task——本函数才是
@@ -1099,7 +1131,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       try { return new URLSearchParams(location.search).get('wprev') !== '0'; } catch { return true; }
     })();
     try {
-      await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
+      await g.newWorld(seedFinal, cfg.w, cfg.h,
         // ★第三参 local=当前原版 pass 段内 Value（GenProgress；undefined=无短条语义路径）
         (label, p, local) => loadState.setProgress(label ?? undefined, p, local),
         {
@@ -1122,7 +1154,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     }
     // onWorldReady 已进游戏；登记世界槽位并保存初始数据
     const meta = await worldStore.register({
-      name: cfg.name, seed: cfg.seed, w: cfg.w, h: cfg.h,
+      name: cfg.name, seed: seedFinal, w: cfg.w, h: cfg.h,
       difficulty: cfg.difficulty, evil: cfg.evil,
     });
     currentWorld = meta;
@@ -1206,7 +1238,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   function showTitle(bgPaused = false) {
-    audio.play('title');
+    audio.play('title', seedMenuMusicId());   // IIII225：种子覆写曲（latch=最近一次创建世界）
     ui.closeAll();
     // SW 资产预载(仅生产构建):进菜单即按优先级全量后台下载 + 挂右下角进度徽标
     // (warmAll 幂等,SW 侧 keys() 过滤已下载;被系统清理只补缺=自愈)

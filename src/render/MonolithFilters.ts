@@ -430,7 +430,10 @@ export interface MonolithEnv {
    *  调用）逐通道 C=(Σrgb+7C)/10 得 Main.tileColor,其三通道均值【恰等于】天空色
    *  均值/255（7C 倾斜项在均值中相消：avg_i[(Σ+7C_i)/10] = 3Σ+7Σ /30 = Σ/3）——
    *  SceneState.cs:203-204 num9 = avg(tileColor.ToVector3()) 直接吃本均值。
-   *  null/缺省 = 首帧 tileColor 尚未产出（原版 default(Color) 全零 → num9=0 同态） */
+   *  ★SW-RB8a 2026-09-08 口径勘误：原版首帧 default(Color) 全零→num9=0;本仓
+   *  Renderer.colorOfTheSkies 声明缺省 白=[255,255,255]→首帧实况 num9=1——仅首帧
+   *  一拍差且首帧 opacity=0 不可见（Renderer 侧注同此为准）。
+   *  null/缺省 = 首帧 tileColor 尚未产出的直传态（测试用） */
   heatTileColor?: readonly [number, number, number] | null;
   /** outsideWeatherEffectIntensity（SceneState.cs:178-179：BehindBackwall ? −0.1 : 1.1,
    *  0.005/t 逼近后钳 0-1——weather.outsideWeatherEffect 同源同值） */

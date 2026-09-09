@@ -151,19 +151,17 @@ ui.onBestiary = () => flow?.openBestiary(); // 背包面板图鉴按钮（原版
 ui.onHousing = () => flow?.openHousing?.(); // 背包面板住房按钮（原版 DrawInterface_33_Housing）
 // SW-BN3 2026-09-07：背包面板设置钮 → 暂停/设置浮层（原版 playerInventory 态的
 // 设置入口 = DrawInterface_29_SettingsButton Main.cs:46287-46301,clickAction =
-// ingameOptionsWindow ? Close : Open :46294-46299——开态点击=收浮层同款 toggle,
-// 浮层开时 playerInventory 不清,收浮层回背包态）
+// ingameOptionsWindow ? Close : Open :46294-46299 同款 toggle）。
+// ★SW-RB8c 2026-09-08 勘误：Open 臂收背包（IngameOptions.cs:70）/Close 臂回背包
+// （:108）——原版设置窗与背包两态互斥,「浮层叠于背包」系 BN3 误读
 ui.onPauseMenu = () => {
   const g = flow?.game;
   if (!g) return;
   if (pausePanel) {
-    pausePanel.remove();
-    pausePanel = null;
-    g.paused = false;
-    g.input.uiBlocking = false;
+    closeInGamePause(g);   // Close 臂（:108 回背包）
     return;
   }
-  openInGamePause(g);
+  openInGamePause(g);      // Open 臂（:70 收背包）
 };
 const audio = new AudioSystem();
 let atlas: SpriteAtlas | null = null;
@@ -349,16 +347,21 @@ function initCameraModeWiring(game: Game): boolean {
  *  Main.cs:17493 的 ingameOptionsWindow 臂,事件驱动同效——autoPause 臂逐帧重算另见
  *  Game.applyAutoPauseUI,两者是原文析取式 :17496/:17500 的两支）。SW-BN3 2026-09-07
  *  起 Esc 链对齐原版（Player.cs:5026 背包开着 Esc=关背包）,浮层入口=背包内设置钮
- *  （DrawInterface_29_SettingsButton Main.cs:46287-46301,开时不清背包——浮层叠于
- *  背包是原版此钮的本相）+ 触屏暂停钮 + 死亡态链支;浮层开着 Esc=仅收浮层
- *  （:4978-4986 IngameOptions.Close,playerInventory 不清）。 */
+ *  （DrawInterface_29_SettingsButton Main.cs:46287-46301）+ 触屏暂停钮 + 死亡态链支。
+ *  ★SW-RB8c 2026-09-08 勘误（IngameOptions.cs:66-92 原文）：Open() 首段
+ *  `Main.playerInventory = false`（:70）——开浮层【收背包】（BN3「Open 不清背包/
+ *  浮层叠于背包」系误读:原版设置窗与背包两态互斥）;收浮层=Close() 置
+ *  playerInventory=true（:108）回背包,见 closeInGamePause。 */
 function openInGamePause(game: Game): void {
+  // ★SW-RB8c：Open 面=收背包（IngameOptions.cs:70;死亡态背包本关=no-op 同相）
+  // + autoPause 属主移交（背包臂 :17500 退出→浮层臂 :17496 接管,防旧属主恢复
+  // 在浮层期误解暂停）
+  game.releaseAutoPauseOwnership();
+  if (ui.inventoryOpen) ui.closeInventory();
   game.paused = true;
   pausePanel = ui.showPause({
     onResume: () => {
-      pausePanel?.remove();
-      pausePanel = null;
-      game!.paused = false;
+      closeInGamePause(game);   // ★SW-RB8c：Close 面=收浮层+回背包（:108）
     },
     onSave: () => flow?.doSave(),
     // onExport(json 档)2026-09-06 用户定案:退出正式 UI,保留 __swFlow.doExportSave()
@@ -389,6 +392,22 @@ function openInGamePause(game: Game): void {
       flow?.quitToMenu();
     },
   });
+}
+
+/** ★SW-RB8c 2026-09-08：浮层收起统一出口（链 closePause 支/onPauseMenu Close 臂/
+ *  浮层 Resume 钮三面共用）——原版 IngameOptions.Close()（:99-110,setKey==-1 门）
+ *  置 `Main.playerInventory = true`（:108）＝关设置【必回背包】;BN3「Close 不清
+ *  playerInventory/只收浮层不动背包」系误读（Open/Close 两端都写 playerInventory:
+ *  Open 收 :70/Close 开 :108,两态互斥）。死亡态豁免重开（RB6b:死亡期本仓逐 tick
+ *  强收背包,重开=1t 闪窗伪响应;原版死亡态 Close 同置 playerInventory=true 但随即
+ *  被死亡 UI 收支,本仓取稳态面,登记）。面板切换出口（onHousing/onItemSearch 等件
+ *  停车坪）不经此——SW 自有面板面,原版无对应物。 */
+function closeInGamePause(g: Game): void {
+  pausePanel?.remove();
+  pausePanel = null;
+  g.paused = false;
+  g.input.uiBlocking = false;
+  if (!g.player.dead) ui.openInventory(true);   // IngameOptions.Close :108（alive 面）
 }
 
 /** Inventory/Esc 优先级态机执行器（SW-BN2 2026-09-07：决策核提取到 ui/escapeChain
@@ -422,19 +441,21 @@ function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory' | 'p
       break;
     case 'closePause':
       // 原版 ingameOptionsWindow 支（Player.cs:4978-4986 IngameOptions.Close）：
-      // 只收浮层,playerInventory 不清（SW-BN3 2026-09-07 撤 BN2「收两层」——浮层
-      // 经背包内设置钮叠入时,Esc 收浮层回背包态,再按 Esc 才关背包 :5026;
-      // 链序 pauseOpen 在 inventoryOpen 之前,无"Esc↔暂停"死循环）
-      pausePanel?.remove();
-      pausePanel = null;
-      game.paused = false;
-      game.input.uiBlocking = false;
+      // ★SW-RB8c 2026-09-08 勘误：Close() 置 playerInventory=true（IngameOptions.cs
+      // :108）＝收浮层+回背包（BN3「只收浮层不动背包」误读已撤;autoPause 开时回包
+      // 背包即被 :17500 臂续暂停=原文 :17496→:17500 臂交接同相;链序 pauseOpen 在
+      // inventoryOpen 之前,无"Esc↔暂停"死循环）
+      closeInGamePause(game);
       break;
     case 'closeNpcDialog':
       // Player.cs:5000-5013 talkNPC 支：先关对话（Shop 级联关,closeNpcDialog
-      // →npcShopClose）,不落背包/暂停——NpcDialog 自身 Esc 捕获监听已拦截物理键,
-      // 此分支承接虚拟沿（触屏暂停钮/重绑键）与 dialogNpc 残余态
+      // →npcShopClose）——★SW-RB8c 2026-09-08 补 :5012 `Main.playerInventory =
+      // false` 半边：原版本支【无条件】清 playerInventory（对话开着 Esc=对话+背包
+      // 同收）,旧实现只关对话=背包开着对话态 Esc 背包残留。不落暂停。
+      // NpcDialog 自身 Esc 捕获监听已拦截物理键,此分支承接虚拟沿（触屏暂停钮/
+      // 重绑键）与 dialogNpc 残余态
       game.closeNpcDialog();
+      if (ui.inventoryOpen) ui.closeInventory();
       break;
     case 'closeSign':
       ui.closeSignDialog();   // Player.cs:5014-5016 sign 支

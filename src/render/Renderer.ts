@@ -125,7 +125,7 @@ import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import { GLScreenFilters, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
-import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo } from '../lighting/SkyColor';
+import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo, setFrameRemix, setFrameDontStarve } from '../lighting/SkyColor';
 import { showJourneyQuickGate } from '../ui/QuickGate';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale, hudTier } from '../ui/MobileControls';
@@ -3152,9 +3152,11 @@ export class Renderer {
       heatZoneSandstorm: !!this.scene?.zoneSandstorm,
       heatSunScorch: player.sunScorchCounter,
       // SW-BJ27 2026-09-07：沙漠支强度输入（SceneState.cs:201-207 val3）——
-      // heatTileColor=上帧 ColorOfTheSkies 快照（本帧 :3140 才写入,滞后一帧与原版
-      // SceneState.Update 读上帧 Draw 的 Main.tileColor 同语义；首帧用声明缺省
-      // 白=[255,255,255]→num9=1,但首帧 opacity=0 不可见,次帧起即真实值）;
+      // heatTileColor=上帧 ColorOfTheSkies 快照（本帧下方 cots 才写入,滞后一帧与原版
+      // SceneState.Update 读上帧 Draw 的 Main.tileColor 同语义;★SW-RB8a 2026-09-08
+      // 与 MonolithFilters 侧"缺省 null→num9=0"注的口径勘误:本处声明缺省
+      // 白=[255,255,255]→首帧 num9=1,原版首帧 default(Color) 全零→num9=0——仅首帧
+      // 一拍差,首帧 opacity=0 不可见,次帧起即真实值,行为面无差,两注以此为准）;
       // heatOutsideWeather=weather.outsideWeatherEffect（SceneState.cs:178-179 同源）
       heatTileColor: this.colorOfTheSkies,
       heatOutsideWeather: world.weather?.outsideWeatherEffect ?? 1,
@@ -3232,8 +3234,15 @@ export class Renderer {
     // 月亮穿云仍有地板光)+闪电白(:63346-63355 bg 向 1 lerp,天空/远景/光种
     // 同步闪亮——旧全屏白闪 overlay 已退役)
     const cloudA = this.sky.weatherRef?.cloudAlpha ?? 0;
-    setFrameCloudDim(cloudA > 0 ? Math.max(0, 1 - cloudA * 0.9 * this.sky.atmoValue(cam.y)) : 1);
+    // ★IIIII224：remix 世界云压暗跳过（:64513 `cloudAlpha > 0f && !remixWorld`）
+    const remixWorld = !!world.seedFlags?.remix;
+    setFrameCloudDim(remixWorld ? 1 : (cloudA > 0 ? Math.max(0, 1 - cloudA * 0.9 * this.sky.atmoValue(cam.y)) : 1));
     setFrameLightning(this.sky.weatherRef?.lightning ?? 0);
+    // ★IIIII224：remix 帧状态（墓园压暗跳过 :64520 / 黑天幕 :64867 ——
+    //  blackSky = (remixWorld && !gameMenu) || remixWorldGen；本渲染路径恒 !gameMenu）
+    setFrameRemix(remixWorld, remixWorld);
+    // ★IIIII224：dontStarve 夜色链（ModifyNightColor/ModifyMinimumLightColorAtNight）
+    setFrameDontStarve(!!world.seedFlags?.theConstant);
     // 群系影响(SetBackColor :63002-63228 四块;scene.biomeLightInfluence 由
     // Game 每 tick 平滑写入)——cots/skySeed 经帧状态自动消费
     setFrameBiome(this.scene?.biomeLightInfluence ?? null);
@@ -3254,7 +3263,12 @@ export class Renderer {
       const tr = cots[0] / 255, tg = cots[1] / 255, tb = cots[2] / 255;
       // GL 路径:离屏画布整段画完单次合成(层序/透明度与 2D 完全一致);
       // 2D 回退路径保留(?bggl=0 / GL 不可用)
+      // ★IIIII224（Main.cs:60577 ShouldDrawSurfaceBackground）：remix 世界游戏内
+      //  整层地表背景不画（remix 的"地表"在地图底端,原版用地下分层背景全覆盖）。
+      //  (gameMenu && remixWorldGen) 菜单例外/ (!remixWorldGen || !drunkWorldGen) 门
+      //  属 drunk 菜单域,本仓菜单不走 remixWorldGen → 恒 false,只判 remix&&!menu
       let bgDone = false;
+      const remixSkipSurfaceBg = !!world.seedFlags?.remix;
       if (this.bgGlEnabled && !this.isCpuRender()) {
         // 死实例丢弃(双开风暴中 GL 反复死亡;5s 退避防重建风暴)
         // ★统一走 acquireGL(2026-08-19 哨兵三捕真凶):初始化失败(WebGL2 缺失/
@@ -3265,13 +3279,15 @@ export class Renderer {
           glbg.resize(this.canvas.width, this.canvas.height);
           glbg.begin();
           // ★只画地表层(2026-08-20 地下背景光照修复):地下层须进世界层吃光
-          this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
+          if (!remixSkipSurfaceBg) {
+            this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
+          }
           glbg.end();
           ctx.drawImage(glbg.canvas, 0, 0);
           bgDone = true;
         }
       }
-      if (!bgDone) {
+      if (!bgDone && !remixSkipSurfaceBg) {
         this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
       }
       // ★暴风雪/沙尘暴背景色罩(#三开压测批 层位修正):原版 BlizzardSky/
@@ -4919,8 +4935,16 @@ export class Renderer {
     else if (f.zoneCrimson) target = 10;           // bgStyle 8/14
     else if (f.zoneHallow) target = 4;             // bgStyle 6/13
     else if (f.zoneSnow) target = 5;               // bgStyle 7
-    else if (f.zoneDesert) target = f.belowSurface ? 12 : 6;  // bgStyle 2（地下→地下沙漠）
+    else if (f.zoneDesert) target = !!world.seedFlags?.remix ? 6 : (f.belowSurface ? 12 : 6);  // bgStyle 2（remix 恒 6 :58291；地下→地下沙漠）
     else if (f.zoneUnderworldHeight) target = 13;  // bgStyle 4（地狱）
+    // ★IIIII224 remix default 分支（:58303-58309）：岩层下 → 7（丛林水色——remix
+    //  地下水即丛林水）、地下 → 8（洞穴水）、地表 → 0；无蘑菇分判
+    else if (!!world.seedFlags?.remix) {
+      const ty = Math.floor(cam.y / TILE);
+      if (ty > world.rockLevel) target = 7;
+      else if (f.belowSurface) target = 8;
+      else target = 0;
+    }
     else {
       // default:岩层+40 以下 → 发光蘑菇区 7 / 洞穴 8;地下 → 7;地表 → 0
       // 深度取相机中心 tile Y（原版 SceneMetrics.TileCenter）
@@ -15214,7 +15238,15 @@ export class Renderer {
       if (/spike|dart_trap|boulder|landmine|geyser|flame_trap|v_21[3-9]|v_137|v_138|v_139|v_140/i.test(k)) danger.add(i);
       if (/corrupt|crimson|ebon|crims|hallow|pearl/i.test(k)) biome.add(i);
     }
-    return { spelunker, danger, biome };
+    // ★IIIII224（Main.cs:22008/22013 IsTileBiomeSightable）：remix 世界 474 腐蚀块
+    //  （紫 200,100,240）/195 血肉块（红 255,100,100）纳入群系视野
+    const lesion = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === 474);
+    const flesh = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === 195);
+    // IIII225（TileDrawing.cs:4476 IsTileDangerous）：FTW 世界 230 脆蜂蜜块计入
+    //  危险感知高亮（`flag |= Main.getGoodWorld && typeCache == 230`）——world 旗在
+    //  消费端判（本静态表无世界上下文,同 remix lesion/flesh 判例）
+    const crispyHoney = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === 230);
+    return { spelunker, danger, biome, lesion, flesh, crispyHoney };
   })();
 
   /** R3 视觉 Buff 高亮叠层：Spelunker(9)/Dangersense(111)/Hunter(17)/BiomeSight(343) */
@@ -15244,8 +15276,15 @@ export class Renderer {
         if (spel && Renderer.HIGHLIGHT_SETS.spelunker.has(t)) {
           ctx.fillStyle = '#FFC419';
           ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
-        } else if (dang && Renderer.HIGHLIGHT_SETS.danger.has(t)) {
+        } else if (dang && (Renderer.HIGHLIGHT_SETS.danger.has(t)
+          || (!!world.seedFlags?.getGoodWorld && t === Renderer.HIGHLIGHT_SETS.crispyHoney))) {
           ctx.fillStyle = '#FF4040';
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+        } else if (biomeS && !!world.seedFlags?.remix && t === Renderer.HIGHLIGHT_SETS.lesion) {
+          ctx.fillStyle = '#C864F0';   // (200,100,240) 腐蚀块 :22008
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+        } else if (biomeS && !!world.seedFlags?.remix && t === Renderer.HIGHLIGHT_SETS.flesh) {
+          ctx.fillStyle = '#FF6464';   // (255,100,100) 血肉块 :22013
           ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
         } else if (biomeS && Renderer.HIGHLIGHT_SETS.biome.has(t)) {
           ctx.fillStyle = '#C060FF';

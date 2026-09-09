@@ -161,9 +161,13 @@ const tileFrameBottomOk = (st: TileStore, tx: number, ty: number): boolean => {
   const t = st.type[i];
   const sh = sheetOf(t);
   const isPlat = PLATFORM_SHEETS.has(sh);
-  const defined = isPlat
-    ? topEdgeCanBeAttachedTo(st, tx, ty + 1)
-    : !st.half[i] && !(st.slope[i] === 1 || st.slope[i] === 2);
+  // SW-RB8a 2026-09-08：num2 门（:87413）是【并集】——`(Platforms∧TopEdge) ∨
+  // (!halfBrick ∧ !topSlope)`，第二支不查 active/inActive/Platforms。旧码平台
+  // 只走 TopEdge 单支 → 已致动平台（TopEdge 的 !inActive 拒）下火把被误判失撑
+  // （原版第二支 `!halfBrick∧!topSlope` 对 slope 字节恒 0 的平台恒真 → 托炬）。
+  // 非 platform 时第一支按 Platforms[]短路恒假，两支并集退化为原文第二支。
+  const defined = (isPlat && topEdgeCanBeAttachedTo(st, tx, ty + 1))
+    || (!st.half[i] && !(st.slope[i] === 1 || st.slope[i] === 2));
   if (!defined) return false;
   return vanTileSolid(t) && (!NO_ATTACH_SHEETS.has(sh) || isPlat);
 };
@@ -182,25 +186,45 @@ const tileFrameSideOk = (
   if (IS_BEAM_SHEETS.has(sh)) return true;
   if (!IS_A_TREE_TRUNK_SHEETS.has(sh)) return false;
   const isTrunkTypeAt = (x: number, y: number): boolean =>
-    st.inBounds(x, y) && IS_A_TREE_TRUNK_SHEETS.has(sheetOf(st.type[st.idx(x, y)]));
+    // SW-RB8a 2026-09-08：TileFrame 侧锚的树干对角读有 active() 门（:87425-87440
+    // `tile6..9.active()` 才赋 tree 族）——幽灵格（flags=0 残型）不算。旧裸 type 读
+    // 会把"上/下邻已挖掉但残型还在"的树干判成三连=该掉不掉。PlaceTile 路的
+    // sideArmPlace 仍保持裸读（:60326 tile5-8 无 active 门,原文两处语义本就不同）。
+    st.inBounds(x, y) && st.hasTile(x, y)
+    && IS_A_TREE_TRUNK_SHEETS.has(sheetOf(st.type[st.idx(x, y)]));
   return isTrunkTypeAt(sx, ty - 1) && isTrunkTypeAt(sx, ty + 1);
 };
 
 /**
- * 已放置火把的锚是否仍然成立（支撑被挖掉时判定掉落；TileFrame 火把支 1:1 的
- * 「任一锚仍在=TileFrame 重锚不杀」按现存 frameX 档位判,重锚定改帧由调用域
- * checkTorchDetach 的掉落语义承担——本仓无逐拍 TileFrame 重算,档位即判定域）。
- * frameX 0 直立：底锚（含平台）或墙锚任一在即成立（vanilla 行为：拆地板留墙不掉）。
- * 未点燃变体（+66）先剥偏移再判锚——此前 88（22+66）/110（44+66）落进 default，
- * 侧锚丢失不掉、只剩侧锚却误判成立。
+ * TileFrame 火把支的重锚帧选取（:87440-87459 优先序：底(0) → 左(22) → 右(44) →
+ * 墙(0)；全部失败 = -1 → KillTile）。与 torchAnchorFrame（PlaceTile case 4 接受面）
+ * 臂定义不同：TileFrame 底锚平台走并集门（见 tileFrameBottomOk）、侧锚实心支只排
+ * noAttach 不排 NotReallySolid/solidTop——重锚定必须按 TileFrame 口径,勿混用。
+ * ★SW-RB8a 2026-09-08 新增：checkTorchDetach 的重锚写帧消费（原版 TileFrame 每次重算
+ * 都按本序重写 frameX,未点燃偏移由调用域加回）。
+ */
+export function torchReanchorFrame(st: TileStore, tx: number, ty: number): number {
+  if (!st.inBounds(tx, ty)) return -1;
+  if (tileFrameBottomOk(st, tx, ty)) return 0;
+  if (tileFrameSideOk(st, tx, ty, -1)) return 22;
+  if (tileFrameSideOk(st, tx, ty, 1)) return 44;
+  if (st.wall[st.idx(tx, ty)] !== 0) return 0;
+  return -1;
+}
+
+/**
+ * 已放置火把是否仍有任一可用锚（TileFrame 火把支存活判定 1:1）。
+ * ★SW-RB8a 2026-09-08 翻案：原版 TileFrame（:87441-87459）每次重算按「底 → 左 →
+ * 右 → 墙」优先序【重选】锚位,只在四臂全空才 KillTile（:87457-87459）——档位
+ * （现 frameX）不影响存活,只决定帧。旧码按现存档位判死：左锚火把左边被挖但
+ * 底/墙仍在 → 原版重锚成直立保留,旧码误判掉落（火烧已放火把家族）。
+ * 未点燃变体（+66）不影响本判定（判定与点亮态正交,调用域剥/加偏移）。
  */
 export function torchStillAnchored(st: TileStore, tx: number, ty: number, frameX: number): boolean {
   if (!st.inBounds(tx, ty)) return false;
-  switch (torchLitFrame(frameX)) {
-    case 22: return tileFrameSideOk(st, tx, ty, -1);
-    case 44: return tileFrameSideOk(st, tx, ty, 1);
-    default: return tileFrameBottomOk(st, tx, ty) || st.wall[st.idx(tx, ty)] !== 0;
-  }
+  void frameX;
+  return tileFrameBottomOk(st, tx, ty) || tileFrameSideOk(st, tx, ty, -1)
+    || tileFrameSideOk(st, tx, ty, 1) || st.wall[st.idx(tx, ty)] !== 0;
 }
 
 // ---- 水炬（TileObjectData :4604-4616 addSubTile 8/11/17）：水中不死、可水中放置 ----

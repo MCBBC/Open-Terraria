@@ -14,8 +14,9 @@
 //      （≈ activeSound.Volume=:28118）、counter 归零拆轨（≈ loopingCondition）、
 //      死亡档 −2 / 存活档 −6 衰减（:28100-28106）。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { Sfx, AMBIENT_FILES, trackVolumeFor } from '../src/core/Sfx';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -109,9 +110,17 @@ describe('SoundPlayOverrides 机制（ActiveSound.cs:36-42/:138-161 同构）', 
 
 describe('覆写表全集 = 1 条（Player.cs:28111-28114 吸血鬼炽灼嘶声环）', () => {
   it('SoundID.VampireSizzle 素材在库（CreateTrackable("sizzle")，SoundID.cs:1039）', () => {
-    const wav = fileURLToPath(new URL('../public/sounds/sizzle.wav', import.meta.url));
-    const head = readFileSync(wav).subarray(0, 4);
-    expect([...head]).toEqual([0x52, 0x49, 0x46, 0x46]);   // 'RIFF'
+    // IIII225 校注：音频管线 2026-09-03 起落盘 mp3/opus（public/sounds 全库无 .wav），
+    // 原 RIFF 断言钉死 wav 变体=格式迁移陈旧——素材在库意图不变,三变体任一在库即过
+    const dir = fileURLToPath(new URL('../public/sounds/', import.meta.url));
+    const candidates = ['sizzle.wav', 'sizzle.mp3', 'sizzle.opus'];
+    const present = candidates.filter((f) => existsSync(join(dir, f)));
+    expect(present.length).toBeGreaterThan(0);
+    const head = readFileSync(join(dir, present[0])).subarray(0, 3);
+    const isWav = present[0].endsWith('.wav') && head[0] === 0x52;
+    const isMp3 = present[0].endsWith('.mp3') && (head[0] === 0x49 || head[0] === 0xff);
+    const isOpus = present[0].endsWith('.opus') && [...head.slice(0, 4)].join('') === 'OggS';
+    expect(isWav || isMp3 || isOpus).toBe(true);
   });
 
   it('SoundType.Sound（CreateTrackable 默认 :1180）→ master 轨，不被环境音滑杆吞', () => {

@@ -592,7 +592,8 @@ import { runMicroBiomesPass } from './vanilla/MicroBiomesPass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
 import { runDirtRockWallRunnerPass } from './vanilla/DirtRockWallRunnerPass';
-import { runSmoothWorldPass, runWaterfallLipPass, setKillTileGetGood, setKillTileTailFlags } from './vanilla/HalfBrickPass';
+import { runSmoothWorldPass, runWaterfallLipPass, setKillTileGetGood, setKillTileTailFlags, killTile, squareTileFrame } from './vanilla/HalfBrickPass';
+import { spawnIsAreaValidSpawn, spawnForceClearArea } from '../spawn/SpawnPlacement';   // ★IIIII226 noSurface 随机落点臂（Player.Spawn_* 移植面）
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsIcePass, runExposedGemsUndergroundPass, runGemTreesPass } from './vanilla/GemPasses';
 import { runCaveWallsPass, runCaveWallVarietyPass, runJungleMudWallsPass } from './vanilla/CaveWallsPass';
@@ -2634,6 +2635,74 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
   //   期间泡泡块(379)视为非实心——非 skyblock 分支。尾 cs:19731 还原 true（见函数尾）。
   //   本仓生成期从不放置 379，翻转仅存档时间线。
   flipGenSolid([379], false);
+  // ★IIIII226：noSurface「mole people」随机落点支（cs:19641-19668）——214b 备案清偿
+  //   （content-parity「备案债（未越刀）」条目：vanilla SpawnPoint 同委托的
+  //   SecretSeed.noSurface.Enabled 随机落点支此前整缺）。原版语义：世界中心
+  //   (maxTilesX/2, maxTilesY/2) ±300/±200 盒内拒绝采样 ≤1000 次（每 attempt 必掷
+  //   Next(600)×Next(400)——★先 X 后 Y 双掷在前、InWorld(10) 门在后），收
+  //   `!active && liquid<=0 && Player.Spawn_IsAreaValidSpawn(x,y,generatingSpawn:true)`
+  //   的四行空腔（floorY 行本体inactive+上方 3 行净空）；全败回退中心点 +
+  //   Spawn_ForceClearArea（3×3 破块排水）。落点写 spawnTileX/Y（floorY 行口径与
+  //   常规臂一致,消费端自行抬高）；此后 fall-through 到 remix relocation（cs:19740
+  //   在 if/else 之外——组合种子两臂先后生效）与 tileSolid[379] 还原。
+  //   ★RNG：本支在十周年沙滩 roll（cs:19689 SpawnOnBeach Next(2)）之前接管——
+  //   vanilla noSurface 分支不掷 Next(2),故非 noSurface 世界掷流零变化（旗关零掷）。
+  //   车道例外备案：本臂属 src/world/gen 域,按交办书「214b 备案清偿」明示越刀,
+  //   严格 seedFlags?.noSurface 门控。
+  if (world.seedFlags?.noSurface) {
+    const num3 = Math.floor(store.w / 2);                       // cs:19637 num3 = maxTilesX/2
+    const num4 = Math.floor(store.h / 2);                       // cs:19642 num4 = maxTilesY/2
+    const num5 = 300;                                           // cs:19643
+    const num6 = 200;                                           // cs:19644
+    let placed = false;                                         // cs:19646 flag2
+    let sxNS = num3, syNS = num4;                               // cs:19632-19634 缺省=中心
+    for (let num7 = 1000; num7 > 0; num7--) {                   // cs:19647-19651 while(true){num7--; if(num7<=0) break;}
+      const num8 = num3 - num5 + rng.nextInt(num5 * 2);         // cs:19652 Next(600)
+      const num9 = num4 - num6 + rng.nextInt(num6 * 2);         // cs:19653 Next(400)
+      // cs:19654 InWorld(num8, num9, 10)
+      if (num8 >= 10 && num9 >= 10 && num8 < store.w - 10 && num9 < store.h - 10) {
+        const ni = store.idx(num8, num9);
+        // cs:19657 `!tile.active() && tile.liquid <= 0 && Spawn_IsAreaValidSpawn(...,true)`
+        if (!store.hasTile(num8, num9) && store.liquid[ni] <= 0
+          && spawnIsAreaValidSpawn(store, num8, num9,
+            { generatingSpawn: true, dualDungeonsSeed: world.seedFlags?.dualDungeons === true })) {
+          sxNS = num8; syNS = num9;                             // cs:19659-19660
+          placed = true;                                        // cs:19661
+          break;
+        }
+      }
+    }
+    if (!placed) {
+      sxNS = num3; syNS = num4;                                 // cs:19665-19666 回退中心
+      // cs:19667 Spawn_ForceClearArea(num3, num4)（Player.cs:38199-38220：3×3 破块+排水
+      //  +SquareTileFrame——killTile/squareTileFrame=HalfBrickPass 的 WorldGen 1:1 移植件;
+      //  排液走 setLiquid(0,0) 通道=lava 一并清除,与 Game 运行时 ForceClearArea 同道）
+      spawnForceClearArea(store, num3, num4,
+        (x, y) => killTile(store, rng, x, y),
+        (x, y) => {
+          if (store.liquid[store.idx(x, y)] > 0) {
+            store.setLiquid(x, y, 0, 0);                        // :38212-38215 lava(false)+liquid=0
+            squareTileFrame(store, rng, x, y);                  // :38216
+          }
+        });
+    }
+    world.spawnX = sxNS; world.spawnX0 = sxNS;                  // cs:19659 spawnTileX 写回
+    world.spawnY = Math.max(4, syNS); world.spawnY0 = Math.max(4, syNS);
+    // noSurface 支后 vanilla 落到 remix relocation（cs:19740 在 if/else 之外——组合
+    //   种子两臂先后生效）与 tileSolid[379] 还原（cs:19731）。本仓常规臂在下方延续,
+    //   故本支以「remix 臂 + 还原 + 提前 return」收口（与函数尾 remix 段逐行同构,
+    //   仅避免无门重入常规采样循环）。
+    if (world.seedFlags?.remix) {
+      world.spawnX = Math.floor(store.w / 2);                   // cs:19741（整除）
+      world.spawnX0 = world.spawnX;
+      let num14 = store.h - 10;                                 // cs:19742
+      while (num14 > 0 && solidTileFC(store, world.spawnX, num14)) num14--;   // cs:19743-19746
+      world.spawnY = Math.max(4, num14 + 1);                    // cs:19747
+      world.spawnY0 = world.spawnY;
+    }
+    flipGenSolid([379], true);
+    return;
+  }
   // ★IIIIIII6：十周年沙滩出生（cs:19689-19695 + SpecialSeedFeatures.cs:95-105）——
   //   SpawnOnBeach = tenthAnniversary && !remix && !dontStarve；取样中心 num3 =
   //   genRand.Next(2)!=0 ? maxTilesX−(beachBordersWidth+15) : +(同值)

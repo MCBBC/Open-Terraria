@@ -21,12 +21,15 @@ import { vanillaNpc, vanillaSoundFiles, NPC_STATIC_ALPHA, type VanillaNpc } from
 import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS } from '../data/vanillaNpcAmbience';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 
-/** 皇家凝胶 3090（ItemID.RoyalGel，非镇静药水）的 npcTypeNoAggro 置位表
- *  （Player.cs:14144-14168：`if (currentItem.type == 3090)` 下逐项
- *  npcTypeNoAggro[N]=true，共 23 类；字段声明 Player.cs:2858。本仓等效语义：
- *  置位源 = Calming buff（vanillaBuff 106，镇静药水）∪ 装备 3090
- *  （equipStats.royalGel，见 npcNoAggroActive），消费点 effectiveTargetDist
- *  (+1000 罚)/targetClosest(+1000)与 seekDirX(不面向门)。 */
+/** 皇家凝胶 3090（ItemID.RoyalGel）的 npcTypeNoAggro 置位表（表名沿用历史,与镇静
+ *  药水无关——1457 Player.cs:14790-14814 / 1456 :14144-14168：`currentItem.type
+ *  == 3090` 下逐项 npcTypeNoAggro[N]=true，共 23 类；字段声明 Player.cs:2977）。
+ *  ★原文全文该数组【唯一】置位源 = 装备 3090（ResetEffects :18922/UpdateDead
+ *  :17157 每帧全清）;calmed 只吃刷怪率（NPC.cs:708-712）不置旗。
+ *  ★SW-RB8c 2026-09-08 定谳清算：旧「Calming ∪ 3090」置位源并集（npcNoAggroActive,
+ *  2026-08-22 接）整体退役——原文全部消费面（接触 skip :31588/索敌 +1000 罚
+ *  :78490/:78502/不面向门 :78542/AI_001 弹射门 :61303 族/aiStyle22 :24935/:24969/
+ *  :25139）一律 gel 专面判定子 npcTypeNoAggro()/royalGelActive。 */
 export const CALMING_NO_AGGRO_TYPES: ReadonlySet<number> = new Set([
   1, 16, 59, 71, 81, 138, 121, 122, 141, 147, 183, 184, 204, 225, 244,
   302, 333, 335, 334, 336, 537, 676, 667,
@@ -35,10 +38,6 @@ export const CALMING_NO_AGGRO_TYPES: ReadonlySet<number> = new Set([
 /** npcTypeNoAggro[type] 置位源并集（Player.cs:14144-14168）：镇静 buff（Calming 106）
  *  ∪ 皇家凝胶 3090 装备（equipStats.royalGel——2026-08-22 配饰审计补接，
  *  此前装备源缺位，3090 只登记不生效）。测试桩无 equipStats 时可选链兜底 false。 */
-export function npcNoAggroActive(player: Player): boolean {
-  return !!player.buffs?.has(BuffType.Calming)
-    || !!(player as unknown as { equipStats?: { royalGel?: boolean } }).equipStats?.royalGel;
-}
 /** ★SW-BJ34 2026-09-08：皇家凝胶装备旗（仅 3090）。1457 原文 npcTypeNoAggro[] 的
  *  【唯一】置位源 = ApplyEquipFunctional `currentItem.type == 3090`（1457
  *  Player.cs:14790-14814；1456 :14144-14168），逐项置 23 类（表见
@@ -47,7 +46,7 @@ export function npcNoAggroActive(player: Player): boolean {
  *  接触伤害跳过（Player.cs:31588 Update_NPCCollision）、AI_001 弹射门（NPC.cs
  *  :61303/:61768/:61823/:61878/:61958/:62007）、aiStyle22 122 充能/开火（:24935/
  *  :24969）与 aiStyle22 垂直决策（:25139）——一律只认装备旗，不并镇静
- *  （npcNoAggroActive 的镇静并集是索敌罚项 :78490/:78542 历史接线，另行结算）。 */
+ *  （旧索敌三锚的镇静并集已随 SW-RB8c 2026-09-08 定谳撤销,同 gel 专面）。 */
 export function royalGelActive(player: Player): boolean {
   return !!(player as unknown as { equipStats?: { royalGel?: boolean } }).equipStats?.royalGel;
 }
@@ -352,7 +351,7 @@ export function fighterNotDiscouraged(game: GameHooks, e: Enemy): boolean {
   const id = e.vanillaId ?? -1;
   if (id < 0) return false;
   const w = game.world;
-  if (!(w.clock.isDay && !w.clock.eclipse)) return true;             // 夜/日食恒放行
+  if (!(w.isItDay && !w.clock.eclipse)) return true;             // 夜/日食恒放行（★IIIII224 IsItDay remix 恒 false）
   if (e.spawnedFromStatue) return true;                              // 雕像产怪豁免
   if (!(e.cy < w.groundLevel * TILE)) return true;                   // 地下(Y≤worldSurface)
   if (w.scene?.zoneGraveyard) return true;                           // 目标玩家在墓地
@@ -1666,8 +1665,10 @@ export class Enemy extends Entity {
     //   if (player.npcTypeNoAggro[type] && direction != 0) faceTarget = false;
     // faceTarget=false 时整段朝向更新跳过（direction 保留旧值）——与潜行门同落点，
     // 原版里它在 :78547 `if (faceTarget)` 外层判定，故先于潜行门生效。
+    // ★SW-RB8c 2026-09-08 定谳：npcTypeNoAggro 唯一置位源=装备 3090（:14790-14814），
+    // calmed 不置旗 → 门改 gel 专面（旧镇静并集撤销）
     if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
-      && npcNoAggroActive(player)) {
+      && royalGelActive(player)) {
       return this.facing;
     }
     if (itemAnimZero && player.aggro < 0 && this.hadTarget && !this.def.boss) {
@@ -1690,12 +1691,14 @@ export class Enemy extends Entity {
     const num = Math.abs(player.cx - this.cx) + Math.abs(player.cy - this.cy);
     let dist = num - player.aggro;                       // :78491 num -= player.aggro
     // 镇静罚项（NPC.cs:78492-78495）：player.npcTypeNoAggro[type] && direction != 0
-    // → num += 1000f。npcTypeNoAggro[type] 置位源 = 镇静 buff（CALMING_NO_AGGRO_TYPES）
-    // + 皇家凝胶 3090 装备（Player.cs:14144-14168 逐项置位 23 类）。★单人语义：NPC.direction
+    // → num += 1000f。npcTypeNoAggro[type] 置位源 = 装备 3090 皇家凝胶（1457
+    // Player.cs:14790-14814 逐项置位 23 类;镇静不置旗,NPC.cs:708-712 calmed 只吃
+    // 刷怪率——★SW-RB8c 2026-09-08 定谳,旧「镇静∪凝胶」并集撤销改 gel 专面）。
+    // ★单人语义：NPC.direction
     // 恒 ±1（本仓 facing 同构，:324 `vx>0?1:-1` / :675 缺省 1，无 0 值）→
     // 罚项对表内怪恒生效 = 索敌半径 +1000 曼哈顿（canTargetPlayerAt 门等效收窄）。
     if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
-      && npcNoAggroActive(player)) dist += 1000;
+      && royalGelActive(player)) dist += 1000;
     return dist;
   }
   /** 各 AI 族索敌门统一入口：有效距离（已按原版减 aggro）< range。
@@ -1742,7 +1745,7 @@ export class Enemy extends Entity {
       let num = this.targetMetric(p);                       // :78503-78505
       num -= p.aggro ?? 0;                                  // :78507 num -= aggro（真 Player 恒数值；?? 0 护测试桩）
       if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
-        && npcNoAggroActive(p)) num += 1000;   // :78508-78510
+        && royalGelActive(p)) num += 1000;   // :78508-78510（★SW-RB8c gel 专面）
       if (!t || num < distance) {                           // :78511
         t = true; distance = num; this.targetPlayer = p;
       }
@@ -2683,9 +2686,15 @@ export class Enemy extends Entity {
           : undefined;
         if (inject) chan.__swNextHitBucket = inject;
         try {
-          game.damagePlayer(
+          const landed = game.damagePlayer(
             damageVar(this.def.damage * gmc.damageMultiplier, -localPlayer.luck),
             this.cx, this.cy, this, true);
+          // IIII225：StatusFromNPC 携物史莱姆支（Player.cs:22559-22640，调用点
+          // :31663 `Hurt(...) > 0 && !dead && !flag2` → StatusFromNPC(npc)——
+          // 实扣>0 才授）。SlimeCanContainItems ∧ ai[1]>0 的接触携物状态梯；
+          // ★StatusFromNPC 全表其余 type 臂（蜘蛛 Chill/木乃伊流血/猪龙等
+          // :22645-22760）本批未建模=登记债（非五旗面,唯 FTW 火把史莱姆臂在此支内）
+          if (landed) this.slimeCarryContactStatus(game, localPlayer);
         } finally {
           if (inject) chan.__swNextHitBucket = undefined;
         }
@@ -3147,6 +3156,47 @@ export class Enemy extends Entity {
       default:                                                                // 钱币桶 :62239
         num = roll(3);
         return num === 0 ? 71 : num === 1 ? 72 : 73;   // 铜/银/金币（堆叠档在掉落侧）
+    }
+  }
+
+  /** IIII225：StatusFromNPC 携物史莱姆支（Player.cs:22559-22640 1:1）——携物史莱姆
+   *  （SlimeCanContainItems ∧ ai[1]>0）接触命中玩家时按体内物品授状态。
+   *  消费点=Update_NPCCollision 接触支（:31663 `Hurt>0 && !dead && !flag2`）。
+   *  梯序与 cs else-if 链同序；时长 tick→s（÷60 取整）。 */
+  private slimeCarryContactStatus(game: GameHooks, player: Player): void {
+    const a1 = this.ai1;
+    if (!(this.vanillaId !== null && Enemy.SLIME_CAN_CONTAIN_ITEMS.has(this.vanillaId) && a1 > 0)) return;
+    const buffs = player.buffs;
+    if (!buffs) return;
+    const sf = game.world.seedFlags;
+    const expert = mainExpertMode(game.world);
+    const t = (ticks: number) => Math.max(1, Math.round(ticks / 60));
+    const R = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1)); // Next(lo,hi+1)
+    const ore = a1 === 364 || a1 === 1104 || a1 === 365 || a1 === 1105 || a1 === 366 || a1 === 1106;
+    if (ore) {
+      // :22561-22581：rand(7) 重映射 {0→31,1→35,2→23,3→32,4→80,5→33,6→36},时长 60-300t
+      const pool = [BuffType.Confused, BuffType.Silenced, BuffType.Cursed, BuffType.Slow,
+        BuffType.Blackout, BuffType.Weak, BuffType.BrokenArmor];
+      buffs.apply(pool[Math.floor(Math.random() * 7)], t(R(60, 300)));
+    } else if (a1 === 3) {
+      buffs.apply(BuffType.Stoned, t(R(30, 59)));                          // :22583-22585
+    } else if (a1 === 150) {
+      buffs.apply(BuffType.Webbed, t(R(30, 59)));                          // :22587-22589
+    } else if (a1 === 147) {
+      buffs.apply(BuffType.Bleeding, t(R(600, 1199)));                     // :22591-22593
+    } else if (a1 === 8 && !!sf?.getGoodWorld) {
+      buffs.apply(BuffType.WellFed, t(R(180, 299)));                       // :22595-22597 FTW 火把史莱姆
+    } else if (a1 === 5395) {
+      let num4 = R(300, 599);                                              // :22599-22606
+      buffs.apply(BuffType.Stinky, t(num4));
+      if (expert) num4 = Math.trunc(num4 / 2);
+      buffs.apply(BuffType.Poisoned, t(num4));
+    } else if (a1 === 174) {
+      buffs.apply(BuffType.Burning, t(R(60, 179)));                        // :22607-22609
+    } else if (a1 === 1103 || a1 === 593) {
+      buffs.apply(BuffType.Frostburn, t(R(180, 359)));                     // :22611-22617
+    } else if (a1 === 3347) {
+      buffs.apply(BuffType.Cursed, t(R(60, 299)));                         // :22619-22621
     }
   }
 
@@ -3668,6 +3718,8 @@ export class Enemy extends Entity {
     // 244 雨/184/535/658/659 仆从/204 丛林刺——白天满血地表照追（曾全缺 =
     // 白天只见游荡,审计 S2,2026-08-19）
     if (this.vanillaId !== null && SLIME_FORCE_AGGRO.has(this.vanillaId)) flag3 = true;
+    // ★IIIII224（NPC.cs:61667）：remix 满血岩浆史莱姆强制不追人
+    if (game.world.seedFlags?.remix && this.vanillaId === 59 && this.hp === this.maxHp) flag3 = false;
     // ---- 244 彩虹史莱姆（1457 :61698-61702，R6-B 2-4）：flag3=true + ai[0]+=2
     // 每 tick 无条件（空中也计）→ 跳频约 3×（曾只接 Disco 光，ai[0]+=2 缺）----
     if (this.vanillaId === 244) this.ai0 += 2;
@@ -3741,7 +3793,7 @@ export class Enemy extends Entity {
       if (flag3) this.ai0 += 1;                                  // :61964-61967
       this.ai0 += 1;                                             // :61968
       const vidS = this.vanillaId ?? 0;
-      if (vidS === 59) this.ai0 += 2;                            // :61969-61972 岩浆史莱姆
+      if (vidS === 59 && !game.world.seedFlags?.remix) this.ai0 += 2;   // :61969-61972 岩浆史莱姆（★IIIII224 !remix 门 :62172）
       if (vidS === 71) this.ai0 += 3;                            // :61973-61976 地牢史莱姆
       if (vidS === 667) this.ai0 += 3;                           // :61977-61980 金史莱姆
       if (vidS === 138) this.ai0 += 2;                           // :61981-61984 微光史莱姆
@@ -3763,15 +3815,15 @@ export class Enemy extends Entity {
         if (stage === 3) {
           // 大跳（L62055-62059）+ 59 岩浆史莱姆跳力加成（S4，:62049-62057）
           this.vy = -8;
-          if (vidS === 59) this.vy -= 2;
+          if (vidS === 59 && !game.world.seedFlags?.remix) this.vy -= 2;   // ★IIIII224 !remix 门 :62252
           this.vx += 3 * dir;
-          if (vidS === 59) this.vx += 0.5 * dir;
+          if (vidS === 59 && !game.world.seedFlags?.remix) this.vx += 0.5 * dir;
           this.ai0 = -200;
         } else {
           // 小跳（L62062-62070）+ 59 追加 2*dir（:62065-62068）
           this.vy = -6;
           this.vx += 2 * dir;
-          if (vidS === 59) this.vx += 2 * dir;
+          if (vidS === 59 && !game.world.seedFlags?.remix) this.vx += 2 * dir;   // ★IIIII224 !remix 门 :62268
           this.ai0 = stage === 1 ? -120 + num54 : -120 + num54 * 2;
         }
         // :62079-62083 659 粉仆从跳乘区（S5）
@@ -3968,7 +4020,8 @@ export class Enemy extends Entity {
         this.ai2 = 200;
       }
       if (this.vy > 0) this.slimeWetX = this.x;
-      if (this.vanillaId === 59) {
+      // ★IIIII224（NPC.cs:62095）：59 水中上浮臂带 !remix 门——remix 岩浆史莱姆不泳
+      if (this.vanillaId === 59 && !game.world.seedFlags?.remix) {
         if (this.vy > 2) this.vy *= 0.9;
         else if (this.dirY < 0) this.vy -= 0.8;
         this.vy -= 0.5;
@@ -9686,9 +9739,10 @@ export class Enemy extends Entity {
       // cs:45244-45247：目标失效或中心距 ≥300 → 渐隐（本仓目标=主角，死亡由分发传 null）
       let fading = !player
         || Math.hypot(player.cx - this.cx, player.cy - this.cy) >= 300;
-      // cs:45248-45252：非 remix 世界（本仓无 remix）且目标玩家不在神圣 → 上限抬 60 且渐隐
+      // cs:45248-45252：非 remix 世界且目标玩家不在神圣 → 上限抬 60 且渐隐
       //（scene 缺席按"在神圣"处理——不因快照缺失误触发渐隐）
-      if (player && game.scene && !game.scene.zoneHallow) { cap = 60; fading = true; }
+      // ★IIIII224：补 !remixWorld 门——remix 世界 661 不渐隐（原注释"本仓无 remix"陈旧）
+      if (player && game.scene && !game.scene.zoneHallow && !game.world.seedFlags?.remix) { cap = 60; fading = true; }
       const f = lacewingFadeStep(this.ai2, fading, cap);
       this.ai2 = f.ai2;
       if (f.despawn) { this.dead = true; return; }             // cs:45254-45262
@@ -12708,7 +12762,8 @@ export class Enemy extends Entity {
     //   跑 → NPC 自身 dead 位无对应消费面（登记）。兜底 `dist > T*120 → dead=true`
     //   同为自加偏离一并摘除——离屏退场统一由 CheckActive 四步承担（boss 归零翻假
     //   :78791-78794,无需 AI 层自杀;旧兜底会把"玩家死后漂离"曲解为瞬灭）
-    if (game.world.clock.isDay) {
+    // ★IIIII224：Main.IsItDay()（:20121；remix 世界恒 false）——非渲染昼夜
+    if (game.world.isItDay) {
       this.vy -= 0.04;
       this.encourageDespawn(10);
       this.x += this.vx; this.y += this.vy;

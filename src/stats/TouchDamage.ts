@@ -65,9 +65,11 @@ export const TOUCH_DESTROY = setOf([32, 69, 352, 655]);
  * 230 因 TouchDamageHot 命中 fireWalk=false 会生效……原版被 CanTileHurt
  * 第一闸拦住,这里同闸:230 排除。
  */
-export function canTileHurt(t: number, fireWalk: boolean): boolean {
-  if (t === tid(230)) return false; // 仅 For-the-Worthy 种子,本作不支持
-  if (t === tid(80)) return false;   // 仙人掌仅 The Constant 种子造成接触伤害(Collision.cs:3226-3228);旧"恒判可伤 6 点"与头注矛盾
+export function canTileHurt(t: number, fireWalk: boolean, seedFlags?: { theConstant?: boolean; getGoodWorld?: boolean }): boolean {
+  // ★IIIII224（Collision.cs:3225-3228）：80 仙人掌=The Constant 种子触伤、
+  // 230 蜂蜜块=For the Worthy 触伤——WorldCreation 支持全种子，旧"本作不支持"陈旧
+  if (t === tid(230)) return !!seedFlags?.getGoodWorld;
+  if (t === tid(80)) return !!seedFlags?.theConstant;
   if (TOUCH_IMMEDIATE.has(t) || TOUCH_BLEEDING.has(t) || SUFFOCATE.has(t)) return true;
   if (TOUCH_HOT.has(t) && !fireWalk) return true;
   return false;
@@ -190,6 +192,7 @@ export function stickyTiles(st: TileStore, px: number, py: number, pw: number, p
  */
 export function hurtTiles(
   st: TileStore, px: number, py: number, pw: number, ph: number, fireWalk: boolean,
+  seedFlags?: { theConstant?: boolean; getGoodWorld?: boolean },
 ): HurtTile | null {
   const TS = 16;
   const i0 = Math.max(0, Math.floor(px / TS) - 1);
@@ -201,7 +204,7 @@ export function hurtTiles(
       const idx = st.idx(i, j);
       if (!st.flags[idx]) continue;
       const t = st.type[idx];
-      if (!canTileHurt(t, fireWalk)) continue;
+      if (!canTileHurt(t, fireWalk, seedFlags)) continue;
       let ty = j * TS;
       let th = TS;
       if (st.half[idx]) { ty += 8; th -= 8; }

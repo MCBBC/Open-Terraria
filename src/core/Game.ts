@@ -31,7 +31,7 @@ import { generateWorld, lastGenState } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
-import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE } from '../world/Torch';
+import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
 import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../world/TileAnchorValidator';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
@@ -191,7 +191,7 @@ const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
 import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, npcTypeNoAggro } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
-import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
+import { spawnMechQueenEnsemble, spawnSkeletronCaster, spawnVanillaEnemy } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC, isItStormingNext, walkPrediction } from '../entities/TownNPC';
 import { spawnStormLightningTick } from '../world/StormLightningSpawner';
@@ -206,7 +206,7 @@ import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 import { spawnForceClearArea, spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } from '../world/spawn/SpawnPlacement';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
 import { TILE_SOLID_TOP_FAMILY } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理
-import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
+import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
 import { damageVarRoll } from '../stats/DamageVar';
 import {
   bindJourneyPowers, journeyPowers, shouldDisableSpawns, spawnRateMultiplier,
@@ -7197,9 +7197,17 @@ export class Game implements GameHooks {
    *  = 事件驱动 openInGamePause/closePause（main.ts,浮层开即 paused=true/关即 false,
    *  与逐帧 OR 同效,不进本逐帧门防 resume 权重打架）;Esc 链对齐后（:5026 背包开着
    *  Esc=关背包）,autoPause∧开背包成为背包态下的主暂停路径（浮层入口=背包内设置钮
-   *  Main.cs:46287）。浮层收起后若背包仍开∧autoPause 开,下帧本门重新暂停=原文
-   *  :17372 逐帧重算同相（非 bug）。 */
+   *  Main.cs:46287）。★SW-RB8c 2026-09-08：浮层收起（closeInGamePause）必回背包
+   *  （IngameOptions.Close :108 playerInventory=true）∧autoPause 开 → 下帧本门重新
+   *  暂停 = 原文 :17496→:17500 臂交接逐帧重算同相（非 bug）;浮层开启时经
+   *  releaseAutoPauseOwnership 移交属主（Open :70 收背包,背包臂退出）。 */
   private _uiPausedByAutoPause = false;
+  /** ★SW-RB8c 2026-09-08：autoPause 暂停属主移交（openInGamePause 开浮层时调）。
+   *  原版 Open() 置 playerInventory=false（IngameOptions.cs:70）→ CanPauseGame 的
+   *  autoPause playerInventory 臂（:17500）退出,暂停由 ingameOptionsWindow 臂
+   *  （:17496）接管;本仓浮层期 paused=true 事件驱动,须清 _uiPausedByAutoPause——
+   *  否则浮层期背包已收,applyAutoPauseUI 会以旧属主身份把浮层期游戏误解暂停 */
+  releaseAutoPauseOwnership(): void { this._uiPausedByAutoPause = false; }
   private applyAutoPauseUI(): void {
     const gate = options.data.autoPause && !!this.world && !this.net?.active
       && ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false);
@@ -7507,16 +7515,20 @@ export class Game implements GameHooks {
       }
       const eventMusic = resolveEventMusic(eventSlots);
       // 月事件 BGM（Main.cs:12914-12921，链尾最高优先级）：相机在地表
-      // worldSurface+10 格带内时覆盖一切（含 Boss 曲）；南瓜月 30 / 霜月 32
+      // worldSurface+10 格带内时覆盖一切（含 Boss 曲）；南瓜月 30 / 霜月 32。
+      // ★IIIII224：门 = (screenY/16 < worldSurface+10 || remixWorld)（:13150/:13154）
       const moonMusic = w.moonEvent.kind === MOON_KIND_PUMPKIN ? 30
         : w.moonEvent.kind === MOON_KIND_FROST ? 32 : 0;
-      const moonMusicGated = moonMusic && this.player.cy / TILE < w.groundLevel + 10 ? moonMusic : 0;
+      const moonMusicGated = moonMusic && (this.player.cy / TILE < w.groundLevel + 10
+        || !!w.seedFlags?.remix) ? moonMusic : 0;
       const music = pickMusic({
         scene: this.scene, isDay, eventMusic, moonMusic: moonMusicGated,
         musicBox: this.scene.musicBoxStyle,
         torchGod: this.torchGod?.active ?? false,   // InTorchGodMinigame（Main.cs:12477-12480 → 101）
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
-        maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
+        maxTilesX: w.store.w, maxTilesY: w.store.h,
+        remix: !!w.seedFlags?.remix,                // Main.remixWorld（:12818-13154 remix 分支）
+        centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
         weather: {
           storm: w.weather.shouldUseStormMusic,
@@ -9298,13 +9310,22 @@ export class Game implements GameHooks {
           // 三机械未全灭 → 三选一（只选未击败；1000 次重抽语义）+ misc[28/29/30]
           // 家族键（vanilla downedMechBoss1/2/3）：n=1 毁灭者 134 / n=2 双子 125 / n=3
           // Prime 127——消费端 :4288 同映射（曾 n=1 键 125=双子 id 错位、门漏 134）
-          for (let k = 0; k < 1000; k++) {
-            const n = 1 + Math.floor(Math.random() * 3);
-            const flag = n === 1 ? 'downed_134' : n === 2 ? 'downed_125' : 'downed_127';
-            if (!w.flags[flag] || bossesKeepSpawning) {
-              this.spawnHardBossPending = n;
-              this.newText(Lang.misc(27 + n), 50, 255, 130);
-              break;
+          // ★IIIII224（:66282-66289）：remix+getGood（Mechdusa 世界）三机械一体——
+          //  1/2 掷随机 1..3，公告 misc[108]，无视 downed 旗（不进 1000 重抽循环）
+          if (sf.remix && sf.getGoodWorld) {
+            if (Math.random() < 1 / 2) {
+              this.spawnHardBossPending = 1 + Math.floor(Math.random() * 3);
+              this.newText(Lang.misc(108), 50, 255, 130);
+            }
+          } else {
+            for (let k = 0; k < 1000; k++) {
+              const n = 1 + Math.floor(Math.random() * 3);
+              const flag = n === 1 ? 'downed_134' : n === 2 ? 'downed_125' : 'downed_127';
+              if (!w.flags[flag] || bossesKeepSpawning) {
+                this.spawnHardBossPending = n;
+                this.newText(Lang.misc(27 + n), 50, 255, 130);
+                break;
+              }
             }
           }
         }
@@ -9444,7 +9465,9 @@ export class Game implements GameHooks {
     }
     // ---- 夜间坠星（SpawnFallingObjects :71861-71898 1456 / 1457 :72395-72432：每 tick 概率
     //      p = 10×(w/4200)×boost/8000 = w×boost/3,360,000）----
-    if (!w.clock.isDay && this.starfallBoost > 0) {
+    // ★IIIII224（WorldGen.cs:72399 SpawnFallingObjects 门 dayTime&&!remix→return）：
+    //  remix 世界白天照掷坠星（Kill 门已在 FallingStar 侧放开,三锚一组）
+    if ((!w.clock.isDay || w.seedFlags?.remix) && this.starfallBoost > 0) {
       const p = (w.store.w * this.starfallBoost) / 3360000;
       if (Math.random() < p) {
         const st = w.store;
@@ -9633,7 +9656,10 @@ export class Game implements GameHooks {
       if (this.player.taxTimer >= 3600) {
         this.player.taxTimer -= 3600;
         const housed = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead && (n as TownNPC).home).length;
-        this.player.taxMoney = Math.min(250000, this.player.taxMoney + 50 * housed);
+        // ★IIIII224（Player.cs:24322 CollectTaxes）：十周年世界入账 50→100 铜且
+        //  上限 25→50 银（num/num2 双 ×2）
+        const taxMul = this.world.seedFlags?.tenthAnniversary ? 2 : 1;
+        this.player.taxMoney = Math.min(250000 * taxMul, this.player.taxMoney + 50 * taxMul * housed);
       }
     }
     // ---- 入侵状态推进（Main.cs:63775 UpdateInvasion：前线推进+胜利判定+周期公告） ----
@@ -10958,6 +10984,8 @@ export class Game implements GameHooks {
   /** 逐枪省弹掷（PickAmmo :52755-52778 六档独立掷，原版先于装备/buff 档执行）：
    *  表与判定 = vanillaItemCombat.GUN_AMMO_SAVE/gunAmmoSaveHit；非表枪恒 false（照常耗弹） */
   private gunAmmoSaveRoll(vid: number): boolean {
+    // ★IIIII224（Player.cs:54303）：remix 世界雪球炮 1319 掷 Next(2)==0 → 不耗弹
+    if (this.world.seedFlags?.remix && vid === 1319) return Math.random() < 0.5;
     return gunAmmoSaveHit(vid, Math.random());
   }
 
@@ -11278,7 +11306,16 @@ export class Game implements GameHooks {
     const s = this.smartSettings();
     // SmartCursor action（默认 LeftControl/RightControl；M5 经键位表）
     const controlSmart = inp.downAction('SmartCursor');
-    if (sc.updateWanted(controlSmart, !!inp.mouseDown, s)) this.sfx.play('menuTick');
+    // SW-RB8a 2026-09-08：controlUseItem 是【电平】——TriggersSet.cs:835-841 每帧
+    // `if (MouseLeft){ if (!Main.blockMouse && !p.mouseInterface) p.controlUseItem=true }`
+    // （帧头 Player.cs:29291 先置 false）。旧传 inp.mouseDown=边沿消费量,按住期
+    // 仅首沿帧为真 → lookup 头清锁门（SmartCursorHelper.cs:64 `!controlUseItem` 项）
+    // 在按住的非首帧恒触发 → 连通锁（GetDesiredDirectionFrom :1442 锁向优先/
+    // AllowedForContinuity :1413）永不生效 = 智能平台拖拽续铺原版本面缺失。
+    // uiBlocking/inpOverDomUi = mouseInterface 本仓等价面;inp.blockMouse 同名同义。
+    const controlUseItem = !!inp.mouseHeld && !inp.blockMouse
+      && !inp.uiBlocking && !this.inpOverDomUi();
+    if (sc.updateWanted(controlSmart, controlUseItem, s)) this.sfx.play('menuTick');
     const blocked = inp.uiBlocking || this.inpOverDomUi() || this.player.dead || !!this.minecart
       || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover
       || this.annotateMode;
@@ -11291,9 +11328,10 @@ export class Game implements GameHooks {
       //  + 放置图标位（:32363）在 showing 恒 false 下把锁存续期外的一切 tile 放置拦死
       //  （用户实报"不开智能光标放不了平台、物块"）。used=本帧 SmartCursorIsUsed 实况:
       //  智能关帧恒 false ⇒ 双锁必清（原文语义,与 controlUseItem/持物无关）;遮挡帧
-      //  wanted 仍在 ⇒ 按原文条件消费 controlUseItem+持物平台位。
+      //  wanted 仍在 ⇒ 按原文条件消费 controlUseItem+持物平台位（★SW-RB8a:电平+UI 门,
+      //  见上 controlUseItem 注）。
       const held0 = this.player.inv.heldItem();
-      sc.lookupSkipped(!!inp.mouseDown, !!sc.wanted, held0 ? ITEM_DEFS[held0.id] ?? null : null);
+      sc.lookupSkipped(controlUseItem, !!sc.wanted, held0 ? ITEM_DEFS[held0.id] ?? null : null);
       VUI.smartCursorOn = false;
       return;
     }
@@ -11334,7 +11372,7 @@ export class Game implements GameHooks {
               .map((q) => ({ x: q.x, y: q.y, w: 20, h: 42 }))
           : []),
       ],
-      controlUseItem: !!inp.mouseDown,
+      controlUseItem,   // SW-RB8a 2026-09-08：电平+UI 门（见 updateSmartCursor 头注）,非 mouseDown 边沿
       // 致动魔杖单摆向锁实况（Step_ActuationRod :1506-1512 消费；A-6 2026-09-04）
       actuationRodLock: p.actuationRodLock,
       actuationRodLockSetting: p.actuationRodLockSetting,
@@ -23135,8 +23173,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       // ★SW-BJ28 2026-09-08：AssortedThings 火把支斜坡拍平前置（Player.cs:41441-41462 1:1）——
       //  墙锚不成立且底/左/右三邻皆非 SolidTileNoAttach 时，对半砖/坡形邻格先 SlopeTile
-      //  拍平再走 PlaceTile 锚点复验（平台被显式豁免不拍：:41452/:41457/:41461）。
-      //  三支互斥序 = 原文 if/else-if（支 1 命中含"平台坡不动作"也终止链）。
+      //  拍平再走 PlaceTile 锚点复验（平台被显式豁免不拍）。
       //  SolidTileNoAttach（WorldGen.cs:71042-71052）= active∧tileSolid∧!noAttach∧slope0
       //  ∧!halfBrick∧!inActive（不查 tileSolidTop；域外 Main.tile null → true）。
       const solidTileNoAttach = (x: number, y: number): boolean => {
@@ -23147,19 +23184,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return !!(TILE_DEFS[st.type[i]]?.solid || VAN_TILE_SOLID_EXTRA.has(sh))
           && !TILE_NO_ATTACH_SHEETS.has(sh) && st.slope[i] === 0 && !st.half[i];
       };
+      // SW-RB8a 2026-09-08：原文的平台豁免在支 1/2 是【支体内】的二次 if（:41443/:41449
+      // `if (!Platforms[type]) SlopeTile(...)`）——坡形平台命中支条件但不动作,且 else-if
+      // 链就此终止;支 3 才把 !Platforms 写进 else-if 条件（:41461）。旧码把豁免并进
+      // 支条件（slopedNonPlat）→ 坡形平台落空后链继续走下支=原版不拍平的左/右邻被拍。
+      const slopedTile = (x: number, y: number): boolean => {
+        if (!st.inBounds(x, y)) return false;
+        const i = st.idx(x, y);
+        return st.hasTile(x, y) && (st.half[i] !== 0 || st.slope[i] !== 0);
+      };
+      const isPlatAt = (x: number, y: number): boolean =>
+        PLATFORMS_SHEETS.has(TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1);
       if (st.wall[st.idx(tx, ty)] === 0
         && !solidTileNoAttach(tx, ty + 1) && !solidTileNoAttach(tx - 1, ty) && !solidTileNoAttach(tx + 1, ty)) {
-        const slopedNonPlat = (x: number, y: number): boolean => {
-          if (!st.inBounds(x, y)) return false;
-          const i = st.idx(x, y);
-          return st.hasTile(x, y) && (st.half[i] !== 0 || st.slope[i] !== 0)
-            && !PLATFORMS_SHEETS.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1);
-        };
-        if (slopedNonPlat(tx, ty + 1)) {                                   // :41441-41447 下方
-          this.worldGenSlopeTile(tx, ty + 1, 0, false);
-        } else if (!solidTileNoAttach(tx - 1, ty) && slopedNonPlat(tx - 1, ty)) {   // :41448-41456 左
-          this.worldGenSlopeTile(tx - 1, ty, 0, false);
-        } else if (!solidTileNoAttach(tx + 1, ty) && slopedNonPlat(tx + 1, ty)) {   // :41457-41462 右
+        if (slopedTile(tx, ty + 1)) {                                      // :41439-41451 下方
+          if (!isPlatAt(tx, ty + 1)) this.worldGenSlopeTile(tx, ty + 1, 0, false);   // :41443-41449
+        } else if (!solidTileNoAttach(tx - 1, ty) && slopedTile(tx - 1, ty)) {      // :41452-41456 左
+          if (!isPlatAt(tx - 1, ty)) this.worldGenSlopeTile(tx - 1, ty, 0, false);   // :41456-41460
+        } else if (!solidTileNoAttach(tx + 1, ty) && slopedTile(tx + 1, ty) && !isPlatAt(tx + 1, ty)) {  // :41461-41462 右
           this.worldGenSlopeTile(tx + 1, ty, 0, false);
         }
       }
@@ -25730,6 +25772,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.recLog('world', { ev: 'rain', on: weather.raining });
     }
     weather.setWorldSize(w.w, w.h);
+    // ★IIIII224 四旗门回填（Main.remixWorld/tenthAnniversaryWorld/getGoodWorld/
+    //  isThereAWorldSurface=worldSurface>50——金币雨/史莱姆雨/风日曲 remix 分支用）
+    weather.remixWorld = !!w.seedFlags?.remix;
+    weather.tenthAnniversaryWorld = !!w.seedFlags?.tenthAnniversary;
+    weather.getGoodWorld = !!w.seedFlags?.getGoodWorld;
+    weather.isThereAWorldSurface = w.groundLevel > 50;
     // ---- 风暴落雷（UpdateWorld :72073 SpawnStormLightning()——1.4.5 落雷机制,
     //      雷暴期天雷劈下 500 伤;每 world tick 一次,门在 spawner 内）----
     spawnStormLightningTick(this as unknown as Parameters<typeof spawnStormLightningTick>[0]);
@@ -26074,7 +26122,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         else if (d && vanillaItemId === 184) d.pickup = 'star';
       },
       spawnNpc: (vanillaNpcId: number, px: number, py: number) => {
-        const e = Enemy.fromVanilla(vanillaNpcId, px, py);
+        // IIII225：NewNPC FTW 野生交换（NPC.cs:81576-81586）——雕像产怪同走 NewNPC：
+        // FTW 世界兔雕像 2/3 出爆破兔 614（雕像无恶魔款,62 支并列仅保全表形状）
+        let vidStatue = vanillaNpcId;
+        if ((vidStatue === 46 || vidStatue === 62) && this.world.seedFlags?.getGoodWorld
+          && Math.floor(Math.random() * 3) !== 0) {
+          vidStatue = vidStatue === 46 ? 614 : 66;
+        }
+        const e = Enemy.fromVanilla(vidStatue, px, py);
         if (e) {
           // Wiring.cs:2479-2483：雕像产怪 value=0（不掉钱）+ SpawnedFromStatue
           e.spawnedFromStatue = true;
@@ -28254,8 +28309,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (num10 === 1 || (num10 === 0 && torchShort)) {
       // 火把档（WorldGen.cs:57545-57605）：基数 2-6（专家 +1-6，吸血鬼 +2-6 :57554）；
-      // 类型按玩家群系/罐 style 换彩火把（神圣 4387/猩红 4386/腐化 4385/沙漠 4388×1.5/
-      // 丛林罐 974/丛林火把 4383/蘑菇 5293，各 +2-6 根）；液体中改荧光棒（沙漠罐 286）
+      // 类型按玩家群系/罐 style 换彩火把（神圣 4387/猩红 4386/腐化 4385/丛林 4388×1.5/
+      // ★IIIII225 纠偏：TorchID.cs:116-126 16=沙漠/21=丛林——4388=丛林火把(style21)、
+      // 974=冰雪罐冰把、4383=沙漠火把(style16),旧注"沙漠 4388/丛林罐 974/丛林火把 4383"
+      // 丛/沙互换/蘑菇 5293，各 +2-6 根）；液体中改荧光棒（沙漠罐 286）
       let n13 = 2 + R(5);
       if (this.world.isExpert) n13 += 1 + R(6);
       if (vampireSeed) n13 += 2 + R(5);
@@ -30996,7 +31053,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'mechanic':
         return !!this.world.flags['savedMech'];
       case 'stylist':
-        return !!this.world.flags['savedStylist'];
+        // ★IIIII224（Main.cs:66840-66843 townNPCCanSpawn[178]）：门 = (tenth && !getGood)
+        //  || downedMechBossAny——十周年世界无需机械 Boss 理发师即可入驻；
+        //  savedStylist（蜘蛛洞 354 解救链）为永久重生臂
+        return (this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.getGoodWorld)
+          || !!(this.world.flags['downed_125'] || this.world.flags['downed_126']
+            || this.world.flags['downed_127'] || this.world.flags['downed_134'])
+          || !!this.world.flags['savedStylist'];
       case 'tax_collector':
         return !!this.world.flags['savedTaxCollector'];
       case 'golfer':
@@ -31008,6 +31071,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           'clothier', 'steampunker', 'dyer', 'party_girl', 'cyborg', 'painter', 'witch_doctor',
           'pirate', 'stylist', 'goblin_tinkerer', 'wizard', 'mechanic', 'truffle',
           'tax_collector', 'golfer', 'zoologist', 'angler', 'tavernkeep'];
+        // ★IIIII224（Main.cs:66928-66932 flag9 直通臂）：十周年世界（!getGoodWorld）
+        //  全员集合恒真——公主 663 可直接入驻
+        if (!!this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.getGoodWorld) return true;
         return all.every((k) => this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === k));
       }
       default:
@@ -31834,7 +31900,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if ((this.dialogHappiness?.report.length ?? 0) > 0) {
         buttons.push({ id: 'happiness', label: Lang.text('UI.NPCCheckHappiness') });
       }
-    } else {
+    } else if (!this.world.seedFlags?.remix) {
+      // ★IIIII224（Main.cs:41304-41306）：remix 世界不画「住房」悬停按钮
+      //  （DrawNPCChatButtons 住房文本前置 `if (remixWorld) return;`——
+      //  住房菜单仍可从 UI 打开,仅对话内快捷位隐藏）
       buttons.push({ id: 'home', label: Lang.text('UI.NPCHousing'), excl: true });
     }
     return buttons;
@@ -32864,8 +32933,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return dialog(174 + r3());
     }
     if (npc.vanillaId === 37) {
-      // 守卫老人(cs:95224-95240):白天 82-84;夜晚(生命<300 或防御<10)85-88,否则 89-92
-      if (!w.clock.isDay) {
+      // 守卫老人(cs:95165/:95224-95240):白天 82-84;夜晚(生命<300 或防御<10)85-88,否则 89-92
+      // ★IIIII224（NPC.cs:95165）：remix 世界恒走夜表（IsItDay remix 恒 false 语义）
+      if (!w.clock.isDay || w.seedFlags?.remix) {
         return dialog(p.maxHp < 300 || p.defense < 10 ? 85 + Math.floor(Math.random() * 4) : 89 + Math.floor(Math.random() * 4));
       }
       return dialog(82 + r3());
@@ -33769,7 +33839,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 上述条目按相位重排（JSON 无 moonPhase 条目的 NPC 也进——分档表是权威）
       switch (npc.vanillaId) {
         case 453: { // 骷髅商（Chest.cs:2805-2960；R14-C8 取反链修正+6 处补齐）
-          add([[284], [946], [3069], [4341], [285], [953], [3068], [3084]][phase]);
+          // ★IIIII224（Chest.cs:2816/:2821）：月相 2 骷髅商 remix 卖 517（替 3069）
+          add([[284], [946], [this.world.seedFlags?.remix ? 517 : 3069], [4341], [285], [953], [3068], [3084]][phase]);
           // :2856-2866 奇相位 28 与（困难）188 并卖（曾只卖 188 丢 28）
           if (phase % 2 === 0) add([3001]);
           else { add([28]); if (this.world.flags.hardMode) add([188]); }
@@ -37496,6 +37567,48 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         spawnSkeletronCaster(this, enemy.cx, enemy.cy, this.world.store.h - 200);
       }
     }
+    // IIII225：checkDead FTW 三臂（NPC.cs:78901-78935/:79030-79034,均 netMode!=1
+    // 且 getGoodWorld——本仓恒单机=门只看旗）——
+    // ①蜂族 {42 黄蜂,176 苔藓黄蜂,231-235 蜂变种} 死亡 → StingerExplosion
+    //   (:53281-53294)：Next(4,9)=4-8 根 55 号毒刺弹,速度 8 随机方向（NextFloat()-0.5
+    //   两轴归一 ×8）,伤 (int)(10×scale)、176 蜜蜂 (int)(30×scale),timeLeft 300。
+    // ②13 世吞头死亡 → NewNPC(-12) 大噬魂怪（SetDefaultsFromNetId case -12：
+    //   num4=1.15,(remix||FTW)×1.3 → WithScale → SetDefaults FTW 膨胀 (o+o²)/2——
+    //   盒链复用 spawner 同款 netIdSpawnScale（③含种子档命中面）,Bottom 锚=
+    //   死头 (Center.X, position.Y+height)
+    // ③631 岩石巨人死亡 → 弹 99 巨石（Center 初速 0,伤 70,kb 10,:79030-79034;
+    //   本仓巨石=TrapShot kind 'boulder'≡vid 99 同表,机关巨石同参 dmg 70）
+    if (enemy && this.world.seedFlags?.getGoodWorld) {
+      const vidK = enemy.vanillaId;
+      if (vidK != null) {
+        if (vidK === 42 || vidK === 176 || (vidK >= 231 && vidK <= 235)) {
+          const n = 4 + Math.floor(Math.random() * 5);            // Next(4,9)
+          const scale = enemy.vanillaScale || 1;
+          const dmg = Math.trunc((vidK === 176 ? 30 : 10) * scale);
+          for (let i = 0; i < n; i++) {
+            let vx = Math.random() - 0.5, vy = Math.random() - 0.5;
+            const len = Math.hypot(vx, vy);
+            if (len > 0) { vx = vx / len * 8; vy = vy / len * 8; } else { vx = 0; vy = -8; }
+            enemy.spawnHostileProj(this, enemy.cx, enemy.cy, vx, vy, dmg, 55);
+          }
+        } else if (vidK === 13) {
+          const v6 = vanillaNpc(6);
+          const e12 = spawnVanillaEnemy(this, 6, enemy.cx, enemy.y + enemy.h);
+          if (v6 && e12) {
+            e12.vanillaNetId = -12;
+            const o12 = (this.world.seedFlags?.remix || this.world.seedFlags?.getGoodWorld)
+              ? 1.15 * 1.3 : 1.15;
+            const box = netIdSpawnScale(6, o12, v6.width, v6.height, scaleStatsWorld());
+            e12.w = e12.def.width = box.width;
+            e12.h = e12.def.height = box.height;
+            e12.vanillaScale = box.scale / (v6.scale ?? 1);
+            e12.x = enemy.cx - e12.w / 2; e12.y = enemy.y + enemy.h - e12.h;
+          }
+        } else if (vidK === 631) {
+          this.entities.add(new TrapShot(enemy.cx, enemy.cy, 0, 0, 70, 'boulder'), 'projectiles');
+        }
+      }
+    }
     // 成就：NPC 击杀通知（NotifyNPCKilledDirect）+ MechaMayhem 推进。
     // 双子语义（CountKillForAchievements NPC.cs:80631-80640）：125/126 需另一只
     // 也已死（!AnyNPCs(另一只)）才通知/计杀——单眼死亡不计
@@ -37935,7 +38048,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  窗口消化电平，极速点按也可靠翻转；tick 内的常规调用见到 prev 已更新，
    *  edge=false 不会双翻） */
   pulseSmartCursor(level: boolean): void {
-    this.smartCursor.updateWanted(level, !!this.input.mouseDown, this.smartSettings());
+    // SW-RB8a 2026-09-08：第二参 controlUseItem 同 updateSmartCursor 改电平
+    //（Input mousedown 注入点 :207/:256 双写 mouseDown+mouseHeld,移动端同受惠）
+    this.smartCursor.updateWanted(level, !!this.input.mouseHeld, this.smartSettings());
   }
 
   // ================= 宠物系统（vanity/light pet） =================
@@ -39160,6 +39275,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // （y>worldSurface）；frameX/54 = 宝石序号 → 对应树 583-589；growGemTree 自带
     // 石/苔基座 + 洞穴墙 + 净空全套判定
     const GEM_SAP = TILE_BY_KEY['v_590_gem_saplings'];
+    // ★IIIII226：gs shim 提前到全函数域并补 worldSurface——GrowTreeWithSettings 系
+    //  （灰烬/宝石/观赏树，vanilla TryGrowingTreeByType :30632-30664 全走
+    //  GrowTreeWithSettings :30677）内 errorWorld 树高臂（:30709-30712）读
+    //  `checkedY < Main.worldSurface` 选重掷档（地表 Next(3,50)/地下 Next(3,15)）；
+    //  运行时 Main.worldSurface ≡ 本仓 world.groundLevel（B2-S1 判例同源）。
+    //  此前 ash/gem/vanity 运行时四路不传 gs ⇒ errorWorld 世界该三族游戏期成树
+    //  树高臂静默（i am error 语义缺面）；旗关世界 shim 多一个字段=零行为差。
+    const gs = {
+      genTrees: this.world.trees, seedFlags: this.world.seedFlags ?? {},
+      worldSurface: this.world.groundLevel,
+    } as unknown as GenState;   // 生长登记进 world.trees;★seedFlags 必带:TreePass:200/202/237 无守卫直读(drunkWorld 短干/errorWorld 枯木)——原版游戏期生长读全局旗,缺=undefined 崩
     if (GEM_SAP) {
       for (let x = plan.x0; x < plan.x1; x++) {
         for (let y = plan.underY0; y < plan.underY1; y++) {
@@ -39174,7 +39300,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const treeType = TILE_DEFS.find((d) => d.vanilla?.sheet === treeSheet)?.key;
           const tid = treeType ? TILE_BY_KEY[treeType] : 0;
           if (!tid) continue;
-          if (growGemTree(st, new RNG((Math.random() * 1e9) | 0), x, y, tid)) {
+          if (growGemTree(st, new RNG((Math.random() * 1e9) | 0), x, y, tid, 0, false, gs)) {
             st.setTile(x, y, 0);
             this.chunks.markDirtyArea(x - 6, y - 14, x + 6, y + 2);
           }
@@ -39189,17 +39315,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const SAK = TILE_BY_KEY['v_595_sakura_sapling'];
     const WIL = TILE_BY_KEY['v_615_yellow_willow_sapling'];
     const vanityP = Math.min(1, sapP * 4);   // 1/5 vs 1/20 采样差折算
-    const gs = { genTrees: this.world.trees, seedFlags: this.world.seedFlags ?? {} } as unknown as GenState;   // 生长登记进 world.trees;★seedFlags 必带:TreePass:200/202/237 无守卫直读(drunkWorld 短干/errorWorld 枯木)——原版游戏期生长读全局旗,缺=undefined 崩
     const tryGrow = (x: number, y: number, sheet: number, fx: number): boolean => {
       const rng = new RNG((Math.random() * 1e9) | 0);
       const style = Math.floor(fx / 54);
       if (sheet === 20) {
-        if (style === 10) return growAshTree(st, rng, x, y);
+        if (style === 10) return growAshTree(st, rng, x, y, 0, false, gs);   // ★IIIII226 补 gs（errorWorld 树高臂）
         if (style >= 6 && style <= 9) return growPalmTree(st, rng, x, y, gs);
         return growTree(st, rng, gs, x, y);
       }
-      if (sheet === 595) return growVanityTree(st, rng, x, y, false);
-      if (sheet === 615) return growVanityTree(st, rng, x, y, true);
+      if (sheet === 595) return growVanityTree(st, rng, x, y, false, 0, false, gs);   // ★IIIII226 补 gs
+      if (sheet === 615) return growVanityTree(st, rng, x, y, true, 0, false, gs);    // ★IIIII226 补 gs
       return false;
     };
     for (let x = plan.x0; x < plan.x1; x++) {
@@ -39226,7 +39351,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!st.hasTile(x, y)) continue;     // ★RD-F5：active() 门（cs:73395-73397——幽灵苗不长树不清格）
         if (Math.floor(st.frameX[st.idx(x, y)] / 54) !== 10) continue;
         if (Math.random() >= underSapP) continue;
-        if (growAshTree(st, new RNG((Math.random() * 1e9) | 0), x, y)) {
+        if (growAshTree(st, new RNG((Math.random() * 1e9) | 0), x, y, 0, false, gs)) {   // ★IIIII226 补 gs（errorWorld 树高臂）
           this.chunks.markDirtyArea(x - 6, y - 14, x + 6, y + 2);
           this.treeGrowFX(x, y, 10);
         }
@@ -39293,7 +39418,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
         if (sheet !== 20 && sheet !== 590 && sheet !== SAKURA_SHEET && sheet !== WILLOW_SHEET) continue;
         const rng = new RNG((Math.random() * 1e9) | 0);
-        const gsShim = { genTrees: this.world.trees, seedFlags: this.world.seedFlags ?? {} } as unknown as GenState;  // 同 growSaplings 先例;★seedFlags 必带(TreePass 无守卫直读,2026-09-02 orphan-b2 炸点)
+        const gsShim = { genTrees: this.world.trees, seedFlags: this.world.seedFlags ?? {}, worldSurface: this.world.groundLevel } as unknown as GenState;  // 同 growSaplings 先例;★seedFlags 必带(TreePass 无守卫直读,2026-09-02 orphan-b2 炸点);★IIIII226 补 worldSurface=groundLevel(errorWorld 树高臂 GrowTreeWithSettings :30709 档位判据)
         // S1（B2-S1）：调用侧判据原式 `num59 > (int)worldSurface - 1`（Projectile.cs:24488）
         // ——原版把 ws 行本身算地下；曾写 `j > groundLevel` 从 ws+1 起（off-by-one 边界行丢失）
         const underground = j >= Math.floor(this.world.groundLevel);
@@ -39304,7 +39429,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let style = -1;
         if (sheet === 20) style = Math.floor(st.frameX[ti] / 54);   // frameX/54 树档（:73414）
         if (sheet === 20 && style === 10) {
-          if (!growAshTree(st, rng, i, j, addon, true)) continue;      // ignoreWalls=true
+          if (!growAshTree(st, rng, i, j, addon, true, gsShim)) continue;      // ignoreWalls=true;★IIIII226 补 gsShim（errorWorld 树高臂）
         } else if (sheet === 20 && style >= 6 && style <= 9) {
           if (denyUnderground) continue;                   // :73417-73419 underground&&!ntb&&!remix → 拒
           if (!growPalmTree(st, rng, i, j, gsShim, addon, true)) continue;
@@ -39319,11 +39444,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const treeSheet = 583 + kind;
           const tidKey = TILE_DEFS.find((d) => d.vanilla?.sheet === treeSheet)?.key;
           const tid = tidKey ? TILE_BY_KEY[tidKey] : 0;
-          if (!tid || !growGemTree(st, rng, i, j, tid, addon, true)) continue;
+          if (!tid || !growGemTree(st, rng, i, j, tid, addon, true, gsShim)) continue;   // ★IIIII226 补 gsShim
         } else if (sheet === SAKURA_SHEET) {
-          if (!growVanityTree(st, rng, i, j, false, addon, true)) continue;  // → 596
+          if (!growVanityTree(st, rng, i, j, false, addon, true, gsShim)) continue;  // → 596;★IIIII226 补 gsShim
         } else {
-          if (!growVanityTree(st, rng, i, j, true, addon, true)) continue;   // 615 → 616
+          if (!growVanityTree(st, rng, i, j, true, addon, true, gsShim)) continue;   // 615 → 616;★IIIII226 补 gsShim
         }
         this.chunks.markDirtyArea(i - 6, j - 14, i + 6, j + 2);
         this.treeGrowFX(i, j, sheet === 20 ? style : -1);
@@ -41465,19 +41590,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private checkTorchDetach(x: number, y: number) {
     const st = this.world.store;
     const TORCH_ID = T.TORCH;
-    for (const [dx, dy] of [[0, 0], [0, -1], [-1, 0], [1, 0]] as const) {
-      const tx = x + dx, ty = y + dy;
-      if (!st.inBounds(tx, ty)) continue;
-      const i = st.idx(tx, ty);
-      if (st.type[i] !== TORCH_ID) continue;
-      if (torchStillAnchored(st, tx, ty, st.frameX[i])) continue;
-      // ★D-3 样式还原（KillTile case 4 :65106-65164 style=frameY/22）：按档掉对应
-      // 火把物品——曾恒掉普通火把 8（咒火炬失撑掉回火把=刷炬漏洞兼 vid 错）
-      const vid = torchDropVid(Math.floor(Math.max(0, st.frameY[i]) / 22));
-      const dropKey = VANILLA_ITEM_KEY_BY_ID[vid] ?? VI_KEY.TORCH;
-      st.setTile(tx, ty, 0);
-      this.spawnDrop(tx * TILE + 8, ty * TILE, dropKey, 1);
-      this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
+    // SW-RB8a 2026-09-08：触发面从十字 5 格扩成 3×3——原版 SquareTileFrame(i,j)
+    //（WorldGen.cs:81462-81473）对变格周身 3×3 全员 TileFrame 重算,火把的
+    // 侧锚树干三连/坡向门读对角格（左上/右上等）,十字面漏对角变化=锚已死仍滞留。
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const tx = x + dx, ty = y + dy;
+        if (!st.inBounds(tx, ty)) continue;
+        const i = st.idx(tx, ty);
+        if (st.type[i] !== TORCH_ID) continue;
+        // SW-RB8a 2026-09-08：原版 TileFrame 四臂全空才 KillTile（:87457-87459）,
+        // 有臂即按「底→左→右→墙」重写 frameX（重锚,保未点燃 +66 偏移）——旧码
+        // 按现存档位单臂判死,左锚失撑但底/墙仍在的火把被误掉（火烧已放火把）。
+        if (torchStillAnchored(st, tx, ty, st.frameX[i])) {
+          const anchor = torchReanchorFrame(st, tx, ty);
+          if (anchor >= 0) {
+            const nf = anchor + (isUnlitTorch(st.frameX[i]) ? TORCH_UNLIT_OFFSET : 0);
+            if (st.frameX[i] !== nf) {
+              st.frameX[i] = nf;   // 原版 TileFrameImportant 同款直写帧（不走 setTile 监听链）
+              this.chunks.markDirtyArea(tx, ty, tx, ty);
+            }
+          }
+          continue;
+        }
+        // ★D-3 样式还原（KillTile case 4 :65106-65164 style=frameY/22）：按档掉对应
+        // 火把物品——曾恒掉普通火把 8（咒火炬失撑掉回火把=刷炬漏洞兼 vid 错）
+        const vid = torchDropVid(Math.floor(Math.max(0, st.frameY[i]) / 22));
+        const dropKey = VANILLA_ITEM_KEY_BY_ID[vid] ?? VI_KEY.TORCH;
+        st.setTile(tx, ty, 0);
+        this.spawnDrop(tx * TILE + 8, ty * TILE, dropKey, 1);
+        this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
+      }
     }
   }
 
@@ -41518,8 +41661,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     if (t === TILE_BY_KEY['pixel_block']) return;
     // ★SW-BJ30 2026-09-08：矿车轨道（314）不入任何支撑链——原版 TileFrame 对 314
     //  唯一派发 = Minecart.FrameTrack(i,j,pound:false)（WorldGen.cs:86569-86572），
-    //  按六邻轨道连接掩码重定前/后轨帧，【无失撑破坏支】（Minecart.cs:947-1172 全文
-    //  零 KillTile;pound=true 的破坏支只有锤击/换轨信号路径触发）——轨道链自支撑、
+    //  按六邻轨道连接掩码重定前/后轨帧，【无失撑破坏支】（★SW-RB8b 2026-09-09 勘误：
+    //  FrameTrack 全文唯一 KillTile 在 Minecart.cs:1169 尾支,门=pound&&flag4&&!mute
+    //  ——TileFrame 本派发恒 pound:false 永不可达;pound:true 只出自锤击
+    //  Player.cs:46448/联机 MessageBuffer.cs:1227/换轨信号 Minecart.cs:1321,不经
+    //  TileFrame——早退分支无误放行面,原版 TileFrame 链对 314 确无拆轨路径）——轨道链自支撑、
     //  悬空合法（孤格 array==null → 重置 0/-1 平轨仍保留，Minecart.cs:984-990）。
     //  曾落家具 hasSupport 近似（framed+非 solid 1×1）→ 挖轨道正下方支撑块（症状②）
     //  或轨道下方空格插火把（症状③）经 onTileChanged→checkFurnitureSupport(x,y-1)

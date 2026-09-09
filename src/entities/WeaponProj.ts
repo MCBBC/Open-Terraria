@@ -5747,6 +5747,15 @@ export class GrenadeProj extends Entity {
     //   2≤2 爆 = 原版 Damage(:17184) 钳后次拍 AI Kill（接触段已移至本判后）。
     //   ★R3：入液门（fixedUpdate 头）在 Kill 判前同拍 → timeLeft=1 当拍即爆 = 原文
     //   :47771→:48031 同拍序
+    // IIII225：FTW×noTraps 双种子引信加速（P.cs:48040-48045：AI_016 :48031 Kill 判
+    //   else 支内 `if (getGoodWorld && noTrapsWorld && !tenthAnniversaryWorld)
+    //   timeLeft--`——存活拍再减 1，180 引信实际 90 拍爆）。本仓 Kill 判与 Update 尾
+    //   timeLeft-- 合并为 `--fuse<=2`（post-dec≤2 ≡ pre-dec≤3），门换算 = 仅
+    //   `fuse>4` 的拍预减（F=4 拍：cs 存活→门减→尾减至 2→次拍爆；若按 fuse>3 预减
+    //   则本仓当拍即爆=早 1 拍。F>4 预减后 --fuse 终值与 cs 每拍终态逐拍相等）。
+    //   仅发射支/投掷支 AI 头两处衰减点之一（同 :6204 投掷支）。
+    if (game.world.seedFlags?.getGoodWorld && game.world.seedFlags?.noTraps
+      && !game.world.seedFlags?.tenthAnniversary && this.fuse > 4) this.fuse--;
     if (--this.fuse <= 2) {
       this.dead = true;
       this.destroy();
@@ -6201,6 +6210,10 @@ export class GrenadeProj extends Entity {
     //   （:17307）。post-dec ≤ 2 ≡ 原版 pre-tail-dec ≤ 3（180 引信=第 178 拍爆;
     //   曾 --fuse<=0=第 180 拍,+2）。接触段已移至本判后（原版 Damage :17184 晚于
     //   AI Kill 判——钳 3 的拍不爆、次拍爆 = 原版同拍）
+    // IIII225：FTW×noTraps 引信加速（同 :5749 发射支——P.cs:48040-48045,门换算
+    //   fuse>4 预减;cs AI_016 单函数对投掷/发射弹共用,本仓两衰减点同门）
+    if (game.world.seedFlags?.getGoodWorld && game.world.seedFlags?.noTraps
+      && !game.world.seedFlags?.tenthAnniversary && this.fuse > 4) this.fuse--;
     if (--this.fuse <= 2) {
       this.dead = true;
       this.destroy();

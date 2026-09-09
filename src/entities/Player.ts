@@ -1285,6 +1285,9 @@ export class Player extends Entity {
   }
   private _equipStatsCache: PlayerEquipStats | null = null;
   private _equipStatsKey = '';
+  /** ★IIIII224：世界旗直读位（Game 每帧注入,computeEquipStats 巫师帽 238 十周年臂消费。
+   *  不入 equipStats 缓存键——键内有独立 T/t 位,旗翻转帧即失效） */
+  worldSeedFlags?: { tenthAnniversary?: boolean; remix?: boolean; theConstant?: boolean; everything?: boolean };
 
   /** equipStats 内容键(输入清单 = computeEquipStats 读到的全部可变状态):
    *  甲/饰品/社交 20 槽 + 染料 10 槽的【id+prefix】(★prefix 是槽条目字段——
@@ -1311,6 +1314,7 @@ export class Player extends Entity {
     }
     k += inv.extraAccessory ? 'E' : 'e';
     k += this.usedGummyWorm ? 'G' : 'g';
+    k += this.worldSeedFlags?.tenthAnniversary ? 'T' : 't';   // ★IIIII224 巫师帽随从臂输入
     k += this.panicTime > 0 ? 'P' : 'p';
     k += this.controlDownHold ? 'D' : 'd';   // shimmerImmune（5355 && !controlDownHold :15643）的输入
     // 配饰格可见性开关段（hideVisibleAccessory,Player.cs:1590——UpdateVisibleAccessories
@@ -1963,6 +1967,12 @@ export class Player extends Entity {
     //  3-9 门=item.accessory 不授 :12970-12989;消费=SelfHurtPlayers :15131-15134）
     let deadMansSweater = false;
     if (bVid === 5007) deadMansSweater = true;
+    // ★IIIII224（GrantArmorBenefits case 238,Player.cs:13352-13359）：巫师帽
+    //  （头槽 238）magicDamage +5%；十周年世界随从上限 +1（tenthAnniversaryWorld）
+    if (hVid === 238) {
+      dmgMagic += 0.05;
+      if (this.worldSeedFlags?.tenthAnniversary) minionSlots += 1;
+    }
     // 老猩红甲套装 crimsonRegen（ArmorSetBonuses.cs:433
     // `Add(Benefits.Crimson,"ArmorSetBonus.Crimson",792,793,794)`——头 792/headSlot57
     // ·胸 793/bodySlot37·腿 794/legSlot35,vanillaArmorSets 表暂未收录此键,内联检测
@@ -3073,6 +3083,7 @@ export class Player extends Entity {
     //      remix 组合（"don't dig up"+constant）拉长 332/333 至 28800t；死亡态不推进
     //      ——原版 UpdateDead 无 UpdateBuffs 链。表情 146/147/148 + Hungry 音经回调）----
     this.buffs.dontStarveWorld = !!world.seedFlags?.theConstant;
+    this.worldSeedFlags = world.seedFlags;   // ★IIIII224：equip 面旗读点（巫师帽 238 tenth）
     this.buffs.hungerPlayerAlive = !this.dead;   // 死亡冻结（UpdateDead 无 UpdateBuffs 链）
     this.buffs.remixHunger = !!(world.seedFlags?.theConstant && world.seedFlags?.remix);
     this.buffs.starvingMaxHp = this.maxHp;
@@ -3804,7 +3815,8 @@ export class Player extends Entity {
       : null;
     const ht = hurtTiles(world.store, rideBox?.x ?? this.x, rideBox?.y ?? this.y,
       rideBox?.w ?? this.w, rideBox?.h ?? this.h,
-      this.equipStats.fireWalk || this.buffs.obsidianSkin); // 黑曜石皮含 fireWalk（:9576）
+      this.equipStats.fireWalk || this.buffs.obsidianSkin,   // 黑曜石皮含 fireWalk（:9576）
+      world.seedFlags); // ★IIIII224 仙人掌 theConstant/蜂蜜 ftw 触伤门（Collision.cs:3225）
     if (ht) this.applyTouchDamage(game, ht);
 
     // ---- CheckDrowning 1:1（Player.cs:22914-23002，本地玩家门 = Main.myPlayer==whoAmI）----
@@ -5301,6 +5313,23 @@ export class Player extends Entity {
       // 推力 −0.1/−0.6 被重力 +0.4 盖成净上浮/下坠畸变）
       if (this.rocketDelay > 0) {
         grav = 0;
+      }
+      // ★IIIII224（Player.cs:24861-24883 深度重力斜率，此前整段漏移植）：
+      //  num5=(maxTilesX/4200)²；num6 = (y/16 − (60+10·num5)) / (worldSurface/6)——
+      //  remix 分母改 worldSurface/1（斜率×6 缓,Don't Dig Up 世界地下低重力）；
+      //  下钳 remix 0.1 / vanilla 0.25，上钳 1；gravity *= num6。普通世界只在
+      //  太空带（y/16 < 60+10n5+ws/6）减重，remix 世界低重力带下探到近地表。
+      {
+        const n5 = (world.w / 4200) ** 2;
+        let num6 = (this.y / 16 - (60 + 10 * n5)) / (world.groundLevel / 6);
+        if (world.seedFlags?.remix) num6 = (this.y / 16 - (60 + 10 * n5)) / world.groundLevel;
+        if (world.seedFlags?.remix) {
+          if (num6 < 0.1) num6 = 0.1;
+        } else if (num6 < 0.25) {
+          num6 = 0.25;
+        }
+        if (num6 > 1) num6 = 1;
+        grav *= num6;
       }
       // 重力倒置（gravDir，R7）：方向取反（Player.cs:3207 vy×gravDir 全局语义近似）
       this.vy = gd === 1

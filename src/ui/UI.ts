@@ -6551,7 +6551,7 @@ export class UI {
     settingsBtn.addEventListener('mouseleave', () => { settingsBtn.style.transform = 'scale(1)'; });
     settingsBtn.addEventListener('mousedown', (e) => {
       e.stopPropagation();
-      this.onPauseMenu?.();   // 开/关设置浮层(SW-BN3 与原版同相:背包开着叠浮层)
+      this.onPauseMenu?.();   // 开/关设置浮层(★SW-RB8c 勘误:Open 收背包 :70/Close 回背包 :108,两态互斥)
     });
     this.vinvRoot?.appendChild(settingsBtn);
     this.vinvLayoutItems.push({ el: settingsBtn, pos: () => {

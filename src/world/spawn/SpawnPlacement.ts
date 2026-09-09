@@ -66,14 +66,30 @@ export function spawnValidSpawnFloor(st: TileStore, tX: number, tY: number): boo
   return false;
 }
 
+/** 生成期双地牢排斥集（★IIIII226 noSurface 随机落点臂消费）：
+ *  Main.tileDungeon{41,43,44,677-679}（Main.cs:8131-8136 终值,与 Game.TILE_DUNGEON_SHEETS
+ *  同表）+ Main.wallDungeon{7,8,9,94-99}（=SceneMetrics.DUNGEON_WALL_IDS 同表）。
+ *  DungeonUtils.IsConsideredDungeonTile/Wall 的 allDungeons=true 第三腿
+ *  （GenVars.dungeonGenVars[i].isDungeonTile 逐地牢砖表,DungeonCrawler.cs:133-172
+ *  Main.tileDungeon 克隆+各 crawler 实际用砖）=dualDungeons 组合细化腿,登记组合债。 */
+const GEN_DUNGEON_TILE_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
+const GEN_DUNGEON_WALL_SHEETS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+
 /** Spawn_IsAreaValidSpawn（Player.cs:38222-38259）：落脚行上方 3×3 净空门。
  *  · InWorld(5)/tile null → continue（:38225-38228,越界格不碍事）
  *  · 底邻行（j==floorY-1）下方格压板 135 / CanTileHurt（player=null → 灼烧恒伤）
  *    → 拒（:38230-38239）
  *  · 格本体 nactive 压板 135 / 实心非顶 → 拒（:38242-38249）；liquid>0 → 拒（:38250-38252）
- *  · generatingSpawn 双地牢墙门（:38253-38257）运行时调用面无 true 调用方
- *    （vanilla 唯一 true 调用 = WorldGen.cs:19672 noSurface 生成期）→ 不移植（登记） */
-export function spawnIsAreaValidSpawn(st: TileStore, floorX: number, floorY: number): boolean {
+ *  · generatingSpawn 双地牢墙门（:38253-38257）：`generatingSpawn && Main.dualDungeonsSeed
+ *    && ((tile.active() && IsConsideredDungeonTile(type,true)) ||
+ *        IsConsideredDungeonWall(wall,true))` → 拒——★IIIII226 补移植
+ *    （vanilla 唯一 true 调用 = WorldGen.cs:19672 noSurface 生成期随机落点臂）。
+ *    默认参（两腿缺省 false/undefined）下与旧签名逐字节同构,运行时调用面零扰动。 */
+export function spawnIsAreaValidSpawn(
+  st: TileStore, floorX: number, floorY: number,
+  opts?: { generatingSpawn?: boolean; dualDungeonsSeed?: boolean },
+): boolean {
+  const genDual = opts?.generatingSpawn === true && opts.dualDungeonsSeed === true;
   for (let i = floorX - 1; i < floorX + 2; i++) {
     for (let j = floorY - 3; j < floorY; j++) {
       if (!inWorld5(st, i, j)) continue;
@@ -94,6 +110,11 @@ export function spawnIsAreaValidSpawn(st: TileStore, floorX: number, floorY: num
         if (solidObstacle(st, i, j)) return false;         // :38247-38249
       }
       if (st.liquid[idx] > 0) return false;                // :38250-38252
+      if (genDual &&                                       // :38253-38257 生成期双地牢排斥
+          ((st.hasTile(i, j) && GEN_DUNGEON_TILE_SHEETS.has(sh))
+            || GEN_DUNGEON_WALL_SHEETS.has(st.wall[idx]))) {
+        return false;
+      }
     }
   }
   return true;

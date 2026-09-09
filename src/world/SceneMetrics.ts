@@ -22,6 +22,12 @@ const SNOW_TILES = ids([147, 148, 161, 162, 164, 163, 200]);
 const JUNGLE_TILES = ids([60, 61, 62, 74, 226, 225]);               // 非 remixWorld 分支 L607
 const EVIL_TILES = ids([23, 661, 24, 25, 32, 112, 163, 400, 398]);  // + 向日葵×(-10) 另计
 const BLOOD_TILES = ids([199, 662, 201, 203, 200, 401, 399, 234, 352]);
+// ★IIIII224 remix 分支表（SceneMetrics.cs:605-610）：丛林去掉 226（荆藤藤蔓——
+//  remix 无常规丛林生物群系判定,只认草丛+神龛砖）、邪恶补 474（腐化丛林草）、
+//  猩红补 195（猩红丛林草）—— remix 丛林草既有腐化也有猩红两型
+const JUNGLE_TILES_REMIX = ids([60, 61, 62, 74, 225]);
+const EVIL_TILES_REMIX = ids([23, 661, 24, 25, 32, 112, 163, 400, 398, 474]);
+const BLOOD_TILES_REMIX = ids([199, 662, 201, 203, 200, 401, 399, 234, 352, 195]);
 const MUSHROOM_TILES = ids([70, 71, 72, 528]);
 const METEOR_TILES = ids([37]);
 const DUNGEON_TILES = ids([41, 43, 44, 481, 482, 483]);
@@ -331,15 +337,19 @@ export function scanScene(
   // 秘密种子）时 ×3 = 每株 -30。本仓 SeedFlags 预留位尚无种子映射 → 恒 ×1
   const infectedSeed = !!world.seedFlags?.infectedSeed;
   const sunflowerMul = infectedSeed ? -30 : -10;
+  // ★IIIII224：remix 世界用 :605-610 变体表（474/195 补入、丛林去 226）
+  const remixCounts = !!world.seedFlags?.remix;
+  const evilSet = remixCounts ? EVIL_TILES_REMIX : EVIL_TILES;
+  const bloodSet = remixCounts ? BLOOD_TILES_REMIX : BLOOD_TILES;
   let holy = Math.max(0, countSet(counts, HOLY_TILES));
-  let evil = Math.max(0, countSet(counts, EVIL_TILES) + sunflower * sunflowerMul);
-  let blood = Math.max(0, countSet(counts, BLOOD_TILES) + sunflower * sunflowerMul);
+  let evil = Math.max(0, countSet(counts, evilSet) + sunflower * sunflowerMul);
+  let blood = Math.max(0, countSet(counts, bloodSet) + sunflower * sunflowerMul);
   const holyRaw = holy;
   holy -= evil; holy -= blood;
   evil -= holyRaw; blood -= holyRaw;
   holy = Math.max(0, holy); evil = Math.max(0, evil); blood = Math.max(0, blood);
 
-  const jungle = countSet(counts, JUNGLE_TILES);
+  const jungle = countSet(counts, remixCounts ? JUNGLE_TILES_REMIX : JUNGLE_TILES);
   const snow = countSet(counts, SNOW_TILES);
   const mushroom = countSet(counts, MUSHROOM_TILES);
   const shadowCandleCount = counts.get(646) ?? 0;   // ShadowCandle tile 646
@@ -363,9 +373,16 @@ export function scanScene(
 
   // Zone 判定（CalculateZones L673-697）
   const zoneUnderworldHeight = tileY > underworldLayer;
+  // IIII225：drunk 世界地牢 Zone 深度下限抬升（SceneMetrics.cs:688-691）——
+  // `num = worldSurface; if (drunkWorld || !isThereAWorldSurface) num = max(num, dungeonY+40)`
+  // → ZoneDungeon 需 TileCenter.Y 深于 num（!isThereAWorldSurface 支本仓恒有地表不接）。
+  // 语义：drunk 世界地牢砖散布面广,深层判定按地牢本体 Y+40 起（仅深度门,砖/墙门不变）
+  const dungeonZoneFloor = world.seedFlags?.drunkWorld
+    ? Math.max(worldSurface, world.dungeonY + 40)
+    : worldSurface;
   const belowSurface = tileY > worldSurface;
   const centerWall = st.inBounds(tileX, tileY) ? st.wall[st.idx(tileX, tileY)] : 0;
-  const zoneDungeon = dungeonTiles >= DUNGEON_THRESHOLD && belowSurface && DUNGEON_WALLS.has(centerWall);
+  const zoneDungeon = dungeonTiles >= DUNGEON_THRESHOLD && tileY > dungeonZoneFloor && DUNGEON_WALLS.has(centerWall);
   const zoneDesert = desert >= DESERT_THRESHOLD;
   // 四墙 Zone + BehindBackwall（cs:675/687-690）：全部取中心格 wall（与神庙 87 同源）
   const zoneGranite = centerWall === 184 || centerWall === 180;
@@ -507,10 +524,12 @@ export function scanBiomeLightCounts(
   }
   // 向日葵压制 ×(−10)(AggregateTileCounts :588-592;infectedSeed ×3 无种子映射恒 ×1)
   const sunflowerMul = -10;
+  // ★IIIII224：remix 变体表（:605-610,同 scanScene）
+  const remixCounts = !!world.seedFlags?.remix;
   return {
-    evil: Math.max(0, countSet(counts, EVIL_TILES) + sunflower * sunflowerMul),
-    blood: Math.max(0, countSet(counts, BLOOD_TILES) + sunflower * sunflowerMul),
-    jungle: countSet(counts, JUNGLE_TILES),
+    evil: Math.max(0, countSet(counts, remixCounts ? EVIL_TILES_REMIX : EVIL_TILES) + sunflower * sunflowerMul),
+    blood: Math.max(0, countSet(counts, remixCounts ? BLOOD_TILES_REMIX : BLOOD_TILES) + sunflower * sunflowerMul),
+    jungle: countSet(counts, remixCounts ? JUNGLE_TILES_REMIX : JUNGLE_TILES),
     mushroom: countSet(counts, MUSHROOM_TILES),
     graveyard: Math.max(0, tomb - (sunflower >> 1)),
   };

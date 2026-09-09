@@ -7,13 +7,23 @@
 // 金字塔 151+墙34、云/沙/活树全图上漆（FinalCleanupPass paintThe*Tenth），游戏内
 // 小地图走 mapPaintColor 而预览漏漆 ⇒ 地牢/金字塔/神庙双路径颜色不一致——本表补漆
 // （MapHelper.cs:1812-1863 MapColor 单源 mapPaintColor，豁免面与 colorFor 同构）。
+// ★IIIII227（2026-09-09）四涂装世界预览清偿：invisibleplane（coatEverythingEcho）
+// 生成期给全域写隐形涂层（DoCoatEverythingEcho_SingleTile cs:937-966 →
+// TileStore.coat invisibleBlock/invisibleWall 位），预览此前漏涂层门 ⇒ 预览全图显形、
+// 进图后小地图/实时全隐——双路径不一致。本表补两道门（MapHelper.cs GetTileType
+// :1934-1939 `invisibleBlock() → baseType=0; return` 落穿液体/墙/背景 + GetWallType
+// :2000 `!invisibleWall()` 门），与游戏内 Renderer.coatHiddenBlock/coatHiddenWall
+// 同构（showInvisibleBlocks=回声腔/幽灵护目镜总豁免；旗驱零扰动：coat=0 恒假）。
+// fullbright 涂层（xrayvision）在原版地图=GetTileType :1935 `newLight=255` 光照地板
+// ——本仓预览/地图不建模逐格光（恒全亮）+探索面=半径点亮（Game.markExplored），
+// 语义已由「无光照模型」覆盖为 no-op，不设门（登记于 content-parity IIII227 章）。
 import { TILE_DEFS, WALL_DEFS , TILE_BY_KEY } from '../data/tiles';
 import {
   vanillaTileMapColor, vanillaTileMapColorOption, vanillaWallMapColor, vanillaLiquidColor,
   vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG, VANILLA_WALL_LOOKUP0,
 } from '../data/vanillaMapColors';
 import { mapPaintColor } from '../world/Paint';
-import type { TileStore } from '../world/TileStore';
+import { TileStore } from '../world/TileStore';
 
 function hexToRgb24(hex: string | undefined, fallback: number): number {
   if (!hex || hex[0] !== '#') return fallback;
@@ -63,8 +73,14 @@ const MAP_TILE_NO_PAINT_SHEET = 160;
 export function mapColor24(st: TileStore, x: number, y: number,
   bg?: { groundLevel: number; rockLevel: number; underworld?: number; remix?: boolean }): number {
   const i = st.idx(x, y);
+  // ★IIIII227 回声涂层双门（与 Renderer.coatHiddenBlock/coatHiddenWall 同构单源语义；
+  //  MapHelper.cs GetTileType :1934-1939 / GetWallType :2000——showInvisibleBlocks
+  //  （回声腔/幽灵护目镜）总豁免；普通世界 coat=0 恒假零扰动）
+  const showInvis = st.showInvisibleBlocks;
+  const invisBlock = (st.coat[i] & TileStore.COAT_INVISIBLE_BLOCK) !== 0 && !showInvis;
+  const invisWall = (st.coat[i] & TileStore.COAT_INVISIBLE_WALL) !== 0 && !showInvis;
   const t = st.flags[i] ? st.type[i] : 0;
-  if (t !== 0) {
+  if (t !== 0 && !invisBlock) {
     // 自研像素方块（F2 图片导入）：RGB 编码在 frameX/Y（r<<8|g, b）——按原像素色显示
     const PIX = TILE_BY_KEY['pixel_block'];
     if (PIX !== undefined && t === PIX) {
@@ -109,7 +125,8 @@ export function mapColor24(st: TileStore, x: number, y: number,
   // ★IIIII223 F-2：玻璃族 wallLookup=0 → 不上图落穿背景（vanilla GetWallType
   //  baseType=0 ⇒ CreateMapTile :1913-1917 背景支；液体支已在上方先行，与 vanilla
   //  GetWallType 液体优先序同构；与 tileLookup=0 落穿哨兵同族）
-  if (w !== 0 && !VANILLA_WALL_LOOKUP0.has(w)) {
+  //  ★IIIII227：回声涂层墙（invisibleWall）同门（GetWallType :2000 !invisibleWall()）
+  if (w !== 0 && !invisWall && !VANILLA_WALL_LOOKUP0.has(w)) {
     const pw = st.paintWall[i];
     const vc = vanillaWallMapColor(w);
     if (vc) {

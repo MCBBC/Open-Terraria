@@ -215,6 +215,11 @@ export class World {
    *  不落盘（StartWorld/StartNight 每次重扫回填）；地下仙女链（NPC.cs:5730）消费门 */
   fairyLog = false;
   clock: Clock;
+  /** ★IIIII224：Main.IsItDay()（Main.cs:63790）——remix（don't dig up）世界**恒 false**。
+   *  与渲染昼夜（clock.isDay=Main.dayTime）是两个口径：消费面 = 日夜型 AI 分支、
+   *  白天召唤物判日（克脑骨餐 43/天磨 544/Mechdusa 556/557）、 fighter 驱散表等。
+   *  remix 世界地表白天仍按"夜晚表"刷怪/判行为（原版同款倒挂）。 */
+  get isItDay(): boolean { return !this.seedFlags?.remix && this.clock.isDay; }
   /** 天气系统（WeatherState 状态机；存档/wld 导入经 applyWeatherSave 回填） */
   weather = new WeatherState();
   applyWeather(s: Partial<WeatherSave>) { applyWeatherSave(this.weather, s); }

@@ -121,7 +121,9 @@ export class FallingStar extends Entity {
     projectileWetSection(this, game, w.store, this.x, this.y, this.w, this.h,
       wetId, !!projectileData(wetId)?.ignoreWater);
     // 白天清除（Spawner :50193 / 正星 :22141——仅自然星）
-    if (w.clock.isDay) {
+    // ★IIIII224（Projectile.cs:24093/:54030 两 Kill 门均带 !remixWorld）：
+    //  remix 世界自然星/催生器白天不灭
+    if (w.clock.isDay && !w.seedFlags?.remix) {
       if (this.natural || this.warmup > 0) { this.dead = true; return; }
     }
     if (this.warmup > 0) {
@@ -162,7 +164,9 @@ export class FallingStar extends Entity {
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) {
       // 落地 Kill（:75593 掉落 + :77259-77323 type12 特效支）
       this.dead = true;
-      if (this.natural) {
+      if (this.natural && !w.seedFlags?.remix) {
+        // ★IIIII224（Projectile.cs:79348）：`type==12 && damage>500 && !remixWorld`
+        //  才掉坠星物品——remix 自然星不落 item 75
         game.spawnDrop(this.cx - 8, this.y - 4, 'vi_75_fallen_star', 1, 0, -2);
       }
       // ★G′ T4：Kill 12 特效逐项（Projectile.cs:77259-77323；替换旧 spawnParticles/

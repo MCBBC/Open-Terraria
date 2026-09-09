@@ -498,18 +498,37 @@ export class Minecart extends Entity {
           ? true
           : st.inBounds(headX, feetY - 1) && st.get(headX, feetY - 1) === TRACK_TILE;
         // ★SW-BJ30 2026-09-08：坡面通行门（45°坡轨"这种角度开不过去"第二案）——
-        //  原版横向碰撞对坡形块从迎坡侧【不算墙】（Collision.cs:2361-2382：slope 1
-        //  在 vx≥0、slope 2 在 vx≤0 时 flag3=true 跳过碰撞；slope 3/4 同支 :2363-2367
-        //  横向让行），矿车贴轨上坡时探针格=坡形山体块是常态,原版车随坡面爬升。
-        //  曾把 slope≠0 当整块实心墙 → 相位落点踩中探针即 vx 清零+回退 x,而
-        //  trackCollision 的 Y 已随坡面抬升（x 回退与 y 抬升错位）→ 车被抛离轨面
-        //  2-3 格后落在坡体上,onWrongGround 刹车链把车永久楔死（用户实报）。
+        //  原版横向碰撞对坡形块从迎坡面侧【不算墙】，矿车贴轨上坡时探针格=坡形
+        //  山体块是常态,原版车随坡面爬升。曾把 slope≠0 当整块实心墙 → 相位落点
+        //  踩中探针即 vx 清零+回退 x,而 trackCollision 的 Y 已随坡面抬升（x 回退
+        //  与 y 抬升错位）→ 车被抛离轨面 2-3 格后落在坡体上,onWrongGround 刹车链
+        //  把车永久楔死（用户实报）。
+        // ★SW-RB8b 2026-09-09：放行判据改 Collision.cs:2361-2382 flag3 精确几何
+        //  （与 physics/TileCollision.ts slopePass 同式同源；BJ30 曾用 vx 符号近似
+        //  slope1∧vx>0/slope2∧vx<0/3·4 恒放行——三偏差：① 原版判据全用【移动前】
+        //  位置 vector3(ox/oy)+|Velocity.X|+Height,与速度方向无关；真实地形右上行
+        //  坡=坡2（smoothSlope case5 down+right→2,TrackPass.smoothSlope 同款;
+        //  坡1=左高右低、右缘整高=右行墙面）,符号规则 slope2∧vx<0 ⇒ 右行爬真实
+        //  坡仍被楔死,而 slope1∧vx>0 反放行整高左脸=穿山；② 坡3/4 原版同样有几何
+        //  门（顶缘 |vx| 容差+横向单侧,:2363/:2367）,恒放行=天花板坡可穿；③ 半砖
+        //  num7=8 支不适用本近似（TileCollision 同款 half 直接不放行）。
+        //  外层再加原版推离前置（:2406/:2428 两支都要求移动前盒【完全】在格一侧）：
+        //  贴面跨格态原版本就不推离（交 Y 面/坡面解析）——本探针只拦"本帧才探入"
+        //  的穿透,爬升中段跨格态不再被逐帧急停。坡 1 行进判据 ox≥格左=前缘格内
+        //  蕴含成立（左行）,坡 2 对称 ox+w≤格右（右行）——与 TileCollision 引擎
+        //  全域同语义。
         const pi = st.inBounds(headX, feetY) ? st.idx(headX, feetY) : -1;
-        const slopeAt = pi >= 0 ? st.slope[pi] : 0;
-        const slopePassable =
-          (slopeAt === 1 && this.vx > 0) || (slopeAt === 2 && this.vx < 0)
-          || slopeAt === 3 || slopeAt === 4;
-        if (!headTrack && pi >= 0 && st.isSolid(headX, feetY) && !slopePassable) {
+        const preX = this.x - this.vx, preY = this.y - this.vy;
+        const avx = Math.abs(this.vx);
+        const slopePassable = pi < 0 || st.half[pi]
+          ? false
+          : st.slope[pi] === 1 ? preY + this.h - avx <= feetY * 16 + 16 && preX >= headX * 16
+            : st.slope[pi] === 2 ? preY + this.h - avx <= feetY * 16 + 16 && preX + this.w <= headX * 16 + 16
+              : st.slope[pi] === 3 ? preY + avx >= feetY * 16 && preX >= headX * 16
+                : st.slope[pi] === 4 && preY + avx >= feetY * 16 && preX + this.w <= headX * 16 + 16;
+        const preFullySided = pi < 0 ? false
+          : preX + this.w <= headX * 16 || preX >= headX * 16 + 16;
+        if (!headTrack && pi >= 0 && st.isSolid(headX, feetY) && !slopePassable && preFullySided) {
           this.x -= this.vx;
           this.vx = 0;
         }

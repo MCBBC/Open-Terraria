@@ -66,8 +66,12 @@ function layTrack(st: TileStore, tx: number, ty: number): void {
 }
 
 /** SW-BJ30 场景（与真实游戏探针 scripts/_bj30-track-slope.mjs 同构）：
- *  助跑平轨 x0-6..x0+7 → 45°上坡山体（slope 1）6 格 → 顶部平轨 5 格
- *  → 45°下坡山体（slope 2）6 格 → 谷底平轨 14 格。返回顶平轨首列/谷底首列 */
+ *  助跑平轨 x0-6..x0+7 → 45°上坡山体 6 格 → 顶部平轨 5 格
+ *  → 45°下坡山体 6 格 → 谷底平轨 14 格。返回顶平轨首列/谷底首列。
+ *  ★SW-RB8b 2026-09-09 坡 id 矫正为 vanilla 形（smoothSlope cs:70037 位编码：
+ *  case5 down+right→坡2 / case6 down+left→坡1——右上行坡面=坡2、右下行坡面=坡1,
+ *  与 TrackPass.smoothSlope/worldgen 生成地形一致;BJ30 原场景坡 id 镜像反标,
+ *  恰好喂对了当时的 vx 符号规则=伪绿） */
 function buildSlopeScene(st: TileStore, x0: number, F: number): { topX: number; valleyX: number } {
   for (let x = x0 - 8; x <= x0 + 38; x++) for (let y = F - 16; y <= F + 2; y++) {
     if (!st.inBounds(x, y)) continue;
@@ -77,20 +81,20 @@ function buildSlopeScene(st: TileStore, x0: number, F: number): { topX: number; 
   // 助跑平轨
   for (let x = x0 - 6; x <= x0 + 7; x++) st.setTile(x, F, STONE, 0, 0);
   for (let x = x0 - 6; x <= x0 + 7; x++) layTrack(st, x, F - 1);
-  // 45° 上坡（slope 1 = 右上行坡,Collision 坡面让行方向）
+  // 45° 上坡（右上行 → 坡 2）
   for (let k = 0; k <= 5; k++) {
     const col = x0 + 8 + k, surf = F - 1 - k;
-    st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 1);
+    st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 2);
     for (let y = surf + 1; y <= F; y++) st.setTile(col, y, STONE, 0, 0);
     layTrack(st, col, surf - 1);
   }
   // 顶部平轨
   for (let x = x0 + 14; x <= x0 + 18; x++) st.setTile(x, F - 6, STONE, 0, 0);
   for (let x = x0 + 14; x <= x0 + 18; x++) layTrack(st, x, F - 7);
-  // 45° 下坡（slope 2 = 右下行坡）
+  // 45° 下坡（右下行 → 坡 1）
   for (let k = 0; k <= 5; k++) {
     const col = x0 + 19 + k, surf = F - 5 + k;
-    st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 2);
+    st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 1);
     for (let y = surf + 1; y <= F; y++) st.setTile(col, y, STONE, 0, 0);
     layTrack(st, col, surf - 1);
   }
@@ -98,6 +102,30 @@ function buildSlopeScene(st: TileStore, x0: number, F: number): { topX: number; 
   for (let x = x0 + 25; x <= x0 + 38; x++) st.setTile(x, F, STONE, 0, 0);
   for (let x = x0 + 25; x <= x0 + 38; x++) layTrack(st, x, F - 1);
   return { topX: x0 + 14, valleyX: x0 + 25 };
+}
+
+/** 镜像场景（SW-RB8b）：助跑平轨在右、45° 左上行坡（坡 1 = 左高右低族的反向面）
+ *  向左爬——覆盖「斜坡下行反向」边界（Collision.cs:2375 坡 1 让行支 ox≥格左）。 */
+function buildSlopeSceneLeft(st: TileStore, x0: number, F: number): { topX: number } {
+  for (let x = x0 - 38; x <= x0 + 8; x++) for (let y = F - 16; y <= F + 2; y++) {
+    if (!st.inBounds(x, y)) continue;
+    if (st.get(x, y) !== 0 || st.slope[st.idx(x, y)] !== 0 || st.half[st.idx(x, y)] !== 0) st.setTile(x, y, 0, 0, 0);
+    st.setSlope(x, y, 0);
+  }
+  // 助跑平轨（右侧）
+  for (let x = x0 - 7; x <= x0 + 6; x++) st.setTile(x, F, STONE, 0, 0);
+  for (let x = x0 - 7; x <= x0 + 6; x++) layTrack(st, x, F - 1);
+  // 45° 左上行坡（col 递减 surf 递减;面 = 坡 1）
+  for (let k = 0; k <= 5; k++) {
+    const col = x0 - 8 - k, surf = F - 1 - k;
+    st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 1);
+    for (let y = surf + 1; y <= F; y++) st.setTile(col, y, STONE, 0, 0);
+    layTrack(st, col, surf - 1);
+  }
+  // 顶部平轨
+  for (let x = x0 - 18; x <= x0 - 14; x++) st.setTile(x, F - 6, STONE, 0, 0);
+  for (let x = x0 - 18; x <= x0 - 14; x++) layTrack(st, x, F - 7);
+  return { topX: x0 - 14 };
 }
 
 function mkCart(st: TileStore, mountId: number): { cart: Minecart; p: Player; game: GameHooks } {
@@ -158,6 +186,41 @@ describe('SW-BJ30 症状①：45° 坡轨行驶相位矩阵', () => {
   it('低速 vx=3 也能爬坡（原版贴轨跟面运动与速度无关）', () => {
     const r = runClimb(WOOD_CART_MOUNT, 3, 3);
     expect(r).toMatchObject({ reached: true, wedged: false });
+  });
+
+  // ★SW-RB8b 2026-09-09：镜像面向（左行爬左上行坡=坡 1）——Collision.cs:2375 坡 1
+  //  让行支（preY+h-|vx|≤格底 && preX≥格左）对左行前缘格蕴含成立;BJ30 符号规则
+  //  （slope1∧vx>0）对本面向恒不放行=楔死。真实 vanilla 形右上行坡=坡 2（上行
+  //  测试同款判据镜像），两面向全绿才证明「与速度方向无关的几何门」1:1。
+  it('镜像面向：左行爬左上行坡（坡 1）全相位不楔死（木车 vx=10）', () => {
+    for (let phase = 0; phase < 8; phase++) {
+      const st = new TileStore(140, 60);
+      const { topX } = buildSlopeSceneLeft(st, 80, 24);
+      const { cart, p, game } = mkCart(st, WOOD_CART_MOUNT);
+      const snap = getOnTrack(st, 80 + 6, 24 - 1, (80 + 6) * 16, (24 - 1) * 16 - 40, cart.w, cart.h);
+      cart.x = (snap ? snap.x : (80 + 6) * 16) + phase * 0.125;
+      cart.y = snap ? snap.y : (24 - 1) * 16 + FLAT_H - cart.h;
+      cart.vx = -10; cart.vy = 0;
+      p.inputX = -1;
+      let reached = false;
+      for (let t = 0; t < 420; t++) {
+        cart.fixedUpdate(1 / 60, game);
+        if (cart.x / 16 <= topX) { reached = true; break; }
+      }
+      const wedged = !reached && !cart.onTrackNow && cart.vx === 0 && cart.vy === 0;
+      expect({ phase, reached, wedged }, `phase ${phase} 楔死/未达顶`).toMatchObject({ reached: true, wedged: false });
+    }
+  });
+
+  it('结构锁：贴轨横墙探针坡面放行 = Collision.cs:2361-2382 flag3 几何（非 vx 符号）', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile('src/entities/Minecart.ts', 'utf8');
+    expect(src).toContain('preY + this.h - avx <= feetY * 16 + 16 && preX >= headX * 16');
+    expect(src).toContain('preY + this.h - avx <= feetY * 16 + 16 && preX + this.w <= headX * 16 + 16');
+    expect(src).toContain('preY + avx >= feetY * 16 && preX >= headX * 16');
+    expect(src).toContain('preY + avx >= feetY * 16 && preX + this.w <= headX * 16 + 16');
+    // 推离前置（原版 :2406/:2428 移动前盒完全在格一侧才拦）在位
+    expect(src).toContain('preX + this.w <= headX * 16 || preX >= headX * 16 + 16');
   });
 });
 

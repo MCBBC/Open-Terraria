@@ -10,6 +10,11 @@ import { swTrace } from '../net/AssetCache';
 
 const TITLE_ID = MUSIC.TitleIntro; // 50
 
+/** IIII225：标题曲种子覆写集（Main.cs:12626-12656 gameMenu 支——drunk:remix 70 /
+ *  shimmerGen 72 / vampire 75 / notTheBees 86 / else 60;非 drunk:remix 8 / 十周年 11。
+ *  'main' 解除面与其取并集——进世界后由环境选曲链接管,同原版 gameMenu/游戏世界分域） */
+const SEED_MENU_MUSIC = new Set<number>([60, 70, 72, 75, 86, 8, 11]);
+
 interface Track {
   src: AudioBufferSourceNode;
   gain: GainNode;
@@ -355,11 +360,15 @@ export class AudioSystem {
     }
   }
 
-  /** 兼容旧调用：'title' = 原版标题曲；'main' = 交由环境选曲接管（此处仅解除标题曲） */
-  play(which: 'title' | 'main') {
+  /** 兼容旧调用：'title' = 原版标题曲；'main' = 交由环境选曲接管（此处仅解除标题曲）。
+   *  IIII225：titleMusicId 传入时覆盖标题曲 id（Main.cs:12626-12656 gameMenu 选曲支
+   *  的种子覆写——drunk 系 60/70/72/75/86 与 remix 8/十周年 11；undefined=默认 50）。
+   *  'main' 解除面 = 标题曲或任一种子覆写曲（原版 gameMenu 选曲面在进世界后由
+   *  环境选曲接管,同语义） */
+  play(which: 'title' | 'main', titleMusicId?: number) {
     if (this.muted) return;
-    if (which === 'title') this.playMusic(TITLE_ID);
-    else if (this.curMusic === TITLE_ID) this.playMusic(0);
+    if (which === 'title') this.playMusic(titleMusicId ?? TITLE_ID);
+    else if (this.curMusic === TITLE_ID || SEED_MENU_MUSIC.has(this.curMusic)) this.playMusic(0);
   }
 
   /** 旧昼夜变奏钩子：曲目切换已由选曲链接管（昼/夜曲不同 id），无操作 */

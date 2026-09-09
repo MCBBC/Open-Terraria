@@ -119,8 +119,35 @@ const SEED_ICON: Record<string, string> = {
 const SPECIAL_ICON_KEY_BY_FLAG: Record<string, string> = SEED_ICON;
 
 /** 路线①命中判定：flags 含任一特殊种子旗标（parseSeed 对 SPECIAL_OPTIONS 首中即返） */
-function isSpecialSeedText(flags: { everything?: boolean; drunkWorld?: boolean; notTheBees?: boolean; getGoodWorld?: boolean; theConstant?: boolean; skyblock?: boolean; tenthAnniversary?: boolean; noTraps?: boolean; remix?: boolean }): boolean {
+export function isSpecialSeedText(flags: { everything?: boolean; drunkWorld?: boolean; notTheBees?: boolean; getGoodWorld?: boolean; theConstant?: boolean; skyblock?: boolean; tenthAnniversary?: boolean; noTraps?: boolean; remix?: boolean }): boolean {
   return Object.keys(flags).some((n) => SPECIAL_ICON_KEY_BY_FLAG[n] !== undefined);
+}
+
+/** Main.isHalloweenDateNow（Main.cs:13313-13327）1:1：现实日期万圣窗 =
+ *  10 月 10-31 日 ∪ 11 月 1 日。★可注入 now 供测试（vanilla 读 DateTime.Now）。
+ *  ★IIIII226 halloweenGen 日期臂（WorldFileData.SetSeedToRandomWithCurrentEvents
+ *  WorldFileData.cs:417-425）消费面，落点=mainFlow.createWorldFlow。 */
+export function isHalloweenDateNow(now: Date = new Date()): boolean {
+  const day = now.getDate();
+  const month = now.getMonth() + 1;             // DateTime.Month 1-12
+  if (day < 10 || month !== 10) {
+    if (day <= 1) return month === 11;
+    return false;
+  }
+  return true;
+}
+
+/** WorldFileData.SetSeedToRandomWithCurrentEvents（WorldFileData.cs:417-425）的
+ *  日期臂（UIWorldCreation.FinishCreatingWorld :984-986 调用面）：创建世界时种子为空
+ *  或特殊种子文本 ⇒ 万圣日期窗内给 halloweenGen（pumpkin season）秘种子启用态 +
+ *  种子文本前缀 "pumpkinseason|"（vanilla 另把种子重掷为随机——本仓随机种子推导
+ *  在 createWorldFlow 的空串缺省位完成，普通输入种子原样保留语义不变）。
+ *  非（空 ∪ 特殊）种子或窗外 ⇒ 原样返回（零触碰）。 */
+export function applyHalloweenSeasonSeed(seed: string, now: Date = new Date()): string {
+  const trimmed = String(seed ?? '').trim();
+  if (trimmed !== '' && !isSpecialSeedText(parseSeed(trimmed).flags)) return trimmed;
+  if (!isHalloweenDateNow(now)) return trimmed;
+  return 'pumpkinseason|' + trimmed;
 }
 
 

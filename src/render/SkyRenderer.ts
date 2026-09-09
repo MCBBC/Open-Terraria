@@ -840,8 +840,8 @@ export interface SkyFrameCtx {
     /** Main.dayRate(星空 fadeIn/坠星推进用,缺省 1) */
     dayRate?: () => number;
     /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；稀有云门 theConstant/tenthAnniversary,
-     *  CloudsEnd 月色/背景云累积器门 drunkWorld） */
-    seedFlags?: { theConstant?: boolean; tenthAnniversary?: boolean; drunkWorld?: boolean };
+     *  CloudsEnd 月色/背景云累积器门 drunkWorld；★IIIII224 remix=太阳短路/星星恒画） */
+    seedFlags?: { theConstant?: boolean; tenthAnniversary?: boolean; drunkWorld?: boolean; remix?: boolean };
     store: {
       inBounds(x: number, y: number): boolean;
       isSolid(x: number, y: number): boolean;
@@ -3756,6 +3756,8 @@ export class SkyRenderer {
     this.stepWeatherTints(dtMs / 1000);
     const t = clock.timeOfDay;
     const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
+    // ★IIIII224：Main.remixWorld（don't dig up）——太阳短路 :63873 / 星星恒画 :64015
+    const remixWorldForDraw = !!this.frameCtx?.world?.seedFlags?.remix;
     // ★0.1875 基(=Clock.DAWN,原版 Main.time 0=4:30AM)——曾用 0.25 基差 1.5h,
     //  日/月位与晨昏窗整体偏移(2026-08-23 校正,菜单调度对拍抓出)
     const dayTimeTicks = isDay ? ((t - ClockVal.DAWN) / 0.625) * 54000 : 0;
@@ -3919,13 +3921,14 @@ export class SkyRenderer {
     {
       // 墓园雾吞(:62471-62479):×(1−1.4·I),≤0 整群跳过
       const starDim = Math.max(0, 1 - gyIntensity * 1.4);
-      // 可见性门(:62491-62493):天空够暗才画(remixWorld 恒画)——
+      // 可见性门(:62491-62493):天空够暗才画——
       // 255·(1−cloudAlpha·atmo) − ColorOfTheSkies.R − 25 > 0
+      // ★IIIII224：remix 世界恒画（:64015 `if (remixWorld || !(…))`）
       const cotsR = this.cots ? this.cots[0] : 255;
       const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
       const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
       if (!this.frameCtx?.paused) this.updateStars(dayRate, isDay, dayTimeTicks);   // Star.UpdateStars 同门(:17198)——暂停冻结
-      if (starDim > 0 && visGate > 0) {
+      if (starDim > 0 && (remixWorldForDraw || visGate > 0)) {
         // ★环外一次性状态(2026-08-24):save/getTransform/smoothing 各一次,
         //   逐星 setTransform(见 drawStar 注)——restore 收尾还原全部
         ctx.save();
@@ -3962,6 +3965,10 @@ export class SkyRenderer {
     let moonBase: { x: number; y: number; r: number } | null = null;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
+    // ★IIIII224（:63873）：remix 世界游戏内白天不画日/月——原版 DrawSunAndMoon 在
+    //  dayTime && remix 时整个 return（夜晚月照常）；实现=太阳块绘制门前短路
+    //  （remix 恒 isDay 分支,月亮 else 支不可达,无需另加门）
+    const remixDayNoCelestial = isDay && remixWorldForDraw;
     if (isDay) {
       this.moonScreen = null;
       // 日食换贴图(:62354-62364:eclipse → Sun3;else if !gameMenu && player.head==12 →
@@ -3975,7 +3982,7 @@ export class SkyRenderer {
         const s2 = this.sun2TexImg();                              // :62365-62370
         if (this.frameCtx?.player?.headArmorSlot === 12 && s2) { tex = s2; flag2 = true; }
       }
-      if ((tex.width > 0) && tex.width > 0) {
+      if (!remixDayNoCelestial && (tex.width > 0) && tex.width > 0) {
         // 原版:x = time/54000*(屏宽+图宽*2)-图宽(横穿);y = bgTopY + |t*2-1|²*250+180(正午最高);
         // scale = (1.2-|t*2-1|²*0.4)*1.1;rotation = t*2-7.3(t=time/54000)
         // ★:62289 num3 恒用基础 Sun 宽度算——换皮(Sun3/Sun2 64×64)只换绘制贴图,

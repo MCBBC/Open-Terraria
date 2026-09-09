@@ -1343,7 +1343,9 @@ export class BiomeBackground {
     // ★层序（:52265-52270）：SurfaceTransition → Dirt → 【黑盒打底】→ Rock → Magma。
     // 黑盒 gate = magmaLayer*16 ≤ 屏底（:52815）——带层随后重画覆盖;深处(UnderworldLayer
     // 之下)即原版纯黑地狱背景（本仓清屏非黑,靠这层兜底,曾露天空渐变）
-    if (magmaPx <= screenY + viewH) {
+    // ★IIIII224（Main.cs:54200 DrawBackground_DrawUnderworldBlackBox）：remix 世界
+    // （宽 < 5000 = remix 必然窄图）整层黑盒不画
+    if (magmaPx <= screenY + viewH && !(!!world.seedFlags?.remix && world.w < 5000)) {
       b.fill(0, 0, viewW, viewH, 0, 0, 0, 1);
     }
     // 地狱多层远景背景(DrawUnderworldBackground :52082-52228,画在带层之下):

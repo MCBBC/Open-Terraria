@@ -53,3 +53,65 @@ export function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement
   ctx.drawImage(tintCanvas!, writeX, writeY);
   return tintCanvas!;
 }
+
+// ---- 任意尺寸源区域染色（★IIIII227 四涂装世界：树冠/树枝/棕榈冠等大精灵路径）----
+// 树族大贴图（Tree_Tops 80×80 / Tree_Branches 40×40 / Shroom_Tops 60×42 / 棕榈
+// Tree_Tops_21 114×98）不进 chunk 烘焙（WindSway 摆动层逐帧画），烘焙油漆 pass
+// 染不到；绘制时按【源矩形】染色后回贴（与 tintRegion 同一 applyPaintTint 真值，
+// 16×16 tileTint 通道的放大版）。缓存键 = 图像身份|源矩形|paint——帧定内容,
+// 同一树冠变体全屏共享（LRU 上限淘汰最旧,勿整表 clear）。
+const regionTintCache = new Map<string, HTMLCanvasElement>();
+const regionImgIds = new WeakMap<object, number>();
+let regionNextImgId = 1;
+
+/** 源图像身份 id（ImageBitmap/HTMLImageElement 无getId,WeakMap 稳定分配） */
+function sourceImgId(img: CanvasImageSource): number {
+  let id = regionImgIds.get(img as object);
+  if (id === undefined) {
+    id = regionNextImgId++;
+    regionImgIds.set(img as object, id);
+  }
+  return id;
+}
+
+/** 把 img 的 (sx,sy,sw,sh) 区域按 paint 逐像素染色,返回染色后的独立画布。
+ *  paint<=0 / 文档环境缺失 / 读回失败 → null（调用方回落原图）。isWall=false
+ *  （树族无墙档;负相 30 墙 hack 只在 wall bake 路径）。special=特判组（paint
+ *  1-12 生效;树族 1-12 特判组接线仍为 Paint.ts 头注登记债,本通道预留参数）。 */
+export function tintedVanillaRegion(
+  img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number, paint: number,
+  isWall = false, special?: LeafPaintSettings,
+): HTMLCanvasElement | null {
+  if (paint <= 0 || paint > 30 || sw <= 0 || sh <= 0) return null;
+  if (typeof document === 'undefined') return null;
+  const key = `${sourceImgId(img)}|${sx}|${sy}|${sw}|${sh}|${paint}|${isWall ? 1 : 0}`;
+  const hit = regionTintCache.get(key);
+  if (hit) return hit;
+  const cv = document.createElement('canvas');
+  cv.width = sw; cv.height = sh;
+  const cctx = cv.getContext('2d', { willReadFrequently: true });
+  if (!cctx) return null;
+  cctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  const data = cctx.getImageData(0, 0, sw, sh);
+  const d = data.data;
+  if (special) {
+    for (let p = 0; p < d.length; p += 4) {
+      if (d[p + 3] === 0) continue;
+      const c = applyPaintTintSpecial(d[p], d[p + 1], d[p + 2], paint, special);
+      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2];
+    }
+  } else {
+    for (let p = 0; p < d.length; p += 4) {
+      if (d[p + 3] === 0) continue;
+      const c = applyPaintTint(d[p], d[p + 1], d[p + 2], paint, isWall);
+      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2];
+    }
+  }
+  cctx.putImageData(data, 0, 0);
+  if (regionTintCache.size > 512) {
+    const k0 = regionTintCache.keys().next().value;
+    if (k0 !== undefined) regionTintCache.delete(k0);
+  }
+  regionTintCache.set(key, cv);
+  return cv;
+}

@@ -631,7 +631,19 @@ export class VanillaSpawner {
 
   private spawnNPC(x: number, y: number, netId: number, rng: RNG, ai0?: number, ai1?: number): Enemy | null {
     const map = NET_ID_MAP[netId];
-    const baseId = map?.base ?? netId;
+    let baseId = map?.base ?? netId;
+    // IIII225：NewNPC FTW 野生交换（NPC.cs:81576-81586）——getGoodWorld 且
+    // Next(3)!=0（2/3）→ 兔 46→爆破兔 614、恶魔 62→巫毒恶魔 66（两 if 共享一次掷）。
+    // 原版门在 NewNPC 入口对一切运行时刷生路径生效；本仓只在【会刷出 46/62 的
+    // 调用】掷骰——cs 对每次 NewNPC 都掷一次 Main.rand（全局流副作用），本仓刷生
+    // 链各自独立流（Math.random/实体惯例），无条件加掷会漂移既有 spawn 决策序，
+    // 故按「可交换类型才掷」收窄（行为面=交换概率 2/3,与原版逐次等价）。
+    // 读档/联机傀儡不经本函数=不重掷（原版同——持久实体不重过 NewNPC）。
+    if ((baseId === 46 || baseId === 62) && this.world.seedFlags?.getGoodWorld
+      && rng.int(0, 2) !== 0) {
+      if (baseId === 46) baseId = 614;
+      else baseId = 66;
+    }
     const e = Enemy.fromVanilla(baseId, x, y);
     if (!e) return null;
     // 非默认落位（≠spawn 位 spawnTileX*16+8 / spawnTileY*16）：Game 侧放置段
@@ -1014,6 +1026,17 @@ export class VanillaSpawner {
     if (zoneSnow && playerYpx / TILE < w.groundLevel) {
       maxSpawns = Math.floor(maxSpawns * (1 + this.rainCloudAlpha));
       spawnRate = Math.floor(spawnRate * (1 - this.rainCloudAlpha + 1) / 2);
+    }
+    // IIII225：drunk 世界蜂巢墙修正（NPC.cs:588-592，1457 行号；L499-503）——
+    // `Main.drunkWorld && Main.tile[pX,pY].wall == 86`（86=HiveUnsafe,WallID.cs:241,
+    // drunk 生成期两邪恶域埋的蜂巢墙）→ spawnRate×0.3 / maxSpawns×1.8。序位=雪原云量
+    // 臂之后、地牢 else-if 链之前（独立 if 不参与互斥）。pX/pY=玩家所站格。
+    if (w.seedFlags?.drunkWorld) {
+      const stRate = this.world.store;
+      if (stRate.wall[stRate.idx(this.pX, this.pY)] === 86) {
+        spawnRate = Math.floor(spawnRate * 0.3);
+        maxSpawns = Math.floor(maxSpawns * 1.8);
+      }
     }
     // 地牢→沙尘暴→地下沙漠→丛林→恶地→陨石 else-if 链（NPC.cs:504-544 1:1——
     // 互斥链，命中前支后支不再叠加；此前只移植了地牢一支）：
@@ -1904,7 +1927,14 @@ export class VanillaSpawner {
 
     // ---- 蜘蛛巢（L1568-1587）：(墙 62 || spawnSpider) && CheckToSpawnSpider ----
     const wall = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
-    if (wall === 62 || this.spawnSpider) {
+    // IIII225：CheckToSpawnSpider（NPC.cs:5790-5800）——NTB×FTW×非十周年世界：
+    // 地狱层（≥UnderworldLayer=maxTilesY-200）1/5 才放行、其余层恒真；函数 vanilla
+    // 尾支恒 true,故仅这类世界有实义（此前整函数缺席=NTB×FTW 地狱蜘蛛超刷）。
+    const spiderGateOk = !(
+      !!this.world.seedFlags?.notTheBees && !!this.world.seedFlags?.getGoodWorld
+      && !this.world.seedFlags?.tenthAnniversary
+      && this.spawnTileY >= this.world.lavaLine && !N(5));
+    if ((wall === 62 || this.spawnSpider) && spiderGateOk) {
       // flag7（L1574-1578）= deeperThanRockLayer && y<h-210（dontStarve 变体不适用）
       const flag7 = this.deeperThanRockLayer && this.spawnTileY < st.h - 210;
       // 造型师 354（L1579-1581）：墙 62 专属门 + 1/8 + !water + flag7 +
@@ -2855,7 +2885,9 @@ export class VanillaSpawner {
         if (N(3)) return D(-25);
         return D(183);
       }
-      if (hardMode && (N(2) || this.spawnTileY > this.world.groundLevel)) return D(174);
+      // ★IIIII224（NPC.cs:4100）：174 臂第二析取支带 !remixWorld 门——remix 世界
+      //  只走 1/2 掷（否则 remix 地表带 174 过密）
+      if (hardMode && (N(2) || (this.spawnTileY > this.world.groundLevel && !this.world.seedFlags?.remix))) return D(174);
       if ((wall > 0 && !N(4)) || N(8)) return D(239);
       if (N(2)) return D(181);
       if (N(3)) return D(-22);

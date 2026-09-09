@@ -25,6 +25,7 @@ type MockPlayer = {
   x: number; y: number; w: number; h: number; cx: number; cy: number;
   vx: number; vy: number; dead: boolean; aggro: number;
   team?: number; buffs?: { has(b: number): boolean };
+  equipStats?: { royalGel?: boolean };
 };
 
 function mkPlayer(px: number, py: number, opts: Partial<MockPlayer> = {}): MockPlayer {
@@ -110,16 +111,25 @@ describe('M11 TargetClosest 全玩家槽索敌', () => {
     expect(e.targetPlayer).toBe(local);
   });
 
-  it('镇静罚项（:78508-78510）：表内怪对 Calming 玩家 +1000 → 选无镇静者', () => {
+  it('镇静罚项（:78508-78510，★SW-RB8c 2026-09-08 重钉 gel 专面）：表内怪对装凝胶玩家 +1000 → 选无 gel 者', () => {
     expect(CALMING_NO_AGGRO_TYPES.has(1)).toBe(true);    // 蓝史莱姆在表
-    const calming = { has: (b: number) => b === BuffType.Calming };
+    // 原版定谳：npcTypeNoAggro 唯一置位源 = 装备 3090（Player.cs:14790-14814），
+    // Calming 不置旗（calmed 只吃刷怪率 NPC.cs:708-712）→ 罚项面吃 equipStats.royalGel
     const local = mkPlayer(44 * TILE, 58 * TILE);                        // metric≈800
-    const remote = mkPlayer(41 * TILE, 58 * TILE, { buffs: calming });   // 300+1000=1300
+    const remote = mkPlayer(41 * TILE, 58 * TILE, { equipStats: { royalGel: true } });   // 300+1000=1300
     const { hooks } = flatWorld(local, [remote]);
     const e = Enemy.fromVanilla(1, 40 * TILE, 59 * TILE)!;               // 史莱姆（aiStyle 1）
     e.fixedUpdate(1 / 60, hooks);                       // 首帧 facing 已 ±1（罚项门）
     e.fixedUpdate(1 / 60, hooks);
     expect(e.targetPlayer).toBe(local);
+    // 对照：镇静药水玩家（无 gel）不吃罚 → 近者胜
+    const calming = { has: (b: number) => b === BuffType.Calming };
+    const remoteCalm = mkPlayer(41 * TILE, 58 * TILE, { buffs: calming });
+    const hooks2 = flatWorld(mkPlayer(44 * TILE, 58 * TILE), [remoteCalm]).hooks;
+    const e2 = Enemy.fromVanilla(1, 40 * TILE, 59 * TILE)!;
+    e2.fixedUpdate(1 / 60, hooks2);
+    e2.fixedUpdate(1 / 60, hooks2);
+    expect(e2.targetPlayer).toBe(remoteCalm);
   });
 
   it('平距取先扫描者（:78511 严格 <）：等距 → 候选序先者（本地=槽 0）胜', () => {

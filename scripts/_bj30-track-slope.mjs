@@ -77,20 +77,22 @@ const outJson = await page.evaluate(async () => {
     // 助跑道（平）x0-22..x0+7
     for (let x = x0 - 22; x <= x0 + 7; x++) st.setTile(x, F, STONE, 0, 0);
     for (let x = x0 - 22; x <= x0 + 7; x++) layTrack(x, F - 1);
-    // 45° 上坡山体（slope 1 = 右上行）
+    // 45° 上坡山体（★SW-RB8b 2026-09-09 坡 id 矫正：右上行=坡 2——smoothSlope
+    //  cs:70037 位编码 case5 down+right→2,与 worldgen 生成地形一致;曾反标坡 1
+    //  =镜像地形,恰好喂对当时的 vx 符号规则=伪绿,同 tests/sw-bj30 矫正）
     for (let k = 0; k <= 5; k++) {
       const col = x0 + 8 + k, surf = F - 1 - k;
-      st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 1);
+      st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 2);
       for (let y = surf + 1; y <= F; y++) st.setTile(col, y, STONE, 0, 0);
       layTrack(col, surf - 1);
     }
     // 顶部平轨 x0+14..x0+18
     for (let x = x0 + 14; x <= x0 + 18; x++) st.setTile(x, F - 6, STONE, 0, 0);
     for (let x = x0 + 14; x <= x0 + 18; x++) layTrack(x, F - 7);
-    // 45° 下坡山体（slope 2 = 右下行）
+    // 45° 下坡山体（右下行=坡 1）
     for (let k = 0; k <= 5; k++) {
       const col = x0 + 19 + k, surf = F - 5 + k;
-      st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 2);
+      st.setTile(col, surf, STONE, 0, 0); st.setSlope(col, surf, 1);
       for (let y = surf + 1; y <= F; y++) st.setTile(col, y, STONE, 0, 0);
       layTrack(col, surf - 1);
     }

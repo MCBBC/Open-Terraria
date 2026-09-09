@@ -8,6 +8,8 @@
 //   C npcTypeNoAggro +1000 罚项     Player.cs:14144-14168（物品 3090 表 23 类）
 //                                  + NPC.cs:78492-78495（direction!=0 → +1000f）
 //                                  + NPC.cs:78543-78546（faceTarget=false 不转身）
+//                                  ★SW-RB8c 2026-09-08 重钉：置位源唯一=3090（凝胶）,
+//                                  Calming 零索敌效应（calmed 只吃刷怪率 NPC.cs:708-712）
 import { describe, it, expect } from 'vitest';
 import { dryadMoonPhaseStock, skeletonMerchantMoonPriceMul } from '../src/data/townNpcProfiles';
 import { Enemy, CALMING_NO_AGGRO_TYPES } from '../src/entities/Enemy';
@@ -85,45 +87,61 @@ describe('C 罚项表（Player.cs:14144-14168：物品 3090 → 23 类）', () =
   });
 });
 
-describe('C +1000 罚项（NPC.cs:78492-78495）与不面向门（NPC.cs:78543-78546）', () => {
+describe('C +1000 罚项（NPC.cs:78492-78495）与不面向门（NPC.cs:78543-78546）——SW-RB8c 2026-09-08 重钉原版 1:1', () => {
+  // ★定谳：npcTypeNoAggro 唯一置位源 = 装备 3090 皇家凝胶（1457 Player.cs:14790-14814;
+  // 1456 :14144-14168 同;ResetEffects :18922/UpdateDead :17157 每帧全清）。镇静药水
+  // calmed 只吃刷怪率 spawnRate×1.65/maxSpawns×0.6（NPC.cs:708-712）——零索敌效应。
+  // 旧钉「Calming → +1000/不面向」为置位源误接（mb CALMING_NO_AGGRO_TYPES 表名误导），
+  // 本块按 gel 专面重钉。
   const mkCalming = () => { const b = new BuffState(); b.apply(BuffType.Calming, 30); return b; };
+  const gel = { equipStats: { royalGel: true } };
 
-  it('表内怪（NPC 1 蓝史莱姆）+ Calming 生效 → 有效距离 +1000；无 Calming 不罚', () => {
+  it('表内怪（NPC 1 蓝史莱姆）+ 凝胶装备 → 有效距离 +1000；裸玩家不罚', () => {
     const e = Enemy.fromVanilla(1, 100, 50);
     expect(e).not.toBeNull();
     const manhattan = Math.abs(300 - e!.cx) + Math.abs(110 - e!.cy);
-    expect(e!.effectiveTargetDist(stub())).toBe(manhattan);                       // 无 buff
-    expect(e!.effectiveTargetDist(stub({ buffs: mkCalming() }))).toBe(manhattan + 1000); // :78494
+    expect(e!.effectiveTargetDist(stub())).toBe(manhattan);                       // 无装备
+    expect(e!.effectiveTargetDist(stub(gel))).toBe(manhattan + 1000);             // :78494
   });
 
-  it('表外怪（僵尸）不受罚项影响', () => {
+  it('镇静药水零索敌效应（calmed 不置 npcTypeNoAggro）——+1000 罚/不面向门双面', () => {
+    const e = Enemy.fromVanilla(1, 100, 50);
+    e!.facing = 1;
+    const manhattan = Math.abs(300 - e!.cx) + Math.abs(110 - e!.cy);
+    expect(e!.effectiveTargetDist(stub({ buffs: mkCalming() }))).toBe(manhattan); // 不罚
+    // 不面向门同面：镇静下照常转身（原版 :78542 门不吃 calmed）
+    expect(e!.seekDirX(stub({ cx: e!.cx - 200, cy: e!.cy, buffs: mkCalming() }))).toBe(-1);
+  });
+
+  it('表外怪（僵尸）不受罚项影响（凝胶/镇静皆然）', () => {
     const z = new Enemy('zombie', 100, 50);
     const manhattan = Math.abs(300 - z.cx) + Math.abs(110 - z.cy);
+    expect(z.effectiveTargetDist(stub(gel))).toBe(manhattan);
     expect(z.effectiveTargetDist(stub({ buffs: mkCalming() }))).toBe(manhattan);
   });
 
   it('罚项等效收窄索敌门：canTargetPlayerAt 同距离由命中转不命中（+1000 曼哈顿）', () => {
     const e = Enemy.fromVanilla(1, 100, 300);
-    const p = stub({ cx: 300, cy: 300, buffs: mkCalming() });   // 距离 200px
+    const p = stub({ cx: 300, cy: 300, ...gel });               // 距离 200px
     const range = 18 * 16;                                      // flyAI 18 格门
     expect(e!.effectiveTargetDist(p)).toBe(Math.abs(300 - e!.cx) + 1000);
     expect(e!.canTargetPlayerAt(p, range)).toBe(false);         // 1200 > 288
-    expect(e!.canTargetPlayerAt(stub({ cx: 300, cy: 300 }), range)).toBe(true); // 无 buff 命中
+    expect(e!.canTargetPlayerAt(stub({ cx: 300, cy: 300 }), range)).toBe(true); // 无 gel 命中
   });
 
-  it('不面向门：表内怪 + Calming 保留旧朝向（faceTarget=false :78543-78546）', () => {
+  it('不面向门：表内怪 + 凝胶保留旧朝向（faceTarget=false :78543-78546）', () => {
     const e = Enemy.fromVanilla(1, 100, 50);
-    const before = e!.facing;
-    // 玩家放在会触发转身的另一侧，镇静下应保持旧朝向
-    const p = stub({ cx: e!.cx - 200, cy: e!.cy, buffs: mkCalming() });
-    expect(e!.seekDirX(p)).toBe(before);                        // 门生效：不转身
-    expect(e!.seekDirX(stub({ cx: e!.cx - 200, cy: e!.cy }))).not.toBe(before);
+    e!.facing = 1;                                              // 旧朝向朝右
+    // 玩家放在会触发转身的另一侧，凝胶下应保持旧朝向
+    const p = stub({ cx: e!.cx - 200, cy: e!.cy, ...gel });
+    expect(e!.seekDirX(p)).toBe(1);                             // 门生效：不转身
+    expect(e!.seekDirX(stub({ cx: e!.cx - 200, cy: e!.cy }))).toBe(-1);
   });
 
   it('单人 direction 语义：facing 恒 ±1 非 0（:324/:675），罚项对表内怪恒生效', () => {
     const e = Enemy.fromVanilla(1, 100, 50);
     expect(e!.facing).not.toBe(0);   // NPC.direction 恒 ±1 → :78492 direction!=0 恒真
-    const p = stub({ buffs: mkCalming() });
+    const p = stub(gel);
     expect(e!.effectiveTargetDist(p)).toBe(
       Math.abs(300 - e!.cx) + Math.abs(110 - e!.cy) + 1000);
   });

@@ -901,7 +901,10 @@ function drawTreeSway(
   const isVariantTop = !isPalm && fx < 22;
   let sway = 0;
   if (!isVariantTop && st.wall[idx] === 0) sway = getWindCycle(x, y, counters.tree, ENV.worldSurface, ENV.remix);
-  drawTreeCell(ctx, atlas, st, x, y, fx, fy, x * TILE, y * TILE, sheet, true, trees, sway);
+  // ★IIIII227 四涂装世界：冠/枝大精灵不进烘焙油漆 pass → 绘制时源染色（drawTreeCell
+  //  paint 通道；本格漆 = 标记格自身 paint，与烘焙层逐格 16×16 染色同口径）
+  drawTreeCell(ctx, atlas, st, x, y, fx, fy, x * TILE, y * TILE, sheet, true, trees, sway,
+    undefined, st.paint[st.idx(x, y)]);
   if (isVariantTop || isPalm) return; // 棕榈冠原版无 EmitTreeLeaves（DrawTrees 323 块只画不喷）
   // 落叶：grassPosX = 枝方向侧树干列（GetCommonTreeFoliageData num13：44→+1 / 66→-1 / 顶→0）；
   // t 参数 = 树底【地面 tile】（Main.tile[grassPosX, floorY]）——不是 scanTreeType 的 style 序号！

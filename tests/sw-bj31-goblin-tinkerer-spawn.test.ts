@@ -233,4 +233,23 @@ describe('SW-BJ31 洞穴层哥布林工匠（绑缚 105）生成链', () => {
     // 原版语义锚注释（1457 行号）防注释漂移
     expect(spawnerSrc).toContain('NPC.cs:1994-2005');
   });
+
+  // ★SW-RB8b 2026-09-09 补钉（BJ31 ④⑤ 跨世界重建面）：loadWorld 换世界必须先置
+  //  vanillaSpawner=null 再谈懒建——spawner.world 是构造期捕获引用,tile 扫描/flags
+  //  （downedGoblins 等）/zoneCounts 缓存全走它;漏置 = 第二个世界沿用旧世界刷怪域。
+  //  时序锁：null 置位点必须位于 this.world = world 之后（先换世界再作废缓存）,
+  //  且全部消费位（trySpawnEnemy:30539 / slimeRain:8685 / faelings:8706）都是
+  //  ?? / if(!x) 懒建形态——首帧生成窗口无 null 解引用。
+  it('结构锁：loadWorld 置 vanillaSpawner=null（换世界重建,先换 world 后作废缓存）', async () => {
+    const fs = await import('node:fs/promises');
+    const gameSrc = await fs.readFile('src/core/Game.ts', 'utf8');
+    const loadIdx = gameSrc.indexOf('async loadWorld(');
+    const worldIdx = gameSrc.indexOf('this.world = world;', loadIdx);
+    const nullIdx = gameSrc.indexOf('this.vanillaSpawner = null;', loadIdx);
+    expect(worldIdx, 'loadWorld 世界换装点丢失').toBeGreaterThan(loadIdx);
+    expect(nullIdx, 'loadWorld vanillaSpawner=null 缺失（跨世界陈旧引用回归）').toBeGreaterThan(worldIdx);
+    // 懒建消费位在位（重建通道不唯一化,防有人把懒建改成裸解引用）
+    expect(gameSrc).toContain('const sp = this.vanillaSpawner ?? (this.vanillaSpawner = this.makeVanillaSpawner(w))');
+    expect(gameSrc).toContain('if (!this.vanillaSpawner) this.vanillaSpawner = this.makeVanillaSpawner(w);');
+  });
 });

@@ -24,11 +24,15 @@
 // - 暂停浮层（IngameOptions 等价面）的原版入口（本仓保留,均在链外）：
 //   ①背包内设置钮 = Main.cs:46287 DrawInterface_29_SettingsButton（可见态 =
 //   playerInventory ∥ ingameOptionsWindow ∥ dead;clickAction =
-//   ingameOptionsWindow ? Close : Open :46292-46301——Open 不清 playerInventory,
-//   浮层叠于背包,故链 :4978 支 Esc 只收浮层不动背包）；②死亡/幽灵态 =
+//   ingameOptionsWindow ? Close : Open :46292-46301。★SW-RB8c 2026-09-08 勘误:
+//   IngameOptions.Open() 置 playerInventory=false（IngameOptions.cs:70）=开浮层
+//   【收背包】,Close() 置 playerInventory=true（:108）=收浮层【回背包】——设置窗
+//   与背包两态互斥,钮的可见态含 ingameOptionsWindow 正是为跨态存续,BN3「Open
+//   不清背包/浮层叠于背包」系误读）;②死亡/幽灵态 =
 //   Player.cs:17391 TryOpeningInGameOptionsBasedOnInput（调用于 UpdateDead :17187
 //   与 Ghost :6732）：ingameOptionsWindow ? Close : Open :17393-17407——本仓
-//   dead 支 1:1;③触屏暂停小钮（原版无对应物,SW 触屏官方同位钮,SW-BN2 备案）。
+//   dead 支 1:1（Close 的 :108 回背包面在死亡态豁免,RB6b 登记见 main.ts）;
+//   ③触屏暂停小钮（原版无对应物,SW 触屏官方同位钮,SW-BN2 备案）。
 // - 单机暂停 = Main.cs:17493 CanPauseGame（1457 实测行号;1458 同位零漂移;
 //   netMode==0 ∧ ingameOptionsWindow ∨ ManageControls/Achievements UI ∨
 //   autoPause∧(playerInventory ∨ sign≥0 ∨ InGameUI)）,消费 = :17372-17379
@@ -86,7 +90,8 @@ export function resolveEscapeChain(s: EscapeChainState, intent: EscapeIntent): E
   if (s.inventoryOpen) {
     // 背包开着：所有触发面一律关背包（SW-BN3 2026-09-07 对齐原版 else 支 :5026
     // ——ToggleInv 无触发面区分;BN2 的「Esc/暂停钮面→暂停浮层」支已退役）。浮层
-    // 叠于背包的合法路径只剩链外入口：背包内设置钮（Main.cs:46287）与死亡态。
+    // 与背包两态互斥（Open 收背包 IngameOptions.cs:70/Close 回背包 :108,★SW-RB8c
+    // 勘误）,背包开着时设置钮开浮层=背包先收。
     return 'closeInventory';
   }
   // 无面板：Esc 面与背包面都开背包（原版 :5023-5025 OpenInventory——Inventory

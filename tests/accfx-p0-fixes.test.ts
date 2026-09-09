@@ -10,7 +10,7 @@ import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { Inventory } from '../src/items/Inventory';
 import { Player } from '../src/entities/Player';
-import { npcNoAggroActive } from '../src/entities/Enemy';
+import { royalGelActive } from '../src/entities/Enemy';
 
 const _iid = (vid: number): number => ITEM_BY_KEY[vanillaItemKey(vid)!];
 
@@ -152,12 +152,12 @@ describe('配饰审计 P0：单件批', () => {
     expect(p.equipStats.manaCostOff).toBeCloseTo(0.14);   // 花 0.08 + 恩赐 0.06（加算非乘）
   });
 
-  it('3090 皇家凝胶 → royalGel 进 npcNoAggroActive 索敌门（:14144-14168）', () => {
+  it('3090 皇家凝胶 → equipStats.royalGel（:14790-14814 唯一置位源;★SW-RB8c 2026-09-08 重钉 gel 专面,旧 npcNoAggroActive 镇静并集退役）', () => {
     const p = new Player(0, 0, new Inventory());
-    expect(npcNoAggroActive(p)).toBe(false);
+    expect(royalGelActive(p)).toBe(false);
     p.inv.armor[3] = { id: _iid(3090), stack: 1 };
     expect(p.equipStats.royalGel).toBe(true);
-    expect(npcNoAggroActive(p)).toBe(true);
+    expect(royalGelActive(p)).toBe(true);
   });
 
   it('1923 工具箱 toolboxRange +1（:14405-14408，与 2215 族 +3/+2 分通道叠加）', () => {

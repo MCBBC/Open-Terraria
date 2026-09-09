@@ -849,12 +849,15 @@ export class ChunkCache {
               const isCrown = fx >= 88 && fx <= 132;
               if (isCrown) continue; // 棕榈冠 → WindSway overlay
               // 棕榈干身（倾斜跨列，必须外扩遍）
+              // ★IIIII227：第四遍在油漆 pass 之后 → 棕榈干身须自带 paint（源染色）
               drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
-                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, false, trees);
+                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, false, trees,
+                0, undefined, st.paint[i]);
             } else {
               // 蘑菇树：顶格标记帧原版不摆动，保留烘焙（DrawTrees switch 无 case 72）
               drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
-                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, true, trees);
+                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, true, trees,
+                0, undefined, st.paint[i]);   // ★IIIII227：同上（油漆 pass 后绘制）
             }
           }
         }

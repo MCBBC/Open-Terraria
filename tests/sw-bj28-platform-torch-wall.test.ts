@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { Game } from '../src/core/Game';
 import { TileStore } from '../src/world/TileStore';
 import {
-  torchAnchorFrame, torchStillAnchored, platformProperTopFrame, topEdgeCanBeAttachedTo,
+  torchAnchorFrame, torchStillAnchored, torchReanchorFrame, platformProperTopFrame, topEdgeCanBeAttachedTo,
   NO_ATTACH_SHEETS, IS_BEAM_SHEETS, IS_A_TREE_TRUNK_SHEETS, NOT_REALLY_SOLID_SHEETS,
   PLATFORM_SHEETS,
 } from '../src/world/Torch';
@@ -154,12 +155,12 @@ describe('SW-BJ28 症状一：平台上火把失撑判定（torchStillAnchored =
     expect(torchStillAnchored(st, 5, 5, 0)).toBe(false);
   });
 
-  it('直立火把底锚=平台但已致动 → 失撑（TileFrame num2 平台臂带 TopEdge）', () => {
+  it('直立火把底锚=平台但已致动 → 仍成立（★SW-RB8a 翻案:num2 门 :87413 是并集——第二支 !halfBrick∧!topSlope 不查 inActive,致动平台照样托炬;旧单支 TopEdge 判=误杀）', () => {
     const st = mkStore();
     st.setTileSilent(5, 6, PLAT, 0, 0);
     st.setTileSilent(5, 5, TORCH, 0, 0);
     st.wire[st.idx(5, 6)] |= TileStore.WIRE_ACTUATED;
-    expect(torchStillAnchored(st, 5, 5, 0)).toBe(false);
+    expect(torchStillAnchored(st, 5, 5, 0)).toBe(true);
   });
 
   it('未点燃变体（+66）剥偏移后同判（66/88/110 三档）', () => {
@@ -228,5 +229,94 @@ describe('SW-BJ28 topEdgeCanBeAttachedTo（TopEdge 1:1 行为面）', () => {
     expect(topEdgeCanBeAttachedTo(st, 5, 6)).toBe(false);
     st.setTileSilent(5, 6, STONE, 0, 0);
     expect(topEdgeCanBeAttachedTo(st, 5, 6)).toBe(true);
+  });
+});
+
+// ═══════════ SW-RB8a 2026-09-08 红蓝对抗审计补面（TileFrame 存活/重锚 1:1） ═══════════
+describe('SW-RB8a 存活判定翻案：TileFrame 四臂全空才杀（:87441-87459),档位不影响存活', () => {
+  it('左锚火把左边被挖、底锚仍在 → 活（原版 TileFrame 重选底臂）；旧档位单臂判=误掉', () => {
+    const st = mkStore();
+    st.setTileSilent(4, 5, STONE, 0, 0);   // 左锚
+    st.setTileSilent(5, 6, STONE, 0, 0);   // 底锚
+    st.setTileSilent(5, 5, TORCH, 22, 0);
+    expect(torchStillAnchored(st, 5, 5, 22)).toBe(true);
+    st.setTileSilent(4, 5, 0, 0, 0);       // 左边被挖
+    expect(torchStillAnchored(st, 5, 5, 22)).toBe(true);   // ★旧码 false=火烧已放火把
+  });
+
+  it('重锚帧序（torchReanchorFrame = :87440-87459 优先序）：底>左>右>墙;未点燃偏移由调用域加回', () => {
+    const st = mkStore();
+    st.setTileSilent(4, 5, STONE, 0, 0);
+    st.setTileSilent(6, 5, STONE, 0, 0);
+    st.setTileSilent(5, 6, STONE, 0, 0);
+    st.setWallSilent(5, 5, 1);
+    expect(torchReanchorFrame(st, 5, 5)).toBe(0);          // 底锚最优先
+    st.setTileSilent(5, 6, 0, 0, 0);
+    expect(torchReanchorFrame(st, 5, 5)).toBe(22);         // 左
+    st.setTileSilent(4, 5, 0, 0, 0);
+    expect(torchReanchorFrame(st, 5, 5)).toBe(44);         // 右
+    st.setTileSilent(6, 5, 0, 0, 0);
+    expect(torchReanchorFrame(st, 5, 5)).toBe(0);          // 墙（帧值同为 0）
+    st.setWallSilent(5, 5, 0);
+    expect(torchReanchorFrame(st, 5, 5)).toBe(-1);         // 全空 → KillTile 面
+  });
+
+  it('侧锚树干对角 active 门（:87425-87440 tree 族 active() 才赋值）：上邻幽灵残型不算三连', () => {
+    const st = mkStore();
+    const tree = TILE_BY_KEY['tree'];
+    st.setTileSilent(4, 5, tree, 0, 0);    // 左邻干
+    st.setTileSilent(4, 4, tree, 0, 0);    // 左上干
+    st.setTileSilent(4, 6, tree, 0, 0);    // 左下干
+    st.setTileSilent(5, 5, TORCH, 22, 0);
+    expect(torchStillAnchored(st, 5, 5, 22)).toBe(true);
+    st.flags[st.idx(4, 4)] = 0;            // 左上成幽灵残型（type 留位 flags=0,原版 active(false) 残型面）
+    expect(st.type[st.idx(4, 4)]).not.toBe(0);
+    expect(torchStillAnchored(st, 5, 5, 22)).toBe(false);  // ★旧裸 type 读=该掉不掉
+  });
+});
+
+describe('SW-RB8a checkTorchDetach（Game 消费域）：重锚写帧+未点燃偏移保持+3×3 触发面', () => {
+  function gameShell(st: TileStore): Record<string, any> {
+    const g = Object.create(Game.prototype) as unknown as Record<string, any>;
+    g.world = { store: st };
+    g.chunks = { markDirtyArea: () => {} };
+    g.spawnDrop = () => {};
+    g.sfx = { play: () => {} };
+    return g;
+  }
+
+  it('左锚失撑但底锚在 → 重锚直立（frameX 22→0,原版 TileFrame 重写帧面）', () => {
+    const st = mkStore();
+    st.setTileSilent(4, 5, STONE, 0, 0);
+    st.setTileSilent(5, 6, STONE, 0, 0);
+    st.setTileSilent(5, 5, TORCH, 22, 0);
+    const g = gameShell(st);
+    (g as unknown as { checkTorchDetach: (x: number, y: number) => void }).checkTorchDetach(4, 5);
+    expect(st.type[st.idx(5, 5)]).toBe(TORCH);
+    expect(st.frameX[st.idx(5, 5)]).toBe(0);
+  });
+
+  it('未点燃火把（+66）重锚后偏移保持（TileFrame :87397-87401 num 剥离/回填）', () => {
+    const st = mkStore();
+    st.setTileSilent(6, 6, STONE, 0, 0);   // 底锚
+    st.setTileSilent(7, 5, STONE, 0, 0);   // 右锚
+    st.setTileSilent(6, 5, TORCH, 88, 0);  // 44+66 未点燃右锚
+    const g = gameShell(st);
+    (g as unknown as { checkTorchDetach: (x: number, y: number) => void }).checkTorchDetach(7, 5);
+    expect(st.type[st.idx(6, 5)]).toBe(TORCH);
+    expect(st.frameX[st.idx(6, 5)]).toBe(66);   // 重锚到底(0)+未点燃 66
+  });
+
+  it('对角触发面（SquareTileFrame :81462-81473 3×3）：挖左上树干 → 左锚三连断 → 火把掉', () => {
+    const st = mkStore();
+    const tree = TILE_BY_KEY['tree'];
+    st.setTileSilent(4, 4, tree, 0, 0);
+    st.setTileSilent(4, 5, tree, 0, 0);
+    st.setTileSilent(4, 6, tree, 0, 0);
+    st.setTileSilent(5, 5, TORCH, 22, 0);
+    const g = gameShell(st);
+    st.setTileSilent(4, 4, 0, 0, 0);       // 挖左上干（对角格,旧十字触发面够不到）
+    (g as unknown as { checkTorchDetach: (x: number, y: number) => void }).checkTorchDetach(4, 4);
+    expect(st.type[st.idx(5, 5)]).toBe(0); // 三连断且无他臂 → 掉
   });
 });

@@ -250,11 +250,15 @@ export class WeatherState {
   }
 
   startRain(instant = false, strengthOverride?: number) {
-    // 金币雨 1/25（Main.cs:64131-64137：数额 = Next(75,151)×10000×maxTilesX/4200）
-    const range = 25;
-    if (this.rng.int(0, range - 1) === 0) {
-      this.coinRain = Math.round(this.rng.int(75, 150) * 100 * 100 * (this.maxTilesXRef / 4200));
-      this.coinRainPending = true;
+    // 金币雨（Main.cs:65640-65655）：门 = !remixWorld && isThereAWorldSurface && !raining
+    //  ——remix 世界永远不出金币雨；十周年掷程 25→5（!getGoodWorld）。
+    //  （原版 range 经最高幸运玩家 RollLuck——本仓 luck 接线域，此处中性掷）
+    if (!this.remixWorld && this.isThereAWorldSurface && !this.raining) {
+      const range = this.tenthAnniversaryWorld && !this.getGoodWorld ? 5 : 25;   // :65643-65646
+      if (this.rng.int(0, range - 1) === 0) {
+        this.coinRain = Math.round(this.rng.int(75, 150) * 100 * 100 * (this.maxTilesXRef / 4200));
+        this.coinRainPending = true;
+      }
     }
     const num2 = 86400;
     const num3 = num2 / 24; // 3600 = 1 游戏小时(tick)
@@ -300,6 +304,13 @@ export class WeatherState {
   coinRainPending = false;
   /** 世界宽（金币雨数额比例用；Game attach 时回填） */
   maxTilesXRef = 4200;
+  // ★IIIII224 四旗门（Game attach 时回填；缺省=false=普通世界语义零扰动）：
+  //  Main.remixWorld / Main.tenthAnniversaryWorld / Main.getGoodWorld /
+  //  Main.isThereAWorldSurface（worldSurface>50）
+  remixWorld = false;
+  tenthAnniversaryWorld = false;
+  getGoodWorld = false;
+  isThereAWorldSurface = true;
 
   // ================= 每帧主更新（UpdateWeather L58124 + updateCloudLayer + 17142 段） =================
 
@@ -437,9 +448,10 @@ export class WeatherState {
     }
   }
 
-  /** StartSlimeRain（Main.cs:64213-64241 netMode 0 主干） */
+  /** StartSlimeRain（Main.cs:65724-65742 netMode 0 主干）：门 = remixWorld ||
+   *  !isThereAWorldSurface || slimeRain → 早退（★IIIII224 remix 世界禁史莱姆雨） */
   startSlimeRain(ctx?: WeatherCtx) {
-    if (this.slimeRain) return;
+    if (this.remixWorld || !this.isThereAWorldSurface || this.slimeRain) return;
     this.slimeRainTime = this.rng.int(32400, 53999);
     this.slimeRain = true;
     this.slimeRainKillCount = 0;
@@ -486,8 +498,8 @@ export class WeatherState {
     } else if (this.lightning > 0) {
       this.lightning -= this.lightningDecay;
       if (this.lightning < 0) this.lightning = 0;
-    } else if (this.thunderDelay <= 0 && ctx.aboveRockLayer && ctx.atmo === 1) {
-      // 触发门：暴雨或强墓园（L58202-58213）
+    } else if (this.thunderDelay <= 0 && ctx.aboveRockLayer && ctx.atmo === 1 && !this.remixWorld) {
+      // 触发门：暴雨或强墓园（L58202-58213）；★IIIII224 remix 世界不落雷（:59684 `&& !remixWorld`）
       if (this.shouldUseStormMusic) {
         let num3 = 600, num4 = 1600;
         if (this.maxRaining > 0.8) { num3 *= 0.6; num4 *= 0.8; }
@@ -734,7 +746,13 @@ export class WeatherState {
       } else if (this.cloudAlpha >= RAIN_MAX && Math.abs(this.windSpeedTarget) >= WIND_MAX) {
         this.shouldUseStormMusic = true;
       }
-      this.shouldUseWindyDayMusic = false;
+      // ★IIIII224（:13189-13196）：雨天尾段 remix → 风暴曲强制关（风日曲保持）；
+      //  非 remix → 风日曲关（风日只在晴天早晨窗）
+      if (this.remixWorld) {
+        this.shouldUseStormMusic = false;
+      } else {
+        this.shouldUseWindyDayMusic = false;
+      }
     }
   }
 
