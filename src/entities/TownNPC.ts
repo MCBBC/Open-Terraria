@@ -34,6 +34,7 @@ import { canBeChasedBy } from './projTargets';
 import { projSprite } from './Arrow';
 import { updateNpcLiquid, wetCollision } from './npcLiquid';
 import { spawnEmote } from '../render/EmoteBubble';
+import { pickNpcEmote } from '../world/EmotePick';
 import {
   TOWN_ATTACK_TIME, TOWN_ATTACK_CHANCE, TOWN_ATTACK_TYPE, TOWN_DANGER_RANGE,
   TOWN_MELEE, TOWN_BOW, TOWN_MAGIC, TOWN_SWING, TOWN_PRETTY_SAFE,
@@ -2916,12 +2917,32 @@ export class TownNPC extends Entity {
     }
   }
 
-  /** NewBubbleNPC 的表情挑选（EmoteBubble.cs:295-330 PickNPCEmote：多 Probe 池
-   *  随机并集——TownNPCs/Emotions/Biomes/Critters/Items/Bosses/Debuffs/Events/
-   *  Weather 各按概率注入 + ProbeExceptions NPC 专属池）。★boss 在场时整池换成
-   *  ProbeCombat（战斗表情）。全量池庞大，此处取 ProbeEmotions 基池（:Emotions
-   *  15 项）近似并登记；树妖(19↔20 勘误:对话特判是 type 19/22——ProbeExceptions
-   *  :EmoteBubble.cs 内 other 相关池未展开）。 */
+  /** NewBubbleNPC 的表情挑选语境（EmotePick.ts = EmoteBubble.PickNPCEmote :295-1065
+   *  全量 1:1）。Game 启动注入世界/玩家/在场普查快照工厂；null（早期 boot/单测）
+   *  → 回退 ProbeEmotions 基池近似（NPC_EMOTE_POOL） */
+  static emoteHost: (() => import('../world/EmotePick').EmotePickContext | null) | null = null;
+
+  /** ★IIIII233（2026-09-09）：旧"ProbeEmotions 基池近似"升级为 PickNPCEmote 全量池——
+   *  九 Probe 按原版概率并集（TownNPCs/Emotions/Biomes/Critters/Items/Bosses/
+   *  Debuffs/Events/Weather）+ ProbeExceptions NPC 专属池（19↔22/107↔124 对话
+   *  other 特判、list.Contains 分支）+ boss 在场整池换 ProbeCombat。空池 → 0（:351） */
+  private static emotePickFor(anchor: TownNPC, otherId?: number): number {
+    const ctx = TownNPC.emoteHost?.();
+    if (ctx) {
+      const self = {
+        vanillaId: anchor.vanillaId, y: anchor.y, cy: anchor.cy,
+        onFire: anchor.onFireT > 0,
+        // TownNPC 无中毒运行时位（Enemy.poisonT 为敌怪域；登记：锚 NPC.poisoned
+        // 恒 false，玩家侧 poisoned 照实供）
+        poisoned: false,
+      };
+      return pickNpcEmote(ctx, anchor.rng, self, otherId);
+    }
+    const pool = TownNPC.NPC_EMOTE_POOL;
+    return pool[Math.floor(anchor.rng() * pool.length) % pool.length];
+  }
+
+  /** 备胎基池（ProbeEmotions :596-610 的 15 项,无语境回退用） */
   private static readonly NPC_EMOTE_POOL: readonly number[] =
     [0, 1, 2, 3, 15, 16, 17, 87, 91, 134, 135, 136, 137, 138, 139];
 
@@ -2976,8 +2997,8 @@ export class TownNPC extends Entity {
         else if (t < 160) f = 0;
         else if (t < 220) f = t % 12 < 6 ? base - 2 : 0;
         this.frame = f;
-        if (t === 16) spawnEmote(this, this.npcEmotePick(this.rng), 112);   // NewBubbleNPC(anchor,112t)
-        if (t === 160) spawnEmote(this, this.npcEmotePick(this.rng), 60);   // NewBubbleNPC(anchor,60t)
+        if (t === 16) spawnEmote(this, this.npcEmotePick(), 112);   // NewBubbleNPC(anchor,112t)
+        if (t === 160) spawnEmote(this, this.npcEmotePick(), 60);   // NewBubbleNPC(anchor,60t)
         if (t >= 220) s.frameT = 0;
         break;
       }
@@ -3021,10 +3042,12 @@ export class TownNPC extends Entity {
           //   ==216 → (self, 70, partner)  ==320 → (self, 100, partner)
           //   ==70  → (partner, 90, self)，须 partner.CanTalk（:6673 站地+非宠物）
           const partnerCanTalk = s.other ? s.other.onGround && !IS_TOWN_PET.has(s.other.vanillaId) : false;
-          if (t === 216) spawnEmote(this, this.npcEmotePick(this.rng), 70);
-          if (t === 320) spawnEmote(this, this.npcEmotePick(this.rng), 100);
+          if (t === 216) spawnEmote(this, this.npcEmotePick(s.other?.vanillaId), 70);
+          if (t === 320) spawnEmote(this, this.npcEmotePick(s.other?.vanillaId), 100);
           if (t === 70 && s.other && partnerCanTalk) {
-            spawnEmote(s.other, this.npcEmotePick(this.rng), 90);
+            // 伙伴锚泡：PickNPCEmote 语境锚=伙伴、other=发起者（原版
+            // NewBubbleNPC(new WorldUIAnchor(nPC), 90, new WorldUIAnchor(this))）
+            spawnEmote(s.other, TownNPC.emotePickFor(s.other, this.vanillaId), 90);
           }
         }
         if (t >= 420) s.frameT = 0;
@@ -3236,11 +3259,11 @@ export class TownNPC extends Entity {
     this.frameT = 0;
   }
 
-  /** PickNPCEmote 近似：从情绪基池随机挑一项（见 NPC_EMOTE_POOL 注——全量 Probe
-   *  池未展开，通用情绪近似；rng=实例随机源保持种子一致性） */
-  private npcEmotePick(rng: () => number): number {
-    const pool = TownNPC.NPC_EMOTE_POOL;
-    return pool[Math.floor(rng() * pool.length) % pool.length];
+  /** PickNPCEmote（EmoteBubble.cs:295-1065 → world/EmotePick.ts 全量 1:1）。
+   *  ★otherId：结对聊天传伙伴 vanillaId（ProbeExceptions 19↔22/107↔124 特判输入）；
+   *  锚=发起者自身，伙伴锚泡（:3047）由 emotePickFor(s.other, self) 反转取语境 */
+  private npcEmotePick(otherId?: number): number {
+    return TownNPC.emotePickFor(this, otherId);
   }
 
   /** 舞蹈音符尘 ×8（:69665-69678）：dust 139-143 随机（NewDust 后逐字段覆写） */

@@ -354,6 +354,29 @@ export const BANNER_STYLE_BY_VID: Readonly<Record<number, number>> = Object.free
  *  （:65826）,掉落全走 CheckSign 帧检 */
 const Tombstones: T = [321, 1173, 1174, 1175, 1176, 1177, 3229, 3230, 3231, 3232, 3233];
 
+/** 字雕 337——Check2xX（WorldGen.cs:38561-38565）`num11 = frameX/36 → 2702+num11`：
+ *  0→2702 / 1-35→2702+s（36 档,Tiles_337 1296×54=36×36 单行实证）。
+ *  KillTile 337 在共享 no-drop 表,掉落全走 Check2xX 帧检。放置侧 placeStyle=
+ *  type-2702（Item.cs:26130,SW-FX3 补档）——两侧闭环 2026-09-09 */
+const TextStatues: T = [
+  2702, 2703, 2704, 2705, 2706, 2707, 2708, 2709, 2710, 2711, 2712, 2713, 2714,
+  2715, 2716, 2717, 2718, 2719, 2720, 2721, 2722, 2723, 2724, 2725, 2726, 2727,
+  2728, 2729, 2730, 2731, 2732, 2733, 2734, 2735, 2736, 2737,
+];
+
+/** 板条箱 376——Check4x2（WorldGen.cs:48689-48763 `num=frameX/36` → 26 档 switch、
+ *  :48771-48774 `if (num13 != 0) Item.NewItem`）：0-2→2334-2336（Wooden/Iron/Golden
+ *  Crate）/ 3-8→3203-3208（Corrupt/Crimson/Dungeon/Sky/Hallowed/Jungle）/
+ *  9-11→3979-3981（Pearlwood/Mythril/Titanium）/ 12-17→3982-3987（Defiled/Hematic/
+ *  Stockade/Azure/Divine/Bramble）/ 18-21→4405-4408（Frozen/Boreal/Oasis/Mirage）/
+ *  22-23→4877-4878（Obsidian/Hellstone）/ 24-25→5002-5003（Ocean/Seaside）。
+ *  Tiles_376 936×38=26×36 实证。放置侧 placeStyle 显式 14 档 + SW-FX3 补 12 件
+ *  （:28910/:35413）——闭环 2026-09-09 */
+const Crates: T = [
+  2334, 2335, 2336, 3203, 3204, 3205, 3206, 3207, 3208, 3979, 3980, 3981, 3982,
+  3983, 3984, 3985, 3986, 3987, 4405, 4406, 4407, 4408, 4877, 4878, 5002, 5003,
+];
+
 /** 汤锅 96——Check2x2Style case 96（WorldGen.cs:52430-52440）：0→345 / 1→1791;
  *  style=fx/36（:52334-52338 num4）。KillTile 96 共享 no-drop（:65834） */
 const CookingPots: T = [345, 1791];
@@ -496,6 +519,8 @@ export const styleFromFrame: Record<number, (fx: number, fy: number) => number> 
   547: (fx) => Math.floor(fx / 36),                                   // 盆栽树（Check2x5 :53747 num3）
   548: (fx) => Math.floor(fx / 54),                                   // 盆栽树二组（Check3x6 :53914 num3）
   572: (_fx, fy) => Math.floor(fy / 36),                              // 瓶装魂（Check1x2Top :47114 num3）
+  337: (fx) => Math.floor(fx / 36),                                   // 字雕（Check2xX :38562 num11,SW-FX3）
+  376: (fx) => Math.floor(fx / 36),                                   // 板条箱（Check4x2 :48535 num,SW-FX3）
   617: (fx) => Math.floor(fx / 54),                                   // 圣物底座（Check3x4 :50530 num3）
   695: (fx) => Math.floor(fx / 54),                                   // 仿制祭坛（Check3x2 :49634 num6）
   696: (fx) => Math.floor(fx / 36),                                   // 仿制暗影珠（CheckOrb :54642 flag）
@@ -565,6 +590,8 @@ export function styleDropVid(sheet: number, style: number): number {
     case 547: return pick(PottedTrees, style);
     case 548: return pick(PottedTrees2, style);
     case 572: return pick(SoulsInBottles, style);
+    case 337: return pick(TextStatues, style);   // 字雕 36 档（Check2xX :38561-38565,SW-FX3）
+    case 376: return pick(Crates, style);        // 板条箱 26 档（Check4x2 :48689-48763,SW-FX3）
     case 617: return pick(RelicBases, style);
     case 695: return pick(ReplicaAltars, style);
     case 696: return pick(ReplicaOrbs, style);

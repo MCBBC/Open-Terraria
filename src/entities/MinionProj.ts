@@ -24,6 +24,7 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
+import { setTemporaryBubble, clearTemporaryBubble } from '../render/EmoteBubble';
 import { hitCritters, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
@@ -1862,19 +1863,23 @@ export class MinionProj extends Entity {
       this.palJoyCd = 60;
       if (this.projId === 1093 || this.projId === 1112) {
         game.playSfxFiles(['pal_cattiva_joy'], 0.35, this.cx, this.cy);   // SoundID.cs:1078 0.35
-      } else if (this.projId === 1118) {
-        game.playSfxFiles(['pal_foxparks_joy'], 0.35, this.cx, this.cy);  // SoundID.cs:1090 0.35
       }
+      // ★IIIII233（2026-09-09）勘误：1118 ClayPotMinion（AI_067 flag9 支
+      //  Projectile.cs:50053-50070）只走 localAI[0] 计时、**无 Joy 音**——旧码误播
+      //  pal_foxparks_joy（全仓 PalFoxparksJoy 站=AI_026 flag8 的 1094/1113 专属,
+      //  Projectile.cs:59122-59131;grep 全量实证仅两站）。已删。
     }
     if (this.palJoyCd > (flag10 ? 1 : 0)) this.palJoyCd--;
-    // ★台账批 C-920（2026-08-31）：抚摸心形气泡的粒子形态近似升级——原版
-    //  Main.cs:34799-34832 在 localAI[0]∈(1,60) 窗（=本仓 palJoyCd 同窗）画
-    //  EmoteBubble.DrawTemporaryBubble 图标/DrawNotificationIcon 兜底框，本仓无该
-    //  资产与 UI 层（登记在案）;改以同窗心跳节拍粉心粒子上浮（spawnParticles
-    //  现有基建）替代——形态近似非资产复刻,资产入库后应换图标直绘
-    if (flag10 && this.palJoyCd > 1 && this.palJoyCd < 60 && (this.palJoyCd - 8) % 16 === 0) {
-      game.spawnParticles(this.cx + Math.sin(this.age * 0.35) * 6,
-        this.cy - this.h / 2 - 14, '#FF7FB2', 1, 0.6, { life: 36, grav: -0.01 });
+    // ★IIIII233（2026-09-09）：抚摸心形气泡原版直绘补全——原版
+    //  Main.cs:34799-34832（1093/1112/1118）与 :33755-33762（1094/1113,计时槽
+    //  localAI[2]=本仓 palJoyCd 同窗）在 localAI∈(1,60) 窗画
+    //  EmoteBubble.DrawTemporaryBubble(0,60,localAI)（emote 0=爱心）。旧粒子近似
+    //  （台账批 C-920）退役。非抚摸支的 DrawNotificationIcon（:34828-34831）资产
+    //  未入库,登记不建模。
+    if (flag10 && this.palJoyCd > 1) {
+      setTemporaryBubble(this, 0, 60, this.palJoyCd);
+    } else if (!flag10) {
+      clearTemporaryBubble(this);
     }
   }
 
@@ -2405,6 +2410,19 @@ export class MinionProj extends Entity {
   private digtoiseStep(game: GameHooks, p: Player): void {
     const st = game.world.store;
     const trusty = this.projId === 1123;
+    // ★IIIII233（2026-09-09）：演出气泡 = Main.cs:34250-34266 Draw 期直绘的 tick 等价
+    //  （DrawTemporaryBubble(emote, maxLifetime, remaining, anchor)）——
+    //  ai[0]==5 抚摸 → emote 0 爱心（ai[1]<60,remaining=60-ai[1]）；
+    //  ai[0]==4 离场 → emote 17 音符（同窗）；挖掘态 1/2/3 → emote 3 惊叹
+    //  （ai[1]<40,remaining=40-ai[1],每次换向重置）；出场态 0 无泡。
+    //  入口处取上 tick 终值 = 原版 Draw 在 Update 后读 ai 的同值（滞后 0 拍）。
+    {
+      const a1 = this.digA1;
+      if (this.digA0 === 5 && a1 < 60) setTemporaryBubble(this, 0, 60, 60 - a1);
+      else if (this.digA0 === 4 && a1 < 60) setTemporaryBubble(this, 17, 60, 60 - a1);
+      else if (this.digA0 !== 0 && a1 < 40) setTemporaryBubble(this, 3, 60, 40 - a1);
+      else clearTemporaryBubble(this);
+    }
     let flag = this.digA0 === 0;        // 出场
     const flag2 = this.digA0 === 1;     // 向下挖
     const flag3 = this.digA0 === 2;     // 向右挖

@@ -1410,6 +1410,12 @@ export class Enemy extends Entity {
     // 显隐态由其 AI :43873 翻 false）。DoT 直扣路径以本位守卫（GetHurtByDebuff
     // :92995 同款）——DoT/血条曾绕过 488 守卫（2026-09-02 用户实报闪烁血条）
     if (id === 488 || id === 690) e.immortal = true;
+    // 290 圣骑士底对齐缩盒（GetTileCollisionParameters :93976-93978,IIIII235 2026-09-10）：
+    // cHeight=40（SetDefaults 盒高 62 → inset=22）——TileCollision/SlopeCollision/StepUp
+    // 三消费点（:93685/:93824/:64909）全走缩盒,碰撞域只看身体下部 40px 窗,视觉头/盔
+    // 可压进上方墙格（原版 3 格高走廊通行靠此;feet 不变=落地语义零变化）。1456:94035/
+    // 1457:93977 同值
+    if (id === 290) e.collTopInset = 62 - 40;
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
     return e;
@@ -4741,7 +4747,7 @@ export class Enemy extends Entity {
             // ★石化旁路（H2-2）：原文无交互门也不调 lastCreatureHit/NotifyNPCKilled,
             // 经 opts.petrifyBypassInteractionGate 逐项对齐
             game.onEnemyKilled(this.key, this, { petrifyBypassInteractionGate: true });
-            game.achievements?.notifyProgressionEvent(24);   // :56466（GAIN_TORCH_GODS_FAVOR）
+            game.achievements?.notifyProgressionEvent(24);   // :56466（prog24=TURN_GNOME_TO_STATUE 地精石化;IIIII231 订正旧注——ev24 才是 GAIN_TORCH_GODS_FAVOR,prog24 域不同）
             this.dead = true; this.hp = 0;                   // life=0+active=false（:56467-56468）
             return;
           }
@@ -14364,7 +14370,19 @@ export class Enemy extends Entity {
           for (let k = 0; k < 75; k++) game.dust?.spawn(this.cx - 25, this.cy - 25, 50, 50, 5, hdDk, -1);
         }
       }
-      if (!birdExactDust && !wofExactDust && !dukeExactDust) {
+      // 圣骑士 290 死亡尘（HitEffect life<=0 支,NPC.cs:1458 :89910-89916,IIIII235
+      // 2026-09-10 补）：10× 尘 16（Smoke）scale 1.5、velocity×2、noGravity——
+      // 原版全盒随机位（NewDust 标准链,speed 0/0+±2 抖动后 ×2）、无 hitDirection 项、
+      // 无生命>0 支（受击零尘,血溅由 hurt 通用层承担）。gore 11-13 三锚点块已由
+      // vanilla-gore.json 290 表项承担（spawnNpcDeathGore）
+      const paladinDeathDust = this.vanillaId === 290;
+      if (paladinDeathDust) {
+        for (let k = 0; k < 10; k++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 16, 0, 0, 0, null, 1.5, true);
+          if (d) { d.vx *= 2; d.vy *= 2; }
+        }
+      }
+      if (!birdExactDust && !wofExactDust && !dukeExactDust && !paladinDeathDust) {
         game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });

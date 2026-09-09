@@ -424,9 +424,15 @@ describe('⑥⑦⑧ achCheckPlayerState（40/38/41）', () => {
 // ⑩ achOnWorldEnter bank0-4+loadouts 扫描（AchievementsHelper.cs:118-168）
 // ---------------------------------------------------------------------------
 describe('⑩ 进世界成就基线（bank/loadouts 补扫）', () => {
+  /** ⑩ 桩 world（IIIII231 起 achOnWorldEnter 消费 flags.unlockedBiomeTorches +
+   *  bestiary 复查 :192-197——桩给最小面） */
+  function stubWorld(): Record<string, unknown> {
+    return { flags: {}, bestiary: { completion: () => ({ percent: 0 }) } };
+  }
   it('bank 格内物品照发 pickup 通知（HEAVY_METAL 存钱罐即满足）', () => {
     const g = stubGame();
     (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [], enemies: [] };
+    (g as unknown as Record<string, unknown>).world = stubWorld();
     const inv = new Inventory();
     const bank0 = [{ id: VI_ID(35), stack: 3 }];
     (g as unknown as Record<string, unknown>).player = { inv, banks: [bank0, [], [], []], maxMana: 20, maxHp: 100 };
@@ -436,6 +442,7 @@ describe('⑩ 进世界成就基线（bank/loadouts 补扫）', () => {
   it('loadout 档内装备照发 pickup 通知', () => {
     const g = stubGame();
     (g as unknown as Record<string, unknown>).entities = { npcs: [], projectiles: [], enemies: [] };
+    (g as unknown as Record<string, unknown>).world = stubWorld();
     const inv = new Inventory();
     inv.loadouts[0].armor[0] = { id: VI_ID(35), stack: 1 };
     (g as unknown as Record<string, unknown>).player = { inv, banks: [[], [], [], []], maxMana: 20, maxHp: 100 };

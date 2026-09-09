@@ -1190,6 +1190,181 @@ const PLACE_STYLE_BACKFILL_1458: ReadonlyArray<readonly [number, string, number]
   [3723, 'v_215_campfires', 6], [3724, 'v_215_campfires', 7],
   [4689, 'v_215_campfires', 8], [4690, 'v_215_campfires', 9], [4691, 'v_215_campfires', 10],
   [4692, 'v_215_campfires', 11], [4693, 'v_215_campfires', 12], [4694, 'v_215_campfires', 13],
+  // 逻辑门六件（★IIIII234 2026-09-09）：Item.cs:32533-32548 共享 case
+  //  `case 3603:…case 3608: createTile=420; placeStyle = type - 3603;`——算式形态
+  //  提取器解不开 ⇒ itemfunc 3603-3607 整条目缺失、3608 只余 createTile 无
+  //  placeStyle（vanilla.json meta 也无 placeStyle 键）⇒ 买自蒸汽朋克人（shop 178）
+  //  的 OR/NAND/NOR/XOR/XNOR 门放置恒 style0=AND 帧。真值表权威 =
+  //  Wiring.CheckLogicGate switch(frameY/18)（Wiring.cs:631-653）：
+  //  0=AND(num2==num3) 1=OR(num3>0) 2=NAND(num2!=num3) 3=NOR(num3==0)
+  //  4=XOR(num3==1,tooltip "Exactly one…on") 5=XNOR(num3!=1)。
+  //  tile 兜底同上（vanilla.json createTile 420 双源已在,此处防御）。
+  [3603, 'v_420_logicgate', 0], [3604, 'v_420_logicgate', 1], [3605, 'v_420_logicgate', 2],
+  [3606, 'v_420_logicgate', 3], [3607, 'v_420_logicgate', 4], [3608, 'v_420_logicgate', 5],
+  // ================= SW-FX3 邻族普查补齐（2026-09-09,545 条）=================
+  //  BJ50 篝火族同病系统普查：金标仪 scripts/_swfx3-placestyle-census.mjs 结构层重放
+  //  Terarria1457 Item.cs SetDefaults1-5 全 placeStyle 写面（1458 同域逐 vid 对拍零差）
+  //  与运行时 def 全量对拍 → 545 件 placeStyle 缺档（全为共享 case/区间 if 算式形态,
+  //  提取器单值面解不开 ⇒ itemfunc 无 placeStyle 键,仅 vanilla.json createTile 撑起
+  //  tile 字段）。亲读行号逐族标注于各行注；掉落侧 S1/S2 表(vanillaStyleDrops)已覆盖
+  //  全部 tile（修放置后两端自动闭环）,唯 337 字雕/376 板条箱掉落表同批补入。
+  // 浴缸 90（21 件 :21838/:21944/:25799）
+  [2072, 'bathtub', 1], [2073, 'bathtub', 2], [2074, 'bathtub', 3], [2075, 'bathtub', 4], [2076, 'bathtub', 5],
+  [2077, 'bathtub', 6], [2078, 'bathtub', 7], [2079, 'bathtub', 8], [2080, 'bathtub', 9], [2081, 'bathtub', 10],
+  [2124, 'bathtub', 11], [2125, 'bathtub', 12], [2126, 'bathtub', 13], [2127, 'bathtub', 14], [2128, 'bathtub', 15],
+  [2658, 'bathtub', 21], [2659, 'bathtub', 22], [2660, 'bathtub', 23], [2661, 'bathtub', 24], [2662, 'bathtub', 25],
+  [2663, 'bathtub', 26],
+  // 床 79（10 件 :19308/:21823）
+  [1719, 'bed', 9], [1720, 'bed', 10], [1721, 'bed', 11], [1722, 'bed', 12], [2066, 'bed', 13],
+  [2067, 'bed', 14], [2068, 'bed', 15], [2069, 'bed', 16], [2070, 'bed', 17], [2071, 'bed', 18],
+  // 长凳沙发 89（22 件 :23968/:25669）
+  [2397, 'bench', 1], [2398, 'bench', 2], [2399, 'bench', 3], [2400, 'bench', 4], [2401, 'bench', 5],
+  [2402, 'bench', 6], [2403, 'bench', 7], [2404, 'bench', 8], [2405, 'bench', 9], [2406, 'bench', 10],
+  [2407, 'bench', 11], [2408, 'bench', 12], [2409, 'bench', 13], [2410, 'bench', 14], [2411, 'bench', 15],
+  [2412, 'bench', 16], [2414, 'bench', 18], [2415, 'bench', 19], [2416, 'bench', 20], [2634, 'bench', 26],
+  [2635, 'bench', 27], [2636, 'bench', 28],
+  // 书架 101（4 件 :21977）
+  [2135, 'bookcase', 18], [2136, 'bookcase', 19], [2137, 'bookcase', 20], [2138, 'bookcase', 21],
+  // 烛台 100（21 件 :21868/:22049/:25814）
+  [2092, 'candelabra', 1], [2093, 'candelabra', 2], [2094, 'candelabra', 3], [2095, 'candelabra', 4], [2096, 'candelabra', 5],
+  [2097, 'candelabra', 6], [2098, 'candelabra', 7], [2099, 'candelabra', 8], [2100, 'candelabra', 9], [2101, 'candelabra', 10],
+  [2102, 'candelabra', 11], [2103, 'candelabra', 12], [2149, 'candelabra', 13], [2150, 'candelabra', 14], [2151, 'candelabra', 15],
+  [2152, 'candelabra', 16], [2664, 'candelabra', 22], [2665, 'candelabra', 23], [2666, 'candelabra', 24], [2667, 'candelabra', 25],
+  [2668, 'candelabra', 26],
+  // 蜡烛 33（17 件 :21796/:22068/:25772）
+  [2045, 'candle', 4], [2046, 'candle', 5], [2047, 'candle', 6], [2048, 'candle', 7], [2049, 'candle', 8],
+  [2050, 'candle', 9], [2051, 'candle', 10], [2052, 'candle', 11], [2053, 'candle', 12], [2054, 'candle', 13],
+  [2153, 'candle', 14], [2154, 'candle', 15], [2155, 'candle', 16], [2648, 'candle', 22], [2649, 'candle', 23],
+  [2650, 'candle', 24], [2651, 'candle', 25],
+  // 椅 15（6 件 :19265）
+  [1703, 'chair', 18], [1704, 'chair', 19], [1705, 'chair', 20], [1706, 'chair', 21], [1707, 'chair', 22],
+  [1708, 'chair', 23],
+  // 吊灯 34（21 件 :21808/:22019/:25784）
+  [2055, 'chandelier', 7], [2056, 'chandelier', 8], [2057, 'chandelier', 9], [2058, 'chandelier', 10], [2059, 'chandelier', 11],
+  [2060, 'chandelier', 12], [2061, 'chandelier', 13], [2062, 'chandelier', 14], [2063, 'chandelier', 15], [2064, 'chandelier', 16],
+  [2065, 'chandelier', 17], [2141, 'chandelier', 18], [2142, 'chandelier', 19], [2143, 'chandelier', 20], [2144, 'chandelier', 21],
+  [2652, 'chandelier', 27], [2653, 'chandelier', 28], [2654, 'chandelier', 29], [2655, 'chandelier', 30], [2656, 'chandelier', 31],
+  [2657, 'chandelier', 32],
+  // 宝箱 21（16 件 :18553/:22703/:25556/:25560——2612-2614 为 35+(type-2612)*2 倍增档）
+  [1528, 'chest', 18], [1529, 'chest', 19], [1530, 'chest', 20], [1531, 'chest', 21], [1532, 'chest', 22],
+  [2249, 'chest', 29], [2250, 'chest', 30], [2612, 'chest', 35], [2613, 'chest', 37], [2614, 'chest', 39],
+  [2615, 'chest', 41], [2616, 'chest', 42], [2617, 'chest', 43], [2618, 'chest', 44], [2619, 'chest', 45],
+  [2620, 'chest', 46],
+  // 门 10（4 件 :19279）
+  [1709, 'door_closed', 20], [1710, 'door_closed', 21], [1711, 'door_closed', 22], [1712, 'door_closed', 23],
+  // 梳妆台 88（19 件 :23949/:25712/:34597）
+  [2386, 'dresser', 5], [2387, 'dresser', 6], [2388, 'dresser', 7], [2389, 'dresser', 8], [2390, 'dresser', 9],
+  [2391, 'dresser', 10], [2392, 'dresser', 11], [2393, 'dresser', 12], [2394, 'dresser', 13], [2395, 'dresser', 14],
+  [2396, 'dresser', 15], [2637, 'dresser', 20], [2638, 'dresser', 21], [2639, 'dresser', 22], [2640, 'dresser', 23],
+  [3911, 'dresser', 28], [3912, 'dresser', 29], [3913, 'dresser', 30], [3914, 'dresser', 31],
+  // 座钟 104（26 件 :22624/:25467/:34538）
+  [2237, 'grandfather_clock', 1], [2238, 'grandfather_clock', 2], [2239, 'grandfather_clock', 3], [2240, 'grandfather_clock', 4], [2241, 'grandfather_clock', 5],
+  [2591, 'grandfather_clock', 8], [2592, 'grandfather_clock', 9], [2593, 'grandfather_clock', 10], [2594, 'grandfather_clock', 11], [2595, 'grandfather_clock', 12],
+  [2596, 'grandfather_clock', 13], [2597, 'grandfather_clock', 14], [2598, 'grandfather_clock', 15], [2599, 'grandfather_clock', 16], [2600, 'grandfather_clock', 17],
+  [2601, 'grandfather_clock', 18], [2602, 'grandfather_clock', 19], [2603, 'grandfather_clock', 20], [2604, 'grandfather_clock', 21], [2605, 'grandfather_clock', 22],
+  [2606, 'grandfather_clock', 23], [3898, 'grandfather_clock', 28], [3899, 'grandfather_clock', 29], [3900, 'grandfather_clock', 30], [3901, 'grandfather_clock', 31],
+  [3902, 'grandfather_clock', 32],
+  // 灯笼 42（4 件 :22036）
+  [2145, 'lantern', 22], [2146, 'lantern', 23], [2147, 'lantern', 24], [2148, 'lantern', 25],
+  // 钢琴 87（18 件 :22673/:22733/:23930/:34612）
+  [2245, 'piano', 5], [2246, 'piano', 6], [2247, 'piano', 7], [2254, 'piano', 8], [2255, 'piano', 9],
+  [2256, 'piano', 10], [2376, 'piano', 11], [2377, 'piano', 12], [2378, 'piano', 13], [2379, 'piano', 14],
+  [2380, 'piano', 15], [2381, 'piano', 16], [2382, 'piano', 17], [2383, 'piano', 18], [2384, 'piano', 19],
+  [2385, 'piano', 20], [3915, 'piano', 30], [3916, 'piano', 31],
+  // 桌 14（6 件 :19294）
+  [1713, 'table', 15], [1714, 'table', 16], [1715, 'table', 17], [1716, 'table', 18], [1717, 'table', 19],
+  [1718, 'table', 20],
+  // 墓碑 85（5 件 :29803）
+  [3229, 'tombstone_v', 6], [3230, 'tombstone_v', 7], [3231, 'tombstone_v', 8], [3232, 'tombstone_v', 9], [3233, 'tombstone_v', 10],
+  // 碗 103（2 件 :22641）
+  [2242, 'v_103_bowls', 2], [2243, 'v_103_bowls', 3],
+  // 雕像 105（25 件 :32847/:32976——style≥55 须 FurnitureStyle 105 行带 case 同批补）
+  [3651, 'v_105_statue', 51], [3652, 'v_105_statue', 52], [3653, 'v_105_statue', 53], [3654, 'v_105_statue', 54], [3655, 'v_105_statue', 55],
+  [3656, 'v_105_statue', 56], [3657, 'v_105_statue', 57], [3658, 'v_105_statue', 58], [3659, 'v_105_statue', 59], [3660, 'v_105_statue', 60],
+  [3661, 'v_105_statue', 61], [3662, 'v_105_statue', 62], [3708, 'v_105_statue', 63], [3709, 'v_105_statue', 64], [3710, 'v_105_statue', 65],
+  [3711, 'v_105_statue', 66], [3712, 'v_105_statue', 67], [3713, 'v_105_statue', 68], [3714, 'v_105_statue', 69], [3715, 'v_105_statue', 70],
+  [3716, 'v_105_statue', 71], [3717, 'v_105_statue', 72], [3718, 'v_105_statue', 73], [3719, 'v_105_statue', 74], [3720, 'v_105_statue', 75],
+  // 瓶 13（2 件 :22750）
+  [2257, 'v_13_placed_bottles', 7], [2258, 'v_13_placed_bottles', 8],
+  // 计时器 144（2 件 :37841）
+  [4484, 'v_144_timers', 3], [4485, 'v_144_timers', 4],
+  // 水槽 172（28 件 :27097）
+  [2828, 'v_172_sinks', 1], [2829, 'v_172_sinks', 2], [2830, 'v_172_sinks', 3], [2831, 'v_172_sinks', 4], [2832, 'v_172_sinks', 5],
+  [2833, 'v_172_sinks', 6], [2834, 'v_172_sinks', 7], [2835, 'v_172_sinks', 8], [2836, 'v_172_sinks', 9], [2837, 'v_172_sinks', 10],
+  [2838, 'v_172_sinks', 11], [2839, 'v_172_sinks', 12], [2840, 'v_172_sinks', 13], [2841, 'v_172_sinks', 14], [2842, 'v_172_sinks', 15],
+  [2843, 'v_172_sinks', 16], [2844, 'v_172_sinks', 17], [2845, 'v_172_sinks', 18], [2846, 'v_172_sinks', 19], [2847, 'v_172_sinks', 20],
+  [2848, 'v_172_sinks', 21], [2849, 'v_172_sinks', 22], [2850, 'v_172_sinks', 23], [2851, 'v_172_sinks', 24], [2852, 'v_172_sinks', 25],
+  [2853, 'v_172_sinks', 26], [2854, 'v_172_sinks', 27], [2855, 'v_172_sinks', 28],
+  // 墙饰 3×3 240（53 件 :18351/:18578/:18901/:20480/:21183/:21896/:24150/:30694/:38295/:41638）
+  [1496, 'v_240_wall_hangings_3x3', 26], [1497, 'v_240_wall_hangings_3x3', 27], [1498, 'v_240_wall_hangings_3x3', 28], [1499, 'v_240_wall_hangings_3x3', 29], [1538, 'v_240_wall_hangings_3x3', 30],
+  [1539, 'v_240_wall_hangings_3x3', 31], [1540, 'v_240_wall_hangings_3x3', 32], [1574, 'v_240_wall_hangings_3x3', 33], [1575, 'v_240_wall_hangings_3x3', 34], [1576, 'v_240_wall_hangings_3x3', 35],
+  [1855, 'v_240_wall_hangings_3x3', 36], [1856, 'v_240_wall_hangings_3x3', 37], [1960, 'v_240_wall_hangings_3x3', 38], [1961, 'v_240_wall_hangings_3x3', 39], [1962, 'v_240_wall_hangings_3x3', 40],
+  [2114, 'v_240_wall_hangings_3x3', 41], [2115, 'v_240_wall_hangings_3x3', 42], [2116, 'v_240_wall_hangings_3x3', 43], [2117, 'v_240_wall_hangings_3x3', 44], [2118, 'v_240_wall_hangings_3x3', 45],
+  [2442, 'v_240_wall_hangings_3x3', 46], [2443, 'v_240_wall_hangings_3x3', 47], [2444, 'v_240_wall_hangings_3x3', 48], [2445, 'v_240_wall_hangings_3x3', 49], [2446, 'v_240_wall_hangings_3x3', 50],
+  [2447, 'v_240_wall_hangings_3x3', 51], [2448, 'v_240_wall_hangings_3x3', 52], [2449, 'v_240_wall_hangings_3x3', 53], [3357, 'v_240_wall_hangings_3x3', 56], [3358, 'v_240_wall_hangings_3x3', 57],
+  [3359, 'v_240_wall_hangings_3x3', 58], [4626, 'v_240_wall_hangings_3x3', 63], [4627, 'v_240_wall_hangings_3x3', 64], [4628, 'v_240_wall_hangings_3x3', 65], [4629, 'v_240_wall_hangings_3x3', 66],
+  [4630, 'v_240_wall_hangings_3x3', 67], [4631, 'v_240_wall_hangings_3x3', 68], [5218, 'v_240_wall_hangings_3x3', 76], [5219, 'v_240_wall_hangings_3x3', 77], [5220, 'v_240_wall_hangings_3x3', 78],
+  [5221, 'v_240_wall_hangings_3x3', 79], [5222, 'v_240_wall_hangings_3x3', 80], [5223, 'v_240_wall_hangings_3x3', 81], [5224, 'v_240_wall_hangings_3x3', 82], [5225, 'v_240_wall_hangings_3x3', 83],
+  [5226, 'v_240_wall_hangings_3x3', 84], [5227, 'v_240_wall_hangings_3x3', 85], [5228, 'v_240_wall_hangings_3x3', 86], [5229, 'v_240_wall_hangings_3x3', 87], [5230, 'v_240_wall_hangings_3x3', 88],
+  [5231, 'v_240_wall_hangings_3x3', 89], [5232, 'v_240_wall_hangings_3x3', 90], [5233, 'v_240_wall_hangings_3x3', 91],
+  // 画 6×4 242（38 件 :18366/:20434/:22985/:28290/:38313/:41070/:41674）
+  [1500, 'v_242_paintings_6x4', 13], [1501, 'v_242_paintings_6x4', 14], [1502, 'v_242_paintings_6x4', 15], [1846, 'v_242_paintings_6x4', 17], [1847, 'v_242_paintings_6x4', 18],
+  [1848, 'v_242_paintings_6x4', 19], [1849, 'v_242_paintings_6x4', 20], [1850, 'v_242_paintings_6x4', 21], [2281, 'v_242_paintings_6x4', 22], [2282, 'v_242_paintings_6x4', 23],
+  [2283, 'v_242_paintings_6x4', 24], [3055, 'v_242_paintings_6x4', 31], [3056, 'v_242_paintings_6x4', 32], [3057, 'v_242_paintings_6x4', 33], [3058, 'v_242_paintings_6x4', 34],
+  [3059, 'v_242_paintings_6x4', 35], [4632, 'v_242_paintings_6x4', 37], [4633, 'v_242_paintings_6x4', 38], [4634, 'v_242_paintings_6x4', 39], [4635, 'v_242_paintings_6x4', 40],
+  [4636, 'v_242_paintings_6x4', 41], [4637, 'v_242_paintings_6x4', 42], [5121, 'v_242_paintings_6x4', 46], [5122, 'v_242_paintings_6x4', 47], [5123, 'v_242_paintings_6x4', 48],
+  [5124, 'v_242_paintings_6x4', 49], [5234, 'v_242_paintings_6x4', 50], [5235, 'v_242_paintings_6x4', 51], [5236, 'v_242_paintings_6x4', 52], [5237, 'v_242_paintings_6x4', 53],
+  [5238, 'v_242_paintings_6x4', 54], [5239, 'v_242_paintings_6x4', 55], [5240, 'v_242_paintings_6x4', 56], [5241, 'v_242_paintings_6x4', 57], [5242, 'v_242_paintings_6x4', 58],
+  [5243, 'v_242_paintings_6x4', 59], [5244, 'v_242_paintings_6x4', 60], [5245, 'v_242_paintings_6x4', 61],
+  // 画 2×3 245（16 件 :18297/:38327/:41734）
+  [1475, 'v_245_paintings_2x3', 1], [1476, 'v_245_paintings_2x3', 2], [1477, 'v_245_paintings_2x3', 3], [1478, 'v_245_paintings_2x3', 4], [4638, 'v_245_paintings_2x3', 7],
+  [4639, 'v_245_paintings_2x3', 8], [5248, 'v_245_paintings_2x3', 19], [5249, 'v_245_paintings_2x3', 20], [5250, 'v_245_paintings_2x3', 21], [5251, 'v_245_paintings_2x3', 22],
+  [5252, 'v_245_paintings_2x3', 23], [5253, 'v_245_paintings_2x3', 24], [5254, 'v_245_paintings_2x3', 25], [5255, 'v_245_paintings_2x3', 26], [5256, 'v_245_paintings_2x3', 27],
+  [5257, 'v_245_paintings_2x3', 28],
+  // 画 3×2 246（33 件 :18319/:18593/:41782）
+  [1480, 'v_246_paintings_3x2', 1], [1481, 'v_246_paintings_3x2', 2], [1482, 'v_246_paintings_3x2', 3], [1483, 'v_246_paintings_3x2', 4], [1484, 'v_246_paintings_3x2', 5],
+  [1485, 'v_246_paintings_3x2', 6], [1486, 'v_246_paintings_3x2', 7], [1487, 'v_246_paintings_3x2', 8], [1488, 'v_246_paintings_3x2', 9], [1489, 'v_246_paintings_3x2', 10],
+  [1490, 'v_246_paintings_3x2', 11], [1491, 'v_246_paintings_3x2', 12], [1492, 'v_246_paintings_3x2', 13], [1493, 'v_246_paintings_3x2', 14], [1494, 'v_246_paintings_3x2', 15],
+  [1541, 'v_246_paintings_3x2', 16], [1542, 'v_246_paintings_3x2', 17], [5258, 'v_246_paintings_3x2', 21], [5259, 'v_246_paintings_3x2', 22], [5260, 'v_246_paintings_3x2', 23],
+  [5261, 'v_246_paintings_3x2', 24], [5262, 'v_246_paintings_3x2', 25], [5263, 'v_246_paintings_3x2', 26], [5264, 'v_246_paintings_3x2', 27], [5265, 'v_246_paintings_3x2', 28],
+  [5266, 'v_246_paintings_3x2', 29], [5267, 'v_246_paintings_3x2', 30], [5268, 'v_246_paintings_3x2', 31], [5269, 'v_246_paintings_3x2', 32], [5270, 'v_246_paintings_3x2', 33],
+  [5271, 'v_246_paintings_3x2', 34], [5272, 'v_246_paintings_3x2', 35], [5273, 'v_246_paintings_3x2', 36],
+  // 字雕 337（35 件 :26130——WorldGen.Check2xX :38561-38565 掉落 2702+fx/36,同批补表）
+  [2703, 'v_337_text_statue', 1], [2704, 'v_337_text_statue', 2], [2705, 'v_337_text_statue', 3], [2706, 'v_337_text_statue', 4], [2707, 'v_337_text_statue', 5],
+  [2708, 'v_337_text_statue', 6], [2709, 'v_337_text_statue', 7], [2710, 'v_337_text_statue', 8], [2711, 'v_337_text_statue', 9], [2712, 'v_337_text_statue', 10],
+  [2713, 'v_337_text_statue', 11], [2714, 'v_337_text_statue', 12], [2715, 'v_337_text_statue', 13], [2716, 'v_337_text_statue', 14], [2717, 'v_337_text_statue', 15],
+  [2718, 'v_337_text_statue', 16], [2719, 'v_337_text_statue', 17], [2720, 'v_337_text_statue', 18], [2721, 'v_337_text_statue', 19], [2722, 'v_337_text_statue', 20],
+  [2723, 'v_337_text_statue', 21], [2724, 'v_337_text_statue', 22], [2725, 'v_337_text_statue', 23], [2726, 'v_337_text_statue', 24], [2727, 'v_337_text_statue', 25],
+  [2728, 'v_337_text_statue', 26], [2729, 'v_337_text_statue', 27], [2730, 'v_337_text_statue', 28], [2731, 'v_337_text_statue', 29], [2732, 'v_337_text_statue', 30],
+  [2733, 'v_337_text_statue', 31], [2734, 'v_337_text_statue', 32], [2735, 'v_337_text_statue', 33], [2736, 'v_337_text_statue', 34], [2737, 'v_337_text_statue', 35],
+  // 板条箱 376（12 件 :28910/:35413——Check4x2 :48689-48763 掉落 26 档全表,同批补表）
+  [3203, 'v_376_fishing_crates', 3], [3204, 'v_376_fishing_crates', 4], [3205, 'v_376_fishing_crates', 5], [3206, 'v_376_fishing_crates', 6], [3207, 'v_376_fishing_crates', 7],
+  [3208, 'v_376_fishing_crates', 8], [3982, 'v_376_fishing_crates', 12], [3983, 'v_376_fishing_crates', 13], [3984, 'v_376_fishing_crates', 14], [3985, 'v_376_fishing_crates', 15],
+  [3986, 'v_376_fishing_crates', 16], [3987, 'v_376_fishing_crates', 17],
+  // 宝石锁 440（6 件 :32829）
+  [3645, 'v_440_gemlocks', 1], [3646, 'v_440_gemlocks', 2], [3647, 'v_440_gemlocks', 3], [3648, 'v_440_gemlocks', 4], [3649, 'v_440_gemlocks', 5],
+  [3650, 'v_440_gemlocks', 6],
+  // 假容器 441（41 件 :32930——布尔计数算式 `(type>N).ToInt()` 逐 id 展开档）
+  [3666, 'v_441_fakecontainers', 1], [3667, 'v_441_fakecontainers', 3], [3668, 'v_441_fakecontainers', 7], [3669, 'v_441_fakecontainers', 8], [3670, 'v_441_fakecontainers', 9],
+  [3671, 'v_441_fakecontainers', 10], [3672, 'v_441_fakecontainers', 11], [3673, 'v_441_fakecontainers', 12], [3674, 'v_441_fakecontainers', 13], [3675, 'v_441_fakecontainers', 14],
+  [3676, 'v_441_fakecontainers', 15], [3677, 'v_441_fakecontainers', 16], [3678, 'v_441_fakecontainers', 17], [3679, 'v_441_fakecontainers', 18], [3680, 'v_441_fakecontainers', 19],
+  [3681, 'v_441_fakecontainers', 20], [3682, 'v_441_fakecontainers', 21], [3683, 'v_441_fakecontainers', 22], [3684, 'v_441_fakecontainers', 28], [3685, 'v_441_fakecontainers', 29],
+  [3686, 'v_441_fakecontainers', 30], [3687, 'v_441_fakecontainers', 31], [3688, 'v_441_fakecontainers', 32], [3689, 'v_441_fakecontainers', 33], [3690, 'v_441_fakecontainers', 34],
+  [3691, 'v_441_fakecontainers', 35], [3692, 'v_441_fakecontainers', 37], [3693, 'v_441_fakecontainers', 39], [3694, 'v_441_fakecontainers', 41], [3695, 'v_441_fakecontainers', 42],
+  [3696, 'v_441_fakecontainers', 43], [3697, 'v_441_fakecontainers', 44], [3698, 'v_441_fakecontainers', 45], [3699, 'v_441_fakecontainers', 46], [3700, 'v_441_fakecontainers', 47],
+  [3701, 'v_441_fakecontainers', 48], [3702, 'v_441_fakecontainers', 49], [3703, 'v_441_fakecontainers', 50], [3704, 'v_441_fakecontainers', 51], [3705, 'v_441_fakecontainers', 52],
+  [3706, 'v_441_fakecontainers', 53],
+  // 瓶装魂 572（5 件 :38629）
+  [4696, 'v_572_souls_in_a_bottle', 1], [4697, 'v_572_souls_in_a_bottle', 2], [4698, 'v_572_souls_in_a_bottle', 3], [4699, 'v_572_souls_in_a_bottle', 4], [4700, 'v_572_souls_in_a_bottle', 5],
+  // 灯 93（21 件 :21853/:21959/:25753）
+  [2082, 'v_93_lamps', 1], [2083, 'v_93_lamps', 2], [2084, 'v_93_lamps', 3], [2085, 'v_93_lamps', 4], [2086, 'v_93_lamps', 5],
+  [2087, 'v_93_lamps', 6], [2088, 'v_93_lamps', 7], [2089, 'v_93_lamps', 8], [2090, 'v_93_lamps', 9], [2091, 'v_93_lamps', 10],
+  [2129, 'v_93_lamps', 11], [2130, 'v_93_lamps', 12], [2131, 'v_93_lamps', 13], [2132, 'v_93_lamps', 14], [2133, 'v_93_lamps', 15],
+  [2134, 'v_93_lamps', 16], [2643, 'v_93_lamps', 22], [2644, 'v_93_lamps', 23], [2645, 'v_93_lamps', 24], [2646, 'v_93_lamps', 25],
+  [2647, 'v_93_lamps', 26],
+  // 工作台 18（6 件 :22718/:25654）
+  [2251, 'workbench', 19], [2252, 'workbench', 20], [2253, 'workbench', 21], [2631, 'workbench', 24], [2632, 'workbench', 25],
+  [2633, 'workbench', 26],
 ];
 for (const [vid, tk, ps] of PLACE_STYLE_BACKFILL_1458) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];
@@ -1263,6 +1438,12 @@ const SHARED_GROUP_PLACE_STYLE_1457: ReadonlyArray<readonly [number, number]> = 
   [3220, 5],    // WaterleafPlanterBox :29739
   [3221, 6],    // ShiverthornPlanterBox :29739
   [3222, 7],    // FireBlossomPlanterBox :29739
+  // 长凳沙发 89（★SW-FX3 2026-09-09）：2413 曾挂 itemfunc 伪值 23——真值 = 共享 case
+  //  算式 `placeStyle = 1 + type - 2397`（Item.cs:23968,亲读）的组内档 17；伪值来自
+  //  提取器对 2413 既有条目的段首匹配（同 F1 家族病,已有值 ⇒ falsy 回填门无效,
+  //  必须本表无条件纠偏）。22 件组内缺档（2397-2412/2414-2416 等）走上方
+  //  PLACE_STYLE_BACKFILL_1458 SW-FX3 块。
+  [2413, 17],   // Mushroom Sofa（沙发族 2397-2416 组内档 17;2397=Sofa/2416=Lihzahrd）
 ];
 for (const [vid, ps] of SHARED_GROUP_PLACE_STYLE_1457) {
   const kSg = VANILLA_ITEM_KEY_BY_ID[vid];

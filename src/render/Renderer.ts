@@ -1242,6 +1242,18 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     }
     return 0;
   }
+  // 圣骑士 290（FindFrame case 290，NPC.cs:76763-76786，IIIII235 2026-09-10 补）：
+  // 瞄准/掷锤相（ai[2]>0）帧行按 ai[1] 倒数窗切换——[20..30]→9（起手）、[10..19]→10
+  // （瞄准,掷锤恰在 ai1==15 此行）、[0..9]→11（随掷）；随后才是行走带：腾空=1、
+  // 站定=0（清计数）、行走 2..8（frameCounter+=|vx|×1、>6 进帧、>8 回 2——**7 帧
+  // 行走带**）。曾落通用 aiStyle3 档：行走循环 2..11 把瞄准帧行 9/10/11 当行走帧
+  // 播放、瞄准相又只显示行走/站立帧（举盾掷锤无演出）
+  if (id === 290) {
+    if (e.ai2 > 0) return Math.min(frames - 1, e.ai1 < 10 ? 11 : e.ai1 < 20 ? 10 : 9);
+    if (!e.onGround) return Math.min(1, frames - 1);
+    if (!walking) return 0;
+    return 2 + (Math.floor(e.walkCycleT / 6) % 7);
+  }
   // 战士族/107（L70155-70252）：站定=0；行走从帧 2 起按 |vx|*2+1 累加、>6 推进、循环回 2
   if (ai === 3 || ai === 26 || ai === 107) {
     if (!e.onGround) return frames - 1; // 腾空取末帧（原版 ai[0]==2 在 0/末帧间交替）
@@ -1739,6 +1751,76 @@ export function deerclopsNextFrame(
   }
   s.idx = idx;
   return idx;
+}
+
+// ==================== 668 绘制层计划（SW-BJ51,纯函数可测面）====================
+/** 668 鹿角怪绘制层序/偏移/alpha 全参数计划（1457 Main.cs DrawNPCDirect_Deerclops
+ *  :26714-26800 逐层公式;层序=原版 z 序）：
+ *  redGhost×2（lai3>0,:26735-26753）→ purpleGhost×5（ai0∈{7,8},:26764-26787,
+ *  【在本体之下】=五连 Draw 在 :26790 主绘之前）→ body×1（:26790）→
+ *  fog×2（lai3>0,:26792-26800,源矩形=本体同格帧 rect）。
+ *  偏移为层偏移（消费侧再叠加锚点 -originX/-originY）;gt=GlobalTimeWrappedHourly
+ *  （进程秒%3600）。公式锚：r=lai3/36(:26737)、红雾 α=(128/255)(1-r²/2)×Opacity
+ *  （value2=(80,0,0,255)×0.5=:26743）、本体 α=Opacity(1-r²)(1-num7)（:26756+:26790）、
+ *  num7=Remap(ai1,20,60,0,2) 三角波（:26765-26769）、紫重影 α=本体×0.5（color2×0.5
+ *  :26783）、双轨道 R1=80n⁹/R2=80n⁹+30j·n⁹（:26774-26775）、fog α=(66/255)×Opacity×
+ *  Remap(lai3,0,20,0,1)×0.25×(1-num7)（:26795）。tPurple=本体紫电 Lerp 合成系数
+ *  （两段 Lerp(·,(50,0,160),·) 链,:26757-26769）。 */
+export interface DeerclopsDrawLayer {
+  kind: 'redGhost' | 'purpleGhost' | 'body' | 'fog';
+  dx: number;
+  dy: number;
+  alpha: number;
+}
+
+export function deerclopsDrawLayers(s: {
+  lai3: number; ai0: number; ai1: number; opacity: number; gt: number;
+}): { layers: DeerclopsDrawLayer[]; tPurple: number } {
+  const { lai3, ai0, ai1, opacity, gt } = s;
+  const r = lai3 > 0 ? lai3 / 36 : 0;                            // num6（:26737）
+  const r2 = r * r;                                              // num3
+  const r1 = lai3 > 0 ? Math.max(0, Math.min(1, lai3 / 20)) : 0; // Remap(lai3,0,20,0,1)
+  let num7 = 0;
+  if (ai0 === 7 || ai0 === 8) {
+    num7 = ai1 <= 20 ? 0 : ai1 >= 60 ? 2 : ((ai1 - 20) / 40) * 2;   // :26765
+    if (num7 > 1) num7 = 2 - num7;                                  // 三角波 0→1→0
+  }
+  const bodyAlpha = opacity * (1 - r2) * (1 - num7);
+  const tPurple = r1 + num7 - r1 * num7;          // Lerp(Lerp(x,t,a),t,b) 合成
+  const layers: DeerclopsDrawLayer[] = [];
+  if (lai3 > 0) {
+    const a = (128 / 255) * (1 - r2 * 0.5) * opacity;
+    for (let i = 0; i < 2; i++) {                 // (0,1).Rot(iπ+gt·10)×r²·20
+      const th = i * Math.PI + gt * 10;
+      const R = r2 * 20;
+      layers.push({ kind: 'redGhost', dx: -Math.sin(th) * R, dy: Math.cos(th) * R, alpha: a });
+    }
+  }
+  if (ai0 === 7 || ai0 === 8) {
+    const n9 = num7 * num7;
+    for (let j = 0; j < 5; j++) {                 // UnitX 双轨道和
+      const a1 = j * (Math.PI * 2) / 5 + gt * 6;
+      const a2 = j * (Math.PI * 2) / 5 + gt * 3 * (j * 0.5);
+      const R1 = 80 * n9, R2 = 80 * n9 + 30 * j * n9;
+      layers.push({
+        kind: 'purpleGhost',
+        dx: Math.cos(a1) * R1 + Math.cos(a2) * R2,
+        dy: Math.sin(a1) * R1 + Math.sin(a2) * R2,
+        alpha: bodyAlpha * 0.5,
+      });
+    }
+  }
+  layers.push({ kind: 'body', dx: 0, dy: 0, alpha: bodyAlpha });
+  if (lai3 > 0) {
+    const num12 = Math.max(0, Math.min(1, lai3 / 20));
+    const fa = (66 / 255) * opacity * num12 * 0.25 * (1 - num7);
+    for (let k = 0; k < 2; k++) {                 // 环绕半径 r²×4
+      const th = k * Math.PI + gt * 10;
+      const R = r2 * 4;
+      layers.push({ kind: 'fog', dx: -Math.sin(th) * R, dy: Math.cos(th) * R, alpha: fa });
+    }
+  }
+  return { layers, tPurple };
 }
 
 // ==================== 拾取飘字命中盒度量（PopupText.GetTextHitbox :751-758）====================
@@ -8932,19 +9014,9 @@ export class Renderer {
     const mirrored = !facingRight;                                        // 贴图朝右
     const originX = facingRight ? 106 : sw - 106, originY = sh - 4;
     const GT = (performance.now() / 1000) % 3600;
-    // ---- 状态量（:26227-26270）----
+    // ---- 状态量+层计划（纯函数 deerclopsDrawLayers,SW-BJ51 抽出可测）----
     const lai3 = e.lai3;
-    const r = lai3 > 0 ? lai3 / 36 : 0;                 // num6（红雾进度）
-    const r2 = r * r;                                   // num3
-    const r1 = lai3 > 0 ? Math.max(0, Math.min(1, lai3 / 20)) : 0; // 紫电 Remap(lai3,0,20,0,1)
-    let num7 = 0;
-    if (e.ai0 === 7 || e.ai0 === 8) {
-      // Remap(ai1,20,60,0,2)（:26265）区外钳制
-      num7 = e.ai1 <= 20 ? 0 : e.ai1 >= 60 ? 2 : ((e.ai1 - 20) / 40) * 2;
-      if (num7 > 1) num7 = 2 - num7;                    // 三角波 0→1→0
-    }
-    const bodyAlpha = opacity * (1 - r2) * (1 - num7);  // ①透明环 + ③消散衰减
-    const tPurple = r1 + num7 - r1 * num7;              // 两段 Lerp 链的合成系数
+    const { layers, tPurple } = deerclopsDrawLayers({ lai3, ai0: e.ai0, ai1: e.ai1, opacity, gt: GT });
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(e.cx, e.y + e.h);
@@ -8954,49 +9026,19 @@ export class Renderer {
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       ctx.drawImage(c.c, c.x, c.y, c.w, c.h, -originX + dx, -originY + dy, sw, sh);
     };
-    // ① 出生红雾双环绕（1457 Main.cs:26735-26753）：num2=2 层,(0,1).Rot(i·π + GT·10) × r²·20
-    //    → 偏移 = (-sinθ, cosθ)·R；色 value2=(80,0,0)×0.5,alpha×(1-r²/2)
-    if (lai3 > 0) {
-      const red = this.lerpSprite('deer-red', frame, [40, 0, 0], 1);
-      const a = (128 / 255) * (1 - r2 * 0.5) * opacity;
-      for (let i = 0; i < 2; i++) {
-        const th = i * Math.PI + GT * 10;
-        const R = r2 * 20;
-        drawFrame(red, -Math.sin(th) * R, Math.cos(th) * R, a);
-      }
-    }
-    // ② ai0∈{7,8} 五层重影（1457 Main.cs:26764-26787）——★SW-BJ51：原版画在【本体之下】
-    //    （:26764-26787 五连 Draw 在 :26790 主绘 Draw 之前）,曾画在本体之上=叠脸重影
+    // 烘焙三 tint（缓存化,键含 t 量化）：红雾环 (80,0,0)×0.5 预乘语义、本体紫电链、
+    // Extra_245 红雾 (255,30,30)——雾的【源矩形=本体同格帧 rect】（1457 :26793 第 3 参
+    // rectangle;Extra_245 与 NPC_668 同为 1090×1200 才容得下该采样窗）
+    const red = layers.some((l) => l.kind === 'redGhost') ? this.lerpSprite('deer-red', frame, [40, 0, 0], 1) : null;
     const body = this.lerpSprite('deer-body', frame, [50, 0, 160], tPurple);
-    if (e.ai0 === 7 || e.ai0 === 8) {
-      const n9 = num7 * num7;
-      for (let j = 0; j < 5; j++) {
-        const a1 = j * (Math.PI * 2) / 5 + GT * 6;
-        const a2 = j * (Math.PI * 2) / 5 + GT * 3 * (j * 0.5);
-        const R1 = 80 * n9, R2 = 80 * n9 + 30 * j * n9;
-        const dx = Math.cos(a1) * R1 + Math.cos(a2) * R2;
-        const dy = Math.sin(a1) * R1 + Math.sin(a2) * R2;
-        drawFrame(body, dx, dy, bodyAlpha * 0.5);       // color2 × 0.5
-      }
-    }
-    // ③ 本体（紫电 tint 链）1457 Main.cs:26790
-    drawFrame(body, 0, 0, bodyAlpha);
-    // ④ Extra_245 前层红雾（1457 Main.cs:26792-26800）：(255,30,30,66)×Opacity×num12×0.25×(1-num7),
-    //    num2 层环绕半径 r²×4——★SW-BJ51：原版以【本体同格帧 rect】为 Extra_245 的
-    //    源矩形（:26793 Draw 第 3 参=rectangle,即 NPC_668 帧网格同坐标子矩形;
-    //    Extra_245 与 NPC_668 同为 1090×1200 才容得下该采样窗）,曾整图压缩进帧格
-    if (lai3 > 0) {
-      const fog = this.atlas!.ensureVImage('vanilla/Extra_245.png');
-      if (fog) {
-        const num12 = Math.max(0, Math.min(1, lai3 / 20));   // Remap(lai3,0,20,0,1)
-        const fa = (66 / 255) * opacity * num12 * 0.25 * (1 - num7);
-        const fogT = this.lerpSprite('deer-fog', { img: fog, sx: frame.sx, sy: frame.sy, sw: frame.sw, sh: frame.sh }, [255, 30, 30], 1);
-        for (let k = 0; k < 2; k++) {
-          const th = k * Math.PI + GT * 10;
-          const R = r2 * 4;
-          drawFrame(fogT, -Math.sin(th) * R, Math.cos(th) * R, fa);
-        }
-      }
+    const fogImg = layers.some((l) => l.kind === 'fog') ? this.atlas!.ensureVImage('vanilla/Extra_245.png') : null;
+    const fogT = fogImg ? this.lerpSprite('deer-fog', { img: fogImg, sx: frame.sx, sy: frame.sy, sw: frame.sw, sh: frame.sh }, [255, 30, 30], 1) : null;
+    // 按计划层序画（=原版 z 序：红雾环→紫五重影→本体→前层红雾）
+    for (const l of layers) {
+      if (l.kind === 'body') drawFrame(body, l.dx, l.dy, l.alpha);
+      else if (l.kind === 'redGhost') drawFrame(red, l.dx, l.dy, l.alpha);
+      else if (l.kind === 'purpleGhost') drawFrame(body, l.dx, l.dy, l.alpha);   // color2 × 0.5
+      else drawFrame(fogT, l.dx, l.dy, l.alpha);
     }
     ctx.restore();
     ctx.globalAlpha = 1;

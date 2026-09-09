@@ -93,11 +93,31 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     //  frameX 留给 TELogicSensor.GetFrame 写 On 态 0/18。曾落 default 写 frameX=style*18
     //  → 自放七件全退化昼档、打掉反推 fy/18 恒返 3613）
     case 423: return [0, style * 18];
+    // ★IIIII234（2026-09-09）：逻辑件族余量补齐——PlaceLogicTiles（WorldGen.cs:
+    //  45705-45728）else 支对 420/423/424/429/445 一律 `frameX=0; frameY=18*style`：
+    //  420 逻辑门：样式档（0=AND/1=OR/2=NAND/3=NOR/4=XOR/5=XNOR,ItemID.cs:8752-8762
+    //  placeStyle=type-3603）在 Y 轴,frameX 留给 CheckLogicGate 写输出态 0/18/36
+    //  （Wiring.cs:631-653）——曾落 default 写 frameX=style*18 → OR 门(style1)
+    //  放出来 frameX=18 =「AND 门已 ON」：渲染错档+真值表全错。
+    //  424 分线盒：样式=材质（铜0,placeStyle 仅 0 物品在库）在 Y 轴,frameX=方向档
+    //  0/18/36（Wiring.cs:751-768 hitWire 读 frameX/18）——同轴向修正。
+    //  429 线缆灯泡：状态位在 frameX（bit 域 per 线色,Wiring.cs case 429 读
+    //  frameX/18 的 %2/%4/%8/%16）,style 仅 0 → Y 轴占位与原版同构。
+    //  445 像素盒：触发态 frameX 0/18（PixelBoxPass Wiring.cs:531-553）,style 仅 0。
+    //  419 灯 = default 即原版（`frameX=style*18; frameY=0`,state 轴恰在 X）。
+    case 420: case 424: case 429: case 445: return [0, style * 18];
     // 10 关门（PlaceDoor WorldGen.cs:32070-32090：frameX=54*(style/36)+变体*18、
     //  frameY=54*(style%36)+行*18——每 36 样式换一列，列内 54px 块三档变体。
     //  曾落 default 写 style*18 → 石门(style44)/活木·骨·血肉门等 style>0 全渲染错区+
     //  doorStyleOf 反推错乱污染开关门链。开门 tile11 无放置物品不经此路径）
     case 10: return [54 * Math.floor(style / 36), 54 * (style % 36)];
+    // ★SW-FX3（2026-09-09）：雕像 105 行带（TileObjectData.cs:3012-3015 CopyFrom(Style2xX)
+    //  + StyleWrapLimit=55——Style2xX=2 宽×3 高、CoordinateWidth 16/Pad 2 ⇒ 全宽
+    //  36/全高 54（:2866-2873），55 样式/行换行。Tiles_105 1980×272=55×36 实证同构）。
+    //  掉落反推 Check2xX（WorldGen.cs:38542-38545）`fx/36 + (fy/54%3)*55`——
+    //  曾落 default X 向（style*36 无换行）→ style≥55（SW-FX3 补档的活木雕像 55-62、
+    //  63-75 等 13 件）帧写到第 55 带外=渲染错档+掉落反推 (fy/54%3)*55 恒 0 错档。
+    case 105: return [(style % 55) * 36, Math.floor(style / 55) * 54];
     default: return [style * fw * 18, 0];
   }
 }

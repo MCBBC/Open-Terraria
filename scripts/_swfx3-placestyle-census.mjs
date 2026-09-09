@@ -16,7 +16,8 @@ const OUT = '/tmp/swfx3-gold-census.json';
 const VER = process.env.SWFX3_VER ?? '1457';
 const itemSrc = readFileSync(`${ROOT}/Terarria${VER}/Terraria/Item.cs`, 'utf8');
 
-// ---- 剥注释（等长空格替换,保行号）----
+// ---- 剥注释（等长空格替换,保行号）;字符串/字符字面量内部同样空格化——
+//      字面量里的 { } ( ) 会让括号配平失效（外层 SetDefaults 卡死根因）----
 function stripComments(src) {
   let out = '';
   let i = 0, n = src.length;
@@ -29,16 +30,30 @@ function stripComments(src) {
       let j = src.indexOf('*/', i + 2); j = j < 0 ? n : j + 2;
       const seg = src.slice(i, j);
       out += seg.replace(/[^\n]/g, ' '); i = j;
-    } else if (c === '"') {
+    } else if (c === '"' || c === "'") {
       let j = i + 1;
-      while (j < n && src[j] !== '"') { if (src[j] === '\\') j++; j++; }
-      out += src.slice(i, j + 1); i = j + 1;
+      while (j < n && src[j] !== c) { if (src[j] === '\\') j++; j++; }
+      // 字面量体（含引号）全空格化,保长度
+      out += ' '.repeat(Math.min(j + 1, n) - i); i = j + 1;
     } else { out += c; i++; }
   }
   return out;
 }
 const SRC = stripComments(itemSrc);
-const lineOf = (absIdx) => SRC.slice(0, absIdx).split('\n').length;
+// 行号：惰性换行偏移表 + 二分（逐调用全量 slice+split 在 2MB 源上是平方级,曾拖垮普查）
+let _nl = null;
+const lineOf = (absIdx) => {
+  if (_nl === null) {
+    _nl = [0];
+    for (let i = 0; i < SRC.length; i++) if (SRC.charCodeAt(i) === 10) _nl.push(i + 1);
+  }
+  let lo = 0, hi = _nl.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (_nl[mid] <= absIdx) lo = mid; else hi = mid - 1;
+  }
+  return lo + 1;
+};
 
 function methodBodyOf(name) {
   const idx = SRC.indexOf(name);
@@ -53,6 +68,8 @@ function methodBodyOf(name) {
 }
 
 // ---- 算式求值（evalArithExpr 同构；memo 编译）----
+//  反编译布尔计数惯用法 `(type > N).ToInt()` → `((type>N)?1:0)`（伪箱族 :32930），
+//  字符集扩展 ? : > <（三目只出现在该惯用法展开内）
 const arithMemo = new Map();
 function evalArith(expr, id) {
   let s = expr.replace(/\(\s*(?:ushort|short|sbyte|uint|int)\s*\)/g, '').replace(/\s+/g, '');
@@ -60,8 +77,11 @@ function evalArith(expr, id) {
   if (!s.includes('type')) return undefined;
   let fn = arithMemo.get(s);
   if (fn === undefined) {
-    if (!/^[\d()+\-*/]*$/.test(s.replace(/\btype\b/g, ''))) return undefined;
-    const js = s.replace(/\btype\b/g, '($1)');
+    const canon = s
+      .replace(/\(\s*type\s*>\s*(\d+)\s*\)\.ToInt\(\)/g, '((type>$1)?1:0)')
+      .replace(/\(\s*type\s*<\s*(\d+)\s*\)\.ToInt\(\)/g, '((type<$1)?1:0)');
+    if (!/^[\d()+\-*/?:><]*$/.test(canon.replace(/\btype\b/g, ''))) return undefined;
+    const js = canon.replace(/\btype\b/g, '(type)');
     try { fn = Function('type', `"use strict";return (${js});`); } catch { return undefined; }
     arithMemo.set(s, fn);
   }
@@ -103,7 +123,7 @@ function evalCond(cond, ids) {
   const m1 = /^type\s*(==|!=|>=|<=|>|<)\s*(-?\d+)$/.exec(s);
   if (m1) return { ids: filterIds(ids, m1[1], +m1[2]), unknown: false };
   const m2 = /^(-?\d+)\s*(==|!=|>=|<=|>|<)\s*type$/.exec(s);
-  if (m2) return { ids: filterIds(ids, flipOp(m2[1]), +m2[1] === undefined ? 0 : +m2[1] * 0 + +m2[1] === undefined ? 0 : +m2[1]) , unknown: false };
+  if (m2) return { ids: filterIds(ids, flipOp(m2[2]), +m2[1]), unknown: false };
   return { ids: new Set(ids), unknown: true };
 }
 function flipOp(op) { return { '==': '==', '!=': '!=', '>=': '<=', '<=': '>=', '>': '<', '<': '>' }[op]; }
@@ -149,6 +169,11 @@ function scanBrace(text, i) { // text[i]==='{' → matching '}'
   }
   return -1;
 }
+/** 失配防御：返回 text.length（保证 walk 的 i 恒前进,杜绝 be=-1 → j=0 死循环） */
+function scanBraceSafe(text, i) {
+  const r = scanBrace(text, i);
+  return r < 0 ? text.length : r;
+}
 function stmtEnd(text, i) { // index of terminating ';' at paren-depth 0
   let d = 0;
   for (; i < text.length; i++) {
@@ -179,18 +204,23 @@ function splitArgs(argText) {
 }
 
 const HELPER_TABLE = {
-  PlaceableTile: { n: 2, apply: (args, id, st) => { st.ct = { rhs: args[0], line: st.line }; st.ps = { rhs: args[1] ?? '0', line: st.line, form: 'helper:PlaceableTile' }; } },
-  Torch: { n: 2, apply: (args, id, st) => { st.ct = { rhs: '4', line: st.line }; st.ps = { rhs: args[0], line: st.line, form: 'helper:Torch' }; } },
-  MusicBox: { n: 1, apply: (args, id, st) => { st.ct = { rhs: '139', line: st.line }; st.ps = { rhs: args[0], line: st.line, form: 'helper:MusicBox' }; } },
-  Banner: { n: 1, apply: (args, id, st) => { st.ct = { rhs: '91', line: st.line }; st.ps = { rhs: args[0] ?? '0', line: st.line, form: 'helper:Banner' }; } },
-  Monolith: { n: 2, apply: (args, id, st) => { st.ct = { rhs: args[0], line: st.line }; st.ps = { rhs: args[1] ?? '0', line: st.line, form: 'helper:Monolith' }; } },
+  PlaceableTile: { n: 2, apply: (args, id, st) => { st.ct = { v: Number(args[0]), line: st.line }; st.ps = { rhs: args[1] ?? '0', line: st.line, form: 'helper:PlaceableTile' }; } },
+  Torch: { n: 2, apply: (args, id, st) => { st.ct = { v: 4, line: st.line }; st.ps = { rhs: args[0], line: st.line, form: 'helper:Torch' }; } },
+  MusicBox: { n: 1, apply: (args, id, st) => { st.ct = { v: 139, line: st.line }; st.ps = { rhs: args[0], line: st.line, form: 'helper:MusicBox' }; } },
+  Banner: { n: 1, apply: (args, id, st) => { st.ct = { v: 91, line: st.line }; st.ps = { rhs: args[0] ?? '0', line: st.line, form: 'helper:Banner' }; } },
+  Monolith: { n: 2, apply: (args, id, st) => { st.ct = { v: Number(args[0]), line: st.line }; st.ps = { rhs: args[1] ?? '0', line: st.line, form: 'helper:Monolith' }; } },
 };
 
 // ---- 主 walker：重放语句序,per-id 写 out ----
 // out: Map(vid → {ps:{v,form,line}|undefined, ct:{v,line}|undefined, flags:Set})
+// 返回 { returned:Set(ids) }——C# return 退出整个方法（跨过后续兄弟语句），
+// 调用方必须把 returned 从活跃 id 集里剔除（2237 型伪污染根修）。
+const EMPTY_SET = new Set();
 function walk(text, ids, out, baseAbs) {
+  let active = ids;
+  const returned = new Set();
   let i = 0;
-  while (i < text.length) {
+  while (i < text.length && active.size > 0) {
     i = skipWs(text, i);
     if (i >= text.length) break;
     if (text.startsWith('if', i) && !/[\w.]/.test(text[i - 1] ?? ' ')) {
@@ -200,32 +230,35 @@ function walk(text, ids, out, baseAbs) {
       const cond = text.slice(hp + 1, he);
       let j = skipWs(text, he + 1);
       let thenText, thenStart, isBlock = false;
-      if (text[j] === '{') { const be = scanBrace(text, j); thenText = text.slice(j + 1, be); thenStart = j + 1; j = be + 1; isBlock = true; }
+      if (text[j] === '{') { const be = scanBraceSafe(text, j); thenText = text.slice(j + 1, be); thenStart = j + 1; j = be + 1; isBlock = true; }
       else { const se = stmtEnd(text, j); if (se < 0) break; thenText = text.slice(j, se + 1); thenStart = j; j = se + 1; }
       // else?
       let elseText = null; let elseStart = 0;
-      let k = skipWs(text, j);
+      const k = skipWs(text, j);
       if (text.startsWith('else', k) && !/[\w.]/.test(text[k + 4] ?? ' ')) {
         let k2 = skipWs(text, k + 4);
-        if (text[k2] === '{') { const be = scanBrace(text, k2); elseText = text.slice(k2 + 1, be); elseStart = k2 + 1; j = be + 1; }
+        if (text[k2] === '{') { const be = scanBraceSafe(text, k2); elseText = text.slice(k2 + 1, be); elseStart = k2 + 1; j = be + 1; }
         else { const se = stmtEnd(text, k2); elseText = text.slice(k2, se + 1); elseStart = k2; j = se + 1; }
-        k = j;
       }
-      const r = evalCond(cond, ids);
+      const r = evalCond(cond, active);
       const line = baseAbs ? lineOf(baseAbs + i) : 0;
       if (r.unknown) {
-        // 不可解条件：标记 unresolved,两支同 scope 走基态口径（then 优先=源序,else 落后）
-        const walkRes = walk(thenText, ids, out, baseAbs ? baseAbs + thenStart : 0);
-        for (const x of ids) out.get(x)?.flags.add(`unresolved-if@${line}`);
-        if (elseText) walk(elseText, ids, out, baseAbs ? baseAbs + elseStart : 0);
+        // 不可解条件：基态口径=支不采用只走 else（F-STRUCT 前例）+ unresolved 标记
+        for (const x of active) out.get(x)?.flags.add(`unresolved-if@${line}`);
+        if (elseText) {
+          const rr = walk(elseText, active, out, baseAbs ? baseAbs + elseStart : 0);
+          for (const x of rr.returned) returned.add(x);
+        }
+        active = new Set([...active].filter((x) => !returned.has(x)));
         i = j;
         continue;
       }
-      walk(thenText, r.ids, out, baseAbs ? baseAbs + thenStart : 0);
-      if (elseText) {
-        const elseIds = new Set([...ids].filter((x) => !r.ids.has(x)));
-        walk(elseText, elseIds, out, baseAbs ? baseAbs + elseStart : 0);
-      }
+      const retThen = walk(thenText, r.ids, out, baseAbs ? baseAbs + thenStart : 0).returned;
+      const elseIds = new Set([...active].filter((x) => !r.ids.has(x)));
+      const retElse = elseText ? walk(elseText, elseIds, out, baseAbs ? baseAbs + elseStart : 0).returned : EMPTY_SET;
+      for (const x of retThen) returned.add(x);
+      for (const x of retElse) returned.add(x);
+      active = new Set([...active].filter((x) => !returned.has(x)));
       i = j;
       continue;
     }
@@ -237,31 +270,46 @@ function walk(text, ids, out, baseAbs) {
       const be = text[j] === '{' ? scanBrace(text, j) : -1;
       if (be < 0) { i = he + 1; continue; }
       const body = text.slice(j + 1, be);
-      if (onType) walkSwitch(body, ids, out, baseAbs ? baseAbs + j + 1 : 0);
-      else { walk(body, ids, out, baseAbs ? baseAbs + j + 1 : 0); for (const x of ids) out.get(x)?.flags.add('unresolved-switch-non-type'); }
+      if (onType) {
+        const rr = walkSwitch(body, active, out, baseAbs ? baseAbs + j + 1 : 0);
+        for (const x of rr.returned) returned.add(x);
+        active = new Set([...active].filter((x) => !returned.has(x)));
+      } else {
+        const rr = walk(body, active, out, baseAbs ? baseAbs + j + 1 : 0);
+        for (const x of rr.returned) returned.add(x);
+        active = new Set([...active].filter((x) => !returned.has(x)));
+        for (const x of active) out.get(x)?.flags.add('unresolved-switch-non-type');
+      }
       i = be + 1;
       continue;
     }
-    if (text.startsWith('return', i)) { return { returned: true }; }
-    if (text.startsWith('break', i)) { return { broke: true }; }
+    if (text.startsWith('return', i)) {
+      for (const x of active) returned.add(x);
+      break;
+    }
+    if (text.startsWith('break', i)) { return { returned, broke: true }; }
     // 普通语句：到 ';'
     let se = i;
     while (se < text.length && text[se] !== ';' && text[se] !== '{') se++;
     if (text[se] === '{') { // 裸块（罕见）
-      const be = scanBrace(text, se);
-      walk(text.slice(se + 1, be), ids, out, baseAbs ? baseAbs + se + 1 : 0);
+      const be = scanBraceSafe(text, se);
+      const rr = walk(text.slice(se + 1, be), active, out, baseAbs ? baseAbs + se + 1 : 0);
+      for (const x of rr.returned) returned.add(x);
+      active = new Set([...active].filter((x) => !returned.has(x)));
       i = be + 1;
       continue;
     }
     const stmt = text.slice(i, se);
-    processStmt(stmt, ids, out, baseAbs ? baseAbs + i : 0);
+    processStmt(stmt, active, out, baseAbs ? baseAbs + i : 0);
     i = se + 1;
   }
-  return {};
+  return { returned };
 }
 
+const DBG_VID = Number(process.env.SWFX3_DEBUG_VID ?? 0);
 function processStmt(stmt, ids, out, abs) {
   const line = abs ? lineOf(abs) : 0;
+  if (DBG_VID && ids.has(DBG_VID)) console.error(`[dbg@${line}] ids=${[...ids].slice(0, 8).join(',')}(${ids.size}) stmt=${stmt.trim().slice(0, 90)}`);
   const am = /(?:^|[^\w.])placeStyle\s*=\s*([^;]+)$/.exec(stmt);
   if (am) {
     for (const id of ids) {
@@ -336,7 +384,8 @@ function ensure(out, id) {
   return r;
 }
 
-/** switch(type) 体解析：case 分组（fallthrough）+ default 归属（有界 id 集） */
+/** switch(type) 体解析：case 分组（fallthrough）+ default 归属（有界 id 集）。
+ *  返回 { returned:Set }——case 体内的 return 退出整个方法（跨过 switch 后的兄弟语句） */
 function walkSwitch(body, ids, out, abs) {
   // 收集段：label → [bodyStart,bodyEnd)
   const segs = []; // {ids:[...], def:boolean, start, end}
@@ -363,7 +412,8 @@ function walkSwitch(body, ids, out, abs) {
     i++;
   }
   if (cur) { cur.end = n; segs.push(cur); }
-  if (!segs.length) return;
+  const returned = new Set();
+  if (!segs.length) return { returned };
   const explicit = new Set();
   for (const s of segs) for (const l of s.labels) explicit.add(l);
   // fallthrough 组装：空体段并入下一非空段
@@ -394,49 +444,83 @@ function walkSwitch(body, ids, out, abs) {
         for (const x of ids) if (!explicit.has(x)) memberIds.add(x);
       } else {
         for (const x of ids) { ensure(out, x).flags.add('unbounded-default'); }
-        walk(bodyText, ids, out, abs + seg.start);
+        const rr = walk(bodyText, ids, out, abs + seg.start);
+        for (const x of rr.returned) returned.add(x);
         continue;
       }
     }
     const r = walk(bodyText, memberIds, out, abs + seg.start);
-    void r;
+    for (const x of r.returned) returned.add(x);
   }
+  return { returned };
 }
 
 // ================= 主流程 =================
 const out = new Map();
 const allIds = new Set(Array.from({ length: 7000 }, (_, k) => k + 1));
+const T0 = Date.now();
 for (const n of [1, 2, 3, 4, 5]) {
   const mb = methodBodyOf(`void SetDefaults${n}(`) || methodBodyOf(`SetDefaults${n}(`);
   if (!mb) { console.error(`SetDefaults${n} not found`); process.exit(2); }
+  const t = Date.now();
   walk(mb.text, allIds, out, mb.start);
-  console.error(`SetDefaults${n}: scanned, out.size=${out.size}`);
+  const nPs = [...out.values()].filter((r) => r.ps !== undefined).length;
+  console.error(`SetDefaults${n}: ${Date.now() - t}ms, out.size=${out.size}, ps-set=${nPs}, flagsUnbounded=${[...out.values()].filter((r) => r.flags.has('unbounded-default')).length}`);
+}
+console.error(`total walk ${Date.now() - T0}ms`);
+// 自检：BJ50 已定谳的四个锚 vid（:21796/:22624/:27097/:28181-28193）
+for (const k of [2045, 2237, 2827, 3046, 966, 5299]) {
+  const g = out.get(k);
+  console.error(`self-check vid=${k} ps=${g?.ps?.v} form=${g?.ps?.form} line=${g?.ps?.line} flags=${[...(g?.flags ?? [])].join('|')}`);
 }
 // 外层 SetDefaults 尾段（委托后可能有 placeStyle 写面——核对性扫描）
-const mbTop = methodBodyOf('public void SetDefaults(');
-const topFlagsBefore = out.size;
-walk(mbTop.text, allIds, out, mbTop.start);
-console.error(`outer SetDefaults walked (out ${topFlagsBefore} -> ${out.size})`);
-
-// 序列化
-const gold = {};
-for (const [vid, r] of [...out.entries()].sort((a, b) => a[0] - b[0])) {
-  gold[vid] = {
-    ps: r.ps?.v, psForm: r.ps?.form, psLine: r.ps?.line, psRhs: r.ps?.rhs,
-    ct: r.ct?.v, ctLine: r.ct?.line,
-    flags: [...r.flags],
-  };
+{
+  const t = Date.now();
+  console.error('phase: locating outer SetDefaults...');
+  const mbTop = methodBodyOf('public void SetDefaults(');
+  console.error(`phase: outer body=${mbTop ? mbTop.text.length : 'null'} chars @${mbTop?.start} (${Date.now() - t}ms)`);
+  const topFlagsBefore = out.size;
+  walk(mbTop.text, allIds, out, mbTop.start);
+  console.error(`outer SetDefaults walked ${Date.now() - t}ms (out ${topFlagsBefore} -> ${out.size})`);
 }
-writeFileSync(OUT, JSON.stringify(gold, null, 1));
-console.error(`gold written: ${OUT} (${Object.keys(gold).length} vids)`);
+{
+  const t = Date.now();
+  const gold = {};
+  for (const [vid, r] of [...out.entries()].sort((a, b) => a[0] - b[0])) {
+    gold[vid] = {
+      ps: r.ps?.v, psForm: r.ps?.form, psLine: r.ps?.line, psRhs: r.ps?.rhs,
+      ct: r.ct?.v, ctLine: r.ct?.line,
+      flags: [...r.flags],
+    };
+  }
+  writeFileSync(OUT, JSON.stringify(gold, null, 1));
+  console.error(`gold serialized ${Date.now() - t}ms (${Object.keys(gold).length} vids)`);
+  void gold;
+}
+
+// 序列化（见上方 timing 块;gold 变量在此作用域重建引用）
+const gold = (() => {
+  const g = {};
+  for (const [vid, r] of [...out.entries()].sort((a, b) => a[0] - b[0])) {
+    g[vid] = {
+      ps: r.ps?.v, psForm: r.ps?.form, psLine: r.ps?.line, psRhs: r.ps?.rhs,
+      ct: r.ct?.v, ctLine: r.ct?.line,
+      flags: [...r.flags],
+    };
+  }
+  return g;
+})();
 
 // ---- 运行时对拍（若 bundle 在位）----
+const UNRES_TOKENS = ['unresolved-ps-', 'unresolved-helper', 'helper-SeaShell'];
 const bundlePath = '/tmp/swfx3-items-bundle.mjs';
 if (existsSync(bundlePath)) {
+  const t = Date.now();
   const rt = await import(bundlePath);
   const defs = rt.ITEM_DEFS;
+  console.error(`bundle imported ${Date.now() - t}ms (${defs.length} defs)`);
   const mism = [];
-  let placeable = 0;
+  let placeable = 0, ok = 0;
   for (const d of defs) {
     const m = /^vi_(\d+)_/.exec(d.key);
     if (!m) continue;
@@ -444,17 +528,29 @@ if (existsSync(bundlePath)) {
     if (!d.tile) continue;   // 只对可放置件
     placeable++;
     const g = gold[vid];
-    const rps = d.placeStyle; // undefined ↔ 0 语义等价（放置链 ?? 0）——单独归档
-    if (!g || g.ps === undefined) {
-      mism.push({ vid, tile: d.tile, rps: rps ?? null, gold: g ? 'UNRESOLVED:' + (g?.flags ?? []).join(',') : 'NO-GOLD' });
+    const flags = (g?.flags ?? []).filter((f) => {
+      // 外层 SetDefaults(:48666+) 的未解条件与 placeStyle 无关（全外层仅 :48982 一处
+      // 无条件 placeStyle=0 复位,亲读核实）——只有 SetDefaults1-5 域内(<48666)的
+      // ps 相关未解标记才算真未解
+      if (f.startsWith('unresolved-if@')) return Number(f.slice('unresolved-if@'.length)) < 48666;
+      return UNRES_TOKENS.some((tk) => f.startsWith(tk));
+    });
+    const unresolved = flags.length > 0;
+    const rps = d.placeStyle; // undefined ↔ 0 语义等价（放置链 ?? 0）
+    const eff = rps ?? 0;
+    if (unresolved && (g?.ps === undefined || flags.some((f) => f.startsWith('helper-')))) {
+      mism.push({ vid, tile: d.tile, rps: rps ?? null, kind: 'UNRESOLVED', flags });
       continue;
     }
-    const eff = rps ?? 0;
-    if (eff !== g.ps) mism.push({ vid, tile: d.tile, rps: rps ?? null, goldPs: g.ps, goldForm: g.psForm, goldLine: g.psLine, kind: rps === undefined ? 'MISSING' : 'WRONG' });
-    else if (rps === undefined && g.ps !== 0) mism.push({ vid, tile: d.tile, rps: null, goldPs: g.ps, kind: 'MISSING(equiv0-note)' });
+    const goldPs = g?.ps ?? 0;   // 无赋值 = C# 缺省 0
+    if (eff !== goldPs) {
+      mism.push({ vid, tile: d.tile, rps: rps ?? null, goldPs, goldForm: g?.psForm, goldLine: g?.psLine, kind: rps === undefined ? 'MISSING' : 'WRONG' });
+      continue;
+    }
+    ok++;
   }
-  writeFileSync('/tmp/swfx3-mismatch.json', JSON.stringify({ placeable, mismatches: mism }, null, 1));
-  console.error(`runtime compare: placeable=${placeable} mismatches=${mism.length} -> /tmp/swfx3-mismatch.json`);
+  writeFileSync('/tmp/swfx3-mismatch.json', JSON.stringify({ placeable, ok, mismatches: mism }, null, 1));
+  console.error(`runtime compare: placeable=${placeable} ok=${ok} mismatches=${mism.length} -> /tmp/swfx3-mismatch.json`);
 } else {
   console.error('no runtime bundle at /tmp/swfx3-items-bundle.mjs — gold only');
 }

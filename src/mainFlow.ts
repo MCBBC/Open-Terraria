@@ -41,6 +41,8 @@ import { Lang } from './i18n/Lang';
 import { UISfx } from './vui/UISfx';
 import type { Appearance } from './player/Appearance';
 import { ITEM_DEFS } from './data/items';
+import { mountCreditsRollOverlay } from './ui/CreditsRollOverlay';   // IIII232 名单演出
+import { creditsRoll } from './world/CreditsRoll';
 
 const QUICK_SAVE_KEY = 'sandboxworld.quicksave';
 /** 脚本兼容垫片：旧 puppeteer 脚本点 select+button 建世界（M7 清理） */
@@ -84,6 +86,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       mobile = cur === 'touch' ? new MobileControls(game, ui.root) : null;
     });
   }
+  // ★IIIII232：制作组名单演出 overlay（CreditsRollSky 消费侧）。canPlay =
+  // Main.CanPlayCreditsRoll（Main.cs:3223-3232）：!gameMenu && hasCreditsSceneMusicBox
+  // （八音盒 5044 Journey's End 生效中 ≙ scene.musicBoxStyle===85，MB_STYLE_TO_MUSIC
+  // [85]=89）∪ gameMenu&&menuMode==3000（本仓无名单菜单态,登记债）∪ IsEventOngoing
+  mountCreditsRollOverlay(root, {
+    canPlay: () => {
+      const g = game;
+      if (!g) return false;
+      return creditsRoll.canPlay(g.scene?.musicBoxStyle === 85, false, 0);
+    },
+  });
   // GOING_OLDSCHOOL B1 收口：菜单级成就句柄（标题屏日月拖拽首访即达——
   // 曾只挂 Game.achOnWorldEnter，直载标题屏拿不到句柄）
   {

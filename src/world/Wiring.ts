@@ -598,13 +598,17 @@ export class Wiring {
           } else break;
         }
         let out: boolean;
+        // 样式→门型权威 = ItemID.cs:8752-8762（物品 3603-3608 placeStyle=type-3603：
+        // AND/OR/NAND/NOR/XOR/XNOR）+ en-US Items.json tooltip（XOR="Exactly one…on"/
+        // XNOR="Zero or more than one"）。★IIIII234（2026-09-09）勘误：case2/case4
+        // 旧注写反（公式本征正确,仅注释错标——行为无变更）。
         switch (num1) { // :631-653
-          case 0: out = num2 === num3; break;   // AND
-          case 1: out = num3 > 0; break;        // OR
-          case 2: out = num2 !== num3; break;   // XOR
-          case 3: out = num3 === 0; break;      // NOR
-          case 4: out = num3 === 1; break;      // NAND
-          case 5: out = num3 !== 1; break;      // XNOR
+          case 0: out = num2 === num3; break;   // AND（3603 style0）：全亮
+          case 1: out = num3 > 0; break;        // OR（3604 style1）：任一亮
+          case 2: out = num2 !== num3; break;   // NAND（3605 style2）：非全亮
+          case 3: out = num3 === 0; break;      // NOR（3606 style3）：全灭
+          case 4: out = num3 === 1; break;      // XOR（3607 style4）：恰一亮
+          case 5: out = num3 !== 1; break;      // XNOR（3608 style5）：0 或 ≥2 亮
           default: return;
         }
         const flag6 = !faulty && flag3;                 // 故障存在且门当前 off → 强制不发

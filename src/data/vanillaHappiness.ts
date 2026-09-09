@@ -162,6 +162,26 @@ export function npcMoodCategory(npcVanillaId: number, transformed = false): stri
   return `TownNPCMood_${name}${transformed && npcVanillaId === 633 ? 'Transformed' : ''}`;
 }
 
+// ---------------------------------------------------------------------------
+// ★IIIII234（2026-09-09）：GetNearbyResidentNPCs 邻居计数谓词（ShopHelper.cs:295-332）。
+//   邻居计入条件 = `nPC.active && nPC.townNPC && !IsNotReallyTownNPC(nPC)
+//   && !TownManager.CanNPCsLiveWithEachOther_ShopHelper(npc, nPC)`（:312-317）：
+//   ① IsNotReallyTownNPC（:373-380）= 37 老人 / 368 旅行商 / 453 骷髅商 → 不计；
+//   ② CanNPCsLiveWithEachOther（TownRoomManager.cs:118-121）= `housingCategory
+//      不同` → 调用点取反 = 同类别才计入。SetDefaults 赋 housingCategory=1 的
+//      全集 = NPCID.Sets.IsTownPet（637/638@NPC.cs:17239、656@:17327、670@:17513、
+//      678-684@:17626）——城镇宠物与普通城镇 NPC 互不计入拥挤（同屋 <25）、
+//      村（25-120）计数与互相关系条目；宠物对宠物照常计入（ProcessMood 对宠物
+//      提前 return,该面仅在同屋双宠物时可达）。
+//   townNPC 门 = 引擎侧 TownNPC 实例 instanceof 判定（TownNPC.cs SetDefaults
+//   townNPC=true 全集），不在此函数承载。
+// ---------------------------------------------------------------------------
+export function shopHelperCountsNeighbor(npcVid: number, neighborVid: number): boolean {
+  if (neighborVid === 37 || neighborVid === 368 || neighborVid === 453) return false;
+  if (TOWN_PET_VIDS.has(neighborVid) !== TOWN_PET_VIDS.has(npcVid)) return false;
+  return true;
+}
+
 /** GetShoppingSettings / ProcessMood 1:1 */
 export function computeHappiness(inp: HappinessInput): HappinessResult {
   let mul = 1.0;

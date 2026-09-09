@@ -27,7 +27,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Game } from '../src/core/Game';
-import { TILE_BY_KEY } from '../src/data/tiles';
+import { TILE_BY_KEY, T } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
 
 type AnyGame = Record<string, any>;
@@ -171,7 +171,17 @@ describe('SW-BJ25 ③ 锁箱失败支置旗压制交谈（原版 flag2 分支入
     const rig = makeRig({ tileAt: {} });
     rig.g.input.mouseX = 200; rig.g.input.mouseY = 180;  // 光标同时在向导帧盒上
     const locked = { locked: true, x: 100, y: 100, items: [] };
-    rig.g.findChestNear = () => locked;
+    // ★SW-BJ52 2026-09-10：箱命中域收原版精确域（findChestNear 3×3 容差根除，
+    // Player.cs:33314 本体门+:33317 帧回溯+:33497 FindChest 精确查）→ 箱臂桩换
+    // findChest + 光标 tile 置箱族（T.CHEST∪sheet21）。优先级语义（本文件主旨）
+    // 不变：箱臂命中即消费 rightDown 压制交谈。
+    rig.g.wiring = { sheetOf: () => 21 };
+    rig.g.world.store = {
+      ...rig.g.world.store,
+      get: (x: number, y: number) => (x === 12 && y === 11 ? T.CHEST : 0),
+      hasTile: (x: number, y: number) => x === 12 && y === 11,
+    };
+    rig.g.findChest = () => locked;
     (rig.g as AnyGame).rightClickTileNpcDispatch(12, 11, null);
     expect(rig.tryOpenCalls).toEqual([locked]);          // tryOpenChest 被调（内部失败支自处）
     expect(rig.dialogOpened).toEqual([]);                // :33551 置旗 → :43807 压制

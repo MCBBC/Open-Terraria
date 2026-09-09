@@ -33,7 +33,12 @@ export function emoteClearAll(): void { bubbles.length = 0; }
 // 探针句柄：挂在 window 上保证与 Game/Renderer 同一模块实例（HMR ?t= 分叉时
 // 动态 import 会拿到另一份模块实例，气泡数恒 0 的假象来源）
 if (typeof window !== 'undefined') {
-  (window as unknown as { __swEmotes?: unknown }).__swEmotes = { spawn: spawnEmote, count: emoteCount, draw: drawEmotes };
+  (window as unknown as { __swEmotes?: unknown }).__swEmotes = {
+    spawn: spawnEmote, count: emoteCount, draw: drawEmotes,
+    snapshot: emoteSnapshot, clear: emoteClearAll,
+    tempSnapshot: temporaryBubbleSnapshot,
+    setTemp: setTemporaryBubble, clearTemp: clearTemporaryBubble,
+  };
 }
 
 /** NewBubble(emoticon, anchor, time)（:116-132）：默认存活 180 tick。
@@ -53,6 +58,11 @@ export function spawnEmote(npc: EmoteBubbleInstance['npc'], emote: number, time 
 
 /** Update()（EmoteBubble.cs:177）：--life；每 8 tick 图标帧 0↔1 */
 export function tickEmotes(): void {
+  // 临时气泡槽新鲜度：拥有者每 tick 必刷新（stamp），2 tick 未续 = 拥有者已亡/停 → 清
+  tempStamp++;
+  for (const [k, b] of temporaryBubbles) {
+    if (tempStamp - b.stamp > 2) temporaryBubbles.delete(k);
+  }
   for (let i = bubbles.length - 1; i >= 0; i--) {
     const b = bubbles[i];
     if (--b.lifeTime <= 0) { bubbles.splice(i, 1); continue; }
@@ -63,12 +73,58 @@ export function tickEmotes(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// ★IIIII233（2026-09-09）：临时气泡 = EmoteBubble.DrawTemporaryBubble（:189-197）
+// 1:1——原版无实体态、由拥有者在 Draw 阶段直接画（宠物弹幕的 localAI 计时槽
+// Main.cs:33755/:34820/:34250 三站）。本仓以【每 tick 由拥有者刷新的槽表】等价：
+// setTemporaryBubble(anchor, emoteId, maxLife, curLife) 覆盖同锚槽，drawEmotes
+// 逐槽绘制（无 Update——寿命由拥有者的计时槽驱动，同原版 lifeTime 直通）。
+// 开合动画门（Draw :205）= curLife<6（闭合收尾）|| maxLife-curLife<6（开泡）。
+// ---------------------------------------------------------------------------
+const temporaryBubbles = new Map<object, { emote: number; lifeTimeStart: number; lifeTime: number; stamp: number }>();
+let tempStamp = 0;
+
+/** DrawTemporaryBubble 等价：同锚覆盖（原版 _temporaryBubble 单例逐帧覆写） */
+export function setTemporaryBubble(
+  anchor: EmoteBubbleInstance['npc'], emoteId: number, maxLifetime: number, currentLifetime: number,
+): void {
+  temporaryBubbles.set(anchor, { emote: emoteId, lifeTimeStart: maxLifetime, lifeTime: currentLifetime, stamp: tempStamp });
+}
+
+/** 拥有者计时槽走完（curLife≤1 或 ≤0 门,原版 >1 才画）后清槽 */
+export function clearTemporaryBubble(anchor: EmoteBubbleInstance['npc']): void {
+  temporaryBubbles.delete(anchor);
+}
+
+/** 测试/探针：临时气泡快照 */
+export function temporaryBubbleSnapshot(): Array<{ emote: number; lifeTime: number }> {
+  return [...temporaryBubbles.values()].map((b) => ({ emote: b.emote, lifeTime: b.lifeTime }));
+}
+
 /** 绘制（Draw :199-242 1:1）。img = Extra_48 表。
  *  ※在渲染器的世界变换内调用（ctx 已 scale(z)/translate(-cam)）——直接用世界坐标锚定 */
 export function drawEmotes(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement): void {
   if (!img || !(img.width > 0) || img.width === 0) return;
   const CW = 34, CH = 28; // 272/8=34, 1092/39=28
+  // 临时气泡（DrawTemporaryBubble :189-197）——宠物弹幕抚摸/离场/挖掘演出
+  for (const [anchor, b] of temporaryBubbles) {
+    if (b.lifeTime <= 1) { temporaryBubbles.delete(anchor); continue; }  // 原版 >1 才画
+    drawOne(ctx, img, CW, CH, {
+      npc: anchor as EmoteBubbleInstance['npc'], emote: b.emote,
+      lifeTime: b.lifeTime, lifeStart: b.lifeTimeStart, frame: 0, frameCounter: 0,
+    });
+  }
   for (const b of bubbles) {
+    drawOne(ctx, img, CW, CH, b);
+  }
+}
+
+/** Draw（EmoteBubble.cs:199-242）单泡绘制（实体锚分支）。开合动画 6t 窗。 */
+function drawOne(
+  ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement,
+  CW: number, CH: number, b: EmoteBubbleInstance,
+): void {
+  {
     const opening = b.lifeTime < 6 || b.lifeStart - b.lifeTime < 6; // flag：开合动画 → 行0 列0
     // 位置（GetPosition Entity 分支）：头顶 + (-dir*w*0.75, 2)px；origin = (格宽/2, 格高)
     const ax = b.npc.cx - b.npc.facing * b.npc.w * 0.75;

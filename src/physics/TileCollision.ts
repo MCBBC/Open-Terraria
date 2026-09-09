@@ -35,6 +35,11 @@ export interface Body {
    *  不再踏站台面）；TownNPC.fixedUpdate 每 tick 按 flag22 写本字段，其余族仍恒 true。 */
   stepUpHolds?: boolean;
   stepUpNpc?: boolean;
+  /** GetTileCollisionParameters 底对齐缩盒（NPC.cs:93950-93983,IIIII235 2026-09-10）：
+   *  逐类型 cHeight 缩减量（px）——290 圣骑士 cHeight=40 → inset=62−40=22。
+   *  moveAndCollide 管线期间整盒下移 inset+盒高缩减（feet 不变,盒顶下移）,
+   *  出口还原（详 moveAndCollide 入口/出口注）。undefined=全盒（原版缺省路径） */
+  collTopInset?: number;
   /** StepDown 触发门。原版两处均为 == 精确等值（NPC.cs:54374 velocity.Y==0、
    *  Player.cs:23252 velocity.Y==gravity）——语义 = 仅"贴地行走"吸附,空中实体不吸附。
    *  本仓 NPC 族重力在碰撞【前】累加（贴地时 vy=GRAVITY≠0）,故 NPC 门取语义等价的
@@ -929,6 +934,14 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   // 只缩位移）。由 npcLiquid.updateNpcLiquid 每 tick 写入（dry=1 跳过）；实体基类缺省 1。
   const lf = b.liqFactor;
   if (lf !== undefined && lf !== 1) { dx *= lf; dy *= lf; }
+  // ★GetTileCollisionParameters 底对齐缩盒入口（NPC.cs:93950-93983;IIIII235 2026-09-10）：
+  //  原版逐类型 cHeight 缩减后 `cPosition.Y += height − cHeight`（底对齐）——TileCollision
+  //  /SlopeCollision/StepUp 全走缩盒（:93685/:93824/:64909 三消费点）。等价承载=管线期间
+  //  整盒下移 inset 且盒高同步缩减：feet(y+h) 恒不变（落地/坡面/StepDown 语义零变化）,
+  //  只有盒顶（顶头/StepUp 探柱/unembed 顶行判据）下移 inset=视觉头部可压进上方墙格
+  //  （圣骑士 290 cHeight=40,inset=22——3 格高走廊通行,原版同款）。出口还原见尾段。
+  const inset = b.collTopInset ?? 0;
+  if (inset > 0) { b.y += inset; b.h -= inset; }
   const wasGround = b.onGround;   // 上一 tick 落地态（StepDown 贴地门用——重置前捕获）
   b.onGround = false;
   b.hitWall = false;
@@ -1035,6 +1048,10 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   // ★轴后贴合（稳定序）+ 振幅限幅 + G2 + collideY：分轴架构下最稳组合
   slopeCollide(b, world, feetEntry, vyEntry, wasGround, false, xPre);
   unembedPass(b, world);
+  // ★GetTileCollisionParameters 底对齐缩盒出口（NPC.cs:93950-93983;IIIII235 2026-09-10）：
+  //   还原本体坐标/盒高（语义见入口注）——碰撞管线全程只见【下部 cHeight 缩盒】,
+  //   本体 y/h 与盒外消费面（AI 探针/LOS/绘制）保持原 SetDefaults 全盒
+  if (inset > 0) { b.h += inset; b.y -= inset; }
 }
 
 const EMBED_DELAY_TICKS = 15;

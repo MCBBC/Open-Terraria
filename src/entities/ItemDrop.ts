@@ -25,6 +25,8 @@ import { liquidCollision } from '../stats/TouchDamage';
 import itemRareJson from '../data/vanilla-itemrare.json';
 import { spawnWOF } from './bossAI_wof';
 import type { TownNPC } from './TownNPC';
+import { isNpcValidForBestiaryKillCredit } from '../data/Bestiary';   // IIII232 图鉴杀数补账
+import { BestiarySub } from '../net/syncModules';                     // const enum 编译期消除
 
 /** Item.rare（tools 提取，缺省 0 = 白色——Item.cs 类默认）
  *  CheckLavaDeath else 分支的 (rare==0 || rare==-1) 烧毁门用（WorldItem.cs:803） */
@@ -653,10 +655,26 @@ export class ItemDrop extends Entity {
     if (vid === 267) {
       let num = this.stack;
       this.dead = true;                       // TurnToAir
+      // ★IIIII232：图鉴杀数补账（WorldItem.cs:723-727/:756-760——原版 StrikeNPCNoInteraction
+      //  前对每只被处决 NPC 直调 Kills.RegisterKill（IsNPCValidForBestiaryKillCredit 门；
+      //  不经 NPCLoot 的交互门——NoInteraction 路径本就无 playerInteraction 位）。
+      //  本仓 TownNPC.hurt 死亡链不经 onEnemyKilled，故在此直记 + module4 广播。
+      //  可见面：城镇条目解锁门=聊天（TownNPCUICollectionInfoProvider），杀数仅计数器；
+      //  但 35 裁缝师（MULTI_SOURCES 68 条目 kill 支）等经 creditId 归并可成为杀数来源）
+      const bestiary = (game.world as unknown as { bestiary?: {
+        registerKill(netId: number): number } }).bestiary;
+      const net = (game as unknown as { net?: { sendBestiaryEvent?(e: unknown): void } }).net;
+      const creditKill = (n: TownNPC): void => {
+        if (!bestiary || n.vanillaId == null) return;
+        if (!isNpcValidForBestiaryKillCredit(n.vanillaId, false)) return;
+        const killCount = bestiary.registerKill(n.vanillaId);
+        net?.sendBestiaryEvent?.({ sub: BestiarySub.Kill, netId: n.vanillaId, count: killCount });
+      };
       const npcs = ((game.npcs?.() ?? []) as TownNPC[]).filter((n) => !n.dead);
       let flag = false;
       for (const n of npcs) {
         if (n.vanillaId !== 22) continue;
+        creditKill(n);                        // :722-724 RegisterKill 先于 StrikeNPC
         n.hurt(9999, 10 * (n.facing || 1), 0, game);   // StrikeNPCNoInteraction(9999, 10f, -dir)
         num--;
         flag = true;
@@ -666,6 +684,7 @@ export class ItemDrop extends Entity {
         const pool = npcs.filter((n) => !n.dead);      // isLikeATownNPC ≙ 城镇 NPC 桶
         while (num > 0 && pool.length > 0) {
           const n = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+          creditKill(n);                      // :755-757 同上（余量随机处决支）
           n.hurt(9999, 10 * (n.facing || 1), 0, game);
           num--;
         }

@@ -96,6 +96,10 @@ export interface MusicInput {
    *  TorchGodInstrumental。注意月事件覆写在链尾（:13150-13157）——南瓜/霜月仍压过
    *  火把神曲，故本分支排在 moonMusic 之后（两者实际互斥：小游戏只在地下） */
   torchGod?: boolean;
+  /** ★IIIII232：制作组名单演出进行中（CreditsRollEvent.IsEventOngoing，Main.cs:3232）。
+   *  原版两链同位链首：:12021 TOW 链 / :12706 经典链 → MusicID 89（MusicID.cs:190
+   *  JourneysEnd，制作组名单曲）——先于火把神 101/87 与全部 Boss flag */
+  creditsRoll?: boolean;
   /** 八音盒曲目 style（SceneMetrics.musicBoxStyle；-1/缺省 = 无）。
    *  原版 Main.cs:11002-11405：ActiveMusicBox ≥ 0 时在 DecideOnNewMusic 之后覆盖 newMusic
    *  ——优先级高于一切（含月事件/Boss 曲）；style 100 = 静音（MusicBoxSilence → newMusic=0） */
@@ -278,6 +282,9 @@ export function pickMusic(inp: MusicInput): number {
   // 月事件（原版 :13150-13157 位于 DecideOnNewMusic 链尾=最高优先级，覆盖 Boss 曲；
   // 门「相机在地表 worldSurface+10 带内」由 Game 侧判定后传入）
   if (inp.moonMusic && inp.moonMusic > 0) return inp.moonMusic;
+  // ★IIIII232：名单演出（:12706-12709 IsEventOngoing → 89 JourneysEnd，链首——
+  // 先于火把神 101 与全部 Boss flag；本分支按原链序排 moonMusic 之后）
+  if (inp.creditsRoll) return MUSIC.JourneysEnd;
   // 火把神小游戏（原版 :12708-12712 InTorchGodMinigame → 101，先于全部 Boss flag；
   // 月事件链尾覆写在其后 → 本分支排 moonMusic 之后）
   if (inp.torchGod) return MUSIC.TorchGodInstrumental;
@@ -478,7 +485,7 @@ export function resolveTowEventMusic(slots: Iterable<number>): number {
 }
 
 /** TOW（Otherworld）选曲链——drunk 世界游戏内专用。逐支锚（1458 Main.cs）：
- *  :12021 制作组名单 89（本仓 CreditsRollEvent 未实装,登记缺口）
+ *  :12021 制作组名单 89（★IIIII232 已接 inp.creditsRoll）
  *  :12025 火把神 87 → :12029-12095 boss flag 域 → :12097-12103 日食 79 →
  *  :12105-12111 remix 血月 79 → :12113 微光 72 → :12117 沙尘暴 66 →
  *  :12121 地狱 71 → :12125 太空 70 → :12129 墙87/神庙 69 → :12133 地牢 69 →
@@ -505,6 +512,8 @@ export function pickTowMusic(inp: MusicInput): number {
   const remix = !!inp.remix;
   // 链尾月事件（:12327-12333 在整链之后覆写=最高优先级,先判等价）
   if (inp.moonMusic && inp.moonMusic > 0) return MUSIC.OtherworldInvasion;
+  // ★IIIII232：名单演出（:12021-12024 IsEventOngoing → 89,链首——IIIII230 登记缺口清偿）
+  if (inp.creditsRoll) return MUSIC.JourneysEnd;
   // 火把神小游戏（:12025-12027 → 87,先于 boss flag 域）
   if (inp.torchGod) return MUSIC.OtherworldWallOfFlesh;
   // boss flag 域（resolveTowEventMusic 已按 TOW num2 表解析,first-wins）

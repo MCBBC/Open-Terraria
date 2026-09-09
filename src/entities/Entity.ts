@@ -23,6 +23,10 @@ export abstract class Entity {
    *  蜂蜜 .25、微光 .375）。1=dry 不减速；Enemy 侧 npcLiquid.updateNpcLiquid 每 tick 写，
    *  moveAndCollide 入口缩 dx/dy（velocity 不变——同 Collision_MoveWhileWet :93986） */
   liqFactor = 1;
+  /** GetTileCollisionParameters 底对齐缩盒（NPC.cs:93950-93983,IIIII235）：逐类型
+   *  cHeight 缩减量 px（290 圣骑士=62−40=22）。moveAndCollide 内承载,语义详
+   *  TileCollision.Body.collTopInset 注 */
+  collTopInset?: number;
   // ---- 联机傀儡标记（v3 实体同步）：快照驱动实体，本地不跑 AI/命中判定 ----
   netPuppet = false;
   /** 联机实体号（拥有者 slot 高 8 位 + 本地 id 低 24 位；见 net/entitySyncHooks） */

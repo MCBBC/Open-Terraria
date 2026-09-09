@@ -1791,7 +1791,12 @@ export class Dart extends Entity {
       //  ★R4(T4-②,2026-09-02)：814 同族并入——SetDefaults 811/814 共块同置
       //  penetrate=-1（P.cs:7927-7936）,Damage_EVP 同段无 Kill;814 tileCollide=false
       //  撞不了墙,命中即死会让"血弹齐射"弹幕一次接触就整波消失（曾仅修 811）
-      if (this.projId !== 811 && this.projId !== 814) this.dead = true;
+      //  ★IIIII235（2026-09-10）：300 圣锤并入同族——Damage_EVP（P.cs:14846-14971）
+      //  对敌→玩家命中【无 Kill 且不扣 penetrate】（末段 penetrate-- 仅 435/436/
+      //  437/682、timeLeft=0 仅 681）,penetrate=-1（SetDefaults :3908-3916）穿过玩家
+      //  继续飞;tileCollide=false 也撞不了墙 → 唯一寿命=timeLeft 3600。曾命中即灭=
+      //  圣骑士一把锤只摸一次（原版可来回穿人反复施压）
+      if (this.projId !== 811 && this.projId !== 814 && this.projId !== 300) this.dead = true;
     }
     // ---- 75 HappyBomb 近身引信（AI_016 :47809-47820）：距存活玩家中心 <40px
     //      即 Kill(=爆炸;tenthAnniversaryWorld 豁免本仓无此世界) ----
@@ -2494,8 +2499,13 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    贴图 1×1 空桩→纯尘埃(尘 181);Item8@第6更新(:53761)
   299: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, updates: 2, noTile: true, noTex: true,
     fallback: '#7A5AFF' },   // 尾尘走 d181 真尘段(dartStep 尾,P.cs:57611-57637)——泛色 trail 已退役
-  // 300 圣锤(圣骑士 290 :59887):38×38 roll,重力 0.2@60(:21893),tileCollide=false 穿墙;Item1
-  300: { w: 38, h: 38, rot: 'roll', grav: 0.2, gravDelay: 60, noTile: true, sfx: ['Item_1'], fallback: '#C8B860' },
+  // 300 圣锤(圣骑士 290 :59887):38×38 roll(通用 else 支 rotation+=(|vx|+|vy|)×0.03×dir
+  //    :23469-23472),重力 0.2@60 + **vx×0.99 同门**(:23850-23853,IIIII235 补 xDamp——曾缺
+  //    =飞行 60t 后不衰减水平速度),tileCollide=false 穿墙;终端 vy 32(aiStyle2 通用钳
+  //    :23914-23916,IIIII235 补);timeLeft=SetupProjectile 缺省 3600(:789,IIIII235 补——
+  //    曾落 Dart 缺省 600=10s 寿终,原版 60s);Item1(ai[0]==0 首拍 :23846-23849)
+  300: { w: 38, h: 38, rot: 'roll', grav: 0.2, gravDelay: 60, xDamp: 0.99, vCap: 32,
+    life: 3600, noTile: true, sfx: ['Item_1'], fallback: '#C8B860' },
   // 302 狙击弹(骷髅神射 291 :59883):4×4,scale1.18,alpha255 渐入(|v|*0.9),extraUpdates7(!) →
   //    弹速 4×8=32px/t,life300;光=ProjLight 0.3×(1,0.7,0.1);Item11
   302: { w: 4, h: 4, rot: 'align90', scale: 1.18, alpha0: 255, fade: 'speed', updates: 7, life: 300,

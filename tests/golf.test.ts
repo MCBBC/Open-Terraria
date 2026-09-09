@@ -488,3 +488,80 @@ describe('高尔夫分数存档往返', () => {
     expect(cap(0, 5)).toBe(5);
   });
 });
+
+// ===================== G. 镜头跟随/落点驻留（IIIII233 2026-09-09,GolfState.cs:52-67/:136-143） =====================
+describe('镜头跟踪（TryGetCameraTrackingPosition :52-67 + RecordBallInfo :136-143）', () => {
+  it('跟踪态球在 → 返回球心（Center,非 position 左上角）', () => {
+    const state = new GolfState();
+    let now = 100;
+    state.setClock(() => now);
+    const ball: GolfBallHandle = {
+      id: 1, x: 1000, y: 2000, cx: 1003.5, cy: 2003.5, vx: 2, vy: 0,
+      swings: 1, moving: true, dead: false, isMine: true,
+    };
+    state.recordSwing(ball);
+    expect(state.waitingForBallToSettle).toBe(true);
+    expect(state.tryGetCameraTrackingPosition()).toEqual({ x: 1003.5, y: 2003.5 });
+  });
+
+  it('球死 → 2s 内停驻 RecordBallInfo 落点（进洞镜头）;>2s → null（:60-64）', () => {
+    const state = new GolfState();
+    let now = 100;
+    state.setClock(() => now);
+    const ball: GolfBallHandle = {
+      id: 1, x: 1000, y: 2000, cx: 1003.5, cy: 2003.5, vx: 0, vy: 0,
+      swings: 2, moving: true, dead: false, isMine: true,
+    };
+    state.recordSwing(ball);
+    state.recordBallInfo(ball);                  // PutBallInCup :98 记落点
+    ball.dead = true;                            // proj.Kill（:114）
+    expect(state.tryGetCameraTrackingPosition()).toEqual({ x: 1003.5, y: 2003.5 });
+    now = 100 + 1.9;
+    expect(state.tryGetCameraTrackingPosition()).toEqual({ x: 1003.5, y: 2003.5 });
+    now = 100 + 2.1;                             // lastRecordedBallTime+2.0 < now
+    expect(state.tryGetCameraTrackingPosition()).toBeNull();
+  });
+
+  it('RecordBallInfo 门：仅跟踪中的本地球才记（GetLastHitBall()==ball && waiting,:138）', () => {
+    const state = new GolfState();
+    state.setClock(() => 5);
+    const ball: GolfBallHandle = {
+      id: 1, x: 0, y: 0, cx: 3.5, cy: 3.5, vx: 0, vy: 0,
+      swings: 1, moving: true, dead: false, isMine: true,
+    };
+    // 未 recordSwing（waiting=false）→ 不记
+    state.recordBallInfo(ball);
+    expect(state.tryGetCameraTrackingPosition()).toBeNull();
+  });
+
+  it('世界清除（WorldClear :69-76）连带清落点缓存', () => {
+    const state = new GolfState();
+    state.setClock(() => 0);
+    const ball: GolfBallHandle = {
+      id: 1, x: 0, y: 0, cx: 3.5, cy: 3.5, vx: 0, vy: 0,
+      swings: 1, moving: true, dead: false, isMine: true,
+    };
+    state.recordSwing(ball);
+    state.recordBallInfo(ball);
+    ball.dead = true;
+    expect(state.tryGetCameraTrackingPosition()).not.toBeNull();
+    state.worldClear();
+    expect(state.tryGetCameraTrackingPosition()).toBeNull();
+  });
+
+  it('Update 手持高尔夫球车物品 3611 保持跟踪态（GolfState.Update :126-129,IIIII233 补）', () => {
+    const state = new GolfState();
+    const ball: GolfBallHandle = {
+      id: 1, x: 0, y: 0, cx: 3.5, cy: 3.5, vx: 0, vy: 0,
+      swings: 1, moving: true, dead: false, isMine: true,
+    };
+    state.recordSwing(ball);
+    // 非高尔夫道具（含 3611=false）→ 停跟踪
+    state.update(false, false);
+    expect(state.waitingForBallToSettle).toBe(false);
+    // 手持 3611（高尔夫球车物品）→ 保持
+    state.recordSwing(ball);
+    state.update(false, true);
+    expect(state.waitingForBallToSettle).toBe(true);
+  });
+});

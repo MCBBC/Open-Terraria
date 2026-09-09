@@ -5487,13 +5487,17 @@ export class UI {
     // (ItemSlot.cs :2200 区:ctx3 世界箱=Back5;ctx4 银行/ctx32 虚空=Back2 黄;
     //  收藏=Back10 paintSlotChrome 已设;经典 chestPanel 无此分=既存偏差)
     if (this._builtLayout === 'vanilla' && this.openChest) {
+      const isVoid = this.openChest.x === -5;
       const backTex = this.openChest.x < 0 ? 'Inventory_Back2' : 'Inventory_Back5';
       for (let i = 0; i < 40; i++) {
         const s = this.vinvSlots.get(`chest:${i}`);
         if (!s) continue;
+        const fav = !!this.openChest.items[i]?.favorited;
+        // 收藏:ctx32 虚空=Back19(ItemSlot.cs :2131-2134)/其余=Back10(:2129-2131)
+        const want = fav ? (isVoid ? 'Inventory_Back19' : 'Inventory_Back10') : backTex;
         const cur = s.style.getPropertyValue('--slot-bgimg');
-        if (!cur.includes('Inventory_Back10') && !cur.includes(backTex)) {
-          s.style.setProperty('--slot-bgimg', `url(sprites/vanilla/${backTex}.png)`);
+        if (!cur.includes(want)) {
+          s.style.setProperty('--slot-bgimg', `url(sprites/vanilla/${want}.png)`);
         }
       }
     }
@@ -7341,18 +7345,28 @@ export class UI {
       } });
       this.vinvChestBtnEls.push(b);
     };
-    mkChestBtn(0, 'LegacyInterface.29', () => this.chestLootAll());
-    mkChestBtn(1, 'LegacyInterface.30', () => this.chestDepositAll());
-    mkChestBtn(2, 'LegacyInterface.31', () => this.chestQuickStack());
-    mkChestBtn(3, 'LegacyInterface.82', () => this.chestRestock());      // 补货
-    mkChestBtn(4, 'LegacyInterface.122', () => this.chestSortChest());   // 排列物品
+    // 标签 = 自有键(官中现译 拿走全部/存放全部——vanilla 分片 全部拿走/全部放入
+    // 与用户原版不符,且非 en 的 custom 无法覆盖既有 vanilla 键,故走自有键)
+    mkChestBtn(0, 'Mods.SandboxWorld.Chest.LootAll', () => this.chestLootAll());
+    mkChestBtn(1, 'Mods.SandboxWorld.Chest.DepositAll', () => this.chestDepositAll());
+    mkChestBtn(2, 'Mods.SandboxWorld.Chest.QuickStack', () => this.chestQuickStack());
+    mkChestBtn(3, 'Mods.SandboxWorld.Chest.Restock', () => this.chestRestock());      // 补货
+    mkChestBtn(4, 'Mods.SandboxWorld.Chest.Arrange', () => this.chestSortChest());   // 排列物品
   }
 
-  /** 宝箱名回写(DrawName :102-180:bank x<0=官译物品名,真箱=chest.name/类型名) */
+  /** 宝箱名回写(DrawName Main.cs :102-180 1:1):bank x<0=官译物品名;世界箱=
+   *  命名箱名或 LegacyChestType[frameX/36] 箱型名(:122;ChestData 无 name 字段,
+   *  重命名=债,登记:型名取 tile store frameX 权威面) */
   private vinvUpdateChestName(): void {
     const c = this.openChest;
     const el = this.vinvChestNameEl;
     if (!el || !c) return;
+    if (c.x >= 0) {
+      const st = this.game.world.store;
+      const fx = st.frameX?.[st.idx(c.x, c.y)] ?? 0;
+      el.textContent = Lang.text(`LegacyChestType.${Math.floor(fx / 36)}`);
+      return;
+    }
     const bankNames: Record<number, string> = {
       [-2]: Lang.itemName(87) ?? '存钱罐',
       [-3]: Lang.itemName(346) ?? '保险箱',

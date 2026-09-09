@@ -25,6 +25,10 @@ import { BallState } from './golfPhysics';
 export interface GolfBallHandle {
   id: number;                 // whoAmI
   x: number; y: number;       // position
+  /** Center（Entity.Center = position + size/2；相机跟随/落点记录用。
+   *  ★IIIII233 补——旧接口无中心读取,recordBallInfo 曾无处取 Center） */
+  readonly cx?: number;
+  readonly cy?: number;
   vx: number; vy: number;     // velocity
   swings: number;             // ai[1]（击杆数；-1 = 球座待发态）
   moving: boolean;            // localAI[1] != Resting
@@ -77,7 +81,17 @@ export class GolfState {
   private lastSwingX = 0; private lastSwingY = 0;                // _lastSwingPosition（:22）
   private lastHitBall: GolfBallHandle | null = null;             // _lastHitGolfBall（:24）
   private lastRecordedSwingCount = 0;                            // _lastRecordedSwingCount（:26）
+  private lastRecordedBallX = 0; private lastRecordedBallY = 0;  // _lastRecordedBallLocation（:18）
+  private lastRecordedBallTime = 0;                              // _lastRecordedBallTime（:16）
+  private hasRecordedBall = false;                               // HasValue 门（Vector2? 可空性）
+  private nowSeconds: () => number = () => 0;                    // Main.gameTimeCache 总秒（注入）
   waitingForBallToSettle = false;                                // _waitingForBallToSettle（:20）
+
+  /** 游戏时钟注入（RecordBallInfo/TryGetCameraTrackingPosition 的
+   *  TotalGameTime.TotalSeconds——Game fixedUpdate 处注入真实会话秒） */
+  setClock(now: () => number): void {
+    this.nowSeconds = now;
+  }
 
   /** ScoreAdjustment（:30）：time/3600 */
   get scoreAdjustment(): number {
@@ -138,14 +152,31 @@ export class GolfState {
     }
   }
 
-  /** RecordBallInfo（:136-143）—— 进洞前记录最终落点。
-   *  原版此处仅缓存 _lastRecordedBallLocation/_lastRecordedBallTime 供镜头跟随
-   *  （TryGetCameraTrackingPosition :52-67）；**不记击点**——记点只在 LandBall（:145-149）。
-   *  本作单人镜头语义未接（等价边界），保留门条件，无计分副作用。 */
+  /** RecordBallInfo（:136-143）—— 进洞前记录最终落点（Center）与时刻。
+   *  ★IIIII233（2026-09-09）补全：原版缓存 _lastRecordedBallLocation/_lastRecordedBallTime
+   *  供 TryGetCameraTrackingPosition（:52-67）——球死后相机在落点停留 2s（进洞镜头）。
+   *  旧实现此段为空壳（登记"镜头未接"），现与相机跟随一并实装。**不记击点**——
+   *  记点只在 LandBall（:145-149）。 */
   recordBallInfo(ball: GolfBallHandle): void {
     if (this.getLastHitBall() === ball && this.waitingForBallToSettle) {
-      /* 镜头跟随缓存未接（单人语义：分数记录 + Golfer 台词/商店消费） */
+      this.lastRecordedBallX = ball.cx ?? ball.x;                 // Center（:140）
+      this.lastRecordedBallY = ball.cy ?? ball.y;
+      this.lastRecordedBallTime = this.nowSeconds();
+      this.hasRecordedBall = true;
     }
+  }
+
+  /** TryGetCameraTrackingPosition（:52-67）：跟踪态且球在 → 球心；球已死但
+   *  落点记录在 2s 内 → 落点（进洞后镜头停留）；否则 null（相机回玩家） */
+  tryGetCameraTrackingPosition(): { x: number; y: number } | null {
+    const ball = this.getLastHitBall();
+    if (ball && this.waitingForBallToSettle) {
+      return { x: ball.cx ?? ball.x, y: ball.cy ?? ball.y };      // Center（:55-59）
+    }
+    if (this.hasRecordedBall && this.lastRecordedBallTime + 2.0 >= this.nowSeconds() && !ball) {
+      return { x: this.lastRecordedBallX, y: this.lastRecordedBallY };  // :60-64
+    }
+    return null;                                                  // :65-66
   }
 
   /** LandBall（:145-149）—— 进洞记终点点 */
@@ -179,6 +210,9 @@ export class GolfState {
     this.hitRecords.clear();
     this.lastRecordedSwingCount = 0;
     this.waitingForBallToSettle = false;
+    this.lastRecordedBallX = 0; this.lastRecordedBallY = 0;    // _lastRecordedBallLocation=null
+    this.lastRecordedBallTime = 0;                             // _lastRecordedBallTime=0
+    this.hasRecordedBall = false;
   }
 
   /** 测试/调试：当前折扣计时原值 */
