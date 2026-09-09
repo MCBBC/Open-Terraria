@@ -1152,8 +1152,13 @@ export function growLivingTree(
   // ★YYYYYY（2026-08-23）NTB #42：cs:28163-28174 脚基门——非 NTB 脚基 ∉
   //   {0,2,1,40,Ore} 即拒；**NTB 追加放行 60 丛林草/59 泥**（`(!notTheBees ||
   //   (foot!=60 && foot!=59))` 反式）。JS 曾缺 NTB 析取 → 蜂罐丛林带树全拒。
-  //   （cs:28167-28173 的 tenthAnniversary 存活支=191/192/383/384 脚基拒——
-  //   celebrationmk10 组合,常规路径不可达,不移植。）
+  //   （cs:28298-28305 的 tenthAnniversary 存活支——★IIIII229 注释改判（IIII212 审查
+  //   M4:旧注「celebrationmk10 组合,常规路径不可达,不移植」与 1458 实文**相反**）：
+  //   `if (!notTheBees || !tenthAnniversaryWorldGen || drunkWorldGen) return false;`
+  //   之后**落出支=放行**——notTheBees∧tenth∧!drunk 组合（celebrationmk10 系合法种子）
+  //   非常规脚基（∉{0,2,1,40,Ore,60,59}）vanilla **接受**,仅 191/192/383/384 四型
+  //   仍拒;JS 现无此存活臂 ⇒ 该组合世界非常规脚基 JS 全拒/vanilla 放行（缺树+掷流差,
+  //   36/36 认证链外,补臂归组合旗标车道,此处先销注释反判债。）
   const ntbFoot = gs.seedFlags.notTheBees && (gSheet === 60 || gSheet === 59);
   // ★IIIII162（1458 cs:28162-28177）：vanilla 脚基类型门整段包在
   //   `!errorWorld.Enabled && !skyblockWorldGen && …` 内——errorWorld 世界**整跳**

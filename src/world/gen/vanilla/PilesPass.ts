@@ -18,6 +18,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame, genKillTile, genRangeFrame } from './FinalCleanupPass';
 import { setBoulderSolidity } from './TrapsPass';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII229 ⑪ place2x2Piles 序言收编
 
 const PILE185 = TILE_BY_KEY['v_185_small_decos']!;
 const PILE186 = TILE_BY_KEY['v_186_decos_3x2']!;
@@ -151,6 +152,9 @@ function placePile3x2(st: TileStore, rng: RNG, x: number, y: number, type: numbe
     if (!st.flags[ti]) {
       st.type[ti] = 0; st.frameX[ti] = 0; st.frameY[ti] = 0;
       st.half[ti] = 0; st.slope[ti] = 0; st.paint[ti] = 0;
+      // ★IIIII229（⑪ copy-sweep B5）：补 coat 方块侧两位（Clear(131) TilePaint 支的
+      //   ClearBlockPaintAndCoating;本地六通道镜像缺⑦,与 SurfaceDecor :2935 同病同治）。
+      st.coat[ti] &= ~TileStore.COAT_BLOCK_MASK;
     }
   }
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:52102 边距门
@@ -359,7 +363,9 @@ function place2x2Piles(st: TileStore, x: number, y: number, type: number): boole
   //   ≡!active，玩家/NPC 域空）；过门后 inactive 锚 Clear(Tile|TilePaint|Slope)
   //   （ghost type/帧/坡/半砖/块漆清零——Place2x2 后续拒绝也保留此清）
   if (st.flags[st.idx(x, y)]) return false;
-  st.setTileSilent(x, y, 0);
+  // ★IIIII229（⑪ copy-sweep B3）：setTileSilent(0) 多清 wire inActive 位——收编共享
+  //   helper（Clear(131) 全语义,保留 inActive;与 TrapsPass.place2x2Traps 同批同治）。
+  placeTilePrologueClear(st, x, y);
   for (let i = x - 1; i <= x; i++) {
     for (let j = y - 1; j <= y; j++) {
       if (st.flags[st.idx(i, j)]) return false;

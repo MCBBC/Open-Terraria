@@ -1,5 +1,9 @@
 // IIII193 工具：导出 internal→vanilla(sheet) 映射表供离线 diff 脚本用（零断言）
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I193MAP=1 npx vitest run tools/_iii193map.test.ts
+const RUN = process.env.SW_I193MAP === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { writeFileSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 

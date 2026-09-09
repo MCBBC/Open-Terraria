@@ -1,5 +1,9 @@
 // IIII198: 扫全部带 frx 链的 104→105 罐杀形态(x86),找有杀量的链做机制实证
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198SCAN=1 npx vitest run tools/_iii198scan.test.ts
+const RUN = process.env.SW_I198SCAN === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 

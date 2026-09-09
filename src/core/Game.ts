@@ -30704,6 +30704,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // （Player.HasItem，NPC.cs:4376-4385；本仓物品池未注册时恒 false = 纯幸运档）
     const palA = invIndexOfVanilla(5663);
     const palB = invIndexOfVanilla(5664);
+    // ★IIIII228 offensiveToTim（NPC.cs:419）：胸甲（GetEffectiveArmor(1)）∈
+    //  {4256 琥珀长袍, 1282..1287 彩色长袍} && 头盔(0) != 238 法师帽——"对 Tim 敌对"
+    //  着装语义；消费 = Tim 45 的 1/50 加掷臂（NPC.cs:5022 remix 或支同支）
+    const timHeadV = viIdFromKey(ITEM_DEFS[this.player.inv.getEffectiveArmor(0)?.id ?? -1]?.key ?? '') ?? -1;
+    const timChestV = viIdFromKey(ITEM_DEFS[this.player.inv.getEffectiveArmor(1)?.id ?? -1]?.key ?? '') ?? -1;
+    const offensiveToTim = (timChestV === 4256 || (timChestV >= 1282 && timChestV <= 1287))
+      && timHeadV !== 238;
     this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon,
       !!(w.flags.downedSkeletron || w.flags['downed_35']),
       invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck,
@@ -30711,7 +30718,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       partyIsUp(this.partyState),
       this.npcAnyDanger(),
       palA >= 0 && this.player.inv.countOf(palA) > 0,
-      palB >= 0 && this.player.inv.countOf(palB) > 0);
+      palB >= 0 && this.player.inv.countOf(palB) > 0,
+      offensiveToTim);
     this.vanillaSpawner.starfallBoost = this.starfallBoost;   // 流星夜附魔夜爬虫支（NPC.cs:2316）
     // AFK 计数注入（终零波 接线）：SetSpawnFlags :412 `noGroundWorms =
     // player.afkCounter >= Player.AFKTimeNeededForNoWormSpawns(300)` ——计数在
@@ -36247,6 +36255,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 软核/旅程随后被 DropCoins 实际掉落额覆盖 :38318-38324，中核/硬核的钱随
     // 物品全掉 → 身家即损失额）
     this.lostCoins = pvpDeathNoCoins ? 0 : this.coinsOwned();
+    // KillMe :39155-39157（1456 :37764-37766）EndOngoingTorchGodEvent——死亡终止
+    // 火把神事件（复燃+3600 冷却,无掉落;在 lostCoins 后/DropItems 前,序同原文）
+    // SW-BJ38 补接线（此前死亡不收尾=blackout 悬挂+熄炬不复原）
+    this.torchGod?.abort();
     // 中核/硬核：掉落全部物品（Player.cs:38254 DropItems(gemsOnly=false)：软核/旅程
     // 才走 gemsOnly=true 只掉宝石——本仓无背包宝石，近似为不掉）
     if (dropsAllItemsOnDeath(charDiff)) {

@@ -13,8 +13,7 @@
 //     （cs:24198-24258 丛林化地牢：地牢砖→泥+树/植物/藤）。
 // 掷流语义：每处调用都在所在 GenPass 头（RunPass 重播后）首个掷骰消费者位——
 // 接线位见 WorldGen.ts 六槽 + FinalCleanupPass 尾（Dirtiest Block 之后）。
-import type { TileStore } from '../../TileStore';
-import { LIQUID_TYPE } from '../../TileStore';
+import { LIQUID_TYPE, TileStore } from '../../TileStore';   // ★IIIII229 ⑪ COAT_BLOCK_MASK（序言⑦补齐;与原 type-import 合并）
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
@@ -532,6 +531,10 @@ function placeVine62(st: TileStore, rng: RNG, x: number, y: number): void {
     st.slope[i] = 0;
     st.half[i] = 0;                            // Tile.Clear(Slope) 含 halfBrick 清位
     st.paint[i] = 0;
+    // ★IIIII229（⑪ copy-sweep B9）：补 coat 方块侧两位——本支形态特殊（type/帧随后被
+    // 直写覆盖,①②③无效面）但 coat 残值会留在藤蔓格上;:523 注「可见面仅 type」系
+    // IIII217 前旧口径,已过时（帧/coat 通道均在 8ch 门控 dump 面）。
+    st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;
   }
   st.flags[i] |= 1;
   st.type[i] = JUNGLE_VINE;
@@ -549,6 +552,8 @@ function placeJunglePlantImpl(st: TileStore, rng: RNG, gs: GenState, x: number, 
   const i = st.idx(x, y);
   if (!st.flags[i]) {                        // cs:59497 前置清（61 非实心恒过大门）
     st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0; st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0;
+    // ★IIIII229（⑪ copy-sweep B7）：补 coat 方块侧两位（Clear(131) TilePaint 支）。
+    st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;
   }
   if (y + 1 >= st.h) return;
   const bi = st.idx(x, y + 1);
@@ -831,6 +836,8 @@ function placeLarva(st: TileStore, rng: RNG, x: number, y: number): boolean {
     if (!st.flags[i0]) {
       // cs:59497 + PlaceTile 头（cs:60237-60240）：!active → Clear(Tile|TilePaint|Slope)
       st.type[i0] = 0; st.frameX[i0] = 0; st.frameY[i0] = 0; st.half[i0] = 0; st.slope[i0] = 0; st.paint[i0] = 0;
+      // ★IIIII229（⑪ copy-sweep B8）：补 coat 方块侧两位（Clear(131) TilePaint 支）。
+      st.coat[i0] &= ~TileStore.COAT_BLOCK_MASK;
     } else if (RESETS_HALF_ATTEMPT_231 && (!FI_SHEET.has(sheetOf(st.type[i0])))) {
       // ★IIII28 批补漏（cs:60241-60246）：目标格已激活且被放类型 ∈
       // ResetsHalfBrickPlacementAttempt[231]=true 且现有型非 tileFrameImportant ⇒

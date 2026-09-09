@@ -1,7 +1,11 @@
 // IIII198: #105 Final_Cleanup 残差几何取证（pot 28 / bubble 379 / moss 族 / 草 60 / 石 1）
 // ——x86 金标 105_Final_Cleanup ↔ JS 槽末#58 快照逐格对拍 + 局部 5×5 窗显影。
 // 用法：SW_I198P_GOLD=<dumpPrefix> SW_I198P_JS=<saveDir> npx vitest run tools/_iii198pot.test.ts
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198P_GOLD=1 npx vitest run tools/_iii198pot.test.ts
+const RUN = process.env.SW_I198P_GOLD === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, writeFileSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 

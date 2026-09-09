@@ -76,6 +76,14 @@ describe('IIIII214b remix 出生 relocation（SpawnPoint cs:19740-19748）', () 
     // 但断言核心=不落土墩 relocation 的 X 钉死语义即可（采样含 rng 抖动）
     expect(world.spawnX0).toBe(world.spawnX);
     expect(world.spawnY0).toBe(world.spawnY);
+    // ★IIIII229（⑫ 212 章 M6 护栏强化）：本测的声明是「非 remix 不受 relocation 臂
+    //   扰动」,旧断言 X0==X/Y0==Y 对「remix 臂误无条件执行」恒绿（两断言在 remix 臂
+    //   执行后同样成立）——补**择一硬断言**：非 remix 落点必须至少一维不等于
+    //   relocation 结果（X=w/2 且 Y=柱顶行 yTop 的组合被拒）。真护栏仍是
+    //   world-final-hash 双籽,本测补的是单元层误执行即时红。
+    const relocated = world.spawnX === Math.floor(w / 2) && world.spawnY === yTop;
+    expect(relocated, `非 remix 世界落到了 relocation 结果 (spawnX=${world.spawnX}, spawnY=${world.spawnY}, ` +
+      `w/2=${Math.floor(w / 2)}, yTop=${yTop})——remix 臂疑似被无条件执行`).toBe(false);
   });
 
   // ③ 全程 e2e（默认跳过——整场 ~2min；CI/回归验证时启用）

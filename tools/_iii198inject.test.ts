@@ -1,6 +1,10 @@
 // IIII198: 导线注入实验——slot57 末把 x86 w.wld 的 wire 位注入 JS store,
 // 观测 #105 罐杀/苔藓/泡泡分歧是否坍缩(=wire 门假说判定)。
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198INJECT=1 npx vitest run tools/_iii198inject.test.ts
+const RUN = process.env.SW_I198INJECT === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { writeFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';

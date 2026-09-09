@@ -14,7 +14,7 @@
 import { WorldStore, type WorldMeta } from '../save/WorldStore';
 import { ensureStyle } from './CharSelect';
 import { Lang } from '../i18n/Lang';
-import { parseSeed } from '../world/gen/SeedEasterEggs';
+import { parseSeedChain } from '../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 parseSeed→parseSeedChain（gen 同口径）
 import { saveClient } from '../workers/SaveClient';
 
 export interface WorldSelectFlow {
@@ -42,7 +42,7 @@ const TOUCH_LABELS = typeof matchMedia === 'function'
  *  "Icon"+(困难?"Hallow":"")+(腐化?"Corruption":"Crimson")+秘密种子后缀；
  *  drunk 不含邪恶段——"CorruptionCrimson" 即完整后缀（2026-08-24 用户报 404 勘误） */
 export function worldIconName(m: WorldMeta): string {
-  const f = parseSeed(m.seed).flags;
+  const f = parseSeedChain(m.seed).flags;
   const hard = m.hardMode ? 'Hallow' : '';
   const evil = m.evil === 1 ? 'Crimson' : 'Corruption';
   // ZenithWorld（AWorldListItem.cs:108-110 GetSeedIcon("Everything", evilVariants:false)）
@@ -63,7 +63,7 @@ export function worldIconName(m: WorldMeta): string {
  *  = 无后缀基础图标单张。天顶世界 GetIcons 原文不特判（会得 7 张），但
  *  GetIconElement :172-175 对 ZenithWorld 先行短路走故障动画，不进轮播——UI 侧同构 */
 export function worldIconNames(m: WorldMeta): string[] {
-  const f = parseSeed(m.seed).flags;
+  const f = parseSeedChain(m.seed).flags;
   const hard = m.hardMode ? 'Hallow' : '';
   const evil = m.evil === 1 ? 'Crimson' : 'Corruption';
   const out: string[] = [];
@@ -93,7 +93,7 @@ export const WORLD_ICON_CYCLE_MS = 750;
 export function fullSeedText(m: WorldMeta): string {
   const size = m.w === 4200 && m.h === 1200 ? 1 : m.w === 6400 && m.h === 1800 ? 2 : m.w === 8400 && m.h === 2400 ? 3 : 0;
   const evilNum = m.evil === 0 ? 1 : m.evil === 1 ? 2 : 0;
-  const f = parseSeed(m.seed).flags;
+  const f = parseSeedChain(m.seed).flags;
   let sum = 0;
   if (f.drunkWorld) sum += 1;
   if (f.notTheBees) sum += 2;
@@ -321,7 +321,7 @@ export class WorldSelectPanel {
       // 其余 = UICyclingImage（GetIcons 列表按 45t=750ms 轮换，首张=列表[0]）
       let icon: HTMLElement;
       const iconNames = worldIconNames(m);
-      if (parseSeed(m.seed).flags.everything === true) {
+      if (parseSeedChain(m.seed).flags.everything === true) {
         icon = this.buildZenithGlitchIcon();
       } else {
         const img = document.createElement('img');
@@ -348,7 +348,7 @@ export class WorldSelectPanel {
       }
       // 混种徽标（UIWorldListItem.cs:83-93）：GetIcons ≥2 且非天顶 → 图标左下角
       // IconMixedSeed 22×18（HAlign 0 / VAlign 1 = 与图标盒左下角对齐）
-      if (iconNames.length >= 2 && parseSeed(m.seed).flags.everything !== true) {
+      if (iconNames.length >= 2 && parseSeedChain(m.seed).flags.everything !== true) {
         const badge = document.createElement('img');
         badge.className = 'sw-vitem-mixed';
         badge.alt = '';

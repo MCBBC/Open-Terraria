@@ -1,5 +1,9 @@
 // IIII180：stateAt(1492,735) 离线直算（TH738 分歧格）
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I180PROBE738=1 npx vitest run tools/_iii180probe738.test.ts
+const RUN = process.env.SW_I180PROBE738 === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 const W = 4200, H = 1200;

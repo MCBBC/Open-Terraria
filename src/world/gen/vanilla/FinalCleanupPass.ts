@@ -3096,6 +3096,10 @@ function solidTileV(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  // ★IIIII229（⑪ 212 章 ④ 残腿）：补 !inActive 腿——本件镜 cs:87176 CheckDoorClosed 的
+  //   SolidTile 锚（全项版含 `!inActive()`);ddual 链 #033_Dungeon 起燃后 3304+ 格带
+  //   致动位（CLXXX/IIIII206 实证），门域与地牢交叠 ⇒「生成期恒无致动位」旧注不成立。
+  if ((st.wire[i] >>> 5) & 1) return false;
   const sh = SWEEP_SHEET[st.type[i]];
   if (sh < 0) return false;
   return genSolidType(st.type[i]) && !TILE_SOLID_TOP.has(sh) && !st.half[i] && st.slope[i] === 0;

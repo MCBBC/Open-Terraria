@@ -1,5 +1,9 @@
 // IIII198: gen2-g x86 罐帧 PlacePot 一致性核查 + iamerror 杀簇连通分量
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198FRX=1 npx vitest run tools/_iii198frx.test.ts
+const RUN = process.env.SW_I198FRX === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 
 const W = 4200, H = 1200, N = W * H;

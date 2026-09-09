@@ -1216,7 +1216,12 @@ function placeFurnTemple(st: TileStore, rng: RNG, x: number, y: number, sheet: n
   const clearAnchor = (cx: number, cy: number) => {
     if (!st.inBounds(cx, cy)) return;
     const i = st.idx(cx, cy);
-    if (!st.flags[i]) { st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0; }
+    // ★IIIII229（⑪ copy-sweep B11）：补 paint/coat 方块侧两位（Clear(131) TilePaint 支;
+    // 本地镜像缺⑥⑦——IIIII99e 五通道面补全）。
+    if (!st.flags[i]) {
+      st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0;
+      st.paint[i] = 0; st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;
+    }
   };
   // ★IIIII99e①前奏 Clear 提到门判定之前（原版在外门之后、写手派发之前）
   if (st.inBounds(x, y)) clearAnchor(x, y);

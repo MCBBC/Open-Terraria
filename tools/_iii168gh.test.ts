@@ -6,7 +6,11 @@
 // 用法：cd game && SW_I168_GHLIST=1 npx vitest run tools/_iii168gh.test.ts
 //       SW_I168_GHTRACE=1 npx vitest run tools/_iii168gh.test.ts
 //       SW_I168_GHPATCH=1 SW_I168_GROUPS=all npx vitest run tools/_iii168gh.test.ts
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I168_GROUPS=1 npx vitest run tools/_iii168gh.test.ts
+const RUN = process.env.SW_I168_GROUPS === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';

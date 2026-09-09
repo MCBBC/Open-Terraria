@@ -1,5 +1,9 @@
 // IIII165 一次性：JS 相① 全量锚点流落盘（与 python vanilla 重放对拍）
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I165P1=1 npx vitest run tools/_iii165p1.test.ts
+const RUN = process.env.SW_I165P1 === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, writeFileSync } from 'node:fs';
 import { TileStore } from '../src/world/TileStore';
 import { RNG } from '../src/core/rng';

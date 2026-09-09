@@ -1,5 +1,9 @@
 // IIII198: flags 数组写监视（Proxy set 陷阱 + 堆栈）——定位 (1435,521)/(21,832) 的凶手
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198WP=1 npx vitest run tools/_iii198wp.test.ts
+const RUN = process.env.SW_I198WP === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { generateWorld } from '../src/world/gen/WorldGen';
 
 const TARGET = new Set([1435 + 521 * 4200, 1435 + 520 * 4200, 1436 + 520 * 4200, 1436 + 521 * 4200, 21 + 832 * 4200, 20 + 832 * 4200]);

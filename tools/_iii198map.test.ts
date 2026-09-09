@@ -1,5 +1,9 @@
 // IIII198: 箱内物品 id 的 EW_INTERNAL_TO_VID 覆盖普查
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198MAP=1 npx vitest run tools/_iii198map.test.ts
+const RUN = process.env.SW_I198MAP === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../src/data/items';
 import { ITEM_BY_KEY } from '../src/data/items';

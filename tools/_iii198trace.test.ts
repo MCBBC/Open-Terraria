@@ -1,5 +1,9 @@
 // IIII198: 追踪 (2655,486) 箱的诞生槽位
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198TRACE=1 npx vitest run tools/_iii198trace.test.ts
+const RUN = process.env.SW_I198TRACE === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { generateWorld } from '../src/world/gen/WorldGen';
 
 it('iii198 chest origin', async () => {

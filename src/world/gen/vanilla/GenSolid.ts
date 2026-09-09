@@ -114,6 +114,16 @@ export function genSolidType(t: number): boolean {
  *  PlacePot 地面门、SpreadGrass 3×3 实心扫描等）须经由本包装——尾部清剿批
  *  2026-08-17。 */
 export const VAN_TILE_SOLID_EXTRA = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+
+/** 原版 Main.tileSolidTop 静态表（sheet 域;Main.cs Initialize_TileAndNPCData2
+ *  :6954-8146 区段逐行提取——DungeonPass ltAllowBottomSlope 同源表上收单源）。
+ *  生成期零翻转（WorldGen 全树无 =false 写）。消费面=「tileSolid∨tileSolidTop」
+ *  第二析取支（SolidTileAllowBottomSlope cs:70706 族），SolidTile/SolidTile2/AllowTopSlope
+ *  均不含 solidTop——勿共用到他处。
+ *  ★IIIII229（⑧ 212 章 M2）：DungeonPass:8214 LT_SOLIDTOP_SET 与 DungeonDualLayout
+ *  solidAllowBottomSlope 的 `def.vanilla.solidTop===true` 死字段（TILE_DEFS 无该字段,
+ *  局部 `as unknown as` 放宽压掉 tsc ⇒ 恒 false）双双收编到此单源。 */
+export const VAN_TILE_SOLIDTOP_SHEET_SET = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
 const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;

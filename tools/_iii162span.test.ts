@@ -1,5 +1,9 @@
 // IIII162 一次性：LT 窗 JS 箱调用掷 span 实测（__swChestEv ab/abx 戳）
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I162SPAN=1 npx vitest run tools/_iii162span.test.ts
+const RUN = process.env.SW_I162SPAN === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { generateWorld, lastGenState } from '../src/world/gen/WorldGen';
 import { TileStore } from '../src/world/TileStore';

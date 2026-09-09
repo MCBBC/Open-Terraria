@@ -1197,6 +1197,9 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       if (!wasActive) {
         st.type[ai] = 0; st.flags[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
         st.slope[ai] = 0; st.half[ai] = 0;
+        // ★IIIII229（⑪ copy-sweep B10）：补 paint/coat 方块侧两位（Clear(131) TilePaint
+        // 支的 ClearBlockPaintAndCoating;本地镜像缺⑥⑦）。
+        st.paint[ai] = 0; st.coat[ai] &= ~TileStore.COAT_BLOCK_MASK;
       }
       const gOK = (() => {
         if (!st.inBounds(barX, barGround + 1)) return false;

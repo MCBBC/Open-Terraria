@@ -3,7 +3,11 @@
 // 「JS 写面清帧」二择一定谳。
 // 用法：cd game && SW_I190TL_CHAIN=jagged npx vitest run tools/_iii190jstl.test.ts
 // 产物：/tmp/iii190-out/jstl-<TAG>.json（cells: {x,y,t,xfx,xfy,act,timeline,passes}）
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I190TL_CHAIN=1 npx vitest run tools/_iii190jstl.test.ts
+const RUN = process.env.SW_I190TL_CHAIN === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, writeFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';

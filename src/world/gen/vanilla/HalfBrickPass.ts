@@ -1205,9 +1205,12 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.flags[i]) return false;
   if (st.wire[i] & 0x20) return false; // cs:70170 !inActive()（致动位=wire bit5）
   const t = st.type[i];
-  if (t === 0) return false;
   const d = TILE_DEFS[t];
-  return genSolidType(t) && !!d && !d.platform && !st.half[i] && st.slope[i] === 0;
+  // ★IIIII229（⑪ 212 章 m2）：拆 type0 反拒——Main.cs:7995 `tileSolid[0]=true` 启动期
+  //   恒置 ⇒ vanilla SolidTile 对 act=1/type=0 残型格判**实心**（IIIII227b 判例;CLXXXV
+  //   solidTileStrict `(t===0||…)` 同腿判例）。JS TILE_DEFS[0]='empty' 查表恒 false,
+  //   「活型0=实心」腿必须显式 `t===0||`——旧写法与原注释「原版 SolidTile 检查」自相矛盾。
+  return (t === 0 || (genSolidType(t) && !!d && !d.platform)) && !st.half[i] && st.slope[i] === 0;
 }
 
 /** 可砸判定（1456 WorldGen.cs:81434 CanPoundTile 1:1 表）：

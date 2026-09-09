@@ -1,5 +1,9 @@
 // IIII198: x86 杀罐格的上格液体(104 与 105 末态)分布——LiquidCheck cut-kill 假说
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198LIQ=1 npx vitest run tools/_iii198liq.test.ts
+const RUN = process.env.SW_I198LIQ === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 const D4 = `${process.env.HOME}/GoldenChains/i106/x86-iamerror/104_Remove_Broken_Traps`;
 const D5 = `${process.env.HOME}/GoldenChains/i106/x86-iamerror/105_Final_Cleanup`;

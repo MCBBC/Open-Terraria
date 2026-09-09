@@ -947,6 +947,19 @@ export class ClientNet {
     world.crimson = crimson;
     world.dungeonX = dungeonX; world.dungeonY = dungeonY; world.jungleX = jungleX;
     Object.assign(world.flags, flags);
+    // ★IIIII228 seedFlags 尾段（v9 增量通道,不升版——同 spawnX0/spawnY0 v8 尾先例）：
+    //  原版 msg7 以 bitsByte10[4..7]/bitsByte11[0..4]/bitsByte13[1..7] 携
+    //  Main.remixWorld/tenth/dontStarve/notTheBees/getGood/zenith/dualDungeons 等
+    //  彩蛋旗（NetMessage.cs:358-381 编码,MessageBuffer.cs:600-619 解码）——
+    //  此前本仓 msg7 未发 seedFlags → 访客四旗全 off。降级矩阵：旧服无尾段 →
+    //  remaining<2 跳过（缺省 {} = 旧行为）；新服发 → 旧客户端只读已知段,
+    //  尾段随帧剩余被丢弃（FrameParser 按长度切帧）= 无害。
+    if (r.remaining >= 2) {
+      const sfCount = r.u16();
+      const sf: Record<string, boolean> = {};
+      for (let i = 0; i < sfCount; i++) sf[r.str()] = r.bool();
+      world.seedFlags = sf as typeof world.seedFlags;
+    }
     // 请求出生点周围 section（对齐原版 msg8）
     this.send(new NetWriter(Msg.SpawnTileData).i32(spawnX).i32(spawnY).finish());
     return world;

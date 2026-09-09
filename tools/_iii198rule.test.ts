@@ -1,6 +1,10 @@
 // IIII198: iamerror 链 x86 杀罐格规则普查——每个被杀罐格按局部模式分类
 // (残形窗/支撑缺/上格液体/2x2 完整),定位 kill 规则。
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198RULE=1 npx vitest run tools/_iii198rule.test.ts
+const RUN = process.env.SW_I198RULE === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 
 const D4 = `${process.env.HOME}/GoldenChains/i106/x86-iamerror/104_Remove_Broken_Traps`;

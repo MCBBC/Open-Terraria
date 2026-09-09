@@ -7,7 +7,11 @@
 // 用法：
 //   cd game && SW_I190_CHAIN=jagged SW_I190_TAG=jagged npx vitest run tools/_iii190census.test.ts
 // 产物：/tmp/iii190-out/c190-<TAG>.json
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I190_CHAIN=1 npx vitest run tools/_iii190census.test.ts
+const RUN = process.env.SW_I190_CHAIN === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, openSync, readSync, closeSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { frameClass } from './_iii163frame';

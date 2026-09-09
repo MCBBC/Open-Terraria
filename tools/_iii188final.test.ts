@@ -7,7 +7,11 @@
 // 用法:
 //   cd game && SW_I188F_CHAIN=drunk npx vitest run tools/_iii188final.test.ts
 //   SW_I188F_TAG=drunk-after 附加产物后缀;产物 /tmp/iii188-out/final-<TAG>.json
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I188F_CHAIN=1 npx vitest run tools/_iii188final.test.ts
+const RUN = process.env.SW_I188F_CHAIN === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { RNG } from '../src/core/rng';

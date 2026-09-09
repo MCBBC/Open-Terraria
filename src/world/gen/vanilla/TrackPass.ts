@@ -296,9 +296,12 @@ const REWRITE_SIZE = 25;     // _rewriteHistory
 function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  // !inActive ≈ 未致动(生成期恒无致动位);tileSolidTop 近似 = platform
+  // ★IIIII229（⑪ 212 章 m3）：补 !inActive 腿（原版 SolidTile(i,j) 全项含 !inActive）——
+  //   旧注「生成期恒无致动位」已被 CLXXX/IIIII206 证伪（ddual 链 gold#083 起 3304+ 格
+  //   带致动位,#033_Dungeon 起燃），轨巷与地牢域交叠 ⇒ 与 CLXXX CaveWalls 同款单行。
+  // tileSolidTop 近似 = platform
   return !!st.flags[i] && trkTileSolidGen(st.type[i]) && !TILE_DEFS[st.type[i]]?.platform
-    && st.half[i] === 0 && st.slope[i] === 0;
+    && st.half[i] === 0 && st.slope[i] === 0 && ((st.wire[i] >>> 5) & 1) === 0;
 }
 
 export class TrackGenerator {

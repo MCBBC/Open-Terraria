@@ -1,5 +1,10 @@
 // IIII198: x86 w.wld 帧提取——幸存罐格 x86帧 vs JS帧 逐格对拍(帧域定罪)
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198WLD=1 npx vitest run tools/_iii198wld.test.ts
+//   ★机器态硬依赖单列（212 章 M3）:本件读本机会话产物（~/GoldenChains i106 w.wld + /tmp/iii195-out）,他机/产物清理后必红——仅门内运行。
+const RUN = process.env.SW_I198WLD === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';

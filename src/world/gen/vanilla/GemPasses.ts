@@ -273,6 +273,9 @@ export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, styl
   if (!st.flags[pi]) {
     st.type[pi] = 0; st.frameX[pi] = 0; st.frameY[pi] = 0;
     st.half[pi] = 0; st.slope[pi] = 0; st.paint[pi] = 0;
+    // ★IIIII229（⑪ copy-sweep B6）：补 coat 方块侧两位（Clear(131) TilePaint 支;
+    // 本地六通道镜像缺⑦,SSSS 批只补了 slope 的同族尾巴）。
+    st.coat[pi] &= ~TileStore.COAT_BLOCK_MASK;
   }
   if (checkMultiDirAnchor(st, x, y) < 0) return;   // CheckAndAdjust 失败：不放置、不掷骰
   const roll1 = rng.nextInt(3) * 18;               // ① cs:59724

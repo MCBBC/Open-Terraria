@@ -1,5 +1,9 @@
 // IIII198: x86 w.wld 导线位 vs JS slot104 wire 位——137 门翻转普查
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198WIRE=1 npx vitest run tools/_iii198wire.test.ts
+const RUN = process.env.SW_I198WIRE === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';

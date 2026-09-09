@@ -16,6 +16,7 @@ import { hfIs1457 } from './HellFortPass';
 import type { SparseChestSink } from '../ChestRegistry';   // ★IIII102c 稀疏 sink 槽模型
 // ★dungeon-1457 批：placeTrap 双地牢界拒门（WorldGen.cs:8865）三因子承载
 import { placeTrapDualDungeonReject } from './DungeonStyles1457';
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII229 ⑪ place2x2Traps 序言收编
 // ★IIII162：树族邻格真分派引擎（vanilla/FinalCleanupPass 的 1:1 TileFrame；见
 //   cascade3x3T 树族支注释——与 FinishNoTrapsPass 同款 co-import 既有惯例）
 import { genTileFrameNeighbor } from './FinalCleanupPass';
@@ -1803,7 +1804,10 @@ function placeHeadMirrorT(st: TileStore, x: number, y: number, tag?: number): vo
     //   half/slope/paint ⇒ ghost 锚残值 type 存活，下游 rawSheetAt（cs:18989 等
     //   不查 active 的直读族）命中判定与 vanilla 分叉（Piles 域写面债源之一）。
     st.type[i] = 0; st.frameX[i] = 0 as never; st.frameY[i] = 0 as never;
-    st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0; st.coat[i] = 0;    // Clear(Tile|TilePaint|Slope)
+    // ★IIIII229（⑪ 212 章 m1）：coat 改掩码清——`st.coat[i] = 0` 整字节清零把墙侧
+    //   两位（COAT_INVISIBLE_WALL=4|COAT_FULLBRIGHT_WALL=16）一并抹掉;Clear(131) 的
+    //   TilePaint 支=ClearBlockPaintAndCoating（Tile.cs:906-911）只清方块侧（2|8）。
+    st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0; st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;    // Clear(Tile|TilePaint|Slope)
     return;
   }
   // ★IIII29 定罪修复③（notraps #76 Hf10 家族 / 半砖清除债）：vanilla 头重排支
@@ -2204,7 +2208,9 @@ function place2x2Traps(st: TileStore, x: number, y: number, type: number): boole
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) { tntProbe(`R bounds ${x},${y}`); return false; }   // cs:51786
   // ★PlaceTile 头（cs:59500）：inactive 锚 Clear(Tile|TilePaint|Slope)（654 非实心
   //   → 头门恒过，先清后派发；active 锚不清——ResetsHalfBrick[654]=false）
-  if (!st.flags[st.idx(x, y)]) st.setTileSilent(x, y, 0);
+  //   ★IIIII229（⑪ copy-sweep B2）：setTileSilent(0) 多清 wire inActive 位（Clear(131)
+  //   保留;IIIII206 实证生成期存在致动格）——收编共享 helper（七通道+flags 门全等价）。
+  if (!st.flags[st.idx(x, y)]) placeTilePrologueClear(st, x, y);
   for (let i = x - 1; i <= x; i++) {
     for (let j = y - 1; j <= y; j++) {
       const ci = st.idx(i, j);

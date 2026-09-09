@@ -4,7 +4,11 @@
 // ewK() 为 undefined,全部 ewLog 退化为 no-op（批后 src 织标还原,本件保留为仪具）。
 // 跑法: cd game && SW_I200=1 SW_I200_OUT=/tmp/iii200-out/js-ewklog.txt \
 //        npx vitest run tools/_iii200klog.test.ts
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I200=1 npx vitest run tools/_iii200klog.test.ts
+const RUN = process.env.SW_I200 === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { openSync, writeSync, closeSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 

@@ -122,7 +122,7 @@ import {
   scaleStats, getAttackDamageForProjectiles, type ScalingStats,
   GDL, remap, mainDifficulty, mainExpertMode, getAttackDamageCappedAtMaster,
   getKnockbackMultiplierScaledByDifficulty,
-  scaleStatsWorld, applySeedAdjustments, type SeedAdjustStats, f32, damageVar,
+  scaleStatsWorld, applySeedAdjustments, applyRemixSetDefaults, type SeedAdjustStats, f32, damageVar,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
@@ -1292,21 +1292,30 @@ export class Enemy extends Entity {
     // 扩盒（★与专家档 Tweaks"只缩贴图不扩盒"语义相反），详 ScaleStats.applySeedAdjustments 头注。
     const seedS: SeedAdjustStats = {
       type: id, scale: v.scale ?? 1, lifeMax: v.lifeMax, defense: v.defense, damage: v.damage,
+      value: npcValueOf(id),
       canDisplayBuffs: true,   // NPC.canDisplayBuffs 默认 true（NPC.cs:6124）
     };
+    // ★IIIII228：SetDefaults 逐型 remix 块（NPC.cs:8775/:8808/:8837/:8866/:9558/:9895/
+    // :11210/:11332）——remix 世界 6/7/8/9/173 ×1.3 全乘、59 定值覆写、82 ×1.2、
+    // 181 ×1.1+×1.2。原版序=主体块（先）→ zenith/getGood/tenth（后）→ ScaleStats。
+    const remixHit = applyRemixSetDefaults(seedS, scaleStatsWorld());
     const seedBox = applySeedAdjustments(seedS, scaleStatsWorld());
     // 碰撞盒：:17745 基扩盒 (int)(w×scale) 之后，种子档命中分支再 (int)(w×scaleNew)
     // （:18025-18026/:17861-17862）——按原文两级 (int) 截断重算（不沿用下方 round
-    // 基盒，s≠1 族 113/114/134-136 差 1px）；未命中走既有 round 路径
-    const vScale = v.scale ?? 1;
+    // 基盒，s≠1 族 113/114/134-136 差 1px）；未命中走既有 round 路径。
+    // ★remix 命中时基 scale 已含 ×1.3/×1.2/×1.1（原版 scale *= 语句）——非种子档
+    // 分支也须走 (int) 截断（原版 :17745 恒 (int)，remix 非 1.0 尺度下 round/trunc
+    // 会出现 1px 差，如 22×1.3=28.6）
+    const vScale = seedS.scale;   // remix 命中=入口 scale 已乘；否则 = v.scale ?? 1
     const boxW = seedBox
       ? Math.trunc(f32(Math.trunc(f32(v.width * vScale)) * f32(seedS.scale)))
-      : Math.round(v.width * vScale);
+      : (remixHit ? Math.trunc(f32(v.width * vScale)) : Math.round(v.width * vScale));
     const boxH = seedBox
       ? Math.trunc(f32(Math.trunc(f32(v.height * vScale)) * f32(seedS.scale)))
-      : Math.round(v.height * vScale);
+      : (remixHit ? Math.trunc(f32(v.height * vScale)) : Math.round(v.height * vScale));
     const ss: ScalingStats = {
-      type: id, lifeMax: seedS.lifeMax, damage: seedS.damage, value: npcValueOf(id),
+      type: id, lifeMax: seedS.lifeMax, damage: seedS.damage,
+      value: seedS.value ?? npcValueOf(id),   // ★IIIII228：remix value ×scale 已并入
       defense: seedS.defense, knockBackResist: rawKb,
       boss: VANILLA_BOSS_IDS.has(id), friendly: !!v.friendly, townNPC: !!v.townNPC,
       scale: seedS.scale, difficulty: 0,

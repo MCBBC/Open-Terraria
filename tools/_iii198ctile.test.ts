@@ -1,5 +1,9 @@
 // IIII198: (2655,486) 箱格 tile 态(x86 slot105)——registry 差 vs tile 差判定
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198CTILE=1 npx vitest run tools/_iii198ctile.test.ts
+const RUN = process.env.SW_I198CTILE === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 
 it('iii198 chest tile at 2655,486', () => {

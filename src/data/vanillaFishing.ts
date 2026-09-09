@@ -135,12 +135,26 @@ export function rollJunk(level: number, waterTilesCount: number, waterNeededToFi
 
 /** TryBuildFishingContext 高度档（:19306-19325 非 remix 分支）1:1：
  *  0=天空(<地表/2) 1=地表 2=地下(<岩层) 3=洞穴(<H-300) 4=地狱 */
-export function heightLevelOf(y: number, worldSurface: number, rockLayer: number, maxTilesY: number): number {
-  if (y < worldSurface * 0.5) return 0;        // :19306-19309
-  if (y < worldSurface) return 1;              // :19310-19313
-  if (y < rockLayer) return 2;                 // :19314-19317
-  if (y < maxTilesY - 300) return 3;           // :19318-19321
-  return 4;                                    // :19322-19325
+export function heightLevelOf(y: number, worldSurface: number, rockLayer: number, maxTilesY: number,
+  /** ★IIIII228 remix 重映射（Projectile.cs:20808-20833）：带序 0/[0.5ws,ws)→1 →
+   *  [ws,rock)→3 → [rock,max-300)→2 → else 4，且带 2 以 1/2 下沉为 1（掷位由
+   *  demoteRoll 注入——null = 非 remix/不掷,保持经典映射零扰动） */
+  remix = false, demoteRoll?: boolean | null): number {
+  if (!remix) {
+    if (y < worldSurface * 0.5) return 0;        // :19306-19309
+    if (y < worldSurface) return 1;              // :19310-19313
+    if (y < rockLayer) return 2;                 // :19314-19317
+    if (y < maxTilesY - 300) return 3;           // :19318-19321
+    return 4;                                    // :19322-19325
+  }
+  let h: number;
+  if (y < worldSurface * 0.5) h = 0;
+  else if (y < worldSurface) h = 1;
+  else if (y < rockLayer) h = 3;
+  else if (y < maxTilesY - 300) h = 2;
+  else h = 4;
+  if (h === 2 && demoteRoll) h = 1;
+  return h;
 }
 
 // ==================== PrepareFishingContext（Projectile.cs:19451-19502）====================
@@ -194,26 +208,36 @@ export function prepareFishingContext(
   rng: Rng = mathRng,
   /** R14-E13②：Main.notTheBeesWorld（PRJ57:20989-20992,在腐化/雪掷之前） */
   notTheBees = false,
+  /** ★IIIII228：Main.remixWorld（:20995 腐猩清旗 / :21020 remixOcean 掷） */
+  remix = false,
 ): RolledFlags {
-  const remix = false;                          // 本仓无颠倒世界（remix 分支不可达）
-  void y; void rockLevel;                      // remix 分支专用（:19466/:19491）
   let corrupt = zones.corrupt;                 // flag  :19453
   let crimson = zones.crimson;                 // flag2 :19454
   let jungle = zones.jungle;                   // flag3 :19455
   let snow = zones.snow;                       // flag4 :19456
-  // R14-E13②：NTB 1/2 弃丛林（:20989-20992,先于腐化/雪二掷——掷序敏感）
+  // R14-E13②：NTB 1/2 弃丛林（:20989-20992,先于腐化/雪二掷——掷序敏感；remix 跳过）
   if (notTheBees && !remix && rng.next(2) === 0) jungle = false;
-  // 腐化∩猩红 → 二选一（:19471-19481）
-  if (corrupt && crimson) {
+  // ★IIIII228 :20995-20998 remix 天空带（heightLevel==0）清腐/猩——else-if 链首支,
+  //  命中即跳过 :20999 的腐∩猩仲裁掷（remix 天空钓鱼不出腐/猩鱼）
+  let remixOcean = false;
+  if (remix && heightLevel === 0) {
+    corrupt = false;
+    crimson = false;
+  } else if (corrupt && crimson) {
+    // 腐化∩猩红 → 二选一（:20999-21009）
     if (rng.next(2) === 0) crimson = false; else corrupt = false;
   }
-  // 雪∩丛林 1/2 弃雪（:19482-19485）
+  // 雪∩丛林 1/2 弃雪（:21010-21013）
   if (snow && jungle && rng.next(2) === 0) snow = false;
   const desert = zones.desert;                 // flag6 :19486（flag5 地牢为真时弃沙漠 :19487-19490 由调用方折）
+  // ★IIIII228 :21020 rolledRemixOcean：remix && heightLevel==1 && Y>=rockLayer &&
+  //  Next(3)==0——remix "地下海"（heightLevel 1 亦由带 2 的 1/2 下沉到达,Y>=rockLayer
+  //  区分真天空带;OceanDrops 组 'ocean' 条件 = rolledRemixOcean || IsOriginalOcean）
+  if (remix && heightLevel === 1 && y >= rockLevel && rng.next(3) === 0) remixOcean = true;
   return {
     corruption: corrupt, crimson, jungle, snow, desert,
-    infectedDesert: desert && rng.next(2) === 0,   // :19499
-    remixOcean: false,                             // :19491（remix 恒 false）
+    infectedDesert: desert && rng.next(2) === 0,   // :21030
+    remixOcean,
   };
 }
 

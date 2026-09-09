@@ -1,6 +1,11 @@
 // IIII208 一次性诊断 v5：(660,448)/(1912,486)/(71,490) 洪水定数 + 活空格路径检查。
 //   cd game && SW_MB_1457=1 npx vitest run tools/_iii208probe.test.ts
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I208PROBE=1 npx vitest run tools/_iii208probe.test.ts
+//   ★机器态硬依赖单列（212 章 M3）:本件读本机会话产物（/tmp/iii207-out）,他机/产物清理后必红——仅门内运行。
+const RUN = process.env.SW_I208PROBE === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { TileStore } from '../src/world/TileStore';
 import { countTiles, countWires } from '../src/world/gen/vanilla/MicroBiomesPass';

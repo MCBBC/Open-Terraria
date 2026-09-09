@@ -429,6 +429,8 @@ export interface SeedAdjustStats {
   lifeMax: number;
   defense: number;
   damage: number;
+  /** npc.value（★IIIII228 remix 逐型块 value ×scale 用；缺省 = 调用方不跟踪 value） */
+  value?: number;
   /** NPC.canDisplayBuffs（NPC.cs:6124 默认 true；缺省 undefined = 调用方不跟踪）——
    *  FTW 245-248 石巨人族置 false（:17945/:17950/:17955；249 不置） */
   canDisplayBuffs?: boolean;
@@ -505,6 +507,56 @@ function tenthAnniversaryAdjustments(s: SeedAdjustStats): boolean {
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// NPC.SetDefaults 逐型 remix（don't dig up）块（★IIIII228，1458 cs:8775/:8808/:8837/
+// :8866/:9558/:9895/:11210/:11332）。运行序 = SetDefaults 主体（先于 :17774-17785
+// zenith/getGood/tenth 种子档与 :17791 ScaleStats）——getfixedboi（zenith）世界
+// 两层都吃（remix 块先做,种子档在其上）。
+//   6 Eater of Souls / 7 8 9 World Feeder 头·身·尾 / 173 Crimera：
+//     !IsABestiaryIconDummy → scale ×1.3（float），damage/defense/lifeMax/value
+//     = (int)((float)v × scale)（★统计乘【不受】假人豁免——原版乘在 if(!dummy)
+//     块外，假人只免 scale）
+//   59 Lava Slime：定值覆写 damage=7 / defense=2 / lifeMax=25 / value=25（无 scale）
+//   82 Wraith：!dummy → scale ×1.2 + stats ×scale
+//   181 Face Monster：!dummy → scale ×1.1；stats = (int)((double)((float)v×scale)×1.2)
+//     （double×1.2 二段截断）
+// value 走 (int)(value*scale)（value 为 float 字段）。
+// ---------------------------------------------------------------------------
+export function applyRemixSetDefaults(s: SeedAdjustStats, ctx: Pick<ScaleStatsWorld, 'remixWorld'>): boolean {
+  const t = s.type;
+  if (!ctx.remixWorld) return false;
+  const scaleStat = (mul: number): void => {
+    if (s.damage) s.damage = Math.trunc(f32(f32(s.damage) * mul));
+    if (s.defense) s.defense = Math.trunc(f32(f32(s.defense) * mul));
+    if (s.lifeMax) s.lifeMax = Math.trunc(f32(f32(s.lifeMax) * mul));
+    if (s.value != null && s.value !== 0) s.value = Math.trunc(f32(f32(s.value) * mul));
+  };
+  if (t === 6 || t === 7 || t === 8 || t === 9 || t === 173) {
+    if (!s.isBestiaryIconDummy) s.scale = f32(s.scale * f32(1.3));
+    scaleStat(s.scale);
+    return true;
+  }
+  if (t === 59) {
+    s.damage = 7; s.defense = 2; s.lifeMax = 25; s.value = 25;
+    return true;
+  }
+  if (t === 82) {
+    if (!s.isBestiaryIconDummy) s.scale = f32(s.scale * f32(1.2));
+    scaleStat(s.scale);
+    return true;
+  }
+  if (t === 181) {
+    if (!s.isBestiaryIconDummy) s.scale = f32(s.scale * f32(1.1));
+    const mul2 = (v: number): number => Math.trunc(f32(f32(v) * s.scale) * 1.2);
+    if (s.damage) s.damage = mul2(s.damage);
+    if (s.defense) s.defense = mul2(s.defense);
+    if (s.lifeMax) s.lifeMax = mul2(s.lifeMax);
+    if (s.value != null && s.value !== 0) s.value = mul2(s.value);
+    return true;
+  }
+  return false;
+}
+
 /** SetDefaults 尾段种子档调整入口（:17774-17785）。原值逐字段原地改；
  *  返回是否【扩盒】——调用侧用调整后 scale 对已基扩盒的 width/height 二次
  *  (int) 乘（:18025-18026/:17861-17862）。isBestiaryIconDummy（s 上）时
@@ -562,7 +614,10 @@ export function netIdSpawnScale(
   let w = Math.trunc(f32(rawWidth * o));
   let h = Math.trunc(f32(rawHeight * o));
   if (h === 16 || h === 32) h++;
-  // ③ 种子档调整 + 命中分支二盒（十周年恒命中：:17861-17862 无条件乘）
+  // ③ 种子档调整 + 命中分支二盒（十周年恒命中：:17861-17862 无条件乘）。
+  //  ★IIIII228：netID 路径的 remix 逐型块只影响 stats/贴图 scale（override 在
+  //  :17824 把 scale 整体替换为 o'——盒=rawW×o' 不含 remix ×1.3；stats 乘区
+  //  由 fromVanilla 的 applyRemixSetDefaults 承载,此处盒链不重做）
   const s: SeedAdjustStats = {
     type, scale: o, lifeMax: 0, defense: 0, damage: 0,
     canDisplayBuffs: true, isBestiaryIconDummy,

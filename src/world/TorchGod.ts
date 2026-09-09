@@ -17,6 +17,11 @@
 //   ★664 无生成路径（全量核查：NewNPC/SetDefaults(664) 仅图鉴记账 Player.cs:37113
 //         进世界已解锁/:44618 使用 5043——事件实体=弹幕 949 群+熄灭火把演出）。
 //         图鉴记账在 5043 使用侧（Game.ts case 5043）+ 进世界已解锁回填，不在事件尾
+// SW-BJ38（2026-09-09）：触发/攻击双扫描窗口基补 Math.floor——原版窗基=(int)Center/16
+//   （:17867-17869 触发 ±40 / :17949-17951 攻击 ±100）,host.playerTile 是浮点中心,
+//   分数下标进 TileStore.idx=typed array 全 undefined=整窗死读=事件永不触发
+//   （实报:地下平台摆 75-90 支无事件;旧测试夹具 ptile 全整数掩盖本症）;
+//   +abort()=EndOngoingTorchGodEvent 死亡出口（KillMe :39155-39157,Game.settlePlayerDeath 接线）
 import type { TileStore } from './TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { TORCH_DUST_BY_STYLE } from './Torch';
@@ -24,7 +29,8 @@ import { TORCH_DUST_BY_STYLE } from './Torch';
 export interface TorchGodHost {
   store: TileStore;
   worldSurface: number;
-  /** 玩家 tile 坐标（中心像素/TILE 的浮点值） */
+  /** 玩家 tile 坐标（中心像素/TILE 的浮点值）——扫描窗口由消费端 floor
+   *  （原版 (int)Center/16 :17867-17869/:17949-17951）,弹道 aim 用浮点原值 */
   playerTile: () => { x: number; y: number } | null;
   /** :17924 门——unlockedBiomeTorches（5043 已用过）后事件永不再触发 */
   unlockedBiomeTorches: () => boolean;
@@ -67,9 +73,14 @@ export class TorchGodEvent {
     // :17928-17935 背包扫描——持有 5043 则不开事件（拿到奖励未用也压门）
     if (this.host.hasVanillaItem(5043)) return;
     const st = this.host.store;
+    // 窗口基 = 原版 (int)Center/16 ±40（TryRecalculatingTorchLuck :17866-17871;
+    // 1456 :17609-17614）——playerTile 是浮点中心（cx/TILE 恒带分数）,必须 floor
+    // 再进 idx:分数下标 y*w+x 在 typed array 上恒 undefined = 整窗死读 = 触发
+    // 永不成立（SW-BJ38 实报:地下摆 75-90 支永无事件;旧夹具 ptile 全整数掩盖本症）
+    const px = Math.floor(p.x), py = Math.floor(p.y);
     let lit = 0;
-    for (let x = Math.max(10, p.x - 40); x <= Math.min(st.w - 10, p.x + 40); x++) {
-      for (let y = Math.max(10, p.y - 40); y <= Math.min(st.h - 10, p.y + 40); y++) {
+    for (let x = Math.max(10, px - 40); x <= Math.min(st.w - 10, px + 40); x++) {
+      for (let y = Math.max(10, py - 40); y <= Math.min(st.h - 10, py + 40); y++) {
         const i = st.idx(x, y);
         if (st.flags[i] && TILE_DEFS[st.type[i]]?.vanilla?.sheet === 4 && st.frameX[i] < TORCH_UNLIT_OFFSET) lit++;
       }
@@ -83,9 +94,17 @@ export class TorchGodEvent {
     }
   }
 
+  /** EndOngoingTorchGodEvent（Player.cs:17834-17843;两处调用:死亡 KillMe :39155-39157、
+   *  升回地表 TorchAttack :17935-17939）：仅事件进行中才收尾（happyFunTorchTime 门
+   *  原样）——复燃全部 + 3600 冷却 + 关 Blackout,无掉落。SW-BJ38 补（死亡出口此前
+   *  无接线:事件中死亡 → blackout 悬挂 + 熄炬不复原） */
+  abort(): void {
+    if (this.active) this.end();
+  }
+
   private step(): void {
     const p = this.host.playerTile();
-    // 回到地表 → EndOngoingTorchGodEvent（:17664-17668）
+    // 回到地表 → EndOngoingTorchGodEvent（:17664-17668;1457 :TorchAttack surface 支 :17935-17939）
     if (!p || p.y <= this.host.worldSurface) { this.end(); return; }
     // AddBuff(80, 2)（每 tick 刷新的 Blackout）
     this.host.setBlackout(true);
@@ -96,9 +115,12 @@ export class TorchGodEvent {
     const st = this.host.store;
     // 扫 ±100 tile 盒内点燃火把（:17683-17705；容量=_torchAttackPosX.Length=
     // maxTorchAttacks=200 :2938——★曾写 500 与原版容量不符）
+    // 盒基同触发窗取整：(int)Center/16 ±100（TorchAttack :17949-17952）——
+    // SW-BJ38 floor 修复（下方 aim 仍用浮点 p,原版 base.Center 不取整 :18012）
+    const px = Math.floor(p.x), py = Math.floor(p.y);
     const lit: Array<[number, number]> = [];
-    for (let x = Math.max(10, p.x - 100); x <= Math.min(st.w - 10, p.x + 100); x++) {
-      for (let y = Math.max(10, p.y - 100); y <= Math.min(st.h - 10, p.y + 100); y++) {
+    for (let x = Math.max(10, px - 100); x <= Math.min(st.w - 10, px + 100); x++) {
+      for (let y = Math.max(10, py - 100); y <= Math.min(st.h - 10, py + 100); y++) {
         const i = st.idx(x, y);
         if (st.flags[i] && TILE_DEFS[st.type[i]]?.vanilla?.sheet === 4 && st.frameX[i] < TORCH_UNLIT_OFFSET) {
           lit.push([x, y]);

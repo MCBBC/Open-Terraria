@@ -1,5 +1,9 @@
 // IIII198: golden-gfb-c 链 x86 罐杀机制实证(有帧)
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198GFB=1 npx vitest run tools/_iii198gfb.test.ts
+const RUN = process.env.SW_I198GFB === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 
 const D = `${process.env.HOME}/GoldenChains/golden-gfb-c/`;

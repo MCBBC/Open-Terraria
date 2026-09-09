@@ -33,7 +33,7 @@ import {
   type DungeonGenVars1457,
   type DungeonStyleData,
 } from './DungeonStyles1457';
-import { genSolidType, vanSolidOrSloped } from './GenSolid';
+import { genSolidType, vanSolidOrSloped, VAN_TILE_SOLIDTOP_SHEET_SET } from './GenSolid';   // ★IIIII229 ⑧ solidTop 单源
 import {
   SnakeOrientation as SO,
   dualSnakes,
@@ -1772,7 +1772,11 @@ function solidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
   if ((st.wire[i] >>> 5) & 1) return false;
   const def = TILE_DEFS_BY_INTERNAL[st.type[i]];
   if (!def) return false;
-  if (!(genSolidType(st.type[i]) || !!def.vanilla && def.vanilla.solidTop === true)) return false;
+  // ★IIIII229（⑧ 212 章 M2）：`def.vanilla.solidTop === true` 死字段拆除——TILE_DEFS
+  //   无该字段（局部 `as unknown as` 放宽压掉 tsc ⇒ 恒 false ⇒ solidTop 家具族
+  //   14 桌/87/88 梳妆/101 书箱/114 钢琴等被地板扫描穿透）。照 DungeonPass:8214
+  //   LT_SOLIDTOP_SET（CLXXVI/IIIII199 判例）换 GenSolid 单源 sheet 域静态表。
+  if (!(genSolidType(st.type[i]) || VAN_TILE_SOLIDTOP_SHEET_SET.has(def.vanilla?.sheet ?? -1))) return false;
   const slope = st.slope[i];
   const topSlope = slope === 1 || slope === 2;
   const isPlatform = PLATFORM_SHEET_SET.has(def.vanilla?.sheet ?? -1);
@@ -1781,11 +1785,14 @@ function solidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
   return st.half[i] === 0;
 }
 
-import { TILE_DEFS } from '../../../data/tiles';
-const TILE_DEFS_BY_INTERNAL: Array<{ vanilla?: { sheet?: number; solidTop?: boolean } }> = [];
+import { TILE_DEFS, type TileDef } from '../../../data/tiles';
+// ★IIIII229（⑧ 212 章 M2）：局部放宽类型 `{vanilla?:{sheet?;solidTop?}}` 拆除,收窄回
+//   TileDef 真型——「as unknown as 局部放宽=死字段的编译期盲区」判例（CLXXXIX 方法论①）,
+//   让 tsc 对 vanilla 字段消费恢复守卫。
+const TILE_DEFS_BY_INTERNAL: Array<TileDef | undefined> = [];
 (function initTileDefs(): void {
   for (let i = 0; i < TILE_DEFS.length; i++) {
-    TILE_DEFS_BY_INTERNAL[i] = TILE_DEFS[i] as unknown as { vanilla?: { sheet?: number; solidTop?: boolean } };
+    TILE_DEFS_BY_INTERNAL[i] = TILE_DEFS[i];
     const sh = TILE_DEFS[i]?.vanilla?.sheet;
     if (typeof sh === 'number' && sh >= 0) TILE_INTERNAL_SHEET_REV.set(i, sh);
   }

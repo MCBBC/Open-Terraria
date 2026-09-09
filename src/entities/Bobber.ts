@@ -551,8 +551,11 @@ export class Bobber extends Entity {
     } else if (Math.random() < luck) {
       level = Math.floor(level * (1.1 + Math.random() * 0.3));
     }
-    // heightLevel（:19306-19325 非 remix 分支）/ junk（:19326）/ 五档（:19327）
-    const heightLevel = heightLevelOf(ty, w.groundLevel, w.rockLevel, st.h);
+    // heightLevel（:19306-19325 非 remix 分支 / ★IIIII228 :20808-20833 remix 重映射
+    //  +带 2 的 1/2 下沉掷）/ junk（:19326）/ 五档（:19327）
+    const remixWorld = !!w.seedFlags?.remix;
+    const heightLevel = heightLevelOf(ty, w.groundLevel, w.rockLevel, st.h,
+      remixWorld, remixWorld ? Math.floor(Math.random() * 2) === 0 : null);
     const junk = rollJunk(level, pond.waterTilesCount, waterNeeded);
     const levels = rollDropLevels(level, p.buffs.has(BuffType.Crate));
     const questFish = this.probeQuestFish(p, game);   // :19328 → :20089-20104
@@ -570,9 +573,9 @@ export class Bobber extends Entity {
       x: tx, y: ty, waterTilesCount: pond.waterTilesCount,
       rockLayer: w.rockLevel, maxTilesX: st.w, heightLevel, questFish,
       hardMode: !!w.flags.hardMode, bloodMoon: !!w.clock.bloodMoon,
-      combatBookWasUsed: !!w.flags.combatBookWasUsed, remix: false,
+      combatBookWasUsed: !!w.flags.combatBookWasUsed, remix: remixWorld,   // ★IIIII228 :20995/:21020
       zones, rolled: prepareFishingContext(zones, heightLevel, ty, w.rockLevel,
-        undefined, !!w.seedFlags?.notTheBees),   // :19451-19502（R14-E13② NTB 弃丛林掷）
+        undefined, !!w.seedFlags?.notTheBees, remixWorld),   // :20979-21032（NTB 弃丛林/腐猩清旗/remixOcean 掷）
     };
     spawnFakeFishInWater(game, tx, ty, rollCtx);
     // 咬钩门（:19181-19184）：Next(100) <= ⌊(力+75)/2⌋ 才真咬（否则空拍再等下一轮）

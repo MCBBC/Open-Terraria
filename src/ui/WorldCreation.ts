@@ -1,6 +1,6 @@
 // 世界创建页（DOM 版，替代 VUI UIWorldCreationState）：
 // 世界名/种子 + 大小/难度/邪恶三组选项 + 彩蛋种子图标 + 多层预览图 + 描述。
-import { parseSeed } from '../world/gen/SeedEasterEggs';
+import { parseSeed, parseSeedChain } from '../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 旗标派生改 parseSeedChain（gen 同口径）
 import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
@@ -145,7 +145,8 @@ export function isHalloweenDateNow(now: Date = new Date()): boolean {
  *  非（空 ∪ 特殊）种子或窗外 ⇒ 原样返回（零触碰）。 */
 export function applyHalloweenSeasonSeed(seed: string, now: Date = new Date()): string {
   const trimmed = String(seed ?? '').trim();
-  if (trimmed !== '' && !isSpecialSeedText(parseSeed(trimmed).flags)) return trimmed;
+  // ★IIIII229 ⑥M1：旗标判定改 parseSeedChain（'|' 链并集口径,gen 同口径）
+  if (trimmed !== '' && !isSpecialSeedText(parseSeedChain(trimmed).flags)) return trimmed;
   if (!isHalloweenDateNow(now)) return trimmed;
   return 'pumpkinseason|' + trimmed;
 }
@@ -345,7 +346,7 @@ export class WorldCreationPanel {
   private enabledSecrets = new Set<string>();
   private refreshSeedIcon() {
     const seed = (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value.trim();
-    const { flags } = parseSeed(seed);
+    const { flags } = parseSeedChain(seed);   // ★IIIII229 ⑥M1:'|' 链并集口径（gen 同口径,多段籽图标/彩蛋不再全灭）
     const key = flags.everything ? 'Seed_Everything'
       : flags.drunkWorld ? 'Seed_Drunk'
       : flags.notTheBees ? 'Seed_NotTheBees'

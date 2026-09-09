@@ -1,6 +1,10 @@
 // IIII198: 扫撒流翻转源——slot104 态下,误差世界 sweep 的 roll-相关不可见门翻转普查
 // (a) 非活性苔藓幽灵格 (moss gate 读裸 type) (b) 137 格 wire 门 (c) 全域首翻转位置
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198FLIP=1 npx vitest run tools/_iii198flip.test.ts
+const RUN = process.env.SW_I198FLIP === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 import { TILE_DEFS } from '../src/data/tiles';

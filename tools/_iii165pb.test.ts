@@ -1,4 +1,8 @@
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I165PB=1 npx vitest run tools/_iii165pb.test.ts
+const RUN = process.env.SW_I165PB === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { TileStore } from '../src/world/TileStore';
 import { RNG } from '../src/core/rng';

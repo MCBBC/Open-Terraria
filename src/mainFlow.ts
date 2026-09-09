@@ -645,6 +645,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function loadFromKey(key: string) {
     if (loadFlowBusy) return;
     loadFlowBusy = true;
+    // ★IIIII229（④ 218 章遗留）：读档路 lockBG 接线——vanilla Main.cs:20056-20065
+    //   `gameMenu && WorldGen.isGeneratingOrLoadingWorld → lockMenuBGChange=true`
+    //   每帧恒置,语义含**读档**（218 批只接了创建流）;loadWorldFlow/loadFromKey/
+    //   loadFromJson/importWld 四路全在此补齐（成败同途解锁,与 createWorldFlow
+    //   finally 模式一致——背景组重掷在读档期同样冻结）。
+    menuBg?.setBGLock(true);
     try {
       startAssetPrewarm();   // #perf2026-08-28:与读档 worker 并行,勿占菜单期表面预算
       // worker 路径：IDB 读取 + JSON 解析 + RLE 解码 + load 模式沉降全在后台
@@ -681,10 +687,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
     } finally {
       loadFlowBusy = false;
+      menuBg?.setBGLock(false);   // ★IIIII229 ④：读档收场解锁（嵌套 loadFromJson 双解锁幂等）
     }
   }
 
   async function loadFromJson(text: string) {
+    // ★IIIII229（④ 218 章遗留）：读档路 lockBG（Main.cs:20056-20065 isGeneratingOrLoadingWorld
+    //   含读档;独立入口（quickLoad/import 兜底）自锁自解,经 loadFromKey 调入时双层
+    //   锁/解幂等无害）。
+    menuBg?.setBGLock(true);
     try {
       startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey
       // worker 路径：JSON 解析 + RLE 解码 + load 模式沉降全在后台（json 源传入）
@@ -742,6 +753,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       ui.hideProgress();
       VUI.setState(null);   // 加载页退场(失败回菜单)
       alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
+    } finally {
+      menuBg?.setBGLock(false);   // ★IIIII229 ④：读档收场解锁（成败同途）
     }
   }
 
@@ -806,6 +819,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   async function importWld(buf: Uint8Array) {
+    menuBg?.setBGLock(true);   // ★IIIII229 ④：读档路 lockBG（本路进世界,同 Main.cs:20056 语义）
     await startAssetPrewarm();   // #perf2026-08-28:同 loadFromKey(wld 转换/沉降段并行)
     // ★宏任务让路:parseWldToSave 同步重活+makeGame 构造必须与预热定时器分 task
     await new Promise((r) => setTimeout(r, 0));
@@ -842,6 +856,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       console.error(e);
       ui.hideProgress();
       alert(Lang.text('Mods.SandboxWorld.Toast.WldImportFailed', (e as Error).message));
+    } finally {
+      menuBg?.setBGLock(false);   // ★IIIII229 ④：导入收场解锁
     }
   }
 

@@ -1,5 +1,9 @@
 // IIII198: 机制1验证——JS 杀罐的支撑行 act1-type0(残型格)统计
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198M1=1 npx vitest run tools/_iii198m1.test.ts
+const RUN = process.env.SW_I198M1 === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 

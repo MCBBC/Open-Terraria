@@ -1,5 +1,9 @@
 // IIII180：findPath 离线模拟 v2（真实 vanGenSolidType 谓词;双变体对拍 JS/oracle TH）
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_SHIM=1 npx vitest run tools/_iii180sim.test.ts
+const RUN = process.env.SW_SHIM === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 import { vanGenSolidType } from '../src/world/gen/vanilla/GenSolid';

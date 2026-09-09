@@ -1,7 +1,11 @@
 // IIII198: 用 gen2-g 链的 x86 帧通道(frx/fry)实证 vanilla CheckPot 机制——
 // 对每个 104→105 被杀罐格,用 x86 帧复算 CheckPot 锚/完整性/支撑,验证杀块集合。
 // 用法：npx vitest run tools/_iii198mech.test.ts
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198M_W=1 npx vitest run tools/_iii198mech.test.ts
+const RUN = process.env.SW_I198M_W === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 
 const D4 = `${process.env.HOME}/GoldenChains/gen2-g/104_Remove_Broken_Traps`;

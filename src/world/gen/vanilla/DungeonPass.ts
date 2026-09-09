@@ -15,7 +15,7 @@ import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/it
 import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
-import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType, VAN_TILE_SOLIDTOP_SHEET_SET } from './GenSolid';   // ★IIIII229 ⑧ solidTop 单源
 import { VAN_TILE_CUT, VAN_TILE_FRAME_IMPORTANT } from './VanillaTileFlags';   // ★IIIII215：原版 FI/CUT 真表
 import { genSquareTileFrame } from './FinalCleanupPass';   // ★IIIII161：campfire PlaceTile 尾 SquareTileFrame 级联
 import { runLavaLayerCaverer } from './LavaLayerCavererPass';
@@ -6455,6 +6455,7 @@ const snap: SnapFn = (name) => {
       //   KillTile(邻,noItem) 生成期写面（active/type 清零+尾部 SquareTileFrame→上方
       //   135 压板孤儿 Check1x1 拆除,与锚格 IIII66 同款可达面）。
       if (akSheet === 404) {
+        const F229 = (globalThis as { __swI229Fossil?: (kind: 'enc' | 'kill', maxValue: number) => void }).__swI229Fossil;   // ★IIIII229 可达性普查钩
         const shatterSolid = (sx: number, sy: number): boolean => {      // vanilla SolidTile(i,j) 全项（cs:70718-70740）
           if (!st.inBounds(sx, sy)) return false;
           const si = st.idx(sx, sy);
@@ -6465,18 +6466,29 @@ const snap: SnapFn = (name) => {
           if (st.half[si] !== 0 || st.slope[si] !== 0) return false;
           return true;
         };
+        // ★IIIII229（⑨ 212 章 M1 写面对齐+可达性计数钩）：killShattered 旧镜像仅
+        //   flags/type 清零+手抄上邻 135 孤儿支——vanilla KillTile(fail:false,noItem:true)
+        //   生成期尾写面（cs:64397-64437）=active(false)+halfBrick(false)+frameX/Y=-1 哨兵+
+        //   ClearBlockPaintAndCoating（块漆+涂层方块侧两位,墙侧保）+type=0（:64433 无条件）+
+        //   inActive(false)+尾 SquareTileFrame(i,j) 3×3 级联（上邻 135 Check1x1 拆除只是
+        //   其一例,吊灯 42 等悬吊族失支撑同在其列）——「手抄孤儿支≠尾级联」判例
+        //   （CLXXXIX 方法论②）。帧通道 65535(-1)/0 双签名=IIIII218 判例;frameNumber(0)
+        //   本仓无通道（TileStore.ts:226 登记不移植）。404 邻尘=10 粒零掷（KD 织标）;
+        //   lava 臂(58/230/147/224/ices)/419/TruncatesWalls 支对 404 皆不可达。
+        //   __swI229Fossil 钩（零成本,仅 404 锚面进入）：'enc'=活化石邻遭遇(maxValue),
+        //   'kill'=邻杀执行——212 章 M1 可达性普查仪。
         const killShattered = (kx: number, ky: number): void => {        // KillTile(邻,fail:false,noItem:true) 生成期写面
           const ki = st.idx(kx, ky);
-          st.flags[ki] = 0;
-          st.type[ki] = 0;
-          const px = kx, py = ky - 1;                                    // 尾部 SquareTileFrame→上邻 135 孤儿拆除
-          if (st.inBounds(px, py)) {
-            const pi = st.idx(px, py);
-            if (st.flags[pi] !== 0 && (TILE_DEFS[st.type[pi]!]?.vanilla?.sheet ?? -1) === 135) {
-              st.flags[pi] = 0;
-              st.type[pi] = 0;
-            }
-          }
+          st.flags[ki] = 0;                                              // active(false)（cs:64397）
+          st.half[ki] = 0;                                               // halfBrick(false)（cs:64398）
+          st.frameX[ki] = 65535;                                         // frameX=-1 哨兵（cs:64399）
+          st.frameY[ki] = 65535;                                         // frameY=-1 哨兵（cs:64400）
+          st.paint[ki] = 0;                                              // ClearBlockPaintAndCoating 块漆（cs:64402）
+          st.coat[ki] &= ~TileStore.COAT_BLOCK_MASK;                     // 涂层方块侧两位,墙侧保（同 Tile.cs:934-939）
+          st.type[ki] = 0;                                               // type=0（cs:64433 无条件）
+          st.wire[ki] &= ~32;                                            // inActive(false)（cs:64434,wire bit5=致动位）
+          genSquareTileFrame(st, rng, kx, ky);                           // 尾 SquareTileFrame 3×3 级联（cs:64437,含 135 Check1x1）
+          F229?.('kill', 0);
         };
         for (let kk = num26 - 1; kk <= num26 + 1; kk++) {
           for (let ll = num27 - 1; ll <= num27 + 1; ll++) {
@@ -6488,6 +6500,7 @@ const snap: SnapFn = (name) => {
             const ni2 = st.idx(kk, ll);
             if ((st.flags[ni2] & 1) === 0) continue;                     // active() 短路先于 Next
             if (st.type[ni2] !== ak) continue;                           // 邻型==404（锚即化石,ak=sheet404 的 js 型）
+            F229?.('enc', maxValue);
             if (rn(maxValue) !== 0) continue;
             killShattered(kk, ll);
           }
@@ -8210,8 +8223,11 @@ const snap: SnapFn = (name) => {
   const LT_PLAT = (sh: number): boolean => sh === 19 || sh === 427 || (sh >= 435 && sh <= 439);
   /** Main.tileSolidTop 静态表（Main.cs Initialize_TileAndNPCData2 :6954-8146 区段逐行提取；
    *  生成期零翻转,WorldGen 全树无 =false 写）。sheet 域——ltAllowBottomSlope 的
-   *  「tileSolid∨solidTop」第二析取支专用（SolidTile2/AllowTopSlope 均不含 solidTop,勿共用）。 */
-  const LT_SOLIDTOP_SET = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+   *  「tileSolid∨solidTop」第二析取支专用（SolidTile2/AllowTopSlope 均不含 solidTop,勿共用）。
+   *  ★IIIII229（⑧ 212 章 M2 副本收编）：表本体上收 GenSolid.VAN_TILE_SOLIDTOP_SHEET_SET
+   *  单源（DungeonDualLayout solidAllowBottomSlope 同款死字段 `vanilla.solidTop` 同批复活
+   *  面,防 CLXXVI/212-M2 式第三副本）。 */
+  const LT_SOLIDTOP_SET = VAN_TILE_SOLIDTOP_SHEET_SET;
   const LT_SOLIDTOP = (sh: number): boolean => LT_SOLIDTOP_SET.has(sh);
   /** PlatformProperTopFrame（cs:70692-70704）：frameX/18 ∈ [0..7]∪[12..16]∪[25..26]。 */
   function ltPlatProperTopFrame(frameX: number): boolean {

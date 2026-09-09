@@ -361,15 +361,17 @@ export function rangeFrameGen(st: TileStore, gs: GenState, x0: number, y0: numbe
 
 
 /** SolidTile(i,j)（cs:70155）子集：active && tileSolid && !half && slope==0。
- *  本域内无平台/门差异（沙/棕榈/植物），用 genSolidType LUT 近似 SolidTile。 */
+ *  本域内无平台/门差异（沙/棕榈/植物），用 genSolidType LUT 近似 SolidTile。
+ *  ★IIIII229（⑪ 212 章 m2）：拆 type0 反拒——Main.cs:7995 tileSolid[0]=true ⇒
+ *  vanilla 判 act=1/type=0 残型格**实心**（IIIII227b/CLXXXV solidTileStrict 判例）;
+ *  d.solid 静态查表对 'empty' 恒 false,活型0 腿显式 `t===0||`。 */
 function solidTileHB(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const k = st.idx(x, y);
   if (!st.flags[k]) return false;
   const t = st.type[k];
-  if (t === 0) return false;
   const d = TILE_DEFS[t];
-  return !!d && d.solid && !d.platform && !st.half[k] && st.slope[k] === 0;
+  return (t === 0 || (!!d && d.solid && !d.platform)) && !st.half[k] && st.slope[k] === 0;
 }
 
 /** GrowPalmTree（1456 cs:27260-27359）：沙滩棕榈，干身倾斜帧 fy=num4（±2 步进趋向 num3） */

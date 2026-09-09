@@ -6,6 +6,7 @@ import type { RNG } from '../../../core/rng';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';   // ★IIIII110b：PlaceTile 尾 SQF
+import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII229 ⑪ 头清收编（原 setTileSilent 多清 inActive）
 import type { GenState } from './GenState';
 
 const HELLFORGE = TILE_BY_KEY['v_77_hellforge']!;
@@ -88,8 +89,9 @@ export function runHellforgesPass(st: TileStore, rng: RNG, gs?: GenState): void 
           //   Clear(Tile|TilePaint|Slope)（type/active/帧/块漆/坡全清）。★IIIII110b 曾缺 →
           //   幽灵锚格 slope 残留（manors (2561,1082) S0>2 实证：落锚恰为带坡幽灵格）。
           if (callIdx >= 0 && !st.flags[callIdx]) {
-            st.setTileSilent(x, y, 0);
-            st.paint[callIdx] = 0;
+            // ★IIIII229（⑪ copy-sweep B4）：setTileSilent(0) 多清 wire inActive 位——
+            //   收编共享 helper（Clear(131) 全语义含块漆,IIIII110b 两行原语合并）。
+            placeTilePrologueClear(st, x, y);
           }
           // ③Place3x2（1458 cs:52533 / 1457 cs:52525）：头边距门 + 净空门 + 3 列底锚
           //   SolidTile2——任一败=不写,但都不短路 case 分支的 SQF。

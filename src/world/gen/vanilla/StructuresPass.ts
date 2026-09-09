@@ -1963,14 +1963,17 @@ function growPalmTreeAt(st: TileStore, rng: RNG, gs: GenState, i: number, y: num
 
 /** SolidTileAllowBottomSlope（cs:70211）：active && (tileSolid||tileSolidTop) &&
  *  非 topSlope(1/2) && !halfBrick。tileSolidTop≈platform（HalfBrickPass 同款近似）；
- *  cs:70214 出界返回 true（原版怪癖，照抄）。 */
+ *  cs:70214 出界返回 true（原版怪癖，照抄）。
+ *  ★IIIII229（⑪ 212 章 m2）：拆 type0 反拒——Main.cs:7995 tileSolid[0]=true ⇒
+ *  vanilla 判 act=1/type=0 残型格**实心**（IIIII227b/CLXXXV solidTileStrict 判例）;
+ *  静态查表对 'empty' 恒 false,活型0 腿显式 `t===0||`。 */
 function solidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true;
   const i = st.idx(x, y);
   const t = st.type[i];
-  if (!st.flags[i] || t === 0) return false;
+  if (!st.flags[i]) return false;
   const d = TILE_DEFS[t];
-  return !!d && (d.solid || !!d.platform)
+  return (t === 0 || (!!d && (d.solid || !!d.platform)))
     && st.slope[i] !== 1 && st.slope[i] !== 2 && !st.half[i];
 }
 

@@ -2,13 +2,14 @@
 // 外加用户特有需求：左侧 GenWorldPreview 实时地图预览。
 //
 // ★IIIII215b 彩蛋种子生成界面 1:1 对齐（原版定谳锚见 doc 章 XCI+）：
-//  · 文案三重奏（UIWorldLoad.DrawSelf :93-116，判定与覆写序逐字同构）：
+//  · 文案三重奏（UIWorldLoad.DrawSelf :93-116，三顺序 if 判定与覆写序逐字同构；
+//    ★IIIII229 M2 由互斥 else-if 链改判为顺序覆写链）：
 //      ① drunk 乱码（drunkWorldGenText && !placingTraps && !getGoodWorldGen）——
 //        每帧 Main.rand.Next(999999999) 起头 + 至多 3 段各 50% 追加；
 //      ② 蜜蜂文案（notTheBees && !Main.zenithWorld）→ "UI.WorldGenEasterEgg_GeneratingBees"
-//        整体覆写（无百分位后缀，原版该形态本就无 Message 之外的文字）；
+//        整体覆写（无百分位后缀，原版该形态本就无 Message 之外的文字）——覆写①；
 //      ③ FTW 镜像反写（getGoodWorldGen && (!noTrapsWorldGen || !placingTraps)）——
-//        对【当前显示串】逐 UTF-16 code unit 倒序（C# Substring(num,1) 语义）。
+//        对【当前显示串】逐 UTF-16 code unit 倒序（C# Substring(num,1) 语义）——覆写②。
 //  · 提示条彩蛋（GameTipsDisplay.Draw :139-162 else-if 链同序）：vampireSeed →
 //    "Misc.Vampirism" 整替 > FTW 反写 > drunk 乱码(14 段)；颜色：十周年且非天顶
 //    → HotPink，否则 White（UIHeader.DrawSelf :54-61 同门）。
@@ -30,7 +31,7 @@ import { GenWorldPreview } from './GenWorldPreview';
 import { Lang } from '../../i18n/Lang';
 import { worldgenProgressKey } from '../../i18n/worldgenKeys';
 import { UnifiedRandom, translateSeed } from '../../core/rng';
-import { parseSeed, type SeedFlags } from '../../world/gen/SeedEasterEggs';
+import { parseSeedChain, type SeedFlags } from '../../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 parseSeed→parseSeedChain（gen 同口径）
 import { UISfx } from '../UISfx';
 import type { World } from '../../world/World';
 import type { UISpriteBatch, Color } from '../draw/UISpriteBatch';
@@ -48,9 +49,26 @@ const TIP_OFFSET_Y = -150;      // TipOffsetY
 const TIP_SCALE = 1.1;          // Draw num4
 const TIP_MAX_H = 110;          // Draw num5（超高清收縮阈值）
 const TIP_APPEAR = 0.5;         // APPEAR_TIME（SmoothStep 2.5→0.5）
-/** 提示池 = LoadingTips_Default + LoadingTips_Keyboard（GameTipsProvider :19-21，
- *  桌面键鼠面；GamePad 池留待手柄 UI） */
+/** 提示池 = LoadingTips_Default +（GamePad ∪ Keyboard 二选一）（GameTipsProvider
+ *  RollAvailableTip :29-36 1:1：`UsingGamepad ? _tipsGamepad : _tipsKeyboard`）。
+ *  ★IIIII229（② 217/212 章登记性接桩）：仓内无 PlayerInput.UsingGamepad 等价层
+ *  （手柄 UI 域未建），以「存在已连接 Gamepad 设备」近似——无手柄环境恒走键盘池
+ *  （桌面键池回归零变化；手柄接入后即换 GamePad 池,文案已在 l10n 三语在位）。 */
 const TIP_CATEGORIES = ['LoadingTips_Default', 'LoadingTips_Keyboard'];
+const TIP_CATEGORIES_GAMEPAD = ['LoadingTips_Default', 'LoadingTips_GamePad'];
+function usingGamepad(): boolean {
+  try {
+    if (typeof navigator === 'undefined' || !navigator.getGamepads) return false;
+    const pads = navigator.getGamepads();
+    for (const p of pads) { if (p && p.connected) return true; }
+    return false;
+  } catch {
+    return false;
+  }
+}
+function tipCategories(): string[] {
+  return usingGamepad() ? TIP_CATEGORIES_GAMEPAD : TIP_CATEGORIES;
+}
 
 /** 乱码数字串（C# string.Concat(int)——无前导零；Main.rand.Next(999999999)）。
  *  segs=追加段数上限（进度头 3 / 提示条 14），每段 50% 命中。纯函数。 */
@@ -70,7 +88,7 @@ export function reverseUtf16Units(text: string): string {
   return out;
 }
 
-/** 生成屏种子表现旗标（UI 层只读派生，零 store 写）：由种子文本 parseSeed 而来
+/** 生成屏种子表现旗标（UI 层只读派生，零 store 写）：由种子文本 parseSeedChain 而来（★IIIII229 ⑥M1:'|' 多段并集,gen 同口径）
  *  （与世界生成同源解析层；读档页无 seedText → undefined → 全彩蛋关）。 */
 export interface GenScreenSeedFlags {
   drunkWorldGenText: boolean;   // WorldGen.drunkWorldGenText（Reset :11165 = drunkWorldGen）
@@ -143,8 +161,12 @@ export class UIWorldLoadState extends UIState {
     this.bar.randomEvil = evil === undefined || evil === -1;
     this.bar.crimson = evil === 1;   // WorldGen.crimson 初值（预览挂载后由 world.crimson 权威覆写）
     // ★IIIII215b：种子旗标派生 + 私有掷子注入（读档页 seedText 缺省 → 全关）
+    //   ★IIIII229（⑥ 217 章 M1）：parseSeed（首中即返）→ parseSeedChain（'|' 多段
+    //   并集）——对齐 gen 口径（WorldGen.ts:195/801/825），多段籽（vanilla 头协议
+    //   UIWorldCreation.cs:1004-1008 同构,如 '05162020|not the bees'）生成屏彩蛋不再全灭。
+    //   UI 层仍只读派生零 store 写。
     if (opts?.seedText != null) {
-      const flags = genScreenFlagsOf(parseSeed(opts.seedText).flags);
+      const flags = genScreenFlagsOf(parseSeedChain(opts.seedText).flags);
       this.seedFlags = flags;
       this.uiRand = new UnifiedRandom(translateSeed(opts.seedText));
       this.bar.drunkWorldGen = flags.drunkWorldGen;
@@ -218,23 +240,30 @@ export class UIWorldLoadState extends UIState {
   private lastLabelKey: string | undefined = '';
 
   /** ★IIIII215b 头部文字逐帧合成（UIWorldLoad.DrawSelf :93-116 序）：
-   *  基串(原样/带后缀) → ① drunk 乱码 → ② 蜜蜂整替 → ③ FTW 反写。 */
+   *  基串(原样/带后缀) → ① drunk 乱码 → ② 蜜蜂整替 → ③ FTW 反写。
+   *  ★IIIII229（⑥ 217 章 M2）：三重奏**顺序 if 化**——vanilla :93/:104/:108 为三顺序
+   *  if（后支可覆写前支,非互斥 else-if）。旧互斥链在组合旗标域与 vanilla 分叉：
+   *  drunk+NTB 域 vanilla 显蜜蜂（乱码被覆写）而 JS 显乱码;FTW+NTB 域 vanilla 反写
+   *  蜜蜂文案而 JS 不反写。M1 解链（parseSeedChain）后组合旗标可上屏,该域由不可达
+   *  转可达。zenith 域三条件天然重合不受影响（bees 支 !zenithWorld 拒、drunk 支
+   *  !getGoodWorldGen 拒）。 */
   private refreshHeaderText(): void {
     const f = this.seedFlags;
     let text: string;
     if (f && f.drunkWorldGenText && !this.placingTraps && !f.getGoodWorldGen) {
       // ① drunk 乱码：整串替换（无后缀——原版该形态纯数字,每帧重掷）
       text = this.uiRand ? drunkScrambleText(this.uiRand, 3) : '';
-    } else if (f && f.notTheBees && !f.zenithWorld) {
-      // ② 蜜蜂整替：固定文案（无后缀,原版即纯 Language.GetTextValue）
-      text = Lang.text('UI.WorldGenEasterEgg_GeneratingBees');
     } else {
       // 基串：原样 / " - X%"后缀（后缀水位优先用 local=段内值,同原版 Message 填充位）
       text = this.suffixMode && this.baseText ? `${this.baseText} - ${this.pctShown}%` : this.baseText;
-      if (f && f.getGoodWorldGen && (!f.noTrapsWorldGen || !this.placingTraps)) {
-        // ③ FTW 反写：对当前显示串逐 code unit 倒序
-        text = reverseUtf16Units(text);
-      }
+    }
+    if (f && f.notTheBees && !f.zenithWorld) {
+      // ② 蜜蜂整替：固定文案（无后缀,原版即纯 Language.GetTextValue）——覆写①
+      text = Lang.text('UI.WorldGenEasterEgg_GeneratingBees');
+    }
+    if (f && f.getGoodWorldGen && (!f.noTrapsWorldGen || !this.placingTraps)) {
+      // ③ FTW 反写：对当前显示串（可为蜜蜂文案/基串）逐 code unit 倒序——覆写②
+      text = reverseUtf16Units(text);
     }
     this.header.setText(text);
     // 十周年 HotPink（UIHeader.DrawSelf :54-61：tenthAnniversary && !zenithWorld）
@@ -286,8 +315,9 @@ export class UIWorldLoadState extends UIState {
     // 一次落定,存进 GenTip 后不再变,与原版"构造期定格"等价;种子变换在绘制期）
     let text: string | null = null;
     const rng = () => (this.uiRand ? this.uiRand.nextDouble() : Math.random());
+    const cats = tipCategories();   // ★IIIII229 ②：GamePad/Keyboard 池按设备接入切换
     for (let i = 0; i < 4 && text === null; i++) {
-      const cat = TIP_CATEGORIES[Math.floor(rng() * TIP_CATEGORIES.length)];
+      const cat = cats[Math.floor(rng() * cats.length)];
       text = Lang.randomFromCategory(cat, rng) || null;
       if (text !== null && text === this.lastTipText) text = null;   // do-while 去重 _lastTip
     }
@@ -351,7 +381,17 @@ export class UIWorldLoadState extends UIState {
     }
   }
 
-  protected override drawSelf(batch: UISpriteBatch): void {
+  /** ★IIIII229（③ 215b 面板层叠让位,217 章层叠债）：tips 改在 children 之后绘制。
+   *  UIElement.draw = drawSelf → drawChildren,JS 曾把 tips 挂在 drawSelf ⇒ 被后绘的
+   *  GenWorldPreview（本仓特有实时地图预览,vAlign=1/marginBottom=56 底部居中）盖住
+   *  SmartCursor 短条（LoadingTips_Keyboard.1）。vanilla GameTips.Draw 在
+   *  UIWorldLoad.DrawSelf :117-118 尾部=该态最上层表现面（vanilla 无预览子元素,无
+   *  遮挡面）;此处 z 序让位=super.draw（children）后再画 tips,与原版「tips 压底图」
+   *  观感一致,面板与短条互不吞没。 */
+  protected override drawSelf(_batch: UISpriteBatch): void {}
+
+  public override draw(batch: UISpriteBatch): void {
+    super.draw(batch);
     this.drawTips(batch);
   }
 

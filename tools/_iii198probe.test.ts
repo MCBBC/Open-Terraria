@@ -1,7 +1,11 @@
 // IIII198: 目标罐格 TileFrame 全程跟踪（__swShimTargets 零开销钩复用）。
 // 用法：SW_I198PT='28,625;29,625;28,626;29,626;29,627;20,832;21,832;20,833;21,833;20,834;21,834'
 //        npx vitest run tools/_iii198probe.test.ts
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198PT=1 npx vitest run tools/_iii198probe.test.ts
+const RUN = process.env.SW_I198PT === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { writeFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 

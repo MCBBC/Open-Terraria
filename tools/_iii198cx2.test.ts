@@ -1,5 +1,9 @@
 // IIII198: 差集箱定位——JS 192 箱 vs wld 191 箱,按 (x,y) 差集
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I198CX2=1 npx vitest run tools/_iii198cx2.test.ts
+const RUN = process.env.SW_I198CX2 === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 

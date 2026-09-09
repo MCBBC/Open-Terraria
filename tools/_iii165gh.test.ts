@@ -1,5 +1,9 @@
 // IIII165 一次性：JS 相① 后状态 vs x86 #057 幽灵差谱（Gh 对账——errorWorld raw 门消费）
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I165GH=1 npx vitest run tools/_iii165gh.test.ts
+const RUN = process.env.SW_I165GH === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, readdirSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);

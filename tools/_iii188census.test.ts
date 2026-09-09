@@ -8,7 +8,11 @@
 //   cd game && npx vitest run tools/_iii188census.test.ts            # 默认 drunk 链 #105
 //   SW_I188_DIR=/Users/vinlic/GoldenChains/golden-remix-fr SW_I188_TAG=remix npx vitest run tools/_iii188census.test.ts
 // 产物：/tmp/iii188-out/census-<tag>.json
-import { it } from 'vitest';
+import { it as itRaw } from 'vitest';
+// ★IIIII229(⑩ 212 章 M3 门控卫生批):一次性仪默认 skip,不在常态 vitest 收集执行面;用法 SW_I188_IDX=1 npx vitest run tools/_iii188census.test.ts
+const RUN = process.env.SW_I188_IDX === '1';
+const it = RUN ? itRaw : itRaw.skip;
+
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
 import vanillaJson from '../public/sprites/vanilla.json';
