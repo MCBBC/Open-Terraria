@@ -30,6 +30,7 @@ import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } fro
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
+import { options } from '../core/Options';   // ★SW-FX14：hoverControl 档读数（Player.Settings.HoverControl 镜像）
 import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
 import type { WingFrameState } from '../data/vanillaWingVisuals';
 import { accFxOfInternal, accFxJsonOfVid } from '../data/vanillaAccFx';
@@ -54,6 +55,37 @@ import { journeyPowers } from '../world/JourneyPowers';
 
 /** 旅程上帝模式激活（GodmodePower.IsEnabledForPlayer——绑定态读取，
  *  对应原版 Player.creativeGodMode 每帧自 power 授予 Player.cs:25208） */
+/** ★SW-FX14 悬停锁存单步纯函数（Player.cs:25452-25484 字面直译——updateHoverLatch
+ *  主体，测试直调面）：↓ press 边沿（inputDown ∧ 上拍未按=controlDown∧releaseDown
+ *  :25452）互斥切换：上锁存开着则关掉，否则开下锁存；↑ press 边沿（:25463）对称；
+ *  vyZero（:25475 velocity.Y==0f）双清；holdMode（:25479 Settings.HoverControl==Hold，
+ *  :357 缺省）双清=缺省档锁存永不驻留。 */
+export function hoverLatchStep(
+  cur: { up: boolean; down: boolean },
+  inputUp: boolean, inputDown: boolean,
+  prevUpHeld: boolean, prevDownHeld: boolean,
+  vyZero: boolean, holdMode: boolean,
+): { up: boolean; down: boolean } {
+  const next = { up: cur.up, down: cur.down };
+  if (inputDown && !prevDownHeld) {              // :25452-25461
+    if (next.up) next.up = false;
+    else next.down = true;
+  }
+  if (inputUp && !prevUpHeld) {                  // :25463-25472
+    if (next.down) next.down = false;
+    else next.up = true;
+  }
+  if (vyZero) {                                  // :25475-25478
+    next.up = false;
+    next.down = false;
+  }
+  if (holdMode) {                                // :25479-25484
+    next.up = false;
+    next.down = false;
+  }
+  return next;
+}
+
 function journeyGodmodeActive(): boolean { return journeyPowers().godmode; }
 
 /** 强风推力脉冲（buff 194 MightyWind；Player.cs:19922-19946 逐系数 1:1——
@@ -4093,6 +4125,10 @@ export class Player extends Entity {
       this.inputUp = newRight;                          // Up←R(新)（原版怪癖同款）
       this.inputDown = wasUp;                           // Down←Up
     }
+    // 悬停锁存更新（★SW-FX14 Player.cs:25452-25484——原版位序在 CCED 清输入段
+    // 之后、移动积分之前；此时 inputUp/Down 已定格（冻/惑清零与换位 quirk 均在
+    // 上方），vy 为上一拍碰撞末速 = 原版 Update 中段读取语义）
+    this.updateHoverLatch();
     // 石化变身瞬间（1457 :25414-25431 stoned != lastStoned 过渡）：Hurt(ByOther(5),
     // 20×敌伤倍率) + SoundID 0（Dig 碎裂档）+ 20 尘。死因 = DeathText.Petrified_1..4。
     // ★F3（四轮蓝队）：原版此处即 !quiet Hurt 形（无静默参的默认调用）→ 走通用漏斗，
@@ -4290,7 +4326,7 @@ export class Player extends Entity {
       let wingAccMul = 1;
       if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
         const ws = wingStatOf(this.equipStats.wing.logic);
-        const hoverDownMove = this.inputDown && this.inputJump && ws.hover && this.wingTime > 0;
+        const hoverDownMove = this.tryingToHoverDown && this.inputJump && ws.hover && this.wingTime > 0;   // ★SW-FX14 :29540 flag=TryingToHoverDown∧controlJump∧wingTime>0
         maxRun = Math.max(maxRun, hoverDownMove && ws.hoverSpeed > 0 ? ws.hoverSpeed : ws.accSpeed);
         accRun = maxRun;                                  // 翼空中横移上限覆盖(原 WingAirLogicTweaks)
         wingAccMul = hoverDownMove ? ws.hoverAccelMult : ws.accelMult;   // :28852/:28856
@@ -4698,7 +4734,7 @@ export class Player extends Entity {
       if (this.vy > -effJumpSpd && this.vy !== 0) this.canRocket = true;   // :26973 canRocket 门（湿档 jumpSpeed）
       flying = (wingsW > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
         || (FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.inputDown && this.wingTime > 0);
-      if (flying) this.wingMovement(wingsW, this.inputDown, effJumpSpd);
+      if (flying) this.wingMovement(wingsW, this.tryingToHoverDown, effJumpSpd);   // ★SW-FX14 :22410 TryingToHoverDown
       if (wingsLogicW > 0) {
         const glideW = !flying && this.inputJump && this.vy > 0;   // :26718（downDash 未建模恒 false）
         this.wingFrameScratch.frame = this.wingFrame;
@@ -4713,7 +4749,7 @@ export class Player extends Entity {
           vy: this.vy,
           controlJump: this.inputJump,
           controlLR: this.inputX !== 0,
-          hoverDown: this.inputDown, hoverUp: this.inputUp,
+          hoverDown: this.tryingToHoverDown, hoverUp: this.tryingToHoverUp,   // ★SW-FX14 :29714/:29792 取值门
           wingTime: this.wingTime,
           glide: glideW,
           downDash: false,          // isPerformingJump_DownDash 未建模
@@ -4964,7 +5000,9 @@ export class Player extends Entity {
       const mountCanWings2 = !mnt2 || MOUNT_DATA[String(mnt2.type)]?.CanUseWings === true;
       const wings = eq.wing && mountCanWings2 ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
       const wingsLogic = eq.wing && mountCanWings2 ? eq.wing.logic : 0;  // 骑禁翼族清零（:26833-26835，2026-09-03 矫正旧"不清"误读）
-      const hoverDown = this.inputDown;            // TryingToHoverDown（保持态近似省略）
+      const hoverDown = this.tryingToHoverDown;    // TryingToHoverDown（:3920-3927——★SW-FX14
+      //  2026-09-10 锁存接线：旧注"保持态近似省略"登记债清偿，Click 档经
+      //  tryKeepingHoveringDown（Player.cs:1801/:25452-25484）驻留悬停）
       const JS = PLAYER_JUMP_SPEED + this.equipStats.jumpSpd;   // jumpSpeed（含 jumpSpeedBoost）
       // 落地重置（原版 :26173 地面块——wingTime/rocketTime 回满已并入跳跃段尾
       // ★回满/清零公共段 = :26947-26982 原文位序；此处保留 rocket/carpet 连带复位）
@@ -5053,7 +5091,7 @@ export class Player extends Entity {
           vy: this.vy,
           controlJump: this.inputJump,
           controlLR: this.inputX !== 0,
-          hoverDown, hoverUp: this.inputUp,
+          hoverDown, hoverUp: this.tryingToHoverUp,   // ★SW-FX14 :29714/:29792 取值门
           wingTime: this.wingTime,
           glide,
           downDash: false,          // isPerformingJump_DownDash 未建模
@@ -5362,9 +5400,11 @@ export class Player extends Entity {
             this.vy = 4;                    // :21960 velocity.Y = 4f*gravDir（gravDir 恒 1 域）
             this.spawnWallSlideDust(game, slideDirSign);       // :21961-21975 尘 31
           } else {
-            // :21960-21968：num3 = slowFall ? gravity/3 : gravity（TryingToHoverUp
-            // /10 档未建模=登记偏差）;:21988-21997 vy = (−num3+1e-5)*gravDir
-            const num3 = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
+            // :21960-21968 + :21988-21997 1:1（★SW-FX14：slowFall 时 TryingToHoverUp
+            // /10 档接线（:21964）——旧注"/10 档未建模=登记偏差"清偿）;vy = (−num3+1e-5)
+            const num3 = this.buffs.slowFall
+              ? (this.tryingToHoverUp ? GRAVITY / 10 : GRAVITY / 3)
+              : GRAVITY;
             this.vy = -num3 + 1e-5;
           }
           this.fallStartY = null;           // :21959 fallStart 重置
@@ -5387,11 +5427,17 @@ export class Player extends Entity {
       // rocketDelay>0 时链被推力独占（:27156 else-if 互斥）→ 滑翔不参与
       const gliding = !!eq.wing && this.wingTime <= 0 && this.inputJump && this.vy > 0 && !hoverDown
         && this.rocketDelay === 0;
-      // 羽落 buff（slowFall,:21369）：重力 /3,fallStart 每帧重置 → 免坠伤
-      let grav = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
+      // 羽落 buff（slowFall,:27224-27235 else-if 臂 1:1）：!TryingToHoverDown 门
+      // （下悬停驻留中缓降整臂跳过=常规重力）+ TryingToHoverUp /10 档（:27226）；
+      // flag20=isPerformingJump_DownDash（:26995,本仓 downDash 未建模 ≡ false）。
+      // ★SW-FX14：旧式无条件 /3 缺两门,锁存接线后按原文补齐
+      let grav = this.buffs.slowFall && !this.tryingToHoverDown
+        ? (this.tryingToHoverUp ? GRAVITY / 10 : GRAVITY / 3)
+        : GRAVITY;
       if (gliding) {
         grav = GRAVITY / 3;
-        if (this.vy > MAX_FALL_SPEED / 3) this.vy = MAX_FALL_SPEED / 3;
+        // :27211-27215 终端钳带 !TryingToHoverDown 门（下悬停中不钳 → 满速下坠）
+        if (this.vy > MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = MAX_FALL_SPEED / 3;
       }
       // 坐骑飞行族已独占 vy（上方 Hover/Flight 段）——重力段整体让位（原版 :26637
       // else-if 链互斥语义）；悬停免摔（Hover :3450 fallStart 每帧重置）
@@ -7187,9 +7233,50 @@ export class Player extends Entity {
     }
   }
 
+  // ===================== 悬停锁存（★SW-FX14 2026-09-10 HoverControl 接线） =====================
+  // 原版 Player.cs:1801/:1803 tryKeepingHoveringDown/Up——Click 档（设置
+  // "悬停控制：点按"，Player.Settings.HoverControl :357 缺省 Hold）下按/松 ↑↓
+  // 切换锁存，翅膀悬停免持续按键。本仓翼链此前按 Hold 语义直读 inputUp/Down
+  // （:4967 旧注"保持态近似省略"登记债 + 贴墙靴 /10 档"无翼悬停升键建模"登记债
+  // 同刀清偿）。
+
+  /** tryKeepingHoveringDown（Player.cs:1801） */
+  tryKeepingHoveringDown = false;
+  /** tryKeepingHoveringUp（Player.cs:1803） */
+  tryKeepingHoveringUp = false;
+  /** 上/下键末拍快照（≙ releaseUp/releaseDown :1739/:1763——UpdateControlHolds
+   *  :29312-29335 语义 releaseUp = !controlUp；press 边沿 = controlUp && releaseUp，
+   *  即「本拍按住 ∧ 上拍末未按住」。输入在本方法前已定格（冻/惑清零与换位 quirk
+   *  均在其上），快照即拍末值，语义与原版「Update 尾部结算」等价） */
+  private prevTickUpHeld = false;
+  private prevTickDownHeld = false;
+
+  /** TryingToHoverUp（Player.cs:3908-3915）：controlUp || tryKeepingHoveringUp */
+  get tryingToHoverUp(): boolean { return this.inputUp || this.tryKeepingHoveringUp; }
+  /** TryingToHoverDown（Player.cs:3920-3927）：controlDown || tryKeepingHoveringDown */
+  get tryingToHoverDown(): boolean { return this.inputDown || this.tryKeepingHoveringDown; }
+
+  /** 锁存更新（Player.cs:25452-25484 1:1，调用点在移动积分前 = 原版 Update 中段
+   *  同位——vy 为上一拍碰撞末速）：↓ press 边沿 = 关上锁存否则开下锁存（互斥档
+   *  :25452-25461）；↑ press 边沿 = 关下锁存否则开上锁存（:25463-25472）；
+   *  vy==0 双清（:25475-25478）；Hold 档双清（:25479-25484）= 缺省档锁存永不驻留，
+   *  行为与接线前逐位相同（守恒保证）。主体=模块级纯函数 hoverLatchStep（测试直调） */
+  private updateHoverLatch(): void {
+    const next = hoverLatchStep(
+      { up: this.tryKeepingHoveringUp, down: this.tryKeepingHoveringDown },
+      this.inputUp, this.inputDown, this.prevTickUpHeld, this.prevTickDownHeld,
+      this.vy === 0, options.data.hoverControl === 'hold',
+    );
+    this.tryKeepingHoveringUp = next.up;
+    this.tryKeepingHoveringDown = next.down;
+    this.prevTickDownHeld = this.inputDown;   // UpdateControlHolds :29312-29335 末拍快照
+    this.prevTickUpHeld = this.inputUp;
+  }
+
   private wingMovement(wings: number, hoverDown: boolean, JS: number): void {
-    if (wings === 4 && this.inputUp) {
-      // wingsLogic 4 + TryingToHoverUp（:21748-21782）
+    if (wings === 4 && this.tryingToHoverUp) {
+      // wingsLogic 4 + TryingToHoverUp（:22205——★SW-FX14 换取值门：原版读
+      //  TryingToHoverUp = controlUp ∨ tryKeepingHoveringUp（:3908-3915））
       this.vy -= 0.2;
       if (this.vy > 0) this.vy -= 1;
       else if (this.vy > -JS) this.vy -= 0.2;
@@ -7207,8 +7294,8 @@ export class Player extends Entity {
         if (wings === 44) { num2 = 0.85; num3 = 2.75; }
         else { num2 = 0.95; num3 = 4.5; }
         num5 = 0.15; num4 = 1; num = 0.125;
-        if (this.inputUp) {
-          // TryingToHoverUp 附加推力（:21821-21838 / :21866-21883 同构）
+        if (this.tryingToHoverUp) {
+          // TryingToHoverUp 附加推力（:22278/:22323——★SW-FX14 换取值门 :3908-3915）
           this.vy -= 0.4;
           if (this.vy > 0) this.vy -= 1;
           else if (this.vy > -JS) this.vy -= 0.2;

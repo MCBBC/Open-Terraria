@@ -15,6 +15,7 @@ import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { Lang } from '../i18n/Lang';
 import { options } from '../core/Options';
+import { bindsOf } from '../core/Keybinds';
 import { isTouchDevice } from '../core/input/touchDevice';
 import { hudTier } from './HudScale';
 import { iconUrl } from './UI';
@@ -679,7 +680,16 @@ export class MobileControls {
       return b;
     };
     mk('inventory', () => this.game.input.tapVirtual('Inventory', { virtualIntent: 'inventory' }));
-    mk('map', () => this.game.input.tapVirtual('KeyM'));
+    // ★SW-FX16 2026-09-10 消费面收口：地图/旅程钮改发【当前绑定首码】（bindsOf 现读
+    // 活绑表,重绑即时跟随）——旧码面 tapVirtual('KeyM'/'KeyC') 在用户改绑/解绑
+    // MapFull/ToggleCreativeMenu 后整钮失效（消费端 isBound 查表而钮发死码）。
+    // 解绑态（空表）不派发 = 钮无功能,与原版解绑一致。聊天钮 'Enter' 保留字面：
+    // 原版聊天键即硬编码 Enter（KnownTriggers 59 项无 Chat trigger,PlayerInput.cs:
+    // 229-237）,不属可重绑面。
+    mk('map', () => {
+      const c = bindsOf('MapFull')[0];
+      if (c) this.game.input.tapVirtual(c);
+    });
     // 智能光标开关:tap=直翻(toggle 语义);点亮绿环=.on(refresh 维护)
     const sc = mk('cross', () => {
       this.game.smartCursor.wanted = !this.game.smartCursor.wanted;
@@ -687,7 +697,10 @@ export class MobileControls {
     }, 'sw-mact-smart');
     this.smartBtn = sc;
     mk('chat', () => this.game.input.tapVirtual('Enter'), 'sw-mact-chat');
-    mk('journey', () => this.game.input.tapVirtual('KeyC'), 'sw-mact-journey');
+    mk('journey', () => {
+      const c = bindsOf('ToggleCreativeMenu')[0];
+      if (c) this.game.input.tapVirtual(c);
+    }, 'sw-mact-journey');
     this.root.appendChild(col);
   }
 

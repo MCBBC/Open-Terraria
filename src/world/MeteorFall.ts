@@ -10,7 +10,8 @@
 //   ★本文件为纯数据操作（setTileSilent 直写）——调用方负责 chunk markDirtyArea。
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
-import type { TileStore } from './TileStore';
+// SW-FX12：COAT_BLOCK_MASK 为运行时常量（陨石清涂层位），不再是纯类型导入
+import { TileStore } from './TileStore';
 
 export interface MeteorHost {
   w: number; h: number;
@@ -102,8 +103,19 @@ export function placeMeteor(h: MeteorHost, i: number, j: number): void {
   const dist = (x: number, y: number) => Math.sqrt((x - i) * (x - i) + (y - j) * (y - j));
   const set = (x: number, y: number, t: number) => {
     st.setTileSilent(x, y, t, 0, 0);
-    st.half[st.idx(x, y)] = 0;   // ClearSlope 语义（setTileSilent 非零不清坡面）
-    st.slope[st.idx(x, y)] = 0;
+    const idx = st.idx(x, y);
+    st.half[idx] = 0;   // ClearSlope 语义（setTileSilent 非零不清坡面）
+    st.slope[idx] = 0;
+    // ★SW-FX12（2026-09-10）陨石转化清漆/方块涂层：WorldGen.meteor 转化支先
+    //  `paintTile(x,y,0,paintEffects:false)` + `paintCoatTile(x,y,0)` 再 `type=37`
+    //  （:6387-6390 主体 / :6457-6460 散布内环 / :6482-6485 散布外环——都只对方块
+    //  侧，墙漆/墙涂层原版不动）。此前漏清 → 涂过漆/涂层的地面被陨石砸后变
+    //  "自带旧漆的陨石矿"。挖空支（active(false)，:6385/:6405）原版不清（inactive
+    //  格 paintTile 早退）——本仓 setTileSilent(0) 的 KillTile 口径清位，可观测面等价。
+    if (t !== 0) {
+      st.paint[idx] = 0;
+      st.coat[idx] &= ~TileStore.COAT_BLOCK_MASK;   // Tile.cs:934-939 清方块侧两位
+    }
   };
   // ① 主体（:6370-6392）：x 外 y 内；r1*0.9±4；非实心 → 挖空（原版 active=false），
   //    实心 → 转 37。顶部削平：行 > j + Next(-2,2) - 5（掷先于距离掷,每格各一掷）

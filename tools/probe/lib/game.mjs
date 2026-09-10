@@ -122,6 +122,27 @@ export async function godMode(page, on = true) {
   return page.evaluate((on) => { const g = window.__swGame; if (g?.player) { g.player.debugGod = on; return true; } return false; }, on);
 }
 
+/**
+ * TS private 方法运行时可直调(坑表 §G11;IIIII238 收编 IIII237 实战摩擦 #2)。
+ * `private` 只是编译期:JS 运行时方法都在实例上,直调 = 最快取证路
+ * (interactAt/isAlchemyPlantHarvestable 类仪器,比绕 UI 摆玩家/朝向快一个量级)。
+ * 页内实现(__callGameInPage)独立导出=框架自测对假 g 直跑。
+ * 返回 { ok, value?, why? } —— 方法缺失/抛错不炸探针,证据链留 why;
+ * ★value 须可序列化(void 方法 value===undefined,以 ok 判定;含循环引用的
+ * 返回值会在协议层炸,证据链惯例只返回标量/平面对象)。
+ */
+export function __callGameInPage({ method, args }) {
+  const g = window.__swGame;
+  const fn = g?.[method];
+  if (typeof fn !== 'function') return { ok: false, why: `no-method:${method}` };
+  try { return { ok: true, value: fn.apply(g, args) }; }
+  catch (e) { return { ok: false, why: String(e?.message ?? e).slice(0, 200) }; }
+}
+
+export async function callGame(page, method, ...args) {
+  return page.evaluate(__callGameInPage, { method, args });
+}
+
 /** 从当前页 URL 推 origin(场景脚本没写 __probeOrigin 时的兜底)。 */
 function safeOrigin(page) {
   try { return new URL(page.url()).origin; } catch { return process.env.SW_ORIGIN ?? 'http://localhost:5199'; }

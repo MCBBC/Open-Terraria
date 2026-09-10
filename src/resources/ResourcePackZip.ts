@@ -30,10 +30,12 @@ export interface ParsedResourcePack {
   images: Map<string, Uint8Array>;
   /** Sfx 键（sounds/<file>.wav 的 file）→ 音频字节 */
   sounds: Map<string, Uint8Array>;
+  /** ★SW-FX16：音乐键 'Music_<id>' → 音频字节（Content/Music/Music_<id>.<ext>） */
+  music: Map<string, Uint8Array>;
   /** FontFace 族名 → 字体字节 */
   fonts: Map<string, Uint8Array>;
-  /** 计数（信息页/日志）：镜像双写后的图片数 / 音频 / 字体 / 跳过明细 */
-  counts: { images: number; sounds: number; fonts: number; skippedXnb: number; skippedUnknown: number };
+  /** 计数（信息页/日志）：镜像双写后的图片数 / 音频 / 音乐 / 字体 / 跳过明细 */
+  counts: { images: number; sounds: number; music: number; fonts: number; skippedXnb: number; skippedUnknown: number };
 }
 
 /** pack.json 解析（缺字段回退空串/0.0；非 JSON 视为损坏） */
@@ -67,8 +69,9 @@ export function readResourcePack(bytes: Uint8Array): ParsedResourcePack {
   let iconPng: Uint8Array | null = null;
   const images = new Map<string, Uint8Array>();
   const sounds = new Map<string, Uint8Array>();
+  const music = new Map<string, Uint8Array>();
   const fonts = new Map<string, Uint8Array>();
-  const counts = { images: 0, sounds: 0, fonts: 0, skippedXnb: 0, skippedUnknown: 0 };
+  const counts = { images: 0, sounds: 0, music: 0, fonts: 0, skippedXnb: 0, skippedUnknown: 0 };
   for (const [entry, data] of Object.entries(entries)) {
     if (isPackManifest(entry)) {
       try {
@@ -90,6 +93,7 @@ export function readResourcePack(bytes: Uint8Array): ParsedResourcePack {
     for (const m of mapped) {
       if (m.kind === 'image') { images.set(m.file, data); counts.images++; }
       else if (m.kind === 'sound') { sounds.set(m.file, data); counts.sounds++; }
+      else if (m.kind === 'music') { music.set(m.file, data); counts.music++; }
       else { fonts.set(m.family, data); counts.fonts++; }
     }
   }
@@ -97,5 +101,5 @@ export function readResourcePack(bytes: Uint8Array): ParsedResourcePack {
     // ResourcePack.cs:121-123：缺 pack.json 的包不可用
     throw new ResourcePackError('资源包缺少 pack.json（Resource Pack must contain a pack.json file）');
   }
-  return { manifest, iconPng, images, sounds, fonts, counts };
+  return { manifest, iconPng, images, sounds, music, fonts, counts };
 }

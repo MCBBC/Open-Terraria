@@ -365,7 +365,7 @@ import { options } from './Options';
 import { cround } from './csCompat';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank, nearbyBanksInRange,
   ITEM_TRANSFER_PLAYER_TO_CHEST_BITS } from '../stats/QuickStacking';
-import { bindsOf, isBound, keybindCodeLabel, type KeybindAction } from './Keybinds';
+import { bindsOf, isBound, keybindCodeLabel, hotbarSlotOfCode, type KeybindAction } from './Keybinds';
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
@@ -5525,9 +5525,14 @@ export class Game implements GameHooks {
       //   、AFK 自动风筝。背包 10-49 槽永远不能被直接选中使用——钉面测试
       //   tests/sw-av2-chest-crafting.test.ts「使用源门钉面」防回退。
       if (this.player && !this.input.uiBlocking) {
-        const digit = /^Digit([0-9])$/.exec(code);
-        if (digit) {
-          this.player.inv.selected = digit[1] === '0' ? 9 : Number(digit[1]) - 1;
+        // ★SW-FX16 2026-09-10 消费面收口：数字切栏改走 Hotbar1..Hotbar10 活绑表
+        // （hotbarSlotOfCode）——原版消费可重绑 trigger（Player.cs:25286-25330 读
+        // Triggers.Current.Hotbar1..Hotbar10;缺省 Digit1-Digit0 = PlayerInput.cs:
+        // 2091-2100）。旧 regex /^Digit([0-9])$/ 无视改绑/解绑,重绑后物理数字键
+        // 仍切栏 = 与原版劈叉;缺省表下行为逐位等价（Digit1-Digit0 全绑定）。
+        const hotbarSlot = hotbarSlotOfCode(code);
+        if (hotbarSlot !== null) {
+          this.player.inv.selected = hotbarSlot;
           // SelectedItemState.Select（Player.cs:498-499）：换栏清 AFK 两计数
           //（afkCounterForKiting 未建模,见 Player.afkCounter 注）
           this.player.afkCounter = 0;
@@ -11454,7 +11459,7 @@ export class Game implements GameHooks {
    *  （长表 :66559 → Tink 档）→ Tink；泥土默认 → Dig（:66576 PlaySound(0)）。
    *  罐=Shatter 走 smashPot、裂砖 481-483=Item127 走 breakCrackedBrick
    *  （全表 1:1 登记遗留）。专用分支（树/罐/裂砖/轨道/锚桩）各有其音不经过此 */
-  /** 花靴/仙灵靴行走生花（Player.DoBootsEffect_PlaceFlowersOnTile :13681-13758 1:1）：
+  /** 花靴/仙灵靴行走生花（Player.DoBootsEffect_PlaceFlowersOnTile，1457 :14203-14297 1:1）：
    *  脚下格 (X,Y) 空且无液体、脚格 (X,Y+1) 实心 → 按脚格草族放植株：
    *  - 草 2/修剪草 477 → 森林短草 3，frameX=18×num：NextFromList 等权
    *    {6,7,9..21,24,27,30,33,36,39,42}（22 值），尾段 8 值再 +Next(3)
@@ -11462,7 +11467,10 @@ export class Game implements GameHooks {
    *    高圣草 113（18×Next(2,8)，≠90 重掷）
    *  - 丛林草 60 → 高丛林草 74（18×Next(9,17)）
    *  - 灰烬草 633 → 灰烬短草 637（18×Next(6,11)）
-   *  帧语义=style 帧（frame 'style'）；CopyPaintAndCoating 涂料复制未建模（涂装系统缺席） */
+   *  帧语义=style 帧（frame 'style'）。★SW-FX12（2026-09-10）：补 CopyPaintAndCoating
+   *  （Tile.cs:869-873，五个放置支各调一次 :14234/:14248/:14259/:14276/:14288）——
+   *  基座草的方块漆 + 方块涂层两位随植株复制（墙侧不复制，CopyPaintAndCoating 只搬
+   *  color/invisibleBlock/fullbrightBlock）；旧注"涂料复制未建模"已失效清偿 */
   private flowerBootsPlaceFlowers(x: number, y: number): void {
     const st = this.world.store;
     if (!st.inBounds(x, y + 1)) return;
@@ -11470,10 +11478,14 @@ export class Game implements GameHooks {
     if (st.type[ti] !== 0 || st.liquid[ti] !== 0) return;   // !active && liquid==0
     if (!st.isSolid(x, y + 1)) return;                      // WorldGen.SolidTile
     const below = st.type[st.idx(x, y + 1)];
+    const bi = st.idx(x, y + 1);
     const put = (key: string, fx: number): void => {
       const id = TILE_BY_KEY[key];
       if (!id) return;
       st.setTile(x, y, id, fx, 0);
+      const hi = st.idx(x, y);   // CopyPaintAndCoating(Main.tile[X, Y+1])（Tile.cs:869-873）
+      st.paint[hi] = st.paint[bi];
+      st.coat[hi] = (st.coat[hi] & ~TileStore.COAT_BLOCK_MASK) | (st.coat[bi] & TileStore.COAT_BLOCK_MASK);
     };
     if (below === TILE_BY_KEY['grass'] || below === TILE_BY_KEY['v_477_mowed_grass_block']) {
       const LIST = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 27, 30, 33, 36, 39, 42];
@@ -13149,6 +13161,17 @@ export class Game implements GameHooks {
     //  目标格可被占用（与电路工具同权，且不进 noBuilding 门）
     if (heldDef?.paintTool && inp.mouseDown && !inp.rightDown) {
       this.faceCursor(tx, ty); // 起手转向光标侧（ChangeDir 家族,判据同 :47614 Dot 门）
+      // ★SW-FX12（2026-09-10）：摆动循环上移到分派口——ItemCheck_StartActualUse
+      //  → ApplyItemAnimation(sItem)（:52314 无乘区档）+ autoReuse 归零重启（刷具
+      //  useStyle 1/useAnimation 15/useTime 10,Item.cs:13374-13383/:18592-18603）。
+      //  原版挥动与 itemTime（冷却域）解耦：同色/无漆空拍也摆、不设冷却。
+      //  dur 显式钳 15：itemCombat 表 1543-1545 为空档（extract-if-range 盲区），
+      //  heldUseAnimation 会回落 30（误）——六件 useAnimation 恒 15（1457 :13377/
+      //  :13381/:13395/:18601 同值），按原文钉值。
+      if (!this.swing || this.swing.t <= 1) {
+        this.useSwing(heldDef, undefined, 1);
+        if (this.swing) { this.swing.t = 15; this.swing.dur = 15; }
+      }
       this.tryUsePaintTool(tx, ty, heldDef);
       return;
     }
@@ -19935,9 +19958,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (style === 5) {
       let flag = y > this.world.groundLevel;
       if (this.world.seedFlags?.remix) flag = y < this.world.store.h - 350;
-      // 火焰花收获窗：15:45 后（且雨中须地下/remix 深度带）——
-      //   原版 WorldGen.cs:66689 Main.time > 40500。
-      if ((!raining || flag) && c.timeOfDay > 15.75 / 24) return true;
+      // ★IIIII220：时基口径修正——原版 Main.time 是**分段**钟（昼 4:30AM 起归零 0..54000、
+      //   夜 7:30PM 起归零 0..32400），`Main.time > 40500`（WorldGen.cs:66689,1457）在
+      //   夜间恒假（32400<40500）→ 火焰花收获窗 = 仅昼 15:45-19:30。旧 `timeOfDay >
+      //   15.75/24` 是绝对钟面刻度比较，把夜晚 19:30-24:00 段也判收获（夜 timeOfDay
+      //   ≥0.8125 恒 >0.65625）→ 夜里成熟火焰花可采收/掉种（渲染侧 WindSway ENV.mainTime
+      //   一直是分段口径无此泄,本仓内双口径曾不一致）。统一走 Clock.vanillaMainTime。
+      if ((!raining || flag) && Clock.vanillaMainTime(c.timeOfDay) > 40500) return true;
     }
     return false;
   }
@@ -21844,25 +21871,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /**
-   * 油漆三件套使用（Player.cs 1:1）：
-   *  - PlaceThing 分派序 :38923-38925（先于 Tiles/Walls，且不在 noBuilding 门内）
-   *  - PlaceThing_Paintbrush :41254-41270：1071/1543，目标格 active → TryPainting(tile 通道)
-   *  - PlaceThing_PaintRoller :41236-41252：1072/1544，目标格 wall>0 → TryPainting(wall 通道)
-   *  - PlaceThing_PaintScrapper :41152-41234：1100/1545（IsPaintScraper 集 ItemID.cs:254），
-   *    TryScrapping :41215-41234 先 tile 后 wall 清除（不消耗物品）；LongMoss :41166-41213
+   * 油漆三件套使用（Player.cs 1457 行号锚）：
+   *  - PlaceThing 分派序 :38899-38901（先于 Tiles/Walls，且不在 noBuilding 门内）
+   *  - PlaceThing_Paintbrush :42230-42246：1071/1543，目标格 active → TryPainting(tile 通道)
+   *  - PlaceThing_PaintRoller :42212-42228：1072/1544，目标格 wall>0 → TryPainting(wall 通道)
+   *  - PlaceThing_PaintScraper :42129-42141：1100/1545（IsPaintScraper 集），TryScraping
+   *    :42191-42210 先 tile 后 wall 清除（不消耗物品）；LongMoss :42143-42189
    *    对 tile 184 KillTile + 1/9 掉苔藓（4349+frameX/22，6-10 档特例 4377/4378/4389/5127/5128）
-   *  - TryPainting/ApplyPaint :41291-41369：FindPaintOrCoating（弹药栏 54-57 优先）取油漆，
-   *    成功改色才扣 1 个；同色格不消耗（paintTile/paintWall 的 b==color 守卫）
-   *  冷却：useTime 10（Item.cs:13354-13373/13536-13545；Spectre 1543-1545 :18571-18583
-   *  useTime 同 10 且 tileBoost+3）× tileSpeed/wallSpeed（ApplyItemTime :4221-4230）。
-   *  涂层（paintCoating 4668/5344）走 TryPainting 的 ApplyCoating 分支（:41301-41327）。
+   *  - FindPaintOrCoating :42248-42265（弹药栏 54-57 优先）→ TryPainting :42267-42281
+   *    （ApplyCoating :42283-42313 / ApplyPaint :42315-42345）：成功改写才扣 1 个；
+   *    同色格不消耗（paintTile/paintWall 的 b==color 守卫）
+   *  冷却：useTime 10 × tileSpeed/wallSpeed（ApplyItemTime :4221-4230），**只在改写
+   *  成功拍设置**（ApplyPaint/ApplyCoating/TryScraping/LongMoss 各成功支 :42310/
+   *  :42329/:42342/:42203/:42207/:41184）——同色/无漆空拍不设 itemTime，连续涂刷
+   *  拖过同色格即时续涂（★SW-FX12 2026-09-10 修正：旧实现先 applyItemTime 再
+   *  tryPainting，同色格也吃 10 拍幻影冷却）。挥动循环与冷却解耦，useSwing 已上移
+   *  到 useCase 分派口（ItemCheck_StartActualUse :52314 / autoReuse 归零重启）。
+   *  Spectre 1543-1545 tileBoost+=3（Item.cs:18592-18603，1457 行号）。
+   *  涂层（paintCoating 4668/5344）走 TryPainting 的 ApplyCoating 分支。
    */
   private tryUsePaintTool(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
-    // IsInTileInteractionRange(Simple, tileBoost + blockRange)（:41154/:41238/:41256）：
-    // Spectre 三件套 tileBoost+=3（Item.cs:18583）；blockRange 同铺砖铺墙公式
+    // IsInTileInteractionRange(Simple, tileBoost + blockRange)（:42131/:42214/:42232）：
+    // Spectre 三件套 tileBoost+=3（Item.cs:18602）；blockRange 同铺砖铺墙公式
     const spectre = itemDef.vid === 1543 || itemDef.vid === 1544 || itemDef.vid === 1545;
     const tb = (spectre ? 3 : 0)
       + this.blockRange();
@@ -21870,36 +21903,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const p = this.player;
     const i0 = st.idx(tx, ty);
     const paintDust: PaintDustHook = this.paintDustHook();
-    const useAnimation = 15; // Item.cs useAnimation 15（三件套与 Spectre 同值）
-    const useTimeBase = 10;  // Item.cs useTime 10
-    // ApplyItemTime(sItem, tileSpeed/wallSpeed)（Player.cs:4221-4230）：useTime×乘子，下限 1；
-    //  同时驱动 useStyle 1 挥动动画（useAnimation 15，autoReuse 持按链式重启）
-    const applyItemTime = (multiplier: number) => {
+    const useTimeBase = 10;  // Item.cs useTime 10（1071/1072/1100/1543-1545 同值）
+    // ApplyItemTime(sItem[, speed])（Player.cs:4221-4230）：useTime×乘子，下限 1。
+    // ★SW-FX12：只设冷却域（itemTime），挥动域（itemAnimation）由分派口 useSwing 驱动
+    const applyCooldown = (multiplier: number) => {
       p.useTime = Math.max(1, Math.round(useTimeBase * multiplier));
-      this.swing = { t: useAnimation, dur: useAnimation, item: p.inv.heldItem()?.id ?? 0 };
-      this.swingHitSet.clear();
-      this.swingTileCutSet.clear();
     };
 
     if (itemDef.paintTool === 'brush') {
-      // :41262 目标格必须 active
+      // :42238 目标格必须 active
       if (!(st.flags[i0] && st.type[i0] !== 0)) return;
-      if (p.useTime > 0) return; // :41265 ItemTimeIsZero && itemAnimation>0 && controlUseItem
-      applyItemTime(this.paintTileSpeed());
-      this.tryPainting(tx, ty, false, paintDust);
+      if (p.useTime > 0) return; // :42241 ItemTimeIsZero && itemAnimation>0 && controlUseItem
+      if (this.tryPainting(tx, ty, false, paintDust)) applyCooldown(this.paintTileSpeed());
       return;
     }
     if (itemDef.paintTool === 'roller') {
-      // :41244 目标格必须有墙
+      // :42220 目标格必须有墙
       if (st.wall[i0] === 0) return;
       if (p.useTime > 0) return;
-      applyItemTime(this.paintWallSpeed());
-      this.tryPainting(tx, ty, true, paintDust);
+      if (this.tryPainting(tx, ty, true, paintDust)) applyCooldown(this.paintWallSpeed());
       return;
     }
     // scraper
-    // TryScrapping :41218-41224——门 = (wall>0 ∧ (墙漆>0 ∨ 隐形墙 ∨ 荧光墙))
-    //   ∨ (active ∧ (块漆>0 ∨ 隐形块 ∨ 荧光块))；两通道全空 → 直接返回（不挥动不耗冷却）
+    // TryScraping :42194——门 = (wall>0 ∧ (墙漆>0 ∨ 隐形墙 ∨ 荧光墙))
+    //   ∨ (active ∧ (块漆>0 ∨ 隐形块 ∨ 荧光块))；两通道全空 → 直接返回（不耗冷却）
     const coat = st.coat[i0];
     const hasPaint = (st.wall[i0] > 0 && (st.paintWall[i0] > 0
       || (coat & TileStore.COAT_INVISIBLE_WALL) !== 0 || (coat & TileStore.COAT_FULLBRIGHT_WALL) !== 0))
@@ -21907,28 +21934,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         || (coat & TileStore.COAT_INVISIBLE_BLOCK) !== 0 || (coat & TileStore.COAT_FULLBRIGHT_BLOCK) !== 0));
     if (hasPaint) {
       if (p.useTime > 0) return;
-      // :41225-41232 先 tile 后 wall，各自 paint||paintCoat 双原语；成功才 ApplyItemTime
+      // :42201-42208 先 tile 后 wall，各自 paint||paintCoat 双原语；成功才 ApplyItemTime
       //  （tileSpeed/wallSpeed 各自）
       if (paintTile(st, tx, ty, 0, paintDust) || paintCoatTile(st, tx, ty, 0, this.coatDustHook())) {
-        applyItemTime(this.paintTileSpeed());
+        applyCooldown(this.paintTileSpeed());
       } else if (paintWall(st, tx, ty, 0, paintDust) || paintCoatWall(st, tx, ty, 0, this.coatDustHook())) {
-        applyItemTime(this.paintWallSpeed());
-      } else {
-        p.useTime = 0; // 双原语都未改色（理论不可达）——不耗冷却
+        applyCooldown(this.paintWallSpeed());
       }
       return;
     }
-    // LongMoss :41166-41213：tile 184 → KillTile + 1/9 苔藓掉落
+    // LongMoss :42143-42189：tile 184 → KillTile + 1/9 苔藓掉落
     if (st.type[i0] === (TILE_BY_KEY['v_184_moss_plants'] ?? -1) && st.flags[i0]) {
       if (p.useTime > 0) return;
       const frameX = st.frameX[i0];
-      // PlaceThing_PaintScraper_LongMoss（Player.cs:42157-42185）= 放置族路径
+      // PlaceThing_PaintScraper_LongMoss（1457 :42155-42185）= 放置族路径
       // （PlaceThing_*,涂擦器）——原版 KillTile :42177 无 _isMining 包络 → 不计
       this.breakTile(tx, ty, false);                 // WorldGen.KillTile（含掉落链）
       const i1 = st.idx(tx, ty);
-      if (st.flags[i1] && st.type[i1] !== 0) return; // :41180-41183 仍 active → 中止
-      applyItemTime(1);                              // ApplyItemTime(sItem)（:41184，无乘子）
-      // :41189-41212 1/9 掉苔藓：4349+frameX/22，6-10 档特例
+      if (st.flags[i1] && st.type[i1] !== 0) return; // :42157-42160 仍 active → 中止
+      applyCooldown(1);                              // ApplyItemTime(sItem)（:42161，无乘子）
+      // :42166-42188 1/9 掉苔藓：4349+frameX/22，6-10 档特例
       if (Math.floor(Math.random() * 9) === 0) {
         const col = Math.floor(frameX / 22);
         let mossVid = 4349 + col;
@@ -21939,11 +21964,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           case 9: mossVid = 5127; break;
           case 10: mossVid = 5128; break;
         }
-        const mossKey = VANILLA_ITEM_KEY_BY_ID[mossVid];
-        const mossId = mossKey !== undefined ? ITEM_BY_KEY[mossKey] : undefined;
+        const mossKey = VI(mossVid);                   // 权威键单源（itemKeys 驼峰注册表）
+        const mossId = mossKey !== '' ? ITEM_BY_KEY[mossKey] : undefined;
         if (mossId !== undefined) {
-          p.inv.add(mossId, 1);
-          this.cb.onInventoryChanged();
+          // ★SW-FX12：掉落面 1:1——原版 RequestNewItem(..., ReserveForLocalPlayer)
+          //  （:42187；1456 为 Item.NewItem(x*16,y*16)+NetMessage 21）= 世界掉落物
+          //  而非直接入包（旧实现 p.inv.add 越过拾取面）
+          this.spawnDrop(tx * TILE, ty * TILE, mossKey, 1, 0, -2);
         }
       }
     }
@@ -21962,44 +21989,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
   }
 
-  /** TryPainting/ApplyCoating/ApplyPaint（Player.cs:41291-41369）：paintingAWall 分通道，
-   *  FindPaintOrCoating 取油漆/涂层；先涂层后油漆（:41296-41299 两 if 顺序，物品
-   *  两域互斥故只中一支），改写成功扣 1 个（同态不扣：涂层=已置位守卫、油漆=同色守卫） */
-  private tryPainting(tx: number, ty: number, paintingAWall: boolean, dust: PaintDustHook) {
+  /** TryPainting/ApplyCoating/ApplyPaint（1457 :42267-42345）：paintingAWall 分通道，
+   *  FindPaintOrCoating（:42248）取油漆/涂层；先涂层后油漆（:42272-42279 两 if 顺序，
+   *  物品两域互斥故只中一支），改写成功扣 1 个（同态不扣：涂层=已置位守卫、油漆=同色
+   *  守卫）。★SW-FX12 返回 true=本次消耗了油漆/涂层（=原版走到了 ApplyItemTime 的
+   *  成功支），调用方据此设冷却域 */
+  private tryPainting(tx: number, ty: number, paintingAWall: boolean, dust: PaintDustHook): boolean {
     const st = this.world.store;
     const inv = this.player.inv;
     const slot = inv.findPaintSlot();
-    if (slot < 0) return;                    // FindPaintOrCoating → null（:41293-41294）
+    if (slot < 0) return false;              // FindPaintOrCoating → null（:42269-42270）
     const def = ITEM_DEFS[inv.slots[slot]!.id];
     const coating = def?.paintCoating ?? 0;
+    let applied = false;
     if (coating !== 0) {
-      // ApplyCoating（:41301-41327）：paintCoatTile/Wall 成功 → stack-- + SetDefaults(0)
+      // ApplyCoating（:42283-42313）：paintCoatTile/Wall 成功 → stack-- + SetDefaults(0)
       //  （仓内 removeAt 到 0 即空槽，等价）；无同色预门——幂等守卫在 paintCoat* 原语内
       if (paintingAWall) {
         if (paintCoatWall(st, tx, ty, coating, this.coatDustHook())) {
           inv.removeAt(slot, 1);
           this.cb.onInventoryChanged();
+          applied = true;
         }
       } else if (paintCoatTile(st, tx, ty, coating, this.coatDustHook())) {
         inv.removeAt(slot, 1);
         this.cb.onInventoryChanged();
+        applied = true;
       }
     }
     const paint = def?.paint ?? 0;
-    if (paint === 0) return;
+    if (paint === 0) return applied;
     if (paintingAWall) {
-      // :41344 wallColor()!=paint && paintWall(...) → stack--
+      // :42320 wallColor()!=paint && paintWall(...) → stack--
       if (st.paintWall[st.idx(tx, ty)] !== paint && paintWall(st, tx, ty, paint, dust)) {
         inv.removeAt(slot, 1);
         this.cb.onInventoryChanged();
+        applied = true;
       }
     } else {
-      // :41357 color()!=paint && paintTile(...) → stack--
+      // :42333 color()!=paint && paintTile(...) → stack--
       if (st.paint[st.idx(tx, ty)] !== paint && paintTile(st, tx, ty, paint, dust)) {
         inv.removeAt(slot, 1);
         this.cb.onInventoryChanged();
+        applied = true;
       }
     }
+    return applied;
   }
 
   /** paintCoatEffect 尘（WorldGen.cs:44114-44131：10 颗 Dust 143，半数 noGravity×1.2、
@@ -44755,6 +44790,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     const npcs = this.entities.npcs.filter(
       (n) => n instanceof TownNPC && !n.dead) as TownNPC[];
     checkForNPCsToReactToEmoteBubble(
+      // ★SW-FX15：stealth 入参 = CanBeTalkedTo 门（Player.cs:3872 stealth==1f 才可对话
+      // ——潜行中城镇 NPC 不再对玩家表情起 200px 近距回应；Player.stealth 即同源字段）
       this.player, npcs,
       (x1, y1, w1, h1, x2, y2, w2, h2) => canHitLine(this.world.store, x1, y1, w1, h1, x2, y2, w2, h2),
     );

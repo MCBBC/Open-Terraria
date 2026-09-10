@@ -484,8 +484,11 @@ export function sortIdOf(vid: number): ItemSortId {
 
 /**
  * 全链比较器：ByUnlockStatus → ByCreativeSortingId → Alphabetical。
- * Alphabetical（:145-151）= item.Name（内部英文名）CompareTo——JS 按码元序（C# current
-//  culture 对 ASCII 内部名等价 ordinal，中文显示名不参与）。
+ * Alphabetical（SortingSteps.cs:138-147）= item.Name（当前语言本地化显示名）
+ * String.CompareTo（current culture 敏感）。本仓用 ITEM_NAME_BY_ID（内部英文名）
+ * 按码元序比较【偏差登记 SW-FX15 勘误：旧注「中文显示名不参与」系误述——原版
+ * zh-Hans 下按中文名文化序；本仓改随语言会让排序结果依赖 ICU 环境且打翻既有
+ * 金标断言，故保持内部名序,组内次序差异备案】。
  */
 export function makeJourneyComparator(research: ResearchSortView) {
   const nameOf = (vid: number): string => ITEM_NAME_BY_ID[vid] ?? `#${vid}`;
@@ -534,3 +537,70 @@ export function runBrowserQuery(
 
 /** 浏览器可展示总数上限语义 = 传入选集（原版 = 研究进度>0 的物品集） */
 export function journeycatEntryCount(): number { return Object.keys(ENTRIES).length; }
+
+// ---------------------------------------------------------------------------
+// ★SW-FX15 复制面板点击臂（ItemSlot.cs 1:1——原版槽交互 = ItemSlot.Handle(ref item, 29|34)，
+// UICreativeItemGrid.DrawSlot :21-27）
+//   · 普点（光标空）→ PickItemMovementAction（ItemSlot.cs:1459）case 29 :1599-1603 → 臂 5；
+//     LeftClick case 5（ItemSlot.cs:1215-1226）：光标收下整组 =
+//     stack=OnlyNeedOneInInventory()?1:maxStack，音效 7（Grab），JourneyDuplicationItemCreationContext
+//   · Shift 点 → OverrideHover/GetAlternateClickAction（:679-697）case 29 →
+//     TransferToBackpack(cursorOverride 7)；LeftClick cursorOverride==7 臂（:749-765）：
+//     整组经 Player.GetItem(QuickTransferFromSlot) 入包，音效 12
+//   · 普点（光标非空）→ 臂 0 = 无操作（case 5 门 Main.mouseItem.IsAir）
+// ---------------------------------------------------------------------------
+
+/** ItemID.Sets.OnlyNeedOneInInventoryOverride（ItemID.cs:1223-1278，28 对） */
+const ONLY_NEED_ONE_TRUE = new Set<number>([
+  1522, 1523, 1524, 1525, 1526, 1527, 3643, 3103, 3104, 856, 1299, 329,
+  4346, 5391, 4767, 5453, 5309, 5454, 5323, 5455, 6190, 6195,
+]);
+const ONLY_NEED_ONE_FALSE = new Set<number>([205, 206, 207, 1128, 267, 849]);
+
+/** Item.CanBeEquipped（Item.cs）——甲三槽/饰品/钩爪 shoot/坐骑/宠物·光源 buff */
+function canBeEquipped(e: CatEntry): boolean {
+  const armored = !!(e.hs || e.bs || e.ls || e.acc !== undefined
+    || ((e.shoot ?? 0) > 0 && e.hook) || e.mt);
+  if (armored) return true;
+  const bt = e.bt ?? 0;
+  if (bt > 0) return e.pet ? true : !!e.light;
+  return false;
+}
+
+/** Item.OnlyNeedOneInInventory（Item.cs:1177-1192）1:1：
+ *  表覆写优先 → !consumable：（useStyle==0 → CanBeEquipped / 否则 true）→ consumable=false */
+export function onlyNeedOneInInventory(vid: number): boolean {
+  if (ONLY_NEED_ONE_TRUE.has(vid)) return true;
+  if (ONLY_NEED_ONE_FALSE.has(vid)) return false;
+  const e = entry(vid);
+  if (!e.cons) {
+    if ((e.us ?? 0) === 0) return canBeEquipped(e);
+    return true;
+  }
+  return false;
+}
+
+/** 点击执行计划（纯函数——测试消费） */
+export interface BrowserClickPlan {
+  to: 'cursor' | 'backpack';
+  stack: number;
+  sound: 'pickup' | 'menuTick';
+}
+
+/**
+ * 复制面板点击臂决策（UICreativeItemGrid context 29 全语义 1:1，见上锚注）。
+ * @param vid          原版物品 id
+ * @param shift        shift 臂（TransferToBackpack）
+ * @param cursorOccupied 光标持物（arm 5 门 = Main.mouseItem.IsAir 取反）
+ * @param maxStack     该物品 maxStack（调用方从 ITEM_DEFS 提供）
+ */
+export function browserClickPlan(
+  vid: number, shift: boolean, cursorOccupied: boolean, maxStack: number,
+): BrowserClickPlan | null {
+  const stack = onlyNeedOneInInventory(vid) ? 1 : Math.max(1, maxStack);
+  if (!shift) {
+    if (cursorOccupied) return null;                       // case 5 门 mouseItem.IsAir
+    return { to: 'cursor', stack, sound: 'pickup' };       // 音效 7（LeftClick :1219）
+  }
+  return { to: 'backpack', stack, sound: 'menuTick' };     // 音效 12（cursorOverride 7 臂 :763）
+}

@@ -14,8 +14,10 @@
  *
  * 推荐走 CLI(vite 生命周期+看门狗+杀树全包):
  *   node tools/probe.mjs run scripts/_xxx.mjs --seed=05162020 --size=small --vite=auto
+ *   node tools/probe.mjs fields        # 常用字段真名速查(IIIII238 ①,防字段名臆造)
  *
- * 坑表(每坑:现象/根因/解法/默认行为)见 docs/methodology/probe-guide.md。
+ * 坑表(每坑:现象/根因/解法/默认行为)见 docs/methodology/probe-guide.md;
+ * 时辰类断言用 freezeClock 夹具(pump 期间钟面不走),分步计时用 L.step(③)。
  */
 export * from './env.mjs';
 export * from './vite.mjs';
@@ -30,4 +32,6 @@ export * from './world.mjs';
 export * from './stats.mjs';
 export * from './watchdog.mjs';
 export * from './ledger.mjs';
+export * from './clock.mjs';
+export * from './cheatsheet.mjs';
 export * from './presets.mjs';

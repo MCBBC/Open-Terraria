@@ -24,21 +24,23 @@ import {
 import { Clock } from '../world/World';
 import { snapshotJourneyWorld } from '../net/journeySync';
 import {
-  JOURNEY_FILTER_KEYS, FILTER_L10N, runBrowserQuery,
+  JOURNEY_FILTER_KEYS, FILTER_L10N, runBrowserQuery, browserClickPlan,
   type JourneyFilterKey,
 } from './JourneyBrowser';
 
-/** 背包内物品点击给 1 / shift 给整组（原版 cursorOverride==7 抓取：整组 =
- *  maxStack，ItemSlot.cs:750-762 经 Player.GetItem 入包——合并/空格全程 maxStack
- *  钳制，溢出落地。R24 修复：曾 s.stack+=stack 直加可造 1099/999 超限堆叠入档）。
+/** 复制面板入包授予（★SW-FX15 起承担 shift 臂=TransferToBackpack + 无 UI 兜底；
+ *  普点整组上光标走 UI.grantCraftToCursor，见 makeCell/browserClickPlan）——
+ *  整组 = maxStack（ItemSlot.cs:749-765 cursorOverride==7 臂经 Player.GetItem
+ *  QuickTransferFromSlot 入包——合并/空格全程 maxStack 钳制，溢出落地）。
+ *  R24 修复：曾 s.stack+=stack 直加可造 1099/999 超限堆叠入档。
  *  export 供 redblue 回归直测钳制语义 */
 export function giveItem(game: Game, internalId: number, stack: number): void {
   const inv = game.player.inv;
   const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
   const want = Math.min(stack, Math.max(1, def?.maxStack ?? 999));
   // ★preferHotbar（2026-09-02 神圣种子 UX 批）：授予先热栏——否则热栏满时新物
-  //  落背包尾,玩家手里仍是旧物（两轮行为日志实证）。原版语义=复制到手/光标,
-  //  本仓无光标槽,热栏直落是最近可用近似。
+  //  落背包尾,玩家手里仍是旧物（两轮行为日志实证）。原版 GetItem 落位序=首选槽
+  //  优先族,热栏直落是最近可用近似（光标臂已按原版补齐,见 makeCell 注）。
   const left = inv.add(internalId, want, undefined, undefined, false, true);
   const key = (def as { key?: string } | undefined)?.key;
   if (left > 0 && key) {
@@ -725,14 +727,22 @@ function makeCell(game: Game, vid: number, x: number, y: number): HTMLButtonElem
   b.addEventListener('mouseenter', () => research.clearNewlyResearchedStatus(vid));
   // ★2026-09-02 开发者模式例外（用户拍板）：授予不再受研究门约束（原版 fully 门
   //  与"只列已捐"配套；本仓全量池后 partial 槽也要能取,徽标只作进度展示）
+  // ★SW-FX15 点击臂 1:1（browserClickPlan——ItemSlot.cs:1459/:1599-1603/:749-765/:1215-1226）：
+  //  普点 = 光标空才整组上光标（音 7 Grab）；光标占用 = 无操作（原版同款不合并）；
+  //  Shift 点 = 整组入包（音 12）。OnlyNeedOneInInventory 族（任务鱼等）恒 1 件。
+  //  2026-09-02 注「本仓无光标槽」已失效——SW-AZ1 2026-09-06 落了光标持物镜像槽。
   b.addEventListener('mousedown', (e) => {
     e.stopPropagation();
     const internalId = internalIdOfVid(vid);
     if (internalId < 0) return;   // ★-1 哨兵(0=合法 def 位,v 109 魔力水晶)
 
     const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
-    giveItem(game, internalId, e.shiftKey ? (def?.maxStack ?? 999) : 1);
-    game.sfx.play('menuTick', 1);
+    const ui = (window as unknown as { __swUI?: { heldStack: unknown; grantCraftToCursor(id: number, stack: number): number } }).__swUI;
+    const plan = browserClickPlan(vid, e.shiftKey, ui ? !!ui.heldStack : false, def?.maxStack ?? 999);
+    if (!plan) return;
+    if (plan.to === 'cursor' && ui) ui.grantCraftToCursor(internalId, plan.stack);
+    else giveItem(game, internalId, plan.stack);   // 无 UI 实例兜底 = 入包（headless/测试）
+    game.sfx.play(plan.sound, 1);
   });
   return b;
 }

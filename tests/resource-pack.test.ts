@@ -285,7 +285,9 @@ describe('ResourcePackManager 应用链', () => {
     expect(r.iconDataUrl).toBeNull();   // 本 zip 无 icon.png
   });
 
-  it('启用→注入 / 双包同键高优先级(后启用置顶)覆盖 / 禁用→撤销+余包重放', async () => {
+  it('启用→注入 / 双包同键列表顶(先启用=低 order)胜 / 禁用→撤销+余包重放', async () => {
+    // ★SW-FX16 优先级定谳修正：首写胜 = 列表顶（最小 order）= 冲突胜者
+    // （AssetRepository.FirstOrDefault 真值锚,见 ResourcePackList.ts 文件头）。
     const rt = makeRuntime();
     const storage = makeStorage();
     const mgr = new ResourcePackManager(rt, new ResourcePackStore(storage));
@@ -293,15 +295,17 @@ describe('ResourcePackManager 应用链', () => {
     const b = await mgr.importPack(packFile(0x22));
     await mgr.setEnabled(a.id, true);
     expect(rt.state.get('vanilla-ui/UI_Cursor_0.png')).toBeTruthy();
-    // 后启用 = 置顶优先（高 order 后应用覆盖）
+    // 后启用落列底（SetResourcePackAsTopPriority=最大+1）→ 不压制 a（首写胜）
     await mgr.setEnabled(b.id, true);
     expect(rt.calls.apply[rt.calls.apply.length - 1]).toContain('vanilla-ui/UI_Cursor_0.png');
-    // 禁用 b：先撤销 b 的文件（clear）再重放 a → 表内仍应是 a 的 blob（非 b）
-    await mgr.setEnabled(b.id, false);
-    expect(rt.calls.restore[rt.calls.restore.length - 1]).toContain('vanilla-ui/UI_Cursor_0.png');
+    const bothBlob = rt.state.get('vanilla-ui/UI_Cursor_0.png') as Blob;
+    const bothBytes = new Uint8Array(await bothBlob.arrayBuffer());
+    expect(bothBytes[0]).toBe(0x11);   // 列表顶 a 胜（SW-FX16 决断行）
+    // 禁用 a（列表顶撤出）→ 余包 b 同键顶上
+    await mgr.setEnabled(a.id, false);
     const finalBlob = rt.state.get('vanilla-ui/UI_Cursor_0.png') as Blob;
     const bytes = new Uint8Array(await finalBlob.arrayBuffer());
-    expect(bytes[0]).toBe(0x11);
+    expect(bytes[0]).toBe(0x22);
   });
 
   it('音效覆盖随启停整表重算（Sfx 跨实例通道）', async () => {
@@ -341,7 +345,7 @@ describe('ResourcePackManager 应用链', () => {
     expect(storage.zips.size).toBe(1);
   });
 
-  it('启动恢复：持久化行+启用态 → 全量按优先级序应用', async () => {
+  it('启动恢复：持久化行+启用态 → 全量按优先级序应用（列表顶胜,SW-FX16）', async () => {
     const storage = makeStorage();
     {
       const mgr = new ResourcePackManager(makeRuntime(), new ResourcePackStore(storage));
@@ -355,7 +359,9 @@ describe('ResourcePackManager 应用链', () => {
     const { applied } = await mgr2.applyInstalled();
     expect(applied).toBe(2);
     const blob = rt2.state.get('vanilla-ui/UI_Cursor_0.png') as Blob;
-    expect(new Uint8Array(await blob.arrayBuffer())[0]).toBe(0x55);  // b 后启用=置顶=终态
+    // a 先启用 = order 0 = 列表顶 = 首写胜（SW-FX16 优先级定谳：AssetRepository
+    // .FirstOrDefault 真值锚,ResourcePackList.ts 文件头）
+    expect(new Uint8Array(await blob.arrayBuffer())[0]).toBe(0x44);
   });
 });
 

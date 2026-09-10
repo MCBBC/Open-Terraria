@@ -2,10 +2,18 @@
 // DOM 复刻：可用/已启用双列（计数入题）、行内 启用/禁用·信息·前移/后移·卸载、
 // 上传 zip、信息子页（名称/作者/版本/简介/返回）。
 // 交互语义对齐反编译：
-//   - 启用 = 置顶优先 + 立即生效（CreatePackToggleButton.OnLeftClick :200-207 每击
-//     即 ResetAllContentBasedRenderTargets；本仓=立即注入/撤销+重烘）；
-//   - 调序 tooltip = UI.OffsetTexturePackPriorityUp/Down（原版"向前移动"=offset+1
-//     =优先级↑=列表下移——本页 ↑ 即 offset+1，语义以 tooltip 为准）；
+//   - 启用 = 立即生效（CreatePackToggleButton.OnLeftClick :200-207 每击
+//     即 ResetAllContentBasedRenderTargets；本仓=立即注入/撤销+重烘）。落位 =
+//     SetResourcePackAsTopPriority(:211-226)=显示列【底】（★方法名误称,实际 =
+//     解析层最低优先——新启用包不压制已启用同键包,与原版行为一致,锚见
+//     ResourcePackList.ts 文件头 SW-FX16 定谳）；
+//   - 调序（★SW-FX16 字形-语义适配登记）：原版按钮精灵 TexturePackButtons
+//     frame0=▲(offset-1,列上移)/frame1=▼(offset+1,列下移),而 tooltip 配对是
+//     offset-1→"UI.OffsetTexturePackPriorityDown(向后移动)"、offset+1→
+//     "...PriorityUp(向前移动)"——原版命名层与引擎解析层（列表顶=最小 order=
+//     冲突胜者,AssetRepository.FirstOrDefault）相反。本页字形按显示方向落
+//     （↑=offset-1=列上移=解析层更优先）,tooltip 键按【行为真值】配对
+//     （↑=向前移动/优先级↑）。原生配对的错位已在 ResourcePackList.ts 登记。
 //   - 列题 = UI.Available/EnabledResourcePacksTitle（{Amount} 命名占位）。
 // 行视觉参照 UIResourcePack.cs（图标+名称+作者 0.7 缩放）；Web 增项：上传/卸载。
 import { Lang } from '../i18n/Lang';
@@ -199,11 +207,12 @@ function mkRow(mgr: ResourcePackManager, row: PackRow, go: (v: View) => void): H
   ));
   // 信息（UI.SeeTexturePackInfo）→ 信息子页
   btns.append(mkBtn('ⓘ', Lang.text('UI.SeeTexturePackInfo'), () => go({ kind: 'info', id: row.id })));
-  // 调序（仅启用列；↑ = UI.OffsetTexturePackPriorityUp = offset+1 = 优先级↑）
+  // 调序（仅启用列；★SW-FX16 字形=显示方向：↑=offset-1=列上移=解析层更优先,
+  // tooltip 键按行为真值配对,错位登记见文件头/ResourcePackList.ts）
   if (row.enabled) {
     btns.append(
-      mkBtn('↓', Lang.text('UI.OffsetTexturePackPriorityDown'), async () => { await mgr.move(row.id, -1); rerender(); }),
-      mkBtn('↑', Lang.text('UI.OffsetTexturePackPriorityUp'), async () => { await mgr.move(row.id, 1); rerender(); }),
+      mkBtn('↑', Lang.text('UI.OffsetTexturePackPriorityUp'), async () => { await mgr.move(row.id, -1); rerender(); }),
+      mkBtn('↓', Lang.text('UI.OffsetTexturePackPriorityDown'), async () => { await mgr.move(row.id, 1); rerender(); }),
     );
   }
   // 卸载（Web 增项）

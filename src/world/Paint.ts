@@ -177,9 +177,10 @@ export const enum PAINT_COAT {
 // ★ 等价边界（登记）：
 //   1. 特判组 pass 28-39 的 per-tile-type 设置表已 1:1 落地（SPECIAL_PAINT_SETTINGS +
 //      getTilePaintSettings，见下节），chunk 烘焙路径（ChunkCache.tintRegion）已按
-//      tile type 分发特判组/普通组（2026-08-20 接线）。未接线残余：树冠/树枝
-//      （Tree_Tops/Branches）走 Renderer WindSway overlay 不进烘焙——getTreeFoliageSettings
-//      已备待其消费点接线。
+//      tile type 分发特判组/普通组（2026-08-20 接线）。★SW-FX12（2026-09-10）：树冠/
+//      树枝/棕榈冠（Tree_Tops/Branches，WindSway 摆动层+第四遍外扩遍，不进烘焙）的
+//      getTreeFoliageSettings 特判组已在 VanillaTiler.drawTreeCell 接线——foliageIndex
+//      = 冠贴图序号（crown），foliageStyle 恒 0（棕榈 = 沙型），绘制时源染色同真值。
 //   2. 已接线：ChunkCache.tintRegion 以本函数逐像素替换旧 multiply 乘色合成
 //      （ImageData 循环；fround 序与 UNORM 取整在函数内做，循环只搬运字节）。
 //   3. 精度：逐指令按 f32 寄存器序模拟（Math.fround）；老 ATI fp24 硬件与 fp32 存在
@@ -470,7 +471,7 @@ export function getTilePaintSettings(tileType: number, tileStyle = 0): TreePaint
 /** GetTreeFoliageSettings（TreePaintSystemData.cs:326-397 逐分支 1:1）——树冠/树枝
  *  （Tree_Tops/Tree_Branches 贴图）专用；★default 分支 = DefaultDirt（:330-331，非
  *  普通组！）。本仓树冠不进 chunk 烘焙（Renderer/WindSway overlay 逐帧画），此表
- *  供该消费点接线用（未尽项登记见文件头等价边界 1）。foliageStyle 仅 15/21（棕榈）消费。 */
+ *  消费点 = VanillaTiler.drawTreeCell 冠/枝 blit（SW-FX12 2026-09-10 接线）。foliageStyle 仅 15/21（棕榈）消费。 */
 export function getTreeFoliageSettings(foliageIndex: number, foliageStyle: number): TreePaintingSettings {
   const palm = (style: number): TreePaintingSettings => {
     switch (style) {

@@ -43,6 +43,13 @@ import { showFeatureGate } from './ui/QuickGate';
 import { showJourneyQuickGate } from './ui/QuickGate';
 import { openPlayerListPanel } from './ui/PlayerListPanel';
 import { openJourneyPowersPanel } from './ui/JourneyPowersUI';
+
+/** ★SW-FX16 2026-09-10：Shift 组合调试键保留集——这些键在 main.ts/Game.ts 有各自的
+ *  Shift 组合臂（F1/F2 像素画·无敌、F3 碰撞盒、F4 迷雾、F5 录制·注记、F10 地图传送）,
+ *  Shift 按下时调试臂优先于键位动作（缺省 ToggleCameraMode=F4 ∈ 集保持原行为）。
+ *  重绑 ToggleCameraMode 到集外键后 Shift+键 照常触发相机模式（原版触发器无 Shift
+ *  概念）。消费点：runKeybindHotkeys 的相机模式门。 */
+const SHIFT_DEBUG_RESERVED: ReadonlySet<string> = new Set(['F1', 'F2', 'F3', 'F4', 'F5', 'F10']);
 import { openResearchPanel } from './ui/ResearchUI';
 import { installCanvasWatch } from './render/CanvasWatch';
 import { RemasterRuntime } from './remaster/RemasterRuntime';
@@ -500,8 +507,14 @@ window.addEventListener('keydown', (e) => {
   //      :982-987 边沿门（死亡/幽灵不可开,再按可关;截图锁定中由
   //      toggleCamera 内 CameraLock 门自拒）。input 直连 = 相机界面需要
   //      mouseHeld/rightDown 电平（render 参数无右键面）;首次按下时绑一次。
-  //      ★Shift+F4 = 迷雾消除/恢复切换（下方 case 'F4',首用确认门）,不触发相机模式 ----
-  if (!e.shiftKey && isBound('ToggleCameraMode', e.code) && initCameraModeWiring(game)) {
+  //      ★Shift+F4 = 迷雾消除/恢复切换（下方 case 'F4',首用确认门）,不触发相机模式
+  // ★SW-FX16 2026-09-10：Shift 豁免从「全键」收窄到「Shift 组合调试键保留集」
+  //  （F1-F5/F10——各键的 Shift 组合臂:Shift+F1/F2 像素画·无敌(Game.ts)、F3 碰撞盒/
+  //  F4 迷雾/F5 录制/F10 地图传送）。原版 ToggleCameraMode 触发器无 Shift 概念
+  //  （Player.cs 相机模式支直读 trigger）,旧全键豁免让「重绑相机键到非调试键 +
+  //  按住 Shift」整类死键。保留集内键保持调试优先(缺省 F4 ∈ 集,缺省行为零变)。----
+  if (isBound('ToggleCameraMode', e.code)
+    && (!e.shiftKey || !SHIFT_DEBUG_RESERVED.has(e.code)) && initCameraModeWiring(game)) {
     e.preventDefault();
     game.renderer.captureMode.toggleRequest(game.player, game.world);
     return;

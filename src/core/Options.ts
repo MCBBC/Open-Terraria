@@ -142,6 +142,36 @@ export interface OptionsData {
   /** 悬停文本框（Main.SettingsEnabled_OpaqueBoxBehindTooltips，:848；默认 true）——
    *  消费：物品 tooltip 背板；本仓 UI .sw-tooltip 底色 */
   opaqueBoxBehindTooltips: boolean;
+  // ---- ★SW-FX14 2026-09-10 M14 收尾（IngameOptions.cs 普查对账补缺 4 项）----
+  /** 悬停控制 Click/Hold（Player.Settings.HoverControl，IngameOptions.cs:671-688；
+   *  缺省 Hold = Player.cs:357 静态初值；config.json 键 "HoverControlMode"
+   *  Main.cs:4293/:4638）。消费：悬停锁存 tryKeepingHoveringUp/Down（Player.cs:
+   *  25452-25484——Click 档锁存驻留/Hold 档每拍双清）+ TryingToHoverUp/Down
+   *  取值（:3908-3927）全消费面（翅膀 WingMovement/WingFrame/贴墙靴缓降）。
+   *  本仓翼链此前按 Hold 语义直读 inputUp/Down（:4967"保持态近似省略"登记债），
+   *  本刀接入锁存后 Click 档成立 */
+  hoverControl: 'hold' | 'click';
+  /** Boss 血条数字（BigProgressBarSystem.ShowText，IngameOptions.cs:806-812；
+   *  静态缺省 true = BigProgressBarSystem.cs:76；原版经 Preferences 键
+   *  "ShowBossBarHealthText" 持久化（:74/:118-124 BindTo）+ Main.cs:50774-50778
+   *  旧版设置页双入口）。消费：BigProgressBarHelper.DrawHealthText 门
+   *  （:57/:123）——本仓 drawBigProgressBar showText 参（BossBars.ts）经
+   *  Renderer.drawBossBar 灌入 */
+  showBossBarHealthText: boolean;
+  /** 背包特效（Main.FlashyEffectsInterface，IngameOptions.cs:833-842；缺省 true =
+   *  Main.cs:443；config.json 键 Main.cs:4300/:4443）。★1.4.5.7 全反编译该字段
+   *  仅 6 处引用（声明/存/读/两处设置行）——零游戏行为消费方（历史遗留死设置），
+   *  1:1 保态不挂行为 */
+  flashyEffectsInterface: boolean;
+  /** 光照模式（Lighting.Mode，IngameOptions.cs:973-979「视频」组；枚举
+   *  Terraria.Graphics.Light/LightMode.cs:White=0/Retro=1/Trippy=2/Color=3，
+   *  静态初值 Color = Lighting.cs:19；config.json 键 "LightingMode"
+   *  Main.cs:4238/:4490-4495）。循环 = Lighting.NextLightMode（Lighting.cs:169-176
+   *  Mode++ 未定义回落 White）= Color→White→Retro→Trippy→Color。
+   *  ★行为备案：Color=NewEngine(逐格 RGB) ≙ 本仓 GL 光照图；White/Retro/Trippy
+   *  三档走 LegacyLighting 引擎（Lighting.cs:40-54）——legacy 引擎族未移植，
+   *  本仓三档暂与 Color 同渲（依赖：照明引擎族移植，登记债） */
+  lightMode: 'color' | 'white' | 'retro' | 'trippy';
   // ---- S 级：自动保存/自动暂停（IngameOptions.cs:619/628）----
   /** 自动保存（Main.autoSave，Main.cs:1196 默认 true）——DoUpdate_AutoSave :19589
    *  墙钟 600000ms 触发 WorldGen.saveAndPlay */
@@ -297,6 +327,10 @@ export class OptionsStore {
     mouseShowBuildingGrid: false,           // Main.cs:257
     dialoguePortraitMode: 'detailed',
     opaqueBoxBehindTooltips: true,          // Main.cs:249
+    hoverControl: 'hold',                   // ★SW-FX14 Player.cs:357 缺省 Hold
+    showBossBarHealthText: true,            // ★SW-FX14 BigProgressBarSystem.cs:76 缺省 true
+    flashyEffectsInterface: true,           // ★SW-FX14 Main.cs:443 缺省 true（死设置,见字段注）
+    lightMode: 'color',                     // ★SW-FX14 Lighting.cs:19 静态初值 Color
     autoSave: true,                         // Main.cs:1196
     autoSaveIntervalMin: 10,                // 原版 600000ms 恒值
     autoPause: false,                       // Main.cs:1298（RB7 勘误,曾写 1280）
@@ -462,6 +496,16 @@ export class OptionsStore {
       }
       // ★SW-AZ1 2026-09-06 附近箱参与制作开关：坏值回原版默认 true（Player.cs:355）
       if (typeof this.data.craftFromNearbyChests !== 'boolean') this.data.craftFromNearbyChests = true;
+      // ★SW-FX14 2026-09-10 M14 收尾 4 项卫门（坏值回原版缺省——vanilla config 读回
+      //  无范围守卫是 enum 裸转产物,实用缺省=初值,此处按缺省收敛）
+      if (this.data.hoverControl !== 'hold' && this.data.hoverControl !== 'click') {
+        this.data.hoverControl = 'hold';                     // Player.cs:357
+      }
+      if (typeof this.data.showBossBarHealthText !== 'boolean') this.data.showBossBarHealthText = true;
+      if (typeof this.data.flashyEffectsInterface !== 'boolean') this.data.flashyEffectsInterface = true;
+      if (!(['color', 'white', 'retro', 'trippy'] as const).includes(this.data.lightMode)) {
+        this.data.lightMode = 'color';                       // Lighting.cs:19
+      }
       // ★2026-09-07 背包布局灰度：坏值回 classic；URL 会话覆盖见 try 外（★红队 F1
       //  清偿：覆盖值只改内存,落盘通道 set() 序列化时剥回存档侧值(persistedLayout),
       //  否则会话内任意一次 set() 把覆盖值连带写档污染用户选择）

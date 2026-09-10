@@ -557,6 +557,20 @@ export class BigProgressBarSystem {
 // ---------------------------------------------------------------------------
 const FH = 58, BW = 456, BH = 22, IX = 32, IY = 24;
 
+/** DrawFancyBar 头像落点（相对条框外扩左上 vec）纯函数——★SW-FX14 双路径定谳：
+ *  生命重载（BigProgressBarHelper.cs:80-81）`vector2 = (4,20) + (26,28)/2` 中心锚，
+ *  iconSize 以 `barIconFrame.Size()/2` 反推左上 = (17-iconW/2, 34-iconH/2)；
+ *  盾量重载（:147-148）`vector2 = (4,20) + iconSize/2` 锚=半宽 → 净左上恒 (4,20)。
+ *  两重载仅对 26×28 图标（克眼族）重合——BossHead 图标尺寸不均（0=26×28 /
+ *  2=24×30 / 8=34×36 / 39=50×48…），旧实现统一 (4,20) 属偏差已修。 */
+export function barIconOrigin(
+  shieldOverload: boolean, iconW: number, iconH: number,
+): { x: number; y: number } {
+  return shieldOverload
+    ? { x: 4, y: 20 }
+    : { x: 17 - iconW / 2, y: 34 - iconH / 2 };
+}
+
 export interface BarTextures {
   bar: DrawRect | null;
   head: DrawRect | null;
@@ -606,10 +620,16 @@ export function drawBigProgressBar(
     c.fillStyle = '#C03030';
     c.fillRect(rect.x, rect.y, Math.max(2, lifeW), BH);
   }
-  // 头像（:55：net 左上 = vec + (4,20)，锚=图标半宽）
+  // 头像（★SW-FX14 2026-09-10 勘误：Helper 两重载头像落点【不同】，旧实现按盾量
+  //  路径一刀切 = 非 26×28 图标偏移。生命重载 :80-81 中心锚 = vec+(4,20)+(26,28)/2
+  //  = vec+(17,34)——原版硬编码按 26×28 图标反推左上，BossHead 图标尺寸不均
+  //  （24×30..50×48），非 26×28 图标净左上 = vec+(17,34)-size/2（鹿角怪 50×48
+  //  偏差达 (-12,+10)px）；盾量重载 :147-148 恒 net 左上 = vec+(4,20)。
+  //  走盾量路径 ⟺ 传入 shield（四塔条恒带盾槽，LunarPillarBigProgessBar.cs:53））
   const head = tex.head;
   if (head) {
-    c.drawImage(head.img, head.sx, head.sy, head.sw, head.sh, vec.x + 4, vec.y + 20, head.sw, head.sh);
+    const o = barIconOrigin(info.shield != null, head.sw, head.sh);
+    c.drawImage(head.img, head.sx, head.sy, head.sw, head.sh, vec.x + o.x, vec.y + o.y, head.sw, head.sh);
   }
   if (showText) {
     // DrawHealthText（:62-76 + 盾量版 :123-133：盾>0 显盾）。字体 =

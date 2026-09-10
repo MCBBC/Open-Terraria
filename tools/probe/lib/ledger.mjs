@@ -13,6 +13,7 @@ export class Ledger {
     this.failExit = failExit;
     this.quiet = quiet;
     this.fails = [];
+    this.t0 = Date.now();   // ③ 分步计时基准(全程 t+ 行)
   }
 
   /** chk(name, ok, extra?) → PASS/FAIL 行;返回 ok 便于 && 串联。 */
@@ -26,6 +27,30 @@ export class Ledger {
 
   /** 信息行(不参与成败)。 */
   say(msg) { this.lines.push(msg); if (!this.quiet) console.log(msg); }
+
+  /** 自构造起的耗时(③;`12.3s` / `2m05s`)。 */
+  elapsed() {
+    const s = (Date.now() - this.t0) / 1000;
+    return s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}s`;
+  }
+
+  /**
+   * ③ 分步计时(IIIII238 收编 IIII237 实战摩擦 #3):case 起止各打一行
+   * (`▶ name (t+…)` / `◀ name 2.4s (t+…)`),nohup+轮询窗能看到当前跑到哪个
+   * 场景、每步多久,不再 tail 猜。fn 收到 ledger 自身;返回值透传。
+   * 用法:await L.step('B1 夜20:00 右键采收', async () => { …; return r; });
+   */
+  async step(name, fn) {
+    const t0 = Date.now();
+    if (!this.quiet) console.log(`▶ ${name} (t+${this.elapsed()})`);
+    try {
+      return await fn(this);
+    } finally {
+      const dur = ((Date.now() - t0) / 1000).toFixed(1);
+      if (!this.quiet) console.log(`◀ ${name} ${dur}s (t+${this.elapsed()})`);
+      this.lines.push(`STEP: ${name} ${dur}s (t+${this.elapsed()})`);
+    }
+  }
 
   get ok() { return this.fails.length === 0; }
 

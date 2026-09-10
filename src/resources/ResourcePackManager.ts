@@ -5,14 +5,21 @@
 // ImageBitmap 桥解码、全透明坏 sheet 防线、sw:remaster-applied 事件）。资源包与素材
 // 重制包共享同一 runtime 实例（main.ts 装配）——buff 图标钩子/弹幕覆盖/重烘链天然合流。
 //
-// 应用序（AssetSourceController.UseResourcePacks :38-63 同语义）：EnabledPacks 按
-// SortingOrder 升序应用，高序后写覆盖低序 = 高优先级；同键多包由合并表终态保证。
-// 音效覆盖经 Sfx.applySfxPackOverrides 整表下发（跨 Sfx 实例驱逐缓存）。
+// 应用序（★SW-FX16 2026-09-10 优先级定谳修正,锚见 ResourcePackList.ts 文件头）：
+// EnabledPacks 按 SortingOrder 升序合并、【首写胜】——列表顶 = 最小 order = 冲突
+// 胜者。真值锚：纹理 AssetRepository.FindSourceForAsset = _sources.FirstOrDefault
+// （源序 = [packs 升序,静态源尾随],AssetSourceController.cs:45-58）;音频
+// FindReplacementTrack（:84-124）对反转表逐源覆盖 → 最小 order 胜。原版 UI 命名层
+// （SetResourcePackAsTopPriority=最大+1/"向前移动"=+1）与引擎相反,系误称,不照抄。
+// 旧实现「高序后写覆盖低序」按命名层落刀 = 与原版引擎行为相反,本批反正。
+// 音效覆盖经 Sfx.applySfxPackOverrides 整表下发（跨 Sfx 实例驱逐缓存）；音乐覆盖
+// 经 Sfx.applyMusicPackOverrides（Audio.buffer/Sfx.loadCueBuffer 消费,跨实例驱逐
+// 经 setMusicOverrideListener 回调）。
 // 字体 = FontFace 注册（web 适配：族名 SWRP:<基名>；XNB 字体不可译已在上游跳过）。
 import { RemasterRuntime } from '../remaster/RemasterRuntime';
 import { buildManifest } from '../remaster/PackFormat';
 import type { LoadedPack } from '../remaster/types';
-import { applySfxPackOverrides, sfxPackOverrideKeys } from '../core/Sfx';
+import { applySfxPackOverrides, applyMusicPackOverrides, musicPackOverrideKeys, sfxPackOverrideKeys } from '../core/Sfx';
 import {
   readResourcePack, ResourcePackError, formatPackVersion,
   type ParsedResourcePack,
@@ -73,7 +80,8 @@ export class ResourcePackManager {
     if (this.rows.length) {
       const enabled = this.rows.filter((r) => r.enabled).length;
       console.log(`[resourcepacks] 启动应用:${enabled}/${this.rows.length} 个启用包,注入 ${applied} 张贴图`
-        + (sfxPackOverrideKeys().length ? `,${sfxPackOverrideKeys().length} 个音效覆盖` : ''));
+        + (sfxPackOverrideKeys().length ? `,${sfxPackOverrideKeys().length} 个音效覆盖` : '')
+        + (musicPackOverrideKeys().length ? `,${musicPackOverrideKeys().length} 首音乐覆盖` : ''));
     }
     return { packs: this.rows.length, applied };
   }
@@ -109,7 +117,9 @@ export class ResourcePackManager {
   }
 
   /** 启用/禁用（CreatePackToggleButton.OnLeftClick :200-207 语义：立即重置内容态）。
-   *  启用 = 置顶优先（SetResourcePackAsTopPriority）+ 立即应用；
+   *  启用 = SetResourcePackAsTopPriority（落显示列底,原版 1:1,见 ResourcePackList
+   *  注）+ 全量重放（★SW-FX16 首写胜语义：新包在列底不压制已启用同键包,故不能只
+   *  注入本包——旧实现直接 applyImages(pack) 在首写胜下会越权覆盖列表顶包）；
    *  禁用 = 撤文件 + 余包重放。 */
   async setEnabled(id: string, on: boolean): Promise<void> {
     const row = this.rows.find((r) => r.id === id);
@@ -117,8 +127,8 @@ export class ResourcePackManager {
     await this.ready();
     if (on) {
       enableAsTopPriority(row, this.rows);
-      const pack = await this.loadParsed(row);
-      if (pack) await this.applyImages(pack);
+      await this.loadParsed(row);
+      await this.applyAll();
     } else {
       disablePack(row);
       const pack = await this.loadParsed(row);
@@ -166,27 +176,23 @@ export class ResourcePackManager {
   private async afterMutation(): Promise<void> {
     cleanUpPriority(this.rows);
     await this.store.saveRows(this.rows);
-    this.pushSoundOverrides();   // 禁用/卸载/重放后重算音效终态
+    this.pushAudioOverrides();   // 禁用/卸载/重放后重算音效+音乐终态
   }
 
-  /** 全量应用（启动/禁用重放/同键调序）：按优先级升序合并 → 一次注入 */
+  /** 全量应用（启动/启停重放/同键调序）：EnabledPacks 按 SortingOrder 升序合并、
+   *  【首写胜】（列表顶 = 最小 order = 冲突胜者——真值锚见文件头 SW-FX16 定谳） */
   private async applyAll(): Promise<void> {
     const merged = new Map<string, Uint8Array>();
     const fonts = new Map<string, Uint8Array>();
-    for (const row of enabledSorted(this.rows)) {   // 升序 = 低优先级先入,高序覆盖
+    for (const row of enabledSorted(this.rows)) {   // 升序遍历,先到先得
       const pack = await this.loadParsed(row);
       if (!pack) continue;
-      for (const [k, v] of pack.images) merged.set(k, v);
-      for (const [k, v] of pack.fonts) fonts.set(k, v);
+      for (const [k, v] of pack.images) if (!merged.has(k)) merged.set(k, v);
+      for (const [k, v] of pack.fonts) if (!fonts.has(k)) fonts.set(k, v);
     }
     if (merged.size) await this.applyImagesMap(merged);
     for (const [fam, bytes] of fonts) void registerPackFont(fam, bytes);
-    this.pushSoundOverrides();
-  }
-
-  private async applyImages(pack: ParsedResourcePack): Promise<void> {
-    await this.applyImagesMap(pack.images);
-    for (const [fam, bytes] of pack.fonts) void registerPackFont(fam, bytes);
+    this.pushAudioOverrides();
   }
 
   private async applyImagesMap(images: Map<string, Uint8Array>): Promise<void> {
@@ -215,15 +221,19 @@ export class ResourcePackManager {
     await this.runtime.restoreVanilla(files);
   }
 
-  /** 音效覆盖终态：enabled 包按优先级升序合并（高序后写）→ Sfx 整表下发 */
-  private pushSoundOverrides(): void {
+  /** 音效+音乐覆盖终态：enabled 包按优先级升序合并（首写胜,SW-FX16 定谳）→
+   *  Sfx 整表下发（音乐表同源;Audio/Sfx 缓存驱逐各自通道承担） */
+  private pushAudioOverrides(): void {
     const merged = new Map<string, Uint8Array>();
+    const music = new Map<string, Uint8Array>();
     for (const row of enabledSorted(this.rows)) {
       const pack = this.parsed.get(row.id);
       if (!pack) continue;
-      for (const [k, v] of pack.sounds) merged.set(k, v);
+      for (const [k, v] of pack.sounds) if (!merged.has(k)) merged.set(k, v);
+      for (const [k, v] of pack.music) if (!music.has(k)) music.set(k, v);
     }
     applySfxPackOverrides(merged);
+    applyMusicPackOverrides(music);
   }
 
   /** 惰性取解析产物（启动后 toggle 首次触发时解 zip） */

@@ -430,6 +430,43 @@ export class SettingsPanel {
               : d.dialoguePortraitMode === 'closeUp' ? 'fullBodyRetro'
                 : d.dialoguePortraitMode === 'fullBodyRetro' ? 'disabled' : 'detailed'),
         ),
+        // ★SW-FX14 2026-09-10 Boss 血条数字（IngameOptions.cs:806-812 1:1——
+        // BigProgressBarSystem.ShowText :76 缺省 true，Preferences 键
+        // "ShowBossBarHealthText" :74/:118-124 持久化；旧版设置页双入口
+        // Main.cs:50774-50778。消费=Renderer.drawBossBar → drawBigProgressBar
+        // showText 参 → DrawHealthText 门 Helper.cs:57/:123）
+        this.modeRow(
+          Lang.text('UI.ShowBossLifeTextOn').replace(/[:：].*$/, ''),
+          () => String(d.showBossBarHealthText),
+          () => Lang.text(d.showBossBarHealthText ? 'UI.ShowBossLifeTextOn' : 'UI.ShowBossLifeTextOff'),
+          () => void options.set('showBossBarHealthText', !d.showBossBarHealthText),
+        ),
+        // ★SW-FX14 背包特效（IngameOptions.cs:833-842 1:1——Main.FlashyEffectsInterface
+        // :443 缺省 true，config 键 :4300/:4443。★1.4.5.7 全库该字段零行为消费方
+        // （仅声明/存/读/两处设置行）= 原版死设置，1:1 保态不挂行为）
+        this.modeRow(
+          Lang.text('UI.FlashyEffectsInterfaceOn').replace(/[:：].*$/, ''),
+          () => String(d.flashyEffectsInterface),
+          () => Lang.text(d.flashyEffectsInterface ? 'UI.FlashyEffectsInterfaceOn' : 'UI.FlashyEffectsInterfaceOff'),
+          () => void options.set('flashyEffectsInterface', !d.flashyEffectsInterface),
+        ),
+        // ★SW-FX14 光照模式（IngameOptions.cs:973-979「视频」组 1:1——Lighting.Mode
+        // 静态初值 Color（Lighting.cs:19；枚举 Terraria.Graphics.Light/LightMode.cs
+        // White=0/Retro=1/Trippy=2/Color=3）；循环 = NextLightMode（Lighting.cs:169-176
+        // Mode++ 未定义回落 White）= Color→White→Retro→Trippy→Color；config 键
+        // "LightingMode" Main.cs:4238/:4490-4495。★行为备案：Color=NewEngine(逐格
+        // RGB)≙本仓 GL 光照图；White/Retro/Trippy 走 LegacyLighting 引擎（Lighting.cs:
+        // 40-54）——legacy 引擎族未移植，三档暂与 Color 同渲（依赖：照明引擎族移植）
+        this.modeRow(
+          Lang.text('UI.LightMode_Color').replace(/[:：].*$/, ''),
+          () => d.lightMode,
+          () => Lang.text(`UI.LightMode_${d.lightMode.charAt(0).toUpperCase()}${d.lightMode.slice(1)}`),
+          () => {
+            // NextLightMode 1:1：枚举序 Color(3)→White(0)→Retro(1)→Trippy(2)→Color
+            const order = ['color', 'white', 'retro', 'trippy'] as const;
+            void options.set('lightMode', order[(order.indexOf(d.lightMode) + 1) % order.length]);
+          },
+        ),
       );
       const hint = document.createElement('div');
       hint.className = 'sw-set-hint';
@@ -614,6 +651,18 @@ export class SettingsPanel {
           () => void options.set('doorOpeningPreference',
             d.doorOpeningPreference === 'enabled' ? 'gamepadOnly'
               : d.doorOpeningPreference === 'gamepadOnly' ? 'disabled' : 'enabled'),
+        ),
+        // ★SW-FX14 2026-09-10 悬停控制（IngameOptions.cs:671-688 1:1——
+        // Player.Settings.HoverControl :357 缺省 Hold，CycleHoverControl :374-377
+        // = Utils.CycleControlControl_ClickHold Hold↔Click 两态互换；config 键
+        // "HoverControlMode" Main.cs:4293/:4638。消费=Player.updateHoverLatch
+        // （Player.cs:25452-25484）+ TryingToHoverUp/Down 取值门（:3908-3927）
+        // 全消费面：WingMovement/WingFrame/WingAirLogicTweaks/贴墙靴缓降/羽落）
+        this.modeRow(
+          Lang.text('UI.HoverControlSettingIsHold').replace(/[:：].*$/, ''),
+          () => d.hoverControl,
+          () => Lang.text(d.hoverControl === 'click' ? 'UI.HoverControlSettingIsClick' : 'UI.HoverControlSettingIsHold'),
+          () => void options.set('hoverControl', d.hoverControl === 'hold' ? 'click' : 'hold'),
         ),
         // 相机平移档（1457 Player.Settings.PanControl_KeyboardAndMouse :359 循环切换
         // CyclePanControl_KeyboardAndMouse :379-382 → Utils.CycleControlControl_OffOnClickHold

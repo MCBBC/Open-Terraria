@@ -17021,8 +17021,12 @@ export class Renderer {
   }
 
   /** Boss 血条绘制（BigProgressBarHelper.DrawFancyBar 两重载合并——生命条
-   *  行0-3 + 盾量叠层行4/5；布局 456×22 居中 (W/2,H-50)，头像净左上 =
-   *  框左上-(32,24)+(4,20)，盾>0 时文本显盾量） */
+   *  行0-3 + 盾量叠层行4/5；布局 456×22 居中 (W/2,H-50)，头像落点按重载双路径
+   *  （★SW-FX14：生命重载中心锚 vec+(17,34) / 盾量重载净左上 vec+(4,20)，
+   *  BossBars.barIconOrigin），盾>0 时文本显盾量）。
+   *  ★SW-FX14：ShowText 数字开关接线（BigProgressBarSystem.ShowText，原版缺省
+   *  true 且经 Preferences "ShowBossBarHealthText" 持久化——BigProgressBarSystem.
+   *  cs:76/:74/:118-124；设置行 IngameOptions.cs:806-812）——旧实现未传参恒显 */
   private drawBossBar(
     ctx: CanvasRenderingContext2D, viewW: number, viewH: number, info: CollectInfo,
   ) {
@@ -17031,7 +17035,7 @@ export class Renderer {
       bar: this.atlas.vui('UI_UI_BossBar.png'),
       head: info.headIndex >= 0
         ? this.atlas.vmisc(`vanilla/NPC_Head_Boss_${info.headIndex}.png`) : null,
-    }, viewW, viewH, info);
+    }, viewW, viewH, info, options.data.showBossBarHealthText);
   }
 
 }

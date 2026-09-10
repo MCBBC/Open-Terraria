@@ -11,6 +11,17 @@
 //   否则整表替换为 [新键]。FixDerpedRebinds（:1399-1417）只保护
 //   MouseLeft/MouseRight/Inventory 三键（空表回默认 ResetKeyBinding）——鼠标两键
 //   本仓硬编码在 Input（声明不可重绑），故保护名单只剩 Inventory。
+//
+// ★SW-FX16 2026-09-10 持久化载体定谳：原版键位存档 = 独立本地文件
+//   "input profiles.json"（Preferences，Main.cs:67488；PlayerInput.Save/Load
+//   PlayerInput.cs:768-777/:779-817），非 .plr、非 config.json——config.json 的
+//   Key* 散位段只在旧版迁移时读（version≤162，Main.cs:4673-4715；重置面
+//   Main.ResetKeyBindings :53257-53273 只复位那批 c* 遗留字段）。本仓载体 =
+//   options.json（sandboxworld.options，KvStore）——同为「本地配置、跨世界存续」
+//   语义（适配登记）；migrateLegacyDefaults 对齐 PlayerInputProfile.Load 的
+//   Last-Launched-Version 版本闸迁移（:114-142 <190/218/227/265 逐段补缺省）。
+//   KeyConfiguration.WritePreferences(:84-91) 强制 MouseLeft/Inventory 非空的
+//   保护在本仓由 assignBinding 的 Inventory 保护臂承担（鼠标两键不入表）。
 import { options } from './Options';
 import { Lang } from '../i18n/Lang';
 
@@ -150,6 +161,28 @@ export function actionsForCode(code: string): KeybindAction[] {
   const out: KeybindAction[] = [];
   for (const a of KEYBIND_ACTIONS) if (bindsOf(a).includes(code)) out.push(a);
   return out;
+}
+
+/** 快捷栏槽位键的 action 名（Hotbar1..Hotbar10 = 槽 0..9；原版 trigger 全集见
+ *  PlayerInput.cs:233-234，缺省 D1..D0 = PlayerInput.cs:2091-2100） */
+const HOTBAR_SLOT_ACTIONS: readonly KeybindAction[] = [
+  'Hotbar1', 'Hotbar2', 'Hotbar3', 'Hotbar4', 'Hotbar5',
+  'Hotbar6', 'Hotbar7', 'Hotbar8', 'Hotbar9', 'Hotbar10',
+];
+
+/**
+ * 快捷栏槽位查键（★SW-FX16 2026-09-10 消费面收口）：Hotbar1..Hotbar10 逐位走活绑表
+ * ——原版数字切栏消费的就是可重绑 trigger（Player.cs:25286-25330 读
+ * Triggers.Current.Hotbar1..Hotbar10），不是硬编码 Digit1-0；此前仓库 regex
+ * `/^Digit([0-9])$/` 在用户改绑/解绑后仍按物理数字键切栏 = 与原版劈叉。
+ * 返回槽位 0-9；无命中 null（含该槽被显式解绑/绑定到别的键——原版同：trigger
+ * 不含该键即不触发）。
+ */
+export function hotbarSlotOfCode(code: string): number | null {
+  for (let i = 0; i < HOTBAR_SLOT_ACTIONS.length; i++) {
+    if (bindsOf(HOTBAR_SLOT_ACTIONS[i]).includes(code)) return i;
+  }
+  return null;
 }
 
 /** 持久化清洗：只留已知 action 的字符串数组，去空串/去重；空表原样保留

@@ -1,5 +1,8 @@
-// 环境转换器全族实体（Terarria1456 1:1，2026-08-20 批）：
-//   ① SolutionProj —— 溶液喷射（aiStyle 31，Projectile.cs:25318-25419）：Clentaminator
+// 环境转换器全族实体（Terarria1456 1:1，2026-08-20 批；★SW-FX13 锚正 2026-09-10：
+//   AI_031 域 1457 终值 = Projectile.cs:27160-27259（1456=旧注 :25318-25419），
+//   本文行号已逐支换算 1457,语义零改动——正文 aiStyle31/弹心 Convert(conv,size)/
+//   寿命钳 133/尘 ramp 各值与 1457 :27160-27259 逐位对拍一致）：
+//   ① SolutionProj —— 溶液喷射（aiStyle 31）：Clentaminator
 //      779 / Terraformer(Clentaminator2) 5134 的溶液弹 145-149/1015-1017。每 AI
 //      子步（extraUpdates=2 → 每 tick 3 子步）在弹心 WorldGen.Convert(conv, size)
 //      （size=2；Terraformer ai[1]=1 → size 3），寿命恒钳 133 子步；本体不绘制
@@ -30,8 +33,8 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 
-/** 溶液弹型号表（AI_031 switch，cs:25321-25358）：projId → [conv, dust]。
- *  conv = BiomeConversionID（cs:25366 Convert 第二参）；dust = NewDust 型号 */
+/** 溶液弹型号表（AI_031 switch，1457 Projectile.cs:27165-27199）：projId → [conv, dust]。
+ *  conv = BiomeConversionID（:27208 Convert 第三参）；dust = NewDust 型号 */
 export const SPRAY_PROJ: Record<number, readonly [number, number]> = {
   145: [0, 110],   // PureSpray 绿溶液 → 纯净（default 分支）
   146: [2, 111],   // HallowSpray 蓝溶液 → 神圣
@@ -45,13 +48,14 @@ export const SPRAY_PROJ: Record<number, readonly [number, number]> = {
 
 export const SPRAY_PROJ_IDS = new Set(Object.keys(SPRAY_PROJ).map(Number));
 
-/** 三瓶水 Kill 转换表（cs:75614-75624）：圣水 69 → 神圣 2 / 邪水 70 → 腐化 1 /
- *  血水 621 → 猩红 4（Convert 第 4 参 size=4） */
+/** 三瓶水 Kill 转换表（1457 Projectile.cs:79360-79378；1456=旧注 :75614-75624）：
+ *  圣水 69 → 神圣 2 / 邪水 70 → 腐化 1 / 血水 621 → 猩红 4（Convert 第 4 参 size=4） */
 export const WATER_PROJ_CONV: Record<number, number> = { 69: 2, 70: 1, 621: 4 };
 
-/** 溶液消耗门（Player.cs:52739/:52815 两处 flag2 合成）：返回 true = 本发扣 1。
- *  · :52739 Terraformer 5134 掷 Next(3)==0 → 免耗（1/3 免,flag2 语义）
- *  · :52815 (779||5134) && itemAnimation < itemAnimationMax - useTime → 免耗——
+/** 溶液消耗门（★SW-FX13 锚正：1457 Player.cs:54231-54234/:54308-54311；1456=旧注
+ *  :52739/:52815——两处 flag2 合成）：返回 true = 本发扣 1。
+ *  · :54231 Terraformer 5134 掷 Next(3)==0 → 免耗（1/3 免,flag 语义）
+ *  · :54308 (779||5134) && itemAnimation < itemAnimationMax - useTime → 免耗——
  *    useAnimation 30/useTime 5 下每轮 6 发仅前 2 发扣（swing.t 为剩余帧数，
  *    itemAnimation 等效 = dur - t）；首发（无 swing/异 item swing）恒扣 */
 export function solutionConsumesThisShot(
@@ -80,13 +84,14 @@ export class SolutionProj extends Entity {
   override vx: number;
   override vy: number;
   projId: number;
-  /** ai[1]==1（Terraformer 5134 发射：Player.cs:48504-48509）→ size 3 + 快尘 */
+  /** ai[1]==1（Terraformer 5134 发射：1457 Player.cs:49632-49637 第 11 参传 1）
+   *  → size 3 + 快尘 */
   private flag13: boolean;
   private convType: number;
   private dustType: number;
   /** ai[0]（尘渐显计数） */
   private ai0 = 0;
-  /** timeLeft：AI 首步钳 133（cs:25367-25370），每子步 -1（Projectile.Update :15861） */
+  /** timeLeft：AI 首步钳 133（:27210-27213），每子步 -1（Projectile.Update） */
   private timeLeft = 1800;
   private rotation = 0;
   private direction = 1;
@@ -107,21 +112,22 @@ export class SolutionProj extends Entity {
     this.direction = vx < 0 ? -1 : 1;
   }
 
-  /** SetDefaults extraUpdates=2 → 每 tick AI/位移/寿命各跑 3 子步（cs:15331 模） */
+  /** SetDefaults extraUpdates=2 → 每 tick AI/位移/寿命各跑 3 子步（SetDefaults
+   *  :2340-2350 extraUpdates=2 之模；1015-1017 经 DefaultToSpray :9635/:10693） */
   fixedUpdate(_dt: number, game: GameHooks): void {
     for (let sub = 0; sub < 3; sub++) this.step(game);
     if (this.timeLeft <= 0) this.dead = true;
   }
 
   private step(game: GameHooks): void {
-    // cs:25359-25367：owner==myPlayer 时每子步弹心 Convert(conv, flag13?3:2)
+    // :27200-27209：owner==myPlayer 时每子步弹心 Convert(conv, flag13?3:2)
     this.convert(this.convType, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE),
       this.flag13 ? 3 : 2);
-    // cs:25368-25370：寿命钳 133（后随子步递减）
+    // :27210-27213：寿命钳 133（后随子步递减）
     if (this.timeLeft > 133) this.timeLeft = 133;
     this.timeLeft--;
-    // cs:25373-25415：尘渐显 ramp（num265=flag13?3:7；前 4 档 0.2/0.4/0.6/0.8；
-    // flag13 再 ×1.2 + 外扩 12×num266）
+    // :27214-27256：尘渐显 ramp（num252=flag13?3:7；前 4 档 0.2/0.4/0.6/0.8；
+    // flag13 再 ×1.2 + 外扩 12×num254）
     const gate = this.flag13 ? 3 : 7;
     if (this.ai0 > gate) {
       let ramp = 1;
@@ -146,7 +152,7 @@ export class SolutionProj extends Entity {
       }
     }
     this.ai0++;
-    // cs:25417：rotation += 0.3 * direction
+    // :27257：rotation += 0.3 * direction
     this.rotation += 0.3 * this.direction;
     // 位移（tileCollide=false / ignoreWater / 无重力——直线）
     this.x += this.vx;

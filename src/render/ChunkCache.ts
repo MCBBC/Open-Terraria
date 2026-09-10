@@ -29,6 +29,16 @@ const TILE_RULES: Record<number, string> = {
   13: '工作台', 14: '熔炉', 15: '铁砧',
 };
 
+/** 树族冠/枝标记帧判定（SW-FX12 荧光叠层补画用）：drawTreeCell 冠块入口
+ *  `fy >= 198 && fx >= 22`（普通/宝石/装饰/灰烬树）与棕榈冠 `fx ∈ [88,132]`——
+ *  这些格烘焙层为空（foliageOnly=false 早退 / 第四遍 continue→WindSway 摆动层）。
+ *  蘑菇树 72 顶格在第四遍烘焙，页上有内容，不在此表。 */
+const TREE_FOLIAGE_SHEETS = new Set([5, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+function isTreeCrownFrame(sheet: number, fx: number, fy: number): boolean {
+  if (sheet === 323) return fx >= 88 && fx <= 132;
+  return TREE_FOLIAGE_SHEETS.has(sheet) && fy >= 198 && fx >= 22;
+}
+
 export interface ChunkPair {
   wall: HTMLCanvasElement;   // atlas 页·墙层（水画在它之上）——用 sx/sy 源矩形取 cell
   tile: HTMLCanvasElement;   // atlas 页·tile 层（画在水之上）
@@ -559,6 +569,31 @@ export class ChunkCache {
           }
           if (c & TileStore.COAT_FULLBRIGHT_BLOCK && st2.flags[i] && st2.type[i] !== 0) {
             gctx.drawImage(tilePage, ox + px, oy + py, TILE, TILE, px, py, TILE, TILE);
+            // ★SW-FX12（2026-09-10）：摆动族（草/藤/药草,swayBakeSkip 烘焙摘除）与
+            //  树冠/树枝/棕榈冠标记格（drawTreeCell foliageOnly=false 早退 / 第四遍
+            //  continue）页上无内容 → 上面直拷=空荧光。原版这些特殊绘制路径同样吃
+            //  fullbright→White（TileDrawing.cs:6727-6740 GetLightOverride 经
+            //  DrawAnimatedTile_AdjustForVisionChangers 对草族生效；DrawTrees :8290/
+            //  :8345/:8455 冠枝 tile.fullbrightBlock()→color=White）→ 本地静态重画
+            //  进叠层（风摆 ±2px 瞬态错位=烘焙层同口径等价边界）。动态动画格
+            //  （isDynamicAnimSheet/378/272）帧随节拍变,静态拷贝会错帧 → 登记债不接。
+            const tdef = TILE_DEFS[st2.type[i]];
+            const v = tdef?.vanilla;
+            if (this.autotiler?.atlas && v
+              && (swayBakeSkip(st2.type[i], st2.frameX[i]) || isTreeCrownFrame(v.sheet, st2.frameX[i], st2.frameY[i]))) {
+              const x = x0 + lx, y = y0 + ly;
+              const trees = { treeX: this.world.treeX, treeStyle: this.world.treeStyle,
+                treeTops: this.world.treeTops, worldSurface: this.world.groundLevel, worldW: this.world.w };
+              if (isTreeCrownFrame(v.sheet, st2.frameX[i], st2.frameY[i])) {
+                drawTreeCell(gctx, this.autotiler.atlas, st2, x, y, st2.frameX[i], st2.frameY[i],
+                  px, py, v.sheet, true, trees, 0, undefined, st2.paint[i]);
+              } else {
+                drawVanillaCell(gctx, this.autotiler.atlas, v.sheet, v.frame, v.fw ?? 1, v.fh ?? 1,
+                  st2, x, y, st2.type[i],
+                  (t) => t === st2.type[i] || frameMergesWith(st2.type[i], t),
+                  px, py, st2.frameX[i], st2.frameY[i], trees);
+              }
+            }
           }
         }
       }
@@ -850,9 +885,16 @@ export class ChunkCache {
               if (isCrown) continue; // 棕榈冠 → WindSway overlay
               // 棕榈干身（倾斜跨列，必须外扩遍）
               // ★IIIII227：第四遍在油漆 pass 之后 → 棕榈干身须自带 paint（源染色）
+              // ★SW-FX12：干身特判组（GetTileSettings(323,style)=棕榈四沙型档,
+              //  TreePaintSystemData.cs:283-300;style=GetPalmTreeBiome 沙型+绿洲）
+              const pi = st.idx(tx, ty);
+              const pp = st.paint[pi];
+              const trunkSpecial = pp >= 1 && pp <= 12
+                ? getTilePaintSettings(323, palmTreePaintStyle(st, tx, ty, this.world.w)) ?? undefined
+                : undefined;
               drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
                 tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, false, trees,
-                0, undefined, st.paint[i]);
+                0, undefined, pp, trunkSpecial);
             } else {
               // 蘑菇树：顶格标记帧原版不摆动，保留烘焙（DrawTrees switch 无 case 72）
               drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,

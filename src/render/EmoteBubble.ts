@@ -173,17 +173,25 @@ export function makeLocalPlayerEmote(
  *  附近城镇 NPC（aiStyle7 城镇族）对玩家表情起回应——条件：ai[0]<2（游走/站定,
  *  社交/攻击/坐姿等态不打断）且（玩家可对话且 <200px 或 无视线遮挡）→
  *  ai[0]=19 回应态 220t + 面向玩家（NPC.cs:69680 ai0==19 与 7 同帧带：帧 16 冒
- *  PickNPCEmote 气泡 112t——见 TownNPC.socialFrame case 7/19）。 */
+ *  PickNPCEmote 气泡 112t——见 TownNPC.socialFrame case 7/19）。
+ *  ★SW-FX15：补 CanBeTalkedTo 门（Player.cs:3872-3882 = active∧!dead∧!ShouldNotDraw
+ *  ∧stealth==1f）——蘑菇矿/星璇潜行中（stealth<1）NPC 不回应 200px 近距臂，仅剩
+ *  无视线遮挡臂（与原版 (talkable && dist<200) || !CanHitLine 同构）。JS 侧 stealth
+ *  用 ε≥1−1e-6 判满：C# float 回升链 +0.1f 累加溢出后钳回精确 1f，JS double 累加
+ *  漂移停在 0.9999999999999999（ULP 族备案）——严格 ===1 会把可对话态误判潜行。 */
 export function checkForNPCsToReactToEmoteBubble(
-  player: { cx: number; cy: number; x: number; y: number; w: number; h: number },
+  player: { cx: number; cy: number; x: number; y: number; w: number; h: number; stealth?: number },
   npcs: readonly TownNPC[],
   canHitLine: (x1: number, y1: number, w1: number, h1: number, x2: number, y2: number, w2: number, h2: number) => boolean,
 ): void {
+  // CanBeTalkedTo（Player.cs:3872）：!ShouldNotDraw（隐身甲/invis,本仓未建模=恒真
+  // 偏差备案）∧ stealth==1f；dead 已由上游 MakeLocalPlayerEmote 死亡门涵盖
+  const talkable = (player.stealth ?? 1) >= 1 - 1e-6;
   for (const n of npcs) {
     if (n.dead || n.bound || !(n.ai0 < 2)) continue;   // aiStyle==7 && townNPC（入参即城镇池）
     const dist = Math.hypot(player.cx - n.cx, player.cy - n.cy);
     // CanBeTalkedTo && Distance(Center) < 200 || !CanHitLine(Top→Top)
-    const reacts = (dist < 200)
+    const reacts = (talkable && dist < 200)
       || !canHitLine(n.x, n.y, 0, 0, player.x, player.y, 0, 0);
     if (!reacts) continue;
     const direction = n.x < player.x ? 1 : -1;

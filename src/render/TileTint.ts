@@ -63,6 +63,10 @@ export function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement
 const regionTintCache = new Map<string, HTMLCanvasElement>();
 const regionImgIds = new WeakMap<object, number>();
 let regionNextImgId = 1;
+/** 特判组设置对象身份 id（SPECIAL_PAINT_SETTINGS 表对象稳定复用，WeakMap 分配）——
+ *  ★SW-FX12：缓存键必须含 special 身份，否则同一 (图,矩形,paint) 的普通组与特判组
+ *  结果会互相污染（首个调用方定型，后者错拿前者画布）。 */
+const regionSpecialIds = new WeakMap<object, number>();
 
 /** 源图像身份 id（ImageBitmap/HTMLImageElement 无getId,WeakMap 稳定分配） */
 function sourceImgId(img: CanvasImageSource): number {
@@ -76,15 +80,23 @@ function sourceImgId(img: CanvasImageSource): number {
 
 /** 把 img 的 (sx,sy,sw,sh) 区域按 paint 逐像素染色,返回染色后的独立画布。
  *  paint<=0 / 文档环境缺失 / 读回失败 → null（调用方回落原图）。isWall=false
- *  （树族无墙档;负相 30 墙 hack 只在 wall bake 路径）。special=特判组（paint
- *  1-12 生效;树族 1-12 特判组接线仍为 Paint.ts 头注登记债,本通道预留参数）。 */
+ *  （树族无墙档;负相 30 墙 hack 只在 wall bake 路径）。special=特判组设置（paint
+ *  1-12 生效,函数内自带 paint 域守卫;★缓存键含 special 身份）。 */
 export function tintedVanillaRegion(
   img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number, paint: number,
   isWall = false, special?: LeafPaintSettings,
 ): HTMLCanvasElement | null {
   if (paint <= 0 || paint > 30 || sw <= 0 || sh <= 0) return null;
   if (typeof document === 'undefined') return null;
-  const key = `${sourceImgId(img)}|${sx}|${sy}|${sw}|${sh}|${paint}|${isWall ? 1 : 0}`;
+  let spId = 0;
+  if (special) {
+    spId = regionSpecialIds.get(special as object) ?? 0;
+    if (spId === 0) {
+      spId = regionNextImgId++;
+      regionSpecialIds.set(special as object, spId);
+    }
+  }
+  const key = `${sourceImgId(img)}|${sx}|${sy}|${sw}|${sh}|${paint}|${isWall ? 1 : 0}|${spId}`;
   const hit = regionTintCache.get(key);
   if (hit) return hit;
   const cv = document.createElement('canvas');

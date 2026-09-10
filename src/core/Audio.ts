@@ -4,11 +4,20 @@
 // musicFade[id] ±0.005/帧 逼近目标曲（:295 UpdateCommonTrack / :323 TowardStopping,1458 行号）。
 // audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
-import { Sfx } from './Sfx';
+import { Sfx, setMusicOverrideListener, musicPackOverride } from './Sfx';
 import { options } from './Options';
 import { swTrace } from '../net/AssetCache';
 
 const TITLE_ID = MUSIC.TitleIntro; // 50
+
+// ---- 资源包音乐覆盖消费面（★SW-FX16 2026-09-10）----
+// 覆盖表本体在 Sfx.ts（低层防环,packMusicOverrides）；本模块登记监听驱逐各
+// AudioSystem 实例解码缓存（换包后重取新源）。原版换轨即停旧载体重源
+// （LegacyAudioSystem.cs:50-54）——本仓在播轨继续到下次切曲（适配登记,同 Sfx 注）。
+const audioInstances = new Set<AudioSystem>();
+setMusicOverrideListener((affected) => {
+  for (const inst of audioInstances) inst.evictMusicBuffers(affected);
+});
 
 /** IIII225：标题曲种子覆写集（Main.cs:12626-12656 gameMenu 支——drunk:remix 70 /
  *  shimmerGen 72 / vampire 75 / notTheBees 86 / else 60;非 drunk:remix 8 / 十周年 11。
@@ -89,8 +98,23 @@ export class AudioSystem {
   private lastTs = 0;
 
   constructor() {
+    audioInstances.add(this);   // 资源包音乐覆盖下发时的解码缓存驱逐对象（SW-FX16）
     this.startLoop();
     this.armUnlock();
+  }
+
+  /** 资源包音乐覆盖变更：驱逐受影响曲目的解码缓存与失败负缓存（下次取曲吃新源）。
+   *  stems = 'Music_<id>' 形式；仅数字后缀命中本实例表（cue 茎名如 Music_45 亦解析） */
+  evictMusicBuffers(stems: Iterable<string>): void {
+    for (const stem of stems) {
+      const m = /^Music_(\d+)$/.exec(stem);
+      if (!m) continue;
+      const id = Number(m[1]);
+      this.buffers.delete(id);
+      this.decoding.delete(id);
+      this.failed.delete(id);
+      this.failedAt.delete(id);
+    }
   }
 
   /** 首次手势解锁监听（见 armUnlock）；null = 未挂/已摘 */
@@ -188,17 +212,29 @@ export class AudioSystem {
     return this.ac;
   }
 
-  /** 解码缓存（每曲一次；LRU 上限 MAX_BUFFERS。失败走限时负缓存,不占缓存位） */
+  /** 解码缓存（每曲一次；LRU 上限 MAX_BUFFERS。失败走限时负缓存,不占缓存位）。
+   *  ★SW-FX16：资源包音乐覆盖优先于网络源（原版资源包替换音乐轨,
+   *  LegacyAudioSystem.LoadFromSources :34-54 + FindReplacementTrack :84-124;
+   *  包内 Content/Music/Music_<id>.<ogg|mp3|wav> → 覆盖表键 'Music_<id>'）。
+   *  缓存一致性 = applyMusicPackOverrides 触发 evictMusicBuffers（audioInstances
+   *  监听,模块头登记）,故 buffers 命中行不必复核覆盖代际 */
   private async buffer(id: number): Promise<AudioBuffer | null> {
     const hit = this.buffers.get(id);
     if (hit !== undefined) return hit;
     if (this.decoding.has(id)) return null; // 解码中：本帧跳过，就绪后 track() 会补建
     if (this.failedFresh(id)) return null;  // 负缓存窗口内：快速短路,过期自动放行重取
+    const override = musicPackOverride(`Music_${id}`);
     this.decoding.add(id);
     try {
-      const r = await fetch(`audios/music/Music_${id}.mp3`);
-      if (!r.ok) throw new Error(String(r.status));
-      const buf = await this.ac!.decodeAudioData(await r.arrayBuffer());
+      let raw: ArrayBuffer;
+      if (override) {
+        raw = override.slice().buffer;   // decodeAudioData 脱管 ArrayBuffer → 先拷贝（音效面同款）
+      } else {
+        const r = await fetch(`audios/music/Music_${id}.mp3`);
+        if (!r.ok) throw new Error(String(r.status));
+        raw = await r.arrayBuffer();
+      }
+      const buf = await this.ac!.decodeAudioData(raw);
       this.buffers.set(id, buf);
       this.failed.delete(id);
       this.failedAt.delete(id);

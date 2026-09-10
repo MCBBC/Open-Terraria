@@ -12,6 +12,7 @@
  *        [--size=<small|medium|large|0|1|2>] [--vite=<auto|PORT|off>] [--headed]
  *        [--out=<dir>] [--timeout=<ms>] [--keep-vite] [-- 场景脚本透传参数...]
  *   node tools/probe.mjs doctor [--vite=PORT|auto] [--browser]
+ *   node tools/probe.mjs fields [过滤子串]
  *   node tools/probe.mjs help
  *
  * 退出码:0 全绿 / 1 环境失败 / 2 看门狗强杀 / 64 用法错误;其余透传场景自设。
@@ -43,6 +44,9 @@ const USAGE = `IIIII236 统一探针框架
   node tools/probe.mjs doctor [--vite=<PORT|off>] [--browser]
     自检:Chrome 路径/puppeteer-core 可解析/端口面/vite 可达/资产(vanilla.json+l10n)/桥
     --browser 再拉真页面:清 IDB+等桥+__swFlow 面+画布计数+SW 管线指纹
+  node tools/probe.mjs fields [过滤子串]
+    常用字段真名速查(IIIII238 ①):全局哨兵/TileStore/实体/玩家/时钟/Game 方法/键名惯例
+    (每条锚定 src 真定义,守卫=tests/probe-framework.test.ts)
   node tools/probe.mjs help
 
 场景脚本契约:
@@ -96,6 +100,11 @@ async function main() {
   const { opts, positionals, unknown } = parseArgs(cliArgv.slice(1));
 
   if (cmd === 'doctor') return doctor(opts);
+  if (cmd === 'fields') {
+    const { cheatsheetText } = await import('./probe/lib/cheatsheet.mjs');
+    console.log(cheatsheetText(positionals.join(' ')));   // positionals 已不含 cmd
+    process.exit(0);
+  }
   if (cmd !== 'run' || !positionals.length) {
     console.error(USAGE);
     process.exit(64);
@@ -166,6 +175,7 @@ async function main() {
     stdio: 'inherit',
     env: childEnv,
   });
+  const runT0 = Date.now();   // ③ 总耗时行(场景退出行附带)
 
   let done = false;
   // 收口唯一入口:done 旗只在这里置位(曾在 child 'exit' 句柄里先置 done 再调
@@ -200,7 +210,8 @@ async function main() {
   child.on('exit', (code, signal) => {
     clearTimeout(watchdog);
     const exitCode = signal ? 1 : (code ?? 1);
-    console.log(`[probe] 场景退出 code=${code} signal=${signal ?? '-'} → ${exitCode === 0 ? 'GREEN' : 'FAIL'}`);
+    const total = ((Date.now() - runT0) / 1000).toFixed(1);
+    console.log(`[probe] 场景退出 code=${code} signal=${signal ?? '-'} 总耗时=${total}s → ${exitCode === 0 ? 'GREEN' : 'FAIL'}`);
     void shutdown('child-exit', exitCode);
   });
   child.on('error', (e) => {

@@ -546,6 +546,45 @@ export function applySfxPackOverrides(sounds: ReadonlyMap<string, Uint8Array>): 
 /** 测试/调试探针：当前覆盖表只读视图 */
 export function sfxPackOverrideKeys(): string[] { return [...packSoundOverrides.keys()]; }
 
+// ---- 资源包音乐覆盖（★SW-FX16 2026-09-10 原版锚定补缺）----
+// 原版资源包可替换音乐轨 = LegacyAudioSystem.LoadFromSources(:34-54) 按
+// "Music/<曲名>" 资产路径经 FindReplacementTrack(:84-124) 取 .ogg/.wav/.mp3
+// 替换（音效 .xnb 走 Sounds/ 内容源面——本仓对应 packSoundOverrides）。仓库 BGM
+// 载体 = audios/music/Music_<id>.mp3（Audio.buffer），风/雨环境 cue =
+// Music_45/Music_28（Sfx.loadCueBuffer）——两路都挂本表。键 = 'Music_<id>' 茎名。
+// 表放 Sfx（低层模块,Audio 单向 import 防环）；AudioSystem 解码缓存驱逐经
+// setMusicOverrideListener 回调（Audio 模块装配时登记,见 core/Audio.ts）。
+// ★适配登记：①原版换曲即停旧轨重载（LegacyAudioSystem.cs:50-54 Stop+换轨）,
+//   本仓在播轨继续到下次切曲才吃到新源（Web 便利档,不重启音乐状态机）；
+//   ②Safari decodeAudioData 不解 ogg——包内 ogg 音乐在 Safari 解码失败=该曲
+//   负缓存静默（音效面同风险已登记）,面向 Web 的包建议 mp3/wav。
+const packMusicOverrides = new Map<string, Uint8Array>();
+let musicOverridesListener: ((affected: string[]) => void) | null = null;
+
+/** 登记音乐覆盖变更监听（Audio 模块装载时调用,驱逐其解码缓存）。返回旧监听。 */
+export function setMusicOverrideListener(l: ((affected: string[]) => void) | null): ((affected: string[]) => void) | null {
+  const prev = musicOverridesListener;
+  musicOverridesListener = l;
+  return prev;
+}
+
+/** 全量下发资源包音乐覆盖（合并终态）。返回受影响键（新旧并集,供驱逐）。 */
+export function applyMusicPackOverrides(music: ReadonlyMap<string, Uint8Array>): string[] {
+  const affected = new Set([...packMusicOverrides.keys(), ...music.keys()]);
+  packMusicOverrides.clear();
+  for (const [k, v] of music) packMusicOverrides.set(k, v);
+  musicOverridesListener?.([...affected]);
+  return [...affected];
+}
+
+/** 取一条音乐覆盖字节（Audio.buffer / Sfx.loadCueBuffer 消费）。 */
+export function musicPackOverride(stem: string): Uint8Array | undefined {
+  return packMusicOverrides.get(stem);
+}
+
+/** 测试/调试探针：当前音乐覆盖键 */
+export function musicPackOverrideKeys(): string[] { return [...packMusicOverrides.keys()]; }
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
@@ -757,10 +796,20 @@ export class Sfx {
     if (v !== null) this.setGainNow(L.gain.gain, v * this.ambientQuiet());
   }
 
-  /** 波 bank 后台取齐（失败静默：buf 恒 null = 冻结无声，雨/风均为可选层） */
+  /** 波 bank 后台取齐（失败静默：buf 恒 null = 冻结无声，雨/风均为可选层）。
+   *  ★SW-FX16：资源包音乐覆盖优先——Music_45/Music_28 与 BGM 同表
+   *  （原版资源包音乐替换覆盖全 AudioTracks 含环境 cue,LegacyAudioSystem.cs:34-54）；
+   *  层缓冲随层节点常驻,覆盖变更不回灌已建层（登记于 applyMusicPackOverrides 注）。 */
   private loadCueBuffer(ctx: AudioContext, L: CueLayer, file: string): void {
     if (L.loading) return;
     L.loading = true;
+    const ov = musicPackOverride(file.replace(/^.*\//, '').replace(/\.[^.]+$/, ''));
+    if (ov) {
+      ctx.decodeAudioData(ov.slice().buffer)
+        .then((buf) => { L.buf = buf; })
+        .catch(() => {});
+      return;
+    }
     fetch(file)
       .then((r) => (r.ok ? r.arrayBuffer() : null))
       .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))

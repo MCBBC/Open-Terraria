@@ -1,10 +1,14 @@
 // 礼袋/礼盒右键开包引擎（Player.OpenPresent :6651-6770 / OpenLegacyPresent :6772-6788 /
 // OpenGoodieBag :9199-9282 / OpenHerbBag :9064-9138，1.4.5.6 逐支抄）。
-// 渔获匣 26 型号（OpenFishingCrate :7667-8921）在 vanillaFishingCrates.ts，
+// 渔获匣 26 型号（OpenFishingCrate；★SW-FX13 锚正 2026-09-10：1457 Player.cs:8052-9336，
+// 1456=旧注 :7667-8921）在 vanillaFishingCrates.ts，
 // 锁盒两件（OpenLockBox :9031 / OpenShadowLockbox :9011）与蠕虫罐/牡蛎/麒麟蛋
 // （OpenCanofWorms :9140 / OpenOyster :9154 / OpenChilletEgg :9188）在本文件。
 // 入口门 = ItemSlot.RightClick :1514-1527（context==0 背包格 && mouseItem 空或不可叠 &&
 // OpenableBag）→ TryOpenContainer :1642-1660（掷骰 → stack-- → PlaySound(7)）。
+// （1457 ItemSlot.cs 同链 = RightClick :1614 / 开包门 :1632-1645 / TryOpenContainer
+//  :1764-1782 / TryOpenContainer_GrantItems :1784-1843——本文件其余注释行号仍为
+//  1456 域,1458 ItemSlot.cs 与 1457 零增量。）
 // 掷骰语义对齐 UnifiedRandom.Next：Next(n) = [0,n)、Next(a,b) = [a,b)。
 import { VANILLA_ITEM_KEY_BY_ID } from './items';
 import { openFishingCrate, FISHING_CRATE_VIDS } from './vanillaFishingCrates';
@@ -307,7 +311,7 @@ export function openBagItem(
       openShadowLockbox(give, rng, !!world.remixWorld);
       return true;
     default:
-      if (FISHING_CRATE_VIDS.has(vid)) {                      // :1668-1670 IsFishingCrate
+      if (FISHING_CRATE_VIDS.has(vid)) {                      // ★SW-FX13 锚正：1457 ItemSlot.cs:1790-1793 IsFishingCrate（1456=旧注 :1668-1670）
         openFishingCrate(vid, give, rng, {
           remixWorld: world.remixWorld,
           skyblockLowTiles: world.skyblockLowTiles,

@@ -16,6 +16,7 @@ import {
 } from '../world/MinecartTrack';
 import { cageFamilyOf, drawCageCell } from './CritterCage';
 import { tintedVanillaRegion } from './TileTint';
+import { getTreeFoliageSettings, type LeafPaintSettings } from '../world/Paint';
 import { inAPlaceWithWindTiles } from '../entities/Mounts';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
 import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, TILE_ANIM_RATE } from './TileAnim';
@@ -660,16 +661,23 @@ export function drawTreeCell(
    *  树族大贴图不进烘焙油漆 pass（冠=摆动层逐帧、棕榈干/蘑菇顶=油漆 pass 之后的
    *  第四遍外扩遍）→ 绘制时按源矩形 tintedVanillaRegion 染色（TileTint 共享模块，
    *  applyPaintTint 同一真值）。0=直通（普通世界逐字节原路径,零扰动）。
-   *  树族 1-12 特判组（getTreeFoliageSettings）接线仍为 Paint.ts 头注登记债——
-   *  本通道暂走普通组 pass（对 13-30 漆/四涂装世界 26/27/30 恒等精确）。 */
+   *  ★SW-FX12（2026-09-10）：树族 1-12 特判组已接线——冠/枝走 getTreeFoliageSettings
+   *  (foliageIndex=冠贴图序号,foliageStyle)（TileDrawing.cs:8280/:8332/:8387/:8445
+   *  GetTreeTop/BranchTexture → TilePaintSystemV2.cs:97/:113），棕榈冠 = 15/21 档
+   *  (沙型,TreePaintSystemData.cs:339-357)；干身走调用方传入的 trunkSpecial
+   *  （GetTileSettings(323,style) 棕榈干档）。13-30 漆不受特判组（函数内守卫）。 */
   paint = 0,
+  /** 干身 blit 的特判组设置（棕榈干身第四遍传入 = getTilePaintSettings(323,style)；
+   *  普通树干走烘焙油漆 pass 不经本通道）。冠/枝特判在函数内按 crown/palmType 派生，
+   *  不吃本参。 */
+  trunkSpecial?: LeafPaintSettings,
 ): void {
   const style = TREE_SHEET_STYLES[sheet] ?? 0;
   // ★IIIII227 油漆源染色直通（paint=0 → 与原 drawImage 逐参数同路径,零扰动）
   const blit = (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
-    dx: number, dy: number, dw = sw, dh = sh): void => {
+    dx: number, dy: number, dw = sw, dh = sh, special?: LeafPaintSettings): void => {
     if (paint > 0) {
-      const t = tintedVanillaRegion(img, sx, sy, sw, sh, paint);
+      const t = tintedVanillaRegion(img, sx, sy, sw, sh, paint, false, special);
       if (t) { ctx.drawImage(t, 0, 0, sw, sh, dx, dy, dw, dh); return; }
     }
     ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
@@ -702,6 +710,11 @@ export function drawTreeCell(
       // 【外】的棕榈，beachDistance=380 常量）→ biome+4）：Tree_Tops_21（348×392，
       // 帧 114×98、X 步长 116、Y 步长 98、X 偏移 48、Y 偏移 +2，:8421-8434）
       const oasis = x >= 380 && x <= st.w - 380;
+      // ★SW-FX12：棕榈冠特判组（GetTreeFoliageSettings(15/21, biome)，TilePaintSystemV2
+      //  TreeTopRenderTargetHolder.PrepareShader :97——TryGetTreeTopAndRequestIfNotReady
+      //  的 TextureIndex/TextureStyle = 15/21 × GetPalmTreeBiome，TileDrawing :8445）
+      const palIdx = oasis ? 21 : 15;
+      const palSpecial = paint >= 1 && paint <= 12 ? getTreeFoliageSettings(palIdx, palmType) : undefined;
       if (oasis) {
         const img21 = atlas.ensureVImage('vanilla/Tree_Tops_21.png');
         if (!img21) return;
@@ -714,10 +727,10 @@ export function drawTreeCell(
           ctx.translate(dx21 + w21 / 2, dy21 + h21);
           ctx.rotate(sway * 0.08);
           ctx.translate(-(dx21 + w21 / 2), -(dy21 + h21));
-          blit(img21, sx21, sy21, 114, 98, dx21, dy21, w21, h21);
+          blit(img21, sx21, sy21, 114, 98, dx21, dy21, w21, h21, palSpecial);
           ctx.restore();
         } else {
-          blit(img21, sx21, sy21, 114, 98, px - 48 + lean21, py + TILE + 2 - 98, 114, 98);
+          blit(img21, sx21, sy21, 114, 98, px - 48 + lean21, py + TILE + 2 - 98, 114, 98, palSpecial);
         }
         return;
       }
@@ -733,11 +746,11 @@ export function drawTreeCell(
         ctx.translate(dx15 + w15 / 2, dy15 + h15);
         ctx.rotate(sway * 0.08);
         ctx.translate(-(dx15 + w15 / 2), -(dy15 + h15));
-        blit(img15, sx15, sy15, 80, 80, dx15, dy15, w15, h15);
+        blit(img15, sx15, sy15, 80, 80, dx15, dy15, w15, h15, palSpecial);
         ctx.restore();
       } else {
         blit(img15, sx15, sy15, 80, 80,
-          px + (TILE - 80) / 2 + leanCrown, py + TILE - 80, 80, 80);
+          px + (TILE - 80) / 2 + leanCrown, py + TILE - 80, 80, 80, palSpecial);
       }
       return;
     }
@@ -747,7 +760,7 @@ export function drawTreeCell(
     const img323 = atlas.ensureVImage('vanilla/Tiles_323.png');
     if (!img323 || fx + 20 > img323.width) return;
     const lean = fy >= 32768 ? fy - 65536 : fy; // 原版 vector2.X += frameY
-    blit(img323, fx, 0, 20, 20, px - 2 + lean, py, 20, 20);
+    blit(img323, fx, 0, 20, 20, px - 2 + lean, py, 20, 20, trunkSpecial);
     return;
   }
   // 蘑菇树（tile 72）：独立渲染路径——U≥36 标记帧 = 巨蘑菇顶（Shroom_Tops，60×42、62px 步长、底部锚定）
@@ -788,6 +801,13 @@ export function drawTreeCell(
       : sheet === 5 && trees
         ? crownStyleFor(scanX, scan.type, scan.floorY, trees)
         : style;
+    // ★SW-FX12（2026-09-10）：冠/枝特判组接线（Paint.ts 头注登记债清偿）——原版
+    //  GetTreeTopTexture(treeStyle3, 0, color)/GetTreeBranchTexture(treeStyle2, 0, color)
+    //  （TileDrawing :8280/:8332/:8387）→ TryGetTreeTop/BranchAndRequestIfNotReady →
+    //  TreePaintSystemData.GetTreeFoliageSettings(TextureIndex=冠贴图序号, 0)
+    //  （TilePaintSystemV2.cs:97/:113）。foliageIndex = crown（Tree_Tops_{crown}），
+    //  foliageStyle 恒 0；灰烬树 634→crown 31 落 DefaultDirt 档 = 原版 default 分支。
+    const foliageSpecial = paint >= 1 && paint <= 12 ? getTreeFoliageSettings(crown, 0) : undefined;
     let img: ImageBitmap | HTMLImageElement | null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
     if (fx === 22) {   // 顶冠（fx=0 已改道干身路径，见块头注释）
@@ -835,11 +855,11 @@ export function drawTreeCell(
       ctx.translate(rdx + rw2 / 2, rdy + rh2);
       ctx.rotate(rot);
       ctx.translate(-(rdx + rw2 / 2), -(rdy + rh2));
-      blit(img, sx, sy, sw, sh, rdx, rdy, rw2, rh2);
+      blit(img, sx, sy, sw, sh, rdx, rdy, rw2, rh2, foliageSpecial);
       drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, rdx, rdy, rw2, rh2);
       ctx.restore();
     } else {
-      blit(img, sx, sy, sw, sh, dx, dy, sw, sh);
+      blit(img, sx, sy, sw, sh, dx, dy, sw, sh, foliageSpecial);
       drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, dx, dy);
     }
     return;

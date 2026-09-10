@@ -1336,9 +1336,14 @@ export class UI {
         const cur = this.slotContent(where, i);
         // 开包门（:1514-1527）：context==0（背包格，含快捷栏）&& OpenableBag &&
         // mouseItem 空或不可叠（!Item.CanStack）→ mouseRightRelease 边沿开包。
+        // ★SW-FX13（2026-09-10）门谓词补全 Item.CanStack（Item.cs:49870-49877）=
+        // type 同且 prefix 同：光标堆与匣同 id 异词缀时原版 !CanStack → 放行开包
+        // （旧码只比 id = 同型异词缀被误判可叠,开包门被吞。匣本身无词缀,现实
+        // 触达面趋零,但谓词按原文收口）。1457 锚 = ItemSlot.cs:1636-1645。
         // DOM mousedown 即边沿；hit 须先于装备/拆半分支（原版同序 return）
         if (cur && where === 'inv'
-          && (!this.heldStack || this.heldStack.id !== cur.id)
+          && (!this.heldStack || this.heldStack.id !== cur.id
+            || (this.heldStack.prefix ?? 0) !== (cur.prefix ?? 0))
           && OPENABLE_BAG_VIDS.has(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''))) {
           this.tryOpenContainer(cur, i);
           return;

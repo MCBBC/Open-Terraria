@@ -16,6 +16,8 @@
 //       Images/{TownNPCs,Misc,Backgrounds,Accessories,SplashScreens}/**
 //                             → vanilla/<族前缀>_<展平>.png
 //       Sounds/**              → Sfx 覆盖键（Custom/ 子目录按本仓提取管线拍平到根）
+//       Music/Music_<id>.<ext> → 音乐覆盖键 'Music_<id>'（★SW-FX16 原版 Music 家族
+//                                 补缺：LegacyAudioSystem.cs:34-54 全 AudioTracks 替换）
 //       Fonts/**               → Web 字体（@font-face 族名；XNB 字体不可译，跳过）
 //   展平规则 = scripts/vanilla-atlas.mjs 的 rel.replace(/\//g, '_') 同款（子目录
 //   下划线展平，含 UI/ 前缀保留）。
@@ -25,6 +27,7 @@
 export type MappedAsset =
   | { kind: 'image'; file: string }   // 形如 'vanilla/<X>.png' | 'vanilla-ui/<X>.png'（按 vanilla-ui/ 前缀分流注入目标）
   | { kind: 'sound'; file: string }   // Sfx 键（sounds/<file>.wav 的 file 部分）
+  | { kind: 'music'; file: string }   // ★SW-FX16：音乐键 'Music_<id>'（Audio.buffer / Sfx.loadCueBuffer 消费）
   | { kind: 'font'; family: string }; // FontFace 族名（SWRP:<基名>）
 
 /** 根级图片但消费侧在 vui 的族（vanilla-atlas.mjs 盔甲段：根级 Armor_Head/Legs
@@ -84,6 +87,17 @@ export function mapPackAsset(rel: string): MappedAsset[] {
     const file = drop.join('_');
     if (hasExt(file, AUDIO_EXT) === null) return [];
     return [{ kind: 'sound', file: file.slice(0, file.lastIndexOf('.')) }];
+  }
+  // ★SW-FX16 2026-09-10：Music/ 族（原版资源包可替换音乐轨——LegacyAudioSystem
+  // .LoadFromSources :34-54 按 "Music/<曲名>" 取 .ogg/.wav/.mp3 替换全 AudioTracks
+  // 含环境 cue 28/45;Wiki「Content/Music/Music_77.ogg」同构）。文件 = Content/Music/
+  // Music_<id>.<ext> 平铺（原版无子目录;嵌套视为未知跳过）。产出键 = 茎名
+  // 'Music_<id>'（Audio.buffer('Music_'+id) / Sfx.loadCueBuffer 同表）。
+  if (lower(head) === 'music') {
+    if (rest.length !== 1) return [];
+    const stem = hasExt(rest[0], AUDIO_EXT);
+    if (stem === null) return [];
+    return [{ kind: 'music', file: stem }];
   }
   if (lower(head) === 'fonts') {
     const name = rest[rest.length - 1] ?? '';
