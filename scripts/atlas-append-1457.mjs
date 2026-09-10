@@ -56,12 +56,27 @@ if (NEW_ITEMS.length) {
     const png = PNG.sync.read(readFileSync(src));
     PNG.bitblt(png, page, 0, 0, iw, ih, x, y);
     v.items[String(id)] = { name: meta.name, key: meta.key, createTile: meta.createTile ?? null, icon: 'vanilla/Item_Atlas_2.png', ix: x, iy: y, iw, ih };
+    v.itemNames[String(id)] = meta.name ?? '';   // ★SW-FX26（2026-09-10）：items/itemNames 成对写——
+                                                 //   本文件头契约"items/itemNames 增键",8/21 批漏 itemNames 半边
     x += iw + GUTTER;
     if (ih > shelfH) shelfH = ih;
   }
   writeFileSync(join(OUT_DIR, 'Item_Atlas_2.png'), PNG.sync.write(page));
   console.log(`Item_Atlas_2.png: ${NEW_ITEMS.length} 新物品`);
 }
+
+// ---- ①a itemNames 49 键缺口回填（SW-FX26 / FX22 定谳,2026-09-10）----
+// 8/21 追加批 items 6147-6195 已落库而 itemNames 全缺（只写 items 忘 itemNames,
+// 头部契约漏半边）——唯 WldImport vanillaItemNames 查表 miss 面。名字源=已落库
+// items[k].name（TEdit items.json 显示名,与既有 itemNames 命名法同源:
+// 6144'Music Box (Skeletron)'/6146'Music Box (Silence)'逐字一致）。幂等:
+// items 缺或 itemNames 已有即跳过;纯增键,既有键零改动。
+let named = 0;
+for (let id = 6147; id <= 6195; id++) {
+  const ks = String(id);
+  if (v.items[ks]?.name && !v.itemNames[ks]) { v.itemNames[ks] = v.items[ks].name; named++; }
+}
+if (named) console.log(`itemNames 回填: ${named} 键（6147-6195）`);
 
 // ---- ①b TEdit 缺口补打包（2026-08-22 资产审计 ❌1）----
 // TEdit items.json 缺 26 个 1.4.4+ 新物品 id（0/2772/2773/2775/2777/2778/2780/

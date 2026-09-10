@@ -163,7 +163,13 @@ describe('atlas 追加保护闸门: PNG 像素 md5 锚(防 PNG 侧重排)', () =
         }
       }
       const got = createHash('md5').update(buf).digest('hex').slice(0, 12);
-      if (got !== want) bad.push(`item ${idStr}@Atlas_${page}(${e.ix},${e.iy},${e.iw}×${e.ih}): md5 ${got} ≠ 冻结 ${want}`);
+      // ★SW-RB12c（2026-09-10,RB11c F7 误诊复盘）:md5 失配有两种互斥机制,本测
+      //   （冻结页 × 现行 json 矩形）无法单凭报错分辨——①json 矩形被重排(页 PNG
+      //   字节不动也爆红,F7 误判「Atlas_3 像素漂移」即此);②PNG 页真被重生成。
+      //   分辨:node tools/run-diag.mjs scripts/_fx22-golden-reseed.mjs（json 自指页
+      //   复算;0 漂移=②真 PNG 漂移,有漂移=①键位移动）。恢复:scripts/restore-vanilla-json.sh。
+      if (got !== want) bad.push(`item ${idStr}@Atlas_${page}(${e.ix},${e.iy},${e.iw}×${e.ih}): md5 ${got} ≠ 冻结 ${want}` +
+        ` ——先分辨 json 矩形移动 vs PNG 重生成: run-diag scripts/_fx22-golden-reseed.mjs`);
     }
     expect(bad).toEqual([]);
   });

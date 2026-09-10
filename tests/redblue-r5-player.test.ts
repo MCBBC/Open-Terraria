@@ -115,6 +115,12 @@ describe('R5-F9/F10 多段跳高度表+优先序', () => {
 });
 
 // ============ F11/F12 releaseJump 松键门（:20845） ============
+// ★SW-FX25 重锚（2026-09-10，定谳=夹具伪影非门偏差）：60×60 夹具世界整体位于原版
+// 高空减重力带——num6 = (y/16−(60+10·num5))/(worldSurface/6) 下钳 0.25（1457
+// Player.cs:24861-24882,仓内 III224 块 1:1）；60t 高世界的全程 y/16 < 60+10·num5
+// → 重力恒 0.4×0.25=0.1/t,起跳+落回 ≈135t > 旧固定 120t/90t 预算（未落地即断言,
+// 恒红）。门本体无罪：轨迹采样证实按住期无再跳（jumpHold=0 后 vy 单调回升,无
+// 重跳）。故预算改「有界等落地 ≤300t」+ 落地后按住 30t 不重跳锐化断言。
 describe('R5-F11/F12 跳跃松键门', () => {
   it('按住跳键落地不自动连跳（releaseJump 仅 !controlJump 帧置真 :21204）', async () => {
     const w = mkWorld();
@@ -123,9 +129,12 @@ describe('R5-F11/F12 跳跃松键门', () => {
     p.inputJump = true;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 起跳
     expect(p.vy).toBeLessThan(0);
-    for (let i = 0; i < 120; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 落地（键仍按住）
+    for (let i = 0; i < 300 && !p.onGround; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 等落地（键仍按住）
     expect(p.onGround).toBe(true);
     expect(p.vy).toBe(0);                              // 未再跳（旧 held 门会立即再跳）
+    for (let i = 0; i < 30; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 键仍按住续跑 0.5s
+    expect(p.onGround).toBe(true);                     // 持按不重跳（releaseJump 门本体判别）
+    expect(p.vy).toBe(0);
   });
 
   it('松键后再按可再跳；蛙蹼族 autoJump(3994) 免松键连跳（:14533）', async () => {
@@ -134,21 +143,21 @@ describe('R5-F11/F12 跳跃松键门', () => {
     settle(p, w);
     p.inputJump = true;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    for (let i = 0; i < 90; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    for (let i = 0; i < 300 && !p.onGround; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // ★SW-FX25：有界等落地（同上注）
     expect(p.onGround).toBe(true);
     p.inputJump = false;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 松键 → releaseJump=true
     p.inputJump = true;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);   // 再按 → 再跳
     expect(p.vy).toBeLessThan(0);
-    // autoJump 档：落地后按住即再跳（等落地稳态后再观察 3t 内起跳）
+    // autoJump 档：落地后按住即再跳（等落地稳态后再观察本帧起跳）
     const w2 = mkWorld();
     const p2 = mkPlayer(w2);
     p2.inv.armor[3] = { id: _iid(3994), stack: 1 };    // 蛙蹼 autoJump
     settle(p2, w2);
     p2.inputJump = true;
     p2.fixedUpdate(1 / 60, fakeHooks(w2, p2) as never);
-    for (let i = 0; i < 90 && !(p2.onGround && p2.vy === 0); i++) {
+    for (let i = 0; i < 300 && !(p2.onGround && p2.vy === 0); i++) {
       p2.fixedUpdate(1 / 60, fakeHooks(w2, p2) as never);
     }
     expect(p2.onGround).toBe(true);

@@ -284,7 +284,8 @@ export const VOID_LENS_CONTAINER = {
  *  - masterMode：Main.masterMode（:7208 首读;袋 master/noMaster 条件臂）。
  *  - crimson：WorldGen.crimson（3319/3320 猩红三元矿种臂 :7255/:7260）。
  *  - extraAccessory：玩家饰品第六格（demon heart 臂 noExtra 条件）。
- *  - tenthAnniversary：十周年世界（TryGettingDevArmor 1/8 门,:7526）。
+ *  - tenthAnniversary：十周年世界（TryGettingDevArmor 1/8 门,:7911=1457 终值,
+ *    ★SW-RB12b 锚正:旧注 :7526 系 1456 域行号;`Next(tenth?8:16)==0`+`Next(21)` 套装表）。
  *  - hasItemInventory：Player.HasItem（:56551-56561 **仅查背包 0-57**,moonlord 袋
  *    3384 传送门枪 noItem 条件 :7748 用它;与锁盒的 HasItemInInventoryOrOpenVoidBag
  *    :56575（含虚空袋）不同方法,故与 hasItem 并存两回调）。 */

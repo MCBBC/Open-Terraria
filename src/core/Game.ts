@@ -210,7 +210,7 @@ import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 // ★SW-BC1 2026-09-06：Player.Spawn 出生落位扫位链 1:1 移植（Spawn_GetPositionAtSpawn
 // :38008/Spawn_IsAreaValidSpawn :38222/DescendFromDefaultSpace :38103/ForceClearArea :38199）
 import { spawnForceClearArea, spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } from '../world/spawn/SpawnPlacement';
-import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
+import { scanLuckScene, torchLuckCheckCenterBelowSurface, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理 + IIIII228 海螺 TileIsDangerous
 import { playerAccessoryVidEquipped, BACC, builderAccGateSet } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位+配饰 vid 扫描
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
@@ -366,12 +366,14 @@ import { options } from './Options';
 import { cround } from './csCompat';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank, nearbyBanksInRange,
   ITEM_TRANSFER_PLAYER_TO_CHEST_BITS } from '../stats/QuickStacking';
+import { sortPlayerInventory, type SortFeedback } from '../stats/ItemSorting';   // ★SW-FX29:ItemSorting.SortInventory 整库移植
 import { bindsOf, isBound, keybindCodeLabel, hotbarSlotOfCode, type KeybindAction } from './Keybinds';
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings, TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
 import { scanSmartInteractTiles, shouldBlockSmartInteract, clearSmartInteractTileFrame, smartInteractTileFrame } from './SmartInteractTiles';   // ★SW-BJ54：智能交互 tile 候选（TileSmartInteractCandidateProvider 1:1）
+import { craftingFilterForTile } from '../ui/craftingGrid';   // ★SW-FX30 刀⑦：合成站资格谓词（Player.cs:33567-33587 单源）
 import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';   // ★SW-BJ28：Main.tileSolid 代理（平台九件套并集）
 import { toolCursorIcon, BUCKET_VIDS, tileBoostOfVid, SOLUTION_AMMO_ITEMS, AMMO_ID_SOLUTION, WIRE_TOOL_VIDS } from '../player/ToolCursorIcon';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
@@ -2507,6 +2509,12 @@ export interface GameCallbacks {
   /** 向导「制作」反查界面（Main.NPCChatText_GuideReverseCrafting :40723：
    *  playerInventory=true + InGuideCraftMenu——UI 侧开背包 + 向导反查浮层） */
   onGuideCraftOpen?: () => void;
+  /** ★SW-FX30 刀⑦：合成站/水源右键 focus 钩（Player.cs:33541-33547 尾臂 →
+   *  InteractWithCraftingStation :33555-33561）——filter = GetCraftingFilterForTile
+   *  产物（station=CraftStationRecipeFilter / water=WaterSourceRecipeFilter，tile=
+   *  原版 tile id 域）。UI 侧 openCraftingStationFilter：classic 支 = OpenCloseFilter
+   *  （CraftingUI.cs:146-159 开包+PipsUseGrid+过滤）；modern 支窗族分期 */
+  onCraftingStationOpen?: (filter: { kind: 'station' | 'water'; tile: number }) => void;
   /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币；
    *  happinessMul = 快乐度价格乘子（Main.cs:41231-41243 标题旁表情/百分比显示用）；
    *  buyback = 卖回货架条目下标（Chest.AddItemToShop 的 buyOnce 克隆，购买时
@@ -2545,6 +2553,11 @@ export interface GameCallbacks {
    *  ItemSlot.IndicateBlockedSlot :527 红脉冲 40t）——参数=源件槽号
    *  （quickStackToChests().blockedSlots），流程层接 UI.indicateBlockedSlots */
   onQuickStackBlockedSlots?: (slots: number[]) => void;
+  /** ★SW-FX29 排序色带（ItemSorting.cs:1529/:1639 ItemSlot.SetGlow(slot,hue,chest!= -1)
+   *  → ItemSlot.cs:2291 hslToRgb(hue,1,0.5) Lerp 渐隐 300t;PresentSlot 期已由
+   *  UI.setSlotGlow CSS 近似呈现）——slot=玩家/箱槽号,chest=true=箱槽面（context 4/32/3）,
+   *  false=背包/弹药格（context 0/2）。流程层接 UI.setSlotGlow */
+  onSortGlow?: (slot: number, hue: number, chest: boolean) => void;
 }
 
 /** Main.time 口径换算已上移为 Clock.vanillaMainTime（World.ts；原版分段计时,
@@ -5215,26 +5228,31 @@ export class Game implements GameHooks {
         this.spawnDust(p.x, p.y, p.w, p.h, 15, 0, 0, 150, null, 1.1);
       }
     } else if (vid === 4263 || vid === 5360 || vid === 4819 || vid === 5361) {
-      // Vector2.UnitY.RotatedBy(itemAnimation×2π/30)×(15,0)：RotatedBy=XNA 旋转矩阵
-      //（x'=x·cosθ−y·sinθ, y'=x·sinθ+y·cosθ）→ UnitY(0,1) 旋后 = (−sinθ, cosθ)×15——
-      // itemAnimation 倒数 → θ 递减 → 底缘绕环螺旋
+      // ★SW-RB12a 翻案：`UnitY.RotatedBy(θ) * new Vector2(15f, 0f)` 的 `*` 是 XNA
+      // Vector2×Vector2【组件乘法】（逐分量）——UnitY 旋后 = (−sinθ, cosθ)，再
+      // ×(15,0) → (−15sinθ, **0**)：Y 分量恒 0。旧刀当标量 ×15 = 自创「底缘绕环
+      // 螺旋」；原版=Bottom 缘上【水平横扫 ±15px】（Dust.cs 内掷速度承担纵波）。
       const ang = p.itemAnimTicks * (Math.PI * 2) / 30;
       const ox = -Math.sin(ang) * 15;
-      const oy = Math.cos(ang) * 15;
+      const oy = 0;                                  // ×(15,0) 组件乘 → Y=0（:43333/:43373 同式）
       const type = vid === 4263 || vid === 5360
         ? dustWaterFor((this.renderer?.waterStyle as number | undefined) ?? 0)
         : 35;
       for (let i = 0; i < 2; i++) {
         if (Math.random() * 3 >= 1) continue;         // Main.rand.Next(3) == 0
         // NewDustPerfect（Dust.cs:54-63）= NewDust(·,0,0,Type,0,0,0,default,1f) 后
-        // position 直装——velocity/scale 原文本取 NewDust 内掷（±2 / jitter×1）再被
-        // 后置语句覆写：vx=内速×1.5（保留随机）、vy=0→−4.5、scale=0.8（精确覆写,
-        // 抖动作废）。spawn 的 perfect 臂会清内速 → vx 手工重掷同分布（±3）。
+        // position 直装（Velocity 缺省不覆写速度）——内掷 ±2 后，NewDust 派生族
+        // 特例块【先于】海螺后置语句改写内速：水尘族 33/52/266/98-105 ×0.5
+        //（:232-237）/34|35|152 ×0.1（:244-252，恶魔海螺尘 35 命中）——
+        // ★SW-RB12a：旧刀漏乘族因子 → 魔海螺 vx ±3（应 ±1.5）2 倍、恶海螺 ±3
+        //（应 ±0.3）10 倍过速。waterStyle 10/12（尘 123/288）不在族块 → 因子 1。
+        const vxFactor = type === 33 || type === 52 || type === 266 || (type >= 98 && type <= 105) ? 0.5
+          : type === 34 || type === 35 || type === 152 ? 0.1 : 1;
         const d = this.spawnDust(p.x + p.w / 2 + ox, p.y + p.h + oy, 0, 0, type,
           0, 0, 0, null, 1, true, true);
         if (!d) continue;
         d.vy = -4.5;                                  // velocity.Y *= 0f; -= 4.5f
-        d.vx = ((Math.random() * 41 | 0) - 20) * 0.1 * 1.5;   // velocity.X *= 1.5f
+        d.vx = ((Math.random() * 41 | 0) - 20) * 0.1 * vxFactor * 1.5;   // velocity.X *= 1.5f
         d.scale = 0.8;                                // 精确覆写（非抖动乘）
         d.alpha = 130;
         d.noGravity = true;
@@ -7837,7 +7855,12 @@ export class Game implements GameHooks {
         const luckScan = scanLuckScene({
           store: w.store,
           tx: Math.floor(this.player.cx / TILE), ty: Math.floor(this.player.cy / TILE),
-          belowSurface: this.player.cy / TILE > w.groundLevel,
+          // ★SW-FX25：门锚=玩家盒中心 Center.Y ≥ worldSurface*16 进地下支（1457
+          //   Player.cs:17859-17862 + :18032 _nextTorchLuckCheckCenter=base.Center）——
+          //   中心锚非顶边锚（顶边门属 TorchAttack :17935/torchGod :18182,RB9a 线）；
+          //   旧式 `cy/16 > groundLevel`（>）把界值拍 cy==worldSurface*16 误归地表支
+          //   （原版 `<` 的反形=≥,闭区间界）→ 单点偏差已修（torchLuckCheckCenterBelowSurface）
+          belowSurface: torchLuckCheckCenterBelowSurface(this.player.cy, w.groundLevel),
           zones: {
             dungeon: s.zoneDungeon, temple: s.zoneTemple, snow: s.zoneSnow, desert: s.zoneDesert,
             jungle: s.zoneJungle, glowshroom: s.zoneGlowshroom, corrupt: s.zoneCorrupt,
@@ -8277,6 +8300,12 @@ export class Game implements GameHooks {
     this.sporeSacTick();
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
+    // ★SW-FX27：呈现面翻转开关同步（GameViewMatrix.Effects=FlipVertically
+    //  Main.cs:62944 `gravDir != 1f` 消费语义）——玩家 update 后（重力药水 Up 沿/
+    //  克脑 forcedGravity 本 tick 内的翻转即刻生效）先于 updateSmartCursor/
+    //  updateSmartSelect 等鼠标→世界消费（8300+），渲染帧头二次同步兜底。
+    //  原版 Draw 每帧读 player[myPlayer].gravDir——本仓 Camera.flipY 同口径。
+    this.camera.flipY = player.gravDir === -1;
     // ★IIIII61 SkyblockRuntime：30t/列滚动巡检（WorldGen.UpdateWorld :72065-72072
     //  totalD>=30 → CountTiles(totalX)；尾列 Calculate 重算八旗——lowTiles 翻转时
     //  同步 noAltars 缓存读数）
@@ -11861,6 +11890,11 @@ export class Game implements GameHooks {
       // 钩爪锚点集（SmartCursorHelper.cs:106-115 _grappleTargets：现役锚点 Center 的
       // tile 坐标——镐链射线终点/免挖集；AI_007 实装后由玩家锚点表收集）
       grappleAnchors: p.grappleAnchorTiles(),
+      // ★SW-FX27：gravDir 实况（SmartCursorHelper.cs:2435 `gravDir==-1 && num2==0 →
+      //  num9++` / :2438 `gravDir==1 && num==0 → num9++` / :197 轨道 314 让位门）。
+      //  env.mouse 已是翻转修正后的 MouseWorld（camera.screenToWorld 内置
+      //  ReverseGravitySupport，Main.cs:2835-2842），本 env 无须再自翻。
+      gravDir: p.gravDir,
       // Main.worldSurface（Step_Pigronata :987 / Step_PumpkinSeeds :1049 地表截断线；
       // 本仓 groundLevel 与 worldSurface 同一标量口径——Housing.ts:903 备案同源）
       worldSurface: this.world.groundLevel,
@@ -11907,13 +11941,22 @@ export class Game implements GameHooks {
     const env: SmartSelectEnv = {
       controlTorch,
       usingGamepad: false,                       // PlayerInput.UsingGamepad（本作无手柄）
+      // ★SW-FX27：裸鼠标 Y（世界比例屏 px，SetZoom_World 口径 = rawY/zoom）——
+      //  SmartSelectGamepadPointer.cs:27 原式 `(screenPosition.Y + screenHeight −
+      //  mouseY)/16` 的 mouseY 输入（gravDir=-1 反演支专用；gravDir=1 支不消费）。
+      //  env.mouseY 是翻转修正后的世界 Y（camera.screenToWorld 内置），直接喂
+      //  原式会二次反演。
+      rawMouseYWorldScale: inp.mouseY / this.camera.zoom,
       st: this.world.store,
       mouseX: mx, mouseY: my,
       screenTopY,
       screenHeight: canvas.height / this.camera.zoom,
       player: {
         x: p.x, y: p.y, w: p.w, h: p.h,
-        gravDir: 1,                              // 反重力未实装（同 SmartCursor 口径）
+        // ★SW-FX27：gravDir 实况（原 SmartSelectEnv.player.gravDir 钉 1 注"反重力
+        //  未实装"——翻转呈现/换算已落地，getTargetTile :27-30 反演支现由
+        //  rawMouseYWorldScale 喂原式 1:1 工作）
+        gravDir: p.gravDir,
         // Player.wet（Player.cs:27540 经 Collision.WetCollision Collision.cs:1575 判定）；
         // p.inWater 为脚部液量>100 的简化门，此处按原版命中盒中心盒求交精确复刻
         wet: p.inWater || wetCollision(this.world.store, p.x, p.y, p.w, p.h),
@@ -25100,6 +25143,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 传送晶塔 597（Player.cs:31707-31747）：开全屏地图选其它晶塔传送
       this.usePylon(tx, ty);
     }
+    // ---- 合成站尾臂（★SW-FX30 刀⑦ 2026-09-11：Player.cs:33541-33547 逐字——格交互
+    // 分派完（switch 全臂之后、active 块内末位）查合成站资格：命中 → flag2=true
+    //（=tileInteractionHappened :33551，本仓 rightDown 消费代理）+ AdjTiles()
+    //（:33545，本仓 vanillaNearbyStations 每刷新拍同源全 tile 扫描）+ InteractWith
+    // CraftingStation（:33546 → UI openCraftingStationFilter：classic 支 OpenCloseFilter
+    // CraftingUI.cs:146-159 = 开包+网格态+站点过滤；modern 支窗族分期）。
+    // 资格谓词 = GetCraftingFilterForTile（:33567-33587）：DoesNotOpenCraftingMenuOnInteract
+    //（TileID.cs:279 CreateBoolSet(215,207)）→ null；TileUsedInRecipes【闭包折叠集,
+    // Recipe.cs:593-602 回写 ⇒ 炼药台 355/699 亦开门】→ station；
+    // CountsAsWaterForCrafting → water。原版 flag2 与前置臂独立（chest tile 走到此处
+    // 资格谓词必 null=箱不在配方站集，双臂不冲突）。
+    const craftFilter = craftingFilterForTile(sh);
+    if (craftFilter) {
+      this.input.rightDown = false;
+      this.cb.onCraftingStationOpen?.(craftFilter);
+    }
   }
 
   /**
@@ -29297,7 +29356,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const [vx, vy] = rot(1.3 * p.facing, 1.3 * -0.8, Math.PI / 5 * rngDir());
       const d = this.vanillaDust.spawn(px, py, 2, 2, 284, vx, vy, 0,
         { r: c[0], g: c[1], b: c[2], a: 255 }, scale);
-      if (d) { d.x = px; d.y = py; d.vx = vx; d.vy = vy; d.scale = scale; d.fadeIn = 0; }
+      // ★SW-RB12a：原版终 scale = NewDust 内掷抖动[0.8,1.2]×Scale（Dust.cs:170-171
+      //  `scale = 1+Next(-20,21)*0.01; scale *= Scale`）——旧刀后置 `d.scale = scale`
+      //  抹掉抖动 = 全体偏小 ~12% 且无随机。x/y/速度覆写照旧（Perfect 语义）。
+      if (d) { d.x = px; d.y = py; d.vx = vx; d.vy = vy; d.fadeIn = 0; }
     }
     const drink = DRINK_PARTICLE_COLORS[vid];
     if (drink && drink.length > 0) {
@@ -29305,7 +29367,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const [vx, vy] = rot(1.3 * p.facing * 0.1, 1.3 * -0.1, -Math.PI / 5 * rngDir());
       const d = this.vanillaDust.spawn(px, py, 2, 2, 284, vx, vy, 0,
         { r: Math.round(c[0] * 0.7), g: Math.round(c[1] * 0.7), b: Math.round(c[2] * 0.7), a: 255 }, scale);
-      if (d) { d.x = px; d.y = py; d.vx = vx; d.vy = vy; d.scale = scale; d.fadeIn = 0; }
+      if (d) { d.x = px; d.y = py; d.vx = vx; d.vy = vy; d.fadeIn = 0; }   // ★SW-RB12a 同上（保留抖动×Scale）
     }
   }
 
@@ -36303,6 +36365,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   startInvasionWithAnnounce(type: number, ignoreDelay = false): boolean {
     return this.startInvasionAndAnnounce(type, ignoreDelay);
+  }
+
+  /** ★SW-FX29 ItemSorting.SortInventory（ItemSorting.cs:1560-1571；Sort 钮消费链
+   *  Main.cs:42602 左键释放 → SortInventory + PlaySound(12)）：
+   *  ① HasLockedInventory 门（:1562 = IsStackingItems ∪ pendingInventoryActions——
+   *     两源在本仓同 QuickStackAllChests 注:均为「逐帧搬移动画窗」态旗,以
+   *     quickStackLockTicks 短锁等价承载,本仓无光标手持槽≡恒空）;
+   *  ② 无钱袋 905（HasItem 扫 0-57,Player.cs:56551 i<58）→ SortCoins 币合并;
+   *  ③ SortAmmo（弹药格吸收/上滑/空位填充,FillAmmoFromInventory :1632 弹药格
+   *     SetGlow 0.31 绿带）;
+   *  ④ Sort(true, inventory, 0-9,50-58)（:1569 只排背包主体 10-49,逐层色带
+   *     onGlow 出站→UI.setSlotGlow 呈现）。 */
+  sortInventory(): void {
+    if (this.hasLockedInventory()) return;              // :1562 门
+    const fb: SortFeedback = {
+      onGlow: (slot, hue, chest) => this.cb.onSortGlow?.(slot, hue, chest),
+    };
+    const p = this.player;
+    sortPlayerInventory(p.inv.slots as Parameters<typeof sortPlayerInventory>[0], fb, {
+      melee: p.damageMult('melee'), ranged: p.damageMult('ranged'),
+      magic: p.damageMult('magic'), minion: p.damageMult('summon'),
+    });
+    this.cb.onInventoryChanged?.();
   }
 
   /** PunchCameraModifier 1:1（GameHooks.punchCamera → Main.instance.CameraModifiers.Add）：
@@ -44632,6 +44717,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     this.renderer.netActive = !!this.net?.active;
     // module100 天空氛围：联机 = 服务器 AmbienceServer 独占掷族（本地调度门关）
     this.renderer.sky.ambientRemoteDriven = !!this.net?.active;
+    // ★SW-FX27：渲染帧头翻转开关二次同步（原版 Main.cs:62944 在 Draw 头读
+    //  gravDir 置 GameViewMatrix.Effects——本仓双点同步，与 fixedUpdate 8295 对）
+    cam.flipY = this.player.gravDir === -1;
     this.renderer.render(
       cam, this.world, this.world.clock, this.chunks,
       L.r, L.g, L.b, L.rx, L.ry, L.rw, L.rh,

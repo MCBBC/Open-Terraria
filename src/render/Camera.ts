@@ -25,6 +25,20 @@ export class Camera {
     this.zoomTarget = Math.max(Camera.ZOOM_MIN, Math.min(Camera.ZOOM_MAX, z));
   }
   viewW = 800; viewH = 600; // 屏幕尺寸
+  /**
+   * ★SW-FX27：呈现面垂直镜像开关 ≙ GameViewMatrix.Effects=FlipVertically
+   *  （Main.cs:62944 `(!gameMenu && player[myPlayer].gravDir != 1f) ?
+   *  SpriteEffects.FlipVertically : None`，BackgroundViewMatrix.Effects 同步
+   *  :62945）。true = gravDir=-1（重力药水/地球仪/FTW 克脑）：
+   *  - 渲染：Renderer 翻转点把已合成世界画面（背景+地形+实体+光照）整幅
+   *    y'=viewH-y 镜像（原版经 TransformationMatrix 全屏翻转的等价实现——
+   *    SpriteViewMatrix.Rebuild :145-148 `CreateScale(1,-1)*CreateTranslation(0,H)`）；
+   *  - 输入：screenToWorld 内置鼠标 Y 镜像（ReverseGravitySupport）。
+   *  相机 x/y（世界中心）与 follow/clamp 语义不受翻转影响（原版 Translation
+   *  只含 zoom 项，SpriteViewMatrix.cs:149-154 翻转只进 _effectMatrix）。
+   *  写入方：Game.fixedUpdate（player.fixedUpdate 后）与 Renderer.render 帧头
+   *  双点同步 = player.gravDir===-1。 */
+  flipY = false;
 
   constructor(public worldW: number, public worldH: number) {}
 
@@ -62,7 +76,26 @@ export class Camera {
     return [(wx - this.x + this.punchX) * this.zoom + this.viewW / 2, (wy - this.y + this.punchY) * this.zoom + this.viewH / 2];
   }
   screenToWorld(sx: number, sy: number): [number, number] {
+    // ★SW-FX27：ReverseGravitySupport(MouseScreen) 逆变换（Main.cs:3242-3250 +
+    //   MouseWorld :2835-2842：`result.Y = screenPosition.Y + screenHeight - mouseY`）
+    //   ——gravDir=-1 时鼠标 Y 先按视口高镜像再做常规换算（Utils.cs:1137
+    //   ScreenToWorldPosition = Invert(TransformationMatrix) 同一矩阵的解析形）。
+    //   本仓全部鼠标→世界消费（Game.ts 100+ 处 screenToWorld / 高亮 / SmartCursor
+    //   / SmartSelect / 交互命中）经此单点获得翻转一致性；gd=1（flipY=false）
+    //   逐位恒等（分支前原式）。
+    if (this.flipY) sy = this.viewH - sy;
     return [(sx - this.viewW / 2) / this.zoom + this.x, (sy - this.viewH / 2) / this.zoom + this.y];
+  }
+  /**
+   * ★SW-FX27：世界→【显示屏幕】坐标（Main.cs:47397-47399 DrawSmartCursor /
+   *   :47445-47447 DrawSmartInteract / :46504-46510 签名泡 / Utils.cs:1131
+   *   ToScreenPosition——原版屏空间层手翻 `screenHeight - y` 语义）。
+   *   仅限【翻转点之后】画在主画布上的世界锚定覆盖层（飘字/签名泡/遮屏孔/
+   *   月总脉冲）使用；翻转点之前的绘制保持 worldToScreen（随呈现面整体镜像）。
+   *   gd=1 逐位恒等。 */
+  worldToScreenDisplayed(wx: number, wy: number): [number, number] {
+    const [sx, sy] = this.worldToScreen(wx, wy);
+    return this.flipY ? [sx, this.viewH - sy] : [sx, sy];
   }
   tileUnder(sx: number, sy: number): [number, number] {
     const [wx, wy] = this.screenToWorld(sx, sy);

@@ -120,7 +120,7 @@ describe('WallslideMovement 倒挂镜像（:21955-22016 全速 ×gravDir）', ()
     expect(saw).toBe(true);                                    // 快滑写 −4(+重力斜率 0.25×0.4=−0.1)
                                                                // 旧码 vy=+4（未 ×gravDir）→ +3.9 必红
   });
-  it('② tier2（984）倒挂驻停 = (−gravity+1e-5)×gravDir ≈ +0.4 缓沉（旧实现 −0.3）', () => {
+  it('② tier2（984）倒挂驻停 = 驻停贴壁 |vy|≈0（★SW-RB11b F2：num3=gravity 字段=0.4×num6 与管线重力同源,写值与重力相消;旧期望 0.29-0.35 系未缩放写值+缩放重力不一致混合态标定）', () => {
     const game = makeGame(ceilingWorld());
     const inv = new Inventory();
     inv.armor[3] = { id: iid(984), stack: 1 };                 // spikedBoots=2（:15180 =2）
@@ -131,9 +131,9 @@ describe('WallslideMovement 倒挂镜像（:21955-22016 全速 ×gravDir）', ()
     let saw = false;
     for (let t = 0; t < 120 && !saw; t++) {
       step(p, game);
-      saw = p.wallCling && p.vy > 0.27 && p.vy < 0.35;         // 写 (−0.4+1e-5)×(−1)=0.39999
-    }                                                          // +松键衰减 0.01+重力斜率 0.1 → 0.29
-    expect(saw).toBe(true);                                    // 驻停镜像:倒挂=向 +y 缓沉;旧码 +0.5 必红
+      saw = p.wallCling && Math.abs(p.vy) < 0.05;              // 写 (+gField−1e-5)−gField ≈ 0（净驻停）
+    }
+    expect(saw).toBe(true);                                    // 驻停镜像:倒挂贴壁缓停;旧码 +0.5 必红
   });
   // ③ 普通重力基线由既有套件覆盖（tests/player-ledger-aug31.test.ts 贴墙缓降）——略。
 });

@@ -220,6 +220,11 @@ export interface SmartCursorEnv {
    *  循环条件 / Step_PumpkinSeeds :1049(1457) 循环内 break 的地表截断线。
    *  缺省 Infinity = 不截断（未接世界态时保持旧行为；Game 侧恒传实况）。 */
   worldSurface?: number;
+  /** ★SW-FX27：Player.gravDir 实况（SmartCursorHelper.cs:2435/:2438 num9 档位
+   *  修正 + :196 轨道 314 让位门）。缺省 1 = 旧钉值（gd=1 行为逐位不变）；
+   *  env.mouse 已是翻转修正后的 MouseWorld（camera.screenToWorld 内置
+   *  ReverseGravitySupport，Main.cs:2835-2842），本处无须再自翻。 */
+  gravDir?: number;
   /** WorldGen.IsAlchemyPlantHarvestable（WorldGen.cs:66198-66225）所需世界态。
    *  仅 Step_AlchemySeeds 的"成熟药草可覆盖"判定用；缺省按"未到收获期"处理
    *  （等价语义 = 仅 type 84 直接可收）。time 为原版 Main.time 口径：
@@ -539,8 +544,8 @@ export class SmartCursor {
     const screenX = Math.max(10, Math.min(raw.x, st.w - 10));
     const screenY = Math.max(10, Math.min(raw.y, st.h - 10));
     if (!st.inBounds(screenX, screenY)) return; // :88-91
-    // :92 让位集
-    const blocks = isHoveringOverAnInteractableTile(st, screenX, screenY);
+    // :92 让位集（★SW-FX27：gravDir 实况——314 轨道倒挂不让位）
+    const blocks = isHoveringOverAnInteractableTile(st, screenX, screenY, env.gravDir ?? 1);
     // :94-103 可达区 = GetTileRegion(tileBoost)（TileReachCheckSettings.cs:53）。
     // blockRange（放置物额外射程）已由 Game 侧并入 env.tileBoost（Builder 药水/配饰同公式）
     const reach = tileRegion(env.actor, env.tileBoost, st);
@@ -738,7 +743,7 @@ export class SmartCursor {
     if (sem.pick <= 0 || taken()) return; // :2355
     const st = env.st;
     const p = env.actor;
-    const gravDir = 1;
+    const gravDir = env.gravDir ?? 1;   // ★SW-FX27：env 实况（原钉 1；providedInfo.player.gravDir :2435/:2438）
     let mouse = { ...env.mouse };
     // :2369-2381 3:1 方向归约（|vx|>3|vy| 纯水平等）
     let vector = { x: mouse.x - p.cx, y: mouse.y - p.cy };
@@ -772,6 +777,9 @@ export class SmartCursor {
     const num8 = Math.floor((mouse.x + ((p.w / 2 - 1) * signX)) / 16);
     let num9 = Math.floor((mouse.y + 0.1 - (p.h / 2 + 1)) / 16);
     if (num3 === -1) num9 = Math.floor((mouse.y + (p.h / 2) - 1) / 16);
+    // :2435-2441 gravDir 档位修正（★SW-FX27 补 -1 支：倒挂时无水平向 → 端点行
+    //   再 +1——倒挂挂顶时假想前缘从盒顶改盒底的同向补偿）
+    if (gravDir === -1 && signY === 0) num9++;
     if (gravDir === 1 && signX === 0) num9++;
     if (num9 < 10) num9 = 10;
     if (num9 > st.h - 10) num9 = st.h - 10;
@@ -1989,12 +1997,14 @@ function tileRegion(p: SmartCursorActor, tb: number, st: TileStore): Region {
   };
 }
 
-/** :183-199 让位集（DisableSmartCursor / 轨道 314 且 gravDir=1）——:197 active() 口径 */
-function isHoveringOverAnInteractableTile(st: TileStore, x: number, y: number): boolean {
+/** :183-199 让位集（DisableSmartCursor / 轨道 314 且 gravDir=1）——:197 active() 口径。
+ *  ★SW-FX27：gravDir 实参（:196 `tile.type == 314 && gravDir == 1f`——倒挂时轨道
+ *  不再让位智能光标；缺省 1 = 旧钉值逐位不变） */
+function isHoveringOverAnInteractableTile(st: TileStore, x: number, y: number, gravDir = 1): boolean {
   if (!hasTileAt(st, x, y)) return false;
   const sheet = sheetOf(st.get(x, y));
   if (DISABLE_SMART_CURSOR_SHEETS.has(sheet)) return true;
-  if (sheet === 314) return true; // gravDir 恒 1（反重力未实装）
+  if (sheet === 314 && gravDir === 1) return true;
   return false;
 }
 

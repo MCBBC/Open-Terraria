@@ -23,6 +23,17 @@
 //   · 4870 回迁 PERMANENT_USE（即时传）→ tripwire 红 + fire 面 'drink' 单音红;
 //   · 2350 触发拍尘改无 ×0.5 → |vx|≤1.31 断言红;
 //   · 海螺螺旋臂删除 → vy=−4.5/位相断言红。
+// ★SW-RB12a 红队批（2026-09-10）翻案两刀 + 表债清偿，变异证红：
+//   · F1 海螺 oy=cosθ×15 → oy=0：原版 `UnitY.RotatedBy(θ) * new Vector2(15f,0f)` 是
+//     XNA Vector2×Vector2 组件乘（Y 恒 0）=Bottom 缘水平横扫,非绕环螺旋——位相测试
+//     重写（y 恒=底缘;x=−15sinθ）;旧「y=底±15」断言即伪版本相锁;
+//   · F2 海螺 vx 漏乘 Dust.cs 派生族因子：水尘族 33/52/266/98-105（:232-237 ×0.5）
+//     → 魔海螺 ±1.5 非 ±3;34|35|152（:244-252 ×0.1）→ 恶海螺 ±0.3 非 ±3（10 倍过速）;
+//   · F3 DrinkParticleColors 表：4018 CreamSoda 两色被误并在 2266 Sake 名下
+//     （原版 2266=单色 ×0.3）、5211 BiomeSightPotion 整缺——金标=测试内直读反编译
+//     ItemID.cs 重提双表全量对拍（sw-rb12a-dust-drink-golden.test.ts）;
+//   · M4 饮用/食物尘 scale 后置覆写抹掉 NewDust 抖动[0.8,1.2]（:44074/:44088
+//     Perfect Scale 直传不覆写）→ 保留抖动,断言域 0.64..1.201。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/core/Game';
@@ -32,7 +43,7 @@ import { TileStore } from '../src/world/TileStore';
 import { TILE } from '../src/core/constants';
 import { ITEM_DEFS } from '../src/data/items';
 import { VanillaDust } from '../src/fx/VanillaDust';
-import { DRINK_PARTICLE_COLORS } from '../src/data/vanillaFoodColors';
+import { DRINK_PARTICLE_COLORS, FOOD_PARTICLE_COLORS } from '../src/data/vanillaFoodColors';
 import { itemUseSoundWav } from '../src/data/itemUseSound';
 import { dustWaterFor } from '../src/render/WeatherRenderer';
 import { seededRandom } from './seeded-rng';
@@ -150,25 +161,40 @@ describe('SW-BJ57 ②③海螺螺旋水尘（Player.cs:43331-43347/:43371-43387,
       expect(d.alpha, 'α=130').toBe(130);
       expect(d.noGravity, 'noGravity=true').toBe(true);
       expect(d.fadeIn, 'fadeIn=1.1').toBeCloseTo(1.1, 6);
-      expect(Math.abs(d.vx), 'vx=内速±2×1.5 → ≤3').toBeLessThanOrEqual(3.001);
-      expect(d.x, 'Bottom 缘绕环:|x−中心|≤15').toBeGreaterThanOrEqual(1010 - 15.001);
+      expect(Math.abs(d.vx), '★SW-RB12a: vx=内速±2×水尘族0.5×1.5 → ≤1.5').toBeLessThanOrEqual(1.501);
+      expect(d.x, 'Bottom 缘横扫:|x−中心|≤15').toBeGreaterThanOrEqual(1010 - 15.001);
       expect(d.x).toBeLessThanOrEqual(1010 + 15.001);
-      expect(d.y, 'Bottom+oy:|y−底|≤15').toBeGreaterThanOrEqual(2042 - 15.001);
-      expect(d.y).toBeLessThanOrEqual(2042 + 15.001);
+      expect(d.y, '★SW-RB12a: ×(15,0) 组件乘 → y=Bottom 缘精确（无纵向分量）').toBeCloseTo(2042, 6);
     }
   });
 
-  it('螺旋位相:itemAnimTicks=90 全粒 y=底+15、=75 全粒 y=底−15（cos(6π)/cos(5π)）', () => {
+  it('★SW-RB12a 螺旋位相=水平横扫:y 恒=底缘;x=中心−15sin(θ)（90/75→0,82→+14.925）', () => {
     const run = (ticks: number) => {
       const g = dustStub({ itemAnimTicks: ticks, inv: { heldItem: () => ({ id: slotOfVid(4263) }) } });
       for (let i = 0; i < 60; i++) (g as unknown as { tickRecallFamilyDust(): void }).tickRecallFamilyDust();
       return activeDust(g).filter((d: { type: number }) => d.type === dustWaterFor(0));
     };
-    const hi = run(90), lo = run(75);
-    expect(hi.length, '90 相位有粒').toBeGreaterThan(0);
-    expect(lo.length, '75 相位有粒').toBeGreaterThan(0);
-    for (const d of hi) expect(d.y, 'cos(90·2π/30)=cos6π=+1 → 底+15').toBeCloseTo(2042 + 15, 6);
-    for (const d of lo) expect(d.y, 'cos(75·2π/30)=cos5π=−1 → 底−15').toBeCloseTo(2042 - 15, 6);
+    for (const ticks of [90, 75, 82]) {
+      const ds = run(ticks);
+      expect(ds.length, `${ticks} 相位有粒`).toBeGreaterThan(0);
+      const expectX = 1010 - 15 * Math.sin(ticks * (Math.PI * 2) / 30);
+      for (const d of ds) {
+        expect(d.y, 'UnitY.RotatedBy×(15,0)=组件乘 → Y 分量恒 0').toBeCloseTo(2042, 6);
+        expect(d.x, `x=Bottom.X−15sin(${ticks}·2π/30)`).toBeCloseTo(expectX, 5);
+      }
+    }
+  });
+
+  it('★SW-RB12a 水样式对比：style10→尘 123 不在族块 → vx 可>1.5（因子分型判别力）', () => {
+    const g = dustStub({ inv: { heldItem: () => ({ id: slotOfVid(4263) }) } });
+    g.renderer = { waterStyle: 10 };   // dustWaterFor(10)=123——NewDust 水尘族块（:232-237）不含 123
+    for (let i = 0; i < 300; i++) (g as unknown as { tickRecallFamilyDust(): void }).tickRecallFamilyDust();
+    const ds = activeDust(g).filter((d: { type: number }) => d.type === dustWaterFor(10));
+    expect(ds.length, '123 尘有粒').toBeGreaterThan(80);
+    for (const d of ds) {
+      expect(d.vy).toBeCloseTo(-4.5, 6);
+      expect(Math.abs(d.vx), '123 非 33/52/266/98-105 族 → 因子 1 → ≤3').toBeLessThanOrEqual(3.001);
+    }
   });
 
   it('恶海螺 4819=尘 35 同律;贝壳手机 5359=尘 267 三色/±4 内速/scale0.8..1.4/盒内', () => {
@@ -176,7 +202,10 @@ describe('SW-BJ57 ②③海螺螺旋水尘（Player.cs:43331-43347/:43371-43387,
     for (let i = 0; i < 300; i++) (g35 as unknown as { tickRecallFamilyDust(): void }).tickRecallFamilyDust();
     const ds35 = activeDust(g35).filter((d: { type: number }) => d.type === 35);
     expect(ds35.length).toBeGreaterThan(100);
-    for (const d of ds35) expect(d.vy).toBeCloseTo(-4.5, 6);
+    for (const d of ds35) {
+      expect(d.vy).toBeCloseTo(-4.5, 6);
+      expect(Math.abs(d.vx), '★SW-RB12a: 尘 35∈Dust.cs:244 族(34|35|152)内速×0.1 → |vx|≤0.3').toBeLessThanOrEqual(0.301);
+    }
 
     const g267 = dustStub({ inv: { heldItem: () => ({ id: slotOfVid(5359) }) } });
     for (let i = 0; i < 400; i++) (g267 as unknown as { tickRecallFamilyDust(): void }).tickRecallFamilyDust();
@@ -268,8 +297,9 @@ describe('SW-BJ57 ⑥⑦音效分型 + 饮用演出负面定谳（防自创）',
     for (const vid of [126, 188, 189, 226, 227, 288, 292, 2322, 2351, 1134, 2756]) {
       expect(DRINK_PARTICLE_COLORS[vid]?.length ?? 0, `vid ${vid} 有饮用尘色`).toBeGreaterThan(0);
     }
-    for (const vid of [50, 3124, 3199, 5358]) {
-      expect(DRINK_PARTICLE_COLORS[vid], `vid ${vid} 魔镜族无饮用尘（ItemID.cs:586- 表无此键）`).toBeUndefined();
+    for (const vid of [50, 3124, 3199, 5358, 2350, 4870]) {
+      expect(DRINK_PARTICLE_COLORS[vid], `vid ${vid} 无饮用尘（ItemID.cs:586- 表无此键——2350/4870 只有青尘引导面）`).toBeUndefined();
+      expect(FOOD_PARTICLE_COLORS[vid], `vid ${vid} 无食物尘`).toBeUndefined();
     }
   });
 
@@ -284,8 +314,9 @@ describe('SW-BJ57 ⑥⑦音效分型 + 饮用演出负面定谳（防自创）',
     expect(ds[0].x).toBeLessThanOrEqual(1010 + 8 + 4);
     expect(ds[0].y).toBeGreaterThanOrEqual(2021 - 4 - 4);
     expect(ds[0].y).toBeLessThanOrEqual(2021 - 4 + 4);
-    expect(ds[0].scale, '0.8+0.2×rand').toBeGreaterThanOrEqual(0.8);
-    expect(ds[0].scale).toBeLessThanOrEqual(1.0);
+    expect(ds[0].scale, '★SW-RB12a: 终scale=NewDust抖[0.8,1.2]×(0.8+0.2×rand)（:44088 Perfect Scale 不被覆写）')
+      .toBeGreaterThanOrEqual(0.64);
+    expect(ds[0].scale).toBeLessThanOrEqual(1.201);
     const c = DRINK_PARTICLE_COLORS[292] as readonly (readonly [number, number, number])[];
     const col = ds[0].color as { r: number; g: number; b: number };
     const tinted = c.some(([r, gg, b]) =>
@@ -297,6 +328,18 @@ describe('SW-BJ57 ⑥⑦音效分型 + 饮用演出负面定谳（防自创）',
     (g50 as unknown as { emitFoodDrinkParticles(h: { id: number } | null): void })
       .emitFoodDrinkParticles({ id: slotOfVid(50) });
     expect(activeDust(g50).length, '魔镜无饮用尘面（不在 DrinkParticleColors）').toBe(0);
+  });
+
+  it('★SW-RB12a 抖动保留：60 拍 scale 极值必越出 [0.8,1.0]（后置覆写抹抖动=变异红）', () => {
+    const g = dustStub({ inv: { heldItem: () => ({ id: slotOfVid(292) }) } });
+    const emit = (g as unknown as { emitFoodDrinkParticles(h: { id: number } | null): void });
+    for (let i = 0; i < 60; i++) emit.emitFoodDrinkParticles({ id: slotOfVid(292) });
+    const scales = activeDust(g).map((d: { scale: number }) => d.scale);
+    expect(scales.length, '60 拍=60 粒（饮用臂无掷）').toBe(60);
+    // 终scale=抖[0.8,1.2]×Scale[0.8,1.0] → 观测域 [0.64,1.2];若被覆写回 Scale 本身
+    // 则全体 ∈[0.8,1.0]——极值必有一端越出
+    expect(Math.min(...scales), 'min<0.8 证抖动在').toBeLessThan(0.8);
+    expect(Math.max(...scales), 'max>1.0 证抖动在').toBeGreaterThan(1.0);
   });
 });
 

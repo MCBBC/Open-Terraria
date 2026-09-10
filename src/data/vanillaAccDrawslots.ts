@@ -288,3 +288,37 @@ export const OFFSETS_PLAYER_OFFHAND: Array<[number, number]> = [
   [16, 16], [16, 16], [16, 16], [16, 16], [14, 14],
   [14, 14], [12, 14], [14, 16], [16, 16], [16, 16],
 ];
+
+// ---- ★SW-BJ58（2026-09-10）HandOn/HandOff 合成臂网格取样 ----
+// 症状：装备创造之手（vid5126 handOn23/handOff15）玩家身侧横排 6-9 个小工具精灵、
+// 静止朝向侧才有。根因：合成网格族贴图（Acc_HandsOn/HandsOff_*.png 360×224 = 9 列×4
+// 行的 40×56 格）被整幅 9 列横排一次画出。原版按 compFrontArmFrame/compBackArmFrame
+// 取【单格】。
+/** CreateCompositeData switch（PlayerDrawSet.cs:1979-2007）：身架行
+ *  （bodyFrame.Y/56,0=站立）→ composite 格 [列,行]。case0→(2,0) 1→(3,0) 2→(4,0)
+ *  3→(5,0) 4→(6,0) 5→(2,1) 6→(3,1) 7-10→(4,1) 11-13→(3,1) 14→(5,1) 15-16→(6,1)
+ *  17→(5,1) 18-19→(3,1)。 */
+export const ACC_COMP_ARM_CELL: ReadonlyArray<readonly [number, number]> = [
+  [2, 0], [3, 0], [4, 0], [5, 0], [6, 0],            // 行 0-4（站立/走A/走B/走C/走D）
+  [2, 1], [3, 1], [4, 1], [4, 1], [4, 1], [4, 1],    // 行 5-9（跳/落/走循环 7-10）
+  [3, 1], [3, 1], [3, 1], [5, 1], [6, 1], [6, 1],    // 行 11-16（★SW-RB12a 原标 10-15 系位次笔误,10=上一组末位(4,1)）
+  [5, 1], [3, 1], [3, 1],                            // 行 17-19
+];
+
+/** CreateCompositeFrameRect（PlayerDrawSet.cs:2247-2250）= (pt.X*40, pt.Y*56, 40,56)。
+ *  compBand：0=前臂带（AccHandsOnComposite×compFrontArmFrame,handOn,
+ *  PlayerDrawLayers.cs:3851）；2=后臂带（AccHandsOffComposite×compBackArmFrame=
+ *  前臂行+2,PlayerDrawSet.cs:2046-2047,handOff,PlayerDrawLayers.cs:1423-1427）。
+ *  返回 null = 非合成网格（tex.width≤40 或非 40 整倍数——竖条/气球族走旧路径）。
+ *  行越界与列钳制在此收敛；朝向无关（镜像由调用方 ctx 变换承担）。 */
+export function accCompositeArmSrcRect(
+  texW: number, texH: number, row: number, compBand: 0 | 2,
+): { sx: number; sy: number; sw: number; sh: number } | null {
+  if (texW <= 40 || texW % 40 !== 0) return null;
+  const rows = Math.floor(texH / 56);
+  if (rows < 2) return null;
+  const cell = ACC_COMP_ARM_CELL[Math.max(0, Math.min(19, row))] ?? [2, 0];
+  const sx = Math.min(cell[0], Math.floor(texW / 40) - 1) * 40;
+  const sy = Math.min(cell[1] + compBand, rows - 1) * 56;
+  return { sx, sy, sw: 40, sh: 56 };
+}

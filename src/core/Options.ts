@@ -265,6 +265,13 @@ export interface OptionsData {
    *  GameUI.CraftFromNearbyChestsOn/Off 官译）；本仓设置面落 Settings 页 game 组。
    *  消费：vanillaRecipes.craftSourcesFor 的 nearbyChestsEnabled 门 */
   craftFromNearbyChests: boolean;
+  /** ★SW-FX30 刀②(2026-09-11)合成视图切换控制(Player.Settings.CraftingGridControl,
+   *  Player.cs:363;config.json 键 "CraftingControlMode" Main.cs:4295/:4640)。
+   *  切换钮右键循环(CraftingUI.DrawGridToggle CraftingUI.cs:322-331)。
+   *  ★缺省偏差备案:原版缺省 Modern(Player.cs:363),本仓缺省 classic——modern 支目标
+   *  NewCraftingUI 窗族=分期未建(SW-FX30 报告分期表),缺省 classic 使切换钮左键
+   *  (list↔grid,CraftingUI.cs:294-306)开箱即有效;modern 窗落地时回切原版缺省。 */
+  craftingGridControl: 'classic' | 'modern';
   /** ★2026-09-07 背包布局灰度 flag(用户定策:重构为原版 1.4.5.7 布局,验证通过前
    *  不替换现有布局)——缺省 classic=现行 DOM 背包(buildInventoryPanel 零改动);
    *  vanilla=原版布局双构建器(UI.ts initInGame 按 flag 分派,运行期切换走
@@ -355,6 +362,7 @@ export class OptionsStore {
     touchOpMode: 'auto',                    // 默认按设备
     quickTrashMode: 'leftControl',          // ★SW-AY1 #10（ItemSlot.cs:28-30 缺省档）
     craftFromNearbyChests: true,            // ★SW-AZ1 2026-09-06（Player.cs:355 缺省 true）
+    craftingGridControl: 'classic',         // ★SW-FX30 刀②（原版缺省 Modern Player.cs:363;偏差备案见接口注）
     inventoryLayout: 'classic',             // ★2026-09-07 灰度 flag(缺省现行布局;切缺省另刀)
   };
   loaded = false;
@@ -499,6 +507,10 @@ export class OptionsStore {
       }
       // ★SW-AZ1 2026-09-06 附近箱参与制作开关：坏值回原版默认 true（Player.cs:355）
       if (typeof this.data.craftFromNearbyChests !== 'boolean') this.data.craftFromNearbyChests = true;
+      // ★SW-FX30 刀② 合成视图切换控制：坏值回本仓缺省 classic（备案见接口注）
+      if (this.data.craftingGridControl !== 'classic' && this.data.craftingGridControl !== 'modern') {
+        this.data.craftingGridControl = 'classic';
+      }
       // ★SW-FX14 2026-09-10 M14 收尾 4 项卫门（坏值回原版缺省——vanilla config 读回
       //  无范围守卫是 enum 裸转产物,实用缺省=初值,此处按缺省收敛）
       if (this.data.hoverControl !== 'hold' && this.data.hoverControl !== 'click') {

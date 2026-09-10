@@ -237,7 +237,11 @@ export class LuckState {
 //（luckyTorchCounter 逐行推进,TryRecalculatingTorchLuck Player.cs:17845-17909）,
 // 扫满 81 行才 UpdateTorchLuck_ConsumeCountersAndCalculate(:18026-18202)；本仓按 15 tick
 // 一整窗直扫（节流等价，语义同净效果）。地表（:17858-17862 worldSurface 门）同理。
-// 地表（position.Y ≤ worldSurface*16）或死亡 → 直接 Consume（torchLuck=0）。
+// ★SW-FX25 勘误：地表支门锚 = 玩家盒【中心】（:17859 nextTorchLuckCheckCenter =
+//   _nextTorchLuckCheckCenter,:18032 = base.Center）——Center.Y < worldSurface*16 或死亡
+//   → 直接 Consume（torchLuck=0）。旧注 "position.Y ≤ worldSurface*16"（顶边锚）系与
+//   TorchAttack/torchGod 门（:17935/:18182 用 position.Y）混淆——顶边锚会把门界错位
+//   h/2=21px（同族对照：坠星 72410 与 torchGod 门确为 position.Y 顶边,勿再外推）。
 
 /** TorchID（Terraria.ID/TorchID.cs:84-131）——窗口内见到的火炬样式集索引 */
 export const TORCH_STYLE = {
@@ -258,7 +262,9 @@ export interface LuckScanZones {
 export interface LuckScanInput {
   store: TileStore;
   tx: number; ty: number;
-  /** 地表以下（position.Y > worldSurface*16）——地表恒无火炬幸运 */
+  /** 地表以下（Center.Y ≥ worldSurface*16,中心锚 1457:17859-17862/:18032——★SW-FX25
+   *  勘误:旧注 "position.Y > worldSurface*16" 系与 TorchAttack :17935 顶边门混淆）
+   *  ——地表恒无火炬幸运 */
   belowSurface: boolean;
   zones: LuckScanZones;
   /** 手持火把 placeStyle（inventory[selectedItem].createTile==4 && placeStyle<24；无 = null） */
@@ -291,6 +297,20 @@ function scanGnome(st: TileStore, tx: number, ty: number): boolean {
     }
   }
   return false;
+}
+
+/**
+ * 火炬幸运「地下扫描」门（TryRecalculatingTorchLuck :17859-17862）：
+ * 原式 `nextTorchLuckCheckCenter.Y < Main.worldSurface * 16.0` → 地表支
+ * （ConsumeCounters,torchLuck=0）——反形即 center.Y ≥ worldSurface*16 进地下逐行扫描。
+ * ★SW-FX25 定谳：锚 = 玩家盒【中心】Center.Y（:18032 `_nextTorchLuckCheckCenter =
+ * base.Center`），非 position.Y 顶边（顶边门属 TorchAttack :17935 / torchGod :18182,
+ * RB9a 已按顶边另修——两门同域异锚,勿互串）。比较子 = 闭区间界：centerY == 界值时
+ * 原版走地下支（`<` 的反形 = ≥）——旧仓 `cy/16 > groundLevel`（>）把界值拍误归地表支。
+ * 仓内净效果版以当帧 Center 代原版滞后检查中心（地下期原版最长 81t 不刷新,登记债）。
+ */
+export function torchLuckCheckCenterBelowSurface(centerY: number, worldSurfaceTiles: number): boolean {
+  return centerY >= worldSurfaceTiles * 16;
 }
 
 /** 扫描火炬窗口 + 地精窗口，算出 torchLuck 与 gnome 在否（1:1 净效果版） */

@@ -565,24 +565,32 @@ export class NightsEdgeFly extends Entity {
  *  num8=|vel|+Late(0.5..1)×40（下限 60）绕锚点旋转 num7=π+sign(vx)×phase×2π
  *  （phase=GetLerpValue(0,1,counter/60)）；rotation=num7+vel角+π/2（ai0<0 反旋）；
  *  Opacity 淡入 0-5/淡出 115-120。
- *  绘制链（DrawProjDirect 内顺序）：① 彩带拖尾（FinalFractalHelper.Draw :28040
- *  → VertexStrip：截面沿刃轴向 ±trailWidth、StripColors 逐剑固定色渐隐）→
+ *  绘制链（DrawProjDirect 内顺序）：① 彩带拖尾（FinalFractalHelper.Draw :176-192
+ *  [1457]（派发 Main.cs:28669-28672 type 933/1100→VertexStrip：截面沿刃轴向
+ *  ±trailWidth（=fullBladeLength/2,FinalFractalHelper.cs:29/:62-65 [1457]）、
+ *  StripColors 逐剑固定色渐隐）→
  *  ② 白残影 ×3（:30381 循环 + :30174 933 档 num156=60/num155=−15 → num159=
  *  45/30/15，60 越界跳过）→ ③ 本体 =【ai[1] 物品贴图】（:29945-29953 LoadItem、
  *  origin=中心、基角 −π/4×spriteDir；GetAlpha :76047 = White×Opacity ×num182
  *  淡入 0-20/淡出 68-60）→ ④ 1.25× 白叠绘（:30841 色 (255,255,255,127)×Opacity
  *  ×num186）→ ⑤ 刃尖星芒（1457 Main.cs:31620 DrawPrettyStarSparkle，15-45 counter 窗）。
- *  档案表（FinalFractalHelper.cs:81-168：剑物品 id → 全刃长/拖尾色）。 */
+ *  档案表（FinalFractalHelper.cs:74-160 [1457]：剑物品 id → 全刃长/拖尾色）。 */
+// ★SW-FX24 2026-09-10：len 列=fullBladeLength（构造参,FinalFractalHelper.cs:27-29
+//  [1457] trailWidth=fullBladeLength/2）。旧表 9 项系 1456 值漏更（65:48→60、
+//  1123:48→75、46:48→65、121:76→110、190:70→105、368:70→75、674:70→75、
+//  795:70→72、3018:80→75），已按 1457 终值对齐（=1458 同域零漂移）；其余 12 项
+//  与 default 50 两版全等。色列 21 项 1456↔1457 零漂移（1123=Main.OurFavoriteColor,
+//  Main.cs:886 [1457]）。
 const FRACTAL_PROFILES: Record<number, { len: number; color: [number, number, number] }> = {
-  65: { len: 48, color: [236, 62, 192] }, 1123: { len: 48, color: [255, 231, 69] },  // 1123=Main.OurFavoriteColor（Main.cs:868）
-  46: { len: 48, color: [122, 66, 191] }, 121: { len: 76, color: [254, 158, 35] },
-  190: { len: 70, color: [107, 203, 0] }, 368: { len: 70, color: [236, 200, 19] },
-  674: { len: 70, color: [236, 200, 19] }, 273: { len: 70, color: [179, 54, 201] },
+  65: { len: 60, color: [236, 62, 192] }, 1123: { len: 75, color: [255, 231, 69] },  // 1123=Main.OurFavoriteColor（Main.cs:886）
+  46: { len: 65, color: [122, 66, 191] }, 121: { len: 110, color: [254, 158, 35] },
+  190: { len: 105, color: [107, 203, 0] }, 368: { len: 75, color: [236, 200, 19] },
+  674: { len: 75, color: [236, 200, 19] }, 273: { len: 70, color: [179, 54, 201] },
   675: { len: 70, color: [179, 54, 201] }, 2880: { len: 70, color: [84, 234, 245] },
   989: { len: 48, color: [91, 158, 232] }, 1826: { len: 76, color: [252, 95, 4] },
   3063: { len: 76, color: [254, 194, 250] }, 3065: { len: 70, color: [237, 63, 133] },
   757: { len: 70, color: [80, 222, 122] }, 155: { len: 70, color: [56, 78, 210] },
-  795: { len: 70, color: [237, 28, 36] }, 3018: { len: 80, color: [143, 215, 29] },
+  795: { len: 72, color: [237, 28, 36] }, 3018: { len: 75, color: [143, 215, 29] },
   4144: { len: 45, color: [178, 255, 180] }, 3507: { len: 45, color: [235, 166, 135] },
   4956: { len: 86, color: [178, 255, 180] },
 };
@@ -602,7 +610,8 @@ export function randomFractalProfile(excludeZenith = true): number {
   return id;
 }
 
-/** GetFinalFractalProfile（:192-199）：缺项回退 50f/Color.White */
+/** GetFinalFractalProfile（:194-201 [1457]=:192-199 [1456]）：缺项回退 50f/Color.White
+ *  （_defaultProfile :162 [1457] = new FinalFractalProfile(50f, Color.White)） */
 export function fractalProfile(id: number): { len: number; color: [number, number, number] } {
   return FRACTAL_PROFILES[id] ?? { len: 50, color: [255, 255, 255] };
 }
@@ -922,13 +931,21 @@ export class ZenithSword extends Entity {
     const ctx = r.ctx;
     if (!ctx) return;
     const prof = fractalProfile(this.ai1);
-    const tw = prof.len / 2;   // trailWidth = 全刃长/2（StripWidth :61-64 恒宽——沿程无宽度变化）
+    // ★SW-FX24 定谳（BJ56 移交疑点）：hw 公式无罪、欠宽在表值。
+    //  反编译半宽链（1457）：FinalFractalHelper.cs:29 trailWidth=fullBladeLength/2
+    //  → :62-65 StripWidth 恒返 trailWidth → VertexStrip.cs:156-158 把 widthFunction
+    //  返回值【直接】当两侧偏移（v=pos±(rot−π/2)·num，无二次除 2）⇒ 半宽=len/2。
+    //  家族对照：Terraprisma 946 EmpressBladeDrawer.cs:40-43 StripWidth 裸返 36f，
+    //  本仓 MinionProj.ts hw:36 同构 1:1。BJ56「应为半宽 50」系把构造参 fullBladeLength
+    //  (50) 误当 widthFunction 返回值——实际返回 trailWidth=25，default 档全宽 50=参数原值。
+    //  恒宽（沿程无宽度变化）：:62-65 [1457]（旧注 :61-64 系 1456 行号）。
+    const tw = prof.len / 2;
     const icon = (r.atlas as unknown as { vicon?: (id: number) => { img: ImageBitmap | HTMLImageElement; sx: number; sy: number; sw: number; sh: number } | null } | undefined)?.vicon?.(this.ai1) ?? null;
     // 本体淡入淡出包络（:30799-30801 num182 与 :30840 num186 同式同参 t=localAI[0]）
     const num182 = ZenithSword.lerpV(0, 20, this.counter) * ZenithSword.lerpV(68, 60, this.counter);
     const n = this.trail.length / 3;
 
-    // ---- ① 彩带拖尾（FinalFractalHelper.Draw :175-190）----
+    // ---- ① 彩带拖尾（FinalFractalHelper.Draw :176-192 [1457]）----
     // ★2026-08-30 GL 化改约：原"平色四边形双 pass + CPU 像素叠层"两段合成整体移除
     // ——原版只有【一次】PS 条带绘制，平色底条系近似期产物（与真值叠成大团色块，
     // 用户实报截图）；CPU 像素循环又是卡顿本体。现在 drawStripTrail 内部自动走

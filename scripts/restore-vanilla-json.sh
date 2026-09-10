@@ -5,6 +5,13 @@
 set -e
 cd "$(dirname "$0")/.."
 git checkout HEAD -- public/sprites/vanilla.json
+# ★SW-RB12c（2026-09-10）:事故面=四文件（FX22 定谳:vanilla.json/vanilla-ui.json/
+# Item_Atlas_0/1）,此前只回 vanilla.json——PNG 侧重排（8/23 0042c846、9/10 15:41/17:44
+# 三发）必须连 PNG 一起回;vanilla-ui.json 的 bulk 键（UI_Camera 8 件手修）同样在
+# 重跑中经 :472 seen.has 跳过被静默丢键。Atlas_2/3 为追加页,事故管线不写,不回。
+git checkout HEAD -- public/sprites/vanilla-ui.json
+git checkout HEAD -- public/sprites/vanilla/Item_Atlas_0.png
+git checkout HEAD -- public/sprites/vanilla/Item_Atlas_1.png
 node scripts/atlas-append-1457.mjs
 python3 - <<'PY'
 import json, struct

@@ -677,6 +677,7 @@ import {
   shieldHaloFactor, shieldParryTransform,
   FACE_UNDER_HAIR, FACE_MASK_LAYER, FACE_FLOWER_LAYER, FACE_HEAD_LAYER,
   resolveFaceLayers, faceLayerSplitPlan, FACE_HEAD_OFFSET_IDS, FACE_HEAD_HELMET_OFFSET,
+  accCompositeArmSrcRect,
 } from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
@@ -3245,6 +3246,11 @@ export class Renderer {
     let ctx = mainCtx;   // 世界层切换期指向 worldCtx（光照分层，见 beginWorldLayer）
     const viewW = this.canvas.width, viewH = this.canvas.height;
     cam.viewW = viewW; cam.viewH = viewH;
+    // ★SW-FX27：呈现面垂直翻转开关（GameViewMatrix.Effects=FlipVertically
+    //  Main.cs:62944 `(!gameMenu && gravDir != 1f)` ↔ BackgroundViewMatrix.Effects
+    //  :62945——游戏内渲染无 gameMenu 态，门=gravDir!==1）。Game.fixedUpdate/
+    //  render 已双点同步，此处兜底取真值（capturePass 等旁路渲染也吃到）。
+    cam.flipY = player.gravDir === -1;
     cam.tickPunch();   // PunchCameraModifier 冲击位移衰减（鹿角怪等震屏源）
     const z = cam.zoom;
     // 水面波动系统帧驱动（WaterShaderData Update+PreDraw+DrawWaves；详见 WaterWaves.ts）
@@ -4214,6 +4220,32 @@ export class Renderer {
     //    等位复刻——全屏过场,画于 HUD 前）
     drawStardewAnimation(ctx, viewW, viewH);
 
+    // ═══ ★SW-FX27 呈现翻转点（GameViewMatrix.Effects=FlipVertically 落地面）═══
+    // 原版：gravDir=-1 时世界 pass（背景 BackgroundViewMatrix :62945 + 地形/实体/
+    //   弹/尘 TileDrawing.cs:8168/8181 与 LegacyPlayerRenderer.cs:269 均经
+    //   GameViewMatrix.TransformationMatrix = y'=H-y 镜像）整幅垂直翻转，UI/
+    //   飘字（ZoomMatrix/UIScaleMatrix）不翻。
+    // 本仓架构适配：世界画面分散在主画布（背景/光照合成）与 worldLayer 中间
+    //   画布上，翻转点取在【世界锚定内容全部落笔之后、屏空间文字层之前】=
+    //   此处（智能交互高亮/星露谷过场之后、告示牌文本与飘字之前）整幅自拷
+    //   镜像——与死亡灰化的整屏自拷（上方 7-死亡灰化段）同械。效果等价：
+    //   翻转点之前的全部像素（天空/地形/实体/液体/光照/贴地覆盖层）作为一个
+    //   已合成图像 y'=viewH-y 镜像（内容与位置同时镜像 ≙ 原版矩阵翻转）；
+    //   之后的屏空间层（飘字 Main.cs:63339 手翻位/签名泡 :46504/遮屏孔
+    //   ScreenObstruction.cs:50-52 经 Transform 翻转/月总脉冲）用
+    //   cam.worldToScreenDisplayed 取显示位，文字内容保持正向（原版
+    //   DrawString SpriteEffects.None 同面）。gd=1 时零操作（分支不进）。
+    //   ★_capturePass 不翻：原版 CaptureCamera 全文无 GameViewMatrix/Effects
+    //   消费（Terraria.Graphics.Capture/CaptureCamera.cs）= 截图恒世界真值向。
+    if (cam.flipY && !this._capturePass) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.translate(0, viewH);
+      ctx.scale(1, -1);
+      ctx.drawImage(ctx.canvas, 0, 0);
+      ctx.restore();
+    }
+
     // 7b'-pre. 告示牌悬停文本（vanilla :43671 signHover → MouseText 悬浮提示：
     //      鼠标格命中 Main.tileSign {55,85,425,573} 且 world.signs 有非空文本时,
     //      鼠标旁 460px 宽 wordwrap 悬浮提示。2026-08-27 补）
@@ -4221,8 +4253,9 @@ export class Renderer {
       this.signHoverText = '';
       this.signBubbleScreen = null;
       const cam2 = cam, z2 = z;
-      const mwx = cam2.x + (this._mouseX - viewW / 2) / z2;
-      const mwy = cam2.y + (this._mouseY - viewH / 2) / z2;
+      // ★SW-FX27：鼠标→世界换算收编 camera.screenToWorld（原内联式无翻转感知；
+      //   screenToWorld 内置 ReverseGravitySupport，Main.cs:2835-2842 同式）
+      const [mwx, mwy] = cam2.screenToWorld(this._mouseX, this._mouseY);
       const mtx = Math.floor(mwx / TILE), mty = Math.floor(mwy / TILE);
       if (world.store.inBounds(mtx, mty)) {
         const si = world.store.idx(mtx, mty);
@@ -4239,10 +4272,15 @@ export class Renderer {
           if (sign && sign.text.trim()) this.signHoverText = sign.text;
           // signBubble（Player.cs:33839-33841）：悬停任意告示牌即置位——
           // signX=锚右缘px、signY=锚顶行；泡偏玩家异侧（:45142 signX>玩家右缘 → 翻转）
+          // ★SW-FX27：锚屏位=worldToScreenDisplayed（vanilla DrawInterface_19
+          //   SignTileBubble Main.cs:46504-46510 `num2 = screenHeight -
+          //   (signY - screenPosition.Y) - 32`——翻转态锚 Y 镜像；泡本体由
+          //   消费端按显示位画,文字正向同原版 ZoomMatrix 层）
           const signX = ax * TILE + 16, signY = ay * TILE;
+          const [sbx, sby] = cam2.worldToScreenDisplayed(signX, signY);
           this.signBubbleScreen = {
-            x: Math.round((signX - cam2.x) * z2 + viewW / 2),
-            y: Math.round((signY - cam2.y) * z2 + viewH / 2),
+            x: Math.round(sbx),
+            y: Math.round(sby),
             flip: signX > player.x + player.w,
           };
         }
@@ -12078,7 +12116,9 @@ export class Renderer {
     // 18_OffhandAcc（:2044-2054）：bodyFrame 对齐（手环/手套族身后手）
     if (ad.handOff > 0) {
       const tex = atlas.ensureVImage(`vanilla/Acc_HandsOff_${ad.handOff}.png`);
-      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeHandOff, stealthClamp, p.facing);
+      // ★SW-BJ58：handOff=后臂合成带（AccHandsOffComposite×compBackArmFrame,
+      // PlayerDrawLayers.cs:1423-1427;后臂行=前臂行+2,PlayerDrawSet.cs:2046-2047）
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeHandOff, stealthClamp, p.facing, 0, 0, 0, 56, 0, 2);
     }
     // 19_WaistAcc（:2066-2080）：UsesTorsoFraming{5,10,12} 用 bodyFrame,余 legFrame
     if (ad.waist > 0) {
@@ -12214,7 +12254,9 @@ export class Renderer {
     // 29_OnhandAcc（:3838-3846）
     if (ad.handOn > 0) {
       const tex = atlas.ensureVImage(`vanilla/Acc_HandsOn_${ad.handOn}.png`);
-      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeHandOn, stealthClamp, p.facing);
+      // ★SW-BJ58：handOn=前臂合成带（AccHandsOnComposite×compFrontArmFrame,
+      // PlayerDrawLayers.cs:3851）——单格 40×56 取样,勿整幅 9 列横排
+      if (tex && tex.width > 0) this.drawAccBodyFrame(ctx, tex, bodyRow, ad.dyeHandOn, stealthClamp, p.facing, 0, 0, 0, 56, 0, 0);
     }
     // 32_FrontPart 常规档（左半,29_OnhandAcc 后 LegacyPlayerRenderer.cs:242-244;
     // front 13 已走上方颈层档）
@@ -12233,19 +12275,39 @@ export class Renderer {
    *  脚底局部 (-20,-52,40,56)（DrawPlayer_10/14/18/19/20/22/25/29/32 各层同式）。
    *  染料走 wingTexSource 同款 SM2 仿真链（uDirection=朝向,cXxx 逐族着色）;
    *  alphaMul = stealth A×s' 档（armor 色族）。
-   *  syOff/hOverride = 源矩形纵向切片（坐姿鞋两片）;half = front 前后半（-1 左/1 右） */
+   *  syOff/hOverride = 源矩形纵向切片（坐姿鞋两片）;half = front 前后半（-1 左/1 右）;
+   *  compBand = ★SW-BJ58 合成臂网格带（0=前臂 compFrontArmFrame / 2=后臂
+   *  compBackArmFrame——后臂行=前臂行+2,PlayerDrawSet.cs:2046-2047） */
   private drawAccBodyFrame(ctx: CanvasRenderingContext2D,
     tex: ImageBitmap | HTMLImageElement | HTMLCanvasElement, row: number,
     dyeVid: number, alphaMul: number, facing: number,
-    dx = 0, dy = 0, syOff = 0, hOverride = 56, half: 0 | -1 | 1 = 0): void {
+    dx = 0, dy = 0, syOff = 0, hOverride = 56, half: 0 | -1 | 1 = 0,
+    compBand: 0 | 2 | null = null): void {
     const fh = 56;
-    if (tex.height < fh * (row + 1)) return;   // 帧行越界（残缺表）防御
     // 源矩形：syOff/hOverride = 坐姿切片（DrawSittingLegs :1660-1672 顶带/身段）;
     // half -1/1 = front 前后半拆层（源左半 [0,20) / 右半 [20,40),PlayerDrawLayers.cs
     // :3896-3910 FrontPart / :3940-3954 BackPart——同锚同位,只拆绘制顺序）
-    const sx = half === 1 ? 20 : 0;
-    const sw = half === 0 ? tex.width : 20;
-    const sy = row * fh + syOff;
+    // ★SW-BJ58 合成网格族（tex.width=40 整倍数 = Acc_HandsOn/HandsOff 360×224 九列格;
+    // ArmorIDs.HandOn.Sets.UsesNewFramingCode 1-32 全真 ArmorIDs.cs:1583 / HandOff
+    // :1665）须按 compFrontArmFrame/compBackArmFrame 取【单格】40×56
+    // （CreateCompositeFrameRect = pt.X*40,pt.Y*56,40,56,PlayerDrawSet.cs:2247-2250;
+    // handOn 前臂 PlayerDrawLayers.cs:3851 × compFrontArmFrame,handOff 后臂
+    // :1423-1427 × compBackArmFrame）。旧实现 sw=tex.width 整条 9 列横排一次画出
+    // = 装备创造之手（vid5126 handOn23/handOff15）玩家身侧横排 6-9 个小工具精灵
+    // （用户实报 2026-09-10）;且旧守卫 tex.height<56*(row+1) 在行走行（bodyRow≥4）
+    // 早退整层不画 → 症状"静止的时候面朝方向才有"。
+    let sx = half === 1 ? 20 : 0;
+    let syRow = row;
+    let sw = half === 0 ? tex.width : 20;
+    const compRect = compBand !== null ? accCompositeArmSrcRect(tex.width, tex.height, row, compBand) : null;
+    if (compRect) {
+      sx = compRect.sx;
+      syRow = compRect.sy / fh;
+      sw = compRect.sw;
+    } else if (tex.height < fh * (row + 1)) {
+      return;   // 帧行越界（残缺表）防御（合成网格族在 accCompositeArmSrcRect 内钳行,不再早退）
+    }
+    const sy = syRow * fh + syOff;
     const sh = Math.min(hOverride, fh - syOff);
     if (sh <= 0) return;
     const dyeEmu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
@@ -14528,7 +14590,9 @@ export class Renderer {
   private drawMoonLordShake(ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number) {
     const m = this.moonLordShake;
     if (!m || m.t <= 0) return;
-    const [sx, sy] = cam.worldToScreen(m.x, m.y);
+    // ★SW-FX27：翻转点之后的屏空间层 → 显示位（原版激活锚=player.position
+    //  Main.cs:65954,滤镜世界→屏走 ToScreenPosition=翻转矩阵,Utils.cs:1131）
+    const [sx, sy] = cam.worldToScreenDisplayed(m.x, m.y);
     const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 90);
     const r = Math.max(viewW, viewH) * 0.75;
     const g = ctx.createRadialGradient(sx, sy, r * 0.12, sx, sy, r);
@@ -14564,8 +14628,14 @@ export class Renderer {
     else if (this.screenObstruction > target) this.screenObstruction = Math.max(target, this.screenObstruction - step);
     if (this.screenObstruction <= 0.001) return;
     // 玩家矩形孔（:50-52）：getRect 以 Extra_49 宽 100 为基准 Inflate，+10/2 竖偏
+    // ★SW-FX27：原版 Draw 挂在 Transform 批内（Main.cs:63270-63272
+    //  `Begin(..., Transform); ScreenObstruction.Draw(spriteBatch)`）——孔位随
+    //  矩阵翻转=显示位玩家头侧。显示位换算：翻转态锚(盒世界顶角)显示在【盒底】，
+    //  显示位盒顶 = 锚显示位 − h；num2 头侧偏移在显示空间方向不变（头恒显示位
+    //  盒顶侧——倒挂时世界盒底=头,翻转后显示在上方）。
     const HOLE = 100, num2 = 10;
-    const [px, py] = cam.worldToScreen(player.x, player.y);
+    const [px, pyAnchor] = cam.worldToScreenDisplayed(player.x, player.y);
+    const py = cam.flipY ? pyAnchor - player.h : pyAnchor;   // 显示位盒顶
     const rw = HOLE, rh = HOLE;   // Inflate 到 100×100（玩家 20×42 基准 + 均分补齐）
     const rect = {
       left: Math.round(px + player.w / 2 - rw / 2),

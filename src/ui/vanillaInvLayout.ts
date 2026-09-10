@@ -75,6 +75,31 @@ export function emoteXY(chestOrShopOpen: boolean): { x: number; y: number } {
   return chestOrShopOpen ? { x: 539, y: 446 } : { x: 534, y: 278 };
 }
 
+// ---- 箱条(开箱态内嵌面板,SW-FX28 刀①;ChestUI.cs Draw 域) ----
+//   原版无独立箱子面板:开箱时 ChestUI.Draw(Main.cs:42552 调)在背包网格正下方
+//   叠画箱格,与钱币/弹药列/垃圾桶共存一体。invBottom=258(Main.cs:6746 定值)。
+/** 箱条缩放(ChestUI.cs:83/:358 `Main.inventoryScale = 0.755f`;商店同值 Main.cs:42516) */
+export const CHEST_SCALE = 0.755;
+/** 箱名落位(ChestUI.cs:158 DrawName `new Vector2(504f, Main.instance.invBottom)`;
+ *  商店店名/储蓄同行 Main.cs:42502-42503 同位——同构面) */
+export const CHEST_NAME_XY = { x: 504, y: 258 } as const;
+/** 箱条 40 槽(ChestUI.cs:324-386 DrawSlots:num=10 列×num2=4 行;
+ *  ChestUI.cs:375 `num5=(int)(73f+(float)(i*56)*scale)` / ChestUI.cs:376 `num6=(int)(invBottom+(j*56)*scale)`;
+ *  商店货架同格几何 Main.cs:42523-42524 context 15)。
+ *  i = 行主序槽号(ChestUI.cs:372 num4=i+j*10) */
+export function chestSlotXY(i: number): { x: number; y: number } {
+  return {
+    x: Math.trunc(73 + (i % 10) * 56 * CHEST_SCALE),
+    y: Math.trunc(258 + Math.floor(i / 10) * 56 * CHEST_SCALE),
+  };
+}
+/** 箱操作钮(ChestUI.cs:182-188 DrawButtons→ChestUI.cs:186 `DrawButton(i, 506, invBottom+40)`;
+ *  ChestUI.cs:198 `Y += ID * 26`)。id = ButtonID:0 拿走全部/1 存放全部/2 快速堆叠/3 补货/4 排列
+ *  (ID5/6 重命名 = 登记债 editChest IME 流,本仓未画但公式同源) */
+export function chestButtonXY(id: number): { x: number; y: number } {
+  return { x: 506, y: 258 + 40 + id * 26 };
+}
+
 // ---- 小地图占位 mH(Main.cs:46535-46561) ----
 //   小地图开启(mapEnabled && mapStyle==1)→256,再钳 sh-PushUp(:46559-46561,可为负=
 //   原版同款;PushUp=RecommendedEquipmentAreaPushUp Main.cs:3063-3071——恶魔心/大师槽

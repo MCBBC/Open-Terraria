@@ -132,4 +132,22 @@ describe('SW-FX21 右键开袋面（TryOpenContainer_GrantItems :1784 首支补�
       expect(got.every((g) => g[0] > 0)).toBe(true);
     }
   });
+
+  // ★SW-RB12b（2026-09-10）探针 C2 定谳锁：关包快捷栏右键整面不可达。
+  //  原版关包态快捷栏走 GUIHotbarDrawInner 专路（Main.cs:44322-44377,:44324
+  //  playerInventory 早退 = 开包态不进;context 13 只 ItemSlot.Draw 不 Handle,
+  //  唯一交互 = mouseLeft changeItem :44357-44360）→ 右键开包/换型/装备/拆半
+  //  四支关包态整面不可达。结构锁钉 UI.ts 右键支的关包早退门（防回退）。
+  it('结构锁:UI.ts 右键支持关包早退门（GUIHotbarDrawInner 只 Draw 不 Handle 的仓库承载位）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const uiSrc = readFileSync(join(dirname(__dirname), 'src', 'ui', 'UI.ts'), 'utf8');
+    expect(uiSrc).toContain("if (!this.invPanel || this.invPanel.style.display !== 'block') return;");
+    // 锁门必须在 button===2 支内（不可误挪到左键面）
+    const b2 = uiSrc.indexOf('if (e.button === 2) {');
+    const gate = uiSrc.indexOf("if (!this.invPanel || this.invPanel.style.display !== 'block') return;");
+    expect(b2).toBeGreaterThanOrEqual(0);
+    expect(gate).toBeGreaterThan(b2);
+    expect(gate - b2).toBeLessThan(1200);   // 同支近邻（中间仅 RB12b 注释）
+  });
 });

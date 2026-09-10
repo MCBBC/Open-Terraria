@@ -5,7 +5,12 @@
 // 不可达）。但半成品 world 对象（如旧夹具 `{store}`）喂入 → n5/num6=NaN,NaN 穿透
 // 两道钳（NaN<0.25 / NaN>1 恒 false）→ grav*=NaN → vy=NaN 整链冻结
 // （moveAndCollide 步数 NaN → 循环零执行 → 悬空定身）。
-// 守卫面：元数据非有限/非正 → 跳过整段调制（num6≡1）；真实世界条件恒 false。
+// 守卫面（★SW-RB12b 2026-09-10 定谳复核校正,旧注「num6≡1 跳过整段调制」系早期
+// 草稿残留,与实现不符）：实装守卫 = `Number.isNaN(num6) → num6 = remix?0.1:0.25`
+// （归各支下钳档;Player.ts :5603/:5496 两块同款）——仅吃 NaN（穿透 `NaN<0.25`/
+// `NaN>1` 双钳的唯一元数据形态）;±Inf（groundLevel=0 → N/0）由原钳原样承接
+// （−Inf→0.25/0.1、+Inf→1,旧行为逐位不变）;非正有限 gl 同样落原钳,守卫不触达。
+// 真实世界（worldgen 必设位）条件恒 false = 零行为面。
 // 本文件三面：①全物理链 N 拍有限性 ②退化元数据注入被钳住 ③原版公式面仍生效
 //（守卫未误杀深度调制）。
 import { describe, it, expect } from 'vitest';

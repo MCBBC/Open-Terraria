@@ -119,13 +119,17 @@ describe('RB11f F1/F2 重力总闸调用点（冻/惑清零之后 + 边沿锁全
 
 describe('RB11f F3 tier2 倒挂头门 vy∈[0,gravity) 带（Player.cs:21957）', () => {
   it('倒挂+984 贴墙 vy=0（碰撞钳帧）仍驻停（旧门 vy*gd>0 在带内恒 false 必红）', () => {
-    const game = makeGame(flatWorld());
+    const w = flatWorld();
+    // flag 双格探针墙（★SW-RB11b 落地的 :21944-21954 probe——玩家右侧 col 61,
+    // 倒挂 probe 行=edgeWs=(y-1)/16=59 及其上 58）
+    for (let y = 56; y <= 60; y++) w.store.setTileSilent(61, y, 1, 0, 0);
+    const game = makeGame(w);
     const inv = new Inventory();
     inv.armor[3] = { id: iid(984), stack: 1 };                 // spikedBoots=2
     const p = new Player(60 * TILE, 60 * TILE, inv);
     p.buffs.apply(BuffType.Gravitation, 9999);                 // 倒挂源（无源倒挂被总闸归 1）
     p.gravDir = -1;
-    p.vy = 0;                              // 碰撞钳 0 帧/顶棚相邻态 = [0,0.4) 带
+    p.vy = 0;                              // 碰撞钳 0 帧/顶棚相邻态 = [0,gFieldWs) 带
     p.inputX = 1;
     p.hitWall = true;
     p.onGround = false;

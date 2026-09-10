@@ -413,6 +413,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onLoadoutSwitched: () => ui.flashLoadoutSwitch(),
       // ★Q-F9 快堆槽级 blocked 回执（QuickStacking.cs:360-363 → IndicateBlockedSlot 红脉冲）
       onQuickStackBlockedSlots: (slots) => ui.indicateBlockedSlots(slots),
+      // ★SW-FX29 排序色带（ItemSorting.cs:1529/:1639 SetGlow → ItemSlot.cs:2291 hsl 色带
+      //  渐隐 300t）——chest=false 背包/弹药格（context 0/2）/true 箱槽（context 4/32/3）
+      onSortGlow: (slot, hue, chest) => ui.setSlotGlow(chest ? 'chest' : 'inv', slot, hue),
       onToast: (m) => ui.toast(m),
       onAchievementPopup: (name, title) => ui.achievementPopup(name, title),
       onHousingCursor: (m) => {
@@ -432,6 +435,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onReforgeOpen: () => ui.showReforge(),
       // 向导「制作」（NPCChatText_GuideReverseCrafting :40723）：开背包 + 反查浮层
       onGuideCraftOpen: () => { ui.openInventory(); ui.openGuideSearch(); },
+      // ★SW-FX30 刀⑦ 合成站右键 focus 钩（Player.cs:33541-33547 → :33555-33561）：
+      // classic 支 = OpenCloseFilter（CraftingUI.cs:146-159 开包+网格态+站点过滤）
+      onCraftingStationOpen: (f) => ui.openCraftingStationFilter(f),
       onNpcShop: (title, items, copper, happinessMul, medals, medalsTotal) => ui.showNpcShop(title, items, copper, happinessMul, medals, medalsTotal),
       // NPC 快乐度详情浮层（ReportHappiness.Interact）
       onNpcHappiness: (info) => ui.showNpcHappiness(info),

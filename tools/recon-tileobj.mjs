@@ -181,6 +181,8 @@ for (let ln = 0; ln < lines.length; ln++) {
     delete snap.waterDeath; delete snap.lavaDeath;
     bases.set(m[1], snap);
     resetLiquid(work);
+    work.yOff = 0;                       // ★SW-FX26：基样式快照后同复位（:2008/:1793）——
+                                         //   块内显式 DrawYOffset 已随 snap 落库,残留=上游块污染
     continue;
   }
   if ((m = L.match(/^(?:newTile|Style\w+)\.(?:CopyFrom\(.*?\)|ResetToTile\(\))\s*;/)) && !/^newTile\.CopyFrom/.test(L)) {
@@ -189,7 +191,11 @@ for (let ln = 0; ln < lines.length; ln++) {
   if ((m = L.match(/^addTile\((-?\d+)\)\s*;/))) {
     const id = parseInt(m[1]);
     stats.total++;
-    if (id <= 0) { continue; }           // addTile(-1) 清工作面语义等价 newTile 复位
+    if (id <= 0) {                       // addTile(-1) 清工作面语义等价 newTile 复位
+      resetLiquid(work);
+      work.yOff = 0;                     // ★SW-FX26：复位同含 DrawYOffset（:1793 SetupBaseObject）
+      continue;
+    }
     if (work.w > 0 && work.h > 0) {
       const rec = deep(work);
       resolveExprs(rec);
@@ -217,6 +223,13 @@ for (let ln = 0; ln < lines.length; ln++) {
     resetSubWork();
     styleWrapLimit = 0;                  // 原版 newTile=new(_baseObject) 复位 StyleWrapLimit
     resetLiquid(work);                   // 原版 addTile 尾 newTile = new(_baseObject)（:2013）
+    work.yOff = 0;                       // ★SW-FX26（2026-09-10）：复位同含 DrawYOffset=0——
+                                         //   原版 addTile 尾 newTile=new(_baseObject)（:2005/:2013）
+                                         //   且 SetupBaseObject 缺省 `DrawYOffset = 0`（:1793）。
+                                         //   此前只复位液体两维，yOff 跨 addTile 残留（家族头
+                                         //   净化约定只豁免几何字段）→ 454 块 `DrawYOffset=-2`
+                                         //   （cs:3166）携带污染 Style3x2 基样式快照（cs:3168-3185
+                                         //   未写 yOff）→ 14/17/77 等 CopyFrom(Style3x2) 族全错 -2。
     continue;
   }
   if (/^addAlternate\(/.test(L)) {

@@ -367,11 +367,13 @@ describe('Zenith 视觉层 1:1（FinalFractalHelper/DrawProjDirect 视觉链）'
 
   it('彩带=每剑固定档案色（无 hue 渐变）：档案色互异、Zenith 本体=OurFavoriteColor(255,231,69)', () => {
     const z = fractalProfile(1123);
-    expect(z.color).toEqual([255, 231, 69]);              // Main.cs:868
-    expect(z.len).toBe(48);                               // 全刃长 48 → trailWidth 24
-    // 宽度恒定（StripWidth :61-64 返回常 trailWidth）——不同剑不同宽、同剑沿程不变
-    expect(fractalProfile(3018).len / 2).toBe(40);
-    expect(fractalProfile(121).len / 2).toBe(38);
+    expect(z.color).toEqual([255, 231, 69]);              // Main.cs:886 [1457] OurFavoriteColor
+    // ★SW-FX24 金标重产：len 列 1457 终值（FinalFractalHelper.cs:74-160 [1457]，1458 同域零漂移；
+    //   旧断言 48/40/38 系 1456 值——65/1123/46/121/190/368/674/795/3018 九项 1457 已改）
+    expect(z.len).toBe(75);                               // 全刃长 75 → trailWidth 37.5
+    // 宽度恒定（StripWidth :62-65 [1457] 返回常 trailWidth）——不同剑不同宽、同剑沿程不变
+    expect(fractalProfile(3018).len / 2).toBe(37.5);      // 1457 由 80 调低至 75
+    expect(fractalProfile(121).len / 2).toBe(55);         // 1457 由 76 调高至 110
     // 彩虹来自档案色差异（齐射随机档案——每剑一色）
     const colors = new Set(FRACTAL_KEYS.map((k) => fractalProfile(k).color.join(',')));
     expect(colors.size).toBeGreaterThan(10);

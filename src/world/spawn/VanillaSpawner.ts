@@ -646,7 +646,7 @@ export class VanillaSpawner {
     let baseId = map?.base ?? netId;
     // ★IIIII228 :5252-5261 SpawnNPC 包装位金史莱姆两掷（基底=蓝史莱姆 1 时）：
     //  RollLuck(180)==0 → -4 Pinky（NPC.luck 刷生槽缺省 0 = 裸 1/180）；十周年世界
-    //  再 RollLuck(180)==0 → 667 派对史莱姆（两 if 顺序消费,后者可覆写前者）。
+    //  再 RollLuck(180)==0 → 667 金史莱姆（GoldenSlime,NPCID.cs:12405;SW-FX26 纠注:原注误标派对类）。
     //  雕像/召唤不走本包装（原版 Wiring→NewNPC 直出,无此掷）
     if (baseId === 1 && netId === 1) {
       if (rng.next() < 1 / 180) baseId = -4;
@@ -2059,7 +2059,7 @@ export class VanillaSpawner {
       }
       if (gold()) return D(443);                             // 金鸟
       if (gold()) return D(539);                             // 金松鼠
-      if (this.world.clock.halloween && !N(3)) return D(303); // 万圣黑猫
+      if (this.world.clock.halloween && !N(3)) return D(303); // 史莱姆兔（BunnySlimed,NPCID.cs:11677;SW-FX26 纠注:原注误标黑猫——原版万圣档 NPC.cs:1639 同掷 303,黑猫类 HoppinJack=304 不在此槽）
       if (this.world.clock.xMas && !N(3)) return D(337);     // 圣诞节日小动物
       if (this.partyUp && !N(3)) return D(540);              // 派对小动物
       if (N(3)) return D(rng.next() < 0.5 ? 299 : 538);      // 鸟/松鼠 SelectRandom
@@ -2576,7 +2576,7 @@ export class VanillaSpawner {
         //      299|538 → 兜底兔 46 ----
         if (N(400)) return D(443);
         if (N(400)) return D(539);
-        if (this.world.clock.halloween && !N(3)) return D(303);
+        if (this.world.clock.halloween && !N(3)) return D(303); // 史莱姆兔（BunnySlimed,SW-FX26 补名）
         if (this.world.clock.xMas && !N(3)) return D(337);
         if (this.partyUp && !N(3)) return D(540);
         if (N(3)) return D(rng.next() < 0.5 ? 299 : 538);   // SelectRandom
@@ -2614,7 +2614,7 @@ export class VanillaSpawner {
       }
       if (N(400)) return D(443);
       if (!deepCaveBand) {
-        if (this.world.clock.halloween && !N(3)) return D(303);
+        if (this.world.clock.halloween && !N(3)) return D(303); // 史莱姆兔（BunnySlimed,SW-FX26 补名）
         if (this.world.clock.xMas && !N(3)) return D(337);
         if (this.partyUp && !N(3)) return D(540);
       }
@@ -3223,8 +3223,8 @@ export class VanillaSpawner {
           // 金兔 443 / 金松鼠 539（:4186-4192）
           if (gold()) return D(443);
           if (gold() && this.spawnTileY <= this.world.groundLevel) return D(539);
-          // 节日档（:4193-4204）：万圣 303 / 圣诞 337 / 派对 540（各 Next(3)!=0）
-          if (this.world.clock.halloween && !N(3)) return D(303);
+          // 节日档（:4193-4204）：万圣 303 史莱姆兔 / 圣诞 337 / 派对 540（各 Next(3)!=0）
+          if (this.world.clock.halloween && !N(3)) return D(303); // 史莱姆兔（BunnySlimed,SW-FX26 补名）
           if (this.world.clock.xMas && !N(3)) return D(337);
           if (this.partyUp && !N(3)) return D(540);
           // 1/3 松鼠（SelectRandom 299|538）/ else 兔 46（:4205-4210）

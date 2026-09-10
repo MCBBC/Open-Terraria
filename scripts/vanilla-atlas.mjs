@@ -20,16 +20,31 @@ const OUT_JSON = join(ROOT, 'public', 'sprites', 'vanilla.json');
 //   SW 缓存链/golden 像素锚全破 + :449 seen.has 静默丢白名单外散件键（UI_Camera_*）。
 //   增量一律走 scripts/atlas-append-1457.mjs（幂等，自验既有键零改动）。
 const FORCE_FULL = process.argv.includes('--force-full');
-if (!FORCE_FULL && existsSync(OUT_JSON)) {
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');   // ★SW-RB12c:双旗第二键
+const INDEX_ONLY = process.argv.includes('--index-only');
+// ★SW-RB12c（2026-09-10）:--index-only 只重产 assets-index.json(声音段 .opus+.wav
+//   枚举修正 + miscVanilla 增量),零图集写盘,故豁免追加时代守卫——FX23 退役
+//   vanillaAtlasAuto 自动通道后,这是 sounds/fonts/l10n 变更后索引再生的唯一入口。
+if (INDEX_ONLY) { genAssetsIndex(); process.exit(0); }
+// ★SW-RB12c:--force-full 单旗在追加时代仍拒（误触防线,rm -rf 式双键）——
+//   原地强推须 --force-full --overwrite-append-era 双旗;清空产物后的全量重建不在此列
+//   （OUT_JSON 不存在,守卫天然不拦）。
+if (existsSync(OUT_JSON)) {
   try {
     const prev = JSON.parse(readFileSync(OUT_JSON, 'utf8'));
     const appendEra = Object.values(prev.items ?? {}).some((m) =>
-      /Item_Atlas_[23]\.png/.test(String(m?.icon ?? '')));
-    if (appendEra) {
+      /Item_Atlas_[23]\.png/.test(String(m?.icon ?? '')))
+      // ★SW-RB12c:追加时代判据不只 items 页引用——tiles['753']（TEdit 白名单 max 752,
+      // 仅追加通道可落库）与 items['4722']（TEdit 缺 id,同理）也是追加时代物证;
+      // 沙盒实证:只探 items 页引用时,「无 Atlas_2/3 引用但 tiles 域含追加键」的
+      // 状态会放行全量重跑→753/4722/伪装箱 62 件静默丢。
+      || prev.tiles?.['753'] != null || prev.items?.['4722'] != null;
+    if (appendEra && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
       console.error('[vanilla-atlas] 拒绝全量重写：vanilla.json 已处于追加通道时代（检测到 Item_Atlas_2/3 页引用）。');
       console.error('  全量重写会换页换坐标重排既有键（事故 8/21、8/23、09-10 ×2），破坏 SW 缓存链/golden/追加语义。');
       console.error('  增量请走：node scripts/atlas-append-1457.mjs（幂等）。');
-      console.error('  确需全量重建（白名单扩容等）：清空 public/sprites/vanilla*.json 与 vanilla/ 页后重跑，或加 --force-full（自担风险，事后必须全绿 tests/atlas-append-golden + atlas-lint）。');
+      console.error('  确需全量重建（白名单扩容等）：清空 public/sprites/vanilla*.json 与 vanilla/ 页后重跑（守卫不拦空产物）。');
+      console.error('  原地强推须双旗 --force-full --overwrite-append-era（--force-full 单旗仍拒;自担风险,事后必须全绿 tests/atlas-append-golden + atlas-lint,并复跑 atlas-append-1457 补回追加键/伪装箱/4722/753）。');
       process.exit(1);
     }
   } catch { /* OUT_JSON 坏损时不拦（让正常流程自行报错） */ }
@@ -469,7 +484,14 @@ if (existsSync(armorDir)) {
         if (statSync(p).isDirectory()) { walkD(p, `${rel}${f}/`); continue; }
         if (!f.endsWith('.png')) continue;
         const key = flatName(rel + f);
-        if (seen.has(key)) continue;   // 已有同名（含白名单产物）不覆盖
+        // ★SW-RB12c（2026-09-10,FX22 定谳的静默丢键家族）:跳过分支必须照样记键——
+        //   旧行为"盘上已有同名→continue"会把既有文件从 uiOut.files 整体漏掉,
+        //   重写 vanilla-ui.json 时静默丢键（UI_Camera 8 键即此机制:8/25 手修回填,
+        //   此后每次全量重跑都复发）。记录幂等:白名单产物键已在前段登记,值相同。
+        if (seen.has(key)) {
+          if (toUi && !uiOut.files[key]) uiOut.files[key] = `vanilla-ui/${key}`;
+          continue;   // 已有同名（含白名单产物）不覆盖
+        }
         copyFileSync(p, join(outDir, key));
         seen.add(key); bulk++;
         if (toUi) uiOut.files[key] = `vanilla-ui/${key}`;
@@ -492,20 +514,21 @@ if (missing.length) console.warn('缺失（白名单有但文件/数据不存在
 // ---------- SW 资产预载索引(2026-08-13)----------
 // 产出 public/assets-index.json:页面侧 AssetCache 的 P2(其余贴图)/P3(音效)枚举源。
 // 音乐不走这里(页面从 data/Music.ts MUSIC 表枚举)。fonts/l10n 也列入 misc。
-// 本脚本在 vanillaAtlasAuto 的 stale 源清单里 → dev 启动与 vite build 自动重跑;
-// ★若只改了 sounds/fonts/l10n 内容,需手动 `node scripts/vanilla-atlas.mjs` 或
-//   bump AssetCache.CACHE_BUSTER 使 SW 版本缓存失效。
-{
+// ★FX23 后 vanillaAtlasAuto 自动重跑通道已退役;★SW-RB12c:索引再生的唯一入口 =
+//   `node scripts/vanilla-atlas.mjs --index-only`（头部短路的守卫豁免路径,零图集写盘）。
+//   声音段枚举 .opus+.wav:SFX Opus 化(863 wav→opus)后盘上 .wav 已清零,旧 .wav-only
+//   枚举一旦重跑会把 863 条 opus 清空（encode-sounds-opus.mjs 的段同步曾代偿,本处对齐真源）。
+function genAssetsIndex() {
   const pub = join(ROOT, 'public');
-  const listDir = (dir, ext) => {
+  const listDir = (dir, exts) => {
     const d = join(pub, dir);
     if (!existsSync(d)) return [];
-    return readdirSync(d).filter((f) => f.endsWith(ext)).map((f) => `${dir}/${f}`).sort();
+    return readdirSync(d).filter((f) => exts.some((e) => f.endsWith(e))).map((f) => `${dir}/${f}`).sort();
   };
   const index = {
     generatedAt: new Date().toISOString(),
-    sounds: listDir('sounds', '.wav'),
-    fonts: listDir('fonts', '.woff2'),
+    sounds: listDir('sounds', ['.opus', '.wav']),
+    fonts: listDir('fonts', ['.woff2']),
     l10n: ['l10n/index.json', ...readdirSync(join(pub, 'l10n')).filter((f) => f.endsWith('.json') && f !== 'index.json').map((f) => `l10n/${f}`)],
     miscVanilla: readdirSync(join(pub, 'sprites', 'vanilla'))
       .filter((f) => f.endsWith('.png') && !/^Item_Atlas_/.test(f) && !/^Tiles_\d+\.png$/.test(f) && !/^Wall_\d+\.png$/.test(f) && !/^NPC_\d+\.png$/.test(f))
@@ -517,3 +540,4 @@ if (missing.length) console.warn('缺失（白名单有但文件/数据不存在
   writeFileSync(join(pub, 'assets-index.json'), JSON.stringify(index));
   console.log(`assets-index: sounds=${index.sounds.length} fonts=${index.fonts.length} l10n=${index.l10n.length} miscVanilla=${index.miscVanilla.length} miscUi=${index.miscUi.length}`);
 }
+genAssetsIndex();

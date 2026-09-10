@@ -93,7 +93,14 @@ describe('deadCellsBeheadedStep 旋位支（:24497-24500）', () => {
     p.mount.fullRotation = 0.3;
     p.vx = 2;                                             // Remap(|vx|,0,3,0,−4) 生效
     const baseX = p.cx;
-    const baseY = p.y + 8 + Math.max(0, Math.min(1, 2 / 3)) * -4;   // gravDir=1
+    // ★SW-FX25 重锚（2026-09-10，定谳=测试陈旧非源偏差）：骑乘态 vanilla position.Y
+    //   经 SetMount（Mount.cs:6317-6323）底边保位、盒上扩 heightBoost → = 仓内
+    //   p.y − heightBoost（UFO heightBoost=16,Mount.cs:1228;playerYOffsets 全帧 16
+    //   :1237-1244）。MountedTop.Y = position.Y + HOC（Player.cs:3336-3338）,
+    //   HOC = PlayerOffsetHitbox = −PlayerOffset + heightBoost（Mount.cs:427-433）
+    //   = −16+16 = 0 → MountedTop.Y = p.y − 16。旧锚 p.y 漏 SetMount 底边保位换算
+    //   = 期望整体低 16px（旋位测试的 x 差 = sin(0.3)×16 = 4.728 即同根）。
+    const baseY = p.y - 16 + 0 + 8 + Math.max(0, Math.min(1, 2 / 3)) * -4;   // posVY+HOC +8×gravDir + Remap
     const fr = playerFullRotationOf(p, p.mount)!;
     const want = rotatedBy(baseX, baseY, fr.angle, fr.pivotX, fr.pivotY);
     p.deadCellsBeheadedStep(g);
@@ -114,7 +121,8 @@ describe('deadCellsBeheadedStep 旋位支（:24497-24500）', () => {
     p.deadCellsBeheadedStep(g);
     expect(payloads.length).toBe(1);
     expect(payloads[0].x).toBeCloseTo(p.cx, 9);
-    expect(payloads[0].y).toBeCloseTo(p.y + 8, 9);
+    // ★SW-FX25 重锚（同上注）：posVY = p.y − heightBoost(16) + HOC(0) + 8×gravDir
+    expect(payloads[0].y).toBeCloseTo(p.y - 16 + 0 + 8, 9);
   });
 
   it('未骑乘：载荷位 = 基位原值（机身倾斜写面仅在骑乘态）', () => {

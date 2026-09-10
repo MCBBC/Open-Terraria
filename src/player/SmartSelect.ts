@@ -160,6 +160,14 @@ export interface SmartSelectEnv {
   st: TileStore;
   /** MouseWorld（Main.mouseX + screenPosition，px） */
   mouseX: number; mouseY: number;
+  /**
+   * ★SW-FX27：裸鼠标 Y 的世界比例屏 px（Main.mouseY 经 SetZoom_World 缩放，
+   *  = rawScreenY/zoom）——SmartSelectGamepadPointer.cs:27 原式
+   *  `(screenPosition.Y + screenHeight − mouseY)/16` 的 mouseY 输入。
+   *  env.mouseY 为 camera.screenToWorld 产出 = 已内置 ReverseGravitySupport
+   *  （Main.cs:2835-2842）的世界 Y；gravDir=-1 反演支若直接喂它会二次反演。
+   *  缺省回退 = mouseY（gd=1 翻转支不达，无行为差）。 */
+  rawMouseYWorldScale?: number;
   /** Main.screenPosition.Y（屏幕左上角世界 Y，px；gravDir=-1 翻转分支用） */
   screenTopY: number;
   /** Main.screenHeight（px，gravDir=-1 翻转分支用） */
@@ -336,10 +344,15 @@ export class SmartSelect {
   private getTargetTile(env: SmartSelectEnv): { tX: number; tY: number } {
     const tX = Math.floor(env.mouseX / 16);                     // :25
     let tY = Math.floor(env.mouseY / 16);                       // :26
-    if (env.player.gravDir === -1) {                            // :27-30（反重力未实装，恒不达）
-      // 原式 tY = (screenPosition.Y + screenHeight − mouseY) / 16（mouseY 为屏幕 px）
-      const screenMouseY = env.mouseY - env.screenTopY;
-      tY = Math.floor((env.screenTopY + env.screenHeight - screenMouseY) / 16);
+    if (env.player.gravDir === -1) {                            // :27-30（★SW-FX27 起真实可达）
+      // 原式 tY = (screenPosition.Y + screenHeight − mouseY) / 16（mouseY 为屏幕
+      // px，SetZoom_World 口径）——1:1 保留，输入吃 rawMouseYWorldScale（裸鼠标
+      // 世界比例屏 Y）。env.mouseY 已是翻转修正后的世界 Y（camera.screenToWorld
+      // 内置 ReverseGravitySupport，Main.cs:2835-2842），直接喂原式=二次反演。
+      // 代数核验：rawMouseYWorldScale = rawY/zoom 时本式 ≡
+      // (screenTopY + (viewH−rawY)/zoom)/16 = 鼠标显示位的世界 Y（非镜像）÷16。
+      const mouseYScreen = env.rawMouseYWorldScale ?? (env.mouseY - env.screenTopY);
+      tY = Math.floor((env.screenTopY + env.screenHeight - mouseYScreen) / 16);
     }
     return { tX, tY };
   }
