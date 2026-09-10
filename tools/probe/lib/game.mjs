@@ -13,7 +13,7 @@
  *    不改引擎语义的调用点(改引擎面=把 bug 修没)。
  */
 import { front } from './browser.mjs';
-import { gotoApp, waitForBridge } from './boot.mjs';
+import { gotoApp, waitForBridge, dismissWelcome } from './boot.mjs';
 import { sizeDims, sizeCode } from './env.mjs';
 
 export const GAME_WAIT_DEFAULT = 600_000;   // large 世界生成 ~分钟级,默认给足
@@ -25,12 +25,13 @@ export const GAME_WAIT_DEFAULT = 600_000;   // large 世界生成 ~分钟级,默
  *  - 'ui'     : / + __swFlow.createWorldProbe(cfg) —— 走真实创建流(UIWorldLoad
  *               双进度条+worker 预览链路;采样生成中态时【不要 await】)。
  * opts: { mode, seed, size('small'|'medium'|'large'|0|1|2'), flags(种子别名),
- *         pinRandom(seed数字), timeout, settleMs, onProgress }
- * 返回 { ok, w, h, seed, why? }。
+ *         pinRandom(seed数字), timeout, settleMs, onProgress,
+ *         keepDialogs(UI 测试要看弹窗时 true;缺省 false=进世界首轮自动关) }
+ * 返回 { ok, w, h, seed, welcome?, why? }。
  */
 export async function createGame(page, {
   mode = 'direct', seed = '', size = 'small', timeout = GAME_WAIT_DEFAULT, settleMs = 1500,
-  pinRandom = null, log = () => {},
+  pinRandom = null, keepDialogs = false, log = () => {},
 } = {}) {
   const [w, h] = sizeDims(size);
   if (pinRandom != null) installPinnedRandom(page, pinRandom);
@@ -63,7 +64,14 @@ export async function createGame(page, {
   const ok = await waitForGame(page, { timeout, log });
   if (!ok) return { ok: false, why: 'game-timeout' };
   await page.evaluate((ms) => new Promise((r) => setTimeout(r, ms)), settleMs);   // afterWorldLoad 尾段(minimap/装备刷新)
-  return { ok: true, w, h, seed };
+  // 欢迎弹窗第二层保险(IIII240 坑③):ack 预置(bootstrap)是第一层;漏网(隐私模式
+  // localStorage 抛错/手动清存储/keepDialogs 探针自己擦过 ack)时弹窗在 onWorldReady
+  // 挂出(mainFlow.ts:391)挡住首轮截图/点击 → settle 后默认关掉。
+  let welcome = null;
+  if (!keepDialogs) {
+    welcome = await dismissWelcome(page).catch((e) => ({ ok: false, why: String(e?.message ?? e).slice(0, 120) }));
+  }
+  return { ok: true, w, h, seed, welcome };
 }
 
 /** 等 __swGame.player/world 就绪(1s 轮询,30s 心跳日志)。 */

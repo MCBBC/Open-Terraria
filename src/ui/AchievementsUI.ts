@@ -104,10 +104,19 @@ let openEscHandler: ((e: KeyboardEvent) => void) | null = null;
 /** 当前过滤类别（原版 4 个 UIToggleImage；全关 = 只看未完成? 原版至少留一个开） */
 const catOn = [true, true, true, true];
 
-export function openAchievementsPanel(game: Game, focusName?: string): void {
+/** ★SW-FX18 2026-09-10 面板宿主结构化（原 Main.cs:112 AchievementsMenu 为全局态，
+ *  两个入口喂同一面板：游戏内 = Game（UI.ts 弹窗定位/顾问卡）,标题屏 = 菜单级
+ *  成就实例（mainFlow __swAchievements 桥,Main.cs:49733 menuMode 0 第三钮同位）） */
+export interface AchievementsHost {
+  achievements: import('../core/Achievements').Achievements;
+  /** UI 音（menuTick）；标题屏菜单直开可缺省静默 */
+  sfx?: { play(name: 'menuTick', vol?: number): void } | null;
+}
+
+export function openAchievementsPanel(host: AchievementsHost, focusName?: string): void {
   ensureCss();
   if (openPanel) { closeAchievementsPanel(); return; }
-  const a = game.achievements;
+  const a = host.achievements;
 
   const panel = el('div', 'sw-ach-panel');
   // 头部：标题 + 完成计数 + 关闭
@@ -198,7 +207,7 @@ export function openAchievementsPanel(game: Game, focusName?: string): void {
   openPanel = panel;
   openEscHandler = (e) => { if (e.code === 'Escape') closeAchievementsPanel(); };
   window.addEventListener('keydown', openEscHandler);
-  game.sfx.play('menuTick', 1);
+  host.sfx?.play('menuTick', 1);
   // ★滚动定位+高亮(2026-09-07 用户需求:成就解锁弹窗点击→定位到该项并高亮)
   if (focusName) {
     const target = list.querySelector(`[data-ach="${focusName}"]`);

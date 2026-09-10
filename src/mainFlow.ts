@@ -9,6 +9,7 @@ import { resolveTouchMode } from './core/input/touchMode';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
+import { builderAccDefaults } from './stats/builderAcc';   // ★SW-FX19:builderAccStatus 回填缺省形
 import { PlayTimeTracker } from './save/PlayTime';
 import { saveClient } from './workers/SaveClient';
 import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
@@ -98,17 +99,25 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     },
   });
   // GOING_OLDSCHOOL B1 收口：菜单级成就句柄（标题屏日月拖拽首访即达——
-  // 曾只挂 Game.achOnWorldEnter，直载标题屏拿不到句柄）
-  {
+  // 曾只挂 Game.achOnWorldEnter，直载标题屏拿不到句柄）。
+  // ★SW-FX18 2026-09-10：句柄 Promise 化——标题菜单"成就"钮（Main.cs:49733
+  // menuMode 0 第三钮 Lang.menu[131] → AchievementsMenu 的本仓等价）点击时
+  // await 此桥,实例未就绪（动态 import 在途）也不丢点击
+  const menuAchievementsReady: Promise<import('./core/Achievements').Achievements> = (async () => {
     const w = window as unknown as { __swAchievements?: unknown };
-    if (!w.__swAchievements) {
-      import('./core/Achievements').then(({ Achievements }) => {
-        (window as unknown as { __swAchievements?: unknown }).__swAchievements
-          = new Achievements(typeof localStorage !== 'undefined'
-            ? { load: () => localStorage.getItem('sbw.achievements.v1'), save: (x: string) => localStorage.setItem('sbw.achievements.v1', x) }
-            : null);
-      });
-    }
+    if (w.__swAchievements) return w.__swAchievements as import('./core/Achievements').Achievements;
+    const { Achievements } = await import('./core/Achievements');
+    const inst = new Achievements(typeof localStorage !== 'undefined'
+      ? { load: () => localStorage.getItem('sbw.achievements.v1'), save: (x: string) => localStorage.setItem('sbw.achievements.v1', x) }
+      : null);
+    w.__swAchievements = inst;
+    return inst;
+  })();
+  /** 成就页开面（标题菜单/设置面板两入口共用——原版双入口喂同一
+   *  Main.AchievementsMenu,Main.cs:112 全局态；本仓同面板双宿主） */
+  function openMenuAchievements(): void {
+    void menuAchievementsReady.then((ach) =>
+      import('./ui/AchievementsUI').then((m) => m.openAchievementsPanel({ achievements: ach })));
   }
   (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
   // #perf-gpulog:gpulog 安装提前到启动装配——菜单期(Game 未构造)也可观测
@@ -423,7 +432,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onReforgeOpen: () => ui.showReforge(),
       // 向导「制作」（NPCChatText_GuideReverseCrafting :40723）：开背包 + 反查浮层
       onGuideCraftOpen: () => { ui.openInventory(); ui.openGuideSearch(); },
-      onNpcShop: (title, items, copper, happinessMul, medals) => ui.showNpcShop(title, items, copper, happinessMul, medals),
+      onNpcShop: (title, items, copper, happinessMul, medals, medalsTotal) => ui.showNpcShop(title, items, copper, happinessMul, medals, medalsTotal),
       // NPC 快乐度详情浮层（ReportHappiness.Interact）
       onNpcHappiness: (info) => ui.showNpcHappiness(info),
       onReadSign: (text) => ui.showSign(text),
@@ -594,6 +603,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.hairDye !== undefined) g.player.hairDye = player.hairDye;   // PL:53805-53808 发色剂 byte（旧档缺省 0）
     if (player.hbLocked !== undefined) g.player.hbLocked = player.hbLocked;               // SW-FX10 债⑪:PL:56268 读
     if (player.enabledSuperCart !== undefined) g.player.enabledSuperCart = player.enabledSuperCart;  // SW-FX10 债⑩:PL:56368 位[1] 读
+    // ★SW-FX19：建筑配件开关位回填（PL:56306-56325 读——旧档/缺省=ResetData 形）
+    if (Array.isArray(player.builderAccStatus)) {
+      const ba = builderAccDefaults();
+      for (let i = 0; i < 12 && i < player.builderAccStatus.length; i++) {
+        ba[i] = player.builderAccStatus[i] | 0;
+      }
+      g.player.builderAccStatus = ba;
+    }
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示
     g.cb.onInventoryChanged();
@@ -1251,6 +1268,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (document.querySelector('.sw-set-panel')) return;
     new SettingsPanel(root, {
       onBack: () => { /* 面板自毁 */ },
+      // ★SW-FX18 成就页入口（IngameOptions.cs:294 DrawLeftSide(Lang.menu[131]) →
+      // IngameFancyUI.OpenAchievements 等价）：世界内用 Game 级成就实例,
+      // 主菜单直开设置走菜单级桥；面板叠开,设置面板留在下层（原版 SetState 同层叠）
+      onAchievements: () => {
+        const g = game;
+        if (g) import('./ui/AchievementsUI').then((m) => m.openAchievementsPanel({ achievements: g.achievements, sfx: g.sfx }));
+        else openMenuAchievements();
+      },
     });
   }
 
@@ -1327,6 +1352,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     titleMenu = new TitleMenu(root, {
       onSinglePlayer: () => gateAssetsOrRun(() => showCharacterSelect()),
       onSettings: () => openSettings(false),
+      onAchievements: () => openMenuAchievements(),   // ★SW-FX18（Main.cs:49733 同位）
       onQuit: () => {
         // 退出三态(2026-08-29 用户定案)：桌面壳=原生退出；浏览器=window.close()
         // (脚本打开的窗/单历史标签可关)；关不掉的普通标签页给"告别幕布"兜底

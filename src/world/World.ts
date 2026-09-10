@@ -59,9 +59,12 @@ export class Clock {
    *  夜幕清除（Main.cs:64721-64725）——全天持续，只影响白天刷怪段。
    *  触发/清除实现在 world/Eclipse.ts */
   eclipse: boolean = false;
-  /** 圣诞季（现实日期 12/15-31，checkXMas Main.cs:13054） */
+  /** 圣诞季（现实日期 12/15-31 ∪ 强制位，checkXMas ★1457 Main.cs:13290-13310——
+   *  由 Game.checkSeasonal 每黎明/读档重算,直读现实 DateTime.Now 的 1:1 镜像） */
   xMas: boolean = false;
-  /** 万圣季（现实日期 10/20-11/10，checkHalloween Main.cs:13093） */
+  /** 万圣季（现实日期 10/10-10/31 ∪ 11/1 ∪ 强制位——isHalloweenDateNow
+   *  ★1457 Main.cs:13315-13327:day≥10∧month==10,或 day≤1∧month==11;checkHalloween
+   *  :13329-13344。旧注「10/20-11/10」系笔误,窗界以反编译为准,SW-BJ55 校正） */
   halloween: boolean = false;
   readonly dayLengthMs: number;
   constructor(dayLengthMs: number) { this.dayLengthMs = dayLengthMs; }
@@ -92,6 +95,46 @@ export class Clock {
     return 0.32 + (t - (Clock.DAWN - 0.04)) / 0.08 * 0.68;
   }
   get hourFloat(): number { return this.timeOfDay * 24; }
+}
+
+// ---- ★SW-BJ55 现实日期节日窗（DateTime.Now 唯一权威镜像,单源）----
+// 原版两窗都直读 DateTime.Now（Main.checkXMas/checkHalloween 每黎明 OnWorldLoad 调,
+// Main.cs:66369-66370/WorldGen.cs:3273-3274 挂钩）。1458 同位逐行号零漂移
+// （1458 Main.cs:13290/13313/13329）。
+
+/** Main.isHalloweenDateNow（★1457 Main.cs:13315-13327）1:1：万圣窗 =
+ *  10 月 10-31 日（day≥10∧month==10）∪ 11 月 1 日（day≤1∧month==11）。
+ *  ★任务书假想窗「10/20-11/10」与反编译不符——以反编译为准（10/10 起窗）。 */
+export function isHalloweenDateNow(now: Date): boolean {
+  const day = now.getDate();
+  const month = now.getMonth() + 1;             // DateTime.Month 1-12（JS getMonth 0-11 +1）
+  if (day < 10 || month !== 10) {
+    if (day <= 1) return month === 11;
+    return false;
+  }
+  return true;
+}
+
+/** checkXMas 现实日期臂（★1457 Main.cs:13292-13299）1:1：圣诞窗 = 12 月 15-31 日
+ *  （day≥15∧month==12；12 月内 day 15 起全开,跨年 1/1 关窗）。 */
+export function isXMasDateNow(now: Date): boolean {
+  const day = now.getDate();
+  const month = now.getMonth() + 1;
+  return month === 12 && day >= 15;
+}
+
+/** checkXMas/checkHalloween 全式（★1457 Main.cs:13290-13310 ∪ 13329-13344）：
+ *  现实日期窗 ∪ forceXMas/HalloweenForToday（月事件胜利当日位）∪ forceForever
+ *  （种子/存档持久位）——三分支或,顺序无关（原版三 if 独立置真）。 */
+export function seasonalHolidayFlags(
+  now: Date,
+  force: { forceHalloweenForToday?: boolean; forceXMasForToday?: boolean },
+  forever: { forceHalloweenForever?: boolean; forceXMasForever?: boolean },
+): { halloween: boolean; xMas: boolean } {
+  return {
+    halloween: isHalloweenDateNow(now) || !!force.forceHalloweenForToday || !!forever.forceHalloweenForever,
+    xMas: isXMasDateNow(now) || !!force.forceXMasForToday || !!forever.forceXMasForever,
+  };
 }
 
 export class World {

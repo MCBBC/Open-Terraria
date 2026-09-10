@@ -306,6 +306,12 @@ export interface MountEffectsCtx {
    *  ——FlameParticle 层已由 src/fx/FlameParticles.ts 实装（TTL50/收缩/淡出
    *  0.3/canvas 预乘两 pass），dust 段原样；消费方 = Player.ts goatFlames 回调 */
   goatFlames?(x: number, y: number): void;
+  /** ★SW-FX18 高尔夫球车轮尘（UpdateFrame_GolfCart :4661-4662 → EmitGolfCartWheelDust
+   *  :4710-4742）：每轮位 1/5 掷（:4712 Next(5)!=0 早退）命中后回调。入参 =
+   *  轮位世界坐标（Bottom ± 20px，Bottom.X=Center.X Entity.cs:122-128）与踢向
+   *  = −direction（:4727 向量 (−direction, −gravDir)）；实心地面门（:4720）与
+   *  KillTile_MakeTileDust 发粒面在消费侧（mapColor 粒子制,同 breakTile 登记口径） */
+  wheelDust?(x: number, y: number, kickDir: number): void;
   fishron: FishronView;
 }
 
@@ -1070,6 +1076,9 @@ export class MountInstance {
   basiliskCharge = 0;
   /** 本 tick 冲刺帧组切入（flag7 :3838：frameExtra<6 时的首拍——冲刺尘触发沿） */
   dashBurst = false;
+  /** ★SW-FX18 本 tick 高尔夫球车跑动态（UpdateFrame case 17 :4650-4662 的车轮尘窗
+   *  ——state ∉ {0,2,3,4}）；updateMountEffects 消费后即弃 */
+  wheelDust = false;
   /** 本 tick 处于冲刺速度门内（flag6 :3831——独角兽尘/山羊火焰的速度门） */
   dashing = false;
   /** 光标世界位（crosshairPosition :48——本地玩家=鼠标世界坐标） */
@@ -1533,6 +1542,18 @@ export class MountInstance {
         ctx.goatFlames(tx * TILE + 8, ty * TILE + TILE);
       }
     }
+    if (this.type === 17 && this.wheelDust && ctx.wheelDust) {
+      // ★SW-FX18 高尔夫球车轮尘（UpdateFrame_GolfCart :4661-4662）：两轮位 =
+      // Bottom ± 20px（direction*∓20 两支并集,Entity.Bottom = (x+w/2, y+h)），
+      // 每轮 1/5 掷（EmitGolfCartWheelDust :4712 Next(5)!=0 早退）。踢向 = −direction
+      // （:4727 velocity += (−direction, −gravDir)）；实心地面门（:4720 SolidTile）
+      // 与发粒面在消费侧——KillTile_MakeTileDust 尘族按 breakTile 惯例走 mapColor
+      // 粒子制（登记,本仓 dust 表无 per-tile 破坏尘）
+      for (const off of [-20, 20]) {
+        if (Math.random() >= 1 / 5) continue;      // :4712 Next(5)!=0 → return
+        ctx.wheelDust(p.x + p.w / 2 + off, p.y + p.h, -p.facing);
+      }
+    }
   }
 
   /** 非悬停飞行坐骑的能量消费（Flight :2937：flyTime 递减，耗尽返回 false） */
@@ -1767,6 +1788,45 @@ export class MountInstance {
         else this.basiliskCharge = Math.min(1, this.basiliskCharge + 1 / 180);
         this.dashing = fast;
         this.dashBurst = fast && vy === 0;
+        break;
+      }
+      case 17: {
+        // ★SW-FX18 2026-09-10 高尔夫球车前倾副帧（UpdateFrame_GolfCart :4614-4647
+        // 1:1）：空中(state==2)且下落(vy>=0)每 6 拍升 1 档至 2（到 2 即挂 -1 衰减闩）；
+        // 非空中每 6 拍降 1 档回 0（-1 闩拍先回 1 再起 6 拍衰减）。驱动 Extra_96 副层
+        // 行（Mount.Draw case 17 drawType 1 → _frameExtra :5656-5670，num4=4）。
+        // state==2 且 vy<0（上升段）两支都不进 = 计数器冻结（原版同构）
+        if (state !== FRAME_IN_AIR) {
+          if (this.frameExtraCounter !== 0 || this.frameExtra !== 0) {
+            if (this.frameExtraCounter === -1) {
+              this.frameExtraCounter = 0;
+              this.frameExtra = 1;
+            }
+            this.frameExtraCounter++;
+            if (this.frameExtraCounter >= 6) {
+              this.frameExtraCounter = 0;
+              if (this.frameExtra > 0) this.frameExtra--;
+            }
+          } else {
+            this.frameExtra = 0;
+            this.frameExtraCounter = 0;
+          }
+        } else if (vy >= 0) {
+          if (this.frameExtra < 1) this.frameExtra = 1;
+          if (this.frameExtra === 2) {
+            this.frameExtraCounter = -1;
+          } else {
+            this.frameExtraCounter++;
+            if (this.frameExtraCounter >= 6) {
+              this.frameExtraCounter = 0;
+              if (this.frameExtra < 2) this.frameExtra++;
+            }
+          }
+        }
+        // 车轮尘触发窗（:4650-4662 `state != 2 && state != 0 && state != 3 && state != 4`
+        // ——本分派域内即 state==1 跑动）：本 tick 标记，updateMountEffects 消费
+        // （两轮位/1/5 掷/实心地面门在消费侧对齐 EmitGolfCartWheelDust :4710-4742）
+        this.wheelDust = state === FRAME_RUNNING;
         break;
       }
       default:
@@ -2063,6 +2123,7 @@ export class MountInstance {
     this.basiliskCharge = 0;
     this.dashBurst = false;
     this.dashing = false;
+    this.wheelDust = false;
   }
 
   /** 每 tick 维护（Player.fixedUpdate 挂点）：能量恢复 + 地面飞行时量回充 + 帧态机 */
@@ -2138,7 +2199,8 @@ export interface MountLightCtx {
  *  - 猪鲨崽 12：增益态 → CurrentLiquidColor×0.4 于身前点（落点实心则退回身侧
  *    :5038-5056；无可见液层透明档已接,ctx.liquidColor=null）
  *  - 仙灵武库 61：GetFairyQueenWeaponsColorFull 通名支 hslToRgb ×0.55（:3670-3673）
- *  - 蜥蜴 14：worldSurface 以下 → 身中心红光 (0.5,0.1,0.1)（:4077-4080） */
+ *  - 蜥蜴 14：worldSurface 以下 → 身中心红光 (0.5,0.1,0.1)（:4077-4080）
+ *  - ★SW-FX18 高尔夫球车 17：车头灯 5 束锥光（EmitGolfCartlight :4685-4703） */
 /** Main.hslToRgb 直译（Main.cs:48695-48747 + hue2rgb :48724）——仙灵武库色光的
  *  色相轮基准；输入 [0,1) 相位，输出 0-255 RGB。dev 名 easter-egg 分支不在此表 */
 export function fairyQueenHslToRgb(hue: number): [number, number, number] {
@@ -2262,6 +2324,42 @@ export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLi
       // 地下红光（:4077-4080）
       if (p.y > ctx.worldSurface * 16 + 160) {
         out.push({ tx: ctxTile, ty: ctyTile, r: 0.5, g: 0.1, b: 0.1 });
+      }
+      break;
+    }
+    case 17: {
+      // ★SW-FX18 车头灯（EmitGolfCartlight :4685-4703，每帧无条件）：光源点 =
+      // Bottom + (direction×40, −20)（:4664）；5 束光线，基准角 = direction==-1 ?
+      // π : 0、间隔 π/32（num2）、单束长 200px = 12.5 格（num4/f_1）。沿线开放格
+      // AddLight((0.7,0.7,0.7)×Lerp(0.65,1, dist/12.5))（DelegateMethods.cs:764-779
+      // CastLightOpen_StopForSolids_ScaleWithDistance——越远越亮，首实心格截断
+      // :772-775 → PlotTileLine 停线）。本仓按 1 格步长离散走线（×5 束）等价；
+      // 束间重叠格逐束独立 AddLight = 原版加法语义。ShouldGolfCartEmitLight 恒
+      // true（:4705-4707）无门。EmitGolfCartSmoke（:4667-4684）反编译零调用者
+      // = 原版死码，不移植（登记）
+      const hx = p.x + p.w / 2 + p.facing * 40;
+      const hy = p.y + p.h - 20;
+      const htx = Math.trunc(hx / 16), hty = Math.trunc(hy / 16);
+      const base = p.facing === -1 ? Math.PI : 0;         // :4688-4692
+      const st = p.store ? (p.store as unknown as SolidTileView) : null;
+      const rays = 5, spread = Math.PI / 32, len = 200 / 16;   // num3/num2/num4÷16
+      for (let k = 0; k < rays; k++) {
+        const ang = base + spread * (k - (rays - 1) / 2); // :4696 num5-(num3/2)
+        const ca = Math.cos(ang), sa = Math.sin(ang);
+        // PlotTileLine 离散：0.5 格步进、格变更加光一次（vanilla 每线逐格一次），
+        // 距离 = 格心到光源的沿线参数 t（1:1 喂 Lerp）；实心格截断（:772-775）
+        let lastTx = NaN, lastTy = NaN;
+        const steps = Math.ceil(len * 2);
+        for (let s = 0; s <= steps; s++) {
+          const t = (s / steps) * len;
+          const tx = Math.trunc(htx + ca * t);
+          const ty = Math.trunc(hty + sa * t);
+          if (tx === lastTx && ty === lastTy) continue;
+          if ((tx !== htx || ty !== hty) && st && solidTileAt(st, tx, ty)) break;
+          lastTx = tx; lastTy = ty;
+          const mul = 0.65 + (1 - 0.65) * Math.min(1, t / len);   // Lerp(0.65,1,d/f_1)
+          out.push({ tx, ty, r: 0.7 * mul, g: 0.7 * mul, b: 0.7 * mul });
+        }
       }
       break;
     }

@@ -76,6 +76,7 @@ const F32_09 = Math.fround(0.9);
 const F32_01 = Math.fround(0.1);
 const F32_015 = Math.fround(0.015);
 const F32_001 = Math.fround(0.01);
+const F32_N03 = Math.fround(-0.3);   // C# 字面 -0.3f（Projectile.cs:19735/:19739 反弹系数）
 
 /** 鱼竿物品 id → 浮标弹型（Item.cs SetDefaults :23001 `shoot = 361 + type - 2291`
  *  （竿 2291-2296 → 361-366）、2289 显式 360 / 4325 血肉竿 760 / 4442 热钓竿 775。
@@ -129,6 +130,20 @@ export class Bobber extends Entity {
   // 唯旧 BOBBER_BOX 常量代读改真盒,见 retract 段注）
   w = 14; h = 14;
   dead = false;
+  /** ★SW-BJ53（2026-09-10）平台四向全穿 = 原版弹幕通用运动缺省：
+   *  fallThrough=fall2=flag6=true（Projectile.cs:17587,1458 :17588——aiStyle 61 不在
+   *  :17590-17700 例外表）→ Collision.TileCollision 平台支永不落地（Collision.cs
+   *  :2388-2391 着陆门 `!(solidTop&fallThrough) || !(vy≤1|fall2)` 恒假;横向/上穿
+   *  :2406/:2426/:2446 带 !tileSolidTop 恒放行;SlopeCollision 平台+fall:true 仅置
+   *  stair/stairFall 旗零位移,Collision.cs:1851-1877）——1458 同域逐行核对一致。
+   *  飞行段/漂浮段同参（湿支 TileCollision 调用 :17726/:17740/:17754 亦传 flag6,flag6）。
+   *  仓库投影 = Body.dropThrough（moveAxis 平台落顶门 TileCollision.ts:300、
+   *  slopeCollide 平台坡 :574/face-snap :550 三消费点）= 弹域既有惯例
+   *  （WeaponProj.ts:1153-1165 等同注 :17587）。SetDefaults 面（:4510-4518,
+   *  1458 :4510-4518）无 tileCollide 行 → 飞行段 tileCollide 缺省 true（:777）：
+   *  实心/半砖/坡照常拦,命块反弹见 fixedUpdate（:19730-19740）。收竿段 tileCollide=false
+   *  （:54654）整段无碰撞=本旗无关。 */
+  dropThrough = true;
   /** 漂浮中（已落液） */
   floating = false;
   /** 咬钩窗口剩余 tick（>0 = 咬钩中，可收竿）。原版 ai[1] 的正值镜像
@@ -333,7 +348,15 @@ export class Bobber extends Entity {
       // ★水中位移阻尼（HandleMovement :17721-17764 → UpdatePosition :20557）：因子乘进
       // dx/dy 入参（moveAndCollide 契约——采纳处原样回读勿除回）,速度场不减
       const dfF = projWaterDragFactor(this);
+      // lastVelocity 捕获（Projectile.cs:17701——碰撞【前】速度,反弹支系数源）
+      const lvx = this.vx, lvy = this.vy;
       moveAndCollide(this, game.world, this.vx * dfF, this.vy * dfF);
+      // ★SW-BJ53 aiStyle 61 命块反弹（Projectile.cs:19730-19740,1458 :19731-19741）：
+      //  X 改写恒反弹 lastVelocity.X×-0.3f；Y 仅 lastVelocity.Y>1f 才 ×-0.3f。
+      //  浮标命【实心/半砖/坡】不 Kill 不 HitTiles 音（penetrate=-1 且专属反弹支）；
+      //  平台因 fallThrough 全穿（dropThrough）不进本支——旗源 collideY/hitWall。
+      if (this.hitWall) this.vx = Math.fround(lvx * F32_N03);
+      if (this.collideY && lvy > 1) this.vy = Math.fround(lvy * F32_N03);
       // 咬钩饵警告每拍写在飞行段同样成立（:54754-54757 位=干物理后/!flag3 早退前,
       // 原版飞行中即写;条件口径同浮态段注——抛竿拍快照 baitVid）
       if (this.baitVid === 2673) {
@@ -469,7 +492,12 @@ export class Bobber extends Entity {
     // 速度场不减）——置于 ai1 分支之后＝原版 AI(:16880)→湿段(:16895)→
     // HandleMovement(:17120) 同拍尾序：咬钩踢速度当拍即入位移（抖动当拍可见）
     const dfW = projWaterDragFactor(this);
+    // lastVelocity 捕获（Projectile.cs:17701）——反弹支同飞行段（aiStyle61 命块
+    // 反弹不分支于 wet/dry,Projectile.cs:19730-19740 在通用 flag 块内）
+    const lvx = this.vx, lvy = this.vy;
     moveAndCollide(this, game.world, this.vx * dfW, this.vy * dfW);
+    if (this.hitWall) this.vx = Math.fround(lvx * F32_N03);
+    if (this.collideY && lvy > 1) this.vy = Math.fround(lvy * F32_N03);
     // ★position += wetVelocity 的 fl32 和取整（UpdatePosition :20555 `if (wet)
     //  position += wetVelocity`——XNA Vector2 加法单精度）：B1 收敛尾墙标度本体。
     //  moveAndCollide 内和为 float64 精确和（两 float32 值之和 ≤49 位恒精确）,

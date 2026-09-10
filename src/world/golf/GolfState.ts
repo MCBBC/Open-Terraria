@@ -139,15 +139,20 @@ export class GolfState {
   }
 
   /** Update（:111-134）—— 每帧：计时推进 + 跟踪态维护 */
-  update(heldIsGolfingItem: boolean, heldIsGolfCartMount: boolean): void {
+  update(heldIsGolfingItem: boolean, heldIsWireKite: boolean): void {
     this.updateScoreTime();                                      // :113
     const ball = this.getLastHitBall();                          // :114
     if (!ball) { this.waitingForBallToSettle = false; return; }  // :115-119
     if (this.waitingForBallToSettle) {                           // :120-123
       this.waitingForBallToSettle = ball.moving;
     }
-    // :125-129 3611 = GolfCart 坐骑；:130-133 非高尔夫道具且非球车 → 停跟踪
-    if (!heldIsGolfingItem && !heldIsGolfCartMount) {
+    // ★SW-FX18 2026-09-10 定谳修正：:126-129 的 3611 = WireKite 宏伟蓝图
+    //（ItemID.cs:8768,接线工具——SetDefaults shoot 651 通道,Item.cs:32515-32527），
+    // 非"高尔夫球车"（GolfCart 物品 = 4264 ItemID.cs:10074 / 坐骑 = 17
+    // MountID.cs:68 GolfCartSomebodySaveMe——IIIII233 的"GolfCart 坐骑"注释系误读,
+    // 行为本身 hv===3611 与原版字面 1:1,仅名与注错）。语义 = 手持宏伟蓝图不中断
+    // 计分跟踪；:130-133 非高尔夫道具且非宏伟蓝图 → 停跟踪
+    if (!heldIsGolfingItem && !heldIsWireKite) {
       this.waitingForBallToSettle = false;
     }
   }

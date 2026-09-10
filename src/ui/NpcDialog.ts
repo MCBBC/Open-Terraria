@@ -455,13 +455,16 @@ export class NpcShop {
     private onClose: () => void,
     private onCellHover?: (hover: ShopCellHover, anchor: HTMLElement | null) => void) {}
 
-  open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null, medals?: number) {
+  open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null, medals?: number, medalsTotal?: number) {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-shop';
-    // 支付能力判定按条目币种分流：勋章条目比勋章持有（medals），铜币条目比铜币
+    // 支付能力判定按条目币种分流：勋章条目比勋章持有全量（medalsTotal = BuyItem
+    // 门口计数五仓 CustomCurrencyManager.cs:76-87,背包+随身银行;缺省回落 medals
+    // 兼容旧调用形），铜币条目比铜币。头部数值 medals = 储蓄面（DrawSavings
+    // bank-only :28-40）——SW-FX17 两域分立
     const afford = (it: ShopEntry): boolean =>
-      it.medal !== undefined ? (medals ?? 0) >= it.medal : copper >= it.price;
+      it.medal !== undefined ? (medalsTotal ?? medals ?? 0) >= it.medal : copper >= it.price;
     // ★SW-BJ22 2026-09-07 原版形制货架网格（Main.cs:42522-42532：10×4=40 格，
     //  空格同样以 InventoryBack 底框绘制并可命中——空格即「售卖放置区」，光标
     //  持非币物左键 = 整叠卖出 PickItemMovementAction case 15 ItemSlot.cs:1435-1438
@@ -484,8 +487,9 @@ export class NpcShop {
     }
     // 快乐度头部指示已摘（2026-08-27 用户要求：商店标题旁不再显示快乐度系数——
     // 快乐度详情仍走底部「快乐度」页签；原版 Main.cs:41231-41243 参考备案）
-    // 勋章持有并列显示（CustomCurrencyManager.DrawSavings :28-63：双货币店在
-    //  钱币行旁画勋章图标+数量；仅本店有勋章条目时传值）
+    // 勋章储蓄并列显示（CustomCurrencyManager.DrawSavings :28-63：双货币店在
+    //  钱币行旁画勋章图标+数量，【只】合计 bank..bank4 储蓄——背包勋章不进此行；
+    //  仅本店有勋章条目时传值。★SW-FX17 值域修正：旧版传持有全量=背包+四仓混淆）
     const medalLine = medals !== undefined
       ? ` <span class="sw-shop-medals">🏅 ×${medals}</span>` : '';
     panel.innerHTML = `

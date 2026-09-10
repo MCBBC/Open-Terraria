@@ -139,6 +139,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     hairDye: player.hairDye ?? 0,               // PL:53805-53808 hairDye byte（发色剂槽）
     hbLocked: player.hbLocked ?? false,         // SW-FX10 债⑪:PL:55543 hbLocked bool
     enabledSuperCart: player.enabledSuperCart ?? true,  // SW-FX10 债⑩:PL:55572 位[1] enabledSuperCart
+    builderAccStatus: [...player.builderAccStatus],     // SW-FX19 债:PL:55553-55555 builderAccStatus[12]
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
 }

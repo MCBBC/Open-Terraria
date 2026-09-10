@@ -1863,6 +1863,12 @@ export class MinionProj extends Entity {
       this.palJoyCd = 60;
       if (this.projId === 1093 || this.projId === 1112) {
         game.playSfxFiles(['pal_cattiva_joy'], 0.35, this.cx, this.cy);   // SoundID.cs:1078 0.35
+      } else if (this.projId === 1094 || this.projId === 1113) {
+        // ★SW-FX18 2026-09-10 回归修复：IIIII233 勘误删共享播放时把 1094/1113 的
+        //  PalFoxparksJoy 一并删失——原版 Projectile.cs:59122-59131（AI_026 case
+        //  1094/1113）flag9+localAI[2]==0 → PlaySound(PalFoxparksJoy)，专属两站
+        //  （SoundID.cs:1090 音量 0.35）。trusts-mounts 域回归实锤,本刀只补音不触计时
+        game.playSfxFiles(['pal_foxparks_joy'], 0.35, this.cx, this.cy);
       }
       // ★IIIII233（2026-09-09）勘误：1118 ClayPotMinion（AI_067 flag9 支
       //  Projectile.cs:50053-50070）只走 localAI[0] 计时、**无 Joy 音**——旧码误播
@@ -2659,7 +2665,19 @@ export class MinionProj extends Entity {
     return best;
   }
 
+  /** oldPos/oldRot 历史环（★SW-BJ56：TrailingMode[946]=2,ProjectileID.cs:385 →
+   *  Projectile.cs:17237-17246 每拍整环移位、oldPos[0]/oldRot[0]=最新;长度=
+   *  oldPos.Length=10,平铺 [x,y,rot]×10,consume 位 = 946 draw 拖尾/EmpressBladeDrawer） */
+  private tHist: number[] = [];
+
+  /** AI 后压栈（原版 TrailingMode=2 在 AI() 之后的 Update 段 oldPos[0]=position :17243） */
   private terraprismaBody(game: GameHooks, p: Player, dmg0: number): void {
+    this.terraprismaAI(game, p, dmg0);
+    this.tHist.unshift(this.cx, this.cy, this.rot);
+    if (this.tHist.length > 30) this.tHist.length = 30;   // oldPos.Length=10
+  }
+
+  private terraprismaAI(game: GameHooks, p: Player, dmg0: number): void {
     // SetDefaults scale=0.75（:8932）→ 命中盒 (int)(10×0.75)=7（SetDefaults 尾段统一缩放）
     if (!this.tInit) { this.tInit = true; this.w = 7; this.h = 7; }
     const st = game.world.store;
@@ -2833,6 +2851,19 @@ export class MinionProj extends Entity {
     const num = 66, num2 = 65, num3 = 126;
     if (Math.hypot(p.cx - this.cx, p.cy - this.cy) > 2000) { this.bA0 = 0; this.bA1 = 0; }
     const tgt = this.bA1 ? this.findEnemyById(game, this.bA1) : null;
+    // ★SW-BJ56 2026-09-10：755 顶格光照 = DelegateMethods.CastLightOpen（Projectile.cs:
+    //  52440-52441 v3_1=AI_156_GetColor()=Crimson(220,20,60)→ToVector3 ≈(0.863,0.078,
+    //  0.235);DelegateMethods.cs:729-747 开放格（非活动实心/无格）时 Lighting.AddLight
+    //  单格施光）——本仓同族 946 支同调用但 v3_1=Transparent=零光（:52463-52465）,
+    //  即棱镜原版无世界光照（其「光效」=不读格光的全亮绘制+拖尾,见 draw 946 专绘注）。
+    //  开放格门以 !isSolid 近似（inActive/tileSolidTop 档本仓 store 侧无独立旗）。
+    {
+      const st = game.world.store;
+      const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
+      if (tx >= 0 && ty >= 0 && tx < st.w && ty < st.h && !st.isSolid(tx, ty)) {
+        game.addLightAt?.(this.cx, this.cy, 0.863, 0.078, 0.235);
+      }
+    }
 
     if (this.bA0 === 0) {
       // 待机（:52537-52548 flag 支）：头顶弧列 SmoothStep 0.45 + 1/20 起手
@@ -6125,6 +6156,120 @@ export class MinionProj extends Entity {
       }
       return;
     }
+    // ---- ★SW-BJ56 2026-09-10：946 泰拉棱镜专绘（Main.cs:28677-28692 派发 +
+    //      DrawProj_EmpressBlade :36562-36601 全层 1:1）----
+    // 旧通用路只画 scale(0.75) 本体一帧（且 rot 未减 π/2、facing 翻转误吃）=
+    // 用户实报「没有光效」根源。原版本体绘制链：
+    //  · num = proj.rotation − π/2（:36572,DrawProj_EmpressBlade 消费角）——AI 侧
+    //    rotation 含 +π/2 补偿（AI_156_GetIdlePosition :52855 idleRotation+=π/2 /
+    //    弧刀段 :52707 rotation=num24+π/2）,draw 侧 −π/2 还原刃轴。dir=SpriteEffects.None
+    //    恒不翻转（AI_156 全支无 spriteDirection 写,Main.cs:36591/:36597 :36600）。
+    //  · num22 色相 = IndexForVisuals % max(1,maxMinions)/max(1,maxMinions)
+    //    + GlobalTimeWrappedHourly%3/3（:28681-28682）——多剑各占相位、3s 一轮循环；
+    //    IndexForVisuals=key.Index（Projectile.cs:554）,本仓实体 id 同位替代。
+    //  · 层序（:36574-36600,全 AlphaBlend 非加算）：①幻影 6 层（沿 −num 向每 1/6
+    //    步进偏移 −120×f×lerpValue、scale×1.5、色=女皇色(A=127→63)×num2×(1−f)×num3）
+    //    仅 num3>0 时可见（lerpValue=GetLerpValue(60,50,ai0)、num3=GetLerpValue(70,50)×
+    //    GetLerpValue(40,45)——跃空段 ai0≥60 双 0、弧刀前段 ai0≤40 为 0）；②环晕 4 层
+    //    （(f5×2π+num) 向 ×4×scale、×num2）；③本体 White×Opacity,A×0.7（:36576-36577）
+    //    ——不读格光色（CurrentDrawnEntityShader=-1 后硬编码色）=暗处全亮,光照面由
+    //    Renderer.SELF_LUMINOUS_PROJS 946 条目承载；④女皇色罩 ×num2×0.5（:36600）。
+    //    XNA Color×float 四通道同乘 → 本仓既定近似折进 globalAlpha（641/755 支同式）。
+    //  · 拖尾 = EmpressBladeDrawer.Draw（Terraria.Graphics/EmpressBladeDrawer.cs:16-33,
+    //    Main.cs:28688 前置）：VertexStrip.PrepareStrip(proj.oldPos,oldRot,
+    //    StripColors,StripWidth=36,expectedPairs=oldPos.Length=10,includeBacksides) —
+    //    TrailingMode[946]=2（ProjectileID.cs:385,Projectile.cs:17237-17246 每拍整环
+    //    移位 oldPos[0]=最新）；StripColors=Lerp(ColorStart,ColorEnd,GetLerpValue(0,
+    //    0.7,p))×(1−GetLerpValue(0,0.98,p)),A/=2（EmpressBladeDrawer.cs:35-42）;SSD=
+    //    (1,0,0,0.6)（:18-26）。XNA 侧条带 = (One,One) 全量直加（GLSpriteLayer TRAIL_FS
+    //    注,GIF 峰值复算钉死）→ 顶点 A=0（ColorStart/End alphaChannelMultiplier=0）
+    //    仍可见;本仓顶点 a 写 0.5×(1−g2)（A/=2 语义折算,兼作 CPU 路写入门）。
+    //    拖尾经 queueTrailShade 入全亮 flush（TrailShader 合成后直绘=脱离光照乘,
+    //    同天顶剑/月牙管线）。
+    if (this.projId === 946 && img) {
+      const gl = (from: number, to: number, t: number): number =>
+        Math.max(0, Math.min(1, (t - from) / (to - from)));            // Utils.GetLerpValue(clamped)
+      const own = this.ownerRef();
+      const op = 1;                                                     // Opacity=1−alpha/255,alpha 恒 0
+      const num = this.rot - Math.PI / 2;                               // :36572
+      const num2 = op * 0.3;                                            // :36573
+      const num20 = (gtwSec() % 3) / 3;                                 // :28680
+      const num21 = Math.max(1, own?.maxMinions ?? 1);                  // :28681
+      const num22 = ((this.id % num21) / num21) + num20;                // :28682 IndexForVisuals=id
+      const hueC = fairyHueRgb(((num22 + 0.5) % 1 + 1) % 1);            // :36566 num=(hueRaw+0.5)%1
+      const tinted = tintFrameHue(img, hueC);                           // 女皇色剪影（每帧一染,全层共用）
+      const num145a = (63 / 255);                                       // A=255×0.5 → /2 =63（:36568/:36575）
+      // ①幻影 6 层（:36578-36586）
+      const lerpValue = gl(60, 50, this.tA0);
+      const num3 = gl(70, 50, this.tA0) * gl(40, 45, this.tA0);
+      if (tinted && num3 > 0) {
+        for (let f = 0; f < 1; f += 1 / 6) {
+          const ox = Math.cos(num) * (-120 * f * lerpValue);
+          const oy = Math.sin(num) * (-120 * f * lerpValue);
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          ctx.globalAlpha = num145a * num2 * (1 - f) * num3;
+          ctx.translate(this.cx + ox, this.cy + oy);
+          ctx.rotate(num);
+          ctx.drawImage(tinted, -img.width / 2 * 1.125, -img.height / 2 * 1.125, img.width * 1.125, img.height * 1.125);
+          ctx.restore();
+        }
+        // ②环晕 4 层（:36588-36591）
+        for (let f5 = 0; f5 < 1; f5 += 0.25) {
+          const ox = Math.cos(f5 * Math.PI * 2 + num) * 4 * 0.75;
+          const oy = Math.sin(f5 * Math.PI * 2 + num) * 4 * 0.75;
+          ctx.save();
+          ctx.imageSmoothingEnabled = false;
+          ctx.globalAlpha = num145a * num2;
+          ctx.translate(this.cx + ox, this.cy + oy);
+          ctx.rotate(num);
+          ctx.drawImage(tinted, -img.width / 2 * 0.75, -img.height / 2 * 0.75, img.width * 0.75, img.height * 0.75);
+          ctx.restore();
+        }
+      }
+      // ③本体（White×Opacity,A×0.7 :36576-36577+:36592）④女皇色罩 ×num2×0.5（:36600）
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = 0.7;
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(num);
+      ctx.scale(0.75, 0.75);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      if (tinted) {
+        ctx.globalAlpha = num145a * num2 * 0.5;
+        ctx.drawImage(tinted, -img.width / 2, -img.height / 2);
+      }
+      ctx.restore();
+      // ⑤拖尾（EmpressBladeDrawer :16-33）：oldPos 环 = tHist（terraprismaBody 每拍压栈）
+      if (this.tHist.length >= 6 && typeof (r as unknown as { queueTrailShade?: unknown }).queueTrailShade === 'function') {
+        const hueA = fairyHueRgb((((num22 % 1) + 0.5) % 1 + 1) % 1);   // ColorStart(:28684)
+        const hueB = fairyHueRgb(((((num22 + 0.5) % 1) + 0.5) % 1 + 1) % 1); // ColorEnd(:28685)
+        const n = this.tHist.length / 3;                               // ≤10（oldPos.Length）
+        const pairs = 10;                                              // expectedPairs=oldPos.Length(:36632)
+        const pts = [];
+        for (let i = 0; i < n; i++) {
+          const p = i / (pairs - 1);                                   // VertexStrip.cs:55-63
+          const g1 = Math.max(0, Math.min(1, p / 0.7));                // GetLerpValue(0,0.7,p)(:36-38)
+          const g2 = Math.max(0, Math.min(1, p / 0.98));
+          const fade = 1 - g2;
+          pts.push({
+            x: this.tHist[i * 3], y: this.tHist[i * 3 + 1],
+            hw: 36,                                                    // StripWidth=36=半宽（VertexStrip.cs:156-159）
+            rot: this.tHist[i * 3 + 2],
+            r: (hueA[0] + (hueB[0] - hueA[0]) * g1) * fade,
+            g: (hueA[1] + (hueB[1] - hueA[1]) * g1) * fade,
+            b: (hueA[2] + (hueB[2] - hueA[2]) * g1) * fade,
+            a: 0.5 * fade,
+          });
+        }
+        try {
+          (r as unknown as { queueTrailShade?: (sp: unknown) => void }).queueTrailShade?.({
+            set: 'EmpressBlade', pts, opacity: 1, expectedPairs: pairs, time: gtwSec(),
+          });
+        } catch { /* 拖尾单帧失败不拖垮本体 */ }
+      }
+      return;
+    }
     // ---- ★SW-FX6 2026-09-10 债②清偿：691-693 陷阱塔 B 支 Bottom 锚（Main.cs:34089-34097）----
     // vanilla（非携行）：vector99 = proj.Bottom + UnitY·gfxOffY（:34092）、
     // origin32 = 帧尺寸×(0.5,1) 后 Y 连减 2×2 → (fw/2, fh−4)（:34093-34096）⇒
@@ -6293,6 +6438,55 @@ function tintFrameCache(src: HTMLCanvasElement, color: string): HTMLCanvasElemen
   if (HALO_TINT.size > 64) HALO_TINT.clear();   // 帧图缓存换代会自然重建
   HALO_TINT.set(src, c);
   return c;
+}
+
+// ---- ★SW-BJ56 2026-09-10：泰拉棱镜 946 绘制辅助（三件,仅 946 消费）----
+
+/** GlobalTimeWrappedHourly 近似（Main.cs:16777 每帧 +1/60s,3600 回卷;npcExtraParts.gtw 同式） */
+function gtwSec(): number {
+  return (performance.now() / 1000) % 3600;
+}
+
+/** Main.hslToRgb(h,1,0.5) 逐式移植（Main.cs:48689-48717 + hue2rgb :48719-48734;
+ *  s=1→t2=l+s−ls=1、t1=2l−t2=0）——女皇武器色 = GetFairyQueenWeaponsColorFull 缺省
+ *  尾段 hslToRgb(num,saturation=1,luminance=0.5)（Projectile.cs:22062）。返回 [r,g,b] 0-1。 */
+export function fairyHueRgb(hue: number): [number, number, number] {
+  const hue2rgb = (c: number, t1: number, t2: number): number => {
+    if (c < 0) c++;
+    if (c > 1) c--;
+    if (6 * c < 1) return t1 + (t2 - t1) * 6 * c;
+    if (2 * c < 1) return t2;
+    if (3 * c < 2) return t1 + (t2 - t1) * (2 / 3 - c) * 6;
+    return t1;
+  };
+  const t2 = 0.5 + 1 - 0.5 * 1;          // l + s − l×s = 1（s=1）
+  const t1 = 2 * 0.5 - t2;               // 2l − t2 = 0
+  const r = Math.round(hue2rgb(hue + 1 / 3, t1, t2) * 255) / 255;
+  const g = Math.round(hue2rgb(hue, t1, t2) * 255) / 255;
+  const b = Math.round(hue2rgb(hue - 1 / 3, t1, t2) * 255) / 255;
+  return [r, g, b];
+}
+
+/** 女皇色剪影（946 幻影/环晕/色罩层共用）：每帧一染（色相随 GlobalTime 循环,缓存无效）
+ *  ——source-atop 保 silhouette α,与 tintFrameCache 同工艺;返回共享 scratch（调用即画,
+ *  同帧内多次 drawImage 安全,跨实体下一帧重染）。 */
+const HUE_TINT_SCRATCH = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
+function tintFrameHue(src: HTMLCanvasElement, rgb: readonly [number, number, number]): HTMLCanvasElement | null {
+  if (!HUE_TINT_SCRATCH || typeof document === 'undefined') return null;
+  if (HUE_TINT_SCRATCH.width !== src.width || HUE_TINT_SCRATCH.height !== src.height) {
+    HUE_TINT_SCRATCH.width = src.width;
+    HUE_TINT_SCRATCH.height = src.height;
+  }
+  const cx2 = HUE_TINT_SCRATCH.getContext('2d');
+  if (!cx2) return null;
+  cx2.globalCompositeOperation = 'source-over';
+  cx2.clearRect(0, 0, HUE_TINT_SCRATCH.width, HUE_TINT_SCRATCH.height);
+  cx2.drawImage(src, 0, 0);
+  cx2.globalCompositeOperation = 'source-atop';
+  cx2.fillStyle = `rgb(${Math.round(rgb[0] * 255)},${Math.round(rgb[1] * 255)},${Math.round(rgb[2] * 255)})`;
+  cx2.fillRect(0, 0, HUE_TINT_SCRATCH.width, HUE_TINT_SCRATCH.height);
+  cx2.globalCompositeOperation = 'source-over';
+  return HUE_TINT_SCRATCH;
 }
 
 /**

@@ -1679,6 +1679,17 @@ export class TownNPC extends Entity {
   lightRGBAt: { x: number; y: number } | null = null;
 
   fixedUpdate(dt: number, game: GameHooks) {
+    // ★SW-BJ55 圣诞老人季末自灭（★1457 NPC.cs:53708,1458 同行号零漂移）：
+    //   type==142 && Main.netMode!=1 && !Main.xMas → StrikeNPCNoInteraction(9999,0,0)
+    //   ——圣诞窗（checkXMas Main.cs:13290：12/15-31 ∪ forceXMasForToday/Forever）
+    //   关闭即死（endlessChristmas 种子 forceXMasForever 恒开窗不灭）。owner=255
+    //   直击通道：不查无敌帧/dontTakeDamage → force=true;dmg≥9999 = 静默清算判据
+    //   （NPC.cs:82065,hurt() 内 strikeSilent 同形）。netMode!=1=单机/服务器权威位,
+    //   本仓城镇 NPC 模拟即权威侧（房主）,访客端 death 由同步面收敛。
+    if (this.vanillaId === 142 && !game.world.clock.xMas) {
+      this.hurt(9999, 0, 0, game, 0, 0, false, true);
+      if (this.dead) return;
+    }
     this.animT++;
     // per-enemy 挥击免疫锁递减（原 npc.immune[owner] 全帧统一倒计时,补齐批②）
     if (this.swingImmune.size > 0) {

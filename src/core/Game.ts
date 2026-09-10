@@ -13,7 +13,7 @@ import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
-import { countDefenderMedals, spendDefenderMedals } from '../stats/DefenderMedals';
+import { countDefenderMedalsAcross, spendDefenderMedalsAcross, defenderMedalSavingsOf } from '../stats/DefenderMedals';
 import { findExoticPlantSlot, rollDyeTraderReward } from '../stats/DyeTrade';
 import { PREFIX_NAMES, rollablePrefixes, rollPrefix, prefixStat, prefixValueMul } from '../data/vanillaPrefixes';
 import { TILE, CHUNK, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
@@ -24,7 +24,7 @@ import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
 import { Input, armBlockMouse } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
-import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction } from '../world/World';
+import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction, seasonalHolidayFlags } from '../world/World';
 import { newCensusCounter } from '../world/EmotePick';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { canCutTile } from '../world/CanCutTile';
@@ -194,6 +194,7 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
+import { updateGravityControls } from '../entities/Player';   // ★SW-FX19:重力倒置总闸（Player.cs:26893-26937）
 import { insideUnbreakableWallsScan } from '../entities/Player';   // ★SW-BJ48 传送药水落点双地牢不可破墙重扫（UnbreakableWallScan.cs:47-66）
 import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, npcTypeNoAggro } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
@@ -212,6 +213,7 @@ import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 import { spawnForceClearArea, spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } from '../world/spawn/SpawnPlacement';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理 + IIIII228 海螺 TileIsDangerous
+import { playerAccessoryVidEquipped, BACC, builderAccGateSet } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位+配饰 vid 扫描
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
 import { damageVarRoll } from '../stats/DamageVar';
 import {
@@ -370,6 +372,7 @@ import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, sheetOf, type SmartCursorSettings, TILE_NO_ATTACH_SHEETS } from '../player/SmartCursor';
+import { scanSmartInteractTiles, shouldBlockSmartInteract, clearSmartInteractTileFrame, smartInteractTileFrame } from './SmartInteractTiles';   // ★SW-BJ54：智能交互 tile 候选（TileSmartInteractCandidateProvider 1:1）
 import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';   // ★SW-BJ28：Main.tileSolid 代理（平台九件套并集）
 import { toolCursorIcon, BUCKET_VIDS, tileBoostOfVid, SOLUTION_AMMO_ITEMS, AMMO_ID_SOLUTION, WIRE_TOOL_VIDS } from '../player/ToolCursorIcon';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
@@ -489,6 +492,7 @@ import { MagicProj } from '../entities/MagicProj';
 import { RainCloudProj } from '../entities/WeaponProj';
 import { firePortalGun } from '../entities/PortalGunBolt';
 import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
+import { holidayPickupSubstitute } from '../drops/SeasonalPickups';   // ★SW-BJ55 Item.cs:49670-49720
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
 import { fadingParticles } from '../fx/FadingParticles';
@@ -568,6 +572,17 @@ const AISTYLE10_PLACE = new Map<number, readonly [tile: number, item: number]>([
  *  （原版散布全部是整数掷：Main.rand.Next(-40,41) 等） */
 function nrand(b: number): number {
   return Math.floor(Math.random() * (b * 2 + 1)) - b;
+}
+
+/** ★SW-FX19：点→命中盒距离（NPC.Hitbox.Distance ≙ XNA Rectangle.Distance，
+ *  盒外=点到矩形最近边欧氏距离,盒内=0）——MinionNPCTargetAim 选靶度量
+ *  （Player.cs:57592 `Main.npc[i].Hitbox.Distance(mouseWorld)`）。 */
+export function npcHitboxDistance(
+  e: { x: number; y: number; w: number; h: number }, px: number, py: number,
+): number {
+  const dx = Math.max(e.x - px, 0, px - (e.x + e.w));
+  const dy = Math.max(e.y - py, 0, py - (e.y + e.h));
+  return Math.hypot(dx, dy);
 }
 
 /** ★F3 粒子缺省重力契约（2026-09-02 红队 I′ 定罪,channel 级条款）：
@@ -2492,7 +2507,7 @@ export interface GameCallbacks {
    *  happinessMul = 快乐度价格乘子（Main.cs:41231-41243 标题旁表情/百分比显示用）；
    *  buyback = 卖回货架条目下标（Chest.AddItemToShop 的 buyOnce 克隆，购买时
    *  回传给 npcShopBuy 以区分常规货） */
-  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }>, copper: number, happinessMul?: number, medals?: number) => void;
+  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }>, copper: number, happinessMul?: number, medals?: number, medalsTotal?: number) => void;
   /** NPC 快乐度详情浮层（ReportHappiness.Interact）：报告逐条文案 + 价格乘子 */
   onNpcHappiness?: (info: { name: string; lines: string[]; priceMul: number }) => void;
   onBuffsChanged?: () => void;
@@ -4898,6 +4913,10 @@ export class Game implements GameHooks {
    * 门+此处 dead 门近似。返回是否找到并上坐（false → 调用方落 QuickMinecart） */
   private quickMount(): boolean {
     const p = this.player;
+    // ★SW-FX19：倒挂拒召唤坐骑（Player.QuickMount :6068 头门
+    //  `CCed || tongued || gravDir == -1f || dead || noItems → return`——
+    //  倒挂落座链未建模,原版同态直接拒;CCed/tongued/noItems 三腿随各域批接续）
+    if (p.gravDir === -1 || p.dead) return false;
     const eq = p.inv.miscEquips[3];
     if (eq) {
       const vid = vanillaIdOfItem(eq.id);
@@ -8110,11 +8129,13 @@ export class Game implements GameHooks {
       if (player.inputUp) this.flexLatchUp = true;
       if (!player.inputDown) this.flexLatchDown = false;
     }
-    // 重力药水（buff 18，:9720）：Up 边沿切换 gravDir（按住不连切）
-    if (player.buffs.has(BuffType.Gravitation) && player.inputUp && !this.gravLatch) {
-      player.gravDir = player.gravDir === 1 ? -1 : 1;
-      this.gravLatch = true;
-    }
+    // 重力倒置总闸（★SW-FX19 1:1 Player.cs:26893-26937,本体在 Player.updateGravityControls
+    //  可单测）——Up 按下沿（gravLatch ≙ 原版 releaseUp 上一帧值 :29324-29331）。
+    updateGravityControls(
+      player,
+      player.inputUp && !this.gravLatch,
+      (n, v, x, y) => this.playSfx(n, v, x, y),
+    );
     if (!player.inputUp) this.gravLatch = false;
 
     // 滚轮：全屏地图打开时缩放地图，否则缩放游戏画面
@@ -8368,8 +8389,11 @@ export class Game implements GameHooks {
         }
       }
     }
-    // ④ 右键集火（ItemCheck_MinionAltFeatureUse :48952 + MinionNPCTargetAim :55975：
+    // ④ 右键集火（ItemCheck_MinionAltFeatureUse :48952 + MinionNPCTargetAim :57587：
     // 召唤杖右键 → hitbox 距鼠标最近敌；同目标再右键取消 toggle）
+    // ★SW-FX19：1) 选靶去掉 3000 距离门——原版 MinionNPCTargetAim 全域扫
+    //   CanBeChasedBy（距离门只存在于每 tick 失效清除 :57682-57685，下方补）；选靶
+    //   距离改 hitbox 距（NPC.Hitbox.Distance(mouseWorld)，入盒=0）。
     if (inp.rightDown && !this._prevRightDown) {
       const held0 = this.player.inv.heldItem();
       const cw0 = held0 ? combatWeapon(ITEM_DEFS[held0.id]) : null;
@@ -8379,13 +8403,14 @@ export class Game implements GameHooks {
         for (const e of this.entities.enemies) {
           const en = e as Enemy;
           if (en.dead) continue;
-          if (Math.hypot(en.cx - this.player.cx, en.cy - this.player.cy) > 3000) continue;
-          const d = Math.hypot(en.cx - wx, en.cy - wy);
+          const d = npcHitboxDistance(en, wx, wy);
           if (d < bestD) { bestD = d; bestId = en.id; }
         }
         this.player.minionTargetId = this.player.minionTargetId === bestId ? -1 : bestId;
       }
     }
+    // ★SW-FX19：集火目标失效清除已归位 Player.fixedUpdate（updateMinionAttackTarget,
+    //  Player.cs:57682-57685 每 tick——原版该清除本就在 Player.Update 域）
     // ★_prevMouseDown/_prevRightDown 须在 updateUse 【之后】记录上一帧值——
     // 此前记在 updateUse 之前(= 本帧值),⑩ 边沿门 mouseDown&&!prev 恒 false,
     // 非 autoReuse 武器(链球/回旋镖/悠悠球/长矛)全体掷不出(2026-08-13 实锤)
@@ -8709,6 +8734,9 @@ export class Game implements GameHooks {
     // ---- 智能交互 NPC 候选（★SW-BJ1 2026-09-06：Player.cs:25644 SmartInteractLookup
     //      与 SmartCursorLookup 同帧紧邻——候选供右键交谈 flag2 智能支消费） ----
     this.tickSmartInteractNpc();
+    // ---- 智能交互 tile 候选（★SW-BJ54 2026-09-10：同查询 tile 支——provider 顺序
+    //      NPC 后 tile（SmartInteractSystem.cs:16-19），渲染 hover 高亮消费面） ----
+    this.tickSmartInteractTiles();
     // ---- 地图键族电平（Player.cs:24596-24653：按住连续步进，详见 updateMapKeys） ----
     this.updateMapKeys();
     // ---- 视野缩放键电平（原版 Main.UpdateViewZoomKeys :16980-16992：ViewZoomIn/Out
@@ -9907,9 +9935,11 @@ export class Game implements GameHooks {
       // IsAGolfingItem（Item.cs:47566-47577）：球族物品或球杆族（4039/4092-4095/4587-4598）
       const golfing = hv === 3989 || (hv >= 4092 && hv <= 4095) || hv === 4039
         || (hv >= 4242 && hv <= 4253) || (hv >= 4587 && hv <= 4598);
-      // ★IIIII233（2026-09-09）补 3611：GolfState.Update :126-129 手持高尔夫球车
-      // 物品（mount 17 坐骑物品）也保持跟踪态（旧注"坐骑未实装"系误读——原版查的
-      // 是 HeldItem.type 而非 mount 态）
+      // ★SW-FX18 2026-09-10 定谳修正（覆 IIIIII233 2026-09-09 注）：3611 = WireKite
+      // 宏伟蓝图（ItemID.cs:8768,接线工具 Item.cs:32515-32527）,非"高尔夫球车物品"
+      //（GolfCart = 4264 ItemID.cs:10074 / mount 17 MountID.cs:68）——GolfState.cs
+      // :126-129 原文即字面 `type == 3611`,手持宏伟蓝图不中断计分跟踪。行为
+      //（hv===3611, hv = vi_ 前缀反解原版 id）与本仓此前一致,仅注与形参名错
       this.golfState.update(golfing, hv === 3611);
     }
     // ---- 自然 Boss 夜间生成（UpdateTime :64542-64621：整段门 !IsFastForwardingTime() &&
@@ -21803,7 +21833,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 通道,applyItemAnimation:false)。喷漆器族 2216/3061/5126（:14720-14734 装备置位
       // =equipStats.autoPaint）+ 开关（options.builderAutoPaintDisabled ↔ status==1）
       // 才刷；同色不耗（:41344 wallColor()!=paint 守卫在 tryPainting 内）
-      if (this.player.equipStats.autoPaint && !options.data.builderAutoPaintDisabled) {
+      if (this.player.equipStats.autoPaint && !this.builderAccOff(BACC.AutoPaint)) {
         this.tryPainting(tx, ty, true, this.paintDustHook());
       }
       this.cb.onInventoryChanged();
@@ -21851,7 +21881,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onInventoryChanged();
         // 补铺格 autoPaint（:40018-40023）：TryPainting(该格,wall 通道,
         // applyItemAnimation:false)——原版逐补铺格即时上漆
-        if (this.player.equipStats.autoPaint && !options.data.builderAutoPaintDisabled) {
+        if (this.player.equipStats.autoPaint && !this.builderAccOff(BACC.AutoPaint)) {
           this.tryPainting(nx, ny, true, this.paintDustHook());
         }
       }
@@ -21861,7 +21891,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 2216/3061/5126（:14720-14734）装备 + 设置开关（builderAccStatus[3]==0）才刷。
     // 仓库内同漆不耗/paintWall 幂等守卫（Game.tryPainting :41344 同式）;涂层项
     // （4668/5344）走 ApplyCoating wall 支（paintCoatWall）同域
-    if (this.player.equipStats.autoPaint && !options.data.builderAutoPaintDisabled) {
+    if (this.player.equipStats.autoPaint && !this.builderAccOff(BACC.AutoPaint)) {
       this.tryPainting(tx, ty, true, this.paintDustHook());
     }
     // 主放消耗（H3-1 时序移动,见上方 FillEmptySpace 注）：ItemCheck 通用段
@@ -22321,10 +22351,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  autoActuator）——仅 moss/dye 两【早期 return】专用路径调用（通用路径尾部已
    *  内联展开,勿重复触发）。OW×OH 恒 1×1 单格。builderAccStatus 开关面接设置页 */
   private placeItAutoAcc(x: number, y: number): void {
-    if (this.player.equipStats.autoPaint && !options.data.builderAutoPaintDisabled) {
+    if (this.player.equipStats.autoPaint && !this.builderAccOff(BACC.AutoPaint)) {
       this.tryPainting(x, y, false, this.paintDustHook());
     }
-    if (this.player.equipStats.autoActuator && !options.data.builderAutoActuatorDisabled
+    if (this.player.equipStats.autoActuator && !this.builderAccOff(BACC.AutoActuate)
       && this.wiring && this.player.inv.countOf(VI_ID(849)) > 0) {
       const ti = this.world.store.idx(x, y);
       const td2 = TILE_DEFS[this.world.store.type[ti]];
@@ -22919,7 +22949,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           && !PLATFORMS_SHEETS.has(placeDef?.vanilla?.sheet ?? -1);
         let swapOk = !NO_SWAP_PLACE.has(placeTileSheet) && !NO_SWAP_TARGET.has(tsheet)
           && (ropeTargetArm
-            || (!(tdef?.decor ?? false) && !tdef?.framed && solidish && !placeFramedNoPlatform));
+            || (!(tdef?.decor ?? false) && !tdef?.framed && solidish && !placeFramedNoPlatform))
+          // ★SW-FX19：块换总开关接线（Player.TileReplacementEnabled :3357 =
+          //  `builderAccStatus[10]==0`——背包左「方块替换」图标 Main.cs:43242-43270
+          //  翻位 + 音 22（Unlock）；旧注"全程默认 0=恒开"=位读整缺）
+          && !this.builderAccOff(BACC.BlockSwap);
         // ★绳目标与 decor 代理门互斥备案：v_213_rope def.decor=true（摆动渲染旗）但
         //  vanilla tileCut[213]=false——decor 代理只护非绳目标;绳目标的权威 tileCut
         //  门=refine 块 TILE_CUT（真表,213 ∉ 表）仍生效,无误放。
@@ -23970,7 +24004,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // （options.builderAutoPaintDisabled ↔ status==1 关断；原版=装备区旁 BuilderAcc
     // 图标钮 Main.cs:48252 case3 + GameUI.PaintSprayerOn/Off tooltip——终零波 最小
     // 可行版,旧「开关 UI 未实装」登记销核）；无线/同色不耗；上漆在冷却前、成败不影响放置
-    if (this.player.equipStats.autoPaint && !options.data.builderAutoPaintDisabled) {
+    if (this.player.equipStats.autoPaint && !this.builderAccOff(BACC.AutoPaint)) {
       const dust = this.paintDustHook();
       for (let dy2 = 0; dy2 < oh; dy2++) {
         for (let dx2 = 0; dx2 < ow; dx2++) {
@@ -23992,7 +24026,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // → 剩余差=不可达差（2026-09-04 蓝队登记核销）;11×11 邻域扫描+tileDataCaches
     // 跳过半边（:40912-40948）同登记：本仓放置面无「类型不变帧变」写路（家族换型
     // 走类型变化,同型同帧不可达 CanPlace :357 占用门）→ 不可达差,维持放置矩形直扫
-    if (this.player.equipStats.autoActuator && !options.data.builderAutoActuatorDisabled
+    if (this.player.equipStats.autoActuator && !this.builderAccOff(BACC.AutoActuate)
       && this.wiring) {
       const actId = VI_ID(849);
       for (let dy2 = 0; dy2 < oh; dy2++) {
@@ -25994,6 +26028,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   lostCoins = 0;
   /** 重力切换边沿锁（buff 18：Up 按住只切一次） */
   private gravLatch = false;
+  /** 建筑配件开关位读数（★SW-FX19；Player.builderAccStatus[i]==1 = 关断——
+   *  0/1 二态位。消费面：AutoPaint[3]（:39940/:40020/:40138/:40950）、
+   *  AutoActuate[2]（:40954）、TileReplacement/BlockSwap[10]（:3357）、
+   *  线材可见度[4-7]/[9]（Main.cs:59126-59140）、[8] HideAllWires
+   *  （WiresUI.cs:39-40 DrawWires）、TorchBiome[11]（Player.cs:3942）。
+   *  开关写入面=背包左图标列（UI.ts buildBuilderAccToggles）+设置页两行。 */
+  builderAccOff(i: number): boolean {
+    const s = this.player.builderAccStatus;
+    return !!s && s[i] === 1;   // 缺位面（测试桩/远端壳）回落启用=原版 ResetData [i]=0 同形
+  }
   /** 狱火光环 tick 计数（buff 116，:9896 infernoCounter） */
   private infernoCounter = 0;
 
@@ -32327,6 +32371,45 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
  *  flag2 智能支（Main.cs:43743）。 */
   private smartInteractNpcId = -1;
 
+  /** NPC 支胜者距离（provider DistanceFromCursor；无候选 = +Infinity）——
+   *  ★SW-BJ54：SmartInteractSystem.RunQuery :56-61 胜出比较（等距先序者保位，
+   *  NPC 先序 → tile 胜出 ⟺ tileDist < npcDist）*/
+  private smartInteractNpcDist = Infinity;
+
+  /** 智能交互 tile 候选（★SW-BJ54 2026-09-10）：TileSmartInteractCandidateProvider.cs
+   *  1:1（scanSmartInteractTiles 单源）+ BlockBecauseYouAreOverAnImportantTile 块门。
+   *  原版时序：Player.Update :25646 SmartInteractLookup 内 Main.ClearSmartInteract()
+   *  清全部 → RunQuery（NPC 支先、tile 支后；NPC 零距 break → tile 支不跑）→
+   *  距最小者 WinCandidacy。渲染消费 = TileDrawing.cs:902-904 GetTileOutlineInfo 链
+   *  （Renderer.drawSmartInteractTileHighlights）。门与 SW-BJ1 NPC 支同源
+   *  （:17497-17498 + :24943）。★hideUI 门（Main.cs:4046）本仓无 F11 隐藏 UI 面
+   *  （登记债，恒 false）。 */
+  private tickSmartInteractTiles(): void {
+    clearSmartInteractTileFrame();                       // Main.ClearSmartInteract tile 半边（:48855-48863）
+    if (!this.smartCursor.wanted || this.player.dead) return;   // :17497 + :24943
+    if (this.uiHeldItemRef?.()) return;                  // !Main.mouseItem.IsAir → Clear（:17498）
+    const [mwx, mwy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+    // BlockBecauseYouAreOverAnImportantTile.cs:12-25（RunQuery :20-27 头门——光标格
+    // 出界/DisableSmartInteract → 整链清空；★原版此门 NPC 支同吃，SW-BJ1 未做=债）
+    if (shouldBlockSmartInteract(this.world.store, Math.floor(mwx / 16), Math.floor(mwy / 16))) return;
+    // 扫描域 = SmartInteractLookup_PrepareCommonlyUsedInfo（Player.cs:17514-17523）：
+    // TileReachCheckSettings.Simple.GetTileRegion（玩家盒外扩 tileRangeX/Y=tileReach(0)
+    // 同源）+ Utils.Clamp(·,10,maxTiles-10)
+    const p = this.player;
+    const reach = this.tileReach(0);
+    const lx = Math.max(10, Math.floor(p.x / 16) - reach.x);
+    const hx = Math.min(this.world.store.w - 10, Math.ceil((p.x + p.w) / 16) - 1 + reach.x);
+    const ly = Math.max(10, Math.floor(p.y / 16) - reach.y);
+    const hy = Math.min(this.world.store.h - 10, Math.ceil((p.y + p.h) / 16) - 1 + reach.y);
+    const scan = scanSmartInteractTiles(this.world.store, lx, ly, hx, hy, mwx, mwy, this.smartInteractNpcDist);
+    if (scan.winDist === null) return;                   // 无域内候选（ProvideCandidate 返回 false）
+    if (scan.winDist < this.smartInteractNpcDist) {      // WinCandidacy（SmartInteractSystem.cs:56-61）
+      smartInteractTileFrame.tileWon = true;             // ⟺ Main.TileInteractionLX..HY 有效
+      smartInteractTileFrame.coords = scan.coords;
+      smartInteractTileFrame.selected = new Set(scan.selected.map((c) => `${c.x},${c.y}`));
+    }
+  }
+
   private tickSmartInteractNpc(): void {
     this.smartInteractNpcId = -1;                          // ClearSelfAndPrepareForCheck（provider :29-32）
     if (!this.smartCursor.wanted || this.player.dead) return;   // :17497 + :24943
@@ -32348,6 +32431,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (d === 0) break;                                  // :58-64 零距立即胜出
     }
     this.smartInteractNpcId = best;
+    this.smartInteractNpcDist = best === -1 ? Infinity : bestDist;   // ★SW-BJ54：provider DistanceFromCursor（RunQuery 胜出比较消费）
   }
 
   /** 右键与附近 NPC 交谈（Main.HoverOverNPCs Main.cs:43715-43813 语义 1:1）：
@@ -35161,10 +35245,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       });
     }
     // 第 4 参 = 快乐度价格百分比（Main.cs:41231-41243 商店标题旁表情/价格显示）
-    // 第 5 参 = 勋章持有（CustomCurrencyManager.DrawSavings :28-63——本店有勋章
-    // 条目时商店头部并列显示持有量；无勋章条目传 0 不显示）
+    // 第 5 参 = 勋章储蓄（CustomCurrencyManager.DrawSavings :28-40——【只】合计
+    // bank..bank4,背包勋章不进储蓄显示;num5>0 才画,本仓头部常显域=呈现适配登记）
+    // 第 6 参 = 勋章持有全量（BuyItem 门口计数 :76-87 五仓,支付能力着色/门取数口
+    // ——与 npcShopBuy 的 defenderMedalsOwned() 同源）
     const hasMedals = entries.some((e) => e.medal !== undefined);
     this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned(), mul,
+      hasMedals ? this.defenderMedalSavings() : undefined,
       hasMedals ? this.defenderMedalsOwned() : undefined);
   }
 
@@ -35412,10 +35499,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         break;
       }
       // 付款分流（Player.BuyItem :34948-34951 customCurrency 参）：勋章条目扣
-      // 勋章（CustomCurrencyManager.BuyItem :79-82 Count<price 拒付 → break）
+      // 勋章（CustomCurrencyManager.BuyItem :79-82 Count<price 拒付 → break；
+      // ★SW-FX17 五仓域——扣序=背包→bank→bank2→bank3→bank4,:88-121）
       if (medalPrice !== undefined) {
         if (this.defenderMedalsOwned() < price
-          || !spendDefenderMedals(this.player.inv.slots, price)) break;
+          || !spendDefenderMedalsAcross({
+            inventory: this.player.inv.slots,
+            banks: this.player.banks as ReadonlyArray<ReadonlyArray<InvItem | null>>,
+          }, price)) break;
       } else if (this.coinsOwned() < price) {
         fundsShort = true;
         break;
@@ -36148,14 +36239,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 季节旗标（checkXMas Main.cs:13054-13073 / checkHalloween :13093-13110：
    *  现实日期 ∪ 月事件胜利当日位 ∪ 永久季种子位 三路或——Forever 随存档 flags 持久化） */
   private checkSeasonal() {
-    const now = new Date();
-    // 现实日期（checkXMas Main.cs:13054 / checkHalloween :13093）∪ 月事件胜利强制位
-    // ∪ forceXMas/HalloweenForever（Main.cs:13071/13104，WorldFile.cs:1418/2459 存档位）
-    this.world.clock.xMas = (now.getMonth() === 11 && now.getDate() >= 15)
-      || this.forceXMasForToday || !!this.world.flags.forceXMasForever;
-    this.world.clock.halloween = (now.getMonth() === 9 && now.getDate() >= 10)
-      || (now.getMonth() === 10 && now.getDate() <= 1)
-      || this.forceHalloweenForToday || !!this.world.flags.forceHalloweenForever;
+    // ★SW-BJ55：窗口/强制位/永久位合算收拢到 world/World.seasonalHolidayFlags
+    // （checkXMas ★1457 Main.cs:13290-13310 ∪ checkHalloween :13329-13344 单源镜像;
+    //   旧内联月/日算式行号锚 13054/13093 系 1456 旧位）。调用面不变：
+    //   读档（:6909 OnWorldLoad 镜像 WorldGen.cs:3273-3274）+ 每黎明（:9502,
+    //   UpdateTime_StartDay Main.cs:66369-66370——原版该位在月事件强制季结算
+    //   CheckForMoonEventsStartingTemporarySeasons :11057-11095 之后,此处同序）。
+    const f = seasonalHolidayFlags(new Date(), {
+      forceHalloweenForToday: this.forceHalloweenForToday,
+      forceXMasForToday: this.forceXMasForToday,
+    }, {
+      forceHalloweenForever: !!this.world.flags.forceHalloweenForever,
+      forceXMasForever: !!this.world.flags.forceXMasForever,
+    });
+    this.world.clock.halloween = f.halloween;
+    this.world.clock.xMas = f.xMas;
   }
 
   /** 税务员收税领取（NPCInteractions TaxCollectorCollectTaxes + Player.CollectTaxes :23854）：
@@ -36456,6 +36554,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2, placeStyle?: number): ItemDrop | null {
+    // ★SW-BJ55 节日拾取替代（Item.NewItem 节日变体臂,Item.cs:49670-49720/1458 同位：
+    //   十周年 ∪ 双季 ∪ 单季三分支——心 58→糖苹果 1734/拐杖糖 1867、星 184→灵魂蛋糕
+    //   1735/糖梅 1868,掷源 Main.rand。落在 key→id 解析前=唯一 chokepoint,原版同位
+    //   （罐/怪/Boss 心星全走 NewItem 整型重载）;pickup 语义按原始 id 打标
+    //   （Enemy.ts spawn 闭包）→ 替代后心族 Heal(20)/星族 +100MP 不变,Player.cs:35344-35362）
+    const dropVid = viIdFromKey(itemKey);
+    if (dropVid === 58 || dropVid === 184) {
+      const sub = holidayPickupSubstitute(dropVid, {
+        halloween: !!this.world.clock.halloween,
+        xMas: !!this.world.clock.xMas,
+        tenthAnniversaryWorld: !!this.world.seedFlags?.tenthAnniversary,
+      });
+      if (sub !== dropVid) {
+        const subKey = VI(sub);
+        if (subKey && ITEM_BY_KEY[subKey] !== undefined) itemKey = subKey;
+      }
+    }
     const id = ITEM_BY_KEY[itemKey];
     if (id === undefined) return null;
     this.recLog('drop', { key: itemKey, n: count, x: Math.round(x), y: Math.round(y) });   // 行为录制：掉落物生成（唯一入口）
@@ -44134,10 +44249,24 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
 
   // ---- 护卫勋章货币（CustomCurrencyManager.DefenderMedals，src/stats/DefenderMedals）----
 
-  /** 勋章持有量（CountCurrency :26-47：3817 计数 ×1，≥999 截断；原版另扫四账本，
-   *  本仓无账本系统——见 DefenderMedals.ts 头注登记） */
+  /** 勋章持有量（CustomCurrencyManager.BuyItem 门口计数 CustomCurrencyManager.cs:76-87：
+   *  3817 计数 ×1，五仓=背包（忽略弹药/镜像槽）+ bank..bank4 合计，≥999 截断。
+   *  ★SW-FX17：旧版仅扫背包 = 存进随身银行的勋章商店读不到（Player.cs:34948-34951
+   *  勋章条目直转 CustomCurrencyManager.BuyItem,五仓计数）——消费/储蓄显示两面
+   *  见 DefenderMedals.ts 头注撤账注 */
   defenderMedalsOwned(): number {
-    return countDefenderMedals(this.player.inv.slots);
+    const p = this.player;
+    return countDefenderMedalsAcross({
+      inventory: p.inv.slots,
+      banks: p.banks as ReadonlyArray<ReadonlyArray<InvItem | null>>,
+    });
+  }
+
+  /** 储蓄显示值（CustomCurrencyManager.DrawSavings :28-40：只合计 bank..bank4，
+   *  不含背包；勋章条目商店头部数值 = 此值） */
+  defenderMedalSavings(): number {
+    const p = this.player;
+    return defenderMedalSavingsOf(p.banks as ReadonlyArray<ReadonlyArray<InvItem | null>>);
   }
 
   /** WorldGen.Skyblock.noAltars（afterWorldLoad 进图普查一次缓存）——全图无
@@ -44304,7 +44433,48 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       && !this.world.flags['downed_35'] && !this.world.flags.downedSkeletron);
     this.renderer.showWires = (this.forceShowWires && ntWireGate) || (!!held && !!ITEM_DEFS[held.id]?.wireTool
       && ntWireGate)
-      || (this.player.equipStats.mechShowWires && ntWireGate);
+      // ★SW-FX19：机械透镜支补 [8] HideAllWires 门（WiresUI.cs:39-40 DrawWires——
+      //  InfoAccMechShowWires 时 `builderAccStatus[8]==0` 才显线；图标钮 Main.cs:48177
+      //  case8 翻位,tooltip GameUI.WireModeForced/WireModeNormal）
+      || (this.player.equipStats.mechShowWires && this.player.builderAccStatus[BACC.HideAllWires] === 0
+        && ntWireGate);
+    // ★SW-FX19：线材可见度四态注入（Main.cs:59126-59140 DrawWires 头——非装备透镜
+    //  时 num2..num6 恒 1（Normal）；装备后逐色读 builderAccStatus[4]/[5]/[6]/[7]/[9]：
+    //  0 Bright=White / 1 Normal=光照色（本仓线层无逐格光照采样,Normal≡Bright 登记偏差）
+    //  / 2 Faded=×0.5 / 3 Hidden=Transparent 不画。消费面 Renderer.drawWires。）
+    const w8 = this.player.equipStats.mechShowWires;
+    this.renderer.wireModes = w8
+      ? [this.player.builderAccStatus[BACC.WireVisibility_Red],
+         this.player.builderAccStatus[BACC.WireVisibility_Blue],
+         this.player.builderAccStatus[BACC.WireVisibility_Green],
+         this.player.builderAccStatus[BACC.WireVisibility_Yellow],
+         this.player.builderAccStatus[BACC.WireVisibility_Actuators]]
+      : [1, 1, 1, 1, 1];
+    // ★SW-FX19：标尺线/标尺网格注入（DrawInterface_4_Ruler :47046 门 rulerLine &&
+    //  status[0]==0；DrawInterface_3_LaserRuler :47148 门 rulerGrid && status[1]==0。
+    //  尺子 486/机械标尺 2799 装备旗 = RefreshMechanicalAccsFromItemType :12897 门）
+    {
+      const gates = builderAccGateSet((vid) =>
+        playerAccessoryVidEquipped(this.player.inv.armor, this.player.inv.accSlotMax, vid));
+      const lineOn = gates.rulerLine && this.player.builderAccStatus[BACC.RulerLine] === 0;
+      const gridOn = gates.rulerGrid && this.player.builderAccStatus[BACC.RulerGrid] === 0;
+      if (lineOn || gridOn) {
+        const p0 = this.player;
+        const [mtx0, mty0] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
+        const [mwx] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+        this.renderer.builderRulers = {
+          lineOn, gridOn,
+          feetTx: Math.trunc((p0.x + p0.w / 2) / 16),
+          feetTy: Math.trunc((p0.y + p0.h - 2) / 16),
+          nudge: mwx < p0.cx ? -1 : 1,               // :47070-47072 num5
+          mouseTx: mtx0, mouseTy: mty0,
+          speed: Math.hypot(p0.vx, p0.vy),
+          gravDir: p0.gravDir,
+        };
+      } else {
+        this.renderer.builderRulers = null;
+      }
+    }
     const hover = (this.input.uiBlocking || this.renderer.timeUiHover) ? null : (() => {
       // 智能光标激活：hover 指向策略选出的目标格（渲染层据此画原版黄框 + 方向箭头）
       const sc = this.smartCursor;

@@ -289,9 +289,22 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     : undefined;
   const anglerQuestsFinished = version >= 98 ? r.i32() : 0;
   if (version >= 162) { r.i32(); r.i32(); r.i32(); r.i32(); }     // DpadRadial
+  // builderAccStatus（PL:56306-56325：n 按版本 8/10/11/12——★SW-FX19 起[0..n) 位面
+  //   真读入玩家态;旧读后即弃=装备开关位丢失。低版本档余位补 0,再按原版迁移 quirk：
+  //   release<210 → [0]=1（:56310,标尺线旧档强制关）;release<249 且背包有 3611
+  //   （Architect Gadget Pack）→ [1]=1（:56325,机械标尺旧档强制关））
+  let builderAccStatus: number[] | undefined;
   if (version >= 164) {
     const n = version >= 230 ? 12 : version >= 197 ? 11 : version >= 167 ? 10 : 8;
-    for (let i = 0; i < n; i++) r.i32();             // builderAccStatus
+    const ba = new Array<number>(12).fill(0);
+    for (let i = 0; i < n; i++) ba[i] = r.i32();
+    if (version < 210) ba[0] = 1;                    // PL:56310
+    // release<249 背包含 3611（Architect Gadget Pack,稳定 id 经 stableOf 域）→ [1]=1
+    const archStable = stableOf(3611);
+    if (version < 249 && archStable && inventory.some((it) => it && it.id === archStable)) {
+      ba[1] = 1;                                     // PL:56312-56325
+    }
+    builderAccStatus = ba;
   }
   if (version >= 181) r.i32();                       // bartenderQuestLog
   let dead = false, respawnTimer = 0;
@@ -346,6 +359,7 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     golferScoreAccumulated,
     anglerQuestsFinished,
     hideInfo,
+    builderAccStatus,
     hideVisibleAccessory: hideVisible,
     deathsPve, deathsPvp,
     team,
@@ -551,7 +565,11 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
   for (let i = 0; i < 13; i++) w.bool(!!hi[i]);
   w.i32(st.anglerQuestsFinished ?? 0);
   for (let i = 0; i < 4; i++) w.i32(0);       // DpadRadial
-  for (let i = 0; i < 12; i++) w.i32(0);      // builderAccStatus
+  // builderAccStatus[12]（PL:55553-55555 写全数组——★SW-FX19 起写真值,旧写 0 面）
+  {
+    const src = st.builderAccStatus;
+    for (let i = 0; i < 12; i++) w.i32(src?.[i] ?? (i === 0 ? 1 : 0));
+  }
   w.i32(0);                                   // bartenderQuestLog
   const dead = !!st.dead;
   w.bool(dead);

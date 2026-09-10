@@ -232,6 +232,8 @@ import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } fr
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
+import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, getSelectionGlowColor, highlightCellRect, loadHighlightMask } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）
+import { smartInteractTileFrame } from '../core/SmartInteractTiles';   // ★SW-BJ54：候选帧态（Game.update 侧每帧写）
 import { isDynamicAnimSheet, campfireYOffset, fountainYOffset } from './TileAnim';
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
@@ -3998,6 +4000,10 @@ export class Renderer {
     //     Main.cs:63251/:63259,均在 DrawWaters() 前景水之后——导线恒在水体/实体上）
     this.drawWires(world, cam, viewW, viewH, z);
     this.drawGrandPreview();
+    // 4.56 建筑配件标尺覆盖层（★SW-FX19：DrawInterface_4_Ruler 标尺线 Main.cs:47046-
+    //     :47140 + DrawInterface_3_LaserRuler 标尺网格 :47146-47224——尺子 486/机械
+    //     标尺 2799 装备面,builderAccStatus[0]/[1]==0 才画）
+    this.drawBuilderRulers(world, cam, viewW, viewH, z);
 
     // 5. 粒子
     for (const p of particles) {
@@ -4194,6 +4200,15 @@ export class Renderer {
       this.drawSmartCursor(ctx, cam, hover, viewW, z,
         lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
     }
+
+    // 7b-bis. 智能交互 tile 高亮（★SW-BJ54 2026-09-10：TileDrawing.cs:902-904
+    //     HasOutlines 门 → :4518-4529 GetTileOutlineInfo → :1422-1427 HighlightMask
+    //     同源矩形叠画。颜色自含该格光照（GetSelectionGlowColor(Colors.cs:127-130)
+    //     的 avg=Lighting.GetColor RGB 均值 :886/:4522），光照合成后直画与 7b 同理；
+    //     原版 tileBatch 层色已内乘光 = 本仓合成后乘光等价）。候选帧态由
+    //     Game.tickSmartInteractTiles 每帧写（core/SmartInteractTiles.ts）。
+    this.drawSmartInteractTileHighlights(ctx, cam, z, world,
+      lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
     // ★批III尾窗：Stardew 彩蛋编排器（Main.cs:28604 弹体 995 屏叠；此处屏空间
     //    等位复刻——全屏过场,画于 HUD 前）
@@ -4770,6 +4785,19 @@ export class Renderer {
 
   /** 导线覆盖层(Main.cs:43543-43954 DrawWires 移植:四色行/连接掩码/多色淡化/致动器覆盖) */
   showWires = false;
+  /** 线材可见度四态（★SW-FX19；[红,蓝,绿,黄,致动器] 值 0 Bright/1 Normal/2 Faded/
+   *  3 Hidden——Main.cs:59126-59140 num2..num6；Game.render 注入。Hidden 不画,
+   *  Faded ×0.5,Bright/Normal 本仓线层无逐格光照采样=全亮（偏差登记）。） */
+  wireModes: number[] = [1, 1, 1, 1, 1];
+  /** 建筑配件标尺注入面（★SW-FX19；Game.render 每帧填,null=无尺装备/关断） */
+  builderRulers: {
+    lineOn: boolean; gridOn: boolean;
+    feetTx: number; feetTy: number;      // (int)((x+w/2)/16), (int)((y+h-2)/16)（:47074-47080）
+    nudge: number;                       // num5 :47070-47072（鼠在中心左侧 -1 否则 +1）
+    mouseTx: number; mouseTy: number;    // MouseWorld.ToTileCoordinates()（:47194）
+    speed: number;                       // velocity.Length()（:47050;原版另取 shadowPos[2] 距,本仓取速度=α 淡出近似,登记）
+    gravDir: number;
+  } | null = null;
   /** 宏伟蓝图拖拽预览(Game.render 注入;世界坐标 tile) */
   grandPreview: { from: [number, number]; to: [number, number]; mode: number } | null = null;
 
@@ -4993,11 +5021,19 @@ export class Renderer {
         const colors = b & 15;
         if (!colors && !(b & 16)) continue;
         let n = 0;
-        for (let c = 0; c < 4; c++) if (colors & (1 << c)) n++;
+        for (let c = 0; c < 4; c++) {
+          // Hidden(3) 色不计入同格色数（vanilla num7-- :59172/:59175 同语义）
+          if ((colors & (1 << c)) && (this.wireModes[c] ?? 1) !== 3) n++;
+        }
         let drawn = 0;
         for (let c = 0; c < 4; c++) {
           const bit = 1 << c; // 红0 蓝1 绿2 黄3(图集行序,Main.cs:43641 等)
           if (!(colors & bit)) continue;
+          // ★SW-FX19：逐色可见度模式（Main.cs:59162-59170——case 3 Transparent 不画
+          //  （num7-- 同步减,桥带按可见色数计）、case 2 ×0.5、case 0/1 本仓全亮）
+          const mode = this.wireModes[c] ?? 1;
+          if (mode === 3) continue;
+          const modeAlpha = mode === 2 ? 0.5 : 1;
           drawn++;
           // 行 Y = 色行*18;分线盒/像素盒额外行偏移(Main.cs:43596-43616)
           let rowY = c * 18;
@@ -5014,19 +5050,133 @@ export class Renderer {
           if (has(tx + 1, ty, bit)) mask += 36;
           if (has(tx, ty + 1, bit)) mask += 72;
           if (has(tx - 1, ty, bit)) mask += 144;
-          if (n > 1) ctx.globalAlpha = 1 / n; // 多色同格淡化(桥带略)
+          if (n > 1) ctx.globalAlpha = (1 / n) * modeAlpha; // 多色同格淡化(桥带略)×模式
+          else if (modeAlpha !== 1) ctx.globalAlpha = modeAlpha;
           ctx.drawImage(wires, mask, rowY, 16, 16, tx * ts, ty * ts, ts, ts);
           ctx.globalAlpha = 1;
         }
         if ((b & 16) && actuatorImg) {
-          ctx.drawImage(actuatorImg, 0, 0, 16, 16, tx * ts, ty * ts, ts, ts);
+          // ★SW-FX19：致动器模式（[9]，num6 :59126/:59135——同四态；Faded ×0.5,Hidden 不画）
+          const am = this.wireModes[4] ?? 1;
+          if (am !== 3) {
+            ctx.globalAlpha = am === 2 ? 0.5 : 1;
+            ctx.drawImage(actuatorImg, 0, 0, 16, 16, tx * ts, ty * ts, ts, ts);
+            ctx.globalAlpha = 1;
+          }
         }
       }
     }
   }
 
-  /** 宏伟蓝图 L 路径预览:先纵后横 + 端点(massWireOperation dir=true 同构);
-   *  剪线=蓝、致动器=绿、四色铺线=红,半透明格覆盖 */
+  /** ★SW-FX19：建筑配件标尺覆盖层（世界空间,水前/线后——原版 Interface 层序
+   *  DrawInterface_3_LaserRuler(:47146-47224 网格)/_4_Ruler(:47046-47140 标尺线)
+   *  在世界之上;世界空间等价绘制,栅格 16px 对齐与原版逐像素同源）。
+   *  门 = 尺子 486/机械标尺 2799 装备且 builderAccStatus[0]/[1]==0（Game 注入）。 */
+  private drawBuilderRulers(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    const r = this.builderRulers;
+    if (!r) return;
+    if (!r.lineOn && !r.gridOn) return;
+    if (!this.atlas) return;
+    const ctx = this.ctx;
+    const ts = TILE;
+    // 视区世界像素（cam.x/y=视区中心）
+    const leftPx = cam.x - viewW / 2 / z;
+    const topPx = cam.y - viewH / 2 / z;
+    const speed = r.speed;
+    // α 淡出（:47154-47157/:47215-47216 num3 = Lerp(0.2,0.7,Clamp(1-num/6))）
+    const fade = 0.2 + (0.7 - 0.2) * Math.max(0, Math.min(1, 1 - speed / 6));
+
+    // ---- 标尺网格（DrawInterface_3_LaserRuler,Extra_68 18×36）----
+    if (r.gridOn) {
+      const img = this.atlas.ensureVImage('vanilla/Extra_68.png');
+      if (img) {
+        // 起点对齐：screenPosition-50 落格（:47220-47222 vec=ToTile*16）；本仓
+        // 世界空间=tile 对齐起点,屏幅外扩 100px（:47223-47224 (w+100)/16 整除）
+        const ox = Math.floor((leftPx - 50) / ts);
+        const oy = Math.floor((topPx - 50) / ts);
+        const nx = Math.floor((viewW / z + 100) / ts);
+        const ny = Math.floor((viewH / z + 100) / ts);
+        // 鼠标格（相对起点 :47225-47228 point）
+        const px = r.mouseTx - ox, py = r.mouseTy - oy;
+        const gA = 0.5 * 0.4 * fade;          // color = (0.24,0.8,0.9,0.5)*0.4*fade
+        const cA = 0.5 * 0.5 * fade;          // color2 = (1,0.8,0.9,0.5)*0.5*fade
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        // 普通格（:47231-47235 `if (i != point.X && j != point.Y) 画`——十字行/列
+        // 不画普通格,改由下方加亮线覆盖）
+        for (let j = 0; j < ny; j++) {
+          for (let i = 0; i < nx; i++) {
+            if (i === px || j === py) continue;
+            const insetX = i === px + 1, insetY = j === py + 1;
+            const sx = insetX ? 2 : 0, sw = insetX ? 14 : 16;
+            const sy = insetY ? 2 : 18, sh = insetY ? 14 : 16;
+            const dx = (ox + i) * ts + (insetX ? 2 : 0) - 1;  // vec -= One :47229
+            const dy = (oy + j) * ts + (insetY ? 2 : 0) - 1;
+            ctx.globalAlpha = gA;
+            ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+          }
+        }
+        // 十字加亮行/列（:47277-47302——point.Y 行横贯（x 向循环）+ point.X 列纵贯）
+        ctx.globalAlpha = cA;
+        for (let k = 0; k < nx; k++) {
+          // 横行 source (0,0,16,16) 端格 / (0,0,16,18) 其余（:47283-47293）
+          ctx.drawImage(img, 0, 0, 16, k === px ? 16 : 18,
+            (ox + k) * ts - 1, (oy + py) * ts - 1, 16, k === px ? 16 : 18);
+        }
+        for (let l = 0; l < ny; l++) {
+          if (l === py) continue;                             // :47299 l != point.Y
+          // 纵列 source (0,0,18,16)（:47296-47298）
+          ctx.drawImage(img, 0, 0, 18, 16,
+            (ox + px) * ts - 1, (oy + l) * ts - 1, 18, 16);
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+    }
+
+    // ---- 标尺线（DrawInterface_4_Ruler,Extra_2 16×80：端帽/横正/横负/竖正/竖负）----
+    if (r.lineOn) {
+      const img = this.atlas.ensureVImage('vanilla/Extra_2.png');
+      if (img) {
+        // α（:47058-47066 num4 = speed≤2 → 1,2..6 线性降 0）× num12 0.8（:47104）
+        const a4 = speed <= 2 ? 1 : Math.max(0, 1 - (speed - 2) / 6);
+        const alpha = 0.8 * a4;
+        let dx = r.feetTx, dy = r.feetTy;                     // (num6,num7) 脚底格
+        if (r.gravDir === -1) dy--;                           // :47083-47085
+        // 起点向鼠侧偏一格（:47086-47088 `if (|num6 − 鼠格X| > 0) num6 += num5`）
+        if (dx !== r.mouseTx) dx += r.nudge;
+        let ddx = r.mouseTx - dx;                             // num8
+        let ddy = r.mouseTy - dy;                             // num9
+        if (ddx === 0 && ddy === 0) return;
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = alpha;
+        // 横段（:47108-47133）：sign→source y=16(正)/32(负),末格 y=0 端帽
+        if (ddx !== 0) {
+          const sx2 = Math.sign(ddx);
+          while (ddx !== 0) {
+            ddx -= sx2;
+            dx += sx2;
+            ctx.drawImage(img, 0, ddx === 0 ? 0 : (sx2 === 1 ? 16 : 32), 16, 16,
+              dx * ts, dy * ts, 16, 16);
+          }
+        }
+        // 竖段（:47134-47139 + 端帽）：sign→source y=48(正)/64(负),末格 y=0
+        if (ddy !== 0) {
+          const sy2 = Math.sign(ddy);
+          while (ddy !== 0) {
+            ddy -= sy2;
+            dy += sy2;
+            ctx.drawImage(img, 0, ddy === 0 ? 0 : (sy2 === 1 ? 48 : 64), 16, 16,
+              dx * ts, dy * ts, 16, 16);
+          }
+        }
+        ctx.globalAlpha = 1;
+        ctx.restore();
+      }
+    }
+  }
+
   private drawGrandPreview() {
     const gp = this.grandPreview;
     if (!gp) return;
@@ -10151,6 +10301,13 @@ export class Renderer {
     // 814: whiteLerp k=0.35 × (255−α)/255 —— 顶点色=Lerp(格光,White,0.35)【读格光】
     //  （Main.cs:30068+:30855）→ whiten=false:逐通道 max 旧形（保留 65% 光色相）
     [814, (proj) => ({ floor: 0.35 * (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: false })],
+    // ★SW-BJ56 2026-09-10：946 泰拉棱镜——DrawProj_EmpressBlade（Main.cs:36562-36601）
+    //  全层硬编码色（本体 White×Opacity :36576-36577、幻影/环晕/色罩=女皇色,均不读
+    //  格光色;PrepareDrawnEntityDrawing :38686 仅管 dye shader）→ 原版本体【不受
+    //  tile 光照】= 暗处全亮。本仓实体层乘光 → 地板 1.0 白化抬亮（946 α 恒 0、
+    //  无出场渐显 → floor 恒 1,整 tile 白=既有 596/811 同面近似）;拖尾/幻影层经
+    //  MinionProj.draw 946 专绘走 trailShadeQueue 全亮通道（合成后直绘）双保险。
+    [946, () => ({ floor: 1, whiten: true })],
   ]);
 
   /** 弹自身 effAlpha（★F2:与 Dart.draw 消费式同源）——596 在 timeLeft<30 渐隐窗内
@@ -13724,6 +13881,18 @@ export class Renderer {
               ctx.restore();
             } else {
               ctx.drawImage(ex, 0, efr * efh, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+              // ★SW-FX18 高尔夫球车灯辉层（Mount.Draw case 17 drawType==1 :6043-6054）：
+              // ShouldGolfCartEmitLight() 恒 true（:4705-4707）→ Extra_96 第 4 行
+              //（num7*3，num7=64）同位再画一次；drawColor = White、A=0 = XNA α=0 纯
+              // 加法惯用法 → canvas 'lighter'。flag 恒 true 的 Height-2 行裁切为本层
+              // 全函数行高约定（副层统一整行,登记）
+              if (mnt.type === 17 && layer === 'back' && efh > 0) {
+                ctx.save();
+                ctx.globalCompositeOperation = 'lighter';
+                ctx.drawImage(ex, 0, 3 * efh, ex.width, efh,
+                  -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+                ctx.restore();
+              }
             }
           }
         }
@@ -14685,6 +14854,64 @@ export class Renderer {
     ctx.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh,
       sx + 8 - tex.sw / 2, sy + 8 - tex.sh / 2, tex.sw, tex.sh);
     ctx.restore();
+  }
+
+  /** 智能交互 tile 高亮 scratch（乘色工作画布，16~18px 件级复用） */
+  private _hlScr: HTMLCanvasElement | null = null;
+
+  /** 智能交互 tile 高亮（★SW-BJ54 2026-09-10）：TileDrawing.cs:902-904
+   *  `if (TileID.Sets.HasOutlines[type]) GetTileOutlineInfo(...)` → :4518-4529
+   *  HighlightMask[type] + GetSelectionGlowColor(selected, avg) → :1422-1427
+   *  与本体同源矩形同位叠画。候选帧态 = smartInteractTileFrame（Game 每帧写）；
+   *  avg = 光带采样 (r+g+b)/3 整除（Lighting.GetColor :886 语义，越界全亮同 7b）；
+   *  avg>10 门（:4523-4525）；动画依赖型排除集见 TileHighlight.ts 头注（债）。 */
+  private drawSmartInteractTileHighlights(
+    ctx: CanvasRenderingContext2D, cam: Camera, z: number, world: World,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    rx: number, ry: number, rw: number, rh: number,
+  ): void {
+    const frame = smartInteractTileFrame;
+    if (!frame.tileWon || frame.coords.length === 0) return;   // InSmartCursorHighlightArea 范围/胜出门
+    const store = world.store;
+    for (const c of frame.coords) {
+      if (!store.inBounds(c.x, c.y)) continue;
+      const si = store.idx(c.x, c.y);
+      if (!(store.flags[si] & 1)) continue;
+      const type = store.type[si];
+      if (!TILE_HAS_OUTLINES.has(type) || HIGHLIGHT_ANIM_EXCLUDED.has(type)) continue;
+      let lr = 255, lg = 255, lb = 255;
+      if (c.x >= rx && c.y >= ry && c.x < rx + rw && c.y < ry + rh) {
+        const li = (c.y - ry) * rw + (c.x - rx);
+        lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+      }
+      const avg = Math.floor((lr + lg + lb) / 3);              // TileDrawing.cs:4522（XNA 整除）
+      if (avg <= 10) continue;                                 // :4523-4525
+      const [r, g, b, a] = getSelectionGlowColor(frame.selected.has(`${c.x},${c.y}`), avg);
+      const mask = loadHighlightMask(type);
+      if (!mask) continue;
+      // 宝箱开盖姿态帧（CacheSpecialDraws_Part2 :4321-4331 锚回查——底行/右列
+      // 折回锚格，frame∈{0,1,2} → 姿态带 +0/38/76）
+      let chestFrame = 0;
+      if (type === 21 || type === 467) {
+        const fx = store.frameX[si], fy = store.frameY[si];
+        const kx = c.x - (fx % 36 !== 0 ? 1 : 0);
+        const ky = c.y - (fy % 36 !== 0 ? 1 : 0);
+        chestFrame = world.chests.find((ch) => ch.x === kx && ch.y === ky)?.frame ?? 0;
+      }
+      const rect = highlightCellRect(type, store.frameX[si], store.frameY[si], c.x, c.y, chestFrame);
+      if (!this._hlScr) this._hlScr = document.createElement('canvas');
+      const scr = this._hlScr;
+      if (scr.width !== rect.sw || scr.height !== rect.sh) { scr.width = rect.sw; scr.height = rect.sh; }
+      const sc = scr.getContext('2d')!;
+      sc.globalCompositeOperation = 'source-over';
+      sc.clearRect(0, 0, rect.sw, rect.sh);
+      sc.drawImage(mask as CanvasImageSource, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, rect.sw, rect.sh);
+      sc.globalCompositeOperation = 'source-in';               // texel(255,255,255,a)×color 逐值等价
+      sc.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
+      sc.fillRect(0, 0, rect.sw, rect.sh);
+      const [dxs, dys] = cam.worldToScreen(rect.dx, rect.dy);
+      ctx.drawImage(scr, 0, 0, rect.sw, rect.sh, dxs, dys, rect.sw * z, rect.sh * z);
+    }
   }
 
   private drawSmartCursor(

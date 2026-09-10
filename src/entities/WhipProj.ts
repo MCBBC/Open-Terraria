@@ -666,6 +666,11 @@ export class WhipProj extends Entity {
         // 非 manual 档 ×时长
         const enVan = (e as unknown as { vanillaId?: number }).vanillaId ?? 0;
         owner?.tagEffectStack.tryApplyTagToNPC(this.itemId, e.id, enVan, this.bonusTagDmg);
+        // ★SW-FX19：鞭命中写召唤集火槽（Projectile.cs:14321-14323 per-hit——
+        //  `aiStyle==165 → MinionAttackTargetNPC = victimIndex`（单槽最新写胜出,
+        //  approx-registry L5+④ 定谳:非"多 tag 争距",各随从消费自持距离/视线门
+        //  :29043+:30314+:37836）。失效清除走 Player.cs:57682-57685 每 tick（Game 侧）
+        if (owner) owner.minionTargetId = e.id;
         // proc 启用（TryDoingOnHitEffects :13968-14013）：{913,1031,1032} 首鞭门
         //  localAI[0]==0（:13970-13977）；{847,1033,1035} 每鞭无条件（:14009-14013）
         if (WHIP_PROC_ITEMS.has(this.itemId) && (WHIP_PROC_ONCE_ITEMS.has(this.itemId) ? !this.procEnabled : true)) {

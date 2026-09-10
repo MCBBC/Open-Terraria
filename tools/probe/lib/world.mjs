@@ -161,3 +161,76 @@ export async function mouseHold(page, down) {
     return true;
   }, down);
 }
+
+// ═══════════ G9(IIIRS241 缺口矩阵):FNV store 指纹(世界终态) ═══════════
+
+/**
+ * FNV-1a 32bit(纯函数,字节流直哈希;与 scripts/_worldgen-hash.mjs 唯一实现逐字同源)。
+ */
+export function fnv1a32(u8) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < u8.length; i++) { h ^= u8[i]; h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * store 全通道字节提取(_worldgen-hash 逐字同源,守卫测试钉死——改这里=改金标
+ * 口径,禁):type/wall/frameX/frameY 是 Uint16Array → new Uint8Array(buffer) 按
+ * LE 字节展开;其余 Uint8Array 直通。通道序=金标序。
+ */
+export const STORE_FNV_CHANNELS = {
+  type: (st) => new Uint8Array(st.type.buffer),
+  wall: (st) => new Uint8Array(st.wall.buffer),
+  liquid: (st) => st.liquid,
+  liquidType: (st) => st.liquidType,
+  half: (st) => st.half,
+  slope: (st) => st.slope,
+  frameX: (st) => new Uint8Array(st.frameX.buffer),
+  frameY: (st) => new Uint8Array(st.frameY.buffer),
+  paint: (st) => st.paint,
+  coat: (st) => st.coat,
+};
+
+/** 纯函数:store → {size, type, wall, …}(channels=子集名单,缺省金标全 10 通道)。 */
+export function fingerprintStoreChannels(st, channels = null) {
+  const out = { size: `${st.w}x${st.h}` };
+  for (const [name, get] of Object.entries(STORE_FNV_CHANNELS)) {
+    if (channels && !channels.includes(name)) continue;
+    out[name] = fnv1a32(get(st));
+  }
+  return out;
+}
+
+/** 页内:世界终态指纹(helper 单一真值源经 toString 注入——shot.litStats 同款;
+ *  evaluate 只序列化函数本体,模块作用域引用不跨闭包)。 */
+export function __fnvStoreInPage({ channels = null, fnvSrc = null, chanPairs = null } = {}) {
+  const st = window.__swGame?.world?.store;
+  if (!st) return { ok: false, why: 'no-store' };
+  const fnv1a32 = eval('(' + fnvSrc + ')');   // 单一真值源注入(shot.litStats 同款)
+  const out = { ok: true, size: `${st.w}x${st.h}` };
+  for (const [name, src] of chanPairs) {
+    if (channels && !channels.includes(name)) continue;
+    out[name] = fnv1a32(new Function('st', `return (${src})(st);`)(st));
+  }
+  return out;
+}
+
+/**
+ * FNV store 指纹(IIIRS241 G9 收编;真值源=scripts/_worldgen-hash.mjs 唯一实现,
+ * 指纹值与既有 _worldgen-hash 快照逐位可比)。世界终态指纹的标准件:
+ *   同 origin 两跑=确定性验证;跨 origin(dev=未混淆 vs preview=混淆)=位级等价验证。
+ * 入参通吃 page(页内 evaluate)|game|world|store(Node 直跑,框架自测用);
+ * channels=通道子集名单。返回 {ok,size,type,…}|{ok:false,why:'no-store'}。
+ */
+export async function fnvStore(pageOrStore, { channels = null } = {}) {
+  if (pageOrStore && typeof pageOrStore.evaluate === 'function') {
+    return pageOrStore.evaluate(__fnvStoreInPage, {
+      channels,
+      fnvSrc: fnv1a32.toString(),
+      chanPairs: Object.entries(STORE_FNV_CHANNELS).map(([name, get]) => [name, get.toString()]),
+    });
+  }
+  const st = pageOrStore?.world?.store ?? pageOrStore;   // game|world 传参走 .world.store,store 传参直用
+  if (!st || st.type == null || st.w == null) return { ok: false, why: 'no-store' };
+  return { ok: true, ...fingerprintStoreChannels(st, channels) };
+}

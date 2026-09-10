@@ -18,6 +18,9 @@ import { Lang } from '../i18n/Lang';
 
 export interface SettingsFlow {
   onBack(): void;
+  /** ★SW-FX18 成就页入口（IngameOptions.cs:294 OpenAchievements 等价）；
+   *  缺省不渲染入口（主菜单直开设置时无成就实例宿主） */
+  onAchievements?(): void;
 }
 
 const CSS = `
@@ -143,6 +146,18 @@ export class SettingsPanel {
       div.dataset.cat = c;
       div.textContent = this.catLabel(c);
       div.addEventListener('click', () => { this.cat = c; this.build(); });
+      cats.appendChild(div);
+    }
+    // ★SW-FX18 2026-09-10 成就入口（IngameOptions.cs:292-298 左列
+    // DrawLeftSide(Lang.menu[131]) → IngameFancyUI.OpenAchievements() 的 DOM 等价：
+    // 点击叠开成就面板、设置面板留在下层——原版 InGameUI SetState 同层叠语义）。
+    // 非分栏：不切内容不落 active 态。缺 flow.onAchievements（主菜单直开设置等）
+    // = 不渲染该入口
+    if (this.flow.onAchievements) {
+      const div = document.createElement('div');
+      div.dataset.cat = 'achievements';
+      div.textContent = Lang.text('LegacyMenu.131');   // menu[131] 成就（Main.cs:49733 同键）
+      div.addEventListener('click', () => this.flow.onAchievements?.());
       cats.appendChild(div);
     }
     this.panel.querySelector('.sw-set-cats')!.replaceWith(cats);
@@ -533,20 +548,32 @@ export class SettingsPanel {
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartAxeAfterPickaxe'), () => d.smartAxeAfterPickaxe, (v) => void options.set('smartAxeAfterPickaxe', v)),
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartBlocks'), () => d.smartBlocksEnabled, (v) => void options.set('smartBlocksEnabled', v)),
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartHoldRelease'), () => d.smartHoldCanReleaseMidUse, (v) => void options.set('smartHoldCanReleaseMidUse', v)),
-        // 建造饰品自动致动（builderAccStatus[2]；原版开关=装备区旁 BuilderAcc 图标钮
-        // Main.cs:48162 区，装备加压器 3624 时才出现，tooltip GameUI.ActuationDeviceOn/Off，
-        // 点击翻 builderAccStatus[2] 0↔1 + 音 22）。本仓无该图标簇 → 开关落设置页
-        // （终零波 最小可行版；status==0 = 启用语义与原版一致）
+        // 建造饰品自动致动（builderAccStatus[2]；★SW-FX19 起读写改走玩家位面
+        // player.builderAccStatus（per-player,.plr 持久化 PL:55553-55555）——原版开关
+        // =背包左图标列 Main.cs:48275 case2（本仓已建,Settings 行=便捷镜像）；
+        // options.builderAutoActuatorDisabled 字段退役保留（旧全局档兼容,不再读写）
         this.toggle(
           `${Lang.text('GameUI.ActuationDeviceOn').replace(/[:：].*$/, '')} / ${Lang.text('GameUI.ActuationDeviceOff').replace(/[:：].*$/, '')}`,
-          () => !d.builderAutoActuatorDisabled,
-          (v) => void options.set('builderAutoActuatorDisabled', !v),
+          () => {
+            const p = (window as unknown as { __swGame?: { player: { builderAccStatus: number[] } } }).__swGame?.player;
+            return (p?.builderAccStatus[2] ?? (d.builderAutoActuatorDisabled ? 1 : 0)) === 0;
+          },
+          (v) => {
+            const p = (window as unknown as { __swGame?: { player: { builderAccStatus: number[] } } }).__swGame?.player;
+            if (p) p.builderAccStatus[2] = v ? 0 : 1;
+          },
         ),
-        // 建造饰品自动喷漆（builderAccStatus[3]，tooltip GameUI.PaintSprayerOn/Off）
+        // 建造饰品自动喷漆（builderAccStatus[3]——同上,图标列 Main.cs:48252 case3）
         this.toggle(
           `${Lang.text('GameUI.PaintSprayerOn').replace(/[:：].*$/, '')} / ${Lang.text('GameUI.PaintSprayerOff').replace(/[:：].*$/, '')}`,
-          () => !d.builderAutoPaintDisabled,
-          (v) => void options.set('builderAutoPaintDisabled', !v),
+          () => {
+            const p = (window as unknown as { __swGame?: { player: { builderAccStatus: number[] } } }).__swGame?.player;
+            return (p?.builderAccStatus[3] ?? (d.builderAutoPaintDisabled ? 1 : 0)) === 0;
+          },
+          (v) => {
+            const p = (window as unknown as { __swGame?: { player: { builderAccStatus: number[] } } }).__swGame?.player;
+            if (p) p.builderAccStatus[3] = v ? 0 : 1;
+          },
         ),
         // 玩家对决（Player.hostile;原版仅联机显示该 UI——Main.cs:2982 ShouldPVPDraw,
         // 单机常驻为调试便利,联机语义由协议同步压制）。显示态读【实时 player.hostile】

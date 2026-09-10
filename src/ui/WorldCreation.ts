@@ -1,6 +1,7 @@
 // 世界创建页（DOM 版，替代 VUI UIWorldCreationState）：
 // 世界名/种子 + 大小/难度/邪恶三组选项 + 彩蛋种子图标 + 多层预览图 + 描述。
 import { parseSeed, parseSeedChain } from '../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 旗标派生改 parseSeedChain（gen 同口径）
+import { isHalloweenDateNow as isHalloweenDateNowVanilla } from '../world/World';   // ★SW-BJ55 单源化
 import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
 import { ensureVanillaKit, bindKeyboardShift } from './vanillaKit';
@@ -123,18 +124,14 @@ export function isSpecialSeedText(flags: { everything?: boolean; drunkWorld?: bo
   return Object.keys(flags).some((n) => SPECIAL_ICON_KEY_BY_FLAG[n] !== undefined);
 }
 
-/** Main.isHalloweenDateNow（Main.cs:13313-13327）1:1：现实日期万圣窗 =
+/** Main.isHalloweenDateNow（★1457 Main.cs:13315-13327）1:1：现实日期万圣窗 =
  *  10 月 10-31 日 ∪ 11 月 1 日。★可注入 now 供测试（vanilla 读 DateTime.Now）。
  *  ★IIIII226 halloweenGen 日期臂（WorldFileData.SetSeedToRandomWithCurrentEvents
- *  WorldFileData.cs:417-425）消费面，落点=mainFlow.createWorldFlow。 */
+ *  WorldFileData.cs:417-425）消费面，落点=mainFlow.createWorldFlow。
+ *  ★SW-BJ55：实现收拢为 world/World.ts 单源镜像（checkXMas/checkHalloween
+ *  同源同锚,1458 同位零漂移）——本处保留缺省参包装以维持既有导入面。 */
 export function isHalloweenDateNow(now: Date = new Date()): boolean {
-  const day = now.getDate();
-  const month = now.getMonth() + 1;             // DateTime.Month 1-12
-  if (day < 10 || month !== 10) {
-    if (day <= 1) return month === 11;
-    return false;
-  }
-  return true;
+  return isHalloweenDateNowVanilla(now);
 }
 
 /** WorldFileData.SetSeedToRandomWithCurrentEvents（WorldFileData.cs:417-425）的

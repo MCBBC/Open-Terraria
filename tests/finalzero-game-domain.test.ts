@@ -286,10 +286,10 @@ describe('终零波 F：建造饰品开关最小可行版（builderAccStatus[2]/
     expect(options.data.builderAutoPaintDisabled).toBe(false);
     options.set('builderAutoActuatorDisabled', false);
   });
-  it('消费端在位（tryPlace 两段 gate 串读 options 关断位）', () => {
+  it('消费端在位（tryPlace gate 串读玩家 builderAccStatus 位面——★SW-FX19 迁移）', () => {
     const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
-    expect(src).toContain("equipStats.autoPaint && !options.data.builderAutoPaintDisabled");
-    expect(src).toContain("equipStats.autoActuator && !options.data.builderAutoActuatorDisabled");
+    expect(src).toContain("equipStats.autoPaint && !this.builderAccOff(BACC.AutoPaint)");
+    expect(src).toContain("equipStats.autoActuator && !this.builderAccOff(BACC.AutoActuate)");
   });
 });
 

@@ -206,6 +206,9 @@ export interface SaveData {
     /** 超级矿车开关（SW-FX10；Player.enabledSuperCart,PL:55572 位[1] 写/:56368 位[1] 读。
      *  旧档缺省 true=原版 Player.cs:2037 缺省同形） */
     enabledSuperCart?: boolean;
+    /** 建筑配件开关位（★SW-FX19；Player.builderAccStatus[12],PL:55553-55555 写/
+     *  :56306-56325 读。旧档缺省=ResetData 形 [0]=1 余 0（Player.cs:56749）） */
+    builderAccStatus?: number[];
     /** 永久升级族(Player.cs:44575-44802;旧档缺省全 false) */
     permanentUpgrades?: {
       extraAccessory?: boolean;

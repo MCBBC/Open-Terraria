@@ -79,6 +79,8 @@ export async function gameplayScenario({
 /**
  * ui 模板:不建世界(或可选),对菜单/VUI 面板做 DOM 文本+截图断言。
  * hook: async run({ page, ledger, outDir })
+ * ★UI 测试要看欢迎弹窗:本模板 keepDialogs=true(createGame 不代关);要真弹出来
+ * 还得 bootstrap 传 { welcomeAck:false } 不预置 ack(坑表 §C11)。
  */
 export async function uiScenario({
   buildGame = false, seed = '', size = 'small', headed = false, outDir = process.env.SW_PROBE_OUT ?? '/tmp/probe-out/ui',
@@ -93,7 +95,7 @@ export async function uiScenario({
     const boot = await bootstrap(page, process.env.SW_ORIGIN, timeouts.boot ?? {});
     ledger.chk('bootstrap', boot.ok, boot.why ?? '');
     if (boot.ok && buildGame) {
-      const gen = await createGame(page, { mode: 'direct', seed, size, timeout: timeouts.game ?? 600_000 });
+      const gen = await createGame(page, { mode: 'direct', seed, size, timeout: timeouts.game ?? 600_000, keepDialogs: true });
       ledger.chk('createGame', gen.ok, gen.why ?? '');
     }
     if (boot.ok && run) await run({ page, ledger, outDir });

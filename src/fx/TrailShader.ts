@@ -57,7 +57,10 @@ export const EXTRA_SETS: Record<string, ExtraSet> = {
   RainbowRod: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_197.png', 'vanilla/Extra_196.png'], tech: false, ssd: [4, 0, 0, 4], sm2: -2.8 },
   LightDisc: { imgs: ['vanilla/Extra_195.png', 'vanilla/Extra_195.png', 'vanilla/Extra_252.png'], tech: false, ssd: [4, 0, 0, 4], sm2: -2.8 },
   FinalFractal: { imgs: ['vanilla/Extra_201.png', 'vanilla/Extra_193.png', null], tech: true, ssd: [4, 0, 0, 4] },
-  EmpressBlade: { imgs: ['vanilla/Extra_209.png', 'vanilla/Extra_210.png', null], tech: true, ssd: [4, 0, 0, 4] },
+  // ★SW-BJ56 2026-09-10：SSD 按 EmpressBladeDrawer.cs:18-26 逐值校=(1,0,0,0.6)——
+  //  旧 [4,0,0,4] 系从 FinalFractal 复制（FinalFractalHelper.cs:175-186 =4,0,0,4）,
+  //  该 set 此前无消费方故未爆;锯齿链 dim=1−ph/SSD.w 与 obj58 尾乘 c2.x=1/SSD.w 语义。
+  EmpressBlade: { imgs: ['vanilla/Extra_209.png', 'vanilla/Extra_210.png', null], tech: true, ssd: [1, 0, 0, 0.6] },
 };
 
 // ---------- obj55 "MagicMissile" pass（SM2 字节码）帧级执行上下文 ----------

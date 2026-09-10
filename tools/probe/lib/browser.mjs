@@ -17,8 +17,10 @@ import { resolveChromePath } from './env.mjs';
 /** 本进程内所有活 browser——SIGTERM/SIGINT 处理器与 finally 统一收口,防孤儿。 */
 const activeBrowsers = new Set();
 
-/** 有头/headless 启动。headed=true 供人眼复核(探针默认 headless)。 */
-export async function launchBrowser({ headed = false, viewport = { width: 1280, height: 800 }, protocolTimeout = 600_000 } = {}) {
+/** 有头/headless 启动。headed=true 供人眼复核(探针默认 headless)。
+ *  extraArgs(IIIII239 perf 追加,additive):追加启动参数(如 macOS ANGLE/Metal
+ *  GPU args——perf 实时跑分用;缺省空,不影响既有探针行为)。 */
+export async function launchBrowser({ headed = false, viewport = { width: 1280, height: 800 }, protocolTimeout = 600_000, extraArgs = [] } = {}) {
   const executablePath = resolveChromePath();
   if (!executablePath) {
     throw new Error('[probe] 找不到 Chrome——设 SW_CHROME=/path/to/chrome 或安装 Google Chrome');
@@ -34,6 +36,7 @@ export async function launchBrowser({ headed = false, viewport = { width: 1280, 
       '--disable-renderer-backgrounding',
       '--disable-backgrounding-occluded-windows',
       '--disable-dev-shm-usage',
+      ...extraArgs,
     ],
   });
   activeBrowsers.add(browser);

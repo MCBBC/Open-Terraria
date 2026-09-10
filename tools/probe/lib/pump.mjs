@@ -71,3 +71,26 @@ export async function pumpInline(page, ticks) {
     return ticks;
   }, ticks);
 }
+
+/**
+ * G8(IIIRS241 缺口矩阵)等一帧真实渲染——页内 rAF 帧边界等待。
+ *
+ * ★与 perf 互斥(perf.mjs:216 互斥纪律的反向同理):perf 用真 rAF 连续渲染做
+ * 计量,startSegment..endSegment 窗内确定性泵(pump/pumpInline)与等帧工具
+ * (nextFrame)皆禁——确定性断言走 pump,渲染链路/UI 过渡/动画推进断言走
+ * nextFrame,两者勿混用(perf 窗内两者皆罪)。
+ *
+ * 双 rAF 语义:单 rAF 回调在下一帧绘制【前】触发,双发才保证至少一次完整
+ * 渲染周期已过(_swfx12-paint/_rb10e-verify 同款手写判例)。多帧=循环调用。
+ */
+export function __nextFrameInPage() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)));
+  });
+}
+
+/** 等一帧真实渲染(先置前——后台页 rAF 节流,memory: 无头后台探针五坑)。 */
+export async function nextFrame(page) {
+  await front(page);
+  return page.evaluate(__nextFrameInPage);
+}

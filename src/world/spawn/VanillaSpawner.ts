@@ -3650,8 +3650,11 @@ export class VanillaSpawner {
         }
         return D(this.ZoneSnow ? 206 : 110);
       }
-      // L4961：幽灵 Ghost 316——!noWorms && (万圣节 || 墓地) && 1/30（洞穴主池内）
-      if (!this.noWorms && this.ZoneGraveyard && N(30)) return D(316);
+      // L4961（★SW-BJ55 补 halloween 臂,1457 NPC.cs:5078）：幽灵 Ghost 316——
+      //  !noWorms && (Main.halloween || ZoneGraveyard) && Next(30)==0（洞穴主池内）。
+      //  注释本已写「万圣节 || 墓地」但代码漏 halloween 单边门（地表 4539/4549 支
+      //  与 cave 骷髅 5115 支的节日臂均已接,唯此支漏）
+      if (!this.noWorms && (this.world.clock.halloween || this.ZoneGraveyard) && N(30)) return D(316);
       // L4969：Undead Miner 44（1/20）
       if (N(20)) return D(44);
       // L4979：冰洞池——落脚 147/161/162：1/15 Snow Flinx 185 / else Undead Viking 167

@@ -250,8 +250,10 @@ describe('SW-AV2 使用源门钉面（Q2 裁决：背包 10-49 不能直接使�
     const ui = read('../src/ui/UI.ts');
     // 裁决注释在位
     expect(game).toContain('SW-AV2 2026-09-06 裁决');
-    // 数字键 Hotbar1-10 → 0-9（Player.cs:25289-25328）
-    expect(game).toMatch(/selected = digit\[1\] === '0' \? 9 : Number\(digit\[1\]\) - 1/);
+    // 数字键 Hotbar1-10 → 0-9（Player.cs:25289-25328；★SW-FX16 2026-09-10 改走活绑表
+    //  hotbarSlotOfCode（Keybinds.ts：HOTBAR_SLOT_ACTIONS 下标即槽位,恒 ∈0-9∨null）,
+    //  缺省 Digit1-Digit0 表下与旧 `digit[1]` regex 写点逐位等价——钉面随之换靶）
+    expect(game).toMatch(/const hotbarSlot = hotbarSlotOfCode\(code\);\s*\n\s*if \(hotbarSlot !== null\) \{\s*\n\s*this\.player\.inv\.selected = hotbarSlot;/);
     // 滚轮 ±1 环绕在 10 内（ClampHotbarOffset Player.cs:32134-32145）
     expect(game).toMatch(/inv\.selected = \(this\.player\.inv\.selected \+ 9\) % 10/);
     expect(game).toMatch(/inv\.selected = \(this\.player\.inv\.selected \+ 1\) % 10/);

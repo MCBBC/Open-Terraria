@@ -162,6 +162,11 @@ import {
   COIN_LABEL_XY, AMMO_LABEL_XY, COIN_AMMO_SCALE,
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
+import {
+  BACC, BUILDER_ACC_ICON_ORDER, builderAccDefaults, builderAccGateSet,
+  builderAccTotalIcons, cycleWireVisibility, toggleBuilderAccBit,
+  playerAccessoryVidEquipped,
+} from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位(图标列纯逻辑单源)
 import { housingHeadRows } from './HousingPanel';   // ★刀3:住房页头像行(与 HousingPanel 同源)
 import { sortingLayerIndex } from '../data/vanillaItemSorting';   // ★刀13:排列物品层序数据
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
@@ -6193,7 +6198,7 @@ export class UI {
     this.npcHappiness?.close();   // 心情浮层随对话框一并关闭
   }
 
-  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }>, copper: number, happinessPct?: number, medals?: number): void {
+  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }>, copper: number, happinessPct?: number, medals?: number, medalsTotal?: number): void {
     // ★SW-BJ8 2026-09-07 开店强制开背包（Main.OpenShop Main.cs:41162-41170 首行
     //  :41164 `playerInventory = true`，1458 本域无增量）：缺此行=商店开着时背包
     //  面板不自动展开——可见物品只剩快捷栏，而关包快捷栏 = context 13
@@ -6265,7 +6270,7 @@ export class UI {
       ...it,
       iconUrl: this.game ? iconUrl(this.game, internalIdOfVid(it.vanillaId)) || '' : '',
     }));
-    this.npcShop.open(title, entries, copper, happinessPct, medals);
+    this.npcShop.open(title, entries, copper, happinessPct, medals, medalsTotal);
     // 懒加载晚到升级(2026-08-13 枚举 review):开店瞬间 iconUrl miss(空串/程序化
     // 兜底)此前会冻结到关店——refreshAll 不触 npcShop。有界轮询就绪后原地补图,
     // 关店/超时即停(iconCache 只缓存命中,iconUrl 天然可升级)
@@ -6928,6 +6933,9 @@ export class UI {
       return { x: px, y: py };
     } });
 
+    // ---- 建筑配件图标列（★SW-FX19 债：DrawBuilderAccToggles Main.cs:48142-48377）----
+    this.vinvBuildBuilderAccToggles();
+
     // ---- 宝箱条(直接叠背包下方;显示随 openChest) ----
     this.vinvBuildChest();
     // ---- 重铸原位(Main.cs:42268-42393;显示随 vinvReforgeOpen+自动退出条件) ----
@@ -7509,6 +7517,154 @@ export class UI {
   //  名字 @(504,258);按钮列 @(506,invBottom+40+ID·26) 文本 0.75 缩放) ----
   private vinvChestNameEl: HTMLElement | null = null;
   private vinvChestBtnEls: HTMLButtonElement[] = [];
+
+  // ---- 建筑配件图标列（★SW-FX19 债清偿；Main.cs:48142-48377 DrawBuilderAccToggles）----
+  //  背包开即画 @(10,77) 竖列 24px 步距、10 槽序 8,9,0,1,2,3,4,5,6,7（:48166 num2 循环
+  //  i=0→num3=8/i=1→num3=9/其余 num3=i-2）;每槽门=对应配饰装备(:48177 InfoAccMechShowWires
+  //  =3619/3611、:48193 rulerLine=486/3611、:48207 rulerGrid=2799/3611、:48229
+  //  autoPaint=2216/3061/5126、:48249 autoActuator=3624——缺配饰 continue 不画)。
+  //  点击:二态位 0↔1(:48201 等)+音 12 menuTick;线材可见度族 4 态 ++>=3→0(:48340-48343
+  //  quirk——Hidden 3 点击不可达)。悬停 tooltip GameUI.*(:48196-48320);尾随方块替换
+  //  图标 (:43242 @(0,44) 音 22 unlock) + 群系炬图标 (:43282 @(0,68) unlockedBiomeTorches
+  //  才画)。totalDrawnIcons>=10 → 列整体上移 24、44→23、68→47(:48166/:43247/:43289)。
+  //  悬停 InfoIcon[13] 星与 UILinkPoint(手柄)未建模=登记。
+  private vinvBuildBuilderAccToggles(): void {
+    const root = this.vinvRoot;
+    if (!root) return;
+    const statusOf = (): number[] => this.game?.player.builderAccStatus ?? builderAccDefaults();
+    const gatesOf = () => builderAccGateSet((vid) => {
+      const g = this.game;
+      return !!g && playerAccessoryVidEquipped(g.player.inv.armor, g.player.inv.accSlotMax, vid);
+    });
+    const ICON_SRC = 'sprites/vanilla-ui/UI_BuilderIcons.png';
+    const slotEls: Array<HTMLButtonElement | null> = BUILDER_ACC_ICON_ORDER.map(() => null);
+    const paintSlot = (i: number): void => {
+      const b = slotEls[i];
+      if (!b) return;
+      const idx = BUILDER_ACC_ICON_ORDER[i].accIndex;
+      const on = statusOf()[idx] === 0;
+      b.style.opacity = on ? '1' : '0.497';   // color2 = (127,127,127) ≙ White×0.498(:48168)
+      const g = gatesOf();
+      b.title = (() => {
+        switch (idx) {
+          case BACC.HideAllWires: return Lang.text(on ? 'GameUI.WireModeForced' : 'GameUI.WireModeNormal');
+          case BACC.RulerLine: return Lang.text(on ? 'GameUI.RulerOn' : 'GameUI.RulerOff');
+          case BACC.RulerGrid: return Lang.text(on ? 'GameUI.MechanicalRulerOn' : 'GameUI.MechanicalRulerOff');
+          case BACC.AutoActuate: return Lang.text(on ? 'GameUI.ActuationDeviceOn' : 'GameUI.ActuationDeviceOff');
+          case BACC.AutoPaint: return Lang.text(on ? 'GameUI.PaintSprayerOn' : 'GameUI.PaintSprayerOff');
+          default: {
+            const arg = ({ 4: 'Game.RedWires', 5: 'Game.BlueWires', 6: 'Game.GreenWires', 7: 'Game.YellowWires', 9: 'Game.Actuators' } as Record<number, string>)[idx] ?? '';
+            const st = statusOf()[idx];
+            const mode = Lang.text(st === 0 ? 'GameUI.Bright' : st === 1 ? 'GameUI.Normal' : st === 2 ? 'GameUI.Faded' : 'GameUI.Hidden');
+            return `${Lang.text(arg)}: ${mode}`;
+          }
+        }
+      })();
+    };
+    const visGateOf = (idx: number, g: ReturnType<typeof builderAccGateSet>): boolean => {
+      if (idx === BACC.RulerLine) return g.rulerLine;
+      if (idx === BACC.RulerGrid) return g.rulerGrid;
+      if (idx === BACC.AutoActuate) return g.autoActuator;
+      if (idx === BACC.AutoPaint) return g.autoPaint;
+      return g.infoAccMechShowWires;              // 8/9/4-7 同门(:48177/:48290)
+    };
+    BUILDER_ACC_ICON_ORDER.forEach((slot, i) => {
+      const b = el('button', 'vinv-btn') as HTMLButtonElement;
+      b.style.cssText = 'width:14px; height:14px; image-rendering:pixelated;'
+        + `background-image:url(${ICON_SRC}); background-size:160px 32px;`;
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        const st = statusOf();
+        if (slot.wireMode) cycleWireVisibility(st, slot.accIndex);
+        else toggleBuilderAccBit(st, slot.accIndex);
+        this.game?.sfx.play('menuTick', 1);       // SoundEngine.PlaySound(12) :48203 等
+        paintSlot(i);
+      });
+      root.appendChild(b);
+      slotEls[i] = b;
+      this.vinvLayoutItems.push({
+        el: b,
+        pos: () => {
+          const c = this.vinvLayoutCtx;
+          if (!c || !this.game) return null;
+          const g = gatesOf();
+          if (!visGateOf(slot.accIndex, g)) return null;   // 缺配饰 continue(:48179)——num 不进
+          const pushUp = builderAccTotalIcons(g, !!this.game.world.flags.unlockedBiomeTorches) >= 10;
+          // start=(10,77)（:48241）;flag(total>=10) → vector.Y -= 24（:48167-48169）;
+          // 行号 = 已画图标数（num 只对实际画出的槽 ++ :48362——隐藏槽不留空行）
+          const drawn = BUILDER_ACC_ICON_ORDER.slice(0, i)
+            .filter((s2) => visGateOf(s2.accIndex, g)).length;
+          const y0 = pushUp ? 77 - 24 : 77;
+          const idx = slot.accIndex;
+          b.style.backgroundPosition = `${-idx * 16}px -16px`;   // rect(0,16,14,14) X=idx*16
+          paintSlot(i);
+          return { x: 10, y: y0 + drawn * 24 };
+        },
+      });
+    });
+
+    // 方块替换图标（Main.cs:43242-43280 DrawBlockReplacementIcon @(0,44/23) 音 22）
+    {
+      const b = el('button', 'vinv-btn') as HTMLButtonElement;
+      b.style.cssText = 'width:22px; height:20px; image-rendering:pixelated;'
+        + 'background-image:url(sprites/vanilla-ui/UI_BlockReplace_0.png); background-size:72px 22px;';
+      const paint = (): void => {
+        const on = statusOf()[BACC.BlockSwap] === 0;
+        b.style.backgroundPosition = `${on ? 0 : -24}px 0px`;  // Frame(3,1,on?0:1) :43251
+        b.title = Lang.text(on ? 'GameUI.BlockReplacerOn' : 'GameUI.BlockReplacerOff');
+      };
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        toggleBuilderAccBit(statusOf(), BACC.BlockSwap);
+        this.game?.sfx.play('unlock', 1);           // SoundEngine.PlaySound(22) :43268
+        paint();
+      });
+      root.appendChild(b);
+      this.vinvLayoutItems.push({
+        el: b,
+        pos: () => {
+          const c = this.vinvLayoutCtx;
+          if (!c || !this.game) return null;
+          const g = gatesOf();
+          const pushUp = builderAccTotalIcons(g, !!this.game.world.flags.unlockedBiomeTorches) >= 10;
+          paint();
+          return { x: 0, y: pushUp ? 23 : 44 };     // :43246-43250
+        },
+      });
+    }
+
+    // 群系炬图标（Main.cs:43282-43320 DrawTorchBiomeSwapIcon @(0,68/47),Extra_211 四帧,
+    // unlockedBiomeTorches 才画 :48370——本仓 flags.unlockedBiomeTorches 同源）
+    {
+      const b = el('button', 'vinv-btn') as HTMLButtonElement;
+      b.style.cssText = 'width:24px; height:22px; image-rendering:pixelated;'
+        + 'background-image:url(sprites/vanilla/Extra_211.png); background-size:104px 24px;';
+      const paint = (): void => {
+        const on = statusOf()[BACC.TorchBiome] === 0;
+        b.style.backgroundPosition = `${(on ? 1 : 0) * -26}px 0px`;   // Frame(4,1,on?1:0) :43291
+        b.title = Lang.text(on ? 'GameUI.TorchTypeSwapperOn' : 'GameUI.TorchTypeSwapperOff');
+      };
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        toggleBuilderAccBit(statusOf(), BACC.TorchBiome);
+        this.game?.sfx.play('unlock', 1);           // SoundEngine.PlaySound(22) :43308
+        paint();
+      });
+      root.appendChild(b);
+      this.vinvLayoutItems.push({
+        el: b,
+        pos: () => {
+          const c = this.vinvLayoutCtx;
+          if (!c || !this.game) return null;
+          if (!this.game.world.flags.unlockedBiomeTorches) return null;   // :48370 门
+          const g = gatesOf();
+          const pushUp = builderAccTotalIcons(g, true) >= 10;
+          paint();
+          return { x: 0, y: pushUp ? 47 : 68 };     // :43289-43292
+        },
+      });
+    }
+  }
   private vinvBuildChest(): void {
     // 名字(Main.cs:504,invBottom;openChestPanel 的 bankNames 语义在 paint 侧回写)
     const nameEl = el('div', 'vinv-txt');

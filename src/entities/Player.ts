@@ -165,12 +165,13 @@ import { playDeathVoice, voiceSlotOfItem, type VoiceState } from '../player/Play
 import {
   MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind, MountShot,
   SantankShellProj, mountRollerSkateStep, MOUNT_DATA, MOUNT_SETS,
-  playerFullRotationOf, rotatedBy,
+  playerFullRotationOf, rotatedBy, solidTileAt,
 } from './Mounts';
 import { flameParticles } from '../fx/FlameParticles';
 // L5 长尾批：拍击石充能三连 Spawn_*Recharge 收编本体（fx/orchestraFx 同池）
 import { snappingStoneRechargeFx } from '../fx/orchestraFx';
 import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中面 NightsEdge 编排（P.cs:28576-28581）
+import { playerAccessoryVidEquipped } from '../stats/builderAcc';   // ★SW-FX19:重力地球仪 1131 装备判定（gravControl2）
 import { deadCellsBeheadedHeadFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_DeadCellsHeadEffect 本体（:1920-1953）
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
@@ -687,6 +688,15 @@ export class Player extends Entity {
    *  unlockedSuperCart && enabledSuperCart（Mount.cs:4851 _shouldSuperCart）。
    *  .plr 持久化 PL:55572 位 [1] 写/:56368 位 [1] 读；杂项页开关 Main.cs:41963-41995） */
   enabledSuperCart = true;
+  /** 建筑配件开关位（SW-FX19 债；Player.builderAccStatus[BuilderAccToggleIDs.Count=12],
+   *  Player.cs:797/40-63——0 RulerLine / 1 RulerGrid / 2 AutoActuate / 3 AutoPaint /
+   *  4-7 WireVisibility RGBY / 8 HideAllWires / 9 WireVisibility_Actuators / 10 BlockSwap /
+   *  11 TorchBiome）。0=开 1=关（二态位）；4-7/9 四态（0 Bright/1 Normal/2 Faded/3 Hidden）。
+   *  ★ResetData 缺省 [0]=1（Player.cs:56749——标尺线默认【关】,1.4.4+ 同款）、其余 0。
+   *  开关 UI=背包左侧图标列（Main.cs:48142-48377 DrawBuilderAccToggles @(10,77) 24px 步距
+   *  + 方块替换图标 (:43242 @(0,44)) + 群系炬图标 (:43282 @(0,68))）；
+   *  .plr 持久化 PL:55553-55555 写/:56306-56325 读。 */
+  builderAccStatus: number[] = [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   /** 上一 tick PvP 死亡标记（Player.cs:1250 pvpDeath：KillMe 时若 pvp 置位——
    *  死亡不掉钱 + 复活满血/300t 无敌/跳过 Boss 延迟，:38208/:38321/:37223/:38388） */
   lastPvpDeath = false;
@@ -1139,8 +1149,22 @@ export class Player extends Entity {
     return Math.floor(dps);
   }
   /** 右键集火目标（MinionAttackTargetNPC，Player.cs:48952：召唤杖右键指定，
-   *  随从索敌优先；-1=无。失效：死亡或离玩家 >3000px——随从侧判定） */
+   *  随从索敌优先；-1=无。★SW-FX19 补两写源：鞭命中同槽直写
+   *  （Projectile.cs:14321-14323,aiStyle 165 per-hit,单槽最新写胜出——
+   *  approx-registry L5+④ 定谳:非"多 tag 争距"）+ 每 tick 失效清除
+   *  （:57682-57685,!CanBeChasedBy ∨ 距玩家中心 >3000px）。 */
   minionTargetId = -1;
+
+  /** ★SW-FX19：MinionAttackTargetNPC 失效清除（Player.cs:57682-57685 1:1）。 */
+  updateMinionAttackTarget(game: GameHooks): void {
+    if (this.minionTargetId === -1) return;
+    const t = (game.enemies() as Array<{ id: number; dead: boolean; cx: number; cy: number }>)
+      .find((e) => e.id === this.minionTargetId);
+    if (!t || t.dead || !canBeChasedBy(t)
+      || Math.hypot(t.cx - this.cx, t.cy - this.cy) > 3000) {
+      this.minionTargetId = -1;
+    }
+  }
   /** 星云三族等级（0-3，各自独立 480t；NebulaLevelup :56091-56121 逐级升/降）：
    *  0=伤害 179-181（四系 +15%/级）1=生命 173-175（lifeRegen +6/级）2=魔力 176-178 */
   nebula = [0, 0, 0];
@@ -2907,6 +2931,25 @@ export class Player extends Entity {
           && inAPlaceWithWind(st, this.x, this.y, this.w, this.h, game.world.groundLevel,
             game.world.seedFlags?.remix === true),
       },
+      // ★SW-FX18 高尔夫球车轮尘（EmitGolfCartWheelDust :4710-4742）：掷门与轮位
+      // 在 Mounts.updateMountEffects；此处补实心地面门（:4720 SolidTile）后发 1 粒
+      // mapColor 粒子（KillTile_MakeTileDust 尘族 = breakTile 同款 mapColor 粒子制,
+      // 登记口径；KillTile_GetTileDustAmount 尘量钳 1（:4723-4725）→ 恒 1 粒）。
+      // 速度 = tileDust×0.2 + (kickDir, −gravDir)（:4727-4731）→ 显式初速 =
+      // (kickDir, −1) ± 0.3 抖（tileDust 初速随机 ±2 的 ×0.2 档）；position 钉轮位
+      // （:4732 obj.position = legSpot）,scale×0.8/fadeIn×0.8（:4733-4734——tile 尘
+      // fadeIn 多为 0,等价 0）
+      wheelDust: (wx, wy, kickDir) => {
+        const st2 = this.lastStore;
+        if (!st2) return;
+        const tx = Math.trunc(wx / 16), ty = Math.trunc((wy + 2) / 16);
+        // WorldGen.SolidTile(p) 门（:4720——半砖/坡/平台不算实心）
+        if (!solidTileAt(st2 as unknown as import('./Mounts').SolidTileView, tx, ty)) return;
+        const i = st2.idx(tx, ty);
+        const color = TILE_DEFS[st2.type[i]]?.mapColor ?? '#8B7553';
+        game.spawnParticles(wx, wy, color, 1, 1,
+          { vx: kickDir + (Math.random() - 0.5) * 0.6, vy: -1 + (Math.random() - 0.5) * 0.6 });
+      },
     };
   }
 
@@ -3138,6 +3181,9 @@ export class Player extends Entity {
     //      距脑 <4000px → forcedGravity=10 → gravDir=-1（Player.cs:26489-26496）；
     //      锚失效/非 266 清除 = Main.cs:18127。仅 FTW 种子会有锚写入,普通世界零行为 ----
     consumeBrainOfGravity(this, game);
+    // ★SW-FX19：召唤集火槽失效清除（Player.cs:57682-57685 每 tick——目标
+    //  !CanBeChasedBy 或 距玩家中心 >3000px → MinionAttackTargetNPC=-1）
+    this.updateMinionAttackTarget(game);
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
     // ★GB2 ghostDmg 预算池每拍衰减（Player.cs:24652-24660，Player.Update 段内）：
@@ -3604,8 +3650,10 @@ export class Player extends Entity {
     const wasWetAll = this.inWater || this.inLava || this.inHoney || this.inShimmer;
     // 水上行走缩高 6px（原版 num82,Player.cs:27875-27881:水面行走不因脚尖触浆受伤）
     // 水上行走（装备 waterWalk 族 ∪ 水上行走药水 buff 15,:9706）——原独立块随
-    // LavaCollision 前移到此（vanilla 序:27877-27938）
-    const canWaterWalk = this.equipStats.waterWalk || this.buffs.canWaterWalk;
+    // LavaCollision 前移到此（vanilla 序:27877-27938）。★SW-FX19：倒挂整禁
+    // （:27866-27869 `gravDir==-1 → waterWalk/waterWalk2=false`，先于 Wet/Lava 碰撞）
+    const canWaterWalk = (this.equipStats.waterWalk || this.buffs.canWaterWalk)
+      && this.gravDir !== -1;
     const lavaProbeH = canWaterWalk ? this.h - 6 : this.h;
     this.inLava = liquidCollision(world.store, this.x, this.y, this.w, lavaProbeH, 2); // LavaCollision 盒判定
     const flag25 = !wasShimmering && this.inLava;   // :27878-27882（!shimmering 门 + 本拍 LavaCollision）
@@ -4801,6 +4849,9 @@ export class Player extends Entity {
         // 覆写锚点牵引 vy）
         if (eqWet.carpet && !mnt2 && !this.grappling[0] && this.extraJumps.length === 0 && this.jumpHold === 0
           && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {
+          // ★SW-FX19：倒挂禁【新激活】（:26312-26314 `gravDir==-1 → canCarpet=false`
+          //   每 tick 先于 CarpetMovement——已激活毯飞行续期不受此限 :22038）
+          if (this.gravDir === -1) this.canCarpet = false;
           if (this.inputJump && this.canCarpet) { this.canCarpet = false; this.carpetTime = 300; }
           if (this.carpetTime > 0 && this.inputJump) {
             this.carpetTime--;
@@ -5064,6 +5115,8 @@ export class Player extends Entity {
           //      vy≠0/火箭靴未在用/翅膀时间尽；效果=vy 钳到 -(gravity+ε) 抵消重力 ----
           if (eq.carpet && !mnt2 && !this.grappling[0] && this.extraJumps.length === 0 && this.jumpHold === 0
             && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {   // !grappling[0]: SW-RB6b 2026-09-07（:22025）
+            // ★SW-FX19：倒挂禁【新激活】（:26312-26314；干支——已激活毯续期 :22038 不受限）
+            if (this.gravDir === -1) this.canCarpet = false;
             if (this.inputJump && this.canCarpet) { this.canCarpet = false; this.carpetTime = 300; }
             if (this.carpetTime > 0 && this.inputJump) {
               this.carpetTime--;
@@ -5394,10 +5447,15 @@ export class Player extends Entity {
         // ★mount.Active 排除（WallslideMovement 头门 :21935——坐骑中贴墙滑/驻停整段不跑;
         //  老鼠坐骑 55 爬墙走上方 ratClimb 专属支,非 55 坐骑两支皆拒）
         const slideDirSign = Math.sign(this.inputX);
-        if (eq.spikedBoots >= 2 && this.vy > 0) {
+        // ★SW-FX19：门与速度全 ×gravDir（:21957 头门 gravDir==1→vy>0 / gravDir==-1→
+        //   vy<-gravity 镜像,:21994 tier1 门 `vy>0.5&&gravDir==1 || vy<-0.5&&gravDir==-1`;
+        //   速度字面 :21960/:21988-21997/:21996/:21998 均 `f*gravDir`——倒挂即镜像,
+        //   gravDir=1 时数值逐位恒等）
+        const gdSlide = this.gravDir;
+        if (eq.spikedBoots >= 2 && this.vy * gdSlide > 0) {
           // ≥2 驻停档（:21955-21990）：↓ 快滑 4 / 否则 (−gravity+1e-5) 缓慢上攀
           if (this.inputDown) {
-            this.vy = 4;                    // :21960 velocity.Y = 4f*gravDir（gravDir 恒 1 域）
+            this.vy = 4 * gdSlide;          // :21960 velocity.Y = 4f*gravDir（★SW-FX19 ×gravDir）
             this.spawnWallSlideDust(game, slideDirSign);       // :21961-21975 尘 31
           } else {
             // :21960-21968 + :21988-21997 1:1（★SW-FX14：slowFall 时 TryingToHoverUp
@@ -5405,14 +5463,14 @@ export class Player extends Entity {
             const num3 = this.buffs.slowFall
               ? (this.tryingToHoverUp ? GRAVITY / 10 : GRAVITY / 3)
               : GRAVITY;
-            this.vy = -num3 + 1e-5;
+            this.vy = (-num3 + 1e-5) * gdSlide;   // :21979-21997 `(−num3+1E-05f)*gravDir`
           }
           this.fallStartY = null;           // :21959 fallStart 重置
           this.wallCling = true;            // :21989 sliding=true 仓内承载位
-        } else if (eq.spikedBoots < 2 && this.vy > 0.5) {
+        } else if (eq.spikedBoots < 2 && this.vy * gdSlide > 0.5) {
           // ==1 缓降档（:21991-22016 else-if,裸 953/975）：↓ 4 / 否则 0.5 缓滑
-          if (this.inputDown) this.vy = 4;                     // :21996
-          else this.vy = 0.5;                                  // :21998 velocity.Y = 0.5f*gravDir
+          if (this.inputDown) this.vy = 4 * gdSlide;           // :21996 4f*gravDir
+          else this.vy = 0.5 * gdSlide;                        // :21998 velocity.Y = 0.5f*gravDir
           this.spawnWallSlideDust(game, slideDirSign);         // :22002 尘 31 恒出
           this.fallStartY = null;           // :21992 fallStart 重置
           this.wallCling = true;            // :22015 sliding=true
@@ -5588,11 +5646,18 @@ export class Player extends Entity {
         // X 阻尼（L22688-22699）：钳 ±1；|vx|>0.75 → ×0.85，否则 ×0.6
         this.vx = Math.max(-1, Math.min(1, this.vx));
         this.vx *= Math.abs(this.vx) > 0.75 ? 0.85 : 0.6;
-        // Y 阻尼（gravDir=1，L22715-22726）：下落钳 1（缓沉）、上升钳 -5；
-        // 上升 ×0.96，下落 ×0.3
-        if (this.vy > 1) this.vy = 1;
-        if (this.vy < -5) this.vy = -5;
-        this.vy *= this.vy < 0 ? 0.96 : 0.3;
+        // Y 阻尼（L23175-23208 双支 1:1）：gravDir=1 → 下落钳 1（缓沉）、上升钳 -5、
+        // 上升 ×0.96、下落 ×0.3；gravDir=-1 → 整体镜像（:23175-23190：钳 [-1,+5]、
+        // vy>0 ×0.96、否则 ×0.3）——★SW-FX19 补倒挂支（旧恒 gravDir=1 半边）
+        if (this.gravDir === -1) {
+          if (this.vy < -1) this.vy = -1;
+          if (this.vy > 5) this.vy = 5;
+          this.vy *= this.vy > 0 ? 0.96 : 0.3;
+        } else {
+          if (this.vy > 1) this.vy = 1;
+          if (this.vy < -5) this.vy = -5;
+          this.vy *= this.vy < 0 ? 0.96 : 0.3;
+        }
         // 丝尘（Collision.cs:3416）：纠缠中速度>0.7 时每 tick 1/30 出白色网屑
         if (inWeb && Math.abs(this.vx) + Math.abs(this.vy) > 0.7 && Math.random() < 1 / 30) {
           game.spawnParticles(webTx * TILE + 8, webTy * TILE + 8, '#C8C8CC', 1, 0.4, { life: 26, damp: 0.96, grav: 0 });
@@ -7900,7 +7965,9 @@ export class Player extends Entity {
     const vd = game.vanillaDust;
     if (!vd) return;
     const px = this.x + this.w / 2 + (this.w / 2 - 4) * slideDir;
-    const py = this.y + this.h / 2 + this.h / 2 - 4;   // gravDir 恒 1 域
+    // ★SW-FX19：py ×gravDir（:21967/:22006 `position.Y+height/2+(height/2-4)*gravDir`——
+    //   倒挂时尘贴"脚侧"=身体上半侧;gravDir=1 数值恒等）
+    const py = this.y + this.h / 2 + (this.h / 2 - 4) * this.gravDir;
     const d = vd.spawn(px, py, 8, 8, 31);
     if (!d) return;
     if (slideDir < 0) d.x -= 10;
@@ -9207,5 +9274,38 @@ export function consumeBrainOfGravity(p: Player, game: GameHooks): void {
   if (p.forcedGravityT > 0) {
     p.gravDir = -1;
     if (--p.forcedGravityT === 0 && !p.buffs.has(BuffType.Gravitation)) p.gravDir = 1;
+  }
+}
+
+/** ★SW-FX19：重力倒置总闸（Player.cs:26893-26937,HorizontalMovement 后 1:1；从
+ *  Game 输入段抽出便于单测）：
+ *  - forcedGravity>0（FTW 克脑,forcedGravityT 消费端）→ gravDir=-1（:26894-26896）；
+ *  - gravControl（重力药水 buff 18,Player.cs:10115）∨ gravControl2（重力地球仪
+ *    1131,Player.cs:15184 装备位——RefreshMechanicalAccsFromItemType 同款槽扫）
+ *    且 !mount.Active（flag18 :26892）→ controlUp 按下沿翻转 gravDir + fallStart
+ *    重置 + jump=0 + 音效 8（SoundID.Item8=DoorOpen,LegacySoundPlayer.cs:731→
+ *    本仓 'door_open'）（:26897-26912/:26917-26932 两支同形）；
+ *  - 两者皆无 → 每 tick gravDir=1（:26936-26937 else 支——药水过期/卸下地球仪
+ *    即回正；旧实现缺此支=倒挂后过期即永久死锁）。
+ *  @param upEdge 本 tick Up 按下沿（≙ 原版 `controlUp && releaseUp`,releaseUp=
+ *    !controlUp 上一帧 UpdateControlHolds 值 :29324-29331） */
+export function updateGravityControls(
+  p: Player,
+  upEdge: boolean,
+  playSfx?: (name: string, vol?: number, x?: number, y?: number) => void,
+): void {
+  const gravControl = p.buffs.has(BuffType.Gravitation);
+  const gravControl2 = playerAccessoryVidEquipped(p.inv.armor, p.inv.accSlotMax, 1131);
+  if (p.forcedGravityT > 0) {
+    p.gravDir = -1;
+  } else if ((gravControl || gravControl2) && !p.mount.active) {
+    if (upEdge) {
+      p.gravDir = p.gravDir === 1 ? -1 : 1;
+      p.fallStartY = p.y;                 // fallStart = position.Y/16（:26901/:26907）
+      p.jumpHold = 0;                     // jump = 0（:26902/:26908）
+      playSfx?.('door_open', 1, p.cx, p.cy);
+    }
+  } else {
+    p.gravDir = 1;                        // :26936-26937
   }
 }

@@ -981,7 +981,10 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 425: { // 广播盒（Wiring.cs:1177-1230 1:1）：锚点 2×2 内登记的告示牌文本 →
       // 粉色聊天广播（NewTextMultiline）；无牌/空文本静默返回。
       // AnnouncementBoxRange 默认 -1 = 全图（设置项，引擎暂未接设置门，恒全图）。
-      // 【依赖登记】牌面文字编辑 UI 未接入（现存 signs 只读：墓碑/导入存档）
+      // ★SW-FX18 2026-09-10 复核：牌面文字编辑 UI 已实装（tileSign 族右键
+      // → openSignEditor 懒建 → UI.showSignDialog 读/编辑双态 → setSignText
+      // 写回 world.signs；本广播读面即同一 signs 表,编辑→触发全链贯通）——
+      // 旧注"牌面编辑 UI 未接入"已过时注销
       const num5 = Math.floor(st.frameX[i] % 36 / 18);
       const num6 = Math.floor(st.frameY[i] % 36 / 18);
       const ox = x - num5, oy = y - num6;

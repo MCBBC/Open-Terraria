@@ -116,7 +116,10 @@ export interface OptionsData {
   /** 建造饰品自动喷漆关断（Main.builderAccStatus[3]==1 档；默认 false = status[3]=0 启用）
    *  ——喷漆器族 2216/3061/5126 放置同步上漆的开关面。原版 tooltip
    *  GameUI.PaintSprayerOn/Off（Main.cs:48252 case3）；本仓以设置页 toggle 承载。
-   *  消费：Game.tryPlace 自动上漆段（Player.cs:39938 `autoPaint && builderAccStatus[3]==0` 等） */
+   *  消费：Game.tryPlace 自动上漆段（Player.cs:39938 `autoPaint && builderAccStatus[3]==0` 等）
+   *  ★SW-FX19（2026-09-10）：[2]/[3] 消费与设置页读写均迁玩家位面
+   *  player.builderAccStatus（per-player,.plr 持久化）——本组字段退役保留
+   *  （旧全局档兼容 + 设置页无玩家实例时的显示回落），不再被消费面读取。 */
   builderAutoPaintDisabled: boolean;
   /** 事件进度条（Main.invasionProgressMode，:714；Main() 静默初始化=2，非字段 0！）：
    *  0=关 / 1=定时(160t 窗) / 2=开(近场常显)。消费：CheckInvasionProgressDisplay

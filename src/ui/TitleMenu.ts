@@ -101,6 +101,10 @@ export interface TitleMenuFlow {
   onMultiplayer(): void;
   /** 素材包管理(自制:重制热补丁;mainFlow → RemasterPanel) */
   onAssetPacks?(): void;
+  /** ★SW-FX18 2026-09-10 成就页（Main.cs:49733 menuMode 0 第三钮
+   *  Lang.menu[131] → MenuUI.SetState(AchievementsMenu) 的本仓等价；
+   *  mainFlow 供菜单级成就实例桥） */
+  onAchievements?(): void;
   /**
    * 日/月被抓住（含拖动中的每帧）。原版此点会写 Main.time 使日/月跟手
    * （Main.cs:62434-62446）；本仓菜单时钟写入入口缺失，主会话接线
@@ -280,6 +284,7 @@ export class TitleMenu {
       <div class="sw-title-btns">
         <div class="sw-title-btn" data-act="sp">${Lang.text('LegacyMenu.12')}</div>
         <div class="sw-title-btn" data-act="mp">${Lang.text('LegacyMenu.13')}</div>
+        ${this.flow.onAchievements ? `<div class="sw-title-btn" data-act="ach">${Lang.text('LegacyMenu.131')}</div>` : ''}
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
         <div class="sw-title-btn" data-act="buy">${Lang.text('Mods.SandboxWorld.Menu.BuyTerraria')}</div>
         <div class="sw-title-btn" data-act="replog">${Lang.text('Mods.SandboxWorld.Menu.ReplicaNotes')}</div>
@@ -351,6 +356,7 @@ export class TitleMenu {
     };
     on('sp', () => flow.onSinglePlayer());
     on('mp', () => flow.onMultiplayer());
+    on('ach', () => flow.onAchievements?.());   // ★SW-FX18 成就页（menu[131] 同位）
     on('set', () => flow.onSettings());
     on('buy', () => window.open('https://store.steampowered.com/app/105600/Terraria', '_blank', 'noopener'));
     on('replog', () => window.open('https://github.com/Vinlic/terraria-replica-build-notes', '_blank', 'noopener'));
@@ -453,6 +459,7 @@ export class TitleMenu {
     };
     set('sp', t('LegacyMenu.12'));
     set('mp', t('LegacyMenu.13'));
+    set('ach', t('LegacyMenu.131'));   // ★SW-FX18 成就页（menu[131] 同位）
     set('set', t('LegacyMenu.14'));
     set('buy', t('Mods.SandboxWorld.Menu.BuyTerraria'));
     set('replog', t('Mods.SandboxWorld.Menu.ReplicaNotes'));

@@ -142,23 +142,19 @@ describe('① PlaceIt_Walls autoPaint 尾奏（wall 通道三站点）', () => {
     expect(st.paintWall[st.idx(10, 10)]).toBe(0);
   });
 
-  it('builderAccStatus[3] 开关关断（builderAutoPaintDisabled）→ 不上漆不耗漆', () => {
+  it('builderAccStatus[3] 开关关断（★SW-FX19 起走玩家位面 builderAccOff）→ 不上漆不耗漆', () => {
     const w = mkWorld();
     const st = w.store;
     st.setWallSilent(10, 9, 4);
     const drops: Drop[] = [];
-    const prev = options.data.builderAutoPaintDisabled;
-    options.data.builderAutoPaintDisabled = true;
-    try {
-      const { g, consumed } = shell(w, drops, { autoPaint: true, paintVid: PAINT_RED_VID });
-      (g as unknown as { tryPlaceWall: (x: number, y: number, d: typeof WOOD_WALL_DEF) => void })
-        .tryPlaceWall(10, 10, WOOD_WALL_DEF);
-      expect(st.wall[st.idx(10, 10)]).toBe(4);
-      expect(st.paintWall[st.idx(10, 10)]).toBe(0);
-      expect(consumed).not.toContain(1);                // 油漆未耗
-    } finally {
-      options.data.builderAutoPaintDisabled = prev;
-    }
+    const { g, consumed } = shell(w, drops, { autoPaint: true, paintVid: PAINT_RED_VID });
+    // 关断 = builderAccStatus[3]=1（图标列/设置页写位;旧 options 面 2026-09-10 退役）
+    (g.player.builderAccStatus as number[]) = [0, 0, 0, 1];
+    (g as unknown as { tryPlaceWall: (x: number, y: number, d: typeof WOOD_WALL_DEF) => void })
+      .tryPlaceWall(10, 10, WOOD_WALL_DEF);
+    expect(st.wall[st.idx(10, 10)]).toBe(4);
+    expect(st.paintWall[st.idx(10, 10)]).toBe(0);
+    expect(consumed).not.toContain(1);                  // 油漆未耗
   });
 
   it('无油漆在包 → 墙照放不上漆（TryPainting FindPaintOrCoating null 早退 :41293）', () => {

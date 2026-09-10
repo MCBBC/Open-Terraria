@@ -48,6 +48,8 @@ export const CHEATSHEET = {
     { name: 'ItemDrop.stack', file: 'src/entities/ItemDrop.ts', token: 'stack: number;', note: '堆叠数——【不是 count】(IIIII237 首写踩坑);掉落计数 drops.filter(d=>d.itemId===iid).reduce((a,d)=>a+d.stack,0)' },
     { name: 'ItemDrop.pickup', file: 'src/entities/ItemDrop.ts', token: "pickup?: 'heart' | 'star' | 'manastar';", note: '心/星类碰触即消永不进包' },
     { name: 'EntityManager', file: 'src/entities/Entity.ts', token: 'enemies: Entity[] = [];', note: 'g.entities 的桶:enemies/drops/npcs/projectiles/props/critters(全数组,length=0 清桶)' },
+    { name: 'Enemy.fromVanilla', file: 'src/entities/Enemy.ts', token: 'static fromVanilla(id: number, x: number, y: number): Enemy | null {', note: '原版数据造怪;(x,y)=盒【中心】锚(ctor x−w/2/y−h/2,Enemy.ts:1984)——当左上算期望偏 w/2(坑表 I1);探针走 world.spawnEnemy/spawnTownNPC 包装' },
+    { name: 'TOWN_NPC_IDS', file: 'src/data/vanillaNpcs.ts', token: 'export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {', note: '城镇 NPC 登记键→原版 vid(40 键含宠物/旅商);未登记键 ctor 静默兜底向导贴图(TownNPC.ts:1322)——spawnTownNPC 先验键防 vacuous' },
   ],
 
   /** 玩家(src/entities/Player.ts:579 / src/items/Inventory.ts:142) */
@@ -56,6 +58,7 @@ export const CHEATSHEET = {
     { name: 'player.debugGod', file: 'src/entities/Player.ts', token: 'debugGod = false;', note: '上帝模式(必死类场景断言先开,框架 godMode)' },
     { name: 'player.inv', file: 'src/entities/Player.ts', token: 'inv: Inventory;', note: 'Inventory(src/items/Inventory.ts:142)' },
     { name: 'inv.slots', file: 'src/items/Inventory.ts', token: 'slots: Array<InvItem | null>;', note: '0-49 背包(0-9 快捷栏)/50-53 钱币/54-57 弹药;格形 {id, stack}' },
+    { name: 'AMMO_START', file: 'src/items/Inventory.ts', token: 'export const AMMO_START = 54;', note: '弹药槽起点(54-57 ×4);批量给物走 world.giveItems([{vid,slot}]),自动位只扫 0-49 背包' },
     { name: 'inv.selected', file: 'src/items/Inventory.ts', token: 'selected = 0; // 快捷栏选中格', note: '手持 = slots[selected];armor[20]/dye[10]/miscEquips[5] 同在 inv 上' },
     { name: 'player.useTime', file: 'src/entities/Player.ts', token: 'useTime', note: '使用节拍计数(cleanUpToIdle 归 0 防段间脏态,坑表 D7)' },
   ],

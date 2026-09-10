@@ -29,9 +29,14 @@ export * from './camera.mjs';
 export * from './shot.mjs';
 export * from './record.mjs';
 export * from './world.mjs';
+export * from './entities.mjs';   // IIII242 G4:实体/物品/反查包装组
 export * from './stats.mjs';
 export * from './watchdog.mjs';
 export * from './ledger.mjs';
 export * from './clock.mjs';
 export * from './cheatsheet.mjs';
 export * from './presets.mjs';
+export * from './staging.mjs';
+export * from './perf.mjs';
+export * from './perf-scenarios.mjs';
+export * from './perf-analyze.mjs';

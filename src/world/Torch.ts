@@ -266,6 +266,9 @@ export interface BiomeTorchZones {
  * 消费端①TorchGodsFlavor（:39529，buff 376 火把神药水每 tick 1/10 扫屏把**异群系群系炬**
  * 转成本表样式）；②原版手持火把自动换样式（UsingBiomeTorches，unlockedBiomeTorches
  * 消费端，本仓未建——登记）。无命中群系 = 0（普通炬，不触发转换）。
+ * ★SW-FX19：UsingBiomeTorches 真形（Player.cs:3934-3941）= `unlockedBiomeTorches &&
+ * builderAccStatus[11]==0`——开关位面已建（背包左群系炬图标 Main.cs:43282 翻 [11]），
+ * 自动换样式本体仍为本登记缺口,建时须并读 [11] 位。
  */
 export function biomeTorchPlaceStyle(z: BiomeTorchZones): number {
   if (z.shimmer) return 23;          // :39592-39594
