@@ -92,6 +92,12 @@ function makeRig(opts: { tileAt?: Record<string, number>; chests?: Array<{ x: nu
   g.wiring = null;
   g.net = undefined;
   g.openChestRef = () => null;
+  g.openChest = () => {};
+  g.closeChestPanel = () => {};
+  // closeNpcDialog → npcShopClose 面（Object.create 桩无构造器,须预置实例态）
+  g.npcShopOpen = false;
+  g.shopSellbackMemo = new Map();
+  g.shopBuybackStock = [];
   g.tryOpenChest = (c: unknown) => { tryOpenCalls.push(c); g.input.rightDown = false; };
   g.sfx = { play: () => {} };
   g.cb = { onInventoryChanged: () => {}, onToast: () => {}, onClothesWindow: () => {}, onReadSign: () => {} };
@@ -258,6 +264,59 @@ describe('SW-BJ52 ⑦ interactAt 容器臂：精确域', () => {
     (rig.g as AnyGame).wiring = { sheetOf: () => 21 };
     (rig.g as AnyGame).interactAt(9, 10);
     expect(rig.tryOpenCalls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑨ SW-RB10d：箱分支入口序 = CloseSign()+SetTalkNPC(-1)（Player.cs:33344-33345）——
+//    交谈中右键箱/储物族 → 对话面板关闭（原版互斥;旧缺序=同开）
+// ---------------------------------------------------------------------------
+describe('SW-RB10d ⑨ 箱/储物臂入口 SetTalkNPC(-1)（Player.cs:33344-33345）', () => {
+  const tileAt: Record<string, number> = {};
+  const chest = { x: 10, y: 10 };
+  paintChest(tileAt, 10, 10);
+  const chests = [chest];
+
+  it('交谈中右键宝箱本体格 → 对话关闭 + 开箱照常', () => {
+    const rig = makeRig({ tileAt, chests });
+    (rig.g as AnyGame).dialogNpc = { talking: true };
+    (rig.g as AnyGame).rightClickTileNpcDispatch(10, 10, null);
+    expect(rig.g.dialogNpc).toBeNull();
+    expect(rig.tryOpenCalls).toEqual([chest]);
+  });
+
+  it('交谈中右键储物族（存钱罐 tile 29）→ 对话关闭（interactAt BANK 臂同序）', () => {
+    const piggy = TILE_BY_KEY['v_29_piggy_bank'];
+    expect(piggy).toBeTruthy();
+    const tileAt2: Record<string, number> = { '12,10': piggy };
+    const rig = makeRig({ tileAt: tileAt2, chests });
+    (rig.g as AnyGame).dialogNpc = { talking: true };
+    (rig.g as AnyGame).interactAt(12, 10);
+    expect(rig.g.dialogNpc).toBeNull();
+    expect(rig.g.input.rightDown).toBe(false);
+  });
+
+  it('无异话时右键箱 → 零副作用（closeNpcDialog 守卫 this.dialogNpc）', () => {
+    const rig = makeRig({ tileAt, chests });
+    (rig.g as AnyGame).rightClickTileNpcDispatch(10, 10, null);
+    expect(rig.g.dialogNpc).toBeNull();
+    expect(rig.tryOpenCalls).toEqual([chest]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ⑩ SW-RB10d：箱 tile 本体命中但注册表落空 → 点击被消费（原版 flag2=true +
+//    Main.mouseRightRelease=false,num77=-1 无操作 :33316/:33497）——
+//    旧 fall-through=未登记箱 tile 被当空格（持物 alt 臂/交谈臂泄流）
+// ---------------------------------------------------------------------------
+describe('SW-RB10d ⑩ 未登记箱 tile：点击消费不泄流（flag2 等价）', () => {
+  it('单人：箱 tile + world.chests 空 → 零开箱且 rightDown=false', () => {
+    const tileAt: Record<string, number> = {};
+    paintChest(tileAt, 10, 10);
+    const rig = makeRig({ tileAt, chests: [] });
+    (rig.g as AnyGame).rightClickTileNpcDispatch(10, 10, null);
+    expect(rig.tryOpenCalls).toEqual([]);
+    expect(rig.g.input.rightDown).toBe(false);   // 旧=true（fall-through 泄流）
   });
 });
 

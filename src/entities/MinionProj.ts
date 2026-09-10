@@ -3365,7 +3365,7 @@ export class MinionProj extends Entity {
             const dmg = Math.max(1, Math.round(dmg0));
             const l = dist || 1;
             const shot = new Arrow(this.cx - hw, this.cy - hh, (ax - this.cx) / l * shooter.speed,
-              (ay - this.cy) / l * shooter.speed, dmg, this.knockback, shooter.shot, null,
+              (ay - this.cy) / l * shooter.speed, dmg, this.knockback, shooter.shot,
               { grav: 0, life: shooter.life ?? 1200 });
             shot.whipTagShot = true;   // MinionShot 吃鞭 tag（ProjectileID.Sets.MinionShot）
             if (shooter.shot === 614) {
@@ -4832,7 +4832,7 @@ export class MinionProj extends Entity {
             //   SetDefaults 无 gravity 覆盖）→ velocity=num4 恒速直线；旧 {grav:0.2}
             //   抛物线系误植，改显式 grav 0
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              Object.assign(new Arrow(s.x - 8, s.y - 8, vx, vy, dmgOf(), this.knockback, tier.shot, null, { grav: 0 }),
+              Object.assign(new Arrow(s.x - 8, s.y - 8, vx, vy, dmgOf(), this.knockback, tier.shot, { grav: 0 }),
                 { whipTagShot: true }),
               'projectiles');
           }
@@ -4931,7 +4931,7 @@ export class MinionProj extends Entity {
               // ★穿透终值：SetDefaults penetrate=4，NewProjectile 内联覆写
               //   `Type==680 && player.setSquireT2 → penetrate=7`（Projectile.cs:11083-11086）
               //   = 侍从 T2 套装「弩车可穿透」——发射点覆写审计批（2026-09-03）补
-              Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680, null,
+              Object.assign(new Arrow(this.cx - 8, spotY134() - 8, vx, vy, dmgOf(), this.knockback, 680,
                 setf134.squireT2 ? { pierce: 7 } : undefined),
                 { whipTagShot: true }),
               'projectiles');
@@ -5174,7 +5174,7 @@ export class MinionProj extends Entity {
           const s53life = sp53?.timeLeft ?? 1200;
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             Object.assign(new Arrow(mx - s53hw, my - s53hh, ((tgt.cx - mx) / d) * s53.speed, ((tgt.cy - my) / d) * s53.speed,
-              dmgOf(), this.knockback, s53.shot, null, { grav: 0, life: s53life }), { whipTagShot: true }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）
+              dmgOf(), this.knockback, s53.shot, { grav: 0, life: s53life }), { whipTagShot: true }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）
             'projectiles');
         }
         if (this.sCool > 0) this.sCool--; // :27377-27380（目标有无均递减）
@@ -5224,7 +5224,7 @@ export class MinionProj extends Entity {
           const life26 = sp26?.timeLeft ?? 3600;
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             Object.assign(new Arrow(mx - hw26, my - hh26, ((tgt.cx - mx) / d) * 12, ((tgt.cy - my) / d) * 12,
-              dmgOf(), this.knockback, 1026, null, { grav: 0, life: life26, extraUpdates: 2 }),
+              dmgOf(), this.knockback, 1026, { grav: 0, life: life26, extraUpdates: 2 }),
               { whipTagShot: true }),                         // SENTRY_SHOT_SET 吃鞭 tag
             'projectiles');
         }
@@ -5273,7 +5273,7 @@ export class MinionProj extends Entity {
             // （曾 mx-5 写死 + 锚点 -2 近似 → 弹心偏移半格）
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
               Object.assign(new Arrow(mx - 9, my - 9, ((tgt.cx - mx) / d) * ss.speed, ((tgt.cy - my) / d) * ss.speed,
-                dmgOf(), this.knockback, ss.shot, null, { grav: 0 }), { whipTagShot: true }),
+                dmgOf(), this.knockback, ss.shot, { grav: 0 }), { whipTagShot: true }),
               'projectiles');
           }
         }
@@ -5290,7 +5290,7 @@ export class MinionProj extends Entity {
           this.shootCd = 60;
           const ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            Object.assign(new Arrow(this.cx - 5, this.cy - 5, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId, null), { whipTagShot: true }),
+            Object.assign(new Arrow(this.cx - 5, this.cy - 5, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId), { whipTagShot: true }),
             'projectiles');
         }
       }
@@ -5357,7 +5357,7 @@ export class MinionProj extends Entity {
         const fourthShot = this.projId === 1113 && this.foxT % 4 === 0;
         const flameSpd = this.projId === 1113 ? 31.5 : 15; // num17 ×3 补偿（:60072/:60074）
         const flame = new Arrow(this.cx - 3, this.cy - 3, this.foxAimX * flameSpd, this.foxAimY * flameSpd,
-          Math.max(1, Math.round(dmg0 * 0.85)), 0, 1106, null,
+          Math.max(1, Math.round(dmg0 * 0.85)), 0, 1106,
           { grav: 0, life: 24, pierce: 4 });
         // 命中火 buff:速度门 StatusNPC :11665-11668——velocity.Length()>10 →
         // OnFire3(323) else OnFire(24),300t 定值。★判门须用原版弹速(num17:1094=5/
@@ -5411,7 +5411,7 @@ export class MinionProj extends Entity {
         const dx = tgtF.cx - this.cx, dy = tgtF.cy - this.cy;
         const d = Math.hypot(dx, dy) || 1;
         const shot = new Arrow(this.cx - 5, this.cy - 5, dx / d * 32, dy / d * 32,
-          Math.max(1, Math.round(dmg0)), this.knockback, 1120, null,
+          Math.max(1, Math.round(dmg0)), this.knockback, 1120,
           { grav: 0, life: 300, pierce: 2, gem: { fastThenSlow: true } });
         shot.whipTagShot = true;   // MinionShot（ProjectileID.Sets.MinionShot[1120] :291）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
@@ -5611,7 +5611,7 @@ export class MinionProj extends Entity {
           const hw = (ps?.width ?? 10) / 2, hh = (ps?.height ?? 10) / 2;
           const ay0 = this.cy + (shooter.muzzleY ?? 0);
           const shot = new Arrow(this.cx - hw, ay0 - hh, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
-            dmg, this.knockback, shooter.shot, null, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 });
+            dmg, this.knockback, shooter.shot, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 });
           shot.whipTagShot = true; // MinionShot 吃鞭 tag（WhipTagEffect.cs:73-84）
           // 1097 火球命中按生成侧 ai[1] 分档（Projectile.cs:11315-11318）：ai[1]>0 →
           // OnFire3(323) 300-600t / 否则 OnFire(24)——1094 ai[1]=0 恒火、1113 ai[1]=3/1
@@ -5806,6 +5806,15 @@ export class MinionProj extends Entity {
     // age/8 匀速循环；哨兵按 facing 翻转（原版 spriteDirection）
     const ctx = r.ctx;
     if (!ctx) return;
+    // ★SW-FX6 2026-09-10 债⑥清偿：831 虎宝石/970 阿比盖尔计数器 = vanilla hide=true
+    //  （Projectile.cs:8082/:9197,SetDefaults aiStyle=164 计数器弹）→ 主循环
+    //  hide 门整支跳过（Main.cs:22404-22406 `if (!active || type<=0 || hide ||
+    //  drawLayer!=0) continue`）=【隐形计数器】:AI_164 照跑（环绕/召唤本体
+    //  838/963 等）,只是本体弹从不绘制。本仓旧刻意渲染 12×12 宝石+环绕 AI
+    //  （语义分叉,BJ16 §4⑥ 留裁决）——本批按原版落 hide（裁决记录见
+    //  docs/audit/summon-draw-branch-registry-2026-09-07.md 与 SW-FX6 报告）。
+    //  行为锁 = tests/sw-fx6-draw-debt-closure.test.ts（摘本支应红）。
+    if (this.projId === 831 || this.projId === 970) return;
     const frames = projFrameCount(this.projId);
     let frame: number;
     if (this.projId === 623) {
@@ -6001,8 +6010,9 @@ export class MinionProj extends Entity {
     //    帧计数被 AI 帧机/钳制消费,注册即污染;故本支内手工切片。
     //  · 1098/1123 钻地龟（:33771-33773）：锚 Y −= 2
     //  · 623 守护者（:34169-34177）：ai0==2 抖动 rand.NextVector2Circular(2,2)
-    //    （gamePaused 门+Main.rand 掷流,draw 侧不建模=登记债）;625-628/643/613/831/
-    //    970/1119 支内无改锚（逐型核验 :33693-34290 全支扫描结论,见审计文档）
+    //    + CurrentDrawnEntityShader==0 时 A/=2——★SW-FX6 2026-09-10 债④清偿,
+    //    见下方 draw 支内实现;625-628/643/613/831/970/1119 支内无改锚（逐型核验
+    //    :33693-34290 全支扫描结论,见审计文档;831/970 另有 hide 门=SW-FX6 债⑥）
     //  · 域外成员：773（WeaponProj.draw 同式接入）/1092（BookProj 已合本支语义：
     //    projFrameImg 走 PROJ_GRID[1092] 6×9 列主序 + 盒心帧心锚）
     if (CENTER_ANCHOR_33703.has(this.projId) && img) {
@@ -6027,9 +6037,29 @@ export class MinionProj extends Entity {
       const oy = this.projId === 758 ? img.height - 4                     // :33966-33967
         : this.projId === 759 ? img.height - 2                            // :33960
         : img.height / 2;
+      // ★SW-FX6 2026-09-10 债④清偿：623 守护者支内特例 1:1（Main.cs:34170-34177）——
+      //  ① ai0==2（攻击态）且 !gamePaused：锚 += rand.NextVector2Circular(2,2)
+      //  （Utils.cs:1301-1303 = 单位向量×(2,2)×NextFloat,逐 draw 掷流）。gamePaused 门
+      //  本仓 draw 侧无暂停源（暂停仍渲染）=备案;rand = draw 侧流,本仓 Math.random
+      //  直映（AI 掷流既有约定同源,不进播种流）。
+      //  ② CurrentDrawnEntityShader==0（常态）时 color106.A /= 2（:34175-34177）——
+      //  守护者本体半透明（灵体观感,A=127/255）;折进 globalAlpha。
+      let jx = 0, jy = 0;
+      if (this.projId === 623 && this.gA0 === 2) {                        // :34171-34173
+        const ang = Math.random() * Math.PI * 2;                          // NextVector2Unit()
+        const mag = Math.random();                                        // NextFloat()
+        jx = Math.cos(ang) * 2 * mag;
+        jy = Math.sin(ang) * 2 * mag;
+      }
       ctx.save();
-      if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
-      ctx.translate(this.cx + ax, this.cy + ay);         // gfxOffY 未建模恒 0（通用路同）
+      {
+        // alpha 组合：出场淡入（既有）×623 A/=2（:34175-34177）——本地标量合成,
+        // 不回读 ctx.globalAlpha（测试记录型 ctx 无 getter）
+        let bodyAlpha = this.alphaFade > 0 ? Math.max(0, (255 - this.alphaFade) / 255) : 1;
+        if (this.projId === 623) bodyAlpha *= 0.5;
+        if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;
+      }
+      ctx.translate(this.cx + ax + jx, this.cy + ay + jy); // gfxOffY 未建模恒 0（通用路同）
       if (this.rot !== 0 || MINION_ROT_ONLY.has(this.projId)) {
         ctx.rotate(this.rot);
         if (!MINION_ROT_ONLY.has(this.projId) && this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
@@ -6048,6 +6078,106 @@ export class MinionProj extends Entity {
       }
       ctx.restore();
       return;
+    }
+    // ---- ★SW-FX6 2026-09-10 债①清偿：641 月门 A 支专绘（Main.cs:33161-33166 +
+    //      :33444-33467 + 主绘 :33569-33572,578/579/641/813 同块 641 支）----
+    // vanilla A 支：锚 = 盒心 + gfxOffY（:33162 vector81 = position+Size/2+UnitY·gfxOffY）、
+    // origin = 【整图】尺寸/2（:33165 origin24,sourceRectangle2=null 无帧切片）——
+    // 本仓旧走通用路（num143/144 未登记 [0,0]）= 帧左上锚盒左上：60×60 精灵/32×32 盒
+    // → 整体偏 (+14,+14)（BJ16 §4①）。:33444-33467（641 flag40=true）叠绘序列：
+    //   ①Extra_50 暗环（color95=Lerp(color87,Black,.5)×num360 → RGB 减半折进 alpha
+    //     的既定近似）、rot=−num340+0.35、scale=scale11=0.6+0.6·num360、dir^FlipH
+    //   ②Extra_50 亮环（color87）、rot=−num340、scale=proj.scale、dir^FlipH
+    //   ③本体幽灵遍（color94=×0.8·A/2 → alpha 0.4）、rot=−num340×0.7、dir^FlipH
+    //   ④Extra_50 三遍（color87×0.8 → alpha 0.8）、rot=num340×0.5、scale×0.9、dir
+    //   随后 color87.A=0（:33464）→ 主绘 :33571 = α0 纯加法（XNA α=0 惯用法,
+    //   canvas 'lighter',同 Arrow ADDITIVE_GLOW_PROJS 族）。
+    //  num360 = 0.95 + (rot·0.75).ToRotationVector2().Y·0.1 = 0.95+sin(0.75·rot)·0.1
+    //  （:33449）。dir：AI_123 全支零 spriteDirection 赋值（:37726-37945 扫描）+
+    //  SetDefaults 复位 1（Projectile.cs:752）→ dir≡None → ①②③恒 FlipH、④⑤恒
+    //  None（不吃 this.facing——月门原版不随目标翻转）。rot 消费 this.rot（AI 侧
+    //  自旋 :37742 rotation−=direction·2π/120 与 scale=Opacity :37743 本批未建模=
+    //  剩债登记,r=0 时全支退化为静态环）。gfxOffY 未建模恒 0（全仓约定）。
+    if (this.projId === 641 && img) {
+      const ringTex = r.atlas?.ensureVImage('vanilla/Extra_50.png') ?? null;
+      const num360 = 0.95 + Math.sin(this.rot * 0.75) * 0.1;               // :33449
+      const scale11 = 0.6 + 0.6 * num360;                                  // :33452
+      const iw = img.width, ih = img.height;
+      const passes: Array<{ tex: unknown; a: number; rot: number; s: number; mirror: boolean; additive?: boolean }> = [
+        { tex: ringTex, a: 0.5 * num360, rot: -this.rot + 0.35, s: scale11, mirror: true },  // :33456
+        { tex: ringTex, a: 1, rot: -this.rot, s: 1, mirror: true },                          // :33457
+        { tex: img, a: 0.4, rot: -this.rot * 0.7, s: 1, mirror: true },                      // :33459-33460
+        { tex: ringTex, a: 0.8, rot: this.rot * 0.5, s: 0.9, mirror: false },                // :33462
+        { tex: img, a: 1, rot: this.rot, s: 1, mirror: false, additive: true },              // :33571(A=0 :33464)
+      ];
+      for (const p of passes) {
+        if (!p.tex) continue;
+        const tw = (p.tex as HTMLImageElement).width, th = (p.tex as HTMLImageElement).height;
+        ctx.save();
+        if (p.additive) ctx.globalCompositeOperation = 'lighter';
+        if (p.a < 1) ctx.globalAlpha = p.a;
+        ctx.translate(this.cx, this.cy);             // 锚=盒心（:33162,债①核心）
+        ctx.rotate(p.rot);
+        if (p.mirror) ctx.scale(-1, 1);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(p.tex as CanvasImageSource, -tw * p.s / 2, -th * p.s / 2, tw * p.s, th * p.s);
+        ctx.restore();
+      }
+      return;
+    }
+    // ---- ★SW-FX6 2026-09-10 债②清偿：691-693 陷阱塔 B 支 Bottom 锚（Main.cs:34089-34097）----
+    // vanilla（非携行）：vector99 = proj.Bottom + UnitY·gfxOffY（:34092）、
+    // origin32 = 帧尺寸×(0.5,1) 后 Y 连减 2×2 → (fw/2, fh−4)（:34093-34096）⇒
+    // 精灵横居盒、底 = 盒底 + 4（758/951/663 族同款「脚微陷」恒量）。携行态
+    // （ai[2]==1=IsSentryBeingCarried :80527-80529,本仓 carriedByBackpack）门反支
+    // 不重锚 = B 支缺省（锚=盒心、origin=帧心）。dir：AI_138 首行
+    // spriteDirection=(direction=1)（:70379）→ dir≡None 恒不翻转（本仓旧通用路
+    // facing 翻转未触发但语义已正）；B 支全帧高无 −1 shave（:33701）。gfxOffY 恒 0。
+    if (this.sentry && TRAP_TOWER.has(this.projId) && img) {
+      ctx.save();
+      if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+      ctx.imageSmoothingEnabled = false;
+      if (!this.carriedByBackpack) {
+        ctx.translate(this.cx, this.y + this.h);                       // proj.Bottom（:34092）
+        ctx.drawImage(img as CanvasImageSource, -img.width / 2, -(img.height - 4)); // origin=(fw/2,fh−4)
+      } else {
+        ctx.translate(this.cx, this.cy);                               // 携行=B 支缺省盒心锚
+        ctx.drawImage(img as CanvasImageSource, -img.width / 2, -img.height / 2);
+      }
+      ctx.restore();
+      return;
+    }
+    // ---- ★SW-FX6 2026-09-10 债③清偿：308/377 哨兵塔通用路内半宽切片
+    //      （Main.cs:34950-34957 + 主绘 :35047）----
+    // vanilla 通用路支内特例：num481 /= 2（源半宽）、num153 /= 2f（num153 初值
+    // (texW−bw)/2+bw/2 = texW/2（:30303）→ 半宽/2 = texW/4）、ai[2]==1（携行,
+    // :37813/:37992 ai[2]=0&&CanGetPickedUpBySentryBackpack→1）时 x15 = num481
+    // 取右半列。主绘 :35047：Rectangle(x15, y25, num481, num482−1)（y25=num482·frame
+    // :34944、num482=C# 整除帧高:34943、底行 −1 shave:35047）、锚 = (盒左+num153+
+    // num152, 盒上+盒高/2)、origin = (num153, 盒高/2+num151)（num151 仅 377=−6
+    // :30190,num152=0）⇒ 半塔左缘 = 盒左、竖居盒高半（377 下移 6px）。本仓旧整宽
+    // 直绘 = 双塔叠影（PNG 94/66 宽内左右两半镜像塔身,663-667 同构）。flip 沿用
+    // 既有 facing 语义（AI_053 spriteDirection 按目标/携行方位覆写 :38002/:38052-
+    // 38062,spriteDirection 可为 −1）。
+    if ((this.projId === 308 || this.projId === 377)) {
+      const sheet = projSprite(this.projId);
+      if (sheet) {
+        const framesN = Math.max(1, projFrameCount(this.projId));
+        const fh = Math.floor(sheet.height / framesN);                 // num482（:34943 C# 整除）
+        const halfW = Math.floor(sheet.width / 2);                     // num481（:34952）
+        const num151 = this.projId === 377 ? -6 : 0;                   // :30190
+        const x15 = this.carriedByBackpack ? halfW : 0;                // :34954-34956
+        const y25 = Math.floor(frame * fh);                            // :34944
+        ctx.save();
+        if (this.alphaFade > 0) ctx.globalAlpha = Math.max(0, (255 - this.alphaFade) / 255);
+        ctx.imageSmoothingEnabled = false;
+        ctx.translate(this.x + halfW / 2, this.y + this.h / 2);        // 锚（num153+num152,num152=0）
+        if (this.facing < 0) ctx.scale(-1, 1);
+        ctx.drawImage(sheet as CanvasImageSource, x15, y25, halfW, fh - 1,
+          -halfW / 2, -(this.h / 2 + num151), halfW, fh - 1);          // :35047（shave −1）
+        ctx.restore();
+        return;
+      }
     }
     ctx.save();
     // 帕鲁出场淡入（Projectile alpha 通道：绘制色 = 原色 × (255-α)/255——

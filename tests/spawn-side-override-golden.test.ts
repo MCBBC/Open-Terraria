@@ -44,9 +44,9 @@ describe('发射点覆写金标（NewProjectile 内联表 + Modifiers）', () =>
 
   it('B: 680 弩箭数据面 penetrate=4，侍从 T2 套装出生覆写 7（P.cs:11083-11086）', () => {
     expect(projectileData(680)?.penetrate).toBe(4);
-    const base = new Arrow(0, 0, 1, 0, 10, 0, 680, null);
+    const base = new Arrow(0, 0, 1, 0, 10, 0, 680);
     expect(base.pierce).toBe(4);
-    const t2 = new Arrow(0, 0, 1, 0, 10, 0, 680, null, { pierce: 7 });
+    const t2 = new Arrow(0, 0, 1, 0, 10, 0, 680, { pierce: 7 });
     expect(t2.pierce).toBe(7);
   });
 
@@ -87,11 +87,11 @@ describe('发射点覆写金标（NewProjectile 内联表 + Modifiers）', () =>
     // "opts 显式优先 → SetDefaults penetrate → 缺省 1"）= 原版字段缺省 penetrate=1;
     // 分裂子镖（P.cs:58320 带 NewProjectileModifiers.IchorDartUpdatePenetrate,ai[1]<0
     // 档=1,Modifier.cs:15-28）由该缺省+Arrow 479 支承载——非再传 {pierce:1} 恒真管路
-    const spawned = new Arrow(0, 0, 1, 0, 10, 0, 479, null);
+    const spawned = new Arrow(0, 0, 1, 0, 10, 0, 479);
     expect(spawned.pierce).toBe(1);
-    // 源锚:子镖出生即 pierce=1（Arrow.ts 分裂支,pd0 链缺省同值）
+    // 源锚:子镖出生即 pierce=1（Arrow.ts 分裂支,pd0 链缺省同值）★SW-FX9:`, null,` 占位实参随回收链摘除,锚改 \s* 容错
     const arrowSrc = readFileSync(ROOT + '../src/entities/Arrow.ts', 'utf-8');
-    const m = arrowSrc.match(/new Arrow\(this\.cx, this\.cy, sx, sy,[\s\S]{0,200}479, null,[\s\S]{0,80}\{ pierce: 1, grav: 0 \}\)/);
+    const m = arrowSrc.match(/new Arrow\(this\.cx, this\.cy, sx, sy,[\s\S]{0,200}479,\s*\{ pierce: 1, grav: 0 \}\)/);
     expect(m, 'Arrow 479 分裂子镖 pierce=1 链漂移').toBeTruthy();
   });
 

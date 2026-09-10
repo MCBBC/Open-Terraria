@@ -196,7 +196,7 @@ export function trySnapStrike(
     if (!t) break;                              // num9 == -1 → break（:14388-90）
     strikes++;
     // NewProjectile(nPC.Center, UnitY*0.1, projId, dmg, kb 5) + timeLeft=2（:14413-14416）
-    const pulse = new Arrow(t.cx, t.cy - 4, 0, 0.1, dmg, 5, projId, null,
+    const pulse = new Arrow(t.cx, t.cy - 4, 0, 0.1, dmg, 5, projId,
       { grav: 0, life: 2, pierce: 1 });
     (pulse as { projClass?: ProjClass }).projClass = strikeClass ?? undefined;   // ★F3 :14414-14418
     pulse.critChance = Math.min(1, strikeCritPct / 100);   // 负值原样穿过=不暴击（1132 档）

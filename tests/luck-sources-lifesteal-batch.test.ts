@@ -112,7 +112,7 @@ describe('吸血链分发（Projectile.cs:12877-12892）', () => {
   it('吸血鬼飞刀 304 命中 → vampire（系数 0.075 侧）', () => {
     const log: Log = { calls: [] };
     const game = makeGame(log, targetEnemy(30 * 16));
-    const a = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 100, 0, 304, null, { grav: 0, life: 300, pierce: 1 });
+    const a = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 100, 0, 304, { grav: 0, life: 300, pierce: 1 });
     for (let i = 0; i < 8 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
     expect(log.calls.length).toBe(1);
     expect(log.calls[0][0]).toBe('vampire');
@@ -123,14 +123,14 @@ describe('吸血链分发（Projectile.cs:12877-12892）', () => {
     const log: Log = { calls: [] };
     const game = makeGame(log, targetEnemy(30 * 16));
     // 恶魔镰刀 15（vanilla-projectiles magic=true）
-    const a = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 60, 0, 15, null, { grav: 0, life: 300, pierce: 1 });
+    const a = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 60, 0, 15, { grav: 0, life: 300, pierce: 1 });
     for (let i = 0; i < 8 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
     expect(log.calls.length).toBe(1);
     expect(log.calls[0][0]).toBe('ghost');
     const log2: Log = { calls: [] };
     const game2 = makeGame(log2, targetEnemy(30 * 16));
     // 木箭 1（melee/ranged 均非）→ 不进吸血链
-    const b = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 60, 0, 1, null, { grav: 0, life: 300, pierce: 1 });
+    const b = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 60, 0, 1, { grav: 0, life: 300, pierce: 1 });
     for (let i = 0; i < 8 && !b.dead; i++) b.fixedUpdate(1 / 60, game2);
     expect(log2.calls.length).toBe(0);
   });

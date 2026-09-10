@@ -22,7 +22,7 @@ export const CHEST_MAX_ITEMS = 40;
  *  frameCounter（Chest.cs:78-80 字段,UpdateChestFrames :3599-3657 驱动）。可选字段
  *  =存量存档/联机 ChestData 合成对象零迁移（缺省 0=关）；banks(x<0) 无 tile 姿态
  *  不消费（vanilla _chestInUse 收 chest>=0 门 :3604-3606） */
-export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number; favorited?: boolean; placeStyle?: number } | null>; locked?: boolean; frame?: number; frameCounter?: number; }
+export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number; favorited?: boolean; placeStyle?: number } | null>; locked?: boolean; frame?: number; frameCounter?: number; /** ★SW-FX11（2026-09-10）：箱名（原版 WF:1660 随箱段持久;重命名 UI 未实装=UI.ts:7358 债,导入/导出环先通） */ name?: string; }
 
 /** 世界尺寸档（原版 WorldGen.GetWorldSize cs:6518）：≤4200→0 小 / ≤6400→1 中 / 其余→2 大。
  *  UIWorldCreation 三档 = 4200×1200 / 6400×1800 / 8400×2400（WorldGen.cs:11163）。 */
@@ -233,6 +233,13 @@ export class World {
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean;
     /** ★SW-BO1 2026-09-07：流浪清场标（NPC.homelessDespawn,WorldFile.cs:1741/:2932） */
     homelessDespawn?: boolean }>;
+  /** ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 四塔位（WF:1744-1755/:2937-2955；
+   *  NPCID.cs:4807 CreateBoolSet(422,507,517,493)）——afterWorldLoad 原位生成后清空。
+   *  缺省=无（towerActive 旗在场走兜底重生成） */
+  pendingPillarNpcs?: Array<{ id: number; x: number; y: number }>;
+  /** ★SW-FX11（2026-09-10）：存档点按压中的压力板位（WF:3374-3386/:3388-3398）——
+   *  afterWorldLoad 逐位 PokeLocation 一次性 hitSwitch 重触发后清空 */
+  pendingPlatePokes?: Array<{ x: number; y: number }>;
   /** ★IIIIIII6：SpawnStarterNPCs pass（cs:19848-20068）播种的初始镇民——仅新世界首进
    *  消费一次后清空（不进存档：实例化后的镇民走 townNpcsForSave 的 town NPC 段，
    *  与原版一致）。celebrationmk10 五人组/组合分支记录，含 homeless 锚与朝向 */
@@ -511,6 +518,9 @@ export class World {
     if (p.weather) w.applyWeather(p.weather);
     if (p.bestiary) w.applyBestiary(p.bestiary);
     w.pendingTownNpcs = p.pendingTownNpcs;
+    // ★SW-FX11（2026-09-10）：四塔位/压力板位随包（联机 worker→主线程同缝）
+    w.pendingPillarNpcs = p.pendingPillarNpcs;
+    w.pendingPlatePokes = p.pendingPlatePokes;
     w.starterTownNpcs = p.starterTownNpcs;
     w.chests = p.chests;
     w.signs = p.signs;

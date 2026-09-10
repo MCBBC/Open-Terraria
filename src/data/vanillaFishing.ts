@@ -405,7 +405,7 @@ function gatesPass(gates: Array<{ gate: string; want: boolean | string }>, g: An
   });
 }
 
-/** Main.AnglerQuestSwap 选取循环（Main.cs:3809-3945）1:1：
+/** Main.AnglerQuestSwap 选取循环（1457 Main.cs:3851-3998;1456=旧注 :3809-3945;1458 :3851 同位,★SW-RB10b 锚正）1:1：
  *  Next(41) 取索引 → 命中拒绝表（世界门不满足）则重掷 → 无地表世界整族拒绝
  *  （noSurfaceItems）。返回 anglerQuest 索引。
  *  ★ 原版掷 Main.rand（世界主随机流，跨系统不可复现）；此处由调用方注入按
@@ -415,10 +415,10 @@ export function rollAnglerQuest(gates: AnglerQuestGates, rng: Rng = mathRng): nu
   const bannedItems = data.anglerQuest.filters
     .filter((f) => !gatesPass(f.gates, gates))
     .flatMap((f) => f.items);
-  if (!gates.hasWorldSurface) bannedItems.push(...data.anglerQuest.noSurfaceItems);   // :3870-3944
+  if (!gates.hasWorldSurface) bannedItems.push(...data.anglerQuest.noSurfaceItems);   // 1457 :3922-3995（18 条逐 if）
   const banned = new Set(bannedItems);
   for (;;) {
-    const q = rng.next(ANGLER_QUEST_ITEMS.length);     // :3812 rand.Next(41)
+    const q = rng.next(ANGLER_QUEST_ITEMS.length);     // 1457 :3864 rand.Next(41)
     if (!banned.has(ANGLER_QUEST_ITEMS[q])) return q;  // 拒绝表全过 → 采纳
   }
 }

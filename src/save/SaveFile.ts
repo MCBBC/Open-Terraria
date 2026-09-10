@@ -36,7 +36,9 @@ function readVarint(u8: Uint8Array, pos: { i: number }): number {
 }
 
 /** 主线程同步存档(兼容入口/worker 回退路径)。常规保存请走 SaveClient.saveAsync */
-export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events']): string {
+export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events'],
+  // ★SW-FX11（2026-09-10）：天界四塔 NPC 段（WF:1744-1755）+ 按压压力板段（WF:3374-3386）
+  pillarNpcs?: SaveData['pillarNpcs'], pressurePlates?: SaveData['pressurePlates']): string {
   const st = world.store;
   const view: SaveStoreView = {
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
@@ -135,8 +137,10 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
       ? [...player.hideVisibleAccessory]
       : undefined,
     hairDye: player.hairDye ?? 0,               // PL:53805-53808 hairDye byte（发色剂槽）
+    hbLocked: player.hbLocked ?? false,         // SW-FX10 债⑪:PL:55543 hbLocked bool
+    enabledSuperCart: player.enabledSuperCart ?? true,  // SW-FX10 债⑩:PL:55572 位[1] enabledSuperCart
   };
-  return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);
+  return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
 }
 
 export function loadSave(json: string): ReturnType<typeof loadSaveData> {
@@ -279,8 +283,8 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   };
   const v3Chests = (data.chests ?? [])   // ★R16-16 缺段守卫（截断 JSON 曾 .map 即抛）
     .map((c) => (v3
-      ? { x: c.x, y: c.y, locked: c.locked, items: padChestItems(c.items.map(mapItem)) }
-      : { x: c.x, y: c.y, locked: c.locked, items: padChestItems(c.items) }));
+      ? { x: c.x, y: c.y, locked: c.locked, name: c.name, items: padChestItems(c.items.map(mapItem)) }
+      : { x: c.x, y: c.y, locked: c.locked, name: c.name, items: padChestItems(c.items) }));
   if (v3 && data.player) {
     data.player = remapPlayerSlots(data.player, v3, v4);
   }
@@ -388,6 +392,11 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   applyLunarSave(world);
   // 城镇 NPC 段（原版 NPC 段 WF:1703-1750;旧档/曾断链=空数组 → 走新世界出生分支）
   if (data.npcs?.length) world.pendingTownNpcs = data.npcs;
+  // ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 四塔位（WF:2937-2955 Load 语义=读档
+  //  即原位重生成）+ 按压压力板位（WF:3388-3398 Load→首拍 PokeLocation 一次性重触发）。
+  //  恢复执行在 Game.afterWorldLoad（实体侧）；旧档缺省=无段
+  if (data.pillarNpcs?.length) world.pendingPillarNpcs = data.pillarNpcs;
+  if (data.pressurePlates?.length) world.pendingPlatePokes = data.pressurePlates;
   if (data.signs) world.signs = data.signs;
   // 挂物族存放物（v3 稳定 id → 内部 id；未知 id 归 0 由 furnitureFromSave 置空槽）
   world.furnitureItems = furnitureFromSave(

@@ -254,9 +254,14 @@ describe('SW-BJ10 并入项：占用实心格放置门（土块→石块,智能�
     const src = await (await import('node:fs/promises')).readFile('src/core/Game.ts', 'utf8');
     expect(src).toMatch(/function placeObstructionClearable\(typeId: number, sheet: number\): boolean \{\s*\n\s*return \(TILE_CUT\.has\(typeId\) && sheet !== 484 && sheet !== 654\)\s*\n\s*\|\| TILE_BREAK_WHEN_PLACING\.has\(typeId\);/);
     // 行为面：石/土（solid 非豁免族）不可被清格相放行=占用拒绝门的实体
+    // ★SW-FX8 单源化：Game.ts 本地副本 TILE_CUT_VANILLA 已删（对拍 41≡41 合并进
+    // data/tiles.ts TILE_CUT_SHEETS）——金标闸移到 sw-fx8-tile-cut.test.ts（全量
+    // tileCut[N] 反编译反查），此处仅钉 single-source 消费位与石/土不入表。
     const TILE_CUT_VANILLA_MATCH = src.match(/const TILE_CUT_VANILLA = new Set\(\[([^\]]*)\]/);
-    expect(TILE_CUT_VANILLA_MATCH).toBeTruthy();
-    const sheets = (TILE_CUT_VANILLA_MATCH![1].match(/\d+/g) ?? []).map(Number);
+    expect(TILE_CUT_VANILLA_MATCH).toBeFalsy();   // 单源化：本地副本不复存在
+    const sheets = (await (await import('node:fs/promises')).readFile('src/data/tiles.ts', 'utf8'))
+      .match(/TILE_CUT_SHEETS = new Set<number>\(\[([^\]]*)\]/)?.[1]?.match(/\d+/g)?.map(Number) ?? [];
+    expect(sheets.length).toBeGreaterThan(0);
     expect(sheets).not.toContain(1);     // stone
     expect(sheets).not.toContain(0);     // dirt
     const BWP_MATCH = src.match(/const TILE_BREAK_WHEN_PLACING = internalIdsOfVanSheets\(\[([^\]]*)\]/);

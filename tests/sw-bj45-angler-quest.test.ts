@@ -123,4 +123,30 @@ describe('SW-BJ45 渔夫任务链', () => {
       expect(world.anglerWhoFinishedToday).toEqual(wld.anglerWhoFinishedToday);
     });
   });
+
+  // ================= ★SW-RB10b（2026-09-10）红队审计修复面 tripwire =================
+  describe('★SW-RB10b 读档重构调用时序（vanilla LoadPlayer 先于 playWorldCallBack:6781-6784）', () => {
+    const gameSrc = () => readFileSync(join(__dirname, '..', 'src/core/Game.ts'), 'utf8');
+    const mainSrc = () => readFileSync(join(__dirname, '..', 'src/mainFlow.ts'), 'utf8');
+
+    it('重构唯一调用点=外观落位后（mainFlow.applyAppearance）——afterWorldLoad 首跑时 appearance 未应用，playerName() 回落缺省名与名单恒不符=修复空转（本文件旧名单项「泰拉瑞亚人」恰=zh 缺省名掩盖了该面）', () => {
+      const g = gameSrc();
+      // 唯一调用点必须在新公开方法体内（先见方法签名,后见 world 调用）
+      const calls = g.split('this.world.reconstructAnglerFinished(').length - 1;
+      expect(calls, 'Game.ts 只允许一处 world.reconstructAnglerFinished 调用').toBe(1);
+      const mIdx = g.indexOf('reconstructAnglerFinishedOnPlayerNamed(): void');
+      const cIdx = g.indexOf('this.world.reconstructAnglerFinished(');
+      expect(mIdx).toBeGreaterThanOrEqual(0);
+      expect(cIdx).toBeGreaterThan(mIdx);
+      // mainFlow 外观落位后补跑（时序修正的落点）
+      const m = mainSrc();
+      expect(m).toMatch(/function applyAppearance[\s\S]{0,1400}?reconstructAnglerFinishedOnPlayerNamed/);
+    });
+
+    it('读档路径不得重掷任务（vanilla 重掷仅生成尾 WorldGen.cs:22655 与黎明 Main.cs:66352）——swap/睡渔夫放置须以 freshlyCreated 门住 else 支（镇民全灭档读档也落该支）', () => {
+      expect(gameSrc()).toMatch(
+        /if \(this\.freshlyCreated\) \{\s*this\.anglerQuestSwap\(\);\s*this\.placeSleepingAngler\(\);\s*\}/,
+      );
+    });
+  });
 });

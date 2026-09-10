@@ -268,7 +268,7 @@ describe('DD2 弹幕物理（台账⑦⑤）', () => {
     const w = emptyWorld();
     const hooks = makeGame(w, [], []);
     (hooks as unknown as { player: Player }).player = fakePlayer(400 * TILE, 400 * TILE);
-    const j = new Arrow(100 * TILE, 100 * TILE, 11.5, 0, 15, 0, 662, null, { hostile: true });
+    const j = new Arrow(100 * TILE, 100 * TILE, 11.5, 0, 15, 0, 662, { hostile: true });
     const vy: number[] = [];
     for (let t = 0; t < 70; t++) { vy.push(j.vy); j.fixedUpdate(1 / 60, hooks); }
     for (let t = 0; t <= 60; t++) expect(vy[t]).toBe(0);        // 前 60t 直飞相缺失面已修
@@ -281,7 +281,7 @@ describe('DD2 弹幕物理（台账⑦⑤）', () => {
     const w = emptyWorld();
     const hooks = makeGame(w, [], []);
     (hooks as unknown as { player: Player }).player = fakePlayer(400 * TILE, 400 * TILE);
-    const k = new Arrow(100 * TILE, 100 * TILE, 13, 0, 25, 0, 671, null, { hostile: true });
+    const k = new Arrow(100 * TILE, 100 * TILE, 13, 0, 25, 0, 671, { hostile: true });
     const vy: number[] = [];
     for (let t = 0; t < 24; t++) { vy.push(k.vy); k.fixedUpdate(1 / 60, hooks); }
     for (let t = 0; t < 15; t++) expect(vy[t]).toBe(0);         // 直飞相

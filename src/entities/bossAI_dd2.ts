@@ -378,7 +378,7 @@ function shootD(
   const shot = PROJ_SHOT_SFX[projId];
   if (shot) game.playSfxFiles(soundTrackFiles(shot), 0.8, x, y);
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav, life, pierce, hostile: true }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, { grav, life, pierce, hostile: true }),
     'projectiles');
 }
 /** shootD 的 opts 直通变体（686 等需完整重力链的弹型;保留出膛音链） */
@@ -390,7 +390,7 @@ function shootD2(
   const shot = PROJ_SHOT_SFX[projId];
   if (shot) game.playSfxFiles(soundTrackFiles(shot), 0.8, x, y);
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { life, hostile: true, ...opts }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, { life, hostile: true, ...opts }),
     'projectiles');
 }
 

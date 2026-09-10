@@ -531,7 +531,7 @@ const SAND_BALL_CUT_SHEETS = new Set([185, 186, 187, 165, 12, 665, 639, 105, 178
  *  930）/310（5378 前身彩蛋弹）/1008（探矿信号弹）/1009 诅咒信号弹（5378 诅咒
  *  信号弹，PickAmmo 弹药 931 同槽换弹）/1010/1011。SetDefaults 同构：6×6 盒、
  *  penetrate −1、alpha 255（渐显）、timeLeft 36000（163 :2517-2526 / 1009 :9592-9601） */
-const FLARE_PROJS = new Set([163, 310, 1008, 1009, 1010, 1011]);
+export const FLARE_PROJS = new Set([163, 310, 1008, 1009, 1010, 1011]);
 /** AI_033 尘尾型号表（:27446-27464 switch(type)）：alpha<70 期每 update 一枚 */
 const FLARE_DUST: Record<number, number> = { 163: 127, 310: 187, 1008: 169, 1009: 75, 1010: 66, 1011: 310 };
 
@@ -1082,11 +1082,11 @@ export class Arrow extends Entity {
   /** 绘制 scale（SetDefaults scale 字段；绘制尺寸 = 贴图原生 × scale，
    *  与判定盒 w/h 无关——子弹 14 是 2×20 曳光条 × 1.2，曾误画成 10×100） */
   drawScale = 1;
-  /** 回收掉落的 item key（null = 不回收，如燃烧箭） */
-  dropKey: string | null;
   /** 原版 Projectile.noDropItem（Projectile.cs:316；630 volley 逐矢 :68277 置位、
-   *  705 凤凰弓 volley :68371 置位）：消亡不掉弹药——与 dropKey null 双保险,
-   *  防未来 dropKey 链回填时 volley 矢捡回弹药=刷箭 */
+   *  705 凤凰弓 volley :68371 置位）：消亡不掉弹药。原版唯一消费位 = Projectile.Kill
+   *  的 !noDropItem 放块族段（TileDrawing 系 985/965 砂球等,FallingBlock 链自承载）
+   *  ——箭族 Kill 无回收,本旗随数据面保留（SW-FX9 摘除本仓自加 1/3 落地回收后
+   *  暂无运行时消费,勿再接自创回收链） */
   noDropItem = false;
   manaStar: boolean;
   grav: number;
@@ -2015,14 +2015,13 @@ export class Arrow extends Entity {
   dead = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
-    knockback: number, projId = 1, dropKey: string | null = null, opts?: ArrowOpts) {
+    knockback: number, projId = 1, opts?: ArrowOpts) {
     super();
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.damage = damage;
     this.knockback = knockback;
     this.projId = projId;
-    this.dropKey = dropKey;
     this.manaStar = opts?.manaStar ?? false;
     // 判定盒/绘制 scale 按弹型取 SetDefaults（子弹 14 = 4×4 hitbox；箭 1 = 10×10）
     const pd0 = projectileData(projId);
@@ -3237,7 +3236,7 @@ export class Arrow extends Entity {
       const ents478 = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
       if (ents478?.add) {
         ents478.add(new Arrow(this.cx, this.cy, 0, 0,
-          Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.5, 480, null,
+          Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.5, 480,
           { grav: 0 }), 'projectiles');
       }
     } else if (this.projId === 503) {
@@ -3288,7 +3287,7 @@ export class Arrow extends Entity {
         const ul = Math.hypot(ux, uy) || 1;
         const spd = (10 + Math.floor(Math.random() * 191)) * 0.01; // ×rand(10,201)×0.01 = 0.10..2.00
         const cloud = new Arrow(this.cx, this.cy, ux / ul * spd, uy / ul * spd,
-          this.damage, 1, 511 + Math.floor(Math.random() * 3), null,
+          this.damage, 1, 511 + Math.floor(Math.random() * 3),
           { grav: 0, life: 3600, pierce: -1 });
         cloud.critChance = this.critChance;
         cloud.critBonus = this.critBonus;
@@ -3327,7 +3326,7 @@ export class Arrow extends Entity {
       // damage×0.75(int 截断)、kb 继承——150×150 盒驻留 ~135t 对盒内敌持续结算
       if (!this.dead) {
         const pillar = new Arrow(this.cx - 75, this.cy - 75, 0, 0,
-          Math.max(1, Math.trunc(this.damage * 0.75)), this.knockback, 296, null,
+          Math.max(1, Math.trunc(this.damage * 0.75)), this.knockback, 296,
           { grav: 0, pierce: -1 });
         pillar.critChance = this.critChance;
         pillar.critBonus = this.critBonus;
@@ -3367,7 +3366,7 @@ export class Arrow extends Entity {
         const spd = (70 + Math.floor(Math.random() * 31)) * 0.1;   // rand(70,101)×0.1 = 7.0..10.0
         const snake = new Arrow(this.x + this.w / 2, this.y + this.h / 2,
           ux / ul * spd, uy / ul * spd,
-          Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.8, 522, null,
+          Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.8, 522,
           { grav: 0, life: 40, pierce: 1 });
         snake.critChance = this.critChance;
         snake.critBonus = this.critBonus;
@@ -3492,7 +3491,7 @@ export class Arrow extends Entity {
           //  → 3 子步/拍（旧 opts 显式 3 系直读 SetDefaults 字面量的 off-by-one
           //  =4 子步/拍,且 ai1Delay 每子步 −1 会被多扣,治标随 json 补列一并撤）
           const c640 = new Arrow(this.moonArrowL0, this.moonArrowL1,
-            this.moonArrowA0, this.moonArrowA1, this.damage, this.knockback, 640, null);
+            this.moonArrowA0, this.moonArrowA1, this.damage, this.knockback, 640);
           c640.ai1Delay = Math.max(0, this.life) + 2;
           ents639.add(c640, 'projectiles');
         }
@@ -3521,7 +3520,7 @@ export class Arrow extends Entity {
             const sub = new Arrow(this.cx, this.cy,
               this.vx * cr - this.vy * sr + Math.cos(ca) * rr,
               this.vx * sr + this.vy * cr + Math.sin(ca) * rr,
-              Math.trunc(this.damage / 2), this.knockback / 2, 1097, null, {});
+              Math.trunc(this.damage / 2), this.knockback / 2, 1097, {});
             sub.foxAi1 = 2;
             sub.foxL0 = 1;
             sub.drawScale = 0.7;
@@ -3724,7 +3723,7 @@ export class Arrow extends Entity {
       const bee = new Arrow(this.x - nx * i, this.y - ny * i,
         (Math.floor(Math.random() * 71) - 35) * 0.01 + this.vx / 6,
         (Math.floor(Math.random() * 71) - 35) * 0.01 + this.vy / 6,
-        dmgBee, strong ? 0.5 : 0, strong ? 566 : 181, null, {});
+        dmgBee, strong ? 0.5 : 0, strong ? 566 : 181, {});
       bee.pierce = 2;                       // :78079 覆盖 181/566 表值 penetrate 3/4
       bee.pierceInit = 2;
       bee.frostEligible = true;             // ranged = true（:78078-78079）
@@ -3794,7 +3793,7 @@ export class Arrow extends Entity {
       const bee = new Arrow(this.x, this.y,
         (Math.floor(Math.random() * 71) - 35) * 0.02,
         (Math.floor(Math.random() * 71) - 35) * 0.02,
-        dmg, kb, strong ? 566 : 181, null, {});
+        dmg, kb, strong ? 566 : 181, {});
       bee.critChance = this.critChance;
       bee.critBonus = this.critBonus;
       bee.armorPen = this.armorPen;
@@ -3812,7 +3811,7 @@ export class Arrow extends Entity {
     for (let i = 0; i < 5; i++) {
       const ang = Math.PI / 4 - (Math.PI / 6) * i;          // num + num3×i
       const s = new Arrow(this.cx, this.cy, -6 * Math.sin(ang), 6 * Math.cos(ang),
-        this.damage, this.knockback, 710, null, {});
+        this.damage, this.knockback, 710, {});
       s.abShard = true;                                     // ai[1] = -1（:51086 尾参）
       s.frostEligible = true;
       s.critChance = this.critChance;
@@ -3837,7 +3836,7 @@ export class Arrow extends Entity {
     const vx631 = dxp / dlp * 6, vy631 = dyp / dlp * 6;
     const dmg631 = Math.max(1, Math.trunc(this.damage * 0.3));
     for (const delay of [0, 15, 30]) {
-      const c = new Arrow(sxp, syp, vx631, vy631, dmg631, 0, 631, null,
+      const c = new Arrow(sxp, syp, vx631, vy631, dmg631, 0, 631,
         { grav: 0, life: 1200 });
       c.ph631Tgt = target.id;
       c.ph631Delay = delay;
@@ -3986,7 +3985,7 @@ export class Arrow extends Entity {
         const l = Math.hypot(sx, sy) || 1;                  // 重归一到 shootSpeed（:48077-48080）
         const pin = new Arrow(mzx + bvx * (n30 - i) * 1.75, mzy + bvy * (n30 - i) * 1.75,
           sx / l * spd336, sy / l * spd336,
-          this.damage, this.knockback, 336, null,
+          this.damage, this.knockback, 336,
           { grav: 0.5, gravDelay: Math.max(1, 50 - Math.floor(Math.random() * 10 * (i + 1))) });
         pin.critChance = this.critChance;
         pin.critBonus = this.critBonus;
@@ -4038,7 +4037,7 @@ export class Arrow extends Entity {
         // ctor 未掷,下方显式补）
         const g1 = coneGeom337(1);                          // i=1 次锥 Y−700
         const cone1 = new Arrow(g1.x, g1.y, g1.vx, g1.vy,
-          this.damage, this.knockback, 337, null, {});
+          this.damage, this.knockback, 337, {});
         cone1.pinFrame = Math.floor(Math.random() * 5);     // ai[1]=rand.Next(5) :48118
         cone1.critChance = this.critChance;
         cone1.critBonus = this.critBonus;
@@ -4061,7 +4060,7 @@ export class Arrow extends Entity {
         const b = new Arrow(this.x, this.y,
           this.batBaseVx + (Math.floor(Math.random() * 71) - 35) * 0.05,
           this.batBaseVy + (Math.floor(Math.random() * 71) - 35) * 0.05,
-          this.damage, this.knockback, 316, null,
+          this.damage, this.knockback, 316,
           { grav: 0, life: 600, pierce: 1 });
         b.critChance = this.critChance;
         b.critBonus = this.critBonus;
@@ -4615,12 +4614,12 @@ export class Arrow extends Entity {
           const a630 = new Arrow(
             this.cx + Math.random() * 30 - 15, this.cy + Math.random() * 30 - 15,
             (this.vx / vl630) * sp630, (this.vy / vl630) * sp630,
-            res630.dmg, res630.kb, res630.pid, null, {});
+            res630.dmg, res630.kb, res630.pid, {});
           a630.frostEligible = true;
           a630.critChance = this.critChance;
           a630.critBonus = this.critBonus;
           a630.armorPen = this.armorPen;
-          a630.noDropItem = true;               // :68277（弹药链免落地回收——dropKey null 双保险）
+          a630.noDropItem = true;               // :68277（volley 逐矢原版置位;箭族无回收语义,见类字段注）
           ents630.add(a630, 'projectiles');
         }
       }
@@ -6247,7 +6246,7 @@ export class Arrow extends Entity {
             const a618 = Math.random() * Math.PI * 2;        // UnitY.RotatedByRandom(2π)
             const spark = new Arrow(this.cx, this.cy,
               -Math.sin(a618) * 12, Math.cos(a618) * 12,
-              Math.max(1, Math.trunc(this.damage / 2)), 0, 618, null,
+              Math.max(1, Math.trunc(this.damage / 2)), 0, 618,
               { grav: 0, life: 420, pierce: -1 });
             spark.naParent = this;                           // ai[1] = ProjectileKey
             spark.naLastPX = this.cx;
@@ -6559,7 +6558,7 @@ export class Arrow extends Entity {
             const dl2 = Math.hypot(dx, dy) || 1;
             const sx = (dx / dl2) * v0, sy = (dy / dl2) * v0;
             const sub = new Arrow(this.cx, this.cy, sx, sy,
-              Math.max(1, Math.trunc(this.damage * 0.9)), this.knockback, 479, null,
+              Math.max(1, Math.trunc(this.damage * 0.9)), this.knockback, 479,
               { pierce: 1, grav: 0 });
             sub.ai1Mirror = -1000;                                          // 子镖不再分裂
             ents4x.add(sub, 'projectiles');
@@ -6580,7 +6579,7 @@ export class Arrow extends Entity {
           if (this.life > 40) this.life -= 20;
           if (ents4x?.add) {
             ents4x.add(new Arrow(this.cx, this.cy, 0, 0,
-              Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.5, 480, null,
+              Math.max(1, Math.trunc(this.damage * 0.8)), this.knockback * 0.5, 480,
               { grav: 0 }), 'projectiles');
           }
         }
@@ -7661,17 +7660,18 @@ export class Arrow extends Entity {
           this.killNow(game);
           return;
         }
-        // 实心块：1/3 概率回收掉落。★终零波真值对账（2026-09-01）：原版 Projectile.Kill
-        // 的 !noDropItem 段（P.cs:79099-79360）只含 aiStyle10 放块族（num18 兜底件）、
-        // 736-738、绳圈 171/475/505/506、type12(dmg>500)/155/861——**箭族 1/2 等无任何
-        // NewItem**,Player.cs 亦无落地拾取链（全文件 RequestNewItem 清单核过）。
-        // 本掷系本仓自加机制=登记在案的旧约定 gameplay 偏离（域内不扩散,新入链件一律
-        // null——见 Game.THROWN_NO_RECOVERY_VIDS 注 + tests/orphan-b1.test.ts 对照
-        // "机制在位"契约钉）,维持不删;注释不再伪称"原版箭 Kill 的掉落"。
+        // 实心块：消亡,无回收。★SW-FX9（2026-09-10,裁决执行）：本仓旧 1/3 落地回收
+        // （rand<1/3 spawnDrop(dropKey)）整链摘除——原版 Projectile.Kill 全文对账:
+        // 箭族支 type==1/81/98/980/1073 仅 Sound 0+10×d7（P.cs:75447-75454）、
+        // 投掷支 3/48/54/599/909 仅 Sound 0+10×d1（P.cs:77221-77230）,均无任何
+        // Item.NewItem/RequestNewItem;!noDropItem 段（P.cs:79099-79360）只含
+        // aiStyle10 放块族（num18 兜底件）/985·965 砂球/3005·2996·3077-3080/
+        // 75 陨星/859/4743,Player.cs 全文件 RequestNewItem 清单亦无落地拾取链
+        // ——原版弹药【恒消耗】。旧 2026-09-01"维持不删"注退役,tests/orphan-b1
+        // "机制在位"对照钉同步退役（新钉=零回收,tests/sw-fx9-arrow-recovery）。
         // ★批 3 摘除(K 代理 HitTiles 全量化):撞块砖屑已由 Game.onProjectileDeath 的
         // hitTilesFx 真值单口承载（BULLET_KILL_SFX 支,几何 1:1+mapColor 尘）——此处
         // 4×d7 通用碎屑近似与真值双撒,退役（音面仍由 OPD BULLET_KILL_SFX 播,不变）
-        if (this.dropKey && !this.noDropItem && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
         this.killNow(game);
         return;
       }
@@ -8357,7 +8357,7 @@ export class Arrow extends Entity {
       const np = new Arrow(p.cx + Math.cos(a) * 14, p.cy - 4 + Math.sin(a) * 14,
         Math.cos(a) * this.pShootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
         Math.sin(a) * this.pShootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
-        this.damage, this.knockback, PIRANHA_PROJ, null,
+        this.damage, this.knockback, PIRANHA_PROJ,
         { grav: 0, life: PIRANHA_LIFE, piranha: this.piranha! });
       np.critChance = this.critChance;
       np.critBonus = this.critBonus;
@@ -8412,7 +8412,7 @@ export class Arrow extends Entity {
         return;                                   // 8/152 尾端不再链生
       }
       const child = new Arrow(this.x + this.vx + this.w / 2, this.y + this.vy + this.h / 2,
-        this.vx, this.vy, this.damage, this.knockback, childType, null,
+        this.vx, this.vy, this.damage, this.knockback, childType,
         { thornChainAi1: this.thornAi1 + 1 });
       child.critChance = this.critChance;
       child.critBonus = this.critBonus;

@@ -230,7 +230,9 @@ export class PhoenixChannel extends Entity {
       this.owner.ppPhoenixCounter = ctr;
     }
     // 出膛（:68372-68389）：速度 = 归一(velocity)×speed + randSquare(±spread)；
-    // 出生点 = vector34（载体中心≈玩家挂点）；noDropItem=true（Arrow dropKey=null 承载）
+    // 出生点 = vector34（载体中心≈玩家挂点）；noDropItem=true（:68371 逐矢原版置位,
+    // ★SW-FX9 2026-09-10 勘误:旧"Arrow dropKey=null 承载"注退役=回收链已摘,
+    // 原版弓系本就恒消耗）
     const vl = Math.hypot(this.vx, this.vy) || 1;
     for (let i = 0; i < shots; i++) {
       const fx = (this.vx / vl) * spd + (Math.random() * 2 - 1) * spread;

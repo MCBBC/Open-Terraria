@@ -95,7 +95,7 @@ describe('① Demon Scythe 加速曲线（AI_018 :25781-25798）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
     // 出生速 0.2（Item.cs:4564 shootSpeed=0.2f），水平向右
-    const a = new Arrow(80 * TILE, 100 * TILE, 0.2, 0, 35, 5, 45, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 0.2, 0, 35, 5, 45, {});
     expect(a.drawScale).toBeCloseTo(0.9, 5);                       // SetDefaults scale
     for (let t = 0; t < 29; t++) a.fixedUpdate(1 / 60, game);       // ai[0] 1..29 未加速
     expect(a.vx).toBeCloseTo(0.2, 6);
@@ -112,7 +112,7 @@ describe('① Demon Scythe 加速曲线（AI_018 :25781-25798）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
     const r0 = rec(game).dusts.length;
-    const a = new Arrow(80 * TILE, 100 * TILE, 1, 0, 35, 5, 45, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 1, 0, 35, 5, 45, {});
     a.fixedUpdate(1 / 60, game);
     expect(a.spinRot).toBeCloseTo(0.8, 5);
     const d45 = rec(game).dusts.slice(r0);
@@ -126,7 +126,7 @@ describe('② Water Bolt（AI_008 type 支 :24515-24577）', () => {
   it('timeLeft/=2 → 寿命 1800（SetDefaults :1104）；贴图隐形（alpha=255 缺省 GetAlpha）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const a = new Arrow(80 * TILE, 100 * TILE, 6, -2, 19, 5, 27, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 6, -2, 19, 5, 27, {});
     expect(a.life).toBe(1800);
     expect(a.alpha).toBe(255);
     // drawGlobalAlpha 私有——经 draw 断言隐形等价于 (255-alpha)/255 = 0
@@ -136,7 +136,7 @@ describe('② Water Bolt（AI_008 type 支 :24515-24577）', () => {
   it('每 update 5 点错位 d172 连续水痕（noGravity,scale1.2,alpha100）+ 1/5 小尘', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const a = new Arrow(80 * TILE, 100 * TILE, 6, 0, 19, 5, 27, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 6, 0, 19, 5, 27, {});
     const r0 = rec(game).dusts.length;
     a.fixedUpdate(1 / 60, game);
     const d27 = rec(game).dusts.slice(r0);
@@ -159,7 +159,7 @@ describe('② Water Bolt（AI_008 type 支 :24515-24577）', () => {
         death.hook(projId, ...rest);
       },
     });
-    const a = new Arrow(80 * TILE, 189 * TILE, 6, 0, 19, 5, 27, null, {});
+    const a = new Arrow(80 * TILE, 189 * TILE, 6, 0, 19, 5, 27, {});
     a.fixedUpdate(1 / 60, game);
     expect(a.spinRot).toBeCloseTo(0.3, 5);
     const r0 = rec(game).dusts.length;
@@ -179,7 +179,7 @@ describe('③ Aqua Scepter（aiStyle 12 type 22 支 :24835-24926）', () => {
   it('收缩 −0.01/AI update（extraUpdates=2 → 3 子步/帧）至 ≤0 Kill；重力弧线 vy+=0.15', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const a = new Arrow(80 * TILE, 100 * TILE, 12.5, 0, 27, 7, 22, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 12.5, 0, 27, 7, 22, {});
     expect(a.extraUpdates).toBe(2);
     expect(a.drawScale).toBeCloseTo(1, 6);
     let ticks = 0;
@@ -193,7 +193,7 @@ describe('③ Aqua Scepter（aiStyle 12 type 22 支 :24835-24926）', () => {
   it('ai[0]>3 后每子步 3×d172 六px 内缩错位拖尾（noGravity,scale1.2）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const a = new Arrow(80 * TILE, 100 * TILE, 12.5, 0, 27, 7, 22, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 12.5, 0, 27, 7, 22, {});
     for (let t = 0; t < 3; t++) a.fixedUpdate(1 / 60, game);        // ai[0] 1..9（3 帧×3 子步）
     const trail = rec(game).dusts.filter((d) => d.type === 172 && d.scale === 1.2);
     expect(trail.length).toBeGreaterThan(3);                        // ai[0]>3 起每子步 3 枚
@@ -213,7 +213,7 @@ describe('④ 宝石法珠三层视觉（AI_029 :38516-38692）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
     // 琥珀杖弹 597 → 尘 262
-    const a = new Arrow(80 * TILE, 100 * TILE, 8, 0, 12, 1, 597, null,
+    const a = new Arrow(80 * TILE, 100 * TILE, 8, 0, 12, 1, 597,
       { gem: { homing: true } });
     const r0 = rec(game).dusts.length;
     for (let t = 0; t < 60; t++) a.fixedUpdate(1 / 60, game);
@@ -231,7 +231,7 @@ describe('⑤ 荆棘链段系统（aiStyle 4 :23943-24080）', () => {
     const game = makeGame(w, [], {
       entities: { nextId: 1, add: (e: unknown) => added.push(e as Arrow), projectiles: [] },
     });
-    const root = new Arrow(80 * TILE, 100 * TILE, 32, 0, 10, 1, 7, null, {});
+    const root = new Arrow(80 * TILE, 100 * TILE, 32, 0, 10, 1, 7, {});
     expect(root.thornChain).toBe(true);
     const x0 = root.x;
     for (let t = 0; t < 5; t++) root.fixedUpdate(1 / 60, game);     // alpha 255→5 渐显期
@@ -256,7 +256,7 @@ describe('⑤ 荆棘链段系统（aiStyle 4 :23943-24080）', () => {
   it('出生音 Item_8 仅首发段播一次（localAI[0]/ai[1]==0 门）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const root = new Arrow(80 * TILE, 100 * TILE, 32, 0, 10, 1, 7, null, {});
+    const root = new Arrow(80 * TILE, 100 * TILE, 32, 0, 10, 1, 7, {});
     root.fixedUpdate(1 / 60, game);
     expect(rec(game).sfx.filter((s) => s.includes('Item_8')).length).toBe(1);
     root.fixedUpdate(1 / 60, game);
@@ -270,12 +270,12 @@ describe('⑤ 荆棘链段系统（aiStyle 4 :23943-24080）', () => {
       entities: { nextId: 1, add: (e: unknown) => added.push(e as Arrow), projectiles: [] },
     });
     // 链生段直接以 thornChainAi1 注入（Game 发射的是 150 首发）
-    const seg = new Arrow(80 * TILE, 100 * TILE, 32, 0, 35, 1, 150, null, {});
+    const seg = new Arrow(80 * TILE, 100 * TILE, 32, 0, 35, 1, 150, {});
     expect(seg.alpha).toBe(255);
     seg.fixedUpdate(1 / 60, game);
     expect(seg.alpha).toBe(180);                                    // 255−75
     // 尾端判定：151 段 ai1>=10 → 子段 152
-    const tipParent = new Arrow(80 * TILE, 110 * TILE, 32, 0, 35, 1, 151, null,
+    const tipParent = new Arrow(80 * TILE, 110 * TILE, 32, 0, 35, 1, 151,
       { thornChainAi1: 10 });
     for (let t = 0; t < 5; t++) tipParent.fixedUpdate(1 / 60, game);   // 渐显 255→0（ceil(255/75)=4 步）
     expect(tipParent.dead).toBe(false);
@@ -358,7 +358,7 @@ describe('⑧ Zapinator 命中侧随机化（Damage_PVE :12691-12777）', () => 
   it('每次命中伤 ×0.9（int 截断）/kb ×0.9 必然生效；速度基线 ×0.6（1/50、1/10 档独立掷）', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const a = new Arrow(80 * TILE, 100 * TILE, 15, 0, 42, 6, 876, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 15, 0, 42, 6, 876, {});
     expect(a.alpha).toBe(255);
     expect(a.extraUpdates).toBe(3);
     (a as unknown as { zapinatorHitChaos(g: GameHooks): void }).zapinatorHitChaos(game);
@@ -371,7 +371,7 @@ describe('⑧ Zapinator 命中侧随机化（Damage_PVE :12691-12777）', () => 
     // 统计：200 次重掷中伤 ×0.9 恒成立（×10 为稀有档），速度落在基线带内占绝对多数
     let baseBand = 0;
     for (let i = 0; i < 200; i++) {
-      const b = new Arrow(80 * TILE, 100 * TILE, 20, 0, 42, 6, 876, null, {});
+      const b = new Arrow(80 * TILE, 100 * TILE, 20, 0, 42, 6, 876, {});
       (b as unknown as { zapinatorHitChaos(g: GameHooks): void }).zapinatorHitChaos(game);
       if (Math.abs(b.knockback - 3.6) < 1e-6 || Math.abs(b.knockback - 36) < 1e-6) {
         expect(b.damage === 37 || b.damage === 370).toBe(true);
@@ -385,7 +385,7 @@ describe('⑧ Zapinator 命中侧随机化（Damage_PVE :12691-12777）', () => 
   it('alpha −10/AI update 渐显（extraUpdates=3 → −40/帧）；GetAlpha 白加算档 ≥200 透明', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const a = new Arrow(80 * TILE, 100 * TILE, 15, 0, 42, 6, 876, null, {});
+    const a = new Arrow(80 * TILE, 100 * TILE, 15, 0, 42, 6, 876, {});
     expect((a as unknown as { drawGlobalAlpha(): number | null }).drawGlobalAlpha()).toBe(0);
     for (let t = 0; t < 6; t++) a.fixedUpdate(1 / 60, game);
     expect(a.alpha).toBe(15);                                       // 255−6帧×4子步×10

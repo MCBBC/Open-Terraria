@@ -97,7 +97,7 @@ describe('泰拉刃光束 985（aiStyle 191，terra 模式）', () => {
     const w = new World(200, 200, 30, 'open');   // 全空世界（无地面干扰）
     const projectiles: unknown[] = [];
     const game = makeGame(w, [], projectiles);
-    const beam = new Arrow(50 * TILE, 80 * TILE, 12, 0, 85, 6.5, 985, null,
+    const beam = new Arrow(50 * TILE, 80 * TILE, 12, 0, 85, 6.5, 985,
       { grav: 0, life: 90, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     const sp0 = Math.hypot(beam.vx, beam.vy);
     beam.fixedUpdate(1, game);
@@ -115,12 +115,12 @@ describe('泰拉刃光束 985（aiStyle 191，terra 模式）', () => {
     const w = new World(200, 200, 30, 'open');
     for (let y = 0; y < 200; y++) w.store.setTileSilent(57, y, 1, 0, 0);   // 正前方墙列（x=57=912px）
     const game = makeGame(w, [], []);
-    const beam = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985, null,
+    const beam = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985,
       { grav: 0, life: 90, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     // 探测窗 110px 沿速度方向（水平）：cx 804+110=914 → 越过 912px 墙列
     for (let t = 0; t < 3 && !beam.terraWall; t++) beam.fixedUpdate(1, game);
     expect(beam.terraWall).toBe(true);                   // 视线探测命中墙 → localAI[1]=1
-    const open = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985, null,
+    const open = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985,
       { grav: 0, life: 90, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     const game2 = makeGame(new World(200, 200, 30, 'open'), [], []);
     for (let t = 0; t < 4; t++) open.fixedUpdate(1, game2);
@@ -136,7 +136,7 @@ describe('星怒 3065 → 弹 503（Arrow star 模式）', () => {
     const projectiles: unknown[] = [];
     const game = makeGame(w, [], projectiles);
     // 目标线 y=120*16=1920（墙在 1280——属线上方穿墙区）
-    const sword = new Arrow(50 * TILE, 60 * TILE, 4, 8, 170, 6.5, 503, null,
+    const sword = new Arrow(50 * TILE, 60 * TILE, 4, 8, 170, 6.5, 503,
       { grav: 0, life: 900, pierce: 2, star: { targetY: 120 * TILE } });
     sword.fixedUpdate(1, game);
     expect(sword.starAlpha).toBe(225);                    // 255−15×2（503 extraUpdates=1 → 2 子步/帧,SetDefaults）
@@ -153,7 +153,7 @@ describe('星怒 3065 → 弹 503（Arrow star 模式）', () => {
   it('alpha 线上钳 150（半显上限）', () => {
     const w = new World(200, 200, 30, 'open');
     const game = makeGame(w, [], []);
-    const sword = new Arrow(50 * TILE, 60 * TILE, 0, 8, 170, 6.5, 503, null,
+    const sword = new Arrow(50 * TILE, 60 * TILE, 0, 8, 170, 6.5, 503,
       { grav: 0, life: 900, pierce: 2, star: { targetY: 120 * TILE } });
     for (let t = 0; t < 30; t++) sword.fixedUpdate(1, game);
     expect(sword.starAlpha).toBe(150);                    // 线上方钳 150（:22197-22202）

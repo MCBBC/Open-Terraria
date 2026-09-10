@@ -33,6 +33,11 @@ export function gridHitRect(): { x: number; y: number; w: number; h: number } {
 // ---- 标题/热键锁(Main.cs:41725 Lang.inter[4] @(40,0);43205 HbLock @(0,21)) ----
 export const TITLE_XY = { x: 40, y: 0 } as const;
 export const HOTBAR_LOCK_XY = { x: 0, y: 21 } as const;
+/** 热键锁 y(Main.cs:43205-43208:pushSideToolsUp(.builderAcc 可见图标≥10=恶魔心+大师
+ *  槽齐显) → (0,0),否则 (0,21)。push 判据经 ctx.visibleRows≥10 同义) */
+export function hotbarLockXY(pushSideToolsUp: boolean): { x: number; y: number } {
+  return pushSideToolsUp ? { x: 0, y: 0 } : HOTBAR_LOCK_XY;
+}
 
 // ---- 成就 Advisor(Main.cs:41758-41763 @(501,25) large) ----
 export const ADVISOR_XY = { x: 501, y: 25 } as const;
@@ -144,6 +149,30 @@ export function miscRowY(num20: number, m: number): number {
 /** 杂项开关勾选框(Main.cs:41934-41935 @(槽左+34, 顶-2)) */
 export function miscCheckXY(slotXY: { x: number; y: number }): { x: number; y: number } {
   return { x: slotXY.x + 34, y: slotXY.y - 2 };
+}
+
+// ---- 杂项页 buff 列(SW-FX10 债④清偿;Main.cs:42008-42046 EquipPage==2 尾段) ----
+//   首列 x = sw-84(num23=杂项列 sw-92 → +=8 :42008),y = num20+247(num24 += 247 :42008);
+//   第 col 列向【左】步进 46(px = num32*-46 :42040),行向下步进 46(num31=46 :42026)
+export const MISC_BUFF_X = (sw: number): number => sw - 84;
+export const MISC_BUFF_Y_OFF = 247;
+export const MISC_BUFF_STEP = 46;
+/** 每列行数(Main.cs:42014-42024:num29=3 起底,sh>630/680/730 + 260×(mapStyle==1) 各 +1;
+ *  260 = num30,小地图(mapStyle 1)开时装备区被 mH=256 上推 → 阈值同步抬) */
+export function miscBuffRowsPerCol(sh: number, minimapStyle1: boolean): number {
+  const t = 260 * (minimapStyle1 ? 1 : 0);
+  let rows = 3;
+  if (sh > 630 + t) rows++;
+  if (sh > 680 + t) rows++;
+  if (sh > 730 + t) rows++;
+  return rows;
+}
+/** 第 n 个 buff 的格坐标(Main.cs:42038-42040:num32=n/rows=列,num33=n%rows=行)。
+ *  x 用 `0 - col*step` 形式——`-col*step` 在 col=0 时产出 -0,Object.is 语义异物 */
+export function miscBuffCellXY(n: number, rowsPerCol: number): { x: number; y: number } {
+  const col = Math.floor(n / rowsPerCol);
+  const row = n % rowsPerCol;
+  return { x: 0 - col * MISC_BUFF_STEP, y: row * MISC_BUFF_STEP };
 }
 
 // ---- 住房页(EquipPage==1 DrawNPCHousesInUI Main.cs:42709-42822) ----

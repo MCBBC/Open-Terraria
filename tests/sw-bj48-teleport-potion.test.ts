@@ -29,6 +29,8 @@ import { World } from '../src/world/World';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 import { TileStore, LIQUID_TYPE } from '../src/world/TileStore';
 import { TILE } from '../src/core/constants';
+import { ITEM_DEFS } from '../src/data/items';
+import { Player } from '../src/entities/Player';
 import { VanillaDust } from '../src/fx/VanillaDust';
 import { solidCollisionPx, lavaCollisionPx, checkForGoodTeleportationSpot } from '../src/world/gen/vanilla/TeleportSpotCheck';
 import { seededRandom } from './seeded-rng';
@@ -39,12 +41,12 @@ import { seededRandom } from './seeded-rng';
 type Stub = {
   g: any;
   sfxLog: string[];
-  state: { removed: number; grapplesCleared: number; particles: number };
+  state: { removed: number; grapplesCleared: number; particles: number; uwScans: number };
 };
 
 function stubGame(world: World, playerPos = { x: 100 * TILE, y: 120 * TILE }): Stub {
   const g = Object.create(Game.prototype) as any;
-  const state = { removed: 0, grapplesCleared: 0, particles: 0 };
+  const state = { removed: 0, grapplesCleared: 0, particles: 0, uwScans: 0 };
   g.world = world;
   g.player = {
     x: playerPos.x, y: playerPos.y, vx: 3, vy: 0, w: 20, h: 42,
@@ -52,6 +54,8 @@ function stubGame(world: World, playerPos = { x: 100 * TILE, y: 120 * TILE }): S
     cx: playerPos.x + 10, cy: playerPos.y + 21,
     inv: { removeHeld: (n: number) => { state.removed += n; } },
     removeAllGrapplingHooks: () => { state.grapplesCleared++; },
+    // ★SW-RB10a：fireRecallTeleport 尾接 DoUnbreakableWallScan（Teleport :37733）
+    updateUnbreakableWallScan: () => { state.uwScans++; },
     equipStats: { fireWalk: false },
     buffs: null,
   };
@@ -177,6 +181,14 @@ describe('SW-BJ48 传送药水 2351 随机落点（Player.cs:56922/Utils.cs:518 
     const act = dust['pool'].filter((d: { active: boolean }) => d.active);
     const d58 = act.filter((d: { type: number }) => d.type === 58);
     expect(d58.length, 'TeleportEffect style2 = 50×2 份尘 58').toBe(100);
+    // ★SW-RB10a：色面=Color.GhostWhite(248,248,255,255) 0-255 域 + dust.alpha=150
+    //  （Dust.cs NewDust(…,58,0,0,150,Color.GhostWhite,1.2f) 双参分立——58 型 GetColor
+    //  着色面只认 color 域,alpha 是 dust.alpha 数据位）
+    expect(d58[0].color, 'style2 色=GhostWhite 0-255 域').toEqual({ r: 248, g: 248, b: 255, a: 255 });
+    expect(d58[0].alpha, 'dust.alpha=150（NewDust α 参）').toBe(150);
+    expect(d58[0].scale, 'scale≈1.2×NewDust 抖（0.8..1.2 档）').toBeGreaterThanOrEqual(0.9);
+    expect(d58[0].scale).toBeLessThanOrEqual(1.5);
+    expect(r1.state.uwScans, 'DoUnbreakableWallScan 落点即扫（Teleport :37733）').toBeGreaterThan(0);
     const ax1 = (p1.x + 2) / 16, ay1 = (p1.y + 42) / 16;
     expect(ay1, '2351 落地板（非出生点面）').toBe(150);
     expect([Math.trunc(ax1), Math.trunc(ay1)]).not.toEqual([150, 150]);   // 非出生柱（150 出生柱被 OLD 占据语义）
@@ -223,6 +235,81 @@ describe('SW-BJ48 传送药水 2351 随机落点（Player.cs:56922/Utils.cs:518 
       // Y 掷：Next(rect.Top=100, rect.Bottom+1)——Bottom=100+(h-200)+1=h-99 → 上参 h-98
       expect(calls[i + 1]).toEqual([100, st.h - 98]);
     }
+  });
+
+  it('★SW-RB10a 触发环 1:1（itemTime==2 等值拍 + item.type 身份门）：换栏后触发拍不响不消耗、过窗清道', () => {
+    // vanilla：`if (item.type == 2351 && itemAnimation > 0) … else if (itemTime == 2)
+    //   { TeleportationPotion(); …; item.stack--; }`（:43502-43520）——item=inventory
+    //   [selectedItem] 触发拍现值。中途换栏后 item.type≠2351 → 该拍不响不消耗。
+    const w = new World(300, 240, 7, 'bj48-syn4');
+    w.groundLevel = 128;
+    const potionId = ITEM_DEFS.findIndex((d: { key?: string }) => !!d.key?.startsWith('vi_2351_'));
+    expect(potionId, 'vi_2351 注册在案').toBeGreaterThan(0);
+    const otherId = ITEM_DEFS.findIndex((d: { key?: string }) => !!d.key && !d.key.startsWith('vi_2351_') && !!d.key.startsWith('vi_'));
+    // ①触发拍 + 持物=2351 → fire
+    const a = stubGame(w);
+    const firedA: unknown[] = [];
+    a.g.fireRecallTeleport = (c: unknown) => firedA.push(c);
+    a.g.player.inv.heldItem = () => ({ id: potionId });
+    a.g.recallChannel = { vid: 2351, kind: 'random', triggerAt: 2, consume: true };
+    a.g.player.useTime = 2;
+    (a.g as unknown as { tickRecallChannel(): void }).tickRecallChannel();
+    expect(firedA.length, '等值拍+身份匹配=fire（:43508）').toBe(1);
+    expect(a.g.recallChannel, 'fire 即清道').toBeNull();
+    // ②触发拍但持物已换 → 不 fire 不消耗（OLD=照传+错物 removeHeld）
+    const b = stubGame(w);
+    const firedB: unknown[] = [];
+    b.g.fireRecallTeleport = (c: unknown) => firedB.push(c);
+    b.g.player.inv.heldItem = () => ({ id: otherId });
+    b.g.recallChannel = { vid: 2351, kind: 'random', triggerAt: 2, consume: true };
+    b.g.player.useTime = 2;
+    (b.g as unknown as { tickRecallChannel(): void }).tickRecallChannel();
+    expect(firedB.length, '身份门：换栏拍不 fire（item.type==X 现值判,Player.cs:43502）').toBe(0);
+    expect(b.state.removed, '不消耗（stack-- 与 TeleportationPotion 同块,不触发即不扣）').toBe(0);
+    b.g.player.useTime = 1;                       // 拍已滑过
+    (b.g as unknown as { tickRecallChannel(): void }).tickRecallChannel();
+    expect(b.g.recallChannel, '过窗清道（原版该拍一过即死）').toBeNull();
+    // ③OLD 判别：useTime=1(≤2) 旧语义会立即 fire → 新=过窗不响
+    const c2 = stubGame(w);
+    const firedC: unknown[] = [];
+    c2.g.fireRecallTeleport = (x: unknown) => firedC.push(x);
+    c2.g.player.inv.heldItem = () => ({ id: potionId });
+    c2.g.recallChannel = { vid: 2351, kind: 'random', triggerAt: 2, consume: true };
+    c2.g.player.useTime = 1;
+    (c2.g as unknown as { tickRecallChannel(): void }).tickRecallChannel();
+    expect(firedC.length, 'OLD(≤) 会 fire=红；新(==)过窗不响').toBe(0);
+  });
+
+  it('★SW-RB10a updateUnbreakableWallScan 门=Main.dualDungeonsSeed（DoUnbreakableWallScan :28826-28829）', () => {
+    // vanilla 门=SecretSeed.dualDungeons（"double daring dangers"）;zenith 依赖七件套
+    // （WorldSeedOption_Everything.Dependencies）不含 dualDungeons。旧刀挂 everything=
+    // ddual 世界扫描整死。变异判别：同墙 pocket 下 ddual=true → 扫描置位;
+    // everything-only → 门早退恒 false（OLD 会置位=红）。
+    const mkWorld = (flags: Record<string, boolean>): World => {
+      const w = new World(200, 400, 42, 'bj48-uw');
+      (w as unknown as { seedFlags: Record<string, boolean> }).seedFlags = flags;
+      const st = w.store;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (!dx && !dy) continue;
+          st.setWall(100 + dx, 100 + dy, 350);
+          st.paintWall[st.idx(100 + dx, 100 + dy)] = 20;   // wallColor()>=16（UnbreakableWallScan.cs:66）
+        }
+      }
+      return w;
+    };
+    // 直调 Player.prototype.updateUnbreakableWallScan（this 注入,免全 Player 装配）
+    const proto = (Player as unknown as { prototype: { updateUnbreakableWallScan: (this: unknown, w: World, force?: boolean) => void } }).prototype;
+    const runScan = (flags: Record<string, boolean>): boolean => {
+      const w = mkWorld(flags);
+      const fake = { insideUnbreakableWalls: false, cx: 100 * TILE + 10, cy: 100 * TILE + 21,
+        uwScanCd: 0, uwScanX: 0, uwScanY: 0 };
+      proto.updateUnbreakableWallScan.call(fake, w, true);
+      return fake.insideUnbreakableWalls;
+    };
+    expect(runScan({ dualDungeons: true }), 'ddual 世界：8 向墙 350 pocket → 置位（vanilla 扫描实跑）').toBe(true);
+    expect(runScan({ everything: true }), 'zenith-only：门早退恒 false（OLD=置位,红）').toBe(false);
+    expect(runScan({}), '普通世界恒 false').toBe(false);
   });
 
   it('路由 tripwire：Game.ts 2351→random 接线在位（防并行会话整文件回写回归）', () => {

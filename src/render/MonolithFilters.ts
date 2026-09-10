@@ -408,8 +408,19 @@ export interface MonolithEnv {
   moonLordCore?: { x: number; y: number } | null;
   /** 主玩星旋世界种旗（Main.onlyDontStarveWorld；引擎恒 false，保留字段对齐 :125 的 XOR） */
   onlyDontStarveWorld?: boolean;
-  /** 玩家微光浸没（SceneState.cs:331 的 shimmering && UndergroundForShimmering 项） */
+  /** SceneMetrics.ZoneShimmer（SceneMetrics.cs:712 = EnoughTilesForShimmer &&
+   *  UndergroundForShimmering && !ZoneDungeon——微光液 ≥300 格的完整判定链）。
+   *  ★SW-RB10e 2026-09-10 勘误：旧注「本位=SceneState.cs:331 的 shimmering &&
+   *  UndergroundForShimmering 项」系口径错位——:331 的该项与 ZoneShimmer 是
+   *  两个独立析取项，本位只承载后者；前者由下方 shimmerSubmerged 承载 */
   zoneShimmer?: boolean;
+  /** ★SW-RB10e：SceneState.cs:331 析取项「PerspectivePlayer.shimmering &&
+   *  UndergroundForShimmering」（buff 353 微光化中 + 深度带内）——小体量人工微光池
+   *  （<300 格阈）浸没时 ZoneShimmer=false 但本项=true，原版照样升
+   *  shimmerAlpha（SceneState.cs:331 析取链）。Renderer 喂 player.shimmering &&
+   *  scene.undergroundForShimmering。:331 尚余 shimmerMonolithShader 项（时装位
+   *  5347 微光独石,Player.ApplyShader :14371）——物品未入仓无载体,登记 */
+  shimmerSubmerged?: boolean;
   /** Main.GraveyardVisualIntensity（SceneState.cs:415-418 平滑后的墓地视觉强度 0-1；
    *  Game.updateWeather 每帧写入 world.weather.graveyardVisual，Renderer 注入） */
   graveyardIntensity?: number;
@@ -565,7 +576,12 @@ export class MonolithFilters {
     }
 
     // 微光三态（SceneState.cs:328-345）：state 1 → 开；state 2 显式关（压掉其它微光源）
-    let flag = scan.shimmerMonolithState === 1 || !!env.zoneShimmer;      // :331
+    // ★SW-RB10e：:331 四项析取补全——此前只接 MonolithState==1 ∨ ZoneShimmer 两项，
+    //  漏「player.shimmering && UndergroundForShimmering」（buff 353 浸没+深度带,
+    //  小微光池 <300 格阈时 ZoneShimmer=false 而原版仍升 α 的整条臂）与
+    //  shimmerMonolithShader（时装位 5347,物品未入仓无载体→恒 false,登记）
+    let flag = scan.shimmerMonolithState === 1 || !!env.zoneShimmer
+      || !!env.shimmerSubmerged;                     // :331
     if (scan.shimmerMonolithState === 2) flag = false;                    // :332-334
     // 原版按 tick 计（60Hz）：0.025/0.05 每步 → 每秒 ×60
     if (flag) {

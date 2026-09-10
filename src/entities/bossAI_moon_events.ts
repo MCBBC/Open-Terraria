@@ -103,7 +103,7 @@ function shootE(
   dmg: number, projId: number, life?: number,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, {
+    new Arrow(x, y, vx, vy, dmg, 0, projId, {
       grav: PROJ_GRAV[projId] ?? 0,
       gravDelay: PROJ_GRAV_DELAY[projId] ?? -1,
       life: life ?? PROJ_LIFE[projId] ?? 3600,
@@ -471,7 +471,7 @@ export function pumpkingBladeAI(e: Enemy, game: GameHooks, player: Player | null
       const d = Math.max(1, Math.hypot(dx, dy));
       const k = 0.01 / d;
       (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-        new Arrow(e.cx, e.cy, dx * k, dy * k, 60, 0, 329, null, {
+        new Arrow(e.cx, e.cy, dx * k, dy * k, 60, 0, 329, {
           grav: 0, life: 420, pierce: 1, hostile: true,
           scythe: { rot0: e.visAngle, flipDir: -e.facing },   // :33440 ai0=rotation/ai1=spriteDirection
         }), 'projectiles');

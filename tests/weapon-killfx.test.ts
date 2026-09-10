@@ -127,7 +127,7 @@ const hitHooks = (enemies: unknown[]): GameHooks => {
 const hitOnce = (projId: number, vanillaId: number | null, dmg = 30): number[] => {
   const taken: number[] = [];
   const foe = mkFoe(vanillaId, taken);
-  const a = new Arrow(1600, 1600, 5, 0, dmg, 1, projId, null, {});
+  const a = new Arrow(1600, 1600, 5, 0, dmg, 1, projId, {});
   a.critChance = -1;   // truthy → Math.random() < -1 恒 false（确定性不暴击）
   (a as unknown as { subStep: (g: GameHooks) => void }).subStep(hitHooks([foe]));
   return taken;

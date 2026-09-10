@@ -55,6 +55,7 @@ export type SfxName =
   | 'gunHandgun'   // SoundID.Item41 手枪族 164/219/1255/1929/2269/2270
   | 'record'      // SoundID.Item166（八音盒录音完成，Player.cs:15054）
   | 'mirror'      // SoundID.Item6（魔镜族 UseSound：Magic/Ice Mirror/Cell Phone/Shellphone :42297 族）
+  | 'item8'       // SoundID.Item8（TeleportEffect style 7 恶魔海螺落点音,Main.cs:13542;★SW-RB10a 补）
   | 'bombFuse'    // SoundID.BombFuse = CreateTrackable("fuse")（SoundID.cs:1153，引信嘶声循环 0.2 音量）
   | 'conch'       // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
   | 'dd2PortalLoop'   // DD2_EtherianPortalIdleLoop（SoundID.cs:984 无 WithVolume→基量 1;
@@ -164,6 +165,7 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   gunHandgun: ['Item_41'],
   record: ['Item_166'],
   mirror: ['Item_6'],
+  item8: ['Item_8'],   // ★SW-RB10a：TeleportEffect case 7（恶魔海螺/地狱款贝壳手机落点）
   bombFuse: ['Fuse'],   // Content/Sounds/Custom/fuse.xnb → Fuse.wav（自提取，1.42s 循环）
   conch: ['Item_64'],
   // ---- DD2 跟踪循环轨（Sounds/Custom 提取拍平；startTrackedLoop 距离衰减+声像通道）----
@@ -1345,6 +1347,7 @@ export class Sfx {
       case 'drown': osc('sine', 400, 90, 0.4, 0.1); break;
       case 'mirror': osc('sine', 700, 1900, 0.3, 0.06); osc('sine', 1400, 2800, 0.25, 0.04, 0.1); break;   // 魔镜闪烁上行
       case 'conch': osc('sine', 220, 330, 0.25, 0.08); osc('sine', 330, 440, 0.3, 0.06, 0.2); break;        // 海螺低鸣
+      case 'item8': osc('sine', 180, 620, 0.28, 0.07); break;   // ★SW-RB10a：Item8 传送嗖声合成兜底
     }
   }
 }

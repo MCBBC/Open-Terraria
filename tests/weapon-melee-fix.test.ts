@@ -123,7 +123,7 @@ describe('② 泰拉刃 985 光束', () => {
   it('初速 60 → >8 减速分支激活（AI_191 :39362 velocity×0.94/t，探墙前无额外阻尼）', () => {
     const { hooks } = makeGame(new World(120, 120, 30, 'open'));
     vi.spyOn(Math, 'random').mockReturnValue(0.999);   // 避开尘/粒子随机分支
-    const beam = new Arrow(60 * TILE, 60 * TILE, 60, 0, 100, 3, 985, null,
+    const beam = new Arrow(60 * TILE, 60 * TILE, 60, 0, 100, 3, 985,
       { grav: 0, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     beam.fixedUpdate(1, hooks);
     expect(beam.vx).toBeCloseTo(60 * 0.94, 6);         // ×0.94 恰一次（空世界探墙恒通）
@@ -136,7 +136,7 @@ describe('② 泰拉刃 985 光束', () => {
     const e = mkEnemy(60 * TILE + 8, 60 * TILE + 8, 200, 200);
     (hooks as unknown as { enemies: () => unknown[] }).enemies = () => [e];
     vi.spyOn(Math, 'random').mockReturnValue(0.999);   // 无暴击（critChance 0.04）
-    const beam = new Arrow(e.x + 100, e.y + 100, 60, 0, 100, 3, 985, null,
+    const beam = new Arrow(e.x + 100, e.y + 100, 60, 0, 100, 3, 985,
       { grav: 0, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     beam.fixedUpdate(1, hooks);
     expect(e.hits).toEqual([75]);                      // 100 ×0.75（(int) 截断）
@@ -147,7 +147,7 @@ describe('② 泰拉刃 985 光束', () => {
     const e = mkEnemy(60 * TILE + 8, 60 * TILE + 8, 200, 200);
     (hooks as unknown as { enemies: () => unknown[] }).enemies = () => [e];
     vi.spyOn(Math, 'random').mockReturnValue(0.999);
-    const bolt = new Arrow(e.x + 100, e.y + 100, 8, 0, 100, 3, 14, null, { grav: 0, life: 600, pierce: 1 });
+    const bolt = new Arrow(e.x + 100, e.y + 100, 8, 0, 100, 3, 14, { grav: 0, life: 600, pierce: 1 });
     bolt.fixedUpdate(1, hooks);
     expect(e.hits).toEqual([100]);
   });

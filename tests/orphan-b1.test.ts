@@ -28,7 +28,7 @@ import { GorePiece } from '../src/entities/GorePiece';
 import { projectileData } from '../src/data/vanillaProjectiles';
 import { BuffType } from '../src/stats/Buffs';
 import { LuckState } from '../src/stats/Luck';
-import { Game, THROWN_NO_RECOVERY_VIDS } from '../src/core/Game';
+import { Game } from '../src/core/Game';
 import { LIQUID_TYPE } from '../src/world/TileStore';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
@@ -37,6 +37,7 @@ import { invIndexOfVanilla } from '../src/data/vanillaRecipes';
 import { Player } from '../src/entities/Player';
 import { Enemy } from '../src/entities/Enemy';
 import { Inventory } from '../src/items/Inventory';
+import { projShimmerStep } from '../src/entities/projWetSection';
 import type { GameHooks } from '../src/entities/types';
 
 const CX = 800;
@@ -129,7 +130,7 @@ it('数据面：370/371/936 均 aiStyle2 抛物线 penetrate1；183 为 aiStyle1
 describe('① 蜜雷锋 Kill 爆裂蜂群（P.cs:78086-78122）', () => {
   function burst(game: GameHooks, added: Array<{ entity: unknown; bucket: string }>): Arrow[] {
     const before = added.length;
-    kill(new Arrow(790, 380, 3, 4, 12, 1, 183, null, {}), game);
+    kill(new Arrow(790, 380, 3, 4, 12, 1, 183, {}), game);
     return added.slice(before)
       .filter((r) => r.bucket === 'projectiles')
       .map((r) => r.entity as Arrow);
@@ -188,7 +189,7 @@ describe('① 蜜雷锋 Kill 爆裂蜂群（P.cs:78086-78122）', () => {
       return g;
     }) as typeof GorePiece.newGore);
     const { game, sfxFiles, dusts } = mkGame();
-    kill(new Arrow(700, 700, 0, 0, 12, 1, 183, null, {}), game);
+    kill(new Arrow(700, 700, 0, 0, 12, 1, 183, {}), game);
     expect(sfxFiles.filter((f) => f === 'Item_14').length).toBe(1);
     const d31 = dusts.filter((d) => d.type === 31);
     expect(d31.length).toBe(20);
@@ -228,7 +229,7 @@ describe('① 蜜雷锋 Kill 爆裂蜂群（P.cs:78086-78122）', () => {
     for (let round = 0; round < 40; round++) {
       const before = out.length;
       const { game } = mkGame();
-      kill(new Arrow(500, 500, 2, -1, 12, 1, 183, null, {}), game);
+      kill(new Arrow(500, 500, 2, -1, 12, 1, 183, {}), game);
       void game;
       const burstVys = out.slice(before).map((g) => g.vy);
       expect(burstVys.length).toBe(4);
@@ -241,7 +242,7 @@ describe('① 蜜雷锋 Kill 爆裂蜂群（P.cs:78086-78122）', () => {
 
   it('hostile 弹不分裂蜂群（owner==Main.myPlayer 门近似）但仍出音/尘', () => {
     const { game, added, dusts } = mkGame();
-    const h = new Arrow(700, 700, 0, 0, 12, 1, 183, null, {});
+    const h = new Arrow(700, 700, 0, 0, 12, 1, 183, {});
     (h as unknown as { hostile: boolean }).hostile = true;
     kill(h, game);
     expect(added.filter((r) => r.bucket === 'projectiles').length).toBe(0);
@@ -255,7 +256,7 @@ describe('① 蜜雷锋 Kill 爆裂蜂群（P.cs:78086-78122）', () => {
 describe('② 爱情药水弹 370 Kill（P.cs:78889-78902）', () => {
   it('圈内玩家/城镇 NPC/敌怪/小动物各得 Lovestruck 30s；圈外/死亡/life 豁免', () => {
     const { game, playerBuffs, enemies, npcs, critters } = mkGame();
-    kill(new Arrow(CX - 7, CY - 11, 2, 3, 1, 0, 370, null, {}), game);
+    kill(new Arrow(CX - 7, CY - 11, 2, 3, 1, 0, 370, {}), game);
     // 玩家 Center≈弹心 <80px；1800t/60 = 30s
     expect(playerBuffs.some(([t, s]) => t === BuffType.Lovestruck && Math.abs(s - 30) < 1e-9))
       .toBe(true);
@@ -272,7 +273,7 @@ describe('② 爱情药水弹 370 Kill（P.cs:78889-78902）', () => {
     const goreSpy = vi.spyOn(GorePiece, 'newGore');
     const { game, sfxFiles, dusts } = mkGame();
     // 弹盒 14×14 → 消亡中心 = (CX-7)+7, (CY-11)+7 = (CX, CY)
-    kill(new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 370, null, {}), game);
+    kill(new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 370, {}), game);
     expect(sfxFiles.includes('Item_4')).toBe(true);
     expect(dusts.filter((d) => d.type === 13).length).toBe(5);
     const hearts = goreSpy.mock.calls.filter(([id]) => id === 331);
@@ -291,7 +292,7 @@ describe('② 爱情药水弹 370 Kill（P.cs:78889-78902）', () => {
 
   it('hostile 弹只出视听不施光环（owner==myPlayer 门近似）', () => {
     const { game, playerBuffs, enemies } = mkGame();
-    const h = new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 370, null, {});
+    const h = new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 370, {});
     (h as unknown as { hostile: boolean }).hostile = true;
     kill(h, game);
     expect(playerBuffs.length).toBe(0);
@@ -308,7 +309,7 @@ describe('②b 恶臭药水弹 371 Kill（P.cs:78903-78918）', () => {
     () => {
       const goreSpy = vi.spyOn(GorePiece, 'newGore');
       const { game, sfxFiles, sfxNames, playerBuffs, enemies, dusts } = mkGame();
-      kill(new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 371, null, {}), game);
+      kill(new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 371, {}), game);
       expect(sfxNames.includes('shatter')).toBe(true);         // legacy PlaySound(13)
       expect(sfxFiles.includes('Item_16')).toBe(true);
       expect(playerBuffs.some(([t, s]) => t === BuffType.Stinky && s === 30)).toBe(true);
@@ -331,7 +332,7 @@ describe('③ 微光气球弹 936 Kill（P.cs:78919-78962）', () => {
   it('圈内玩家得 GelBalloonBuff(320) 30s；敌怪/NPC 侧 gelBalloonT 计时（源码同循环）',
     () => {
       const { game, playerBuffs, enemies, npcs, critters } = mkGame();
-      kill(new Arrow(CX - 7, CY - 11, 0, 2, 1, 0, 936, null, {}), game); // Kill 单口已无解锁段（B1-X3 后任何消亡均不触发）
+      kill(new Arrow(CX - 7, CY - 11, 0, 2, 1, 0, 936, {}), game); // Kill 单口已无解锁段（B1-X3 后任何消亡均不触发）
       expect(playerBuffs.some(([t, s]) => t === BuffType.GelBalloonBuff && s === 30))
         .toBe(true);
       expect(enemies[0].gelBalloonT).toBe(30);
@@ -343,7 +344,7 @@ describe('③ 微光气球弹 936 Kill（P.cs:78919-78962）', () => {
   it('音 Item21 + 两档 HSL 微光尘各×20（次枚 scale1.8、返回尘 noGravity 置位、色 A 减半）',
     () => {
       const { game, sfxFiles, dusts } = mkGame();
-      kill(new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 936, null, {}), game);
+      kill(new Arrow(CX - 7, CY - 11, 0, 0, 1, 0, 936, {}), game);
       expect(sfxFiles.includes('Item_21')).toBe(true);
       expect(dusts.length).toBe(40);                           // 20 拍 × 2 枚
       expect(dusts.every((d) => d.type === 4 && d.alpha === 150)).toBe(true);
@@ -394,7 +395,7 @@ describe('③b 微光气球 936 巨星解锁触发域（B1-X3）', () => {
   }
 
   function mkRising936(g: GameHooks): Arrow {
-    const b = new Arrow(CX - 7, CY - 11, 2, -1, 0, 0, 936, null, {});
+    const b = new Arrow(CX - 7, CY - 11, 2, -1, 0, 0, 936, {});
     (b as unknown as { life: number }).life = 300;             // 满寿命——原版 cap 只降不升
     (b as unknown as { shimmerUnlock: (g: GameHooks) => void }).shimmerUnlock(g);
     return b;
@@ -416,14 +417,29 @@ describe('③b 微光气球 936 巨星解锁触发域（B1-X3）', () => {
     expect(npcCount()).toBe(0);
   });
 
-  it('反例：微光液但下落期(vy>=0)不触发（原版 velocity.Y<0 门 :22677）', () => {
-    const { g, flags, npcCount } = mkShimGame(LIQUID_TYPE.SHIMMER);
-    const b = new Arrow(CX - 7, CY - 11, 2, 3, 0, 0, 936, null, {});   // 下落
-    (b as unknown as { life: number }).life = 300;
-    (b as unknown as { shimmerUnlock: (g: GameHooks) => void }).shimmerUnlock(g);
-    expect(flags['unlockedSlimeRainbowSpawn']).toBeUndefined();
-    expect((b as unknown as { life: number }).life).toBe(300);
-    expect(npcCount()).toBe(0);
+  it('反例：快速下落(vy−0.7 后仍 ≥0)不触发（★层位勘误 2026-09-10：原版 velocity.Y<0 门'
+    + ' :22677-22679 在 Shimmer() 分派体=projShimmerStep 持有,shimmerUnlock 回调本体'
+    + '无二次 vy 判——旧"直调 shimmerUnlock 斥下落"钉测错层,随 2026-09-08 续刀摘臂失效;'
+    + '此处按正确层位经 face 直驱锁定 :22676-22696 全式）', () => {
+    const called: number[] = [];
+    const mkFace = (vy: number) => ({
+      projId: 936, aiStyle: 2, hostile: false, vx: 2, vy,
+      timeLeft: 300, ai0: 0, ai1: 0, wet: false, shimmerWet: false,
+      rainbowSlimeUnlocked: false,
+      unlockRainbowSlime: () => void called.push(1),
+    });
+    const { g: shimGame } = mkShimGame(LIQUID_TYPE.SHIMMER);
+    const store = (shimGame as unknown as { world: { store: unknown } }).world.store;
+    // 下落 3 − 0.7 = 2.3 ≥ 0 → else 支 timeLeft−=20,不解锁（:22676/:22679/:22696）
+    const fall = mkFace(3);
+    projShimmerStep(fall as never, store as never, 0, 0, 0);
+    expect(called).toEqual([]);
+    expect(fall.timeLeft).toBe(280);
+    // 静止出生 0 − 0.7 = −0.7 < 0 → 解锁窗内（0≤vy<0.7 档,:22677 续刀既案）
+    const rest = mkFace(0);
+    projShimmerStep(rest as never, store as never, 0, 0, 0);
+    expect(called).toEqual([1]);
+    expect(rest.timeLeft).toBe(5);      // :22680-22682 cap
   });
 
   it('反例：旗已置位后再入液不再生成（vanilla !unlockedSlimeRainbowSpawn 门）', () => {
@@ -436,7 +452,7 @@ describe('③b 微光气球 936 巨星解锁触发域（B1-X3）', () => {
 
   it('Kill 单口不含解锁段：无液体环境上升中消亡（旧行为在此永久置位）旗不动', () => {
     const { game } = mkGame();                                 // store=null 世界桩
-    kill(new Arrow(CX - 7, CY - 11, 0, -1, 1, 0, 936, null, {}), game);
+    kill(new Arrow(CX - 7, CY - 11, 0, -1, 1, 0, 936, {}), game);
     const flags = ((game as unknown as { world: { flags: Record<string, boolean> } }).world.flags);
     expect(flags['unlockedSlimeRainbowSpawn']).toBeUndefined();
     // 且 Kill 特效链（音/dust）与解锁无关——只断言无 NPC 入桶由上面空 store 兜底
@@ -498,10 +514,13 @@ describe('④ 靓丽镜碎裂（P.cs:72034-72057，Game.onProjectileDeath 1085 �
 });
 
 // ===========================================================================
-// ⑤ 恒消耗门（2026-08-30 蓝队 B1-3）：四件弹撞块消亡不回收——原版各弹 Kill 段
-//    （P.cs:78889-78962 / :72034-72057）无 Item.NewItem 掉落段，SetDefaults 面
-//    （Item.cs:23667/:23681/:40164/:43927）亦无任何回收语义。通用投掷尾
-//    dropKey=null 走 THROWN_NO_RECOVERY_VIDS（雪球 949/beenade 先例同源）。
+// ⑤ 恒消耗门（2026-08-30 蓝队 B1-3 立门 → ★SW-FX9 2026-09-10 升格全族终态）：
+//    撞块消亡不回收——原版投掷/箭族【全族恒消耗】：Projectile.Kill 箭族支
+//    （1/81/98/980/1073 P.cs:75447-75454 仅音尘）、投掷支（3/48/54/599/909
+//    P.cs:77221-77230 仅音尘）、四件弹 Kill 段（P.cs:78889-78962/:72034-72057）
+//    均无 Item.NewItem;!noDropItem 段（P.cs:79099-79360）只含放块/砂球/陨星族。
+//    旧 THROWN_NO_RECOVERY_VIDS 白名单+dropKey 1/3 回收链已整链摘除
+//    （tests/sw-fx9-arrow-recovery 持新裁决钉）;此处保留四件弹撞块零掉落回归。
 //    撞块几何沿 tests/arrow-tree-pass.test.ts 的实心泥墙模式。
 // ===========================================================================
 const NO_RECOVERY_PAIRS: ReadonlyArray<readonly [vid: number, projId: number]> = [
@@ -540,17 +559,12 @@ describe('⑤ 恒消耗门：撞块消亡不回收（P.cs Kill 无掉落段）',
   }
 
   /** 弹从墙左 20px 处水平飞入,逐 tick 推进至消亡（撞块单口,同 arrow-tree-pass 法） */
-  function flyUntilDead(game: GameHooks, projId: number, dropKey: string | null): boolean {
-    const a = new Arrow(40 * 16 - 20, 16 * 16 + 6, 5, 0, 10, 0, projId, dropKey,
+  function flyUntilDead(game: GameHooks, projId: number): boolean {
+    const a = new Arrow(40 * 16 - 20, 16 * 16 + 6, 5, 0, 10, 0, projId,
       thrownTailOpts(projId) as never);
     for (let i = 0; i < 60 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
     return a.dead;
   }
-
-  it('清单钉值：949 + 四件,既存偏差手里剑 47 不入档', () => {
-    expect([...THROWN_NO_RECOVERY_VIDS].sort((a, b) => a - b))
-      .toEqual([949, 2352, 2353, 4986, 5577]);
-  });
 
   it('四件仍由通用投掷分流接管（thrownCombat 非空/combatWeapon 空）——闸门即真实通路', () => {
     for (const v of NO_RECOVERY_PAIRS) {
@@ -560,28 +574,15 @@ describe('⑤ 恒消耗门：撞块消亡不回收（P.cs Kill 无掉落段）',
     }
   });
 
-  it('dropKey=null：四件连掷多轮撞块消亡零 spawnDrop（null 短路在 rand 前,确定性）', () => {
+  it('四件连掷多轮撞块消亡零 spawnDrop（回收链已摘,确定性）', () => {
     for (const [vid, projId] of NO_RECOVERY_PAIRS) {
       for (let round = 0; round < 12; round++) {
         const world = wallWorld();
         const { game, drops } = recoverGame(world);
-        expect(flyUntilDead(game, projId, /* 派发侧映射后 */ null)).toBe(true);
+        expect(flyUntilDead(game, projId)).toBe(true);
         expect(drops).toEqual([]);                             // 绝不回吐 vi_...
         void vid;
       }
-    }
-  });
-
-  it('对照（机制在位）：带 dropKey 的既有偏差件 rand<1/3 仍回收一枚原 key', () => {
-    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0);   // 必中 1/3 掷
-    try {
-      const world = wallWorld();
-      const { game, drops } = recoverGame(world);
-      // 手里剑弹 3（既有偏差族样例）：带 key 撞块 → 回收该 key ×1 且消亡
-      expect(flyUntilDead(game, 3, 'vi_47_shuriken')).toBe(true);
-      expect(drops).toEqual(['vi_47_shuriken']);
-    } finally {
-      rnd.mockRestore();
     }
   });
 });
@@ -719,7 +720,7 @@ describe('B1-6 零伤投掷出口根治：damage≤0 直传 + penetrate raw（23
           showPickupLabel: () => {}, notifyInventoryChanged: () => {},
         } as unknown as GameHooks;
         // 出口终值规格：dmgT=0、pierce=数据面 1、物理档 opts 通用投掷尾同款
-        const a = new Arrow(20 * TILE, 16 * TILE, 5, 0, /* dmgT */ 0, 0, pid, null,
+        const a = new Arrow(20 * TILE, 16 * TILE, 5, 0, /* dmgT */ 0, 0, pid,
           { pierce: projectileData(pid)?.penetrate ?? 1,
             grav: 0.4, gravDelay: 20, drag: 0.97, maxFall: 32 } as never);
         let ticks = 0;

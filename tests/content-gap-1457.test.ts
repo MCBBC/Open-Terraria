@@ -312,7 +312,7 @@ describe('⑤宝石法杖 6171', () => {
     const f = packGemStaffFeatures(126, undefined, 6171);
     expect(finalizeGemStaffStats(f, { penetrate: 1, armorPen: 0, timeLeft: 120 }))
       .toEqual({ penetrate: 3, armorPen: 4, timeLeft: 90 });
-    const a = new Arrow(100, 100, 5, 0, 27, 6, 126, null,
+    const a = new Arrow(100, 100, 5, 0, 27, 6, 126,
       { grav: 0, life: 3600, pierce: 1, gem: f });
     expect((a as unknown as { life: number }).life).toBe(90);
     expect((a as unknown as { pierce: number }).pierce).toBe(3);

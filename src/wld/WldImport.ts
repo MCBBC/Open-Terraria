@@ -751,7 +751,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     while (items.length < CHEST_MAX_ITEMS) items.push(null);
     const anchorSheet = TILE_DEFS[type[anchor]]?.vanilla?.sheet ?? -1;
     const locked = vanillaChestIsLocked(anchorSheet, frameX[anchor]) || undefined;
-    chests.push({ x: c.x, y: c.y, items, locked });
+    // ★SW-FX11（2026-09-10）：箱名透传（原版 WF:1660 `writer.Write(chest.name)` 随箱段
+    //  持久;WldParser 已读进 WldChest.name,曾在此丢弃）。重命名 UI 未实装（UI.ts:7358
+ 	//  债）,但导入→存档→导出环零漂移自此成立
+    chests.push({ x: c.x, y: c.y, items, locked, name: c.name || undefined });
   }
 
   // 时间换算（★R16-4 2026-08-24）：Main.time 是逐帧 +1/60 的**小数量纲**
@@ -892,6 +895,14 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     altarCount: wld.altarCount,
     shadowOrbCount: wld.shadowOrbCount,
     savedOreTiers: wld.savedOreTiers,
+    // ★SW-FX11（2026-09-10）：肉前四档替代矿（WF:1394-1397,v>=216）——WldParser 曾读位
+    //  即弃 → 醉酒世界 166/167/168/169 导入即丢（军火商钨弹门 Game.ts:34531）
+    oreTiersPH: wld.oreTiersPH.copper !== -1 ? wld.oreTiersPH : undefined,
+    // ★SW-FX11（2026-09-10）：天界四塔 NPC 段（SavesAndLoads,NPCID.cs:4807）+ 按压
+    //  压力板段（WF:3374-3386）——loadSaveData 回填 world.pendingPillarNpcs /
+    //  pendingPlatePokes,Game afterWorldLoad 恢复生成/一次性重触发
+    pillarNpcs: wld.pillarNpcs.length ? wld.pillarNpcs : undefined,
+    pressurePlates: wld.pressurePlates.length ? wld.pressurePlates : undefined,
     // ★全通道统一稳定 id 域(2026-09-07):SaveData 唯一 id 域=稳定 id(与 serializeSave
     //  产物同域)。此前 tiles/物品 落内部 id,而 loadSaveData/exportWld 按稳定域查表
     //  (INTERNAL_OF_STABLE 二次映射)——导入原版 wld 后类型大面积错位(6400×1800 实测
@@ -940,6 +951,9 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       const home = hasHome ? [n.homeX, n.homeY] as [number, number] : null;
       return [{
         key: entry.key, x: n.x, y: n.y, home, bound: entry.bound, givenName: n.name || undefined,
+        // ★SW-FX11（2026-09-10）：微光变体透传（ShimmeredTownNPCs 名单按 NPC type id
+        //  索引,WF:1712-1720/:2899-2906;名单含 spriteId 即微光态）——曾读位即弃
+        shimmered: wld.shimmered.includes(n.spriteId) || undefined,
         // ★SW-BO1 2026-09-07：流浪清场标透传（原版 v315+ 持久位;仅 SpawnHomelessNPC
         //  生成位会带 true,其余 homeless 者恒 false）
         homelessDespawn: n.homelessDespawn || undefined,

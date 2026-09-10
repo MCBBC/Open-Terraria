@@ -402,7 +402,7 @@ export class TagEffectState {
         // 目标上方 280px 落陨石 1037,伤 = calcDamage×1.33,速 8
         consumed = true;
         ctx.add(new Arrow(ctx.hx - 6, ctx.hy - 280, 0.4, 8,
-          Math.max(1, Math.trunc(calcDamage * 1.33)), 2, 1037, null, { grav: 0 }));
+          Math.max(1, Math.trunc(calcDamage * 1.33)), 2, 1037, { grav: 0 }));
         break;
       }
       case 'flower': {
@@ -423,8 +423,7 @@ export class TagEffectState {
         const sx = ctx.hurtEnemyXY.x + enwh.w / 2, sy = ctx.hurtEnemyXY.y + enwh.h / 2; // :28 targetNPC.Center
         for (let i = 0; i < count; i++) {
           const a = (i / count) * Math.PI * 2 + base + (Math.random() * 2 - 1) * 0.39269909262657166;
-          ctx.add(new Arrow(sx, sy, Math.cos(a) * spd, Math.sin(a) * spd, petalDmg, 0, 1038,
-            null, { grav: 0, life: 120, pierce: 1,
+          ctx.add(new Arrow(sx, sy, Math.cos(a) * spd, Math.sin(a) * spd, petalDmg, 0, 1038, { grav: 0, life: 120, pierce: 1,
               localImmuneSeed: { npcId: ctx.hurtNpcId, t: 30 } }));                // :29 = 30t
         }
         break;

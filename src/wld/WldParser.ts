@@ -128,6 +128,26 @@ export interface WldWorld {
    *  combatBook/2、shadowOrbSmashed、spawnMeteor、vampireSeed/infectedSeed、
    *  teamBasedSpawnsSeed。曾读位即弃 → 导入肉后世界=肉前玩法。 */
   flags: Record<string, boolean>;
+  /** ★SW-FX11（2026-09-10）：SavedOreTiers 肉前四档（WF:1394-1397 Copper/Iron/Silver/Gold
+   *  i32×4，v>=216 门）——曾读位即弃（:436 void）→ 醉酒世界 166/167/168/169 替代矿
+   *  导入即丢（军火商钨弹门 Game.ts:34531 读 oreTiersPH.silver===168） */
+  oreTiersPH: { copper: number; iron: number; silver: number; gold: number };
+  /** ★SW-FX11（2026-09-10）：城镇 NPC 段头 ShimmeredTownNPCs 名单（v>=268 门，
+   *  WF:1712-1720 Save / :2899-2906 Load——i32 数量 × i32 NPC type id）。
+   *  曾读位即弃 → 微光城镇化 NPC 导入后微光变体丢失（回退原色渲染） */
+  shimmered: number[];
+  /** ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 非城镇 NPC 段（v>=140 门，
+   *  WF:1744-1755 Save / :2937-2955 Load——bool true → i32 netID + f32×2 position
+   *  循环，bool false 终止）。集合成员=NPCID.Sets.SavesAndLoads（NPCID.cs:4807
+   *  CreateBoolSet(422,507,517,493)）=天界四塔。曾整段跳过 → 导入/读档后天界入侵
+   *  中途档塔实体消失，updateLunarApocalypse 首帧全灭塔旗（四塔齐无 398 时还会误启
+   *  ImpendingDoom 倒计时）。position=实体左上角像素（NPC.position 同语义） */
+  pillarNpcs: Array<{ id: number; x: number; y: number }>;
+  /** ★SW-FX11（2026-09-10）：按压压力板段（pointers[6]，WF:3374-3386 Save /
+   *  :3388-3398 Load——i32 数量 × (i32 x, i32 y)）。原版语义=读档首拍对每位置
+   *  PokeLocation→Wiring.HitSwitch 一次性重触发后清空（PressurePlateHelper.cs:19-31/
+   *  :156-164）；存档点恰站压力板时接线的机关重载应响一次 */
+  pressurePlates: Array<{ x: number; y: number }>;
   /** ★SW-BJ45（2026-09-09）：渔夫任务链段（WF:1335-1341/2159-2173）——当日任务鱼索引
    *  + 今日已交付玩家名单。曾读位即弃 → 导入世界任务恒索引 0=蝙蝠鱼且名单清空 */
   anglerQuest: number;
@@ -227,6 +247,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
   let fastForwardTimeToDawn = false;
   let fastForwardTimeToDusk = false;
   let moondialCooldown = 0;
+  // ★SW-FX11（2026-09-10）：SavedOreTiers 肉前四档（WF:1394-1397, v>=216；缺省 -1=未
+  //  掷过,同原版 v<216 旧档读侧 WF:2358-2361）
+  let oreTiersPH = { copper: -1, iron: -1, silver: -1, gold: -1 };
   // 彩蛋种子旗标九位（WorldFile.cs:1242-1250 写序 = :1988-2014 读序，版本门逐位）：
   //   v222 drunk / v227 good(FTW) / v238 tenthAnniversary / v239 dontStarve(theConstant) /
   //   v241 notTheBees / v249 remix / v266 noTraps / v267 zenith(everything) / v302 skyblock
@@ -412,7 +435,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   //  个旗标域(boss 击杀/NPC 解锁/宠物/季节事件/秘密种子)整体错位,TreeTops 读出
   //  1280 项垃圾——「教科书式断言盲区」(tiles/chests 走指针 seek 不受影响)。
   //  bg10-12 即 treeBG2-4,上方已读,不再二次读取。
-  if (version >= 204 && r.boolean()) flags.combatBook = true;                              // combat book
+  if (version >= 204 && r.boolean()) flags.combatBookWasUsed = true;                       // combatBookWasUsed（★SW-FX11 键域归一,原 WF:1386 NPC.combatBookWasUsed）
   if (version >= 207) { r.i32(); r.boolean(); r.boolean(); r.boolean(); }                  // 灯笼夜四件套（运行时态,不落 flags）
   if (version >= 211) {
     // TreeTops 变体表（WorldGen.TreeTops.Load：13 个区域树样式，v≥211 世界用这个）
@@ -426,14 +449,13 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (r.boolean()) flags.forceXMasForToday = true;
   } else { r.boolean(); r.boolean(); }
   if (version >= 216) {
-    // SavedOreTiers 铜/铁/银/金（WF:2337-2340 写 int32×4）——R14-C18 接入军火商
-    // 银弹/钨弹分支（CH57:1487-1494 SavedOreTiers.Silver==168）
-    // ★2026-08-24 代接:原稿 `world.oreTiersPH = …` 引用了不存在的作用域（parseWld
-    //   无 world 局部,字段在 :473 return 字面量组装）→ ReferenceError 炸全部 .wld
-    //   解析。先落局部保流位（4×i32 与旧 skip 逐字节同构）;WldWorld 接口字段+
-    //   return 透出+WldImport 映射归原会话续作（World.ts:193 缺省 7/6/9/8 已在）。
-    const oreTiersPH = { copper: r.i32(), iron: r.i32(), silver: r.i32(), gold: r.i32() };
-    void oreTiersPH;
+    // SavedOreTiers 铜/铁/银/金（WF:1394-1397 写 / :2351-2361 读 int32×4, v>=216）——
+    // ★SW-FX11（2026-09-10）接通透传:曾读位即弃（void）→ 醉酒世界 166/167/168/169
+    // 替代矿导入即丢（军火商钨弹门 Game.ts:34531 读 oreTiersPH.silver===168）。
+    // 旧档（<216）原版读侧落 -1 四连（WF:2358-2361），同形落缺省。
+    oreTiersPH = { copper: r.i32(), iron: r.i32(), silver: r.i32(), gold: r.i32() };
+  } else {
+    oreTiersPH = { copper: -1, iron: -1, silver: -1, gold: -1 };
   }
   // ★R16-1：宠物购买三连（v217）+ EoL/史莱姆女皇（v223）+ 鹿角怪（v240）
   if (version >= 217) {
@@ -458,8 +480,14 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (r.boolean()) flags.unlockedNurseSpawn = true;
     if (r.boolean()) flags.unlockedPrincessSpawn = true;
   } else { for (let i = 0; i < 8; i++) r.boolean(); }
-  if (version >= 259) { if (r.boolean()) flags.combatBook2 = true; } else r.boolean();     // combatBookVolumeTwo
-  if (version >= 260) { if (r.boolean()) flags.peddler = true; } else r.boolean();         // peddlersSatchel
+  // ★SW-FX11（2026-09-10）键域归一：combatBook 家族三键曾落 wld 旧短键
+  //  {combatBook,combatBook2,peddler}，而运行时消费面（Game.ts:38711 TRAINING_DAY 进度/
+  //  :15562 使用侧/:35811 旅商股票+1）与使用侧写点（Game.ts:13674/:15562）读
+  //  {combatBookWasUsed,combatBookVolumeTwoWasUsed,peddlersSatchelUsed}——导入域与
+  //  消费域断链：导入书已用世界=进度门/旅商股票丢失,自建用书世界导出=真值丢失。
+  //  归一到运行时键（原版字段名 NPC.combatBookWasUsed 等,WF:1386/:1413-1414）。
+  if (version >= 259) { if (r.boolean()) flags.combatBookVolumeTwoWasUsed = true; } else r.boolean();   // combatBookVolumeTwoWasUsed
+  if (version >= 260) { if (r.boolean()) flags.peddlersSatchelUsed = true; } else r.boolean();          // peddlersSatchelWasUsed
   if (version >= 261) {
     if (r.boolean()) flags.unlockedSlimeGreenSpawn = true;
     if (r.boolean()) flags.unlockedSlimeOldSpawn = true;
@@ -475,8 +503,14 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (r.boolean()) flags.forceHalloweenForever = true;
     if (r.boolean()) flags.forceXMasForever = true;
   } else { r.boolean(); r.boolean(); }
-  if (version >= 288) { if (r.boolean()) flags.vampire = true; } else r.boolean();         // vampireSeed
-  if (version >= 296) { if (r.boolean()) flags.infected = true; } else r.boolean();        // infectedSeed
+  // ★SW-FX11（2026-09-10）域归一：vampireSeed/infectedSeed 曾落 flags.vampire/flags.infected
+  //  （全仓零消费面），而真实消费面读 seedFlags.vampireSeed/infectedSeed（SeedFlags 注册码,
+  //  Player.ts:8384 电池/SceneMetrics.ts:346 感染/Game.ts:28853/mainFlow.ts:218/UI.ts:4534/
+  //  Sfx.ts:519）→ 导入吸血鬼/净化种子世界=全部种子特性失效。原版该二位本就是种子衍生旗
+  //  （WF:1426-1427 写 Main.vampireSeed/infectedSeed;种子文本注册 WorldGen.cs:411 侧亦置位）,
+  //  与 WldImport seedFlags 合流(:837-842)同域。
+  if (version >= 288) { if (r.boolean()) seedFlags.vampireSeed = true; } else r.boolean();  // vampireSeed
+  if (version >= 296) { if (r.boolean()) seedFlags.infectedSeed = true; } else r.boolean(); // infectedSeed
   if (version >= 291) { r.i32(); r.i32(); }
   if (version >= 297) {
     if (r.boolean()) flags.teamBasedSpawnsSeed = true;                                     // WF57:2507
@@ -546,10 +580,15 @@ export function parseWld(buf: Uint8Array): WldWorld {
   // ---- npcs ----
   r.seek(pointers[4]);
   const npcs: WldNPC[] = [];
+  const shimmered: number[] = [];
+  const pillarNpcs: Array<{ id: number; x: number; y: number }> = [];
   {
     if (version >= 268) {
+      // ★SW-FX11（2026-09-10）：ShimmeredTownNPCs 名单捕获（WF:1712-1720 Save /
+      //  :2899-2906 Load——i32 数量 × i32 NPC type id）。曾读位即弃 → 微光城镇化
+      //  NPC 导入后微光变体丢失
       const n = r.i32();
-      for (let i = 0; i < n; i++) r.i32();
+      for (let i = 0; i < n; i++) shimmered.push(r.i32());
     }
     while (r.boolean()) {
       const spriteId = version >= 190 ? r.i32() : 0;
@@ -570,6 +609,20 @@ export function parseWld(buf: Uint8Array): WldWorld {
       const homelessDespawn = version >= 315 ? r.boolean() : false;
       npcs.push({ spriteId, name: displayName, x, y, homeX, homeY, homeless, homelessDespawn });
     }
+    // ★SW-FX11（2026-09-10）：SavesAndLoads 非城镇 NPC 段（v>=140 门,WF:1744-1755
+    //  Save / :2937-2955 Load——bool true → i32 netID + f32×2 position 循环,bool false
+    //  终止）。集合成员=NPCID.Sets.SavesAndLoads（NPCID.cs:4807 CreateBoolSet(422,
+    //  507,517,493)）=天界四塔。曾整段跳过（无害于流位——TileEntities 段按 pointers[5]
+    //  重定位）→ 导入天界入侵中途档塔实体消失,updateLunarApocalypse 首帧全灭塔旗,
+    //  四塔齐无 398 时误启 ImpendingDoom 倒计时。position=实体左上角像素。
+    if (version >= 140) {
+      while (r.boolean()) {
+        const id = version >= 190 ? r.i32() : 0;
+        if (version < 190) r.string();   // NPCID.FromLegacyName（旧档形态,保流位）
+        const x = r.f32(), y = r.f32();
+        pillarNpcs.push({ id, x, y });
+      }
+    }
   }
 
   // ---- TileEntities（★七批备案④-c：pointers[5] 段,v>=122 门；段不存在/pointers
@@ -582,16 +635,31 @@ export function parseWld(buf: Uint8Array): WldWorld {
     teSkipped = te.skipped;
   }
 
+  // ---- 按压压力板（★SW-FX11 2026-09-10：pointers[6] 段,WF:3374-3386 Save /
+  //      :3388-3398 Load——i32 数量 × (i32 x, i32 y)。原版语义=读档首拍逐位置
+  //      PokeLocation→Wiring.HitSwitch 一次性重触发后清空（PressurePlateHelper.cs:
+  //      19-31/:156-164）——存档点恰站压力板时,接线机关重载应响一次。曾整段跳过）----
+  const pressurePlates: Array<{ x: number; y: number }> = [];
+  if (pointers.length >= 8 && pointers[6] > 0 && pointers[7] > pointers[6]) {
+    r.seek(pointers[6]);
+    const n = r.i32();
+    for (let i = 0; i < n && r.pos + 8 <= pointers[7]; i++) {
+      pressurePlates.push({ x: r.i32(), y: r.i32() });
+    }
+  }
+
   return {
     worldId, caveBackStyle, iceBackStyle, jungleBackStyle, hellBackStyle,
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
     groundLevel, rockLevel, time, dayTime, moonType, moonPhase, bloodMoon, eclipse,
     isCrimson, hardMode, gameMode,
     shadowOrbCount, altarCount, savedOreTiers,
+    oreTiersPH,
     sundialCooldown, cultistDelay, fastForwardTimeToDawn, fastForwardTimeToDusk, moondialCooldown,
     bannerKills,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
+    shimmered, pillarNpcs, pressurePlates,
     anglerQuest, anglerWhoFinishedToday,
     bgMushroom, bgUnderworld, bg10, bg11, bg12,
     treeBG1, treeBG2: bg10, treeBG3: bg11, treeBG4: bg12, corruptBG, jungleBG, snowBG, hallowBG, crimsonBG, desertBG, oceanBG,

@@ -54,7 +54,7 @@ function makeHooks(store: TileStore, dust: DustCall[], player?: Record<string, u
 
 /** 出生在 tile (50,90) 格心的 22 弹（18×18 → 左上 = 格心−9） */
 function mkStream(store: TileStore, vx: number, vy: number): Arrow {
-  const p = new Arrow(50 * 16 + 8 - 9, 90 * 16 + 8 - 9, vx, vy, 27, 7, 22, null, {});
+  const p = new Arrow(50 * 16 + 8 - 9, 90 * 16 + 8 - 9, vx, vy, 27, 7, 22, {});
   return p;
 }
 

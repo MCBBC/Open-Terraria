@@ -87,7 +87,7 @@ describe('① 91 圣箭星雨（Kill :72250-72287）', () => {
     const game = makeGame(w, [], {
       onProjectileDeath: (...a: unknown[]) => (sh.g.onProjectileDeath as (...aa: unknown[]) => void)(...a),
     });
-    const a = new Arrow(100 * TILE, 186 * TILE, 3, 8, 30, 2, 91, null, {});
+    const a = new Arrow(100 * TILE, 186 * TILE, 3, 8, 30, 2, 91, {});
     flyToTileDeath(a, game);
     // Arrow 半边：消亡转发带 projId/伤害/击退（Game 侧 num663=dmg/3、kb 透传的输入）
     expect(sh.sfx).toEqual(['Item_10']);                       // SoundID.Item10（:72251）
@@ -116,7 +116,7 @@ describe('② 41 狱炎箭爆炸（Kill :73256-73293）', () => {
     const game = makeGame(emptyWorld(), [], {
       onProjectileDeath: (...a: unknown[]) => (sh.g.onProjectileDeath as (...aa: unknown[]) => void)(...a),
     });
-    const a = new Arrow(41 * TILE, 185 * TILE, 0, 6, 30, 8, 41, null, {});
+    const a = new Arrow(41 * TILE, 185 * TILE, 0, 6, 30, 8, 41, {});
     flyToTileDeath(a, game);
     expect(sh.sfx).toEqual(['Item_14']);                       // SoundID.Item14（:73258）
     expect(sh.dusts.filter((d) => d.type === 31).length).toBe(10);   // :73259-73262
@@ -136,7 +136,7 @@ describe('③ 469 蜂箭放蜂/入水消亡', () => {
     const game = makeGame(emptyWorld(), [], {
       entities: { nextId: 1, add: (e: unknown) => { added.push(e); } },
     });
-    const a = new Arrow(100 * TILE, 186 * TILE, 4, 6, 30, 3, 469, null, {});
+    const a = new Arrow(100 * TILE, 186 * TILE, 4, 6, 30, 3, 469, {});
     flyToTileDeath(a, game);
     expect(added.length).toBe(6);                              // 6 拍循环全放（:73371-73374）
     for (const raw of added) {
@@ -157,7 +157,7 @@ describe('③ 469 蜂箭放蜂/入水消亡', () => {
     const game = makeGame(emptyWorld(), [], {
       entities: { nextId: 1, add: (e: unknown) => { added.push(e); } },
     });
-    const a = new Arrow(100 * TILE, 186 * TILE, 0, 8, 30, 3, 469, null, {});
+    const a = new Arrow(100 * TILE, 186 * TILE, 0, 8, 30, 3, 469, {});
     flyToTileDeath(a, game);
     expect(added.length).toBe(3);                              // 奇数拍（1/3/5）全跳
     const ol = Math.hypot(a.vx, a.vy);
@@ -172,13 +172,13 @@ describe('③ 469 蜂箭放蜂/入水消亡', () => {
     const w = emptyWorld();
     w.store.setLiquid(100, 189, 255, LIQUID_TYPE.WATER);
     const game = makeGame(w);
-    const a = new Arrow(100 * TILE, 186 * TILE, 0, 4, 30, 3, 469, null, {});
+    const a = new Arrow(100 * TILE, 186 * TILE, 0, 4, 30, 3, 469, {});
     for (let t = 0; t < 60 && !a.dead; t++) a.fixedUpdate(1, game);
     expect(a.dead).toBe(true);                                 // 弹心入水行 189 → Kill
     const w2 = emptyWorld();
     w2.store.setLiquid(100, 189, 255, LIQUID_TYPE.HONEY);
     const game2 = makeGame(w2);
-    const b = new Arrow(100 * TILE, 186 * TILE, 0, 4, 30, 3, 469, null, {});
+    const b = new Arrow(100 * TILE, 186 * TILE, 0, 4, 30, 3, 469, {});
     for (let t = 0; t < 6; t++) b.fixedUpdate(1, game2);
     expect(b.dead).toBe(false);                                // honeyWet 豁免（:54969）
   });
@@ -198,7 +198,7 @@ describe('④ 225 叶绿箭撞块弹反', () => {
 
   it('首撞伤 ×0.66、全速反 lastVelocity 不消亡；第 4 撞 Kill（:17131-17139）', () => {
     const game = makeGame(corridorWorld());
-    const a = new Arrow(101 * TILE, 186 * TILE + 8, 5, 0, 16, 2, 225, null, { grav: 0 });
+    const a = new Arrow(101 * TILE, 186 * TILE + 8, 5, 0, 16, 2, 225, { grav: 0 });
     // 撞右墙（x=110 行 186）：ai[1]=1 → 伤 ×0.66、vx 反向
     for (let t = 0; t < 60 && a.vx > 0; t++) a.fixedUpdate(1, game);
     expect(a.dead).toBe(false);
@@ -212,7 +212,7 @@ describe('④ 225 叶绿箭撞块弹反', () => {
   it('弹反后 FindTargetWithLineOfSight 归巢：保速转向视距内最近敌（:17142-17150）', () => {
     const enemy = mkEnemy(7, 102 * TILE, 186 * TILE + 8);
     const game = makeGame(corridorWorld(), [enemy]);
-    const a = new Arrow(108 * TILE, 186 * TILE + 8, 5, 0, 16, 2, 225, null, { grav: 0 });
+    const a = new Arrow(108 * TILE, 186 * TILE + 8, 5, 0, 16, 2, 225, { grav: 0 });
     for (let t = 0; t < 60 && a.vx > 0; t++) a.fixedUpdate(1, game);
     expect(a.dead).toBe(false);
     const sp = Math.hypot(a.vx, a.vy);
@@ -232,7 +232,7 @@ describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
     {
       const enemy = mkEnemy(1, 100 * TILE, 40 * TILE);
       const game = makeGame(emptyWorld(), [enemy]);
-      const a = new Arrow(100 * TILE - 4, 40 * TILE - 2, 6, 0, 20, 4, 710, null, {});
+      const a = new Arrow(100 * TILE - 4, 40 * TILE - 2, 6, 0, 20, 4, 710, {});
       a.critChance = -1;   // 钳非暴击（缺省回落 4% 基础暴击 = 批序换 RNG 流即偶发 ×2 假失败）
       a.fixedUpdate(1, game);
       expect(enemy.hits.length).toBe(1);
@@ -242,7 +242,7 @@ describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
     {
       const enemy = mkEnemy(1, 100 * TILE, 188 * TILE);
       const game = makeGame(emptyWorld(), [enemy]);
-      const a = new Arrow(100 * TILE - 4, 188 * TILE - 2, 6, 0, 20, 4, 710, null, {});
+      const a = new Arrow(100 * TILE - 4, 188 * TILE - 2, 6, 0, 20, 4, 710, {});
       a.critChance = -1;   // 同上钳非暴击
       a.fixedUpdate(1, game);
       expect(enemy.hits.length).toBe(1);
@@ -256,7 +256,7 @@ describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
     const game = makeGame(emptyWorld(), [enemy], {
       entities: { nextId: 1, add: (e: unknown) => { added.push(e); } },
     });
-    const a = new Arrow(100 * TILE - 4, 40 * TILE - 2, 6, 0, 20, 4, 710, null, {});
+    const a = new Arrow(100 * TILE - 4, 40 * TILE - 2, 6, 0, 20, 4, 710, {});
     a.fixedUpdate(1, game);
     expect(a.dead).toBe(true);                                 // penetrate 1 命中即耗
     expect(added.length).toBe(5);                              // num2 = 5（:51082）
@@ -276,7 +276,7 @@ describe('⑤ 710 空中祸害空旷加伤/裂片', () => {
     const game2 = makeGame(emptyWorld(), [enemy2], {
       entities: { nextId: 1, add: (e: unknown) => { added2.push(e); } },
     });
-    const shard = new Arrow(100 * TILE - 4, 60 * TILE - 2, 6, 0, 20, 4, 710, null, {});
+    const shard = new Arrow(100 * TILE - 4, 60 * TILE - 2, 6, 0, 20, 4, 710, {});
     shard.abShard = true;
     shard.fixedUpdate(1, game2);
     expect(enemy2.hits.length).toBe(1);
@@ -297,7 +297,7 @@ describe('⑥ Kill 音/尘分档', () => {
         return null;
       },
     });
-    const a = new Arrow(100 * TILE, 186 * TILE, 2, 6, 10, 1, projId, null, {});
+    const a = new Arrow(100 * TILE, 186 * TILE, 2, 6, 10, 1, projId, {});
     // ★R2 #7 重锚:2026-09-02 尾尘批后飞行期每 tick 撒尾尘(2/82→d6 与 Kill 尘同型
     //  混流)——本用例锁【Kill 档】,直调 killNow 单口,不经飞行
     (a as unknown as { killNow: (g: unknown) => void }).killNow(game);
@@ -334,7 +334,7 @@ describe('⑥ Kill 音/尘分档', () => {
 describe('⑦ 485 狱翼箭渐转/扇翅', () => {
   it('v=(v×39+ai)/40 渐转向游移向量（保速），2 拍/帧推 5 帧扇翅（:54834-54843）', () => {
     const game = makeGame(emptyWorld());
-    const a = new Arrow(50 * TILE, 50 * TILE, 10, 0, 22, 5, 485, null, {});
+    const a = new Arrow(50 * TILE, 50 * TILE, 10, 0, 22, 5, 485, {});
     const sp0 = Math.hypot(a.vx, a.vy);
     const ang0 = Math.atan2(a.vy, a.vx);
     expect(a.hwFrame).toBe(0);
@@ -359,7 +359,7 @@ describe('⑧ 477 水晶镖旋转', () => {
   it('前 5 拍对齐速度角+π/2，之后 (rot×2+aim)/3 渐近平滑', () => {
     const game = makeGame(emptyWorld());
     // extraUpdates 0：单步/tick，age 即拍号（原版 localAI[1] 每 AI 步 +1）
-    const a = new Arrow(50 * TILE, 50 * TILE, 6, -2, 14, 3, 477, null, { extraUpdates: 0 });
+    const a = new Arrow(50 * TILE, 50 * TILE, 6, -2, 14, 3, 477, { extraUpdates: 0 });
     const aim = () => Math.atan2(a.vy, a.vx) + Math.PI / 2;
     for (let t = 0; t < 5; t++) a.fixedUpdate(1, game);
     expect(a.dartRot).not.toBeNull();
@@ -383,7 +383,7 @@ describe('⑨ 639 月总箭 on-hit 衰减', () => {
     const e1 = mkEnemy(1, 100 * TILE, 50 * TILE);
     const e2 = mkEnemy(2, 100 * TILE + 8, 50 * TILE);
     const game = makeGame(emptyWorld(), [e1, e2]);
-    const a = new Arrow(100 * TILE - 4, 50 * TILE - 2, 6, 0, 100, 3, 639, null, {});
+    const a = new Arrow(100 * TILE - 4, 50 * TILE - 2, 6, 0, 100, 3, 639, {});
     a.fixedUpdate(1, game);
     expect(e1.hits.length).toBe(1);
     expect(e1.hits[0][0]).toBe(100);                           // 本跳全额（字段结算后改写）

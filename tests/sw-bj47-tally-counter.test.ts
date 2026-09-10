@@ -22,6 +22,7 @@ import { Inventory } from '../src/items/Inventory';
 import { Enemy } from '../src/entities/Enemy';
 import { saveGame, loadSave } from '../src/save/SaveFile';
 import { recordBannerKill, bannerOfNpc, bannerToNpcOf } from '../src/world/Banners';
+import { hitCritters } from '../src/entities/projTargets';
 import type { GameHooks } from '../src/entities/types';
 
 function makeGame(): GameHooks {
@@ -151,5 +152,51 @@ describe('SW-BJ47 ④ Game.ts 接线锁（击杀写摘除 + 显示面旗种域/�
     const s = readFileSync(fileURLToPath(new URL('../src/entities/Enemy.ts', import.meta.url)), 'utf8');
     expect(s).toContain("pl.lastCreatureHit = bannerOfNpc(this.vanillaNetId !== 0 ? this.vanillaNetId : (this.vanillaId ?? 0))");
     expect(s).toContain("import { bannerOfNpc } from '../world/Banners'");
+  });
+});
+
+// ===================== ⑤ SW-RB10d 补刀：critter 命中面 fromPlayer 收口 =====================
+//  原版小动物=Main.npc 桶成员：近战（Player.cs:44593-44612 无 critter 排除→:44769 写）、
+//  玩家弹/爆炸（Projectile.Damage_PVE :13382 ownedBySomeone 写,:13712 addDPS 同门,
+//  StrikeNPC :13702/:82097 owner==myPlayer → LocalPlayerInteraction）。仓库分桶后
+//  critter 支曾全数 fromPlayer=false → 杀鸟（74→旗 8）不进旗杀账/图鉴/计数器行。
+//  trap 弹（弹 12 坠星 Projectile.cs:939 trap=true → OwnedBySomeone :580-588=false）
+//  反向锁:不写不计数（旧 FallingStar fromPlayer=true=反向偏差,已修）。
+describe('SW-BJ47 ⑤ RB10d critter 命中写位收口（Projectile.cs:13382 并集×critter 桶）', () => {
+  const mkGameWithCritter = (critter: Enemy) => {
+    const g = makeGame();
+    (g as { critters: () => unknown[] }).critters = () => [critter];
+    (g as { player: unknown }).player = { addDPS: () => {}, lastCreatureHit: -1, dead: false };
+    return g;
+  };
+
+  it('玩家弹命中 critter：Enemy.hurt 收 fromPlayer=true → lastCreatureHit=旗种域', () => {
+    const bird = Enemy.fromVanilla(74, 40 * 16, 20 * 16)!;      // 蓝鸟 74 → 旗 8
+    const g = mkGameWithCritter(bird);
+    const hit = hitCritters({ x: bird.x, y: bird.y, w: bird.w, h: bird.h }, g);
+    expect(hit).toBe(true);
+    expect((g as { player: { lastCreatureHit: number } }).player.lastCreatureHit)
+      .toBe(bannerOfNpc(74));
+  });
+
+  it('trap 弹（坠星 ctx）命中 critter：ownedBySomeone=false → 不写（Projectile.cs:580/:939）', () => {
+    const bird = Enemy.fromVanilla(74, 40 * 16, 20 * 16)!;
+    const g = mkGameWithCritter(bird);
+    hitCritters({ x: bird.x, y: bird.y, w: bird.w, h: bird.h }, g, { trap: true });
+    expect((g as { player: { lastCreatureHit: number } }).player.lastCreatureHit).toBe(-1);
+  });
+
+  it('变异锁：critter 爆炸/近战/弹三支 fromPlayer=true 在位（旧缺参爆红）', () => {
+    const s = readFileSync(fileURLToPath(new URL('../src/core/Game.ts', import.meta.url)), 'utf8');
+    // 773 贴附爆炸 critter 支（F-BJ47-A）——尾参 pen,false,0,true（敌怪支 en.hurt 同形
+    //  但变量名 en/c 可辨）
+    expect(s).toMatch(/c\.hurt\(this\.world\.isExpert[^]+?, this, pen, false, 0, true\)/);
+    // settleKillExplosion 两支（F-BJ47-B）
+    expect(s.match(/c\.hurt\(applyBannerDamageDealt\(this, c, Math\.max\(1, Math\.trunc\(dmg\)\)\), cx - c\.cx, 0, this, 0, false, 0, true\)/g)?.length).toBe(2);
+    // 近战 critter 支（F-BJ47-C）
+    expect(s).toContain('c.hurt(5, 0, 0, this, 0, false, 0, true);');
+    // 坠星敌怪支 trap 语义（F-BJ47-E）：pierce=-1 后 fromPlayer=false
+    const fs = readFileSync(fileURLToPath(new URL('../src/entities/FallingStar.ts', import.meta.url)), 'utf8');
+    expect(fs).toMatch(/STAR_KB, 0, game, 0, false, -1, false\)/);
   });
 });

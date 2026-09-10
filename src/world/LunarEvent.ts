@@ -172,6 +172,37 @@ export function triggerLunarApocalypse(w: World, rng: RNG, host: LunarHost): voi
   messageLunarApocalypse(w, host);                   // MessageLunarApocalypse（misc[43]）
 }
 
+/**
+ * ★SW-FX11（2026-09-10）兜底重生成：towerActive 在场但存档无 SavesAndLoads 塔位
+ * （SW-FX11 前的旧档/导入老 .wld）时，按 triggerLunarApocalypse 同款落位算式
+ * （列 x=maxTilesX/5×(1+j)+抖动±100，自 worldSurface 向下找 21×36 非实心窗，
+ * 30 次失败兜底 (列x, worldSurface-40)）为缺失活动塔补位——保证读档后天界入侵
+ * 事件态与原版同构（塔实体在场，updateLunarApocalypse 不会首帧全灭塔旗/误启
+ * ImpendingDoom）。原版无此支（原版塔位随 NPC 段存取,WF:1744-1755/:2937-2955）。
+ */
+export function respawnMissingTowers(w: World, rng: RNG, host: LunarHost, has: (id: number) => boolean): void {
+  if (!w.lunarEvent.active) return;
+  const missing = TOWER_IDS.filter((id) => w.lunarEvent.towerActive[TOWER_KEY[id]] && !has(id));
+  if (!missing.length) return;
+  const surface = Math.floor(w.groundLevel);         // (int)Main.worldSurface
+  for (let j = 0; j < missing.length; j++) {
+    const num3 = Math.floor(w.w / 5) * (1 + j);      // Main.maxTilesX / 5
+    let placed = false;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const jitter = rng.int(-100, 100);             // Main.rand.Next(-100, 101)
+      for (let y = surface; y > 100; y--) {
+        if (!solidTiles(w, num3 + jitter - 10, num3 + jitter + 10, y - 20, y + 15)) {
+          host.spawnTowerNpc(missing[j], num3 + jitter, y);
+          placed = true;
+          break;
+        }
+      }
+      if (placed) break;
+    }
+    if (!placed) host.spawnTowerNpc(missing[j], num3, surface - 40);
+  }
+}
+
 /** MessageLunarApocalypse（WorldGen.cs:87523-87546）：数已灭塔 n → Lang.misc[43+n]
  *  （43 天界入侵 / 44 头脑麻木 / 45 痛苦 / 46 阴森低语；47 需 n=4 此时 active 已 false 不可达） */
 export function messageLunarApocalypse(w: World, host: LunarHost): void {

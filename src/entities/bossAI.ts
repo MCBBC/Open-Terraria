@@ -985,7 +985,7 @@ export function losClear(game: GameHooks, x0: number, y0: number, x1: number, y1
  *  Boss/敌怪发射的敌弹(双子激光/死光/蜂后毒刺/哥布林弹等) */
 export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId: number, life = 300, arrowOpts?: Partial<import('./Arrow').ArrowOpts>): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }), 'projectiles');
+    new Arrow(x, y, vx, vy, dmg, 0, projId, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }), 'projectiles');
 }
 
 /** 幻影矢 462 出膛统一口(2026-08-26 音频收口工单⑦):发弹(shoot 同式直飞桶)+

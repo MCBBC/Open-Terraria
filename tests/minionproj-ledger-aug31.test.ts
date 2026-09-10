@@ -25,6 +25,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
 import { canHit, canHitLine } from '../src/physics/LineOfSight';
+import { temporaryBubbleSnapshot } from '../src/render/EmoteBubble';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 220, H = 140;
@@ -394,19 +395,21 @@ describe('台账批 C-4179 焰流塔环境尘双矩形（AI_130 case 663/665/667
   });
 });
 
-describe('台账批 C-920 抚摸心形气泡窗（Main.cs:34799-34832 形态近似）', () => {
-  it('palJoyCd∈(1,60) 窗内心跳节拍粒子上浮;停摸归零后不再发', () => {
-    const { hooks, player, parts } = makeHooks([]);
+describe('台账批 C-920 抚摸心形气泡窗（Main.cs:34799-34832;★IIIII233 忠实化=EmoteBubble 直绘非粒子）', () => {
+  it('palJoyCd∈(1,60) 窗内临时爱心情气泡(EmoteBubble.DrawTemporaryBubble(0,60,·));停摸清槽', () => {
+    const { hooks, player } = makeHooks([]);
     const cat = mk(1093, player, player.cx, player.cy - 4);
     priv(cat).beingPetted = true;
     (player.petting as unknown as { isPetting: boolean }).isPetting = true;
     cat.fixedUpdate(1, hooks);                            // Joy 触发 → palJoyCd=60
     for (let k = 0; k < 62; k++) cat.fixedUpdate(1, hooks);
-    const hearts = parts.filter((c) => c === '#FF7FB2').length;
-    expect(hearts).toBeGreaterThanOrEqual(3);             // cadence 56/40/24/8
-    parts.length = 0;
+    // 原版 Main.cs:34799-34832 = EmoteBubble.DrawTemporaryBubble(0,60,localAI)
+    // （emote 0=爱心）——旧 C-920 粒子近似（'#FF7FB2'）已按原版退役
+    const snaps = temporaryBubbleSnapshot();
+    expect(snaps.length).toBe(1);
+    expect(snaps[0].emote).toBe(0);                       // 爱心
     (player.petting as unknown as { isPetting: boolean }).isPetting = false;
     for (let k = 0; k < 10; k++) cat.fixedUpdate(1, hooks);
-    expect(parts.length).toBe(0);
+    expect(temporaryBubbleSnapshot().length).toBe(0);     // 停摸清槽
   });
 });

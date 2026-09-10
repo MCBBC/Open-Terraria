@@ -148,7 +148,7 @@ describe('工单1 绳圈弹 171/475 铺绳（Arrow aiStyle35 自校正+ROPE_COIL
     for (let y = 8; y <= 16; y++) store.setTileSilent(30, y, stone, 0, 0);
     const g = makeHooks(store);
     // 出生于 (26*16,10*16) 朝右速度 10（shootSpeed=10,Item.cs:12701）
-    const coil = new Arrow(26 * TILE + 8, 10 * TILE + 8, 10, 0, 0, 0, 171, null,
+    const coil = new Arrow(26 * TILE + 8, 10 * TILE + 8, 10, 0, 0, 0, 171,
       { pierce: 6 });
     let ticks = 0;
     while (!coil.dead && ticks < 120) { coil.fixedUpdate(1 / 60, g); ticks++; }
@@ -168,7 +168,7 @@ describe('工单1 绳圈弹 171/475 铺绳（Arrow aiStyle35 自校正+ROPE_COIL
     const stone = STONE();
     for (let y = 8; y <= 16; y++) store.setTileSilent(30, y, stone, 0, 0);
     const g = makeHooks(store);
-    const coil = new Arrow(26 * TILE + 8, 12 * TILE + 8, 10, 0, 0, 0, 475, null,
+    const coil = new Arrow(26 * TILE + 8, 12 * TILE + 8, 10, 0, 0, 0, 475,
       { pierce: 6 });
     let ticks = 0;
     while (!coil.dead && ticks < 120) { coil.fixedUpdate(1 / 60, g); ticks++; }
@@ -193,7 +193,7 @@ describe('工单1 绳圈弹 171/475 铺绳（Arrow aiStyle35 自校正+ROPE_COIL
     const g = makeHooks(store);
     expect(VI(965)).not.toBe('');            // 散绳件已注册
     expect(VI(985)).not.toBe('');            // 原圈件已注册
-    const coil = new Arrow(26 * TILE + 8, 10 * TILE + 8, 10, 0, 0, 0, 171, null,
+    const coil = new Arrow(26 * TILE + 8, 10 * TILE + 8, 10, 0, 0, 0, 171,
       { pierce: 6 });
     let ticks = 0;
     while (!coil.dead && ticks < 120) { coil.fixedUpdate(1 / 60, g); ticks++; }
@@ -215,7 +215,7 @@ describe('工单1 绳圈弹 171/475 铺绳（Arrow aiStyle35 自校正+ROPE_COIL
     const stone = STONE();
     for (let y = 8; y <= 16; y++) store.setTileSilent(30, y, stone, 0, 0);
     const g = makeHooks(store);
-    const coil = new Arrow(26 * TILE + 8, 10 * TILE + 8, 10, 0, 0, 0, 171, null,
+    const coil = new Arrow(26 * TILE + 8, 10 * TILE + 8, 10, 0, 0, 0, 171,
       { pierce: 6 });
     let ticks = 0;
     while (!coil.dead && ticks < 120) { coil.fixedUpdate(1 / 60, g); ticks++; }
@@ -236,7 +236,7 @@ describe('工单1 绳圈弹 171/475 铺绳（Arrow aiStyle35 自校正+ROPE_COIL
     // 600×500 全空图：平飞+重力下坠 ~5000px 也触不到边界/地物 → 必为寿命杀
     const store = new TileStore(600, 500);
     const g = makeHooks(store);
-    const coil = new Arrow(30 * TILE + 8, 80 * TILE + 8, 2, 0, 0, 0, 171, null,
+    const coil = new Arrow(30 * TILE + 8, 80 * TILE + 8, 2, 0, 0, 0, 171,
       { pierce: 6 });
     let lastCx = coil.cx; let lastCy = coil.cy;
     let ticks = 0;
@@ -329,7 +329,7 @@ describe('红队 A-2 绳圈通用出口数值（damage0 直传 + penetrate −1 
       (...a: unknown[]) => { hurtCalls.push(a[0] as number); return false; };
     (g as unknown as { enemies(): unknown[] }).enemies = () => [e];
     // 直接按出口终值构造（damage0/pierce−1）——物理自校正走 ctor 绳圈块
-    const coil = new Arrow(100, 96, 2, 0, 0, 0, 171, null, { pierce: -1 });
+    const coil = new Arrow(100, 96, 2, 0, 0, 0, 171, { pierce: -1 });
     let ticks = 0;
     while (!coil.dead && ticks < 20 && hurtCalls.length === 0) { coil.fixedUpdate(1 / 60, g); ticks++; }
     expect(hurtCalls.length).toBe(0);                  // 重叠窗内零受击调用
@@ -344,7 +344,7 @@ describe('红队 A-2 绳圈通用出口数值（damage0 直传 + penetrate −1 
     const c = { x: 100, y: 96, w: 20, h: 20, dead: false, hurtCalls: 0,
       hurt() { this.hurtCalls++; return true; } };
     (g as unknown as { critters(): unknown[] }).critters = () => [c];
-    const coil = new Arrow(100, 96, 2, 0, 0, 0, 171, null, { pierce: -1 });
+    const coil = new Arrow(100, 96, 2, 0, 0, 0, 171, { pierce: -1 });
     let ticks = 0;
     while (!coil.dead && ticks < 20 && !(c as { dead: boolean }).dead) {
       coil.fixedUpdate(1 / 60, g); ticks++;
@@ -717,7 +717,7 @@ describe('工单5 晶洞 772 Kill 宝石雨（Arrow.killNow 772 支=DropGeodeGem
     const stone = STONE();
     for (let x = 0; x < 200; x++) store.setTileSilent(x, 40, stone, 0, 0);   // 石板地
     const g = makeHooks(store);
-    const geode = new Arrow(50 * TILE, 30 * TILE, 3, 5, 0, 0, 772, null, {});
+    const geode = new Arrow(50 * TILE, 30 * TILE, 3, 5, 0, 0, 772, {});
     let ticks = 0;
     while (!geode.dead && ticks < 200) { geode.fixedUpdate(1 / 60, g); ticks++; }
     expect(geode.dead).toBe(true);
@@ -758,7 +758,7 @@ describe('工单5 晶洞 772 Kill 宝石雨（Arrow.killNow 772 支=DropGeodeGem
         return d;
       },
     } as unknown as GameHooks;
-    const geode = new Arrow(50 * TILE, 30 * TILE, 3, 5, 0, 0, 772, null, {});
+    const geode = new Arrow(50 * TILE, 30 * TILE, 3, 5, 0, 0, 772, {});
     // 钉 rand=0.99 ⇒ 每粒内建抖动恰取上界桶 +2.0（(0.99*41|0−20)*0.1）
     const spy = vi.spyOn(Math, 'random').mockImplementation(() => 0.99);
     try {

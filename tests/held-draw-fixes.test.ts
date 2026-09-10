@@ -160,7 +160,7 @@ describe('④ 叶绿弹 207 追踪（AI_001 :53906-54010）', () => {
     // 弹(100,50) → 敌(108,58)：曼哈顿 < 300，视线空旷
     const enemy = mkEnemy(7, 108, 58);
     const game = makeGame(emptyWorld(), [enemy]);
-    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, null, { extraUpdates: 0 });
+    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, { extraUpdates: 0 });
     // 转向一步 = (v×(8−1) + dir×|v₀|)/8（dir = 弹心→敌心单位向量，speed = localAI[0]）
     const dirTo = (): [number, number] => {
       const dx = 108 * TILE - (a.x + a.w / 2), dy = 58 * TILE - (a.y + a.h / 2);
@@ -184,7 +184,7 @@ describe('④ 叶绿弹 207 追踪（AI_001 :53906-54010）', () => {
   it('目标失效（死亡）→ 清锁重锁；敌方同型（hostile）恒不追踪', () => {
     const enemy = mkEnemy(3, 105, 52);
     const game = makeGame(emptyWorld(), [enemy]);
-    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, null, { extraUpdates: 0 });
+    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, { extraUpdates: 0 });
     a.fixedUpdate(1, game);
     expect(a.chloAi1).toBe(3);
     enemy.dead = true;                            // :53984-53986 失效清锁
@@ -192,7 +192,7 @@ describe('④ 叶绿弹 207 追踪（AI_001 :53906-54010）', () => {
     expect(a.chloAi1).toBe(0);
     // 敌方同型弹（!friendly → :53992-53994 flag5=false）：锁敌照记但恒不转向
     const game2 = makeGame(emptyWorld(), [mkEnemy(3, 105, 52)]);
-    const h = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, null,
+    const h = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207,
       { extraUpdates: 0, hostile: true });
     h.fixedUpdate(1, game2);
     h.fixedUpdate(1, game2);
@@ -202,7 +202,7 @@ describe('④ 叶绿弹 207 追踪（AI_001 :53906-54010）', () => {
 
   it('alpha 255 起 −25/t 渐显（GetAlpha :76682 (255−alpha) 通道）', () => {
     const game = makeGame(emptyWorld(), []);
-    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, null, { extraUpdates: 0 });
+    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, { extraUpdates: 0 });
     expect(a.alpha).toBe(255);                    // SetDefaults :2687
     a.fixedUpdate(1, game);
     expect(a.alpha).toBe(230);
@@ -219,7 +219,7 @@ describe('④b 92 坠星弹体（aiStyle 5 :22152-22156 + :22222-22245）', () =
     });
     const deaths: unknown[] = [];
     // 命中线 y=60T，星在线上方（y=40T）直落
-    const star = new Arrow(100 * TILE, 40 * TILE, 0, 22, 10, 2, 92, null,
+    const star = new Arrow(100 * TILE, 40 * TILE, 0, 22, 10, 2, 92,
       { starFall: { lineY: 60 * TILE, gen: 1 } });
     expect(star.noTileCollide).toBe(true);        // SetDefaults tileCollide=false（:1487）
     for (let t = 0; t < 5; t++) star.fixedUpdate(1, game);
@@ -241,7 +241,7 @@ describe('④b 92 坠星弹体（aiStyle 5 :22152-22156 + :22222-22245）', () =
     const game = makeGame(emptyWorld(), [], {
       playSfxFiles: (files: string[]) => { sfx.push(files.join(',')); },
     });
-    const star = new Arrow(100 * TILE, 40 * TILE, 0, 22, 10, 2, 92, null,
+    const star = new Arrow(100 * TILE, 40 * TILE, 0, 22, 10, 2, 92,
       { starFall: { lineY: 60 * TILE, gen: 0 } });
     for (let t = 0; t < 8; t++) star.fixedUpdate(1, game);
     expect(star.alpha).toBe(200);                 // 0→200 钳顶（:22229-22231）

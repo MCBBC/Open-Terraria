@@ -105,7 +105,7 @@ describe('Kill 消亡面清偿批金标（2026-09-02）', () => {
   it('① 283：Item_10 + 30×d171 三组结构（scale∈[0.1,0.9]/fadeIn1.5/noGravity;组1 零附加、组2/3 oldV 附加）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 30, 1, 283, null, { grav: 0 });
+    const a = new Arrow(400, 300, 6, 0, 30, 1, 283, { grav: 0 });
     kill(a, game);
     const d171 = dusts.filter((d) => d.type === 171);
     expect(d171.length).toBe(30);
@@ -140,7 +140,7 @@ describe('Kill 消亡面清偿批金标（2026-09-02）', () => {
     const mid = mkEnemy(495);    // 段1+段2（|495−465|=30 / |495−525|=30）
     const beyond = mkEnemy(700); // 三段全不覆盖
     const game = makeGame(emptyWorld(), dusts, [], [seg0, mid, beyond]);
-    const a = new Arrow(400, 300, 6, 0, 30, 1, 283, null, { grav: 0 });
+    const a = new Arrow(400, 300, 6, 0, 30, 1, 283, { grav: 0 });
     kill(a, game);
     expect(seg0.rec.hits).toHaveLength(1);
     expect(mid.rec.hits).toHaveLength(2);
@@ -163,7 +163,7 @@ describe('Kill 消亡面清偿批金标（2026-09-02）', () => {
     const bucket: Array<{ projId?: number; x?: number; vx?: number; vy?: number;
       damage?: number; alpha?: number }> = [];
     const game = makeGame(emptyWorld(), dusts, bucket);
-    const a = new Arrow(400, 300, 6, 0, 30, 1, 639, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 30, 1, 639, { grav: 0, life: 600 });
     for (let i = 0; i < 2 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
     const snap = a as unknown as { moonArrowL0: number; moonArrowL1: number;
       moonArrowA0: number; moonArrowA1: number };
@@ -257,7 +257,7 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     const sfx1: string[] = [];
     (game as unknown as { playSfxFile: (n: string) => void }).playSfxFile =
       (n: string) => { sfx1.push(n); };
-    const a = new Arrow(400, 300, 6, 0, 30, 1, 1097, null, { grav: 0 });
+    const a = new Arrow(400, 300, 6, 0, 30, 1, 1097, { grav: 0 });
     kill(a, game);
     expect(sfx1).toEqual(['Item_20']);
     expect(dusts.filter((d) => d.type === 6)).toHaveLength(6);
@@ -266,7 +266,7 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     const dusts2: DustRec[] = [];
     const bucket2: Array<Record<string, unknown>> = [];
     const game2 = makeGame(emptyWorld(), dusts2, bucket2);
-    const b = new Arrow(400, 300, 6, 0, 30, 1, 1097, null, { grav: 0 });
+    const b = new Arrow(400, 300, 6, 0, 30, 1, 1097, { grav: 0 });
     (b as unknown as { foxAi1: number }).foxAi1 = 1;
     kill(b, game2);
     expect(bucket2).toHaveLength(8);
@@ -289,7 +289,7 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     const dusts: DustRec[] = [];
     const bucket: Array<Record<string, unknown>> = [];
     const game = makeGame(emptyWorld(), dusts, bucket);
-    const a = new Arrow(400, 300, 6, 0, 30, 1, 639, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 30, 1, 639, { grav: 0, life: 600 });
     for (let i = 0; i < 2 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
     const lifeAtKill = (a as unknown as { life: number }).life;
     kill(a, game);
@@ -299,7 +299,7 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     // 消费面（Update 环 :16784-16787 同构）：EU=3（opts 显式,json 缺列已补）→ 4 子步/拍
     const dusts2: DustRec[] = [];
     const game2 = makeGame(emptyWorld(), dusts2);
-    const f = new Arrow(400, 300, 6, 0, 30, 1, 640, null, { grav: 0, extraUpdates: 3 });
+    const f = new Arrow(400, 300, 6, 0, 30, 1, 640, { grav: 0, extraUpdates: 3 });
     (f as unknown as { ai1Delay: number }).ai1Delay = 4;
     const life0 = (f as unknown as { life: number }).life;
     f.fixedUpdate(1 / 60, game2);                            // 冻结拍：4 子步全 continue
@@ -486,7 +486,7 @@ describe('Kill 消亡面批 3：24 型通用 HitTiles 砖屑档（消亡原因�
       (Game.prototype.onProjectileDeath as (...a: unknown[]) => void).bind(game);
     (game as unknown as Record<string, unknown>).hitTilesFx =
       (Game.prototype.hitTilesFx as (...a: unknown[]) => void).bind(game);
-    const a = new Arrow(400, 300, 0, 0, 10, 1, 14, null, { grav: 0, life: 1 });
+    const a = new Arrow(400, 300, 0, 0, 10, 1, 14, { grav: 0, life: 1 });
     for (let k = 0; k < 4 && !a.dead; k++) a.fixedUpdate(1 / 60, game);
     expect(a.dead).toBe(true);
     expect(sfx13.filter((s) => s === 'Item_10')).toHaveLength(1);   // 到期口达 Kill 单口

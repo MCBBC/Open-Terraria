@@ -176,7 +176,7 @@ describe('SunDanceBeam 923(AI_180 :45791-45851 两版本同段)', () => {
 describe('467 真制导(Arrow projId===467 支,AI_001 P.cs:55133-55253)', () => {
   function fire(): { arrow: Arrow; f: Fixture } {
     const f = makeHooks();
-    const arrow = new Arrow(110 * TILE, 25 * TILE, 12, 0, 30, 0, 467, null,
+    const arrow = new Arrow(110 * TILE, 25 * TILE, 12, 0, 30, 0, 467,
       { grav: 0, life: 600, hostile: true });
     return { arrow, f };
   }

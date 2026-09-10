@@ -289,6 +289,7 @@ function buildFixture(tes: TeEntry[], version: number, withTeSection = true): Ui
   mark();
   w.i32(0);                         // shimmered count（>=268）
   w.bool(false);                    // 无城镇 NPC
+  w.bool(false);                    // SavesAndLoads 尾（★SW-FX11 起解析,WF:1744-1755 原版恒写）
 
   // ---- TileEntities 段（pointers[5]） ----
   mark();

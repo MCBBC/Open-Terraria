@@ -220,9 +220,12 @@ describe('SW-BJ31 洞穴层哥布林工匠（绑缚 105）生成链', () => {
     expect(spawnerSrc).toContain('return this.spawnBound(105);');
     expect(spawnerSrc).toContain("if (hardMode && luck20() && !this.waterTile && this.deeperThanRockLayer");
     expect(spawnerSrc).toContain('this.downedBoss3 && luck20()');
-    // 同族新支：沙滩干沙睡渔夫（NPC.cs:1928-1931 1:1,门序逐字段）+ 海洋支 !savedAngler 两门（L1705/L1708）
+    // 同族新支：沙滩干沙睡渔夫（NPC.cs:1928-1931 1:1,门序逐字段;★IIIII228 重写=
+    //  beachDistance 380 两向+remix 或支,取代旧单行 groundLevel 形态）+ 海洋支 !savedAngler 两门
     expect(spawnerSrc).toContain("if (!this.waterTile && !this.world.flags['savedAngler'] && !any(376)");
-    expect(spawnerSrc).toContain('&& TILE_SAND.has(t) && this.spawnTileY < this.world.groundLevel)');
+    expect(spawnerSrc).toContain('&& (this.spawnTileX < 380 || this.spawnTileX > st.w - 380)');
+    expect(spawnerSrc).toContain('&& TILE_SAND.has(t)');
+    expect(spawnerSrc).toContain('&& (this.spawnTileY < this.world.groundLevel || this.world.seedFlags?.remix))');
     expect(spawnerSrc).toContain('return this.spawnNPC(x, y, 376, rng);');
     expect(spawnerSrc).toContain("(!this.spawnFriendlyCycle || (!this.world.flags['savedAngler'] && !any(376)))");
     // Game 侧转换映射（105 → goblin_tinkerer）与解救旗表

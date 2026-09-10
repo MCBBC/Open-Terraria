@@ -344,3 +344,101 @@ describe('SW-BJ43 魔法海螺落点（TeleportHelpers.cs:49-241 金标）', () 
     expect(g.requestMagicConchTeleportPosition(false)).toBeNull();
   });
 });
+
+describe('SW-BJ43 ★SW-RB10a fireRecallTeleport 调用面（Player.cs:56785-56825 双尝试/双败/公共语义）', () => {
+  /** fire 面桩：Object.create 不跑构造器 → 手工装配 fireRecallTeleport 消费域 */
+  function fireStub(world: World, px = 100 * TILE, py = 120 * TILE) {
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+      player: Record<string, unknown>;
+      world: World;
+    };
+    const state = {
+      removed: 0, grapples: 0, uwScans: 0,
+      sounds: [] as string[], calls: [] as boolean[],
+    };
+    g.world = world;
+    g.player = {
+      x: px, y: py, vx: 1, vy: 1, w: 20, h: 42, cx: px + 10, cy: py + 21,
+      iframes: 0, fallStartY: 1234, team: 0,
+      inv: { removeHeld: (n: number) => { state.removed += n; } },
+      removeAllGrapplingHooks: () => { state.grapples++; },
+      updateUnbreakableWallScan: () => { state.uwScans++; },
+      equipStats: { fireWalk: false },
+      buffs: null,
+    };
+    g.sfx = { play: (k: string) => { state.sounds.push(k); } };
+    g.spawnParticles = () => {};
+    g.camera = { x: 0, y: 0 };
+    g.cb = {};
+    g.net = null;
+    g.spectatingSlot = -1;
+    g.lastStripReq = '';
+    (g as unknown as { requestMagicConchTeleportPosition: (r: boolean) => { x: number; y: number } | null })
+      .requestMagicConchTeleportPosition = (r: boolean) => {
+        state.calls.push(r);
+        return null;   // 缺省双败;用例内再覆写
+      };
+    return { g, state };
+  }
+
+  it('双尝试序：左半图先右洋(crawl −1)、败再左洋（Player.cs:56785-56788 RequestMagicConchTeleportPosition(−num4, flag) → (num4, !flag)）', () => {
+    const w = new World(300, 240, 7, 'bj43-syn5');
+    w.groundLevel = 128;
+    // 玩家 x=100 格 <150=左半 → 首选 rightOcean=true（右洋败=null）→ 回落左洋命中
+    const s = fireStub(w, 100 * TILE, 120 * TILE);
+    const seq: boolean[] = [];
+    (s.g as unknown as { requestMagicConchTeleportPosition: (r: boolean) => { x: number; y: number } | null })
+      .requestMagicConchTeleportPosition = (r: boolean) => {
+        seq.push(r);
+        return r ? null : { x: 50 * TILE, y: 129 * TILE };   // 右洋败→左洋命中(50,129)
+      };
+    (s.g as unknown as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4263, kind: 'ocean', triggerAt: 45, consume: false });
+    expect(seq, '先右洋（rightOcean=flag）后左洋（!flag）——首试命中时 ?? 短路,序仅 [true]').toEqual([true, false]);
+    const p = s.g.player as { x: number; y: number; vx: number; vy: number };
+    expect(p.x).toBe(50 * TILE);
+    expect(p.vy, '命中 → velocity=Zero（:56820）').toBe(0);
+    expect(s.state.removed, '海螺非消耗品（Player.cs:56755 族无 stack--）').toBe(0);
+  });
+
+  it('首试命中即短路：?? 序=[true] 单调用（Player.cs:56785 flag2 直取,无第二尝试）', () => {
+    const w = new World(300, 240, 7, 'bj43-syn8');
+    w.groundLevel = 128;
+    const s = fireStub(w, 100 * TILE, 120 * TILE);
+    const seq: boolean[] = [];
+    (s.g as unknown as { requestMagicConchTeleportPosition: (r: boolean) => { x: number; y: number } | null })
+      .requestMagicConchTeleportPosition = (r: boolean) => { seq.push(r); return { x: 250 * TILE, y: 129 * TILE }; };
+    (s.g as unknown as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4263, kind: 'ocean', triggerAt: 45, consume: false });
+    expect(seq, '首试命中=单调用').toEqual([true]);
+    const p = s.g.player as { x: number; y: number };
+    expect(p.x).toBe(250 * TILE);
+  });
+
+  it('双洋全败=原地照走：Teleport(position,5)+velocity=(0,0.001f)（:56817-56824,非取消）+尘/音/公共语义', () => {
+    const w = new World(300, 240, 7, 'bj43-syn6');
+    w.groundLevel = 128;
+    const s = fireStub(w, 100 * TILE, 120 * TILE);
+    const px0 = 100 * TILE, py0 = 120 * TILE;
+    (s.g as unknown as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4263, kind: 'ocean', triggerAt: 45, consume: false });
+    const p = s.g.player as { x: number; y: number; vx: number; vy: number; fallStartY: unknown };
+    expect(p.x, '原地（Teleport(position,5) :56819）').toBe(px0);
+    expect(p.y).toBe(py0);
+    expect(p.vx).toBe(0);
+    expect(p.vy, '双败 velocity=(0,0.001f)（:56824）').toBe(0.001);
+    expect(p.fallStartY, 'fallStart 重置（Teleport :37730）').toBeNull();
+    expect(s.state.grapples, 'RemoveAllGrapplingHooks（Teleport :37704,Style!=10）').toBe(1);
+    expect(s.state.uwScans, 'DoUnbreakableWallScan（:37733）').toBe(1);
+    expect(s.state.sounds, 'style5=Splash（Main.cs:13513 SoundEngine.PlaySound(19,·,0)）').toEqual(['splash']);
+  });
+
+  it('★SW-RB10a 判别：hell 败臂不再取消——原地照走+0.001（DemonConch :56907-56914,OLD=整链取消）', () => {
+    const w = new World(300, 240, 7, 'bj43-syn7');
+    w.groundLevel = 128;
+    const s = fireStub(w, 100 * TILE, 120 * TILE);
+    // hell 走 findTeleportSpot（300×240 世界中心 [100,200]×[?],熔岩下带无实心底 → null）
+    (s.g as unknown as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4819, kind: 'hell', triggerAt: 45, consume: false });
+    const p = s.g.player as { x: number; y: number; vy: number };
+    expect(p.x, 'hell 败=原地（OLD 整链取消=不进此赋值面）').toBe(100 * TILE);
+    expect(p.vy, 'DemonConch 败臂 velocity=(0,0.001f)（:56914）').toBe(0.001);
+    expect(s.state.sounds, 'style7=Item8（:13542）').toEqual(['item8']);
+  });
+});

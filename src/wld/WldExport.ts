@@ -19,6 +19,7 @@ import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
 import { BinaryWriterLE } from '../save/PlrImport';
 import { HEADER_FLAGS, HEADER_PRE, fieldValue, type WldField, type WldVal } from './WldHeaderFields';
 import { TOWN_NPC_KEY_BY_ID } from './WldImport';
+import { isTowerId } from '../world/LunarEvent';   // ★SW-FX11：SavesAndLoads 段塔 id 判定（NPCID.cs:4807）
 import { bytesToB64, rlePairs, rleTiles } from '../save/SaveFile';
 import vanillaJson from '../../public/sprites/vanilla.json';
 
@@ -382,7 +383,9 @@ export function exportWld(save: SaveData): Uint8Array {
   const chests = save.chests ?? [];
   w.i16(chests.length);
   for (const c of chests) {
-    w.i32(c.x).i32(c.y).str('');
+    // ★SW-FX11（2026-09-10）：箱名写真值（WF:1660 `writer.Write(chest.name)`——曾恒 '',
+    //  SaveData.chests[].name 自本批携带,导入→存档→导出环零漂移）
+    w.i32(c.x).i32(c.y).str(c.name ?? '');
     const items = c.items ?? [];
     w.i32(40);                                      // maxItems(≥294 i32,WF:1633)
     for (let i = 0; i < 40; i++) {
@@ -399,9 +402,18 @@ export function exportWld(save: SaveData): Uint8Array {
   w.i16(signs.length);
   for (const s of signs) w.str(s.text ?? '').i32(s.x).i32(s.y);
   mark();                                           // [3] signs 尾
-  // npcs(WF:1710):shimmered count 0+镇 NPC 循环+false+SavesAndLoads false
-  w.i32(0);
+  // npcs(WF:1710):shimmered 名单+镇 NPC 循环+false+SavesAndLoads 段(四塔)+false
+  // ★SW-FX11（2026-09-10）：ShimmeredTownNPCs 写真值（WF:1712-1720 Save——i32 数量 ×
+  //  i32 NPC type id;曾恒 i32(0),微光城镇化导出即丢）。type id 取镇 NPC 段同款反查
   const npcs = save.npcs ?? [];
+  const shimmeredIds: number[] = [];
+  for (const n of npcs) {
+    if (!n.shimmered) continue;
+    const netId = Number(Object.entries(TOWN_NPC_KEY_BY_ID).find(([, v]) => v.key === n.key)?.[0] ?? 0);
+    if (netId) shimmeredIds.push(netId);
+  }
+  w.i32(shimmeredIds.length);
+  for (const id of shimmeredIds) w.i32(id);
   for (const n of npcs) {
     // TOWN_NPC_KEY_BY_ID:netId→{key,bound}(WldImport 表);反查取 id
     const netId = Number(Object.entries(TOWN_NPC_KEY_BY_ID).find(([, v]) => v.key === n.key)?.[0] ?? 0);
@@ -419,10 +431,24 @@ export function exportWld(save: SaveData): Uint8Array {
     w.bool(!!n.homelessDespawn);
   }
   w.bool(false);
+  // ★SW-FX11（2026-09-10）：SavesAndLoads 尾段写真值（WF:1744-1755 Save——bool active +
+  //  i32 netID + f32×2 position(左上角像素);集合=天界四塔 NPCID.cs:4807。曾恒 false,
+  //  天界入侵中途档导出→再导入塔实体消失）
+  for (const pn of save.pillarNpcs ?? []) {
+    if (!pn || !isTowerId(pn.id)) continue;
+    w.bool(true).i32(pn.id).f32(pn.x).f32(pn.y);
+  }
   w.bool(false);
   mark();                                           // [4] npcs 尾
   writeTileEntities(w, save); mark();               // [5] TE 尾
-  w.i32(0); mark();                                 // [6] pressurePlates 尾(空)
+  // ★SW-FX11（2026-09-10）：按压压力板段写真值（WF:3374-3386 Save——i32 数量 ×
+  //  (i32 x, i32 y);曾恒 i32(0),存档点恰站压力板的机关重触发位丢失）
+  {
+    const plates = save.pressurePlates ?? [];
+    w.i32(plates.length);
+    for (const pp of plates) w.i32(pp.x).i32(pp.y);
+    mark();                                         // [6] pressurePlates 尾
+  }
   w.i32(0); mark();                                 // [7] townManager 尾(空壳,自足读侧不读)
   w.i32(0); mark();                                 // [8] bestiary 尾(空壳)
   w.byte(0); mark();                                // [9] creativePowers 尾(单 false 空流)

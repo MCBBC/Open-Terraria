@@ -272,7 +272,7 @@ describe('台账⑥ 荆棘球 277 弹跳阈值 lastVelocity.Y>3f（:19838-19845 
   // 才有实体语义（vx=0 时身后格=本格恒通过,x 反向拍对 0 无感）；两用例均给 vx≠0
   it('轻着陆 1<vy≤3 → 落定滚动（vy=0+摩擦 ×0.97），不弹起', () => {
     const game = makeGame(emptyWorld(), []);
-    const b = new Arrow(392, 3020, 0.5, 2, 10, 0, 277, null, { thornBounce: true });
+    const b = new Arrow(392, 3020, 0.5, 2, 10, 0, 277, { thornBounce: true });
     expect(b.cy).toBeLessThan(3040);                      // 心在空气中（row189）
     (b as unknown as { thornBounceOff: (g: GameHooks) => boolean }).thornBounceOff(game);
     expect(b.vy).toBe(0);                                 // 落定滚动档（vy>1 false 后 settle）
@@ -281,15 +281,15 @@ describe('台账⑥ 荆棘球 277 弹跳阈值 lastVelocity.Y>3f（:19838-19845 
 
   it('静止滚动耗尽 |vx|≤0.01 → 自灭；重击 vy>3 → ×−0.9 反弹不落定', () => {
     const game = makeGame(emptyWorld(), []);
-    const still = new Arrow(392, 3020, 0.005, 1, 10, 0, 277, null, { thornBounce: true });
+    const still = new Arrow(392, 3020, 0.005, 1, 10, 0, 277, { thornBounce: true });
     (still as unknown as { thornBounceOff: (g: GameHooks) => boolean }).thornBounceOff(game);
     expect(still.dead).toBe(true);                        // 静止自灭（本仓承载件）
 
-    const b = new Arrow(392, 3020, 0, 4, 10, 0, 277, null, { thornBounce: true });
+    const b = new Arrow(392, 3020, 0, 4, 10, 0, 277, { thornBounce: true });
     (b as unknown as { thornBounceOff: (g: GameHooks) => boolean }).thornBounceOff(game);
     expect(b.vy).toBeCloseTo(-3.6, 5);                    // lastVy 4 → ×−0.9
 
-    const c = new Arrow(392, 3020, 3, 1, 10, 0, 277, null, { thornBounce: true });
+    const c = new Arrow(392, 3020, 3, 1, 10, 0, 277, { thornBounce: true });
     (c as unknown as { thornBounceOff: (g: GameHooks) => boolean }).thornBounceOff(game);
     expect(c.vy).toBe(0);                                 // vy≤3 走 settle（旧门 vy>1 会弹起=B 差）
     expect(c.vx).toBeCloseTo(-2.7 * 0.97, 5);             // X 反 ×0.9 → settle 摩擦 ×0.97

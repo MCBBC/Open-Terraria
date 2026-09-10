@@ -58,10 +58,10 @@ const DOMAIN = new Set([...DOMAIN_WEAPONS, ...DOMAIN_SIDEKICK, ...DOMAIN_DERIVED
  *   · 'debt'：原版在专支、本仓走通用路 = 已登记债（坐标见审计文档） */
 const BRANCH_TABLE: Record<number, { branch: 'A_33161' | 'B_33693' | 'C_34788' | 'generic'; impl: string }> = {
   // ---- A 支 :33161（中心锚·整图）----
-  641: { branch: 'A_33161', impl: 'debt' },                     // 月门（repo 通用路;债 :33162/:33444）
+  641: { branch: 'A_33161', impl: 'special-A33161' },           // 月门（★SW-FX6 2026-09-10 债①清偿:专绘 :33162/:33444）
   // ---- B 支 :33693（中心锚·帧切片）----
   613: { branch: 'B_33693', impl: 'set-33703' },                // 星尘细胞
-  623: { branch: 'B_33693', impl: 'set-33703' },                // 星尘守护者（ai0==2 抖动=债）
+  623: { branch: 'B_33693', impl: 'set-33703' },                // 星尘守护者（★SW-FX6 债④清偿:ai0==2 抖动+A/2）
   625: { branch: 'B_33693', impl: 'set-33703' },                // 龙链条（ROT_ONLY）
   626: { branch: 'B_33693', impl: 'set-33703' },
   627: { branch: 'B_33693', impl: 'set-33703' },
@@ -73,15 +73,15 @@ const BRANCH_TABLE: Record<number, { branch: 'A_33161' | 'B_33693' | 'C_34788' |
   677: { branch: 'B_33693', impl: 'special' },                  // 弩车（T9 专绘）
   678: { branch: 'B_33693', impl: 'special' },
   679: { branch: 'B_33693', impl: 'special' },
-  691: { branch: 'B_33693', impl: 'debt' },                     // 陷阱塔（Bottom 锚 :34091;债）
-  692: { branch: 'B_33693', impl: 'debt' },
-  693: { branch: 'B_33693', impl: 'debt' },
+  691: { branch: 'B_33693', impl: 'special' },                  // 陷阱塔（★SW-FX6 债②清偿:Bottom 锚 :34091）
+  692: { branch: 'B_33693', impl: 'special' },
+  693: { branch: 'B_33693', impl: 'special' },
   758: { branch: 'B_33693', impl: 'set-33703' },                // 吸血蛙（盒底锚特例）
   759: { branch: 'B_33693', impl: 'set-33703' },                // 雀杖（origin 帧高−2 ±1 特例）
-  831: { branch: 'B_33693', impl: 'set-33703' },                // 虎宝石计数器
+  831: { branch: 'B_33693', impl: 'set-33703' },                // 虎宝石计数器（★SW-FX6 债⑥:hide=true 前置门,不绘）
   951: { branch: 'B_33693', impl: 'set-33703' },                // 雪怪（盒底−帧高/2+4 特例）
   963: { branch: 'B_33693', impl: 'set-33703' },                // 阿比盖尔体（4×13 网格第 0 列特例）
-  970: { branch: 'B_33693', impl: 'set-33703' },                // 阿比盖尔计数器
+  970: { branch: 'B_33693', impl: 'set-33703' },                // 阿比盖尔计数器（★SW-FX6 债⑥:hide=true 前置门,不绘）
   1098: { branch: 'B_33693', impl: 'set-33703' },               // 钻地龟（锚 Y−2 特例;特殊命令直召）
   1123: { branch: 'B_33693', impl: 'set-33703' },               // 钻地龟二型（同上）
   1094: { branch: 'B_33693', impl: 'special' },                 // 火绒狐（DYN 偏移折算+Extra_303）
@@ -99,7 +99,7 @@ const BRANCH_TABLE: Record<number, { branch: 'A_33161' | 'B_33693' | 'C_34788' |
   1118: { branch: 'C_34788', impl: 'set-34788' },
   // ---- 通用路（原版就在通用路,repo 通用路+num143/144 表=正确位）----
   191: { branch: 'generic', impl: 'generic' }, 266: { branch: 'generic', impl: 'generic' },
-  308: { branch: 'generic', impl: 'generic' },                  // 半宽切片 :34931=债（见文档）
+  308: { branch: 'generic', impl: 'generic' },                  // 半宽切片 :34950-34957=★SW-FX6 债③已接（MinionProj.draw 专块）
   317: { branch: 'generic', impl: 'generic' }, 373: { branch: 'generic', impl: 'generic' },
   375: { branch: 'generic', impl: 'generic' }, 377: { branch: 'generic', impl: 'generic' },
   387: { branch: 'generic', impl: 'generic' }, 390: { branch: 'generic', impl: 'generic' },
@@ -148,8 +148,10 @@ describe('SW-BJ16 ①分派链注册表：召唤物域全员归类（新增召�
       if (e.branch !== 'B_33693' || !DOMAIN.has(id)) continue;
       expect(['set-33703', 'special', 'debt'], `proj ${id} impl 位`).toContain(e.impl);
       if (e.impl === 'set-33703') expect(SET_33703_EXPECTED, `proj ${id}`).toContain(id);
-      if (e.impl === 'special') expect([663, 665, 667, 677, 678, 679, 1094, 1113], `proj ${id}`).toContain(id);
-      if (e.impl === 'debt') expect([691, 692, 693], `proj ${id}（债须逐项登记文档）`).toContain(id);
+      // ★SW-FX6 2026-09-10：691-693 陷阱塔 Bottom 锚专绘入列（债②清偿）
+      if (e.impl === 'special') expect([663, 665, 667, 677, 678, 679, 691, 692, 693, 1094, 1113], `proj ${id}`).toContain(id);
+      // ★SW-FX6 2026-09-10：①②清偿后 B 支零债——新增债必须先登记审计文档再动刀
+      if (e.impl === 'debt') expect([], `proj ${id}（债须逐项登记文档）`).toContain(id);
     }
   });
 });
@@ -255,10 +257,13 @@ function mkOnGround(projId: number, player: Player, groundTopY = 100 * 16): Mini
 }
 
 describe('SW-BJ16 ③B 支缺省型行为锁：锚=盒心、origin=帧心（translate=[cx,cy]、args=[−fw/2,−fh/2]）', () => {
-  // 613 24×104/4 帧、625-628 32×66 单帧、643 26×400/8、831/970 12×72/6、1119 28×324/9
+  // 613 24×104/4 帧、625-628 32×66 单帧、643 26×400/8、1119 28×324/9
+  // ★SW-FX6 2026-09-10：831/970 移出——vanilla hide=true（Projectile.cs:8082/:9197 →
+  //  Main.cs:22404-22406 主循环 hide 门）=隐形计数器,draw 前置早退零绘制;
+  //  行为锁移交 tests/sw-fx6-draw-debt-closure.test.ts（债⑥）
   const SHEET: Record<number, [number, number, number]> = {
     613: [24, 104, 4], 625: [32, 66, 1], 626: [32, 66, 1], 627: [32, 66, 1], 628: [32, 66, 1],
-    643: [26, 400, 8], 831: [12, 72, 6], 970: [12, 72, 6], 1119: [28, 324, 9],
+    643: [26, 400, 8], 1119: [28, 324, 9],
   };
   for (const [idStr, [tw, th, fr]] of Object.entries(SHEET)) {
     const id = Number(idStr);

@@ -196,11 +196,11 @@ describe('T1 弹 189：数据面 + projClass 投影（SetDefaults :2771-2781）'
     //   ★两刀已随微批落地（读侧 hitSet 豁免 + 写侧 iframes 清零,键形=
     //   immunityIdentity 组键）,行为级三跳断言见下方「F4 落地」describe。
     const { hooks } = makeHooks();
-    const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0 });
+    const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0 });
     expect(wasp.idStaticGroup).toBe(189);
     expect(wasp.idStaticCdMs).toBe(167);
     // 181/566 共用组键 181（UseGroupStaticImmunity(181)）不与 189 互斥
-    const bee = new Arrow(60 * 16, 90 * 16, 9, 0, 9, 1, 181, null, { grav: 0 });
+    const bee = new Arrow(60 * 16, 90 * 16, 9, 0, 9, 1, 181, { grav: 0 });
     expect(bee.idStaticGroup).toBe(181);
     void hooks;
   });
@@ -236,7 +236,7 @@ describe('F4 落地：189 IDStatic 同敌三跳节拍（读侧豁免+写侧清�
   it('同敌 10t 间隔三跳结算、穿透恰耗尽（penetrate=3 → 3 跳后消亡）', () => {
     const e = mkRealEnemy(21, 60 * 16, 90 * 16, BIG_W, BIG_H);
     const { hooks } = makeHooks([e]);
-    const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });
     expect(wasp.pierceInit).toBe(3);
     const hitTicks: number[] = [];
     withRng(0.99, () => withTickClock((clock) => {            // 钉 0.99=无暴击,实伤恒 31
@@ -258,8 +258,8 @@ describe('F4 落地：189 IDStatic 同敌三跳节拍（读侧豁免+写侧清�
   it('<10t 第二跳被组表拦（写侧清帧实证：拦门=组表,非 iframes;被拒跳不耗穿透）', () => {
     const e = mkRealEnemy(22, 60 * 16, 90 * 16, BIG_W, BIG_H);
     const { hooks } = makeHooks([e]);
-    const w1 = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
-    const w2 = new Arrow(60 * 16 + 20, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    const w1 = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });
+    const w2 = new Arrow(60 * 16 + 20, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });
     withRng(0.99, () => withTickClock((clock) => {
       for (let t = 1; t <= 8; t++) {                          // 窗内 8t：两弹同拍压敌
         clock.t += 1000 / 60;
@@ -281,8 +281,8 @@ describe('F4 落地：189 IDStatic 同敌三跳节拍（读侧豁免+写侧清�
   it('181/566 组回归：两型共用组键 181,窗内跨实例只结算一颗;成功跳不漏清帧', () => {
     const e = mkRealEnemy(23, 60 * 16, 90 * 16, BIG_W, BIG_H);
     const { hooks } = makeHooks([e]);
-    const bee = new Arrow(60 * 16, 90 * 16, 9, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
-    const hornet = new Arrow(60 * 16 + 20, 90 * 16, 9, 0, 9, 1, 566, null, { grav: 0, life: 660, pierce: 4 });
+    const bee = new Arrow(60 * 16, 90 * 16, 9, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3 });
+    const hornet = new Arrow(60 * 16 + 20, 90 * 16, 9, 0, 9, 1, 566, { grav: 0, life: 660, pierce: 4 });
     expect(bee.idStaticGroup).toBe(181);
     expect(hornet.idStaticGroup).toBe(181);                   // 两键共用一张表
     withRng(0.99, () => withTickClock((clock) => {
@@ -311,7 +311,7 @@ describe('T1 弹 189：aiStyle36 蜂族 AI 逐段（1457 :27683-27862）', () =>
   it('30 update 索敌延迟后逐轴转向收敛（:27761-27764+:27823-27862）', () => {
     const e2 = mkEnemy(2, 60 * 16 - 200, 90 * 16 + 100);
     const { hooks: h2 } = makeHooks([e2]);
-    const wasp = new Arrow(60 * 16, 90 * 16, -9, 0, 31, 0.25, 189, null, { grav: 0 });
+    const wasp = new Arrow(60 * 16, 90 * 16, -9, 0, 31, 0.25, 189, { grav: 0 });
     step(wasp, 60, h2);
     expect(wasp.dead).toBe(false);
     expect(wasp.vy).toBeGreaterThan(0);      // 延迟后朝左下敌折线转向
@@ -319,7 +319,7 @@ describe('T1 弹 189：aiStyle36 蜂族 AI 逐段（1457 :27683-27862）', () =>
   it('800 曼哈顿门（:27772）：远敌不锁 → 保持直飞', () => {
     const far = mkEnemy(3, 60 * 16 - 1000, 90 * 16);
     const { hooks: hFar } = makeHooks([far]);
-    const wasp = new Arrow(60 * 16, 90 * 16, -9, 0, 31, 0.25, 189, null, { grav: 0 });
+    const wasp = new Arrow(60 * 16, 90 * 16, -9, 0, 31, 0.25, 189, { grav: 0 });
     step(wasp, 80, hFar);
     expect(wasp.dead).toBe(false);
     expect(wasp.vy).toBe(0);
@@ -330,11 +330,11 @@ describe('T1 弹 189：aiStyle36 蜂族 AI 逐段（1457 :27683-27862）', () =>
     const tx = 60, ty = 90;
     store.liquid[store.idx(tx, ty)] = 200;
     store.liquidType[store.idx(tx, ty)] = 1;   // WATER（LIQUID_TYPE +1 编码）
-    const wasp = new Arrow(tx * 16, ty * 16, 9, 0, 31, 0.25, 189, null, { grav: 0 });
+    const wasp = new Arrow(tx * 16, ty * 16, 9, 0, 31, 0.25, 189, { grav: 0 });
     wasp.fixedUpdate(1, hooks);
     expect(wasp.dead).toBe(true);
     store.liquidType[store.idx(tx, ty)] = 3;   // HONEY 豁免（!honeyWet 门）
-    const wasp2 = new Arrow(tx * 16, ty * 16, 9, 0, 31, 0.25, 189, null, { grav: 0 });
+    const wasp2 = new Arrow(tx * 16, ty * 16, 9, 0, 31, 0.25, 189, { grav: 0 });
     wasp2.fixedUpdate(1, hooks);
     expect(wasp2.dead).toBe(false);
   });
@@ -344,7 +344,7 @@ describe('T1 弹 189：撞块弹反（HandleMovement :19019-19030 蜂族四型�
   it('penetrate>0 撞实心块不消亡：pierce-- + 主轴全速反号', () => {
     const { hooks, store } = makeHooks();
     for (let y = 88; y <= 92; y++) store.setTile(70, y, 1);   // 竖墙
-    const wasp = new Arrow(66 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    const wasp = new Arrow(66 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });
     step(wasp, 12, hooks);
     expect(wasp.dead).toBe(false);
     expect(wasp.pierce).toBe(2);            // 3→2（命中侧/撞侧共用同一计数）
@@ -353,7 +353,7 @@ describe('T1 弹 189：撞块弹反（HandleMovement :19019-19030 蜂族四型�
   it('pierce 归零后不再弹反 → 通用消亡口（原版 penetrate>0 门反面）', () => {
     const { hooks, store } = makeHooks();
     for (let y = 88; y <= 92; y++) store.setTile(70, y, 1);
-    const wasp = new Arrow(66 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    const wasp = new Arrow(66 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });
     // 人工压穿透=1：一次弹反耗尽后再次撞墙必死
     wasp.pierce = 1;
     wasp.pierceInit = 1;
@@ -369,7 +369,7 @@ describe('T1 否证钉：189 命中侧无放蜂（999 陷阱拆除）', () => {
   it('弹命中敌后零伴生蜂（Projectile.cs:13752 支 type==999=HiveFive 非黄蜂枪）', () => {
     const e = mkEnemy(1, 60 * 16 + 40, 90 * 16);
     const { hooks, added } = makeHooks([e]);
-    const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, null, { grav: 0, life: 600 });
+    const wasp = new Arrow(60 * 16, 90 * 16, 9, 0, 31, 0.25, 189, { grav: 0, life: 600 });
     step(wasp, 30, hooks);
     expect(e.hits.length).toBeGreaterThan(0);   // 已结算命中
     const bees = added.filter((a) => a instanceof Arrow

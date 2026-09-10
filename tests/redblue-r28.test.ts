@@ -106,7 +106,7 @@ describe('R28 §8 Razorpine 松针手枪', () => {
   });
   it('出生自校正展开 2..4 发（本弹+兄弟弹）且兄弟弹带散布/排布', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 12, 0, 48, 2, 336, null, { grav: 0.5, gravDelay: 50 });
+    const a = new Arrow(800, 300, 12, 0, 48, 2, 336, { grav: 0.5, gravDelay: 50 });
     a.fixedUpdate(1 / 60, g);
     const added = rec(g).added.filter((e) => (e as { projId?: number }).projId === 336);
     const total = added.length + 1;
@@ -115,7 +115,7 @@ describe('R28 §8 Razorpine 松针手枪', () => {
   });
   it('ai0≥50 后每子步 vy+0.5（延迟重力档生效）', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 12, 0, 48, 2, 336, null, { grav: 0.5, gravDelay: 50 });
+    const a = new Arrow(800, 100, 12, 0, 48, 2, 336, { grav: 0.5, gravDelay: 50 });
     for (let i = 0; i < 26; i++) a.fixedUpdate(1 / 60, g);   // age≈52 子步 > 50
     const before = a.vy;
     a.fixedUpdate(1 / 60, g);
@@ -127,19 +127,19 @@ describe('R28 §8 Razorpine 松针手枪', () => {
 describe('R28 §13/§14 火之花/冰之花', () => {
   it.each([[15, 6], [253, 135]])('飞行尘 2×d%d/子步 + aiCnt≥20 坠弧 + vy 钳 16', (pid, dust) => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 6, 0, 85, 2, pid, null, { grav: 0 });
+    const a = new Arrow(800, 100, 6, 0, 85, 2, pid, { grav: 0 });
     a.fixedUpdate(1 / 60, g);
     const n0 = rec(g).dusts.filter((d) => d.type === dust).length;
     expect(n0).toBeGreaterThanOrEqual(2);                    // ≥1 tick × 2 枚（extraUpdates=0 → 1 子步）
     for (let i = 0; i < 25; i++) a.fixedUpdate(1 / 60, g);   // age>20 → 坠弧
     expect(a.vy).toBeGreaterThan(0);
-    const fast = new Arrow(900, 100, 0, 40, 85, 2, pid, null, { grav: 0 });
+    const fast = new Arrow(900, 100, 0, 40, 85, 2, pid, { grav: 0 });
     for (let i = 0; i < 30; i++) fast.fixedUpdate(1 / 60, g);
     expect(fast.vy).toBeLessThanOrEqual(16);                 // 终端钳
   });
   it.each([[15], [253]])('Kill：Item10 音 + 40 枚 %i 族 Kill 尘', (pid) => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 6, 0, 85, 2, pid, null, { grav: 0 });
+    const a = new Arrow(800, 100, 6, 0, 85, 2, pid, { grav: 0 });
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
     const r = rec(g);
     expect(r.sfx).toContain('Item_10');
@@ -150,7 +150,7 @@ describe('R28 §13/§14 火之花/冰之花', () => {
 describe('R28 §3 Bat Scepter', () => {
   it('出生自校正展开 2..3 只', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 10, 0, 45, 2, 316, null, { grav: 0, life: 600, pierce: 1 });
+    const a = new Arrow(800, 300, 10, 0, 45, 2, 316, { grav: 0, life: 600, pierce: 1 });
     a.fixedUpdate(1 / 60, g);
     const total = rec(g).added.filter((e) => (e as { projId?: number }).projId === 316).length + 1;
     expect(total).toBeGreaterThanOrEqual(2);
@@ -158,7 +158,7 @@ describe('R28 §3 Bat Scepter', () => {
   });
   it('Kill：无音效 + 5×d195 scale0.85 noGravity v+=弹速×0.5', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 8, -2, 45, 2, 316, null, {});
+    const a = new Arrow(800, 300, 8, -2, 45, 2, 316, {});
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
     const r = rec(g);
     expect(r.sfx.filter((s) => s !== '')).toHaveLength(0);   // 无音效（勿加 Item_10）
@@ -170,14 +170,14 @@ describe('R28 §3 Bat Scepter', () => {
 describe('R28 §12 Unholy Trident Kill 迸散', () => {
   it('显形期消亡撒沿弹道 d27（Item10 音）；隐身期(alpha=255)不撒', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 10, 0, 150, 2, 114, null, {});
+    const a = new Arrow(800, 300, 10, 0, 150, 2, 114, {});
     (a as unknown as { alpha: number }).alpha = 0;           // 显形态
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
     const r = rec(g);
     expect(r.sfx).toContain('Item_10');
     expect(r.dusts.filter((d) => d.type === 27 && d.noGravity).length).toBeGreaterThan(0);
     const g2 = makeGame(emptyWorld());
-    const b = new Arrow(800, 300, 10, 0, 150, 2, 114, null, {});
+    const b = new Arrow(800, 300, 10, 0, 150, 2, 114, {});
     (b as unknown as { killNow: (g: GameHooks) => void }).killNow(g2);
     expect(rec(g2).dusts.filter((d) => d.type === 27).length).toBe(0);   // SetDefaults alpha=255 全隐
   });
@@ -194,7 +194,7 @@ describe('R28 §9 Blizzard Staff', () => {
   it('天顶双锥几何：出生位重锚到玩家上方 600/700px 带、vy 向下、|dy| 钳 ≥20', () => {
     const g = makeGame(emptyWorld());
     const p = (g as unknown as { player: { cy: number; aimWY: number; aimWX: number } }).player;
-    const a = new Arrow(805, 396, Math.cos(-0.3) * 10, Math.sin(-0.3) * 10, 58, 2, 337, null, {});
+    const a = new Arrow(805, 396, Math.cos(-0.3) * 10, Math.sin(-0.3) * 10, 58, 2, 337, {});
     a.fixedUpdate(1 / 60, g);
     expect(a.y).toBeGreaterThanOrEqual(p.cy - 700 - 12);
     expect(a.y).toBeLessThanOrEqual(p.cy - 600 + 12);         // 同拍已按 vy 位移一步
@@ -203,14 +203,14 @@ describe('R28 §9 Blizzard Staff', () => {
   it('动态穿墙门：出生高于地表线(worldSurface×16)即开撞块（原版门只开不关）', () => {
     const g = makeGame(emptyWorld());
     (g.world as unknown as { groundLevel: number }).groundLevel = 180;   // ×16=2880px
-    const a = new Arrow(805, 396, 0, 10, 58, 2, 337, null, {});
+    const a = new Arrow(805, 396, 0, 10, 58, 2, 337, {});
     a.fixedUpdate(1 / 60, g);
     // 出生位 y≈-200 < 2880 → `position.Y < worldSurface*16` 成立 → tileCollide=true
     expect((a as unknown as { noTileCollide: boolean }).noTileCollide).toBe(false);
   });
   it('Kill：Item_27 + 10×d197 noGravity；帧恒 pinFrame', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(805, 396, 0, 10, 58, 2, 337, null, {});
+    const a = new Arrow(805, 396, 0, 10, 58, 2, 337, {});
     const pf = (a as unknown as { pinFrame: number | null }).pinFrame;
     expect(pf).not.toBeNull();
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
@@ -223,7 +223,7 @@ describe('R28 §9 Blizzard Staff', () => {
 describe('R28 §11 Crystal Serpent 死亡链', () => {
   it('Kill：Item110 + d254 尘爆 + 522 子蛇 3-5（伤 ×0.8 截断）', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 8.5, 0, 40, 2, 521, null, {});
+    const a = new Arrow(800, 300, 8.5, 0, 40, 2, 521, {});
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
     const r = rec(g);
     expect(r.sfx).toContain('Item_110');
@@ -234,7 +234,7 @@ describe('R28 §11 Crystal Serpent 死亡链', () => {
   });
   it('522 子蛇 AI：vy+0.2 钳 18、vx×0.98、寿命 40 子步', () => {
     const g = makeGame(emptyWorld());
-    const s = new Arrow(800, 300, 8, 0, 32, 1.6, 522, null, { grav: 0, life: 40, pierce: 1 });
+    const s = new Arrow(800, 300, 8, 0, 32, 1.6, 522, { grav: 0, life: 40, pierce: 1 });
     const vx0 = s.vx;
     s.fixedUpdate(1 / 60, g);
     expect(s.vx).toBeCloseTo(vx0 * 0.98, 5);
@@ -253,7 +253,7 @@ describe('R28 §11 Crystal Serpent 死亡链', () => {
 describe('R28 §10 Toxic Flask 毒云爆', () => {
   it('Kill：Item107 + 20..30 枚 511-513 毒云（全额伤/kb1）', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 5, -3, 52, 2, 510, null, { grav: 0.3 });
+    const a = new Arrow(800, 300, 5, -3, 52, 2, 510, { grav: 0.3 });
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
     const r = rec(g);
     expect(r.sfx).toContain('Item_107');
@@ -266,7 +266,7 @@ describe('R28 §10 Toxic Flask 毒云爆', () => {
   });
   it('毒云：包络淡入淡出 + drag ×0.96/拍 + 260t 消亡 + 组共享免疫键', () => {
     const g = makeGame(emptyWorld());
-    const c = new Arrow(800, 300, 2, 0, 52, 1, 511, null, { grav: 0, life: 3600, pierce: -1 });
+    const c = new Arrow(800, 300, 2, 0, 52, 1, 511, { grav: 0, life: 3600, pierce: -1 });
     (c as unknown as { idStaticGroup: number | null }).idStaticGroup = 511;
     const vx0 = c.vx;
     c.fixedUpdate(1 / 60, g);
@@ -282,7 +282,7 @@ describe('R28 §10 Toxic Flask 毒云爆', () => {
 describe('R28 §2 Inferno Fork', () => {
   it('295 飞行期 8×d174 尘焰包裹/子步；Kill 生成 296 爆区（伤 ×0.75 截断）', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 8, 0, 70, 2, 295, null, {});
+    const a = new Arrow(800, 300, 8, 0, 70, 2, 295, {});
     a.fixedUpdate(1 / 60, g);
     expect(rec(g).dusts.filter((d) => d.type === 174).length).toBeGreaterThanOrEqual(8);
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
@@ -293,7 +293,7 @@ describe('R28 §2 Inferno Fork', () => {
   });
   it('296 爆区：Item74 点火吼一次、~17.5×d174/update、>540 自毁', () => {
     const g = makeGame(emptyWorld());
-    const z = new Arrow(800, 300, 0, 0, 52, 2, 296, null, { grav: 0, pierce: -1 });
+    const z = new Arrow(800, 300, 0, 0, 52, 2, 296, { grav: 0, pierce: -1 });
     z.w = 150; z.h = 150;
     z.fixedUpdate(1 / 60, g);
     z.fixedUpdate(1 / 60, g);
@@ -309,7 +309,7 @@ describe('R28 §2 Inferno Fork', () => {
 describe('R28 §1 Shadowbeam Staff', () => {
   it('数据面 extraUpdates=100 直读 + alpha=255 恒隐初值', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 6, 0, 80, 2, 294, null, {});
+    const a = new Arrow(800, 300, 6, 0, 80, 2, 294, {});
     expect((a as unknown as { extraUpdates: number }).extraUpdates).toBe(100);
     expect(a.alpha).toBe(255);
     a.fixedUpdate(1 / 60, g);
@@ -321,7 +321,7 @@ describe('R28 §1 Shadowbeam Staff', () => {
     const g = makeGame(w);
     // 墙左侧 300px 起步向右：EU=100 → 首 tick 101 子步×6px 必撞（同 tick 内完成,
     // 寿命 300 子步 ≈3 tick 为原版语义,勿跨 tick 布景）
-    const a = new Arrow(16 * 120 - 300, 16 * 100 + 8, 6, 0, 80, 2, 294, null, {});
+    const a = new Arrow(16 * 120 - 300, 16 * 100 + 8, 6, 0, 80, 2, 294, {});
     a.fixedUpdate(1 / 60, g);
     expect((a as unknown as { dead: boolean }).dead).toBe(false);   // 不因撞块死
     expect(a.vx).toBeLessThanOrEqual(-6 + 1e-6);                    // 全速反号
@@ -332,7 +332,7 @@ describe('R28 §1 Shadowbeam Staff', () => {
 describe('R28 §4 Spirit Flame', () => {
   it('出生态零速悬浮：速度归零、出生点沿随机全圆向偏移 30px', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 3 * Math.cos(0.7), 3 * Math.sin(0.7), 85, 2, 659, null, {});
+    const a = new Arrow(800, 300, 3 * Math.cos(0.7), 3 * Math.sin(0.7), 85, 2, 659, {});
     const bx = a.cx, by = a.cy;
     a.fixedUpdate(1 / 60, g);
     expect(a.vx).toBe(0);
@@ -343,7 +343,7 @@ describe('R28 §4 Spirit Flame', () => {
   });
   it('三臂旋尘：每拍 ≤3 臂各 1/3 掷 d27 向心尘,scale 按 timeLeft 三档', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 300, 3, 0, 85, 2, 659, null, {});
+    const a = new Arrow(800, 300, 3, 0, 85, 2, 659, {});
     a.fixedUpdate(1 / 60, g);
     const armDusts = rec(g).dusts.filter((d) => d.type === 27 && d.alpha === 200 && d.noGravity);
     expect(armDusts.length).toBeGreaterThanOrEqual(0);        // 1/3 掷可能空拍
@@ -358,7 +358,7 @@ describe('R28 §4 Spirit Flame', () => {
       hurt: (d: number) => { hurtLog.push({ d }); return true; },
     };
     const g = makeGame(emptyWorld(), [enemy]);
-    const a = new Arrow(785, 290, 3, 0, 85, 2, 659, null, {});
+    const a = new Arrow(785, 290, 3, 0, 85, 2, 659, {});
     (a as unknown as { sf659Ai0: number }).sf659Ai0 = 7;      // 已锁敌态
     (a as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
     expect(hurtLog.length).toBe(1);
@@ -456,7 +456,7 @@ describe('R28 §15 Medusa Head', () => {
 describe('R28 数据面杂项', () => {
   it.each([[15], [253]])('火/冰之花 %i 自旋 rotation += 0.3×sign(vx)', (pid) => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 4, 0, 85, 2, pid, null, { grav: 0 });
+    const a = new Arrow(800, 100, 4, 0, 85, 2, pid, { grav: 0 });
     a.fixedUpdate(1 / 60, g);
     const r0 = (a as unknown as { spinRot: number }).spinRot;
     a.fixedUpdate(1 / 60, g);

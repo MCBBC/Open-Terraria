@@ -181,7 +181,7 @@ describe('② 沙枪三色砂换弹（PickAmmo :52666-52678）', () => {
 describe('②b 沙球 aiStyle10 物理（AI_010 :55060-55160）', () => {
   it('60 update 直飞后 +0.2/update（ai[1]≥60 门 :55071-55075），终端 10', () => {
     const game = makeSimGame(emptyWorld());
-    const b = new Arrow(10 * TILE, 100 * TILE, 12, 0, 30, 5, 42, null, {});
+    const b = new Arrow(10 * TILE, 100 * TILE, 12, 0, 30, 5, 42, {});
     // 42 extraUpdates=1（json）→ 每 tick 2 子步 = ai[1] +2/tick → 第 30 tick 触发
     for (let t = 0; t < 29 && !b.dead; t++) b.fixedUpdate(1, game);
     expect(b.vy).toBe(0);                        // ai[1] 1..58 < 60 直飞
@@ -197,7 +197,7 @@ describe('②b 沙球 aiStyle10 物理（AI_010 :55060-55160）', () => {
     expect(deco).toBeDefined();
     w.store.setTileSilent(20, 100, deco!, 0, 0);
     const game = makeSimGame(w);
-    const b = new Arrow(18 * TILE, 100 * TILE + 4, 8, 0, 30, 5, 42, null, {});
+    const b = new Arrow(18 * TILE, 100 * TILE + 4, 8, 0, 30, 5, 42, {});
     for (let t = 0; t < 40 && !b.dead; t++) b.fixedUpdate(1, game);
     expect(w.store.isActive(20, 100)).toBe(false);           // 途经即破坏
   });
@@ -205,11 +205,11 @@ describe('②b 沙球 aiStyle10 物理（AI_010 :55060-55160）', () => {
   it('四沙球族自动激活（ctor 按 aiStyle10 表）+ PROJ_SPIN 恒滚 0.1', () => {
     const game = makeSimGame(emptyWorld());
     for (const pid of [42, 65, 68, 354]) {
-      const b = new Arrow(10 * TILE, 100 * TILE, 12, 0, 30, 5, pid, null, {});
+      const b = new Arrow(10 * TILE, 100 * TILE, 12, 0, 30, 5, pid, {});
       expect((b as unknown as { sandBall: boolean }).sandBall, `proj ${pid}`).toBe(true);
       expect(projectileData(pid)?.aiStyle).toBe(10);
     }
-    const b = new Arrow(10 * TILE, 100 * TILE, 12, 0, 30, 5, 14, null, {});   // 子弹对照
+    const b = new Arrow(10 * TILE, 100 * TILE, 12, 0, 30, 5, 14, {});   // 子弹对照
     expect((b as unknown as { sandBall: boolean }).sandBall).toBe(false);
   });
 });

@@ -1683,9 +1683,18 @@ export class Dart extends Entity {
       }
     }
     // ---- 撞实心块 ----
-    const tx = Math.floor(this.cx / TILE);
-    const ty = Math.floor(this.cy / TILE);
-    if (game.world.store.isSolid(tx, ty)) {
+    // ★SW-FX7（2026-09-10）大盒弹缩盒 tile 判定（GetCollisionParams,Projectile.cs:
+    //  19982-20156）——原版 HandleMovement 的 TileCollision 用【缩盒】而非弹体盒:
+    //  44 魔镰 aiStyle18 → width−36 = 12×12（:20081-20085）;288 金雨命中缩盒名单
+    //  → 10×10（:20072-20080）。缩盒重叠 = TileCollision 截停 = velocity 变 →
+    //  默认 Kill 支 position+=velocity;Kill（:19962-19966）。此前中心格判定对
+    //  缩盒边缘 6px/5px 漏检（弹沿墙皮掠过时可多穿半格才消亡）。
+    //  其余弹型维持中心格近似（GetCollisionParams 其余分支逐型未对拍,登记债）。
+    const tileBoxHalf = st.tileBox ? st.tileBox / 2 : 0;
+    const tileHit = tileBoxHalf > 0
+      ? shotBoxSolid(game, this.cx - tileBoxHalf, this.cy - tileBoxHalf, st.tileBox!, st.tileBox!)
+      : game.world.store.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
+    if (tileHit) {
       // ★①290 暗影束撞块反弹（Update HandleMovement :18975-19018）：全速反号不消亡
       //  （penetrate=-1 无限反弹）+ 束段铺撒（上一锚点→当前心,Spawn_Shadowbeam
       //  敌版 velocityScalar=0.03334,ParticleOrchestrator.cs:1987-1993）后重锚。
@@ -2366,6 +2375,11 @@ interface DartStyle {
   accel?: { from: number; to: number; mul: number };   // 加速段(ai0 区间内每更新 ×mul)
   updates?: number;                      // extraUpdates(每 tick 完整更新次数)
   noTile?: boolean;                      // tileCollide=false 穿墙
+  /** ★SW-FX7：tile 碰撞缩盒边长（GetCollisionParams Projectile.cs:19982-20156，
+   *  中心锚）。原版 HandleMovement 的 Collision.TileCollision 用此盒而非弹体盒;
+   *  缺省 = 弹体盒近似为中心格判定（逐型对拍前维持现状）。44=12（aiStyle18
+   *  width−36 :20081）/ 288=10（缩盒名单 :20072） */
+  tileBox?: number;
   /** ★批五：碰玩家无伤穿透不消亡（NewProjectile damage=0 的原版形态——
    *  596 沙漠幽焰飞行伤=0+penetrate=-1,唯一伤害面=寿终 Kill 爆 :73762） */
   noPlayerHit?: boolean;
@@ -2494,6 +2508,7 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // 288 金雨(脓水粘怪 268 :25032):32×32,重力 0.075(:22835),scale -0.002/更新(:22824),
   //    extraUpdates2,旋转恒 0;尘 170 ×3;Item17
   288: { w: 32, h: 32, rot: 'none', alpha0: 255, fade: 50, grav: 0.075, updates: 2, shrink: 0.002,
+    tileBox: 10,   // ★SW-FX7：GetCollisionParams 缩盒名单（P.cs:20072）
     trail: { color: '#E8C060', count: 2 }, sfx: ['Item_17'], fallback: '#E0B040' },
   // 299 暗影焰(巨型诅咒颅 289 :21795):6×6,alpha255,tileCollide=false 穿墙,extraUpdates2,
   //    贴图 1×1 空桩→纯尘埃(尘 181);Item8@第6更新(:53761)
@@ -2540,8 +2555,14 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    (AI_018 P.cs:25780),加速 ×1.06@ai0[30,100)(:25782-25792),光=ProjLight 0.2×(0.6,0.1,B=1
   //    绝对)(:15054);Item8(:23723)。★尾迹=原版 AI 尾尘链(见 dartStep 44 支)——曾用通用
   //    trail(spawnParticles 单点 cx/cy,1/2 拍)2026-09-02 用户报"尾迹恒偏出弹体"退役
+  //    ★SW-FX7 勘误（2026-09-10）：spawn-parity-gaps.md 登记的"44 AI_018 蓄势段
+  //    AngleTowards(0.25) 转向(:23761-23774)"系误锚——1457 P.cs:25735-25737 的
+  //    AngleTowards 属 aiStyle18 内 type==1092 支（ai[1]<20 蓄势段）;44 走 :25780
+  //    起的通用支（spin+加速+尘,零转向/零追踪）。"飞镰加速段直线不追踪"正是
+  //    原版本相,不修。tile 碰撞另走 tileBox 12 缩盒（GetCollisionParams :20081）。
   44: { w: 48, h: 48, rot: 'spin', spinRate: 0.8, scale: 0.9, alpha0: 100, life: 300,
     accel: { from: 30, to: 100, mul: 1.06 },
+    tileBox: 12,   // ★SW-FX7：GetCollisionParams aiStyle18 width−36（P.cs:20081）
     sfx: ['Item_8'], fallback: '#B08050' },
   // 909 岩石巨人岩(631 :56722):12×12,roll,重力 0.4@38+xDamp0.97(:21527),随机帧 1-6(:21534)
   909: { w: 12, h: 12, rot: 'roll', grav: 0.4, gravDelay: 38, xDamp: 0.97, frameRand: 6, fallback: '#9A8C72' },

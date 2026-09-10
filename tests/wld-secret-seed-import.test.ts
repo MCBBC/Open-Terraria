@@ -192,6 +192,7 @@ function buildFixture(opts: {
   mark();
   w.i32(0);            // shimmered count (268)
   w.bool(false);       // end town loop
+  w.bool(false);       // SavesAndLoads 尾（★SW-FX11 起解析,WF:1744-1755 原版恒写）
 
   for (let i = 0; i < 5; i++) mark();
 

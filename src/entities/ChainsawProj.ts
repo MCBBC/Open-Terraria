@@ -5,7 +5,8 @@
 // :23879/:23921-23922）、velocity = 瞄准向归一×(shootSpeed×scale)（每帧直写
 // :23884-23902）、松链即 Kill（:23904-23907）；音效按持械物品 pick 分档
 // （:23866-23878：>0 → Item190 每 15t，否则 Item189 每 20t）；rotation =
-// atan2(vy,vx)+1.57（:23923）；尘 31 火花（1/6、出生 = position+velocity×
+// atan2(vy,vx)+1.5700000524（:25889,1.57f≈π/2——★SW-FX4 勘误:旧注 :23923 系 1456 锚
+// 残留,且旧 draw 曾把该 π/2 重复加了两次,见 draw 支注）；尘 31 火花（1/6、出生 = position+velocity×
 // Next(6,10)×0.1 前向偏移、X−4、noGravity、vy = −Next(7,13)×0.15 向上反溅
 // :23933-23941）；velocity.X 抖动 ×(1+Next(−3,4)×0.01)（:23932）。
 // 命中 = 弹盒（SetDefaults 宽高）持续判定 + 同敌 10t 免疫（509
@@ -29,7 +30,7 @@
 // ⑥杀拍口径批已照配方清偿（杀位补跑湿段+挂点重钉,见 fixedUpdate 杀支注）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
-import { projSprite } from './Arrow';
+import { projSprite, projFrameCount } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -273,14 +274,25 @@ export class ChainsawProj extends Entity {
     const img = projSprite(this.projId);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
-    const frames = Math.max(1, Math.round(img.height / img.width));
+    // ★SW-FX4 帧切片改权威表（Main.projFrames；Main.cs:8620 projFrames[509]=2 /
+    //  :8750 projFrames[252]=4,余 19 型无赋值恒 1——draw 支取数同 Arrow.projFrameCount）：
+    //  原版通用 draw 源矩形 = (0, 帧高×frame, 图宽, 图高/projFrames)、origin=帧心
+    //  （Main.cs:30625-30631 num161=Height()/projFrames + y11=num161×frame +
+    //  rectangle4/origin8=Size()/2）。旧式 Math.round(图高/图宽) 对本族 21 型全错：
+    //  竖长单帧条（57=14×54 等）被切成 3-4 份只画顶部 13-18px 小块、252(22×240)
+    //  切成 11 份（应 4×60）、509(28×140) 切成 5 份（应 2×70）——持械钻/锯画成碎屑。
+    const frames = projFrameCount(this.projId);
     const fh = img.height / frames;
     const idx = Math.min(frames - 1, this.frame % frames);
-    const rot = Math.atan2(this.vy, this.vx) + Math.PI / 2 + 1.57;   // :23923（+π/2 贴图纵向 +1.57 链锯修正）
+    // 姿态角（Projectile.cs:25889 AI_020 尾 `rotation = Atan2(velocity.Y, velocity.X)
+    // + 1.5700000524f`）——单一 +π/2,贴图钻头朝上旋向瞄准向。旧式再 +1.57（=又转
+    // π/2,合计 +π）把钻头转离瞄准向 180°,且 vx<0 时画布纵向翻转（原版无此臂——
+    // DrawProjDirect 的 dir 翻转仅 ownerHitCheck && gravDir==-1 倒重力支 Main.cs:35447-35456,
+    // 常规重力 dir=SpriteEffects.None）——两处均本仓自创,随 SW-FX4 勘误撤除。
+    const rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;   // :25889（1.5700000524f 即 π/2）
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(rot);
-    if (this.vx < 0) ctx.scale(1, -1);
     ctx.imageSmoothingEnabled = false;
     const dw = img.width * this.drawScale, dh = fh * this.drawScale;
     ctx.drawImage(img, 0, idx * fh, img.width, fh, -dw / 2, -dh / 2, dw, dh);

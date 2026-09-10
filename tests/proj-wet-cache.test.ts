@@ -109,7 +109,7 @@ describe('★F2② inLiquid 扫描窗钳制（Wet/LavaCollision :1595-1598/:1663
 // =====================================================================
 /** 燃烧箭（projId 2,IsDestroyedByWater 变型族）：静止弹,手动摆位驱动 */
 function mkArrow(store: TileStore, x: number, y: number): { a: Arrow; g: GameHooks; tick(n: number): void } {
-  const a = new Arrow(x, y, 0, 0, 12, 1, 2, null, { grav: 0 });
+  const a = new Arrow(x, y, 0, 0, 12, 1, 2, { grav: 0 });
   a.w = 10; a.h = 10;
   const g = hooks(store);
   return {
@@ -246,7 +246,7 @@ describe('★V3 溅花/湿计数段（:16935-17102）逐值', () => {
   function mkSplash(store: TileStore, projId: number, x: number, y: number) {
     const dusts: Array<{ type: number; x: number; y: number; sw: number; sh: number; d: { vx: number; vy: number; scale: number; alpha: number; noGravity: boolean; color: unknown } }> = [];
     const sounds: Array<{ file: string; vol: number; pitch: number }> = [];
-    const a = new Arrow(x, y, 0, 0, 12, 1, projId, null, { grav: 0 });
+    const a = new Arrow(x, y, 0, 0, 12, 1, projId, { grav: 0 });
     a.w = 10; a.h = 10;
     const g = {
       ...hooks(store),
@@ -374,7 +374,7 @@ describe('★L2 湿段时序钉 + 水中位移阻尼（2026-09-04 重排金标�
   /** 位移记录宿主（469/1 型 EU=0 → 1 fixedUpdate = 1 子步;尘按盒尺寸分流） */
   function mkMoving(store: TileStore, projId: number, x: number, y: number, vx: number) {
     const dusts: Array<{ sw: number; sh: number; type: number }> = [];
-    const a = new Arrow(x, y, vx, 0, 12, 1, projId, null, { grav: 0 });
+    const a = new Arrow(x, y, vx, 0, 12, 1, projId, { grav: 0 });
     const g = {
       ...hooks(store),
       spawnDust: (_sx: number, _sy: number, sw: number, sh: number, type: number) => {
@@ -468,7 +468,7 @@ describe('★L2 湿段时序钉 + 水中位移阻尼（2026-09-04 重排金标�
 describe('★⑥ 杀拍湿段（AI 杀当拍湿段照跑,:16903 无 active 门）', () => {
   function mkKill(store: TileStore, projId: number, x: number, y: number) {
     const dusts: Array<{ sw: number; sh: number; type: number }> = [];
-    const a = new Arrow(x, y, 0, 0, 12, 1, projId, null, { grav: 0 });
+    const a = new Arrow(x, y, 0, 0, 12, 1, projId, { grav: 0 });
     a.w = 10; a.h = 10;
     const g = {
       ...hooks(store),
@@ -545,7 +545,7 @@ describe('★⑥ 杀拍湿段（AI 杀当拍湿段照跑,:16903 无 active 门�
 // =====================================================================
 describe('★③ flare 贴壁与通用湿阻尼叠加对拍（:18731-18745 × :17721-17764/:20555-20562）', () => {
   function mkFlare(store: TileStore, x: number, y: number, vx: number) {
-    const a = new Arrow(x, y, vx, 0, 12, 1, 163, null, { grav: 0 });
+    const a = new Arrow(x, y, vx, 0, 12, 1, 163, { grav: 0 });
     a.w = 10; a.h = 10;
     const g = hooks(store);
     const tick = (n: number) => { for (let i = 0; i < n && !a.dead; i++) a.fixedUpdate(1 / 60, g); };

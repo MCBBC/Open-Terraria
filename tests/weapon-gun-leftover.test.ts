@@ -118,7 +118,7 @@ describe('备案遗留① 信号枪弹 163（AI_033 Projectile.cs:27425-27498）
   it('SetDefaults 面：6×6 盒/penetrate −1/timeLeft 36000/alpha 255/重力规格 0', () => {
     expect(projGravSpec(163)).toEqual({ grav: 0, delay: -1 });   // aiStyle 33 不入 AI_001 重力链
     const game = makeGame(emptyWorld());
-    const f = new Arrow(10 * TILE, 40 * TILE, 4, -2, 2, 1.5, 163, null, {});
+    const f = new Arrow(10 * TILE, 40 * TILE, 4, -2, 2, 1.5, 163, {});
     expect(f.w).toBe(6);
     expect(f.h).toBe(6);
     expect(f.pierce).toBe(-1);
@@ -130,7 +130,7 @@ describe('备案遗留① 信号枪弹 163（AI_033 Projectile.cs:27425-27498）
 
   it('alpha −50/t 渐显（:27428-27435）；30t 后每拍 vy+0.09（:27474-27482）、终端 16', () => {
     const game = makeGame(emptyWorld());
-    const f = new Arrow(10 * TILE, 40 * TILE, 4, 0, 2, 0, 163, null, {});
+    const f = new Arrow(10 * TILE, 40 * TILE, 4, 0, 2, 0, 163, {});
     f.fixedUpdate(1, game);
     expect(f.alpha).toBe(205);
     for (let t = 0; t < 28; t++) f.fixedUpdate(1, game);   // 累计 29 拍
@@ -148,7 +148,7 @@ describe('备案遗留① 信号枪弹 163（AI_033 Projectile.cs:27425-27498）
     const w = emptyWorld();
     for (let y = 30; y <= 50; y++) w.store.setTileSilent(30, y, 1, 0, 0);   // 竖墙
     const game = makeGame(w);
-    const f = new Arrow(26 * TILE, 40 * TILE, 4, 0, 7, 0, 163, null, {});
+    const f = new Arrow(26 * TILE, 40 * TILE, 4, 0, 7, 0, 163, {});
     for (let t = 0; t < 20 && !f.dead; t++) f.fixedUpdate(1, game);
     expect(f.dead).toBe(false);                 // 贴壁不消亡（penetrate −1 + aiStyle33 支）
     expect(f.vx).toBe(0);
@@ -166,14 +166,14 @@ describe('备案遗留① 信号枪弹 163（AI_033 Projectile.cs:27425-27498）
   it('命中点燃：163 → OnFire 5-10s（:11687-11696）；1009 诅咒弹 → Cursed Inferno 10s（:11702-11705）', () => {
     const enemy = { ...mkEnemy(1, 12, 40), onFireT: undefined as number | undefined };
     const game = makeGame(emptyWorld(), [enemy]);
-    const f = new Arrow(12 * TILE - 4, 40 * TILE - 4, 0.5, 0, 2, 0, 163, null, {});
+    const f = new Arrow(12 * TILE - 4, 40 * TILE - 4, 0.5, 0, 2, 0, 163, {});
     for (let t = 0; t < 8 && enemy.onFireT === undefined; t++) f.fixedUpdate(1, game);
     expect(enemy.onFireT).toBeDefined();
     expect(enemy.onFireT!).toBeGreaterThanOrEqual(5);
     expect(enemy.onFireT!).toBeLessThanOrEqual(10);
     const enemy2 = { ...mkEnemy(2, 12, 40), cursedT: undefined as number | undefined };
     const game2 = makeGame(emptyWorld(), [enemy2]);
-    const c = new Arrow(12 * TILE - 4, 40 * TILE - 4, 0.5, 0, 2, 0, 1009, null, {});
+    const c = new Arrow(12 * TILE - 4, 40 * TILE - 4, 0.5, 0, 2, 0, 1009, {});
     for (let t = 0; t < 8 && !enemy2.cursedT; t++) c.fixedUpdate(1, game2);
     expect(enemy2.cursedT).toBe(10);
   });
@@ -185,7 +185,7 @@ describe('备案遗留② 叶绿弹 207 自导引（AI_001 :53906-54010）', () 
   it('300px 锁敌 + (v×7+dir·v0)/8 保速转向；初速基准 localAI[0] 不随转向衰减', () => {
     const enemy = mkEnemy(7, 108, 58);
     const game = makeGame(emptyWorld(), [enemy]);
-    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, null, { extraUpdates: 0 });
+    const a = new Arrow(100 * TILE, 50 * TILE, 5, 0, 9, 4.5, 207, { extraUpdates: 0 });
     a.fixedUpdate(1, game);
     expect(a.chloAi1).toBe(7);                       // ai[1] 锚定（:53963-53966）
     expect(a.chloSpeed).toBeCloseTo(5, 9);
@@ -208,7 +208,7 @@ describe('备案遗留④b 新枪弹体行为（AI_093 :33425-33487 / AI_001 :58
     const hits: number[] = [];
     e.hurt = (d: number) => { hits.push(d); return true; };
     const game = makeGame(emptyWorld(), [e]);
-    const n = new Arrow(20 * TILE - 40, 40 * TILE - 4, 4, 0, 100, 0, 514, null, {});
+    const n = new Arrow(20 * TILE - 40, 40 * TILE - 4, 4, 0, 100, 0, 514, {});
     n.critChance = 0;   // 钉死确定性（默认 0.04 暴击 ×2 DoT=4% 偶发 30≠15）
     expect(n.nail93).toBe(true);
     for (let t = 0; t < 20 && n.nailAi0 === 0; t++) n.fixedUpdate(1, game);
@@ -226,7 +226,7 @@ describe('备案遗留④b 新枪弹体行为（AI_093 :33425-33487 / AI_001 :58
     const w = emptyWorld();
     for (let y = 35; y <= 45; y++) w.store.setTileSilent(30, y, 1, 0, 0);
     const game = makeGame(w);
-    const n = new Arrow(26 * TILE, 40 * TILE, 4, 0, 100, 0, 514, null, {});
+    const n = new Arrow(26 * TILE, 40 * TILE, 4, 0, 100, 0, 514, {});
     for (let t = 0; t < 20 && n.nailAi0 === 0; t++) n.fixedUpdate(1, game);
     expect(n.nailAi0).toBe(1);
     const sp0 = Math.hypot(n.vx, n.vy);
@@ -237,7 +237,7 @@ describe('备案遗留④b 新枪弹体行为（AI_093 :33425-33487 / AI_001 :58
 
   it('刺炮弹 246：alpha −20/t 渐显 + 60 子步后 vy+0.15（:58105-58114）', () => {
     const game = makeGame(emptyWorld());
-    const s = new Arrow(10 * TILE, 40 * TILE, 6, 0, 17, 1, 246, null, { extraUpdates: 0 });
+    const s = new Arrow(10 * TILE, 40 * TILE, 6, 0, 17, 1, 246, { extraUpdates: 0 });
     expect(s.alpha).toBe(255);
     s.fixedUpdate(1, game);
     expect(s.alpha).toBe(235);
@@ -249,7 +249,7 @@ describe('备案遗留④b 新枪弹体行为（AI_093 :33425-33487 / AI_001 :58
 
   it('糖果玉米 311：alpha −50/t 渐显 + 30 拍后 vy+0.5（:58116-58132）+ 同敌 10t 冷却', () => {
     const game = makeGame(emptyWorld());
-    const c = new Arrow(10 * TILE, 40 * TILE, 6, 0, 9, 1.5, 311, null, { extraUpdates: 0 });
+    const c = new Arrow(10 * TILE, 40 * TILE, 6, 0, 9, 1.5, 311, { extraUpdates: 0 });
     expect(c.alpha).toBe(255);
     c.fixedUpdate(1, game);
     expect(c.alpha).toBe(205);

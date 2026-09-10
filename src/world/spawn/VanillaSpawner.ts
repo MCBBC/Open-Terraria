@@ -2743,7 +2743,10 @@ export class VanillaSpawner {
       const f = this.world.flags;
       const downedPlant = !!f['downed_262'];   // downedPlantBoss（世花 262）
       const flag14 = !!(f['downed_134'] && (f['downed_125'] || f['downed_126']) && f['downed_127']);
-      let cnt467 = 0; for (const id of this.activeIds) if (id === 467) cnt467++;
+      // ★SW-FX7（2026-09-10）：原为 activeIds（Set）迭代计数=恒 0/1——原版
+      //  CountNPCS(467)<2（NPC.cs:3575）是真计数，2 只在场仍会再放行第 3 只。
+      //  改走 Game 注入计数通道（countNpc）。
+      const cnt467 = this.countNpc(467);
       if (downedPlant && N(80) && !any(477)) return D(477);    // 飞蛾魔 Mothron（唯一）
       if (N(50) && !any(251)) return D(251);                   // 独眼怪 Eyezor（唯一）
       if (downedPlant && N(5) && !any(466)) return D(466);     // 精神病人 Psycho（唯一）
@@ -3773,10 +3776,17 @@ export class VanillaSpawner {
     return count >= 120 * 3 * 0.8;
   }
 
-  /** CountNPCS 近似：优先用 Game 传入的计数表（月事件/星璇塔 ctx 同源），
-   *  无事件时退化为 activeIds 的 0/1 检测（Set 去重，无法区分 1 只与 N 只——
-   *  登记 docs/spawn-parity-gaps.md）。消费点：地牢外 513 唯一门 / 地表雨云怪 250<2 */
+  /** CountNPCS（NPC.cs CountNPCS 遍历 Main.npc 全表）：Game 每周期注入的全量
+   *  vanilla id→存活数表（SW-FX7 2026-09-10 补齐——此前无事件时退化为 activeIds
+   *  的 0/1 检测，N 阈值门失真：250 雨云怪 <2（:4192）/ 467 致命球 <2（:3575）/
+   *  510 沙幽灵 <4（:3973）/ 74+297+298 晨鸟 <6（:4328）在 ≥2 只在场时仍放行）。
+   *  ★==0 型唯一门（513 :1703 / 453 :5007）在旧退化下也正确——Set 语义与计数对
+   *  ==0 判定等价，故此通道此前只伤"上限"不伤"唯一" */
+  npcCounts: Map<number, number> = new Map();
   private countNpc(id: number): number {
+    const injected = this.npcCounts.get(id);
+    if (injected != null) return injected;
+    // 兼容回退（测试/未注入域）：月事件/星璇塔 ctx 计数表 → activeIds 0/1 检测
     const c = this.moonEvent?.counts.get(id) ?? this.lunar?.counts.get(id);
     if (c != null) return c;
     return this.activeIds.has(id) ? 1 : 0;

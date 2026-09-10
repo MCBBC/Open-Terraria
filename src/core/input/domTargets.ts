@@ -18,7 +18,16 @@ export const DOM_UI_TARGET_SELECTOR =
   // .sw-vinv = 原版布局全屏层(2026-09-07 刀 2):pointer-events:none 根+绝对定位子元素,
   // 不登记则列间缝隙点击穿透成世界挥剑(eqdock 同族事故)
 
-/** event.target 是否落在 DOM UI 上(命中=点击归 UI,不透传为世界输入) */
+/** event.target 是否落在 DOM UI 上(命中=点击归 UI,不透传为世界输入)。
+ *  ★SW-FX10 债⑪：`data-sw-world-passthrough="1"` 子树豁免——热键锁开启且关包时,
+ *  快捷栏格在原版不是 mouseInterface（Main.cs:44353 `!player.hbLocked` hover 门整体
+ *  不进）,点击须透传为世界输入（对着快捷栏区域挖矿/放置正是本功能的用途）。
+ *  属性面由 UI.paintHotbarLockState 按态挂摘;closest 形式覆盖格内子元素（槽号/幽灵图）。
+ *  守卫 = `e?.dataset` 存在才走豁免支:真实 Element 恒有 dataset;测试桩
+ *  （closest 恒回真值的合成对象,如 rightclick-subframe/bj32 夹具）无 dataset,
+ *  保持旧判定路径——豁免支不得改变「closest 桩语义」既有契约。 */
 export function isDomUiTarget(t: EventTarget | null | undefined): boolean {
-  return !!t && (t as HTMLElement).closest?.(DOM_UI_TARGET_SELECTOR) != null;
+  const e = t as HTMLElement | null | undefined;
+  if (e?.dataset && e.closest?.('[data-sw-world-passthrough="1"]')) return false;
+  return !!e && e.closest?.(DOM_UI_TARGET_SELECTOR) != null;
 }

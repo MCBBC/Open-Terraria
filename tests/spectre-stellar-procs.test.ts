@@ -106,14 +106,14 @@ describe('661 黑爆命中管线：dist>500 或 CanHitLine 断 ⇒ 不结算', (
     // 弹 10×10 放在原点；敌宽 1200 从弹右侧遮到远处——中心距 590>500
     const big = mkEnemy(1, 12, -20, 1200, 40);
     const { hooks } = makeHooks([big]);
-    const a = new Arrow(-5, -5, 0.01, 0, 50, 2, 661, null);
+    const a = new Arrow(-5, -5, 0.01, 0, 50, 2, 661);
     a.fixedUpdate(1 / 60, hooks);
     expect(big.hits).toEqual([]);
   });
   it('近距小目标正常结算（对照臂）', () => {
     const near = mkEnemy(1, 4, -14, 18, 40);
     const { hooks } = makeHooks([near]);
-    const a = new Arrow(-8, -8, 0.01, 0, 50, 2, 661, null);
+    const a = new Arrow(-8, -8, 0.01, 0, 50, 2, 661);
     a.fixedUpdate(1 / 60, hooks);
     expect(near.hits.length).toBeGreaterThan(0);
   });
@@ -125,7 +125,7 @@ describe('661 黑爆命中管线：dist>500 或 CanHitLine 断 ⇒ 不结算', (
       store.setTile(74, ty, TILE_BY_KEY['stone']);
       store.setTile(75, ty, TILE_BY_KEY['stone']);
     }
-    const a = new Arrow(1000 - 5, 1734 - 20, 0.01, 0, 50, 2, 661, null);
+    const a = new Arrow(1000 - 5, 1734 - 20, 0.01, 0, 50, 2, 661);
     a.fixedUpdate(1 / 60, hooks);
     expect(near.hits).toEqual([]);
   });

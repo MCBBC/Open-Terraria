@@ -59,12 +59,12 @@ function mkHooks(enemies: MockEnemy[] = []) {
   return { hooks: hooks as unknown as GameHooks, world: w, player };
 }
 
-type SFOpts = Partial<ConstructorParameters<typeof Arrow>[8]>;
+type SFOpts = Partial<ConstructorParameters<typeof Arrow>[7]>;
 /** NewProjectile 496 出手参缺省：重力 0（aiStyle91 无重力段）+ 穿透 3。
  *  top-left 传「意想 Center − 20」（出生盒 40×40 → Center=top-left+20） */
 const mkArrow = (cx: number, cy: number, vx: number, vy: number,
-  opts: SFOpts = {}): Arrow => new Arrow(cx - 20, cy - 20, vx, vy, 32, 2, 496, null,
-  { grav: 0, pierce: 3, extraUpdates: 0, ...opts } as ConstructorParameters<typeof Arrow>[8]);
+  opts: SFOpts = {}): Arrow => new Arrow(cx - 20, cy - 20, vx, vy, 32, 2, 496,
+  { grav: 0, pierce: 3, extraUpdates: 0, ...opts } as ConstructorParameters<typeof Arrow>[7]);
 
 describe('496 暗影炎弓箭 aiStyle 91（Projectile.cs:33097-33148）', () => {
   it('【数据面】vanilla-projectiles/projstatus 496 条目（缺口登记哨兵）', () => {
@@ -269,7 +269,7 @@ describe('496 暗影炎弓箭 aiStyle 91（Projectile.cs:33097-33148）', () => 
   it('⑦88 激光支零影响:ai0 槽双消费面分流（88=extraUpdates 接管/496=纯数据）', () => {
     const { hooks } = mkHooks();
     // 88：opts.ai0 → hostileAi0 → AI 支头 extraUpdates 直写（Projectile.cs:54979-54982）
-    const laser = new Arrow(500, 500, 6, 0, 10, 1, 88, null, { grav: 0, ai0: 3 });
+    const laser = new Arrow(500, 500, 6, 0, 10, 1, 88, { grav: 0, ai0: 3 });
     const lk = laser as unknown as { hostileAi0: number; extraUpdates: number };
     expect(lk.hostileAi0).toBe(3);
     laser.fixedUpdate(1 / 60, hooks);

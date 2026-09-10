@@ -93,7 +93,7 @@ describe('452 幻影矢三段弹道(aiStyle 82)', () => {
   it('135t 弧线上升后 14 速追踪,距玩家 <30 消亡', () => {
     const h = makeHarness({ x: 80, y: 96 });
     const p0 = h.player.cx, p1 = h.player.cy;
-    const a = new Arrow(p0, p1 - 200, 0, -8, 30, 0, 452, null,
+    const a = new Arrow(p0, p1 - 200, 0, -8, 30, 0, 452,
       { grav: 0, life: 600, pierce: 1, hostile: true, phantasm: { spin: 0.1 } });
     h.projectiles.push(a);
     h.enemies.push({ id: 999, dead: true, x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, facing: 1, visAngle: 0 });
@@ -110,7 +110,7 @@ describe('452 幻影矢三段弹道(aiStyle 82)', () => {
 
   it('上升段 vx 弧线弯转钳 ±6', () => {
     const h = makeHarness({ x: 80, y: 96 });
-    const a = new Arrow(h.player.cx, h.player.cy - 400, 0, -8, 30, 0, 452, null,
+    const a = new Arrow(h.player.cx, h.player.cy - 400, 0, -8, 30, 0, 452,
       { grav: 0, life: 600, pierce: 1, hostile: true, phantasm: { spin: 0.5 } });
     h.projectiles.push(a);
     h.enemies.push({ id: 999, dead: true, x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, facing: 1, visAngle: 0 });
@@ -125,7 +125,7 @@ describe('454 幻影能量球归巢(aiStyle 83)', () => {
     const h = makeHarness({ x: 80, y: 96 });
     const hand = { id: 7, dead: false, x: 1000, y: 1000, w: 100, h: 100, cx: 1050, cy: 1050, facing: 1, visAngle: 0 };
     h.enemies.push(hand);
-    const orb = new Arrow(hand.cx, hand.cy, 6, -6, 40, 0, 454, null,
+    const orb = new Arrow(hand.cx, hand.cy, 6, -6, 40, 0, 454,
       { grav: 0, life: 600, pierce: 1, hostile: true, phantomOrb: { ownerId: 7, ai0: 0 } });
     h.projectiles.push(orb);
     // 随行:ai0<30 期间球心钉在手心(position = 主心 − 尺寸/2)
@@ -155,9 +155,9 @@ describe('454 幻影能量球归巢(aiStyle 83)', () => {
     const h = makeHarness({ x: 80, y: 96 });
     h.enemies.push({ id: 7, dead: false, x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, facing: 1, visAngle: 0 });
     h.enemies.push({ id: 8, dead: false, x: 0, y: 0, w: 0, h: 0, cx: 0, cy: 0, facing: 1, visAngle: 0 });
-    const mine = new Arrow(0, 0, 0, 0, 40, 0, 454, null,
+    const mine = new Arrow(0, 0, 0, 0, 40, 0, 454,
       { grav: 0, life: 600, pierce: 1, hostile: true, phantomOrb: { ownerId: 7, ai0: 30 } });
-    const other = new Arrow(0, 0, 0, 0, 40, 0, 454, null,
+    const other = new Arrow(0, 0, 0, 0, 40, 0, 454,
       { grav: 0, life: 600, pierce: 1, hostile: true, phantomOrb: { ownerId: 8, ai0: 30 } });
     h.projectiles.push(mine, other);
     volleyPhantomOrbs(h.hooks, 7, 0, -12);
@@ -169,7 +169,7 @@ describe('454 幻影能量球归巢(aiStyle 83)', () => {
 describe('1021 月总巨砾物理(aiStyle 25)', () => {
   it('重力 0.06 下落,Y 撞 Dig 音 + ×−0.9 反弹,轻落置 rest 后滚动加速', () => {
     const h = makeHarness({ x: 10, y: 10 });
-    const b = new Arrow(80 * TILE, 95 * TILE, 2, 12, 70, 0, 1021, null,
+    const b = new Arrow(80 * TILE, 95 * TILE, 2, 12, 70, 0, 1021,
       { grav: 0.06, life: 900, pierce: 1, hostile: true, mlBoulder: true });
     h.projectiles.push(b);
     // 高速下坠撞地:vy>4 → Dig 音 + ×−0.9 反弹(:17578-17588)
@@ -186,7 +186,7 @@ describe('1021 月总巨砾物理(aiStyle 25)', () => {
 describe('448 火箭引信/追踪/爆炸(aiStyle 80)', () => {
   it('20t 引信后 +4 加速(8→12);近身 42px 爆炸重结算伤害', () => {
     const h = makeHarness({ x: 84, y: 96 });
-    const r = new Arrow(80 * TILE, 90 * TILE, 8, 0, 50, 0, 448, null,
+    const r = new Arrow(80 * TILE, 90 * TILE, 8, 0, 50, 0, 448,
       { grav: 0, life: 3600, pierce: 1, hostile: true, martianRocket: true });
     h.projectiles.push(r);
     step(h, 20);

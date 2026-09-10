@@ -154,7 +154,6 @@ describe('IIIII235 圣骑士 290 底对齐缩盒（GetTileCollisionParameters NP
     const w = buildWorld(3);
     const withInset = body(46 * TILE, 22);
     walk(withInset, w, 240);
-    console.log('DBG gap3 inset x=', withInset.x, (withInset.x / TILE));
     expect(withInset.x < 40 * TILE).toBe(true);              // 走过墙左侧
     const fullBox = body(46 * TILE, undefined);
     walk(fullBox, w, 240);

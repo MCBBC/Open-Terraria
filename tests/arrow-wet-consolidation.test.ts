@@ -47,7 +47,7 @@ function mkWet(store: TileStore, projId: number, x: number, y: number, vx = 0) {
   const dusts: Array<{ type: number; x: number; y: number; sw: number; sh: number;
     d: { vx: number; vy: number; scale: number; alpha: number; noGravity: boolean; color: unknown } }> = [];
   const sounds: Array<{ file: string; vol: number; pitch: number }> = [];
-  const a = new Arrow(x, y, vx, 0, 12, 1, projId, null, { grav: 0, life: 300 });
+  const a = new Arrow(x, y, vx, 0, 12, 1, projId, { grav: 0, life: 300 });
   a.w = 10; a.h = 10;
   const g = {
     ...hooks(store),
@@ -271,7 +271,7 @@ function mk936(vy0: number) {
     entities: { nextId: 1, add: () => {} },
     addLightAt: () => {},
   } as unknown as GameHooks;
-  const a = new Arrow(25 * 16, 18 * 16, 0, vy0, 50, 0, 936, null, { grav: 0 });
+  const a = new Arrow(25 * 16, 18 * 16, 0, vy0, 50, 0, 936, { grav: 0 });
   a.x = 25 * 16 + 1 - a.w / 2;               // 心落液格内（shimmerImmersed 中心格重查过）
   a.y = 18 * 16 + 6 - a.h / 2;
   return { a, w, g };

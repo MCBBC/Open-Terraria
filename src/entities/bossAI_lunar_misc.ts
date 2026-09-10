@@ -256,7 +256,7 @@ function shootL(
   arrowOpts?: Partial<import('./Arrow').ArrowOpts>,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }),
     'projectiles');
 }
 
@@ -2269,7 +2269,7 @@ export class LunarOrb extends Entity {
             const dx = p.cx - this.cx, dy = p.cy - this.cy;
             const d = Math.hypot(dx, dy) || 1;
             (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(
-              new Arrow(this.cx, this.cy, (dx / d) * 8, (dy / d) * 8, 65, 0, 576, null,
+              new Arrow(this.cx, this.cy, (dx / d) * 8, (dy / d) * 8, 65, 0, 576,
                 { grav: 0, life: 600, pierce: 1, hostile: true }), 'projectiles');
             // 弹 576 出生音:Projectile.cs:56327-56331 ai[1]==0 首拍 SoundID.Item12（R8 勘误:
             //  56443-56447 为 numUpdates==1 的 α 面尘 229,非播音行）——

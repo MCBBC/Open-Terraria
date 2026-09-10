@@ -503,6 +503,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       g.player.appearance = selectedAppearance;
       if (typeof selectedAppearance.team === 'number') g.player.team = selectedAppearance.team;
       g.net?.resendAppearance();
+      // ★SW-RB10b（2026-09-10）：单人读档渔夫任务完成旗重构（WorldGen.cs:6781-6784
+      //  playWorldCallBack）。vanilla 时序=LoadPlayer 先于 loadWorld 装配尾、重构时
+      //  角色名已就位；本仓倒置（loadWorld→afterWorldLoad 先跑，角色名此刻才落位），
+      //  原挂 afterWorldLoad 的重构拿到的是缺省名（appearance 未应用→playerName()
+      //  回落 l10n DefaultPlayerName），与名单内真实角色名 Contains 恒 false=旗恒
+      //  false（用户实报「持鱼提交不了」的残余半边，BJ45 单测以缺省名作名单项被
+      //  掩盖）。幂等；联机不重构（原版走 msg74，Game 方法内自带门）。
+      g.reconstructAnglerFinishedOnPlayerNamed();
     }
   }
 
@@ -584,6 +592,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       g.player.hideVisibleAccessory = hv;
     }
     if (player.hairDye !== undefined) g.player.hairDye = player.hairDye;   // PL:53805-53808 发色剂 byte（旧档缺省 0）
+    if (player.hbLocked !== undefined) g.player.hbLocked = player.hbLocked;               // SW-FX10 债⑪:PL:56268 读
+    if (player.enabledSuperCart !== undefined) g.player.enabledSuperCart = player.enabledSuperCart;  // SW-FX10 债⑩:PL:56368 位[1] 读
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示
     g.cb.onInventoryChanged();
@@ -941,7 +951,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           hardMode: !!game.world.flags.hardMode,
         });
       }
-      const json = saveGame(game.world, game.player, cumulativePlayMs(), game.townNpcsForSave(), game.eventsForSave());
+      const json = saveGame(game.world, game.player, cumulativePlayMs(), game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave());
       if (currentWorld) currentWorld.hardMode = !!game.world.flags.hardMode;   // 图标 Hallow 前缀随肉山刷新
       await worldStore.save(currentWorld, json, cumulativePlayMs());
       const lobbyPort = addr.includes(':') ? parseInt(addr.split(':')[1], 10) : 7778;
@@ -1403,7 +1413,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const hardModeNow = !!game.world.flags.hardMode;
     const playTimeMs = cumulativePlayMs();
     saveClient.ensure();
-    void saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
+    void saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave()).then((json) => {
       void kvSetCompat(json).then((where) => {
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
@@ -1444,7 +1454,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (!game) return;
     saveClient.ensure();
     // 导出档同链：playTime 一并写累计口径（与槽位/quick 档一致,2026-09-01 审计）
-    void saveClient.save(game.world, game.player, cumulativePlayMs(), game.townNpcsForSave(), game.eventsForSave()).then((json) => {
+    void saveClient.save(game.world, game.player, cumulativePlayMs(), game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave()).then((json) => {
       const name = (game!.world.name ?? 'world').replace(/\s+/g, '_');
       const d = new Date();
       const p = (n: number) => String(n).padStart(2, '0');
@@ -1520,7 +1530,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     spawnHostileProj: async (x: number, y: number, vx: number, vy: number, dmg: number, projId = 9, grav = 0) => {
       const { Arrow } = await import('./entities/Arrow');
       if (!game) return null;
-      const p = new Arrow(x, y, vx, vy, dmg, 0, projId, null, { hostile: true, grav });
+      const p = new Arrow(x, y, vx, vy, dmg, 0, projId, { hostile: true, grav });
       game.entities.add(p, 'projectiles');
       return { id: p.id };
     },

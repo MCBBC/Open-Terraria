@@ -31,6 +31,9 @@ interface SaveRequest {
   playTimeMs: number;
   townNpcs?: import('../save/serialize').SaveData['npcs'];
   events?: import('../save/serialize').SaveData['events'];
+  /** ★SW-FX11（2026-09-10）：四塔位/压力板位（worker 序列化与主线程同参） */
+  pillarNpcs?: import('../save/serialize').SaveData['pillarNpcs'];
+  pressurePlates?: import('../save/serialize').SaveData['pressurePlates'];
 }
 
 type SaveWorkerRequest = SaveRequest
@@ -115,7 +118,7 @@ self.onmessage = (e: MessageEvent<SaveWorkerRequest>) => {
       explored: req.bufs.explored ? new Uint8Array(req.bufs.explored) : undefined,
     };
     const meta: SaveMeta = { ...req.meta, w: req.w, h: req.h };
-    const json = serializeSave(view, meta, req.player, req.playTimeMs, req.townNpcs, req.events);
+    const json = serializeSave(view, meta, req.player, req.playTimeMs, req.townNpcs, req.events, req.pillarNpcs, req.pressurePlates);
     (self as unknown as Worker).postMessage({ type: 'saved', id: req.id, json });
   } catch (err) {
     (self as unknown as Worker).postMessage({ type: 'error', id: req.id, message: String(err) });

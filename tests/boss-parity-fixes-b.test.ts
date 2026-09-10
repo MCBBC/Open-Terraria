@@ -234,7 +234,7 @@ describe('moon_events 弹体物理表（Projectile.cs SetDefaults/AI_014/AI_056/
     const w = makeWorld();
     for (let y = 40; y < 100; y++) w.store.setTile(98, y, STONE);   // 迎面竖墙
     const h = makeHooks(w, { x: 20, y: 60 });
-    const proj = new Arrow(90 * TILE, 60 * TILE, 8, 0, 42, 0, 348, null,
+    const proj = new Arrow(90 * TILE, 60 * TILE, 8, 0, 42, 0, 348,
       { grav: 0, life: 900, pierce: 1, hostile: true });
     expect(proj.noTileCollide).toBe(true);
     h.projectiles.push(proj);
@@ -245,14 +245,14 @@ describe('moon_events 弹体物理表（Projectile.cs SetDefaults/AI_014/AI_056/
 
   it('aiStyle14 重力延迟 5 子步（:23484-23498）;352 尖刺同族（grav 0.2/bounce/1200t）', () => {
     const h = makeHooks(makeWorld(), { x: 100, y: 60 });
-    const greek = new Arrow(60 * TILE, 60 * TILE, 4, -2, 40, 0, 326, null,
+    const greek = new Arrow(60 * TILE, 60 * TILE, 4, -2, 40, 0, 326,
       { grav: 0.2, gravDelay: 6, life: 360, pierce: 1, hostile: true, bounce: true });
     h.projectiles.push(greek);
     for (let t = 0; t < 5; t++) greek.fixedUpdate(1 / 60, h.hooks);
     expect(greek.vy).toBe(-2);          // 前 5 子步纯惯性
     greek.fixedUpdate(1 / 60, h.hooks);
     expect(greek.vy).toBeCloseTo(-1.8, 5);   // 第 6 子步 +0.2
-    const spike = new Arrow(60 * TILE, 40 * TILE, 4, -2, 80, 0, 352, null,
+    const spike = new Arrow(60 * TILE, 40 * TILE, 4, -2, 80, 0, 352,
       { grav: 0.2, gravDelay: 6, life: 1200, pierce: 1, hostile: true, bounce: true });
     expect(spike.bounce).toBe(true);    // 352 = aiStyle 14 弹跳族（曾漏）
     expect(spike.life).toBe(1200);      // timeLeft 3600/3（:4155）
@@ -260,7 +260,7 @@ describe('moon_events 弹体物理表（Projectile.cs SetDefaults/AI_014/AI_056/
 
   it('329 焰镰 aiStyle56 自加速 ×1.05 至 16 + 恒旋（Projectile.cs:27666-27687）', () => {
     const h = makeHooks(makeWorld(), { x: 100, y: 60 });
-    const scythe = new Arrow(60 * TILE, 60 * TILE, 1, 0, 60, 0, 329, null, {
+    const scythe = new Arrow(60 * TILE, 60 * TILE, 1, 0, 60, 0, 329, {
       grav: 0, life: 420, pierce: 1, hostile: true,
       scythe: { rot0: 0.5, flipDir: -1 },
     });
@@ -273,7 +273,7 @@ describe('moon_events 弹体物理表（Projectile.cs SetDefaults/AI_014/AI_056/
 
   it('351 礼盒 aiStyle58 两段重力（Projectile.cs:27727-27757）', () => {
     const h = makeHooks(makeWorld(), { x: 100, y: 60 });
-    const gift = new Arrow(60 * TILE, 60 * TILE, 3, -8, 50, 0, 351, null,
+    const gift = new Arrow(60 * TILE, 60 * TILE, 3, -8, 50, 0, 351,
       { grav: 0, life: 3600, pierce: 1, hostile: true, present: true });
     h.projectiles.push(gift);
     for (let t = 0; t < 30; t++) gift.fixedUpdate(1 / 60, h.hooks);

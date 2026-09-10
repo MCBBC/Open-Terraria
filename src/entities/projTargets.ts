@@ -17,7 +17,10 @@ import {
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
   dead: boolean;
-  /** 小动物受击:一击致死,返回是否生效(iframes 内 false) */
+  /** 小动物受击:一击致死,返回是否生效(iframes 内 false)。
+   *  ★SW-RB10d：实际实体=Enemy.hurt 全参（dmg/kbx/kby/game/armorPen/crit/pierce/
+   *  fromPlayer）；单参 (game) 形=兼容旧 shim 调用点（Game 怪物碾压/Dart 陷阱）,
+   *  经 Enemy.hurt 头部 object 重映射=dmg5/fromPlayer=false。 */
   hurt(game: GameHooks): boolean;
 }
 
@@ -333,7 +336,18 @@ export function hitCritters(
     if (!projOverlap(self.x, self.y, self.w, self.h, c)) continue;
     // :20680-20688（isCritterThatIsHostileToPlayers 复权 + CountsAsCritter∧flag 拒收）
     if (flag && !isCritterThatIsHostileToPlayers(c)) continue;
-    c.hurt(game);
+    // ★SW-RB10d（F-BJ47-D,2026-09-10）：单参 shim 改全参——fromPlayer 语义 =
+    //  原版 Projectile.OwnedBySomeone（Projectile.cs:580-588 `!npcProj ? !trap :
+    //  false`）：npcProj 敌对弹已由上方 hostile 门拒（:12631 受理式等价）,trap 弹
+    //  （ctx.trap=true,弹 12 坠星 Projectile.cs:939 等家族）ownedBySomeone=false →
+    //  不写 lastCreatureHit（:13382）/不 addDPS（:13712 ownedBySomeone 门）/
+    //  StrikeNPC :82097 owner=255 → 无 AnyInteractions（旗杀/图鉴不计）。旧单参
+    //  shim fromPlayer=false 恒假 = 玩家弹弓/魔法箭杀鸟不进账。dmg=5 与 shim 面
+    //  等价（全 critter life=5 杀面不变;DPS 计 5 vs 原版弹伤=登记债 RB10d-D1）。
+    (c as unknown as {
+      hurt: (d: number, kx: number, ky: number, g: GameHooks,
+        armorPen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
+    }).hurt(5, 0, 0, game, 0, false, 0, ctx?.trap !== true);
     return true;
   }
   return false;

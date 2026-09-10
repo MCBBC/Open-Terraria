@@ -32,7 +32,7 @@ function makeHooks(world: World) {
 describe('投掷武器物理（aiStyle 2 默认档）', () => {
   it('前 19 tick 平飞；第 20 tick（ai0>=20，:21961-21966）起重力', () => {
     const hooks = makeHooks(makeWorld());
-    const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, null, { ...THROWN, life: 2000 });
+    const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, { ...THROWN, life: 2000 });
     for (let i = 0; i < 19; i++) a.fixedUpdate(1, hooks);
     expect(a.vy).toBe(0);          // 平飞期零下坠
     expect(a.vx).toBeCloseTo(10);  // 无阻力
@@ -42,7 +42,7 @@ describe('投掷武器物理（aiStyle 2 默认档）', () => {
 
   it('20t 起：重力 0.4/tick + X 阻力 ×0.97/tick（:21963-21966 ai[0]>=20 含等号）', () => {
     const hooks = makeHooks(makeWorld());
-    const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, null, { ...THROWN, life: 2000 });
+    const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, { ...THROWN, life: 2000 });
     for (let i = 0; i < 30; i++) a.fixedUpdate(1, hooks);
     expect(a.vy).toBeCloseTo(0.4 * 11, 1);        // 11 个重力 tick（第 20..30，≥ 门）
     expect(a.vx).toBeCloseTo(10 * Math.pow(0.97, 11), 2);
@@ -50,7 +50,7 @@ describe('投掷武器物理（aiStyle 2 默认档）', () => {
 
   it('终端下落速度 32（非箭矢档 16）', () => {
     const hooks = makeHooks(makeWorld());
-    const a = new Arrow(100 * TILE, 20 * TILE, 0, 0, 10, 0, 3, null, { ...THROWN, life: 4000 });
+    const a = new Arrow(100 * TILE, 20 * TILE, 0, 0, 10, 0, 3, { ...THROWN, life: 4000 });
     for (let i = 0; i < 400; i++) a.fixedUpdate(1, hooks);
     expect(a.vy).toBeLessThanOrEqual(32);
     expect(a.vy).toBeCloseTo(32, 0);   // 已达终端
@@ -58,7 +58,7 @@ describe('投掷武器物理（aiStyle 2 默认档）', () => {
 
   it('翻滚自出生累加（手里剑 3 不锁姿态）', () => {
     const hooks = makeHooks(makeWorld());
-    const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, null, { ...THROWN, life: 2000 });
+    const a = new Arrow(100 * TILE, 50 * TILE, 10, 0, 10, 0, 3, { ...THROWN, life: 2000 });
     a.fixedUpdate(1, hooks);
     a.fixedUpdate(1, hooks);
     expect(a.tumbleRot).toBeGreaterThan(0);
@@ -66,7 +66,7 @@ describe('投掷武器物理（aiStyle 2 默认档）', () => {
 
   it('世纪之花种子档不受影响（35t 延迟/0.025 重力/默认终端 16）', () => {
     const hooks = makeHooks(makeWorld());
-    const a = new Arrow(100 * TILE, 20 * TILE, 8, 0, 22, 0, 275, null,
+    const a = new Arrow(100 * TILE, 20 * TILE, 8, 0, 22, 0, 275,
       { grav: 0.025, gravDelay: 35, hostile: true, life: 4000 });
     for (let i = 0; i < 30; i++) a.fixedUpdate(1, hooks);
     expect(a.vy).toBe(0);                 // 35t 延迟内

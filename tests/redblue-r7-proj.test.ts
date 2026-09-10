@@ -60,7 +60,7 @@ describe('R7-19 614 星尘细胞弹 TargetSticker', () => {
   it('硬追踪 v=(v×4+敌向×14)/5：右飞弹向上偏转追高敌', () => {
     const e = mkEnemy(1, 572, 712);            // 敌盒心(580,720),弹心(500,800) → 45° 上偏
     const g = makeHooks([e]);
-    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, null, { grav: 0, life: 300 });
+    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, { grav: 0, life: 300 });
     a.stickerTgt = 1;
     a.alpha = 255;                             // MinionProj 发射侧置 255（SetDefaults :6619）
     a.fixedUpdate(1 / 60, g.hooks);
@@ -71,7 +71,7 @@ describe('R7-19 614 星尘细胞弹 TargetSticker', () => {
   });
   it('目标失格(!CanBeChasedBy/移除)→立即 Kill（:41317-41320）', () => {
     const g = makeHooks([]);                   // 无敌怪 = 目标失效
-    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, null, { grav: 0, life: 300 });
+    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, { grav: 0, life: 300 });
     a.stickerTgt = 1;
     a.fixedUpdate(1 / 60, g.hooks);
     expect(a.dead).toBe(true);
@@ -79,7 +79,7 @@ describe('R7-19 614 星尘细胞弹 TargetSticker', () => {
   it('命中绑定目标上 buff 183×900t（StatusNPC :11381-11383 ai1==i 门）', () => {
     const bound = mkEnemy(1, 492, 792);        // 绑定目标即被命中敌
     const g = makeHooks([bound]);
-    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, null, { grav: 0, life: 300 });
+    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, { grav: 0, life: 300 });
     a.stickerTgt = 1;
     a.fixedUpdate(1 / 60, g.hooks);
     expect(bound.hurtLog).toHaveLength(1);
@@ -89,7 +89,7 @@ describe('R7-19 614 星尘细胞弹 TargetSticker', () => {
     const bound = mkEnemy(1, 1200, 792);       // 绑定目标在场（远处,不被命中）
     const other = mkEnemy(2, 496, 792);        // 挡路敌（被命中,含 614 目标盒收缩余量）
     const g = makeHooks([bound, other]);
-    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, null, { grav: 0, life: 300 });
+    const a = new Arrow(492, 792, 14, 0, 30, 2, 614, { grav: 0, life: 300 });
     a.stickerTgt = 1;
     a.fixedUpdate(1 / 60, g.hooks);
     expect(other.hurtLog).toHaveLength(1);     // 照常受击
@@ -105,7 +105,7 @@ describe('R7-01/02/03 837 骷髅头', () => {
   it('R7-01 转向权重 N=20：v=(v×19+向×speed)/20（:57861-57864,曾 32）', () => {
     const e = mkEnemy(1, 497, 600);            // 敌盒心(505,608)与弹心(505,805)同列 → 向 (0,−1)
     const g = makeHooks([e]);
-    const a = new Arrow(492, 792, 10, 0, 30, 2, 837, null, { grav: 0, life: 480 });
+    const a = new Arrow(492, 792, 10, 0, 30, 2, 837, { grav: 0, life: 480 });
     a.fixedUpdate(1 / 60, g.hooks);
     expect(a.vx).toBeCloseTo(9.5, 6);          // (10×19+0)/20
     expect(a.vy).toBeCloseTo(-0.5, 6);         // (0×19−10)/20
@@ -115,7 +115,7 @@ describe('R7-01/02/03 837 骷髅头', () => {
     const stone = TILE_BY_KEY['stone'] ?? 1;
     for (let x = 24; x <= 26; x++) for (let y = 49; y <= 51; y++) store.setTile(x, y, stone);
     const g = makeHooks([mkEnemy(1, 800, 1600)], store);
-    const a = new Arrow(392, 792, 0, 0, 30, 2, 837, null, { grav: 0, life: 100, noTileCollide: true });
+    const a = new Arrow(392, 792, 0, 0, 30, 2, 837, { grav: 0, life: 100, noTileCollide: true });
     a.fixedUpdate(1 / 60, g.hooks);            // AI 期 −33（100→67）+ 尾递减 → 66
     expect(a['life']).toBe(66);
     a.fixedUpdate(1 / 60, g.hooks);            // −33（66→33）+ 尾递减 → 32
@@ -127,11 +127,11 @@ describe('R7-01/02/03 837 骷髅头', () => {
   });
   it('R7-03 837 无尘拖尾、207 有（:57760 type==207 门）', () => {
     const g837 = makeHooks([]);
-    const a = new Arrow(492, 792, 10, 0, 30, 2, 837, null, { grav: 0, life: 480 });
+    const a = new Arrow(492, 792, 10, 0, 30, 2, 837, { grav: 0, life: 480 });
     for (let i = 0; i < 6; i++) a.fixedUpdate(1 / 60, g837.hooks);   // alpha 255→<170 期
     expect(g837.dusts).toHaveLength(0);
     const g207 = makeHooks([]);
-    const b = new Arrow(492, 792, 10, 0, 30, 2, 207, null, { grav: 0, life: 480 });
+    const b = new Arrow(492, 792, 10, 0, 30, 2, 207, { grav: 0, life: 480 });
     for (let i = 0; i < 6; i++) b.fixedUpdate(1 / 60, g207.hooks);
     expect(g207.dusts.length).toBeGreaterThan(0);
   });
@@ -143,7 +143,7 @@ describe('R7-01/02/03 837 骷髅头', () => {
 describe('R7-05 life 递减在子步末', () => {
   it('life=1 当拍仍跑 AI 且当拍杀（Kill 链同拍触发）', () => {
     const g = makeHooks([]);
-    const a = new Arrow(492, 792, 8, 0, 30, 2, 1, null, { grav: 0, life: 1 });
+    const a = new Arrow(492, 792, 8, 0, 30, 2, 1, { grav: 0, life: 1 });
     const x0 = a.x;
     a.fixedUpdate(1 / 60, g.hooks);
     expect(a.dead).toBe(true);
@@ -159,7 +159,7 @@ describe('R7-10/11 AI_029 homing', () => {
     // 竖直下飞 v=(0,1)（sp=1<8 提速档）,敌在正右视距内（496<500）
     const e = mkEnemy(1, 988, 800);            // 盒心(996,808)
     const g = makeHooks([e]);
-    const a = new Arrow(492, 792, 0, 1, 30, 2, 125, null, { grav: 0, life: 300 });
+    const a = new Arrow(492, 792, 0, 1, 30, 2, 125, { grav: 0, life: 300 });
     a['gem'] = { homing: true } as never;
     a.fixedUpdate(1 / 60, g.hooks);
     const dist = Math.hypot(996 - 497, 808 - 797);   // 弹心(497,797) 125=10×10
@@ -173,7 +173,7 @@ describe('R7-10/11 AI_029 homing', () => {
   it('R7-10 提速段双轴对称：竖直飞行的 vy 也吃 +0.1·ny（:38580-38584）', () => {
     const e = mkEnemy(1, 492, 1200);           // 盒心(500,1208) 正下方视距内 → 方向不变纯加速
     const g2 = makeHooks([e]);
-    const b = new Arrow(492, 792, 0, 1, 30, 2, 125, null, { grav: 0, life: 300 });
+    const b = new Arrow(492, 792, 0, 1, 30, 2, 125, { grav: 0, life: 300 });
     b['gem'] = { homing: true } as never;
     b.fixedUpdate(1 / 60, g2.hooks);
     expect(Math.hypot(b.vx, b.vy)).toBeCloseTo(1.21, 6);   // (1+0.1)×1.1 双轴

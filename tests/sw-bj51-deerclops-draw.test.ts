@@ -6,6 +6,8 @@
 //     + Extra_245 红雾整图压缩进帧格（原版第 3 参 rectangle=本体同格帧子矩形 :26793）——本批校正。
 // 全部公式按 1457 反编译逐行锚定；1456↔1457 该函数逐字全等、1458 未动（三版本核对）。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { deerclopsDrawLayers, type DeerclopsDrawLayer } from '../src/render/Renderer';
 
 const kinds = (ls: DeerclopsDrawLayer[]) => ls.map((l) => l.kind);
@@ -125,6 +127,50 @@ describe('SW-BJ51 ④alpha 公式链（预乘语义折算,逐值锚定）', () =
   it('本体透明化=远距可见主因：lai3=30 → α=1-(30/36)²≈0.3056（用户所见半透明重影态）', () => {
     const { layers } = deerclopsDrawLayers({ lai3: 30, ai0: 0, ai1: 0, opacity: 1, gt: 0 });
     expect(near(layers.find((l) => l.kind === 'body')!.alpha, 1 - (30 / 36) ** 2)).toBe(true);
+  });
+
+  // ★SW-RB10e 2026-09-10：红雾环不乘 Opacity——原版 value3 链 Lerp(·,value2,1)
+  //  整体覆写 GetAlpha 光照链（Main.cs:26747-26751）；本体/雾照常吃 Opacity
+  //  （本体经 GetAlpha :94549、雾 color3 显式 ×Opacity :26795）
+  it('★SW-RB10e：红雾环 α 不随 Opacity 衰减（GetAlpha 被覆写）；本体/雾随 Opacity（变异:回潮 ×opacity 即红）', () => {
+    const a = (o: number) => deerclopsDrawLayers({ lai3: 18, ai0: 0, ai1: 0, opacity: o, gt: 0 }).layers;
+    const red1 = a(1).find((l) => l.kind === 'redGhost')!.alpha;
+    const redHalf = a(0.4).find((l) => l.kind === 'redGhost')!.alpha;
+    expect(near(red1, redHalf)).toBe(true);                       // 红雾环与 Opacity 无关
+    expect(near(red1, (128 / 255) * (1 - 0.25 * 0.5))).toBe(true);
+    expect(near(a(1).find((l) => l.kind === 'body')!.alpha * 0.4,
+      a(0.4).find((l) => l.kind === 'body')!.alpha)).toBe(true);  // 本体吃 Opacity
+    expect(near(a(1).find((l) => l.kind === 'fog')!.alpha * 0.4,
+      a(0.4).find((l) => l.kind === 'fog')!.alpha)).toBe(true);   // 雾吃 Opacity
+  });
+});
+
+// ★SW-RB10e 2026-09-10：帧矩形几何/烘焙语义/层安置 tripwire（drawDeerclopsGrid
+//  消费侧纯函数外语义,源正则锁定防回潮）
+describe('★SW-RB10e 668 几何/烘焙/安置 tripwire', () => {
+  const src = (p: string) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
+
+  it('帧矩形=原版 sizeOffset 外扩 +2（Utils.Frame :1389-1395），非内缩 padding', () => {
+    const r = src('../src/render/Renderer.ts');
+    expect(r).toMatch(/const sx = col \* g\.cellW, sy = row \* g\.cellH;/);
+    expect(r).toMatch(/const vw = g\.cellW \+ 2, vh = g\.cellH \+ 2;/);
+    expect(r).toMatch(/originX = facingRight \? 106 : vw - 106, originY = vh - 4;/);
+    // 旧内缩式不得回潮
+    expect(r).not.toMatch(/const sw = g\.cellW - \(g\.padX/);
+    // NPC_GRIDS[668] 不再载 pad 语义
+    const layouts = src('../src/remaster/NpcGridLayouts.ts');
+    expect(layouts).toMatch(/668: \{ cols: 5, rows: 5, cellW: 218, cellH: 240, perRow: 5 \}/);
+  });
+
+  it('红雾环/雾烘焙=顶点色乘法（tintedSprite），本体=Lerp（lerpSprite）；自发光层出实体层', () => {
+    const r = src('../src/render/Renderer.ts');
+    expect(r).toMatch(/tintedSprite\('deer-red-m', frame, \[40, 0, 0\]\)/);
+    expect(r).toMatch(/tintedSprite\('deer-fog-m'/);
+    expect(r).toMatch(/lerpSprite\('deer-body', frame, \[50, 0, 160\], tPurple\)/);
+    // 旧 lerp t=1 压平烘焙不得回潮
+    expect(r).not.toMatch(/lerpSprite\('deer-red'/);
+    // 7d' 合成后专绘挂钩 + 实体层跳过红雾/雾层
+    expect(r).toMatch(/if \(ent\.vanillaId === 668\) this\.drawDeerclopsGlow\(ent\);/);
   });
 });
 

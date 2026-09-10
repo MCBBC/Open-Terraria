@@ -192,8 +192,8 @@ export function openFishingCrate(
       return;
   }
 
-  const maxValue = 1;                                          // :8253
-  let flag5 = true;                                            // :8254
+  const maxValue = 1;                                          // 1457 Player.cs:8641（1456=旧注 :8253;1458 :8641 同值）★SW-RB10b 锚正
+  let flag5 = true;                                            // 1457 :8642
   while (flag5) {
     if ((crateItemID === 5002 || crateItemID === 5003) && flag5 && rnd.next(maxValue) === 0) {
       // :8257-8270 海洋匣：1/10 海龟雕像兜底四选一
@@ -242,7 +242,8 @@ export function openFishingCrate(
       flag5 = false;
     }
     if (crateItemID === 4407 || crateItemID === 4408) {
-      // :8365-8395 绿洲匣：八选一 + 1/4 4423×4-6 + 1/2 3380×10-16 + 1/35 857（后三支不查 flag5）
+      // 1457 Player.cs:8746-8782（1456=旧注 :8365-8395;1458 :8750-8786 同值;★SW-RB10b 锚正）
+      // 绿洲匣：八选一（:8750-8760，含 4263 魔法海螺）+ 1/4 4423×4-6 + 1/2 3380×10-16 + 1/35 857（后三支不查 flag5）
       if (flag5 && rnd.next(maxValue) === 0) {
         give([4056, 4442, 4055, 4061, 4062, 4276, 4262, 4263][rnd.next(8)]);
         flag5 = false;

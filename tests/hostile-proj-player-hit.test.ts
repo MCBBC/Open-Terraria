@@ -48,7 +48,7 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
     const log = { dmg: [] as number[] };
     const game = makeGame(p, log);
     // hostile 弹从左向右穿过玩家（双子激光 100 同语义,grav 0 直飞）
-    const arrow = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 25, 0, 100, null,
+    const arrow = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 25, 0, 100,
       { grav: 0, life: 300, pierce: 1, hostile: true });
     for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     expect(log.dmg.length).toBe(1);
@@ -63,12 +63,12 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
     const p = new Player(30 * 16, 10 * 16, new Inventory());
     const log = { dmg: [] as number[] };
     const game = makeGame(p, log);
-    const a1 = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 25, 0, 100, null,
+    const a1 = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 25, 0, 100,
       { grav: 0, life: 300, pierce: 1, hostile: true });
     for (let i = 0; i < 6; i++) a1.fixedUpdate(1 / 60, game);
     const hp1 = p.hp;
     // 第二发同帧穿身:iframes 内不结算
-    const a2 = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 25, 0, 100, null,
+    const a2 = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 25, 0, 100,
       { grav: 0, life: 300, pierce: 1, hostile: true });
     for (let i = 0; i < 6; i++) a2.fixedUpdate(1 / 60, game);
     expect(log.dmg.length).toBe(1);
@@ -93,7 +93,7 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
     // 多次射击摊平概率（原版 1/2→600t、否则 300t,必中其一）
     for (let k = 0; k < 24 && !p.buffs.has(BuffType.Chilled); k++) {
       p.iframes = 0; // 清无敌帧让每发都结算
-      const arrow = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 40, 0, 348, null,
+      const arrow = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 40, 0, 348,
         { grav: 0, life: 300, pierce: 1, hostile: true });
       for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     }
@@ -112,7 +112,7 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
     // 使用 makeGame 的 world 在底部两行放实心块）
     const w = game.world.store;
     for (let x = 0; x < w.w; x++) { w.setTile(x, 20, 1); w.setTile(x, 21, 1); }
-    const arrow = new Arrow(30 * 16, 14 * 16, 2, 3, 30, 0, 326, null,
+    const arrow = new Arrow(30 * 16, 14 * 16, 2, 3, 30, 0, 326,
       { grav: 0.2, life: 300, pierce: 1, hostile: true, bounce: true });
     let bounces = 0;
     let prevVy = arrow.vy;

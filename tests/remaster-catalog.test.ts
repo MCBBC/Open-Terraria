@@ -110,9 +110,14 @@ describe('npc 帧枚举', () => {
     expect(e.frames[0]).toMatchObject({ x: 0, y: 1, w: 180, h: 120 });
     expect(e.frames[1]).toMatchObject({ x: 180, y: 1 }); // 行优先:idx1=(col1,row0)
   });
-  it('668 pad 2px:帧 214×236(218/240 各去 2)', () => {
+  // ★SW-RB10e 2026-09-10 勘误：vanilla Frame(5,5,fx,fy,2,2) 末两参 = Utils.Frame
+  //  sizeOffset【外扩 +2】（Utils.cs:1389-1395 rect=(218fx,240fy,220,242)），非内缩
+  //  padding——本表只载网格基准（纯 218×240 格），渲染侧 drawDeerclopsGrid 自算
+  //  外扩+表缘裁剪；旧断言 {x:2,y:2,w:214,h:236} 系内缩误读
+  it('668 网格基准:纯 218×240 格(外扩 +2 由渲染侧承载)', () => {
     const e = catalog.byKey.get('npc:668')!;
-    expect(e.frames[0]).toMatchObject({ x: 2, y: 2, w: 214, h: 236 });
+    expect(e.frames[0]).toMatchObject({ x: 0, y: 0, w: 218, h: 240 });
+    expect(e.frames[1]).toMatchObject({ x: 218, y: 0, w: 218, h: 240 });
   });
   it('横条/拼装特殊路径排除(594/690)', () => {
     expect(catalog.byKey.get('npc:594')!.meta?.excluded).toBeTruthy();

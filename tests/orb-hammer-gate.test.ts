@@ -48,11 +48,14 @@ describe('暗影珠/猩红之心（tile 31）分派门', () => {
 describe('恶魔/猩红祭坛（tile 26）分派门', () => {
   const ALTAR = TILE_BY_KEY['v_26_altars'];
 
-  it('手持镐拒入；drill 通道在祭坛特支内拦截（到不了本谓词，Mount.cs:3101-3116）', () => {
+  it('手持镐拒入；drill 谓词豁免（PickTile 直调语义）但祭坛拦截在 tryMine 特支（空转位）', () => {
     expect(toolMatchesTile(ALTAR, 'pick')).toBe(false);
-    // 谓词对祭坛恒 false（d.pick=-1）——drill+pick 由 tryMine 祭坛特支先行拦截
-    // （非困难反噬半血 / 困难内联 PickTile 累积 → smashAltar），不落通用镐支
-    expect(toolMatchesTile(ALTAR, 'pick', true)).toBe(false);
+    // ★SW-FX8 D-12：drill 臂前置=原版 PickTile（Player.cs:54398）头无分派门——
+    // 谓词对 (祭坛, drill) 现按直调语义返回 true（注释"可钻珠祭坛"=原版铁则）。
+    // 但该答案在实链【空转】：tryMine 祭坛特支（Game.ts,先于 :19077 通用镐支）
+    // 对镐/钻/锤三路各自 return——非困难反噬半血 / 困难内联 PickTile 累积 → smashAltar。
+    // 谓词不再承载祭坛拦截职责（行为面由祭坛特支测试承载）。
+    expect(toolMatchesTile(ALTAR, 'pick', true)).toBe(true);
     expect(TILE_DEFS[ALTAR].pick).toBe(-1); // 手持镐被 d.pick<0 双保险
   });
 });

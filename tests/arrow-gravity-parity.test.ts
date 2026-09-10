@@ -84,7 +84,7 @@ describe('projGravSpec 规格表（AI_001 重力链）', () => {
 describe('Arrow 重力仿真（subStep = per-update 语义）', () => {
   it('木箭 1：14 update 平飞，第 15（ai0=15）起缓坠 0.1/update，终端 16', () => {
     const game = makeGame(emptyWorld());
-    const a = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 1, null, {});
+    const a = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 1, {});
     for (let t = 0; t < 14; t++) a.fixedUpdate(1, game);
     expect(a.vy).toBe(0);                       // ai0 1..14 < 15（:54686 `ai[0] >= 15f` ≥ 门，
     a.fixedUpdate(1, game);                     //  2026-08-22 修 off-by-one：第 15 update 即坠）
@@ -97,14 +97,14 @@ describe('Arrow 重力仿真（subStep = per-update 语义）', () => {
 
   it('子弹 14（flag3）：全程直线不下坠', () => {
     const game = makeGame(emptyWorld());
-    const b = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 14, null, {});
+    const b = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 14, {});
     for (let t = 0; t < 120 && !b.dead; t++) b.fixedUpdate(1, game);
     expect(b.vy).toBe(0);
   });
 
   it('箭 172：0.085@17（ai0=17 拍起 0.085/update）', () => {
     const game = makeGame(emptyWorld());
-    const a = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 172, null, {});
+    const a = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 172, {});
     for (let t = 0; t < 16; t++) a.fixedUpdate(1, game);
     expect(a.vy).toBe(0);
     a.fixedUpdate(1, game);
@@ -114,7 +114,7 @@ describe('Arrow 重力仿真（subStep = per-update 语义）', () => {
   it('711 两段式：ai0=10 起 +0.1、ai0=20 起 +0.2/update，vx ×0.99/update', () => {
     const game = makeGame(emptyWorld());
     const g = projGravSpec(711);
-    const a = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 711, null,
+    const a = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 711,
       { grav: g.grav, gravDelay: g.delay, grav2: g.grav2, grav2At: g.grav2At, dragAlways: g.drag });
     // 711 extraUpdates=1（数据自带）→ 2 update/tick：ai0=10 在第 5 tick 末达成（≥ 门）
     for (let t = 0; t < 5; t++) a.fixedUpdate(1, game);
@@ -132,7 +132,7 @@ describe('Arrow 重力仿真（subStep = per-update 语义）', () => {
 
   it('飞镖 267（ammo 283）：0.075@20（ai0=20 拍起）', () => {
     const game = makeGame(emptyWorld());
-    const d = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 267, null, {});
+    const d = new Arrow(10 * TILE, 40 * TILE, 8, 0, 10, 1, 267, {});
     for (let t = 0; t < 19; t++) d.fixedUpdate(1, game);
     expect(d.vy).toBe(0);
     d.fixedUpdate(1, game);

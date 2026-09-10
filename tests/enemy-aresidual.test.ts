@@ -109,7 +109,7 @@ describe('项1 Ichor/穿甲池：dmg + pen/2 − def/2（NPC.cs:81913-81938）',
   it('Arrow.settlePen 已被 hurt 消费：85 型(穿甲15)+玩家5 → pen20→10 加伤', () => {
     const h = makeHooks(makeWorld());
     const e = makeEnemy(h, { defense: 30 });
-    const a = new Arrow(0, 0, 1, 0, 10, 1, 85, null);
+    const a = new Arrow(0, 0, 1, 0, 10, 1, 85);
     a.armorPen = 5;
     const settlePen = (a as unknown as { settlePen: number }).settlePen;
     expect(settlePen).toBe(20);             // 上一批两源相加（StrikeNPC :12068）

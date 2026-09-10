@@ -52,6 +52,9 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     seedFlags: world.seedFlags,
     weather: world.weatherToSave(), bestiary: world.bestiary.toSave(),
     pendingTownNpcs: world.pendingTownNpcs,
+    // ★SW-FX11（2026-09-10）：四塔位/压力板位随包（worker 读档→主线程恢复同缝）
+    pendingPillarNpcs: world.pendingPillarNpcs,
+    pendingPlatePokes: world.pendingPlatePokes,
     starterTownNpcs: world.starterTownNpcs,
     chests: world.chests,
     signs: world.signs,

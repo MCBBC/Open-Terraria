@@ -125,7 +125,7 @@ describe('R29 §5 玛瑙爆破枪 661 黑爆', () => {
   });
   it('显形链：alpha−55/子步、scale→1.3、归零拍 16 枚 d62 暗环', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 7, 0, 48, 6, 661, null, {});
+    const a = new Arrow(800, 100, 7, 0, 48, 6, 661, {});
     expect(a.alpha).toBe(255);
     a.fixedUpdate(1 / 60, g);                       // EU=1 → 两子步:255→200→145
     expect(a.drawScale).toBeCloseTo(1.3, 5);
@@ -140,7 +140,7 @@ describe('R29 §5 玛瑙爆破枪 661 黑爆', () => {
     const near = { x: 830, y: 130, w: 20, h: 20, dead: false, hurt: (..._a: unknown[]) => true };
     const far = { x: 1400, y: 900, w: 20, h: 20, dead: false, hurt: (..._a: unknown[]) => true };
     const g = makeGame(emptyWorld(), [near, far]);
-    const a = new Arrow(800, 100, 7, 0, 48, 6, 661, null, {});
+    const a = new Arrow(800, 100, 7, 0, 48, 6, 661, {});
     const hurtSpy: number[] = [];
     (near as unknown as { hurt: (d: number) => boolean }).hurt = (d: number) => { hurtSpy.push(d); return true; };
     a.life = 2;                                     // 寿命尽 → killNow → 黑爆（全消亡路径同口）
@@ -157,7 +157,7 @@ describe('R29 §5 玛瑙爆破枪 661 黑爆', () => {
 
 describe('R29 §1 幻象弓 630 载体 + 631 追踪矢', () => {
   function carrier(g: GameHooks): Arrow {
-    const a = new Arrow(800, 400, 11, 0, 50, 2, 630, null, { grav: 0 });
+    const a = new Arrow(800, 400, 11, 0, 50, 2, 630, { grav: 0 });
     a.ph630Ctl = {
       channel: () => true,
       aim: () => ({ x: 1200, y: 400 }),
@@ -205,7 +205,7 @@ describe('R29 §1 幻象弓 630 载体 + 631 追踪矢', () => {
   });
   it('volley 解析失败（无弹药）→ 载体下一拍 Kill', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 400, 11, 0, 50, 2, 630, null, { grav: 0 });
+    const a = new Arrow(800, 400, 11, 0, 50, 2, 630, { grav: 0 });
     a.ph630Ctl = { channel: () => true, aim: () => ({ x: 1200, y: 400 }), volley: () => null };
     a.fixedUpdate(1 / 60, g);                        // 首拍 volley → null → Kill
     expect(a.dead).toBe(true);
@@ -213,7 +213,7 @@ describe('R29 §1 幻象弓 630 载体 + 631 追踪矢', () => {
   it('channel 断开 → 下一 volley 拍 Kill（canShoot 门）', () => {
     const g = makeGame(emptyWorld());
     let held = true;
-    const a = new Arrow(800, 400, 11, 0, 50, 2, 630, null, { grav: 0 });
+    const a = new Arrow(800, 400, 11, 0, 50, 2, 630, { grav: 0 });
     a.ph630Ctl = {
       channel: () => held, aim: () => ({ x: 1200, y: 400 }),
       volley: () => ({ pid: 1, dmg: 60, kb: 3, speed: 15 }),
@@ -230,7 +230,7 @@ describe('R29 §1 幻象弓 630 载体 + 631 追踪矢', () => {
     };
     const g = makeGame(emptyWorld(), [enemy]);
     Arrow.phantasmWindowUntil = performance.now() + 500;
-    const a = new Arrow(805, 400, 10, 0, 40, 2, 1, null, { grav: 0 });   // 木箭穿入敌盒
+    const a = new Arrow(805, 400, 10, 0, 40, 2, 1, { grav: 0 });   // 木箭穿入敌盒
     for (let i = 0; i < 4 && !a.dead; i++) a.fixedUpdate(1 / 60, g);
     const chase = rec(g).added.filter((e) => e.projId === 631);
     expect(chase.length).toBe(3);
@@ -246,7 +246,7 @@ describe('R29 §1 幻象弓 630 载体 + 631 追踪矢', () => {
   it('631 AI_122：延迟期定身、有效目标 homing ×12 渐显、失效态恢复撞块淡出', () => {
     const enemy = { x: 1000, y: 395, w: 30, h: 30, id: 7, dead: false };
     const g = makeGame(emptyWorld(), [enemy]);
-    const c = new Arrow(800, 400, 6, 0, 12, 0, 631, null, { grav: 0 });
+    const c = new Arrow(800, 400, 6, 0, 12, 0, 631, { grav: 0 });
     c.ph631Tgt = 7;
     c.ph631Delay = 2;
     expect(c.alpha).toBe(255);
@@ -335,7 +335,7 @@ describe('R29 §11 弹药飞行拖尾族', () => {
     [41, [31, 6]],            // 地狱火箭烟+火双尘/update
   ])('地狱火箭 41 每 update d31+d6 双尘 noGravity', (pid, types) => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 5, 0, 10, 0, pid as number, null, {});
+    const a = new Arrow(800, 100, 5, 0, 10, 0, pid as number, {});
     a.fixedUpdate(1 / 60, g);
     for (const t of types as number[]) {
       expect(rec(g).dusts.some((d) => d.type === t && d.noGravity)).toBe(true);
@@ -343,7 +343,7 @@ describe('R29 §11 弹药飞行拖尾族', () => {
   });
   it('冰雪弓箭 120：d67 出生点=position−velocity 且速度继承×0.3', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 6, -2, 10, 0, 120, null, {});
+    const a = new Arrow(800, 100, 6, -2, 10, 0, 120, {});
     a.fixedUpdate(1 / 60, g);
     const d = rec(g).dusts.find((x) => x.type === 67);
     expect(d).toBeDefined();
@@ -352,7 +352,7 @@ describe('R29 §11 弹药飞行拖尾族', () => {
   });
   it.each([[91], [225]])('圣箭/叶绿箭 %i 半概率尘（跑 60 步必有 d58|d15 / d40）', (pid) => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 5, 0, 10, 0, pid, null, {});
+    const a = new Arrow(800, 100, 5, 0, 10, 0, pid, {});
     for (let i = 0; i < 60 && !a.dead; i++) a.fixedUpdate(1 / 60, g);
     const types = rec(g).dusts.map((d) => d.type);
     if (pid === 91) expect(types.some((t) => t === 58 || t === 15)).toBe(true);
@@ -360,13 +360,13 @@ describe('R29 §11 弹药飞行拖尾族', () => {
   });
   it('毒液箭 282：d171 fadeIn1.5 noGravity;蜂箭 469 alpha255 起前 3 拍满隐后渐显', () => {
     const g = makeGame(emptyWorld());
-    const a282 = new Arrow(800, 100, 5, 0, 10, 0, 282, null, {});
+    const a282 = new Arrow(800, 100, 5, 0, 10, 0, 282, {});
     a282.fixedUpdate(1 / 60, g);
     const d171 = rec(g).dusts.find((x) => x.type === 171);
     expect(d171).toBeDefined();
     expect((d171 as unknown as { fadeIn?: number }).fadeIn ?? 0).toBeGreaterThan(0);
     const g2 = makeGame(emptyWorld());
-    const a469 = new Arrow(800, 100, 5, 0, 10, 0, 469, null, {});
+    const a469 = new Arrow(800, 100, 5, 0, 10, 0, 469, {});
     expect(a469.alpha).toBe(255);                    // SetDefaults :5437（本批补列）
     a469.fixedUpdate(1 / 60, g2);
     a469.fixedUpdate(1 / 60, g2);
@@ -376,7 +376,7 @@ describe('R29 §11 弹药飞行拖尾族', () => {
   });
   it('血箭 819：首拍 8×d5 尘爆 + alpha 渐显 + 血迹回铺', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 8, 0, 10, 0, 819, null, {});
+    const a = new Arrow(800, 100, 8, 0, 10, 0, 819, {});
     expect(a.alpha).toBe(255);
     a.fixedUpdate(1 / 60, g);
     expect(rec(g).dusts.filter((d) => d.type === 5).length).toBeGreaterThanOrEqual(8 + 5 - 2);
@@ -393,7 +393,7 @@ describe('R29 §8 星星炮族行为面（注册前置,检测先行）', () => {
   });
   it('955：Item_9 星啸 20-59t 节拍 + 闪烁档 0↔200;728：alpha 钳 100 半透', () => {
     const g = makeGame(emptyWorld());
-    const a = new Arrow(800, 100, 14, 0, 55, 3, 955, null, {});
+    const a = new Arrow(800, 100, 14, 0, 55, 3, 955, {});
     expect(a.alpha).toBe(50);
     let item9 = 0;
     for (let i = 0; i < 130 && !a.dead; i++) {
@@ -404,7 +404,7 @@ describe('R29 §8 星星炮族行为面（注册前置,检测先行）', () => {
     expect(item9).toBeGreaterThanOrEqual(2);
     expect(a.alpha).toBeGreaterThanOrEqual(0);
     expect(a.alpha).toBeLessThanOrEqual(200);
-    const b = new Arrow(800, 100, 20, 0, 60, 5, 728, null, {});
+    const b = new Arrow(800, 100, 20, 0, 60, 5, 728, {});
     b.fixedUpdate(1 / 60, g);
     expect(b.alpha).toBe(245);                       // 255−10
     for (let i = 0; i < 20; i++) b.fixedUpdate(1 / 60, g);

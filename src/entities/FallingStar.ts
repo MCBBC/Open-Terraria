@@ -265,8 +265,14 @@ export class FallingStar extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       // 击退 = kb 10 × direction（vx 符号,0→1;Damage :13652 num40=direction 同源）
+      // ★SW-RB10d（F-BJ47-E,2026-09-10）：fromPlayer 翻正为 false——原版弹 12 坠星
+      //  SetDefaults 带 trap=true（Projectile.cs:939）→ OwnedBySomeone（:580-588
+      //  `!npcProj ? !trap : false`）=false → 写位链全不达：lastCreatureHit（:13382
+      //  ownedBySomeone 门）/addDPS（:13712 同门）/StrikeNPC(255)（:13702）→
+      //  LocalPlayerInteraction 不置位（NPC.cs:82097 owner==myPlayer 门）= 坠星杀怪
+      //  不进旗杀账/图鉴/DPS 计（自然坠星与星炮同 trap 面）。旧 true=反向偏差。
       const hurtOk = e.hurt(applyBannerDamageDealt(game, e, STAR_DAMAGE),
-        (this.vx < 0 ? -1 : 1) * STAR_KB, 0, game, 0, false, -1, true);
+        (this.vx < 0 ? -1 : 1) * STAR_KB, 0, game, 0, false, -1, false);
       // Damage 尾梯（:14180-14183,pen≠1 档）写 immune[owner]=10——仅实扣跳写
       // （iframes 头门拒收跳原版不达尾梯）
       if (hurtOk) noteVanillaProjImmune(game, 12, e.id);

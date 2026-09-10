@@ -113,6 +113,16 @@ export interface SaveData {
   cultistDelay?: number;
   /** 旗击杀计数（BannerSystem.killCount;BannerSystem.cs:32 随存档——旧档缺省空） */
   bannerKills?: Record<number, number>;
+  /** 天界四塔 NPC 原位（★SW-FX11 2026-09-10：NPC 段尾 SavesAndLoads 段,WF:1744-1755
+   *  写/:2937-2955 读;集合=NPCID.Sets.SavesAndLoads NPCID.cs:4807 CreateBoolSet(422,
+   *  507,517,493)。id=原版 netID,x/y=实体左上角像素浮点。旧档缺省=无（towerActive 旗
+   *  在场时走兜底重生成）;导入原版 .wld 由 WldImport 透传原值） */
+  pillarNpcs?: Array<{ id: number; x: number; y: number }>;
+  /** 存档点按压中的压力板格坐标（★SW-FX11 2026-09-10：WF:3374-3386 Save/:3388-3398
+   *  Load;原版读档首拍逐位 PokeLocation→Wiring.HitSwitch 一次性重触发后清空
+   *  （PressurePlateHelper.cs:19-31/:156-164）——存档点恰站压力板时接线机关重载
+   *  应响一次。旧档缺省=无） */
+  pressurePlates?: Array<{ x: number; y: number }>;
   /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WorldFile.cs:1329-1335/
    *  2147-2161；anglerQuestFinished 运行时态不存——读档 loadTempInfo 重置 WF:628-629） */
   angler?: { quest: number; whoFinishedToday: string[] };
@@ -146,7 +156,7 @@ export interface SaveData {
   /** 战争迷雾 0/1 位图（World.explored；原版 .twld MapHelper 段的等价物）。
    *  base64 RLE 同构通道——0/1 游程压到几个字节；旧档缺段 = 全 0 未探索（旧行为，不迁移） */
   explored?: string;
-  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
+  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; name?: string }>;
   player: {
     hp: number; x: number; y: number;
     inventory: Array<SavedItem | null>;
@@ -191,6 +201,11 @@ export interface SaveData {
     /** 发色剂染料 shaderId 1..12（Player.hairDye byte,PL:53805-53808 写/:54214-54216
      *  读；0=无。旧档缺省 0=无染料） */
     hairDye?: number;
+    /** 热键栏锁定（SW-FX10；Player.hbLocked,PL:55543 写/:56268 读。旧档缺省 false=未锁） */
+    hbLocked?: boolean;
+    /** 超级矿车开关（SW-FX10；Player.enabledSuperCart,PL:55572 位[1] 写/:56368 位[1] 读。
+     *  旧档缺省 true=原版 Player.cs:2037 缺省同形） */
+    enabledSuperCart?: boolean;
     /** 永久升级族(Player.cs:44575-44802;旧档缺省全 false) */
     permanentUpgrades?: {
       extraAccessory?: boolean;
@@ -396,6 +411,10 @@ export function serializeSave(
   player: SaveData['player'], playTimeMs: number,
   townNpcs?: SaveData['npcs'],
   events?: SaveData['events'],
+  // ★SW-FX11（2026-09-10）：天界四塔 NPC 段 + 按压压力板段（实体侧快照,与 townNpcs
+  //  同通道——SaveMeta 由 World 组装,此二者来自 Game 实体扫描故走参数位）
+  pillarNpcs?: SaveData['pillarNpcs'],
+  pressurePlates?: SaveData['pressurePlates'],
 ): string {
   // 物品 id → 稳定 id(全槽位统一;量小直接遍历)。保留 favorited/prefix。
   // v4 起 armor/dye/trash/miscEquips/miscDyes/loadouts 也走稳定 id(v3 曾裸透传内部
@@ -465,7 +484,7 @@ export function serializeSave(
     // 战争迷雾（0/1 位图 RLE：全 0/全 1 各 1 游程 = ~7 字节；undefined 不落段 →
     // JSON.stringify 丢弃该键，旧读档端无害忽略）
     explored: st.explored ? bytesToB64(rlePairs(st.explored)) : undefined,
-    chests: meta.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked || undefined, items: c.items.map(mapItem) })),
+    chests: meta.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked || undefined, name: c.name || undefined, items: c.items.map(mapItem) })),
     // v4:armor/dye/trash/miscEquips/miscDyes/loadouts 逐槽稳定 id(v3 是裸内部下标)
     player: {
       ...player,
@@ -483,6 +502,10 @@ export function serializeSave(
       })),
     },
     npcs: townNpcs ?? [],   // 城镇 NPC 段(WorldFile.cs:1703-1750 NPC 段;曾硬编码 [] 断链)
+    // ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 四塔位 + 按压压力板位（缺省=不落键,
+    //  旧读档端/旧档零迁移）
+    pillarNpcs: pillarNpcs?.length ? pillarNpcs : undefined,
+    pressurePlates: pressurePlates?.length ? pressurePlates : undefined,
     signs: meta.signs,
     // 挂物族：存放物 id 走与 chests 相同的稳定 id 映射（mapItem 同构，保留 prefix）；
     // ★SW-BO1（SW-BL1 P1）：模特姿态 pose 可选字段透传（undefined 旧档自动兼容）

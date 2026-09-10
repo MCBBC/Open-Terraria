@@ -167,7 +167,7 @@ describe('世纪之花弹幕与状态', () => {
   it('Arrow 延迟重力：35t 内不下坠、之后下坠', () => {
     const w = makeWorld();
     const { hooks } = makeHooks(w, { x: 100, y: 94 });
-    const a = new Arrow(100 * TILE, 90 * TILE, 8, 0, 22, 0, 275, null,
+    const a = new Arrow(100 * TILE, 90 * TILE, 8, 0, 22, 0, 275,
       { grav: 0.025, gravDelay: 35, hostile: true });
     for (let i = 0; i < 30; i++) a.fixedUpdate(1, hooks);
     expect(a.vy).toBe(0);
@@ -179,7 +179,7 @@ describe('世纪之花弹幕与状态', () => {
     const w = makeWorld();
     w.difficulty = 1;
     const { hooks } = makeHooks(w, { x: 110, y: 94 });
-    const a = new Arrow(100 * TILE, 90 * TILE, 0, -14, 22, 0, 275, null,
+    const a = new Arrow(100 * TILE, 90 * TILE, 0, -14, 22, 0, 275,
       { grav: 0, hostile: true, homing: { speed: 18, weight: 70, floor: 14 } });
     const v0 = Math.hypot(a.vx, a.vy);
     for (let i = 0; i < 40; i++) a.fixedUpdate(1, hooks);
@@ -191,7 +191,7 @@ describe('世纪之花弹幕与状态', () => {
     const w = makeWorld();
     for (let y = 0; y < H; y++) w.store.setTile(120, y, TILE_DEFS.findIndex((d) => d.key === 'stone'));
     const { hooks } = makeHooks(w, { x: 100, y: 94 });
-    const a = new Arrow(115 * TILE, 94 * TILE, 8, 2, 31, 0, 277, null,
+    const a = new Arrow(115 * TILE, 94 * TILE, 8, 2, 31, 0, 277,
       { grav: 0, thornBounce: true, hostile: true, life: 600 });
     let bounced = false;
     for (let i = 0; i < 40 && !a.dead; i++) {

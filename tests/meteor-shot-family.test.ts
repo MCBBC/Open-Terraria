@@ -17,7 +17,7 @@ describe('流星法杖 2750 → 流星弹 424-426 出生面(R3)', () => {
   it('①scale=ai[1] 同分布掷定:三型 drawScale ∈ [0.5,0.8)(曾只 424,425/426 恒 1)', () => {
     for (let i = 0; i < 200; i++) {
       for (const pid of [424, 425, 426]) {
-        const a = new Arrow(1000, 1600, 6, 0, 10, 1, pid, null, {});
+        const a = new Arrow(1000, 1600, 6, 0, 10, 1, pid, {});
         expect(a.drawScale, `pid ${pid}`).toBeGreaterThanOrEqual(0.5);
         expect(a.drawScale, `pid ${pid}`).toBeLessThan(0.8);
       }
@@ -27,7 +27,7 @@ describe('流星法杖 2750 → 流星弹 424-426 出生面(R3)', () => {
   it('②PhoenixQuivered 位不可达:ai[2]=0 → 三位标全 false(StatusNPC :11179 门死,翻案钉)',
     () => {
       for (const pid of [424, 425, 426]) {
-        const a = new Arrow(1000, 1600, 6, 0, 10, 1, pid, null, {});
+        const a = new Arrow(1000, 1600, 6, 0, 10, 1, pid, {});
         expect(a.phoenixQuivered, `pid ${pid}`).toBe(false);
         expect(a.harpyCharmed, `pid ${pid}`).toBe(false);
         expect(a.seraphNecklaced, `pid ${pid}`).toBe(false);
@@ -49,7 +49,7 @@ describe('流星法杖 2750 → 流星弹 424-426 出生面(R3)', () => {
       broadcastParticleOrchestra: () => {}, spawnDust: () => null,
     } as unknown as GameHooks;
     for (const pid of [424, 425, 426]) {
-      const a = new Arrow(40 * 16, 40 * 16, 6, 0, 10, 1, pid, null, {});
+      const a = new Arrow(40 * 16, 40 * 16, 6, 0, 10, 1, pid, {});
       expect(a.noTileCollide, `pid ${pid} init`).toBe(true);    // SetDefaults tileCollide=false
       a.fixedUpdate(1 / 60, game);
       expect(a.noTileCollide, `pid ${pid} reset`).toBe(false);  // y(640) > player.y-300(180)

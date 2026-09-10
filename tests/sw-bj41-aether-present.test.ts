@@ -94,6 +94,28 @@ describe('SW-BJ41 shimmerAlpha 驱动（SceneState.UpdateShimmer :332-357）', (
     expect(mf.shimmerAlpha).toBeCloseTo(0.025, 6);
     expect(mf.shimmerAlpha).not.toBeCloseTo(0.05, 6);
   });
+
+  // ★SW-RB10e 2026-09-10：:331 四项析取补全——旧实现只接 MonolithState==1 ∨
+  //  ZoneShimmer 两项,漏「player.shimmering && UndergroundForShimmering」臂
+  //  （小微光池 <300 格阈时 ZoneShimmer=false 而原版仍升 α）
+  it('★SW-RB10e：shimmerSubmerged 臂（buff 353 浸没+深度带）独立驱动（:331 析取项）', () => {
+    const mf = new MonolithFilters();
+    mf.update(TICK, emptyMonolithScene(), { ...baseEnv(), shimmerSubmerged: true });
+    expect(mf.shimmerAlpha).toBeCloseTo(0.025, 6);
+  });
+
+  it('★SW-RB10e：shimmerSubmerged 与 zoneShimmer 任一为真即升（析取语义）；state=2 仍压暗', () => {
+    // 两项皆真 → 升；单 submerged 真 → 升（上一测）；state=2 显式关压掉全部
+    const scan2 = emptyMonolithScene();
+    scan2.shimmerMonolithState = 2;
+    const mf2 = new MonolithFilters();
+    mf2.update(TICK, scan2, { ...baseEnv(), zoneShimmer: true, shimmerSubmerged: true });
+    expect(mf2.shimmerAlpha).toBe(0);
+    // 全缺省 → 不升（防误触发）
+    const mf3 = new MonolithFilters();
+    mf3.update(TICK, emptyMonolithScene(), baseEnv());
+    expect(mf3.shimmerAlpha).toBe(0);
+  });
 });
 
 describe('SW-BJ41 以太 BGM 槽位（Main.cs:12834 → MusicID.Aether 91）', () => {
@@ -117,6 +139,13 @@ describe('SW-BJ41 接线 tripwire（env 漏喂/表现层回退防再发）', () 
   it('Renderer 每帧把 scene.zoneShimmer 喂进 monoFilters.update env（本次事故主根因）', () => {
     const r = src('../src/render/Renderer.ts');
     expect(r).toMatch(/zoneShimmer:\s*!!this\.scene\?\.zoneShimmer/);
+  });
+
+  it('★SW-RB10e：:331 析取项补全（shimmerSubmerged 喂位+状态机臂）在位', () => {
+    const r = src('../src/render/Renderer.ts');
+    const m = src('../src/render/MonolithFilters.ts');
+    expect(r).toMatch(/shimmerSubmerged: !!\(player\.shimmering && this\.scene\?\.undergroundForShimmering\)/);
+    expect(m).toMatch(/!!env\.shimmerSubmerged/);
   });
 
   it('黑幕+人工星空 pass 在位（Main.cs:63132-63153 → Renderer 主画布段）', () => {

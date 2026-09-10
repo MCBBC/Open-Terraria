@@ -537,7 +537,7 @@ export class Bobber extends Entity {
     if (pond.chums > 1) level += 6;
     if (pond.chums > 2) level += 3;
     p.displayedFishingInfo = Lang.text('GameUI.FishingPower', level);   // :20771-20772
-    const canFishInLava = CAN_FISH_IN_LAVA_POLES.has(this.poleVid)   // :19230 三源
+    const canFishInLava = CAN_FISH_IN_LAVA_POLES.has(this.poleVid)   // ★SW-RB10b 锚正:Projectile.cs:20758 三源（1458 :20759 同值）;旧注「:19230」系 Player.cs 误挂（Player.cs:19230=usedAegisCrystal 回血域,非本面）
       || IS_LAVA_BAIT.has(this.baitVid) || this.ownerLavaOk();
     // 水量缩放（:19244-19261）：atmo = (Y/16 - (60 + 10·(W/4200)²)) / (地表/6) 截 [0.25,1]
     const atmoNum = (st.w / 4200) ** 2;
@@ -660,14 +660,15 @@ export class Bobber extends Entity {
       fireLavaFishingAch();                           // :20921 尾奏（咬钩支同发）
       return;
     }
-    // 二者皆空（:19368-19391）：岩浆且三源 ≥2 → 累积器 +240/+480 加速下一咬
+    // 二者皆空（★SW-RB10b 锚正:Projectile.cs:20896-20919 `!flag && fisher.inLava`，
+    // 1458 :20897-20920 同构;旧注「:19368-19391」系 Player.cs 误挂=回血域）：岩浆且三源 ≥2 → 累积器 +240/+480 加速下一咬
     if (pond.lava) {
       let n = 0;
-      if (IS_LAVA_BAIT.has(this.baitVid)) n++;        // :19371-19374
-      if (CAN_FISH_IN_LAVA_POLES.has(this.poleVid)) n++;   // :19375-19378
-      if (this.ownerLavaOk()) n++;                    // :19379-19382
-      if (n >= 3) this.lAI1 += 480;                   // :19383-19386
-      else if (n >= 2) this.lAI1 += 240;              // :19387-19390
+      if (IS_LAVA_BAIT.has(this.baitVid)) n++;        // :20899-20902 IsLavaBait
+      if (CAN_FISH_IN_LAVA_POLES.has(this.poleVid)) n++;   // :20903-20906 CanFishInLava
+      if (this.ownerLavaOk()) n++;                    // :20907-20910 accLavaFishing
+      if (n >= 3) this.lAI1 += 480;                   // :20911-20914
+      else if (n >= 2) this.lAI1 += 240;              // :20915-20918
     }
     fireLavaFishingAch();                             // :20921 尾奏（空咬支同发）
   }

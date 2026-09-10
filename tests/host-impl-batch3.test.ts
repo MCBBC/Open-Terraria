@@ -48,7 +48,7 @@ describe('批III① RainbowTownSlime 触发链（B1-X3：解锁段归 Shimmer �
 
   it('浸微光液上升期触达 → 世界旗置位 + 巨星史莱姆 681 入镇 NPC 桶 + 寿命钳 5', () => {
     const { g, npcs } = makeGame();
-    const b = new Arrow(800, 300, 2, -1, 0, 0, 936, null, {});
+    const b = new Arrow(800, 300, 2, -1, 0, 0, 936, {});
     seedLiquid(g.world, b, LIQUID_TYPE.SHIMMER);
     (b as unknown as { life: number }).life = 300;
     (b as unknown as { shimmerUnlock: (g: GameHooks) => void }).shimmerUnlock(g);
@@ -61,7 +61,7 @@ describe('批III① RainbowTownSlime 触发链（B1-X3：解锁段归 Shimmer �
   it('反例：同格清水（非微光）消亡路径不置位、不出 Diva（killNow 单口已无解锁段）',
     () => {
       const { g, npcs } = makeGame();
-      const b = new Arrow(800, 300, 2, -1, 0, 0, 936, null, {});   // 上升中消亡——旧实现在此永久解锁
+      const b = new Arrow(800, 300, 2, -1, 0, 0, 936, {});   // 上升中消亡——旧实现在此永久解锁
       seedLiquid(g.world, b, LIQUID_TYPE.WATER);
       (b as unknown as { vy: number }).vy = -1;
       (b as unknown as { killNow: (g: GameHooks) => void }).killNow(g);
@@ -74,7 +74,7 @@ describe('批III① RainbowTownSlime 触发链（B1-X3：解锁段归 Shimmer �
     });
   it('已解锁后二次触达不再生成（unlockedSlimeRainbowSpawn 门）', () => {
     const { g, npcs } = makeGame();
-    const b = new Arrow(800, 300, 2, -1, 0, 0, 936, null, {});
+    const b = new Arrow(800, 300, 2, -1, 0, 0, 936, {});
     seedLiquid(g.world, b, LIQUID_TYPE.SHIMMER);
     g.world.flags['unlockedSlimeRainbowSpawn'] = true;
     (b as unknown as { vy: number }).vy = -1;

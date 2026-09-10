@@ -81,7 +81,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     const dusts: DustRec[] = [];
     const sfx: string[] = [];
     const game = makeGame(emptyWorld(), dusts, sfx);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 660, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 660, { grav: 0, life: 600 });
     flyFrames(a, game, 3);
     const ring = dusts.filter((d) => d.type === 180);
     expect(ring.length).toBe(16);                       // 恰一次（EU=1 首帧第 2 子步门已关）
@@ -98,7 +98,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     const dusts: DustRec[] = [];
     const sfx: string[] = [];
     const game = makeGame(emptyWorld(), dusts, sfx);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 712, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 712, { grav: 0, life: 600 });
     flyFrames(a, game, 1);
     const ring = dusts.filter((d) => d.type === 15);
     expect(ring.length).toBe(4);
@@ -124,7 +124,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     for (const [pid, dustId] of [[265, 163], [355, 205]] as const) {
       const dusts: DustRec[] = [];
       const game = makeGame(emptyWorld(), dusts);
-      const a = new Arrow(400, 300, 6, 0, 10, 1, pid, null, { grav: 0 });   // life=SetDefaults
+      const a = new Arrow(400, 300, 6, 0, 10, 1, pid, { grav: 0 });   // life=SetDefaults
       const seq: number[] = [a.alpha];
       for (let i = 0; i < 7; i++) {
         a.fixedUpdate(1 / 60, game);
@@ -141,7 +141,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
   it('④ 495 暗影焰弓箭：每 tick 恰 1×d27 尾迹（α100,scale1.2,noGravity）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 495, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 495, { grav: 0, life: 600 });
     flyFrames(a, game, 10);
     const t = dusts.filter((d) => d.type === 27);
     expect(t.length).toBe(10);
@@ -151,7 +151,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
   it('⑤ 710 空中祸害：1/4 子步掷尘（d31 半率 + d6 恒,fadeIn 1.22/裂片 1.5）+ 入水灭', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 710, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 710, { grav: 0, life: 600 });
     flyFrames(a, game, 40);                              // EU=1 → 80 子步
     const d6 = dusts.filter((d) => d.type === 6);
     const d31 = dusts.filter((d) => d.type === 31);
@@ -164,7 +164,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     // 裂片（abShard=ai[1]=-1）档 fadeIn=1.5
     const dusts2: DustRec[] = [];
     const game2 = makeGame(emptyWorld(), dusts2);
-    const s = new Arrow(400, 300, 6, 0, 10, 1, 710, null, { grav: 0, life: 600 });
+    const s = new Arrow(400, 300, 6, 0, 10, 1, 710, { grav: 0, life: 600 });
     s.abShard = true;
     flyFrames(s, game2, 40);
     const d6s = dusts2.filter((d) => d.type === 6);
@@ -179,7 +179,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     }
     const dusts3: DustRec[] = [];
     const game3 = makeGame(w2, dusts3);
-    const w = new Arrow(656, 320, -6, 0, 10, 1, 710, null, { grav: 0, life: 600 });
+    const w = new Arrow(656, 320, -6, 0, 10, 1, 710, { grav: 0, life: 600 });
     for (let i = 0; i < 60 && !w.dead; i++) w.fixedUpdate(1 / 60, game3);
     expect(w.dead).toBe(true);                           // (3/4)^120 ≈ 3e-15 漏杀率
   });
@@ -188,7 +188,7 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
     const dusts: DustRec[] = [];
     const sfx: string[] = [];
     const game = makeGame(emptyWorld(), dusts, sfx);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 1097, null, { grav: 0, life: 300 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 1097, { grav: 0, life: 300 });
     expect(a.drawScale).toBeCloseTo(1, 9);
     flyFrames(a, game, 1);
     // 出生尘爆：10×(细尘 scale×0.7 + 大尘 scale×1.25)——与 1/4 掷尾迹尘(scale×1.3)
@@ -219,8 +219,8 @@ describe('Arrow 观感面缺口批金标（2026-09-02）', () => {
 describe('Arrow 遗留批金标（2026-09-02 ②）', () => {
   it('⑦ 1097 tileCollide 动态翻转：SetDefaults false 起步 → 下坠期撞块/上升期穿墙 → 40 子步后恒撞块', () => {
     // 起始值：数据表 tileCollide=false（SetDefaults :10236）→ ctor noTileCollide=true
-    const down = new Arrow(400, 288, 6, 5, 10, 1, 1097, null, { life: 300 });
-    const up = new Arrow(400, 288, 6, -5, 10, 1, 1097, null, { life: 300 });
+    const down = new Arrow(400, 288, 6, 5, 10, 1, 1097, { life: 300 });
+    const up = new Arrow(400, 288, 6, -5, 10, 1, 1097, { life: 300 });
     const gate = (a: Arrow) => (a as unknown as { noTileCollide: boolean }).noTileCollide;
     expect(gate(down)).toBe(true);
     expect(gate(up)).toBe(true);
@@ -244,7 +244,7 @@ describe('Arrow 遗留批金标（2026-09-02 ②）', () => {
     setProjSpriteOverride(265, { width: 12, height: 12 } as unknown as HTMLImageElement);
     setProjSpriteOverride(355, { width: 12, height: 12 } as unknown as HTMLImageElement);
     const game = makeGame(emptyWorld(), []);
-    const a = new Arrow(400, 288, 6, 0, 10, 1, 265, null, { grav: 0 });
+    const a = new Arrow(400, 288, 6, 0, 10, 1, 265, { grav: 0 });
     const snap = (arr: Array<{ ga: number; gco: string }>) => arr[0];
     const c1 = makeDrawCtx();
     a.draw({ ctx: c1.ctx } as unknown as Renderer, {} as never);
@@ -256,7 +256,7 @@ describe('Arrow 遗留批金标（2026-09-02 ②）', () => {
     a.draw({ ctx: c2.ctx } as unknown as Renderer, {} as never);
     expect(snap(c2.calls)).toEqual({ ga: 1, gco: 'lighter' });   // (255,255,255,0) A=0 满强加算白
     // 355 同档
-    const b = new Arrow(400, 288, 6, 0, 10, 1, 355, null, { grav: 0 });
+    const b = new Arrow(400, 288, 6, 0, 10, 1, 355, { grav: 0 });
     flyFrames(b, game, 6);
     const c3 = makeDrawCtx();
     b.draw({ ctx: c3.ctx } as unknown as Renderer, {} as never);
@@ -294,7 +294,7 @@ describe('斗篷星 alpha 渐减金标（2026-09-03）', () => {
     const game = makeGame(emptyWorld(), []);
     const targetY = 120 * 16;
     // 出生于目标线上方（100*16 < 120*16）——线上期 α 先减后上钳 100（num44）
-    const a = new Arrow(80 * 16, 100 * 16, 0, 2, 75, 5, 723, null, { star: { targetY } });
+    const a = new Arrow(80 * 16, 100 * 16, 0, 2, 75, 5, 723, { star: { targetY } });
     expect(a.starAlpha).toBe(50);                       // SetDefaults :7655（PROJ_ALPHA0 注入）
     flyFrames(a, game, 1);
     expect(a.starAlpha).toBe(100);                      // 50−15=35 <100 → 上钳 100
@@ -310,7 +310,7 @@ describe('斗篷星 alpha 渐减金标（2026-09-03）', () => {
     expect(a.starAlpha).toBe(0);
     // 回归线：503 星怒星 α 面不变（255 起 −15/子步,线上钳 150——:24151-24158 num43;
     //  EU=1 → 2 子步/拍 → 每游戏拍 −30,与原版 AI()×2 同拍）
-    const b = new Arrow(80 * 16, 100 * 16, 0, 2, 95, 5, 503, null, { star: { targetY } });
+    const b = new Arrow(80 * 16, 100 * 16, 0, 2, 95, 5, 503, { star: { targetY } });
     expect(b.starAlpha).toBe(255);
     flyFrames(b, game, 1);
     expect(b.starAlpha).toBe(225);                      // 255−15×2（150 钳未触及）
@@ -335,8 +335,10 @@ describe('出膛音面金标（2026-09-03:83→Item_33 / 576→Item_12 发射位
     const src = readFileSync(new URL('../src/entities/bossAI_lunar_misc.ts', import.meta.url), 'utf8');
     // ★R10 锚序纠:音在 Arrow 构造【后】(发射位等价结算=弹先出生后补播,与原版
     // ai[1]==0 首拍同拍)——正则改从 Arrow(…576) 向后窗找 Item_12
+    // ★SW-FX9(2026-09-10)：`, null,`（旧 dropKey 占位实参）已随回收链摘除,窗匹配
+    // 改按 576 出生实参尾锚
     const m = src.match(
-      /576, null,[\s\S]{0,320}?playSfxWav\?\.\('Item_12'/);
+      /576,[\s\S]{0,320}?playSfxWav\?\.\('Item_12'/);
     expect(m, 'bossAI_lunar_misc.ts 弹 576 出膛位缺 Item_12 播放').toBeTruthy();
   });
 });

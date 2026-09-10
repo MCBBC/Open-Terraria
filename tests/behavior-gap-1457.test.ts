@@ -264,7 +264,7 @@ describe('1133 星斗篷 override 链（:38738-38753 顺序赋值后者覆盖）
 describe('拍击石 6167 kind0 远程脉冲（Arrow.ts 通用命中环消费端）', () => {
   /** ranged 弹（projId 1 木箭,ranged 位真）从左射向敌 0 */
   const shoot = (hooks: GameHooks, enemies: MockEnemy[], x = 20 * 16 - 14) => {
-    const arrow = new Arrow(x, 10 * 16, 8, 0, 40, 0, 1, null, { grav: 0 });
+    const arrow = new Arrow(x, 10 * 16, 8, 0, 40, 0, 1, { grav: 0 });
     for (let i = 0; i < 6 && !arrow.dead; i++) arrow.fixedUpdate(1 / 60, hooks);
     return arrow;
   };
@@ -292,11 +292,11 @@ describe('拍击石 6167 kind0 远程脉冲（Arrow.ts 通用命中环消费端�
     const victims = [mkEnemy(1, 20 * 16, 10 * 16), mkEnemy(2, 20 * 16 + 100, 10 * 16)];
     const { hooks, player, added } = makeHooks(victims);
     player.inv.armor[3] = { id: iid(6167), stack: 1 };
-    const magic = new Arrow(20 * 16 - 14, 10 * 16, 8, 0, 40, 0, 15, null, { grav: 0 });
+    const magic = new Arrow(20 * 16 - 14, 10 * 16, 8, 0, 40, 0, 15, { grav: 0 });
     for (let i = 0; i < 6 && !magic.dead; i++) magic.fixedUpdate(1 / 60, hooks);
     expect(victims[0].hits.length).toBeGreaterThan(0);   // 命中了
     expect(added.some((a) => (a as { projId?: number }).projId === 1121)).toBe(false);
-    const hostile = new Arrow(20 * 16 - 14, 12 * 16, 8, 0, 40, 0, 1, null, { grav: 0, hostile: true });
+    const hostile = new Arrow(20 * 16 - 14, 12 * 16, 8, 0, 40, 0, 1, { grav: 0, hostile: true });
     for (let i = 0; i < 6 && !hostile.dead; i++) hostile.fixedUpdate(1 / 60, hooks);
     expect(added.some((a) => (a as { projId?: number }).projId === 1121)).toBe(false);
     expect(player.accSnappingStoneCooldown).toBe(0);

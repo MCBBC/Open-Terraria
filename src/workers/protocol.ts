@@ -64,6 +64,10 @@ export interface WorldPacket {
   bestiary?: BestiarySave;
   /** 城镇 NPC 段（读档路径回传,Game.loadWorld 消费;旧包缺省=空→新世界出生分支） */
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
+  /** ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 四塔位（读档路径回传,afterWorldLoad 恢复;旧包缺省=无） */
+  pendingPillarNpcs?: Array<{ id: number; x: number; y: number }>;
+  /** ★SW-FX11（2026-09-10）：按压压力板位（读档路径回传,afterWorldLoad 一次性重触发;旧包缺省=无） */
+  pendingPlatePokes?: Array<{ x: number; y: number }>;
   /** ★IIIIIII6：SpawnStarterNPCs 播种记录（生成路径回传,首进消费后清空） */
   starterTownNpcs?: Array<{ key: string; givenName: string; x: number; y: number; anchor: [number, number]; dir: -1 | 1; variationIndex?: number }>;
   chests: ChestData[];

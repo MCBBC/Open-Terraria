@@ -258,7 +258,7 @@ describe('MinionShot tag/proc 继承', () => {
     const e = mkEnemy(9, 60 * 16 + 100, 90 * 16);
     const { hooks, player, added } = makeHooks([e]);
     tagEnemy(player, e, 5476);   // 星陨鞭 TagDamage=2（ItemID.cs:1341）
-    const arrow = new Arrow(e.x - 60, e.y + 4, 8, 0, 10, 1, 374, null, { grav: 0, life: 60 });
+    const arrow = new Arrow(e.x - 60, e.y + 4, 8, 0, 10, 1, 374, { grav: 0, life: 60 });
     arrow.whipTagShot = true;   // 374 ∈ MinionShot（ProjectileID.cs:197）
     step([arrow], 20, hooks);
     expect(e.hp).toBe(10000 - 12);          // 10 + tag 2（ModifyTaggedHit :62-74）

@@ -344,8 +344,8 @@ describe('④ accHarpyCharm：HarpyCharmEffect 玩家侧扫描（:28661-28704）
     withEq(player, { accHarpyCharm: true });
     const foe = mkEnemy(1, player.cx + 700, player.cy - 100);
     (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [foe];
-    const far = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, null, { grav: 0 });
-    const near = new Arrow(player.cx + 300, player.cy, 6, 0, 10, 1, 1, null, { grav: 0 });   // <400 排除
+    const far = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, { grav: 0 });
+    const near = new Arrow(player.cx + 300, player.cy, 6, 0, 10, 1, 1, { grav: 0 });   // <400 排除
     const projs = (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles;
     projs.push(near, far);
     harpyCharmEffect(hooks, player);
@@ -363,13 +363,13 @@ describe('④ accHarpyCharm：HarpyCharmEffect 玩家侧扫描（:28661-28704）
     withEq(player, { accHarpyCharm: true });
     const foe = mkEnemy(1, player.cx + 900, player.cy);
     (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [foe];
-    const tooFar = new Arrow(player.cx + 1300, player.cy, 6, 0, 10, 1, 1, null, { grav: 0 });
+    const tooFar = new Arrow(player.cx + 1300, player.cy, 6, 0, 10, 1, 1, { grav: 0 });
     const projs = (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles;
     projs.push(tooFar);
     harpyCharmEffect(hooks, player);
     expect(tooFar.harpyCharmed).toBe(false);
     expect(player.accHarpyCharmCooldown).toBe(0);
-    const charmed = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, null, { grav: 0 });
+    const charmed = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, { grav: 0 });
     charmed.harpyCharmed = true;                           // 已引（AI_001_Features bit0）
     projs.length = 0;
     projs.push(charmed);
@@ -377,7 +377,7 @@ describe('④ accHarpyCharm：HarpyCharmEffect 玩家侧扫描（:28661-28704）
     expect(player.accHarpyCharmCooldown).toBe(0);          // :28682 HarpyCharmed 跳过
     // 冷却期（Update_HarpyCharm 递减支）不进扫描
     player.accHarpyCharmCooldown = 30;
-    const fresh = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, null, { grav: 0 });
+    const fresh = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, { grav: 0 });
     projs.push(fresh);
     tick1457(player, hooks);
     expect(fresh.harpyCharmed).toBe(false);
@@ -389,7 +389,7 @@ describe('④ accHarpyCharm：HarpyCharmEffect 玩家侧扫描（:28661-28704）
     const foe = mkEnemy(1, player.cx + 700, player.cy);
     (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [foe];
     const projs = (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles;
-    const a = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, null, { grav: 0 });
+    const a = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, { grav: 0 });
     projs.push(a);
     harpyCharmEffect(hooks, player);
     expect(player.accHarpyCharmCooldown).toBe(72);         // :28671-28674
@@ -397,7 +397,7 @@ describe('④ accHarpyCharm：HarpyCharmEffect 玩家侧扫描（:28661-28704）
     expect(a.phoenixQuivered).toBe(false);
     withEq(player, { accHarpyCharm: true, accSeraphNecklace: true, hasPhoenixQuiver: true });
     player.accHarpyCharmCooldown = 0;                      // 复位冷却（:28663 门）
-    const b = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, null, { grav: 0 });
+    const b = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 1, { grav: 0 });
     projs.length = 0; projs.push(b);
     harpyCharmEffect(hooks, player);
     expect(b.phoenixQuivered).toBe(true);                  // :28700 hasPhoenixQuiver 优先
@@ -410,7 +410,7 @@ describe('④ accHarpyCharm：AI_001 尾消费 + 命中面（:58752-58777 / Stat
     const { hooks } = makeHooks();
     const foe = mkEnemy(1, 800, 1200);
     (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [foe];
-    const a = new Arrow(600, 1400, 8, 0, 10, 1, 1, null, { grav: 0 });
+    const a = new Arrow(600, 1400, 8, 0, 10, 1, 1, { grav: 0 });
     a.applyHarpyCharm(foe.cx, foe.cy, 6166);               // ApplyHarpyCharm :58779
     expect(a.harpyCharmed).toBe(true);
     a.fixedUpdate(1 / 60, hooks);
@@ -424,10 +424,10 @@ describe('④ accHarpyCharm：AI_001 尾消费 + 命中面（:58752-58777 / Stat
     const { hooks } = makeHooks();
     const foe = mkEnemy(1, 800, 1400);
     (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [foe];
-    const plain = new Arrow(foe.x - 4, foe.y, 4, 0, 10, 1, 1, null, { grav: 0 });
+    const plain = new Arrow(foe.x - 4, foe.y, 4, 0, 10, 1, 1, { grav: 0 });
     plain.fixedUpdate(1 / 60, hooks);
     expect(foe.onFire3T ?? 0).toBe(0);
-    const phoenix = new Arrow(foe.x - 4, foe.y, 4, 0, 10, 1, 1, null, { grav: 0 });
+    const phoenix = new Arrow(foe.x - 4, foe.y, 4, 0, 10, 1, 1, { grav: 0 });
     phoenix.phoenixQuivered = true;
     phoenix.fixedUpdate(1 / 60, hooks);
     expect(foe.onFire3T ?? 0).toBeGreaterThanOrEqual(5);   // AddBuff(323, 300)
@@ -442,7 +442,7 @@ describe('④ accHarpyCharm：AI_001 尾消费 + 命中面（:58752-58777 / Stat
     const foe = mkEnemy(1, player.cx + 700, player.cy);
     (hooks as unknown as { enemies: () => StubEnemy[] }).enemies = () => [foe];
     const projs = (hooks as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles;
-    const bullet = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 14, null, { grav: 0 });
+    const bullet = new Arrow(player.cx + 500, player.cy, 6, 0, 10, 1, 14, { grav: 0 });
     projs.push(bullet);
     harpyCharmEffect(hooks, player);
     expect(bullet.harpyCharmed).toBe(false);               // :28682 projectile.arrow 门

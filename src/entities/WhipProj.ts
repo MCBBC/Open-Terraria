@@ -695,7 +695,7 @@ export class WhipProj extends Entity {
             //  再乘 (1+NextFloatDirection×3) 随机速率（可负 → 反向）
             const f = owner ? owner.facing : 1;
             const s = (1 + (Math.random() * 2 - 1) * 3) * (f >= 0 ? 1 : -1);
-            add(new Arrow(a.x, a.y, dy / d * s, -dx / d * s, starDmg, this.knockback, 1039, null,
+            add(new Arrow(a.x, a.y, dy / d * s, -dx / d * s, starDmg, this.knockback, 1039,
               { grav: 0, life: 240 }), 'projectiles');
           }
         }

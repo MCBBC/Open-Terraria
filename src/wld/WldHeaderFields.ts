@@ -118,9 +118,12 @@ export const HEADER_FLAGS: WldField[] = [
   { name: '_tempRaining', type: 'bool', ver: 0, get: (s) => !!WT(s).raining },
   { name: '_tempRainTime', type: 'i32', ver: 0, get: (s) => WT(s).rainTime ?? 0 },
   { name: '_tempMaxRain', type: 'f32', ver: 0, get: (s) => WT(s).maxRaining ?? 0 },
-  { name: 'SavedOreTiers.Cobalt', type: 'i32', ver: 0, get: () => -1 },
-  { name: 'SavedOreTiers.Mythril', type: 'i32', ver: 0, get: () => -1 },
-  { name: 'SavedOreTiers.Adamantite', type: 'i32', ver: 0, get: () => -1 },
+  // ★SW-FX11（2026-09-10）：曾恒 -1（=未砸过祭坛）→ 自建世界砸祭坛掷定的困难矿
+  //  档位导出即丢（SaveData.savedOreTiers 既有,serialize.ts :120/:449）。缺省 -1
+  //  保留（旧档缺省语义）
+  { name: 'SavedOreTiers.Cobalt', type: 'i32', ver: 0, get: (s) => s.savedOreTiers?.cobalt ?? -1 },
+  { name: 'SavedOreTiers.Mythril', type: 'i32', ver: 0, get: (s) => s.savedOreTiers?.mythril ?? -1 },
+  { name: 'SavedOreTiers.Adamantite', type: 'i32', ver: 0, get: (s) => s.savedOreTiers?.adamantite ?? -1 },
   { name: 'treeBG1', type: 'u8', ver: 0, get: (s) => BG(s).forest?.[0] ?? 0 },
   { name: 'corruptBG', type: 'u8', ver: 0, get: (s) => BG(s).corrupt ?? 0 },
   { name: 'jungleBG', type: 'u8', ver: 0, get: () => 0 },   // BgStylesSave 无键,登记偏差
@@ -178,17 +181,20 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'treeBG2', type: 'u8', ver: 204, get: (s) => BG(s).forest?.[1] ?? 0 },
   { name: 'treeBG3', type: 'u8', ver: 204, get: (s) => BG(s).forest?.[2] ?? 0 },
   { name: 'treeBG4', type: 'u8', ver: 204, get: (s) => BG(s).forest?.[3] ?? 0 },
-  { name: 'combatBookWasUsed', type: 'bool', ver: 204, get: (s) => B(F(s), 'combatBook') },
+  { name: 'combatBookWasUsed', type: 'bool', ver: 204, get: (s) => B(F(s), 'combatBookWasUsed') },   // ★SW-FX11 键域归一(曾读 'combatBook' 短键=断链)
   { name: '_tempLanternNightCooldown', type: 'i32', ver: 207, get: (s) => EV(s).lanternCooldown ?? 0 },
   { name: '_tempLanternNightGenuine', type: 'bool', ver: 207, get: (s) => !!EV(s).lanternGenuine },
   { name: '_tempLanternNightManual', type: 'bool', ver: 207, get: (s) => !!EV(s).lanternManual },
   { name: '_tempLanternNightNextNightIsGenuine', type: 'bool', ver: 207, get: (s) => !!EV(s).lanternNext },
   { name: 'forceHalloweenForToday', type: 'bool', ver: 212, get: (s) => B(F(s), 'forceHalloweenForToday') },
   { name: 'forceXMasForToday', type: 'bool', ver: 212, get: (s) => B(F(s), 'forceXMasForToday') },
-  { name: 'SavedOreTiers.Copper', type: 'i32', ver: 216, get: () => 7 },
-  { name: 'SavedOreTiers.Iron', type: 'i32', ver: 216, get: () => 6 },
-  { name: 'SavedOreTiers.Silver', type: 'i32', ver: 216, get: () => 9 },
-  { name: 'SavedOreTiers.Gold', type: 'i32', ver: 216, get: () => 8 },
+  // ★SW-FX11（2026-09-10）：曾恒 7/6/9/8 标准矿 → 醉酒世界替代矿 166/167/168/169
+  //  导出即丢（SaveData.oreTiersPH 既有,serialize.ts :121/:450;军火商银弹/钨弹分支
+  //  Game.ts:34531 消费）。缺省 7/6/9/8=原版标准档
+  { name: 'SavedOreTiers.Copper', type: 'i32', ver: 216, get: (s) => s.oreTiersPH?.copper ?? 7 },
+  { name: 'SavedOreTiers.Iron', type: 'i32', ver: 216, get: (s) => s.oreTiersPH?.iron ?? 6 },
+  { name: 'SavedOreTiers.Silver', type: 'i32', ver: 216, get: (s) => s.oreTiersPH?.silver ?? 9 },
+  { name: 'SavedOreTiers.Gold', type: 'i32', ver: 216, get: (s) => s.oreTiersPH?.gold ?? 8 },
   { name: 'boughtCat', type: 'bool', ver: 217, get: (s) => B(F(s), 'boughtCat') },
   { name: 'boughtDog', type: 'bool', ver: 217, get: (s) => B(F(s), 'boughtDog') },
   { name: 'boughtBunny', type: 'bool', ver: 217, get: (s) => B(F(s), 'boughtBunny') },
@@ -204,8 +210,8 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'unlockedArmsDealerSpawn', type: 'bool', ver: 251, get: (s) => B(F(s), 'unlockedArmsDealerSpawn') },
   { name: 'unlockedNurseSpawn', type: 'bool', ver: 251, get: (s) => B(F(s), 'unlockedNurseSpawn') },
   { name: 'unlockedPrincessSpawn', type: 'bool', ver: 251, get: (s) => B(F(s), 'unlockedPrincessSpawn') },
-  { name: 'combatBookVolumeTwoWasUsed', type: 'bool', ver: 259, get: (s) => B(F(s), 'combatBook2') },
-  { name: 'peddlersSatchelWasUsed', type: 'bool', ver: 260, get: (s) => B(F(s), 'peddler') },
+  { name: 'combatBookVolumeTwoWasUsed', type: 'bool', ver: 259, get: (s) => B(F(s), 'combatBookVolumeTwoWasUsed') },   // ★SW-FX11 键域归一(曾读 'combatBook2')
+  { name: 'peddlersSatchelWasUsed', type: 'bool', ver: 260, get: (s) => B(F(s), 'peddlersSatchelUsed') },   // ★SW-FX11 键域归一(曾读 'peddler';运行时键见 Game.ts:13674/:35811)
   { name: 'unlockedSlimeGreenSpawn', type: 'bool', ver: 261, get: (s) => B(F(s), 'unlockedSlimeGreenSpawn') },
   { name: 'unlockedSlimeOldSpawn', type: 'bool', ver: 261, get: (s) => B(F(s), 'unlockedSlimeOldSpawn') },
   { name: 'unlockedSlimePurpleSpawn', type: 'bool', ver: 261, get: (s) => B(F(s), 'unlockedSlimePurpleSpawn') },
@@ -217,8 +223,8 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'moondialCooldown', type: 'u8', ver: 264, get: (s) => H(s).moondialCooldown ?? 0 },
   { name: 'forceHalloweenForever', type: 'bool', ver: 287, get: (s) => B(F(s), 'forceHalloweenForever') },
   { name: 'forceXMasForever', type: 'bool', ver: 287, get: (s) => B(F(s), 'forceXMasForever') },
-  { name: 'vampireSeed', type: 'bool', ver: 288, get: (s) => B(F(s), 'vampire') },
-  { name: 'infectedSeed', type: 'bool', ver: 296, get: (s) => B(F(s), 'infected') },
+  { name: 'vampireSeed', type: 'bool', ver: 288, get: (s) => B(SF(s), 'vampireSeed') },   // ★SW-FX11 域归一(曾读 flags.'vampire';种子旗真域=seedFlags,消费面 Player.ts:8384 等)
+  { name: 'infectedSeed', type: 'bool', ver: 296, get: (s) => B(SF(s), 'infectedSeed') },   // ★SW-FX11 域归一(曾读 flags.'infected')
   { name: '_tempMeteorShowerCount', type: 'i32', ver: 291, get: (s) => (s as { meteorShowerCount?: number }).meteorShowerCount ?? 0 },   // ★P2-10:曾恒 0(serialize.ts :104)
   { name: '_tempCoinRain', type: 'i32', ver: 291, get: () => 0 },
   { name: 'teamBasedSpawnsSeed', type: 'bool', ver: 297, get: (s) => B(F(s), 'teamBasedSpawnsSeed') },

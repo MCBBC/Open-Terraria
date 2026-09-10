@@ -55,7 +55,7 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182;★R1:段在 numUpd
   it('弹 2 燃烧箭：10 帧 → d6 ×10（α100）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 2, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 2, { grav: 0, life: 600 });
     flyFrames(a, game, 10);
     expect(dusts.filter((d) => d.type === 6).length).toBe(10);
     expect(dusts.every((d) => d.alpha === 100)).toBe(true);
@@ -63,21 +63,21 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182;★R1:段在 numUpd
   it('弹 82 敌燃烧箭：同 d6 每拍 1 粒', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 82, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 82, { grav: 0, life: 600 });
     flyFrames(a, game, 8);
     expect(dusts.filter((d) => d.type === 6).length).toBe(8);
   });
   it('弹 172 毒镖：d135 ×10', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 172, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 172, { grav: 0, life: 600 });
     flyFrames(a, game, 10);
     expect(dusts.filter((d) => d.type === 135).length).toBe(10);
   });
   it('弹 103 流星弹：d75 ×10，1/2 掷 noGravity+scale×2（比例在 20-80%）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 103, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 103, { grav: 0, life: 600 });
     // ★2026-09-02 flake 修：n=10 的 1/2 掷带宽 [2,8] 漏检率 ≈2.1%/次（二项 10,0.5）
     // ——闸门批量跑常假红。样本 30、带宽 ±3σ（期望 15）→ 漏检 ≈0.2%,比例语义不变
     flyFrames(a, game, 30);
@@ -90,7 +90,7 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182;★R1:段在 numUpd
   it('弹 278 绿藻弹：d169 ×60（30 帧 × EU=1 → ×2/帧;★R1 子步层级），1/2 掷 noGravity+scale×1.5', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 278, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 278, { grav: 0, life: 600 });
     flyFrames(a, game, 30);
     const d169 = dusts.filter((d) => d.type === 169);
     expect(d169.length).toBe(60);
@@ -101,7 +101,7 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182;★R1:段在 numUpd
   it('弹 4 星星：1/5 掷 d14（60 帧 → 6..24 粒，α150 scale1.1）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 4, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 4, { grav: 0, life: 600 });
     flyFrames(a, game, 60);
     const d14 = dusts.filter((d) => d.type === 14);
     expect(d14.length).toBeGreaterThanOrEqual(6);
@@ -111,7 +111,7 @@ describe('AI Update 飞行尾尘通用段（P.cs:17141-17182;★R1:段在 numUpd
   it('弹 5 猎鹰刃：Next(3)∈{15,57,58} ×20（EU=1 → ×2/帧），speed=v×0.5（单次采样）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 5, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 5, { grav: 0, life: 600 });
     flyFrames(a, game, 10);
     expect(dusts.length).toBe(20);
     expect(dusts.every((d) => d.type === 15 || d.type === 57 || d.type === 58)).toBe(true);
@@ -124,7 +124,7 @@ describe('309 冰九头蛇冰弹（aiStyle28 尘尾 :26996-27004 每**子步**;E
   it('飞行：4 帧 → d185 ×48（α50 noGravity scale1.2,尘速×0.3）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 309, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 309, { grav: 0, life: 600 });
     flyFrames(a, game, 4);
     const d185 = dusts.filter((d) => d.type === 185);
     expect(d185.length).toBe(48);                      // 4 帧 × 4 子步 × 3 粒
@@ -147,7 +147,7 @@ describe('镖族 479/478 行为面（AI_001 :58288-58343）', () => {
     const dusts: DustRec[] = [];
     const bucket: unknown[] = [];
     const game = makeGame(emptyWorld(), dusts, bucket);
-    const a = new Arrow(400, 300, 6, 0, 100, 2, 479, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 100, 2, 479, { grav: 0, life: 600 });
     flyFrames(a, game, 40);
     // ★R1 F3:分裂后(ai1Mirror=-1000)母镖 penetrate 每拍回落 1(:58291-58294 else 支)
     expect((a as unknown as { pierce: number }).pierce).toBe(1);
@@ -162,7 +162,7 @@ describe('镖族 479/478 行为面（AI_001 :58288-58343）', () => {
     const dusts: DustRec[] = [];
     const bucket: unknown[] = [];
     const game = makeGame(emptyWorld(), dusts, bucket);
-    const a = new Arrow(400, 300, 6, 0, 100, 2, 478, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 100, 2, 478, { grav: 0, life: 600 });
     const life0 = (a as unknown as { life: number }).life;
     flyFrames(a, game, 45);
     const fires = bucket.filter((b) => (b as Arrow).projId === 480) as Arrow[];
@@ -176,7 +176,7 @@ describe('42 沙枪沙球（AI_010 per-type 尘链 :58852-58857,每子步 1/2 �
   it('飞行：8 帧 → d32 4..12 粒（EU=1 → 2 子步/帧 ×8 = 16 掷,1/2 期望 ~8）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 42, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 42, { grav: 0, life: 600 });
     flyFrames(a, game, 8);
     const d32 = dusts.filter((d) => d.type === 32);
     expect(d32.length).toBeGreaterThanOrEqual(4);
@@ -185,7 +185,7 @@ describe('42 沙枪沙球（AI_010 per-type 尘链 :58852-58857,每子步 1/2 �
   it('354 维多利亚沙球 → d36（同 EU=1,8..24 掷）', () => {
     const dusts: DustRec[] = [];
     const game = makeGame(emptyWorld(), dusts);
-    const a = new Arrow(400, 300, 6, 0, 10, 1, 354, null, { grav: 0, life: 600 });
+    const a = new Arrow(400, 300, 6, 0, 10, 1, 354, { grav: 0, life: 600 });
     flyFrames(a, game, 8);
     expect(dusts.filter((d) => d.type === 36).length).toBeGreaterThanOrEqual(3);
     expect(dusts.filter((d) => d.type === 36).length).toBeLessThanOrEqual(14);   // 16 掷 1/2 ±3σ

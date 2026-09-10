@@ -1760,12 +1760,14 @@ export function deerclopsNextFrame(
  *  【在本体之下】=五连 Draw 在 :26790 主绘之前）→ body×1（:26790）→
  *  fog×2（lai3>0,:26792-26800,源矩形=本体同格帧 rect）。
  *  偏移为层偏移（消费侧再叠加锚点 -originX/-originY）;gt=GlobalTimeWrappedHourly
- *  （进程秒%3600）。公式锚：r=lai3/36(:26737)、红雾 α=(128/255)(1-r²/2)×Opacity
- *  （value2=(80,0,0,255)×0.5=:26743）、本体 α=Opacity(1-r²)(1-num7)（:26756+:26790）、
+ *  （进程秒%3600）。公式锚：r=lai3/36(:26737)、红雾 α=(128/255)(1-r²/2)——★SW-RB10e
+ *  2026-09-10 勘误:【不乘 Opacity】（value2=(80,0,0,255)×0.5=:26743;Lerp(·,value2,
+ *  amount2=1) 整体覆写 GetAlpha 光照链,Opacity 不进结果）、本体 α=Opacity(1-r²)(1-num7)
+ *  （:26756+:26790,Opacity 经 GetAlpha :94549 rgb×(255-alpha)/255 进链）、
  *  num7=Remap(ai1,20,60,0,2) 三角波（:26765-26769）、紫重影 α=本体×0.5（color2×0.5
  *  :26783）、双轨道 R1=80n⁹/R2=80n⁹+30j·n⁹（:26774-26775）、fog α=(66/255)×Opacity×
- *  Remap(lai3,0,20,0,1)×0.25×(1-num7)（:26795）。tPurple=本体紫电 Lerp 合成系数
- *  （两段 Lerp(·,(50,0,160),·) 链,:26757-26769）。 */
+ *  Remap(lai3,0,20,0,1)×0.25×(1-num7)（:26795,Opacity 显式在链）。tPurple=本体紫电
+ *  Lerp 合成系数（两段 Lerp(·,(50,0,160),·) 链,:26757-26769）。 */
 export interface DeerclopsDrawLayer {
   kind: 'redGhost' | 'purpleGhost' | 'body' | 'fog';
   dx: number;
@@ -1789,7 +1791,11 @@ export function deerclopsDrawLayers(s: {
   const tPurple = r1 + num7 - r1 * num7;          // Lerp(Lerp(x,t,a),t,b) 合成
   const layers: DeerclopsDrawLayer[] = [];
   if (lai3 > 0) {
-    const a = (128 / 255) * (1 - r2 * 0.5) * opacity;
+    // ★SW-RB10e：红雾环不乘 Opacity——原版 value3 链（:26747-26751）
+    //  Lerp(npcColor,value2,amount=0) → GetAlpha → Lerp(·,value2,amount2=1)
+    //  第三步以 value2【整体覆写】,GetAlpha 带入的 Opacity 衰减被抹去;
+    //  旧式 ×opacity 系误转录（出生淡入窗内红雾被多乘一档衰减）
+    const a = (128 / 255) * (1 - r2 * 0.5);
     for (let i = 0; i < 2; i++) {                 // (0,1).Rot(iπ+gt·10)×r²·20
       const th = i * Math.PI + gt * 10;
       const R = r2 * 20;
@@ -3296,6 +3302,12 @@ export class Renderer {
       // 以太星空/黑幕/音乐门（Main.cs:63132/:63147/:12834）整类不生效（用户实报
       // "站在微光湖旁却没有以太环境"主根因；MonolithFilters.ts:568 读 env.zoneShimmer）
       zoneShimmer: !!this.scene?.zoneShimmer,
+      // ★SW-RB10e 2026-09-10：SceneState.cs:331 析取项「player.shimmering &&
+      //  UndergroundForShimmering」（buff 353 微光化 + 深度带 worldSurface+84..
+      //  maxTilesY-396）——小微光池（<300 格阈,ZoneShimmer=false）浸没时原版
+      //  仍升 shimmerAlpha 的整条臂。shimmerMonolithShader 项（时装 5347）无
+      //  载体恒 false（物品未入仓,登记）
+      shimmerSubmerged: !!(player.shimmering && this.scene?.undergroundForShimmering),
     });
     this._monoFrameMs = this._liquidNow;
 
@@ -4142,6 +4154,13 @@ export class Renderer {
           else if (ent.vanillaId === 583 || ent.vanillaId === 584 || ent.vanillaId === 585) {
             this.drawFairyBright(ent);   // GetAlpha Lerp(light,White,0.5)（cs:94662-94665）
           }
+          // ★SW-RB10e 2026-09-10：668 鹿角怪自发光层（红雾环/Extra_245 前雾）
+          //  ——原版固定顶点色（value2=(80,0,0,255)×0.5 :26743、color3=(255,30,30,66)
+          //  :26795）不经 GetAlpha 光照 = 暗处自发光；此前画进实体层被光照乘法
+          //  压黑（夜战/洞窟不可见）。本体+紫重影仍留实体层吃光（原版本体
+          //  npcColor=Lighting.GetColor 同面）；红雾环原版在【本体之下】、此处分
+          //  层后在本体之上——半径 ≤(lai3/36)²×20 贴身环绕+暗红半透明,偏差登记
+          else if (ent.vanillaId === 668) this.drawDeerclopsGlow(ent);
         }
       }
       ctx.restore();
@@ -8986,15 +9005,22 @@ export class Renderer {
 
   /** 668 鹿角怪（1457 Main.cs DrawNPCDirect_Deerclops :26714-26800 全层 + FindFrame case 668
    *  NPC.cs:67543-67612；1456↔1457 绘制逐字全等,1458 未动）：NPC_668.png 1090×1200
-   *  = 5 列×5 行（218×240/格），Frame(5,5,idx/5,idx%5,2,2) 2px padding；锚 Bottom、
-   *  origin(106 或 214-106, 236-4)、贴图朝右（spriteDirection==1 → origin.X=106）。
+   *  = 5 列×5 行（218×240/格），Frame(5,5,idx/5,idx%5,2,2)——★SW-RB10e 2026-09-10
+   *  勘误：末两参 Utils.Frame(Utils.cs:1389-1395) 是 sizeOffset【外扩 +2】
+   *  （rect=(218fx,240fy,218+2,240+2)=220×242,向右/下邻格渗 2px 防缝惯用法），
+   *  非内缩 padding——旧式 sx+2/sw−2 → 214×236 帧（右/上各裁 6px、origin.Y 差 6px、
+   *  左向 origin.X 108≠114）；锚 Bottom、origin(106 或 220-106, 242-4)、
+   *  贴图朝右（spriteDirection==1 → base Flip → XOR 后【不翻】:23357-23362）。
    *  全层 1:1（★层序=原版 z 序,SW-BJ51 校正）：①localAI[3]>0 出生红雾双环绕
    *  （半径 (lai3/36)²×20，角速 GT×10，色值 (80,0,0)×0.5、alpha×(1-r²/2)，
-   *  :26735-26753）②ai0∈{7,8} 消散五重影【画在本体之下】（:26764-26787 五连 Draw
-   *  在 :26790 主绘前；曾画在本体之上=叠脸重影）③本体（紫电 tint：
+   *  :26735-26753——★SW-RB10e 移至 compositeLight 后 drawDeerclopsGlow）②
+   *  ai0∈{7,8} 消散五重影【画在本体之下】（:26764-26787 五连 Draw 在 :26790
+   *  主绘前；曾画在本体之上=叠脸重影）③本体（紫电 tint：
    *  Lerp(白,(50,0,160),Remap(lai3,0,20,0,1))，alpha×(1-r²)，:26755-26762+:26790）
    *  ④Extra_245 前层红雾【源矩形=本体同格帧 rect】（:26792-26800 第 3 参 rectangle；
-   *  曾整图压缩进帧格）。GT=GlobalTimeWrappedHourly（进程秒%3600，Main.cs:16777） */
+   *  曾整图压缩进帧格；★SW-RB10e 移至 drawDeerclopsGlow）。
+   *  GT=GlobalTimeWrappedHourly（进程秒%3600，Main.cs:16777——★暂停冻结
+   *  GlobalTimerPaused 门 :17013,本仓 performance.now 暂停不掉表,登记） */
   private drawDeerclopsGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
@@ -9002,17 +9028,20 @@ export class Renderer {
     const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy, lai0: e.lai0 });
     // 玩家接触侧回填（GetMeleeCollisionData 668 斧臂帧判定 :96253-96278 消费）
     e.vanillaGridFrameIdx = idx;
-    // 几何查 NPC_GRIDS[668](5×5×218×240+pad2,重制管线同源)
+    // 几何查 NPC_GRIDS[668]（5×5×218×240 网格基准）+ 原版 sizeOffset +2 外扩
+    //（Utils.Frame :1389-1395 `new Rectangle(w*fx, h*fy, w+off, h+off)`；
+    //  末列/末行越界 2px 按表缘裁剪——XNA 侧越界采样钳到边像素,视觉同面）
     const g = NPC_GRIDS[668]!;
     const col = Math.floor(idx / (g.perRow ?? g.rows)), row = idx % (g.perRow ?? g.rows);
-    const sx = col * g.cellW + (g.padX ?? 0), sy = row * g.cellH + (g.padY ?? 0);
-    const sw = g.cellW - (g.padX ?? 0) * 2, sh = g.cellH - (g.padY ?? 0) * 2;
+    const sx = col * g.cellW, sy = row * g.cellH;
+    const vw = g.cellW + 2, vh = g.cellH + 2;                    // 原版 rect 尺寸(不裁,origin 用)
+    const sw = Math.min(vw, img.width - sx), sh = Math.min(vh, img.height - sy);
     const frame = { img, sx, sy, sw, sh };
     const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
     const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;   // NPC.Opacity
     const facingRight = e.facing > 0;
     const mirrored = !facingRight;                                        // 贴图朝右
-    const originX = facingRight ? 106 : sw - 106, originY = sh - 4;
+    const originX = facingRight ? 106 : vw - 106, originY = vh - 4;
     const GT = (performance.now() / 1000) % 3600;
     // ---- 状态量+层计划（纯函数 deerclopsDrawLayers,SW-BJ51 抽出可测）----
     const lai3 = e.lai3;
@@ -9026,19 +9055,63 @@ export class Renderer {
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       ctx.drawImage(c.c, c.x, c.y, c.w, c.h, -originX + dx, -originY + dy, sw, sh);
     };
-    // 烘焙三 tint（缓存化,键含 t 量化）：红雾环 (80,0,0)×0.5 预乘语义、本体紫电链、
-    // Extra_245 红雾 (255,30,30)——雾的【源矩形=本体同格帧 rect】（1457 :26793 第 3 参
+    // 烘焙三 tint（缓存化,键含 t/色量化）：红雾环与 Extra_245 雾 = SpriteBatch
+    // 【顶点色乘法】（tex×value2/tex×color3,tintedSprite multiply 语义——旧
+    // lerpSprite t=1 压平成单色丢贴图细节）、本体紫电链 = Color.Lerp 语义
+    //（lerpSprite 分职）。雾的【源矩形=本体同格帧 rect】（1457 :26793 第 3 参
     // rectangle;Extra_245 与 NPC_668 同为 1090×1200 才容得下该采样窗）
-    const red = layers.some((l) => l.kind === 'redGhost') ? this.lerpSprite('deer-red', frame, [40, 0, 0], 1) : null;
     const body = this.lerpSprite('deer-body', frame, [50, 0, 160], tPurple);
-    const fogImg = layers.some((l) => l.kind === 'fog') ? this.atlas!.ensureVImage('vanilla/Extra_245.png') : null;
-    const fogT = fogImg ? this.lerpSprite('deer-fog', { img: fogImg, sx: frame.sx, sy: frame.sy, sw: frame.sw, sh: frame.sh }, [255, 30, 30], 1) : null;
-    // 按计划层序画（=原版 z 序：红雾环→紫五重影→本体→前层红雾）
+    // 按计划层序画（=原版 z 序：红雾环→紫五重影→本体→前层红雾）。
+    // ★SW-RB10e：红雾环/前雾两层移至 compositeLight 后 drawDeerclopsGlow
+    // （固定顶点色自发光面,留实体层会被光照乘法压黑）
     for (const l of layers) {
       if (l.kind === 'body') drawFrame(body, l.dx, l.dy, l.alpha);
-      else if (l.kind === 'redGhost') drawFrame(red, l.dx, l.dy, l.alpha);
       else if (l.kind === 'purpleGhost') drawFrame(body, l.dx, l.dy, l.alpha);   // color2 × 0.5
-      else drawFrame(fogT, l.dx, l.dy, l.alpha);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /** ★SW-RB10e 2026-09-10：668 自发光层后处理（compositeLight 之后,7d' 专绘位）。
+   *  原版 DrawNPCDirect_Deerclops 的红雾环（:26735-26753）与 Extra_245 前雾
+   *  （:26792-26800）用【固定顶点色】直绘（value2=(80,0,0,255)×0.5 经
+   *  Lerp(·,value2,amount2=1) 整体覆写 GetAlpha 光照链 → 不吃 tile 光；
+   *  color3=(255,30,30,66) 同理只乘 Opacity）——夜战/暗 arena 须可见。本仓
+   *  世界层乘光管线会压黑固定色层,故对齐 677 飞灵先例移至合成后。
+   *  z 序偏差登记：原版红雾环在【本体之下】,分层后在本体之上（半径
+   *  ≤20px 贴身+暗红半透明,视觉面窄）;紫重影仍留实体层保「本体之下」序 */
+  private drawDeerclopsGlow(e: Enemy) {
+    const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
+    if (!img) return;
+    const g = NPC_GRIDS[668]!;
+    const idx = e.vanillaGridFrameIdx ?? 0;
+    const col = Math.floor(idx / (g.perRow ?? g.rows)), row = idx % (g.perRow ?? g.rows);
+    const sx = col * g.cellW, sy = row * g.cellH;
+    const vw = g.cellW + 2, vh = g.cellH + 2;
+    const sw = Math.min(vw, img.width - sx), sh = Math.min(vh, img.height - sy);
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;   // NPC.Opacity
+    const facingRight = e.facing > 0;
+    const mirrored = !facingRight;
+    const originX = facingRight ? 106 : vw - 106, originY = vh - 4;
+    const GT = (performance.now() / 1000) % 3600;
+    const lai3 = e.lai3;
+    const { layers } = deerclopsDrawLayers({ lai3, ai0: e.ai0, ai1: e.ai1, opacity, gt: GT });
+    if (!layers.some((l) => l.kind === 'redGhost' || l.kind === 'fog')) return;
+    const frame = { img, sx, sy, sw, sh };
+    const red = this.tintedSprite('deer-red-m', frame, [40, 0, 0]);       // value2=(80,0,0,255)×0.5
+    const fogImg = this.atlas!.ensureVImage('vanilla/Extra_245.png');
+    const fog = fogImg ? this.tintedSprite('deer-fog-m', { img: fogImg, sx, sy, sw, sh }, [255, 30, 30]) : null;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(e.cx, e.y + e.h);
+    ctx.scale(scale * (mirrored ? -1 : 1), scale);
+    for (const l of layers) {
+      if (l.kind !== 'redGhost' && l.kind !== 'fog') continue;
+      const c = l.kind === 'redGhost' ? red : fog;
+      if (!c) continue;
+      ctx.globalAlpha = Math.max(0, Math.min(1, l.alpha));
+      ctx.drawImage(c.c, c.x, c.y, c.w, c.h, -originX + l.dx, -originY + l.dy, sw, sh);
     }
     ctx.restore();
     ctx.globalAlpha = 1;

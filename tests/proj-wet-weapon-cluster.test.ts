@@ -547,7 +547,7 @@ describe('出生预置逐字面化（NewProjectile :10886-10893,红队 R1+R2）'
     expect(projectileData(5)?.ignoreWater, '前置:5 豁免').toBe(true);
     const hw = mkWorld();
     liquidAt(hw, WX0, WX1, WY0, WY1, 3);
-    const a = new Arrow(34 * TILE, 1000, 0, 0, 12, 1, 5, null, { grav: 0 });
+    const a = new Arrow(34 * TILE, 1000, 0, 0, 12, 1, 5, { grav: 0 });
     a.w = 10; a.h = 10;
     a.fixedUpdate(1 / 60, makeGame(hw).g);
     expect(a.wet).toBe(false);                       // :10888-10891
@@ -557,7 +557,7 @@ describe('出生预置逐字面化（NewProjectile :10886-10893,红队 R1+R2）'
     // 湿段 :16906-16911 在消亡判定 :16921 前并入 → 粘滞面保护不因预置瘦身而失
     const lw = mkWorld();
     liquidAt(lw, WX0, WX1, WY0, WY1, 2);
-    const b = new Arrow(34 * TILE, 1000, 0, 0, 12, 1, 2, null, { grav: 0 });
+    const b = new Arrow(34 * TILE, 1000, 0, 0, 12, 1, 2, { grav: 0 });
     b.w = 10; b.h = 10;
     b.fixedUpdate(1 / 60, makeGame(lw).g);
     expect(b.dead).toBe(false);

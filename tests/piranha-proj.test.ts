@@ -67,7 +67,7 @@ function dummy(id: number, x: number, y: number): Enemy {
 
 function spawnPiranha(x: number, y: number, vx: number, vy: number,
   channel: () => boolean, aim: () => { x: number; y: number }, damage = 100): Arrow {
-  const p = new Arrow(x, y, vx, vy, damage, 1, 190, null,
+  const p = new Arrow(x, y, vx, vy, damage, 1, 190,
     { grav: 0, life: PIRANHA_LIFE, piranha: { channel, aim } });
   p.pShootSpeed = Math.hypot(vx, vy);
   return p;

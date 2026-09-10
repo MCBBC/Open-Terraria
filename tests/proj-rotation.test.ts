@@ -36,7 +36,7 @@ describe('PROJ_ROT_DIAG 剑气族(aiStyle 27,rotation=atan2+0.785 即 +45°,:248
   });
 
   it('173 水平飞行 → 绘制旋转 = π/4（速度角 0 + 0.785）', () => {
-    const a = new Arrow(0, 0, 9.5, 0, 23, 4.25, 173, null, { grav: 0 });
+    const a = new Arrow(0, 0, 9.5, 0, 23, 4.25, 173, { grav: 0 });
     const rotate: number[] = [];
     const ctx = {
       save() {}, restore() {}, translate() {}, rotate(r: number) { rotate.push(r); },
@@ -67,7 +67,7 @@ describe('武器弹幕旋转全审计（AI_001 异常分支 ∩ 武器可达，2
 
   it('121 宝石珠水平飞行 → 绘制旋转 = 0（速度向摆放,非 +π/2）', () => {
     expect(PROJ_ROT_ASIS.has(121)).toBe(true);
-    const a = new Arrow(0, 0, 8, 0, 10, 1, 121, null, { grav: 0 });
+    const a = new Arrow(0, 0, 8, 0, 10, 1, 121, { grav: 0 });
     const rotate: number[] = [];
     const ctx = {
       save() {}, restore() {}, translate() {}, rotate(r: number) { rotate.push(r); },
@@ -87,7 +87,7 @@ describe('武器弹幕旋转全审计（AI_001 异常分支 ∩ 武器可达，2
   });
 
   it('312 南瓜灯恒旋：两 tick spinRot = 2×vx×0.02，绘制不对齐速度', () => {
-    const a = new Arrow(0, 0, 10, 0, 10, 2, 312, null, { grav: 0 });
+    const a = new Arrow(0, 0, 10, 0, 10, 2, 312, { grav: 0 });
     const hooks = {
       world: {
         store: {

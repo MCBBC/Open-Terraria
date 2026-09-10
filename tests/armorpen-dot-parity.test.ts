@@ -82,10 +82,10 @@ describe('项2 armorPen 独立字段（弹幕 armorPenetration 数据层 + settl
     expect(projectileData(1)?.armorPenetration).toBeUndefined(); // 无穿甲档不落键
   });
   it('Arrow.settlePen = 玩家 AP + 本型号 AP（StrikeNPC :12068 两源,再入 :81913 池）', () => {
-    const a85 = new Arrow(0, 0, 1, 0, 10, 1, 85, null);
+    const a85 = new Arrow(0, 0, 1, 0, 10, 1, 85);
     a85.armorPen = 5;
     expect((a85 as unknown as { settlePen: number }).settlePen).toBe(20);
-    const a1 = new Arrow(0, 0, 1, 0, 10, 1, 1, null);
+    const a1 = new Arrow(0, 0, 1, 0, 10, 1, 1);
     a1.armorPen = 5;
     expect((a1 as unknown as { settlePen: number }).settlePen).toBe(5);
   });

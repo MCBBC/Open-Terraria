@@ -156,6 +156,7 @@ import {
   TAB_MISC_SIZE, TAB_HOUSING_SIZE, TAB_CAMERA_SIZE,
   miscRowY, miscCheckXY, housingSlotPositions,
   MISC_COL_EQUIP_X, MISC_COL_DYE_X,
+  hotbarLockXY, MISC_BUFF_X, MISC_BUFF_Y_OFF, MISC_BUFF_STEP, miscBuffRowsPerCol, miscBuffCellXY,
   pvpSwordXY, pvpTeamXY,
   vanillaScaleFor, ADVISOR_XY, TITLE_XY,
   COIN_LABEL_XY, AMMO_LABEL_XY, COIN_AMMO_SCALE,
@@ -1324,6 +1325,10 @@ export class UI {
       s.appendChild(g);
     }
     s.addEventListener('mousedown', (e) => {
+      // ★SW-FX10 债⑪热键锁穿透（Main.cs:44353-44359）：锁定+关包时快捷栏格不是
+      //  mouseInterface——不 stopPropagation/preventDefault，事件透传 window（domTargets
+      //  按 data-sw-world-passthrough 豁免 → 世界使用/挖掘链照常吃这一按）
+      if (s.dataset.swWorldPassthrough === '1') return;
       e.stopPropagation();
       e.preventDefault();
       if (e.button === 2) {
@@ -1911,7 +1916,11 @@ export class UI {
       } else {
         // 无拖动的普通点击：快捷栏（面板关）选中；否则拾取到光标（点击移动仍可用）
         const panelOpen = this.invPanel && this.invPanel.style.display === 'block';
+        // ★SW-FX10 债⑪：热键锁门（Main.cs:44357 `mouseLeft && !player.hbLocked` →
+        //  changeItem 臂）——锁定+关包时快捷栏格左键不换选中也不拾取（整格无动作，
+        //  点击本体已透传世界输入;1-0 数字键照常）
         if (from.where === 'inv' && from.i < 10 && !panelOpen) {
+          if (this.game.player.hbLocked) return;
           this.game.player.inv.selected = from.i;
           this.refreshHotbar();
         } else {
@@ -2736,6 +2745,7 @@ export class UI {
     // (refreshHotbar 开包早退的还原面;classic 关包链无刷新点,main.ts:427 直调)
     if (this._builtLayout === 'vanilla') {
       this.vinvReforgeOpen = false;   // 原版重铸菜单随背包关闭退出(DrawInventory 域内)
+      this.reflowBuffs();             // ★SW-FX10 债④:页2 列内 buff 块回流 HUD 栏(关包当帧)
       this.refreshAll();
     }
     // ★2026-09-02：不再清 uiBlocking——背包自 2026-09-02 起不置位（世界输入解锁）,
@@ -4449,7 +4459,11 @@ export class UI {
    *  ① buff 键集合变更 → 即时整刷（随从召唤/死亡/药水到期的图标生灭当帧跟手）；
    *  ② 计数族（BuffTextHandlers）逐帧更新 "xN" 文本，值不变时零 DOM 写。 */
   tickBuffLive(): void {
-    if (!this.game || this.invPanel.style.display === 'block') return;
+    // ★SW-FX10 债④：开包但页2(buff 列在显)不再整帧早退——列内块同样需要随从
+    //  计数/生灭即时面；其余开包态(块整体不可见)照旧零开销
+    const invOpen = this.invPanel?.style.display === 'block';
+    const colVisible = invOpen && this._builtLayout === 'vanilla' && this.vinvPageCurrent === 2 && !!this.miscBuffCol;
+    if (!this.game || (invOpen && !colVisible)) return;
     const buffs = this.game.player.buffs;
     let sig = '';
     for (const t of buffs.active.keys()) sig += t + ',';
@@ -4473,8 +4487,51 @@ export class UI {
    *  背包/华美 UI 打开时整栏不画；剩余时长由 DrawBuffIcon（:44049-44064）常驻
    *  画在图标正下方，经 TryGetBuffTime（:43985）门控 + LocalizedDuration 缩写
    *  格式（单最大单位，<60 秒逐秒）——见 localizedDuration */
+  /** buff 块宿主（SW-FX10 债④）：开包∧vanilla 布局∧页2 → 杂项页 buff 列
+   *  （原版 EquipPage==2 支 :42008-42046），否则 HUD 栏（:42618-42640+DrawBuffIcon）。
+   *  refreshBuffs 的新建/整序 appendChild 一律经此——两态同一批块对象,零复制 */
+  private get buffHost(): HTMLElement {
+    const invOpen = this.invPanel?.style.display === 'block';
+    return (invOpen && this.miscBuffCol && this._builtLayout === 'vanilla' && this.vinvPageCurrent === 2)
+      ? this.miscBuffCol
+      : this.buffBar!;
+  }
+
+  /** buff 块容器 reflow（SW-FX10 债④）：页切换/布局变化后把三通道块按序搬入当前
+   *  宿主。块在 buffBar 内走 flex 流（position:relative 已由类/内联给足）,入列后
+   *  改绝对定位（miscBuffCellXY 列向左/行向下）;回流 buffBar 时还原。由
+   *  vinvApplyPage 与 refreshBuffs 头部调用 */
+  private reflowBuffs(): void {
+    if (!this.buffBar) return;
+    const host = this.buffHost;
+    const c = this.vinvLayoutCtx;
+    const rows = c ? miscBuffRowsPerCol(c.sh, c.minimapOn) : 3;
+    const inCol = host === this.miscBuffCol && !!this.miscBuffCol;
+    const pools = [this.buffBlocks, this.petBuffBlocks, this.nebulaBuffBlocks];
+    for (const pool of pools) {
+      let n = 0;
+      for (const ui of pool.values()) {
+        const b = ui.block;
+        if (inCol && this.miscBuffCol) {
+          const cell = miscBuffCellXY(n, rows);
+          b.style.position = 'absolute';
+          b.style.left = `${cell.x}px`;
+          b.style.top = `${cell.y}px`;
+          if (b.parentElement !== this.miscBuffCol) this.miscBuffCol.appendChild(b);
+        } else {
+          b.style.position = 'relative';
+          b.style.left = '';
+          b.style.top = '';
+          if (b.parentElement !== this.buffBar) this.buffBar.appendChild(b);
+        }
+        n++;
+      }
+    }
+  }
+
   refreshBuffs() {
     if (!this.game || !this.buffBar) return;
+    this.reflowBuffs();
     const buffs = this.game.player.buffs;
     const invOpen = this.invPanel.style.display === 'block';
     // ★收气泡只走“栏隐藏”边沿（2026-08-28 用户报"hover 道具气泡过一会自己消失"）：
@@ -4494,7 +4551,7 @@ export class UI {
       if (!ui) {
         // 动态建块：无白名单，任何激活 buff 都显示（原版按 buff 槽序）
         ui = this.makeBuffBlock(t);
-        this.buffBar.appendChild(ui.block);
+        this.buffHost.appendChild(ui.block);   // SW-FX10 债④:宿主随开包页2 reflow
         this.buffBlocks.set(t, ui);
       }
       ui.block.style.display = 'flex';
@@ -4599,9 +4656,10 @@ export class UI {
       }
     }
     // 恒置普通 buff 之后（原版 AddBuff 找空槽追加）：末位不符才整序（免每秒 DOM 抖动）
+    // ★SW-FX10 债④：宿主面随 buffHost（开包页2 = 杂项列,否则 HUD 栏）
     const liveBlocks = petStates.filter((s) => s.pb && s.ui).map((s) => s.ui!.block);
-    if (liveBlocks.length && this.buffBar.lastElementChild !== liveBlocks[liveBlocks.length - 1]) {
-      for (const b of liveBlocks) this.buffBar.appendChild(b);
+    if (liveBlocks.length && this.buffHost.lastElementChild !== liveBlocks[liveBlocks.length - 1]) {
+      for (const b of liveBlocks) this.buffHost.appendChild(b);
     }
     // ---- 星云增益派生通道（补 C ⚠️图标批：原版拾取星云 booster 即 AddBuff
     //      173-181（NebulaLevelup Player.cs:56091-56121），buff 栏随档位显示
@@ -4636,7 +4694,7 @@ export class UI {
     const liveNeb = nebStates.filter((s) => s.nb && s.ui).map((s) => s.ui!.block);
     if (liveNeb.length) {
       const last = liveNeb[liveNeb.length - 1];
-      if (this.buffBar.lastElementChild !== last) for (const b of liveNeb) this.buffBar.appendChild(b);
+      if (this.buffHost.lastElementChild !== last) for (const b of liveNeb) this.buffHost.appendChild(b);
     }
   }
 
@@ -5224,8 +5282,23 @@ export class UI {
     return null;
   }
 
+  /** 热键锁穿透态（SW-FX10 债⑪;Main.cs:44353-44359）：关包且 hbLocked 时给 10 个
+   *  快捷栏格挂 data-sw-world-passthrough——点击透传为世界输入（挖/放/使用照常）,
+   *  锁未开或开包态摘除。选中门在 mouseup 臂（:1913 区）。随 refreshHotbar 全路径跑 */
+  private paintHotbarLockState(): void {
+    const closed = !!this.invPanel && this.invPanel.style.display !== 'block';
+    const on = closed && !!this.game?.player.hbLocked;
+    for (let i = 0; i < 10; i++) {
+      const s = this.slotEl(i, 'inv');
+      if (!s) continue;
+      if (on) s.dataset.swWorldPassthrough = '1';
+      else if (s.dataset.swWorldPassthrough) delete s.dataset.swWorldPassthrough;
+    }
+  }
+
   refreshHotbar() {
     if (!this.game) return;
+    this.paintHotbarLockState();
     // ★2026-09-07 刀 2 守卫:vanilla 布局开包 = 原版 GUIHotbarDrawInner 整体早退
     // (Main.cs:44324 `if (playerInventory || ...) return;`)——热键栏 DOM 隐藏,
     // 第 0 行由 .sw-vinv 网格承担(paintVanillaInvSlots);关包态落下方 D0 画法
@@ -6315,6 +6388,11 @@ export class UI {
   private vinvTabMisc: HTMLElement | null = null;
   private vinvTabHousing: HTMLElement | null = null;
   private vinvTabCamera: HTMLElement | null = null;
+  /** 热键锁图标(SW-FX10 债⑪;Main.cs:43203 DrawHotbarLockIcon 的 DOM 化) */
+  private vinvLockEl: HTMLElement | null = null;
+  /** 杂项页 buff 列容器(SW-FX10 债④;Main.cs:42008-42046 EquipPage==2 尾段的 DOM 化。
+   *  开包∧页2 时 buff 块 reflow 至此,否则回流 buffBar——原版双态同源 DrawBuffIcon) */
+  private miscBuffCol: HTMLElement | null = null;
   /** EquipPage 状态(原版 Main.EquipPageSelected/-1 记忆语义;每帧重算见 vinvApplyPage) */
   private vinvPageSelected: 0 | 1 | 2 = 0;
   private vinvPageCurrent = -1;
@@ -6326,7 +6404,7 @@ export class UI {
   /** 布局期元素表:{el, pos()}——pos 返回 null=隐藏(追加槽未解锁/开箱态堆叠钮) */
   private vinvLayoutItems: Array<{ el: HTMLElement; pos: () => { x: number; y: number } | null }> = [];
   private vinvRowMap = new Map<string, number>();   // `equip:8`→可见行号(追加槽重编号;查不到=隐藏)
-  private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean; visibleRows: number } | null = null;
+  private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean; visibleRows: number; minimapOn: boolean; cartUnlocked: boolean } | null = null;
   private vinvLayoutSig = '';
   private vinvResizeHandler: (() => void) | null = null;
   /** 当前已建布局(分派/重建判据;null=未建) */
@@ -6485,7 +6563,11 @@ export class UI {
       });
       pos(b, () => quickStackXY(!!this.vinvLayoutCtx?.chestOpen));
     }
-    // Sort(534,244):★登记债——ItemSorting.SortInventory 未移植,钮画+音,点击 no-op
+    // Sort(534,244):★SW-FX10 定谳(债③备案,未修)——vanilla 点击=ItemSorting.SortInventory
+    // (Main.cs:42602:SortCoins+SortAmmo+Sort 主干 ItemSorting.cs:1396-1545,52 层谓词+
+    //  21 张 SortingPriority 集比较器)。本仓层映射表已提取(vanilla-itemsorting.json
+    //  6147 条 type→层,tools/extract-itemsorting.mjs),缺比较器字段面+运行时层序推导+
+    //  金标测试——整刀独立移债,点击音照画(钮/悬停帧 Main.cs:42588-42616 1:1)
     {
       const b = btn(30, 30);
       this.vinvSortBtn = b;
@@ -6677,12 +6759,67 @@ export class UI {
       this.vinvPageCurrent = -1;
       this.vinvApplyPage();
     });
-    // 相机页签(Main.cs:43549-43556 开截图界面)——★登记债:CaptureMode 接线,暂 no-op
-    this.vinvTabCamera = mkTab(TAB_CAMERA_SIZE.w, TAB_CAMERA_SIZE.h, 'UI_DisplaySlots_8.png', 'Camera');
-    this.vinvTabCamera.addEventListener('mousedown', (e) => { e.stopPropagation(); });
+    // 相机页签(Main.cs:43549-43595)——SW-FX10 债⑥清偿：点击开 M6 拍照模式
+    //  （原版 CaptureManager.Instance.Active=true + blockMouse :43565-43568;游戏pad 臂
+    //  =QuickScreenshot :43562-43564 本仓触屏同走开界面备案）。成功播放 PlaySound(10)
+    //  =menuOpen（:43583 flag 门——CaptureModeDisabled 红图态本仓无,死亡/幽灵拒开
+    //  由 toggleRequest 内置,拒开不响=同相）
+    this.vinvTabCamera = mkTab(TAB_CAMERA_SIZE.w, TAB_CAMERA_SIZE.h, 'UI_DisplaySlots_8.png',
+      Lang.inter(81));
+    this.vinvTabCamera.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      const cm = this.game?.renderer.captureMode;
+      if (!cm || !this.game) return;
+      const was = cm.active;
+      cm.toggleRequest(this.game.player, this.game.world);
+      if (!was && cm.active) this.game.sfx.play('menuOpen', 1);
+    });
     pos(this.vinvTabMisc, () => ({ x: TAB_MISC_X(this.vinvLayoutCtx!.sw), y: TAB_Y(this.vinvLayoutCtx!.num20) }));
     pos(this.vinvTabHousing, () => ({ x: TAB_HOUSING_X(this.vinvLayoutCtx!.sw), y: TAB_Y(this.vinvLayoutCtx!.num20) }));
     pos(this.vinvTabCamera, () => ({ x: TAB_CAMERA_X(this.vinvLayoutCtx!.sw), y: TAB_Y(this.vinvLayoutCtx!.num20) }));
+
+    // ---- 热键锁(Main.cs:43203-43237 DrawHotbarLockIcon;仅开包态画)——SW-FX10 债⑪清偿:
+    //  位置 (0,21),pushSideToolsUp(builderAcc 可见图标≥10=恶魔心+大师槽齐显)→(0,0)
+    //  (:43205-43208);贴图 Lock_{锁0/未锁1} 50×22 双帧横排取单帧 25×22,缩放 0.9(:43212/
+    //  :43234);点击 PlaySound(22)=unlock + hbLocked 翻转(:43230-43231);悬停名 inter[5]
+    //  未锁/inter[6] 已锁(:43220-43223);悬停描 OurFavoriteColor 第二帧(:43232-43234,
+    //  本仓近似=帧1 叠加 screen 混合)。锁定消费面=关包快捷栏点击门(:44353/:44357,
+    //  paintHotbarLockState/mouseup 臂) + 1-0 数字键照常 ----
+    {
+      const lock = el('button', 'vinv-btn') as HTMLButtonElement;
+      const paintLock = (): void => {
+        const locked = !!this.game?.player.hbLocked;
+        lock.style.backgroundImage = `url(sprites/vanilla/Lock_${locked ? 0 : 1}.png)`;
+        // 悬停金描帧=当前态贴图帧1(原版 value.Frame(2,1,1)+OurFavoriteColor :43232-43234)
+        glow.style.backgroundImage = `url(sprites/vanilla/Lock_${locked ? 0 : 1}.png)`;
+        lock.title = Lang.inter(locked ? 6 : 5);
+      };
+      lock.style.cssText = 'position:absolute; width:25px; height:22px; background-size:200% 100%;'
+        + 'background-position:0 0; image-rendering:pixelated; cursor:pointer; padding:0; border:none;';
+      const glow = el('div', '', '');
+      glow.style.cssText = 'position:absolute; inset:0; background-size:200% 100%;'
+        + 'background-position:100% 0; image-rendering:pixelated; mix-blend-mode:screen;'
+        + 'opacity:0.85; pointer-events:none; display:none;';
+      glow.style.backgroundImage = 'url(sprites/vanilla/Lock_1.png)';
+      lock.appendChild(glow);
+      lock.addEventListener('mouseenter', () => { glow.style.display = 'block'; });
+      lock.addEventListener('mouseleave', () => { glow.style.display = 'none'; });
+      lock.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (e.button !== 0 || !this.game) return;
+        this.game.player.hbLocked = !this.game.player.hbLocked;   // :43231
+        this.game.sfx.play('unlock', 1);                          // PlaySound(22) :43230
+        paintLock();
+        this.paintHotbarLockState();
+      });
+      this.vinvLockEl = lock;
+      paintLock();
+      root.appendChild(lock);
+      this.vinvLayoutItems.push({
+        el: lock,
+        pos: () => hotbarLockXY((this.vinvLayoutCtx?.visibleRows ?? 8) >= 10),
+      });
+    }
 
     // ---- 杂项页(EquipPage==2 Main.cs:41886-41932:两列 5 行,行距整型 47) ----
     // miscEquips 序 = 宠物/光源/矿车/坐骑/钩爪(context 19/20/18/17/16;:41905-41931)。
@@ -6709,6 +6846,53 @@ export class UI {
         pageMisc.appendChild(eye);
         pagePos(eye, () => miscCheckXY({ x: MISC_COL_EQUIP_X(this.vinvLayoutCtx!.sw), y: miscRowY(this.vinvLayoutCtx!.num20, m) }));
       }
+      // 矿车升级开关(Main.cs:41963-41995:m==2 矿车槽;unlockedSuperCart 才画=flag2 门
+      // :41959/:41963)——SW-FX10 债⑩UI 面：Extra_255 开/Extra_256 关 18×18 全白
+      // (宠物勾选框是 White*0.7,矿车框是全白 :41998),点击翻转 enabledSuperCart +
+      // PlaySound(12) + 单人即改玩家面(原版 NetMessage 4 同步位=联机面备案),悬停名
+      // GameUI.SuperCart{Enabled,Disabled}(:41987-41992 num26 语义)
+      if (m === 2) {
+        const cart = el('button', 'vinv-btn') as HTMLButtonElement;
+        cart.style.width = '18px'; cart.style.height = '18px';
+        cart.style.backgroundSize = '100% 100%';
+        cart.style.imageRendering = 'pixelated';
+        const paintCart = (): void => {
+          const on = !!this.game?.player.enabledSuperCart;
+          cart.style.backgroundImage = `url(sprites/vanilla/Extra_${on ? 255 : 256}.png)`;
+          cart.title = Lang.text(on ? 'GameUI.SuperCartEnabled' : 'GameUI.SuperCartDisabled');
+        };
+        cart.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          if (this.heldStack || !this.game) return;          // mouseItem.IsAir 门(:41968)
+          this.game.player.enabledSuperCart = !this.game.player.enabledSuperCart;
+          this.game.sfx.play('menuTick', 1);
+          paintCart();
+        });
+        paintCart();
+        pageMisc.appendChild(cart);
+        pagePos(cart, () => {
+          if (!this.vinvLayoutCtx?.cartUnlocked) return null;   // 未解锁不画(:41963)
+          return miscCheckXY({ x: MISC_COL_EQUIP_X(this.vinvLayoutCtx.sw), y: miscRowY(this.vinvLayoutCtx.num20, m) });
+        });
+      }
+    }
+
+    // ---- 杂项页 buff 列(Main.cs:42008-42046 EquipPage==2 尾段)——SW-FX10 债④清偿：
+    //  开包∧页2 时 buff 块 reflow 入此容器(reflowBuffs),块本体/悬停气泡/右键取消
+    //  复用 makeBuffBlock 面（原版两态同源 DrawBuffIcon :44043）。首列 x=sw-84
+    //  (num23=sw-92+8)、y=num20+247(num24+=247);块绝对定位:列向左/行向下步距 46,
+    //  每列行数随屏高(:42014-42024 miscBuffRowsPerCol)。maxBuffs=22 上限由 BuffState 面
+    //  对齐(本仓同 22,超出槽不显示=原版同) ----
+    {
+      const col = el('div');
+      col.style.cssText = 'position:absolute; pointer-events:auto; width:0; height:0;';
+      pageMisc.appendChild(col);
+      pagePos(col, () => {
+        const c = this.vinvLayoutCtx;
+        if (!c) return null;
+        return { x: MISC_BUFF_X(c.sw), y: c.num20 + MISC_BUFF_Y_OFF };
+      });
+      this.miscBuffCol = col;
     }
 
     // ---- 现代合成面板 → 经典竖列表(用户实测二轮退役 Modern 面板) ----
@@ -6871,17 +7055,21 @@ export class UI {
     const masterShown = inv.gateMaster || hasAt(9, 9);
     const chestOpen = !!this.openChest || this.game.npcShopOpen;
     const visibleRows = 8 + (heartShown ? 1 : 0) + (masterShown ? 1 : 0);
-    // ★小地图占位:本仓 minimap 缺省恒开(mapStyle 1);全屏地图/关图态的 mH=0 联动=债。
+    // ★SW-FX10 债⑨清偿：mH 联动真实小地图态（Main.cs:46537-46561 DrawInterface_16_MapOr
+    // Minimap：mapEnabled 关→mH=0 早退；全屏地图开/mapStyle≠1→mH=0；仅 mapStyle==1 且
+    // 非全屏 → mH=256 再钳 sh-PushUp）。本仓 mapEnabled 无独立设置面（默认开）。
     // PushUp=610 当恶魔心/大师槽可显示(Main.cs:3063-3071;PushEquipmentAreaUp 设置
     // 本仓无,取 0=偏差备案);mH 可为负=原版同款
-    const mH = mHOf(true, sh, heartShown || masterShown ? 610 : 600);
+    const minimapOn = this.game.renderer.mapStyle === 1 && !this.game.mapFullscreen();
+    const mH = mHOf(minimapOn, sh, heartShown || masterShown ? 610 : 600);
     const num20 = equipAreaTop(sh, mH, visibleRows);
     root.style.transformOrigin = 'top left';
     root.style.transform = `scale(${K})`;
-    this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen, visibleRows };
+    this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen, visibleRows, minimapOn, cartUnlocked: this.game.superCartUnlocked() };
     this.vinvComputeRows(heartShown, masterShown);
-    // 签名含 uiScale(★红队 MINOR-4:K 依赖 uiScale,漏签 = 改缩放右锚列不重排)
-    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}`;
+    // 签名含 uiScale(★红队 MINOR-4:K 依赖 uiScale,漏签 = 改缩放右锚列不重排);
+    // ★SW-FX10:再含 minimapOn(mH 变 → num20/页签/右锚列全体位移)与矿车解锁(开关框显隐)
+    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}`;
     if (sig === this.vinvLayoutSig) return;
     this.vinvLayoutSig = sig;
     for (const it of this.vinvLayoutItems) {
@@ -7290,6 +7478,14 @@ export class UI {
   private vinvPulseLast = 0;
   private vinvPulseTick = (ts: number): void => {
     if (!this.vinvRoot || this.vinvRoot.style.display === 'none') { this.vinvPulseRaf = 0; return; }
+    // ★SW-FX10 债⑨ mH 每帧新鲜度：原版 mH 每帧重算（Main.cs:46537 DrawInterface_16）——
+    //  Tab 循环地图样式/全屏图开关会即时改 mH → num20/右锚列全体位移。layoutVanilla
+    //  无每帧挂点（仅 refresh/resize/页切），此处每帧比对小地图态布尔，值变才走
+    //  重排（签名含 minimapOn → 必然重排；不变时零 DOM 写）
+    {
+      const mm = this.game ? (this.game.renderer.mapStyle === 1 && !this.game.mapFullscreen()) : true;
+      if (this.vinvLayoutCtx && this.vinvLayoutCtx.minimapOn !== mm) this.layoutVanilla();
+    }
     const dt = this.vinvPulseLast ? Math.min(100, ts - this.vinvPulseLast) : 16.67;
     this.vinvPulseLast = ts;
     this.vinvPulseA += this.vinvPulseDir * 0.2 * (dt / 16.67);
@@ -7355,13 +7551,15 @@ export class UI {
   }
 
   /** 宝箱名回写(DrawName Main.cs :102-180 1:1):bank x<0=官译物品名;世界箱=
-   *  命名箱名或 LegacyChestType[frameX/36] 箱型名(:122;ChestData 无 name 字段,
-   *  重命名=债,登记:型名取 tile store frameX 权威面) */
+   *  命名箱名或 LegacyChestType[frameX/36] 箱型名(:122;★SW-FX11 2026-09-10:
+   *  ChestData.name 已随档携带——原版 .wld 导入箱名自此回显;重命名 UI 仍=债) */
   private vinvUpdateChestName(): void {
     const c = this.openChest;
     const el = this.vinvChestNameEl;
     if (!el || !c) return;
     if (c.x >= 0) {
+      // 原版 DrawName 命名支（Main.cs:102-180）：chest.name 非空 → 箱名优先于型名
+      if (c.name) { el.textContent = c.name; return; }
       const st = this.game.world.store;
       const fx = st.frameX?.[st.idx(c.x, c.y)] ?? 0;
       el.textContent = Lang.text(`LegacyChestType.${Math.floor(fx / 36)}`);
@@ -7569,6 +7767,7 @@ export class UI {
     }
     if (page === this.vinvPageCurrent) return;
     this.vinvPageCurrent = page;
+    this.reflowBuffs();   // ★SW-FX10 债④:页2 ↔ buffBar 块容器随页搬运
     pages.equip.style.display = page === 0 ? 'block' : 'none';
     pages.housing.style.display = page === 1 ? 'block' : 'none';
     pages.misc.style.display = page === 2 ? 'block' : 'none';
@@ -7663,6 +7862,8 @@ export class UI {
     this.vinvPageCurrent = -1;
     this.vinvQuickBtn = this.vinvSortBtn = this.vinvBestiaryBtn = this.vinvEmoteBtn = null;
     this.vinvDefenseEl = null;
+    this.vinvLockEl = null;    // SW-FX10 债⑪
+    this.miscBuffCol = null;   // SW-FX10 债④(页2 列随 vinv root 整体重建)
     this.vinvHousingPage = null;
     this.vinvHousingSlotEls = [];
     this.vinvHousingSig = '-init';

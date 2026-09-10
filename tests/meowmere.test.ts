@@ -36,7 +36,7 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
   it('平飞 20t 后落体重力，落地弹跳 tink+计数，5 弹消亡', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502, null,
+    const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502,
       { grav: 0.2, gravDelay: 20, life: 600, pierce: 5 });
     // 平飞期（age≤19）无重力
     for (let t = 0; t < 19; t++) cat.fixedUpdate(1, game);
@@ -63,7 +63,7 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
       hurt: () => true, def: { hitSound: ['NPC_Hit_1'] },
     };
     list.push(enemy);
-    const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502, null,
+    const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502,
       { grav: 0, life: 180, pierce: 5 });
     // 命中：伤害结算但 ai[0] 不动（计数属撞块链 HandleMovement :16796，
     // 全库唯一 PlaySound(37) :16797——2026-08-13 实测复核修正）
@@ -85,7 +85,7 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
   it('迪斯科点光 + 彩虹拖尾采样每 tick 推进', () => {
     const w = emptyWorld();
     const game = makeGame(w);
-    const cat = new Arrow(50 * TILE, 80 * TILE, 8, 0, 100, 6.5, 502, null,
+    const cat = new Arrow(50 * TILE, 80 * TILE, 8, 0, 100, 6.5, 502,
       { grav: 0, life: 180, pierce: 5 });
     cat.fixedUpdate(1, game);
     expect(cat.lightRGB).toBeTruthy();            // :22613 (Disco+0.5)/2
@@ -106,7 +106,7 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
       list.push({ id: 10 + i, x: 50 * TILE + i * 64, y: 80 * TILE, w: 24, h: 18,
         dead: false, hurt: () => { hits++; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
     }
-    const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502, null,
+    const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502,
       { grav: 0, life: 180, pierce: 5 });
     // 逐敌重定位咬（不同敌无冷却门，每 tick 咬一只）
     for (let i = 0; i < 5 && !cat.dead; i++) {

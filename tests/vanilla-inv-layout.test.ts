@@ -324,13 +324,14 @@ describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
   it('守卫:refreshAllNow 补绘门 + closeInventory 还原刷', () => {
     const s = ui();
     expect(s).toContain("if (this._builtLayout === 'vanilla') this.paintVanillaInvSlots();");
-    // 刀 12:closeInventory 尾刷扩为 vinvReforgeOpen 复位+刷新
-    expect(s).toContain("if (this._builtLayout === 'vanilla') {\n      this.vinvReforgeOpen = false;   // 原版重铸菜单随背包关闭退出(DrawInventory 域内)\n      this.refreshAll();\n    }");
+    // 刀 12:closeInventory 尾刷扩为 vinvReforgeOpen 复位+刷新;SW-FX10:再入 buff 块回流
+    expect(s).toContain("if (this._builtLayout === 'vanilla') {\n      this.vinvReforgeOpen = false;   // 原版重铸菜单随背包关闭退出(DrawInventory 域内)\n      this.reflowBuffs();             // ★SW-FX10 债④:页2 列内 buff 块回流 HUD 栏(关包当帧)\n      this.refreshAll();\n    }");
   });
   it('teardown 清单:双构建器字段全清(重建路径完整性)', () => {
     const s = ui();
     for (const f of ['this.vinvCraftCellEls = [];', 'this.vinvCraftListEl = null;',
       'this.vinvChestNameEl = null;', 'this.vinvHousingPage = null;',,
+      'this.vinvLockEl = null;', 'this.miscBuffCol = null;',   // SW-FX10 新增页域字段
       'this.loadoutBtns = [];', 'this.accEyeEls.clear();', "document.getElementById('sw-vinv-style')?.remove();"]) {
       expect(s).toContain(f);
     }

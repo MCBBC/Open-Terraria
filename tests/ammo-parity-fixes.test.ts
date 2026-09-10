@@ -13,9 +13,9 @@ import { Arrow } from '../src/entities/Arrow';
 import { itemCombat, resolveAmmoProjId, AMMO_SOLUTION } from '../src/data/vanillaItemCombat';
 import { projectileData } from '../src/data/vanillaProjectiles';
 
-type ArrowOpts = ConstructorParameters<typeof Arrow>[8];
+type ArrowOpts = ConstructorParameters<typeof Arrow>[7];
 /** 零场构造（构造器只读数据表，不触世界/DOM） */
-const mk = (projId: number, opts?: ArrowOpts): Arrow => new Arrow(0, 0, 5, 0, 10, 1, projId, null, opts);
+const mk = (projId: number, opts?: ArrowOpts): Arrow => new Arrow(0, 0, 5, 0, 10, 1, projId, opts);
 
 // ---------------------------------------------------------------------------
 // ① penetrate 全域（11 件清单抽 7 + 不变项对照）

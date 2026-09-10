@@ -726,7 +726,7 @@ export class ChargedBlaster extends Entity {
         // ×2.5）；JS 双精 0.7+0.3=0.9999999999999999 不可直接比，按 num20 判门；(int)=截断
         const num36 = stage === 0 ? this.damage : Math.trunc(this.damage * 2.5);
         const bolt = new Arrow(this.cx, this.cy, this.dirX * 10, this.dirY * 10,
-          num36, this.knockback, 459, null,
+          num36, this.knockback, 459,
           { grav: 0, life: 600, pierce: 1 });
         bolt.critChance = this.critChance;
         bolt.armorPen = this.armorPen;

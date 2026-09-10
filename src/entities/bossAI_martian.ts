@@ -64,7 +64,7 @@ function shootM(
   arrowOpts?: Partial<import('./Arrow').ArrowOpts>,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce, hostile: true, ...arrowOpts }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, { grav: 0, life, pierce, hostile: true, ...arrowOpts }),
     'projectiles');
 }
 

@@ -87,7 +87,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const e = mkEnemy(1, 60 * 16 + 300, 90 * 16);
     const { hooks } = makeHooks([e]);
     // 出生向右平飞（敌在右侧 300px）——蜂枪初速 = shootSpeed 5（Item.cs:14482）
-    const bee = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3, extraUpdates: 3 });
+    const bee = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3, extraUpdates: 3 });
     // 前 30 update 无转向：vy 恒 0（alpha 淡入 6 update 后 extraUpdates 3→0，
     // 30 update 延迟实际跨 ~26 tick——原版同拍）
     step(bee, 7, hooks);
@@ -96,7 +96,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     // 斜向敌验证转向：向左飞、敌在左下（−200,+100）——延迟后 vy 朝下偏
     const e2 = mkEnemy(2, 60 * 16 - 200, 90 * 16 + 100);
     const { hooks: h2 } = makeHooks([e2]);
-    const bee2 = new Arrow(60 * 16, 90 * 16, -5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3, extraUpdates: 3 });
+    const bee2 = new Arrow(60 * 16, 90 * 16, -5, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3, extraUpdates: 3 });
     step(bee2, 60, h2);
     expect(bee2.dead).toBe(false);
     expect(bee2.vy).toBeGreaterThan(0);        // :27823-27862 逐轴步进转向已激活
@@ -109,11 +109,11 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const tx = 60, ty = 90;
     store.liquid[store.idx(tx, ty)] = 200;
     store.liquidType[store.idx(tx, ty)] = 1;   // WATER（LIQUID_TYPE +1 编码）
-    const bee = new Arrow(tx * 16, ty * 16, 5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    const bee = new Arrow(tx * 16, ty * 16, 5, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3 });
     bee.fixedUpdate(1, hooks);
     expect(bee.dead).toBe(true);               // :27685-27688
     // 307 小吞噬者同格不死于水（type != 307 门）
-    const eater = new Arrow(tx * 16, ty * 16, 5, 0, 9, 1, 307, null, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
+    const eater = new Arrow(tx * 16, ty * 16, 5, 0, 9, 1, 307, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
     eater.fixedUpdate(1, hooks);
     expect(eater.dead).toBe(false);
   });
@@ -122,7 +122,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const e = mkEnemy(1, 60 * 16 + 60, 90 * 16);
     const { hooks } = makeHooks([e]);
     // 背向敌出生（向左飞，敌在右 60px）——锁定前（friendly=false）穿过敌盒不结算
-    const eater = new Arrow(60 * 16, 90 * 16, -4, 0, 10, 1, 307, null, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
+    const eater = new Arrow(60 * 16, 90 * 16, -4, 0, 10, 1, 307, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
     step(eater, 5, hooks);
     expect(e.hits.length).toBe(0);             // 未锁定 friendly=false 不结算
     // 锁定（~26 tick）+ 折返（逐轴步进 0.35/update）→ 回到敌盒造成伤害
@@ -134,14 +134,14 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     // 距离门外：敌在身后 900px（飞行远离,曼哈顿恒 >800）→ 不锁敌直飞
     const far = mkEnemy(1, 60 * 16 - 900, 90 * 16);
     const { hooks: hFar } = makeHooks([far]);
-    const a616far = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, null, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
+    const a616far = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
     step(a616far, 30, hFar);
     expect(a616far.dead).toBe(false);
     expect(a616far.vy).toBe(0);                // 无目标保持直飞（前瞻点 = v×100）
     // 距离门内（300px）→ 20 update（≈7 tick）后锁敌转向（敌在上方 → vy 变负）
     const near = mkEnemy(2, 60 * 16 + 300, 90 * 16 - 200);
     const { hooks: hNear } = makeHooks([near]);
-    const a616 = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, null, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
+    const a616 = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
     step(a616, 6, hNear);
     expect(a616.vy).toBe(0);                   // 延迟期内不转
     step(a616, 30, hNear);
@@ -151,7 +151,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const t1 = mkEnemy(3, 60 * 16 + 300, 90 * 16 - 120);
     const t2 = mkEnemy(4, 60 * 16 + 300, 90 * 16 + 320);
     const { hooks: h3 } = makeHooks([t1, t2]);
-    const a3 = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, null, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
+    const a3 = new Arrow(60 * 16, 90 * 16, 8, 0, 20, 1, 616, { grav: 0, life: 270, pierce: 1, extraUpdates: 2 });
     step(a3, 40, h3);
     expect((a3 as unknown as { vx616Ai1: number }).vx616Ai1).toBe(3);   // 锁 t1（近者）
     t1.dead = true;
@@ -163,7 +163,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
   it('297 幽灵法杖弹：400 视距内转向收敛', () => {
     const e = mkEnemy(1, 60 * 16 + 200, 90 * 16 - 150);
     const { hooks } = makeHooks([e]);
-    const bolt = new Arrow(60 * 16, 90 * 16, 6, 0, 30, 1, 297, null, { grav: 0, life: 600, pierce: 3, extraUpdates: 1 });
+    const bolt = new Arrow(60 * 16, 90 * 16, 6, 0, 30, 1, 297, { grav: 0, life: 600, pierce: 3, extraUpdates: 1 });
     step(bolt, 30, hooks);
     expect(bolt.vy).toBeLessThan(0);           // :28913-28916 向敌收敛
   });
@@ -171,7 +171,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
   it('659 灵魂之焰：追踪 + 目标失效 timeLeft 钳 5 + 埋实心格钳 2', () => {
     const e = mkEnemy(1, 60 * 16 + 150, 90 * 16 - 100);
     const { hooks } = makeHooks([e]);
-    const flame = new Arrow(60 * 16, 90 * 16, 2, 0, 20, 1, 659, null, { grav: 0, life: 240, pierce: -1 });
+    const flame = new Arrow(60 * 16, 90 * 16, 2, 0, 20, 1, 659, { grav: 0, life: 240, pierce: -1 });
     step(flame, 20, hooks);
     expect(flame.vy).toBeLessThan(0);          // :36954-36959 追踪
     expect(flame.life).toBeGreaterThan(240 - 25);   // 锁到即 timeLeft=420（:36896-36898）
@@ -184,7 +184,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     // 埋实心格 → timeLeft 钳 2（:36945-36948）
     const e2 = mkEnemy(2, 60 * 16 + 150, 90 * 16 - 100);
     const { hooks: h2, store } = makeHooks([e2]);
-    const f2 = new Arrow(60 * 16, 90 * 16, 2, 0, 20, 1, 659, null, { grav: 0, life: 240, pierce: -1 });
+    const f2 = new Arrow(60 * 16, 90 * 16, 2, 0, 20, 1, 659, { grav: 0, life: 240, pierce: -1 });
     step(f2, 10, h2);
     const bx = Math.floor(f2.cx / 16), by = Math.floor(f2.cy / 16);
     store.setTile(bx, by, 1);                  // 弹心格变实心
@@ -197,7 +197,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     // grav 0 / life 600 / pierce 1 / extraUpdates 3（SetDefaults :3996-4004）
     const e = mkEnemy(1, 60 * 16 + 80, 90 * 16);
     const { hooks } = makeHooks([e]);
-    const eater = new Arrow(60 * 16, 90 * 16, 0.5, -0.3, 22, 1, 307, null,
+    const eater = new Arrow(60 * 16, 90 * 16, 0.5, -0.3, 22, 1, 307,
       { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
     step(eater, 150, hooks);
     expect(e.hits.length).toBeGreaterThan(0);  // 锁定后命中
@@ -208,7 +208,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const e = mkEnemy(1, 60 * 16 + 250, 90 * 16 - 180);
     const { hooks } = makeHooks([e]);
     // 2622 剃刀台风：shootSpeed 6、extraUpdates 2、penetrate −1、timeLeft 300
-    const ty = new Arrow(60 * 16, 90 * 16, 6, 0, 85, 5, 409, null,
+    const ty = new Arrow(60 * 16, 90 * 16, 6, 0, 85, 5, 409,
       { grav: 0, life: 300, pierce: -1, extraUpdates: 2 });
     step(ty, 40, hooks);
     expect(ty.dead).toBe(false);
@@ -228,7 +228,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     const e1 = mkEnemy(1, 60 * 16 + 120, 90 * 16);
     const e2 = mkEnemy(2, 60 * 16 + 260, 90 * 16 + 40);
     const { hooks } = makeHooks([e1, e2]);
-    const iw = new Arrow(60 * 16, 90 * 16, 11, 0, 100, 4.5, 451, null,
+    const iw = new Arrow(60 * 16, 90 * 16, 11, 0, 100, 4.5, 451,
       { grav: 0, life: 3600, pierce: 3 });
     step(iw, 20, hooks);
     expect(e1.hits.length).toBeGreaterThan(0);          // 飞行态命中 e1
@@ -245,7 +245,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
   it('617 星璇秘术：减速段归一 4 速 + 慢速段锁敌追踪 + 掷 618 隐形火花', () => {
     const e = mkEnemy(1, 60 * 16 + 200, 90 * 16 - 120);
     const { hooks } = makeHooks([e]);
-    const orb = new Arrow(60 * 16, 90 * 16, 7, 0, 70, 5, 617, null,
+    const orb = new Arrow(60 * 16, 90 * 16, 7, 0, 70, 5, 617,
       { grav: 0, life: 3600, pierce: 3 });
     // makeHooks 的 entities.add 不落桶——重接以捕获 618
     const spawned: Arrow[] = [];
@@ -284,12 +284,12 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
   it('442 电圈导弹：到点 ≤16px Kill + alpha 归零后 120t 超时', () => {
     const { hooks } = makeHooks([]);
     // 锁定格 = 出生点右侧 240px（15 格）——12 速直线 20 tick 到点
-    const orb = new Arrow(60 * 16, 90 * 16, 12, 0, 40, 0, 442, null,
+    const orb = new Arrow(60 * 16, 90 * 16, 12, 0, 40, 0, 442,
       { grav: 0, life: 600, pierce: 1, aimPoint: { tx: 60 + 15, ty: 90 } });
     step(orb, 25, hooks);
     expect(orb.dead).toBe(true);               // :55704-55710 到点杀
     // 超时：锁定点远（永不达）→ alpha 归零（≈3 tick）后 120 update Kill
-    const orb2 = new Arrow(60 * 16, 90 * 16, 0.5, 0, 40, 0, 442, null,
+    const orb2 = new Arrow(60 * 16, 90 * 16, 0.5, 0, 40, 0, 442,
       { grav: 0, life: 600, pierce: 1, aimPoint: { tx: 60 + 500, ty: 90 } });
     step(orb2, 200, hooks);
     expect(orb2.dead).toBe(true);              // :55708-55712 localAI[1] ≥ 120
@@ -320,7 +320,7 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
       playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
       spawnDust: (() => null) as never,
     }) as unknown as GameHooks;
-    const bee = new Arrow(30 * 16, 0, 0, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    const bee = new Arrow(30 * 16, 0, 0, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3 });
     (bee as unknown as { y: number }).y = 70 * 16 - bee.h / 2;   // 弹心精确落在 row70 走廊线
     // 双向自证（与实现同参）：D 两族皆断 / T 步行通·积分线断 ⇒ 行为分叉只在 T 面
     const ray = (e: MockEnemy) => [bee.x, bee.y, bee.w, bee.h, e.x, e.y, e.w, e.h] as const;
@@ -346,14 +346,14 @@ describe('追踪弹全族补齐（1457 制导 1:1）', () => {
     // A. 只有湿常怪（vanillaId 缺省≠370）→ 豁免永不命中,恒不锁定（旧 e.id!==370 同病此面）
     const onlyWet = mkWet(9, 60 * 16 + 100, 90 * 16);
     const hA = makeHooks([onlyWet]).hooks;
-    const beeA = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    const beeA = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3 });
     step(beeA, 45, hA);
     expect((beeA as unknown as { bee36AimLocked: boolean }).bee36AimLocked).toBe(false);
     // B. 湿常怪近(240px)/湿 Duke 远(曼哈顿 600<800)→ 候选集只剩 Duke,锁定取远者
     const wetNorm = mkWet(8, 60 * 16 + 240, 90 * 16);
     const duke = mkWet(3, 60 * 16 + 400, 90 * 16 - 200, 370);
     const hB = makeHooks([wetNorm, duke]).hooks;
-    const beeB = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    const beeB = new Arrow(60 * 16, 90 * 16, 5, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3 });
     step(beeB, 45, hB);
     const aimB = () => beeB as unknown as { bee36AimLocked: boolean; bee36Aim?: { cx: number; cy: number } };
     expect(aimB().bee36AimLocked).toBe(true);
@@ -384,7 +384,7 @@ const putLiquid = (st: TileStore, tx: number, ty: number, amt: number, t: number
 };
 describe('★F7 蜂族入水判死几何三态固防（深水/浅缘/邻格/蜜·光豁免/浆致死）', () => {
   const bee181 = (px: number, py: number): Arrow =>
-    new Arrow(px, py, 0, 0, 9, 1, 181, null, { grav: 0, life: 600, pierce: 3 });
+    new Arrow(px, py, 0, 0, 9, 1, 181, { grav: 0, life: 600, pierce: 3 });
   const diesWithin = (p: Arrow, n: number, h: GameHooks): boolean => {
     let died = false;
     for (let i = 0; i < n && !died; i++) { p.fixedUpdate(1, h); died = p.dead; }

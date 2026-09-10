@@ -780,7 +780,7 @@ function exportTexFixes() {
 function saveGameCompat(g: Game): string {
   // SW-BJ5 2026-09-07：导出地图档同累计口径（旧值=会话净时长,与槽位/quick 档不一致）；
   // 调用面 exportMap 已有 game 非空门（⇒flow 在场）,此处 `?.` 仅为类型收窄兜 0
-  return saveGame(g.world, g.player, flow?.cumulativePlayMs ?? 0, g.townNpcsForSave(), g.eventsForSave());
+  return saveGame(g.world, g.player, flow?.cumulativePlayMs ?? 0, g.townNpcsForSave(), g.eventsForSave(), g.pillarNpcsForSave(), g.pressurePlatesForSave());
 }
 
 // 暴露 tile/key 常量给调试控制台

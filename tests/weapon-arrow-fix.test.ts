@@ -39,7 +39,7 @@ describe('修复1：穿透表（SetDefaults penetrate 直读）', () => {
   });
 
   it('opts 显式穿透仍优先；无 penetrate 列的弹缺省 1', () => {
-    expect(new Arrow(0, 0, 1, 0, 10, 1, 5, null, { pierce: 3 }).pierce).toBe(3);
+    expect(new Arrow(0, 0, 1, 0, 10, 1, 5, { pierce: 3 }).pierce).toBe(3);
     expect(new Arrow(0, 0, 1, 0, 10, 1, 1).pierce).toBe(1);     // 木箭无列 → 1
   });
 
@@ -73,7 +73,7 @@ describe('修复2：寿命表（SetDefaults timeLeft 直读，缺省 3600）', (
 
   it('无覆写弹缺省 3600（P.cs:526）；opts.life 仍优先', () => {
     expect(new Arrow(0, 0, 1, 0, 10, 1, 41).life).toBe(3600);   // 地狱火箭无 timeLeft 列
-    expect(new Arrow(0, 0, 1, 0, 10, 1, 41, null, { life: 60 }).life).toBe(60);
+    expect(new Arrow(0, 0, 1, 0, 10, 1, 41, { life: 60 }).life).toBe(60);
   });
 });
 

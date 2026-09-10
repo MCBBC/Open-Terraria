@@ -173,7 +173,7 @@ describe('Stinky(120)：投掷弹 371 消亡授予——B1 批起经 ThrowKillFx
       playSfxFiles: () => {}, playSfx: () => {}, spawnDust: () => null,
       world: { flags: {} },
     } as unknown as GameHooks;
-    const a = new Arrow(95, 95, 0, 0, 1, 0, 371, null, {});   // 弹心 ≈ (102,102) 距离 <80
+    const a = new Arrow(95, 95, 0, 0, 1, 0, 371, {});   // 弹心 ≈ (102,102) 距离 <80
     (a as unknown as { killNow: (gg: GameHooks) => void }).killNow(g);
     expect(applied).toEqual([[BuffType.Stinky, 30]]);
   });

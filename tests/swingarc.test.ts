@@ -314,7 +314,7 @@ describe('初代分形剑 857（AI_168）+ 双足翼龙弹 711 模式', () => {
   });
 
   it('711：构造态 dragonFade + betsyCurse + 30×30 盒 scale 0.7', () => {
-    const b = new Arrow(0, 0, 10, 0, 10, 1, 711, null, {});
+    const b = new Arrow(0, 0, 10, 0, 10, 1, 711, {});
     expect(b.dragonFade).toBe(true);
     expect(b.betsyCurse).toBe(true);
     expect(b.w).toBe(30); expect(b.h).toBe(30);

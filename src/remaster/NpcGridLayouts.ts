@@ -29,9 +29,12 @@ export const NPC_GRIDS: Record<number, NpcGridDef> = {
   // 564/565 暗黑魔法师 T1/T2:600×972 = 5 列×9 行(120×108/格)
   564: { cols: 5, rows: 9, cellW: 120, cellH: 108, perRow: 9 },
   565: { cols: 5, rows: 9, cellW: 120, cellH: 108, perRow: 9 },
-  // 668 鹿角怪:1090×1200 = 5 列×5 行(218×240/格),Frame(5,5,idx/5,idx%5,2,2) 2px padding
-  // (Renderer 里 drawDeerclopsGrid 手写切格未走 drawNpcGrid,几何等价此处入表)
-  668: { cols: 5, rows: 5, cellW: 218, cellH: 240, perRow: 5, padX: 2, padY: 2 },
+  // 668 鹿角怪:1090×1200 = 5 列×5 行(218×240/格)。★SW-RB10e 2026-09-10 勘误:
+  // vanilla Frame(5,5,fx,fy,2,2) 末两参是 Utils.Frame sizeOffset【外扩 +2】
+  // (rect=220×242,向右/下邻格渗 2px 防缝),非内缩 padding——旧 padX/padY=2 表述
+  // 有误已撤(drawDeerclopsGrid 侧按 cellW+2 外扩+表缘裁剪自算,本表只载网格基准,
+  // npcGridFrames 枚举=纯 218×240 格)
+  668: { cols: 5, rows: 5, cellW: 218, cellH: 240, perRow: 5 },
 };
 
 /** 依布局定义枚举 sheet 全部格子矩形(行优先网格序,总格数 = cols×rows)。

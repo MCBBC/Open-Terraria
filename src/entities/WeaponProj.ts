@@ -3197,7 +3197,7 @@ export class YoyoProj extends Entity {
         }
         svx *= 0.8; svy *= 0.8;
         const shot = new Arrow(this.cx - svx, this.cy - svy, svx, svy,
-          Math.max(1, Math.round(this.damage)), this.knockback, 604, null,
+          Math.max(1, Math.round(this.damage)), this.knockback, 604,
           { grav: 0, life: 120, noTileCollide: false });
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
       }

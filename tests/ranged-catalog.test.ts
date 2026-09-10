@@ -12,7 +12,7 @@ const dummy = {} as unknown as GameHooks;
 
 describe('弹体尺寸按弹型（SetDefaults 数据驱动）', () => {
   it('子弹 14 火枪弹：判定盒 4×4 / 绘制 scale 1.2 / extraUpdates 1', () => {
-    const b = new Arrow(0, 0, 16, 0, 10, 1, 14, null, {});
+    const b = new Arrow(0, 0, 16, 0, 10, 1, 14, {});
     expect(b.w).toBe(4);
     expect(b.h).toBe(4);
     expect(b.drawScale).toBeCloseTo(1.2, 3);
@@ -20,14 +20,14 @@ describe('弹体尺寸按弹型（SetDefaults 数据驱动）', () => {
   });
 
   it('高速弹 207 extraUpdates=2 / 银弹 242 =7（穿 3）', () => {
-    const hv = new Arrow(0, 0, 16, 0, 10, 1, 207, null, {});
+    const hv = new Arrow(0, 0, 16, 0, 10, 1, 207, {});
     expect(hv.extraUpdates).toBe(2);
-    const sb = new Arrow(0, 0, 16, 0, 10, 1, 242, null, { pierce: 3 });
+    const sb = new Arrow(0, 0, 16, 0, 10, 1, 242, { pierce: 3 });
     expect(sb.extraUpdates).toBe(7);
   });
 
   it('木箭 1 保持 10×10（原版 SetDefaults）', () => {
-    const a = new Arrow(0, 0, 16, 0, 10, 1, 1, null, {});
+    const a = new Arrow(0, 0, 16, 0, 10, 1, 1, {});
     expect(a.w).toBe(10);
   });
 });
@@ -47,18 +47,18 @@ describe('远程武器/弹药目录全量', () => {
 
 describe('飞龙剑气 684（AI_001 type 段 + CanHitWithOwnBody 线碰撞）', () => {
   it('渐显 alpha 255−40/t + 垂直线命中（旁侧 30px 敌也中，通用盒不中）', () => {
-    const b = new Arrow(100, 100, 16, 0, 10, 1, 684, null, {});
+    const b = new Arrow(100, 100, 16, 0, 10, 1, 684, {});
     expect(b.dragonFade).toBe(true);
     expect(b.dragonAlpha).toBe(255);
     // 渐显不依赖 game（subStep 需要 host）——直接验证字段无 game 需求的构造态
-    const b2 = new Arrow(100, 100, 16, 0, 10, 1, 1, null, {});
+    const b2 = new Arrow(100, 100, 16, 0, 10, 1, 1, {});
     expect(b2.dragonFade).toBe(false);
   });
 });
 
 describe('大地法杖巨石 261（AI_014 弹跳族 + boulder 模式）', () => {
   it('构造态：重力 0.3 + 弹跳开 + 慢速死亡门字段', () => {
-    const b = new Arrow(0, 0, 12, -4, 10, 1, 261, null, { grav: 0.3, bounce: true, pierce: 6 });
+    const b = new Arrow(0, 0, 12, -4, 10, 1, 261, { grav: 0.3, bounce: true, pierce: 6 });
     expect(b.boulder).toBe(true);
     expect(b.bounce).toBe(true);
     expect(b.grav).toBe(0.3);

@@ -73,7 +73,7 @@ describe('442 导弹：直线飞向锁定点（AI_001 :55689-55740，无逐帧�
   it('速度恒定（无 homing 修正式）；到点 ≤16px Kill（:55704-55710）', () => {
     // 锁定格 103 → 点 (103×16+8, 100×16+8) = (1656, 1608)；出生 (1600,1600) 向 +x 8/t
     const g = mkMissileHooks();
-    const m = new Arrow(1600, 1600, 8, 0, 40, 2, 442, null, { aimPoint: { tx: 103, ty: 100 } });
+    const m = new Arrow(1600, 1600, 8, 0, 40, 2, 442, { aimPoint: { tx: 103, ty: 100 } });
     const v0x = m.vx, v0y = m.vy;
     let ticks = 0;
     while (!m.dead && ticks < 60) { m.fixedUpdate(1 / 60, g); ticks++; }
@@ -86,7 +86,7 @@ describe('442 导弹：直线飞向锁定点（AI_001 :55689-55740，无逐帧�
 
   it('渐显曲线：α 255→(t4)165→(t5)75→(t6)0（计数不复位语义 :55691-55703）', () => {
     const g = mkMissileHooks();
-    const m = new Arrow(1600, 1600, 4, 0, 40, 2, 442, null, { aimPoint: { tx: 300, ty: 300 } });
+    const m = new Arrow(1600, 1600, 4, 0, 40, 2, 442, { aimPoint: { tx: 300, ty: 300 } });
     expect(m.alpha).toBe(255);
     m.fixedUpdate(1 / 60, g); m.fixedUpdate(1 / 60, g); m.fixedUpdate(1 / 60, g);
     expect(m.alpha).toBe(255);                   // t1-3 仅计数
@@ -100,7 +100,7 @@ describe('442 导弹：直线飞向锁定点（AI_001 :55689-55740，无逐帧�
 
   it('alpha==0 后 120t 超时 Kill（:55708-55712）——远点弹 t125 杀', () => {
     const g = mkMissileHooks();
-    const m = new Arrow(1600, 1600, 4, 0, 40, 2, 442, null, { aimPoint: { tx: 5, ty: 5 } });
+    const m = new Arrow(1600, 1600, 4, 0, 40, 2, 442, { aimPoint: { tx: 5, ty: 5 } });
     for (let t = 0; t < 124; t++) m.fixedUpdate(1 / 60, g);
     expect(m.dead).toBe(false);                  // 渐显 6t（首拍即计超时）+ 119
     m.fixedUpdate(1 / 60, g);
@@ -109,7 +109,7 @@ describe('442 导弹：直线飞向锁定点（AI_001 :55689-55740，无逐帧�
 
   it('青蓝光仅 alpha==0 期（:55713）：渐显期 null、之后 (0.3,0.45,0.8)', () => {
     const g = mkMissileHooks();
-    const m = new Arrow(1600, 1600, 4, 0, 40, 2, 442, null, { aimPoint: { tx: 300, ty: 300 } });
+    const m = new Arrow(1600, 1600, 4, 0, 40, 2, 442, { aimPoint: { tx: 300, ty: 300 } });
     for (let t = 0; t < 5; t++) m.fixedUpdate(1 / 60, g);
     expect(m.lightRGB).toBeNull();
     m.fixedUpdate(1 / 60, g);                    // t6 α→0
@@ -118,7 +118,7 @@ describe('442 导弹：直线飞向锁定点（AI_001 :55689-55740，无逐帧�
 
   it('135 尘旋转环：每 3t 恰 8 粒（scale 1.5/noGravity/环距 ≤√80/v=v₀×0.66，:55714-55730）', () => {
     const g = mkMissileHooks();
-    const m = new Arrow(1600, 1600, 6, 0, 40, 2, 442, null, { aimPoint: { tx: 300, ty: 300 } });
+    const m = new Arrow(1600, 1600, 6, 0, 40, 2, 442, { aimPoint: { tx: 300, ty: 300 } });
     for (let t = 0; t < 5; t++) m.fixedUpdate(1 / 60, g);
     expect(g.dusts.length).toBe(0);              // 渐显期（α>0）无环
     const cxBefore = m.cx, cyBefore = m.cy;      // 尘位 = 本拍位移前弹心（AI 段先于位移）

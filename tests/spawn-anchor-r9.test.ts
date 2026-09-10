@@ -98,7 +98,7 @@ describe('R9 批一合成语义：ctor 收左上 + placeAtShootSpawn 盒心回�
     expect(m.cy).toBe(700);
   });
   it('③ Arrow 261：盒 32×34（非方形,曾偏 (16,17)）；回正后盒心=pointPosition', () => {
-    const b = new Arrow(900, 900, 6, 0, 35, 8, 261, null, { grav: 0.3, bounce: true, life: 3600, pierce: 6 });
+    const b = new Arrow(900, 900, 6, 0, 35, 8, 261, { grav: 0.3, bounce: true, life: 3600, pierce: 6 });
     expect(b.w).toBe(32);
     expect(b.h).toBe(34);
     expect(b.x).toBe(900);
@@ -107,7 +107,7 @@ describe('R9 批一合成语义：ctor 收左上 + placeAtShootSpawn 盒心回�
     expect(b.cy).toBe(900);
   });
   it('① Arrow 496：盒 40×40；回正后盒心=pointPosition（首拍 AI 缩径 20×scale 围绕该盒心）', () => {
-    const a = new Arrow(800, 800, 9, 0, 32, 2, 496, null, { grav: 0, pierce: 3, extraUpdates: 2 });
+    const a = new Arrow(800, 800, 9, 0, 32, 2, 496, { grav: 0, pierce: 3, extraUpdates: 2 });
     expect(a.w).toBe(40);
     expect(a.h).toBe(40);
     expect(a.x).toBe(800);
@@ -116,7 +116,7 @@ describe('R9 批一合成语义：ctor 收左上 + placeAtShootSpawn 盒心回�
     expect(a.cy).toBe(800);
   });
   it('② Arrow 711：盒 30×30；回正后盒心=muzzle（pointPosition+40px 探针位）', () => {
-    const b = new Arrow(1200, 1000, 8, 0, 45, 4, 711, null, { grav: 0.1, gravDelay: 10, life: 600, pierce: 3 });
+    const b = new Arrow(1200, 1000, 8, 0, 45, 4, 711, { grav: 0.1, gravDelay: 10, life: 600, pierce: 3 });
     expect(b.w).toBe(30);
     expect(b.h).toBe(30);
     expect(b.x).toBe(1200);
@@ -125,7 +125,7 @@ describe('R9 批一合成语义：ctor 收左上 + placeAtShootSpawn 盒心回�
     expect(b.cy).toBe(1000);
   });
   it('⑤ Arrow 928：Game 支先覆写 w/h=34 再回正（序敏感——先回正会按 10×10 默认盒算错）', () => {
-    const bub = new Arrow(300, 300, 1.3, 0, 30, 2, 928, null, { grav: 0.3, life: 250, pierce: 2, bounce: true });
+    const bub = new Arrow(300, 300, 1.3, 0, 30, 2, 928, { grav: 0.3, life: 250, pierce: 2, bounce: true });
     bub.w = 34; bub.h = 34;                      // Game.ts 14260 调用序复刻
     placeAtShootSpawn(bub, 300, 300);
     expect(bub.cx).toBe(300);
@@ -137,13 +137,15 @@ describe('R9 批一合成语义：ctor 收左上 + placeAtShootSpawn 盒心回�
 
 describe('R9 批一接线源锁（src/core/Game.ts 七处配对）', () => {
   const src = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
+  // ★SW-FX9(2026-09-10)：旧 ctor 第 8 参 dropKey=null 占位实参已随回收链摘除,
+  //  下列源锁正则的 `, null,` 锚同步勘误（语义=ctor 后接盒心回正,不变）
   const WIRING: Array<[string, RegExp]> = [
     ['① 3053→496（sfArrow）',
       /new Arrow\(sfAnchor\.x, sfAnchor\.y, sfVx, sfVy,[\s\S]{0,1400}?placeAtShootSpawn\(sfArrow, sfAnchor\.x, sfAnchor\.y\);/],
     ['② 3870→711（bolt）',
       /new Arrow\(muzzleX, muzzleY, bvx, bvy,[\s\S]{0,400}?placeAtShootSpawn\(bolt, muzzleX, muzzleY\);/],
     ['③ 1296→261（b261）',
-      /new Arrow\(mzX, mzY,[\s\S]{0,300}?cw\.knockback, 261, null,[\s\S]{0,400}?placeAtShootSpawn\(b261, mzX, mzY\);/],
+      /new Arrow\(mzX, mzY,[\s\S]{0,300}?cw\.knockback, 261,\s*\{[\s\S]{0,400}?placeAtShootSpawn\(b261, mzX, mzY\);/],
     ['④ 魔法导弹族（m）',
       /new MagicMissileProj\(mx, my, mvx, mvy, \{[\s\S]{0,2200}?placeAtShootSpawn\(m, mx, my\);/],
     ['⑤ 伴生 928（bub，w/h=34 之后）',
@@ -392,12 +394,12 @@ describe('R9 批二/三合成语义：ctor 收左上 + placeAtShootSpawn 盒心�
     expect(e.y + e.h / 2).toBe(cy);
   };
   it('#6 杀意牌 1024：Arrow 16×16（曾偏 (8,8)）', () => {
-    const c = new Arrow(500, 500, 6, -2, 40, 2, 1024, null, { grav: 0, pierce: 1 });
+    const c = new Arrow(500, 500, 6, -2, 40, 2, 1024, { grav: 0, pierce: 1 });
     expect(c.w).toBe(16); expect(c.h).toBe(16); expect(c.x).toBe(500);
     CENTER(c, 500, 500);
   });
   it('#14 食人鱼枪 190：Arrow 22×22（曾偏 (11,11)）', () => {
-    const p = new Arrow(800, 800, 9, 0, 25, 0, 190, null, { grav: 0, life: 3600 });
+    const p = new Arrow(800, 800, 9, 0, 25, 0, 190, { grav: 0, life: 3600 });
     expect(p.w).toBe(22); expect(p.h).toBe(22); expect(p.x).toBe(800);
     CENTER(p, 800, 800);
   });
@@ -413,24 +415,24 @@ describe('R9 批二/三合成语义：ctor 收左上 + placeAtShootSpawn 盒心�
     CENTER(f, 900, 900);
   });
   it('#20 烟雾弹 196：Arrow 16×16（曾偏 (8,8)）', () => {
-    const s = new Arrow(300, 300, 3, -1, 0, 0, 196, null,
+    const s = new Arrow(300, 300, 3, -1, 0, 0, 196,
       { grav: 0.2, life: 600, pierce: -1, bounce: true });
     expect(s.w).toBe(16); expect(s.h).toBe(16); expect(s.x).toBe(300);
     CENTER(s, 300, 300);
   });
   it('#4 泡泡枪 410：Arrow 14×14（曾偏 (7,7)）', () => {
-    const b = new Arrow(600, 600, 5, 1, 8, 0, 410, null, { grav: 0, life: 100, pierce: 1 });
+    const b = new Arrow(600, 600, 5, 1, 8, 0, 410, { grav: 0, life: 100, pierce: 1 });
     expect(b.w).toBe(14); expect(b.h).toBe(14); expect(b.x).toBe(600);
     CENTER(b, 600, 600);
   });
   it('#25 伴生 248：Arrow 18×18（曾偏 (9,9)）', () => {
-    const d = new Arrow(400, 400, 10, 0, 30, 2, 248, null, { grav: 0, life: 1200 });
+    const d = new Arrow(400, 400, 10, 0, 30, 2, 248, { grav: 0, life: 1200 });
     expect(d.w).toBe(18); expect(d.h).toBe(18); expect(d.x).toBe(400);
     CENTER(d, 400, 400);
   });
   it('批三 mkBolt：宝石珠 121/水矢 27/恶魔镰 42 各型盒随型回正（helper 读 e.w/h）', () => {
     for (const [pid, w] of [[121, 10], [27, 16], [42, 10], [94, 8]] as const) {
-      const b = new Arrow(111, 222, 4, 4, 15, 2, pid, null, { grav: 0, life: 3600 });
+      const b = new Arrow(111, 222, 4, 4, 15, 2, pid, { grav: 0, life: 3600 });
       expect(b.w).toBe(w);
       placeAtShootSpawn(b, 111, 222);
       expect(b.cx).toBe(111);
@@ -441,13 +443,15 @@ describe('R9 批二/三合成语义：ctor 收左上 + placeAtShootSpawn 盒心�
 
 describe('R9 批二接线源锁（src/core/Game.ts 九处配对）', () => {
   const src = readFileSync(join(ROOT, 'src/core/Game.ts'), 'utf8');
+  // ★SW-FX9(2026-09-10)：旧 ctor 第 8 参 dropKey=null 占位实参已随回收链摘除,
+  //  下列源锁正则的 `, null,` 锚同步勘误（语义=ctor 后接盒心回正,不变）
   const WIRING: Array<[string, RegExp]> = [
     ['#4 2623→410（bub）',
-      /new Arrow\(mzX, mzY,[\s\S]{0,300}?410, null, \{ grav: 0, life: 100, pierce: 1 \}\);[\s\S]{0,400}?placeAtShootSpawn\(bub, mzX, mzY\);/],
+      /new Arrow\(mzX, mzY,[\s\S]{0,300}?410, \{ grav: 0, life: 100, pierce: 1 \}\);[\s\S]{0,400}?placeAtShootSpawn\(bub, mzX, mzY\);/],
     ['#6 5461→1024（card,fireCard 闭包）',
       /new Arrow\(mzX, mzY, cvx, cvy,[\s\S]{0,450}?placeAtShootSpawn\(card, mzX, mzY\);/],
     ['#14 1156→190（pg）',
-      /new Arrow\(this\.player\.cx, this\.player\.cy,[\s\S]{0,700}?PIRANHA_PROJ, null,[\s\S]{0,400}?placeAtShootSpawn\(pg, this\.player\.cx, this\.player\.cy\);/],
+      /new Arrow\(this\.player\.cx, this\.player\.cy,[\s\S]{0,700}?PIRANHA_PROJ,\s*\{[\s\S]{0,400}?placeAtShootSpawn\(pg, this\.player\.cx, this\.player\.cy\);/],
     ['#15 3030→491（knife）',
       /new FlyingKnifeProj\(this\.player\.cx, this\.player\.cy,[\s\S]{0,700}?placeAtShootSpawn\(knife, this\.player\.cx, this\.player\.cy\);/],
     ['#16 3543→636（flare）',
@@ -455,11 +459,11 @@ describe('R9 批二接线源锁（src/core/Game.ts 九处配对）', () => {
     ['#18 shot 尾支（shotArrow）',
       /pierce: HOMING_FAMILY_PIERCE\.has\(cw\.shoot\)[\s\S]{0,600}?placeAtShootSpawn\(shotArrow, shotTip\.x, shotTip\.y\);/],
     ['#20 1168→196（smk）',
-      /196,\s*\n\s*null, \{ grav: 0\.2, life: 600, pierce: -1, bounce: true \}\);[\s\S]{0,800}?placeAtShootSpawn\(smk, px, py\);/],
+      /196, \{ grav: 0.2, life: 600, pierce: -1, bounce: true \}\);[\s\S]{0,800}?placeAtShootSpawn\(smk, px, py\);/],
     ['#22 通用投掷（thrownArrow）',
       /tumblePoseLock: THROWN_POSE_LOCK\.has\(tc\.shoot\)[\s\S]{0,900}?placeAtShootSpawn\(thrownArrow, px, py\);/],
     ['#25 伴生 248（bud）',
-      /const bud = new Arrow\(sx, sy, svx, svy, dmg, sKb, sProj, null,[\s\S]{0,500}?placeAtShootSpawn\(bud, sx, sy\);/],
+      /const bud = new Arrow\(sx, sy, svx, svy, dmg, sKb, sProj,\s*\{[\s\S]{0,500}?placeAtShootSpawn\(bud, sx, sy\);/],
     ['批三 mkBolt（b,百件级单点）',
       /gem: gemFlags, gemPhase: phase \}\);[\s\S]{0,400}?placeAtShootSpawn\(b, bx, by\);/],
     ['批三 5526 链伴生 405（−7,−7 盒心回正）',

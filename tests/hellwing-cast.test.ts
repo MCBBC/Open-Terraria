@@ -70,7 +70,7 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
   it('①[现状绿] 散布角度范围:出膛初速 ∈ ±π/16、ai 载荷 ∈ ±π/8(400 样本零越界)',
     () => {
       for (let i = 0; i < 400; i++) {
-        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, {});
         const b = signed(a.vy, a.vx);                      // 出膛速度角
         const ai = signed(hwOf(a).y, hwOf(a).x);           // ai[0]/ai[1] 游移角
         expect(Math.abs(b)).toBeLessThanOrEqual(SPAWN_MAX + 1e-9);
@@ -83,7 +83,7 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
       const n = 1200;
       let aHalf = 0, aQuart = 0, bHalf = 0, bQuart = 0;
       for (let i = 0; i < n; i++) {
-        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, {});
         const ai = signed(hwOf(a).y, hwOf(a).x);
         const b = signed(a.vy, a.vx);
         if (Math.abs(ai) < AI_MAX / 2) aHalf++;
@@ -101,7 +101,7 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
   it('③[现状绿] ai 载荷与出膛速度幅值恒= shootSpeed(旋转保幅长):'
     + 'ai[0]/ai[1] 是"被劫持的游移向量"非单位向', () => {
       for (let i = 0; i < 50; i++) {
-        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, {});
         expect(Math.abs(Math.hypot(hwOf(a).x, hwOf(a).y) - SPEED)).toBeLessThan(1e-6);
         expect(Math.abs(Math.hypot(a.vx, a.vy) - SPEED)).toBeLessThan(1e-6);
       }
@@ -110,7 +110,7 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
   it('④[现状绿] AI 载荷消费:v=(v×39+ai)/40 逐拍渐转(Projectile.cs:58692-58693),'
     + '150 拍后速度向收敛到 ai 向且幅值不减(无重力无阻力固定点)', () => {
       const game = makeGame(openWorld(), []);
-      const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+      const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, {});
       const aiAng = signed(hwOf(a).y, hwOf(a).x);
       for (let t = 0; t < 150 && !a.dead; t++) a.fixedUpdate(1 / 60, game);
       expect(a.dead).toBe(false);
@@ -125,7 +125,7 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
       const restore = mockRandom05();
       try {
         const game = makeGame(openWorld(), []);
-        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, {});
         expect(a.vy).toBe(0);
         for (let t = 0; t < 300 && !a.dead; t++) a.fixedUpdate(1 / 60, game);
         expect(Math.abs(a.vy)).toBeLessThan(0.5);   // 若误挂 0.1@15 档,此处 ≈28.5
@@ -136,7 +136,7 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
 
   it('⑥[现状绿] 承袭面:伤害/击退直传、penetrate=-1/timeLeft=1200/24×24 走数据表、'
     + 'critBonus/armorPen/frostEligible 注入面(Game.ts:12794-12798 弓支契约)', () => {
-      const a = new Arrow(1000, 1600, SPEED, 0, 30, 5.5, 485, null, {});
+      const a = new Arrow(1000, 1600, SPEED, 0, 30, 5.5, 485, {});
       expect(a.damage).toBe(30);            // 弓伤+弹药伤由 Game 侧合成后直传
       expect(a.knockback).toBe(5.5);
       expect(a.pierce).toBe(-1);            // Projectile.cs:5614 penetrate=-1 无限穿透
@@ -158,7 +158,7 @@ describe('地狱翼弓 3019 → 狱翼蝠 485(施法支散布 + ai 载荷 + 承�
       const game = makeGame(openWorld(), dusts);
       const restore = mockRandom05();
       try {
-        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+        const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, {});
         expect(a.vx).toBe(SPEED);           // 双掷角恒 0,出膛即撞面快照
         (a as unknown as { killNow: (g: GameHooks) => void }).killNow(game);
         const d6 = dusts.filter((d) => d.type === 6);
@@ -198,7 +198,7 @@ describe('485 狱翼蝠 GetAlpha (255,255,255,200) → 本体 78.4% 不透明（
     setProjSpriteOverride(485, { width: 24, height: 120 } as unknown as HTMLImageElement); // 5 帧 × 24px
     const dusts: DustRec[] = [];
     const game = makeGame(openWorld(), dusts);
-    const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, null, {});
+    const a = new Arrow(1000, 1600, SPEED, 0, 10, 1, 485, {});
     a.fixedUpdate(1 / 60, game);                       // 推进 1 拍（hwFrame 帧链/age=1）
     const calls: Array<{ ga: number; gco: string }> = [];
     let ga = 1;

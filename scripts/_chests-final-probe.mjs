@@ -120,6 +120,7 @@ const v = await page.evaluate(async () => {
 if (v.evalFail) {
   ok(false, `evaluate 失败: ${v.evalFail}`);
 } else {
+  console.log('[dbg-pos]', JSON.stringify(v.dbgPos));
   const t = v.types;
   ok(t.world0 && t.world0.name && t.world0.tex === 'Inventory_Back5' && t.world0.slots >= 40 && t.world0.btns === 5,
     `蓝:世界箱默认型 名=${t.world0 && t.world0.name} 贴=${t.world0 && t.world0.tex} 槽=${t.world0 && t.world0.slots} 钮=${t.world0 && t.world0.btns}, dbg=${JSON.stringify(t.world0 && t.world0.dbg3)}`);

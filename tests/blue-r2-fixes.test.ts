@@ -46,7 +46,7 @@ function makeHooks(enemies: StubEnemy[] = [], store?: TileStore): GameHooks {
 
 function gemBolt(vid: number, x: number, y: number, vx: number, vy: number,
   gem: Record<string, boolean>, opts: { life?: number; pierce?: number; dmg?: number; kb?: number } = {}) {
-  return new Arrow(x, y, vx, vy, opts.dmg ?? 100, opts.kb ?? 2, vid, null,
+  return new Arrow(x, y, vx, vy, opts.dmg ?? 100, opts.kb ?? 2, vid,
     { grav: 0, life: opts.life ?? 300, pierce: opts.pierce ?? 1, gem: gem as never });
 }
 

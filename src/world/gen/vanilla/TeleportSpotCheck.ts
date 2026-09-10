@@ -473,8 +473,13 @@ export function checkForGoodTeleportationSpot(
         continue;
       }
       const i2 = st.idx(num4, num5 + num8);
+      // ★SW-RB10a：tile2 判定 = Main.tileSolid[type]（Utils.cs:577）——vanilla tileSolid
+      //  含平台九件套（19/239/380/427/435-439,本仓数据档 solid:false 由 PLATFORM_FAMILY_
+      //  LUT 代偿,vanTileSolid 同源式）。旧刀裸读 TILE_DEFS.solid → 锚格=平台且盒内
+      //  邻列实心触发 (H+1) 碰撞时,vanilla 按锚格实心 break+受理（standing on platform,
+      //  终检 SolidCollision(H) 对 1px 掠带不触发）而本仓继续下坠/耗尽=拒。
       if ((st.flags[i2] & 1) !== 0 && (st.wire[i2] & WIRE_ACTUATED) === 0
-        && TILE_DEFS[st.type[i2]]?.solid === true) break;   // active && !inActive && tileSolid
+        && vanTileSolid(st.type[i2])) break;                // active && !inActive && tileSolid
       num8++;
     }
     if (flag) {

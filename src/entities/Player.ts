@@ -646,6 +646,15 @@ export class Player extends Entity {
    *  使用发色剂物品赋值 Player.cs:42179-42186，随存档持久化 :53805-53808）。
    *  原版无装备槽位——使用即换色，清除走 1990 去除剂 */
   hairDye = 0;
+  /** 热键栏锁定（SW-FX10 债⑪；Player.hbLocked :1419——DrawHotbarLockIcon Main.cs:43231
+   *  点击切换 + PlaySound(22)；锁定后关包快捷栏格不响应鼠标（Main.cs:44353 hover 门
+   *  /:44357 changeItem 门），数字键 1-0 照常）。.plr 持久化 PL:55543 写/:56268 读 */
+  hbLocked = false;
+  /** 超级矿车开关（SW-FX10 债⑩；Player.enabledSuperCart :2037 缺省 true——矿车升级
+   *  套件解锁(unlockedSuperCart)后可切换；消费面 UsingSuperCart :3955-3961 =
+   *  unlockedSuperCart && enabledSuperCart（Mount.cs:4851 _shouldSuperCart）。
+   *  .plr 持久化 PL:55572 位 [1] 写/:56368 位 [1] 读；杂项页开关 Main.cs:41963-41995） */
+  enabledSuperCart = true;
   /** 上一 tick PvP 死亡标记（Player.cs:1250 pvpDeath：KillMe 时若 pvp 置位——
    *  死亡不掉钱 + 复活满血/300t 无敌/跳过 Boss 延迟，:38208/:38321/:37223/:38388） */
   lastPvpDeath = false;
@@ -1179,7 +1188,15 @@ export class Player extends Entity {
    *  （getfixedboi）+ 20t 冷却/256px 移动重扫；扫描=UnbreakableWallScan.cs。
    *  Game 刷怪周期调用（内部冷却幂等） */
   updateUnbreakableWallScan(world: import('../world/World').World, force = false): void {
-    if (!world.seedFlags?.everything) return;   // Main.dualDungeonsSeed（:28127-28129）
+    // ★SW-RB10a 旗域定谳：vanilla 门=Main.dualDungeonsSeed（DoUnbreakableWallScan
+    //  :28826-28829「if (!Main.dualDungeonsSeed || Main.netMode == 1) return;」）＝
+    //  SecretSeed.dualDungeons（"double daring dangers"）专属旗。旧刀挂 seedFlags.
+    //  everything（getfixedboi）——zenith 依赖七件套（WorldSeedOption_Everything.
+    //  Dependencies=Remix/Drunk/NotTheBees/NoTraps/DontStarve/Anniversary/ForTheWorthy）
+    //  【不含 dualDungeons】：ddual 世界扫描整死（insideUnbreakableWalls 恒 false →
+    //  NPC.cs:402 inDualDungeon/1256/5452/60596 全链哑火）；zenith 世界则误扫（墙 350
+    //  不生成恒 false=侥幸无害）。消费端 Game.setPlayerFlags 位同步改（同批）。
+    if (!world.seedFlags?.dualDungeons) return;   // Main.dualDungeonsSeed（:28127-28129）
     if (force || --this.uwScanCd <= 0
       || Math.hypot(this.cx - this.uwScanX, this.cy - this.uwScanY) >= 256) {
       this.insideUnbreakableWalls = insideUnbreakableWallsScan(

@@ -463,7 +463,7 @@ describe('SW-FX1⑥ 532/937 撞块弹反', () => {
 
   it('532 落地弹反：vy=5 → v.Y=−3.75 后 num18 保速归一 → |v|=|last|×0.75²（:18259-18278）', () => {
     const game = bounceGame();
-    const b = new Arrow(400, 3020, 0, 5, 25, 5, 532, null);
+    const b = new Arrow(400, 3020, 0, 5, 25, 5, 532);
     expect(b.pierce).toBe(3);                       // penetrate 3（json 数据面）
     let hitTiles = 0;
     (game as unknown as { hitTilesFx: () => void }).hitTilesFx = () => { hitTiles++; };
@@ -477,7 +477,7 @@ describe('SW-FX1⑥ 532/937 撞块弹反', () => {
 
   it('937 落地弹反：Y 撞 ×−0.95 + penetrate--（:18602-18613）', () => {
     const game = bounceGame();
-    const g = new Arrow(400, 3020, 0, 5, 65, 7, 937, null);
+    const g = new Arrow(400, 3020, 0, 5, 65, 7, 937);
     for (let i = 0; i < 10 && g.vy > 0; i++) g.fixedUpdate(1 / 60, game);
     expect(g.vy).toBeLessThan(0);
     expect(g.vy).toBeCloseTo(-5 * 0.95, 6);

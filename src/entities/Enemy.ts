@@ -12584,6 +12584,10 @@ export class Enemy extends Entity {
         }
         const d = Math.hypot(dx, dy) || 1;
         const dart = new Dart(this.cx, this.y, (dx / d) * spd, (dy / d) * spd, dmg, proj);
+        // ★SW-FX7（2026-09-10）：291 发射点显式传目标锚 ai[0]/ai[1]=玩家心（NPC.cs:
+        //  21294 NewProjectile 末两参 Main.player[target].Center.X/Y）——此前缺省 0
+        //  由 Dart 首子步补偿捕获（差 1 拍玩家位移）。293/290 原版即传 0/0 不动
+        if (proj === 291) { dart.spawnAi0 = player.cx; dart.spawnAi1 = player.cy; }
         dart.hostile = true; // 史后三法师直构弹——敌怪弹（v5 bit7）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
       } else if (vid === 533) {
@@ -13932,6 +13936,14 @@ export class Enemy extends Entity {
         return false;
       }
       this.dead = true;
+      // ★SW-FX7（2026-09-10）：死亡面 noSpawnCycle 置位（NPC.checkDead 尾
+      //  NPC.cs:78941 无条件 `noSpawnCycle = true`——与消散面 :78797 对偶；下一
+      //  刷怪周期整体跳过,NPC.SpawnNPC :80991-80995）。消散面已由 runDespawnFx
+      //  承接（:2787），死亡面此前整缺=战斗高频击杀帧仍照常刷生。SW 下帧消耗/
+      //  清零（Game.trySpawnEnemy 头）。登记残差：城镇 NPC 死亡管线未接本旗
+      //  （checkDead 全型共用,本仓 TownNPC 走独立类）;微光 GetShimmered
+      //  两置位（:92673/:92690）未接。
+      game.noSpawnCycleThisFrame = true;
       game.recLog?.('death', { id: this.id, vid: this.vanillaId ?? null });   // 行为录制：敌怪死亡
       // 瓢虫被杀 → 坏运（NPC.checkDead cs:78838-78840 → LadyBugKilled :82332）：
       // 604 普通 / 605 金瓢虫（距离衰减公式见 LuckState.ladyBugKilled）；

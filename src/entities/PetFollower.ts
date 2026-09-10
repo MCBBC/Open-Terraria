@@ -267,8 +267,8 @@ export class PetFollower extends Entity {
   // ---- ★终清波批彩蛋状态 ----
   /** 764 UpbeatStar alpha 脉冲三角波（localAI[0]：0..120 折返,:66806-66808/
    *  :66831-66834 Opacity=Lerp(0.4,0.75,tri)）；starRot=localAI[1] 自旋累加
-   *  （+=vX*0.01+1/120 wrap ±2π,:66809-66816—— FallenStar 覆绘旋转消费面因
-   *  sprites 盘缺 Item_75.png 登记,累加面随批就位） */
+   *  （+=vX*0.01+1/120 wrap ±2π,:66809-66816—— FallenStar 覆绘旋转消费面,
+   *  ★SW-FX9 已随 Item_75.png 入库接通,draw() 覆绘支消费） */
   private starT = 0;
   private starOpacity = 1;
   private starRot = 0;
@@ -982,8 +982,8 @@ export class PetFollower extends Entity {
    *  · localAI[0] 相位 ++ wrap120 → alpha 脉冲三角波 Opacity=Lerp(0.4,0.75,fold)
    *    （:66831-66834,num11 折返）；draw() 以 starOpacity 消费
    *  · localAI[1] 自旋：+=vX×0.01 + 1/120，wrap ±2π；慢速档再 ×0.9（:66809-66820）
-   *    ——消费面（DrawProjWithStarryTrail FallenStar 覆绘 rotation）因 sprites 盘
-   *    缺 Item_75.png 登记,累加面随批就位
+   *    ——消费面（DrawProjWithStarryTrail FallenStar 覆绘 rotation）★SW-FX9
+   *    已随 Item_75.png 入库接通（draw() 覆绘支,Main.cs:38315-38333）
    *  · d292 微光尘：慢速档 |v|∈(0.1,4) Next(30)==0 一粒（vel×0.5 出速→×0.3 阻尼+
    *    noLightEmittance,:66821-66823）;快速档 ≥4 时无屏盒结果消费直 Next(15)==0 且
    *    scale0.9 档（:66826-66830——原版 Hitbox.Intersects 结果弃置,不建模）
@@ -1183,6 +1183,31 @@ export class PetFollower extends Entity {
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.imageSmoothingEnabled = false;
+    // ★SW-FX9（2026-09-10）：764 UpbeatStar DrawProjWithStarryTrail 陨星覆绘
+    //   （Main.cs:38315-38333——资产面=Item_75.png 经 atlas-append 通道入库,登记债清偿）：
+    //   · 画序:DrawProjWithStarryTrail 在 DrawProjectiles else-if 链先跑、本体
+    //     EntitySpriteDraw 在后 → 覆绘【先】于本体（本体压顶）
+    //   · 贴图 = Item_75 Frame(1,8) 顶帧（22×26,恒首帧不逐帧走）,origin=帧心,
+    //     position=Center,proj.scale=1
+    //   · rotation = proj.rotation + localAI[1]（:38316）——AI_144 不写 rotation
+    //     (缺省 0) → = starRot（upbeatStarTick 累积 vx×0.01+1/120 wrap±2π 慢速×0.9）
+    //   · color = Color(255,255,255, projectileColor.A−proj.alpha)（:38303;
+    //     764 GetAlpha 恒 White P.cs:80749-80751,Opacity 三角波写 alpha
+    //     :71244-71245）→ A = 255×Opacity → globalAlpha = starOpacity
+    //   · SpriteEffects.None:覆绘不随 facing 翻转 → 独立 save 块,不吃本体 flip
+    //   · Extra_91 五星芒尾未画（拖尾域登记债维持,见类尾注②——非本批范围）
+    if (this.projId === 764) {
+      const itemImg = r.atlas?.ensureVImage?.('vanilla/Item_75.png');
+      if (itemImg && itemImg.height >= 8) {
+        const ifh = itemImg.height / 8;                        // Frame(1,8) 帧高 26
+        ctx.save();
+        ctx.globalAlpha *= this.starOpacity;                   // A=255×Opacity
+        ctx.rotate(this.starRot);                              // proj.rotation+localAI[1]
+        ctx.drawImage(itemImg, 0, 0, itemImg.width, ifh,
+          -itemImg.width / 2, -ifh / 2, itemImg.width, ifh);
+        ctx.restore();
+      }
+    }
     // ★终清波批：1050 旋转照原版 npc.rotation（AI_144 双档旋转面）；
     //   764 alpha 脉冲（Opacity 三角波 Lerp(0.4,.75) :66831-66834）→ globalAlpha
     if (this.projId === 1050) {
@@ -1215,7 +1240,8 @@ export class PetFollower extends Entity {
   //    NewProjectile 同构,非 PetFollower 承载）→ 此处无重复实现。
   //    ★资产缺口销核（2026-09-01 终零波批）：Extra_91 星芒尾已随 StarfuryStar.draw
   //    真值组合落地（vanilla/Extra_91.png 盘上在案,MissileProj.ts 染色副本周转池），
-  //    渲染域债登记退役;FallenStar 覆绘(764)仍待 Item_75.png 入库维持登记。
+  //    渲染域债登记退役。★SW-FX9（2026-09-10）：FallenStar 覆绘(764)随 Item_75.png
+  //    入库（atlas-append 通道）+ draw() 覆绘支落地,登记债清偿（Main.cs:38315-38333）。
   //  ③ 地面族逐款帧窗口——★终零波批销核面：960 Chester（chesterStepAnim 1:1,
   //    2026-08-26）、208 鹦鹉（parrotStep+[0.1/cap4] 重力档 + 追赶降落禁用档
   //    P.cs:61487——旧"0.95 水平阻尼"系误读销核）、825 小红熊猫（pandaStep 表情
