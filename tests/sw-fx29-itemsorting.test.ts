@@ -64,14 +64,12 @@ describe('SW-FX29 金标：ItemSorting.cs 层结构直读', () => {
     expect(names).toEqual([...LAYER_NAMES]);
   });
 
-  it('SetupSortingPriorities 运行时序 = 前四伤害层（平序 Melee/Ranged/Magic/Minions）+ 其余 48 层同固定序', () => {
-    expect(priOrder.length).toBe(52);
-    const wlBodyEnd = sortSrc.indexOf('for (int i = -48');
-    void wlBodyEnd;
-    // 前四层 = AddSortingPrioritiesBasedOnPlayerDamage 的四系（:1360-1363 加入序）
-    expect(priOrder.slice(0, 4)).toEqual(['WeaponsMelee', 'WeaponsRanged', 'WeaponsMagic', 'WeaponsMinions']);
-    // 后 48 层与白名单序逐位一致（白名单序前四也按 Melee→Ranged→Magic→Minions 排布）
-    expect(priOrder.slice(4)).toEqual(wlOrder.slice(4));
+  it('SetupSortingPriorities 运行时序：伤害层整块置顶 + 其余 48 层逐位同白名单序', () => {
+    // 前四层经 AddSortingPrioritiesBasedOnPlayerDamage(_layerList)（:1385）整块加入——
+    // 文本面只有一次调用,无逐层 Add;随后 48 个 _layerList.Add 从 WeaponsAssorted 起
+    expect(priOrder.length).toBe(48);
+    expect(priOrder[0]).toBe('WeaponsAssorted');
+    expect(priOrder).toEqual(wlOrder.slice(4));
   });
 
   it('层方法引用的 SortingPriority 集恰为 json 所载 20 张 + BuffID.SortingPriorityFoodBuffs', () => {
@@ -145,7 +143,7 @@ describe('SW-FX29 金标：SortingPriority 集全量对拍', () => {
     expect(boolSet(itemIdSrc, 'IsFishingCrate')).toEqual(json.bools.IsFishingCrate);
     expect(boolSet(itemIdSrc, 'IsBasicFish')).toEqual(json.bools.IsBasicFish);
     const mainSrc = readFileSync(path.join(ROOT1457, 'Terraria', 'Main.cs'), 'utf8');
-    const fi = [...mainSrc.matchAll(/\btileFrameImportant\[(\d+)\] = true;/g)].map((m) => Number(m[1])).sort((a, b) => a - b);
+    const fi = [...new Set([...mainSrc.matchAll(/\btileFrameImportant\[(\d+)\] = true;/g)].map((m) => Number(m[1])))].sort((a, b) => a - b);
     expect(fi).toEqual([...json.frameImportant].sort((a, b) => a - b));
     expect(json.frameImportant).toContain(4);   // 火把 tile=帧重要（Last - Tiles Important 层）
   });
@@ -154,11 +152,26 @@ describe('SW-FX29 金标：SortingPriority 集全量对拍', () => {
 // ================= 金标三：属性面直读 spot（Item.cs case 段） =================
 
 describe('SW-FX29 金标：attrs 属性面反编译直读 spot', () => {
-  /** case 段（含 fall-through 共享体）首段文本 */
+  /** case 段（限 SetDefaults1-5 方法体内——Item.cs 前部还有别的 switch(type) 之外的
+   *  数字 switch,裸 indexOf 会命中错误方法体） */
+  const sdRegion = (() => {
+    const parts: string[] = [];
+    for (let n = 1; n <= 5; n++) {
+      const head = itemSrc.indexOf(`private void SetDefaults${n}(int type)`);
+      if (head < 0) continue;
+      const open = itemSrc.indexOf('{', head);
+      let depth = 0;
+      for (let i = open; i < itemSrc.length; i++) {
+        if (itemSrc[i] === '{') depth++;
+        else if (itemSrc[i] === '}') { depth--; if (depth === 0) { parts.push(itemSrc.slice(open, i)); break; } }
+      }
+    }
+    return parts.join('\n');
+  })();
   const caseSeg = (id: number): string => {
-    const idx = itemSrc.indexOf(`case ${id}:`);
-    expect(idx, `case ${id} 应存在`).toBeGreaterThanOrEqual(0);
-    return itemSrc.slice(idx, idx + 900);
+    const idx = sdRegion.indexOf(`case ${id}:`);
+    expect(idx, `case ${id} 应存在于 SetDefaults1-5`).toBeGreaterThanOrEqual(0);
+    return sdRegion.slice(idx, idx + 900);
   };
   const num = (seg: string, field: string): number | undefined => {
     const m = seg.match(new RegExp(`\\b${field} = (-?\\d+);`));
@@ -268,8 +281,10 @@ describe('SW-FX29 行为矩阵：52 层谓词 + 比较器', () => {
     place(s, 10, 4); place(s, 11, 2);   // 两层
     const hues: Array<[number, number, boolean]> = [];
     sortPlayerInventory(s, { onGlow: (slot, hue, chest) => hues.push([slot, hue, chest]) });
-    expect(hues.map((h) => h[1])).toEqual([0.25, 0.75]);
+    // 弹药格 4 枚 0.31 绿带在先（:1639）;主体落位两层两带（:1523-1536）
+    expect(hues.filter((h) => h[0] >= 10 && h[0] < 50).map((h) => h[1])).toEqual([0.25, 0.75]);
     expect(hues.every((h) => h[2] === false)).toBe(true);
+    expect(hues.filter((h) => h[0] >= 54 && h[0] < 58).map((h) => h[1])).toEqual([0.31, 0.31, 0.31, 0.31]);
   });
 
   it('弹药格 SetGlow 0.31（FillAmmoFromInventory :1639）', () => {
@@ -337,23 +352,30 @@ describe('SW-FX29 币链', () => {
     expect(s[51]!.stack).toBe(50);
   });
 
-  it('99 进位与铂金 9999 封顶（:1726-1737）', () => {
-    const s = emptySlots();
-    place(s, 10, 71, 150);              // 1 金 51 铜? → 1银51铜? 150铜=1银50铜
-    sortPlayerInventory(s);
-    // 150 铜 = 1 银 + 50 铜 → 两堆:银 1 + 铜 50
-    const found = [vanillaIdOfItem(s[50]!.id), vanillaIdOfItem(s[51]!.id)].sort();
-    expect(found).toEqual([71, 72]);
-    const stacks = [s[50]!.stack, s[51]!.stack].sort((a, b) => a - b);
-    expect(stacks).toEqual([1, 50]);
+  it('单堆不足堆位 → :1749 门 no-op;双堆 99+51 → 清币重排（铜槽 50 起）', () => {
+    const s1 = emptySlots();
+    place(s1, 50, 71, 150);             // 单堆 150 铜:需 2 堆位,现堆数 1 → 放弃
+    sortPlayerInventory(s1);
+    expect(vanillaIdOfItem(s1[50]!.id)).toBe(71);
+    expect(s1[50]!.stack).toBe(150);
+    const s2 = emptySlots();
+    place(s2, 10, 71, 99); place(s2, 11, 71, 51);   // 现堆数 2 ≥ 需 2 → 清币重排
+    sortPlayerInventory(s2);
+    // CoinsSplit(150) = 银 1 + 铜 50（币值 100:1 折算,Utils.cs:1083-1097）
+    expect(vanillaIdOfItem(s2[50]!.id)).toBe(72);
+    expect(s2[50]!.stack).toBe(1);
+    expect(vanillaIdOfItem(s2[51]!.id)).toBe(71);
+    expect(s2[51]!.stack).toBe(50);
   });
 
-  it('钱袋 905 在场 → 整个币整理跳过（:1563-1565 HasItem 门）', () => {
+  it('钱袋 905 在场 → SortCoins 跳过（:1563-1565）——主排序仍会把币归层 5 并叠', () => {
     const s = emptySlots();
     place(s, 12, 73, 3); place(s, 13, 72, 50); place(s, 40, 905);
     sortPlayerInventory(s);
-    expect(vanillaIdOfItem(s[12]!.id)).toBe(73);
-    expect(vanillaIdOfItem(s[13]!.id)).toBe(72);
+    // 币槽 50-53 保持空（未走币合并重排）
+    expect(vids(s).slice(50, 54)).toEqual([null, null, null, null]);
+    // 币作为 Weapons - Ammo 层物品仍参与主排序（d100 金先于 d50 银）+ 钱袋层 1 首发
+    expect(vids(s).slice(10, 13)).toEqual([905, 73, 72]);
   });
 
   it('币槽不足 → no-op（:1749 num4 < num 门）', () => {
@@ -393,15 +415,6 @@ describe('SW-FX29 变异实验（判别力）', () => {
 
   it('层表错位（删 4 号白名单归属）→ 输出改变（红）', () => {
     const golden = goldenOrder();
-    const d = JSON.parse(JSON.stringify({
-      layers: Object.fromEntries(getSortDataForTests().layers),
-      prio: getSortDataForTests().prio, buffFoodPrio: [...getSortDataForTests().buffFood.map],
-      bools: { IsFood: [...getSortDataForTests().isFood], IsFishingCrate: [...getSortDataForTests().isCrate], IsBasicFish: [...getSortDataForTests().isBasicFish] },
-      frameImportant: [...getSortDataForTests().frameImportant],
-      attrs: Object.fromEntries(getSortDataForTests().attrs),
-      meta: { itemCount: 6196 },
-    }));
-    void d;
     // 构造:把 vid 4 从层 0 摘除（白名单错位语义）→ 剑落入尾接
     const data = getSortDataForTests();
     const layersMut = new Map(data.layers);
@@ -428,10 +441,10 @@ describe('SW-FX29 变异实验（判别力）', () => {
     const golden = base();
     expect(golden).toEqual([3467, 3460]);   // prio 101 > 100 降序
     const data = getSortDataForTests();
-    const prioMut = JSON.parse(JSON.stringify(data.prio));
-    const set = prioMut.SortingPriorityMaterials as [number, number][];
-    set.find((p) => p[0] === 3467)![1] = 100;
-    set.find((p) => p[0] === 3460)![1] = 101;
+    const prioMut: typeof data.prio = {};
+    for (const [k, v] of Object.entries(data.prio)) prioMut[k] = { def: -1, map: new Map(v.map) };
+    prioMut.SortingPriorityMaterials.map.set(3467, 100);
+    prioMut.SortingPriorityMaterials.map.set(3460, 101);
     useSortDataForTests({ ...data, prio: prioMut });
     expect(base()).toEqual([3460, 3467]);   // 反转 → 与金标异
     expect(base()).not.toEqual(golden);

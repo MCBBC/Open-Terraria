@@ -5206,6 +5206,9 @@ export class UI {
     slotEl.style.setProperty('--slot-bgimg', `url(sprites/vanilla/${tex}.png)`);
     if (tint) slotEl.style.setProperty('--slot-tint', tint);
     else slotEl.style.removeProperty('--slot-tint');
+    // ★SW-FX29：glow 活态未到期 → 重绘后复铺（原版时间态逐帧驱动;仓内重绘
+    // 模型下由状态承载——见 applySlotGlow 注）
+    if (this.slotGlowState.has(`${where}:${i}`)) this.applySlotGlow(where, i);
   }
 
   /** LoadoutShare 槽面（ItemSlot.Draw :2454-2473 + :2726-2746；R4-15 补绘——曾缺
@@ -5259,17 +5262,40 @@ export class UI {
     if (frame.dataset.src !== frameUrl) { frame.style.backgroundImage = frameUrl; frame.dataset.src = frameUrl; }
   }
 
+  /** 槽位 glow 活动态（★SW-FX29：ItemSlot.inventoryGlowTime/Hue :270-276 的仓内
+   *  时间态——SetGlow 写态 300t(5s) 渐隐;呈现面 paintSlotChrome 重绘时按活态重铺。
+   *  旧一次性 DOM overlay 会被 refreshAll 的权威重绘当场清掉（chestQuickStack
+   *  :5001 紧跟 refreshAll 同病）——改状态承载,重绘后 applySlotGlow 复铺） */
+  private slotGlowState = new Map<string, { hue: number; until: number }>();
+
   /** 物品转移 hue 脉冲（ItemSlot.SetGlow :428 + :2144-2152：贴图换 Back13 +
    *  hslToRgb(hue,1,0.5) 色层 (time/300)²/2 衰减 5s；CSS 动画近似二次曲线） */
   setSlotGlow(where: SlotWhere, i: number, hue: number): void {
+    this.slotGlowState.set(`${where}:${i}`, { hue, until: performance.now() + 5000 });
+    this.applySlotGlow(where, i);
+  }
+
+  /** glow 活态复铺（ItemSlot.Draw :2289-2296：context 0/2/3/4/32 且 !favorited
+   *  && 非空——Back13 贴图 + 色层;animationDuration=余量,到期 animationend
+   *  清态并归位 chrome 重绘） */
+  private applySlotGlow(where: SlotWhere, i: number): void {
+    const key = `${where}:${i}`;
+    const st = this.slotGlowState.get(key);
+    if (!st) return;
     const slotEl = this.slotEl(i, where);
-    if (!slotEl) return;
+    if (!slotEl || !slotEl.isConnected) return;
+    const remain = st.until - performance.now();
+    if (remain <= 0) {
+      this.slotGlowState.delete(key);
+      return;
+    }
     slotEl.querySelector('.sw-glow-overlay')?.remove();
     slotEl.style.backgroundImage = 'url(sprites/vanilla/Inventory_Back13.png)';
     const ov = el('div', 'sw-glow-overlay');
-    ov.style.setProperty('--glow', `hsl(${(hue * 360).toFixed(1)} 100% 50%)`);
+    ov.style.setProperty('--glow', `hsl(${(st.hue * 360).toFixed(1)} 100% 50%)`);
+    ov.style.animationDuration = `${Math.ceil(remain)}ms`;
     ov.addEventListener('animationend', () => {
-      ov.remove();
+      this.slotGlowState.delete(key);
       if (this.game) this.paintSlotChrome(slotEl, where, i);
     });
     slotEl.appendChild(ov);
@@ -7663,7 +7689,8 @@ export class UI {
       this.vinvRefreshCraft();
     } else {
       // modern 支(:33556-33557 → NewCraftingUI.OpenCloseFilter)=窗族分期;
-      // playerInventory=true 副作用面照走(原版窗内开包逻辑同面)
+      // classic 模式×classic 构建器布局(无网格域)同落此臂——playerInventory=true
+      // 副作用面照走(OpenCloseFilter 开支 :156 Player.OpenInventory 同面)
       this.openInventory(true);
     }
   }

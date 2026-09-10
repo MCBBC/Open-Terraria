@@ -4272,15 +4272,15 @@ export class Renderer {
           if (sign && sign.text.trim()) this.signHoverText = sign.text;
           // signBubble（Player.cs:33839-33841）：悬停任意告示牌即置位——
           // signX=锚右缘px、signY=锚顶行；泡偏玩家异侧（:45142 signX>玩家右缘 → 翻转）
-          // ★SW-FX27：锚屏位=worldToScreenDisplayed（vanilla DrawInterface_19
-          //   SignTileBubble Main.cs:46504-46510 `num2 = screenHeight -
-          //   (signY - screenPosition.Y) - 32`——翻转态锚 Y 镜像；泡本体由
-          //   消费端按显示位画,文字正向同原版 ZoomMatrix 层）
+          // ★SW-FX27：翻转态锚 Y 镜像（vanilla DrawInterface_19 SignTileBubble
+          //   Main.cs:46504-46510 `num2 = screenHeight - (signY - screenPosition.Y)
+          //   - 32`；-32 泡高侧调整由消费端自身偏移承担）。gd=1 分支保持旧式
+          //   逐位（不含 punch——旧式即无 punch,镜面律铁律不动基线）。
           const signX = ax * TILE + 16, signY = ay * TILE;
-          const [sbx, sby] = cam2.worldToScreenDisplayed(signX, signY);
+          const sbyRaw = (signY - cam2.y) * z2 + viewH / 2;
           this.signBubbleScreen = {
-            x: Math.round(sbx),
-            y: Math.round(sby),
+            x: Math.round((signX - cam2.x) * z2 + viewW / 2),
+            y: Math.round(cam2.flipY ? viewH - sbyRaw : sbyRaw),
             flip: signX > player.x + player.w,
           };
         }

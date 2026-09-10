@@ -135,7 +135,9 @@ describe('SW-FX28 ③开箱流 D0/绑定面(UI.ts)', () => {
     const start = uiSrc.indexOf('private vinvBuildChest');
     const body = uiSrc.slice(start, uiSrc.indexOf('private vinvUpdateChestName', start));
     expect(body).toContain('for (let i = 0; i < 40; i++) {');
-    expect(body).toContain('pos: () => (this.openChest ? { x, y } : null)');
+    // ★SW-FX30 刀②(2026-09-11):pos 门扩 ChestUI.cs:81 网格态吞箱条面(chest!=-1 &&
+    //   !PipsUseGrid && !modern)——openChest ∧ !PipsUseGrid 双门,开箱即原位语义不变
+    expect(body).toContain('pos: () => (this.openChest && !this.vinvPipsUseGrid ? { x, y } : null)');
     expect(body).toContain('const { x, y } = chestSlotXY(i);');
   });
 });

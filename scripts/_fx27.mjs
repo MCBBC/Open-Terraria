@@ -25,7 +25,7 @@ await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 180000 });
 console.log('[fx27] dom loaded; wait bridge');
 await page.waitForFunction(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.newWorld, { timeout: 240000, polling: 500 });
 console.log('[fx27] bridge ready; newWorld');
-await page.evaluate(async () => { await window.__swFlow.newWorld('424242', 1200, 400); });
+await page.evaluate(async () => { await window.__swFlow.newWorld('424242', 4200, 1200); });
 console.log('[fx27] newWorld done; wait game');
 await page.waitForFunction(() => !!window.__swGame, { timeout: 300000, polling: 500 });
 await new Promise((r) => setTimeout(r, 2500));
@@ -35,7 +35,7 @@ const outDir = process.env.SW_PROBE_OUT ?? '/tmp/probe-out/_fx27';
 
 // 随机采样配对像素（世界区中部，避开 HUD 条带）：命中=两图 RGBA 全等
 const mirrorRate = async (x0, x1, y0, y1, n) => page.evaluate(async ([x0, x1, y0, y1, n]) => {
-  const cv = document.querySelector('canvas');
+  const cv = window.__swGame.renderer.canvas;   // 主世界画布（DOM 里另有小 UI 画布,querySelector 会抓错）
   const ctx = cv.getContext('2d');
   const H = cv.height;
   const a = ctx.getImageData(0, 0, cv.width, H).data;
@@ -72,7 +72,7 @@ try {
   await new Promise((r) => setTimeout(r, 600));   // 相机缓动收敛
   await page.screenshot({ path: `${outDir}/fx27-A-baseline.png` });
   await page.evaluate(() => {                      // 缓存基线全幅像素
-    const cv = document.querySelector('canvas');
+    const cv = window.__swGame.renderer.canvas;
     const ctx = cv.getContext('2d');
     window.__fx27Base = ctx.getImageData(0, 0, cv.width, cv.height).data;
   });
