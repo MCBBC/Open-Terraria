@@ -339,6 +339,21 @@ function tintedSwayCell(
   return c;
 }
 
+/** ★SW-RB11e 2026-09-10：glow 荧光叠层 sway 分支补画通道（ChunkCache 荧光层消费）——
+ *  SW-FX12 荧光补画对 sway 族原直走 drawVanillaCell 丢 paint（同格"涂漆∧荧光涂层"
+ *  并置时叠层显原色,且叠层在光照合成后绘 = 视觉盖过摆动层染色面）。本导出走
+ *  tintedSwayCell 同源缓存（paint 染色+特判组分派与烘焙油漆 pass 同式）；
+ *  style 恒 0：sway 族（草/藤/药草）不含 sheet 5/323 树干 style 维度。
+ *  调用前提 = swayBakeSkip(type,fx) 已真（type ∈ SWAY_REC）,否则返回 null 回落。 */
+export function tintedSwayCellForGlow(
+  atlas: SpriteAtlas, st: TileStore, x: number, y: number, type: number,
+  fx: number, fy: number, paint: number, trees?: TreeStyleData,
+): HTMLCanvasElement | null {
+  const rec = SWAY_REC.get(type);
+  if (!rec) return null;
+  return tintedSwayCell(atlas, st, rec, x, y, type, fx, fy, paint, trees);
+}
+
 function drawCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
   rec: SwayRec, x: number, y: number, type: number,

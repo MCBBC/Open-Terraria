@@ -28,7 +28,7 @@ vi.mock('../src/render/TileTint', () => ({
   tintRegion: vi.fn(),
   tintedVanillaRegion: vi.fn(() => null),
 }));
-import { tintedVanillaRegion } from '../src/render/TileTint';
+import { tintedVanillaRegion, tintRegion } from '../src/render/TileTint';
 import { drawTreeCell } from '../src/render/VanillaTiler';
 import { ChunkCache } from '../src/render/ChunkCache';
 import type { VanillaWallTiler } from '../src/render/VanillaWallTiler';
@@ -377,6 +377,38 @@ describe('SW-FX12 C2. 荧光叠层摆动族/冠标记格补画（DrawTrees :8290
       (c) => c.fn === 'drawImage' && c.args[0] !== tile.page && c.args[0] !== wall.page,
     );
     expect(crownDraw, '冠标记格荧光叠层应有补画（旧实现只有页拷贝=空）').toBeTruthy();
+  });
+
+  it('★SW-RB11e sway 族补画吃 paint：涂漆∧荧光株 → tintedSwayCellForGlow 染色通道', () => {
+    // 判别力：旧实现（FX12 初版）glow sway 分支直走 drawVanillaCell（无 paint 形参）
+    // = 涂漆∧荧光并置格叠层显原色。新通道 = WindSway.tintedSwayCellForGlow →
+    // tintedSwayCell → tintRegion(scratch 画布)——tintRegion mock 的 src 必出现
+    // 【非页画布】调用（烘焙油漆 pass 的 src 恒为 wall/tile 页）。
+    made.length = 0;
+    vi.mocked(tintRegion).mockClear();
+    const w = new World(48, 40, 3, 'fx12-glow-sway-paint');
+    const st = w.store;
+    const plant = TILE_BY_KEY['v_3_forest_short_plants']!;   // sheet 3 = SWAYS_IN_WIND_BASIC
+    st.setTileSilent(6, 7, TILE_BY_KEY['grass']!);           // 支撑块（邻域帧查找真值）
+    st.setTileSilent(6, 6, plant, 18, 0);
+    st.paint[st.idx(6, 6)] = 5;                              // 绿漆（paint 1-12 特判域）
+    st.setCoatSilent(6, 6, TileStore.COAT_FULLBRIGHT_BLOCK, TileStore.COAT_FULLBRIGHT_BLOCK);
+    const cc = new ChunkCache(w, new Map(), {
+      // drawVanillaCell 消费 vframeAt/vImageFailed（帧查找+诊断）——桩回 null 走
+      // reconFb 回退,断言只锚 tintRegion 染色调用,不锚帧内容
+      atlas: {
+        ...atlasStub({}), vframeAt: () => null,
+        vImageFailed: () => false, ensureVImage: () => null,
+      } as unknown as SpriteAtlas,
+    } as unknown as AutoTiler, null as unknown as VanillaWallTiler);
+    const wall = page(), tile = page();
+    cc.bakeChunkInto(0, 0, wall.page, tile.page, -1);
+    // 建层数 ≥1（glow 层 + tintedSwayCell scratch 画布都走 createElement 桩）
+    expect(made.length, 'glow 建层').toBeGreaterThanOrEqual(1);
+    const swayTint = vi.mocked(tintRegion).mock.calls.find(
+      (c) => c[1] !== wall.page && c[1] !== tile.page);
+    expect(swayTint, '荧光叠层 sway 分支必须经染色通道（tintRegion src=scratch 画布）').toBeTruthy();
+    expect(swayTint![4], 'paint 直传').toBe(5);
   });
 
   it('普通实心格荧光：仍走页拷贝（drawImage 源=tilePage），回归保护', () => {

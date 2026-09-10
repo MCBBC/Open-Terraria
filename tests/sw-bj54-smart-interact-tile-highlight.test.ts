@@ -32,12 +32,15 @@ import {
   DISABLE_SMART_INTERACT,
   COUNTS_AS_WATER_FOR_CRAFTING,
   CAMPFIRE_TILES,
+  FILL_TARGET_TYPES,
   clearSmartInteractTileFrame,
   smartInteractTileFrame,
+  type SmartInteractCondCtx,
 } from '../src/core/SmartInteractTiles';
 import {
   TILE_HAS_OUTLINES,
   HIGHLIGHT_ANIM_EXCLUDED,
+  HIGHLIGHT_ANIM_WHEN_LIT,
   getSelectionGlowColor,
   highlightCellRect,
 } from '../src/render/TileHighlight';
@@ -115,14 +118,17 @@ describe('SW-BJ54 候选谓词与尺寸表（provider :140-408 1:1）', () => {
     expect(ck.size).toBe(4 + 6);
   });
 
-  it('配方站 TileUsedInRecipes 面目入候选：熔炉 17（2×3）与砧继承型 355（3×3，TileCountsAs 355→13）', () => {
+  it('配方站 TileUsedInRecipes 面目入候选：熔炉 17（3×2）与砧继承型 355（3×3，TileCountsAs 355→13）', () => {
+    // ★SW-RB11a：候选谓词改 FILL_TARGET_TYPES∪recipes∪water∪campfire（旧 DIMS.has
+    //   把 14/469 误入候选）——17/355 经 TileUsedInRecipes 入候选。场景同步订正：
+    //   熔炉 17 原版多格框=3 宽×2 高（旧 2×3 是尺寸表误抄 0 的连带摆位,锚不齐）。
     const store = makeStore(W, H);
-    placeBox(store, 32, 34, 17, 2, 3);
+    placeBox(store, 32, 34, 17, 3, 2);                        // frameX 0..36 / frameY 0..18
     placeBox(store, 37, 34, 355, 3, 3);                       // 分子机/微光砧族(继承进 TileUsedInRecipes)
     const scan = scanSmartInteractTiles(store, LX, LY, HX, HY, 32 * 16 + 8, 34 * 16 + 8, Infinity);
     const ck = new Set(scan.coords.map((c) => key(c.x, c.y)));
-    for (let i = 32; i <= 33; i++) for (let j = 34; j <= 36; j++) expect(ck.has(key(i, j))).toBe(true);
-    for (let i = 37; i <= 39; i++) for (let j = 34; j <= 36; j++) expect(ck.has(key(i, j))).toBe(true);
+    for (let i = 32; i <= 34; i++) for (let j = 34; j <= 35; j++) expect(ck.has(key(i, j)), `17@${i},${j}`).toBe(true);
+    for (let i = 37; i <= 39; i++) for (let j = 34; j <= 36; j++) expect(ck.has(key(i, j)), `355@${i},${j}`).toBe(true);
   });
 
   it('水槽族 CountsAsWaterForCrafting{172,207}：172（2×2）入候选', () => {
@@ -236,7 +242,13 @@ describe('SW-BJ54 渲染面（TileDrawing.cs:902-904/:4518-4529/:1422-1427）', 
   });
 
   it('候选∩HasOutlines=可见高亮面；CANDIDATE_TILE_DIMS 与 provider case 表全等', () => {
-    // provider :141-330 原文 case→(cols,rows,extra) 内嵌对拍（变异证红:任意改表即红）
+    // provider 原文 case→(cols,rows,extra) 内嵌对拍（变异证红:任意改表即红）。
+    // ★SW-RB11a（2026-09-10）金标重产：旧 want 表系【转抄自实现】把实现的三处误抄
+    // （207=2、3×2/3×3/3×4 三组=0）一并锁进测试=金标陈旧。逐 case 复核反编译原文：
+    //   207 显式 num11=0（TileSmartInteractCandidateProvider.cs:200-204）；
+    //   {14,17,26,77,86,89,114,133,217,218,237,377,469}（:214-230）、
+    //   {106,220,228,243,247,283,300-308,355,412,499}（:231-250）、
+    //   {101,102,463,475,597}（:273-280）三组均【不写 num11】→ 缺省 2（:139）。
     const want: Array<[number, number, number, number]> = [
       ...[136, 144, 494].map((t) => [t, 1, 1, 0] as [number, number, number, number]),
       ...[216, 338].map((t) => [t, 1, 2, 2] as [number, number, number, number]),
@@ -248,17 +260,17 @@ describe('SW-BJ54 渲染面（TileDrawing.cs:902-904/:4518-4529/:1422-1427）', 
         467, 468, 573, 621, 622].map((t) => [t, 2, 2, 2] as [number, number, number, number]),
       ...[79, 139, 510, 511].map((t) => [t, 2, 2, 0] as [number, number, number, number]),
       ...[11, 356, 410, 470, 480, 509, 657, 658, 663, 720, 721, 725].map((t) => [t, 2, 3, 0] as [number, number, number, number]),
-      [207, 2, 4, 2],
+      [207, 2, 4, 0],
       [104, 2, 5, 2],
       [88, 3, 1, 0],
-      ...[14, 17, 26, 77, 86, 89, 114, 133, 217, 218, 237, 377, 469].map((t) => [t, 3, 2, 0] as [number, number, number, number]),
+      ...[14, 17, 26, 77, 86, 89, 114, 133, 217, 218, 237, 377, 469].map((t) => [t, 3, 2, 2] as [number, number, number, number]),
       ...[106, 220, 228, 243, 247, 283, 300, 301, 302, 303, 304, 305, 306, 307,
-        308, 355, 412, 499].map((t) => [t, 3, 3, 0] as [number, number, number, number]),
+        308, 355, 412, 499].map((t) => [t, 3, 3, 2] as [number, number, number, number]),
       ...[354, 455, 491, 733].map((t) => [t, 3, 3, 0] as [number, number, number, number]),
       [487, 4, 2, 0],
       [212, 4, 3, 2],
       [209, 4, 3, 0],
-      ...[101, 102, 463, 475, 597].map((t) => [t, 3, 4, 0] as [number, number, number, number]),
+      ...[101, 102, 463, 475, 597].map((t) => [t, 3, 4, 2] as [number, number, number, number]),
       [699, 4, 4, 2],
       [464, 5, 4, 2],
     ];
@@ -381,5 +393,103 @@ describe('SW-BJ54 数据面静态建集（TileUsedInRecipes 闭包）', () => {
     expect(set.has(355)).toBe(true);                          // 355→13（继承）
     expect(set.has(699)).toBe(true);                          // 699→13（继承）
     expect(set.has(21)).toBe(false);                          // 宝箱非配方站
+  });
+});
+
+
+// =====================================================================
+// ★SW-RB11a（2026-09-10）审计落刀面：Fill 谓词重建 + 条件型门 + 帧矩形缺块
+// =====================================================================
+
+describe('SW-RB11a Fill 谓词重建（provider :359-480 逐 case）', () => {
+  it('FILL_TARGET_TYPES = 无条件 57 型照录（:385-445 case 表）', () => {
+    expect(FILL_TARGET_TYPES.size).toBe(57);
+    for (const t of [10, 11, 21, 29, 55, 79, 85, 88, 89, 97, 102, 104, 125, 132, 136, 139,
+      144, 207, 209, 216, 287, 335, 338, 354, 377, 386, 387, 388, 389, 410, 411, 425,
+      441, 455, 463, 464, 467, 468, 470, 475, 480, 487, 491, 494, 509, 510, 511,
+      573, 597, 621, 657, 658, 699, 720, 721, 725, 733]) {
+      expect(FILL_TARGET_TYPES.has(t), `fill ${t}`).toBe(true);
+    }
+    // 表外型不因尺寸表有键而入候选：14 桌 / 469 桌2（Fill switch 无 case,配方站亦无）
+    expect(FILL_TARGET_TYPES.has(14)).toBe(false);
+    expect(FILL_TARGET_TYPES.has(469)).toBe(false);
+  });
+
+  it('桌族 14/469 永不入候选（旧 DIMS.has 谓词误纳=整类假高亮,SW-RB11a 撤）', () => {
+    const store = makeStore(W, H);
+    placeBox(store, 32, 34, 14, 3, 2);
+    placeBox(store, 37, 34, 469, 3, 2);
+    const scan = scanSmartInteractTiles(store, LX, LY, HX, HY, 34 * 16 + 8, 35 * 16 + 8, Infinity);
+    expect(scan.coords).toHaveLength(0);
+    expect(scan.winDist).toBeNull();
+  });
+
+  it('15 瓶贴靠门 IsWithinSnappngRangeToTile(i,j,40)（Player.cs:17476-17482）：40px 内入候选/外不入;无 ctx 不入', () => {
+    const mk = (cond?: SmartInteractCondCtx | undefined) => {
+      const store = makeStore(W, H);
+      placeBox(store, 34, 34, 15, 2, 2);
+      return scanSmartInteractTiles(store, LX, LY, HX, HY, 34 * 16 + 8, 34 * 16 + 8, Infinity, true, cond);
+    };
+    // 玩家站瓶旁（中心 34.5 格,足底 36 格顶）：dist((34*16+8, 34*16+8),(px, py-16)) ≤ 40
+    const near = mk({ playerCX: 34 * 16 + 8, playerBottomY: 36 * 16, hasLihzahrdPowerCell: false, hasSnowball: false, sundialUsable: true, moondialUsable: true });
+    expect(near.coords).toHaveLength(4);
+    // 玩家远在 3 格外 → dist ≈ 48+ > 40
+    const far = mk({ playerCX: 34 * 16 + 8, playerBottomY: 40 * 16, hasLihzahrdPowerCell: false, hasSnowball: false, sundialUsable: true, moondialUsable: true });
+    expect(far.coords).toHaveLength(0);
+    expect(mk().coords).toHaveLength(0);      // 无 ctx = 缺省「不在贴靠圈」
+  });
+
+  it('356 日晷冷却门（:465-469 单机化 !fastForwardTimeToDawn && sundialCooldown==0）与 212 持物门（:459-463）', () => {
+    const mkScan = (type: number, cond?: SmartInteractCondCtx | undefined) => {
+      const store = makeStore(W, H);
+      placeBox(store, 34, 34, type, 2, 2);
+      return scanSmartInteractTiles(store, LX, LY, HX, HY, 34 * 16 + 8, 34 * 16 + 8, Infinity, true, cond);
+    };
+    const ctxOn = { playerCX: 0, playerBottomY: 0, hasLihzahrdPowerCell: false, hasSnowball: true, sundialUsable: true, moondialUsable: true };
+    const ctxOff = { playerCX: 0, playerBottomY: 0, hasLihzahrdPowerCell: false, hasSnowball: false, sundialUsable: false, moondialUsable: true };
+    // 注：356 尺寸=2×3 → 2×2 摆位锚后 6 格（结构展开面,非本测焦点,只验门通断）
+    expect(mkScan(356, ctxOff).coords).toHaveLength(0);   // 日晷冷却中=不候选
+    expect(mkScan(356, ctxOn).coords.length).toBeGreaterThan(0);
+    expect(mkScan(356).coords.length).toBeGreaterThan(0); // 无 ctx=静息世界（冷却 0）
+    expect(mkScan(212, ctxOn).coords.length).toBeGreaterThan(0);   // 持雪球 949
+    expect(mkScan(212, ctxOff).coords).toHaveLength(0);
+    expect(mkScan(212).coords).toHaveLength(0);           // 无 ctx=未持
+  });
+});
+
+describe('SW-RB11a 帧矩形修正补块（GetTileDrawData 全 HasOutlines 型逐 case 复核）', () => {
+  it('静态缺块：{16,17,26,77,487} h=18（:4954-4981）/ {85,133,134,283} top=2（:4737-4751）/ 132 top2+h18（:5047-5050）', () => {
+    for (const t of [16, 17, 26, 77, 487]) {
+      expect(highlightCellRect(t, 0, 0, 3, 4).sh).toBe(18);
+    }
+    for (const t of [85, 133, 134, 283]) {
+      expect(highlightCellRect(t, 0, 0, 3, 4).dy).toBe(4 * 16 + 2);
+    }
+    const r132 = highlightCellRect(132, 0, 0, 3, 4);
+    expect(r132.dy).toBe(4 * 16 + 2);        // top=2 折进 dy
+    expect(r132.sh).toBe(18);
+  });
+
+  it('172 fy%38==18→h=18（:5031-5035,与折带并存）/ 441 fy==18→h=18（:5423-5427）/ {470,475,597,621,622} top=2（:5338-5354）/ 491 top2+addFrX54（:5405-5407）/ {480,509,657,720,721} top=2（:6044-6056）', () => {
+    expect(highlightCellRect(172, 0, 18, 3, 4).sh).toBe(18);
+    expect(highlightCellRect(172, 0, 0, 3, 4).sh).toBe(16);
+    expect(highlightCellRect(441, 0, 18, 3, 4).sh).toBe(18);
+    expect(highlightCellRect(441, 0, 0, 3, 4).sh).toBe(16);
+    for (const t of [470, 475, 597, 621, 622, 480, 509, 657, 720, 721]) {
+      expect(highlightCellRect(t, 0, 0, 3, 4).dy).toBe(4 * 16 + 2);
+    }
+    const r491 = highlightCellRect(491, 18, 0, 3, 4);
+    expect(r491.dy).toBe(4 * 16 + 2);
+    expect(r491.sx).toBe(18 + 54);            // addFrX += 54
+  });
+
+  it('动画排除集补员 19 型 + 条件动画集 {480,509,657,720,721}（SW-RB11a 名单）', () => {
+    for (const t of [96, 215, 217, 218, 220, 228, 243, 300, 301, 302, 303, 304, 305, 306, 307, 308, 354, 355, 463]) {
+      expect(HIGHLIGHT_ANIM_EXCLUDED.has(t), `anim ${t}`).toBe(true);
+    }
+    expect([...HIGHLIGHT_ANIM_WHEN_LIT].sort((a, b) => a - b)).toEqual([480, 509, 657, 720, 721]);
+    // 源锁：Renderer 消费点亮态门（fy≥54 排除,静息照画）
+    const rsrc = readFileSync(join(HERE, '..', 'src', 'render', 'Renderer.ts'), 'utf8');
+    expect(rsrc).toContain('HIGHLIGHT_ANIM_WHEN_LIT.has(type) && store.frameY[si] >= 54');
   });
 });

@@ -12,9 +12,13 @@
 // 掷骰语义对齐 UnifiedRandom.Next：Next(n) = [0,n)、Next(a,b) = [a,b)。
 import { VANILLA_ITEM_KEY_BY_ID } from './items';
 import { openFishingCrate, FISHING_CRATE_VIDS } from './vanillaFishingCrates';
+import { openBossBag, BOSS_BAG_IDS } from './vanillaBossBags';
 
-/** ItemID.Sets.OpenableBag（ItemID.cs:1211 全量，右键可开包集合——UI 门禁用）。
- *  其中宝藏袋 3318-3332/3860-3862/4782/4957/5111 走 Game 持用链（openBossBag），
+/** ItemID.Sets.OpenableBag（ItemID.cs:1217 全量,1457 终值;1458 同域零增量，右键
+ *  可开包集合——UI 门禁用）。其中 BossBag 子集 21 件（3318-3332/3860-3862/4782/
+ *  4957/5111 = ItemID.cs:1215）由 openBagItem 首支路由 openBossBag（★SW-FX21
+ *  2026-09-10：旧版 BossBag 族整缺右键面,只有 Game 持用左键链;原版两入口
+ *  都走 ItemSlot.TryOpenContainer_GrantItems 首支 ItemSlot.cs:1786-1789），
  *  其余全族（礼盒/礼袋/草药袋/渔获匣 26 型/锁盒两件/蠕虫罐/牡蛎/麒麟蛋）由本
  *  引擎 openBagItem 分派。 */
 export const OPENABLE_BAG_VIDS: ReadonlySet<number> = new Set<number>([
@@ -275,25 +279,54 @@ export const VOID_LENS_CONTAINER = {
  *    4879 暗影钥匙 329【只验不耗】，Player.ConsumeItem :8846 / HasItemInInventoryOrOpenVoidBag
  *    :54963——UI 侧注入背包实现；缺省 = 视为无钥匙 → 两锁盒拒开返回 false）。
  *  - remixWorld / getGoodWorld：Main 种子旗（don't dig up / FTW），作用于锁盒
- *    与冰冻匣个别支。skyblockLowTiles：WorldGen.Skyblock.lowTiles（空岛匣 2197 支）。 */
+ *    与冰冻匣个别支。skyblockLowTiles：WorldGen.Skyblock.lowTiles（空岛匣 2197 支）。
+ *  ★SW-FX21（2026-09-10）BossBag 族（OpenBossBag Player.cs:7206）新增上下文：
+ *  - masterMode：Main.masterMode（:7208 首读;袋 master/noMaster 条件臂）。
+ *  - crimson：WorldGen.crimson（3319/3320 猩红三元矿种臂 :7255/:7260）。
+ *  - extraAccessory：玩家饰品第六格（demon heart 臂 noExtra 条件）。
+ *  - tenthAnniversary：十周年世界（TryGettingDevArmor 1/8 门,:7526）。
+ *  - hasItemInventory：Player.HasItem（:56551-56561 **仅查背包 0-57**,moonlord 袋
+ *    3384 传送门枪 noItem 条件 :7748 用它;与锁盒的 HasItemInInventoryOrOpenVoidBag
+ *    :56575（含虚空袋）不同方法,故与 hasItem 并存两回调）。 */
 export interface BagOpenWorld {
   hardMode: boolean;
   consumeItem?: (vanillaId: number) => boolean;
   hasItem?: (vanillaId: number) => boolean;
+  hasItemInventory?: (vanillaId: number) => boolean;
+  masterMode?: boolean;
+  crimson?: boolean;
+  extraAccessory?: boolean;
+  tenthAnniversary?: boolean;
   remixWorld?: boolean;
   getGoodWorld?: boolean;
   skyblockLowTiles?: boolean;
 }
 
-/** 右键开包分派（TryOpenContainer_GrantItems :1662-1721 同源子集）：
- *  返回 true = 已开（调用方做 stack-- + PlaySound(7)）；false = 非本引擎物品或
- *  钥匙门未过（宝藏袋走 Game 持用链；原版 GrantItems 返回 false 时盒子不消耗） */
+/** 右键开包分派（TryOpenContainer_GrantItems,1457 终值 ItemSlot.cs:1784-1843 同源;
+ *  1456 旧注 :1662-1721）：返回 true = 已开（调用方做 stack-- + PlaySound(7)）；
+ *  false = 非本引擎物品或钥匙门未过（原版 GrantItems 返回 false 时盒子不消耗）。
+ *  ★SW-FX21（2026-09-10）补齐 BossBag 首支（ItemSlot.cs:1786-1789 =
+ *  `if (ItemID.Sets.BossBag[item.type]) player.OpenBossBag(item.type)`,全树唯一
+ *  调用方）——与 Game 持用左键链共存,两入口同走 openBossBag 引擎。 */
 export function openBagItem(
   vid: number,
   give: BagGive,
   world: BagOpenWorld,
   rng: BagRand = defaultRand,
 ): boolean {
+  if (BOSS_BAG_IDS.has(vid)) {                              // :1786-1789 首支（ItemID.cs:1215 全集 21 件）
+    openBossBag(vid, give, {
+      masterMode: world.masterMode ?? false,
+      crimson: world.crimson ?? false,
+      extraAccessory: world.extraAccessory ?? false,
+      // 原版 OpenBossBag 内 HasItem(3384)（:7748）= Player.HasItem 仅查背包
+      // :56551——注入 hasItemInventory（缺省回落 hasItem/恒 false 防误吞产出）
+      hasItem: world.hasItemInventory ?? world.hasItem ?? (() => false),
+      remixWorld: world.remixWorld,
+      tenthAnniversary: world.tenthAnniversary,
+    });
+    return true;                                            // :1842 原版恒 true（无 case 也不 false）→ 盒照耗
+  }
   switch (vid) {
     case 1869: openPresent(give, world.hardMode, rng); return true;
     case 599: case 600: case 601: openLegacyPresent(give, world.hardMode, rng); return true;

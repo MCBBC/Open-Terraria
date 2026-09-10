@@ -194,7 +194,6 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 import { isGemBolt, packGemStaffFeatures, gemDamageMultiplier } from '../data/vanillaGemStaff';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
-import { updateGravityControls } from '../entities/Player';   // ★SW-FX19:重力倒置总闸（Player.cs:26893-26937）
 import { insideUnbreakableWallsScan } from '../entities/Player';   // ★SW-BJ48 传送药水落点双地牢不可破墙重扫（UnbreakableWallScan.cs:47-66）
 import { Enemy, visEffectFrames, stepVisEffectTick, bindEnemySoundPrewarm, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, npcTypeNoAggro } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
@@ -1788,7 +1787,9 @@ const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
 /** 传送族物品（Player.cs:42297-42516）：魔镜 50/手机 3124/冰镜 3199/贝壳手机 5358/
  *  回忆药水 2350/传送药水 2351/魔海螺 4263/恶魔海螺 4819/贝壳手机·出生点 5359/
  *  贝壳手机·海洋 5360/贝壳手机·地狱 5361 */
-const TELEPORT_ITEM_VIDS = new Set([50, 3124, 3199, 5358, 2350, 2351, 4263, 4819, 5359, 5360, 5361]);
+/** ★SW-BJ57：补 4870 回归药水——原版走 itemTime==20 引导触发（Player.cs:43472-43502,
+ *  1458 同域 :43468 区 diff=same）,与 2350 同族;旧刀误落 PERMANENT_USE 即时支=点击即传 */
+const TELEPORT_ITEM_VIDS = new Set([50, 3124, 3199, 5358, 2350, 2351, 4263, 4819, 5359, 5360, 5361, 4870]);
 /** vanilla TileID.Sets.Platforms（WorldGen.SolidOrSlopedTile includePlatforms 臂消费；
  *  ★SW-BJ43 海螺落位面复刻——与 VanillaTiler VANILLA_PLATFORM_SHEETS 同表） */
 const CONCH_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
@@ -1798,7 +1799,10 @@ const CONCH_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
 type RecallKind = 'spawn' | 'ocean' | 'hell' | 'random';
 /** 永久升级/特殊消耗品使用集(UpdatePermanentBoosters 族+特殊单品) */
 const PERMANENT_USE_VIDS = new Set([
-  3335, 5337, 5338, 5339, 5340, 5341, 5342, 5043, 2756, 4870, 678, 1326, 5335, 1133, 4988, 3601,
+  // ★SW-BJ57：4870 移出（原版非即时件——itemTime==20 引导触发,Player.cs:43472-43502,
+  //  SkipsInitialUseSound 表 :151 亦明示 2350/4870 起手跳 UseSound=引导族同款）→
+  //  走下方 TELEPORT_ITEM_VIDS 通道支;旧即时 case 整删
+  3335, 5337, 5338, 5339, 5340, 5341, 5342, 5043, 2756, 678, 1326, 5335, 1133, 4988, 3601,
   4829, 4830, 4910,   // 宠物许可证（猫/狗/兔，Player.cs:44730-44745 ItemCheck_UsePetLicenses）
   // ★5340 银河珍珠补入（V2a 复核 ⚠️b：与五兄弟同档 useStyle4/Item92/45×45
   // Item.cs:42338-42347,曾漏→无举持动画无音;旗标置位后原版全惰性）
@@ -5187,6 +5191,78 @@ export class Game implements GameHooks {
     }
   }
 
+  /** ★SW-BJ57 传送族引导期【逐拍演出尘】（用户实报「使用魔镜时没有光粒子」主修刀;
+   *  Player.cs:43307-43435 四连块 1:1,1458 同域 :43305 区 diff=same）——独立于通道态：
+   *  原版各块以 `item.type==X && itemAnimation>0` 每拍评估（触发拍传送后余半程
+   *  itemAnimation 仍>0 继续发尘;通道清空不影响）,故挂 tickRecallChannel 之后无条件跑。
+   *  家族身份门逐拍对当前 HeldItem 求值（原版 item.type 每拍读手持,换栏即断）;
+   *  itemAnimation 代理 = itemAnimTicks（swing 窗镜像,起手=useAnimation）。
+   *  四臂（与 :43307/:43331/:43371/:43391 块一一对应）：
+   *  ① 魔镜族 {50,3124,3199,5358}（:43309-43312）：Next(2)==0 → NewDust(position,w,h,
+   *     15,0,0,150,default,1.1)——尘 15 JesterSparkleBlue（DustID.cs:33）盒散布;
+   *  ② 魔法海螺 {4263,5360}（:43333-43347,★BJ48 登记债同块清偿）：2 掷 × Next(3)==0 →
+   *     NewDustPerfect(Bottom + UnitY.RotatedBy(itemAnimation×2π/30)×(15,0), dustWater())
+   *     + vy=0→−4.5、vx=内速±2×1.5、scale0.8、α130、noGravity、fadeIn1.1——螺旋上升水尘;
+   *  ③ 恶魔海螺 {4819,5361}（:43373-43387）：同②臂尘 35;
+   *  ④ 贝壳手机 5359（:43393-43408）：Next(2)==0 → NewDustPerfect(Hitbox 随机点,267)
+   *     色 {绿×2/4,黄,白}、velocity×2、scale0.8+rand×0.6、noGravity。 */
+  private tickRecallFamilyDust(): void {
+    if (this.player.itemAnimTicks <= 0) return;
+    const vid = viIdFromKey(ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.key ?? '') ?? -1;
+    const p = this.player;
+    if (vid === 50 || vid === 3124 || vid === 3199 || vid === 5358) {
+      if (Math.random() * 2 < 1) {                    // Main.rand.Next(2) == 0
+        this.spawnDust(p.x, p.y, p.w, p.h, 15, 0, 0, 150, null, 1.1);
+      }
+    } else if (vid === 4263 || vid === 5360 || vid === 4819 || vid === 5361) {
+      // Vector2.UnitY.RotatedBy(itemAnimation×2π/30)×(15,0)：RotatedBy=XNA 旋转矩阵
+      //（x'=x·cosθ−y·sinθ, y'=x·sinθ+y·cosθ）→ UnitY(0,1) 旋后 = (−sinθ, cosθ)×15——
+      // itemAnimation 倒数 → θ 递减 → 底缘绕环螺旋
+      const ang = p.itemAnimTicks * (Math.PI * 2) / 30;
+      const ox = -Math.sin(ang) * 15;
+      const oy = Math.cos(ang) * 15;
+      const type = vid === 4263 || vid === 5360
+        ? dustWaterFor((this.renderer?.waterStyle as number | undefined) ?? 0)
+        : 35;
+      for (let i = 0; i < 2; i++) {
+        if (Math.random() * 3 >= 1) continue;         // Main.rand.Next(3) == 0
+        // NewDustPerfect（Dust.cs:54-63）= NewDust(·,0,0,Type,0,0,0,default,1f) 后
+        // position 直装——velocity/scale 原文本取 NewDust 内掷（±2 / jitter×1）再被
+        // 后置语句覆写：vx=内速×1.5（保留随机）、vy=0→−4.5、scale=0.8（精确覆写,
+        // 抖动作废）。spawn 的 perfect 臂会清内速 → vx 手工重掷同分布（±3）。
+        const d = this.spawnDust(p.x + p.w / 2 + ox, p.y + p.h + oy, 0, 0, type,
+          0, 0, 0, null, 1, true, true);
+        if (!d) continue;
+        d.vy = -4.5;                                  // velocity.Y *= 0f; -= 4.5f
+        d.vx = ((Math.random() * 41 | 0) - 20) * 0.1 * 1.5;   // velocity.X *= 1.5f
+        d.scale = 0.8;                                // 精确覆写（非抖动乘）
+        d.alpha = 130;
+        d.noGravity = true;
+        d.fadeIn = 1.1;
+      }
+    } else if (vid === 5359) {
+      if (Math.random() * 2 < 1) {                    // Main.rand.Next(2) == 0
+        const roll = Math.random() * 4 | 0;           // Main.rand.Next(4)
+        const color = roll === 2
+          ? { r: 255, g: 255, b: 0, a: 255 }          // Color.Yellow
+          : roll === 3
+            ? { r: 255, g: 255, b: 255, a: 255 }      // Color.White
+            : { r: 100, g: 255, b: 100, a: 255 };     // new Color(100,255,100)（case 0/1）
+        // NewDustPerfect(Hitbox 随机点, 267)：velocity 保留内速 ±2 再 ×2 → ±4
+        //（spawn perfect 臂清内速 → 手工重掷）;scale=0.8+NextFloat×0.6 精确覆写
+        const d = this.spawnDust(0, 0, 0, 0, 267, 0, 0, 0, color, 1, true, true);
+        if (d) {
+          d.x = p.x + Math.random() * p.w;            // NextVector2FromRectangle(Hitbox)
+          d.y = p.y + Math.random() * p.h;
+          d.vx = ((Math.random() * 41 | 0) - 20) * 0.1 * 2;   // velocity *= 2f
+          d.vy = ((Math.random() * 41 | 0) - 20) * 0.1 * 2;
+          d.scale = 0.8 + Math.random() * 0.6;        // 0.8f + NextFloat × 0.6f
+          d.noGravity = true;
+        }
+      }
+    }
+  }
+
   /** F7 强制显示导线 */
   forceShowWires = false;
   // 贴图纠错子模式：点击方块弹出该图块的完整原版贴图表供选帧
@@ -8129,14 +8205,9 @@ export class Game implements GameHooks {
       if (player.inputUp) this.flexLatchUp = true;
       if (!player.inputDown) this.flexLatchDown = false;
     }
-    // 重力倒置总闸（★SW-FX19 1:1 Player.cs:26893-26937,本体在 Player.updateGravityControls
-    //  可单测）——Up 按下沿（gravLatch ≙ 原版 releaseUp 上一帧值 :29324-29331）。
-    updateGravityControls(
-      player,
-      player.inputUp && !this.gravLatch,
-      (n, v, x, y) => this.playSfx(n, v, x, y),
-    );
-    if (!player.inputUp) this.gravLatch = false;
+    // ★SW-RB11f F1/F2：重力倒置总闸调用点迁 Player.fixedUpdate（冻/惑清零之后、
+    //  与 hover 锁存共用 prevTickUpHeld 快照）——此处旧位读冻结前裸输入（F2）+
+    //  gravLatch 只清不置（F1 电平化,按住↑每拍翻转）整段退役。见 Player.ts 同标记。
 
     // 滚轮：全屏地图打开时缩放地图，否则缩放游戏画面
     if (inp.wheelDelta !== 0) {
@@ -12058,6 +12129,10 @@ export class Game implements GameHooks {
     if (this.player.buffs.has(BuffType.Cursed)) return;
     // ---- 传送族引导 tick(先于 uiBlocking 早退:引导中开背包不中断,原版同语义) ----
     this.tickRecallChannel();
+    // ★SW-BJ57：传送族引导期逐拍演出尘（Player.cs:43307-43435 四臂——魔镜光尘/海螺
+    //   螺旋水尘/贝壳手机仙尘,原版块在通道触发拍后仍随 itemAnimation 评估,
+    //   故独立于通道态无条件跑;与通道同处 uiBlocking 早退前=引导中开背包不中断）
+    this.tickRecallFamilyDust();
     // ---- 高尔夫哨引导 tick（Player.cs:42921-42924：itemAnimation==2 → ResetGolfBall）----
     if (this.golfWhistleAt !== null && this.player.useTime <= this.golfWhistleAt) {
       this.golfWhistleAt = null;
@@ -13893,30 +13968,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           consume(); p.useTime = 30; this.sfx.play('drink');
           break;
         }
-        case 4870: {
-          // 回归药水（1458 P.cs:43470 区 itemTime==20 →
-          // DoPotionOfReturnTeleportationAndSetTheComebackPoint :37780-37792）：
-          // Spawn(PlayerSpawnContext.RecallFromItem) 等价面——落位走 Player.Spawn
-          // 全流程 placePlayerAtSpawn()（床点→CheckSpawn 复验→初始出生点 failover
-          // +三分支扫位链,与 respawnPlayer 同一读口,终零波「床/回归点 stash 未实装」
-          // 登记销核;CheckSpawn 门接入后床被拆/房间破坏时不再嵌回失效床点）。
-          // 原版前后还
-          // RemoveAllGrapplingHooks + immune/immuneTime 存取回存（净效果=免疫窗不变）
-          // + PotionOfReturn{Original,Home}Position 双锚——双锚的消费端（返回腿
-          // DoPotionOfReturnReturnToOriginalUsePosition）在 1458 全树无调用方、仅渲染/
-          // 地图图标读取 → 本仓不建死状态（引擎无对应消费位,登记）。
-          this.sfx.play('drink');
-          p.removeAllGrapplingHooks();                      // :37782（召回前收钩爪）
-          // ★SW-BC1 2026-09-06：落位换 Player.Spawn 全流程（placePlayerAtSpawn——床复验
-          //  +三分支扫位链;此前只做源选择+直置,出生区被埋时回归药水同样嵌墙）
-          this.placePlayerAtSpawn(p);
-          p.vx = 0; p.vy = 0;                               // Spawn :37919 ResetFallDamage+vel 清零
-          p.sleeping = false;
-          this.camera.x = p.cx; this.camera.y = p.cy;
-          this.recallDust(p, 70, true);                     // TeleportEffect 尘（:43483-43484 七十粒）
-          consume(); p.useTime = 30;
-          break;
-        }
+        // ★SW-BJ57：case 4870 回归药水整删迁出——原版=itemTime==20 引导触发
+        //（Player.cs:43472-43502：起手 Item3+10 青尘 → :43485 拍 UseSound(Item6)
+        // +70×2 青尘 + DoPotionOfReturnTeleportationAndSetTheComebackPoint :37782-37794
+        // [=RemoveAllGrapplingHooks+Spawn(RecallFromItem)+immune/immuneTime 存取回存]
+        // + stack--）,本刀并入上方 TELEPORT_ITEM_VIDS 通道支（'spawn' kind 同 2350 面,
+        // 落位同走 Player.Spawn 全流程 spawnPlacementCoords 链——BC1 语义保持）。
+        // PotionOfReturn{Original,Home}Position 双锚：消费端（返回腿
+        // DoPotionOfReturnReturnToOriginalUsePosition :37796）在 1458 全树无调用方、
+        // 仅渲染/地图图标读取 → 本仓不建死状态（引擎无对应消费位,登记不变）。
         case 678: { // 红药水（Player.cs:42205-42284）：惩罚彩蛋件——无治疗无自伤
           //（Item.cs:9330-9340 仅 useStyle9/useTime17/consumable，无 heal 字段）。
           // 普通世界 = 固定 11 减益各 216000t=3600s（:42271-42283：20/22/23/24/30/
@@ -15592,28 +15652,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 魔镜族 {50,3124,3199,5358}/贝壳手机出生点 5359：引导 useTime 90,半程 Spawn(RecallFromItem);
       // 回忆药水 2350:起始 SoundID.Item3 饮用音+青尘,itemTime==20 时 UseSound+双 70 尘+保留无敌帧+消耗;
       // 传送药水 2351:itemTime==2 随机传送+消耗;海螺族 4263/5360 海洋、4819/5361 地狱:螺旋水尘+半程传送
+      // ★SW-BJ57：4870 回归药水并入——itemTime==20 引导触发（Player.cs:43472-43502,
+      //   1458 同域 diff=same）,起手音/尘与 2350 同款（:43477-43481 Item3+10 青尘）,
+      //   触发拍 :43485 UseSound(Item6)+70×2 青尘+DoPotionOfReturn…(Spawn 等价面)。
       const tvid = viIdFromKey(heldDef.key);
-      const useTime = itemCombat(tvid)?.useTime ?? 90;
+      // ★SW-BJ57：4870 在 vanilla-itemcombat.json 为空对象（提取缺口）→ 旧兜底 90
+      //  会把 itemTime==20 触发拍拉长 3×。按 Item.cs SetDefaults 逐件钉值兜底：
+      //  魔镜族/海螺族 90（case 50 :1985/case 4263 :36666/case 4819 :39460/case 5359/
+      //  5360/5361 同段）、2350 30（Item.cs:23659 区）、2351 17、4870 30（:38265-38266
+      //  useTime=(useAnimation=30)）。既有 vid 仍以 itemCombat 表值为先。
+      const FAMILY_USE_TIME: Record<number, number> =
+        { 50: 90, 3124: 90, 3199: 90, 5358: 90, 4263: 90, 4819: 90, 5359: 90, 5360: 90, 5361: 90, 2350: 30, 2351: 17, 4870: 30 };
+      const useTime = itemCombat(tvid)?.useTime ?? FAMILY_USE_TIME[tvid] ?? 90;
       // ★SW-BJ48：2351=传送药水随机落点支（Player.cs:43504-43522 itemTime==2 →
       //   TeleportationPotion :56922）——旧刀缺 'random' 分支使其落 'spawn'=回出生点
       //  （用户实报「与回忆药水类似被传回出生点」根因）
       const kind: RecallKind = tvid === 4263 || tvid === 5360 ? 'ocean'
         : tvid === 4819 || tvid === 5361 ? 'hell'
         : tvid === 2351 ? 'random' : 'spawn';
-      const triggerAt = tvid === 2350 ? 20 : tvid === 2351 ? 2 : Math.floor(useTime / 2);
+      const triggerAt = tvid === 2350 || tvid === 4870 ? 20 : tvid === 2351 ? 2 : Math.floor(useTime / 2);
       this.player.useTime = useTime;                    // ApplyItemTime
       this.player.itemAnimTicks = useTime;              // 引导姿势(useStyle 4/6/9 holdup)
       // 渲染层持物姿势认 this.swing（只设 itemAnimTicks 无视觉）——魔镜 50 useStyle 4
       //（Item.cs:22514 族）/回忆药水 2350 useStyle 6/海螺 4263 useStyle 4 持物
       this.useSwing(heldDef);
-      this.recallChannel = { vid: tvid, kind, triggerAt, consume: tvid === 2350 || tvid === 2351 };
-      if (tvid === 2350) {
-        this.sfx.play('drink');                         // SoundID.Item3(:42432)
-        this.recallDust(this.player, 10);               // 10 青尘(:42434)
+      this.recallChannel = { vid: tvid, kind, triggerAt,
+        consume: tvid === 2350 || tvid === 2351 || tvid === 4870 };
+      if (tvid === 2350 || tvid === 4870) {
+        // ApplyItemTime 同拍：SoundID.Item3（:42432/:43477）+ 10 青尘（:43439-43442/
+        //  :43479-43482——尘 15 Color.Cyan α150 scale1.2,Speed=v×0.2 后整速 ×0.5）
+        this.sfx.play('drink');
+        this.recallSparkleDust(this.player, 10, true, this.player.vx, this.player.vy, 0.2, true);
       } else {
         // 标准使用音全族=SoundID.Item6（★SW-BJ43 核对 Item.cs SetDefaults：case 4263
         //  :36665/case 4819 :39459/case 5360/case 5361 均 UseSound=Item6——旧注「海螺族
-        //  Item64」系误提取；Item64 非海螺族 UseSound）
+        //  Item64」系误提取；Item64 非海螺族 UseSound）。★SW-BJ57 备案：2350/4870 在
+        //  ItemID.Sets.SkipsInitialUseSound（ItemID.cs:151 CreateBoolSet(false,2350,4870)）
+        //  =起手跳 UseSound（Player.cs:52315-52316 flag2 门）——本仓 2350/4870 起手只响
+        //  Item3 饮用音即原文语义,魔镜族/海螺族不在表内起手响 Item6 同原文。
         this.sfx.play('mirror');
       }
       this.input.mouseDown = false;
@@ -18684,7 +18760,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       if (!(power > 0)) { this.mining = null; return; }           // sItem.hammer>0 门（Player.cs:45036）：零锤力整段跳过（无反噬无音）
       const cooldown = Math.max(1, useTime ?? speed);             // ApplyItemTime 裸 useTime
-      if (this.tickCount - this.lastMineHitTick < cooldown) {
+      // ★SW-RB11b E1：门改读共享镜像（原版门=toolTime==0 :46052,toolTime 每 ItemCheck
+      //  镜像共享 itemTime :43911——与最后动作种类无关。旧读本地 cooldown=镐←锤墙
+      //  跨路径漏节流：锤墙写 useTime/2 后切镐,本地门按镐自身 useTime 放行）
+      if (this.tickCount - this.lastMineHitTick < this.lastMineItemTime) {
         this.hardnessCache = 100;
         this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty) };
         return;
@@ -18740,7 +18819,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       } else {
         if (!(power > 0)) { this.mining = null; return; }           // sItem.hammer>0 门（:46055）
         const cooldown = Math.max(1, useTime ?? speed);             // ApplyItemTime 裸 useTime（:46089）
-        if (this.tickCount - this.lastMineHitTick < cooldown) {
+        // ★SW-RB11b E1：门改读共享镜像（原版门=toolTime==0 :46052,同上祭坛支注）
+        if (this.tickCount - this.lastMineHitTick < this.lastMineItemTime) {
           this.hardnessCache = 100;
           this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty) };
           return;
@@ -19214,8 +19294,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 慢 8-100%），改回 max(1,...)。
     // 钻头坐骑（drillPickTime=1）原版 PickTile 每束每 tick 可命中（Mount.cs :3092/:3139），
     // 节流由光束自身 cooldown 承担
-    const cooldown = Math.max(1, Math.round((useTime ?? speed) * this.pickSpeedMult()));
-    if (this.tickCount - this.lastMineHitTick < cooldown) {
+    // ★SW-RB11b F5：(int) C# 截断非四舍五入（:46163 `(int)((float)useTime*pickSpeed)`
+    //  ——15×0.85=12.75 → 原版 12,round 13=慢 1 拍）。
+    const cooldown = Math.max(1, Math.floor((useTime ?? speed) * this.pickSpeedMult()));
+    // ★SW-RB11b E1：门改读共享镜像（原版门=toolTime==0 :45995/:46018,toolTime 每
+    //  ItemCheck 镜像共享 itemTime :43911——镐←锤墙/祭坛/珠跨路径同拍;旧本地门=
+    //  切工具后按新工具自身 useTime 放行,漏旧写值余窗）
+    if (this.tickCount - this.lastMineHitTick < this.lastMineItemTime) {
       // 节流窗内：只刷新裂缝显示，不积累
       this.hardnessCache = 100;
       this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty) };
@@ -23114,7 +23199,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               this.spawnParticles(tx * TILE + 8, ty * TILE + 8,
                 tdef?.mapColor ?? '#8a8a8a', 3, 1.2, { life: 20 });
               this.playSfxFile?.('hit', 1, tx * TILE + 8, ty * TILE + 8);
-              this.player.useTime = Math.max(1, Math.round(bestPickItem.useTime * this.pickSpeedMult()));
+              // ★SW-RB11b F5：ApplyItemTime(sItem,pickSpeed)（:40201）val=(int)(useTime×
+              //  pickSpeed) 后 max(val,1)——C# (int) 截断,非四舍五入
+              this.player.useTime = Math.max(1, Math.floor(bestPickItem.useTime * this.pickSpeedMult()));
               return;
             }
             this.hitTiles.clear(tx, ty, 1);   // 清积累(同格新方块不继承旧伤害)
@@ -23128,8 +23215,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  `(int)(bestPickaxe.useTime * pickSpeed)`——挖矿速度乘区,原版
             //  meleeSpeed 不作用于挖掘/块换镐段,旧 attackSpeedMult 换算系错乘区;
             //  无 14 帧 floor（BJ10 自创,顶速镐 4-7t 冷却被钉 14）。下限 1 =
-            //  ApplyItemTime val=max(val,1) 同款）
-            const pickSeg = Math.max(1, Math.round(bestPickItem.useTime * this.pickSpeedMult()));
+            //  ApplyItemTime val=max(val,1) 同款。★SW-RB11b F5：(int) 截断非 round
+            //  （:40221 `(int)((float)useTime*pickSpeed)`——15×0.85=12.75→12）
+            const pickSeg = Math.max(1, Math.floor(bestPickItem.useTime * this.pickSpeedMult()));
             blockSwapPickSeg += pickSeg;
             // 方块替换（PlaceThing_Tiles_PlaceIt 之 hitReplace 支 Player.cs:40164-40230）：
             // 原版走 WorldGen.ReplaceTile :40218【非 KillTile】——不触发 NotifyTileDestroyed/
@@ -25599,7 +25687,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  TeleportPylonsSystem.SpawnInWorldDust（:401-403 尘 43 塔型配色，速度 ×0.1
    *  后 Y−0.2 慢速上浮）+ SoundID.Item6；Player.Teleport :37740/:37758 Entry/Exit
    *  双份 = 旧位与新位各一轮）。本仓 spawnParticles 为简化尘池——上浮曲线取
-   *  recallDust 同款近似（尘型/配色/数量/音效 1:1） */
+   *  recallSparkleDust 旧载体同款近似（尘型/配色/数量/音效 1:1） */
   private pylonTeleportFx(style: number, newX: number, newY: number): void {
     const p = this.player;
     const hex = pylonDustHex(style);
@@ -26026,8 +26114,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private slimeWarningTime = 0;
   /** 本次死亡掉落钱数（LocalPlayer.lostCoins；死亡 UI"掉了{0}"用） */
   lostCoins = 0;
-  /** 重力切换边沿锁（buff 18：Up 按住只切一次） */
-  private gravLatch = false;
   /** 建筑配件开关位读数（★SW-FX19；Player.builderAccStatus[i]==1 = 关断——
    *  0/1 二态位。消费面：AutoPaint[3]（:39940/:40020/:40138/:40950）、
    *  AutoActuate[2]（:40954）、TileReplacement/BlockSwap[10]（:3357）、
@@ -28096,14 +28182,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return got;
   }
 
-  /** 传送族青尘（回忆药水 Cyan / 魔镜族白尘 dust 15，:42299/:42434 近似） */
-  private recallDust(p: import('../entities/Player').Player, n: number, cyan = false): void {
+  /** ★SW-BJ57 传送族尘面 1:1（旧 recallDust 通用 spawnParticles 粒子=尘型/运动学/
+   *  配色三面偏离,本刀按原文重写为原版尘池直发——用户实报「魔镜没有光粒子」主修面①）：
+   *  - 魔镜族（Player.cs:43319-43328,1458 同域 diff=same）：尘 15（JesterSparkleBlue,
+   *    default 色）α150 scale1.5——传送前 70 粒 SpeedX/Y=v×0.5、传送后 70 粒 Speed=0
+   *    （内速 = NewDust 自掷 ±2,vanillaDust.spawn 1:1 已带;无 ×0.5 后乘）;
+   *  - 回忆 2350（:43440-43464）/回归 4870（:43477-43499）：尘 15 Color.Cyan(0,255,255)
+   *    α150 scale1.2——Speed=v×0.2 后整速 ×0.5（`.velocity *= 0.5f` 后置面,half=true）,
+   *    传送后臂 Speed=0 仍 ×0.5;
+   *  - 起手 10 粒（2350 :43439-43442 / 4870 :43479-43482）= 触发前臂同式。
+   *  盒参 = 玩家 position/width/height（NewDust 内 rand(W-4)+4 散布,spawn 已 1:1）。 */
+  private recallSparkleDust(p: { x: number; y: number; w: number; h: number; vx: number; vy: number },
+    n: number, cyan: boolean, vx: number, vy: number, speedFactor: number, half: boolean): void {
     for (let i = 0; i < n; i++) {
-      this.spawnParticles(
-        p.x + Math.random() * p.w, p.y + Math.random() * p.h,
-        cyan ? '#60E8E8' : '#D8E8FF', 1, 1.2,
-        { life: 26 + Math.random() * 14, grav: -0.02, damp: 0.94 },
-      );
+      const d = this.spawnDust(p.x, p.y, p.w, p.h, 15,
+        vx * speedFactor, vy * speedFactor, 150,
+        cyan ? { r: 0, g: 255, b: 255, a: 255 } : null,
+        cyan ? 1.2 : 1.5);
+      if (d && half) { d.vx *= 0.5; d.vy *= 0.5; }
     }
   }
 
@@ -28372,20 +28468,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.recallChannel = null;
       return;
     }
-    if (c.vid === 2350) this.sfx.play('mirror');      // HeldItem.UseSound（:42444）
+    if (c.vid === 2350 || c.vid === 4870) this.sfx.play('mirror');   // HeldItem.UseSound（2350 :42444 / 4870 :43485,★SW-BJ57 补 4870）
     else if (c.kind === 'ocean') this.sfx.play('splash'); // TeleportEffect case 5：SoundID.Splash=legacy 19（Main.cs:13524,SoundID.cs:60）
     else if (c.kind === 'hell') this.sfx.play('item8');   // ★SW-RB10a：case 7=SoundID.Item8（Main.cs:13542）——旧刀借 'conch'(Item_64)顶位系登记债,Item_8.wav 在盘,Sfx 补 kind 清偿
     // ★SW-BJ48：TeleportEffect style 2 无 PlaySound 臂（Main.cs:13454-13462）——
     //   2351 触发拍零音效（饮用音 Item6 已在进入通道时播放）
     // ★SW-RB10a 尘分道收原文：style5=100×Dust.dustWater()（Main.cs:13497-13512,盒
     //   h+24/vy=−3.5/vx×1.5/scale0.8/α130/noGravity/fadeIn1.2）;style7=50×尘35 同律
-    //   （:13516-13532）;style2=teleportStyle2Dust（2351 专用）;回忆/魔镜族青尘 15
-    //   面=recallDust（:43311-43330/:43440-43464,Cyan 仅 2350）。旧刀 ocean/hell 误走
-    //   recallDust(70) 通用近似=尘型/计数/运动学三面偏离。
+    //   （:13516-13532）;style2=teleportStyle2Dust（2351 专用）。
+    // ★SW-BJ57：回忆/魔镜族青白尘 15 面换 recallSparkleDust 1:1（:43319-43330/
+    //   :43440-43464/:43477-43499,Cyan 仅 2350/4870）——旧 recallDust 通用粒子
+    //   =尘型/计数/运动学三面偏离,见该函数头注。
     if (c.kind === 'random') this.teleportStyle2Dust(p.x, p.y);   // Entry 尘（:37724 TeleportEffect Entry）
     else if (c.kind === 'ocean') this.conchWaterDust(p.x, p.y, true);   // Entry（:37724）
     else if (c.kind === 'hell') this.conchWaterDust(p.x, p.y, false);   // Entry
-    else this.recallDust(p, 70, c.vid === 2350);            // 传送前 70 尘
+    else if (c.vid === 2350 || c.vid === 4870)
+      this.recallSparkleDust(p, 70, true, p.vx, p.vy, 0.2, true);   // 传送前 70 青（:43448-43452/:43487-43491）
+    else this.recallSparkleDust(p, 70, false, p.vx, p.vy, 0.5, false);   // 魔镜族传送前 70 白（:43319-43322）
     // ★SW-RB10a：Teleport 公共语义全支接（Teleport :37704-37733 对全 style 生效;
     //  Spawn :37905 ResetFallDamage/:37929 spectating=-1 同面,且镜像/回忆药水块
     //  :43321/:43463 亦显式 RemoveAllGrapplingHooks）——旧刀只接 'random' 支:
@@ -28393,15 +28492,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  照算摔伤（摔落 30 格用海螺,落点只降 5 格仍按 30 格结伤=击穿）。
     p.removeAllGrapplingHooks();                     // RemoveAllGrapplingHooks Style!=10（:37704-37707）
     this.setSpectating(-1);                          // SetOrRequestSpectating(-1)（:37719）
-    const keepIframes = p.iframes;                     // 回忆药水保留无敌帧（:42449-42451）
+    const keepIframes = p.iframes;                     // 回忆/回归药水保留无敌帧（2350 :42449-42451 / 4870 :37786-37793 immune 存取回存,★SW-BJ57 补 4870）
     p.x = dest.x; p.y = dest.y; p.vx = 0; p.vy = conchFailBoth ? 0.001 : 0;   // ★SW-BJ43 双败 0.001f（:56824/:56914）
-    if (c.vid === 2350) p.iframes = keepIframes;
+    if (c.vid === 2350 || c.vid === 4870) p.iframes = keepIframes;
     p.fallStartY = null;      // fallStart 重置（Teleport :37730；Spawn ResetFallDamage :37906）
     this.player.updateUnbreakableWallScan(this.world, true);   // ★SW-RB10a：DoUnbreakableWallScan（Teleport :37733）落点即扫
     if (c.kind === 'random') this.teleportStyle2Dust(p.x, p.y);   // Exit 尘（:37752 TeleportEffect Exit）
     else if (c.kind === 'ocean') this.conchWaterDust(p.x, p.y, true);   // Exit（:37752）
     else if (c.kind === 'hell') this.conchWaterDust(p.x, p.y, false);   // Exit
-    else this.recallDust(p, 70, c.vid === 2350);            // 传送后 70 尘
+    else if (c.vid === 2350 || c.vid === 4870)
+      this.recallSparkleDust(p, 70, true, 0, 0, 0, true);           // 传送后 70 青（:43455-43458/:43493-43496,Speed=0 仍 ×0.5）
+    else this.recallSparkleDust(p, 70, false, 0, 0, 0, false);      // 魔镜族传送后 70 白（:43325-43328,Speed=0 全内速）
     if (c.consume) p.inv.removeHeld(1);
     this.camera.x = p.cx; this.camera.y = p.cy;        // 相机直跟（无缓动瞬移）
     this.cb.onInventoryChanged?.();
@@ -28475,7 +28576,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** ★SW-BJ48 TeleportEffect style 2（Main.cs:13454-13462）：50×尘 58（GhostWhite/
    *  α150/scale1.2）velocity×0.5——传送药水 Teleport(newPos,2) Entry/Exit 双份
-   *  （Player.cs:56952/56960）；无音效臂。recallDust 的青尘 15 面是回忆药水专用面 */
+   *  （Player.cs:56952/56960）；无音效臂。recallSparkleDust 的青尘 15 面是回忆/回归药水专用面 */
   private teleportStyle2Dust(x: number, y: number): void {
     const D = this.vanillaDust;
     if (!D) return;
@@ -32390,8 +32491,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (this.uiHeldItemRef?.()) return;                  // !Main.mouseItem.IsAir → Clear（:17498）
     const [mwx, mwy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
     // BlockBecauseYouAreOverAnImportantTile.cs:12-25（RunQuery :20-27 头门——光标格
-    // 出界/DisableSmartInteract → 整链清空；★原版此门 NPC 支同吃，SW-BJ1 未做=债）
-    if (shouldBlockSmartInteract(this.world.store, Math.floor(mwx / 16), Math.floor(mwy / 16))) return;
+    // 出界/DisableSmartInteract → 整链清空；★原版此门 NPC 支同吃，SW-BJ1 未做=债）。
+    // ★SW-RB11a（2026-09-10）：门格 = Player.tileTargetX/Y（:12-13）——SmartInteractLookup
+    //  在 SmartCursorLookup 同帧之后（Player.cs:25644-25646）,此时 tileTarget 已被
+    //  智能光标覆写（命中=选定格;未命中=回落鼠标格 :25586-25604）。旧读裸鼠标格=
+    //  智能目标格落在 DisableSmartInteract 型（火把 4/timo 灯族等）上时漏拦。
+    const gtx = this.smartCursor.showing ? this.smartCursor.x : Math.floor(mwx / 16);
+    const gty = this.smartCursor.showing ? this.smartCursor.y : Math.floor(mwy / 16);
+    if (shouldBlockSmartInteract(this.world.store, gtx, gty)) return;
     // 扫描域 = SmartInteractLookup_PrepareCommonlyUsedInfo（Player.cs:17514-17523）：
     // TileReachCheckSettings.Simple.GetTileRegion（玩家盒外扩 tileRangeX/Y=tileReach(0)
     // 同源）+ Utils.Clamp(·,10,maxTiles-10)
@@ -32401,7 +32508,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const hx = Math.min(this.world.store.w - 10, Math.ceil((p.x + p.w) / 16) - 1 + reach.x);
     const ly = Math.max(10, Math.floor(p.y / 16) - reach.y);
     const hy = Math.min(this.world.store.h - 10, Math.ceil((p.y + p.h) / 16) - 1 + reach.y);
-    const scan = scanSmartInteractTiles(this.world.store, lx, ly, hx, hy, mwx, mwy, this.smartInteractNpcDist);
+    const scan = scanSmartInteractTiles(this.world.store, lx, ly, hx, hy, mwx, mwy,
+      this.smartInteractNpcDist, true, {
+        // ★SW-RB11a：条件型候选门（provider :446-477）——15/497 贴靠 40px
+        // （IsWithinSnappngRangeToTile Player.cs:17476-17482）、237 持蜥蜴能量电池、
+        // 212 持雪球、356/663 晷冷却静息（World 同名四字段 :195-208）。
+        playerCX: p.cx,
+        playerBottomY: p.y + p.h,
+        hasLihzahrdPowerCell: p.inv.countOf(1293) > 0,
+        hasSnowball: p.inv.countOf(949) > 0,
+        sundialUsable: !this.world.fastForwardTimeToDawn && this.world.sundialCooldown === 0,
+        moondialUsable: !this.world.fastForwardTimeToDusk && this.world.moondialCooldown === 0,
+      });
     if (scan.winDist === null) return;                   // 无域内候选（ProvideCandidate 返回 false）
     if (scan.winDist < this.smartInteractNpcDist) {      // WinCandidacy（SmartInteractSystem.cs:56-61）
       smartInteractTileFrame.tileWon = true;             // ⟺ Main.TileInteractionLX..HY 有效
@@ -41649,10 +41767,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   place_v_462 兜底=与挖掉同源）。
         //  注：tileTable 含平台 19/427/435-439（Main.cs:8174/:10121/:10128 循环）——
         //  存钱罐可坐平台沿=原版本相（半砖/顶坡形态仍杀）。
+        //  ★SW-RB11d（2026-09-10 红队 F1）完整性补全 ①：右列 frameX==左列+18（:47417
+        //  `Main.tile[num+1,y].frameX == Main.tile[num,y].frameX + 18`）——FX8 首刀
+        //  漏了帧关系半边（注释声称有,码里无）,错帧双活态（两左半并排/右半 frameX
+        //  断链,仅污染导入/历史 bug 态可达）原版整件杀、本仓恒幸存。
+        //  ★SW-RB11d（红队 F2）孤儿半件：尾段 KillTile 是【逐格】杀（:47513/:47516
+        //  `if(Main.tile[num,y].type==type) KillTile(num,y); if(Main.tile[num+1,…]…)`）
+        //  ——锚格已死时杀向落空会被 killDecorTile 死格跳过守卫（get()==0 continue）
+        //  吞掉,幸存右半永不塌。改杀【活着的同型成员格】（breakTile 整件链自该格
+        //  清全件=与原版逐格杀终态等价）。
         const ax = x - (Math.floor(Math.max(0, st.frameX[i]) / 18) % 2);
+        const fxAt = (cx: number): number =>
+          st.inBounds(cx, y) ? (st.frameX[st.idx(cx, y)] ?? 0) : 0;
         const intact = st.get(ax, y) === st.type[i] && st.get(ax + 1, y) === st.type[i]
-          && st.hasTile(ax, y) && st.hasTile(ax + 1, y);
-        if (!intact) { this.killDecorTile(Math.max(0, ax), y); return; }
+          && st.hasTile(ax, y) && st.hasTile(ax + 1, y)
+          && fxAt(ax + 1) === fxAt(ax) + 18;   // :47417 帧链关系
+        if (!intact) {
+          const killAt = st.hasTile(ax, y) && st.get(ax, y) === st.type[i] ? ax
+            : (st.hasTile(ax + 1, y) && st.get(ax + 1, y) === st.type[i] ? ax + 1 : -1);
+          if (killAt >= 0) this.killDecorTile(Math.max(0, killAt), y);
+          return;
+        }
         // :47426/:47441 下方两格逐格判（界外=原版 tile null → 直接门必败,兜底臂 false）
         const cellOk = (cx: number): boolean => {
           if (!st.inBounds(cx, y + 1)) return false;

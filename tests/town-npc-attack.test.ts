@@ -790,6 +790,11 @@ describe('★F8 战斗判定掷骰全走实例注入面(Math.random 仅限演出
     const eY = 96 * 16;
     const wBox = { x: 104 * 16, y: eY, w: 18, h: 40 };
     const { world, game, shots, npc } = entryHarness(key, [wBox]);
+    // ★SW-RB11f F6：Santa 季末自灭（NPC.cs:53708 AI_007 逐拍,type==142∧!xMas→9999）
+    //  与本夹具冲突——本测试研究的是【当季】圣诞老人的攻击链,夹具须落圣诞窗
+    //  （checkXMas Main.cs:13290 语义位）;否则 NPC 首拍即被 BJ55 清算支击杀,
+    //  589 弹零发（expected 0 ≥ 1 红）。
+    if (key === 'santa_claus') world.clock.xMas = true;
     Object.assign(npc, { dangerNear: true, dangerSide: 1, threatRaw: true });
     seedPool(npc, 'right', wBox);
     npc.rng = () => 0.0000001;

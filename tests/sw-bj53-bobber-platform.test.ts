@@ -23,6 +23,9 @@
 // 变异证据：修复前本文件 ①④⑤⑥ 红（DOWN 落停平台顶/TOPREST 恒驻/SOLID 无反弹）,
 //   修复后全绿；②③⑦⑧⑨ 为守卫（修复前已绿,防豁免泄漏/回退）。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Bobber } from '../src/entities/Bobber';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -285,5 +288,39 @@ describe('⑦ 收竿段穿平台穿实心（tileCollide=false :54654）', () => 
     (b as unknown as { retract: number }).retract = 1;   // startReel(1) 等价置位
     steps(b, hooks, 300);
     expect(b.dead).toBe(true);                        // 触玩家盒 Kill（穿墙到达）
+  });
+});
+
+// ============ ★SW-RB11a：反弹触发=速度差判据（vanilla 字面） ============
+
+describe('SW-RB11a aiStyle61 反弹触发 = velocity!=lastVelocity（Projectile.cs:19732/:19735 字面）', () => {
+  it('受阻支双清（天花板坡下推受阻,Collision.cs:2032-2033）改写速度而不置旗——旗源漏判,速度差判据命中', () => {
+    // 几何同 tests/ceiling-slope-blocked-branch.test.ts（手推全门定值）：
+    // slope3@(12,18) + 行19 地板 → slopeCollide 下推受阻臂 = ①截短 ②X 滑移 ③速度双清。
+    const store = new TileStore(40, 40);
+    dirtRow(store, 8, 16, 19);
+    store.setTile(12, 18, DIRT_ID);
+    store.setSlope(12, 18, 3);
+    const body = { x: 200, y: 289, w: 8, h: 12, vx: 1.5, vy: 2, onGround: false, hitWall: false, hitHead: false };
+    const lvx = body.vx, lvy = body.vy;
+    moveAndCollide(body as never, { store } as never, 0, 2);
+    expect(body.vx).toBe(0);            // ③双清（:2032-2033）——原文本支改写速度
+    expect(body.vy).toBe(0);
+    // ★旗源缺口实貌：slopeCollide 全程不写 hitWall → 受阻支双清把 vx 改写为 0 后,
+    //   旧旗源（this.hitWall）看不见 = 原文 :19732 无条件 X 反弹漏发（Y 轴 collideY
+    //   在候选评估时点已置,覆盖无缺口）。
+    expect(body.hitWall).toBe(false);
+    // 原文判据 velocity.X != lastVelocity.X（:19732）双清后恒真 → X 反弹必触发；
+    // velocity.Y != lastVelocity.Y && lastVelocity.Y > 1f（:19735）同理（lvy=2>1）。
+    expect(body.vx !== lvx).toBe(true);
+    expect(body.vy !== lvy && lvy > 1).toBe(true);
+  });
+
+  it('Bobber 反弹触发锁速度差判据（防回退到旗源;值公式不变 fround(lv×-0.3f)）', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'entities', 'Bobber.ts'), 'utf8');
+    expect(src).toContain('if (this.vx !== lvx) this.vx = Math.fround(lvx * F32_N03);');
+    expect(src).toContain('if (this.vy !== lvy && lvy > 1) this.vy = Math.fround(lvy * F32_N03);');
+    expect(src).not.toContain('if (this.hitWall) this.vx = Math.fround');
+    expect(src).not.toContain('if (this.collideY && lvy > 1) this.vy = Math.fround');
   });
 });

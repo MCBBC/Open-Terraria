@@ -273,13 +273,11 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     }
   }
   // spawn 点列表(-1 终止;本仓不消费,流必须对齐)
+  // ★SW-RB11d（2026-09-10）:曾内嵌调试探针（i<1 时 console.log 明文缓冲 2750..2775
+  //  十六进制）——每次 .plr 导入都向控制台倾倒【解密后角色档字节】,取证期残留,
+  //  与流对齐语义无关,整块删除（读序不变:首 i32=-1 终止,否则 i32+i32+string）。
   for (let i = 0; i < 200; i++) {
     const x = r.i32();
-    if (typeof process !== 'undefined' && i < 1) {
-      let hh = '';
-      for (let k = 2750; k < 2775; k++) hh += (r.buf[k] ?? 0).toString(16).padStart(2, '0') + ' ';
-      console.log(`SPW i=${i} x=${x} pos=${r.pos} RBUF[2750..2775]=${hh}`);
-    }
     if (x === -1) break;
     r.i32(); r.i32(); r.string();
   }
@@ -560,7 +558,8 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
     else w.i32(0).i32(0);
   }
   w.i32(-1);                                  // spawn 列表空(-1 终止)
-  w.bool(false);                              // hbLocked
+  // ★SW-RB11e 2026-09-10：hbLocked 写真值（PL:55546 写/:56271 读,playerState 已有域）
+  w.bool(st.hbLocked ?? false);
   const hi = st.hideInfo ?? new Array(13).fill(false);
   for (let i = 0; i < 13; i++) w.bool(!!hi[i]);
   w.i32(st.anglerQuestsFinished ?? 0);
@@ -580,7 +579,11 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
   w.bool(false).i32(0);
   w.byte(0);                                  // 临时槽 bits(全空)
   w.byte(0);                                  // SaveToPlayer 空流(单 false)
-  w.byte(0);                                  // superCart bits
+  // ★SW-RB11e 2026-09-10：superCart bits 位[1]=enabledSuperCart 写真值
+  //  （PL:55572-55576 BitsByte{[0]=unlockedSuperCart,[1]=enabledSuperCart}——
+  //  位[0] 解锁面在本仓属世界旗 world.flags.superCart,playerState 视图不可达=
+  //  导出恒 0 登记债）。repo 读侧 :328 不消费该字节,改写不影响自家回环。
+  w.byte((st.enabledSuperCart ?? true) ? 2 : 0);
   // Loadouts:3 套(armor20+prefix+fav / dye10 同 / hide 10 bool);缺省空套
   const loadouts = st.loadouts ?? [];
   w.i32(Math.max(0, Math.min(2, st.currentLoadout ?? 0)));

@@ -67,7 +67,8 @@ function l10nAuditAuto(): Plugin {
 /** 素材过期自动重打包(物品图集/贴图表管线)。
  *  判定 = 源目录(terraria-assets/Images)·白名单·TEdit 数据·脚本本体的最新 mtime
  *  晚于产物(vanilla.json / Item_Atlas_0.png)的最旧 mtime → 同步重跑 vanilla-atlas.mjs。
- *  dev 启动与 vite build 均触发;vitest 不走这些钩子,零开销 */
+ *  dev 启动与 vite build 均触发;vitest 会触发 configureServer(★SW-FX23 勘误:旧注
+ *  "vitest 不走这些钩子"有误——createVitest 走 server 钩子,钩子内禁任何长任务/throw) */
 function vanillaAtlasAuto(): Plugin {
   const ROOT = join(dirname(fileURLToPath(import.meta.url)));
   const sources = [
@@ -90,8 +91,14 @@ function vanillaAtlasAuto(): Plugin {
   };
   const run = () => {
     if (!stale()) return;
-    console.log('[vanilla-atlas] 素材源有更新,自动重打包…');
-    execFileSync('node', [join(ROOT, 'scripts', 'vanilla-atlas.mjs')], { stdio: 'inherit' });
+    // ★追加时代守卫（SW-FX23 2026-09-10）：vanilla.json 已进入追加通道时代
+    //   （Item_Atlas_2/3 页引用在册），自动全量重打包会换页换坐标重排 6000+ 键——
+    //   事故 8/21、8/23 0042c846、09-10 15:41 与 17:44（FX22 定谳=与 0042c846 事故
+    //   blob 字节全等的同案重演）。自动通道退役：只提醒，不重跑（脚本本体另有
+    //   --force-full 前的追加时代拒绝守卫）。增量一律走 atlas-append-1457.mjs。
+    console.log('[vanilla-atlas-auto] 素材源有更新,但追加时代已禁用自动全量重打包。');
+    console.log('  增量请走：node scripts/atlas-append-1457.mjs（幂等，自验既有键零改动）。');
+    console.log('  全量重建需清空产物+脚本 --force-full（自担风险，事后必须全绿 atlas-append-golden+atlas-lint）。');
   };
   return {
     name: 'vanilla-atlas-auto',

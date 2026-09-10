@@ -20,6 +20,20 @@
 //   动画/临时帧依赖型（addFrY=Main.tileFrame*38/54/72、GetTemporaryFrame 重写）
 //   = 106/377/464/499/455/247/207/410/725/468/658 —— 本刀【排除】不画高亮（画则
 //   mask 与本体动画帧错位），测试锁 RED 名单，债登记（补法：接 TileAnim.animFrameIdx）。
+//
+// 【SW-RB11a 审计落刀（2026-09-10）：GetTileDrawData 全 HasOutlines 型逐 case 复核】
+//   · 静态修正缺块补齐（缺=mask 源矩形/落位错 2~18px）：
+//       {16,17,26,77,487} tileHeight=18（:4954-4981）；{85,133,134,283} tileTop=2
+//       （:4737-4751 组内 HasOutlines 成员）；132 top=2+h=18（:5047-5050）；
+//       172 fy%38==18→h=18（:5031-5035,与 :6602 折带并存）；441 fy==18→h=18（:5423-5427）；
+//       {470,475,597,621,622} tileTop=2（:5338-5354 组）；491 top=2+addFrX=54（:5405-5407）；
+//       {480,509,657,720,721} tileTop=2（:6044-6056,fy≥54 另有 tileFrame*54 动画位——
+//       动画态由 HIGHLIGHT_ANIM_WHEN_LIT 渲染门排除）。
+//   · 动画排除集补员（Main.tileFrame 依赖,画则 mask 与本体动画帧错位）：
+//       96（:5529 *36）/215 篝火（:6129 *36|252）/217,218（:5620 *36）/220（:5626 *54）/
+//       228,243（:5588 *54）/300-308,354,355（:5381 *54）/463（:5400 *72）——旧 11 型
+//       名单漏员；480/509/657/720/721 为【条件动画】（仅 lit 态 fy≥54）走 HIGHLIGHT_
+//       ANIM_WHEN_LIT 保留静息态高亮。补法债同前（接 TileAnim.animFrameIdx 后可摘除）。
 
 /** TileID.Sets.HasOutlines（TileID.cs:277，Factory.CreateBoolSet 缺省 false，
  *  表内 95 型 true）—— 原文数列照录 */
@@ -32,10 +46,19 @@ export const TILE_HAS_OUTLINES: ReadonlySet<number> = new Set([
   243, 247, 283, 300, 301, 302, 303, 304, 305, 306, 307, 308, 412, 499, 622, 355, 172,
 ]);
 
-/** 本刀排除：GetTileDrawData 动画 addFr/临时帧重写型（详见头注债） */
+/** 本刀排除：GetTileDrawData 动画 addFr/临时帧重写型（详见头注债）。
+ *  ★SW-RB11a 补员 19 型：96/215/217/218/220/228/243/300-308/354/355/463（Main.tileFrame
+ *  依赖,各自行号见头注）。 */
 export const HIGHLIGHT_ANIM_EXCLUDED: ReadonlySet<number> = new Set([
   106, 377, 464, 499, 455, 247, 207, 410, 725, 468, 658,
+  96, 215, 217, 218, 220, 228, 243, 300, 301, 302, 303, 304, 305, 306, 307,
+  308, 354, 355, 463,
 ]);
+
+/** ★SW-RB11a：条件动画型（GetTileDrawData :6044-6056——fy<54 静息 top=2 无动画位、
+ *  fy≥54 点亮态 addFrY=Main.tileFrame*54）。静息态照画（top=2 修正）,点亮态渲染门
+ *  排除（同排除集债,补 TileAnim 接线后可改画动画位）。 */
+export const HIGHLIGHT_ANIM_WHEN_LIT: ReadonlySet<number> = new Set([480, 509, 657, 720, 721]);
 
 /** TileID.Sets.BasicChest（TileID.cs:315 = CreateBoolSet(21, 467)）——
  *  CacheSpecialDraws_Part2（TileDrawing.cs:4319）开盖姿态带面 */
@@ -72,12 +95,29 @@ export function highlightCellRect(
   let h = 16;
   let top = 0;
   switch (type) {
-    case 14:                                                     // :5017-5024 与 21/411/467/469 同组
+    case 14:                                                     // :5016-5023 与 21/411/467/469 同组
     case 21:
     case 411:
     case 467:
     case 469:
       if (fy === 18) h = 18;
+      break;
+    case 16:                                                     // ★SW-RB11a :4954-4981 组
+    case 17:                                                     // （16/17/26/32/69/72/77/124/
+    case 26:                                                     //   137/138/352/462/487/488/
+    case 77:                                                     //   574-578/664/695/704/712-716
+    case 487:                                                    //   tileHeight=18——组内 HasOutlines
+      h = 18;                                                    //   成员仅此五型）
+      break;
+    case 85:                                                     // ★SW-RB11a :4737-4751 组
+    case 133:                                                    // （78/85/133/134/173/210/233/254/
+    case 134:                                                    //   283/378/457/466/520/651/652
+    case 283:                                                    //   tileTop=2——组内 HasOutlines 成员
+      top = 2;                                                   //   仅此四型）
+      break;
+    case 132:                                                    // ★SW-RB11a :5047-5050（135 同组）
+      top = 2;
+      h = 18;
       break;
     case 15:                                                     // :5025-5029（与 497 同组）
     case 497:
@@ -158,12 +198,34 @@ export function highlightCellRect(
       top = 2;
       break;
     }
-    case 172: {                                                  // 172 带折块
+    case 470:                                                    // ★SW-RB11a :5338-5354 组
+    case 475:                                                    // （28/105/470/475/506/547/548/
+    case 597:                                                    //   552/560/597/613/621/622/623/
+    case 621:                                                    //   653/699 tileTop=2——组内
+    case 622:                                                    //   HasOutlines 成员 470/475/597/
+      top = 2;                                                   //   621/622;699 原已单列）
+      break;
+    case 491:                                                    // ★SW-RB11a :5405-5407
+      top = 2;
+      addFrX += 54;
+      break;
+    case 480:                                                    // ★SW-RB11a :6044-6056（509/657/
+    case 509:                                                    //   720/721/725 同组——fy≥54 另有
+    case 657:                                                    //   tileFrame*54 动画位,点亮态由
+    case 720:                                                    //   HIGHLIGHT_ANIM_WHEN_LIT 渲染门
+    case 721:                                                    //   排除;725 已在排除集）
+      top = 2;
+      break;
+    case 172: {                                                  // 172 带折块（:6602-6604）
       const n66 = Math.floor(fy / 2014);
       addFrY -= 2014 * n66;
       addFrX += 36 * n66;
+      if (fy % 38 === 18) h = 18;                                // ★SW-RB11a :5031-5035（376 同组）
       break;
     }
+    case 441:                                                    // ★SW-RB11a :5423-5427（468 同组
+      if (fy === 18) h = 18;                                     //   动画型已排除;441 静态半边）
+      break;
     case 733: {                                                  // 733 块
       top = 2;
       if (fy < 54) addFrX += 54;

@@ -193,7 +193,9 @@ describe('SW-BJ48 传送药水 2351 随机落点（Player.cs:56922/Utils.cs:518 
     expect(ay1, '2351 落地板（非出生点面）').toBe(150);
     expect([Math.trunc(ax1), Math.trunc(ay1)]).not.toEqual([150, 150]);   // 非出生柱（150 出生柱被 OLD 占据语义）
     expect(r1.state.removed, '2351 消耗').toBe(1);
-    expect(r1.state.particles, '2351 不走 recallDust 载体').toBe(0);
+    expect(r1.state.particles, '2351 不走 recallSparkleDust 载体').toBe(0);
+    expect(dust['pool'].filter((d: { active: boolean; type: number }) => d.active && d.type === 15).length,
+      '2351 零尘 15（青/白尘 15 面为回忆/回归/魔镜族专用）').toBe(0);
     // —— 2350 回忆臂：'mirror' 音 + 青尘 15 系载体 + 落点=出生点（OLD 面保持不动,回归对照）
     const r2 = stubGame(w, { x: 130 * TILE, y: 140 * TILE });
     r2.g.resolvePlayerSpawnPoint = () => [w.spawnX0, w.spawnY0];
@@ -201,7 +203,15 @@ describe('SW-BJ48 传送药水 2351 随机落点（Player.cs:56922/Utils.cs:518 
     const p2 = r2.g.player as { x: number; y: number };
     expect(r2.sfxLog, '2350 fire = HeldItem.UseSound（:42444）').toEqual(['mirror']);
     expect(p2.x, '2350 落出生点臂（spawnPlacementCoords +8 锚）').toBe(150 * TILE + 8);
-    expect(r2.state.particles, '2350 双 70 青尘走 recallDust').toBe(140);
+    // ★SW-BJ57 金标重产：尘载体换原版尘 15（Player.cs:43448-43458 Color.Cyan α150
+    //  scale1.2,Speed=v×0.2→×0.5 / 传送后 Speed=0→×0.5）——旧 recallDust 通用粒子退役
+    const d15r2 = (r2.g.vanillaDust as VanillaDust)['pool'].filter((d: { active: boolean; type: number }) => d.active && d.type === 15);
+    expect(d15r2.length, '2350 双 70 青尘=尘 15（Cyan α150）').toBe(140);
+    expect(d15r2[0].color, '青尘色=Color.Cyan(0,255,255,255)').toEqual({ r: 0, g: 255, b: 255, a: 255 });
+    expect(d15r2[0].alpha, '青尘 α=150').toBe(150);
+    expect(d15r2[0].scale, '青尘 scale≈1.2×NewDust 抖（0.8..1.2 档）').toBeGreaterThanOrEqual(0.9);
+    expect(d15r2[0].scale).toBeLessThanOrEqual(1.5);
+    expect(r2.state.particles, '2350 不走 spawnParticles 旧载体').toBe(0);
     expect(r2.state.removed, '2350 消耗').toBe(1);
   });
 

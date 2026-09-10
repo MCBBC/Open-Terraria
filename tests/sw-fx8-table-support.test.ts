@@ -181,6 +181,37 @@ describe('SW-FX8 Check2x1 桌面支撑门（29/103/462,WorldGen.cs:47426-47451�
     expect(w.store.get(10, 9)).toBe(0);
   });
 
+  it('SW-RB11d F1 错帧双活态（两左半并排 frameX 0/0）→ 整件杀（:47417 frameX==左+18 完整性半边）', () => {
+    // 原版：右列 frameX != 左列+18 → flag 恒 true（:47417 完整性判不过）→ 尾段
+    // KillTile 两格。FX8 首刀只查「同型+双活」,漏帧关系半边 → 错帧态恒幸存。
+    const w = new World(40, 40, 7, 'sw-rb11d-piggy-badframe');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    ground2(w, 10, 10, TABLE);
+    w.store.setTileSilent(10, 9, PIGGY, 0, 0);
+    w.store.setTileSilent(11, 9, PIGGY, 0, 0);   // 右半错帧（应为 18,现 0）
+    g.checkFurnitureSupport(10, 9);
+    expect(w.store.get(10, 9)).toBe(0);
+    expect(w.store.get(11, 9)).toBe(0);
+    expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[87], n: 1 }]);
+  });
+
+  it('SW-RB11d F2 锚格已死+幸存右半（自右列扫域）→ 右半不孤儿（:47513/:47516 逐格 KillTile）', () => {
+    // 原版尾段逐格杀（type 匹配才杀）——锚格（num）已死时 KillTile(num+1) 照杀;
+    // 本仓 killDecorTile 有死格跳过守卫（get()==0 continue）,杀向落空 → 幸存
+    // 右半成永久孤儿。修=改杀活着的同型成员格（breakTile 整件链终态等价）。
+    const w = new World(40, 40, 7, 'sw-rb11d-piggy-orphan');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    ground2(w, 10, 10, TABLE);
+    place2x1(w, PIGGY, 10, 9);
+    w.store.setTileSilent(10, 9, 0);   // 锚格（左列）先死
+    g.checkFurnitureSupport(11, 9);    // 幸存右半自身被扫域派发
+    expect(w.store.get(10, 9)).toBe(0);
+    expect(w.store.get(11, 9)).toBe(0);   // 右半不孤儿（FX8 首刀此处恒 29）
+    expect(drops).toEqual([{ key: VANILLA_ITEM_KEY_BY_ID[87], n: 1 }]);
+  });
+
   it('放置侧锁：29/103/462 AnchorBottom=Table——泥土下不可放/桌下可放（TileObjectData.cs:2810-2823）', () => {
     const w = new World(40, 40, 7, 'sw-fx8-place-anchor');
     const st = w.store;

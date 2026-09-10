@@ -24,6 +24,7 @@ import { Enemy } from '../src/entities/Enemy';
 import { Arrow } from '../src/entities/Arrow';
 import { Game } from '../src/core/Game';
 import { SporeSacCloud, SporeGasCloud, SPORE_CLOUD_A, SPORE_CLOUD_B } from '../src/entities/SporeSacProj';
+import { BuffType } from '../src/stats/Buffs';
 import type { GameHooks } from '../src/entities/types';
 
 const iid = (vid: number): number => ITEM_BY_KEY[vanillaItemKey(vid)!];
@@ -118,7 +119,11 @@ describe('SW-FX1①b 贴墙分档：≥2 驻停上攀 / ==1 缓降 0.5（Wallsli
     return w;
   }
   function slideVys(vid: number, inputDown = false): number[] {
-    const game = makeGame(wallWorld());
+    return slideVysWorld(wallWorld(), vid, inputDown);
+  }
+  // ★SW-RB11b F1：世界可注入版（flag 双格探针的短墙夹具消费）
+  function slideVysWorld(w: World, vid: number, inputDown = false): number[] {
+    const game = makeGame(w);
     const p = new Player(25 * TILE - 20, 50 * TILE, new Inventory());   // 右缘贴墙(400px)
     p.inv.armor[3] = { id: iid(vid), stack: 1 };
     p.equipStats;                                                       // 预热
@@ -143,13 +148,57 @@ describe('SW-FX1①b 贴墙分档：≥2 驻停上攀 / ==1 缓降 0.5（Wallsli
   it('==1 档按 ↓：4 快滑出现（:21996 +0.1 = 4.1）', () => {
     expect(slideVys(953, true).some((v) => Math.abs(v - 4.1) < 1e-6)).toBe(true);
   });
-  it('≥2 档（976）：驻停上攀（vy=−gravity+1e-5 后积分 ≈ −0.29）出现——==1 档永不出现', () => {
+  it('≥2 档（976）：驻停贴壁（vy=(−gravity+1e-5)+gravity ≈ 0,原版字段语义——★SW-RB11b F2）——==1 档永不出现', () => {
+    // ★SW-RB11b 勘误：num3=:21962 `float num3 = gravity`【字段】=0.4×num6（:24559 复位
+    //  → :24880 gravity*=num6 先于 :26965）——与管线重力 III224 同源,净速度
+    //  (−gField+1e-5)+gField ≈ 1e-5 ≈ 0（驻停贴壁,非上攀）。旧期望 vy<−0.2 系
+    //  wallslide 支用未缩放 GRAVITY 常量+管线缩放重力的【不一致混合】标定。
     const vys = slideVys(976);
-    expect(vys.some((v) => v < -0.2)).toBe(true);                        // :21988-21997 上攀
+    expect(vys.some((v) => Math.abs(v) < 0.01)).toBe(true);              // 驻停（净≈0）
+    expect(vys.some((v) => v < -0.05)).toBe(false);                      // 不上攀（旧混合态）
     expect(vys.some((v) => Math.abs(v - 0.6) < 1e-6)).toBe(false);       // 0.5 缓降档是 ==1 专属
   });
   it('≥2 档按 ↓：4 快滑出现（:21960 +0.1 = 4.1）', () => {
     expect(slideVys(976, true).some((v) => Math.abs(v - 4.1) < 1e-6)).toBe(true);
+  });
+  it('★SW-RB11b F1 flag 双格探针（:21944-21954）：墙不延到脚缘之下（悬浮墙）→ 不驻停自由落体', () => {
+    // 墙柱只到 y=50（身体贴住行 50=hitWall 真,但脚缘行 51/52 无墙）→ flag=false
+    // → ≥2 门 !flag 早退 :21957 → 自由落体（无 |vy|≈0 驻停拍、无 4.1 快滑拍）
+    function shortWallWorld(): World {
+      const w = flatWorld();
+      for (let y = 30; y <= 50; y++) w.store.setTileSilent(25, y, 1, 0, 0);
+      return w;
+    }
+    const vys = slideVysWorld(shortWallWorld(), 976);
+    expect(vys.some((v) => Math.abs(v) < 0.01)).toBe(false);
+    expect(vys.some((v) => Math.abs(v - 4.1) < 1e-6)).toBe(false);
+    expect(vys.some((v) => v > 2)).toBe(true);                           // 自由落体加速
+  });
+  it('★SW-RB11b F1 flag 双格探针：==1 缓降档 gd=1 半边同吃 flag（:21991）——悬浮墙不缓降', () => {
+    function shortWallWorld(): World {
+      const w = flatWorld();
+      for (let y = 30; y <= 50; y++) w.store.setTileSilent(25, y, 1, 0, 0);
+      return w;
+    }
+    const vys = slideVysWorld(shortWallWorld(), 953);
+    // 自由落体链 0.1 步进会【路过】0.6 一拍——缓降档被 flag 拦的判别=0.6 不驻留
+    //（ slide 态 0.6 连续多拍）,且坠速突破缓降帽
+    expect(vys.filter((v) => Math.abs(v - 0.6) < 1e-6).length).toBeLessThanOrEqual(1);
+    expect(vys.some((v) => v > 2)).toBe(true);                           // 自由落体
+  });
+  it('★SW-RB11b F2b slowFall 双乘 quirk（:21963-21967 gravDir 在 num3 内）：慢Fall 驻停同 ≈0（与 gd 无关）', () => {
+    const game = makeGame(wallWorld());
+    const p = new Player(25 * TILE - 20, 50 * TILE, new Inventory());
+    p.inv.armor[3] = { id: iid(976), stack: 1 };
+    p.buffs.apply(BuffType.Featherfall, 60);                             // Featherfall = slowFall 源
+    p.equipStats;
+    const vys: number[] = [];
+    for (let i = 0; i < 24; i++) {
+      p.inputX = 1;
+      p.fixedUpdate(1 / 60, game);
+      vys.push(p.vy);
+    }
+    expect(vys.some((v) => Math.abs(v) < 0.05)).toBe(true);
   });
 });
 

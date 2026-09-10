@@ -175,14 +175,17 @@ const HOTBAR_SLOT_ACTIONS: readonly KeybindAction[] = [
  * ——原版数字切栏消费的就是可重绑 trigger（Player.cs:25286-25330 读
  * Triggers.Current.Hotbar1..Hotbar10），不是硬编码 Digit1-0；此前仓库 regex
  * `/^Digit([0-9])$/` 在用户改绑/解绑后仍按物理数字键切栏 = 与原版劈叉。
- * 返回槽位 0-9；无命中 null（含该槽被显式解绑/绑定到别的键——原版同：trigger
- * 不含该键即不触发）。
+ * ★SW-RB11f F5：命中取【最后一个】匹配槽（原版 :25289-25330 十连 if 顺序覆写
+ * num7——一键绑多 Hotbar action 时高槽号后写胜出;旧 early-return 首中 = 低槽号
+ * 劈叉）。返回槽位 0-9；无命中 null（含该槽被显式解绑/绑定到别的键——原版同：
+ * trigger 不含该键即不触发）。
  */
 export function hotbarSlotOfCode(code: string): number | null {
+  let hit: number | null = null;
   for (let i = 0; i < HOTBAR_SLOT_ACTIONS.length; i++) {
-    if (bindsOf(HOTBAR_SLOT_ACTIONS[i]).includes(code)) return i;
+    if (bindsOf(HOTBAR_SLOT_ACTIONS[i]).includes(code)) hit = i;
   }
-  return null;
+  return hit;
 }
 
 /** 持久化清洗：只留已知 action 的字符串数组，去空串/去重；空表原样保留

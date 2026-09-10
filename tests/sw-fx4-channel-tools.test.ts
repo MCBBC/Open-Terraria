@@ -206,13 +206,27 @@ describe('SW-FX4 ④ ChainsawProj AI_020/AI_075 真值表', () => {
     expect(saw.x).toBeCloseTo(330 - saw.w / 2, 6);
     expect(saw.y).toBeCloseTo(341 - saw.h / 2, 6);
     // velocity = (鼠标−anchor) 归一 × shootSpeed×scale（:23884-23902：48×1.2=57.6），
-    // 出膛后 :23932 抖动 ×(1+Next(−3,4)×0.01)——掷 0.5 → Next(−3,4)=2 → ×1.01（右向）
+    // 出膛后 :23932 抖动 ×(1+Next(−3,4)×0.01)——掷 0.5 → Next(−3,4)=−3+floor(0.5×7)=0
+    // → ×1.00（右向）。（★SW-RB11b F3 勘误：旧期望 ×1.01 按 rand×8 八值域标定，
+    //  原版 Next(min,max)=min+⌊rand×(max−min)⌋ 七值域 [−3,3]——floor(0.5×7)=3−3=0）
     expect(saw.vy).toBeCloseTo(0, 9);
-    expect(saw.vx).toBeCloseTo(48 * 1.2 * 1.01, 6);
+    expect(saw.vx).toBeCloseTo(48 * 1.2 * 1.0, 6);
     // 断链（松键/切件/死亡）→ 下一 AI 拍 Kill
     channel = false;
     saw.fixedUpdate(1 / 60, env.g);
     expect(saw.dead).toBe(true);
+  });
+
+  it('★SW-RB11b F3：抖动域 = Next(−3,4) 七值 [−3,3]（:23932）——掷 0.999 上限 1.03 非 1.04', () => {
+    const env = mkGame();
+    vi.spyOn(Math, 'random').mockReturnValue(0.999);
+    const o = sawOwner();
+    const saw = new ChainsawProj(o, 10, 1, () => true,
+      () => ({ x: o.cx + 100, y: o.cy }), { projId: 509, pick: 0, shootSpeed: 48 });
+    saw.fixedUpdate(1 / 60, env.g);
+    // −3+⌊0.999×7⌋=3 → ×1.03（旧 ⌊0.999×8⌋−3=4 → ×1.04 超原版上限）
+    expect(saw.vx).toBeCloseTo(48 * 1.2 * 1.03, 6);
+    vi.restoreAllMocks();
   });
 
   it('面向跟随 velocity.X 符号（:23909-23916 ChangeDir）', () => {

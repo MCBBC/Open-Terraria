@@ -1,4 +1,5 @@
-// 宝藏袋开包引擎测试：19 袋全部可执行、产出合法、关键对账（神庙钥匙恒给等）
+// 宝藏袋开包引擎测试：BossBag 全集 21 件全部可执行（★SW-FX21 锚正 ItemID.cs:1215,
+// 其中 3861/3862 零产出=原版本相）、产出合法、关键对账（神庙钥匙恒给等）
 // + 2026-08-18 分布对账批：sw 掷面按臂数/猪鲨 case5 remix 分裂/去重池恰 2/
 //   EoW·BoC 矿量区间/devArmor 全局 21 组套装
 import { describe, it, expect } from 'vitest';
@@ -7,14 +8,16 @@ import { openBossBag, BOSS_BAG_IDS, DEV_ARMOR_SETS } from '../src/data/vanillaBo
 const W = { masterMode: false, crimson: false, extraAccessory: false, hasItem: () => false };
 const WM = { ...W, masterMode: true };
 
-describe('宝藏袋开包引擎（Player.OpenBossBag :6828）', () => {
-  it('19 袋全部注册', () => {
-    expect(BOSS_BAG_IDS.size).toBe(19);
+describe('宝藏袋开包引擎（Player.OpenBossBag,1457 终值 :7206）', () => {
+  it('BossBag 全集 21 件注册（★SW-FX21 2026-09-10 锚正 ItemID.cs:1215：旧 19 + 3861/3862）', () => {
+    expect(BOSS_BAG_IDS.size).toBe(21);
     expect(BOSS_BAG_IDS.has(3328)).toBe(true);
     expect(BOSS_BAG_IDS.has(5111)).toBe(true);
+    expect(BOSS_BAG_IDS.has(3861)).toBe(true);   // 食人魔袋（主战利品 case 整缺=原版本相）
+    expect(BOSS_BAG_IDS.has(3862)).toBe(true);   // 黑魔法师袋（同上）
   });
 
-  it('每袋 50 次开包:不炸、产出非空、id 合法', () => {
+  it('每袋 50 次开包:不炸、产出合法（3861/3862 主战利品 case 整缺 + NPC 576/564 value=0f = 零产出本相,NPC.cs:16314/:16484）', () => {
     for (const vid of BOSS_BAG_IDS) {
       let total = 0;
       for (let k = 0; k < 50; k++) {
@@ -24,7 +27,11 @@ describe('宝藏袋开包引擎（Player.OpenBossBag :6828）', () => {
           total++;
         }, W);
       }
-      expect(total, `袋 ${vid} 应有产出`).toBeGreaterThan(0);
+      if (vid === 3861 || vid === 3862) {
+        expect(total, `袋 ${vid} 零产出=原版本相`).toBe(0);
+      } else {
+        expect(total, `袋 ${vid} 应有产出`).toBeGreaterThan(0);
+      }
     }
   });
 

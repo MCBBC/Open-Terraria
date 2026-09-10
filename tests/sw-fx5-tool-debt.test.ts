@@ -150,6 +150,36 @@ describe('SW-FX5 E1 残余：拆墙节拍 = itemTime = useTime/2（Player.cs:463
     expect(itemCombat(367)!.useTime).toBe(14);
     expect(itemCombat(367)!.useAnimation).toBe(27);
   });
+
+  it('⑤ ★SW-RB11b E1 反向共享：锤墙写 useTime/2 后切镐，本地窗（useTime=3）不再提前放行（:43911 toolTime 镜像共享 itemTime）', () => {
+    const w = new World(40, 40, 20, 'open');
+    const st = w.store;
+    st.setTile(20, 20, TILE_BY_KEY['stone'], 0, 0);
+    st.setWall(20, 20, 1);
+    const { g } = mkMineGame(w);
+    g.tryMine(20, 20, 40, 'hammer', 20, 14);                // t=0 拆墙（itemTime=14/2=7）
+    expect(dmg2(g, 20, 20, 2)).toBe(60);
+    g.tickCount = 3;
+    g.tryMine(20, 20, 40, 'pick', 20, 3);                   // 3 < 7（锤写值）→ 吞（旧本地门按镐 useTime=3 放行=偏差）
+    expect(dmg2(g, 20, 20)).toBe(0);
+    g.tickCount = 7;
+    g.tryMine(20, 20, 40, 'pick', 20, 3);                   // t=7 ≥ 7 → 镐落击
+    expect(dmg2(g, 20, 20)).toBe(40);
+  });
+
+  it('⑥ ★SW-RB11b F5：(int) 截断非四舍五入（:46163 `(int)(useTime×pickSpeed)`）——15×0.85=12.75→12 拍（round=13 慢 1 拍）', () => {
+    const w = new World(40, 40, 20, 'open');
+    w.store.setTile(20, 20, TILE_BY_KEY['stone'], 0, 0);
+    const { g } = mkMineGame(w);
+    // 饱食三档 −0.15 → pickSpeed=0.85（pickSpeedMult 减量链,无 Mining/chisel 等其余源）
+    g.player.buffs.wellFedTier = 3;
+    const hit = (t: number) => { g.tickCount = t; g.tryMine(20, 20, 40, 'pick', 20, 15); };
+    hit(0);
+    expect(dmg2(g, 20, 20)).toBe(40);
+    g.tickCount = 12;                                        // 12 ≥ ⌊15×0.85⌋=12 → 落击（round=13 时 12<13 被吞）
+    g.tryMine(20, 20, 40, 'pick', 20, 15);
+    expect(dmg2(g, 20, 20)).toBe(80);
+  });
 });
 
 describe('SW-FX5 E3 残余：工具支挥摆时长下限钳 14→1（SetItemAnimation :4440-4447）', () => {

@@ -1,4 +1,6 @@
-// 宝藏袋开包引擎（Player.OpenBossBag :6828-7520,1.4.5.6 全 19 袋）
+// 宝藏袋开包引擎（Player.OpenBossBag,1457 终值 :7206-7901;1456 旧注 :6828-7520,
+// ★SW-FX21 2026-09-10 锚正 1457 行号）。BossBag 路由全集 21 件=ItemID.cs:1215;
+// 袋体 19 件 + 3861/3862 主战利品 case 整缺（原版本相,详见 BOSS_BAG_IDS 注）。
 // 数据 = tools/extract-bossbags.mjs 结构化提取（提取期归一条件,随机全部留给引擎期掷）。
 // 引擎执行:逐 spawn 求值 conds(chance/master/noExtra/noItem/switch 选支),
 // 支持 idFrom 范围/dedupPair/maskIds/pick2/stackExpr 表达式 +
@@ -48,7 +50,13 @@ export const DEV_ARMOR_SETS: Array<Array<[number] | [number, number]>> = [
   [[6137], [6138], [6139], [6140], [6141]],
 ];
 
-export const BOSS_BAG_IDS = new Set(Object.keys(DATA.bags).map(Number));
+/** ItemID.Sets.BossBag 全集（ItemID.cs:1215,1457 终值;1458 同域零增量）= 21 件：
+ *  袋体 19 件（vanilla-bossbags.json bags）+ 3861 食人魔袋/3862 黑魔法师袋——
+ *  后两件主战利品 case 整缺=原版本相（1456/1457 OpenBossBag switch 均无 case
+ *  3861/3862,仅走 :7767-7851 共享钱币尾段,而 NPC 576/564 value=0f——
+ *  NPC.cs:16314/:16484 → 开袋=纯消耗零产出,原版刻意）。
+ *  ★SW-FX21（2026-09-10）：旧版仅取 bags 键 19 件,3861/3862 开袋面整死。 */
+export const BOSS_BAG_IDS = new Set([...Object.keys(DATA.bags), ...Object.keys(DATA.coinMap)].map(Number));
 
 /** rand.Next(a,b) 上界开 */
 const rn = (a: number, b: number) => a + Math.floor(Math.random() * (b - a));
@@ -59,17 +67,21 @@ export function openBossBag(
   world: { masterMode: boolean; crimson: boolean; extraAccessory: boolean; hasItem: (id: number) => boolean; remixWorld?: boolean; tenthAnniversary?: boolean },
 ): void {
   const bag = DATA.bags[String(vid)];
-  if (!bag) return;
+  // ★SW-FX21（2026-09-10）：袋体缺省（3861/3862）不再提前 return——原版 OpenBossBag
+  // 主战利品 switch 无 case 3861/3862（:7210-7696 逐支核对,1456:7215 区同判）,
+  // 但共享钱币尾段（:7767-7851）照走;此处只跳过主战利品段,尾段语义同序。
+  const spawns: Spawn[] = bag ? bag.spawns : [];
+  const devArmorFlag = bag ? bag.devArmor : false;
   // TryGettingDevArmor（:7048 等 10 袋调用,json devArmor 登记）:1/16 门
   // （十周年世界 1/8,:7526）→ Next(21) 全局套装表,整组下发
-  if (bag.devArmor && Math.random() < 1 / (world.tenthAnniversary ? 8 : 16)) {
+  if (devArmorFlag && Math.random() < 1 / (world.tenthAnniversary ? 8 : 16)) {
     const set = DEV_ARMOR_SETS[Math.floor(Math.random() * DEV_ARMOR_SETS.length)] ?? [];
     for (const it of set) give(it[0], it[1] ?? 1);
   }
   // switch 掷面数 = 该 k 族 branch 最大值+1（=原版 Next(N) 的 N,switch 臂数;
   // 曾硬编码 *8 → 3/4/6/7 臂袋各武器 12.5%/37.5% 共现或 25% 空手,2026-08-18 修）
   const swFaces = new Map<number, number>();
-  for (const sp of bag.spawns) {
+  for (const sp of spawns) {
     for (const c of sp.conds) {
       if (c.t === 'sw') swFaces.set(c.k ?? 0, Math.max(swFaces.get(c.k ?? 0) ?? 0, (c.branch ?? 0) + 1));
     }
@@ -79,7 +91,7 @@ export function openBossBag(
   // else 补集:同一 chanceId 的 else 与 if 共享掷骰结果
   const chanceRoll = new Map<number, boolean>();
   let chanceSeq = 0;
-  for (const sp of bag.spawns) {
+  for (const sp of spawns) {
     let ok = true;
     for (const c of sp.conds) {
       switch (c.t) {

@@ -12,6 +12,9 @@ import type { GameHooks } from '../src/entities/types';
 function makePlayer() {
   const w = new World(160, 300, 30, 'open');   // 高 300：避开下 40 格边框死区（原版 KillMe 语义）
   for (let x = 0; x < 120; x++) w.store.setTile(x, 100, 1);
+  // ★SW-FX20：worldgen 必设位（Player.cs:24864 num6 分母 Main.worldSurface 恒>0）——
+  // 夹具补全完整世界不变量；缺省 0 会走 ±Inf→上钳 1 支（结果同但非真实公式面）
+  w.groundLevel = 100;
   const p = new Player(50 * TILE, 90 * TILE, new Inventory());
   p.hp = 100;                              // hp 字段构造默认 100；冻结是 hp 0（旧模拟误判已清）
   p.x = 50 * TILE; p.y = 96 * TILE;        // 地面(100)上 4 格悬空
@@ -19,7 +22,10 @@ function makePlayer() {
   p.inv.armor[3] = { id: iid, stack: 1 };
   const enemies: unknown[] = [];
   const hooks = {
-    world: { store: w.store } as never,
+    // ★SW-FX20：喂完整 World 实例（真实 Game 面 game.world 恒为完整对象）——
+    // 曾传 {store} 半成品：III224 深度重力块（Player.ts:5526-5537）读 world.w /
+    // world.groundLevel 得 NaN → vy=NaN 整链冻结（本文件两例红的根因）
+    world: w as never,
     player: p as never,
     enemies: () => enemies,
     critters: () => [],

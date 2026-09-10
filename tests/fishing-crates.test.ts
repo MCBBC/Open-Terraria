@@ -18,12 +18,22 @@ import {
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { UnifiedRandom } from '../src/core/rng';
 
-/** 定序源：队列耗尽抛错（漏掷一支立刻暴露，不静默吞掉） */
+/** 定序源：队列耗尽抛错（漏掷一支立刻暴露，不静默吞掉）。
+ *  ★SW-RB11c（2026-09-10）掷域校验补盲：脚本值必须 ∈ 被测调用声明的
+ *  next(a)/next(a,b) 值域——哑 rng 直返脚本值对「next(3)→next(2)」一类
+ *  掷域收缩变异失明（等额消费同序时脚本可自洽通过,变异实验实证）。
+ *  参照 sw-fx13-crate-matrix.test.ts seqCounted 同款判别力。 */
 function seq(vals: number[]): BagRand {
   return {
     next: (a, b) => {
       if (vals.length === 0) throw new Error(`RNG 队列耗尽（next(${a}${b === undefined ? '' : `, ${b}`})）`);
-      return vals.shift() as number;
+      const v = vals.shift() as number;
+      const lo = b === undefined ? 0 : a;
+      const hi = b === undefined ? a : b;
+      if (v < lo || v >= hi) {
+        throw new Error(`掷域越界：next(${a}${b === undefined ? '' : `, ${b}`}) 脚本值 ${v} ∉ [${lo},${hi})——被测代码掷域漂移或脚本错位`);
+      }
+      return v;
     },
   };
 }
@@ -182,8 +192,9 @@ describe('生物群系匣通用循环（:8252-8592）+ 后置支（:8593-8921）
       .toEqual([[1198, 7], [520, 5], [502, 9]]);
   });
   it('普通档尾段不掷：3207 后置后直接 return（!flag 短路零消费）', () => {
-    // 钱币 4 命中 → 73 栈 4；7/4 miss → continue 出循环；后置 4/2/2 全 miss → 尾段不掷
-    expect(run(3207, seq([0, 4, 1, 1, 1, 1, 1, 1]))).toEqual([[73, 4]]);
+    // 钱币 4 命中 → 73 栈 5（next(5,13)∈[5,13)——★SW-RB11c 掷域校验纠:旧脚本值 4
+    // 为原版不可达栈值,哑 rng 下自洽假钉）;7/4 miss → continue 出循环；后置 4/2/2 全 miss → 尾段不掷
+    expect(run(3207, seq([0, 5, 1, 1, 1, 1, 1, 1]))).toEqual([[73, 5]]);
   });
 });
 

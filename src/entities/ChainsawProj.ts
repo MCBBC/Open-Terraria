@@ -206,7 +206,9 @@ export class ChainsawProj extends Entity {
     // velocity.X 抖动（:23932）：×(1+Next(−3,4)×0.01)——原版在旋转/尘之前，
     // 每帧被 channel 直写覆盖，实际只影响下方尘的前向偏移。
     // ★ai75 无此段（AI_075 共用尾 :68404-68411 前无抖动行）——laser 分支跳过
-    if (!this.laser) this.vx *= 1 + (Math.floor(Math.random() * 8) - 3) * 0.01;
+    // ★SW-RB11b F3：Next(−3,4)∈[−3,3] 七值（Projectile.cs:23932）——旧 *8 产 [−3,4]
+    //  八值,+4 端 1.04 超原版上限 1.03
+    if (!this.laser) this.vx *= 1 + (Math.floor(Math.random() * 7) - 3) * 0.01;
     // ai75 相位灯串（:67300-67320）：localAI[0]++ ≥60 归零；num12=phase/60 三角折返
     // （>0.5 取 1−num12）；vector5=Lerp(青(0,1,.7),蓝(0,.7,1),1−num12×2)×0.5——
     // 弹心点光经 lightRGB 通道结算（PlotTileLine 线光带未建模，登记）

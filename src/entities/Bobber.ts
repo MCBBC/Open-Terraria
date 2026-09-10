@@ -354,9 +354,16 @@ export class Bobber extends Entity {
       // ★SW-BJ53 aiStyle 61 命块反弹（Projectile.cs:19730-19740,1458 :19731-19741）：
       //  X 改写恒反弹 lastVelocity.X×-0.3f；Y 仅 lastVelocity.Y>1f 才 ×-0.3f。
       //  浮标命【实心/半砖/坡】不 Kill 不 HitTiles 音（penetrate=-1 且专属反弹支）；
-      //  平台因 fallThrough 全穿（dropThrough）不进本支——旗源 collideY/hitWall。
-      if (this.hitWall) this.vx = Math.fround(lvx * F32_N03);
-      if (this.collideY && lvy > 1) this.vy = Math.fround(lvy * F32_N03);
+      //  平台因 fallThrough 全穿（dropThrough）不进本支。
+      //  ★SW-RB11a（2026-09-10）触发改速度差判据：原文 = `velocity.X != lastVelocity.X`
+      //  （:19732/:19735——P.cs:17701 lastVelocity 捕获后 HandleMovement 全程之差）。
+      //  旧旗源缺口：slopeCollide 全程不写 hitWall → 受阻支双清（Collision.cs
+      //  :2016-2017/:2032-2033 经 TileCollision.ts shortfall/天花板下推受阻臂照抄）
+      //  把 vx 改写 0 后原文无条件 X 反弹漏发;另 sw_slope_g2 回退旗关时贴合清零
+      //  不置 collideY。Y 轴候选时点已置 collideY（G2 开）无缺口。速度差判据逐字
+      //  对齐原文,常规着陆/横拦/贴合支与旗源全等（moveAxis 命中必改写 vx/vy）。
+      if (this.vx !== lvx) this.vx = Math.fround(lvx * F32_N03);
+      if (this.vy !== lvy && lvy > 1) this.vy = Math.fround(lvy * F32_N03);
       // 咬钩饵警告每拍写在飞行段同样成立（:54754-54757 位=干物理后/!flag3 早退前,
       // 原版飞行中即写;条件口径同浮态段注——抛竿拍快照 baitVid）
       if (this.baitVid === 2673) {
@@ -493,11 +500,12 @@ export class Bobber extends Entity {
     // HandleMovement(:17120) 同拍尾序：咬钩踢速度当拍即入位移（抖动当拍可见）
     const dfW = projWaterDragFactor(this);
     // lastVelocity 捕获（Projectile.cs:17701）——反弹支同飞行段（aiStyle61 命块
-    // 反弹不分支于 wet/dry,Projectile.cs:19730-19740 在通用 flag 块内）
+    // 反弹不分支于 wet/dry,Projectile.cs:19730-19740 在通用 flag 块内）。
+    // ★SW-RB11a：触发=速度差判据（原文 velocity.X!=lastVelocity.X逐字,见飞行段注）
     const lvx = this.vx, lvy = this.vy;
     moveAndCollide(this, game.world, this.vx * dfW, this.vy * dfW);
-    if (this.hitWall) this.vx = Math.fround(lvx * F32_N03);
-    if (this.collideY && lvy > 1) this.vy = Math.fround(lvy * F32_N03);
+    if (this.vx !== lvx) this.vx = Math.fround(lvx * F32_N03);
+    if (this.vy !== lvy && lvy > 1) this.vy = Math.fround(lvy * F32_N03);
     // ★position += wetVelocity 的 fl32 和取整（UpdatePosition :20555 `if (wet)
     //  position += wetVelocity`——XNA Vector2 加法单精度）：B1 收敛尾墙标度本体。
     //  moveAndCollide 内和为 float64 精确和（两 float32 值之和 ≤49 位恒精确）,

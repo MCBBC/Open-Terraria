@@ -158,8 +158,13 @@ describe('SW-FX10 债⑪ 热键锁 HbLock', () => {
     expect(uiSrc).toMatch(/url\(sprites\/vanilla\/Lock_\$\{locked \? 0 : 1\}\.png\)/);
     expect(uiSrc).toMatch(/this\.game\.sfx\.play\('unlock', 1\);/);
     expect(uiSrc).toMatch(/Lang\.inter\(locked \? 6 : 5\)/);
-    // pushSideToolsUp = visibleRows≥10（恶魔心+大师槽齐显 = GetBuilderAccsCountToShow≥10）
-    expect(uiSrc).toMatch(/hotbarLockXY\(\(this\.vinvLayoutCtx\?\.visibleRows \?\? 8\) >= 10\)/);
+    // ★SW-RB11e 勘误（2026-09-10）：pushSideToolsUp = GetBuilderAccsCountToShow.totalDrawnIcons≥10
+    //  （Main.cs:41752-41753 同一变量喂 DrawHotbarLockIcon :41755/方块替换 :43247/群系炬 :43289/
+    //  图标列 :48166；表式 :48381-48386,门=配饰装备态 Player.cs:12899-12915）——与 SW-FX19
+    //  图标列单源同式。原刀误写 visibleRows≥10（装备列行数,另一量纲）已废,反向锁定禁回潮。
+    expect(uiSrc).toMatch(/builderAccGateSet\(\(vid\) => playerAccessoryVidEquipped\(/);
+    expect(uiSrc).toMatch(/builderAccTotalIcons\(\s*g, !!this\.game\?\.world\.flags\.unlockedBiomeTorches\) >= 10/);
+    expect(uiSrc).not.toMatch(/hotbarLockXY\(\(this\.vinvLayoutCtx\?\.visibleRows \?\? 8\) >= 10\)/);
   });
   it('关包选中门（Main.cs:44357 changeItem 门）+ 透传豁免（:44353 hover 门整块不进）', () => {
     // mouseup 臂：锁定+关包 → 该格既不选中也不拾取（整格无动作,点击本体透传世界）

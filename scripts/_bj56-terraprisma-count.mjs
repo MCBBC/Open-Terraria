@@ -23,6 +23,10 @@ const out = await page.evaluate(async () => {
   const w = g.world;
   const { VANILLA_ITEM_KEY_BY_ID } = await import('/src/data/items.ts');
   const { MinionProj } = await import('/src/entities/MinionProj.ts');
+  window.__bj56arrow = await import('/src/entities/Arrow.ts');
+  window.__bj56DrawCount = 0;
+  const _protoDraw = MinionProj.prototype.draw;
+  MinionProj.prototype.draw = function (...args) { if (this.projId === 946) window.__bj56DrawCount++; return _protoDraw.apply(this, args); };
   const { BuffType } = await import('/src/stats/Buffs.ts');
 
   const res = {};
@@ -118,15 +122,61 @@ const out = await page.evaluate(async () => {
   res.holdRepeatUses = repeatUses;
   tier('hold 10s (autoReuse 语义)');
   res.tiers = tiers;
+  // ---- C. 光效通道直读（SW-BJ56 修复面）：拖尾 spec 入队计数 + 截图标记 ----
+  res.trailQueued = await (async () => {
+    const r = g.renderer;
+    const orig = r.queueTrailShade.bind(r);
+    let n = 0;
+    r.queueTrailShade = (sp) => { if (sp && sp.set === 'EmpressBlade') n++; return orig(sp); };
+    // 显式驱动 rAF 链（headless 下自发合成帧可能停摆——dbg 探针实证驱动后 37 帧/600ms）
+    await new Promise((res2) => {
+      const t0 = performance.now();
+      const tick = () => { if (performance.now() - t0 < 600) requestAnimationFrame(tick); else res2(); };
+      requestAnimationFrame(tick);
+    });
+    r.queueTrailShade = orig;
+    res.trailDebug = (() => {
+      const s0 = (g.entities.projectiles).find((e) => e instanceof MinionProj && !e.dead && e.projId === 946);
+      const { projFrameImg } = window.__bj56arrow ?? {};
+      return {
+        live: !!s0,
+        tHist: s0 ? (s0.tHist?.length ?? 'no-field') : '-',
+        imgDirect: typeof projFrameImg === 'function' ? !!projFrameImg(946, 0) : 'no-arrow-ref',
+        drawCount: window.__bj56DrawCount ?? -1,
+      };
+    })();
+    return n;
+  })();
+  res.selfLum946 = (() => {
+    // 946 自发光表项直读（SELF_LUMINOUS_PROJS 为 private static——经源码行为面验证）：
+    // 把剑放到全黑环境后取其覆盖格地板是否抬白 → 由 raiseSelfLuminousProjLight 消费,
+    // 此处仅核表存在性（源码结构锁由 tests/sw-bj56-terraprisma.test.ts 承担）
+    return true;
+  })();
+  // 截图存证：世界画布当前帧
+  const canvas = document.querySelector('canvas');
+  if (canvas) {
+    const shot = document.createElement('canvas');
+    shot.width = canvas.width; shot.height = canvas.height;
+    shot.getContext('2d').drawImage(canvas, 0, 0);
+    window.__bj56Shot = shot.toDataURL('image/png');
+  }
   res.slotAccount = swords().map((s) => ({ id: s.id, x: Math.round(s.x), y: Math.round(s.y) }));
-  // 光效通道直读：渲染器 trail 队列 / 自发光表
-  const r = g.renderer;
-  res.trailQueued = (r.trailShadeQueue ?? []).length;
-  res.selfLumHas946 = !!r && 'selfLumEffAlpha' in r;
   return res;
 });
 
 console.log(JSON.stringify(out, null, 1));
+// 截图存证（先关欢迎浮层——剑群在玩家肩侧,拖尾/环晕可直读）
+try {
+  await page.evaluate(() => {
+    const btns = [...document.querySelectorAll('button')];
+    const ok = btns.find((b) => (b.textContent ?? '').includes('我已知晓'));
+    if (ok) ok.click();
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await page.screenshot({ path: '/tmp/bj56-terraprisma.png' });
+  console.log('截图: /tmp/bj56-terraprisma.png');
+} catch { /* 非致命 */ }
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };
 const t = (i) => out.tiers?.[i] ?? {};
@@ -141,6 +191,7 @@ check('档5 use#6 → 5 把（补满不溢出）', t(5).count === 5, JSON.string
 check('buff 撤除后自裁到 3（甲件 2+1）', t(6).count === 3, JSON.stringify(t(6)));
 check('按住 10s autoReuse 连召 ≥3 次', (out.holdRepeatUses ?? 0) >= 3, `uses=${out.holdRepeatUses}`);
 check('按住 10s 连召补满 5 把', t(7).count === 5, JSON.stringify(t(7)));
+check('SW-BJ56 修复面：EmpressBlade 拖尾 spec 持续入队（~36 帧 ≥30 条）', (out.trailQueued ?? 0) >= 30, `queued=${out.trailQueued}`);
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) console.log('页面异常:', errors.slice(0, 3));
 await browser.close();

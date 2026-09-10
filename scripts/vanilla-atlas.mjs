@@ -12,6 +12,29 @@ const ASSETS = join(ROOT, '..', 'terraria-assets', 'Images');
 const TEDIT_DATA = join(ROOT, '..', 'Terraria-Map-Editor', 'src', 'TEdit.Terraria', 'Data');
 const OUT_DIR = join(ROOT, 'public', 'sprites', 'vanilla');
 const OUT_JSON = join(ROOT, 'public', 'sprites', 'vanilla.json');
+
+// ★追加时代守卫（SW-FX23 2026-09-10）：vanilla.json 进入追加通道时代（存在引用
+//   Item_Atlas_2/3 页的键）后，本脚本的全量重写会换页换坐标重排 6000+ 既有键——
+//   同族事故已四发：8/21、8/23 0042c846、2026-09-10 15:41 与 17:44（FX22 定谳，
+//   工作树 Atlas blob 与 0042c846 事故字节全等=确定性管线同案重演）。后果三连：
+//   SW 缓存链/golden 像素锚全破 + :449 seen.has 静默丢白名单外散件键（UI_Camera_*）。
+//   增量一律走 scripts/atlas-append-1457.mjs（幂等，自验既有键零改动）。
+const FORCE_FULL = process.argv.includes('--force-full');
+if (!FORCE_FULL && existsSync(OUT_JSON)) {
+  try {
+    const prev = JSON.parse(readFileSync(OUT_JSON, 'utf8'));
+    const appendEra = Object.values(prev.items ?? {}).some((m) =>
+      /Item_Atlas_[23]\.png/.test(String(m?.icon ?? '')));
+    if (appendEra) {
+      console.error('[vanilla-atlas] 拒绝全量重写：vanilla.json 已处于追加通道时代（检测到 Item_Atlas_2/3 页引用）。');
+      console.error('  全量重写会换页换坐标重排既有键（事故 8/21、8/23、09-10 ×2），破坏 SW 缓存链/golden/追加语义。');
+      console.error('  增量请走：node scripts/atlas-append-1457.mjs（幂等）。');
+      console.error('  确需全量重建（白名单扩容等）：清空 public/sprites/vanilla*.json 与 vanilla/ 页后重跑，或加 --force-full（自担风险，事后必须全绿 tests/atlas-append-golden + atlas-lint）。');
+      process.exit(1);
+    }
+  } catch { /* OUT_JSON 坏损时不拦（让正常流程自行报错） */ }
+}
+
 const whitelist = JSON.parse(readFileSync(join(here, 'vanilla-whitelist.json'), 'utf8'));
 
 /** 读 PNG IHDR（8 字节签名 + 4 长度 + 4 类型后即宽高，各 4 字节大端） */

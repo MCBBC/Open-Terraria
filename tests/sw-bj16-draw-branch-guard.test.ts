@@ -107,7 +107,11 @@ const BRANCH_TABLE: Record<number, { branch: 'A_33161' | 'B_33693' | 'C_34788' |
   688: { branch: 'generic', impl: 'generic' }, 689: { branch: 'generic', impl: 'generic' },
   690: { branch: 'generic', impl: 'generic' }, 755: { branch: 'generic', impl: 'generic' },
   838: { branch: 'generic', impl: 'generic' }, 864: { branch: 'generic', impl: 'generic' },
-  917: { branch: 'generic', impl: 'generic' }, 946: { branch: 'generic', impl: 'generic' },
+  917: { branch: 'generic', impl: 'generic' },
+  // 946 泰拉棱镜：原版分派=DrawProjDirect 逐型专支（Main.cs:28677 DrawProj_EmpressBlade,
+  // 非 33161/33693/34788 锚支族→branch 仍 generic）;★SW-BJ56 2026-09-10 本仓接专绘
+  // （MinionProj.draw 946 支=全层 1:1+EmpressBladeDrawer 拖尾）
+  946: { branch: 'generic', impl: 'special' },
   966: { branch: 'generic', impl: 'generic' }, 1025: { branch: 'generic', impl: 'generic' },
 };
 

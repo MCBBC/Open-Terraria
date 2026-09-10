@@ -29,8 +29,8 @@ describe('OPENABLE_BAG_VIDS（ItemID.cs:1211）', () => {
 });
 
 describe('openBagItem 分派（TryOpenContainer_GrantItems :1662-1721 子集）', () => {
-  it('非本引擎物品返回 false（宝藏袋走 Game 持用链）', () => {
-    expect(openBagItem(3328, () => {}, { hardMode: true })).toBe(false);
+  it('非本引擎物品返回 false（★SW-FX21 2026-09-10：BossBag 首支补齐 ItemSlot.cs:1786-1789 → 3328 恒 true 走 openBossBag;旧断言"宝藏袋 false"被 1457 金标推翻）', () => {
+    expect(openBagItem(3328, () => {}, { hardMode: true })).toBe(true);
     expect(openBagItem(2, () => {}, { hardMode: true })).toBe(false);
   });
 });

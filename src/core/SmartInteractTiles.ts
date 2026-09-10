@@ -34,6 +34,14 @@
 //   全部跑完取 DistanceFromCursor 最小者 WinCandidacy（:56-61，等距先序者保位
 //   ——NPC 在前，故 tile 胜出 ⟺ tileDist < npcDist）。
 //   本仓驱动位 = Game.tickSmartInteractTiles（updateSmartCursor 同帧，NPC 支后）。
+//
+// 【SW-RB11a 审计落刀（2026-09-10）】
+//   · F1 CANDIDATE_TILE_DIMS 四处 num11 錯值（207 应 0；3×2/3×3/3×4 三组应缺省 2）
+//     ——见表头注。
+//   · F2 Fill 谓词重建：FILL_TARGET_TYPES 无条件 57 型 + 六条件型（SmartInteractCondCtx）
+//     ——旧 DIMS.has 谓词把 14/469 误入候选,且五条件门整缺（15/497 贴靠圈/237/212
+//     持物/356/663 晷冷却）。
+//   · F3 高亮帧矩形修正表缺块 + 动画排除集缺员 ——见 TileHighlight.ts SW-RB11a 注。
 
 import { TileStore } from '../world/TileStore';
 import { VANILLA_RECIPES, TILE_COUNTS_AS } from '../data/vanillaRecipes';
@@ -57,37 +65,80 @@ export const DISABLE_SMART_INTERACT: ReadonlySet<number> = new Set([
  * 3×2（:332-334）。
  * ★num11 缺省=2（:139），显式 0/4 者按原值——宝箱 21 走缺省 2（frameY%38，
  * 底行 frameY=18 折回锚顶行，见测试锚）。
+ * ★SW-RB11a（2026-09-10）四处錯值订正（逐 case 复核）：
+ *   · 207 原文显式 `num11 = 0`（:200-204）——旧值 2 系误抄 104 块（:205-208 无 num11 行）;
+ *   · 3×2 组 {14,17,26,77,86,89,114,133,217,218,237,377,469}（:214-229）、
+ *     3×3 组 {106,220,228,243,247,283,300-308,355,412,499}（:230-250）、
+ *     3×4 组 {101,102,463,475,597}（:273-280）原文【均不写 num11】→ 缺省 2——
+ *     旧值 0 系相邻 88 块（num11=0）串行误抄。模 18h+2 vs 18h 在 frameY≥首行周期后
+ *     分歧（如桌 14 style1 顶行 frameY=36：38 模=36→锚上 2 行=原版 quirk 照录；
+ *     36 模=0→锚本行=偏离）。
  */
 export const CANDIDATE_TILE_DIMS: ReadonlyArray<readonly [number, number, number, number]> = [
-  ...[136, 144, 494].map((t) => [t, 1, 1, 0] as const),                      // :141-149
-  ...[216, 338].map((t) => [t, 1, 2, 2] as const),                           // :150-153（缺省 2）
-  ...[15, 497].map((t) => [t, 1, 2, 4] as const),                            // :154-157
-  [10, 1, 3, 0] as const,                                                    // :158-162
-  ...[388, 389].map((t) => [t, 1, 5, 2] as const),                           // :163-166（缺省 2）
-  ...[16, 18, 29, 134, 387].map((t) => [t, 2, 1, 2] as const),               // :167-171（缺省 2）
+  ...[136, 144, 494].map((t) => [t, 1, 1, 0] as const),                      // :117-123
+  ...[216, 338].map((t) => [t, 1, 2, 2] as const),                           // :124-128（缺省 2）
+  ...[15, 497].map((t) => [t, 1, 2, 4] as const),                            // :129-134
+  [10, 1, 3, 0] as const,                                                    // :135-139
+  ...[388, 389].map((t) => [t, 1, 5, 2] as const),                           // :140-144（缺省 2）
+  ...[16, 18, 29, 134, 387].map((t) => [t, 2, 1, 2] as const),               // :145-152（缺省 2）
   ...[21, 55, 85, 94, 96, 97, 125, 132, 172, 287, 335, 386, 411, 425, 441,
-    467, 468, 573, 621, 622].map((t) => [t, 2, 2, 2] as const),              // :172-186（缺省 2）
-  ...[79, 139, 510, 511].map((t) => [t, 2, 2, 0] as const),                  // :187-191
+    467, 468, 573, 621, 622].map((t) => [t, 2, 2, 2] as const),              // :153-175（缺省 2）
+  ...[79, 139, 510, 511].map((t) => [t, 2, 2, 0] as const),                  // :176-183
   ...[11, 356, 410, 470, 480, 509, 657, 658, 663, 720, 721, 725].map(
-    (t) => [t, 2, 3, 0] as const),                                           // :192-202
-  [207, 2, 4, 2] as const,                                                   // :203-206（缺省 2）
-  [104, 2, 5, 2] as const,                                                   // :207-210（缺省 2）
-  [88, 3, 1, 0] as const,                                                    // :211-214
+    (t) => [t, 2, 3, 0] as const),                                           // :184-199
+  [207, 2, 4, 0] as const,                                                   // :200-204 显式 num11=0
+  [104, 2, 5, 2] as const,                                                   // :205-208（缺省 2）
+  [88, 3, 1, 0] as const,                                                    // :209-213
   ...[14, 17, 26, 77, 86, 89, 114, 133, 217, 218, 237, 377, 469].map(
-    (t) => [t, 3, 2, 0] as const),                                           // :215-228
+    (t) => [t, 3, 2, 2] as const),                                           // :214-230（缺省 2）
   ...[106, 220, 228, 243, 247, 283, 300, 301, 302, 303, 304, 305, 306, 307,
-    308, 355, 412, 499].map((t) => [t, 3, 3, 0] as const),                   // :229-246
-  ...[354, 455, 491, 733].map((t) => [t, 3, 3, 0] as const),                 // :247-251
-  [487, 4, 2, 0] as const,                                                   // :252-255
-  [212, 4, 3, 2] as const,                                                   // :256-259（缺省 2）
-  [209, 4, 3, 0] as const,                                                   // :260-263
-  ...[101, 102, 463, 475, 597].map((t) => [t, 3, 4, 0] as const),            // :264-269
-  [699, 4, 4, 2] as const,                                                   // :270-273（缺省 2）
-  [464, 5, 4, 2] as const,                                                   // :274-277（缺省 2）
+    308, 355, 412, 499].map((t) => [t, 3, 3, 2] as const),                   // :231-250（缺省 2）
+  ...[354, 455, 491, 733].map((t) => [t, 3, 3, 0] as const),                 // :251-258
+  [487, 4, 2, 0] as const,                                                   // :259-263
+  [212, 4, 3, 2] as const,                                                   // :264-267（缺省 2）
+  [209, 4, 3, 0] as const,                                                   // :268-272
+  ...[101, 102, 463, 475, 597].map((t) => [t, 3, 4, 2] as const),            // :273-280（缺省 2）
+  [699, 4, 4, 2] as const,                                                   // :281-284（缺省 2）
+  [464, 5, 4, 2] as const,                                                   // :285-288（缺省 2）
 ];
 
 /** Campfires 覆盖（:332-334）：num7=3, num8=2（num11 维持缺省 2） */
 export const CAMPFIRE_DIMS: Readonly<[number, number]> = [3, 2];
+
+/**
+ * FillPotentialTargetTiles 无条件 case 表（TileSmartInteractCandidateProvider.cs:385-445，
+ * 57 型照录）——★SW-RB11a（2026-09-10）：旧实现用 `DIMS_BY_TYPE.has(type)` 充当候选
+ * 谓词,而尺寸表含 Fill 表外型（14 桌/469 桌2 无配方站资格）→ 桌族整类被误当候选
+ * 高亮（原版 Fill switch 无 14/469 case、TileUsedInRecipes 亦不含,永不入 targets）。
+ * 其余尺寸表外型（16/17/18/26/77/86/94/96/101/106/114/133/134/172/217/218/220/228/
+ * 243/247/283/300-308/355/412/499/622 等）靠 TileUsedInRecipes ∪ CountsAsWaterForCrafting
+ * 谓词入集（recipes 数据闸门已对账）,与本表并集 ≙ 原版 Fill 语义。
+ * 条件型 15/497/237/212/356/663 不在本表——见 SmartInteractCondCtx 各门。
+ */
+export const FILL_TARGET_TYPES: ReadonlySet<number> = new Set([
+  10, 11, 21, 29, 55, 79, 85, 88, 89, 97, 102, 104, 125, 132, 136, 139, 144,
+  207, 209, 216, 287, 335, 338, 354, 377, 386, 387, 388, 389, 410, 411, 425,
+  441, 455, 463, 464, 467, 468, 470, 475, 480, 487, 491, 494, 509, 510, 511,
+  573, 597, 621, 657, 658, 699, 720, 721, 725, 733,
+]);
+
+/** 条件型候选门（:446-477 逐支）入参——undefined 时取「无玩家/静息世界」缺省：
+ *  15/497 出 40px 贴靠圈=不候选、237/212 未持钥匙物=不候选、356/663 冷却静息=候选。 */
+export interface SmartInteractCondCtx {
+  /** 15/497 门 IsWithinSnappngRangeToTile(i,j,40)（Player.cs:17476-17482）：
+   *  dist((i×16+8,j×16+8),(Center.X, Bottom.Y−16)) ≤ 40 */
+  playerCX: number;
+  playerBottomY: number;
+  /** 237 LihzahrdAltar 门 player.HasItem(1293=LihzahrdPowerCell)（:453-457） */
+  hasLihzahrdPowerCell: boolean;
+  /** 212 SnowballLauncher 门 player.HasItem(949=Snowball)（:459-463） */
+  hasSnowball: boolean;
+  /** 356 Sundial 门 `!Main.fastForwardTimeToDawn && (netMode==1 || sundialCooldown==0)`
+   *  （:465-469,单机化=冷却 0） */
+  sundialUsable: boolean;
+  /** 663 Moondial 门 `!Main.fastForwardTimeToDusk && (netMode==1 || moondialCooldown==0)` */
+  moondialUsable: boolean;
+}
 
 const DIMS_BY_TYPE: ReadonlyMap<number, readonly [number, number, number]> = (() => {
   const m = new Map<number, readonly [number, number, number]>();
@@ -169,13 +220,39 @@ export function scanSmartInteractTiles(
   mouseWX: number, mouseWY: number,
   npcWinDist: number,
   fullInteraction = true,
+  cond?: SmartInteractCondCtx,
 ): SmartInteractTileScan {
   const out: SmartInteractTileScan = { coords: [], selected: [], winDist: null, winX: -1, winY: -1 };
   const mx = Math.floor(mouseWX / 16);
   const my = Math.floor(mouseWY / 16);
 
-  // ---- FillPotentialTargetTiles（:359-408）：候选谓词 Campfires ∪ TileUsedInRecipes
-  //      ∪ CountsAsWaterForCrafting ∪ 硬编码表（DIMS_BY_TYPE 有键者）----
+  // ---- FillPotentialTargetTiles（:359-480）★SW-RB11a：候选谓词 = Campfires ∪
+  //      TileUsedInRecipes ∪ CountsAsWaterForCrafting ∪ FILL_TARGET_TYPES（无条件
+  //      57 型）∪ 条件型六支（15/497 贴靠 40px、237/212 持物、356/663 晷冷却）——
+  //      旧谓词 DIMS_BY_TYPE.has 会把 14/469 等表外型误入候选（见 FILL_TARGET_TYPES 注）。
+  //      尺寸展开（下方逐目标 loop）仍读 DIMS_BY_TYPE——凡入 targets 的型必在尺寸表
+  //      有键（原版两表同源,尺寸表 14/469 键在原版即死键）。
+  const isTargetType = (type: number, tx: number, ty: number): boolean => {
+    if (CAMPFIRE_TILES.has(type) || tileUsedInRecipes().has(type)
+      || COUNTS_AS_WATER_FOR_CRAFTING.has(type) || FILL_TARGET_TYPES.has(type)) return true;
+    switch (type) {
+      case 15:
+      case 497:
+        if (!cond) return false;
+        return Math.hypot(tx * 16 + 8 - cond.playerCX,
+          ty * 16 + 8 - (cond.playerBottomY - 16)) <= 40;      // :448-451
+      case 237:
+        return cond?.hasLihzahrdPowerCell ?? false;             // :453-457
+      case 212:
+        return cond?.hasSnowball ?? false;                      // :459-463
+      case 356:
+        return cond?.sundialUsable ?? true;                     // :465-469
+      case 663:
+        return cond?.moondialUsable ?? true;                    // :471-475
+      default:
+        return false;
+    }
+  };
   const targets: Array<[number, number]> = [];
   for (let i = lx; i <= hx; i++) {
     for (let j = ly; j <= hy; j++) {
@@ -183,8 +260,7 @@ export function scanSmartInteractTiles(
       const si = store.idx(i, j);
       if (!(store.flags[si] & 1)) continue;                       // !tile.active()
       const type = store.type[si];
-      if (CAMPFIRE_TILES.has(type) || tileUsedInRecipes().has(type)
-        || COUNTS_AS_WATER_FOR_CRAFTING.has(type) || DIMS_BY_TYPE.has(type)) {
+      if (isTargetType(type, i, j)) {
         targets.push([i, j]);
       }
     }

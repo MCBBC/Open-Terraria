@@ -232,7 +232,7 @@ import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } fr
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
-import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, getSelectionGlowColor, highlightCellRect, loadHighlightMask } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）
+import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, HIGHLIGHT_ANIM_WHEN_LIT, getSelectionGlowColor, highlightCellRect, loadHighlightMask } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）;SW-RB11a 补条件动画门
 import { smartInteractTileFrame } from '../core/SmartInteractTiles';   // ★SW-BJ54：候选帧态（Game.update 侧每帧写）
 import { isDynamicAnimSheet, campfireYOffset, fountainYOffset } from './TileAnim';
 import { frameMergesWith } from './TileMergeFamily';
@@ -14879,6 +14879,9 @@ export class Renderer {
       if (!(store.flags[si] & 1)) continue;
       const type = store.type[si];
       if (!TILE_HAS_OUTLINES.has(type) || HIGHLIGHT_ANIM_EXCLUDED.has(type)) continue;
+      // ★SW-RB11a：条件动画型点亮态排除（GetTileDrawData :6044-6056 fy≥54 =
+      //  addFrY=Main.tileFrame*54——静息态 top=2 照画,动画态不画=与排除集同债）
+      if (HIGHLIGHT_ANIM_WHEN_LIT.has(type) && store.frameY[si] >= 54) continue;
       let lr = 255, lg = 255, lb = 255;
       if (c.x >= rx && c.y >= ry && c.x < rx + rw && c.y < ry + rh) {
         const li = (c.y - ry) * rw + (c.x - rx);

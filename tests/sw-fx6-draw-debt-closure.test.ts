@@ -385,3 +385,27 @@ describe('SW-FX6 债⑦ 1092 书弹 dir≡None 定谳（无刀,语义锁）', ()
     expect(rec.scales, 'dir≡None ⇒ 恒无 scale 镜像').toEqual([]);
   });
 });
+
+// =====================================================================
+// ★SW-RB11e 2026-09-10 红队补刀：641 月门自发光（AI_123 flag 支 Projectile.cs:37744
+//  `Lighting.AddLight(Center, (0.3,0.9,0.7)*Opacity)`）——SW-FX6 债①清偿时漏接
+//  lightRGB 表（月门在暗处既不发光自身也吃不到自身光=几乎不可见）。643 原版
+//  无 AddLight（AI_123 全支唯一 AddLight 在 flag(641) 分支内）→ 恒 null。
+// =====================================================================
+describe('SW-RB11e 债①补刀：641 lightRGB (0.3,0.9,0.7)/643 无光（Projectile.cs:37744）', () => {
+  function lightOf(id: number): [number, number, number] | null {
+    const { player } = makeHooks();
+    return (mkMinion(id, player, true) as unknown as {
+      lightRGB: [number, number, number] | null;
+    }).lightRGB;
+  }
+  it('641 = [0.3, 0.9, 0.7]（AddLight 三通道 1:1,Opacity 增幅=常数档同 613/623 口径）', () => {
+    expect(lightOf(641)).toEqual([0.3, 0.9, 0.7]);
+  });
+  it('643 彩虹水晶 = null（AI_123 全支唯一 AddLight 在 641 flag 支内）', () => {
+    expect(lightOf(643)).toBeNull();
+  });
+  it('变异证红：摘 641 case → 表回退 null（判别力）', () => {
+    expect(MINION_TS).toContain('case 641: return [0.3, 0.9, 0.7];');
+  });
+});

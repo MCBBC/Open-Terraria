@@ -103,6 +103,14 @@ export function builderAccTotalIcons(g: {
     + 1 + (unlockedBiomeTorches ? 1 : 0);
 }
 
+/** 图标列顶行 Y（★SW-RB11f F4 单源纯函数；Main.cs:48166-48169）：
+ *  start.Y=(10,77) → `start.Y += 24 * torchGodIcons`（:48166）→ 每行 +24 →
+ *  totalDrawnIcons>=10 时整列再上移 24（:48167-48169 flag 支）。
+ *  旧实现漏 torch 支 = 炬神恩赐开∧total<10 时列与方块替换/群系炬图标重叠。 */
+export function builderAccColumnTopY(unlockedBiomeTorches: boolean, pushUp: boolean): number {
+  return 77 + (unlockedBiomeTorches ? 24 : 0) - (pushUp ? 24 : 0);
+}
+
 // ---- 配饰槽 vid 扫描（Player.cs:12897 旗位判定的仓内等价）----
 /** 装备式配饰（armor[3..accSlotMax)，Player.cs:36326 armor[3-7 基座+8 恶魔之心]）
  *  当前是否持有 vid（重力地球仪 1131 / 图标门 486/2799/3619/3611/3624/2216/3061/5126）。

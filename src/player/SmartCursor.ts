@@ -21,7 +21,7 @@
 // 我们的 tile id 与原版 tile id 通过 TILE_DEFS[t].vanilla.sheet 桥接（sheet = 原版 Tiles_N 表 id）；
 // 物品原版 id 通过 ITEM_DEFS[i].vid 或 key 前缀 vi_(\d+)_ 反解。
 import type { ItemDef } from '../data/items';
-import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
@@ -55,13 +55,12 @@ const IS_BEAM = new Set([124, 561, 574, 575, 576, 577, 578]);
 /** TileID.cs:243 Platforms（平台族 = tileSolidTop） */
 const PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
 
-/** Main.tileTable 全表（Main.cs:7018-7100 77 条赋值——桌面/工作台/家具承重族；
- *  Step_Boulders :917 支撑谓词消费，红蓝对抗 F4 收编） */
-const TILE_TABLE_SHEETS = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392,
-  393, 394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558,
-  559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632,
-  640, 643, 644, 645, 710]);
+/** Main.tileTable 全表——★SW-RB11d（2026-09-10）单源化：本地 76 条副本（曾漏
+ *  Main.cs:10124-10131 for 循环臂 435-439 五队伍平台）退役，改引 data/tiles.ts
+ *  TILE_TABLE_SHEETS 权威表（81 条，上方 import）。行为零差备案：本消费点
+ *  （Step_Boulders :917/:921 承重谓词）同句 tileNoAttachType 即拒 435-439
+ *  （原版 tileNoAttach 循环臂 Main.cs:10129 同置位），19/427 两副本同有——
+ *  单源化只为防再漂移。红蓝对抗 F4 收编面维持 */
 
 /** TileID.cs:401 Torches（tile 级：只有 4） */
 const TORCH_TILES = new Set([4]);

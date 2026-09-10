@@ -884,7 +884,10 @@ export class MinionProj extends Entity {
    *  755 血蝙蝠 = Crimson CastLightOpen（:48604 GetColor=Color.Crimson(220,20,60)）；
    *  613 星尘细胞 (0.2,0.6,0.7)（:62191）；623 守护者 (0.9,0.9,0.7)（:41997）；
    *  1094 Foxparks (0.5,0.3,0.1)（:55275）；533 致命球 ai0%3≠2 橙/≡2 青（:28542-
-   *  28551，无态机取橙档）；653 同伴方块白光 0.5（:46598 档位近似）。387/388/
+   *  28551，无态机取橙档）；653 同伴方块白光 0.5（:46598 档位近似）。
+   *  ★SW-RB11e 2026-09-10：641 月门补 (0.3,0.9,0.7)（AI_123 flag 支 :37744
+   *  `Lighting.AddLight(Center, (0.3,0.9,0.7)*Opacity)`,Opacity 增幅未建模=常数档,
+   *  同 613/623 口径；643 彩虹水晶原版无 AddLight 不进表）。387/388/
    *  373/375/407/423/266/蜘蛛/虎/阿比盖尔/龙链原版零自发光。 */
   get lightRGB(): [number, number, number] | null {
     switch (this.projId) {
@@ -894,6 +897,7 @@ export class MinionProj extends Entity {
       case 1094: return [0.5, 0.3, 0.1];
       case 533: return [0.8, 0.3, 0.1];
       case 653: return [0.5, 0.5, 0.5];
+      case 641: return [0.3, 0.9, 0.7];   // ★SW-RB11e：AI_123 :37744（月门青绿光）
       default: return null;
     }
   }
@@ -2667,14 +2671,19 @@ export class MinionProj extends Entity {
 
   /** oldPos/oldRot 历史环（★SW-BJ56：TrailingMode[946]=2,ProjectileID.cs:385 →
    *  Projectile.cs:17237-17246 每拍整环移位、oldPos[0]/oldRot[0]=最新;长度=
-   *  oldPos.Length=10,平铺 [x,y,rot]×10,consume 位 = 946 draw 拖尾/EmpressBladeDrawer） */
+   *  oldPos.Length=TrailCacheLength[946]=20（ProjectileID.cs:387 CreateIntSet 第 1 参
+   *  缺省 10,946 显式覆写 20;SetDefaults :723 按 TrailCacheLength[Type] 重分配）,
+   *  平铺 [x,y,rot]×20,consume 位 = 946 draw 拖尾/EmpressBladeDrawer。
+   *  ★SW-RB11a（2026-09-10）：旧值 10 系把 CreateIntSet 缺省当覆写值——拖尾环
+   *  少一半=尾迹视觉减半（EmpressBladeDrawer.PrepareStrip expectedPairs=
+   *  proj.oldPos.Length=20,VertexStrip.cs:54-63 progressOnStrip=i/(pairs−1)）。 */
   private tHist: number[] = [];
 
   /** AI 后压栈（原版 TrailingMode=2 在 AI() 之后的 Update 段 oldPos[0]=position :17243） */
   private terraprismaBody(game: GameHooks, p: Player, dmg0: number): void {
     this.terraprismaAI(game, p, dmg0);
     this.tHist.unshift(this.cx, this.cy, this.rot);
-    if (this.tHist.length > 30) this.tHist.length = 30;   // oldPos.Length=10
+    if (this.tHist.length > 60) this.tHist.length = 60;   // oldPos.Length=TrailCacheLength[946]=20（SW-RB11a）
   }
 
   private terraprismaAI(game: GameHooks, p: Player, dmg0: number): void {
@@ -6177,7 +6186,8 @@ export class MinionProj extends Entity {
     //    XNA Color×float 四通道同乘 → 本仓既定近似折进 globalAlpha（641/755 支同式）。
     //  · 拖尾 = EmpressBladeDrawer.Draw（Terraria.Graphics/EmpressBladeDrawer.cs:16-33,
     //    Main.cs:28688 前置）：VertexStrip.PrepareStrip(proj.oldPos,oldRot,
-    //    StripColors,StripWidth=36,expectedPairs=oldPos.Length=10,includeBacksides) —
+    //    StripColors,StripWidth=36,expectedPairs=oldPos.Length=TrailCacheLength[946]
+    //    =20（ProjectileID.cs:387,SW-RB11a 订正）,includeBacksides) —
     //    TrailingMode[946]=2（ProjectileID.cs:385,Projectile.cs:17237-17246 每拍整环
     //    移位 oldPos[0]=最新）；StripColors=Lerp(ColorStart,ColorEnd,GetLerpValue(0,
     //    0.7,p))×(1−GetLerpValue(0,0.98,p)),A/=2（EmpressBladeDrawer.cs:35-42）;SSD=
@@ -6193,28 +6203,32 @@ export class MinionProj extends Entity {
       const op = 1;                                                     // Opacity=1−alpha/255,alpha 恒 0
       const num = this.rot - Math.PI / 2;                               // :36572
       const num2 = op * 0.3;                                            // :36573
-      const num20 = (gtwSec() % 3) / 3;                                 // :28680
-      const num21 = Math.max(1, own?.maxMinions ?? 1);                  // :28681
-      const num22 = ((this.id % num21) / num21) + num20;                // :28682 IndexForVisuals=id
+      const num22 = empressHuePhase(this.id, own?.maxMinions ?? 1, gtwSec());
       const hueC = fairyHueRgb(((num22 + 0.5) % 1 + 1) % 1);            // :36566 num=(hueRaw+0.5)%1
       const tinted = tintFrameHue(img, hueC);                           // 女皇色剪影（每帧一染,全层共用）
       const num145a = (63 / 255);                                       // A=255×0.5 → /2 =63（:36568/:36575）
       // ①幻影 6 层（:36578-36586）
       const lerpValue = gl(60, 50, this.tA0);
       const num3 = gl(70, 50, this.tA0) * gl(40, 45, this.tA0);
-      if (tinted && num3 > 0) {
-        for (let f = 0; f < 1; f += 1 / 6) {
+      if (tinted) {
+        // ①幻影 6 层（:36578-36586,门= num2>0f :36574——num3 因子进色乘,num3=0 时
+        //   XNA 画 (0,0,0,0) 色无贡献,本仓 globalAlpha=0 同效）
+        //   ★float 环界（C# float 6×(1/6f)=1.00000012>1 → 恰 6 圈 f∈{0,1/6..5/6};
+        //   JS double 累加 0.999…9<1 会多出第 7 圈 f≈1）——Math.fround 逐拍钳 float32
+        //   = C# `float num4` 累加同相（:22）
+        for (let f = 0; f < 1; f = Math.fround(f + Math.fround(1 / 6))) {
+          const a = num145a * num2 * (1 - f) * num3;
           const ox = Math.cos(num) * (-120 * f * lerpValue);
           const oy = Math.sin(num) * (-120 * f * lerpValue);
           ctx.save();
           ctx.imageSmoothingEnabled = false;
-          ctx.globalAlpha = num145a * num2 * (1 - f) * num3;
+          ctx.globalAlpha = a;
           ctx.translate(this.cx + ox, this.cy + oy);
           ctx.rotate(num);
           ctx.drawImage(tinted, -img.width / 2 * 1.125, -img.height / 2 * 1.125, img.width * 1.125, img.height * 1.125);
           ctx.restore();
         }
-        // ②环晕 4 层（:36588-36591）
+        // ②环晕 4 层（:36588-36591,色=女皇色×num2 无 num3 因子=恒可见）
         for (let f5 = 0; f5 < 1; f5 += 0.25) {
           const ox = Math.cos(f5 * Math.PI * 2 + num) * 4 * 0.75;
           const oy = Math.sin(f5 * Math.PI * 2 + num) * 4 * 0.75;
@@ -6242,29 +6256,10 @@ export class MinionProj extends Entity {
       ctx.restore();
       // ⑤拖尾（EmpressBladeDrawer :16-33）：oldPos 环 = tHist（terraprismaBody 每拍压栈）
       if (this.tHist.length >= 6 && typeof (r as unknown as { queueTrailShade?: unknown }).queueTrailShade === 'function') {
-        const hueA = fairyHueRgb((((num22 % 1) + 0.5) % 1 + 1) % 1);   // ColorStart(:28684)
-        const hueB = fairyHueRgb(((((num22 + 0.5) % 1) + 0.5) % 1 + 1) % 1); // ColorEnd(:28685)
-        const n = this.tHist.length / 3;                               // ≤10（oldPos.Length）
-        const pairs = 10;                                              // expectedPairs=oldPos.Length(:36632)
-        const pts = [];
-        for (let i = 0; i < n; i++) {
-          const p = i / (pairs - 1);                                   // VertexStrip.cs:55-63
-          const g1 = Math.max(0, Math.min(1, p / 0.7));                // GetLerpValue(0,0.7,p)(:36-38)
-          const g2 = Math.max(0, Math.min(1, p / 0.98));
-          const fade = 1 - g2;
-          pts.push({
-            x: this.tHist[i * 3], y: this.tHist[i * 3 + 1],
-            hw: 36,                                                    // StripWidth=36=半宽（VertexStrip.cs:156-159）
-            rot: this.tHist[i * 3 + 2],
-            r: (hueA[0] + (hueB[0] - hueA[0]) * g1) * fade,
-            g: (hueA[1] + (hueB[1] - hueA[1]) * g1) * fade,
-            b: (hueA[2] + (hueB[2] - hueA[2]) * g1) * fade,
-            a: 0.5 * fade,
-          });
-        }
+        const pts = buildEmpressTrailPts(this.tHist, num22);
         try {
           (r as unknown as { queueTrailShade?: (sp: unknown) => void }).queueTrailShade?.({
-            set: 'EmpressBlade', pts, opacity: 1, expectedPairs: pairs, time: gtwSec(),
+            set: 'EmpressBlade', pts, opacity: 1, expectedPairs: 20, time: gtwSec(),
           });
         } catch { /* 拖尾单帧失败不拖垮本体 */ }
       }
@@ -6470,9 +6465,11 @@ export function fairyHueRgb(hue: number): [number, number, number] {
 /** 女皇色剪影（946 幻影/环晕/色罩层共用）：每帧一染（色相随 GlobalTime 循环,缓存无效）
  *  ——source-atop 保 silhouette α,与 tintFrameCache 同工艺;返回共享 scratch（调用即画,
  *  同帧内多次 drawImage 安全,跨实体下一帧重染）。 */
-const HUE_TINT_SCRATCH = (typeof document !== 'undefined') ? document.createElement('canvas') : null;
+let HUE_TINT_SCRATCH: HTMLCanvasElement | null = null;
 function tintFrameHue(src: HTMLCanvasElement, rgb: readonly [number, number, number]): HTMLCanvasElement | null {
-  if (!HUE_TINT_SCRATCH || typeof document === 'undefined') return null;
+  if (typeof document === 'undefined') return null;
+  HUE_TINT_SCRATCH ??= document.createElement('canvas');
+  if (!HUE_TINT_SCRATCH) return null;
   if (HUE_TINT_SCRATCH.width !== src.width || HUE_TINT_SCRATCH.height !== src.height) {
     HUE_TINT_SCRATCH.width = src.width;
     HUE_TINT_SCRATCH.height = src.height;
@@ -6487,6 +6484,49 @@ function tintFrameHue(src: HTMLCanvasElement, rgb: readonly [number, number, num
   cx2.fillRect(0, 0, HUE_TINT_SCRATCH.width, HUE_TINT_SCRATCH.height);
   cx2.globalCompositeOperation = 'source-over';
   return HUE_TINT_SCRATCH;
+}
+
+/** ★SW-BJ56：女皇剑色相相位（Main.cs:28680-28682 1:1,Export 供测试）——
+ *  num22 = IndexForVisuals % max(1,maxMinions)/max(1,maxMinions) + GlobalTimeWrappedHourly%3/3 */
+export function empressHuePhase(id: number, maxMinions: number, gtw: number): number {
+  const num20 = (gtw % 3) / 3;
+  const num21 = Math.max(1, maxMinions);
+  return ((id % num21) / num21) + num20;
+}
+
+export interface EmpressTrailPt { x: number; y: number; hw: number; rot: number; r: number; g: number; b: number; a: number }
+
+/** ★SW-BJ56：EmpressBladeDrawer 条带顶点色列（Terraria.Graphics/EmpressBladeDrawer.cs
+ *  :16-42 1:1,Export 供测试）。tHist = [x,y,rot]×N 平铺（[0..2]=最新,TrailingMode=2 压栈序
+ *  Projectile.cs:17237-17246）;pairs=expectedPairs=oldPos.Length=TrailCacheLength[946]
+ *  =20（ProjectileID.cs:387,SW-RB11a 订正;PrepareStrip 第 6 参,progressOnStrip =
+ *  i/(pairs−1) VertexStrip.cs:55-63——与实际点数无关,短条带只摊到 (n−1)/19）。
+ *  逐点色 = Lerp(ColorStart,ColorEnd,GetLerpValue(0,0.7,p))×(1−GetLerpValue(
+ *  0,0.98,p))、A/=2(:35-42)——XNA 侧顶点 A 实为 0（alphaChannelMultiplier=0),(One,One)
+ *  全量直加下 rgb 承载贡献（GLSpriteLayer TRAIL_FS 注）;本仓 a=0.5×(1−g2) 兼作 CPU 路门。
+ *  hw=36=StripWidth 恒半宽（AddVertexPair ±(rot−π/2)×36,VertexStrip.cs:153-160）。 */
+export function buildEmpressTrailPts(tHist: readonly number[], huePhase: number): EmpressTrailPt[] {
+  const hueA = fairyHueRgb((((huePhase % 1) + 0.5) % 1 + 1) % 1);          // ColorStart(:28684)
+  const hueB = fairyHueRgb(((((huePhase + 0.5) % 1) + 0.5) % 1 + 1) % 1);  // ColorEnd(:28685)
+  const pairs = 20;                        // oldPos.Length=TrailCacheLength[946]（SW-RB11a）
+  const n = Math.min(Math.floor(tHist.length / 3), pairs);
+  const pts: EmpressTrailPt[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = i / (pairs - 1);
+    const g1 = Math.max(0, Math.min(1, p / 0.7));
+    const g2 = Math.max(0, Math.min(1, p / 0.98));
+    const fade = 1 - g2;
+    pts.push({
+      x: tHist[i * 3], y: tHist[i * 3 + 1],
+      hw: 36,
+      rot: tHist[i * 3 + 2],
+      r: (hueA[0] + (hueB[0] - hueA[0]) * g1) * fade,
+      g: (hueA[1] + (hueB[1] - hueA[1]) * g1) * fade,
+      b: (hueA[2] + (hueB[2] - hueA[2]) * g1) * fade,
+      a: 0.5 * fade,
+    });
+  }
+  return pts;
 }
 
 /**

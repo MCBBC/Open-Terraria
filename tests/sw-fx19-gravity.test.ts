@@ -108,6 +108,10 @@ describe('WallslideMovement 倒挂镜像（:21955-22016 全速 ×gravDir）', ()
     const inv = new Inventory();
     inv.armor[3] = { id: iid(953), stack: 1 };                 // spikedBoots=1
     const p = new Player(100 * 16 - 20, 34 * 16, inv);         // 柱左贴脸,倒挂上坠
+    // ★SW-RB11f：倒挂态补重力源（buff 18——Player.cs:26893-26937 总闸迁入
+    //  fixedUpdate 后,无源倒挂被 :26936-26937 else 支每拍归 1 = 原版不可达态;
+    //  药水在身 + 不按 ↑ → else 支不进,倒挂驻存）
+    p.buffs.apply(BuffType.Gravitation, 600);
     p.gravDir = -1;
     p.inputX = 1;
     p.inputDown = true;
@@ -121,6 +125,7 @@ describe('WallslideMovement 倒挂镜像（:21955-22016 全速 ×gravDir）', ()
     const inv = new Inventory();
     inv.armor[3] = { id: iid(984), stack: 1 };                 // spikedBoots=2（:15180 =2）
     const p = new Player(100 * 16 - 20, 34 * 16, inv);
+    p.buffs.apply(BuffType.Gravitation, 600);                  // ★SW-RB11f：倒挂源同上
     p.gravDir = -1;
     p.inputX = 1;
     let saw = false;
@@ -140,6 +145,7 @@ describe('StickyMovement Y 阻尼镜像（Player.cs:23168-23208 双支）', () =
       const WEB = TILE_BY_KEY['v_51_cobweb']!;
       for (let y = 18; y <= 21; y++) w.store.setTileSilent(20, y, WEB);
       const p = new Player(20 * 16, 17 * 16, new Inventory());
+      p.buffs.apply(BuffType.Gravitation, 600);                // ★SW-RB11f：倒挂源（同上）
       p.gravDir = gravDir;
       p.vy = 8;
       p.fixedUpdate(1 / 60, makeGame(w));
@@ -163,6 +169,7 @@ describe('飞毯倒挂禁新激活（Player.cs:26312-26314;已激活续期 :2203
       const inv = new Inventory();
       inv.armor[3] = { id: iid(934), stack: 1 };               // Flying Carpet → carpet
       const p = new Player(100 * 16, 40 * 16, inv);
+      p.buffs.apply(BuffType.Gravitation, 600);                // ★SW-RB11f：倒挂源（同上）
       p.gravDir = gravDir;
       p.vy = gravDir === 1 ? 2 : -2;
       p.inputJump = true;

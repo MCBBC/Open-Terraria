@@ -1,6 +1,5 @@
 // 弹幕命中小动物回归:原版小动物是 NPC,任何伤害即死——
 // 箭/法弹此前只遍历 enemies 桶,critters 桶漏判,射松鼠无效果。
-import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 // Critter.ts 已由小动物 Enemy 化重构移除（066d742b）——小动物=Enemy.fromVanilla 入
@@ -19,7 +18,9 @@ const makeSquirrel = (): Enemy => {
 function makeGame(critters: unknown[]): GameHooks {
   const world = new World(64, 32, 42, '测试');
   // Enemy.hurt 死亡掉落 ctx 读 game.player 的 hp/luck（原版 Main.player[myPlayer] 恒在）
-  const stubPlayer = { hp: 100, maxHp: 100, mana: 20, maxMana: 20, luck: 0, dead: false, cx: 0, cy: 0 };
+  // ★SW-RB11c：补 addDPS 桩（Enemy.hurt :13739/:13801 pl?.addDPS 消费,?. 只防 null
+  //  不防缺方法——2026-09-02 DPS 计量批后本夹具缺此键=命中即 TypeError,两用例伪红）
+  const stubPlayer = { hp: 100, maxHp: 100, mana: 20, maxMana: 20, luck: 0, dead: false, cx: 0, cy: 0, addDPS: (_d: number) => {} };
   return {
     world,
     player: stubPlayer,
@@ -41,7 +42,11 @@ describe('弹幕命中小动物', () => {
     expect(squirrel.dead).toBe(false);
     const game = makeGame([squirrel]);
     // 松鼠在 (40,20) 格;箭从左侧水平飞入
-    const arrow = new Arrow(40 * 16 - 20, 20 * 16 + 4, 8, 0, 9, 1, 1, VANILLA_ITEM_KEY_BY_ID[40]);
+    // ★SW-RB11c（2026-09-10）FX9 codemod 残留清偿：旧 ctor 第 8 参 dropKey
+    //  （VANILLA_ITEM_KEY_BY_ID[40] 表达式形态,codemod 只摘了 null/'vi_*' 字面量
+    //  形态,漏了索引表达式）随回收链摘除——字符串入 opts 槽运行时被静默忽略
+    //  （string 属性访问恒 undefined）,但 tsc TS2559 恒红。
+    const arrow = new Arrow(40 * 16 - 20, 20 * 16 + 4, 8, 0, 9, 1, 1);
     for (let i = 0; i < 8; i++) arrow.fixedUpdate(1 / 60, game);
     expect(squirrel.dead).toBe(true);
     expect(arrow.dead).toBe(true);
@@ -60,7 +65,7 @@ describe('弹幕命中小动物', () => {
     const squirrel = makeSquirrel();
     const game = makeGame([squirrel]);
     // 箭在松鼠下方 3 格飞过
-    const arrow = new Arrow(40 * 16 - 20, 23 * 16, 8, 0, 9, 1, 1, VANILLA_ITEM_KEY_BY_ID[40]);
+    const arrow = new Arrow(40 * 16 - 20, 23 * 16, 8, 0, 9, 1, 1);   // ★SW-RB11c 同上:摘残留 dropKey 实参
     for (let i = 0; i < 8; i++) arrow.fixedUpdate(1 / 60, game);
     expect(squirrel.dead).toBe(false);
     expect(arrow.dead).toBe(false);

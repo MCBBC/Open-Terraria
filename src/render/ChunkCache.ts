@@ -8,7 +8,7 @@ import { treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 // 树油漆 style 派生已迁 VanillaTiler（2026-08-25：WindSway 同源消费防环）——re-export 保既有引用面
 export { treeGroundVariant, treeTrunkPaintStyle, palmTreePaintStyle } from './VanillaTiler';
 import { frameMergesWith } from './TileMergeFamily';
-import { swayBakeSkip } from './WindSway';
+import { swayBakeSkip, tintedSwayCellForGlow } from './WindSway';
 import { tileAnim, isDynamicAnimSheet } from './TileAnim';
 import { tileFrameCapture } from '../debug/TileFrameCapture';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
@@ -587,6 +587,15 @@ export class ChunkCache {
               if (isTreeCrownFrame(v.sheet, st2.frameX[i], st2.frameY[i])) {
                 drawTreeCell(gctx, this.autotiler.atlas, st2, x, y, st2.frameX[i], st2.frameY[i],
                   px, py, v.sheet, true, trees, 0, undefined, st2.paint[i]);
+              } else if (st2.paint[i] > 0
+                && tintedSwayCellForGlow(this.autotiler.atlas, st2, x, y, st2.type[i],
+                  st2.frameX[i], st2.frameY[i], st2.paint[i], trees)) {
+                // ★SW-RB11e 2026-09-10：sway 族补画同样要吃 paint（涂漆∧荧光并置时
+                // 叠层不得显原色）——tintedSwayCellForGlow = WindSway 摆动层染色
+                // 单源（scratch 画格+tintRegion,特判组分派同烘焙油漆 pass）。
+                gctx.drawImage(tintedSwayCellForGlow(this.autotiler.atlas, st2, x, y,
+                  st2.type[i], st2.frameX[i], st2.frameY[i], st2.paint[i], trees)!,
+                  px, py);
               } else {
                 drawVanillaCell(gctx, this.autotiler.atlas, v.sheet, v.frame, v.fw ?? 1, v.fh ?? 1,
                   st2, x, y, st2.type[i],

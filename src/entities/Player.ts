@@ -4173,6 +4173,19 @@ export class Player extends Entity {
       this.inputUp = newRight;                          // Up←R(新)（原版怪癖同款）
       this.inputDown = wasUp;                           // Down←Up
     }
+    // ★SW-RB11f F1/F2：重力倒置总闸调用点迁入（原版位序 = CCed 清输入 :25436 →
+    //   hover 锁存 :25452 → 翻转门 :26892 → UpdateControlHolds 末拍快照 :29324-29331；
+    //   原版 `if (dead)` :24943 早退于翻转门前 → 死亡态不翻不写）。旧位在
+    //   Game.fixedUpdate 读冻结/困惑换位【前】的裸 inputUp = 冻结/石化/困惑态可翻转
+    //   （F2），且 Game.gravLatch 只清不置 → upEdge 退化电平、按住↑每拍翻转（F1）。
+    //   本位与 hover 锁存共用同一 prevTickUpHeld 快照（= 原版同帧同 releaseUp 读数，
+    //   快照仍由 updateHoverLatch 末尾单点更新）。
+    if (!this.dead) {
+      updateGravityControls(
+        this, this.inputUp && !this.prevTickUpHeld,
+        (n, v, x, y) => game.playSfx(n, v, x, y),
+      );
+    }
     // 悬停锁存更新（★SW-FX14 Player.cs:25452-25484——原版位序在 CCED 清输入段
     // 之后、移动积分之前；此时 inputUp/Down 已定格（冻/惑清零与换位 quirk 均在
     // 上方），vy 为上一拍碰撞末速 = 原版 Update 中段读取语义）
@@ -5443,8 +5456,12 @@ export class Player extends Entity {
       //  按 ↓ 4、否则 0.5 缓滑（:21995-21999）,尘 31 恒出（:22002）。曾布尔化
       //  1/2 同档 vy=min(vy,1.5)——按 ↓ 快滑/驻停上攀两语义整缺。
       //  蹬墙跳仍统一走 JumpMovement 外门（wallCling=sliding 仓内承载位）。
-      if (!this.onGround && eq.spikedBoots > 0 && this.hitWall && this.inputX !== 0 && !this.mount.active) {
+      if (eq.spikedBoots > 0 && this.hitWall && this.inputX !== 0 && !this.mount.active) {
         // ★mount.Active 排除（WallslideMovement 头门 :21935——坐骑中贴墙滑/驻停整段不跑;
+        //  ★SW-RB11f F3：`!this.onGround` 撤除——原版头门（:21935-21937 slideDir==0∨
+        //  spikedBoots<=0∨mount.Active∨方向不符）【无】落地态项,落地排除由内层 vy 门
+        //  自然承载（gd=1: vy>0/vy>0.5 恒假;gd=-1: 天花板挂壁 vy=0 <gravity=原版
+        //  驻停-active 态,旧外门把整类堵死）。
         //  老鼠坐骑 55 爬墙走上方 ratClimb 专属支,非 55 坐骑两支皆拒）
         const slideDirSign = Math.sign(this.inputX);
         // ★SW-FX19：门与速度全 ×gravDir（:21957 头门 gravDir==1→vy>0 / gravDir==-1→
@@ -5452,23 +5469,64 @@ export class Player extends Entity {
         //   速度字面 :21960/:21988-21997/:21996/:21998 均 `f*gravDir`——倒挂即镜像,
         //   gravDir=1 时数值逐位恒等）
         const gdSlide = this.gravDir;
-        if (eq.spikedBoots >= 2 && this.vy * gdSlide > 0) {
-          // ≥2 驻停档（:21955-21990）：↓ 快滑 4 / 否则 (−gravity+1e-5) 缓慢上攀
-          if (this.inputDown) {
+        // ★SW-RB11b F1：flag 双格探针（:21944-21954）：slideDir 向邻列
+        //  num=position.X(+width if slideDir==1)+slideDir、num2=gd>0?(y+h+1):(y-1)，
+        //  须 WorldGen.SolidTile(col,num2) ∧ SolidTile(col,num2-1) 双格实——
+        //  墙延到玩家重力向边缘之外才可挂。原版 flag 同时吃 ≥2 门（:21957 !flag 早退）
+        //  与 <2 门 gd=1 半边（:21991;gd=-1 半边无 flag=原文 quirk）。缺此探针=
+        //  悬浮墙（不落地墙/墙底缘以下）可驻停攀爬（Tiger Climbing Gear 越悬浮岛）。
+        //  slideDir≙按压向（:28456 由碰撞拍写入=撞向,头门已要求按向=撞向）
+        const stWs = game.world.store;
+        const colWs = Math.floor((slideDirSign > 0 ? this.x + this.w + 1 : this.x - 1) / TILE);
+        const edgeWs = Math.floor((gdSlide > 0 ? this.y + this.h + 1 : this.y - 1) / TILE);
+        const wsSolid = (c: number, r: number) => stWs.inBounds(c, r) && stWs.isSolid(c, r);
+        const wsFlag = wsSolid(colWs, edgeWs) && wsSolid(colWs, edgeWs - 1);
+        // ★SW-RB11b F2：原版门/num3 读 Player.gravity 字段=0.4×深度斜率（:24559 拍首
+        //  复位 0.4f → :24880 `gravity *= num6`——先于 :26965 调用）——高空带 num6<1
+        //  时上攀速度与 gd=-1 门阈值同步缩小。num6 式与 :24861-24879 一致（remix 分母
+        //  worldSurface/1、钳 0.1/0.25~1；本仓 III224 块同式,world.groundLevel≡worldSurface）
+        const n5Ws = (game.world.w / 4200) ** 2;
+        let num6Ws = (this.y / 16 - (60 + 10 * n5Ws)) / (game.world.groundLevel / 6);
+        if (game.world.seedFlags?.remix) {
+          num6Ws = (this.y / 16 - (60 + 10 * n5Ws)) / game.world.groundLevel;
+        }
+        num6Ws = Math.min(1, Math.max(game.world.seedFlags?.remix ? 0.1 : 0.25, num6Ws));
+        // ★SW-FX20 NaN 防灌同款（III224 块）：半成品 world 夹具 w/groundLevel=undefined →
+        //  num6=NaN 穿钳 → gFieldWs=NaN → vy=NaN 整链冻结——归各支下钳档
+        if (Number.isNaN(num6Ws)) num6Ws = game.world.seedFlags?.remix ? 0.1 : 0.25;
+        const gFieldWs = GRAVITY * num6Ws;
+        // ★SW-RB11f F3：tier2 头门按原版异或形拆写（:21957 `(!(vy>0)||gd!=1) &&
+        //  (!(vy<gravity)||gd!=-1)` 取反 = (vy>0∧gd==1)∨(vy<gravity∧gd==-1)——
+        //  旧 `vy*gdSlide>0` 在倒挂半边漏 vy∈[0,gravity) 带（贴墙静止 vy=0/碰撞钳
+        //  0 帧不驻停=脱挂下坠）;gd=1 半边逐位恒等。★SW-RB11b：补 !flag 早退半边
+        //  （:21957 首项）+ gravity 字段=深度缩放值（gFieldWs））
+        if (eq.spikedBoots >= 2 && wsFlag
+          && ((gdSlide === 1 && this.vy > 0) || (gdSlide === -1 && this.vy < gFieldWs))) {
+          // ≥2 驻停档（:21955-21990）：快滑臂 = (↓∧gd==1)∨(↑∧gd==-1)（:21958-21960
+          //  `(controlDown && gravDir==1f) || (controlUp && gravDir==-1f)`——★SW-RB11b
+          //  旧只认 ↓,倒挂时原版按 ↑ 快滑）;否则 (−num3+1e-5)×gravDir 缓慢上攀
+          if ((this.inputDown && gdSlide === 1) || (this.inputUp && gdSlide === -1)) {
             this.vy = 4 * gdSlide;          // :21960 velocity.Y = 4f*gravDir（★SW-FX19 ×gravDir）
             this.spawnWallSlideDust(game, slideDirSign);       // :21961-21975 尘 31
           } else {
             // :21960-21968 + :21988-21997 1:1（★SW-FX14：slowFall 时 TryingToHoverUp
-            // /10 档接线（:21964）——旧注"/10 档未建模=登记偏差"清偿）;vy = (−num3+1e-5)
+            // /10 档接线（:21964））。★SW-RB11b F2b：slowFall 档 num3=gravity/3f*gravDir
+            //  （:21963-21967 gravDir【在内】——外式再 ×gravDir 双乘相消=慢Fall 时
+            //  vy≡−g/3 与重力向无关（原文 quirk）;旧无内乘 → 倒挂半边符号翻转）;
+            //  gravity 字段=深度缩放值（num3=:21962 `float num3 = gravity`）
             const num3 = this.buffs.slowFall
-              ? (this.tryingToHoverUp ? GRAVITY / 10 : GRAVITY / 3)
-              : GRAVITY;
+              ? (this.tryingToHoverUp ? gFieldWs / 10 : gFieldWs / 3) * gdSlide
+              : gFieldWs;
             this.vy = (-num3 + 1e-5) * gdSlide;   // :21979-21997 `(−num3+1E-05f)*gravDir`
           }
           this.fallStartY = null;           // :21959 fallStart 重置
           this.wallCling = true;            // :21989 sliding=true 仓内承载位
-        } else if (eq.spikedBoots < 2 && this.vy * gdSlide > 0.5) {
+        } else if (eq.spikedBoots < 2
+          && ((wsFlag && this.vy > 0.5 && gdSlide === 1) || (this.vy < -0.5 && gdSlide === -1))) {
           // ==1 缓降档（:21991-22016 else-if,裸 953/975）：↓ 4 / 否则 0.5 缓滑
+          //  ★SW-RB11b：门=原文双支 `(flag∧vy>0.5∧gd==1)∨(vy<-0.5∧gd==-1)`——
+          //  gd=1 半边吃 flag、gd=-1 半边不吃（原文 quirk;旧 `vy*gd>0.5` 全 gd
+          //  无 flag=悬浮墙可缓降+按向不符侧误挂）
           if (this.inputDown) this.vy = 4 * gdSlide;           // :21996 4f*gravDir
           else this.vy = 0.5 * gdSlide;                        // :21998 velocity.Y = 0.5f*gravDir
           this.spawnWallSlideDust(game, slideDirSign);         // :22002 尘 31 恒出
@@ -5533,6 +5591,16 @@ export class Player extends Entity {
           num6 = 0.25;
         }
         if (num6 > 1) num6 = 1;
+        // ★SW-FX20 NaN 防灌（2026-09-10）：原版 Main.maxTilesX / Main.worldSurface 在任何
+        //  Player.Update 前必经 worldgen 初始化 → num6 结构性不可达 NaN。本仓半成品 world
+        //  对象（如旧夹具 `{store}`：w/groundLevel=undefined）→ n5/num6=NaN,且 NaN 穿透
+        //  上面两道钳（NaN<x / NaN>1 恒 false）→ grav*=NaN → :5539 vy=NaN 整链冻结
+        //  （moveAndCollide 步数 NaN=悬空定身,FX20 定谳）。有限元数据的 ±Inf（如测试小世界
+        //  groundLevel=0 → N/0=∓Inf）由原钳原样承接（−Inf→0.25/0.1、+Inf→1,旧行为逐位不变,
+        //  sw-fx19-gravity 金标窗依赖此面）；唯 NaN 无钳可依 → 归各支下钳档（vanilla 0.25 /
+        //  remix 0.1=地表上带低重力档）。y 本身 NaN 不在此钳（会掩盖位置腐化）——由
+        //  防NaN断言测试负起（tests/sw-fx20-physics-nan.test.ts）。
+        if (Number.isNaN(num6)) num6 = world.seedFlags?.remix ? 0.1 : 0.25;
         grav *= num6;
       }
       // 重力倒置（gravDir，R7）：方向取反（Player.cs:3207 vy×gravDir 全局语义近似）

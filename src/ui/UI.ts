@@ -128,7 +128,7 @@ import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { tryItemSwapVid } from '../render/CursorItemIcon';
 import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames } from '../stats/Buffs';
-import { mainDifficulty, GDL } from '../stats/ScaleStats';
+import { mainDifficulty, GDL, mainMasterMode } from '../stats/ScaleStats'; // ★SW-FX21 +mainMasterMode（BossBag 右键上下文）
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
@@ -164,7 +164,7 @@ import {
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
 import {
   BACC, BUILDER_ACC_ICON_ORDER, builderAccDefaults, builderAccGateSet,
-  builderAccTotalIcons, cycleWireVisibility, toggleBuilderAccBit,
+  builderAccTotalIcons, builderAccColumnTopY, cycleWireVisibility, toggleBuilderAccBit,
   playerAccessoryVidEquipped,
 } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位(图标列纯逻辑单源)
 import { housingHeadRows } from './HousingPanel';   // ★刀3:住房页头像行(与 HousingPanel 同源)
@@ -1977,13 +1977,20 @@ export class UI {
     this.refreshAll();
   }
 
-  /** 右键开包（ItemSlot.TryOpenContainer :1642-1660 + Player.Open* 1:1）：
+  /** 右键开包（ItemSlot.TryOpenContainer,1457 终值 :1764-1782 + TryOpenContainer_GrantItems
+   *  :1784-1843 + Player.Open* 1:1;1456 旧注 :1642-1660）：
    *  掷骰 → 产出入包（装不下落地 = GetOrDropItem :6813-6826 noGrabDelay 语义）→
-   *  stack-- → SoundEngine.PlaySound(7)（Sfx 'pickup' = Grab.wav）。宝藏袋族
-   *  （BOSS_BAG_IDS）走 Game 持用左键链，本方法回落 false 不动它。
-   *  锁盒钥匙门（:1693-1704）：金锁盒 3085 消耗金钥匙 327（Player.ConsumeItem
+   *  stack-- → SoundEngine.PlaySound(7)（Sfx 'pickup' = Grab.wav）。★SW-FX21
+   *  （2026-09-10）BossBag 族经 openBagItem 首支路由 openBossBag（ItemSlot.cs:1786-1789
+   *  原版唯一调用面）——与 Game 持用左键链共存,右键不再回落 false。
+   *  锁盒钥匙门（:1794-1829 1457 行号）：金锁盒 3085 消耗金钥匙 327（Player.ConsumeItem
    *  :8846 槽序 0→57，含虚空袋兜底）；黑曜石锁盒 4879 只验暗影钥匙 329 不消耗
-   *  （HasItemInInventoryOrOpenVoidBag :54963——持虚空透镜 4131 才查 bank4） */
+   *  （HasItemInInventoryOrOpenVoidBag :56575——持虚空透镜 4131 才查 bank4）。
+   *  BossBag 上下文：masterMode=Main.masterMode（:7208）/crimson/extraAccessory/
+   *  tenthAnniversary;hasItemInventory=Player.HasItem（:56551 仅背包,moonlord 袋
+   *  3384 条件 :7748）,与锁盒的虚空袋版 hasItem 分流。
+   *  原版互斥门 itemAnimation>0 拒右键（RightClick :1621-1624）由 UI/世界两域
+   *  分离吸收（UI 开启时世界使用链不消费同一击）——架构性近似,登记注释。 */
   private tryOpenContainer(cur: { id: number; stack: number }, i: number): void {
     const game = this.game;
     const inv = game.player.inv;
@@ -2008,6 +2015,11 @@ export class UI {
       remixWorld: !!game.world.seedFlags?.remix,
       getGoodWorld: !!game.world.seedFlags?.getGoodWorld,
       skyblockLowTiles: !!game.world.seedFlags?.skyblock,   // WorldGen.Skyblock.lowTiles（空岛匣 2197 支）
+      // ★SW-FX21 BossBag 上下文（Player.OpenBossBag :7206-7901 与 Game 持用链 :15398-15404 同源）
+      masterMode: mainMasterMode(game.world),             // Main.masterMode（:7208）
+      crimson: !!game.world.crimson,                      // WorldGen.crimson（:7255/:7260 矿种臂）
+      extraAccessory: !!game.player.inv.extraAccessory,   // 饰品第六格（noExtra 条件臂）
+      tenthAnniversary: !!game.world.seedFlags?.tenthAnniversary,  // TryGettingDevArmor 1/8（:7526）
       // 金钥匙消耗：先背包槽序 0→57（Inventory.remove 同序），后虚空袋 bank4
       consumeItem: (vidX) => {
         const iid = invIndexOfVanilla(vidX);
@@ -2021,6 +2033,11 @@ export class UI {
       hasItem: (vidX) => {
         const iid = invIndexOfVanilla(vidX);
         return iid >= 0 && (inv.countOf(iid) > 0 || (useVoidBag && bank4Has(vidX)));
+      },
+      // Player.HasItem :56551 仅查背包 0-57（moonlord 袋 3384 传送门枪条件 :7748）
+      hasItemInventory: (vidX) => {
+        const iid = invIndexOfVanilla(vidX);
+        return iid >= 0 && inv.countOf(iid) > 0;
       },
     });
     if (opened) {
@@ -6827,7 +6844,20 @@ export class UI {
       root.appendChild(lock);
       this.vinvLayoutItems.push({
         el: lock,
-        pos: () => hotbarLockXY((this.vinvLayoutCtx?.visibleRows ?? 8) >= 10),
+        // ★SW-RB11e 2026-09-10 勘误：pushSideToolsUp 与 FX19 图标列同源 = GetBuilderAccsCountToShow
+        //  的 totalDrawnIcons（Main.cs:41752-41753 同一变量喂 :41755/:43247/:43289/:48166）——
+        //  InfoAccMechShowWires×6+rulerLine+rulerGrid+autoActuator+autoPaint+1+unlockedBiomeTorches
+        //  （:48381-48386,门=配饰装备态 plr.rulerLine 等 Player.cs:12899-12915）。原刀误写
+        //  visibleRows>=10（装备列行数,另一量纲）：恶魔心+大师档 false-push 锁钮上移,
+        //  而原版 push 场景（info 件+拨杆≥10）锁钮不上移 → 与方块替换图标 @(0,23) 重叠。
+        pos: () => {
+          const g = this.game
+            ? builderAccGateSet((vid) => playerAccessoryVidEquipped(
+              this.game!.player.inv.armor, this.game!.player.inv.accSlotMax, vid))
+            : null;
+          return hotbarLockXY(!!g && builderAccTotalIcons(
+            g, !!this.game?.world.flags.unlockedBiomeTorches) >= 10);
+        },
       });
     }
 
@@ -7589,12 +7619,15 @@ export class UI {
           if (!c || !this.game) return null;
           const g = gatesOf();
           if (!visGateOf(slot.accIndex, g)) return null;   // 缺配饰 continue(:48179)——num 不进
-          const pushUp = builderAccTotalIcons(g, !!this.game.world.flags.unlockedBiomeTorches) >= 10;
-          // start=(10,77)（:48241）;flag(total>=10) → vector.Y -= 24（:48167-48169）;
+          const torch = !!this.game.world.flags.unlockedBiomeTorches;
+          const pushUp = builderAccTotalIcons(g, torch) >= 10;
+          // start=(10,77)（:48241）;start.Y += 24*torchGodIcons（:48166,★SW-RB11f F4
+          //  旧实现漏此支——炬神恩赐开∧total<10 时图标列与方块替换/群系炬图标重叠）;
+          // flag(total>=10) → vector.Y -= 24（:48167-48169）;
           // 行号 = 已画图标数（num 只对实际画出的槽 ++ :48362——隐藏槽不留空行）
           const drawn = BUILDER_ACC_ICON_ORDER.slice(0, i)
             .filter((s2) => visGateOf(s2.accIndex, g)).length;
-          const y0 = pushUp ? 77 - 24 : 77;
+          const y0 = builderAccColumnTopY(torch, pushUp);
           const idx = slot.accIndex;
           b.style.backgroundPosition = `${-idx * 16}px -16px`;   // rect(0,16,14,14) X=idx*16
           paintSlot(i);
