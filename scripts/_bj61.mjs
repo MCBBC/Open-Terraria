@@ -209,10 +209,12 @@ try {
   L.chk('亮·目标格光照 avg>100（火把贴身）',
     lit.light.targetAvg != null && lit.light.targetAvg > 100,
     `targetAvg=${lit.light.targetAvg} rgb=${JSON.stringify(lit.light.target)}`);
-  L.chk('亮·黄框边框≈(255,242,77)（原版不透明 buffColor×1 精确值,Main.cs:47417）',
-    lit.boxBorder && Math.abs(lit.boxBorder.max[0] - 255) <= 35
-      && Math.abs(lit.boxBorder.max[1] - 242) <= 40 && lit.boxBorder.max[2] <= 130,
-    `max=${JSON.stringify(lit.boxBorder?.max)}`);
+  // 边框=light×(1,0.95,0.3) 不透明精确值（火把非饱和:light=(158,150,126)→(158,142,38)）
+  L.chk('亮·黄框边框=light×(1,0.95,0.3)（原版 buffColor 精确值,Main.cs:47417）',
+    lit.boxBorder && lit.light.target
+      && Math.abs(lit.boxBorder.max[0] - lit.light.target[0]) <= 12
+      && Math.abs(lit.boxBorder.max[1] - Math.round(lit.light.target[1] * 0.95)) <= 14,
+    `max=${JSON.stringify(lit.boxBorder?.max)} light=${JSON.stringify(lit.light.target)}`);
   // 单乘证明：边框蓝色分量=light.b×0.3（±35）——双乘会把它压到 <20
   if (lit.light.target) {
     const expB = Math.round((lit.light.target[2] * 0.3) * (255 / 255));

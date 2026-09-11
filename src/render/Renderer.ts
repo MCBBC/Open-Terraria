@@ -235,7 +235,7 @@ import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } fr
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
-import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, HIGHLIGHT_ANIM_WHEN_LIT, getSelectionGlowColor, highlightCellRect, loadHighlightMask } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）;SW-RB11a 补条件动画门
+import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, HIGHLIGHT_ANIM_WHEN_LIT, getSelectionGlowColor, highlightCellRect, loadHighlightMask, smartHighlightSampleLight, SMART_CURSOR_ARROW_COLOR } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）;SW-RB11a 补条件动画门;SW-BJ61 用户分歧采样+箭头原版 White
 import { smartInteractTileFrame } from '../core/SmartInteractTiles';   // ★SW-BJ54：候选帧态（Game.update 侧每帧写）
 import { isDynamicAnimSheet, campfireYOffset, fountainYOffset } from './TileAnim';
 import { frameMergesWith } from './TileMergeFamily';
@@ -4203,8 +4203,9 @@ export class Renderer {
     // 中心，α 随玩家速度淬灭（站立 Lerp(0,0.7,1-v/6)，每帧 0.2 缓动，关时 -0.05）
     this.drawBuildingGrid(ctx, cam, player, hover?.smart === true, mouseX, mouseY);
 
-    // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画，
-    //     颜色手动乘该格光照（Lighting.GetColor 语义）
+    // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画。
+    //     ★SW-BJ61 用户明令分歧：原版颜色乘该格光照（:47406,暗处框黑不可见）,
+    //     用户实机验证+明令「别受环境光压暗」→ 恒全亮采样（见 drawSmartCursor 注）
     if (hover?.smart) {
       this.drawSmartCursor(ctx, cam, hover, viewW, z,
         lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
@@ -4212,9 +4213,10 @@ export class Renderer {
 
     // 7b-bis. 智能交互 tile 高亮（★SW-BJ54 2026-09-10：TileDrawing.cs:902-904
     //     HasOutlines 门 → :4518-4529 GetTileOutlineInfo → :1422-1427 HighlightMask
-    //     同源矩形叠画。颜色自含该格光照（GetSelectionGlowColor(Colors.cs:127-130)
-    //     的 avg=Lighting.GetColor RGB 均值 :886/:4522），光照合成后直画与 7b 同理；
-    //     原版 tileBatch 层色已内乘光 = 本仓合成后乘光等价）。候选帧态由
+    //     同源矩形叠画。GetSelectionGlowColor(Colors.cs:127-130) 本体 1:1；
+    //     原版 avg=该格光照（:886/:4522,暗处 ≤10 整支不画）。
+    //     ★SW-BJ61 用户明令分歧：采样恒全亮（avg 恒 255=门恒过）,证据链见
+    //     TileHighlight.smartHighlightSampleLight 注）。候选帧态由
     //     Game.tickSmartInteractTiles 每帧写（core/SmartInteractTiles.ts）。
     this.drawSmartInteractTileHighlights(ctx, cam, z, world,
       lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
@@ -15179,13 +15181,19 @@ export class Renderer {
    *  `if (TileID.Sets.HasOutlines[type]) GetTileOutlineInfo(...)` → :4518-4529
    *  HighlightMask[type] + GetSelectionGlowColor(selected, avg) → :1422-1427
    *  与本体同源矩形同位叠画。候选帧态 = smartInteractTileFrame（Game 每帧写）；
-   *  avg = 光带采样 (r+g+b)/3 整除（Lighting.GetColor :886 语义，越界全亮同 7b）；
-   *  avg>10 门（:4523-4525）；动画依赖型排除集见 TileHighlight.ts 头注（债）。 */
+   *  avg = 光带采样 (r+g+b)/3 整除（Lighting.GetColor :886 语义）；avg>10 门
+   *  （:4523-4525）；动画依赖型排除集见 TileHighlight.ts 头注（债）。
+   *  ★SW-BJ61（2026-09-11）用户明令分歧：可视面不吃环境光——原版本支乘格光
+   *  （:4522-4526,光=0 不画），用户实机验证原版暗处高亮可见并明令「别受环境光
+   *  压暗」→ 采样恒全亮（smartHighlightSampleLight,证据链/回滚口见彼注），
+   *  avg 恒 255=门恒过、GetSelectionGlowColor 本体 1:1 不动。lightR/rx 等形参
+   *  保留（调用面/光照区几何不变），仅采样改道。 */
   private drawSmartInteractTileHighlights(
     ctx: CanvasRenderingContext2D, cam: Camera, z: number, world: World,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
     rx: number, ry: number, rw: number, rh: number,
   ): void {
+    void lightR; void lightG; void lightB; void rx; void ry; void rw; void rh;   // ★SW-BJ61 采样改道后不读（保留形参=调用面稳定）
     const frame = smartInteractTileFrame;
     if (!frame.tileWon || frame.coords.length === 0) return;   // InSmartCursorHighlightArea 范围/胜出门
     const store = world.store;
@@ -15198,13 +15206,9 @@ export class Renderer {
       // ★SW-RB11a：条件动画型点亮态排除（GetTileDrawData :6044-6056 fy≥54 =
       //  addFrY=Main.tileFrame*54——静息态 top=2 照画,动画态不画=与排除集同债）
       if (HIGHLIGHT_ANIM_WHEN_LIT.has(type) && store.frameY[si] >= 54) continue;
-      let lr = 255, lg = 255, lb = 255;
-      if (c.x >= rx && c.y >= ry && c.x < rx + rw && c.y < ry + rh) {
-        const li = (c.y - ry) * rw + (c.x - rx);
-        lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
-      }
+      const [lr, lg, lb] = smartHighlightSampleLight();        // ★SW-BJ61 用户分歧:恒全亮（原=格光采样）
       const avg = Math.floor((lr + lg + lb) / 3);              // TileDrawing.cs:4522（XNA 整除）
-      if (avg <= 10) continue;                                 // :4523-4525
+      if (avg <= 10) continue;                                 // :4523-4525（全亮下恒过）
       const [r, g, b, a] = getSelectionGlowColor(frame.selected.has(`${c.x},${c.y}`), avg);
       const mask = loadHighlightMask(type);
       if (!mask) continue;
@@ -15239,14 +15243,14 @@ export class Renderer {
     rx: number, ry: number, rw: number, rh: number,
   ) {
     void viewH;
+    void lightR; void lightG; void lightB; void rx; void ry; void rw; void rh;   // ★SW-BJ61 采样改道后不读（保留形参=调用面稳定）
     const ts = TILE * z;                       // 屏幕空间下的格尺寸
     const [sx, sy] = cam.worldToScreen(hover.x * TILE, hover.y * TILE);
-    // 光照采样（越界/区域外按全亮，防洞穴边缘框消失）
-    let lr = 255, lg = 255, lb = 255;
-    if (hover.x >= rx && hover.y >= ry && hover.x < rx + rw && hover.y < ry + rh) {
-      const li = (hover.y - ry) * rw + (hover.x - rx);
-      lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
-    }
+    // ★SW-BJ61（2026-09-11）用户明令分歧：黄框不吃环境光——原版乘格光
+    //  （Lighting.GetColor×buffColor(1,0.9,0.1,1),Main.cs:47406,光=0 时框黑不可见），
+    //  用户实机验证原版暗处黄框可见并明令「别受环境光压暗」→ 恒全亮采样
+    //  （=原版公式在 light=255 的取值;证据链/回滚口见 TileHighlight.smartHighlightSampleLight 注）
+    const [lr, lg, lb] = smartHighlightSampleLight();
     const mul = (c: number, l: number): number => Math.round((c * l) / 255);
     // 四象限 8×8 块 (1,0.9,0.1) × 0.6
     ctx.fillStyle = `rgba(${mul(255, lr)},${mul(229, lg)},${mul(26, lb)},0.6)`;
@@ -15275,7 +15279,8 @@ export class Renderer {
         ctx.save();
         ctx.translate(cxp, cyp);
         ctx.rotate((idx * Math.PI) / 4); // SmartCursorDirectionLocks 上起顺时针（Main.cs:66188）
-        ctx.fillStyle = `rgb(${mul(255, lr)},${mul(242, lg)},${mul(77, lb)})`;
+        // ★SW-BJ61：箭头=原版 Color.White 恒亮（Main.cs:47437 不读格光——曾误乘光照）
+        ctx.fillStyle = `rgb(${SMART_CURSOR_ARROW_COLOR[0]},${SMART_CURSOR_ARROW_COLOR[1]},${SMART_CURSOR_ARROW_COLOR[2]})`;
         const r = 5 * z;
         ctx.beginPath();
         ctx.moveTo(0, -r);

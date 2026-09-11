@@ -262,6 +262,32 @@ export function highlightCellRect(
 const maskCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
 const maskPending = new Set<number>();
 
+// ═══ ★SW-BJ61（2026-09-11）智能光标可视面光照采样 —— 用户明令分歧注册 ═══
+// 反编译证据（1457 终值;1458 同域逐字同;1456 同）：原版黄框色 =
+//   Lighting.GetColor(scX,scY) × buffColor(1,0.9,0.1,1)（Main.cs:47406,buffColor
+//   :38728-38735 纯乘;DrawSmartCursor :47385-47442）、tile 高亮 avg=(R+G+B)/3 且
+//   avg>10 才画（TileDrawing.cs:4522-4526;GetSelectionGlowColor Colors.cs:127-130）
+//   ——即原版高亮随格光照线性压暗,光照=0 时黄框为黑（不可见）、高亮不画;恒亮面仅
+//   光标图标本体（Main.cs:48783 + CursorColor :53271-53294,屏空间）与方向锁箭头
+//   （:47437 Color.White）。光照引擎零下限（LightingEngine.GetColor :65-73 →
+//   LightMap 索引器裸值;TileLightScannerOptions 仅 DrawInvisibleWalls）。
+// 用户实机验证原版「无照明处智能光标仍呈黄色高亮态——自身高亮,不给环境发光」
+//   （2026-09-11 会话实报),明令本仓「别受环境光压暗」→ 按用户明令分歧注册
+//   （先例:keybinds Esc 链「用户明令分歧」）。本仓高亮可视面（7b 黄框 + 7b-bis
+//   tile 高亮）光照采样恒取全亮:黄框=原版公式在 light=(255,255,255) 的取值
+//   （填充 (255,229,26)×0.6、边框 (255,242,77)）,tile 高亮 avg 恒 255（>10 门恒过,
+//   GetSelectionGlowColor 1:1 本体不动）。几何/源矩形/姿态带/贴图链保持 BJ54 1:1。
+// 回滚口:本函数改回读格光（lightR[li] 三通道）即可,渲染几何零耦合。
+/** 智能光标可视面（黄框/tile 高亮）光照采样 —— 用户明令分歧:恒全亮（见上注） */
+export function smartHighlightSampleLight(): [number, number, number] {
+  return [255, 255, 255];
+}
+
+/** 方向锁箭头色 —— 原版 Color.White 恒亮（Main.cs:47432-47437 smartCursorArrow
+ *  Draw 不读格光;与黄框/高亮不同,此项是【真实原版 1:1】非用户分歧）。
+ *  ★SW-BJ61 修复:本仓 Renderer 曾误乘格光=对原版偏离。 */
+export const SMART_CURSOR_ARROW_COLOR: readonly [number, number, number] = [255, 255, 255];
+
 /** TextureAssets.HighlightMask[type] 等价懒加载（Assets/Content 路径映
  *  sprites/vanilla/Misc_TileOutlines_Tiles_<type>.png）。null=尚未就绪/不存在。
  *  404 → 永久负缓存（防每帧重发）；HasOutlines 全 95 型素材实测在库（97 张，
