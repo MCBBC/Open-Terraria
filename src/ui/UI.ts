@@ -15,8 +15,9 @@ import {
   craftToggleFrame, cycleCraftingGridControl, craftingWindowTextTipKey,
   craftSelectedBarRows, CRAFT_BAR_COLOR, CRAFT_BAR_SOLID, CRAFT_BAR_TOP_OFF,
   CRAFT_GRID_SLOT_SCALE, CRAFT_GRID_LEFT, CRAFT_GRID_TOP, craftingFilterForTile, recipeFilterAccepts, filterRemainOpen,
+  vanillaWheelNotches, craftSnapEase, craftSnapCrossedRow,
   type CraftingGridControl, type CraftingTileFilter,
-} from './craftingGrid';   // ★SW-FX30 刀②+⑦:经典网格视图/切换钮/站点过滤纯逻辑单源(CraftingUI.cs 域)
+} from './craftingGrid';   // ★SW-FX30 刀②+⑦:经典网格视图/切换钮/站点过滤纯逻辑单源(CraftingUI.cs 域);★SW-FX38 滚轮档数/吸附步进
 import { petInfoOfVid } from '../data/vanillaPets';
 import { showJourneyQuickGate } from './QuickGate';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
@@ -6445,18 +6446,23 @@ export class UI {
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }
 
-  // ================= 原版布局构建器(2026-09-07 刀 2;flag inventoryLayout='vanilla',缺省关) =================
+  // ================= 原版布局构建器(2026-09-07 刀 2;★SW-FX39 2026-09-11 缺省转正:
+  //  inventoryLayout 缺省=vanilla,classic 旧自创布局退居 ?invlayout=legacy 回退旗) =================
   // 权威 = Terarria1457/Terraria/Main.cs DrawInventory 族(几何逐行锚,数值单源
   // vanillaInvLayout.ts;与 docs/inventory-crafting-research-1456.md §四 交叉验证一致)。
-  // 纪律:classic(buildInventoryPanel)零改动;本族全为新代码,共享区仅 4 处 flag 守卫
-  // (initInGame 分派/positionInvPanel 首行/refreshHotbar 开包早退/refreshAllNow 补绘)。
+  // 纪律:classic(buildInventoryPanel)冻结维护(仅回退旗面);本族全为新代码,共享区仅 4 处
+  // flag 守卫(initInGame 分派/positionInvPanel 首行/refreshHotbar 开包早退/refreshAllNow 补绘)。
   // 坑①:网格含槽 0-9,与关包热键栏 [data-idx] 全局 querySelector 首匹配冲突——
   //   本族内一律走 vinvSlots 作用域引用,禁用 slotEl(0-9);DOM 序保证关包态全局查询
   //   首命中热键栏(.sw-vinv 在 buildHud 之后挂载)。
   // 坑②:独立类 .sw-vinv,不得复用 sw-panel/sw-inv/sw-invgrid/sw-eqdock(--slot:39px
   //   等 CSS 渗漏),作用域样式见 vinvStyleEnsure。
-  // 登记债(不阻塞):住房页槽位(刀 3)/Sort 钮功能(ItemSorting 未移植)/相机页签接线/
-  //   杂项页超级矿车开关/开箱态垃圾桶-钮变体只随 chestOpen(商店态同面)。
+  // 登记债清偿状态(SW-FX39 时点):住房页槽位=刀3 ✓/Sort 钮=FX29 ✓/相机页签=FX10 债⑥ ✓/
+  //   杂项页超级矿车开关=FX10 债⑩ ✓/热键锁=FX10 债⑪ ✓/buff 列=FX10 债④ ✓;
+  //   自创面入口(道具搜索/天气/时间/玩家列表/旅程/研究/住房面板)停于暂停菜单停车坪
+  //   (main.ts openInGamePause,inventoryLayout==='vanilla' 门控——缺省转正后即常态路径)。
+  //   遗留债:配方搜索框/合成站文字行(SW 自创 QoL,原版 1457 CraftingUI.cs:161-318
+  //   无此面;配方搜索待 FX30 modern 窗分期)——见 SW-FX39 差集审计报告。
 
   private vinvRoot: HTMLElement | null = null;
   /** 作用域槽引用 `${where}:${i}`(坑①:替代全局 slotEl) */
@@ -7346,13 +7352,22 @@ export class UI {
 
   private vinvCraftFocusV = 0;
   private vinvCraftAvailV: Array<{ r: VanillaRecipeLike; count: number }> = [];
+  // ★SW-FX38 吸附动画状态(CraftingUI.cs:376-404 DrawRecipes_AdjustRecipeOffsetSnappy):
+  //   glideY ≡ availableRecipeY[focusRecipe](焦点行当前吸附偏移,全列表重锚不变式
+  //   availableRecipeY[i]=glideY+(i−focus)·65 :394-399);fastScroll ≡ PipsFastScroll/
+  //   recFastScroll(Main.cs:1794/CraftingUI.cs:523,关背包每拍置位 Main.cs:46428);
+  //   glideAcc = 60fps 步进配额(原版 Frame Skip 缺省拍频,高刷屏防 2× 快进)。
+  private vinvCraftGlideY = 0;
+  private vinvCraftFastScroll = false;
+  private vinvCraftGlideAcc = 0;
 
   // ---- 合成区(★2026-09-08 用户实测二轮:原版无面板底/无搜索框,合成=左下角
   //  竖向列表;Modern 网格面板整体退役)。权威:CraftingUI.DrawRecipesList
   //  (CraftingUI.cs:161-318)+ Main.cs:42239-42250(adjY/middleY 分档)+
   //  HoverOverCraftingItemButton(Main.cs:42971-43036,点非焦点=居中+音12,
   //  点焦点=合成,Shift×10)+ DrawRecipes_AdjustRecipeOffsetSnappy(:371-396)。
-  //  登记偏差:吸附动画以瞬时重排替代(recFastScroll 形态);鱼眼 scale/alpha/
+  //  ★SW-FX38(2026-09-11)清偿旧登记偏差:吸附动画已按 :376-404 落地(glideY/fastScroll
+  //  + 60fps 步进配额,见上方字段注)——旧"瞬时重排替代"退役;鱼眼 scale/alpha/
   //  x 位移逐式还原。inventoryBack.A 取 150(原版 LoadSettings 初值)。
   private vinvBuildCraft(): void {
     // 列表/材料行容器(透明,仅命中面;格子绝对定位直挂 root)
@@ -7600,9 +7615,10 @@ export class UI {
     const c = this.vinvLayoutCtx;
     if (!c) return;
     const avail = this.vinvCraftAvailV.length;
-    // 每档数(档 = deltaY/120 取整;Main.cs:17596 int num = ScrollWheelDelta/120)
-    const steps = Math.abs(Math.round(e.deltaY / 120));
-    let notches = Math.round(e.deltaY / 120);
+    // ★SW-FX38:每档数=vanillaWheelNotches(Main.cs:17593 int num=ScrollWheelDelta/120,
+    //   C# 整除向零截断:子档拍=0 整吞无累积器,±240=±2 档;取负=XNA 上滚为正 vs
+    //   浏览器 deltaY 下滚为正)——旧 `Math.round+Math.abs` 在 (60,120) 档带虚生 1 档=滚距偏快
+    const notches = vanillaWheelNotches(e.deltaY);
     if (this.vinvPipsUseGrid) {                       // :17597 PipsUseGrid 支(flag 初值 true 不变,本支不清)
       const geo = craftGridGeometry(c.sw, c.sh);
       // 视口 px → vinv 逻辑域(÷K;transform-origin top left = 原点同)
@@ -7610,15 +7626,15 @@ export class UI {
       const lx = e.clientX / K, ly = e.clientY / K;
       if (lx >= geo.left && ly >= geo.top
         && lx < geo.left + geo.w && ly < geo.top + geo.h) {   // :17602-17608 Contains
-        const sign = notches === 0 ? 0 : Math.sign(notches);
-        while (notches !== 0) {                       // :17610-17613 while 档数
-          if (sign < 0) {
-            this.vinvCraftRecStart = craftGridRecStartAfterUp(this.vinvCraftRecStart, geo.cols);   // ScrollCraftingGrid 上滚支(:576-581)
+        let num = notches;
+        while (num !== 0) {                           // :17610-17613 while 档数(每档一调,num 只取号)
+          if (num < 0) {
+            this.vinvCraftRecStart = craftGridRecStartAfterUp(this.vinvCraftRecStart, geo.cols);   // ScrollCraftingGrid mouseWheel<0 支(:587-594,−=cols 无音)
           } else {
-            this.vinvCraftRecStart = craftGridRecStartAfterDown(this.vinvCraftRecStart, geo.cols, avail);   // 下滚支(:582-590)
-            this.game.sfx.play('menuTick', 1);            // :584 音只走下滚支(逐字)
+            this.vinvCraftRecStart = craftGridRecStartAfterDown(this.vinvCraftRecStart, geo.cols, avail);   // +=支(:596-601)
+            this.game.sfx.play('menuTick', 1);            // :597 音只走 +=支(逐字)
           }
-          notches -= sign;
+          num -= Math.sign(num);
         }
         this.vinvUpdateCraftGrid();
       }
@@ -7627,7 +7643,7 @@ export class UI {
     // 箱行滚支(:17622 chest!=-1 ∧ ChestUI.LastHighestChestRow>0 → flag=false+Scroll):
     //   40 槽箱 LastHighestChestRow=ceil(40/10)-4=0 恒假=死支(本仓无 >40 槽容器,同相不建)
     // NewCraftingUI.Visible 支(:17630 flag=false)=窗族分期缺席 ⇒ flag 恒 true
-    this.vinvCraftWheel(e, steps);                    // :17633-17640 flag 支 ScrollCraftingList
+    this.vinvCraftWheel(e);                           // :17633-17640 flag 支 ScrollCraftingList(档数自算)
   }
 
   /** 网格重排/重建(每刷新拍):recStart 逐拍钳制(:461-467)+页钮可见门+格池签名重建 */
@@ -7690,14 +7706,16 @@ export class UI {
       // ★SW-RB13b:网格格【不绑】wheel——滚轮走窗口级 vinvGridWheelTick(DoScrollingInInventory
       //   域):格面在网格矩形内,原版=分页网格+列表同拍滚(:17602-17633);曾绑 vinvCraftWheel
       //   → stopPropagation 吞掉窗口级分页=滚轮只在 3px 空档生效(格覆盖 93% 面积,倒挂)
-      // 点击(:517-527):focusRecipe=i + recFastScroll(本仓瞬时重排同相)+ PipsUseGrid=false
-      // + SoundID 12(游戏pad ChangePage(9) 支=N/A)
+      // 点击(:517-527):focusRecipe=i + recFastScroll=true(:523,★SW-FX38 列表瞬吸
+      // 同相)+ PipsUseGrid=false + SoundID 12(游戏pad ChangePage(9) 支=N/A)
       cell.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
-        this.vinvCraftFocusV = i;
+        this.vinvCraftFastScroll = true;              // ★SW-FX38 :523 recFastScroll=true
+        this.vinvCraftFocusGoto(i);                   // :522 focusRecipe=i
         this.vinvPipsUseGrid = false;
         this.vinvCraftRecStart = 0;                   // !PipsUseGrid → recStart=0(Main.cs:43926-43929)
         this.game.sfx.play('menuTick', 1);
+        this.vinvCraftSnapStep();                     // 同帧瞬吸(fast → original=0,行界音同相)
         this.vinvSyncGridToggle();
         this.vinvUpdateCraftList();
         this.refreshAll();
@@ -7937,19 +7955,46 @@ export class UI {
   }
 
   /** 列表滚轮(格/材料格/命中区/窗口级 flag 支共用;滚轮悬停格子上也有效——★用户实测二轮)。
-   *  ★SW-RB13b:steps=档数(ScrollCraftingList mouseWheel=Delta/120 整档——
-   *  CraftingUI.cs:390-397 focusRecipe += mouseWheel 一次走多档),缺省 1=格/材料格面 */
-  private vinvCraftWheel(e: WheelEvent, steps = 1): void {
+   *  ★SW-FX38 滚距定谳:Main.cs:17633-17640 flag 支 ScrollCraftingList(num) →
+   *  CraftingUI.cs:572-583 `focusRecipe += mouseWheel`【单次整批】+钳 [0,n−1];
+   *  档数=vanillaWheelNotches(Delta/120 C# 向零截断——子档拍=0 无位移无音,±240=±2
+   *  档一拍全走);符号=原版滚轮【上滚】为正档(XNA ScrollWheelValue 上滚递增)⇒
+   *  deltaY<0(上滚)→ +1。★音效不在本面(:572-583 全程无 PlaySound)——吸附步进
+   *  每越 65px 行界一响(:388-393,vinvCraftSnapStep)。 */
+  private vinvCraftWheel(e: WheelEvent): void {
     e.stopPropagation();
     const rows = this.vinvCraftAvailV;
     if (!rows.length) return;
-    const dir = e.deltaY > 0 ? 1 : -1;
-    const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + dir * Math.max(1, steps)));
-    if (next !== this.vinvCraftFocusV) {
-      this.vinvCraftFocusV = next;
-      this.game.sfx.play('menuTick', 1);   // SoundID 12(每越一步 :391/:4209)
-      this.vinvUpdateCraftList();
-    }
+    const num = vanillaWheelNotches(e.deltaY);            // Main.cs:17593(取负=浏览器同手势)
+    if (num === 0) return;                                // 子档拍:ScrollCraftingList(0) 零位移零音
+    const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + num));   // :574-582
+    this.vinvCraftFocusGoto(next);
+    this.vinvCraftSnapStep();                             // 同帧首步(原版 Update→Draw 帧序)
+  }
+
+  /** ★SW-FX38 焦点迁移+重锚播种(CraftingUI.cs:394-399 全行重锚不变式
+   *  availableRecipeY[i]=glideY+(i−focus)·65 ⇒ focus 变更时 glideY 按【新焦点行迁移前
+   *  旧位】重播种——:380 num2=availableRecipeY[focusRecipe] 读的正是它,吸附由此起步)。 */
+  private vinvCraftFocusGoto(next: number): void {
+    const prev = this.vinvCraftFocusV;
+    if (next === prev) return;
+    this.vinvCraftGlideY += (next - prev) * 65;
+    this.vinvCraftFocusV = next;
+  }
+
+  /** ★SW-FX38 吸附步进(DrawRecipes_AdjustRecipeOffsetSnappy CraftingUI.cs:376-404,
+   *  每绘制拍;原版"切换速度"本体=此拍面,非滚轮面瞬移):
+   *  num2=glideY;original=fast?0:MoveTowards(num2·0.97,0,6.5)(:381-386);
+   *  trunc(num2/65)≠trunc(original/65) → SoundID 12(每越行界一响 :388-393,多档滚动
+   *  N 响随滑行散布);num2==0 → fast=false(:400-403)。返回是否位移。 */
+  private vinvCraftSnapStep(): boolean {
+    const num2 = this.vinvCraftGlideY;
+    const original = this.vinvCraftFastScroll ? 0 : craftSnapEase(num2);
+    if (craftSnapCrossedRow(num2, original)) this.game.sfx.play('menuTick', 1);   // :390-393
+    this.vinvCraftGlideY = original;
+    if (num2 === 0) this.vinvCraftFastScroll = false;     // :400-403
+    if (original !== num2) this.vinvUpdateCraftList();
+    return original !== num2;
   }
 
   /** ★原版槽底脉冲(Main.cs:46460-46474):invAlpha 每游戏拍 ±0.2 循环 180↔240。
@@ -7960,7 +8005,10 @@ export class UI {
   private vinvPulseRaf = 0;
   private vinvPulseLast = 0;
   private vinvPulseTick = (ts: number): void => {
-    if (!this.vinvRoot || this.vinvRoot.style.display === 'none') { this.vinvPulseRaf = 0; return; }
+    if (!this.vinvRoot || this.vinvRoot.style.display === 'none') {
+      this.vinvCraftFastScroll = true;   // ★SW-FX38:!playerInventory 每拍置 fast(Main.cs:46428)→ 重开首拍瞬吸
+      this.vinvPulseRaf = 0; return;
+    }
     // ★SW-FX10 债⑨ mH 每帧新鲜度：原版 mH 每帧重算（Main.cs:46537 DrawInterface_16）——
     //  Tab 循环地图样式/全屏图开关会即时改 mH → num20/右锚列全体位移。layoutVanilla
     //  无每帧挂点（仅 refresh/resize/页切），此处每帧比对小地图态布尔，值变才走
@@ -7981,6 +8029,15 @@ export class UI {
     }
     const dt = this.vinvPulseLast ? Math.min(100, ts - this.vinvPulseLast) : 16.67;
     this.vinvPulseLast = ts;
+    // ★SW-FX38 列表吸附步进(CraftingUI.cs:376-404 每绘制拍):原版 Frame Skip 缺省
+    //   60fps ⇒ dt 累积整数步配额(高刷屏不 2× 快进,后台回前台 dt=100ms 钳 6 步防跳变)
+    this.vinvCraftGlideAcc += dt / (1000 / 60);
+    if (this.vinvCraftGlideAcc >= 1) {
+      let steps = Math.floor(this.vinvCraftGlideAcc);
+      this.vinvCraftGlideAcc -= steps;
+      if (steps > 6) steps = 6;
+      for (let k = 0; k < steps; k++) this.vinvCraftSnapStep();
+    }
     this.vinvPulseA += this.vinvPulseDir * 0.2 * (dt / 16.67);
     if (this.vinvPulseA > 240) { this.vinvPulseA = 240; this.vinvPulseDir = -1; }
     if (this.vinvPulseA < 180) { this.vinvPulseA = 180; this.vinvPulseDir = 1; }
@@ -8493,7 +8550,7 @@ export class UI {
     const unchanged = prev.length === avail.length
       && prev.every((p, i) => p.r === avail[i].r && p.count === avail[i].count);
     this.vinvCraftAvailV = avail;
-    this.vinvCraftFocusV = Math.min(this.vinvCraftFocusV, Math.max(0, avail.length - 1));
+    this.vinvCraftFocusGoto(Math.min(this.vinvCraftFocusV, Math.max(0, avail.length - 1)));   // ★SW-FX38 焦点钳制走重锚播种(availableRecipeY 语义存续)
     if (!unchanged) {
       this.vinvRebuildCraftCells();
     }
@@ -8522,11 +8579,12 @@ export class UI {
       if (rec.r.createStack > 1) s.appendChild(el('span', 'cnt', String(rec.r.createStack)));
       s.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
-        // HoverOverCraftingItemButton :43020-43033:点非焦点=居中+音12;点焦点=合成
+        // HoverOverCraftingItemButton :43020-43033:点非焦点=居中+音12(:43032-43035,
+        //   无 recFastScroll ⇒ ★SW-FX38 走吸附滑行非瞬移);点焦点=合成
         if (this.vinvCraftFocusV !== idx) {
-          this.vinvCraftFocusV = idx;
+          this.vinvCraftFocusGoto(idx);
           this.game.sfx.play('menuTick', 1);
-          this.vinvUpdateCraftList();
+          this.vinvCraftSnapStep();
           return;
         }
         this.game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
@@ -8554,16 +8612,20 @@ export class UI {
     }
   }
 
-  /** 鱼眼格几何(DrawRecipesList :186-201):y_i=(i-focus)·65;
-   *  scale=max(0.75,100/(|y_i|+100));x=trunc(46-26·scale);
-   *  y=trunc(410+y_i·scale-30·scale+adjY);|y_i|>middleY 剔除(:188) */
+  /** 鱼眼格几何(DrawRecipesList :186-201):y_i=(i-focus)·65+glideY(★SW-FX38 吸附偏移
+   *  :398 availableRecipeY[i]=original+(i−focus)·65——剔界 :177/缩放 :181 吃【吸附值】);
+   *  scale=max(0.75,100/(|y_i|+100));fast 态全体 0.75(:186-189 recFastScroll 支;
+   *  本仓并门 glideY≠0=重开首拍 glideY=0 时按鱼眼渲染,原版 settle 帧序同相,1 帧差登记);
+   *  x=trunc(46-26·scale);y=trunc(410+y_i·scale-30·scale+adjY);|y_i|>middleY 剔除(:188) */
   private vinvCraftCellPos(i: number): { x: number; y: number } | null {
     const c = this.vinvLayoutCtx;
     if (!c) return null;
     const adjY = this.vinvCraftAdjY(c.sh), middleY = this.vinvCraftMiddleY(c.sh);
-    const yOff = (i - this.vinvCraftFocusV) * 65;
+    const yOff = (i - this.vinvCraftFocusV) * 65 + this.vinvCraftGlideY;
     if (Math.abs(yOff) > middleY) return null;
-    const scale = Math.max(0.75, 100 / (Math.abs(yOff) + 100));
+    const scale = this.vinvCraftFastScroll && this.vinvCraftGlideY !== 0
+      ? 0.75
+      : Math.max(0.75, 100 / (Math.abs(yOff) + 100));
     return {
       x: Math.trunc(46 - 26 * scale),
       y: Math.trunc(410 + yOff * scale - 30 * scale + adjY),
@@ -8584,8 +8646,10 @@ export class UI {
       el.style.display = '';
       el.style.left = `${pos.x}px`;
       el.style.top = `${pos.y}px`;
-      const yOff = (i - this.vinvCraftFocusV) * 65;
-      const scale = Math.max(0.75, 100 / (Math.abs(yOff) + 100));
+      const yOff = (i - this.vinvCraftFocusV) * 65 + this.vinvCraftGlideY;   // ★SW-FX38 吸附值(GetItemSlotColors :358-369 吃 availableRecipeY=glideY+(i−focus)·65)
+      const scale = this.vinvCraftFastScroll && this.vinvCraftGlideY !== 0
+        ? 0.75
+        : Math.max(0.75, 100 / (Math.abs(yOff) + 100));
       el.style.transform = `scale(${scale})`;
       let alpha = A + 50;
       if (Math.abs(yOff) > middleY - 100) {
@@ -8779,6 +8843,9 @@ export class UI {
     this.vinvHousingSlotEls = [];
     this.vinvHousingSig = '-init';
     this.vinvCraftFocusV = 0;   // 经典列表缺省聚焦首配方(-1 是 Modern 时代哨兵,已退役)
+    this.vinvCraftGlideY = 0;   // ★SW-FX38 重建=吸附态整帧清零(availableRecipeY 族随面板重建)
+    this.vinvCraftFastScroll = false;
+    this.vinvCraftGlideAcc = 0;
     this.vinvCraftAvailV = [];
     this.vinvCraftCellEls = [];
     this.vinvCraftListEl = null;

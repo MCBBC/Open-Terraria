@@ -35,6 +35,7 @@ import { worldgenProgressKey } from '../../i18n/worldgenKeys';
 import { UnifiedRandom, translateSeed } from '../../core/rng';
 import { parseSeedChain, type SeedFlags } from '../../world/gen/SeedEasterEggs';   // ★IIIII229 ⑥M1 parseSeed→parseSeedChain（gen 同口径）
 import { UISfx } from '../UISfx';
+import { UIScale } from '../draw/UIScale';
 import type { World } from '../../world/World';
 import type { UISpriteBatch, Color } from '../draw/UISpriteBatch';
 import { PixelText } from '../draw/PixelText';
@@ -134,6 +135,9 @@ interface GenTip {
   spawnTime: number;    // SpawnTime（秒,状态机时钟）
 }
 
+/** ★IIIII243 逻辑坐标矩形（layoutRects 探针观测面/净带断言通用形态） */
+export interface GenRect { x: number; y: number; w: number; h: number }
+
 export class UIWorldLoadState extends UIState {
   private header: UIHeader;
   private bar = new UIGenProgressBar();
@@ -163,6 +167,9 @@ export class UIWorldLoadState extends UIState {
   // ---- 提示条（GameTipsDisplay 1:1：集合 + 全员临期补新） ----
   private tips: GenTip[] = [];
   private lastTipText = '';
+  /** ★IIIII243 提示条最近一帧实绘联合框（逻辑坐标；drawTips 每帧重置回写，
+   *  无提示在屏=null——layoutRects 探针观测面消费,零布局副作用） */
+  private tipRect: GenRect | null = null;
 
   constructor(evil?: -1 | 0 | 1, opts?: { seedText?: string; genSounds?: boolean; /** ★IIIII229 ①：Esc 中止请求出口（缺省=无操作——读档页无生成作业可中止） */ onAbort?: () => void }) {
     super();
@@ -372,6 +379,7 @@ export class UIWorldLoadState extends UIState {
     const f = this.seedFlags;
     const color: Color = f && f.tenthAnniversaryWorldGen && !f.zenithWorld ? HOT_PINK : rgb(255, 255, 255);
     const y = d.height + TIP_OFFSET_Y;                     // Draw :128
+    this.tipRect = null;                                   // ★IIIII243 每帧重置实绘联合框
     for (const tip of this.tips) {
       const num = this.time - tip.spawnTime;
       // 锚点动画（GameTip.Update :69-84）：0..0.5s SmoothStep(2.5,0.5)；末 1s SmoothStep(0.5,-1.5)
@@ -396,6 +404,15 @@ export class UIWorldLoadState extends UIState {
       const drawScale = vecH > TIP_MAX_H ? TIP_MAX_H / vecH : 1;   // :156-159 高度超阈收縮
       const px = d.width * anchorX - vecW * 0.5;            // :161-162 中心锚定
       const py = y - vecH * 0.5;
+      // ★IIIII243 实绘 bbox 回写（收缩形态两轴同乘 num4,vanilla position-=vector*num4*0.5 同构）
+      const r: GenRect = { x: px, y: py, w: vecW * drawScale, h: vecH * drawScale };
+      this.tipRect = this.tipRect
+        ? {
+            x: Math.min(this.tipRect.x, r.x), y: Math.min(this.tipRect.y, r.y),
+            w: Math.max(this.tipRect.x + this.tipRect.w, r.x + r.w) - Math.min(this.tipRect.x, r.x),
+            h: Math.max(this.tipRect.y + this.tipRect.h, r.y + r.h) - Math.min(this.tipRect.y, r.y),
+          }
+        : r;
       if (drawScale !== 1) {
         // 收縮形态罕见（超 5 行长提示）：逐行缩放绘制
         let ly = py;
@@ -421,6 +438,34 @@ export class UIWorldLoadState extends UIState {
   public override draw(batch: UISpriteBatch): void {
     super.draw(batch);
     this.drawTips(batch);
+  }
+
+  /** ★IIIII243 生成屏四要素逻辑坐标 bbox（探针/单测零叠压断言观测面；纯读零副作用）。
+   *  bar=绘制 sprite 联合框（UIGenProgressBar.SPRITE：元素框 612×70 之外的视觉外沿
+   *  x-8..x+612 / y..y+106,窄屏 k<1 时不适用——探针跑桌面 k=1）；preview=预览面板
+   *  （未挂载=null）；tips=最近一帧实绘联合框（drawTips 回写,无提示在屏=null）。
+   *  换算屏幕像素=各值 × scale（UIScale）。 */
+  get layoutRects(): {
+    logicalW: number; logicalH: number; scale: number;
+    header: GenRect; bar: GenRect; preview: GenRect | null; tips: GenRect | null;
+  } {
+    const rectOf = (d: { x: number; y: number; width: number; height: number }): GenRect =>
+      ({ x: d.x, y: d.y, w: d.width, h: d.height });
+    const hd = this.header.getDimensions();
+    const bd = this.bar.getDimensions();
+    const pd = this.preview?.getDimensions() ?? null;
+    return {
+      logicalW: UIScale.logicalW,
+      logicalH: UIScale.logicalH,
+      scale: UIScale.scale,
+      header: rectOf(hd),
+      bar: {
+        x: bd.x + UIGenProgressBar.SPRITE.x, y: bd.y + UIGenProgressBar.SPRITE.y,
+        w: UIGenProgressBar.SPRITE.w, h: UIGenProgressBar.SPRITE.h,
+      },
+      preview: pd ? rectOf(pd) : null,
+      tips: this.tipRect,
+    };
   }
 
   /** 预览已挂载（测试用） */

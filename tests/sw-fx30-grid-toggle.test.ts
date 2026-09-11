@@ -249,7 +249,7 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
     expect(uiSrc).toMatch(/window\.removeEventListener\('wheel', this\.vinvGridWheelHandler\)/);
     // 网格矩形命中（Main.cs:17602-17608）+ flag 支列表滚恒走（:17633-17640，★SW-RB13b 逐字重写）
     expect(uiSrc).toMatch(/lx >= geo\.left && ly >= geo\.top\s*\n\s*&& lx < geo\.left \+ geo\.w && ly < geo\.top \+ geo\.h\)/);
-    expect(uiSrc).toMatch(/this\.vinvCraftWheel\(e, steps\);\s*\/\/ :17633-17640 flag 支 ScrollCraftingList/);
+    expect(uiSrc).toMatch(/this\.vinvCraftWheel\(e\);\s*\/\/ :17633-17640 flag 支 ScrollCraftingList/);
     // playerInventory 调用域门（:17547——关包态窗口级监听不得滚列表）
     expect(uiSrc).toMatch(/if \(this\.invPanel\.style\.display !== 'block'\) return;\s*\/\/ playerInventory 门/);
     // ★SW-RB13b:格面不绑 wheel(stopPropagation 会吞窗口级分页——滚轮只在 3px 空档生效的倒挂)
@@ -260,8 +260,9 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
   it('网格每拍钳制 + 列表刷新挂网格重排', () => {
     expect(uiSrc).toMatch(/this\.vinvCraftRecStart = clampCraftGridRecStart\(this\.vinvCraftRecStart, availLen, geo\.cols, geo\.rows\);/);
     expect(uiSrc).toMatch(/this\.vinvUpdateCraftList\(\);\s*\n\s*this\.vinvUpdateCraftGrid\(\);/);
-    // 格点选 = focus + PipsUseGrid=false + recStart 归零（CraftingUI.cs:520-527）
-    expect(uiSrc).toMatch(/this\.vinvCraftFocusV = i;\s*\n\s*this\.vinvPipsUseGrid = false;\s*\n\s*this\.vinvCraftRecStart = 0;/);
+    // 格点选 = focus + PipsUseGrid=false + recStart 归零（CraftingUI.cs:520-527;
+    //   ★SW-FX38:focus 走 vinvCraftFocusGoto 重锚播种 + :523 recFastScroll=true）
+    expect(uiSrc).toMatch(/this\.vinvCraftFastScroll = true;[^\n]*\n\s*this\.vinvCraftFocusGoto\(i\);[^\n]*\n\s*this\.vinvPipsUseGrid = false;[^\n]*\n\s*this\.vinvCraftRecStart = 0;/);
   });
   it('刀⑦ 过滤域：失效拍 + 列表头文字 + 可用行过滤', () => {
     expect(uiSrc).toMatch(/private vinvTickCraftFilter\(\): void \{/);
@@ -325,9 +326,13 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
     expect(uiSrc).toMatch(/quickStackXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen\)/);   // :42548 chest==-1 裸门
     expect(uiSrc).toMatch(/sortXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen\)/);   // :42586 同
   });
-  it('列表滚轮 steps=档数（ScrollCraftingList mouseWheel :390-397 focusRecipe += mouseWheel）', () => {
-    expect(uiSrc).toMatch(/private vinvCraftWheel\(e: WheelEvent, steps = 1\): void \{/);
-    expect(uiSrc).toMatch(/this\.vinvCraftFocusV \+ dir \* Math\.max\(1, steps\)/);
+  it('列表滚轮 = ScrollCraftingList 整批直加（★SW-FX38 重锚:Main.cs:17593 Delta/120 截断档,CraftingUI.cs:574 focusRecipe += mouseWheel——旧 max(1,steps)+round 虚生档已废）', () => {
+    expect(uiSrc).toMatch(/private vinvCraftWheel\(e: WheelEvent\): void \{/);
+    expect(uiSrc).toMatch(/const num = vanillaWheelNotches\(e\.deltaY\);/);
+    expect(uiSrc).toMatch(/this\.vinvCraftFocusV \+ num/);
+    // 旧虚生档面残留 = 回归哨兵
+    expect(uiSrc).not.toMatch(/Math\.max\(1, steps\)/);
+    expect(uiSrc).not.toMatch(/Math\.round\(e\.deltaY \/ 120\)/);
   });
   it('过滤失效拍逐帧化（DrawGridToggle 头 :268-272 每帧执行；事件驱动刷新下走远站不清滤）', () => {
     expect(uiSrc).toMatch(/if \(this\.vinvCraftFilter && this\._builtLayout === 'vanilla'\) \{[^]*?vinvFilterRemain\(\)\) \{\s*\n\s*this\.vinvCraftFilter = null;\s*\n\s*this\.vinvRefreshCraft\(\);/);

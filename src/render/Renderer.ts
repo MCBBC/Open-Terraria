@@ -112,6 +112,7 @@ import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
+import { blendItemColorTint } from '../data/vanillaItemColor';   // SW-BJ60 掉落物 Item.color 两遍合成（与 UI.iconUrl 单源）
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache, petArmParams } from '../player/PaperDoll';
 import { DOLL_APPEARANCE, dollEquipFromSlots, displayDollRenderState, displayDollAnchor, displayDollFacing, dollHeldUseStyle, dollLightTint, isValidDollPose } from './DisplayDoll';
@@ -6683,16 +6684,14 @@ export class Renderer {
       //   选中框视觉钉在左上（用户实报 2026-09-02）
       const ddx = d.x - (ar.sw - d.w) / 2, ddy = d.y - (ar.sh - d.h) / 2 + bob;
       ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
-      // 原版 Item.color（彩色凝胶）：同贴图逐像素乘 color，XNA 预乘两步（同 NPC color pass）
+      // 原版 Item.color 两遍着色（ItemSlot.cs:2888 同款 GetColor 消费,世界掉落
+      // DrawItem 域）。SW-BJ60：烘焙改 itemColorSprite（与 UI.iconUrl 共用
+      // blendItemColorTint 单源公式,XNA pass1 底图+pass2 色图精确合成）——
+      // 旧 destination-out+lighter 组合在 A<255 时漏底图残量项且 bg 系数
+      // (1−kc)≠(1−t·ka)(1−t·kc),与原版预乘两遍不等价
       if (d.color && d.color[3] > 0) {
-        const tinted = this.tintedSprite(`item${d.itemId}`, ar, d.color);
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.globalAlpha = d.color[3] / 255;
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 1;
+        const tinted = this.itemColorSprite(`item${d.itemId}`, ar, d.color);
         if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, ddx, ddy, ar.sw, ar.sh);
-        ctx.globalCompositeOperation = 'source-over';
       }
       return;
     }
@@ -8639,6 +8638,13 @@ export class Renderer {
    *  在光照合成后 = 等价）。 */
   private _faelingTint: HTMLCanvasElement | null = null;
   private _faelingSil: HTMLCanvasElement | null = null;
+  /** ★拖尾光晕桶缓存(2026-09-09 微光湖 trace:drawFaeling 1.88s=19% 帧预算——拖尾
+   *  17 层 × 5-6 ops 的染色舞步 = 主体)。键 = hueBucket(32)·16+kBucket(16):
+   *  拖尾各索引的 k=num14·0.16 按索引恒定,hue 随 num2 连续扫频(1rev/6s)→32 档
+   *  单条目存活 ~0.53s=高命中;hue 量化 11.25°(彩虹拖尾本身逐索引大跨度,不可辨)。
+   *  内容 = col2row0 光晕 × 彩虹色(A=0 纯加算,无剪影层)——'lighter' 单 blit。
+   *  Map 上限 1024 清空(22×22 canvas,内存可忽略)。 */
+  private _faelingTrailCache = new Map<number, HTMLCanvasElement>();
   /** 飞灵预乘合成单层绘制（DrawNPCDirect_Faeling 各层共享；ctx 须已在世界变换内）。
    *  (mr,mg,mb)=调制 RGB(0-255)、ma=调制 A(0-1)、rot=旋转、fl=水平镜像。
    *  两步：①黑剪影（纹理 alpha 形状）source-over alpha=ma → 背景衰减
@@ -8689,6 +8695,24 @@ export class Renderer {
       ctx.drawImage(img, sx, sy, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
     }
     ctx.restore();
+  }
+
+  /** 染色合成进指定画布(faelingPremultLayer 染色支的原位变体,逐式同序):
+   *  clearRect→drawImage→multiply fillRect→destination-in drawImage→source-over。
+   *  拖尾桶缓存(微光湖 trace 2026-09-09)用它预渲染桶代表帧,拖尾层变单 blit。 */
+  private faelingTintInto(c: HTMLCanvasElement, img: ImageBitmap | HTMLImageElement,
+    sx: number, sy: number, sw: number, sh: number,
+    mr: number, mg: number, mb: number): void {
+    const cx = c.getContext('2d')!;
+    cx.globalCompositeOperation = 'source-over';
+    cx.clearRect(0, 0, sw, sh);
+    cx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    cx.globalCompositeOperation = 'multiply';
+    cx.fillStyle = `rgb(${Math.max(0, Math.min(255, Math.round(mr)))},${Math.max(0, Math.min(255, Math.round(mg)))},${Math.max(0, Math.min(255, Math.round(mb)))})`;
+    cx.fillRect(0, 0, sw, sh);
+    cx.globalCompositeOperation = 'destination-in';
+    cx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    cx.globalCompositeOperation = 'source-over';
   }
 
   /** 飞灵离屏 canvas 对（惰性建，实例级复用） */
@@ -8786,9 +8810,29 @@ export class Renderer {
         const vx = -spin, vy = num7 * num15;
         const [tr, tg, tb] = hsl(num2 + num15 * 0.5, 1, 0.5);
         const k = num14 * 0.16;
-        drawPremult(2, 0, e.histXAt(i) + half + vx, e.histYAt(i) + halfH + vy,
-          tr * 255 * k, tg * 255 * k, tb * 255 * k, 0,
-          scale * Math.max(0, Math.min(2.5, num14 * num14 * 2.5)), flip);
+        // ★拖尾桶缓存(2026-09-09 微光湖 trace):染色舞步(5-6 ops)→单 blit。
+        //  键=hue32档×k16档;色值取桶代表点(位差 hue≤11.25°/k≤6.25%,彩虹拖尾不可辨)。
+        //  旋转/翻镜像仍在 blit 时施加(缓存=轴对齐染色帧)。
+        const hueB = Math.max(0, Math.min(31, Math.floor((num2 + num15 * 0.5) * 32)));
+        const kB = Math.max(0, Math.min(15, Math.round(k * 100)));
+        const ckey = hueB * 16 + kB;
+        let glowC = this._faelingTrailCache.get(ckey);
+        if (!glowC) {
+          if (this._faelingTrailCache.size > 1024) this._faelingTrailCache.clear();
+          const [gr2, gg2, gb2] = hsl((hueB + 0.5) / 32, 1, 0.5);
+          const kk = (kB + 0.5) / 16;
+          glowC = document.createElement('canvas'); glowC.width = 22; glowC.height = 22;
+          this.faelingTintInto(glowC, img, 44, 0, 22, 22,
+            gr2 * 255 * kk, gg2 * 255 * kk, gb2 * 255 * kk);
+          this._faelingTrailCache.set(ckey, glowC);
+        }
+        ctx.save();
+        ctx.translate(e.histXAt(i) + half + vx, e.histYAt(i) + halfH + vy);
+        ctx.rotate(rot);
+        if (flip) ctx.scale(-1, 1);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(glowC, -11 * scale, -11 * scale, 22 * scale, 22 * scale);
+        ctx.restore();
       }
     }
 
@@ -14758,6 +14802,25 @@ export class Renderer {
     });
   }
 
+  /** 掉落物 Item.color 两遍合成烘焙（SW-BJ60,2026-09-11）：XNA pass1 底图
+   *  （GetAlpha 全亮,ItemSlot.cs:2879）+ pass2 色图（GetColor=VANILLA_ITEM_COLOR
+   *  表色,:2888 同帧第二遍）的逐 texel 精确合成。公式与 UI.iconUrl 烘焙共用
+   *  blendItemColorTint 单源（两路一致）；xnaCombined 同族（ka=1——Item.alpha
+   *  凝胶 175 等未建模=仓域既有债,原版底图 pass 对 alpha>0 件会乘 (255−alpha)/255） */
+  private itemColorSprite(
+    key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, color: number[],
+  ): TintRect | null {
+    const q = (v: number) => Math.round(v) & ~7;
+    const k = `${key}|itemcolor|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${q(color[0])},${q(color[1])},${q(color[2])},${q(color[3] ?? 255)}`;
+    const w = Math.max(1, frame.sw), h = Math.max(1, frame.sh);
+    return this.tintAtlas.bake(k, w, h, (cx) => {
+      cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
+      const im = cx.getImageData(0, 0, w, h);
+      blendItemColorTint(im.data, [color[0], color[1], color[2], color[3] ?? 255]);
+      cx.putImageData(im, 0, 0);
+    });
+  }
+
   /**
    * 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor 1:1）：
    * 目标格四象限各 8×8 块色 (1,0.9,0.1)×0.6 + 2px 外框十字 (1,0.95,0.3)，
@@ -16183,9 +16246,10 @@ export class Renderer {
     const hit = (x: number, y: number, w: number, h: number) =>
       mx >= x && mx <= x + w && my >= y && my <= y + h;
     const btnX = ox + size - 22, btnY = oy + 252, btnS = 20;
-    // ★2026-09-02 用户要求：按钮迁入背包 2×4 钮格（UI 侧 DOM 钮,开同一面板）——
-    //   背包打开时画布按钮不再绘制（防双份）;面板本体（若已开）照常绘制/可交互
-    const hudBtns = !this.playerInventory;
+    // ★2026-09-11 用户要求：去除小地图下方 ⛅/± 两钮（自创件,原版无）——
+    //   hudBtns 恒 false = 两钮不绘制/不命中;天气/时间入口保留在暂停菜单
+    //   （2026-09-02 曾迁入背包 2×4 钮格——画布侧自此退出）
+    const hudBtns = false;
     const btnHover = hudBtns && hit(btnX, btnY, btnS, btnS);
     this.timeUiHover = btnHover || (this.timePanelOpen && hit(ox, oy + 276, size, 64));
     if (hudBtns) {

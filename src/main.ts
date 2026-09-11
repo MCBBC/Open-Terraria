@@ -377,7 +377,9 @@ function openInGamePause(game: Game): void {
     onBestiary: () => flow?.openBestiary(),
     // ★2026-09-07 刀 3:住房面板停车坪(vanilla 布局)——原版 EquipPage=1 住房页已
     // 覆盖查询/指定,HousingPanel 右缘条自暂停菜单调起;classic 布局仍走背包簇格钮
-    // ★刀 5 停车坪:道具搜索/天气/时间/玩家列表/旅程/研究同迁(vanilla 门控)
+    // ★刀 5 停车坪:道具搜索/天气/时间/玩家列表/旅程/研究同迁(vanilla 门控;
+    // ★SW-FX39 2026-09-11 起该门=常态路径——vanilla 已是缺省布局,classic 仅存
+    // ?invlayout=legacy 回退旗)
     ...(options.data.inventoryLayout === 'vanilla' ? (() => {
       const isJourney = game.player.appearance?.difficulty === 3;
       return {

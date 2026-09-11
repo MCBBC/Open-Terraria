@@ -43,8 +43,9 @@ export class ItemDrop extends Entity {
   stack: number;
   age = 0;
   bobPhase: number;
-  /** 原版 Item.color（Item.cs SetDefaults 静态表——凝胶 23 蓝/316-319 青；
-   *  构造期按 vid 自 VANILLA_ITEM_COLOR 注入，Renderer 两遍着色消费） */
+  /** 原版 Item.color（Item.cs SetDefaults 静态表——SW-BJ60 定谳:可见染=铁锭 22(:1640)/
+   *  凝胶 23(:1658)/鲨鱼鳍 319(:5180),草本 313-318 无 item.color 原样;
+   *  构造期按 vid 自 VANILLA_ITEM_COLOR 注入，Renderer.itemColorSprite 两遍着色消费） */
   color?: number[]; // [r, g, b, a]
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */

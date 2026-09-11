@@ -774,8 +774,9 @@ export class SettingsPanel {
             ? 'GameUI.CraftFromNearbyChestsOn' : 'GameUI.CraftFromNearbyChestsOff'),
           () => void options.set('craftFromNearbyChests', !d.craftFromNearbyChests),
         ),
-        // ★2026-09-07 背包布局灰度 flag(用户定策「重构为原版 1.4.5.7 布局,验证通过
-        //  前不替换」):classic=现行 DOM 背包(缺省)/vanilla=原版布局双构建器
+        // ★2026-09-07 背包布局灰度 flag → ★SW-FX39(2026-09-11)缺省转正:vanilla=
+        //  原版布局(缺省)/classic=旧自创布局退居回退旗(?invlayout=legacy 别名,
+        //  过渡一个版本后随 classic 构建器一并退役)。
         //  (UI.ts initInGame 分派;运行期切换 → options.onChange 重建面板)。
         //  会话覆盖 ?invlayout= 优先于本行(Options.load)。
         this.modeRow(

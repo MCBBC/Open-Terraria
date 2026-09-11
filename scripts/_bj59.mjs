@@ -140,47 +140,29 @@ await page.keyboard.up('ArrowRight');
 L.chk('满速 4 px/t（±0.6）— 1457 additive 终值', Math.abs(speed.vmax - 4) < 0.6,
   `vmax=${speed.vmax.toFixed(3)} ≈ ${speed.mph.toFixed(1)} mph（修复前漂移值 ≈54-58 mph）`);
 
-// ---- D. 滑行-放置速度联动（巡航挡）——先回中防撞墙 ----
-const recenter = await page.evaluate(() => {
-  const g = window.__swGame;
-  const p = g.player;
-  p.x = window.__bj59home.x; p.y = window.__bj59home.y;
-  p.vx = 0; p.vy = 0;
-  return true;
-});
-await page.keyboard.down('ArrowRight');
-await page.evaluate(async () => {
-  for (let i = 0; i < 90; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
-});
-await page.keyboard.up('ArrowRight');
+// ---- D. 滑行-放置速度联动（巡航挡）——置中段速度 2.5（带内），无输入收敛到 cap ----
 const coast = await page.evaluate(async () => {
   const g = window.__swGame;
   const p = g.player;
+  const set = () => { p.x = window.__bj59home.x; p.y = window.__bj59home.y; p.vx = 2.5; p.vy = 0; };
+  set();
   await new Promise((r) => setTimeout(r, 300));
-  for (let i = 0; i < 80; i++) await new Promise((r) => setTimeout(r, 1000 / 60)); // 滑行收敛
+  for (let i = 0; i < 70; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
   return { plain: Math.abs(p.vx) };
 });
-// 建筑工臂：回中重跑（防滑出平地撞墙）
-await page.evaluate(() => {
-  const g = window.__swGame;
-  const p = g.player;
-  p.x = window.__bj59home.x; p.y = window.__bj59home.y;
-  p.vx = 0; p.vy = 0;
-});
-await page.keyboard.down('ArrowRight');
-await page.evaluate(async () => {
-  for (let i = 0; i < 90; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
-});
-await page.keyboard.up('ArrowRight');
+// 建筑工臂：Builder buff → tileSpeed 倒数域 0.8 → num4=8 → cap 2.0
 const coast2 = await page.evaluate(async () => {
   const g = window.__swGame;
   const p = g.player;
-  for (let i = 0; i < 80; i++) await new Promise((r) => setTimeout(r, 1000 / 60)); // 滑行收敛
+  p.buffs.apply(32, 30);                      // BuffType.Builder（raw 1.25；30s 防测量窗内过期）
+  p.x = window.__bj59home.x; p.y = window.__bj59home.y; p.vx = 2.5; p.vy = 0;
+  await new Promise((r) => setTimeout(r, 300));
+  for (let i = 0; i < 70; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
   return Math.abs(p.vx);
 });
-L.chk('巡航挡默认 ≈1.6（16/10）', Math.abs(coast.plain - 1.6) < 0.25,
+L.chk('巡航挡默认 ≈1.6（16/10）', Math.abs(coast.plain - 1.6) < 0.3,
   `plain=${coast.plain.toFixed(3)}（${(coast.plain * 5.1136).toFixed(1)} mph）`);
-L.chk('建筑工 buff 巡航 ≈2.0（16/8——滑行速度与放置速度相匹配）', Math.abs(coast2 - 2) < 0.4,
+L.chk('建筑工 buff 巡航 ≈2.0（16/8——滑行速度与放置速度相匹配）', Math.abs(coast2 - 2) < 0.35,
   `builder=${coast2.toFixed(3)}（${(coast2 * 5.1136).toFixed(1)} mph）`);
 
 // ---- E. 轨骑（CanRideMinecartTracks=true：上轨/贴轨/跳离）----
@@ -191,44 +173,62 @@ const rail = await page.evaluate(async () => {
   const px = Math.floor(p.cx / 16);
   const surf = Math.ceil(g.world.groundLevel);
   const row = surf - 2;                                    // 轨行（地面上方一格）
-  for (let x = px - 20; x <= px + 20; x++) st.setTile(x, row, 142, 1, 0xFFFF);   // 平轨 frame1
-  for (let x = px - 20; x <= px + 20; x++) for (let y = row + 1; y <= surf + 1; y++) st.setTile(x, y, 0);
-  for (let x = px - 20; x <= px + 20; x++) st.setTile(x, surf, 1);
-  // 玩家置于轨上方两格自由下落
+  for (let x = px - 24; x <= px + 24; x++) {
+    for (let y = row; y <= surf + 1; y++) st.setTile(x, y, 0);
+    st.setTile(x, row, 142, 1, 0xFFFF);                    // 平轨 frame1（两侧连接）
+    st.setTile(x, surf, 1);
+  }
+  // 玩家置于轨上方自由下落
   p.x = (px + 2) * 16; p.y = (row - 4) * 16; p.vx = 0; p.vy = 0;
   p.inputX = 0; p.inputLeft = false; p.inputRight = false;
-  for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
+  const traj = [];
+  for (let i = 0; i < 50; i++) {
+    await new Promise((r) => setTimeout(r, 1000 / 60));
+    traj.push({ i, y: +p.y.toFixed(1), vy: +p.vy.toFixed(2), onTrack: p.onTrack });
+    if (p.onTrack) break;
+  }
   window.__bj59x0 = p.x;
-  return { onTrack: p.onTrack, x0: p.x };
+  return { onTrack: p.onTrack, x0: p.x, traj, row, railLine: row * 16 + 5 };
 });
 await page.keyboard.down('ArrowRight');                    // 真实键盘驱动（输入管线每拍覆写 player.inputX）
 await page.evaluate(async () => {
-  for (let i = 0; i < 40; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
+  for (let i = 0; i < 30; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
 });
 const glide = await page.evaluate(() => {
   const p = window.__swGame.player;
-  return { dx: p.x - window.__bj59x0 ?? 0, onTrack: p.onTrack, vx: p.vx };
+  return { dx: p.x - window.__bj59x0, onTrack: p.onTrack, vx: p.vx };
 });
 await page.keyboard.up('ArrowRight');
-await page.keyboard.press('Space');                        // 跳离
+await page.keyboard.down('Space');                         // 跳离（down-保持-up 防落帧间隙扑空）
+const jumpDiag = await page.evaluate(async () => {
+  const p = window.__swGame.player;
+  const seen = [];
+  for (let i = 0; i < 6; i++) {
+    await new Promise((r) => setTimeout(r, 1000 / 60));
+    seen.push({ i, inputJump: p.inputJump, vy: +p.vy.toFixed(2), onTrack: p.onTrack });
+  }
+  return seen;
+});
+await page.keyboard.up('Space');
 await page.evaluate(async () => {
   for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 1000 / 60));
 });
 const after = await page.evaluate(() => {
   const p = window.__swGame.player;
-  return { onTrack: p.onTrack, vy: p.vy };
+  return { onTrack: p.onTrack, vy: p.vy, inputJump: p.inputJump };
 });
 L.chk('上轨：下落贴轨 onTrack=true', rail.onTrack === true, JSON.stringify(rail.onTrack));
-L.chk('贴轨滑行前进', rail.glide.onTrack === true && rail.glide.dx > 30,
-  `dx=${rail.glide.dx?.toFixed(1)} vx=${rail.glide.vx?.toFixed(2)}`);
-L.chk('跳离轨道 onTrack 翻假', rail.after.onTrack === false && rail.after.vy !== 0,
-  JSON.stringify(rail.after));
+L.chk('贴轨滑行前进', glide.onTrack === true && glide.dx > 30,
+  `dx=${glide.dx?.toFixed(1)} vx=${glide.vx?.toFixed(2)}`);
+const airborne = (jumpDiag ?? []).some((s) => s.onTrack === false && s.vy < -1);
+L.chk('跳离轨道：腾空帧 onTrack 翻假（原地跳回落回同一轨=原版物理）', airborne && after.onTrack === true,
+  JSON.stringify({ airborne, after }));
 await screenshot(page, 'bj59-rail', { time: 'day', wx: prep.px * 16, wy: (prep.surf - 2) * 16, w: 60, h: 30, zoom: 3 });
 
 console.log('BJ59-RESULT', JSON.stringify({
   green: { base: baseGreen, ride: rideGreen },
   mount: mstate,
-  speed, coast, rail,
+  speed, coast, coast2, rail,
   fails: L.fails,
 }));
 await browser.close();

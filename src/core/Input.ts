@@ -128,6 +128,20 @@ export class Input {
   private pendingRightRelease: 0 | 1 | 2 = 0;
 
   private el: HTMLElement;
+  /** ★canvas rect 缓存(2026-09-08 光标流畅案):#game-root fixed inset:0 + canvas
+   *  block 全屏 = rect 恒 (0,0,innerW,innerH),仅窗口 resize 变。此前 mousemove
+   *  每事件 getBoundingClientRect(游戏鼠标 1000Hz 回报=每秒千次强制布局刷新,
+   *  与渲染争抢布局队列=光标移动卡顿主源)。touch 路径同享。 */
+  private rectLeft = 0;
+  private rectTop = 0;
+  /** 当前缓存 rect(Game.inpOverDomUi 等共享,免每 tick getBoundingClientRect) */
+  get canvasRectLeft(): number { return this.rectLeft; }
+  get canvasRectTop(): number { return this.rectTop; }
+  /** 布局可能变化时手动刷新(Game:全屏切换/设置面板等) */
+  refreshRect(): void {
+    const r = this.el.getBoundingClientRect();
+    this.rectLeft = r.left; this.rectTop = r.top;
+  }
   /** 已注册监听(destroy 时全部移除——window 强引用曾把整个旧 Game 钉死,
    *  连续多次读档 GPU 内存累积 → contextlost 风暴卡死,2026-08-10 trace 实证) */
   private winListeners: Array<[string, EventListener, AddEventListenerOptions?]> = [];
@@ -135,6 +149,7 @@ export class Input {
 
   constructor(el: HTMLElement) {
     this.el = el;
+    this.refreshRect();
     const onWin = (type: string, fn: EventListener, opts?: AddEventListenerOptions) => {
       window.addEventListener(type, fn, opts);
       this.winListeners.push([type, fn, opts]);
@@ -143,6 +158,8 @@ export class Input {
       el.addEventListener(type, fn, opts);
       this.elListeners.push([type, fn, opts]);
     };
+    // rect 缓存失效:窗口 resize(全屏切换也走 resize)——canvas fixed 全屏恒 (0,0)
+    onWin('resize', (() => this.refreshRect()) as EventListener);
 
     onWin('keydown', ((e: KeyboardEvent) => {
       // 输入框内打字不算操作键位（合成搜索框等）：游戏键全不放行、也不吞事件
@@ -186,9 +203,9 @@ export class Input {
     // （elementFromPoint 按 mouseX/Y 采样）就读到旧点=悬停判定失效。挂 window 后
     // 坐标全屏跟随,悬停 UI 期间世界使用/智能光标/朝向门按真实光标位置拦截。
     onWin('mousemove', ((e: MouseEvent) => {
-      const r = this.el.getBoundingClientRect();
-      this.mouseX = e.clientX - r.left;
-      this.mouseY = e.clientY - r.top;
+      // ★rect 缓存读(2026-09-08 光标流畅案:每事件 getBoundingClientRect=千Hz 强制布局)
+      this.mouseX = e.clientX - this.rectLeft;
+      this.mouseY = e.clientY - this.rectTop;
     }) as EventListener);
     // mousedown 挂 window：不依赖事件目标是否恰好是 canvas
     onWin('mousedown', ((e: MouseEvent) => {
@@ -240,9 +257,8 @@ export class Input {
     let longPressTimer: ReturnType<typeof setTimeout> | null = null;
     const clearLongPress = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
     const setCursor = (t: Touch) => {
-      const r = this.el.getBoundingClientRect();
-      this.mouseX = t.clientX - r.left;
-      this.mouseY = t.clientY - r.top;
+      this.mouseX = t.clientX - this.rectLeft;    // ★rect 缓存读(同 mousemove 2026-09-08)
+      this.mouseY = t.clientY - this.rectTop;
     };
     onEl('touchstart', ((e: TouchEvent) => {
       // 操作模式门(keyboard 强制=触摸屏点击不合成世界输入;键鼠语义接管)

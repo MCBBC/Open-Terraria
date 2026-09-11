@@ -76,6 +76,13 @@ export class UIGenProgressBar extends UIElement {
     return 270 + t * 100;
   }
 
+  /** ★IIIII243 绘制 sprite 联合框（元素框 612×70 之外的真实视觉外沿,布局净带/
+   *  探针零叠压断言消费;DrawSelf :84-85 同构,k=1 桌面语义）：
+   *  Outer 620×70 画在 (x-8,y)（vanilla r.X-=8）∪ Outer_Lower 532×46 画在 (x+36,y+60)
+   *  → 视觉外沿 = x-8 .. x+612 / y .. y+106（短条框下沿的中垂装饰垂尾伸到 +106,
+   *  资产实/UI_WorldGen_Outer_Lower.png 532×46 全出血,虚高 70 元素框会漏这 36px）。 */
+  static readonly SPRITE = { x: -8, y: 0, w: 620, h: 106 } as const;
+
   protected drawSelf(batch: UISpriteBatch): void {
     const d = this.getDimensions();
     const k = fitProgressScale(UIScale.logicalW);

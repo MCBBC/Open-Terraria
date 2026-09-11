@@ -27,15 +27,15 @@ describe('刀0 flag 面:inventoryLayout(Options)', () => {
     vi.restoreAllMocks();
   });
 
-  it('★缺省锁(刀 7 前红绿开关):new OptionsStore() 缺省 classic', () => {
-    expect(new OptionsStore().data.inventoryLayout).toBe('classic');
+  it('★缺省锁(SW-FX39 缺省转正红绿开关):new OptionsStore() 缺省 vanilla', () => {
+    expect(new OptionsStore().data.inventoryLayout).toBe('vanilla');
   });
 
-  it('load 坏值回退 classic(存档含非法值/旧档缺键同语义)', async () => {
+  it('load 坏值回退 vanilla(存档含非法值/旧档缺键同语义;SW-FX39 新缺省)', async () => {
     vi.mocked(kvGet).mockResolvedValue(JSON.stringify({ inventoryLayout: 'modern' }));
     const s = new OptionsStore();
     await s.load();
-    expect(s.data.inventoryLayout).toBe('classic');
+    expect(s.data.inventoryLayout).toBe('vanilla');
   });
 
   it('load 合法 vanilla 保留(用户显式选择不被卫门吞)', async () => {
@@ -43,6 +43,13 @@ describe('刀0 flag 面:inventoryLayout(Options)', () => {
     const s = new OptionsStore();
     await s.load();
     expect(s.data.inventoryLayout).toBe('vanilla');
+  });
+
+  it('★SW-FX39 存档侧 classic 保留不迁移(灰度期经设置行显式切换=用户意志,回退旗面)', async () => {
+    vi.mocked(kvGet).mockResolvedValue(JSON.stringify({ inventoryLayout: 'classic' }));
+    const s = new OptionsStore();
+    await s.load();
+    expect(s.data.inventoryLayout).toBe('classic');
   });
 
   it('URL 会话覆盖 ?invlayout=vanilla(不落盘:仅 load 内存改写,非 set 通道)', async () => {
@@ -60,11 +67,32 @@ describe('刀0 flag 面:inventoryLayout(Options)', () => {
     expect(s.data.inventoryLayout).toBe('classic');
   });
 
-  it('URL 非法值忽略(维持存档/缺省)', async () => {
+  it('URL 非法值忽略(维持存档/缺省;SW-FX39 后无存档=vanilla)', async () => {
     vi.stubGlobal('location', { search: '?invlayout=terraria' });
     const s = new OptionsStore();
     await s.load();
+    expect(s.data.inventoryLayout).toBe('vanilla');
+  });
+
+  it('★SW-FX39 回退旗 ?invlayout=legacy → classic(旧自创布局统一叫法,过渡期面)', async () => {
+    vi.stubGlobal('location', { search: '?invlayout=legacy' });
+    const s = new OptionsStore();
+    await s.load();
     expect(s.data.inventoryLayout).toBe('classic');
+  });
+
+  it('★SW-FX39 回退旗仅会话生效:set() 落盘剥回存档侧值(红队 F1 语义对 legacy 同样成立)', async () => {
+    vi.stubGlobal('location', { search: '?invlayout=legacy' });
+    const s = new OptionsStore();
+    await s.load();
+    expect(s.data.inventoryLayout).toBe('classic');
+    s.set('uiScale', 1.2);
+    await new Promise((r) => setTimeout(r, 450));   // 落盘防抖 400ms
+    const { kvSet } = await import('../src/save/KvStore');
+    const writes = vi.mocked(kvSet).mock.calls.map((c) => JSON.parse(c[1] as string) as { inventoryLayout?: string });
+    expect(writes.length).toBeGreaterThan(0);
+    // 无存档 case:persistedLayout=缺省 vanilla → 落盘恒 vanilla;legacy 覆盖值绝不入档
+    for (const w of writes) expect(w.inventoryLayout).toBe('vanilla');
   });
 });
 

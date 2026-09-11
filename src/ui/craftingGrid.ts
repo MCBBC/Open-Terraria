@@ -153,6 +153,39 @@ export function craftingFilterForTile(sheet: number): CraftingTileFilter | null 
 // 集,结果集等价):炼金台 355/699 本身无配方要求,但 countsAs→13(放置瓶)∈配方 ⇒
 // 运行时门为真 ⇒ 右键炼金台开 crafting 菜单(过滤到 355,接受集 {355,13})=原版同相。
 
+// ---- ★SW-FX38 滚轮档数/吸附步进纯逻辑(2026-09-11 用户报"列表切换比原版快"定谳刀) ----
+/** 原版滚轮档数(Main.cs:17593 `int num = PlayerInput.ScrollWheelDelta / 120`):
+ *  - C# 整除【向零截断】:±[1,119] → 0(子档拍整吞,合成链全程无 deltaY 累积器——
+ *    PlayerInput.cs:901-902 ScrollWheelDelta=ScrollWheelValue−ScrollWheelValueOld 每
+ *    帧直差,120/notch 量化在 OS 层;±120→±1、±240→±2 一拍多档);
+ *  - 符号:XNA/MonoGame ScrollWheelValue【上滚为正】(docs.monogame.net/api/Microsoft.
+ *    Xna.Framework.Input.MouseState.html)⇒ 浏览器 deltaY>0=下滚=原版负档,取负对齐
+ *    (同手势同号;仓内经验锚:ChestUI.cs:306-312 Scroll(mouseWheel>0)→行--,原版玩家
+ *    体感"下滚=箱子下翻"即 wheel-down 为负档)。 */
+export function vanillaWheelNotches(deltaY: number, deltaMode = 0): number {
+  // 行/页模式归一(Firefox deltaMode=1 每事件 ±1 行):1 行=1 原版 notch=±120
+  // (仓内全局约定 src/main.ts:624 「±120/notch」;页模式 1 页≈1 档,发射源近乎绝迹)
+  const px = deltaMode === 0 ? deltaY : deltaY * 120;
+  const n = Math.trunc(-px / 120);
+  return n === 0 ? 0 : n;   // JS trunc 负域吐 -0,C# int 除法恒 +0(差分断言会咬)
+}
+
+/** 吸附一步(CraftingUI.cs:381-382):original=MoveTowards(num2·0.97, 0, 6.5)。
+ *  行距 65px(:378 num)、6.5px/拍(:379 amount=65/10)→ 65px 约 9-10 拍 ≈150ms/行
+ *  ——原版"切换速度"本体=此吸附,非滚轮面瞬移。 */
+export function craftSnapEase(v: number): number {
+  const original = v * 0.97;
+  if (Math.abs(original) <= 6.5) return 0;
+  return original - Math.sign(original) * 6.5;
+}
+
+/** 行界越格判响(CraftingUI.cs:388-393):(int)(num2/65)≠(int)(original/65) →
+ *  SoundEngine.PlaySound(12)——【每越 65px 行界一响】,非每滚轮事件一响;
+ *  C# 整除向零截断(trunc(-3/65)=0 族)。 */
+export function craftSnapCrossedRow(a: number, b: number): boolean {
+  return Math.trunc(a / 65) !== Math.trunc(b / 65);
+}
+
 /** DoesNotNeedTileOrLiquid(Recipe.cs:106-116):requiredTile<0 ∧ !needHoney ∧ !needWater ∧ !needLava */
 export function doesNotNeedTileOrLiquid(r: VanillaRecipeLike): boolean {
   if (r.tile < 0 && !r.honey && !r.water) return !r.lava;

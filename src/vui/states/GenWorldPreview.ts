@@ -10,12 +10,86 @@ import type { UISpriteBatch } from '../draw/UISpriteBatch';
 import { rgb } from '../draw/UISpriteBatch';
 import { UIScale } from '../draw/UIScale';
 import { mapColor24 } from '../../render/MapColors';
+import { UIGenProgressBar } from '../elements/UIGenProgressBar';
 import type { World } from '../../world/World';
 
 /** 每帧重绘的列数（列扫描 fallback；8400 列大世界约 2 秒扫完一轮） */
 const COLUMNS_PER_FRAME = 64;
 /** 位图帧擦除耗时（ms）：整帧瞬切观感是"跳变"，改为从左到右刷过揭示 */
 const BITMAP_WIPE_MS = 1200;
+
+// ---- ★IIIII243 生成屏预览面板净带布局（叠压修复） ----
+// 用户实报（1080p 天顶生成中截图）：旧布局 vAlign=1/marginBottom=56 把面板底沿钉在
+// H-56，与提示条（锚 H-150、字形上下居中 ±17.6..55）整段叠压。面板是本仓自研叠加物
+// （vanilla 无此子元素），由它让位——放进「进度条绘制下沿 ↔ 提示条字形上沿」净带。
+// 净带几何三锚（全部 vanilla 对齐位，只读不修）：
+//   · 进度条下沿 = topForScreenH(H)+106（UIGenProgressBar.SPRITE——Outer_Lower 532×46
+//     画在 y+60，短条框垂尾伸到 +106；用元素高 70 会与垂尾叠 36px）；
+//   · 提示条上沿 = H-150（GameTipsDisplay TipOffsetY）− 字形半高（上下居中锚定，
+//     worst-case 两行 vecH=35.2 → 半高 17.6；超两行走 110 收缩域，现实提示池不达）；
+//   · 标题（UIHeader）在 barTop-70，全部 H≥600 档与净带零接触（单测断言守）。
+
+/** 净带布局常量（逻辑像素；previewBandLayout 消费，tests/iiiii243-genpreview-layout 钉值） */
+export const PREVIEW_BAND = {
+  /** 净带与相邻 vanilla 元素的上下间隙 */
+  GAP: 8,
+  /** 提示条锚线距屏底（GameTipsDisplay TipOffsetY=-150；UIWorldLoadState.TIP_OFFSET_Y 同值） */
+  TIP_ANCHOR_FROM_BOTTOM: 150,
+  /** 提示条字形半高 worst-case（两行：2×16×1.1/2——折行域见 GameTipsDisplay.CreateWrappedText） */
+  TIP_HALF_H: 17.6,
+  /** 极矮屏兜底阈值：净带高低于此 → 贴净带下沿放最小预览条（floor 模式） */
+  MIN_BAND_H: 28,
+  /** 面板自然宽策略（旧 55%/上限 520 保留为带内上限——只有带高放得下时才给满） */
+  WIDTH_FRAC: 0.55,
+  MAX_W: 520,
+  /** 两侧最小余量（水平居中前提下的带宽钳制） */
+  EDGE_MARGIN: 8,
+} as const;
+
+/** 布局结果（逻辑像素；mode='band'=正常带内放行，'floor'=极矮屏贴底最小条） */
+export interface PreviewBandRect {
+  x: number; y: number; width: number; height: number;
+  mode: 'band' | 'floor';
+}
+
+/** ★IIIII243 预览面板净带布局（纯函数，单测钉值）。
+ *  净带 = [进度条绘制下沿+8, 提示条字形上沿-8]；面板等比缩放（aspect=h/w）到带高内、
+ *  水平居中、带内垂直居中；自然宽（min(logicalW×0.55, 520)）只作上限——超宽矮条
+ *  （aspect<带高/naturalW）保自然宽，带宽不足（极窄屏）按宽钳。带高不足 MIN_BAND_H
+ *  （logicalH<600 档净带塌缩,如 800×500 窗）→ floor：贴净带下沿放 MIN_BAND_H 高的
+ *  最小条（"贴底"，y≥0 钳）。 */
+export function previewBandLayout(input: {
+  logicalW: number;
+  logicalH: number;
+  /** 预览位图纵横比 h/w（等比缩放基准；≤0 视为未知 → floor 最小条兜底） */
+  aspect: number;
+  /** 自然宽上限（缺省 min(logicalW×0.55, 520)） */
+  naturalW?: number;
+}): PreviewBandRect {
+  const { logicalW, logicalH, aspect } = input;
+  const barTop = UIGenProgressBar.topForScreenH(logicalH);
+  const bandTop = barTop + UIGenProgressBar.SPRITE.y + UIGenProgressBar.SPRITE.h + PREVIEW_BAND.GAP;
+  const bandBottom = logicalH - PREVIEW_BAND.TIP_ANCHOR_FROM_BOTTOM - PREVIEW_BAND.TIP_HALF_H - PREVIEW_BAND.GAP;
+  const bandH = bandBottom - bandTop;
+  const maxW = Math.max(0, logicalW - PREVIEW_BAND.EDGE_MARGIN * 2);
+  const natural = input.naturalW ?? Math.min(logicalW * PREVIEW_BAND.WIDTH_FRAC, PREVIEW_BAND.MAX_W);
+  const k = aspect > 0 ? aspect : 0;
+  // floor 兜底（极矮屏/未知 aspect）：净带塌缩 → 贴净带下沿的最小条，宽按 maxW 收
+  if (!(bandH >= PREVIEW_BAND.MIN_BAND_H) || k === 0) {
+    const width = Math.min(maxW, k > 0 ? PREVIEW_BAND.MIN_BAND_H / k : maxW);
+    const h = width * k;
+    return { x: (logicalW - width) / 2, y: Math.max(0, bandBottom - h), width, height: h, mode: 'floor' };
+  }
+  // 正常态：等比缩放进带（高不足缩高、宽不足缩宽），水平居中 + 带内垂直居中
+  const width = Math.max(0, Math.min(natural, maxW, bandH / k));
+  const height = width * k;
+  return {
+    x: (logicalW - width) / 2,
+    y: bandTop + (bandH - height) / 2,
+    width, height,
+    mode: 'band',
+  };
+}
 
 export class GenWorldPreview extends UIElement {
   private off: HTMLCanvasElement;
@@ -89,16 +163,32 @@ export class GenWorldPreview extends UIElement {
     }
   }
 
-  /** 布局：底部居中，宽取屏宽 55%（上限 520），等比缩放；底部留 56px 避开小贴士行 */
+  /** 布局（★IIIII243 重排）：放进「进度条绘制下沿 ↔ 提示条字形上沿」净带——旧版
+   *  vAlign=1/marginBottom=56 把面板底沿钉在 H-56，与提示条（锚 H-150 字形居中）
+   *  整段叠压（用户实报截图）；预览是本仓自研叠加物，由它让位（vanilla 对齐位
+   *  标题/进度条/提示条零触碰）。几何全在 previewBandLayout 纯函数（单测钉值）：
+   *  等比缩放进带、水平居中、带内垂直居中，极矮屏贴带下沿。 */
   private applyLayout() {
-    const w = Math.min(UIScale.logicalW * 0.55, 520);
-    const h = w * this.previewAspect;
-    this.width = StyleDimension.fromPixels(w);
-    this.height = StyleDimension.fromPixels(h);
-    this.hAlign = 0.5;
-    this.vAlign = 1;
-    this.marginBottom = 56;
+    const g = previewBandLayout({
+      logicalW: UIScale.logicalW,
+      logicalH: UIScale.logicalH,
+      aspect: this.previewAspect,
+    });
+    this.lastLayW = UIScale.logicalW;
+    this.lastLayH = UIScale.logicalH;
+    this.width = StyleDimension.fromPixels(g.width);
+    this.height = StyleDimension.fromPixels(g.height);
+    this.left = StyleDimension.fromPixels(g.x);
+    this.top = StyleDimension.fromPixels(g.y);
+    this.hAlign = 0;
+    this.vAlign = 0;
+    this.marginTop = 0;
+    this.marginBottom = 0;
   }
+
+  /** 上次布局时的逻辑屏面（窗口/用户缩放变化 → 净带重算；update 每帧两数比对） */
+  private lastLayW = 0;
+  private lastLayH = 0;
 
   /** worker 路径首帧预览：在未知世界尺寸时先建预览容器 */
   static fromFirstFrame(rgba: Uint8ClampedArray, width: number, height: number): GenWorldPreview {
@@ -108,6 +198,9 @@ export class GenWorldPreview extends UIElement {
   }
 
   update(): void {
+    // ★IIIII243：生成中拖窗口/设置改 UI 缩放 → 逻辑屏面变，净带重排（旧布局钉死
+    // 首帧尺寸同款盲区；两数比对零开销）
+    if (this.lastLayW !== UIScale.logicalW || this.lastLayH !== UIScale.logicalH) this.applyLayout();
     if (this.bitmapMode && this.showCtx && this.revealX < this.show!.width) this.wipe();
     else if (!this.bitmapMode && this.world) this.sweep();
     super.update();

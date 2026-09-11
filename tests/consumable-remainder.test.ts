@@ -97,12 +97,16 @@ describe('A③ 银河珍珠 5340 usedGalaxyPearl → 幸运 +0.03（:28676-28678
 });
 
 describe('A④ 仙馔 5342 usedAmbrosia → 镐速-0.05/砌速+0.05/墙速+0.05（:12455-12462）', () => {
-  /** Game 侧 placeSpeed*Raw 桩（私有方法 Object.create 直调） */
+  /** Game 侧 placeSpeed*Raw 桩（私有方法 Object.create 直调）。
+   *  ★SW-BJ59：tileSpeed 聚合单源迁移至 Player.placeSpeedTileRaw（Game 委托）——
+   *  桩换真 Player 实例（mkPlayer 同款），仙馔位经 usedAmbrosia 置位（防双抄漂移） */
   const mkPlace = (ambrosia: boolean) => {
     const g = Object.create(Game.prototype) as unknown as {
       placeSpeedTileRaw: () => number; placeSpeedWallRaw: () => number;
     } & Record<string, unknown>;
-    g.player = { buffs: { has: () => false }, usedAmbrosia: ambrosia, equipStats: { tileSpeed: false, wallSpeed: false } };
+    const p = mkPlayer();
+    p.usedAmbrosia = ambrosia;
+    g.player = p;
     return g;
   };
   it('placeSpeedTileRaw：仙馔 1→1.05（:12458 tileSpeed += 0.05）', () => {

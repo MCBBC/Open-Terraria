@@ -272,11 +272,12 @@ export interface OptionsData {
    *  NewCraftingUI 窗族=分期未建(SW-FX30 报告分期表),缺省 classic 使切换钮左键
    *  (list↔grid,CraftingUI.cs:294-306)开箱即有效;modern 窗落地时回切原版缺省。 */
   craftingGridControl: 'classic' | 'modern';
-  /** ★2026-09-07 背包布局灰度 flag(用户定策:重构为原版 1.4.5.7 布局,验证通过前
-   *  不替换现有布局)——缺省 classic=现行 DOM 背包(buildInventoryPanel 零改动);
-   *  vanilla=原版布局双构建器(UI.ts initInGame 按 flag 分派,运行期切换走
-   *  options.onChange → rebuildInventoryPanel)。会话覆盖 ?invlayout=vanilla|classic
-   *  (load() 内改内存不落盘,探针/评审直达);验证全绿后切缺省另刀。 */
+  /** ★2026-09-07 背包布局灰度 flag → ★SW-FX39(2026-09-11)缺省转正:vanilla(原版
+   *  1.4.5.7 布局,UI.ts buildVanillaInventoryPanel)为缺省;classic=旧自创布局退居
+   *  回退旗——会话覆盖 ?invlayout=legacy(别名,等值 classic;探针/回退直达)或
+   *  ?invlayout=classic(历史名,仍收),load() 内改内存不落盘。运行期切换走
+   *  options.onChange → rebuildInventoryPanel。退役计划:过渡一个版本后摘
+   *  buildInventoryPanel classic 构建器与 legacy/classic URL 旗(见 SW-FX39 报告)。 */
   inventoryLayout: 'classic' | 'vanilla';
 }
 
@@ -363,7 +364,7 @@ export class OptionsStore {
     quickTrashMode: 'leftControl',          // ★SW-AY1 #10（ItemSlot.cs:28-30 缺省档）
     craftFromNearbyChests: true,            // ★SW-AZ1 2026-09-06（Player.cs:355 缺省 true）
     craftingGridControl: 'classic',         // ★SW-FX30 刀②（原版缺省 Modern Player.cs:363;偏差备案见接口注）
-    inventoryLayout: 'classic',             // ★2026-09-07 灰度 flag(缺省现行布局;切缺省另刀)
+    inventoryLayout: 'vanilla',             // ★SW-FX39(2026-09-11)缺省转正(原版布局;旧自创退 ?invlayout=legacy 回退旗)
   };
   loaded = false;
   /** ★红队 F1(2026-09-08):?invlayout= 会话覆盖生效中——set() 序列化时把
@@ -521,21 +522,24 @@ export class OptionsStore {
       if (!(['color', 'white', 'retro', 'trippy'] as const).includes(this.data.lightMode)) {
         this.data.lightMode = 'color';                       // Lighting.cs:19
       }
-      // ★2026-09-07 背包布局灰度：坏值回 classic；URL 会话覆盖见 try 外（★红队 F1
-      //  清偿：覆盖值只改内存,落盘通道 set() 序列化时剥回存档侧值(persistedLayout),
-      //  否则会话内任意一次 set() 把覆盖值连带写档污染用户选择）
+      // ★SW-FX39(2026-09-11)缺省转正：坏值回新缺省 vanilla；URL 会话覆盖见 try 外
+      //  （★红队 F1 清偿：覆盖值只改内存,落盘通道 set() 序列化时剥回存档侧值
+      //  (persistedLayout),否则会话内任意一次 set() 把覆盖值连带写档污染用户选择）。
+      //  存档侧 'classic' = 灰度期经设置行显式切换的用户意志,保留不迁移(回退旗面)。
       if (this.data.inventoryLayout !== 'vanilla' && this.data.inventoryLayout !== 'classic') {
-        this.data.inventoryLayout = 'classic';
+        this.data.inventoryLayout = 'vanilla';
       }
       this.persistedLayout = this.data.inventoryLayout;
     } catch { /* 无存档用默认 */ }
     // URL 会话覆盖在 try 外执行:kvGet 拒绝(隐私模式)时覆盖仍生效(红队 F7)
     if (this.persistedLayout === null) this.persistedLayout = this.data.inventoryLayout;
     {
+      // ★SW-FX39:回退旗面——legacy = classic 别名(旧自创布局退居回退旗后统一叫法;
+      //  classic 历史名仍收,灰度期探针/测试零改动)。vanilla=缺省态显式钉回(探针双档复用)。
       const qLayout = typeof location !== 'undefined'
         ? new URLSearchParams(location.search).get('invlayout') : null;
-      if (qLayout === 'vanilla' || qLayout === 'classic') {
-        this.data.inventoryLayout = qLayout;
+      if (qLayout === 'vanilla' || qLayout === 'classic' || qLayout === 'legacy') {
+        this.data.inventoryLayout = qLayout === 'legacy' ? 'classic' : qLayout;
         this.urlOverrideLayout = true;
       }
     }

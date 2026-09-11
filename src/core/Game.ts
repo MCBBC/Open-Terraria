@@ -348,7 +348,7 @@ import { WorldEvolution } from '../world/evolution/WorldEvolution';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
-import { isDomUiTarget } from './input/domTargets';
+import { isDomUiTarget, DOM_UI_TARGET_SELECTOR } from './input/domTargets';
 import {
   MapPingStore, isMapPingDoubleClick, BestiarySub, PylonSub, ParticleOrchestraType,
   type LiquidCell, type BestiaryNetEvent, type PylonNetMsg, type ParticleSettings,
@@ -11754,16 +11754,29 @@ export class Game implements GameHooks {
   /** 觜野缩放键电平（原版 Main.UpdateViewZoomKeys :16980-16992 1:1）：ViewZoomIn/Out
    *  held 触发器每帧 ±0.02,钳 [1,2]（:16986-16990）。全屏地图打开时不步进（该态下
    *  同键族归地图缩放,updateMapKeys 电平——原版地图开时 +/- 归 mapFullscreenZoom）。 */
+  /** ★IIIII244：ViewZoom 键调完的 zoom 持久化（options.gameZoom,消费=mainFlow:309/
+   *  Game:6648 进世界恢复）。原版不持久化 GameViewZoom——本仓为 web 移植,键调后
+   *  下次进世界归 1 被用户实报(=-/= 重调);故意偏差备案。脏标记+键释放冲洗:
+   *  held 连发每帧 ±0.02,逐帧写 kv 会刷爆存储;scope 狙击镜临时变焦不走本函数不误存。 */
+  private _viewZoomDirty = false;
+
   private updateViewZoomKeys(): void {
     if (!this.camera || this.renderer?.fullMap?.open) return;
     const inp = this.input;
     if (!inp) return;
     const held = (a: Parameters<typeof bindsOf>[0]) =>
       bindsOf(a).some((c) => inp.keys.has(c) || inp.touchKeys.has(c));
+    const zoomHeld = held('ViewZoomIn') || held('ViewZoomOut');
     let z = this.camera.zoomTarget;
     if (held('ViewZoomIn')) z += 0.02;
     if (held('ViewZoomOut')) z -= 0.02;
-    if (z !== this.camera.zoomTarget) this.setZoom(z);   // setZoom→setZoomTarget 钩 [ZOOM_MIN,ZOOM_MAX]=[1,2]
+    if (z !== this.camera.zoomTarget) {
+      this.setZoom(z);                       // setZoom→setZoomTarget 钩 [ZOOM_MIN,ZOOM_MAX]=[1,2]
+      this._viewZoomDirty = true;
+    } else if (this._viewZoomDirty && !zoomHeld) {
+      this._viewZoomDirty = false;           // 键释放后的首个无变化 tick=冲洗持久化
+      void options.set('gameZoom', this.camera.zoomTarget);
+    }
   }
 
   private updateMapKeys(): void {
@@ -12068,13 +12081,39 @@ export class Game implements GameHooks {
    *  掠过背包/面板时朝向不得跟着世界坐标乱翻）。
    *  Node 测试环境兼容:canvas 无 getBoundingClientRect/document 缺席 → 恒 false
    *  (= 测试桩视为不悬 DOM UI,与既有 spawnDust/vanillaDust 可选桩同款约定) */
+  /** DOM UI bbox 快照(2026-09-08 光标流畅案):每 30 tick 一次批量取矩形,逐 tick
+   *  的 inpOverDomUi 先做纯数学点in矩形预检,命中才 elementFromPoint(强制布局)。
+   *  光标在世界区域(屏幕 95%+ 缺省态)时逐 tick 布局读取归零。 */
+  private _domUiRects: Array<{ l: number; t: number; r: number; b: number }> = [];
+  private _domUiRectsTick = -999;
+
   private inpOverDomUi(): boolean {
-    if (typeof document === 'undefined'
-      || typeof this.renderer?.canvas?.getBoundingClientRect !== 'function') return false;
-    const r = this.renderer.canvas.getBoundingClientRect();
-    const el = document.elementFromPoint(
-      Math.max(0, r.left + this.input.mouseX),
-      Math.max(0, r.top + this.input.mouseY));
+    if (typeof document === 'undefined') return false;
+    const inp = this.input;
+    if (!inp) return false;
+    // 点(客户端系) = canvas rect 缓存(Input 维护,resize 失效) + 画布内坐标
+    const cx = inp.canvasRectLeft + inp.mouseX;
+    const cy = inp.canvasRectTop + inp.mouseY;
+    // bbox 快照 30 tick 刷新(面板开合最迟 0.5s 收录;开合沿可调 refreshDomUiRects)
+    if (this.tickCount - this._domUiRectsTick > 30 || !this._domUiRects.length) {
+      this._domUiRectsTick = this.tickCount;
+      const list: Array<{ l: number; t: number; r: number; b: number }> = [];
+      const els = document.querySelectorAll(DOM_UI_TARGET_SELECTOR);
+      for (let i = 0; i < els.length; i++) {
+        const rc = (els[i] as HTMLElement).getBoundingClientRect();
+        if (rc.width <= 0 || rc.height <= 0) continue;   // display:none/空层
+        list.push({ l: rc.left, t: rc.top, r: rc.right, b: rc.bottom });
+      }
+      this._domUiRects = list;
+    }
+    // 纯数学预检:不落在任何 UI 矩形 → 必不命中(免 elementFromPoint 强制布局)
+    let near = false;
+    for (let i = 0; i < this._domUiRects.length; i++) {
+      const q = this._domUiRects[i];
+      if (cx >= q.l && cx <= q.r && cy >= q.t && cy <= q.b) { near = true; break; }
+    }
+    if (!near) return false;
+    const el = document.elementFromPoint(Math.max(0, cx), Math.max(0, cy));
     return isDomUiTarget(el ?? null);
   }
 

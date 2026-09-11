@@ -1035,7 +1035,9 @@ export class Player extends Entity {
   stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
   stepUpHolds = false;         // holdsMatching（Player.cs:23258 第 8 参 = controlUp，fixedUpdate 灌入）
   stepUpNpc = false;
-  stepDownGate = 'gravity' as const;  // StepDown 门 = vy===GRAVITY（Player.cs:23252 字面）
+  /** StepDown 门 = vy===GRAVITY（Player.cs:23252 字面）；★SW-BJ59 滚轴鞋贴轨帧
+   *  fixedUpdate 灌 'never'（:28265/:28276 `!IsRidingTracks` 否决腿） */
+  stepDownGate: 'grounded' | 'gravity' | 'never' = 'gravity';
   /** ★SW-FX34：倒挂 StepUp 每 tick 门（Player.cs:28273-28275，fixedUpdate 灌入；
    *  moveAndCollide 仅 gravDir=-1 时消费—— gravDir=1 半边照旧走 vy>=0 通用门） */
   stepUpInvGate = false;
@@ -5992,6 +5994,11 @@ export class Player extends Entity {
     //  防贴轨滑行被台阶弹起脱轨。上拍 onTrack（本拍轨骑段在下方重算 = 同原文时序）
     this.stepUp = !this.grappling[0] && !this.onTrack; // 原版玩家走 Collision.StepUp（:28278 门;:23258/:27753）
     this.stepUpHolds = this.inputUp;   // holdsMatching=controlUp：按住↑行走可踏上站台面（桌子/平台/铁砧…）
+    // ★SW-BJ59：StepDown !IsRidingTracks 否决腿（:28265/:28276 两处 StepDown 调用门的
+    //  `!IsRidingTracks`——IsRidingTracks（:4136-4152）= mount.Cart ∨ (CanGrindRails∧onTrack)，
+    //  非矿车面 = 滚轴鞋贴轨帧；上拍 onTrack（本拍轨骑段在下方重算 = 同原文时序）。
+    //  贴轨滑行禁自动走下台阶，防轨面被台阶步降拽离轨线（轨面跟随由 TrackCollision 接管）
+    this.stepDownGate = this.onTrack ? 'never' : 'gravity';
     // ★SW-FX34：倒挂 StepUp 每 tick 门（:28273-28275 `if (gravDir == -1f) {
     //  if ((carpetFrame != -1 || velocity.Y <= gravity) && !controlUp) StepUp(…,(int)gravDir,controlUp) }`）。
     //  carpetFrame!=-1 ≙ 飞毯本 tick 在展开（仓承载=carpetTime>0 且按住跳,同 CarpetMovement

@@ -379,8 +379,11 @@ export class WorldSelectPanel {
         });
       // 原版按钮序（UIWorldListItem.cs:95-158）：Play/Favorite/Seed/Rename/Delete——
       // 种子钮复制完整种子串（SeedButtonClick :127-131），非"复制世界"
-      const seedBtn = this.iconBtn(btns, 'UI_ButtonSeed', Lang.text('UI.CopySeed', fullSeedText(m)), () => {
-        copyToClipboard(fullSeedText(m));
+      // ★IIIII243：复制种子=用户输入的干净原文（get fixed boi 这类文本本身就是完整种子,
+      //   旗标由文本自携带;fullSeedText 的 1.1.0.255. 前缀是 TryApplyingCopiedSeed 规范
+      //   形式,作为 tooltip 信息保留于 fullSeedText 导出,复制不再混入）
+      const seedBtn = this.iconBtn(btns, 'UI_ButtonSeed', Lang.text('UI.CopySeed', m.seed), () => {
+        copyToClipboard(m.seed);
         this.setLabel(seedBtn, Lang.text('UI.SeedCopied'), false);
       });
       this.iconBtn(btns, 'UI_ButtonRename', Lang.text('UI.Rename'), async () => {
