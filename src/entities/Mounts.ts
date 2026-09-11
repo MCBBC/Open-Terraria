@@ -973,6 +973,11 @@ export function playerFullRotationOf(
     // fullRotationOrigin=(width/2,height) → pivot = position+(w/2, cart.h)
     return { angle: cart.rotation, pivotX: p.x + p.w / 2, pivotY: p.y + cart.h };
   }
+  // ★SW-BJ59 滚轴鞋轨面支（Player.cs:28325-28326 同式）：贴轨倾角存
+  // mount.fullRotation（57-60 无 Hover 倾斜占用）、origin=(width/2,height)
+  if (m.active && MOUNT_SETS.IsRollerSkates?.[m.type] && m.fullRotation !== 0) {
+    return { angle: m.fullRotation, pivotX: p.x + p.w / 2, pivotY: p.y + p.h };
+  }
   if (!m.active || m.fullRotation === 0 || (m.type !== 7 && m.type !== 8 && m.type !== 23)) return null;
   const mh = 42 + (m.heightBoost || 0);
   return {

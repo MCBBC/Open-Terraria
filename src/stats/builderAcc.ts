@@ -93,12 +93,17 @@ export const BUILDER_ACC_ICON_ORDER: readonly BuilderAccIconSlot[] = [
  *  InfoAccMechShowWires×6 + rulerLine + rulerGrid + autoActuator + autoPaint +
  *  1（方块替换恒 1,blockReplaceIcons）+ unlockedBiomeTorches(1:0)。
  *  >=10 → 图标列整体上移 24px（:48166 flag）、方块替换图标 y 44→23（:43247-43250）、
- *  群系炬图标 y 68→47（:43289-43292）。 */
+ *  群系炬图标 y 68→47（:43289-43292）。
+ *  ★SW-FX36：rulerLine 项 = 恒 1——原版 `plr.rulerLine.ToInt()` 读的旗位在
+ *  ResetEffects（Player.cs:18808-18809）每拍 `rulerGrid=false; rulerLine=true`,
+ *  全仓无置 false 写点（仅 :12903/:15307 置 true）⇒ 旗恒真,计数/图标门（:48193
+ *  `if (!player.rulerLine) continue`）对无配饰玩家同样放行 = Ruler 档开关人人
+ *  可见（用户实报原版如此）。传参 g.rulerLine 保留形参但不再消费。 */
 export function builderAccTotalIcons(g: {
   rulerLine: boolean; rulerGrid: boolean; autoPaint: boolean;
   autoActuator: boolean; infoAccMechShowWires: boolean;
 }, unlockedBiomeTorches: boolean): number {
-  return (g.infoAccMechShowWires ? 6 : 0) + (g.rulerLine ? 1 : 0)
+  return (g.infoAccMechShowWires ? 6 : 0) + 1
     + (g.rulerGrid ? 1 : 0) + (g.autoActuator ? 1 : 0) + (g.autoPaint ? 1 : 0)
     + 1 + (unlockedBiomeTorches ? 1 : 0);
 }
@@ -109,6 +114,35 @@ export function builderAccTotalIcons(g: {
  *  旧实现漏 torch 支 = 炬神恩赐开∧total<10 时列与方块替换/群系炬图标重叠。 */
 export function builderAccColumnTopY(unlockedBiomeTorches: boolean, pushUp: boolean): number {
   return 77 + (unlockedBiomeTorches ? 24 : 0) - (pushUp ? 24 : 0);
+}
+
+// ---- ★SW-FX36 标尺族绘制纯公式（Renderer.drawBuilderRulers 消费）----
+
+/** 标尺线 α（Main.cs:47056-47066 + :47104）：speed>6 → 整段早退（null=不画/
+ *  不显计数）;num4 = speed≤2 → 1,2..6 线性降 0;最终 tint=Color(0.24,0.8,0.9,1)
+ *  ×0.8×num4 ⇒ 返回值 = tint.a（XNA Color*float 全通道乘,rgb 侧消费方按
+ *  floor(61·α)/floor(204·α)/floor(229·α) 重烘）。 */
+export function rulerLineAlpha(speed: number): number | null {
+  if (speed > 6) return null;                       // :47056-47058 `if (!(num <= num2)) return`
+  const num4 = speed <= 2 ? 1 : Math.max(0, 1 - (speed - 2) / 6);
+  return 0.8 * num4;                                // ×num12=0.8（:47104 num12）
+}
+
+/** 标尺网格淡出（Main.cs:47151-47156）：驱动 = Distance(position, shadowPos[2])
+ *  （social shadow 4~5 拍滞后——:47151 的 velocity.Length() 赋值是死码）;
+ *  num3 = Lerp(0.2,0.7,Clamp(1-dist/6,0,1))。旧码误用瞬时速度 = 行走中过亮。 */
+export function rulerGridFade(dist: number): number {
+  return 0.2 + 0.5 * Math.max(0, Math.min(1, 1 - dist / 6));
+}
+
+/** 标尺 W×H 计数文本（Main.cs:46189-46194 DrawInterface_33_MouseText）：
+ *  (|rulerLineDisplayValues.X|+1)+"x"+(|Y|+1),`num>1||num2>1` 门 ⇒ 1×1 不显。
+ *  值源 :47089-47091 = 玩家脚底格→鼠标格跨度（nudge 后）——与放置笔画/墙无关,
+ *  悬停任意处都显;纯数字拼串无 l10n 键。返回 null = 不显。 */
+export function rulerReadoutText(dx: number, dy: number): string | null {
+  const w = Math.abs(dx) + 1;
+  const h = Math.abs(dy) + 1;
+  return (w > 1 || h > 1) ? `${w}x${h}` : null;
 }
 
 // ---- 配饰槽 vid 扫描（Player.cs:12897 旗位判定的仓内等价）----
@@ -123,6 +157,32 @@ export function playerAccessoryVidEquipped(
   if (vid <= 0) return false;
   const want = VI_ID(vid);
   if (want === 0) return false;
+  for (let i = 3; i < accSlotMax && i < armor.length; i++) {
+    if (armor[i] && armor[i]!.id === want) return true;
+  }
+  return false;
+}
+
+/** ★SW-FX36：背包∪装备 vid 扫描（建筑配件旗位门的 1:1 判定域）。
+ *  原版 UpdateEquips（Player.cs:12997-13004）对 inventory[0..57] 逐槽调
+ *  RefreshMechanicalAccsFromItemType（信息配件族不必装备,背包/钱币/弹药格都算,
+ *  wiki Mechanical_Ruler「carried in the player's inventory」同证）;
+ *  装备段经 GrantArmorBenefits（:13025-13032 → :13204-13206,armor[3-9] 配饰槽,
+ *  0-2 盔甲位对配饰 vid 恒不可达）。虚空袋支（:13039-13049 bank4,门=背包持
+ *  4131 VoidLens+WorksInVoidBag）本仓无袋容器 = 登记债 SW-FX36-D1。
+ *  垃圾槽 58 不扫（vanilla j<58）——本仓 trash 亦独立字段,天然排除。 */
+export function playerVidCarried(
+  slots: ReadonlyArray<{ id: number } | null | undefined>,
+  armor: ReadonlyArray<{ id: number } | null | undefined>,
+  accSlotMax: number,
+  vid: number,
+): boolean {
+  if (vid <= 0) return false;
+  const want = VI_ID(vid);
+  if (want === 0) return false;
+  for (let i = 0; i < slots.length && i < 58; i++) {
+    if (slots[i] && slots[i]!.id === want) return true;
+  }
   for (let i = 3; i < accSlotMax && i < armor.length; i++) {
     if (armor[i] && armor[i]!.id === want) return true;
   }

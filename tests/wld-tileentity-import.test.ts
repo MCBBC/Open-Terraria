@@ -21,7 +21,10 @@
 //     5       → 位图(byte：bit0-1=hat bit2-3=dye) + hat2 → dye2（TEHatRack.cs:56-111）
 //     0       → short npc（TETrainingDummy.cs:119-127）
 //     2       → byte logicCheck + bool On（TELogicSensor.cs:381-395，文件恒写）
-//     7/9/10  → 无 ExtraData（TETeleportationPylon/TEKiteAnchor/TECritterAnchor 无覆写）
+//     7       → 无 ExtraData（TETeleportationPylon 无覆写）
+//     9/10    → short itemType（★SW-FX35 2026-09-11 勘误：继承
+//               TELeashedEntityAnchorWithItem.WriteExtraData/ReadExtraData :9-17，
+//               TEdit TileEntity.cs:414-416 互证；旧注「无 ExtraData」系漏看基类覆写）
 //   同位去重 = 后写覆盖前者（WorldFile.cs:3339-3342 Remove+Add）；CheckValidTile
 //   淘汰（:3353）——各 TE ValidTile 保证 Position=物件左上锚且锚帧带基成立
 //   （471/475：frameY==0 && frameX%54==0，TEWeaponsRack.cs:36/TEHatRack.cs:409；
@@ -344,9 +347,9 @@ describe('wld 导入：TileEntities 段四类挂物家具还原（v326）', () =
   const furn = save.furniture ?? [];
   const rec = (kind: string, x: number, y: number) => furn.find((f) => f.kind === kind && f.x === x && f.y === y);
 
-  it('parser：TE 段落负载 6 条 + 跳过计数 2（晶塔/假人）', () => {
-    expect(wld.tileEntities).toHaveLength(6);
-    expect(wld.teSkipped).toBe(2);
+  it('parser：TE 段落负载 8 条全型解码（★SW-FX35 前晶塔/假人计入 skipped）', () => {
+    expect(wld.tileEntities).toHaveLength(8);
+    expect(wld.teSkipped).toBe(0);
     expect(wld.tileEntities.filter((t) => t.type === 4)).toHaveLength(2);
   });
 
@@ -467,7 +470,21 @@ describe('真实 .wld：TileEntities 段（Starter_World v279）', () => {
     // 真值（本批扫描定谳）：Pylon8/ItemFrame21/DisplayDoll10/Dummy1
     expect(wld.tileEntities.filter((t) => t.type === 1)).toHaveLength(21);
     expect(wld.tileEntities.filter((t) => t.type === 3)).toHaveLength(10);
-    expect(wld.teSkipped).toBe(9);    // Pylon8 + Dummy1
+    // ★SW-FX35：全型解码后晶塔/假人入 list（teSnap 透传面），skipped 仅余未知型
+    // （真值实测：假人 TE(3242,348) npc=100 引用在场训练假人实体）
+    expect(wld.tileEntities.filter((t) => t.type === 7)).toHaveLength(8);
+    expect(wld.tileEntities.filter((t) => t.type === 0).map((t) => t.dummy?.npc)).toEqual([100]);
+    expect(wld.teSkipped).toBe(0);
+    // 三尾段真值（SW-FX35 新解析）：城镇房间 13/图鉴 k1+s8+c1/旅程力六力全在（经典档全默认）
+    expect(wld.townRooms).toHaveLength(13);
+    expect(wld.townRooms[0]).toEqual({ npc: 369, x: 6096, y: 301 });
+    expect(wld.bestiary.k).toEqual({ TorchGod: 15 });
+    expect(wld.bestiary.s.length).toBe(8);
+    expect(wld.bestiary.c).toEqual(['Guide']);
+    expect(wld.creativePowers).toEqual([
+      { id: 0, bool: false }, { id: 8, num: 0 }, { id: 9, bool: false },
+      { id: 10, bool: false }, { id: 12, num: 0 }, { id: 13, bool: false },
+    ]);
     // 完整导入链路不炸 + 家具记录物化（脱节/未映射按判定淘汰,只锁下限）
     const { save } = parseWldToSave(buf);
     const { world } = loadSaveData(save);

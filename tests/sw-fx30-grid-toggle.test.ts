@@ -247,9 +247,13 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
     expect(uiSrc).toMatch(/this\.vinvGridWheelHandler = \(e\) => this\.vinvGridWheelTick\(e\);/);
     expect(uiSrc).toMatch(/window\.addEventListener\('wheel', this\.vinvGridWheelHandler, \{ passive: true \}\)/);
     expect(uiSrc).toMatch(/window\.removeEventListener\('wheel', this\.vinvGridWheelHandler\)/);
-    // 网格矩形命中（Main.cs:17602-17608）+ 列表同拍（:17629-17632 flag 语义）
-    expect(uiSrc).toMatch(/lx >= geo\.left \+ geo\.w \|\| ly >= geo\.top \+ geo\.h\) return;/);
-    expect(uiSrc).toMatch(/this\.vinvUpdateCraftGrid\(\);\s*\n\s*this\.vinvCraftWheel\(e\);/);
+    // 网格矩形命中（Main.cs:17602-17608）+ flag 支列表滚恒走（:17633-17640，★SW-RB13b 逐字重写）
+    expect(uiSrc).toMatch(/lx >= geo\.left && ly >= geo\.top\s*\n\s*&& lx < geo\.left \+ geo\.w && ly < geo\.top \+ geo\.h\)/);
+    expect(uiSrc).toMatch(/this\.vinvCraftWheel\(e, steps\);\s*\/\/ :17633-17640 flag 支 ScrollCraftingList/);
+    // playerInventory 调用域门（:17547——关包态窗口级监听不得滚列表）
+    expect(uiSrc).toMatch(/if \(this\.invPanel\.style\.display !== 'block'\) return;\s*\/\/ playerInventory 门/);
+    // ★SW-RB13b:格面不绑 wheel(stopPropagation 会吞窗口级分页——滚轮只在 3px 空档生效的倒挂)
+    expect(uiSrc).not.toMatch(/cell\.addEventListener\('wheel'/);
     // 下滚音只走下滚支（ScrollCraftingGrid :584 逐字）
     expect(uiSrc).toMatch(/craftGridRecStartAfterDown\(this\.vinvCraftRecStart, geo\.cols, avail\);[^]*?menuTick/);
   });
@@ -293,5 +297,56 @@ describe('SW-FX30 接线锚定：Game.ts 尾臂 + mainFlow + Options', () => {
     expect(en.CombineFormat.Crafting).toBeTruthy();
     expect(zh.GameUI.CraftingWindowClassicTip).toBeTruthy();
     expect(zh.CombineFormat.Crafting).toBeTruthy();
+  });
+});
+
+// ============================================================
+// SW-RB13b（2026-09-11）红蓝审计修复面：FX28×FX30 互踩四态矩阵 + 滚轮域语义。
+// 变异证红：删重排调用/删 PipsUseGrid 入签/格面回绑 wheel/删 modern 副效应即红。
+// ============================================================
+describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
+  it('PipsUseGrid 翻转三路全部触发重排（ChestUI.cs:81 吞箱条三门+变体回位 pos 闭包求值前提）', () => {
+    // 切换钮 classic 支（:306 翻转后 relayout——vinvUpdateReforge 显隐 relayout 同族教训）。
+    // 行界锚定逐段断言（禁 [^]*? 懒惰跨臂——classic/modern 两臂尾部同构,懒惰会跳臂假绿）
+    expect(uiSrc).toMatch(/this\.vinvPipsUseGrid = !this\.vinvPipsUseGrid;[^\n]*\n\s*if \(!this\.vinvPipsUseGrid\) this\.vinvCraftRecStart = 0;[^\n]*\n\s*this\.vinvSyncGridToggle\(\);\s*\n\s*this\.vinvUpdateCraftGrid\(\);\s*\n(?:[^\n]*\n){3}\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\} else \{/);
+    // 切换钮 modern 支（CraftingUI.cs:310-315 副效应 PipsUseGrid=false——窗族缺席但可关网格）
+    expect(uiSrc).toMatch(/this\.vinvPipsUseGrid = false;\s*\n\s*this\.vinvCraftRecStart = 0;[^\n]*\n\s*this\.vinvSyncGridToggle\(\);\s*\n\s*this\.vinvUpdateCraftGrid\(\);\s*\n\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\}\s*\n\s*\/\/ modern 支/);
+    // 站点过滤开支（OpenCloseFilter :157 置位后 relayout）
+    expect(uiSrc).toMatch(/this\.vinvRefreshCraft\(\);\s*\n\s*\/\/ ★SW-RB13b:PipsUseGrid=true(?:[^\n]*\n){2}\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\} else \{/);
+  });
+  it('layoutVanilla 签名含 PipsUseGrid 位（否则早退跳过 pos 循环=吞箱条门死码）+ cosUiVisible 谓词', () => {
+    expect(uiSrc).toMatch(/const cosUiVisible = chestOpen && !this\.vinvPipsUseGrid;/);
+    expect(uiSrc).toMatch(/\$\{this\.vinvPipsUseGrid \? 1 : 0\}/);
+    // ChestOrShopUIVisible 消费面：垃圾桶/图鉴/表情吃 cosUiVisible；QuickStack/Sort 保裸门
+    expect(uiSrc).toMatch(/trashXY\(\!\!this\.vinvLayoutCtx\?\.cosUiVisible\)/);
+    expect(uiSrc).toMatch(/bestiaryXY\(\!\!this\.vinvLayoutCtx\?\.cosUiVisible\)/);
+    expect(uiSrc).toMatch(/emoteXY\(\!\!this\.vinvLayoutCtx\?\.cosUiVisible\)/);
+    expect(uiSrc).toMatch(/trashXY\(cosUiVisible\)\.scale/);
+    expect(uiSrc).toMatch(/quickStackXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen\)/);   // :42548 chest==-1 裸门
+    expect(uiSrc).toMatch(/sortXY\(\!\!this\.vinvLayoutCtx\?\.chestOpen\)/);   // :42586 同
+  });
+  it('列表滚轮 steps=档数（ScrollCraftingList mouseWheel :390-397 focusRecipe += mouseWheel）', () => {
+    expect(uiSrc).toMatch(/private vinvCraftWheel\(e: WheelEvent, steps = 1\): void \{/);
+    expect(uiSrc).toMatch(/this\.vinvCraftFocusV \+ dir \* Math\.max\(1, steps\)/);
+  });
+  it('过滤失效拍逐帧化（DrawGridToggle 头 :268-272 每帧执行；事件驱动刷新下走远站不清滤）', () => {
+    expect(uiSrc).toMatch(/if \(this\.vinvCraftFilter && this\._builtLayout === 'vanilla'\) \{[^]*?vinvFilterRemain\(\)\) \{\s*\n\s*this\.vinvCraftFilter = null;\s*\n\s*this\.vinvRefreshCraft\(\);/);
+  });
+  it('滤器消费门 = RecipeFilterHack getter（CraftingUI.cs:121-127 control≠Classic → null）', () => {
+    expect(uiSrc).toMatch(/const filterActive = this\.vinvCraftFilter !== null && options\.data\.craftingGridControl === 'classic';/);
+  });
+  it('网格容器/页钮 pos 闭包与 vinvUpdateCraftGrid 双写者一致化（防 relayout 冲掉几何与 recStart 门）', () => {
+    // 容器 pos=网格原点（曾 (0,0):pos 循环把 (310,340) 冲回原点=格全体左上漂移）
+    expect(uiSrc).toMatch(/pos: \(\) => this\.vinvPipsUseGrid \? \{ x: CRAFT_GRID_LEFT, y: CRAFT_GRID_TOP \} : null \}\)/);
+    // 页钮可见门与 vinvUpdateCraftGrid 同谓词（:470/:501——pos 循环不得复现被门隐藏的钮）
+    expect(uiSrc).toMatch(/if \(dir === 'up' \? this\.vinvCraftRecStart <= 0\s*\n\s*: this\.vinvCraftRecStart >= avail - geo\.cols \* geo\.rows\) return null;/);
+  });
+  it('FX28 箱条 cosmetic 清偿：名无命中盒/悬停金 OurFavoriteColor/钮竖直居中锚', () => {
+    const chestBlock = uiSrc.slice(uiSrc.indexOf('private vinvBuildChest'), uiSrc.indexOf('private vinvUpdateChestName'));
+    expect(chestBlock).toContain("nameEl.style.cssText += 'font-size:13px;';");   // 不再 pointer-events:auto（DrawName 无命中盒）
+    expect(chestBlock).toContain("b.style.color = 'rgb(255,231,69)';");   // Main.cs:886 OurFavoriteColor
+    expect(chestBlock).not.toContain("'#c8f0c8'");
+    expect(chestBlock).toContain('transform:translateY(-50%);');   // origin=vector/2 竖直居中（:234）
+    expect(chestBlock).toContain('padding:5.5px 0');   // 24px 命中带（:223 Y-12..Y+12）
   });
 });

@@ -217,8 +217,12 @@ export function lineRectangleDistance(rect: Rect, lineStart: Pt, lineEnd: Pt): n
 export function starfurySwingProbes(
   itemLocation: Pt, itemRotation: number, direction: number, itemScale: number,
   frame?: Parameters<typeof rotatedRelativePoint>[2],
+  gravDir: 1 | -1 = 1,
 ): [Pt, Pt] {
-  const a = getPointOnSwungItemPath(70, 70, 0, itemScale, itemLocation, itemRotation, direction, 1, frame);
-  const b = getPointOnSwungItemPath(70, 70, 0.9, itemScale, itemLocation, itemRotation, direction, 1, frame);
+  // ★SW-FX31：gravDir 活语义透传（GetPointOnSwungItemPath 的 num2 倒挂支
+  //  Player.cs:45124-45126 `if (gravDir == -1f) num2 += PI/2*direction`；
+  //  itemRotation 实参已由调用方按 FlipItem :52284 取反）——gd=1 恒等
+  const a = getPointOnSwungItemPath(70, 70, 0, itemScale, itemLocation, itemRotation, direction, gravDir, frame);
+  const b = getPointOnSwungItemPath(70, 70, 0.9, itemScale, itemLocation, itemRotation, direction, gravDir, frame);
   return [a, b];
 }

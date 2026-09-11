@@ -100,6 +100,66 @@ export function chestButtonXY(id: number): { x: number; y: number } {
   return { x: 506, y: 258 + 40 + id * 26 };
 }
 
+// ---- 商店货架(SW-FX32 刀①店侧分期二;Main.cs:42500-42532 DrawInventory 商店段) ----
+//   原版店开态无独立面板:货架 40 格与箱条同格同几何(context 15),店名/储蓄/快乐度
+//   画在 (504,invBottom) 同一列;PipsUseGrid 态整段不画(Main.cs:42500 门)。
+/** 店名/储蓄落位(Main.cs:42502-42503 @(504,invBottom)——与 CHEST_NAME_XY 同构面,
+ *  同一常量对象单源,禁另立字面) */
+export const SHOP_TITLE_XY = CHEST_NAME_XY;
+/** 货架 40 槽(Main.cs:42522-42524:num78=(int)(73+num76·56·scale)/num79=(int)(invBottom+
+ *  num77·56·scale),slot=num76+num77·10 行主序;Main.cs:42529 context 15)=箱条同格
+ *  (ChestUI.cs:375-376 同式——FX28 chestSlotXY 单源,本函数为店侧可读别名) */
+export function shopSlotXY(i: number): { x: number; y: number } {
+  return chestSlotXY(i);
+}
+/** 货架整带鼠标拦截区(Main.cs:42514-42516:73..73+560·0.755 × invBottom..invBottom+
+ *  224·0.755——原版只置 mouseInterface 不动作;DOM 面格间缝隙不建节点=与箱条同面) */
+export function shopShelfBand(): { x: number; y: number; w: number; h: number } {
+  return { x: 73, y: 258, w: Math.trunc(560 * CHEST_SCALE), h: Math.trunc(224 * CHEST_SCALE) };
+}
+/** 快乐度表情档位(Main.cs:42506 三元链:pa≤0.82→0/≤1→1/≤1.1→2/其余→3;
+ *  NPCHappiness 贴图 4 帧 Frame(4,1,frameX) Main.cs:42507)。1458 Main.cs:42512 同式 */
+export function happinessFrameX(pa: number): 0 | 1 | 2 | 3 {
+  if (pa <= 0.82) return 0;
+  if (pa <= 1) return 1;
+  if (pa <= 1.1) return 2;
+  return 3;
+}
+/** 快乐度图标/百分比文字偏移(Main.cs:67677-67680 赋值;1458 :67683-67686 同值:
+ *  text(26,98)/icon(12,108))+invBottom 落位(Main.cs:42508/:42512)。
+ *  图标 = 中心锚(rectangle2.Size()/2 origin :42509)——iconXY 为【中心】点 */
+export const SHOP_HAPPINESS_TEXT_OFFSET = { x: 26, y: 98 } as const;
+export const SHOP_HAPPINESS_ICON_OFFSET = { x: 12, y: 108 } as const;
+export function shopHappinessTextXY(): { x: number; y: number } {
+  return { x: 504 + SHOP_HAPPINESS_TEXT_OFFSET.x, y: 258 + SHOP_HAPPINESS_TEXT_OFFSET.y };
+}
+export function shopHappinessIconXY(): { x: number; y: number } {
+  return { x: 504 + SHOP_HAPPINESS_ICON_OFFSET.x, y: 258 + SHOP_HAPPINESS_ICON_OFFSET.y };
+}
+/** 储蓄行(ItemSlot.cs:3712-3757 DrawSavings→DrawMoney vertical fromSavings)。
+ *  语义:【只】合计 bank..bank4 币值(存钱罐/保险箱/熔炉/虚空保险库)>0 才画整行;
+ *  文字 = Lang.inter[66] @(shopx,shopy+40)(ItemSlot.cs:3671);币图标 @(shopx+11+24j,
+ *  shopy+75) j=0..3 = 74-ji(铂/金/银/铜)(ItemSlot.cs:3699-3701);数量文字在图标下
+ *  (ItemStack 字体 0.75 缩放,基线偏移=字体度量——DOM 以 CSS 近似,偏差备案) */
+export const SHOP_SAVED_LABEL_OFF = { x: 0, y: 40 } as const;
+export function shopSavingsLabelXY(): { x: number; y: number } {
+  return { x: 504 + SHOP_SAVED_LABEL_OFF.x, y: 258 + SHOP_SAVED_LABEL_OFF.y };
+}
+export function shopSavingsCoinXY(j: number): { x: number; y: number } {
+  return { x: 504 + 11 + 24 * j, y: 258 + 75 };
+}
+/** 四银行小图标落位(ItemSlot.cs:3727-3740;CenteredRectangle 中心点,贴图 ×0.65):
+ *  bank4 虚空袋 4076 (70,45)/bank3 守护者熔炉 3813 (92,45)/bank2 保险箱 346 (80,50)/
+ *  bank 存钱罐 87 (70,60)——bank = 本仓 p.banks 下标(-2 存钱罐..-5 虚空对应 0..3) */
+export const SHOP_SAVINGS_BANK_ICONS = [
+  { vid: 4076, off: { x: 70, y: 45 }, bank: 3 },
+  { vid: 3813, off: { x: 92, y: 45 }, bank: 2 },
+  { vid: 346, off: { x: 80, y: 50 }, bank: 1 },
+  { vid: 87, off: { x: 70, y: 60 }, bank: 0 },
+] as const;
+/** 银行图标缩放(ItemSlot.cs:3728 等 itemFrame.Size()*0.65) */
+export const SHOP_SAVINGS_ICON_SCALE = 0.65;
+
 // ---- 小地图占位 mH(Main.cs:46535-46561) ----
 //   小地图开启(mapEnabled && mapStyle==1)→256,再钳 sh-PushUp(:46559-46561,可为负=
 //   原版同款;PushUp=RecommendedEquipmentAreaPushUp Main.cs:3063-3071——恶魔心/大师槽

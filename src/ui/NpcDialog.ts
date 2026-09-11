@@ -174,7 +174,6 @@ const CSS = `
 .sw-shop-empty { width: 42px; height: 42px; background: #1a2140;
   border: 1px solid #2c3768; border-radius: 4px; }
 .sw-shop-empty:hover { border-color: #4a5aa0; background: #20294e; }
-.sw-shop-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 .sw-shop-happy { display: flex; align-items: center; gap: 6px; margin-left: 10px;
   font-size: 13px; color: #e8e8f4; }
 .sw-shop-happy.best { color: #7dff8a; }
@@ -495,8 +494,10 @@ export class NpcShop {
     panel.innerHTML = `
       <div class="sw-shop-title">${title}</div>
       <div class="sw-shop-coins">${formatCopper(copper)}${medalLine}</div>
-      <div class="sw-shop-grid">${cells.join('')}</div>
-      <div class="sw-shop-foot"><button class="sw-set-back" style="background:#3a4680;color:#e8e8f4;border:1px solid #7d92d6;border-radius:4px;padding:5px 16px;cursor:pointer;font-family:inherit;">${Lang.inter(52)}</button></div>`;
+      <div class="sw-shop-grid">${cells.join('')}</div>`;
+    // ★SW-FX32 刀①（2026-09-11）Set-Back 钮退役：原版 Main.cs:42500-42532 商店段
+    //  全文无关闭钮——关店 = Esc / 对话「关闭」钮 / 走远（closeNpcDialog →
+    //  npcShopClose Main.cs:18056-18064 等价面）。旧「Set-Back」钮=自创,撤。
     panel.querySelectorAll('.sw-shop-item').forEach((el) => {
       const cell = el as HTMLElement;
       cell.addEventListener('click', (ev) => {
@@ -521,7 +522,8 @@ export class NpcShop {
         cell.addEventListener('mouseleave', () => this.onCellHover?.(null, null));
       }
     });
-    (panel.querySelector('.sw-set-back') as HTMLElement).addEventListener('click', () => this.onClose());
+    // Esc 关店（Player.cs:4960-5025 Esc 优先序——talkNPC 活跃时 Esc 只收对话链,
+    //  对话关闭连带关店 closeNpcDialog → npcShopClose;此处 onClose 为浮面板直挂底）
     this.parent.appendChild(panel);
     this.panel = panel;
     this.escHandler = (e: KeyboardEvent) => { if (e.code === 'Escape') this.onClose(); };

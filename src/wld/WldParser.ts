@@ -32,19 +32,24 @@ export interface WldNPC { spriteId: number; name: string; x: number; y: number; 
  *  Item.prefix 为 byte——Item.cs:305） */
 export interface WldTeItem { vid: number; prefix: number; stack: number }
 
-/** TileEntities 段挂物家具条目（WorldFile.cs:3317-3327 写/:3330-3372 读；type byte =
+/** TileEntities 段条目（WorldFile.cs:3317-3327 写/:3330-3372 读；type byte =
  *  TileEntitiesManager.RegisterAll 注册序（TileEntitiesManager.cs:26-39）：
  *  0=训练假人 1=物品框 2=逻辑传感器 3=模特 4=武器架 5=帽架 6=食物盘 7=晶塔
- *  8=展示罐 9=风筝桩 10=小动物桩。仅 1/3/4/5（挂物家具四类）落负载——
- *  TE.Position 即物件左上锚（各 TE ValidTile 保证 frameY==0 且 frameX%带宽==0）；
- *  其余类型按各自 ExtraData 布局消费跳过保持流对齐，计入 teSkipped */
+ *  8=展示罐 9=风筝桩 10=小动物桩。全部 11 类逐型解码（★SW-FX35 2026-09-11
+ *  定谳勘误：9/10 风筝桩/小动物桩继承 TELeashedEntityAnchorWithItem，
+ *  WriteExtraData 写 short itemType（TELeashedEntityAnchorWithItem.cs:9-12）——
+ *  旧版「7/9/10 无 ExtraData」对 7（晶塔，无覆写）成立、对 9/10 不成立，
+ *  曾按无负载跳过 → 段内后续 TE 全体错位/自家导出丢挂物。TEdit TileEntity.cs
+ *  Load switch（CritterAnchor/KiteAnchor → NetId=r.ReadInt16()）三方互证） */
 export interface WldTileEntity {
-  type: 1 | 3 | 4 | 5;
+  type: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
   id: number;
   x: number;
   y: number;
-  /** type 4 武器架 / type 1 物品框 单槽
-   *  （TEWeaponsRack.cs:54-67 / TEItemFrame.cs:40-53 同构三元组） */
+  /** type 4 武器架 / 1 物品框 / 6 食物盘 / 8 展示罐 单槽三元组
+   *  （TEWeaponsRack.cs:54-67 / TEItemFrame.cs:40-53 / TEFoodPlatter.cs:41-46 /
+   *    TEDeadCellsDisplayJar.cs:40-45 同构 (short vid, byte prefix, short stack)）；
+   *  type 9/10 锚桩复用本字段装挂物 vid（short itemType 单值，prefix=0/stack=1） */
   item?: WldTeItem | null;
   /** type 3 模特：equip[9]+misc[1]+dyes[9]+pose
    *  （TEDisplayDoll.cs:157-215 写/:217-278 读的持久化形状；pose=v307+，
@@ -52,6 +57,11 @@ export interface WldTileEntity {
   doll?: { equip: Array<WldTeItem | null>; misc: WldTeItem | null; dyes: Array<WldTeItem | null>; pose: number };
   /** type 5 帽架：hat[2]+dye[2]（TEHatRack.cs:56-111，位图 bit0-1=hat bit2-3=dye） */
   hat?: { hats: Array<WldTeItem | null>; dyes: Array<WldTeItem | null> };
+  /** type 0 训练假人：short npc（TETrainingDummy.cs:119-127；-1=空桩） */
+  dummy?: { npc: number };
+  /** type 2 逻辑传感器：byte logicCheck + bool on（TELogicSensor.cs:381-395，
+   *  LogicCheckType 枚举 0-7：None/Day/Night/PlayerAbove/Water/Lava/Honey/Liquid） */
+  sensor?: { logicCheck: number; on: boolean };
 }
 
 export interface WldWorld {
@@ -156,6 +166,15 @@ export interface WldWorld {
    *  {string text, i32 x, i32 y}）——坐标=2×2 牌左上锚（Sign.ReadSign :24-31 同款
    *  frameX/18 反解）。曾整段跳过 → 导入图牌全灭（连同 tile 55 被 null 清空）。 */
   signs: Array<{ text: string; x: number; y: number }>;
+  /** ★SW-FX33（2026-09-11）：派对段（WF:1367-1369 写/_tempPartyManual·Genuine·Cooldown +
+   *  :1370-1374 TempPartyCelebratingNPCs 名单 i32 n + n×i32;读侧 :2266-2276 同序,v>=170 门,
+   *  本仓支持域 >=210 恒过门)。celebrating=原版 netId 域(WorldFile.cs:168 Load 尾
+   *  BirthdayParty.CelebratingNPCs.AddRange 回灌)。曾读位即弃 → 导入档派对进行中/
+   *  过生日名单丢失,再导出恒写空 */
+  party: { manual: boolean; genuine: boolean; cooldown: number; celebrating: number[] };
+  /** ★SW-FX33（2026-09-11）：灯笼夜四件套（WF:1387-1390 写/_tempLanternNight* 四连;
+   *  读侧 :2336-2341 同序,v>=207 门恒过）。曾读位即弃 → 导入档灯笼夜进行中/预约态丢失 */
+  lantern: { cooldown: number; genuine: boolean; manual: boolean; next: boolean };
   /** ★R16-5：背景样式 13 档全量（setBG 0-12；caveBackStyle[4]/ice/jungle/hell 之外
    *  补 8=蘑菇(v>194)/9=地狱(v>=215)/10-12(v>195)——曾读位即弃 → seed 派生重掷） */
   bgMushroom: number;
@@ -176,11 +195,28 @@ export interface WldWorld {
   crimsonBG: number;
   desertBG: number;
   oceanBG: number;
-  /** ★七批备案④-c（2026-09-02）：TileEntities 段（pointers[5]，v>=122 门 WF:1803-1821）
-   *  ——仅四类挂物家具（1/3/4/5）落负载；段不存在/版本旧/pointers 缺失=空数组（静默略过） */
+  /** ★七批备案④-c（2026-09-02）/★SW-FX35（2026-09-11）：TileEntities 段
+   *  （pointers[5]，v>=122 门 WF:1803-1821）——11 类全型解码落负载；
+   *  段不存在/版本旧/pointers 缺失=空数组（静默略过） */
   tileEntities: WldTileEntity[];
-  /** TE 段中被消费跳过（非家具类）+ 未知 type 中止后放弃余段的条数 */
+  /** TE 段中未知 type 中止后放弃余段的条数（可解码类型全部落 list，不再计入） */
   teSkipped: number;
+  /** ★SW-FX35：城镇房间表（pointers[7] 段,v>=189 门 WF:1830-1836；TownRoomManager.cs:94-124
+   *  Save/Load——i32 n + n×(i32 npcType, i32 roomX, i32 roomY)。原版语义=TownManager
+   *  房间预留（NPC 入住的家位记录， homeless 期间房间仍占位）。曾整段跳过 */
+  townRooms: Array<{ npc: number; x: number; y: number }>;
+  /** ★SW-FX35：图鉴三桶（pointers[8] 段,v>=210 门 WF:1838-1846；BestiaryUnlocksTracker.cs:14-31
+   *  Save 序 Kills→Sights→Chats）。k=persistentId→杀数（NPCKillsTracker.cs:60-71），
+   *  s/c=persistentId 集合（NPCWasNearPlayerTracker.cs:65-76/NPCWasChatWithTracker.cs:54-65）。
+   *  persistentId 域 = NPCID.Search.GetName(netID)（vanilla）== 本仓 bestiaryCreditId 域。
+   *  曾整段跳过 → 导入档图鉴进度全丢 */
+  bestiary: { k: Record<string, number>; s: string[]; c: string[] };
+  /** ★SW-FX35：旅程力量 per-world 段（pointers[9],v>=220 门 WF:1848-1856；
+   *  CreativePowerManager.cs:125-137 SaveToWorld——bool true+u16 id+负载 循环+bool false。
+   *  IPersistentPerWorldContent 六力：0 FreezeTime bool/8 ModifyTimeRate f32(滑杆 0-1)/
+   *  9 FreezeRain bool/10 FreezeWind bool/12 DifficultySlider f32(0-1)/13 StopBiomeSpread bool；
+   *  按键力 1-4 与 per-player 力（5/11/14）不落世界段。曾整段跳过 */
+  creativePowers: Array<{ id: number; num?: number; bool?: boolean }>;
 }
 
 export class WldParseError extends Error {}
@@ -405,10 +441,17 @@ export function parseWld(buf: Uint8Array): WldWorld {
   }
   // （v<140 原版在此 return 终读——本解析器只支持 >=210,else 不补读）
   if (r.boolean()) flags.lunarApocalypseUp = true;                                         // apocalypse
+  // ★SW-FX33（2026-09-11）：派对段捕获（原 WF:1367-1374 同位——曾读位即弃,见接口注）。
+  //  读序=WF:2267-2275:manual(bool)/genuine(bool)/cooldown(i32)/celebrating(i32 n + n×i32)
+  let party = { manual: false, genuine: false, cooldown: 0, celebrating: [] as number[] };
   if (version >= 170) {
-    r.boolean(); r.boolean(); r.i32();
+    const manual = r.boolean();
+    const genuine = r.boolean();
+    const cooldown = r.i32();
     const n = r.i32();
-    for (let i = 0; i < n; i++) r.i32();
+    const celebrating: number[] = [];
+    for (let i = 0; i < n; i++) celebrating.push(r.i32());
+    party = { manual, genuine, cooldown, celebrating };
   }
   if (version >= 174) { r.boolean(); r.i32(); r.f32(); r.f32(); }
   // ★savedBartender+DD2 三 bool（v178,WF:1369 savedBartender + DD2Event.cs:151-157
@@ -436,7 +479,12 @@ export function parseWld(buf: Uint8Array): WldWorld {
   //  1280 项垃圾——「教科书式断言盲区」(tiles/chests 走指针 seek 不受影响)。
   //  bg10-12 即 treeBG2-4,上方已读,不再二次读取。
   if (version >= 204 && r.boolean()) flags.combatBookWasUsed = true;                       // combatBookWasUsed（★SW-FX11 键域归一,原 WF:1386 NPC.combatBookWasUsed）
-  if (version >= 207) { r.i32(); r.boolean(); r.boolean(); r.boolean(); }                  // 灯笼夜四件套（运行时态,不落 flags）
+  // ★SW-FX33（2026-09-11）：灯笼夜四件套捕获（原注释「运行时态,不落 flags」误判——
+  //  原版持久化于 WF:1387-1390,读序=WF:2336-2339 cooldown(i32)/genuine/manual/next）
+  let lantern = { cooldown: 0, genuine: false, manual: false, next: false };
+  if (version >= 207) {
+    lantern = { cooldown: r.i32(), genuine: r.boolean(), manual: r.boolean(), next: r.boolean() };
+  }
   if (version >= 211) {
     // TreeTops 变体表（WorldGen.TreeTops.Load：13 个区域树样式，v≥211 世界用这个）
     const n = r.i32();
@@ -648,6 +696,68 @@ export function parseWld(buf: Uint8Array): WldWorld {
     }
   }
 
+  // ---- 城镇房间表（★SW-FX35：pointers[7] 段,v>=189 门 WF:1830-1836；本仓支持域
+  //      恒过门。TownRoomManager.cs:94-106 Save/:108-121 Load——i32 n + n×
+  //      (i32 npcType, i32 roomX, i32 roomY)。原版语义=TownManager 房间预留表
+  //      （Load 后 _hasRoom[npcType]=true, homeless NPC 的房间不重分配）。曾整段跳过）----
+  const townRooms: Array<{ npc: number; x: number; y: number }> = [];
+  if (pointers.length >= 9 && pointers[7] > 0 && pointers[8] > pointers[7]) {
+    r.seek(pointers[7]);
+    const n = r.i32();
+    for (let i = 0; i < n && r.pos + 12 <= pointers[8]; i++) {
+      townRooms.push({ npc: r.i32(), x: r.i32(), y: r.i32() });
+    }
+  }
+
+  // ---- 图鉴三桶（★SW-FX35：pointers[8] 段,v>=210 门 WF:1838-1846 恒过。
+  //      SaveBestiary WF:3411-3416 → BestiaryUnlocksTracker.Save（BestiaryUnlocksTracker.cs:
+  //      14-19）序 = Kills→Sights→Chats：
+  //        Kills  = i32 n + n×(string persistentId, i32 count)（NPCKillsTracker.cs:60-71）
+  //        Sights = i32 n + n×string（NPCWasNearPlayerTracker.cs:65-76）
+  //        Chats  = i32 n + n×string（NPCWasChatWithTracker.cs:54-65）
+  //      persistentId 域 = NPCID.Search.GetName(netID) == 本仓 bestiaryCreditId（vanilla
+  //      persistentId 直存,与 data/Bestiary.ts BestiarySave {k,s,c} 同构）。曾整段跳过）----
+  const bestiary: { k: Record<string, number>; s: string[]; c: string[] } = { k: {}, s: [], c: [] };
+  if (pointers.length >= 10 && pointers[8] > 0 && pointers[9] > pointers[8]) {
+    try {
+      r.seek(pointers[8]);
+      const nK = r.i32();
+      for (let i = 0; i < nK && r.pos < pointers[9]; i++) bestiary.k[r.string()] = r.i32();
+      const nS = r.i32();
+      for (let i = 0; i < nS && r.pos < pointers[9]; i++) bestiary.s.push(r.string());
+      const nC = r.i32();
+      for (let i = 0; i < nC && r.pos < pointers[9]; i++) bestiary.c.push(r.string());
+    } catch { /* 脏段容错：保已解析桶（footer 由 pointer 重定位,不影响前段） */ }
+  }
+
+  // ---- 旅程力量 per-world 段（★SW-FX35：pointers[9] 段,v>=220 门 WF:1848-1856 恒过。
+  //      SaveCreativePowers WF:3427-3432 → CreativePowerManager.SaveToWorld（
+  //      CreativePowerManager.cs:125-137）：while 读 bool true + u16 id + 负载,
+  //      bool false 终止；LoadFromWorld :139-155 按 id 分派。per-world 六力：
+  //        0 FreezeTime bool（CreativePowers.cs:1465-1468）/ 8 ModifyTimeRate f32 滑杆
+  //        缓存 0-1（:972-975）/ 9 FreezeRain bool（:1533-1536）/ 10 FreezeWind bool
+  //        （:1499-1502）/ 12 DifficultySlider f32 0-1（:1169-1172）/ 13 StopBiomeSpread
+  //        bool（:1567-1570）。键力 1-4 与 per-player 力（5/11/14）不落世界段。
+  //      未知 id：负载长度不可知 → 停止余段（vanilla 同 break）。曾整段跳过）----
+  const creativePowers: Array<{ id: number; num?: number; bool?: boolean }> = [];
+  if (pointers.length >= 11 && pointers[9] > 0 && pointers[10] > pointers[9]) {
+    r.seek(pointers[9]);
+    try {
+      for (;;) {
+        if (r.pos >= pointers[10]) break;
+        if (!r.boolean()) break;
+        const id = r.u16();
+        if (id === 0 || id === 9 || id === 10 || id === 13) {
+          creativePowers.push({ id, bool: r.boolean() });
+        } else if (id === 8 || id === 12) {
+          creativePowers.push({ id, num: r.f32() });
+        } else {
+          break;   // 未知 id（负载长度不可知）——与 vanilla LoadFromWorld break 同语义
+        }
+      }
+    } catch { /* 脏段容错：保已解析力（footer 由 pointer 重定位,不影响前段） */ }
+  }
+
   return {
     worldId, caveBackStyle, iceBackStyle, jungleBackStyle, hellBackStyle,
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
@@ -660,10 +770,11 @@ export function parseWld(buf: Uint8Array): WldWorld {
     treeX, treeStyle, treeTops,
     tiles, chests, npcs, signs, flags,
     shimmered, pillarNpcs, pressurePlates,
+    party, lantern,
     anglerQuest, anglerWhoFinishedToday,
     bgMushroom, bgUnderworld, bg10, bg11, bg12,
     treeBG1, treeBG2: bg10, treeBG3: bg11, treeBG4: bg12, corruptBG, jungleBG, snowBG, hallowBG, crimsonBG, desertBG, oceanBG,
-    tileEntities, teSkipped,
+    tileEntities, teSkipped, townRooms, bestiary, creativePowers,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
     seedFlags,
   };
@@ -690,7 +801,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
  *      6 食物盘 (short,byte,short)（TEFoodPlatter.cs:41-46）
  *      7 晶塔 无（TETeleportationPylon 无 WriteExtraData 覆写）
  *      8 展示罐 (short,byte,short)（TEDeadCellsDisplayJar.cs:40-45）
- *      9/10 风筝桩/小动物桩 无（TEKiteAnchor/TECritterAnchor 无覆写）
+ *      9/10 风筝桩/小动物桩 short itemType（★SW-FX35 勘误：继承
+ *        TELeashedEntityAnchorWithItem.WriteExtraData/ReadExtraData :9-17，
+ *        TEdit TileEntity.cs:414-417 互证；空桩写 0）
  *  容错：未知 type 的 ExtraData 长度不可知（流无法重同步；vanilla GenerateInstance
  *  返 null 会 NRE）→ 中止余段+计数；读越界 → 保已解析部分（本段在 npcs 之后，
  *  失败不回波既有段）。 */
@@ -709,8 +822,24 @@ function decodeTileEntities(r: BinaryReaderLE, version: number, start: number, e
       const teId = r.i32();
       const tx = r.i16();
       const ty = r.i16();
-      if (teType === 4 || teType === 1) {
+      if (teType === 4 || teType === 1 || teType === 6 || teType === 8) {
         list.push({ type: teType, id: teId, x: tx, y: ty, item: live(triplet()) });
+      } else if (teType === 9 || teType === 10) {
+        // ★SW-FX35 定谳勘误：锚桩 ExtraData = short itemType（TELeashedEntityAnchorWithItem.cs:9-12
+        //  WriteExtraData/ReadExtraData :14-17；TEdit TileEntity.cs:414-417 互证）。
+        //  旧版按「无负载」跳过 → 流错位（vanilla 恒写该 short，空桩写 0）
+        const vid = r.i16();
+        list.push({ type: teType, id: teId, x: tx, y: ty, item: vid > 0 ? { vid, prefix: 0, stack: 1 } : null });
+      } else if (teType === 0) {
+        // 训练假人：short npc（TETrainingDummy.cs:119-127；-1=无假人实体）
+        list.push({ type: 0, id: teId, x: tx, y: ty, dummy: { npc: r.i16() } });
+      } else if (teType === 2) {
+        // 逻辑传感器：byte logicCheck + bool on（TELogicSensor.cs:381-395，文件恒写）
+        list.push({ type: 2, id: teId, x: tx, y: ty, sensor: { logicCheck: r.byte(), on: r.boolean() } });
+      } else if (teType === 7) {
+        // 晶塔：无 ExtraData（TETeleportationPylon 无 WriteExtraData 覆写——
+        //  塔型=tile 597 frameX/54 样式,运行时面 TeleportPylons.ts 按 tile 扫描）
+        list.push({ type: 7, id: teId, x: tx, y: ty });
       } else if (teType === 3) {
         const bEquip = r.byte();
         const bDye = r.byte();
@@ -740,10 +869,7 @@ function decodeTileEntities(r: BinaryReaderLE, version: number, start: number, e
         const dyes: Array<WldTeItem | null> = [];
         for (let s = 0; s < 2; s++) dyes.push((mask >> (s + 2)) & 1 ? live(triplet()) : null);
         list.push({ type: 5, id: teId, x: tx, y: ty, hat: { hats, dyes } });
-      } else if (teType === 0) { r.i16(); skipped++; }                        // 假人 npc short
-      else if (teType === 2) { r.byte(); r.boolean(); skipped++; }            // 逻辑传感器
-      else if (teType === 6 || teType === 8) { triplet(); skipped++; }        // 食物盘/展示罐
-      else if (teType === 7 || teType === 9 || teType === 10) skipped++;      // 晶塔/风筝桩/小动物桩
+      }
       else { skipped += total - i; break; }                                   // 未知 type → 余段放弃
     }
   } catch {

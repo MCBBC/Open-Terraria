@@ -35,6 +35,19 @@ export interface Body {
    *  不再踏站台面）；TownNPC.fixedUpdate 每 tick 按 flag22 写本字段，其余族仍恒 true。 */
   stepUpHolds?: boolean;
   stepUpNpc?: boolean;
+  /** ★SW-FX34：重力方向（Collision.StepUp/Down 第 7 参 `(int)gravDir`，Player.cs:28271/
+   *  28275/:23719-23726 传入；Collision.cs:3641 签名缺省 1）。缺省/1 = 原版 gravDir=1
+   *  半边（现有实现逐位不变）；仅反重力玩家写 -1（Player.fixedUpdate 每 tick 同步）。
+   *  NPC/掉落物/弹幕族不写 = 恒 1 半边。 */
+  gravDir?: 1 | -1;
+  /** ★SW-FX34：倒挂 StepUp 每 tick 门（Player.cs:28273-28275 `(carpetFrame != -1 ||
+   *  velocity.Y <= gravity) && !controlUp`——玩家侧算好传入；Body 无输入/飞毯语境）。
+   *  仅 gravDir=-1 且本 tick 满足门时为 true；gravDir=1 消费面照旧走 vy>=0 通用门。 */
+  stepUpInvGate?: boolean;
+  /** ★SW-FX34：本 tick Y 轴向下被拦（原版 Collision.down，Collision.cs:2398-2410）。
+   *  moveAxis dir>0 阻挡置位、moveAndCollide 头部复位。原版 Update :28467-28471
+   *  `gravDir==-1 && Collision.down → velocity.Y=-0.01; jump=0`（倒挂顶头）消费。 */
+  hitDown?: boolean;
   /** GetTileCollisionParameters 底对齐缩盒（NPC.cs:93950-93983,IIIII235 2026-09-10）：
    *  逐类型 cHeight 缩减量（px）——290 圣骑士 cHeight=40 → inset=62−40=22。
    *  moveAndCollide 管线期间整盒下移 inset+盒高缩减（feet 不变,盒顶下移）,
@@ -151,6 +164,86 @@ function applyStepUp(b: Body, world: World, holds: boolean, npcMode: boolean): v
   if (target >= b.y + b.h) return;
   if (b.y + b.h - target > 16.1) return;
   b.y = target - b.h;
+}
+
+/** ★SW-FX34 Collision.StepUp 反重力半边（Collision.cs:3641-3779 的 `gravDir != 1`
+ *  else 支，1457 逐值）：倒挂玩家沿天花板行走时「上台阶」= 探柱在身体【顶行】
+ *  （num3=(y+0.1)/16），落脚格在探柱列、台阶面向下凸出 → 身体整体【下移】
+ *  num7=num3*16+16（顶边贴台阶格底），并清 vy（:3773 `velocity.Y = 0f`）。
+ *  与 gravDir=1 半边的语义差（原文如此,非省略）：
+ *  · flag3 的坡面豁免是「任意 slope!=0」（:3733 `tile.slope() != 0`）——normal 半边
+ *    是 slope1/2 各带 centerX 侧别门；
+ *  · flag4 无 topSlope 侧别/沉入附加门（:3737-3741）；
+ *  · 终门多两腿：头行 bottomSlope（坡 3/4）拒踏、tile2（头行下一行）为平台拒踏
+ *    （:3770-3772）；
+ *  · 抬升写 position.Y=num7 + velocity.Y=0（normal 半边不写 vy）。
+ *  holdsMatching 的 frameY==0 沿用本文件 normal 半边的近似（平台上方无平台；
+ *  倒挂镜像 = 头行下一行无平台）。X 重叠门/探列算法与 normal 半边同式。 */
+function applyStepUpInv(b: Body, world: World, holds: boolean): void {
+  const vx = b.vx;
+  if (vx === 0) return;                           // 与 normal 半边同门（vanilla num=0 探中列,仓制早退）
+  const st = world.store;
+  const probeX = b.x + vx;                        // vector.X = position.X + velocity.X
+  const dir = Math.sign(vx);                      // num
+  const num2 = Math.floor((probeX + b.w / 2 + (b.w / 2 + 1) * dir) / TILE);
+  const num3 = Math.floor((b.y + 0.1) / TILE);    // 身体顶行（:3663 `(int)((double)vector.Y + 0.1) / 16`）
+  const num4 = Math.floor(b.h / TILE) + (b.h % TILE !== 0 ? 1 : 0);
+  if (!st.inBounds(num2, num3) || num3 >= st.h - 40) return;   // :3666-3668
+  // 存在性门（:3673-3686）：顶行下 i=1..num4+1 行、对角列 num3+num4 行须在界内
+  // （原版 !InWorld || tile==null → return；仓制 store 无 null 格 → 越界=return）
+  for (let i = 1; i < num4 + 2; i++) {
+    if (!st.inBounds(num2, num3 + i)) return;
+  }
+  if (!st.inBounds(num2 - dir, num3 + num4)) return;
+  // flag（:3700-3708 镜像）：探柱内身体下方行 j=2..num4 全净空
+  for (let j = 2; j <= num4; j++) if (solidAtInv(st, num2, num3 + j)) return;
+  // flag2（:3710-3714 镜像）：对角格净空
+  if (solidAtInv(st, num2 - dir, num3 + num4)) return;
+  // flag3（:3729-3735）：头行下一格净空 / 任意坡 / 半砖且再下一格净空
+  {
+    const s = slopeAtInv(st, num2, num3 + 1);
+    const ok = !solidAtInv(st, num2, num3 + 1)
+      || s !== 0
+      || (halfAtInv(st, num2, num3 + 1) && !solidAtInv(st, num2, num3 + num4 + 1));
+    if (!ok) return;
+  }
+  // flag4（:3736-3741）：头行=阻挡实心 / holdsMatching 站台面顶（下一行非实心非平台）/
+  //   下一行是半砖
+  {
+    const a = solidAtInv(st, num2, num3);
+    const cc = holds && platAtInv(st, num2, num3)
+      && !solidAtInv(st, num2, num3 + 1) && !platAtInv(st, num2, num3 + 1);
+    const bb = halfAtInv(st, num2, num3 + 1) && solidAtInv(st, num2, num3 + 1);
+    if (!(a || cc || bb)) return;
+  }
+  // X 重叠门（:3745-3748 同式）
+  if (!(num2 * TILE < probeX + b.w && num2 * TILE + TILE > probeX)) return;
+  // 终门（:3770-3772）：头行 bottomSlope（坡 3/4）拒踏；下一行平台拒踏
+  const headSlope = slopeAtInv(st, num2, num3);
+  if (headSlope === 3 || headSlope === 4) return;
+  if (platAtInv(st, num2, num3 + 1)) return;
+  // 抬升（:3773-3779）：身体顶边贴台阶格底（num7=num3*16+16），≤16.1px 才生效,清 vy
+  const num7 = num3 * TILE + TILE;
+  if (!(num7 > b.y)) return;
+  if (num7 - b.y > 16.1) return;
+  b.y = num7;
+  b.vy = 0;
+}
+
+// —— applyStepUpInv 辅助谓词（与 applyStepUp 内联版同语义,提为独立小函数避免
+//    触碰 normal 半边已验证的实现体）——
+function solidAtInv(st: World['store'], x: number, y: number): boolean {
+  return st.inBounds(x, y) && st.isSolid(x, y);
+}
+function halfAtInv(st: World['store'], x: number, y: number): boolean {
+  return st.inBounds(x, y) && !!st.half[st.idx(x, y)];
+}
+function slopeAtInv(st: World['store'], x: number, y: number): number {
+  return st.inBounds(x, y) ? st.slope[st.idx(x, y)] : 0;
+}
+function platAtInv(st: World['store'], x: number, y: number): boolean {
+  return st.inBounds(x, y) && st.isPlatform(x, y)
+    && TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet !== 239; // 239 矿锭不踏（同 applyStepUp）
 }
 
 /** 格子的半砖碰撞盒（原版 Collision.cs:1320-1324 三处一致）：下半 8px。
@@ -322,7 +415,7 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
       }
     }
     if (bestTop !== Infinity) {
-      if (dir > 0) { b.y = bestTop - b.h; b.onGround = true; }
+      if (dir > 0) { b.y = bestTop - b.h; b.onGround = true; b.hitDown = true; }
       else { b.y = bestTop; b.hitHead = true; }
       b.vy = 0;
       hitY = true;
@@ -374,7 +467,8 @@ export function setWalkDownPre(v: boolean): void { WALKDOWN_PRE = v; }
  *     接近坡第一列即同步补偿（阻尼残差根因）;
  *  ③ 表面等高续链门（:1735-1743）：同层表面并列时只跟随与行走方向配套的同侧
  *     坡链（slope==dirCode），防跨结构误触发。 */
-function walkDownSlopePre(b: Body, world: World, wasGround: boolean): void {
+/** ★export 仅为 sw-fx34 倒挂门测试直驱（moveAndCollide 内部的中间态 vy 不可外察） */
+export function walkDownSlopePre(b: Body, world: World, wasGround: boolean): void {
   if (!WALKDOWN_PRE) return;
   // 活性门（:1695 字面 `Velocity.Y != gravity` 早退）：玩家侧 vy===GRAVITY 字面
   // 等价；NPC 族本仓重力先累加、碰撞头已清 onGround——贴地判据用入口快照
@@ -383,7 +477,14 @@ function walkDownSlopePre(b: Body, world: World, wasGround: boolean): void {
   if (!b.stepUp) return;
   const gate = b.stepDownGate ?? 'grounded';
   if (gate === 'never') return;
-  if (gate === 'gravity' ? b.vy !== GRAVITY : !(wasGround && b.vy >= 0)) return;
+  // ★SW-FX34：门值 = gravity*gravDir（Player.cs:23610 `Collision.WalkDownSlope(…,
+  //  gravity * gravDir)` → Collision.cs:1695 `Velocity.Y != gravity` 早退）——倒挂
+  //  贴顶态 vy=-GRAVITY 过门（vanilla 语义：倒挂玩家同样跑 WalkDownSlope,其扫描窗
+  //  仍在身体【下方】、vy 追加也恒为世界向下 +=|vx|——原文本不随 gravDir 镜像,
+  //  倒挂时只有身下恰有地面坡的罕见摆位才会被「拖离天花板」= 原版 quirk,照单全收）。
+  //  gravDir=1 半边数值恒等。
+  const gdWs: 1 | -1 = b.gravDir === -1 ? -1 : 1;
+  if (gate === 'gravity' ? b.vy !== GRAVITY * gdWs : !(wasGround && b.vy >= 0)) return;
   const st = world.store;
   // 扫描窗（:1698-1720）：j0=(feet+4)/16；候选面须在 (j*16-17, j*16) 的 17px 上探带内
   // 与身体盒相交，且 num5 <= num(初始 (j0+3)*16 大帽)。solid||solidTop(平台族)均可作面。
@@ -946,7 +1047,9 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   b.onGround = false;
   b.hitWall = false;
   b.hitHead = false;
+  b.hitDown = false;             // ★SW-FX34：Collision.down 逐 tick 复位（Player.cs:28467 消费）
   b.collideY = false;            // 原版 collideY 逐 tick 复位（NPC.cs:93741）
+  const gdBody: 1 | -1 = b.gravDir === -1 ? -1 : 1;   // ★SW-FX34：缺省 1=原版 gravDir 半边
   // 原版 StepUp/StepDown 在 TileCollision 之前用未受阻的意图速度探测
   // （Player.cs:23252-23263 / NPC.cs:54377-54382）。StepDown 门：玩家 vy===GRAVITY
   // （原版字面 :23252）、NPC 族 onGround（原版 :54374 vy==0 在该时点=贴地语义；
@@ -962,13 +1065,27 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     //   （那需要无 wasGround 门；飞虫 wasGround 恒 false 本就不吸附）
     if (gate === 'never') { /* no StepDown */ }
     else if (gate === 'gravity' ? b.vy === GRAVITY : (wasGround && b.vy >= 0)) applyStepDown(b, world);
+    // ★SW-FX34 StepDown 倒挂语义备案（Collision.cs:3577-3638 + Player.cs:28267-28271）：
+    //  原 Collision.StepDown 函数体【完全不读 gravDir 形参】（扫描/吸附恒向世界下方,
+    //  num5=(num3+num4)*16 向下找落面）——其触发门 `velocity.Y == gravity`（:28271,
+    //  取正 gravity）对倒挂贴顶态（本仓重力链后 vy=-GRAVITY）恒不成立 ⇒ 原版倒挂
+    //  玩家【无 StepDown 吸附】（脱阶靠重力回吸天花板,1-2 tick 内自行归位）。本仓
+    //  `b.vy === GRAVITY` 字面门对倒挂同样恒不成立 = 与原版逐位同结果,零修改。
     // ★对抗修复批③2026-09-01 D-F3（cs:54525-54527）：原版 AI_007 的 StepUp 整个
     // 包在 `if (velocity.Y >= 0f)` 里——上升帧（跳跃首 tick / 击退上抛）不探台面,
     // 杜绝半空中贴身探测到 16.1px 内落脚格被瞬移抬升的"怪力上吸"。玩家侧原版同形
     // （Player.cs:23726/:28273 的 `(carpetFrame != -1 || velocity.Y >= gravity)` 门）;
     // 其余走 moveAndCollide 的族——AI_107 ImprovedWalkers（NPC.cs:64911 无门）与
     // 弹系步进体——本闸对它们只在 vy<0（离地上行）帧收紧探柱,贴地/下落行为零变化。
-    if (b.vy >= 0) applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
+    if (gdBody === -1) {
+      // ★SW-FX34：倒挂 StepUp 门（Player.cs:28273-28275 `(carpetFrame != -1 ||
+      //  velocity.Y <= gravity) && !controlUp`——玩家侧逐 tick 预计算写 stepUpInvGate;
+      //  holdsMatching 实参= controlUp 同款,经 stepUpHolds 承载）。
+      //  探柱/抬升走 applyStepUpInv（Collision.cs:3641-3779 else 支 1:1）。
+      if (b.stepUpInvGate === true) applyStepUpInv(b, world, !!b.stepUpHolds);
+    } else if (b.vy >= 0) {
+      applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
+    }
   }
   // ★WalkDownSlope 预备阶段（2026-09-01 全量移植,见 walkDownSlopePre 注释）：
   //   vanilla 玩家 SlopingCollision 前置/NPC UpdateCollision 首步同源。开启后

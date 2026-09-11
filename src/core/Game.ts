@@ -212,7 +212,7 @@ import { teamSpawnPlacement } from '../world/spawn/ExtraSpawnsRoyale';
 import { spawnForceClearArea, spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } from '../world/spawn/SpawnPlacement';
 import { scanLuckScene, torchLuckCheckCenterBelowSurface, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理 + IIIII228 海螺 TileIsDangerous
-import { playerAccessoryVidEquipped, BACC, builderAccGateSet } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位+配饰 vid 扫描
+import { playerVidCarried, BACC, builderAccGateSet } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位+配饰 vid 扫描（★FX36:装备改背包∪装备扫描）
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
 import { damageVarRoll } from '../stats/DamageVar';
 import {
@@ -12800,8 +12800,13 @@ export class Game implements GameHooks {
           const animT = Math.max(1, Math.round((cwMelee.useAnimation ?? cwMelee.useTime ?? 100)
             / this.player.attackSpeedMult));   // ResetStats 缺省（Item.cs:48626-48627）
           const scaleT = ps?.size ?? 1;
+          // ★SW-FX31：真刃系 ai[0] = direction × gravDir（Player.cs:49381/:49382×0.1/
+          //  :49396/:49403/:49416/:49427/:49435/:49443/:49444 逐链实参）——倒挂时
+          //  旋斩弧/飞斩的旋转方向与镜像面随 gravDir 翻转（SwingArc.draw 的
+          //  `ai0<0 → scale(1,-1)` 即原版 effects 语义）；gd=1 逐位恒等
+          const arcAi0 = this.player.facing * this.player.gravDir;
           const mkArc = (projId: number, dmg: number) => {
-            const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), this.player.facing, scaleT);
+            const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), arcAi0, scaleT);
             arc.critChance = arcCrit;
             arc.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
             // 弹体击退（NewProjectile KnockBack 实参）——997 命中召 321 时透传
@@ -12814,7 +12819,7 @@ export class Game implements GameHooks {
               mkArc(972, this.swing.dmg ?? cwMelee.damage);
               const fly = new NightsEdgeFly(this.player.cx, this.player.cy - 4,
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 5), Math.sin(angT) * (cwMelee.shootSpeed ?? 5),
-                this.swing.dmg ?? cwMelee.damage, this.player.facing, 30, scaleT);
+                this.swing.dmg ?? cwMelee.damage, arcAi0, 30, scaleT);   // ai0=dir×gravDir×0.1（:49382）
               fly.critChance = arcCrit;
               fly.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
               this.entities.add(fly, 'projectiles');
@@ -12824,7 +12829,7 @@ export class Game implements GameHooks {
               mkArc(972, this.swing.dmg ?? cwMelee.damage);
               const slash = new TrueNightsEdgeSlash(this.player,
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 14), Math.sin(angT) * (cwMelee.shootSpeed ?? 14),
-                (this.swing.dmg ?? cwMelee.damage) / 2, this.player.facing, 32, scaleT);
+                (this.swing.dmg ?? cwMelee.damage) / 2, arcAi0, 32, scaleT);   // ai0=dir×gravDir（:49435-49436）
               slash.critChance = arcCrit;
               slash.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
               this.entities.add(slash, 'projectiles');
@@ -13118,7 +13123,8 @@ export class Game implements GameHooks {
             const arc = new SwingArc(this.player, 984,
               Math.max(1, Math.round((cwMelee.useAnimation ?? cwMelee.useTime ?? 100)
                 / this.player.attackSpeedMult)),
-              Math.round((this.swing.dmg ?? 1)), this.player.facing, (ps?.size ?? 1));
+              // ★SW-FX31：757 链 984 弧 ai[0] = direction×gravDir（Player.cs:49443）
+              Math.round((this.swing.dmg ?? 1)), this.player.facing * this.player.gravDir, (ps?.size ?? 1));
             arc.critChance = arcCrit;
             arc.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
             this.entities.add(arc, 'projectiles');
@@ -14499,9 +14505,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let ax = anchor.x;
         let ay = anchor.y;
         // 逐枪枪口偏移（Player.cs:47632-47640）：吹箭筒 281/吹箭枪 986 (+6×dir,−6×gravDir)、
-        // 飞镖手枪 3007 (−4×dir,−2×gravDir)；gravDir 本仓恒 1（无重力翻转建模）
-        if (bowVid2 === 281 || bowVid2 === 986) { ax += 6 * this.player.facing; ay -= 6; }
-        else if (bowVid2 === 3007) { ax -= 4 * this.player.facing; ay -= 2; }
+        // 飞镖手枪 3007 (−4×dir,−2×gravDir)；★SW-FX31：gravDir 活语义（:47680
+        // `pointPosition.Y -= 6f*gravDir` / :47685 `-= 2f*gravDir`——倒挂反号下移；
+        // gd=1 逐位恒等）
+        if (bowVid2 === 281 || bowVid2 === 986) { ax += 6 * this.player.facing; ay -= 6 * this.player.gravDir; }
+        else if (bowVid2 === 3007) { ax -= 4 * this.player.facing; ay -= 2 * this.player.gravDir; }
         // ★SW-FX9（2026-09-10）：旧"仅木箭 1/3 落地回收"（dropKey 链）整链摘除——
         // 原版弹药恒消耗（P.cs 箭族 Kill 支 :75447-75454 仅音尘、!noDropItem 段
         // :79099-79360 无箭族 NewItem,Player.cs 无落地拾取链;裁决见 Arrow.ts 撞块段注
@@ -22211,18 +22219,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  来源：Builder 药水 +0.25（:9842）/ 仙馔蜜酒 +0.05（:12458）/ 风筝 buff +0.15（:9616）/
    *  砌砖刀族配饰 +0.5（:12604-12608）——★acc 份有手持门：selectedItem.createTile≥0
    *  且非火把（TileID.Sets.Torches 仅 tile 4，:12605-12607）。本仓 createTile≥0 ⇔
-   *  itemDef.tile 为 string（火把族走 Torch 特链无该字段，天然被排除） */
+   *  itemDef.tile 为 string（火把族走 Torch 特链无该字段，天然被排除）。
+   *  ★SW-BJ59：单源迁移至 Player.placeSpeedTileRaw（tileSpeed 是 Player 字段，
+   *  滚轴鞋巡航挡 :28751 同消费——此处委托防双抄漂移） */
   private placeSpeedTileRaw(): number {
-    let s = 1;
-    if (this.player.buffs.has(BuffType.Builder)) s += 0.25;
-    if (this.player.usedAmbrosia) s += 0.05;
-    if (this.player.buffs.has(BuffType.KiteBuff)) s += 0.15;
-    const es = this.player.equipStats;
-    if (es.tileSpeed) {
-      const heldDef = ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1];
-      if (heldDef?.tile !== undefined) s += 0.5;
-    }
-    return s;
+    return this.player.placeSpeedTileRaw();
   }
 
   /** Player.wallSpeed 原始聚合（:2336 基 1f;Builder +0.25/ambrosia +0.05/风筝 +0.15/
@@ -29932,7 +29933,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const playerOffNow = mountRiding.ridingCart || mountRiding.mount?.active
       ? Math.floor(((p as unknown as { anchorPlayerOffset: number }).anchorPlayerOffset ?? 0)) : 0;
     let bx = p.cx + p.facing * offX;
-    let by = p.y + offY - playerOffNow;
+    // ★SW-FX31：倒挂时 itemLocation.Y 先经 FlipItemLocationAndRotationForGravity
+    //（Player.cs:52281 + useStyle 内联支 :51478 等）镜像——offY 关于玩家盒竖直中心
+    // 镜像（h−offY），与 Renderer.drawUseItem 同式；gd=1 恒等。
+    let by = p.y + (p.gravDir === -1 ? p.h - offY : offY) - playerOffNow;
     // ★近战任务B 火之大剑(Volcano,type121)[★J1 勘误:历史注误标"星怒"]延长臂锚点快照：此二值 = 三段持位结果（与 Renderer.drawUseItem
     //  case 1 双表同源）≡ C# ItemCheck_ApplyUseStyle(1457 :51292 / 1456 :49921)
     //  写入的 player.itemLocation（useStyle1 各段 X=position.X+w/2±(fw/2−num)·dir、
@@ -29955,7 +29959,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       bh = Math.trunc(bh * 1.1);
     }
     if (p.facing === -1) bx -= bw;
-    by -= bh;
+    // ★SW-FX31：`if (gravDir == 1f) itemRectangle.Y -= itemRectangle.Height;`
+    //（Player.cs:45519-45521）——倒挂时判定盒自 itemLocation.Y 向【下】伸展
+    //（镜像锚已在上面翻好），普通重力原样（gd=1 逐位恒等）
+    if (p.gravDir === 1) by -= bh;
     if (hitUs === 3) {
       // useStyle 3（cs:44545-44560 + :50279-50312）：anim>0.666max 收势段 dontAttack
       // （:45553 double 阈值原式——[N5] 同源闭式，勿换 pAnim 比值式）；
@@ -29974,12 +29981,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 三段扩展（cs:44516-44540）：早段大盒覆盖抡起区、晚段小盒收势
       if (p.facing === 1) bx -= Math.floor(bw * 1.2);
       bw *= 2;
-      by -= Math.floor(bh * 1.4 - bh);
+      // ★SW-FX31：`itemRectangle.Y -= (int)((H*1.4 − H) * gravDir)`（Player.cs:45543
+      // ——gravDir 在 (int) 内，倒挂反号为下移 0.4H）；gd=1 数值恒等
+      by -= Math.floor(bh * 1.4 - bh) * p.gravDir;
       bh = Math.floor(bh * 1.4);
     } else if (phase === 2) {
       if (p.facing === -1) bx -= Math.floor(bw * 1.4 - bw);
       bw = Math.floor(bw * 1.4);
-      by += Math.floor(bh * 0.5);
+      // ★SW-FX31：`itemRectangle.Y += (int)(H*0.5 * gravDir)`（Player.cs:45533
+      // ——倒挂反号为上移 0.5H）；gd=1 数值恒等
+      by += Math.floor(bh * 0.5) * p.gravDir;
       bh = Math.floor(bh * 1.1);
     }
     // ★[N6] 任务⑥ 整型化锚（2026-08-31 对齐批）：原版 itemRectangle 自 GetMeleeHitbox
@@ -30128,9 +30139,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     let sfB: { x: number; y: number } | null = null;
     if (swingVid === 121) {
       const rotLocal = (pAnim - 0.5) * -3.5 - 0.3;
+      // ★SW-FX31：倒挂档（Player.cs:45124-45126 num2 倒挂支 + :52284 FlipItem 取反
+      //  ——itemRotation = −(dir 档旋转)、itemLocation 镜像已随 swingLocY 快照；
+      //  gd=1 逐位恒等）
+      const dirRot = p.facing === 1 ? rotLocal : -rotLocal;
       [sfA, sfB] = starfurySwingProbes(
         { x: swingLocX, y: swingLocY },
-        p.facing === 1 ? rotLocal : -rotLocal,
+        p.gravDir === -1 ? -dirRot : dirRot,
         p.facing,
         this.player.equipStats.meleeScaleGlove && swingCombat?.melee ? 1.1 : 1,
         // ★[N1] RESOLVED：RotatedRelativePoint 三面全量接线——gfxOffY 取 Player 实值
@@ -30145,7 +30160,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           fullRotation: (p as unknown as { anchorFullRotation?: number }).anchorFullRotation ?? 0,
           gfxOffY: p.gfxOffY,
           mountPlayerOffset: playerOffNow,
-        });
+        },
+        p.gravDir);
     }
     // 小动物：网 → 捕捉（ItemCheck_CatchCritters :45083-45113 纯矩形相交，无视线
     // 门、无冷却门——catch 原文本就不进 ItemCheck_MeleeHitNPCs 循环）；其余挥击
@@ -40697,6 +40713,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // WF:1024-1030 SaveHeader 对十周年世界另恒重算 true——见 applySave 尾的旗标强制）
       partyGenuine: this.partyState.genuineParty || undefined,
       partyCooldown: this.partyState.daysOnCooldown,
+      // ★SW-FX33（2026-09-11）：TempPartyCelebratingNPCs 名单（WF:1370-1374 写/
+      // :2273-2276 读）——key→原版 netId（TOWN_NPC_IDS[key].id），与导入侧
+      // WldParser 透传的 netId 域同域；曾登记未接（见 applySave 尾批章注）
+      partyCelebratingNpcs: this.partyState.celebratingNpcs.length
+        ? [...new Set(this.partyState.celebratingNpcs
+          .map((k) => TOWN_NPC_IDS[k]?.id)
+          .filter((id): id is number => !!id))]
+        : undefined,
       lanternManual: LanternNight.manualLanterns,
       lanternGenuine: LanternNight.genuineLanterns,
       lanternNext: LanternNight.nextNightIsLanternNight,
@@ -40716,8 +40740,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.partyState.manualParty = !!ev.partyManual;
     this.partyState.genuineParty = !!ev.partyGenuine;   // WF:165 GenuineParty=_tempPartyGenuine
     this.partyState.daysOnCooldown = ev.partyCooldown ?? 0;
+    // ★SW-FX33（2026-09-11）：CelebratingNPCs 回灌（原版 WorldFile.cs:168 Load 尾
+    //  BirthdayParty.CelebratingNPCs.AddRange(TempPartyCelebratingNPCs)）——netId→key
+    //  （TOWN_NPC_IDS 同款反查,与 :40073 惯例一致）;无映射 id（旧档/越界）按缺席跳过
+    this.partyState.celebratingNpcs = (ev.partyCelebratingNpcs ?? [])
+      .map((id) => Object.entries(TOWN_NPC_IDS).find(([, v]) => v.id === id)?.[0])
+      .filter((k): k is string => !!k);
     // WF:1024-1030（SaveHeader 序列化侧）：十周年世界 _tempPartyGenuine 恒真——读档/
-    // 导入 .wld 后与原版同语义强制（CelebratingNPCs 列表位登记未接，见批章）
+    // 导入 .wld 后与原版同语义强制
     if (this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.skyblock) {
       this.partyState.genuineParty = true;
     }
@@ -44467,6 +44497,50 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     return total;
   }
 
+  /** 储蓄（铜计;ItemSlot.DrawSavings ItemSlot.cs:3717-3726 数据面）——【只】合计
+   *  bank..bank4 四仓（存钱罐/保险箱/守护者熔炉/虚空保险库）。Utils.CoinsCount
+   *  （Utils.cs:1054-1081）：71/72/73/74 = ×1/×100/×10000/×1000000。背包/光标不进
+   *  （储蓄显示语义——与 coinsOwned 的 BuyItem 五仓消费面分立；defenderMedalSavingsOf
+   *  同构面）。商店头储蓄行取数口（SW-FX32 刀①;Main.cs:42503 DrawSavings(504,invBottom)） */
+  coinSavingsCopper(): number {
+    let total = 0;
+    for (const n of this.coinSavingsByBank()) total += n;
+    return total;
+  }
+
+  /** 逐仓储蓄（铜计;SW-FX32 银行小图标门用——ItemSlot.cs:3727-3740 该仓有币才画
+   *  图标:bank 存钱罐/bank2 保险箱/bank3 守护者熔炉/bank4 虚空保险库,下标 0..3 同
+   *  p.banks 序）。单仓 CoinsCount 同 :1054-1081 */
+  coinSavingsByBank(): [number, number, number, number] {
+    const out: [number, number, number, number] = [0, 0, 0, 0];
+    const pools = this.player.banks;
+    for (let b = 0; b < 4 && b < pools.length; b++) {
+      for (const s of pools[b] ?? []) {
+        if (!s) continue;
+        const ci = coinIndexOf(s.id);
+        if (ci >= 0) out[b] += s.stack * COIN_VALUES[ci];
+      }
+    }
+    return out;
+  }
+
+  /** Utils.CoinsSplit（Utils.cs:1083-1097）：[铜,银,金,铂] 贪心除档——商店储蓄行
+   *  四档计数显示用（SW-FX32;ItemSlot.cs:3699-3701 币图标 j=0..3 = 74-j 铂/金/银/铜,
+   *  计数 = split[3-j]）。★ItemSorting.ts 内同式实现为 FX29 域私有（不碰），此处独立
+   *  直译同锚 */
+  coinSavingsSplit(): [number, number, number, number] {
+    const array: [number, number, number, number] = [0, 0, 0, 0];
+    let done = 0;
+    let denom = 1000000;
+    const count = this.coinSavingsCopper();
+    for (let i = 3; i >= 0; i--) {
+      array[i] = Math.trunc((count - done) / denom);
+      done += array[i] * denom;
+      denom /= 100;
+    }
+    return array;
+  }
+
   // ---- 护卫勋章货币（CustomCurrencyManager.DefenderMedals，src/stats/DefenderMedals）----
 
   /** 勋章持有量（CustomCurrencyManager.BuyItem 门口计数 CustomCurrencyManager.cs:76-87：
@@ -44673,10 +44747,16 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     // ★SW-FX19：标尺线/标尺网格注入（DrawInterface_4_Ruler :47046 门 rulerLine &&
     //  status[0]==0；DrawInterface_3_LaserRuler :47148 门 rulerGrid && status[1]==0。
     //  尺子 486/机械标尺 2799 装备旗 = RefreshMechanicalAccsFromItemType :12897 门）
+    // ★SW-FX36 修正两门：①标尺线门【无物品面】——:47048 的 rulerLine 旗在
+    //  ResetEffects（Player.cs:18809）每拍置 true、全仓无置 false 点 ⇒ 恒真,
+    //  :12903 486/3611 置位支为无操作,真门只剩 status[0]==0（+spectating<0,
+    //  本仓无观战态 N/A）——Ruler 档开关人人可用（用户实报原版如此）。
+    //  ②标尺网格旗判定域改背包∪装备扫描（UpdateEquips :12997-13004 逐 inventory
+    //  [0..57] 槽 + GrantArmorBenefits :13204 装备段——信息配件族不必装备）。
     {
       const gates = builderAccGateSet((vid) =>
-        playerAccessoryVidEquipped(this.player.inv.armor, this.player.inv.accSlotMax, vid));
-      const lineOn = gates.rulerLine && this.player.builderAccStatus[BACC.RulerLine] === 0;
+        playerVidCarried(this.player.inv.slots, this.player.inv.armor, this.player.inv.accSlotMax, vid));
+      const lineOn = this.player.builderAccStatus[BACC.RulerLine] === 0;
       const gridOn = gates.rulerGrid && this.player.builderAccStatus[BACC.RulerGrid] === 0;
       if (lineOn || gridOn) {
         const p0 = this.player;
@@ -44689,6 +44769,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
           nudge: mwx < p0.cx ? -1 : 1,               // :47070-47072 num5
           mouseTx: mtx0, mouseTy: mty0,
           speed: Math.hypot(p0.vx, p0.vy),
+          gridDist: p0.shadowLagDist(),              // :47152 Distance(position,shadowPos[2])
           gravDir: p0.gravDir,
         };
       } else {

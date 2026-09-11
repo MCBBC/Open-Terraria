@@ -1,4 +1,19 @@
 // SW-FX29：ItemSorting 整库提取 v2（1457 基线重跑，2026-09-11）。
+// ★SW-RB13c 红蓝复审修复（同日）——六处既有盲区修复之外的五处新盲区：
+//   ⑦ 嵌套 switch(type) 双写序逆置（collectCaseSegments）——外层体在嵌套体之后才 flush,
+//     重放 last-write-wins 反取外层基值（DD2 哨兵杖 3819-3834 rare 5/8 → 3）;
+//   ⑧ 助手体内嵌套 DefaultTo* 转发不递归（expandHelperCall）——DefaultToInfoAccessory →
+//     DefaultToAccessory(accessory=true) 断链,22 件信息饰品 accessory 整缺;
+//   ⑨ `field = false;` 直赋被丢（replaySegment/expandHelperCall 只认 true）——
+//     5629 Acorn Slingshot ranged=false 被 DefaultToRangedWeapon 的 true 顶回;
+//   ⑩ IsFood 分派面（SetFoodDefaults 先于 SetDefaults1-5,Item.cs:48685）——对全部
+//     IsFood 强行 consumable=true+buffType=26,无 SetFoodDefaults case 的 4010 误入
+//     PotionsFood;染料/染发剂升级为 DyeInitializer 绑定序精确 shader id（dye/hairDye
+//     比较器键）,hairDye 终值门按 Item.cs:48717-48721（case 段 0 标记 ∪ Hair 绑定集）;
+//   ⑪ switch 外顶层 if(type>=A&&type<=B)/if(type==X) 范围分派支（39 支）——旗帜座
+//     1479-1494/染发剂 1977-1986/头饰 2104-2113/平衡配件 3309-3314/蛋糕块 3390-3452
+//     等家族字段整缺,234 件塌进 LastMaterials（48 层 2242→2443、21 层 474→502、
+//     47 层 578→331）。SetShopValues(ItemRarityColor.X) rare 终值同批补提。
 // 旧版（2026-08-20）只产 layers 6147 条（1456 基线,1457 缺 6147-6195 共 49 件——
 // ItemID.Count 1456:13833=6147 → 1457:13938=6196）；本版按 1457 重跑并补齐
 // ItemSorting.Sort 运行时引擎所需全量数据面：
@@ -15,9 +30,9 @@
 //                     consumable/notAmmo/questItem/accessory/vanity/mech/damage/
 //                     defense/pick/axe/hammer/ammo/shoot/buffType/healLife/healMana/
 //                     mountType/headSlot/bodySlot/legSlot/paint/paintCoating/
-//                     createTile/createWall/makeNPC/rare）+ vanilla-equip.json dye
-//                     （Item.cs:48716 GetShaderIdFromItemId 运行时面,文本不可提）+
-//                     vanilla-hairdyes.json hairDye（:48719 同理）+ vanilla-itemvalue.json
+//                     createTile/createWall/makeNPC/rare）+ dye/hairDye=DyeInitializer
+//                     绑定序精确 shader id（RB13c；旧 vanilla-equip.json/vanilla-hairdyes.json
+//                     布尔近似退役为对照校验源）+ vanilla-itemvalue.json
 //                     value + 衍生旗：fk=projHook[shoot]（Main.cs:6752-6762 aiStyle==7）、
 //                     lp/vp=Main.lightPet/vanityPet[buffType]（Main.cs 直赋表）、
 //                     ca=MountID.Sets.Cart[mountType]（MountID.cs:21）、fo/fc/fb=布尔集、
@@ -126,6 +141,17 @@ function collectCaseSegments(body, out) {
   while ((m = tokRe.exec(body))) {
     const t = m[0];
     if (t.startsWith('switch')) {
+      // ★SW-RB13c 修复⑦：嵌套 switch(type) 双写序逆置——case 体内嵌 switch(type) 时,
+      // 原版执行序 = 外层体先跑、嵌套体后跑（后写覆盖先写）。旧实现外层体要等下一个
+      // 外层标签才 flush,晚于嵌套体落盘 → 重放 last-write-wins 反取外层基值
+      // （DD2 哨兵杖 3819/3820/3825/3826/3830/3831/3833/3834 的 rare=5/8 被外层 rare=3 覆盖）。
+      // 修复：遇嵌套 switch 先把外层已累积段按执行序落盘,外层 segStart 跳到嵌套 switch
+      // 之后（嵌套文本在重放端由 depth 守卫跳过,不重复生效）,嵌套体随后追加=执行序正确。
+      const outer = stack[stack.length - 1];
+      if (outer && outer.opened && outer.isType) {
+        flush(outer, body.slice(outer.segStart, m.index));
+        outer.segStart = m.index + t.length;
+      }
       stack.push({ isType: /switch\s*\(\s*(?:type|currentItem\.type|Type)\b/.test(t), opened: false, bodyDepth: -1, pending: [null], segStart: 0 });
     } else if (t === '{') {
       depth++;
@@ -136,6 +162,9 @@ function collectCaseSegments(body, out) {
       if (top && top.opened && depth === top.bodyDepth) {
         if (top.isType) flush(top, body.slice(top.segStart, m.index));
         stack.pop();
+        // ★SW-RB13c：自嵌套关闭处恢复外层续段（跳过已落盘的嵌套文本,防重复追加）
+        const outer = stack[stack.length - 1];
+        if (outer && outer.opened && outer.isType) outer.segStart = m.index + 1;
       }
       depth--;
     } else {
@@ -177,10 +206,97 @@ function collectIfChainSegments(body, out) {
   }
 }
 const SEGS = new Map();
-for (let n = 1; n <= 5; n++) {
-  const body = methodBodyOf(itemSrc, `public void SetDefaults${n}(int type)`)
-    || methodBodyOf(itemSrc, `private void SetDefaults${n}(int type)`);
-  if (body) collectCaseSegments(body, SEGS);
+const ITEM_COUNT = 6196;   // ItemID.Count（Terarria1457/Terraria.ID/ItemID.cs:13938 public static readonly short Count = 6196）
+{
+  const braceBodyOf = (text, openIdx) => {
+    let depth = 0;
+    for (let i = openIdx; i < text.length; i++) {
+      if (text[i] === '{') depth++;
+      else if (text[i] === '}') { depth--; if (depth === 0) return i; }
+    }
+    return -1;
+  };
+  for (let n = 1; n <= 5; n++) {
+    const body = methodBodyOf(itemSrc, `public void SetDefaults${n}(int type)`)
+      || methodBodyOf(itemSrc, `private void SetDefaults${n}(int type)`);
+    if (!body) continue;
+    // ★SW-RB13c 修复⑪：switch 外顶层 if(type>=A && type<=B)/if(type==X) 范围分派支——
+    //  反编译器把大量家族（火把座/旗帜座/染发剂 1977-1986/宠物牌 3453-3455/头饰
+    //  2104-2113/平衡配件 3309-3314/蛋糕块 3390-3452 等全 39 支）放在 switch 之后,
+    //  旧实现只扫 switch 段 → 这批 vid 的 SORT 字段整缺,层归属塌进 LastMaterials
+    //  （234 件实测）。执行序 = switch 先、if 支后;case `return;` 结尾者不再执行 if 支,
+    //  `break;` 结尾/无 case 者执行——据此判登记资格。
+    const segsN = new Map();
+    collectCaseSegments(body, segsN);
+    const switchSpans = [];
+    {
+      let pos = 0;
+      for (;;) {
+        const mm = /switch\s*\(\s*type\s*\)/.exec(body.slice(pos));
+        if (!mm) break;
+        const s = pos + mm.index;
+        const open = body.indexOf('{', s);
+        const close = braceBodyOf(body, open);
+        switchSpans.push([s, close]);
+        pos = close + 1;
+      }
+    }
+    const inSwitch = (i) => switchSpans.some(([a, b]) => a <= i && i <= b);   // ★JS 无链式比较
+    const registerBranch = (condStart, condText, blockOpen, depth) => {
+      const blockClose = braceBodyOf(body, blockOpen);
+      if (blockClose < 0) return;
+      const segText = body.slice(blockOpen + 1, blockClose);
+      const lo = /type\s*>=\s*(\d+)/.exec(condText);
+      const hi = /type\s*<=\s*(\d+)/.exec(condText);
+      const eq = [...condText.matchAll(/type\s*==\s*(\d+)/g)].map((x) => Number(x[1]));
+      let vids = [];
+      if (lo && hi) {
+        for (let v = Number(lo[1]); v <= Number(hi[1]); v++) vids.push(v);
+      } else {
+        vids = eq;
+      }
+      for (const v of vids) {
+        if (v < 0 || v >= ITEM_COUNT) continue;
+        const existing = segsN.get(v);
+        if (existing !== undefined && !existing.trimEnd().endsWith('break;')) continue;  // return 结尾=已 return,if 支不可达
+        segsN.set(v, (existing ?? '') + segText);
+      }
+      // 嵌套 if 支递归（外层体内再分派,如染发剂 1980/1984/1985 的 value 特例）
+      if (depth < 4) collectTopIfs(body, blockOpen + 1, blockClose, segsN, depth + 1);
+    };
+    const collectTopIfs = (text, from, to, segsN2, depth) => {
+      const re = /\b(?:else\s+)?if\s*\(([^)]*\btype\b[^)]*)\)\s*\{/g;
+      re.lastIndex = from;
+      let mm;
+      while ((mm = re.exec(text)) && mm.index < to) {
+        if (inSwitch(mm.index)) continue;
+        const open = text.indexOf('{', mm.index + mm[0].length - 1);
+        if (open < 0) continue;
+        const close = braceBodyOf(text, open);
+        if (close < 0) continue;
+        const cond = mm[1];
+        if (!/\btype\b\s*(>=|<=|==)/.test(cond)) continue;
+        registerBranch(mm.index, cond, open, depth);
+        re.lastIndex = close;   // 跳过块内已递归处理的嵌套支
+      }
+    };
+    collectTopIfs(body, 0, body.length, segsN, 0);
+    for (const [v, s] of segsN) SEGS.set(v, s);
+  }
+}
+// ★SW-RB13c 修复⑩：SetFoodDefaults 分派面（Item.cs:48685 `else if (ItemID.Sets.IsFood[type])
+//  SetFoodDefaults(type)` 先于 SetDefaults1-5）——IsFood 物品走此处,SetDefaults1-5 的同名
+//  case 是死码。无 case 的 IsFood 物品（4010 Apple Pie Slice）基值=ResetStats 全零
+//  （consumable=false）→ 层归属 LastMaterials;旧实现对全部 IsFood 强行 consumable=true
+//  +buffType=26 曾致 4010 误入 PotionsFood。此处只取 SetFoodDefaults 的 case 标签集作分派门。
+const FOOD_CASE_IDS = new Set();
+{
+  const body = methodBodyOf(itemSrc, 'private void SetFoodDefaults(int type)')
+    || methodBodyOf(itemSrc, 'public void SetFoodDefaults(int type)');
+  if (!body) throw new Error('SetFoodDefaults 缺档——SetDefaults 分派面已变,先核对 Item.cs:48685');
+  const re = /case (\d+):/g;
+  let m;
+  while ((m = re.exec(body))) FOOD_CASE_IDS.add(Number(m[1]));
 }
 const PROJ_SEGS = new Map();
 {
@@ -210,6 +326,79 @@ const CART_MOUNTS = new Set((() => {
   if (!m) throw new Error('MountID.Sets.Cart 缺档');
   return m[1].split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x));
 })());
+
+// ---------- 染料/染发剂 shader id（DyeInitializer 执行序 = ArmorShaderDataSet/HairShaderDataSet
+//  BindShader 的 `++_shaderDataCount` 自增 id,ArmorShaderDataSet.cs:16）——Item.dye/hairDye
+//  的逐件精确值（PotionsDyes/PotionsHairDyes 比较器 `dye.CompareTo` / `hairDye.CompareTo`
+//  消费面）。旧模型 dye 恒 1 / hairDye 恒 1 → 层内排序退化为槽序（非原版）。 ----------
+const DYEINIT_SRC = read('Terarria1457/Terraria.Initializers/DyeInitializer.cs');
+const ARMOR_SHADER_ID = new Map();
+const HAIR_SHADER_ID = new Map();
+{
+  const methodOf = (name) => {
+    const m = DYEINIT_SRC.match(new RegExp(`(?:public|private)\\s+static\\s+void\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{`));
+    if (!m) return null;
+    const start = m.index + m[0].length - 1;
+    let depth = 0, end = -1;
+    for (let i = start; i < DYEINIT_SRC.length; i++) {
+      if (DYEINIT_SRC[i] === '{') depth++;
+      else if (DYEINIT_SRC[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+    }
+    return { params: m[1], body: DYEINIT_SRC.slice(start + 1, end) };
+  };
+  const seen = new Set();
+  const exec = (name, argText, depth) => {
+    if (depth > 4 || seen.has(name + argText)) return;
+    seen.add(name + argText);
+    const meth = methodOf(name);
+    if (!meth) return;
+    const args = argText.split(',').map((x) => x.trim()).filter(Boolean);
+    const paramNames = meth.params.split(',').map((p) => p.trim().split(/\s+/).pop().replace(/=.*$/, ''));
+    const env = new Map();
+    paramNames.forEach((p, i) => env.set(p, args[i] ?? ''));
+    const resolved = (s) => {
+      let v = String(s ?? '').trim();
+      for (let k = 0; k < 6 && env.has(v); k++) v = String(env.get(v) ?? '').trim();
+      return v;
+    };
+    const callRe = /(GameShaders\.(?:Armor|Hair)\.BindShader|LoadBasicColorDye|Load\w+)\s*\(/g;
+    let cm;
+    while ((cm = callRe.exec(meth.body))) {
+      const open = meth.body.indexOf('(', cm.index + cm[0].length - 1);
+      let pd = 0, close = -1;
+      for (let i = open; i < meth.body.length; i++) {
+        if (meth.body[i] === '(') pd++;
+        else if (meth.body[i] === ')') { pd--; if (pd === 0) { close = i; break; } }
+      }
+      const rawArgs = meth.body.slice(open + 1, close).split(',').map((x) => x.trim());
+      if (cm[1].endsWith('.BindShader')) {
+        const vid = Number(resolved(rawArgs[0]).replace(/^\(\w+\)\s*/, ''));
+        if (Number.isInteger(vid)) {
+          if (cm[1].includes('Armor.')) { if (!ARMOR_SHADER_ID.has(vid)) ARMOR_SHADER_ID.set(vid, ARMOR_SHADER_ID.size + 1); }
+          else if (!HAIR_SHADER_ID.has(vid)) HAIR_SHADER_ID.set(vid, HAIR_SHADER_ID.size + 1);
+        }
+      } else if (cm[1] === 'LoadBasicColorDye') {
+        // 双载展开：4 实参形=逐件绑定;1 实参形=base/base+12/base+31/base+44（LoadBasicColorDye.cs:22）
+        const vals = rawArgs.map(resolved).map((x) => Number(x.replace(/^\(\w+\)\s*/, '')));
+        if (vals.length >= 4 && vals.slice(0, 4).every(Number.isInteger)) {
+          exec('LoadBasicColorDye', `${vals[0]}, ${vals[1]}, ${vals[2]}, ${vals[3]}`, depth + 1);
+        } else if (Number.isInteger(vals[0])) {
+          const b = vals[0];
+          exec('LoadBasicColorDye', `${b}, ${b + 12}, ${b + 31}, ${b + 44}`, depth + 1);
+        }
+      } else if (cm[1] !== 'Load') {
+        exec(cm[1], rawArgs.map(resolved).join(', '), depth + 1);
+      }
+      callRe.lastIndex = close;
+    }
+  };
+  const loadBody = methodOf('Load');
+  if (!loadBody) throw new Error('DyeInitializer.Load 缺档——染料绑定序提取失败');
+  // Load() 依序执行的方法（LoadArmorDyes → LoadHairDyes → LoadMisc,DyeInitializer.cs:490-494）
+  const entryRe = /(Load\w+)\s*\(\s*\)/g;
+  let em;
+  while ((em = entryRe.exec(loadBody.body))) exec(em[1], '', 0);
+}
 
 // ---------- 既有产物复用 ----------
 const func = JSON.parse(read('game/src/data/vanilla-itemfunc.json'));
@@ -244,7 +433,8 @@ const NAMES = {};
 const SORT_FIELDS = new Set(['melee', 'ranged', 'magic', 'summon', 'consumable', 'notAmmo', 'questItem',
   'accessory', 'vanity', 'mech', 'damage', 'defense', 'pick', 'axe', 'hammer', 'ammo', 'shoot', 'buffType',
   'healLife', 'healMana', 'mountType', 'headSlot', 'bodySlot', 'legSlot', 'paint', 'paintCoating',
-  'createTile', 'createWall', 'makeNPC', 'rare']);
+  'createTile', 'createWall', 'makeNPC', 'rare', 'hairDye']);   // ★SW-RB13c：+hairDye（case 段 hairDye=0
+//   标记是 PotionsHairDyes 白名单成员的原文判据——Hair Dye Remover 1990 曾因此漏认领,落入 LastMaterials）
 // ★value 不走扫描——`value = dungeonPrice/sellPrice(...)` 算式文本不可直读,
 //   权威源 = vanilla-itemvalue.json（4928 条,含 1457 新物品,计算值已折算）
 /** itemfunc 表同名字段映射（其嵌套 case/区间块已按源码校对修补——在档键优先） */
@@ -257,12 +447,18 @@ const FUNC_KEYS = { melee: 'melee', ranged: 'ranged', magic: 'magic', summon: 's
 //  makeNPC/buffType/healLife 等大量走 DefaultToMinecart/PlaceableTile/Vanitypet/
 //  CapturedCritter/HealingPotion/Headgear… 助手,直赋正则扫不到——逐助手体参数
 //  代换后按 case 段内出现序重放,后写覆盖先写） ----------
+// ★SW-RB13c 修复⑧：同名多载（DefaultToPlaceableTile 有 int/ushort 两体）——旧 HELPERS
+//  只留末位声明;改为按名收集全载,调用期按实参数+首参类型(cast)选体。
 const HELPERS = new Map();
 {
   const re = /(?:public|private)\s+void\s+(DefaultTo\w+)\(([^)]*)\)\s*\{/g;
   let m;
   while ((m = re.exec(itemSrc))) {
-    const params = m[2].split(',').map((x) => x.trim().split(/\s+/).pop()).filter(Boolean);
+    const params = m[2].split(',').map((x) => x.trim()).filter(Boolean)
+      .map((p) => {
+        const parts = p.replace(/=\s*[^,]+$/, '').trim().split(/\s+/);
+        return { type: parts.length > 1 ? parts[0] : '', name: parts[parts.length - 1] };
+      });
     const start = m.index + m[0].length;
     let depth = 1, end = -1;
     for (let i = start; i < itemSrc.length; i++) {
@@ -270,56 +466,117 @@ const HELPERS = new Map();
       else if (itemSrc[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
     }
     if (end < 0) continue;
-    HELPERS.set(m[1], { params, body: itemSrc.slice(start, end) });
+    if (!HELPERS.has(m[1])) HELPERS.set(m[1], []);
+    HELPERS.get(m[1]).push({ params, body: itemSrc.slice(start, end) });
   }
 }
+/** 实参文本解析：剥 (ushort)/(short)/(byte)/(int) cast 后取整数字面量 */
+function argLiteral(a) {
+  const v = String(a ?? '').trim().replace(/^\(\w+\)\s*/, '');
+  return /^-?\d+$/.test(v) ? Number(v) : null;
+}
 /** 展开单条助手调用：助手体内【顶层】`field = 常量|参数|AmmoID.X;` → 赋值对列表
- *  （条件支内的赋值是运行时世界态分支,非基值——跳过,如 rare=2 + if(remix) rare=8） */
-function expandHelperCall(name, argsRaw) {
-  const h = HELPERS.get(name);
-  if (!h) return [];
+ *  （条件支内的赋值是运行时世界态分支,非基值——跳过,如 rare=2 + if(remix) rare=8）。
+ *  ★SW-RB13c 修复⑨：助手体内的嵌套 DefaultTo* 转发调用递归展开——
+ *  DefaultToInfoAccessory 体 = DefaultToAccessory(newwidth,newheight)（accessory=true
+ *  在彼处）,旧实现不递归 → 22 件信息饰品(表/罗盘/GPS/探鱼器族) accessory 整缺。 */
+function expandHelperCall(name, argsRaw, env = new Map(), depthGuard = 0) {
+  const overloads = HELPERS.get(name);
+  if (!overloads || depthGuard > 6) return [];
   const args = argsRaw.split(',').map((x) => x.trim());
+  // 选载：优先首实参 cast 与首形参类型匹配者,否则取可容实参的最后一个声明
+  const firstCast = /^\((\w+)\)/.exec(args[0] ?? '');
+  let h = null;
+  for (const cand of overloads) {
+    if (args.length > cand.params.length) continue;
+    h = cand;
+    if (firstCast && cand.params[0] && cand.params[0].type === firstCast[1]) break;
+  }
+  if (!h) h = overloads[overloads.length - 1];
   const paramVal = new Map();
   h.params.forEach((p, i) => {
     const a = args[i] ?? '';
     // 缺省参数（= xxx）在参数名里已剥,实参缺位时取 decl 缺省——params 提取只留了
     // 尾名,缺省值丢失可接受（本域助手缺省参数仅 useGulpSound/animationTime 等无关面）
-    paramVal.set(p, a);
+    paramVal.set(p.name, a);
   });
+  if (env.size) for (const [k, v] of env) if (!paramVal.has(k)) paramVal.set(k, v);
   const out = [];
   let depth = 0;
   // ★值域禁跨行/跨花括号——否则 `if (Variant == X)` 头部的 `==` 会被当作赋值吞掉
   //  整个 if 块,块内赋值（rare=8）顶层面化（157 Aqua Scepter 教训）
-  const tokRe = /[{}]|(\w+)\s*=(?!=)\s*([^;{}\n]+);/g;
+  const tokRe = /[{}]|(\w+)\s*=(?!=)\s*([^;{}\n]+);|(DefaultTo\w+)\s*\(/g;
   let am;
   while ((am = tokRe.exec(h.body))) {
     const t = am[0];
     if (t === '{') { depth++; continue; }
     if (t === '}') { depth--; continue; }
     if (depth !== 0) continue;
+    if (am[3]) {
+      // 嵌套转发调用：先解出实参（参数代换 + cast 剥除）再递归
+      const open = h.body.indexOf('(', am.index + am[0].length - 1);
+      let pd = 0, close = -1;
+      for (let i = open; i < h.body.length; i++) {
+        if (h.body[i] === '(') pd++;
+        else if (h.body[i] === ')') { pd--; if (pd === 0) { close = i; break; } }
+      }
+      const innerArgs = h.body.slice(open + 1, close).split(',').map((x) => x.trim())
+        .map((a) => {
+          const lit = argLiteral(a);
+          if (lit !== null) return String(lit);
+          if (paramVal.has(a)) {
+            const lit2 = argLiteral(paramVal.get(a));
+            if (lit2 !== null) return String(lit2);
+          }
+          return a;
+        }).join(', ');
+      const innerEnv = new Map();
+      for (const [k, v] of paramVal) innerEnv.set(k, v);
+      for (const [field, v] of expandHelperCall(am[3], innerArgs, innerEnv, depthGuard + 1)) {
+        out.push([field, v]);
+      }
+      tokRe.lastIndex = close;
+      continue;
+    }
     const field = am[1], expr = am[2].trim();
     if (paramVal.has(expr)) {
-      const v = paramVal.get(expr);
-      if (/^-?\d+$/.test(v)) out.push([field, Number(v)]);
-      else if (v.startsWith('AmmoID.')) out.push([field, AMMO_ID[v.slice(7)] ?? 0]);
-      // 非字面量实参（算式）不代换——本域无此类调用,守门留痕
+      const v = argLiteral(paramVal.get(expr));
+      if (v !== null) out.push([field, v]);
+      else if (String(paramVal.get(expr)).startsWith('AmmoID.')) out.push([field, AMMO_ID[String(paramVal.get(expr)).slice(7)] ?? 0]);
+      // 非字面量实参（算式）不代换——守门留痕（DefaultToVanitypet(881+type-4797) 族
+      // 的算式实参由 itemfunc buffType 权威承载）
     } else if (/^-?\d+$/.test(expr)) {
       out.push([field, Number(expr)]);
     } else if (expr === 'true') {
       out.push([field, true]);
+    } else if (expr === 'false') {
+      // ★SW-RB13c：false 直赋同权重放（5629 染色弹弓 ranged=false 曾被丢,层 1≠4）
+      out.push([field, false]);
     } else if (expr.startsWith('AmmoID.')) {
       out.push([field, AMMO_ID[expr.slice(7)] ?? 0]);
     }
   }
   return out;
 }
-/** case 段顺序重放：【顶层】直赋 `field = 字面量;` + DefaultTo* 调用展开,后写覆盖先写。
- *  itemId 供 `shoot = 486 + type - 3020` 型算式代换（Lunar Hook 3020-3023 族）。
+/** case 段顺序重放：【顶层】直赋 `field = 字面量;` + DefaultTo* 调用展开 + SetShopValues,
+ *  后写覆盖先写。itemId 供 `shoot = 486 + type - 3020` 型算式代换（Lunar Hook 3020-3023 族）。
  *  ★条件支（if 内）赋值不重放——基值才是排序语义（157 rare=2 + if(remix) rare=8 教训） */
+const RARITY_ENUM = { TrashMinus1: -1, AmberMinus11: -11, White0: 0, Blue1: 1, Green2: 2, Orange3: 3,
+  LightRed4: 4, Pink5: 5, LightPurple6: 6, Lime7: 7, Yellow8: 8, Cyan9: 9, StrongRed10: 10, Purple11: 11 };
 function replaySegment(seg, target, consider, itemId = 0) {
   let depth = 0;
   // ★值域禁跨行/跨花括号 + == 防误配（同 expandHelperCall 注）
-  const re = /[{}]|(\w+)\s*=(?!=)\s*([^;{}\n]+);|(DefaultTo\w+)\s*\(([^)]*)\)/g;
+  const re = /[{}]|(\w+)\s*=(?!=)\s*([^;{}\n]+);|(DefaultTo\w+)\s*\(|(SetShopValues)\s*\(/g;
+  // 实参提取 = 括号配对（[^)]* 会被 `(ushort)726, 0` 的内层 ')' 截断——旧实现此盲区
+  // 由 itemfunc createTile 兜底掩盖,本版直取全参）
+  const scanArgs = (openIdx) => {
+    let pd = 0, close = -1;
+    for (let i = openIdx; i < seg.length; i++) {
+      if (seg[i] === '(') pd++;
+      else if (seg[i] === ')') { pd--; if (pd === 0) { close = i; break; } }
+    }
+    return { args: seg.slice(openIdx + 1, close), close };
+  };
   let m;
   while ((m = re.exec(seg))) {
     const t = m[0];
@@ -327,9 +584,22 @@ function replaySegment(seg, target, consider, itemId = 0) {
     if (t === '}') { depth--; continue; }
     if (depth !== 0) continue;
     if (m[3]) {
-      for (const [field, v] of expandHelperCall(m[3], m[4] ?? '')) {
+      const { args, close } = scanArgs(m.index + m[0].length - 1);
+      for (const [field, v] of expandHelperCall(m[3], args)) {
         if (consider.has(field)) target.set(field, v);
       }
+      re.lastIndex = close;
+      continue;
+    }
+    if (m[4]) {
+      // ★SW-RB13c：SetShopValues(ItemRarityColor.X, 价格式) —— rare 取枚举终值
+      //  （5356 Used Gas Trap rare=-1、各食物 SetShopValues 覆写 DefaultToFood rare=1;
+      //  value 面 = vanilla-itemvalue.json 权威表,不在此重放）
+      const { args, close } = scanArgs(m.index + m[0].length - 1);
+      const firstArg = args.split(',')[0]?.trim() ?? '';
+      const em = /^ItemRarityColor\.(\w+)$/.exec(firstArg);
+      if (em && consider.has('rare') && em[1] in RARITY_ENUM) target.set('rare', RARITY_ENUM[em[1]]);
+      re.lastIndex = close;
       continue;
     }
     const field = m[1];
@@ -337,6 +607,7 @@ function replaySegment(seg, target, consider, itemId = 0) {
     const expr = m[2].trim();
     if (/^-?\d+$/.test(expr)) target.set(field, Number(expr));
     else if (expr === 'true') target.set(field, true);
+    else if (expr === 'false') target.set(field, false);   // ★SW-RB13c：false 直赋重放（5629 ranged=false）
     else if (expr.startsWith('AmmoID.')) target.set(field, AMMO_ID[expr.slice(7)] ?? 0);
     else if (/type\b/.test(expr) && /^[\d\s+\-*()%|]+$/.test(expr.replace(/type/g, ''))) {
       // 算式（type 与 itemId 代换,白名单字符防注入）——工具期求值,非运行时代码
@@ -348,11 +619,14 @@ function replaySegment(seg, target, consider, itemId = 0) {
   }
 }
 
-const ITEM_COUNT = 6196;   // ItemID.Count（Terarria1457/Terraria.ID/ItemID.cs:13938 public static readonly short Count = 6196）
 const items = [];
 for (let id = 0; id < ITEM_COUNT; id++) {
   const f = func[String(id)] ?? {};
-  const seg = SEGS.get(id);
+  const isFood = (BOOL_SETS.IsFood?.ids ?? []).includes(id);
+  // ★SW-RB13c 修复⑩：IsFood 分派——SetDefaults(Type) 对 IsFood 物品先走 SetFoodDefaults
+  //  （Item.cs:48685）,SetDefaults1-5 同名 case = 死码,不重放（4010 死码组曾借尸还魂）;
+  //  字段面 = itemfunc（全 85 个有 case 食物均有档,consumable/buffType/healLife 全覆盖）。
+  const seg = isFood ? undefined : SEGS.get(id);
   const it = {
     id,
     melee: !!f.melee, ranged: !!f.ranged, magic: !!f.magic, summon: !!f.summon,
@@ -366,13 +640,13 @@ for (let id = 0; id < ITEM_COUNT; id++) {
     headSlot: -1, bodySlot: -1, legSlot: -1, paint: 0, paintCoating: 0,
     rare: rareTable[String(id)] ?? 0,
     value: valueTable[String(id)] ?? 0,
-    hairDye: hairDyeIds.has(String(id)) ? 1 : -1,
-    // ★染料修正：vanilla-equip.json 的 dye 表把染发剂（1977-1988,Item.dye 恒 0——
-    //   :48716 GetShaderIdFromItemId 只归 Armor 系,染发剂走 Hair 系返回 0）也算了进去,
-    //   令 PotionsHairDyes 层整层被 PotionsDyes 抢走——此处按 hairDye 成员剔除
-    dye: (equip.dye.includes(id) && !hairDyeIds.has(String(id))) ? 1 : 0,
+    hairDye: -1,   // ★SW-RB13c：缺省 -1（ResetStats 基值）;case 段 hairDye=0 标记/Hair 绑定 id 终门在 seg 重放后
+    // ★染料面（SW-RB13c 升级为精确 shader id）：Item.dye = Armor 绑定序 id（DyeInitializer
+    //  执行序 ++_shaderDataCount）,染发剂不在 Armor 集 → dye=0（原 48716 直读语义）;
+    //  旧模型 dye 恒 1 且混入染发剂（equip.dye 曾含 1977-1986）曾令 PotionsHairDyes 整层被抢
+    dye: ARMOR_SHADER_ID.get(id) ?? 0,
     makeNPC: makeNPC[String(id)] ?? 0,
-    isFood: (BOOL_SETS.IsFood?.ids ?? []).includes(id),
+    isFood,
     isCrate: (BOOL_SETS.IsFishingCrate?.ids ?? []).includes(id),
     isBasicFish: (BOOL_SETS.IsBasicFish?.ids ?? []).includes(id),
   };
@@ -388,13 +662,16 @@ for (let id = 0; id < ITEM_COUNT; id++) {
       it[name] = v;
     }
   }
+  // ★SW-RB13c hairDye 终值门（Item.cs:48717-48721）：`if (hairDye != 0) hairDye =
+  //  GameShaders.Hair.GetShaderIdFromItemId(type)` —— case 段 hairDye=0 标记者终值 0
+  //  （Hair Dye Remover 1990）;无标记者取 Hair 绑定序 id（染发剂 1977-1986/2863/3259）,
+  //  未绑定 → -1（HairShaderDataSet.cs:57-63 GetShaderIdFromItemId 未命中返回 -1）。
+  if (it.hairDye !== 0) it.hairDye = HAIR_SHADER_ID.get(id) ?? -1;
   // 衍生旗（运行时谓词面）
   it.hook = HOOK_PROJS.has(it.shoot);                                   // Main.projHook[shoot]
   it.isLightPet = (LIGHT_PETS.has(it.buffType));                        // Main.lightPet[buffType]
   it.isVanityPet = (VANITY_PETS.has(it.buffType));                      // Main.vanityPet[buffType]
   it.isCart = it.mountType >= 0 && CART_MOUNTS.has(it.mountType);       // MountID.Sets.Cart
-  // IsFood → SetFoodDefaults/DefaultToFood：consumable=true + buffType>0（层判定只需非零）
-  if (it.isFood) { it.consumable = true; it.buffType = it.buffType > 0 ? it.buffType : 26; }
   items.push(it);
 }
 
@@ -421,6 +698,19 @@ diffFlags('cart(equip.cart vs Cart[mountType])', equip.cart, itemsWith((it) => i
     if (t !== undefined && t !== it.rare) { diff++; if (samples.length < 8) samples.push(`${it.id}:${t}→${it.rare}`); }
   }
   console.log(`rare 差集: ${diff} 条 ${samples.join(' ')}`);
+}
+// ★SW-RB13c：shader id 集与既有 vanilla-equip/vanilla-hairdyes 表交叉校验
+{
+  const armorSet = new Set(ARMOR_SHADER_ID.keys());
+  const legacyArmor = new Set(equip.dye.filter((v) => !hairDyeIds.has(String(v))));
+  const onlyA = [...armorSet].filter((v) => !legacyArmor.has(v));
+  const onlyL = [...legacyArmor].filter((v) => !armorSet.has(v));
+  console.log(`Armor 绑定集 vs equip.dye(-hair): ${armorSet.size} vs ${legacyArmor.size} 仅新=[${onlyA.slice(0, 8)}] 仅旧=[${onlyL.slice(0, 8)}]`);
+  const hairSet = new Set(HAIR_SHADER_ID.keys());
+  const legacyHair = new Set([...hairDyeIds].map(Number));
+  const onlyH = [...hairSet].filter((v) => !legacyHair.has(v));
+  const onlyH2 = [...legacyHair].filter((v) => !hairSet.has(v));
+  console.log(`Hair 绑定集 vs vanilla-hairdyes: ${hairSet.size} vs ${legacyHair.size} 仅新=[${onlyH.slice(0, 8)}] 仅旧=[${onlyH2.slice(0, 8)}]`);
 }
 
 // ---------- 52 层谓词（SetupWhiteLists :1278-1329 固定序;ItemSorting.cs 谓词逐条对照） ----------

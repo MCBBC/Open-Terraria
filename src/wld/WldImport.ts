@@ -447,16 +447,27 @@ export interface CompatReport {
 }
 export interface ImportResult { save: SaveData; warnings: string[]; report: CompatReport; seedText: string; gameMode: number }
 
-/** ★七批备案④-c（2026-09-02）：TileEntities 段挂物家具还原规格表——TE type byte
- *  （TileEntitiesManager.RegisterAll 序,TileEntitiesManager.cs:26-39）→ 本仓 kind。
- *  band = 各 TE ValidTile 的锚帧判据带宽（frameX%band==0 且 frameY==0）：
+/** ★七批备案④-c（2026-09-02）/★SW-FX35（2026-09-11）扩八类：TileEntities 段挂物
+ *  家具还原规格表——TE type byte（TileEntitiesManager.RegisterAll 序,
+ *  TileEntitiesManager.cs:26-39）→ 本仓 kind。
+ *  band = 各 TE ValidTile 的锚帧判据带宽（frameX%band==0 且 frameY==0；band=1=无
+ *  frameX 条件）：
  *   471/475 → 54（TEWeaponsRack.cs:36 / TEHatRack.cs:409）
- *   395/470 → 36（TEItemFrame.cs:33 / TEDisplayDoll.cs:858） */
-const TE_KIND_SPECS: ReadonlyArray<{ te: 1 | 3 | 4 | 5; key: string; kind: FurnitureKind; band: number }> = [
+ *   395/470 → 36（TEItemFrame.cs:33 / TEDisplayDoll.cs:858）
+ *   698     → 18（TEDeadCellsDisplayJar.cs:31-35 frameY==0 && frameX%18==0）
+ *   520/723/724 → 1（TEFoodPlatter.cs:32-36 仅 frameY==0；锚桩 TEKiteAnchor.cs:21-27 /
+ *   TECritterAnchor.cs:23-29 仅 type 判定,1×1 无帧条件） */
+const TE_KIND_SPECS: ReadonlyArray<{ te: 1 | 3 | 4 | 5 | 6 | 8 | 9 | 10; key: string; kind: FurnitureKind; band: number }> = [
   { te: 4, key: 'v_471_weapon_rack', kind: 'weapon_rack', band: 54 },
   { te: 1, key: 'v_395_item_frame', kind: 'item_frame', band: 36 },
   { te: 3, key: 'v_470_mannequins', kind: 'display_doll', band: 36 },
   { te: 5, key: 'v_475_hat_rack', kind: 'hat_rack', band: 54 },
+  // ★SW-FX35：运行时已有 kind 的四类补还原（此前 6/8 读位即弃=盘上食物/罐中物丢失,
+  //  9/10 锚桩整类跳过且流错位——TELeashedEntityAnchorWithItem 短 itemType 勘误）
+  { te: 6, key: 'v_520_plate', kind: 'food_platter', band: 1 },
+  { te: 8, key: 'v_698_item_flask', kind: 'display_jar', band: 18 },
+  { te: 9, key: 'v_723_kite_anchor', kind: 'kite_anchor', band: 1 },
+  { te: 10, key: 'v_724_critter_anchor', kind: 'critter_anchor', band: 1 },
 ];
 
 /** Chest.IsLocked（Chest.cs:295-310）帧区间判定：tile21 六段锁定带 + tile467
@@ -656,6 +667,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   //    帽架 4 槽 = hat[2]→0..1 + dye[2]→2..3（TEHatRack.cs:56-111）
   //    框/架 1 槽 = item→0
   //  脱节/未映射物品 → 跳过计数（原版淘汰面同源），不造幽灵物品。
+  //  ★SW-FX35：另收 0/2/7 三类透传快照 teSnap（假人/传感器/晶塔本仓不建模）
+  const teSnap: NonNullable<SaveData['teSnap']> = [];
   if (wld.tileEntities.length) {
     const teByPos = new Map<number, WldTileEntity>();
     for (const te of wld.tileEntities) teByPos.set(te.y * w + te.x, te);   // 同位后者覆盖（WF:3339-3342）
@@ -671,9 +684,18 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       return { id: iid, stack: Math.max(1, Math.min(999, it.stack)), ...(it.prefix > 0 ? { prefix: it.prefix } : {}) };
     };
     let teInvalid = 0;
+    // ★SW-FX35：本仓不建模的三类（0 训练假人/2 逻辑传感器/7 晶塔）透传存底，
+    //  导出回写零漂移（TE 位置域以同位覆盖后的 teByPos 为准,WF:3339-3342 同源）
     for (const te of teByPos.values()) {
       const spec = TE_KIND_SPECS.find((s) => s.te === te.type);
-      if (!spec) continue;
+      if (!spec) {
+        if (te.type === 0 || te.type === 2 || te.type === 7) {
+          teSnap.push(te.type === 0 ? { type: 0, x: te.x, y: te.y, npc: te.dummy?.npc ?? -1 }
+            : te.type === 2 ? { type: 2, x: te.x, y: te.y, logicCheck: te.sensor?.logicCheck ?? 0, on: te.sensor?.on ?? false }
+            : { type: 7, x: te.x, y: te.y });
+        }
+        continue;
+      }
       const tid = TILE_BY_KEY[spec.key];
       const ai = te.y * w + te.x;
       if (tid === undefined || type[ai] !== tid || frameY[ai] !== 0 || frameX[ai] % spec.band !== 0) {
@@ -798,6 +820,41 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   const ewrFixRain = wld.version <= 317 && (wld.weather?.rainTime ?? 0) >= 5184000
     && !ewrSeedFlags.rainsForAYear;
 
+  // ★SW-FX35：旅程力量 per-world 段（WldParser.creativePowers,CreativePowerManager.cs:
+  //  125-137 帧式）→ header.journeyPowers 落地值。曾整段跳过 → 导入档冻结时间/雨/风/
+  //  停止蔓延/难度滑杆/时间倍率全回默认。值域换算（读侧 CreativePowers.cs 同构）：
+  //   id 8 ModifyTimeRate：Save 写滑杆缓存 0-1（:972-975）,TargetTimeRate =
+  //   round(Remap(cache,0,1,1,24))（:876-878）→ 本仓 journeyTimeRate 存整档,
+  //   导入反解 rate=round(1+23·cache)、导出正解 cache=(rate-1)/23。
+  //   id 0/9/10/13 bool 直落；id 12 DifficultySlider 滑杆 0-1 原值（本仓
+  //   journeyPowers.difficultySlider 同域,serialize.ts 注记「原始 float」）。
+  //   ★roundEven：vanilla UpdateInfoFromSliderValueCache 用 .NET Math.Round
+  //   （银行家舍入,中点取偶）——JS Math.round 中点恒上取,cache 恰 0.5 时 12/13 分歧。
+  const roundEven = (x: number): number => {
+    const fl = Math.floor(x), d = x - fl;
+    if (d > 0.5) return fl + 1;
+    if (d < 0.5) return fl;
+    return fl % 2 === 0 ? fl : fl + 1;
+  };
+  const journeyLanding: Partial<SaveData['header']> = (() => {
+    if (!wld.creativePowers.length) return {};
+    const pw = new Map<number, number | boolean>();
+    for (const p of wld.creativePowers) pw.set(p.id, p.bool !== undefined ? p.bool : (p.num ?? 0));
+    const b = (id: number): boolean | undefined => pw.get(id) as boolean | undefined;
+    const f = (id: number): number | undefined => pw.get(id) as number | undefined;
+    const rate = f(8);
+    return {
+      journeyFreezeTime: b(0) ?? false,
+      journeyTimeRate: rate !== undefined ? roundEven(1 + 23 * Math.min(1, Math.max(0, rate))) : undefined,
+      journeyPowers: {
+        freezeRain: b(9) ?? false,
+        freezeWind: b(10) ?? false,
+        stopBiomeSpread: b(13) ?? false,
+        difficultySlider: Math.min(1, Math.max(0, f(12) ?? 0)),
+      },
+    };
+  })();
+
   const save: SaveData = {
     format: 'sandboxworld.save',
     // ★v3(2026-09-07 统一稳定域):产物 tiles/items=稳定 id,读档端(v3 分支做
@@ -851,6 +908,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       moondialCooldown: wld.moondialCooldown,
       fastForwardTimeToDawn: wld.fastForwardTimeToDawn,
       fastForwardTimeToDusk: wld.fastForwardTimeToDusk,
+      // ★SW-FX35：旅程力量 per-world 段落地（上方 journeyLanding 值域换算）
+      ...journeyLanding,
       // ★R16-5：背景样式 13 档全量（setBG 0-12）——曾读位即弃 → 腐化/丛林/雪原/
       //  地狱/蘑菇背景样式全部回退 seed-0 默认
       bgStyles: {
@@ -878,6 +937,21 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     clock: { timeOfDay, dayCount: 1,
       // 原版 header _temp 三件套（WF:1276-1278）+ moonType（WF:1252）
       bloodMoon: wld.bloodMoon, eclipse: wld.eclipse, moonPhase: wld.moonPhase },
+    // ★SW-FX33（2026-09-11）：派对/灯笼夜 header 态透传（WldParser.party/lantern 捕获,
+    //  WF:1367-1374/:1387-1390）——曾读位即弃 → 导入档派对进行中（manual/genuine/
+    //  cooldown/celebrating 名单）与灯笼夜（cooldown/genuine/manual/next）全丢,再导出
+    //  恒写空。celebrating 保持原版 netId 域（与 SaveData.events.partyCelebratingNpcs
+    //  契约一致;消费面 Game.eventsApplySave 经 TOWN_NPC_IDS 反查 key）
+    events: wld.party || wld.lantern ? {
+      partyManual: wld.party?.manual ?? false,
+      partyGenuine: wld.party?.genuine || undefined,
+      partyCooldown: wld.party?.cooldown ?? 0,
+      partyCelebratingNpcs: wld.party?.celebrating.length ? [...wld.party.celebrating] : undefined,
+      lanternManual: wld.lantern?.manual ?? false,
+      lanternGenuine: wld.lantern?.genuine ?? false,
+      lanternNext: wld.lantern?.next ?? false,
+      lanternCooldown: wld.lantern?.cooldown ?? 0,
+    } : undefined,
     weather: wld.weather ? {
       // ★IIIII228：legacy 永雨迁移（FixEndlessRainWorlds,见上 ewrFixRain）
       raining: ewrFixRain ? false : wld.weather.raining,
@@ -903,6 +977,12 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     //  pendingPlatePokes,Game afterWorldLoad 恢复生成/一次性重触发
     pillarNpcs: wld.pillarNpcs.length ? wld.pillarNpcs : undefined,
     pressurePlates: wld.pressurePlates.length ? wld.pressurePlates : undefined,
+    // ★SW-FX35：TE 三类透传快照 + 城镇房间表 + 图鉴三桶（导入→存档→导出零漂移）
+    teSnap: teSnap.length ? teSnap : undefined,
+    townRooms: wld.townRooms.length ? wld.townRooms : undefined,
+    bestiary: (Object.keys(wld.bestiary.k).length || wld.bestiary.s.length || wld.bestiary.c.length)
+      ? wld.bestiary
+      : undefined,
     // ★全通道统一稳定 id 域(2026-09-07):SaveData 唯一 id 域=稳定 id(与 serializeSave
     //  产物同域)。此前 tiles/物品 落内部 id,而 loadSaveData/exportWld 按稳定域查表
     //  (INTERNAL_OF_STABLE 二次映射)——导入原版 wld 后类型大面积错位(6400×1800 实测

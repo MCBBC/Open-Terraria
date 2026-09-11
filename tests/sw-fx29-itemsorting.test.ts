@@ -450,3 +450,154 @@ describe('SW-FX29 变异实验（判别力）', () => {
     expect(base()).not.toEqual(golden);
   });
 });
+
+// ================= ★SW-RB13c 红蓝复审回归（四处新盲区修复锁定） =================
+
+describe('SW-RB13c 回归：修复⑦嵌套switch序 ⑧助手转发 ⑨false直赋 ⑩IsFood分派 + shader id', () => {
+  it('修复⑧：22 件 DefaultToInfoAccessory 信息饰品 accessory=true → 层 21（曾 47）', () => {
+    for (const vid of [15, 16, 17, 18, 393, 395, 707, 708, 709, 3036, 3037, 3084, 3095, 3096, 3099, 3102, 3118, 3119, 3120, 3121, 3122, 3123]) {
+      expect(json.layers[String(vid)], `vid ${vid} 层`).toBe(21);
+      expect(json.attrs[String(vid)].ac).toBe(1);       // DefaultToAccessory 内 accessory=true
+      expect(json.attrs[String(vid)].hd).toBeUndefined(); // 非 Hair 绑定
+    }
+    // 行为面：铁阔剑(层0) → 铜表(层21)
+    const s = emptySlots();
+    place(s, 10, 15); place(s, 11, 4);
+    sortPlayerInventory(s);
+    expect(vids(s).slice(10, 12)).toEqual([4, 15]);
+  });
+
+  it('修复⑨：5629 Acorn Slingshot ranged=false（DefaultToRangedWeapon 的 true 被覆写）→ 层 4（曾 1）', () => {
+    expect(json.layers['5629']).toBe(4);
+    expect(json.attrs['5629'].rg).toBeUndefined();      // ranged=false 生效
+    expect(json.attrs['5629'].d).toBe(5);
+    // 4682/4702 Release Doves/Lantern 同族：ranged=false、无伤害 → 仍层 47 但 rg 不误标
+    expect(json.attrs['4682'].rg).toBeUndefined();
+    expect(json.attrs['4702'].rg).toBeUndefined();
+    // 行为面：剑(层0) 先于 弹弓(层4)
+    const s = emptySlots();
+    place(s, 10, 5629); place(s, 11, 4);
+    sortPlayerInventory(s);
+    expect(vids(s).slice(10, 12)).toEqual([4, 5629]);
+  });
+
+  it('修复⑩：4010 Apple Pie Slice 为 IsFood 但无 SetFoodDefaults case → 基值全零 → 层 47（曾 34）', () => {
+    expect(json.layers['4010']).toBe(47);
+    expect(json.attrs['4010'].c).toBeUndefined();       // consumable=false（ResetStats 基值）
+    expect(json.attrs['4010'].bf).toBeUndefined();
+    expect(json.attrs['4010'].fo).toBe(1);              // IsFood 集成员仍在
+    // 有 case 的食物不受影响：353 Ale 层 34、1912 Eggnog 层 29（healLife=80）
+    expect(json.layers['353']).toBe(34);
+    expect(json.layers['1912']).toBe(29);
+    expect(json.attrs['1912'].hl).toBe(80);
+    expect(json.attrs['1912'].bf).toBeUndefined();      // DefaultToHealingPotion 不设 buffType
+  });
+
+  it('修复⑩补：Hair Dye Remover 1990 案段 hairDye=0 标记 → 层 28 PotionsHairDyes（曾 47）', () => {
+    expect(json.layers['1990']).toBe(28);
+    expect(json.attrs['1990'].hd).toBe(0);              // case 段 0 标记终值（非 -1）
+    for (const vid of [1977, 1978, 1979, 1980, 1981, 1982, 1983, 1984, 1985, 1986, 2863, 3259]) {
+      expect(json.layers[String(vid)]).toBe(28);        // 12 件染发剂仍在（Hair 绑定集）
+      expect(json.attrs[String(vid)].hd).toBeGreaterThan(0);
+    }
+    // 行为面：染发剂(层28) 尾于武器；层内 hairDye 降序（1977 id=1 > 1990 id=0）
+    const s = emptySlots();
+    place(s, 10, 1990); place(s, 11, 1977);
+    sortPlayerInventory(s);
+    expect(vids(s).slice(10, 12)).toEqual([1977, 1990]);
+  });
+
+  it('修复⑦：DD2 哨兵杖嵌套 switch(type) 的 rare 覆写生效（3820 Flameburst Staff rare=8）', () => {
+    expect(json.attrs['3819'].r).toBe(5);
+    expect(json.attrs['3820'].r).toBe(8);
+    expect(json.attrs['3825'].r).toBe(5);
+    expect(json.attrs['3826'].r).toBe(8);
+    expect(json.attrs['3830'].r).toBe(5);
+    expect(json.attrs['3831'].r).toBe(8);
+    expect(json.attrs['3833'].r).toBe(5);
+    expect(json.attrs['3834'].r).toBe(8);
+    // 伤害（itemfunc 在档键优先）不被嵌套序修复扰动
+    expect(json.attrs['3819'].d).toBe(42);
+    expect(json.attrs['3820'].d).toBe(88);
+    // 层归属不变（summon+damage>0 → 层 3）
+    expect(json.layers['3819']).toBe(3);
+    // 行为面：层内 OriginalRarity 降序——T3 杆(8) 先于 T2 杖(5)
+    const s = emptySlots();
+    place(s, 10, 3819); place(s, 11, 3820);
+    sortPlayerInventory(s);
+    expect(vids(s).slice(10, 12)).toEqual([3820, 3819]);
+  });
+
+  it('SetShopValues rare 终值（ItemRarityColor 枚举）——1.4.4 宠物牌族与 5356 Used Gas Trap', () => {
+    expect(json.attrs['4365'].r).toBe(5);   // Pink5
+    expect(json.attrs['4425'].r).toBe(5);
+    expect(json.attrs['5326'].r).toBe(3);   // Orange3
+    expect(json.attrs['5466'].r).toBe(3);   // Green2（rareTable 2 为误）
+    expect(json.attrs['5356'].r).toBe(-1);  // TrashMinus1 → 层 51 LastTrash 白名单
+    expect(json.layers['5356']).toBe(51);
+  });
+
+  it('染料/染发剂 shader id = DyeInitializer 绑定序（比较器 dye/hairDye 键的精确值）', () => {
+    expect(json.attrs['1007'].dy).toBe(1);   // 首个 Armor 绑定（Red Dye）
+    expect(json.attrs['1052'].dy).toBe(8);   // 1007+44（Silver Trim 家族第 2）
+    expect(json.attrs['1977'].hd).toBe(1);   // 首个 Hair 绑定（Life Hair Dye）
+    expect(json.attrs['3259'].hd).toBe(12);  // Twilight Hair Dye = Hair 集末位（LoadHairDyes 尾）
+    // 不变量：LastNotTrash(50) 白名单恒空
+    expect(Object.values(json.layers).filter((l) => l === 50).length).toBe(0);
+  });
+});
+
+// ================= ★SW-RB13c 修复⑪：switch 外顶层 if-range 分派支（39 支） =================
+
+describe('SW-RB13c 回归：if-range 分派家族（曾整族塌进 LastMaterials）', () => {
+  it('旗座 1479-1494（createTile=246 帧重要）→ 层 48', () => {
+    for (const vid of [1479, 1481, 1487, 1494]) {
+      expect(json.layers[String(vid)], `vid ${vid}`).toBe(48);
+      expect(json.attrs[String(vid)].ct).toBe(246);
+      expect(json.attrs[String(vid)].c).toBe(1);       // consumable=true
+    }
+    // 名字比较器真值源就位（Last - Tiles Important 层内按名排序）
+    expect(json.attrs['1479'].nm).toBe("Demon's Eye");
+  });
+
+  it('头饰 2104-2113（headSlot+vanity）→ 层 20 ArmorVanity；平衡配件 3309-3314 → 层 21', () => {
+    for (const vid of [2104, 2105, 2110, 2113]) {
+      expect(json.layers[String(vid)]).toBe(20);
+      expect(json.attrs[String(vid)].hs).toBe(vid + 146 - 2104);   // headSlot = type+146-2104 算式
+      expect(json.attrs[String(vid)].v).toBe(1);
+    }
+    for (const vid of [3309, 3310, 3314]) {
+      expect(json.layers[String(vid)]).toBe(21);
+      expect(json.attrs[String(vid)].ac).toBe(1);
+    }
+  });
+
+  it('染发剂 rare=2/consumable=true（分支体）+ 特例价（1980 Money Hair Dye）', () => {
+    expect(json.attrs['1977'].r).toBe(2);
+    expect(json.attrs['1977'].c).toBe(1);
+    expect(json.attrs['1985'].r).toBe(2);
+    expect(json.layers['1985']).toBe(28);
+    // 层 28 内排序：rare 同 → hairDye 降序（Twilight 12 最前）
+    const s = emptySlots();
+    place(s, 10, 1977); place(s, 11, 3259);
+    sortPlayerInventory(s);
+    expect(vids(s).slice(10, 12)).toEqual([3259, 1977]);
+  });
+
+  it('蛋糕块/队伍平台 3390-3452、3638-3642 → 层 48/49（createTile 算式域）', () => {
+    expect(json.layers['3390']).toBe(48);
+    expect(json.attrs['3390'].ct).toBe(91);
+    expect([48, 49]).toContain(json.layers['3638']);
+    expect(json.attrs['3638'].ct).toBeDefined();
+  });
+
+  it('if-range 家族大规模回归：47 层计数 578→331、48 层 2242→2443（无 vid 落 50）', () => {
+    const counts: Record<number, number> = {};
+    for (const L of Object.values(json.layers) as number[]) counts[L] = (counts[L] ?? 0) + 1;
+    expect(counts[47]).toBe(331);
+    expect(counts[48]).toBe(2443);
+    expect(counts[49]).toBe(560);
+    expect(counts[50] ?? 0).toBe(0);
+    expect(counts[51]).toBe(4);
+  });
+});

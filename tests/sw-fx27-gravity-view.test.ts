@@ -180,3 +180,75 @@ describe('结构锁（源文本锚——防静默回退/整文件覆写）', () 
     expect(src).toContain('if (env.player.gravDir === -1) {');
   });
 });
+
+// ═══ ★SW-RB13a（2026-09-11）红蓝对抗批：翻转点后屏空间层镜像三刀 ═══
+// 金标：Main.cs:46504-46516 SignTileBubble（1458 :46516 同值）/ ScreenObstruction.cs:50-58
+// （1458 :54-57 同值）/ Main.cs:47046-47140 DrawInterface_4_Ruler（1458 :47079/:47108 同值）。
+describe('SW-RB13a 签名泡 −32（翻转支独立补偿，消费端只有 −22）', () => {
+  it('源锁：翻转支含 -32，消费端 num2−22 两态同式', () => {
+    const src = SRC('render/Renderer.ts');
+    expect(src).toContain('y: Math.round(cam2.flipY ? viewH - sbyRaw - 32 : sbyRaw),');
+    expect(src).toContain('const num2 = this.signBubbleScreen.y - 22;');
+    expect(src).not.toContain('viewH - sbyRaw : sbyRaw');   // 旧缺 −32 式退役
+  });
+  it('代数：zoom=1 时翻转泡位 ≡ 原版 num2 = H−(signY−screenTop)−32−22（worked example）', () => {
+    // 场景：H=600、screenTopY=1000、signY=1200（锚顶行）→ 原版翻转泡 y = 600−200−32−22 = 346
+    const H = 600, signY = 1200, screenTopY = 1000;
+    const sbyRaw = signY - screenTopY;                      // zoom=1 时 worldToScreen ≡ 世界偏移
+    const repoFlip = H - sbyRaw - 32 - 22;                  // 锚支 −32 + 消费端 −22
+    const vanilla = H - (signY - screenTopY) - 32 - 22;     // :46508 + :46517
+    expect(repoFlip).toBe(vanilla);
+    expect(repoFlip).toBe(346);
+    // 旧实现（无 −32）= 378 → 泡下坠 32px 覆盖签面（翻转态签体显示带 [M−32,M]）
+    expect(H - sbyRaw - 22).toBe(378);
+  });
+});
+
+describe('SW-RB13a 遮屏孔翻转镜像（孔 = gd=1 孔的整幅显示镜像）', () => {
+  it('源锁：翻转支锚 = pyAnchor − h + num2（num2 头侧偏移随镜像换边）', () => {
+    const src = SRC('render/Renderer.ts');
+    expect(src).toContain('const py = cam.flipY ? pyAnchor - player.h + num2 : pyAnchor;');
+    expect(src).not.toContain('cam.flipY ? pyAnchor - player.h : pyAnchor');   // 旧式退役
+  });
+  it('代数：翻转孔 ≡ gd=1 孔绕 viewH/2 镜像（worked example，zoom 无关）', () => {
+    // H=600；gd=1：worldToScreen(player.y)=100 → 孔 = [100+21−55, +100] = [66,166]
+    // 整幅翻转后孔应落在 [600−166, 600−66] = [434,534]
+    const H = 600, h = 42, rh = 100, num2 = 10, pyW = 100;
+    const topNormal = pyW + h / 2 - rh / 2 + num2 / 2 - num2;         // 66
+    expect(topNormal).toBe(66);
+    const wantTop = H - (topNormal + rh);                             // 434
+    // 修后翻转支：pyAnchor=H−pyW=500 → py=500−42+10=468 → top=468+21−55=434
+    const pyAnchor = H - pyW;
+    const py = pyAnchor - h + num2;
+    const topFlip = py + h / 2 - rh / 2 + num2 / 2 - num2;
+    expect(topFlip).toBe(wantTop);
+    // 旧式（pyAnchor−h 后复用同式）= 424 → 孔上移 10px（顶部露缝/底部压头）
+    expect(pyAnchor - h + h / 2 - rh / 2 + num2 / 2 - num2).toBe(424);
+  });
+});
+
+describe('SW-RB13a 标尺线翻转双锚（距离锚 num7 / 画线锚 num11 / 鼠标行 +16px）', () => {
+  it('源锁：dyDraw/mouseTyFlip 分离，画位行走 dyDraw（gd=1 三处增量全 0 = 逐位恒等）', () => {
+    const src = SRC('render/Renderer.ts');
+    expect(src).toContain('const dyDraw = dy - (r.gravDir === -1 ? 1 : 0);');
+    expect(src).toContain('const mouseTyFlip = r.mouseTy + (r.gravDir === -1 ? 1 : 0);');
+    expect(src).toContain('const ddy0 = mouseTyFlip - dy;');                 // num9 距离（★FX36 重构更名 ddy→ddy0,语义同 num9;并落 rulerReadoutText W×H 计数控）
+    expect(src).toContain('dx * ts, dyDraw * ts, 16, 16');                   // 横段画位
+    expect(src).toContain('let dyRun = dyDraw;');                            // 竖段画位
+    expect(src).not.toContain('let ddy = r.mouseTy - dy;');                  // 旧单锚式退役
+  });
+  it('代数：翻转态 worked example ≡ 原版 num7/num11/num9（feet=100, mouseTy=90）', () => {
+    // 原版翻转态：num7=100−1=99（距离锚）；鼠标行=(90·16+16)/16=91；num9=91−99=−8；
+    // 画线锚 num11=num7−1=98。旧码：dy=99 单锚、ddy=90−99=−9、画位 99 —— 双偏差。
+    const feetTy = 100, mouseTy = 90;
+    const num7 = feetTy - 1;
+    const mouseRow = Math.floor((mouseTy * 16 + 16) / 16);
+    const num9 = mouseRow - num7;
+    const num11 = num7 - 1;
+    expect([num7, mouseRow, num9, num11]).toEqual([99, 91, -8, 98]);
+    const dy = feetTy - 1;
+    const dyDraw = dy - 1;
+    const ddy = (mouseTy + 1) - dy;
+    expect([dy, ddy, dyDraw]).toEqual([num7, num9, num11]);
+  });
+});

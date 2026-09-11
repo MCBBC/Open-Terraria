@@ -14,7 +14,7 @@ import {
   clampCraftGridRecStart, craftGridRecStartAfterUp, craftGridRecStartAfterDown,
   craftToggleFrame, cycleCraftingGridControl, craftingWindowTextTipKey,
   craftSelectedBarRows, CRAFT_BAR_COLOR, CRAFT_BAR_SOLID, CRAFT_BAR_TOP_OFF,
-  CRAFT_GRID_SLOT_SCALE, craftingFilterForTile, recipeFilterAccepts, filterRemainOpen,
+  CRAFT_GRID_SLOT_SCALE, CRAFT_GRID_LEFT, CRAFT_GRID_TOP, craftingFilterForTile, recipeFilterAccepts, filterRemainOpen,
   type CraftingGridControl, type CraftingTileFilter,
 } from './craftingGrid';   // ★SW-FX30 刀②+⑦:经典网格视图/切换钮/站点过滤纯逻辑单源(CraftingUI.cs 域)
 import { petInfoOfVid } from '../data/vanillaPets';
@@ -141,7 +141,7 @@ import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
-import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
+import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, happinessPct, type NpcButtonId, type ShopEntry, type ShopCellHover, type HappinessInfo } from './NpcDialog';   // ★SW-FX32:happinessPct/ShopCellHover 内嵌货架共用
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot } from '../items/Inventory';
@@ -169,15 +169,18 @@ import {
   vanillaScaleFor, ADVISOR_XY, TITLE_XY,
   COIN_LABEL_XY, AMMO_LABEL_XY, COIN_AMMO_SCALE,
   CHEST_SCALE, CHEST_NAME_XY, chestSlotXY, chestButtonXY,   // ★SW-FX28 刀①:箱条几何单源(ChestUI.cs 域)
+  SHOP_TITLE_XY, shopSlotXY,                                // ★SW-FX32 刀①:货架/店名同格单源(Main.cs:42500-42532)
+  shopHappinessIconXY, shopHappinessTextXY, happinessFrameX, // ★SW-FX32:快乐度图标/倍率位(Main.cs:42504-42512)
+  shopSavingsLabelXY, shopSavingsCoinXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE, // ★SW-FX32:储蓄行(ItemSlot.cs:3712-3757)
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
 import {
   BACC, BUILDER_ACC_ICON_ORDER, builderAccDefaults, builderAccGateSet,
   builderAccTotalIcons, builderAccColumnTopY, cycleWireVisibility, toggleBuilderAccBit,
-  playerAccessoryVidEquipped,
-} from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位(图标列纯逻辑单源)
+  playerVidCarried,
+} from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位(图标列纯逻辑单源;★FX36:判定域=背包∪装备)
 import { housingHeadRows } from './HousingPanel';   // ★刀3:住房页头像行(与 HousingPanel 同源)
-import { sortingLayerIndex } from '../data/vanillaItemSorting';   // ★刀13:排列物品层序数据
+import { sortContainerItems } from '../stats/ItemSorting';   // ★SW-RB13c:chestSortChest 换 FX29 精确引擎（sortingLayerIndex 旧近似随旧实现退役）
 import { computeSellValue } from '../stats/SellChain';   // SW-BJ22 商店悬停卖出价全链
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel, isResearchPanelOpen } from './ResearchUI';
@@ -5070,62 +5073,18 @@ export class UI {
     this.refreshAll();
   }
 
-  /** 排列物品（ChestUI.ButtonID 4 → ItemSorting.SortChest :ItemSorting.cs——
-   *  ①未收藏件并堆 ②按 sortingLayerIndex 层序分组(层内稳定) ③按可用槽升序回填；
-   *  收藏格保持原位(不在 availableSortingSlots)。登记偏差:层内细排序规则
-   *  (各层 SortingMethod 谓词)以层内稳定序近似;Glow 反馈未移植。 */
+  /** 排列物品（ChestUI.ButtonID 4 → ItemSorting.SortChest :ItemSorting.cs:1573-1597——
+   *  ★SW-RB13c：弃「层内稳定序近似」旧实现,改接 FX29 精确引擎 sortContainerItems
+   *  （52 层谓词+Validate 白名单+各层 SortingMethod 比较器+SetGlow 色带 chest=true）;
+   *  SortChest 门=chest != -1（:1576）,无 HasLockedInventory 面;MemoryStamp net 同步
+   *  （32）单人仓无对应,引擎面同形略。旧近似已由测试锁定的层间序漂移就此清偿。 */
   chestSortChest(): void {
     const chest = this.openChest;
     if (!chest) return;
     const items = chest.items as Array<{ id: number; stack: number; prefix?: number; favorited?: boolean } | null>;
-    const maxStackOf = (id: number): number => ITEM_DEFS[id]?.maxStack ?? 999;
-    // ① itemsToSort = 非空未收藏
-    const toSort: number[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (it && it.stack > 0 && !it.favorited) toSort.push(i);
-    }
-    // ② 并堆(vanilla j/k 双环 :Sort 1496-1520)
-    for (let j = 0; j < toSort.length; j++) {
-      const a = items[toSort[j]];
-      if (!a || a.stack >= maxStackOf(a.id)) continue;
-      let room = maxStackOf(a.id) - a.stack;
-      for (let k = j + 1; k < toSort.length; k++) {
-        const b = items[toSort[k]];
-        if (!b || b.stack >= maxStackOf(b.id)) continue;
-        if (canMergeStack(a, b)) {
-          const move = Math.min(room, b.stack);
-          a.stack += move;
-          b.stack -= move;
-          room -= move;
-          if (b.stack <= 0) { items[toSort[k]] = null; toSort.splice(k, 1); j--; break; }
-          if (room <= 0) break;
-        }
-      }
-    }
-    // ③ 层序分组(层内稳定;sortingLayerIndex=vanilla 层白名单提取面)
-    const ordered = toSort
-      .map((idx) => {
-        const it = items[idx]!;
-        const vid = ITEM_DEFS[it.id]?.vid ?? (ITEM_DEFS[it.id]?.key.startsWith('vi_') ? parseInt(ITEM_DEFS[it.id]!.key.slice(3), 10) : -1);
-        return { idx, layer: vid >= 0 ? sortingLayerIndex(vid) : 0 };
-      })
-      .sort((x, y) => x.layer - y.layer || x.idx - y.idx)
-      .map((e) => e.idx);
-    // ④ 可用槽 = 未收藏件槽 + 空槽,升序回填
-    const available: number[] = [];
-    for (let l = 0; l < items.length; l++) {
-      if (items[l] && !items[l]!.favorited) available.push(l);
-      else if (!items[l]) available.push(l);
-    }
-    available.sort((a, b) => a - b);
-    const cache = ordered.map((idx) => items[idx]!);
-    for (const idx of ordered) items[idx] = null;
-    let at = 0;
-    for (const slotIdx of available) {
-      if (at >= cache.length) break;
-      items[slotIdx] = cache[at++];
-    }
+    sortContainerItems(items, {
+      onGlow: (slot, hue) => this.setSlotGlow('chest', slot, hue),   // SetGlow(…, chest != -1)（:1530）
+    });
     this.refreshAll();
   }
   private chestTitle!: HTMLElement;
@@ -6268,6 +6227,9 @@ export class UI {
     this.npcShop?.close();
     this.npcShop = null;
     this.npcHappiness?.close();   // 心情浮层随对话框一并关闭
+    // ★SW-FX32:内嵌货架随关店收面（pos 门读 game.npcShopOpen——refreshAll 触发
+    //  layoutVanilla 重排,sig 含 chestOpen=npcShopOpen 必翻 → 货架/头部 display:none）
+    if (this._builtLayout === 'vanilla') this.refreshAll();
   }
 
   showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number; stack?: number; prefix?: number }>, copper: number, happinessPct?: number, medals?: number, medalsTotal?: number): void {
@@ -6282,6 +6244,23 @@ export class UI {
     //  force=true：卖出/购买后 openNpcShop 重刷货架会再次进入本方法，
     //  openInventory 缺省是开/关翻转——非 force 会把背包连带关掉。
     this.openInventory(true);
+    // 图标由 UI 侧按原版 id 补(atlas 管线)——iconUrl 收内部 id,vid 先转
+    // (2026-08-28 修复:此前 vid 直喂=ITEM_DEFS[vid] 错位 def,商店图标张冠李戴)
+    const entries: ShopEntry[] = items.map((it) => ({
+      ...it,
+      iconUrl: this.game ? iconUrl(this.game, internalIdOfVid(it.vanillaId)) || '' : '',
+    }));
+    // ★SW-FX32 刀①(2026-09-11) vanilla 内嵌位：原版店开态无独立面板——货架 40 格
+    //  (Main.cs:42518-42532 context 15)/店名+储蓄(Main.cs:42502-42503 @(504,invBottom))/
+    //  快乐度图标+倍率(Main.cs:42504-42512)全部住 .sw-vinv 原版几何(同 FX28 箱条面);
+    //  NpcShop 浮面板 =classic 专属面(FX28 箱侧 chestPanel 同例)。Set-Back 钮退役
+    //  (原版 Main.cs:42500-42532 全段无关闭钮——关店 = Esc/对话关闭/走远 closeNpcDialog 链)
+    if (this._builtLayout === 'vanilla') {
+      this.vinvShopPayload = { title, entries, copper, happinessMul: happinessPct ?? 1, medals, medalsTotal };
+      this.refreshAll();   // → paintVanillaInvSlots → vinvRefreshShop(货架内容+头部)
+      this.vinvShopIconPoll();
+      return;
+    }
     if (!this.npcShop) {
       this.npcShop = new NpcShop(this.root,
         // 行点击 = 有货商店格（PickItemMovementAction case 15 ItemSlot.cs:1426-1439）：
@@ -6308,40 +6287,9 @@ export class UI {
         //  AddShopLines 买入价行 Main.cs:20632-20402）。价格取数现查 Game——
         //  卖出/购买后 openNpcShop 重刷货架,闭包 entries 会陈旧；shopCell 传价
         //  走 shopTooltipContext 的 context15 买入价支（HoverItem.buy 语义）
-        (hover, anchor) => {
-          if (!hover) {
-            this.tooltip.style.display = 'none';
-            cancelAnimationFrame(this.tooltipPulseRaf);
-            return;
-          }
-          if (!this.game) return;
-          const iid = internalIdOfVid(hover.vid);
-          if (!iid) return;
-          let shopCell: { price: number; medal?: number } | undefined;
-          if (hover.buyback !== undefined) {
-            const p = this.game.shopBuybackPriceOf(hover.vid, hover.buyback);
-            if (p != null) shopCell = { price: p };
-          } else {
-            const medal = this.game.shopEntryMedalPriceOf(hover.vid);
-            if (medal != null) shopCell = { price: medal, medal };
-            else {
-              const p = this.game.shopEntryPriceOf(hover.vid);
-              if (p != null) shopCell = { price: p };
-            }
-          }
-          this.showTooltipFor(iid, 'inv', {
-            slot: { id: iid, stack: hover.stack, prefix: hover.prefix },
-            anchor: anchor!,
-            shopCell,
-          });
-        });
+        //  ★SW-FX32:主体迁 showShopCellTooltip 单源(内嵌货架共用)
+        (hover, anchor) => this.showShopCellTooltip(hover, anchor));
     }
-    // 图标由 UI 侧按原版 id 补(atlas 管线)——iconUrl 收内部 id,vid 先转
-    // (2026-08-28 修复:此前 vid 直喂=ITEM_DEFS[vid] 错位 def,商店图标张冠李戴)
-    const entries: ShopEntry[] = items.map((it) => ({
-      ...it,
-      iconUrl: this.game ? iconUrl(this.game, internalIdOfVid(it.vanillaId)) || '' : '',
-    }));
     this.npcShop.open(title, entries, copper, happinessPct, medals, medalsTotal);
     // 懒加载晚到升级(2026-08-13 枚举 review):开店瞬间 iconUrl miss(空串/程序化
     // 兜底)此前会冻结到关店——refreshAll 不触 npcShop。有界轮询就绪后原地补图,
@@ -6362,6 +6310,53 @@ export class UI {
         }
       }, 600);
     }
+  }
+
+  /** 内嵌货架图标懒加载轮询(SW-FX32):vinvRefreshShop 重画时 paintSlot 现查
+   *  iconUrl——懒加载就绪后下一拍原地升级;关店/超时(15 拍)即停。「src 不变不动」
+   *  纪律(paintSlot)保证零解码浪费 */
+  private vinvShopIconPoll(): void {
+    let tries = 0;
+    const timer = setInterval(() => {
+      if (!this.game?.npcShopOpen || this._builtLayout !== 'vanilla' || ++tries > 15) {
+        clearInterval(timer);
+        return;
+      }
+      this.vinvRefreshShop();
+    }, 600);
+  }
+
+  /** 商品格位悬停 tooltip 单源(SW-BJ22 语义面,SW-FX32 起浮面板/内嵌货架共用):
+   *  MouseHover context 15 → Main.HoverItem.buy=true（ItemSlot.cs:3197-3201）→
+   *  MouseText 物品全文 + AddShopLines 买入价行（Main.cs:20632-20402）。价格取数
+   *  现查 Game——卖出/购买后 openNpcShop 重刷货架,闭包 entries 会陈旧;shopCell
+   *  传价走 shopTooltipContext 的 context15 买入价支（HoverItem.buy 语义） */
+  private showShopCellTooltip(hover: ShopCellHover, anchor: HTMLElement | null): void {
+    if (!hover) {
+      this.tooltip.style.display = 'none';
+      cancelAnimationFrame(this.tooltipPulseRaf);
+      return;
+    }
+    if (!this.game) return;
+    const iid = internalIdOfVid(hover.vid);
+    if (!iid) return;
+    let shopCell: { price: number; medal?: number } | undefined;
+    if (hover.buyback !== undefined) {
+      const p = this.game.shopBuybackPriceOf(hover.vid, hover.buyback);
+      if (p != null) shopCell = { price: p };
+    } else {
+      const medal = this.game.shopEntryMedalPriceOf(hover.vid);
+      if (medal != null) shopCell = { price: medal, medal };
+      else {
+        const p = this.game.shopEntryPriceOf(hover.vid);
+        if (p != null) shopCell = { price: p };
+      }
+    }
+    this.showTooltipFor(iid, 'inv', {
+      slot: { id: iid, stack: hover.stack, prefix: hover.prefix },
+      anchor: anchor!,
+      shopCell,
+    });
   }
 
   /** NPC 快乐度详情浮层（ReportHappiness.Interact） */
@@ -6486,7 +6481,7 @@ export class UI {
   /** 布局期元素表:{el, pos()}——pos 返回 null=隐藏(追加槽未解锁/开箱态堆叠钮) */
   private vinvLayoutItems: Array<{ el: HTMLElement; pos: () => { x: number; y: number } | null }> = [];
   private vinvRowMap = new Map<string, number>();   // `equip:8`→可见行号(追加槽重编号;查不到=隐藏)
-  private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean; visibleRows: number; minimapOn: boolean; cartUnlocked: boolean } | null = null;
+  private vinvLayoutCtx: { sw: number; sh: number; mH: number; num20: number; chestOpen: boolean; cosUiVisible: boolean; visibleRows: number; minimapOn: boolean; cartUnlocked: boolean } | null = null;   // cosUiVisible=★SW-RB13b ChestOrShopUIVisible(Main.cs:3035-3046)
   private vinvLayoutSig = '';
   private vinvResizeHandler: (() => void) | null = null;
   /** 当前已建布局(分派/重建判据;null=未建) */
@@ -6531,6 +6526,10 @@ export class UI {
   text-shadow:1px 1px 0 #000; white-space:nowrap; }
 .sw-vinv .sw-slot-num { position:absolute; left:5px; top:2px; font-size:11px; font-weight:bold;
   color:#fff; text-shadow:1px 1px 0 #000; pointer-events:none; }
+/* ★SW-FX32 商店货架格:InventoryBack 底框(含空格=售卖放置区)同箱条 chrome;
+   买不起调暗=经典面同款呈现(原版无调暗,呈现偏差备案) */
+.sw-vinv .sw-vshop-cell { transform:scale(0.755); }
+.sw-vinv .sw-vshop-cell.is-poor { opacity:0.45; }
 `;
     document.head.appendChild(st);
   }
@@ -6678,7 +6677,7 @@ export class UI {
       b.addEventListener('mouseenter', () => { b.style.backgroundPosition = '100% 0'; });
       b.addEventListener('mouseleave', () => { b.style.backgroundPosition = '0 0'; });
       b.addEventListener('mousedown', (e) => { e.stopPropagation(); this.onBestiary?.(); });
-      pos(b, () => bestiaryXY(!!this.vinvLayoutCtx?.chestOpen));
+      pos(b, () => bestiaryXY(!!this.vinvLayoutCtx?.cosUiVisible));   // ★SW-RB13b:ChestOrShopUIVisible(Main.cs:3035-3046)=chest/shop ∧ !PipsUseGrid——网格态回位(43103)
     }
     {
       const b = btn(30, 30);
@@ -6689,7 +6688,7 @@ export class UI {
       b.addEventListener('mouseenter', () => { b.style.backgroundPosition = '100% 0'; });
       b.addEventListener('mouseleave', () => { b.style.backgroundPosition = '0 0'; });
       b.addEventListener('mousedown', (e) => { e.stopPropagation(); this.onEmoteMenu?.(); });
-      pos(b, () => emoteXY(!!this.vinvLayoutCtx?.chestOpen));
+      pos(b, () => emoteXY(!!this.vinvLayoutCtx?.cosUiVisible));   // ★SW-RB13b:同上(43158 门=ChestOrShopUIVisible)
     }
 
     // ---- 三页容器(EquipPage 0/1/2;页签见下;页切换=display,坐标全绝对) ----
@@ -6914,9 +6913,10 @@ export class UI {
         //  visibleRows>=10（装备列行数,另一量纲）：恶魔心+大师档 false-push 锁钮上移,
         //  而原版 push 场景（info 件+拨杆≥10）锁钮不上移 → 与方块替换图标 @(0,23) 重叠。
         pos: () => {
+          // ★SW-FX36：判定域改背包∪装备扫描（同 vinvBuildBuilderAccToggles gatesOf）
           const g = this.game
-            ? builderAccGateSet((vid) => playerAccessoryVidEquipped(
-              this.game!.player.inv.armor, this.game!.player.inv.accSlotMax, vid))
+            ? builderAccGateSet((vid) => playerVidCarried(
+              this.game!.player.inv.slots, this.game!.player.inv.armor, this.game!.player.inv.accSlotMax, vid))
             : null;
           return hotbarLockXY(!!g && builderAccTotalIcons(
             g, !!this.game?.world.flags.unlockedBiomeTorches) >= 10);
@@ -7031,6 +7031,8 @@ export class UI {
 
     // ---- 宝箱条(直接叠背包下方;显示随 openChest) ----
     this.vinvBuildChest();
+    // ---- 商店货架(SW-FX32 刀①店侧分期二;Main.cs:42500-42532;显示随 npcShopOpen) ----
+    this.vinvBuildShop();
     // ---- 重铸原位(Main.cs:42268-42393;显示随 vinvReforgeOpen+自动退出条件) ----
     this.vinvBuildReforge();
 
@@ -7137,7 +7139,7 @@ export class UI {
     this.vinvLayoutItems.push({
       el: trash,
       pos: () => {
-        const t = trashXY(!!this.vinvLayoutCtx?.chestOpen);
+        const t = trashXY(!!this.vinvLayoutCtx?.cosUiVisible);   // ★SW-RB13b:43078 门=ChestOrShopUIVisible(网格态回位 448,258/0.85)
         return { x: t.x, y: t.y };
       },
     });
@@ -7160,6 +7162,11 @@ export class UI {
     const heartShown = (inv.extraAccessory && (inv.gateExpert || inv.gateMaster)) || hasAt(8, 8);
     const masterShown = inv.gateMaster || hasAt(9, 9);
     const chestOpen = !!this.openChest || this.game.npcShopOpen;
+    // ★SW-RB13b(2026-09-11):ChestOrShopUIVisible(Main.cs:3035-3046)=chest/shop 态
+    //   ∧ !NewCraftingUI.Visible ∧ !PipsUseGrid——网格态回位垃圾桶/图鉴/表情
+    //   (43078/43103/43158 门读该谓词,非 chestOpen 裸读);QuickStack/Sort 仍走
+    //   chest==-1 && npcShop==0 裸门(:42548/42586)不折 PipsUseGrid。
+    const cosUiVisible = chestOpen && !this.vinvPipsUseGrid;
     const visibleRows = 8 + (heartShown ? 1 : 0) + (masterShown ? 1 : 0);
     // ★SW-FX10 债⑨清偿：mH 联动真实小地图态（Main.cs:46537-46561 DrawInterface_16_MapOr
     // Minimap：mapEnabled 关→mH=0 早退；全屏地图开/mapStyle≠1→mH=0；仅 mapStyle==1 且
@@ -7171,11 +7178,23 @@ export class UI {
     const num20 = equipAreaTop(sh, mH, visibleRows);
     root.style.transformOrigin = 'top left';
     root.style.transform = `scale(${K})`;
-    this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen, visibleRows, minimapOn, cartUnlocked: this.game.superCartUnlocked() };
+    this.vinvLayoutCtx = { sw, sh, mH, num20, chestOpen, cosUiVisible, visibleRows, minimapOn, cartUnlocked: this.game.superCartUnlocked() };
     this.vinvComputeRows(heartShown, masterShown);
     // 签名含 uiScale(★红队 MINOR-4:K 依赖 uiScale,漏签 = 改缩放右锚列不重排);
     // ★SW-FX10:再含 minimapOn(mH 变 → num20/页签/右锚列全体位移)与矿车解锁(开关框显隐)
-    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}`;
+    // ★SW-RB13b:再含 PipsUseGrid(网格态翻转 → 箱条吞门/变体回位 pos 闭包须重跑——
+    //   签名不变则早退跳过整段 pos 循环,FX28 ChestUI.cs:81 门=死码,故必须入签)
+    // ★SW-FX32:再含储蓄行可见旗(总储蓄>0 + 逐仓有币——储蓄行/四银行图标 pos 门
+    //   的输入;银行间搬钱不翻 chestOpen 旗,不入签 = 图标滞留)
+    const savBanks = this.game.coinSavingsByBank();
+    // ★SW-FX36：建筑配件旗位门入签——原版 DrawBuilderAccToggles（Main.cs:48142-48377）
+    //   每帧条件绘制,拾取/丢弃即时显隐;本仓布局签名缓存不含门输入 ⇒ 背包拾入 2799
+    //   等后网格/喷漆/线材档滞留不显（FX36 探针实测）。门=背包∪装备旗位（UpdateEquips
+    //   :12997-13004 面）;门变化=低频事件,入签触发一次整排代价可忽略。
+    //   rulerLine 恒真（ResetEffects :18809）不入签。
+    const bg = builderAccGateSet((vid) => playerVidCarried(inv.slots, inv.armor, inv.accSlotMax, vid));
+    const bgSig = `${bg.rulerGrid ? 1 : 0}${bg.autoActuator ? 1 : 0}${bg.autoPaint ? 1 : 0}${bg.infoAccMechShowWires ? 1 : 0}`;
+    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}`;
     if (sig === this.vinvLayoutSig) return;
     this.vinvLayoutSig = sig;
     for (const it of this.vinvLayoutItems) {
@@ -7188,8 +7207,8 @@ export class UI {
         it.el.style.display = 'none';
       }
     }
-    // 垃圾桶 scale 换档(Main.cs:43078-43083 开箱 0.755)
-    if (this.vinvTrashEl) this.vinvTrashEl.style.transform = `scale(${trashXY(chestOpen).scale})`;
+    // 垃圾桶 scale 换档(Main.cs:43078-43083 开箱 0.755;★SW-RB13b 门=ChestOrShopUIVisible 含 !PipsUseGrid)
+    if (this.vinvTrashEl) this.vinvTrashEl.style.transform = `scale(${trashXY(cosUiVisible).scale})`;
   }
 
   /** 装备列追加槽可见行号表(重编号;未显示不入表=隐藏不占行,:42092-42113) */
@@ -7234,6 +7253,7 @@ export class UI {
     this.vinvRefreshHousing();
     this.vinvRefreshCraft();
     this.vinvUpdateChestName();
+    this.vinvRefreshShop();   // ★SW-FX32:商店货架内容+头部回写(Main.cs:42500-42532)
     this.vinvUpdateReforge();
     this.paintVanillaDefense();
   }
@@ -7462,6 +7482,21 @@ export class UI {
         if (!this.vinvPipsUseGrid) this.vinvCraftRecStart = 0;   // !PipsUseGrid → recStart=0(Main.cs:43926-43929)
         this.vinvSyncGridToggle();
         this.vinvUpdateCraftGrid();
+        // ★SW-RB13b:网格态翻转必须重排——ChestUI.cs:81 吞箱条三门(名/槽/钮 pos 闭包)
+        //   与变体回位闭包只在 layoutVanilla pos 循环里求值;不重排=开箱+开网格态
+        //   箱条滞留屏上与网格叠画(vinvUpdateReforge 同族教训:显隐依赖可变状态必须触发 relayout)
+        this.vinvLayoutSig = '';
+        this.layoutVanilla();
+      } else {
+        // ★SW-RB13b:modern 左键副效应面(:310-315 Main.PipsUseGrid=false 先于
+        //   ToggleInInventory)——窗族缺席但 PipsUseGrid=false 可建模,否则 modern 态
+        //   下已开的网格无法经切换钮关闭(声效面 :321 照走)
+        this.vinvPipsUseGrid = false;
+        this.vinvCraftRecStart = 0;                     // !PipsUseGrid → recStart=0(Main.cs:43926-43929)
+        this.vinvSyncGridToggle();
+        this.vinvUpdateCraftGrid();
+        this.vinvLayoutSig = '';
+        this.layoutVanilla();
       }
       // modern 支(:308-316)= NewCraftingUI.ToggleInInventory——窗族分期(债#2-modern),
       // 右键可连性保留(悬停名键随态切换),左键 modern=无窗可开,声效面(:321)照走
@@ -7494,7 +7529,10 @@ export class UI {
     grid.style.cssText = 'position:absolute; pointer-events:none; z-index:3; display:none;';
     root.appendChild(grid);
     this.vinvCraftGridEl = grid;
-    this.vinvLayoutItems.push({ el: grid, pos: () => this.vinvPipsUseGrid ? { x: 0, y: 0 } : null });
+    // ★SW-RB13b:容器 pos=网格原点(310,340)——与 vinvUpdateCraftGrid 的 left/top 双写者
+    //   一致化。曾 (0,0):layoutVanilla pos 循环会把 vinvUpdateCraftGrid 写的 (310,340)
+    //   冲回 (0,0)(格全体左上漂 310/340;PipsUseGrid 入签后每次切换必触发,探针实捕)
+    this.vinvLayoutItems.push({ el: grid, pos: () => this.vinvPipsUseGrid ? { x: CRAFT_GRID_LEFT, y: CRAFT_GRID_TOP } : null });
     // 上/下页钮(:453-455 num10=290:num11=342/362;RecUp/RecDown 16×16,色 (200,200,200,200)
     // → opacity 0.784;可见门 = recStart>0 / recStart<avail-cols·rows :470/:501)
     const mkPage = (dir: 'up' | 'down'): HTMLButtonElement => {
@@ -7523,7 +7561,14 @@ export class UI {
       });
       root.appendChild(b);
       this.vinvLayoutItems.push({ el: b, pos: () => {
-        if (!this.vinvPipsUseGrid) return null;
+        if (!this.vinvPipsUseGrid || !this.vinvLayoutCtx) return null;
+        // ★SW-RB13b:可见门与 vinvUpdateCraftGrid 逐字同谓词(:470 recStart>0 /
+        //   :501 recStart<avail-页容量)——pos 循环双写者一致化,防 relayout 把
+        //   recStart 门冲掉(曾 relayout 后 recStart=0 上页钮仍现形,探针实捕)
+        const avail = this.vinvCraftAvailV.length;
+        const geo = craftGridGeometry(this.vinvLayoutCtx.sw, this.vinvLayoutCtx.sh);
+        if (dir === 'up' ? this.vinvCraftRecStart <= 0
+          : this.vinvCraftRecStart >= avail - geo.cols * geo.rows) return null;
         const p = craftGridPageBtnXY(dir);
         return { x: p.x, y: p.y };
       } });
@@ -7547,30 +7592,42 @@ export class UI {
   }
 
   private vinvGridWheelTick(e: WheelEvent): void {
-    if (!this.vinvPipsUseGrid || !this.game || this._builtLayout !== 'vanilla') return;   // Main.cs:17596
+    // ★SW-RB13b:DoScrollingInInventory(Main.cs:17592-17640)逐字重写——调用域
+    //   playerInventory(:17547)+ _builtLayout 域守卫;PipsUseGrid 支只管网格分页
+    //   且【不清 flag】,flag 支(列表滚)恒走=网格外/关网格态列表照滚(:17633-17640)。
+    if (!this.game || this._builtLayout !== 'vanilla') return;
+    if (this.invPanel.style.display !== 'block') return;   // playerInventory 门(:17547)
     const c = this.vinvLayoutCtx;
     if (!c) return;
-    const geo = craftGridGeometry(c.sw, c.sh);
-    // 视口 px → vinv 逻辑域(÷K;transform-origin top left = 原点同)
-    const K = vanillaScaleFor(window.innerWidth, window.innerHeight, options.data.uiScale);
-    const lx = e.clientX / K, ly = e.clientY / K;
-    if (lx < geo.left || ly < geo.top
-      || lx >= geo.left + geo.w || ly >= geo.top + geo.h) return;   // :17602-17608 Contains
     const avail = this.vinvCraftAvailV.length;
-    // 每档循环(Main.cs:17610-17613 while 档数;档 = deltaY/120)
+    // 每档数(档 = deltaY/120 取整;Main.cs:17596 int num = ScrollWheelDelta/120)
+    const steps = Math.abs(Math.round(e.deltaY / 120));
     let notches = Math.round(e.deltaY / 120);
-    const sign = notches === 0 ? 0 : Math.sign(notches);
-    while (notches !== 0) {
-      if (sign < 0) {
-        this.vinvCraftRecStart = craftGridRecStartAfterUp(this.vinvCraftRecStart, geo.cols);   // ScrollCraftingGrid 上滚支(:576-581)
-      } else {
-        this.vinvCraftRecStart = craftGridRecStartAfterDown(this.vinvCraftRecStart, geo.cols, avail);   // 下滚支(:582-590)
-        this.game.sfx.play('menuTick', 1);            // :584 音只走下滚支(逐字)
+    if (this.vinvPipsUseGrid) {                       // :17597 PipsUseGrid 支(flag 初值 true 不变,本支不清)
+      const geo = craftGridGeometry(c.sw, c.sh);
+      // 视口 px → vinv 逻辑域(÷K;transform-origin top left = 原点同)
+      const K = vanillaScaleFor(window.innerWidth, window.innerHeight, options.data.uiScale);
+      const lx = e.clientX / K, ly = e.clientY / K;
+      if (lx >= geo.left && ly >= geo.top
+        && lx < geo.left + geo.w && ly < geo.top + geo.h) {   // :17602-17608 Contains
+        const sign = notches === 0 ? 0 : Math.sign(notches);
+        while (notches !== 0) {                       // :17610-17613 while 档数
+          if (sign < 0) {
+            this.vinvCraftRecStart = craftGridRecStartAfterUp(this.vinvCraftRecStart, geo.cols);   // ScrollCraftingGrid 上滚支(:576-581)
+          } else {
+            this.vinvCraftRecStart = craftGridRecStartAfterDown(this.vinvCraftRecStart, geo.cols, avail);   // 下滚支(:582-590)
+            this.game.sfx.play('menuTick', 1);            // :584 音只走下滚支(逐字)
+          }
+          notches -= sign;
+        }
+        this.vinvUpdateCraftGrid();
       }
-      notches -= sign;
+      // 网格支不清 flag(:17600-17608 无 flag=false)→ 列表同拍仍走
     }
-    this.vinvUpdateCraftGrid();
-    this.vinvCraftWheel(e);                           // :17629-17632 列表同拍(flag 语义)
+    // 箱行滚支(:17622 chest!=-1 ∧ ChestUI.LastHighestChestRow>0 → flag=false+Scroll):
+    //   40 槽箱 LastHighestChestRow=ceil(40/10)-4=0 恒假=死支(本仓无 >40 槽容器,同相不建)
+    // NewCraftingUI.Visible 支(:17630 flag=false)=窗族分期缺席 ⇒ flag 恒 true
+    this.vinvCraftWheel(e, steps);                    // :17633-17640 flag 支 ScrollCraftingList
   }
 
   /** 网格重排/重建(每刷新拍):recStart 逐拍钳制(:461-467)+页钮可见门+格池签名重建 */
@@ -7630,7 +7687,9 @@ export class UI {
         this.tooltip.style.display = 'none';
         cancelAnimationFrame(this.tooltipPulseRaf);
       });
-      cell.addEventListener('wheel', (e) => this.vinvCraftWheel(e));
+      // ★SW-RB13b:网格格【不绑】wheel——滚轮走窗口级 vinvGridWheelTick(DoScrollingInInventory
+      //   域):格面在网格矩形内,原版=分页网格+列表同拍滚(:17602-17633);曾绑 vinvCraftWheel
+      //   → stopPropagation 吞掉窗口级分页=滚轮只在 3px 空档生效(格覆盖 93% 面积,倒挂)
       // 点击(:517-527):focusRecipe=i + recFastScroll(本仓瞬时重排同相)+ PipsUseGrid=false
       // + SoundID 12(游戏pad ChangePage(9) 支=N/A)
       cell.addEventListener('mousedown', (ev) => {
@@ -7687,6 +7746,10 @@ export class UI {
       this.vinvPipsUseGrid = true;                    // :157
       this.vinvSyncGridToggle();
       this.vinvRefreshCraft();
+      // ★SW-RB13b:PipsUseGrid=true 置位后箱条吞门/变体回位 pos 闭包须重跑
+      //   (开箱态右键合成站→网格开→ChestUI.cs:81 吞箱条;不重排=箱条滞留)
+      this.vinvLayoutSig = '';
+      this.layoutVanilla();
     } else {
       // modern 支(:33556-33557 → NewCraftingUI.OpenCloseFilter)=窗族分期;
       // classic 模式×classic 构建器布局(无网格域)同落此臂——playerInventory=true
@@ -7873,13 +7936,15 @@ export class UI {
     return html || `<span style="color:${COLORS[3]}">0 ${Lang.inter(18)}</span>`;
   }
 
-  /** 列表滚轮(格/材料格/命中区共用;滚轮悬停格子上也有效——★用户实测二轮) */
-  private vinvCraftWheel(e: WheelEvent): void {
+  /** 列表滚轮(格/材料格/命中区/窗口级 flag 支共用;滚轮悬停格子上也有效——★用户实测二轮)。
+   *  ★SW-RB13b:steps=档数(ScrollCraftingList mouseWheel=Delta/120 整档——
+   *  CraftingUI.cs:390-397 focusRecipe += mouseWheel 一次走多档),缺省 1=格/材料格面 */
+  private vinvCraftWheel(e: WheelEvent, steps = 1): void {
     e.stopPropagation();
     const rows = this.vinvCraftAvailV;
     if (!rows.length) return;
     const dir = e.deltaY > 0 ? 1 : -1;
-    const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + dir));
+    const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + dir * Math.max(1, steps)));
     if (next !== this.vinvCraftFocusV) {
       this.vinvCraftFocusV = next;
       this.game.sfx.play('menuTick', 1);   // SoundID 12(每越一步 :391/:4209)
@@ -7903,6 +7968,16 @@ export class UI {
     {
       const mm = this.game ? (this.game.renderer.mapStyle === 1 && !this.game.mapFullscreen()) : true;
       if (this.vinvLayoutCtx && this.vinvLayoutCtx.minimapOn !== mm) this.layoutVanilla();
+    }
+    // ★SW-RB13b:站点过滤失效拍逐帧化(DrawGridToggle 头 CraftingUI.cs:268-272 每帧执行)
+    //   vinvRefreshCraft 是事件驱动刷新——走远站后无事件则滤器滞留(原版 adjTile 每拍
+    //   AdjTiles 重算+逐帧门)。filter 非空才走(零负载):vanillaNearbyStations=±5/±3 盒扫
+    if (this.vinvCraftFilter && this._builtLayout === 'vanilla') {
+      const invOpen = this.invPanel.style.display === 'block';
+      if (!invOpen || !this.vinvFilterRemain()) {
+        this.vinvCraftFilter = null;
+        this.vinvRefreshCraft();   // 失效拍清滤+按全量配方域重列(ClearHacks 同相 CraftingUI.cs:142)
+      }
     }
     const dt = this.vinvPulseLast ? Math.min(100, ts - this.vinvPulseLast) : 16.67;
     this.vinvPulseLast = ts;
@@ -7928,8 +8003,11 @@ export class UI {
   // ---- 建筑配件图标列（★SW-FX19 债清偿；Main.cs:48142-48377 DrawBuilderAccToggles）----
   //  背包开即画 @(10,77) 竖列 24px 步距、10 槽序 8,9,0,1,2,3,4,5,6,7（:48166 num2 循环
   //  i=0→num3=8/i=1→num3=9/其余 num3=i-2）;每槽门=对应配饰装备(:48177 InfoAccMechShowWires
-  //  =3619/3611、:48193 rulerLine=486/3611、:48207 rulerGrid=2799/3611、:48229
-  //  autoPaint=2216/3061/5126、:48249 autoActuator=3624——缺配饰 continue 不画)。
+  //  =3619/3611、:48193 rulerLine=【恒可见】(旗经 ResetEffects Player.cs:18809 每拍
+  //  置 true,SW-FX36 修正——旧注 486/3611 系把置位支当门)、:48207 rulerGrid=2799/3611、:48229
+  //  autoPaint=2216/3061/5126、:48249 autoActuator=3624——缺配饰 continue 不画;
+  //  ★FX36 判定域=背包∪装备(UpdateEquips :12997-13004 全 inventory 扫描,信息配件族
+  //  不必装备),旧「仅配饰槽」域已撤)。
   //  点击:二态位 0↔1(:48201 等)+音 12 menuTick;线材可见度族 4 态 ++>=3→0(:48340-48343
   //  quirk——Hidden 3 点击不可达)。悬停 tooltip GameUI.*(:48196-48320);尾随方块替换
   //  图标 (:43242 @(0,44) 音 22 unlock) + 群系炬图标 (:43282 @(0,68) unlockedBiomeTorches
@@ -7939,9 +8017,12 @@ export class UI {
     const root = this.vinvRoot;
     if (!root) return;
     const statusOf = (): number[] => this.game?.player.builderAccStatus ?? builderAccDefaults();
+    // ★SW-FX36：旗位判定域=背包∪装备扫描（UpdateEquips :12997-13004 逐 inventory[0..57]
+    //  槽调 RefreshMechanicalAccsFromItemType——信息配件族不必装备;装备段
+    //  GrantArmorBenefits :13204。旧「仅配饰槽」域=wiki 明证偏差）
     const gatesOf = () => builderAccGateSet((vid) => {
       const g = this.game;
-      return !!g && playerAccessoryVidEquipped(g.player.inv.armor, g.player.inv.accSlotMax, vid);
+      return !!g && playerVidCarried(g.player.inv.slots, g.player.inv.armor, g.player.inv.accSlotMax, vid);
     });
     const ICON_SRC = 'sprites/vanilla-ui/UI_BuilderIcons.png';
     const slotEls: Array<HTMLButtonElement | null> = BUILDER_ACC_ICON_ORDER.map(() => null);
@@ -7969,7 +8050,9 @@ export class UI {
       })();
     };
     const visGateOf = (idx: number, g: ReturnType<typeof builderAccGateSet>): boolean => {
-      if (idx === BACC.RulerLine) return g.rulerLine;
+      // ★SW-FX36：Ruler 档(:48193 门 `player.rulerLine`)恒可见——旗位在 ResetEffects
+      //  (Player.cs:18809) 每拍置 true、全仓无置 false 点,与配饰持有无关
+      if (idx === BACC.RulerLine) return true;
       if (idx === BACC.RulerGrid) return g.rulerGrid;
       if (idx === BACC.AutoActuate) return g.autoActuator;
       if (idx === BACC.AutoPaint) return g.autoPaint;
@@ -8079,7 +8162,10 @@ export class UI {
     // 名字(Main.cs:504,invBottom;openChestPanel 的 bankNames 语义在 paint 侧回写)
     // ★SW-FX28 刀①:坐标迁 vanillaInvLayout.CHEST_NAME_XY 单源(ChestUI.cs:158)
     const nameEl = el('div', 'vinv-txt');
-    nameEl.style.cssText += 'font-size:13px; pointer-events:auto;';
+    // ★SW-RB13b:pointer-events:none(.vinv-txt 基线)——DrawName(ChestUI.cs:158)纯
+    //   DrawString 无命中盒,且 (504,258) 在箱域 FloatIntersect(:84 x≤495.8)外;
+    //   曾 auto=无处理器的世界点击死区(504..~580 × 258..~273)
+    nameEl.style.cssText += 'font-size:13px;';
     this.vinvRoot?.appendChild(nameEl);
     this.vinvChestNameEl = nameEl;
     this.vinvLayoutItems.push({ el: nameEl, pos: () => {
@@ -8100,12 +8186,17 @@ export class UI {
     // 按钮列(DrawButtons :182-188:Y=invBottom+40+ID·26,ID 跳号位保留;
     // ID0 拿走全部/1 存放全部/2 快速堆叠/3 补货(inter[82])/4 排列物品(inter[122]);
     // ID5 重命名/6 取消 = 真箱+editChest 域=债;文本 0.75 缩放 hover 1)
+    // ★SW-RB13b:①悬停色=OurFavoriteColor(Main.cs:886=(255,231,69);DrawButton :227
+    //   flag→color=OurFavoriteColor),曾 #c8f0c8 自创绿;②锚=竖直居中(origin=vector/2
+    //   :234 → 文本中线在 Y,命中盒 Y-12..Y+12 :223;DOM 用 translateY(-50%)+5.5px
+    //   上下 padding 复刻 24px 命中带,x 左对齐 506(:222 X-num2=506)不偏)
     const mkChestBtn = (id: number, labelKey: string, act: () => void): void => {
       const b = el('button', 'vinv-txt') as HTMLButtonElement;
       b.style.cssText = 'left:506px; font-size:13px; pointer-events:auto; cursor:pointer;'
-        + 'background:none; border:none; padding:0; color:#fff; text-shadow:1px 1px 0 #000;';
+        + 'background:none; border:none; padding:5.5px 0; color:#fff; text-shadow:1px 1px 0 #000;'
+        + 'transform:translateY(-50%);';
       b.textContent = Lang.text(labelKey);
-      b.addEventListener('mouseenter', () => { b.style.color = '#c8f0c8'; });
+      b.addEventListener('mouseenter', () => { b.style.color = 'rgb(255,231,69)'; });
       b.addEventListener('mouseleave', () => { b.style.color = '#fff'; });
       b.addEventListener('mousedown', (e) => { e.stopPropagation(); act(); });
       this.vinvRoot?.appendChild(b);
@@ -8148,6 +8239,213 @@ export class UI {
     el.textContent = bankNames[c.x] ?? ((c as { name?: string }).name || Lang.text('Mods.SandboxWorld.UI.Chest'));
   }
 
+  // ---- 商店货架(★SW-FX32 刀①店侧分期二;Main.cs:42500-42532 DrawInventory 商店段) ----
+  //  原版店开态无独立面板:货架 40 格=箱条同格(context 15 :42529,scale 0.755 :42513),
+  //  店名/储蓄同位 (504,invBottom) (:42502-42503),快乐度图标+倍率 (:42504-42512,
+  //  offsets Main.cs:67677-67680),PipsUseGrid 态整段不画 (:42500 门)。原版无
+  //  Set-Back 钮——关店 = Esc/对话关闭/走远(closeNpcDialog → npcShopClose)。
+  //  几何单源 vanillaInvLayout(shopSlotXY/SHOP_TITLE_XY/happiness 族)。
+  private vinvShopPayload: { title: string; entries: ShopEntry[]; copper: number; happinessMul: number; medals?: number; medalsTotal?: number } | null = null;
+  private vinvShopCells: HTMLDivElement[] = [];
+  private vinvShopTitleEl: HTMLElement | null = null;
+  private vinvShopSavedEl: HTMLElement | null = null;
+  private vinvShopCoinRow: HTMLElement | null = null;
+  private vinvShopCoinCnts: HTMLElement[] = [];
+  private vinvShopBankImgs: HTMLImageElement[] = [];
+  private vinvShopHappyIcon: HTMLElement | null = null;
+  private vinvShopHappyText: HTMLElement | null = null;
+
+  /** 显示门(Main.cs:42500 `npcShop > 0 && !PipsUseGrid`——网格态货架/店名/储蓄/
+   *  快乐度整段不画;SW-FX30 箱条 ChestUI.cs:81 同面) */
+  private vinvShopVisible(): boolean {
+    return !!this.game?.npcShopOpen && !this.vinvPipsUseGrid;
+  }
+
+  private vinvBuildShop(): void {
+    const root = this.vinvRoot;
+    if (!root) return;
+    const vis = (): boolean => this.vinvShopVisible();
+
+    // 店名(Main.cs:42502 Lang.inter[28] @(504,invBottom)——payload title 即 Lang.inter(28))
+    const title = el('div', 'vinv-txt');
+    title.style.cssText = 'font-size:15px;';
+    root.appendChild(title);
+    this.vinvShopTitleEl = title;
+    this.vinvLayoutItems.push({ el: title, pos: () => (vis() ? { x: SHOP_TITLE_XY.x, y: SHOP_TITLE_XY.y } : null) });
+
+    // 储蓄行标签(Main.cs:42503 → ItemSlot.DrawSavings ItemSlot.cs:3717-3757 →
+    //  DrawMoney :3671 Lang.inter[66] @(shopx,shopy+40);num5>0 才画 :3726)
+    const saved = el('div', 'vinv-txt');
+    saved.style.cssText = 'font-size:13px;';
+    saved.textContent = Lang.text('LegacyInterface.66');
+    root.appendChild(saved);
+    this.vinvShopSavedEl = saved;
+    this.vinvLayoutItems.push({ el: saved, pos: () => {
+      if (!vis() || !(this.game && this.game.coinSavingsCopper() > 0)) return null;
+      return shopSavingsLabelXY();
+    } });
+
+    // 四银行小图标(ItemSlot.cs:3727-3740:该仓有币才画,CenteredRectangle 中心
+    //  (shopx+off) 贴图 ×0.65;iconUrl 32px 代理贴图=尺寸偏差备案)
+    for (const def of SHOP_SAVINGS_BANK_ICONS) {
+      const img = document.createElement('img');
+      img.draggable = false;
+      img.style.cssText = `position:absolute; width:${32 * SHOP_SAVINGS_ICON_SCALE}px;`
+        + `height:${32 * SHOP_SAVINGS_ICON_SCALE}px; image-rendering:pixelated; pointer-events:none;`;
+      root.appendChild(img);
+      this.vinvShopBankImgs.push(img);
+      const wHalf = (32 * SHOP_SAVINGS_ICON_SCALE) / 2;
+      this.vinvLayoutItems.push({ el: img, pos: () => {
+        const g = this.game;
+        if (!vis() || !g || !(g.coinSavingsCopper() > 0)) return null;
+        if (!(g.coinSavingsByBank()[def.bank] > 0)) return null;
+        if (!img.getAttribute('src')) {
+          const u = iconUrl(g, internalIdOfVid(def.vid));
+          if (u) img.src = u;
+        }
+        return { x: SHOP_TITLE_XY.x + def.off.x - wHalf, y: SHOP_TITLE_XY.y + def.off.y - wHalf };
+      } });
+    }
+
+    // 币图标+计数(ItemSlot.cs:3699-3710:j=0..3 币种 74-j=铂/金/银/铜,图标
+    //  @(shopx+11+24j,shopy+75),计数在下 :3705-3710(0.75 缩放——DOM 以 12px 近似
+    //  =字体度量偏差备案);计数帽 999 :3704-3706;>0 才画整行 :3726)
+    const coinRow = el('div');
+    coinRow.style.cssText = 'position:absolute; pointer-events:none;';
+    for (let j = 0; j < 4; j++) {
+      const cell = el('div');
+      cell.style.cssText = 'position:absolute; width:24px;';
+      cell.style.left = `${24 * j}px`;
+      const icon = document.createElement('img');
+      icon.draggable = false;
+      icon.style.cssText = 'width:20px; height:20px; margin:0 auto; display:block;'
+        + 'image-rendering:pixelated; pointer-events:none;';
+      icon.src = (this.game ? iconUrl(this.game, internalIdOfVid(74 - j)) : '') || '';
+      const cnt = el('div');
+      cnt.style.cssText = 'font-size:12px; text-align:center; color:#fff; text-shadow:1px 1px 0 #000;';
+      cell.appendChild(icon);
+      cell.appendChild(cnt);
+      coinRow.appendChild(cell);
+      this.vinvShopCoinCnts.push(cnt);
+    }
+    root.appendChild(coinRow);
+    this.vinvShopCoinRow = coinRow;
+    this.vinvLayoutItems.push({ el: coinRow, pos: () => {
+      if (!vis() || !(this.game && this.game.coinSavingsCopper() > 0)) return null;
+      return shopSavingsCoinXY(0);
+    } });
+
+    // 快乐度表情(Main.cs:42504-42509:NPCHappiness 4 帧 Frame(4,1,frameX),中心锚
+    //  (504+12,invBottom+108) scale 1——Main.cs:67679-67680 offsets;恒画,帧随
+    //  PriceAdjustment :42506 三元链)
+    const happy = el('div');
+    happy.style.cssText = 'position:absolute; width:24px; height:24px; image-rendering:pixelated;'
+      + 'pointer-events:none;background:url(sprites/vanilla-ui/UI_NPCHappiness.png); background-size:96px 24px;';
+    root.appendChild(happy);
+    this.vinvShopHappyIcon = happy;
+    this.vinvLayoutItems.push({ el: happy, pos: () => {
+      if (!vis()) return null;
+      const c = shopHappinessIconXY();
+      return { x: c.x - 12, y: c.y - 12 };
+    } });
+    // 倍率文字(Main.cs:42510-42512 pa.ToString("P0") @(504+26,invBottom+98))
+    const happyTxt = el('div', 'vinv-txt');
+    happyTxt.style.cssText = 'font-size:13px; color:#fff;';
+    root.appendChild(happyTxt);
+    this.vinvShopHappyText = happyTxt;
+    this.vinvLayoutItems.push({ el: happyTxt, pos: () => (vis() ? shopHappinessTextXY() : null) });
+
+    // 货架 40 格(Main.cs:42518-42532:10×4 行主序 slot3=num76+num77·10,context 15;
+    //  空格同样以 InventoryBack 底框绘制 :42531=售卖放置区。★非 makeSlotEl——
+    //  商品格语义=买/卖放置区,非拾放;交互直连 Game.npcShopBuy/npcShopSellHeld)
+    for (let i = 0; i < 40; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'sw-slot sw-vshop-cell';
+      cell.dataset.vshop = String(i);
+      cell.style.cssText = 'width:52px; height:52px; cursor:pointer;';
+      const entry = (): ShopEntry | undefined => this.vinvShopPayload?.entries[i];
+      cell.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        if (e.button !== 0) return;   // 右键不买不卖(RightClick→HandleShopSlot CanStack 早退 ItemSlot.cs:1878-1881)
+        const it = entry();
+        if (!it) {
+          // 空格 = 唯一卖出放置区(PickItemMovementAction case 15 ItemSlot.cs:1435-1438
+          //  空格+持有非币 → result 4 → LeftClick case 4 :1195-1212 SellItem 整叠)
+          if (this.heldStack && this.game?.npcShopSellHeld(this.heldStack)) {
+            this.heldStack = null;   // SellItem 成交:光标 SetDefaults(0) :1116
+            this.refreshAll();
+          }
+          return;
+        }
+        if (cell.dataset.ok !== '1') return;   // 买不起 = 无动作(原版 BuyItem 静默失败)
+        const bulk = e.shiftKey || undefined;  // Shift 批量买 10(GetBulkBuyAmount ItemSlot.cs:2861-2870)
+        const held = this.heldStack;
+        if (held) {
+          this.game?.npcShopBuy(it.vanillaId, it.buyback, held, bulk);   // 同型 CanStack :1431 → 叠光标
+          this.refreshAll();
+          return;
+        }
+        this.game?.npcShopBuy(it.vanillaId, it.buyback, undefined, bulk);
+      });
+      // 格位悬停 = MouseHover context 15(单源 showShopCellTooltip;SW-BJ22 语义面)
+      cell.addEventListener('mouseenter', () => {
+        const it = entry();
+        if (!it) return;
+        this.showShopCellTooltip({ vid: it.vanillaId, stack: 1, prefix: it.prefix, buyback: it.buyback }, cell);
+      });
+      cell.addEventListener('mouseleave', () => this.showShopCellTooltip(null, null));
+      root.appendChild(cell);
+      this.vinvShopCells.push(cell);
+      const { x, y } = shopSlotXY(i);   // ★SW-FX32 单源(Main.cs:42522-42523=箱条同格)
+      this.vinvLayoutItems.push({ el: cell, pos: () => (vis() ? { x, y } : null) });
+    }
+  }
+
+  /** 货架内容+头部回写(paintVanillaInvSlots/showNpcShop/图标轮询共用;显示面由
+   *  vinvLayoutItems pos 门管辖,本函数只写内容与格位着色) */
+  private vinvRefreshShop(): void {
+    const g = this.game;
+    if (!g || !this.vinvRoot) return;
+    const pay = this.vinvShopPayload;
+    const on = this.vinvShopVisible() && !!pay;
+    // 店名(Main.cs:42502:恒 inter[28],payload title 即 Game 侧 Lang.inter(28))
+    if (this.vinvShopTitleEl) this.vinvShopTitleEl.textContent = pay?.title ?? '';
+    // 快乐度帧/文案(:42506/:42510——mul≤0.82→0/≤1→1/≤1.1→2/其余→3)
+    const mul = pay?.happinessMul ?? 1;
+    if (this.vinvShopHappyIcon) this.vinvShopHappyIcon.style.backgroundPosition = `${-happinessFrameX(mul) * 24}px 0px`;
+    if (this.vinvShopHappyText) this.vinvShopHappyText.textContent = happinessPct(mul);
+    // 币计数(ItemSlot.cs:3705-3710 split[3-j],帽 999 :3704-3706)
+    if (on && this.vinvShopCoinRow) {
+      const split = g.coinSavingsSplit();
+      for (let j = 0; j < 4; j++) {
+        const cnt = this.vinvShopCoinCnts[j];
+        if (cnt) cnt.textContent = String(Math.min(999, split[3 - j]));
+      }
+    }
+    // 40 格内容(Main.cs:42531 逐格 ItemSlot.Draw;afford 着色=经典面同款呈现,
+    //  原版无买不起调暗=呈现偏差备案)
+    for (let i = 0; i < this.vinvShopCells.length; i++) {
+      const cell = this.vinvShopCells[i];
+      const it = on ? pay!.entries[i] : undefined;
+      if (!it) {
+        cell.classList.add('is-empty');
+        cell.classList.remove('is-poor');
+        delete cell.dataset.ok;
+        if (cell.childElementCount) this.paintSlot(cell, null);
+        continue;
+      }
+      cell.classList.remove('is-empty');
+      const ok = it.medal !== undefined
+        ? (pay!.medalsTotal ?? pay!.medals ?? 0) >= it.medal
+        : pay!.copper >= it.price;
+      cell.dataset.ok = ok ? '1' : '0';
+      cell.classList.toggle('is-poor', !ok);
+      const iid = internalIdOfVid(it.vanillaId);
+      this.paintSlot(cell, iid >= 0 ? { id: iid, stack: it.stack ?? 1, prefix: it.prefix } : null);
+    }
+  }
+
   /** adjY(Main.cs:42239-42244:<700 → (sh-508)/2,否则 (sh-600)/2,整型) */
   private vinvCraftAdjY(sh: number): number {
     return sh < 700 ? Math.trunc((sh - 508) / 2) : Math.trunc((sh - 600) / 2);
@@ -8174,7 +8472,11 @@ export class UI {
     // (DrawRecipesList :167-171:RecipeFilterHack → GetWindowDescription,else inter[25])
     this.vinvTickCraftFilter();
     let avail = game.vanillaAvailableRecipes();
-    if (this.vinvCraftFilter) {
+    // ★SW-RB13b:消费门=RecipeFilterHack getter(CraftingUI.cs:121-127:control≠Classic →
+    //   null)——classic 态置入的滤器在切 modern 后不消费(列表回全量/头回 inter[25]),
+    //   切回 classic 恢复(_lastFilter 本体不清,原版同相)
+    const filterActive = this.vinvCraftFilter !== null && options.data.craftingGridControl === 'classic';
+    if (filterActive && this.vinvCraftFilter) {
       // Recipe.cs:252 filterHack ∧ 门(CraftStationRecipeFilter.Accepts :159-170 /
       // WaterSourceRecipeFilter.Accepts :180-187)——列表与网格同吃过滤后的
       // availableRecipe 数组(DrawRecipesGrid :522 遍历 availableRecipe 同源)
@@ -8483,6 +8785,16 @@ export class UI {
     this.vinvCraftTitleEl = null;
     this.vinvCraftMatEl = null;
     this.vinvCraftMatSig = '';
+    // ★SW-FX32:商店货架面(vinvBuildShop 重建前清零,防死节点入 vinvLayoutItems/
+    // vinvShopCells 旧引用重paint——红队 F2 teardown 卫生同族)
+    this.vinvShopCells = [];
+    this.vinvShopTitleEl = null;
+    this.vinvShopSavedEl = null;
+    this.vinvShopCoinRow = null;
+    this.vinvShopCoinCnts = [];
+    this.vinvShopBankImgs = [];
+    this.vinvShopHappyIcon = null;
+    this.vinvShopHappyText = null;
     // ★SW-FX30 刀②:网格态域随布局拆解清空(window 级 wheel 监听守卫位一并复位,
     // 重进 vanilla 布局时 vinvBindGridWheel 重挂一次;无独立 removeEventListener 点
     // =监听闭包引用 this 且 tick 头 _builtLayout 门,classic 态恒 no-op,同 vinvPulse 单例面)

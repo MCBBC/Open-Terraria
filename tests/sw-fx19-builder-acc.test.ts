@@ -104,13 +104,13 @@ describe('配饰旗位门（Player.cs:12897-12913 RefreshMechanicalAccsFromItemT
 });
 
 describe('GetBuilderAccsCountToShow（Main.cs:48381-48386）', () => {
-  it('① 无任何配饰+未解锁群系炬 = 1（方块替换恒画）', () => {
+  it('① 无任何配饰+未解锁群系炬 = 2（方块替换恒画 + ★SW-FX36 rulerLine 项恒 1：旗经 ResetEffects Player.cs:18809 每拍置 true,旧 1 = 误把置位支当门）', () => {
     const g = builderAccGateSet(() => false);
-    expect(builderAccTotalIcons(g, false)).toBe(1);
+    expect(builderAccTotalIcons(g, false)).toBe(2);
   });
-  it('② 机械透镜装备 = 1+6=7;全配饰+群系炬 = 6+4+1+1 = 12（上限含列外两图标）', () => {
+  it('② 机械透镜装备 = 6+1(尺线恒)+1(方块替换)=8;全配饰+群系炬 = 6+1+1+1+1+1+1 = 12（上限含列外两图标）', () => {
     const lens = builderAccGateSet((v) => v === 3619);
-    expect(builderAccTotalIcons(lens, false)).toBe(7);
+    expect(builderAccTotalIcons(lens, false)).toBe(8);
     const all = builderAccGateSet(() => true);
     expect(builderAccTotalIcons(all, true)).toBe(12);
   });

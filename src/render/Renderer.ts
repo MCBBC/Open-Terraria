@@ -3,6 +3,7 @@ import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, onStarveTra
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { findBannerAnchorY } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
+import { rulerLineAlpha, rulerGridFade, rulerReadoutText } from '../stats/builderAcc';   // ★SW-FX36:标尺族绘制纯公式单源
 import { TintAtlas, type TintRect } from './TintAtlas';
 import { tintedTex } from './StringLine';
 import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
@@ -102,6 +103,7 @@ function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
 import type { Camera } from './Camera';
+import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
 import type { World, Clock } from '../world/World';
@@ -4273,18 +4275,47 @@ export class Renderer {
           // signBubble（Player.cs:33839-33841）：悬停任意告示牌即置位——
           // signX=锚右缘px、signY=锚顶行；泡偏玩家异侧（:45142 signX>玩家右缘 → 翻转）
           // ★SW-FX27：翻转态锚 Y 镜像（vanilla DrawInterface_19 SignTileBubble
-          //   Main.cs:46504-46510 `num2 = screenHeight - (signY - screenPosition.Y)
-          //   - 32`；-32 泡高侧调整由消费端自身偏移承担）。gd=1 分支保持旧式
-          //   逐位（不含 punch——旧式即无 punch,镜面律铁律不动基线）。
+          //   Main.cs:46504-46510 `num2 = screenHeight - (signY - screenPosition.Y) - 32`）。
+          // ★SW-RB13a（2026-09-11）：原注"-32 由消费端自身偏移承担"系误判——消费端
+          //   （:14836 num2−22）两态同式只有 −22，翻转支的 −32 是泡与锚相对关系
+          //   随镜像换边的独立补偿（泡底=镜像锚−26，与 gd=1「泡底=锚+6、压签顶 6px」
+          //   镜面对称）。漏 −32 时翻转泡下坠 32px 覆盖签面。gd=1 分支逐位不动。
           const signX = ax * TILE + 16, signY = ay * TILE;
           const sbyRaw = (signY - cam2.y) * z2 + viewH / 2;
           this.signBubbleScreen = {
             x: Math.round((signX - cam2.x) * z2 + viewW / 2),
-            y: Math.round(cam2.flipY ? viewH - sbyRaw : sbyRaw),
+            y: Math.round(cam2.flipY ? viewH - sbyRaw - 32 : sbyRaw),
             flip: signX > player.x + player.w,
           };
         }
       }
+    }
+    // 7a''. 标尺 W×H 计数控（★SW-FX36；Main.cs:46187-46195 DrawInterface_33_MouseText：
+    //      门=rulerLine(:18809 恒真)∧status[0]==0∧spectating<0∧velocity≤6（世界段
+    //      同款门,Game 注入/Renderer 双重承载）∧num>1||num2>1;内容=(|X|+1)+"x"+(|Y|+1)
+    //      纯数字拼串无 l10n 键;@ MouseScreen+(16,0),色 Color(0.24,0.8,0.9,1)=
+    //      rgb(61,204,229)（float→byte 截断）,scale 1,origin(0,0.8)——origin y=0.8×
+    //      行高 ⇒ 字形主体悬于鼠标上方;描边=Utils.DrawBorderString(:2679)→
+    //      DrawColorCodedStringWithShadow spread 1.5（ChatManager.cs:30 四向 ±x±y
+    //      黑影）。字体原版 FontAssets.MouseText → 本仓 14px monospace 替身
+    //      （同 cursorItemIconText 字体偏差登记）。层序=MouseText(33) 在
+    //      InteractItemIcon(40) 之下 ⇒ 画在 drawCursorItemIcon 之前。）
+    if (this.rulerReadout) {
+      ctx.save();
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const tm = ctx.measureText(this.rulerReadout.text);
+      const th = (tm.actualBoundingBoxAscent || 11) + (tm.actualBoundingBoxDescent || 3);
+      const roX = this._mouseX + 16;
+      const roY = this._mouseY - 0.8 * th;        // origin=(0,0.8·行高) :46194
+      ctx.fillStyle = '#000';
+      for (const [oxs, oys] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) {
+        ctx.fillText(this.rulerReadout.text, roX + oxs, roY + oys);
+      }
+      ctx.fillStyle = 'rgb(61,204,229)';
+      ctx.fillText(this.rulerReadout.text, roX, roY);
+      ctx.restore();
     }
     // 7b'. 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房光标
     //      携带头像（:44622-44688 DrawInterface_38）——屏幕空间最后层
@@ -4827,15 +4858,24 @@ export class Renderer {
    *  3 Hidden——Main.cs:59126-59140 num2..num6；Game.render 注入。Hidden 不画,
    *  Faded ×0.5,Bright/Normal 本仓线层无逐格光照采样=全亮（偏差登记）。） */
   wireModes: number[] = [1, 1, 1, 1, 1];
-  /** 建筑配件标尺注入面（★SW-FX19；Game.render 每帧填,null=无尺装备/关断） */
+  /** 建筑配件标尺注入面（★SW-FX19；Game.render 每帧填,null=无尺装备/关断）。
+   *  ★SW-FX36：speed 语义钉死=标尺线专用（:47050 velocity.Length,门 >6 不画 +
+   *  :46187 计数文本二态门）;gridDist=网格淡出驱动 Distance(position,shadowPos[2])
+   *  （:47152,social shadow 4~5 拍滞后——Player.shadowLagDist）,两者不再是同一量。 */
   builderRulers: {
     lineOn: boolean; gridOn: boolean;
     feetTx: number; feetTy: number;      // (int)((x+w/2)/16), (int)((y+h-2)/16)（:47074-47080）
     nudge: number;                       // num5 :47070-47072（鼠在中心左侧 -1 否则 +1）
     mouseTx: number; mouseTy: number;    // MouseWorld.ToTileCoordinates()（:47194）
-    speed: number;                       // velocity.Length()（:47050;原版另取 shadowPos[2] 距,本仓取速度=α 淡出近似,登记）
+    speed: number;                       // velocity.Length()（:47050 标尺线门/淡出）
+    gridDist: number;                    // Distance(position,shadowPos[2])（:47152 网格淡出）
     gravDir: number;
   } | null = null;
+  /** ★SW-FX36：标尺 W×H 计数控（Main.cs:47089-47091 rulerLineDisplayValues 由
+   *  DrawInterface_4_Ruler 世界段写、:46187-46195 DrawInterface_33_MouseText 屏幕
+   *  段消费——本仓拆同帧两段：drawBuilderRulers 置值,drawCursorItemIcon 前的屏幕
+   *  层绘制。null=不显（1×1 或 speed>6 或线关）。 */
+  rulerReadout: { text: string } | null = null;
   /** 宏伟蓝图拖拽预览(Game.render 注入;世界坐标 tile) */
   grandPreview: { from: [number, number]; to: [number, number]; mode: number } | null = null;
 
@@ -5106,11 +5146,45 @@ export class Renderer {
     }
   }
 
+  /** ★SW-FX36：Extra 白模调色烘焙（XNA SpriteBatch tint 语义 final = tex × tint：
+   *  Extra_2/68 像素全白（255,255,255,α∈{127,255}）——原版标尺的青色全靠 Color
+   *  调色,旧码裸 drawImage = 白模+α 而已（色偏）。rgb=tint.rgb,α 保 tex.a,
+   *  tint.a 走 globalAlpha；byte 截断链 = XNA Color(float)→(byte)(f*255) 后
+   *  Color*float 全通道乘再截断（floor）。multiply+destination-in = tintIconRect
+   *  同式（fillRect 不透面压 α,须重绘原图保 α）。槽位 0/1 分离——网格普通格与
+   *  十字同帧两版调色并存。fade 连续变化,逐帧重烘（≤80×16,开销可忽略）。 */
+  private _rulerTintScratch: [HTMLCanvasElement, HTMLCanvasElement] | null = null;
+  private tintedExtra(path: string, r: number, g: number, b: number, slot: 0 | 1): HTMLCanvasElement | null {
+    const img = this.atlas?.ensureVImage(path);
+    if (!img) return null;
+    if (!this._rulerTintScratch) {
+      this._rulerTintScratch = [document.createElement('canvas'), document.createElement('canvas')];
+    }
+    const c = this._rulerTintScratch[slot];
+    const w = img.width, h = img.height;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const o = c.getContext('2d');
+    if (!o) return null;
+    o.clearRect(0, 0, w, h);
+    o.imageSmoothingEnabled = false;
+    o.drawImage(img, 0, 0);
+    o.globalCompositeOperation = 'multiply';
+    o.fillStyle = `rgb(${r},${g},${b})`;
+    o.fillRect(0, 0, w, h);
+    o.globalCompositeOperation = 'destination-in';
+    o.drawImage(img, 0, 0);
+    o.globalCompositeOperation = 'source-over';
+    return c;
+  }
+
   /** ★SW-FX19：建筑配件标尺覆盖层（世界空间,水前/线后——原版 Interface 层序
    *  DrawInterface_3_LaserRuler(:47146-47224 网格)/_4_Ruler(:47046-47140 标尺线)
    *  在世界之上;世界空间等价绘制,栅格 16px 对齐与原版逐像素同源）。
-   *  门 = 尺子 486/机械标尺 2799 装备且 builderAccStatus[0]/[1]==0（Game 注入）。 */
+   *  ★SW-FX36 门修正：标尺线门 = Ruler 档开关位[0]（旗 rulerLine 经 ResetEffects
+   *  Player.cs:18809 恒真,无物品面——旧「486/3611 装备」门撤销）;网格门 = 旗
+   *  rulerGrid（2799/3611 背包∪装备扫描,Game 注入）∧开关位[1]。 */
   private drawBuilderRulers(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    this.rulerReadout = null;   // 每帧重置（线关/1×1/speed>6 时保持 null = 计数控不显）
     const r = this.builderRulers;
     if (!r) return;
     if (!r.lineOn && !r.gridOn) return;
@@ -5121,13 +5195,21 @@ export class Renderer {
     const leftPx = cam.x - viewW / 2 / z;
     const topPx = cam.y - viewH / 2 / z;
     const speed = r.speed;
-    // α 淡出（:47154-47157/:47215-47216 num3 = Lerp(0.2,0.7,Clamp(1-num/6))）
-    const fade = 0.2 + (0.7 - 0.2) * Math.max(0, Math.min(1, 1 - speed / 6));
 
-    // ---- 标尺网格（DrawInterface_3_LaserRuler,Extra_68 18×36）----
+    // ---- 标尺网格（DrawInterface_3_LaserRuler,Extra_68 18×36 白模调色）----
     if (r.gridOn) {
-      const img = this.atlas.ensureVImage('vanilla/Extra_68.png');
-      if (img) {
+      // 淡出驱动（:47151-47152：num 先赋 velocity.Length() 随即被
+      //   Distance(position, shadowPos[2]) 覆盖 = 死赋值,真驱动=social shadow 滞后
+      //   距离——Player.shadowLagDist,4~5 拍窗口;旧码误用瞬时速度,行走中网格过亮）
+      const num3 = rulerGridFade(r.gridDist);   // Lerp(0.2,0.7,Clamp(1-num/6)) :47156
+      // 调色（:47162-47163 color=(0.24,0.8,0.9,0.5)*0.4*num3 / color2=(1,0.8,0.9,0.5)
+      //   *0.5*num3——XNA Color(float)→byte 截断 (61,204,229,127)/(255,204,229,127)
+      //   再全通道乘；rgb 进烘焙,α（127/255 系数）走 globalAlpha）
+      const img = this.tintedExtra('vanilla/Extra_68.png',
+        Math.floor(61 * 0.4 * num3), Math.floor(204 * 0.4 * num3), Math.floor(229 * 0.4 * num3), 0);
+      const imgHi = this.tintedExtra('vanilla/Extra_68.png',
+        Math.floor(127.5 * num3), Math.floor(102 * num3), Math.floor(114.5 * num3), 1);
+      if (img && imgHi) {
         // 起点对齐：screenPosition-50 落格（:47220-47222 vec=ToTile*16）；本仓
         // 世界空间=tile 对齐起点,屏幅外扩 100px（:47223-47224 (w+100)/16 整除）
         const ox = Math.floor((leftPx - 50) / ts);
@@ -5136,8 +5218,8 @@ export class Renderer {
         const ny = Math.floor((viewH / z + 100) / ts);
         // 鼠标格（相对起点 :47225-47228 point）
         const px = r.mouseTx - ox, py = r.mouseTy - oy;
-        const gA = 0.5 * 0.4 * fade;          // color = (0.24,0.8,0.9,0.5)*0.4*fade
-        const cA = 0.5 * 0.5 * fade;          // color2 = (1,0.8,0.9,0.5)*0.5*fade
+        const gA = (127 / 255) * 0.4 * num3;   // tint.a = 127/255×0.4×num3
+        const cA = (127 / 255) * 0.5 * num3;   // tint2.a = 127/255×0.5×num3
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         // 普通格（:47231-47235 `if (i != point.X && j != point.Y) 画`——十字行/列
@@ -5158,13 +5240,13 @@ export class Renderer {
         ctx.globalAlpha = cA;
         for (let k = 0; k < nx; k++) {
           // 横行 source (0,0,16,16) 端格 / (0,0,16,18) 其余（:47283-47293）
-          ctx.drawImage(img, 0, 0, 16, k === px ? 16 : 18,
+          ctx.drawImage(imgHi, 0, 0, 16, k === px ? 16 : 18,
             (ox + k) * ts - 1, (oy + py) * ts - 1, 16, k === px ? 16 : 18);
         }
         for (let l = 0; l < ny; l++) {
           if (l === py) continue;                             // :47299 l != point.Y
           // 纵列 source (0,0,18,16)（:47296-47298）
-          ctx.drawImage(img, 0, 0, 18, 16,
+          ctx.drawImage(imgHi, 0, 0, 18, 16,
             (ox + px) * ts - 1, (oy + l) * ts - 1, 18, 16);
         }
         ctx.globalAlpha = 1;
@@ -5172,45 +5254,69 @@ export class Renderer {
       }
     }
 
-    // ---- 标尺线（DrawInterface_4_Ruler,Extra_2 16×80：端帽/横正/横负/竖正/竖负）----
+    // ---- 标尺线（DrawInterface_4_Ruler,Extra_2 16×80 白模调色：端帽/横正/横负/竖正/竖负）----
+    // ★SW-FX36：speed>6 整段早退（:47056-47058,经 rulerLineAlpha 的 null 档显式化——
+    //   旧码靠 α=0 兜底视觉等价,但 :46187 计数文本的门是同款二态）
     if (r.lineOn) {
-      const img = this.atlas.ensureVImage('vanilla/Extra_2.png');
+      const alpha = rulerLineAlpha(speed);
+      if (alpha !== null) {
+      // α（:47058-47066 num4 = speed≤2 → 1,2..6 线性降 0）× num12 0.8（:47104）
+      // 调色：XNA 全通道乘 ⇒ rgb=(0.24,0.8,0.9)×0.8×num4（byte 链 floor(61·k) 等）,
+      //   α=0.8×num4 走 globalAlpha——旧码裸白模无青调=色偏,现同帧重烘
+      const img = this.tintedExtra('vanilla/Extra_2.png',
+        Math.floor(61 * alpha), Math.floor(204 * alpha), Math.floor(229 * alpha), 0);
       if (img) {
-        // α（:47058-47066 num4 = speed≤2 → 1,2..6 线性降 0）× num12 0.8（:47104）
-        const a4 = speed <= 2 ? 1 : Math.max(0, 1 - (speed - 2) / 6);
-        const alpha = 0.8 * a4;
         let dx = r.feetTx, dy = r.feetTy;                     // (num6,num7) 脚底格
-        if (r.gravDir === -1) dy--;                           // :47083-47085
+        if (r.gravDir === -1) dy--;                           // :47071-47073 num7--（距离锚）
+        // ★SW-RB13a（2026-09-11）：翻转态双锚拆分——原版距离锚 num7 与画线锚 num11
+        //   是两个变量（:47098-47102 `num11 = num7` 后翻转支再 `num11--`），且鼠标行
+        //   翻转态先 +16px 世界偏移再取整（:47079-47082 `mouseWorld.Y += 16f`）。
+        //   旧码距离/画线共用单锚且鼠标行无 +1 → 翻转态整条标尺线偏 1 行、长度差 1。
+        //   gd=1 三处增量全为 0 = 逐位恒等（镜面律不动基线）。
+        const dyDraw = dy - (r.gravDir === -1 ? 1 : 0);       // num11（画线锚）
+        const mouseTyFlip = r.mouseTy + (r.gravDir === -1 ? 1 : 0);   // (MouseWorld.Y+16)/16
         // 起点向鼠侧偏一格（:47086-47088 `if (|num6 − 鼠格X| > 0) num6 += num5`）
         if (dx !== r.mouseTx) dx += r.nudge;
-        let ddx = r.mouseTx - dx;                             // num8
-        let ddy = r.mouseTy - dy;                             // num9
-        if (ddx === 0 && ddy === 0) return;
+        const ddx0 = r.mouseTx - dx;                          // num8（循环前值=rulerLineDisplayValues.X :47090）
+        const ddy0 = mouseTyFlip - dy;                        // num9（:47091 .Y）
+        // W×H 计数控（消费 Main.cs:46187-46195——公式单源 rulerReadoutText：
+        //   (|X|+1)+"x"+(|Y|+1),纯数字拼串无 l10n 键;1×1 不显）
+        const ro = rulerReadoutText(ddx0, ddy0);
+        if (ro) this.rulerReadout = { text: ro };
+        if (ddx0 === 0 && ddy0 === 0) return;
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         ctx.globalAlpha = alpha;
-        // 横段（:47108-47133）：sign→source y=16(正)/32(负),末格 y=0 端帽
+        // 起锚格（:47108-47110 `num10=nudged num6` 处 source(0,0,16,16) 恒画——
+        //   ★旧码整缺此格,链总格数少 1、玩家脚侧无起点帽）
+        ctx.drawImage(img, 0, 0, 16, 16, dx * ts, dyDraw * ts, 16, 16);
+        let ddx = ddx0;
+        let ddy = ddy0;
+        // 横段（:47112-47133）：sign→source y=16(正)/32(负),末格 y=0 端帽
+        //   （画位行 = dyDraw/num11 非距离锚 dy——SW-RB13a）
         if (ddx !== 0) {
           const sx2 = Math.sign(ddx);
           while (ddx !== 0) {
             ddx -= sx2;
             dx += sx2;
             ctx.drawImage(img, 0, ddx === 0 ? 0 : (sx2 === 1 ? 16 : 32), 16, 16,
-              dx * ts, dy * ts, 16, 16);
+              dx * ts, dyDraw * ts, 16, 16);
           }
         }
         // 竖段（:47134-47139 + 端帽）：sign→source y=48(正)/64(负),末格 y=0
         if (ddy !== 0) {
           const sy2 = Math.sign(ddy);
+          let dyRun = dyDraw;
           while (ddy !== 0) {
             ddy -= sy2;
-            dy += sy2;
+            dyRun += sy2;
             ctx.drawImage(img, 0, ddy === 0 ? 0 : (sy2 === 1 ? 48 : 64), 16, 16,
-              dx * ts, dy * ts, 16, 16);
+              dx * ts, dyRun * ts, 16, 16);
           }
         }
         ctx.globalAlpha = 1;
         ctx.restore();
+      }
       }
     }
   }
@@ -12094,21 +12200,33 @@ export class Renderer {
     // ★默认支三片 [46,10]+[44,2]+[42,2]（num3=2/num2=42 :1594-1596）;217 族特例支
     // 两片 [[2,54],[0,2]]（num3=1/num2=0 :1608-1716,legs 169/177/178/181/182/206/217）
     // ——V2b 复核勘误：曾把特例支两片当默认支全档通用
-    if (ad.shoe > 0) {
-      const tex = atlas.ensureVImage(`vanilla/Acc_Shoes_${ad.shoe}.png`);
+    // ★SW-BJ59：滚轴鞋坐骑鞋面覆写（Player.cs:37096-37115 UpdateVisibleAccessories
+    //  尾段：mount.Active 且 type 57-60 → shoe=27/28/29/30、cShoe=cMount——在配饰
+    //  两轮（功能槽/社交槽）之后应用 = 覆盖配饰鞋面（穿赫尔墨斯靴+骑滚轴鞋显轮滑鞋）。
+    //  cMount = miscDyes[3]（Player.cs:9300）→ 染料位随坐骑染料槽）。
+    const skateMountShoe = mnt && MOUNT_SETS.IsRollerSkates?.[mnt.type] ? mnt.type - 30 : 0;
+    const shoeId = skateMountShoe > 0 ? skateMountShoe : ad.shoe;
+    if (shoeId > 0) {
+      const tex = atlas.ensureVImage(`vanilla/Acc_Shoes_${shoeId}.png`);
       if (tex && tex.width > 0) {
-        const roller = SHOE_ROLLER_SKATE.has(ad.shoe) ? 2 : 0;
+        const roller = SHOE_ROLLER_SKATE.has(shoeId) ? 2 : 0;
+        let shoeDye = ad.dyeShoe;
+        if (skateMountShoe > 0) {
+          const mDye = p.inv.miscDyes[3];                       // cMount（:9300）
+          shoeDye = mDye ? (ITEM_DEFS[mDye.id]?.vid
+            ?? viIdFromKey(ITEM_DEFS[mDye.id]?.key ?? '') ?? -1) : -1;
+        }
         if (p.sitting) {
           // 表序 = 原版循环序（num10=num3→0：身段先、顶带后叠）；分支按 legs vid
           const slices = SITTING_LEG_SPECIAL_LEGS.has(sittingLegsVid)
             ? SITTING_LEG_SLICES_SPECIAL : SITTING_LEG_SLICES;
           for (let k = 0; k < slices.length; k++) {
             const [oy, h2] = slices[k];
-            this.drawAccBodyFrame(ctx, tex, legRow, ad.dyeShoe, stealthClamp, p.facing,
+            this.drawAccBodyFrame(ctx, tex, legRow, shoeDye, stealthClamp, p.facing,
               0, roller, oy, h2);
           }
         } else {
-          this.drawAccBodyFrame(ctx, tex, legRow, ad.dyeShoe, stealthClamp, p.facing,
+          this.drawAccBodyFrame(ctx, tex, legRow, shoeDye, stealthClamp, p.facing,
             0, roller);
         }
       }
@@ -13042,6 +13160,10 @@ export class Renderer {
         // CanVisuallyHoldItem（:49462-49500）：抚摸中 holdStyle 4/5/6 持物隐藏
         //（petting 三分支 return false——仅门持物绘制，身体行档不受此门）
         if (p.petting.isPetting && (hs === 4 || hs === 5 || hs === 6)) staticHoldStyle = 0;
+        // ★SW-FX31：CanVisuallyHoldItem holdStyle 4 倒挂隐藏支（Player.cs:50816-50818
+        //  `if (item.holdStyle == 4) { … if (gravDir == -1f) return false; }`——
+        //  hs4=高尔夫球杆族（Item.cs:48524 DefaultToGolfClub）倒挂时不画持物）
+        if (hs === 4 && p.gravDir === -1) staticHoldStyle = 0;
         holdStyleRaw = hs;
         // 变身坐骑（PlayerIsHidden）原版由 AdjustmentsForWolfMount 改锚续画手持物——
         // 此处原锚近似续画（不隐藏，登记锚点偏差）
@@ -13141,11 +13263,19 @@ export class Renderer {
     if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;   // 免疫闪烁等基底 alpha（stealth 分层在各层内乘）
     // 矿车骑乘：整体绕脚底中心旋转（Player.fullRotation/fullRotationOrigin=(w/2,h)，
     // Player.cs:27805-27806 TrackRotation 产出）+ gfxOffY 纵向贴轨补偿
+    // ★SW-BJ59：滚轴鞋 57-60 轨面倾角同轴同源（:28325-28326 TrackRotation 写玩家
+    //  fullRotation、origin=(w/2,h)；本仓态存 mount.fullRotation，skateOnTrack 帧），
+    //  gfxOffY 走玩家字段（贴轨帧轨差补偿）
     const cart = p.ridingCart ? p.cart : null;
-    const gfxOff = cart ? cart.gfxOffY : 0;
-    if (cart && cart.rotation !== 0) {
+    const mntPre = p.ridingMount ? p.mount : null;
+    const onSkates = !!mntPre && MOUNT_SETS.IsRollerSkates?.[mntPre.type] === true;
+    const skateRot = onSkates ? mntPre.fullRotation : 0;
+    const skateGfx = onSkates && p.onTrack ? p.gfxOffY : 0;
+    const gfxOff = cart ? cart.gfxOffY : skateGfx;
+    const tiltAng = cart ? cart.rotation : skateRot;
+    if (tiltAng !== 0) {
       ctx.translate(p.cx, p.y + p.h);
-      ctx.rotate(cart.rotation);
+      ctx.rotate(tiltAng);
       ctx.translate(-p.cx, -(p.y + p.h));
     }
     // ---- 坐骑身后层（Mount.Draw backTexture :5500：先于玩家本体绘制）----
@@ -13575,6 +13705,19 @@ export class Renderer {
     if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
     if (heldDraw) {
       const { vid, ar, icon, fw, fh, offX, offY, rot } = heldDraw;
+      // ★SW-FX31 反重力静持档（gd=1 零基线差）：
+      //  ① FlipItemLocationAndRotationForGravity（Player.cs:52281）+ 内联同式支：
+      //     holdStyle 1（:51070——930 特例镜像后 Y−24 :51073-51077）/ 2 双支
+      //     （:51091/:51110）与 holdStyle 4/5/6/8（FlipItem :51154/:51170/:51184/
+      //     :51196）翻转；hs3（:51115-51121 锚 MountedCenter）与 hs7（无持位支）
+      //     无翻转。us16 原版委托 ApplyHoldStyle（:52010-52016）→ 按其 hs 档处理。
+      //  ② itemEffect=FlipVertically（PlayerDrawSet.cs:1722/:1727）+ origin 翻转
+      //     （PlayerDrawLayers.cs:3269-3271）→ 贴图竖直镜像 + 顶左放置位
+      //     dy = −(−fh) − fh = 0（heldItemOriginFlipY）。
+      const hsFlip = holdStyleFlipsForGravity(heldDraw.hs);
+      const gOffY = p.gravDir === -1 && hsFlip
+        ? flipItemLocationAndRotationForGravity(offY, rot, p.h, -1) : { offY, rot };
+      const holdOYEff = heldItemOriginFlipY(-fh, fh, p.gravDir);
       ctx.save();
       // 静持物随躺转（原版手持层在 DrawDataCache 内,TransformDrawData 整组
       // 旋转——睡中持火把等也横躺;世界空间直接施加,无镜像纠缠）
@@ -13587,18 +13730,19 @@ export class Renderer {
         ctx.rotate(Math.PI / 2 * -p.facing);
         ctx.translate(-ccx, -ccy);
       }
-      ctx.translate(p.cx + p.facing * offX, p.y + offY);
+      ctx.translate(p.cx + p.facing * offX, p.y + gOffY.offY);
       ctx.scale(p.facing, 1);
-      ctx.rotate(rot);
+      ctx.rotate(gOffY.rot);
+      if (p.gravDir === -1) ctx.scale(1, -1);
       if (ar) {
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -fh, ar.sw, ar.sh);
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, holdOYEff, ar.sw, ar.sh);
       } else if (icon) {
-        ctx.drawImage(icon, 0, -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
+        ctx.drawImage(icon, 0, p.gravDir === -1 ? heldItemOriginFlipY(-icon.height * 0.6, icon.height * 0.6, -1) : -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
       }
       // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
       // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）
       if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
-        drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: -fh, w: ar.sw, h: ar.sh }, flicker);
+        drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: holdOYEff, w: ar.sw, h: ar.sh }, flicker);
       }
       ctx.restore();
     }
@@ -13749,11 +13893,20 @@ export class Renderer {
    *   - 史后坐骑 50（:5838-5857/:5924-5948）：Extra_207（后翼）→ 主贴图 → Extra_205
    *     （前身）→ Extra_206（眼翼）四层；主贴图原版经 RenderTarget 叠 QueenSlime 着色器
    *     （PlayerQueenSlimeMountTextureContent——纯装饰，静态近似，登记）。
-   *  贴图不可得坐骑（MOUNT_TEXTURE_OK=false：马匹/滚轴鞋/Chillet 等 Extra 表缺）→
-   *  色块近似（胶囊体）并保留能力生效——登记于 vanilla-mounts.json textureOk */
+   *  贴图不可得坐骑（MOUNT_TEXTURE_OK=false：马匹/Chillet 等 Extra 表缺）→
+   *  色块近似（胶囊体）并保留能力生效——登记于 vanilla-mounts.json textureOk。
+   *  ★SW-BJ59 勘误：滚轴鞋 57-60 的 textureOk=false 并非"素材缺表"——原版本就
+   *  无贴图：SetAsRollerSkate（Mount.cs:2596-2606）四 Texture 全置 Empty +
+   *  textureWidth/Height=1 → Mount.Draw 零绘制（隐形坐骑）。视觉唯一载体 =
+   *  玩家鞋甲覆写 shoe=27-30（Player.cs:37096-37115，drawAccFrontLayers 鞋面支
+   *  已接）——57-60 在此整段早退，禁入色块近似（曾画绿色胶囊体 = 用户实报
+   *  "脚下绿色一坨"的根因） */
   private drawMountLayer(ctx: CanvasRenderingContext2D, p: Player,
     mnt: import('../entities/Mounts').MountInstance, layer: 'back' | 'front',
     worldSurface = 0) {
+    // ★SW-BJ59：滚轴鞋四坐骑（IsRollerSkates={57,58,59,60}，MountID.cs:19）机身
+    // 零绘制（原版 Empty 贴图语义，见方法头勘误注）
+    if (MOUNT_SETS.IsRollerSkates?.[mnt.type]) return;
     // ---- 坐骑点光注入（Mount.cs 各 AddLight 段；同岩浆瀑布惯例走渲染端 lighting 引用，
     //      次帧生效）。仅背层走一遍，避免双层重复累加 ----
     if (layer === 'back' && this.lighting) {
@@ -14349,7 +14502,9 @@ export class Renderer {
           //  上半平面 sin(aim)<0 线性渐入（水平 ±π 零、垂直向上满额）；消费段
           //  facing×offX 镜像自动对称——水平两向/垂直向下（下半平面）零改动。
           offX = -2 + Math.max(0, -Math.sin(aim)) * 2;
-          offY = p.h * 0.5 + dp[1];
+          // ★SW-FX31：Main.DrawPlayerItemPos(gravdir, num) 的 dy 逐项 `±N*gravdir`
+          //（Main.cs:3357-3692）——倒挂时握把 dy 反号（gd=1 恒等）
+          offY = p.h * 0.5 + drawPlayerItemPosDy(dp[1], p.gravDir);
           rot = aim;
           drawOX = dp[0]; drawOY = -fh * 0.5;
         }
@@ -14441,10 +14596,34 @@ export class Renderer {
         else { offX += m.dx; offY += m.dy; }
       }
     }
+    // ★SW-FX31 反重力持物档（gd=1 零基线差；gd=-1 逐面公式）：
+    //  ① FlipItemLocationAndRotationForGravity（Player.cs:52281-52290）：
+    //     itemRotation 取反 + itemLocation.Y = Bottom.Y+(position.Y−itemLocation.Y)
+    //     ≙ offY 关于玩家盒竖直中心镜像（h−offY）。原版 8 显式调用位 =
+    //     holdStyle 4/5/6/8（:51154/:51170/:51184/:51196）+ useStyle 8/12/14/15
+    //     （:51901/:51946/:51991/:52008）；8 内联同式支 = useStyle
+    //     1/7/9/6/2/11/3/4（:51478/:51497/:51528/:51553/:51595/:51649/:51683/:51709）。
+    //     useStyle 5/13【无】翻转支（:51715-51820；us5 分支尾 `!=5065 return`）——
+    //     us5 锚=MountedCenter 域天然重力中性，瞄准角已由 FX27 翻转修正的世界
+    //     鼠标承载。us16 原版委托 ApplyHoldStyle（:52010-52016）随 hs 档翻转。
+    let gravRot = rot;
+    let gravOffY = offY;
+    if (p.gravDir === -1 && useStyleFlipsForGravity(us)) {
+      const flipped = flipItemLocationAndRotationForGravity(offY, rot, p.h, -1);
+      gravOffY = flipped.offY;
+      gravRot = flipped.rot;
+    }
     ctx.save();
-    ctx.translate(p.cx + p.facing * offX, p.y + offY);
+    ctx.translate(p.cx + p.facing * offX, p.y + gravOffY);
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
-    ctx.rotate(rot);
+    ctx.rotate(gravRot);
+    // ② itemEffect=FlipVertically（PlayerDrawSet.cs:1722 direction==1 /
+    //    :1727 direction==-1 双支）——持物贴图竖直镜像无条件随 gravDir=-1（含
+    //    us5/13）；配套 origin 翻转（PlayerDrawLayers.cs:3269-3271
+    //    `origin.Y = H − origin.Y`）→ 贴图顶左放置位 dy = −drawOY − H。
+    //    gd=1 时 heldItemOriginFlipY 恒等、scale 门不进 = 逐位恒等。
+    const drawOYEff = heldItemOriginFlipY(drawOY, fh, p.gravDir);
+    if (p.gravDir === -1) ctx.scale(1, -1);
     // GetAdjustedItemScale（★F 锚校正：1457 Player.cs:42891，ApplyMeleeScale :42901；
     // 旧 :41919-41930 为 1456 行段；PlayerDrawLayers.cs:3170 DrawData
     // scale）：melee 武器且手套族 meleeScaleGlove 在身 → 手持贴图 ×1.1（缩放绕握点
@@ -14459,16 +14638,17 @@ export class Renderer {
       // dir=1 → 底左角 / dir=−1 → 底右角钉在 itemLocation（握点）旋转——
       // 镜像空间里统一画在 (0,−fh) 即底左角=握点，镜像自动翻成底右角；
       // useStyle 5 非法杖（握把 (-num9,H/2)）与 9（Size*(0.5,0.4) 轴心）经 drawOX/drawOY 覆盖
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOY, ar.sw, ar.sh);
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
     } else if (icon) {
-      ctx.drawImage(icon, drawOX, -14, 14, 14);
+      ctx.drawImage(icon, drawOX, p.gravDir === -1 ? heldItemOriginFlipY(-14, 14, -1) : -14, 14, 14);
     }
     // 手持火苗（PlayerDrawLayers.cs:3519-3561 挥舞分支同接）：flame 物品在武器贴图
-    // 之上叠 ItemFlame_{id}（与本体同变换，dest = drawOX/drawOY 本体矩形）
+    // 之上叠 ItemFlame_{id}（与本体同变换，dest = drawOX/drawOYEff 本体矩形——
+    // SW-FX31：倒挂时随 origin 翻转同步）
     if (ar && this.atlas) {
       const fvid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
       if (fvid >= 0 && FLAME_ITEMS.has(fvid)) {
-        drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOY, w: ar.sw, h: ar.sh }, flicker);
+        drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOYEff, w: ar.sw, h: ar.sh }, flicker);
       }
     }
     ctx.restore();
@@ -14630,12 +14810,15 @@ export class Renderer {
     // 玩家矩形孔（:50-52）：getRect 以 Extra_49 宽 100 为基准 Inflate，+10/2 竖偏
     // ★SW-FX27：原版 Draw 挂在 Transform 批内（Main.cs:63270-63272
     //  `Begin(..., Transform); ScreenObstruction.Draw(spriteBatch)`）——孔位随
-    //  矩阵翻转=显示位玩家头侧。显示位换算：翻转态锚(盒世界顶角)显示在【盒底】，
-    //  显示位盒顶 = 锚显示位 − h；num2 头侧偏移在显示空间方向不变（头恒显示位
-    //  盒顶侧——倒挂时世界盒底=头,翻转后显示在上方）。
+    //  矩阵翻转=显示位玩家头侧。
+    // ★SW-RB13a（2026-09-11）：翻转态孔必须=gd=1 孔的整幅显示镜像（y'=viewH−y）。
+    //  gd=1 孔（原版 Inflate+Offset 对盒不对称）相对盒顶锚 a=worldToScreen(player.y)
+    //  为 [a+h/2−55, a+h/2+45]；镜像后孔顶 = pyAnchor−h/2−45。旧码 `pyAnchor−h`
+    //  复用 gd=1 式 = num2 头侧偏移未随镜像换边 → 翻转态孔整体上移 10px（顶部
+    //  露缝/底部压头），zoom 无关的纯镜像差。修 = pyAnchor−h+num2。
     const HOLE = 100, num2 = 10;
     const [px, pyAnchor] = cam.worldToScreenDisplayed(player.x, player.y);
-    const py = cam.flipY ? pyAnchor - player.h : pyAnchor;   // 显示位盒顶
+    const py = cam.flipY ? pyAnchor - player.h + num2 : pyAnchor;   // 显示位锚（翻转支含换边偏移）
     const rw = HOLE, rh = HOLE;   // Inflate 到 100×100（玩家 20×42 基准 + 均分补齐）
     const rect = {
       left: Math.round(px + player.w / 2 - rw / 2),

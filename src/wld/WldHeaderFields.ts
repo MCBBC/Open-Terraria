@@ -30,7 +30,11 @@ const H = (save: SaveData): SaveData['header'] => save.header;
 export const HEADER_PRE: WldField[] = [
   { name: 'title', type: 'str', ver: 0, get: (s) => H(s).name || 'World' },
   { name: 'seedText', type: 'str', ver: 179, get: (s) => String(H(s).seed ?? '') },
-  { name: 'worldGenVersion', type: 'i64', ver: 179, get: () => 0n },
+  // ★SW-FX33:原版建世界恒写 Main.WorldGeneratorVersion 常量(WorldFile.cs:606;
+  //  Main.cs:228 = 1395864371201)。写 0 会使原版 WorldFileData.HasValidSeed=false
+  //  (WorldFileData.cs:104,唯一消费=服务器控制台 seed 命令 Main.cs:6233 显示
+  //  "NoValidSeed")——曾写 0n
+  { name: 'worldGenVersion', type: 'i64', ver: 179, get: () => 1395864371201n },
   { name: 'guid', type: 'bytes16', ver: 181, get: () => 0 } as unknown as WldField,
   { name: 'worldId', type: 'i32', ver: 0, get: (s) => ((H(s).created ?? 0) ^ 0x55555555) & 0x7fffffff },
   { name: 'leftWorld', type: 'i32', ver: 0, get: () => 0 },

@@ -160,9 +160,12 @@ describe('SW-FX10 债⑪ 热键锁 HbLock', () => {
     expect(uiSrc).toMatch(/Lang\.inter\(locked \? 6 : 5\)/);
     // ★SW-RB11e 勘误（2026-09-10）：pushSideToolsUp = GetBuilderAccsCountToShow.totalDrawnIcons≥10
     //  （Main.cs:41752-41753 同一变量喂 DrawHotbarLockIcon :41755/方块替换 :43247/群系炬 :43289/
-    //  图标列 :48166；表式 :48381-48386,门=配饰装备态 Player.cs:12899-12915）——与 SW-FX19
-    //  图标列单源同式。原刀误写 visibleRows≥10（装备列行数,另一量纲）已废,反向锁定禁回潮。
-    expect(uiSrc).toMatch(/builderAccGateSet\(\(vid\) => playerAccessoryVidEquipped\(/);
+    //  图标列 :48166；表式 :48381-48386）——与 SW-FX19 图标列单源同式。原刀误写 visibleRows≥10
+    //  （装备列行数,另一量纲）已废,反向锁定禁回潮。
+    //  ★SW-FX36（2026-09-11）：vid 判定域=背包∪装备扫描 playerVidCarried（UpdateEquips
+    //  Player.cs:12997-13004 逐 inventory[0..57] + GrantArmorBenefits :13204——信息配件族
+    //  不必装备,wiki Mechanical_Ruler 明证）;旧「仅配饰槽 playerAccessoryVidEquipped」域废。
+    expect(uiSrc).toMatch(/builderAccGateSet\(\(vid\) => playerVidCarried\(/);
     expect(uiSrc).toMatch(/builderAccTotalIcons\(\s*g, !!this\.game\?\.world\.flags\.unlockedBiomeTorches\) >= 10/);
     expect(uiSrc).not.toMatch(/hotbarLockXY\(\(this\.vinvLayoutCtx\?\.visibleRows \?\? 8\) >= 10\)/);
   });

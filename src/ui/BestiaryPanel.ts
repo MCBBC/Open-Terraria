@@ -729,6 +729,36 @@ export function bestiaryFilterAvailable(key: string, rows: BestiaryRow[]): boole
   return false;
 }
 
+// ============ 自愈补画目标（FX37 纯逻辑;scheduleBlankSweep 消费方） ============
+
+/** sweep 扫描格（DOM cell 的纯数据投影） */
+export interface BestiarySweepCell { canvas: object | null; creditId: string | null }
+
+/** 自愈补画目标（2026-09-11 FX37 重做）:只收「从未落笔」的画布并按 creditId 反查行。
+ *  旧实现逐画布 getImageData 判空=每轮 81+1 张同步 GPU→CPU 读回(实测 22-51ms/次,
+ *  每次翻页/筛选/选中后 400ms 必掉 1-2 vsync)——painted 登记面替代;context 丢失面
+ *  由各画布 contextlost/contextrestored 监听自愈(创建后首画前同步挂载,无窗口期)。
+ *  纯逻辑:Node 可单测(tests/sw-fx37-bestiary-perf.test.ts) */
+export function bestiarySweepTargets(
+  cells: BestiarySweepCell[],
+  rows: BestiaryRow[],
+  painted: WeakSet<object>,
+): Array<{ canvas: object; npcId: number; unlocked: boolean }> {
+  const byCredit = new Map<string, BestiaryRow>();
+  for (const w of rows) byCredit.set(w.entry.creditId, w);
+  const out: Array<{ canvas: object; npcId: number; unlocked: boolean }> = [];
+  for (const cell of cells) {
+    if (!cell.canvas || painted.has(cell.canvas)) continue;
+    const r = byCredit.get(cell.creditId ?? '');
+    if (r) out.push({ canvas: cell.canvas, npcId: r.npcId, unlocked: r.state > UnlockState.NotKnown });
+  }
+  return out;
+}
+
+/** 未解锁占位贴图（bstLoadSheet 缓存键;FX37 前每格 new Image 重发此 src——
+ *  一页 81 锁格=81 次 decode 请求/拍）。测试钉住资产存在(404→负缓存→整面锁格空白) */
+export const BST_LOCKED_ICON_SHEET = 'vanilla-ui/UI_Bestiary_Icon_Locked.png';
+
 // ============ DOM 面板 ============
 
 /** 图鉴贴图缓存(2026-08-13,用户报"滚动翻页崩溃"的核心修复):
@@ -1195,10 +1225,16 @@ export class BestiaryPanel {
   }
 
   /** 自愈补画扫描(2026-08-14,用户报"resize 后头像全消失"):
-   *  context 丢失可发生在 contextrestored 监听挂上之前的窗口期,内容丢了没人补。
-   *  每次 refresh 后 400ms 扫描可见画布,空白的按原参数重画(bstLoadSheet 缓存
-   *  命中=同步,开销可忽略)。兜住 resize 风暴/加载竞态一切丢失窗口 */
+   *  每次 refresh 后 400ms 补画"从未画上"的画布(drawPortrait 幂等+缓存命中=同步)。
+   *  ★FX37 重做(2026-09-11,探针取证):旧版对全部可见画布逐张 getImageData 判空——
+   *  81+1 张/次=22-25ms 同步 GPU→CPU 读回,恰在每次翻页/筛选/选中后 400ms 必然
+   *  落一帧 16-33ms 的掉 vsync(probe 实测 pages/details 段各 1 次 >20ms 帧,与
+   *  getImageData 账面逐段吻合)。改为 painted 登记面:只重试未画上的画布,零读回;
+   *  context 丢失面由各画布 contextlost/contextrestored 监听自愈(两处画布均在
+   *  创建后、首画前同步挂监听,无"监听前丢失"窗口期)。 */
   private sweepTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  /** 已实际落笔的画布登记(drawPortrait/drawLockedIcon 各落笔点登记;sweep 只补漏) */
+  private painted = new WeakSet<HTMLCanvasElement>();
   /** renderInfo 的大头像参数(sweep 补画用) */
   private infoDraw: { canvas: HTMLCanvasElement; npcId: number; st: number } | null = null;
   private scheduleBlankSweep(): void {
@@ -1206,22 +1242,15 @@ export class BestiaryPanel {
     this.sweepTimer = setTimeout(() => {
       this.sweepTimer = 0;
       if (!this.panel.isConnected) return;
-      const isBlank = (c: HTMLCanvasElement) => {
-        try {
-          const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
-          for (let i = 3; i < d.length; i += 16) { if (d[i] > 10) return false; }
-          return true;
-        } catch { return false; }
-      };
-      // 网格:cell.dataset.credit 反查行
-      for (const cell of this.gridEl.querySelectorAll('.sw-bst-cell')) {
-        const canvas = cell.querySelector('canvas');
-        if (!canvas || !isBlank(canvas)) continue;
-        const r = this.working.find((w) => w.entry.creditId === (cell as HTMLElement).dataset.credit);
-        if (r) this.drawPortrait(canvas as HTMLCanvasElement, r.npcId, 'grid', r.state > UnlockState.NotKnown);
+      const cells: BestiarySweepCell[] = [...this.gridEl.querySelectorAll('.sw-bst-cell')].map((cell) => ({
+        canvas: cell.querySelector('canvas') as HTMLCanvasElement | null,
+        creditId: (cell as HTMLElement).dataset.credit ?? null,
+      }));
+      for (const t of bestiarySweepTargets(cells, this.working, this.painted)) {
+        this.drawPortrait(t.canvas as HTMLCanvasElement, t.npcId, 'grid', t.unlocked);
       }
       // 大头像
-      if (this.infoDraw && isBlank(this.infoDraw.canvas)) {
+      if (this.infoDraw && !this.painted.has(this.infoDraw.canvas)) {
         this.drawPortrait(this.infoDraw.canvas, this.infoDraw.npcId, 'portrait', this.infoDraw.st > UnlockState.NotKnown);
       }
     }, 400) as unknown as ReturnType<typeof setTimeout>;
@@ -1269,10 +1298,25 @@ export class BestiaryPanel {
         kills.textContent = String(r.kills);
         cell.appendChild(kills);
       }
-      cell.addEventListener('click', () => { this.selected = r; this.refresh(); });
+      cell.addEventListener('click', () => this.selectRow(r));
       this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
       this.gridEl.appendChild(cell);
     }
+  }
+
+  /** 选中条目（Click_SelectEntryButton → SelectEntryButton，UIBestiaryTest.cs:486-495：
+   *  DeselectEntryButton + _infoSpace.FillInfoForEntry——**只重渲详情栏,网格不动**）。
+   *  ★FX37(2026-09-11):曾走 refresh() 全量重建——每选一次=81 格画布+~400 节点+
+   *  ~330 监听器整体重造(probe ΔNodes 4992/ΔListeners 3924 每 12 击),原版无此面 */
+  private selectRow(r: BestiaryRow): void {
+    this.selected = r;
+    const credit = r.entry.creditId;
+    for (const el of this.gridEl.querySelectorAll('.sw-bst-cell.sel')) el.classList.remove('sel');
+    for (const cell of this.gridEl.querySelectorAll('.sw-bst-cell')) {
+      if ((cell as HTMLElement).dataset.credit === credit) { cell.classList.add('sel'); break; }
+    }
+    this.renderInfo();
+    this.scheduleBlankSweep();
   }
 
   /** 头像 = NPC 表首帧（UnlockableNPCEntryIcon 用整表绘制；DOM 取 frame0 缩放）。
@@ -1351,6 +1395,7 @@ export class BestiaryPanel {
       } else if (composed) cx.drawImage(composed, dx, dy, w, h);   // base+染色离屏合成
       else cx.drawImage(img, 0, frameIdx * fh, iw, fh, dx, dy, w, h);
       cx.globalAlpha = 1;
+      this.painted.add(canvas);   // 落笔登记(FX37 sweep 只补"从未画上"的画布)
     };
     const atlas = this.flow.atlas ?? null;
     // 装饰叠层（仅详情档；NPCPortraitInfoElement.cs:73-84 偏好命中 flag2 短路不收集）
@@ -1389,6 +1434,7 @@ export class BestiaryPanel {
       // 叠层：与底图同一目标盒（原版同容器 ScaleToFit 拉伸——对位关系 1:1），
       // 色为预着色成品（bstTintedOverlay，声明色 ?? Lerp 回退）
       for (const o of ovs) cx.drawImage(o, bx, by, bw, bh);
+      if (bgImg || ovs.length) this.painted.add(canvas);   // 实际铺了底图/叠层才登记
     };
     // 贴图源：CustomTexturePath 手绘图（Images/UI/Bestiary/NPCs/* 扁平化 basename）
     // 替换母体表（UnlockableNPCEntryIcon :74-81/:199——原样画、无帧无染色）
@@ -1443,24 +1489,28 @@ export class BestiaryPanel {
   /** 未解锁占位：Icon_Locked 锁形图居中 ×alpha0.15（UIBestiaryEntryIcon.DrawSelf
    *  :64-69 `spriteBatch.Draw(_notUnlockedTexture, dimensions.Center(), null,
    *  Color.White * 0.15f, ...)` 1:1——零轮廓泄露）。贴图 = Images/UI/Bestiary/
-   *  Icon_Locked（本仓扁平化 UI_Bestiary_Icon_Locked.png） */
+   *  Icon_Locked（本仓扁平化 UI_Bestiary_Icon_Locked.png）。
+   *  ★FX37(2026-09-11):贴图改走 bstLoadSheet 共享缓存——旧版每格 new Image+重发
+   *  src,一页 81 锁格=81 个 Image 元素+81 次 decode 请求,翻页/筛选/选中每拍重发
+   *  (fresh:details 段 GC 144ms 的主力);缓存命中=同步直画(原版 _notUnlockedTexture
+   *  也是预载一次逐帧重画,语义同)。失败走 bstSheetFailed 负缓存自愈 */
   private drawLockedIcon(canvas: HTMLCanvasElement): void {
     const cx = canvas.getContext('2d');
     if (!cx) return;
     cx.imageSmoothingEnabled = false;
     cx.clearRect(0, 0, canvas.width, canvas.height);
     const size = canvas.width;
-    const img = new Image();
-    img.src = 'sprites/vanilla-ui/UI_Bestiary_Icon_Locked.png';
-    img.addEventListener('load', () => {
-      if (!canvas.isConnected) return;
+    bstLoadSheet(this.flow.atlas ?? null, BST_LOCKED_ICON_SHEET, (img) => {
+      if (!img || !canvas.isConnected) return;
       // 原版 scale=1 原尺寸画（锁图 44px 级）——超画布才等比缩
-      const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+      const iw = (img as HTMLImageElement).naturalWidth || (img as ImageBitmap).width;
+      const ih = (img as HTMLImageElement).naturalHeight || (img as ImageBitmap).height;
       const s = Math.min(1, size / iw, size / ih);
       const w = iw * s, h = ih * s;
       cx.globalAlpha = 0.15;
       cx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
       cx.globalAlpha = 1;
+      this.painted.add(canvas);   // 落笔登记(FX37 sweep 只补"从未画上"的画布)
     });
   }
 

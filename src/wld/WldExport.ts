@@ -2,12 +2,17 @@
 // 反编译标杆:Terarria1457/Terraria.IO/WorldFile.cs(SaveWorld_Version2 :1156 段序/
 // SaveFileFormatHeader :1184/SaveWorldTiles :1438/SaveChests :1613/SaveSigns :1685/
 // SaveNPCs :1710/SaveFooter :1759/SaveTileEntities :3317)。
-// ★形态:【全量台账版 v2】——header 段经 WldHeaderFields 台账(WF:1264-1437 逐字段
-//   定谳,含 DD2 3 bool/TreeTops 恒 13/Manifest 空串合法/170 段=party 真值)全字段
-//   写出;wldSnap 快照优先(原版导入档零漂移)。tiles/chests/signs/npcs/TE 与原版
-//   1:1。已登记偏差: SavedOreTiers 三档 -1/四档 7/6/9/8 缺省、jungleBG 无键写 0、
-//   anglerWhoFinishedToday/CelebratingNPCs/ExtraSpawnPoint 写空、致动器/wire4/inActive
-//   无态写 0、manifest 空串(合法,原版 v<299 同款)。原版可读性=待 rig/TEdit 终验。
+// ★形态:【全量台账版 v3(SW-FX33)】——header 段经 WldHeaderFields 台账(WF:1264-1437
+//   逐字段定谳)全字段写出;wldSnap 快照优先(原版导入档零漂移)。tiles/chests/signs/
+//   npcs/TE 与原版 1:1。SW-FX33 批:TempPartyCelebratingNPCs 写真值(save.events.
+//   partyCelebratingNpcs,netId 域)/TreeTops 无数据自建世界按原版 CopyExistingWorldInfo
+//   (WorldGen.cs:11370→TreeTopsInfo.cs:217-232)派生/tileFrameImportant[753] 金标勘误
+//   (Main.cs:9950)。★SW-FX35(2026-09-11):TE 段扩 6/8/9/10 四类+锚桩 short itemType 勘误
+//   +teSnap 三类透传(0 假人/2 传感器/7 晶塔);townManager/bestiary/creativePowers 三尾段
+//   真写(bestiar 空桶=12B 修【原版拒载】级缺段)。已登记偏差: SavedOreTiers 三档 -1/四档 7/6/9/8 缺省、jungleBG 无键
+//   写 0、ExtraSpawnPoint 写空、致动器/wire4/inActive 无态写 0、manifest 空串(合法,
+//   WorldManifest.cs:31-45 容错)、caveBackX 无独立建模按 treeX 派生(导入档漂移,登记债)、
+//   guid 恒 16 零字节(GUID.Zero 合法)。原版可读性=待 rig/TEdit 终验。
 // 数据源映射:save.header(时间/尺寸/spawn/地层/地牢/树与背景样式/月相快照)/
 //   save.flags(WldParser 命名键布尔旗)/save.weather/save.events/save.clock/
 //   save.bannerKills/save.invasion;缺省值按读侧缺省语义补(矿层 -1=未锁定、
@@ -88,6 +93,14 @@ const FRAME_IMPORTANT: boolean[] = (() => {
   }
   return out;
 })();
+// ★SW-FX33（2026-09-11）tileFrameImportant 金标勘误:vanilla.json tiles[753].framed=false
+//  与反编译金标不符——Main.cs:9950 `tileFrameImportant[753] = true`（Giant Tiki 多格件）。
+//  该位错一位=双杀:①FileFormatHeader 位图 753 位写 0,原版读侧 Main.tileFrameImportant[753]
+//  =true 恒期待帧数据;②encodeTiles 对 753 活格不写 frameX/frameY 4 字节 → 原版
+//  LoadWorldTiles 按位图消费帧数据 → 该格起全流错位 → BadSectionPointer 整档拒载。
+//  （完整金标=Main.cs 直写赋值 + :10125-10134 循环 435-439 + :8551-8559
+//  AddEchoFurnitureTile 九件;全 754 位对拍守卫=tests/sw-fx33-frameimportant-golden.test.ts）
+for (const fiFix of [753]) FRAME_IMPORTANT[fiFix] = true;
 
 // ---- 原版 tile 编码(WF:1438-1511 逐位) ----
 function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
@@ -275,13 +288,31 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
   for (let i = iFFDawn; i <= iTeam; i++) {
     put(HEADER_FLAGS[i]);
     if (i === iPartyCooldown) {
-      // TempPartyCelebratingNPCs list(i32 n+n×i32;本仓不建模写空)——原版 :1381-1384
-      w.i32(0);
+      // ★SW-FX33（2026-09-11）：TempPartyCelebratingNPCs 名单写真值（WF:1370-1374
+      //  Save——i32 n + n×i32;WorldFile.cs:1056-1057 SaveHeader 快照
+      //  BirthdayParty.CelebratingNPCs/:168 Load 尾回灌）。值域=原版 netId
+      //  （存档侧 Game.eventsForSave key→netId;导入侧 WldParser.party.celebrating
+      //  原值透传——两路同域）。曾恒写空=派对名单导出即丢
+      const celebrating = save.events?.partyCelebratingNpcs ?? [];
+      w.i32(celebrating.length);
+      for (const id of celebrating) w.i32(id);
     }
     if (i === iLantern) {
       // ★TreeTops.Save(WorldGen.TreeTopsInfo :40:恒 13 项;Load :任 n≤13 逐项读)——
       // 原版位置=lantern 四件套之后、force ForToday 之前(WF:1391)
-      const tt = save.header.treeTops ?? [];
+      // ★SW-FX33：无 treeTops 数据的自建世界按原版世界生成同款派生——原版建世界时
+      // WorldGen.cs:11370 调 CopyExistingWorldInfoForWorldGeneration → TreeTopsInfo.cs:
+      // 217-232 按 header treeStyle[0..3]+corrupt/jungle/snow/hallow/crimson/desert/
+      // ocean/mushroom/underworldBG 填 13 区变体(曾全 0=树冠变体全默认)。
+      // jungleBG 在 SaveData 无键(WldHeaderFields :129 登记偏差)落 0。
+      const bg = save.header.bgStyles;
+      const ts = save.header.treeStyle;
+      const ts4 = ts && ts.length >= 4 ? ts : [0, 0, 0, 0];
+      const tt = save.header.treeTops?.length ? save.header.treeTops : [
+        ts4[0], ts4[1], ts4[2], ts4[3],
+        bg?.corrupt ?? 0, 0, bg?.snow ?? 0, bg?.hallow ?? 0, bg?.crimson ?? 0,
+        bg?.desert ?? 0, bg?.ocean ?? 0, bg?.mushroom ?? 0, bg?.underworld ?? 0,
+      ];
       w.i32(13);
       for (let k = 0; k < 13; k++) w.i32(tt[k] ?? 0);
     }
@@ -292,17 +323,29 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
   for (let i = iDual; i < HEADER_FLAGS.length; i++) put(HEADER_FLAGS[i]);
 }
 
-// ---- TE 段(save.furniture 挂物族四类;其余类型本仓不建模写空段亦可) ----
+// ---- TE 段(save.furniture 挂物族八类 + save.teSnap 三类透传) ----
 function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
   const list = save.furniture ?? [];
-  w.i32(list.length);
+  const snap = save.teSnap ?? [];
+  w.i32(list.length + snap.length);
   for (const f of list) {
-    // kind → TEType(TileEntitiesManager.RegisterAll 序):1 物品框/3 模特/4 武器架/
-    // 5 帽架/6 食物盘/8 展示罐/9 风筝桩/10 小动物桩(均有实体;0 假人/2 传感器不建模)
+    // kind → TEType(TileEntitiesManager.RegisterAll 序,TileEntitiesManager.cs:26-39):
+    // 1 物品框/3 模特/4 武器架/5 帽架/6 食物盘/8 展示罐/9 风筝桩/10 小动物桩
+    // （均有运行时实体;0 假人/2 传感器/7 晶塔本仓不建模,走 teSnap 透传）
     const teType = f.kind === 'item_frame' ? 1 : f.kind === 'display_doll' ? 3
       : f.kind === 'weapon_rack' ? 4 : f.kind === 'hat_rack' ? 5
-      : f.kind === 'food_platter' ? 6 : f.kind === 'display_jar' ? 8 : 0;
-    if (teType === 0 || f.kind === 'kite_anchor' || f.kind === 'critter_anchor') { w.byte(9).i32(0).i16(f.x).i16(f.y); continue; }   // 9/10 桩=无 ExtraData(写 type 9 占位)
+      : f.kind === 'food_platter' ? 6 : f.kind === 'display_jar' ? 8
+      : f.kind === 'kite_anchor' ? 9 : f.kind === 'critter_anchor' ? 10 : 0;
+    // ★SW-FX35 定谳勘误：锚桩 9/10 ExtraData = short itemType（继承
+    //  TELeashedEntityAnchorWithItem.WriteExtraData,TELeashedEntityAnchorWithItem.cs:9-12;
+    //  TEdit TileEntity.cs:414-417 互证）——旧版写 type 9 裸占位（无 short）：
+    //  原版读侧流错位（后续 TE 全体错读/BadSectionPointer）+ 本仓挂物丢失;
+    //  critter_anchor 亦曾误写 9（vanilla 按 9 校验 tile 723 → TE 被淘汰）
+    if (f.kind === 'kite_anchor' || f.kind === 'critter_anchor') {
+      const hung = f.slots?.[0];
+      w.byte(teType).i32(0).i16(f.x).i16(f.y).i16(hung && hung.id > 0 ? hung.id : 0);
+      continue;
+    }
     w.byte(teType).i32(0).i16(f.x).i16(f.y);
     const slot = (s: { id: number; stack: number; prefix?: number } | null | undefined) =>
       w.i16(s ? s.id : 0).byte(s?.prefix ?? 0).i16(s ? Math.max(1, s.stack ?? 1) : 0);   // 稳定 id=原版 netId(★SW-BO1 勘误);★P3:stack 钳 ≥1(原版 vanilla 钳,stack=0 曾被 parse 按空槽丢)
@@ -340,6 +383,19 @@ function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
       for (let i = 0; i < 2; i++) if (bits & (1 << i)) slot(hat[i]);
       for (let i = 0; i < 2; i++) if (bits & (4 << i)) slot(dye[i]);
       void n;
+    }
+  }
+  // ★SW-FX35：不建模三类透传回写（WldImport teSnap 存底）——
+  //  0 假人 short npc（TETrainingDummy.cs:119-127）/ 2 传感器 byte+bool
+  //  （TELogicSensor.cs:381-395）/ 7 晶塔 无负载（TETeleportationPylon 无覆写）。
+  //  ID 恒写 0（原版 Load 侧 :3337 重编号 tileEntity.ID=num2++）
+  for (const t of snap) {
+    if (t.type === 0) {
+      w.byte(0).i32(0).i16(t.x).i16(t.y).i16(t.npc ?? -1);
+    } else if (t.type === 2) {
+      w.byte(2).i32(0).i16(t.x).i16(t.y).byte(t.logicCheck ?? 0).bool(!!t.on);
+    } else if (t.type === 7) {
+      w.byte(7).i32(0).i16(t.x).i16(t.y);
     }
   }
 }
@@ -449,9 +505,57 @@ export function exportWld(save: SaveData): Uint8Array {
     for (const pp of plates) w.i32(pp.x).i32(pp.y);
     mark();                                         // [6] pressurePlates 尾
   }
-  w.i32(0); mark();                                 // [7] townManager 尾(空壳,自足读侧不读)
-  w.i32(0); mark();                                 // [8] bestiary 尾(空壳)
-  w.byte(0); mark();                                // [9] creativePowers 尾(单 false 空流)
+  // townManager（★SW-FX35：WF:3400-3404 SaveTownManager → TownRoomManager.Save,
+  //  TownRoomManager.cs:94-106——i32 n + n×(i32 npcType,i32 roomX,i32 roomY)。
+  //  save.townRooms=WldImport 自原版档透传的房间预留表;自建世界写空表 i32(0)=4B）
+  {
+    const rooms = save.townRooms ?? [];
+    w.i32(rooms.length);
+    for (const r of rooms) w.i32(r.npc).i32(r.x).i32(r.y);
+    mark();                                         // [7] townManager 尾
+  }
+  // bestiary（★SW-FX35：WF:3411-3416 SaveBestiary → BestiaryUnlocksTracker.Save,
+  //  BestiaryUnlocksTracker.cs:14-19 序 Kills→Sights→Chats——
+  //  Kills=i32 n+n×(string persistentId,i32 count)（NPCKillsTracker.cs:60-71）/
+  //  Sights=i32 n+n×string（NPCWasNearPlayerTracker.cs:65-76）/ Chats 同。
+  //  persistentId 键域=save.bestiary creditId（== vanilla NPCID.Search.GetName 域）。
+  //  ★勘误：空图鉴=3×i32(0) 共 12B——旧版只写 4B,原版 LoadBestiary 读 Sights/Chats
+  //  越段 → LoadWorld_Version2 :1844-1847 Position!=positions[9] → BadSectionPointer
+  //  【整文件拒载】）
+  {
+    const bk = save.bestiary?.k ?? {};
+    const kKeys = Object.keys(bk).filter((key) => typeof bk[key] === 'number' && bk[key] > 0);
+    const bs = save.bestiary?.s ?? [];
+    const bc = save.bestiary?.c ?? [];
+    w.i32(kKeys.length);
+    for (const key of kKeys) w.str(key).i32(bk[key]);
+    w.i32(bs.length);
+    for (const id of bs) w.str(id);
+    w.i32(bc.length);
+    for (const id of bc) w.str(id);
+    mark();                                         // [8] bestiary 尾
+  }
+  // creativePowers（★SW-FX35：WF:3427-3432 SaveCreativePowers → CreativePowerManager.
+  //  SaveToWorld,CreativePowerManager.cs:125-137——每 IPersistentPerWorldContent 力
+  //  bool true+u16 id+负载,bool false 终止。原版六力恒全写（世界段,与游戏模式无关）：
+  //   0 FreezeTime bool（CreativePowers.cs:1465-1468）/ 8 ModifyTimeRate f32 滑杆缓存
+  //   0-1（:972-975）/ 9 FreezeRain bool（:1533-1536）/ 10 FreezeWind bool（:1499-1502）/
+  //   12 DifficultySlider f32（:1169-1172）/ 13 StopBiomeSpread bool（:1567-1570）。
+  //   id 8 值域换算：TargetTimeRate=round(Remap(cache,0,1,1,24))（:876-878）→
+  //   cache=(rate-1)/23。per-player 力（5/11/14）落 .plr,按键力 1-4 无持久态）
+  {
+    const jp = save.header.journeyPowers;
+    const cache = Math.min(1, Math.max(0, ((save.header.journeyTimeRate ?? 1) - 1) / 23));
+    const dSlider = Math.min(1, Math.max(0, jp?.difficultySlider ?? 0));
+    w.bool(true).u16(0).bool(!!save.header.journeyFreezeTime);
+    w.bool(true).u16(8).f32(cache);
+    w.bool(true).u16(9).bool(!!jp?.freezeRain);
+    w.bool(true).u16(10).bool(!!jp?.freezeWind);
+    w.bool(true).u16(12).f32(dSlider);
+    w.bool(true).u16(13).bool(!!jp?.stopBiomeSpread);
+    w.bool(false);
+    mark();                                         // [9] creativePowers 尾
+  }
   // footer(WF:1759):true+name+worldId
   w.bool(true).str(save.header.name || 'World').i32(12345);
   mark();                                           // [10] footer 尾

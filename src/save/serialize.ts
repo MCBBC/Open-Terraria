@@ -238,14 +238,29 @@ export interface SaveData {
     partyManual: boolean;            // BirthdayParty.ManualParty
     partyGenuine?: boolean;          // ★IIIIIII6：BirthdayParty.GenuineParty（旧档缺省=按 seedFlags 重算）
     partyCooldown?: number;         // BirthdayParty.PartyDaysOnCooldown（旧档缺省 0）
+    /** ★SW-FX33（2026-09-11）：TempPartyCelebratingNPCs 名单（WF:1370-1374 写/
+     *  :2273-2276 读;WorldFile.cs:168 Load 尾回灌 BirthdayParty.CelebratingNPCs）。
+     *  值域=原版 NPC netId（存档侧 Game.eventsForSave key→netId;导入侧 WldParser 原值
+     *  透传——两路同域）。旧档缺省=无（.wld 导出按空名单落） */
+    partyCelebratingNpcs?: number[];
     lanternManual: boolean;          // 服务端手动灯笼（本仓无入口,位保留）
     lanternGenuine: boolean;         // 真灯笼夜兑现中
     lanternNext: boolean;            // 次夜灯笼夜预约
     lanternCooldown: number;         // 冷却夜数
   };
-  /** 挂物族存放物（物品框 395/武器架 471/模特 470/帽架 475/食物盘 520/展示罐 698；
-   *  原版 TileEntity 段的最小等价，旧档缺省无） */
+  /** 挂物族存放物（物品框 395/武器架 471/模特 470/帽架 475/食物盘 520/展示罐 698/
+   *  风筝锚桩 723/小动物锚桩 724；原版 TileEntity 段的最小等价，旧档缺省无） */
   furniture?: FurnitureSaveEntry[];
+  /** ★SW-FX35（2026-09-11）：原版 TileEntity 段中本仓不建模的三类透传快照
+   *  （0 训练假人/2 逻辑传感器/7 晶塔；9/10 锚桩有运行时面走 furniture 段）——
+   *  导入原版档收位存底，导出回写零漂移（WF:3317-3327 Save 段）。npc=假人 NPC id
+   *  short（-1=空）；logicCheck=TELogicSensor.LogicCheckType 0-7；on=传感器输出态。
+   *  自建世界缺省=无 */
+  teSnap?: Array<{ type: 0 | 2 | 7; x: number; y: number; npc?: number; logicCheck?: number; on?: boolean }>;
+  /** ★SW-FX35：城镇房间预留表（TownRoomManager.Save,WF:3400-3402→TownRoomManager.cs:94-106
+   *  i32 n+n×(i32 npcType,i32 x,i32 y)；原版语义=TownManager._roomLocationPairs,homeless
+   *  期间房间仍占位）。npc=原版 NPC netId 域。旧档缺省=无（.wld 导出按空表落） */
+  townRooms?: Array<{ npc: number; x: number; y: number }>;
   flags: Record<string, boolean>;
   weather?: WeatherSave; // 天气快照（雨/风/云/沙尘暴；旧档缺省=晴）
   /** 图鉴统计（BestiaryUnlocksTracker——原版随世界文件持久化 WorldFile.cs:3399/3405；
