@@ -45,6 +45,22 @@
 
 import { TileStore } from '../world/TileStore';
 import { VANILLA_RECIPES, TILE_COUNTS_AS } from '../data/vanillaRecipes';
+import { TILE_DEFS } from '../data/tiles';
+
+/**
+ * ★SW-BJ61（2026-09-11）id 域归一：本文件全部谓词表（FILL_TARGET_TYPES/
+ * DISABLE_SMART_INTERACT/DIMS_BY_TYPE/CAMPFIRE_TILES/switch case 组）皆按
+ * 【vanilla sheet 域】照录（TileID.cs 各表/TileSmartInteractCandidateProvider 原文
+ * case 号），而 store.type=【内部 id 域】（TILE_DEFS 序——643/664 与 sheet 分歧,
+ * 运行时实测：internal 4=铜矿(7)/10=木块(30)/11=平台(19)/12=火把(4)/16=宝箱(21)/
+ * 19=蘑菇(3)/21=高草(3)/23=雪(147)）。曾按内部 id 直配 sheet 表=候选/高亮打错物：
+ * 高草(21)吃 sheet21 宝箱候选（2×2 黄框画在地面草上）、木块(10)吃 sheet10 门候选、
+ * 平台(11)吃 sheet11——用户实报「未持工具时地面暗黄痕迹」（选中档 (avg,avg,avg/3)
+ * 黄调×光照衰减即"暗黄"）真根因。
+ * 一律先转 sheet 再查表（与渲染器 TILE_DEFS[type].vanilla.sheet 消费同式）。 */
+function sheetOfStoreType(type: number): number {
+  return TILE_DEFS[type]?.vanilla?.sheet ?? -1;
+}
 
 /** TileID.Sets.Campfires（TileID.cs:407）= CreateBoolSet(215) */
 export const CAMPFIRE_TILES: ReadonlySet<number> = new Set([215]);
@@ -260,7 +276,7 @@ export function scanSmartInteractTiles(
       const si = store.idx(i, j);
       if (!(store.flags[si] & 1)) continue;                       // !tile.active()
       const type = store.type[si];
-      if (isTargetType(type, i, j)) {
+      if (isTargetType(sheetOfStoreType(type), i, j)) {   // ★SW-BJ61 域归一
         targets.push([i, j]);
       }
     }
@@ -298,11 +314,12 @@ export function scanSmartInteractTiles(
   for (const [tx, ty] of targets) {
     const si = store.idx(tx, ty);
     const type = store.type[si];
+    const sheet = sheetOfStoreType(type);                           // ★SW-BJ61 域归一
     let cols: number, rows: number, extra: number;
-    if (CAMPFIRE_TILES.has(type)) {
+    if (CAMPFIRE_TILES.has(sheet)) {
       [cols, rows, extra] = [CAMPFIRE_DIMS[0], CAMPFIRE_DIMS[1], 2];  // :332-334 num11 维持缺省
     } else {
-      const dims = DIMS_BY_TYPE.get(type);
+      const dims = DIMS_BY_TYPE.get(sheet);
       if (!dims) continue;                                          // :329-331 `num7==0||num8==0` skip
       [cols, rows, extra] = dims;
     }
@@ -352,7 +369,7 @@ export function shouldBlockSmartInteract(store: TileStore, tx: number, ty: numbe
   if (tx < w || ty < w || tx >= store.w - w || ty >= store.h - w) return true;  // InWorld(…,10)
   const si = store.idx(tx, ty);
   if (!(store.flags[si] & 1)) return false;
-  return DISABLE_SMART_INTERACT.has(store.type[si]);
+  return DISABLE_SMART_INTERACT.has(sheetOfStoreType(store.type[si]));   // ★SW-BJ61 域归一
 }
 
 // ---- 每帧共享帧态（renderEnv 同款模式：update 侧写、渲染侧读，零签名变更）----

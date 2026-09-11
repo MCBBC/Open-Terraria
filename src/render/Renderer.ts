@@ -4203,9 +4203,9 @@ export class Renderer {
     // 中心，α 随玩家速度淬灭（站立 Lerp(0,0.7,1-v/6)，每帧 0.2 缓动，关时 -0.05）
     this.drawBuildingGrid(ctx, cam, player, hover?.smart === true, mouseX, mouseY);
 
-    // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画。
-    //     ★SW-BJ61 用户明令分歧：原版颜色乘该格光照（:47406,暗处框黑不可见）,
-    //     用户实机验证+明令「别受环境光压暗」→ 恒全亮采样（见 drawSmartCursor 注）
+    // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画，
+    //     颜色手动乘该格光照（Lighting.GetColor 语义）。★SW-BJ61：恒全亮分歧
+    //     已按用户确认回滚（2026-09-11 复核=反编译语义）,采样恢复读格光
     if (hover?.smart) {
       this.drawSmartCursor(ctx, cam, hover, viewW, z,
         lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
@@ -4213,11 +4213,10 @@ export class Renderer {
 
     // 7b-bis. 智能交互 tile 高亮（★SW-BJ54 2026-09-10：TileDrawing.cs:902-904
     //     HasOutlines 门 → :4518-4529 GetTileOutlineInfo → :1422-1427 HighlightMask
-    //     同源矩形叠画。GetSelectionGlowColor(Colors.cs:127-130) 本体 1:1；
-    //     原版 avg=该格光照（:886/:4522,暗处 ≤10 整支不画）。
-    //     ★SW-BJ61 用户明令分歧：采样恒全亮（avg 恒 255=门恒过）,证据链见
-    //     TileHighlight.smartHighlightSampleLight 注）。候选帧态由
-    //     Game.tickSmartInteractTiles 每帧写（core/SmartInteractTiles.ts）。
+    //     同源矩形叠画。颜色自含该格光照（GetSelectionGlowColor(Colors.cs:127-130)
+    //     的 avg=Lighting.GetColor RGB 均值 :886/:4522,暗处 ≤10 整支不画）。
+    //     ★SW-BJ61：恒全亮分歧已按用户确认回滚（2026-09-11 复核）,avg 门照常生效。
+    //     候选帧态由 Game.tickSmartInteractTiles 每帧写（core/SmartInteractTiles.ts）。
     this.drawSmartInteractTileHighlights(ctx, cam, z, world,
       lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
@@ -8643,7 +8642,8 @@ export class Renderer {
   /** ★拖尾光晕桶缓存(2026-09-09 微光湖 trace:drawFaeling 1.88s=19% 帧预算——拖尾
    *  17 层 × 5-6 ops 的染色舞步 = 主体)。键 = hueBucket(32)·16+kBucket(16):
    *  拖尾各索引的 k=num14·0.16 按索引恒定,hue 随 num2 连续扫频(1rev/6s)→32 档
-   *  单条目存活 ~0.53s=高命中;hue 量化 11.25°(彩虹拖尾本身逐索引大跨度,不可辨)。
+   *  单条目存活 ~0.53s=高命中;hue 量化 11.25°(彩虹拖尾本身逐索引大跨度,不可辨;
+   *  用户 A/B 实测 2026-09-11 回滚/不回滚观感无差=量化无害实锤)。
    *  内容 = col2row0 光晕 × 彩虹色(A=0 纯加算,无剪影层)——'lighter' 单 blit。
    *  Map 上限 1024 清空(22×22 canvas,内存可忽略)。 */
   private _faelingTrailCache = new Map<number, HTMLCanvasElement>();
@@ -8701,7 +8701,7 @@ export class Renderer {
 
   /** 染色合成进指定画布(faelingPremultLayer 染色支的原位变体,逐式同序):
    *  clearRect→drawImage→multiply fillRect→destination-in drawImage→source-over。
-   *  拖尾桶缓存(微光湖 trace 2026-09-09)用它预渲染桶代表帧,拖尾层变单 blit。 */
+   *  拖尾桶缓存(微光湖 trace 2026-09-09,用户 A/B 观感无差实锤)用它预渲染桶代表帧。 */
   private faelingTintInto(c: HTMLCanvasElement, img: ImageBitmap | HTMLImageElement,
     sx: number, sy: number, sw: number, sh: number,
     mr: number, mg: number, mb: number): void {
@@ -8812,8 +8812,11 @@ export class Renderer {
         const vx = -spin, vy = num7 * num15;
         const [tr, tg, tb] = hsl(num2 + num15 * 0.5, 1, 0.5);
         const k = num14 * 0.16;
-        // ★拖尾桶缓存(2026-09-09 微光湖 trace):染色舞步(5-6 ops)→单 blit。
-        //  键=hue32档×k16档;色值取桶代表点(位差 hue≤11.25°/k≤6.25%,彩虹拖尾不可辨)。
+        // ★拖尾桶缓存(2026-09-09 微光湖 trace:drawFaeling 1.88s=19% 帧预算——拖尾
+        //  17 层 × 5-6 ops 的染色舞步 = 主体)。键 = hueBucket(32)·16+kBucket(16):
+        //  拖尾各索引的 k=num14·0.16 按索引恒定,hue 随 num2 连续扫频(1rev/6s)→32 档
+        //  单条目存活 ~0.53s=高命中;hue 量化 11.25°(彩虹拖尾本身逐索引大跨度,不可辨;
+        //  用户 A/B 实测 2026-09-11 回滚/不回滚观感无差=量化无害实锤)。
         //  旋转/翻镜像仍在 blit 时施加(缓存=轴对齐染色帧)。
         const hueB = Math.max(0, Math.min(31, Math.floor((num2 + num15 * 0.5) * 32)));
         const kB = Math.max(0, Math.min(15, Math.round(k * 100)));
@@ -15183,17 +15186,14 @@ export class Renderer {
    *  与本体同源矩形同位叠画。候选帧态 = smartInteractTileFrame（Game 每帧写）；
    *  avg = 光带采样 (r+g+b)/3 整除（Lighting.GetColor :886 语义）；avg>10 门
    *  （:4523-4525）；动画依赖型排除集见 TileHighlight.ts 头注（债）。
-   *  ★SW-BJ61（2026-09-11）用户明令分歧：可视面不吃环境光——原版本支乘格光
-   *  （:4522-4526,光=0 不画），用户实机验证原版暗处高亮可见并明令「别受环境光
-   *  压暗」→ 采样恒全亮（smartHighlightSampleLight,证据链/回滚口见彼注），
-   *  avg 恒 255=门恒过、GetSelectionGlowColor 本体 1:1 不动。lightR/rx 等形参
-   *  保留（调用面/光照区几何不变），仅采样改道。 */
+   *  ★SW-BJ61（2026-09-11）：曾按用户首报注册「恒全亮」分歧,同日用户实机复核
+   *  确认暗处衰减=反编译语义 → 分歧撤销恢复读格光（smartHighlightSampleLight
+   *  恒等直通=单点标记,证据链见彼注）；avg>10 门（:4523-4525）随之照常生效。 */
   private drawSmartInteractTileHighlights(
     ctx: CanvasRenderingContext2D, cam: Camera, z: number, world: World,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
     rx: number, ry: number, rw: number, rh: number,
   ): void {
-    void lightR; void lightG; void lightB; void rx; void ry; void rw; void rh;   // ★SW-BJ61 采样改道后不读（保留形参=调用面稳定）
     const frame = smartInteractTileFrame;
     if (!frame.tileWon || frame.coords.length === 0) return;   // InSmartCursorHighlightArea 范围/胜出门
     const store = world.store;
@@ -15202,26 +15202,38 @@ export class Renderer {
       const si = store.idx(c.x, c.y);
       if (!(store.flags[si] & 1)) continue;
       const type = store.type[si];
-      if (!TILE_HAS_OUTLINES.has(type) || HIGHLIGHT_ANIM_EXCLUDED.has(type)) continue;
+      // ★SW-BJ61（2026-09-11）id 域归一：TILE_HAS_OUTLINES/排除集/mask 文件名/
+      //  highlightCellRect case 表皆 vanilla sheet 域,store.type=内部 id——一律先转
+      //  sheet 再查表。曾按内部 id 直配的物证（运行时实测映射）：高草(内部21)吃
+      //  sheet21 宝箱候选=2×2 黄框画在地面草上、木块(10)吃 sheet10 门候选、
+      //  平台(11)吃 sheet11、真宝箱(16→sheet21)用错 mask/dims——=用户实报「地面暗黄痕迹」）
+      const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
+      if (!TILE_HAS_OUTLINES.has(sheet) || HIGHLIGHT_ANIM_EXCLUDED.has(sheet)) continue;
       // ★SW-RB11a：条件动画型点亮态排除（GetTileDrawData :6044-6056 fy≥54 =
       //  addFrY=Main.tileFrame*54——静息态 top=2 照画,动画态不画=与排除集同债）
-      if (HIGHLIGHT_ANIM_WHEN_LIT.has(type) && store.frameY[si] >= 54) continue;
-      const [lr, lg, lb] = smartHighlightSampleLight();        // ★SW-BJ61 用户分歧:恒全亮（原=格光采样）
+      if (HIGHLIGHT_ANIM_WHEN_LIT.has(sheet) && store.frameY[si] >= 54) continue;
+      // 格光采样（越界/区域外按全亮,防区域边缘框消失——原版 Lighting.GetColor 区域外=0）
+      let lr = 255, lg = 255, lb = 255;
+      if (c.x >= rx && c.y >= ry && c.x < rx + rw && c.y < ry + rh) {
+        const li = (c.y - ry) * rw + (c.x - rx);
+        lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+      }
+      [lr, lg, lb] = smartHighlightSampleLight([lr, lg, lb]);  // ★SW-BJ61 单点标记（回滚后=恒等直通）
       const avg = Math.floor((lr + lg + lb) / 3);              // TileDrawing.cs:4522（XNA 整除）
-      if (avg <= 10) continue;                                 // :4523-4525（全亮下恒过）
+      if (avg <= 10) continue;                                 // :4523-4525
       const [r, g, b, a] = getSelectionGlowColor(frame.selected.has(`${c.x},${c.y}`), avg);
-      const mask = loadHighlightMask(type);
+      const mask = loadHighlightMask(sheet);                 // ★SW-BJ61 域归一（HighlightMask=vanilla sheet 域文件名）
       if (!mask) continue;
       // 宝箱开盖姿态帧（CacheSpecialDraws_Part2 :4321-4331 锚回查——底行/右列
       // 折回锚格，frame∈{0,1,2} → 姿态带 +0/38/76）
       let chestFrame = 0;
-      if (type === 21 || type === 467) {
+      if (sheet === 21 || sheet === 467) {   // ★SW-BJ61 域归一（BasicChest sheet 域）
         const fx = store.frameX[si], fy = store.frameY[si];
         const kx = c.x - (fx % 36 !== 0 ? 1 : 0);
         const ky = c.y - (fy % 36 !== 0 ? 1 : 0);
         chestFrame = world.chests.find((ch) => ch.x === kx && ch.y === ky)?.frame ?? 0;
       }
-      const rect = highlightCellRect(type, store.frameX[si], store.frameY[si], c.x, c.y, chestFrame);
+      const rect = highlightCellRect(sheet, store.frameX[si], store.frameY[si], c.x, c.y, chestFrame);   // ★SW-BJ61 域归一（case 表=sheet 域）
       if (!this._hlScr) this._hlScr = document.createElement('canvas');
       const scr = this._hlScr;
       if (scr.width !== rect.sw || scr.height !== rect.sh) { scr.width = rect.sw; scr.height = rect.sh; }
@@ -15243,14 +15255,18 @@ export class Renderer {
     rx: number, ry: number, rw: number, rh: number,
   ) {
     void viewH;
-    void lightR; void lightG; void lightB; void rx; void ry; void rw; void rh;   // ★SW-BJ61 采样改道后不读（保留形参=调用面稳定）
     const ts = TILE * z;                       // 屏幕空间下的格尺寸
     const [sx, sy] = cam.worldToScreen(hover.x * TILE, hover.y * TILE);
-    // ★SW-BJ61（2026-09-11）用户明令分歧：黄框不吃环境光——原版乘格光
-    //  （Lighting.GetColor×buffColor(1,0.9,0.1,1),Main.cs:47406,光=0 时框黑不可见），
-    //  用户实机验证原版暗处黄框可见并明令「别受环境光压暗」→ 恒全亮采样
-    //  （=原版公式在 light=255 的取值;证据链/回滚口见 TileHighlight.smartHighlightSampleLight 注）
-    const [lr, lg, lb] = smartHighlightSampleLight();
+    // 格光采样（越界/区域外按全亮，防洞穴边缘框消失）。★SW-BJ61：曾按用户首报
+    //  注册「恒全亮」分歧,同日用户实机复核确认暗处衰减=反编译语义（原版乘格光,
+    //  Main.cs:47406）→ 分歧撤销恢复读格光,smartHighlightSampleLight 恒等直通=
+    //  单点标记（证据链见 TileHighlight 彼注）
+    let lr = 255, lg = 255, lb = 255;
+    if (hover.x >= rx && hover.y >= ry && hover.x < rx + rw && hover.y < ry + rh) {
+      const li = (hover.y - ry) * rw + (hover.x - rx);
+      lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+    }
+    [lr, lg, lb] = smartHighlightSampleLight([lr, lg, lb]);
     const mul = (c: number, l: number): number => Math.round((c * l) / 255);
     // 四象限 8×8 块 (1,0.9,0.1) × 0.6
     ctx.fillStyle = `rgba(${mul(255, lr)},${mul(229, lg)},${mul(26, lb)},0.6)`;

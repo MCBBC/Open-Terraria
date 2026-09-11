@@ -44,6 +44,7 @@ import {
   getSelectionGlowColor,
   highlightCellRect,
 } from '../src/render/TileHighlight';
+import { TILE_DEFS } from '../src/data/tiles';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -52,11 +53,20 @@ function makeStore(w: number, h: number): TileStore {
   return new TileStore(w, h);
 }
 
+/** ★SW-BJ61 域归一：夹具入参统一【vanilla sheet 域】（测试名/断言语义与原版表一致），
+ *  写 store 时转内部 id——store.type=TILE_DEFS 序（643/664 与 sheet 分歧,如 sheet21 宝箱
+ *  =internal14）；provider 内部再 sheetOfStoreType 转回 sheet 查表=生产链同式。 */
+function internalOfSheet(sheet: number): number {
+  const i = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === sheet);
+  return i >= 0 ? i : sheet;
+}
+
 function placeBox(store: TileStore, x: number, y: number, type: number, cols: number, rows: number, baseFx = 0, baseFy = 0) {
+  const internal = internalOfSheet(type);
   for (let i = 0; i < cols; i++) {
     for (let j = 0; j < rows; j++) {
       const si = store.idx(x + i, y + j);
-      store.type[si] = type;
+      store.type[si] = internal;
       store.flags[si] = 1;                                  // bit0 active
       store.frameX[si] = baseFx + i * 18;
       store.frameY[si] = baseFy + j * 18;
@@ -93,7 +103,7 @@ describe('SW-BJ54 候选谓词与尺寸表（provider :140-408 1:1）', () => {
     const store = makeStore(W, H);
     // 底行格 frameY=18（宝箱行值语义：顶 0/底 18）
     const si = store.idx(34, 35);
-    store.type[si] = 21;
+    store.type[si] = internalOfSheet(21);   // ★SW-BJ61 域归一:宝箱 sheet21→internal
     store.flags[si] = 1;
     store.frameX[si] = 0;
     store.frameY[si] = 18;
@@ -195,7 +205,7 @@ describe('SW-BJ54 胜出与门（SmartInteractSystem.cs:20-62）', () => {
     const store = makeStore(W, H);
     placeBox(store, 34, 34, 21, 2, 2);
     const si = store.idx(36, 36);
-    store.type[si] = 33;
+    store.type[si] = internalOfSheet(33);    // ★SW-BJ61 域归一:灰烬 sheet33→internal
     store.flags[si] = 1;
     expect(shouldBlockSmartInteract(store, 36, 36)).toBe(true);
   });
@@ -210,7 +220,7 @@ describe('SW-BJ54 胜出与门（SmartInteractSystem.cs:20-62）', () => {
     const store = makeStore(W, H);
     expect(shouldBlockSmartInteract(store, 36, 36)).toBe(false);  // 空格
     const si = store.idx(36, 36);
-    store.type[si] = 21;                                       // active 宝箱不在 Disable 表
+    store.type[si] = internalOfSheet(21);   // ★SW-BJ61 域归一:宝箱 sheet21→internal                                       // active 宝箱不在 Disable 表
     store.flags[si] = 1;
     expect(shouldBlockSmartInteract(store, 36, 36)).toBe(false);
   });
@@ -490,6 +500,6 @@ describe('SW-RB11a 帧矩形修正补块（GetTileDrawData 全 HasOutlines 型�
     expect([...HIGHLIGHT_ANIM_WHEN_LIT].sort((a, b) => a - b)).toEqual([480, 509, 657, 720, 721]);
     // 源锁：Renderer 消费点亮态门（fy≥54 排除,静息照画）
     const rsrc = readFileSync(join(HERE, '..', 'src', 'render', 'Renderer.ts'), 'utf8');
-    expect(rsrc).toContain('HIGHLIGHT_ANIM_WHEN_LIT.has(type) && store.frameY[si] >= 54');
+    expect(rsrc).toContain('HIGHLIGHT_ANIM_WHEN_LIT.has(sheet) && store.frameY[si] >= 54');   // ★SW-BJ61 域归一:type→sheet
   });
 });

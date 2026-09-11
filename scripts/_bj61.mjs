@@ -19,6 +19,13 @@
  * 填充/边框/BJ54 高亮 patch 像素 + ui-canvas 光标图标本体亮度，对照原版公式
  * 预测带（lit 边框=不透明 (255,242,77) 可精确锚定；暗态=黑框黑填充近不可见）。
  *
+ * 断言基准（★2026-09-11 定谳后翻转到【动刀后语义】）：
+ *   预修取证（本探针前版断言,已留档 /tmp/probe-out/_bj61/bj61-states.json@预修）：
+ *   仓库=反编译语义——黄框/高亮乘光（0/56/158 单调线性,蓝分量=light.b×0.3 精确）、
+ *   光标图标恒亮。动刀=用户明令分歧（TileHighlight.smartHighlightSampleLight 注）：
+ *   黄框/高亮恒全亮（暗态边框=(255,242,77) 不透明、填充黄签名）,环境光照不受扰
+ *   （avg≤10=「不给环境发光」）,光标图标恒亮。箭头=Color.White（真实 1:1 修复）。
+ *
  * 运行：node tools/probe.mjs run scripts/_bj61.mjs --seed=05162020 --size=small --vite=auto
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -116,9 +123,16 @@ window.__bj61stage = () => {
     st.liquid[i] = 0; st.slope[i] = 0; st.half[i] = 0;
   }
   for (let x = 46; x <= 80; x++) st.setTileSilent(x, 132 + ${DY}, 1, 0, 0);   // 石地板
-  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {           // 宝箱 2×2 @ (58,128)
-    st.setTileSilent(58 + i, 128 + ${DY} + j, 21, i * 18, j * 18);
-  }
+  // ★SW-BJ61 域归一:store=内部 id——宝箱=sheet21 的内部 id(曾误写 21=高草,吃了
+  //  sheet21 宝箱候选=「地面暗黄痕迹」物证)。真宝箱/高草/木块/平台各布一组
+  st.setTileSilent(58, 128 + ${DY}, window.__chestTid, 0, 0);
+  st.setTileSilent(59, 128 + ${DY}, window.__chestTid, 18, 0);
+  st.setTileSilent(58, 129 + ${DY}, window.__chestTid, 0, 18);
+  st.setTileSilent(59, 129 + ${DY}, window.__chestTid, 18, 18);
+  st.setTileSilent(66, 132 + ${DY}, window.__grassTid, 0, 0);      // 草块(sheet2)
+  st.setTileSilent(66, 131 + ${DY}, window.__tallgrassTid, 0, 0);  // 高草(sheet3→internal21)
+  for (let j = 0; j < 2; j++) st.setTileSilent(70 + j, 131 + ${DY}, window.__woodTid, 0, 0);  // 木块(sheet30)
+  for (let j = 0; j < 2; j++) st.setTileSilent(73 + j, 131 + ${DY}, window.__platTid, 0, 0);  // 平台(sheet19)
   g.chunks.markDirtyArea(44, 114 + ${DY}, 82, 134 + ${DY});
   g.world.spawnX = 54; g.world.spawnY = 130 + ${DY}; g.world.spawnX0 = 54; g.world.spawnY0 = 130 + ${DY};
   const pl = g.player;
@@ -156,7 +170,13 @@ try {
   await page.evaluate(INSTALL);
   await page.evaluate(async () => {
     const m = await import('/src/data/tiles.ts');
-    window.__torchTid = m.TILE_DEFS.findIndex((d) => d && d.vanilla && d.vanilla.sheet === 4);
+    const bySheet = (sh) => m.TILE_DEFS.findIndex((d) => d && d.vanilla && d.vanilla.sheet === sh);
+    window.__torchTid = bySheet(4);
+    window.__chestTid = bySheet(21);     // sheet21 宝箱 → internal16
+    window.__grassTid = bySheet(2);      // 草块
+    window.__tallgrassTid = bySheet(3);  // 高草 → internal21
+    window.__woodTid = bySheet(30);      // 木块 → internal10
+    window.__platTid = bySheet(19);      // 平台 → internal11
   });
   await page.evaluate(() => window.__bj61stage());
   await pump(page, 60, { clearEnemies: true });
@@ -189,11 +209,15 @@ try {
   L.chk('暗·目标格光照 avg≤10（无光源洞穴）',
     dark.light.targetAvg != null && dark.light.targetAvg <= 10,
     `targetAvg=${dark.light.targetAvg} rgb=${JSON.stringify(dark.light.target)}`);
-  L.chk('暗·黄框填充近不可见（原版=60%黑填充,Main.cs:47406）',
-    dark.boxFill && dark.boxFill.maxSum <= 120,
+  // ★SW-BJ61 动刀后：恒全亮——暗态黄框=原版公式在 light=255 的取值
+  L.chk('暗·黄框填充亮黄签名（(255,229,26)×0.6 合成:r>g>b 且 r−b>50 且 r≥120）',
+    dark.boxFill && dark.boxFill.max[0] > dark.boxFill.max[1]
+      && dark.boxFill.max[1] > dark.boxFill.max[2]
+      && dark.boxFill.max[0] - dark.boxFill.max[2] > 50 && dark.boxFill.max[0] >= 120,
     `max=${JSON.stringify(dark.boxFill?.max)} sum=${dark.boxFill?.maxSum}`);
-  L.chk('暗·黄框边框黑（原版=light×(1,0.95,0.3)→黑）',
-    dark.boxBorder && dark.boxBorder.max[0] <= 95,
+  L.chk('暗·黄框边框=(255,242,77) 恒亮（不透明合成=精确值）',
+    dark.boxBorder && Math.abs(dark.boxBorder.max[0] - 255) <= 8
+      && Math.abs(dark.boxBorder.max[1] - 242) <= 12 && Math.abs(dark.boxBorder.max[2] - 77) <= 20,
     `max=${JSON.stringify(dark.boxBorder?.max)}`);
   L.chk('暗·光标图标本体恒亮（原版 CursorColor 不吃光照 Main.cs:53271-53294）',
     dark.cursor.maxSum >= 200, `maxSum=${dark.cursor.maxSum} pix=${JSON.stringify(dark.cursor.pix)}`);
@@ -209,19 +233,11 @@ try {
   L.chk('亮·目标格光照 avg>100（火把贴身）',
     lit.light.targetAvg != null && lit.light.targetAvg > 100,
     `targetAvg=${lit.light.targetAvg} rgb=${JSON.stringify(lit.light.target)}`);
-  // 边框=light×(1,0.95,0.3) 不透明精确值（火把非饱和:light=(158,150,126)→(158,142,38)）
-  L.chk('亮·黄框边框=light×(1,0.95,0.3)（原版 buffColor 精确值,Main.cs:47417）',
-    lit.boxBorder && lit.light.target
-      && Math.abs(lit.boxBorder.max[0] - lit.light.target[0]) <= 12
-      && Math.abs(lit.boxBorder.max[1] - Math.round(lit.light.target[1] * 0.95)) <= 14,
-    `max=${JSON.stringify(lit.boxBorder?.max)} light=${JSON.stringify(lit.light.target)}`);
-  // 单乘证明：边框蓝色分量=light.b×0.3（±35）——双乘会把它压到 <20
-  if (lit.light.target) {
-    const expB = Math.round((lit.light.target[2] * 0.3) * (255 / 255));
-    L.chk('亮·边框蓝分量=light.b×0.3（排除双乘光照）',
-      Math.abs(lit.boxBorder.max[2] - expB) <= 45,
-      `got=${lit.boxBorder?.max[2]} exp≈${expB}`);
-  }
+  // ★SW-BJ61 动刀后：边框恒 (255,242,77)（与暗态同值=光照无关性证明）
+  L.chk('亮·黄框边框=(255,242,77) 恒亮（与暗态同值）',
+    lit.boxBorder && Math.abs(lit.boxBorder.max[0] - 255) <= 8
+      && Math.abs(lit.boxBorder.max[1] - 242) <= 12 && Math.abs(lit.boxBorder.max[2] - 77) <= 20,
+    `max=${JSON.stringify(lit.boxBorder?.max)}`);
   L.chk('亮·黄框填充黄色签名（r>g>b 且 r−b>50）',
     lit.boxFill && lit.boxFill.max[0] > lit.boxFill.max[1]
       && lit.boxFill.max[1] > lit.boxFill.max[2]
@@ -241,9 +257,9 @@ try {
     dim.light.targetAvg != null && dim.light.targetAvg > 10 && dim.light.targetAvg <= 100,
     `targetAvg=${dim.light.targetAvg}`);
   if (dark.boxBorder && lit.boxBorder && dim.boxBorder) {
-    const rOrd = dim.boxBorder.max[0] > dark.boxBorder.max[0] + 5
-              && dim.boxBorder.max[0] < lit.boxBorder.max[0] - 5;
-    L.chk('微光·边框亮度严格介于暗/亮之间（随光照单调=原版线性语义）', rOrd,
+    const indep = Math.abs(dim.boxBorder.max[0] - lit.boxBorder.max[0]) <= 8
+               && Math.abs(dark.boxBorder.max[0] - lit.boxBorder.max[0]) <= 8;
+    L.chk('三态·边框亮度光照无关（暗=微光=亮,★SW-BJ61 用户分歧核心语义）', indep,
       `dark=${dark.boxBorder.max[0]} dim=${dim.boxBorder.max[0]} lit=${lit.boxBorder.max[0]}`);
   }
 

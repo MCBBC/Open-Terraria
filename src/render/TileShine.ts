@@ -233,7 +233,11 @@ const S = CHUNK * TILE;          // 256
 const PAD = 12;                  // 逐格 scratch 留白（18px 格盒 ±1 + tileTop 溢出带）
 const SCR = TILE + PAD * 2;      // 40
 
-const shineCache = new WeakMap<ChunkPair, ShineChunkEntry>();
+/** ★档位记忆缓存(2026-09-09 群落切换风暴案):微光域边界 shimmerAlpha 连续变化,
+ *  量化档 shimmerQ(8 档)随之翻转 → 旧单条目缓存每档翻转=全视界 chunk 重烘风暴
+ *  (用户 trace 实测:切换瞬间 drawImage 单秒 0.95s)。改=每 pair 记忆最近 3 档,
+ *  边界回摆(档位回到近期档)即命中零重烘;新档首次仍需一烘(每 chunk 一次,有界)。 */
+const shineCache = new WeakMap<ChunkPair, { q: number; e: ShineChunkEntry }[]>();
 let scratch: HTMLCanvasElement | null = null;
 let scratchCtx: CanvasRenderingContext2D | null = null;
 let mask: HTMLCanvasElement | null = null;
@@ -386,10 +390,16 @@ function bakeShineChunk(
 function ensureEntry(
   atlas: SpriteAtlas, world: World, pair: ChunkPair, cx: number, cy: number, shimmerQ: number,
 ): ShineChunkEntry {
-  const e = shineCache.get(pair);
-  if (e && e.shimmerQ === shimmerQ) return e;
+  const slots = shineCache.get(pair);
+  if (slots) {
+    for (const s of slots) if (s.q === shimmerQ) return s.e;   // 档位命中(含边界回摆)
+    const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ);
+    if (slots.length >= 3) slots.shift();                       // 只留最近 3 档
+    slots.push({ q: shimmerQ, e: ne });
+    return ne;
+  }
   const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ);
-  shineCache.set(pair, ne);
+  shineCache.set(pair, [{ q: shimmerQ, e: ne }]);
   return ne;
 }
 
@@ -511,13 +521,14 @@ export function drawTileShineAdditive(
     for (let cy = by0; cy <= by1; cy++) {
       for (let cx = bx0; cx <= bx1; cx++) {
         if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
-        const e = shineCache.get(chunks.get(cx, cy));
-        if (!e?.add) continue;
+        const slots2 = shineCache.get(chunks.get(cx, cy));
+        const e = slots2?.find((s0) => s0.e.add);   // ★档位记忆:任一档含平加层即用
+        if (!e?.e.add) continue;
         const xd0 = ox + Math.round((cx * CHUNK * TILE - camRX) * zz);
         const yd0 = oy + Math.round((cy * CHUNK * TILE - camRY) * zz);
         const xd1 = ox + Math.round(((cx + 1) * CHUNK * TILE - camRX) * zz);
         const yd1 = oy + Math.round(((cy + 1) * CHUNK * TILE - camRY) * zz);
-        ctx.drawImage(e.add, 0, 0, S, S, xd0, yd0, xd1 - xd0, yd1 - yd0);
+        ctx.drawImage(e.e.add, 0, 0, S, S, xd0, yd0, xd1 - xd0, yd1 - yd0);
       }
     }
   } finally {
