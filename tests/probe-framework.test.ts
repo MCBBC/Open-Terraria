@@ -10,6 +10,7 @@ import net from 'node:net';
 
 import { parseArgs, resolveSeed, sizeDims, sizeCode, pickFreePort, portBusy, SIZE_PRESETS } from '../tools/probe/lib/env.mjs';
 import { lsofListeners, killTree } from '../tools/probe/lib/vite.mjs';
+import { descendantsOf, killDescendants, runWithTimeout, psTable } from '../tools/probe/lib/proc.mjs';   // IIII245 J 域
 import { allRuns, compareAB, DEFAULT_RUNS } from '../tools/probe/lib/stats.mjs';
 import { withTimeout, stepWatchdog } from '../tools/probe/lib/watchdog.mjs';
 import { Ledger } from '../tools/probe/lib/ledger.mjs';
@@ -100,6 +101,94 @@ describe('端口面(IIIRS216 lsof-kill 契约)', () => {
   }, 15000);
 });
 
+// ═══════════════ IIII245 J 域两坑收编(全后代树杀 + runWithTimeout) ═══════════════
+
+describe('IIIII245 J5/J6 进程树收尾域(proc.mjs)', () => {
+  /** ps 层"进程已消失"复核(杀完到 ps 摘除有收割延迟,轮询兜) */
+  const gone = async (pid: number) => {
+    for (let i = 0; i < 20; i++) {
+      if (!psTable().has(pid)) return true;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  };
+
+  it('descendantsOf 纯表递归正确(直链/分叉/多级/无关节点;不含根自身)', () => {
+    const t = new Map<number, number>([[10, 1], [20, 10], [30, 20], [50, 10], [40, 99]]);
+    expect(descendantsOf(1, t).sort((a, b) => a - b)).toEqual([10, 20, 30, 50]);
+    expect(descendantsOf(10, t).sort((a, b) => a - b)).toEqual([20, 30, 50]);
+    expect(descendantsOf(30, t)).toEqual([]);   // 叶子=无后代
+    expect(descendantsOf(40, t)).toEqual([]);   // 挂在无关父下,不被 1 的树收进来
+    expect(descendantsOf(999, t)).toEqual([]);
+  });
+
+  it('J5 全后代树杀:真进程树(子→孙两级)递归收集+两段收口净', async () => {
+    const { spawn } = await import('node:child_process');
+    // 父进程再 spawn 一层孙代并把孙 pid 报出来=两级真树
+    const parent = spawn(process.execPath, ['-e',
+      `const { spawn } = require('child_process');
+       const c = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+       console.log('G' + c.pid);
+       setInterval(() => {}, 1000);`],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const gpid = await new Promise<number>((resolve, reject) => {
+      let buf = '';
+      const t = setTimeout(() => reject(new Error('grandchild pid 超时')), 5000);
+      parent.stdout!.on('data', (d: Buffer) => {
+        buf += d.toString();
+        const m = buf.match(/G(\d+)/);
+        if (m) { clearTimeout(t); resolve(Number(m[1])); }
+      });
+    });
+    try {
+      // 收集正确性:两级都在自树内(只读断言,不动兄弟进程)
+      const before = descendantsOf(process.pid);
+      expect(before).toContain(parent.pid!);
+      expect(before).toContain(gpid);
+      // 两段杀:以 parent 为根(防 vitest 并行池里误伤兄弟 worker——root 语义即"只杀这棵子树")
+      const r = await killDescendants({ root: parent.pid!, termMs: 600, killWaitMs: 400 });
+      expect(r.targets).toEqual([gpid]);
+      expect(r.survivors).toEqual([]);
+      expect(await gone(gpid)).toBe(true);
+    } finally {
+      try { parent.kill('SIGKILL'); } catch { /* 已死 */ }
+    }
+    expect(await gone(parent.pid!)).toBe(true);
+  }, 20_000);
+
+  it('J6 runWithTimeout:快速完成如实上报(timedOut=false+stdout)', async () => {
+    const r = await runWithTimeout('echo probe-iii245-ok', 5000);
+    expect(r.timedOut).toBe(false);
+    expect(r.ok).toBe(true);
+    expect(r.stdout).toContain('probe-iii245-ok');
+    expect(r.pid).toBeGreaterThan(0);
+  });
+
+  it('J6 runWithTimeout:硬超时触发+组杀净(不陪长跑命令悬挂)', async () => {
+    const t0 = Date.now();
+    const r = await runWithTimeout('sleep 30', 500, { termMs: 400 });
+    const wall = Date.now() - t0;
+    expect(r.timedOut).toBe(true);
+    expect(r.ok).toBe(false);
+    expect(wall).toBeGreaterThanOrEqual(500);
+    expect(wall).toBeLessThan(10_000);          // 真硬杀,不是陪 sleep 30 跑满
+    expect(await gone(r.pid)).toBe(true);       // 本尊确实被收割
+  }, 20_000);
+
+  it('guide↔lib 同步:J5/J6 已入坑表,API 三件在 proc.mjs 真身', () => {
+    const guide = readFileSync(join(GAME, 'docs/methodology/probe-guide.md'), 'utf8');
+    expect(guide).toContain('| J5 |');
+    expect(guide).toContain('| J6 |');
+    expect(guide).toContain('killDescendants');
+    expect(guide).toContain('runWithTimeout');
+    const proc = readFileSync(join(GAME, 'tools/probe/lib/proc.mjs'), 'utf8');
+    for (const t of ['export function descendantsOf', 'export async function killDescendants', 'export function runWithTimeout']) {
+      expect(proc).toContain(t);
+    }
+  });
+});
+
 describe('统计面(6× 重复纪律)', () => {
   it('DEFAULT_RUNS=6(Math.random 实体 A/B 的最低重复数)', () => {
     expect(DEFAULT_RUNS).toBe(6);
@@ -187,7 +276,7 @@ describe('坑表默认值与代码同步(docs/methodology/probe-guide.md 防漂�
 
 describe('框架不触 src 生产面', () => {
   it('tools/probe 全域零 import src/', () => {
-    const files = ['tools/probe.mjs', 'tools/probe/lib/env.mjs', 'tools/probe/lib/vite.mjs', 'tools/probe/lib/browser.mjs',
+    const files = ['tools/probe.mjs', 'tools/probe/lib/env.mjs', 'tools/probe/lib/vite.mjs', 'tools/probe/lib/proc.mjs', 'tools/probe/lib/browser.mjs',
       'tools/probe/lib/boot.mjs', 'tools/probe/lib/game.mjs', 'tools/probe/lib/pump.mjs', 'tools/probe/lib/camera.mjs',
       'tools/probe/lib/shot.mjs', 'tools/probe/lib/record.mjs', 'tools/probe/lib/world.mjs', 'tools/probe/lib/stats.mjs',
       'tools/probe/lib/watchdog.mjs', 'tools/probe/lib/ledger.mjs', 'tools/probe/lib/clock.mjs', 'tools/probe/lib/cheatsheet.mjs',

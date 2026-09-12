@@ -20,6 +20,11 @@
 //       ⇒ ×0.7 缩小）同向；上滚两版同放大。⇒ 不修（本相正确）。
 //       偏差备案（登记债,非本刀面）：倍率 0.85/1.18 ≠ 原版 0.7/1.3,且一帧多档
 //       不复利（原版 num8=±2 ⇒ ×1.6/×0.4;仓内恒单步）+鼠标锚点缩放为仓内增益。
+//       ★SW-FX51（2026-09-13）上债清偿：0.85/1.18 单步→Player.cs:25387-25396 复利
+//       1:1（Game.fullMapWheelZoom,zoomTarget 基准保缓动增益下复利逐值同）+热栏滚轮
+//       整缺补建（HandleHotbarControls :32005-32036 → Game.hotbarWheelSwitch）;Input
+//       wheelDelta sign 号面→±notch 计数档（RB14d 余数累计器,见 Input.ts 字段注）。
+//       B1/B2 源锁随刀更新;A（拍照）/C（VUI）与 B3（观战,符号无关）不动。
 //   点3 VUI.ts:72 —— RB14d 修复在位复核：`VUI.wheel += -Math.sign(e.deltaY)`
 //       单次取负;消费链 UserInterface.ts:126 直通（UserInterface.cs:219-222）+
 //       UIList `viewPosition -= evt.scrollWheelValue`（UIList.cs:109-116 照抄）
@@ -114,25 +119,26 @@ describe('SW-FX50 A：拍照模式滚轮符号（PlayerInput.cs:901-902 上滚�
   });
 });
 
-// ═══ 点2：Input.ts:246 观战退出/全屏地图缩放（定谳:不修——符号无关+消费端补偿臂） ═══
-describe('SW-FX50 B：world wheelDelta（浏览器号）两消费面（Player.cs:17209/:25385-25392）', () => {
-  it('B1 源锁：Input 浏览器号入账 + endFrame 统一清零（量纲不归一=只取号,sign 面）', () => {
-    expect(inputSrc).toContain('this.wheelDelta += Math.sign(e.deltaY);');
-    expect(inputSrc).toContain('this.wheelDelta = 0;');   // endFrame（fixedUpdate 尾）
+// ═══ 点2：Input.ts:246 观战退出/全屏地图缩放（★SW-FX51 2026-09-13 清偿本节备案债:
+//    0.85/1.18 单步→0.7/1.3 复利（Player.cs:25387-25396 1:1）+热栏滚轮整缺补建
+//    （:32005-32036）;Input wheelDelta sign 号面→±notch 计数档。B1/B2 源锁随刀更新,
+//    B3 观战退出符号无关判据不变;方向判据（上滚放大/下滚缩小）保留） ═══
+describe('SW-FX50 B：world wheelDelta 两消费面（Player.cs:17209/:25385-25396;FX51 重写后回归锁）', () => {
+  it('B1 源锁：Input ±notch 计数档入账（FX51:sign 号面退役,RB14d 余数累计器）+ endFrame 清档留余', () => {
+    expect(inputSrc).toContain('this._wheelPxCarry -= wheelEventPx(e.deltaY, e.deltaMode);');
+    expect(inputSrc).toContain('this.wheelDelta += notches;');   // 整档发布（XNA 号:上滚=+）
+    expect(inputSrc).toContain('this.wheelDelta = 0;');          // endFrame 清计数档（_wheelPxCarry 跨帧留置）
   });
 
-  it('B2 全屏地图缩放方向（Game.ts:8252 补偿臂）：下滚→缩小/上滚→放大 ≡ 原版 ×0.7/×1.3 同向', () => {
-    // 消费端补偿臂值面锁定（互换 0.85/1.18 即红）
-    const m = gameSrc.match(/inp\.wheelDelta > 0 \? ([\d.]+) : ([\d.]+)/);
-    expect(m).not.toBeNull();
-    const downMult = parseFloat(m![1]);   // 浏览器下滚(+1) → 缩放倍率
-    const upMult = parseFloat(m![2]);     // 浏览器上滚(−1) → 缩放倍率
-    // 原版 Player.cs:25385-25392：num8=ScrollWheelDelta/120;scale *= 1+num8*0.3
-    // XNA 上滚为正 ⇒ 上滚 ×1.3（放大）、下滚 ×0.7（缩小）
-    const VAN_UP = 1 + 0.3;
-    const VAN_DOWN = 1 - 0.3;
-    expect(upMult).toBeGreaterThan(1);    expect(VAN_UP).toBeGreaterThan(1);    // 上滚=放大,两版同向
-    expect(downMult).toBeLessThan(1);     expect(VAN_DOWN).toBeLessThan(1);     // 下滚=缩小,两版同向
+  it('B2 全屏地图缩放方向+倍率（FX51 fullMapWheelZoom）：下滚→×0.7/上滚→×1.3,一帧多档 1+n·0.3 线性', () => {
+    // 公式源锁（Player.cs:25388/:25396 1:1;换系数/换基准即红）
+    expect(gameSrc).toContain('const num8 = this.input.wheelDelta;');
+    expect(gameSrc).toContain('fm.zoomTarget * (1 + num8 * 0.3),');
+    // 方向/量值判据（原版转录:XNA 上滚为正 ⇒ +1 档 ×1.3 放大、−1 档 ×0.7 缩小;
+    // ±2 档一帧=1+2·0.3=1.6 线性,非 1.3²=1.69——复利只在跨帧）
+    expect(1 * (1 + 1 * 0.3)).toBeGreaterThan(1);    // 上滚=放大（FX50 B2 方向判据保留）
+    expect(1 * (1 + -1 * 0.3)).toBeLessThan(1);      // 下滚=缩小
+    expect(1 * (1 + 2 * 0.3)).toBeCloseTo(1.6, 10);  // 一帧多档线性
     // 门序锁：mapFullscreen 先、无图不开缩放（Player.cs:25385 if(mapFullscreen) 前置）
     expect(gameSrc).toContain('if (inp.wheelDelta !== 0) {');
     expect(gameSrc).toContain('if (this.renderer.fullMap.open) {');

@@ -21,6 +21,7 @@
  */
 export * from './env.mjs';
 export * from './vite.mjs';
+export * from './proc.mjs';      // IIII245 J 域:descendantsOf/killDescendants/runWithTimeout
 export * from './browser.mjs';
 export * from './boot.mjs';
 export * from './game.mjs';

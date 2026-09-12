@@ -101,6 +101,12 @@ function glyphStyle(div: HTMLElement, a: Game['achievements'], name: string, sca
 // ---- 成就菜单（开关式：再次调用关闭） ----
 let openPanel: HTMLElement | null = null;
 let openEscHandler: ((e: KeyboardEvent) => void) | null = null;
+/** 开合广播（★IIIII245）：window 级 CustomEvent，detail.open=面板现态。
+ *  TitleMenu 等独占态消费方监听它做【同步】摘挂——rAF 轮询在 headless 后台标签
+ *  会被节流（坑表 B1 同族），开/关还原延迟到下一帧=探针/低帧率机可见闪序。 */
+function notifyAchToggle(): void {
+  window.dispatchEvent(new CustomEvent('sw-ach-toggle', { detail: { open: !!openPanel } }));
+}
 /** 当前过滤类别（原版 4 个 UIToggleImage；全关 = 只看未完成? 原版至少留一个开） */
 const catOn = [true, true, true, true];
 
@@ -203,10 +209,21 @@ export function openAchievementsPanel(host: AchievementsHost, focusName?: string
   };
   renderList();
   panel.addEventListener('mousedown', (e) => e.stopPropagation());
-  (document.querySelector('.sw-root') ?? document.body).appendChild(panel);
+  // ★IIIII245 z 序修复:必须挂 body 顶层语境,禁挂 .sw-root——
+  //   .sw-root 自身 position:fixed+z-index:10(UI.ts)=独立 stacking context,
+  //   面板的 z-index:120 只在其内部生效;主菜单 .sw-title-menu(z15)与设置面板
+  //   .sw-set-panel(z25)是 #game-root 下平级语境 → 挂 .sw-root 的面板被两者
+  //   盖住(用户截图实报"成就面板跑到菜单层之下";探针 elementFromPoint 实证:
+  //   交叠区顶层=.sw-title-btn / .sw-set-row)。挂 body 后 120 与各层直接比较:
+  //   > 标题菜单 15/角色选择 20/设置 25/图鉴 30/chrome 35/安装条 45/对话层 60,
+  //   < 手机操控层 150(操控钮保持可达,与旧挂法相对关系不变)/表情轮盘 1150/
+  //   模态遮罩 1200+/音频门·资产诊断 10000+。输入门安全:.sw-ach-panel 已在
+  //   domTargets.ts DOM_UI_TARGET_SELECTOR(closest 判定不依赖挂载点)。
+  document.body.appendChild(panel);
   openPanel = panel;
   openEscHandler = (e) => { if (e.code === 'Escape') closeAchievementsPanel(); };
   window.addEventListener('keydown', openEscHandler);
+  notifyAchToggle();   // ★IIIII245 独占态同步广播（TitleMenu 藏按钮列）
   host.sfx?.play('menuTick', 1);
   // ★滚动定位+高亮(2026-09-07 用户需求:成就解锁弹窗点击→定位到该项并高亮)
   if (focusName) {
@@ -225,6 +242,7 @@ export function closeAchievementsPanel(): void {
   openPanel?.remove();
   openPanel = null;
   if (openEscHandler) { window.removeEventListener('keydown', openEscHandler); openEscHandler = null; }
+  notifyAchToggle();   // ★IIIII245 关闭也广播（独占态还原；UI.closeAll 路径同享）
 }
 
 export function achievementsPanelOpen(): boolean { return !!openPanel; }

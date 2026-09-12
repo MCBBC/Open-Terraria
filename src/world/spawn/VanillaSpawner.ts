@@ -3614,8 +3614,13 @@ export class VanillaSpawner {
     if (N(2)) {
       // 洞穴主池（L4896-5099）
       // 骷髅商 453（L5007-5010）：1/35，!ZoneShadowCandle（影烛熄灭商队）&& 非水域 &&
-      // 场内唯一（CountNPCS==0）—— Game.trySpawnEnemy 把 453 转成 TownNPC 放 npcs 桶
-      if (N(35) && !this.waterTile && !this.shadowCandle && !any(453)) return D(453);
+      // 场内唯一（CountNPCS==0，NPC.cs:5007 终值逐位）—— Game.trySpawnEnemy 把 453
+      // 转成 TownNPC 放 npcs 桶。★SW-FX52（2026-09-13）：唯一门改走 countNpc 通道
+      // （CountNPCS=Main.npc 全表遍历 :90941-90951，城镇 NPC一体可见）——旧 !any(453)
+      // 读 enemies 桶 activeIds，453 从不入其内 ⇒ 商人在场时门恒开 = 掷流分叉
+      // （本支吞 Next(35) 即返，vanilla 应落空续掷 Next(80) 仙女支，RB12c 定谳）。
+      // 453 入表面 = Game.trySpawnEnemy 计数注入（vanillaId===453 臂）
+      if (N(35) && !this.waterTile && !this.shadowCandle && this.countNpc(453) === 0) return D(453);
       // L4911：Lost Girl 195（Nymph）1/80
       if (N(80)) return D(195);
       // 深层半段 = y > (rockLayer + maxTilesY)/2（L4913/4917 共用门）
@@ -3783,8 +3788,10 @@ export class VanillaSpawner {
    *  vanilla id→存活数表（SW-FX7 2026-09-10 补齐——此前无事件时退化为 activeIds
    *  的 0/1 检测，N 阈值门失真：250 雨云怪 <2（:4192）/ 467 致命球 <2（:3575）/
    *  510 沙幽灵 <4（:3973）/ 74+297+298 晨鸟 <6（:4328）在 ≥2 只在场时仍放行）。
-   *  ★==0 型唯一门（513 :1703 / 453 :5007）在旧退化下也正确——Set 语义与计数对
-   *  ==0 判定等价，故此通道此前只伤"上限"不伤"唯一" */
+   *  ★==0 型唯一门分域：513 墓穴爬虫（:1703）走 enemies 桶 → 旧 activeIds Set 语义
+   *  与计数对 ==0 等价（旧退化下也正确）；453 骷髅商（:5007）走 TownNPC npcs 桶 →
+   *  从不入 activeIds，旧 !any(453) 恒真 ⇒ 唯一门整缺（SW-FX52 2026-09-13 修：
+   *  Game 侧 vanillaId===453 入表 + 本侧唯一门改 countNpc(453)==0） */
   npcCounts: Map<number, number> = new Map();
   private countNpc(id: number): number {
     const injected = this.npcCounts.get(id);

@@ -26,6 +26,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs, pickFreePort, resolveSeed, resolveChromePath, sizeDims, httpGet, httpUp, portBusy, outDirDefault } from './probe/lib/env.mjs';
 import { startPrivateVite, killTree, lsofListeners } from './probe/lib/vite.mjs';
+import { killDescendants, descendantsOf } from './probe/lib/proc.mjs';   // IIII245 J5 全后代树杀
 
 const GAME_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));   // tools/ → game/
 const DEFAULT_TIMEOUT = 600_000;
@@ -67,25 +68,60 @@ if (process.argv[2] === '--_child') {
   const target = process.argv[3];
   const passthrough = process.argv.slice(4);
   const { closeAllBrowsers } = await import('./probe/lib/browser.mjs');
+  const { killDescendants } = await import('./probe/lib/proc.mjs');
+  /** ★IIIII245 J5 自树清扫:场景进程【活着时】收掉自己 spawn 的全部后代——
+   *  vitest 池 worker/python heredoc 这类无端口孙代不随父死,等本进程一退
+   *  它们被收养到 pid 1、CLI 的 ppid 树清扫就永远够不着了(diag2 实证)。
+   *  本进程在树上的时刻是唯一清扫窗口。 */
+  const selfSweep = async ({ termMs = 800, killWaitMs = 400 } = {}) => {
+    try {
+      const sweep = await killDescendants({ root: process.pid, termMs, killWaitMs });
+      if (sweep.term.length) {
+        console.error(`[probe:child] 自树清扫: TERM×${sweep.term.length} KILL×${sweep.killed.length}`
+          + (sweep.survivors.length ? ` 残留×${sweep.survivors.length}(pid=${sweep.survivors.join(',')})` : ''));
+      }
+      return sweep;
+    } catch { return null; }   // 清理路径不许抛
+  };
   const killAndExit = (sig) => {
     // 探针被外部信号打断:先收 browser(防 headless Chrome 孤儿——曾 66 进程级泄漏),
-    // 800ms 内不退就硬退(TERM 对忙循环无效)。
-    console.error(`[probe] 收到 ${sig},收口 browser…`);
-    setTimeout(() => process.exit(130), 800).unref?.();
-    closeAllBrowsers().finally(() => process.exit(130));
+    // 再自树清扫(紧凑宽限,2.5s 硬退兜底——TERM 对忙循环无效,清扫尾段是 KILL)。
+    // ★硬退走 realExit:补丁层可能已在途(exiting 旗),兜底必须无条件可退。
+    console.error(`[probe] 收到 ${sig},收口 browser+自树…`);
+    setTimeout(() => realExit(130), 2500).unref?.();
+    (async () => {
+      await closeAllBrowsers().catch(() => { /* 已死 */ });
+      await selfSweep({ termMs: 300, killWaitMs: 150 });
+      process.exit(130);   // 经补丁层(幂等;清扫未跑时这里补跑)
+    })();
   };
   process.on('SIGTERM', () => killAndExit('SIGTERM'));
   process.on('SIGINT', () => killAndExit('SIGINT'));
+  // ★IIIII245 J5:场景契约是 process.exit(code) 直退(坑表骨架如此)——那会绕过
+  // 任何异步收尾,且本进程一死其孙代被内核【即刻】收养到 pid 1、ppid 树断链,
+  // CLI 的树清扫永远够不着(diag2 实证)。故在本作用域包一层 process.exit:
+  // 真退前先自树清扫。零后代时 killDescendants 短路返回=常规路径零开销。
+  const realExit = process.exit.bind(process);
+  let exiting = false;
+  process.exit = (code) => {
+    if (exiting) return;
+    exiting = true;
+    selfSweep().finally(() => realExit(code));
+  };
   try {
     process.argv = [process.argv[0], target, ...passthrough];
     await import(pathToFileURL(resolve(process.cwd(), target)).href);
   } catch (e) {
     console.error('[probe] 场景异常:', e);
-    process.exit(1);
+    process.exit(1);   // 经补丁层=先自树清扫再真退
   }
-  // 主体完成:给 stdout 冲刷 0.5s 后强退(run-diag 同款,兜残留活句柄)。
-  setTimeout(() => process.exit(0), 500).unref?.();
-  // 事件循环空转兜底:10s 后仍未退(残留 setInterval)也强退。
+  // 主体完成:给 stdout 冲刷 0.5s,然后【自树清扫】再强退(run-diag 同款兜残留活句柄;
+  // 零后代时 killDescendants 短路返回,零额外开销)。
+  setTimeout(async () => {
+    await selfSweep();
+    process.exit(0);
+  }, 500).unref?.();
+  // 事件循环空转兜底:10s 后仍未退(残留 setInterval)也强退(此时自树清扫已尝试过)。
   setTimeout(() => process.exit(0), 10_000).unref?.();
 } else {
   await main();
@@ -120,6 +156,7 @@ async function main() {
   if (unknown.length) console.log(`[probe] 未知参数(透传给场景自取): ${unknown.join(',')}`);
 
   const timeoutMs = Number(opts.timeout ?? DEFAULT_TIMEOUT);
+  const keepVite = !!opts['keep-vite'];   // ★IIIII245 落地:此前仅文档有、代码从未消费(恒杀)
   const seed = resolveSeed(opts.seed ?? '');
   const flags = opts.flags ? resolveSeed(opts.flags) : '';
   const size = String(opts.size ?? 'small');
@@ -186,15 +223,33 @@ async function main() {
     // 收口硬兜底:杀树若卡死(lsof 异常路径),15s 后强退——收尾路径绝不允许悬挂
     const hard = setTimeout(() => { console.error('[probe] 收口卡死,硬退'); process.exit(exitCode); }, 15_000);
     hard.unref?.();
-    if (vite) {
+    if (vite && !keepVite) {
       const r = await vite.kill();
       if (r.listenersLeft > 0) console.error(`[probe] 警告:端口 ${vite.port} 仍有 ${r.listenersLeft} 个监听者(lsof)——手动 lsof -ti tcp:${vite.port} 清理`);
       else console.log(`[probe] vite 已收口(监听者=0)`);
+    } else if (vite) {
+      console.log(`[probe] --keep-vite:私有 vite 保留 @ ${vite.origin}(日志 ${vite.logPath})`);
+    }
+    // ★IIIII245 J5/J6 全后代树杀:vite 三段式只管【端口面】,看不见 vitest 池
+    // worker / python heredoc 这类不监听端口的孙代——按 ppid 树递归收齐
+    // TERM→KILL 两段兜底。只杀自身后代 ⇒ 并行会话的 5199/他人 52xx 结构性免疫。
+    // keep-vite 时把 vite 整树豁免(esbuild service 是 vite 子进程,不豁免=清扫
+    // 背刺被保留的实例);脱链孙代(中间父先死收养到 pid 1)树杀不可见,须场景侧
+    // runWithTimeout 进程组自尽自管(坑表 J6)。
+    const keepTree = vite && keepVite && vite.child?.pid
+      ? [vite.child.pid, ...descendantsOf(vite.child.pid)]
+      : [];
+    const sweep = await killDescendants({ root: process.pid, exclude: keepTree });
+    if (sweep.term.length) {
+      console.log(`[probe] 后代树清扫: TERM×${sweep.term.length} KILL×${sweep.killed.length}`
+        + (sweep.survivors.length
+          ? ` 残留×${sweep.survivors.length}(pid=${sweep.survivors.join(',')})——手动核查`
+          : '(收口净)'));
     }
     process.exit(exitCode);
   };
-  process.on('SIGTERM', () => { try { child.kill('SIGKILL'); } catch { /* 已死 */ } void shutdown('SIGTERM', 130); });
-  process.on('SIGINT', () => { try { child.kill('SIGKILL'); } catch { /* 已死 */ } void shutdown('SIGINT', 130); });
+  process.on('SIGTERM', () => { try { child.kill('SIGTERM'); } catch { /* 已死 */ } void shutdown('SIGTERM', 130); });
+  process.on('SIGINT', () => { try { child.kill('SIGTERM'); } catch { /* 已死 */ } void shutdown('SIGINT', 130); });
   process.on('uncaughtException', (e) => {
     console.error('[probe] CLI 未捕获异常:', e);
     try { child.kill('SIGKILL'); } catch { /* 已死 */ }
@@ -202,8 +257,13 @@ async function main() {
   });
 
   const watchdog = setTimeout(() => {
-    console.error(`[probe] 总看门狗超时 ${timeoutMs}ms → SIGKILL 场景进程(exit 2)`);
-    try { child.kill('SIGKILL'); } catch { /* 已死 */ }
+    console.error(`[probe] 总看门狗超时 ${timeoutMs}ms → 场景进程收口(exit 2)`);
+    // ★IIIII245:先 TERM 再补 KILL——场景子进程的 SIGTERM 处理器会收 browser+自树
+    // 清扫;进程一死其孙代被内核即刻收养到 pid 1、ppid 树断链,CLI 的树清扫永远
+    // 够不着(diag2 实证)。2.5s 宽限保留"硬超时"语义:超时必死,exit 2 恒定。
+    try { child.kill('SIGTERM'); } catch { /* 已死 */ }
+    const hard = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* 已死 */ } }, 2500);
+    hard.unref?.();
     void shutdown('watchdog', 2);
   }, timeoutMs);
 

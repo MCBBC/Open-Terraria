@@ -233,14 +233,12 @@ const S = CHUNK * TILE;          // 256
 const PAD = 12;                  // 逐格 scratch 留白（18px 格盒 ±1 + tileTop 溢出带）
 const SCR = TILE + PAD * 2;      // 40
 
-/** shine 乘法 delta 缓存。★2026-09-09 终案(群落切换风暴两轮迭代):shimmerAlpha
- *  是连续量,烘焙进缓存(任何档位方案)都会在 alpha 扫频时反复失效=重烘风暴
- *  (3 档记忆只挡两档震荡,挡不住 0→1 扫频途经 8 档)。终案=烘焙固定【全强度】
- *  (shimmerQ≡1,与 alpha 解耦→缓存零失效),强度在绘制时 globalAlpha 连续施加
- *  (视觉连续,零重烘;原版 shine() 的 lerp 色相在 ramp 段有微差,8 档量化本就
- *  是近似,连续 α 不更差)。消费方:drawTileShineGrid 主 blit globalAlpha=shimmerAlpha;
- *  平加 Gemspark 层(+0.39,与 shimmerAlpha 无关)照常 α=1。 */
-const shineCache = new WeakMap<ChunkPair, ShineChunkEntry>();
+/** shine 乘法 delta 缓存(2026-09-09 三轮迭代终案):shimmerAlpha 是连续量,烘焙
+ *  进缓存(任何单条目方案)都会在 alpha 扫频时反复失效=重烘风暴。方案=**3 档槽位
+ *  记忆**(边界两档震荡=零重烘)+**重烘预算分帧**(扫频途经 8 档的成本摊到多帧,
+ *  预算外用最近档旧帧顶替=shine 渐进更新无爆发)。平加 Gemspark 消费面用
+ *  slots.find(e=>e.add)。 */
+const shineCache = new WeakMap<ChunkPair, { q: number; e: ShineChunkEntry }[]>();
 let scratch: HTMLCanvasElement | null = null;
 let scratchCtx: CanvasRenderingContext2D | null = null;
 let mask: HTMLCanvasElement | null = null;
@@ -392,13 +390,24 @@ function bakeShineChunk(
 
 function ensureEntry(
   atlas: SpriteAtlas, world: World, pair: ChunkPair, cx: number, cy: number,
-): ShineChunkEntry {
-  const e = shineCache.get(pair);
-  if (e) return e;
-  // ★烘焙固定全强度(shimmerQ=1):强度与 shimmerAlpha 解耦(绘制时 globalAlpha 施加),
-  //  缓存零失效——群落边界 alpha 扫频不再触发重烘(2026-09-09 终案)。
-  const ne = bakeShineChunk(atlas, world, cx, cy, 1);
-  shineCache.set(pair, ne);
+  shimmerQ: number, budget?: { left: number },
+): ShineChunkEntry | null {
+  const slots = shineCache.get(pair);
+  if (slots) {
+    for (const s of slots) if (s.q === shimmerQ) return s.e;   // 档位命中(含边界回摆)
+    // 档位未命中:预算内重烘,预算外用最近档旧帧顶替(shine 渐进更新,无爆发)
+    if (budget && budget.left <= 0) return slots[slots.length - 1].e;
+    const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ);
+    if (budget) budget.left--;
+    if (slots.length >= 3) slots.shift();
+    slots.push({ q: shimmerQ, e: ne });
+    return ne;
+  }
+  // 首次:预算内烘(预算外本帧跳过该 chunk,下帧再烘)
+  if (budget && budget.left <= 0) return null;
+  const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ);
+  if (budget) budget.left--;
+  shineCache.set(pair, [{ q: shimmerQ, e: ne }]);
   return ne;
 }
 
@@ -418,8 +427,8 @@ export function drawTileShineGrid(
   const st = world.store;
   // 调试逃生门（同 __SW_DYNSNAP_OFF 惯例）：A/B 探针/取证时秒关本通道
   if ((globalThis as { __SW_SHINE_OFF?: boolean }).__SW_SHINE_OFF) return;
-  // ★强度=绘制时 globalAlpha 连续施加(2026-09-09 终案:烘焙全强度+绘制时 α,
-  //  缓存零失效;旧 8 档量化进 cache 键=边界 alpha 扫频反复失效=重烘风暴)
+  // shimmer 量化进 cache 键(8 档;★重烘有预算分帧,见 ensureEntry——扫频不再爆发)
+  const shimmerQ = shimmerAlpha > 0 ? Math.min(1, Math.ceil(shimmerAlpha * 8) / 8) : 0;
   // chunk 界（drawCoatGlowGrid 同式）
   const bx0 = Math.floor((cam.x - viewW / 2 / z) / (CHUNK * TILE)) - 1;
   const bx1 = Math.floor((cam.x + viewW / 2 / z) / (CHUNK * TILE)) + 1;
@@ -430,13 +439,13 @@ export function drawTileShineGrid(
   ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'lighter';   // A=0 预乘加色语义（同 TileFlames 文件头注）
+  const bakeBudget = { left: 2 };   // ★重烘预算:每帧最多 2 个 chunk 重烘(风暴分帧)
   try {
-    ctx.globalAlpha = Math.max(0, Math.min(1, shimmerAlpha));
     for (let cy = by0; cy <= by1; cy++) {
       for (let cx = bx0; cx <= bx1; cx++) {
         if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
-        const e = ensureEntry(atlas, world, chunks.get(cx, cy), cx, cy);
-        if (!e.mul) continue;
+        const e = ensureEntry(atlas, world, chunks.get(cx, cy), cx, cy, shimmerQ, bakeBudget);
+        if (!e?.mul) continue;
         // 设备矩形 = drawChunkGrid 同一表达式（共享边同 round → 与底图像素配准）
         const xd0 = dev.ox + Math.round((cx * CHUNK * TILE - dev.camRX) * dev.zz);
         const yd0 = dev.oy + Math.round((cy * CHUNK * TILE - dev.camRY) * dev.zz);
@@ -525,7 +534,8 @@ export function drawTileShineAdditive(
     for (let cy = by0; cy <= by1; cy++) {
       for (let cx = bx0; cx <= bx1; cx++) {
         if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
-        const e = shineCache.get(chunks.get(cx, cy));
+        const slots = shineCache.get(chunks.get(cx, cy));
+        const e = slots?.find((s0) => s0.e.add)?.e;   // 任一档含平加层即用(+0.39 与档无关)
         if (!e?.add) continue;
         const xd0 = ox + Math.round((cx * CHUNK * TILE - camRX) * zz);
         const yd0 = oy + Math.round((cy * CHUNK * TILE - camRY) * zz);

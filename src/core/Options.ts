@@ -280,6 +280,8 @@ export interface OptionsData {
    *  options.onChange → rebuildInventoryPanel。退役计划:过渡一个版本后摘
    *  buildInventoryPanel classic 构建器与 legacy/classic URL 旗(见 SW-FX39 报告)。 */
   inventoryLayout: 'classic' | 'vanilla';
+  /** ★SW-FX51 退役刀迁移标记：classic→vanilla 一次性迁移已执行（防显式切回被再迁移） */
+  inventoryLayoutMigrated?: boolean;
 }
 
 const KEY = 'sandboxworld.options';
@@ -527,7 +529,14 @@ export class OptionsStore {
       // ★SW-FX39(2026-09-11)缺省转正：坏值回新缺省 vanilla；URL 会话覆盖见 try 外
       //  （★红队 F1 清偿：覆盖值只改内存,落盘通道 set() 序列化时剥回存档侧值
       //  (persistedLayout),否则会话内任意一次 set() 把覆盖值连带写档污染用户选择）。
-      //  存档侧 'classic' = 灰度期经设置行显式切换的用户意志,保留不迁移(回退旗面)。
+      //  ★SW-FX51(2026-09-11) 退役刀一次性迁移（用户拍板 vanilla 转正生效于存量档）：
+      //  转正前旧缺省 classic 被自动落盘=非用户意志；迁移后经 Settings 显式切回
+      //  classic 由 migrated 旗保留（不再二次迁移）。迁移即经 set() 走 saveTimer 落盘。
+      if (!this.data.inventoryLayoutMigrated && this.data.inventoryLayout === 'classic') {
+        this.data.inventoryLayout = 'vanilla';
+        this.data.inventoryLayoutMigrated = true;
+        void this.set('inventoryLayoutMigrated', true);
+      }
       if (this.data.inventoryLayout !== 'vanilla' && this.data.inventoryLayout !== 'classic') {
         this.data.inventoryLayout = 'vanilla';
       }

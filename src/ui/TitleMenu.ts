@@ -23,6 +23,7 @@ import { Lang } from '../i18n/Lang';
 import { menuTimeInfo } from '../render/MenuBackground';
 import { decayCelestialModY } from '../render/SkyRenderer';
 import { openAssetDiagPanel } from './AssetDownloadUI';
+import { achievementsPanelOpen } from './AchievementsUI';
 import type { GenScreenSeedFlags } from '../vui/states/UIWorldLoadState';
 
 /** Sun.png 114×114 / Moon_N.png 50×400（8 相位帧，帧宽 50）——SkyRenderer.ts:27-28 */
@@ -152,6 +153,11 @@ const CSS = `
   text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
   pointer-events: none;
 }
+/* ★IIIII245 成就面板独占态(vanilla SetState 语义:Main.cs:49733 menuMode 0 第三钮
+   → MenuUI.SetState(AchievementsMenu) 是【替换】菜单按钮态,成就页开着时菜单项
+   不绘制不可点)。visibility:hidden = 同时移出命中测试(仅藏会吃点击的按钮列,
+   logo/日·月抓取层不受影响);由 rAF 步进按 achievementsPanelOpen() 摘挂。 */
+.sw-title-menu.sw-title-suppressed .sw-title-btns { visibility: hidden; }
 /* 复刻版本基准副行(v0.1.0 下方,用户要求 2026-08-28) */
 .sw-title-baseline { opacity: .85; }
 /* 右下署名（GLM-5.3/GLM-5.3-Flash 协作声明）用【内联样式】——注入样式表的
@@ -202,6 +208,20 @@ export class TitleMenu {
   /** sunModY/moonModY（:1244/:1246，绘制与命中盒的垂直抓取偏移——拖动中 = mouseY-基准，
    *  松手后每帧 ×0.999 缓回 0；基准 y 见 celestialState 的 dip 公式） */
   private modY = 0;
+  /** 成就面板独占态现值（IIIII245；由 sw-ach-toggle 同步事件驱动摘挂——rAF 轮询
+   *  在 headless 后台标签被节流（坑表 B1 同族），还原会拖到下一帧） */
+  private menuSuppressed = false;
+  /** sw-ach-toggle 监听句柄（destroy 自摘） */
+  private onAchToggle = (e: Event): void => {
+    this.applyMenuSuppressed(!!(e as CustomEvent).detail?.open);
+  };
+
+  /** 独占态落 DOM（构造器初值+事件双入口共用；差分写防重复样式失效） */
+  private applyMenuSuppressed(v: boolean): void {
+    if (v === this.menuSuppressed) return;
+    this.menuSuppressed = v;
+    this.root.classList.toggle('sw-title-suppressed', v);
+  }
 
   // ---- ★IIIII218 生成屏 logo 动效（Main.cs DrawMenu :49060-49132 + Update :17292 1:1）----
   /** 生成屏种子表现旗标（mainFlow.createWorldFlow 注入；null=标题/普通籽=CSS 摆动照旧）。
@@ -362,6 +382,10 @@ export class TitleMenu {
     on('replog', () => window.open('https://github.com/Vinlic/terraria-replica-build-notes', '_blank', 'noopener'));
     on('quit', () => flow.onQuit());
     parent.appendChild(this.root);
+    // ★IIIII245 成就面板独占态(vanilla SetState 替换语义,见 CSS 注):同步事件驱动,
+    //   构造时初值对齐(quitToMenu 路径 closeAll 先关面板再重建菜单,初值恒 false)
+    window.addEventListener('sw-ach-toggle', this.onAchToggle);
+    this.applyMenuSuppressed(achievementsPanelOpen());
     this.startLogoFade();
     this.unsubLang = Lang.onChange(() => this.renderTexts());
     this.renderTexts(); // 初始填充（署名 div 是空容器，仅靠 onChange 永不落字）
@@ -522,6 +546,7 @@ export class TitleMenu {
     cancelAnimationFrame(this.rafId);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('sw-ach-toggle', this.onAchToggle);
     this.unsubLang?.();
     this.chrome.remove();
     this.root.remove();

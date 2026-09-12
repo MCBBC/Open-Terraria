@@ -11,7 +11,7 @@
 //     词缀名（PrefixID.cs 常量 1-97）+ 属性修正（TryGetPrefixStatMultipliersForItem :691-1061
 //     switch）+ 传奇档 value 加成（:1043-1060）+ 各武器类可掷池（PrefixLegacy.Prefixes）+
 //     物品类集合（PrefixLegacy.ItemSets / ItemID.Sets.CanGetPrefixes）。
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
@@ -20,7 +20,13 @@ const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
 // "提取器坏"与"数据被重生成坏"。幂等链（extract→patch 两次 md5 一致）另经
 // 手工全链验证（2026-08-19：三连跑五产物 md5 全等）。
 const AUDIT = process.argv.includes('--audit');
-const writeOut = (p, data) => { if (!AUDIT) writeFileSync(p, data); };
+// SW-FX53 2026-09-13: SW_FX53_OUT=<dir> 试产重定向——全部产物改写进指定目录
+// （文件名不变）,真文件零触碰;供重产 dry-run 对拍测试与人工审计（禁真写纪律）。
+const DRY_DIR = process.env.SW_FX53_OUT;
+const writeOut = (p, data) => {
+  if (DRY_DIR) { mkdirSync(DRY_DIR, { recursive: true }); writeFileSync(p.replace(/^.*\//, `${DRY_DIR}/`), data); return; }
+  if (!AUDIT) writeFileSync(p, data);
+};
 const itemSrc = read('Terarria1456/Terraria/Item.cs');
 
 // ---- Item.cs case 块逐 id 字段扫描（SetDefaults1-5 段）----
@@ -245,6 +251,35 @@ const BUFF_TYPE = scanCaseFields(itemSrc, [
   'DefaultToVanitypet\\(\\d+,\\s*(\\d+)\\);',
 ]);
 const MOUNT_TYPE = scanCaseFields(itemSrc, ['\\bmountType\\s*=\\s*(-?\\d+);', 'DefaultToMinecart\\((\\d+)\\);']);
+// ★SW-FX53 2026-09-13：算式实参通道（字面通道的 fill-when-undefined 补充——
+//  ① DefaultToVanitypet 共享算式块 `DefaultToVanitypet(881 + type - 4797, 284 + type
+//  - 4797)`（Item.cs 1456:39417-39440,1458 同值）——boss 宠 21 件 buffType 整缺,
+//  equip.json pet/light 由 FX48 手补,重产即回退（vanilla-pets.json 同根因已同批
+//  教学解析直出）;② mountType 算式 `44 + type - 4792`（:39414 大师模式坐骑
+//  4792-4796）与 `40 + (type - 4785)`（:39364 马鞍 4785-4787）——本刀解出入表,
+//  ★注意 equip.mount 数据面 4785-4787/4792-4796 当前在盘缺档（坐骑骑乘面
+//  MountID 40-48 移植域另行定谳）,重产落表前须先过坐骑移植面审计（登记债）。
+//  evalTypeExpr 白名单拒形参名/局部变量,不可解即沉默。）
+for (const [id, seg] of CASE_SEGMENTS) {
+  if (!BUFF_TYPE.has(id)) {
+    for (const p of caseParts(seg, id)) {
+      const m = [...p.matchAll(/DefaultToVanitypet\(([^,]+),\s*([^)]+)\)/g)].pop();
+      if (m) {
+        const v = evalTypeExpr(m[2], id);
+        if (v !== undefined) { BUFF_TYPE.set(id, v); break; }
+      }
+    }
+  }
+  if (!MOUNT_TYPE.has(id)) {
+    for (const p of caseParts(seg, id)) {
+      const m = [...p.matchAll(/\bmountType\s*=\s*([^;]+);/g)].pop();
+      if (m) {
+        const v = evalTypeExpr(m[1], id);
+        if (v !== undefined) { MOUNT_TYPE.set(id, v); break; }
+      }
+    }
+  }
+}
 
 // ---- 盔甲/配饰基础数据（装备槽归属 + 防御值）→ vanilla-itemstats.json ----
 // 槽位归属：headSlot/bodySlot/legSlot 赋值即对应部位（值是绘制槽序号非部位，仅判有无）。

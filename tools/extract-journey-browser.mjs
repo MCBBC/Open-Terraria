@@ -26,7 +26,7 @@
 //   ④ createTile 权威 = public/sprites/vanilla.json（游戏数据转储，与 TEdit 对账过）
 //   ⑤ tileFrameImportant = Main.cs 全量赋值（404 处 = true + 435-439 循环，无 = false）
 // 用法：node tools/extract-journey-browser.mjs（在 game/ 下运行）
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
@@ -188,6 +188,8 @@ const CT_LITERAL = new Map();  // 字面量 createTile
 const PS_LITERAL = new Map();  // 字面量 placeStyle
 const CW_LITERAL = new Map();  // 字面量 createWall
 const CW_EXPR = new Map();     // SW-BK1 2026-09-06: 共享算式 createWall（type 算式 per-id 求值）
+const PS_EXPR = new Map();     // SW-FX53 2026-09-13: 共享算式 placeStyle（同 evalWallExpr 通道）
+const PET_PROJ = new Map();    // SW-FX53 2026-09-13: DefaultToVanitypet 算式 per-id shoot（boss 宠 21 件）
 const BUFF_TIME = new Map();
 const FISHING = new Map();
 const EXPERT = new Set();
@@ -209,6 +211,31 @@ for (const [id, seg] of CASE_SEGMENTS) {
   if (ct !== undefined) CT_LITERAL.set(id, ct);
   const ps = resolveCaseField(seg, '\\bplaceStyle\\s*=\\s*(\\d+);', id);
   if (ps !== undefined) PS_LITERAL.set(id, ps);
+  // SW-FX53 2026-09-13: 共享算式补提取（fill-when-undefined——字面已值不覆写,取段内
+  // 最后命中同 C# 后写语义;`placeStyle = 1 + type - 3046` 篝火三段式等,与 itemfunc
+  // 侧 evalArithExpr 通道同源。evalWallExpr 亦解纯字面,但字面已走上一通道,此处
+  // 仅算式形态实际生效）。
+  else {
+    for (const p of caseParts(seg, id)) {
+      const em = [...p.matchAll(/\bplaceStyle\s*=\s*([^;]+);/g)].pop();
+      if (em) {
+        const pv = evalWallExpr(em[1], id);
+        if (pv !== undefined) { PS_EXPR.set(id, pv); break; }
+      }
+    }
+  }
+  // SW-FX53: DefaultToVanitypet 实参算式（`881 + type - 4797` 共享块,boss 宠 21 件）
+  // ——FX48 手补面（dmg:0/shoot:N）此前靠盘上手补,重产即回退;此处解析直出 shoot,
+  // damage=0 由 DefaultToVanitypet 本体（Item.cs:47937-47950 damage=0）并入合并面。
+  if (!PET_PROJ.has(id)) {
+    for (const p of caseParts(seg, id)) {
+      const pm = [...p.matchAll(/DefaultToVanitypet\(([^,]+),\s*([^)]+)\)/g)].pop();
+      if (pm) {
+        const pv = evalWallExpr(pm[1], id);
+        if (pv !== undefined) { PET_PROJ.set(id, pv); break; }
+      }
+    }
+  }
   const cw = resolveCaseField(seg, '\\bcreateWall\\s*=\\s*(\\d+);', id);
   if (cw !== undefined) CW_LITERAL.set(id, cw);
   // SW-BK1 2026-09-06: 共享算式补提取（fill-when-undefined——字面已值不覆写;取段内
@@ -297,8 +324,9 @@ for (let vid = 1; vid < ITEM_COUNT; vid++) {
   const c = COMBAT[String(vid)] ?? {};
   const st = STATS[String(vid)] ?? {};
   const rec = {};
-  // damage：本扫(含负) → combat → 默认 -1（Item.cs:48609 复位块）
-  const dmg = DAMAGE.get(vid) ?? c.damage ?? -1;
+  // damage：本扫(含负) → combat → DefaultToVanitypet 隐式 0（SW-FX53）→ 默认 -1
+  //（Item.cs:48609 复位块）
+  const dmg = DAMAGE.get(vid) ?? c.damage ?? (PET_PROJ.has(vid) ? 0 : -1);
   if (dmg !== -1) rec.dmg = dmg;
   // createTile：vanilla.json（游戏转储权威）→ DefaultToPlaceableTile → 字面量
   const vanCt = VAN.items[String(vid)]?.createTile;
@@ -308,8 +336,8 @@ for (let vid = 1; vid < ITEM_COUNT; vid++) {
   // createWall：DefaultToPlaceableWall → 字面量 → 共享算式(SW-BK1) → itemfunc
   const cw = PLACE_WALL.get(vid) ?? CW_LITERAL.get(vid) ?? CW_EXPR.get(vid) ?? f.createWall ?? -1;
   if (cw >= 0) rec.cw = cw;
-  // placeStyle：字面量 → DefaultToPlaceableTile 第二参 → itemfunc
-  const ps = PS_LITERAL.get(vid) ?? ptArgs?.[1] ?? f.placeStyle ?? 0;
+  // placeStyle：字面量 → DefaultToPlaceableTile 第二参 → 共享算式(SW-FX53) → itemfunc
+  const ps = PS_LITERAL.get(vid) ?? ptArgs?.[1] ?? PS_EXPR.get(vid) ?? f.placeStyle ?? 0;
   if (ps) rec.ps = ps;
   if (TILE_WAND.has(vid)) rec.tw = TILE_WAND.get(vid);
   if (MAKE_NPC.has(vid)) rec.mnpc = MAKE_NPC.get(vid);
@@ -337,6 +365,7 @@ for (let vid = 1; vid < ITEM_COUNT; vid++) {
   if (fp !== 1) rec.fp = fp;                          // 默认 1（Item.cs:104）
   if (f.bait) rec.bait = f.bait;
   if (c.shoot) rec.shoot = c.shoot;
+  else if (PET_PROJ.has(vid)) rec.shoot = PET_PROJ.get(vid);
   if (dyeSet.has(vid)) rec.dye = 1;
   if (hairDyeSet.has(vid)) rec.hd = 1;
   if (c.melee) rec.m = 1;
@@ -374,7 +403,12 @@ const doc = {
   tileSolid, tileSolidTop,
   tileFrameImportant: [...frameImportant].sort((a, b) => a - b),
 };
-writeFileSync(`${ROOT}/game/src/data/vanilla-journeycat.json`, JSON.stringify(doc));
+// SW-FX53 2026-09-13: SW_FX53_OUT=<dir> 试产重定向（禁真写纪律,与 equip 提取器同约定）
+const JC_OUT = process.env.SW_FX53_OUT
+  ? `${process.env.SW_FX53_OUT}/vanilla-journeycat.json`
+  : `${ROOT}/game/src/data/vanilla-journeycat.json`;
+if (process.env.SW_FX53_OUT) mkdirSync(process.env.SW_FX53_OUT, { recursive: true });
+writeFileSync(JC_OUT, JSON.stringify(doc));
 
 // ---- 统计出口（提取器健康度目检）----
 const stats = { vanity: VANITY.size, tileWand: TILE_WAND.size, makeNPC: MAKE_NPC.size,

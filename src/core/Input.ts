@@ -2,6 +2,7 @@
 import { bindsOf, type KeybindAction } from './Keybinds';
 import { isDomUiTarget } from './input/domTargets';
 import { resolveTouchMode } from './input/touchMode';
+import { wheelEventPx } from './input/wheel';   // ★SW-FX51：滚轮 deltaMode 归一（RB14d 单源）
 
 /** 泛化键沿载荷(mobile-adaptation-plan 模块①):keydownHandlers 的统一第二参。
  *  物理键盘派发时由 KeyboardEvent 逐字段映射(origin='physical');虚拟通道
@@ -92,7 +93,19 @@ export class Input {
    *  ——电平语义下复位先于任何新沿（mouseup 必经）,沿位门=死代码。 */
   blockMouse = false;
   uiBlocking = false;     // 背包/合成等打开时为 true
+  /** ★SW-FX51 2026-09-12 语义升级（FX50 点2 备案债清偿面）：wheelDelta = 原版
+   *  PlayerInput.ScrollWheelDelta 的【±notch 计数档】等价物（XNA 上滚为正,整数,
+   *  一拍可 ±2+）。入账链（wheel 监听）=deltaMode 归一 px 取负入 _wheelPxCarry
+   *  （浏览器 deltaY 下滚为正 → XNA 上滚为正;PlayerInput.cs:1407 逐事件
+   *  ScrollWheelValue+=）,整档 ±120 即时发布、余数跨帧留置（RB14d 余数累计器
+   *  同款——Chrome ±100px/notch 重映射下逐事件 trunc 会整类吞零;量化相位在事件
+   *  界而非帧界,<1 拍差,净档数逐值同）。旧 `Math.sign` 号面退役（FX50 B1 源锁
+   *  已随刀更新）:①观战退出=符号无关真值不变（Player.cs:17209 !=0）②全屏图缩放
+   *  /③热栏切换消费档数（Player.cs:25387-25396 /:32029）。每帧 endFrame 清零
+   *  （:901-902 帧差语义,余数不清=跨帧累计）。 */
   wheelDelta = 0;
+  /** 滚轮 px 余数累计器（XNA 号,跨帧留置;见 wheelDelta 注） */
+  private _wheelPxCarry = 0;
   /** keydown 边沿回调（含原生事件与虚拟按键沿）。第二参已泛化为 KeyEventLite:
    *  物理键=KeyboardEvent 字段映射,e.shiftKey/e.altKey 读法原样可用;
    *  虚拟边沿 origin='virtual' 且 repeat 恒 false(repeat 由 pressVirtual 重发承担) */
@@ -243,7 +256,17 @@ export class Input {
     }) as EventListener);
     onEl('contextmenu', (e) => e.preventDefault());
     onEl('wheel', ((e: WheelEvent) => {
-      this.wheelDelta += Math.sign(e.deltaY);
+      // ★SW-FX51 2026-09-12：±notch 计数档入账（语义升级见 wheelDelta 字段注）。
+      //  取负=浏览器 deltaY 下滚为正 → XNA ScrollWheelValue 上滚为正
+      //  （PlayerInput.cs:901-902;FX50 点1 browserWheelDeltaYToVanilla 同号锚）。
+      //  deltaMode 归一=core/input/wheel.wheelEventPx（RB14d 单源,Firefox 行模式
+      //  不吞零）;整档发布+余数留置（RB14d 累计器同款,防 Chrome ±100px/notch 重映射）。
+      this._wheelPxCarry -= wheelEventPx(e.deltaY, e.deltaMode);
+      const notches = Math.trunc(this._wheelPxCarry / 120);
+      if (notches !== 0) {
+        this._wheelPxCarry -= notches * 120;
+        this.wheelDelta += notches;   // XNA 号:上滚=+,下滚=−（PlayerInput.cs:901）
+      }
       e.preventDefault();
     }) as EventListener, { passive: false });
 
@@ -461,7 +484,10 @@ export class Input {
     return ACTION_CODE_SET.has(v) ? bindsOf(v as KeybindAction) : [v];
   }
 
-  /** 每帧末调用（fixedUpdate 尾），处理一次性输入：滚轮计数清零 + tap 兜底释放 */
+  /** 每帧末调用（fixedUpdate 尾），处理一次性输入：滚轮计数清零 + tap 兜底释放
+   *  （★SW-FX51：只清计数档,_wheelPxCarry 余数跨帧留置——PlayerInput.cs:876-877
+   *  ScrollWheelValueOld=Value 每帧重锚,子档差在原版被帧界 trunc 整吞;仓内余数
+   *  留置=RB14d 判例,防浏览器 ±100px/notch 重映射整类吞档,净档数逐值同） */
   endFrame() {
     this.wheelDelta = 0;
     if (this.pendingTapRelease) {
@@ -479,5 +505,16 @@ export class Input {
       this.rightDown = false;
       this.pendingRightRelease = 0;
     }
+  }
+
+  /** ★SW-FX51 2026-09-12：滚轮累加器重锚（PlayerInput.cs:1407-1409 `if
+   *  (!FocusHelper.AllowInputProcessing) { ScrollWheelValue = (ScrollWheelValueOld =
+   *  Mouse.GetState().ScrollWheelValue); return; }` 1:1——输入处理不被允许的窗口
+   *  （本仓=暂停/失焦,paused 冻结 fixedUpdate→endFrame 不跑）里滚动产生的增量在
+   *  原版被重锚【整段丢弃】,恢复拍 ScrollWheelDelta=0,无幻象消费。本仓 Game.frame
+   *  暂停支逐帧调用;计数档+px 余数一并清（原版重锚即累积量归位,余数同死）。 */
+  resetWheelAccumulators() {
+    this.wheelDelta = 0;
+    this._wheelPxCarry = 0;
   }
 }

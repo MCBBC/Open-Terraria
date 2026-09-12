@@ -7502,6 +7502,12 @@ export class Game implements GameHooks {
         this.acc -= FIXED_DT;
         steps++;
       }
+    } else {
+      // ★SW-FX51 2026-09-13：暂停窗滚轮重锚（PlayerInput.cs:1407-1409
+      //  !AllowInputProcessing → ScrollWheelValue 双锚归位=增量整段丢弃 1:1）——
+      //  暂停期 fixedUpdate 冻结（endFrame 不跑）,wheelDelta 会滞留到恢复拍造成
+      //  幻象切槽;原版门内增量本就逐帧丢弃,此处对齐（含 px 余数=累积量归位）。
+      this.input.resetWheelAccumulators();
     }
     // 环境音 cue 斜坡步进（★差异对齐 2026-08-24）：原版 UpdateAudio 在 XNA 固定
     // 60Hz Update 内无条件执行（Main.cs:17222 DoUpdate 主流程，gamePaused 不门控）
@@ -7657,6 +7663,53 @@ export class Game implements GameHooks {
   }
 
   // ================= 固定步逻辑 =================
+
+  /** ★SW-FX51(2) 2026-09-12 全屏图滚轮缩放（FX50 点2 备案债清偿）——Player.cs:25387-25396
+   *  1:1（调用域 :25385 mapFullscreen 先占支;前提 inp.wheelDelta≠0=外层门,原版 num8=0
+   *  恒 ×1 无操作等价）：
+   *  `float num8 = PlayerInput.ScrollWheelDelta / 120;`（:25388,C# 整除向零——Input 已
+   *  结算成 ±notch 计数档,此处直读）;
+   *  `Main.mapFullscreenScale *= 1f + num8 * 0.3f;`（:25396）——跨帧【复利】（连滚两拍
+   *  =1.3²=1.69）;一帧多档 1+n·0.3 【线性】（±2 档=×1.6/×0.4,非 1.3²）。
+   *  方向=XNA 上滚为正 ⇒ 上滚 ×1.3 放大/下滚 ×0.7 缩小（FX50 B2 判据保留,与旧 0.85/1.18 同向）。
+   *  手柄臂（:25391-25394 UsingGamepad → HotbarPlus/Minus ×0.1f）本作无手柄通道不建（登记）。
+   *  仓内增益保留（FX50 点2 裁决）：①鼠标锚点缩放（zoomFullMapAt）②[0.5,6] 显示域钳
+   *  （原版钳在 mapFullscreenScale 域 :56202-56210=屏宽/世界宽·0.599..31.18,域不同不搬）
+   *  ③缓动（BJ15）——复利基准取 zoomTarget（缓动收终点）而非缓动中的 zoom：连滚 n 档
+   *  终值=z₀·1.3ⁿ 逐值同原版（基准取 zoom 会被缓动分数吞掉部分复利）。 */
+  private fullMapWheelZoom(): void {
+    const fm = this.renderer.fullMap;
+    const num8 = this.input.wheelDelta;   // PlayerInput.ScrollWheelDelta/120 等价（C# 整除已结算）
+    this.renderer.zoomFullMapAt(
+      fm.zoomTarget * (1 + num8 * 0.3),   // :25396 复利（基准=收终点,见注）
+      this.input.mouseX, this.input.mouseY,
+    );
+  }
+
+  /** ★SW-FX51(1) 2026-09-12 热栏滚轮切换（FX50 最大发现:仓内全无 wheel→hotbar 消费）——
+   *  Player.cs:32005-32036 HandleHotbarControls 滚轮臂 1:1（调用域 :25403-25406
+   *  !mapFullscreen ∧ !CaptureManager.Active ∧ !hairWindow ∧ !playerInventory 的 else 支,
+   *  见 fixedUpdate 滚轮块分支注）。notches=Input wheelDelta ±notch 计数档（XNA 上滚为正）。
+   *  原式 `num += PlayerInput.ScrollWheelDelta / -120;`（:32029,C# 整除向零）⇒ num=−notches:
+   *  上滚=−1=上一格（selected−1,向左）,下滚=+1=下一格——`/-120` 的负号即方向自白。
+   *  `selectedItemState.Select(ClampHotbarOffset(selectedItemState.Hotbar + num))`（:32032-
+   *  32033 + :32134-32145 while >9 −10/<0 +10 环绕）——基准槽=SelectedItemState.Hotbar
+   *  镜像 smartSelectHotbar（:12024 跟随记录;★A-F5 同判:Shift 智选覆盖期 inv.selected 可能
+   *  是 >9 工具槽,原版基准从不取它,OverrideSelection 从不写 :391）;while 环绕 ≡ 双 mod
+   *  （Hotbar∈[0,9] ∧ |num| 有限）。
+   *  Select 本地等价三件套=数字键臂（:5648-5659）同款：selected 写回 + afkCounter=0
+   *  （Select :498-499;kiting 计数未建模同数字键臂）+ cb.onInventoryChanged()。
+   *  同帧序：原版数字键块（:25289-25330）先于滚轮块（:25406）读同一 selectedItemState,
+   *  末写者胜;本仓 keydown 边沿即时写、tick 滚轮相对叠加=同相。QuickMount 链
+   *  （:12264-12288 坐骑键族）零滚轮消费面=无交叉。SoundID 12（Select :492）与数字键臂
+   *  现状一致不响=同域债一并登记（不单边响,防两通道不一致）。 */
+  private hotbarWheelSwitch(notches: number): void {
+    const num = -notches;                                            // :32029 /-120 负号
+    const target = ((this.smartSelectHotbar + num) % 10 + 10) % 10;  // ClampHotbarOffset(:32134-32145)
+    this.player.inv.selected = target;
+    this.player.afkCounter = 0;             // Select(:498) 同款清零
+    this.cb.onInventoryChanged();
+  }
 
   private fixedUpdate(dt: number) {
     this.tickCount++;
@@ -8245,13 +8298,30 @@ export class Game implements GameHooks {
     //  gravLatch 只清不置（F1 电平化,按住↑每拍翻转）整段退役。见 Player.ts 同标记。
 
     // 滚轮：全屏地图打开时缩放地图，否则缩放游戏画面
+    // ★SW-FX51 2026-09-12：分支序=Player.cs:25385-25407 逐支对齐（调用域在 Player.Update,
+    //  本仓同位=fixedUpdate tick 段;wheelDelta 现为 ±notch 计数档,见 Input.wheelDelta 注）：
+    //  ①mapFullscreen→缩放（:25387-25396,fullMapWheelZoom 1:1）
+    //  ②CaptureManager.Active→Scrolling()（:25397-25399）——本仓拍照滚轮走 main.ts
+    //    捕获相位直供 cm.pendingWheel（capture 期 stopPropagation,Input 通道不进账）,
+    //    此空支承接分支序防热栏/背包误接
+    //  ③!hairWindow→{playerInventory→DoScrollingInInventory（:25404-25405,本仓=
+    //    UI.ts vinvGridWheelTick/vinvCraftWheel DOM 通道 FX38/RB14d）;else→热栏滚轮
+    //    （:25406 HandleHotbarControls → hotbarWheelSwitch 1:1,FX50 最大发现整缺面）}
+    //    hairWindow=原版 DrawHairWindow 理发窗悬停让位（:25400-25403 flag7;Main.cs:44452
+    //    ScrollWheelDelta/120 滚发式）——本仓无对局内理发窗,不建模（登记）。
     if (inp.wheelDelta !== 0) {
       if (this.renderer.fullMap.open) {
-        // 以鼠标为锚点缩放（缩放不乱飞）
-        this.renderer.zoomFullMapAt(
-          this.renderer.fullMap.zoom * (inp.wheelDelta > 0 ? 0.85 : 1.18),
-          inp.mouseX, inp.mouseY,
-        );
+        this.fullMapWheelZoom();
+      } else if (this.renderer.captureMode.active) {
+        // 拍照模式支（见上②;滚轮量已走 main.ts capture 相位,此处无第二消费面）
+      } else if (typeof window !== 'undefined'
+        && ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false)) {
+        // 背包支（见上③;Main.playerInventory 语义直读 __swUI,Game.ts:12193 同款）——
+        // 滚轮归背包/合成列表 DOM 通道,热栏不切（原版 :25404 同门,数字键无此门=刻意不对称）
+      } else if (!this.paused) {
+        // 热栏滚轮切换（HandleHotbarControls 滚轮臂;inFancyUI∧ingameOptionsWindow 门
+        // :32028 → 本仓等价=浮层事件驱动 paused,RB8c 口径）
+        this.hotbarWheelSwitch(inp.wheelDelta);
       }
       // ★滚轮视野缩放移除(2026-09-08 zoom 对齐原版):原版 Main 无滚轮视野缩放
       //  (UpdateViewZoomKeys 键族 + IngameOptions 滑条是仅有的两个入口),滚轮在
@@ -10188,7 +10258,16 @@ export class Game implements GameHooks {
       w.markExplored(Math.floor(player.cx / TILE), Math.floor(player.cy / TILE), 28);
     }
 
-    // ---- Buff 状态栏刷新（每秒） ----
+    // ---- Buff 状态栏刷新 ----
+    // ★SW-FX52（2026-09-12）onBuffsFrame 逐帧接线（FX48/A1 定谳：声明 Game.ts:2527/
+    //  mainFlow :408 赋值/全仓零调用点 = tickBuffLive 逐帧通道整断，图标生灭/随从
+    //  xN 计数退化 1Hz）。原版频率语义 = DrawBuffIcon 每帧跑（Main.cs:44042-44060，
+    //  xN 计数 BuffTextHandlers 逐帧求值 :44053 = CachedProjectileCounterBuffTextHandler
+    //  的 ownedProjectileCounts 现算（Terraria.DataStructures 同名.cs;注册 BuffID.cs:36+））
+    //  → 本仓 tick 即帧。开销面：
+    //  UI 侧自带门控增量（buff 键签名比对，无变更零 DOM 写；开包非 buff 页整帧早退）
+    //  ⇒ 60Hz 调用为 O(buffs+projectiles) 纯读。1Hz 整刷臂保持原频（:下 onBuffsChanged）
+    this.cb.onBuffsFrame?.();
     if (this.tickCount % 60 === 0) this.cb.onBuffsChanged?.();
 
     // ---- 相机 / 光照 ----
@@ -31684,14 +31763,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // bound TownNPC → 绑缚原版 id 登记（原版被缚 NPC 本体就是 105/106/123/354/589/685
     // 类型，AnyNPCs 直接可见；本仓 bound 态以 TownNPC 近似 → 反查登记，使三人组链的
     // !AnyNPCs(105/106/685) 场上唯一门与机械师/造型师/高尔夫球手各支同语义）
+    // ★SW-FX52（2026-09-12）：骷髅商 453（非绑 TownNPC，npcs 桶承载）一并入计数表
+    // ——原版 CountNPCS 遍历 Main.npc 全表（NPC.cs:90941-90951，城镇 NPC一体可见），
+    // 唯一门 CountNPCS(453)==0（:5007）消费；此前 453 不入 enemies/critters 桶也不
+    // 是 bound → 不入表 → spawner 侧 !any(453) 恒真（RB12c）。只入 moonCounts 不入
+    // activeIds：原版 AnyNPCs(453) 全源零消费（仅 :5007 计数门），activeIds 加 453
+    // 无行为面且会扰动 AnyNPCs 去重语义域
     for (const n of this.entities.npcs) {
       const tn = n as TownNPC;
-      if (!(tn instanceof TownNPC) || tn.dead || !tn.bound) continue;
-      const boundId = Game.BOUND_TOWN_NPC_ID[tn.npcKey];
-      if (boundId !== undefined) {
-        activeIds.add(boundId);
-        moonCounts.set(boundId, (moonCounts.get(boundId) ?? 0) + 1);
+      if (!(tn instanceof TownNPC) || tn.dead) continue;
+      if (tn.bound) {
+        const boundId = Game.BOUND_TOWN_NPC_ID[tn.npcKey];
+        if (boundId !== undefined) {
+          activeIds.add(boundId);
+          moonCounts.set(boundId, (moonCounts.get(boundId) ?? 0) + 1);
+        }
+        continue;
       }
+      if (tn.vanillaId === 453) moonCounts.set(453, (moonCounts.get(453) ?? 0) + 1);
     }
     const moonCtx = w.moonEvent.kind !== 0
       ? { kind: w.moonEvent.kind, wave: w.moonEvent.waveNumber, counts: moonCounts, bossSlotSum: moonBossSlotSum }

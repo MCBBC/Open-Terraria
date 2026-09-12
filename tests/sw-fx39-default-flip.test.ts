@@ -61,11 +61,32 @@ describe('SW-FX39 ①缺省翻转(Options)', () => {
     expect(optionsSrc).toContain('★SW-FX39(2026-09-11)缺省转正：坏值回新缺省 vanilla');
   });
 
-  it('存档侧 classic(灰度期显式切换)保留不迁移', async () => {
+  it('存档侧 classic(转正前自动落盘)一次性迁移→vanilla+migrated 旗(SW-FX51 退役刀)', async () => {
     vi.mocked(kvGet).mockResolvedValue(JSON.stringify({ inventoryLayout: 'classic' }));
     const s = new OptionsStore();
     await s.load();
+    expect(s.data.inventoryLayout).toBe('vanilla');
+    expect(s.data.inventoryLayoutMigrated).toBe(true);
+    // ★RB14b-F2(2026-09-12):迁移即经 set() 挂 400ms 防抖落盘——本测试必须自行冲刷,
+    //   否则计时器在后续测试窗口内触发,写档串扰(曾把 classic 写进 ②legacy 取窗)
+    await new Promise((r) => setTimeout(r, 450));
+  });
+
+  it('迁移后显式切回 classic 经 Settings 保留（migrated 旗防再迁移）', async () => {
+    vi.mocked(kvGet).mockResolvedValue(JSON.stringify({ inventoryLayout: 'classic' }));
+    const s = new OptionsStore();
+    await s.load();
+    expect(s.data.inventoryLayout).toBe('vanilla');           // 一次性迁移已发生
+    s.set('inventoryLayout', 'classic');                       // 用户显式切回
     expect(s.data.inventoryLayout).toBe('classic');
+    expect(s.data.inventoryLayoutMigrated).toBe(true);         // 旗在,下次 load 不再迁移
+    const s2 = new OptionsStore();
+    vi.mocked(kvGet).mockResolvedValue(JSON.stringify({ inventoryLayout: s.data.inventoryLayout, inventoryLayoutMigrated: s.data.inventoryLayoutMigrated }));
+    await s2.load();
+    expect(s2.data.inventoryLayout).toBe('classic');           // 显式意志保留
+    // ★RB14b-F2:set('inventoryLayout','classic') 的 400ms 落盘计时器在本测试结束后
+    //   才触发——不冲刷则 classic 写档落入 ②legacy 测试取窗(纯计时器串扰,非语义回归)
+    await new Promise((r) => setTimeout(r, 450));
   });
 
   it('存档侧 vanilla 保留', async () => {
@@ -119,11 +140,15 @@ describe('SW-FX39 ②回退旗面(URL 会话覆盖)', () => {
 
   it('legacy 覆盖仅会话生效:set() 落盘剥回存档侧值(红队 F1 语义不变)', async () => {
     vi.stubGlobal('location', { search: '?invlayout=legacy' });
+    // ★SW-FX51:断言窗口化——kvSet mock 全文件累积,只取本测试窗口内的新增写入。
+    //  ★RB14b-F2:窗口化单靠自身不够——①的 set() 计时器若不在其测试内冲刷,触发点
+    //  恰落进本窗(晚于 callsBefore 采样);根修=①迁移刀/显式切回两测各自冲刷 450ms。
+    const callsBefore = vi.mocked(kvSet).mock.calls.length;
     const s = new OptionsStore();
     await s.load();
     s.set('uiScale', 1.2);
     await new Promise((r) => setTimeout(r, 450));   // 落盘防抖 400ms
-    const writes = vi.mocked(kvSet).mock.calls
+    const writes = vi.mocked(kvSet).mock.calls.slice(callsBefore)
       .map((c) => JSON.parse(c[1] as string) as { inventoryLayout?: string });
     expect(writes.length).toBeGreaterThan(0);
     for (const w of writes) expect(w.inventoryLayout).toBe('vanilla');   // 覆盖值绝不入档

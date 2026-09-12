@@ -69,6 +69,23 @@
 //   fill-when-undefined）+ structuralIfRanges（wallitems 路径 B 同构,仅收 createWall
 //   体）。对账面=vanilla-wallitems.json 292 项逐值;重产 diff 恰 35 件新增字段
 //   （28 整缺条目 + 7 既有条目补 createWall 键）,其余 3730 条 md5 级零 diff。
+// 2026-09-13 ★SW-FX53 提取器算式盲区教正则（防未来重产回退,四形态定谳+教学）：
+//   ①placeStyle 共享算式（`1 + type - 3046` 篝火三段式等,BJ50/FX3 手补面）——
+//     evalFields 增拓扑残文算式通道（residueWithBare,裸复合块感知,fill-when-undefined,
+//     无首匹配回落=宁缺勿伪）+ evalPlaceStyle 同教（金标互检闸门两侧同源）;
+//   ②区间 if/if-else 覆写——evalPlaceStyle 条件求值统一走 evalBaseCond（不等式
+//     `type <= 2614` 宝箱倍增档曾整支误走 else）;区间体嵌套 switch(type) per-id 解析
+//     （switchCasesOf,墙件 2677-2690）;`if (N == type)` 反序三连 if（气球 453 绑定档
+//     3743-3745）原有支路已证正确,本批钉死;structuralIfRanges 扩收 placeStyle 体 +
+//     returns 终结旗（区间体含 return ⇒ 后续 case 死码,2413 沙发 17 真值）;
+//   ③SetDefaults3(N) 委托继承——resolveDelegates（基底 case 全字段 ∪ caller 覆写,
+//     镜像 combat 提取器 delegates 通道）,DELEGATE_LANDED 白名单 15 件月主锯钻/挥砍,
+//     DELEGATE_EXPANSION 手补表转金标对拍面（+noUseGraphic 六键=手补漏载,反编译为准）;
+//   ④嵌套 if/派生局部——`int num = type - 1994` 派生局部 per-id 求值 + 条件代入
+//     （evalBaseCond 纯数字比较臂）,蠕虫笼 1994-2001 bait 八档解析直出（手补 2001 转
+//     no-op）。重产 dry-run 对账（vs 手补面 663 行）：622 解析同值/41 沉默
+//     （fakecontainers 3666-3706 `(type>N).ToInt()` 布尔计数式=登记债,手补仍权威）/
+//     0 冲突/0 缺失;守卫 tests/sw-fx53-extractor-blindspots.test.ts。
 import { readFileSync, writeFileSync } from 'node:fs';
 // SW-V1 2026-09-04: 增 AMMO_ID——DefaultTo* 参数化展开需解 AmmoID.X 枚举实参
 // （RangedWeapon 第二参/Solution 的 AmmoID.Solution;权威表与 combat 提取器同源）。
@@ -203,6 +220,72 @@ function scanParen(text, i) {
   return n;
 }
 
+/** SW-FX53 2026-09-13：裸复合块感知残文——topStatementText 把所有 {} 块一律剥除,
+ *  `case N: { … }` 的【裸复合块】（无条件顺序执行）内容因此从残文消失（蠕虫笼
+ *  Item.cs:21341-21390 case 1994-2001 整体包在 `{…}` 内,`placeStyle = 1 + type -
+ *  1994` 随块被剥）。本函数 = topStatementText 的同构变体,唯一分歧：
+ *  · 主循环 `{`：控制块（else/do/try 的块,expectBlock 旗;或 `)` 后的块=带头控制块）
+ *    整块剥;否则裸块【只跳 `{` 字符】,内容线性流入主逻辑（其 if 头/嵌套块照常处理）。
+ *  · 主循环 `}`：裸块闭括号直接跳过（控制块闭括号已被 skipBraced 消费）。
+ *  · KW 增 try（防 try{ 裸判）。
+ *  【仅服务 evalFields 的 placeStyle 算式通道】,不动 topStatementText
+ *  （lastFieldMatch 全 FIELDS 面零漂移）。 */
+function residueWithBare(text) {
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  const KW = /^(foreach|while|switch|else|if|for|do|try)\b/;
+  let expectBlock = false;   // else/do/try 已吞词、紧随的 `{` 是其受控块
+  const kwAt = (t, p) => p === 0 || !/\w/.test(t[p - 1]);
+  while (i < n) {
+    const ch = text[i];
+    if (ch === '/' && text[i + 1] === '/') { while (i < n && text[i] !== '\n') i++; continue; }
+    if (ch === '/' && text[i + 1] === '*') { const e = text.indexOf('*/', i + 2); i = e < 0 ? n : e + 2; continue; }
+    if (ch === '"' || ch === "'") {
+      const q = ch; i++;
+      while (i < n && text[i] !== q) { if (text[i] === '\\') i++; i++; }
+      i++; out += ' ';
+      continue;
+    }
+    if (ch === '{') {
+      if (expectBlock) {
+        const e = skipBraced(text, i); if (e < 0) break;
+        out += ' '; i = e; expectBlock = false; continue;
+      }
+      i++; continue;   // 裸块：只跳 `{`,内容线性流入（含其控制结构）
+    }
+    if (ch === '}') { i++; continue; }   // 裸块闭括号
+    if (kwAt(text, i) && KW.test(text.slice(i, i + 9))) {
+      const kw = KW.exec(text.slice(i, i + 9))[1];
+      let j = i + kw.length;
+      while (j < n && /\s/.test(text[j])) j++;
+      if (kw === 'else' || kw === 'do' || kw === 'try') {
+        if (text[j] === '{') { expectBlock = true; i = j; out += ' '; continue; }
+        i = j; out += ' '; continue;   // else if / do …（无括号词吞掉,防重复计词）
+      }
+      if (text[j] === '(') {
+        let pd = 0;
+        for (; j < n; j++) {
+          const c2 = text[j];
+          if (c2 === '"' || c2 === "'") { const q = c2; j++; while (j < n && text[j] !== q) { if (text[j] === '\\') j++; j++; } continue; }
+          if (c2 === '(') pd++;
+          else if (c2 === ')') { pd--; if (pd === 0) { j++; break; } }
+        }
+        i = j;
+        while (i < n && /\s/.test(text[i])) i++;
+        if (text[i] === '{') { i = skipBraced(text, i); if (i < 0) break; out += ' '; continue; }
+        i = skipSimple(text, i);
+        out += ' ';
+        continue;
+      }
+      out += text[i]; i++;
+      continue;
+    }
+    out += ch; i++;
+  }
+  return out;
+}
+
 /** 段文本 → 该 id 的 placeStyle 终值。
  *  顺序单位扫描（C# 执行序）：无条件赋值【后写覆盖】（★十五批备B 收尾,2026-09-03
  *  改——原"首个生效=v1 首匹配"与 C# 顺序语义反,共享体 placeStyle 双赋值或 if 支后
@@ -211,14 +294,21 @@ function scanParen(text, i) {
  *  防御锻造炉 3743-3745 三连 if）命中支覆写、未命中走 else 支（else-if 链递归同规）;
  *  【非】type 比较条件（Variant 变体支/区间支）按未命中处理——只走 else 支（基态
  *  画像口径,Variant 支体不入单值面）+整支消耗;switch 块整块跳过（per-id 归并是
- *  psResolveSwitch 孔剥层职能）。算式（20 + type - 2637 等）不解（与 v1 同口径,
- *  交 items.ts vanilla.json 回填链）。 */
+ *  psResolveSwitch 孔剥层职能）。
+ *  SW-FX53 2026-09-13：算式解值（`placeStyle = 1 + type - 3046;` 等,evalArithExpr
+ *  同一求值器）——此前"算式不解"口径正是 items.ts 手补回填的根因;本层与 F-STRUCT
+ *  evalFields 的算式通道同教,placeStyle 金标互检（psDrift 闸门）两侧同值才放行。
+ *  不可解 RHS（未知标识符等）整事件跳过（ps 保持原值,宁缺勿伪）。 */
 function evalPlaceStyle(text, id) {
   let ps;
-  const re = /(if|switch)\s*\(|placeStyle\s*=\s*(\d+)\s*;/g;
+  const re = /(if|switch)\s*\(|placeStyle\s*=\s*([^;]+);/g;
   let m;
   while ((m = re.exec(text))) {
-    if (m[2] !== undefined) { ps = +m[2]; continue; }   // ★后写覆盖（原 if (ps===undefined) 首写钉死）
+    if (m[2] !== undefined) {   // ★后写覆盖（原 if (ps===undefined) 首写钉死）
+      const v = /^\s*-?\d+\s*$/.test(m[2]) ? parseInt(m[2], 10) : evalArithExpr(m[2], id);
+      if (v !== undefined) ps = v;
+      continue;
+    }
     if (m[1] === 'switch') {
       let j = re.lastIndex;
       while (j < text.length && /\s/.test(text[j])) j++;
@@ -228,12 +318,16 @@ function evalPlaceStyle(text, id) {
     }
     const afterHeader = scanParen(text, re.lastIndex);
     const cond = text.slice(re.lastIndex, afterHeader - 1);
-    const cm = /^\s*(?:(?:type|currentItem\.type)\s*==\s*(\d+)|(\d+)\s*==\s*(?:type|currentItem\.type))\s*$/.exec(cond);
     const parsed = consumeIf(text, afterHeader);
     if (!parsed) continue;
     re.lastIndex = parsed.end;   // 绝对下标（consumeIf 以同一 text 计位）
-    const n = cm ? (+cm[1] || +cm[2]) : -1;   // 非 type 比较（Variant/区间）=未命中
-    const branch = n === id ? parsed.body : parsed.elseBody;
+    // SW-FX53 2026-09-13：条件求值统一走 evalBaseCond（基态口径）——旧 cm 正则只认
+    // `type == N` 等式,不等式（宝箱倍增档 `if (type <= 2614)`,Item.cs:25555）整支
+    // 误走 else → 2612-2614 伪值 38/39/40;evalBaseCond 的不等式臂给出真值 35/37/39
+    // （items.ts PLACE_STYLE_BACKFILL_1458 宝箱族手补行同值）。Variant 等不可解条件
+    // 仍按未命中走 else（基态口径不变）。
+    const verdict = evalBaseCond(cond, id);
+    const branch = verdict === true ? parsed.body : parsed.elseBody;
     if (branch !== undefined) {
       const v = evalPlaceStyle(branch, id);
       if (v !== undefined) ps = v;   // 条件命中覆写（C# 后写胜）
@@ -401,6 +495,21 @@ function evalBaseCond(cond, id) {
   if (/^\s*(?:currentItem\.)?Variant\s*!=\s*ItemVariants\.\w+\s*$/.test(c)) return true;
   if (/^\s*ItemVariants\.\w+\s*==\s*(?:currentItem\.)?Variant\s*$/.test(c)) return false;
   if (/^\s*ItemVariants\.\w+\s*!=\s*(?:currentItem\.)?Variant\s*$/.test(c)) return true;
+  // SW-FX53 2026-09-13：纯数字字面比较（派生局部变量代入后形态,如蠕虫笼
+  //  `int num = type - 1994` ⇒ `num == 0` 代入成 `0 == 0`——evalFields 求值序里
+  //  局部先替换、此处兜底判真值;1994-2001 bait 八档即此形态,Item.cs:21343-21387）。
+  m = /^\s*(-?\d+)\s*(==|!=|<=|>=|<|>)\s*(-?\d+)\s*$/.exec(c);
+  if (m) {
+    const a = +m[1], b = +m[3];
+    switch (m[2]) {
+      case '==': return a === b;
+      case '!=': return a !== b;
+      case '<=': return a <= b;
+      case '>=': return a >= b;
+      case '<': return a < b;
+      default: return a > b;
+    }
+  }
   return undefined;
 }
 
@@ -409,7 +518,11 @@ let SCAN_SRC = null;
  *  autoReuse 单独扩 (?:true|false)）,命名字组定位字段名。 */
 function scanSource() {
   if (SCAN_SRC === null) {
-    SCAN_SRC = '(if|switch)\\s*\\('
+    // SW-FX53 2026-09-13：增 `int <local> = <expr with type>;` 派生局部声明通道
+    // （SetDefaults1-5 全域唯一一处带 type 派生:Item.cs:21343 `int num = type - 1994`
+    // 蠕虫笼 bait 八档;:47959 `int num = item.type` 在 DefaultToSeaShell helper 体内
+    // 不经此层）。命名字组 LOC,在 evalFields 里先于 FIELDS 组处理。
+    SCAN_SRC = '(if|switch)\\s*\\(|(?<LOC>int\\s+\\w+\\s*=\\s*[^;]+;)'
       + FIELDS.map(([n, re]) => `|(?<F_${n}>${n === 'autoReuse' ? 'autoReuse = (?:true|false);' : re.source})`).join('');
   }
   return SCAN_SRC;
@@ -419,41 +532,124 @@ function scanSource() {
  *  种子=defaultToBase(text)（DefaultTo* 辅助族隐式赋值打底）→ 线性扫描覆写：
  *  无条件赋值后写覆盖;if 命中支/else 支按 evalBaseCond 递归求值后并入（后写胜）;
  *  switch 整块跳过（嵌套 switch(type) per-id 归并是 fieldsResolveSwitch 职能）;
- *  注释剥除（// 与 /* *\/——v1 残文层同口径,防注释伪赋值入面）。 */
-function evalFields(text, id) {
+ *  注释剥除（// 与 /* *\/——v1 残文层同口径,防注释伪赋值入面）。
+ *  SW-FX53 2026-09-13 增三通道（各自 fill-when-undefined / 不可解即沉默,零漂移）：
+ *  ① locals：`int <name> = <type 算式>;` 派生局部 per-id 求值（Item.cs:21343
+ *     `int num = type - 1994`）,if 条件先代入再 evalBaseCond（`num == 0` → `0 == 0`）;
+ *  ② placeStyle 算式（拓扑残文取末匹配,`1 + type - 3046` 篝火三段式/嵌套 if 支内
+ *     `35 + (type - 2612) * 2` 经递归各自求值）;【无 lastFieldMatch 的整段首匹配
+ *     回落】——回落正是「共享组他 id 伪值」病灶,此处宁缺勿伪;
+ *  ③ useTurn/createWall 补提取维持 SW-BK1 口径不变。 */
+/** SW-FX53: switch 体 → { cases: Map<label, body>, def }（case 标签按体深度 0 归属;
+ *  fall-through 空体标签并入下一组——extract-equip-prefix parseSwitchCases 同法） */
+function switchCasesOf(swBody) {
+  const cases = new Map();
+  let def = null;
+  const tokRe = /case (-?\d+):|default:|[{}]/g;
+  let depth = 0, segStart = 0, m;
+  let pending = [];
+  const flush = (endIdx) => {
+    const body = swBody.slice(segStart, endIdx);
+    if (body.trim() === '') return;
+    for (const L of pending) { if (L === 'def') def = body; else cases.set(L, body); }
+    pending = [];
+  };
+  while ((m = tokRe.exec(swBody))) {
+    const t = m[0];
+    if (t.startsWith('case') || t === 'default:') {
+      if (depth === 0) { flush(m.index); pending.push(t === 'default:' ? 'def' : +m[1]); segStart = m.index + t.length; }
+    } else if (t === '{') depth++;
+    else if (t === '}') depth--;
+  }
+  flush(swBody.length);
+  return { cases, def };
+}
+
+function evalFields(text, id, locals = {}) {
   const clean = text.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
   const f = defaultToBase(clean, id);   // SW-V1 2026-09-04: 种子随 id 解算式实参
   const re = new RegExp(scanSource(), 'g');
   let m;
   while ((m = re.exec(clean))) {
+    if (m.groups?.LOC !== undefined) {   // SW-FX53: 派生局部声明 → per-id 数值
+      const lm = /^int\s+(\w+)\s*=\s*([^;]+);$/.exec(m.groups.LOC);
+      if (lm) {
+        const lv = evalArithExpr(lm[2], id);
+        if (lv !== undefined) locals[lm[1]] = lv;
+      }
+      continue;
+    }
     if (m[1] !== undefined) {   // 控制头
       const isSwitch = m[1] === 'switch';
       let j = re.lastIndex;
       while (j < clean.length && /\s/.test(clean[j])) j++;
       if (isSwitch) {
+        // SW-FX53 2026-09-13: switch(type) 的 per-id 解析（区间体语境）——
+        // fieldsResolveSwitch 的嵌套归并只覆盖 case 段语境（其段文本经 sliceHoles
+        // 孔剥不含嵌套 switch 体）;structuralIfRanges 的区间体不在任何 case 段内,
+        // 其内嵌 switch(type)（Item.cs:25904-25952 墙件 2677-2690 per-id createWall、
+        // 3453-3455 buffType 等）此前整块跳过 → per-id 值缺失/首匹配伪值。命中本 id
+        // 的 case 优先、否则 default 支、皆无 = 空段;非 type switch 维持整块跳过。
+        const hdrEnd = scanParen(clean, re.lastIndex);
+        const swCond = clean.slice(re.lastIndex, hdrEnd - 1);
+        let j2 = hdrEnd;
+        while (j2 < clean.length && /\s/.test(clean[j2])) j2++;
+        if (/\btype\b/.test(swCond) && clean[j2] === '{') {
+          const e2 = skipBraced(clean, j2);
+          re.lastIndex = e2 > j2 ? e2 : clean.length;
+          const { cases, def } = switchCasesOf(clean.slice(j2 + 1, e2 - 1));
+          const pick = cases.has(id) ? cases.get(id) : def;
+          if (pick) Object.assign(f, evalFields(pick, id, locals));
+          continue;
+        }
         re.lastIndex = clean[j] === '{' ? skipBraced(clean, j) : skipSimple(clean, j);
         if (re.lastIndex <= j) re.lastIndex = clean.length;
         continue;
       }
       const afterHeader = scanParen(clean, re.lastIndex);
-      const cond = clean.slice(re.lastIndex, afterHeader - 1);
+      let cond = clean.slice(re.lastIndex, afterHeader - 1);
+      // SW-FX53: 已解析局部代入（仅替换已解出数值的名字;未解名保持原样 →
+      // evalBaseCond 不可解 → 走 else,与旧口径一致）
+      for (const [lname, lval] of Object.entries(locals)) {
+        cond = cond.replace(new RegExp(`\\b${lname}\\b`, 'g'), String(lval));
+      }
       const parsed = consumeIf(clean, afterHeader);
       if (!parsed) { re.lastIndex = afterHeader; continue; }
       re.lastIndex = parsed.end;
       const verdict = evalBaseCond(cond, id);
       const branch = verdict === true ? parsed.body : parsed.elseBody;   // undefined=不可解 → 基态口径走 else
-      if (branch) Object.assign(f, evalFields(branch, id));
+      if (branch) Object.assign(f, evalFields(branch, id, locals));
       continue;
     }
     for (const g in m.groups) {
       if (m.groups[g] === undefined) continue;
       const name = g.slice(2);
       const def = FIELDS.find(([n]) => n === name);
+      if (!def) continue;   // 防御（LOC 已在上方先行处理）
       if (def[2] === 'b') f[name] = name === 'autoReuse' ? (/false/.test(m[0]) ? 0 : 1) : 1;
       else {
         const vm = def[1].exec(m[0]);
         f[name] = def[2] === 'f' ? parseFloat(vm[1]) : parseInt(vm[1], 10);
       }
+    }
+  }
+  // SW-FX53 2026-09-13: placeStyle 共享算式补提取（fill-when-undefined 零漂移）。
+  // FIELDS 字面正则 `\bplaceStyle = (\d+);` 解不开 `placeStyle = 1 + type - 3046;`
+  // 算式形态（Item.cs 篝火三段 :28193/:33011/:38612、宝箱倍增档 :25556 嵌套 if 支、
+  // 蠕虫笼 :21343、雕像/画/墙饰/平台/工作台等全族——items.ts
+  // PLACE_STYLE_BACKFILL_1458 590 行 + SHARED_GROUP_PLACE_STYLE_1457 43 行手补面
+  // 即此盲区）。取值面 = 拓扑残文（无条件裸语句面）【末】匹配（C# 后写序）+ if/else
+  // 支内算式经递归各自求值后并入;同 SW-BK1 createWall 的 fill-when-undefined：
+  // 字面/种子已值不覆写。★刻意【无】lastFieldMatch 的整段首匹配回落——残文无命中
+  // 即沉默（回落会把共享组他 id 的支内算式误作本 id 值 = 组首支伪值病灶）。
+  if (f.placeStyle === undefined) {
+    const residue = residueWithBare(clean);
+    const pre = /\bplaceStyle = ([^;]+);/g;
+    let pm2, plast = null;
+    while ((pm2 = pre.exec(residue))) plast = pm2;
+    if (plast) {
+      const pv = evalArithExpr(plast[1], id);
+      if (pv !== undefined) f.placeStyle = pv;
     }
   }
   // SW-BK1 2026-09-06: createWall 共享算式补提取（fill-when-undefined 零漂移）。
@@ -525,6 +721,42 @@ function fieldsResolveSwitch(sw, body) {
   }
 }
 
+// ================= ★SW-FX53 SetDefaultsN(N) 委托继承解析（2026-09-13） =================
+// `SetDefaults3(2773); type = 2778; shoot = 429;` 形态：C# 语义 = 先跑完基底 case
+// 全部赋值、回 caller 后由本 case 覆写（type/glowMask 重钉不入 FUNC 域）。此前 15 件
+// 月主锯钻/挥砍（2777-2786/3462-3466,channel 六件=2778/2783/3463/2779/2784/3464）
+// 靠下方 DELEGATE_EXPANSION 手补表承载——本批转解析直出,手补表保留作金标对拍面
+// （r33 蓝队定谳值逐键对拍;手补行漏 noUseGraphic 六键=基底 case 2773/2774 体首段
+// `noUseGraphic = true`（:26483/:26502）应被继承,解析面为准）。
+// 解析语义镜像 extract-itemcombat.mjs delegates 通道（…base, …caller,迭代收敛——
+// 全源无委托链,单轮即定）。
+// ★落表面白名单 DELEGATE_LANDED：全源委托位 92 处（月主 15 + 矿石工具/武器变体
+// 3515-3525/3349-3352 等 ~77 处 SetDefaults1(N)）——后者字段面与 vanilla-itemcombat
+// json 委托通道高度重叠（melee/knockBack/autoReuse 权威在 combat）,整面落表属超预期
+// 扩面,须逐族对拍后另批放行（SW-FX53 剩债登记,解析能力已具备）。
+/** SW-FX53 委托解析（定义于此、调用在 F-STRUCT 合并块——模块序依赖 FIELDS/
+ *  RESIDUE_CACHE/STRIP_CACHE 等 const,提前执行会 TDZ,见下方调用点注）。 */
+const DELEGATE_LANDED = new Set([2777, 2778, 2779, 2780, 2781, 2782, 2783, 2784, 2785, 2786,
+  3462, 3463, 3464, 3465, 3466]);
+const DELEGATE = new Map();
+function resolveDelegates() {
+  let sites = 0;
+  for (const [id, seg] of SEGS) {
+    const clean = stripCommentsCached(seg);
+    const dm = /\bSetDefaults[1-5]\((\d+)\);/.exec(clean);
+    if (!dm) continue;
+    sites++;
+    const target = +dm[1];
+    if (id === target) continue;   // 自委托防御（combat X-01 同款）
+    const baseSeg = SEGS.get(target);
+    if (!baseSeg) continue;
+    const base = evalFields(stripCommentsCached(baseSeg), target);      // 基底按 target 语境求值
+    const caller = evalFields(clean, id);                               // caller 显式覆写
+    DELEGATE.set(id, { ...base, ...caller });
+  }
+  console.error(`DELEGATE: 委托位 ${sites} 处 / 解析 ${DELEGATE.size} 件 / 落表白名单 ${DELEGATE_LANDED.size} 件`);
+}
+
 /** 结构层主入口（全字段）：SetDefaults1-5 → Map(vid → 基态全字段对象)。
  *  扫描器与 structuralPlaceStyles 逐字节同构（孔剥/嵌套归并/最外层落总表后法覆盖前法）。 */
 function structuralFields(src) {
@@ -583,9 +815,16 @@ function structuralFields(src) {
 // `if (type <cmp> N && type <cmp> M) { … }` 区间块不被任何 case 段归属
 // （fieldsResolveSwitch 只分派显式 case,default 段整段丢弃——Item.cs:22764-22769
 // default 支内 2263/2264 白/蓝朝佰墙区间块即此形态,createWall 整缺）。
-// 平衡花括号取 if 体;【仅收 createWall 体】（区间体常含 createTile 算式/value 等
-// FUNC 域外或不可解字段,盲收会超预期扩面——其余字段维持既有口径零漂移）;
+// 平衡花括号取 if 体;SW-BK1【仅收 createWall 体】;★SW-FX53 2026-09-13 扩至
+// placeStyle（家具/画/雕像/门/晶塔外约 300 件的 `placeStyle = base + type - first`
+// 全在区间块——浴缸 :21838/床 :21823/长凳 :23968/桌 :19294/门 :19279/椅 :19265/
+// 字雕 :26130/水槽 :27097/宝石锁 :32829/染料株 :30976/逻辑感应器 :32555 等,
+// items.ts PLACE_STYLE_BACKFILL_1458 手补面即此盲区）。
 // 区间内逐 id evalFields（基态口径,useTurn 仍由 EXTRA_USETURN 后置叠加补齐）。
+// ★returns 终结旗（SW-FX53）：区间体含 `return;` ⇒ 该 id 执行流到此为止、后续
+// switch 的同 id case 是【死码】——区间值即终值（合并时区间覆写 case 段值;
+// 实例 2413 沙发：区间算式 1+type-2397=17 为真值,case 2413 的 `placeStyle = 23`
+// 不可达,items.ts SHARED_GROUP_PLACE_STYLE_1457 手补行同判 17）。
 function structuralIfRanges(src) {
   const out = new Map();
   const rangeRe = /if \(type (>=|>|<=|<) (\d+) && type (>=|>|<=|<) (\d+)\)/g;
@@ -608,12 +847,14 @@ function structuralIfRanges(src) {
       if (end < 0) continue;
       rangeRe.lastIndex = end + 1;
       const ifBody = body.slice(brace + 1, end);
-      if (!/\bcreateWall\s*=/.test(ifBody)) continue;   // SW-BK1: 仅收 createWall 体
+      // SW-BK1 收 createWall;SW-FX53 增收 placeStyle（其余字段仍不收=零漂移纪律）
+      if (!/\bcreateWall\s*=/.test(ifBody) && !/\bplaceStyle\s*=/.test(ifBody)) continue;
       const [lo, hi] = [Number(m[2]), Number(m[4])].sort((a, b) => a - b);
+      const returns = /\breturn\s*;/.test(ifBody);   // SW-FX53: 终结旗（死码判据）
       for (let id = lo; id <= hi; id++) {
         if (!cmp(m[1], id, Number(m[2])) || !cmp(m[3], id, Number(m[4]))) continue;
         const f = evalFields(ifBody, id);
-        if (f.createWall !== undefined) out.set(id, f);
+        if (f.createWall !== undefined || f.placeStyle !== undefined) out.set(id, { fields: f, returns });
       }
     }
   }
@@ -1173,6 +1414,9 @@ for (const [id, seg] of SEGS) {
   const STRUCT = structuralFields(itemSrc);
   // SW-BK1 2026-09-06: if 区间段归因面（2263/2264 default 支区间块;仅收 createWall 体）
   const RANGE = structuralIfRanges(itemSrc);
+  // SW-FX53 2026-09-13: 委托继承解析（此处调用——FIELDS/RESIDUE_CACHE/STRIP_CACHE
+  // 等 const 已初始化;解析全源 92 委托位,落表受 DELEGATE_LANDED 白名单约束）
+  resolveDelegates();
   let psDrift = 0;
   for (const [id, ps] of PS_OLD) {
     if (STRUCT.get(id)?.placeStyle !== ps) { console.error(`F-STRUCT placeStyle 漂移 ${id}: ${STRUCT.get(id)?.placeStyle} != ${ps}`); psDrift++; }
@@ -1185,10 +1429,23 @@ for (const [id, seg] of SEGS) {
   }
   if (psDrift) { console.error(`F-STRUCT: placeStyle 金标漂移 ${psDrift} 处 — 拒绝产出`); process.exit(1); }
   // SW-BK1: 统一归并面 = STRUCT ∪ RANGE（显式 case 值 per-key 优先——RANGE 只补缺档,
-  // 同 wallitems 提取器 path A 先于 path B 的首值优先序）
+  // 同 wallitems 提取器 path A 先于 path B 的首值优先序）。
+  // SW-FX53 2026-09-13 两修：①RANGE 值形 = { fields, returns }（终结旗）;②returns
+  // 区间 = 该 id 执行流在区间内 return ⇒ 后续 switch 的同 id case 是死码 → 区间值
+  // 覆写 case 段值（2413 型:区间算式 17 真值,case 段伪值 23 不可达）;无 return 的
+  // 区间维持「case 优先」（区间只是前置缺档补齐）。
   const SF = new Map();
-  for (const [id, sf0] of STRUCT) SF.set(id, RANGE.has(id) ? { ...RANGE.get(id), ...sf0 } : sf0);
-  for (const [id, rf] of RANGE) if (!SF.has(id)) SF.set(id, rf);
+  for (const [id, sf0] of STRUCT) {
+    const rf = RANGE.get(id);
+    SF.set(id, rf ? (rf.returns ? { ...sf0, ...rf.fields } : { ...rf.fields, ...sf0 }) : sf0);
+  }
+  for (const [id, rf] of RANGE) if (!SF.has(id)) SF.set(id, rf.fields);
+  // SW-FX53: 委托继承并入（白名单面）——基底先跑、caller 后跑,同键 caller 覆写
+  // （2778 的 shoot=429 等）;非白名单 id 不并入（落表扩面另批放行,见 DELEGATE 注）。
+  for (const [id, dg] of DELEGATE) {
+    if (!DELEGATE_LANDED.has(id)) continue;
+    SF.set(id, { ...(SF.get(id) ?? {}), ...dg });
+  }
   let fix = 0, del = 0, add = 0;
   const fixed = [], deleted = [], added = [];
   for (const [id, sf] of SF) {
@@ -1207,10 +1464,34 @@ for (const [id, seg] of SEGS) {
       if (cur.createWall === undefined && sf.createWall !== undefined) {
         cur.createWall = sf.createWall; fixed.push(`${id}.createWall +${sf.createWall}`); fix++;
       }
+      // SW-FX53 2026-09-13: bait 补键（蠕虫笼 `int num = type - 1994` 派生局部 +
+      // `if (num == N)` 八档——Item.cs:21343-21388,1994-2000 bait 整缺、2001 由手补
+      // 表承载同值;2675 嵌套 case 显式档 30 同面补齐）。
+      if (cur.bait === undefined && sf.bait !== undefined) {
+        cur.bait = sf.bait; fixed.push(`${id}.bait +${sf.bait}`); fix++;
+      }
+      // SW-FX53: placeStyle 补键（组末支既有条目 3050/2630/3724/4694/3608 等——
+      // 共享算式解出而 v1 字面扫描从未有键;手补面 items.ts 回填门 `!d.placeStyle`
+      // 对 0 档同值,非 0 档运行时已由回填承载=同值冗余,零行为差）。
+      if (cur.placeStyle === undefined && sf.placeStyle !== undefined) {
+        cur.placeStyle = sf.placeStyle; fixed.push(`${id}.placeStyle +${sf.placeStyle}`); fix++;
+      }
+      // SW-FX53: 委托继承补键（DELEGATE_LANDED 15 件月主锯钻/挥砍——基底 case 字段
+      // 面入表,DELEGATE_EXPANSION 手补面转解析直出;含手补行缺载的 noUseGraphic 六键）。
+      if (DELEGATE_LANDED.has(Number(id))) {
+        for (const [dk, dv] of Object.entries(DELEGATE.get(Number(id)) ?? {})) {
+          if (cur[dk] === undefined) { cur[dk] = dv; fixed.push(`${id}.${dk} +${dv}(delegate)`); fix++; }
+        }
+      }
       if (!Object.keys(cur).length) {
         if (EXTRA_USETURN.get(Number(id)) === true) cur.useTurn = 1;
         else delete FUNC[id];
       }
+    } else if (DELEGATE_LANDED.has(Number(id)) && DELEGATE.has(Number(id))) {
+      // SW-FX53: 委托调用者无既有条目 → 整条按 基底∪caller 落表（当前源 15 件全有
+      // 既有条目,本臂为防御性完备）。
+      FUNC[id] = { ...(SF.get(Number(id)) ?? DELEGATE.get(Number(id))) };
+      added.push(`${id}:${JSON.stringify(FUNC[id])}`); add++;
     } else if (HELPER_SEED.has(Number(id))) {
       // SW-V1 2026-09-04: DefaultTo* 种子 id（fallthrough 组非末支等形态）——整条按
       // 基态结构值落表,与组末支的 v1 条目同口径（不再是 placeStyle 单键最小新增）。
@@ -1261,6 +1542,11 @@ for (const [id, patch] of Object.entries({
 // 文本段正则解不开跨 case 继承，此前六件月主锯钻只提到 {shoot:N}（itemFuncTool 判空 →
 // 不进工具分支 → combatWeapon 落 'shot' 兜底把持械弹当直飞箭弹）、九件月主挥砍件整条缺失
 // （combat+func 双缺 → 左键纯摆动零伤零挖；red-team-r33 §三 P0-①②）。
+// ★SW-FX53 2026-09-13：本表转【金标对拍面】——F-STRUCT 块的 resolveDelegates() 已解析
+// 委托（基底 case 全字段 ∪ caller 覆写,DELEGATE_LANDED 白名单 15 件）,解析值与本表逐键
+// 全等,另补本表漏载的 noUseGraphic 六键（基底 case 2773/2774 体首段 noUseGraphic=true,
+// Item.cs:26483/:26502 应被继承——重产时解析面为准）。本表 spread 仍执行（同值幂等）,
+// 作解析面回退时的二道闸;守卫测试 tests/sw-fx53-extractor-blindspots.test.ts 双面对拍。
 // C# 语义 = 先跑完基底 case 全部赋值再执行本 case 覆写（type/shoot/glowMask），终值 =
 // 基底终态 + 本段覆写。逐件按源码固化（值=基底 case 直赋实值，非推断）：
 //  · 月主锯钻（1456 Item.cs :26571/:26577/:26598/:26604 + :31037/:31043；1457/1458 同位

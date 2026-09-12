@@ -17,8 +17,52 @@ import { projSprite } from './Arrow';
 import { beeWallPushDir } from './WeaponProj';   // SW-AF1 2026-09-04（F-3）：1047 滚石踢墙门单源化（与 655/99 同摄取器）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { TILE_DEFS } from '../data/tiles';
+import { shimmerBlockFx } from '../fx/orchestraFx';
 
 const KB_X = 10;               // 出生 kb 第二参 = 10f
+
+/** Main.hslToRgb(h,s,l)（Main.cs:48689-48717 + hue2rgb :48737-48757 直译,浮点 0..1 出）。
+ *  ★SW-BJ64b：仅 1047 彩虹光消费（s=1,l=0.6 → 每通道 0.2..1.0 浮点,addLight 端 >1 合法,
+ *  原版 Lighting.AddLight 即收 >1 值,出口钳 255=LightingEngine present 截断同向）。 */
+function hslToRgb1457(h: number, s: number, l: number): [number, number, number] {
+  const hue2rgb = (c: number, t1: number, t2: number): number => {
+    if (c < 0) c += 1;
+    if (c > 1) c -= 1;
+    if (6 * c < 1) return t1 + (t2 - t1) * 6 * c;
+    if (2 * c < 1) return t2;
+    if (3 * c < 2) return t1 + (t2 - t1) * (2 / 3 - c) * 6;
+    return t1;
+  };
+  if (s === 0) return [l, l, l];
+  const t2 = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const t1 = 2 * l - t2;
+  return [hue2rgb(h + 1 / 3, t1, t2), hue2rgb(h, t1, t2), hue2rgb(h - 1 / 3, t1, t2)];
+}
+
+/** ★SW-BJ64b 切片金标（Main.cs:33209 `Frame(5,20, proj.frame/20, proj.frame%20)`——
+ *  Utils.cs:1389 Frame 直译：cell = (W/5×frameX, H/20×frameY, W/5, H/20)。1458 :33215
+ *  同值）。Projectile_1047.png 95×380 → 19×19 壳 ×(5 列色相带 × 20 行微光相)。
+ *  导出=金标测试消费（tests/sw-bj64b-frames.test.ts），draw() 同源调用=测的就是跑的。 */
+export function rainbowBoulderCell(
+  frame: number, texW = 95, texH = 380,
+): { sx: number; sy: number; sw: number; sh: number } {
+  const sw = texW / 5, sh = texH / 20;
+  const f = ((frame % 100) + 100) % 100;
+  return { sx: sw * Math.floor(f / 20), sy: sh * (f % 20), sw, sh };
+}
+
+/** ★SW-BJ64b 拖尾光金标（P.cs:26420-26435;1458 :26421 同值）：hue =
+ *  ((GlobalTimeWrappedHourly×120)%300)/300 → hsl(hue,1,0.6) 基色 ×1.4（vector23）×
+ *  (1−i/10)（num208=Utils.Remap(i/len,0,1,1,0) 线性 × num207²≡1）。gtw=运行秒%3600。
+ *  导出=金标测试+fixedUpdate/draw 同源。 */
+export function rainbowBoulderLight(
+  gtw: number, i: number, trailLen = 10,
+): [number, number, number] {
+  const [r, g, b] = hslToRgb1457(((gtw * 120) % 300) / 300, 1, 0.6);
+  const f = 1.4 * (1 - i / trailLen);
+  return [r * f, g * f, b * f];
+}
 
 export class RollingBoulder extends Entity {
   w = 31; h = 31;
@@ -51,6 +95,19 @@ export class RollingBoulder extends Entity {
   wetCount = 0;
   /** 出生预置已做（NewProjectile :10886-10892 等价;共享体首调用执行） */
   presetDone = false;
+
+  // ---- ★SW-BJ64b（2026-09-13）1047 彩虹壳帧账/拖尾（P.cs:26411-26471 / Main.cs:33205-33210;
+  //  1458 :26412/:33211 同域逐字=1457,零变更）----
+  /** 弹帧 0..99：Projectile_1047.png 95×380 = 5 列×20 行 19×19 壳表（列=frame/20 色相带、
+   *  行=frame%20 微光相,100 帧环 200t）;AI 每 2t 前进（P.cs:26414-26418）。 */
+  frame = 0;
+  private frameCounter = 0;
+  /** TrailingMode[1047]=0（ProjectileID.cs:385 表尾）旧位环 10 段——P.cs:17199-17203
+   *  每拍【位移后】shift+头插 [0]=position;trailN = 非 Zero 段数（消费端与原版
+   *  Vector2.Zero 哨兵截断同义）。 */
+  private readonly trailX = new Array<number>(10).fill(0);
+  private readonly trailY = new Array<number>(10).fill(0);
+  private trailN = 0;
 
   constructor(x: number, y: number, sheet: number) {
     super();
@@ -85,6 +142,40 @@ export class RollingBoulder extends Entity {
       this.vx = beeWallPushDir(game.world.store, this.x, this.y, this.w, this.cx);
     }
     this.ai0 = true;
+    // ---- ★SW-BJ64b 1047 专支（P.cs:26411-26471;1458 :26412 逐字同）----
+    //  ① 帧动画（:26414-26418）：frameCounter 每 2t 一帧、frame 环 0..99。
+    //  ② 彩虹拖尾光（:26420-26435）：基色 = hsl(((GlobalTimeWrappedHourly×120)%300)/300,
+    //    1, 0.6)×1.4（vector22/23）;沿 oldPos 逐点 ×(1−i/10)（num208 Remap 线性,
+    //    num207≡1 平方不变）,经 DelegateMethods.CastLightOpen（DelegateMethods.cs:729-742）
+    //    ——【实心体格不吃光】门:active() && !inActive() && !tileSolidTop && tileSolid
+    //    → 跳过（本仓映射:hasTile=原版 active() 裸位 / isActuated=inActive /
+    //    TILE_DEFS.solid=tileSolid / .platform=tileSolidTop）。
+    //    GlobalTimeWrappedHourly = 运行秒 %3600（Main.cs:16777;FlickerClock 同源公式）。
+    //  ③ 微光星屑（:26466-26471）：ShimmerBlock clientOnly 每拍一粒,位 = Center+
+    //    圆缘随机(w/2,h/2)、move = velocity×0.05（本地直驱 shimmerBlockFx,
+    //    PetFollower 1090 判例同款;原版无 UniqueInfoPiece → 0）。
+    if (this.projId === 1047) {
+      if (++this.frameCounter >= 2) {
+        this.frameCounter = 0;
+        if (++this.frame >= 100) this.frame = 0;
+      }
+      const gtw = typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+      const st = game.world.store;
+      for (let i = 0; i < this.trailN; i++) {
+        const tx = Math.floor((this.trailX[i] + this.w / 2) / 16);
+        const ty = Math.floor((this.trailY[i] + this.h / 2) / 16);
+        if (st.inBounds(tx, ty) && st.hasTile(tx, ty) && !st.isActuated(tx, ty)) {
+          const d = TILE_DEFS[st.get(tx, ty)];
+          if (d && d.solid && !d.platform) continue;
+        }
+        const [lr, lg, lb] = rainbowBoulderLight(gtw, i);
+        game.addLightAt?.(this.trailX[i] + this.w / 2, this.trailY[i] + this.h / 2, lr, lg, lb);
+      }
+      const ang = Math.random() * Math.PI * 2;
+      shimmerBlockFx(game,
+        this.cx + Math.cos(ang) * this.w / 2, this.cy + Math.sin(ang) * this.h / 2,
+        this.vx * 0.05, this.vy * 0.05);
+    }
     // ---- AI_025 运动核 ----
     if (this.vy <= 6) {
       if (this.vx > 0 && this.vx < 7) this.vx += 0.05;
@@ -120,6 +211,18 @@ export class RollingBoulder extends Entity {
     //  旧位=本拍位移前真实值,碎裂拍扫描按原版 :19966 后位序照跑
     this.oldX = this.x; this.oldY = this.y;
     moveAndCollide(this, game.world, this.vx * df, this.vy * df);
+    // ★SW-BJ64b：旧位环捕获（P.cs:17199-17203——TrailingMode=0 每拍无条件 shift+头插,
+    //  [0] = HandleMovement 后 position（即本拍碰撞调整位）;置于碰撞响应分支前,
+    //  撞墙碎裂拍旧位也照原版落账 = Kill 拖尾尘消费位）
+    if (this.projId === 1047) {
+      for (let i = 9; i > 0; i--) {
+        this.trailX[i] = this.trailX[i - 1];
+        this.trailY[i] = this.trailY[i - 1];
+      }
+      this.trailX[0] = this.x;
+      this.trailY[0] = this.y;
+      if (this.trailN < 10) this.trailN++;
+    }
     this.rotation += this.vx * 0.06;
     // ① 高速落地（lastVy>5）：弹回 20% + 落地尘/声（SoundID 0 = dig 系）
     if (this.vy !== lastVY && lastVY > 5) {
@@ -177,10 +280,81 @@ export class RollingBoulder extends Entity {
     if (!img || !(img.width > 0) || !ctx) return;
     ctx.save();
     ctx.globalAlpha = 1;
-    ctx.translate(this.cx, this.cy);
-    ctx.rotate(this.rotation);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    if (this.projId === 1047) {
+      // ★SW-BJ64b 1047 彩虹壳三叠画。原版序：拖尾块（Main.cs:33351-33385）先画=垫底，
+      //  本体（:33571）后画=压顶。帧账 = Frame(5,20, frame/20, frame%20)（:33209）——
+      //  源矩形 19×19、origin=帧心（:33210）、scale=vector82×2（:33208,SetDefaults
+      //  scale=1）、color87 = GetAlpha 全亮白（:80967 `type==488||1047 → (255,255,255,255)`,
+      //  即本体不受环境光暗化=黑暗里也发光）、num340 = rotation（:33167/:33229 尾
+      //  `type!=1055 → rotation += vx*0.06`）。
+      //  ★反伪影自证：实拍逐点直读 drawImage 源矩形对拍本式（scripts/_bj64b.mjs）。
+      const cw = img.width / 5, ch = img.height / 20;
+      const cell = rainbowBoulderCell(this.frame, img.width, img.height);
+      const col = Math.floor(this.frame / 20), row = this.frame % 20;
+      // ① 250 微光拖尾（:33351-33367,Projectile_250 14×32,origin=(w/2,0),沿段拉伸）：
+      //    num350=0.5/num351=1 → scaleX=2.2×0.5=1.1、scaleY=段长/32、rot=段向−π/2、
+      //    alpha=(127/255)×(1−i/10)²（white4.A=127 × (1−num355)²,i=旧位序 0..9）
+      const streak = projSprite(250);
+      if (streak && streak.width > 0) {
+        for (let i = 9; i > 0; i--) {
+          if (i >= this.trailN) continue;                     // 原版 Zero 哨兵截断
+          const x1 = this.trailX[i] + this.w / 2, y1 = this.trailY[i] + this.h / 2;
+          const x0 = this.trailX[i - 1] + this.w / 2, y0 = this.trailY[i - 1] + this.h / 2;
+          const seg = Math.hypot(x0 - x1, y0 - y1);
+          if (seg < 0.01) continue;
+          ctx.save();
+          ctx.translate(x1, y1);
+          ctx.rotate(Math.atan2(y0 - y1, x0 - x1) - Math.PI / 2);
+          ctx.globalAlpha = (127 / 255) * (1 - i / 10) * (1 - i / 10);
+          ctx.drawImage(streak, -streak.width * 1.1 / 2, 0, streak.width * 1.1, Math.max(1, seg));
+          ctx.restore();
+        }
+      }
+      // ② Extra_55 星屑（:33368-33385）：68×384 竖 4 帧（68×96/帧）,origin=(w/2,h/8+14),
+      //    rot=velocity.ToRotation()−π/2、scale=Lerp(0.1,0.8,(10−i)/10)×0.5、
+      //    白×(1−i/3) 且 A=0 = 纯加法惯用法（memory:XNA α=0 → canvas 'lighter'）
+      const spark = r.atlas?.ensureVImage('vanilla/Extra_55.png');
+      if (spark) {
+        const sh = spark.height / 4;
+        const ox = spark.width / 2, oy = spark.height / 8 + 14;
+        const rot = Math.atan2(this.vy, this.vx) - Math.PI / 2;
+        const f4 = this.frame % 4;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 3; i >= 0; i--) {
+          if (i >= this.trailN) continue;
+          let fi = (f4 - i) % 4;
+          if (fi < 0) fi += 4;                                // num358（:33379-33382）
+          const a = 1 - i / 3;                                // white5 × (1−i/3)×num351
+          if (a <= 0) continue;
+          const sc = (0.1 + 0.7 * (10 - i) / 10) * 0.5;
+          ctx.save();
+          ctx.globalAlpha = a;
+          ctx.translate(this.trailX[i] + this.w / 2, this.trailY[i] + this.h / 2);
+          ctx.rotate(rot);
+          ctx.drawImage(spark, 0, fi * sh, spark.width, sh,
+            -ox * sc, -oy * sc, spark.width * sc, sh * sc);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+      // ③ 本体单帧切片（:33571 缺省支 sourceRectangle2 非 null）——源矩形走
+      //  rainbowBoulderCell 金标同源,绘制尺寸 = 帧心 origin × scale2 → 38×38
+      ctx.globalAlpha = 1;
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(this.rotation);
+      ctx.drawImage(img, cell.sx, cell.sy, cell.sw, cell.sh,
+        -cw, -ch, cw * 2, ch * 2);
+    } else {
+      // 余族（99/727/1013/1048/1053/1054/1055/1057/1002）整图单帧：DrawProjDirect
+      //  sourceRectangle2=null 缺省支（Main.cs:33169/:33571）——1055 竖条 10 帧走
+      //  Main.cs:30618 家族块专支、1014 整图即原版本相（DrawProjDirect 全域无 1014
+      //  切片支,projFrames[1014]=11 仅供 AI 消费）——1:1 维持勿"顺手修"。
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(this.rotation);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    }
     ctx.restore();
     ctx.globalAlpha = 1;
   }
