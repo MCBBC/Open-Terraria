@@ -46,9 +46,10 @@ await page.evaluate(async () => {
   const g = window.__swGame;
   const st = g.world.store;
   const tilesMod = await import('/src/data/tiles.ts');
-  // ★直写 21: tiles.ts TILE_BY_KEY['chest'] 实为 16(瓶,键表被占)——曾致探针
-  // 放出 2×1 瓶件(n=2 自洽假象)。宝箱 def(vanilla.sheet=21)的 store type=21 直取。
-  const chestId = 21;
+  // ★SW-BJ63(2026-09-11)勘误:真宝箱 = TILE_BY_KEY['chest'] = internal 16
+  //  (vanilla.sheet=21)。旧值 21 在 BJ61 域归一后是 tallgrass(sheet3)——曾以
+  //  「内部 id 直配 sheet 表」时代碰巧命中宝箱表项而假绿,域归一后必假红。
+  const chestId = (tilesMod.TILE_BY_KEY ?? {})['chest'] ?? 16;
   // ---- 场地:石地板行 132(列 46-80),宝箱 2×2 @ (58,128),周边清空 ----
   for (let x = 44; x <= 82; x++) for (let y = 114; y <= 134; y++) {
     const i = st.idx(x, y);

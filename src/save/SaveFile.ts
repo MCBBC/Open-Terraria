@@ -6,7 +6,7 @@ import { World as WorldClass, CHEST_MAX_ITEMS } from '../world/World';
 import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
-import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
+import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
 import type { SavedItem as SavedItemT } from './serialize';
@@ -88,6 +88,17 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
     bannerKills: world.bannerKills,   // BannerSystem.killCount（BannerSystem.cs:32 随存档）
+    // ★SW-FX43（2026-09-12）：wld-compat 五通道随档（World→SaveMeta→serializeSave）：
+    //  caveBackX/worldId（建模值:自建=worldgen 掷值/导入=原值）+ wldSnap 差量快照
+    //  + teSnap/townRooms/bgStyles 透传（FX35 剩债:repo 存档链曾不携行——bgStyles 同族
+    //  断链系本刀 round-trip 真档验证炸出:R16-5 落盘值只在 SaveData 层,meta 装配三处
+    //  均未喂入 → 导入→游玩→存档→导出 13 档背景样式全回 0）
+    worldId: world.worldId,
+    caveBackX: world.caveBackX ? [...world.caveBackX] : undefined,
+    bgStyles: world.bgStyles ? { ...world.bgStyles, cave: [...world.bgStyles.cave] } : undefined,
+    wldSnap: world.wldSnap,
+    teSnap: world.teSnap,
+    townRooms: world.townRooms,
     // 挂物族存放物（内部 id；serializeSave 内过稳定 id 表）
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
@@ -199,6 +210,14 @@ export function buildSaveParts(world: World): {
     fastForwardTimeToDusk: world.fastForwardTimeToDusk,
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
     bannerKills: world.bannerKills,   // BannerSystem.killCount（BannerSystem.cs:32 随存档）
+    // ★SW-FX43：wld-compat 五通道随档（服务器/worker 件路径与 saveGame 同源,注同上;
+    //  bgStyles 同族断链=round-trip 真档验证炸出,一并接通）
+    worldId: world.worldId,
+    caveBackX: world.caveBackX ? [...world.caveBackX] : undefined,
+    bgStyles: world.bgStyles ? { ...world.bgStyles, cave: [...world.bgStyles.cave] } : undefined,
+    wldSnap: world.wldSnap,
+    teSnap: world.teSnap,
+    townRooms: world.townRooms,
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
   };
@@ -302,6 +321,14 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   if (data.header.treeX) world.treeX = data.header.treeX;
   if (data.header.treeStyle) world.treeStyle = data.header.treeStyle;
   if (data.header.treeTops?.length) world.treeTops = data.header.treeTops;
+  // ★SW-FX43（2026-09-12）：wld-compat 四通道回填（旧档缺省=undefined →
+  //  WldHeaderFields 缺省映射回退:caveBackX→treeX 派生/worldId→created XOR 派生）。
+  //  teSnap 载入后按原版 CheckValidTile 淘汰（见 tiles 解码后的 prune 段）
+  if (data.header.caveBackX?.length === 3) world.caveBackX = [...data.header.caveBackX];
+  if (data.header.worldId !== undefined) world.worldId = data.header.worldId;
+  world.wldSnap = data.wldSnap;
+  world.teSnap = data.teSnap;
+  world.townRooms = data.townRooms;
   if (data.header.crimson !== undefined) world.crimson = data.header.crimson;
   if (data.header.dungeonX !== undefined) world.dungeonX = data.header.dungeonX;
   // dungeonY 缺省（旧档/导入）回退地表线：CheckToSpawnDungeonEnemies 的 pY<dungeonY+40 门槛近似成立
@@ -614,5 +641,29 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   //  **之后**(旧档 v5 差分先还原 flags=0,再净化清 type=正确迁移)。
   const purgedGhosts = world.store.purgeGhostTiles();
   if (purgedGhosts > 0) console.log(`[load] 幽灵格净化 ${purgedGhosts} 格(对齐原版读档语义)`);
+  // ★SW-FX43：teSnap 载入侧淘汰（1:1 LoadTileEntities 尾扫 WF:3349-3359——
+  //  !WorldGen.InWorld(x,y,1) 或 !TileEntitiesManager.CheckValidTile(type,x,y)
+  //  （:3352-3357 分派各型 IsTileValidForEntity）即除名。逐型判据=各自 ValidTile：
+  //  假人 TETrainingDummy.cs:93-99（378+frameY==0+frameX%36==0）/逻辑传感器
+  //  TELogicSensor.cs:152-158（423+frameX%18==0+frameY%18==0）/晶塔
+  //  TETeleportationPylon.cs:136-137（597+frameY==0+frameX%54==0））。
+  //  曾无淘汰=拆掉假人/晶塔后 teSnap 残影随档永久回写（原版载入即淘汰）。
+  //  tile 域=内部 id（st.type 解码产物,未知键防 undefined 恒不等）。
+  if (world.teSnap?.length) {
+    const stT = world.store;
+    const dummyT = TILE_BY_KEY['v_378_target_dummy'];
+    const sensorT = TILE_BY_KEY['v_423_logicsensor'];
+    const pylonT = TILE_BY_KEY['v_597_pylons'];
+    const kept = world.teSnap.filter((t) => {
+      if (!(t.x >= 0 && t.y >= 0 && t.x < stT.w && t.y < stT.h)) return false;   // InWorld 门
+      const i = t.y * stT.w + t.x;
+      const ty = stT.type[i], fx = stT.frameX[i], fy = stT.frameY[i];
+      if (t.type === 0) return ty === dummyT && fy === 0 && fx % 36 === 0;
+      if (t.type === 2) return ty === sensorT && fx % 18 === 0 && fy % 18 === 0;
+      if (t.type === 7) return ty === pylonT && fy === 0 && fx % 54 === 0;
+      return true;
+    });
+    world.teSnap = kept.length ? kept : undefined;
+  }
   return { world, player: data.player, data };
 }

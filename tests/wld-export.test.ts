@@ -182,3 +182,56 @@ describe('exportWld → parseWldToSave 闭环', () => {
     expect(back.save.flags.downed_4).toBe(true);
     expect(back.save.header.name).toBe('快照世界');
   });
+
+// ---- ★SW-RB14c（2026-09-12）红蓝对抗回归 ----
+import { parseWld } from '../src/wld/WldParser';
+
+describe('SW-RB14c：wld 流位/纪元对抗回归', () => {
+  it('F1 墙高字节流位：wall>255 ∧ liquid>0 同格回环全等（WF:1540-1545 liquid 后追加）', () => {
+    const save = mkSave();
+    // 直接在导出前改 walls/liquid 通道（mkSave 的 base64 已冻结,须重编码）
+    const n = W * H;
+    const wall = new Uint16Array(n), liquid = new Uint16Array(n), liquidType = new Uint16Array(n), paintWall = new Uint8Array(n);
+    // 解回原数组再改:简单起见直接构造单格档（其余全零游程）
+    wall[10 * W + 10] = 300; liquid[10 * W + 10] = 200; liquidType[10 * W + 10] = 1; paintWall[10 * W + 10] = 5;
+    save.walls = bytesToB64(rlePairs(wall));
+    save.liquid = bytesToB64(rlePairs(liquid));
+    save.liquidType = bytesToB64(rlePairs(liquidType));
+    save.paintWall = bytesToB64(rlePairs(paintWall));
+    const wld = parseWld(exportWld(save));
+    const i = 10 * W + 10;
+    // 修复前:液量与墙高字节互换读位 → wall|=(200<<8)≥367 钳 0 + 液量=1
+    expect(wld.tiles.wall[i]).toBe(300);
+    expect(wld.tiles.liquid[i]).toBe(200);
+    expect(wld.tiles.liquidType[i]).toBe(1);
+    expect(wld.tiles.paintWall[i]).toBe(5);
+    // 邻格不受 RLE 污染
+    expect(wld.tiles.wall[i + 1]).toBe(0);
+    expect(wld.tiles.liquid[i + 1]).toBe(0);
+  });
+
+  it('F2 CreationTime/lastSavedTime = .NET 纪元 ticks + KindUtc 位（WF:601/:1261）', () => {
+    const save = mkSave();
+    const bytes = exportWld(save);
+    const dv = new DataView(bytes.buffer);
+    // header flags 段定位:PRE 尾=title+seedText+worldGenVersion+guid16+worldId+bounds16
+    //   +尺寸 8——从 pointers[0] 起按流解（title/seedText 变长,逐字段走查）
+    let p = dv.getInt32(26 + 0 * 4, true);   // header 段起点
+    const readStr = (q: number): [string, number] => {
+      let len = 0, shift = 0;
+      for (;;) { const b = bytes[q++]; len |= (b & 0x7f) << shift; if (!(b & 0x80)) break; shift += 7; }
+      return [new TextDecoder().decode(bytes.subarray(q, q + len)), q + len];
+    };
+    readStr(p); p += 0; [ , p] = readStr(p);   // title
+    [ , p] = readStr(p);                        // seedText
+    const wgv = dv.getBigUint64(p, true); p += 8;
+    expect(wgv).toBe(1395864371201n);           // 定位自证（worldGenVersion 槽）
+    p += 16 + 4 + 16;                           // guid(16B)+worldId(4B)+bounds(4×i32)
+    p += 8;                                     // maxTilesY/X
+    // GameMode(i32)+9 种子位(bool)+CreationTime(i64)
+    p += 4 + 9;
+    const creation = dv.getBigUint64(p, true);
+    const expected = 621355968000000000n + BigInt(1700000000000) * 10000n + 0x4000000000000000n;
+    expect(creation).toBe(expected);            // .NET 纪元+Utc Kind 位（修复前=Unix 纪元裸值）
+  });
+});

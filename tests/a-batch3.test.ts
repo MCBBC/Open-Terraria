@@ -8,7 +8,8 @@
 //   4. AI_003 逐族切片（src/entities/fighterFamilies.ts ↔ NPC.cs :57799-58800
 //      横向移动链 / :57431-57460+:60679-60696 混沌元素 / :56327-56360 沼泽怪）
 // 宿主全确定性：DD2 用脚本化 rand 队列，钓鱼/配饰走真实数据表。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { seededRandom } from './seeded-rng';
 import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
@@ -272,6 +273,15 @@ describe('钓鱼咬钩（AI_061 :50897-50934 / FishingCheck :19179-19184 / :1933
   });
 
   it('海洋判定 = 边缘 380 格 && 地表以上 && 水体 >1000（:19886）——大池边缘咬出海洋池渔获', () => {
+    // ★SW-FX46（2026-09-12）夹具播种化（seeded-rng 范式,sw-fx46 批任务4）：本用例
+    //   是概率型断言（some 命中海洋池）,咬钩累积 rand(1,3)/rand(300)<力 与渔获池掷
+    //   全走 Math.random——FX44 定谳「疑 RNG flake」,12 连跑 3 红（~25%）复证为
+    //   真实 flake 非确定性回归。全域钉种子后掷流确定,断言值零改动。种子 1=枚举
+    //   选定（12 候选种子实测海洋池命中 3/6 轮,余量最大;BATTERY_SEED 恰命中 0/6
+    //   不适用——本用例非电池族,独立种子另注）。钉点=用例首行:落水前 land() 的
+    //   逐 tick 掷流一并入流,首播种点晚于 land 会漏钉。
+    const randStake = vi.spyOn(Math, 'random').mockImplementation(seededRandom(1));
+    try {
     const { hooks, player } = fishingHooks({ pool: { x: 2, w: 75 }, depth: 20, bobberTileY: 95 });
     // R32：距离门 900px（AI_061 :54703-54705）——玩家须站浮漂 900px 内（原版抛程内）
     player.x = 8 * TILE;
@@ -303,6 +313,7 @@ describe('钓鱼咬钩（AI_061 :50897-50934 / FishingCheck :19179-19184 / :1933
     // 唯一可靠断言：海洋专属渔获可达（some 命中）
     expect(catches.length).toBeGreaterThanOrEqual(4);
     expect(catches.some((c) => oceanPool.has(c))).toBe(true);
+    } finally { randStake.mockRestore(); }
   });
 });
 

@@ -225,6 +225,24 @@ try {
   await page.screenshot({ path: `${OUT}/bj61-dark.png` });
   // ★Ctrl 一次性按住到底（delete→re-add 循环曾致 case3/4 wanted 断链）
 
+  // ═══ 态 2b：域归一检查（★SW-BJ61）——高草/木块不再是候选;真宝箱 4 格候选 ═══
+  await page.evaluate((dy) => window.__bj61aim(66, 131 + dy), DY);
+  await pump(page, 10, { clearEnemies: true });
+  const grass = await read();
+  L.chk('域归一·高草零候选（旧 bug:internal21 吃 sheet21 宝箱候选=地面暗黄痕迹）',
+    grass.frame && grass.frame.n === 0, JSON.stringify(grass.frame));
+  await page.evaluate((dy) => window.__bj61aim(70, 131 + dy), DY);
+  await pump(page, 10, { clearEnemies: true });
+  const wood = await read();
+  L.chk('域归一·木块零候选（旧 bug:internal10 吃 sheet10 门候选）',
+    wood.frame && wood.frame.n === 0, JSON.stringify(wood.frame));
+  await page.evaluate((dy) => window.__bj61aim(59, 129 + dy), DY);
+  await pump(page, 10, { clearEnemies: true });
+  const chestScan = await read();
+  L.chk('域归一·真宝箱（internal16→sheet21）整件 4 格候选',
+    chestScan.frame && chestScan.frame.tileWon && chestScan.frame.n === 4,
+    JSON.stringify(chestScan.frame));
+
   // ═══ 态 3：亮·火把贴身（61,131——宝箱右 3 格）═══
   await page.evaluate(() => window.__bj61torch(61, true));
   await pump(page, 240, { clearEnemies: true });   // 光传播充分

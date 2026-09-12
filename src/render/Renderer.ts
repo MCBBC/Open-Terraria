@@ -6684,16 +6684,25 @@ export class Renderer {
       //   曾按盒左上角画 = 大贴图物品（坠落星 22×26 盒 16×16）精灵溢出右下、
       //   选中框视觉钉在左上（用户实报 2026-09-02）
       const ddx = d.x - (ar.sw - d.w) / 2, ddy = d.y - (ar.sh - d.h) / 2 + bob;
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
       // 原版 Item.color 两遍着色（ItemSlot.cs:2888 同款 GetColor 消费,世界掉落
-      // DrawItem 域）。SW-BJ60：烘焙改 itemColorSprite（与 UI.iconUrl 共用
+      // DrawItem 域 Main.cs:39408）。SW-BJ60：烘焙改 itemColorSprite（与 UI.iconUrl 共用
       // blendItemColorTint 单源公式,XNA pass1 底图+pass2 色图精确合成）——
       // 旧 destination-out+lighter 组合在 A<255 时漏底图残量项且 bg 系数
       // (1−kc)≠(1−t·ka)(1−t·kc),与原版预乘两遍不等价
-      if (d.color && d.color[3] > 0) {
-        const tinted = this.itemColorSprite(`item${d.itemId}`, ar, d.color);
-        if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, ddx, ddy, ar.sw, ar.sh);
+      // ★SW-FX49：合成需求含 Item.alpha 维度（GetAlpha 默认支 pass1,Main.cs:39284——
+      // 凝胶 175/星怒 100/恶魔弓 30/幽灵翼 255 全透明等 18 件）。烘焙已是完整
+      // 两遍合成,命中时【只画烘焙件】:裸底图+烘焙叠画会对半透明 texel 双计
+      // 底图(凝胶合成 α0.583 会被叠成 0.875——旧行为在 tint 件全为不透明贴图
+      // 时无差,alpha 维度加入后即现形);烘焙失败回落裸底图(BJ60 同款 fail-open)
+      const needsComp = (d.color !== undefined && d.color[3] > 0)
+        || (d.alpha !== undefined && d.alpha > 0);
+      if (!needsComp) {
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
+        return;
       }
+      const tinted = this.itemColorSprite(`item${d.itemId}`, ar, d.color ?? null, d.alpha ?? 0);
+      if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, ddx, ddy, ar.sw, ar.sh);
+      else ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ddx, ddy, ar.sw, ar.sh);
       return;
     }
     const icon = this.itemIcon(d.itemId);
@@ -14810,18 +14819,22 @@ export class Renderer {
   /** 掉落物 Item.color 两遍合成烘焙（SW-BJ60,2026-09-11）：XNA pass1 底图
    *  （GetAlpha 全亮,ItemSlot.cs:2879）+ pass2 色图（GetColor=VANILLA_ITEM_COLOR
    *  表色,:2888 同帧第二遍）的逐 texel 精确合成。公式与 UI.iconUrl 烘焙共用
-   *  blendItemColorTint 单源（两路一致）；xnaCombined 同族（ka=1——Item.alpha
-   *  凝胶 175 等未建模=仓域既有债,原版底图 pass 对 alpha>0 件会乘 (255−alpha)/255） */
+   *  blendItemColorTint 单源（两路一致）。
+   *  ★SW-FX49：Item.alpha 维度已建模（旧债"ka=1 凝胶 175 未建模"清偿）——
+   *  itemAlpha=VANILLA_ITEM_ALPHA 表值（Item.cs GetAlpha 默认支 :49328-49347
+   *  f=(255−alpha)/255,世界掉落权威 Main.cs:39284 同构）,color=null 纯 pass1 */
   private itemColorSprite(
-    key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, color: number[],
+    key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+    color: number[] | null, itemAlpha = 0,
   ): TintRect | null {
     const q = (v: number) => Math.round(v) & ~7;
-    const k = `${key}|itemcolor|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${q(color[0])},${q(color[1])},${q(color[2])},${q(color[3] ?? 255)}`;
+    const cs = color ? `${q(color[0])},${q(color[1])},${q(color[2])},${q(color[3] ?? 255)}` : 'none';
+    const k = `${key}|itemcolor|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${cs}|al${itemAlpha}`;
     const w = Math.max(1, frame.sw), h = Math.max(1, frame.sh);
     return this.tintAtlas.bake(k, w, h, (cx) => {
       cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
       const im = cx.getImageData(0, 0, w, h);
-      blendItemColorTint(im.data, [color[0], color[1], color[2], color[3] ?? 255]);
+      blendItemColorTint(im.data, color ? [color[0], color[1], color[2], color[3] ?? 255] : null, itemAlpha);
       cx.putImageData(im, 0, 0);
     });
   }

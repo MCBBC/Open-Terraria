@@ -19,7 +19,7 @@ import { Arrow, projSprite } from './Arrow';
 import { projectileWetSection, projWaterDragFactor, projShimmerStep,
   type ProjShimmerFace } from './projWetSection';
 import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile,
-  resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS,
+  tryReflectShimmerSlimeHit, resolveProjClass, IS_A_WHIP_PROJS, DONT_APPLY_PARRY_DAMAGE_BUFF_PROJS,
   applyBannerDamageDealt } from './projTargets';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { GorePiece } from './GorePiece';   // AI_189 壳 gore 61-63 生成通道（GorePiece 引擎池）
@@ -391,6 +391,15 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     // （结构锚 tests/blue-batch3-combat-parity「F1 弹侧旗乘区」钉本站 hurt 首参字面——
     //   加伤并入写成同行表达式,勿再折行拆散 applyBannerDamageDealt 前缀）
     e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
+    // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——StrikeNPC
+    // 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :320 事前支恒不触发）。
+    // 本环弹型（回旋镖 3/长矛 19,161/悠悠球 99,15）全不在 CanBeReflected 白名单,
+    // 天然不触发；白名单内弹型 hurt 后即刻弹回,穿透补偿由弹型 onHit 记账面承担
+    // （reflected 后敌怪环整体短路=不再消耗穿透）。
+    if ((e as { vanillaId?: number | null }).vanillaId === 676) {
+      tryReflectShimmerSlimeHit(me as unknown as Parameters<typeof tryReflectShimmerSlimeHit>[0],
+        me.projId ?? 0, e as unknown as { vanillaId?: number | null; immortal?: boolean }, game, (me as { life?: number }).life);
+    }
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;

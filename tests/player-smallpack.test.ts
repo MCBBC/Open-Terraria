@@ -16,6 +16,10 @@ import { BuffState, BuffType, BUFF_DEFS } from '../src/stats/Buffs';
 import { ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank } from '../src/stats/QuickStacking';
+
+// ★SW-FX40：MakeFloorDust（Player.cs:23981-24234）尘型全集（num3 表）——水晶鞋
+// 尘 204 全称断言的重锚豁免集
+const FLOOR_DUST_TYPES = new Set([0, 4, 5, 14, 16, 32, 36, 37, 51, 53, 76, 108, 122, 153, 243, 322, 326, 327, 328]);
 import { sortingLayerIndex } from '../src/data/vanillaItemSorting';
 import { InsanityShadowFriendly, randomizeFriendlyInsanityShadow } from '../src/entities/InsanityShadowFriendly';
 import { PunchCameraModifier, CameraModifierStack, remap } from '../src/render/CameraModifierStack';
@@ -492,6 +496,9 @@ describe('DoEyebrellaRainEffect / DoGlassSlipperSparkles（Player.cs:13866-13919
     });
     for (let t = 0; t < 1200; t++) p.fixedUpdate(1 / 60, hooks);  // 1/60 掷 → 20s 期望 ~20
     expect(dusts.length).toBeGreaterThan(3);   // P(≤3 | λ=20) ≈ 0.0002%——不 flaky
-    expect(dusts.every((t) => t === 204)).toBe(true);
+    // ★SW-FX40 重锚：MakeFloorDust（Player.cs:23981-24234）整支接入后，落地拍
+    // （开场坠落触地）追加泥土尘 0（num3=0 表,:24056-24058）——204 全称断言放宽
+    // 为「204 ∪ 地板尘表」，鞋染料尘 204 生成面不变
+    expect(dusts.every((t) => t === 204 || FLOOR_DUST_TYPES.has(t))).toBe(true);
   });
 });

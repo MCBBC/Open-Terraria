@@ -700,6 +700,37 @@ export function tryReflectProjectile(
   return true;
 }
 
+/** ★SW-BJ62（2026-09-11）：微光史莱姆 676 命中后反射支（原版 Damage_PVE_Inner 尾部
+ *  Projectile.cs:13721-13725，1456 :12830-12834 / 1458 :13722-13726 三基线同值）：
+ *  `if (flag8 && active && timeLeft > 10 && targetNPC.active && targetNPC.type == 676
+ *  && CanBeReflected()) { targetNPC.ReflectProjectile(this); penetrate++; }`
+ *  ★与 tryReflectProjectile（:12050-12060 事前支）不同域——676 全 SetDefaults/AI
+ *  【零】置 reflectsProjectiles（1457 NPC.cs grep 全量核），故事前支对 676 恒不触发；
+ *  本支位于 StrikeNPC（:13706）【之后】、穿透外层递减之前 ⇒ 原版语义 = 微光史莱姆
+ *  吃弹掉血【同时】把弹打回玩家（伤害 ÷4、hostile 翻转、速度=|原速| 向玩家偏置 20 权重），
+ *  penetrate++ 补偿本次命中穿透消耗（弹以剩余 1 穿透存续弹回）。
+ *  门禁逐值：flag8 = !targetNPC.immortal（:12740 一带声明）；timeLeft > 10（弹将
+ *  到期不救）；targetNPC.active = 命中已发生即真（原版杀死击仍反射——StrikeNPC 不
+ *  立即失活，本仓 hurt 后不读 dead 同语义）；CanBeReflected = projCanBeReflected。
+ *  调用点 = 各命中管线 hurt() 之后（Arrow :8130 递减前 / WeaponProj hurt 后 /
+ *  Dart hurt 后）；返回 true 时调用方须自补穿透（Arrow pierce=1+pierce++，原版
+ *  penetrate=1（NPC.cs:67212）+penetrate++（:13724）→ 外层递减后剩 1 同拍）。 */
+export function tryReflectShimmerSlimeHit(
+  proj: ReflectableProj,
+  projId: number,
+  e: { vanillaId?: number | null; immortal?: boolean },
+  game: GameHooks,
+  timeLeft?: number,
+): boolean {
+  if ((e.vanillaId ?? null) !== 676) return false;
+  if (e.immortal === true) return false;              // flag8 = !targetNPC.immortal
+  if (timeLeft !== undefined && timeLeft <= 10) return false;   // Projectile.cs:13721 timeLeft>10
+  if (proj.reflected) return false;                   // hostile 翻转天然拦二反（本仓显式）
+  if (!projCanBeReflected(projId, proj)) return false;
+  reflectProjectile(proj, game);
+  return true;
+}
+
 /** 敌弹命中玩家的状态授予(原版 Projectile.StatusPlayer :11450-11722 **全量**,
  *  仅在 hitPlayer 返回 true 即 Hurt>0 且未死后调用——调用点 Game.ts 敌弹命中段)。
  *  数值表 = tools/extract-statusplayer.mjs 从 1456 源码提取的 AST

@@ -37,10 +37,23 @@ describe('Player.bordersMovement(原版 :23771-23844)', () => {
     expect(p.gravDir).toBe(1);
   });
 
-  it('底:出界即死(KillMe 原因 21)+ 位置钳回', () => {
+  it('底:普通世界只钳不杀 + 脚底钳(-height)(★SW-FX40 重锚 :24292-24317——KillMe 原因 21 仅 skyblock 世界,:24295 `if (skyblockWorld && !dead)`;旧"恒杀"系 skyblock 门整缺)', () => {
     const w = mkWorld();
     const p = new Player(100 * 16, 200 * 16 - 10, new Inventory());
+    p.iframes = 60;
+    p.hp = 100;
+    p.bordersMovement(w);
+    expect(p.hp).toBe(100);            // 普通世界不杀（原版同——仅 skyblock 判死）
+    expect(p.y).toBe(200 * 16 - 640 - p.h);  // 640 钳 + 脚底钳 -height(:24308-24313)
+    expect(p.vy).toBe(0);
+  });
+
+  it('底:skyblock 世界越界即死(KillMe 原因 21)+ 仅 640 钳(脚底钳不生效,★SW-FX40 补门面)', () => {
+    const w = mkWorld();
+    w.seedFlags.skyblock = true;
+    const p = new Player(100 * 16, 200 * 16 - 10, new Inventory());
     p.iframes = 60; // 出生/受击无敌帧在场——KillMe 必须无视它
+    p.hp = 100;
     p.bordersMovement(w);
     expect(p.hp).toBe(0);              // 直杀(hp 归零;dead 由 fixedUpdate 尾部统一结算)
     expect(p.y).toBe(200 * 16 - 640);

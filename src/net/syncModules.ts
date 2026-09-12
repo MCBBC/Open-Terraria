@@ -677,3 +677,84 @@ export function writePingProbeEcho(serverTs: number): Uint8Array {
 export function readPingProbeEcho(r: NetReader): number {
   return r.f64();
 }
+
+// ================= module15 AnglerQuest（SW-FX42 渔夫任务联机面，msg74/75 等价） =================
+// 标杆（Terarria1457）：
+//   Main.AnglerQuestSwap（Main.cs:3851-3855 头门）——`if (netMode == 1) return;`
+//     客户端从不本地重掷，权威端重掷后经 msg74 下发
+//   NetMessage.SendData case 74（NetMessage.cs:1147-1153）——
+//     {byte Main.anglerQuest, bool anglerWhoFinishedToday.Contains(收端名)}
+//   MessageBuffer.cs:3145-3151 —— 客户端收包：Main.anglerQuest/anglerQuestFinished 直写
+//   MessageBuffer.cs:3152-3160（msg75）—— 交付端上行，服务器把名字加入
+//     Main.anglerWhoFinishedToday（Main.cs:40948 SendData(75)）
+//   NetMessage.cs:2682/2688 —— 服务器把 msg74 发给进场者/重掷后全员
+// 本仓差异（登记 multiplayer-design.md §SW-FX42）：任务重掷在仓内按
+//   「seed^dayCount」确定性播种（Game.anglerQuestSwap），原版掷 Main.rand 不可复现——
+//   故 sub0 重掷断言同时承担 msg74 的任务号下发与「新的一天」重置信号
+//   （服务器侧清 finished 集）；交付去重 = 服务器 per-slot 会话集（原版按名字，
+//   本仓名字可改且重连凭据是 slot——按 slot 记账，重连 60s 窗内同 slot 复位保去重）。
+
+export const enum AnglerQuestSub {
+  /** 权威端（房主）新任务断言：{u8 quest}——收端 world.anglerQuest 直写 +
+   *  anglerQuestFinished/今日名单复位（=msg74 全量语义） */
+  Quest = 0,
+  /** 交付上行/中继：{u8 slot}——服务器记入今日完成集 + 排除发送者广播 */
+  Finished = 1,
+}
+
+export function writeAnglerQuestModule(sub: AnglerQuestSub.Quest, quest: number): Uint8Array;
+export function writeAnglerQuestModule(sub: AnglerQuestSub.Finished, slot: number): Uint8Array;
+export function writeAnglerQuestModule(sub: AnglerQuestSub, value: number): Uint8Array {
+  const w = new NetWriter(Msg.NetModules);
+  w.u16(NetModule.AnglerQuest);
+  w.u8(sub);
+  w.u8(value & 0xff);
+  return w.finish();
+}
+
+/** 载荷不足（截断/脏帧）/未知 sub 返回 null（调用方静默丢弃，同 readDoorEvent 先例）。
+ *  联合形状：sub0/1 带一个 u8 值；sub2 季节位（值=SeasonBitsFlags 位图）。
+ *  三种 sub 一体解析——曾拆 readSeasonBitsModule 二段读（先 readAnglerQuestModule
+ *  消 sub 再读值），调用方两步取数的次序耦合极易读错位，单一读取器收敛 */
+export type AnglerQuestMsg =
+  | { sub: AnglerQuestSub.Quest; quest: number }
+  | { sub: AnglerQuestSub.Finished; slot: number }
+  | { sub: 2; bits: number }
+  | null;
+
+export function readAnglerQuestModule(r: NetReader): AnglerQuestMsg {
+  if (r.remaining < 2) return null;
+  const sub = r.u8() as AnglerQuestSub;
+  const value = r.u8();
+  if (sub === AnglerQuestSub.Quest) return { sub, quest: value };
+  if (sub === AnglerQuestSub.Finished) return { sub, slot: value };
+  if (sub === 2) return { sub: 2, bits: value };
+  return null;
+}
+
+// ================= module15 sub2 季节强置位（SW-FX42 force 位同步面） =================
+// 标杆（Terarria1457）——原版随 msg7 WorldData 全员下发：
+//   NetMessage.cs:340-341 bitsByte9[6]/[7] = forceHalloweenForToday/forceXMasForToday
+//   （读侧 MessageBuffer.cs:588-589）；
+//   NetMessage.cs:385-386 bitsByte14[1]/[2] = forceHalloweenForever/forceXMasForever
+//   （读侧 MessageBuffer.cs:628-629）。
+// 本仓：forever 位在 world.flags（msg7 通用 flags map 已随帧同步）；ForToday 位是
+//   Game 私有运行时位（月事件 wave15 胜利当日置位,Main.cs:10833-10846 每黎明先清再
+//   按事件重设），msg7 无从承载 → 权威端（房主）每黎明重算后以本子消息断言合并结果。
+//   原版收端以 force 位各自重算 checkXMas/checkHalloween（Main.cs:13290-13344），本仓
+//   收端直写合并结果（world.clock.halloween/xMas）+ ForToday 私有位（Game 侧）——
+//   两步合成等价于原版「收位→重算」，偏差=省去收端重算（读数同源，无行为面）。
+export const enum SeasonBitsFlags {
+  Halloween = 1 << 0,          // world.clock.halloween（checkHalloween 合并结果）
+  XMas = 1 << 1,               // world.clock.xMas（checkXMas 合并结果）
+  ForceHalloweenToday = 1 << 2,// Game.forceHalloweenForToday（万圣夜事件胜利当日位）
+  ForceXMasToday = 1 << 3,     // Game.forceXMasForToday（霜月事件胜利当日位）
+}
+
+export function writeSeasonBitsModule(bits: number): Uint8Array {
+  const w = new NetWriter(Msg.NetModules);
+  w.u16(NetModule.AnglerQuest);
+  w.u8(2);
+  w.u8(bits & 0xff);
+  return w.finish();
+}

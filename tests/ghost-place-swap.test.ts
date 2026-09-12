@@ -46,7 +46,8 @@ function defOf(vid: number) {
 
 interface Shell {
   world: World;
-  player: { inv: { slots: unknown[]; selected: number; removeAt(): void; heldItem(): unknown } }
+  player: { inv: { slots: unknown[]; selected: number; removeAt(): void; heldItem(): unknown;
+    removeHeld(): void } }   // ★SW-FX44：removeHeld 为 SW-AZ1 镜像臂夹具既有字段,类型面补齐（清 tsc 基线）
     & Record<string, unknown>;   // 其余运动学/状态字段由各用例自由携带
   tryPlace(tx: number, ty: number, def: (typeof ITEM_DEFS)[number]): void;
 }
@@ -75,6 +76,9 @@ function shell(w: World, drops: Array<[string, number]>, heldVid: number, withPi
     facing: 1, useTime: 0, attackSpeedMult: 1,
     // ★SW-BJ12：pickSpeedMult（块换镐段冷却）读面补齐——wellFedTier/hungerPickSpeed
     buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
+    // ★SW-FX44：SW-BJ59 后 Game.tryPlace 尾 useTime 走 paintTileSpeed→placeSpeedTileRaw
+    // 委托面（Game:22294→Player:3213）——桩锁基态 1（Player.cs:2453 基 1f,无增益）
+    placeSpeedTileRaw: () => 1,
     inv: {
       selected: 0,
       slots: withPick ? [{ id: iidOf(PICK_V), stack: 1 }] : new Array(50).fill(null),

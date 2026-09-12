@@ -260,10 +260,15 @@ describe('SW-FX10 登记债⑤⑧ 定谳面反向锁定', () => {
     expect(uiSrc).toMatch(/vinvReforgeOpen/);
     expect(uiSrc).toMatch(/:42277-42279:chest\/npcShop\/talkNPC\/guide 任一即 InReforgeMenu=false/);
   });
-  it('债⑧：Images/UI/Craft.png 仅 NewCraftingUI.cs:464 消费（classic 面无此资产支）——classic 列表不画', () => {
+  it('债⑧：Images/UI/Craft.png 仅 NewCraftingUI.cs:464 消费——★SW-FX41(2026-09-12) modern 窗族落地,消费面接通', () => {
     // 1457 AssetInitializer.cs 注册面（:548-606）只含 ChestCraft_0-3/Craft_Toggle_0-5/
     // RecUp/RecDown，无 UI\Craft 单帧注册；消费面唯一 = NewCraftingUI.DrawChildren
-    // （modern 网格窗内成品→材料行间装饰,几何已建模 vanillaInvLayout craftDetailLayout）
-    expect(uiSrc).not.toMatch(/sprites\/vanilla-ui\/UI_Craft\.png/);
+    // :464（modern 网格窗内成品→材料行间装饰 ×0.8 @origin+(47,13)）。FX30 期窗未建
+    // 时本锚锁「不出现」；窗落地后反转为【恰一处+原版几何】锁（classic 列表仍不画）
+    const hits = uiSrc.match(/vinvModernDetail[\s\S]{0,4000}?UI_Craft\.png/g);
+    expect(hits).toHaveLength(1);
+    // 几何原相:origin+(47,13) ×0.8（26×24 贴图 → 20.8×19.2）
+    expect(uiSrc).toMatch(/left:\$\{o\.origin\.x - 20 \+ 47\}px; top:\$\{o\.origin\.y - 312 \+ 13\}px/);
+    expect(uiSrc).toMatch(/width:20\.8px; height:19\.2px/);
   });
 });

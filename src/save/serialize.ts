@@ -64,6 +64,15 @@ export interface SaveData {
     wldVersion?: number;
     moonType?: number;   // 月亮贴图样式（原版 header WF:1252；旧档缺省 0 标准月）
     seedFlags?: Record<string, boolean>; // 彩蛋种子旗标（旧档缺省={}）
+    /** ★SW-FX43：caveBackX[3]（WF:1266-1268 写/:2065-2067 读;原版 RandomizeCaveBackgrounds
+     *  WorldGen.cs:8141-8210 独立掷,与 treeX 无派生关系）。导入=原值捕获、自建=worldgen
+     *  掷值、旧档缺省 → WldHeaderFields 按 treeX 派生回退（FX33 登记债清偿） */
+    caveBackX?: number[];
+    /** ★SW-FX43：原版 worldId（WF:1244 写/:1977 读）。自建=genRand.Next(int.MaxValue)
+     *  掷值（WorldGen.cs:11364——本仓 ⑫ 掷流位照掷曾弃值）、导入=原值;旧档缺省 →
+     *  WldHeaderFields created-XOR 派生回退。footer 必须与 header 同值
+     *  （LoadFooter :3003-3015 硬校验,BadFooter=整档拒载） */
+    worldId?: number;
     /** ★IIIII20b：StarterNPC 换人一次性迁移标记——换人族旗标在身而存档还是
      *  换人支实装前生成的向导起始位时，首次以修复后客户端载入做顶替并打标。
      *  打标后该世界的后续合法入城（如派对女孩世界玩家补招的向导）不再被动 */
@@ -307,6 +316,10 @@ export interface BgStylesSave {
    *  仅 .wld 导入档携带；本仓自建世界缺省 → BiomeBackground.seedFor 走 seed 派生 */
   forest?: number[]; desert?: number; ocean?: number;
   corrupt?: number; snow?: number; hallow?: number; crimson?: number;
+  /** ★SW-FX43：地表丛林背景样式（WF:1327 setBG(2) 0-6）——与 BG.jungle（WF:1274
+   *  jungleBackStyle 地下丛林）不同族,键名按原版全名。仅 .wld 导入档携带;
+   *  自建世界缺省 → WldHeaderFields 落 0（原登记偏差「无键写 0」本刀补键清偿） */
+  jungleBG?: number;
 }
 
 export interface SaveMeta {
@@ -357,6 +370,19 @@ export interface SaveMeta {
   shadowOrbCount?: number;
   /** 图鉴三桶（杀数/遇数/聊天）——data/Bestiary.ts BestiarySave */
   bestiary?: import('../data/Bestiary').BestiarySave;
+  /** ★SW-FX43：原版 worldId（SaveData.header.worldId 同名注;World.worldId→此处随档） */
+  worldId?: number;
+  /** ★SW-FX43：caveBackX[3]（SaveData.header.caveBackX 同名注;World.caveBackX→随档） */
+  caveBackX?: number[];
+  /** ★SW-FX43：wldSnap 原版 header 差量快照（全仓生产点=WldImport wldSnap 组装,
+   *  消费=exportWld writeHeader 快照优先回写;键集/裁断注记见彼处） */
+  wldSnap?: SaveData['wldSnap'];
+  /** ★SW-FX43：TE 三类透传快照（0 假人/2 传感器/7 晶塔）随存档链携行——
+   *  FX35 剩债清偿:此前仅存 SaveData 层,repo 存档链（serializeSave→loadSaveData）
+   *  不携行 →「导入→游玩→存 repo 档→再导出」快照丢失 */
+  teSnap?: SaveData['teSnap'];
+  /** ★SW-FX43：城镇房间预留表随存档链携行（FX35 剩债同上） */
+  townRooms?: SaveData['townRooms'];
 }
 
 export function rlePairs(values: ArrayLike<number>): Uint8Array {
@@ -461,6 +487,10 @@ export function serializeSave(
       crimson: meta.crimson, dungeonX: meta.dungeonX, dungeonY: meta.dungeonY, jungleX: meta.jungleX,
       created: Date.now(), playTimeMs,
       moonType: meta.moonType ?? 0,
+      // ★SW-FX43：caveBackX/worldId 随档（undefined 键由 JSON.stringify 丢弃=
+      //  旧档零迁移;消费端 WldHeaderFields 缺省回退派生）
+      caveBackX: meta.caveBackX,
+      worldId: meta.worldId,
       seedFlags: meta.seedFlags,
       difficulty: meta.difficulty ?? 0,   // Main.GameMode（旧档缺省=经典）
       journeyTimeRate: meta.journeyTimeRate ?? 1,
@@ -537,6 +567,12 @@ export function serializeSave(
     events,
     bestiary: meta.bestiary,
     bannerKills: meta.bannerKills,
+    // ★SW-FX43：wld-compat 三通道随存档链携行（生产=WldImport wldSnap/teSnap/
+    //  townRooms → loadSaveData 回填 World → SaveMeta → 此处落 JSON → exportWld
+    //  消费。空值不落键=JSON.stringify 丢弃,旧档/自建世界零迁移）
+    wldSnap: meta.wldSnap && Object.keys(meta.wldSnap).length ? meta.wldSnap : undefined,
+    teSnap: meta.teSnap?.length ? meta.teSnap : undefined,
+    townRooms: meta.townRooms?.length ? meta.townRooms : undefined,
     idScheme: 'sheet',
   };
   return JSON.stringify(data);

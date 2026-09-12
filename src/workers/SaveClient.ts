@@ -101,6 +101,15 @@ export class SaveClient {
       savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
       shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
       bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
+      // ★SW-FX43（2026-09-12）：wld-compat 五通道随档（生产保存主路径——本 meta 与
+      //  saveGame/buildSaveParts 三处同源;缺一处即「导入→游玩→存档→导出」丢通道。
+      //  bgStyles 同族断链=R16-5 落盘值 meta 三处均未喂入,一并接通）
+      worldId: world.worldId,
+      caveBackX: world.caveBackX ? [...world.caveBackX] : undefined,
+      bgStyles: world.bgStyles ? { ...world.bgStyles, cave: [...world.bgStyles.cave] } : undefined,
+      wldSnap: world.wldSnap,
+      teSnap: world.teSnap,
+      townRooms: world.townRooms,
       // 挂物族存放物：内部 id 直传（worker 侧 serializeSave 统一过稳定 id 表）
       furniture: world.furnitureItems,
     };

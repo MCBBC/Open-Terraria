@@ -7,7 +7,6 @@ import { getSittingTargetInfo, SITTABLE_SHEETS } from '../src/player/PlayerSitti
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TILE } from '../src/core/constants';
-import { TileStore } from '../src/world/TileStore';
 
 function worldWithChair(): { w: World; chairX: number; chairY: number } {
   const w = new World(80, 80, 7, 'open');
@@ -114,12 +113,15 @@ describe('睡床锚点（GetSleepingTargetInfo :193-224）', () => {
 // 睡眠物理锁 + 输入起床（SH:103-105 + isLockedToATile :3858-3868，2026-08-17 复查批）
 
 function sleepPlayer(): { p: Player; hooks: import('../src/entities/types').GameHooks } {
-  const store = new TileStore(40, 30);
-  for (let x = 0; x < 40; x++) store.setTile(x, 25, 1);
+  // ★SW-FX44：喂完整 World（wing-flight 同法）——曾喂 {store} 半成品，III224 深度
+  // 重力 NaN 防灌带把夹具重力打成 0.25 档（生产面 game.world 恒为完整对象）
+  const w = new World(40, 30, 7, 'sleep-fixture');
+  for (let x = 0; x < 40; x++) w.store.setTile(x, 25, 1);
+  w.groundLevel = 25;
   const p = new Player(100, 100, new Inventory());
   p.sleeping = true;
   const hooks = {
-    world: { store }, enemies: () => [], critters: () => [],
+    world: w, enemies: () => [], critters: () => [],
     spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},
     onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
     notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},

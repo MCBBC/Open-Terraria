@@ -361,11 +361,14 @@ describe('配饰系统性③：翅膀横移加速倍率消费（WingAirLogicTwea
   function makeFlyer(wingVid: number) {
     const w = new World(160, 300, 30, 'open');
     for (let x = 0; x < 120; x++) w.store.setTile(x, 100, 1);
+    // ★SW-FX44：喂完整 World（wing-flight 同法）——曾丢 w 只给 {store}，III224 深度
+    // 重力 NaN 防灌带把夹具重力打成 0.25 档（升力/横移积分失真,生产面恒完整对象）
+    w.groundLevel = 100;
     const p = new Player(50 * TILE, 96 * TILE, new Inventory());
     p.hp = 100;
     p.inv.armor[3] = { id: _iid(wingVid), stack: 1 };
     const hooks = {
-      world: { store: w.store } as never,
+      world: w as never,
       player: p as never,
       enemies: () => [], critters: () => [], spawnDrop: () => null,
       damagePlayer: (): number => 0, addDamageNumber: () => {}, cutTile: () => {},

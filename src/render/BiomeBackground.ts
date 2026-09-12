@@ -630,9 +630,12 @@ export class BiomeBackground {
     this.hellBack = seedPick(s, 33, 3);
     // 地狱多层背景风格(WorldGen.cs:7975 setBG(9, Next(3));World.underworldBG 若有存档值优先)
     this.underworldStyle = world.underworldBG || seedPick(s, 34, 3);
-    // caveBackX 四段边界（原版 worldgen 期设定；按世界宽近似重建）+ 每段基础风格 0..6
+    // caveBackX 四段边界（★SW-FX43（2026-09-12）：world.caveBackX 真值优先——
+    //  自建=worldgen RandomizeCaveBackgrounds 掷值/导入=.wld 原值（WF:1266-1268）;
+    //  旧档缺省按世界宽近似重建）+ 每段基础风格 0..6
     const w = world.store.w;
-    this.caveBackX = [Math.floor(w * 0.22), Math.floor(w * 0.42), Math.floor(w * 0.65)];
+    this.caveBackX = world.caveBackX?.length === 3 ? [...world.caveBackX]
+      : [Math.floor(w * 0.22), Math.floor(w * 0.42), Math.floor(w * 0.65)];
     this.caveBackStyle = [0, 1, 2, 3].map((i) => seedPick(s, 41 + i, 7));
     // ★R16-5（2026-08-24）：存档落盘值优先（WF57 setBG 0-12 随 .wld 头/本仓
     //  SaveData.header.bgStyles 落盘）——导入档/重开档不再按 seed 重掷回默认

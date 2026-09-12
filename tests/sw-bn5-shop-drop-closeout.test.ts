@@ -435,6 +435,9 @@ function shell(w: World, heldDef: (typeof ITEM_DEFS)[number]): Shell {
     facing: 1, useTime: 0, attackSpeedMult: 1, usedAmbrosia: false,
     buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 },
     equipStats: {},
+    // ★SW-FX44：SW-BJ59 后 Game.tryPlace 尾 useTime 走 paintTileSpeed→placeSpeedTileRaw
+    // 委托面（Game:22294→Player:3213）——桩锁基态 1（Player.cs:2453 基 1f,无增益）
+    placeSpeedTileRaw: () => 1,
     inv: {
       slots,
       countOf: () => 0,

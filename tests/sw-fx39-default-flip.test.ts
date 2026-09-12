@@ -186,6 +186,20 @@ describe('SW-FX39 ③差集审计终态锁(vinv 缺省态逐面在位)', () => {
     expect(v()).toContain("options.set('craftFromNearbyChests', !options.data.craftFromNearbyChests)");
   });
 
+  it('★SW-RB14b 研究钮标签订正:LegacyInterface.112 原版=「你必须先设置边框」(1457 zh-Hans.Legacy.json :112,非研究面),三消费点改自有键', () => {
+    // 原版锚:Terarria1457/Terraria.Localization.Content.zh-Hans.Legacy.json LegacyInterface.112
+    //   = 你必须先设置边框 / en-US "You must first set a frame"——研究面原版键族 =
+    //   Game.CreativePowers.InfiniteItemsCategory(Research);本仓研究 UI 自有键 Research.Title
+    expect(srcOf('public/l10n/zh-Hans.json')).toContain('你必须先设置边框');   // 112 语义钉死(防键表漂移翻案)
+    const ui = srcOf('src/ui/UI.ts');
+    const res = srcOf('src/ui/ResearchUI.ts');
+    expect(ui).toContain("Lang.text('Mods.SandboxWorld.Research.Title')");
+    expect(res).toContain("Lang.text('Mods.SandboxWorld.Research.Title')");
+    // 消费点订正(注释提及不在锁内):Lang.text('LegacyInterface.112') 直取式禁回潮
+    expect(ui).not.toMatch(/Lang\.text\(['"]LegacyInterface\.112/);
+    expect(res).not.toMatch(/Lang\.text\(['"]LegacyInterface\.112/);
+  });
+
   it('自创面停车坪(main.ts):vanilla 门控下经暂停菜单可达——缺省转正后即常态路径', () => {
     expect(mainSrc).toContain("options.data.inventoryLayout === 'vanilla'");
     const pause = mainSrc.slice(mainSrc.indexOf('pausePanel = ui.showPause({'));

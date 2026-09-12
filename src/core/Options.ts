@@ -268,9 +268,10 @@ export interface OptionsData {
   /** ★SW-FX30 刀②(2026-09-11)合成视图切换控制(Player.Settings.CraftingGridControl,
    *  Player.cs:363;config.json 键 "CraftingControlMode" Main.cs:4295/:4640)。
    *  切换钮右键循环(CraftingUI.DrawGridToggle CraftingUI.cs:322-331)。
-   *  ★缺省偏差备案:原版缺省 Modern(Player.cs:363),本仓缺省 classic——modern 支目标
-   *  NewCraftingUI 窗族=分期未建(SW-FX30 报告分期表),缺省 classic 使切换钮左键
-   *  (list↔grid,CraftingUI.cs:294-306)开箱即有效;modern 窗落地时回切原版缺省。 */
+   *  ★SW-FX41(2026-09-12)缺省回切 Modern:原版缺省 Modern(Player.cs:363),FX30 期
+   *  因 modern 窗族未建而缺省 classic(偏差备案);NewCraftingUI 窗族已落地
+   *  (UI.ts vinvBuildModernCraft),缺省回切原版值——存量档无此键者取新缺省,
+   *  已存 classic 档保留用户意志(原版 config 语义同相)。 */
   craftingGridControl: 'classic' | 'modern';
   /** ★2026-09-07 背包布局灰度 flag → ★SW-FX39(2026-09-11)缺省转正:vanilla(原版
    *  1.4.5.7 布局,UI.ts buildVanillaInventoryPanel)为缺省;classic=旧自创布局退居
@@ -363,7 +364,7 @@ export class OptionsStore {
     touchOpMode: 'auto',                    // 默认按设备
     quickTrashMode: 'leftControl',          // ★SW-AY1 #10（ItemSlot.cs:28-30 缺省档）
     craftFromNearbyChests: true,            // ★SW-AZ1 2026-09-06（Player.cs:355 缺省 true）
-    craftingGridControl: 'classic',         // ★SW-FX30 刀②（原版缺省 Modern Player.cs:363;偏差备案见接口注）
+    craftingGridControl: 'modern',           // ★SW-FX41 缺省回切原版缺省 Modern(Player.cs:363;FX30 偏差备案清偿)
     inventoryLayout: 'vanilla',             // ★SW-FX39(2026-09-11)缺省转正(原版布局;旧自创退 ?invlayout=legacy 回退旗)
   };
   loaded = false;
@@ -508,9 +509,10 @@ export class OptionsStore {
       }
       // ★SW-AZ1 2026-09-06 附近箱参与制作开关：坏值回原版默认 true（Player.cs:355）
       if (typeof this.data.craftFromNearbyChests !== 'boolean') this.data.craftFromNearbyChests = true;
-      // ★SW-FX30 刀② 合成视图切换控制：坏值回本仓缺省 classic（备案见接口注）
+      // ★SW-FX30 刀② 合成视图切换控制：坏值回原版缺省 Modern（★SW-FX41 回切;
+      //  Player.cs:363——FX30 期回 classic 系窗族未建备案,随本刀撤）
       if (this.data.craftingGridControl !== 'classic' && this.data.craftingGridControl !== 'modern') {
-        this.data.craftingGridControl = 'classic';
+        this.data.craftingGridControl = 'modern';
       }
       // ★SW-FX14 2026-09-10 M14 收尾 4 项卫门（坏值回原版缺省——vanilla config 读回
       //  无范围守卫是 enum 裸转产物,实用缺省=初值,此处按缺省收敛）

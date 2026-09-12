@@ -87,6 +87,9 @@ function fakeAY(opts: { chestX?: number; chestItems?: Slot[]; researchHave?: num
   fake.game = {
     player: { inv },
     npcShopOpen: false,
+    // SW-FX48（2026-09-12）：UI.closeInventory（UI.ts:2814）新增无条件 npcShopClose 臂
+    // （店面板随对话关闭）——本 fake 缺桩致 RB4a 用例 TypeError,补 no-op 桩恢复原断言面
+    npcShopClose: () => {},
     world: { isJourney: true },
     research: {
       tryGetSacrificeNumbers: (vid: number) =>

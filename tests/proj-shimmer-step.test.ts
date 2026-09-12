@@ -7,8 +7,9 @@
 //     相刃/弹反族 A(600 钳+−60)/弹反族 B(无 timeLeft 面)/15/99/沉没族/2(936 解锁)/
 //     14·16/25·17/缺省无动作
 //   · 深浸 Kill 判定格 = CenterX/16 列 × positionY/16 行,双格满微光液柱
-//   · 调用位两处：Arrow.wetSectionStep 尾（整段门外+936 特支收口防双跑）与
-//     projWetSection 共享体（整段门外+段尾两支路）
+//   · 调用位（★SW-FX44 重锚:B1-X3 泛化收口后）:门体 `if (shimmerWet) Shimmer()` 承载
+//     于 projWetSection 共享体（豁免门内+段尾两支路,豁免弹亦跑）;Arrow.wetSectionStep
+//     承载 shimmer 全步回调组装+面适配写回（宿主侧消费面）
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -245,14 +246,13 @@ describe('调用位落点（源级钉）', () => {
     return out.join('\n');
   }
 
-  it('Arrow.wetSectionStep:Shimmer 调用位在湿段块【外】=整段门豁免弹亦跑（:17114 位次）', () => {
+  it('Arrow.wetSectionStep:shimmer 全步回调接共享体调用位+面适配 life≡timeLeft（:17114 位次;★SW-FX44 重锚=B1-X3 泛化收口后形态）', () => {
     const blk = blockFrom(arrowLines, 'private wetSectionStep(game: GameHooks)');
-    expect(blk).toContain('if (this.shimmerWet) {');
-    expect(blk).toContain('projShimmerStep(sf, game.world.store, this.x, this.y, this.cx)');
-    // 调用位在 `if (!projectileData(...).ignoreWater) {...}` 段体闭合之后（整段门外）
-    const gateEnd = blk.indexOf('if (this.wetCount > 0) this.wetCount--;');
-    const call = blk.indexOf('if (this.shimmerWet) {');
-    expect(call).toBeGreaterThan(gateEnd);
+    // 2026-09-11 B1-X3 泛化收口后,:17114 `if (shimmerWet) Shimmer()` 门体移入共享体
+    // projectileWetSection（豁免门内+段尾两支路位次由「共享体」用例钉）——Arrow 侧承载
+    // =shimmer 全步回调组装（缺位=共享体门空转,Arrow 域微光静默截断）+面适配写回
+    expect(blk).toContain('shimmer: (st, x, y, _w, _h) => {');
+    expect(blk).toContain('projShimmerStep(sf, st, x, y, this.cx)');
     // 面适配：timeLeft≡life 直读写
     expect(blk).toContain('timeLeft: this.life');
     expect(blk).toContain('this.vx = sf.vx; this.vy = sf.vy; this.life = sf.timeLeft;');
@@ -267,10 +267,11 @@ describe('调用位落点（源级钉）', () => {
   });
   it('共享体:整段门外+段尾两支路接 shimmer 回调（:17114 位次,豁免弹亦跑）', () => {
     const fn = blockFrom(wetLines, 'export function projectileWetSection(');
-    // 豁免早退支（ignoreWater）内有一次调用
-    const early = fn.indexOf('if (ignoreWater) {');
-    const gateRet = fn.indexOf('if (flags.shimmerWet) hooks?.shimmer?.(st, x, y, w, h);', early);
-    expect(gateRet).toBeGreaterThan(early);
+    // 豁免早退支（ignoreWater）【块体内】有一次调用（★SW-FX44 收紧:原锁只查序,
+    // 摘除豁免支调用不翻红=位次断言被段尾调用顶替的盲区）
+    const gateBlk = blockFrom(wetLines, 'if (ignoreWater) {');
+    expect(gateBlk).toContain('if (flags.shimmerWet) hooks?.shimmer?.(st, x, y, w, h);');
+    expect(gateBlk).toContain('return;');
     // 段尾（wetCount-- 后）有第二次调用
     const tail = fn.indexOf('if (flags.wetCount > 0) flags.wetCount--;');
     const tailCall = fn.indexOf('if (flags.shimmerWet) hooks?.shimmer?.(st, x, y, w, h);', tail);

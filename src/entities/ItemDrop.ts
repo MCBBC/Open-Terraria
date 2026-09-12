@@ -15,7 +15,7 @@ import {
   makeNpcOfItem, npcShimmerTransformTo,
 } from '../stats/Shimmer';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { VANILLA_ITEM_COLOR } from '../data/vanillaItemColor';
+import { VANILLA_ITEM_COLOR, VANILLA_ITEM_ALPHA } from '../data/vanillaItemColor';
 
 /** CantTakeLunchMoney（NPCID.cs:4468,39 型）——专家模式怪捡钱豁免表（R14-A3） */
 const CANT_TAKE_LUNCH_MONEY = new Set([394, 393, 392, 690, 492, 491, 662, 384, 478, 535,
@@ -47,6 +47,12 @@ export class ItemDrop extends Entity {
    *  凝胶 23(:1658)/鲨鱼鳍 319(:5180),草本 313-318 无 item.color 原样;
    *  构造期按 vid 自 VANILLA_ITEM_COLOR 注入，Renderer.itemColorSprite 两遍着色消费） */
   color?: number[]; // [r, g, b, a]
+  /** 原版 Item.alpha（Item.cs SetDefaults 静态表——SW-FX49 亲读提取）：GetAlpha
+   *  默认支（Item.cs:49328-49347）pass1 底图维 f=(255−alpha)/255，掉落绘制
+   *  （Main.cs:39284）经此变暗/半透明（凝胶 175≈31% 不透明度、星怒 100≈61%、
+   *  幽灵翼 255=全透明）。构造期按 vid 自 VANILLA_ITEM_ALPHA 注入（>0 才存）；
+   *  75 坠星/120 熔岩之弓被 GetAlpha 特例中和（:49191/:49197→不透明）不入表 */
+  alpha?: number;
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
   pickup?: 'heart' | 'star' | 'manastar';
@@ -87,6 +93,10 @@ export class ItemDrop extends Entity {
     const vid = vanillaIdOfItem(itemId);
     const ic = vid > 0 ? VANILLA_ITEM_COLOR[vid] : undefined;
     if (ic && ic[3] > 0) this.color = [...ic];
+    // ★SW-FX49 Item.alpha 静态表注入（GetAlpha 默认支 pass1 维,与 color 域无
+    // 耦合——星怒 65 color A=0 但 alpha=100 照样半透明;幽灵翼 823 全透明）
+    const al = vid > 0 ? VANILLA_ITEM_ALPHA[vid] : undefined;
+    if (al && al > 0) this.alpha = al;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {

@@ -5,7 +5,7 @@
 //   Item.GetStoreValue            Item.cs:49492-49500     （shopCustomPrice ?? value）
 //   Item.sellPrice                Item.cs:49019-49022     （×5 → 表值恒为 5 的倍数）
 //   ItemShopSellbackHelper        ItemShopSellbackHelper.cs:10-64（店内回购记）
-//   Main.UpdateOldNPCShop         Main.cs:18056-18064     （换店清回购记）
+//   Main.UpdateOldNPCShop         Main.cs:18387-18393     （换店清回购记；1456:18054）
 //   ItemSlot.GetSellOrTrash       ItemSlot.cs:185-196     （Shift+左键 Sell/垃圾桶/钱币豁免）
 //   ItemSlot.OverrideLeftClick cursorOverride==10         ItemSlot.cs:780-798（出售结算）
 //   ItemSlot.LeftClick case 4 / PickItemMovementAction 15 ItemSlot.cs:1110-1129/:1426-1439

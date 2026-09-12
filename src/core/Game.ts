@@ -3173,6 +3173,9 @@ export class Game implements GameHooks {
   // ---- 箱子同步（msg31/32，服务器权威） ----
   /** 待开箱（msg31 已发、等回包后自动开面板） */
   private netPendingChest: { x: number; y: number } | null = null;
+  /** 本端在用箱镜像（SW-FX42）：本端正开着的世界箱 idx（null=无）——msg33 开/关
+   *  公告的数据源;随身储蓄族（x<0）不入镜像（原版不在 Main.chest 域） */
+  private netChestOpenIdx: number | null = null;
   /** 已登记箱子差分基准（postUpdate 轮询 → msg32 槽位编辑上报） */
   private netChestWatch: Array<{ chest: ChestData; idx: number; last: Array<{ id: number; stack: number; prefix?: number } | null> }> = [];
 
@@ -3199,7 +3202,11 @@ export class Game implements GameHooks {
     } else {
       watch.last = chest.items.map((it) => it ? { ...it } : null);
     }
-    if (this.netPendingChest && this.netPendingChest.x === x && this.netPendingChest.y === y) {
+    // ★SW-FX42 ±1 容差（= 服务器 msg31 邻域找箱同口径,room.ts findIndex ±1）：
+    //  点 2×2 箱体非锚格 → 帧携箱锚,精确等号恒失配 → 面板不弹且 pending 永挂
+    //  （后被他人编辑广播误触发的开口）。容差=同一请求必然命中;无关箱远隔 ≥2 格
+    if (this.netPendingChest
+      && Math.abs(this.netPendingChest.x - x) <= 1 && Math.abs(this.netPendingChest.y - y) <= 1) {
       this.netPendingChest = null;
       this.tryOpenChest(chest); // 服务器已下发内容 = 通过了 protectItems 门
     }
@@ -6958,6 +6965,11 @@ export class Game implements GameHooks {
       //   以 freshlyCreated（newWorld=true/loadWorld=false）锚定生成语义，读档零触碰。
       if (this.freshlyCreated) {
         this.anglerQuestSwap();
+        // ★SW-FX42：生成尾首掷同样只归权威端（任务号确定性播种「seed^dayCount」,
+        //  双端同值,但断言仍要发——服务器今日交付集记账与访客复位面靠它建立）
+        if (!this.net || this.net.policy.isHost) {
+          this.net?.sendAnglerQuestAssert(this.world.anglerQuest);
+        }
         this.placeSleepingAngler();
       }
     }
@@ -9533,7 +9545,14 @@ export class Game implements GameHooks {
         if (w.sundialCooldown > 0) w.sundialCooldown--;
         // 渔夫任务每日重掷（UpdateTime_StartDay :64852 → Main.AnglerQuestSwap）：清
         // 今日交付名单/完成旗 + 按世界门（困难/邪恶类型/Boss 进度）重选任务鱼
-        this.anglerQuestSwap();
+        // 渔夫任务重掷（Main.AnglerQuestSwap :3851-3855 头门 `if (netMode == 1) return;`
+        // ——★SW-FX42 补上该门：联机仅权威端（房主）本地重掷,重掷后 module15 sub0
+        // 断言下发（msg74 等价）,访客随断言复位今日旗;访客本地重掷会与
+        // 「seed^dayCount」外的名单清空面竞态并绕过服务器今日交付集）
+        if (!this.net || this.net.policy.isHost) {
+          this.anglerQuestSwap();
+          this.net?.sendAnglerQuestAssert(w.anglerQuest);
+        }
         // 成就：熬过一夜（Main.cs:64894 event 1）+ 血月夜结束（:64862-64866 event 5，
         // 血月旗在清除前求值——本块首两行即原序）
         this.achievements.notifyProgressionEvent(1);
@@ -9598,6 +9617,17 @@ export class Game implements GameHooks {
             ? 'Misc.StartedVictoryXmas' : 'Misc.EndedVictoryXmas'), 50, 255, 130);
         }
         this.checkSeasonal();
+        // ★SW-FX42 季节强置位断言（msg7 bitsByte9[6]/[7] 等价承载,原版收端以
+        //  force 位各自重算 checkXMas/checkHalloween Main.cs:13290-13344）：本仓
+        //  ForToday 位=Game 私有运行时位（月事件胜利当日）,访客无从重算 → 权威端
+        //  每黎明把合并结果+ForToday 位随 module15 sub2 下发,收端直写等价读数
+        if (!this.net || this.net.policy.isHost) {
+          this.net?.sendSeasonAssert(
+            (this.world.clock.halloween ? 1 : 0)
+            | (this.world.clock.xMas ? 2 : 0)
+            | (this.forceHalloweenForToday ? 4 : 0)
+            | (this.forceXMasForToday ? 8 : 0));
+        }
         // 生日自然派对（BirthdayParty.CheckMorning→NaturalAttempt :62-143）：
         // 派对女孩在场 + 冷却 + 1/10 → 在场 ≥5 NPC 时开生日派对。
         // RNG 消费点已接：原版 StartDay 序 = BirthdayParty.CheckMorning(:64853) 先于
@@ -13151,7 +13181,10 @@ export class Game implements GameHooks {
               tdx / tdl * cwMelee.shootSpeed * 5, tdy / tdl * cwMelee.shootSpeed * 5,
               this.swing.dmg ?? 1, this.swing.kb ?? 3, 985,
               { grav: 0, pierce: Math.max(1, pd?.penetrate ?? 3),
-                terra: { ai0: this.player.facing, ai1: 18, ai2: (ps?.size ?? 1) } }),
+                // ★SW-RB14a（F4）：757 链第二 NewProjectile（985 光束）ai[0] = direction×gravDir
+                //（Player.cs:49444——同链 984 弧 :49443 同式,波 3 已修;光束 ±ai0 张合
+                //  层随 gravDir 镜像,倒挂漏乘 = 张合方向不翻）。gd=1 逐位恒等。
+                terra: { ai0: this.player.facing * this.player.gravDir, ai1: 18, ai2: (ps?.size ?? 1) } }),
               'projectiles');
             // 984 旋斩弧（同链首行 NewProjectile 984：方向×重力、itemAnimationMax、
             // 调整 scale——Player 相对锚定的挥砍视觉，TerraArcProj 随 985 同生同灭）。
@@ -25487,6 +25520,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.openChest?.(chest as never);
     this.sfx.play(curC ? 'menuTick' : 'menuOpen', 1); // Sound 12（:33508）/ Sound 10（:33504）
+    // ★SW-FX42 开箱公告（msg33,C→S——原版 Player.OpenChest 尾 SendData(33) 链）：
+    //  仅世界箱（x>=0）入在用箱镜像;换箱时服务器 per-slot 单值 map 自动释放旧箱
+    //  （Main.player[].chest 单值语义）;关闭公告走 closeChestPanel 访问器包装。
+    //  访客被服务器 msg31 拒绝时不会走到这里（onChestSync 未回包,netPendingChest
+    //  由 msg80 镜像否定信号清除）
+    {
+      const cxyOpen = chest as { x?: number; y?: number };
+      if (cxyOpen.x !== undefined && cxyOpen.x >= 0 && cxyOpen.y !== undefined) {
+        const ci = this.world.chests.indexOf(chest as ChestData);
+        if (ci >= 0) {
+          this.netChestOpenIdx = ci;
+          this.net?.sendChestOpenState(ci, cxyOpen.x, cxyOpen.y, false);
+        }
+      }
+    }
     this.input.rightDown = false;
   }
   /** 拉杆/开关/计时器:右键 → Wiring.HitSwitch(Wiring.cs:163-252) */
@@ -28746,7 +28794,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   openChestRef: (() => ChestData | null) | null = null;
   /** 收起宝箱/储物面板回调（UI 注入；Main.cs:38455-38458 chest=-1 与 Player.cs
    *  :31264/:31277 追踪失联关面板路径——Game 侧 Chester 容器链用） */
-  closeChestPanel: (() => void) | null = null;
+  /** UI 关箱面板回调（UI.ts 注入）。★SW-FX42 改访问器包装：关闭时若本端持有在用
+   *  世界箱 → 先发 msg33 关闭公告（服务器释放 chestUserBySlot 并广播 msg80;
+   *  = 原版 Player 关箱路径 Main.player[myPlayer].chest=-1 → msg33/80 链） */
+  private _closeChestPanel: (() => void) | null = null;
+  get closeChestPanel(): (() => void) | null { return this._closeChestPanel; }
+  set closeChestPanel(fn: (() => void) | null) {
+    this._closeChestPanel = fn
+      ? () => {
+          fn();
+          if (this.netChestOpenIdx !== null) {
+            this.netChestOpenIdx = null;
+            this.net?.sendChestOpenState(-1, -1, -1, true);
+          }
+        }
+      : null;
+  }
   /** 死亡收背包（Main.cs:46435 dead ⇒ playerInventory=false；UI 注入） */
   closeInventory: (() => void) | null = null;
   /** UI 光标持物查询（UI.ts 注入,2026-09-02）：非空返回值=光标捏着物品。★SW-AZ1
@@ -31098,6 +31161,50 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 力量权限查询（UI 门禁；单机恒 true——IsAvailableForPlayer netMode==0 放行 :189-192） */
   journeyPowerAvailable(powerId: number): boolean {
     return !this.net ? true : this.net.journeyPowerAvailable(powerId);
+  }
+
+  // ================= SW-FX42 渔夫任务/季节位联机面（module15；syncModules.ts 编解码） =================
+
+  /** module15 sub0 到达（msg74 等价,MessageBuffer.cs:3145-3151 直写同面）：
+   *  任务号直写 + 今日完成旗/名单复位（服务器在断言时刻已清今日交付集） */
+  netApplyAnglerQuest(quest: number): void {
+    const w = this.world;
+    if (!w) return;
+    w.anglerQuest = quest;
+    w.anglerQuestFinished = false;       // AnglerQuestSwap :3806（服务器断言即新的一天）
+    w.anglerWhoFinishedToday = [];       // :3805
+  }
+
+  /** module15 sub1 到达（msg75 中继）：本端 slot 的交付回执置完成旗
+   *  （重连/晚进房补发去重面——他人 slot 静默忽略,名单是本地单机面） */
+  netApplyAnglerFinished(slot: number): void {
+    if (slot !== this.net?.mySlot) return;
+    this.world.anglerQuestFinished = true;
+  }
+
+  /** module15 sub2 到达（msg7 bitsByte9[6]/[7] 等价）：合并结果直写 clock +
+   *  ForToday 私有位（原版收端存 force 位后各自重算 checkXMas/checkHalloween
+   *  Main.cs:13290-13344；本仓发送端已算好合并值,直写=同一读数） */
+  netApplySeasonBits(bits: number): void {
+    const w = this.world;
+    if (!w) return;
+    w.clock.halloween = !!(bits & 1);
+    w.clock.xMas = !!(bits & 2);
+    this.forceHalloweenForToday = !!(bits & 4);
+    this.forceXMasForToday = !!(bits & 8);
+  }
+
+  /** msg80 在用箱镜像到达（SW-FX42）：占用者开/关他人可见面。本端 pending 开箱
+   *  请求撞上他人占用 → 清 pending（服务器 msg31 拒发内容时的唯一否定信号,
+   *  防陈旧 pending 被后续他人编辑广播误开面板——onChestSync 只在 pending
+   *  命中时自动开箱,Game.ts netApplyChestSync 段）。匹配带 ±1 容差=服务器
+   *  msg31 邻域找箱同口径（点 2×2 箱体任意一格,帧携箱锚,坐标可差 1） */
+  netApplyChestInUse(slot: number, chestIdx: number, x: number, y: number): void {
+    const pend = this.netPendingChest;
+    if (chestIdx >= 0 && pend
+      && Math.abs(pend.x - x) <= 1 && Math.abs(pend.y - y) <= 1) {
+      this.netPendingChest = null;
+    }
   }
 
   // ================= MP 同步轻件包（module0/2/4/7） =================
@@ -34215,10 +34322,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   npcDialogButton(id: NpcButtonId): void {
     const npc = this.dialogNpc;
     if (id === 'close' || !npc) { this.closeNpcDialog(); return; }
-    if (id === 'shop') { this.openNpcShop(); return; }
+    if (id === 'shop') { this.openShopFromButton(false); return; }
     // 画家装饰专柜（OpenShop(227,25,"GameUI.PainterDecor") Main.instance.OpenShop(:41160)：
     // 同开商店管线，仅换货架来源——见 painterDecorStock）
-    if (id === 'shopDecor' && npc.vanillaId === 227) { this.openNpcShop(true); return; }
+    if (id === 'shopDecor' && npc.vanillaId === 227) { this.openShopFromButton(true); return; }
     if (id === 'heal') { this.nurseHeal(); return; }
     if (id === 'collect' && npc.npcKey === 'tax_collector') { this.taxCollect(); return; }
     if (id === 'reforge' && npc.npcKey === 'goblin_tinkerer') {
@@ -34485,6 +34592,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       chat = Lang.specialText('AnglerQuestText.TurnIn_') ?? Lang.text('Mods.SandboxWorld.NPC.AnglerTurnIn');
       w.anglerQuestFinished = true;         // :39678
       w.anglerWhoFinishedToday.push(this.playerName());   // :39685（单人即本地名）
+      // ★SW-FX42 交付上行（msg75 等价,Main.cs:40948 SendData(75) 同位）——服务器
+      //  记入今日交付集,重连（60s 窗内同 slot）/晚进房者经进房补发保去重
+      this.net?.sendAnglerFinishedClaim();
       // 成就：钓鱼任务服务计数（AchievementsHelper.HandleAnglerService，Main.cs:40954
       // NPCChatText_DoAnglerQuest 交鱼成功支 `if (flag)` 尾 1:1）——SERVANT_IN_TRAINING
       // 一次性 + GOOD_LITTLE_SLAVE/TROUT_MONKEY/FAST_AND_FISHIOUS/SUPREME_HELPER_MINION
@@ -35423,6 +35533,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       { buyOnce: true, priceAdjustment: this.shopHappinessMul }).buying);
   }
 
+  /** 商店按钮开启面(Main.OpenShop Main.cs:41162-41170 等价,★SW-RB14b 补):
+   *  ①SetupShop 重建货架面——OpenShop 每次点击重跑 Chest.SetupShop(Chest.cs:1357-1361
+   *  整面 `array[i] = new Item()` 回填)⇒回购 buyOnce 条目不跨重建存活;本仓 openNpcShop
+   *  兼职刷新(npcShopBuy/Sell 后同会话重建)不可清,故把清面钉在按钮臂;
+   *  ②UpdateOldNPCShop 面(1457:18387-18393,1458 同位)——npcShop 变更才清
+   *  shopSellbackHelper。此前两面整缺:换店(对话 A→B 后点 B 商店钮,不经 closeNpcDialog)
+   *  旧店回购件+卖差价记串进新货架;同店再点回购件滞留(原版已随 SetupShop 清空)。
+   *  会话身份 = (decor,npc)——A 店→B 对话→回 A 点钮:身份未变,记不清(原版 npcShop
+   *  恒 A 同相);A 常规→A 装饰专柜:商店索引 15→25 变更,清(原版同相) */
+  private openShopFromButton(decor: boolean): void {
+    const idx = `${decor ? 'd' : 's'}:${this.dialogNpc?.vanillaId ?? -1}`;
+    if (this.lastOpenedShopIdx !== idx) {
+      this.lastOpenedShopIdx = idx;
+      this.shopSellbackMemo.clear();   // UpdateOldNPCShop(Main.cs:18387-18393)
+    }
+    this.shopBuybackStock = [];        // Chest.SetupShop 重建(Chest.cs:1357-1361)
+    this.openNpcShop(decor);
+  }
+  /** 上次经商店按钮开启的会话身份(openShopFromButton 维护;UpdateOldNPCShop oldNPCShop 投影) */
+  private lastOpenedShopIdx: string | null = null;
+
   private openNpcShop(decor = false) {
     const npc = this.dialogNpc;
     if (!npc) return;
@@ -35587,7 +35718,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 店内回购记（Main.shopSellbackHelper，ItemShopSellbackHelper.cs:10-64）：
    *  key = `${vid}:${prefix}`（ItemMemo.type+prefix :10-29），value = 本次开店会话
    *  内从该店购入数量。买时记（ItemSlot.cs:1919-1922）→ 卖时按买价原额退
-   *  （Player.cs:34739-34743）→ 换店/关店清（Main.cs:18056-18064 UpdateOldNPCShop） */
+   *  （Player.cs:34739-34743）→ 换店/关店清（UpdateOldNPCShop 1457:18387-18393/
+   *  1458 同位/1456:18054——★SW-RB14b 行号订正,旧注 18056-18064 系 1456 锚） */
   private shopSellbackMemo = new Map<string, number>();
 
   /** 卖回 buyOnce 货架（Chest.AddItemToShop Chest.cs:651-670 的会话投影）：卖出/
@@ -35795,13 +35927,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 关闭商店面板（UI 回调；原版 Main.npcShop=-1）。换店/关店清回购记
-   *  （Main.UpdateOldNPCShop Main.cs:18056-18064：npcShop != oldNPCShop → Clear）
+   *  （Main.UpdateOldNPCShop 1457:18387-18393/1458 同位/1456:18054——★SW-RB14b
+   *  行号订正：npcShop != oldNPCShop → Clear）
    *  与 buyOnce 货架（原版重开走 Main.OpenShop → SetupShop 重建货架
    *  Main.cs:39895-39903，卖回条目不跨会话存活） */
   npcShopClose(): void {
     this.npcShopOpen = false;
     this.shopSellbackMemo.clear();
     this.shopBuybackStock = [];
+    this.lastOpenedShopIdx = null;   // ★SW-RB14b:SetNPCShopIndex(0) → oldNPCShop 归零投影(重开同店=索引变更,重清无害幂等)
   }
 
   /** 商店出售（Player.SellItem Player.cs:34716-34878 + ItemSlot.OverrideLeftClick
@@ -44504,7 +44638,12 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     const cause = p.lastDamageCause ?? { kind: 'slain' } as const;
     const deathText = createDeathText(this.playerName(), cause, this.world?.name ?? '');
     // 原版 Player.cs:38312-38313:死亡消息走消息列,色 (225,25,25)
-    this.newText(deathText, 225, 25, 25);
+    // ★SW-FX42 死亡收尾同步包（msg118 SendPlayerDeath 的本仓文本面）：原版 KillMe 内
+    //  ChatHelper.BroadcastChatMessage(deathText, (225,25,25))（Player.cs:39221-39223,
+    //  118 包 = KillMe 重放/死因 Damage 编码）——曾用 newText 只显本端,其他端死亡无痕
+    //  （死局面仅靠 msg13 ghost 旗/hp=0）。chatBroadcast = BroadcastChatMessage 等价单口
+    //  （本地消息列 + 联机 channel2 系统行中继,room.ts slot=255 形态）
+    this.chatBroadcast(deathText, 225, 25, 25);
     // 红色粉碎粒子：身体范围多层爆散,下落渐隐(原版尘语义,无碰撞;~5s 淡出
     // —— 旧"落地反弹/停驻"自制物理 2026-08-19 随粒子碰撞整体退役)
     this.spawnParticles(p.cx, p.y + 8, '#C02020', 22, 3.2, { life: 300, damp: 0.988, grav: 0.09 });
@@ -45484,6 +45623,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
           }
         },
         onJourneyPermission: () => journeyBrowserNotifyResearchChanged(),
+        // ---- SW-FX42 渔夫任务/季节位/在用箱（module15 + msg80）----
+        onAnglerQuest: (quest) => this.netApplyAnglerQuest(quest),
+        onAnglerFinished: (slot) => this.netApplyAnglerFinished(slot),
+        onSeasonBits: (bits) => this.netApplySeasonBits(bits),
+        onChestInUse: (slot, chestIdx, x, y) => this.netApplyChestInUse(slot, chestIdx, x, y),
         // ---- MP 同步轻件包（net/syncModules.ts：module0/2/4/7/8/100 + msg203）----
         onLiquidSync: (cells) => this.netApplyLiquid(cells),
         onBestiaryEvent: (events) => this.netApplyBestiary(events),

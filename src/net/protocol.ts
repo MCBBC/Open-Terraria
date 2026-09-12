@@ -189,6 +189,21 @@ export const enum Msg {
   RequestChestOpen = 31, // C→S {i32 x, i32 y}（箱子锚点；原版同号）
   SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
                        //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}
+  ChestOpenState = 33, // C→S（SW-FX42 在用箱面，原版同号 ChestOpen）：{i16 chestIdx(-1=关),
+                       //   i32 x, i32 y}——客户端开/关箱公告（原版 Player.OpenChest 尾
+                       //   SendData(33, chestIdx, chestX, chestY, nameLen...)，
+                       //   NetMessage.cs:880-902 + MessageBuffer.cs:1962-1977：服务器据
+                       //   此更新 Main.player[whoAmI].chest 并广播 msg80）。原版载荷还带
+                       //   箱名改名段（num24 nameLen+string）——本仓箱改名未过网（msg69
+                       //   ChestName 域整缺,登记 multiplayer-design.md §SW-FX42）
+  ChestInUse = 80,     // S→C 广播（SW-FX42 在用箱面，原版同号）：{u8 slot, i16 chestIdx,
+                       //   i32 x, i32 y}——每玩家在用箱镜像（原版 Main.player[slot].chest,
+                       //   NetMessage.cs:1180-1184 写 / MessageBuffer.cs:3220-3231 读，
+                       //   值域 -3..7999；本仓放宽 i16 且附 x,y 供拒绝匹配）。
+                       //   生产位 = msg31 授予（MessageBuffer.cs:1878）/ msg33 换箱关旧开新
+                       //   （:1972）/ 进场补发（NetMessage.cs:2924 SyncOnePlayer 捆包段）。
+                       //   消费 = Chest.UsingChest（Chest.cs:492-503）服务器拒开门 + 客户端
+                       //   镜像（Wiring.cs:2571/:2667 提纯机/抽取机在用门等未来消费面）
   StrikeNPC = 42,      // 访客→房主（服务器定向转发）{u32 netId, i16 dmg, f32 kbx, f32 kby}
                        //   （原版 42=Unknown42：旧 StrikeNPC 槽位；注释曾误写 crit/kbDir/srcX/srcY——
                        //    实际线格式自 v3 起即为 dmg+击退两分量，2026-08 校正）
@@ -407,6 +422,12 @@ export const enum NetModule {
                   //   CommonCode.DropItemLocalPerClientAndSetNPCMoneyTo0（CommonCode.cs:35-58）：
                   //   Boss 袋族（bossBag 规则）各交互端各得一份 instanced 副本,
                   //   接收端本地生成 netLocalOnly 掉落（不上报 msg21——仅本端玩家可见可拾）
+  AnglerQuest = 15, // 渔夫任务/季节强置位（SW-FX42,依 InstancedLoot=14 先例取 14+1）：
+                  //   sub0=msg74 等价（任务号断言+新的一天复位）/ sub1=msg75 等价（交付
+                  //   上行,服务器 per-slot 记账）/ sub2=force 季节位（msg7 bitsByte9[6][7]
+                  //   等价——ForToday 位是 Game 运行时位,msg7 通用 flags map 不承载）。
+                  //   编解码与语义锚见 net/syncModules.ts module15 段;
+                  //   旧双端 default 忽略未知 moduleId,增量通道不升 PROTO_VER
   Ambience = 100, // 天空氛围（原版 NetAmbienceModule——注册序 id=3 被 JoinLeave 占用，
                   //   依 CreativePowerPermissions=9 先例走仓库私有大号 id；语义 1:1）：
                   //   S→C {u8 playerSlot, i32 seed, u8 skyEntityType}——服务器 AmbienceServer

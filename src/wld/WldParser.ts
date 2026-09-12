@@ -87,6 +87,29 @@ export interface WldWorld {
   hardMode: boolean;
   /** 原版 worldId（WF header；对话月相池等消费） */
   worldId: number;
+  /** ★SW-FX43（2026-09-12）：header 身份/精度字段捕获（曾读位即弃 → 导入→存→导出
+   *  环身份漂移）。落 save.wldSnap 差量快照（WldImport 组装,导出 fieldValue 快照
+   *  优先回写零漂移）。i64 两项以十进制字符串域携行（>2^53,Number 化即失真），
+   *  guid=16B hex 串。 */
+  worldGenVersion: bigint;
+  guid: string;
+  creationTime: bigint;
+  /** 原版世界清单串（v≥299 varint 长度+UTF8,WF:1436 写/:2523 读;台账曾恒写 ''） */
+  manifest: string;
+  /** ★SW-FX43：caveBackX[3]（WF:1266-1268 写/:2065-2067 读）——原版独立掷
+   *  RandomizeCaveBackgrounds（WorldGen.cs:8141-8210）,与 treeX 无派生关系。
+   *  曾读位即弃 → 导出按 treeX 派生=导入档漂移（FX33 登记债） */
+  caveBackX: number[];
+  /** ★SW-FX43：入侵五元组（WF:1306-1309 写序 delay/size/type/x + :1322
+   *  invasionSizeStart v107+;读侧 :2100-2104/:2151 同序）——曾读位即弃 →
+   *  导入世界入侵中断+再导出归零 */
+  invasion: { delay: number; size: number; type: number; x: number; sizeStart: number };
+  /** ★SW-FX43：沙暴四元组（WF:1375-1378 _tempSandstormHappening..IntendedSeverity;
+   *  SetTempToOngoing :1063-1066 / LoadWorld :166-172 回灌 Sandstorm.*）——曾读位即弃 */
+  sandstorm: { happening: boolean; timeLeft: number; severity: number; intendedSeverity: number };
+  /** ★SW-FX43：流星雨剩余计数（WF:1428 _tempMeteorShowerCount → LoadWorld :177
+   *  回灌 WorldGen.meteorShowerCount）——曾读位即弃 */
+  meteorShowerCount: number;
   /** 原版洞穴背景四区样式（WF:1262-1268 caveBackStyle[4]） */
   caveBackStyle: number[];
   /** 冰雪/丛林/地狱背景样式（WF:1269-1271） */
@@ -266,11 +289,18 @@ export function parseWld(buf: Uint8Array): WldWorld {
   r.seek(pointers[0]);
   const title = r.string();
   let seed = '';
+  // ★SW-FX43：worldGenVersion 捕获（WF:1243 写/:1979 读;i64,快照字符串域携行）
+  let worldGenVersion = 0n;
   if (version >= 179) {
     seed = version === 179 ? String(r.i32()) : r.string();
-    r.u64(); // worldGenVersion
+    worldGenVersion = r.u64(); // worldGenVersion（曾读位即弃）
   }
-  if (version >= 181) r.bytes(16); // guid
+  // ★SW-FX43：guid 16B 捕获（WF:1245 写/:1983 读;曾读位即弃→导出恒 16 零字节）。
+  //  hex 串落 wldSnap（导出 writeHeader 按 32 位 hex 解回 16B）
+  let guid = '';
+  if (version >= 181) {
+    for (const b of r.bytes(16)) guid += b.toString(16).padStart(2, '0');
+  }
   const worldId = r.i32(); // worldId
   r.i32(); r.i32(); r.i32(); r.i32(); // bounds
   const tilesHigh = r.i32();
@@ -311,13 +341,17 @@ export function parseWld(buf: Uint8Array): WldWorld {
     r.boolean();
     if (version === 208 && r.boolean()) gameMode = 2;
   }
-  if (version >= 141) r.i64(); // creationTime
+  // ★SW-FX43：CreationTime 捕获（v141 门,WF:1254 写/:2020 读;i64 .NET ticks——
+  //  >2^53 以字符串域携行,导出 BigInt(str) 精确回写;header.created=ms 派生丢亚毫秒位）
+  const creationTime = version >= 141 ? r.i64() : 0n;
   if (version >= 284) r.i64(); // lastPlayed
   const moonType = r.u8(); // moonType
   const treeX = [r.i32(), r.i32(), r.i32()];       // 世界横向 4 区分界（树样式用）
   let treeTops: number[] = [];                    // TreeTops 13 区域变体（v≥211 优先于 header treeStyle）
   const treeStyle = [r.i32(), r.i32(), r.i32(), r.i32()]; // 各区森林树样式
-  for (let i = 0; i < 3; i++) r.i32(); // caveBackX
+  // ★SW-FX43：caveBackX[3] 捕获（WF:1266-1268;原版 RandomizeCaveBackgrounds
+  //  WorldGen.cs:8141-8210 独立掷,与 treeX 无派生关系——曾读位即弃）
+  const caveBackX = [r.i32(), r.i32(), r.i32()];
   const caveBackStyle = [r.i32(), r.i32(), r.i32(), r.i32()];
   const iceBackStyle = r.i32();
   const jungleBackStyle = r.i32();
@@ -361,7 +395,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const hardMode = r.boolean();
   if (hardMode) flags.hardMode = true;
   if (version >= 257 && r.boolean()) flags.afterPartyOfDoom = true;                        // party of doom
-  r.i32(); r.i32(); r.i32(); r.f64(); // invasion
+  // ★SW-FX43：入侵四连捕获（WF:1306-1309 写序 delay/size/type/x;读侧 :2100-2104 同序）
+  //  ——曾读位即弃 → 导入世界入侵中断+再导出归零
+  const invDelay = r.i32(), invSize = r.i32(), invType = r.i32(), invX = r.f64();
   const slimeRainTime = version >= 118 ? r.f64() : 0; // slime rain（Main.slimeRainTime：>0 进行中 <0 冷却）
   if (version >= 113) sundialCooldown = r.u8(); // WF:2120 Main.sundialCooldown
   const raining = r.boolean(); const rainTime = r.i32(); const maxRaining = r.f32(); // rain
@@ -394,7 +430,8 @@ export function parseWld(buf: Uint8Array): WldWorld {
   // ★R16-7①：tax collector 门 = 129（WF57:2179），非 140
   if (version >= 129 && r.boolean()) flags.savedTaxCollector = true;
   if (version >= 201 && r.boolean()) flags.savedGolfer = true;
-  if (version >= 107) r.i32(); // invasionSizeStart
+  // ★SW-FX43：invasionSizeStart 捕获（v107 门,WF:1322 写/:2151 读）——曾读位即弃
+  const invasionSizeStart = version >= 107 ? r.i32() : 0;
   const cultistDelay = version >= 108 ? r.i32() : 86400; // WF:2185-2192（缺省=delayStart，同 CultistRitual.cs:7）
 
   // banners（WF:2210 BannerSystem.Load：i16 n + n×i32 killCount[banner]；v≥289 再
@@ -453,7 +490,12 @@ export function parseWld(buf: Uint8Array): WldWorld {
     for (let i = 0; i < n; i++) celebrating.push(r.i32());
     party = { manual, genuine, cooldown, celebrating };
   }
-  if (version >= 174) { r.boolean(); r.i32(); r.f32(); r.f32(); }
+  // ★SW-FX43：沙暴四元组捕获（v174 门,WF:1375-1378 写/_tempSandstormHappening..
+  //  IntendedSeverity;读侧 :2319-2323 同序;LoadWorld :166-172 回灌 Sandstorm.*）
+  //  ——曾读位即弃 → 导入档沙暴进行中丢失+再导出恒全零
+  const sandstorm = version >= 174
+    ? { happening: r.boolean(), timeLeft: r.i32(), severity: r.f32(), intendedSeverity: r.f32() }
+    : { happening: false, timeLeft: 0, severity: 0, intendedSeverity: 0 };
   // ★savedBartender+DD2 三 bool（v178,WF:1369 savedBartender + DD2Event.cs:151-157
   //  Save=3 bool(T1/T2/T3),Load 读 savedBartender+3 共 4 bool——**无第 4 个 Any**!
   //  曾把第 1 位标成 dd2DownedT1(语义错位):flags.savedBartender 缺失=原版导入世界
@@ -559,7 +601,11 @@ export function parseWld(buf: Uint8Array): WldWorld {
   //  与 WldImport seedFlags 合流(:837-842)同域。
   if (version >= 288) { if (r.boolean()) seedFlags.vampireSeed = true; } else r.boolean();  // vampireSeed
   if (version >= 296) { if (r.boolean()) seedFlags.infectedSeed = true; } else r.boolean(); // infectedSeed
-  if (version >= 291) { r.i32(); r.i32(); }
+  // ★SW-FX43：_tempMeteorShowerCount 捕获（v291 门,WF:1428 写/:2496 读 → :177 回灌
+  //  WorldGen.meteorShowerCount）;_tempCoinRain（WF:1429/:2498→Main.coinRain :178）
+  //  本仓不建模仍读位即弃（导出恒 0,登记债）
+  const meteorShowerCount = version >= 291 ? r.i32() : 0;
+  if (version >= 291) r.i32();
   if (version >= 297) {
     if (r.boolean()) flags.teamBasedSpawnsSeed = true;                                     // WF57:2507
     const n = r.u8();
@@ -573,7 +619,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (r.boolean()) seedFlags.noLightning = true;
   }
   if (version >= 299 && version < 313) r.u32();
-  if (version >= 299) r.string(); // manifest
+  // ★SW-FX43：manifest 串捕获（v299,WF:1436 写/:2523 读;台账导出曾恒写 ''——
+  //  WorldManifest.cs:31-45 容错域合法但导入档漂移）
+  const manifest = version >= 299 ? r.string() : '';
 
   // ---- tiles ----
   if (pointers.length < 5) throw new WldParseError('section 数量不足，不是有效的 1.4 世界文件');
@@ -760,6 +808,10 @@ export function parseWld(buf: Uint8Array): WldWorld {
 
   return {
     worldId, caveBackStyle, iceBackStyle, jungleBackStyle, hellBackStyle,
+    // ★SW-FX43：header 身份/精度/入侵/沙暴/流星雨捕获面（接口注记见上）
+    worldGenVersion, guid, creationTime, manifest, caveBackX,
+    invasion: { delay: invDelay, size: invSize, type: invType, x: invX, sizeStart: invasionSizeStart },
+    sandstorm, meteorShowerCount,
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
     groundLevel, rockLevel, time, dayTime, moonType, moonPhase, bloodMoon, eclipse,
     isCrimson, hardMode, gameMode,

@@ -61,7 +61,7 @@ describe('A. 缺口清单完备性（BUFF_BY_VANILLA 反查零落空）', () => 
     }
   });
 
-  it('vanilla-pets.json 全表（62 行）buff 可反查——装备宠物图标链无静默丢失', () => {
+  it('vanilla-pets.json 全表（★SW-FX48 后 83 行）buff 可反查——装备宠物图标链无静默丢失', () => {
     const buffs = new Set<number>();
     for (const [, e] of Object.entries(petsJson)) buffs.add(e.buff);
     expect(buffs.size).toBeGreaterThanOrEqual(61);    // 3855 勘误后 200/201 各有行
@@ -81,10 +81,10 @@ describe('A. 缺口清单完备性（BUFF_BY_VANILLA 反查零落空）', () => 
   it('itemfunc 有 buffType 且物品在仓的全部 vid 可反查（静默丢失面收口）', () => {
     // 豁免（剩债登记,非本批可收口）:
     //  21 = Resistance 治疗副作用位（不主动施加）
-    //  284-304 = 1.4.5 boss 宠 21 件（4797-4817 在仓但 vanilla-pets.json 无行 →
-    //          petInfoOfVid 落空,UpdatePet 补挂面/跟随体均无载体;DEFS 单边入档
-    //          是死条目——须与 pets.json/petai 行 + 宠物内容批同落,见审计报告剩债）
-    const exempt = new Set<number>([21, ...Array.from({ length: 21 }, (_, i) => 284 + i)]);
+    // ★SW-FX48（2026-09-12）：原豁免 284-304（1.4.5 boss 宠 21 件）已收口——
+    //  vanilla-pets.json 补行 4797-4817（Item.cs:39417-39440）+ Buffs.ts 284-304
+    //  收口位（BuffType 360-380）+ petai 17 条目,本扫面不再豁免
+    const exempt = new Set<number>([21]);
     for (let vid = 1; vid <= 5700; vid++) {
       if (vanillaItemKey(vid) === undefined) continue; // 只锁在仓物品
       const f = itemFuncOfVid(vid);

@@ -349,14 +349,14 @@ describe('SW-FX34 域G：倒挂顶头臂（Player.cs:28467-28471 vy=-0.01+jump=0
     expect(u.vy).toBe(0);
   });
 
-  it('G3 gd=1 恒等：上撞顶头 vy=0、无 -0.01 臂（既有 gd=1 面,本波禁碰=登记债）', () => {
+  it('G3 gd=1 恒等：上撞顶头 vy=0、无 -0.01 臂（碰撞层钉面;★SW-FX40 已在 Player 层补 :28463-28466 `vy=0.01+jump=0` 臂——本断言钉的是 moveAndCollide 碰撞层语义,两层不冲突,注释重锚不改断言）', () => {
     const w = shaftWorld();
     const b: Body = {
       x: 100, y: 64 * TILE + 4, w: 20, h: 42, vx: 0, vy: -3,
       onGround: false, hitWall: false, hitHead: false, stepUp: true, stepDownGate: 'gravity',
     };
     moveAndCollide(b, w, 0, -12);
-    expect(b.vy).toBe(0);                          // vanilla gd=1 顶头 +0.01 缺口=债
+    expect(b.vy).toBe(0);                          // 碰撞层清零（SW-FX40 Player 层 +0.01 在其后写）
     expect(b.hitDown).toBe(false);
   });
 });

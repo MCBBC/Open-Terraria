@@ -52,6 +52,7 @@ import { openJourneyPowersPanel } from './ui/JourneyPowersUI';
 const SHIFT_DEBUG_RESERVED: ReadonlySet<string> = new Set(['F1', 'F2', 'F3', 'F4', 'F5', 'F10']);
 import { openResearchPanel } from './ui/ResearchUI';
 import { installCanvasWatch } from './render/CanvasWatch';
+import { browserWheelDeltaYToVanilla } from './render/CaptureMode';   // ★SW-FX50 滚轮符号对齐
 import { RemasterRuntime } from './remaster/RemasterRuntime';
 import { assetVersion } from './net/AssetCache';
 import { RemasterManager } from './remaster/RemasterManager';
@@ -613,17 +614,22 @@ window.addEventListener('keydown', (e) => {
   }
 });
 
-// ---- M6 拍照模式滚轮门（Player.cs:24903-24907）：相机模式激活且非全屏地图
-//      时,滚轮 = 切换相机模式（CaptureInterface.Scrolling）而非视野缩放。
-//      capture 相位拦截：Game 的滚轮消费点在 update 段（先于渲染执行）,
+// ---- M6 拍照模式滚轮门（★SW-FX50 锚修正:1457 分支序=Player.cs:25385-25396
+//      `if (Main.mapFullscreen) 缩放 else if (CaptureManager.Instance.Active)
+//      Scrolling() else if (!flag7) 背包/热栏`;旧注 :24903-24907 系旧基准行号）:
+//      相机模式激活且非全屏地图时,滚轮 = 切换相机模式（CaptureInterface.Scrolling）
+//      而非视野缩放。capture 相位拦截：Game 的滚轮消费点在 update 段（先于渲染执行）,
 //      渲染端回写清零已晚一帧;地图开着时放行——滚轮归地图缩放（原版分支序）。
-//      pendingWheel ±120/notch = 原版 ScrollWheelDelta 计数语义 ----
+//      ★SW-FX50（FX38 剩债1）：pendingWheel ±120/notch = 原版 ScrollWheelDelta 计数
+//      语义（上滚为正,PlayerInput.cs:901-902）——旧 +sign(deltaY) 与原版符号相反,
+//      经 scrolling()（CaptureInterface.cs:1523 无补偿臂）本不可观测（±2 环绕+ %30
+//      归一 ⇒ 终模式只随 notch 奇偶）,仍对齐原版约定防未来量值型消费面踩雷。----
 window.addEventListener('wheel', (e) => {
   const g = flow?.game;
   const cm = g?.renderer.captureMode;
   if (!g || !cm?.active) return;
   if (g.renderer.fullMap.open) return;
-  cm.pendingWheel += Math.sign(e.deltaY) * 120;
+  cm.pendingWheel += browserWheelDeltaYToVanilla(e.deltaY);
   e.stopPropagation();
 }, { capture: true, passive: true });
 

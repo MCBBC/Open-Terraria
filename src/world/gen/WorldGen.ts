@@ -982,7 +982,10 @@ function vanillaTerrain(ctx: GenCtx) {
   else if (cfg.evil === 1) gs.crimson = true;
   world.crimson = gs.crimson;
   // ⑫ WorldId（cs:11354）——Next(int.MaxValue) 单次采样，未消费
-  rng.nextIntRange(0, 2147483647);
+  // ★SW-FX43（2026-09-12）：掷流位不变（同调用同序,零流扰动）,掷值落 gs——
+  // vanilla WorldGen.cs:11364 `Main.ActiveWorldFileData.WorldId = genRand.Next(int.MaxValue)`
+  // （自建世界 worldId=该掷值,finalize 写 world.worldId 随档;导出 footer 同值硬校验）
+  gs.worldId = rng.nextIntRange(0, 2147483647);
   // ⑬ RandomizeTreeStyle（cs:8082）——树冠样式与边界
   const ts = randomizeTreeStyle(rng, W);
   gs.treeX = ts.treeX;
@@ -2622,6 +2625,12 @@ function finalize({ store, world }: GenCtx) {
   if (gs) {
     world.treeX = gs.treeX;
     world.treeStyle = gs.treeStyle;
+    // ★SW-FX43（2026-09-12）：caveBackX（RandomizeCaveBackgrounds 掷值,WF:1266-1268
+    //  随 .wld 头落盘;此前只入 gs——导出按 treeX 派生=自建世界漂移）
+    world.caveBackX = [...gs.caveBackX];
+    // ★SW-FX43：worldId（Reset ⑫ 掷流位 WorldGen.cs:11364 掷值——曾照掷弃值;
+    //  导出 header+footer 同值,LoadFooter :3003-3015 硬校验）
+    world.worldId = gs.worldId;
     world.trees = gs.genTrees; // 砍伐整棵判定（Player/Game 消费）
   }
   // 树登记保留:树干不再被清理盒删除,world.trees 与实际树一一对应

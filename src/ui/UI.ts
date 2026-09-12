@@ -15,13 +15,13 @@ import {
   craftToggleFrame, cycleCraftingGridControl, craftingWindowTextTipKey,
   craftSelectedBarRows, CRAFT_BAR_COLOR, CRAFT_BAR_SOLID, CRAFT_BAR_TOP_OFF,
   CRAFT_GRID_SLOT_SCALE, CRAFT_GRID_LEFT, CRAFT_GRID_TOP, craftingFilterForTile, recipeFilterAccepts, filterRemainOpen,
-  vanillaWheelNotches, craftSnapEase, craftSnapCrossedRow,
+  vanillaWheelNotches, wheelEventPx, craftSnapEase, craftSnapCrossedRow,
   type CraftingGridControl, type CraftingTileFilter,
 } from './craftingGrid';   // ★SW-FX30 刀②+⑦:经典网格视图/切换钮/站点过滤纯逻辑单源(CraftingUI.cs 域);★SW-FX38 滚轮档数/吸附步进
 import { petInfoOfVid } from '../data/vanillaPets';
 import { showJourneyQuickGate } from './QuickGate';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
-import { VANILLA_ITEM_COLOR, blendItemColorTint } from '../data/vanillaItemColor';
+import { VANILLA_ITEM_COLOR, VANILLA_ITEM_ALPHA, blendItemColorTint } from '../data/vanillaItemColor';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
 
 /** 原版像素面板底(IngameOptions.Draw + Utils.DrawInvBG 1:1):
@@ -132,7 +132,7 @@ import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/vanillaItemVariants';
-import { assembleTooltipLines, materialVids } from './itemTooltip';   // ★SW-BJ24 2026-09-07：materialIids→materialVids（vid 域门消费面,双域分池见 itemTooltip 注）
+import { assembleTooltipLines, buildTooltipBody, materialVids } from './itemTooltip';   // ★SW-BJ24 2026-09-07：materialIids→materialVids（vid 域门消费面,双域分池见 itemTooltip 注）
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { tryItemSwapVid } from '../render/CursorItemIcon';
@@ -175,6 +175,18 @@ import {
   shopSavingsLabelXY, shopSavingsCoinXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE, // ★SW-FX32:储蓄行(ItemSlot.cs:3712-3757)
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
+import {
+  // ★SW-FX41(2026-09-12)UI 移债 modern 窗族 P2-1..P2-4:NewCraftingUI 纯逻辑单源
+  MCRAFT_ALL_BUTTONS, MCRAFT_PANEL_BG, MCRAFT_PANEL_BORDER, MCRAFT_SEARCH_BG,
+  MCRAFT_SEPARATOR_COLOR, MCRAFT_TAB_TEX, MCRAFT_ICON_TEX, MCRAFT_CELL_SCALE,
+  mcraftPanelRect, mcraftTitleXY, mcraftGridGeometry, mcraftCellXY,
+  mcraftTabFrame, mcraftIconBgX, mcraftDetailOrigin, mcraftMaterialPos,
+  mcraftOwnedCountPos, mcraftOwnedCountColor, mcraftWindowToggleXY,
+  mcraftFilterBarRect, clampViewPosition, MCRAFT_MISSING_COLOR, MCRAFT_MISSING_KEY,
+  MCRAFT_DISABLED_GRAY, MCRAFT_SEARCH_H, MCRAFT_STATE_H_OFF,
+  filterItemOfVid, filtererFits, toggleFilterRadio, normalizeSearch,
+  openCloseFilterTransition, type FilterKind, type FilterItem,
+} from './modernCrafting';
 import {
   BACC, BUILDER_ACC_ICON_ORDER, builderAccDefaults, builderAccGateSet,
   builderAccTotalIcons, builderAccColumnTopY, cycleWireVisibility, toggleBuilderAccBit,
@@ -244,6 +256,25 @@ function internalIdOfVid(vid: number): number {
   return k !== undefined ? (ITEM_BY_KEY[k] ?? -1) : -1;
 }
 
+/** ★SW-FX41 BySearch 检索域填充(ItemFilters.BySearch :28-48 = tooltip 全行检索——
+ *  Main.MouseText_DrawItemTooltip_GetLinesInfo 每查一次全量重算,本仓按 vid 缓存;
+ *  行 0 = 物品名(GetLinesInfo 首行=AffixName)。player=null/无词缀槽 = 检索域近似
+ *  (伤害等玩家增幅行不参与,登记偏差:原版同名增幅行文本随玩家变动,搜索面不敏感)) */
+function vinvFillTooltipLines(it: FilterItem): void {
+  const iid = internalIdOfVid(it.vid);
+  const def = iid >= 0 ? ITEM_DEFS[iid] : undefined;
+  const lines: string[] = [];
+  const nameKey = VANILLA_ITEM_KEY_BY_ID[it.vid];
+  lines.push(nameKey ? (Lang.itemNameByKey(nameKey) ?? String(it.vid)) : String(it.vid));
+  if (def && iid >= 0) {
+    try {
+      const body = buildTooltipBody(def, { id: iid, stack: 1 }, null);
+      for (const ln of body.lines) lines.push(ln.text);
+    } catch { /* 检索域尽力填充(数据缺失件=仅名字行) */ }
+  }
+  it.tooltipLines = lines;
+}
+
 /** 物品图标 dataURL(32×32;模块内多处槽位/钮面共用)。2026-08-29 起导出供
  *  MobileControls 官方手游形态的"使用"钮实时上当前物品(icons 在 ui 域内闭环) */
 export function iconUrl(game: Game, id: number): string {
@@ -280,9 +311,15 @@ export function iconUrl(game: Game, id: number): string {
         // 凝胶显示灰块（2026-08-19 用户报告）
         const tvid = vidOf(id);
         const tint = tvid > 0 ? VANILLA_ITEM_COLOR[tvid] : undefined;
-        if (tint && tint[3] > 0) {
+        // ★SW-FX49 Item.alpha 维度（VANILLA_ITEM_ALPHA 表,Item.cs SetDefaults
+        // 全赋值位）：GetAlpha 默认支（Item.cs:49328）pass1 底图 alpha×
+        // (255−alpha)/255（ItemSlot.cs:2879）——凝胶 175/星怒 100/幽灵翼 255
+        // （全透明,tooltip"I am right here."）等 18 件。与 color 无耦合：
+        // 仅 alpha>0（恶魔弓 44 等）同样进本支;c=null 走纯 pass1
+        const itemAlpha = tvid > 0 ? VANILLA_ITEM_ALPHA[tvid] : undefined;
+        if ((tint && tint[3] > 0) || (itemAlpha && itemAlpha > 0)) {
           const id32 = cx.getImageData(0, 0, 32, 32);
-          blendItemColorTint(id32.data, tint);
+          blendItemColorTint(id32.data, tint ?? null, itemAlpha ?? 0);
           cx.putImageData(id32, 0, 0);
         }
         url = c.toDataURL();
@@ -2770,6 +2807,17 @@ export class UI {
     this.vinvPipsUseGrid = false;
     this.vinvCraftRecStart = 0;
     this.vinvSyncGridToggle();
+    // ★SW-FX41:NewCraftingUI.Close(quiet:true)(Main.cs:46438-46444 !playerInventory
+    //   支——关包当帧静默收窗+OnDeactivate :917-924 清滤器/选中)
+    this.vinvCloseModernCraft(true);
+    // ★SW-RB14b:!playerInventory ⇒ npcShop=0(Main.cs:42496-42499 DrawInventory 每帧门
+    //   `npcShop > 0 && (!playerInventory || talkNPC == -1) → SetNPCShopIndex(0)` +
+    //   Main.cs:46434-46441 dead→playerInventory=false 链;1458 :42502/:46440 同式)。
+    //   原版关闭商店面 = !playerInventory ∨ 对话关闭 双臂,本仓此前只接对话臂
+    //   (closeNpcDialog→npcShopClose):设置浮层开(openInGamePause 收包)/死亡强收包
+    //   (tickChestAutoClose→closeInventory)后 npcShopOpen 残留 → 重开背包货架复活
+    //   (原版需重按商店钮)。对话臂先走的路径(Esc 链)此处幂等 no-op。
+    this.game.npcShopClose();
     // 放回手上物品。★SW-RB4a 2026-09-06 关包光标物归位 1:1（dropItemCheck :5136-5140
     // `!Main.playerInventory` 臂 → GetOrDropItem（ReturnItemFromSlot）→ GetItem + 余量
     // RequestNewItem 落地 Player.cs:5132-5136）：①词缀/实例样式随行入包（曾裸
@@ -3754,7 +3802,9 @@ export class UI {
           openJourneyPowersPanel(this.game);
         });
         row.appendChild(bPow);
-        const bRes = el('button', 'sw-btn', Lang.text('LegacyInterface.112'));
+        // ★SW-RB14b:研究钮标签订正——LegacyInterface.112 原版 zh-Hans=「你必须先设置边框」
+        //   (Terarria1457 zh-Hans.Legacy.json :112,非研究面),误用致钮/标题错文案;改自有键
+        const bRes = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Research.Title'));
         bRes.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
         bRes.addEventListener('mousedown', (e) => {
           e.stopPropagation();
@@ -6027,7 +6077,8 @@ export class UI {
     // 停车坪钮组(★刀 5:vanilla 布局时自创功能入口;classic 不传=不渲染)
     if (handlers.onPlayerList) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.PlayerList.Title'), () => { panel.remove(); handlers.onPlayerList?.(); }));
     if (handlers.onJourney) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.JourneyPowers.Title'), () => { panel.remove(); handlers.onJourney?.(); }));
-    if (handlers.onResearch) panel.appendChild(mkBtn(Lang.text('LegacyInterface.112'), () => { panel.remove(); handlers.onResearch?.(); }));
+    // ★SW-RB14b:研究钮标签订正(LegacyInterface.112 原版=你必须先设置边框,非研究面)
+    if (handlers.onResearch) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.Research.Title'), () => { panel.remove(); handlers.onResearch?.(); }));
     if (handlers.onWeather) panel.appendChild(mkBtn('天气控制', () => { panel.remove(); handlers.onWeather?.(); }));
     if (handlers.onTime) panel.appendChild(mkBtn('时间控制', () => { panel.remove(); handlers.onTime?.(); }));
     if (handlers.onItemSearch) panel.appendChild(mkBtn('道具搜索', () => { panel.remove(); handlers.onItemSearch?.(); }));
@@ -6279,7 +6330,8 @@ export class UI {
         () => {
           this.npcShop?.close();
           this.npcShop = null;
-          // Main.npcShop=-1 + 回购记清（Main.UpdateOldNPCShop Main.cs:18056-18064）：
+          // Main.npcShop=-1 + 回购记清（Main.UpdateOldNPCShop 1457:18387-18393/
+          //  1458 同位/1456:18054——★SW-RB14b 行号订正,旧注 18056-18064 系 1456 锚）：
           // 卖出/回购价依赖开店会话状态，关店必须通知 Game 侧失效
           this.game?.npcShopClose();
         },
@@ -7172,7 +7224,8 @@ export class UI {
     //   ∧ !NewCraftingUI.Visible ∧ !PipsUseGrid——网格态回位垃圾桶/图鉴/表情
     //   (43078/43103/43158 门读该谓词,非 chestOpen 裸读);QuickStack/Sort 仍走
     //   chest==-1 && npcShop==0 裸门(:42548/42586)不折 PipsUseGrid。
-    const cosUiVisible = chestOpen && !this.vinvPipsUseGrid;
+    //   ★SW-FX41:首支再加 !NewCraftingUI.Visible(Main.cs:3037 窗可见恒 false)
+    const cosUiVisible = chestOpen && !this.vinvPipsUseGrid && !this.vinvModernCraftOpen;
     const visibleRows = 8 + (heartShown ? 1 : 0) + (masterShown ? 1 : 0);
     // ★SW-FX10 债⑨清偿：mH 联动真实小地图态（Main.cs:46537-46561 DrawInterface_16_MapOr
     // Minimap：mapEnabled 关→mH=0 早退；全屏地图开/mapStyle≠1→mH=0；仅 mapStyle==1 且
@@ -7198,9 +7251,11 @@ export class UI {
     //   等后网格/喷漆/线材档滞留不显（FX36 探针实测）。门=背包∪装备旗位（UpdateEquips
     //   :12997-13004 面）;门变化=低频事件,入签触发一次整排代价可忽略。
     //   rulerLine 恒真（ResetEffects :18809）不入签。
+    // ★SW-FX41:再含 modern 窗开态(窗开 → 切换钮/就近箱钮换锚 + 经典合成面隐藏 +
+    //   ChestOrShopUIVisible 折叠,Main.cs:42418-42456/:3037)
     const bg = builderAccGateSet((vid) => playerVidCarried(inv.slots, inv.armor, inv.accSlotMax, vid));
     const bgSig = `${bg.rulerGrid ? 1 : 0}${bg.autoActuator ? 1 : 0}${bg.autoPaint ? 1 : 0}${bg.infoAccMechShowWires ? 1 : 0}`;
-    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}`;
+    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}|${this.vinvModernCraftOpen ? 1 : 0}`;
     if (sig === this.vinvLayoutSig) return;
     this.vinvLayoutSig = sig;
     for (const it of this.vinvLayoutItems) {
@@ -7360,6 +7415,27 @@ export class UI {
   private vinvCraftGlideY = 0;
   private vinvCraftFastScroll = false;
   private vinvCraftGlideAcc = 0;
+  /** ★SW-RB14d（FX38-F2）：滚轮累计器（px,含余数留置——ScrollWheelValue 跨事件
+   *  累计语义;teardown 清零） */
+  private vinvCraftWheelPendPx = 0;
+
+  // ---- ★SW-FX41 modern 合成窗状态域(NewCraftingUI.cs 字段面 1:1) ----
+  /** Visible ≡ _ui.CurrentState != null(:240) */
+  private vinvModernCraftOpen = false;
+  /** _filter(站点滤器,craftingGrid CraftingTileFilter 同形) */
+  private vinvModernCraftFilter: CraftingTileFilter | null = null;
+  /** _openedWithoutFilter(OnActivate :907-909 置位) */
+  private vinvModernOpenedWithoutFilter = false;
+  /** _filterer.ActiveFilters(11 类筛选条激活集,UICreativeItemsInfiniteFilteringOptions 单选面) */
+  private vinvModernActive: FilterKind[] = [];
+  /** _searchBar 内容(OnActivate :912 SetContents("") 清) */
+  private vinvModernSearch = '';
+  /** _recipes 条目池(ResetRecipes :575-587 清;UpdateContents :589-634 增量建) */
+  private vinvModernEntries: Array<{ r: VanillaRecipeLike; count: number; seen: boolean }> = [];
+  /** _selectedRecipeIndex(=配方条目 r 引用;OnActivate :910 预选 availableRecipe[focusRecipe]) */
+  private vinvModernSelected: VanillaRecipeLike | null = null;
+  /** 滚动位(UIScrollbar._viewPosition) */
+  private vinvModernViewPos = 0;
 
   // ---- 合成区(★2026-09-08 用户实测二轮:原版无面板底/无搜索框,合成=左下角
   //  竖向列表;Modern 网格面板整体退役)。权威:CraftingUI.DrawRecipesList
@@ -7401,26 +7477,36 @@ export class UI {
       e.stopPropagation();
       void options.set('craftFromNearbyChests', !options.data.craftFromNearbyChests);
       this.game.sfx.play('menuTick', 1);
+      // ★SW-FX41:窗开态 = NewCraftingUI.RefreshGrid(CraftingUI.cs:350-352 →
+      //   NewCraftingUI.cs:988-994 ResetRecipes)——就近箱集变化即重排窗格
+      if (this.vinvModernCraftOpen) { this.vinvModernResetRecipes(); this.vinvUpdateModernCraft(); }
     });
     options.onChange(() => syncNear());
     this.vinvRoot?.appendChild(nearBtn);
     this.vinvLayoutItems.push({ el: nearBtn, pos: () => {
       const c = this.vinvLayoutCtx;
       if (!c) return null;
+      // ★SW-FX41:窗开态 = 窗内就近箱钮锚(DrawChildren :495-499 num2+40 → (82|122,285);
+      //   经典锚 (94,490+adjY) 在 else 分支,窗开不画——同一对象换锚,两态互斥)
+      if (this.vinvModernCraftOpen) {
+        return mcraftWindowToggleXY(!!this.game?.world?.isJourney).nearby;
+      }
       return { x: 94, y: 490 + this.vinvCraftAdjY(c.sh) };
     } });
-    this.vinvLayoutItems.push({ el: listHit, pos: () => this.vinvCraftListRect() });
+    this.vinvLayoutItems.push({ el: listHit, pos: () => this.vinvClassicCraftVisible() ? this.vinvCraftListRect() : null });   // ★SW-FX41:窗开隐藏(Main.cs:42418 else 支)
     this.vinvLayoutItems.push({ el: title, pos: () => {
       const c = this.vinvLayoutCtx;
-      if (!c) return null;
+      if (!c || !this.vinvClassicCraftVisible()) return null;   // ★SW-FX41:窗开不画(:42418 else 支)
       return { x: 76, y: 414 + this.vinvCraftAdjY(c.sh) };
     } });
-    this.vinvLayoutItems.push({ el: mats, pos: () => ({ x: 0, y: 0 }) });
+    this.vinvLayoutItems.push({ el: mats, pos: () => this.vinvClassicCraftVisible() ? { x: 0, y: 0 } : null });   // ★SW-FX41:窗开隐藏(材料行 = 窗详情浮层替代)
     // ---- 网格切换钮 + 经典网格视图(★SW-FX30 刀②:DrawGridToggle CraftingUI.cs:267-330 +
     //      DrawRecipesGrid CraftingUI.cs:446-571;债#2 清偿) ----
     this.vinvBuildGridToggle();
     this.vinvBuildCraftGrid();
     this.vinvBindGridWheel();
+    // ---- ★SW-FX41 modern 窗族(NewCraftingUI.cs:302-501;债#2-modern P2-1/P2-4 清偿) ----
+    this.vinvBuildModernCraft();
   }
 
   /** 合成视图切换钮(DrawGridToggle CraftingUI.cs:267-330,Main.cs:42437-42439
@@ -7456,6 +7542,12 @@ export class UI {
     this.vinvLayoutItems.push({ el: bar, pos: () => {
       const c = this.vinvLayoutCtx;
       if (!c) return null;
+      // ★SW-FX41:窗开态锚随窗内切换钮(DrawChildren :486-499 (42|82,285);:275-278
+      //   指示条在钮下层恒画——Recipes 页本仓恒真)
+      if (this.vinvModernCraftOpen) {
+        const t = mcraftWindowToggleXY(!!this.game?.world?.isJourney).toggle;
+        return { x: t.x, y: t.y + CRAFT_BAR_TOP_OFF };
+      }
       return { x: 94, y: 450 + this.vinvCraftAdjY(c.sh) + CRAFT_BAR_TOP_OFF };
     } });
     // 钮本体(Craft_Toggle 六帧贴图;悬停 ±15 盒≈整钮)
@@ -7493,6 +7585,9 @@ export class UI {
       // 左键支(:294-321):!TryChangePipsPage(Recipes) 恒 false(无 Banners pip=恒已该页)
       //   → 走切换;flag2(classic 支) = PipsUseGrid 翻转;NewCraftingUI.Close(quiet)=窗未建恒 no-op
       if (options.data.craftingGridControl === 'classic') {
+        // ★SW-FX41:classic 左键支(:299-306)先 NewCraftingUI.Close(quiet:true,
+        //   returnToInventory:true) 再翻网格——窗开态右键切回 classic 后左键可达此臂
+        this.vinvCloseModernCraft(true);
         this.vinvPipsUseGrid = !this.vinvPipsUseGrid;   // :306
         if (!this.vinvPipsUseGrid) this.vinvCraftRecStart = 0;   // !PipsUseGrid → recStart=0(Main.cs:43926-43929)
         this.vinvSyncGridToggle();
@@ -7504,33 +7599,653 @@ export class UI {
         this.layoutVanilla();
       } else {
         // ★SW-RB13b:modern 左键副效应面(:310-315 Main.PipsUseGrid=false 先于
-        //   ToggleInInventory)——窗族缺席但 PipsUseGrid=false 可建模,否则 modern 态
-        //   下已开的网格无法经切换钮关闭(声效面 :321 照走)
+        //   ToggleInInventory)——PipsUseGrid=false 使已开网格可经切换钮关闭
         this.vinvPipsUseGrid = false;
         this.vinvCraftRecStart = 0;                     // !PipsUseGrid → recStart=0(Main.cs:43926-43929)
         this.vinvSyncGridToggle();
         this.vinvUpdateCraftGrid();
         this.vinvLayoutSig = '';
         this.layoutVanilla();
+        // ★SW-FX41 P2-2:modern 左键支(:308-316)ToggleInInventory——开/关 NewCraftingUI
+        //   窗(:926-936 Visible?Close(returnToInventory:true):Open)
+        this.vinvToggleModernCraft(false);
       }
-      // modern 支(:308-316)= NewCraftingUI.ToggleInInventory——窗族分期(债#2-modern),
-      // 右键可连性保留(悬停名键随态切换),左键 modern=无窗可开,声效面(:321)照走
+      // 声效面(:321 PlaySound(12) 在两支后照走;窗开合音 10/11 由 Open/Close 各自放)
       this.game.sfx.play('menuTick', 1);                // PlaySound(12)(:321)
     });
     root.appendChild(btn);
     this.vinvLayoutItems.push({ el: btn, pos: () => {
       const c = this.vinvLayoutCtx;
       if (!c) return null;
+      // ★SW-FX41:窗开态 = 窗内切换钮锚(NewCraftingUI.DrawChildren :486-499 num2=42/
+      //   旅程 82,num3=285——Main.cs:42424-42443 经典锚 (94,450+adjY) 在 else 分支不画)
+      if (this.vinvModernCraftOpen) {
+        return mcraftWindowToggleXY(!!this.game?.world?.isJourney).toggle;
+      }
       return { x: 94, y: 450 + this.vinvCraftAdjY(c.sh) };
     } });
   }
 
-  /** 帧同步(craftToggleFrame:grid 态 0/1,list 态 2/3;modern 窗态 4/5 分期缺席) */
+  /** 帧同步(craftToggleFrame:grid 态 0/1,list 态 2/3,modern 窗态 4/5——★SW-FX41
+   *  NewCraftingUI.Visible 支接线,:281-285 modernVisible=窗开态) */
   private vinvSyncGridToggle(): void {
     const img = this.vinvGridToggleImg;
     if (!img) return;
-    const f = craftToggleFrame(false, this.vinvPipsUseGrid, this.vinvGridToggleHover);
+    const f = craftToggleFrame(this.vinvModernCraftOpen, this.vinvPipsUseGrid, this.vinvGridToggleHover);
     img.src = `sprites/vanilla-ui/UI_Craft_Toggle_${f}.png`;
+  }
+
+  // =====================================================================
+  // ★SW-FX41(2026-09-12)modern 合成窗(P2-1 窗体本体/P2-4 11 类筛选条)——
+  // NewCraftingUI.cs:302-501 逐式;几何/筛选判据/状态机单源 = ui/modernCrafting.ts。
+  // Main.cs:42418-42421 窗可见 → DrawUI,else 分支(经典列表+标题+材料行)整支不画
+  // = vinvClassicCraftVisible 门;窗内切换钮/就近箱钮 = 同一 DOM 对象换锚(:486-499)。
+  // =====================================================================
+  private vinvModernCraftEl: HTMLDivElement | null = null;
+  private vinvModernPanelEl: HTMLElement | null = null;
+  private vinvModernTitleEl: HTMLElement | null = null;
+  private vinvModernSearchInput: HTMLInputElement | null = null;
+  private vinvModernSearchClear: HTMLButtonElement | null = null;
+  private vinvModernGridList: HTMLElement | null = null;
+  private vinvModernGridInner: HTMLElement | null = null;
+  private vinvModernSeparatorEl: HTMLElement | null = null;
+  private vinvModernScrollbarEl: HTMLElement | null = null;
+  private vinvModernScrollHandle: HTMLElement | null = null;
+  private vinvModernDetailEl: HTMLElement | null = null;
+  private vinvModernFilterBtns: HTMLButtonElement[] = [];
+  private vinvModernFilterHovers: boolean[] = [];
+  private vinvModernCellEls: Array<{ el: HTMLElement; r: VanillaRecipeLike }> = [];
+
+  /** 经典合成面可见门(Main.cs:42418-42421 NewCraftingUI.Visible → else 分支跳过) */
+  private vinvClassicCraftVisible(): boolean {
+    return !this.vinvModernCraftOpen;
+  }
+
+  private vinvBuildModernCraft(): void {
+    const root = this.vinvRoot;
+    if (!root) return;
+    const win = el('div');
+    win.style.cssText = 'position:absolute; width:490px; pointer-events:auto; display:none; z-index:5;';
+    root.appendChild(win);
+    this.vinvModernCraftEl = win;
+    this.vinvLayoutItems.push({ el: win, pos: () => this.vinvModernCraftOpen ? { x: 20, y: 312 } : null });
+    // ---- 11 类筛选条(:389-393 HAlign .5/Top 4 + UICreativeItemsInfiniteFilteringOptions
+    //      钮 40px 步距/帧 42×48 offset−2−2/icon 帧 30×30 offset−2−0 Left6 VAlign.5) ----
+    const bar = mcraftFilterBarRect();
+    MCRAFT_ALL_BUTTONS.forEach((fb, i) => {
+      const b = el('button', 'vinv-btn') as HTMLButtonElement;
+      b.style.cssText = `position:absolute; left:${bar.x - 20 + 40 * i}px; top:${bar.y - 312}px;`
+        + `width:${MCRAFT_TAB_TEX.dw}px; height:${MCRAFT_TAB_TEX.dh}px; padding:0; overflow:hidden;`;
+      const tab = document.createElement('div');
+      tab.style.cssText = 'position:absolute; left:0; top:0; width:100%; height:100%; image-rendering:pixelated; pointer-events:none;';
+      const icon = document.createElement('img');
+      icon.draggable = false;
+      icon.style.cssText = `position:absolute; left:${MCRAFT_ICON_TEX.ox}px; top:${MCRAFT_ICON_TEX.oy}px;`
+        + `width:${MCRAFT_ICON_TEX.dw}px; height:${MCRAFT_ICON_TEX.dh}px; image-rendering:pixelated; pointer-events:none;`
+        + `background-image:url(sprites/vanilla-ui/UI_Creative_Infinite_Icons.png); background-size:${MCRAFT_ICON_TEX.w}px ${MCRAFT_ICON_TEX.h}px;`
+        + `background-position:${mcraftIconBgX(fb.icon)}px 0px;`;
+      b.appendChild(tab);
+      b.appendChild(icon);
+      b.title = Lang.text(fb.l10n);
+      b.addEventListener('mouseenter', () => {
+        this.vinvModernFilterHovers[i] = true;
+        this.game.sfx.play('menuTick', 1);            // button_OnMouseOver :76-79 Sound 12
+        b.title = Lang.text(fb.l10n);                 // ShowButtonName :128-135
+        this.vinvSyncModernFilterBtn(i);
+      });
+      b.addEventListener('mouseleave', () => {
+        this.vinvModernFilterHovers[i] = false;
+        this.vinvSyncModernFilterBtn(i);
+      });
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.vinvModernActive = toggleFilterRadio(this.vinvModernActive, fb.kind);   // :81-101
+        this.vinvModernResetRecipes();                // OnClickingOption :393 → ResetRecipes
+        for (let k = 0; k < this.vinvModernFilterBtns.length; k++) this.vinvSyncModernFilterBtn(k);
+        this.vinvUpdateModernCraft();
+      });
+      win.appendChild(b);
+      this.vinvModernFilterBtns.push(b);
+      this.vinvModernFilterHovers.push(false);
+      this.vinvSyncModernFilterBtn(i);
+    });
+    // ---- 主内衬 UIPanel(:321-332 背景/边框色) ----
+    const panel = el('div');
+    panel.style.cssText = `position:absolute; left:0; top:38px; width:490px; bottom:0;`
+      + `border:12px solid #000; border-image:none; border-radius:10px; box-sizing:border-box;`
+      + `background:${MCRAFT_PANEL_BG};`;
+    panel.style.borderColor = MCRAFT_PANEL_BORDER;
+    win.appendChild(panel);
+    this.vinvModernPanelEl = panel;
+    // 标题(UIPanel 内 UIText Left−1/Top−2 :333-337;UpdateText :419-429)
+    const title = el('div', 'vinv-txt');
+    title.style.cssText += 'position:absolute; font-size:14px; pointer-events:none; white-space:nowrap;';
+    panel.appendChild(title);
+    this.vinvModernTitleEl = title;
+    // 搜索条(UIWrappedSearchBar Red 主题 :340-353;宽=100%−文本−10 走 flex 等价:426)
+    const searchRow = el('div');
+    searchRow.style.cssText = `position:absolute; right:8px; top:${12 - 4}px; height:${MCRAFT_SEARCH_H}px;`
+      + 'display:flex; align-items:center; gap:3px;';
+    const searchBtn = el('button', 'vinv-btn') as HTMLButtonElement;
+    searchBtn.style.cssText = 'position:relative; width:22px; height:22px; padding:0; flex:none;';
+    const sbImg = document.createElement('img');
+    sbImg.src = 'sprites/vanilla-ui/UI_Bestiary_Button_Search_2.png';
+    sbImg.style.cssText = 'width:100%; height:100%; image-rendering:pixelated; pointer-events:none;';
+    searchBtn.appendChild(sbImg);
+    searchBtn.addEventListener('mouseenter', () => { sbImg.src = 'sprites/vanilla-ui/UI_Bestiary_Button_Search_Border.png'; });
+    searchBtn.addEventListener('mouseleave', () => { sbImg.src = 'sprites/vanilla-ui/UI_Bestiary_Button_Search_2.png'; });
+    searchBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.vinvModernSearchInput?.focus();            // Click_SearchArea
+    });
+    searchRow.appendChild(searchBtn);
+    const searchBox = el('div');
+    searchBox.style.cssText = `flex:1; height:${MCRAFT_SEARCH_H}px; position:relative; display:flex; align-items:center;`
+      + `background:${MCRAFT_SEARCH_BG}; border-radius:5px; min-width:60px;`;
+    const input = el('input') as HTMLInputElement;
+    input.placeholder = Lang.text('UI.PlayerNameSlot');   // 空文案 = UI.PlayerNameSlot(:81 缺省,原版本相)
+    input.style.cssText = 'flex:1; min-width:0; background:transparent; border:none; outline:none; color:#fff;'
+      + 'font-size:13px; padding:0 24px 0 4px; font-family:inherit;';
+    input.addEventListener('input', () => {
+      this.vinvModernSearch = input.value;
+      // SetSearchFilter+ResetRecipes(OnSearchContentsChanged :649-653);空白归零走
+      // normalizeSearch(EntryFilterer.SetSearchFilter :85-94 IsNullOrWhiteSpace→null)
+      this.vinvModernResetRecipes();
+      this.vinvUpdateModernCraft();
+    });
+    input.addEventListener('mousedown', (e) => e.stopPropagation());
+    searchBox.appendChild(input);
+    const cancel = el('button', 'vinv-btn') as HTMLButtonElement;
+    cancel.style.cssText = 'position:absolute; right:-2px; top:50%; transform:translateY(-50%);'
+      + 'width:24px; height:24px; padding:0; flex:none;';
+    const cxImg = document.createElement('img');
+    cxImg.src = 'sprites/vanilla-ui/UI_SearchCancel.png';
+    cxImg.style.cssText = 'width:100%; height:100%; image-rendering:pixelated; pointer-events:none;';
+    cancel.appendChild(cxImg);
+    cancel.addEventListener('mouseenter', () => this.game.sfx.play('menuTick', 1));   // :196-199
+    cancel.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (this.vinvModernSearch !== '') {             // searchCancelButton_OnClick :189-195
+        this.vinvModernSearch = '';
+        input.value = '';
+        this.vinvModernResetRecipes();
+        this.vinvUpdateModernCraft();
+        this.game.sfx.play('menuClose', 1);
+      } else {
+        this.game.sfx.play('menuTick', 1);
+      }
+    });
+    searchBox.appendChild(cancel);
+    searchRow.appendChild(searchBox);
+    panel.appendChild(searchRow);
+    this.vinvModernSearchInput = input;
+    this.vinvModernSearchClear = cancel;
+    // ---- 网格容器/分隔线/列表/滚动条(:354-388) ----
+    const sepEl = el('div');
+    sepEl.style.cssText = `position:absolute; left:4px; height:4px; image-rendering:pixelated;`
+      + `background:${MCRAFT_SEPARATOR_COLOR};`
+      + `background-image:url(sprites/vanilla-ui/UI_CharCreation_Separator1.png); background-size:100% 100%;`;
+    panel.appendChild(sepEl);
+    this.vinvModernSeparatorEl = sepEl;
+    const gridList = el('div');
+    gridList.style.cssText = 'position:absolute; overflow:hidden;';
+    panel.appendChild(gridList);
+    this.vinvModernGridList = gridList;
+    const gridInner = el('div');
+    gridInner.style.cssText = 'position:absolute; left:0; top:0;';
+    gridList.appendChild(gridInner);
+    this.vinvModernGridInner = gridInner;
+    const sbar = el('div');
+    sbar.style.cssText = `position:absolute; width:20px; image-rendering:pixelated;`
+      + `background-image:url(sprites/vanilla-ui/UI_Scrollbar.png); background-size:100% ${6 + 4 + 6}px;`;
+    const handle = el('div');
+    handle.style.cssText = 'position:absolute; left:0; width:20px; image-rendering:pixelated; pointer-events:auto;';
+    sbar.appendChild(handle);
+    panel.appendChild(sbar);
+    this.vinvModernScrollbarEl = sbar;
+    this.vinvModernScrollHandle = handle;
+    this.vinvBindModernScrollbar(sbar, handle);
+    // ---- 详情浮层(DrawChildren :440-487;origin = 面板+(24,73) = craftDetailLayout) ----
+    const detail = el('div');
+    detail.style.cssText = 'position:absolute; pointer-events:none; display:none;';
+    win.appendChild(detail);
+    this.vinvModernDetailEl = detail;
+    this.vinvLayoutItems.push({ el: detail, pos: () => {
+      if (!this.vinvModernCraftOpen) return null;
+      const o = mcraftDetailOrigin();
+      return { x: o.origin.x - 20, y: o.origin.y - 312 };
+    } });
+  }
+
+  /** 筛选钮帧同步(UpdateVisuals :103-114:frameX=激活、frameY=激活×2+悬停、图标半透)。
+   *  ★tab 面 = 首个 div(帧 sprite);icon = img(半透)——两者取子元素分治 */
+  private vinvSyncModernFilterBtn(i: number): void {
+    const b = this.vinvModernFilterBtns[i];
+    if (!b) return;
+    const tab = b.querySelector('div');
+    if (!tab) return;
+    const fb = MCRAFT_ALL_BUTTONS[i]!;
+    const { fx, fy } = mcraftTabFrame(this.vinvModernActive.includes(fb.kind), this.vinvModernFilterHovers[i] ?? false);
+    tab.style.backgroundImage = `url(sprites/vanilla-ui/UI_Creative_Infinite_Tabs_B_2.png)`;
+    tab.style.backgroundSize = `${MCRAFT_TAB_TEX.w}px ${MCRAFT_TAB_TEX.h}px`;
+    tab.style.backgroundPosition = `-${fx * MCRAFT_TAB_TEX.fw}px -${fy * MCRAFT_TAB_TEX.fh}px`;
+    const icon = b.querySelector('img');
+    if (icon) icon.style.opacity = this.vinvModernActive.includes(fb.kind) ? '1' : '0.5';   // White vs White*0.5
+  }
+
+  /** ResetRecipes(:575-587):条目池/选中/滚动清;搜索域不清(仅 OnActivate/SetContents 清) */
+  private vinvModernResetRecipes(): void {
+    this.vinvModernEntries = [];
+    this.vinvModernSelected = null;
+    this.vinvModernViewPos = 0;
+  }
+
+  /** Open(quiet, filter)(:883-905)+ OnActivate(:907-915):可见即 no-op;置滤器+
+   *  openedWithoutFilter+条目池清+搜索/激活集清+预选 availableRecipe[focusRecipe]。
+   *  IngameUIWindows.CloseAll(:889)本仓无同域模态群=不建模(备案);playerInventory/
+   *  PipsCurrentPage=Recipes 由开包链承担(本窗只在背包开态可达) */
+  private vinvOpenModernCraft(filter: CraftingTileFilter | null, quiet: boolean): void {
+    if (this.vinvModernCraftOpen) return;                       // :885 if (!Visible)
+    this.vinvModernCraftOpen = true;
+    this.vinvModernCraftFilter = filter;
+    this.vinvModernOpenedWithoutFilter = filter === null;       // :907-909(OnActivate)
+    this.vinvModernSelected = this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null;   // :910 预选
+    this.vinvModernResetRecipes();                              // :911 ResetRecipes
+    this.vinvModernSearch = '';
+    this.vinvModernActive = [];                                 // :912-913 ActiveFilters.Clear
+    if (this.vinvModernSearchInput) this.vinvModernSearchInput.value = '';
+    this.vinvSyncGridToggle();
+    this.vinvLayoutSig = '';
+    this.layoutVanilla();
+    this.vinvRefreshCraft();
+    if (!quiet) this.game.sfx.play('menuOpen', 1);              // :900-903 Sound 10
+  }
+
+  /** Close(quiet, returnToInventory)(:866-881):PipsFastScroll 置位+OnDeactivate
+   *  (:917-924 滤器/选中清)+音 11。returnToInventory=false → playerInventory=false
+   *  面(本仓唯一调用域 = 关包链,由 closeInventory 承担=Quiet 支) */
+  private vinvCloseModernCraft(quiet: boolean): void {
+    if (!this.vinvModernCraftOpen) return;
+    this.vinvModernCraftOpen = false;
+    this.vinvCraftFastScroll = true;                            // :871 Main.PipsFastScroll=true
+    this.vinvModernCraftFilter = null;                          // :919 OnDeactivate _filter=null
+    this.vinvModernSelected = null;                             // :920 _selectedRecipeIndex=null
+    this.vinvModernOpenedWithoutFilter = false;
+    this.vinvSyncGridToggle();
+    this.vinvLayoutSig = '';
+    this.layoutVanilla();
+    this.vinvRefreshCraft();
+    if (!quiet) this.game.sfx.play('menuClose', 1);             // :876-879 Sound 11
+  }
+
+  /** ToggleInInventory(:926-936) */
+  private vinvToggleModernCraft(quiet: boolean): void {
+    if (this.vinvModernCraftOpen) this.vinvCloseModernCraft(quiet);
+    else this.vinvOpenModernCraft(null, quiet);
+  }
+
+  /** OpenCloseFilter 执行器(:938-964 四支;向导支 :946-951 本仓无域)。modern 支消费点
+   *  = InteractWithCraftingStation(Player.cs:33555-33557) → openCraftingStationFilter */
+  vinvOpenCloseModernCraftFilter(f: CraftingTileFilter): void {
+    const t = openCloseFilterTransition(
+      { visible: this.vinvModernCraftOpen, filter: this.vinvModernCraftFilter, openedWithoutFilter: this.vinvModernOpenedWithoutFilter },
+      f,
+    );
+    switch (t) {
+      case 'open':
+        this.vinvOpenModernCraft(f, false);                     // Open(quiet:false, filter) :942
+        break;
+      case 'setFilter':                                         // :952-953 Sound 12 + SetFilter
+        this.game.sfx.play('menuTick', 1);
+        this.vinvModernCraftFilter = f;
+        this.vinvModernOpenedWithoutFilter = false;
+        this.vinvModernResetRecipes();
+        this.vinvUpdateModernCraft();
+        break;
+      case 'clearFilter':                                       // :957-958 Sound 12 + SetFilter(null)
+        this.game.sfx.play('menuTick', 1);
+        this.vinvModernCraftFilter = null;
+        this.vinvModernResetRecipes();
+        this.vinvUpdateModernCraft();
+        break;
+      case 'close':                                             // :962 Close(returnToInventory:true)
+        this.vinvCloseModernCraft(false);
+        break;
+    }
+  }
+
+  /** 窗内滚动条绑定(UIScrollbar.cs:109-180 拖拽/点轨 1:1) */
+  private vinvBindModernScrollbar(sbar: HTMLElement, handle: HTMLElement): void {
+    let dragging = false;
+    let dragYOffset = 0;
+    const myOf = (e: MouseEvent): number => e.clientY / this.vinvModernScaleK();
+    handle.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      const g = this.vinvModernGridGeometry();
+      if (!g) return;
+      dragging = true;
+      // _dragYOffset = mouseY − handleRect.Y(:146-148;handleRect.Y = sbarY + 5 +
+      //   innerH·(pos/max) − 3,即 GetHandleRectangle :78-84 屏位)
+      const handleRectY = g.scrollbar.y + 5 + Math.trunc(g.scrollbar.innerH * (this.vinvModernViewPos / Math.max(1, g.contentH))) - 3;
+      dragYOffset = myOf(e) - handleRectY;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const g = this.vinvModernGridGeometry();
+      if (!g) return;
+      const num = myOf(e) - g.scrollbar.innerY - dragYOffset;    // :111-115
+      this.vinvModernViewPos = clampViewPosition(num / g.scrollbar.innerH * g.contentH, g.list.h, g.contentH);
+      this.vinvSyncModernScroll();
+    });
+    window.addEventListener('mouseup', () => { dragging = false; });
+    sbar.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (dragging) return;
+      // 点轨支(:151-159):num = mouseY − innerY − handleH/2
+      const g = this.vinvModernGridGeometry();
+      if (!g) return;
+      const handleH = parseFloat(handle.style.height || '0') || 0;
+      const num = myOf(e) - g.scrollbar.innerY - handleH / 2;
+      this.vinvModernViewPos = clampViewPosition(num / g.scrollbar.innerH * g.contentH, g.list.h, g.contentH);
+      this.vinvSyncModernScroll();
+    });
+    sbar.addEventListener('wheel', (e) => {
+      e.stopPropagation();
+      this.vinvModernScrollBy(e);
+    }, { passive: true });
+  }
+
+  private vinvModernScaleK(): number {
+    return vanillaScaleFor(window.innerWidth, window.innerHeight, options.data.uiScale);
+  }
+
+  /** UIList.ScrollWheel(UIList.cs:109-115):ViewPosition −= ScrollWheelDeltaForUI
+   *  (±120/notch,PlayerInput.cs:902;XNA 上滚为正 = 浏览器 deltaY 取负) */
+  private vinvModernScrollBy(e: WheelEvent): void {
+    const g = this.vinvModernGridGeometry();
+    if (!g || g.contentH <= g.list.h) return;
+    const notches = vanillaWheelNotches(e.deltaY, e.deltaMode);   // ★SW-RB14d：补传 deltaMode（旧缺省 0=Firefox 行模式整类吞零）
+    if (notches === 0) return;
+    this.vinvModernViewPos = clampViewPosition(
+      this.vinvModernViewPos - notches * 120, g.list.h, g.contentH,
+    );
+    this.vinvSyncModernScroll();
+  }
+
+  private vinvModernGridGeometry(): ReturnType<typeof mcraftGridGeometry> | null {
+    const c = this.vinvLayoutCtx;
+    if (!c || !this.vinvModernGridList) return null;
+    return mcraftGridGeometry(c.sh, Math.max(1, this.vinvModernEntries.length));
+  }
+
+  /** 滚动条/内容位移同步(UIScrollbar.GetHandleRectangle :78-84) */
+  private vinvSyncModernScroll(): void {
+    const g = this.vinvModernGridGeometry();
+    if (!g || !this.vinvModernGridInner || !this.vinvModernScrollHandle) return;
+    this.vinvModernGridInner.style.transform = `translateY(${-this.vinvModernViewPos}px)`;
+    const canScroll = g.contentH > g.list.h;                    // CanScroll :49(AutoHide :105)
+    this.vinvModernScrollbarEl!.style.display = canScroll ? '' : 'none';
+    if (!canScroll) return;
+    // GetHandleRectangle(:78-84):Y = innerY + innerH·(pos/max) − 3;H = innerH·(view/max) + 7
+    //   (handle 位 = sbar 内相对;innerY − sbar.y = padding top 5)
+    const maxV = Math.max(1, g.contentH);
+    const handleH = Math.trunc(g.scrollbar.innerH * (g.list.h / maxV)) + 7;
+    const handleY = 5 + Math.trunc(g.scrollbar.innerH * (this.vinvModernViewPos / maxV)) - 3;
+    this.vinvModernScrollHandle.style.height = `${Math.max(12, handleH)}px`;
+    this.vinvModernScrollHandle.style.top = `${handleY}px`;
+    this.vinvModernScrollHandle.style.backgroundImage = 'url(sprites/vanilla-ui/UI_ScrollbarInner.png)';
+    this.vinvModernScrollHandle.style.backgroundSize = '100% 16px';
+  }
+
+  /** 窗内网格条目构建(UpdateContents :589-634 + ItemGrid.DrawSlot :56-76)。
+   *  条目 = availableRecipe(可用集)过滤 FitsFilter(搜索+激活类)∧站点滤器 Accepts;
+   *  累计条目池保留曾可用件(ResetRecipes 前不散)——重置拍重建。 */
+  private vinvUpdateModernCraft(): void {
+    const game = this.game;
+    const win = this.vinvModernCraftEl;
+    const c = this.vinvLayoutCtx;
+    if (!game || !win || !c) return;
+    win.style.height = `${c.sh + MCRAFT_STATE_H_OFF}px`;        // Height = −350×100%(:307)
+    const panel = mcraftPanelRect(c.sh);
+    if (this.vinvModernPanelEl) {
+      this.vinvModernPanelEl.style.top = '38px';
+      this.vinvModernPanelEl.style.height = `${panel.h}px`;
+    }
+    // 标题(UpdateText :419-429:_filter ? GetWindowDescription : inter[25];站名空 =
+    //   TileBasedRecipeFilter.GetWindowDescription 域外,回 inter[25] 与经典路径同守卫)
+    if (this.vinvModernTitleEl) {
+      const f = this.vinvModernCraftFilter;
+      const name = f ? Lang.tileName(f.tile) : null;
+      const text = f && name ? Lang.text('CombineFormat.Crafting', name) : Lang.inter(25);
+      if (this.vinvModernTitleEl.textContent !== text) this.vinvModernTitleEl.textContent = text;
+      const t = mcraftTitleXY(panel);
+      this.vinvModernTitleEl.style.left = `${t.x - panel.x}px`;
+      this.vinvModernTitleEl.style.top = `${t.y - panel.y}px`;
+    }
+    // 搜索域(EntryFilterer.SetSearchFilter :85-94 IsNullOrWhiteSpace→null)
+    const search = normalizeSearch(this.vinvModernSearch);
+    // ---- 条目池增量(:596-617:availableRecipe 逐条入池,FitsFilter 过滤入 _filteredRecipes) ----
+    const avail = game.vanillaAvailableRecipes();
+    for (const row of avail) {
+      if (this.vinvModernEntries.some((e) => e.r === row.r)) continue;
+      if (!this.vinvModernRecipeFits(row.r, search, this.vinvModernActive)) continue;
+      this.vinvModernEntries.push({ r: row.r, count: row.count, seen: true });
+    }
+    // 选中同步(:618-629:SelectedEntry==null→清;滤器拒→清;可用→focusRecipe 回写)
+    if (this.vinvModernSelected !== null) {
+      const sel = this.vinvModernEntries.find((e) => e.r === this.vinvModernSelected);
+      const stillAvail = sel !== undefined && avail.some((row) => row.r === sel.r);
+      if (this.vinvModernCraftFilter !== null && !recipeFilterAccepts(this.vinvModernSelected, this.vinvModernCraftFilter)) this.vinvModernSelected = null;
+      else if (stillAvail && sel) {
+        const idx = avail.findIndex((row) => row.r === sel.r);
+        if (idx >= 0 && this.vinvCraftFocusV !== idx) {
+          this.vinvCraftFocusGoto(idx);                        // :626-629 focusRecipe 双向回写
+          this.vinvUpdateCraftList();
+        }
+      }
+    }
+    // ---- 几何/格池 ----
+    const g = mcraftGridGeometry(c.sh, Math.max(1, this.vinvModernEntries.length));
+    const list = this.vinvModernGridList!;
+    list.style.left = `${g.list.x - panel.x}px`;
+    list.style.top = `${g.list.y - panel.y}px`;
+    list.style.width = `${g.list.w}px`;
+    list.style.height = `${g.list.h}px`;
+    if (this.vinvModernSeparatorEl) {
+      this.vinvModernSeparatorEl.style.left = `${g.separator.x - panel.x}px`;
+      this.vinvModernSeparatorEl.style.top = `${g.separator.y - panel.y}px`;
+      this.vinvModernSeparatorEl.style.width = `${g.separator.w}px`;
+    }
+    if (this.vinvModernScrollbarEl) {
+      this.vinvModernScrollbarEl.style.left = `${g.scrollbar.x - panel.x}px`;
+      this.vinvModernScrollbarEl.style.top = `${g.scrollbar.y - panel.y}px`;
+      this.vinvModernScrollbarEl.style.height = `${g.scrollbar.h}px`;
+    }
+    this.vinvModernViewPos = clampViewPosition(this.vinvModernViewPos, g.list.h, Math.max(g.contentH, g.list.h));
+    // 格池重建(签名:条目集+选中+可用集+几何)
+    const availKeys = avail.map((row) => row.r.create).join(',');
+    const sig = this.vinvModernEntries.map((e) => e.r.create).join(',')
+      + `|${this.vinvModernSelected ? this.vinvModernSelected.create : ''}|${g.cols}x${g.rows}|${availKeys}`;
+    if (sig !== this.vinvModernCellsSig) {
+      this.vinvModernCellsSig = sig;
+      this.vinvRebuildModernCells(g, new Set(avail.map((row) => row.r)));
+    }
+    this.vinvSyncModernScroll();
+    this.vinvUpdateModernDetail(avail);
+  }
+  private vinvModernCellsSig = '';
+
+  /** 单条目 Fit(UpdateContents :610 FitsFilter → EntryFilterer.FitsFilter(产物)+
+   *  _filter.Accepts(配方) :636-647) */
+  private vinvModernRecipeFits(
+    r: VanillaRecipeLike, search: string | null, active: readonly FilterKind[],
+  ): boolean {
+    const vid = r.create;
+    const it = filterItemOfVid(vid);
+    if (it.tooltipLines.length === 0) vinvFillTooltipLines(it);
+    if (!filtererFits(search, active, it)) return false;
+    if (this.vinvModernCraftFilter !== null && !recipeFilterAccepts(r, this.vinvModernCraftFilter)) return false;
+    return true;
+  }
+
+  private vinvRebuildModernCells(
+    g: ReturnType<typeof mcraftGridGeometry>, availNow: ReadonlySet<VanillaRecipeLike>,
+  ): void {
+    const inner = this.vinvModernGridInner;
+    if (!inner || !this.game) return;
+    inner.replaceChildren();
+    this.vinvModernCellEls = [];
+    inner.style.height = `${Math.max(g.contentH, g.list.h)}px`;
+    const entries = this.vinvModernEntries;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i]!;
+      const pos = mcraftCellXY(g, i);
+      const slotEl = el('div', 'sw-slot');   // ★变量名 slotEl:classic「cell 不绑 wheel」反向锚不扰
+      slotEl.style.cssText = `position:absolute; left:${pos.x - g.list.x}px; top:${pos.y - g.list.y}px;`
+        + 'width:52px; height:52px; background-image:none; transform-origin:top left;'
+        + `transform:scale(${MCRAFT_CELL_SCALE}); pointer-events:auto;`;
+      const iid = this.game.itemId(vanillaItemKey(e.r.create) ?? '');
+      const img = el('img') as HTMLImageElement;
+      img.draggable = false;
+      img.src = iconUrl(this.game, iid);
+      slotEl.appendChild(img);
+      if (e.r.createStack > 1) slotEl.appendChild(el('span', 'cnt', String(e.r.createStack)));
+      if (!availNow.has(e.r)) {
+        // 不可用槽(ItemGrid.DrawSlot :75 DisabledSlotColor (160,160,160))
+        img.style.filter = `grayscale(1) brightness(${MCRAFT_DISABLED_GRAY})`;
+        slotEl.dataset.unavail = '1';
+      }
+      this.vinvBindModernCell(slotEl, e.r, availNow.has(e.r));
+      inner.appendChild(slotEl);
+      this.vinvModernCellEls.push({ el: slotEl, r: e.r });
+    }
+  }
+
+  /** 格交互(HandleCraftSlot :503-532):未选/不可用=点选(音12);已选且可用=
+   *  HoverOverCraftingItemButton(focusRecipe) 合成链(:526);不可用=材料不足行 tooltip
+   *  (AddTooltipLines :545-553)。stackSplit/重复合成拍面 = vanillaCraft 内接。
+   *  ★变量名 slotEl:classic 网格域「cell 不绑 wheel」反向锚(FX30/RB13b)不受扰——
+   *  本域格面绑 wheel 是窗列表滚动(UIList.cs:109-115),非 classic 分页面 */
+  private vinvBindModernCell(slotEl: HTMLElement, r: VanillaRecipeLike, availNow: boolean): void {
+    slotEl.addEventListener('mouseenter', () => {
+      const iid = this.game.itemId(vanillaItemKey(r.create) ?? '');
+      if (iid > 0) {
+        this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: r.createStack }, anchor: slotEl });
+        if (!availNow) {
+          const line = document.createElement('div');
+          line.style.color = MCRAFT_MISSING_COLOR;
+          line.textContent = Lang.text(MCRAFT_MISSING_KEY);
+          this.tooltip.appendChild(line);
+        }
+      }
+    });
+    slotEl.addEventListener('mouseleave', () => {
+      this.tooltip.style.display = 'none';
+      cancelAnimationFrame(this.tooltipPulseRaf);
+    });
+    slotEl.addEventListener('wheel', (e) => this.vinvModernScrollBy(e));
+    slotEl.addEventListener('mousedown', (ev) => {
+      ev.stopPropagation();
+      const selected = this.vinvModernSelected === r;
+      if (!availNow || !selected) {                       // :506-522 选中队
+        this.vinvModernSelected = r;
+        this.game.sfx.play('menuTick', 1);                // :520 Sound 12
+        this.vinvUpdateModernCraft();
+        return;
+      }
+      // :524-527 else 支 = Main.HoverOverCraftingItemButton(Main.focusRecipe) 合成
+      //   (Main.cs:42971-43036:焦点即配方→CraftItem;Shift×10 = num2·10 :43011-43013)
+      this.game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
+      this.refreshAll();
+    });
+  }
+
+  /** 详情浮层(DrawChildren :450-487):hover ?? Selected;成品槽 ctx42(scale1,
+   *  底 White*0.749 :566)/锤图标 +(47,13) scale0.8/材料行 34·num 步距+拥有数
+   *  (DrawOwnedItemCount :555-561)/向导槽 ctx7 = 本仓无 InGuideCraftMenu 域(备案) */
+  private vinvUpdateModernDetail(avail: Array<{ r: VanillaRecipeLike; count: number }>): void {
+    const detail = this.vinvModernDetailEl;
+    if (!detail || !this.game) return;
+    const o = mcraftDetailOrigin();
+    // hover 优先(:451 _hoveredEntry ?? SelectedEntry)——DOM hover 由 CSS :hover 承担,
+    //   此处重建 = 选中态拍面(hover tooltip 逐帧面不合事件驱动;登记偏差)
+    const r = this.vinvModernSelected;
+    if (!r) { detail.style.display = 'none'; detail.replaceChildren(); return; }
+    detail.style.display = '';
+    detail.replaceChildren();
+    const availNow = avail.some((row) => row.r === r);
+    // 成品槽(ctx 42;DrawRecipeSlot :563-573 底 White×0.749)
+    const slot = el('div', 'sw-slot');
+    slot.style.cssText = `position:absolute; left:${o.origin.x - 20}px; top:${o.origin.y - 312}px;`
+      + 'width:52px; height:52px; background-image:none; --slot-alpha:0.749; pointer-events:auto;';
+    const iid = this.game.itemId(vanillaItemKey(r.create) ?? '');
+    const img = el('img') as HTMLImageElement;
+    img.draggable = false;
+    img.src = iconUrl(this.game, iid);
+    if (!availNow) img.style.filter = `grayscale(1) brightness(${MCRAFT_DISABLED_GRAY})`;
+    slot.appendChild(img);
+    if (r.createStack > 1) slot.appendChild(el('span', 'cnt', String(r.createStack)));
+    slot.addEventListener('mouseenter', () => {
+      if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: r.createStack }, anchor: slot });
+    });
+    slot.addEventListener('mouseleave', () => {
+      this.tooltip.style.display = 'none';
+      cancelAnimationFrame(this.tooltipPulseRaf);
+    });
+    slot.addEventListener('mousedown', (ev) => {
+      ev.stopPropagation();
+      if (!availNow) return;                              // 不可用=仅 tooltip(:460 enabled:false)
+      this.game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
+      this.refreshAll();
+    });
+    detail.appendChild(slot);
+    // 锤图标(:464 Images/UI/Craft ×0.8 @origin+(47,13))
+    const hammer = el('img') as HTMLImageElement;
+    hammer.draggable = false;
+    hammer.src = 'sprites/vanilla-ui/UI_Craft.png';
+    hammer.style.cssText = `position:absolute; left:${o.origin.x - 20 + 47}px; top:${o.origin.y - 312 + 13}px;`
+      + 'width:20.8px; height:19.2px; image-rendering:pixelated; pointer-events:none;';
+    detail.appendChild(hammer);
+    // 材料行(:465-486)
+    r.items.forEach((req, j) => {
+      const mp = mcraftMaterialPos({ x: o.origin.x, y: o.origin.y }, j, r.items.length);
+      const owned = this.vinvModernOwnedOf(r, req.id);
+      const enough = owned >= req.stack;                  // :474 availableItemCount ≥ stack
+      const k2 = ingredientKey(req.id);
+      const box = el('div', 'sw-slot');
+      const px = mp.x - 20, py = mp.y - 312;
+      box.style.cssText = `position:absolute; left:${px}px; top:${py}px; width:52px; height:52px;`
+        + 'background-image:none; --slot-alpha:0.749;'
+        + `transform:scale(${mp.scale}); transform-origin:top left; pointer-events:auto;`;
+      const mimg = el('img') as HTMLImageElement;
+      mimg.draggable = false;
+      mimg.src = k2 ? iconUrl(this.game, this.game.itemId(k2)) : '';
+      box.appendChild(mimg);
+      if (req.stack > 1) box.appendChild(el('span', 'cnt', String(req.stack)));
+      // 拥有数(DrawOwnedItemCount :555-561:槽 +(3,32)·scale,ItemStack 字体 0.8·scale)
+      const cnt = el('div');
+      cnt.textContent = owned > 999 ? '999+' : String(owned);
+      const cp = mcraftOwnedCountPos({ x: px, y: py, scale: mp.scale });
+      cnt.style.cssText = `position:absolute; left:${cp.x}px; top:${cp.y}px; color:${mcraftOwnedCountColor(enough)};`
+        + `font-size:${Math.max(8, Math.trunc(11 * mp.scale))}px; text-shadow:1px 1px 0 #000; pointer-events:none;`;
+      box.addEventListener('mouseenter', () => {
+        const miid = k2 ? this.game.itemId(k2) : -1;
+        if (miid > 0) this.showTooltipFor(miid, 'inv', { slot: { id: miid, stack: req.stack }, anchor: box });
+      });
+      box.addEventListener('mouseleave', () => {
+        this.tooltip.style.display = 'none';
+        cancelAnimationFrame(this.tooltipPulseRaf);
+      });
+      detail.appendChild(box);
+      detail.appendChild(cnt);
+    });
+  }
+
+  /** 材料拥有数(Recipe.GetAvailableItemCount :313-320 组感知——availableItemCountFor
+   *  同源 owned 聚合表) */
+  private vinvModernOwnedOf(r: VanillaRecipeLike, reqId: number): number {
+    const owned = this.game?.vanillaCraftOwned();
+    return owned ? availableItemCountFor(r, reqId, owned) : 0;
   }
 
   /** 经典网格视图容器(DrawRecipesGrid CraftingUI.cs:446-571,Main.cs:42449-42454
@@ -7618,7 +8333,7 @@ export class UI {
     // ★SW-FX38:每档数=vanillaWheelNotches(Main.cs:17593 int num=ScrollWheelDelta/120,
     //   C# 整除向零截断:子档拍=0 整吞无累积器,±240=±2 档;取负=XNA 上滚为正 vs
     //   浏览器 deltaY 下滚为正)——旧 `Math.round+Math.abs` 在 (60,120) 档带虚生 1 档=滚距偏快
-    const notches = vanillaWheelNotches(e.deltaY);
+    const notches = vanillaWheelNotches(e.deltaY, e.deltaMode);   // ★SW-RB14d：补传 deltaMode
     if (this.vinvPipsUseGrid) {                       // :17597 PipsUseGrid 支(flag 初值 true 不变,本支不清)
       const geo = craftGridGeometry(c.sw, c.sh);
       // 视口 px → vinv 逻辑域(÷K;transform-origin top left = 原点同)
@@ -7642,8 +8357,11 @@ export class UI {
     }
     // 箱行滚支(:17622 chest!=-1 ∧ ChestUI.LastHighestChestRow>0 → flag=false+Scroll):
     //   40 槽箱 LastHighestChestRow=ceil(40/10)-4=0 恒假=死支(本仓无 >40 槽容器,同相不建)
-    // NewCraftingUI.Visible 支(:17630 flag=false)=窗族分期缺席 ⇒ flag 恒 true
-    this.vinvCraftWheel(e);                           // :17633-17640 flag 支 ScrollCraftingList(档数自算)
+    // ★SW-FX41:NewCraftingUI.Visible 支(:17636-17639 flag=false)已落地——窗开=列表滚停
+    //   (网格分页支在上方,不受此门=原版同相)
+    if (!this.vinvModernCraftOpen) {
+      this.vinvCraftWheel(e);                         // :17633-17640 flag 支 ScrollCraftingList(档数自算)
+    }
   }
 
   /** 网格重排/重建(每刷新拍):recStart 逐拍钳制(:461-467)+页钮可见门+格池签名重建 */
@@ -7734,8 +8452,10 @@ export class UI {
     if (!this.vinvFilterRemain()) this.vinvCraftFilter = null;
   }
 
-  private vinvFilterRemain(): boolean {
-    const f = this.vinvCraftFilter;
+  /** CanRemainOpen 域内判定(adjTile 闭包语义)。f 缺省 = classic 滤器(vinvTickCraftFilter
+   *  消费);★SW-FX41:modern 窗 Update 拍(NewCraftingUI.cs:655-665)传
+   *  vinvModernCraftFilter——曾恒读 classic 域 = 窗开即被误判失效秒关(探针实斩) */
+  private vinvFilterRemain(f: CraftingTileFilter | null = this.vinvCraftFilter): boolean {
     const game = this.game;
     if (!f || !game) return false;
     const sheets: number[] = [];
@@ -7768,9 +8488,14 @@ export class UI {
       //   (开箱态右键合成站→网格开→ChestUI.cs:81 吞箱条;不重排=箱条滞留)
       this.vinvLayoutSig = '';
       this.layoutVanilla();
+    } else if (this._builtLayout === 'vanilla') {
+      // ★SW-FX41 P2-3:modern 支(:33556-33557 → NewCraftingUI.OpenCloseFilter
+      //   NewCraftingUI.cs:938-964)——四支状态机(开窗/换滤器/清滤器/关窗+Matches 去重);
+      //   开支内含 Player.OpenInventory 副作用面(:891)
+      if (this.invPanel.style.display !== 'block') this.openInventory(true);
+      this.vinvOpenCloseModernCraftFilter(f);
     } else {
-      // modern 支(:33556-33557 → NewCraftingUI.OpenCloseFilter)=窗族分期;
-      // classic 模式×classic 构建器布局(无网格域)同落此臂——playerInventory=true
+      // classic 模式×classic 构建器布局(无网格/窗域)——playerInventory=true
       // 副作用面照走(OpenCloseFilter 开支 :156 Player.OpenInventory 同面)
       this.openInventory(true);
     }
@@ -7965,11 +8690,24 @@ export class UI {
     e.stopPropagation();
     const rows = this.vinvCraftAvailV;
     if (!rows.length) return;
-    const num = vanillaWheelNotches(e.deltaY);            // Main.cs:17593(取负=浏览器同手势)
-    if (num === 0) return;                                // 子档拍:ScrollCraftingList(0) 零位移零音
+    // ★SW-RB14d（FX38-F2）：量化语义 1:1——原版 ScrollWheelDelta=ScrollWheelValue
+    //  （【跨事件累计量】,PlayerInput.cs:1407 += 每事件累加）帧间差分(:901-902),
+    //  即一帧内多次/亚 notch 滚动【先累计再 /120】。旧刀逐事件 trunc:macOS 触控板/
+    //  惯性每次 ±(4~60)px → 每事件 0 档整段吞零(与"比原版快"同源的逆偏差)。
+    //  余数累计器=同构语义:累计像素、整档消费、余数留置(量化相位在事件界而非帧界,
+    //  <1 拍差,净档数逐值同)。
+    this.vinvCraftWheelPendPx += wheelEventPx(e.deltaY, e.deltaMode);   // ★SW-RB14d：并补传 deltaMode
+    const num = vanillaWheelNotches(this.vinvCraftWheelPendPx);         // Main.cs:17594(取负=浏览器同手势)
+    if (num === 0) return;                                // 子档拍:ScrollCraftingList(0) 零位移零音（余数留置）
+    this.vinvCraftWheelPendPx += num * 120;               // 消费整档,余数留累计器
     const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + num));   // :574-582
     this.vinvCraftFocusGoto(next);
-    this.vinvCraftSnapStep();                             // 同帧首步(原版 Update→Draw 帧序)
+    // ★SW-RB14d 债 FX38-F4：此同步步 + rAF 配额步（dt/16.67 档）在事件落在两帧
+    //  之间时首窗得 2 步（原版 Update 消费滚轮→Draw 恰 1 步）,滑行提前 ~1 步、
+    //  行界音同步提前一拍;且配额在任意 pip 页推进,原版仅 Recipes 页(:42425-42427
+    //  DrawRecipesList 内 AdjustRecipeOffsets)——亚秒级观感差,不动刀（改动牵动
+    //  快感面,留独立批）。另:rebuild 面板撤除时 focus/glide 清零(FX38-F5)无原版
+    //  对应物（focusRecipe 静态量,切页/换分辨率不重置 Main.cs:1806）——同债登记。
   }
 
   /** ★SW-FX38 焦点迁移+重锚播种(CraftingUI.cs:394-399 全行重锚不变式
@@ -8026,6 +8764,12 @@ export class UI {
         this.vinvCraftFilter = null;
         this.vinvRefreshCraft();   // 失效拍清滤+按全量配方域重列(ClearHacks 同相 CraftingUI.cs:142)
       }
+    }
+    // ★SW-FX41:NewCraftingUI.Update(NewCraftingUI.cs:655-665 UpdateUIStates
+    //   Main.cs:17678-17682 每拍)——站点滤器失效 → Close(quiet:false,
+    //   returnToInventory:true)(音 11+背包保持);_filter==null 时零开销
+    if (this.vinvModernCraftOpen && this.vinvModernCraftFilter !== null && this._builtLayout === 'vanilla') {
+      if (!this.vinvFilterRemain(this.vinvModernCraftFilter)) this.vinvCloseModernCraft(false);
     }
     const dt = this.vinvPulseLast ? Math.min(100, ts - this.vinvPulseLast) : 16.67;
     this.vinvPulseLast = ts;
@@ -8227,8 +8971,10 @@ export class UI {
     this.vinvChestNameEl = nameEl;
     this.vinvLayoutItems.push({ el: nameEl, pos: () => {
       // ★SW-FX30 刀②:网格态吞箱条面(ChestUI.cs:81 chest!=-1 && !PipsUseGrid && !modern——
-      // 原版 PipsUseGrid 时不画箱名/按钮/槽)
-      if (!this.openChest || this.vinvPipsUseGrid) return null;
+      // 原版 PipsUseGrid 时不画箱名/按钮/槽)。★SW-RB14b:补第三门 !NewCraftingUI.Visible
+      // (ChestUI.cs:81 三门 verbatim;1458 同行)——FX41 modern 窗落地+craftingGridControl
+      // 缺省回切 modern 后窗开态可达:开箱→开窗,原版箱条整面让位,本仓曾滞留叠画
+      if (!this.openChest || this.vinvPipsUseGrid || this.vinvModernCraftOpen) return null;
       return { x: CHEST_NAME_XY.x, y: CHEST_NAME_XY.y };
     } });
     // 40 槽(scale 0.755;context 3/4/32 由 slotContext('chest') 经 openChest.x 分派)
@@ -8238,7 +8984,8 @@ export class UI {
       const s = this.vinvMakeSlot('chest', i, CHEST_SCALE);
       this.vinvRoot?.appendChild(s);
       const { x, y } = chestSlotXY(i);
-      this.vinvLayoutItems.push({ el: s, pos: () => (this.openChest && !this.vinvPipsUseGrid ? { x, y } : null) });   // ChestUI.cs:81 网格态吞箱槽(SW-FX30)
+      // ★SW-RB14b:第三门 !NewCraftingUI.Visible(ChestUI.cs:81 三门 verbatim,1458 同行)
+      this.vinvLayoutItems.push({ el: s, pos: () => (this.openChest && !this.vinvPipsUseGrid && !this.vinvModernCraftOpen ? { x, y } : null) });   // ChestUI.cs:81 网格态吞箱槽(SW-FX30/SW-RB14b)
     }
     // 按钮列(DrawButtons :182-188:Y=invBottom+40+ID·26,ID 跳号位保留;
     // ID0 拿走全部/1 存放全部/2 快速堆叠/3 补货(inter[82])/4 排列物品(inter[122]);
@@ -8258,7 +9005,8 @@ export class UI {
       b.addEventListener('mousedown', (e) => { e.stopPropagation(); act(); });
       this.vinvRoot?.appendChild(b);
       this.vinvLayoutItems.push({ el: b, pos: () => {
-        if (!this.openChest || this.vinvPipsUseGrid) return null;   // ChestUI.cs:81 网格态吞钮(SW-FX30)
+        // ★SW-RB14b:补第三门 !NewCraftingUI.Visible(ChestUI.cs:81 三门 verbatim,1458 同行)
+        if (!this.openChest || this.vinvPipsUseGrid || this.vinvModernCraftOpen) return null;   // ChestUI.cs:81 网格态吞钮(SW-FX30/SW-RB14b)
         return chestButtonXY(id);   // ★SW-FX28 刀①:单源(ChestUI.cs:186/:198 Y+=ID*26)
       } });
       this.vinvChestBtnEls.push(b);
@@ -8323,9 +9071,11 @@ export class UI {
     if (!root) return;
     const vis = (): boolean => this.vinvShopVisible();
 
-    // 店名(Main.cs:42502 Lang.inter[28] @(504,invBottom)——payload title 即 Lang.inter(28))
+    // 店名(Main.cs:42502 Lang.inter[28] @(504,invBottom)——payload title 即 Lang.inter(28);
+    // 13px = 刀11 MouseText 同档族定标:原版店名/箱名同为 scale-1 DrawString(:42502 vs
+    // ChestUI.cs:161 Vector2.One),★SW-RB14b:曾 15px 与箱名 13px 同面两档=内不一致,对齐)
     const title = el('div', 'vinv-txt');
-    title.style.cssText = 'font-size:15px;';
+    title.style.cssText = 'font-size:13px;';
     root.appendChild(title);
     this.vinvShopTitleEl = title;
     this.vinvLayoutItems.push({ el: title, pos: () => (vis() ? { x: SHOP_TITLE_XY.x, y: SHOP_TITLE_XY.y } : null) });
@@ -8550,12 +9300,34 @@ export class UI {
     const unchanged = prev.length === avail.length
       && prev.every((p, i) => p.r === avail[i].r && p.count === avail[i].count);
     this.vinvCraftAvailV = avail;
-    this.vinvCraftFocusGoto(Math.min(this.vinvCraftFocusV, Math.max(0, avail.length - 1)));   // ★SW-FX38 焦点钳制走重锚播种(availableRecipeY 语义存续)
+    // ★SW-RB14d（FX38-F3）：重建期焦点 1:1（Recipe.UpdateRecipeList :228-256 +
+    //  TryRefocusingRecipe :478-494 + VisuallyRepositionRecipes :131-139）：
+    //  ①身份追焦——旧焦点配方在新表中的索引成为焦点（材料耗尽/离站致整表位移时,
+    //  原版仍居中同一配方;旧刀只保索引=居中被挤入的另一配方）;
+    //  ②钳制——找不到才钳 [0,n−1]（原文 :488-495 两道 if）;
+    //  ③glideY【不变】——VisuallyRepositionRecipes 把新焦点行平移接管旧焦点行偏移,
+    //  在 availableRecipeY[i]≡glideY+(i−focus)·65 不变式下,焦点行偏移恒=glideY
+    //  ⇒任何重建分支 glideY 都保持原值。旧刀走 vinvCraftFocusGoto 的移焦播种
+    //  （glideY+=(next−prev)·65）=重建支被施以移焦语义,钳位差 N 行 → 焦点行从
+    //  ±N·65px 起步多行幻影滑行 ~0.7s,原版即刻落位无滑行。
+    {
+      const oldRecipe = prev[this.vinvCraftFocusV]?.r ?? null;
+      let nextFocus = this.vinvCraftFocusV;
+      if (oldRecipe !== null) {
+        const idx = avail.findIndex((p2) => p2.r === oldRecipe);
+        if (idx >= 0) nextFocus = idx;                 // :483-486 找到=身份位
+      }
+      if (nextFocus >= avail.length) nextFocus = avail.length - 1;   // :488-490
+      if (nextFocus < 0) nextFocus = 0;                // :491-493
+      this.vinvCraftFocusV = nextFocus;                // ③：直写,glideY 不动
+    }
     if (!unchanged) {
       this.vinvRebuildCraftCells();
     }
     this.vinvUpdateCraftList();
     this.vinvUpdateCraftGrid();   // ★SW-FX30 刀②:网格视图随拍重排(分页钳制/页钮门)
+    // ★SW-FX41:modern 窗内容随拍(UpdateContents :589-634 每拍语义;窗关时早退零开销)
+    if (this.vinvModernCraftOpen) this.vinvUpdateModernCraft();
   }
 
   /** 格池重建(配方集变化;每配方一枚 52 盒槽,鱼眼 scale/x/y 全在 update 拍) */
@@ -8616,10 +9388,11 @@ export class UI {
    *  :398 availableRecipeY[i]=original+(i−focus)·65——剔界 :177/缩放 :181 吃【吸附值】);
    *  scale=max(0.75,100/(|y_i|+100));fast 态全体 0.75(:186-189 recFastScroll 支;
    *  本仓并门 glideY≠0=重开首拍 glideY=0 时按鱼眼渲染,原版 settle 帧序同相,1 帧差登记);
-   *  x=trunc(46-26·scale);y=trunc(410+y_i·scale-30·scale+adjY);|y_i|>middleY 剔除(:188) */
+   *  x=trunc(46-26·scale);y=trunc(410+y_i·scale-30·scale+adjY);|y_i|>middleY 剔除(:188)
+   *  ★SW-FX41:modern 窗开 = Main.cs:42418 else 分支整支不画 → 恒 null(隐藏) */
   private vinvCraftCellPos(i: number): { x: number; y: number } | null {
     const c = this.vinvLayoutCtx;
-    if (!c) return null;
+    if (!c || !this.vinvClassicCraftVisible()) return null;
     const adjY = this.vinvCraftAdjY(c.sh), middleY = this.vinvCraftMiddleY(c.sh);
     const yOff = (i - this.vinvCraftFocusV) * 65 + this.vinvCraftGlideY;
     if (Math.abs(yOff) > middleY) return null;
@@ -8844,6 +9617,7 @@ export class UI {
     this.vinvHousingSig = '-init';
     this.vinvCraftFocusV = 0;   // 经典列表缺省聚焦首配方(-1 是 Modern 时代哨兵,已退役)
     this.vinvCraftGlideY = 0;   // ★SW-FX38 重建=吸附态整帧清零(availableRecipeY 族随面板重建)
+    this.vinvCraftWheelPendPx = 0;   // ★SW-RB14d（FX38-F2）累计器随面板重建清零
     this.vinvCraftFastScroll = false;
     this.vinvCraftGlideAcc = 0;
     this.vinvCraftAvailV = [];
@@ -8852,6 +9626,31 @@ export class UI {
     this.vinvCraftTitleEl = null;
     this.vinvCraftMatEl = null;
     this.vinvCraftMatSig = '';
+    // ★SW-FX41:modern 窗族面重建前清零(窗开态随 teardown 复位——重建后
+    //   vinvModernCraftOpen=false,再开走 vinvOpenModernCraft 全量重置)
+    this.vinvModernCraftOpen = false;
+    this.vinvModernCraftFilter = null;
+    this.vinvModernOpenedWithoutFilter = false;
+    this.vinvModernActive = [];
+    this.vinvModernSearch = '';
+    this.vinvModernEntries = [];
+    this.vinvModernSelected = null;
+    this.vinvModernViewPos = 0;
+    this.vinvModernCellsSig = '';
+    this.vinvModernCraftEl = null;
+    this.vinvModernPanelEl = null;
+    this.vinvModernTitleEl = null;
+    this.vinvModernSearchInput = null;
+    this.vinvModernSearchClear = null;
+    this.vinvModernGridList = null;
+    this.vinvModernGridInner = null;
+    this.vinvModernSeparatorEl = null;
+    this.vinvModernScrollbarEl = null;
+    this.vinvModernScrollHandle = null;
+    this.vinvModernDetailEl = null;
+    this.vinvModernFilterBtns = [];
+    this.vinvModernFilterHovers = [];
+    this.vinvModernCellEls = [];
     // ★SW-FX32:商店货架面(vinvBuildShop 重建前清零,防死节点入 vinvLayoutItems/
     // vinvShopCells 旧引用重paint——红队 F2 teardown 卫生同族)
     this.vinvShopCells = [];

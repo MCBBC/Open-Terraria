@@ -206,7 +206,7 @@ const sortIndicesStable = (list: number[], cmpFn: (x: number, y: number) => numb
 
 // ============ 52 层谓词 + 比较器（ItemSorting.cs :39-1140 逐条对照） ============
 
-interface LayerDef {
+export interface LayerDef {
   name: string;
   /** 谓词（v=槽内物品视图） */
   pred: (v: SortView) => boolean;
@@ -402,6 +402,13 @@ const LAYERS: LayerDef[] = [
 
 /** 层名表（原版 ItemSortingLayer.Name 字符串面;SetupWhiteLists 固定序） */
 export const LAYER_NAMES = LAYERS.map((l) => l.name);
+
+// ★SW-RB13c-e 测试接缝（金标白名单全量重放消费,引擎路径勿用）：52 层谓词/比较器
+// 本体 + vid→引擎视图（与 viewOfSlot 单源;仅注册域 vid,vid<0 未注册件走 fallback 面）
+export const LAYER_DEFS_FOR_TESTS: readonly LayerDef[] = LAYERS;
+export function viewOfVidForTests(vid: number): SortView {
+  return viewOfSlot({ id: internalIdOfVanilla(vid), stack: 1 });
+}
 
 // ============ SortCoins（:1715-1824,Utils.CoinsCount/CoinsSplit） ============
 

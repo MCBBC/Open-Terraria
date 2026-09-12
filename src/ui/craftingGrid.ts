@@ -162,10 +162,19 @@ export function craftingFilterForTile(sheet: number): CraftingTileFilter | null 
  *    Xna.Framework.Input.MouseState.html)⇒ 浏览器 deltaY>0=下滚=原版负档,取负对齐
  *    (同手势同号;仓内经验锚:ChestUI.cs:306-312 Scroll(mouseWheel>0)→行--,原版玩家
  *    体感"下滚=箱子下翻"即 wheel-down 为负档)。 */
+/** ★SW-RB14d：DOM wheel 事件 → 像素（deltaMode 归一）。DOM 规范：mode 0=pixel、
+ *  1=line（Firefox 鼠标滚轮缺省,每 notch ≈ 3 行）、2=page。行高取通用约定 40px
+ *  （WHATWG/FF 缺省行距近似;原版量化在 OS 层 ±120/notch,行模式换算只能近似）。
+ *  旧刀 `deltaY*120` 两错：①行模式 1 行当 1 notch=约 3× 过计;②三处调用点全部
+ *  未传 deltaMode（deltaMode 缺省 0）→ Firefox ±1..3/事件 trunc(±3/120)=0 整类吞零。 */
+export function wheelEventPx(deltaY: number, deltaMode = 0): number {
+  if (deltaMode === 1) return deltaY * 40;
+  if (deltaMode === 2) return deltaY * 120;   // 页模式:发射源近乎绝迹,近似 120px/页
+  return deltaY;
+}
+
 export function vanillaWheelNotches(deltaY: number, deltaMode = 0): number {
-  // 行/页模式归一(Firefox deltaMode=1 每事件 ±1 行):1 行=1 原版 notch=±120
-  // (仓内全局约定 src/main.ts:624 「±120/notch」;页模式 1 页≈1 档,发射源近乎绝迹)
-  const px = deltaMode === 0 ? deltaY : deltaY * 120;
+  const px = wheelEventPx(deltaY, deltaMode);
   const n = Math.trunc(-px / 120);
   return n === 0 ? 0 : n;   // JS trunc 负域吐 -0,C# int 除法恒 +0(差分断言会咬)
 }

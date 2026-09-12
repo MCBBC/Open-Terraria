@@ -367,6 +367,23 @@ export class World {
   /** 原版树样式数据（header treeX/treeStyle）：横向 4 区森林树冠样式 */
   treeX: number[] = [];
   treeStyle: number[] = [0, 0, 0, 0];
+  /** ★SW-FX43（2026-09-12）：caveBackX[3]（WF:1266-1268;原版 RandomizeCaveBackgrounds
+   *  WorldGen.cs:8141-8210 独立掷,与 treeX 无派生关系）。自建=worldgen 掷值
+   *  （WorldGen finalize 回填）、导入=原值;undefined（旧档）→ 导出按 treeX 派生回退 */
+  caveBackX?: number[];
+  /** ★SW-FX43：原版 worldId（WF:1244 写/:1977 读;LoadFooter :3003-3015 与 footer
+   *  同值硬校验）。自建=genRand.Next(int.MaxValue) 掷值（WorldGen.cs:11364）、
+   *  导入=原值;undefined（旧档）→ created-XOR 派生回退 */
+  worldId?: number;
+  /** ★SW-FX43：原版 .wld header 差量快照（全仓生产点=WldImport wldSnap 组装;
+   *  随存档链携行至 exportWld writeHeader 快照优先回写——键集/差量裁断注记见彼处） */
+  wldSnap?: Record<string, number | boolean | string>;
+  /** ★SW-FX43：TE 三类透传快照（0 假人/2 传感器/7 晶塔;loadSaveData 载入后按
+   *  CheckValidTile WF:3349-3359 淘汰）——FX35 SaveData 层→World 随档携行 */
+  teSnap?: import('../save/serialize').SaveData['teSnap'];
+  /** ★SW-FX43：城镇房间预留表（TownRoomManager.Save/Load,TownRoomManager.cs:94-124）
+   *  ——FX35 SaveData 层→World 随档携行 */
+  townRooms?: import('../save/serialize').SaveData['townRooms'];
   /** 尺寸档 0 小/1 中/2 大（构造时按宽派生，GetWorldSize 语义——多尺寸生成/消费分支用） */
   size: WorldSize = 0;
   /** 生成期水线（GenVars.waterLine，TerrainPass 写入）。生成期沉降的落水越线转
@@ -571,6 +588,12 @@ export class World {
     w.trees = p.trees;
     w.flags = p.flags;
     w.treeX = p.treeX; w.treeStyle = p.treeStyle; w.treeTops = p.treeTops;
+    // ★SW-FX43：caveBackX/worldId + wld 快照三通道随包回填（旧包缺省=undefined→
+    //  导出侧台账缺省映射回退;bgStyles 同缝）
+    if (p.caveBackX?.length === 3) w.caveBackX = [...p.caveBackX];
+    if (p.worldId !== undefined) w.worldId = p.worldId;
+    w.wldSnap = p.wldSnap; w.teSnap = p.teSnap; w.townRooms = p.townRooms;
+    if (p.bgStyles) w.bgStyles = { ...p.bgStyles, cave: [...p.bgStyles.cave] };
     w.shimmerX = p.shimmerX ?? 0; w.shimmerY = p.shimmerY ?? 0;
     return w;
   }

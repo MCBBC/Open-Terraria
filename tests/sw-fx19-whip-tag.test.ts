@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { TileStore } from '../src/world/TileStore';
+import { World } from '../src/world/World';
 import { WhipProj } from '../src/entities/WhipProj';
 import type { GameHooks } from '../src/entities/types';
 
@@ -26,12 +26,15 @@ const mkEnemy = (id: number, cx: number, cy: number, w = 16, h = 24): MockEnemy 
 };
 
 function makeHooks(enemies: MockEnemy[] = []) {
-  const store = new TileStore(200, 120);
-  for (let x = 0; x < 200; x++) for (let y = 100; y < 120; y++) store.setTile(x, y, 1);
+  // ★SW-FX44：夹具换真 World（wing-flight 同法）——曾喂 {store} 半成品，III224 深度
+  // 重力 NaN 防灌带把夹具重力打成 0.25 档（生产面 game.world 恒为完整对象）
+  const w = new World(200, 120, 7, 'whip-tag');
+  for (let x = 0; x < 200; x++) for (let y = 100; y < 120; y++) w.store.setTile(x, y, 1);
+  w.groundLevel = 100;
   const player = new Player(60 * 16, 90 * 16, new Inventory());
   const added: unknown[] = [];
   const hooks: GameHooks = {
-    world: { store } as never,
+    world: w as never,
     player: player as never,
     enemies: () => enemies,
     critters: () => [],
@@ -50,7 +53,7 @@ function makeHooks(enemies: MockEnemy[] = []) {
   (hooks as unknown as { entities: { add: (e: unknown) => void } }).entities = {
     add: (e: unknown) => { added.push(e); },
   };
-  return { hooks, store, player, added };
+  return { hooks, store: w.store, player, added };
 }
 
 /** 鞭挥至命中的标准流程（batch-d 同款）：9 拍起手 → 敌移到曲线第 10 点 → 1 拍命中 */

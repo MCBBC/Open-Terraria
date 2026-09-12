@@ -216,7 +216,17 @@ describe('冲刺（DashMovement 1:1）', () => {
     doubleTap(p, w);
     expect(p.dashDelay).toBe(-1);               // 冲刺确已触发
     expect(p.x + p.w).toBeLessThanOrEqual(wallX + 1e-6);  // 贴墙
-    expect(p.vx).toBe(0);                        // 撞停（探测命中 → 减半后仍撞）
+    // ★SW-FX44 重锚（RB12b/FX40 移交定谳）：原版无"撞墙拍硬清零"——
+    // velocity = TileCollision 结果向量（Player.cs:23625），result.X = 截断残量
+    //（Collision.cs result.X = vector4.X−(vector3.X+Width)，slope-seam 残量语义批
+    // 1:1 既案）。触发拍身前缝隙 2px → vx=截断残量∈(0,2]；贴墙次拍零位移=撞停。
+    // 旧断言 vx===0 = 硬清零旧实现，与残量语义批冲突（测试陈旧,非生产回归——
+    // 探针实测触发拍 vx=1.92、次拍 vx=0 且恒贴墙）。
+    expect(p.vx).toBeGreaterThan(0);
+    expect(p.vx).toBeLessThanOrEqual(2 + 1e-6);  // 残量 ≤ 缝隙 2px（不穿透）
+    p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    expect(p.vx).toBe(0);                        // 次拍贴墙撞停
+    expect(p.x + p.w).toBeLessThanOrEqual(wallX + 1e-6);  // 恒贴墙（不穿墙）
     // 对比：无墙时触发帧 vx 保留 16.9（见上例）——减半分支只对探测命中生效
   });
 
@@ -253,17 +263,24 @@ describe('冲刺（DashMovement 1:1）', () => {
 
 // ============ 3 沙丘行者靴（Player.cs:26225-26231） ============
 describe('沙丘行者靴（runningOnSand ×1.75）', () => {
+  /** ★SW-FX44 场景重锚（RB12b/FX40 移交,探针定谳）:旧夹具地板 y=30/玩家 y=27
+   *  = III224 深度重力 num6=(27−60…)/(groundLevel/6)<0 → 原钳下档 0.25（太空带
+   *  低重力=原版本相,非 bug）——6px 落地拖到 ~11t,37t 预算下沙面加速只剩 26 拍。
+   *  场景下移到地表带（y=77/80,num6=(77−60)/(80/6)=1.27→上钳 1=满重力,5 拍落地）
+   *  = 恢复测试写作时的物理前提,断言本体不动。 */
+  const run = (floorTile: number, ticks = 37): { p: Player; vx: number; onSand: boolean } => {
+    const w = new World(60, 130, 42, 'dune');
+    w.groundLevel = 80;
+    for (let x = 2; x <= 57; x++) w.store.setTileSilent(x, 80, floorTile);
+    const p = new Player(20 * 16, 77 * 16, new Inventory());
+    p.inv.armor[3] = { id: _iid(4055), stack: 1 };   // 沙丘行者靴 runSpeed 6 + desertBoots
+    p.inputX = 1;
+    for (let i = 0; i < ticks; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+    return { p, vx: p.vx, onSand: p.runningOnSand };
+  };
+
   it('沙族地格检测 + 全参数 ×1.75（慢爬坡上限:沙 5.25/泥 3.0;原版乘区非 +0.25 定值）', () => {
     const sand = TILE_BY_KEY['sand']!;
-    const run = (floorTile: number): { p: Player; vx: number; onSand: boolean } => {
-      const w = new World(60, 60, 42, 'dune');
-      for (let x = 2; x <= 57; x++) w.store.setTileSilent(x, 30, floorTile);
-      const p = new Player(20 * 16, 27 * 16, new Inventory());
-      p.inv.armor[3] = { id: _iid(4055), stack: 1 };   // 沙丘行者靴 runSpeed 6 + desertBoots
-      p.inputX = 1;
-      for (let i = 0; i < 37; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);  // 60t:全速段内(未撞墙)
-      return { p, vx: p.vx, onSand: p.runningOnSand };
-    };
     const onSand = run(sand);
     const onDirt = run(1 /* dirt */);
     expect(onSand.onSand).toBe(true);     // FloorVisuals :23457 沙族集合命中
@@ -272,6 +289,31 @@ describe('沙丘行者靴（runningOnSand ×1.75）', () => {
     // maxRun = 3 × moveMult(=1) ×(沙上 1.75) = 5.25 / 泥土 3.0;靴族走【慢爬坡】到 6×1.75
     expect(onSand.vx).toBeCloseTo(3 * 1.75, 0);   // 沙上 maxRun = 3×1.75 = 5.25
     expect(onDirt.vx).toBeCloseTo(3, 0);                    // 泥土 maxRun = 3×1.0
+  });
+
+  it('两段加速界:全速段恰止于 maxRun=5.25,越界首拍即落 ×0.2 慢爬坡档（:20033/:20121 两分支界;SW-FX44 钉双 ×1.75 回归）', () => {
+    const sand = TILE_BY_KEY['sand']!;
+    const w = new World(60, 130, 42, 'dune-cross');
+    w.groundLevel = 80;
+    for (let x = 2; x <= 57; x++) w.store.setTileSilent(x, 80, sand);
+    const p = new Player(20 * 16, 77 * 16, new Inventory());
+    p.inv.armor[3] = { id: _iid(4055), stack: 1 };
+    p.inputX = 1;
+    const MAXRUN = 3 * 1.75;
+    let crossedDv = -1;
+    for (let i = 0; i < 200 && crossedDv < 0; i++) {
+      const before = p.vx;
+      p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+      if (before < MAXRUN && p.vx >= MAXRUN) {
+        const midBefore = p.vx;
+        p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+        crossedDv = p.vx - midBefore;      // 越界后首拍增量
+      }
+    }
+    // 原版 :20033 全速段门 vx<maxRunSpeed → 越界即入 :20121 慢爬坡支
+    // runAcceleration ×0.2（=0.08×1.75×0.2=0.028）。maxRun 若被双 ×1.75
+    //（speedMult :4296 + 旧 :4562 叠乘=9.19）,越界首拍仍是 0.14 全速档 → 本钉红。
+    expect(crossedDv).toBeCloseTo(0.08 * 1.75 * 0.2, 6);
   });
 });
 

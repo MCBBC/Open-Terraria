@@ -34,6 +34,8 @@ import {
   readInstancedLootModule, writeInstancedLootModule, INSTANCED_LOOT_PER_FRAME,
   type InstancedLootEntry, type LiquidCell,
   readPingProbe, writePingProbeEcho,
+  AnglerQuestSub, readAnglerQuestModule, writeAnglerQuestModule,
+  writeSeasonBitsModule,
 } from './syncModules';
 import type { LeashedNetMsg } from '../entities/LeashedCritter';
 import type { World } from '../world/World';
@@ -217,6 +219,18 @@ export interface ClientNetHooks {
   /** module14 per-client 掉落到达（房主/SimHost 经服务器定向转发——原版 msg90
    *  InstancedItem 等价;Boss 袋族各端私有实例。Game 侧 netLocalOnly 落地） */
   onInstancedLoot?: (entries: InstancedLootEntry[]) => void;
+  /** module15 sub0 渔夫任务断言到达（SW-FX42,msg74 等价）：收端 world.anglerQuest
+   *  直写 + anglerQuestFinished/今日名单复位（Game 侧消费） */
+  onAnglerQuest?: (quest: number) => void;
+  /** module15 sub1 交付中继到达（msg75 等价）：slot==mySlot 时收端置完成旗
+   *  （重连/晚进房补发去重——Game 侧消费） */
+  onAnglerFinished?: (slot: number) => void;
+  /** module15 sub2 季节强置位到达（msg7 bitsByte9[6]/[7] 等价）：合并结果 +
+   *  ForToday 私有位（Game 侧消费） */
+  onSeasonBits?: (bits: number) => void;
+  /** msg80 在用箱镜像到达（SW-FX42）：slot→chestIdx（-1=关闭）。Game 消费 =
+   *  拒绝匹配（本端 pending 开箱请求撞上他人占用 → 清 pending,面板不弹） */
+  onChestInUse?: (slot: number, chestIdx: number, x: number, y: number) => void;
 }
 
 /** vanilla 近战 PvP 甲虫蓄能入账【精确】式（★F14；Player.cs:38864-38868 返回段重算 +
@@ -665,6 +679,15 @@ export class ClientNet {
           // targetSlot 定向转发;非本端条目为异常流,Game 侧再验后静默丢弃）
           const entries = readInstancedLootModule(r);
           if (entries.length) this.hooks.onInstancedLoot?.(entries);
+        } else if (moduleId === NetModule.AnglerQuest) {
+          // module15（SW-FX42）：sub0=msg74 任务号+新的一天复位 / sub1=msg75 交付中继
+          // / sub2=季节强置位（msg7 bitsByte9[6]/[7] 等价）。旧端 default 忽略未知
+          // moduleId = 无漂移（150/SpectateFocus 先例）
+          const m = readAnglerQuestModule(r);
+          if (!m) return;
+          if (m.sub === AnglerQuestSub.Quest) this.hooks.onAnglerQuest?.(m.quest);
+          else if (m.sub === AnglerQuestSub.Finished) this.hooks.onAnglerFinished?.(m.slot);
+          else this.hooks.onSeasonBits?.(m.bits);
         }
         return;
       }
@@ -696,6 +719,19 @@ export class ClientNet {
       }
       case Msg.SyncChestItem: {
         this.applyRemoteChest(r);
+        return;
+      }
+      case Msg.ChestInUse: {
+        // msg80（SW-FX42 在用箱镜像）：{u8 slot, i16 chestIdx, i32 x, i32 y}——
+        // 原版 MessageBuffer.cs:3220-3231 收包直写 Main.player[slot].chest（值域
+        // -3..7999 门）；本仓镜像进 chestOpenByPlayer,拒绝匹配走 hook（Game 清
+        // netPendingChest——服务器 msg31 拒发内容时本帧是唯一否定信号）
+        const slot = r.u8();
+        const chestIdx = r.i16();
+        const x = r.i32(), y = r.i32();
+        if (chestIdx >= 0) this.chestOpenByPlayer.set(slot, chestIdx);
+        else this.chestOpenByPlayer.delete(slot);
+        if (slot !== this.mySlot) this.hooks.onChestInUse?.(slot, chestIdx, x, y);
         return;
       }
       case Msg.SyncNPC: {
@@ -1195,6 +1231,46 @@ export class ClientNet {
 
   /** 本地登记的箱子 → 同步槽位号（Game 注册；diff 轮询用） */
   chestIndexByPos = new Map<string, number>();
+
+  /** msg80 在用箱镜像（SW-FX42）：slot → chestIdx。原版 Main.player[slot].chest 的
+   *  客户端侧等价（进房补发/开关箱广播维护）——消费面登记见 multiplayer-design.md
+   *  §SW-FX42（现役=拒绝匹配；Wiring.cs:2571/:2667 在用门为未来消费位） */
+  chestOpenByPlayer = new Map<number, number>();
+
+  /** 他端是否正占用世界箱 chestIdx（本地镜像查询；-1/无记录=空闲） */
+  isChestInUseByOther(chestIdx: number): boolean {
+    for (const [slot, idx] of this.chestOpenByPlayer) {
+      if (slot !== this.mySlot && idx === chestIdx) return true;
+    }
+    return false;
+  }
+
+  /** 开/关箱公告（msg33,C→S；SW-FX42）：chestIdx=-1=关闭。原版 Player.OpenChest 尾
+   *  SendData(33,...)（NetMessage.cs:880-902 写面）——服务器据此维护每玩家在用箱
+   *  并广播 msg80。仅世界箱（x>=0）公告;随身储蓄族（x<0）原版不在 Main.chest 域 */
+  sendChestOpenState(chestIdx: number, x: number, y: number, closing: boolean) {
+    this.send(new NetWriter(Msg.ChestOpenState)
+      .i16(closing ? -1 : Math.max(0, Math.min(0x7fff, chestIdx)))
+      .i32(x).i32(y)
+      .finish());
+  }
+
+  // ================= 渔夫任务/季节位（module15,SW-FX42；见 net/syncModules.ts） =================
+
+  /** sub0 任务断言（msg74 等价,仅权威端=房主调用）——服务器记态 + 排除发送者广播 */
+  sendAnglerQuestAssert(quest: number) {
+    this.send(writeAnglerQuestModule(AnglerQuestSub.Quest, quest));
+  }
+
+  /** sub1 交付上行（msg75 等价,Main.cs:40948 SendData(75) 同位）——本端已本地置旗 */
+  sendAnglerFinishedClaim() {
+    this.send(writeAnglerQuestModule(AnglerQuestSub.Finished, this.mySlot));
+  }
+
+  /** sub2 季节强置位断言（仅权威端调用；msg7 bitsByte9[6]/[7] 等价承载面） */
+  sendSeasonAssert(bits: number) {
+    this.send(writeSeasonBitsModule(bits));
+  }
 
   private applyRemoteChest(r: NetReader) {
     const chestIdx = r.u16();

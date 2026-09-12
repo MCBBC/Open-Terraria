@@ -15,6 +15,11 @@ export interface WldField {
   get: (save: SaveData) => WldVal; // 无快照时的取值(建模映射/缺省)
 }
 
+/** ★SW-RB14c：.NET DateTime 纪元偏移（0001-01-01→1970-01-01 = 621355968000000000
+ *  ticks，100ns/tick）+ Kind 位（DateTime.cs KindUtc=0x4000000000000000/KindLocal=
+ *  0x8000000000000000；ToBinary/FromBinary WF:1261/:2020） */
+const NET_TICKS_EPOCH = 621355968000000000n;
+
 /** flags/短键取值帮手 */
 const F = (save: SaveData): Record<string, boolean> => save.flags ?? {};
 const B = (fl: Record<string, boolean>, k: string) => !!fl[k];
@@ -36,7 +41,10 @@ export const HEADER_PRE: WldField[] = [
   //  "NoValidSeed")——曾写 0n
   { name: 'worldGenVersion', type: 'i64', ver: 179, get: () => 1395864371201n },
   { name: 'guid', type: 'bytes16', ver: 181, get: () => 0 } as unknown as WldField,
-  { name: 'worldId', type: 'i32', ver: 0, get: (s) => ((H(s).created ?? 0) ^ 0x55555555) & 0x7fffffff },
+  // ★SW-FX43（2026-09-12）：worldId 真值链——header.worldId（自建=WorldGen.cs:11364
+  //  genRand.Next(int.MaxValue) 掷值/导入=wld 原值）优先;旧档缺省回退 created-XOR
+  //  派生（既有近似）。footer 必须同值（LoadFooter :3003-3015,BadFooter=整档拒载）
+  { name: 'worldId', type: 'i32', ver: 0, get: (s) => H(s).worldId ?? (((H(s).created ?? 0) ^ 0x55555555) & 0x7fffffff) },
   { name: 'leftWorld', type: 'i32', ver: 0, get: () => 0 },
   { name: 'rightWorld', type: 'i32', ver: 0, get: (s) => H(s).width * 16 },
   { name: 'topWorld', type: 'i32', ver: 0, get: () => 0 },
@@ -57,8 +65,13 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'noTrapsWorld', type: 'bool', ver: 266, get: (s) => B(SF(s), 'noTraps') },
   { name: 'zenithWorld', type: 'bool', ver: 267, get: (s) => B(SF(s), 'everything') },
   { name: 'skyblockWorld', type: 'bool', ver: 302, get: (s) => B(SF(s), 'skyblock') },
-  { name: 'CreationTime', type: 'i64', ver: 141, get: (s) => BigInt(H(s).created ?? 0) * 10000n },
-  { name: 'lastSavedTime(utc)', type: 'i64', ver: 284, get: () => BigInt(Date.now()) * 10000n },
+  // ★SW-RB14c 纪元勘误:.NET DateTime ticks 纪元=0001-01-01（非 Unix 1970），且
+  //  ToBinary() 顶 2 位编 Kind（0x4000..=Utc）——WF:601 `CreationTime=DateTime.Now`
+  //  /WF:1261 `DateTime.UtcNow.ToBinary()`。曾直写 Unix-ms×1e4（≈1.79e16）→ 原版
+  //  FromBinary 解出公元 57 年（世界列表创建日期/Age 全错）。快照域(导入档)不受
+  //  此影响（原值回写）；本行只服务自建世界回退。
+  { name: 'CreationTime', type: 'i64', ver: 141, get: (s) => NET_TICKS_EPOCH + BigInt(Math.floor(H(s).created ?? 0)) * 10000n + 0x4000000000000000n },
+  { name: 'lastSavedTime(utc)', type: 'i64', ver: 284, get: () => NET_TICKS_EPOCH + BigInt(Date.now()) * 10000n + 0x4000000000000000n },
   { name: 'moonType', type: 'u8', ver: 0, get: (s) => H(s).moonType ?? 0 },
   { name: 'treeX[0]', type: 'i32', ver: 0, get: (s) => treeX(s)[0] },
   { name: 'treeX[1]', type: 'i32', ver: 0, get: (s) => treeX(s)[1] },
@@ -67,9 +80,12 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'treeStyle[1]', type: 'i32', ver: 0, get: (s) => treeStyle(s)[1] },
   { name: 'treeStyle[2]', type: 'i32', ver: 0, get: (s) => treeStyle(s)[2] },
   { name: 'treeStyle[3]', type: 'i32', ver: 0, get: (s) => treeStyle(s)[3] },
-  { name: 'caveBackX[0]', type: 'i32', ver: 0, get: (s) => treeX(s)[0] },
-  { name: 'caveBackX[1]', type: 'i32', ver: 0, get: (s) => treeX(s)[1] },
-  { name: 'caveBackX[2]', type: 'i32', ver: 0, get: (s) => treeX(s)[2] },
+  // ★SW-FX43（2026-09-12）：caveBackX 真值链——header.caveBackX（导入捕获/自建
+  //  worldgen 掷值 RandomizeCaveBackgrounds）优先;旧档缺省回退 treeX 派生（既有
+  //  近似——原版两者无派生关系,WorldGen.cs:8141-8210 独立掷,FX33 登记债清偿）
+  { name: 'caveBackX[0]', type: 'i32', ver: 0, get: (s) => H(s).caveBackX?.[0] ?? treeX(s)[0] },
+  { name: 'caveBackX[1]', type: 'i32', ver: 0, get: (s) => H(s).caveBackX?.[1] ?? treeX(s)[1] },
+  { name: 'caveBackX[2]', type: 'i32', ver: 0, get: (s) => H(s).caveBackX?.[2] ?? treeX(s)[2] },
   { name: 'caveBackStyle[0]', type: 'i32', ver: 0, get: (s) => BG(s).cave?.[0] ?? 0 },
   { name: 'caveBackStyle[1]', type: 'i32', ver: 0, get: (s) => BG(s).cave?.[1] ?? 0 },
   { name: 'caveBackStyle[2]', type: 'i32', ver: 0, get: (s) => BG(s).cave?.[2] ?? 0 },
@@ -130,7 +146,10 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'SavedOreTiers.Adamantite', type: 'i32', ver: 0, get: (s) => s.savedOreTiers?.adamantite ?? -1 },
   { name: 'treeBG1', type: 'u8', ver: 0, get: (s) => BG(s).forest?.[0] ?? 0 },
   { name: 'corruptBG', type: 'u8', ver: 0, get: (s) => BG(s).corrupt ?? 0 },
-  { name: 'jungleBG', type: 'u8', ver: 0, get: () => 0 },   // BgStylesSave 无键,登记偏差
+  // ★SW-FX43（2026-09-12）：BgStylesSave.jungleBG 键补齐（WF:1327 setBG(2) 地表丛林
+  //  0-6;与 BG.jungle=WF:1274 jungleBackStyle 地下域不同族）——原「无键写 0」登记
+  //  偏差清偿;自建世界缺省仍落 0（同 corrupt/snow 等自建缺省语义）
+  { name: 'jungleBG', type: 'u8', ver: 0, get: (s) => BG(s).jungleBG ?? 0 },
   { name: 'snowBG', type: 'u8', ver: 0, get: (s) => BG(s).snow ?? 0 },
   { name: 'hallowsBG', type: 'u8', ver: 0, get: (s) => BG(s).hallow ?? 0 },
   { name: 'crimsonBG', type: 'u8', ver: 0, get: (s) => BG(s).crimson ?? 0 },

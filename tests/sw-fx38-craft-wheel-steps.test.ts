@@ -57,11 +57,13 @@ describe('SW-FX38 滚轮档数 vanillaWheelNotches（Main.cs:17593）', () => {
     expect(vanillaWheelNotches(119.999)).toBe(0);
     expect(vanillaWheelNotches(-120.5)).toBe(1);
   });
-  it('行模式归一(Firefox deltaMode=1 每事件 ±1 行 = ±1 档,不归一=列表死轮)', () => {
-    expect(vanillaWheelNotches(-1, 1)).toBe(1);
-    expect(vanillaWheelNotches(1, 1)).toBe(-1);
-    expect(vanillaWheelNotches(3, 1)).toBe(-3);
-    expect(vanillaWheelNotches(-2, 2)).toBe(2);     // 页模式 1 页=1 档
+  it('行模式归一(★SW-RB14d F1 重锚:1 行≈40px、Firefox 每 notch≈3 行——旧「±1 行=±1 档」3× 过计;' +
+    '亚 notch 吞零由滚轮累计器余数留置补偿,不归一=列表死轮的意图不变)', () => {
+    expect(vanillaWheelNotches(-3, 1)).toBe(1);     // Firefox 鼠标一格=±3 行
+    expect(vanillaWheelNotches(3, 1)).toBe(-1);
+    expect(vanillaWheelNotches(-1, 1)).toBe(0);     // 亚 notch 吞（累计器三拍汇 1 档）
+    expect(vanillaWheelNotches(-6, 1)).toBe(2);
+    expect(vanillaWheelNotches(-2, 2)).toBe(2);     // 页模式近似 120px/页
   });
 });
 
@@ -201,12 +203,14 @@ describe('SW-FX38 接线锚定', () => {
     expect(gridSrc).toMatch(/CraftingUI\.cs:381-382/);
   });
   it('UI.ts:窗口级网格支吃共享档数器(单源,无本地 round/abs 派生)', () => {
-    expect(uiSrc).toMatch(/const notches = vanillaWheelNotches\(e\.deltaY\);\s*\n\s*if \(this\.vinvPipsUseGrid\)/);
+    expect(uiSrc).toMatch(/const notches = vanillaWheelNotches\(e\.deltaY, e\.deltaMode\);[^\n]*\n\s*if \(this\.vinvPipsUseGrid\)/);   // ★SW-RB14d：补传 deltaMode
     expect(uiSrc).not.toMatch(/Math\.round\(e\.deltaY \/ 120\)/);
     expect(uiSrc).not.toMatch(/Math\.abs\(Math\.round\(e\.deltaY \/ 120\)\)/);
   });
   it('UI.ts:列表滚轮=vanillaWheelNotches+单次整批钳制+子档早退(CraftingUI.cs:574-582)', () => {
-    expect(uiSrc).toMatch(/const num = vanillaWheelNotches\(e\.deltaY\);[^\n]*\n\s*if \(num === 0\) return;/);
+    expect(uiSrc).toMatch(/this\.vinvCraftWheelPendPx \+= wheelEventPx\(e\.deltaY, e\.deltaMode\);/);   // ★SW-RB14d F2：跨事件累计
+    expect(uiSrc).toMatch(/const num = vanillaWheelNotches\(this\.vinvCraftWheelPendPx\);[^\n]*\n\s*if \(num === 0\) return;/);   // 帧差分量化同构
+    expect(uiSrc).toMatch(/this\.vinvCraftWheelPendPx \+= num \* 120;/);   // 整档消费余数留置
     expect(uiSrc).toMatch(/Math\.min\(rows\.length - 1, Math\.max\(0, this\.vinvCraftFocusV \+ num\)\)/);
     expect(uiSrc).not.toMatch(/Math\.max\(1, steps\)/);   // 旧虚生档=回归哨兵
     expect(uiSrc).not.toMatch(/vinvCraftWheel\(e, steps\)/);
@@ -226,7 +230,10 @@ describe('SW-FX38 接线锚定', () => {
   });
   it('UI.ts:鱼眼几何/渐隐吃吸附值(CraftingUI.cs:177/:358-369 读 availableRecipeY)', () => {
     expect(uiSrc).toMatch(/const yOff = \(i - this\.vinvCraftFocusV\) \* 65 \+ this\.vinvCraftGlideY;/);
-    expect(uiSrc).toMatch(/this\.vinvCraftFocusGoto\(Math\.min\(this\.vinvCraftFocusV, Math\.max\(0, avail\.length - 1\)\)\)/);
+    // ★SW-RB14d F3 重锚：重建期=身份追焦+钳制+glideY 不动（Recipe.cs:478-494 + VisuallyRepositionRecipes :131-139）
+    expect(uiSrc).toMatch(/const idx = avail\.findIndex\(\(p2\) => p2\.r === oldRecipe\);/);
+    expect(uiSrc).toMatch(/this\.vinvCraftFocusV = nextFocus;/);
+    expect(uiSrc).not.toMatch(/vinvCraftFocusGoto\(Math\.min\(this\.vinvCraftFocusV/);   // 旧钳制播种式退役
   });
   it('滚轮面无音效(音走行界:CraftingUI.cs:572-583 全程无 PlaySound)', () => {
     const wheelBlock = uiSrc.slice(uiSrc.indexOf('private vinvCraftWheel(e: WheelEvent)'), uiSrc.indexOf('private vinvCraftFocusGoto'));

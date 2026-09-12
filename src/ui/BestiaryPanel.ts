@@ -745,7 +745,11 @@ export function bestiarySweepTargets(
   painted: WeakSet<object>,
 ): Array<{ canvas: object; npcId: number; unlocked: boolean }> {
   const byCredit = new Map<string, BestiaryRow>();
-  for (const w of rows) byCredit.set(w.entry.creditId, w);
+  for (const w of rows) {
+    // ★SW-RB14d：first-wins（≡旧 working.find 语义,测试注「与旧 working.find 等义」
+    //  才真成立;Map 直 set 是 last-wins,靠"重复 creditId 行 npcId/state 恒同源"才无差）
+    if (!byCredit.has(w.entry.creditId)) byCredit.set(w.entry.creditId, w);
+  }
   const out: Array<{ canvas: object; npcId: number; unlocked: boolean }> = [];
   for (const cell of cells) {
     if (!cell.canvas || painted.has(cell.canvas)) continue;
@@ -803,7 +807,15 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBi
     bstSheetPending.delete(file);
     if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
     // bitmap 就绪才入缓存+回调(Image 窗口期每格每帧发 LazyPixelRef,trace⑨)
+    // ★SW-RB14d（FX37-F7）：landOnce 终结一次——upgradeToBitmap 首试失败回调
+    //  onFail（land(im)）后仍会在 10/20/40s 重试成功再调 onReady（SpriteAtlas
+    //  tryBitmapUpgrade 重试链）,旧刀二次 land 会把已落笔回调再触发一遍:
+    //  paint() 无 clear（清底职责在 paintWithBg）,α<255 变体（黑史莱姆 120 等）
+    //  被二次合成为加深重影。终结=首个到位版本生效（Image 兜底不缺图语义不变）。
+    let landed = false;
     const land = (x: ImageBitmap | HTMLImageElement) => {
+      if (landed) return;
+      landed = true;
       if (bstSheetFailed.has(file)) bstSheetFailed.delete(file);   // 重试成功:撤销负缓存
       if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
       bstSheetCache.set(file, x);
@@ -1209,6 +1221,12 @@ export class BestiaryPanel {
   }
 
   private refreshNow() {
+    // ★SW-RB14d（FX37-F5）：网格重建=原版 FillBestiarySpaceWithEntries
+    //  （UIBestiaryTest.cs:340-347 `DeselectEntryButton()` 先行——筛选/排序/翻页
+    //  全部经此重填,OffsetLibrary :111-115 翻页同）⇒ 重建即清选中,详情栏回空白态
+    //  （renderInfo 的 !selected 分支=FillInfoForEntry(null) 同位）。旧刀保旧选中,
+    //  筛选后详情栏仍显示已不在工作集的条目 = 1:1 偏差（登记 FX37-F5,本刀清偿）。
+    this.selected = null;
     const rows = bestiaryRows(this.flow.getTracker());
     sortBestiaryRows(rows, this.sortKey);
     this.working = filterBestiaryRows(rows, this.filter);
@@ -1231,7 +1249,9 @@ export class BestiaryPanel {
    *  落一帧 16-33ms 的掉 vsync(probe 实测 pages/details 段各 1 次 >20ms 帧,与
    *  getImageData 账面逐段吻合)。改为 painted 登记面:只重试未画上的画布,零读回;
    *  context 丢失面由各画布 contextlost/contextrestored 监听自愈(两处画布均在
-   *  创建后、首画前同步挂监听,无"监听前丢失"窗口期)。 */
+   *  创建后、首画前同步挂监听,无"监听前丢失"窗口期;★SW-RB14d 备案:掉落表
+   *  itemIcon() 离屏小画布为第三类,不在 sweep 域也无监听=丢_context_后空白至
+   *  下次 renderInfo,预存面非本刀引入)。 */
   private sweepTimer: ReturnType<typeof setTimeout> | 0 = 0;
   /** 已实际落笔的画布登记(drawPortrait/drawLockedIcon 各落笔点登记;sweep 只补漏) */
   private painted = new WeakSet<HTMLCanvasElement>();
@@ -1283,7 +1303,10 @@ export class BestiaryPanel {
       // contextlost 韧性(2026-08-14,用户报"resize 后头像全消失"):canvas 2D
       // 内容在 context 丢失后不自动恢复,而本面板只在创建时画一次——preventDefault
       // 允许恢复,restored 时按原参数重画
-      canvas.addEventListener('contextlost', (e) => e.preventDefault());
+      // ★SW-RB14d（FX37-F2）：contextlost 同时从登记面除名——preventDefault 只承诺
+      //  "可恢复",restore 可能永不来（GPU 压力/上下文配额）;旧刀 painted 恒含 ⇒
+      //  sweep 永跳 = 相比旧 getImageData 判空面的自愈力倒退。
+      canvas.addEventListener('contextlost', (e) => { e.preventDefault(); this.painted.delete(canvas); });
       canvas.addEventListener('contextrestored', () => {
         this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
       });
@@ -1309,11 +1332,20 @@ export class BestiaryPanel {
    *  ★FX37(2026-09-11):曾走 refresh() 全量重建——每选一次=81 格画布+~400 节点+
    *  ~330 监听器整体重造(probe ΔNodes 4992/ΔListeners 3924 每 12 击),原版无此面 */
   private selectRow(r: BestiaryRow): void {
-    this.selected = r;
-    const credit = r.entry.creditId;
+    // ★SW-RB14d（FX37-F3）：行按 creditId 从 tracker 现取——闭包行 r 是上次
+    //  refreshNow 的快照,面板开着时击杀/解锁推进后点击,详情栏会显示旧 kills/
+    //  NotKnown 态（原版 FillInfoForEntry 的信息元素 Update 每帧重读 tracker）。
+    //  重建网格的刷新路径本就传新行,现取对它们等价。
+    const fresh = bestiaryRows(this.flow.getTracker()).find((w) => w.entry.creditId === r.entry.creditId) ?? r;
+    this.selected = fresh;
+    const credit = fresh.entry.creditId;
     for (const el of this.gridEl.querySelectorAll('.sw-bst-cell.sel')) el.classList.remove('sel');
+    // ★SW-RB14d（FX37-F4）：全部同 creditId 格标记（fillGrid :1279 重建路径即
+    //  全标记;旧 break 只亮首格=重复 creditId 行（Scarecrow1×10/Nymph×2）点击
+    //  第 2..n 格无反馈且余格丢 outline。原版无选中视觉（_selectedEntryButton
+    //  写后不读）,本仓自设面从内部一致性）
     for (const cell of this.gridEl.querySelectorAll('.sw-bst-cell')) {
-      if ((cell as HTMLElement).dataset.credit === credit) { cell.classList.add('sel'); break; }
+      if ((cell as HTMLElement).dataset.credit === credit) cell.classList.add('sel');
     }
     this.renderInfo();
     this.scheduleBlankSweep();
@@ -1395,7 +1427,10 @@ export class BestiaryPanel {
       } else if (composed) cx.drawImage(composed, dx, dy, w, h);   // base+染色离屏合成
       else cx.drawImage(img, 0, frameIdx * fh, iw, fh, dx, dy, w, h);
       cx.globalAlpha = 1;
-      this.painted.add(canvas);   // 落笔登记(FX37 sweep 只补"从未画上"的画布)
+      // ★SW-RB14d（FX37-F2）：丢_context_期（contextlost 已发、restore 未至）绘制
+      //  是静默 no-op,登记=把空白格标"已画"锁死 sweep;守卫后 sweep 持续重试,
+      //  contextrestored 重画成功（context 已活）再登记。isContextLost 老引擎缺省=未丢。
+      if (!(cx.isContextLost && cx.isContextLost())) this.painted.add(canvas);   // 落笔登记(FX37 sweep 只补"从未画上"的画布)
     };
     const atlas = this.flow.atlas ?? null;
     // 装饰叠层（仅详情档；NPCPortraitInfoElement.cs:73-84 偏好命中 flag2 短路不收集）
@@ -1434,7 +1469,10 @@ export class BestiaryPanel {
       // 叠层：与底图同一目标盒（原版同容器 ScaleToFit 拉伸——对位关系 1:1），
       // 色为预着色成品（bstTintedOverlay，声明色 ?? Lerp 回退）
       for (const o of ovs) cx.drawImage(o, bx, by, bw, bh);
-      if (bgImg || ovs.length) this.painted.add(canvas);   // 实际铺了底图/叠层才登记
+      // ★SW-RB14d（FX37-F1）：此处【不再】登记 painted——旧刀 bg/叠层落地即登记,
+      //  若随后 NPC 表 cb(null)（404/负缓存 TTL 终结）成"半画格":底图在、NPC 缺,
+      //  painted 恒含 ⇒ sweep 永跳,只能翻页/筛选重建自救。登记权移交终端落笔点
+      //  paint()/drawLockedIcon;全失败格保持未登记 = sweep 重试可愈（负缓存 TTL 10s）。
     };
     // 贴图源：CustomTexturePath 手绘图（Images/UI/Bestiary/NPCs/* 扁平化 basename）
     // 替换母体表（UnlockableNPCEntryIcon :74-81/:199——原样画、无帧无染色）
@@ -1510,7 +1548,7 @@ export class BestiaryPanel {
       cx.globalAlpha = 0.15;
       cx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
       cx.globalAlpha = 1;
-      this.painted.add(canvas);   // 落笔登记(FX37 sweep 只补"从未画上"的画布)
+      if (!(cx.isContextLost && cx.isContextLost())) this.painted.add(canvas);   // 落笔登记（★SW-RB14d F2 丢_context_守卫,同 paint 注）
     });
   }
 
@@ -1592,7 +1630,8 @@ export class BestiaryPanel {
     const canvas = document.createElement('canvas');
     canvas.width = 96; canvas.height = 96;
     canvas.style.cssText = 'width:96px;height:96px;image-rendering:pixelated;display:block;margin:0 auto 6px;';
-    canvas.addEventListener('contextlost', (e) => e.preventDefault());
+    // ★SW-RB14d（FX37-F2）：除名登记面（同 grid 画布注——restore 永不来时 sweep 仍可重试）
+    canvas.addEventListener('contextlost', (e) => { e.preventDefault(); this.painted.delete(canvas); });
     canvas.addEventListener('contextrestored', () => {
       this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
     });

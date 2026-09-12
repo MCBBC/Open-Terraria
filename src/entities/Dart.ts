@@ -1,7 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, applyBannerDamageDealt, statusPlayer } from './projTargets';
+import { hitPlayer, playerCanHitEnemy, projOverlap, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, statusPlayer } from './projTargets';
 import { InfernoHostileBlast } from './InfernoHostileBlast';
 import { shadowbeamLineFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -740,6 +740,14 @@ export class TrapShot extends Entity {
             Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
         } else {
           e.hurt(applyBannerDamageDealt(game, e, this.damage), Math.sign(this.vx) * kb, 0, game, 0, false, 0, true);   // 音/飘值=单点
+        }
+        // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——
+        // StrikeNPC 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :711
+        // 事前支对 676 恒不触发。陷阱弹 penetrate=-1 无递减面,补偿空置=原版同拍
+        // （-1+1=0 经 ReflectProjectile penetrate=1 归一后弹回存续））
+        if ((e as { vanillaId?: number | null }).vanillaId === 676) {
+          tryReflectShimmerSlimeHit(this as unknown as Parameters<typeof tryReflectShimmerSlimeHit>[0],
+            trapProjId ?? 0, e as unknown as { vanillaId?: number | null; immortal?: boolean }, game, this.life);
         }
         // ★GC1 写方桥（Projectile.Damage :14031-14183 命中尾梯,StrikeNPC 后原位）：
         // 陷阱弹 id 的全局档按纯表取（现役表内无显型定档/三旗——penetrate 走数据面：

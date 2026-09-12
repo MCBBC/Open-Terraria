@@ -2,11 +2,11 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import {
-  GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX,
+  GRAVITY, MAX_FALL_SPEED, PLAYER_MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX,
   PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS,
   PLAYER_IFRAME_TICKS, TILE, RUN_ACCELERATION, RUN_SLOWDOWN,
 } from '../core/constants';
-import { moveAndCollide } from '../physics/TileCollision';
+import { moveAndCollide, isClearSpotTest, findCollisionTileVertical } from '../physics/TileCollision';
 import { dustWaterFor } from '../render/WeatherRenderer';   // Dust.dustWater()（Dust.cs:405-421,waterStyle 映射）
 import { wetCollision, getWaterLine } from './npcLiquid';
 import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
@@ -48,7 +48,7 @@ import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 // ★SW-BJ59 滚轴鞋轨骑：TrackCollision/TrackRotation 单源复用（Minecart 实体同函数）
 import { trackCollision, trackRotation, magnetPosition, FLAG_ON_TRACK, FLAG_BOUNCY_BUMPER, FLAG_USED_RAMP, FLAG_HIT_SWITCH, FLAG_BOOST_LEFT, FLAG_BOOST_RIGHT } from '../world/MinecartTrack';
 import { getAutoDoorVelocityContribution } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 自动门速度贡献
-import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
+import { hurtTiles, canTileHurt, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, TILE_SOLID_TOP_FAMILY, type HurtTile } from '../stats/TouchDamage';
 import { damageVarRoll } from '../stats/DamageVar';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
 import { ParticleOrchestraType } from '../net/syncModules';
@@ -173,6 +173,7 @@ import { flameParticles } from '../fx/FlameParticles';
 // L5 长尾批：拍击石充能三连 Spawn_*Recharge 收编本体（fx/orchestraFx 同池）
 import { snappingStoneRechargeFx } from '../fx/orchestraFx';
 import { nightsEdgeFx } from '../fx/orchestraFx';   // δB B4：TimerCrit 命中面 NightsEdge 编排（P.cs:28576-28581）
+import { shimmerBlockFx } from '../fx/orchestraFx';   // ★SW-FX47：MakeFloorDust 微光块 659/667 编排粒子（Player.cs:24002）
 import { playerAccessoryVidEquipped } from '../stats/builderAcc';   // ★SW-FX19:重力地球仪 1131 装备判定（gravControl2）
 import { deadCellsBeheadedHeadFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_DeadCellsHeadEffect 本体（:1920-1953）
 
@@ -202,6 +203,12 @@ export const TILE_WAND_VIDS = new Set<number>([832, 932, 933, 1129, 3360, 3361])
  *  （Player.cs:25538,本仓 2026-09-04 终审 B⑤ 补）消费面；本仓 sheet 域直比
  *  （消费者先经 TILE_DEFS[].vanilla?.sheet 归一,同 ICE_SLIP_IDS 教训） */
 const CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
+
+/** ★SW-FX47（b）：Main.tileBouncy（Main.cs:1484 表 + :9626-9629 初始化）——
+ *  371 粉色史莱姆块 / 446-448 派对气球三色（四件全 tileSolid：Main.cs:9623/
+ *  :10114-10116）。TryBouncingBlocks（Player.cs:35102）触碰扫描消费；本仓
+ *  sheet 域直比（消费者先经 TILE_DEFS[].vanilla?.sheet 归一,同 CLOUD_SHEETS 口径） */
+const TILE_BOUNCY_SHEETS = new Set([371, 446, 447, 448]);
 
 // ---- 绳锚几何系统常量（绳锚批 2026-08-19：pulley 悬挂 + 线起点链）----
 /** ItemID.Sets.Yoyo（ItemID.cs:1166）——悠悠球物品 vid 集
@@ -1041,9 +1048,24 @@ export class Player extends Entity {
   /** ★SW-FX34：倒挂 StepUp 每 tick 门（Player.cs:28273-28275，fixedUpdate 灌入；
    *  moveAndCollide 仅 gravDir=-1 时消费—— gravDir=1 半边照旧走 vy>=0 通用门） */
   stepUpInvGate = false;
+  /** ★SW-RB14d：正挂 StepUp 速度门两腿（Player.cs:28276 `(carpetFrame != -1 ||
+   *  velocity.Y >= gravity)`，fixedUpdate 灌入——①毯展开腿（仓承载 carpetTime>0∧
+   *  controlJump）;②阈=gravity 字段（gField）。moveAndCollide 正挂臂消费） */
+  stepUpCarpet = false;
+  stepUpVeloFloor: number | undefined = undefined;
   /** ★SW-FX34：本 tick Y 轴向下被拦（原版 Collision.down）——moveAxis 置位、
    *  moveAndCollide 头复位；倒挂顶头臂（:28467-28471 vy=-0.01+jump=0）消费 */
   hitDown = false;
+  /** ★SW-FX40（h2）：原版 Player.gravity 字段拍末值（:24559 复位 0.4 → :24884
+   *  ×num6 深度缩水 → 慢Fall 链 :27228/:27232 签名改写）。每 tick 重力链灌入,
+   *  Body.gField 通道喂 StepDown/StepUp 倒挂/WalkDown 三门（TileCollision 消费）。 */
+  gField: number = GRAVITY;
+  /** ★SW-FX40（e）：原版 jumpSpeed 字段承载位（:24561 复位 5.01 + 跳参链/湿档覆写
+   *  :24624/:19301-19366）——坐骑 43 弹跳臂（:19912）消费。跳参链在移动相后=一拍滞后。 */
+  jumpSpeedField: number = PLAYER_JUMP_SPEED;
+  /** ★SW-FX40（g）：本系统触碰格清单（UpdateTouchingTiles :57734 写、GetHurtTile
+   *  兜底 :29189 读）——上拍值（原版同拍滞后时序,见方法注） */
+  touchedTiles: Array<{ x: number; y: number }> = [];
   // （gravDir 字段本类既有声明 :8047 `gravDir: 1 | -1 = 1`——SW-FX34 经 Body.gravDir
   //   可选位供 moveAndCollide/walkDownSlopePre 消费,缺省 1=gd=1 半边恒等）
   /** 高尔夫累计分（Player.cs:1792 AccumulateGolfingScore——Golfer 商店门槛/月相画门） */
@@ -1350,11 +1372,14 @@ export class Player extends Entity {
     super();
     this.x = x; this.y = y;
     this.inv = inv;
-    // ★SW-FX36：残影基线=出生位（原版 spawn 链 ResetAdvancedShadows+3×UpdateSocialShadow
-    //  :37929-37932 冲洗后 shadowPos[0..2] 全等当前位——否则开局 4 拍 shadowPos=(0,0)
-    //  使网格恒暗,原版即亮）
-    this.spX = [x, x, x];
-    this.spY = [y, y, y];
+    // ★SW-FX36：残影基线=原版 Spawn 冲洗后态（Player.cs:37927-37932
+    //  ResetAdvancedShadows+3×UpdateSocialShadow——count 0→1→2→0 轮转后
+    //  shadowPos[0]=出生位、[1]/[2] 仍为零向量、shadowCount=0）。
+    //  ★SW-RB14d 勘误：旧刀 [x,x,x]（三槽全出生位）系误判"冲洗后全等当前位"——
+    //  轮转只写 [0],旧开局 4 拍 shadowLagDist()=0（网格满幅 0.7）,原版 |pos−0|
+    //  巨大 → 网格钳 0.2 下档（开局暗 4 拍=原版本相）。本基线即冲洗后态逐位复刻。
+    this.spX = [x, 0, 0];
+    this.spY = [y, 0, 0];
   }
 
   // ---- 配饰效果（重算式聚合，幂等）----
@@ -4068,10 +4093,31 @@ export class Player extends Entity {
     const rideBox = this.ridingCart && this.cart
       ? { x: this.cart.x, y: this.cart.y, w: this.cart.w, h: this.cart.h }
       : null;
-    const ht = hurtTiles(world.store, rideBox?.x ?? this.x, rideBox?.y ?? this.y,
+    const fireWalkFx = this.equipStats.fireWalk || this.buffs.obsidianSkin;   // 黑曜石皮含 fireWalk（:9576）
+    // ★SW-RB14a（F2）：微光化豁免整段接触伤（Player.cs:27818-27824 `if (!shimmering)
+    //  { GetHurtTile… ApplyTouchDamage }`——GetHurtTile 是 HurtTiles 唯一玩家消费位,
+    //  微光穿墙态原版尖刺/狱石/仙人掌全哑）。旧无门=微光态照吃接触伤,FX40-g 兜底
+    //  清单扫描把暴露面又扩到上拍触碰格。
+    let ht = this.shimmering ? null : hurtTiles(world.store, rideBox?.x ?? this.x, rideBox?.y ?? this.y,
       rideBox?.w ?? this.w, rideBox?.h ?? this.h,
-      this.equipStats.fireWalk || this.buffs.obsidianSkin,   // 黑曜石皮含 fireWalk（:9576）
+      fireWalkFx,
       world.seedFlags); // ★IIIII224 仙人掌 theConstant/蜂蜜 ftw 触伤门（Collision.cs:3225）
+    // ★SW-FX40（g·gd 无关新增）：TouchedTiles 兜底扫描（GetHurtTile :29182-29203）——
+    //  HurtTiles 盒扫落空（type<0）时逐格扫上拍触碰清单：active ∧ nactive ∧
+    //  非窒息族（:29192 埋沙另有窒息通道）∧ CanTileHurt。原版无盒重叠复检
+    //  （清单来自本拍碰撞/探针,已含接触语义）。
+    if (!ht && !this.shimmering) {
+      for (const t of this.touchedTiles) {
+        if (!world.store.inBounds(t.x, t.y)) continue;
+        if (!world.store.hasTile(t.x, t.y)) continue;          // active()∧nactive()
+        const tType = world.store.type[world.store.idx(t.x, t.y)];
+        if (SUFFOCATE.has(tType)) continue;                    // :29192 !Suffocate
+        if (canTileHurt(tType, fireWalkFx, world.seedFlags)) {
+          ht = { type: tType, x: t.x, y: t.y };
+          break;
+        }
+      }
+    }
     if (ht) this.applyTouchDamage(game, ht);
 
     // ---- CheckDrowning 1:1（Player.cs:22914-23002，本地玩家门 = Main.myPlayer==whoAmI）----
@@ -4217,27 +4263,21 @@ export class Player extends Entity {
     // （TileID.Sets.Conversion Sand{53,112,116,234}/HardenedSand{397-399,402}/
     // Sandstone{396,400,401,403}，TileID.cs:30-34）。原版只在 vy==0 时刷新、离地不清零
     // （ResetFloorFlags 仅重生/传送调用）——空中保留加成，同语义
-    if (this.vy === 0 && !this.ridingCart) {
-      const st0 = world.store;
-      // ★SW-FX34：倒挂地板行 = 身体顶行（:23904-23908 `num2=(int)(position.Y+height)/16;
-      //  if (gravDir==-1f) num2=(int)(position.Y-0.1f)/16;`）——倒挂贴顶时「脚下一行」
-      //  在身体上方;沙族判定/坡面门/消费面同读此行。gd=1 数值恒等。
-      const fx0 = Math.floor(this.cx / TILE);
-      const fy0 = this.gravDir === -1
-        ? Math.floor((this.y - 0.1) / TILE)
-        : Math.floor((this.y + this.h) / TILE);
-      let ft = -1;
-      for (const d of [0, -1, 1]) {
-        const xx = fx0 + d;
-        if (!st0.inBounds(xx, fy0)) continue;
-        const ii = st0.idx(xx, fy0);
-        if (st0.flags[ii] && st0.isSolid(xx, fy0)) { ft = st0.type[ii]; break; }
-      }
-      // 坡面门（FloorCheck :23466-23471：脚下三格任一有 slope → num3=-1，slippy 等地板旗全灭）
-      if (ft >= 0 && (st0.slope[st0.idx(fx0 - 1, fy0)] !== 0 || st0.slope[st0.idx(fx0, fy0)] !== 0
-        || st0.slope[st0.idx(fx0 + 1, fy0)] !== 0)) ft = -1;
+    if (this.vy === 0 && !this.grappling[0]) {
+      // ★SW-FX40（h3）：门 !ridingCart → grappling[0]==-1（:28479 `if (velocity.Y == 0f
+      //  && grappling[0] == -1) FloorVisuals(falling)`——原版坐骑矿车照跑 FloorVisuals
+      //  （旗标面不豁免;只有 MakeFloorDust 内部 !mount.Cart 豁免尘 :23931),挂钩悬停
+      //  (vy==0)才整段跳过。旧 !ridingCart = 矿车面全哑+挂钩面误跑,双面各偏一次。
+      const floorR = this.readFloorTile(world);
+      const ft = floorR.id;
       this.floorTileT = ft;
       this.runningOnSand = ft >= 0 && SAND_FLOOR_IDS.has(ft);
+      // ★SW-RB14a（F3）：粪块地板恶臭 buff（FloorVisuals Player.cs:23921-23923
+      //  `(num3==666||num3==712) && whoAmI==myPlayer → AddBuff(120,180)`——180t=3s,
+      //  原序在坡面门/!wet 门之前=坡面粪块与湿身照挂;tile666/712=粪块族,dust 322
+      //  同源）。旧缺=踩粪不臭。
+      const preSheet = floorR.preSlopeId >= 0 ? TILE_DEFS[floorR.preSlopeId]?.vanilla?.sheet ?? -1 : -1;
+      if (preSheet === 666 || preSheet === 712) this.buffs.apply(BuffType.Stinky, 3);
     }
     // 沙丘行者靴 1:1（Player.cs:26225-26231）：runningOnSand && desertBoots →
     // maxRunSpeed/accRunSpeed/runAcceleration/runSlowdown 全部 ×1.75（原版是乘区，
@@ -4440,6 +4480,41 @@ export class Player extends Entity {
     const mountAllowDir = !this.ridingMount || this.mount.allowDirectionChange;
     // pulley 悬挂期 HorizontalMovement 整段不跑（Player.cs:26366 在 pulley else
     // 分支内）——只保留朝向翻转（:25842-25851，pulleyDir 1 居中档按反方向键翻面）
+    // ★SW-FX47（e）：jumpSpeed 字段前置快照（原版序 = UpdateJumpHeight :19714 经
+    //  :26211 调用位【先于】HorizontalMovement :26889——弹跳臂 :19912 消费当拍
+    //  值）。本仓跳参链原在物理相（:4853 写）=弹跳臂读上拍值,FX40-e 一拍滞后备案
+    //  项就此清偿：移动相头按同一 base 公式（jumpBaseSnapshot 单源）重写字段,
+    //  vx 用移动【前】值（原版 :26211 在 HorizontalMovement 前读 velocity.X 同序）。
+    //  honey/dazed 两尾削弱（UpdateJumpHeight :19759-19768 尾段,坐骑赋值【后】）
+    //  照原文随快照;湿档覆写对弹跳臂不可达（坐骑 43 非叠加档,mount.JumpSpeed
+    //  赋值覆盖湿值 :19755-19756）故不进快照。
+    {
+      const jb0 = this.jumpBaseSnapshot(this.vx);
+      let jsPre = jb0.spd;
+      if (this.floorTileT === HONEY_FLOOR_ID) jsPre /= 5;      // :19759-19763 sticky（jumpSpeed/=5 :19762）
+      if (this.buffs.has(BuffType.Dazed)) jsPre /= 2;          // :19764-19768 dazed（jumpSpeed/=2 :19767）
+      this.jumpSpeedField = jsPre;
+    }
+    // ★SW-FX40（e·gd=1 新增行为 + gd=-1 倒挂 quirk）：坐骑 43 弹跳座（PogoStick）
+    //  自动弹跳臂（HorizontalMovement 头 :19909-19921）——横向输入∧贴地(vy==0)∧
+    //  未持跳 → 播 Item168 + vy=-(max(jumpSpeed·gravDir·0.5, 2)+0.01) + jump=jumpHeight
+    //  + fullRotation=0 + HorizontalMovement 余段整段 return。★倒挂 quirk：gd=-1 时
+    //  num3=jumpSpeed·(-1)·0.5<2 → 钳 2 → vy=-2.01（向上顶进天花板侧而非向下弹,
+    //  原文照单全收）。jumpSpeed=玩家字段（:19912）——★SW-FX47（e）起读当拍前置
+    //  快照（上方）,坐骑变档拍不再滞后一拍。
+    //  命中拍跳过 dashDelay/ix 朝向两分支（:19921 return 语义）。
+    let pogoFired = false;
+    if (!this.pulley && this.inputX !== 0 && this.ridingMount && this.mount.active
+      && this.mount.type === 43 && this.vy === 0 && !this.inputJump) {
+      game.playSfxFile?.('Item_168', 1, this.cx, this.cy);            // :19911 SoundID.Item168
+      let num3 = this.jumpSpeedField * this.gravDir * 0.5;            // :19912
+      if (num3 < 2) num3 = 2;                                         // :19913-19916 clamp<2（倒挂 quirk 源）
+      num3 += 0.01;                                                   // :19917
+      this.vy = -num3;                                                // :19918
+      this.jumpHold = PLAYER_JUMP_TICKS;                              // :19919 jump = jumpHeight(15)
+      // fullRotation = 0（:19920）——本仓 fullRotation 未建模（坐骑旋转域）,略
+      pogoFired = true;                                               // :19921 return
+    }
     if (this.pulley) {
       if (this.pulleyDir === 1) {
         if (this.facing === 1 && this.inputX < 0) this.facing = -1;
@@ -4448,7 +4523,8 @@ export class Player extends Entity {
     } else
     // 冲刺滑行期（dashDelay<0）常规加速/摩擦/限速整体跳过——Run 各分支 dashDelay>=0 门
     // （Player.cs:19559/:19575/:19675/:19705），速度由 DashMovement 阻尼段独占
-    if (this.dashDelay >= 0) {
+    // ★SW-FX40（e）：!pogoFired——弹跳座命中拍 HorizontalMovement 余段 return（:19921）
+    if (!pogoFired && this.dashDelay >= 0) {
       // ---- 原版两段加速模型（Player.cs:19559-19800 HorizontalMovement Run 段）----
       // maxRunSpeed=3×moveSpeed（常规上限）;accRunSpeed=6（靴族 6/6.75,冲刺爬坡上限）
       // 全速段（:19559:|vx|<maxRun）runAcceleration=0.08 全力;慢爬坡段（:19675:
@@ -4504,8 +4580,14 @@ export class Player extends Entity {
         wingAccMul = hoverDownMove ? ws.hoverAccelMult : ws.accelMult;   // :28852/:28856
       }
       let runSlow = RUN_SLOWDOWN * this.equipStats.runSlowMul;   // 暗影套 ×1.75(:26195-26201)
-      // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）
-      if (duneBoost && !mnt) { maxRun *= 1.75; accRun *= 1.75; }
+      // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）。
+      // ★SW-FX44 定谳（a-batch1 沙丘 5.25 红根因）：maxRun 的 ×1.75 已由 speedMult
+      // 承载（:4296 duneBoost 因子→:4520 maxRun=3×speedMult）——此处再乘=双 ×1.75
+      //（maxRun=9.19,探针实测全速段爬到 9.28 才落 ×0.2 档,原版 :20033 全速段恰止于
+      // maxRunSpeed=5.25）。本行只补 accRun 的 ×1.75（accRun=equipStats 值,无 speedMult
+      // 路由）——原版 :26743-26744 maxRunSpeed/accRunSpeed 各恰一次。maxRun 经 speedMult
+      // 的消费面（:5543 滑行步行支 mRun=滑行中落步行分支=乘区后值;:5592 num15）同取单次。
+      if (duneBoost && !mnt) { accRun *= 1.75; }
       // D3（1457 :26206 runAcceleration *= moveSpeed）：步行支加速度也吃 moveSpeed
       // 乘区——构成 = moveSpeedMult×装备 moveMult×strongestSlow（含盾举,上方合成）。
       // ★勿整乘 speedMult：inHoney 0.5/星璇潜行 0.3 是场景因子,原版不走 moveSpeed 链
@@ -4687,7 +4769,7 @@ export class Player extends Entity {
           else if (push > 0 && this.vx < push) { this.vx += push; if (this.vx > push) this.vx = push; }
         }
       }
-    } else if (ix !== 0) {
+    } else if (!pogoFired && ix !== 0) {
       if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）
     }
 
@@ -4742,7 +4824,7 @@ export class Player extends Entity {
       // Frozen∪Shimmering 段执行——此处只做物理）+ fallStart 重置（免摔伤）；
       // 物理 :24117-24119 gravity/maxFall ×0.9——速度只用于积分，位移走下方
       // :27868 的 velocity×0.375 穿墙下坠（绕过 tile collision）
-      this.vy = Math.min(this.vy + GRAVITY * 0.9, MAX_FALL_SPEED * 0.9);
+      this.vy = Math.min(this.vy + GRAVITY * 0.9, PLAYER_MAX_FALL_SPEED * 0.9);
       this.fallStartY = null;
     } else if (this.buffs.has(BuffType.Webbed)) {
       // 结网(149)（Player.cs:11459-11476）：本帧 velocity 清零（下落中留 1e-6 缓降）、
@@ -4761,28 +4843,14 @@ export class Player extends Entity {
     // ---- 跳跃参数链（每帧先于物理求值：UpdateJumpHeight :19301-19341 + 坐骑档
     //      Mount.JumpHeight/JumpSpeed :19307-19308——原版 jumpHeight/jumpSpeed 是
     //      玩家字段，液体链 :24130-24155 在湿态覆写；sustain 段消费当帧生效值）----
+    //      ★SW-FX47（e）：base 段抽为 jumpBaseSnapshot() 单源——移动相头弹跳臂
+    //      前置快照（原版 :26211 UpdateJumpHeight 调用位先于 :26889
+    //      HorizontalMovement）与本链共用一份 base 公式,防两处漂移。
     {
-      const gd = this.gravDir;
+      const gd = this.gravDir;      // 倒挂物理臂/湿档臂同块续用（下方既有消费）
       const mnt2 = this.ridingMount ? this.mount : null;
       const eqJ = this.equipStats;
-      let baseJumpSpd = PLAYER_JUMP_SPEED;
-      let baseJumpTicks = PLAYER_JUMP_TICKS;
-      if (eqJ.jumpBoost) {
-        baseJumpTicks = Math.max(baseJumpTicks, 20);
-        baseJumpSpd = Math.max(baseJumpSpd, 6.51);
-      }
-      if (this.buffs.has(BuffType.Werewolf)) baseJumpTicks += 2;   // :19334 jumpHeight += 2（速度 +0.2 已在 jumpSpd）
-      if (this.stoolInUse) baseJumpTicks += 5;   // :19341-19344 折叠凳 +5（非坐骑支——凳/坐骑互斥）
-      baseJumpSpd += eqJ.jumpSpd;
-      // ★MovementStatsAreAdditive 支（Player.cs:19744-19755：滚轴鞋 57-60 跳跃参数
-      //  += mount.JumpHeight/JumpSpeed 叠加——其余坐骑保持赋值覆盖）
-      const jumpAdditive = mnt2?.movementStatsAdditive === true;
-      const mJumpSpd0 = mnt2
-        ? (jumpAdditive ? baseJumpSpd + mnt2.jumpSpeed(this.vx) : mnt2.jumpSpeed(this.vx))
-        : baseJumpSpd;
-      const mJumpTicks0 = mnt2
-        ? (jumpAdditive ? baseJumpTicks + mnt2.jumpHeight(this.vx) : mnt2.jumpHeight(this.vx))
-        : baseJumpTicks;
+      const { spd: mJumpSpd0, ticks: mJumpTicks0 } = this.jumpBaseSnapshot(this.vx);
       // 蜂蜜块【地面】sticky 跳削弱（Player.cs:19343-19346：jumpHeight/=10（整数除）、
       // jumpSpeed/=5——在坐骑赋值【之后】=坐骑跳同样被削；与泡块阻尼
       // （StickyTiles :22650+）不同链；dazed 同位点（:19350-19353 jumpHeight/=5、
@@ -4800,6 +4868,10 @@ export class Player extends Entity {
       // 本帧生效跳跃速度（湿态液体档覆写；长跳 sustain 钉速用它——原版钉的是当帧
       // jumpSpeed，出水瞬间自动切回干燥档）
       let effJumpSpd = mJumpSpd;
+      this.jumpSpeedField = mJumpSpd;   // ★SW-FX47（e）：拍末快照改由移动相头前置写
+                                        //  （弹跳臂当拍消费,原版序 :26211→:26889）;
+                                        //  本行保留为拍末字段态（无游戏内消费者,
+                                        //  sw-fx40 域E 测试读数面）
       this._curJumpTicksCap = mJumpTicks;   // ★附带①：当帧 jumpHeight 等效值（clip 段尾消费）
       // 起跳帧标记（原版 JumpMovement 的 if(jump>0)/else-if(起跳) 同帧互斥——
       // 起跳帧不进 sustain，平台段全长 = 起跳帧 + jumpHold 帧）
@@ -4879,13 +4951,17 @@ export class Player extends Entity {
         || this.merman;   // :25779-25781 变身授 accFlipper（2026-09-03 备案清偿②）
       let lGrav = GRAVITY * 0.5, lMaxFall = 5.01;
       let lJSpd = mJumpSpd, lJT = mJumpTicks;
-      if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3; }
-      else if (this.merman) { lGrav = GRAVITY * 0.75; lMaxFall = 7; }   // :24602 原文读 merman 变身态（非装备位）
+      // ★SW-RB14d：湿档 lMaxFall 补 :24637 无条件 `maxFallSpeed += 0.01f`——原版
+      //  该加法在 wet/shimmer/传送门各分支之后逐档生效（3→3.01/7→7.01/6→6.01/
+      //  2→2.01;水档 5.01 与干档 10.01 旧已含,同批补齐四档）
+      if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3.01; }
+      else if (this.merman) { lGrav = GRAVITY * 0.75; lMaxFall = 7.01; }   // :24602 原文读 merman 变身态（非装备位）
       else if (trident && !this.inLava) {
-        lGrav = GRAVITY * 0.625; lMaxFall = 6; lJSpd = 5.51; lJT = 25;
-        if (this.inputUp) { lGrav = GRAVITY * 0.25; lMaxFall = 2; }
+        lGrav = GRAVITY * 0.625; lMaxFall = 6.01; lJSpd = 5.51; lJT = 25;
+        if (this.inputUp) { lGrav = GRAVITY * 0.25; lMaxFall = 2.01; }
       } else { lJSpd = 6.01; lJT = 30; }
       effJumpSpd = lJSpd;
+      this.jumpSpeedField = lJSpd;      // ★SW-FX40（e）：湿档覆写（:24624 6.01 族）
       // ---- 水面行走（WaterWalkingBoots/LavaWaders 族 + 水行药水；按 ↓ 下潜）----
       // vy 清零 → 下方起跳门 vy==0 自然通过（原版同——水面站立即 velocity.Y==0）
       if (canWaterWalk && !this.headUnderwater && this.vy >= 0 && !this.inputDown) {
@@ -5033,9 +5109,13 @@ export class Player extends Entity {
             this.fallStartY = null;
             // 微升抵消随后重力 → 净缓降（湿档）。★SW-FX34 补倒挂臂（:22041,
             //  同干支；gd=1 旧无条件写维持=已登记债）
+            // ★SW-FX40（a·gd=1 行为补齐）：gd=1 臂补门 `vy > -gravity`（:22037-22040
+            //  `if (gravDir == 1f && velocity.Y > 0f - num) velocity.Y = -(num+1E-06f)`）
+            //  ——旧无条件钉写把上升段（二段跳耗尽仍上升 vy<-gravity）剪成 -0.4，
+            //  原版门内不写、续升照旧。gd=-1 臂（FX34）逐位不动。
             if (this.gravDir === -1) {
               if (this.vy < lGrav) this.vy = lGrav + 1e-6;
-            } else {
+            } else if (this.vy > -lGrav) {
               this.vy = -(lGrav + 1e-6);
             }
           }
@@ -5071,7 +5151,29 @@ export class Player extends Entity {
           this.vy += lGrav;
           this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
         }
+        // ★SW-FX40（b·gd=1 行为补齐 + gd=-1 新增镜像臂）：慢Fall 终端钳湿链
+        //  （:27571-27578/:27586-27593——maxFallSpeed 字段=湿档 lMaxFall
+        //  :24600-24622;原版 :26695 链不排湿态,钳制湿干同闸）。蜜蜂坐骑豁免同干链。
+        //  ★湿链 slowFall 重力本身未 /3（:27224-27235 湿态可达,本仓 lGrav 恒全值）
+        //  = 登记债,仅终端收敛,逼近速率仍偏陡。
+        if (!(this.ridingMount && this.mount.type === 5)) {
+          if (this.gravDir === -1) {
+            if (this.buffs.slowFall && this.vy < -lMaxFall / 3 && !this.tryingToHoverDown) this.vy = -lMaxFall / 3;
+            if (this.buffs.slowFall && this.vy < -lMaxFall / 5 && this.tryingToHoverUp) this.vy = -lMaxFall / 10;
+          } else {
+            if (this.buffs.slowFall && this.vy > lMaxFall / 3 && !this.tryingToHoverDown) this.vy = lMaxFall / 3;
+            if (this.buffs.slowFall && this.vy > lMaxFall / 5 && this.tryingToHoverUp) this.vy = lMaxFall / 10;
+          }
+        }
       }
+      // ★SW-RB14a（F5）：湿档 gravity 字段快照改【每拍无条件写】（原版字段复位链
+      //  Player.cs:24559 `gravity = defaultGravity` → :24590-24628 液体变体
+      //  （水 0.2/蜜 0.1/人鱼 0.3/三叉戟 0.25|上 0.1/微光 0.15）→ :24884 `*= num6`
+      //  全在 Update 头部执行,湿/飞/推力各态都拿到当拍新值）。旧写位在
+      //  `!flying && rocketDelay===0` 支内 → 湿态扇翅/火箭推力期 gField 吃上拍
+      //  陈值（最坏=干链慢Fall 签名改写的带符号值）,falling 旗/StepDown/
+      //  StepUpInv 三门阈值漂移。湿链未乘 num6=既有债不变（:24884 语义）。
+      this.gField = lGrav;
       this.fallStartY = null;
     } else {
       // 悬停坐骑贴地档（JumpMovement :20845 落地门 = velocity.Y==0f 原版字面）：
@@ -5225,7 +5327,7 @@ export class Player extends Entity {
           } else {
             // 能量耗尽缓降（:26683-26696）：重力/3 + 终端 maxFallSpeed/3
             this.vy += GRAVITY / 3 * gd;
-            const cap = MAX_FALL_SPEED / 3 * gd;
+            const cap = PLAYER_MAX_FALL_SPEED / 3 * gd;
             this.vy = gd === 1 ? Math.min(this.vy, cap) : Math.max(this.vy, -cap);
           }
           mountFlight = true;
@@ -5332,9 +5434,11 @@ export class Player extends Entity {
               //  钉 +(gravity+ε)（已激活毯倒挂续期 :22041 不受限——FX19 的
               //  canCarpet=false 只封【新激活】）。gd=1 分支维持仓内旧无条件写
               //  （上升段条件缺失=已登记债,本波 gd=1 禁碰）。
+              // ★SW-FX40（a·gd=1 行为补齐）：gd=1 臂补门 `vy > -gravity`（:22037-22040,
+              //  同湿档注）——上升段不再被剪成 -(g+ε)。FX34 注的"gd=1 禁碰债"就此清偿。
               if (this.gravDir === -1) {
                 if (this.vy < GRAVITY) this.vy = GRAVITY + 1e-6;
-              } else {
+              } else if (this.vy > -GRAVITY) {
                 this.vy = -(GRAVITY + 1e-6);
               }
             }
@@ -5755,7 +5859,7 @@ export class Player extends Entity {
       if (gliding) {
         grav = GRAVITY / 3;
         // :27211-27215 终端钳带 !TryingToHoverDown 门（下悬停中不钳 → 满速下坠）
-        if (this.vy > MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = MAX_FALL_SPEED / 3;
+        if (this.vy > PLAYER_MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = PLAYER_MAX_FALL_SPEED / 3;
       }
       // 坐骑飞行族已独占 vy（上方 Hover/Flight 段）——重力段整体让位（原版 :26637
       // else-if 链互斥语义）；悬停免摔（Hover :3450 fallStart 每帧重置）
@@ -5804,6 +5908,9 @@ export class Player extends Entity {
         //  防NaN断言测试负起（tests/sw-fx20-physics-nan.test.ts）。
         if (Number.isNaN(num6)) num6 = world.seedFlags?.remix ? 0.1 : 0.25;
         grav *= num6;
+        // ★SW-FX40（h2·gd=1 行为补齐 + gd=-1 新增符号臂）：gravity 字段拍末值快照
+        //  （:24884 `gravity *= num6`——慢Fall 签名因子在门灌入位补乘,见下）
+        this.gField = GRAVITY * num6;
       }
       // ★SW-BJ59：斜坡起飞重力停摆窗（Player.cs:27553-27560 else-if——cartRampTime>0
       //  时不加重力、窗口递减；:27022-27025 vy==0 清零 = 落地即收窗。滚轴鞋轨骑
@@ -5815,14 +5922,39 @@ export class Player extends Entity {
       }
       // 重力倒置（gravDir，R7）：方向取反（Player.cs:3207 vy×gravDir 全局语义近似）
       this.vy = gd === 1
-        ? Math.min(this.vy + grav, MAX_FALL_SPEED)
-        : Math.max(this.vy - grav, -MAX_FALL_SPEED);
+        ? Math.min(this.vy + grav, PLAYER_MAX_FALL_SPEED)
+        : Math.max(this.vy - grav, -PLAYER_MAX_FALL_SPEED);
+      // ★SW-FX40（b·gd=1 行为补齐 + gd=-1 新增镜像臂）：终端钳总闸（:27563-27595
+      //  `if (!mount.Active || mount.Type != 5)`——蜜蜂坐骑 5 整段豁免=原文逐位）。
+      //  ① maxFallSpeed 钳 gd=1 半边已由上行 Math.min 承载（同值同序）;gd=-1 由
+      //  Math.max 承载。② 慢Fall 终端钳（:27571-27578 正挂/:27586-27593 镜像）整缺
+      //  ——羽落药水终速原版 = maxFall/3 ≈ 3.33（ TryingToHoverUp 时 maxFall/5 过门
+      //  → maxFall/10=1.0 驻留,:27575-27578),旧缺钳 → 羽落终速 10 直坠。③ 本闸在
+      //  干链尾（原版 :27563 属 !wet 大支,湿链钳制在液体段 lMaxFall 承载,不双钳）。
+      if (!(this.ridingMount && this.mount.type === 5)) {
+        if (gd === 1) {
+          if (this.buffs.slowFall && this.vy > PLAYER_MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = PLAYER_MAX_FALL_SPEED / 3;
+          if (this.buffs.slowFall && this.vy > PLAYER_MAX_FALL_SPEED / 5 && this.tryingToHoverUp) this.vy = PLAYER_MAX_FALL_SPEED / 10;
+        } else {
+          if (this.buffs.slowFall && this.vy < -PLAYER_MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = -PLAYER_MAX_FALL_SPEED / 3;
+          if (this.buffs.slowFall && this.vy < -PLAYER_MAX_FALL_SPEED / 5 && this.tryingToHoverUp) this.vy = -PLAYER_MAX_FALL_SPEED / 10;
+        }
+      }
       // 老鼠坐骑爬墙速度钉（原版序：重力 :26200s 先行、WallClimb :26436 直写
       // velocity.Y 覆盖）——上 -2/下 4/松手 0.5 精确落碰撞
       if (this.ratClimbVy !== null) this.vy = this.ratClimbVy;
       if (this.buffs.slowFall) this.fallStartY = null;
       // 倒置时天花板即地板（TileCollision.hitHead → onGround 近似）
       if (gd === -1) this.onGround = this.hitHead;
+      // ★SW-FX40（h2·gd=-1 新增符号臂,gd=1 慢Fall 亦然）：慢Fall 字段签名改写
+      //  （:27228/:27232 `gravity = gravity/10f|/3f * gravDir`——分支被走时才写,
+      //  滑翔/火箭/翼飞/坐骑飞行各支整链让位=不改写;湿链不进此段）。in-place
+      //  镜像原文:基于刚写好的 0.4×num6 字段再乘——StepDown/StepUp 倒挂/
+      //  WalkDownSlope 三门在本段之后消费 gField（原版 :28265/:28271/:23610 同序）。
+      if (this.buffs.slowFall && !this.tryingToHoverDown && !gliding && !flying
+        && this.rocketDelay === 0 && !mountFlight) {
+        this.gField = (this.tryingToHoverUp ? this.gField / 10 : this.gField / 3) * this.gravDir;
+      }
     }
     // ★原版长跳平台段（:20384-20396；湿/干同链——JumpMovement 不分液体，2026-08-16
     //   从干燥分支提出为公共段）：vy==0（撞顶/落地）→ jump=0（:20386 平台段终止）；
@@ -5992,20 +6124,39 @@ export class Player extends Entity {
     // ★SW-BJ59：!IsRidingTracks 否决腿（:28278 `!IsRidingTracks`——滚轴鞋贴轨帧
     //  onTrack=true → IsRidingTracks（:4136-4152 CanGrindRails∧onTrack）→ 不自动上台阶，
     //  防贴轨滑行被台阶弹起脱轨。上拍 onTrack（本拍轨骑段在下方重算 = 同原文时序）
-    this.stepUp = !this.grappling[0] && !this.onTrack; // 原版玩家走 Collision.StepUp（:28278 门;:23258/:27753）
+    // ★SW-FX40（h1）：补 controlDown / IsRidingTracks 矿车腿 / flag28 三腿（:28276
+    //  `else if ((carpetFrame != -1 || velocity.Y >= gravity) && !controlDown &&
+    //  !IsRidingTracks && !flag28 && grappling[0] == -1`）——flag28 = mount.Active ∧
+    //  Type∈{7 UFO,8 钻头,12 猪鲨崽,44 海盗船,49 熔岩鲨}（:28258,飞行/钻探/冲撞坐骑
+    //  不自动上台阶）;IsRidingTracks（:4136-4152）= mount.Cart ∨ (CanGrindRails∧
+    //  onTrack)——旧缺 mount.Cart 腿（骑矿车非贴轨帧仍探台阶）。
+    const flag28Fx = this.ridingMount && (this.mount.type === 7 || this.mount.type === 8
+      || this.mount.type === 12 || this.mount.type === 44 || this.mount.type === 49);
+    const flag29Fx = this.ridingMount && this.mount.type === 48;   // :28259 黑魔书（StepDown 专属否决）
+    this.stepUp = !this.grappling[0] && !this.onTrack && !this.ridingCart
+      && !this.inputDown && !flag28Fx; // 原版玩家走 Collision.StepUp（:28278 门;:23258/:27753）
     this.stepUpHolds = this.inputUp;   // holdsMatching=controlUp：按住↑行走可踏上站台面（桌子/平台/铁砧…）
+    // ★SW-RB14d：:28276 速度门两条腿经 Body 通道承载（消费面 TileCollision moveAndCollide
+    //  正挂 StepUp 臂）——①毯展开腿 carpetFrame!=-1 ≙ carpetTime>0∧controlJump（同
+    //  stepUpInvGate 的毯腿承载式）;②`velocity.Y >= gravity` 阈=gravity 字段（gField,
+    //  深度缩水带 0.4×num6——旧消费者恒 `vy >= 0`,水行/悬停/跳顶点 [0,g) 窗误探、
+    //  飞毯缓降 vy<0 误拦）。本拍 gField 已由重力链写好（:5898 段在前）。
+    this.stepUpCarpet = this.carpetTime > 0 && this.inputJump;
+    this.stepUpVeloFloor = this.gField;
     // ★SW-BJ59：StepDown !IsRidingTracks 否决腿（:28265/:28276 两处 StepDown 调用门的
     //  `!IsRidingTracks`——IsRidingTracks（:4136-4152）= mount.Cart ∨ (CanGrindRails∧onTrack)，
     //  非矿车面 = 滚轴鞋贴轨帧；上拍 onTrack（本拍轨骑段在下方重算 = 同原文时序）。
     //  贴轨滑行禁自动走下台阶，防轨面被台阶步降拽离轨线（轨面跟随由 TrackCollision 接管）
-    this.stepDownGate = this.onTrack ? 'never' : 'gravity';
+    //  ★SW-FX40（h1）：补矿车腿 + flag28/flag29 腿（:28265 `velocity.Y == gravity &&
+    //  !IsRidingTracks && !flag29 && !flag28`）。
+    this.stepDownGate = (this.onTrack || this.ridingCart || flag28Fx || flag29Fx) ? 'never' : 'gravity';
     // ★SW-FX34：倒挂 StepUp 每 tick 门（:28273-28275 `if (gravDir == -1f) {
     //  if ((carpetFrame != -1 || velocity.Y <= gravity) && !controlUp) StepUp(…,(int)gravDir,controlUp) }`）。
     //  carpetFrame!=-1 ≙ 飞毯本 tick 在展开（仓承载=carpetTime>0 且按住跳,同 CarpetMovement
-    //  :22031 展开门）;gravity 取常数字段 GRAVITY（与 StepDown 'gravity' 门同口径,
-    //  深度缩水带差异已在该门备案）。moveAndCollide 只在 gravDir=-1 时消费。
+    //  :22031 展开门）;★SW-FX40（h2）：门值 GRAVITY → gField（gravity 字段拍末值,
+    //  深度缩水带同步缩水）。moveAndCollide 只在 gravDir=-1 时消费。
     this.stepUpInvGate = this.gravDir === -1
-      && ((this.carpetTime > 0 && this.inputJump) || this.vy <= GRAVITY)
+      && ((this.carpetTime > 0 && this.inputJump) || this.vy <= this.gField)
       && !this.inputUp;
     // 跑动/下落撞碎裂砖（Player.Update :27733 CheckIceBreak 后紧随——在 StepDown/StepUp
     // （:27745-27760）与 TileCollision（:27783+）【之前】调用：读碰撞前的完整速度与
@@ -6148,19 +6299,51 @@ export class Player extends Entity {
       // 帮助函数消费同一收缩值。上拍 onTrack（轨骑段在上方 = 同原文时序），后写还原）
       const hKeep = this.h;
       if (this.onTrack) this.h = Math.max(16, this.h - 10);
+      // ★SW-FX40（d）：falling 旗（:28283-28290 `falling = vy > gravity || vy < -gravity`
+      //  ——gravity=字段拍末值（gField）；FloorVisuals 的落地尘 20 连发参数）。
+      //  原版在 StepUp/Down 门后、碰撞位移【前】求值——同位捕获。
+      const fallingFx = this.vy > (this.gField ?? GRAVITY) || this.vy < -(this.gField ?? GRAVITY);
       moveAndCollide(this, world, this.vx, this.vy);
       this.h = hKeep;
-      // ★SW-FX34：倒挂顶头臂（Player.cs:28467-28471 `else if (gravDir == -1f &&
-      //  Collision.down) { velocity.Y = -0.01f; if (!merman) jump = 0; }`）——倒挂
-      //  玩家「跳向下」撞下方实心 = 原版 Collision.down。缺此臂时 vy 留 0、jumpHold
-      //  拖到下拍平台段才清（且清前 vy≠0 门已被重力破坏）→ 按住跳撞地板=钉在地板
-      //  上反复被 re-pin（原版同拍取消跳）。gd=1 的 Collision.up 臂（vy=+0.01+jump=0,
-      //  :28463-28466）为既有 gd=1 面,本波禁碰=已登记债。Collision.down ≙ 仓
-      //  moveAxis dir>0 阻挡位（hitDown,坡面贴合置位的 onGround 不算——原版
-      //  SlopeCollision 也不置 Collision.down）。
-      if (this.gravDir === -1 && this.hitDown) {
+      // ★SW-FX40（g）：UpdateTouchingTiles（:28432——SlopingCollision/传送带后、
+      //  顶头臂前，原版同序；GetHurtTile 兜底面/弹跳块 TryBouncingBlocks 消费）
+      this.updateTouchingTiles(world);
+      // ★SW-FX47（b）：TryBouncingBlocks（:28433——UpdateTouchingTiles 后、
+      //  TryLandingOnDetonator(≙landImpactVy)/SlopingCollision/顶头臂前,原版同序）。
+      //  弹跳块族（tileBouncy 371/446-448）落地反弹整支,见方法注。
+      //  preY/impactVy（:6178-6179 碰撞前快照）=落地拍残量重建通道（方法注②）。
+      //  备案：landImpactVy（:6344）读碰撞前 impactVy,原版 TryLandingOnDetonator
+      //  （:34368 vy≥3 门）读【反弹后】vy——弹跳拍原版门假（|vy|×0.8 后可 <3）,
+      //  本仓真=引爆器面上弹跳拍会误触发（引爆器+弹跳块邻接极端几何,登记）。
+      this.tryBouncingBlocks(game, world, fallingFx, preY, impactVy);
+      // ★SW-FX40（c·gd=1 行为补齐）：正挂顶头臂（:28463-28470 `if (gravDir == 1f &&
+      //  Collision.up) { velocity.Y = 0.01f; if (!merman) jump = 0; }`）——上撞天花板
+      //  同拍 vy=+0.01 + 取消跳 hold（FX34 注的"gd=1 禁碰债"就此清偿;Collision.up ≙
+      //  hitHead=moveAxis dir<0 阻挡位）。FX34 G3 的 Body 级 vy=0 钉面=碰撞层语义,
+      //  本臂在其后写 +0.01,两层不冲突（G3 注已重锚）。merman 豁免 jump=0 照原文。
+      // ★SW-FX34：倒挂顶头臂（:28471-28478 else if 臂,波 4 已接）——结构按原文
+      //  if/else-if 归位（gravDir 互斥,数值面不变）。Collision.down ≙ hitDown
+      //  （moveAxis dir>0 阻挡位,坡面贴合置位的 onGround 不算）。
+      if (this.gravDir === 1 && this.hitHead) {
+        this.vy = 0.01;
+        // ★SW-RB14a 复核定谳（F1 撤销）：merman 门【保留】=原版净语义 1:1——
+        //  原版 DryCollision 两处无门站（:23731/:23767 `Collision.up && gravDir==1
+        //  → jump=0`）是【干路径专属】（WetCollision :23157-23172 无此站）,而
+        //  merman ⊆ wet（:22965 变身态只在水中置位;本仓 :3895 同域推导）——
+        //  干态 merman 恒 false ⇒ 门对干态不可达=无门站净语义自动成立;湿态人鱼
+        //  原版本就不经 DryCollision ⇒ 不清。单门双臂=干/湿/正挂/倒挂四面全等。
+        if (!this.merman) this.jumpHold = 0;
+      } else if (this.gravDir === -1 && this.hitDown) {
         this.vy = -0.01;
         if (!this.merman) this.jumpHold = 0;
+      }
+      // ★SW-FX40（d）：FloorVisuals 调用位（:28479-28482 `vy==0 && grappling[0]==-1`）
+      //  ——地板旗块（上文 ~:4220 处,消费面同原版 HorizontalMovement 读上拍旗）
+      //  + MakeFloorDust 整支（内部 !wet && !mount.Cart 闸 :23931）
+      if (this.vy === 0 && !this.grappling[0]) {
+        const wetVanillaFx = this.inWater || this.inLava || this.inHoney || this.inShimmer;
+        const cartFx = this.ridingMount && this.mount.isCart;
+        if (!wetVanillaFx && !cartFx) this.makeFloorDust(game, fallingFx, world);
       }
       this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
     }
@@ -6169,7 +6352,29 @@ export class Player extends Entity {
     //      且非（微光浸身而幻彩斗篷豁免缺失）→ GetWaterLine 定液面（npcLiquid 1:1）：
     //      深处（ty-2 有液）恒上浮 −0.4 钳 −6；液面下沿 −0.4 上爬；到线钉线（钳 −3、
     //      vy==0 置 float.Epsilon 防"落地"语义吞）。坐椅先起（SitUp :23646-49 经钩）----
-    if (this.shouldFloatInWater && !(this.inShimmer && !this.equipStats.shimmerImmune)) {
+    // ★SW-FX46（2026-09-12）补湿域门：TryFloatingInFluid 的原版调用点 = WetCollision
+    //  体内尾段（Player.cs:23622 方法头 / :23640 调用），即只在 UpdateMovement 湿/干
+    //  选档（:28396-28428 shimmerWet > honeyWet&&!ignoreWater > wet&&!merman&&
+    //  !ignoreWater&&!trident 三支走 WetCollision；shimmering/tongued 积分分支、
+    //  其余走 DryCollision）的拍才执行。出水（身体离液）后浮液停、干重力全额拉回
+    //  → 落回水面由钉线支钳定稳态 cy*=waterLine−num2（vy≈0）。
+    //  旧仓缺此门：else 支（GetWaterLine false）的 vy−=0.4 在空中照跑，与天空缩水
+    //  重力（:24876 num6 钳下限 0.25 → 0.4×0.25=0.1）净 −0.3/拍 无界加速——深水上
+    //  浮攒速冲出水面后直飞世界顶（vy=−30.78，shimmer-immune-float 钉线用例红）。
+    //  选档三式与下方 liqFactor 块（SW 同源，原版 :28396-28408 同形）逐字同构；
+    //  shimmering/tongued（:28390-28394 积分顶层分支）与原版同走旁路不吃浮液。----
+    const heldFloat = this.inv.heldItem();
+    const tridentHeld = heldFloat
+      ? (ITEM_DEFS[heldFloat.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldFloat.id].key)) === 277 : false;
+    const ignoreWaterF = this.ridingMountSwimFree
+      || this.buffs.has(BuffType.FlipperPotion)
+      || this.equipStats.wing?.slot === 26;
+    const floatWetDomain = this.inShimmer
+      || (this.inHoney && !ignoreWaterF)
+      || ((this.inWater || this.inLava || this.inHoney || this.inShimmer)
+        && !this.merman && !ignoreWaterF && !tridentHeld);
+    if (!this.shimmering && !this.buffs.has(BuffType.TheTongue) && this.shouldFloatInWater
+      && !(this.inShimmer && !this.equipStats.shimmerImmune) && floatWetDomain) {
       if (this.sitting) this.sitUpHook?.();
       const wl = getWaterLine(world.store, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
       if (!wl.found) {
@@ -7837,7 +8042,10 @@ export class Player extends Entity {
    *  稳态 shadowPos[2] 滞后 4~5 拍;原版调用相位 = Update 内重力段、本拍移动前
    *  （:24885,重力 ×num6 之后）⇒ 本仓 fixedUpdate 头（pre-movement）同相。
    *  传送/spawn 冲洗（ResetAdvancedShadows+:37768/:37929 3×UpdateSocialShadow）
-   *  本仓传送链未建模 = 债 SW-FX36-D2（表现:传送后网格暗 4 拍,原版即亮）。 */
+   *  本仓传送链未建模 = 债 SW-FX36-D2。★SW-RB14d 勘误：冲洗只轮转写 [0]（count
+   *  0→1→2→0）,[1]/[2] 保留冲洗前值 ⇒ 原版传送后 shadowPos[2] 仍是传送前采样,
+   *  dist 巨大 → 网格钳 0.2 下档（"暗"即原版本相,旧注"原版即亮"系误判,无行为影响——
+   *  本仓不冲洗的滞后窗与原版同量级,差 ≤1 拍）。 */
   shadowCount = 0;
   private spX = [0, 0, 0];
   private spY = [0, 0, 0];
@@ -8059,7 +8267,7 @@ export class Player extends Entity {
     } else if (this.inputDown) {
       if (this.vy < 0) this.vy *= 0.7;
       this.vy += this.vy < 3 ? 0.2 : 0.1;
-      if (this.vy > MAX_FALL_SPEED) this.vy = MAX_FALL_SPEED;
+      if (this.vy > PLAYER_MAX_FALL_SPEED) this.vy = PLAYER_MAX_FALL_SPEED;
     } else {
       this.vy *= 0.7;
       if (Math.abs(this.vy) < ROPE_IDLE_ZERO) this.vy = 0;
@@ -8353,8 +8561,10 @@ export class Player extends Entity {
    *    （:24264 + 成就 44 MY_PEOPLE_NEED_ME :24266-24268）+ 半幅钳位（num4=320，
    *    :24269-24276）；【普通世界：钳回】+ vy 下推至 ≥0.11 + gravDir 复位 1
    *    （else 支 :24277-24283）
-   *  - 底越线 → 【出界即死】KillMe 原因 21 伤害 10（:23829-23834——地狱地板
-   *    挖穿/坠落兜底；走 damage 直杀近似，iframes 只延迟一 tick 不改语义） */
+   *  - 底越线 → ★SW-FX40（f）重锚（:24292-24317）：仅 skyblock 世界 KillMe 原因 21
+   *    伤害 10（:24295-24297）；普通世界只钳 y（:24300-24301）+ 脚底钳 −height
+   *    （:24308-24313,神模式或非 skyblock 生效）+ ROCK_BOTTOM 特殊事件 10
+   *    （:24314-24317）——旧"恒杀"系 skyblock 门整缺,普通世界底界挖穿误判死 */
   bordersMovement(world: import('../world/World').World, game?: import('./types').GameHooks): void {
     const B = 640;                              // offLimitBorderTiles(40) × 16
     const wPx = world.store.w * TILE;           // Main.rightWorld
@@ -8392,21 +8602,367 @@ export class Player extends Entity {
         if (this.vy < 0.11) this.vy = 0.11;
         this.gravDir = 1;
       }
+      // ★SW-FX47（c）：INTO_ORBIT 特殊事件 11（:24290——顶界 if 块内、remix/普通
+      //  两分支汇合后恒执行）→ INTO_ORBIT Reach 成就（AchievementsHelper.cs:328-330
+      //  case 11;语义=抵达世界顶界带,非火箭/出世界事件）。原版在钳位【前】的同一
+      //  块内判发——本仓 Game.ts achTick 曾有 y<640 中央核查位,但跑在 fixedUpdate
+      //  （含顶界钳 y=B）之后,y==640 时 `y<640` 恒假=普通世界永哑（remix 半幅钳
+      //  320 才偶发）——补内联位对齐原版越过拍触发;中央核查位保留（幂等+小世界
+      //  豁免域兜底）。cameraY=0 复位（:24262/:24276/:24282）无承载位不接（镜头
+      //  无 Main.cameraX/Y 平移通道,既登记）。whoAmI==myPlayer 门（Helper 头
+      //  :283-285）单人恒真,本仓成就面即本地玩家。 */
+      game?.achievements?.handleSpecialEvent(11,
+        this as unknown as { statLifeMax: number; statManaMax: number });
     }
+    // ---- 底界（:24292-24317）——★SW-FX40（f·gd 无关行为补齐）三刀：
+    //  ① skyblock 门（:24292 skyblockWorld=:24295 `if (skyblockWorld && !dead)`
+    //  才 KillMe——WorldGen.cs:11150 skyblockWorldGen=WorldSeedOption_Skyblock；
+    //  旧"恒杀"把普通世界底界挖穿也判死=自造域）② -height 脚底钳（:24308-24313
+    //  `flag = creativeGodMode || !skyblockWorld` → y > bottom−640−height 再钳脚底
+    //  ——身体【整体】拉回界内,vy 清零）③ ROCK_BOTTOM（:24314-24317
+    //  HandleSpecialEvent(10)=ROCK_BOTTOM Reach——y > bottom−640−118−height）。
+    const skyblockWorld = world.seedFlags?.skyblock === true;   // Main.skyblockWorld
     if (this.y > hPx - B) {
-      // 旅程上帝模式（Player.cs:23837-23845 creativeGodMode）：越界钳位不致死
-      if (!journeyGodmodeActive()) {
-        // KillMe(ByOther 21, 10.0):直死——绕过防御/无敌帧(不走 damage()),
-        // hp 归零后由 fixedUpdate 尾部统一结算(死亡音/墓碑),最迟次 tick 生效
-        this.hp = 0;
-        this.lastDamageCause = { kind: 'underground' }; // ByOther(21) Underground_1..5
+      if (skyblockWorld && !this.dead) {
+        // KillMe(ByOther 21, 10.0)（:24297）:直死——绕过防御/无敌帧(不走 damage()),
+        // hp 归零后由 fixedUpdate 尾部统一结算(死亡音/墓碑),最迟次 tick 生效。
+        // creativeGodMode 豁免在 KillMe 头(:39096 早退),本仓以 journeyGodmode 门近似
+        if (!journeyGodmodeActive()) {
+          this.hp = 0;
+          this.lastDamageCause = { kind: 'underground' }; // ByOther(21) Underground_1..5
+        }
       }
       this.y = hPx - B;
       this.vy = 0;
     }
+    // 脚底钳（:24308-24313）：非 skyblock（或神模式）才生效——skyblock 活体停在
+    // [bottom−640−height, bottom−640) 死亡带内由上支判死,本钳不救
+    if ((journeyGodmodeActive() || !skyblockWorld) && this.y > hPx - B - this.h) {
+      this.y = hPx - B - this.h;
+      this.vy = 0;
+    }
+    // ROCK_BOTTOM 成就（:24314-24317 HandleSpecialEvent(10)→ROCK_BOTTOM Reach
+    // AchievementsHelper.cs:328-330）——仅越线带触发,神模式不豁免（原文无门）
+    if (this.y > hPx - B - 118 - this.h) {
+      game?.achievements?.handleSpecialEvent(10, this as unknown as { statLifeMax: number; statManaMax: number });
+    }
   }
   /** 贴墙缓降中（spikedBoots 攀壁） */
   wallCling = false;
+  /** ★SW-FX40（d·gd 无关整支新增）：FloorVisuals 头段单源（:23901-23930）——
+   *  num=(int)((position.X+width/2)/16)、num2=脚下一行（gd=-1 换身体顶行
+   *  :23904-23908）、GetFloorTile（:23946-23974 中心→x−1→x+1 首 nactive+solid 格）
+   *  + 坡面门（:23927-23930 脚下三格任一 slope → num3=-1）。地板旗块与
+   *  MakeFloorDust 调用位共用；返回地板格 TS id 与其格列/行（-1=无地板）。
+   *  ★SW-FX47（d）：实心门补平台行为族臂——原版 Main.tileSolid[19/239/380/
+   *  427/435-439] 全 true（Main.cs:8031-8032/:9797-9800/:10118-10119/:10126-10136,
+   *  平台=solid 双旗），GetFloorTile 的 tileSolid 门对站平台态命中平台格;
+   *  本仓 solid 位拆出 platform 旗（solid 恒 false）→ 旧 isSolid 门对平台恒假
+   *  =站平台无地板格（棕榈平台 style49 落地尘 16 的 face 整缺根因）。家族表
+   *  用静态 TILE_SOLID_TOP_FAMILY（stats/TouchDamage.ts:38——setOf 已把 sheet
+   *  字面 19/239/… 折算本仓内部 id,故直比 st.type 内部域）——勿用
+   *  st.isPlatform（其含家具族,家具 tileSolid=false 原版 GetFloorTile 不认）。 */
+  private readFloorTile(world: import('../world/World').World): { id: number; col: number; row: number; preSlopeId: number } {
+    const st = world.store;
+    const fx0 = Math.floor(this.cx / TILE);
+    const fy0 = this.gravDir === -1
+      ? Math.floor((this.y - 0.1) / TILE)
+      : Math.floor((this.y + this.h) / TILE);
+    let ft = -1, fcol = fx0;
+    for (const d of [0, -1, 1]) {
+      const xx = fx0 + d;
+      if (!st.inBounds(xx, fy0)) continue;
+      const ii = st.idx(xx, fy0);
+      // GetFloorTile 门（:23962 `nactive() && Main.tileSolid[type]`）——solid 位
+      // ∪ 平台行为族（原版 tileSolid 的平台九件,本仓 solid 拆分面）
+      if (st.flags[ii] && (st.isSolid(xx, fy0) || TILE_SOLID_TOP_FAMILY.has(st.type[ii]))) {
+        ft = st.type[ii]; fcol = xx; break;
+      }
+    }
+    // ★SW-RB14a（F3）：preSlopeId = 坡面门置 -1【前】的地板型（FloorVisuals 原序：
+    //  旗块/粪块 AddBuff(120,180) 都在 :23927 坡面 num3=-1 之前消费,尘才吃坡面门）
+    const preSlopeId = ft;
+    if (ft >= 0 && (st.slope[st.idx(fx0 - 1, fy0)] !== 0 || st.slope[st.idx(fx0, fy0)] !== 0
+      || st.slope[st.idx(fx0 + 1, fy0)] !== 0)) ft = -1;
+    return { id: ft, col: fcol, row: fy0, preSlopeId };
+  }
+
+  /** readFloorTile 的旗标面简版（地板旗块消费） */
+  readFloorTileId(world: import('../world/World').World): number {
+    return this.readFloorTile(world).id;
+  }
+
+  /** ★SW-FX40（g·gd 无关新增）：UpdateTouchingTiles（Player.cs:57734-57765）——
+   *  本 tick 碰撞触碰格清单。两道 IsClearSpotTest 探针（position+velocity @16px、
+   *  position @|vy|；:57739/:57743）失空时以 FindCollisionTile 竖向扫描
+   *  （Direction=sign(vy)==1?2:3）收集触碰格。消费面：①GetHurtTile 兜底
+   *  （:29189-29201——HurtTiles 盒扫落空时逐格 !Suffocate && CanTileHurt）；
+   *  ②TryBouncingBlocks 弹跳块（:35102+,本仓弹跳块族未建模=登记债,清单先挂）。
+   *  原版调用时序 = 碰撞积分后（:23755 DryCollision 亚像素环内 + :28432 Update 主环）
+   *  ——本仓接 :28432 位（moveAndCollide 后）；GetHurtTile 在 fixedUpdate 早段消费
+   *  上拍清单 = 原版 :27820 先于 :28432 的同拍滞后,时序逐位对齐。 */
+  updateTouchingTiles(world: import('../world/World').World): void {
+    this.touchedTiles.length = 0;
+    const gd = this.gravDir === -1 ? -1 : 1;
+    const dir: 2 | 3 = Math.sign(this.vy) === 1 ? 2 : 3;
+    let list: Array<{ x: number; y: number }> | null = null;
+    if (!isClearSpotTest(world, this.x + this.vx, this.y + this.vy, this.w, this.h, 16, gd, true)) {
+      list = findCollisionTileVertical(world, dir, this.x + this.vx, this.y + this.vy,
+        this.w, this.h, 16, gd, false);                      // :57741 checkSlopes 缺省 false
+    }
+    let list2: Array<{ x: number; y: number }> | null = null;
+    if (!isClearSpotTest(world, this.x, this.y, this.w, this.h, Math.abs(this.vy), gd, true)) {
+      list2 = findCollisionTileVertical(world, dir, this.x, this.y,
+        this.w, this.h, Math.abs(this.vy), gd, true);
+    }
+    if (list && list2) {
+      for (const p of list2) {
+        if (!list.some((q) => q.x === p.x && q.y === p.y)) list.push(p);   // :57749-57755 去重并入
+      }
+    } else if (!list && list2) {
+      list = list2;                                                        // :57757-57760
+    }
+    if (list) this.touchedTiles = list;                                    // :57761-57764
+  }
+
+  /** ★SW-FX47（e）：跳跃参数 base 段单源（UpdateJumpHeight :19714-19758 前半——
+   *  jumpBoost 钳 / jumpSpeedBoost(jumpSpd) 累加 / 折叠凳·狼人 jumpHeight 项 /
+   *  坐骑 additive(滚轴鞋 57-60)叠加或赋值覆盖臂）。消费位：①移动相头弹跳臂
+   *  前置快照（原版 :26211 先于 :26889 HorizontalMovement 的调用序）；②物理相
+   *  跳参链（原 base 内联式,数值逐位同源）。honey(sticky)/dazed 两尾削弱在
+   *  UpdateJumpHeight 尾段（:19759-19766）,由各消费位自行施加（返回值未含）。 */
+  private jumpBaseSnapshot(vx: number): { spd: number; ticks: number } {
+    const eqJ = this.equipStats;
+    let baseJumpSpd = PLAYER_JUMP_SPEED;
+    let baseJumpTicks = PLAYER_JUMP_TICKS;
+    if (eqJ.jumpBoost) {
+      baseJumpTicks = Math.max(baseJumpTicks, 20);
+      baseJumpSpd = Math.max(baseJumpSpd, 6.51);
+    }
+    if (this.buffs.has(BuffType.Werewolf)) baseJumpTicks += 2;   // :19738 jumpHeight += 2（速度 +0.2 已在 jumpSpd :19739）
+    if (this.stoolInUse) baseJumpTicks += 5;                     // :19741-19744 折叠凳 +5
+    baseJumpSpd += eqJ.jumpSpd;
+    const mnt2 = this.ridingMount ? this.mount : null;
+    const jumpAdditive = mnt2?.movementStatsAdditive === true;   // :19748-19757
+    const spd = mnt2
+      ? (jumpAdditive ? baseJumpSpd + mnt2.jumpSpeed(vx) : mnt2.jumpSpeed(vx))
+      : baseJumpSpd;
+    const ticks = mnt2
+      ? (jumpAdditive ? baseJumpTicks + mnt2.jumpHeight(vx) : mnt2.jumpHeight(vx))
+      : baseJumpTicks;
+    return { spd, ticks };
+  }
+
+  /** ★SW-FX47（b·gd 无关整支新增）：TryBouncingBlocks（Player.cs:35102-35165）——
+   *  弹跳块族落地反弹：门 `!wet && !shimmering && (vy≥5 || vy≤-5)`（:35104）→
+   *  TouchedTiles 顺序扫首个 active∧nactive∧tileBouncy 格（:35113-35124,原版
+   *  `(flag || tileBouncy)` 的 flag 恒 false=死旗,条件折叠为 tileBouncy）→
+   *  vy×=-0.8（:35127）+ controlJump 钳 ±13（:35128-35130）→ 位钳到弹跳面
+   *  （:35131 `position.Y = row*16 - (vy<0 ? height : -16)`——反弹向上=脚贴块顶,
+   *  gd=-1 反弹向下=头顶贴块底）→ FloorVisuals(Falling)（:35134——旗块面+落地尘,
+   *  本仓旗块相在移动相头 :4272 一拍内自愈,尘面经 makeFloorDust 带 !wet&&!Cart 闸
+   *  :23931）→ vy 钳 ±20（:35161）→ 反弹向与重力反向时 fallStart 重置（:35162-35164
+   *  `vy*gravDir<0 → fallStart=position.Y/16`,本仓 fallStartY 像素口径同源）。
+   *  ★flag2/Keybrand 编排支（:35135-35158）不接——原版死支（`bool flag2=false`
+   *  声明后全程无置位句,Keybrand 尘不可达;syncModules.ts module8 注同判）。
+   *  ★双触发面（缺一不可,原版两路皆经 :35104 同一门）：
+   *  ①【凌空拍】原版碰撞未截断（未及落面）时 velocity.Y=全速,探针窗
+   *  （position+velocity 后 16px,FX40-g 同参）见弹跳格 → 意图脚（F+vy)入格行
+   *  才报行（FindCollisionTile 行=探针盒前缘行 Collision.cs:2614）→ 反弹先于落地;
+   *  ②【落地拍】原版碰撞截断后 velocity.Y=残量（Collision.cs:2401
+   *  `result.Y=块顶−移前脚`）→ |vy|=残量过 ≥5 门=落地拍反弹（残量∈[5,vy) 带）。
+   *  本仓 moveAxis 落地硬清零 vy（TileCollision.ts moveAxis b.vy=0,通用碰撞层
+   *  语义不可动）→ 落地拍以本拍垂直位移 dy=y−preY 重建残量（=块顶−移前脚同值;
+   *  gd=-1 天然反号）。落地拍标记=本拍轴碰撞位（hitDown/hitHead,moveAndCollide
+   *  头逐拍复位）非 onGround——倒挂 onGround=hitHead 上拍值（:5948）滞一拍;
+   *  界门 dy∈(0,impactVy]（gd=-1 镜像）——排除 StepDown 吸附
+   *  （吸附距∈(7,17)>impactVy=重力值,Collision.cs:3632 gap 窗;吸附拍原版
+   *  velocity.Y 不截断恒 0.4=不反弹;吸附不置 hitDown/hitHead 天然过门）与
+   *  坡面贴合（slopeCollide 置 onGround 不置 hitDown=排除,贴合量≠残量=备案近似）。
+   *  落地拍触碰行：原版意图盒（position+velocity=面下残量深处）入块行 →
+   *  FindCollisionTile 报脚下行（Collision.cs:2614 前缘行）;本仓 vy=0 意图盒贴面,
+   *  忠实探针（FX40-g）扫空 → 脚下行直扫同值集（行=意图盒行,逐列首弹跳格）。
+   *  ★DryCollision 亚像素环第二调用位（:23756）不另接:本仓 moveAndCollide 统一
+   *  分轴碰撞管线（无 DryCollision 亚像素环承载位）,:28433 主环位覆盖弹跳主路径。
+   *  弹跳格族 TILE_BOUNCY_SHEETS={371,446,447,448}（Main.cs:9626-9629）。 */
+  private tryBouncingBlocks(game: GameHooks, world: import('../world/World').World,
+    falling: boolean, preY: number, impactVy: number): void {
+    const gdSign = this.gravDir === -1 ? -1 : 1;
+    const wet = this.inWater || this.inLava || this.inHoney || this.inShimmer;
+    // :35104 门——vy 取原版碰撞后语义：凌空拍=全速（本仓同值）；落地拍=残量重建
+    let vyGate = this.vy;
+    let landedFloorRow = -1;
+    const landedThisTick = gdSign === 1 ? this.hitDown : this.hitHead;   // 本拍轴碰撞标记
+    if (landedThisTick && this.vy === 0) {
+      const dy = this.y - preY;                        // 本拍垂直位移=块顶−移前脚（:2401 残量）
+      const inResidualBand = gdSign === 1
+        ? (dy > 0 && dy <= Math.abs(impactVy))
+        : (dy < 0 && -dy <= Math.abs(impactVy));       // impactVy 带符号（倒挂为负）→ 取模
+      if (inResidualBand) {
+        vyGate = dy;                                   // 原版碰撞后 velocity.Y=±残量
+        // 落地拍弹跳行=脚下行（正挂）/头顶行（倒挂,头顶贴块底）
+        const floorRow = gdSign === 1
+          ? Math.floor((this.y + this.h) / TILE)
+          : Math.floor((this.y - 0.01) / TILE);
+        const c0 = Math.floor(this.x / TILE);
+        const c1 = Math.floor((this.x + this.w - 0.01) / TILE);
+        for (let cx = c0; cx <= c1; cx++) {
+          if (!world.store.inBounds(cx, floorRow)) continue;
+          if (!world.store.hasTile(cx, floorRow)) continue;                 // active()∧nactive()
+          const sheet = TILE_DEFS[world.store.type[world.store.idx(cx, floorRow)]]?.vanilla?.sheet ?? -1;
+          if (TILE_BOUNCY_SHEETS.has(sheet)) { landedFloorRow = floorRow; break; }
+        }
+      }
+    }
+    if (wet || this.shimmering || !(vyGate >= 5 || vyGate <= -5)) return;   // :35104 门
+    let row = landedFloorRow;                                                // num3
+    if (row < 0) {                                                           // :35113-35124
+      for (const t of this.touchedTiles) {
+        if (!world.store.inBounds(t.x, t.y)) continue;
+        if (!world.store.hasTile(t.x, t.y)) continue;                        // active()∧nactive()
+        const sheet = TILE_DEFS[world.store.type[world.store.idx(t.x, t.y)]]?.vanilla?.sheet ?? -1;
+        if (TILE_BOUNCY_SHEETS.has(sheet)) { row = t.y; break; }
+      }
+    }
+    if (row < 0) return;                                                     // :35125-35127 !flag3
+    this.vy = vyGate * -0.8;                                                 // :35127
+    if (this.inputJump) this.vy = Math.max(-13, Math.min(13, this.vy));      // :35128-35130 Clamp
+    this.y = row * TILE - (this.vy < 0 ? this.h : -TILE);                    // :35131 位钳
+    // FloorVisuals(Falling)（:35134）——尘面（旗块面见方法注备案）。MakeFloorDust
+    // 内门 `!wet && !mount.Cart`（:23931）：wet 已被外门排除,Cart 面照原文保留
+    const cartFx = this.ridingMount && this.mount.isCart;
+    if (!cartFx) this.makeFloorDust(game, falling, world);
+    this.vy = Math.max(-20, Math.min(20, this.vy));                          // :35161 Clamp ±20
+    if (this.vy * gdSign < 0) this.fallStartY = this.y;                      // :35162-35164
+  }
+
+  /** ★SW-FX40（d·gd 无关整支新增）：MakeFloorDust（:23981-24234）——行走/落地地板
+   *  尘（踩草 76/沙 32/雪冰 16/便便 322-328/泥土 0/黏土 36…逐型映射表）+ 落地
+   *  Falling 20 连发 + 便便族落地音 Item177。调用位 = 碰撞积分后 FloorVisuals
+   *  （:28479-28482 `vy==0 && grappling[0]==-1`），内部再过 `!wet && !mount.Cart`
+   *  （:23931）。canCarpet 语境无关=两 gravDir 同表（gd=-1 出尘位/速度镜像
+   *  :24175-24177/:24229-24231 照原文）。659/667 微光块支（:23983-24009）粒子
+   *  载体 = ParticleOrchestration ShimmerBlock 编排（★SW-FX47 清偿：Spawn_
+   *  ShimmerBlock 本体已在 fx/orchestraFx.shimmerBlockFx 收编、Game.ts:31455
+   *  派发在位,原 producer 空转——本方法补 RequestParticleSpawn 面;clientOnly:
+   *  true 本地直驱不上网,syncModules.ts module8 注同口径）。flag2（tile19
+   *  style49 棕榈木平台,frameY/18==49）★SW-FX47 清偿：frameY 材质行在
+   *  st.frameY（TileStore,平台族 PlaceTile case19 `frameY=18*style` 同源）,
+   *  且 readFloorTile 已扩平台行为族臂（见其注）——style49 面可判。 */
+  private makeFloorDust(game: GameHooks, falling: boolean, world: import('../world/World').World): void {
+    const fl = this.readFloorTile(world);
+    const ft = fl.id;
+    if (ft < 0) return;                                       // num3<=-1 早退（FloorVisuals :23913-23917）
+    const st = world.store;
+    const type = TILE_DEFS[ft]?.vanilla?.sheet ?? -1;         // 本仓 id → 原版 sheet id
+    const paintColor = st.paint[st.idx(fl.col, fl.row)] ?? 0; // floorTile.color()（:23933 实参）
+    const vd = game.vanillaDust;
+    if (!vd) return;
+    // 微光块 659/667 支（:23983-24009）：行走掷骰门 flag（!Falling → |vx|/3 概率
+    //  减半计数）+ ShimmerBlock 编排粒子本地直驱。掷序照原文：位偏移 2 掷
+    //  （width×NextFloat / 6×NextFloat）→ NextVector2Circular(0.8,0.8) 2 掷
+    //  （Utils.cs:1301-1304 = NextVector2Unit 角掷 × NextFloat 半径掷,F6 口径）
+    //  → Y>0 反号（:24006-24008）。UniqueInfo 缺省 0 → Spawn_ShimmerBlock
+    //  scaleMul 兜底 1（ParticleOrchestrator.cs:2360-2364）。
+    if (type === 659 || type === 667) {
+      let shimmerOk = true;
+      if (!falling) {
+        const num = Math.abs(this.vx) / 3;
+        if (Math.random() * 100 > num * 50) shimmerOk = false;
+      }
+      if (!shimmerOk) return;
+      const sx = this.x + this.w * Math.random();                    // :24001 width×NextFloat
+      const sy = this.y + this.h - 2 + 6 * Math.random();            // :24001 +6×NextFloat
+      const ang = Math.random() * Math.PI * 2;                       // NextVector2Unit 角掷
+      const rad = Math.random();                                     // ×NextFloat 半径掷
+      let mvx = Math.cos(ang) * rad * 0.8;
+      let mvy = Math.sin(ang) * rad * 0.8;
+      if (mvy > 0) mvy *= -1;                                        // :24006-24008
+      shimmerBlockFx(game, sx, sy, mvx, mvy);                        // :24002-24008 clientOnly:true
+    }
+    // flag2（:24010 `type == 19 && frameY / 18 == 49`）：19 木平台 style49=棕榈木
+    // 平台材质行（frameY=18×49=882,整除域 [882,899] 同判）。frameY 读本仓
+    // st.frameY（活格真帧;非活格哨兵 65535/18≠49 自然排除）
+    const flag2 = type === 19
+      && Math.floor((st.frameY[st.idx(fl.col, fl.row)] ?? 0) / 18) === 49;
+    const inBig = (type === 147 || type === 25 || type === 53 || type === 189) || flag2;
+    const smalls = [0, 123, 57, 112, 116, 196, 193, 195, 197, 199, 229, 234, 371, 460, 666, 712, 717, 718, 719];
+    if (!inBig && !smalls.includes(type)) return;             // :24011-24013 允许集闸
+    let count = 1;                                            // num2
+    if (falling) {
+      count = 20;
+      if (type === 666 || type === 712) {
+        game.playSfxFile?.('Item_177', 1, this.cx, this.y + this.h);   // :24021 SoundID.Item177
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      let keep = true;                                        // flag3
+      let num3 = 76;
+      if (type === 666 || type === 712) {
+        if (paintColor !== 0) break;                          // :24030-24033 涂色便便不出尘
+        num3 = 322;
+      }
+      if (type === 53) num3 = 32;
+      if ((type === 189) || flag2) num3 = 16;
+      if (type === 717) num3 = 326;
+      if (type === 718) num3 = 327;
+      if (type === 719) num3 = 328;
+      if (type === 0) num3 = 0;
+      if (type === 123) num3 = 53;
+      if (type === 57) num3 = 36;
+      if (type === 112) num3 = 14;
+      if (type === 234) num3 = 122;
+      if (type === 116) num3 = 51;
+      if (type === 196) num3 = 108;
+      if (type === 193) num3 = 4;
+      if (type === 195 || type === 199) num3 = 5;
+      if (type === 197) num3 = 4;
+      if (type === 229) num3 = 153;
+      if (type === 371) num3 = 243;
+      if (type === 460) num3 = 108;
+      if (type === 25) num3 = 37;
+      // 稀疏族掷骰（:24112-24135）
+      if ((num3 === 32 || num3 === 14 || num3 === 51 || num3 === 36) && Math.random() < 0.5) keep = false;
+      if ((num3 === 0 || num3 === 53) && Math.floor(Math.random() * 3) !== 0) keep = false;
+      let color: import('../fx/VanillaDust').DustColor | null = null;   // newColor（:24136-24148）
+      if (type === 193) color = { r: 30, g: 100, b: 255, a: 100 };
+      if (type === 197) color = { r: 97, g: 200, b: 255, a: 100 };
+      if (type === 460) color = { r: 100, g: 150, b: 130, a: 100 };
+      if (!falling) {
+        const num4 = Math.abs(this.vx) / 3;
+        if (Math.random() * 100 > num4 * 100) keep = false;   // :24151-24155 行走概率=|vx|/3
+      }
+      if (!keep) continue;
+      const num5 = Math.max(-6, Math.min(6, this.vx));        // :24161-24169
+      if (!(Math.abs(this.vx) + Math.abs(this.vy) > 1) && !falling) continue;  // CanSpawnWalkingEffects :36034
+      const d = vd.spawn(this.x, this.y + this.h - 2, this.w, 6, num3, 0, 0, 50, color, 1);  // :24174
+      if (!d) continue;
+      if (this.gravDir === -1) d.y -= this.h + 4;             // :24175-24177
+      if (num3 === 76) { d.scale += Math.floor(Math.random() * 3) * 0.1; d.noLight = true; }
+      if (num3 === 16 || num3 === 108 || num3 === 153 || num3 === 326 || num3 === 327 || num3 === 328) {
+        d.scale += Math.floor(Math.random() * 6) * 0.1;
+      }
+      if (num3 === 37) { d.scale += 0.25; d.alpha = 50; }
+      if (num3 === 5) d.scale += (2 + Math.floor(Math.random() * 6)) * 0.1;   // Next(2,8)
+      d.noGravity = true;
+      if (num3 === 322) {
+        if (Math.floor(Math.random() * 4) === 0) { d.noGravity = false; d.scale *= 1.1; }
+        else d.scale *= 1.2;
+      }
+      if (count > 1) {
+        d.vx *= 1.2; d.vy *= 0.8; d.vy--; d.vx *= 0.8; d.vy *= 0.8;   // :24212-24215 依原序
+        d.scale += Math.floor(Math.random() * 3) * 0.1;
+        d.vx = (d.x - (this.x + this.w / 2)) * 0.2;
+        if (d.vy > 0) d.vy *= -1;
+        d.vx += num5 * 0.3;
+      } else {
+        d.vx *= 0.2; d.vy *= 0.2;
+      }
+      d.x -= num5;
+      if (this.gravDir === -1) d.vy *= -1;                    // :24229-24231
+    }
+  }
+
   /** ★SW-FX1：WallslideMovement 尘 31（1457 :21961-21975 ≥2 ↓ 支 / :22002-22015
    *  tier1 恒出支 1:1）——出生盒 = (position.X+width/2+(width/2-4)*slideDir,
    *  position.Y+height/2+(height/2-4)*gravDir) 8×8;slideDir<0 时 position.X −10

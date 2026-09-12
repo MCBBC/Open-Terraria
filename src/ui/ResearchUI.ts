@@ -82,8 +82,9 @@ export function openResearchPanel(game: Game): void {
 
   panel = el('div', 'sw-res-panel');
   const head = el('div', 'sw-res-head');
-  head.appendChild(el('div', 'sw-title', Lang.text('LegacyInterface.112') !== 'LegacyInterface.112'
-    ? Lang.text('LegacyInterface.112') : Lang.text('Mods.SandboxWorld.Research.Title')));   // Journey UI 研究
+  // ★SW-RB14b:标签订正——LegacyInterface.112 原版 zh-Hans=「你必须先设置边框」
+  //   (1457 zh-Hans.Legacy.json,非研究面),误用致标题错文案;直取自有键(研究/Research)
+  head.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.Research.Title')));   // Journey UI 研究
   const closeBtn = el('button', 'sw-btn', '✕');
   closeBtn.style.cssText = 'margin:0; padding:4px 10px; width:auto; font-size:12px; flex:none;';
   closeBtn.addEventListener('mousedown', (e) => { e.stopPropagation(); closeResearchPanel(); });

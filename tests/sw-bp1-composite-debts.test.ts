@@ -84,6 +84,9 @@ function shell(w: World): Shell {
     cx: 8 * TILE + 8, cy: 16 * TILE + 8, x: 8 * TILE + 2, y: 16 * TILE, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1, dead: false, gfxOffY: 0,
     buffs: { has: () => false }, equipStats: {},
+    // ★SW-FX44：SW-BJ59 后 Game.tryPlace 尾 useTime 走 paintTileSpeed→placeSpeedTileRaw
+    // 委托面（Game:22294→Player:3213）——桩锁基态 1（Player.cs:2453 基 1f,无增益）
+    placeSpeedTileRaw: () => 1,
     inv: {
       selected: 0,
       slots: [{ id: STONE_ITEM ? ITEM_DEFS.indexOf(STONE_ITEM) : 0, stack: 99 }],

@@ -108,7 +108,8 @@ type G = Record<string, unknown> & {
   tryPainting: (x: number, y: number, wall: boolean, dust: unknown) => boolean;
   flowerBootsPlaceFlowers: (x: number, y: number) => void;
   player: { useTime: number; inv: Inventory; equipStats: Record<string, unknown>;
-    buffs: { has: () => boolean; wellFedTier: number; hungerPickSpeed: number }; usedAmbrosia: boolean };
+    buffs: { has: () => boolean; wellFedTier: number; hungerPickSpeed: number }; usedAmbrosia: boolean;
+    placeSpeedTileRaw: () => number };
   drops: Drop[];
 };
 
@@ -120,6 +121,9 @@ function mkPaintGame(): { g: G; w: World; st: TileStore; inv: Inventory; drops: 
   g.player = {
     useTime: 0, inv: new Inventory(), equipStats: {},
     buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, usedAmbrosia: false,
+    // ★SW-FX44：SW-BJ59 后 Game.placeSpeedTileRaw 委托 player 同名方法（:22294→Player:3213）
+    // ——本桩锁基态 1（Player.cs:2453 基 1f,无 Builder/仙馔/风筝/砌砖刀增益）,B1 断言 useTime=10 依赖之
+    placeSpeedTileRaw: () => 1,
   };
   g.inTileRange = () => true;
   g.blockRange = () => 5;

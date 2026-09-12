@@ -223,12 +223,16 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
     expect(uiSrc).toMatch(/return \{ x: 94, y: 450 \+ this\.vinvCraftAdjY\(c\.sh\) \};/);
     // 金标指示条 = 钮心下移 17（CRAFT_BAR_TOP_OFF）
     expect(uiSrc).toMatch(/450 \+ this\.vinvCraftAdjY\(c\.sh\) \+ CRAFT_BAR_TOP_OFF/);
-    // 帧算式单源接线（modernVisible≡false=窗族分期缺席）
-    expect(uiSrc).toMatch(/craftToggleFrame\(false, this\.vinvPipsUseGrid, this\.vinvGridToggleHover\)/);
+    // 帧算式单源接线（★SW-FX41 2026-09-12：modernVisible=窗开态 vinvModernCraftOpen
+    //   ——NewCraftingUI 窗族已落地,FX30 期「≡false=窗族分期缺席」锚随之退役）
+    expect(uiSrc).toMatch(/craftToggleFrame\(this\.vinvModernCraftOpen, this\.vinvPipsUseGrid, this\.vinvGridToggleHover\)/);
     expect(uiSrc).toMatch(/UI_Craft_Toggle_\$\{f\}\.png/);
   });
   it('左键 classic 支 = PipsUseGrid 翻转 + recStart 归零；右键 = 模式循环持久化', () => {
-    expect(uiSrc).toMatch(/if \(options\.data\.craftingGridControl === 'classic'\) \{\s*\n\s*this\.vinvPipsUseGrid = !this\.vinvPipsUseGrid;/);
+    // ★SW-FX41(2026-09-12)：classic 臂头部插入 vinvCloseModernCraft(true)
+    //   （CraftingUI.cs:299-301 NewCraftingUI.Close(quiet:true,returnToInventory:true)
+    //   ——窗开态右键切回 classic 后左键可达此臂,静默收窗面接通）
+    expect(uiSrc).toMatch(/if \(options\.data\.craftingGridControl === 'classic'\) \{\s*\n\s*\/\/ ★SW-FX41:classic 左键支[^\n]*\n[^\n]*\n\s*this\.vinvCloseModernCraft\(true\);\s*\n\s*this\.vinvPipsUseGrid = !this\.vinvPipsUseGrid;/);
     expect(uiSrc).toMatch(/craftingGridControl',\s*\n\s*cycleCraftingGridControl\(options\.data\.craftingGridControl\)/);
     // 悬停名键随模式（CraftingWindowTextTipKey :91-97）
     expect(uiSrc).toMatch(/Lang\.text\(craftingWindowTextTipKey\(options\.data\.craftingGridControl\)\)/);
@@ -239,9 +243,9 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
   });
   it('网格视图接线：DrawRecipesGrid 门 + 页钮 + 滚轮矩形 + 列表同滚', () => {
     expect(uiSrc).toMatch(/private vinvBuildCraftGrid\(\): void \{/);
-    // 网格态吞箱条面（ChestUI.cs:81）
-    expect(uiSrc).toMatch(/if \(!this\.openChest \|\| this\.vinvPipsUseGrid\) return null;/);
-    expect(uiSrc).toMatch(/this\.openChest && !this\.vinvPipsUseGrid \? \{ x, y \} : null/);
+    // 网格态吞箱条面（ChestUI.cs:81）★SW-RB14b:三门 verbatim 补 !NewCraftingUI.Visible
+    expect(uiSrc).toMatch(/if \(!this\.openChest \|\| this\.vinvPipsUseGrid \|\| this\.vinvModernCraftOpen\) return null;/);
+    expect(uiSrc).toMatch(/this\.openChest && !this\.vinvPipsUseGrid && !this\.vinvModernCraftOpen \? \{ x, y \} : null/);
     // 窗口级滚轮（容器 pointer-events:none=空档不拦世界,原版空档不置 mouseInterface 同相;
     // 句柄存储式挂/摘 = 布局拆解退订对称）
     expect(uiSrc).toMatch(/this\.vinvGridWheelHandler = \(e\) => this\.vinvGridWheelTick\(e\);/);
@@ -253,6 +257,8 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
     // playerInventory 调用域门（:17547——关包态窗口级监听不得滚列表）
     expect(uiSrc).toMatch(/if \(this\.invPanel\.style\.display !== 'block'\) return;\s*\/\/ playerInventory 门/);
     // ★SW-RB13b:格面不绑 wheel(stopPropagation 会吞窗口级分页——滚轮只在 3px 空档生效的倒挂)
+    //   ★SW-FX41(2026-09-12):modern 窗格面绑 wheel 合法(窗列表滚动 UIList.cs:109-115),
+    //   变量名用 slotEl 与本锚判别字「cell.」隔离——两域各自滚轮面并存
     expect(uiSrc).not.toMatch(/cell\.addEventListener\('wheel'/);
     // 下滚音只走下滚支（ScrollCraftingGrid :584 逐字）
     expect(uiSrc).toMatch(/craftGridRecStartAfterDown\(this\.vinvCraftRecStart, geo\.cols, avail\);[^]*?menuTick/);
@@ -286,9 +292,9 @@ describe('SW-FX30 接线锚定：Game.ts 尾臂 + mainFlow + Options', () => {
   it('mainFlow cb 接线（onCraftingStationOpen → openCraftingStationFilter）', () => {
     expect(flowSrc).toMatch(/onCraftingStationOpen: \(f\) => ui\.openCraftingStationFilter\(f\),/);
   });
-  it('Options：缺省 classic（原版 Modern Player.cs:363 偏差备案）+ 坏值守卫', () => {
-    expect(optSrc).toMatch(/craftingGridControl: 'classic',/);
-    expect(optSrc).toMatch(/if \(this\.data\.craftingGridControl !== 'classic' && this\.data\.craftingGridControl !== 'modern'\) \{\s*\n\s*this\.data\.craftingGridControl = 'classic';/);
+  it('Options：缺省 modern（★SW-FX41 2026-09-12 缺省回切原版缺省 Modern Player.cs:363——FX30 期 classic 备案随窗族落地撤）+ 坏值守卫', () => {
+    expect(optSrc).toMatch(/craftingGridControl: 'modern',/);
+    expect(optSrc).toMatch(/if \(this\.data\.craftingGridControl !== 'classic' && this\.data\.craftingGridControl !== 'modern'\) \{\s*\n\s*this\.data\.craftingGridControl = 'modern';/);
   });
   it('l10n 原版键在仓（en-US/zh-Hans）', () => {
     const en = JSON.parse(read('public/l10n/en-US.json'));
@@ -310,13 +316,16 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
     // 切换钮 classic 支（:306 翻转后 relayout——vinvUpdateReforge 显隐 relayout 同族教训）。
     // 行界锚定逐段断言（禁 [^]*? 懒惰跨臂——classic/modern 两臂尾部同构,懒惰会跳臂假绿）
     expect(uiSrc).toMatch(/this\.vinvPipsUseGrid = !this\.vinvPipsUseGrid;[^\n]*\n\s*if \(!this\.vinvPipsUseGrid\) this\.vinvCraftRecStart = 0;[^\n]*\n\s*this\.vinvSyncGridToggle\(\);\s*\n\s*this\.vinvUpdateCraftGrid\(\);\s*\n(?:[^\n]*\n){3}\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\} else \{/);
-    // 切换钮 modern 支（CraftingUI.cs:310-315 副效应 PipsUseGrid=false——窗族缺席但可关网格）
-    expect(uiSrc).toMatch(/this\.vinvPipsUseGrid = false;\s*\n\s*this\.vinvCraftRecStart = 0;[^\n]*\n\s*this\.vinvSyncGridToggle\(\);\s*\n\s*this\.vinvUpdateCraftGrid\(\);\s*\n\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\}\s*\n\s*\/\/ modern 支/);
-    // 站点过滤开支（OpenCloseFilter :157 置位后 relayout）
-    expect(uiSrc).toMatch(/this\.vinvRefreshCraft\(\);\s*\n\s*\/\/ ★SW-RB13b:PipsUseGrid=true(?:[^\n]*\n){2}\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\} else \{/);
+    // 切换钮 modern 支（CraftingUI.cs:310-315 副效应 PipsUseGrid=false——★SW-FX41
+    //   2026-09-12 窗族落地:副效应后接 vinvToggleModernCraft(false) = ToggleInInventory）
+    expect(uiSrc).toMatch(/this\.vinvPipsUseGrid = false;\s*\n\s*this\.vinvCraftRecStart = 0;[^\n]*\n\s*this\.vinvSyncGridToggle\(\);\s*\n\s*this\.vinvUpdateCraftGrid\(\);\s*\n\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\/\/ ★SW-FX41 P2-2:modern 左键支[^\n]*\n[^\n]*\n\s*this\.vinvToggleModernCraft\(false\);/);
+    // 站点过滤开支（OpenCloseFilter :157 置位后 relayout；★SW-FX41:else 臂改 modern
+    //   状态机分支（else if _builtLayout==='vanilla'），classic×classic 布局退第三臂）
+    expect(uiSrc).toMatch(/this\.vinvRefreshCraft\(\);\s*\n\s*\/\/ ★SW-RB13b:PipsUseGrid=true(?:[^\n]*\n){2}\s*this\.vinvLayoutSig = '';\s*\n\s*this\.layoutVanilla\(\);\s*\n\s*\} else if \(this\._builtLayout === 'vanilla'\) \{/);
   });
   it('layoutVanilla 签名含 PipsUseGrid 位（否则早退跳过 pos 循环=吞箱条门死码）+ cosUiVisible 谓词', () => {
-    expect(uiSrc).toMatch(/const cosUiVisible = chestOpen && !this\.vinvPipsUseGrid;/);
+    // ★SW-FX41:ChestOrShopUIVisible(Main.cs:3037 首支)再折 !NewCraftingUI.Visible
+    expect(uiSrc).toMatch(/const cosUiVisible = chestOpen && !this\.vinvPipsUseGrid && !this\.vinvModernCraftOpen;/);
     expect(uiSrc).toMatch(/\$\{this\.vinvPipsUseGrid \? 1 : 0\}/);
     // ChestOrShopUIVisible 消费面：垃圾桶/图鉴/表情吃 cosUiVisible；QuickStack/Sort 保裸门
     expect(uiSrc).toMatch(/trashXY\(\!\!this\.vinvLayoutCtx\?\.cosUiVisible\)/);
@@ -328,7 +337,7 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
   });
   it('列表滚轮 = ScrollCraftingList 整批直加（★SW-FX38 重锚:Main.cs:17593 Delta/120 截断档,CraftingUI.cs:574 focusRecipe += mouseWheel——旧 max(1,steps)+round 虚生档已废）', () => {
     expect(uiSrc).toMatch(/private vinvCraftWheel\(e: WheelEvent\): void \{/);
-    expect(uiSrc).toMatch(/const num = vanillaWheelNotches\(e\.deltaY\);/);
+    expect(uiSrc).toMatch(/vanillaWheelNotches\(e\.deltaY, e\.deltaMode\)/);   // ★SW-RB14d：补传 deltaMode（Firefox 行模式归一）
     expect(uiSrc).toMatch(/this\.vinvCraftFocusV \+ num/);
     // 旧虚生档面残留 = 回归哨兵
     expect(uiSrc).not.toMatch(/Math\.max\(1, steps\)/);

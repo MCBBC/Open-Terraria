@@ -497,7 +497,8 @@ export class NpcShop {
       <div class="sw-shop-grid">${cells.join('')}</div>`;
     // ★SW-FX32 刀①（2026-09-11）Set-Back 钮退役：原版 Main.cs:42500-42532 商店段
     //  全文无关闭钮——关店 = Esc / 对话「关闭」钮 / 走远（closeNpcDialog →
-    //  npcShopClose Main.cs:18056-18064 等价面）。旧「Set-Back」钮=自创,撤。
+    //  npcShopClose 等价面；UpdateOldNPCShop 1457:18387-18393/1458 同位/1456:18054
+    //  ——★SW-RB14b 行号订正,旧注 18056-18064 系 1456 锚）。旧「Set-Back」钮=自创,撤。
     panel.querySelectorAll('.sw-shop-item').forEach((el) => {
       const cell = el as HTMLElement;
       cell.addEventListener('click', (ev) => {

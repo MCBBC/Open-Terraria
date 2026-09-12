@@ -548,7 +548,15 @@ describe('F2/F3 黄蜂枪 1155 出手链单次应用形（Player.cs:48809-48820�
 function parkourGame(vid: 6190 | 6195, input: Record<string, unknown>, prevRightDown = false) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
-  player.inv.add(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[vid]], 1);
+  // SW-FX46 重锚（2026-09-12）：手持物直写热栏槽 0（magicGame :446 同法先例）。
+  // ★定谳：原 `inv.add(...)` 曾落热栏系旧 ③ 空格支升序臂（0..49）把 6837 落槽 0;
+  //   SW-BN5（2026-09-08,Inventory.fillBagArms 三臂化 1:1）后非收藏件改降序臂,
+  //   且热栏空格臂被 useStyle!==0 门控（Player.cs GetItem :39671-39680 门面
+  //   `!isACoin && useStyle != 0`——6190 SetDefaults :47656-47660 无 useStyle →
+  //   itemUseStyleOf=0,原版捡起同样不落热栏）→ 6837 实落槽 49,heldItem()=null,
+  //   F1 四用例齐读 null.id。生产落位 1:1 无罪,壳陈旧——快换面被测的是「热栏
+  //   持物右键互换」,直写槽位即被测手势的真起点。
+  player.inv.slots[0] = { id: invIndexOfVanilla(vid), stack: 1 };
   g.player = player;
   g.entities = { add: () => {}, projectiles: [], npcs: [], critters: [], enemies: [] };
   g.input = { mouseDown: false, mouseHeld: false, rightDown: true, mouseX: 700, mouseY: 300,

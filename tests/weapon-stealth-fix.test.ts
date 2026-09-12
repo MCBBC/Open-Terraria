@@ -14,7 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { TileStore } from '../src/world/TileStore';
+import { World } from '../src/world/World';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import type { GameHooks } from '../src/entities/types';
@@ -27,19 +27,22 @@ const mkPlayer = () => {
   return p;
 };
 
-// ---- fixedUpdate 桩环境（a-batch2 summon-r6 同款 + world 只读字段补齐） ----
+// ---- fixedUpdate 桩环境（a-batch2 summon-r6 同款） ----
 // H=200：bordersMovement 底边出界即死线 = hPx−640px（Player.ts:5629 ByOther 21），
 // 120 格世界死线 1280px < 出生 1440px 会秒杀玩家——世界须高出生点 +640px 以上
 const W = 200, H = 200;
-function makeStore(): TileStore {
-  const store = new TileStore(W, H);
-  for (let x = 0; x < W; x++) for (let y = 100; y < 120; y++) store.setTile(x, y, 1);
-  return store;
-}
 function makeHooks(player: Player): GameHooks {
+  // ★SW-FX44：夹具换真 World（wing-flight 同法）。曾喂 {store,h,lavaLine,…} 半成品——
+  // SW-FX20 NaN 防灌带（Player.ts 深度重力 num6 NaN→0.25 档）把夹具世界重力打成
+  // 0.4×0.25=0.1：40 拍 settle 落不到地（160px 需 ~24 拍@0.4,0.1 档只走 ~82px）→
+  // ④ 静止衰减分支（|vy|<0.1 门）不达 / ⑩⑪ vy=0.1 混入 |v| 轴（3.0→3.1）。
+  // 非 1457 语义债,生产面 game.world 恒为完整对象（FX40 定谳=夹具债）。
+  const w = new World(W, H, 7, 'stealth-fixture');
+  for (let x = 0; x < W; x++) for (let y = 100; y < 120; y++) w.store.setTile(x, y, 1);
+  w.groundLevel = 100;                     // ★SW-FX20 worldgen 必设位（num6 分母面）
+  w.lavaLine = 90;                         // 旧夹具语义保留
   const hooks: GameHooks = {
-    world: { store: makeStore(), h: H, lavaLine: 90, isExpert: false,
-             seedFlags: {}, clock: { isDay: true } } as never,
+    world: w as never,
     player: player as never,
     enemies: () => [],
     critters: () => [],

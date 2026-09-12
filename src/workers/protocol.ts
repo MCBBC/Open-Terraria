@@ -77,6 +77,16 @@ export interface WorldPacket {
   trees: Array<{ x: number; y: number; h: number }>;
   flags: Record<string, boolean>;
   treeX: number[]; treeStyle: number[]; treeTops: number[];
+  /** ★SW-FX43（2026-09-12）：caveBackX/worldId + wld 快照三通道随包（worker 读档→
+   *  主线程同缝;旧包缺省=undefined → 导出侧台账缺省映射回退） */
+  caveBackX?: number[];
+  worldId?: number;
+  wldSnap?: SaveData['wldSnap'];
+  teSnap?: SaveData['teSnap'];
+  townRooms?: SaveData['townRooms'];
+  /** ★SW-FX43：背景样式 13 档（R16-5 落盘值;worker 读档→主线程同缝——曾缺=worker
+   *  路径读档后主线程存档丢全部背景样式） */
+  bgStyles?: SaveData['header']['bgStyles'];
   /** 以太生物群系中心（无微光世界为 0；旧包可缺省） */
   shimmerX?: number; shimmerY?: number;
   buf: TileBuffers;

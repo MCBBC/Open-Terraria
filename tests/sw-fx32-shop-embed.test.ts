@@ -293,3 +293,77 @@ describe('SW-FX32 ③买卖接线/悬停单源(SW-BJ22 语义面 vanilla 载体)
     expect(uiSrc).toContain('const savBanks = this.game.coinSavingsByBank();');
   });
 });
+
+// ============================================================
+// SW-RB14b(2026-09-12)修复锚定:关包关店门/换店失效面/陈旧锚订正
+// ============================================================
+describe('SW-RB14b 修复锚定(F1 关包关店门/F5 换店失效/F4 锚订正)', () => {
+  it('F1 !playerInventory ⇒ npcShop=0:closeInventory 补 npcShopClose(Main.cs:42496-42499 每帧门 + :46434-46441 dead 链)', () => {
+    const start = uiSrc.indexOf('closeInventory() {');
+    const body = uiSrc.slice(start, uiSrc.indexOf('openItemSearch()', start));
+    expect(body).toContain('this.game.npcShopClose();');
+    expect(body).toContain('★SW-RB14b');
+    // 门序:在 vinvCloseModernCraft(Main.cs:46438-46444 同段)之后,与原版 !playerInventory
+    // 块同域(Main.cs:46437 chest=-1 → InGuideCraftMenu → InReforgeMenu → NewCraftingUI.Close)
+    expect(body.indexOf('this.vinvCloseModernCraft(true);')).toBeGreaterThan(-1);
+    expect(body.indexOf('this.game.npcShopClose();')).toBeGreaterThan(body.indexOf('this.vinvCloseModernCraft(true);'));
+  });
+
+  it('F5 商店按钮开启面:openShopFromButton 接线(OpenShop Main.cs:41162-41170 两臂)', () => {
+    const g = read('src/core/Game.ts');
+    expect(g).toContain("if (id === 'shop') { this.openShopFromButton(false); return; }");
+    expect(g).toContain("if (id === 'shopDecor' && npc.vanillaId === 227) { this.openShopFromButton(true); return; }");
+    const start = g.indexOf('private openShopFromButton');
+    const body = g.slice(start, g.indexOf('private openNpcShop(decor', start));
+    expect(body).toContain('this.shopSellbackMemo.clear();');   // UpdateOldNPCShop(1457:18387-18393)
+    expect(body).toContain('this.shopBuybackStock = [];');      // Chest.SetupShop 重建(Chest.cs:1357-1361)
+    expect(body).toContain("`${decor ? 'd' : 's'}:${this.dialogNpc?.vanillaId ?? -1}`");
+  });
+
+  it('F5 行为矩阵:换店清记/同店保记/装饰专柜算换店(原版 npcShop 变更语义)', () => {
+    const shell = (memo: Record<string, number>, idx: string | null) => {
+      const g = Object.create(Game.prototype) as unknown as {
+        dialogNpc: { vanillaId: number };
+        shopSellbackMemo: Map<string, number>;
+        shopBuybackStock: Array<{ vid: number; prefix: number; stack: number }>;
+        lastOpenedShopIdx: string | null;
+        openNpcShop(decor?: boolean): void;
+      };
+      g.dialogNpc = { vanillaId: 1 };
+      g.shopSellbackMemo = new Map(Object.entries(memo).map(([k, v]) => [k, v]));
+      g.shopBuybackStock = [{ vid: 8, prefix: 0, stack: 3 }];
+      g.lastOpenedShopIdx = idx;
+      let refreshDecor: boolean | null = null;
+      g.openNpcShop = (decor = false) => { refreshDecor = decor; };
+      return { g, getRefresh: () => refreshDecor };
+    };
+    // ①换店(A s:1 → B s:2):记+回购清,openNpcShop 照走
+    const a = shell({ '8:0': 5 }, 's:2');   // 上一会话=B 店(s:2)→点 NPC1 商店钮=换店
+    (Game.prototype as unknown as { openShopFromButton(decor: boolean): void }).openShopFromButton.call(a.g, false);
+    expect(a.g.shopSellbackMemo.size).toBe(0);
+    expect(a.g.shopBuybackStock).toEqual([]);
+    expect(a.g.lastOpenedShopIdx).toBe('s:1');   // 目标 NPC=1(/dialogNpc)
+    expect(a.getRefresh()).toBe(false);
+    // ②同店再点(npcShop 未变):差价记保留(原版 helper 存活),回购货架仍重建(SetupShop)
+    const b = shell({ '8:0': 5 }, 's:1');
+    (Game.prototype as unknown as { openShopFromButton(decor: boolean): void }).openShopFromButton.call(b.g, false);
+    expect(b.g.shopSellbackMemo.get('8:0')).toBe(5);
+    expect(b.g.shopBuybackStock).toEqual([]);
+    // ③装饰专柜(商店索引 15→25 变更):记清
+    const c = shell({ '8:0': 5 }, 's:1');
+    (Game.prototype as unknown as { openShopFromButton(decor: boolean): void }).openShopFromButton.call(c.g, true);
+    expect(c.g.shopSellbackMemo.size).toBe(0);
+    expect(c.getRefresh()).toBe(true);
+    // ④npcShopClose 归零投影:重开同店=索引 0→A 变更 → lastOpenedShopIdx 复位
+    const d = shell({}, 's:1');
+    (Game.prototype as unknown as { npcShopClose(): void }).npcShopClose.call(d.g);
+    expect(d.g.lastOpenedShopIdx).toBeNull();
+  });
+
+  it('F4 锚订正:陈旧 1456 锚(18056-18064)不再入注(现锚 1457:18387-18393)', () => {
+    for (const f of ['src/ui/UI.ts', 'src/ui/NpcDialog.ts', 'src/core/Game.ts', 'src/stats/SellChain.ts']) {
+      expect(read(f), f).not.toContain('Main.cs:18056-18064');
+    }
+    expect(read('src/core/Game.ts')).toContain('UpdateOldNPCShop 1457:18387-18393');
+  });
+});

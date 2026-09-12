@@ -137,7 +137,9 @@ describe('SW-FX28 ③开箱流 D0/绑定面(UI.ts)', () => {
     expect(body).toContain('for (let i = 0; i < 40; i++) {');
     // ★SW-FX30 刀②(2026-09-11):pos 门扩 ChestUI.cs:81 网格态吞箱条面(chest!=-1 &&
     //   !PipsUseGrid && !modern)——openChest ∧ !PipsUseGrid 双门,开箱即原位语义不变
-    expect(body).toContain('pos: () => (this.openChest && !this.vinvPipsUseGrid ? { x, y } : null)');
+    //   ★SW-RB14b(2026-09-12):补第三门 !NewCraftingUI.Visible(FX41 modern 窗落地后
+    //   可达;ChestUI.cs:81 三门 verbatim,1458 同行)——箱条 40 槽随门整面让位
+    expect(body).toContain('pos: () => (this.openChest && !this.vinvPipsUseGrid && !this.vinvModernCraftOpen ? { x, y } : null)');
     expect(body).toContain('const { x, y } = chestSlotXY(i);');
   });
 });

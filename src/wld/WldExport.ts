@@ -9,10 +9,14 @@
 //   (WorldGen.cs:11370→TreeTopsInfo.cs:217-232)派生/tileFrameImportant[753] 金标勘误
 //   (Main.cs:9950)。★SW-FX35(2026-09-11):TE 段扩 6/8/9/10 四类+锚桩 short itemType 勘误
 //   +teSnap 三类透传(0 假人/2 传感器/7 晶塔);townManager/bestiary/creativePowers 三尾段
-//   真写(bestiar 空桶=12B 修【原版拒载】级缺段)。已登记偏差: SavedOreTiers 三档 -1/四档 7/6/9/8 缺省、jungleBG 无键
-//   写 0、ExtraSpawnPoint 写空、致动器/wire4/inActive 无态写 0、manifest 空串(合法,
-//   WorldManifest.cs:31-45 容错)、caveBackX 无独立建模按 treeX 派生(导入档漂移,登记债)、
-//   guid 恒 16 零字节(GUID.Zero 合法)。原版可读性=待 rig/TEdit 终验。
+//   真写(bestiar 空桶=12B 修【原版拒载】级缺段)。★SW-FX43(2026-09-12) wld-compat P1:
+//   wldSnap 快照通道生产者落地(WldImport 差量携行→serializeSave→loadSaveData→World)、
+//   caveBackX 真值链(header.caveBackX 导入捕获/自建 worldgen 掷值/旧档 treeX 派生回退)、
+//   footer worldId 与 header 同值(LoadFooter :3003-3015 BadFooter 门)、guid/manifest/
+//   seedText/CreationTime/worldGenVersion/worldSurface/rockLayer 快照回写、jungleBG 键
+//   补齐(TreeTopsInfo.cs:222 slot5)。已登记偏差: SavedOreTiers 三档 -1/四档 7/6/9/8 缺省、
+//   ExtraSpawnPoint 写空、致动器/wire4/inActive 无态写 0、_tempCoinRain 恒 0(活态未建模)、
+//   自建世界 bg 字节组按 seed 派生(缺省 0)。原版可读性=待 rig/TEdit 终验。
 // 数据源映射:save.header(时间/尺寸/spawn/地层/地牢/树与背景样式/月相快照)/
 //   save.flags(WldParser 命名键布尔旗)/save.weather/save.events/save.clock/
 //   save.bannerKills/save.invasion;缺省值按读侧缺省语义补(矿层 -1=未锁定、
@@ -29,6 +33,10 @@ import { bytesToB64, rlePairs, rleTiles } from '../save/SaveFile';
 import vanillaJson from '../../public/sprites/vanilla.json';
 
 const TILE_COUNT = 754;   // TileID.Count(Terarria1457/Terraria.ID/TileID.cs:1945)
+
+// ★SW-FX43（2026-09-12）：footer worldId 取值域锚（=HEADER_PRE.worldId 台账行,
+//  快照优先取值走 fieldValue——与 writeHeader 同一取值链,保证 header/footer 同值）
+const WORLD_ID_FIELD: WldField = HEADER_PRE.find((f) => f.name === 'worldId')!;
 
 // ---- 自有 RLE 解压(varint run-1 + varint v;serialize.ts rlePairs/rleTiles 逆) ----
 function b64ToBytes(b64: string): Uint8Array {
@@ -189,10 +197,12 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
       // ★P2-7 补:致动器安装位(WF:1528-1530 actuator→b3|=2;内部 wire bit4)——
       //  曾漏写:导入后信号无法翻转这些格(Wiring 消费 bit4)
       if (wire[i] & 0x10) b3 |= 2;
-      // ★P1-4+红队复核:墙高字节(WF:1540-1545 wall>255→payload 追加+b3|=0x40;
-      //  位置=liquid payload 之后(原版 num3 流水尾,读侧 cs:2663-2665 同位)——
-      //  曾写在 liquid 前=与原版流位互换(Echo 墙水下场景交叉错,不失步但错值)
-      if (wall > 255) { payload.push((wall >> 8) & 0xff); b3 |= 0x40; }
+      // ★SW-RB14c 复核勘误:墙高字节流位=liquid payload **之后**(写侧 WF:1540-1545
+      //  `if (tile.wall > 255)` 在 liquid 块尾追加 num3;读侧 cs:2663-2665 同位)——
+      //  本行此前仍挂在 liquid 前(注/码背离,P1-4 勘误未真正落码):wall>255∧liquid>0
+      //  同格(Echo 墙水景)流序互换,回环 wall|=(液量<<8)→≥367 钳 0(墙整格丢失)+
+      //  液量=墙高字节(200→1)。回归:tests/wld-export.test.ts RB14c 组。
+      if (wall > 255) b3 |= 0x40;
       if (liq !== 0) {
         // ★液体类型位 1:1 原版(WF:1500-1513,2026-09-07 勘误:旧写整体错一位——
         //  内部 1 水 误写 0x10=岩浆位、2 岩浆→0x18=蜂蜜、3 蜂蜜→微光,回环
@@ -204,6 +214,8 @@ function encodeTiles(w: BinaryWriterLE, save: SaveData): void {
         else b |= 8;
         payload.push(liq);
       }
+      // ★SW-RB14c:墙高字节实体 push 在 liquid 之后(WF:1540-1545 num3 流水尾同位)
+      if (wall > 255) payload.push((wall >> 8) & 0xff);
       if (wire[i] & 1) b2 |= 2;
       if (wire[i] & 2) b2 |= 4;
       if (wire[i] & 4) b2 |= 8;
@@ -242,7 +254,10 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
       case 'f64': w.f64(Number(v)); break;
       case 'f32': w.f32(Number(v)); break;
       case 'bool': w.bool(!!v); break;
-      case 'i64': w.i64(typeof v === 'bigint' ? v : BigInt(Math.round(Number(v)))); break;
+      // ★SW-FX43：i64 快照字符串域（CreationTime .NET ticks ~6.4e17 > 2^53——
+      //  Number 化即失真;十进制数字串直 BigInt 精确回写,wldSnap 携行域）
+      case 'i64': w.i64(typeof v === 'bigint' ? v
+        : (typeof v === 'string' && /^-?\d+$/.test(v) ? BigInt(v) : BigInt(Math.round(Number(v))))); break;
       case 'str': w.str(String(v)); break;
     }
   };
@@ -253,7 +268,13 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
   };
   // [pre] title..maxTilesX(guid=16B 特例嵌在 PRE 里,按 name 分流)
   for (const f of HEADER_PRE) {
-    if (f.name === 'guid') { for (let i = 0; i < 16; i++) w.byte(0); continue; }
+    if (f.name === 'guid') {
+      // ★SW-FX43：guid 快照回写（WldImport 捕获 16B hex → wldSnap.guid;曾恒写 16
+      //  零字节=GUID.Zero 合法但导入档漂移）。非 32 位 hex 脏值防御性回退零字节
+      const g = typeof snap?.guid === 'string' && /^[0-9a-f]{32}$/.test(snap.guid) ? snap.guid : '';
+      for (let i = 0; i < 16; i++) w.byte(g ? parseInt(g.slice(i * 2, i * 2 + 2), 16) : 0);
+      continue;
+    }
     put(f);
   }
   // [flags 1] GameMode..windSpeedTarget
@@ -310,7 +331,9 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
       const ts4 = ts && ts.length >= 4 ? ts : [0, 0, 0, 0];
       const tt = save.header.treeTops?.length ? save.header.treeTops : [
         ts4[0], ts4[1], ts4[2], ts4[3],
-        bg?.corrupt ?? 0, 0, bg?.snow ?? 0, bg?.hallow ?? 0, bg?.crimson ?? 0,
+        // ★SW-FX43：slot5=jungleBG（TreeTopsInfo.cs:222 `_variations[5] = WorldGen.jungleBG`）
+        //  ——BgStylesSave.jungleBG 键补齐后写真值;自建世界缺省仍落 0（旧派生语义）
+        bg?.corrupt ?? 0, bg?.jungleBG ?? 0, bg?.snow ?? 0, bg?.hallow ?? 0, bg?.crimson ?? 0,
         bg?.desert ?? 0, bg?.ocean ?? 0, bg?.mushroom ?? 0, bg?.underworld ?? 0,
       ];
       w.i32(13);
@@ -326,7 +349,12 @@ function writeHeader(w: BinaryWriterLE, save: SaveData): void {
 // ---- TE 段(save.furniture 挂物族八类 + save.teSnap 三类透传) ----
 function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
   const list = save.furniture ?? [];
-  const snap = save.teSnap ?? [];
+  // ★SW-RB14c：teSnap 与活态家具同位冲突 → 丢弃透传残影。原版 LoadTileEntities
+  //  (WF:3339-3342) 按【流序】后写覆盖前写——若不滤,同一格先写家具后写 snap 残影
+  //  → 残影胜出、活态家具整件丢失（场景：会话内拆晶塔/假人后原格放挂物家具——
+  //  teSnap 载入侧淘汰只在 loadSaveData 边界,同会话不刷新）。
+  const livePos = new Set(list.map((f) => `${f.x},${f.y}`));
+  const snap = (save.teSnap ?? []).filter((t) => !livePos.has(`${t.x},${t.y}`));
   w.i32(list.length + snap.length);
   for (const f of list) {
     // kind → TEType(TileEntitiesManager.RegisterAll 序,TileEntitiesManager.cs:26-39):
@@ -556,8 +584,11 @@ export function exportWld(save: SaveData): Uint8Array {
     w.bool(false);
     mark();                                         // [9] creativePowers 尾
   }
-  // footer(WF:1759):true+name+worldId
-  w.bool(true).str(save.header.name || 'World').i32(12345);
+  // footer(WF:1759):true+name+worldId——★SW-FX43（2026-09-12）：worldId 与 header
+  //  同值（LoadFooter :3003-3015 读回比对 Main.ActiveWorldFileData.WorldId=header
+  //  载入值,不符=BadFooter【整档拒载】;曾恒写 12345=潜拒载雷）。取值链=快照优先→
+  //  header.worldId（自建=WorldGen.cs:11364 掷值/导入=原值）→ created-XOR 派生
+  w.bool(true).str(save.header.name || 'World').i32(Number(fieldValue(save, WORLD_ID_FIELD)));
   mark();                                           // [10] footer 尾
   // (2026-09-07 终版:幽灵格净化方案落地——存档在读档/生成边界已无幽灵,
   //  actDiff 恒空,无需任何私有附加段。历史:本日曾三易其稿(丢弃/转正/虚化/

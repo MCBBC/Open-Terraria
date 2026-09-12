@@ -351,3 +351,29 @@ describe('SW-FX35 真实档回归（Starter_World v279）：三桶导入→导�
     expect(wld2.tileEntities.filter((t) => t.type === 0).map((t) => t.dummy?.npc)).toEqual([100]);
   });
 });
+
+// ---- ★SW-RB14c（2026-09-12）：teSnap 残影与活态家具同位冲突守卫 ----
+describe('SW-RB14c：teSnap 同位冲突 → 活态家具胜出（WF:3339-3342 后写覆盖语义反置）', () => {
+  it('同位 (4,2)：teSnap 假人残影被滤,food_platter 全量回写', () => {
+    const save = mkSave({
+      furniture: [{ x: 4, y: 2, kind: 'food_platter', slots: [{ id: vidStable(353), stack: 1 }] } as never],
+      teSnap: [{ type: 0, x: 4, y: 2, npc: 100 }],
+    });
+    const bytes = exportWld(save);
+    const rec = parseWldToSave(bytes).save;
+    // 活态家具胜出（修复前:snap 残影后写 → vanilla/本仓解析双双只留假人,挂物丢失）
+    expect(rec.furniture?.length).toBe(1);
+    expect(rec.furniture?.[0]?.kind).toBe('food_platter');
+    expect(rec.teSnap?.length ?? 0).toBe(0);
+  });
+  it('异位共存：非冲突 teSnap 照常透传（守卫零误伤）', () => {
+    const save = mkSave({
+      furniture: [{ x: 4, y: 2, kind: 'food_platter', slots: [{ id: vidStable(353), stack: 1 }] } as never],
+      teSnap: [{ type: 0, x: 20, y: 5, npc: -1 }, { type: 7, x: 26, y: 5 }],
+    });
+    const rec = parseWldToSave(exportWld(save)).save;
+    expect(rec.furniture?.length).toBe(1);
+    expect(rec.furniture?.[0]?.slots[0]?.id).toBe(vidStable(353));
+    expect(rec.teSnap?.map((t) => t.type)).toEqual([0, 7]);   // 异位两件全透传
+  });
+});

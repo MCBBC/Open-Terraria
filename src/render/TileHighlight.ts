@@ -294,6 +294,7 @@ export function loadHighlightMask(type: number): ImageBitmap | HTMLImageElement 
   const hit = maskCache.get(type);
   if (hit !== undefined) return hit;
   if (maskPending.has(type)) return null;
+  if (typeof Image === 'undefined') return null;   // ★SW-BJ63：非浏览器环境（vitest/SSR）恒 null——渲染侧 `!mask → continue` 消费,不进负缓存
   maskPending.add(type);
   const img = new Image();
   img.onload = () => {

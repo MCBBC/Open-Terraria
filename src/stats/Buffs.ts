@@ -464,6 +464,35 @@ export enum BuffType {
   AxeFairyPet = 357,         // 塞纳克斯(372,←5517)
   BoulderPet = 358,          // 友好巨石(373,←5523)
   RainbowBoulderPet = 359,   // 友好彩虹巨石(382,←5654)
+  // ---- SW-FX48（2026-09-12）1.4.5 boss 宠 21 件（FX2 豁免剩债收口）----
+  // 物品 4797-4817（Item.cs:39417-39440 共享块 DefaultToVanitypet(881+type-4797,
+  // 284+type-4797),1456 :39399-39422/1458 :39417-39438 同值）→ buff 284-304。
+  // 施加链 = UpdatePet/UpdatePetLight（Player.cs:17414-17445）装备槽 60s 补挂
+  // （Game.updatePetSlot）。vanityPet[284..293,295..297,300..304]（Main.cs:9392-9409）
+  // / lightPet[294,298,299]（Main.cs:9436-9438——石巨人/光之女皇/南瓜王三只光宠）。
+  // 枚举名一律 = 原版 BuffID 内部名（idNames.generated BUFF_NAME_BY_ID 同源）→
+  // BuffName/BuffDescription 双键走原版 l10n 现成语料,零 l10n-custom 新增。
+  KingSlimePet = 360,        // 史莱姆王子(284,←4797 Royal Delight)：vanityPet[284]（Main.cs:9392）
+  EyeOfCthulhuPet = 361,     // 可疑眼睛(285,←4798)：vanityPet[285]（Main.cs:9393）
+  EaterOfWorldsPet = 362,    // 蠕虫吞噬怪(286,←4799)：vanityPet[286]（Main.cs:9394）
+  BrainOfCthulhuPet = 363,   // 蜘蛛脑(287,←4800)：vanityPet[287]（Main.cs:9395）
+  SkeletronPet = 364,        // 小骷髅王(288,←4801)：vanityPet[288]（Main.cs:9396）
+  QueenBeePet = 365,         // 宝贝蜜蜂(289,←4802)：vanityPet[289]（Main.cs:9397）
+  DestroyerPet = 366,        // 微型毁灭者(290,←4803)：vanityPet[290]（Main.cs:9398）
+  TwinsPet = 367,            // 激光眼和魔焰眼(291,←4804)：vanityPet[291]（Main.cs:9399）
+  SkeletronPrimePet = 368,   // 小机械骷髅王(292,←4805)：vanityPet[292]（Main.cs:9400）
+  PlanteraPet = 369,         // 世纪之花幼苗(293,←4806)：vanityPet[293]（Main.cs:9401）
+  GolemPet = 370,            // 玩具石巨人(294,←4807)：lightPet[294]（Main.cs:9436）＝光宠
+  DukeFishronPet = 371,      // 小猪龙鱼(295,←4808)：vanityPet[295]（Main.cs:9402）
+  LunaticCultistPet = 372,   // 小幻影龙(296,←4809)：vanityPet[296]（Main.cs:9403）
+  MoonLordPet = 373,         // 月精灵(297,←4810)：vanityPet[297]（Main.cs:9404）
+  FairyQueenPet = 374,       // 仙灵公主(298,←4811)：lightPet[298]（Main.cs:9437）＝光宠
+  PumpkingPet = 375,         // 杰克南瓜灯(299,←4812)：lightPet[299]（Main.cs:9438）＝光宠
+  EverscreamPet = 376,       // 常绿尖叫怪树苗(300,←4813)：vanityPet[300]（Main.cs:9405）
+  IceQueenPet = 377,         // 冰雪女王(301,←4814)：vanityPet[301]（Main.cs:9406）
+  MartianPet = 378,          // 异星滑板小子(302,←4815)：vanityPet[302]（Main.cs:9407）
+  DD2OgrePet = 379,          // 食人魔宝宝(303,←4816)：vanityPet[303]（Main.cs:9408）
+  DD2BetsyPet = 380,         // 小双足翼龙(304,←4817)：vanityPet[304]（Main.cs:9409）
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -801,6 +830,33 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.AxeFairyPet]: { vanillaBuff: 372, descKey: 'BuffDescription.AxeFairyPet', fallbackName: '塞纳克斯' },
   [BuffType.BoulderPet]: { vanillaBuff: 373, descKey: 'BuffDescription.BoulderPet', fallbackName: '友好巨石' },
   [BuffType.RainbowBoulderPet]: { vanillaBuff: 382, descKey: 'BuffDescription.RainbowBoulderPet', fallbackName: '友好彩虹巨石' },
+  // ---- SW-FX48（2026-09-12）：1.4.5 boss 宠 21 件（4797-4817 → 284-304,
+  //      Item.cs:39417-39440 DefaultToVanitypet(881+type-4797, 284+type-4797)）。
+  //      枚举名 = 原版 BuffID 内部名 → descKey 走原版 l10n BuffDescription.<Internal>
+  //      现成语料（zh/en 全 12 语言在盘,零 l10n-custom 新增）;图标 Buff_284-304.png 全在盘。
+  //      消费面 = Game.petBuffKinds light/vanity 双集 + updatePetSlot 补挂面（SW-FX2 已建）。
+  //      buffNoSave 全名单不含以下任何 id（Main.cs:9108-9199 无 284-304,原版同）----
+  [BuffType.KingSlimePet]: { vanillaBuff: 284, descKey: 'BuffDescription.KingSlimePet', fallbackName: '史莱姆王子' },
+  [BuffType.EyeOfCthulhuPet]: { vanillaBuff: 285, descKey: 'BuffDescription.EyeOfCthulhuPet', fallbackName: '可疑眼睛' },
+  [BuffType.EaterOfWorldsPet]: { vanillaBuff: 286, descKey: 'BuffDescription.EaterOfWorldsPet', fallbackName: '蠕虫吞噬怪' },
+  [BuffType.BrainOfCthulhuPet]: { vanillaBuff: 287, descKey: 'BuffDescription.BrainOfCthulhuPet', fallbackName: '蜘蛛脑' },
+  [BuffType.SkeletronPet]: { vanillaBuff: 288, descKey: 'BuffDescription.SkeletronPet', fallbackName: '小骷髅王' },
+  [BuffType.QueenBeePet]: { vanillaBuff: 289, descKey: 'BuffDescription.QueenBeePet', fallbackName: '宝贝蜜蜂' },
+  [BuffType.DestroyerPet]: { vanillaBuff: 290, descKey: 'BuffDescription.DestroyerPet', fallbackName: '微型毁灭者' },
+  [BuffType.TwinsPet]: { vanillaBuff: 291, descKey: 'BuffDescription.TwinsPet', fallbackName: '激光眼和魔焰眼' },
+  [BuffType.SkeletronPrimePet]: { vanillaBuff: 292, descKey: 'BuffDescription.SkeletronPrimePet', fallbackName: '小机械骷髅王' },
+  [BuffType.PlanteraPet]: { vanillaBuff: 293, descKey: 'BuffDescription.PlanteraPet', fallbackName: '世纪之花幼苗' },
+  [BuffType.GolemPet]: { vanillaBuff: 294, descKey: 'BuffDescription.GolemPet', fallbackName: '玩具石巨人' },
+  [BuffType.DukeFishronPet]: { vanillaBuff: 295, descKey: 'BuffDescription.DukeFishronPet', fallbackName: '小猪龙鱼' },
+  [BuffType.LunaticCultistPet]: { vanillaBuff: 296, descKey: 'BuffDescription.LunaticCultistPet', fallbackName: '小幻影龙' },
+  [BuffType.MoonLordPet]: { vanillaBuff: 297, descKey: 'BuffDescription.MoonLordPet', fallbackName: '月精灵' },
+  [BuffType.FairyQueenPet]: { vanillaBuff: 298, descKey: 'BuffDescription.FairyQueenPet', fallbackName: '仙灵公主' },
+  [BuffType.PumpkingPet]: { vanillaBuff: 299, descKey: 'BuffDescription.PumpkingPet', fallbackName: '杰克南瓜灯' },
+  [BuffType.EverscreamPet]: { vanillaBuff: 300, descKey: 'BuffDescription.EverscreamPet', fallbackName: '常绿尖叫怪树苗' },
+  [BuffType.IceQueenPet]: { vanillaBuff: 301, descKey: 'BuffDescription.IceQueenPet', fallbackName: '冰雪女王' },
+  [BuffType.MartianPet]: { vanillaBuff: 302, descKey: 'BuffDescription.MartianPet', fallbackName: '异星滑板小子' },
+  [BuffType.DD2OgrePet]: { vanillaBuff: 303, descKey: 'BuffDescription.DD2OgrePet', fallbackName: '食人魔宝宝' },
+  [BuffType.DD2BetsyPet]: { vanillaBuff: 304, descKey: 'BuffDescription.DD2BetsyPet', fallbackName: '小双足翼龙' },
 };
 
 /** BuffType → vanilla buff id 反查（BUFF_DEFS 驱动；新入档 buff 自动可见） */

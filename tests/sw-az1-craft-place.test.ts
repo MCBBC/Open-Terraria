@@ -401,6 +401,9 @@ describe('SW-AZ1 item1 行为面（Game 壳端到端）', () => {
       cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
       facing: 1, useTime: 0, attackSpeedMult: 1,
       buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
+      // ★SW-FX44：SW-BJ59 后 Game.tryPlace 尾 useTime 走 paintTileSpeed→placeSpeedTileRaw
+      // 委托面（Game:22294→Player:3213）——桩锁基态 1（Player.cs:2453 基 1f,无增益）
+      placeSpeedTileRaw: () => 1,
       inv,
     };
     const woodDef = ITEM_DEFS[iidOf(9)];

@@ -44,6 +44,16 @@ export interface Body {
    *  velocity.Y <= gravity) && !controlUp`——玩家侧算好传入；Body 无输入/飞毯语境）。
    *  仅 gravDir=-1 且本 tick 满足门时为 true；gravDir=1 消费面照旧走 vy>=0 通用门。 */
   stepUpInvGate?: boolean;
+  /** ★SW-RB14d：正挂 StepUp 速度门（Player.cs:28276 `(carpetFrame != -1 ||
+   *  velocity.Y >= gravity)`）——玩家侧逐 tick 预计算传入：stepUpCarpet=毯展开腿
+   *  （仓承载 carpetTime>0∧controlJump,同 stepUpInvGate 的毯腿 :22031）；/
+   *  stepUpVeloFloor=gravity 字段值（gField,深度缩水带 0.4×num6）。
+   *  缺省 undefined = NPC 族门字面 `velocity.Y >= 0`（NPC.cs:54525）逐位不变。
+   *  旧消费者恒用 `vy >= 0`：[0,gravity) 窗（水行 vy=0/悬停/跳顶点 vy≈0+）原版
+   *  不过门却上探（跳顶点横越台阶="空中踏步"）,飞毯缓降（vy=−0.4）原版可探却
+   *  被拦,双向各偏一次。 */
+  stepUpCarpet?: boolean;
+  stepUpVeloFloor?: number;
   /** ★SW-FX34：本 tick Y 轴向下被拦（原版 Collision.down，Collision.cs:2398-2410）。
    *  moveAxis dir>0 阻挡置位、moveAndCollide 头部复位。原版 Update :28467-28471
    *  `gravDir==-1 && Collision.down → velocity.Y=-0.01; jump=0`（倒挂顶头）消费。 */
@@ -90,6 +100,14 @@ export interface Body {
    *  `y = Position.Y + Velocity.Y`，Collision.cs G2 `Position.Y + num7 < y`） */
   vyEntry?: number;
   feetEntry?: number;
+  /** ★SW-FX40（h2）：原版 Player.gravity 字段拍末值（:24559 复位 0.4f → :24884
+   *  `gravity *= num6` 深度缩水 → 慢Fall 链 :27228/:27232 `gravity=gravity/3f*gravDir`
+   *  签名改写）。StepDown 门（Player.cs:28265 `velocity.Y == gravity`）、StepUp 倒挂
+   *  门（:28271 `velocity.Y <= gravity`）、WalkDownSlope 参（:23610 `gravity*gravDir`）
+   *  全读此字段——旧常数字面 GRAVITY 在深度缩水带（num6<1，太空/低重力带）与贴地
+   *  实际 vy 错位 → 门恒哑。缺省 undefined → 回退 GRAVITY（Body 级测试/非玩家实体
+   *  旧行为逐位不变）。 */
+  gField?: number;
 }
 
 /** Collision.StepUp（Collision.cs:3641-3770，gravDir=1、holdsMatching=false）：
@@ -484,7 +502,9 @@ export function walkDownSlopePre(b: Body, world: World, wasGround: boolean): voi
   //  倒挂时只有身下恰有地面坡的罕见摆位才会被「拖离天花板」= 原版 quirk,照单全收）。
   //  gravDir=1 半边数值恒等。
   const gdWs: 1 | -1 = b.gravDir === -1 ? -1 : 1;
-  if (gate === 'gravity' ? b.vy !== GRAVITY * gdWs : !(wasGround && b.vy >= 0)) return;
+  // ★SW-FX40（h2）：门值 = gravity*gravDir（:23610）——gravity 字段=深度缩水值
+  //  （b.gField,缺省回退 GRAVITY=旧字面,Body 级测试/非玩家实体逐位不变）
+  if (gate === 'gravity' ? b.vy !== (b.gField ?? GRAVITY) * gdWs : !(wasGround && b.vy >= 0)) return;
   const st = world.store;
   // 扫描窗（:1698-1720）：j0=(feet+4)/16；候选面须在 (j*16-17, j*16) 的 17px 上探带内
   // 与身体盒相交，且 num5 <= num(初始 (j0+3)*16 大帽)。solid||solidTop(平台族)均可作面。
@@ -1064,7 +1084,10 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     //   from y3928→3944 且 v=(−1.5,−8)）。vy>=0 不复活旧"低空飞虫被按地"bug
     //   （那需要无 wasGround 门；飞虫 wasGround 恒 false 本就不吸附）
     if (gate === 'never') { /* no StepDown */ }
-    else if (gate === 'gravity' ? b.vy === GRAVITY : (wasGround && b.vy >= 0)) applyStepDown(b, world);
+    // ★SW-FX40（h2）：'gravity' 门值 = 原版 gravity 字段（:28265 `velocity.Y == gravity`
+    //  ——深度缩水带 gravity=0.4×num6<0.4,贴地 vy 同步缩水,旧常数字面在该带恒假=门哑）。
+    //  玩家侧 fixedUpdate 每 tick 写 b.gField;未写（NPC/测试裸 Body）回退 GRAVITY 旧行为。
+    else if (gate === 'gravity' ? b.vy === (b.gField ?? GRAVITY) : (wasGround && b.vy >= 0)) applyStepDown(b, world);
     // ★SW-FX34 StepDown 倒挂语义备案（Collision.cs:3577-3638 + Player.cs:28267-28271）：
     //  原 Collision.StepDown 函数体【完全不读 gravDir 形参】（扫描/吸附恒向世界下方,
     //  num5=(num3+num4)*16 向下找落面）——其触发门 `velocity.Y == gravity`（:28271,
@@ -1073,17 +1096,20 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     //  `b.vy === GRAVITY` 字面门对倒挂同样恒不成立 = 与原版逐位同结果,零修改。
     // ★对抗修复批③2026-09-01 D-F3（cs:54525-54527）：原版 AI_007 的 StepUp 整个
     // 包在 `if (velocity.Y >= 0f)` 里——上升帧（跳跃首 tick / 击退上抛）不探台面,
-    // 杜绝半空中贴身探测到 16.1px 内落脚格被瞬移抬升的"怪力上吸"。玩家侧原版同形
-    // （Player.cs:23726/:28273 的 `(carpetFrame != -1 || velocity.Y >= gravity)` 门）;
-    // 其余走 moveAndCollide 的族——AI_107 ImprovedWalkers（NPC.cs:64911 无门）与
-    // 弹系步进体——本闸对它们只在 vy<0（离地上行）帧收紧探柱,贴地/下落行为零变化。
+    // 杜绝半空中贴身探测到 16.1px 内落脚格被瞬移抬升的"怪力上吸"。
+    // ★SW-RB14d 勘误：旧注"玩家侧原版同形(vy>=0)"系误读——玩家门是
+    //  Player.cs:28276 `(carpetFrame != -1 || velocity.Y >= gravity)`（阈=gravity
+    //  字段非 0,且毯展开腿）。旧消费者恒 `vy >= 0`：[0,gravity) 窗（水行 vy=0/
+    //  悬停 vy=0/跳顶点 vy≈0+）原版不过门却上探（跳顶点横越 1 格台阶=空中踏步）,
+    //  飞毯缓降（vy=−0.4<0）原版可探却被拦——双向各偏一次。玩家经 stepUpCarpet/
+    //  stepUpVeloFloor 承载原门;缺省 undefined = NPC 族门字面 vy>=0 逐位不变。
     if (gdBody === -1) {
       // ★SW-FX34：倒挂 StepUp 门（Player.cs:28273-28275 `(carpetFrame != -1 ||
       //  velocity.Y <= gravity) && !controlUp`——玩家侧逐 tick 预计算写 stepUpInvGate;
       //  holdsMatching 实参= controlUp 同款,经 stepUpHolds 承载）。
       //  探柱/抬升走 applyStepUpInv（Collision.cs:3641-3779 else 支 1:1）。
       if (b.stepUpInvGate === true) applyStepUpInv(b, world, !!b.stepUpHolds);
-    } else if (b.vy >= 0) {
+    } else if (b.stepUpCarpet === true || b.vy >= (b.stepUpVeloFloor ?? 0)) {
       applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
     }
   }
@@ -1330,4 +1356,92 @@ function unembedPass(b: Body, world: World): void {
     const dbg = (globalThis as Record<string, unknown> | undefined)?.__swPhysDbg as Record<string, number> | undefined;
     if (dbg) dbg.unembedH = (dbg.unembedH ?? 0) + 1;
   }
+}
+
+// ---- ★SW-FX40（g）：UpdateTouchingTiles 探针族（Player.cs:57734-57765 →
+//      Collision.IsClearSpotTest :2547-2600 + FindCollisionTile :2602-2681）----
+//  探针语义：体从 start 起按 (dx,dy) 位移是否被 tile 拦截（原版
+//  `TileCollision(position - vector, vector, …) != vector`）——用 scratch Body 走
+//  moveAxis（单轴分步/坡面放行门/残量语义与玩家碰撞同源），只写 scratch 不触世界。
+//  slope 支近似：原版 SlopeCollision 对【位移后】盒做贴合（结果≠入参=命中）；本仓
+//  slopeCollide 带 G2/入口门无法无副作用复用 → 以「盒与坡格静态相交」近似（坡面
+//  命中面=贴合带，消费面 GetHurtTile 兜底排除窒息族且尖刺族无坡，偏差不达消费面）。
+
+/** 单次 TileCollision 探针（IsClearSpotTest/FindCollisionTile 公用）。
+ *  start=(x,y)（位移【前】盒位）,位移=(dx,dy)。返回是否被拦截。 */
+export function tileCollisionProbeBlocked(
+  world: World, x: number, y: number, w: number, h: number,
+  dx: number, dy: number, gravDir: 1 | -1,
+): boolean {
+  const scratch: Body = {
+    x, y, w, h, vx: dx, vy: dy,
+    onGround: false, hitWall: false, hitHead: false,
+    gravDir, stepUp: false,
+  };
+  const { hitX, hitY } = moveAxis(scratch, world, dx, dy);
+  return hitX || hitY;
+}
+
+/** 坡支近似探针（IsClearSpotTest checkSlopes / FindCollisionTile checkSlopes）：
+ *  盒 [x..x+w)×[y..y+h) 与任一致动坡格（slope≠0）静态相交 → 命中。 */
+export function slopeProbeHit(
+  world: World, x: number, y: number, w: number, h: number,
+): boolean {
+  const st = world.store;
+  const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w - 0.01) / TILE);
+  const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h - 0.01) / TILE);
+  for (let i = x0; i <= x1; i++) {
+    for (let j = y0; j <= y1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const k = st.idx(i, j);
+      if (st.slope[k] !== 0 && st.isActive(i, j)) return true;
+    }
+  }
+  return false;
+}
+
+/** Collision.IsClearSpotTest（:2547-2600）：四向卡笛尔 TileCollision 探针
+ *  （start=position−vector、位移=vector → 扫过 [position−testMag, position] 带）
+ *  + checkSlopes 时四向 SlopeCollision 探针（start=position 原位）。全通=净空。 */
+export function isClearSpotTest(
+  world: World, x: number, y: number, w: number, h: number,
+  testMag: number, gravDir: 1 | -1, checkSlopes: boolean,
+): boolean {
+  if (!tileCollisionProbeBlocked(world, x - testMag, y, w, h, testMag, 0, gravDir)
+    && !tileCollisionProbeBlocked(world, x + testMag, y, w, h, -testMag, 0, gravDir)
+    && !tileCollisionProbeBlocked(world, x, y - testMag, w, h, 0, testMag, gravDir)
+    && !tileCollisionProbeBlocked(world, x, y + testMag, w, h, 0, -testMag, gravDir)) {
+    if (!checkSlopes) return true;
+    // 原版四向 SlopeCollision 探针 start 均为 position 原位——静态相交判定四向同值,
+    // 单次即四向并集（偏差见头部注）
+    return !slopeProbeHit(world, x, y, w, h);
+  }
+  return false;
+}
+
+/** Collision.FindCollisionTile 竖向半边（:2602-2643 Direction 2/3——UpdateTouchingTiles
+ *  两处实参恒为 `sign(vy)==1 ? 2 : 3`，横向半边 :2644-2681 零调用面不移植）。
+ *  Direction 2=下探（vector=(0,+testMag)，y=(int)(position.Y+Height)/16），
+ *  3=上探（vector=(0,−testMag)，y=(int)position.Y/16）。列切分按原文：首列
+ *  num=min(16−x%16,Width)、中列 16 递进（num2+16≤Width−16）、尾列余宽。
+ *  返回触碰格点集（列为探针子盒左缘列、行为前缘行——:2616/:2626/:2636 字面）。 */
+export function findCollisionTileVertical(
+  world: World, dir: 2 | 3, x: number, y: number, w: number, h: number,
+  testMag: number, gravDir: 1 | -1, checkSlopes: boolean,
+): Array<{ x: number; y: number }> {
+  const list: Array<{ x: number; y: number }> = [];
+  const dy = dir === 2 ? testMag : -testMag;
+  const ty = Math.floor((y + (dir === 2 ? h : 0)) / TILE);
+  const blocked = (sx: number, cw: number): boolean =>
+    tileCollisionProbeBlocked(world, sx, y - dy, cw, h, 0, dy, gravDir)
+    || (checkSlopes && slopeProbeHit(world, sx, y, cw, h));
+  const num = Math.min(16 - (((x % 16) + 16) % 16), w);   // :2612（C# 浮点模恒 ≥0）
+  let num2 = num;
+  if (blocked(x, num)) list.push({ x: Math.floor(x / 16), y: ty });
+  for (; num2 + 16 <= w - 16; num2 += 16) {
+    if (blocked(x + num2, 16)) list.push({ x: Math.floor((x + num2) / 16), y: ty });
+  }
+  const rest = w - num2;
+  if (rest > 0 && blocked(x + num2, rest)) list.push({ x: Math.floor((x + num2) / 16), y: ty });
+  return list;
 }

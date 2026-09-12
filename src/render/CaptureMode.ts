@@ -376,6 +376,22 @@ function shutterSound(): void {
   UISfx.sfx.playWavFile('Camera', 1, -1, -1);   // SoundID 40;x=-1 = UI 声不衰减
 }
 
+/** ★SW-FX50（FX38 剩债1 定谳刀）：浏览器 WheelEvent.deltaY → 原版 ScrollWheelDelta
+ *  计数（±120/notch）。符号锚：PlayerInput.cs:901-902 `ScrollWheelDelta =
+ *  ScrollWheelValue − ScrollWheelValueOld`,XNA/MonoGame MouseState.ScrollWheelValue
+ *  【上滚为正】⇒ 原版上滚=+120/下滚=−120;浏览器 deltaY【下滚为正】⇒ 取负对齐
+ *  （同族先例:VUI.ts RB14d、craftingGrid.vanillaWheelNotches FX38——量值/deltaMode
+ *  归一属另一刀,此处保持「任意非零 deltaY=1 notch」既有面不变）。
+ *  行为注（红队自证）：唯一消费面 scrolling()（CaptureInterface.cs:1523-1545 照抄,
+ *  无补偿臂）的 `num%=30` 归一 + `±2` 环绕使终模式只取决于 notch 总数【奇偶】
+ *  （30、2 皆偶 ⇒ num 与 30−num 同奇偶 ⇒ ±1 两向同果,camera-mode.test 已照抄钉死）
+ *  ——旧 +sign(deltaY) 在现消费面【不可观测】,本刀=字段语义对齐原版约定,
+ *  防未来量值型消费面（如按 notches 计数的 UI）踩反转雷。 */
+export function browserWheelDeltaYToVanilla(deltaY: number): number {
+  const s = Math.sign(deltaY);
+  return s === 0 ? 0 : -s * 120;   // s=0 支显式 +0（JS −0 陷阱:−0*120=−0,而 C# int 无 −0;craftingGrid.vanillaWheelNotches 同款守卫）
+}
+
 export class CaptureInterface {
   // ---- 公共态（原版 static :890-918 → 实例字段;单 Renderer 单实例等价）----
   active = false;
@@ -433,7 +449,11 @@ export class CaptureInterface {
    *  由 Renderer 集成点承担,DOM 快捷栏/buff 栏等 canvas 外 HUD 需此回调隐藏） */
   onActiveChange?: (active: boolean) => void;
   /** 滚轮积累（main.ts capture 相位拦截写入;Scrolling 消费后清零——
-   *  Player.cs:24903-24907 语义,见 main.ts 集成注释） */
+   *  ★SW-FX50 锚修正:1457 分支序=Player.cs:25385-25396 `if (Main.mapFullscreen)
+   *  缩放 else if (CaptureManager.Instance.Active) Scrolling() else if (!flag7)
+   *  背包/热栏`;旧注 :24903-24907 系旧基准行号。值域=原版 ScrollWheelDelta 计数
+   *  （±120/notch,上滚为正,PlayerInput.cs:901-902;符号经
+   *  browserWheelDeltaYToVanilla 在 main.ts 捕获点对齐） */
   pendingWheel = 0;
 
   // ---- 输入边沿（frame 内更新,update/draw 两相位共用）----

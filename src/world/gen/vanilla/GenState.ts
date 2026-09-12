@@ -129,6 +129,10 @@ export interface GenState {
   iceBackStyle: number;
   hellBackStyle: number;
   jungleBackStyle: number;
+  /** ★SW-FX43（2026-09-12）：worldId（Reset 段 ⑫ 掷流位 WorldGen.cs:11364
+   *  genRand.Next(int.MaxValue)——掷流值曾弃置;finalize 写 world.worldId 随档,
+   *  .wld 导出 header+footer 同值 LoadFooter :3003-3015 硬校验） */
+  worldId: number;
   /** 生成的树登记（{x, y=树顶, h}；finalize 写 world.trees 供砍伐整棵判定） */
   genTrees: Array<{ x: number; y: number; h: number }>;
   /** Lakes pass 记录的湖位 x（后续 pass 避让用） */
@@ -325,6 +329,7 @@ export function newGenState(w: number, h: number): GenState {
     shellStartXLeft: 0, shellStartYLeft: 0, shellStartXRight: 0, shellStartYRight: 0,
     treeX: [0, 0, 0], treeStyle: [0, 0, 0, 0], genTrees: [], lakeX: [],
   caveBackX: [0, 0, 0], caveBackStyle: [0, 0, 0, 0], iceBackStyle: 0, hellBackStyle: 0, jungleBackStyle: 0,
+  worldId: 0,   // ★SW-FX43：Reset ⑫ 掷流位回填（WorldGen.cs:11364）
     mCaveX: new Int32Array(1024), mCaveY: new Int32Array(1024), numMCaves: 0,
     snowMinX: null, snowMaxX: null, snowTop: 0, snowBottom: 0,
     jungleBounds: null,

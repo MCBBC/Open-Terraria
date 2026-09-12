@@ -65,7 +65,11 @@ export class VUI {
     window.addEventListener('blur', () => VUI.clearForBlur());
     window.addEventListener('focus', () => { VUI.hasFocus = true; });
     // wheel 记 UI 侧增量；游戏侧 Input 另有自己的监听（分流在 main.ts 编排）
-    window.addEventListener('wheel', (e) => { VUI.wheel += Math.sign(e.deltaY); }, { passive: true });
+    // ★SW-RB14d（FX38-F6）：取负对齐原版 ScrollWheelDeltaForUI 语义（上滚为正,
+    // PlayerInput.cs:902;浏览器 deltaY 上滚为负）。旧直传 sign(deltaY) 经
+    // UIList.scrollWheel `viewPosition -= value`（UserInterface.cs:219-222 →
+    // UIList.cs:109-116 同式）= 上滚向列表底,与原版上滚向顶反向无补偿。
+    window.addEventListener('wheel', (e) => { VUI.wheel += -Math.sign(e.deltaY); }, { passive: true });
   }
 
   /** 窗口失焦清理（SW-BA1 2026-09-06；镜像 Input.clearForBlur 的「失焦=无按住态」

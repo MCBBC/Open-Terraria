@@ -158,12 +158,22 @@ describe('网格淡出驱动=残影滞后距离（Main.cs:47151-47156）', () =>
 });
 
 describe('social shadow 3 拍轮转（Player.cs:16699-16728;网格淡出驱动源）', () => {
-  it('① 稳态 shadowPos[2] 滞后 4 拍：每拍 +10px,第 4 拍 dist=40', () => {
+  it('★SW-RB14d ① ctor=原版 Spawn 冲洗后态：[0]=出生位,[1]=[2]=零向量（:37927-37932 ' +
+    'ResetAdvancedShadows+3×UpdateSocialShadow——count 0→1→2→0 只写 [0]）', () => {
     const p = new Player(100, 200, new Inventory());
+    // 行为面验证（spX 私有）：首拍 count1 时 [2]<=[1]=0 ⇒ dist=当前位
+    p.x = 110; p.updateSocialShadow();
+    expect(p.shadowLagDist()).toBeCloseTo(Math.hypot(110, 200));   // 旧刀 [x,x,x] 退化值=10（开局网格恒亮=偏离原版暗窗）
+    expect(rulerGridFade(p.shadowLagDist())).toBeCloseTo(0.2);   // dist≥6 钳下档=原版开局暗 4 拍
+  });
+  it('② 稳态 shadowPos[2] 滞后 4 拍：每拍 +10px,第 4 拍 dist=40（6 拍暖机入稳态）', () => {
+    const p = new Player(100, 200, new Inventory());
+    for (let i = 0; i < 6; i++) { p.x = 100; p.updateSocialShadow(); }   // 暖机:[0..2] 全 100、count=0
+    expect(p.shadowLagDist()).toBe(0);
     p.x = 110; p.updateSocialShadow();   // count1: [2]<=[1]=100
+    expect(p.shadowLagDist()).toBeCloseTo(10);
     p.x = 120; p.updateSocialShadow();   // count2: [1]<=[0]=100
     p.x = 130; p.updateSocialShadow();   // count0: [0]=130
-    expect(p.shadowLagDist()).toBeCloseTo(30);        // 此拍 [2] 仍=100（初相）
     p.x = 140; p.updateSocialShadow();   // count1: [2]=[1]=100
     expect(p.shadowLagDist()).toBeCloseTo(40);        // |140−100| = 4 拍位移
     p.x = 150; p.updateSocialShadow();   // count2
@@ -171,20 +181,16 @@ describe('social shadow 3 拍轮转（Player.cs:16699-16728;网格淡出驱动�
     p.x = 170; p.updateSocialShadow();   // count1: [2]=[1]=130
     expect(p.shadowLagDist()).toBeCloseTo(40);        // 稳态窗口恒 4 拍
   });
-  it('② 静止 → dist=0 ⇒ 网格满幅 0.7', () => {
+  it('③ 静止 → dist=0 ⇒ 网格满幅 0.7', () => {
     const p = new Player(50, 60, new Inventory());
     for (let i = 0; i < 6; i++) p.updateSocialShadow();
     expect(p.shadowLagDist()).toBe(0);
     expect(rulerGridFade(p.shadowLagDist())).toBeCloseTo(0.7);
   });
-  it('③ shadowPos[0] 写点含 gfxOffY（:16723 `shadowPos[0].Y += gfxOffY`）', () => {
+  it('④ shadowPos[0] 写点含 gfxOffY（:16723 `shadowPos[0].Y += gfxOffY`）', () => {
     const p = new Player(0, 0, new Inventory());
     p.gfxOffY = 8;
-    p.updateSocialShadow(); p.updateSocialShadow(); p.updateSocialShadow(); // count0: [0]=y+8
-    p.updateSocialShadow();                          // count1: [2]=[1]=(0,0)
-    p.updateSocialShadow();                          // count2: [1]=[0]=(0,8)
-    p.updateSocialShadow();                          // count0: [0]=y+8（重写）
-    p.updateSocialShadow();                          // count1: [2]=[1]=(0,8)
+    for (let i = 0; i < 7; i++) p.updateSocialShadow();   // 7 拍入稳态:[2]=(0,8)（t4 时 [2] 仍 0）
     expect(p.shadowLagDist()).toBeCloseTo(Math.hypot(0, 8));
   });
 });

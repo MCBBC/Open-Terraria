@@ -11,7 +11,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { SpriteAtlas, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatus';
 import { applyThrownKillFx } from './ThrowKillFx';
-import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile , applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
+import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
@@ -5448,7 +5448,13 @@ export class Arrow extends Entity {
       // immune[owner]=5 档已由 data/vanillaProjImmuneTiers.ts:79 承载（:14076-14078）
       const mp = game.player as { y?: number } | null;
       if (mp && typeof mp.y === 'number' && this.y > mp.y - 300) this.noTileCollide = false;
-      if (this.y < game.world.groundLevel * 16) this.noTileCollide = false;
+      // ★SW-FX46（2026-09-12）NaN 守卫：地表线读改 `(groundLevel || 0)`（同文件 :6012
+      // 337 支 FX20/R28 同款先例）——原版量=Main.worldSurface×16.0（Projectile.cs
+      // :58014-58016，仓内 world.groundLevel 即 worldSurface 消费位,Game.ts:5402
+      // `worldSurface: w.groundLevel` 映射）。旧裸读在缺 groundLevel 的宿主
+      // （测试桩/远端镜像）下 undefined×16=NaN → `y<NaN` 恒 false,高空恢复撞块
+      // 支静默失效（424-426 SetDefaults tileCollide=false → 全寿穿墙）。
+      if (this.y < (game.world.groundLevel || 0) * 16) this.noTileCollide = false;
       game.spawnParticles(this.cx, this.cy, '#E08030', 3, 0.8, { life: 16, grav: 0 });
     } else if (this.projId === 90) {
       // 90 水晶碎块（aiStyle 24，Projectile.cs:24302-24326 非 94 支，515 水晶子弹
@@ -8135,6 +8141,19 @@ export class Arrow extends Entity {
             this.vy = (dy477h / dl477h) * sp477h;
             this.dartRot = Math.atan2(this.vy, this.vx) + Math.PI / 2;   // :13609 rotation 直写（AI 侧平滑自此角续算）
           }
+        }
+        // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——
+        // StrikeNPC(:13706) 后、穿透外层递减前：伤害照常落账【同时】弹体被反射回玩家
+        // （伤÷4/hostile 翻转/速度=|原速|），penetrate++ 补偿本次穿透消耗。676 不置
+        // reflectsProjectiles（1457 全量核）故 :7835 事前支对 676 恒不触发——此前整支
+        // 缺 = 射微光史莱姆无反射直死（用户实报 2026-09-06））
+        if ((e as { vanillaId?: number | null }).vanillaId === 676
+          && tryReflectShimmerSlimeHit(this, this.projId,
+            e as unknown as { vanillaId?: number | null; immortal?: boolean }, game, this.life)) {
+          this.pierce = 1;        // ReflectProjectile penetrate=1（NPC.cs:67212）
+          this.pierceInit = 1;    // flag3 单发弹语义（同 :7837 事前支先例）
+          this.pierce++;          // penetrate++（:13724）——下方递减后剩 1（原版同拍存续）
+          this.hitSet.clear();    // 转敌对后本帧命中表作废（同 :7840 事前支先例）
         }
         // 穿透递减（−1 = 无限穿透不递减不消亡，修复1）
         if (this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }

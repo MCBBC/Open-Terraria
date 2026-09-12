@@ -62,6 +62,14 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     trees: world.trees,
     flags: world.flags,
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
+    // ★SW-FX43（2026-09-12）：caveBackX/worldId + wld 快照三通道随包（worker 读档→
+    //  主线程同缝;缺任一 = 主线程存档/导出即丢该通道。bgStyles=R16-5 落盘值同缝）
+    caveBackX: world.caveBackX ? [...world.caveBackX] : undefined,
+    worldId: world.worldId,
+    wldSnap: world.wldSnap,
+    teSnap: world.teSnap,
+    townRooms: world.townRooms,
+    bgStyles: world.bgStyles ? { ...world.bgStyles, cave: [...world.bgStyles.cave] } : undefined,
     shimmerX: world.shimmerX, shimmerY: world.shimmerY,
     // 历史索引帧修复完成标志（worker saveParse/gen 侧置位；主线程据此跳过二次扫描）
     ...(world.indexFramesRepaired ? { repairedIndexFrames: true as const } : {}),

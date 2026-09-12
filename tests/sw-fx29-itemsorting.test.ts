@@ -13,6 +13,7 @@ import path from 'node:path';
 import {
   sortPlayerInventory, sortContainerItems, LAYER_NAMES,
   useSortDataForTests, getSortDataForTests,
+  LAYER_DEFS_FOR_TESTS, viewOfVidForTests,
   type SortSlot,
 } from '../src/stats/ItemSorting';
 import { internalIdOfVanilla, vanillaIdOfItem } from '../src/stats/Shimmer';
@@ -599,5 +600,107 @@ describe('SW-RB13c 回归：if-range 分派家族（曾整族塌进 LastMaterial
     expect(counts[49]).toBe(560);
     expect(counts[50] ?? 0).toBe(0);
     expect(counts[51]).toBe(4);
+  });
+});
+
+// ================= ★SW-RB13c-e 独立解析路径重放 + 白名单全量重放 =================
+// （红蓝复核:①21 张表既有对拍走提取器同形正则=同源伪绿面,此处改括号配对扫描
+//   重放（SetFactory.cs:116 CreateIntSet 语义 1:1 模拟）;
+//  ②layers 表由提取器 layerOf 独立推导,此处用引擎 LAYERS 谓词×attrs 重放
+//   先到先得,两独立实现+反编译原文三方对账;:1353 不变量随之全量复核）
+
+describe('SW-RB13c-e：21 表独立解析（括号配对,非提取器正则）+ 引擎谓词白名单全量重放', () => {
+  it('括号配对扫描重放 20 张 ItemID 表 + BuffID 表：default 全 -1 且逐对全等', () => {
+    // 语义锚 = Terraria.ID/SetFactory.cs:116 CreateIntSet(defaultState, inputs)：
+    // (index,value) 对顺序赋值,后写覆盖先写;intBuffer 全量填 defaultState。
+    const parse = (src: string, name: string): { def: number; pairs: [number, number][] } => {
+      const anchor = src.indexOf(`${name} = Factory.CreateIntSet(`);
+      expect(anchor, `${name} 声明存在`).toBeGreaterThanOrEqual(0);
+      const open = src.indexOf('(', anchor);
+      let depth = 0, end = -1;
+      for (let i = open; i < src.length; i++) {
+        if (src[i] === '(') depth++;
+        else if (src[i] === ')') { depth--; if (depth === 0) { end = i; break; } }
+      }
+      expect(end, `${name} 括号配对`).toBeGreaterThan(open);
+      const inner = src.slice(open + 1, end);
+      const toks: string[] = [];
+      let d = 0, cur = '';
+      for (const ch of inner) {
+        if (ch === '(') d++;
+        else if (ch === ')') d--;
+        if (ch === ',' && d === 0) { toks.push(cur.trim()); cur = ''; }
+        else cur += ch;
+      }
+      if (cur.trim()) toks.push(cur.trim());
+      for (const t of toks) expect(/^-?\d+$/.test(t), `${name} 实参整数字面量: ${t}`).toBe(true);
+      const def = Number(toks[0]);
+      const rest = toks.slice(1);
+      expect(rest.length % 2, `${name} (index,value) 对数`).toBe(0);
+      const pairs: [number, number][] = [];
+      for (let t = 0; t + 1 < rest.length; t += 2) pairs.push([Number(rest[t]), Number(rest[t + 1])]);
+      return { def, pairs };
+    };
+    for (const name of Object.keys(json.prio)) {
+      const { def, pairs } = parse(itemIdSrc, name);
+      expect(def, `${name} defaultState（引擎 prioVal ?? -1 的单源前提）`).toBe(-1);
+      expect(pairs, name).toEqual(json.prio[name as keyof typeof json.prio]);
+    }
+    const buff = parse(buffIdSrc, 'SortingPriorityFoodBuffs');
+    expect(buff.def).toBe(-1);
+    expect(buff.pairs).toEqual(json.buffFoodPrio);
+    // 引擎数据面与独立解析互证（prio map 消费面）
+    const data = getSortDataForTests();
+    for (const [name, pairs] of Object.entries(json.prio as Record<string, [number, number][]>)) {
+      for (const [vid, val] of pairs) expect(data.prio[name].map.get(vid)).toBe(val);
+    }
+  });
+
+  it('引擎 LAYERS 谓词×attrs 纯谓词先到先得重放 == layers 表（:1353 不变量,注册域 6175+）', () => {
+    // ★重放不读 v.layer——纯谓词逐层先到先得（与 ItemSorting.cs:1340-1352 SetupWhiteLists
+    //  同构：每层认领「未被前层认领 ∧ 本层谓词真」）,与 JSON layers 表（提取器 layerOf
+    //  独立推导）双向独立,真三方对账：反编译原文 ↔ 提取器 layerOf ↔ 引擎 LAYERS 谓词。
+    const data = getSortDataForTests();
+    const ITEM_COUNT = 6196;
+    const views = new Map<number, ReturnType<typeof viewOfVidForTests>>();
+    const viewOf = (vid: number): ReturnType<typeof viewOfVidForTests> => {
+      let v = views.get(vid);
+      if (!v) { v = viewOfVidForTests(vid); views.set(vid, v); }
+      return v;
+    };
+    const claimed = new Int16Array(ITEM_COUNT).fill(-1);
+    for (let L = 0; L < 52; L++) {
+      for (let vid = 0; vid < ITEM_COUNT; vid++) {
+        if (claimed[vid] >= 0) continue;
+        if (LAYER_DEFS_FOR_TESTS[L].pred(viewOf(vid))) claimed[vid] = L;
+      }
+    }
+    let skipped = 0;
+    for (let vid = 0; vid < ITEM_COUNT; vid++) {
+      if (internalIdOfVanilla(vid) < 0) { skipped++; continue; }   // 未实装件（0/2777 族）不可入槽,注册域外
+      expect(claimed[vid], `vid ${vid} 重放层=数据表层`).toBe(data.layers.get(vid) ?? -1);
+      // :1353 Invariant.Assert 等价面：全认领 ∧ 无 vid 落 LastNotTrash(50)
+      expect(claimed[vid] >= 0 && claimed[vid] !== 50, `vid ${vid} 认领`).toBe(true);
+    }
+    expect(skipped, '未注册 vid 数（注册面坍塌守门）').toBeLessThan(32);
+    expect(skipped).toBeGreaterThan(0);   // 已知 21 件未实装——归零说明注册面被改,先核对
+  });
+
+  it('词缀门不对称锁：主排序并叠需同词缀（CanStack Item.cs:49870）vs 弹药补叠无词缀门（:1836 仅 type 域）', () => {
+    // 主排序:不同 prefix 的土不并叠（两堆共存）
+    const s = emptySlots();
+    place(s, 10, 2, 50, { prefix: 1 });
+    place(s, 11, 2, 50, { prefix: 5 });
+    sortPlayerInventory(s);
+    const dirtStacks = s.filter((it) => it && vanillaIdOfItem(it.id) === 2);
+    expect(dirtStacks.length).toBe(2);
+    expect(dirtStacks.map((it) => it!.stack).sort()).toEqual([50, 50]);
+    // 弹药补叠:不同 prefix 的木箭照并（RefillItemStack 原文无 prefix 门——加错门即红）
+    const s2 = emptySlots();
+    place(s2, 54, 40, 100, { prefix: 1 });
+    place(s2, 12, 40, 300, { prefix: 5 });
+    sortPlayerInventory(s2);
+    expect(s2[54]!.stack).toBe(400);
+    expect(s2[12]).toBeNull();
   });
 });

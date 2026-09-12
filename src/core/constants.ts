@@ -18,6 +18,12 @@ export const GRAVITY = 0.4; // px/tick^2
 //   半对齐；全套移植需 NPC_GRAVITY 新常量+逐点替换，留待重力专项。
 //   湿身落速帽（ npcLiquid.updateNpcLiquid 第 6 段）是当前唯一的补偿位。
 export const MAX_FALL_SPEED = 10;
+// ★SW-RB14d：玩家 maxFallSpeed 字段终值 = 10(:24555 复位) + 0.01(:24637 无条件
+//  `maxFallSpeed += 0.01f`——湿档 3/7/6/2、微光/传送门变体同样过此 +0.01)。
+//  旧 MAX_FALL_SPEED=10 系 NPC 族共用面（Enemy/bossAI/Minecart/LeashedCritter 的
+//  落速帽）,玩家侧终端/慢Fall 钳改读本值（Player.ts 干链 5 位+绳攀 1 位）；
+//  MAX_FALL_SPEED 保持 10 供 NPC 族原样（NPC 落速帽为独立语义面,不随玩家字段走）。
+export const PLAYER_MAX_FALL_SPEED = 10.01;
 export const PLAYER_WALK_ACCEL = 0.32;
 export const PLAYER_WALK_MAX = 3; // px/tick（15 mph）
 export const PLAYER_FRICTION = 0.72; // 地面摩擦系数（乘法）——旧模型遗留,两段模型用 RUN_*

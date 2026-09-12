@@ -874,9 +874,19 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       dungeonX: wld.dungeonX, dungeonY: wld.dungeonY,
       groundLevel: Math.floor(wld.groundLevel),
       rockLevel: Math.floor(wld.rockLevel),
-      created: Date.now(),
+      // ★SW-FX43：原版 CreationTime ticks→ms 建世界日期真值（曾 Date.now()=导入日;
+      //  ticks/10000 = ms;0（<141 旧档）回退导入时刻。f64 精确域:ticks<2^53/1e4 恒成立——
+      //  实际 ticks~6.4e17 除后 ~6.4e12 < 2^53 ✓）
+      created: wld.creationTime > 0n ? Number(wld.creationTime / 10000n) : Date.now(),
       playTimeMs: 0,
       wldVersion: wld.version,
+      // ★SW-FX43：原版 worldId（WF header :1244 写/:1977 读）——loadSaveData 回填
+      //  world.worldId,导出 header+footer 同值（LoadFooter :3003-3015 硬校验同值）
+      worldId: wld.worldId,
+      // ★SW-FX43：caveBackX[3]（WF:1266-1268;原版 RandomizeCaveBackgrounds
+      //  WorldGen.cs:8141-8210 独立掷,与 treeX 无派生关系）——曾读位即弃 →
+      //  导出按 treeX 派生=导入档漂移（FX33 登记债本刀清偿）
+      caveBackX: wld.caveBackX,
       treeX: wld.treeX,
       treeStyle: wld.treeStyle,
       treeTops: wld.treeTops?.length ? wld.treeTops : undefined,
@@ -923,7 +933,11 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         //  同一存储)——映射 [treeBG1, bg10, bg11, bg12](旧写恒 treeBG1×4,四区
         //  森林背景 2-4 区全错)
         forest: [wld.treeBG1, wld.bg10, wld.bg11, wld.bg12],
+        // ★SW-FX43：jungleBG 键补齐（WF:1327 setBG(2) 地表丛林背景 0-6）——BG 表
+        //  曾缺键（WldHeaderFields :133 登记偏差「无键写 0」）,导入档丛林背景导出即丢。
+        //  ★与 BG.jungle（WF:1274 jungleBackStyle 地下丛林）不同族,键名按原版全名
         corrupt: wld.corruptBG, snow: wld.snowBG, hallow: wld.hallowBG, crimson: wld.crimsonBG,
+        jungleBG: wld.jungleBG,
       },
     },
     // 拜月教石碑重生倒计时（WF:2185-2192，SaveData 顶层字段）——2026-08-13 前
@@ -960,7 +974,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       cloudBGActive: wld.weather.cloudBGActive,
       numClouds: wld.weather.numClouds,
       windSpeedTarget: wld.weather.windSpeedTarget,
-      sand: { happening: false, timeLeft: 0, severity: 0, intendedSeverity: 0 },
+      // ★SW-FX43：沙暴四元组真值（WldParser.sandstorm,WF:1375-1378/:2319-2323;
+      //  LoadWorld :166-172 回灌 Sandstorm.*）——曾恒全零=导入档沙暴进行中丢失
+      sand: { happening: wld.sandstorm.happening, timeLeft: wld.sandstorm.timeLeft,
+        severity: wld.sandstorm.severity, intendedSeverity: wld.sandstorm.intendedSeverity },
       slimeRainTime: wld.weather.slimeRainTime ?? 0,
       slimeRain: (wld.weather.slimeRainTime ?? 0) > 0,
     } : undefined,
@@ -969,6 +986,11 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     altarCount: wld.altarCount,
     shadowOrbCount: wld.shadowOrbCount,
     savedOreTiers: wld.savedOreTiers,
+    // ★SW-FX43：入侵五元组（WF:1306-1309/:1322）+ 流星雨剩余计数（WF:1428）——
+    //  曾读位即弃 → 导入世界入侵中断/流星雨中断+再导出归零（SaveData 顶层既有槽）
+    invasion: { type: wld.invasion.type, size: wld.invasion.size,
+      sizeStart: wld.invasion.sizeStart, x: wld.invasion.x, delay: wld.invasion.delay },
+    meteorShowerCount: wld.meteorShowerCount,
     // ★SW-FX11（2026-09-10）：肉前四档替代矿（WF:1394-1397,v>=216）——WldParser 曾读位
     //  即弃 → 醉酒世界 166/167/168/169 导入即丢（军火商钨弹门 Game.ts:34531）
     oreTiersPH: wld.oreTiersPH.copper !== -1 ? wld.oreTiersPH : undefined,
@@ -977,6 +999,32 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     //  pendingPlatePokes,Game afterWorldLoad 恢复生成/一次性重触发
     pillarNpcs: wld.pillarNpcs.length ? wld.pillarNpcs : undefined,
     pressurePlates: wld.pressurePlates.length ? wld.pressurePlates : undefined,
+    // ★SW-FX43（2026-09-12）：wldSnap 快照通道【全仓唯一生产点】（FX33 定谳:
+    //  serialize.ts :272 声明、WldExport fieldValue 快照优先消费,本仓此前零生产者）。
+    //  ★差量携行裁断（非全字段）：仅收「值静态且建模面无法还原」的字段——活态字段
+    //  （boss 旗/时间/入侵/天气）不进快照,游玩后导出=建模现值（全字段钉快照=状态
+    //  回退,反面破坏）。本快照随 repo 存档链携行（loadSaveData→World→SaveMeta→
+    //  serializeSave→JSON→exportWld writeHeader 快照优先回写）：
+    //   seedText        种子原文文本（header.seed 是 translateSeed 数值派生 :870）
+    //   worldGenVersion i64 原值（台账导出恒写常量 1395864371201,Main.cs:228;
+    //                   字符串域:>2^53 不经 Number）
+    //   guid            16B hex（WldExport 曾恒 16 零字节=GUID.Zero）
+    //   CreationTime    i64 .NET ticks 字符串域（header.created=ms 派生丢亚毫秒位;
+    //                   WF:1254 写/:2020 读）
+    //   manifest        原版世界清单串（台账曾恒写 ''——WorldManifest.cs:31-45 容错域）
+    //   worldSurface / rockLayer  f64 原值（WF:1279-1280 直存;header.groundLevel/
+    //                   rockLevel 曾 floor :875-876——自建世界 live 值本就不 floor）
+    //  旧档/自建世界缺省 undefined → WldHeaderFields.get 台账映射回退（零行为变化）。
+    //  存量已导入世界原值已弃不可回溯（诚实边界:重导入获得满保真）。
+    wldSnap: {
+      seedText: wld.seed,
+      worldGenVersion: wld.worldGenVersion.toString(),
+      guid: wld.guid,
+      CreationTime: wld.creationTime.toString(),
+      manifest: wld.manifest,
+      worldSurface: wld.groundLevel,
+      rockLayer: wld.rockLevel,
+    } as NonNullable<SaveData['wldSnap']>,
     // ★SW-FX35：TE 三类透传快照 + 城镇房间表 + 图鉴三桶（导入→存档→导出零漂移）
     teSnap: teSnap.length ? teSnap : undefined,
     townRooms: wld.townRooms.length ? wld.townRooms : undefined,

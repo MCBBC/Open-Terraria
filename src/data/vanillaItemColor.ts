@@ -37,6 +37,43 @@ export const VANILLA_ITEM_COLOR: Record<number, readonly [number, number, number
   4776: [255, 255, 255, 0],                                  // 仙灵荧光棒（:39283，A=0）
 };
 
+// 原版 Item.alpha 静态表（Item.cs SetDefaults 全部 `alpha = N` 赋值，SW-FX49
+// 2026-09-12 全文件 python 扫描逐行亲读提取；ResetDefaults :48997 缺省=0，
+// 未列件 alpha=0）。消费面：GetAlpha 默认支（Item.cs:49328-49347）
+// f=(255−alpha)/255 —— pass1 底图乘 f（ItemSlot.cs:2879 UI 图标 / Main.cs:39284
+// 世界掉落，两路同构）。直通 alpha 表示下 = 仅 alpha 通道乘 f。
+// ★GetAlpha 特例中和（:49174-49330 内 switch）——下列件虽 SetDefaults 有 alpha
+// 但特例覆写为不透明，**不入表**：75 坠星（:2305 alpha=75，GetAlpha case 75
+// :49191→(255,255,255,255)）、120 熔岩之弓（:2833 alpha=30，case 119-122
+// :49197→(255,255,255,255)）。
+// ★SW-BJ60 锚值勘误（BJ60 旧登记"22 A=110/23 A=100/65 A=0"系把 item.color 的
+// A 通道串域到 Item.alpha；1457 实值：22 铁锭无 alpha 赋值=0（case 22 :1633-1639
+// 全体无 alpha）、23 凝胶=175（:1656）、65 星怒=100（:2153）、319 鲨鱼鳍无赋值=0
+// （:5180）、823 幽灵翼=255（:11041，GetAlpha 无特例→默认支 f=0=图标/掉落全透明，
+// 其 tooltip"I am right here."即隐形本相的自白；1456 :11022/1458 :11041 同值）。
+// 发光棒族 282/286/3112/4776 无赋值=0（:4722/:4770/:28811/:39283 仅 color 通道），
+// 3002 显式 alpha=0（:27687）。
+export const VANILLA_ITEM_ALPHA: Record<number, number> = {
+  23: 175,   // 凝胶 :1656
+  44: 30,    // 恶魔弓 :1907
+  47: 30,    // 邪恶箭 :1954
+  65: 100,   // 星怒 :2153（color=(150,150,150,0) A=0→pass2 零贡献，纯 alpha 维度）
+  150: 100,  // 蛛网 :3185
+  177: 50,   // 蓝玉 :3558（createTile 178 六宝石族）
+  178: 50,   // 红玉 :3572
+  179: 50,   // 绿玉 :3586
+  180: 50,   // 黄玉 :3600
+  181: 50,   // 紫晶 :3614
+  182: 50,   // 钻石 :3628
+  725: 30,   // 冰雪弓 :9871
+  796: 30,   // 猩红弓 :10702
+  823: 255,  // 幽灵翼（Ghostar's Infinity Eight）:11041 → f=0 图标+掉落全透明
+  999: 50,   // 琥珀 :12909
+  3002: 0,   // 洞穴探测荧光棒 :27687（显式 0，对账保留=无操作）
+  3111: 100, // 粉凝胶 :28807
+  5471: 100, // 蛛网复制品 :43154
+};
+
 /** Item.color 两遍合成（ItemSlot.cs:2879-2889 + Item.cs:49174 GetAlpha /
  *  :49348 GetColor 的 XNA 预乘等价，与 Renderer.xnaCombined 同族公式，ka=1）：
  *  对已画好底图的 RGBA 像素做逐 texel 合成——
@@ -46,21 +83,49 @@ export const VANILLA_ITEM_COLOR: Record<number, readonly [number, number, number
  *  T=底图 texel、t=底图 alpha、kc=C.a/255。★乘法语义：C 全遮（A=255）时
  *  out = T×C.rgb/255 保留贴图明暗（鲨鱼鳍=暗青鲨鱼鳍,非纯色剪影）；
  *  半遮（凝胶 A=100）时底图按 (1−t·kc) 残量叠加。纯函数便于单测，
- *  UI.iconUrl（图标烘焙）与 Renderer 掉落物着色共用——两路一致性单源。 */
+ *  UI.iconUrl（图标烘焙）与 Renderer 掉落物着色共用——两路一致性单源。
+ *  ★SW-FX49 第三参 itemAlpha=Item.alpha（VANILLA_ITEM_ALPHA 表）：>0 时先做
+ *  pass1 底图 alpha×f（f=(255−alpha)/255，GetAlpha 默认支 :49328）再做色图
+ *  叠加；c=null 且 f<1 = 纯 pass1（星怒/恶魔弓等无可见 color 件）。
+ *  f=1 时走 BJ60 原式逐位基线；f<1 合成式见函数内注（pass2 α 用原 t）。 */
 export function blendItemColorTint(
-  data: Uint8ClampedArray, c: readonly [number, number, number, number],
+  data: Uint8ClampedArray, c: readonly [number, number, number, number] | null,
+  itemAlpha = 0,
 ): void {
-  const kc = c[3] / 255;
-  if (kc <= 0) return;                       // A=0：pass2 零贡献（原版视觉无操作）
-  const cr = c[0] / 255, cg = c[1] / 255, cb = c[2] / 255;
+  // ★SW-FX49 pass1 维度（Item.cs GetAlpha 默认支 :49328-49347）：
+  // f=(255−alpha)/255。直通 alpha 表示下 pass1 = 仅 alpha 通道乘 f、RGB 不动
+  // （预乘域 T·(255f,255f,255f,255−alpha) 的 straight 等价 = (T.rgb, T.a·f)，
+  // 变暗发生在 alpha 通道——与"RGB 乘暗"是两种不同债面）。
+  const f = (255 - Math.max(0, Math.min(255, itemAlpha))) / 255;
+  const kc = c ? c[3] / 255 : 0;
+  if (kc <= 0 && f >= 1) return;             // A=0：pass2 零贡献（原版视觉无操作）
+  const cr = c ? c[0] / 255 : 0, cg = c ? c[1] / 255 : 0, cb = c ? c[2] / 255 : 0;
   for (let i = 0; i < data.length; i += 4) {
     const t = data[i + 3] / 255;
     if (t === 0) continue;
-    const occ = 1 - (1 - t) * (1 - t * kc);
+    if (kc <= 0) {                           // 仅 pass1（c=null 或 color A=0）
+      data[i + 3] = data[i + 3] * f;
+      continue;
+    }
+    if (f >= 1) {                            // BJ60 原式（f=1 逐位基线，勿动）
+      const occ = 1 - (1 - t) * (1 - t * kc);
+      const keep = 1 - t * kc;
+      data[i] = (t * data[i] * cr + t * data[i] * keep) / occ;
+      data[i + 1] = (t * data[i + 1] * cg + t * data[i + 1] * keep) / occ;
+      data[i + 2] = (t * data[i + 2] * cb + t * data[i + 2] * keep) / occ;
+      data[i + 3] = occ * 255;
+      continue;
+    }
+    // f<1：pass1(pre)=(T.rgb·a1, a1) 叠 pass2(pre)=(T.rgb·t·cr, t·kc) 的
+    // source-over 合成（xnaCombined 同式，Renderer.ts:14795 前注）。
+    // ★判别位：pass2 的 α 用【原 t】——原版第二遍画原贴图，不吃 pass1 的
+    // alpha 折减（若误用 a1·kc，凝胶合成 α 0.583→0.398 即爆红）。
+    const a1 = t * f;
     const keep = 1 - t * kc;
-    data[i] = (t * data[i] * cr + t * data[i] * keep) / occ;
-    data[i + 1] = (t * data[i + 1] * cg + t * data[i + 1] * keep) / occ;
-    data[i + 2] = (t * data[i + 2] * cb + t * data[i + 2] * keep) / occ;
+    const occ = t * kc + a1 * keep;
+    data[i] = (t * data[i] * cr + a1 * data[i] * keep) / occ;
+    data[i + 1] = (t * data[i + 1] * cg + a1 * data[i + 1] * keep) / occ;
+    data[i + 2] = (t * data[i + 2] * cb + a1 * data[i + 2] * keep) / occ;
     data[i + 3] = occ * 255;
   }
 }

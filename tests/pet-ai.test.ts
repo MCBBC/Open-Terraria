@@ -24,34 +24,49 @@ const frames = framesJson as Record<string, number>;
 /** vanilla-pets.json 的唯一 proj id 全集（升序） */
 const PET_PROJ_IDS = [...new Set(Object.values(pets).map((e) => e.proj))].sort((a, b) => a - b);
 
+/** ★SW-FX48：AI_174_MultisegmentPet（1457 Projectile.cs:46177）蠕虫多头三型——
+ *  单精灵 PetFollower 无第四族引擎,不入 petai 表 → legacy 肩后悬停回退（登记债）。
+ *  883 EaterOfWorldsPet / 887 DestroyerPet / 893 LunaticCultistPet（Item.cs:39417-39440
+ *  4799/4803/4809 → proj 883/887/893,SetDefaults aiStyle 174） */
+const AI174_EXEMPT = [883, 887, 893] as const;
+
 describe('vanilla-petai：aiStyle 覆盖统计', () => {
   // ★SW-FX2（2026-09-09）：61→62 —— vanilla-pets.json 3855 行勘误（buff201/proj702
   //  → buff200/proj703,Item.cs:34017-34022 共享块缺省臂 3855→200/703,原行与 3856
   //  重复 201/702）后唯一 proj 集 +1;703 DD2PetGato = AI_144 悬停族（1456
   //  Projectile.cs:66784 逐臂:vector.Y+=cos(localAI·π/30)·2/num=3/num2=4/num3=2/
   //  num4=4 帧钳,Main.cs:8765 projFrames[703]=8）,条目按 702 同构补入
-  it('宠物 proj 全覆盖（62 款，无缺条目/无 aiStyle 缺失）', () => {
-    expect(T.meta.petProjCount).toBe(62);
-    expect(PET_PROJ_IDS).toHaveLength(62);
+  // ★SW-FX48（2026-09-12）：62→79（boss 宠 4797-4817 → proj 881-901 共 21 款,
+  //  其中 881 与 5131 双宠共用已有条目;17 款补条目 + AI_174 三款豁免,见 AI174_EXEMPT）
+  it('宠物 proj 全覆盖（82 款,表载 79 + AI_174 豁免 3,无 aiStyle 缺失）', () => {
+    expect(PET_PROJ_IDS).toHaveLength(82);
+    expect(T.meta.petProjCount).toBe(79);
     for (const id of PET_PROJ_IDS) {
+      if ((AI174_EXEMPT as readonly number[]).includes(id)) {
+        expect(T.pets[String(id)], `proj ${id} 应豁免（AI_174 未建模）`).toBeUndefined();
+        continue;
+      }
       expect(T.pets[String(id)], `proj ${id} 缺条目`).toBeDefined();
       expect(T.pets[String(id)].aiStyle, `proj ${id} 缺 aiStyle`).toBe(projs[String(id)]?.aiStyle);
     }
   });
 
-  it('aiStyle 分布 = {26:48, 67:5, 144:5, 124:2, 90:1, 11:1}（任务预期"19 为主"实勘为 26）', () => {
+  it('aiStyle 分布 = {26:60, 67:5, 144:5, 124:7, 90:1, 11:1}（表载 79 款;174 三款豁免不入表）', () => {
     const dist: Record<string, number> = {};
     for (const id of PET_PROJ_IDS) {
-      const k = String(T.pets[String(id)].aiStyle);
+      const e = T.pets[String(id)];
+      if (!e) continue;   // AI_174 豁免
+      const k = String(e.aiStyle);
       dist[k] = (dist[k] ?? 0) + 1;
     }
-    expect(dist).toEqual({ '11': 1, '26': 48, '67': 5, '90': 1, '124': 2, '144': 5 });
+    expect(dist).toEqual({ '11': 1, '26': 60, '67': 5, '90': 1, '124': 7, '144': 5 });
   });
 
-  it('家族分派覆盖 62 款：ground 43 / fly 10 / hover 9，且 aiStyle→家族映射合法', () => {
+  it('家族分派覆盖 79 款：ground 51 / fly 14 / hover 14，且 aiStyle→家族映射合法', () => {
     const counts: Record<string, number> = { ground: 0, fly: 0, hover: 0 };
     for (const id of PET_PROJ_IDS) {
       const e = T.pets[String(id)];
+      if (!e) continue;   // AI_174 豁免
       expect(['ground', 'fly', 'hover']).toContain(e.family);
       counts[e.family]++;
       // 映射不变量：26 → ground|fly；67 → ground；11/90/124/144 → hover
@@ -59,25 +74,30 @@ describe('vanilla-petai：aiStyle 覆盖统计', () => {
       else if (e.aiStyle === 67) expect(e.family).toBe('ground');
       else expect(e.family).toBe('hover');
     }
-    expect(counts).toEqual({ ground: 43, fly: 10, hover: 9 });
+    expect(counts).toEqual({ ground: 51, fly: 14, hover: 14 });
     expect(T.meta.familyCounts).toEqual(counts);
   });
 
-  it('AI_026 飞行子型 10 款与 ground/fly 拆分一致（tileCollide=false 分支成员）', () => {
-    // AI_026 内无重力悬停分支成员（源码 :56163/:56290/:56468/:56833/:57000 等）
-    const FLY_26 = [175, 197, 198, 199, 211, 380, 774, 815, 817, 1046];
+  it('AI_026 飞行子型 14 款与 ground/fly 拆分一致（tileCollide=false 分支成员）', () => {
+    // AI_026 内无重力悬停分支成员（源码 :56163/:56290/:56468/:56833/:57000 等;
+    // ★SW-FX48：1457 :60398 共享悬停分支增补 886/892/894/901 四款）
+    const FLY_26 = [175, 197, 198, 199, 211, 380, 774, 815, 817, 886, 892, 894, 901, 1046];
     for (const id of FLY_26) expect(T.pets[String(id)].family, `proj ${id}`).toBe('fly');
     // 其余 aiStyle 26 全部是地面族
     for (const id of PET_PROJ_IDS) {
-      if (T.pets[String(id)].aiStyle === 26 && !FLY_26.includes(id)) {
-        expect(T.pets[String(id)].family, `proj ${id}`).toBe('ground');
+      const e = T.pets[String(id)];
+      if (!e) continue;   // AI_174 豁免
+      if (e.aiStyle === 26 && !FLY_26.includes(id)) {
+        expect(e.family, `proj ${id}`).toBe('ground');
       }
     }
   });
 
   it('帧数与 vanilla-projframes 表一致（缺条目 = 1 帧）', () => {
     for (const id of PET_PROJ_IDS) {
-      expect(T.pets[String(id)].frames).toBe(frames[String(id)] ?? 1);
+      const e = T.pets[String(id)];
+      if (!e) continue;   // ★SW-FX48：AI_174 豁免三款无条目
+      expect(e.frames).toBe(frames[String(id)] ?? 1);
     }
   });
 });
