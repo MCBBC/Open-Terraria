@@ -5458,6 +5458,16 @@ export class Renderer {
   golfPower: { x: number; y: number; rel: number; ball: import('../entities/GolfBall').GolfBall } | null = null;
   /** 光照合成 ImageData 复用(尺寸变化才重建) */
   private _lightImg: ImageData | null = null;
+  /** ★IIIII248 光照图脏行带镜像:恒等于 lightCanvas 当前呈现内容(compositeLight
+   *  写前捕获、写后置换);逐行比对产出脏行带。首帧/尺寸变化时按全带处理=旧行为。
+   *  逃生门 ?glband=0 = 恒全幅上传(旧行为,A/B 对拍用) */
+  private _lightPrev: Uint8ClampedArray | null = null;
+  private static readonly lightBandOn = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('glband') !== '0' : true;
+  /** ★IIIII248 脏行带上传画布(WebGL2 texSubImage2D DOM 源无 srcX/srcY 形态——
+   *  带内容先画进本画布 (0,0,w,bandH),再以 (0,y,w,bandH) 子矩形上传) */
+  private _lightBandCanvas: HTMLCanvasElement | null = null;
+  private _lightBandCtx: CanvasRenderingContext2D | null = null;
   /** CPU 乘光循环 x 侧采样参数缓存（只依赖 px，每帧预计算一次——原每像素重算；
    *  2026-08-22 软渲染瓶颈分析：乘循环 5.7ms/帧=55% 帧时。尺寸变化才重建。
    *  ★权重必须 Float64：Float32 存储会把 1−fx2 舍入 → 乘积末位漂移 →
@@ -15737,7 +15747,42 @@ export class Renderer {
         img.data[i + 3] = 255;
       }
     }
-    lc.putImageData(img, 0, 0);
+    // ★IIIII248 光照图脏行带(④ texSubImage2D 0.40%→仅变化带):逐行与上一帧
+    //  已呈现内容(prev 镜像)比对,仅变化行带 putImageData/texSubImage2D。
+    //  等价性:lightCanvas 全仓唯一写点=此处 putImageData;prev 恒镜像画布当前
+    //  内容(写前捕获、写后置换);GL light 纹理由同一脏带对称推进 ⇒ 带外纹素=
+    //  带外画布像素恒等。首帧/尺寸变化(prev 缺失或不匹配)⇒ 全带=旧行为。
+    //  零变化 ⇒ 跳过 putImageData(画布已是本帧内容)且跳过 GL 上传。
+    let dirtyY0 = -1, dirtyY1 = -1;
+    let prevValid = false;
+    {
+      const prev = Renderer.lightBandOn ? this._lightPrev : null;
+      const d = img.data;
+      if (prev && prev.length === d.length) {
+        prevValid = true;
+        const rowBytes = w2 * 4;
+        for (let ry = 0; ry < h2; ry++) {
+          const o = ry * rowBytes;
+          let same = true;
+          for (let k = 0; k < rowBytes; k++) {
+            if (d[o + k] !== prev[o + k]) { same = false; break; }
+          }
+          if (!same) {
+            if (dirtyY0 < 0) dirtyY0 = ry;
+            dirtyY1 = ry;
+          }
+        }
+      }
+      if (!this._lightPrev || this._lightPrev.length !== d.length) {
+        this._lightPrev = new Uint8ClampedArray(d.length);
+      }
+      this._lightPrev.set(d);
+    }
+    if (!prevValid) {
+      lc.putImageData(img, 0, 0);   // 首帧/尺寸变化:全幅(旧行为)
+    } else if (dirtyY0 >= 0) {
+      lc.putImageData(img, 0, 0, 0, dirtyY0, w2, dirtyY1 - dirtyY0 + 1);
+    }   // prevValid 且 dirtyY0<0 = 零变化:画布已是本帧内容,跳过
     const [sx, sy] = cam.worldToScreen(tx0 * ts, ty0 * ts);
     // ==== 世界层路径（2026-08-20 重写,对齐原版顶点色语义）：
     //      out.rgb = 世界.rgb × 光.rgb,α 原样保留（Lighting.GetColor 的 A 恒 255）。
@@ -15778,7 +15823,35 @@ export class Renderer {
       const lx1 = oxW + Math.round(((tx0 + tilesX) * ts - camRXl) * zzL);
       const ly1 = oyW + Math.round(((ty0 + tilesY) * ts - camRYl) * zzL);
       void lw; void lh; void sx; void sy;
-      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip)) {
+      // ★IIIII248:光照脏行带下传 GL(null=零变化跳过上传;undefined=旧行为恒全幅)。
+      //  带 = 本帧逐行比对结果(prevValid 且有变化);带内容画进带画布 (0,0,w,bandH),
+      //  纹理内目标行 = dirtyY0。带外纹素与画布像素恒等(见上注)。
+      let lightBand: { canvas: HTMLCanvasElement; y: number; w: number; h: number } | null | undefined;
+      if (!Renderer.lightBandOn) {
+        lightBand = undefined;   // ?glband=0 逃生门:恒全幅上传(旧行为)
+      } else if (!prevValid) {
+        lightBand = undefined;   // 首帧/变尺寸:全幅(key 全幅支兜底)
+      } else if (dirtyY0 < 0) {
+        lightBand = null;        // 零变化:画布已是本帧内容,跳过上传
+      } else if (dirtyY1 - dirtyY0 + 1 > h2 * 0.6) {
+        // ★IIIII248 自适应门:脏带>60% 行(动态光照常态——火把闪烁/实体移动/天光
+        //  推进逐帧刷窗)⇒ 带画布 blit+带上传不划算,回退全幅直传(与旧行为同)
+        lightBand = undefined;
+      } else {
+        const bh = dirtyY1 - dirtyY0 + 1;
+        if (!this._lightBandCanvas) {
+          this._lightBandCanvas = document.createElement('canvas');
+          this._lightBandCtx = this._lightBandCanvas.getContext('2d');
+        }
+        if (this._lightBandCanvas.width !== w2 || this._lightBandCanvas.height !== h2) {
+          this._lightBandCanvas.width = w2;
+          this._lightBandCanvas.height = h2;
+        }
+        const bc = this._lightBandCtx!;
+        bc.drawImage(this.lightCanvas, 0, dirtyY0, w2, bh, 0, 0, w2, bh);
+        lightBand = { canvas: this._lightBandCanvas, y: dirtyY0, w: w2, h: bh };
+      }
+      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand)) {
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
         //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/

@@ -21,7 +21,13 @@
  *     --fail-on-regression                 有回归时退出码 2(缺省只报告)
  *     --vite=<auto|PORT|off>               auto=5201+ 扫描私有实例;PORT=复用(会话约定口)
  *     --headed                             有头 Chrome(默认 headless 'new'+GPU args)
- *     --no-gpu-args                        去掉 macOS ANGLE/Metal GPU args(软渲染对账用)
+ *     --use-angle=<metal|swiftshader|gl>   ANGLE 后端(缺省 metal=硬件路径;swiftshader
+ *                                          显式钉软渲染=两象限对拍;darwin 生效)
+ *     --no-gpu-args                        去掉 GPU args(全裸回 Chrome 缺省)
+ *     --gpu-probe=0                        跳过 GPU 启用定谳(缺省:SystemInfo+renderer 串
+ *                                          +fill 基准 → meta.gpuCheck.verdict)
+ *     --trace-gpu                          .trace 加 'gpu'+GPU timeline 类目(GPU 证据加厚;
+ *                                          GPUTask/Commit 基础类目已带,解析不受此开关限制)
  *     --out=<dir>                          产物目录(缺省 /tmp/probe-out/perf-<ts>)
  *     --timeout=<ms>                       总看门狗(缺省 1500000=25min)
  *     --keep-vite                          收尾不杀私有 vite(调试)
@@ -46,6 +52,7 @@ import { bootstrap } from './lib/boot.mjs';
 import { createGame, godMode } from './lib/game.mjs';
 import {
   armPerfInstrumentation, installFrameProbe, perfProbeReady, createPerfRecorder, sleep,
+  probeGpuEnablement,
 } from './lib/perf.mjs';
 import { runBiomeTour, runStress, STRESS_FACTORS } from './lib/perf-scenarios.mjs';
 import {
@@ -122,10 +129,27 @@ try {
 
   // ---------- browser(GPU args:macOS ANGLE/Metal,_perf-lib.mjs 先例) ----------
   const extraArgs = [];
-  if (!opts['no-gpu-args'] && process.platform === 'darwin') extraArgs.push('--use-gl=angle', '--use-angle=metal');
+  if (!opts['no-gpu-args'] && process.platform === 'darwin') {
+    // 后端选择(IIIII246 定谳面):缺省 metal=硬件路径;--use-angle=swiftshader 显式
+    // 钉软渲染(两象限对拍);--no-gpu-args 全裸(回 Chrome 缺省,用于对照实验)。
+    const angle = String(opts['use-angle'] ?? 'metal');
+    extraArgs.push('--use-gl=angle', `--use-angle=${angle}`);
+  }
   browser = await launchBrowser({ headed: !!opts.headed, extraArgs });
   const page = await openPage(browser, { errors: [] });
   page.__probeOrigin = origin;
+
+  // ---------- GPU 启用定谳(①:SystemInfo + renderer 串 + fill 基准;--gpu-probe=0 跳) ----------
+  let gpuCheck = null;
+  if (opts['gpu-probe'] !== '0') {
+    gpuCheck = await probeGpuEnablement(page, { browser });
+    log(`GPU 定谳: ${gpuCheck.verdict} renderer=${gpuCheck.renderer ?? 'n/a'} model=${gpuCheck.gpuModel ?? 'n/a'}` +
+      ` fill=${gpuCheck.fillMsPerFrame ?? 'n/a'}ms/帧(gl=${gpuCheck.glImplementation ?? 'n/a'})`);
+    const askedSoftware = String(opts['use-angle'] ?? '') === 'swiftshader' || !!opts['no-gpu-args'];
+    if (gpuCheck.verdict === 'software' && !askedSoftware) {
+      log('警告:未主动要软渲染却判 software——GPU 参数未生效/驱动回落(坑表 K14),GPU 面数据按软渲染象限判读');
+    }
+  }
 
   // ---------- perf 探针(必须导航前) ----------
   await armPerfInstrumentation(page, {});
@@ -164,7 +188,7 @@ try {
   const frameCap = env.frameCap;
   const meta = {
     ts: new Date().toISOString(),
-    title: `IIIII239 perf(${scenario})`,
+    title: `IIIII239/246 perf(${scenario})`,
     seed, size, dims: sizeDims(size).join('x'),
     dwellMs: { tour: dwellTour, stress: dwellStress },
     speedTps, channels: channelsList.join(','), projTarget, dustRate,
@@ -172,11 +196,16 @@ try {
     dpr: env.dpr, frameCap, warmupMs, ua: env.ua,
     loadavg: os.loadavg().map((x) => +x.toFixed(2)).join(' '),
     headless: !opts.headed, gpuArgs: extraArgs.join(' ') || 'none',
+    useAngle: opts['no-gpu-args'] ? 'none' : String(opts['use-angle'] ?? 'metal'),
+    gpuCheck,
+    traceGpu: !!opts['trace-gpu'],
     notes: [
       '实时模式:全程真实 rAF,未用确定性 pump(与 perf 互斥)。',
       'biome-tour 对世界数据只读;stress 为合成注入(液体台/弹幕/尘)且用后即拆。',
-      'CPU profiler 不含 GPU 面(「GPU 页绝不挂」)——GPU 段看 .trace 的 GPUTask/RasterTask/DrawFrame。',
+      'CPU profiler 不含 GPU 面(「GPU 页绝不挂」)——GPU 段看 .trace 的 GPUTask/Commit('
+        + 'parseTrace.gpu 已解析;基础类目即含 GPU 进程事件,gpu 类目=证据加厚)。',
       `场景前 warmup ${warmupMs}ms(不进计量段):首站区块烘焙/GL 编译/mimap 首扫属一次性成本,看各段 fps.max 仍可见。`,
+      ...(gpuCheck ? [`GPU 定谳=${gpuCheck.verdict}(renderer=${gpuCheck.renderer};fill=${gpuCheck.fillMsPerFrame ?? 'n/a'}ms/帧;SystemInfo=${gpuCheck.systemInfoOk ? gpuCheck.gpuModel : 'err'})`] : []),
     ],
   };
 
@@ -192,6 +221,7 @@ try {
       dwellMs: dwellTour, speedTps, measureTransit, log,
     });
     skipStops.push(...(tourRes.skipped ?? []));
+    await rec.settled();   // ★IIIII248:异步段收汇合(trace 排空/解析/落盘)后再聚合
     scenarios['biome-tour'] = {
       stops: tourRes.stops ?? [], missing: tourRes.missing ?? [], route: tourRes.route ?? [],
       segments: rec.segments.filter((s) => s.name.startsWith('dwell:') || s.name.startsWith('transit:')),
@@ -212,6 +242,7 @@ try {
     stressRes = await runStress(page, rec, {
       factors: stressFactors, dwellMs: dwellStress, projTarget, dustPerSec: dustRate, desertStop, log,
     });
+    await rec.settled();   // ★IIIII248:异步段收汇合后再聚合
     scenarios['stress'] = {
       factors: stressFactors, anchor: stressRes?.anchor ?? null, stats: stressRes?.stats ?? null,
       segments: rec.segments.filter((s) => s.name.startsWith('stress:')),

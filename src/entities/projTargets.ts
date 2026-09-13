@@ -13,6 +13,19 @@ import statusPlayerJson from '../data/vanilla-statusplayer.json';
 import {
   getGlobalHurtBuckets, ImmunityCooldownID,
 } from '../player/HurtCooldownBuckets';
+import { getProjScanCtx } from './projScanCtx';
+
+/** ★IIIII248 弹幕命中扫描 equip 取用面（projScanCtx.ts 头注全证明）：
+ *  projectiles 桶步进窗内 = tick 级快照（六布尔字段与 equipStats 同名同义）;
+ *  窗外/单测/探针 = null ⇒ 回退逐次活读（行为与旧路径逐位相同）。 */
+function projScanEq(game: GameHooks): { killGuide?: boolean; killClothier?: boolean;
+  dontHurtCritters?: boolean; accPyroclast?: boolean; accSnappingStone?: boolean;
+  accGolemSentryBackpack?: boolean } | undefined {
+  return getProjScanCtx(game.player)
+    ?? (game.player as unknown as { equipStats?: { killGuide?: boolean; killClothier?: boolean;
+      dontHurtCritters?: boolean; accPyroclast?: boolean; accSnappingStone?: boolean;
+      accGolemSentryBackpack?: boolean } } | null)?.equipStats;
+}
 
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
@@ -53,8 +66,8 @@ export function hitTownNpcs(
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
   // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
-  const eq = (game.player as unknown as { equipStats?: { killGuide?: boolean; killClothier?: boolean } } | null)
-    ?.equipStats;
+  // ★IIIII248:projScanEq = 桶窗快照 ?? 旧活读(语义面不变)
+  const eq = projScanEq(game);
   let any = false;
   for (const ent of list) {
     const n = ent as {
@@ -151,8 +164,7 @@ function snapStoneFamilyGate(
   if (!proj || proj.hostile === true) return false;           // ownedBySomeone 档
   const cls = resolveProjClass(proj);
   if (!classes.includes(cls as ProjClass)) return false;      // 类位门
-  return ((game.player as unknown as { equipStats?: Record<string, boolean> } | null)
-    ?.equipStats?.[accessoryKey]) === true;
+  return ((projScanEq(game) as Record<string, boolean> | undefined)?.[accessoryKey]) === true;
 }
 
 export function pyroclastProjectileGate(
@@ -209,9 +221,8 @@ export function rollGolemSentryCrit(
   isSentry: boolean,
 ): boolean {
   if (!isSentry && !SENTRY_SHOT_PROJS.has(projId)) return false;
-  const own = (game as unknown as
-    { player?: { equipStats?: { accGolemSentryBackpack?: boolean } } | null }).player;
-  if (!own?.equipStats?.accGolemSentryBackpack) return false;
+  // ★IIIII248:projScanEq = 桶窗快照 ?? 旧活读(语义面不变)
+  if (!projScanEq(game)?.accGolemSentryBackpack) return false;
   return Math.floor(Math.random() * 10) === 0;   // Main.rand.Next(10) == 0
 }
 
@@ -322,7 +333,8 @@ export function hitCritters(
   // 敌对弹面（Damage_PVE_Inner :12631 受理式推导）——hostile-only 恒不结小动物伤害
   if (pd?.hostile === true && pd?.friendly !== true) return false;
   // 玩家/环境双面弹（friendly 或无登记）→ :20675 flag 组装 + :20676 trap 复位
-  const eq = (game.player as { equipStats?: { dontHurtCritters?: boolean } } | null)?.equipStats;
+  // ★IIIII248:projScanEq = 桶窗快照 ?? 旧活读(语义面不变)
+  const eq = projScanEq(game);
   // ★ζ#3/#4（终局扫尾批）：MinionShot/SentryShot 两张 id 表接进 flag 组装——原版
   // :20675 组装式含 `MinionShot[type] || SentryShot[type]` 两臂，此前只有 minion 旗
   // 数据列+ctx 显式位。表见上方（ProjectileID.cs 提取）。
@@ -396,8 +408,8 @@ export function playerCanHitEnemy(
   const vid = t?.vanillaId;
   if (!t?.def?.friendly) return true;
   if (projId === 318) return true;
-  const eq = (game.player as unknown as { equipStats?: { killGuide?: boolean; killClothier?: boolean } } | null)
-    ?.equipStats;
+  // ★IIIII248:projScanEq = 桶窗快照 ?? 旧活读(语义面不变)
+  const eq = projScanEq(game);
   if (vid === 22 && eq?.killGuide) return true;
   if (vid === 54 && eq?.killClothier) return true;
   return false;
@@ -961,8 +973,9 @@ export function playerProjectileCanHitNpcGate(
   fromCritterBucket = false,
   proj?: { projId?: number; trap?: boolean; minion?: boolean; sentry?: boolean },
 ): boolean {
-  const eq = (game.player as { equipStats?: { dontHurtCritters?: boolean } } | null)
-    ?.equipStats;
+  // ★IIIII248:projScanEq(game.player) = 桶窗快照 ?? 旧活读(game.player 直传面兼容)
+  const eq = getProjScanCtx(game.player)
+    ?? (game.player as { equipStats?: { dontHurtCritters?: boolean } } | null)?.equipStats;
   let flag = eq?.dontHurtCritters === true              // （:20675 玩家面）
     || (!!proj && (proj.minion === true || proj.sentry === true
       || (proj.projId !== undefined

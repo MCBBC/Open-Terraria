@@ -1484,11 +1484,30 @@ export class UI {
     this.paintAccEye(eye, slotIdx);
   }
 
+  /** ★2026-09-13 反馈轮6:眼/勾选框 hover 名路由——vinv 元素走自有气泡(懒绑定
+   *  一次,paint 每拍刷 dataset 文案=悬停中再点即时反映),classic 元素保持原生
+   *  title(共享 paint,classic 行为零变化白名单)。★判据=元素类名(vinv-btn)而非
+   *  _builtLayout——构建期 _builtLayout 尚未登记(先构建后登记约定),按布局路由
+   *  会让 vinv 宠物/光源眼(仅构建期 paint)误走 classic 分支残留 title */
+  private vinvEyeTip(eye: HTMLElement, textFn: () => string): void {
+    if (!eye.classList.contains('vinv-btn')) {
+      eye.title = textFn();
+      return;
+    }
+    if (!eye.dataset.swTipBound) {
+      eye.dataset.swTipBound = '1';
+      eye.addEventListener('mouseenter', () => this.showBuffTooltip(eye, eye.dataset.swTipText ?? '', ''));
+      eye.addEventListener('mouseleave', () => this.hideBuffTooltip());
+      eye.title = '';   // 清可能的构建期残留,防原生气泡与自有气泡并存
+    }
+    eye.dataset.swTipText = textFn();
+  }
+
   /** 眼睛图标态（InventoryTickOn/Off :40862-40865）+ 悬停文案（:40889 inter[59/60]） */
   private paintAccEye(eye: HTMLElement, slotIdx: number): void {
     const hidden = this.game?.player.hideVisibleAccessory[slotIdx] ?? false;
     eye.style.backgroundImage = `url(sprites/vanilla/Inventory_Tick_${hidden ? 'Off' : 'On'}.png)`;
-    eye.title = Lang.text(hidden ? 'LegacyInterface.60' : 'LegacyInterface.59');
+    this.vinvEyeTip(eye, () => Lang.text(hidden ? 'LegacyInterface.60' : 'LegacyInterface.59'));
   }
 
   /** 杂项眼（宠物/光源,miscRail）——同配饰眼图标/文案族（原版 40666-40691：
@@ -1496,7 +1515,7 @@ export class UI {
   private paintPetEye(eye: HTMLElement, slot: 0 | 1): void {
     const hidden = slot === 0 ? this.game.petHidden : this.game.lightPetHidden;
     eye.style.backgroundImage = `url(sprites/vanilla/Inventory_Tick_${hidden ? 'Off' : 'On'}.png)`;
-    eye.title = Lang.text(hidden ? 'LegacyInterface.60' : 'LegacyInterface.59');
+    this.vinvEyeTip(eye, () => Lang.text(hidden ? 'LegacyInterface.60' : 'LegacyInterface.59'));
   }
 
   /** 全部眼睛图标重刷（读档回填/翻槽后） */
@@ -3692,13 +3711,25 @@ export class UI {
     const [col, row] = pvpIconFrame(p.hostile, swordHover, p.team);
     // background-position 百分比 = col/(4-1)、row/(6-1)（38px 帧裁 36×37）
     this.pvpSwordBtn.style.backgroundPosition = `${(col / 3) * 100}% ${(row / 5) * 100}%`;
-    this.pvpSwordBtn.title = cool ? '' : Lang.text(p.hostile ? 'UI.PvpIcon_Active' : 'UI.PvpIcon_Inactive');
+    // ★2026-09-13 反馈轮6:vanilla 布局 hover 名走自有气泡(classic 保持原生 title=
+    //  零变化白名单);气泡只在悬停态显示/刷新(mouseenter/点击经本函数),隐藏由
+    //  构建区 mouseleave 管——本函数在共享刷新链(:5591)每拍跑,不可无条件 hide
+    const vanillaTip = this._builtLayout === 'vanilla';
+    if (!vanillaTip) {
+      this.pvpSwordBtn.title = cool ? '' : Lang.text(p.hostile ? 'UI.PvpIcon_Active' : 'UI.PvpIcon_Inactive');
+    } else if (swordHover) {
+      this.showBuffTooltip(this.pvpSwordBtn, Lang.text(p.hostile ? 'UI.PvpIcon_Active' : 'UI.PvpIcon_Inactive'), '');
+    }
     PVP_TEAM_BUTTONS.forEach((tb, k) => {
       const cell = this.pvpTeamBtns[k];
       const hover = !cool && cell.matches(':hover');
       // 悬停高亮 = UI_PVP_2 垫底（:42186-42188）；提示 = TeamIcon{Name}_{Active|Inactive}（:42160）
       cell.style.backgroundImage = hover ? 'url(sprites/vanilla-ui/UI_PVP_2.png)' : 'none';
-      cell.title = cool ? '' : Lang.text(`UI.TeamIcon${tb.name}_${p.team === tb.team ? 'Active' : 'Inactive'}`);
+      if (!vanillaTip) {
+        cell.title = cool ? '' : Lang.text(`UI.TeamIcon${tb.name}_${p.team === tb.team ? 'Active' : 'Inactive'}`);
+      } else if (hover) {
+        this.showBuffTooltip(cell, Lang.text(`UI.TeamIcon${tb.name}_${p.team === tb.team ? 'Active' : 'Inactive'}`), '');
+      }
     });
   }
 
@@ -4473,6 +4504,13 @@ export class UI {
   private hideBuffTooltip(): void {
     this.tooltip.style.display = 'none';
     cancelAnimationFrame(this.tooltipPulseRaf);
+  }
+
+  /** ★2026-09-13 反馈轮6:vinv 域钮 hover 名统一走自有气泡(showBuffTooltip),弃原生
+   *  title(浏览器原生气泡延迟 ~1s 且样式不符)。textFn 惰性求值——hover 瞬间读当前态。 */
+  private vinvBindHoverTip(btn: HTMLElement, textFn: () => string): void {
+    btn.addEventListener('mouseenter', () => this.showBuffTooltip(btn, textFn(), ''));
+    btn.addEventListener('mouseleave', () => this.hideBuffTooltip());
   }
 
   /** 单个 buff 块（原版 DrawBuffIcon Main.cs:42725 的 DOM 化）。
@@ -6646,7 +6684,8 @@ export class UI {
     // → 改画装备列旁第二落位 (:42096-42100 sw-224, 末行y+8),非恒钉 (501,25)
     pos(advWrap, () => {
       const c = this.vinvLayoutCtx!;
-      if (c.sw >= 1000) return { x: ADVISOR_XY.x, y: ADVISOR_XY.y };
+      // ★2026-09-13 用户要求:成就卡顶对齐背包格顶(y=20;vanilla 25 = 5px 差,偏差备案)
+      if (c.sw >= 1000) return { x: ADVISOR_XY.x, y: 20 };
       let last = 7;
       for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
       return { x: c.sw - 224, y: equipRowY(c.num20, last) + 8 };
@@ -6711,7 +6750,8 @@ export class UI {
     {
       const b = btn(30, 30);
       this.vinvSortBtn = b;
-      b.title = Lang.has('GameUI.SortInventory') ? Lang.text('GameUI.SortInventory') : 'GameUI.SortInventory';
+      this.vinvBindHoverTip(b, () =>
+        Lang.has('GameUI.SortInventory') ? Lang.text('GameUI.SortInventory') : 'GameUI.SortInventory');
       b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Sort_0.png)';
       b.style.backgroundSize = '100% 100%';
       b.addEventListener('mouseenter', () => { b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Sort_1.png)'; });
@@ -6729,7 +6769,7 @@ export class UI {
     {
       const b = btn(30, 30);
       this.vinvBestiaryBtn = b;
-      b.title = Lang.text('Mods.SandboxWorld.Tabs.Bestiary');
+      this.vinvBindHoverTip(b, () => Lang.text('Mods.SandboxWorld.Tabs.Bestiary'));
       b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Bestiary.png)';
       b.style.backgroundSize = '200% 100%';
       b.addEventListener('mouseenter', () => { b.style.backgroundPosition = '100% 0'; });
@@ -6740,7 +6780,7 @@ export class UI {
     {
       const b = btn(30, 30);
       this.vinvEmoteBtn = b;
-      b.title = Lang.has('GameUI.Emote') ? Lang.text('GameUI.Emote') : 'GameUI.Emote';
+      this.vinvBindHoverTip(b, () => Lang.has('GameUI.Emote') ? Lang.text('GameUI.Emote') : 'GameUI.Emote');
       b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_Emotes.png)';
       b.style.backgroundSize = '200% 100%';
       b.addEventListener('mouseenter', () => { b.style.backgroundPosition = '100% 0'; });
@@ -6792,6 +6832,7 @@ export class UI {
         p.hideVisibleAccessory[slot] = !p.hideVisibleAccessory[slot];
         this.game!.sfx.play('menuTick');
         this.paintAccEyes();
+        this.showBuffTooltip(eye, eye.dataset.swTipText ?? '', '');   // ★反馈轮6:点击即刷新(mousedown 必在悬停态)
       });
       this.accEyeEls.set(slot, eye);   // 复用 paintAccEyes 共享重刷(:1405)
       this.paintAccEye(eye, slot);
@@ -6883,7 +6924,7 @@ export class UI {
     // 页签(DrawPageIcons Main.cs:43511-43593:y=num20-32;杂项/住房=页切换,相机=债)
     const mkTab = (w: number, h: number, imgNormal: string, title: string): HTMLButtonElement => {
       const b = btn(Math.round(w * 0.9), Math.round(h * 0.9));   // ★红队 n2:原版 0.9f 绘制(:43523/:43534/:43545)
-      b.title = title;
+      this.vinvBindHoverTip(b, () => title);
       b.style.backgroundImage = `url(sprites/vanilla-ui/${imgNormal})`;
       b.style.backgroundSize = '100% 100%';
       return b;
@@ -6939,8 +6980,9 @@ export class UI {
         lock.style.backgroundImage = `url(sprites/vanilla/Lock_${locked ? 0 : 1}.png)`;
         // 悬停金描帧=当前态贴图帧1(原版 value.Frame(2,1,1)+OurFavoriteColor :43232-43234)
         glow.style.backgroundImage = `url(sprites/vanilla/Lock_${locked ? 0 : 1}.png)`;
-        lock.title = Lang.inter(locked ? 6 : 5);
       };
+      // ★2026-09-13 反馈轮6:hover 名走自有气泡(原版 MouseText Main.cs:43232 域)
+      this.vinvBindHoverTip(lock, () => Lang.inter(this.game?.player.hbLocked ? 6 : 5));
       lock.style.cssText = 'position:absolute; width:25px; height:22px; background-size:200% 100%;'
         + 'background-position:0 0; image-rendering:pixelated; cursor:pointer; padding:0; border:none;';
       const glow = el('div', '', '');
@@ -7002,6 +7044,7 @@ export class UI {
           if (this.heldStack) return;
           this.game.togglePetSlot(m as 0 | 1);
           this.paintPetEye(eye, m as 0 | 1);
+          this.showBuffTooltip(eye, eye.dataset.swTipText ?? '', '');   // ★反馈轮6:点击即刷新
         });
         this.paintPetEye(eye, m as 0 | 1);
         pageMisc.appendChild(eye);
@@ -7020,8 +7063,10 @@ export class UI {
         const paintCart = (): void => {
           const on = !!this.game?.player.enabledSuperCart;
           cart.style.backgroundImage = `url(sprites/vanilla/Extra_${on ? 255 : 256}.png)`;
-          cart.title = Lang.text(on ? 'GameUI.SuperCartEnabled' : 'GameUI.SuperCartDisabled');
         };
+        // ★2026-09-13 反馈轮6:hover 名走自有气泡(:41987-41992 MouseText 域)
+        this.vinvBindHoverTip(cart, () =>
+          Lang.text(this.game?.player.enabledSuperCart ? 'GameUI.SuperCartEnabled' : 'GameUI.SuperCartDisabled'));
         cart.addEventListener('mousedown', (e) => {
           e.stopPropagation();
           if (this.heldStack || !this.game) return;          // mouseItem.IsAir 门(:41968)
@@ -7063,7 +7108,7 @@ export class UI {
     //  贴列底上方(:46266-46282);点击=开/关设置浮层) ----
     const settingsBtn = el('button', 'vinv-txt') as HTMLButtonElement;
     settingsBtn.textContent = Lang.inter(62);
-    settingsBtn.style.cssText = 'font-size:15px; pointer-events:auto; cursor:pointer;'
+    settingsBtn.style.cssText = 'font-size:18px; pointer-events:auto; cursor:pointer;'
       + 'background:none; border:none; padding:0; color:#fff; text-shadow:1px 1px 0 #000;'
       + 'transition:transform 80ms linear;';
     settingsBtn.addEventListener('mouseenter', () => { settingsBtn.style.transform = 'scale(1.15)'; });
@@ -7127,6 +7172,7 @@ export class UI {
         const p = pvpSwordXY(c.sw, c.mH, this.vinvPageCurrent === 2);
         return { x: p.x, y: p.y };
       });
+      sword.addEventListener('mouseleave', () => this.hideBuffTooltip());   // ★反馈轮6:气泡隐藏面
       for (let i = 0; i < 6; i++) {
         const cell = el('button', 'vinv-btn sw-btn') as HTMLButtonElement;
         cell.style.width = '20px'; cell.style.height = '20px';
@@ -7137,7 +7183,7 @@ export class UI {
         cell.style.position = 'absolute';
         cell.appendChild(icon);
         cell.addEventListener('mouseenter', () => this.refreshPvpButtons());
-        cell.addEventListener('mouseleave', () => this.refreshPvpButtons());
+        cell.addEventListener('mouseleave', () => { this.refreshPvpButtons(); this.hideBuffTooltip(); });   // ★反馈轮6
         cell.addEventListener('mousedown', (e) => { e.stopPropagation(); this.pvpSetTeam(PVP_TEAM_BUTTONS[i].team); });
         root.appendChild(cell);
         this.pvpTeamBtns.push(cell);
@@ -7350,7 +7396,7 @@ export class UI {
         b.style.transformOrigin = 'top left';
         b.style.backgroundImage = 'url(sprites/vanilla/Inventory_Back11.png)';
         b.style.backgroundSize = '100% 100%';
-        b.title = name;
+        this.vinvBindHoverTip(b, () => name);   // ★2026-09-13 反馈轮6:自有气泡替代 title
         const im = el('img') as HTMLImageElement;
         im.draggable = false;
         im.style.cssText = 'position:absolute; inset:0; margin:auto; max-width:36px; max-height:36px; image-rendering:pixelated;';
@@ -7446,12 +7492,8 @@ export class UI {
   //  + 60fps 步进配额,见上方字段注)——旧"瞬时重排替代"退役;鱼眼 scale/alpha/
   //  x 位移逐式还原。inventoryBack.A 取 150(原版 LoadSettings 初值)。
   private vinvBuildCraft(): void {
-    // 列表/材料行容器(透明,仅命中面;格子绝对定位直挂 root)
-    const listHit = el('div');
-    listHit.style.cssText = 'position:absolute; pointer-events:auto;';
-    listHit.addEventListener('wheel', (e) => this.vinvCraftWheel(e), { passive: true });
-    this.vinvRoot?.appendChild(listHit);
-    this.vinvCraftListEl = listHit;
+    // ★2026-09-13 用户实测:listHit 巨带(100×700)罩住背包左列=滚轮/点击死区 →
+    //  整体移除;滚轮只绑配方格(vanilla=悬停配方列才滚)
     // 制作标题(Lang.inter[25] @(76,414+adjY);:169-173)
     const title = el('div', 'vinv-txt', Lang.inter(25));
     title.style.fontSize = '14px';
@@ -7472,7 +7514,16 @@ export class UI {
     const nearBtn = el('button', 'vinv-btn') as HTMLButtonElement;
     nearBtn.style.cssText = 'width:32px; height:34px; padding:0;';
     nearBtn.appendChild(nearImg);
-    nearBtn.title = Lang.has('GameUI.CraftFromNearbyChestsOn') ? Lang.text('GameUI.CraftFromNearbyChestsOn') : 'CraftFromNearbyChests';
+    // ★2026-09-13 用户要求:hover 态(帧 1/3)+ 自有气泡(title 原生气泡慢)
+    nearBtn.addEventListener('mouseenter', () => {
+      nearImg.src = `sprites/vanilla-ui/UI_ChestCraft_${options.data.craftFromNearbyChests ? 1 : 3}.png`;
+      this.showBuffTooltip(nearBtn, Lang.text(options.data.craftFromNearbyChests
+        ? 'GameUI.CraftFromNearbyChestsOn' : 'GameUI.CraftFromNearbyChestsOff'), '');
+    });
+    nearBtn.addEventListener('mouseleave', () => {
+      syncNear();
+      this.hideBuffTooltip();
+    });
     nearBtn.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       void options.set('craftFromNearbyChests', !options.data.craftFromNearbyChests);
@@ -7493,7 +7544,6 @@ export class UI {
       }
       return { x: 94, y: 490 + this.vinvCraftAdjY(c.sh) };
     } });
-    this.vinvLayoutItems.push({ el: listHit, pos: () => this.vinvClassicCraftVisible() ? this.vinvCraftListRect() : null });   // ★SW-FX41:窗开隐藏(Main.cs:42418 else 支)
     this.vinvLayoutItems.push({ el: title, pos: () => {
       const c = this.vinvLayoutCtx;
       if (!c || !this.vinvClassicCraftVisible()) return null;   // ★SW-FX41:窗开不画(:42418 else 支)
@@ -7559,16 +7609,17 @@ export class UI {
     btn.appendChild(img);
     this.vinvGridToggleImg = img;
     this.vinvSyncGridToggle();
-    btn.title = Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl));
+    // ★2026-09-13 用户要求:hover 名走自有气泡(showBuffTooltip),弃原生 title(慢)
     btn.addEventListener('mouseenter', () => {
       this.vinvGridToggleHover = true;
       this.vinvSyncGridToggle();                        // num += flag.ToInt()(:291)
       this.game.sfx.play('menuTick', 1);                // DoStatefulTickSound(Main.cs:3333-3344)沿
-      btn.title = Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl));
+      this.showBuffTooltip(btn, Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl)), '');
     });
     btn.addEventListener('mouseleave', () => {
       this.vinvGridToggleHover = false;
       this.vinvSyncGridToggle();
+      this.hideBuffTooltip();
     });
     btn.addEventListener('contextmenu', (e) => e.preventDefault());
     btn.addEventListener('mousedown', (e) => {
@@ -7577,7 +7628,7 @@ export class UI {
         // 右键支(:322-331):Classic↔Modern 循环 + PlaySound(12)
         void options.set('craftingGridControl',
           cycleCraftingGridControl(options.data.craftingGridControl));
-        btn.title = Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl));
+        this.showBuffTooltip(btn, Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl)), '');
         this.game.sfx.play('menuTick', 1);
         return;
       }
@@ -7686,16 +7737,17 @@ export class UI {
         + `background-position:${mcraftIconBgX(fb.icon)}px 0px;`;
       b.appendChild(tab);
       b.appendChild(icon);
-      b.title = Lang.text(fb.l10n);
       b.addEventListener('mouseenter', () => {
         this.vinvModernFilterHovers[i] = true;
         this.game.sfx.play('menuTick', 1);            // button_OnMouseOver :76-79 Sound 12
-        b.title = Lang.text(fb.l10n);                 // ShowButtonName :128-135
+        // ShowButtonName :128-135 → ★2026-09-13 反馈轮6:自有气泡替代 title
+        this.showBuffTooltip(b, Lang.text(fb.l10n), '');
         this.vinvSyncModernFilterBtn(i);
       });
       b.addEventListener('mouseleave', () => {
         this.vinvModernFilterHovers[i] = false;
         this.vinvSyncModernFilterBtn(i);
+        this.hideBuffTooltip();
       });
       b.addEventListener('mousedown', (e) => {
         e.stopPropagation();
@@ -8833,22 +8885,24 @@ export class UI {
       const idx = BUILDER_ACC_ICON_ORDER[i].accIndex;
       const on = statusOf()[idx] === 0;
       b.style.opacity = on ? '1' : '0.497';   // color2 = (127,127,127) ≙ White×0.498(:48168)
-      const g = gatesOf();
-      b.title = (() => {
-        switch (idx) {
-          case BACC.HideAllWires: return Lang.text(on ? 'GameUI.WireModeForced' : 'GameUI.WireModeNormal');
-          case BACC.RulerLine: return Lang.text(on ? 'GameUI.RulerOn' : 'GameUI.RulerOff');
-          case BACC.RulerGrid: return Lang.text(on ? 'GameUI.MechanicalRulerOn' : 'GameUI.MechanicalRulerOff');
-          case BACC.AutoActuate: return Lang.text(on ? 'GameUI.ActuationDeviceOn' : 'GameUI.ActuationDeviceOff');
-          case BACC.AutoPaint: return Lang.text(on ? 'GameUI.PaintSprayerOn' : 'GameUI.PaintSprayerOff');
-          default: {
-            const arg = ({ 4: 'Game.RedWires', 5: 'Game.BlueWires', 6: 'Game.GreenWires', 7: 'Game.YellowWires', 9: 'Game.Actuators' } as Record<number, string>)[idx] ?? '';
-            const st = statusOf()[idx];
-            const mode = Lang.text(st === 0 ? 'GameUI.Bright' : st === 1 ? 'GameUI.Normal' : st === 2 ? 'GameUI.Faded' : 'GameUI.Hidden');
-            return `${Lang.text(arg)}: ${mode}`;
-          }
+    };
+    // ★2026-09-13 反馈轮6:hover 文案抽函数走自有气泡(:48300-48320 MouseText 域;
+    //  文案随 num3 走的映射错位 quirk 见 BUILDER_ACC_ICON_ORDER 注)
+    const baccTipOf = (idx: number): string => {
+      const on = statusOf()[idx] === 0;
+      switch (idx) {
+        case BACC.HideAllWires: return Lang.text(on ? 'GameUI.WireModeForced' : 'GameUI.WireModeNormal');
+        case BACC.RulerLine: return Lang.text(on ? 'GameUI.RulerOn' : 'GameUI.RulerOff');
+        case BACC.RulerGrid: return Lang.text(on ? 'GameUI.MechanicalRulerOn' : 'GameUI.MechanicalRulerOff');
+        case BACC.AutoActuate: return Lang.text(on ? 'GameUI.ActuationDeviceOn' : 'GameUI.ActuationDeviceOff');
+        case BACC.AutoPaint: return Lang.text(on ? 'GameUI.PaintSprayerOn' : 'GameUI.PaintSprayerOff');
+        default: {
+          const arg = ({ 4: 'Game.RedWires', 5: 'Game.BlueWires', 6: 'Game.GreenWires', 7: 'Game.YellowWires', 9: 'Game.Actuators' } as Record<number, string>)[idx] ?? '';
+          const st = statusOf()[idx];
+          const mode = Lang.text(st === 0 ? 'GameUI.Bright' : st === 1 ? 'GameUI.Normal' : st === 2 ? 'GameUI.Faded' : 'GameUI.Hidden');
+          return `${Lang.text(arg)}: ${mode}`;
         }
-      })();
+      }
     };
     const visGateOf = (idx: number, g: ReturnType<typeof builderAccGateSet>): boolean => {
       // ★SW-FX36：Ruler 档(:48193 门 `player.rulerLine`)恒可见——旗位在 ResetEffects
@@ -8863,6 +8917,7 @@ export class UI {
       const b = el('button', 'vinv-btn') as HTMLButtonElement;
       b.style.cssText = 'width:14px; height:14px; image-rendering:pixelated;'
         + `background-image:url(${ICON_SRC}); background-size:160px 32px;`;
+      this.vinvBindHoverTip(b, () => baccTipOf(slot.accIndex));
       b.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         const st = statusOf();
@@ -8870,6 +8925,7 @@ export class UI {
         else toggleBuilderAccBit(st, slot.accIndex);
         this.game?.sfx.play('menuTick', 1);       // SoundEngine.PlaySound(12) :48203 等
         paintSlot(i);
+        this.showBuffTooltip(b, baccTipOf(slot.accIndex), '');   // 点击即刷新(mousedown 必在悬停态)
       });
       root.appendChild(b);
       slotEls[i] = b;
@@ -8905,13 +8961,16 @@ export class UI {
       const paint = (): void => {
         const on = statusOf()[BACC.BlockSwap] === 0;
         b.style.backgroundPosition = `${on ? 0 : -24}px 0px`;  // Frame(3,1,on?0:1) :43251
-        b.title = Lang.text(on ? 'GameUI.BlockReplacerOn' : 'GameUI.BlockReplacerOff');
       };
+      // ★2026-09-13 反馈轮6:hover 名走自有气泡(:43260-43266 MouseText 域)
+      this.vinvBindHoverTip(b, () =>
+        Lang.text(statusOf()[BACC.BlockSwap] === 0 ? 'GameUI.BlockReplacerOn' : 'GameUI.BlockReplacerOff'));
       b.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         toggleBuilderAccBit(statusOf(), BACC.BlockSwap);
         this.game?.sfx.play('unlock', 1);           // SoundEngine.PlaySound(22) :43268
         paint();
+        this.showBuffTooltip(b, Lang.text(statusOf()[BACC.BlockSwap] === 0 ? 'GameUI.BlockReplacerOn' : 'GameUI.BlockReplacerOff'), '');
       });
       root.appendChild(b);
       this.vinvLayoutItems.push({
@@ -8936,13 +8995,16 @@ export class UI {
       const paint = (): void => {
         const on = statusOf()[BACC.TorchBiome] === 0;
         b.style.backgroundPosition = `${(on ? 1 : 0) * -26}px 0px`;   // Frame(4,1,on?1:0) :43291
-        b.title = Lang.text(on ? 'GameUI.TorchTypeSwapperOn' : 'GameUI.TorchTypeSwapperOff');
       };
+      // ★2026-09-13 反馈轮6:hover 名走自有气泡(:43300-43306 MouseText 域)
+      this.vinvBindHoverTip(b, () =>
+        Lang.text(statusOf()[BACC.TorchBiome] === 0 ? 'GameUI.TorchTypeSwapperOn' : 'GameUI.TorchTypeSwapperOff'));
       b.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         toggleBuilderAccBit(statusOf(), BACC.TorchBiome);
         this.game?.sfx.play('unlock', 1);           // SoundEngine.PlaySound(22) :43308
         paint();
+        this.showBuffTooltip(b, Lang.text(statusOf()[BACC.TorchBiome] === 0 ? 'GameUI.TorchTypeSwapperOn' : 'GameUI.TorchTypeSwapperOff'), '');
       });
       root.appendChild(b);
       this.vinvLayoutItems.push({
@@ -9263,18 +9325,9 @@ export class UI {
     if (sh < 850) return Math.trunc(sh / 600 * 225);
     return Math.trunc(sh / 600 * 250);
   }
-  /** 列表命中区(覆盖可见鱼眼带;顶=最上可见槽 410+adjY-0.75·(middleY+30)——
-   *  不下探到背包网格区,防吃首列点击) */
-  private vinvCraftListRect(): { x: number; y: number } | null {
-    const c = this.vinvLayoutCtx;
-    if (!c) return null;
-    const adjY = this.vinvCraftAdjY(c.sh), middleY = this.vinvCraftMiddleY(c.sh);
-    return { x: 0, y: Math.trunc(410 + adjY - 0.75 * (middleY + 30)) };
-  }
-
   private vinvRefreshCraft(): void {
     const game = this.game;
-    if (!game || !this.vinvCraftListEl) return;
+    if (!game) return;
     // ★SW-FX30 刀⑦:过滤失效拍(DrawGridToggle 头 CraftingUI.cs:269-273)+列表头文字
     // (DrawRecipesList :167-171:RecipeFilterHack → GetWindowDescription,else inter[25])
     this.vinvTickCraftFilter();
@@ -9433,12 +9486,6 @@ export class UI {
       el.style.setProperty('--slot-bgimg',
         `url(sprites/vanilla/Inventory_Back${i === this.vinvCraftFocusV ? 14 : ''}.png)`);
     }
-    if (this.vinvCraftListEl) {
-      const r = this.vinvCraftListRect();
-      if (r) { this.vinvCraftListEl.style.left = `${r.x}px`; this.vinvCraftListEl.style.top = `${r.y}px`; }
-      this.vinvCraftListEl.style.width = '100px';
-      this.vinvCraftListEl.style.height = `${Math.trunc(middleY * 1.5) + 80}px`;
-    }
     this.vinvUpdateCraftMaterials();
   }
 
@@ -9480,7 +9527,6 @@ export class UI {
   }
 
   private vinvCraftCellEls: Array<{ el: HTMLElement }> = [];
-  private vinvCraftListEl: HTMLElement | null = null;
   private vinvCraftTitleEl: HTMLElement | null = null;
   private vinvCraftMatEl: HTMLElement | null = null;
   private vinvCraftMatSig = '';
@@ -9622,7 +9668,6 @@ export class UI {
     this.vinvCraftGlideAcc = 0;
     this.vinvCraftAvailV = [];
     this.vinvCraftCellEls = [];
-    this.vinvCraftListEl = null;
     this.vinvCraftTitleEl = null;
     this.vinvCraftMatEl = null;
     this.vinvCraftMatSig = '';

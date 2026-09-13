@@ -102,6 +102,9 @@ void main() {
       }
     } catch { /* RENDERER 查询失败按硬件处理 */ }
     this.gl = gl;
+    // ★IIIII248:DOM 源带源矩形的 texSubImage2D 重载仅 WebGL2 提供(WebGL1 规范
+    //  无此签名,调用会 TypeError)——按实际上下文域分派
+    this._isGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
     const compile = (type: number, src: string): WebGLShader | null => {
       const sh = gl.createShader(type)!;
       gl.shaderSource(sh, src);
@@ -150,12 +153,21 @@ void main() {
   /** 整幅刷新优化(#perf-gpulog,gptlog2 定量):world/light 同尺寸场景纹理每帧整幅重传——
    *  首次/尺寸变化才走 texImage2D(隐式重分配),此后 texSubImage2D 数据区直刷,
    *  规避驱动逐帧 realloc/错排路径(弱 iGPU 上该路径是 CPU→GPU 复制的主要开销项)。
-   *  账本语义不变:上传恒记带宽;仅 key 变化时补记一笔 新分配(隐式 realloc)。 */
+   *  账本语义:上传记实际带宽;仅 key 变化时补记一笔 新分配(隐式 realloc)。
+   *  ★IIIII248:light 纹理支持脏行带上传(lightDirty=[x,y,w,h] 于 light 画布像素系;
+   *  null=零变化跳过上传;undefined=旧全幅路径)。world 纹理无内容级脏迹,恒全幅。 */
   private _texKeyWorld = '';
   private _texKeyLight = '';
+  /** WebGL2 通道(webgl2 上下文才有 DOM 源带 src-rect 的 texSubImage2D 重载;
+   *  WebGL1 回退全幅——正确性不变,只是少省带宽) */
+  private _isGL2 = false;
   /** 每帧合成:world(worldCanvas) × light(lightCanvas @ lightRect 像素矩形) → this.canvas
-   *  darkSkip（★SW-BJ41 2026-09-09）：1 = 以太域零光 α→0（shimmerAlpha≥1 时传入） */
-  composite(world: HTMLCanvasElement, light: HTMLCanvasElement, lightRect: readonly [number, number, number, number], darkSkip = 0): boolean {
+   *  darkSkip（★SW-BJ41 2026-09-09）：1 = 以太域零光 α→0（shimmerAlpha≥1 时传入）
+   *  lightBand（★IIIII248）：light 纹理脏行带 {canvas,y,w,h}——canvas 的 (0,0,w,h)
+   *  区已由调用方绘制好本帧带内容(带画布,y=纹理内目标行);null=本帧零变化跳过
+   *  上传;缺省 undefined=全幅(兼容旧调用面)。 */
+  composite(world: HTMLCanvasElement, light: HTMLCanvasElement, lightRect: readonly [number, number, number, number], darkSkip = 0,
+    lightBand?: { canvas: HTMLCanvasElement; y: number; w: number; h: number } | null): boolean {
     const gl = this.gl;
     if (!gl || !this.prog || this.diedAt) return false;
     const w = world.width, h = world.height;
@@ -185,14 +197,30 @@ void main() {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texLight);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // ★IIIII248 光照图脏行带:调用方逐行比对产出带画布(canvas 的 (0,0,w,h) = 本帧
+    //  带,y = 纹理内目标行)。纹理与 light 画布由同一脏带对称推进 ⇒ 带外纹素=
+    //  带外画布像素恒等,采样结果与全幅上传逐位一致。null=零变化 ⇒ 纹理已是
+    //  本帧内容,整段跳过。WebGL2 的 texSubImage2D DOM 源重载为
+    //  (target,level,xoff,yoff,w,h,fmt,type,source)——无 srcX/srcY 形态(带内容
+    //  由调用方先画进带画布左上角);WebGL1 无宽高形态 → 走全幅回退支。
     if (this._texKeyLight !== kb) {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, light);
       glStatTexCreate('worldLight', light.width * light.height * 4);
       this._texKeyLight = kb;
+      glStatUpload('worldLight', light.width * light.height * 4);
+    } else if (lightBand === null) {
+      // 零变化:跳过上传(账本零带宽)
+    } else if (lightBand !== undefined && this._isGL2) {
+      // WebGL2 9 参 DOM 源重载(target,level,xoff,yoff,w,h,fmt,type,source)——
+      // 本仓 TS DOM 库版本未收录该重载,松散调用面 + _isGL2 门控(GL1 走全幅回退)
+      (gl as unknown as { texSubImage2D: (...a: unknown[]) => void }).texSubImage2D(
+        gl.TEXTURE_2D, 0, 0, lightBand.y, lightBand.w, lightBand.h,
+        gl.RGBA, gl.UNSIGNED_BYTE, lightBand.canvas);
+      glStatUpload('worldLight', lightBand.w * lightBand.h * 4);
     } else {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, light);
+      glStatUpload('worldLight', light.width * light.height * 4);
     }
-    glStatUpload('worldLight', light.width * light.height * 4);
     gl.uniform1i(this.uni.uWorld, 0);
     gl.uniform1i(this.uni.uLight, 1);
     gl.uniform2f(this.uni.uCanvas, w, h);

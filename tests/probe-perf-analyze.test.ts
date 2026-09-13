@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   isFrameworkFunc, shortUrl, summarizeProfile, parseTrace, fpsStats,
   aggregateSegments, buildSelfCheck, compareWithBaseline, renderReportMd, LONG_TASK_US,
+  classifyGpuRenderer,
 } from '../tools/probe/lib/perf-analyze.mjs';
 import { BIOME_STOPS, STRESS_FACTORS } from '../tools/probe/lib/perf-scenarios.mjs';
 
@@ -285,5 +286,132 @@ describe('IIIII239 isFrameworkFunc/shortUrl', () => {
     expect(isFrameworkFunc('drawWorld', 'http://x/src/render/Renderer.ts')).toBe(false);
     expect(shortUrl('http://localhost:5293/src/core/Game.ts')).toBe('/src/core/Game.ts');
     expect(shortUrl('')).toBe('(eval)');
+  });
+});
+
+// ═══════════════ IIII246 GPU 启用定谳 + GPU 段量化 ═══════════════
+
+describe('IIIII246 parseTrace GPU 段量化(GPU 进程账)', () => {
+  const gpuTrace = {
+    traceEvents: [
+      // 元数据:GPU 进程(900)+ 线程名;Renderer(100)主线程
+      { cat: '__metadata', name: 'process_name', pid: 900, args: { name: 'GPU Process' } },
+      { cat: '__metadata', name: 'thread_name', pid: 900, tid: 1, args: { name: 'CrGpuMain' } },
+      { cat: '__metadata', name: 'thread_name', pid: 900, tid: 2, args: { name: 'VizCompositorThread' } },
+      { cat: '__metadata', name: 'process_name', pid: 100, args: { name: 'Renderer' } },
+      { cat: '__metadata', name: 'thread_name', pid: 100, tid: 10, args: { name: 'CrRendererMain' } },
+      // GPU 侧:GPUTask ×2=2.0ms;Commit 耗时件 0.8ms+无 dur 标记;SwapBuffers 0.3ms
+      { pid: 900, tid: 1, cat: 'disabled-by-default-devtools.timeline', name: 'RunTask', ts: 1000, dur: 1600 },
+      { pid: 900, tid: 1, cat: 'disabled-by-default-devtools.timeline', name: 'GPUTask', ts: 1100, dur: 1500 },
+      { pid: 900, tid: 1, cat: 'disabled-by-default-devtools.timeline', name: 'GPUTask', ts: 3000, dur: 500 },
+      { pid: 900, tid: 2, cat: 'disabled-by-default-devtools.timeline', name: 'Commit', ts: 2000, dur: 800 },
+      { pid: 900, tid: 2, cat: 'cc,benchmark,disabled-by-default-devtools.timeline.frame', name: 'Commit', ts: 2100 },
+      { pid: 900, tid: 2, cat: 'gpu', name: 'SwapBuffers', ts: 4000, dur: 300 },
+      // Renderer 主线程:长任务 80ms + 渲染事件(GPU 事件不得混入主账)
+      { pid: 100, tid: 10, cat: 'devtools.timeline', name: 'RunTask', ts: 500, dur: 80_000 },
+      { pid: 100, tid: 10, cat: 'devtools.timeline', name: 'FunctionCall', ts: 6000, dur: 5_000 },
+    ],
+  };
+  const t = parseTrace(gpuTrace as never)!;
+  it('GPU 进程识别(__metadata process_name=GPU Process;线程名入账)', () => {
+    expect(t.gpu).not.toBeNull();
+    expect(t.gpu!.pid).toBe(900);
+    expect(t.gpu!.threads).toContain('CrGpuMain');
+    expect(t.gpu!.threads).toContain('VizCompositorThread');
+  });
+  it('GPUTask 聚合(count/total/max/mean/busyPct=和÷主线程墙钟)', () => {
+    expect(t.gpu!.tasks.count).toBe(2);
+    expect(t.gpu!.tasks.totalMs).toBeCloseTo(2, 3);
+    expect(t.gpu!.tasks.maxMs).toBe(1.5);
+    expect(t.gpu!.tasks.meanMs).toBe(1);
+    // wall=主线程 ts 窗 500..6000µs=5.5ms → 2/5.5×100=36.4
+    expect(t.gpu!.tasks.busyPct).toBeCloseTo(36.4, 1);
+  });
+  it('Commit 聚合(dur>0 计时长;dur=0 的 frame 域标记只计次)', () => {
+    expect(t.gpu!.commit.count).toBe(1);
+    expect(t.gpu!.commit.totalMs).toBeCloseTo(0.8, 3);
+    expect(t.gpu!.commit.maxMs).toBe(0.8);
+    expect(t.gpu!.commit.markers).toBe(1);
+  });
+  it('GPU breakdown 含 GPUTask/SwapBuffers;主线程 breakdown/长任务不混 GPU 事件', () => {
+    const gpuNames = t.gpu!.breakdown.map((b: { name: string }) => b.name);
+    expect(gpuNames).toContain('GPUTask');
+    expect(gpuNames).toContain('SwapBuffers');
+    expect(t.breakdown.map((b: { name: string }) => b.name)).not.toContain('GPUTask');
+    expect(t.longTasks).toHaveLength(1);
+    expect(t.longTasks[0]).toMatchObject({ name: 'RunTask', ms: 80 });
+  });
+  it('无 GPU 进程 trace → gpu=null 不炸;回退:无元数据时按 GPUTask 事件 pid 认', () => {
+    const bare = parseTrace({ traceEvents: [{ cat: 'devtools.timeline', name: 'RunTask', ts: 1, dur: 100 }] } as never)!;
+    expect(bare.gpu).toBeNull();
+    const fallback = parseTrace({
+      traceEvents: [{ pid: 777, tid: 1, cat: 'disabled-by-default-devtools.timeline', name: 'GPUTask', ts: 100, dur: 900 }],
+    } as never)!;
+    expect(fallback.gpu!.pid).toBe(777);
+    expect(fallback.gpu!.tasks.totalMs).toBeCloseTo(0.9, 3);
+  });
+});
+
+describe('IIIII246 classifyGpuRenderer(SwiftShader/Apple 指纹)', () => {
+  it('Apple Metal(239/246 实测串)→ gpu-metal', () => {
+    const c = classifyGpuRenderer('ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)');
+    expect(c).toMatchObject({ software: false, apple: true, backend: 'metal', verdict: 'gpu-metal' });
+  });
+  it('SwiftShader(Vulkan Device,246 实测串)→ software;llvmpipe/software 同判', () => {
+    expect(classifyGpuRenderer('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (LLVM 10.0.0) (0x0000C0DE)), SwiftShader driver)').verdict).toBe('software');
+    expect(classifyGpuRenderer('llvmpipe (LLVM 15.0.7)').software).toBe(true);
+    expect(classifyGpuRenderer('Software Renderer').software).toBe(true);
+  });
+  it('gpuModel 辅助(Apple 串+model)/非 Apple/空串', () => {
+    expect(classifyGpuRenderer('ANGLE Metal Renderer: Unknown', 'Apple M5 Pro').apple).toBe(true);
+    expect(classifyGpuRenderer('ANGLE (NVIDIA, ...)').verdict).toBe('gpu-other');
+    expect(classifyGpuRenderer('').verdict).toBe('unknown');
+  });
+});
+
+describe('IIIII246 aggregateSegments GPU 聚合/buildSelfCheck GPU 证据闸/renderReportMd GPU 面', () => {
+  const segs = [
+    { name: 'a', kind: 'dwell', fps: { frames: 60, wallMs: 1000, mean: 60 }, gpu: { tasks: { totalMs: 30, count: 100 }, commit: { totalMs: 5, count: 10 } } },
+    { name: 'b', kind: 'dwell', fps: { frames: 120, wallMs: 2000, mean: 60 }, gpu: { tasks: { totalMs: 60, count: 200 }, commit: { totalMs: 10, count: 20 } } },
+  ];
+  it('GPU 账跨段求和+busyPct 按墙钟加权(tasksMs/commitMs/busyPct)', () => {
+    const agg = aggregateSegments(segs as never);
+    expect(agg.gpu.tasksMs).toBe(90);
+    expect(agg.gpu.tasksCount).toBe(300);
+    expect(agg.gpu.commitMs).toBe(15);
+    expect(agg.gpu.busyPct).toBeCloseTo(3, 3);   // 90/3000×100
+  });
+  function mkRun(meta: unknown, list: unknown[]) {
+    return {
+      meta,
+      scenarios: {
+        s: {
+          aggregate: { framework: { pct: 0.5 }, hotspots: [{ fn: 'drawWorld', url: '/src/render/Renderer.ts' }] },
+          segments: list,
+        },
+      },
+    };
+  }
+  const segOk = { name: 'dwell:a', kind: 'dwell', fps: { mean: 50, frames: 60, wallMs: 1000 }, trace: { events: 10 }, longtasks: { count: 0 }, gc: { count: 0 }, gpu: { tasks: { count: 5, totalMs: 3 } } };
+  const segLost = { ...segOk, name: 'dwell:b', gpu: null };
+  const findCheck = (r: ReturnType<typeof buildSelfCheck>, n: string) => r.checks.find((c: { name: string }) => c.name === n)!;
+  it('traceGpu 开+段缺 GPU 账=FAIL;全段有账=PASS', () => {
+    expect(findCheck(buildSelfCheck(mkRun({ traceGpu: true }, [segOk, segLost]) as never), 'gpu-evidence(s)').ok).toBe(false);
+    expect(findCheck(buildSelfCheck(mkRun({ traceGpu: true }, [segOk]) as never), 'gpu-evidence(s)').ok).toBe(true);
+  });
+  it('traceGpu 关且全无 GPU 账=不强制(兼容旧环境);部分段有账(缓冲断流指纹)仍 FAIL', () => {
+    expect(findCheck(buildSelfCheck(mkRun({ traceGpu: false }, [segLost]) as never), 'gpu-evidence(s)').ok).toBe(true);
+    expect(findCheck(buildSelfCheck(mkRun({}, [segOk, segLost]) as never), 'gpu-evidence(s)').ok).toBe(false);
+  });
+  it('报告带 GPU 定谳行/聚合 GPU 行/分段 GPU 列', () => {
+    const run = mkRun({}, [segOk]) as never as Parameters<typeof renderReportMd>[0];
+    (run as { meta: Record<string, unknown> }).meta = {
+      gpuCheck: { verdict: 'gpu-metal', renderer: 'ANGLE (Apple...)', gpuModel: 'ANGLE (Apple...)', fillMsPerFrame: 0.6 },
+      headless: false,
+    };
+    const md = renderReportMd(run, {});
+    expect(md).toContain('GPU 定谳:**gpu-metal**');
+    expect(md).toContain('GPU:GPUTask');
+    expect(md).toContain('GPU ms(busy%)');
   });
 });

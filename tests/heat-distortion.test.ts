@@ -5,6 +5,7 @@
 //  ③ MonolithFilters vs 字节码审计结论表（MONOLITH_FILTER_AUDIT）锁定
 //  ④ GLSL 源含字节码衍生常量（防手滑改漂）
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   MonolithFilters, emptyMonolithScene, MONOLITH_FILTER_AUDIT,
   HEAT_TIME_SCROLL, HEAT_DELTA_BIAS,
@@ -257,6 +258,23 @@ describe('GLSL 源锁字节码衍生常量（防漂移）', () => {
     expect(f).toContain('* 0.5');                    // 噪声半尺 :849,851
     expect(f).toContain('delta * uOffset');
     expect(f).toContain('uTimeScroll');              // 0.04·time 注入侧
+  });
+
+  it('★BJ65 s0 越界=钳边非回绕（FNA SpriteBatch.Begin(null)→LinearClamp）', () => {
+    // 定谳链：1.4.5.7=FNA（反编译 csproj 引 FNA.dll+Program.cs SDL3/FNA3D）；
+    // FilterManager.EndCapture 滤镜循环 spriteBatch.Begin(Immediate,AlphaBlend)
+    // 两参调用 sampler=null → FNA 解析 ?? SamplerState.LinearClamp（FNA
+    // SpriteBatch.cs:296，23.01-25.03 各 tag 同值）；ScreenShaderData.Apply 只设
+    // s1-s3、从不设 s0；heat 字节码 :858-859 无 frc/sat/clamp。故原版顶缘=钳到
+    // 边行。曾有 mod(uvOut,1.0) 手工回绕 → 顶行采底行内容=顶部 1-2px 错位条
+    // 伪影（用户实报 2026-09-13，合成探针 top2.out=[19.9,0,235.1] 蓝色实锤）。
+    const f = SCREEN_FX_FRAGS['FilterHeatDistortion'];
+    expect(f).not.toContain('mod(uvOut');
+    expect(f).toContain('BJ65');                     // 定谳注释在位（结构锚）
+    // 2D 回退同语义（drawHeat2D 屏幕采样坐标钳边+索引夹界）
+    const src = readFileSync(new URL('../src/render/MonolithFilters.ts', import.meta.url), 'utf8');
+    expect(src).toContain('Math.min(Math.max(oux, 0), 1) * lw');
+    expect(src).not.toContain('((oux % 1) + 1) % 1');
   });
 
   it('FilterMiniTower：V+min 度量 + lerp(color,1−color,s) 分档', () => {

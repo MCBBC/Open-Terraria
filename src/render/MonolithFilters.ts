@@ -942,7 +942,7 @@ export class MonolithFilters {
   //    GLScreenFilters FRAG_HEAT 同源 = ScreenShader.cso obj18 逐指令）
   // -------------------------------------------------------------------------
 
-  /** 半分辨率逐像素扭曲（噪声双线性 + wrap = LinearWrap 同款）。
+  /** 半分辨率逐像素扭曲（噪声双线性 + 屏幕采样钳边=FNA LinearClamp 同款，BJ65 勘误）。
    *  screenPos=屏幕左上世界px（uScreenPosition）、screenRes=(viewW/z, viewH/z)
    *  （uScreenResolution=UnscaledScreenSize）、time=GlobalTimeWrappedHourly */
   drawHeat2D(
@@ -983,9 +983,12 @@ export class MonolithFilters {
         const nAx = sample(wx, wy + scroll, 0), nAy = sample(wx, wy + scroll, 1);
         const nBx = sample(wx, wy - scroll, 0), nBy = sample(wx, wy - scroll, 1);
         const [oux, ouy] = heatUvOut(u, v, nAx, nAy, nBx, nBy, [offX, offY]);
-        const sx = ((oux % 1) + 1) % 1 * lw;                       // s0 wrap 等价
-        const sy = ((ouy % 1) + 1) % 1 * lh;
-        const x0 = sx | 0, y0 = sy | 0;
+        // ★BJ65 2026-09-13：s0 越界=钳边（FNA SpriteBatch.Begin(null)→LinearClamp，
+        //   同 GLScreenFilters FRAG_HEAT 勘误）——曾有 wrap 回绕 → 顶行采底行=
+        //   顶部 1-2px 错位条伪影。钳后索引再夹 lw-1/lh-1 防 oux=1 越界读。
+        const sx = Math.min(Math.max(oux, 0), 1) * lw;
+        const sy = Math.min(Math.max(ouy, 0), 1) * lh;
+        const x0 = Math.min(sx | 0, lw - 1), y0 = Math.min(sy | 0, lh - 1);
         const i = (py * lw + px) * 4, j = (y0 * lw + x0) * 4;
         d[i] = d[j]; d[i + 1] = d[j + 1]; d[i + 2] = d[j + 2];
       }

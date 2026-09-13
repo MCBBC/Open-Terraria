@@ -996,20 +996,24 @@ export function drawLiquidBehindTilesOnly(
       // 四邻液体(TileDrawing.cs:3861-3900;379=conveyor 按 vanilla 视为无液体)。
       // ★零分配版(2026-08-18):旧 lq() 每调用 new {lq,lt} ×4/格——水邻屏每帧
       // 8k-33k 对象 = GC 0.94s/次 = 行走 70-135ms 掉帧主源(trace ProfileChunk+GC 相关性)
-      let nLq = 0, nLt = 0;
-      const nb = (dx: number, dy: number): boolean => {
-        const nx = x + dx, ny = y + dy;
-        if (!st.inBounds(nx, ny)) return false;
-        const ni = st.idx(nx, ny);
-        nLq = st.liquid[ni];
-        nLt = st.liquidType[ni] || 1;
-        return true;
-      };
+      // ★IIIII248 内联展开(等价证明):本循环界 x∈[max(1,tx0),min(w-2,tx1)]/
+      //   y∈[max(1,ty0),min(h-2,ty1)] ⇒ 四邻 nx=x±1∈[0,w-1]、ny=y±1∈[0,h-1]
+      //   ⇒ st.inBounds(nx,ny) 在全循环域恒真(0.44% self 热点的源头即此
+      //   恒真守卫+闭包上下文分配——nb 捕获 x/y/nLq/nLt 可变外层 let,V8 每
+      //   格迭代建 Context)。展开为直读:idx 展开 = y*w+x 同式,liquidType||1
+      //   同式,四邻恒成立 ⇒ 直读与原 inBounds 门逐位同值。
       let Lq = 0, Lqt = 0, Rq = 0, Rqt = 0, Uq = 0, Uqt = 0, Dq = 0, Dqt = 0;
-      if (nb(-1, 0)) { Lq = nLq; Lqt = nLt; }
-      if (nb(1, 0)) { Rq = nLq; Rqt = nLt; }
-      if (nb(0, -1)) { Uq = nLq; Uqt = nLt; }
-      if (nb(0, 1)) { Dq = nLq; Dqt = nLt; }
+      {
+        const liqA = st.liquid, liqT = st.liquidType, wArr = st.w;
+        let ni = y * wArr + (x - 1);            // 左邻(x≥1 ⇒ x-1≥0)
+        Lq = liqA[ni]; Lqt = liqT[ni] || 1;
+        ni = y * wArr + (x + 1);                // 右邻(x≤w-2 ⇒ x+1≤w-1)
+        Rq = liqA[ni]; Rqt = liqT[ni] || 1;
+        ni = (y - 1) * wArr + x;                // 上邻(y≥1 ⇒ y-1≥0)
+        Uq = liqA[ni]; Uqt = liqT[ni] || 1;
+        ni = (y + 1) * wArr + x;                // 下邻(y≤h-2 ⇒ y+1≤h-1)
+        Dq = liqA[ni]; Dqt = liqT[ni] || 1;
+      }
       // 坡面格的"实心侧"邻格不计入（:3967/:3989/:4011/:4028 的 slope 门）：
       // slope 1/3 忽略左、2/4 忽略右、3/4 忽略上、1/2 忽略下——液体只从坡面开放侧来
       const slopeBlocksLeft = slope === 1 || slope === 3;
@@ -1032,15 +1036,20 @@ export function drawLiquidBehindTilesOnly(
       //   【登记为定性偏差】(液位取 255——IsHalfBrick 视觉恒满格,与上格实际液位
       //   无关;带画在贴图之后仅透过透明像素可见,越界部分被贴图遮挡无副作用)。
       if (!fL || !fR) {
-        const halfNbVisualWater = (dx: number): boolean => {
-          const nx = x + dx;
-          if (!st.inBounds(nx, y) || !st.inBounds(nx, y - 1)) return false;
-          const ni = st.idx(nx, y);
-          if (!st.flags[ni] || !st.half[ni] || TILE_DEFS[st.type[ni]]?.platform) return false;
-          return st.liquid[st.idx(nx, y - 1)] > 0;
-        };
-        if (!fL && halfNbVisualWater(-1)) { fL = true; Lq = 255; }
-        if (!fR && halfNbVisualWater(1)) { fR = true; Rq = 255; }
+        // ★IIIII248 内联展开(等价证明):nx=x±1∈[0,w-1](循环界同上)、y≥1 ⇒
+        //   y-1≥0 ⇒ 两个 inBounds 恒真;谓词体 flags/half/platform/上格 liquid>0
+        //   逐项同式直读,命中支同值(fL/fR=true + Lq/Rq=255)。
+        const halfF = st.half, typeA = st.type, flagA = st.flags, liqA2 = st.liquid, wA = st.w;
+        if (!fL) {
+          const ni = y * wA + (x - 1), nu = (y - 1) * wA + (x - 1);
+          if (flagA[ni] !== 0 && halfF[ni] !== 0 && !(TILE_DEFS[typeA[ni]]?.platform)
+            && liqA2[nu] > 0) { fL = true; Lq = 255; }
+        }
+        if (!fR) {
+          const ni = y * wA + (x + 1), nu = (y - 1) * wA + (x + 1);
+          if (flagA[ni] !== 0 && halfF[ni] !== 0 && !(TILE_DEFS[typeA[ni]]?.platform)
+            && liqA2[nu] > 0) { fR = true; Rq = 255; }
+        }
       }
       // ★flag5 自身格液体(:3943-3963,2026-08-19 用户实报"半格方块浸润未处理"):
       //   半砖/坡面格【自己格内】的液体也画浸润(半砖需 >160)——本格既是容器

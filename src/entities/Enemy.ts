@@ -8179,9 +8179,11 @@ export class Enemy extends Entity {
   private dungeonGuardianAI(game: GameHooks, player: Player | null) {
     if (!this.aiInit) {
       this.aiInit = true; this.ai0 = 1;   // 初始化（L21910；68 无手 NPC）
+      if (player) this.facing = this.seekDirX(player);   // ★:22022 TargetClosest（ai[0]==0 初索敌）
       game.playSfx('roar', 1, this.cx, this.cy);
     }
     if (!player || Math.abs(this.cx - player.cx) > 2000 || Math.abs(this.cy - player.cy) > 2000) {
+      if (player) this.facing = this.seekDirX(player);   // ★:22048 TargetClosest（超远沿重索敌）
       this.ai1 = 3;
     } else if (this.ai1 !== 3) {
       this.ai1 = 2;
@@ -8195,6 +8197,10 @@ export class Enemy extends Entity {
       const d = Math.hypot(dx, dy) || 1;
       this.vx = (dx / d) * 8;
       this.vy = (dy / d) * 8;
+      // ★2026-09-13（用户实报"守卫骷髅头不旋转"）：:22359 rotation += direction×0.3f
+      //  ——type 68 恒处 ai[1]=2f（:22054 守卫无条件强制），该模式首行逐拍旋 0.3 rad
+      //  （~0.35s/圈电锯观感）；direction 由 :22022/:22048 TargetClosest 刷新
+      this.visAngle += this.facing * 0.3;
     } else {
       this.vy += 0.1;
       if (this.vy < 0) this.vy *= 0.95;

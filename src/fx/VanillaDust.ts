@@ -176,6 +176,8 @@ export function dustFrameOf(type: number): { fx: number; fy: number } {
 }
 
 export class VanillaDust {
+  /** 上帧湿碰探针（update 注入;spawn 侧 :246-253 气泡族生成时湿判复用） */
+  wetProbe: ((px: number, py: number, w: number, h: number) => boolean) | null = null;
   private pool: VDust[] = [];
   private cursor = 0;
   /** 活跃尘计数（update 每帧全池遍历顺带重数——密度门 frac 的真负载源,见 spawn 门注）。
@@ -326,6 +328,14 @@ export class VanillaDust {
       d.vx *= 0.5;
       d.vy = d.vy * 0.5 + 1;   // 原文 velocity *= 0.5f 矢量(含 Y)后 Y++——红队R2-P1-1:曾漏 vy×0.5,净初速分布偏散至多 1px/t
     }
+    // ★气泡族补（2026-09-13 用户实报"呼吸泡下坠"）：:246-253 34=Bubbles/35/152——
+    //  velocity×0.1 + vy=−0.5 上浮钉值;34 生成点离水（WetCollision(pos.y−8,4,4) 失败）
+    //  即 active=false（原版同句）。旧版整支缺 → 池内落 default 吃 +0.1 重力 = 泡下坠
+    if (!ps && (type === 34 || type === 35 || type === 152)) {
+      d.vx *= 0.1;
+      d.vy = -0.5;
+      if (type === 34 && this.wetProbe && !this.wetProbe(d.x, d.y - 8, 4, 4)) d.active = false;
+    }
     // :52-63 NewDustPerfect：dust.position = Position；Velocity.HasValue →
     // dust.velocity = Velocity.Value（仅这两项覆写——scale 等照走 NewDust 结果）。
     //  ps 分支已零掷直写同值,此处对 ps 为恒真冗余（无掷,仅语义对齐）
@@ -389,6 +399,9 @@ export class VanillaDust {
     solidBoxAt: ((px: number, py: number, w: number, h: number) => boolean) | null = null,
     player: { cx: number; cy: number; vy: number } | null = null,
     wetBoxAt: ((px: number, py: number, w: number, h: number) => boolean) | null = null): void {
+    // ★气泡族(2026-09-13)：探针存字段——spawn() 侧 :246-253 生成时湿判复用
+    //  （上帧探针,液体面 1 帧滞后无感;探针未注入=null=跳过生成时杀）
+    this.wetProbe = wetBoxAt;
     this.lights.length = 0;
     let activeN = 0;
     for (const d of this.pool) {
@@ -664,6 +677,23 @@ export class VanillaDust {
           d.vx *= 0.99;
           chainLink = true;
           break;
+        case 34: case 35: case 152: {
+          // ★气泡族补（2026-09-13，Dust.cs:2023-2040 1:1）：离水（WetCollision
+          //  (pos.y−8,4,4) 失败）→ scale=0 灭;湿内 alpha+rand(2)/>255 灭、
+          //  vy=−0.5 恒上浮、34 scale+0.005 渐大。chainLink 置位跳过通用重力
+          //  ——原版 +0.1 先行即被 :2029 vy=−0.5 逐拍覆写,净 −0.5 与跳过等价。
+          //  （用户实报"入水呼吸泡往下掉"根因=本档整缺,泡吃 +0.1 重力下坠）
+          if (wetBoxAt && !wetBoxAt(d.x, d.y - 8, 4, 4)) {
+            d.scale = 0;
+          } else {
+            d.alpha += (Math.random() * 2) | 0;   // Main.rand.Next(2)
+            if (d.alpha > 255) d.scale = 0;
+            d.vy = -0.5;
+            if (d.type === 34) d.scale += 0.005;
+          }
+          chainLink = true;
+          break;
+        }
         default:
           break;
       }

@@ -361,8 +361,9 @@ describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
   });
   it('teardown 清单:双构建器字段全清(重建路径完整性)', () => {
     const s = ui();
-    for (const f of ['this.vinvCraftCellEls = [];', 'this.vinvCraftListEl = null;',
-      'this.vinvChestNameEl = null;', 'this.vinvHousingPage = null;',,
+    // 刀16 滚轮修复:vinvCraftListEl(listHit 巨带)连字段整删,锁改钉存留字段
+    for (const f of ['this.vinvCraftCellEls = [];', 'this.vinvCraftTitleEl = null;',
+      'this.vinvChestNameEl = null;', 'this.vinvHousingPage = null;',
       'this.vinvLockEl = null;', 'this.miscBuffCol = null;',   // SW-FX10 新增页域字段
       'this.loadoutBtns = [];', 'this.accEyeEls.clear();', "document.getElementById('sw-vinv-style')?.remove();"]) {
       expect(s).toContain(f);

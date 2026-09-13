@@ -3,6 +3,7 @@ import type { GameHooks } from './types';
 import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { beginDropScanCtx } from './dropScanCtx';
+import { beginProjScanCtx, endProjScanCtx } from './projScanCtx';
 import { cutTilesBox } from './ProjCutTiles';
 
 export abstract class Entity {
@@ -124,6 +125,12 @@ export class EntityManager {
         //   enter drops 桶前一次快照 ⇒ 帧内逐物访问与逐次计算严格同值
         beginDropScanCtx((game as { player?: unknown }).player);
       }
+      if (list === this.projectiles) {
+        // ★弹幕命中扫描帧上下文（IIIII248,见 projScanCtx.ts 头注）：projTargets
+        //   五出口每弹×每 subStepAI×每目标读 equipStats——内容键全量重建放大器。
+        //   enter projectiles 桶前一次快照 ⇒ 窗内六布尔字段逐值恒等(证明见头注)。
+        beginProjScanCtx((game as { player?: unknown }).player);
+      }
       for (const e of list) {
         e.fixedUpdate(dt, game);
         // ★中央 CutTiles 收口（2026-09-01 清零审计）：原版 Projectile.cs:11824 对
@@ -146,6 +153,9 @@ export class EntityManager {
         }
       }
       compact(list);
+      if (list === this.projectiles) {
+        endProjScanCtx((game as { player?: unknown }).player);   // 窗对称收口(窗外回退活路径)
+      }
     }
   }
 

@@ -16,9 +16,14 @@
 //   uOpacity=CombinedOpacity=UseOpacity×Filter.Opacity、uImageSize1=噪声图尺寸）
 //   FilterManager.EndCapture（链式叠加 + 每级 ×ColorOfTheSkies :172/:194）。
 //
-// 采样态：s1=Images/Misc/noise(256²,POT)→LinearWrap（ScreenShaderData.cs:175-178）；
-// s0=链上前级目标，XNA 设备默认 LinearWrap——NPOT 画布 WebGL1 只能 CLAMP，
-// 故片元内 mod(uv,1) 手工重复等价 wrap（差异=0，采样前已折回）。
+// 采样态：s1=Images/Misc/noise(256²,POT)→LinearWrap（ScreenShaderData.cs:175-178
+// POT 分支，显式设 SamplerStates[1]）；s0=链上前级目标→LinearClamp（★BJ65
+// 2026-09-13 勘误：滤镜循环 spriteBatch.Begin(Immediate,AlphaBlend) 两参调用
+// sampler=null → FNA `?? SamplerState.LinearClamp`（FNA SpriteBatch.cs:296；
+// 1.4.5.7 跑 FNA=反编译 csproj FNA.dll/SDL3 指纹）。Apply() 只设 s1-s3 采样器、
+// 从不设 s0。旧注「XNA 设备默认 LinearWrap→片元 mod 手工 wrap」系错框架假设，
+// 曾致 FRAG_HEAT 顶行回绕采底行=用户实报顶部 1-2px 错位条伪影，已废——
+// s0 越界一律钳边（uScreen=CLAMP_TO_EDGE），勿再手写 wrap。
 
 /** 一条滤镜链中的一个 pass（字段=已折入 preshader 的语义 uniform） */
 export type ScreenFxPass =
@@ -88,7 +93,15 @@ void main() {
   vec2 nA = texture2D(uNoise, halfNuv + vec2(0.0,  uTimeScroll)).rg; // :850,855(c1)
   vec2 delta = nA - nB - 0.5;                                     // :856-857(def c6.y=-0.5)
   vec2 uvOut = vUv + delta * uOffset;                             // :858
-  uvOut = mod(uvOut, 1.0);                    // s0 设备默认 wrap 的手工等价
+  // ★BJ65 顶缘横线伪影定谳（2026-09-13 用户实报沙漠/地狱地表顶 1-2px 错位条）：
+  //  字节码 :858-859 无 frc/sat/clamp，s0 越界行为=采样器地址模式。滤镜循环
+  //  spriteBatch.Begin(Immediate, AlphaBlend) 两参调用 sampler=null → FNA 解析
+  //  为 SamplerState.LinearClamp（FNA SpriteBatch.cs:296；1.4.5.7=FNA，
+  //  反编译 csproj 引 FNA.dll+Program.cs SDL3/FNA3D 指纹；旧注「XNA 设备默认
+  //  LinearWrap」系错框架假设已废）。故原版顶缘=钳到边行，此处曾有
+  //  手工 mod 回绕 → 顶行采底行内容=1-2px 错位图像条。uScreen 纹理
+  //  已是 CLAMP_TO_EDGE+LINEAR（init :492-495），与 FNA Clamp+双线性等价，
+  //  越界交硬件钳制——内部像素（uv∈[0,1)）零改动。
   // ★v0 死参数定谳（2026-08-25 用户实报血月过暗）：ScreenShader.cso 全 pass 反汇编
   //  ——滤镜族（Heat/MiniTower/Graveyard/BloodMoon/Test2/CRT/MoonLord…）【无一读取
   //  v0】（仅 Default 直通/沙尘暴/暴风雪/水波读）——EndCapture C# 侧

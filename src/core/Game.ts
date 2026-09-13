@@ -3129,6 +3129,22 @@ export class Game implements GameHooks {
 
   // 弹药
   particles: Particle[] = [];
+  /** ★IIIII248 legacy 简化尘池对象复用：死亡(life≤0)/溢出(splice)对象回自由表,
+   *  发射端取用后逐字段显式赋值(Particle 全 12 字段,省略位写 undefined——与字面量
+   *  「键缺省」的差异仅可由键枚举观测,全部读写消费面逐值恒等;RNG 消费序=原
+   *  字面量键序逐位不变)。上限 640=池容量(600)+余量,free 表本身零分配增长。 */
+  private _particleFree: Particle[] = [];
+
+  /** ★IIIII248:取尘对象(自由表或新分配) */
+  private acquireParticle(): Particle {
+    return this._particleFree.pop()
+      ?? { x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 0, color: '', size: 0 } as Particle;
+  }
+
+  /** ★IIIII248:尘对象回池(死亡/溢出;引用无人持有——粒子对象出表即死) */
+  private releaseParticle(p: Particle): void {
+    if (this._particleFree.length < 640) this._particleFree.push(p);
+  }
   dmgNumbers: DamageNumber[] = [];
   /** PopupText.numActive 上一帧写回终值快照（UpdateItemText :760-772:num 在循环内
    *  逐个 ++、循环结束才写回 → 帧内 Update 读到的是上一帧写回终值 = 上一帧帧首
@@ -7517,10 +7533,12 @@ export class Game implements GameHooks {
         steps++;
       }
     } else {
-      // ★SW-FX51 2026-09-13：暂停窗滚轮重锚（PlayerInput.cs:1407-1409
-      //  !AllowInputProcessing → ScrollWheelValue 双锚归位=增量整段丢弃 1:1）——
-      //  暂停期 fixedUpdate 冻结（endFrame 不跑）,wheelDelta 会滞留到恢复拍造成
-      //  幻象切槽;原版门内增量本就逐帧丢弃,此处对齐（含 px 余数=累积量归位）。
+      // ★SW-FX51 2026-09-13：暂停窗滚轮重锚（PlayerInput.cs:1400-1404
+      //  ——1403 双锚行;RB15d 勘误:原写 1407-1409 系误记;!AllowInputProcessing
+      //  的门体=FocusHelper.cs:79 IsSelectedApplication=【窗口焦点】门,非暂停门——
+      //  原版暂停期增量不滞留=CanUpdateGameplay=false 整段跳过消费+:1400 门逐帧
+      //  重锚两机制合成;本仓暂停期 fixedUpdate 冻结（endFrame 不跑）,wheelDelta
+      //  会滞留到恢复拍造成幻象切槽,故此处补重锚（含 px 余数=累积量归位）。
       this.input.resetWheelAccumulators();
     }
     // 环境音 cue 斜坡步进（★差异对齐 2026-08-24）：原版 UpdateAudio 在 XNA 固定
@@ -10885,7 +10903,17 @@ export class Game implements GameHooks {
       p.y += p.vy;
     }
     // 就地压缩(2026-08 审计 G9:此前每 tick 两个 filter 新数组)
-    compactByLife(this.particles);
+    // ★IIIII248:死亡对象回池(压缩语义=compactByLife 同式保序就地收敛)
+    {
+      let w = 0;
+      const list = this.particles;
+      for (let r = 0; r < list.length; r++) {
+        const q = list[r];
+        if (q.life > 0) list[w++] = q;
+        else this.releaseParticle(q);
+      }
+      list.length = w;
+    }
     // 飘字更新 1:1（CombatText.Update:131-206）。label 类（物品名）走旧轨迹;
     // 数字类:alpha 0.6~1 闪烁 → 速度演化（dot 加重力,暴击双重衰减）→ 寿命内
     // scale 生长（原版 Update :163-165 dot 与普通同链 +0.1×TargetScale 无封顶——
@@ -12206,9 +12234,22 @@ export class Game implements GameHooks {
    *  (= 测试桩视为不悬 DOM UI,与既有 spawnDust/vanillaDust 可选桩同款约定) */
   /** DOM UI bbox 快照(2026-09-08 光标流畅案):每 30 tick 一次批量取矩形,逐 tick
    *  的 inpOverDomUi 先做纯数学点in矩形预检,命中才 elementFromPoint(强制布局)。
-   *  光标在世界区域(屏幕 95%+ 缺省态)时逐 tick 布局读取归零。 */
+   *  光标在世界区域(屏幕 95%+ 缺省态)时逐 tick 布局读取归零。
+   *  ★IIIII248 命中结果缓存(0.46% self→≈0):key=(cx,cy,rectsTick)。函数输出面的
+   *  全部输入 = ①document/inp 存在性(常量) ②光标点(cx,cy) ③_domUiRects 快照
+   *  (以 _domUiRectsTick 唯一标识,键覆盖) ④elementFromPoint 的活 DOM 依赖。
+   *  ④被 ③收敛:rects 快照窗内(≤30 tick)面板/槽位为静态布局,顶层元素翻转仅
+   *  可能来自"随光标出现的动态层"(tooltip/拖拽影随光标移动 ⇒ cx/cy 变 ⇒ 键失
+   *  配 ⇒ 走活查询)或面板开合(开合沿含 UI 层重建,窗最迟 30 tick 收录;窗口内
+   *  缓存仅延展既有 bbox 快照的陈旧度界,而预检门本就以快照为准——悬停在快照
+   *  矩形外的面板开合在旧实现同样读不到)。cursor 越界/rects 刷新路径:rectsTick
+   *  前进 ⇒ 键失配 ⇒ 必走活查询(测试 scripts/_iii248-domui.mjs 覆盖)。 */
   private _domUiRects: Array<{ l: number; t: number; r: number; b: number }> = [];
   private _domUiRectsTick = -999;
+  private _domUiHitCx = NaN;
+  private _domUiHitCy = NaN;
+  private _domUiHitRectsTick = -1000;
+  private _domUiHitResult = false;
 
   private inpOverDomUi(): boolean {
     if (typeof document === 'undefined') return false;
@@ -12229,15 +12270,30 @@ export class Game implements GameHooks {
       }
       this._domUiRects = list;
     }
+    // ★IIIII248:同 (cx,cy,rectsTick) 直接复用上次命中结果(逐 tick 多调用点
+    //  updateSmartCursor/朝向/使用放置支收敛为每键一次 elementFromPoint)
+    if (cx === this._domUiHitCx && cy === this._domUiHitCy
+      && this._domUiRectsTick === this._domUiHitRectsTick) {
+      return this._domUiHitResult;
+    }
     // 纯数学预检:不落在任何 UI 矩形 → 必不命中(免 elementFromPoint 强制布局)
     let near = false;
     for (let i = 0; i < this._domUiRects.length; i++) {
       const q = this._domUiRects[i];
       if (cx >= q.l && cx <= q.r && cy >= q.t && cy <= q.b) { near = true; break; }
     }
-    if (!near) return false;
+    if (!near) {
+      this._domUiHitCx = cx; this._domUiHitCy = cy;
+      this._domUiHitRectsTick = this._domUiRectsTick;
+      this._domUiHitResult = false;
+      return false;
+    }
     const el = document.elementFromPoint(Math.max(0, cx), Math.max(0, cy));
-    return isDomUiTarget(el ?? null);
+    const hit = isDomUiTarget(el ?? null);
+    this._domUiHitCx = cx; this._domUiHitCy = cy;
+    this._domUiHitRectsTick = this._domUiRectsTick;
+    this._domUiHitResult = hit;
+    return hit;
   }
 
   /** SW-AT1 2026-09-05：autoReuseAllItems 全局连发臂（TryAllowingItemReuse
@@ -24612,6 +24668,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (st.inBounds(sx, sy) && st.isSolid(sx, sy)) return;
       }
     }
+    // ★SW-BJ66 占用堆叠门（PlayerSittingHelper.cs:112-118：CanSnap 过后
+    //  `flag &= sittingManager.GetNextPlayerStackIndexInCoords(座位格) < 2`——
+    //  席位表 NPC+玩家同坐标计数,AnchoredEntitiesCollection.cs:53-68;坐姿 NPC
+    //  每帧登记 (Bottom+(0,-2))格=NPC.cs:54849/:55952,玩家门坐标=:114
+    //  (sittingPosition+(0,-2))格≡本式）。门在【同位重坐起身】(:120-125)之前：
+    //  共占态（count≥2）连点同椅不再起身=原版序。被坐 NPC 占用的椅格：落座当帧
+    //  count=1 过门,次帧 updateSitting 挤落（:66-68）=原版「占椅不可坐」净效果。
+    if (this.anchoredSeatsAt(Math.floor(t.sittingX / TILE), Math.floor((t.sittingY - 2) / TILE)) >= 2) return;
     // 同位重坐 = 起身（Helper.cs:167-170）
     if (p.sitting && Math.abs(p.y + p.h - t.sittingY) < 0.5
       && Math.abs(p.x + p.w / 2 - t.sittingX) < 0.5) {
@@ -24641,6 +24705,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.sitTicks = 0;
   }
 
+  /** 座位格锚实体计数（AnchoredEntitiesCollection.GetEntitiesInCoords 1:1，
+   *  AnchoredEntitiesCollection.cs:53-68——NPC 席位表+玩家席位表同坐标求和；
+   *  原版集合每帧全清重建（Main.cs:18013/18088）+ ai[0]==5 每帧重登记
+   *  （NPC.cs:54849）/UpdateSitting 尾重登记（PlayerSittingHelper.cs:86），
+   *  本仓改读时点算：坐姿实体坐标=(cx,Bottom−2)格同式，净计数等价）。
+   *  坐标域 1:1：NPC=(Bottom+(0,-2)).ToTileCoordinates（NPC.cs:54843-54845，
+   *  落座 Bottom=:55952 地面行顶）；玩家=(Bottom+(0,-2))（PlayerSittingHelper.cs:70）。
+   *  消费：sitDownAt 占用门（:114）+ updateSitting 挤落（:66-68）。
+   *  ★鸭子类型与 TownNPC 占位门（TownNPC.ts:4881-4886）同式——桩对象可直驱。 */
+  private anchoredSeatsAt(tx: number, ty: number): number {
+    let n = 0;
+    for (const o of this.entities.npcs) {
+      const e = o as { sitting?: boolean; cx?: number; y?: number; h?: number; dead?: boolean };
+      if (!e || e.dead || !e.sitting) continue;
+      if (Math.floor((e.cx ?? 0) / TILE) === tx
+        && Math.floor(((e.y ?? 0) + (e.h ?? 0) - 2) / TILE) === ty) n++;
+    }
+    const p = this.player;
+    if (p.sitting && Math.floor(p.cx / TILE) === tx
+      && Math.floor((p.y + p.h - 2) / TILE) === ty) n++;
+    return n;
+  }
+
   /** PlayerSittingHelper.UpdateSitting（Helper.cs:69-105）：每帧维护——
    *  椅失效 / 任意移动输入（含滑轮/坐骑）/ 朝向变化 → 起身；马桶 wellFed →
    *  TryToPoop（:18714-18745 概率档 1/600·醉 1/200；食 tier 递降一档 + 屎堆
@@ -24659,6 +24746,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.standUp();                     // Helper.cs:79-82（pulley≈onRope）
       return;
     }
+    // ★SW-BJ66 堆叠挤落（PlayerSittingHelper.cs:66-68）：本座位格锚实体
+    //  （坐姿 NPC+玩家同表计数）≥ 2 → 起身——占椅 NPC 在场把玩家弹出（坐下当帧
+    //  sitDownAt 过 :114 门 count=1,次帧此处 count=2=原版「占椅不可坐」净效果）。
+    //  位次 = 输入起身之后 / 座位偏移刷新之前（原版序 :63 → :66 → :76）。
+    if (this.anchoredSeatsAt(cx, cy) >= 2) { this.standUp(); return; }
     p.seatOffsetX = t.offsetX;            // Helper.cs:96-97 偏移随帧刷新
     p.seatOffsetY = t.offsetY;
     // ---- 红帽骷髅王（PlayerSittingHelper.cs:84-95 → NPC.RedHatSkeletron
@@ -24987,9 +25079,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // ---- 坐椅族（Player.cs:31842-31860 右键分支：tile 15/497 一档、89/102/487
     //  一档，均 IsWithinSnappngRangeToTile 40px 门 → sitting.SitDown）----
+    // ★SW-BJ66 原版交谈闩（Player.cs:32188-32197）：悬停交谈气泡 NPC 的拍上
+    //  releaseUseTile 被消费 ⇒ TileInteractionsUse 的 flag 门（:32414 `if (flag)`
+    //  包住全部标准格交互支，坐椅支 :32560-32576 在内）整块跳过 ⇒ rightDown 不
+    //  消费 ⇒ 交谈臂（Main.cs:43807 !tileInteractionHappened）开对话——「点坐着
+    //  的 NPC=对话不落座」。消费条件 1:1：`currentNPCShowingChatBubble > -1 &&
+    //  (talkNPC == -1 || !npcChatRelease)` ⇒ 本式 = 气泡候选 ∧（未对话 ∨ 非
+    //  press 边沿（prevRightDown≡!npcChatRelease，Main.cs:45755-45763））。
+    //  （★SW-BJ25 任务书偏差「格交互先行」收窄：仅坐椅支回收原版 NPC 优先，
+    //  容器/牌/床/致动族仍格先行——坐姿 NPC 绘制帧盒罩住其椅格，不回收即实报
+    //  「点坐姿 NPC 玩家落座」。）跳过时不消费 rightDown，落空直达本方法尾部
+    //  （坐椅 sheet 不命中后续臂/合成站尾谓词）→ 交谈臂放行。
     if (SITTABLE_SHEETS.has(sh) && this.withinSnapRange(tx, ty, 40)) {
-      this.sitDownAt(tx, ty);
-      return;
+      const [mxS, myS] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+      if (!(this.npcChatBubbleHovered(mxS, myS) && (!this.dialogNpc || this._prevRightDown))) {
+        this.sitDownAt(tx, ty);
+        return;
+      }
     }
     // ---- 梳妆台 tile 88（Player.cs:32409-32479 右键分支）----
     //（Main.cs:43568 更衣界面：衣服样式+六色+音色，随角色档持久化）；上半（frameY==0）
@@ -32906,6 +33012,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
  *  ★SW-BJ25 2026-09-07：消费位从「宝箱臂后」移到「全部格交互臂后」
  *  （updateUse 右键块尾，格交互先行=原版 :43807 !tileInteractionHappened 语义，
  *  旗代理=rightDown 未被格臂消费）+ 补 talkNPC != i 门（对话中同体不重谈）。 */
+  /** 交谈气泡候选只读镜像（Main.cs:43716-43812 HoverOverNPCs flag3 链——
+   *  外门 flag2=绘制帧盒悬停（:43722-43724，npcHoverHit 单源）∨ 智能候选
+   *  （:43743）；townNPC 族（:43775 名单）再过射程盒 worldRegion（:43776-43782）；
+   *  否决 651 弹（本仓无该弹种）/stinky（:43785）/mouseInterface（:43787，
+   *  updateUse 头 uiBlocking 同语义）。与 talkToNearbyNpc 同候选集，差两点：
+   *  ①无 dialogNpc 跳过——气泡对 talkNPC==i 亦置位（:43799 在 talkNPC!=i 门外）；
+   *  ②无副作用（不开对话不解救）。消费：interactAt 坐椅支闩
+   *  （Player.cs:32188-32197 currentNPCShowingChatBubble 消费面）。 */
+  private npcChatBubbleHovered(mx: number, my: number): boolean {
+    const stinky = this.player.buffs?.has(BuffType.Stinky) ?? false;
+    const smartId = this.smartInteractNpcId ?? -1;
+    for (const ent of this.entities.enemies) {
+      const e = ent as Enemy;
+      if (!(e instanceof Enemy) || e.dead) continue;
+      if (!Game.ENEMY_BOUND_TOWN_KEY[e.vanillaId ?? -1]) continue;
+      if (!this.worldRegionIntersects(e.x, e.y, e.w, e.h)) continue;
+      if (!this.npcHoverHit(e.vanillaId ?? -1, mx, my, e.x, e.y, e.w, e.h)) continue;
+      return !stinky;                        // :43785 同款（stinky 全族否决,恒等续扫）
+    }
+    for (const o of this.entities.npcs) {
+      const npc = o as TownNPC;
+      if (!this.worldRegionIntersects(npc.x, npc.y, npc.w, npc.h)) continue;
+      if (!this.npcHoverHit(npc.vanillaId, mx, my, npc.x, npc.y, npc.w, npc.h)
+        && smartId !== npc.id) continue;
+      return !stinky;                        // :43785 同款
+    }
+    return false;
+  }
+
   private talkToNearbyNpc(mx: number, my: number): boolean {
     // 敌怪桶 bound 形态（睡渔夫 376 等）：原版同为右键 SetTalkNPC 触发（AI_000
     // :19782-19810 player.talkNPC==whoAmI → Transform 城镇型 + 置 saved 旗 +
@@ -41287,17 +41422,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 火点位置按锚定帧（TileDrawing.cs:7227-7231）：左锚 22→+6、右锚 44→+2、底/墙→+4
         const fx = st.frameX[i];
         const sparkX = fx === 22 ? 6 : fx === 44 ? 2 : 4;
-        this.particles.push({
-          x: x * TILE + sparkX + Math.random() * 4,
-          y: y * TILE + Math.random() * 4,
-          vx: (Math.random() - 0.5) * 0.25,
-          vy: -0.35 - Math.random() * 0.4,   // 原版 velocity.Y -= 1.5（上飘）
-          life: 16 + Math.random() * 12, maxLife: 28,
-          color: Math.random() < 0.55 ? '#FFB642' : Math.random() < 0.5 ? '#FF8A2A' : '#FFD97A',
-          size: 1 + Math.random() * 1.2,
-          grav: -0.015,  // 微浮力：火星徐徐上飘
-          damp: 0.985,
-        });
+        // ★IIIII248 对象复用:赋值序=原字面量键序,RNG 消费序逐位不变
+        const pt = this.acquireParticle();
+        pt.x = x * TILE + sparkX + Math.random() * 4;
+        pt.y = y * TILE + Math.random() * 4;
+        pt.vx = (Math.random() - 0.5) * 0.25;
+        pt.vy = -0.35 - Math.random() * 0.4;   // 原版 velocity.Y -= 1.5（上飘）
+        pt.life = 16 + Math.random() * 12; pt.maxLife = 28;
+        pt.color = Math.random() < 0.55 ? '#FFB642' : Math.random() < 0.5 ? '#FF8A2A' : '#FFD97A';
+        pt.size = 1 + Math.random() * 1.2;
+        pt.grav = -0.015;  // 微浮力：火星徐徐上飘
+        pt.damp = 0.985;
+        pt.ax = undefined; pt.ay = undefined;
+        this.particles.push(pt);
       }
     }
   }
@@ -41380,25 +41517,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // dxBox/dyBox（NewDust 矩形盒 1:1，TileParticles.ts 头注）：命中时取代
           // dx/dy±2 的近似抖动
           const bx = rule.dxBox, by = rule.dyBox;
-          this.particles.push({
-            x: bx !== undefined
-              ? x * TILE + bx[0] + Math.random() * (bx[1] - bx[0])
-              : x * TILE + (rule.dx ?? 8) + (Math.random() - 0.5) * 4,
-            y: by !== undefined
-              ? y * TILE + by[0] + Math.random() * (by[1] - by[0])
-              : y * TILE + (rule.dy ?? 0) + (Math.random() - 0.5) * 4,
-            vx: (rule.sideways ?? 0) * (Math.random() < 0.5 ? 1 : -1) + (Math.random() - 0.5) * 0.2,
-            vy: -rise * (0.7 + Math.random() * 0.6),
-            life, maxLife: life,
-            color: rule.color,
-            size: smin + Math.random() * (smax - smin),
-            grav: rule.grav ?? (rise < 0 ? 0.1 : -0.005),
-            damp: rule.damp ?? 0.985,
-          });
+          // ★IIIII248 对象复用:赋值序=原字面量键序,RNG 消费序逐位不变
+          const pt = this.acquireParticle();
+          pt.x = bx !== undefined
+            ? x * TILE + bx[0] + Math.random() * (bx[1] - bx[0])
+            : x * TILE + (rule.dx ?? 8) + (Math.random() - 0.5) * 4;
+          pt.y = by !== undefined
+            ? y * TILE + by[0] + Math.random() * (by[1] - by[0])
+            : y * TILE + (rule.dy ?? 0) + (Math.random() - 0.5) * 4;
+          pt.vx = (rule.sideways ?? 0) * (Math.random() < 0.5 ? 1 : -1) + (Math.random() - 0.5) * 0.2;
+          pt.vy = -rise * (0.7 + Math.random() * 0.6);
+          pt.life = life; pt.maxLife = life;
+          pt.color = rule.color;
+          pt.size = smin + Math.random() * (smax - smin);
+          pt.grav = rule.grav ?? (rise < 0 ? 0.1 : -0.005);
+          pt.damp = rule.damp ?? 0.985;
+          pt.ax = undefined; pt.ay = undefined;
+          this.particles.push(pt);
         }
       }
     }
-    if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
+    if (this.particles.length > 600) {
+      // ★IIIII248:溢出剔除对象回池(剔除即出表,无人持有引用)
+      const removed = this.particles.splice(0, this.particles.length - 600);
+      for (let i = 0; i < removed.length; i++) this.releaseParticle(removed[i]);
+    }
     this.emitTileOrchestraAmbient(tx0, ty0, tx1, ty1);
   }
 
@@ -43550,15 +43693,21 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const life = opts.lifeExact ?? Math.round(base * (0.6 + Math.random() * 0.4));
-      this.particles.push({
-        x, y,
-        vx: opts.vx ?? Math.cos(a) * speed * Math.random(),
-        vy: opts.vy ?? Math.sin(a) * speed * Math.random() - 1,
-        life, maxLife: life, color, size: opts.size ?? 2 + Math.random() * 2,
-        damp: opts.damp, grav: opts.grav, ax: opts.ax, ay: opts.ay,
-      });
+      // ★IIIII248 对象复用:赋值序=原字面量键序,RNG 消费序逐位不变
+      const pt = this.acquireParticle();
+      pt.x = x; pt.y = y;
+      pt.vx = opts.vx ?? Math.cos(a) * speed * Math.random();
+      pt.vy = opts.vy ?? Math.sin(a) * speed * Math.random() - 1;
+      pt.life = life; pt.maxLife = life; pt.color = color;
+      pt.size = opts.size ?? 2 + Math.random() * 2;
+      pt.damp = opts.damp; pt.grav = opts.grav; pt.ax = opts.ax; pt.ay = opts.ay;
+      this.particles.push(pt);
     }
-    if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
+    if (this.particles.length > 600) {
+      // ★IIIII248:溢出剔除对象回池(剔除即出表,无人持有引用)
+      const removed = this.particles.splice(0, this.particles.length - 600);
+      for (let i = 0; i < removed.length; i++) this.releaseParticle(removed[i]);
+    }
   }
 
   /** 定向粒子爆发（GameHooks.spawnBurst）：烟花爆花/喷泉/马桶水花的原版 dust
@@ -43575,15 +43724,21 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       const a = dir + (Math.random() - 0.5) * 2 * spread;
       const sp = speed * (0.85 + Math.random() * 0.2);
       const life = Math.round(base * (0.6 + Math.random() * 0.4));
-      this.particles.push({
-        x, y,
-        vx: Math.cos(a) * sp * (opts.xMul ?? 1),
-        vy: Math.sin(a) * sp * (opts.yMul ?? 1),
-        life, maxLife: life, color, size: 2 + Math.random() * 2,
-        damp: opts.damp, grav: opts.grav,
-      });
+      // ★IIIII248 对象复用:赋值序=原字面量键序,RNG 消费序逐位不变
+      const pt = this.acquireParticle();
+      pt.x = x; pt.y = y;
+      pt.vx = Math.cos(a) * sp * (opts.xMul ?? 1);
+      pt.vy = Math.sin(a) * sp * (opts.yMul ?? 1);
+      pt.life = life; pt.maxLife = life; pt.color = color;
+      pt.size = 2 + Math.random() * 2;
+      pt.damp = opts.damp; pt.grav = opts.grav; pt.ax = undefined; pt.ay = undefined;
+      this.particles.push(pt);
     }
-    if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
+    if (this.particles.length > 600) {
+      // ★IIIII248:溢出剔除对象回池(剔除即出表,无人持有引用)
+      const removed = this.particles.splice(0, this.particles.length - 600);
+      for (let i = 0; i < removed.length; i++) this.releaseParticle(removed[i]);
+    }
   }
 
   setZoom(z: number) {

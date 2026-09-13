@@ -49,6 +49,35 @@ export function shortUrl(url) {
 const SPECIAL_NODES = new Set(['(idle)', '(program)', '(garbage collector)', '(root)']);
 
 /**
+ * GPU renderer 串分类(IIIII246 GPU 启用定谳的数据面;纯函数可单测)。
+ * 输入:WEBGL_debug_renderer_info 的 UNMASKED_RENDERER_WEBGL 串(+可选 SystemInfo
+ * gpuModel,如 "Apple M5 Pro")。输出:
+ *   software — SwiftShader/llvmpipe/software 指纹(软渲染象限的铁证);
+ *   apple    — Apple GPU(金属路径的前提);
+ *   backend  — metal|gl|angle|webgpu|unknown(串里 ANGLE Metal Renderer 指纹);
+ *   verdict  — gpu-metal | gpu | gpu-other | software | unknown(报告定谳词)。
+ * ★定谳纪律:renderer 串是主证据,fill 基准(perf.probeGpuEnablement)是旁证——
+ *   两者冲突时以 renderer 串为准(慢也可能是功耗管控,不是软渲染)。
+ */
+export function classifyGpuRenderer(renderer, gpuModel = '') {
+  const s = String(renderer ?? '');
+  const lo = s.toLowerCase();
+  const m = String(gpuModel ?? '').toLowerCase();
+  if (!lo) return { software: false, apple: false, backend: 'unknown', verdict: 'unknown' };
+  const software = lo.includes('swiftshader') || lo.includes('llvmpipe')
+    || /\bsoftware\b/.test(lo) || lo.includes('software renderer');
+  const apple = lo.includes('apple') || m.startsWith('apple ') || m.includes('apple gpu');
+  let backend = 'unknown';
+  if (lo.includes('angle')) backend = lo.includes('metal') ? 'metal' : (lo.includes('opengl') ? 'gl' : 'angle');
+  else if (lo.includes('webgpu')) backend = 'webgpu';
+  else backend = 'gl';
+  const verdict = software ? 'software'
+    : (apple && backend === 'metal' ? 'gpu-metal'
+      : (apple ? 'gpu' : (backend !== 'unknown' ? 'gpu-other' : 'unknown')));
+  return { software, apple, backend, verdict };
+}
+
+/**
  * 解析 V8 CPU profile → { totalMs, sampleCount, nodeCount, funcs[], framework, special }。
  * funcs[]: { key, fn, url, line, selfMs, selfPct, samples, avgMs, parents[] } 按 selfMs 降序。
  * parents: 最热节点沿 parent 链的调用路径(每层 { fn, url, selfMs });(root) 止。
@@ -194,6 +223,57 @@ export function parseTrace(data) {
   let drawFrames = 0;
   let lastTs = null;
   let firstTs = null;
+
+  // ── GPU 进程账(IIIII246;补齐 239「GPU 贡献不可见」的半边)──
+  // 事实(IIIII246 对 239 final trace 复核):GPU 事件(GPUTask 等)本就随
+  // 'disabled-by-default-devtools.timeline' 类目落进 .trace,只是本函数的主线程
+  // 过滤把它们全部滤掉——GPU 贡献不可见的真相是【解析缺位】,不是类目缺位。
+  // 识别:__metadata process_name='GPU Process'(唯一);找不到回退 GPUTask 事件
+  // 最多的 pid。聚合面:GPUTask(GPU 服务任务=真 GPU 命令处理时长)/Commit(合成
+  // 提交;dur>0 的是耗时件,dur=0 的 frame 域标记只计次;**跨进程收账**——实测
+  // dur>0 的 Commit 落在 renderer 主线程(cc::Scheduler 提交,GPU 进程侧多为
+  // dur=0 标记),commitDomain 记账域)/其余带 dur 事件按名 breakdown。
+  // GPU 侧事件不混入主线程长任务/breakdown(主线程过滤语义不变)。
+  const gpuMetaPid = new Map();
+  const gpuThreads = new Map();
+  for (const e of evs) {
+    if (e?.cat !== '__metadata' || e?.pid == null) continue;
+    if (e.name === 'process_name' && e.args?.name === 'GPU Process') {
+      gpuMetaPid.set(e.pid, (gpuMetaPid.get(e.pid) ?? 0) + 1);
+    } else if (e.name === 'thread_name' && typeof e.args?.name === 'string') {
+      const list = gpuThreads.get(e.pid) ?? [];
+      list.push(e.args.name);
+      gpuThreads.set(e.pid, list);
+    }
+  }
+  let gpuPid = [...gpuMetaPid.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  if (gpuPid == null) {
+    const gtPid = new Map();
+    for (const e of evs) {
+      if (e?.name === 'GPUTask' && e?.pid != null) gtPid.set(e.pid, (gtPid.get(e.pid) ?? 0) + 1);
+    }
+    gpuPid = [...gtPid.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  }
+  const isGpu = (e) => gpuPid != null && e.pid === gpuPid;
+  const gpuTask = { count: 0, totalUs: 0, maxUs: 0 };
+  const gpuCommit = { count: 0, totalUs: 0, maxUs: 0, markers: 0 };
+  let commitDomain = null;   // 'renderer-main' | 'gpu' | 'mixed'
+  const gpuByName = new Map();
+  for (const e of evs) {
+    if (!e || typeof e !== 'object' || e.cat === '__metadata' || !isGpu(e)) continue;
+    const name = String(e.name ?? '');
+    const durUs = typeof e.dur === 'number' && e.dur > 0 ? e.dur : 0;
+    if (name === 'GPUTask' && durUs > 0) {
+      gpuTask.count++; gpuTask.totalUs += durUs;
+      if (durUs > gpuTask.maxUs) gpuTask.maxUs = durUs;
+    }
+    if (durUs > 0) {
+      const rec = gpuByName.get(name) ?? { name, count: 0, totalUs: 0 };
+      rec.count++; rec.totalUs += durUs;
+      gpuByName.set(name, rec);
+    }
+  }
+
   for (const e of evs) {
     if (!e || typeof e !== 'object') continue;
     const cat = String(e.cat ?? '');
@@ -212,6 +292,16 @@ export function parseTrace(data) {
     if (!inTimeline && !(isGcName && inV8)) continue;
     // DrawFrame 在合成器线程(非 CrRendererMain)——fps 交叉核对面按渲染进程全线程计
     if (name === 'DrawFrame' && (mainPid == null || e.pid === mainPid)) drawFrames++;
+    // Commit(合成提交)跨进程收账:renderer 主线程(cc::Scheduler,实测 dur>0 落此)
+    // 与 GPU 进程(多 dur=0 标记);域记进 commitDomain(IIIII246)
+    if (name === 'Commit' && (isMain(e) || isGpu(e))) {
+      if (durUs > 0) {
+        gpuCommit.count++; gpuCommit.totalUs += durUs;
+        if (durUs > gpuCommit.maxUs) gpuCommit.maxUs = durUs;
+        const dom = isMain(e) ? 'renderer-main' : 'gpu';
+        commitDomain = commitDomain == null ? dom : (commitDomain === dom ? dom : 'mixed');
+      } else gpuCommit.markers++;
+    }
     if (durUs <= 0) continue;
     if (isGcName) {
       gcAll.push({ name, durUs, ts });
@@ -239,6 +329,39 @@ export function parseTrace(data) {
       totalMs: +(r.totalUs / 1000).toFixed(1),
       pct: +(r.totalUs / Math.max(1, totalOf(byName)) * 100).toFixed(2),
     }));
+  // GPU 账输出(无 GPU 进程事件 → null,报告按缺省显)
+  let gpu = null;
+  if (gpuPid != null && (gpuTask.count > 0 || gpuByName.size > 0)) {
+    const gpuTotalOf = (r) => r.totalUs;
+    gpu = {
+      pid: gpuPid,
+      threads: (gpuThreads.get(gpuPid) ?? []).slice(0, 8),
+      tasks: {
+        count: gpuTask.count,
+        totalMs: +(gpuTask.totalUs / 1000).toFixed(1),
+        maxMs: +(gpuTask.maxUs / 1000).toFixed(2),
+        meanMs: gpuTask.count ? +((gpuTask.totalUs / gpuTask.count) / 1000).toFixed(3) : 0,
+        // GPU 忙率=GPUTask 时长和 / trace 墙钟窗(>100%=多队列并发,按和计)
+        busyPct: wallMs > 0 ? +((gpuTask.totalUs / 1000) / wallMs * 100).toFixed(1) : 0,
+      },
+      commit: {
+        count: gpuCommit.count,
+        totalMs: +(gpuCommit.totalUs / 1000).toFixed(1),
+        meanMs: gpuCommit.count ? +((gpuCommit.totalUs / gpuCommit.count) / 1000).toFixed(3) : 0,
+        maxMs: +(gpuCommit.maxUs / 1000).toFixed(2),
+        markers: gpuCommit.markers,
+        domain: commitDomain ?? 'none',
+      },
+      breakdown: [...gpuByName.values()]
+        .sort((a, b) => b.totalUs - a.totalUs)
+        .slice(0, 10)
+        .map((r) => ({
+          name: r.name, count: r.count,
+          totalMs: +(r.totalUs / 1000).toFixed(1),
+          pct: +(r.totalUs / Math.max(1, [...gpuByName.values()].reduce((s, x) => s + gpuTotalOf(x), 0)) * 100).toFixed(2),
+        })),
+    };
+  }
   return {
     wallMs: +wallMs.toFixed(0),
     events: evs.length,
@@ -254,6 +377,7 @@ export function parseTrace(data) {
       allCount: gcAll.length,
       allTotalMs: +(gcAllTotalUs / 1000).toFixed(1),   // 含后台并发标记(参考面,非主线程停顿)
     },
+    gpu,
     breakdown,
     frames: drawFrames,
   };
@@ -262,6 +386,13 @@ function totalOf(byName) {
   let s = 0;
   for (const r of byName.values()) s += r.totalUs;
   return s;
+}
+/** 中位数(自检 detail 用;空数组返 0)。 */
+function median(arr) {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : +((s[m - 1] + s[m]) / 2).toFixed(1);
 }
 
 /** 帧时间数组(ms)→ fps 统计(均值/p50/p95/p99/最大/1% low)。 */
@@ -297,6 +428,7 @@ export function aggregateSegments(segments, { topN = 25, excludeKinds = ['transi
   const hot = new Map();
   let fwSelfMs = 0, fwTotalMs = 0;
   let ltCount = 0, ltMs = 0, gcCount = 0, gcMs = 0;
+  let gpuTasksMs = 0, gpuTasksCount = 0, gpuCommitMs = 0, gpuCommitCount = 0;
   for (const seg of use) {
     frames += seg.fps?.frames ?? 0;
     wallMs += seg.fps?.wallMs ?? 0;
@@ -305,6 +437,10 @@ export function aggregateSegments(segments, { topN = 25, excludeKinds = ['transi
     ltMs += seg.longtasks?.totalMs ?? 0;
     gcCount += seg.gc?.count ?? 0;
     gcMs += seg.gc?.totalMs ?? 0;
+    gpuTasksMs += seg.gpu?.tasks?.totalMs ?? 0;
+    gpuTasksCount += seg.gpu?.tasks?.count ?? 0;
+    gpuCommitMs += seg.gpu?.commit?.totalMs ?? 0;
+    gpuCommitCount += seg.gpu?.commit?.count ?? 0;
     const profTotal = seg.profile?.totalMs ?? 0;
     fwTotalMs += profTotal;
     fwSelfMs += seg.profile?.framework?.selfMs ?? 0;
@@ -336,6 +472,15 @@ export function aggregateSegments(segments, { topN = 25, excludeKinds = ['transi
     },
     longtasks: { count: ltCount, totalMs: +ltMs.toFixed(1) },
     gc: { count: gcCount, totalMs: +gcMs.toFixed(1) },
+    // GPU 账聚合(IIIII246):GPUTask=GPU 服务任务时长,commit=合成提交时长;
+    // busyPct=GPUTask 和 / 段墙钟和(跨段加权,与 fps 同口径)
+    gpu: {
+      tasksMs: +gpuTasksMs.toFixed(1),
+      tasksCount: gpuTasksCount,
+      commitMs: +gpuCommitMs.toFixed(1),
+      commitCount: gpuCommitCount,
+      busyPct: wallMs > 0 ? +((gpuTasksMs / wallMs) * 100).toFixed(1) : 0,
+    },
     framework: { selfMs: +fwSelfMs.toFixed(2), pct: fwTotalMs > 0 ? +((fwSelfMs / fwTotalMs) * 100).toFixed(2) : 0 },
     hotspots: hotArr,
   };
@@ -365,6 +510,31 @@ export function buildSelfCheck(run) {
       ok: dead.length === 0,
       detail: dead.length ? `死段:${dead.map((s) => s.name).join(',')}(fps≤1 = rAF 节流/误用确定性泵)` : 'all>1',
     });
+    // GPU 证据闸(IIIII246):GPU 面只活在 .trace——若开了 GPU 类目(--trace-gpu)或
+    // 同场景任一段已认出 GPU 账而其余段缺 = 缓冲断流/类目被剥,该段 GPU 数据不可信。
+    const withTrace = (sc.segments ?? []).filter((s) => s.trace != null);
+    if (withTrace.length) {
+      const noGpu = withTrace.filter((s) => !(s.gpu?.tasks?.count > 0));
+      const anyGpu = withTrace.some((s) => s.gpu?.tasks?.count > 0);
+      const required = !!run.meta?.traceGpu || anyGpu;
+      checks.push({
+        name: `gpu-evidence(${name})`,
+        ok: !required || noGpu.length === 0,
+        detail: noGpu.length === 0
+          ? `GPUTask ×${withTrace.reduce((n, s) => n + (s.gpu?.tasks?.count ?? 0), 0)}`
+          : `缺 GPU 账:${noGpu.slice(0, 3).map((s) => s.name).join(',')}(trace 断流/类目缺?)`,
+      });
+      // trace 环形覆盖哨(IIIII246):覆盖<50% = 缓冲只剩段尾(GPU 类目 ×3 体积时),
+      // 该段 GPU/主账是尾部采样面——绝对值只代表窗内,勿当整段均值。
+      const thin = withTrace.filter((s) => (s.traceSpanCoveragePct ?? 100) < 50);
+      checks.push({
+        name: `trace-span>=50%(${name})`,
+        ok: thin.length === 0,
+        detail: thin.length === 0
+          ? `median ${median(withTrace.map((s) => s.traceSpanCoveragePct ?? 100))}%`
+          : `瘦段:${thin.slice(0, 3).map((s) => `${s.name}(${s.traceSpanCoveragePct}%)`).join(',')}`,
+      });
+    }
   }
   return { ok: checks.every((c) => c.ok), checks };
 }
@@ -426,6 +596,10 @@ export function renderReportMd(run, { baselineCompare = null, selfCheck = null }
     : `${run.meta?.dwellMs ?? ''}ms`;
   L.push(`- 时间:${run.meta?.ts ?? ''} · seed=${run.meta?.seed ?? ''} · size=${run.meta?.size ?? ''} · dwell=${dwellTxt}`);
   L.push(`- 环境:${run.meta?.chrome ?? ''} · GPU=${run.meta?.gpu ?? 'n/a'} · 视口 ${run.meta?.viewport ?? ''} · 通道=${run.meta?.channels ?? ''}`);
+  if (run.meta?.gpuCheck) {
+    const g = run.meta.gpuCheck;
+    L.push(`- GPU 定谳:**${g.verdict}**(renderer=${g.renderer ?? 'n/a'} · SystemInfo gpuModel=${g.gpuModel ?? 'n/a'} · fill≈${g.fillMsPerFrame ?? 'n/a'}ms/帧 · headless=${run.meta?.headless})`);
+  }
   L.push(`- 机器负载 loadavg=${run.meta?.loadavg ?? 'n/a'}(perf 结论判读先看此项——并行负载会整体压低 fps)`);
   if (run.meta?.notes?.length) for (const n of run.meta.notes) L.push(`- 注:${n}`);
   L.push('');
@@ -435,13 +609,14 @@ export function renderReportMd(run, { baselineCompare = null, selfCheck = null }
     L.push('');
     L.push(`- fps 均值 **${a.fps?.mean ?? 'n/a'}**(frames=${a.fps?.frames ?? 0})· 最长帧 ${a.fps?.maxFrameMs ?? 'n/a'}ms · 长任务 ${a.longtasks?.count ?? 0}(${a.longtasks?.totalMs ?? 0}ms)· GC ${a.gc?.count ?? 0} 次(${a.gc?.totalMs ?? 0}ms)`);
     L.push(`- **框架自身开销 ${a.framework?.pct ?? 0}%**(要求 <2%)`);
+    L.push(`- GPU:GPUTask **${a.gpu?.tasksMs ?? 0}ms**(busy ${a.gpu?.busyPct ?? 0}%,×${a.gpu?.tasksCount ?? 0})· Commit ${a.gpu?.commitMs ?? 0}ms(×${a.gpu?.commitCount ?? 0})`);
     L.push('');
     L.push('### 分段');
     L.push('');
-    L.push('| 段 | kind | wall s | fps 均值 | 1% low | p95 帧 ms | p99 帧 ms | 最长帧 ms | 长任务 | GC | 框架 % |');
-    L.push('|---|------|--------|----------|--------|-----------|-----------|-----------|--------|----|--------|');
+    L.push('| 段 | kind | wall s | fps 均值 | 1% low | p95 帧 ms | p99 帧 ms | 最长帧 ms | 长任务 | GC | 框架 % | GPU ms(busy%) | commit ms |');
+    L.push('|---|------|--------|----------|--------|-----------|-----------|-----------|--------|----|--------|----------------|-----------|');
     for (const s of sc.segments ?? []) {
-      L.push(`| ${s.name} | ${s.kind} | ${((s.fps?.wallMs ?? 0) / 1000).toFixed(1)} | ${s.fps?.mean ?? '-'} | ${s.fps?.low1 ?? '-'} | ${s.fps?.p95 ?? '-'} | ${s.fps?.p99 ?? '-'} | ${s.fps?.max ?? '-'} | ${s.longtasks?.count ?? 0} | ${s.gc?.count ?? 'n/a'} | ${s.profile?.framework?.pct ?? '-'} |`);
+      L.push(`| ${s.name} | ${s.kind} | ${((s.fps?.wallMs ?? 0) / 1000).toFixed(1)} | ${s.fps?.mean ?? '-'} | ${s.fps?.low1 ?? '-'} | ${s.fps?.p95 ?? '-'} | ${s.fps?.p99 ?? '-'} | ${s.fps?.max ?? '-'} | ${s.longtasks?.count ?? 0} | ${s.gc?.count ?? 'n/a'} | ${s.profile?.framework?.pct ?? '-'} | ${s.gpu?.tasks?.totalMs ?? '-'}(${s.gpu?.tasks?.busyPct ?? '-'}%) | ${s.gpu?.commit?.totalMs ?? '-'} |`);
     }
     L.push('');
     L.push('### Top 卡点函数(场景聚合,self-time)');
