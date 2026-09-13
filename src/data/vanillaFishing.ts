@@ -423,6 +423,42 @@ export function rollAnglerQuest(gates: AnglerQuestGates, rng: Rng = mathRng): nu
   }
 }
 
+// ==================== 渔夫任务：AnglerQuestSwap 世界侧单源（SW-FX52-R11） ====================
+
+/** Main.AnglerQuestSwap 世界侧半边（1457 Main.cs:3851-3998）：清今日交付名单/完成旗
+ *  （:3805-3806）+ 按世界门重掷（:3808 起）。Game.anglerQuestSwap（单人/中继房房主
+ *  黎明 + 新世界首掷）与 SimHost.dawnRolls（serverAuth 权威房黎明,R11 拓展位）双端
+ *  单源——门旗键表/播种式任一侧漂移即两端任务鱼分叉,故收编于此。
+ *  参数鸭子型（不 import World,防 data↔world 环）。 */
+export function anglerQuestSwapInto(w: {
+  flags: Record<string, boolean>;
+  crimson: boolean;
+  groundLevel: number;
+  seed: number;
+  clock: { dayCount: number };
+  anglerQuest: number;
+  anglerQuestFinished: boolean;
+  anglerWhoFinishedToday: string[];
+}): number {
+  const f = w.flags;
+  w.anglerWhoFinishedToday = [];          // :3805
+  w.anglerQuestFinished = false;          // :3806
+  // :3807 flag = downedBoss1||downedBoss2||downedBoss3||hardMode||downedSlimeKing||downedQueenBee
+  const anyBoss = !!(f['downed_4'] || f.downedEyeOfCthulhu          // downedBoss1（EoC）
+    || f['downed_13'] || f['downed_266']                            // downedBoss2（世吞/克脑）
+    || f.downedSkeletron || f['downed_35']                          // downedBoss3（骷髅王）
+    || f.hardMode
+    || f.downedSlimeKing || f['downed_50']                          // downedSlimeKing
+    || f['downed_222']);                                            // downedQueenBee
+  w.anglerQuest = rollAnglerQuest({
+    hardMode: !!f.hardMode,
+    evil: w.crimson ? 'crimson' : 'corrupt',
+    anyBoss,
+    hasWorldSurface: w.groundLevel > 50,  // Main.isThereAWorldSurface=worldSurface>50.0（1457 Main.cs:2884;★SW-RB10b 锚正,旧注 :2861 系他域）
+  }, seededRng((w.seed ^ Math.imul(w.clock.dayCount, 0x9E3779B1)) | 0));
+  return w.anglerQuest;
+}
+
 // ==================== 渔夫任务链：四段奖励（Player.cs:55351-55741）====================
 
 /** 奖励产出（物品 id × 数量；货币以金币 73 / 银币 72 条目出现） */

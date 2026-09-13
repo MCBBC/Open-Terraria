@@ -144,8 +144,12 @@ describe('SW-BJ45 渔夫任务链', () => {
     });
 
     it('读档路径不得重掷任务（vanilla 重掷仅生成尾 WorldGen.cs:22655 与黎明 Main.cs:66352）——swap/睡渔夫放置须以 freshlyCreated 门住 else 支（镇民全灭档读档也落该支）', () => {
+      // ★SW-FX52 锁形更新（2026-09-13,守卫意图等价）：SW-FX42 批在 swap 与
+      // placeSleepingAngler 之间合法插入权威端断言块（sendAnglerQuestAssert,
+      // 见 sw-fx42-mp-faces），旧紧邻式锁面陈旧爆红——0-300 字符窗保留
+      // 「freshlyCreated 门 + swap 先行 + 放置收尾」的顺序约束,不放行跨函数错位
       expect(gameSrc()).toMatch(
-        /if \(this\.freshlyCreated\) \{\s*this\.anglerQuestSwap\(\);\s*this\.placeSleepingAngler\(\);\s*\}/,
+        /if \(this\.freshlyCreated\) \{\s*this\.anglerQuestSwap\(\);[\s\S]{0,300}?this\.placeSleepingAngler\(\);\s*\}/,
       );
     });
   });

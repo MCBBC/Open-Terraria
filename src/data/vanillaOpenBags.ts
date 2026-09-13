@@ -17,7 +17,7 @@ import { openBossBag, BOSS_BAG_IDS } from './vanillaBossBags';
 /** ItemID.Sets.OpenableBag（ItemID.cs:1217 全量,1457 终值;1458 同域零增量，右键
  *  可开包集合——UI 门禁用）。其中 BossBag 子集 21 件（3318-3332/3860-3862/4782/
  *  4957/5111 = ItemID.cs:1215）由 openBagItem 首支路由 openBossBag（★SW-FX21
- *  2026-09-10：旧版 BossBag 族整缺右键面,只有 Game 持用左键链;原版两入口
+ *  2026-09-10：旧版 BossBag 族整缺右键面;★§五裁决(09-13)持用左键链已摘=原版唯右键入口
  *  都走 ItemSlot.TryOpenContainer_GrantItems 首支 ItemSlot.cs:1786-1789），
  *  其余全族（礼盒/礼袋/草药袋/渔获匣 26 型/锁盒两件/蠕虫罐/牡蛎/麒麟蛋）由本
  *  引擎 openBagItem 分派。 */
@@ -308,7 +308,7 @@ export interface BagOpenWorld {
  *  false = 非本引擎物品或钥匙门未过（原版 GrantItems 返回 false 时盒子不消耗）。
  *  ★SW-FX21（2026-09-10）补齐 BossBag 首支（ItemSlot.cs:1786-1789 =
  *  `if (ItemID.Sets.BossBag[item.type]) player.OpenBossBag(item.type)`,全树唯一
- *  调用方）——与 Game 持用左键链共存,两入口同走 openBossBag 引擎。 */
+ *  调用方）——★§五裁决(09-13)Game 持用左键链已摘除,本引擎为唯一开包承载。 */
 export function openBagItem(
   vid: number,
   give: BagGive,

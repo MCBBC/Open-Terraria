@@ -105,6 +105,7 @@ function shell(w: World, o: ShellOpts = {}) {
     { id: ITEM_DEFS.indexOf(o.held ?? PLAT_ITEM), stack: 99, favorited: false },
   ];
   g.player = {
+    placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
     ...P, cx: P.x + 6, cy: P.y + 14, facing: 1, useTime: 0, attackSpeedMult: 1,
     dead: false, gfxOffY: 0, buffs: { has: () => false }, equipStats: {},
     actuationRodLock: false, actuationRodLockSetting: false, grappleAnchorTiles: () => [],

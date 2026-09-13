@@ -7,6 +7,7 @@
 //   专家持械僵尸替换生成表      ↔ NPC.cs:4565/:4624/:4644 + GetZombieSettings :5495-5523
 // 数值断言全部按原版公式手算（每条附算式），不与本仓实现互相印证。
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import { VanillaSpawner } from '../src/world/spawn/VanillaSpawner';
@@ -634,5 +635,22 @@ describe('getGoodAdjustments 整族（NPC.cs:17874-18027）', () => {
     expect(Enemy.fromVanilla(245, 0, 0)!.w).toBe(140);
     expect(Enemy.fromVanilla(266, 0, 0)!.w).toBe(160);
     expect(Enemy.fromVanilla(245, 0, 0)!.vanillaScale).toBe(1);
+  });
+  it('SC1 结构锁：vScale（首盒基 scale :17842）读取点须在 applySeedAdjustments 之前（防盒平方回归）', () => {
+    // 原版两级盒乘数不同源：首盒（NPC.cs:17842，1456:17745）用【基 scale】，getGood/
+    // 十周年二盒（:18122/:17958，1456:18025-18026/:17861-17862）才用【调整后 scale】。
+    // 2026-09-09 3c6df9d76 曾把 vScale 读取点移到种子档调整之后 → 首盒被种子档 scale
+    // 再乘一遍（盒平方：245=35/266=193/113=60/39=38/13=68，SC1 2026-09-13 定谳回锚）。
+    const src = readFileSync(new URL('../src/entities/Enemy.ts', import.meta.url), 'utf8');
+    const vScaleAt = src.indexOf('const vScale = seedS.scale;');
+    const seedAdjAt = src.indexOf('applySeedAdjustments(seedS');
+    // ★RB15b-F5(2026-09-13)：下界钉——读取点若上移到 applyRemixSetDefaults 之前,
+    //   remix 族(6-9/173/82/181)基盒丢 ×1.3/×1.2/×1.1（盒 49 类错回 38 类），锁必须红
+    const remixAt = src.indexOf('applyRemixSetDefaults(');
+    expect(vScaleAt).toBeGreaterThan(-1);
+    expect(seedAdjAt).toBeGreaterThan(-1);
+    expect(remixAt).toBeGreaterThan(-1);
+    expect(vScaleAt).toBeGreaterThan(remixAt);
+    expect(vScaleAt).toBeLessThan(seedAdjAt);
   });
 });

@@ -10675,6 +10675,7 @@ void DgPaintings()
             if (act[y * W + x] == 0) DgPlacePainting(x, y, e.tile, e.style);
             if (act[y * W + x] != 0) continue;
             int baseY = y;
+            int baseX1 = x;                     // ★SC2（2026-09-13）：num19=num6 基 x 存档（DungeonGlobalPaintings.cs:190）——基点回写镜像（JS DungeonPass baseX1）
             // ★OOO⑤（2026-08-18 镜像）：攀爬起点**链式**（vanilla :198/:221——第 m 轮从上轮
             //   中心起爬，非每轮从 baseY 起）；向后循环前重置（JS DungeonPass :3626-3658 同源）。
             int nyPrev = baseY;
@@ -10696,6 +10697,7 @@ void DgPaintings()
                 }
             }
             nyPrev = baseY;
+            x = baseX1;                         // ★SC2：num6=num19 基 x 回写（DungeonGlobalPaintings.cs:219）——旧缺 ⇒ 回扫列=baseX+7/baseX+0（C#=baseX-7/baseX-14）
             for (int m = 0; m < 2; m++)
             {
                 x -= 7;
@@ -10721,6 +10723,7 @@ void DgPaintings()
             if (act[y * W + x] == 0) DgPlacePainting(x, y, e.tile, e.style);
             if (act[y * W + x] != 0) continue;
             int baseX = x;
+            int baseY2 = y;                     // ★SC2（2026-09-13）：num16=num7 基 y 存档（DungeonGlobalPaintings.cs:262）——基点回写镜像（JS DungeonPass baseY2）
             int nxPrev = baseX;                 // ★OOO⑤：num16 链式（:265-291 同款）
             for (int m = 0; m < 3; m++)
             {
@@ -10740,6 +10743,7 @@ void DgPaintings()
                 }
             }
             nxPrev = baseX;
+            y = baseY2;                         // ★SC2：num7=num16 基 y 回写（DungeonGlobalPaintings.cs:290-291）——旧缺 ⇒ 回扫行=baseY+14/baseY+7（C#=baseY-7/baseY-14）
             for (int m = 0; m < 3; m++)
             {
                 y -= 7;

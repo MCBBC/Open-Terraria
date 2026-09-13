@@ -5,15 +5,18 @@
 // 进程内直驱 WorldEvolution(无渲染/无 dev server,vite 私有实例在本机高载下反复被杀的
 // 替代仪表;概率掷序列化=每第 7 次给 0.001,其余 0.9——恒 0 会让顶植物先手占位饿死花苞门)。
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { loadSaveData } from '../src/save/SaveFile';
 import { WorldEvolution } from '../src/world/evolution/WorldEvolution';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import type { World } from '../src/world/World';
 
 const SAVE = '/tmp/chain-save-stage3.json';
+// 工件自跳守卫(2026-09-13):本测试吃链存档会话工件(/tmp 由该会话产出,会被系统清理);
+//  缺失时干净跳过而非 ENOENT 挂红——重产工件后按原语义照跑。
+const hasSave = existsSync(SAVE);
 
-describe('花苞再生机制(肉后+三王)', () => {
+describe.skipIf(!hasSave)('花苞再生机制(肉后+三王)', () => {
   it('burst 在场 → 远距挖除 → 演化 tick 再生 → 底承丛林草', async () => {
     const data = JSON.parse(readFileSync(SAVE, 'utf8'));
     const world = loadSaveData(data as never).world;

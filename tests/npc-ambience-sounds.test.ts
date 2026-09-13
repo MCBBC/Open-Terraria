@@ -101,8 +101,14 @@ describe('环境声三表数据对账', () => {
     files.add('NPC_Hit_11'); files.add('Zombie_109');
     const missing: string[] = [];
     for (const f of files) {
-      // public/sounds 目录直查（构建期已拷贝;测试环境以 fs 为准）
-      try { readFileSync(`${ROOT}/public/sounds/${f}.wav`); } catch { missing.push(f); }
+      // public/sounds 目录直查（构建期已拷贝;测试环境以 fs 为准）。
+      //  ★2026-09-13 重锚:Opus 化批(09-04 双格式回退定案)已删全量 wav,盘面=863
+      //  .opus + 863 .mp3 回退（Sfx.ts:1091 运行时同序）——审计改对双格式任一在盘。
+      let ok = false;
+      for (const ext of ['opus', 'mp3'] as const) {
+        try { readFileSync(`${ROOT}/public/sounds/${f}.${ext}`); ok = true; break; } catch { /* 下一格式 */ }
+      }
+      if (!ok) missing.push(f);
     }
     expect(missing.join(',')).toBe('');
   });
@@ -121,12 +127,19 @@ describe('环境声三表数据对账', () => {
     for (let i = 0; i < 60; i++) seen.add(petSlimeHitVoice(5485)!.file);
     expect(seen.has('player_hit_chicken')).toBe(true);
     expect([...seen].every((f) => f === 'player_hit_chicken' || f === 'player_hit_chicken_rare')).toBe(true);
-    // 全表 wav 在库（含 Item_35——case2 音库 35 号档）
+    // 全表音频在库（含 Item_35——case2 音库 35 号档）。
+    //  ★2026-09-13 重锚:同上——Opus 化后盘面无 .wav,改双格式任一在盘（Sfx.ts:1091 同序）
     const missing: string[] = [];
+    const hasAudio = (f: string): boolean => {
+      for (const ext of ['opus', 'mp3'] as const) {
+        try { readFileSync(`${ROOT}/public/sounds/${f}.${ext}`); return true; } catch { /* 下一格式 */ }
+      }
+      return false;
+    };
     for (const v of Object.values(PET_SLIME_HIT_VOICES)) {
-      try { readFileSync(`${ROOT}/public/sounds/${v.file}.wav`); } catch { missing.push(v.file); }
+      if (!hasAudio(v.file)) missing.push(v.file);
     }
-    try { readFileSync(`${ROOT}/public/sounds/player_hit_chicken_rare.wav`); } catch { missing.push('player_hit_chicken_rare'); }
+    if (!hasAudio('player_hit_chicken_rare')) missing.push('player_hit_chicken_rare');
     expect(missing.join(',')).toBe('');
   });
 });

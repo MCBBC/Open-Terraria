@@ -175,7 +175,6 @@ export class Bobber extends Entity {
   /** localAI[0]（AI_61 :50809-50811）：出竿后 0→100 渐增——钓线摆垂权重
    *  1−lai0/100（DrawProj_FishingLine :35173-35174）随时间收敛 */
   lai0 = 0;
-  private airT = 0;
   /** ai[1]（AI_061）：0 = 等待累积中；<0 = 咬钩窗口（负值幅度 = rand(-240,-90) - 钓鱼力） */
   private ai1 = 0;
   /** localAI[1]：等待累积器（>660 触发 FishingCheck，:54779-54783） */
@@ -392,9 +391,11 @@ export class Bobber extends Entity {
         // 根因），退役。
         this.floating = true;
         this.liquidKind = 'lava';
-      } else if (++this.airT > 600) {
-        this.dead = true; // 落地未入水超时
       }
+      // ★§五裁决（2026-09-13 对齐原版）：落地未入水【无】超时自毁——AI_061
+      //  首行 `timeLeft = 60`（Projectile.cs:54602）逐拍重置 = 液体判定外的干态
+      //  浮标永续，唯一清理 = 拉竿/换竿 flag2 Kill（:54622）。旧 600t 空气超时
+      //  系自创机制（原版干地浮标会一直躺着），退役。
       return;
     }
     // ---- 浮态（AI_061 if (wet) 浮支 :54684-54753 1:1；2026-09-06 二批——旧

@@ -168,6 +168,10 @@ describe("②' SunVisibilityPixel 采样域（实心 tile 覆盖率代位）", (
 
   it('开空域 → 可见度 1；实心覆盖 → 按覆盖率衰减；首帧前未采样（SunVisibilityEnabled 门）', () => {
     const sky = makeSky();
+    // ★2026-09-13 补夹具:09-03 地下遮挡门(sampleSunVisibility 读 fx.surfaceY,屏顶
+    //  ≥ surfaceY+16 → vis=0)——缺省 fx.surfaceY=0 使地表门误触发,开空域 vis 恒 0。
+    //  夹具喂地表 600*TILE(与 ① 同),太阳世界位 (12800,800) 在地表上 → 门放行。
+    sky.fx = { monolith: -1, party: false, surfaceY: 600 * TILE, worldW: 4200, worldH: 1200, moonEventKind: 0 };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     expect((sky as any).sunVisSampled).toBe(false);   // _targetUpToDate 初值 false → 首帧不画光斑
     const open = sample(sky, ctxFor(sunSkyWorld(false)));

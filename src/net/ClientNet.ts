@@ -10,6 +10,7 @@ import {
   writeDoorEvent, readDoorEvent,
   writePlayerHurt, readPlayerHurt,
   PlayerHurtFlags,
+  readChestName,   // SW-FX52-R12 msg69 ChestName 镜像
 } from './protocol';
 import {
   writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
@@ -152,6 +153,10 @@ export interface ClientNetHooks {
   onKick?: (reason: string) => void;
   /** 箱子内容到达/被纠正（服务器权威；Game 负责登记 world.chests 与开面板） */
   onChestSync?: (chestIdx: number, x: number, y: number, items: Array<{ id: number; stack: number } | null>) => void;
+  /** msg69 ChestName（SW-FX52-R12）箱名帧到达（MessageBuffer.cs:3053-3074 读面）：
+   *  生产=服务器改名广播（:1969）+ 授予/纠正随发名断言（chestNameFrame）；
+   *  chestIdx+x/y 定位（位置不符=原版 break 面由消费端判），name=''=清名 */
+  onChestName?: (chestIdx: number, x: number, y: number, name: string) => void;
   /** NPC 快照到达（msg23；Game 维护傀儡池） */
   onNpcSnapshot?: (snaps: NpcSnap[]) => void;
   /** NPC 开关门事件到达（msg19 等价通道；Game 重放动作+音效） */
@@ -721,6 +726,14 @@ export class ClientNet {
         this.applyRemoteChest(r);
         return;
       }
+      case Msg.ChestName: {
+        // msg69（SW-FX52-R12 箱改名广播）：{i16 idx, i16 x, i16 y, str name}——
+        // 服务器受理 msg33 改名段后广播（MessageBuffer.cs:1969）；本端镜像进
+        // ChestData.name（消费=地图标签/悬停名/箱面板题）
+        const cn = readChestName(r);
+        if (cn) this.hooks.onChestName?.(cn.chestIdx, cn.x, cn.y, cn.name);
+        return;
+      }
       case Msg.ChestInUse: {
         // msg80（SW-FX42 在用箱镜像）：{u8 slot, i16 chestIdx, i32 x, i32 y}——
         // 原版 MessageBuffer.cs:3220-3231 收包直写 Main.player[slot].chest（值域
@@ -1284,6 +1297,9 @@ export class ClientNet {
       const prefix = withPrefix ? r.u8() : undefined;
       items[slot] = itemId ? { id: itemId, stack, prefix } : null;
     }
+    // ★SW-FX52-R12 定谳：箱名不走本帧尾段——`withPrefix` 兼容门按帧尾余量判
+    //  5/6 字节条目,追名尾段会引入位面歧义（小 n 时翻转前缀门=条目错位）。
+    //  名字统一走 msg69 ChestName 专帧（onChestName 钩）
     this.hooks.onChestSync?.(chestIdx, x, y, items);
   }
 

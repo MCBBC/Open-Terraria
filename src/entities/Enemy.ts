@@ -1300,20 +1300,30 @@ export class Enemy extends Entity {
     // :11210/:11332）——remix 世界 6/7/8/9/173 ×1.3 全乘、59 定值覆写、82 ×1.2、
     // 181 ×1.1+×1.2。原版序=主体块（先）→ zenith/getGood/tenth（后）→ ScaleStats。
     const remixHit = applyRemixSetDefaults(seedS, scaleStatsWorld());
+    // ★vScale = 首盒基 scale（1457 NPC.cs:17842 首盒乘数；1456:17745）——必须在
+    //  applySeedAdjustments【之前】读取：种子档命中后 seedS.scale 已是调整后总 scale，
+    //  在其后读会把首盒也用种子档 scale 再乘一遍 = 盒被平方（SC1 2026-09-13 定谳：
+    //  09-09 3c6df9d76 把 08-13 213dcc9d1 的 `v.scale ?? 1` 改为此行且读取点落在
+    //  applySeedAdjustments 之后，245/266/113/39/13 五族盒全错）。remix 命中=入口
+    //  scale 已乘（原版 remix 块在 SetDefaults 主体、先于 :17842 首盒）；zenith 只改
+    //  lifeMax 不动 scale。
+    const vScale = seedS.scale;
     const seedBox = applySeedAdjustments(seedS, scaleStatsWorld());
-    // 碰撞盒：:17745 基扩盒 (int)(w×scale) 之后，种子档命中分支再 (int)(w×scaleNew)
-    // （:18025-18026/:17861-17862）——按原文两级 (int) 截断重算（不沿用下方 round
+    // 碰撞盒：:17842 基扩盒 (int)(w×scale)（1456:17745）之后，种子档命中分支再
+    // (int)(w×scaleNew)（getGood :18122 / 十周年 :17958；1456:18025-18026/:17861-17862）
+    // ——按原文两级 (int) 截断重算（不沿用下方 round
     // 基盒，s≠1 族 113/114/134-136 差 1px）；未命中走既有 round 路径。
     // ★remix 命中时基 scale 已含 ×1.3/×1.2/×1.1（原版 scale *= 语句）——非种子档
-    // 分支也须走 (int) 截断（原版 :17745 恒 (int)，remix 非 1.0 尺度下 round/trunc
+    // 分支也须走 (int) 截断（原版 :17842 恒 (int)，remix 非 1.0 尺度下 round/trunc
     // 会出现 1px 差，如 22×1.3=28.6）
-    const vScale = seedS.scale;   // remix 命中=入口 scale 已乘；否则 = v.scale ?? 1
     const boxW = seedBox
       ? Math.trunc(f32(Math.trunc(f32(v.width * vScale)) * f32(seedS.scale)))
-      : (remixHit ? Math.trunc(f32(v.width * vScale)) : Math.round(v.width * vScale));
+      // ★RB15b-F1(2026-09-13)：双未命中支原版同为 (int) 截断（NPC.cs:17842 首盒）——
+      //   旧 Math.round 曾使普通世界史莱姆王 50 盒宽 123 vs 原版 122（98×1.25=122.5）
+      : (remixHit ? Math.trunc(f32(v.width * vScale)) : Math.trunc(f32(v.width * vScale)));
     const boxH = seedBox
       ? Math.trunc(f32(Math.trunc(f32(v.height * vScale)) * f32(seedS.scale)))
-      : (remixHit ? Math.trunc(f32(v.height * vScale)) : Math.round(v.height * vScale));
+      : (remixHit ? Math.trunc(f32(v.height * vScale)) : Math.trunc(f32(v.height * vScale)));
     const ss: ScalingStats = {
       type: id, lifeMax: seedS.lifeMax, damage: seedS.damage,
       value: seedS.value ?? npcValueOf(id),   // ★IIIII228：remix value ×scale 已并入
@@ -13826,7 +13836,11 @@ export class Enemy extends Entity {
       const max = mechQueenUp() ? 50 : 25;
       if (Math.floor(Math.random() * max) === 0) {
         this.ai2 = 1;
-        const probe = Enemy.fromVanilla(139, this.cx, this.y + this.h - 10);
+        // ★RB15c 勘误(2026-09-13)：-10 系旧注"h=20"错误前提——原版 SetDefaults(139)
+        //   (NPC.cs:10748-10751)=30×30；原版生成=NewNPC(Bottom 锚 :90342)传【中心】坐标
+        //   → 探针中心=节底−探针半高=−15（fromVanilla y=中心语义,Enemy.ts:1429）。
+        //   旧 -10 曾使探针低 5px
+        const probe = Enemy.fromVanilla(139, this.cx, this.y + this.h - 15);
         if (probe) addEnemy(game, probe);
       }
     }

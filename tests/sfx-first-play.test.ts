@@ -133,7 +133,7 @@ describe('Sfx 首播补播（首声不丢）', () => {
 describe('Sfx 高频预热（WARMUP_NAMES）', () => {
   it('首次 ensure 触发预热：枪族三件/菜单/挖掘入缓存；仅预热一次', async () => {
     const fetchMock = vi.fn((url: string | URL) => {
-      expect(String(url)).toMatch(/^sounds\/[\w.]+\.wav$/);
+      expect(String(url)).toMatch(/^sounds\/[\w.]+\.(opus|mp3)$/);   // ★Opus 化重锚:.opus 主/.mp3 回退（Sfx.ts:1091）
       return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
     });
     vi.stubGlobal('fetch', fetchMock);

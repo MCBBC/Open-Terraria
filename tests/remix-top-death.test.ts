@@ -24,7 +24,7 @@ function mkHooks(w: World, p: Player, events: number[], settle = vi.fn()) {
   const hooks = {
     world: w,
     player: p,
-    achievements: { notifyProgressionEvent: (ev: number) => { events.push(ev); } },
+    achievements: { notifyProgressionEvent: (ev: number) => { events.push(ev); }, handleSpecialEvent: () => {} },   // ★SW-FX47(c) 顶界块新增事件 11 臂,本测只断 44
     settlePlayerDeath: settle,
     enemies: () => [], critters: () => [], projectiles: () => [],
     spawnDrop: () => null, damagePlayer: vi.fn(() => 40),

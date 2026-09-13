@@ -64,6 +64,7 @@ function placeShell(w: World, heldVid: number) {
   g.swingTileCutSet = new Set<number>();
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
   g.player = {
+    placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1,
     buffs: { has: () => false }, equipStats: {},

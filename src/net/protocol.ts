@@ -190,12 +190,34 @@ export const enum Msg {
   SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
                        //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}
   ChestOpenState = 33, // C→S（SW-FX42 在用箱面，原版同号 ChestOpen）：{i16 chestIdx(-1=关),
-                       //   i32 x, i32 y}——客户端开/关箱公告（原版 Player.OpenChest 尾
+                       //   i32 x, i32 y[, u8 nameLen, [str name]（SW-FX52-R12 改名尾段）]}——
+                       //   客户端开/关箱公告（原版 Player.OpenChest 尾
                        //   SendData(33, chestIdx, chestX, chestY, nameLen...)，
                        //   NetMessage.cs:880-902 + MessageBuffer.cs:1962-1977：服务器据
-                       //   此更新 Main.player[whoAmI].chest 并广播 msg80）。原版载荷还带
-                       //   箱名改名段（num24 nameLen+string）——本仓箱改名未过网（msg69
-                       //   ChestName 域整缺,登记 multiplayer-design.md §SW-FX42）
+                       //   此更新 Main.player[whoAmI].chest 并广播 msg80）。原版载荷尾部
+                       //   即箱名改名段（num24 nameLen+string,NetMessage.cs:895-905 写 /
+                       //   MessageBuffer.cs:1928-1937 读）——SW-FX52 起服务器受理：改名段
+                       //   施加于【发送者当前在用箱】（=原版 Main.player[whoAmI].chest,
+                       //   非本帧 idx）并广播 msg69 ChestName。nameLen 语义 1:1 原版：
+                       //   0=无改名;1..20=后随 str（20 字符钳=NetMessage.cs:899-903
+                       //   len==0||len>20 → 255 不写名）;255=清名（原版收端 :1948-1952
+                       //   num24!=0 即写 string.Empty 的同款面）;21..254 非原版产出=按
+                       //   无名处理。★线格式差备案：本仓 x/y 为 i32（原版 i16）且改名段
+                       //   在其后——字段宽度简化同 msg3 先例,ID 保留;旧 server 只读已知
+                       //   段后忽略尾段,新 server×旧 client 尾段 remaining=0 = 无改名,
+                       //   双向兼容。上行生产面=箱改名 UI（本仓未实装,UI.ts:9025 债）——
+                       //   编解码/服务器受理面已通,生产面登记不越界
+  ChestName = 69,      // S→C 广播（SW-FX52-R12 箱改名，原版同号 ChestName）：{i16 chestIdx,
+                       //   i16 x, i16 y, str name}——写面 NetMessage.cs:1119-1126 1:1；
+                       //   生产 = 服务器受理 msg33 改名段后 TrySendData(69,-1,whoAmI,...)
+                       //   （MessageBuffer.cs:1969）广播给除改名者外全体。读面
+                       //   MessageBuffer.cs:3053-3074（netMode==1 支）：idx∈[0,8000) 门 +
+                       //   坐标不符丢弃（chest.x!=num8||chest.y!=num9 → break）；本仓
+                       //   镜像进 ChestData.name（消费面=地图标签 Renderer.ts:2418-2423 /
+                       //   悬停名 CursorItemIcon.ts:107 / 箱面板题 UI.ts:9023-9031）；
+                       //   未开过箱的端无本地箱记录 → 忽略（原版 CreateWorldChest 造
+                       //   仅坐标桩——本仓访客模型无预开箱记录,名随 chestFrame 尾段
+                       //   开箱时刻补齐,行为收敛同点）
   ChestInUse = 80,     // S→C 广播（SW-FX42 在用箱面，原版同号）：{u8 slot, i16 chestIdx,
                        //   i32 x, i32 y}——每玩家在用箱镜像（原版 Main.player[slot].chest,
                        //   NetMessage.cs:1180-1184 写 / MessageBuffer.cs:3220-3231 读，
@@ -758,6 +780,55 @@ export function readPlayerHurt(r: NetReader): PlayerHurtMsg | null {
   const x = r.f32(), y = r.f32(), dir = r.i8(), flags = r.u8();
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;   // S6 NaN 清洗
   return { slot, dmg, x, y, dir, flags };
+}
+
+// ================= 箱改名（msg69 ChestName + msg33 改名尾段；SW-FX52-R12） =================
+
+/** msg33 改名尾段 nameLen 语义（原版 num24——NetMessage.cs:895-905 写 /
+ *  MessageBuffer.cs:1928-1937 读）：0=无改名；1..20=后随名串（20=字符钳，
+ *  NetMessage.cs:899-903 len==0||len>20 → 写 255 不写名）；255=清名；21..254=
+ *  非原版产出（收端 num24=0 同款无名处理） */
+export const CHEST_NAME_MAX = 20;
+/** msg33 改名尾段清名哨兵（原版「长度非法」写值,收端 1948-1952 写 string.Empty） */
+export const CHEST_NAME_CLEAR = 255;
+
+export interface ChestNameMsg { chestIdx: number; x: number; y: number; name: string }
+
+/** msg69 S→C 广播帧（NetMessage.cs:1119-1126：i16 idx + i16 x + i16 y + string name——
+ *  ★SW-RB15d 定谳：三个 i16 字段逐位 1:1；string 长度前缀本仓=u16 LE（NetWriter.str），
+ *  原版=BinaryWriter 7bit 变长（NetMessage.cs:120 writer；.NET Write(string) 语义）——
+ *  本协议 SW 双端自洽（str/读面同配对），非跨端兼容面，登记差异勿当 1:1 引用。
+ *  生产 = 服务器受理 msg33 改名段（MessageBuffer.cs:1969 TrySendData(69,-1,whoAmI,...)） */
+export function writeChestName(chestIdx: number, x: number, y: number, name: string): Uint8Array {
+  return new NetWriter(Msg.ChestName)
+    .i16(chestIdx)
+    .i16(x).i16(y)
+    .str(name)
+    .finish();
+}
+
+/** 截断/越界返回 null（idx∈[0,8000) 门=MessageBuffer.cs:3056/:3078；位置校验在消费端,
+ *  同原版 chest.x!=num8||chest.y!=num9 → break :3068-3070）。 */
+export function readChestName(r: NetReader): ChestNameMsg | null {
+  if (r.remaining < 8) return null;   // i16×3 + u16 名长
+  const chestIdx = r.i16();
+  const x = r.i16(), y = r.i16();
+  if (chestIdx < 0 || chestIdx >= 8000) return null;
+  const name = r.str();
+  return { chestIdx, x, y, name };
+}
+
+/** msg33 改名尾段解析（num24 语义 1:1）。在读完全部已知段后调用（尾段=remaining 门：
+ *  旧端帧 remaining=0 → null=无改名）。返回 ''=清名（255）。 */
+export function readChestRenameTail(r: NetReader): string | null {
+  if (r.remaining < 1) return null;
+  const len = r.u8();
+  if (len >= 1 && len <= CHEST_NAME_MAX) {
+    if (r.remaining < 2) return null;
+    return r.str();
+  }
+  if (len === CHEST_NAME_CLEAR) return '';
+  return null;   // 21..254：非原版产出（原版 num24=0 同款,MessageBuffer.cs:1937-1939）
 }
 
 // ================= tile 操作批量（msg17，对齐原版单点操作语义的批量变体） =================

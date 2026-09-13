@@ -217,7 +217,33 @@ describe('红队:wld 对抗输入', () => {
   });
   it('tiles 流截断 → 越界抛错', () => {
     const bytes = exportWld(mkWldSave());
-    expect(() => parseWldToSave(bytes.slice(0, bytes.length - 60))).toThrow();
+    // ★截断深度锚=文件自带 section 指针(头 26+4×i 处 i32)取 tiles 流中点,不冻结
+    //  绝对字节数——FX33/35 曾真写三尾段(bestiary12+creativePowers31+footer18=61B
+    //  容忍区),冻结 -60 恰落容忍区假绿(2026-09-13 复锚;定谳=非生产回归,详见下测)。
+    //  原版读侧同域:LoadWorldTiles(Terarria1457/Terraria.IO/WorldFile.cs:2526)对截断
+    //  无容忍=EndOfStreamException;段尾 Position 对账不符=BadSectionPointer(WF:1784)
+    //  整档拒载——tiles 流截断必须抛。
+    const dv = new DataView(bytes.buffer);
+    const tilesStart = dv.getInt32(26 + 4 * 1, true), tilesEnd = dv.getInt32(26 + 4 * 2, true);
+    expect(() => parseWldToSave(bytes.slice(0, tilesStart + Math.floor((tilesEnd - tilesStart) / 2)))).toThrow(/越界/);
+  });
+  it('尾段截断契约(显式,防双向漂移):creativePowers+footer 可缺;bestiary 缺失/截断必抛', () => {
+    // ★RB15c 实证修正(2026-09-13,探测脚本报存):段表 mark 序=[6]pressurePlates 尾/
+    //  [7]townManager 尾(=bestiary 起点)/[8]bestiary 尾(=creativePowers 起点)——
+    //  原稿 townStart/townEnd 命名与"三段可缺"注释各错一位。parseWldToSave 实证:
+    //  · slice(0,pointers[8])=保到 bestiary 尾,creativePowers+footer 缺 → 不抛(FX35
+    //    容忍语义真身;WldParser.ts:778/:806 try/catch 的"脏段容错"在游戏读侧,
+    //    footer 由 pointer 重定位);
+    //  · slice(0,pointers[7])=bestiary 整段缺 → 抛(bestiary count 读 EOF);
+    //  · slice(0,pointers[7]+2)=bestiary 头截 2B → 抛。与原版 LoadWorld_Version2
+    //    (WF:1844-1847)Position 对账不符=BadSectionPointer 整档拒载同向。
+    const bytes = exportWld(mkWldSave());
+    const dv = new DataView(bytes.buffer);
+    const bestiaryStart = dv.getInt32(26 + 4 * 7, true);   // pointers[7]=townManager 尾=bestiary 起点
+    const creativeStart = dv.getInt32(26 + 4 * 8, true);   // pointers[8]=bestiary 尾=creativePowers 起点
+    expect(() => parseWldToSave(bytes.slice(0, creativeStart))).not.toThrow();
+    expect(() => parseWldToSave(bytes.slice(0, bestiaryStart + 2))).toThrow(/越界/);
+    expect(() => parseWldToSave(bytes.slice(0, bestiaryStart))).toThrow(/越界/);   // ★RB15c 补腿:bestiary 整段缺=拒载
   });
   it('全 0xFF 1KB → 明确拒绝', () => {
     expect(() => parseWldToSave(new Uint8Array(1024).fill(0xff))).toThrow();

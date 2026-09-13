@@ -56,7 +56,7 @@ describe('SW-AD1 655 墙推支 + 334 blockMouse', () => {
   it('Input.mousedown/up 消费点：置位不再吞沿（按住期压制由 updateUse 门承担）,松键复位旗', () => {
     const reg = new Map<string, (e: unknown) => void>();
     vi.stubGlobal('window', { addEventListener: (t: string, f: (e: unknown) => void) => reg.set(t, f), removeEventListener: () => {} });
-    const inp = new Input({ addEventListener: () => {}, removeEventListener: () => {} } as unknown as HTMLElement);
+    const inp = new Input({ addEventListener: () => {}, removeEventListener: () => {}, getBoundingClientRect: () => ({ left: 0, top: 0 }) } as unknown as HTMLElement)   // ★rect 缓存批后 refreshRect 读 el.rect;
     // 场景 B：旗置位（334 锁定帧写点等价）时新沿不再被吞——mouseDown/mouseHeld 照常置
     armBlockMouse(inp);
     (reg.get('mousedown') as (e: unknown) => void)({ button: 0, target: null });

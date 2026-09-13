@@ -144,7 +144,7 @@ import {
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_BY_KEY, ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE, PLACE_TILE_ON_ALT_USE, VANILLA_ITEM_KEY_BY_ID, placeableSheetsForItems, vanillaPlaceableTileKeys, type ItemDef , vanillaItemCreateTile } from '../data/items';
-import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
+import { ANGLER_QUEST_ITEMS, rollAnglerRewards, fishingPowerMultiplier, anglerQuestSwapInto } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { WALL_DUNGEON_WALLS, killWallCheckFailure, wallDropItemVid } from '../data/wallDrops';   // SW-BF1 2026-09-06
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf } from '../data/vanillaNpcs';
@@ -175,7 +175,6 @@ import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, solid
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, collectOwnedItems, collectedEnoughForCraft, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, CRAFT_CHEST_RANGE_PX, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerToNpcOf, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
-import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
 import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
 // 孤儿武器 B3 波（2026-08-30 工单1/2/4）：虚空袋对 4131/5325 + 沙滩球 859 + 橄榄球 4743
@@ -1792,6 +1791,21 @@ const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
 /** ★SW-BJ57：补 4870 回归药水——原版走 itemTime==20 引导触发（Player.cs:43472-43502,
  *  1458 同域 :43468 区 diff=same）,与 2350 同族;旧刀误落 PERMANENT_USE 即时支=点击即传 */
 const TELEPORT_ITEM_VIDS = new Set([50, 3124, 3199, 5358, 2350, 2351, 4263, 4819, 5359, 5360, 5361, 4870]);
+/** ★RB15a（2026-09-13）宝藏袋左键豁免集：BossBag 21 件（ItemID.cs:1215 集,1458 同域
+ *  :1215 零增量）原版 SetDefaults 无 useStyle（Item.cs:30544 共块仅 consumable=true）
+ *  = 非使用物,持用左键原版零动作（ItemCheck useStyle 0 不进 ApplyItemAnimation）。
+ *  updateUse「其它物品 useStyle 分族」臂（:13562 区）兜底 useSwing(:13619) 曾让持袋
+ *  左键挥摆（dur=heldUseAnimation 缺省 30,不耗不响不进 useTime——变异实验
+ *  tests/sw-fx21 捕红定谳）。§五裁决「唯右键开包」的左键面须为【零动作】而非
+ *  【挥摆】,故该臂整族抑制。数据面 vanilla-itemcombat.json 无 useStyle 列（提取器
+ *  未提）→ 只能集合闭式表达;21 vid 与 vanillaBossBags 的 BOSS_BAG_IDS 全等由
+ *  tests/sw-fx21 结构锁交叉核对（刻意不 import 该表:§五结构锁禁止 Game.ts 直查
+ *  BossBag 门集/调用开包引擎——防左键开包入口回潮;豁免臂是抑制不是开包,
+ *  与锁语义不冲突）。 */
+const BOSS_BAG_NO_USE_VIDS = new Set([
+  3318, 3319, 3320, 3321, 3322, 3323, 3324, 3325, 3326, 3327, 3328, 3329,
+  3330, 3331, 3332, 3860, 3861, 3862, 4782, 4957, 5111,
+]);
 /** vanilla TileID.Sets.Platforms（WorldGen.SolidOrSlopedTile includePlatforms 臂消费；
  *  ★SW-BJ43 海螺落位面复刻——与 VanillaTiler VANILLA_PLATFORM_SHEETS 同表） */
 const CONCH_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
@@ -13560,7 +13574,11 @@ export class Game implements GameHooks {
     //  短剑 3483+ 全列）——旧注"模板无 noUseGraphic 须画手持剑"系 1405 误记，
     //  2026-08-17 据提取表修正；挥击姿势(useStyle 13 身体帧)保留,物品贴图由
     //  useSwing 的 noGraphic 抑制——投射物即唯一的剑）
+    //  ★RB15a（2026-09-13）宝藏袋豁免（集=BOSS_BAG_NO_USE_VIDS,模块级锚注）：
+    //  BossBag 原版无 useStyle=非使用物,持用左键零动作——本臂兜底 useSwing(:13619)
+    //  曾让持袋左键挥摆,§五裁决左键面=零动作非挥摆,在此整族抑制。
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
+      && !BOSS_BAG_NO_USE_VIDS.has(viIdFromKey(heldDef.key) ?? -1)
       && cw?.kind !== 'summon' && cw?.kind !== 'yoyo'
       && cw?.kind !== 'flail' && cw?.kind !== 'boomerang' && cw?.kind !== 'anchored'
       && cw?.kind !== 'flairon'   // 2611 掷球形态同族投射物即本体（R4,避免 :11292 useStyle5 姿势支抢注册）
@@ -15645,32 +15663,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
       this.input.mouseDown = false;
-    } else if (heldDef && BOSS_BAG_IDS.has(viIdFromKey(heldDef.key))
-      && inp.mouseDown && this.player.useTime === 0) {
-      // 宝藏袋开包（Player.OpenBossBag :6828-7520 全 19 袋,数据驱动引擎
-      // data/vanillaBossBags.ts:概率门/大师门/武器 switch/猩红三元/去重双随机/
-      // 月总十选二 + 共享尾段按 boss value 附赠钱币——旧仅世花 3328 手写一例,
-      // 专家袋整层不可开,2026-08-13 修）
-      {
-        const px = this.player.cx, py = this.player.cy;
-        openBossBag(viIdFromKey(heldDef.key), (id, n) => {
-          const k = VANILLA_ITEM_KEY_BY_ID[id];
-          if (k) this.spawnDrop(px, py, k, n ?? 1, 0, -2);
-        }, {
-          masterMode: mainMasterMode(this.world),
-          crimson: this.world.crimson,
-          extraAccessory: this.player.inv.extraAccessory,
-          // ★remix/十周年投影（TryGettingDevArmor 十周年 1/8 Player.cs:7909-7912、
-          //  3330 case5 remix 支 AquaScepter——红蓝对抗 R3-B2:曾漏传=两分支死）
-          remixWorld: !!this.world.seedFlags?.remix,
-          tenthAnniversary: !!this.world.seedFlags?.tenthAnniversary,
-          hasItem: (id) => { const iid = invIndexOfVanilla(id); return iid >= 0 && this.player.inv.countOf(iid) > 0; },
-        });
-        this.player.inv.removeHeld(1);
-        this.player.useTime = 60;
-        this.cb.onInventoryChanged();
-      }
-      this.input.mouseDown = false;
+      // ★§五裁决（2026-09-13 对齐原版）：宝藏袋持用左键开包链已摘除——原版开启
+      //  唯 ItemSlot 右键首支（Item.cs 无 useStyle=非使用物;ItemSlot.cs:1786-1789
+      //  右键开门集 21 件无条件 return 先于 swap/装备/拆半,仓内引擎=openBagItem
+      //  tests/sw-fx21 全对拍）。持用左键系前批自创共存入口,退役。
+      //  ★RB15a 复核补全（2026-09-13）：摘链后持袋左键并非自然归零——上游
+      //  「其它物品 useStyle 分族」臂（:13562 区,13619 兜底 useSwing）仍接住袋子
+      //  起挥摆（不耗不响不进 useTime）=原版没有的行为,已在该臂加 BOSS_BAG_NO_USE_
+      //  VIDS 整族抑制（变异实验捕红→修后 21 件全量零副作用,tests/sw-fx21）。
     } else if (heldDef && viIdFromKey(heldDef.key) === 3213
       && inp.mouseDown && this.player.useTime === 0) {
       // ---- 钱槽 3213（Item.cs:28979-28990：useStyle 1 / useTime=useAnimation 28 /
@@ -25607,7 +25607,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     {
       const cxyOpen = chest as { x?: number; y?: number };
       if (cxyOpen.x !== undefined && cxyOpen.x >= 0 && cxyOpen.y !== undefined) {
-        const ci = this.world.chests.indexOf(chest as ChestData);
+        // ★SW-FX52-R12 idx 域修正：公告域=服务器箱索引（chestUserBySlot/msg80 键域，
+        // 与 msg31/msg32 头域同）。曾用本地 indexOf——访客 chests 为 push 增长
+        // （netApplyChest:3190）,本地域与服务器域错位 → 在用门/镜像按错箱记账,
+        // 改名段（chestUserBySlot 取施加对象）随之落错箱。chestIndexByPos 由
+        // netApplyChest 按帧头登记服务器域 idx（:3197）;本地开箱（房主/单人,无
+        // netApplyChest 登记面）回退本地 indexOf（同存档序=同域,原语义）
+        const ci = this.net?.chestIndexByPos.get(`${cxyOpen.x},${cxyOpen.y}`)
+          ?? this.world.chests.indexOf(chest as ChestData);
         if (ci >= 0) {
           this.netChestOpenIdx = ci;
           this.net?.sendChestOpenState(ci, cxyOpen.x, cxyOpen.y, false);
@@ -31286,6 +31293,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** msg69 ChestName 到达（SW-FX52-R12，MessageBuffer.cs:3053-3074 netMode==1 支）：
+   *  idx 门在编解码层（0..7999）；此处=索引域经 netChestWatch（netApplyChest 登记
+   *  {chest, idx=服务器箱索引}）+ 位置校验（:3068-3070 chest.x!=num8||chest.y!=num9
+   *  → break 同款）。''=清名。生产=①授予/纠正随发名断言（chestNameFrame,存档名
+   *  投递位=原版进端箱表名域 CompressTileBlock {idx,x,y,name} 等价落点）②改名
+   *  广播（msg33 改名段→:1969）。未开过箱的端无登记 → 忽略（原版 CreateWorldChest
+   *  :3060-3062 造仅坐标桩——本仓访客无预开箱记录,名随授予帧序补齐,收敛同点,
+   *  不造桩防地图/悬停面出现未开箱标签） */
+  netApplyChestName(chestIdx: number, x: number, y: number, name: string): void {
+    const chest = this.netChestWatch.find((wch) => wch.idx === chestIdx)?.chest;
+    if (!chest || chest.x !== x || chest.y !== y) return;
+    chest.name = name || undefined;
+  }
+
   // ================= MP 同步轻件包（module0/2/4/7） =================
 
   /** 地图 ping 存储（Main.Pings / PingMapLayer 语义：15s 存活 · 10fps 五帧 · 容量 100）。
@@ -34633,25 +34654,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  清今日交付名单/完成旗 + 按世界门重掷。
    *  调用点 = 黎明（UpdateTime_StartDay :66352;旧注 :64852 系 1456 行号）+ 新世界（WorldGen.cs:22655）。
    *  掷骰注入按「种子 ^ 天数」播种的独立 UnifiedRandom → 同种子同天数同任务鱼
-   *  （读档/联机一致；原版掷 Main.rand 不可复现，拒绝语义逐条不变） */
+   *  （读档/联机一致；原版掷 Main.rand 不可复现，拒绝语义逐条不变）。
+   *  ★SW-FX52-R11：实现体收编 data/vanillaFishing.ts anglerQuestSwapInto 双端单源
+   *  ——SimHost.dawnRolls（serverAuth 权威房黎明,R11 拓展位）同源调用，防门旗键表/
+   *  播种式任一侧漂移分叉两端任务鱼 */
   anglerQuestSwap(): void {
-    const w = this.world;
-    const f = w.flags;
-    w.anglerWhoFinishedToday = [];          // :3805
-    w.anglerQuestFinished = false;          // :3806
-    // :3807 flag = downedBoss1||downedBoss2||downedBoss3||hardMode||downedSlimeKing||downedQueenBee
-    const anyBoss = !!(f['downed_4'] || f.downedEyeOfCthulhu          // downedBoss1（EoC）
-      || f['downed_13'] || f['downed_266']                            // downedBoss2（世吞/克脑）
-      || f.downedSkeletron || f['downed_35']                          // downedBoss3（骷髅王）
-      || f.hardMode
-      || f.downedSlimeKing || f['downed_50']                          // downedSlimeKing
-      || f['downed_222']);                                            // downedQueenBee
-    w.anglerQuest = rollAnglerQuest({
-      hardMode: !!f.hardMode,
-      evil: w.crimson ? 'crimson' : 'corrupt',
-      anyBoss,
-      hasWorldSurface: w.groundLevel > 50,  // Main.isThereAWorldSurface=worldSurface>50.0（1457 Main.cs:2884;★SW-RB10b 锚正,旧注 :2861 系他域）
-    }, seededRng((w.seed ^ Math.imul(w.clock.dayCount, 0x9E3779B1)) | 0));
+    anglerQuestSwapInto(this.world);
   }
 
   /** 「任务」按钮（NPCInteractions.AnglerQuest.Interact → Main.NPCChatText_DoAnglerQuest
@@ -45717,6 +45725,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
         onAnglerFinished: (slot) => this.netApplyAnglerFinished(slot),
         onSeasonBits: (bits) => this.netApplySeasonBits(bits),
         onChestInUse: (slot, chestIdx, x, y) => this.netApplyChestInUse(slot, chestIdx, x, y),
+        onChestName: (chestIdx, x, y, name) => this.netApplyChestName(chestIdx, x, y, name),   // SW-FX52-R12 msg69 镜像
         // ---- MP 同步轻件包（net/syncModules.ts：module0/2/4/7/8/100 + msg203）----
         onLiquidSync: (cells) => this.netApplyLiquid(cells),
         onBestiaryEvent: (events) => this.netApplyBestiary(events),

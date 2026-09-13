@@ -12,7 +12,9 @@ describe('Mech 族缺口补齐', () => {
   it('① 135 受击出探针：hurt 内 1/25（mech 1/50）+ ai2 门 + 139 段底生成', () => {
     expect(enemySrc).toContain('vanillaId === 135 && this.hp > 0 && this.ai2 === 0');
     expect(enemySrc).toContain('mechQueenUp() ? 50 : 25');
-    expect(enemySrc).toContain('fromVanilla(139, this.cx, this.y + this.h)');
+    //  ★重锚(2026-09-13,RB15c 勘误):139=30×30(NPC.cs:10748),探针中心=节底−15(NewNPC
+    //  中心坐标语义);旧 -10 曾低 5px(旧注"h=20"前提错误)
+    expect(enemySrc).toContain('Enemy.fromVanilla(139, this.cx, this.y + this.h - 15)');
   });
   it('② 双子互保：夜晚 + despawnTimer<10 → 借另一只眼生命期（DiscourageDespawn 语义）', () => {
     expect(bossAISrc).toContain("!game.world.clock.isDay && e.despawnTimer < 10");

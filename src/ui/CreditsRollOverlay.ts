@@ -155,7 +155,10 @@ export class CreditsRollOverlay {
   private active = false;           // isActive
   private wants = false;            // _wantsToBeSeen
   private sheets = new Map<string, SheetImg>();
-  private failed = new Set<string>();
+  // ★审计对齐(2026-09-13):永久负缓存 → 10s TTL 自愈（参照 ensureVImage/loadExtraSprite——
+  //  首访冷缓存一次失败曾=整会话缺贴图;TTL 后允许重试） */
+  private failed = new Map<string, number>();
+  private static readonly FAILED_TTL_MS = 10000;   // ★RB15c:readonly 收紧
   private walkPhase = new Map<object, number>();   // 走路动画相位（段对象键）
   private scale: number;
 
@@ -193,7 +196,11 @@ export class CreditsRollOverlay {
   private loadSheet(tex: string, cb: (s: SheetImg | null) => void): void {
     const hit = this.sheets.get(tex);
     if (hit) { cb(hit); return; }
-    if (this.failed.has(tex)) { cb(null); return; }
+    {
+      const at = this.failed.get(tex);
+      if (at !== undefined && performance.now() - at < CreditsRollOverlay.FAILED_TTL_MS) { cb(null); return; }
+      if (at !== undefined) this.failed.delete(tex);   // TTL 过 → 重试
+    }
     const pending = this.pend.get(tex);
     if (pending) { pending.push(cb); return; }
     const q: Array<(s: SheetImg | null) => void> = [cb];
@@ -206,7 +213,7 @@ export class CreditsRollOverlay {
       for (const f of q) f(rec);
     };
     img.onerror = () => {
-      this.failed.add(tex);
+      this.failed.set(tex, performance.now());
       this.pend.delete(tex);
       for (const f of q) f(null);
     };

@@ -17,6 +17,13 @@
 import { describe, it, expect } from 'vitest';
 import { openBagItem, OPENABLE_BAG_VIDS, type BagOpenWorld } from '../src/data/vanillaOpenBags';
 import { BOSS_BAG_IDS } from '../src/data/vanillaBossBags';
+// ★RB15a 变异实验夹具依赖（Game/Player/World 最小桩,惯例=blue-r2-fixes casterGame）
+import { Game } from '../src/core/Game';
+import { Player } from '../src/entities/Player';
+import { Inventory } from '../src/items/Inventory';
+import { World } from '../src/world/World';
+import { TILE } from '../src/core/constants';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 
 const W: BagOpenWorld = { hardMode: false };
 const collect = (fn: (give: (id: number, n?: number) => void) => void): Array<[number, number]> => {
@@ -124,13 +131,106 @@ describe('SW-FX21 右键开袋面（TryOpenContainer_GrantItems :1784 首支补�
     expect(openBagItem(4879, () => {}, W)).toBe(false);          // 黑曜石锁盒缺暗影钥匙
   });
 
-  it('左键链共存:持用链直调 openBossBag 引擎与右键同源（BOSS_BAG_IDS 即 Game.ts:15386 门集）', () => {
-    // 持用链开门集 = BOSS_BAG_IDS;右键首支同集路由——两入口对 3861/3862 同步复活
+  it('★§五裁决(2026-09-13):左键链已摘除=原版唯右键链(BOSS_BAG_IDS 门集经 openBagItem 引擎全通)', () => {
+    // 原"两入口共存"系前批设计决策;§五拍板对齐原版——Item.cs 无 useStyle=非使用物,
+    // 开启唯 ItemSlot.cs:1786-1789 右键首支(无条件 return 先于 swap/装备/拆半)。
+    // Game.ts 持用左键链退役(结构锁见下)。
     expect(BOSS_BAG_IDS.has(3861) && BOSS_BAG_IDS.has(3862)).toBe(true);
     for (const vid of BOSS_BAG_IDS) {
       const got = collect((give) => openBagItem(vid, give, W));
       expect(got.every((g) => g[0] > 0)).toBe(true);
     }
+  });
+
+  it('结构锁:Game.ts 持用链无 BossBag 左键分支（防自创入口回潮）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const gameSrc = readFileSync(join(dirname(__dirname), 'src', 'core', 'Game.ts'), 'utf8');
+    expect(gameSrc).not.toContain('BOSS_BAG_IDS.has');   // 左键门集直查已随链退役
+    expect(gameSrc).not.toContain("openBossBag(");       // 引擎唯右键/开包引擎面引用
+    expect(gameSrc).not.toContain('openBossBag');        // 连 import 也不得回潮（RB15a 收紧）
+    // ★RB15a 交叉核对:Game.ts「其它物品」臂的左键豁免集与 BOSS_BAG_IDS 全等
+    //  （豁免集刻意本地定义不 import —— 见 Game.ts BOSS_BAG_NO_USE_VIDS 锚注;
+    //  防两表漂移:漏件=持袋挥摆回归,多件=误抑制他人左键）
+    const m = gameSrc.match(/BOSS_BAG_NO_USE_VIDS = new Set\(\[([\s\S]*?)\]\);/);
+    expect(m, 'Game.ts 须存在 BOSS_BAG_NO_USE_VIDS 豁免集').toBeTruthy();
+    const local = new Set(m![1].split(',').map((s) => Number(s.trim())).filter((n) => n > 0));
+    expect(local.size).toBe(21);
+    expect([...local].sort((a, b) => a - b)).toEqual([...BOSS_BAG_IDS].sort((a, b) => a - b));
+  });
+
+  // ============ ★RB15a 变异实验（2026-09-13）：持袋左键一帧零副作用 ============
+  //  摘刀后宝藏袋 vid 落进 Game.updateUse 通用尾支（:15885）——内层手臂
+  //  （高尔夫/4095/战斗书/语音饰品/血泪 4271/钓竿）无一支匹配 → 整帧 no-op。
+  //  原版同相：SetDefaults 无 useStyle（Item.cs:30544 共块 consumable=true only）
+  //  → controlUseItem 整链不启动 = 不挥/不响/不耗/不进 useTime。
+  //  阳性对照 3213 钱槽证明桩灵敏度（防"全 miss 恒 0"反向陷阱——playbook P3.1）。
+  const bagIid = (vid: number): number => {
+    // 键源 = VANILLA_ITEM_KEY_BY_ID（全量 vanilla.json 反查表）——vanillaItemKey
+    // 是配方域表（3861/3862 等非配方可造袋不在其中,曾报"未注册"）
+    const k = VANILLA_ITEM_KEY_BY_ID[vid];
+    const found = k ? ITEM_BY_KEY[k] : undefined;
+    if (found === undefined) throw new Error(`vid ${vid} 未注册`);
+    return found;
+  };
+
+  /** updateUse 可驱动的最小 Game 桩（蓝队 R2 惯例:blue-r2-fixes casterGame 同款） */
+  function bagGame(heldVid: number) {
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
+    const player = new Player(50 * TILE, 90 * TILE, new Inventory());
+    player.inv.add(bagIid(heldVid), 1);
+    const sel = player.inv.slots.findIndex((s) => s && s.id === bagIid(heldVid));
+    player.inv.selected = Math.max(0, sel);
+    const added: unknown[] = [];
+    const sfxCalls: string[] = [];
+    const record = (k: string) => () => { sfxCalls.push(k); };
+    const toasts: string[] = [];
+    g.player = player;
+    g.world = new World(120, 120, 30, 'rb15a');
+    g.entities = { critters: [], npcs: [], enemies: [], projectiles: [], add: (e: unknown) => added.push(e) };
+    g.input = { mouseDown: true, mouseHeld: true, mouseX: 700, mouseY: 300, rightDown: false, uiBlocking: false, downAction: () => false };
+    g.camera = { tileUnder: () => [60, 60], screenToWorld: () => [800, 0] };
+    g.renderer = { canvas: { width: 800, height: 600 }, fullMap: { open: false }, timeUiHover: false, weatherUiHover: false };
+    g.smartCursor = { showing: false };
+    g.annotateMode = false;
+    g.prevSwingMouse = false;
+    g.mining = null;
+    g.swingHitSet = new Set<number>();
+    g.swingTileCutSet = new Set<number>();
+    g.sfx = { play: record('play'), playWav: record('playWav'), playWavFile: record('playWavFile'), playFiles: record('playFiles') };
+    g.playSfxFile = record('playSfxFile');
+    g.playSfxWav = record('playSfxWav');
+    g.cb = { onInventoryChanged: () => {}, onToast: (m: string) => toasts.push(m) };
+    return { g, player, added, sfxCalls, toasts, heldSlot: sel };
+  }
+
+  describe('★RB15a 摘刀后持袋左键一帧零副作用（原版 useStyle=0 同相）', () => {
+    const BAGS = [...BOSS_BAG_IDS];
+    it(`持用面全量：左键一帧 no-op（无 swing/无音/无消耗/无 useTime/无实体/无 toast）`, () => {
+      expect(BAGS.length).toBe(21);
+      // 3861/3862 仓内未注册为物品（vanilla.json 无条目=玩家不可持用,仅引擎面
+      // 可达,上一测试已全通）——持用面如实跳过,跳过集钉死防内容面漂移
+      const unholdable = BAGS.filter((v) => !VANILLA_ITEM_KEY_BY_ID[v]);
+      expect(unholdable.sort((a, b) => a - b)).toEqual([3861, 3862]);
+      for (const vid of BAGS) {
+        if (!VANILLA_ITEM_KEY_BY_ID[vid]) continue;
+        const { g, player, added, sfxCalls, toasts, heldSlot } = bagGame(vid);
+        (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
+        expect(player.useTime, `${vid} useTime`).toBe(0);
+        expect((g as unknown as { swing?: unknown }).swing, `${vid} swing`).toBeUndefined();
+        expect(added, `${vid} 实体`).toHaveLength(0);
+        expect(sfxCalls, `${vid} 音效`).toHaveLength(0);
+        expect(toasts, `${vid} toast`).toHaveLength(0);
+        expect(player.inv.slots[heldSlot]?.id, `${vid} 不消耗`).toBe(bagIid(vid));
+      }
+    });
+
+    it('阳性对照:3213 钱槽同桩发射 525 弹+音效（桩灵敏度证明,防全 miss 假绿）', () => {
+      const { g, added, sfxCalls } = bagGame(3213);
+      (g as unknown as { updateUse: (dt: number) => void }).updateUse(1 / 60);
+      expect(added.length).toBeGreaterThanOrEqual(1);
+      expect(sfxCalls.length).toBeGreaterThanOrEqual(1);
+    });
   });
 
   // ★SW-RB12b（2026-09-10）探针 C2 定谳锁：关包快捷栏右键整面不可达。

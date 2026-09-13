@@ -201,10 +201,11 @@ describe('useTime 五件落点（Game.ts）', () => {
   it('回归药水 2350 引导走 itemCombat(tvid)?.useTime（表 30 生效,兜 90 不再命中）', () => {
     // 传送族引导冷却统一读表（Game.ts TELEPORT_ITEM_VIDS 支）——2350 表条目补 30 后
     // 该路径即得原版值;此处锁"读表"不回退成写死
-    const blk = blockFrom('const useTime = itemCombat(tvid)?.useTime ?? 90;');
-    expect(blk).toContain('const useTime = itemCombat(tvid)?.useTime ?? 90;');
+    const blk = blockFrom('const useTime = itemCombat(tvid)?.useTime ?? FAMILY_USE_TIME[tvid] ?? 90;');
+    expect(blk).toContain('const useTime = itemCombat(tvid)?.useTime ?? FAMILY_USE_TIME[tvid] ?? 90;');
     // 2350 触发 tick 20（:42444 itemTime==20）不受冷却改动影响
-    expect(blk).toContain('tvid === 2350 ? 20 :');
+    //  ★重锚(2026-09-13):魔镜族批把触发式扩展为 2350||4870 同拍 20(4870 点击即传修),语义等价扩容
+    expect(blk).toContain('tvid === 2350 || tvid === 4870 ? 20 :');
   });
 
   it('致动器 849 放置 useTime=10、红扳手 509=5（逐工具读表,旧统一 5）', () => {

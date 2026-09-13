@@ -1,6 +1,16 @@
 // W3 复核探针（一次性）：GERunner 裸读幽灵格时 js(内存 fresh) vs js2(存档读回) 是否一致。
 // 前置=幽灵保域批（WorldGen finalize 净化删除 + serialize v5 tileActive 通道）。
 // 心跳走 fs.appendFileSync('/tmp/w3probe-heartbeat.log')（vitest console 有缓冲,不便盯）。
+// ★SW_W3PROBE=1 门控（2026-09-13）：困难模式世界生成×2+存档回环数十秒起,一次性取证仪
+//   不设门会拖累全量套件（模式同 tests/_dgidump.test.ts 的 SW_DGI_DUMP）。
+// ★diff≠0 定谳状态=未定/疑与「幽灵净化方案B·读档边界（2026-09-07,dae304d4,
+//   src/save/SaveFile.ts purgeGhostTiles）」时序吻合：本探针（bc6ee391 09-03）前提=
+//   幽灵保域批（serialize v5 tileActive 通道,81fb4f8f 09-03）的「fresh≡存档读回
+//   逐位一致」,该前提被 09-07 方案B 推翻（幽灵=不可见不碰撞私有状态,读档边界净化;
+//   写侧零就地写,SaveFile.ts:164）。心跳实证：diff 恰=typ 通道=fresh 内存幽灵数
+//   （1637781,js2 读回 ghost=0）,act/wal/liq/lty/half/slope 全 0——act 通道零漂移=
+//   v5 tileActive 通道本身工作正常。待专项按净化语义改写判据（fresh 内存幽灵残差属
+//   预期）,不得为凑绿改生产。
 import { it, expect } from 'vitest';
 import { appendFileSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
@@ -39,7 +49,7 @@ function diff(a: Snap, b: Snap): Record<string, number> {
   return o;
 }
 
-it('W3: fresh-HM ≡ save/load-HM（幽灵跨存档）', async () => {
+it.skipIf(!process.env.SW_W3PROBE)('W3: fresh-HM ≡ save/load-HM（幽灵跨存档）', async () => {
   const W = 4200, H = 1200, SEED = '12345';
   const t0 = Date.now();
   let w1last = 0;

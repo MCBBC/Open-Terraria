@@ -94,13 +94,13 @@ describe('水中跳跃原版对齐（JumpMovement :20405-20496）', () => {
     expect(p.vy).toBeCloseTo(5.01, 4);
   });
 
-  it('蜂蜜档：重力 0.1/终端 3（honeyWet :24133-24135）', () => {
+  it('蜂蜜档：重力 0.1/终端 3.01（honeyWet :24133-24135 + :24637 maxFallSpeed += 0.01f——★SW-RB14d 终端四档补齐后重锚）', () => {
     const w = poolWorld(3);
     const p = new Player(40 * 16, 65 * 16, new Inventory());
     p.inputJump = false;
-    sink(w, p, 80);                       // 0.1×80=8 → 钳 3
+    sink(w, p, 80);                       // 0.1×80=8 → 钳 3+0.01(:24637 无条件加)
     expect(p.inWater).toBe(true);         // inWater 含蜂蜜
-    expect(p.vy).toBeCloseTo(3, 4);
+    expect(p.vy).toBeCloseTo(3.01, 4);
   });
 
   it('蜂蜜踩底跳：速度保持干燥档（原版 honeyWet 分支不覆写 jumpSpeed）', () => {

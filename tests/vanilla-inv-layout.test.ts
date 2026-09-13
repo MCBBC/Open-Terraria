@@ -45,11 +45,15 @@ describe('刀0 flag 面:inventoryLayout(Options)', () => {
     expect(s.data.inventoryLayout).toBe('vanilla');
   });
 
-  it('★SW-FX39 存档侧 classic 保留不迁移(灰度期经设置行显式切换=用户意志,回退旗面)', async () => {
+  it('★SW-FX51 存档侧 classic 一次性迁移→vanilla(转正刀;显式切回经 migrated 旗保留=用户意志)', async () => {
+    // 旧断言"classic 保留不迁移"系 FX39 灰度期语义;FX51 退役刀(2026-09-12)将转正前
+    //  自动落盘的 classic 视为非用户意志一次性迁移,显式切回由 inventoryLayoutMigrated 旗保留
     vi.mocked(kvGet).mockResolvedValue(JSON.stringify({ inventoryLayout: 'classic' }));
     const s = new OptionsStore();
     await s.load();
-    expect(s.data.inventoryLayout).toBe('classic');
+    expect(s.data.inventoryLayout).toBe('vanilla');
+    expect(s.data.inventoryLayoutMigrated).toBe(true);
+    await new Promise((r) => setTimeout(r, 450));   // ★RB14b-F2:迁移走 set() 400ms 防抖,冲刷防串扰
   });
 
   it('URL 会话覆盖 ?invlayout=vanilla(不落盘:仅 load 内存改写,非 set 通道)', async () => {

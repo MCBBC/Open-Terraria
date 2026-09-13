@@ -163,7 +163,7 @@ describe('F4｜挖掘冷却下限钳（Player.cs:4221-4226 max(val,1)）', () =>
     tryMine.call(g, 20, 20, 35, 'pick', 12, 4);   // t=8 击3 → 105 ≥ 100 破坏
     expect(broken).toEqual([[20, 20]]);
   });
-  it('钳位常量 = 1：冷却公式下限不再吞顶速工具击（2176 useTime 4 原版档）', () => {
+  it('钳位常量 = 1：冷却公式下限不再吞顶速工具击（2176 useTime 4 原版档;★重锚=BJ59 单源化把 round→floor,钳位不变）', () => {
     // 数据面锚：2176 蘑菇矿爪 useTime 4 / 2774 星旋钻头 useTime 4——
     // 修复前 Math.max(8,…) 强制 8t（慢 100%）
     expect(itemCombat(2176)!.useTime).toBe(4);
@@ -171,7 +171,7 @@ describe('F4｜挖掘冷却下限钳（Player.cs:4221-4226 max(val,1)）', () =>
     // ★SW-RB9c（2026-09-09）随 SW-BJ12 pickSpeed 单源化刷新锚文本（pickSpeedMult()）：
     //   :18837 现式 `Math.max(1, Math.round((useTime ?? speed) * this.pickSpeedMult()))`
     //   ——钳位 max(1,…) 语义不变,静态锚同步（旧字面 `* pickSpeed` 已不存在=恒红假锚）
-    const src = 'Math.max(1, Math.round((useTime ?? speed) * this.pickSpeedMult()))';
+    const src = 'Math.max(1, Math.floor((useTime ?? speed) * this.pickSpeedMult()))';
     // 静态锚：tryMine 冷却表达式唯一、无 8t 残留（读源码防回归）
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('node:fs') as typeof import('node:fs');

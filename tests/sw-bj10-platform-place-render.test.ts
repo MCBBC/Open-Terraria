@@ -75,6 +75,7 @@ function shell(w: World, o: { smart?: boolean; showing?: boolean; scx?: number; 
   const slots: Array<{ id: number; stack: number } | null> = [{ id: ITEM_DEFS.indexOf(held), stack: 99 }];
   for (const s of o.extraSlots ?? []) slots.push(s);
   g.player = {
+    placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
     // 站位行 33：目标行 30 ∈ inTileRange 盒（y=tileReach 3 外扩 → [30,37]）且玩家盒
     // (528..556) 与目标格 (480..496) 不相交——实体门夹具需重叠时显式改写 player
     cx: 20 * TILE + 8, cy: 33 * TILE + 8, x: 20 * TILE + 2, y: 33 * TILE, w: 12, h: 28,

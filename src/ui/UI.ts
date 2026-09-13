@@ -2042,7 +2042,7 @@ export class UI {
    *  掷骰 → 产出入包（装不下落地 = GetOrDropItem :6813-6826 noGrabDelay 语义）→
    *  stack-- → SoundEngine.PlaySound(7)（Sfx 'pickup' = Grab.wav）。★SW-FX21
    *  （2026-09-10）BossBag 族经 openBagItem 首支路由 openBossBag（ItemSlot.cs:1786-1789
-   *  原版唯一调用面）——与 Game 持用左键链共存,右键不再回落 false。
+   *  原版唯一调用面）——★§五裁决(09-13)Game 持用左键链已摘,右键为唯一入口。
    *  锁盒钥匙门（:1794-1829 1457 行号）：金锁盒 3085 消耗金钥匙 327（Player.ConsumeItem
    *  :8846 槽序 0→57，含虚空袋兜底）；黑曜石锁盒 4879 只验暗影钥匙 329 不消耗
    *  （HasItemInInventoryOrOpenVoidBag :56575——持虚空透镜 4131 才查 bank4）。
@@ -2075,7 +2075,7 @@ export class UI {
       remixWorld: !!game.world.seedFlags?.remix,
       getGoodWorld: !!game.world.seedFlags?.getGoodWorld,
       skyblockLowTiles: !!game.world.seedFlags?.skyblock,   // WorldGen.Skyblock.lowTiles（空岛匣 2197 支）
-      // ★SW-FX21 BossBag 上下文（Player.OpenBossBag :7206-7901 与 Game 持用链 :15398-15404 同源）
+      // ★SW-FX21 BossBag 上下文（Player.OpenBossBag :7206-7901 唯一入口;§五裁决 09-13 持用链已摘）
       masterMode: mainMasterMode(game.world),             // Main.masterMode（:7208）
       crimson: !!game.world.crimson,                      // WorldGen.crimson（:7255/:7260 矿种臂）
       extraAccessory: !!game.player.inv.extraAccessory,   // 饰品第六格（noExtra 条件臂）

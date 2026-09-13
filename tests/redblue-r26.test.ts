@@ -231,7 +231,9 @@ describe('GAP-06:Item_1 三变体随机轮换(LegacySoundPlayer.cs:556-563 Next(
       });
       sfx.playWavFile('Item_1');
       await settle();
-      expect(urls.some((u) => u.includes(`sounds/${expected}.wav`)),
+      // ★2026-09-13 重锚:Opus 化后运行时 fetch .opus 主/.mp3 回退（Sfx.ts:1091）,
+      //  URL 不再以 .wav 结尾——轮换语义(roll→Item_1/18/19)不变,扩展名脱敏
+      expect(urls.some((u) => RegExp(`sounds/${expected}\\.(opus|mp3)$`).test(u)),
         `roll ${rollPct} → ${expected}`).toBe(true);
       spy.mockRestore();
     }
@@ -247,8 +249,8 @@ describe('GAP-06:Item_1 三变体随机轮换(LegacySoundPlayer.cs:556-563 Next(
     for (let i = 0; i < 60; i++) sfx.playWavFile('Item_1');
     await settle();
     (globalThis as { fetch?: unknown }).fetch = origFetch;
-    const variants = [...urls].filter((u) => /sounds\/Item_(1|18|19)\.wav$/.test(u));
+    const variants = [...urls].filter((u) => /sounds\/Item_(1|18|19)\.(opus|mp3)$/.test(u));
     expect(variants.length).toBeGreaterThanOrEqual(2);   // 60 抽 3 类,缺 2 类概率 <1e-11
-    for (const v of variants) expect(v).toMatch(/Item_(1|18|19)\.wav$/);
+    for (const v of variants) expect(v).toMatch(/Item_(1|18|19)\.(opus|mp3)$/);
   });
 });

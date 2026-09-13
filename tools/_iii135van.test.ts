@@ -1,5 +1,5 @@
 // IIII104b：FindBoulderTrapSpots 的 cs 直转独立复刻（不经生产类），逐列逐门 trace。
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { it } from 'vitest';
 import { TILE_DEFS } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
@@ -22,7 +22,9 @@ function hydrate(): TileStore {
   return st;
 }
 
-it('III135 vanilla-replica boulder scan trace', () => {
+// 工件自跳守卫(2026-09-13):吃 worldgen rig 会话工件(SW_I135_BASE,缺省 /tmp/iii133-out/js);
+//  缺失时干净跳过而非 ENOENT 挂红——工件重产/设 env 后照跑。
+it.skipIf(!existsSync(`${BASE}/base_hdr.json`))('III135 vanilla-replica boulder scan trace', () => {
   const st = hydrate();
   // ---- 表直转（本文件独立于 MicroBiomesPass.ts，全部从 cs 文本重写）----
   // Main.tileFrameImportant —— 用 framed 字段；Main.tileSolid —— solid；

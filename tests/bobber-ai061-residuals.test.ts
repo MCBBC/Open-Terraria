@@ -193,3 +193,42 @@ describe('咬钩反馈（原版无音无尘）', () => {
     expect(h.particles.length).toBe(0);             // 旧 6 粒色方块删
   });
 });
+
+describe('★§五裁决(2026-09-13):浮标无空气超时', () => {
+  it('结构锁:Bobber.ts 无落地未入水自毁面（原版 AI_061 timeLeft=60 逐拍重置,Projectile.cs:54602）', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join, dirname } = await import('node:path');
+    const src = readFileSync(join(dirname(__dirname), 'src', 'entities', 'Bobber.ts'), 'utf8');
+    expect(src).not.toContain('airT');          // 自创空气计数器字段已退役
+    expect(src).not.toContain('落地未入水超时');
+  });
+
+  // ★RB15a（2026-09-13）干态寿命行为锁：摘掉 600t 自毁后,干地浮标的唯一清理面 =
+  //  flag2 五支（Projectile.cs:54604-54622:非竿/CCed/noItems/shoot 不符/pulley →
+  //  Kill）。本锁钉两头:①干地 700+ 拍永续（>旧 600t 自毁窗,变异证红基线=重挂
+  //  airT 会红）;②切走鱼竿 → 首拍 Kill（flag2 语义在仓 Bobber.fixedUpdate 头门）。
+  it('干地永续 700 拍（旧 600t 自毁窗已退役）;切走鱼竿 → flag2 首拍 Kill（:54604-54622）', () => {
+    const store = new TileStore(200, 120);
+    for (let dx = 40; dx < 70; dx++) store.setTile(dx, 46, 1);   // 干地地板（tile 1=dirt）
+    const player = new Player(50 * TILE, 36 * TILE, new Inventory());
+    player.inv.selected = 5;
+    player.inv.slots[5] = { id: ROD_2289, stack: 1 };
+    const hooks = {
+      world: { store, groundLevel: 100, clock: { timeOfDay: 0.25, isDay: true, moonPhase: 2, bloodMoon: false, eclipse: false }, weather: { raining: false, cloudAlpha: 0 }, flags: {}, scene: null },
+      player,
+      enemies: () => [], critters: () => [], npcs: () => [],
+      spawnDrop: () => null, damagePlayer: (): number => 0, addDamageNumber: () => {},
+      cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
+      spawnParticles: () => {}, notifyInventoryChanged: () => {}, showPickupLabel: () => {},
+      playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {}, playSfxWav: () => {},
+      spawnDust: () => null,
+    } as unknown as GameHooks;
+    const b = new Bobber(51 * TILE, 40 * TILE, 2, 0, 5, 0, 5, () => player);
+    for (let k = 0; k < 700; k++) b.fixedUpdate(1 / 60, hooks);
+    expect(b.dead, '干地 700 拍（>旧 600t 窗）必须存活=timeLeft=60 逐拍重置同相').toBe(false);
+    // flag2:手持非钓竿（player.selectedItem 非竿 = fishingPole==0 支,Projectile.cs:54604）
+    player.inv.selected = 7;                       // 空槽
+    b.fixedUpdate(1 / 60, hooks);
+    expect(b.dead, '切走鱼竿 → flag2 Kill（仓库唯一清理面,Bobber.fixedUpdate 头门）').toBe(true);
+  });
+});

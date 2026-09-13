@@ -50,8 +50,11 @@ describe('钱币单轨(vi_71-74)', () => {
     for (let i = 0; i < 4; i++) inv.slots[COIN_START + i] = { id: copper, stack: 100 };
     const left = inv.add(copper, 1);
     expect(left).toBe(0);
-    expect(inv.slots[0]?.id).toBe(copper); // 触发币落背包首空格(fillRange 升序)
-    expect(inv.slots[0]?.stack).toBe(1);
+    // ★2026-09-13 重锚:溢出币袋支=BN5 改 fillBagArms 与原版 GetItem 同构——非收藏
+    //  分支降序扫空格(1457 Player.cs GetItem `for (num4 = num - 1; num4 >= 0; num4--)`,
+    //  收藏才升序);空背包首空格=49(降序首个),旧"升序落 0"系 BN5 前语义。
+    expect(inv.slots[49]?.id).toBe(copper);
+    expect(inv.slots[49]?.stack).toBe(1);
     expect(inv.slots[COIN_START]?.id).toBe(silver);
     expect(inv.slots[COIN_START]?.stack).toBe(4); // 4×100 铜全部升位合并
     expect(inv.slots[COIN_START + 1]).toBeNull(); // 51-53 清空(升位合并源)

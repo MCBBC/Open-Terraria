@@ -110,6 +110,7 @@ function placeShell(w: World, drops: Array<[string, number]>, heldVid: number) {
   // （tryPlace 头 lockedContinuity 读）缺 stub——锁存续期 null=无锁直通
   g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.player = {
+    placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1,
     // ★SW-BJ12：pickSpeedMult（块换镐段冷却）读面补齐

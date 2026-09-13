@@ -291,7 +291,6 @@ export class RollingBoulder extends Entity {
       //  ★反伪影自证：实拍逐点直读 drawImage 源矩形对拍本式（scripts/_bj64b.mjs）。
       const cw = img.width / 5, ch = img.height / 20;
       const cell = rainbowBoulderCell(this.frame, img.width, img.height);
-      const col = Math.floor(this.frame / 20), row = this.frame % 20;
       // ① 250 微光拖尾（:33351-33367,Projectile_250 14×32,origin=(w/2,0),沿段拉伸）：
       //    num350=0.5/num351=1 → scaleX=2.2×0.5=1.1、scaleY=段长/32、rot=段向−π/2、
       //    alpha=(127/255)×(1−i/10)²（white4.A=127 × (1−num355)²,i=旧位序 0..9）

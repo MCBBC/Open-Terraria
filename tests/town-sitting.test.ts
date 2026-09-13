@@ -634,7 +634,7 @@ describe('坐姿落存档语义（WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883
     }];
     expect(Object.keys(snap[0]).sort()).toEqual(['givenName', 'home', 'key', 'x', 'y']);
     // 存 → 读往返（共享 save 管线；sitting 不在序列化面 = 蒸发）
-    const json = saveGame(world, { hp: 100, x: 0, y: 0, luckState: { usedGalaxyPearl: false }, inv: { slots: [], selected: 0 } } as never, 0, snap);
+    const json = saveGame(world, { hp: 100, x: 0, y: 0, luckState: { usedGalaxyPearl: false }, inv: { slots: [], selected: 0 }, builderAccStatus: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] } as never, 0, snap);   // 桩携 builderAccStatus(★SW-FX19 起 saveGame 展开本字段,Player.ts:715)
     const { world: w2 } = loadSave(json);
     expect(w2.pendingTownNpcs).toHaveLength(1);
     const rec = w2.pendingTownNpcs![0];
@@ -658,7 +658,7 @@ describe('坐姿落存档语义（WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883
     // 存档前拆椅
     world.store.setTileSilent(SPOT_X, FLOOR - 2, 0);
     world.store.setTileSilent(SPOT_X, FLOOR - 1, 0);
-    const json = saveGame(world, { hp: 100, x: 0, y: 0, luckState: { usedGalaxyPearl: false }, inv: { slots: [], selected: 0 } } as never, 0, [{
+    const json = saveGame(world, { hp: 100, x: 0, y: 0, luckState: { usedGalaxyPearl: false }, inv: { slots: [], selected: 0 }, builderAccStatus: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] } as never, 0, [{   // 桩携 builderAccStatus(★SW-FX19 起 saveGame 展开本字段,Player.ts:715)
       key: npc.npcKey, x: Math.round(npc.x), y: Math.round(npc.y),
       home: [npc.home.x, npc.home.y] as [number, number], givenName: npc.givenName,
     }]);
