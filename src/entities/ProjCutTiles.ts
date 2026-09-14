@@ -12,11 +12,16 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 
 /** 弹盒(+1 外沿)逐格上报 game.cutTile（pot→smashPot 路由在 Game.cutTile，
- *  非 tileCut 格在其内部零操作，调用侧无需自筛） */
-export function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h: number): void {
+ *  非 tileCut 格在其内部零操作，调用侧无需自筛）。
+ *  ★SW-BJ67（2026-09-14）vid 穿线（最小刀）：Projectile.CutTiles 逐型豁免面
+ *  （P.cs:15391-15393 `type==1047 && tile.type==231 → flag=false` 滚过幼虫不召
+ *  蜂王;1458 :15392 同）需要弹型上下文——vid 由中央收口/调用侧传入,缺省
+ *  undefined = 旧无型语义（全部既有调用方零变化）。 */
+export function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h: number,
+  vid?: number): void {
   const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE) + 1;
   const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE) + 1;
   for (let ix = x0; ix <= x1; ix++) {
-    for (let iy = y0; iy <= y1; iy++) game.cutTile?.(ix, iy);
+    for (let iy = y0; iy <= y1; iy++) game.cutTile?.(ix, iy, vid);
   }
 }

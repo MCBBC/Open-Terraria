@@ -7300,7 +7300,9 @@ export class UI {
     // ★SW-FX41:再含 modern 窗开态(窗开 → 切换钮/就近箱钮换锚 + 经典合成面隐藏 +
     //   ChestOrShopUIVisible 折叠,Main.cs:42418-42456/:3037)
     const bg = builderAccGateSet((vid) => playerVidCarried(inv.slots, inv.armor, inv.accSlotMax, vid));
-    const bgSig = `${bg.rulerGrid ? 1 : 0}${bg.autoActuator ? 1 : 0}${bg.autoPaint ? 1 : 0}${bg.infoAccMechShowWires ? 1 : 0}`;
+    // ★反馈轮7:unlockedBiomeTorches 入签(:48166 start.Y+=24*torchGodIcons 列体位移
+    //   + :48370 炬图标显隐)——旗翻(炬神事件结算)不入签则图标列滞留旧位与炬图标重叠
+    const bgSig = `${bg.rulerGrid ? 1 : 0}${bg.autoActuator ? 1 : 0}${bg.autoPaint ? 1 : 0}${bg.infoAccMechShowWires ? 1 : 0}${this.game.world.flags.unlockedBiomeTorches ? 1 : 0}`;
     const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}|${this.vinvModernCraftOpen ? 1 : 0}`;
     if (sig === this.vinvLayoutSig) return;
     this.vinvLayoutSig = sig;
@@ -9051,17 +9053,21 @@ export class UI {
     }
     // 按钮列(DrawButtons :182-188:Y=invBottom+40+ID·26,ID 跳号位保留;
     // ID0 拿走全部/1 存放全部/2 快速堆叠/3 补货(inter[82])/4 排列物品(inter[122]);
-    // ID5 重命名/6 取消 = 真箱+editChest 域=债;文本 0.75 缩放 hover 1)
+    // ★BJ69(2026-09-14):ID5 重命名落地(:193 仅真箱 chest>-1 可见——储蓄族 x<0 隐藏;
+    //   点击=RenameChest :823 OpenVirtualKeyboard(2) 的 DOM 对话承载,见 showChestRenameDialog);
+    //   ID6 取消(RenameChestCancel :859)原版仅 editChest 态可见(:193 !editChest 隐藏)——
+    //   本仓编辑态=模态对话面板域,取消钮在面板内,列位 ID6 恒不可见=不落(结构注)
+    //   文本 0.75 缩放 hover 1)
     // ★SW-RB13b:①悬停色=OurFavoriteColor(Main.cs:886=(255,231,69);DrawButton :227
     //   flag→color=OurFavoriteColor),曾 #c8f0c8 自创绿;②锚=竖直居中(origin=vector/2
     //   :234 → 文本中线在 Y,命中盒 Y-12..Y+12 :223;DOM 用 translateY(-50%)+5.5px
     //   上下 padding 复刻 24px 命中带,x 左对齐 506(:222 X-num2=506)不偏)
-    const mkChestBtn = (id: number, labelKey: string, act: () => void): void => {
+    const mkChestBtn = (id: number, labelKey: string, act: () => void, visible?: () => boolean, label?: string): void => {
       const b = el('button', 'vinv-txt') as HTMLButtonElement;
       b.style.cssText = 'left:506px; font-size:13px; pointer-events:auto; cursor:pointer;'
         + 'background:none; border:none; padding:5.5px 0; color:#fff; text-shadow:1px 1px 0 #000;'
         + 'transform:translateY(-50%);';
-      b.textContent = Lang.text(labelKey);
+      b.textContent = label ?? Lang.text(labelKey);
       b.addEventListener('mouseenter', () => { b.style.color = 'rgb(255,231,69)'; });
       b.addEventListener('mouseleave', () => { b.style.color = '#fff'; });
       b.addEventListener('mousedown', (e) => { e.stopPropagation(); act(); });
@@ -9069,6 +9075,7 @@ export class UI {
       this.vinvLayoutItems.push({ el: b, pos: () => {
         // ★SW-RB14b:补第三门 !NewCraftingUI.Visible(ChestUI.cs:81 三门 verbatim,1458 同行)
         if (!this.openChest || this.vinvPipsUseGrid || this.vinvModernCraftOpen) return null;   // ChestUI.cs:81 网格态吞钮(SW-FX30/SW-RB14b)
+        if (visible && !visible()) return null;
         return chestButtonXY(id);   // ★SW-FX28 刀①:单源(ChestUI.cs:186/:198 Y+=ID*26)
       } });
       this.vinvChestBtnEls.push(b);
@@ -9080,11 +9087,16 @@ export class UI {
     mkChestBtn(2, 'Mods.SandboxWorld.Chest.QuickStack', () => this.chestQuickStack());
     mkChestBtn(3, 'Mods.SandboxWorld.Chest.Restock', () => this.chestRestock());      // 补货
     mkChestBtn(4, 'Mods.SandboxWorld.Chest.Arrange', () => this.chestSortChest());   // 排列物品
+    // ID5 重命名(DrawButton :193 chest<-1 隐藏=仅世界箱;标签=inter[61] 官译「重命名」,
+    // editChest 态标签切换 inter[47] 由对话面板承载=原版桌面态 fancyUI 覆盖同相)
+    mkChestBtn(5, 'LegacyInterface.61', () => this.showChestRenameDialog(),
+      () => (this.openChest?.x ?? -1) >= 0, Lang.inter(61));
   }
 
   /** 宝箱名回写(DrawName Main.cs :102-180 1:1):bank x<0=官译物品名;世界箱=
    *  命名箱名或 LegacyChestType[frameX/36] 箱型名(:122;★SW-FX11 2026-09-10:
-   *  ChestData.name 已随档携带——原版 .wld 导入箱名自此回显;重命名 UI 仍=债) */
+   *  ChestData.name 已随档携带——原版 .wld 导入箱名自此回显。★BJ69 2026-09-14:
+   *  重命名 UI 已落地=showChestRenameDialog,债清) */
   private vinvUpdateChestName(): void {
     const c = this.openChest;
     const el = this.vinvChestNameEl;
@@ -9092,9 +9104,7 @@ export class UI {
     if (c.x >= 0) {
       // 原版 DrawName 命名支（Main.cs:102-180）：chest.name 非空 → 箱名优先于型名
       if (c.name) { el.textContent = c.name; return; }
-      const st = this.game.world.store;
-      const fx = st.frameX?.[st.idx(c.x, c.y)] ?? 0;
-      el.textContent = Lang.text(`LegacyChestType.${Math.floor(fx / 36)}`);
+      el.textContent = this.vinvChestTypeName(c) ?? Lang.text('Mods.SandboxWorld.UI.Chest');
       return;
     }
     const bankNames: Record<number, string> = {
@@ -9104,6 +9114,92 @@ export class UI {
       [-5]: Lang.itemName(4076) ?? '虚空保险库',
     };
     el.textContent = bankNames[c.x] ?? ((c as { name?: string }).name || Lang.text('Mods.SandboxWorld.UI.Chest'));
+  }
+
+  /** 箱型名（DrawName :122 LegacyChestType[frameX/36] 单源；★BJ69：重命名对话的
+   *  defaultChestName 同源——OpenVirtualKeyboard(2) IngameFancyUI.cs:96-113 型名域） */
+  private vinvChestTypeName(c: ChestData): string | null {
+    if (c.x < 0 || c.x === undefined) return null;
+    const st = this.game.world.store;
+    const fx = st.frameX?.[st.idx(c.x, c.y)] ?? 0;
+    return Lang.text(`LegacyChestType.${Math.floor(fx / 36)}`);
+  }
+
+  // ---- 箱改名对话（★BJ69 2026-09-14；ChestUI.RenameChest :823-864 + IngameFancyUI.
+  //      OpenVirtualKeyboard(2) :86-153 1:1,DOM 对话承载=路牌双态对话同款近似）----
+  //  原版流：ID5 点击 → RenameChest :823 !editChest → OpenVirtualKeyboard(2)：
+  //  Sound 12(:89) + npcChatText=chest.name（空则 defaultChestName=型名 :96-113）+
+  //  editChest=true(:115) + UIVirtualKeyboard(maxLength=20 :159/:429)。确认 →
+  //  RenameChestSubmit(:836)；取消 → RenameChestCancel(:859)。编辑态 DrawName 预览
+  //  （:106/:160）由面板输入框本相承载（桌面 fancyUI 覆盖世界=同相不可见）。
+  private vinvChestRenameEl: HTMLElement | null = null;
+
+  private showChestRenameDialog(): void {
+    const c = this.openChest;
+    if (!c || c.x < 0) return;                       // RenameChest :825 真箱域
+    if (this.vinvChestRenameEl) this.vinvChestRenameEl.remove();
+    UISfx.click();                                   // OpenVirtualKeyboard :89 Sound 12
+    const defName = this.vinvChestTypeName(c);
+    const panel = el('div', 'sw-panel');
+    panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:360px;';
+    panel.appendChild(el('div', 'sw-title', Lang.text('UI.EnterNewName')));   // :92 EnterNewName
+    const input = el('input') as HTMLInputElement;
+    input.value = c.name || defName || '';           // :93 npcChatText=chest.name;空→型名(:108-112)
+    input.maxLength = 20;                            // UIVirtualKeyboard :159/:429 maxLength=20
+    input.style.cssText = 'width:100%; box-sizing:border-box; font-size:13px; color:#d8d4e4;'
+      + 'background:#14121c; border:1px solid #3a3350; border-radius:4px; padding:6px; margin-top:6px;';
+    panel.appendChild(input);
+    const row = el('div');
+    row.style.cssText = 'display:flex; gap:8px; margin-top:10px; justify-content:flex-end;';
+    const cancelBtn = el('button', 'sw-btn', Lang.inter(63));   // inter[63] 取消（:216/:863）
+    cancelBtn.addEventListener('click', () => {                  // RenameChestCancel :859-864
+      UISfx.click();                                             // Sound 12（:860）
+      this.closeChestRenameDialog();
+    });
+    const saveBtn = el('button', 'sw-btn', Lang.inter(47));     // inter[47] 保存（editChest 态 ID5 标签 :216）
+    saveBtn.addEventListener('click', () => {
+      this.chestRenameSubmit(input.value);                     // RenameChestSubmit :836-853（Sound 12 在内）
+      this.closeChestRenameDialog();
+    });
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();                          // 键位面隔离（Esc 链/热栏数字不串）
+      if (e.key === 'Enter') {                      // UIVirtualKeyboard Enter=submit
+        this.chestRenameSubmit(input.value);
+        this.closeChestRenameDialog();
+      } else if (e.key === 'Escape') {              // UIVirtualKeyboard Esc=cancel
+        UISfx.click();
+        this.closeChestRenameDialog();
+      }
+    });
+    row.appendChild(cancelBtn);
+    row.appendChild(saveBtn);
+    panel.appendChild(row);
+    this.root.appendChild(panel);
+    this.vinvChestRenameEl = panel;
+    input.focus();
+    input.select();
+  }
+
+  private closeChestRenameDialog(): void {
+    this.vinvChestRenameEl?.remove();
+    this.vinvChestRenameEl = null;
+  }
+
+  /** 箱改名提交（ChestUI.RenameChestSubmit Player.cs 域 :836-853 1:1）：
+   *  chest<0（储蓄族）整支拒（:840-843）;提交名==defaultChestName(型名) → 存空=
+   *  重置默认（:846-848）;chest.name 变更才落（:849-850）+ editedChestName=true
+   *  （:851-853 netMode==1）→ 本仓等价=chestRenameLatch（下条 msg33 携改名尾段）。
+   *  单人（无 net）=仅本地写（ChestData.name 随档持久,FX11 环）。 */
+  private chestRenameSubmit(input: string): void {
+    const c = this.openChest;
+    if (!c || c.x < 0) return;
+    UISfx.click();                                   // :837 SoundEngine.PlaySound(12)
+    const name = input === (this.vinvChestTypeName(c) ?? '') ? '' : input;
+    if ((c.name ?? '') !== name) {
+      c.name = name || undefined;                    // :850 空串=型名回显域（netApplyChestName 同编码）
+      this.game.net?.chestRenameLatch(name);         // :851-853 editedChestName=true 等价位
+    }
+    this.refreshAll();                               // vinvUpdateChestName 回写（DrawName 下帧同相）
   }
 
   // ---- 商店货架(★SW-FX32 刀①店侧分期二;Main.cs:42500-42532 DrawInventory 商店段) ----
@@ -9725,6 +9821,8 @@ export class UI {
     this.vinvGridWheelBound = false;
     this.vinvChestNameEl = null;
     this.vinvChestBtnEls = [];
+    this.vinvChestRenameEl?.remove();   // ★BJ69：改名对话随 vinv 拆除（防脱离面板悬挂）
+    this.vinvChestRenameEl = null;
     this.vinvReforgeOpen = false;
     this.vinvReforgeSlotEl = null;
     this.vinvReforgeTextEl = null;

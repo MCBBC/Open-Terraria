@@ -87,6 +87,7 @@
 //     （fakecontainers 3666-3706 `(type>N).ToInt()` 布尔计数式=登记债,手补仍权威）/
 //     0 冲突/0 缺失;守卫 tests/sw-fx53-extractor-blindspots.test.ts。
 import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 // SW-V1 2026-09-04: 增 AMMO_ID——DefaultTo* 参数化展开需解 AmmoID.X 枚举实参
 // （RangedWeapon 第二参/Solution 的 AmmoID.Solution;权威表与 combat 提取器同源）。
 import { EXTRA_USETURN, AMMO_ID } from './extract-itemcombat.mjs';
@@ -1389,259 +1390,266 @@ function defaultToBase(seg, id) {
   cancelFalseBooleans(f, segClean);   // SW-V1: 种子布尔被段内无条件 false 尾随→取消（见函数注）
   return f;
 }
-for (const [id, seg] of SEGS) {
-  const f = defaultToBase(seg, id);   // SW-V1 2026-09-04: 种子随 id 解算式实参（种子布尔取消在 defaultToBase 尾）
-  for (const [name, re, type] of FIELDS) {
-    const m = lastFieldMatch(seg, re);   // ★后写生效（首匹配→末匹配,见 lastFieldMatch 注）
-    if (!m) continue;
-    f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
-  }
-  if (Object.keys(f).length) FUNC[id] = f;
-}
-// ★F-STRUCT 全字段基态修正（在 FIELDS 之后、手补丁之前——手补丁/食物/useTurn 链不受影响）。
-// 合并语义（对 FUNC 的 diff 规则）：
-//   · 已有条目：struct 有值 → 覆写（伪值纠偏）;struct 判「基态缺省」（辅助无隐式+基路径
-//     无赋值）而 v1 有支内值 → 删除该键（autoReuse 缺省 false=键删除等价;数值缺省=无键）;
-//     【不新增】cur 缺的键——缺档面（fallthrough 组非末支/嵌套 case 专属段）仍由 items.ts
-//     运行时纠偏 / vanilla.json 回填链承载（防超预期 diff 与未审消费面漂移）;
-//   · 无条目：仅 placeStyle 最小新增（PS-STRUCT v2 口径延续=金标 24 行面零 diff）;
-//   · 清空条目：EXTRA_USETURN 命中则保 {useTurn:1}（useTurn 通道时序不变）,否则整条回收
-//     （v1 对空段从不产条目,回收=维持「仅记非默认值」形态）;
-//   · placeStyle 金标自检：泛化层 placeStyle 映射必须与旧 evalPlaceStyle 逐 id 全等,
-//     漂移即拒产（exit 1）——①placeStyle 维零 diff 的机器闸门。
-{
-  const PS_OLD = structuralPlaceStyles(itemSrc);
-  const STRUCT = structuralFields(itemSrc);
-  // SW-BK1 2026-09-06: if 区间段归因面（2263/2264 default 支区间块;仅收 createWall 体）
-  const RANGE = structuralIfRanges(itemSrc);
-  // SW-FX53 2026-09-13: 委托继承解析（此处调用——FIELDS/RESIDUE_CACHE/STRIP_CACHE
-  // 等 const 已初始化;解析全源 92 委托位,落表受 DELEGATE_LANDED 白名单约束）
-  resolveDelegates();
-  let psDrift = 0;
-  for (const [id, ps] of PS_OLD) {
-    if (STRUCT.get(id)?.placeStyle !== ps) { console.error(`F-STRUCT placeStyle 漂移 ${id}: ${STRUCT.get(id)?.placeStyle} != ${ps}`); psDrift++; }
-  }
-  for (const [id, f] of STRUCT) {
-    // SW-V1 2026-09-04: DefaultTo* 种子 placeStyle 不在 PS_OLD 面（helper 形参赋值
-    // 是本批新解析面）——helper 种子 id 豁免"PS_OLD 缺值"比对;PS_OLD 有值时仍由
-    // 上一循环全等把关（显式赋值覆写种子的 id 两法同值,不会走到豁免）。
-    if (f.placeStyle !== undefined && !HELPER_SEED.has(Number(id)) && PS_OLD.get(id) !== f.placeStyle) { console.error(`F-STRUCT placeStyle 新增漂移 ${id}: ${f.placeStyle} != ${PS_OLD.get(id)}`); psDrift++; }
-  }
-  if (psDrift) { console.error(`F-STRUCT: placeStyle 金标漂移 ${psDrift} 处 — 拒绝产出`); process.exit(1); }
-  // SW-BK1: 统一归并面 = STRUCT ∪ RANGE（显式 case 值 per-key 优先——RANGE 只补缺档,
-  // 同 wallitems 提取器 path A 先于 path B 的首值优先序）。
-  // SW-FX53 2026-09-13 两修：①RANGE 值形 = { fields, returns }（终结旗）;②returns
-  // 区间 = 该 id 执行流在区间内 return ⇒ 后续 switch 的同 id case 是死码 → 区间值
-  // 覆写 case 段值（2413 型:区间算式 17 真值,case 段伪值 23 不可达）;无 return 的
-  // 区间维持「case 优先」（区间只是前置缺档补齐）。
-  const SF = new Map();
-  for (const [id, sf0] of STRUCT) {
-    const rf = RANGE.get(id);
-    SF.set(id, rf ? (rf.returns ? { ...sf0, ...rf.fields } : { ...rf.fields, ...sf0 }) : sf0);
-  }
-  for (const [id, rf] of RANGE) if (!SF.has(id)) SF.set(id, rf.fields);
-  // SW-FX53: 委托继承并入（白名单面）——基底先跑、caller 后跑,同键 caller 覆写
-  // （2778 的 shoot=429 等）;非白名单 id 不并入（落表扩面另批放行,见 DELEGATE 注）。
-  for (const [id, dg] of DELEGATE) {
-    if (!DELEGATE_LANDED.has(id)) continue;
-    SF.set(id, { ...(SF.get(id) ?? {}), ...dg });
-  }
-  let fix = 0, del = 0, add = 0;
-  const fixed = [], deleted = [], added = [];
-  for (const [id, sf] of SF) {
-    const cur = FUNC[id];
-    if (cur) {
-      for (const k of Object.keys(cur)) {
-        if (sf[k] !== undefined) {
-          if (cur[k] !== sf[k]) { fixed.push(`${id}.${k} ${cur[k]}->${sf[k]}`); cur[k] = sf[k]; fix++; }
-        } else {
-          deleted.push(`${id}.${k}(${cur[k]})`); delete cur[k]; del++;
-        }
-      }
-      // SW-BK1: createWall 补键（仅此字段——其余字段维持「不新增 cur 缺的键」零漂移
-      // 纪律）。7 件组末支既有条目（1957/2014/2160/2213/2434/2791/3762）由共享算式
-      // 求值补上（Item.cs:21139 等七处,与 vanilla-wallitems.json 逐值对账）。
-      if (cur.createWall === undefined && sf.createWall !== undefined) {
-        cur.createWall = sf.createWall; fixed.push(`${id}.createWall +${sf.createWall}`); fix++;
-      }
-      // SW-FX53 2026-09-13: bait 补键（蠕虫笼 `int num = type - 1994` 派生局部 +
-      // `if (num == N)` 八档——Item.cs:21343-21388,1994-2000 bait 整缺、2001 由手补
-      // 表承载同值;2675 嵌套 case 显式档 30 同面补齐）。
-      if (cur.bait === undefined && sf.bait !== undefined) {
-        cur.bait = sf.bait; fixed.push(`${id}.bait +${sf.bait}`); fix++;
-      }
-      // SW-FX53: placeStyle 补键（组末支既有条目 3050/2630/3724/4694/3608 等——
-      // 共享算式解出而 v1 字面扫描从未有键;手补面 items.ts 回填门 `!d.placeStyle`
-      // 对 0 档同值,非 0 档运行时已由回填承载=同值冗余,零行为差）。
-      if (cur.placeStyle === undefined && sf.placeStyle !== undefined) {
-        cur.placeStyle = sf.placeStyle; fixed.push(`${id}.placeStyle +${sf.placeStyle}`); fix++;
-      }
-      // SW-FX53: 委托继承补键（DELEGATE_LANDED 15 件月主锯钻/挥砍——基底 case 字段
-      // 面入表,DELEGATE_EXPANSION 手补面转解析直出;含手补行缺载的 noUseGraphic 六键）。
-      if (DELEGATE_LANDED.has(Number(id))) {
-        for (const [dk, dv] of Object.entries(DELEGATE.get(Number(id)) ?? {})) {
-          if (cur[dk] === undefined) { cur[dk] = dv; fixed.push(`${id}.${dk} +${dv}(delegate)`); fix++; }
-        }
-      }
-      if (!Object.keys(cur).length) {
-        if (EXTRA_USETURN.get(Number(id)) === true) cur.useTurn = 1;
-        else delete FUNC[id];
-      }
-    } else if (DELEGATE_LANDED.has(Number(id)) && DELEGATE.has(Number(id))) {
-      // SW-FX53: 委托调用者无既有条目 → 整条按 基底∪caller 落表（当前源 15 件全有
-      // 既有条目,本臂为防御性完备）。
-      FUNC[id] = { ...(SF.get(Number(id)) ?? DELEGATE.get(Number(id))) };
-      added.push(`${id}:${JSON.stringify(FUNC[id])}`); add++;
-    } else if (HELPER_SEED.has(Number(id))) {
-      // SW-V1 2026-09-04: DefaultTo* 种子 id（fallthrough 组非末支等形态）——整条按
-      // 基态结构值落表,与组末支的 v1 条目同口径（不再是 placeStyle 单键最小新增）。
-      // 金标=vanillaItemFunc FUNC['5594']/['5595'] 与 EXTRACT_PATCH 重叠字段逐字段对拍。
-      FUNC[id] = { ...sf };
-      added.push(`${id}:${JSON.stringify(sf)}`); add++;
-    } else if (sf.createWall !== undefined) {
-      // SW-BK1 2026-09-06: createWall 缺档整条落表（共享 fallthrough 组非末支/嵌套
-      // case 专属段/区间件——与组末支 v1 条目同口径;useTurn 由 EXTRA_USETURN 后置
-      // 叠加补齐）。28 件整缺:1948-1956/2008-2013/2158-2159/2210-2212/2263-2264/
-      // 2432-2433/2789-2790/3760-3761。
-      FUNC[id] = { ...sf };
-      added.push(`${id}:${JSON.stringify(sf)}`); add++;
-    } else if (sf.placeStyle !== undefined) {
-      FUNC[id] = { placeStyle: sf.placeStyle }; added.push(`${id}:${sf.placeStyle}`); add++;
-    }
-  }
-  console.error(`F-STRUCT: 伪值覆写 ${fix} [${fixed.join(', ')}]`);
-  console.error(`F-STRUCT: 支内伪键删除 ${del} [${deleted.join(', ')}]`);
-  console.error(`F-STRUCT: 缺档补齐 ${add} 件 [${added.join(', ')}]`);
-  if (process.env.ITEMFUNC_DIFF) writeFileSync(process.env.ITEMFUNC_DIFF, JSON.stringify({ fixed, deleted, added }, null, 1));
-}
-// 钓竿区段补丁：2290-2296 族在 case 段外的 type 区间块赋值（最近 switch 归属扫不到），
-// 按源码实表补齐（Item.cs:23005-23040 前向扫描实证）。
-for (const [id, pow] of Object.entries({ 2291: 15, 2293: 20, 2292: 30, 2295: 35, 2296: 40, 2294: 50 })) {
-  FUNC[id] = { ...(FUNC[id] ?? {}), fishingPole: pow };
-}
-// 嵌套块首匹配错位补丁（collectCaseSegments 是文本段正则——嵌套 switch/`int num` 分支
-// 里的同字段多赋值取首匹配；以下逐 case 按源码校对，2026-08-17 与提交态对账固化）：
-//  · 2674-2676 诱饵三连（Item.cs:25851-25870 嵌套 switch：2675=30 / 2676=50 / default 2674=15，
-//    首匹配把 2676 吃成 2675 的 30）
-//  · 2001 蠕虫笼族（:21313-21350 `int num = type - 1994` 逐分支：num=7→25，
-//    首匹配吃到 num=0 的 5）
-//  · 2422 熔线钓钩（SetDefaults2 `if (type >= 2421 && type <= 2422)` 区间块，case 标签外
-//    ——同 2291 族漏提形态；:23048-23066 `else` 分支 fishingPole 45（1405 同位 :25413 同读
-//    45）。此前提交态手记 25 与两版反编译均不符，2026-08-17 按 1456 最终态校正；
-//    melee/autoReuse 为旧手记误加，源块未设，随校正摘除）
-for (const [id, patch] of Object.entries({
-  2674: { bait: 15, consumable: 1 },
-  2676: { bait: 50 },
-  2001: { bait: 25 },
-  2422: { fishingPole: 45 },
-})) {
-  FUNC[id] = { ...(FUNC[id] ?? {}), ...patch };
-}
-// SetDefaults 委托展开补丁（2026-08-25 r33 蓝队）：`SetDefaults3(N)`/`SetDefaults1(N)` 形态
-// 的 case 段本体只有 type/glowMask/shoot 覆写，工具力/伤害面全在【被委托基底】的 case 段——
-// 文本段正则解不开跨 case 继承，此前六件月主锯钻只提到 {shoot:N}（itemFuncTool 判空 →
-// 不进工具分支 → combatWeapon 落 'shot' 兜底把持械弹当直飞箭弹）、九件月主挥砍件整条缺失
-// （combat+func 双缺 → 左键纯摆动零伤零挖；red-team-r33 §三 P0-①②）。
-// ★SW-FX53 2026-09-13：本表转【金标对拍面】——F-STRUCT 块的 resolveDelegates() 已解析
-// 委托（基底 case 全字段 ∪ caller 覆写,DELEGATE_LANDED 白名单 15 件）,解析值与本表逐键
-// 全等,另补本表漏载的 noUseGraphic 六键（基底 case 2773/2774 体首段 noUseGraphic=true,
-// Item.cs:26483/:26502 应被继承——重产时解析面为准）。本表 spread 仍执行（同值幂等）,
-// 作解析面回退时的二道闸;守卫测试 tests/sw-fx53-extractor-blindspots.test.ts 双面对拍。
-// C# 语义 = 先跑完基底 case 全部赋值再执行本 case 覆写（type/shoot/glowMask），终值 =
-// 基底终态 + 本段覆写。逐件按源码固化（值=基底 case 直赋实值，非推断）：
-//  · 月主锯钻（1456 Item.cs :26571/:26577/:26598/:26604 + :31037/:31043；1457/1458 同位
-//    :26572/:26578/:26599/:26605 + :31061/:31067，两版 diff=0 已对账）：
-//    2778←2773+shoot429 / 2783←2773+431 / 3463←2773+610（axe27/dmg80/kb4）
-//    2779←2774+shoot430 / 2784←2774+432 / 3464←2774+609（pick225/dmg50/kb0.5）
-//  · 月主挥砍斧/锤/镐（:26566/:26583/:26588 + :31032/:31049/:31054）：
-//    2777·2782·3462←2772（axe27/dmg100/kb6/autoReuse）/ 2780·2785·3465←2775
-//    （hammer100/dmg110/kb7/useTurn）/ 2781·2786·3466←2776（pick225/dmg80/kb5.5/useTurn）
-//  · 2209 超级魔药 healMana=400 手补【已退役】（2026-09-03 十五批备B 收尾）：提取器
-//    源面切 1458 后 case 2209 段自然产出 healMana=400（Terarria1458 Item.cs:22349）,
-//    手补为纯 no-op——历史"300"系 1456 值（Terarria1456 Item.cs:22323 `healMana =
-//    300;`）,当年"case 1933 段 healLife/healMana 双赋值首匹配"归因系误诊（实为
-//    1456→1458 版值变更）。退役已验：去补重产与在库 json 逐字节一致。
-const DELEGATE_EXPANSION = {
-  2778: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 429 },
-  2783: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 431 },
-  3463: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 610 },
-  2779: { melee: 1, noMelee: 1, channel: 1, damage: 50, pick: 225, useStyle: 5, knockBack: 0.5, shoot: 430 },
-  2784: { melee: 1, noMelee: 1, channel: 1, damage: 50, pick: 225, useStyle: 5, knockBack: 0.5, shoot: 432 },
-  3464: { melee: 1, noMelee: 1, channel: 1, damage: 50, pick: 225, useStyle: 5, knockBack: 0.5, shoot: 609 },
-  2777: { melee: 1, autoReuse: 1, damage: 100, axe: 27, useStyle: 1, knockBack: 6 },
-  2782: { melee: 1, autoReuse: 1, damage: 100, axe: 27, useStyle: 1, knockBack: 6 },
-  3462: { melee: 1, autoReuse: 1, damage: 100, axe: 27, useStyle: 1, knockBack: 6 },
-  2780: { melee: 1, autoReuse: 1, damage: 110, hammer: 100, useStyle: 1, knockBack: 7, useTurn: 1 },
-  2785: { melee: 1, autoReuse: 1, damage: 110, hammer: 100, useStyle: 1, knockBack: 7, useTurn: 1 },
-  3465: { melee: 1, autoReuse: 1, damage: 110, hammer: 100, useStyle: 1, knockBack: 7, useTurn: 1 },
-  2781: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
-  2786: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
-  3466: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
-  // 2209 已退役（自然产出 healMana=400,见上方退役注）——留空位防序号误读
-};
-for (const [id, expansion] of Object.entries(DELEGATE_EXPANSION)) {
-  // 委托语义：基底字段打底、本 case 显式字段覆盖——现有条目（如六锯钻的 {shoot:N}）
-  // 即"显式覆写"，展开值与之同键同值，直接整体赋终态。
-  FUNC[id] = { ...(FUNC[id] ?? {}), ...expansion };
-}
-
-// ---- SetFoodDefaults（Item.cs:47653）：食物族走 SetDefaults 的 IsFood 分支直转此方法，
-// SetDefaults1-5 扫不到——85 个 case 全靠此 switch 补。逐 case 解析
-// DefaultToFood(w,h,buff,dur[,useGulpSound]) → buffType/buffTime/useStyle(2 咀嚼 | 9 仰饮)
-// /consumable（DefaultToFood :48155 实体）；DefaultToHealingPotion（case 1912）→ 治疗。
-// case 内显式赋值可覆盖（967/969 强制 useStyle=9；353 清酒 Ale holdStyle/ammo/notAmmo）。
-{
-  const foodSegs = new Map();
-  const foodBody = methodBodyOf(itemSrc, 'private void SetFoodDefaults(');
-  if (foodBody) collectCaseSegments(foodBody, foodSegs);
-  const foodFunc = {};
-  for (const [id, seg] of foodSegs) {
-    const f = {};
-    const dm = seg.match(/DefaultToFood\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)([^)]*)\)/);
-    if (dm) {
-      f.buffType = +dm[3];
-      f.buffTime = +dm[4];
-      // DefaultToFood：useGulpSound=true → useStyle 9（Item2/Item3 音效差异不在此表）
-      f.useStyle = /useGulpSound\s*:\s*true/.test(dm[5]) ? 9 : 2;
-      f.consumable = 1;
-    }
-    const dh = seg.match(/DefaultToHealingPotion\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
-    if (dh) {
-      f.healLife = +dh[3];
-      f.useStyle = 9;
-      f.consumable = 1;
-      f.potion = 1;
-    }
-    if (!Object.keys(f).length) continue;
-    // case 段内显式赋值（仅 useStyle 允许覆盖解析值；其余字段并集）
-    // ★后写生效同主线（lastFieldMatch 注）——SetFoodDefaults case 段同字段双赋值
+// 库模式守卫（★RB15d-FX53 2026-09-14）：提取管线包 main——直跑（node tools/extract-itemfunc.mjs /
+// fx53 spawnSync dry-run,ITEMFUNC_OUT 重定向）才执行;被 import 时零写盘零审计（模块级 Item.cs
+// 读入+解析保留=itemcombat.mjs 同款契约;此前顶层直跑,import 即覆写 vanilla-itemfunc.json）。
+function main() {
+  for (const [id, seg] of SEGS) {
+    const f = defaultToBase(seg, id);   // SW-V1 2026-09-04: 种子随 id 解算式实参（种子布尔取消在 defaultToBase 尾）
     for (const [name, re, type] of FIELDS) {
-      if (f[name] !== undefined && name !== 'useStyle') continue;
-      const m = lastFieldMatch(seg, re);
+      const m = lastFieldMatch(seg, re);   // ★后写生效（首匹配→末匹配,见 lastFieldMatch 注）
       if (!m) continue;
       f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
     }
-    foodFunc[id] = f;
+    if (Object.keys(f).length) FUNC[id] = f;
   }
-  for (const [id, f] of Object.entries(foodFunc)) {
-    FUNC[id] = { ...(FUNC[id] ?? {}), ...f };
+  // ★F-STRUCT 全字段基态修正（在 FIELDS 之后、手补丁之前——手补丁/食物/useTurn 链不受影响）。
+  // 合并语义（对 FUNC 的 diff 规则）：
+  //   · 已有条目：struct 有值 → 覆写（伪值纠偏）;struct 判「基态缺省」（辅助无隐式+基路径
+  //     无赋值）而 v1 有支内值 → 删除该键（autoReuse 缺省 false=键删除等价;数值缺省=无键）;
+  //     【不新增】cur 缺的键——缺档面（fallthrough 组非末支/嵌套 case 专属段）仍由 items.ts
+  //     运行时纠偏 / vanilla.json 回填链承载（防超预期 diff 与未审消费面漂移）;
+  //   · 无条目：仅 placeStyle 最小新增（PS-STRUCT v2 口径延续=金标 24 行面零 diff）;
+  //   · 清空条目：EXTRA_USETURN 命中则保 {useTurn:1}（useTurn 通道时序不变）,否则整条回收
+  //     （v1 对空段从不产条目,回收=维持「仅记非默认值」形态）;
+  //   · placeStyle 金标自检：泛化层 placeStyle 映射必须与旧 evalPlaceStyle 逐 id 全等,
+  //     漂移即拒产（exit 1）——①placeStyle 维零 diff 的机器闸门。
+  {
+    const PS_OLD = structuralPlaceStyles(itemSrc);
+    const STRUCT = structuralFields(itemSrc);
+    // SW-BK1 2026-09-06: if 区间段归因面（2263/2264 default 支区间块;仅收 createWall 体）
+    const RANGE = structuralIfRanges(itemSrc);
+    // SW-FX53 2026-09-13: 委托继承解析（此处调用——FIELDS/RESIDUE_CACHE/STRIP_CACHE
+    // 等 const 已初始化;解析全源 92 委托位,落表受 DELEGATE_LANDED 白名单约束）
+    resolveDelegates();
+    let psDrift = 0;
+    for (const [id, ps] of PS_OLD) {
+      if (STRUCT.get(id)?.placeStyle !== ps) { console.error(`F-STRUCT placeStyle 漂移 ${id}: ${STRUCT.get(id)?.placeStyle} != ${ps}`); psDrift++; }
+    }
+    for (const [id, f] of STRUCT) {
+      // SW-V1 2026-09-04: DefaultTo* 种子 placeStyle 不在 PS_OLD 面（helper 形参赋值
+      // 是本批新解析面）——helper 种子 id 豁免"PS_OLD 缺值"比对;PS_OLD 有值时仍由
+      // 上一循环全等把关（显式赋值覆写种子的 id 两法同值,不会走到豁免）。
+      if (f.placeStyle !== undefined && !HELPER_SEED.has(Number(id)) && PS_OLD.get(id) !== f.placeStyle) { console.error(`F-STRUCT placeStyle 新增漂移 ${id}: ${f.placeStyle} != ${PS_OLD.get(id)}`); psDrift++; }
+    }
+    if (psDrift) { console.error(`F-STRUCT: placeStyle 金标漂移 ${psDrift} 处 — 拒绝产出`); process.exit(1); }
+    // SW-BK1: 统一归并面 = STRUCT ∪ RANGE（显式 case 值 per-key 优先——RANGE 只补缺档,
+    // 同 wallitems 提取器 path A 先于 path B 的首值优先序）。
+    // SW-FX53 2026-09-13 两修：①RANGE 值形 = { fields, returns }（终结旗）;②returns
+    // 区间 = 该 id 执行流在区间内 return ⇒ 后续 switch 的同 id case 是死码 → 区间值
+    // 覆写 case 段值（2413 型:区间算式 17 真值,case 段伪值 23 不可达）;无 return 的
+    // 区间维持「case 优先」（区间只是前置缺档补齐）。
+    const SF = new Map();
+    for (const [id, sf0] of STRUCT) {
+      const rf = RANGE.get(id);
+      SF.set(id, rf ? (rf.returns ? { ...sf0, ...rf.fields } : { ...rf.fields, ...sf0 }) : sf0);
+    }
+    for (const [id, rf] of RANGE) if (!SF.has(id)) SF.set(id, rf.fields);
+    // SW-FX53: 委托继承并入（白名单面）——基底先跑、caller 后跑,同键 caller 覆写
+    // （2778 的 shoot=429 等）;非白名单 id 不并入（落表扩面另批放行,见 DELEGATE 注）。
+    for (const [id, dg] of DELEGATE) {
+      if (!DELEGATE_LANDED.has(id)) continue;
+      SF.set(id, { ...(SF.get(id) ?? {}), ...dg });
+    }
+    let fix = 0, del = 0, add = 0;
+    const fixed = [], deleted = [], added = [];
+    for (const [id, sf] of SF) {
+      const cur = FUNC[id];
+      if (cur) {
+        for (const k of Object.keys(cur)) {
+          if (sf[k] !== undefined) {
+            if (cur[k] !== sf[k]) { fixed.push(`${id}.${k} ${cur[k]}->${sf[k]}`); cur[k] = sf[k]; fix++; }
+          } else {
+            deleted.push(`${id}.${k}(${cur[k]})`); delete cur[k]; del++;
+          }
+        }
+        // SW-BK1: createWall 补键（仅此字段——其余字段维持「不新增 cur 缺的键」零漂移
+        // 纪律）。7 件组末支既有条目（1957/2014/2160/2213/2434/2791/3762）由共享算式
+        // 求值补上（Item.cs:21139 等七处,与 vanilla-wallitems.json 逐值对账）。
+        if (cur.createWall === undefined && sf.createWall !== undefined) {
+          cur.createWall = sf.createWall; fixed.push(`${id}.createWall +${sf.createWall}`); fix++;
+        }
+        // SW-FX53 2026-09-13: bait 补键（蠕虫笼 `int num = type - 1994` 派生局部 +
+        // `if (num == N)` 八档——Item.cs:21343-21388,1994-2000 bait 整缺、2001 由手补
+        // 表承载同值;2675 嵌套 case 显式档 30 同面补齐）。
+        if (cur.bait === undefined && sf.bait !== undefined) {
+          cur.bait = sf.bait; fixed.push(`${id}.bait +${sf.bait}`); fix++;
+        }
+        // SW-FX53: placeStyle 补键（组末支既有条目 3050/2630/3724/4694/3608 等——
+        // 共享算式解出而 v1 字面扫描从未有键;手补面 items.ts 回填门 `!d.placeStyle`
+        // 对 0 档同值,非 0 档运行时已由回填承载=同值冗余,零行为差）。
+        if (cur.placeStyle === undefined && sf.placeStyle !== undefined) {
+          cur.placeStyle = sf.placeStyle; fixed.push(`${id}.placeStyle +${sf.placeStyle}`); fix++;
+        }
+        // SW-FX53: 委托继承补键（DELEGATE_LANDED 15 件月主锯钻/挥砍——基底 case 字段
+        // 面入表,DELEGATE_EXPANSION 手补面转解析直出;含手补行缺载的 noUseGraphic 六键）。
+        if (DELEGATE_LANDED.has(Number(id))) {
+          for (const [dk, dv] of Object.entries(DELEGATE.get(Number(id)) ?? {})) {
+            if (cur[dk] === undefined) { cur[dk] = dv; fixed.push(`${id}.${dk} +${dv}(delegate)`); fix++; }
+          }
+        }
+        if (!Object.keys(cur).length) {
+          if (EXTRA_USETURN.get(Number(id)) === true) cur.useTurn = 1;
+          else delete FUNC[id];
+        }
+      } else if (DELEGATE_LANDED.has(Number(id)) && DELEGATE.has(Number(id))) {
+        // SW-FX53: 委托调用者无既有条目 → 整条按 基底∪caller 落表（当前源 15 件全有
+        // 既有条目,本臂为防御性完备）。
+        FUNC[id] = { ...(SF.get(Number(id)) ?? DELEGATE.get(Number(id))) };
+        added.push(`${id}:${JSON.stringify(FUNC[id])}`); add++;
+      } else if (HELPER_SEED.has(Number(id))) {
+        // SW-V1 2026-09-04: DefaultTo* 种子 id（fallthrough 组非末支等形态）——整条按
+        // 基态结构值落表,与组末支的 v1 条目同口径（不再是 placeStyle 单键最小新增）。
+        // 金标=vanillaItemFunc FUNC['5594']/['5595'] 与 EXTRACT_PATCH 重叠字段逐字段对拍。
+        FUNC[id] = { ...sf };
+        added.push(`${id}:${JSON.stringify(sf)}`); add++;
+      } else if (sf.createWall !== undefined) {
+        // SW-BK1 2026-09-06: createWall 缺档整条落表（共享 fallthrough 组非末支/嵌套
+        // case 专属段/区间件——与组末支 v1 条目同口径;useTurn 由 EXTRA_USETURN 后置
+        // 叠加补齐）。28 件整缺:1948-1956/2008-2013/2158-2159/2210-2212/2263-2264/
+        // 2432-2433/2789-2790/3760-3761。
+        FUNC[id] = { ...sf };
+        added.push(`${id}:${JSON.stringify(sf)}`); add++;
+      } else if (sf.placeStyle !== undefined) {
+        FUNC[id] = { placeStyle: sf.placeStyle }; added.push(`${id}:${sf.placeStyle}`); add++;
+      }
+    }
+    console.error(`F-STRUCT: 伪值覆写 ${fix} [${fixed.join(', ')}]`);
+    console.error(`F-STRUCT: 支内伪键删除 ${del} [${deleted.join(', ')}]`);
+    console.error(`F-STRUCT: 缺档补齐 ${add} 件 [${added.join(', ')}]`);
+    if (process.env.ITEMFUNC_DIFF) writeFileSync(process.env.ITEMFUNC_DIFF, JSON.stringify({ fixed, deleted, added }, null, 1));
   }
-  console.error(`foodfunc: ${Object.keys(foodFunc).length} 件（SetFoodDefaults）`);
-}
-// useTurn 全量叠加（只在已有条目上补键，不新增 id）：EXTRA_USETURN 含 SetDefaults1-5
-// case 显式 + DefaultToPlaceableTile/Wall/Torch/Food/HealingPotion/CapturedCritter/MusicBox
-// 等辅助函数族 + 区间 if 块 + 委托继承 + SetFoodDefaults 食物族
-{
-  let n = 0;
-  for (const [id, f] of Object.entries(FUNC)) {
-    if (EXTRA_USETURN.get(Number(id)) === true) { f.useTurn = 1; n++; }
+  // 钓竿区段补丁：2290-2296 族在 case 段外的 type 区间块赋值（最近 switch 归属扫不到），
+  // 按源码实表补齐（Item.cs:23005-23040 前向扫描实证）。
+  for (const [id, pow] of Object.entries({ 2291: 15, 2293: 20, 2292: 30, 2295: 35, 2296: 40, 2294: 50 })) {
+    FUNC[id] = { ...(FUNC[id] ?? {}), fishingPole: pow };
   }
-  console.error(`useTurn=1: ${n} 件（EXTRA_USETURN 全量 ${EXTRA_USETURN.size}）`);
+  // 嵌套块首匹配错位补丁（collectCaseSegments 是文本段正则——嵌套 switch/`int num` 分支
+  // 里的同字段多赋值取首匹配；以下逐 case 按源码校对，2026-08-17 与提交态对账固化）：
+  //  · 2674-2676 诱饵三连（Item.cs:25851-25870 嵌套 switch：2675=30 / 2676=50 / default 2674=15，
+  //    首匹配把 2676 吃成 2675 的 30）
+  //  · 2001 蠕虫笼族（:21313-21350 `int num = type - 1994` 逐分支：num=7→25，
+  //    首匹配吃到 num=0 的 5）
+  //  · 2422 熔线钓钩（SetDefaults2 `if (type >= 2421 && type <= 2422)` 区间块，case 标签外
+  //    ——同 2291 族漏提形态；:23048-23066 `else` 分支 fishingPole 45（1405 同位 :25413 同读
+  //    45）。此前提交态手记 25 与两版反编译均不符，2026-08-17 按 1456 最终态校正；
+  //    melee/autoReuse 为旧手记误加，源块未设，随校正摘除）
+  for (const [id, patch] of Object.entries({
+    2674: { bait: 15, consumable: 1 },
+    2676: { bait: 50 },
+    2001: { bait: 25 },
+    2422: { fishingPole: 45 },
+  })) {
+    FUNC[id] = { ...(FUNC[id] ?? {}), ...patch };
+  }
+  // SetDefaults 委托展开补丁（2026-08-25 r33 蓝队）：`SetDefaults3(N)`/`SetDefaults1(N)` 形态
+  // 的 case 段本体只有 type/glowMask/shoot 覆写，工具力/伤害面全在【被委托基底】的 case 段——
+  // 文本段正则解不开跨 case 继承，此前六件月主锯钻只提到 {shoot:N}（itemFuncTool 判空 →
+  // 不进工具分支 → combatWeapon 落 'shot' 兜底把持械弹当直飞箭弹）、九件月主挥砍件整条缺失
+  // （combat+func 双缺 → 左键纯摆动零伤零挖；red-team-r33 §三 P0-①②）。
+  // ★SW-FX53 2026-09-13：本表转【金标对拍面】——F-STRUCT 块的 resolveDelegates() 已解析
+  // 委托（基底 case 全字段 ∪ caller 覆写,DELEGATE_LANDED 白名单 15 件）,解析值与本表逐键
+  // 全等,另补本表漏载的 noUseGraphic 六键（基底 case 2773/2774 体首段 noUseGraphic=true,
+  // Item.cs:26483/:26502 应被继承——重产时解析面为准）。本表 spread 仍执行（同值幂等）,
+  // 作解析面回退时的二道闸;守卫测试 tests/sw-fx53-extractor-blindspots.test.ts 双面对拍。
+  // C# 语义 = 先跑完基底 case 全部赋值再执行本 case 覆写（type/shoot/glowMask），终值 =
+  // 基底终态 + 本段覆写。逐件按源码固化（值=基底 case 直赋实值，非推断）：
+  //  · 月主锯钻（1456 Item.cs :26571/:26577/:26598/:26604 + :31037/:31043；1457/1458 同位
+  //    :26572/:26578/:26599/:26605 + :31061/:31067，两版 diff=0 已对账）：
+  //    2778←2773+shoot429 / 2783←2773+431 / 3463←2773+610（axe27/dmg80/kb4）
+  //    2779←2774+shoot430 / 2784←2774+432 / 3464←2774+609（pick225/dmg50/kb0.5）
+  //  · 月主挥砍斧/锤/镐（:26566/:26583/:26588 + :31032/:31049/:31054）：
+  //    2777·2782·3462←2772（axe27/dmg100/kb6/autoReuse）/ 2780·2785·3465←2775
+  //    （hammer100/dmg110/kb7/useTurn）/ 2781·2786·3466←2776（pick225/dmg80/kb5.5/useTurn）
+  //  · 2209 超级魔药 healMana=400 手补【已退役】（2026-09-03 十五批备B 收尾）：提取器
+  //    源面切 1458 后 case 2209 段自然产出 healMana=400（Terarria1458 Item.cs:22349）,
+  //    手补为纯 no-op——历史"300"系 1456 值（Terarria1456 Item.cs:22323 `healMana =
+  //    300;`）,当年"case 1933 段 healLife/healMana 双赋值首匹配"归因系误诊（实为
+  //    1456→1458 版值变更）。退役已验：去补重产与在库 json 逐字节一致。
+  const DELEGATE_EXPANSION = {
+    2778: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 429 },
+    2783: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 431 },
+    3463: { melee: 1, noMelee: 1, channel: 1, damage: 80, axe: 27, useStyle: 5, knockBack: 4, shoot: 610 },
+    2779: { melee: 1, noMelee: 1, channel: 1, damage: 50, pick: 225, useStyle: 5, knockBack: 0.5, shoot: 430 },
+    2784: { melee: 1, noMelee: 1, channel: 1, damage: 50, pick: 225, useStyle: 5, knockBack: 0.5, shoot: 432 },
+    3464: { melee: 1, noMelee: 1, channel: 1, damage: 50, pick: 225, useStyle: 5, knockBack: 0.5, shoot: 609 },
+    2777: { melee: 1, autoReuse: 1, damage: 100, axe: 27, useStyle: 1, knockBack: 6 },
+    2782: { melee: 1, autoReuse: 1, damage: 100, axe: 27, useStyle: 1, knockBack: 6 },
+    3462: { melee: 1, autoReuse: 1, damage: 100, axe: 27, useStyle: 1, knockBack: 6 },
+    2780: { melee: 1, autoReuse: 1, damage: 110, hammer: 100, useStyle: 1, knockBack: 7, useTurn: 1 },
+    2785: { melee: 1, autoReuse: 1, damage: 110, hammer: 100, useStyle: 1, knockBack: 7, useTurn: 1 },
+    3465: { melee: 1, autoReuse: 1, damage: 110, hammer: 100, useStyle: 1, knockBack: 7, useTurn: 1 },
+    2781: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
+    2786: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
+    3466: { melee: 1, autoReuse: 1, damage: 80, pick: 225, useStyle: 1, knockBack: 5.5, useTurn: 1 },
+    // 2209 已退役（自然产出 healMana=400,见上方退役注）——留空位防序号误读
+  };
+  for (const [id, expansion] of Object.entries(DELEGATE_EXPANSION)) {
+    // 委托语义：基底字段打底、本 case 显式字段覆盖——现有条目（如六锯钻的 {shoot:N}）
+    // 即"显式覆写"，展开值与之同键同值，直接整体赋终态。
+    FUNC[id] = { ...(FUNC[id] ?? {}), ...expansion };
+  }
+
+  // ---- SetFoodDefaults（Item.cs:47653）：食物族走 SetDefaults 的 IsFood 分支直转此方法，
+  // SetDefaults1-5 扫不到——85 个 case 全靠此 switch 补。逐 case 解析
+  // DefaultToFood(w,h,buff,dur[,useGulpSound]) → buffType/buffTime/useStyle(2 咀嚼 | 9 仰饮)
+  // /consumable（DefaultToFood :48155 实体）；DefaultToHealingPotion（case 1912）→ 治疗。
+  // case 内显式赋值可覆盖（967/969 强制 useStyle=9；353 清酒 Ale holdStyle/ammo/notAmmo）。
+  {
+    const foodSegs = new Map();
+    const foodBody = methodBodyOf(itemSrc, 'private void SetFoodDefaults(');
+    if (foodBody) collectCaseSegments(foodBody, foodSegs);
+    const foodFunc = {};
+    for (const [id, seg] of foodSegs) {
+      const f = {};
+      const dm = seg.match(/DefaultToFood\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)([^)]*)\)/);
+      if (dm) {
+        f.buffType = +dm[3];
+        f.buffTime = +dm[4];
+        // DefaultToFood：useGulpSound=true → useStyle 9（Item2/Item3 音效差异不在此表）
+        f.useStyle = /useGulpSound\s*:\s*true/.test(dm[5]) ? 9 : 2;
+        f.consumable = 1;
+      }
+      const dh = seg.match(/DefaultToHealingPotion\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+      if (dh) {
+        f.healLife = +dh[3];
+        f.useStyle = 9;
+        f.consumable = 1;
+        f.potion = 1;
+      }
+      if (!Object.keys(f).length) continue;
+      // case 段内显式赋值（仅 useStyle 允许覆盖解析值；其余字段并集）
+      // ★后写生效同主线（lastFieldMatch 注）——SetFoodDefaults case 段同字段双赋值
+      for (const [name, re, type] of FIELDS) {
+        if (f[name] !== undefined && name !== 'useStyle') continue;
+        const m = lastFieldMatch(seg, re);
+        if (!m) continue;
+        f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
+      }
+      foodFunc[id] = f;
+    }
+    for (const [id, f] of Object.entries(foodFunc)) {
+      FUNC[id] = { ...(FUNC[id] ?? {}), ...f };
+    }
+    console.error(`foodfunc: ${Object.keys(foodFunc).length} 件（SetFoodDefaults）`);
+  }
+  // useTurn 全量叠加（只在已有条目上补键，不新增 id）：EXTRA_USETURN 含 SetDefaults1-5
+  // case 显式 + DefaultToPlaceableTile/Wall/Torch/Food/HealingPotion/CapturedCritter/MusicBox
+  // 等辅助函数族 + 区间 if 块 + 委托继承 + SetFoodDefaults 食物族
+  {
+    let n = 0;
+    for (const [id, f] of Object.entries(FUNC)) {
+      if (EXTRA_USETURN.get(Number(id)) === true) { f.useTurn = 1; n++; }
+    }
+    console.error(`useTurn=1: ${n} 件（EXTRA_USETURN 全量 ${EXTRA_USETURN.size}）`);
+  }
+  writeFileSync(OUT, JSON.stringify(FUNC));
+  console.error(`itemfunc: ${Object.keys(FUNC).length} 件`);
+  const stats = {};
+  for (const f of Object.values(FUNC)) {
+    for (const k of Object.keys(f)) stats[k] = (stats[k] ?? 0) + 1;
+  }
+  console.error(JSON.stringify(stats));
 }
-writeFileSync(OUT, JSON.stringify(FUNC));
-console.error(`itemfunc: ${Object.keys(FUNC).length} 件`);
-const stats = {};
-for (const f of Object.values(FUNC)) {
-  for (const k of Object.keys(f)) stats[k] = (stats[k] ?? 0) + 1;
-}
-console.error(JSON.stringify(stats));
+// 守卫调用（extract-itemcombat.mjs:664 同式）
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

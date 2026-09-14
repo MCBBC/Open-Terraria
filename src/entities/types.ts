@@ -132,7 +132,9 @@ export interface GameHooks {
   punchCamera?(dirX: number, dirY: number, frames?: number, strength?: number,
     srcX?: number, srcY?: number): void;   // src = PunchCameraModifier.startPosition（距离衰减原点）
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
-  cutTile(x: number, y: number): void;
+  /** ★SW-BJ67（2026-09-14）vid = 弹型上下文（vanilla Projectile.CutTiles 逐型豁免
+   *  面 P.cs:15391-15393 消费——1047 滚过幼虫 231 不割;缺省 undefined = 无型） */
+  cutTile(x: number, y: number, vid?: number): void;
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */
   placePortal?(x: number, y: number, vx: number, vy: number, form: number): void;
   /** 破坏 tile（掉落+音效+帧刷新；Enemy 攻门拆门 = WorldGen.KillTile 语义） */

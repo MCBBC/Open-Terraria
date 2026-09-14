@@ -11,6 +11,7 @@ import {
   writePlayerHurt, readPlayerHurt,
   PlayerHurtFlags,
   readChestName,   // SW-FX52-R12 msg69 ChestName 镜像
+  CHEST_NAME_MAX, CHEST_NAME_CLEAR,   // ★BJ69 msg33 改名尾段（NetMessage.cs:895-905 语义）
 } from './protocol';
 import {
   writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
@@ -1258,14 +1259,35 @@ export class ClientNet {
     return false;
   }
 
+  /** ★BJ69（2026-09-14）改名段闩锁 = 原版 Player.editedChestName 语义（Player.cs:1425
+   *  声明;置位=ChestUI.RenameChestSubmit :851-853;消费=:33141-33145/:33355-33359 关箱/
+   *  换箱拍 `if (editedChestName) SendData(33, ..., chest, 1f)`——改名段随【下一条
+   *  msg33】上行后清位）。UI 提交改名 → 本端 chest.name 已本地写 → latch(name);
+   *  尾段写语义 = NetMessage.cs:895-905（num24=nameLen;0/超 20 → 255 清名;1..20 随名串,
+   *  本端 20 字符钳在 UI 层 maxLength 承担）。施加对象=发送者在用箱（room 侧
+   *  MessageBuffer.cs:1962 域,非本帧 idx——改名者先改名后关箱,两帧序）。 */
+  private pendingChestRename: string | null = null;
+
+  chestRenameLatch(name: string): void {
+    this.pendingChestRename = name;
+  }
+
   /** 开/关箱公告（msg33,C→S；SW-FX42）：chestIdx=-1=关闭。原版 Player.OpenChest 尾
    *  SendData(33,...)（NetMessage.cs:880-902 写面）——服务器据此维护每玩家在用箱
-   *  并广播 msg80。仅世界箱（x>=0）公告;随身储蓄族（x<0）原版不在 Main.chest 域 */
+   *  并广播 msg80。仅世界箱（x>=0）公告;随身储蓄族（x<0）原版不在 Main.chest 域。
+   *  ★BJ69：闩锁改名段随帧尾上行（num24 语义 1:1;room 侧 readChestRenameTail 受理,
+   *  施加对象=发送者在用箱——idx=-1 关箱帧先改后关,Room 记账序=原版 :1962 前）。 */
   sendChestOpenState(chestIdx: number, x: number, y: number, closing: boolean) {
-    this.send(new NetWriter(Msg.ChestOpenState)
+    const w = new NetWriter(Msg.ChestOpenState)
       .i16(closing ? -1 : Math.max(0, Math.min(0x7fff, chestIdx)))
-      .i32(x).i32(y)
-      .finish());
+      .i32(x).i32(y);
+    if (this.pendingChestRename !== null) {
+      const rename = this.pendingChestRename;
+      this.pendingChestRename = null;
+      if (rename.length === 0 || rename.length > CHEST_NAME_MAX) w.u8(CHEST_NAME_CLEAR);   // :899-903
+      else w.u8(rename.length).str(rename);                                                 // :905 Write(text2)
+    }
+    this.send(w.finish());
   }
 
   // ================= 渔夫任务/季节位（module15,SW-FX42；见 net/syncModules.ts） =================

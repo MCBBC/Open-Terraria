@@ -1370,10 +1370,19 @@ export class Enemy extends Entity {
     // 种子档命中族（boxW/boxH）已含 :18025/:17862 二次扩盒
     e.w = boxW;
     e.h = boxH;
-    // 渲染乘区同步（Renderer.ts drawEnemy :2213 = vanilla.scale × vanillaScale）：
-    // 注入"种子档总 scale / 基 scale"比值，使贴图与扩盒后的碰撞盒一致
-    // （113=0.65、134-136=1.3、39-41=1.1[remix 1.32]）
-    if (seedBox) e.vanillaScale = seedS.scale / vScale;
+    // 渲染乘区同步（Renderer.ts drawEnemy :7092 = vanilla.scale × vanillaScale）：
+    // 注入"SetDefaults 终态 scale / def 基 scale"比值，使贴图与扩盒后的碰撞盒一致
+    // （113=0.65、134-136=1.3、39-41=1.1[remix 1.32]）。
+    // ★RB15b-F3(2026-09-14)：remix 命中族（6-9/173/59/82/181，NPC.cs:8775-11332
+    //   SetDefaults 主体块）盒已 ×1.3/×1.2/×1.1 而此处不写 → 贴图按 def 基 scale
+    //   画 = 盒贴图不匹配，补 remixHit 支。除数必须为 def 基 scale（v.scale ?? 1）
+    //   而非 vScale——vScale 在 remix 块【之后】读取已含 ×1.3，remix-only 时
+    //   seedS.scale===vScale → 比值恒 1 修不动；语义=Game.ts:39129 -12 臂先例
+    //   box.scale/(v6.scale ?? 1)，vanilla 侧贴图消费 npc.scale 终态（remix 乘在
+    //   主体、先于 :17842 首盒）。种子档-only 命中族与 remix 乘 scale 族零交集
+    //   ⇒ 未 remix 时 vScale===defBase，既有值逐位不变（scale-stats 金标零漂移）；
+    //   tenth 未列族（seedBox 恒真、scale 未改）比值=1 同旧值。
+    if (seedBox || remixHit) e.vanillaScale = seedS.scale / (v.scale ?? 1);
     // NPC.canDisplayBuffs（批次B 落地）：FTW getGood 245-248 石巨人族置 false
     // （ScaleStats.getGoodAdjustments :17945/:17950/:17955）。原版两处消费
     // （染色门 :92026 / 鞭标 VFX 门 :92135）本仓均未移植——字段先行保数据链一致
@@ -8172,10 +8181,15 @@ export class Enemy extends Entity {
 
   // AI_011 骷髅王(35)战斗状态机在 bossAI.ts skeletronBossAI；68 守卫走下方专用分支
 
-  /** AI_011 地牢守卫(68)（NPC.145.cs:21937-21941, 22277-22288）：
+  /** AI_011 地牢守卫(68)（NPC.cs:21937-22387；1458 同域 :22039-22380 行号-2 内对齐）：
    *  恒 ai[1]=2：伤害 9999、恒速 8 直线追击；玩家死/超 2000px → ai[1]=3 下坠脱场。
-   *  noTileCollide 直移。生成瞬间一声 Roar（:21929-21933 localAI[0]==0 单次——
-   *  地牢守卫是全游戏唯一"非物品召唤也咆哮"的生成点） */
+   *  noTileCollide 直移。★生成拍双声 Roar（BJ68 2026-09-14 补第二声,1:1）：
+   *  ①:22039-22042 (type==68||netMode==1)&&localAI[0]==0 → localAI[0]=1+吼（aiInit 支）；
+   *  ②:22054-22058 (type==68||IsItDay)&&ai[1]∉{3,2} → ai[1]=2+吼——守卫生成拍 ai[1]=0
+   *  必中此支 = 同拍第二声（有活目标时；目标超距/死亡拍 ai[1]=3 → 只有①无②）。
+   *  原文档注"一声"系漏读②支——地牢守卫是全游戏唯一"非物品召唤也咆哮"的生成点。
+   *  mode-3 下坠支补 EncourageDespawn(50)（:22378-22380,原版=离场计时钉低值+置
+   *  despawnEncouraged;离屏后 ~50t 消散,玩家死后血条不再滞留——语义同 35/127 离场支） */
   private dungeonGuardianAI(game: GameHooks, player: Player | null) {
     if (!this.aiInit) {
       this.aiInit = true; this.ai0 = 1;   // 初始化（L21910；68 无手 NPC）
@@ -8185,8 +8199,11 @@ export class Enemy extends Entity {
     if (!player || Math.abs(this.cx - player.cx) > 2000 || Math.abs(this.cy - player.cy) > 2000) {
       if (player) this.facing = this.seekDirX(player);   // ★:22048 TargetClosest（超远沿重索敌）
       this.ai1 = 3;
-    } else if (this.ai1 !== 3) {
+    } else if (this.ai1 !== 3 && this.ai1 !== 2) {
+      // :22054-22058 强制块原条件 = ai[1]∉{3,2}（68 恒 type==68 腿成立）——
+      // 补 !==2 门后本支仅在 0→2 转换拍走一次（曾恒真重写=行为同值但 roar#2 会误连响）
       this.ai1 = 2;
+      game.playSfx('roar', 1, this.cx, this.cy);   // ★第二声（:22057,生成拍与①同拍双吼）
     }
     if (this.ai1 === 2) {
       // :22246-22248 白天狂暴 damage/defense 均 9999（守卫恒处本态；json
@@ -8199,12 +8216,19 @@ export class Enemy extends Entity {
       this.vy = (dy / d) * 8;
       // ★2026-09-13（用户实报"守卫骷髅头不旋转"）：:22359 rotation += direction×0.3f
       //  ——type 68 恒处 ai[1]=2f（:22054 守卫无条件强制），该模式首行逐拍旋 0.3 rad
-      //  （~0.35s/圈电锯观感）；direction 由 :22022/:22048 TargetClosest 刷新
-      this.visAngle += this.facing * 0.3;
+      //  （~0.35s/圈电锯观感）；direction 由 :22022/:22048 TargetClosest 刷新。
+      //  写 spin（渲染 rotId 分支消费位,与 35 头 bossAI.ts:89 同通道）而非 visAngle
+      //  ——visAngle 对 rotId 家族不进绘制（曾写成 visAngle=本体仍不转,渲染断链）
+      this.spin += this.facing * 0.3;
     } else {
+      // :22372-22380 ai[1]==3f 离场态（守卫 ai1∈{0→2,2,3},本 else ≡ 3f 支）：
+      // vy+=0.1 下坠 + 双 0.95 阻尼逐字对齐;★补 EncourageDespawn(50)（:22380,
+      // timeLeft 封顶 min(·,50)+despawnEncouraged——离屏后 CheckActive 停更③,
+      // 剩余 timer≈50 → 约 50t 消散;屏内 ③ 每 tick 重置 750 抵挡=照常保命）
       this.vy += 0.1;
       if (this.vy < 0) this.vy *= 0.95;
       this.vx *= 0.95;
+      this.encourageDespawn(50);
     }
     this.x += this.vx;
     this.y += this.vy;

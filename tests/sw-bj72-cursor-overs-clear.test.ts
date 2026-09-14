@@ -1,0 +1,172 @@
+// SW-BJ72（2026-09-14）光标跟随态逐帧清空回归 —— 用户实报"开启自动暂停时:先悬停一个
+// 会给光标带文字的按钮/物（游戏内世界/UI 悬停 → 光标旁出现跟随文字）,按 Esc 打开背包
+// → 文字永驻光标旁跟随（跟随光标的图标同理）"。
+// 取证定谳（1457 反编译锚,1458 同位零漂移）:
+//   - 原版 MouseOversClear（Main.cs:47279-47289）挂 Update 头部【无条件每帧】
+//     （Main.cs:17213;1458 :17213 同位）——清 _mouseTextCache.isValid/noOverride +
+//     player.cursorItemIconEnabled/ID/Text/Push + signHover/signBubble,先于 :17372
+//     CanPauseGame→gamePaused 门;claim 面随后重写（UpdateUIStates 暂停帧照跑 +
+//     DrawMouseOver :43595 绘制相）→ 先清后 claim 每帧往复,悬停文字/图标不可能残留。
+//   - 本仓 cursorItemIcon 五字段的重置曾只挂 tickCursorIcon（fixedUpdate,暂停冻结）
+//     头部 → autoPause∧开背包（applyAutoPauseUI）/失焦暂停拍 claim 停摆,悬停文字/图标
+//     冻结残留且 Renderer.drawCursorItemIcon（:15069 文本支/图标支）随实时 _mouseX/Y
+//     逐帧重画 = 继续跟随光标（自创偏差:清零拍与 claim 拍同挂 fixedUpdate,缺原版
+//     "Update 头逐帧清"半拍）。
+//   - 余辉验证同理:原版 ItemIconCacheVerification 调用点 = DrawInterface_40 :45817
+//     （1458 :45823）= 绘制相每【绘制】帧衰减,暂停帧照衰减;本仓曾挂 tickCursorIcon
+//     → 暂停拍 cacheTime 冻结,余辉图标滞留光标旁。
+// 修刀（最小,对齐原版拍位）:
+//   - frame() 头（applyAutoPauseUI 后,暂停分支前）每帧 mouseOversClear()——五字段清零;
+//   - frame() 尾（SuppressDraw 早退后、render 前）每绘制帧 refreshCursorIconDrawState()
+//     ——余辉验证 + renderer.cursorIconCtx 重建（原 tickCursorIcon 尾段拆出）。
+// 本测试双面:①行为面（最小 Game 桩逐环驱动,chester-pet 同法）②结构锁（frame() 内
+// 拍位序 + ctx 单写者——变异即红）。
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { Enemy } from '../src/entities/Enemy';   // ★先加载断活环（chester-pet 同法）
+import { Game } from '../src/core/Game';
+import { Player } from '../src/entities/Player';
+import { Inventory } from '../src/items/Inventory';
+import { World } from '../src/world/World';
+import { ItemIconCache } from '../src/render/CursorItemIcon';
+import { TILE } from '../src/core/constants';
+
+// ===================== Game 最小桩（chester-pet cursorGame 同法） =====================
+function bj72Game() {
+  const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+    player: Player; world: World; input: { mouseX: number; mouseY: number; uiBlocking: boolean };
+    camera: { screenToWorld: (x: number, y: number) => [number, number] };
+    renderer: Record<string, unknown>; itemIconCache: ItemIconCache;
+  };
+  g.player = new Player(50 * TILE, 90 * TILE, new Inventory());
+  g.world = new World(120, 160, 30);
+  g.input = { mouseX: 0, mouseY: 0, uiBlocking: true };
+  g.camera = { screenToWorld: (mx: number, my: number) => [mx, my] as [number, number] };
+  g.renderer = {};
+  g.itemIconCache = new ItemIconCache();
+  g.entities = { npcs: [], enemies: [], projectiles: [] };
+  return g;
+}
+
+// ===================== 行为面 1：MouseOversClear 五字段清零 =====================
+describe('mouseOversClear（Main.cs:47279-47289 1:1 契约）', () => {
+  it('五字段全归零（enabled/ID/Push/Text/Reversed）——原版清 cursorItemIcon 四字段+本仓 Reversed 位', () => {
+    const g = bj72Game();
+    const p = g.player;
+    // 残留态 = 悬停箱名 claim 后的冻结快照（用户实报的文字+图标残留源）
+    p.cursorItemIconText = 'Chest';
+    p.cursorItemIconEnabled = true;
+    p.cursorItemIconID = 5098;
+    p.cursorItemIconPush = 3;
+    p.cursorItemIconReversed = true;
+    (g as unknown as { mouseOversClear(): void }).mouseOversClear();
+    expect(p.cursorItemIconText).toBe('');       // :47284 string.Empty
+    expect(p.cursorItemIconEnabled).toBe(false); // :47282 false
+    expect(p.cursorItemIconID).toBe(0);          // :47283 0
+    expect(p.cursorItemIconPush).toBe(0);        // :47285 0
+    expect(p.cursorItemIconReversed).toBe(false);
+  });
+
+  it('暂停拍管线合成：清零后绘制拍重建上下文 → 无残留可画、快照随实时输入刷新', () => {
+    const g = bj72Game();
+    const p = g.player;
+    p.cursorItemIconText = 'Chest';
+    p.cursorItemIconEnabled = true;
+    p.cursorItemIconID = 5098;
+    // 模拟 autoPause 暂停拍：frame() = applyAutoPauseUI → mouseOversClear →（fixedUpdate 不跑）
+    // → refreshCursorIconDrawState → render
+    (g as unknown as { mouseOversClear(): void }).mouseOversClear();
+    (g as unknown as { refreshCursorIconDrawState(): void }).refreshCursorIconDrawState();
+    expect(p.cursorItemIconText).toBe('');       // 文本支（Renderer :15069 门）不再进
+    expect(p.cursorItemIconEnabled).toBe(false); // flag 支（悬停图标）不再进
+    // ctx 是绘制拍重建的新快照（非冻结旧物）——uiBlocking 随实时 input
+    const ctx = g.renderer.cursorIconCtx as { uiBlocking: boolean; heldVid: number };
+    expect(ctx.uiBlocking).toBe(true);           // input 桩恒 true → 新快照同相
+    expect(ctx.heldVid).toBe(0);                 // 空手
+  });
+});
+
+// ===================== 行为面 2：余辉验证挂绘制拍（原版 :45817 同相） =====================
+describe('refreshCursorIconDrawState 余辉衰减（ItemIconCacheVerification 绘制拍）', () => {
+  it('暂停拍余辉随绘制拍衰减：静止不减（衰减=移动门控 :45930-45936）、小幅移动 -1 并同步 ctx.cacheTime', () => {
+    const g = bj72Game();
+    // 缓存键须与所选槽匹配（verify :45941 itemId!==selectedItemId → 0）——空手桩 selectedItemId=0
+    g.itemIconCache.update(0, 100, 100);
+    const drive = g as unknown as { refreshCursorIconDrawState(): void };
+    (g.input as { mouseX: number }).mouseX = 100;
+    (g.input as { mouseY: number }).mouseY = 100;
+    drive.refreshCursorIconDrawState();    // 静止 1 帧 → 不衰减（原版同相：d==0 不减）
+    expect(g.itemIconCache.time).toBe(10);
+    expect((g.renderer.cursorIconCtx as { cacheTime: number }).cacheTime).toBe(10);
+    (g.input as { mouseX: number }).mouseX = 102;   // 2px 微移
+    drive.refreshCursorIconDrawState();
+    expect(g.itemIconCache.time).toBe(9);           // 移动门控衰减 -1
+    expect((g.renderer.cursorIconCtx as { cacheTime: number }).cacheTime).toBe(9);
+  });
+
+  it('鼠标位移 >4px → 余辉即灭（:45933-45936 同式）——暂停拍移动光标不再滞留旧图标', () => {
+    const g = bj72Game();
+    g.itemIconCache.update(0, 100, 100);   // 缓存键与空手桩 selectedItemId=0 匹配
+    const drive = g as unknown as { refreshCursorIconDrawState(): void };
+    (g.input as { mouseX: number }).mouseX = 130;   // +30px
+    (g.input as { mouseY: number }).mouseY = 100;
+    drive.refreshCursorIconDrawState();
+    expect(g.itemIconCache.time).toBe(0);
+    expect((g.renderer.cursorIconCtx as { cacheTime: number }).cacheTime).toBe(0);
+  });
+});
+
+// ===================== 结构锁：frame() 拍位序 + ctx 单写者 =====================
+describe('结构锁（变异即红）', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/core/Game.ts'), 'utf8');
+
+  /** frame() 方法体切片（下一起点 = scanBoulderFamilyNear） */
+  function frameBody(): string {
+    const s = src.indexOf('private frame(now: number) {');
+    expect(s).toBeGreaterThan(0);
+    const e = src.indexOf('private scanBoulderFamilyNear', s);
+    expect(e).toBeGreaterThan(s);
+    return src.slice(s, e);
+  }
+
+  it('拍位序：applyAutoPauseUI → mouseOversClear →（暂停分支前）→ fixedUpdate → refreshCursorIconDrawState → render', () => {
+    const f = frameBody();
+    const iAuto = f.indexOf('this.applyAutoPauseUI()');
+    const iClear = f.indexOf('this.mouseOversClear()');
+    const iSplit = f.indexOf('if (!this.paused) {');
+    const iFixed = f.indexOf('this.fixedUpdate(FIXED_DT)');
+    const iSuppress = f.indexOf('return;   // SuppressDraw');
+    const iRefresh = f.indexOf('this.refreshCursorIconDrawState()');
+    const iRender = f.indexOf('this.render()');
+    for (const [name, i] of [['autoPause', iAuto], ['clear', iClear], ['split', iSplit],
+      ['fixed', iFixed], ['suppress', iSuppress], ['refresh', iRefresh], ['render', iRender]] as const) {
+      expect(i, name).toBeGreaterThan(0);
+    }
+    // 清空拍先于暂停分支（原版 MouseOversClear :17213 先于 gamePaused 门 :17372 同位）
+    expect(iClear, '清零须在暂停分支前（暂停拍也清）').toBeGreaterThan(iAuto);
+    expect(iClear).toBeLessThan(iSplit);
+    // 重建拍在 SuppressDraw 早退之后、render 之前（=每【绘制】帧,原版 Verification 在 draw 内同相）
+    expect(iRefresh).toBeGreaterThan(iSuppress);
+    expect(iRefresh).toBeLessThan(iRender);
+  });
+
+  it('清零/重建调用带 world 门（pre-world 帧不炸）', () => {
+    const f = frameBody();
+    expect(f).toContain('if (this.world) this.mouseOversClear()');
+    expect(f).toContain('if (this.world) this.refreshCursorIconDrawState()');
+  });
+
+  it('renderer.cursorIconCtx 单写者：组装只存在于 refreshCursorIconDrawState（tickCursorIcon 尾段已拆出）', () => {
+    expect(src.split('this.renderer.cursorIconCtx =').length - 1).toBe(1);
+    const sTick = src.indexOf('private tickCursorIcon(): void {');
+    const sRefresh = src.indexOf('private refreshCursorIconDrawState(): void {');
+    expect(sTick).toBeGreaterThan(0);
+    expect(sRefresh).toBeGreaterThan(sTick);
+    // tickCursorIcon 段内不再有 verify/ctx 组装（余辉衰减曾随 fixedUpdate 冻结）
+    const tickBody = src.slice(sTick, sRefresh);
+    expect(tickBody).not.toContain('itemIconCache.verify');
+    expect(tickBody).not.toContain('this.renderer.cursorIconCtx');
+  });
+});

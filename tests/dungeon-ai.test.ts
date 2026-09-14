@@ -51,9 +51,10 @@ describe('地牢 AI 族', () => {
   it('★地牢守卫恒旋：mode-2f 每拍 rotation += direction×0.3（NPC.cs:22359,用户实报不转根因）', () => {
     const w = makeWorld();
     const e = Enemy.fromVanilla(68, 20 * TILE, 60 * TILE)!;
-    const r0 = e.visAngle;
+    const r0 = e.spin;
     tick(e, stubGame(w), 21);   // 21 拍 × 0.3 = 6.3 ≈ 2π（一整圈,~0.35s 原版电锯观感）
-    expect(e.visAngle - r0).toBeCloseTo(21 * 0.3 * e.facing, 6);
+    // 渲染 rotId 分支消费 e.spin（Renderer.ts:7318 ctx.rotate(e.spin)）——写 spin 本体才转
+    expect(e.spin - r0).toBeCloseTo(21 * 0.3 * e.facing, 6);
   });
 
   it('刺球(70)：首段竖直后转为水平弹跳，逐轴速度 ≤ 6×2.4', () => {

@@ -471,7 +471,7 @@ import { requestMushroomBoiExplosion } from '../entities/DeadCellsMushroom';
 // module8 编排粒子 Spawn_* 收编池（fx/orchestraFx.ts;台账 L5 批 2026-08-31）
 // module8 编排粒子 L5 长尾批（fx/orchestraFx.ts 追加收编段;2026-08-31）
 // module8 编排粒子 L5 长尾批（fx/orchestraFx.ts 追加收编段;2026-08-31）
-import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
+import { type InfoAccCtx, mphOf, radarCountsEnemy } from '../stats/InfoAccs';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
 import { GolfState } from '../world/golf/GolfState';
 import { golfVanillaTileId, BallState } from '../world/golf/golfPhysics';
@@ -1399,6 +1399,14 @@ export const TILE_CUT = new Set<number>(
     return acc;
   }, []),
 );
+/** ★SW-BJ67（2026-09-14）D4：CutTiles 逐型豁免（P.cs:15391-15393 直译;1458 :15392
+ *  同）——`type==1047 && tile.type==231 → flag=false`：彩虹巨石滚过幼虫
+ *  （tileCut[231]=true Main.cs:7536,破格即 larvaSummonInRange 召蜂王）不割。
+ *  vanilla 该表在 Projectile.CutTiles 弹侧逐型求值;本仓砍切收口 Game.cutTile
+ *  单点 → vid 由 EntityManager 中央收口/cutTilesBox 穿线。独立导出 = 行为面可测。 */
+export function cutTilesTypeExempt(vid: number | undefined, tileType: number): boolean {
+  return vid === 1047 && tileType === (TILE_BY_KEY['v_231_larva'] ?? -1);
+}
 // 原版 TileID.Sets.BreakableWhenPlacing（TileID.cs:383）→ 内部 id——放置占用
 // 例外面第二支（CanPlace TileObject.cs:357 / Place 清格 TileObject.cs:84-86）：
 // 小石块 185、大石堆 186/187、海滩石堆 324、珊瑚 81、钟乳石 165、绿洲植物 530、
@@ -1791,21 +1799,54 @@ const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
 /** ★SW-BJ57：补 4870 回归药水——原版走 itemTime==20 引导触发（Player.cs:43472-43502,
  *  1458 同域 :43468 区 diff=same）,与 2350 同族;旧刀误落 PERMANENT_USE 即时支=点击即传 */
 const TELEPORT_ITEM_VIDS = new Set([50, 3124, 3199, 5358, 2350, 2351, 4263, 4819, 5359, 5360, 5361, 4870]);
-/** ★RB15a（2026-09-13）宝藏袋左键豁免集：BossBag 21 件（ItemID.cs:1215 集,1458 同域
- *  :1215 零增量）原版 SetDefaults 无 useStyle（Item.cs:30544 共块仅 consumable=true）
- *  = 非使用物,持用左键原版零动作（ItemCheck useStyle 0 不进 ApplyItemAnimation）。
- *  updateUse「其它物品 useStyle 分族」臂（:13562 区）兜底 useSwing(:13619) 曾让持袋
- *  左键挥摆（dur=heldUseAnimation 缺省 30,不耗不响不进 useTime——变异实验
- *  tests/sw-fx21 捕红定谳）。§五裁决「唯右键开包」的左键面须为【零动作】而非
- *  【挥摆】,故该臂整族抑制。数据面 vanilla-itemcombat.json 无 useStyle 列（提取器
- *  未提）→ 只能集合闭式表达;21 vid 与 vanillaBossBags 的 BOSS_BAG_IDS 全等由
- *  tests/sw-fx21 结构锁交叉核对（刻意不 import 该表:§五结构锁禁止 Game.ts 直查
- *  BossBag 门集/调用开包引擎——防左键开包入口回潮;豁免臂是抑制不是开包,
- *  与锁语义不冲突）。 */
-const BOSS_BAG_NO_USE_VIDS = new Set([
-  3318, 3319, 3320, 3321, 3322, 3323, 3324, 3325, 3326, 3327, 3328, 3329,
-  3330, 3331, 3332, 3860, 3861, 3862, 4782, 4957, 5111,
-]);
+/** ★BJ69（2026-09-14）非使用物左键数据门——RB15a 袋豁免集（21 vid 集合闭式,标识符已退役
+ *  且结构锁禁回潮——tests/sw-fx21）的推广退役。原版语义：useStyle==0 = 非使用物,持用左键零动作——起用总门
+ *  Player.cs:43064 `controlUseItem && releaseUseItem && itemAnimation==0
+ *  && item.useStyle != 0`（1458 同域 :43062 diff=same;配对门 :24525 TryAllowingItem-
+ *  Reuse 支 HeldItem.useStyle==0 → return false）。此前「其它物品」臂只对
+ *  BossBag 21 件做集合闭式抑制（RB15a）,其余 useStyle=0 物品（凝胶/表/火把块外
+ *  材料等 1400+ 件,BJ69 全量对拍定谳）持用左键仍被兜底 useSwing——本门改数据驱动,
+ *  useStyle 权威=vanilla-itemfunc.useStyle（heldUseStyle 消费面同源）。
+ *
+ *  提取缺口回填（fallthrough 组共享体只落组末标签——itemfunc v1 提取器语义,
+ *  SW-FX53 族既有盲区;运行时纠偏先例=items.ts SHARED_GROUP_PLACE_STYLE_1457）：
+ *  vanilla 真值 useStyle>0 但 itemfunc 缺档、且经本臂可达的 38 件——
+ *   · 226 复原药水 →9（Item.cs:4198-4200 组 226/227,末标签 227 已有档）
+ *   · 1874-1904 圣诞树装饰 →1（Item.cs:20636-20682 组 1874-1905,末标签 1905 已有档）
+ *   · 2337/2338 垃圾（旧鞋/海藻,绿藻提取机组 2337-2339）→1（Item.cs:23489-23499,末标
+ *     签 2339 已有档）
+ *   · 2436/2437 水母饵（组 2436-2438）→1（Item.cs:24110 区,末标签 2438 已有档）
+ *   · 5326 →2（DefaultToFood 无 useGulpSound 实参=咀嚼,Item.cs:42260-42263;itemfunc
+ *     无条目——辅助函数条件实参面,BJ69 补）
+ *   · 2320 岩鱼 →1（Rockfish=锤类武器,Item.cs:23103-23120 共享 quest-fish 组内的
+ *     if(type==2320) 支;itemfunc 无条目,BJ69 补）
+ *   · 4785/4786 坐骑鞍 →4（Item.cs:39355 组 4785-4787,末标签 4787 已有档）
+ *   · 4792-4795 坐骑召唤 →4（Item.cs:39400-39404 组 4792-4796,末标签 4796 已有档）
+ *  （5334 的 useStyle=4 在 `if (Variant == EnabledVariant)` 支内——基态 SelectVariant
+ *  =null 恒假不采用,FX53 定谳口径,不回填。钓竿 2291-2295 钓鱼臂自挥不涉本门。）
+ *  全量对拍器=tools/_bj69-nouse-item-audit.mjs（Item.cs SetDefaults1..5+SetFoodDefaults
+ *  执行序仿真×itemfunc 逐 id 对拍,A 面=本表/B 面=门静默面）;守卫=tests/bj69-nouse-
+ *  gate.test.ts（Item.cs 真值×门数据逐 id 锁 + 行为面）。 */
+const NO_USE_STYLE_BACKFILL_1457: Record<number, number> = {
+  226: 9,
+  1874: 1, 1875: 1, 1876: 1, 1877: 1, 1878: 1, 1879: 1, 1880: 1, 1881: 1,
+  1882: 1, 1883: 1, 1884: 1, 1885: 1, 1886: 1, 1887: 1, 1888: 1, 1889: 1,
+  1890: 1, 1891: 1, 1892: 1, 1893: 1, 1894: 1, 1895: 1, 1896: 1, 1897: 1,
+  1898: 1, 1899: 1, 1900: 1, 1901: 1, 1902: 1, 1903: 1, 1904: 1,
+  2337: 1, 2338: 1,
+  2436: 1, 2437: 1,
+  2320: 1,
+  5326: 2,
+  4785: 4, 4786: 4,
+  4792: 4, 4793: 4, 4794: 4, 4795: 4,
+};
+
+/** 非使用物门数据（vanilla useStyle 真值;vid<0=本仓自产物品,无原版域,沿用现行）。
+ *  export=守卫 tests/bj69-nouse-gate.test.ts 逐 id 对拍面（Item.cs 真值×本函数）。 */
+export function heldItemUseStyle(vid: number): number {
+  if (vid < 0) return 1;
+  return itemFuncOfVid(vid)?.useStyle ?? NO_USE_STYLE_BACKFILL_1457[vid] ?? 0;
+}
 /** vanilla TileID.Sets.Platforms（WorldGen.SolidOrSlopedTile includePlatforms 臂消费；
  *  ★SW-BJ43 海螺落位面复刻——与 VanillaTiler VANILLA_PLATFORM_SHEETS 同表） */
 const CONCH_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
@@ -5681,18 +5722,27 @@ export class Game implements GameHooks {
         // 2091-2100）。旧 regex /^Digit([0-9])$/ 无视改绑/解绑,重绑后物理数字键
         // 仍切栏 = 与原版劈叉;缺省表下行为逐位等价（Digit1-Digit0 全绑定）。
         const hotbarSlot = hotbarSlotOfCode(code);
+        // ★BJ68 2026-09-14 Select 音接通（SoundID 12=MenuTick,Player.cs:492——Select
+        //  :490-493 selected!=item && item∉{overridden,buffered} 拍播;本仓
+        //  overridden/buffered 未建模 → 门=实际变更拍;与滚轮臂/±臂同拍,单边禁）：
         if (hotbarSlot !== null) {
+          const prevSel = this.player.inv.selected;
           this.player.inv.selected = hotbarSlot;
+          if (prevSel !== hotbarSlot) this.playSfx('menuTick');
           // SelectedItemState.Select（Player.cs:498-499）：换栏清 AFK 两计数
           //（afkCounterForKiting 未建模,见 Player.afkCounter 注）
           this.player.afkCounter = 0;
           this.cb.onInventoryChanged();
         } else if (isBound('HotbarMinus', code)) {
+          const prevSel = this.player.inv.selected;
           this.player.inv.selected = (this.player.inv.selected + 9) % 10;
+          if (prevSel !== this.player.inv.selected) this.playSfx('menuTick');
           this.player.afkCounter = 0;              // Select(:498) 同款清零
           this.cb.onInventoryChanged();
         } else if (isBound('HotbarPlus', code)) {
+          const prevSel = this.player.inv.selected;
           this.player.inv.selected = (this.player.inv.selected + 1) % 10;
+          if (prevSel !== this.player.inv.selected) this.playSfx('menuTick');
           this.player.afkCounter = 0;              // Select(:498) 同款清零
           this.cb.onInventoryChanged();
         }
@@ -7516,6 +7566,18 @@ export class Game implements GameHooks {
       this._autoSaveAt = 0;
     }
     this.applyAutoPauseUI();   // autoPause"开界面暂停"逐帧重算（CanPauseGame 同构,②）
+    // ★SW-BJ72 2026-09-14：光标跟随态逐帧清空（MouseOversClear Main.cs:17213——Update
+    //  头部【无条件每帧】清 _mouseTextCache+cursorItemIcon 五字段+signHover/signBubble,
+    //  先于 :17372 gamePaused 门;1458 :17213 同位零漂移）。本仓五字段重置曾只挂
+    //  tickCursorIcon（fixedUpdate,暂停冻结）头部 → autoPause∧开背包/失焦暂停拍 claim
+    //  停摆,悬停文字/悬停图标冻结残留且随实时鼠标位移继续跟随（用户实报:autoPause 开
+    //  +悬停带光标文字的钮/物+Esc 开背包 → 文字永驻光标旁）。claim 面仍只在
+    //  fixedUpdate（原版 update 相:TileInteractionsMouseOver/HoverOverNPCs 世界扫描）
+    //  → 暂停帧清空后不回填,与原版"暂停期 update 相悬停（箱/梳妆台）不重 claim"同相;
+    //  原版绘制相悬停（DrawMouseOver :43595 → DrawInterface_39）暂停帧照重 claim
+    //  （NPC 名/掉落物名）,本仓该族 claim 亦在 fixedUpdate → 暂停期不显示,偏差方向
+    //  "少显"非"残留",登记不接（要接须拆 draw 相 claim 面,独立刀）。
+    if (this.world) this.mouseOversClear();
     windSway.active = !this.paused; // _isActiveAndNotPaused（暂停不喷落叶；物理随 !paused 冻结）
     // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）
     (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
@@ -7569,6 +7631,13 @@ export class Game implements GameHooks {
     if (!this.paused && options.data.frameSkipMode === 'subtle' && steps === 0) {
       return;   // SuppressDraw 语义：逻辑未推进的超前帧不重绘（画布保留上一帧）
     }
+    // ★SW-BJ72 2026-09-14：余辉验证+指针图标上下文改挂【绘制拍】逐帧（原版
+    //  ItemIconCacheVerification 调用点 = DrawInterface_40 :45817/1458 :45823——每
+    //  【绘制】帧衰减,暂停帧照衰减;上下文组装是纯读快照）。曾挂 tickCursorIcon
+    //  （fixedUpdate）→ 暂停拍余辉 cacheTime/群系覆写/uiBlocking 快照全部冻结旧态,
+    //  余辉图标滞留光标旁（同上残留族）。SuppressDraw 抑制帧不跑=原版同相
+    //  （Verification 在 draw 内,被抑制帧不进 draw）。
+    if (this.world) this.refreshCursorIconDrawState();
     const r0 = performance.now();
     this.render();
     gfxQuality.drawsThisSecond++;
@@ -7733,14 +7802,73 @@ export class Game implements GameHooks {
    *  （Select :498-499;kiting 计数未建模同数字键臂）+ cb.onInventoryChanged()。
    *  同帧序：原版数字键块（:25289-25330）先于滚轮块（:25406）读同一 selectedItemState,
    *  末写者胜;本仓 keydown 边沿即时写、tick 滚轮相对叠加=同相。QuickMount 链
-   *  （:12264-12288 坐骑键族）零滚轮消费面=无交叉。SoundID 12（Select :492）与数字键臂
-   *  现状一致不响=同域债一并登记（不单边响,防两通道不一致）。 */
+   *  （:12264-12288 坐骑键族）零滚轮消费面=无交叉。
+   *  ★BJ68 2026-09-14 SoundID 12（MenuTick,Select :492）债清偿：原版三臂（数字键
+   *  :25370/±键+滚轮 :32033）全汇 Select → 变更拍播 :490-493;本仓两臂+数字键臂同拍
+   *  接通（menuTick,无坐标=全局 UI 音,单边禁;overridden/buffered 未建模 → 门=变更拍）。 */
   private hotbarWheelSwitch(notches: number): void {
     const num = -notches;                                            // :32029 /-120 负号
     const target = ((this.smartSelectHotbar + num) % 10 + 10) % 10;  // ClampHotbarOffset(:32134-32145)
+    const prevSel = this.player.inv.selected;
     this.player.inv.selected = target;
+    if (prevSel !== target) this.playSfx('menuTick');   // Select :490-493 变更拍（同数字键臂）
     this.player.afkCounter = 0;             // Select(:498) 同款清零
     this.cb.onInventoryChanged();
+  }
+
+  // ---- aiStyle 160（Projectile.DefaultToKite,Projectile.cs:10746-10753）弹 id 集
+  // （1457 Projectile.SetDefaults 七支 :7891-7893/:8042-8045/:8057-8060/:8138-8141/
+  // :8151-8154/:8170-8173/:8184-8187;1458 同域 :7891/:8042/:8057/:8138/:8151/:8170/:8184
+  // 逐值全等——25 弹；生产面 Item.cs:37245/:37283/:38248-38568 DefaultToKite(projId)）。
+  // 本仓弹幕实体无 aiStyle 载体 → IsInterruptible 的 aiStyle==160 门以 projId 集承载。
+  static readonly KITE_PROJ_IDS: ReadonlySet<number> = new Set([
+    ...Array.from({ length: 6 }, (_, i) => 766 + i),   // 766-771
+    ...Array.from({ length: 3 }, (_, i) => 822 + i),   // 822-824
+    ...Array.from({ length: 5 }, (_, i) => 826 + i),   // 826-830
+    ...Array.from({ length: 3 }, (_, i) => 838 + i),   // 838-840
+    ...Array.from({ length: 4 }, (_, i) => 843 + i),   // 843-846
+    850, ...Array.from({ length: 2 }, (_, i) => 852 + i),   // 850 / 852-853
+  ]);
+
+  /** Player.TryInterruptingItemUsage 1:1 定义面移植（P.cs:24353-24440;1456:23887-23974/
+   *  1458:24351-24438 同款）。★BJ68 2026-09-14 死码定谳（fx51 剩债②翻案）：三版反编译
+   *  全树 grep 仅定义零调用点（1.4.0.5 无此方法）=原版本体不执行——本仓同构移植：
+   *  **不接调用点**（接了=自造原版没有的行为,反模式#1;数字键/滚轮臂消费面在
+   *  hotbarWheelSwitch+keydown 臂,不在此面）。法体照抄供死码断言测试直驱与未来
+   *  风筝 AI（aiStyle160 生产面）实装时按新定谳接线,勿凭本注直接接。
+   *  原版结构：flag=heldProj>-1∧IsInterruptible（Projectile.cs:22370-22378 唯
+   *  aiStyle==160 支）→ 早退;flag2=Hotbar1..10 触发电平（:24364-24403,本仓数字键
+   *  为 keydown 事件沿、无轮询电平表 → 经 hotbarTriggered 参数入口）∨ 滚轮臂
+   *  （:24421-24433 门=!mapFullscreen∧!capture∧!hairWindow∧!playerInventory;
+   *  num=HotbarPlus-Minus∨ScrollWheelDelta/-120,num≠0 → flag2）;末拍 flag2 →
+   *  Interrupt（Projectile.cs:22380-22392 aiStyle160 支=Kill+heldProj=-1+
+   *  itemAnimation=0+itemTime=0）。
+   *  未建模臂（死码面内登记,非行为缺口）：①:24417-24419 HotbarScrollCD!=0 veto——
+   *  CD 仅由手柄转盘 Plus/Minus 计数置位（:32026-32031）,键盘/鼠标域不可达,本仓
+   *  无该域状态;②hairWindow 理发窗（:24405-24410）本仓无对局内理发窗（同
+   *  hotbarWheelSwitch 头注③登记）。 */
+  tryInterruptingItemUsage(hotbarTriggered: boolean): void {
+    const held = this.player.heldProj;
+    if (held <= -1) return;                                   // :24355-24361 flag 门
+    const proj = this.entities.projectiles.find((q) => q.id === held);   // Main.projectile[heldProj]
+    if (!proj) return;
+    const vid = (proj as { projId?: number }).projId
+      ?? (proj as { vanillaId?: number }).vanillaId ?? 0;
+    if (!Game.KITE_PROJ_IDS.has(vid)) return;                 // IsInterruptible 唯 aiStyle160 支
+    // flag2 臂1：Hotbar1..Hotbar10（:24364-24403）→ hotbarTriggered 参数（事件沿域）
+    let flag2 = hotbarTriggered;
+    // flag2 臂2：滚轮（:24421-24433 门序照抄;ScrollWheelDelta/-120=wheelDelta ±notch 档）
+    if (!this.renderer.fullMap.open && !this.renderer.captureMode.active
+      && !(typeof window !== 'undefined'
+        && ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false))) {
+      if (this.input.wheelDelta !== 0) flag2 = true;
+    }
+    if (flag2) {                                              // :24434-24436 Interrupt 支
+      proj.dead = true;                                       // Projectile.Kill 等价（compact 剔除）
+      this.player.heldProj = -1;                              // :22385
+      this.player.itemAnimTicks = 0;                          // :22386 itemAnimation=0
+      this.player.useTime = 0;                                // :22387 itemTime=0
+    }
   }
 
   private fixedUpdate(dt: number) {
@@ -13630,11 +13758,14 @@ export class Game implements GameHooks {
     //  短剑 3483+ 全列）——旧注"模板无 noUseGraphic 须画手持剑"系 1405 误记，
     //  2026-08-17 据提取表修正；挥击姿势(useStyle 13 身体帧)保留,物品贴图由
     //  useSwing 的 noGraphic 抑制——投射物即唯一的剑）
-    //  ★RB15a（2026-09-13）宝藏袋豁免（集=BOSS_BAG_NO_USE_VIDS,模块级锚注）：
-    //  BossBag 原版无 useStyle=非使用物,持用左键零动作——本臂兜底 useSwing(:13619)
-    //  曾让持袋左键挥摆,§五裁决左键面=零动作非挥摆,在此整族抑制。
+    //  ★RB15a（2026-09-13）→★BJ69（2026-09-14）数据门推广：BossBag 原版无
+    //  useStyle=非使用物,持用左键零动作——本臂兜底 useSwing 曾让持袋左键挥摆,
+    //  §五裁决左键面=零动作非挥摆。RB15a 的袋集合闭式抑制已推广为数据驱动门
+    //  heldItemUseStyle>0（useStyle==0=非使用物,原版起用总门 Player.cs:43064
+    //  item.useStyle!=0 同语义;袋 21 件为数据面的子集,旧豁免集已退役（标识符
+    //  不回潮,sw-fx21 结构锁）——全量对拍与守卫见 NO_USE_STYLE_BACKFILL_1457 注）。
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
-      && !BOSS_BAG_NO_USE_VIDS.has(viIdFromKey(heldDef.key) ?? -1)
+      && heldItemUseStyle(viIdFromKey(heldDef.key) ?? -1) > 0
       && cw?.kind !== 'summon' && cw?.kind !== 'yoyo'
       && cw?.kind !== 'flail' && cw?.kind !== 'boomerang' && cw?.kind !== 'anchored'
       && cw?.kind !== 'flairon'   // 2611 掷球形态同族投射物即本体（R4,避免 :11292 useStyle5 姿势支抢注册）
@@ -33708,8 +33839,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** UI 拖拽物桥（mainFlow 注入:MouseDisplayItem 非空语义,DrawInterface_40/38 门） */
   uiHeldStack: (() => boolean) | null = null;
 
-  /** 每帧数据面：五字段重置 → 悬停扫描(TileInteractionsMouseOver 语义) → 余辉验证
-   *  → 组装 renderer.cursorIconCtx(绘制层消费) */
+  /** update 相数据面（fixedUpdate 拍,暂停冻结——原版 update 相悬停扫描同相）：
+   *  五字段重置 → 悬停扫描(TileInteractionsMouseOver 语义)。★SW-BJ72 2026-09-14：
+   *  余辉验证+renderer.cursorIconCtx 组装已拆 refreshCursorIconDrawState（绘制拍
+   *  逐帧,暂停不停）;帧头清零之外还有 frame() 逐帧 mouseOversClear（Main.cs:17213
+   *  同位）兜底暂停拍残留——本函数头部重置保留=直接驱动面（测试/复用）自洁。 */
   private tickCursorIcon(): void {
     const p = this.player;
     p.cursorItemIconEnabled = false;
@@ -33771,7 +33905,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 先于信息饰品行标签（原版 mouseText=true 后 :46578/:46627 不再 claim）
       this.tickHoverNpcName();
     }
-    // 余辉验证（:45929-45945）：所选槽物品 id 与缓存比对（缓存键 = 原版 vid）
+    // ★SW-BJ72 2026-09-14：余辉验证+渲染上下文组装拆出（refreshCursorIconDrawState,
+    //  frame() 绘制拍逐帧调用）——本函数挂 fixedUpdate,暂停拍不跑;若保留组装,暂停拍
+    //  cursorIconCtx 旧快照（余辉 cacheTime/群系覆写/uiBlocking）会冻结进绘制层。
+  }
+
+  /** 绘制拍每帧（frame() 中 render 前,SuppressDraw 抑制帧跳过）：余辉验证
+   *  （ItemIconCacheVerification Main.cs:45929-45945;原版调用点 = DrawInterface_40
+   *  :45817/1458 :45823 = 绘制相,每绘制帧衰减,暂停帧照衰减）+ 指针图标上下文重建
+   *  （DrawInterface_40 消费面纯读快照:手持 vid/群系覆写/油漆子图标/住房头像/
+   *  cursorScale/uiBlocking 随实时输入刷新——暂停拍不再滞留旧态）。 */
+  private refreshCursorIconDrawState(): void {
+    if (!this.renderer) return;
+    const inp = this.input;
+    const p = this.player;
     const held = p.inv.heldItem();
     const heldVid = held ? viIdFromKey(ITEM_DEFS[held.id].key) : 0;
     this.itemIconCache.verify(inp.mouseX, inp.mouseY, heldVid);
@@ -33796,6 +33943,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // mouseInterface 门在 Draw 端（红蓝对抗 C-F8：置位侧照跑,UI 悬停只压绘制）
       uiBlocking: inp.uiBlocking,
     };
+  }
+
+  /** MouseOversClear（Main.cs:47279-47289 1:1）：光标跟随态每帧无条件清空。原版挂
+   *  Update 头部（:17213,先于 :17372 CanPauseGame→gamePaused 门;1458 :17213 同位）,
+   *  清 _mouseTextCache.isValid/noOverride + cursorItemIcon 四字段 + signHover/
+   *  signBubble,再由当帧 claim 面重写——先清后 claim 每帧往复=悬停文字/图标不可能
+   *  残留。本仓等价面：_mouseTextCache 域=cursorItemIconText 字段;signHover/signBubble
+   *  是 Renderer 渲染拍局部态（每绘制帧自清重claim,Renderer :4257-4258）不在此域。
+   *  claim 面在 fixedUpdate（tickCursorIcon/tickInfoAccs）,本方法挂 frame() 头
+   *  （world 门内）保证暂停拍也清零。 */
+  private mouseOversClear(): void {
+    const p = this.player;
+    p.cursorItemIconEnabled = false;
+    p.cursorItemIconID = 0;
+    p.cursorItemIconPush = 0;
+    p.cursorItemIconText = '';
+    p.cursorItemIconReversed = false;
   }
 
   /** 悬停 NPC 名 MouseText（★SW-BJ1 2026-09-06：Main.HoverOverNPCs Main.cs:43820-43832
@@ -34879,9 +35043,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  白天、空闲、地面上的 NPC 与 6 格内另一 NPC 配对，低频随机互发表情 */
   private emoteCooldown = 0;
 
-  /** NPC.dontCountMe 全表(雷达行不计入):1456 SetDefaults 仅 10 处赋 true——
-   *  type 8/9/11/12/14/15/40/41/88/89(NPC.cs:8740/8769/8815/8833/8872/8892/9191/9209/9905/9923) */
-  private static readonly NPC_DONT_COUNT_ME = new Set([8, 9, 11, 12, 14, 15, 40, 41, 88, 89]);
+  /** NPC.dontCountMe 全表已迁 stats/InfoAccs.ts NPC_DONT_COUNT_ME_1457(2026-09-14
+   *  孢子蝙蝠定谳:1456 旧 10 id 表缺 1457 新增 23 id;雷达谓词统一走 radarCountsEnemy) */
 
   /** PlayerFishingConditions(Player.cs:41528-41556)1:1 切片——渔情行无浮标时的
    *  FinalFishingLevel 现算:GetBestFishingPole(手持竿优先,否则全包最高)/GetBait
@@ -35028,16 +35191,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       worldSurface: w.groundLevel, rockLevel: w.rockLevel,
       maxTilesX: w.store.w, maxTilesY: w.store.h,
     };
-    // 层 tick(节流计数 + speedSlice 推进);雷达谓词=原版四门
-    // (active/!friendly/damage>0/lifeMax>5/!dontCountMe :46401;dontCountMe 全表
-    // 仅 10 id:NPC.cs SetDefaults type 8/9/11/12/14/15/40/41/88/89)
+    // 层 tick(节流计数 + speedSlice 推进);雷达谓词=radarCountsEnemy(原版四门
+    // active/!friendly/damage>0/lifeMax>5/!dontCountMe Main.cs:47813 1:1;
+    // ★SW-BJ73 2026-09-14 孢子蝙蝠定谳:旧谓词读 def.lifeMax(EnemyDef 无此字段,
+    // 实为 def.hp)→ 恒假,雷达对一切敌怪恒 0——孢子蝙蝠 634 实报即此总漏检面;
+    // 且 dontCountMe 1456 旧 10 id 表缺 1457 新增 23 蠕虫段/Boss 部件 id)
     r.infoAccs.tick(p, this.entities.enemies as never, this.entities.critters as never,
       p.cx, p.cy,
-      (e) => {
-        const en = e as unknown as { vanillaId: number | null; def?: { damage?: number; lifeMax?: number } };
-        return (en.def?.damage ?? 0) > 0 && (en.def?.lifeMax ?? 0) > 5
-          && !Game.NPC_DONT_COUNT_ME.has(en.vanillaId ?? -1);
-      },
+      (e) => radarCountsEnemy(e as unknown as { vanillaId: number | null; def?: { friendly?: boolean; damage?: number; hp?: number } }),
       (vid) => npcRarityOf(vid as number | null),
       (vid) => vid != null ? Lang.npcName(vid as number) : null,
       (vx, vy) => Math.hypot(vx, vy),
@@ -37155,14 +37316,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义）：瓦罐→整罐碎裂，其余→breakTile。
    *  手持再生法杖 213/再生之斧 5295 挥割药草 → staffOfRegrowthBonus（:44013-44016，
-   *  ItemCheck_CutTiles 挥击期间置位，breakTile 掉落求值时消费） */
-  cutTile(x: number, y: number) {
+   *  ItemCheck_CutTiles 挥击期间置位，breakTile 掉落求值时消费）
+   *  ★SW-BJ67（2026-09-14）vid 逐型豁免面（P.cs:15391-15393;1458 :15392 同）：
+   *  `type==1047 && tile.type==231 → flag=false`——彩虹巨石滚过幼虫（tileCut[231],
+   *  Main.cs:7536）不割 → 不召蜂王。vanilla CutTilesAt 逐型 flag 表在弹侧,
+   *  本仓收口在 Game.cutTile 单点 → vid 由 EntityManager/cutTilesBox 穿线。 */
+  cutTile(x: number, y: number, vid?: number) {
     const st = this.world.store;
     if (!st.inBounds(x, y)) return;
     const t = st.get(x, y);
     // ★幽灵格门（2026-09-03）：原版 Collision.CutTiles（:15454 循环）首门 active()
     //  ——弹体砍切不割幽灵残型（放置域同款洞清扫）
     if (t === 0 || !st.hasTile(x, y)) return;
+    // ★SW-BJ67 D4：1047×幼虫豁免（vanilla 是 flag=false → 不进 KillTile 支;
+    //  瓦罐支在 TILE_CUT 判之前,231 非瓦罐,豁免位次与原版同向）
+    if (cutTilesTypeExempt(vid, t)) return;
     if (t === POT_TILE) this.smashPot(x, y);
     else if (TILE_CUT.has(t)) {
       if (t === TILE_BY_KEY['v_83_herbs_mature'] || t === TILE_BY_KEY['v_84_herbs_bloom']) {

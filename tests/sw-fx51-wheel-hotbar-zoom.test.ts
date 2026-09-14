@@ -79,6 +79,8 @@ interface WheelShell {
   smartSelectHotbar: number;
   paused: boolean;
   cb: { onInventoryChanged: ReturnType<typeof vi.fn> };
+  // BJ68 2026-09-14:hotbarWheelSwitch 接 Select 音(SoundID 12)后触及 sfx sink——壳补桩
+  sfx: { play: ReturnType<typeof vi.fn> };
   fullMapWheelZoom(): void;
   hotbarWheelSwitch(notches: number): void;
 }
@@ -100,6 +102,7 @@ function wheelShell() {
   g.smartSelectHotbar = 3;
   g.paused = false;
   g.cb = { onInventoryChanged: vi.fn() };
+  g.sfx = { play: vi.fn() };   // BJ68:menuTick 桩（音效面断言在 bj68-select-sound-interrupt.test.ts）
   return { g, calls, fm, p };
 }
 

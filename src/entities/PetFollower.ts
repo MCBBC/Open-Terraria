@@ -34,7 +34,10 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 // ★终清波批：1090 彩虹巨石宠微光粒子（AI_067 ai[0]==1 段 Projectile.cs:50640-50648,
 // ParticleOrchestration ShimmerBlock clientOnly:true 本地直驱——fx 本体 L6 收编池复用）
-import { shimmerBlockFx } from '../fx/orchestraFx';
+// ★SW-BJ67（2026-09-14）：+orchestraHslCss（Extra_283 虹晕三重 hsl 相位色）+
+//   rainbowBoulderCell（滚动模式 1047 壳表切片,RollingBoulder 同源金标导出）
+import { shimmerBlockFx, orchestraHslCss } from '../fx/orchestraFx';
+import { rainbowBoulderCell } from './RollingBoulder';
 // ★终清波批：1050 斧仙树干扫描面（TileID.Sets.IsShakeable 等价集）+ 木材 vid→key
 import { TREE_SHAKEABLE_SHEETS } from '../world/TreeShake';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -150,6 +153,27 @@ function jumpPick(st: { inBounds(c: number, r: number): boolean; isSolid(c: numb
 }
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
+/** ★SW-BJ67 D3：Extra_283 虹晕逐帧染色 scratch（34×36 小图 ×3/帧,canvas
+ *  source-in 直染——模块内自持,不涉 Renderer 共享域） */
+let glowTintCanvas: HTMLCanvasElement | null = null;
+function tintGlow(img: ImageBitmap | HTMLImageElement, css: string): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  const c = glowTintCanvas ?? (glowTintCanvas = document.createElement('canvas'));
+  if (c.width !== img.width || c.height !== img.height) {
+    c.width = img.width;
+    c.height = img.height;
+  }
+  const g = c.getContext('2d');
+  if (!g) return null;
+  g.globalCompositeOperation = 'source-over';
+  g.clearRect(0, 0, c.width, c.height);
+  g.drawImage(img, 0, 0);
+  g.globalCompositeOperation = 'source-in';
+  g.fillStyle = css;
+  g.fillRect(0, 0, c.width, c.height);
+  return c;
+}
 
 /** ★终零波批：帧 branch 自带 rotation 的逐款集（208/825/958/1027——
  *  Projectile.cs:65827/:61861/:61969/:63624，draw() 消费 animRot） */
@@ -295,6 +319,24 @@ export class PetFollower extends Entity {
    *  undefined = 本拍无旋转覆写 → 走通用翻转面） */
   private animRot?: number;
 
+  // ---- ★SW-BJ67（2026-09-14）1090 彩虹巨石宠滚动模式（D3）----
+  //  域：P.cs:52080-52105（帧环 + localAI[2] 混合,aiStyle 67 尾 type==1090 段;
+  //  1458 同域逐字 +1 行）、Main.cs:33212-33217（滚动模式切绘 1047 壳表）、
+  //  Main.cs:33338-33400（num351=localAI[2] 拖尾混合 + 非滚动 Extra_283 虹晕）、
+  //  P.cs:50835-50838（滚动态自旋 rotation += 0.5×spriteDirection,1056/1090 共线）。
+  /** 1047 壳表帧环（vanilla proj.frame 与 projFrames 条带帧共用域——本仓 1090 的
+   *  petai 条带 frames=1 恒 0,壳环独立承载互不干扰;语义与 vanilla 同一 frame 位） */
+  rbFrame = 0;
+  private rbFrameCounter = 0;
+  /** localAI[2]：滚动混合系数 0..1（±0.025/t,P.cs:52089-52105）——拖尾 α 与
+   *  拖尾绘制门（num351>0）消费 */
+  rbBlend = 0;
+  /** oldPos 旧位环（TrailingMode[1090]=0,Projectile.Update :17199 每拍无条件
+   *  shift+头插 [0]=位移后位;Zero 哨兵=trailN 截断,与 RollingBoulder 同构） */
+  private trailX = new Array<number>(10).fill(0);
+  private trailY = new Array<number>(10).fill(0);
+  private trailN = 0;
+
   constructor(x: number, y: number, public readonly projId: number,
     private ownerRef: () => OwnerRef | null) {
     super();
@@ -341,6 +383,9 @@ export class PetFollower extends Entity {
         this.hoverAI(p, R); break;
     }
     this.stepAnim(R, game, this.x !== prevX);
+    // ★SW-BJ67 D3：1090 帧环/混合/旧位环（AI_067 尾 P.cs:52080-52105 + Update
+    //  :17199——帧环 vanilla 对 type==1090 无条件运转,与 ai[0] 无关）
+    if (this.projId === 1090) this.rainbowBoulderPetTick();
   }
 
   // =============== 地面跳跃族（aiStyle 26 地面子型 + aiStyle 67 滚地族） ===============
@@ -377,6 +422,13 @@ export class PetFollower extends Entity {
         this.vy = accelToward(this.vy, ty, flyAccel);
       }
       this.x += this.vx; this.y += this.vy;
+      // ★SW-BJ67 D3：滚动态自旋（AI_067 ai[0]==1 段 P.cs:50835-50838 `type==1056||
+      //  1090 → rotation += 0.5×spriteDirection`;spriteDirection = sign(vx) :50748,
+      //  vx==0 时沿用旧向——同原文条件赋值语义）+ spriteDirection 维护
+      if (this.projId === 1056 || this.projId === 1090) {
+        if (this.vx !== 0) this.dir = Math.sign(this.vx);
+        this.rollRot += 0.5 * this.dir;
+      }
       // ★终清波批：1090 彩虹巨石宠微光粒子（AI_067 ai[0]==1 归位飞行段 :50640-50648,
       // Main.LocalPlayer.miscCounter %2==0 → ShimmerBlock 编排 @Center+NextCircularEdge
       // (w/2,h/2)、MovementVector=v*0.05、UniqueInfoPiece=500;clientOnly:true 本地直驱）
@@ -1155,6 +1207,8 @@ export class PetFollower extends Entity {
     const ctx = r.ctx;
     if (!ctx || !img) return;
     if (!this.params) { this.legacyDraw(ctx, img); return; }
+    // ★SW-BJ67 D3：1090 专支（滚动模式切绘 1047 壳表 + 拖尾/虹晕,详方法注）
+    if (this.projId === 1090) { this.rainbowBoulderPetDraw(r, ctx); return; }
     const frames = Math.max(1, this.params.e.frames ?? 1);
     // 竖排帧条（原版投射物表布局）：帧高 = 图高/帧数；贴图异常（不足一帧）回退整图
     const fh = frames > 1 ? img.height / frames : img.height;
@@ -1224,6 +1278,147 @@ export class PetFollower extends Entity {
     // 帧按原像素尺寸 1:1 绘制（原版投射物 scale=1，判定盒小于贴图帧）
     ctx.drawImage(img, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
     ctx.restore();
+  }
+
+  // ===========================================================================
+  // ★SW-BJ67（2026-09-14）D3：1090 彩虹巨石宠滚动模式（ai[0]==1 ≡ 本仓 flying
+  //  追赶态——入/出门与原版逐值同构：入 dist>200|||dy|>300（num3 :50347=200、
+  //  num4=300）＝groundAI flying 置位门;出 dist<200∧玩家落地∧未嵌块
+  //  ＝:50671-50676/:50686-50692 落回门＝landGate 逐值）。
+  // ===========================================================================
+
+  /** 帧环 + localAI[2] 混合 + 旧位环（P.cs:52080-52105 尾段 + Update :17199）：
+   *  帧环每 2t 一帧环 0..99（:52080-52086,vanilla 对 type==1090 无条件运转）;
+   *  rbBlend 滚动态 +0.025/t 顶 1、非滚动 −0.025/t 底 0（:52088-52105）;旧位环
+   *  TrailingMode=0 每拍无条件 shift+头插（:17199-17203,[0]=位移后位）。 */
+  private rainbowBoulderPetTick(): void {
+    if (++this.rbFrameCounter >= 2) {                 // :52080-52086
+      this.rbFrameCounter = 0;
+      if (++this.rbFrame >= 100) this.rbFrame = 0;
+    }
+    if (this.flying) {                                // ai[0]==1（:52088-52094）
+      this.rbBlend = Math.min(1, this.rbBlend + 0.025);
+    } else {                                          // :52095-52105
+      this.rbBlend = Math.max(0, this.rbBlend - 0.025);
+    }
+    for (let i = 9; i > 0; i--) {                     // :17199-17203（TrailingMode[1090]=0）
+      this.trailX[i] = this.trailX[i - 1];
+      this.trailY[i] = this.trailY[i - 1];
+    }
+    this.trailX[0] = this.x;
+    this.trailY[0] = this.y;
+    if (this.trailN < 10) this.trailN++;
+  }
+
+  /** 绘制（Main.cs:33212-33217 + :33338-33400）：
+   *  · 滚动态（ai[0]==1）：本体位原位换装 1047 壳表（LoadProjectile(1047)+
+   *    Frame(5,20,frame/20,frame%20),vector82=proj.scale 0.5×2=1 → 19×19 壳格,
+   *    origin=帧心,rotation=num340=rollRot）——vanilla 替换式,非叠加;
+   *  · 非滚动态：Extra_283 虹晕三重（:33348-33361,color=hsl((GTW%2/2+k/3)%1,1,0.5)
+   *    A=0 纯加法×0.3、位=中心+单位向×4.Floor、scale=0.5）+ 本体贴图;
+   *  · 两态共用拖尾（num351>0 门,:33368-33403）：250 拖尾条（α=(127/255)×num351×
+   *    (1−i/10)²、scaleX=2.2×0.5）+ Extra_55 星屑四重（α=(1−i/3)×num351、A=0 加法、
+   *    scale=Lerp(0.1,0.8,(10−i)/10)×0.5、rot=v 向−π/2、帧 (frame−i)%4）。
+   *  ★登记近似：Extra_283 逐帧 hsl 染色经模块内 scratch canvas source-in 直染
+   *  （Renderer 域染色通道不涉）;XNA A=0 加法色 = canvas 'lighter'×α（惯用法同族）。 */
+  private rainbowBoulderPetDraw(r: Renderer, ctx: CanvasRenderingContext2D): void {
+    const rolling = this.flying;                      // ai[0]==1（Main.cs:33212 门）
+    let blend = this.rbBlend < 0 ? 0 : this.rbBlend > 1 ? 1 : this.rbBlend;   // :33343 Clamp
+    if (blend > 0 && rolling) {                       // :33344-33346
+      const spd = Math.hypot(this.vx, this.vy);
+      const lerp = (spd - 3) / 2;                     // GetLerpValue(3,5,|v|,clamped)
+      blend *= lerp < 0 ? 0 : lerp > 1 ? 1 : lerp;
+    }
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    const gtw = typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+    if (!rolling) {
+      // ---- 非滚动：Extra_283 虹晕三重（:33348-33361）----
+      const glow = r.atlas?.ensureVImage('vanilla/Extra_283.png');
+      if (glow) {
+        const num353 = (gtw % 2) / 2;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let k = 0; k < 3; k++) {                 // num352 = 0,1/3,2/3
+          const t = (num353 + k / 3) % 1;
+          // 染色 scratch 不可用（无 DOM 环境）→ 原图直绘降档（色相相缺失,位/α/加法面保留）
+          const drawable = tintGlow(glow, orchestraHslCss(t, 1, 0.5)) ?? glow;
+          const a = t * Math.PI * 2;
+          const ox = Math.floor(Math.cos(a) * 4);
+          const oy = Math.floor(Math.sin(a) * 4);
+          ctx.save();
+          ctx.globalAlpha = 0.3;
+          ctx.translate(this.cx + ox, this.cy + oy);
+          ctx.rotate(this.rollRot);
+          const gw = glow.width * 0.5, gh = glow.height * 0.5;   // vector82=proj.scale 0.5
+          ctx.drawImage(drawable, -gw / 2, -gh / 2, gw, gh);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+    // ---- 拖尾（num351>0 门,Main.cs:33368-33403;Vector89=Size/2=(16,16)）----
+    if (blend > 0) {
+      const streak = r.atlas?.ensureVImage('vanilla/Projectile_250.png');
+      if (streak && streak.width > 0) {
+        for (let i = 9; i > 0; i--) {
+          if (i >= this.trailN) continue;             // Zero 哨兵截断
+          const x1 = this.trailX[i] + this.w / 2, y1 = this.trailY[i] + this.h / 2;
+          const x0 = this.trailX[i - 1] + this.w / 2, y0 = this.trailY[i - 1] + this.h / 2;
+          const seg = Math.hypot(x0 - x1, y0 - y1);
+          if (seg < 0.01) continue;
+          ctx.save();
+          ctx.translate(x1, y1);
+          ctx.rotate(Math.atan2(y0 - y1, x0 - x1) - Math.PI / 2);
+          ctx.globalAlpha = (127 / 255) * blend * (1 - i / 10) * (1 - i / 10);
+          ctx.drawImage(streak, -streak.width * 1.1 / 2, 0, streak.width * 1.1, Math.max(1, seg));
+          ctx.restore();
+        }
+      }
+      const spark = r.atlas?.ensureVImage('vanilla/Extra_55.png');
+      if (spark) {
+        const sh = spark.height / 4;
+        const ox = spark.width / 2, oy = spark.height / 8 + 14;
+        const rot = Math.atan2(this.vy, this.vx) - Math.PI / 2;
+        const f4 = this.rbFrame % 4;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let i = 3; i >= 0; i--) {
+          if (i >= this.trailN) continue;
+          let fi = (f4 - i) % 4;
+          if (fi < 0) fi += 4;                        // num358（:33399-33402）
+          const a = (1 - i / 3) * blend;              // white5（A=0 加法）×num351
+          if (a <= 0) continue;
+          const sc = (0.1 + 0.7 * (10 - i) / 10) * 0.5;   // Lerp(0.1,0.8,(10−i)/10)×num350
+          ctx.save();
+          ctx.globalAlpha = a;
+          ctx.translate(this.trailX[i] + this.w / 2, this.trailY[i] + this.h / 2);
+          ctx.rotate(rot);
+          ctx.drawImage(spark, 0, fi * sh, spark.width, sh, -ox * sc, -oy * sc, spark.width * sc, sh * sc);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
+    // ---- 本体（滚动态=1047 壳表换装 Main.cs:33212-33217;非滚动=自身贴图）----
+    ctx.translate(this.cx, this.cy);
+    if (rolling) {
+      const shell = r.atlas?.ensureVImage('vanilla/Projectile_1047.png');
+      if (shell && shell.width > 0) {
+        const cell = rainbowBoulderCell(this.rbFrame, shell.width, shell.height);
+        ctx.rotate(this.rollRot);
+        ctx.drawImage(shell, cell.sx, cell.sy, cell.sw, cell.sh,
+          -cell.sw / 2, -cell.sh / 2, cell.sw, cell.sh);   // vector82=0.5×2=1 → 19×19 壳格
+      }
+    } else {
+      const img = r.atlas?.ensureVImage(`vanilla/Projectile_${this.projId}.png`);
+      if (img) {
+        ctx.rotate(this.rollRot);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   // =============== 回退：旧统一肩后悬停近似（表外 proj id 用） ===============

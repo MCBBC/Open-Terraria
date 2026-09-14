@@ -901,6 +901,14 @@ export class Player extends Entity {
    *  用。Game.fixedUpdate 每帧注入（swing 在 postUpdate 递减，读到的是上一帧尾值，
    *  ≤1 tick 偏差，注释存档） */
   itemAnimTicks = 0;
+  /** 原版 heldProj（Player.cs:1499 `public int heldProj = -1`）：本 tick 持用中投射物
+   *  槽号——投射物 AI 每拍自写（Projectile.cs:23919/:29536/:41497 等族），Update 前置
+   *  复位块每拍清 -1（:24570）。★BJ68 2026-09-14 死码移植面（fx51 剩债②）：
+   *  消费者 TryInterruptingItemUsage（P.cs:24353-24440）在 1456/1457/1458 反编译全树
+   *  **零调用点**（1.4.0.5 无此方法）= 原版死码——本仓同构：字段+复位+Game.
+   *  tryInterruptingItemUsage 定义面在,无生产面（aiStyle160 风筝弹未实装）无调用点。
+   *  勿据此自造调用/生产（接了=自创行为偏离原版;风筝 AI 实装时随新定谳翻转）。 */
+  heldProj = -1;
   /** 魂镰 3006 吸魂计数（Player.cs:784 字段；NPC.cs:91952-91979 每帧邻域敌
    *  SoulDrain+3006 挥击中 → ++；Player.cs:9555 UpdateBuffs >0 → AddBuff(151,2)
    *  自持；:18939 lifeRegenTime+2；:18979 回复加成 (5+n)/2——每 tick 0 归零） */
@@ -3319,6 +3327,9 @@ export class Player extends Entity {
     // ★GB3 弩车恐慌旗逐拍衰减（AddBuff(205,300)=300t 恒值窗——vanilla 由 buff
     //  timeLeft 递减,本仓以数值字段承载,ResetEffects 读面在 MinionProj.dd2SetFlags）
     if (this.ballistaPanicT > 0) this.ballistaPanicT--;
+    // 原版 heldProj 每拍前置复位（Player.cs:24570,Update 复位块——投射物 AI 同拍
+    // 自写覆盖;本仓现无写面=恒 -1,复位与原版同拍在位保未来生产面语义）
+    this.heldProj = -1;
     this.miscCounter++;
     // AdvancedShadows 历史环（翅膀 45 彩虹拖尾；尾插保持 ≤31）
     this.advancedShadows.push({ x: this.x, y: this.y });

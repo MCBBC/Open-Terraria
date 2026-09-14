@@ -16769,7 +16769,21 @@ export class Renderer {
       if (vid == null) continue;
       const idx = BOSS_HEAD_INDEX[vid];
       if (idx === undefined) continue;
-      const rot = bossHeadRotation(vid, (e as unknown as { visAngle?: number }).visAngle ?? 0);
+      // RB16（2026-09-13）：旋转源改读 e.spin——本仓 rotId 家族的 npc.rotation 载体是
+      // spin（68 守卫 Enemy.dungeonGuardianAI :8205、262 世纪之花 bossAI_queenbee_plantera:537），
+      // 曾读 visAngle：68 改写 spin 后（visAngle 退役）地图头恒 0 不转=回归。
+      // 原版地图头旋转 = GetBossHeadRotation（NPC.cs:7636-7650）：68/262 → npc.rotation；
+      // 35/127 仅 ai[1]∈{1,2}（旋冲/狂暴态,悬浮 tilt=vx/15 不上头）；345(冰雪女王)
+      // 仅 ai[0]==2（自旋环射 NPC.cs:33935 rotation+=0.2）。与本体绘制同字段；小地图
+      // 路径 mapStyle==1 → DrawNPCMapIcons2（Main.cs:56536-56537,:57028 消费）。
+      // ★BJ68 2026-09-14 接 ai 门（RB16 遗留）：35/127 旋转载体=spin（skeletronBossAI
+      // mode1/2 bossAI.ts:89/:214、skeletronPrimeAI mode1/2 bossAI.ts:1605/:1620）、
+      // 345=visAngle（iceQueenAI ai0==2 支 bossAI_moon_events.ts:664）——态值经实体
+      // 字段直读（ai0/ai1 公有位），最小刀不动 AI 喂值面。
+      const ex = e as unknown as { spin?: number; visAngle?: number; ai0?: number; ai1?: number };
+      const rot = vid === 345
+        ? bossHeadRotation(vid, ex.visAngle ?? 0, 0, ex.ai0 ?? 0)
+        : bossHeadRotation(vid, ex.spin ?? 0, ex.ai1 ?? 0, ex.ai0 ?? 0);
       drawHead(this.atlas.ensureVImage(`vanilla/NPC_Head_Boss_${idx}.png`), e.cx, e.cy, false, rot);
     }
   }

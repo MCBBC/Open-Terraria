@@ -45,12 +45,18 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:1340/:2192）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },
+    oreTiersPH: { ...world.oreTiersPH },   // 肉前四档（WF:11294-11320）——★BJ71:曾缺=worker 读档包缝丢
+    meteorShowerCount: world.meteorShowerCount,   // WorldGen.meteorShowerCount（WF:1069/:177）——★BJ71:曾缺
     shadowOrbCount: world.shadowOrbCount,
     sundial: world.sundialCooldown, moondial: world.moondialCooldown,   // WF:1311/1417
     fastForwardTimeToDawn: world.fastForwardTimeToDawn,                 // WF:1342
     fastForwardTimeToDusk: world.fastForwardTimeToDusk,                 // WF:1416
     seedFlags: world.seedFlags,
     weather: world.weatherToSave(), bestiary: world.bestiary.toSave(),
+    // ★BJ71（2026-09-14）：旗击杀计数（BannerSystem.killCount,WF:1347 Save/:2210 Load）随包——
+    //  worker 读档（worldGen.worker:215 packWorld）→ 主线程（WorldGenClient:199 fromPacket）
+    //  同缝;曾缺=即使保存面写入,重进存档计数仍在包缝归零
+    bannerKills: world.bannerKills,
     pendingTownNpcs: world.pendingTownNpcs,
     // ★SW-FX11（2026-09-10）：四塔位/压力板位随包（worker 读档→主线程恢复同缝）
     pendingPillarNpcs: world.pendingPillarNpcs,

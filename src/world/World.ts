@@ -557,6 +557,9 @@ export class World {
     }
     // 困难矿锁定选种（WorldGen.SavedOreTiers；旧档缺省 -1/-1/-1 = 未砸过，首砸重 roll）
     if (p.savedOreTiers !== undefined) w.savedOreTiers = { ...p.savedOreTiers };
+    // 肉前矿档四件（WF:11294-11320）+ 流星雨剩余计数（WF:1069/:177）——★BJ71:包缝曾缺
+    if (p.oreTiersPH !== undefined) w.oreTiersPH = { ...p.oreTiersPH };
+    if (p.meteorShowerCount !== undefined) w.meteorShowerCount = p.meteorShowerCount;
     if (p.shadowOrbCount !== undefined) w.shadowOrbCount = p.shadowOrbCount;
     // 日晷/月晷四件套（WorldFile.cs:1311/1342/1416-1417；旧包缺省=无快进无冷却）
     if (p.sundial !== undefined) {
@@ -577,6 +580,9 @@ export class World {
     if (p.cultistDelay !== undefined) w.cultistDelay = p.cultistDelay;
     if (p.weather) w.applyWeather(p.weather);
     if (p.bestiary) w.applyBestiary(p.bestiary);
+    // ★BJ71（2026-09-14）：旗击杀计数随包回填（BannerSystem.killCount,WF:1347/:2210;
+    //  旧包缺省=保持空表,与 loadSaveData 缺段守卫同口径）
+    if (p.bannerKills) w.bannerKills = p.bannerKills;
     w.pendingTownNpcs = p.pendingTownNpcs;
     // ★SW-FX11（2026-09-10）：四塔位/压力板位随包（联机 worker→主线程同缝）
     w.pendingPillarNpcs = p.pendingPillarNpcs;

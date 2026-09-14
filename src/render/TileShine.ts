@@ -217,6 +217,62 @@ export function shineDelta(
   return [dR, dG, dB];
 }
 
+// ---- ★IIIII249 巡航烘焙时间盒（?shinebudget=<ms>）——flag 解析与取证面 ----
+//
+// 【背景】IIIRS247 实测 transit 最差帧 66.4ms = 本通道巡航烘焙链（drawImage 72%）。
+//   :442 既有「每帧 2 chunk」固定计数预算的分帧不充分：chunk 烘焙成本随高光格
+//   密度浮动，密集砖区单 chunk 可达数十 ms，2 chunk 仍可整帧爆掉。
+// 【语义】?shinebudget=<ms>（如 shinebudget=4）启用毫秒时间盒：预算窗内逐 chunk
+//   ensureEntry，超线剩余 chunk 标记待烘（pendingQ）下一帧优先续烘（先到先得 +
+//   chunk 中心与相机中心距离升序）；缓存命中/已烘 chunk 永不重烘。
+//   缺省（不传参/解析失败）= 现行「每帧 2 chunk」计数预算【逐位不变】；
+//   shinebudget=0 = 显式关（转正后的反向逃生门）。
+// 【零随机备案】stampShineCell/bakeShineChunk 全链（drawVanillaCell/chestLidPoseAt/
+//   tintRegion/applyPaintTint*/getTilePaintSettings/frameMergesWith/animFrameIdx）
+//   无任何随机数消费（全仓 grep 定谳：Paint.ts:720 Math.random 仅涂层刮除尘钩子
+//   paintCoatDustColor，不在烘焙可达路径；TileTint.ts:124 为 Map 迭代序，确定性）。
+//   ⇒ 延迟烘焙/断行续烘不重排任何 RNG 流，闪光变体分配与一次烘完逐位恒等。
+
+/** 解析 ?shinebudget=<ms>（纯函数，单测面）。null=未传/无效（缺省=现行计数预算）；
+ *  0=显式关（逃生门）；>0=时间盒毫秒/帧。小数向下取整；负数/非有限=容错视同未传。 */
+export function parseShineBudget(search: string): number | null {
+  if (!search) return null;
+  const raw = new URLSearchParams(search).get('shinebudget');
+  if (raw === null) return null;
+  const v = Math.floor(Number(raw));
+  return Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+/** 模块装载期解析（?glband 先例：渲染模块直读 location；Node/vitest 无 location=0=缺省路径）。 */
+export const shineBudgetMs: number =
+  typeof location !== 'undefined' && typeof location.search === 'string'
+    ? parseShineBudget(location.search) ?? 0
+    : 0;
+
+/** 时间盒模式逐帧计数（仅 shineBudgetMs>0 的调度路径推进；缺省路径零成本零触碰）。
+ *  探针消费面：bakes 停涨+hits 单调 = 缓存无重烘抖动；catchup* = chunk 出现→完成帧数。 */
+export const shineStats = {
+  frames: 0,        // 预算模式 drawTileShineGrid 帧数
+  ensures: 0,       // 调度相 ensureEntry 调用数
+  hits: 0,          // 档位全等且已完成（零烘焙命中）
+  resumes: 0,       // 断行续烘
+  resumesStalled: 0, // 续烘零进展次数(断行行号未动)——诊断面
+  bakeMs: 0,         // 烘焙链毫秒累计(时间盒模式;帧时归因面)
+  bakes: 0,         // 全新烘焙（含超线部分烘焙）
+  stale: 0,         // 超线最近档旧帧顶替
+  skips: 0,         // 超线首烘跳过（null）
+  pending: 0,       // 帧初待烘队列长度（上一帧遗留）
+  immediate: 0,     // 出现当帧即烘完的 chunk 数（追赶 0 帧）
+  catchupMax: 0,    // 单 chunk 出现→完成最长帧数
+  catchupN: 0,      // 追赶样本数
+  catchupSum: 0,    // 追赶帧数累计（均值 = catchupSum/catchupN）
+  reset(): void {
+    for (const k of Object.keys(this) as (keyof typeof this)[]) {
+      if (typeof this[k] === 'number') (this as unknown as Record<string, number>)[k] = 0;
+    }
+  },
+};
+
 // ---- 绘制层 ----
 
 interface ShineChunkEntry {
@@ -227,6 +283,9 @@ interface ShineChunkEntry {
   _mulCtx?: CanvasRenderingContext2D;
   _addCtx?: CanvasRenderingContext2D;
   shimmerQ: number;
+  /** ★IIIII249 时间盒部分烘焙断行标记：>0 = 已烘 [0.._resumeRow) 行,下帧续烘；
+   *  undefined = 烘完（现行路径恒 undefined = 零行为差）。 */
+  _resumeRow?: number;
 }
 
 const S = CHUNK * TILE;          // 256
@@ -258,6 +317,55 @@ function devTools(): { s: CanvasRenderingContext2D; m: CanvasRenderingContext2D;
   return scratchCtx && maskCtx && scratch && mask
     ? { s: scratchCtx, m: maskCtx, sc: scratch, mk: mask }
     : null;
+}
+
+/** chunk 条目是否已烘完（★IIIII249：时间盒部分烘焙条目带断行标记）。现行路径
+ *  烘焙恒一次烘完（_resumeRow 恒 undefined）= 恒 true，零行为差。 */
+export function shineEntryComplete(e: ShineChunkEntry): boolean {
+  return e._resumeRow === undefined;
+}
+
+/** 取证导出（惰性，零渲染触碰；等价性对拍仪/A/B 探针专用）：[bx0..bx1]×[by0..by1]
+ *  界内 shine 缓存逐 chunk 摘要——档位 q/完成态/层有无/像素校验和（sum=Σ字节,
+ *  sumX=Σ字节×偏移,位置敏感）。同世界同暖机序列下摘要全等 = 烘焙产物逐位等价
+ *  （对粒子/天空/HUD 等全帧噪声免疫——本机今日树上全帧 sha 不自洽,故对拍下沉到
+ *  本通道自身产物层）。注意 chunks.get 会按需烘底图（ChunkCache.get）——界外勿调。 */
+export function shineDebugChunkDigests(
+  chunks: { get(cx: number, cy: number): ChunkPair },
+  bx0: number, bx1: number, by0: number, by1: number,
+): Array<{
+  cx: number; cy: number; q: number; done: boolean; hasMul: boolean; hasAdd: boolean;
+  resumeRow: number; sum: number; sumX: number;
+}> {
+  const out: Array<{
+    cx: number; cy: number; q: number; done: boolean; hasMul: boolean; hasAdd: boolean;
+    resumeRow: number; sum: number; sumX: number;
+  }> = [];
+  for (let cy = by0; cy <= by1; cy++) {
+    for (let cx = bx0; cx <= bx1; cx++) {
+      const slots = shineCache.get(chunks.get(cx, cy));
+      if (!slots) {
+        out.push({ cx, cy, q: -1, done: false, hasMul: false, hasAdd: false, resumeRow: -1, sum: 0, sumX: 0 });
+        continue;
+      }
+      for (const s of slots) {
+        const e = s.e;
+        let sum = 0, sumX = 0, hasMul = false, hasAdd = false;
+        for (const c of [e.mul, e.add]) {
+          if (!c) continue;
+          if (c === e.mul) hasMul = true; else hasAdd = true;
+          const d = (c.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, S, S).data;
+          for (let i = 0; i < d.length; i++) {
+            const b = d[i];
+            if (!b) continue;
+            sum += b; sumX += b * i;
+          }
+        }
+        out.push({ cx, cy, q: s.q, done: shineEntryComplete(e), hasMul, hasAdd, resumeRow: e._resumeRow ?? -1, sum, sumX });
+      }
+    }
+  }
+  return out;
 }
 
 /** 与 chunk 烘焙同款 merge 谓词（ChunkCache.ts:716 `(t) => t === type || frameMergesWith(type, t)`） */
@@ -329,11 +437,24 @@ function stampShineCell(
 
 function bakeShineChunk(
   atlas: SpriteAtlas, world: World, cx: number, cy: number, shimmerQ: number,
+  deadline?: number, resume?: ShineChunkEntry,
+  /** ★仅测试面消费(shineDebugResumeIdentity):行数限制断行;生产恒 undefined。 */
+  stopAfterRows?: number,
 ): ShineChunkEntry {
-  const entry: ShineChunkEntry = { shimmerQ };
+  const entry: ShineChunkEntry = resume ?? { shimmerQ };
   const st = world.store;
   const x0 = cx * CHUNK, y0 = cy * CHUNK;
-  for (let ly = 0; ly < CHUNK; ly++) {
+  const ly0 = resume?._resumeRow ?? 0;
+  const rowLimit = stopAfterRows !== undefined ? Math.min(CHUNK, ly0 + Math.max(0, stopAfterRows)) : CHUNK;
+  // ★IIIII249 时间盒断行粒度=【行】——超线只在行首检查(行内不中断)。续烘从断行
+  // 起、行序不变、不重踏任何已烘格 ⇒ 与一次烘完逐位恒等。行内断点被禁的原因:
+  // stampShineCell 对 entry 画布是 source-over 覆盖写(格盒 40px 相互重叠 12px),
+  // 重踏已烘格会在 AA 重叠带二次混合(非幂等),行首断点天然避开。
+  for (let ly = ly0; ly < rowLimit; ly++) {
+    if (deadline !== undefined && performance.now() > deadline) {
+      entry._resumeRow = ly;   // 断行标记:本行未烘,下帧从此行续
+      return entry;
+    }
     for (let lx = 0; lx < CHUNK; lx++) {
       const x = x0 + lx, y = y0 + ly;
       if (!st.inBounds(x, y)) continue;
@@ -385,30 +506,267 @@ function bakeShineChunk(
       }
     }
   }
-  return entry;
+  if (rowLimit < CHUNK) {
+    entry._resumeRow = rowLimit;   // 行数限制断行(测试面):同时间盒语义的部分标记
+    return entry;
+  }
+  entry._resumeRow = undefined;   // ★IIIII249 烘完必须清断行标记——否则条目永远"部分",
+  return entry;                   // 每帧被重续烘尾部行(steady 实测曾因此 100% stalled)
+}
+
+/** ★IIIII249 烘焙预算两形态:计数(现行 `{left}`,每帧 N chunk)/时间盒(`{deadline}`,
+ *  ?shinebudget=<ms>)。计数形态语义逐位保持原实现。 */
+type ShineBakeBudget = { left: number } | { deadline: number };
+
+/** 预算超线判定(计数形态 = 原 `budget.left <= 0` 原语义;时间盒 = 死线已过)。
+ *  导出面 = 单测(纯函数,时钟仅 deadline 支消费)。 */
+export function budgetExhausted(budget: ShineBakeBudget | undefined): boolean {
+  if (!budget) return false;
+  return 'deadline' in budget ? performance.now() >= budget.deadline : budget.left <= 0;
+}
+
+/** 预算扣减(仅计数形态;时间盒由死线自然耗尽)。导出面 = 单测。 */
+export function budgetConsume(budget: ShineBakeBudget | undefined): void {
+  if (budget && 'left' in budget) budget.left--;
+}
+
+/** 工作清单项(调度/纯函数共用形)。 */
+export interface ShineWorkItem { cx: number; cy: number; pair: ChunkPair }
+
+/** 纯函数(单测面):工作清单合并排序——待烘队列(先到先得)在前 + 视界缺额在后,
+ *  两组各自按 chunk 中心与相机中心【距离升序】,并列=行序(确定性);按 pair 去重
+ *  (同 chunk 同帧只处理一次)。返回新数组,不改入参。 */
+export function planShineWork<T extends ShineWorkItem>(
+  pending: readonly T[], fresh: readonly T[], camX: number, camY: number,
+  chunkPx = CHUNK * TILE,
+): T[] {
+  const d2 = (cx: number, cy: number) => {
+    const dx = (cx + 0.5) * chunkPx - camX, dy = (cy + 0.5) * chunkPx - camY;
+    return dx * dx + dy * dy;
+  };
+  const byDist = (a: T, b: T) =>
+    d2(a.cx, a.cy) - d2(b.cx, b.cy) || a.cy - b.cy || a.cx - b.cx;
+  const out: T[] = [];
+  const seen = new Set<ChunkPair>();
+  for (const it of [[...pending].sort(byDist), [...fresh].sort(byDist)].flat()) {
+    if (seen.has(it.pair)) continue;
+    seen.add(it.pair);
+    out.push(it);
+  }
+  return out;
 }
 
 function ensureEntry(
   atlas: SpriteAtlas, world: World, pair: ChunkPair, cx: number, cy: number,
-  shimmerQ: number, budget?: { left: number },
+  shimmerQ: number, budget?: ShineBakeBudget,
 ): ShineChunkEntry | null {
   const slots = shineCache.get(pair);
   if (slots) {
-    for (const s of slots) if (s.q === shimmerQ) return s.e;   // 档位命中(含边界回摆)
+    for (const s of slots) if (s.q === shimmerQ) {
+      // 档位命中(含边界回摆)。已完成 = 零烘焙返回(缓存命中永不重烘);时间盒下
+      // 部分烘焙条目 = 断行续烘(行序不变 ⇒ 与一次烘完逐位恒等,见 bakeShineChunk 注)
+      const e = s.e;
+      if (shineEntryComplete(e) || !budget || !('deadline' in budget)) {
+        if (budget && 'deadline' in budget) shineStats.hits++;   // 时间盒命中记账(计数路径零触碰)
+        return e;
+      }
+      if (performance.now() < budget.deadline) {
+        shineStats.resumes++;
+        const before = e._resumeRow;
+        const __t0 = performance.now();
+        bakeShineChunk(atlas, world, cx, cy, shimmerQ, budget.deadline, e);
+        shineStats.bakeMs += performance.now() - __t0;
+        if (!shineEntryComplete(e) && e._resumeRow === before) shineStats.resumesStalled++;
+      }
+      return e;
+    }
     // 档位未命中:预算内重烘,预算外用最近档旧帧顶替(shine 渐进更新,无爆发)
-    if (budget && budget.left <= 0) return slots[slots.length - 1].e;
-    const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ);
-    if (budget) budget.left--;
+    if (budgetExhausted(budget)) {
+      if (budget && 'deadline' in budget) shineStats.stale++;
+      return slots[slots.length - 1].e;
+    }
+    const __tBake = performance.now();
+    const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ,
+      budget && 'deadline' in budget ? budget.deadline : undefined);
+    if (budget && 'deadline' in budget) {
+      shineStats.bakes++;
+      shineStats.bakeMs += performance.now() - __tBake;
+    }
+    budgetConsume(budget);
     if (slots.length >= 3) slots.shift();
     slots.push({ q: shimmerQ, e: ne });
     return ne;
   }
   // 首次:预算内烘(预算外本帧跳过该 chunk,下帧再烘)
-  if (budget && budget.left <= 0) return null;
-  const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ);
-  if (budget) budget.left--;
+  if (budgetExhausted(budget)) {
+    if (budget && 'deadline' in budget) shineStats.skips++;
+    return null;
+  }
+  const __tBake = performance.now();
+  const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ,
+    budget && 'deadline' in budget ? budget.deadline : undefined);
+  if (budget && 'deadline' in budget) {
+    shineStats.bakes++;
+    shineStats.bakeMs += performance.now() - __tBake;
+  }
+  budgetConsume(budget);
   shineCache.set(pair, [{ q: shimmerQ, e: ne }]);
   return ne;
+}
+
+// ---- ★IIIII249 时间盒调度(仅 shineBudgetMs>0 路径;缺省路径零触碰) ----
+
+/** 待烘队列条目:底图重烘会换代 ChunkPair(WeakMap 键),留 pair 引用做身份校验。 */
+interface PendingShine { pair: ChunkPair; cx: number; cy: number; seq: number }
+const shinePendingQ: PendingShine[] = [];
+/** pair → 首次待烘帧号(追赶期计量:chunk 从出现到高光完成的帧数;纯遥测)。 */
+const shinePendingSince = new Map<ChunkPair, number>();
+let shineSeq = 0;
+let shineFrame = 0;
+/** 扫描循环只读缓存语义(计数预算 left=0:q 未命中→最近档顶替/无档→null 跳过)。 */
+const SHINE_NO_BAKE: { left: number } = { left: 0 };
+
+/** 档位是否缺额(无 slots/q 未命中/条目仍部分烘焙 ⇒ 缺)。 */
+function shineChunkNeedy(pair: ChunkPair, shimmerQ: number): boolean {
+  const slots = shineCache.get(pair);
+  if (!slots) return true;
+  for (const s of slots) if (s.q === shimmerQ) return !shineEntryComplete(s.e);
+  return true;
+}
+
+/** 追赶计量收账(pair 完成时刻 − 首次待烘帧号;遥测面)。 */
+function shineCatchupSettle(pair: ChunkPair): void {
+  const f0 = shinePendingSince.get(pair);
+  if (f0 === undefined) return;
+  const dt = shineFrame - f0;
+  shineStats.catchupN++;
+  shineStats.catchupSum += dt;
+  if (dt > shineStats.catchupMax) shineStats.catchupMax = dt;
+  shinePendingSince.delete(pair);
+}
+
+/** 取证导出(单测/诊断面):断行续烘逐位恒等证明——同一 chunk 一次烘完 vs
+ *  按 splits 逐段断开+续烘到完成,产物像素校验和逐字节对拍。写全新条目,
+ *  不触碰 shineCache。equal=true ⇔ 续烘链与一次烘完逐位恒等。 */
+export function shineDebugResumeIdentity(
+  atlas: SpriteAtlas, world: World, cx: number, cy: number, shimmerQ: number,
+  splits: number[],
+): Array<{ split: number; sumA: number; sumB: number; sumXA: number; sumXB: number; equal: boolean }> {
+  const digest = (e: ShineChunkEntry) => {
+    let sum = 0, sumX = 0;
+    for (const c of [e.mul, e.add]) {
+      if (!c) continue;
+      const d = (c.getContext('2d') as CanvasRenderingContext2D).getImageData(0, 0, S, S).data;
+      for (let i = 0; i < d.length; i++) {
+        const b = d[i];
+        if (!b) continue;
+        sum += b; sumX += b * i;
+      }
+    }
+    return { sum, sumX };
+  };
+  const a = digest(bakeShineChunk(atlas, world, cx, cy, shimmerQ));
+  const out: Array<{ split: number; sumA: number; sumB: number; sumXA: number; sumXB: number; equal: boolean }> = [];
+  for (const split of splits) {
+    const b0 = bakeShineChunk(atlas, world, cx, cy, shimmerQ, undefined, undefined, split);
+    const b = digest(bakeShineChunk(atlas, world, cx, cy, shimmerQ, undefined, b0));
+    out.push({ split, sumA: a.sum, sumB: b.sum, sumXA: a.sumX, sumXB: b.sumX, equal: a.sum === b.sum && a.sumX === b.sumX });
+  }
+  return out;
+}
+
+/** 取证导出(诊断面):待烘队列逐项状态 + 视界 chunk 槽位摘要(卡死定位用)。 */
+export function shineDebugPendingState(
+  chunks: { get(cx: number, cy: number): ChunkPair },
+  bx0: number, bx1: number, by0: number, by1: number, shimmerQ: number,
+): {
+  pendingQ: Array<{ cx: number; cy: number; near: boolean; validPair: boolean; needy: boolean;
+    q: number; resumeRow: number; slotsLen: number }>;
+  sinceSize: number; frame: number;
+} {
+  const rows: Array<{ cx: number; cy: number; near: boolean; validPair: boolean; needy: boolean;
+    q: number; resumeRow: number; slotsLen: number }> = [];
+  for (const it of shinePendingQ) {
+    const near = it.cx >= bx0 - 1 && it.cx <= bx1 + 1 && it.cy >= by0 - 1 && it.cy <= by1 + 1;
+    const cur = chunks.get(it.cx, it.cy);
+    const slots = shineCache.get(cur);
+    const hit = slots?.find((s) => s.q === shimmerQ);
+    rows.push({
+      cx: it.cx, cy: it.cy, near, validPair: cur === it.pair,
+      needy: shineChunkNeedy(cur, shimmerQ),
+      q: hit?.q ?? -1, resumeRow: hit ? (hit.e._resumeRow ?? -1) : -1, slotsLen: slots?.length ?? 0,
+    });
+  }
+  return { pendingQ: rows, sinceSize: shinePendingSince.size, frame: shineFrame };
+}
+
+/** 时间盒调度:待烘队列(上一帧超线遗留)∪ 视界缺额。先到先得(队列优先)+
+ *  组内按 chunk 中心与相机中心距离升序;尽预算即停,剩余标记待烘下帧优先续烘。
+ *  ★只对近视野项调 chunks.get——ChunkCache.get 会按需烘底图,视野外调用=屏外烘焙。 */
+function scheduleShineBakes(
+  atlas: SpriteAtlas, world: World, chunks: { get(cx: number, cy: number): ChunkPair },
+  cam: Camera, bx0: number, bx1: number, by0: number, by1: number,
+  shimmerQ: number, budget: { deadline: number },
+): void {
+  shineStats.frames++;
+  shineFrame++;
+  const camX = cam.x, camY = cam.y;
+  const d2 = (cx: number, cy: number) => {
+    const dx = (cx + 0.5) * S - camX, dy = (cy + 0.5) * S - camY;
+    return dx * dx + dy * dy;
+  };
+  // ① 待烘队列:近视野者本帧续烘;远离视野者保留待烘资格不占本帧预算;
+  //    pair 换代(底图重烘)即弃(缺额由②按当前 pair 重收)
+  shineStats.pending = shinePendingQ.length;
+  const carry: { cx: number; cy: number; pair: ChunkPair; d: number }[] = [];
+  const keep: PendingShine[] = [];
+  for (const it of shinePendingQ) {
+    const near = it.cx >= bx0 - 1 && it.cx <= bx1 + 1 && it.cy >= by0 - 1 && it.cy <= by1 + 1;
+    if (!near) { keep.push(it); continue; }
+    const cur = chunks.get(it.cx, it.cy);
+    if (cur !== it.pair) continue;
+    if (!shineChunkNeedy(cur, shimmerQ)) { shineCatchupSettle(cur); continue; }
+    carry.push({ cx: it.cx, cy: it.cy, pair: cur, d: d2(it.cx, it.cy) });
+  }
+  // ② 视界缺额(含刚完成的收账)
+  const fresh: { cx: number; cy: number; pair: ChunkPair; d: number }[] = [];
+  for (let cy = by0; cy <= by1; cy++) {
+    for (let cx = bx0; cx <= bx1; cx++) {
+      if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
+      const pair = chunks.get(cx, cy);
+      if (!shineChunkNeedy(pair, shimmerQ)) { shineCatchupSettle(pair); continue; }
+      fresh.push({ cx, cy, pair, d: d2(cx, cy) });
+    }
+  }
+  // ③ 先到先得:待烘队列先于本帧新缺额;组内中心升序+pair 去重(planShineWork
+  //   纯函数,单测同源);逐项尽预算;未完成者(再)标记待烘。
+  //   完成判据用缺额谓词(非条目完成态):超线 stale 顶替返回的是旧档条目,
+  //   当前 q 仍缺 → 必须继续留队,不得误记完成。
+  const order = planShineWork(carry, fresh, camX, camY);
+  const seen = new Set<ChunkPair>();
+  const newPending: PendingShine[] = [...keep];
+  for (const it of order) {
+    seen.add(it.pair);
+    shineStats.ensures++;
+    const e = ensureEntry(atlas, world, it.pair, it.cx, it.cy, shimmerQ, budget);
+    void e;
+    if (!shineChunkNeedy(it.pair, shimmerQ)) {
+      if (shinePendingSince.has(it.pair)) shineCatchupSettle(it.pair);
+      else shineStats.immediate++;
+    } else {
+      if (!shinePendingSince.has(it.pair)) shinePendingSince.set(it.pair, shineFrame);
+      if (!newPending.some((p) => p.pair === it.pair)) {
+        newPending.push({ pair: it.pair, cx: it.cx, cy: it.cy, seq: shineSeq++ });
+      }
+    }
+  }
+  // ④ 上限保险:待烘队列 FIFO 丢最老(防异常场景无界);追赶账本防泄漏
+  if (newPending.length > 128) newPending.splice(0, newPending.length - 128);
+  shinePendingQ.length = 0;
+  for (const p of newPending) shinePendingQ.push(p);
+  if (shinePendingSince.size > 256) {
+    for (const k of [...shinePendingSince.keys()]) if (!seen.has(k)) shinePendingSince.delete(k);
+  }
 }
 
 export interface ShineDev { zz: number; ox: number; oy: number; camRX: number; camRY: number }
@@ -439,12 +797,23 @@ export function drawTileShineGrid(
   ctx.imageSmoothingEnabled = false;
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'lighter';   // A=0 预乘加色语义（同 TileFlames 文件头注）
-  const bakeBudget = { left: 2 };   // ★重烘预算:每帧最多 2 个 chunk 重烘(风暴分帧)
+  // ★IIIII249 预算双形态:timeBudget(?shinebudget=<ms> 时间盒)‖ countBudget
+  //   (缺省「每帧 2 chunk」计数预算,逐位不变)。时间盒:调度相先按「先到先得+
+  //   中心优先」尽预算烘/续,扫描循环只读缓存(SHINE_NO_BAKE:q 未命中→最近档
+  //   旧帧顶替/无档→null 跳过,与计数预算 left=0 同语义)。
+  const tb = shineBudgetMs;
+  const timeBudget = tb > 0 ? { deadline: performance.now() + tb } : null;
+  const countBudget: ShineBakeBudget | undefined = timeBudget ? undefined : { left: 2 };   // ★重烘预算:每帧最多 2 个 chunk 重烘(风暴分帧)
   try {
+    if (timeBudget) {
+      scheduleShineBakes(atlas, world, chunks, cam, bx0, bx1, by0, by1, shimmerQ, timeBudget);
+    }
+    const scanBudget: ShineBakeBudget | undefined = timeBudget ? SHINE_NO_BAKE : countBudget;
     for (let cy = by0; cy <= by1; cy++) {
       for (let cx = bx0; cx <= bx1; cx++) {
         if (cx < 0 || cy < 0 || cx * CHUNK >= world.w || cy * CHUNK >= world.h) continue;
-        const e = ensureEntry(atlas, world, chunks.get(cx, cy), cx, cy, shimmerQ, bakeBudget);
+        const e = ensureEntry(atlas, world, chunks.get(cx, cy), cx, cy, shimmerQ, scanBudget);
+        if (timeBudget && e) shineStats.hits++;   // 时间盒命中记账(零烘焙命中渲染;计数路径零触碰)
         if (!e?.mul) continue;
         // 设备矩形 = drawChunkGrid 同一表达式（共享边同 round → 与底图像素配准）
         const xd0 = dev.ox + Math.round((cx * CHUNK * TILE - dev.camRX) * dev.zz);

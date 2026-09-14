@@ -149,14 +149,14 @@ describe('SW-FX21 右键开袋面（TryOpenContainer_GrantItems :1784 首支补�
     expect(gameSrc).not.toContain('BOSS_BAG_IDS.has');   // 左键门集直查已随链退役
     expect(gameSrc).not.toContain("openBossBag(");       // 引擎唯右键/开包引擎面引用
     expect(gameSrc).not.toContain('openBossBag');        // 连 import 也不得回潮（RB15a 收紧）
-    // ★RB15a 交叉核对:Game.ts「其它物品」臂的左键豁免集与 BOSS_BAG_IDS 全等
-    //  （豁免集刻意本地定义不 import —— 见 Game.ts BOSS_BAG_NO_USE_VIDS 锚注;
-    //  防两表漂移:漏件=持袋挥摆回归,多件=误抑制他人左键）
-    const m = gameSrc.match(/BOSS_BAG_NO_USE_VIDS = new Set\(\[([\s\S]*?)\]\);/);
-    expect(m, 'Game.ts 须存在 BOSS_BAG_NO_USE_VIDS 豁免集').toBeTruthy();
-    const local = new Set(m![1].split(',').map((s) => Number(s.trim())).filter((n) => n > 0));
-    expect(local.size).toBe(21);
-    expect([...local].sort((a, b) => a - b)).toEqual([...BOSS_BAG_IDS].sort((a, b) => a - b));
+    // ★BJ69（2026-09-14）：RB15a 的 BOSS_BAG_NO_USE_VIDS 集合闭式豁免已退役——推广为
+    //  数据驱动门 heldItemUseStyle>0（useStyle==0=非使用物,Player.cs:43064 同语义;
+    //  袋 21 件=数据面子集）。门数据≡Item.cs 真值的逐 id 守卫=tests/bj69-nouse-gate。
+    expect(gameSrc).not.toContain('BOSS_BAG_NO_USE_VIDS');
+    expect(gameSrc).toMatch(/heldItemUseStyle\(viIdFromKey\(heldDef\.key\) \?\? -1\) > 0/);
+    // 袋 21 件门数据全 0（原 heldItemUseStyle 消费面=vanilla-itemfunc.useStyle+回填表,
+    //  袋族两源皆 0——此断言由 import heldItemUseStyle 的 bj69 守卫逐 id 承接,此处锁
+    //  「豁免集不回潮」+「门表达式在位」两面）
   });
 
   // ============ ★RB15a 变异实验（2026-09-13）：持袋左键一帧零副作用 ============
@@ -208,10 +208,10 @@ describe('SW-FX21 右键开袋面（TryOpenContainer_GrantItems :1784 首支补�
     const BAGS = [...BOSS_BAG_IDS];
     it(`持用面全量：左键一帧 no-op（无 swing/无音/无消耗/无 useTime/无实体/无 toast）`, () => {
       expect(BAGS.length).toBe(21);
-      // 3861/3862 仓内未注册为物品（vanilla.json 无条目=玩家不可持用,仅引擎面
-      // 可达,上一测试已全通）——持用面如实跳过,跳过集钉死防内容面漂移
+      // ★BJ69（2026-09-14）：3861/3862 已按数据管线注册（atlas-append ①c→items.ts
+      //  自动注册循环）——袋 21 件全部可持用,无跳过集
       const unholdable = BAGS.filter((v) => !VANILLA_ITEM_KEY_BY_ID[v]);
-      expect(unholdable.sort((a, b) => a - b)).toEqual([3861, 3862]);
+      expect(unholdable.sort((a, b) => a - b)).toEqual([]);
       for (const vid of BAGS) {
         if (!VANILLA_ITEM_KEY_BY_ID[vid]) continue;
         const { g, player, added, sfxCalls, toasts, heldSlot } = bagGame(vid);

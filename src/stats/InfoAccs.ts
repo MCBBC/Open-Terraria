@@ -76,6 +76,52 @@ export function infoAccGatesOf(vanillaIds: Iterable<number>): InfoAccGates {
   return g;
 }
 
+// ================= 雷达(第三只眼)敌怪计数谓词(Main.cs:47800-47816 1:1) =================
+
+/** NPC.dontCountMe 全表——1457 NPC.cs SetDefaults 共 30 处赋 true(NPC.cs:8836/8865/
+ *  8911/8929/8968/8988/9287/9305/10001/10019/10037/10055/10073/10139/10158/10194/
+ *  10212/10725/10745/13201/14478/14497/14779/14798/14834/14853/15325/15343/17034/
+ *  17053;1458 同表逐行核实)→ 32 id。★1456 旧表仅前 10 id(8/9/11/12/14/15/40/41/
+ *  88/89)——1457 起新增 23 id(90-92/96/97/99/100/135/136/328/413/414/455-459/
+ *  511/512/514/515/622/623,均为蠕虫段/Boss 部件族,各自 damage>0 且 lifeMax>5,
+ *  漏排会使雷达把整条蠕虫逐段计入)。运行时无 SetDefaults 之外的赋值位
+ *  (全库唯一读点=Main.cs:47813 雷达行);tests/radar-enemy-count.test.ts 反编译
+ *  直读双版本(1457+1458)锁表。 */
+export const NPC_DONT_COUNT_ME_1457: ReadonlySet<number> = new Set([
+  8, 9, 11, 12, 14, 15,        // 1456 旧 6(蠕虫段族)
+  40, 41, 88, 89,              // 1456 旧 4
+  90, 91, 92,                  // ★1457 新增(NPC.cs:10037/10055/10073)
+  96, 97, 99, 100,             // ★1457 新增(:10139/:10158/:10194/:10212)
+  135, 136,                    // ★1457 新增 毁灭者体/尾段(:10725/:10745)
+  328,                         // ★1457 新增 南瓜王之刃(:13201)
+  413, 414,                    // ★1457 新增(:15325/:15343)
+  455, 456, 457, 458, 459,     // ★1457 新增 教徒龙段族(:14478/:14497)
+  511, 512, 514, 515,          // ★1457 新增(:14834/:14853/:14779/:14798)
+  622, 623,                    // ★1457 新增 血鳗体/尾段(:17034/:17053)
+]);
+
+/** 雷达计数谓词(Main.cs:47813 逐门 1:1):`active && !friendly && damage>0 &&
+ *  lifeMax>5 && !dontCountMe`。本仓映射:active=调用方 dead 门(实体桶无死体)、
+ *  friendly=def.friendly(Enemy.ts:1341 fromVanilla 写入)、damage=def.damage
+ *  (ScaleStats 缩放后基线,critter/friendly 恒 0≡原版 damage>0 门)、
+ *  lifeMax=def.hp(=ScaleStats 后 npc.lifeMax;原版 :18192 弹体 NPC 外下限 6,
+ *  故 >5 门对真怪恒真,真过滤=!friendly/damage/dontCountMe)、dontCountMe=
+ *  NPC_DONT_COUNT_ME_1457。
+ *  ★数据面勘误(2026-09-14,孢子蝙蝠实报):旧谓词读 `def.lifeMax`——EnemyDef 无
+ *  此字段(fromVanilla 写 hp,:1347)→ 恒 undefined → `?? 0 > 5` 恒假 → 雷达对
+ *  一切敌怪恒 0(「附近没有敌人」),孢子蝙蝠 634 实报即此总漏检面。
+ *  距离门(<2000px)与 16 帧节流由调用方扫描环持有(InfoAccsLayer.tick)。 */
+export function radarCountsEnemy(
+  e: { vanillaId: number | null; def?: { friendly?: boolean; damage?: number; hp?: number } },
+): boolean {
+  const def = e.def;
+  if (!def) return false;
+  if (def.friendly === true) return false;
+  if ((def.damage ?? 0) <= 0) return false;
+  if ((def.hp ?? 0) <= 5) return false;
+  return !(e.vanillaId != null && NPC_DONT_COUNT_ME_1457.has(e.vanillaId));
+}
+
 // ================= 行构造(Main.cs:46180-46539 分支序 1:1) =================
 
 export interface InfoAccCtx {

@@ -76,6 +76,7 @@ export class SaveClient {
       timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
       bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
       moonPhase: world.clock.moonPhase, moonType: world.moonType,
+      seedFlags: { ...world.seedFlags },   // 彩蛋种子旗标（SeedEasterEggs;loadSaveData header 回填）——★BJ71:曾漏喂=worker 保存丢旗
       difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
       journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
       // 旅程力量·世界侧（IPersistentPerWorldContent；与 saveGame 主线程路径同源）
@@ -93,14 +94,21 @@ export class SaveClient {
       invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
         x: world.invasionX, delay: world.invasionDelay },
       altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
+      meteorShowerCount: world.meteorShowerCount,   // WorldGen.meteorShowerCount（WF:1069/:177）——★BJ71:曾漏喂=worker 保存归零
       // 夜间小动物概率五件套（setFireFlyChance；旧档缺省=代表值，当晚重掷）
       critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
         fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
       cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:1340/:2192）
       angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
       savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
+      oreTiersPH: { ...world.oreTiersPH },        // 肉前四档（WF:11294-11320,军火商钨弹门）——★BJ71:曾漏喂
       shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
       bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
+      // ★BJ71（2026-09-14）：旗击杀计数（BannerSystem.killCount,原版 WF:1347 Save/:2210 Load
+      //  随世界档持久化）。本 meta 是生产保存主路径（mainFlow.doSave→saveClient.save）的
+      //  第三份装配——曾只有 saveGame/buildSaveParts 喂入,worker 路径落盘 JSON 无
+      //  bannerKills 键 → 重进存档计数归零（用户实报;fx43 bgStyles「meta 装配漏喂」同族）
+      bannerKills: world.bannerKills,
       // ★SW-FX43（2026-09-12）：wld-compat 五通道随档（生产保存主路径——本 meta 与
       //  saveGame/buildSaveParts 三处同源;缺一处即「导入→游玩→存档→导出」丢通道。
       //  bgStyles 同族断链=R16-5 落盘值 meta 三处均未喂入,一并接通）

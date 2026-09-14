@@ -157,7 +157,10 @@ describe('SW-FX10 债⑪ 热键锁 HbLock', () => {
   it('图标接线：Lock_{0锁/1未锁} 双帧贴图 + unlock 音（SoundID 22 :43230）+ inter[5]/[6]', () => {
     expect(uiSrc).toMatch(/url\(sprites\/vanilla\/Lock_\$\{locked \? 0 : 1\}\.png\)/);
     expect(uiSrc).toMatch(/this\.game\.sfx\.play\('unlock', 1\);/);
-    expect(uiSrc).toMatch(/Lang\.inter\(locked \? 6 : 5\)/);
+    // ★RB17a-R7（2026-09-14）重锚：悬停名已改 vinvBindHoverTip 惰性回调（实时读
+    //  player.hbLocked,inter[5]/[6] 映射不变:锁→6/未锁→5）——旧直读 `locked` 变量
+    //  锁文本陈旧,非行为回归。
+    expect(uiSrc).toMatch(/Lang\.inter\(this\.game\?\.player\.hbLocked \? 6 : 5\)/);
     // ★SW-RB11e 勘误（2026-09-10）：pushSideToolsUp = GetBuilderAccsCountToShow.totalDrawnIcons≥10
     //  （Main.cs:41752-41753 同一变量喂 DrawHotbarLockIcon :41755/方块替换 :43247/群系炬 :43289/
     //  图标列 :48166；表式 :48381-48386）——与 SW-FX19 图标列单源同式。原刀误写 visibleRows≥10

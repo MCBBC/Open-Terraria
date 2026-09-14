@@ -51,6 +51,10 @@ export interface WorldPacket {
   angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers；旧包缺省 -1 = 未砸过,首砸重 roll） */
   savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
+  /** 肉前矿档四件（WF:11294-11320,军火商钨弹门；旧包缺省=构造默认 7/6/9/8） */
+  oreTiersPH?: { copper: number; iron: number; silver: number; gold: number };
+  /** 流星雨剩余计数（WorldGen.meteorShowerCount,WF:1069/:177；旧包缺省 0） */
+  meteorShowerCount?: number;
   /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount；旧包缺省 0） */
   shadowOrbCount?: number;
   /** 日晷/月晷快进四件套（WorldFile.cs:1311/1342/1416-1417；旧包缺省=无快进无冷却） */
@@ -62,6 +66,9 @@ export interface WorldPacket {
   weather?: WeatherSave;
   /** 图鉴三桶（读档路径回传;旧包缺省=空） */
   bestiary?: BestiarySave;
+  /** 旗击杀计数（BannerSystem.killCount,原版 WF:1347 Save/:2210 Load 随世界档；
+   *  ★BJ71:worker 读档包缝随包;旧包缺省=空表） */
+  bannerKills?: Record<number, number>;
   /** 城镇 NPC 段（读档路径回传,Game.loadWorld 消费;旧包缺省=空→新世界出生分支） */
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
   /** ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 四塔位（读档路径回传,afterWorldLoad 恢复;旧包缺省=无） */

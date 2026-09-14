@@ -40,6 +40,10 @@ function fakeStore(solidAt?: Set<number>, platformAt?: Set<number>) {
     idx: (x: number, y: number) => y * w + x,
     inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h,
     isSolid: (_x: number, _y: number) => false,
+    // ★SW-BJ67：isPlatform/isActive 补面——D5 动态门（P.cs:26437）落库后 1047
+    //  空场 tileCollide=true → moveAndCollide 实跑,store 面补齐（断言面零变化）
+    isPlatform: (_x: number, _y: number) => false,
+    isActive: (x: number, y: number) => cells.has(y * w + x),
     hasTile: (x: number, y: number) => cells.has(y * w + x),
     isActuated: () => false,
     get: (x: number, y: number) => cells.get(y * w + x) ?? 0,

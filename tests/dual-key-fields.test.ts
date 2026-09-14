@@ -116,13 +116,14 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
     expect(missing, `缺稳定 id def ${missing.length} 件:\n${missing.join('\n')}`).toEqual([]);
   });
 
-  // ★SW-RB8b 2026-09-09 台账一致性钉：BN1 终态三账（ITEM_DEFS 7195→6854、byKey
-  //  8109 键零丢失、VANILLA_ITEM_KEY_BY_ID 6175 vid）——隐式漂移（误注册/批量重放
-  //  踩踏）在此显形； legit 扩容须有意识改本钉（同 banner 290/f 35 过闸惯例）。
-  it('台账一致性：ITEM_DEFS 6854 / byKey 8109 / 权威反查 6175（BN1 终态三账）', () => {
-    expect(ITEM_DEFS.length, 'ITEM_DEFS 基数漂移（BN1 台账 6854）').toBe(6854);
-    expect(Object.keys(ITEM_BY_KEY).length, 'byKey 键数漂移（BN1 台账 8109）').toBe(8109);
-    expect(Object.keys(VANILLA_ITEM_KEY_BY_ID).length, '权威 vid 反查键数漂移（BN1 台账 6175）').toBe(6175);
+  // ★SW-RB8b 2026-09-09 台账一致性钉：BN1 终态三账（ITEM_DEFS 7195→6854→★BJ69
+  //  2026-09-14 6856、byKey 8109→8111 键零丢失、VANILLA_ITEM_KEY_BY_ID 6175→6177
+  //  vid——3861/3862 宝藏袋按数据管线注册=atlas-append ①c+自动注册循环,+2 def/+2
+  //  键/+2 vid legit 扩容有意识改本钉）；隐式漂移（误注册/批量重放踩踏）在此显形。
+  it('台账一致性：ITEM_DEFS 6856 / byKey 8111 / 权威反查 6177（BN1 终态三账,BJ69 扩面）', () => {
+    expect(ITEM_DEFS.length, 'ITEM_DEFS 基数漂移（BN1 台账 6856）').toBe(6856);
+    expect(Object.keys(ITEM_BY_KEY).length, 'byKey 键数漂移（BN1 台账 8111）').toBe(8111);
+    expect(Object.keys(VANILLA_ITEM_KEY_BY_ID).length, '权威 vid 反查键数漂移（BN1 台账 6177）').toBe(6177);
   });
 
   it('全域别名一致性域扫：byKey 每个 vi_ 键与 VANILLA_ITEM_KEY_BY_ID[vid] 同靶（SW-BN4,替代代表抽验）', () => {

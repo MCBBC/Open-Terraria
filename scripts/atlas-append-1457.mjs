@@ -97,6 +97,33 @@ if (!v.items['4722']) {
   } else missing.push('Item_4722(png)');
 }
 
+// ---- ①c TEdit 缺口有消费方补注册（★BJ69 2026-09-14,RB15 债账「3861/3862 物品注册」）----
+// 3861/3862 = Ogre/DarkMage 宝藏袋（ItemID.cs:9268/:9270 BossBagOgre/BossBagDarkMage;
+// ItemID.Sets.BossBag 全集成员=vanillaBossBags.ts BOSS_BAG_IDS 锚）。TEdit items.json
+// 缺条目（①b 注 26 件清单）→ vanilla.json items/itemNames 增键 + 源图单体直引。
+// 注册后 items.ts 自动注册循环（vanilla.json 驱动）产出 def=玩家可持用,右键开包面
+// （UI.tryOpenContainer → openBagItem 首支 BOSS_BAG_IDS 路由 openBossBag）自动覆盖;
+// 3861/3862 主战利品 case 整缺+NPC 576/564 value=0f（NPC.cs:16314/:16484）→ 开袋
+// 零产出=原版刻意,不改产出。命名:官 l10n 无 ItemName.BossBagOgre/BossBagDarkMage 键
+// （en-US Items.json 仅 BossBag* 系 tooltip 键,id-maps en='none'=官方未本地化）——
+// name 按袋族命名法补（3860 'Treasure Bag (Betsy)' 同源 TEdit 面）;key 用 ItemID.cs
+// 常量名。显示名 = tools/l10n-custom ItemName.* 补译（en 官名不存在,按袋族式样）。
+if (!v.items['3861'] || !v.items['3862']) {
+  const EXTRA_ITEMS = {
+    3861: { name: 'Treasure Bag (Ogre)', key: 'BossBagOgre' },
+    3862: { name: 'Treasure Bag (Dark Mage)', key: 'BossBagDarkMage' },
+  };
+  for (const [idStr, meta] of Object.entries(EXTRA_ITEMS)) {
+    if (v.items[idStr]) continue;   // 幂等
+    const src = srcOf(`Item_${idStr}.png`);
+    if (!src) { missing.push(`Item_${idStr}(png)`); continue; }
+    copyFileSync(src, join(OUT_DIR, `Item_${idStr}.png`)); copied++;
+    v.items[idStr] = { name: meta.name, key: meta.key, createTile: null, icon: `vanilla/Item_${idStr}.png` };
+    v.itemNames[idStr] = meta.name;
+    console.log(`TEdit 缺口补注册: Item_${idStr} ${meta.name}（单体直引）`);
+  }
+}
+
 // ---- ② tile 753 ----
 if (!v.tiles['753']) {
   const meta = tileById.get(753);

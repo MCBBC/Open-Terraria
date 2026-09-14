@@ -245,11 +245,16 @@ export function npcRarityOf(vanillaId: number | null): number {
   return NPC_RARITY[vanillaId] ?? 0;
 }
 
-/** Boss 头像旋转(NPC.GetBossHeadRotation :7586-7608):68/262 → npc.rotation;
- *  35/127 仅 ai[1]∈{1,2} / 345 仅 ai[0]==2 取 rotation;其余 0 */
-export function bossHeadRotation(id: number, rotation: number): number {
+/** Boss 头像旋转(NPC.GetBossHeadRotation NPC.cs:7636-7650):68/262 → npc.rotation;
+ *  35/127 仅 ai[1]∈{1,2}(旋冲/白天狂暴态,悬浮态 tilt 不上头) / 345(冰雪女王)
+ *  仅 ai[0]==2(自旋环射态,NPC.cs:33920-33935 rotation+=0.2) 取 rotation;其余 0。
+ *  ★BJ68 2026-09-14 接门(RB16 遗留):此前 35/127/345 输入无感恒 0——ai 态由调用侧
+ *  传入(渲染层经实体字段直读,见 Renderer.ts drawMapHeads boss 头块)。 */
+export function bossHeadRotation(id: number, rotation: number, ai1 = 0, ai0 = 0): number {
   if (id === 68 || id === 262) return rotation;
-  return 0; // 35/127/345 的 ai 门(冲刺态)未接,取 0
+  if (id === 35 || id === 127) return ai1 === 1 || ai1 === 2 ? rotation : 0;
+  if (id === 345) return ai0 === 2 ? rotation : 0;
+  return 0;
 }
 
 /** NPC id → ExtraFramesCount（TOWN_NPC_IDS 反查；未登记的默认 2） */

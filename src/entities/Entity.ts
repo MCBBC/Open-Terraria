@@ -148,7 +148,9 @@ export class EntityManager {
           const m = e as { vanillaId?: number; projId?: number; minion?: boolean; npcProj?: boolean };
           const vid = m.vanillaId ?? m.projId ?? 0;
           if (!m.minion && m.npcProj !== true && !CUT_EXCLUDE_VIDS.has(vid)) {
-            cutTilesBox(game, e.x, e.y, e.w, e.h);
+            // ★SW-BJ67（2026-09-14）：vid 随盒穿线——CutTiles 逐型豁免面
+            //   （P.cs:15391-15393 1047 滚过幼虫 231 不割,详 ProjCutTiles.ts 注）
+            cutTilesBox(game, e.x, e.y, e.w, e.h, vid);
           }
         }
       }
