@@ -415,6 +415,20 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   world.chests = v3Chests ?? [];   // v3 id 翻译+locked 透传（★R16-16 缺段守卫）
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags ?? {};   // ★R16-16
+  // ★RB28-F2（2026-09-14）旧导入档脏键一次性归正（债锚 WldParser.ts:501-505）：
+  //  2026-09-06 前 WldParser 曾把流第 1 位（原版 savedBartender,WF:1369）标成
+  //  dd2DownedT1（语义错位）——旧档 dd2DownedT1=true 实为「酒保已解救」。检测
+  //  「dd2DownedT1=true ∧ savedBartender 缺失」→ 搬键（savedBartender=true+脏键删除）：
+  //  酒保入住链（VanillaSpawner:2074/Game.ts:32473）与表情解锁面即归正。新写档键序
+  //  不动（现解析器 4 位语义正确;旧日军团双写面 downedOldOnesArmyT1-3 并存不受扰,
+  //  DD2 导出/表情门走 OR 并读仍表真）。★不动 data.flags（入参纯度判例
+  //  loadsavedata-input-purity——夹具共享面,归正只落 world 侧新对象,再存档即落盘）
+  if (world.flags['dd2DownedT1'] && !world.flags.savedBartender) {
+    const healed = { ...world.flags };
+    delete healed['dd2DownedT1'];
+    healed.savedBartender = true;
+    world.flags = healed;
+  }
   // 星璇塔运行时态回填（WorldFile.cs:2220-2255 尾段：downedTower*/towerActive*/lunarApocalypseUp
   // 三类 bool 走 flags 落盘；盾值不存——TowerActive=true 读档重置满盾）
   applyLunarSave(world);

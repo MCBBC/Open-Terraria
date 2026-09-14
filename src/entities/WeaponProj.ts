@@ -141,15 +141,23 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   // 贴图宽,帧高−1)（SW-L1 2026-09-03 I-4：:35047 Rectangle num482−1 底行 shave）、
   // dest 高=帧高−1 保纵横、origin/锚点公式不变。frames=Main.projFrames[id]。
   frame = -1, frames = 0): void {
-  // drawSize=绘制尺寸(0=取碰撞盒 w；-1=贴图原生尺寸——原版投射物绘制语义,
-  // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
+  // drawSize=绘制尺寸(0/-1=贴图原生尺寸×scale——F1/RB28 前缺省 0 曾取碰撞盒 w;
+  // -1 为历史显式写法,与缺省 0 同义——原版投射物绘制语义,爆炸族雷管 10×32 竖条
+  // 等非方贴图必须走原生尺寸否则被拉方)
   // mirror=旋转坐标系内水平镜像（XNA dir=FlipHorizontally 等价，绕 origin 翻转）
   // centerAnchor=Main.cs:32360 专属组（802/842/938-945 短剑刺族等）：锚=盒中心、
   // origin=贴图中心、无 num143/144 偏置——曾误走通用 num145 偏置锚（枢轴≈剑尖），
   // 右刺角度巧合正常、左刺 −π/4×sd 与镜像叠加后枢轴错位=剑柄朝前（2026-08-17 用户报）
   const img0 = projSprite(projId);
-  const natural = drawSize < 0 && img0 && (img0.width > 0) && img0.width > 0;
-  const dw = natural ? img0!.width : drawSize > 0 ? drawSize : e.w;
+  // ★F1/RB28 2026-09-14：通支 dest=贴图原生尺寸×scale——原版 DrawProjDirect 通支
+  //  Main.cs:35475 source=(0,0,texW,texH)、scale=proj.scale（origin40.x=num153=
+  //  (texW−proj.width)×0.5+proj.width×0.5=:30130 化简 texW/2,与本函数 num145 同式,
+  //  锚点不动）。drawSize=0 缺省曾取碰撞盒宽 e.w → 盒宽≠贴图宽的投射物被拉伸到
+  //  命中盒（雨云雨滴 239=2×40 误绘 4×80、245=2×30 误绘 4×60 实锤）；drawSize>0
+  //  保留为调用点显式覆盖、无图 fallback=e.w 不变。
+  const dw = drawSize > 0 ? drawSize
+    : img0 && img0.width > 0 ? img0.width
+      : e.w;
   const ctx = r.ctx;
   if (!ctx) return;
   const img = img0;

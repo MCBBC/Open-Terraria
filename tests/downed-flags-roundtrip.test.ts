@@ -64,6 +64,9 @@ const DOWNED_KEYS: Record<string, boolean> = {
   // DD2 三档（DD2Event.cs:151-157;OldOnesArmy WinInvasionInternal 双键）
   downedOldOnesArmyT1: true, downedOldOnesArmyT2: true, downedOldOnesArmyT3: true,
   dd2DownedT1: true, dd2DownedT2: true, dd2DownedT3: true,
+  // ★RB28-F2：酒保位与 dd2DownedT1 并存=合法驻留态（脏键态 dd2DownedT1∧!savedBartender
+  //  经 loadSaveData 读回即被搬键归正,见 ⑥——全集态必须自洽才可锁 round-trip 全等）
+  savedBartender: true,
   // 世界域伴生位（round-trip 面一并锁）
   hardMode: true, shadowOrbSmashed: true,
 };
@@ -185,6 +188,22 @@ describe('downed ② 运行时键态 → exportWld → 解析（vid 键唯一表
 });
 
 describe('downed ③ 导入域命名键态(旧导入档) → 导出 → 解析(旧档兼容)', () => {
+  it('★RB28-F1 三 getter 补并读:仅命名键/别名键 → 导出位真+现行键对照不变', () => {
+    // downedBoss1:仅命名键 downedEyeOfCthulhu(审计前导入形态)→ 位真;对照 vid 键不回归
+    const eocNamed = parseWldToSave(exportWld(mkSave({ downedEyeOfCthulhu: true })));
+    expect(eocNamed.save.flags.downed_4).toBe(true);
+    expect(eocNamed.save.flags.downedEyeOfCthulhu).toBe(true);
+    expect(parseWldToSave(exportWld(mkSave({ downed_4: true }))).save.flags.downed_4).toBe(true);
+    // downedBoss3:仅命名键 downedSkeletron;对照 vid 键不回归
+    const skelNamed = parseWldToSave(exportWld(mkSave({ downedSkeletron: true })));
+    expect(skelNamed.save.flags.downed_35).toBe(true);
+    expect(parseWldToSave(exportWld(mkSave({ downed_35: true }))).save.flags.downed_35).toBe(true);
+    // downedMechBoss2:仅别名键 downed_126（双子 Spazmatism;击败链归一写 125,旧档可携 126）
+    const twins126 = parseWldToSave(exportWld(mkSave({ downed_126: true })));
+    expect(twins126.save.flags.downed_125).toBe(true);
+    expect(parseWldToSave(exportWld(mkSave({ downed_125: true }))).save.flags.downed_125).toBe(true);
+  });
+
   it('驼峰键(审计前导入形态)仍逐位表真', () => {
     const save = mkSave({
       downedHalloweenKing: true, downedChristmasIceQueen: true, downedChristmasSantank: true,
@@ -226,5 +245,28 @@ describe('downed ⑤ 消费面（表情解锁门双键并读）', () => {
   it('未击败不解锁(门仍有判别力)', () => {
     expect(emotesBosses({})).not.toContain(54);
     expect(emotesBosses({})).not.toContain(133);
+  });
+});
+
+describe('downed ⑥ RB28-F2 旧导入档 dd2DownedT1 脏键一次性归正(loadSaveData 读回侧)', () => {
+  it('脏键态(dd2DownedT1=true ∧ savedBartender 缺失)→ 搬键 savedBartender=true+脏键删除', () => {
+    // 债锚 WldParser.ts:501-505:2026-09-06 前解析器把流第 1 位(savedBartender)
+    // 标成 dd2DownedT1——脏键承载的是酒保位,搬键后酒保入住链/表情解锁面归正
+    const { world, player } = mkWorldFlags({ dd2DownedT1: true });
+    const back = loadSave(saveGame(world, player, 0));
+    expect(back.world.flags.savedBartender).toBe(true);
+    expect(back.world.flags['dd2DownedT1']).toBe(undefined);   // 严格:键确已不在
+  });
+
+  it('新写档键序不动:双键并存/纯 savedBartender 态原样往返(不误伤真 DD2 T1 位)', () => {
+    const coherent = mkWorldFlags({ dd2DownedT1: true, savedBartender: true, dd2DownedT2: true });
+    const backA = loadSave(saveGame(coherent.world, coherent.player, 0));
+    expect(backA.world.flags['dd2DownedT1']).toBe(true);
+    expect(backA.world.flags.savedBartender).toBe(true);
+    expect(backA.world.flags['dd2DownedT2']).toBe(true);
+    const clean = mkWorldFlags({ savedBartender: true });
+    const backB = loadSave(saveGame(clean.world, clean.player, 0));
+    expect(backB.world.flags.savedBartender).toBe(true);
+    expect(backB.world.flags['dd2DownedT1']).toBe(undefined);
   });
 });

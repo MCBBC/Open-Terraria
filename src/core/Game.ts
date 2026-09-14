@@ -10014,7 +10014,12 @@ export class Game implements GameHooks {
         //   （Main.cs:66244-66251 maxValue / :66265 机械门 || Skyblock.lowTiles）
         const sbLow = () => !!w.skyblockLowTiles;
         const sbNoAltars = () => !!(w.skyblockNoAltars || sf.skyblock);
-        const eocEligible = !w.flags['downed_4'] || bossesKeepSpawning || sbNoAltars();
+        // ★RB28-F1（2026-09-14）：EoC 别名键并读——旧导入档/旧档可能只有命名键
+        // downedEyeOfCthulhu（WldParser 审计前形态）,单读 vid 键=克眼夜间自然召唤门
+        // 重开（「打败后又反复出现」）。全仓 EoC 消费点均 OR 口径
+        // （:32149/:33561/:34457/:35737/:36786）=惯例参照
+        const eocEligible = !(w.flags['downed_4'] || w.flags.downedEyeOfCthulhu)
+          || bossesKeepSpawning || sbNoAltars();
         const townCount = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).length;
         // statLifeMax>=200（:64737）= 永久上限（baseMaxHp）；maxHp 是 statLifeMax2
         // （含生命力药水等临时加成）——挂错会被一瓶药水提前刷出 EoC
@@ -34046,7 +34051,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private tickHoverNpcName(): void {
     const p = this.player;
-    if (p.cursorItemIconText !== '') return;   // mouseText 已被前置 claim（原版同门 :43820）
+    // ★F2a/RB28 2026-09-14：让位门（原读 cursorItemIconText!=='' 即让位）撤销——
+    //  原版 :43820 门=`flag && !mouseText`,mouseText 是【接口层 claim 域】（layer 28
+    //  MouseTextNoOverride 等先行置位）;箱文本=TileInteractionsMouseOver 置位、
+    //  DrawInterface_40 层绘制（:45859 cursorItemIconText!="" → MouseText）,被 39 层
+    //  HoveringOverAnNPC + 40 头门 `if (HoveringOverAnNPC || mouseInterface) return`
+    //  （:45794/:45858-45861）压制——不属让位集。城镇 NPC 帧盒悬停时本支覆盖 claim
+    //  （=NPC 名赢箱文本）;信息饰品行标签 claim 在 tickInfoAccs（后跑,=原版 28<39
+    //  先 claim 锁后续的同效仲裁,见 F2b）。
     const inp = this.input;
     const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
     const hit = (vid: number, x: number, y: number, w: number, h: number): boolean =>
@@ -34808,10 +34820,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onReforgeOpen?.();
       return;
     }
-    // 造型师理发窗（StylistHairWindow.Interact = Main.OpenHairWindow Main.cs:43073：
-    // SoundID 10 menuOpen + 记 oldHairStyle/oldHairColor 快照——取消回退）
+    // 造型师理发窗（StylistHairWindow.Interact = Main.OpenHairWindow，NPCInteractions.cs:437-440
+    // → Main.cs:44390-44403——旧锚 :43073 系行移陈旧，RB28-F1 复核勘误）：
+    // SoundID 10 menuOpen + 记 oldHairStyle/oldHairColor 快照（取消回退）。
+    // ★RB28-F1(2026-09-14)：OpenHairWindow 的 `npcChatText=""` 且【talkNPC 不清】
+    // （:44396）=刀19 minimize 同语义——面板收起、对话会话保持（dialogNpc/keepAlive
+    // 保留，走远即退）。旧实现缺 minimize=理发窗叠在对话面板上双面板同显；
+    // apply/cancel 链的 closeNpcDialog（BuyHairWindow :44426 SetTalkNPC(-1) /
+    // CancelHairWindow :44416 同款）已在 mainFlow.ts:500/:502 落位。
+    // 登记差异:原版 :44395 `playerInventory=false` 半边本仓未接(对话态背包开闭
+    // 面属 BN3 Esc 链域,理发窗全屏模态叠开后无共显面,不影响本 finding 语义)
     if (id === 'hair' && npc.vanillaId === 353) {
       this.sfx.play('menuOpen');
+      this.minimizeNpcDialog();
       this.cb.onHairWindow?.();
       return;
     }
@@ -35275,14 +35296,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!gates.accThirdEye) p.accThirdEyeCounter = 0;
     // 悬停行;背包内点图标切换 hideInfo(Main.cs:46547-46573:Sound 12 + 翻转;
     // num==8 已在 buildInfoAccRows 归并 7)。
-    // ★悬停门 = 无其它光标文本(原版 !mouseText,:46578/:46627)——tickCursorIcon
-    //  先行(:5546)已写入箱名等 tooltip 时本层不 claim(不压暗下一行、不出标签)
-    r.infoAccHover = p.cursorItemIconText === ''
-      ? r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY) : -1;
+    // ★F2b/RB28 2026-09-14：悬停检测不再以 cursorItemIconText==='' 为门——原版 layer 28
+    //  MouseTextNoOverride 先 claim 锁死后续(Main.cs:20345-20348 noOverride 锁缓存,
+    //  :48075 DrawInfoAccs 调用站);世界物件文本(箱名等)属 40 层绘制域、非本层 mouseText
+    //  让位集,旧门读 tickCursorIcon 先行写入的世界 claim → infoAccHover 恒 -1,
+    //  hideInfo 点击(下方 hovering 域)整链丢失。现无条件 hitTest,命中即覆盖 claim
+    //  （=label 置前锁后续;对 NPC 名/箱文本的仲裁=原版 28 层先 claim 语义同效）
+    r.infoAccHover = r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY);
     // 行标签 tooltip(Main.cs:46636 MouseTextNoOverride(text3)):悬停图标 →
     // 行标题(Lang.inter 95-106「时间/深度/…」)随光标,复用 cursorItemIconText
     // 管线(锚 mouse+14 + 屏缘收边,Main.cs:20032 MouseTextInner 同语义)
-    if (r.infoAccHover >= 0 && p.cursorItemIconText === '') {
+    if (r.infoAccHover >= 0) {
       const hr = r.infoAccs.state.rows[r.infoAccHover];
       if (hr) p.cursorItemIconText = hr.label;
     }
@@ -37174,7 +37198,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     else if (f.hardMode) num *= 60;
     else if (f.downedSkeletron || f['downed_222']) num *= 25;   // Boss3 | QueenBee
     else if (f['downed_13'] || f['downed_14'] || f['downed_15']) num *= 10;  // EoW/BoC
-    else if (f['downed_4']) num *= 3;       // EoC
+    else if (f['downed_4'] || f.downedEyeOfCthulhu) num *= 3;   // EoC（★RB28-F1 别名并读,同 :10017 门）
     if (this.world.isExpert) num *= 2;
     // :39506-39509 折扣卡 ×0.8（(int) 先截后乘）；:39511 ×currentShoppingSettings
     // PriceAdjustment（快乐度购物价乘区——护士是服务非商品，原版仍乘，本仓

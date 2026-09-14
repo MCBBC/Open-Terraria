@@ -1,4 +1,6 @@
 // BJ83 复现 v2:右击制作台无视 craftingGridControl 设置强制 classic 宫格(用户实报)。
+// ★P4 相已停用(取证中相位,站点超扫描盒=秒杀带伪影):对话框开启依赖已由
+// _bj83-station-mutex.mjs DL 相取代(ALL PASS);本文件保留 P1/P2/P3/P5/P6 守恒价值。
 // 站点钩链:Game 右击尾臂(:25582 craftingFilterForTile)→ cb.onCraftingStationOpen →
 // UI.openCraftingStationFilter(:8714 三分支:classic+vanilla 布局→FX30 网格链 /
 // vanilla 布局→FX41 modern 窗四支状态机 / else→只开包)。

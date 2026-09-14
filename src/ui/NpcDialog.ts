@@ -175,19 +175,34 @@ const CSS = `
 .sw-npc-btn { position: absolute; height: 22px; line-height: 22px; padding: 0; margin: 0;
   background: none; border: none; outline: none; cursor: pointer; font-family: inherit;
   font-size: 12px; white-space: nowrap;
-  text-shadow: 1px 1px 0 #000; transform-origin: left center;
+  text-shadow: 1px 1px 0 #000;
   animation: sw-btn-pulse 2.1667s linear infinite alternate; }
-.sw-npc-btn:hover { transform: translateX(-15%) scale(1.3333);   /* 1.2/0.9 基准换算+左扩补偿 :125 */
-  text-shadow: 1px 1px 0 rgb(139,69,19); }                       /* Color.Brown */
+/* ★RB28-F3(2026-09-14) 绘制/命中解耦:悬停缩放只作用文字绘制,承载于内层
+   .sw-npc-btn-t(pointer-events:none);外层 button 本体【零 transform】=命中盒恒为
+   压缩文本矩形(:117-118 flag=rectangle.Contains,原版命中面不随悬停放大)。旧实现
+   :hover transform 直接在 button 上=命中盒 24→32px 扩张,右缘外/行向邻钮域被劫走。
+   悬停绘制几何不变:translateX(-15%)+scale(1.3333) = :120-125(1.2/0.9 基准换算
+   +左扩补偿 0.15×压缩宽),仅载体从 button 移至 span */
+.sw-npc-btn:hover { text-shadow: 1px 1px 0 rgb(139,69,19); }   /* Color.Brown :119-121 */
 @keyframes sw-btn-pulse { from { color: rgb(190,172,95); } to { color: rgb(255,231,127); } }
-.sw-npc-btn-t { display: inline-block; transform-origin: left center; }   /* >260 压缩承载(:113-115) */
+/* 内层 span 载体:--cx=压缩系数(>260 时 TS 置 260/自然宽,≙ num5 :113-115;未压缩=1)、
+   --hx=悬停左扩补偿(:124-125 =压缩宽×15%,span 版面宽=未压缩自然宽,TS 按
+   15%×压缩宽/自然宽换算成百分比;未压缩=15%)。transform 先绕 left center 缩放再
+   左移 = 原版 vector3.X-=0.15×宽 + origin(0,h/2) × scale(1.2·num5)(:120-125) */
+.sw-npc-btn-t { display: inline-block; transform-origin: left center; pointer-events: none;
+  transform: scaleX(var(--cx, 1)); }
+.sw-npc-btn:hover .sw-npc-btn-t {
+  transform: translateX(calc(-1 * var(--hx, 15%))) scale(calc(var(--cx, 1) * 1.3333)); }
 /* 金币条（TryAddCoins → ItemSlot.DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106
    :140-144 → 按钮相对 (-151,-44)） */
 .sw-npc-coins { position: absolute; left: -151px; top: -44px; color: #ffd76e;
   font-size: 11px; white-space: nowrap; text-shadow: 1px 1px 0 #000; pointer-events: none; }
-/* 感叹号（:136-139 文字右 +8px,锚行中,不入命中盒；亮度脉冲 Utils.cs:448） */
+/* 感叹号（:136-139 文字右 +8px,锚行中,不入命中盒；亮度脉冲 Utils.cs:448）
+   ★RB28-F3:原版命中矩形=:117-118 文字宽,图标悬在盒外——pointer-events:none
+   使其不入命中面（旧实现可点=命中盒右缘恒 +14px,与悬停扩张同族) */
 .sw-npc-excl { position: absolute; left: 100%; margin-left: 8px; top: 50%;
   transform: translateY(-50%); width: 6px; height: 16px; image-rendering: pixelated;
+  pointer-events: none;
   animation: sw-excl-pulse 1s linear infinite; }
 @keyframes sw-excl-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 /* 右下角物品（DrawNPCChatBottomRightItem Main.cs:40480-40543：>0=bottomRight-8、
@@ -402,13 +417,17 @@ export class NpcDialog {
     layer.style.top = `${panelH - 22 * btnRows + Math.max(0, 2 * (btnRows - 1)) - 4}px`;
     for (const c of created) {
       // 超 260 横向压缩（:113-115 num5=260/stringSize.X）——命中盒=压缩后宽(:117)
+      // ★RB28-F3:压缩/悬停缩放一律走内层 span 的 CSS 变量,button 本体零 transform
+      // =命中盒恒宽。--hx 把原版「压缩宽×15%」悬停左扩补偿(:124-125)换算成 span
+      // 版面宽(=未压缩 w0)百分比:15%×c.w/w0——span 的 translateX 百分比按自身
+      // 未压缩宽解析,直接写 -15% 在压缩钮上会过量左移
       const w0 = c.btn.offsetWidth;
       c.w = w0;
-      if (w0 > 260) {
-        c.w = 260;
-        c.btn.style.width = '260px';
-        const t = c.btn.querySelector<HTMLElement>('.sw-npc-btn-t');
-        if (t) t.style.transform = `scaleX(${(260 / w0).toFixed(4)})`;
+      if (w0 > 260) { c.w = 260; c.btn.style.width = '260px'; }
+      const t = c.btn.querySelector<HTMLElement>('.sw-npc-btn-t');
+      if (t && w0 > 0) {
+        t.style.setProperty('--cx', (c.w / w0).toFixed(4));
+        t.style.setProperty('--hx', `${((15 * c.w) / w0).toFixed(3)}%`);
       }
     }
     let cursorX = 0;
@@ -683,7 +702,17 @@ export class NpcHappinessPanel {
     (panel.querySelector('.sw-happy-close') as HTMLElement).addEventListener('click', () => this.close());
     this.parent.appendChild(panel);
     this.panel = panel;
-    // 捕获阶段拦截 Esc：只关浮层，不连带关掉背后的对话框
+    // ★RB28-F2(2026-09-14) 定谳:下方 window 捕获 Esc 监听对本注释原称语义
+    // （「只关浮层,不连带关背后对话框」）是【死码】——NpcDialog 自身 Esc 闩
+    // （:423-435,同为 window capture）注册在先(浮层只能从对话按钮点开,对话
+    // 闩必然先挂),同节点同相位按注册序派发,闩的 stopImmediatePropagation
+    // 先行吞事件,本监听永不可达。Esc 实际语义 = 对话闩 → onButton('close')
+    // → closeNpcDialog → ui.closeNpcDialog 对话+本浮层双收——与原版同相:
+    // ReportHappiness(NPCInteractions.cs:303-313)把快乐度报告整段写进
+    // npcChatText,原版无独立浮层,Esc 即整段关。故按原版同相原则【不改行为
+    // 面】,仅更正本注释并登记脆弱点:若日后 NpcDialog Esc 闩被摘除/改序
+    // （如物理 Esc 整体移交 main.ts 链）,本监听将原地复活并静默把 Esc 语义
+    // 翻成「只关浮层」——届时须二选一:删除本监听或显式接正语义
     this.escHandler = (e: KeyboardEvent) => {
       if (e.code === 'Escape') { e.stopImmediatePropagation(); this.close(); }
     };

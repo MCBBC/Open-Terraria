@@ -270,8 +270,15 @@ export interface OptionsData {
    *  切换钮右键循环(CraftingUI.DrawGridToggle CraftingUI.cs:322-331)。
    *  ★SW-FX41(2026-09-12)缺省回切 Modern:原版缺省 Modern(Player.cs:363),FX30 期
    *  因 modern 窗族未建而缺省 classic(偏差备案);NewCraftingUI 窗族已落地
-   *  (UI.ts vinvBuildModernCraft),缺省回切原版值——存量档无此键者取新缺省,
-   *  已存 classic 档保留用户意志(原版 config 语义同相)。 */
+   *  (UI.ts vinvBuildModernCraft),缺省回切原版值——存量档无此键者取新缺省。
+   *  ★BJ83(2026-09-14)修订本键 FX41「已存 classic 档保留用户意志」条款：持久化
+   *  classic 未必=用户意志(FX30 窗口期整对象序列化把缺省烤档),load() 尾部一次性
+   *  迁移清偿(见 craftingGridControlMigrated)。
+   *  ★RB29(2026-09-15)再修订:BJ83 迁移【退役】——迁移无法区分「烤档 classic」与
+   *  「用户右键切换钮显式 classic」,用户实报显式 classic 于 BJ83 后首次 load 被无声
+   *  翻 modern(回归1;探针 _fx28-guide-regress P0 实证)。BJ83 目标人群(烤档卡宫格)
+   *  在 09-14 起的每次 load 已全部迁移+落旗,退役不再伤及;未知归属 classic 档保持
+   *  classic=忠实存档(classic 域自 FX30 刀②+BJ85 功能面完满);新档缺省仍 modern。 */
   craftingGridControl: 'classic' | 'modern';
   /** ★2026-09-07 背包布局灰度 flag → ★SW-FX39(2026-09-11)缺省转正:vanilla(原版
    *  1.4.5.7 布局,UI.ts buildVanillaInventoryPanel)为缺省;classic=旧自创布局退居
@@ -282,6 +289,11 @@ export interface OptionsData {
   inventoryLayout: 'classic' | 'vanilla';
   /** ★SW-FX51 退役刀迁移标记：classic→vanilla 一次性迁移已执行（防显式切回被再迁移） */
   inventoryLayoutMigrated?: boolean;
+  /** ★BJ83(2026-09-14) FX30 窗口期烤档迁移标记：craftingGridControl classic→modern
+   *  一次性迁移已执行（防显式切回被再迁移）——判例同 inventoryLayoutMigrated。
+   *  ★RB29(2026-09-15)迁移块退役（见 craftingGridControl 注）：本旗仅余历史档
+   *  记账价值,保留字段防旧档键位漂移,不再有写点。 */
+  craftingGridControlMigrated?: boolean;
 }
 
 const KEY = 'sandboxworld.options';
@@ -516,6 +528,21 @@ export class OptionsStore {
       if (this.data.craftingGridControl !== 'classic' && this.data.craftingGridControl !== 'modern') {
         this.data.craftingGridControl = 'modern';
       }
+      // ★BJ83(2026-09-14)→★RB29(2026-09-15) FX30 窗口期烤档一次性迁移【已退役】。
+      //  BJ83 原文（存档取证）：craftingGridControl 缺省曾为 'classic'（c88f0de9 09-11
+      //  FX30）→ 944cb78d 09-12 FX41 翻 'modern'；持久化=整对象序列化（set() 全量
+      //  stringify），窗口期内任意一次 set() 都把当时缺省 classic 烤入存档 ⇒ BJ83 于
+      //  load() 此处一次性 classic→modern+落旗。RB29 退役定谳（用户实报回归1+
+      //  scripts/_fx28-guide-regress.mjs P0 相实证：存档 classic+无旗 → reload 后
+      //  control=modern）：①该迁移对存储态无法区分「烤档 classic」与「用户右键切换钮
+      //  的显式 classic」（Player.Settings.CraftingGridControl 写点只有右键循环
+      //  CraftingUI.cs:322-331 与本仓 Settings 面）——显式选择被无声没收=真回归；
+      //  ②BJ83 目标人群（烤档卡 FX30 宫格）在 09-14 起的每次 load 已全部迁移+落旗，
+      //  块撤除对已迁移档零影响（幂等已发生过，旗保留）；③classic 域自 FX30 刀②+
+      //  BJ85 起功能面完满（经典列表/网格/切换钮/站点三态），未知归属 classic 档保持
+      //  classic=忠实存档；④新档缺省仍 modern（上方初值，Player.cs:363），modern 体验
+      //  面不变。被 BJ83 翻档的用户恢复路径：右键切换钮一轮即回 classic（本退役后
+      //  持久化不再被任何 load 卫门冲写）。
       // ★SW-FX14 2026-09-10 M14 收尾 4 项卫门（坏值回原版缺省——vanilla config 读回
       //  无范围守卫是 enum 裸转产物,实用缺省=初值,此处按缺省收敛）
       if (this.data.hoverControl !== 'hold' && this.data.hoverControl !== 'click') {

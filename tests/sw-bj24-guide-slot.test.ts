@@ -129,7 +129,10 @@ describe('SW-BJ24 ④ 结构锁（源文本锚）', () => {
   it('向导槽放置门 = vid 域直查（isMaterialVid 经 vidOfItem 域转换）', () => {
     expect(UI_SRC).toContain(
       'const isMaterialVid = (vid: number): boolean => vid >= 0 && materialVids().has(vid);');
-    expect(UI_SRC).toContain('if (cur && !isMaterialVid(vidOfItem(cur.id))) return;');
+    // ★FX27 刀(2026-09-14)随源翻新:闭包 vidOfItem 已上提为实例法 this.vidOfItemOf
+    // （刀19「ctx7 槽语义共享体」重构,UI.ts:8799 注）——旧锁钉的 `vidOfItem(cur.id)`
+    // 字面量在盘上已不存在,本锁按现形翻新,语义(vid 域直查门)不变
+    expect(UI_SRC).toContain('if (cur && !isMaterialVid(this.vidOfItemOf(cur.id))) return;');
   });
 
   it('旧病根 `vidOfItem(vid) >= 0`（vid 当 ITEM_DEFS 下标二次解析）已绝迹', () => {

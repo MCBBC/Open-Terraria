@@ -102,7 +102,7 @@ describe('SW-BN2 ①缺省表对齐原版（PlayerInput.cs:2062-2140 Redigit Key
 
 describe('SW-BN2 ②Esc 链决策核（resolveEscapeChain;原版锚=Player.cs:4961 ToggleInv;SW-BN3 对齐原版重钉）', () => {
   const base: EscapeChainState = {
-    summonOpen: false, fullMapOpen: false, pauseOpen: false,
+    summonOpen: false, fullMapOpen: false, settingsOpen: false, pauseOpen: false,
     npcDialogActive: false, signDialogActive: false, uiBlocking: false,
     inventoryOpen: false, dead: false,   // SW-RB6b 2026-09-07 补死亡态字段
   };

@@ -494,9 +494,25 @@ function heldSemantics(held: SmartCursorHeld, paintLookup = 0, coatingLookup = 0
 
 // ===================== SmartCursor 状态机 + 策略链 =====================
 
+// ★SW-BJ84 2026-09-14 开态跨世界保留：Main.SmartCursorWanted_Mouse 是 Main 的 static 字段
+// （Main.cs:2095），全树写点仅 Main.cs:67590-67591（进程启动置 false）与 Player.cs:25649-25650
+// （SmartCursorLookup 异常复位）——进程内退世界/换世界【保留】开态，进程重启即失；config.json
+// 不持久化开态（SaveSettings 只存 SmartCursorToggle 模式键，Main.cs:4199/4422）。本仓每进世界
+// 重建 Game 实例（SmartCursor 随之重建），故以模块级变量承载页面（进程）寿命的开态：实例构造
+// 时读它作初值，仅 updateWanted 切换拍回写；外部直赋 .wanted（测试/触屏钮 MobileControls:695/
+// Game destroy 复位）不回写——与原版「直写 Main.SmartCursorWanted_Mouse 即进程态」的差异由
+// 唯一运行时切换入口 updateWanted 承接，直赋点全部是一次性会话管理面，语义互不干扰。
+let sessionWanted = false;
+
+/** ★SW-BJ84 测试/显式流程用：把会话开态清回「进程刚启动」相（Main.cs:67590 静态构造器）。
+ *  运行时无需调用——页面刷新即模块重建天然复位（模块寿命=页面寿命）。 */
+export function resetSmartCursorSessionState(): void {
+  sessionWanted = false;
+}
+
 export class SmartCursor {
   // Main.cs:2074-2084
-  wanted = false;        // SmartCursorWanted_Mouse
+  wanted = sessionWanted; // SmartCursorWanted_Mouse（初值读会话态，★SW-BJ84 见上）
   showing = false;       // SmartCursorShowing
   x = -1; y = -1;        // SmartCursorX/Y
   /** SmartCursorHelper.cs:55-57 方向锁/连通锁（仅 Platforms 写入 :1382-1383） */
@@ -511,6 +527,7 @@ export class SmartCursor {
     this.prevSmart = controlSmart;
     if (s.toggleMode) {
       if (edge) this.wanted = !this.wanted;
+      sessionWanted = this.wanted; // ★SW-BJ84 切换拍回写会话态（跨世界保留）
       return edge;
     }
     if (s.holdCanReleaseMidUse) {
@@ -520,6 +537,7 @@ export class SmartCursor {
     } else {
       this.wanted = controlSmart;
     }
+    sessionWanted = this.wanted; // ★SW-BJ84 电平拍回写（Hold 模式松开即归 false，同原版 static 收敛）
     return edge;
   }
 

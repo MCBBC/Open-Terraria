@@ -4907,8 +4907,10 @@ export class Renderer {
       return (r + g + b) / 765;
     };
     if (isBackground) {
-      // ★IIIII251（?slopewave=1 GL 路）：bg 浸润 pass 把坡面水形状 α≈0.02 预画进
-      // 前景离屏（本帧 fg pass beginFgPass 跳过清屏）→ obj19 门控覆盖斜坡水缘
+      // ★IIIII251 GL 路（★IIIII257 转正缺省开）：bg 浸润 pass 把坡面水形状 α≈0.02
+      // 预画进前景离屏（本帧 fg pass beginFgPass 跳过清屏）→ obj19 门控覆盖斜坡
+      // 水缘——同时是 256 坡面亮线的位移/扭曲接入面（足迹楔形 ⊇ 亮线条带）。
+      // ?slopewave=0 逃生门回退灰度期行为（gate 缺席=坡面静态）。
       const footCtx = warpOn && slopeWaveEnabled
         ? this.waterWarp.gateFootprintCtx(this.ctx.canvas.width, this.ctx.canvas.height)
         : null;
@@ -4939,8 +4941,9 @@ export class Renderer {
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
     drawLiquidBehindTilesOnly(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this.waterStyle,
       (x, y) => this.waterfalls.checkForWaterfall(x, y), true, 0,
-      // ★IIIII251（?slopewave=1 CPU 路）：实心层坡面斜面带随波场 bob——门与表层
-      // bob 同构（GL 全屏扭曲路径交付位移,不双重 bob）
+      // ★IIIII251 CPU 路（★IIIII257 转正缺省开）：实心层坡面斜面带+256 亮线随波场
+      // bob——门与表层 bob 同构（GL 全屏扭曲路径交付位移,不双重 bob）；
+      // ?slopewave=0 逃生门同关
       slopeWaveEnabled && waterWaves.quality > 0 && !this.warpPathActive());
   }
 
@@ -15161,8 +15164,8 @@ export class Renderer {
     // 2026-09-14：旧位在本函数=层 40 域（步骤 7b'）,早于步骤 9 信息饰品列（层 28
     // 域）→ 悬停行标签（「移动速度」等）落在下方行文字像素带且被压在下层（用户
     // 实报）。原版 MouseTextNoOverride（DrawInfoAccs :48175）只置缓存不即画,实际
-    // 绘制恒在界面最上层;uiHeld/uiBlocking 门随迁文本支（本函数头部门自此只压
-    // 图标/余辉/告示牌面）。
+    // 绘制恒在界面最上层;uiBlocking 门随迁文本支（本函数头部门自此只压
+    // 图标/余辉/告示牌面;uiHeld 支经 F2c/RB28 改锚 X+=34 不早退）。
     // 告示牌头顶指示泡（Main.cs:45133-45152 signBubble）：Chat2.png（32×28）挂锚顶
     // 上方 22px、偏玩家异侧 ±(8+宽)，白×mouseTextColor 脉动（乘色，复用 tintIconRect）
     if (this.signBubbleScreen) {
@@ -15257,16 +15260,20 @@ export class Renderer {
    *  步骤 9 信息饰品列（层 28 域）→ 悬停行标签被下方行文字叠写压住（用户实报）。
    *  本层挂 render() 尾（步骤 13,死亡画面之后）=主画布最顶层;光标本体在 VUI
    *  独立画布（z-index 300）恒在其上,与原版 DrawPendingMouseText 内
-   *  MouseTextInner→DrawInterface_36_Cursor 次序等效。uiHeld/uiBlocking 门随迁
-   *  （BJ7 结构锁「拖拽物/面板态本次不动」维持——原版 mouseItem 域,文本支本就随
-   *  整函数早退;capturePass/photoMode 在步骤 12 前返=不画,同原版无界面层语义）。
-   *  原版 `!mouseItem.IsAir → X+=34`（:20390-20392）helper 留参不接线（债 BJ7-R1
-   *  同前）。字体偏差登记同 InfoAccsLayer:原版 FontAssets.MouseText → 本仓
+   *  MouseTextInner→DrawInterface_36_Cursor 次序等效。uiBlocking 门随迁（mouseInterface
+   *  压制,:45794 40 层头门域,capturePass/photoMode 在步骤 12 前返=不画,同原版无界面层
+   *  语义）;uiHeld 不早退改锚 X+=34（★F2c/RB28 2026-09-14:原版 MouseTextInner 持物
+   *  :20390-20392 仅偏移不早退,NPC 名在拖拽物下仍显示——债 BJ7-R1 清偿）。
+   *  字体偏差登记同 InfoAccsLayer:原版 FontAssets.MouseText → 本仓
    *  canvas 字+四向描边;canvas fillText 锚 = XNA DrawString origin 零 = 字形
    *  【左上】——textAlign/textBaseline 显式钉死（MouseText 家族锚语义）。 */
   private drawMouseTextLayer(ctx: CanvasRenderingContext2D, player: Player): void {
     const c = this.cursorIconCtx;
-    if (c.uiHeld || c.uiBlocking) return;
+    // ★F2c/RB28 2026-09-14：uiHeld（拖拽物）整支早退撤销——原版 MouseTextInner
+    //  持物【不早退】,仅锚 X+=34（Main.cs:20390-20392 `if (!mouseItem.IsAir) X += 34`）,
+    //  NPC 名在拖拽物下仍显示。mouseInterface（UI 悬停）压制保留（:45794 40 层头门域,
+    //  BJ7 结构锁「面板态不动」维持）。
+    if (c.uiBlocking) return;
     const p = player;
     if (p.cursorItemIconText === '') return;
     const mt = this.lighting?.clock.mouseTextColor ?? 255;
@@ -15274,7 +15281,8 @@ export class Renderer {
     ctx.font = '14px monospace';
     const w = ctx.measureText(p.cursorItemIconText).width;
     const h = 14;
-    const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height);
+    const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height,
+      { heldOnCursor: c.uiHeld });   // F2c:持物锚 X+=34(:20390-20392,债 BJ7-R1 清偿)
     ctx.save();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';

@@ -54,7 +54,8 @@ export class WaterWarpCompositor {
   }
 
   /**
-   * ★IIIII251 斜坡水缘 GL 门控足迹（?slopewave=1）：bg 浸润 pass 在前景离屏建立
+   * ★IIIII251 斜坡水缘 GL 门控足迹（★IIIII257 转正缺省开；?slopewave=0 关）：
+   * bg 浸润 pass 在前景离屏建立
    * 之前把坡面水形状以 α≈0.02 画进本画布——obj19 门控 aD/aU = min(α×100,1) 在
    * α≥0.01 即饱和 ⇒ 坡面水缘纳入全屏位移场；离屏合成回场景仅 +2% 水色 tint
    * （与浸润带同域）不可辨（对比：不透明带入离屏 = "水蓝盖地形"，已撤回方案）。

@@ -373,7 +373,9 @@ describe('刀6 结构锁:vanilla 构建器判据(UI.ts)', () => {
   it('domTargets/ closest 门登记 .sw-vinv(缝隙点击不穿透)', () => {
     expect(srcOf('src/core/input/domTargets.ts')).toContain('.sw-eqdock, .sw-vinv');
     const s = ui();
-    expect(s).toContain("'.sw-panel, .sw-eqdock, .sw-vinv'");
+    // ★BJ81(2026-09-14):道具搜索浮窗选择器 .sw-itemsearch 入 closest 门登记——
+    //   字面锁随扩展同步(缝隙点击不穿透语义不变,集合扩员)
+    expect(s).toContain("'.sw-panel, .sw-eqdock, .sw-vinv, .sw-itemsearch'");
   });
 });
 

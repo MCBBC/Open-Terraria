@@ -427,6 +427,9 @@ function runInventoryEscapeChain(game: Game, intent: 'escape' | 'inventory' | 'p
   const act = resolveEscapeChain({
     summonOpen: !!game.summonPanel?.open,
     fullMapOpen: game.renderer.fullMap.open,
+    // ★RB28-F3：设置面板叠开于暂停浮层（暂停菜单→设置）=IngameOptions 子页面——
+    // 链让位 noop,Esc 只走设置面板自身 window handler=关设置回暂停菜单
+    settingsOpen: !!document.querySelector('.sw-set-panel'),
     pauseOpen: pausePanel != null,
     npcDialogActive: game.npcDialogActive,
     signDialogActive: ui.signDialogActive,

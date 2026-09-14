@@ -128,7 +128,11 @@ const craftState = (page) => page.evaluate(() => {
   });
   await sleep(250);
   const pre = await craftState(page);
-  ok(pre.panel === 'block' && !pre.dialogGone, `B-pre 背包开+对话叠开(panel=${pre.panel})`);
+  // B-pre(②④刀 2026-09-14 更):原版开话链首站 = IngameUIWindows.CloseAll(quiet:true)
+  // (Main.cs:43805,:58-65)——背包开着开对话=【先收包】静默,旧断言「对话叠物品栏=
+  // 原版合法态」取锚有误,已随 Game.openNpcDialog 收包门同步翻新
+  ok(!pre.dialogGone, `B-pre 对话面板开`);
+  ok(pre.panel !== 'block', `B-pre 开对话先收背包(④ CloseAll quiet,panel=${pre.panel})`);
   await clickCraft(page);
   await sleep(300);
   const b2 = await craftState(page);
@@ -324,8 +328,26 @@ const craftState = (page) => page.evaluate(() => {
   ok(r5.filter !== null, `R5 站点过滤置位(${JSON.stringify(r5.filter)})`);
 
   // ---- R4 角标三态:点「住房」→ DisplaySlots_5 角标显 → 点角标 = 关对话+开背包 ----
+  // ★FX27(2026-09-14)随 BJ83 翻新:R5 站点右键走原版 CraftingUI.OpenCloseFilter(CraftingUI.cs:153)
+  //  / NewCraftingUI.Open(:886)的 IngameUIWindows.CloseAll(quiet:true)——talkNPC 被收
+  //  (vinvCloseAllQuiet 承接)⇒ 旧序「R5 后对话仍在」不再成立。R4 先收包+重开对话
+  //  (原版再右键交谈=SetTalkNPC 新会话)再测角标三态,覆盖面不变
+  await page.evaluate(() => { window.__swUI.closeInventory(); });
+  await sleep(150);
+  {
+    const p = await page.evaluate(() => {
+      const g = window.__swGame, guide = window.__fx23Guide;
+      const [sx, sy] = g.camera.worldToScreen(guide.cx, guide.y + guide.h * 0.5);
+      return { sx, sy };
+    });
+    await page.mouse.move(p.sx, p.sy);
+    await sleep(120);
+    await page.mouse.down({ button: 'right' });
+    await sleep(500);
+    await page.mouse.up({ button: 'right' });
+    await sleep(280);
+  }
   await page.evaluate(() => {
-    window.__swUI.closeInventory();          // 收 R5 面板,角标从「关」起测
     window.__fx23invLog.length = 0;
     const b = document.querySelector('.sw-npc-dialog .sw-npc-btn[data-b="home"]');
     b?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));

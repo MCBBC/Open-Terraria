@@ -15,6 +15,14 @@ await page.waitForFunction(() => !!window.__swFlow, { timeout: 60000 });
 await page.evaluate(() => window.__swFlow.newWorld('', 4200, 1200));
 await page.waitForFunction(() => !!window.__swGame?.player, { timeout: 300000 });
 await new Promise((r) => setTimeout(r, 2000));
+// ★FX27(2026-09-14)前提修复:本探针靶 = 反查浮层(.sw-guide-overlay)= classic 布局路径。
+//   SW-FX39(2026-09-11)起 inventoryLayout 缺省转正 'vanilla' → 「制作」改开 vanilla
+//   向导件(mainFlow onGuideCraftOpen vanilla 门),旧「缺省出浮层」前提失效(A1 曾红)。
+//   显式钉 classic 恢复原覆盖面(浮层交互矩阵),不动 vanilla 路径(_fx19/_fx23 管辖)
+await page.evaluate(async () => {
+  const options = window.__swOptions ?? (await import('/src/core/Options.ts')).options;
+  await options.set('inventoryLayout', 'classic');
+});
 
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };
@@ -46,13 +54,21 @@ const res = await page.evaluate(async () => {
     g.npcDialogButton('craft');
     await new Promise((r) => setTimeout(r, 120));
     const overlay = document.querySelector('.sw-guide-overlay');
-    ok('A1 关对话+浮层现', g.dialogNpc === null && !!overlay);
+    // ★FX27(2026-09-14)随刀19翻新:「制作」入口 = minimizeNpcDialog(会话保持,dialogNpc
+    //   不清=走远退出面)+浮层现——旧「关对话(dialogNpc===null)」前提已被会话保持修替换
+    ok('A1 会话保持+浮层现', g.dialogNpc !== null && !!overlay);
     ok('A2 无选材搜索网格（原版无此物）',
       ![...(overlay.querySelectorAll('input'))].some((i) =>
         /材料名称|key \/ 原版 id/.test(i.placeholder || '')),
       [...overlay.querySelectorAll('input')].map((i) => i.placeholder).join('/'));
     const slotEl = document.querySelector('.sw-guide-slot');
-    ok('A3 实体槽虚线空态', !!slotEl && getComputedStyle(slotEl).borderStyle === 'dashed');
+    // A3(②刀 2026-09-14 更):槽 chrome 1:1 = Inventory_Back 底 + 空态 ctx7 幽灵帧
+    // (ItemSlot.cs:2451 case7→num15=18 @0px -204px 0.35α)——旧自创 2px dashed 退役
+    const a3ghost = slotEl?.querySelector('.sw-slot-ghost');
+    ok('A3 实体槽空态=Inventory_Back 底+ctx7 幽灵帧',
+      !!slotEl && /Inventory_Back/.test(getComputedStyle(slotEl).backgroundImage)
+      && !!a3ghost && a3ghost.style.backgroundPosition === '0px -204px' && a3ghost.style.opacity === '0.35',
+      `bg=${getComputedStyle(slotEl ?? document.body).backgroundImage.slice(0, 60)} ghost=${JSON.stringify(a3ghost ? { p: a3ghost.style.backgroundPosition, o: a3ghost.style.opacity } : null)}`);
     ok('A4 空槽 caption=inter[24]', (overlay.querySelector('.sw-guide-slot + div')?.textContent ?? '').includes('在此放置材料'), `raw=[${(overlay.querySelector('.sw-guide-slot + div')?.textContent ?? '')}]`);
     ok('A5 空槽配方=0', overlay.querySelectorAll('.sw-recipe').length === 0);
     const pr = overlay.firstElementChild.getBoundingClientRect();

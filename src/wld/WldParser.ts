@@ -502,7 +502,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
   //  Save=3 bool(T1/T2/T3),Load 读 savedBartender+3 共 4 bool——**无第 4 个 Any**!
   //  曾把第 1 位标成 dd2DownedT1(语义错位):flags.savedBartender 缺失=原版导入世界
   //  酒保永不入住(VanillaSpawner :1815 消费),dd2DownedAny 键不存在于原版流。
-  //  2026-09-06 修正语义;旧导入档的 dd2DownedT1 实为 savedBartender(登记)。
+  //  2026-09-06 修正语义;旧导入档的 dd2DownedT1 实为 savedBartender——★RB28-F2
+  //  (2026-09-14)登记债已清偿:loadSaveData 读回侧一次性搬键归正（SaveFile.ts,
+  //  检测 dd2DownedT1=true ∧ savedBartender 缺失 → savedBartender=true+脏键删除）。
   if (version >= 178) {
     if (r.boolean()) flags.savedBartender = true;
     if (r.boolean()) flags.dd2DownedT1 = true;

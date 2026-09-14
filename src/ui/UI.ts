@@ -7751,6 +7751,11 @@ export class UI {
         const t = mcraftWindowToggleXY(!!this.game?.world?.isJourney).toggle;
         return { x: t.x, y: t.y + CRAFT_BAR_TOP_OFF };
       }
+      // ★RB29(2026-09-15)回归2连带:向导态条随切换钮上移(Main.cs:42438
+      //   num67=InGuideCraftMenu ? 300 : 450;条画在钮位 CraftingUI.cs:275-278
+      //   Utils.DrawSelectedCraftingBarIndicator(spriteBatch,craftX,craftY)——旧码缺
+      //   向导支=条滞留 450 位与钮脱钩,向导态旧钮位悬空金条=用户截图可见异常)
+      if (this.vinvGuideMenuOpen) return { x: 94, y: 300 + this.vinvCraftAdjY(c.sh) + CRAFT_BAR_TOP_OFF };
       return { x: 94, y: 450 + this.vinvCraftAdjY(c.sh) + CRAFT_BAR_TOP_OFF };
     } });
     // 钮本体(Craft_Toggle 六帧贴图;悬停 ±15 盒≈整钮)
@@ -8074,10 +8079,22 @@ export class UI {
 
   /** Open(quiet, filter)(:883-905)+ OnActivate(:907-915):可见即 no-op;置滤器+
    *  openedWithoutFilter+条目池清+搜索/激活集清+预选 availableRecipe[focusRecipe]。
-   *  IngameUIWindows.CloseAll(:889)本仓无同域模态群=不建模(备案);playerInventory/
-   *  PipsCurrentPage=Recipes 由开包链承担(本窗只在背包开态可达) */
+   *  ★BJ83(2026-09-14):CloseAll 门(:886-890)已建面子集(见体内)——旧备案
+   *  「本仓无同域模态群=不建模」随刀撤;playerInventory/PipsCurrentPage=Recipes
+   *  由开包链承担(本窗只在背包开态可达) */
   private vinvOpenModernCraft(filter: CraftingTileFilter | null, quiet: boolean): void {
     if (this.vinvModernCraftOpen) return;                       // :885 if (!Visible)
+    // ★BJ83:Open 开臂 IngameUIWindows.CloseAll(quiet:true) 门(NewCraftingUI.cs:886-890
+    //   → IngameUIWindows.cs:17-66)——!playerInventory ∨ (chest==-1 ∧ !InGuideCraftMenu)
+    //   时静默收对话(talkNPC=-1 :36-43)+箱(chest=-1 :50-57);NewCraftingUI.Close(quiet)
+    //   =自身开启中 no-op 不进 vinvCloseAllQuiet。本仓站点链先 openInventory 后到本门
+    //   (playerInventory 恒真)→ 门收敛为第二支:对话开着右击站点=原版先收话再开窗
+    //   (用户实报"对话与制作窗叠放"面)。guideMenu 支(openVanillaGuideCraft 先置位)
+    //   门翻假=会话保持不收(原版同相);箱开着门翻假=箱不收(原版 :887 同相)。
+    if (this.invPanel.style.display !== 'block' || (!this.openChest && !this.vinvGuideMenuOpen)) {
+      this.game?.closeNpcDialog(true);
+      this.closeChest();
+    }
     this.vinvModernCraftOpen = true;
     this.vinvModernCraftFilter = filter;
     this.vinvModernOpenedWithoutFilter = filter === null;       // :907-909(OnActivate)
@@ -8108,6 +8125,47 @@ export class UI {
     this.layoutVanilla();
     this.vinvRefreshCraft();
     if (!quiet) this.game.sfx.play('menuClose', 1);             // :876-879 Sound 11
+  }
+
+  /** ★BJ83(2026-09-14):IngameUIWindows.CloseAll(quiet:true) 站点开臂子面
+   *  (CraftingUI.cs:153 + NewCraftingUI.cs:888-890 → IngameUIWindows.cs:17-66)——
+   *  收 NewCraftingUI(quiet :63)+对话(SetTalkNPC(-1) :36-43,连带 npcChatCornerItem/
+   *  npcChatText 清+shop index=0 :64)+箱(chest=-1 :50-57)。静默=CloseAll quiet 同相
+   *  (closeNpcDialog(true) 不放音)。未建模域(全屏地图/ingameOptions/FancyUI/sign/
+   *  hair/clothes window/TE 锚/创意菜单)与背包面(playerInventory=false,由
+   *  openInventory(true) 紧随重开)不在此收=登记债(本仓无同域单点 CloseAll)。
+   *  ★SW-BJ85(2026-09-15) 债①:尾接 ClearHacks 面(IngameUIWindows.cs:69 →
+   *  CraftingUI.cs:141-144 _lastFilter=null)=原版 CloseAll 尾语句,紧跟 :154
+   *  vinvCraftFilter=f 的开臂序——滤器置入同拍即净(净死,见 openCraftingStationFilter)。 */
+  private vinvCloseAllQuiet(): void {
+    this.game?.closeNpcDialog(true);
+    this.closeChest();
+    this.vinvCloseModernCraft(true);
+    this.vinvCraftFilter = null;   // ClearHacks(:69 → CraftingUI.cs:143)
+  }
+
+  /** ★SW-BJ85(2026-09-15) 债②:IngameUIWindows.CloseAll() LOUD 支(CraftingUI.cs:151
+   *  网格已开臂 :148-153 调用)——原版网格开态再右击站点=收全部建模域且对话(:33-42)/
+   *  箱(:50-57)/背包(:58-65)各 PlaySound(11)=menuClose;modern 窗恒静默收
+   *  (NewCraftingUI.Close(quiet:true) :63-68,走 closeInventory 内 vinvCloseModernCraft(true));
+   *  ClearHacks(:69) 面不在本支——滤器清置已在臂头(:150)完成(本支不经 vinvCloseAllQuiet)。
+   *  背包面=closeInventory():原版 CloseAll 只置
+   *  playerInventory=false,次帧 !playerInventory 门走 DrawInterface_Resources_Buffs
+   *  首行 PipsUseGrid=false(Main.cs:43940)+ClearBuffs !PipsUseGrid 支 recStart=0
+   *  (Main.cs:43933-43937)——closeInventory 即时净态同相(关包链同源),heldStack
+   *  归包=dropItemCheck !playerInventory 臂(Player.cs:5136)同相。对话守卫
+   *  npcDialogActive ≡ talkNPC>=0(Game.ts:36253);箱守卫 openChest ≡ chest!=-1。
+   *  未建模域=vinvCloseAllQuiet 登记债延续(本仓无同域单点)。 */
+  private vinvCloseAllLoud(): void {
+    const game = this.game;
+    if (game?.npcDialogActive) game.closeNpcDialog();   // :33-42 音 11
+    if (this.openChest) {                               // :50-57 音 11
+      this.closeChest();
+      game?.sfx.play('menuClose', 1);
+    }
+    game?.sfx.play('menuClose', 1);                     // :58-65 playerInventory 音 11(网格臂 invOpen 恒真)
+    this.closeInventory();                              // playerInventory=false+次帧净态(Main.cs:43912-43941)
+    this.vinvRefreshCraft();
   }
 
   /** ToggleInInventory(:926-936) */
@@ -8693,20 +8751,16 @@ export class UI {
     }
   }
 
-  /** 站点/水源过滤失效拍(DrawGridToggle 头 :269-273:_lastFilter ≠ null 且
-   *  (!CanRemainOpen ∨ 页≠Recipes ∨ !playerInventory) → 清。本仓页恒 Recipes;
-   *  playerInventory 门 = 背包开态;CanRemainOpen = filterRemainOpen(adjTile 闭包语义)) */
-  private vinvTickCraftFilter(): void {
-    if (!this.vinvCraftFilter) return;
-    const invOpen = this.invPanel.style.display === 'block';
-    if (!invOpen) { this.vinvCraftFilter = null; return; }
-    if (!this.vinvFilterRemain()) this.vinvCraftFilter = null;
-  }
+  /** ★SW-BJ85(2026-09-15):vinvTickCraftFilter(DrawGridToggle 失效拍 :269-273 移植)
+   *  随滤器消费面退役——原版 :269 门=`_lastFilter != null`,而 _lastFilter 恒 null
+   *  (写点 :154 后 :155 CloseAll(quiet) 尾 ClearHacks :69 同拍即净;三版同构)=
+   *  失效拍在原版本就是净死臂,本仓退役不再移植死臂(惰性死码纪律)。
+   *  CanRemainOpen 语义本体保留于 filterRemainOpen(modern 窗失效拍 :655-665 活机制)。 */
 
-  /** CanRemainOpen 域内判定(adjTile 闭包语义)。f 缺省 = classic 滤器(vinvTickCraftFilter
-   *  消费);★SW-FX41:modern 窗 Update 拍(NewCraftingUI.cs:655-665)传
+  /** CanRemainOpen 域内判定(adjTile 闭包语义;★SW-BJ85:f 改必传——classic 缺省消费方
+   *  vinvTickCraftFilter 已退役)。★SW-FX41:modern 窗 Update 拍(NewCraftingUI.cs:655-665)传
    *  vinvModernCraftFilter——曾恒读 classic 域 = 窗开即被误判失效秒关(探针实斩) */
-  private vinvFilterRemain(f: CraftingTileFilter | null = this.vinvCraftFilter): boolean {
+  private vinvFilterRemain(f: CraftingTileFilter | null): boolean {
     const game = this.game;
     if (!f || !game) return false;
     const sheets: number[] = [];
@@ -8719,18 +8773,33 @@ export class UI {
 
   /** 站点 focus 钧落地(InteractWithCraftingStation Player.cs:33555-33561 → classic 支
    *  CraftingUI.OpenCloseFilter CraftingUI.cs:146-159):格交互右键合成站/水源 →
-   *  开包 + 网格态 + 站点过滤;网格已开时再点 = 清过滤(:148-153 支)。modern 支
-   *  (NewCraftingUI.OpenCloseFilter)=分期(债#2-modern),本刀落地 playerInventory
+   *  开包 + 网格态(滤器 :154 置入后由 vinvCloseAllQuiet 尾 ClearHacks 面即净=
+   *  ★SW-BJ85 债①原版净死对齐:经典列表恒全量邻接配方+头文字恒 inter[25]);
+   *  网格已开时再点 = 清过滤+LOUD CloseAll(:148-153 支,★SW-BJ85 债②三态开关)。
+   *  modern 支(NewCraftingUI.OpenCloseFilter)本刀前已落地,playerInventory
    *  副作用面(:33545 AdjTiles 本仓 vanillaNearbyStations 每刷新拍同源,无需单独调)。 */
   openCraftingStationFilter(f: CraftingTileFilter): void {
     if (options.data.craftingGridControl === 'classic' && this._builtLayout === 'vanilla') {
       const invOpen = this.invPanel.style.display === 'block';
       if (invOpen && this.vinvPipsUseGrid) {
-        this.vinvCraftFilter = null;                  // :148-153 网格已开 → 清过滤(关浮窗支)
-        this.vinvRefreshCraft();
+        // ★SW-BJ85(2026-09-15) 债②:网格已开臂(CraftingUI.cs:148-153)——原版网格
+        //   开态再右击站点=_lastFilter=null(:150)+IngameUIWindows.CloseAll()(:151,
+        //   LOUD:对话/箱/背包各音 11+modern 窗静默收+ClearHacks)三态开关语义。
+        //   旧刀「清过滤后照常全开」=FX30 期偏差(sw-fx30:283 锁死存量,RB19 揭出),
+        //   本刀对齐;响铃面=vinvCloseAllLoud。
+        this.vinvCraftFilter = null;                  // :150
+        this.vinvCloseAllLoud();                      // :151 IngameUIWindows.CloseAll()(LOUD)
         return;
       }
-      this.vinvCraftFilter = f;                       // :154
+      this.vinvCraftFilter = f;                       // :154(瞬时写;CloseAll 尾 ClearHacks 同拍即净=债①)
+      // ★BJ83(2026-09-14):IngameUIWindows.CloseAll(quiet:true)(CraftingUI.cs:155 →
+      //   IngameUIWindows.cs:17-66)——classic 开臂静默收 NewCraftingUI(:63=FX30/FX41
+      //   两窗互斥,防网格+modern 窗双开叠画)/对话(talkNPC=-1 :36-43)/箱(chest=-1
+      //   :50-57)。曾缺此面=modern 窗开着切 classic 后右击站点 → 双窗同屏(用户实报
+      //   "强制宫格"叠放面);PipsUseGrid 不在 CloseAll 域(modern 开臂同样不清网格,
+      //   Main.cs:42448 网格门独立于窗可见=原版同相,残留网格登记不判)。
+      //   ★SW-BJ85:尾 ClearHacks(:69)净 :154 滤器=原版序(净死,消费面已退役)。
+      this.vinvCloseAllQuiet();
       this.openInventory(true);                       // :156 Player.OpenInventory
       this.vinvPipsUseGrid = true;                    // :157
       this.vinvSyncGridToggle();
@@ -9131,16 +9200,11 @@ export class UI {
       const mm = this.game ? (this.game.renderer.mapStyle === 1 && !this.game.mapFullscreen()) : true;
       if (this.vinvLayoutCtx && this.vinvLayoutCtx.minimapOn !== mm) this.layoutVanilla();
     }
-    // ★SW-RB13b:站点过滤失效拍逐帧化(DrawGridToggle 头 CraftingUI.cs:268-272 每帧执行)
-    //   vinvRefreshCraft 是事件驱动刷新——走远站后无事件则滤器滞留(原版 adjTile 每拍
-    //   AdjTiles 重算+逐帧门)。filter 非空才走(零负载):vanillaNearbyStations=±5/±3 盒扫
-    if (this.vinvCraftFilter && this._builtLayout === 'vanilla') {
-      const invOpen = this.invPanel.style.display === 'block';
-      if (!invOpen || !this.vinvFilterRemain()) {
-        this.vinvCraftFilter = null;
-        this.vinvRefreshCraft();   // 失效拍清滤+按全量配方域重列(ClearHacks 同相 CraftingUI.cs:142)
-      }
-    }
+    // ★SW-BJ85(2026-09-15) 债①:RB13b 站点滤器逐帧失效块随消费面退役——原版
+    //   DrawGridToggle 头失效拍(CraftingUI.cs:269-272)以 _lastFilter!=null 为门,
+    //   而 _lastFilter 恒 null(OpenCloseFilter :154 置入 → :155 CloseAll(quiet) 尾
+    //   ClearHacks :69 同拍即净)=原版该拍净死,退役不移植死臂。modern 窗失效拍
+    //   (NewCraftingUI.cs:655-665,_filter 活机制)保留于下块。
     // ★SW-FX41:NewCraftingUI.Update(NewCraftingUI.cs:655-665 UpdateUIStates
     //   Main.cs:17678-17682 每拍)——站点滤器失效 → Close(quiet:false,
     //   returnToInventory:true)(音 11+背包保持);_filter==null 时零开销
@@ -9356,9 +9420,11 @@ export class UI {
     // ★SW-RB13b:pointer-events:none(.vinv-txt 基线)——DrawName(ChestUI.cs:158)纯
     //   DrawString 无命中盒,且 (504,258) 在箱域 FloatIntersect(:84 x≤495.8)外;
     //   曾 auto=无处理器的世界点击死区(504..~580 × 258..~273)
-    // ★2026-09-14 用户报:四向描边(亮背景可读,同钮列)
+    // ★2026-09-14 用户报:四向描边(亮背景可读,同钮列);★F3/RB28 2026-09-14:
+    //   1px 对角族统一为原版 DrawBorderStringFourWay ±2px 轴向族(与 canvas
+    //   MouseText/InfoAccs 行同式,text-shadow 轴向转录)
     nameEl.style.cssText += 'font-size:13px;'
-      + ' text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;';
+      + ' text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,0 -2px 0 #000;';
     this.vinvRoot?.appendChild(nameEl);
     this.vinvChestNameEl = nameEl;
     this.vinvLayoutItems.push({ el: nameEl, pos: () => {
@@ -9392,10 +9458,12 @@ export class UI {
     //   上下 padding 复刻 24px 命中带,x 左对齐 506(:222 X-num2=506)不偏)
     const mkChestBtn = (id: number, labelKey: string, act: () => void, visible?: () => boolean, label?: string): void => {
       const b = el('button', 'vinv-txt') as HTMLButtonElement;
-      // ★2026-09-14 用户报:1px 阴影在亮背景下可见性弱 → 四向描边(同信息栏行)
+      // ★2026-09-14 用户报:1px 阴影在亮背景下可见性弱 → 四向描边(同信息栏行);
+      //   ★F3/RB28 2026-09-14:统一 2px 轴向族(DrawBorderStringFourWay ±2px,与
+      //   canvas MouseText/箱名同式)
       b.style.cssText = 'left:506px; font-size:13px; pointer-events:auto; cursor:pointer;'
         + 'background:none; border:none; padding:5.5px 0; color:#fff;'
-        + 'text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;'
+        + 'text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,0 -2px 0 #000;'
         + 'transform:translateY(-50%);';
       b.textContent = label ?? Lang.text(labelKey);
       b.addEventListener('mouseenter', () => { b.style.color = 'rgb(255,231,69)'; });
@@ -9754,9 +9822,8 @@ export class UI {
   private vinvRefreshCraft(): void {
     const game = this.game;
     if (!game) return;
-    // ★SW-FX30 刀⑦:过滤失效拍(DrawGridToggle 头 CraftingUI.cs:269-273)+列表头文字
-    // (DrawRecipesList :167-171:RecipeFilterHack → GetWindowDescription,else inter[25])
-    this.vinvTickCraftFilter();
+    // ★SW-BJ85(2026-09-15) 债①:失效拍调用随滤器消费面退役(原版 :269-272 净死,
+    //   见 vinvFilterRemain 头注);列表头文字恒 inter[25](见下块)。
     this.vinvGuideMenuExitCheck();   // ★刀19:向导态退出面(:42396-42400 每拍消费)
     let avail: Array<{ r: VanillaRecipeLike; count: number }>;
     // ★刀19:向导反查(Recipe.UpdateRecipeList :235-241)——guideItem 有件 →
@@ -9770,21 +9837,18 @@ export class UI {
     } else {
       avail = game.vanillaAvailableRecipes();
     }
-    // ★SW-RB13b:消费门=RecipeFilterHack getter(CraftingUI.cs:121-127:control≠Classic →
-    //   null)——classic 态置入的滤器在切 modern 后不消费(列表回全量/头回 inter[25]),
-    //   切回 classic 恢复(_lastFilter 本体不清,原版同相)
-    const filterActive = !this.vinvGuideMenuOpen && this.vinvCraftFilter !== null && options.data.craftingGridControl === 'classic';
-    if (filterActive && this.vinvCraftFilter) {
-      // Recipe.cs:252 filterHack ∧ 门(CraftStationRecipeFilter.Accepts :159-170 /
-      // WaterSourceRecipeFilter.Accepts :180-187)——列表与网格同吃过滤后的
-      // availableRecipe 数组(DrawRecipesGrid :522 遍历 availableRecipe 同源)
-      const f = this.vinvCraftFilter;
-      avail = avail.filter(({ r }) => recipeFilterAccepts(r, f));
-      const name = Lang.tileName(f.tile);
-      const title = this.vinvCraftTitleEl;
-      if (name && title) title.textContent = Lang.text('CombineFormat.Crafting', name);   // NewCraftingUI.cs:101-104
-    } else if (this.vinvCraftTitleEl && this.vinvCraftTitleEl.textContent !== Lang.inter(25)) {
-      this.vinvCraftTitleEl.textContent = Lang.inter(25);   // :167 复位
+    // ★SW-BJ85(2026-09-15) 债①:滤器消费面退役=原版净死对齐——RecipeFilterHack
+    //   getter(CraftingUI.cs:112-122)恒 null:_lastFilter 全树非空写点仅 OpenCloseFilter
+    //   :154,其后 :155 IngameUIWindows.CloseAll(quiet:true) 尾部 ClearHacks(:69 →
+    //   CraftingUI.cs:143)同拍即净(1456/1457/1458 三版同构,IngameUIWindows.cs 三版
+    //   字节全等)⇒ ①Recipe.UpdateRecipeList :252 `filterHack == null` 支恒走=经典
+    //   列表恒【全量邻接配方】(PlayerMeetsEnvironmentConditions 门,不再仅被击站过滤);
+    //   ②DrawRecipesList :167-171 GetWindowDescription 支不可达=头文字恒 Lang.inter[25]。
+    //   本仓对齐:vinvCraftFilter=f(openCraftingStationFilter :154)由 vinvCloseAllQuiet
+    //   尾 ClearHacks 面即净;旧「站台名头文字+列表过滤」消费面(RB13b 消费门/FX30 刀⑦)
+    //   退役。modern 窗滤器(NewCraftingUI._filter 活机制 :421/:622/:642/:657)不误伤。
+    if (this.vinvCraftTitleEl && this.vinvCraftTitleEl.textContent !== Lang.inter(25)) {
+      this.vinvCraftTitleEl.textContent = Lang.inter(25);   // :167
     }
     // 签名比对(r 引用静态+count)——配方集变化才重建格池
     const prev = this.vinvCraftAvailV;
@@ -9979,7 +10043,10 @@ export class UI {
   /** Main.recStart(网格分页游标;!PipsUseGrid 每拍归零 Main.cs:43926-43930 →
    *  本仓在每次关闭网格处置 0) */
   private vinvCraftRecStart = 0;
-  /** CraftingUI._lastFilter(站点/水源过滤;OpenCloseFilter CraftingUI.cs:146-159) */
+  /** CraftingUI._lastFilter(OpenCloseFilter CraftingUI.cs:146-159)。★SW-BJ85(2026-09-15)
+   *  债①定谳:原版机制净死——非空写点仅 :154,其后 :155 CloseAll(quiet) 尾 ClearHacks
+   *  (:69 → :143)同拍即净;本仓同构(:154 置入 → vinvCloseAllQuiet 尾即净),
+   *  消费面(列表过滤/站台名头文字/失效拍)已退役 ⇒ 恒 null(观察点上)。 */
   private vinvCraftFilter: CraftingTileFilter | null = null;
   private vinvCraftGridEl: HTMLElement | null = null;
   private vinvCraftGridSig = '';

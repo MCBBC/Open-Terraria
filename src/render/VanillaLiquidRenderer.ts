@@ -19,7 +19,7 @@ const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微�
                                           // 前景水基 0.5(cs:57029),岩浆 ×1.8、蜂蜜 ×1.6 钳 1(cs:57138-57150);
                                           // 微光 = DrawShimmer val×0.75（LiquidRenderer.cs:700）
 
-// ---- ★IIIII251 斜坡水缘波纹覆盖（?slopewave=1 查询参数灰度 flag，用户明示偏差）----
+// ---- ★IIIII251 斜坡水缘波纹覆盖（用户明示偏差；★IIIII257 转正缺省 true）----
 // 【偏差语义】原版坡面/半砖岸格的水线 = 方块贴图斜边 + 静态浸润带，波场不覆盖
 // （表层逐格 bob 只走 hasTE 液体格；GL 全屏扭曲的 obj19 门控足迹 = 前景水 alpha,
 //   坡面格无前景水 ⇒ gate=0 恒不位移）⇒ 斜坡水缘是全池塘唯一不动的水线。
@@ -27,12 +27,17 @@ const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微�
 //   CPU 路径（?wwarp=0 / CPU 渲染 / GL 死）= 浸润带逐格 bob（waveBob 入参）；
 //   GL 路径（现役默认）= 坡面水形状以 α≈0.02 预画进前景水离屏（footprintCtx
 //   入参）→ obj19 门控 aD/aU×100 在 α≥0.01 即饱和 ⇒ 纳入全屏位移场。
-// 【转正】用户验收后缺省改 true（同 ?shinebudget/?glband 惯例，先灰度）。
+// 【转正·IIIII257】缺省 true（251 头注预告的"用户验收后转正"落地；probe-guide
+//   B10 同注）。256 批的坡面亮线（实心层 pass 常开段）落位后用户实报"亮线静止"，
+//   定谳 = 本 flag 仍灰度（=== '1'）⇒ 缺省 GL 路坡面格足迹缺席 → obj19 gate=0 →
+//   亮线不随位移场波动、不进水中扭曲（255 verify-report off 臂坡面全 0.0000 /
+//   on 臂 0.10-0.18 实证 flag 是唯一开关面）。转正后位移门与亮线常开段同域；
+//   ?slopewave=0 = 逃生门回退灰度期行为（亮线仍在——常开段不归本 flag 管）。
 export const slopeWaveEnabled = (() => {
   try {
-    return typeof location !== 'undefined'
-      && new URLSearchParams(location.search).get('slopewave') === '1';
-  } catch { return false; }
+    if (typeof location === 'undefined') return true;
+    return new URLSearchParams(location.search).get('slopewave') !== '0';
+  } catch { return true; }
 })();
 
 // 我们的 liquidType（1 水 / 2 岩浆 / 3 蜂蜜 / 4 微光）→ 原版 LiquidType（0/1/2/3）
@@ -659,7 +664,8 @@ export function drawVanillaLiquids(
   const waveOn = waterWaves.quality > 0 && !warpMode;
   const waveInvZ = waveOn ? 1 / Math.max(1e-6, waterWaves.viewZoom()) : 0;
   // ★IIIII251 斜坡水缘 CPU bob 门（与表层 bob 同门：GL 全屏扭曲路径不双重 bob，
-  //  位移由足迹门控交付——见 Renderer footCtx 接线与 WaterWarpCompositor）
+  //  位移由足迹门控交付——见 Renderer footCtx 接线与 WaterWarpCompositor；
+  //  ★IIIII257 转正后 slopeWaveEnabled 缺省 true，?slopewave=0 逃生门关）
   const slopeWaveBob = slopeWaveEnabled && waterWaves.quality > 0 && !warpMode;
   const _wdisp: [number, number] = [0, 0];
   const _slopeDisp251: [number, number] = [0, 0];   // ★IIIII251 斜坡水缘 bob 采样暂存
@@ -988,11 +994,14 @@ export function drawLiquidBehindTilesOnly(
    *  ★前景层禁止带入（前景合成画在方块贴图之上 = 水蓝盖地形——用户实报撤回）；
    *    前景采样落空由 GL 合成的足迹回退兜住（GLWaterDistortion.FRAG uFoot） */
   warpFill = 0,
-  /** ★IIIII251（?slopewave=1 CPU 路）：坡面/半砖浸润带随波场垂直 bob（刚性整移）。
-   *  调用方门 = slopeWaveEnabled && quality>0 && !warpOn（GL 路径不双重 bob） */
+  /** ★IIIII251 CPU 路（★IIIII257 转正缺省开）：坡面/半砖浸润带随波场垂直 bob
+   *  （刚性整移）。调用方门 = slopeWaveEnabled && quality>0 && !warpOn
+   *  （GL 路径不双重 bob）；?slopewave=0 逃生门关 */
   waveBob = false,
-  /** ★IIIII251（?slopewave=1 GL 路）：坡面水形状 α≈0.02 预画进前景水离屏
-   *  （= 全屏位移 obj19 门控足迹；仅 bg 调用传入，见 Renderer.drawLiquids） */
+  /** ★IIIII251 GL 路（★IIIII257 转正缺省开）：坡面水形状 α≈0.02 预画进前景水
+   *  离屏（= 全屏位移 obj19 门控足迹；仅 bg 调用传入，见 Renderer.drawLiquids）。
+   *  256 批坡面亮线的位移/扭曲接入面：足迹楔形含亮线 2px 条带全宽
+   *  （LiquidSlope 表 slope1/2 行 0-3 全宽，见 /tmp/iii257-out alpha 台账） */
   footprintCtx: CanvasRenderingContext2D | null = null,
 ): void {
   // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
@@ -1231,6 +1240,9 @@ export function drawLiquidBehindTilesOnly(
       // 预画进前景水离屏——obj19 门控 aD/aU = min(α×100,1) 在 α≥0.01 即饱和 ⇒
       // 斜坡水缘纳入全屏位移场（可见合成仅 +2% 水色 tint，与浸润带同域不可辨）。
       // 半砖带整格宽但水区只在上半（下半是砖体）→ 足迹钳上半。
+      // ★IIIII257：足迹=坡面亮线（本文件实心层 pass 末段）的位移/扭曲接入面——
+      // 足迹楔形行 0-3 全宽 ⊇ 亮线 2px 条带，gate 饱和 ⇒ 亮线与平水面亮线同场
+      // 起伏、同入水中扭曲。转正后随 warpOn 常开（?slopewave=0 逃生门）。
       if (footprintCtx && num4 !== 0) {
         if (slope !== 0) {
           const stex = slopeTexFor(lt);
@@ -1281,6 +1293,28 @@ export function drawLiquidBehindTilesOnly(
       if (!warpFill && st.half[i] && Uq > 0 && st.wall[i] > 0) continue;
       ctx.globalAlpha = alpha;
       drawBand(bobDy251);
+      // ---- ★IIIII256 白色水面亮线沿水位线延伸过斜坡格水面段（用户明示偏差，2026-09-14）----
+      // 【断线根因】平水面亮边 = 水面带 srcY=1280 顶 2px / Liquid_N 顶 2px（147,177,253）；
+      // 坡面格的水最终呈现 = 实心层 pass（本 pass）的 LiquidSlope 斜面表——该表全暗
+      // 无亮顶行，且画在背景 pass 平面带（ry=num6=0 时自带亮顶行）之后 ⇒ 亮线在坡面
+      // 水面段被暗斜面水盖掉（drawImage 钩子实证：每帧 Liquid_0 亮带 → LiquidSlope
+      // ×2 后画覆盖）。半砖格 slope=0 走平面带不受影响（亮线本就连续）。
+      // 【修法】坡面 1/2（落地坡）且水位线横过格顶（上格无液体无实心=带顶即水面；
+      // 上格有液 fU=水下坡不画、上格实心=水下顶板不画）时，以平面 Liquid_N 顶 2px
+      // 亮边同位过画——方块贴图随后覆盖实心侧，亮线恰落在可见水面段上，与平水面
+      // 亮线同色同厚（终色同为末次不透明绘制）。仅实心层 pass（坡面液体最后一次
+      // 绘制）；3/4 为顶坡（水面不横过格顶）不画。bobDy251 随带同移（CPU bob 路）。
+      // ★IIIII257 位移接线定谳：GL 路亮线的位移施加点 = compositeLight 末尾全屏
+      // 扭曲 pass（GLWaterDistortion obj19，门控纹理=前景水离屏）——亮线像素在
+      // uScene 内，gate 由 251 足迹（α≈0.02 饱和）在坡面楔形内交付；256 曾宣称
+      // "GL 路随位移场波动"仅在 ?slopewave=1 灰度支成立，缺省足迹缺席 gate=0
+      // =用户实报"亮线静止"的根因（255 verify-report off/on 臂对照实证）。转正
+      // 后常开，?slopewave=0 回退（亮线仍在、静止同灰度期）。
+      if (solidLayer && (slope === 1 || slope === 2) && Uq === 0 && !st.isSolid(x, y - 1)
+        && (fL || fR)) {
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(tex, rx, 0, Math.min(rw, tex.width - rx), 2, px, py + bobDy251, rw, 2);
+      }
     }
   }
   // ★IIIII251：足迹画完恢复 identity（beginFgPass 每帧重设变换，此处为防御复位）

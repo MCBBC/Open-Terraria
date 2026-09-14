@@ -249,13 +249,13 @@ describe('SW-BJ1 ③ tickHoverNpcName 悬停名牌', () => {
     expect(g.player.cursorItemIconText).toBe(`${Lang.npcName(22) ?? ''}: 250/250`);
   });
 
-  it('mouseText 已被前置 claim 时不再 claim（原版 `flag && !mouseText` 同门）', () => {
+  it('★F2a/RB28:箱文本（layer 40 域）不压 NPC 名——覆盖 claim（:45794/:45858-45861 40 层头门被 HoveringOverAnNPC 压制,非 :43820 mouseText 让位集）', () => {
     const g = stubGame();
     g.input.mouseX = 170; g.input.mouseY = 180;
-    g.player.cursorItemIconText = '土块';
+    g.player.cursorItemIconText = '土块';   // TileInteractionsMouseOver setSuppress 等世界 claim
     g.entities.npcs = [mkNpc()];
     (g as any).tickHoverNpcName();
-    expect(g.player.cursorItemIconText).toBe('土块');
+    expect(g.player.cursorItemIconText).toBe(`${Lang.npcName(22) ?? ''}: 250/250`);
     expect(g.player.cursorItemIconEnabled).toBe(false);
   });
 

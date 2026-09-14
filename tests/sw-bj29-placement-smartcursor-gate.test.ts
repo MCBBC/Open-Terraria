@@ -25,7 +25,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/item
 import { TILE_BY_KEY, T } from '../src/data/tiles';
 import type { ItemDef } from '../src/data/items';
 import type { World } from '../src/world/World';
-import { SmartCursor } from '../src/player/SmartCursor';
+import { SmartCursor, resetSmartCursorSessionState } from '../src/player/SmartCursor';
 
 const TILE = 16;
 const PLAT = TILE_BY_KEY['platform']!;
@@ -111,6 +111,7 @@ function shell(w: World, o: ShellOpts = {}) {
     actuationRodLock: false, actuationRodLockSetting: false, grappleAnchorTiles: () => [],
     inv: { selected: 0, slots, heldItem: () => slots[0], removeAt: () => {}, removeHeld: () => {} },
   };
+  resetSmartCursorSessionState();         // ★SW-BJ84:壳=全新进程相(Main.cs:67590)——会话态语义下新实例读模块态,先清防同文件前序用例切换拍串味
   g.smartCursor = new SmartCursor();      // wanted=false 起步（世界初值同 Game :6994）
   return g;
 }

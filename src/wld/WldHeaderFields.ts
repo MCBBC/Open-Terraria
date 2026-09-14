@@ -105,15 +105,25 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'dungeonX', type: 'i32', ver: 0, get: (s) => H(s).dungeonX ?? 0 },
   { name: 'dungeonY', type: 'i32', ver: 0, get: (s) => H(s).dungeonY ?? 0 },
   { name: 'crimson', type: 'bool', ver: 0, get: (s) => !!H(s).crimson },
-  { name: 'downedBoss1', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_4') },
+  // ★downedBoss1 双键（2026-09-14 RB28-F1 审计）：运行时键 downed_4（Game.ts 击败链
+  //  `downed_${vanillaId}`）+ 原版名（审计前 WldParser 导入形态只落驼峰键）并读——
+  //  曾单读 vid 键=旧导入档（仅命名键态）导出 downedBoss1 恒 false（消费面
+  //  Game.ts:32149/:33561/:34457/:35737/:36786 全域 OR 口径=惯例参照）
+  { name: 'downedBoss1', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_4') || B(F(s), 'downedEyeOfCthulhu') },
   // ★downedBoss2 双键（2026-09-14 审计）：EoW 写 downed_13、BoC 写 downed_266（本仓
   //  击败链 Game.ts `downed_${vanillaId}`；导入端 WldParser:373 双键）——曾单读
   //  downed_13 = 只杀过克脑的自建国度导出 downedBoss2 恒 false
   { name: 'downedBoss2', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_13') || B(F(s), 'downed_266') },
-  { name: 'downedBoss3', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_35') },
+  // ★downedBoss3 双键（2026-09-14 RB28-F1 审计）：运行时键 downed_35 + 原版名
+  //  downedSkeletron（审计前导入形态/旧档）并读——曾单读 vid 键=旧导入档导出恒 false
+  { name: 'downedBoss3', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_35') || B(F(s), 'downedSkeletron') },
   { name: 'downedQueenBee', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_222') },
   { name: 'downedMechBoss1', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_134') },
-  { name: 'downedMechBoss2', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_125') },
+  // ★downedMechBoss2 双键（2026-09-14 RB28-F1 审计）：双子=125/双 NPC（Retinazer/
+  //  Spazmatism,NPC.cs:80239-80244 双 case 同旗）——击败链今归一写 downed_125
+  //  （Game.ts:9559 注）,旧档/裸写形态可能有 downed_126；消费面全仓 OR 口径
+  //  （Game.ts:32454/:33564/:35746/:37173）,导出 getter 同相并读
+  { name: 'downedMechBoss2', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_125') || B(F(s), 'downed_126') },
   { name: 'downedMechBoss3', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_127') },
   // ★downedMechBossAny 并集（2026-09-14 审计）：运行时键+任一机械 vid 键皆可表真
   //  （导入端 WldParser:379 只落命名键；自建国度由 Game.ts 击败链双写,旧档兼容并读）

@@ -68,6 +68,11 @@ export interface EscapeChainState {
   pauseOpen: boolean;
   npcDialogActive: boolean;
   signDialogActive: boolean;
+  /** ★RB28-F3（2026-09-14）：设置面板（.sw-set-panel）叠开于暂停浮层之上=IngameOptions
+   *  子页面（mainFlow openSettings 叠层设计意图：设置关=回暂停菜单）。此态链让位返回
+   *  noop——Esc 只走设置面板自身 window handler（关设置+保持暂停态=IngameOptions.Close
+   *  同相）；否则 pauseOpen 支同帧双收两层（设置+暂停整关=状态残留） */
+  settingsOpen: boolean;
   uiBlocking: boolean;
   inventoryOpen: boolean;
   /** SW-RB6b 2026-09-07 补：死亡/幽灵态——原版此态 ToggleInv 整链不跑
@@ -82,6 +87,10 @@ export interface EscapeChainState {
 export function resolveEscapeChain(s: EscapeChainState, intent: EscapeIntent): EscapeChainAction {
   if (s.summonOpen) return 'closeSummon';
   if (s.fullMapOpen) return 'closeFullMap';
+  // ★RB28-F3：设置子页面叠开于暂停浮层——链让位（面板自带 Esc=关设置回暂停菜单,
+  // IngameOptions.Close「关设置+保持暂停态」同相）;置于 pauseOpen 支前,否则 closePause
+  // 同帧双收两层
+  if (s.settingsOpen) return 'noop';
   if (s.pauseOpen) return 'closePause';
   if (s.npcDialogActive) return 'closeNpcDialog';
   if (s.signDialogActive) return 'closeSign';

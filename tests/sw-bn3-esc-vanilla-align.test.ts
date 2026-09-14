@@ -29,7 +29,7 @@ const readSrc = (p: string): string => readFileSync(`${srcRoot}/${p}`, 'utf8');
 
 describe('SW-BN3 ①Esc 链矩阵（对齐原版 ToggleInv Player.cs:4961-5057）', () => {
   const base: EscapeChainState = {
-    summonOpen: false, fullMapOpen: false, pauseOpen: false,
+    summonOpen: false, fullMapOpen: false, settingsOpen: false, pauseOpen: false,
     npcDialogActive: false, signDialogActive: false, uiBlocking: false,
     inventoryOpen: false, dead: false,
   };
@@ -64,6 +64,16 @@ describe('SW-BN3 ①Esc 链矩阵（对齐原版 ToggleInv Player.cs:4961-5057�
       // 死亡+浮层=closePause（ingameOptionsWindow ? Close : Open 的 Close 臂）
       expect(resolveEscapeChain(s({ pauseOpen: true, dead: true }), intent)).toBe('closePause');
     }
+  });
+
+  it('★RB28-F3 设置子页面让位支：设置面板叠开于暂停浮层=noop（Esc 只走设置面板自身 handler=关设置回暂停菜单）', () => {
+    // pauseOpen 支前让位——否则 closePause 同帧双收两层（设置+暂停整关=状态残留）;
+    // summon/fullMap 支仍在其前（历史序保留,设置态与两者实际互斥）
+    for (const intent of ALL_INTENTS) {
+      expect(resolveEscapeChain(s({ settingsOpen: true, pauseOpen: true }), intent)).toBe('noop');
+    }
+    // 设置面板独开（无暂停浮层,理论态）同让位
+    expect(resolveEscapeChain(s({ settingsOpen: true }), 'escape')).toBe('noop');
   });
 
   it('前序支序 1:1 不因重钉漂移（summon→map→pause→对话→路牌→模态让位→死亡）', () => {

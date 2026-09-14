@@ -223,6 +223,12 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
     expect(uiSrc).toMatch(/return \{ x: 94, y: 450 \+ this\.vinvCraftAdjY\(c\.sh\) \};/);
     // 金标指示条 = 钮心下移 17（CRAFT_BAR_TOP_OFF）
     expect(uiSrc).toMatch(/450 \+ this\.vinvCraftAdjY\(c\.sh\) \+ CRAFT_BAR_TOP_OFF/);
+    // ★RB29(2026-09-15)回归2连带:条随钮走——向导态支(Main.cs:42438
+    //   num67=InGuideCraftMenu?300:450;条画在钮位 CraftingUI.cs:275-278。
+    //   变异证红:删向导支=条滞留 450 位与钮脱钩,向导态旧钮位悬空金条)
+    expect(uiSrc).toMatch(
+      /if \(this\.vinvGuideMenuOpen\) return \{ x: 94, y: 300 \+ this\.vinvCraftAdjY\(c\.sh\) \+ CRAFT_BAR_TOP_OFF \};/,
+    );
     // 帧算式单源接线（★SW-FX41 2026-09-12：modernVisible=窗开态 vinvModernCraftOpen
     //   ——NewCraftingUI 窗族已落地,FX30 期「≡false=窗族分期缺席」锚随之退役）
     expect(uiSrc).toMatch(/craftToggleFrame\(this\.vinvModernCraftOpen, this\.vinvPipsUseGrid, this\.vinvGridToggleHover\)/);
@@ -270,16 +276,52 @@ describe('SW-FX30 接线锚定：UI.ts vinv 网格域', () => {
     //   ★SW-FX38:focus 走 vinvCraftFocusGoto 重锚播种 + :523 recFastScroll=true）
     expect(uiSrc).toMatch(/this\.vinvCraftFastScroll = true;[^\n]*\n\s*this\.vinvCraftFocusGoto\(i\);[^\n]*\n\s*this\.vinvPipsUseGrid = false;[^\n]*\n\s*this\.vinvCraftRecStart = 0;/);
   });
-  it('刀⑦ 过滤域：失效拍 + 列表头文字 + 可用行过滤', () => {
-    expect(uiSrc).toMatch(/private vinvTickCraftFilter\(\): void \{/);
-    expect(uiSrc).toMatch(/avail = avail\.filter\(\(\{ r \}\) => recipeFilterAccepts\(r, f\)\);/);
-    expect(uiSrc).toMatch(/Lang\.text\('CombineFormat\.Crafting', name\)/);   // NewCraftingUI.cs:101-104
-    expect(uiSrc).toMatch(/this\.vinvCraftTitleEl\.textContent = Lang\.inter\(25\);/);   // :167 复位
+  it('刀⑦/★BJ85 债① 过滤域：净死对齐——ClearHacks 网入 CloseAll 尾 + 消费面退役（列表恒全量/头文字恒 inter[25]）', () => {
+    // ★SW-BJ85(2026-09-15) 债①实锤：RecipeFilterHack(CraftingUI.cs:112-122)恒 null——
+    //   非空写点仅 OpenCloseFilter :154，其后 :155 IngameUIWindows.CloseAll(quiet:true)
+    //   尾部 ClearHacks(IngameUIWindows.cs:69 → CraftingUI.cs:143)同拍即净
+    //   (1456/1457/1458 三版同构,IngameUIWindows.cs 三版字节全等)。净死 ⇒
+    //   Recipe.UpdateRecipeList :252 filterHack==null 支恒走=经典列表恒【全量邻接配方】
+    //   + DrawRecipesList :167-171 头文字恒 Lang.inter[25](GetWindowDescription 支不可达)。
+    //   旧消费面(FX30 刀⑦列表过滤/站台名头文字/RB13b 失效拍)退役。变异证红：
+    //   回植 avail.filter(recipeFilterAccepts)/vinvTickCraftFilter/filterActive 即红。
+    // ClearHacks=原版 CloseAll 尾语句：vinvCloseAllQuiet 体序=对话→箱→modern 窗(quiet)→滤器净
+    expect(uiSrc).toMatch(
+      /private vinvCloseAllQuiet\(\): void \{\s*\n\s*this\.game\?\.closeNpcDialog\(true\);\s*\n\s*this\.closeChest\(\);\s*\n\s*this\.vinvCloseModernCraft\(true\);\s*\n\s*this\.vinvCraftFilter = null;/,
+    );
+    // 消费面退役：vinvRefreshCraft 体内不得出现经典滤器过滤/站台名头文字/失效拍
+    //   （slice 界=vinvRefreshCraft→vinvRebuildCraftCells；modern 窗同字面在界外不受此锁）
+    const refresh = uiSrc.slice(uiSrc.indexOf('private vinvRefreshCraft'), uiSrc.indexOf('private vinvRebuildCraftCells'));
+    expect(refresh).not.toMatch(/recipeFilterAccepts/);
+    expect(refresh).not.toMatch(/CombineFormat\.Crafting/);
+    expect(refresh).not.toMatch(/vinvTickCraftFilter/);
+    expect(refresh).not.toMatch(/const filterActive/);
+    expect(refresh).toMatch(/this\.vinvCraftTitleEl\.textContent = Lang\.inter\(25\);/);   // :167
+    // 失效拍死臂不移植（DrawGridToggle 头 :269-272 以 _lastFilter!=null 为门=原版本就净死）
+    expect(uiSrc).not.toMatch(/private vinvTickCraftFilter\(\): void \{/);
+    // modern 窗滤器消费面不误伤（NewCraftingUI._filter=活机制 NewCraftingUI.cs:421/:622/:642/:657）
+    expect(uiSrc).toMatch(/recipeFilterAccepts\(r, this\.vinvModernCraftFilter\)/);
     expect(uiSrc).toMatch(/openCraftingStationFilter\(f: CraftingTileFilter\): void \{/);
-    // OpenCloseFilter 开支：滤器置位 + 开包 + 网格态（CraftingUI.cs:154-158）
-    expect(uiSrc).toMatch(/this\.vinvCraftFilter = f;[^\n]*\n\s*this\.openInventory\(true\);[^\n]*\n\s*this\.vinvPipsUseGrid = true;/);
-    // 关支：网格已开 → 清过滤（:148-153）
-    expect(uiSrc).toMatch(/if \(invOpen && this\.vinvPipsUseGrid\) \{\s*\n\s*this\.vinvCraftFilter = null;/);
+    // OpenCloseFilter 开支：滤器置位 + CloseAll(quiet) 面 + 开包 + 网格态
+    // （CraftingUI.cs:154-158;★BJ83:CloseAll(quiet) 面(:155 → IngameUIWindows.cs:17-66
+    // 收 modern 窗/对话/箱)插在滤器置位与开包之间=原版序；★BJ85:ClearHacks 网
+    // (IngameUIWindows.cs:69)在 vinvCloseAllQuiet 体内=置入同拍即净）
+    expect(uiSrc).toMatch(/this\.vinvCraftFilter = f;[\s\S]{0,900}?this\.vinvCloseAllQuiet\(\);[\s\S]{0,300}?this\.openInventory\(true\);[\s\S]{0,200}?this\.vinvPipsUseGrid = true;/);
+  });
+  it('★BJ85 债② 关支：网格已开 → 清过滤 + LOUD CloseAll（CraftingUI.cs:148-153 三态开关）', () => {
+    // 原版网格开态再右击站点=_lastFilter=null(:150)+IngameUIWindows.CloseAll()(:151,
+    // LOUD:对话/箱/背包各音 11+modern 窗静默+ClearHacks)——旧刀「清过滤后照常全开」
+    // =FX30 期偏差(RB19 揭出)已撤。变异证红：换回 vinvRefreshCraft()+return(照常全开)即红。
+    expect(uiSrc).toMatch(
+      /if \(invOpen && this\.vinvPipsUseGrid\) \{\s*\n\s*(?:[ \t]*\/\/[^\n]*\n)*[ \t]*this\.vinvCraftFilter = null;[^\n]*\n\s*this\.vinvCloseAllLoud\(\);[^\n]*\n\s*return;/,
+    );
+    // vinvCloseAllLoud=IngameUIWindows.CloseAll() LOUD 支(:10-70)：对话(:33-42 音11)/
+    //   箱(:50-57 音11)/背包(:58-65 音11)/modern 窗恒静默(:63-68,走 closeInventory 内
+    //   vinvCloseModernCraft(true))；背包面=closeInventory()=!playerInventory 次帧净态
+    //   (Main.cs:43940 PipsUseGrid=false / :43933-43937 recStart=0)同相
+    expect(uiSrc).toMatch(
+      /private vinvCloseAllLoud\(\): void \{[\s\S]{0,200}?if \(game\?\.npcDialogActive\) game\.closeNpcDialog\(\);[\s\S]{0,200}?if \(this\.openChest\) \{[\s\S]{0,200}?this\.closeChest\(\);[\s\S]{0,200}?game\?\.sfx\.play\('menuClose', 1\);[\s\S]{0,300}?this\.closeInventory\(\);[^\n]*\n\s*this\.vinvRefreshCraft\(\);/,
+    );
   });
 });
 
@@ -343,11 +385,11 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
     expect(uiSrc).not.toMatch(/Math\.max\(1, steps\)/);
     expect(uiSrc).not.toMatch(/Math\.round\(e\.deltaY \/ 120\)/);
   });
-  it('过滤失效拍逐帧化（DrawGridToggle 头 :268-272 每帧执行；事件驱动刷新下走远站不清滤）', () => {
-    expect(uiSrc).toMatch(/if \(this\.vinvCraftFilter && this\._builtLayout === 'vanilla'\) \{[^]*?vinvFilterRemain\(\)\) \{\s*\n\s*this\.vinvCraftFilter = null;\s*\n\s*this\.vinvRefreshCraft\(\);/);
+  it('★BJ85:RB13b 失效拍逐帧块随滤器消费面退役（原版 DrawGridToggle 头 :269-272 净死臂不移植）', () => {
+    expect(uiSrc).not.toMatch(/站点过滤失效拍逐帧化/);
   });
-  it('滤器消费门 = RecipeFilterHack getter（CraftingUI.cs:121-127 control≠Classic → null）', () => {
-    expect(uiSrc).toMatch(/const filterActive = !this\.vinvGuideMenuOpen && this\.vinvCraftFilter !== null && options\.data\.craftingGridControl === 'classic';/);   // ★刀19:向导态早退分支不消费滤器(Recipe.cs:236-241 return)
+  it('★BJ85:RecipeFilterHack 消费门退役（CraftingUI.cs:112-122 getter 恒 null ⇒ 无 filterActive 门；变异回植即红）', () => {
+    expect(uiSrc).not.toMatch(/const filterActive = /);
   });
   it('网格容器/页钮 pos 闭包与 vinvUpdateCraftGrid 双写者一致化（防 relayout 冲掉几何与 recStart 门）', () => {
     // 容器 pos=网格原点（曾 (0,0):pos 循环把 (310,340) 冲回原点=格全体左上漂移）
@@ -358,7 +400,7 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
   it('FX28 箱条 cosmetic 清偿：名无命中盒/悬停金 OurFavoriteColor/钮竖直居中锚', () => {
     const chestBlock = uiSrc.slice(uiSrc.indexOf('private vinvBuildChest'), uiSrc.indexOf('private vinvUpdateChestName'));
     expect(chestBlock).toContain("nameEl.style.cssText += 'font-size:13px;'");   // 不再 pointer-events:auto（DrawName 无命中盒）
-    expect(chestBlock).toContain("text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;");   // ★2026-09-14 四向描边(亮背景可读)
+    expect(chestBlock).toContain("text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,0 -2px 0 #000;");   // ★F3/RB28 2026-09-14:2px 轴向族(与 canvas DrawBorderStringFourWay 统一)
     expect(chestBlock).toContain("b.style.color = 'rgb(255,231,69)';");   // Main.cs:886 OurFavoriteColor
     expect(chestBlock).not.toContain("'#c8f0c8'");
     expect(chestBlock).toContain('transform:translateY(-50%);');   // origin=vector/2 竖直居中（:234）

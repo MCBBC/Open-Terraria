@@ -56,7 +56,7 @@ const A = await page.evaluate(async () => {
     expectHeight: H, lines,
     chatLeft: cr.left - pr.left, chatTop: cr.top - pr.top, chatW: cs.width,
     lineHeight: cs.lineHeight,
-    bodyImgH: bgBodyImg ? parseFloat(bgBodyImg.style.height) : -1,
+    bodyImgH: bgBodyImg ? parseFloat(getComputedStyle(bgBodyImg).height) : -1,
     bodyH: bgBody?.getBoundingClientRect().height ?? -1,
     hasCap: !!bgCap,
     btnTops: btns.map((b) => b.top), btnLefts: btns.map((b) => b.left),
@@ -75,7 +75,11 @@ ok('A5 文本 inset (20,20)', approx(A.chatLeft, 20, 1) && approx(A.chatTop, 20,
 ok('A6 换行宽 460', approx(parseFloat(A.chatW), 460, 1), `w=${A.chatW}`);
 ok('A7 行距 30', A.lineHeight === '30px', `lh=${A.lineHeight}`);
 ok('A8 面板高=30+30L+30n+max(0,2(n-1))', approx(A.height, A.expectHeight, 1), `h=${A.height} expect=${A.expectHeight} lines=${A.lines}`);
-ok('A9 Chat_Back 主体两段绘制(源(0,0,500,470)→(500,H-30))', approx(A.bodyImgH, (A.height - 30) * 500 / 470, 2) && approx(A.bodyH, A.height - 30, 1) && A.hasCap, `imgH=${A.bodyImgH} bodyH=${A.bodyH} cap=${A.hasCap}`);
+// A9(②刀 2026-09-14 更):反编译核读 NPCChatPanel.cs:71 主体 = Draw(tex, TopLeft,
+// source(0,0,500,rect.H-30))——源高=目标高【1:1 零拉伸】切顶部 H-30 行(旧断言
+// 「源(0,0,500,470)→H-30 纵向压缩」系 spec 转写误锚=顶角被压扁根因,已修)
+ok('A9 Chat_Back 两段绘制 1:1(主体=源顶 H-30 行@原尺寸 :71,底帽=源(0,470,500,30) :72)',
+  approx(A.bodyImgH, 500, 1) && approx(A.bodyH, A.height - 30, 1) && A.hasCap, `imgH=${A.bodyImgH} bodyH=${A.bodyH} cap=${A.hasCap}`);
 // 按钮行：行高 22 / 列距 30 / 4 列换行（:97/:103-107/:135）
 ok('A10 按钮行高 22', A.btnHeights.every((h) => approx(h, 22, 1)), `hs=${A.btnHeights.join(',')}`);
 ok('A11 4 列换行(第 5 钮回行首)', approx(A.btnLefts[4], A.btnLefts[0], 1) && approx(A.btnTops[4] - A.btnTops[0], 22, 1), `l4=${A.btnLefts[4]} l0=${A.btnLefts[0]} dy=${A.btnTops[4] - A.btnTops[0]}`);

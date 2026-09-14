@@ -34,7 +34,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/item
 import { T, TILE_BY_KEY } from '../src/data/tiles';
 import type { ItemDef } from '../src/data/items';
 import type { World } from '../src/world/World';
-import { SmartCursor, DEFAULT_SMART_CURSOR_SETTINGS, type SmartCursorEnv } from '../src/player/SmartCursor';
+import { SmartCursor, DEFAULT_SMART_CURSOR_SETTINGS, resetSmartCursorSessionState, type SmartCursorEnv } from '../src/player/SmartCursor';
 
 const TILE = 16;
 const PLAT = TILE_BY_KEY['platform']!;
@@ -129,6 +129,7 @@ interface ShellOpts {
 }
 
 function shell(w: World, o: ShellOpts = {}) {
+  resetSmartCursorSessionState(); // ★SW-BJ84:壳=全新进程相(Main.cs:67590)——防同文件前序用例切换拍把会话态留成开,串味后续"新壳=关"前提
   const g = Object.create(Game.prototype) as unknown as Record<string, any>;
   g.world = w;
   g.chunks = { markDirtyArea: () => {} };

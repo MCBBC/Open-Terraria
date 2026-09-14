@@ -186,15 +186,25 @@ describe('SW-BJ7 ② 缺陷①：npcHover 只压图标支不压名支（:45794 �
     expect(calls(events, 'drawImage').length).toBe(1);
   });
 
-  it('uiHeld / uiBlocking 维持整函数门（拖拽物/面板态,原版 mouseItem 域,本次不动）', () => {
-    for (const extra of [{ uiHeld: true }, { uiBlocking: true }]) {
-      const events = stubRenderer(
-        { ...NPC_HOVER_CTX, ...extra },
-        mkPlayer({ cursorItemIconText: 'Levi: 250/250', cursorItemIconEnabled: true, cursorItemIconID: 48 }),
-      );
-      expect(calls(events, 'fillText').length).toBe(0);
-      expect(calls(events, 'drawImage').length).toBe(0);
-    }
+  it('uiBlocking（mouseInterface）整函数早退（:45794 40 层头门域,面板态压制维持）', () => {
+    const events = stubRenderer(
+      { ...NPC_HOVER_CTX, uiBlocking: true },
+      mkPlayer({ cursorItemIconText: 'Levi: 250/250', cursorItemIconEnabled: true, cursorItemIconID: 48 }),
+    );
+    expect(calls(events, 'fillText').length).toBe(0);
+    expect(calls(events, 'drawImage').length).toBe(0);
+  });
+
+  it('uiHeld（拖拽物）不早退:名照画+锚 X+=34（★F2c/RB28:MouseTextInner :20390-20392 持物仅偏移,债 BJ7-R1 清偿）', () => {
+    const events = stubRenderer(
+      { ...NPC_HOVER_CTX, uiHeld: true },
+      mkPlayer({ cursorItemIconText: 'Levi: 250/250', cursorItemIconEnabled: true, cursorItemIconID: 48 }),
+    );
+    const fills = calls(events, 'fillText');
+    expect(fills.length).toBe(5);                       // 四向描边 + 本体
+    const core = fills[fills.length - 1];
+    expect(core.args[0]).toBe('Levi: 250/250');
+    expect(core.args[1]).toBe(500 + 20 + 34);           // +14+6 基础锚 + 持物 34
   });
 });
 
@@ -242,7 +252,7 @@ describe('SW-BJ7 ③ 缺陷②：MouseTextInner 锚定同式（:20379-20419）+ 
     expect(a.x).toBe(520);
   });
 
-  it('光标持物 +34（:20390-20392 helper 面全转录;本仓 uiHeld 整函数早退不接=债 BJ7-R1）', () => {
+  it('光标持物 +34（:20390-20392 helper 面全转录;★F2c/RB28 绘制层已接线=债 BJ7-R1 清偿）', () => {
     const a = mouseTextAnchor(500, 300, 112, 14, 1920, 1080, { heldOnCursor: true });
     expect(a.x).toBe(500 + 14 + 6 + 34);
     expect(a.y).toBe(320);
@@ -262,17 +272,20 @@ describe('SW-BJ7 ④ 结构锁：drawCursorItemIcon 门拓扑', () => {
     fileURLToPath(new URL('../src/render/Renderer.ts', import.meta.url)), 'utf8',
   );
 
-  it('整函数早退门不含 npcHover（旧门 `c.npcHover||c.uiHeld||c.uiBlocking` 已拆）', () => {
-    expect(src).toContain('if (c.uiHeld || c.uiBlocking) return;');
-    expect(src).not.toContain('if (c.npcHover || c.uiHeld || c.uiBlocking) return;');
+  it('整函数早退门拓扑（★F2c/RB28:图标支（drawCursorItemIcon）保留 uiHeld 门,文本支（drawMouseTextLayer）=uiBlocking 单臂;不含 npcHover）', () => {
+    const mtLayer = src.slice(src.indexOf('private drawMouseTextLayer'));
+    expect(mtLayer).toContain('if (c.uiBlocking) return;');
+    expect(mtLayer).not.toContain('if (c.uiHeld || c.uiBlocking) return;');
+    expect(src).toContain('if (c.uiHeld || c.uiBlocking) return;');   // 图标支门保留(持物不画图标)
+    expect(mtLayer).not.toContain('if (c.npcHover || c.uiHeld || c.uiBlocking) return;');
   });
 
   it('图标支门含 !c.npcHover（npcHover 下沉至图标支,余辉支一并压）', () => {
     expect(src).toContain('if ((flag || flag2) && !c.npcHover) {');
   });
 
-  it('名文本支走 mouseTextAnchor（+14 裸锚公式不得回流）', () => {
-    expect(src).toContain('const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height);');
+  it('名文本支走 mouseTextAnchor（+14 裸锚公式不得回流;★F2c/RB28 持物经 heldOnCursor 接线）', () => {
+    expect(src).toMatch(/const anchor = mouseTextAnchor\(this\._mouseX, this\._mouseY, w, h, this\.canvas\.width, this\.canvas\.height,\s*\{ heldOnCursor: c\.uiHeld \}\);/);
     expect(src).not.toMatch(/let x = this\._mouseX \+ 14, y = this\._mouseY \+ 14;/);
   });
 });
