@@ -375,16 +375,14 @@ function openInGamePause(game: Game): void {
     // onExport(json 档)2026-09-06 用户定案:退出正式 UI,保留 __swFlow.doExportSave()
     // 调试通道(Shift+F5/控制台);世界备份走世界列表的 .wld 导出
     onSettings: () => flow?.openSettings(true),
-    onBestiary: () => flow?.openBestiary(),
-    // ★2026-09-07 刀 3:住房面板停车坪(vanilla 布局)——原版 EquipPage=1 住房页已
-    // 覆盖查询/指定,HousingPanel 右缘条自暂停菜单调起;classic 布局仍走背包簇格钮
+    // ★2026-09-14 反馈轮8:暂停菜单摘 住房(原版 EquipPage=1 页签已覆盖)/图鉴(背包
+    // 2×2 钮已覆盖);天气/时间/道具搜索收入"开发者选项"子视图(showPause 侧)
     // ★刀 5 停车坪:道具搜索/天气/时间/玩家列表/旅程/研究同迁(vanilla 门控;
     // ★SW-FX39 2026-09-11 起该门=常态路径——vanilla 已是缺省布局,classic 仅存
     // ?invlayout=legacy 回退旗)
     ...(options.data.inventoryLayout === 'vanilla' ? (() => {
       const isJourney = game.player.appearance?.difficulty === 3;
       return {
-        onHousing: () => { pausePanel = null; game!.paused = false; flow?.openHousing?.(); },
         onItemSearch: () => { pausePanel = null; game!.paused = false; ui.openItemSearch(); },
         onWeather: () => { pausePanel = null; game!.paused = false; showJourneyQuickGate('weather', () => { game.renderer.weatherPanelOpen = !game.renderer.weatherPanelOpen; }); },
         onTime: () => { pausePanel = null; game!.paused = false; showJourneyQuickGate('time', () => { game.renderer.timePanelOpen = !game.renderer.timePanelOpen; }); },

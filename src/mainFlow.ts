@@ -433,8 +433,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onNpcDialog: (name, chat, buttons, portrait, vanillaId, cornerItem) => ui.showNpcDialog(name, chat, buttons, portrait, vanillaId, cornerItem),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onReforgeOpen: () => ui.showReforge(),
-      // 向导「制作」（NPCChatText_GuideReverseCrafting :40723）：开背包 + 反查浮层
-      onGuideCraftOpen: () => { ui.openInventory(); ui.openGuideSearch(); },
+      // 向导「制作」（NPCChatText_GuideReverseCrafting :40723）：开背包 +
+      // ★刀19 vanilla 布局=原版向导制作菜单（modern 缺省开窗/经典位槽）;
+      // classic 布局=自创反查浮层（零变化白名单）
+      onGuideCraftOpen: () => {
+        ui.openInventory();
+        if (options.data.inventoryLayout === 'vanilla') ui.openVanillaGuideCraft();
+        else ui.openGuideSearch();
+      },
       // ★SW-FX30 刀⑦ 合成站右键 focus 钩（Player.cs:33541-33547 → :33555-33561）：
       // classic 支 = OpenCloseFilter（CraftingUI.cs:146-159 开包+网格态+站点过滤）
       onCraftingStationOpen: (f) => ui.openCraftingStationFilter(f),

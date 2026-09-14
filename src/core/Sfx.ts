@@ -436,6 +436,43 @@ export function trackVolumeFor(file: string, ambientVol: number, masterVol: numb
   return AMBIENT_FILES.has(file) ? ambientVol : masterVol;
 }
 
+/** ★BJ74（2026-09-14 用户报「蘑菇群系 BGM 一轮后不 loop、变嗡嗡声」取证定谳）：
+ *  Chromium AudioBufferSourceNode 循环回绕缺陷——loop=true 且循环终点=缓冲区
+ *  绝对末帧时，特定总帧数的 buffer 在首轮回绕后渲染器冻结为「单渲染量子
+ *  （128 帧）重复块」：音乐停、余音是恒定低鸣（用户口中的"嗡嗡声"），且
+ *  **onended 不触发**（09-07 为"播完一轮停止"加的 ended 哨兵因此恒抓不到；
+ *  行为日志 bgm 环零事件=无 sel/stop/ended 亦为佐证——图无迁移，声自己变质）。
+ *  本机 Chrome 152.0.7977.84 实测矩阵（tools 外 /tmp/bj74-www 探针,Music_29.mp3
+ *  解码长 3665419 帧 @48kHz）：
+ *  · 全长循环（原实现）→ 76.4s 后冻结恒定 -51.7dB/zc=32/rep=128,两轮不愈;
+ *  · 尾部补零对齐 128（3665472 帧,循环仍跨绝对末帧）→ 冻结为静默同病;
+ *  · 循环终点内收（trim 至 3665408 / 或不拷贝仅设 loopEnd=3665408/48000）→
+ *    两轮+ 全程真音乐,零冻结。合成正弦扫频同长度判别：仅 3665419 帧中毒,
+ *    3665418/3665420 均活——与内容无关、帧数触发（Chromium 回绕算术缺陷）。
+ *  修 = 循环终点恒内收一个量子尾（rem==0 收 128 帧、否则收 rem 帧,≤128 帧
+ *  ≈2.7ms;曲尾本身是原版淡出,不可闻）——循环永不触碰缓冲区绝对末帧。
+ *  原版锚（★RB18 翻案定谳 2026-09-14,更正本段;缺陷论/变体矩阵/接线说明不变）：
+ *  Wave Bank.xwb 104/104 流 loopStart 恒 0 且 loopEnd==波全长=整波循环（xwb 逐流
+ *  解析,不存在"尾部不播"域）;mp3 提取即整波（xwb-extract vgmstream 带 -i）,解码
+ *  实长 3665419@48k = 3367680 帧@44101 换算链保时长落点（±1 帧舍入）→整缓冲循环
+ *  =原版语义。BJ74 曾记「全长 162.7s/尾 86s 原版永不播」系 vgmstream 无 -i 时
+ *  「loop×2+fade10s」预估播报值误读,非 xwb 事实。本内收一量子 = Chromium 回绕
+ *  缺陷逼出的对原版刻意偏差（原版 XAudio2 循环直达末帧无此缺陷）,非「与原版
+ *  loopEnd 等价备案」——与原版边界差 ≈0.23ms = 内收 11 帧本身+换算链舍入伪影
+ *  （旧记「差≤7 帧」系按 44100 误率折算的伪值）。
+ *  消费面：本仓全部 4 处 loop=true（Audio.track / Sfx.stepCue /
+ *  Sfx.startTrackedLoop / Sfx.startLoopFile）统一走本函数,禁裸 `loop = true`
+ *  （守卫 tests/bgm-loop-end-guard.test.ts 结构断言+变异证红）。 */
+export function applyLoopBounds(src: AudioBufferSourceNode, buf: AudioBuffer): void {
+  src.loop = true;
+  const rem = buf.length % 128;
+  if (buf.length > 128) {
+    const end = buf.length - (rem === 0 ? 128 : rem);
+    src.loopStart = 0;
+    src.loopEnd = end / buf.sampleRate;
+  }
+}
+
 // ---- 环境音 cue 斜坡状态机（LegacyAudioSystem.cs:219-274 1:1；风 cue45/雨 cue28 共用）----
 
 /** Main.musicFade[i] + AudioTrack.IsPlaying 等价态 */
@@ -782,7 +819,7 @@ export class Sfx {
     if (!was && L.cue.playing) {              // :237-239 Reuse()+Play() 从头起播
       const src = ctx.createBufferSource();
       src.buffer = L.buf;
-      src.loop = true;
+      applyLoopBounds(src, L.buf);            // ★BJ74 循环终点内收（Chromium 回绕缺陷,见函数注）
       src.connect(L.gain!);
       src.start();
       L.src = src;
@@ -1017,7 +1054,7 @@ export class Sfx {
     if (!buf) return null;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.loop = true;
+    applyLoopBounds(src, buf);              // ★BJ74 循环终点内收（Chromium 回绕缺陷,见函数注）
     src.playbackRate.value = pitchRateFor(list[0]);
     const g = ctx.createGain();
     // setVolume 面积(终清波)：ActiveSound.Volume 逐帧覆写语义(NPC.cs:41464 女皇水晶
@@ -1159,7 +1196,7 @@ export class Sfx {
       if (!buf) { st.failed = true; gain.disconnect(); this.emit('loopF', { f: file }); return; }
       const src = ctx.createBufferSource();
       src.buffer = buf;
-      src.loop = true;
+      applyLoopBounds(src, buf);            // ★BJ74 循环终点内收（Chromium 回绕缺陷,见函数注）
       if (st.rate !== 1) src.playbackRate.value = st.rate;
       src.connect(gain);
       src.start();

@@ -233,8 +233,10 @@ export function shineDelta(
 //   paintCoatDustColor，不在烘焙可达路径；TileTint.ts:124 为 Map 迭代序，确定性）。
 //   ⇒ 延迟烘焙/断行续烘不重排任何 RNG 流，闪光变体分配与一次烘完逐位恒等。
 
-/** 解析 ?shinebudget=<ms>（纯函数，单测面）。null=未传/无效（缺省=现行计数预算）；
- *  0=显式关（逃生门）；>0=时间盒毫秒/帧。小数向下取整；负数/非有限=容错视同未传。 */
+/** 解析 ?shinebudget=<ms>（纯函数，单测面）。null=未传/无效；0=显式关（逃生门=
+ *  回落计数预算）；>0=时间盒毫秒/帧。小数向下取整；负数/非有限=容错视同未传。
+ *  ★IIIRS249→转正(2026-09-14 用户验收)：缺省启用 4ms 时间盒（shineBudgetMs 兜底
+ *  null→4），shinebudget=0 为反向逃生门。 */
 export function parseShineBudget(search: string): number | null {
   if (!search) return null;
   const raw = new URLSearchParams(search).get('shinebudget');
@@ -246,7 +248,7 @@ export function parseShineBudget(search: string): number | null {
 /** 模块装载期解析（?glband 先例：渲染模块直读 location；Node/vitest 无 location=0=缺省路径）。 */
 export const shineBudgetMs: number =
   typeof location !== 'undefined' && typeof location.search === 'string'
-    ? parseShineBudget(location.search) ?? 0
+    ? parseShineBudget(location.search) ?? 4
     : 0;
 
 /** 时间盒模式逐帧计数（仅 shineBudgetMs>0 的调度路径推进；缺省路径零成本零触碰）。

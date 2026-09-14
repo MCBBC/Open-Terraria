@@ -347,7 +347,7 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
     expect(uiSrc).toMatch(/if \(this\.vinvCraftFilter && this\._builtLayout === 'vanilla'\) \{[^]*?vinvFilterRemain\(\)\) \{\s*\n\s*this\.vinvCraftFilter = null;\s*\n\s*this\.vinvRefreshCraft\(\);/);
   });
   it('滤器消费门 = RecipeFilterHack getter（CraftingUI.cs:121-127 control≠Classic → null）', () => {
-    expect(uiSrc).toMatch(/const filterActive = this\.vinvCraftFilter !== null && options\.data\.craftingGridControl === 'classic';/);
+    expect(uiSrc).toMatch(/const filterActive = !this\.vinvGuideMenuOpen && this\.vinvCraftFilter !== null && options\.data\.craftingGridControl === 'classic';/);   // ★刀19:向导态早退分支不消费滤器(Recipe.cs:236-241 return)
   });
   it('网格容器/页钮 pos 闭包与 vinvUpdateCraftGrid 双写者一致化（防 relayout 冲掉几何与 recStart 门）', () => {
     // 容器 pos=网格原点（曾 (0,0):pos 循环把 (310,340) 冲回原点=格全体左上漂移）

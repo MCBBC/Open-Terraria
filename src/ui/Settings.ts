@@ -140,24 +140,14 @@ export class SettingsPanel {
     const cats = document.createElement('div');
     cats.className = 'sw-set-cats';
     // 资源包/数据栏已摘（2026-08-27 用户要求）——见文件头注
-    const list = ['sound', 'ui', 'game', 'touch', 'controls'];
+    // CatTouch 栏已摘（2026-09-14 用户要求；成就入口同批摘除）
+    const list = ['sound', 'ui', 'game', 'controls'];
+    if (!list.includes(this.cat)) this.cat = 'sound';   // 语言重建保留分栏卫门(残 cat 落回)
     for (const c of list) {
       const div = document.createElement('div');
       div.dataset.cat = c;
       div.textContent = this.catLabel(c);
       div.addEventListener('click', () => { this.cat = c; this.build(); });
-      cats.appendChild(div);
-    }
-    // ★SW-FX18 2026-09-10 成就入口（IngameOptions.cs:292-298 左列
-    // DrawLeftSide(Lang.menu[131]) → IngameFancyUI.OpenAchievements() 的 DOM 等价：
-    // 点击叠开成就面板、设置面板留在下层——原版 InGameUI SetState 同层叠语义）。
-    // 非分栏：不切内容不落 active 态。缺 flow.onAchievements（主菜单直开设置等）
-    // = 不渲染该入口
-    if (this.flow.onAchievements) {
-      const div = document.createElement('div');
-      div.dataset.cat = 'achievements';
-      div.textContent = Lang.text('LegacyMenu.131');   // menu[131] 成就（Main.cs:49733 同键）
-      div.addEventListener('click', () => this.flow.onAchievements?.());
       cats.appendChild(div);
     }
     this.panel.querySelector('.sw-set-cats')!.replaceWith(cats);
@@ -489,7 +479,7 @@ export class SettingsPanel {
       this.content.append(hint);
     } else if (this.cat === 'game') {
       this.content.append(
-        this.toggle(Lang.text('Mods.SandboxWorld.Settings.DevMode'), () => d.devMode, (v) => void options.set('devMode', v)),
+        // 开发者模式行已摘（2026-09-14 用户要求；devMode 选项面保留走 URL/控制台）
         // 背景 开/关（Main.BackgroundEnabled Main.cs:790，原版视频设置项 Lang.menu[100/101]；
         // 天气阴天渐变 cloudBGAlpha 的门，Game.updateWeather 注入 WeatherCtx.backgroundEnabled）
         this.toggle(Lang.menu(100).replace(/[:：].*$/, ''), () => d.backgrounds, (v) => void options.set('backgrounds', v)),
@@ -789,10 +779,7 @@ export class SettingsPanel {
             d.inventoryLayout === 'vanilla' ? 'classic' : 'vanilla'),
         ),
       );
-      const hint = document.createElement('div');
-      hint.className = 'sw-set-hint';
-      hint.textContent = Lang.text('Mods.SandboxWorld.Settings.DevModeHint');
-      this.content.append(hint);
+      // 开发者模式提示已摘(2026-09-14 用户要求,行+提示同批)
       const scHint = document.createElement('div');
       scHint.className = 'sw-set-hint';
       scHint.textContent = Lang.text('Mods.SandboxWorld.Settings.SmartCursorHint');

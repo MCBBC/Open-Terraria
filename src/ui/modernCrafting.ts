@@ -377,10 +377,12 @@ export interface MCraftGridGeometry {
   /** 首格屏坐标(UIDynamicItemCollection.GetGridParameters:startX=中心−44·cols/2) */
   startX: number; startY: number;
 }
-export function mcraftGridGeometry(sh: number, count: number): MCraftGridGeometry {
+export function mcraftGridGeometry(sh: number, count: number, guide = false): MCraftGridGeometry {
   const panel = mcraftPanelRect(sh);
   const inner = mcraftPanelInner(panel);
-  const container = { x: inner.x, y: inner.y + 77, w: inner.w, h: inner.h - 77 };
+  // ★刀19:向导态网格域 −130(UpdateCraftAreaSize NewCraftingUI.cs:409-416 num=77|130
+  //   ——向导槽+文案在窗内 detail 区下方,网格域让位 53px)
+  const container = { x: inner.x, y: inner.y + 77, w: inner.w, h: inner.h - (guide ? 130 : 77) };
   const list = { x: container.x, y: container.y + 7, w: container.w - 20, h: container.h - 7 };
   const separator = { x: container.x + Math.floor((container.w - (container.w - 8)) / 2), y: container.y, w: container.w - 8, h: 4 };
   const scrollbar = {

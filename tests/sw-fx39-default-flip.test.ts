@@ -228,14 +228,20 @@ describe('SW-FX39 ③差集审计终态锁(vinv 缺省态逐面在位)', () => {
   it('自创面停车坪(main.ts):vanilla 门控下经暂停菜单可达——缺省转正后即常态路径', () => {
     expect(mainSrc).toContain("options.data.inventoryLayout === 'vanilla'");
     const pause = mainSrc.slice(mainSrc.indexOf('pausePanel = ui.showPause({'));
-    for (const key of ['onHousing', 'onItemSearch', 'onWeather', 'onTime', 'onPlayerList', 'onJourney', 'onResearch']) {
+    // ★2026-09-14 反馈轮8:onHousing 摘除(住房=原版 EquipPage=1 页签面),其余保留
+    for (const key of ['onItemSearch', 'onWeather', 'onTime', 'onPlayerList', 'onJourney', 'onResearch']) {
       expect(pause).toContain(`${key}:`);
     }
-    // UI.showPause 渲染侧同面在位(刀 5 停车坪)
+    expect(pause).not.toContain('onHousing:');
+    // UI.showPause 渲染侧同面在位(刀 5 停车坪;★反馈轮8:三项入"开发者选项"子视图)
     const showPause = uiSrc.slice(uiSrc.indexOf('showPause(handlers: {'));
     expect(showPause).toContain("if (handlers.onItemSearch) panel.appendChild(mkBtn('道具搜索'");
     expect(showPause).toContain("if (handlers.onWeather) panel.appendChild(mkBtn('天气控制'");
     expect(showPause).toContain("if (handlers.onTime) panel.appendChild(mkBtn('时间控制'");
+    expect(showPause).toContain("mkBtn(Lang.text('Mods.SandboxWorld.UI.DevOptions'), () => buildDev())");
+    // 住房/图鉴入口已摘
+    expect(showPause).not.toContain('handlers.onHousing');
+    expect(showPause).not.toContain('handlers.onBestiary');
   });
 });
 

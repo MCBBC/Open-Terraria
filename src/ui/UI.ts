@@ -1454,7 +1454,10 @@ export class UI {
     });
     // hover 型信息通道统一走 bindHint:fine 指针=原 mouseenter(行为不变);
     // coarse 指针=touchLongPressMs 长按显示(mobile-adaptation-plan 模块④)
-    bindHint(s, () => this.showSlotHintTouch(i, where));
+    // ★反馈轮7:vanilla 布局显式传自身为 anchor——tooltip 定位回退的 slotEl(i,where)
+    //  全局首匹配在开包态命中【隐藏热键栏】(0-9 DOM 序在前,rect=(0,0))→ 气泡钉
+    //  左上角(用户报 ESC 开包热栏格气泡错位);classic 不传=行为零变化白名单
+    bindHint(s, () => this.showSlotHintTouch(i, where, this._builtLayout === 'vanilla' ? s : undefined));
     s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
     s.addEventListener('contextmenu', (e) => e.preventDefault());
     return s;
@@ -2413,12 +2416,13 @@ export class UI {
   /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行/商店格位）——slot 传
    *  合成槽内容（stack 1 无词缀/收藏），anchor 传气泡定位锚元素；shopCell = 商店
    *  格位悬停（SW-BJ22：context 15 HoverItem.buy 语义 → tooltip 价格行走买入价） */
-  private showTooltipFor(i: number, where: SlotWhere, override?: { slot: { id: number; stack: number; prefix?: number }; anchor: HTMLElement; shopCell?: { price: number; medal?: number } }) {
+  private showTooltipFor(i: number, where: SlotWhere, override?: { slot?: { id: number; stack: number; prefix?: number }; anchor?: HTMLElement; shopCell?: { price: number; medal?: number } }) {
     let s = (override?.slot ?? this.slotContent(where, i)) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
     // LoadoutShare 空槽悬停（ItemSlot.MouseHover IS57:3174-3178）：装备/染料格空槽
     // 悬停时共享件代打（GetSharedLoadoutItem → GetEffectiveArmor/Dye）——tooltip
     // 全文 + "共享自配装N"行随下方 R4-15 行族自然接上。曾缺 = 空槽早退无任何提示
-    if (!s && !override && (where === 'armor' || where === 'dye')) {
+    //（★override 判据按【内容覆写】位算——仅锚定位的 override 不抑制共享代打）
+    if (!s && !override?.slot && (where === 'armor' || where === 'dye')) {
       const inv = this.game!.player.inv;
       const from = inv.effectiveSharedFrom(i, where === 'dye');
       if (from !== null) s = (where === 'dye' ? inv.loadouts[from].dye[i] : inv.loadouts[from].armor[i]) ?? null;
@@ -2868,6 +2872,7 @@ export class UI {
     // (refreshHotbar 开包早退的还原面;classic 关包链无刷新点,main.ts:427 直调)
     if (this._builtLayout === 'vanilla') {
       this.vinvReforgeOpen = false;   // 原版重铸菜单随背包关闭退出(DrawInventory 域内)
+      this.vinvGuideMenuOpen = false;   // ★刀19:向导态随背包关闭退出(关包=playerInventory 面同步)
       this.reflowBuffs();             // ★SW-FX10 债④:页2 列内 buff 块回流 HUD 栏(关包当帧)
       this.refreshAll();
     }
@@ -3325,7 +3330,7 @@ export class UI {
         img.style.cssText = 'max-width:46px; max-height:46px; image-rendering:pixelated;';
         img.draggable = false;
         slotBox.appendChild(img);
-        slotCaption.textContent = `${Lang.inter(21)} ${itemNameOfVid(vidOfItem(this.guidePlaced.id))} ×${this.guidePlaced.stack}`;
+        slotCaption.textContent = `${Lang.inter(21)} ${itemNameOfVid(this.vidOfItemOf(this.guidePlaced.id))} ×${this.guidePlaced.stack}`;
       } else {
         slotBox.style.borderStyle = 'dashed';
         slotBox.style.borderColor = '#55506a';
@@ -3367,82 +3372,7 @@ export class UI {
     const isMaterialVid = (vid: number): boolean => vid >= 0 && materialVids().has(vid);
     const maxStackOf = (iid: number): number => ITEM_DEFS[iid]?.maxStack ?? 999;
     slotBox.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const cur = this.heldStack;
-      const pl = this.guidePlaced;
-      let action: 'none' | 'take' | 'move' = 'none';
-      if (cur && !isMaterialVid(vidOfItem(cur.id))) return;          // 放置门不过=原样拒
-      const changed = (): void => { refreshHeader(); renderRecipes(); applyFilter(); };
-      this.guideRefresh = changed;   // ★SW-AY1 R5：Shift 对换支（shiftGuideSwap）同刷面板
-      if (e.button === 0) {
-        if (!cur && pl) {                                            // 空手 → 取整组
-          const hadPrefix = (pl as { prefix?: number }).prefix;
-          this.heldStack = { id: pl.id, stack: pl.stack,
-            ...(hadPrefix !== undefined ? { prefix: hadPrefix } : {}),
-            ...(pl.placeStyle !== undefined ? { placeStyle: pl.placeStyle } : {}) };   // ★SW-RB5a 实例样式随行
-          this.guidePlaced = null;
-          this.game?.sfx.play('pickup');                             // SoundID.Grab(7)
-          action = 'take';
-        } else if (cur && !pl && isMaterialVid(vidOfItem(cur.id))) { // 手持 → 空槽整组
-          this.guidePlaced = { id: cur.id, stack: cur.stack,
-            ...(cur.prefix !== undefined ? { prefix: cur.prefix } : {}),   // ★SW-BM1 保词缀
-            ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) };   // ★SW-RB5a 实例样式随行
-          this.heldStack = null;
-          this.game?.sfx.play('pickup');                             // ★SW-RB5a：case 0 尾奏 SoundID 7（ItemSlot.cs:986-988）
-          action = 'move';
-        } else if (cur && pl) {
-          // ★SW-RB5a 2026-09-07 case 0 1:1（ItemSlot.cs:912 MouseItemSwap 先行 +
-          //  :968-985 CanStack 并回）：槽↔手整体对换后,同型同词缀（CanStack,
-          //  Item.cs:49870-49877 prefix 相等臂）且双方未满才并回——旧实现「同 vid
-          //  即并」漏词缀臂（异词缀同型物并堆=词缀丢失数据面）且槽满时 no-op
-          //  （原版=纯对换）;对换不再要求槽内件是材料（vanilla 只门手持侧
-          //  checkItem.material,PickItemMovementAction context 7 :1478-1481）。
-          //  MouseItemSwap 双端清收藏（context 7 不在 retainFavoriteOnMoveAt
-          //  :362-366）——对换产物不带 favorited
-          const oldPl = { id: pl.id, stack: pl.stack,
-            ...(pl.prefix !== undefined ? { prefix: pl.prefix } : {}),
-            ...(pl.placeStyle !== undefined ? { placeStyle: pl.placeStyle } : {}) };
-          this.guidePlaced = { id: cur.id, stack: cur.stack,
-            ...(cur.prefix !== undefined ? { prefix: cur.prefix } : {}),
-            ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) };
-          this.heldStack = oldPl;
-          const cap = maxStackOf(pl.id);
-          if (canMergeStack(cur, pl) && cur.stack !== cap && pl.stack !== cap) {
-            if (pl.stack + cur.stack <= cap) {
-              this.guidePlaced!.stack = pl.stack + cur.stack;        // 槽吸收手持原堆,手清空
-              this.heldStack = null;
-            } else {
-              const mv = cap - cur.stack;                            // num2 = maxStack − 对换后槽内堆
-              this.guidePlaced!.stack = cur.stack + mv;
-              this.heldStack!.stack = pl.stack - mv;                 // 余量留手
-            }
-          }
-          this.game?.sfx.play('pickup');                             // case 0 尾奏 SoundID 7（:988）
-          action = 'move';
-        }
-      } else if (e.button === 2) {
-        if (!cur && pl && pl.stack > 0) {                            // 空手右键 = 取 1
-          const one: { id: number; stack: number; prefix?: number } = { id: pl.id, stack: 1 };
-          const pref = (pl as { prefix?: number }).prefix;
-          if (pref !== undefined) one.prefix = pref;
-          this.heldStack = one;
-          pl.stack -= 1;
-          if (pl.stack <= 0) this.guidePlaced = null;
-          UISfx.click();                                             // RightClick 内 PlaySound(12)
-          action = 'take';
-        } else if (cur && pl && canMergeStack(cur, pl)               // ★SW-RB5a：CanStack 词缀面（:1639）
-          && cur.stack < maxStackOf(cur.id) && pl.stack > 0) {       // 手持同型不满 → 放 1
-          pl.stack += 1; cur.stack -= 1;
-          if (cur.stack <= 0) this.heldStack = null;
-          UISfx.click();
-          action = 'move';
-        }
-      }
-      if (action !== 'none') {
-        changed();
-        if (this.guideGhostMove) this.guideGhostMove(e as unknown as MouseEvent);   // 立即重算影子显隐
-      }
+      this.guideSlotMouseDown(e as MouseEvent, () => { refreshHeader(); renderRecipes(); applyFilter(); });
     });
     slotBox.addEventListener('contextmenu', (e) => e.preventDefault());
     filterInput.addEventListener('input', () => {
@@ -3458,7 +3388,7 @@ export class UI {
     const renderRecipes = (): void => {
       recipeList.textContent = '';
       filterInput.value = ''; filterQ = '';
-      const vid = this.guidePlaced ? vidOfItem(this.guidePlaced.id) : null;
+      const vid = this.guidePlaced ? this.vidOfItemOf(this.guidePlaced.id) : null;
       if (vid != null && vid >= 0) this.renderGuideRecipes(recipeList, vid);
     };
     // ---- 图标补图升级器（面板级有界轮询；结构渲染仍由 renderRecipes 承担）----
@@ -3529,6 +3459,89 @@ export class UI {
       ghost.style.top = `${e.clientY + 8}px`;
     };
     window.addEventListener('mousemove', this.guideGhostMove);
+  }
+
+  /** ★刀19:ctx7 槽点击语义共享体(向导反查浮层与 vanilla 布局向导槽共用;ItemSlot.cs
+   *  case-0/RightClick 1:1,注释锚见原 openGuideSearch 体内迁前行)。repaint=槽态
+   *  变化后的面板重刷(浮层=header/列表/筛选;vanilla=槽绘制+vinvRefreshCraft) */
+  private guideSlotMouseDown(e: MouseEvent, repaint: () => void): void {
+    e.preventDefault();
+    e.stopPropagation();
+    const cur = this.heldStack;
+    const pl = this.guidePlaced;
+    let action: 'none' | 'take' | 'move' = 'none';
+    const isMaterialVid = (vid: number): boolean => vid >= 0 && materialVids().has(vid);
+    const maxStackOf = (iid: number): number => ITEM_DEFS[iid]?.maxStack ?? 999;
+    this.guideRefresh = repaint;   // ★SW-AY1 R5：Shift 对换支（shiftGuideSwap）同刷面板
+    if (cur && !isMaterialVid(this.vidOfItemOf(cur.id))) return;   // 放置门不过=原样拒
+    if (e.button === 0) {
+      if (!cur && pl) {                                            // 空手 → 取整组
+        const hadPrefix = (pl as { prefix?: number }).prefix;
+        this.heldStack = { id: pl.id, stack: pl.stack,
+          ...(hadPrefix !== undefined ? { prefix: hadPrefix } : {}),
+          ...(pl.placeStyle !== undefined ? { placeStyle: pl.placeStyle } : {}) };   // ★SW-RB5a 实例样式随行
+        this.guidePlaced = null;
+        this.game?.sfx.play('pickup');                             // SoundID.Grab(7)
+        action = 'take';
+      } else if (cur && !pl && isMaterialVid(this.vidOfItemOf(cur.id))) { // 手持 → 空槽整组
+        this.guidePlaced = { id: cur.id, stack: cur.stack,
+          ...(cur.prefix !== undefined ? { prefix: cur.prefix } : {}),   // ★SW-BM1 保词缀
+          ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) };   // ★SW-RB5a 实例样式随行
+        this.heldStack = null;
+        this.game?.sfx.play('pickup');                             // ★SW-RB5a：case 0 尾奏 SoundID 7（ItemSlot.cs:986-988）
+        action = 'move';
+      } else if (cur && pl) {
+        // ★SW-RB5a 2026-09-07 case 0 1:1（ItemSlot.cs:912 MouseItemSwap 先行 +
+        //  :968-985 CanStack 并回）：槽↔手整体对换后,同型同词缀（CanStack,
+        //  Item.cs:49870-49877 prefix 相等臂）且双方未满才并回——旧实现「同 vid
+        //  即并」漏词缀臂（异词缀同型物并堆=词缀丢失数据面）且槽满时 no-op
+        //  （原版=纯对换）;对换不再要求槽内件是材料（vanilla 只门手持侧
+        //  checkItem.material,PickItemMovementAction context 7 :1478-1481）。
+        //  MouseItemSwap 双端清收藏（context 7 不在 retainFavoriteOnMoveAt
+        //  :362-366）——对换产物不带 favorited
+        const oldPl = { id: pl.id, stack: pl.stack,
+          ...(pl.prefix !== undefined ? { prefix: pl.prefix } : {}),
+          ...(pl.placeStyle !== undefined ? { placeStyle: pl.placeStyle } : {}) };
+        this.guidePlaced = { id: cur.id, stack: cur.stack,
+          ...(cur.prefix !== undefined ? { prefix: cur.prefix } : {}),
+          ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) };
+        this.heldStack = oldPl;
+        const cap = maxStackOf(pl.id);
+        if (canMergeStack(cur, pl) && cur.stack !== cap && pl.stack !== cap) {
+          if (pl.stack + cur.stack <= cap) {
+            this.guidePlaced!.stack = pl.stack + cur.stack;        // 槽吸收手持原堆,手清空
+            this.heldStack = null;
+          } else {
+            const mv = cap - cur.stack;                            // num2 = maxStack − 对换后槽内堆
+            this.guidePlaced!.stack = cur.stack + mv;
+            this.heldStack!.stack = pl.stack - mv;                 // 余量留手
+          }
+        }
+        this.game?.sfx.play('pickup');                             // case 0 尾奏 SoundID 7（:988）
+        action = 'move';
+      }
+    } else if (e.button === 2) {
+      if (!cur && pl && pl.stack > 0) {                            // 空手右键 = 取 1
+        const one: { id: number; stack: number; prefix?: number } = { id: pl.id, stack: 1 };
+        const pref = (pl as { prefix?: number }).prefix;
+        if (pref !== undefined) one.prefix = pref;
+        this.heldStack = one;
+        pl.stack -= 1;
+        if (pl.stack <= 0) this.guidePlaced = null;
+        UISfx.click();                                             // RightClick 内 PlaySound(12)
+        action = 'take';
+      } else if (cur && pl && canMergeStack(cur, pl)               // ★SW-RB5a：CanStack 词缀面（:1639）
+        && cur.stack < maxStackOf(cur.id) && pl.stack > 0) {       // 手持同型不满 → 放 1
+        pl.stack += 1; cur.stack -= 1;
+        if (cur.stack <= 0) this.heldStack = null;
+        UISfx.click();
+        action = 'move';
+      }
+    }
+    if (action !== 'none') {
+      repaint();
+      if (this.guideGhostMove) this.guideGhostMove(e as unknown as MouseEvent);   // 立即重算影子显隐(浮层面)
+    }
   }
 
   /** 材料的配方列表（CollectGuideRecipes：items 直接命中或 RecipeGroup 成员命中） */
@@ -5550,8 +5563,8 @@ export class UI {
 
   /** 触屏长按槽位 tooltip(mobile-adaptation-plan 模块④):显示后挂一次性
    *  document 触摸关闭(桌面 mouseleave 已有;触屏无 leave 语义) */
-  private showSlotHintTouch(i: number, where: string): void {
-    this.showTooltipFor(i, where as never);
+  private showSlotHintTouch(i: number, where: string, anchor?: HTMLElement): void {
+    this.showTooltipFor(i, where as never, anchor ? { anchor } : undefined);
     document.addEventListener('touchstart', () => {
       this.tooltip.style.display = 'none';
       cancelAnimationFrame(this.tooltipPulseRaf);
@@ -6060,7 +6073,7 @@ export class UI {
 
   // ============ 暂停菜单（原版像素风：IngameOptions.Draw + Utils.DrawInvBG） ============
 
-  showPause(handlers: { onResume: () => void; onSave: () => void; onExport?: () => void; onQuit: () => void; onSettings?: () => void; onBestiary?: () => void; onHousing?: () => void;
+  showPause(handlers: { onResume: () => void; onSave: () => void; onExport?: () => void; onQuit: () => void; onSettings?: () => void;
     /** ★2026-09-07 刀 5 停车坪(vanilla 布局):自创功能入口自背包簇格迁暂停菜单 */
     onItemSearch?: () => void; onWeather?: () => void; onTime?: () => void; onPlayerList?: () => void; onJourney?: () => void; onResearch?: () => void }) {
     // 已开守卫：移除旧面板再建新——防 ESC 快速连按/HMR 监听器堆积导致多层叠框
@@ -6104,23 +6117,36 @@ export class UI {
       ? mkBtn(Lang.text('Mods.SandboxWorld.UI.ExportSave'), () => handlers.onExport?.())
       : null;
     const bSet = mkBtn(Lang.text('LegacyMenu.14'), () => handlers.onSettings?.());
-    const bBst = mkBtn(Lang.text('Mods.SandboxWorld.Tabs.Bestiary'), () => handlers.onBestiary?.());
     const bQuit = mkBtn(Lang.text('Mods.SandboxWorld.UI.BackToMenu'), () => { panel.remove(); handlers.onQuit(); });
-    panel.append(bRes, bSave);
-    if (bExp) panel.appendChild(bExp);
-    panel.append(bSet);
-    // 住房面板入口(★2026-09-07 刀 3:vanilla 布局停车坪——原版 EquipPage=1 住房页
-    // 已覆盖查询/指定,HousingPanel 右缘条(超集)自暂停菜单调起;classic 仍走簇格钮)
-    if (handlers.onHousing) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.Housing.Button'), () => { panel.remove(); handlers.onHousing?.(); }));
-    // 停车坪钮组(★刀 5:vanilla 布局时自创功能入口;classic 不传=不渲染)
-    if (handlers.onPlayerList) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.PlayerList.Title'), () => { panel.remove(); handlers.onPlayerList?.(); }));
-    if (handlers.onJourney) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.JourneyPowers.Title'), () => { panel.remove(); handlers.onJourney?.(); }));
-    // ★SW-RB14b:研究钮标签订正(LegacyInterface.112 原版=你必须先设置边框,非研究面)
-    if (handlers.onResearch) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.Research.Title'), () => { panel.remove(); handlers.onResearch?.(); }));
-    if (handlers.onWeather) panel.appendChild(mkBtn('天气控制', () => { panel.remove(); handlers.onWeather?.(); }));
-    if (handlers.onTime) panel.appendChild(mkBtn('时间控制', () => { panel.remove(); handlers.onTime?.(); }));
-    if (handlers.onItemSearch) panel.appendChild(mkBtn('道具搜索', () => { panel.remove(); handlers.onItemSearch?.(); }));
-    panel.append(bBst, bQuit);
+    // ★2026-09-14 反馈轮8:住房/图鉴入口摘除(住房=原版 EquipPage=1 页签面已在背包;
+    //  图鉴=背包 2×2 钮已有),天气/时间/道具搜索收入"开发者选项"子视图
+    const clearRows = (): void => {
+      panel.querySelectorAll('.sw-pause-btn').forEach((n) => n.remove());
+    };
+    const buildDev = (): void => {
+      clearRows();
+      if (handlers.onWeather) panel.appendChild(mkBtn('天气控制', () => { panel.remove(); handlers.onWeather?.(); }));
+      if (handlers.onTime) panel.appendChild(mkBtn('时间控制', () => { panel.remove(); handlers.onTime?.(); }));
+      if (handlers.onItemSearch) panel.appendChild(mkBtn('道具搜索', () => { panel.remove(); handlers.onItemSearch?.(); }));
+      panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.MP.Back'), () => buildMain()));   // 返回
+      applyBg();
+    };
+    const buildMain = (): void => {
+      clearRows();
+      panel.append(bRes, bSave);
+      if (bExp) panel.appendChild(bExp);
+      panel.append(bSet);
+      // 停车坪钮组(★刀 5:vanilla 布局时自创功能入口;classic 不传=不渲染)
+      if (handlers.onPlayerList) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.PlayerList.Title'), () => { panel.remove(); handlers.onPlayerList?.(); }));
+      if (handlers.onJourney) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.JourneyPowers.Title'), () => { panel.remove(); handlers.onJourney?.(); }));
+      // ★SW-RB14b:研究钮标签订正(LegacyInterface.112 原版=你必须先设置边框,非研究面)
+      if (handlers.onResearch) panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.Research.Title'), () => { panel.remove(); handlers.onResearch?.(); }));
+      if (handlers.onWeather || handlers.onTime || handlers.onItemSearch) {
+        panel.appendChild(mkBtn(Lang.text('Mods.SandboxWorld.UI.DevOptions'), () => buildDev()));
+      }
+      panel.append(bQuit);
+      applyBg();
+    };
     this.root.appendChild(panel);
     // 原版像素面板底:Inventory_Back13 九宫(Utils.DrawInvBG :2672+:2681,
     // IngameOptions.Draw 面板色 (33,15,91)×0.685)逐像素乘色后按角 10px 合成;
@@ -6133,6 +6159,7 @@ export class UI {
         panel.classList.remove('fallback-bg');
       }
     };
+    buildMain();   // 初始主视图(住房/图鉴已摘,自创项入开发者选项子视图)
     requestAnimationFrame(applyBg);
     const img = invBgEnsure();
     // ★bitmap 就绪语义(2026-08-14 修复):invBgImg 升级为 ImageBitmap 后无
@@ -7110,9 +7137,13 @@ export class UI {
     settingsBtn.textContent = Lang.inter(62);
     settingsBtn.style.cssText = 'font-size:18px; pointer-events:auto; cursor:pointer;'
       + 'background:none; border:none; padding:0; color:#fff; text-shadow:1px 1px 0 #000;'
-      + 'transition:transform 80ms linear;';
-    settingsBtn.addEventListener('mouseenter', () => { settingsBtn.style.transform = 'scale(1.15)'; });
-    settingsBtn.addEventListener('mouseleave', () => { settingsBtn.style.transform = 'scale(1)'; });
+      + 'transition:transform 80ms linear;'
+      // ★反馈轮8:中心锚由 translate(-50%,-50%) 承载——(sw-110,sh-20)=文本中心
+      //  (Main.cs:46344 origin=Size/2)。不用 pos 内 offsetWidth:build 期 root 尚
+      //  display:none(关包构建)→ 度量为 0,中心退化回左上
+      + 'transform:translate(-50%,-50%);';
+    settingsBtn.addEventListener('mouseenter', () => { settingsBtn.style.transform = 'translate(-50%,-50%) scale(1.15)'; });
+    settingsBtn.addEventListener('mouseleave', () => { settingsBtn.style.transform = 'translate(-50%,-50%)'; });
     settingsBtn.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       this.onPauseMenu?.();   // 开/关设置浮层(★SW-RB8c 勘误:Open 收背包 :70/Close 回背包 :108,两态互斥)
@@ -7121,11 +7152,13 @@ export class UI {
     this.vinvLayoutItems.push({ el: settingsBtn, pos: () => {
       const c = this.vinvLayoutCtx;
       if (!c) return null;
+      // ★反馈轮8:(sw-110, sh-20) 是文本【中心】(Main.cs:46344 origin=Size/2)——
+      //   居中由元素 translate(-50%,-50%) 承载,pos 只写中心点
       let px = c.sw - 110, py = c.sh - 20;
       let last = 7;
       for (let s = 9; s >= 3; s--) { const r = this.vinvRowMap.get(`equip:${s}`); if (r !== undefined) { last = r; break; } }
       const colBottom = equipRowY(c.num20, last) + 44.2;
-      if (py - 28 <= colBottom) { px -= 140; py = colBottom - 17; }
+      if (py - 28 <= colBottom) { px -= 140; py = colBottom - 17; }   // :46274-46282 推挤(posY=num3-47+30)
       return { x: px, y: py };
     } });
 
@@ -7303,7 +7336,7 @@ export class UI {
     // ★反馈轮7:unlockedBiomeTorches 入签(:48166 start.Y+=24*torchGodIcons 列体位移
     //   + :48370 炬图标显隐)——旗翻(炬神事件结算)不入签则图标列滞留旧位与炬图标重叠
     const bgSig = `${bg.rulerGrid ? 1 : 0}${bg.autoActuator ? 1 : 0}${bg.autoPaint ? 1 : 0}${bg.infoAccMechShowWires ? 1 : 0}${this.game.world.flags.unlockedBiomeTorches ? 1 : 0}`;
-    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}|${this.vinvModernCraftOpen ? 1 : 0}`;
+    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}|${this.vinvModernCraftOpen ? 1 : 0}|${this.vinvGuideMenuOpen ? 1 : 0}`;
     if (sig === this.vinvLayoutSig) return;
     this.vinvLayoutSig = sig;
     for (const it of this.vinvLayoutItems) {
@@ -7539,6 +7572,8 @@ export class UI {
     this.vinvLayoutItems.push({ el: nearBtn, pos: () => {
       const c = this.vinvLayoutCtx;
       if (!c) return null;
+      // ★刀19:向导态整隐(Main.cs:42440 !InGuideCraftMenu 门/NewCraftingUI.cs:496 同门)
+      if (this.vinvGuideMenuOpen) return null;
       // ★SW-FX41:窗开态 = 窗内就近箱钮锚(DrawChildren :495-499 num2+40 → (82|122,285);
       //   经典锚 (94,490+adjY) 在 else 分支,窗开不画——同一对象换锚,两态互斥)
       if (this.vinvModernCraftOpen) {
@@ -7559,6 +7594,38 @@ export class UI {
     this.vinvBindGridWheel();
     // ---- ★SW-FX41 modern 窗族(NewCraftingUI.cs:302-501;债#2-modern P2-1/P2-4 清偿) ----
     this.vinvBuildModernCraft();
+
+    // ---- ★刀19:向导槽(经典位 Main.cs:42401-42415 @(73,331+num52) ctx7 0.85)+
+    //      DrawGuideCraftText(:42901-42924)——仅向导态∧窗关可见(:42401 else-if 门) ----
+    {
+      const root = this.vinvRoot;
+      if (!root) return;
+      const cgSlot = el('div', 'sw-slot');
+      cgSlot.style.cssText = 'position:absolute; width:52px; height:52px; background-image:none;'
+        + '--slot-bgimg:url(sprites/vanilla/Inventory_Back.png); transform:scale(0.85);'
+        + 'transform-origin:top left; pointer-events:auto;';
+      cgSlot.addEventListener('contextmenu', (e) => e.preventDefault());
+      cgSlot.addEventListener('mousedown', (e) => {
+        this.guideSlotMouseDown(e as MouseEvent, () => { this.vinvPaintGuideCraft(); this.vinvRefreshCraft(); });
+      });
+      root.appendChild(cgSlot);
+      this.vinvGuideSlotClassicEl = cgSlot;
+      this.vinvLayoutItems.push({ el: cgSlot, pos: () => {
+        const c = this.vinvLayoutCtx;
+        if (!c || !this.vinvGuideMenuOpen || this.vinvModernCraftOpen) return null;
+        return { x: 73, y: 331 + this.vinvCraftAdjY(c.sh) };
+      } });
+      const cgTxt = el('div', 'vinv-txt');
+      cgTxt.style.cssText += 'position:absolute; font-size:14px; white-space:normal; line-height:26px; width:300px;';
+      root.appendChild(cgTxt);
+      this.vinvGuideClassicTextEl = cgTxt;
+      this.vinvLayoutItems.push({ el: cgTxt, pos: () => {
+        const c = this.vinvLayoutCtx;
+        if (!c || !this.vinvGuideMenuOpen || this.vinvModernCraftOpen) return null;
+        // 空=inter[24] @(槽+50,+12);有件=两行 @(+50,−2) 起(原文 +12−14=−2,+26 步距)
+        return { x: 123, y: 329 + this.vinvCraftAdjY(c.sh) };
+      } });
+    }
   }
 
   /** 合成视图切换钮(DrawGridToggle CraftingUI.cs:267-330,Main.cs:42437-42439
@@ -7675,6 +7742,8 @@ export class UI {
       if (this.vinvModernCraftOpen) {
         return mcraftWindowToggleXY(!!this.game?.world?.isJourney).toggle;
       }
+      // ★刀19:向导态切换钮上移(Main.cs:42438 num67=InGuideCraftMenu ? 300 : 450)+num52)
+      if (this.vinvGuideMenuOpen && !this.vinvModernCraftOpen) return { x: 94, y: 300 + this.vinvCraftAdjY(c.sh) };
       return { x: 94, y: 450 + this.vinvCraftAdjY(c.sh) };
     } });
   }
@@ -7859,6 +7928,26 @@ export class UI {
     this.vinvModernScrollbarEl = sbar;
     this.vinvModernScrollHandle = handle;
     this.vinvBindModernScrollbar(sbar, handle);
+    // ---- ★刀19:向导槽+文案(DrawChildren NewCraftingUI.cs:441-458;win 相对:
+    //      槽=detailOrigin+(0,58)=(24,131) ctx7 scale1/文案=+(52,73)=(76,146)/
+    //      环境需求=+(52,36)=(76,109);仅向导态+窗开可见) ----
+    const gSlot = el('div', 'sw-slot');
+    gSlot.style.cssText = 'position:absolute; left:24px; top:131px; width:52px; height:52px;'
+      + 'background-image:none; --slot-bgimg:url(sprites/vanilla/Inventory_Back.png); pointer-events:auto;';
+    gSlot.addEventListener('contextmenu', (e) => e.preventDefault());
+    gSlot.addEventListener('mousedown', (e) => {
+      this.guideSlotMouseDown(e as MouseEvent, () => { this.vinvPaintGuideCraft(); this.vinvRefreshCraft(); });
+    });
+    win.appendChild(gSlot);
+    this.vinvGuideSlotModernEl = gSlot;
+    const gTxt = el('div', 'vinv-txt');
+    gTxt.style.cssText += 'position:absolute; left:76px; top:146px; font-size:14px;';
+    win.appendChild(gTxt);
+    this.vinvGuideModernCaptionEl = gTxt;
+    const gReq = el('div', 'vinv-txt');
+    gReq.style.cssText += 'position:absolute; left:76px; top:109px; font-size:14px; color:#c8c8c8;';
+    win.appendChild(gReq);
+    this.vinvGuideModernReqEl = gReq;
     // ---- 详情浮层(DrawChildren :440-487;origin = 面板+(24,73) = craftDetailLayout) ----
     const detail = el('div');
     detail.style.cssText = 'position:absolute; pointer-events:none; display:none;';
@@ -7869,6 +7958,11 @@ export class UI {
       const o = mcraftDetailOrigin();
       return { x: o.origin.x - 20, y: o.origin.y - 312 };
     } });
+    // ★刀19:窗内向导件显隐(InGuideCraftMenu ∧ NewCraftingUI.Visible;:441 在
+    //   DrawChildren=窗子级,窗关随窗隐藏,此处双门=显式)
+    this.vinvLayoutItems.push({ el: gSlot, pos: () => this.vinvGuideMenuOpen && this.vinvModernCraftOpen ? { x: 24, y: 131 } : null });
+    this.vinvLayoutItems.push({ el: gTxt, pos: () => this.vinvGuideMenuOpen && this.vinvModernCraftOpen ? { x: 76, y: 146 } : null });
+    this.vinvLayoutItems.push({ el: gReq, pos: () => this.vinvGuideMenuOpen && this.vinvModernCraftOpen ? { x: 76, y: 109 } : null });
   }
 
   /** 筛选钮帧同步(UpdateVisuals :103-114:frameX=激活、frameY=激活×2+悬停、图标半透)。
@@ -8029,7 +8123,7 @@ export class UI {
   private vinvModernGridGeometry(): ReturnType<typeof mcraftGridGeometry> | null {
     const c = this.vinvLayoutCtx;
     if (!c || !this.vinvModernGridList) return null;
-    return mcraftGridGeometry(c.sh, Math.max(1, this.vinvModernEntries.length));
+    return mcraftGridGeometry(c.sh, Math.max(1, this.vinvModernEntries.length), this.vinvGuideMenuOpen);
   }
 
   /** 滚动条/内容位移同步(UIScrollbar.GetHandleRectangle :78-84) */
@@ -8079,7 +8173,22 @@ export class UI {
     // 搜索域(EntryFilterer.SetSearchFilter :85-94 IsNullOrWhiteSpace→null)
     const search = normalizeSearch(this.vinvModernSearch);
     // ---- 条目池增量(:596-617:availableRecipe 逐条入池,FitsFilter 过滤入 _filteredRecipes) ----
-    const avail = game.vanillaAvailableRecipes();
+    // ★刀19:向导反查(NewCraftingUI.GetNumRecipes :256-262)——空槽=0 配方;有件=
+    //   CollectGuideRecipes 集(与经典支同源,vinvRefreshCraft 的 vinvCraftAvailV 已带,
+    //   但本窗每拍自取 avail=独立接入)
+    let avail: Array<{ r: VanillaRecipeLike; count: number }>;
+    if (this.vinvGuideMenuOpen) {
+      avail = this.guidePlaced
+        ? (() => {
+          const vid = this.vidOfItemOf(this.guidePlaced!.id);
+          return VANILLA_RECIPES.filter((r) => r.items.some((req) => req.id === vid
+            || (req.id >= 1000000 && (RECIPE_GROUP_ITEMS[String(req.id - 1000000)] ?? []).includes(vid))))
+            .map((r) => ({ r, count: 0 }));
+        })()
+        : [];                                       // GetNumRecipes=0(:257-261)
+    } else {
+      avail = game.vanillaAvailableRecipes();
+    }
     for (const row of avail) {
       if (this.vinvModernEntries.some((e) => e.r === row.r)) continue;
       if (!this.vinvModernRecipeFits(row.r, search, this.vinvModernActive)) continue;
@@ -8099,7 +8208,7 @@ export class UI {
       }
     }
     // ---- 几何/格池 ----
-    const g = mcraftGridGeometry(c.sh, Math.max(1, this.vinvModernEntries.length));
+    const g = mcraftGridGeometry(c.sh, Math.max(1, this.vinvModernEntries.length), this.vinvGuideMenuOpen);
     const list = this.vinvModernGridList!;
     list.style.left = `${g.list.x - panel.x}px`;
     list.style.top = `${g.list.y - panel.y}px`;
@@ -8236,7 +8345,7 @@ export class UI {
     const img = el('img') as HTMLImageElement;
     img.draggable = false;
     img.src = iconUrl(this.game, iid);
-    if (!availNow) img.style.filter = `grayscale(1) brightness(${MCRAFT_DISABLED_GRAY})`;
+    if (!availNow && !this.vinvGuideMenuOpen) img.style.filter = `grayscale(1) brightness(${MCRAFT_DISABLED_GRAY})`;
     slot.appendChild(img);
     if (r.createStack > 1) slot.appendChild(el('span', 'cnt', String(r.createStack)));
     slot.addEventListener('mouseenter', () => {
@@ -8249,6 +8358,7 @@ export class UI {
     slot.addEventListener('mousedown', (ev) => {
       ev.stopPropagation();
       if (!availNow) return;                              // 不可用=仅 tooltip(:460 enabled:false)
+      if (this.guidePlaced) return;                       // ★刀19:反查态不合成(:42988 门,HandleCraftSlot → HoverOverCraftingItemButton 同路)
       this.game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
       this.refreshAll();
     });
@@ -8264,7 +8374,9 @@ export class UI {
     r.items.forEach((req, j) => {
       const mp = mcraftMaterialPos({ x: o.origin.x, y: o.origin.y }, j, r.items.length);
       const owned = this.vinvModernOwnedOf(r, req.id);
-      const enough = owned >= req.stack;                  // :474 availableItemCount ≥ stack
+      // ★刀19:向导态材料全亮(:474 InGuideCraftMenu ∨ 满足)+拥有数整支不画(:482 !InGuideCraftMenu 门)
+      const enough = this.vinvGuideMenuOpen || owned >= req.stack;
+      const showOwned = !this.vinvGuideMenuOpen;
       const k2 = ingredientKey(req.id);
       const box = el('div', 'sw-slot');
       const px = mp.x - 20, py = mp.y - 312;
@@ -8281,7 +8393,8 @@ export class UI {
       cnt.textContent = owned > 999 ? '999+' : String(owned);
       const cp = mcraftOwnedCountPos({ x: px, y: py, scale: mp.scale });
       cnt.style.cssText = `position:absolute; left:${cp.x}px; top:${cp.y}px; color:${mcraftOwnedCountColor(enough)};`
-        + `font-size:${Math.max(8, Math.trunc(11 * mp.scale))}px; text-shadow:1px 1px 0 #000; pointer-events:none;`;
+        + `font-size:${Math.max(8, Math.trunc(11 * mp.scale))}px; text-shadow:1px 1px 0 #000; pointer-events:none;`
+        + (showOwned ? '' : 'display:none;');
       box.addEventListener('mouseenter', () => {
         const miid = k2 ? this.game.itemId(k2) : -1;
         if (miid > 0) this.showTooltipFor(miid, 'inv', { slot: { id: miid, stack: req.stack }, anchor: box });
@@ -8562,6 +8675,111 @@ export class UI {
   // 由 closeInventory 归包链承担(原版 dropItemCheck 同相)。登记偏差:reforgeScale
   // 悬停脉冲以 CSS transition 近似;tint 灰随 alpha 同脉的次要观感差。
   private vinvReforgeOpen = false;
+  /** ★刀19:向导反查态(InGuideCraftMenu Main.cs:1917)——向导对话"制作"置位;
+   *  退出条件 = 开箱/开店/重开对话/重铸(:42396-42400)或关包(closeInventory) */
+  private vinvGuideMenuOpen = false;
+  private vinvGuideSlotModernEl: HTMLElement | null = null;
+  private vinvGuideSlotClassicEl: HTMLElement | null = null;
+  private vinvGuideModernCaptionEl: HTMLElement | null = null;
+  private vinvGuideModernReqEl: HTMLElement | null = null;
+  private vinvGuideClassicTextEl: HTMLElement | null = null;
+
+  /** ★刀19:NPCChatText_GuideReverseCrafting(Main.cs:40724-40732)——音 12+置位;
+   *  modern 控制模式(缺省) → NewCraftingUI.Open(quiet:true)。
+   *  调用方 = mainFlow onGuideCraftOpen(vanilla 布局门控;classic 仍走反查浮层) */
+  openVanillaGuideCraft(): void {
+    if (this._builtLayout !== 'vanilla' || !this.game) return;
+    this.game.sfx.play('menuTick', 1);                              // PlaySound(12) :40728
+    this.vinvGuideMenuOpen = true;
+    if (options.data.craftingGridControl === 'modern') this.vinvOpenModernCraft(null, true);   // :40729-40731
+    this.vinvLayoutSig = '';                                        // 向导态入签 → 强制重排(经典位槽/文案/切换钮换位)
+    this.layoutVanilla();
+    this.vinvRefreshCraft();                                        // guideItem 空 → GetNumRecipes=0(modern)
+  }
+
+  /** 向导态退出面(Main.cs:42396-42400):开箱/开店/重开对话/重铸 → 复位+窗收
+   *  (NewCraftingUI.Close(quiet,returnToInventory))。每刷新拍消费(vinvRefreshCraft 头) */
+  private vinvGuideMenuExitCheck(): void {
+    if (!this.vinvGuideMenuOpen) return;
+    const g = this.game;
+    const exit = !!this.openChest || !!g?.npcShopOpen || !!g?.npcDialogActive || this.vinvReforgeOpen;
+    if (exit) {
+      this.vinvGuideMenuOpen = false;
+      if (this.vinvModernCraftOpen) this.vinvCloseModernCraft(true);
+      this.vinvLayoutSig = '';
+      this.layoutVanilla();
+      this.vinvRefreshCraft();
+    }
+  }
+
+  /** 内部 id → 原版 vid(vi_ 键前缀解析;原 openGuideSearch 局部闭包上提共享) */
+  private vidOfItemOf(iid: number): number {
+    const def = ITEM_DEFS[iid];
+    const m = def && /^vi_(\d+)_/.exec(def.key);
+    return m ? Number(m[1]) : -1;
+  }
+
+  /** 原版 vid → 本地化名 */
+  private vidNameOf(vid: number): string {
+    const k = VANILLA_ITEM_KEY_BY_ID[vid];
+    return (k && Lang.itemNameByKey(k)) || String(vid);
+  }
+
+  /** 环境需求文本(GetRecipeRequirementsText Main.cs:42908-42958:站点/水/蜂蜜/岩浆/
+   *  雪原/墓地/炬神恩赐 join(", "),前缀 inter[22];explicitNone=true 空集补 inter[23]
+   *  ——物品项不在此串,材料走格面) */
+  private recipeEnvReqText(r: VanillaRecipeLike, explicitNone: boolean): string {
+    const parts: string[] = [];
+    if (r.tile >= 0) parts.push(Lang.tileName(r.tile) ?? `站点 ${r.tile}`);
+    if (r.water) parts.push(Lang.inter(53));
+    if (r.honey) parts.push(Lang.inter(58));
+    if (r.lava) parts.push(Lang.inter(56));
+    if (r.snow) parts.push(Lang.inter(123));
+    if (r.graveyard) parts.push(Lang.inter(124));
+    if (r.torchGod) parts.push(Lang.inter(125));
+    if (explicitNone && parts.length === 0) parts.push(Lang.inter(23));
+    return `${Lang.inter(22)} ${parts.join(', ')}`;
+  }
+
+  /** ★刀19:向导槽/文案绘制面(双窗位共享;guideItem 变化/focus 变化/开态进入时消费)。
+   *  文案无堆叠数(DrawGuideCraftText :42912/NewCraftingUI.cs:447 均 inter[21]+Name) */
+  private vinvPaintGuideCraft(): void {
+    const g = this.game;
+    if (!g) return;
+    const pl = this.guidePlaced;
+    const capText = pl ? `${Lang.inter(21)} ${this.vidNameOf(this.vidOfItemOf(pl.id))}` : Lang.inter(24);
+    const mkImg = (host: HTMLElement): void => {
+      const img = el('img') as HTMLImageElement;
+      img.src = iconUrl(g, pl!.id) || '';
+      img.style.cssText = 'position:absolute; inset:0; margin:auto; max-width:46px; max-height:46px; image-rendering:pixelated;';
+      img.draggable = false;
+      host.appendChild(img);
+    };
+    // modern 位(DrawChildren NewCraftingUI.cs:441-458)
+    const ms = this.vinvGuideSlotModernEl;
+    if (ms) {
+      ms.replaceChildren();
+      if (pl) mkImg(ms);
+    }
+    if (this.vinvGuideModernCaptionEl) this.vinvGuideModernCaptionEl.textContent = capText;
+    if (this.vinvGuideModernReqEl) {
+      const r = this.vinvModernSelected ?? this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null;
+      this.vinvGuideModernReqEl.textContent = r ? this.recipeEnvReqText(r, false) : '';
+    }
+    // 经典位(DrawGuideCraftText Main.cs:42901-42924:空=inter[24] 单行;有件=「需要 X」
+    //   +「环境需求(explicitNone)」两行 → 单元素 \n 拆行(line-height 26=原文 +26px 步距))
+    const cs = this.vinvGuideSlotClassicEl;
+    if (cs) {
+      cs.replaceChildren();
+      if (pl) mkImg(cs);
+    }
+    if (this.vinvGuideClassicTextEl) {
+      const r = this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null;
+      this.vinvGuideClassicTextEl.textContent = pl
+        ? `${capText}\n${r ? this.recipeEnvReqText(r, true) : ''}`
+        : capText;
+    }
+  }
   private vinvReforgeSlotEl: HTMLElement | null = null;
   private vinvReforgeTextEl: HTMLElement | null = null;
   private vinvReforgeHammerEl: HTMLButtonElement | null = null;
@@ -8573,9 +8791,12 @@ export class UI {
     const root = this.vinvRoot;
     if (!root) return;
     // 重铸槽(ctx5:ItemSlot.Handle —— 放入=整件克隆含词缀,取回=回光标)
+    // ★反馈轮8:0.85 缩放落地(原版槽视觉=52×0.85=44.2,文本 +50 → 缝 5.8px;
+    //  旧码未缩放=槽 52px 全宽,文本 +50 反压槽 2px=用户报"格子太近")
     const slot = el('div', 'sw-slot');
     slot.style.cssText = 'position:absolute; width:52px; height:52px; background-image:none;'
-      + '--slot-bgimg:url(sprites/vanilla/Inventory_Back.png); transform-origin:top left;';
+      + '--slot-bgimg:url(sprites/vanilla/Inventory_Back.png); transform-origin:top left;'
+      + 'transform:scale(0.85);';
     slot.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       if (this.heldStack) {
@@ -8950,7 +9171,11 @@ export class UI {
           const idx = slot.accIndex;
           b.style.backgroundPosition = `${-idx * 16}px -16px`;   // rect(0,16,14,14) X=idx*16
           paintSlot(i);
-          return { x: 10, y: y0 + drawn * 24 };
+          // ★反馈轮7 定谳(用户原版截图证伪旧"顶格"实现):vector=【中心锚】——
+          //   spriteBatch.Draw(..., origin: rectangle.Size()/2f)(Main.cs:48354),
+          //   hover 盒 CenteredRectangle(vector,14)(:48197)同心 ⇒ 精灵左上=vector-(7,7)
+          //   =(3,70+24n)。旧 (10,y) 顶格画=整体右/下偏 7px=用户报的错位。
+          return { x: 10 - 7, y: y0 + drawn * 24 - 7 };
         },
       });
     });
@@ -9427,11 +9652,23 @@ export class UI {
     // ★SW-FX30 刀⑦:过滤失效拍(DrawGridToggle 头 CraftingUI.cs:269-273)+列表头文字
     // (DrawRecipesList :167-171:RecipeFilterHack → GetWindowDescription,else inter[25])
     this.vinvTickCraftFilter();
-    let avail = game.vanillaAvailableRecipes();
+    this.vinvGuideMenuExitCheck();   // ★刀19:向导态退出面(:42396-42400 每拍消费)
+    let avail: Array<{ r: VanillaRecipeLike; count: number }>;
+    // ★刀19:向导反查(Recipe.UpdateRecipeList :235-241)——guideItem 有件 →
+    //   CollectGuideRecipes(Recipe.cs:441-460 全表 items 组匹配,不问站点/材料/可制性,
+    //   filterHack 不消费=早退分支);空槽 → 常规可制列表(:42427 classic 无门)
+    if (this.vinvGuideMenuOpen && this.guidePlaced) {
+      const vid = this.vidOfItemOf(this.guidePlaced.id);
+      avail = VANILLA_RECIPES.filter((r) => r.items.some((req) => req.id === vid
+        || (req.id >= 1000000 && (RECIPE_GROUP_ITEMS[String(req.id - 1000000)] ?? []).includes(vid))))
+        .map((r) => ({ r, count: 0 }));   // count 不消费:guide 模式拥有数整支不画(NewCraftingUI.cs:482)
+    } else {
+      avail = game.vanillaAvailableRecipes();
+    }
     // ★SW-RB13b:消费门=RecipeFilterHack getter(CraftingUI.cs:121-127:control≠Classic →
     //   null)——classic 态置入的滤器在切 modern 后不消费(列表回全量/头回 inter[25]),
     //   切回 classic 恢复(_lastFilter 本体不清,原版同相)
-    const filterActive = this.vinvCraftFilter !== null && options.data.craftingGridControl === 'classic';
+    const filterActive = !this.vinvGuideMenuOpen && this.vinvCraftFilter !== null && options.data.craftingGridControl === 'classic';
     if (filterActive && this.vinvCraftFilter) {
       // Recipe.cs:252 filterHack ∧ 门(CraftStationRecipeFilter.Accepts :159-170 /
       // WaterSourceRecipeFilter.Accepts :180-187)——列表与网格同吃过滤后的
@@ -9477,6 +9714,7 @@ export class UI {
     this.vinvUpdateCraftGrid();   // ★SW-FX30 刀②:网格视图随拍重排(分页钳制/页钮门)
     // ★SW-FX41:modern 窗内容随拍(UpdateContents :589-634 每拍语义;窗关时早退零开销)
     if (this.vinvModernCraftOpen) this.vinvUpdateModernCraft();
+    if (this.vinvGuideMenuOpen) this.vinvPaintGuideCraft();   // ★刀19:文案/focus 行随拍
   }
 
   /** 格池重建(配方集变化;每配方一枚 52 盒槽,鱼眼 scale/x/y 全在 update 拍) */
@@ -9508,6 +9746,7 @@ export class UI {
           this.vinvCraftSnapStep();
           return;
         }
+        if (this.guidePlaced) return;   // ★刀19:反查态不合成(HoverOverCraftingItemButton :42988 guideItem.IsAir 门)
         this.game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
         this.refreshAll();
       });
@@ -9763,6 +10002,12 @@ export class UI {
     this.vinvCraftFastScroll = false;
     this.vinvCraftGlideAcc = 0;
     this.vinvCraftAvailV = [];
+    this.vinvGuideMenuOpen = false;   // ★刀19:向导态随面板重建复位
+    this.vinvGuideSlotModernEl = null;
+    this.vinvGuideSlotClassicEl = null;
+    this.vinvGuideModernCaptionEl = null;
+    this.vinvGuideModernReqEl = null;
+    this.vinvGuideClassicTextEl = null;
     this.vinvCraftCellEls = [];
     this.vinvCraftTitleEl = null;
     this.vinvCraftMatEl = null;

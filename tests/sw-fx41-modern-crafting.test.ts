@@ -342,7 +342,7 @@ describe('SW-FX41 P2-2 切换钮 modern 支接线(CraftingUI.cs:294-331)', () =>
     // ChestOrShopUIVisible 折叠(Main.cs:3037)
     expect(uiSrc).toMatch(/const cosUiVisible = chestOpen && !this\.vinvPipsUseGrid && !this\.vinvModernCraftOpen;/);
     // 布局签名含窗开态(位序=PipsUseGrid 位后新增尾位)
-    expect(uiSrc).toMatch(/\|\$\{bgSig\}\|\$\{this\.vinvModernCraftOpen \? 1 : 0\}`;/);
+    expect(uiSrc).toMatch(/\|\$\{bgSig\}\|\$\{this\.vinvModernCraftOpen \? 1 : 0\}\|\$\{this\.vinvGuideMenuOpen \? 1 : 0\}`;/);   // ★刀19:向导态入签
     // 切换钮锚换位(窗开 → (42|82,285))
     expect(uiSrc).toMatch(/if \(this\.vinvModernCraftOpen\) \{\s*\n\s*return mcraftWindowToggleXY\(\!\!this\.game\?\.world\?\.isJourney\)\.toggle;\s*\n\s*\}/);
     // CanRemainOpen 失效自动关窗(NewCraftingUI.cs:655-665;remain 判定传 modern 滤器域)

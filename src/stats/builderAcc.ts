@@ -1,7 +1,9 @@
 // 建筑配件开关位共享逻辑（★SW-FX19；Player.builderAccStatus 家族 1:1）。
 // 金标：Terarria1457/Terraria/Player.cs:40-63（BuilderAccToggleIDs）、:797（数组）/
 // :56749（ResetData 缺省 [0]=1）；图标列 UI = Main.cs:48142-48377（DrawBuilderAccToggles
-// @(10,77) 24px 步距）；方块替换图标 = Main.cs:43242-43280；群系炬图标 = :43282-43320；
+// @(10,77) 24px 步距；★vector=【中心锚】origin=rectangle.Size()/2f :48354——精灵左上
+// =vector-(7,7)=(3,70+24n)，hover 盒 CenteredRectangle(:48197) 同心；方块替换/群系炬
+// 两图标则 top-left=default(Vector2) 原点）；方块替换图标 = Main.cs:43242-43280；群系炬图标 = :43282-43320；
 // 计数 = :48381-48386（GetBuilderAccsCountToShow）；线材可见度消费 = Main.cs:59126-59140；
 // [8] 门消费 = Terraria.GameContent/UI/WiresUI.cs:29-45（DrawWires）；
 // [10] 消费 = Player.cs:3357 TileReplacementEnabled；[11] 消费 = :3942 UsingBiomeTorches。

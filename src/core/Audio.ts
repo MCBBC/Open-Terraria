@@ -4,7 +4,7 @@
 // musicFade[id] ±0.005/帧 逼近目标曲（:295 UpdateCommonTrack / :323 TowardStopping,1458 行号）。
 // audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
-import { Sfx, setMusicOverrideListener, musicPackOverride } from './Sfx';
+import { Sfx, setMusicOverrideListener, musicPackOverride, applyLoopBounds } from './Sfx';
 import { options } from './Options';
 import { swTrace } from '../net/AssetCache';
 
@@ -82,7 +82,9 @@ export class AudioSystem {
     this.trace.push({ t: Math.round(performance.now() / 1000), cm: this.curMusic, muted: this.muted, moon: this.moonNum, ...e });
     if (this.trace.length > 60) this.trace.shift();
   }
-  /** 周期快照(内部状态)->trace;由 startLoop 每 ~10s 调一次 */
+  /** 周期快照(内部状态)->trace;由 startLoop rAF step 每帧调用、本体 10s 节流
+   *  （★BJ75 2026-09-14 接线:RB18 定谳此调用此前整缺——bgm 环无心跳,行为日志
+   *  eventCount=0 与坏通道不可区分;snap 即活体心跳）。纯读快照零副作用 */
   private lastSnapAt = 0;
   private snapshotTrace(): void {
     const now = performance.now();
@@ -278,7 +280,7 @@ export class AudioSystem {
     if (!buf) return; // 未就绪：ensureTrack 的解码回调里补建
     const src = ac.createBufferSource();
     src.buffer = buf;
-    src.loop = true;
+    applyLoopBounds(src, buf);   // ★BJ74 循环终点内收（Chromium 回绕缺陷=「一轮后嗡嗡声」根因,见 Sfx.applyLoopBounds 注）
     const gain = ac.createGain();
     gain.gain.value = 0;
     src.connect(gain).connect(ac.destination);
@@ -325,6 +327,7 @@ export class AudioSystem {
       this.lastTs = ts;
       const frames = dt / (1000 / 60);
       this.tickFade(frames * 0.005);
+      this.snapshotTrace();   // ★BJ75 心跳接线：本体 10s 节流（见 trace 字段注）,RB18 定谳补缺
       this.rafId = requestAnimationFrame(step);
     };
     this.rafId = requestAnimationFrame(step);
