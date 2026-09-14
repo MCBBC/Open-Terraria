@@ -261,7 +261,7 @@ describe('SW-FX10 登记债⑤⑧ 定谳面反向锁定', () => {
   it('债⑤：重铸/锤/储蓄罐原位化已在刀12 清偿（vanilla 原位臂在盘,classic modal 保留）', () => {
     // Main.cs:42440 重铸 (50,270)（num53=50/num54=270）;本仓 vanilla 档原位臂锚
     expect(uiSrc).toMatch(/vinvReforgeOpen/);
-    expect(uiSrc).toMatch(/:42277-42279:chest\/npcShop\/talkNPC\/guide 任一即 InReforgeMenu=false/);
+    expect(uiSrc).toMatch(/:42277-42285:InReforgeMenu ∧ 无箱 ∧ 无店 ∧ talkNPC!=-1/);   // ★刀19:退出门扩四条件(会话保持)
   });
   it('债⑧：Images/UI/Craft.png 仅 NewCraftingUI.cs:464 消费——★SW-FX41(2026-09-12) modern 窗族落地,消费面接通', () => {
     // 1457 AssetInitializer.cs 注册面（:548-606）只含 ChestCraft_0-3/Craft_Toggle_0-5/

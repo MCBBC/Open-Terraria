@@ -174,7 +174,9 @@ import {
   shopHappinessIconXY, shopHappinessTextXY, happinessFrameX, // ★SW-FX32:快乐度图标/倍率位(Main.cs:42504-42512)
   shopSavingsLabelXY, shopSavingsCoinXY, SHOP_SAVINGS_BANK_ICONS, SHOP_SAVINGS_ICON_SCALE, // ★SW-FX32:储蓄行(ItemSlot.cs:3712-3757)
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
+  itemSearchPanelRect,   // ★SW-BJ81 规格③:道具搜索浮窗几何(物品栏占位面之外,单源)
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
+import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源
 import {
   // ★SW-FX41(2026-09-12)UI 移债 modern 窗族 P2-1..P2-4:NewCraftingUI 纯逻辑单源
   MCRAFT_ALL_BUTTONS, MCRAFT_PANEL_BG, MCRAFT_PANEL_BORDER, MCRAFT_SEARCH_BG,
@@ -1951,7 +1953,9 @@ export class UI {
       if (!this.heldStack) return;
       const t = e.target as HTMLElement | null;
       // ★.sw-eqdock 同算面板（2026-09-02 右下角坞无 .sw-panel 底框）
-      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock, .sw-vinv')) return;
+      // ★.sw-itemsearch 同算面板（★SW-BJ81 2026-09-14 道具搜索改非模态浮窗——
+      //   旧全屏 overlay 天然挡住本监听,浮窗后漏登记会在面板上误触世界使用/丢出）
+      if (t?.closest?.('.sw-slot, .sw-panel, .sw-btn, .sw-eqdock, .sw-vinv, .sw-itemsearch')) return;
       // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:42522-42532 商品格网格）：
       //  ★SW-BJ22 2026-09-07 原版卖出触发面收窄——原版 40 格网格里【空商店格】
       //  才是卖出放置区（PickItemMovementAction case 15 ItemSlot.cs:1435-1438
@@ -2293,7 +2297,9 @@ export class UI {
     }
     // 面板外：丢进世界；面板内空白：放回原格。★右下角坞同算面板内（2026-09-02
     // 无框坞在 .sw-panel 之外——漏登记会把拖到坞标签/缝隙的物品当世界抛掷）
-    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock, .sw-vinv');
+    // ★.sw-itemsearch 同算面板内（★SW-BJ81 2026-09-14：拖经道具搜索浮窗松手
+    //   =放回原格,不当世界抛掷——浮窗为背包子面板,与合成窗同域）
+    const inPanel = target?.closest?.('.sw-panel, .sw-eqdock, .sw-vinv, .sw-itemsearch');
     if (!inPanel) {
       this.throwHeldToWorld();
     } else {
@@ -2882,9 +2888,42 @@ export class UI {
 
   // ============ 调试用：道具搜索器（背包面板"🔍 道具搜索"按钮） ============
   private itemSearchEl: HTMLDivElement | null = null;
-  /** 搜索面板开启期间 tooltip 的暂离归宿（面板 z1200 > .sw-root z10——tooltip 留在
-   *  root 内会被 stacking context 压在面板下,2026-08-27 用户报；搬 body 顶层） */
+  /** 搜索面板开启期间 tooltip 的暂离归宿（浮窗 z60 > .sw-root z10——tooltip 已搬
+   *  body 顶层保持最高,2026-08-27 用户报的遮挡随模态浮层一并消解） */
   private tooltipHome: HTMLElement | null = null;
+  // ★SW-BJ81 2026-09-14 规格⑥:长按连取计时器（面板关/松开/滑出条目三面兜底停摆）
+  private itemSearchGrabTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** 搜出项取件执行器（★SW-BJ81 规格②⑤:数量恒 1,上光标走合成抓取通道
+   *  grantCraftToCursor → heldStack;光标满叠余量落地入包,光标被异型占据时整份
+   *  兜底入包——覆盖光标=静默丢玩家持物,禁）。取件只动光标不动槽位,故刷新面
+   *  = moveGhost(辉光) 而非 refreshAll(长按 8/s 不得整帧刷槽)。 */
+  private itemSearchGrab(id: number): void {
+    if (!this.game) return;
+    const plan = searchGrabPlan(this.heldStack, id);
+    if (plan.to === 'cursor') {
+      const left = this.grantCraftToCursor(id, plan.stack);
+      if (left > 0) this.game.player.inv.add(id, left);   // 满叠余量（创造性语义,溢出即散）
+      this.markCursorGlow(id);
+      this.moveGhost();
+    } else {
+      this.game.player.inv.add(id, plan.stack);
+      this.refreshAll();
+    }
+    this.game.cb.onInventoryChanged?.();
+  }
+
+  private startItemSearchGrabRepeat(id: number): void {
+    this.stopItemSearchGrabRepeat();
+    this.itemSearchGrabTimer = setInterval(() => this.itemSearchGrab(id), ITEMSEARCH_GRAB_INTERVAL_MS);
+  }
+
+  private stopItemSearchGrabRepeat(): void {
+    if (this.itemSearchGrabTimer !== null) {
+      clearInterval(this.itemSearchGrabTimer);
+      this.itemSearchGrabTimer = null;
+    }
+  }
 
   /** 打开搜索面板（首用门：道具搜索为超游调试件,明示风险确认一次后
    *  localStorage 持久放行,后续不再拦截——2026-08-27 用户要求） */
@@ -2926,22 +2965,33 @@ export class UI {
     document.body.appendChild(overlay);
   }
 
-  /** 搜索面板本体：按 名称/key/原版id 过滤 ITEM_DEFS，点击条目入包 */
+  /** 搜索面板本体：按 名称/key/原版id 过滤 ITEM_DEFS。
+   *  ★SW-BJ81 2026-09-14（用户规格③④）:①几何改右置浮窗（vanillaInvLayout
+   *  itemSearchPanelRect 单源——物品栏占位面[网格/钱币弹药列/装备列]之外,旧居中
+   *  560px modal 缩窄右移）;②全屏压暗底废止——旧 overlay inset:0 z1200 把背包
+   *  槽点击整面吞掉,与规格④「搜索开着物品栏必须在场可点」互斥;非模态后点世界
+   *  =光标持物既有语义（左键使用/放置、右键丢出）=规格⑤落点面。生命周期挂靠
+   *  背包（closeInventory→closeItemSearch 反向随行）,合成窗同款子面板语义。 */
   private openItemSearchPanel() {
     if (!this.game) return;
     this.closeItemSearch();
+    // ★规格④:开搜索必带出物品栏（搜出项落点=物品栏槽,栏不在场=无处可放;
+    //   force=已开态幂等刷新,不翻转。停车坪入口 main.ts onItemSearch 从暂停层
+    //   进入时背包本关——旧实现不带出=搜出项无处安放,用户实报）
+    this.openInventory(true);
     // tooltip 提到 body 顶层（关闭时归还 root）——否则结果行气泡被面板遮挡
     if (this.tooltip.parentElement !== document.body) {
       this.tooltipHome = this.tooltip.parentElement;
       document.body.appendChild(this.tooltip);
     }
-    const overlay = el('div') as HTMLDivElement;
-    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1200; display:flex; align-items:center; justify-content:center;';
-    const panel = el('div');
-    panel.style.cssText = 'width:560px; max-height:70vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
+    const rect = itemSearchPanelRect(window.innerWidth, window.innerHeight, options.data.uiScale);
+    const panel = el('div', 'sw-itemsearch') as HTMLDivElement;
+    panel.style.cssText = `position:fixed; left:${Math.round(rect.x)}px; top:${Math.round(rect.y)}px;`
+      + `width:${Math.round(rect.w)}px; max-height:${Math.round(rect.h)}px; z-index:60;`
+      + 'box-sizing:border-box; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
     const titleRow = el('div');
     titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:flex-start;';
-    titleRow.appendChild(el('div', 'sw-lbl', '道具搜索（点击加入背包）'));
+    titleRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.ItemSearch.Title')));
     const closeBtn = el('button');
     closeBtn.textContent = '✕';
     closeBtn.title = Lang.text('Mods.SandboxWorld.UI.Close');
@@ -2956,14 +3006,13 @@ export class UI {
     input.style.cssText = 'width:100%; box-sizing:border-box; padding:6px 8px; background:#1a1a22; color:#eee; border:1px solid #555; border-radius:4px; font-size:14px;';
     panel.appendChild(input);
     const list = el('div');
-    list.style.cssText = 'overflow-y:auto; display:flex; flex-wrap:wrap; gap:4px; align-content:flex-start;';
+    // 浮窗内滚:面板 max-height 已钳,列表吃满余高自滚(flex:1+min-height:0)
+    list.style.cssText = 'overflow-y:auto; display:flex; flex-wrap:wrap; gap:4px; align-content:flex-start; flex:1 1 auto; min-height:0;';
     panel.appendChild(list);
-    overlay.appendChild(panel);
-    overlay.addEventListener('mousedown', (e) => {
-      if (e.target === overlay) this.closeItemSearch();
-    });
-    document.body.appendChild(overlay);
-    this.itemSearchEl = overlay;
+    document.body.appendChild(panel);
+    this.itemSearchEl = panel;
+    // 长按中在浮窗外松开(行 mouseup 不达)的兜底停摆;{once}=自然消亡不堆积
+    document.addEventListener('mouseup', () => this.stopItemSearchGrabRepeat(), { once: true });
 
     // 全量条目缓存（一次性构建：id/显示名/小写匹配串）
     // 匹配串含【英文原名】——zh 名只对部分家族含族词（翅膀族 zh 多为"XX之翼"，
@@ -3017,7 +3066,9 @@ export class UI {
         }
         const item = el('div');
         item.title = `${e.name}  [${e.d.key}]`;
-        item.style.cssText = 'display:flex; align-items:center; gap:4px; width:170px; padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd;';
+        // ★SW-BJ81 规格③:行宽随浮窗自适应(flex-basis 150 → 340 宽浮窗两列,
+        //   窄窗退化单列;旧固定 170px 在缩窄后只剩单列)
+        item.style.cssText = 'display:flex; align-items:center; gap:4px; flex:1 1 150px; min-width:0; padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd; user-select:none;';
         // 悬停 = 背包同款详情气泡（2026-08-27 用户要求）——合成槽语义（stack1 无
         // 词缀/收藏）,锚=行元素;离开即收
         item.addEventListener('mouseenter', () =>
@@ -3034,13 +3085,20 @@ export class UI {
         lbl.textContent = e.name;
         lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
         item.appendChild(lbl);
-        item.addEventListener('click', () => {
-          // 可堆叠给一组(≤99)，不可堆叠给 1；溢出由 inv.add 处理
-          const n = e.d.maxStack > 1 ? Math.min(e.d.maxStack, 99) : 1;
-          this.game!.player.inv.add(e.id, n);
-          this.game!.cb.onInventoryChanged?.();
-          this.refreshAll();
+        // ★SW-BJ81 规格②⑤⑥:按下即取 1 件上光标（合成抓取同款,数量恒 1——
+        //   旧「可堆叠给一组≤99」废止）,按住持续 +1（ITEMSEARCH_GRAB_INTERVAL_MS
+        //   节奏,并入上限=maxStack,grantCraftToCursor 既有钳制）;落点由玩家放置
+        //   （点物品栏槽=放入/点世界=左键使用右键丢出）。stopPropagation=不落
+        //   document 光标持物监听（installDragListeners 已豁免 .sw-itemsearch 双保险）
+        item.addEventListener('mousedown', (ev) => {
+          if (ev.button !== 0) return;
+          ev.stopPropagation();
+          ev.preventDefault();
+          this.itemSearchGrab(e.id);
+          this.startItemSearchGrabRepeat(e.id);
         });
+        item.addEventListener('mouseup', () => this.stopItemSearchGrabRepeat());
+        item.addEventListener('mouseleave', () => this.stopItemSearchGrabRepeat());
         list.appendChild(item);
       }
       if (!shown) list.appendChild(el('div', 'sw-lbl', '无匹配'));
@@ -3051,10 +3109,16 @@ export class UI {
   }
 
   closeItemSearch() {
+    // ★SW-BJ81 规格⑥兜底:面板关=连取计时器必停(否则闭包内 itemSearchGrab
+    //   持续向已卸载面板的取件规则投喂,光标物无声连涨)
+    this.stopItemSearchGrabRepeat();
     if (this.itemSearchEl) {
       this.itemSearchEl.remove();
       this.itemSearchEl = null;
     }
+    // ★SW-BJ81 规格⑤残留处置定谳:关面板【不动光标持物】——合成面板关闭惯例
+    //   同款（关合成窗/modern 窗不清光标,关【背包】才由 closeInventory 的
+    //   RB4a/BP1 链归还+余量落地）。搜索浮窗=背包子面板,持物落点仍由玩家放置。
     // tooltip 归位 root + 收起（面板关,气泡无锚）
     if (this.tooltipHome) {
       this.tooltipHome.appendChild(this.tooltip);
@@ -9270,7 +9334,9 @@ export class UI {
     // ★SW-RB13b:pointer-events:none(.vinv-txt 基线)——DrawName(ChestUI.cs:158)纯
     //   DrawString 无命中盒,且 (504,258) 在箱域 FloatIntersect(:84 x≤495.8)外;
     //   曾 auto=无处理器的世界点击死区(504..~580 × 258..~273)
-    nameEl.style.cssText += 'font-size:13px;';
+    // ★2026-09-14 用户报:四向描边(亮背景可读,同钮列)
+    nameEl.style.cssText += 'font-size:13px;'
+      + ' text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;';
     this.vinvRoot?.appendChild(nameEl);
     this.vinvChestNameEl = nameEl;
     this.vinvLayoutItems.push({ el: nameEl, pos: () => {
@@ -9304,8 +9370,10 @@ export class UI {
     //   上下 padding 复刻 24px 命中带,x 左对齐 506(:222 X-num2=506)不偏)
     const mkChestBtn = (id: number, labelKey: string, act: () => void, visible?: () => boolean, label?: string): void => {
       const b = el('button', 'vinv-txt') as HTMLButtonElement;
+      // ★2026-09-14 用户报:1px 阴影在亮背景下可见性弱 → 四向描边(同信息栏行)
       b.style.cssText = 'left:506px; font-size:13px; pointer-events:auto; cursor:pointer;'
-        + 'background:none; border:none; padding:5.5px 0; color:#fff; text-shadow:1px 1px 0 #000;'
+        + 'background:none; border:none; padding:5.5px 0; color:#fff;'
+        + 'text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;'
         + 'transform:translateY(-50%);';
       b.textContent = label ?? Lang.text(labelKey);
       b.addEventListener('mouseenter', () => { b.style.color = 'rgb(255,231,69)'; });

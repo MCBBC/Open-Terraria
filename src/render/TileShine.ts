@@ -71,7 +71,7 @@ import { ChunkCache, type ChunkPair } from './ChunkCache';
 import { TileStore } from '../world/TileStore';
 import { drawVanillaCell, chestLidPoseAt, chestPoseSheet } from './VanillaTiler';
 import { frameMergesWith } from './TileMergeFamily';
-import { isDynamicAnimSheet } from './TileAnim';
+import { isDynamicAnimSheet, tileAnim } from './TileAnim';
 import { getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
 import { tintRegion } from './TileTint';
 import type { Camera } from './Camera';
@@ -317,14 +317,38 @@ const shineCache = new WeakMap<ChunkPair, { q: number; e: ShineChunkEntry }[]>()
  *  【边界】上限 256 条（≈MAX_CHUNKS 同阶；256² 画布 ≤2 张/条 ⇒ ≤64MB 上界，逐出即
  *  GC）；LRU 触碰序（delete+set）。__SW_SHINE_MEMO_OFF 逃生门（A/B 探针，同
  *  __SW_SHINE_OFF 惯例）。 */
-const shineMemo = new Map<number, { fp: number; slots: { q: number; e: ShineChunkEntry }[] }>();
+const shineMemo = new Map<number, { q: number; fp: number; e: ShineChunkEntry }[]>();
 const SHINE_MEMO_MAX = 256;
 
 /** bake 输入指纹。语义注记：① wire/coat 混【全字节】= bake 门（已致动/隐形/荧光）
- *  的超集——电路/涂装编辑引发的多余重烘可接受，反向漏烘不可接受；② 箱盖态混入
- *  world.chests 全表（chestLidPoseAt 输入 x/y/frame；宝箱 21 是 shine2 成员）；
- *  ③ showInvisibleBlocks 是 bake 门的全局输入（Game.ts 隐形块翻转 → invalidateAll），
- *  不混入 = 翻转后 memo 误复用。 */
+ *  的超集——电路/涂装编辑引发的多余重烘可接受，反向漏烘不可接受；② 箱盖态仅在
+ *  chunk 内真有容器格（21/467 型）时混入（chestLidPoseAt 输入 x/y/frame；宝箱 21
+ *  是 shine2 成员；无容器格的 chunk 箱表变化不可能影响烘焙产物）——箱表摘要按
+ *  帧+按 chests 数组身份缓存（updateChestFrames 在 fixedUpdate 内变异，帧内恒定；
+ *  长龄世界数千箱不构成逐 fp 调用的 O(chests) 热点）；③ showInvisibleBlocks 是
+ *  bake 门的全局输入（Game.ts 隐形块翻转 → invalidateAll），不混入 = 翻转后 memo
+ *  误复用。 */
+let chestTypeIds: Set<number> | null = null;
+const chestDigestCache = new WeakMap<object, { tick: number; v: number }>();
+function chestDigestOf(world: World): number {
+  const chests = world.chests as unknown as object | undefined;
+  if (!chests) return 0;
+  const hit = chestDigestCache.get(chests);
+  if (hit && hit.tick === tileAnim.tick) return hit.v;
+  let h = 0x811c9dc5 | 0;
+  const arr = world.chests;
+  for (let k = 0; k < arr.length; k++) {
+    const c = arr[k];
+    h = ((h ^ (c.x & 255)) * 0x01000193) | 0;
+    h = ((h ^ ((c.x >>> 8) & 255)) * 0x01000193) | 0;
+    h = ((h ^ (c.y & 255)) * 0x01000193) | 0;
+    h = ((h ^ ((c.y >>> 8) & 255)) * 0x01000193) | 0;
+    h = ((h ^ (c.frame ?? 0)) * 0x01000193) | 0;
+  }
+  const v = h >>> 0;
+  chestDigestCache.set(chests, { tick: tileAnim.tick, v });
+  return v;
+}
 function shineChunkFingerprint(world: World, cx: number, cy: number, shimmerQ: number): number {
   const st = world.store;
   const x0 = cx * CHUNK, y0 = cy * CHUNK;
@@ -333,28 +357,34 @@ function shineChunkFingerprint(world: World, cx: number, cy: number, shimmerQ: n
     h = ((h ^ (v & 255)) * 0x01000193) | 0;
     h = ((h ^ ((v >>> 8) & 255)) * 0x01000193) | 0;
   };
-  for (let ly = 0; ly < CHUNK; ly++) {
-    const row = (y0 + ly) * st.w;
-    for (let lx = 0; lx < CHUNK; lx++) {
-      const i = row + x0 + lx;
-      mix2(st.type[i]); mix2(st.flags[i]);
+  const cTypes = chestTypeIds ?? (chestTypeIds = (() => {
+    const s = new Set<number>();
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      const sh = TILE_DEFS[i]?.vanilla?.sheet;
+      if (sh === 21 || sh === 467) s.add(i);
+    }
+    return s;
+  })());
+  let hasChest = false;
+  // ★±1 环带：blend/auto 取帧读邻格（drawVanillaCell same 谓词邻接）,chunk 边缘
+  //   shine 格的取帧依赖相邻 chunk 的格——与 ChunkCache.markDirtyArea ±1 协商边距
+  //   同域。环带外（世界界外）混哨兵 0=无邻格,与取帧侧界外语义一致。
+  for (let ly = -1; ly <= CHUNK; ly++) {
+    for (let lx = -1; lx <= CHUNK; lx++) {
+      const x = x0 + lx, y = y0 + ly;
+      if (!st.inBounds(x, y)) { mix2(0); mix2(0); continue; }
+      const i = st.idx(x, y);
+      const t = st.type[i];
+      mix2(t); mix2(st.flags[i]);
       mix2(st.frameX[i] & 255); mix2(st.frameX[i] >>> 8);
       mix2(st.frameY[i] & 255); mix2(st.frameY[i] >>> 8);
       mix2(st.paint[i]); mix2(st.wire[i]); mix2(st.coat[i]);
+      if (cTypes.has(t)) hasChest = true;
     }
   }
   mix2(st.showInvisibleBlocks ? 1 : 0);
   mix2(shimmerQ * 255);
-  const chests = world.chests;
-  if (chests) {
-    mix2(chests.length & 255); mix2((chests.length >>> 8) & 255);
-    for (let k = 0; k < chests.length; k++) {
-      const c = chests[k];
-      mix2(c.x & 255); mix2((c.x >>> 8) & 255);
-      mix2(c.y & 255); mix2((c.y >>> 8) & 255);
-      mix2(c.frame ?? 0);
-    }
-  }
+  if (hasChest) mix2(chestDigestOf(world));
   return h >>> 0;
 }
 
@@ -649,7 +679,7 @@ function ensureEntry(
     if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
       const key = ChunkCache.key(cx, cy);
       const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
-      const mSlot = shineMemo.get(key)?.slots.find((s2) => s2.q === shimmerQ && s2.fp === fp);
+      const mSlot = shineMemo.get(key)?.find((s2) => s2.q === shimmerQ && s2.fp === fp);
       if (mSlot) {
         shineStats.memoHits++;
         // LRU 触碰序
@@ -677,7 +707,7 @@ function ensureEntry(
       if (slots.length >= 3) slots.shift();
       slots.push({ q: shimmerQ, e: ne });
       shineMemo.delete(key);
-      shineMemo.set(key, { fp, slots: [{ q: shimmerQ, e: ne }] });
+      shineMemo.set(key, [{ q: shimmerQ, fp, e: ne }]);
       if (shineMemo.size > SHINE_MEMO_MAX) {
         const oldest = shineMemo.keys().next().value as number | undefined;
         if (oldest !== undefined) shineMemo.delete(oldest);
@@ -705,7 +735,7 @@ function ensureEntry(
   if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
     const key = ChunkCache.key(cx, cy);
     const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
-    const mSlot = shineMemo.get(key)?.slots.find((s2) => s2.q === shimmerQ && s2.fp === fp);
+    const mSlot = shineMemo.get(key)?.find((s2) => s2.q === shimmerQ && s2.fp === fp);
     if (mSlot) {
       shineStats.memoHits++;
       const m = shineMemo.get(key)!;
@@ -734,7 +764,7 @@ function ensureEntry(
     const key = ChunkCache.key(cx, cy);
     const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
     shineMemo.delete(key);
-    shineMemo.set(key, { fp, slots: [{ q: shimmerQ, e: ne }] });
+    shineMemo.set(key, [{ q: shimmerQ, fp, e: ne }]);
     if (shineMemo.size > SHINE_MEMO_MAX) {
       const oldest = shineMemo.keys().next().value as number | undefined;
       if (oldest !== undefined) shineMemo.delete(oldest);

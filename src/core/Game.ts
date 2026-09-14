@@ -35262,7 +35262,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  talkNPC(dialogNpc)不清=对话距离保持链照常监视,走远即 closeNpcDialog →
    *  菜单退出门(:42283/:42397)消费) */
   minimizeNpcDialog(): void {
-    this.cb.onNpcDialogClose?.();   // UI 面板收起;dialogNpc/keepAlive 保留
+    // ★cb 可空守卫(FX22):本方法现也被 openShopFromButton(开店收面板)消费,而
+    //  Object.create(Game.prototype) 裸壳单测(sw-fx32-shop-embed F5 行为矩阵)直驱
+    //  openShopFromButton 无 cb——`?.` 只对裸壳变静默,生产 cb 恒在,语义零变化
+    this.cb?.onNpcDialogClose?.();   // UI 面板收起;dialogNpc/keepAlive 保留
   }
 
   closeNpcDialog(silent = false): void {

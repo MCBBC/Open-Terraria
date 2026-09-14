@@ -45,6 +45,8 @@ async function sequence(layout, suffix) {
   const setup = await page.evaluate(async () => {
     document.getElementById('sw-welcome-announce')?.remove();
     const g = window.__swGame;
+    const { options } = await import('/src/core/Options.ts');
+    options.data.autoPause = false;   // ④走远须世界照常步进——autoPause 开时背包开=暂停,keepAlive 冻结(可达性,非语义面)
     const { TownNPC } = await import('/src/entities/TownNPC.ts');
     const n = new TownNPC('merchant', g.player.x + 30, g.world.groundLevel * 16 - 48);
     n.home = { x: Math.floor(n.cx / 16), y: Math.floor(n.cy / 16) };
@@ -54,8 +56,8 @@ async function sequence(layout, suffix) {
     g.player.debugGod = true;
     const IBK = window.__swItems ?? {};
     const keys = Object.keys(IBK);
-    const gunKey = keys.find((k) => k.startsWith('vi_38_')) ?? keys.find((k) => k.startsWith('vi_1553_'));
-    const ammoKey = keys.find((k) => k.startsWith('vi_97_')) ?? keys.find((k) => k.startsWith('vi_546_'));
+    const gunKey = keys.find((k) => k.startsWith('vi_1553_')) ?? keys.find((k) => k.startsWith('vi_98_'));   // SDMG/迷你鲨
+    const ammoKey = keys.find((k) => k.startsWith('vi_97_')) ?? keys.find((k) => k.startsWith('vi_546_'));   // 火枪弹
     if (gunKey) g.player.inv.slots[0] = { id: IBK[gunKey], stack: 1 };
     if (ammoKey) g.player.inv.slots[53] = { id: IBK[ammoKey], stack: 99 };
     g.player.inv.selected = 0;
@@ -82,7 +84,7 @@ async function sequence(layout, suffix) {
   ok(`${layout} ①水平居中±4(screenWidth/2-250)`, approx(geo?.left ?? -1, (geo?.vw ?? 0) / 2 - 250, 4),
     `left=${geo?.left} 期望=${((geo?.vw ?? 0) / 2 - 250).toFixed(1)}`);
   ok(`${layout} ①y=100±2`, approx(geo?.top ?? -1, 100, 2), `top=${geo?.top}`);
-  if (layout === '') await page.screenshot({ path: '/tmp/fx22-dialog-pos.png' });
+  if (layout === 'legacy') await page.screenshot({ path: '/tmp/fx22-dialog-pos.png' });
 
   // ---- ② 点商店钮 → 面板收 + 货架显 + dialogNpc 仍活 + 点击不漏世界层 ----
   const shop = await page.evaluate(async () => {
@@ -115,8 +117,8 @@ async function sequence(layout, suffix) {
   ok(`${layout} ②事件到达 window 层(spy)`, shop.saw === true);
   ok(`${layout} ②面板收起(display none 级)`, shop.panelGone === true);
   ok(`${layout} ②dialogNpc 会话保持`, shop.dialogAlive === true && shop.active === true);
-  ok(`${layout} ②货架显(${layout === '' ? 'classic .sw-npc-shop' : 'vinv 内嵌'})`,
-    layout === '' ? shop.classicShelf === true : shop.vinvShelf === true,
+  ok(`${layout} ②货架显(${layout === 'legacy' ? 'classic .sw-npc-shop' : 'vinv 内嵌'})`,
+    layout === 'legacy' ? shop.classicShelf === true : shop.vinvShelf === true,
     `classic=${shop.classicShelf} vinv=${shop.vinvShelf}`);
   ok(`${layout} ②Input 门拦住(mouseDown/mouseHeld 恒 false)`,
     shop.mouseDown === false && shop.mouseHeld === false,
@@ -154,13 +156,14 @@ async function sequence(layout, suffix) {
       npcCleared: g.dialogNpc === null, shopClosed: g.npcShopOpen === false,
       panelGone: !document.querySelector('.sw-npc-dialog'),
       classicShelfGone: !document.querySelector('.sw-npc-shop'),
-      vinvShelfGone: !(vinvTitle && vinvTitle.getClientRects().length > 0),
+      vinvShelfGone: g.npcShopOpen === false && !(vinvTitle && vinvTitle.getClientRects().length > 0),
     };
   });
   ok(`${layout} ④走远 dialogNpc 清`, away.npcCleared === true);
   ok(`${layout} ④npcShopOpen 清`, away.shopClosed === true);
   ok(`${layout} ④面板不重现(原版同相:npcChatText 仍空)`, away.panelGone === true);
-  ok(`${layout} ④货架随会话收`, layout === '' ? away.classicShelfGone === true : away.vinvShelfGone === true);
+  ok(`${layout} ④货架随会话收`, layout === 'legacy' ? away.classicShelfGone === true : away.vinvShelfGone === true,
+    `classic=${away.classicShelfGone} vinv=${away.vinvShelfGone}`);
 
   // ---- ⑤ 关闭钮漏世界层回归(追报主诉):走回 NPC 重开 → 点关闭 ----
   await page.evaluate(async () => {
@@ -207,8 +210,8 @@ async function sequence(layout, suffix) {
   await page.close();
 }
 
-await sequence('', '');                       // classic 浮面商店(用户实报布局)
-await sequence('vanilla', '&invlayout=vanilla');   // FX32 内嵌货架布局
+await sequence('legacy', '&invlayout=legacy');   // classic 浮面商店(用户实报布局;vanilla 现为缺省)
+await sequence('vanilla', '');                    // 缺省=vanilla 内嵌货架(FX32)
 
 console.log(`\nfx22 probe: ${pass} PASS / ${fail} FAIL`);
 await browser.close();

@@ -334,3 +334,35 @@ export function vanillaScaleFor(vw: number, vh: number, uiScale = 1): number {
   const k = uiScale * Math.min(1, vw / 720, vh / 780);
   return Math.min(1.15, Math.max(0.5, k));
 }
+
+// ---- 道具搜索浮窗几何(★SW-BJ81 2026-09-14 用户规格③;本面=FX39 停车坪自创 QoL,
+//      原版无对应物——非反编译锚面,几何判据=「不与物品栏占位面重叠+在视口内」) ----
+// 物品栏占位面(本模块既有单源):网格 gridSlotXY 20..496 × 20..258(gridHitRect)、
+// 钱币/弹药列 coinSlotXY/ammoSlotXY x 497..586、装备三列 EQUIP_COL_X..sw-58、
+// 合成面板 craftPanelRect (20,312)。旧实现=全屏模态(居中 560px+压暗底)——
+// 与规格④「搜索开着物品栏必须在场可点」互斥,改右置浮窗。
+/** 浮窗逻辑左缘 = 钱币/弹药列右缘(586)之外留 24 间距(规格③「往右一些」) */
+export const ITEMSEARCH_X = 610;
+/** 浮窗逻辑顶缘 = 与背包网格顶对齐(gridSlotXY(0).y=20) */
+export const ITEMSEARCH_Y = 20;
+/** 浮窗逻辑宽缺省 = 340(旧 modal 560 → 缩窄,规格③「缩小一些」) */
+export const ITEMSEARCH_W = 340;
+/** 浮窗逻辑宽下限(窄窗退化档)——压到下限仍放不进时按视口钳位优先 */
+export const ITEMSEARCH_W_MIN = 220;
+/** 右缘护栏 = 装备列左缘(sw-186)再留 22 间距:右缘不得越 sw-208 */
+export const ITEMSEARCH_RIGHT_GUARD = 208;
+/** 浮窗逻辑高上限(结果列表内滚,不给视口压出滚动条) */
+export const ITEMSEARCH_H_MAX = 460;
+/** 视口贴边余量(右/下) */
+export const ITEMSEARCH_VIEWPORT_PAD = 4;
+/** 浮窗矩形(物理 px;调用方直喂 style.left/top/width/max-height)。
+ *  窄窗退化序:①宽钳 [W_MIN, W];②左缘钳视口内(此档允许压住钱币/弹药列,
+ *  但 gridHitRect 右缘 496 仍不让——x ≥ 496 恒成立,720 逻辑宽下限保证) */
+export function itemSearchPanelRect(vw: number, vh: number, uiScale = 1): { x: number; y: number; w: number; h: number } {
+  const K = vanillaScaleFor(vw, vh, uiScale);
+  const sw = vw / K, sh = vh / K;
+  const w = Math.max(ITEMSEARCH_W_MIN, Math.min(ITEMSEARCH_W, sw - ITEMSEARCH_X - ITEMSEARCH_RIGHT_GUARD));
+  const x = Math.min(ITEMSEARCH_X, sw - w - ITEMSEARCH_VIEWPORT_PAD);
+  const h = Math.min(ITEMSEARCH_H_MAX, sh - ITEMSEARCH_Y - ITEMSEARCH_VIEWPORT_PAD * 2);
+  return { x: x * K, y: ITEMSEARCH_Y * K, w: w * K, h: h * K };
+}

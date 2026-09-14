@@ -129,6 +129,9 @@ describe('★BJ78 W1/W2 wamp 读取面', () => {
     waterWaves.setQuality(3);
     waterWaves.frame({ camX: 0, camY: 0, zoom: 1, viewW: 64, viewH: 64, tileX: 2, tileY: 2,
       maxTilesX: 120, maxTilesY: 80, worldSurface: 30, rockLayer: 60, windAbs: 0.3, rain: 0, dt: 1 / 60 });
+    // 播撒非中性波场（h−0.5 ≠ 0 → amp 项进入位移；中性场下 amp 被 0 消数=断言真空）
+    const seedR = waterWaves.readGridR();
+    for (let i = 0; i < seedR.length; i++) seedR[i] = 0.5 + Math.sin(i * 1.7) * 0.29;
     waterWaves.progress = 77.5;
     const run = (): [number, number][] => {
       const rows: [number, number][] = [];
@@ -146,6 +149,13 @@ describe('★BJ78 W1/W2 wamp 读取面', () => {
     const on = run();
     expect(on).toEqual(off);
     expect(off.some(([dx]) => dx !== 0)).toBe(true);  // 防哑夹具（位移恒 0 = 断言真空）
+    // 非空证臂：amp=1 臂（search 无 wamp）输出必须与 amp=2 臂不同——
+    // 证明本断言对 amp 值真敏感（否则 flag-on 值腐蚀不可检）
+    g.location = { search: '' };
+    waveAmpResetForTest();
+    const amp1 = run();
+    expect(amp1).not.toEqual(on);
+    g.location = { search: '?wamp=2' };
     swPerfSetForTest(false);
   });
 });

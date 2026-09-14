@@ -357,7 +357,8 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
   });
   it('FX28 箱条 cosmetic 清偿：名无命中盒/悬停金 OurFavoriteColor/钮竖直居中锚', () => {
     const chestBlock = uiSrc.slice(uiSrc.indexOf('private vinvBuildChest'), uiSrc.indexOf('private vinvUpdateChestName'));
-    expect(chestBlock).toContain("nameEl.style.cssText += 'font-size:13px;';");   // 不再 pointer-events:auto（DrawName 无命中盒）
+    expect(chestBlock).toContain("nameEl.style.cssText += 'font-size:13px;'");   // 不再 pointer-events:auto（DrawName 无命中盒）
+    expect(chestBlock).toContain("text-shadow:1px 1px 0 #000,-1px 1px 0 #000,1px -1px 0 #000,-1px -1px 0 #000;");   // ★2026-09-14 四向描边(亮背景可读)
     expect(chestBlock).toContain("b.style.color = 'rgb(255,231,69)';");   // Main.cs:886 OurFavoriteColor
     expect(chestBlock).not.toContain("'#c8f0c8'");
     expect(chestBlock).toContain('transform:translateY(-50%);');   // origin=vector/2 竖直居中（:234）

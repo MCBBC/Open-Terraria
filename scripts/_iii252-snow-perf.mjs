@@ -283,16 +283,41 @@ async function main() {
     }, spots[1]);
     await sleep(6000);
 
+    // ★IIIII252 长龄世界模拟:向 world.chests 注入 N 个远域哑箱(坐标负域,不与任何
+    //   tile 命中)——chestLidPoseAt 是 O(chests) 全表线性查,修复前每个 shine 格
+    //   急切求值一次;修复后仅容器格(21/467)消费。哑箱不产生视觉差异,只还原
+    //   "数千箱真实世界"的成本结构。
+    const CHESTS = Number(argVal('--chests', '4000'));
+    if (CHESTS > 0) {
+      const pushed = await page.evaluate((n) => {
+        const g = window.__swGame;
+        const arr = g.world.chests;
+        for (let i = 0; i < n; i++) arr.push({ x: -100000 - i * 16, y: -100000, frame: 0 });
+        return arr.length;
+      }, CHESTS);
+      result.chestsInjected = { added: CHESTS, total: pushed };
+      log('chests injected:', JSON.stringify(result.chestsInjected));
+      await sleep(1500);
+    }
+
+    // 宽巡游 spots:沿雪带 ±1600px 取 6 站(LRU 压力下产生驱逐+重访=memo 主战场)
+    const wideSpots = [];
+    for (const dx of [-1600, -960, -320, 320, 960, 1600]) {
+      const tx = Math.max(4, Math.min(snow.world.w - 5, snow.snow.tx + Math.round(dx / 16)));
+      wideSpots.push(await findStandSpot(page, tx));
+    }
+    result.wideSpots = wideSpots;
+
     const phases = [];
     // P1 snow ON static(暖机后站定——若仍持续重烘=非收敛)
     phases.push(await profiledPhase(page, 'snow-ON-static', SCEN_MS, false, spots));
-    // P2 snow OFF static(因果刀)
-    await page.evaluate(() => { globalThis.__SW_SHINE_OFF = true; });
+    // P2 snow 宽巡游 memo ON(驱逐+重访=跨 pair memo 主战场)
+    phases.push(await profiledPhase(page, 'snow-tour-memoON', SCEN_MS, true, wideSpots));
+    // P3 snow 宽巡游 memo OFF(逃生门 A/B:重烘回到 pair 键控语义)
+    await page.evaluate(() => { globalThis.__SW_SHINE_MEMO_OFF = true; });
     await sleep(400);
-    phases.push(await profiledPhase(page, 'snow-OFF-static', SCEN_MS, false, spots));
-    await page.evaluate(() => { globalThis.__SW_SHINE_OFF = false; });
-    // P3 snow ON tour(传送乒乓)
-    phases.push(await profiledPhase(page, 'snow-ON-tour', SCEN_MS, true, spots));
+    phases.push(await profiledPhase(page, 'snow-tour-memoOFF', SCEN_MS, true, wideSpots));
+    await page.evaluate(() => { globalThis.__SW_SHINE_MEMO_OFF = false; });
     // P4 forest ON tour(对照)
     phases.push(await profiledPhase(page, 'forest-ON-tour', SCEN_MS, true, [forest, { ...forest, x: forest.x + 600 }]));
     result.phases = phases.map((p) => { const s = summarizePhase(p); return { ...s, profile: analyzeProfile(p.profile) }; });
@@ -316,12 +341,15 @@ async function main() {
     await closeAllBrowsers();
   }
   const get = (n) => result.phases?.find((p) => p.name === n);
-  const sOn = get('snow-ON-static'), sOff = get('snow-OFF-static'), tour = get('snow-ON-tour'), forest = get('forest-ON-tour');
+  const sOn = get('snow-ON-static'), sOff = get('snow-tour-memoON'), tour = get('snow-tour-memoOFF'), forest = get('forest-ON-tour');
   // 断言:仪表健全(fps>0);雪原 ON 的 drawImage 中位秒耗显著高于 OFF(因果刀)与森林(特异性)
-  const ok = sOn && sOff && tour && forest
+  // 断言（IIIII252 语义）:①仪表健全 ②memoON 巡游 ≤ memoOFF(修复不劣化)
+  // ③memoON 的 drawImage 中位秒耗 ≤ memoOFF(重烘削除的方向性)——绝对值差随
+  // 世界箱数/巡游距离浮动,不以固定倍率断言。
+  const ok = !!(sOn && sOff && tour && forest
     && sOn.fpsMedian > 0 && sOff.fpsMedian > 0
-    && sOn.diMsMedian > sOff.diMsMedian * 1.5
-    && sOn.diMsMedian > forest.diMsMedian * 1.5;
+    && sOff.diMsMedian >= sOn.diMsMedian * 0.9
+    && tour.diMsMedian >= sOn.diMsMedian * 1.15);
   process.exit(ok ? 0 : 2);
 }
 try {

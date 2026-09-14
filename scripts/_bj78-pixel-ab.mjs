@@ -241,7 +241,34 @@ try {
     await page.evaluate(async () => { const m = await import('/src/core/Options.ts'); m.options.data.waveQuality = 3; });
   }
 
-  // ================= 页 2:?wamp=2(W1/W2 amp 缓存读取面的增益路径) =================
+  // ================= 页 2:?wwarp=0(W1 bob 路径主场:sampleDisplace 逐格激活;
+  //   定谳 VanillaLiquidRenderer.ts:639 waveOn=q>0 && !warpMode——GL warp 激活时
+  //   逐格 bob 按设计关闭,W1 只在此配置逐格跑) =================
+  {
+    const pageB = await openPage(browser, { errors: L.fails });
+    const bootB = await bootstrap(pageB, process.env.SW_ORIGIN);
+    L.chk('bootstrap(wwarp=0)', bootB.ok, bootB.why ?? '');
+    const uB = new URL(process.env.SW_ORIGIN);
+    uB.searchParams.set('wwarp', '0');
+    await pageB.evaluate((href) => { location.href = href; }, uB.toString());
+    await new Promise((r) => setTimeout(r, 1500));
+    const bridgeB = await pageB.waitForFunction(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.newWorld, { timeout: 120_000 }).then(() => true).catch(() => false);
+    L.chk('带参重导航桥(wwarp=0)', bridgeB, '');
+    const genB = await createGame(pageB, { mode: 'direct', seed: process.env.SW_SEED || '05162020', size: process.env.SW_SIZE || 'small' });
+    L.chk('createGame(wwarp=0)', genB.ok, genB.why ?? '');
+    await installHarness(pageB);
+    const waterB = await findWater(pageB);
+    if (waterB.runs.length) {
+      const [w0, w1] = waterB.runs[0];
+      await scene(pageB, 'ocean-bob(wwarp0)', async () => {
+        await teleport(pageB, (w1 + 6) * 16, waterB.gl * 16 - 48);
+        await pump(pageB, 30, { clearEnemies: true });
+      });
+    } else L.say('ocean-bob skipped: 无地表水体');
+    await pageB.close().catch(() => { });
+  }
+
+  // ================= 页 3:?wamp=2(W1/W2 amp 缓存读取面的增益路径) =================
   // ★bootstrap 的 gotoApp 用裸 origin 重导航会洗掉查询参数——先正常 boot,
   //   再带参二次导航重等桥;参数生效以页内 waveAmpParam()===2 断言(真值面)。
   const page2 = await openPage(browser, { errors: L.fails });

@@ -32,7 +32,7 @@ async function installCounter(page) {
   return ok.ok;
 }
 
-/** 计一轮:3 采样窗中位(轮询 animTick 定界) */
+/** 计一轮:3 采样窗中位(轮询 animTick 定界);W4 走调用窗内精确计数 */
 async function countArms(page, flag) {
   await page.evaluate((v) => window.__swPerfFlags.set(v), flag);
   const samples = [];
@@ -41,16 +41,43 @@ async function countArms(page, flag) {
       const g = window.__swGame;
       const t0 = g.renderer.animTick;
       window.__alloc.usp = 0; window.__alloc.set = 0;
+      window.__w4 = { sets: 0, calls: 0 };
       const iv = setInterval(() => {
         if (g.renderer.animTick - t0 >= n) {
           clearInterval(iv);
-          res({ usp: window.__alloc.usp, set: window.__alloc.set, frames: g.renderer.animTick - t0 });
+          res({
+            usp: window.__alloc.usp, set: window.__alloc.set, frames: g.renderer.animTick - t0,
+            w4sets: window.__w4.sets, w4calls: window.__w4.calls,
+          });
         }
       }, 25);
     }), FRAMES);
     samples.push(r);
   }
   return samples;
+}
+
+/** W4 精确仪具:包 updateWaterWaves 原型方法,调用窗内读 Set 计数(背景归零) */
+async function installW4Probe(page) {
+  return page.evaluate(async () => {
+    const R = (await import('/src/render/Renderer.ts')).Renderer;
+    if (window.__w4Installed) return { ok: true, note: 'already' };
+    window.__w4Installed = true;
+    window.__w4 = { sets: 0, calls: 0 };
+    const proto = R.prototype;
+    const oUW = proto.updateWaterWaves;
+    proto.updateWaterWaves = function (...a) {
+      const before = window.__alloc.set;
+      window.__alloc.set = 0;
+      try { return oUW.apply(this, a); }
+      finally {
+        window.__w4.sets += window.__alloc.set;
+        window.__w4.calls++;
+        window.__alloc.set = before;
+      }
+    };
+    return { ok: true };
+  });
 }
 
 /** 一个场景的完整对拍(焐热缓存 → off → on),返回 {offU,onU,offS,onS} */
@@ -67,6 +94,7 @@ async function census(page, water, label) {
     if (w) { try { w.maxRaining = 0; w.raining = false; w.windSpeedCurrent = 0; } catch { /* 域缺字段 */ } }
   });
   // 先 ON 跑 60 帧把 waveAmpParam 缓存焐热(首调用构造 1 次,不入正式窗)
+  await installW4Probe(page);
   await page.evaluate((v) => window.__swPerfFlags.set(v), true);
   await page.evaluate((n) => new Promise((res) => {
     const g = window.__swGame;
@@ -79,9 +107,13 @@ async function census(page, water, label) {
   const med = (xs, k) => xs.map((s) => s[k]).sort((a, b) => a - b)[1];
   const offU = med(off, 'usp') / FRAMES, onU = med(on, 'usp') / FRAMES;
   const offS = med(off, 'set') / FRAMES, onS = med(on, 'set') / FRAMES;
+  // W4:调用窗内精确读数(每次 updateWaterWaves 的 Set 构造数,零背景)
+  const w4per = (xs) => xs.map((s) => s.w4calls ? s.w4sets / s.w4calls : -1);
+  const offW4 = w4per(off)[1], onW4 = w4per(on)[1];
   L.say(`[${label}] URLSearchParams/帧: off=${offU.toFixed(1)} on=${onU.toFixed(1)} delta=${(offU - onU).toFixed(1)}  (off ${JSON.stringify(off)})`);
-  L.say(`[${label}] Set/帧:             off=${offS.toFixed(2)} on=${onS.toFixed(2)} delta=${(offS - onS).toFixed(2)}  (on ${JSON.stringify(on)})`);
-  return { offU, onU, offS, onS };
+  L.say(`[${label}] Set/帧(全域背景): off=${offS.toFixed(2)} on=${onS.toFixed(2)}`);
+  L.say(`[${label}] W4 Set/updateWaterWaves 调用窗: off=${offW4?.toFixed(2)} on=${onW4?.toFixed(2)}`);
+  return { offU, onU, offS, onS, offW4, onW4 };
 }
 
 try {
@@ -117,7 +149,7 @@ try {
   const b = await census(page0, water0, 'wwarp0-bob');
   L.chk('W1 sampleDisplace: off 每帧 >30(表层水格×bob 路径)', b.offU > 30, `offU=${b.offU}`);
   L.chk('W1 sampleDisplace: on 每帧差值 >25(缓存热后 bob 路径零构造)', b.offU - b.onU > 25, `delta=${(b.offU - b.onU).toFixed(1)}`);
-  L.chk('W4 Set: off-on 差 ≥1.5(每帧 2 常量表被消除)', b.offS - b.onS >= 1.5, `delta=${(b.offS - b.onS).toFixed(2)}`);
+  L.chk('W4 Set/updateWaterWaves 调用窗: off≥1.9 → on=0(每帧 2 常量表精确消除)', b.offW4 >= 1.9 && b.onW4 === 0, `off=${b.offW4} on=${b.onW4}`);
 
   // ================= 场景 A:默认页(GL warp 激活=W2 主场) =================
   const page = await openPage(browser, { errors: L.fails });
@@ -140,9 +172,8 @@ try {
   L.chk('计数仪具(gl)', await installCounter(page), '');
   const a = await census(page, water, 'gl-warp');
   L.chk('W2 uploadWave: off-on 差 ≥0.8(每帧 1 次解析被消除)', a.offU - a.onU >= 0.8, `delta=${(a.offU - a.onU).toFixed(2)}`);
-  // GL 场 Set 读数沉在 ~12/帧域外背景噪声里(信号 2/帧)——W4 由 wwarp=0 场
-  // (delta 2.99 干净)+node 精确计数(off≥2/on=0)双证,此处只报告不断言。
-  L.say(`[gl-warp] W4 Set delta=${(a.offS - a.onS).toFixed(2)}/帧(背景噪声大,断言见 wwarp0 场+node 守卫)`);
+  // W4 调用窗内精确读数(背景已归零,两场皆可断言)
+  L.chk('W4 Set/updateWaterWaves 调用窗: off≥1.9 → on=0(GL 场同断言)', a.offW4 >= 1.9 && a.onW4 === 0, `off=${a.offW4} on=${a.onW4}`);
 
   L.say('census-done');
   process.exit(L.exitCode());

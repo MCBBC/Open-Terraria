@@ -8,6 +8,7 @@ import {
 } from '../core/constants';
 import { moveAndCollide, isClearSpotTest, findCollisionTileVertical } from '../physics/TileCollision';
 import { dustWaterFor } from '../render/WeatherRenderer';   // Dust.dustWater()（Dust.cs:405-421,waterStyle 映射）
+import { queueRippleSized, RippleShape } from '../render/WaterWaves';   // ★用户明令分歧 2026-09-14 唇入必响：掠水涟漪走既有公共口（QueueRipple 玩家重载）
 import { wetCollision, getWaterLine } from './npcLiquid';
 import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
   mountHorizontalCharges, grantCollisionAttackImmunity, chilletDashCharge,
@@ -103,6 +104,43 @@ export function windPushImpulse(windSpeed: number, airborne: boolean, hasInput: 
     else if (push < -0.072) push = -0.072;
   }
   return push;
+}
+
+// ---- ★用户明令分歧 2026-09-14「唇入必响」（超越原版）——表层掠水反馈几何探针 ----
+// 分歧面专用（非原版移植体）：判定「脚位带与液面物理接触」。原版湿态判定仍是
+// wetCollision 居中盒 1:1（上方液体解析段，一字不动）——本探针只喂反馈支。
+/** 脚位带液面探针：盒 [px,px+pw)×[py,py+ph) 与液面带（surfY=行顶+(256−liquid)/32×2
+ *  ..【格底】）物理相交的首个液体格（扫序同 WetCollision :1614-1627 行优先首中即返）。
+ *  返回 { type, surfY }；null = 无接触。液型 0/1=水 3=蜜 4=微光 2=岩浆（调用侧对
+ *  岩浆保守 Skip，见 surfaceSkimSplashFeedback 边缘 case⑤定谳）。
+ *  ★液带下沿取【格底物理值】而非原版 effH 甩尾（WetCollision :1610 effH=16−trunc(drop·2)
+ *  的 surfY+effH 对满水/半水可超格底 0.06-0.75px）——岸侧贴走（脚=相邻水格底）零接触
+ *  判据依赖严格格底；该甩尾在原版湿探针上是被 BJ79 亚像素测试冻结的 1:1 面，此处不复用。
+ *  导出面=行为测试对边缘 case 定谳逐条冻结（tests/bj79-lip-pocket-wet-parity）。 */
+export function skimSurfaceProbe(
+  st: TileStore, px: number, py: number, pw: number, ph: number,
+): { type: number; surfY: number } | null {
+  const i0 = Math.max(0, Math.floor(px / TILE));
+  const i1 = Math.min(st.w - 1, Math.floor((px + pw) / TILE));
+  const j0 = Math.max(0, Math.floor(py / TILE));
+  const j1 = Math.min(st.h - 1, Math.floor((py + ph) / TILE));
+  for (let j = j0; j <= j1; j++) {
+    for (let i = i0; i <= i1; i++) {
+      if (!st.inBounds(i, j)) continue;
+      const idx = st.idx(i, j);
+      if (st.liquid[idx] <= 0) continue;
+      const type = st.liquidType[idx];
+      if (type === 2) return { type, surfY: j * TILE };   // 岩浆：带内即报（保守 Skip）
+      // 液面高度：同 WetCollision :1607-1610 float 收缩（255 满水 = +0.0625px）
+      const drop = (256 - st.liquid[idx]) / 32;
+      const surfY = j * TILE + drop * 2;
+      if (px + pw > i * TILE && px < i * TILE + TILE
+        && py + ph > surfY && py < (j + 1) * TILE) {
+        return { type, surfY };
+      }
+    }
+  }
+  return null;
 }
 
 /** 蘑菇矿潜行加成轴 = Utils.Remap(stealth, 1f, 0.75f, 1f, 0f)（1457 Player.cs:26015
@@ -774,6 +812,20 @@ export class Player extends Entity {
    *  :37921 重生清零；1456 = :27464/:27558/:27649/:37203）——水波涟漪尺寸因子
    *  （WaterShaderData.cs:263 h·wetCount/9）+ 出入液溅花门（:27984/:28078） */
   wetCount = 0;
+  // ---- ★用户明令分歧 2026-09-14「唇入必响」（超越原版）——表层掠水反馈三件套 ----
+  // 判例 = smart-cursor-dark-visibility-user-divergence（用户拍板动刀+分歧标注+回滚口单点）。
+  // BJ79 定谳的唇缘水袋几何静默（1 格宽满水袋嵌半砖唇缘间，湿探针盒底差 2.06px 够不到
+  // 液面→左入 0/9 翻转静默，tests/bj79-lip-pocket-wet-parity）被用户裁决为 bug：任何
+  // 入水姿态都应有入水声+波纹。反馈与状态解耦：湿/游泳状态（wetCollision 探针）原版
+  // 1:1 不动，本支只在其【干】时按脚位带液面接触的上升沿复用同一 splash 路径。
+  /** 回滚口（运行时单点闸）：false = 摘除掠水反馈支，BJ79 原版几何静默语义原样恢复。
+   *  摘除式回滚 = 删本字段 + surfaceSkimSplashFeedback 方法 + 其唯一调用行 + 本区两计数器。 */
+  static SURFACE_SKIM_SPLASH = true;
+  /** 掠水 anti-spam 冷却（镜像 wetCount :28169 递减语义：置 10、每拍 −1、门 ===0）
+   *  ——连走多格水袋防逐格连响，跨袋间隔 >10t（vanilla 溅花再入门同窗）可再响 */
+  private _skimSplashCooldown = 0;
+  /** 脚位带液接触上升沿检测（上一拍接触值；被门拦下的边沿即消费——冷却窗内新袋静默） */
+  private _skimContactPrev = false;
   /** 原版 lavaWet 粘滞镜像（Player.cs:27872 flag24 / :27883 lavaWet=flag25 / :28164 !wet 清）
    *  ——溅花液型门专用：入水门=本拍 flag25（:27989）、出水门=上拍值（:28083）。
    *  与 inLava 桶位分离：inLava 无 :27878 的 !shimmering 门且消费面更广（灼烧/Wet 剥离） */
@@ -3284,6 +3336,71 @@ export class Player extends Entity {
     }
   }
 
+  // ---- ★用户明令分歧 2026-09-14「唇入必响」（超越原版）——表层掠水反馈支 ----
+  // 触发与正常入水同一 splash 路径（同尘发射器/同 Splash_N 音量 1/同规模涟漪注入），
+  // 但湿/游泳状态面零参与：wetCollision 探针（居中盒,液体解析段）保持原版 1:1。
+  // 边缘 case 定谳（逐条冻结于 tests/bj79-lip-pocket-wet-parity）：
+  //  ① 水上漂靴/水面行走=不发——本仓水行=湿支 water-walk 悬停块（canWaterWalk ∧
+  //     vy>=0 → vy=0，运动段液体档内），悬停期主探针
+  //     恒湿 → main-dry 门天然拦截（判别器=支撑来源：液面支撑 ⇒ 主探针湿 ⇒ 正常入水
+  //     splash 已发；唇缘实心/半砖支撑 ⇒ 主探针干 ⇒ 本支发）。onWaterSurface 字段曾
+  //     考虑作门，弃（干态不重置=陈旧真,不可靠；main-dry 已蕴含非液面支撑）。
+  //  ② 宽水域=无双发——主探针沉入即正常 splash；descent 期（腾空/下行速度）被
+  //     onGround∧vy==0 门拦，入水后主探针湿被 main-dry 门拦，两段都不可能双发。
+  //  ③ 连走多格水袋=anti-spam——_skimSplashCooldown 镜像 wetCount :28169（置 10、
+  //     每拍 −1、门 ===0）：冷却窗（10t≈vanilla 溅花再入门同窗）内逐格不连响；跨袋
+  //     间隔 >10t 可再响（证据地形两袋间隔 ~31px≈12t 步行 → 双响）。
+  //  ④ 跳跃掠过=不发——上升沿=接触开始，跳跃中 onGround=false；StepDown 下行帧
+  //     vy=stepSpeed≠0 亦拦（坡道下行入水只走 vanilla 入水 splash，无双发）。
+  //  ⑤ 岩浆袋=保守 Skip——原版岩浆侧反馈已 1:1 齐备且更响：LavaCollision 全盒
+  //     （Collision.cs:1657-1692）在本几何（袋面高出脚位）照样命中 → inLava →
+  //     重伤 80+OnFire 420（:27888-27932）+hurt 音；vanilla 溅花本就静默（居中湿探针
+  //     够不到,与水袋同几何）。再叠一层掠水 splash 音=分歧面上再叠分歧,不做。
+  //  蜜/微光袋=发对应档（蜜 :28018 Splash_1+蜜尘 / 微光 :27991 Splash_2+微光尘），
+  //  微光态（shimmering）整体静默（:27987 !shimmering 门镜像）。
+  /** 掠水反馈主入口（液体解析段粘滞清偿后唯一调用；摘除=回滚口单点） */
+  private surfaceSkimSplashFeedback(game: GameHooks, st: TileStore, wetNow: boolean): void {
+    if (!Player.SURFACE_SKIM_SPLASH) { this._skimContactPrev = false; return; }
+    if (this._skimSplashCooldown > 0) this._skimSplashCooldown--;   // 镜像 :28169 每拍递减
+    // 脚位带 [脚底, 脚底+8)（★不用任务草案的 foot−2 上沿：+2px 会把「岸侧贴走」
+    // （脚=相邻满水格底,液带下沿=格底）2px 掠边误触成溅水——带收进脚底以下后该姿态
+    // 零接触;涉行（脚踩池底）同样零接触=vanilla 涉行静默 1:1 不扩）。倒挂镜像。
+    const gd = this.gravDir;
+    const bandTop = gd === -1 ? this.y - 8 : this.y + this.h;
+    const hit = skimSurfaceProbe(st, this.x, bandTop, this.w, 8);
+    const contact = hit !== null;
+    const rising = contact && !this._skimContactPrev;
+    this._skimContactPrev = contact;   // 边沿每拍更新：被门拦下的边沿即消费（窗内静默）
+    if (!rising || hit === null || hit.type === 2) return;   // 岩浆=边缘 case⑤ 保守 Skip
+    // 门序：主湿探针干（②宽水域/①水行悬停——vanilla splash 已发）∧ 非岩浆全盒
+    // （:3859 inLava 本拍即时值）∧ vanilla 溅花 anti-spam 门（wetCount===0,:27984 同式）
+    // ∧ 本支冷却（③）∧ 非微光态（:27987 镜像）∧ 着地静止（④走/站;descent/跳/StepDown 不发）
+    if (wetNow || this.inLava || this.wetCount !== 0 || this._skimSplashCooldown !== 0
+      || this.shimmering || !this.onGround || this.vy !== 0) return;
+    this._skimSplashCooldown = 10;   // ③（置位序同 :27986；本方法头递减→再入门=置位后第10拍,与 wetCount :28169 同拍距）
+    const boxY = gd === -1 ? this.y - 16 : this.y + this.h - 8;   // 尘盒锚脚位（入水支 −8 同式）
+    if (hit.type === 3) {                              // 蜜（:28018-28029 同款）
+      this.splashHoneyDust(game, boxY);
+      game.playSfxWav?.('Splash_1', 1, this.x, this.y);
+    } else if (hit.type === 4) {                       // 微光（:27991-28016 入水档 0.8 同款）
+      this.splashShimmerDust(game, boxY, 0.8);
+      game.playSfxWav?.('Splash_2', 1, this.x, this.y);
+    } else {                                           // 水 0/1（:28031-28042 同款）
+      this.splashWaterDust(game, boxY, 3);
+      game.playSfxWav?.('Splash_0', 1, this.x, this.y);
+    }
+    // 涟漪注入（玩家入水拍同式=Renderer pushPlayer→injectEntity :792 queueRippleSized：
+    // strength=num3·3=0.15√|vel|、尺寸 (w,h)·k、Circle）——水平镜像入水 +5·v̂,垂直钉
+    // 接触液面线 surfY：唇袋姿态下身体中心悬于水面上方 ~13px,中心点入队能量落空气/
+    // 水下,掠水反馈必须在水面即刻可见（同 player-water-entry-splash v2 钳液面线方向）
+    const velLen = Math.hypot(this.vx, this.vy);
+    const s3 = 0.15 * Math.sqrt(velLen);
+    const k = Math.min(1, Math.max(0, s3 * 10));
+    const vnx = velLen > 0 ? this.vx / velLen : 0;
+    queueRippleSized(this.cx + vnx * 5, hit.surfY, s3, this.w * k, this.h * k,
+      RippleShape.Circle, 0);
+  }
+
   /** ★SW-BJ59：Player.tileSpeed 原始聚合单源（Player.cs:2453 基 1f，加法叠加，
    *  更大=更快）。来源：建筑工药水 buff 107 +0.25（:10248）/ 仙馔蜜酒 +0.05
    *  （:12960）/ 风筝 buff 383 +0.15（:10005）/ 砌砖刀族配饰 +0.5（:13122-13130，
@@ -3949,6 +4066,10 @@ export class Player extends Entity {
       this.splashHoneyWet = false;
       this.splashShimmerWet = false;
     }
+    // ★用户明令分歧 2026-09-14「唇入必响」（超越原版）——表层掠水反馈支（唯一调用行）。
+    // ★回滚口：摘除本行（+ Player.SURFACE_SKIM_SPLASH=false 运行时闸）即恢复 BJ79
+    // 定谳的原版几何静默（tests/bj79-lip-pocket-wet-parity 头注）。状态面零参与。
+    this.surfaceSkimSplashFeedback(game, world.store, wetNow);
     // Wet 103：浸岩浆即刻移除（UpdateBuffs :11335-11338 `if (lavaWet) DelBuff(j)`——
     // 岩浆蒸干一身水。★须在 inLava 判定同帧执行（原版 Collision 先于 UpdateBuffs），
     // 放 buffs.tick 前会因 inLava 滞后一帧）

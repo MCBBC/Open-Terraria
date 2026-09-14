@@ -16557,7 +16557,9 @@ export class Renderer {
     //   （2026-09-02 曾迁入背包 2×4 钮格——画布侧自此退出）
     const hudBtns = false;
     const btnHover = hudBtns && hit(btnX, btnY, btnS, btnS);
-    this.timeUiHover = btnHover || (this.timePanelOpen && hit(ox, oy + 276, size, 64));
+    // ★SW-BJ81 2026-09-14:面板加高 64→88（标题行+面板内关闭钮,用户规格①）——
+    //   命中区随行;关闭钮语义=面板内显式关(旧唯一出口=外部入口钮再 toggle)
+    this.timeUiHover = btnHover || (this.timePanelOpen && hit(ox, oy + 276, size, 88));
     if (hudBtns) {
       ctx.fillStyle = btnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';
       ctx.fillRect(btnX, btnY, btnS, btnS);
@@ -16574,7 +16576,8 @@ export class Renderer {
       }
     }
     if (this.timePanelOpen) {
-      const px = ox, py = oy + 276, pw = size, ph = 64;
+      // \u2605SW-BJ81 \u89c4\u683c\u2460:64\u219288\u2014\u2014\u9876\u8865\u6807\u9898\u884c(Lang)+\u9762\u677f\u5185 \u2715 \u5173\u95ed\u94ae,\u5185\u5bb9\u884c\u6574\u4f53\u4e0b\u79fb 24
+      const px = ox, py = oy + 276, pw = size, ph = 88;
       ctx.fillStyle = 'rgba(8,10,26,0.92)';
       ctx.fillRect(px, py, pw, ph);
       ctx.strokeStyle = '#4a5aa0';
@@ -16591,26 +16594,35 @@ export class Renderer {
         ctx.fillText(label, x + w / 2, y + h / 2 + 4);
         if (clicked && hov) { act(); this._minimapBtnClicked = true; }
       };
+      // \u6807\u9898\u884c + \u663e\u5f0f\u5173\u95ed\u94ae\uff08\u5173\u95ed\u94ae\u6837\u5f0f=\u9762\u677f box \u60ef\u4f8b;\u547d\u4e2d\u533a\u5728 timeUiHover \u57df\u5185,
+      // Game \u7167\u5e38\u541e\u70b9\u51fb;act \u7f6e false=\u5355\u4e49\u5173\u95ed,\u4e0d\u5403\u5165\u53e3\u94ae\u7684 toggle \u7ffb\u8f6c\uff09
+      ctx.fillStyle = '#9aa2cc';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(Lang.text('Mods.SandboxWorld.UI.TimePanel.Title'), px + 10, py + 17);
+      ctx.textAlign = 'center';
+      box(px + pw - 26, py + 5, 20, 20, '\u2715', () => { this.timePanelOpen = false; });
       const setT = (t: number) => { clock.timeOfDay = ((t % 1) + 1) % 1; };
-      box(px + 8, py + 8, 76, 22, '\u2212 1 \u5c0f\u65f6', () => setT(clock.timeOfDay - 1 / 24));
+      box(px + 8, py + 32, 76, 22, '\u2212 1 \u5c0f\u65f6', () => setT(clock.timeOfDay - 1 / 24));
       ctx.fillStyle = '#9aa2cc';
       ctx.font = '12px sans-serif';
-      ctx.fillText(`\u7b2c ${clock.dayCount} \u5929`, px + pw / 2, py + 23);
-      box(px + pw - 84, py + 8, 76, 22, '+ 1 \u5c0f\u65f6', () => setT(clock.timeOfDay + 1 / 24));
+      ctx.fillText(`\u7b2c ${clock.dayCount} \u5929`, px + pw / 2, py + 47);
+      box(px + pw - 84, py + 32, 76, 22, '+ 1 \u5c0f\u65f6', () => setT(clock.timeOfDay + 1 / 24));
       // \u5feb\u6377\u9884\u8bbe\uff08clock \u8bed\u4e49\uff1a0=\u5348\u591c 0.25=06:00 0.5=\u6b63\u5348 0.75=18:00\uff09\u3002
       // \u9ec4\u660f\u987b\u7528\u663c\u591c\u8fb9\u754c DUSK=0.8125\uff0819:30,\u539f\u7248 StartNightImmediately \u540c\u951a\uff09\u2014\u2014
       // \u66fe\u5199 0.73(17:31) \u70b9\u5b8c\u5929\u8fd8\u4eae\u7740\uff08type-only import,\u5e38\u91cf\u843d\u5b57\u9762\u91cf\uff09
       const presets: Array<[string, number]> = [['\u6e05\u6668', 0.27], ['\u6b63\u5348', 0.5], ['\u9ec4\u660f', 0.8125], ['\u5348\u591c', 0.0]];
       presets.forEach(([label, t], i) => {
-        box(px + 10 + i * 56, py + 38, 52, 20, label, () => setT(t));
+        box(px + 10 + i * 56, py + 62, 52, 20, label, () => setT(t));
       });
     }
 
     // ---- 天气调整按钮 + 面板（同时间按钮模式；预设回调由 Game 注入 weatherPreset） ----
     const wBtnX = ox + size - 46, wBtnY = oy + 252;
     const wBtnHover = hudBtns && hit(wBtnX, wBtnY, btnS, btnS);
-    const wPanelY = oy + 276 + (this.timePanelOpen ? 72 : 0);
-    const wPanelH = 112;
+    // ★SW-BJ81:时间面板加高 64→88 ⇒ 叠放下移 72→96;天气面板同规格加高 112→136
+    const wPanelY = oy + 276 + (this.timePanelOpen ? 96 : 0);
+    const wPanelH = 136;
     this.weatherUiHover = wBtnHover || (this.weatherPanelOpen && hit(ox, wPanelY, size, wPanelH));
     if (hudBtns) {
       ctx.fillStyle = wBtnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';

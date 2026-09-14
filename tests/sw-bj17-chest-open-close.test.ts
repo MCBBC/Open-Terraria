@@ -203,9 +203,14 @@ describe('SW-BJ17 渲染姿态 chestLidPoseAt / drawVanillaCell', () => {
 
   it('结构锁：drawVanillaCell 姿态带位移挂 vframeAt 前（21/467 门）;烘焙两路喂 chestLidPoseAt;fixedUpdate 挂驱动', () => {
     const vt = readFileSync(new URL('../src/render/VanillaTiler.ts', import.meta.url), 'utf8');
-    expect(vt).toContain('chestPose > 0 && (sheet === 21 || sheet === 467)) ofy += chestPose * 38');
+    // ★IIIII252：门集合单源化到 chestPoseSheet（=21||467 逐字锁在定义处）——
+    //   位移消费点改谓词调用,门集合语义不变;并锁「非容器格姿态求值短路」
+    //   （chestLidPoseAt 是 O(chests) 全表查,急切求值=烘焙成本放大器）。
+    expect(vt).toContain('chestPose > 0 && chestPoseSheet(sheet)) ofy += chestPose * 38');
+    expect(vt).toContain('export function chestPoseSheet(sheet: number): boolean {\n  return sheet === 21 || sheet === 467;\n}');
     const cc = readFileSync(new URL('../src/render/ChunkCache.ts', import.meta.url), 'utf8');
     expect(cc.match(/chestLidPoseAt\(this\.world\.chests/g)?.length).toBe(2);  // 主遍+上溢补绘条带
+    expect(cc.match(/chestPoseSheet\((\w+\.)?vanilla\.sheet\)|chestPoseSheet\(sheet\)/g)?.length).toBe(2); // ★两路皆门控短路
     const g = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
     expect(g).toContain('this.updateChestFrames();   // ★SW-BJ17 2026-09-07');
   });
