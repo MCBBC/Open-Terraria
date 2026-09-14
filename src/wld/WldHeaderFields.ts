@@ -106,21 +106,28 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'dungeonY', type: 'i32', ver: 0, get: (s) => H(s).dungeonY ?? 0 },
   { name: 'crimson', type: 'bool', ver: 0, get: (s) => !!H(s).crimson },
   { name: 'downedBoss1', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_4') },
-  { name: 'downedBoss2', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_13') },
+  // ★downedBoss2 双键（2026-09-14 审计）：EoW 写 downed_13、BoC 写 downed_266（本仓
+  //  击败链 Game.ts `downed_${vanillaId}`；导入端 WldParser:373 双键）——曾单读
+  //  downed_13 = 只杀过克脑的自建国度导出 downedBoss2 恒 false
+  { name: 'downedBoss2', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_13') || B(F(s), 'downed_266') },
   { name: 'downedBoss3', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_35') },
   { name: 'downedQueenBee', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_222') },
   { name: 'downedMechBoss1', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_134') },
   { name: 'downedMechBoss2', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_125') },
   { name: 'downedMechBoss3', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_127') },
-  { name: 'downedMechBossAny', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedMechBossAny') },
+  // ★downedMechBossAny 并集（2026-09-14 审计）：运行时键+任一机械 vid 键皆可表真
+  //  （导入端 WldParser:379 只落命名键；自建国度由 Game.ts 击败链双写,旧档兼容并读）
+  { name: 'downedMechBossAny', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedMechBossAny') || B(F(s), 'downed_134') || B(F(s), 'downed_125') || B(F(s), 'downed_126') || B(F(s), 'downed_127') },
   { name: 'downedPlantBoss', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_262') },
   { name: 'downedGolemBoss', type: 'bool', ver: 0, get: (s) => B(F(s), 'downed_245') },
-  { name: 'downedSlimeKing', type: 'bool', ver: 118, get: (s) => B(F(s), 'downed_50') },
+  { name: 'downedSlimeKing', type: 'bool', ver: 118, get: (s) => B(F(s), 'downed_50') || B(F(s), 'downedSlimeKing') },
   { name: 'savedGoblin', type: 'bool', ver: 0, get: (s) => B(F(s), 'savedGoblin') },
   { name: 'savedWizard', type: 'bool', ver: 0, get: (s) => B(F(s), 'savedWizard') },
   { name: 'savedMech', type: 'bool', ver: 0, get: (s) => B(F(s), 'savedMech') },
   { name: 'downedGoblins', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedGoblins') },
-  { name: 'downedClown', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedClown') },
+  // ★downedClown 双键（2026-09-14 审计）：运行时键 downed_109（Game.ts 小丑击杀链）+
+  //  原版名（导入端 WldParser:388）并读——曾单读命名键=自建国度杀小丑导出恒 false
+  { name: 'downedClown', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedClown') || B(F(s), 'downed_109') },
   { name: 'downedFrost', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedFrost') },
   { name: 'downedPirates', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedPirates') },
   { name: 'shadowOrbSmashed', type: 'bool', ver: 0, get: (s) => B(F(s), 'shadowOrbSmashed') },
@@ -172,11 +179,15 @@ export const HEADER_FLAGS: WldField[] = [
   { name: 'downedMartians', type: 'bool', ver: 131, get: (s) => B(F(s), 'downedMartians') },
   { name: 'downedAncientCultist', type: 'bool', ver: 131, get: (s) => B(F(s), 'downed_439') },
   { name: 'downedMoonlord', type: 'bool', ver: 131, get: (s) => B(F(s), 'downed_398') },
-  { name: 'downedHalloweenKing', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedHalloweenKing') },
-  { name: 'downedHalloweenTree', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedHalloweenTree') },
-  { name: 'downedChristmasIceQueen', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedChristmasIceQueen') },
-  { name: 'downedChristmasSantank', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedChristmasSantank') },
-  { name: 'downedChristmasTree', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedChristmasTree') },
+  // ★五节日 Boss 双键并读（2026-09-14 审计）：运行时键 downed_325/327/344/345/346
+  //  （Game.ts 月事件击杀链）+ 原版名（导入端 WldParser:463-467）——曾单读命名键=
+  //  自建国度月事件 boss 首杀后导出五位恒 false（原版消费:Lang 替换 PumpkingDefeated
+  //  等/NPC.cs:80029-80053 首杀语义/向导 helpText 1155-1156）
+  { name: 'downedHalloweenKing', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedHalloweenKing') || B(F(s), 'downed_327') },
+  { name: 'downedHalloweenTree', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedHalloweenTree') || B(F(s), 'downed_325') },
+  { name: 'downedChristmasIceQueen', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedChristmasIceQueen') || B(F(s), 'downed_345') },
+  { name: 'downedChristmasSantank', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedChristmasSantank') || B(F(s), 'downed_346') },
+  { name: 'downedChristmasTree', type: 'bool', ver: 0, get: (s) => B(F(s), 'downedChristmasTree') || B(F(s), 'downed_344') },
   { name: 'downedTowerSolar', type: 'bool', ver: 140, get: (s) => B(F(s), 'downedTowerSolar') },
   { name: 'downedTowerVortex', type: 'bool', ver: 140, get: (s) => B(F(s), 'downedTowerVortex') },
   { name: 'downedTowerNebula', type: 'bool', ver: 140, get: (s) => B(F(s), 'downedTowerNebula') },
@@ -196,9 +207,13 @@ export const HEADER_FLAGS: WldField[] = [
   { name: '_tempSandstormIntendedSeverity', type: 'f32', ver: 174, get: (s) => (WT(s) as { sand?: { intendedSeverity?: number } }).sand?.intendedSeverity ?? 0 },
   { name: 'savedBartender', type: 'bool', ver: 0, get: (s) => B(F(s), 'savedBartender') },
   // DD2Event.Save:3 bool(T1/T2/T3)——**无第 4 个**(DD2Event.cs:151-157;曾误写 Any=多 1B)
-  { name: 'DD2_DownedInvasionT1', type: 'bool', ver: 178, get: (s) => B(F(s), 'dd2DownedT1') },
-  { name: 'DD2_DownedInvasionT2', type: 'bool', ver: 178, get: (s) => B(F(s), 'dd2DownedT2') },
-  { name: 'DD2_DownedInvasionT3', type: 'bool', ver: 178, get: (s) => B(F(s), 'dd2DownedT3') },
+  // ★DD2 三档双键并读（2026-09-14 审计）：DD2Event.DownedInvasionT1-3（DD2Event.cs:151-157
+  //  Save）。导入域 dd2DownedT1-3（WldParser:506-508）+ 旧运行时键 downedOldOnesArmyT1-3
+  //  （OldOnesArmy WinInvasionInternal,2026-09-14 起双写）——曾单读 dd2 键=自建国度
+  //  DD2 胜利导出三位恒 false
+  { name: 'DD2_DownedInvasionT1', type: 'bool', ver: 178, get: (s) => B(F(s), 'dd2DownedT1') || B(F(s), 'downedOldOnesArmyT1') },
+  { name: 'DD2_DownedInvasionT2', type: 'bool', ver: 178, get: (s) => B(F(s), 'dd2DownedT2') || B(F(s), 'downedOldOnesArmyT2') },
+  { name: 'DD2_DownedInvasionT3', type: 'bool', ver: 178, get: (s) => B(F(s), 'dd2DownedT3') || B(F(s), 'downedOldOnesArmyT3') },
   { name: 'mushroomBG', type: 'u8', ver: 195, get: (s) => BG(s).mushroom ?? 0 },
   { name: 'underworldBG', type: 'u8', ver: 215, get: (s) => BG(s).underworld ?? 0 },
   { name: 'treeBG2', type: 'u8', ver: 204, get: (s) => BG(s).forest?.[1] ?? 0 },

@@ -4,7 +4,16 @@
 //     (不回归);干燥陆地两臂均静(对照)。
 //   · 标记 JSON 坐标逐一核(store 真值 vs marks-*.json)。
 //   · 截图证据(off/on 各一张全帧)。
-// 用法(game/ 下):SW_ORIGIN=http://localhost:5301 node tools/run-diag.mjs \
+// ★IIIII255 映射 bug 定谳修复(2026-09-14):区域矩形必须用【渲染系】相机态
+//   renderer._waveCss(camL/camT/cssZoom·cssScale——updateWaterWaves 每帧缓存,与
+//   drawLiquids/waterWarp/GL 合成同源)。旧式在帧外读 g.camera.x/y(相机钉扎写入值,
+//   56272)与渲染实际消费值(玩家跟随缓动后的 56230.3,见 _waveCss.camL=55910.3)偏
+//   +41.7 世界 px = 83 设备 px → 五个区域全部测错格:mark1 矩形落在干石银行(恒静,
+//   假 fail "on mark1-waves: longMean=0.0000")、half 矩形落在池心动画水(假 fail
+//   "off half-static: longMean=0.4453")、mark2 矩形落在半砖足迹区(假 pass)。
+//   门控画布真值锚(2026-09-14 取证):tile3509 左缘=设备 x467、水行顶=设备 y406、
+//   32 设备 px/tile;足迹 α=5 三处齐备(mark1 三角/half 上半矩形/mark2 镜像三角)。
+// 用法(game/ 下):SW_ORIGIN=http://localhost:5304 node tools/run-diag.mjs \
 //   --timeout=600000 scripts/_iii251-verify.mjs
 import fs from 'node:fs';
 import { mkdirSync } from 'node:fs';
@@ -162,16 +171,23 @@ async function sampleArm(page, tag) {
   const result = await page.evaluate(() => {
     const g = window.__swGame;
     const cv = g.renderer.canvas;
+    // ★IIIII255：矩形映射改用渲染系帧态 _waveCss（帧外读 camera.x/y 偏 +41.7 世界
+    //   px=跟随缓动差,见文件头定谳）——cssZoom·cssScale = 设备px/世界px。
+    const wcss = g.renderer._waveCss ?? null;
     const dpr = cv.width / g.camera.viewW;
-    const zoom = g.camera.zoom;
-    const camL = g.camera.x - g.camera.viewW / 2 / zoom;
-    const camT = g.camera.y - g.camera.viewH / 2 / zoom;
+    const zoom = wcss ? wcss.cssZoom * wcss.cssScale : g.camera.zoom;
+    const camL = wcss ? wcss.camL : g.camera.x - g.camera.viewW / 2 / zoom;
+    const camT = wcss ? wcss.camT : g.camera.y - g.camera.viewH / 2 / zoom;
+    // ★IIIII255：坡面区域水平内缩 1 世界 px——坡面格与邻格水体的共享边界列上,
+    // 原版水线果冻经 uWater 线性采样溢入门控(vanilla 行为,与本特性无关;实测定谳
+    // mark2 整格矩形 OFF longMean=0.0152>0.004 假 fail,溢出恰在左缘 1 设备 px 列)。
+    // 内缩后测的是坡面格自身水缘覆盖域;flat/land 同步内缩保持口径一致。
     const regions = {
-      mark1: [3508 * 16, 394 * 16, 16, 16],
-      mark2: [3521 * 16, 394 * 16, 16, 16],
-      half: [3518 * 16, 394 * 16, 16, 8],
-      flat: [3513 * 16, 394 * 16, 16, 16],
-      land: [3504 * 16, 396 * 16, 16, 16],
+      mark1: [3508 * 16 + 1, 394 * 16, 14, 16],
+      mark2: [3521 * 16 + 1, 394 * 16, 14, 16],
+      half: [3518 * 16 + 1, 394 * 16, 14, 8],
+      flat: [3513 * 16 + 1, 394 * 16, 14, 16],
+      land: [3504 * 16 + 1, 396 * 16, 14, 16],
     };
     const rects = {};
     for (const [k, [wx, wy, ww, wh]] of Object.entries(regions)) {
@@ -247,8 +263,9 @@ async function sampleArm(page, tag) {
       Buffer.from(result.shot.split(',')[1], 'base64')));
   }
   delete result.shot;
-  // 门控足迹取证:钩 endFgPass(合成后清屏前)抓门控画布快照,读 mark1 像素 alpha
-  // (≈5=足迹已画 0.02;0=足迹未达门控)
+  // 门控足迹取证:钩 endFgPass(合成后清屏前)抓门控画布快照,扫 mark1 矩形 alpha
+  // (≈5=足迹已画 0.02;0=足迹未达门控)。★IIIII255:单点(12,12)恰在 slope1 对角线上
+  // (液形三角之外)恒 0——改为整矩形扫描取 max/mean;映射同改渲染系 _waveCss。
   const gateProbe = await page.evaluate(async () => {
     const g = window.__swGame;
     const wwc = g.renderer.waterWarp;
@@ -272,14 +289,23 @@ async function sampleArm(page, tag) {
     }
     await new Promise((r) => setTimeout(r, 600));   // 等几帧走钩
     if (!snap) return { why: 'no-snapshot', mode: wwc.mode };
+    const wcss = g.renderer._waveCss ?? null;
     const dpr = snap.width / g.camera.viewW;
-    const zoom = g.camera.zoom;
-    const px = Math.round((3508 * 16 + 12 - (g.camera.x - g.camera.viewW / 2 / zoom)) * zoom * dpr);
-    const py = Math.round((394 * 16 + 12 - (g.camera.y - g.camera.viewH / 2 / zoom)) * zoom * dpr);
+    const zoom = wcss ? wcss.cssZoom * wcss.cssScale : g.camera.zoom;
+    const camL = wcss ? wcss.camL : g.camera.x - g.camera.viewW / 2 / zoom;
+    const camT = wcss ? wcss.camT : g.camera.y - g.camera.viewH / 2 / zoom;
+    const x0 = Math.round((3508 * 16 - camL) * zoom);
+    const y0 = Math.round((394 * 16 - camT) * zoom);
     const x2 = snap.getContext('2d', { willReadFrequently: true });
-    const a1 = x2.getImageData(px, py, 1, 1).data[3];
-    const a2 = x2.getImageData(px + 4, py + 4, 1, 1).data[3];
-    return { mode: wwc.mode, gateW: snap.width, alphaMark1: [a1, a2] };
+    let sum = 0, n = 0, mx = 0;
+    for (let yy = y0; yy < y0 + 16 * zoom; yy += 2) {
+      for (let xx = x0; xx < x0 + 16 * zoom; xx += 2) {
+        if (xx < 0 || yy < 0 || xx >= snap.width || yy >= snap.height) continue;
+        const a = x2.getImageData(xx, yy, 1, 1).data[3];
+        sum += a; n++; if (a > mx) mx = a;
+      }
+    }
+    return { mode: wwc.mode, gateW: snap.width, alphaMark1Max: mx, alphaMark1Mean: +(sum / Math.max(1, n)).toFixed(2) };
   }).catch((e) => ({ why: String(e).slice(0, 120) }));
   log(tag, 'gateProbe', JSON.stringify(gateProbe));
   log(tag, JSON.stringify(result.stats));

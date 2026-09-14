@@ -1,8 +1,18 @@
 // SW-BJ25 2026-09-07 NPC 交互范围覆盖可交互格——格交互优先级（用户实报附截图：
 // 向导旁猪猪存钱罐右键弹出向导对话框而非存钱罐界面）
+// ★FX23 2026-09-14 翻案终审：本文件原判「格交互恒赢」（任务书诚实偏离）被用户
+//   复测推翻——右键向导（帧盒罩住其脚下格=工作台/箱）→ 物品栏直开、对话不开
+//   （FX23 探针 R2 栈实锤：interactAt 合成站臂 ← rightClickTileNpcDispatch）。终审
+//   回归原版 Player.cs:32188-32197 交谈闩全臂化：光标悬停城镇 NPC 帧盒
+//   （currentNPCShowingChatBubble>-1 ∧ (talkNPC==-1 ∨ !npcChatRelease)）⇒
+//   releaseUseTile=false ⇒ :32414 if(flag) 包住的全部标准格交互支让位 ⇒ 交谈臂
+//   （Main.cs:43807）开对话。仓内实现 = rightClickTileNpcDispatch 头 bubbleLatch
+//   （BJ66 坐椅支同式谓词；物品层右键臂——矿车套件/可疑之眼/altUse 放置族——
+//   原版属 ItemCheck 域不受闩辖）。BJ25 猪罐主诉存活面 = 光标落在罐格且在帧盒
+//   【外】→ 格臂照常（原版两案自洽,见 ①(b)/③/④ 改测）。
 //
 // 原版仲裁链（1457 反编译；1458 SetDefaults 零变更不改交互面）：
-//   ①格交互先行 = LookForTileInteractions（Player.cs:32159）→ TileInteractionsCheck
+//   ①格交互 = LookForTileInteractions（Player.cs:32159）→ TileInteractionsCheck
 //     （:32273 active() 门）→ TileInteractionsUse（:32358）——容器族
 //     `TileID.Sets.BasicChest[21,467] ∪ 29 猪罐 ∪ 97 保险箱 ∪ 463 ∪ 491`（:33314）
 //     分支命中即置 flag2 → tileInteractionHappened = true（:33551）——锁箱失败支
@@ -13,16 +23,14 @@
 //     tileInteractionHappened = false`（Player.cs:32183-32186，右键闩释放态每帧清）。
 //   ④智能支 = flag2 智能臂（Main.cs:43743 SmartInteractShowingGenuine）同样被
 //     ②压制；城镇 NPC 射程门 = worldRegion ∩ 命中盒（:43778，BH1 已移植）。
-//   ★诚实偏离声明（任务书裁决）：原版光标同时命中 NPC 绘制帧盒与可交互格时，
-//   Player.cs:32190 消费闩（currentNPCShowingChatBubble 悬停帧盒 ⇒ 消费
-//   releaseUseTile ⇒ 格臂被跳）使 NPC 赢——本仓按任务书判「格交互先行」：
-//   可交互格（容器/牌/床/致动）恒赢过帧盒悬停。其余旗/边沿语义 1:1。
+//   ⑤交谈闩 = LookForTileInteractions :32188-32197（FX23 回归 1:1,见上翻案注）。
 //
 // 仓库修复（Game.ts rightClickTileNpcDispatch，本批从 updateUse 右键块抽出）：
-//   序 = 宝箱 ±1 → 矿车套件 → 可疑之眼 → altUse 放置族 → interactAt 全格交互
-//   → NPC 交谈（旗代理 = rightDown 未被格臂消费；边沿 = npcChatRelease
-//   Main.cs:45755-45763 ≡ !prevRightDown）。旧序（宝箱→交谈→其余格交互）使
-//   非箱容器/牌/床被交谈抢先 = 实报病根。
+//   序 = 交谈闩（FX23）→ 宝箱 ±1 → 矿车套件 → 可疑之眼 → altUse 放置族 →
+//   interactAt 全格交互 → NPC 交谈（旗代理 = rightDown 未被格臂消费；边沿 =
+//   npcChatRelease Main.cs:45755-45763 ≡ !prevRightDown）。旧序（宝箱→交谈→
+//   其余格交互）使非箱容器/牌/床被交谈抢先 = BJ25 实报病根（其光标在帧盒外的
+//   部分由闩外路径继续覆盖）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -122,18 +130,30 @@ function makeRig(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// ① 猪罐在 NPC 旁 → 右键猪罐 = 开罐界面，不弹对话（实报主诉）
+// ① 交谈闩（FX23 翻案终审）：光标在向导帧盒内 = 对话赢（原版 :32188 闩全臂化）；
+//    光标在帧盒外落在猪罐格 = 开罐（BJ25 主诉存活面）
 // ---------------------------------------------------------------------------
-describe('SW-BJ25 ① 格交互先行：向导旁猪罐右键=开罐不弹对话', () => {
-  it('光标在猪罐 tile（同时落在向导帧盒内）→ 开 bank 面板（chest=-2）、交谈零调用、rightDown 消费', () => {
+describe('SW-BJ25 ① 交谈闩终审：帧盒内=对话赢；帧盒外猪罐=开罐', () => {
+  it('(a) 光标在猪罐 tile 且同时落在向导帧盒内 → 闩施放 = 开对话、罐不开（原版 :32188）', () => {
     const rig = makeRig({ tileAt: { [`${PIGGY_TILE[0]},${PIGGY_TILE[1]}`]: piggyType } });
     const [mx, my] = CURSOR_ON_PIGGY;
-    // 前置自证：该光标确实同时命中向导绘制帧盒（旧序 talkToNearbyNpc 会抢先开对话）
+    // 前置自证：该光标确实同时命中向导绘制帧盒（闩的施放面）
     expect((rig.g as AnyGame).npcHoverHit(22, mx, my, GUIDE.x, GUIDE.y, GUIDE.w, GUIDE.h)).toBe(true);
     expect((rig.g as AnyGame).worldRegionIntersects(GUIDE.x, GUIDE.y, GUIDE.w, GUIDE.h)).toBe(true);
 
     const early = (rig.g as AnyGame).rightClickTileNpcDispatch(PIGGY_TILE[0], PIGGY_TILE[1], null);
     expect(early).toBe(false);
+    expect(rig.dialogOpened).toEqual([GUIDE]);           // ★FX23：闩让格臂全让位 → 交谈臂开对话
+    expect(rig.chestsOpened).toEqual([]);                // 储物臂被闩压制（releaseUseTile=false 面）
+    expect(rig.g.input.rightDown).toBe(false);           // 交谈臂自消（:43800 消费面）
+  });
+
+  it("(b) 光标落在猪罐格但在向导帧盒外（BJ25 主诉存活面）→ 开 bank 面板、交谈零调用", () => {
+    // 罐移到 tile (10,11)（中心 168,184）——x<180 在帧盒 [180,220) 外
+    const rig = makeRig({ tileAt: { '10,11': piggyType } });
+    rig.g.input.mouseX = 168; rig.g.input.mouseY = 184;
+    expect((rig.g as AnyGame).npcHoverHit(22, 168, 184, GUIDE.x, GUIDE.y, GUIDE.w, GUIDE.h)).toBe(false);
+    (rig.g as AnyGame).rightClickTileNpcDispatch(10, 11, null);
     expect(rig.chestsOpened).toEqual([{ x: -2, y: 0, items: [] }]);  // bank0 = chest -2（原版 :33352 num77=-2）
     expect(rig.dialogOpened).toEqual([]);                // 交谈被旗代理压制（:43807 !tileInteractionHappened）
     expect(rig.g.input.rightDown).toBe(false);           // 罐臂自消 rightDown（=原版置旗面）
@@ -165,11 +185,12 @@ describe('SW-BJ25 ② 交谈边沿门：按住右键滑到 NPC 上不交谈', ()
 
 // ---------------------------------------------------------------------------
 // ③ 锁箱失败支：格臂命中即置旗（Player.cs :33314 分支入口 flag2 → :33551）→ 不交谈
+//    （★FX23：光标在帧盒外时箱臂照常——帧盒内则闩让对话赢,见 ①(a)）
 // ---------------------------------------------------------------------------
 describe('SW-BJ25 ③ 锁箱失败支置旗压制交谈（原版 flag2 分支入口语义）', () => {
-  it('宝箱臂命中（即便锁箱不开）→ rightDown 消费 → 交谈零调用', () => {
+  it('宝箱臂命中（光标帧盒外,即便锁箱不开）→ rightDown 消费 → 交谈零调用', () => {
     const rig = makeRig({ tileAt: {} });
-    rig.g.input.mouseX = 200; rig.g.input.mouseY = 180;  // 光标同时在向导帧盒上
+    rig.g.input.mouseX = 170; rig.g.input.mouseY = 180;  // 帧盒 [180,220) 外 → 闩不施放
     const locked = { locked: true, x: 100, y: 100, items: [] };
     // ★SW-BJ52 2026-09-10：箱命中域收原版精确域（findChestNear 3×3 容差根除，
     // Player.cs:33314 本体门+:33317 帧回溯+:33497 FindChest 精确查）→ 箱臂桩换
@@ -187,32 +208,47 @@ describe('SW-BJ25 ③ 锁箱失败支置旗压制交谈（原版 flag2 分支入
     expect(rig.dialogOpened).toEqual([]);                // :33551 置旗 → :43807 压制
     expect(rig.g.input.rightDown).toBe(false);
   });
+
+  it('★FX23 翻案面：同箱几何、光标在向导帧盒内 → 闩施放 = 开对话、箱不开', () => {
+    const rig = makeRig({ tileAt: {} });
+    rig.g.input.mouseX = 200; rig.g.input.mouseY = 180;  // 帧盒内 → bubbleLatch 施放
+    rig.g.wiring = { sheetOf: () => 21 };
+    rig.g.world.store = {
+      ...rig.g.world.store,
+      get: (x: number, y: number) => (x === 12 && y === 11 ? T.CHEST : 0),
+      hasTile: (x: number, y: number) => x === 12 && y === 11,
+    };
+    rig.g.findChest = () => ({ locked: true, x: 100, y: 100, items: [] });
+    (rig.g as AnyGame).rightClickTileNpcDispatch(12, 11, null);
+    expect(rig.tryOpenCalls).toEqual([]);                // 箱臂被闩压制（releaseUseTile=false 面）
+    expect(rig.dialogOpened).toEqual([GUIDE]);           // 交谈臂放行（:43807）
+    expect(rig.g.input.rightDown).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// ④ 牌/床同类采样：非箱可交互格同样赢过帧盒悬停交谈
+// ④ 牌/床同类采样：非箱可交互格在【帧盒外】照常工作（帧盒内=闩让对话赢,①(a)）
 // ---------------------------------------------------------------------------
-describe('SW-BJ25 ④ 牌/床同类优先级采样', () => {
-  it('告示牌（sh=55）在向导帧盒下 → 开牌编辑器不弹对话', () => {
-    const rig = makeRig({ tileAt: { '12,11': 999999 }, wiringSheet: 55 });
-    rig.g.input.mouseX = 200; rig.g.input.mouseY = 180;
-    expect((rig.g as AnyGame).npcHoverHit(22, 200, 180, GUIDE.x, GUIDE.y, GUIDE.w, GUIDE.h)).toBe(true);
-    (rig.g as AnyGame).rightClickTileNpcDispatch(12, 11, null);
-    expect(rig.signEdits).toEqual([[12, 11]]);
+describe('SW-BJ25 ④ 牌/床同类采样（帧盒外格臂照常,FX23 终审面）', () => {
+  it('告示牌（sh=55）光标落在牌格且在向导帧盒外 → 开牌编辑器不弹对话', () => {
+    const rig = makeRig({ tileAt: { '10,11': 999999 }, wiringSheet: 55 });
+    rig.g.input.mouseX = 168; rig.g.input.mouseY = 180;  // x<180 帧盒外 → 闩不施放
+    expect((rig.g as AnyGame).npcHoverHit(22, 168, 180, GUIDE.x, GUIDE.y, GUIDE.w, GUIDE.h)).toBe(false);
+    (rig.g as AnyGame).rightClickTileNpcDispatch(10, 11, null);
+    expect(rig.signEdits).toEqual([[10, 11]]);
     expect(rig.dialogOpened).toEqual([]);
     expect(rig.g.input.rightDown).toBe(false);
   });
 
-  it('床（脚端 frameX=72 档）在向导帧盒下 → 入睡支静默终止仍消费右键，不弹对话', () => {
-    const idx = 11 * 400 + 11;
+  it('床（脚端 frameX=72 档）光标落在床格且在向导帧盒外 → 入睡支静默终止仍消费右键', () => {
+    const idx = 11 * 400 + 10;
     const rig = makeRig(
-      { tileAt: { '11,11': bedType }, frames: { [idx]: [72, 0] } },
+      { tileAt: { '10,11': bedType }, frames: { [idx]: [72, 0] } },
     );
-    const [mx, my] = CURSOR_ON_PIGGY;                    // (184,184) 在向导帧盒内
-    (rig.g as AnyGame).rightClickTileNpcDispatch(11, 11, null);
+    rig.g.input.mouseX = 168; rig.g.input.mouseY = 184;  // (168,184) 在向导帧盒 [180,220) 外
+    (rig.g as AnyGame).rightClickTileNpcDispatch(10, 11, null);
     expect(rig.dialogOpened).toEqual([]);
     expect(rig.g.input.rightDown).toBe(false);           // 床支尾部自消（分支命中=置旗面）
-    expect(mx).toBe(184); expect(my).toBe(184);          // 几何自证（防夹具漂移空转）
   });
 });
 

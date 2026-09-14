@@ -93,14 +93,17 @@ export function emotesBosses(f: EmoteGateFlags): number[] {
   if (f['downed_636']) list.push(143);                            // downedEmpressOfLight
   if (f['downed_439']) list.push(52);                             // downedAncientCultist
   if (f['downed_398']) list.push(53);                             // downedMoonlord
-  if (f['downed_325']) list.push(54);                             // downedHalloweenTree（哀木）
-  if (f['downed_327']) list.push(55);                             // downedHalloweenKing（南瓜王）
-  if (f['downed_344']) list.push(56);                             // downedChristmasTree（常绿尖叫树）
-  if (f['downed_345']) list.push(57);                             // downedChristmasIceQueen（冰雪女王）
-  if (f['downed_346']) list.push(58);                             // downedChristmasSantank（圣诞坦克）
+  if (f['downed_325'] || f['downedHalloweenTree']) list.push(54);           // downedHalloweenTree（哀木）
+  if (f['downed_327'] || f['downedHalloweenKing']) list.push(55);           // downedHalloweenKing（南瓜王）
+  if (f['downed_344'] || f['downedChristmasTree']) list.push(56);           // downedChristmasTree（常绿尖叫树）
+  if (f['downed_345'] || f['downedChristmasIceQueen']) list.push(57);       // downedChristmasIceQueen（冰雪女王）
+  if (f['downed_346'] || f['downedChristmasSantank']) list.push(58);        // downedChristmasSantank（圣诞坦克）
   if (f['downedPirates']) list.push(59);                          // downedPirates（荷兰飞船）
   if (f['downedMartians']) list.push(60);                         // downedMartians（火星飞碟）
-  if (f['downedOldOnesArmyT1'] || f['downedOldOnesArmyT2'] || f['downedOldOnesArmyT3']) {
+  // DD2Event.DownedInvasionAnyDifficulty（:93-100）：旧运行时键 downedOldOnesArmyT1-3
+  // + 导入域 dd2DownedT1-3 双读（2026-09-14 审计——旧导入档只有 dd2 键,曾漏读=表情 133 不解锁）
+  if (f['downedOldOnesArmyT1'] || f['downedOldOnesArmyT2'] || f['downedOldOnesArmyT3']
+    || f['dd2DownedT1'] || f['dd2DownedT2'] || f['dd2DownedT3']) {
     list.push(133);                                               // DD2Event.DownedInvasionAnyDifficulty
   }
   return list;

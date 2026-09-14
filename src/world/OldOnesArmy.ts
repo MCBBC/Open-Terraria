@@ -294,10 +294,15 @@ export function stopInvasion(
   if (!st.ongoing) return null;
   let result: 'win' | 'lose' | null = null;
   if (win) {
-    // WinInvasionInternal（:322-343）：downed 旗标逐档累积 + 奖牌（T1 3/T2 15/T3 60）
-    if (st.ongoingDifficulty >= 1) w.flags['downedOldOnesArmyT1'] = true;
-    if (st.ongoingDifficulty >= 2) w.flags['downedOldOnesArmyT2'] = true;
-    if (st.ongoingDifficulty >= 3) w.flags['downedOldOnesArmyT3'] = true;
+    // WinInvasionInternal（:322-343）：downed 旗标逐档累积 + 奖牌（T1 3/T2 15/T3 60）。
+    // ★双键（2026-09-14 审计）：DD2Event.DownedInvasionT1-3 是原版 DD2Event.Save
+    // （DD2Event.cs:151-157,随世界存 WF:1369 段）持久键——本仓 wld 导入/导出域用
+    // dd2DownedT1-T3（WldParser:506-508/WldHeaderFields:199-201），旧运行时键
+    // downedOldOnesArmyT1-T3 仅存档 JSON 域消费（Game.ts:5481/EmoteMenu:103）。
+    // 曾只写旧键 → 自建国度 DD2 胜利导出 .wld 三位恒 false；旧档双读兼容
+    if (st.ongoingDifficulty >= 1) { w.flags['downedOldOnesArmyT1'] = true; w.flags.dd2DownedT1 = true; }
+    if (st.ongoingDifficulty >= 2) { w.flags['downedOldOnesArmyT2'] = true; w.flags.dd2DownedT2 = true; }
+    if (st.ongoingDifficulty >= 3) { w.flags['downedOldOnesArmyT3'] = true; w.flags.dd2DownedT3 = true; }
     host.dropAtCrystal(3817, st.ongoingDifficulty === 3 ? 60 : st.ongoingDifficulty === 2 ? 15 : 3);
     host.broadcast('DungeonDefenders2.InvasionWin', 50, 255, 130);
     result = 'win';

@@ -5479,7 +5479,8 @@ export class Game implements GameHooks {
         partyIsUp: partyIsUp(this.partyState),
         dd2Active: w.oldOnesArmy.ongoing
           || !!w.flags['downedOldOnesArmyT1'] || !!w.flags['downedOldOnesArmyT2']
-          || !!w.flags['downedOldOnesArmyT3'],
+          || !!w.flags['downedOldOnesArmyT3']
+          || !!w.flags['dd2DownedT1'] || !!w.flags['dd2DownedT2'] || !!w.flags['dd2DownedT3'],
         census: newCensusCounter(ids),
         anyBossActive: anyBoss,
         plr: {
@@ -9568,6 +9569,15 @@ export class Game implements GameHooks {
           boss2Already = wasDowned
             || !!(this.boss.vanillaId === 266 ? w.flags['downed_13'] : w.flags['downed_266']);
           w.flags[downedKey] = true;
+          // 机械任一击败 → downedMechBossAny（NPC.cs:80243 case 125/126 / :80286 case 127
+          // / :80293 case 134 三处同置,随各 case boss 门）。本仓消费面全以 downed_134/125/
+          // 127 派生（Eclipse/OldOnesArmy/VanillaSpawner 等）,本键为 .wld 导出面真值
+          // （WldHeaderFields 导出 getter 读此键,曾漏写=自建国度击败任一机械后导出
+          // .wld 该位恒 false）+ DD2 ReadyForTier2 原版口径同源键
+          if (this.boss.vanillaId === 125 || this.boss.vanillaId === 126
+            || this.boss.vanillaId === 127 || this.boss.vanillaId === 134) {
+            w.flags.downedMechBossAny = true;
+          }
           // 世花首杀公告（NPC.cs:80229-80237 case 262：置旗前捕获旧
           // downedPlantBoss，首杀翻转 → BroadcastChatMessage(Lang.misc[33],
           // ChatColors.World)"地牢中回荡着尖叫声……"——此前缺）
@@ -25065,15 +25075,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  DrawInterface_41 Main.cs:45755-45763；交谈消费 :43800 `mouseRight &&
    *  npcChatRelease` ≡ 按住右键滑到 NPC 不交谈）。悬停门 npcHoverHit 帧盒 +
    *  射程门 worldRegionIntersects 保持（SW-BH1/SW-BJ1）。
-   *  ★与原版显式偏离（任务书裁决 2026-09-07）：原版光标同时命中 NPC 帧盒与
-   *  可交互格时 Player.cs:32190 消费闩（currentNPCShowingChatBubble 悬停帧盒
-   *  ⇒ 消费 releaseUseTile）使 NPC 赢；本仓按任务书判「格交互先行」——可交互
-   *  格（容器/牌/床/致动）恒赢过帧盒悬停（向导旁猪罐右键=开罐，用户实报）。
+   *  ★偏离史（两代用户实报拉锯,终审=原版闩,2026-09-14）：2026-09-07 任务书曾判
+   *  「格交互先行」（可交互格恒赢帧盒悬停,依据=向导旁猪罐右键=开罐）；2026-09-14
+   *  用户复测翻案（右键向导=物品栏直开、对话不开,FX23 探针 R2 栈实锤）→ 回归
+   *  原版 Player.cs:32188-32197 交谈闩全臂化（帧盒悬停=格臂让位,见方法体内
+   *  bubbleLatch）。猪罐案在原版语义下自洽：光标落罐格且在向导帧盒【外】=开罐；
+   *  光标在帧盒【内】（BJ25 ①几何）=原版本就开对话。
    *  返回 true = updateUse 应早退（altUse 放置臂原 return 语义透传）。
    *  抽方法目的 = 分派序可被 tests/sw-bj25-interact-priority.test.ts 直驱。 */
   private rightClickTileNpcDispatch(tx: number, ty: number, heldDef: ItemDef | null): boolean {
     const inp = this.input;
     const type = this.world.store.get(tx, ty);
+    // ★FX23 原版交谈闩全臂化（Player.cs:32188-32197：光标悬停城镇 NPC 交谈气泡
+    //  currentNPCShowingChatBubble>-1 ∧（talkNPC==-1 ∨ !npcChatRelease）→
+    //  releaseUseTile=false ⇒ :32414 `if (flag)` 包住的【全部】标准格交互支
+    //  （箱/储物/门/床/牌/家具/合成站尾臂）整块让位 ⇒ 交谈臂（Main.cs:43807
+    //  !tileInteractionHappened）开对话。仓内翻译 = SW-BJ66 坐椅支同式谓词
+    //  （npcChatBubbleHovered 单源 ∧ (未对话 ∨ 按住中≡_prevRightDown)）。
+    //  ★翻案记录：本方法 2026-09-07 任务书判「格交互恒赢」（BJ25 诚实偏离）被
+    //  2026-09-14 用户复测推翻——右键向导（帧盒罩住其脚下格=工作台/箱）→ 合成
+    //  站臂/箱臂吞右键 → onCraftingStationOpen→openInventory(true)，物品栏直开、
+    //  对话不开（FX23 探针 R2 栈实锤：interactAt:合成站臂 ← rightClickTileNpcDispatch
+    //  ← updateUse）。原版帧盒悬停闩天然仲裁双向：光标在帧盒内=NPC 赢；帧盒外
+    //  （BJ25 猪罐主诉的光标落在罐格、向导只是邻位）=格臂照常，两用户案并存。
+    //  物品层右键臂（矿车套件/可疑之眼/altUse 放置族）在原版属 ItemCheck 域、
+    //  先于 LookForTileInteractions，不受闩辖——本仓分派序维持原位不闩。
+    //  闩施放时不消费 rightDown（=原版闩只消 releaseUseTile，交谈消费仍在尾臂）。
+    const bubbleLatch = (() => {
+      const [mxS, myS] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+      return this.npcChatBubbleHovered(mxS, myS) && (!this.dialogNpc || this._prevRightDown);
+    })();
     // ★SW-BJ52 2026-09-10 箱命中域收原版精确域（用户实报：并排多箱点 B 正中开左邻
     //  A，右移一点才开 B）：旧 3×3 邻域找箱容差（dy=-1 行先行、dx=-1 列
     //  先行=左上偏平局裁决）整撤——原版右键开箱链无任何邻域回退：
@@ -25092,7 +25123,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const shC = this.wiring?.sheetOf(tx, ty) ?? -1;
     const chestTile = (type === T.CHEST || shC === 21 || shC === 467) && this.inTileRange(tx, ty);
     const nearChest = chestTile ? this.findChest(tx, ty) : null;
-    if (nearChest) {
+    if (nearChest && !bubbleLatch) {
       // ★SW-RB10d（F-BJ52-A,2026-09-10）：原版箱分支入口序 = CloseSign()+SetTalkNPC(-1)
       //  （Player.cs:33344-33345）→ 再走开/关箱尾段——右键开箱时对话/告示牌面板关闭。
       //  本仓此前漏序=交谈中右键箱,箱面板与对话同开（原版互斥）。silent=true：
@@ -25100,7 +25131,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.dialogNpc) this.closeNpcDialog(true);
       this.tryOpenChest(nearChest);
       this.input.rightDown = false;
-    } else if (chestTile) {
+    } else if (chestTile && !bubbleLatch) {
       // ★SW-RB10d（F-BJ52-B）：箱 tile 本体命中但注册表落空（findChest=null）——
       //  原版此态箱分支已进入：flag2=true（:33316→:33552 tileInteractionHappened）+
       //  Main.mouseRightRelease=false=点击被消费,num77=-1 无操作（:33497 不达）,
@@ -25142,7 +25173,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
       this.tryPlace(tx, ty, heldDef);
       return true;
-    } else {
+    } else if (!bubbleLatch) {
+      // ★FX23:闩施放时格交互整块让位（箱/储物/门/床/牌/家具/合成站尾臂全在内
+      //  ——原版 :32414 if(flag) 面）；rightDown 不消费=交谈臂尾随放行
       this.interactAt(tx, ty);
     }
     // ---- NPC 交谈（★SW-BJ25 2026-09-07 移位：格交互先行，旗/边沿门见方法头注）----
@@ -33520,9 +33553,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const deerclopsDown = !!f['downed_668'];
     const hallTree = !!(f.downedHalloweenTree || f['downed_325']);
     const hallKing = !!(f.downedHalloweenKing || f['downed_327']);
-    const iceQueen = !!(f.downedChristmasIceQueen || f['downed_344']);
-    const xmasTree = !!(f.downedChristmasTree || f['downed_346']);
-    const santank = !!(f.downedChristmasSantank || f['downed_345']);
+    // ★vid 键勘误（2026-09-14 审计）：344=Everscream(常绿尖叫树=downedChristmasTree)、
+    // 345=IceQueen、346=SantaNK1（NPCID.cs:11759-11763；NPC.cs:80041-80053 case 344→
+    // downedChristmasTree/345→IceQueen/346→Santank）——旧码 344↔345↔346 三键错位
+    //（iceQueen 读 344、xmasTree 读 346、santank 读 345）；三者唯一消费点 = 下文
+    // helpText 1156 「!iceQueen && !xmasTree && !santank」任一被杀即同隐,行为等价,
+    // 但键语义已归正（防未来新消费点踩坑）
+    const iceQueen = !!(f.downedChristmasIceQueen || f['downed_345']);
+    const xmasTree = !!(f.downedChristmasTree || f['downed_344']);
+    const santank = !!(f.downedChristmasSantank || f['downed_346']);
     const moonlordDown = !!f['downed_398'];
     const lunarUp = !!f.lunarApocalypseUp;
     // ---- 城镇 NPC 在场检测（Main.cs:39806-39941：15-39 号 flag 表）----
@@ -39271,9 +39310,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // NPCDamageTracker.BossKilled :79821——报告文案"被击杀"而非"逃脱"）
     if (enemy?.def?.boss) bossDamageKilled(enemy);
     // 小丑(109)击杀记账（checkDead case 109 :80194-80195 downedClown=true）——
-    // 裁缝小丑套装 503-505 上架门（R14-C10；此前旗仅存档解析,击杀不置位）
+    // 裁缝小丑套装 503-505 上架门（R14-C10；此前旗仅存档解析,击杀不置位）。
+    // ★双键：downedClown=原版名（.wld 导出 getter WldHeaderFields:123 直读此键,
+    // 曾漏写=自建国度杀小丑导出恒 false）；downed_109=本仓 vid 键（Game.ts:35766
+    // 命名解析器消费）
     if (enemy?.vanillaId === 109 && !this.world.flags['downed_109']) {
       this.world.flags['downed_109'] = true;
+      this.world.flags.downedClown = true;
     }
     // 骷髅王红帽变体死亡调侃（NPC.checkDead :78835-78837：type 35 且 ai[3]==1 →
     // SkeletronText.Taunt1 红字广播，Chippy 彩蛋"<骷髅王>今天就到此为止…"）
@@ -39538,10 +39581,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 327→event 5 / 325→4；霜月 344→21 / 345→20 / 346→22——首杀置 downed_* 旗
       // 并投递灯笼夜预约（4/21/22 在排除集不预约，仅置旗；此前缺本段 = 南瓜王/
       // 冰女王首杀后次夜灯笼夜不触发，2026-08-13 review 补）
-      const meFlag: Record<number, { ev: number; pumpkin: boolean }> = {
-        327: { ev: 5, pumpkin: true }, 325: { ev: 4, pumpkin: true },
-        344: { ev: 21, pumpkin: false }, 345: { ev: 20, pumpkin: false },
-        346: { ev: 22, pumpkin: false },
+      const meFlag: Record<number, { ev: number; pumpkin: boolean; named: string }> = {
+        327: { ev: 5, pumpkin: true, named: 'downedHalloweenKing' },
+        325: { ev: 4, pumpkin: true, named: 'downedHalloweenTree' },
+        344: { ev: 21, pumpkin: false, named: 'downedChristmasTree' },
+        345: { ev: 20, pumpkin: false, named: 'downedChristmasIceQueen' },
+        346: { ev: 22, pumpkin: false, named: 'downedChristmasSantank' },
       };
       const mf = meFlag[enemy.vanillaId];
       const meKind = this.world.moonEvent.kind;
@@ -39549,6 +39594,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const key = `downed_${enemy.vanillaId}`;
         if (!this.world.flags[key]) {
           this.world.flags[key] = true;
+          this.world.flags[mf.named] = true;   // 原版名双键（.wld 导出 getter 读此键,曾漏写=月事件 boss 首杀导出恒 false）
           LanternNight.onGameEventCleared(mf.ev);
         }
       }

@@ -6720,6 +6720,12 @@ export class UI {
    买不起调暗=经典面同款呈现(原版无调暗,呈现偏差备案) */
 .sw-vinv .sw-vshop-cell { transform:scale(0.755); }
 .sw-vinv .sw-vshop-cell.is-poor { opacity:0.45; }
+/* ★2026-09-14 用户实报:vinv 垃圾桶图标不居中——52px 盒吃 classic 44px 盒的
+   图标几何(left/top 8.5/27px=已烘 0.85 的经典盒)→ 盒心偏 4px 偏左上+图标小 15%。
+   原版盒坐标恒定(ItemSlot.cs:2747-2751 position6 = position + 52s/2 − 32s/2
+   = 盒内 (10,10) 32px;s=0.85/0.755 经盒 transform 缩放,盒坐标不变):
+   开箱/商店 0.755 变体同一规则自动覆盖 */
+.sw-vinv .sw-trash .sw-trash-icon { left:10px; top:10px; width:32px; height:32px; }
 `;
     document.head.appendChild(st);
   }

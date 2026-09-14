@@ -15,7 +15,7 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { Arrow, projSprite } from './Arrow';
+import { Arrow, projFrameCount, projSprite } from './Arrow';
 import { projectileWetSection, projWaterDragFactor, projShimmerStep,
   type ProjShimmerFace } from './projWetSection';
 import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectProjectile,
@@ -7835,7 +7835,15 @@ export class RainCloudProj extends Entity {
   draw(r: Renderer, cam: Camera): void {
     const a = this.fade > 0 ? Math.max(0, 1 - this.fade / 255)
       : this.projId === 239 ? 50 / 255 : this.projId === 245 ? 100 / 255 : 1;
-    drawProj(r, cam, this, this.projId, this.rot, '#B8CCE8', a);
+    // ★SW-I1 帧通道(Main.cs:34923 projFrames>1 通支,:35047 source 高 num482−1):
+    //  237/243=4 帧(Projectile_237 28×112)、238/244=6 帧(Projectile_238 54×168 /
+    //  244 54×156)——缺 frames 实参走整图通支=帧高 28/26 未除帧数,四帧/六帧云
+    //  竖排胶片条整体画出(用户实报);通支单帧源=(0,fh×frame,W,fh−1),锚点公式
+    //  不变。239/245 雨滴 projFrames 表无项=1 → 帧支不触发,行为零变。
+    //  帧推进序在 aiMove/aiRain(:28375-28379 >4t 循环 0-3 / :28397-28405 >8t
+    //  开阔 0-5·受阻 0-2),与本处帧数表一致。
+    drawProj(r, cam, this, this.projId, this.rot, '#B8CCE8', a, 0, false, false, 1,
+      this.frame, projFrameCount(this.projId));
   }
 
   /** ①移动云(:28353-28379):直线飞行,过锚逐轴清速,双轴齐停 → 亡(Kill 钩原位变降雨云)。

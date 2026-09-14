@@ -385,7 +385,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (r.boolean()) flags.savedWizard = true;
   if (r.boolean()) flags.savedMech = true;
   if (r.boolean()) flags.downedGoblins = true;
-  if (r.boolean()) flags.downedClown = true;
+  if (r.boolean()) { flags.downedClown = true; flags.downed_109 = true; }                  // 小丑（★双键:downed_109=运行时键,Game.ts:35766 命名解析器消费,2026-09-14 审计补）
   if (r.boolean()) flags.downedFrost = true;
   if (r.boolean()) flags.downedPirates = true;
   if (r.boolean()) flags.shadowOrbSmashed = true;                                          // shadowOrbSmashed
@@ -459,12 +459,14 @@ export function parseWld(buf: Uint8Array): WldWorld {
     if (r.boolean()) flags.downed_439 = true;                                              // downedAncientCultist 拜月教邪教徒
     if (r.boolean()) flags.downed_398 = true;                                              // downedMoonlord 月总
   } else { r.boolean(); r.boolean(); r.boolean(); }
-  // 五节日 Boss（WF57:2224-2228）
-  if (r.boolean()) flags.downedHalloweenKing = true;
-  if (r.boolean()) flags.downedHalloweenTree = true;
-  if (r.boolean()) flags.downedChristmasIceQueen = true;
-  if (r.boolean()) flags.downedChristmasSantank = true;
-  if (r.boolean()) flags.downedChristmasTree = true;
+  // 五节日 Boss（WF57:2224-2228）——★双键（2026-09-14 审计,同 :456 downedFishron 先例）：
+  // 消费端 EmoteMenu:96-100 读 vid 键 downed_325/327/344/345/346,曾只落驼峰键=
+  // 导入已败南瓜王/哀木/常绿树/冰女王/圣诞坦克的世界表情 54-58 永不上锁
+  if (r.boolean()) { flags.downedHalloweenKing = true; flags.downed_327 = true; }
+  if (r.boolean()) { flags.downedHalloweenTree = true; flags.downed_325 = true; }
+  if (r.boolean()) { flags.downedChristmasIceQueen = true; flags.downed_345 = true; }
+  if (r.boolean()) { flags.downedChristmasSantank = true; flags.downed_346 = true; }
+  if (r.boolean()) { flags.downedChristmasTree = true; flags.downed_344 = true; }
   // 四塔 downed（v140 门,WF57:2233-2236）+ 四塔 active（:2237-2240）+ 天界入侵
   if (version >= 140) {
     if (r.boolean()) flags.downedTowerSolar = true;

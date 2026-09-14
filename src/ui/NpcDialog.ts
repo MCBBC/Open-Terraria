@@ -132,7 +132,10 @@ const CSS = `
 /* Chat_Back 两段绘制（:71-72）：主体 = 源(0,0,500,470) 纵向拉伸到 (500,H-30)；
    底帽 = 源(0,470,500,30) 原尺寸 @ 底缘。乘色 (200,200,200,200)（:62）
    → opacity+brightness 各 200/255（XNA tint RGB×A 近似,预乘暗晕判例） */
-.sw-npc-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.sw-npc-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  /* ★2026-09-14 用户报:顶角在两段纵向拉伸里被压扁(Chat_Back 顶圆角≈10 源 px,短面板
+     拉伸系数 ~0.2 → 归方)。容器圆角裁切兜底,底帽原生圆角不受影响 */
+  border-radius: 10px 10px 10px 10px; }
 .sw-npc-bg img { position: absolute; left: 0; width: 500px; image-rendering: pixelated;
   opacity: 0.784; filter: brightness(0.784); }
 .sw-npc-bg-body { position: absolute; left: 0; top: 0; width: 100%; height: 60px; overflow: hidden; }
