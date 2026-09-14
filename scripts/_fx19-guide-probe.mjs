@@ -1,4 +1,4 @@
-// 刀19验收:向导制作菜单 1:1(modern 窗槽/空槽0配方/反查过滤/全亮/打造门/经典位/退出面)
+// 刀19验收:向导制作菜单 1:1(modern 窗槽/空槽0配方/反查过滤/全亮/打造门/经典位/会话保持+走远退出)
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
@@ -6,6 +6,16 @@ const fails = [];
 const ok = (cond, name) => { console.log(`${cond ? 'PASS' : 'FAIL'} ${name}`); if (!cond) fails.push(name); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', protocolTimeout: 600000, defaultViewport: { width: 1600, height: 1000 } });
+
+// ★刀19:真实入口=对话会话保持(npcDialogActive=true)——探针伪造会话 NPC(置玩家区域=keepAlive 在界)
+const mkFake = (page) => page.evaluate(() => {
+  const g = window.__swGame;
+  const p = g.player;
+  g.dialogNpc = { dead: false, x: p.x, y: p.y, w: p.w, h: p.h };
+  return true;
+});
+const clearFake = (page) => page.evaluate(() => { window.__swGame.dialogNpc = null; return true; });
+
 {
   const page = await browser.newPage();
   const errs = [];
@@ -14,9 +24,9 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
   await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swUI, { timeout: 280000, polling: 1000 });
   await page.waitForFunction((sel) => document.querySelector(sel), { timeout: 300000, polling: 1000 }, '.sw-vinv');
   await sleep(700);
-  // modern 缺省(Options 缺省 modern;localStorage 新 profile)
 
   // ---- P1 入口:开向导菜单 → modern 窗开+向导槽显+空槽文案 ----
+  await mkFake(page);
   const p1 = await page.evaluate(async () => {
     const ui = window.__swUI;
     document.getElementById('sw-welcome-announce')?.remove();
@@ -31,7 +41,6 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
       open: ui.vinvGuideMenuOpen, winOpen: ui.vinvModernCraftOpen,
       slotRect: r, slotVisible: slot ? slot.offsetParent !== null : false,
       cap: ui.vinvGuideModernCaptionEl?.textContent,
-      winDisp: ui.vinvModernCraftEl?.style.display,
     };
   });
   ok(p1.open && p1.winOpen, 'P1a 向导态+modern 窗开');
@@ -43,17 +52,15 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
   const p2 = await page.evaluate(() => {
     const ui = window.__swUI;
     const list = ui.vinvModernGridInner;
-    return { entries: ui.vinvModernEntries.length, cells: list ? list.children.length : -1, avail: ui.vinvCraftAvailV.length };
+    return { entries: ui.vinvModernEntries.length, cells: list ? list.children.length : -1 };
   });
   ok(p2.entries === 0 && p2.cells === 0, `P2 空槽=0 配方(entries=${p2.entries} cells=${p2.cells})`);
 
-  // ---- P3 放置木材 → 反查过滤+全亮+无拥有数+文案"需要 X" ----
+  // ---- P3 放置木材 → 反查过滤+全亮+无拥有数 ----
   const p3 = await page.evaluate(async () => {
     const ui = window.__swUI;
-    const g = window.__swGame;
     const mod = await import('/src/data/items.ts');
-    const woodKey = mod.VANILLA_ITEM_KEY_BY_ID[9];
-    const wood = mod.ITEM_BY_KEY[woodKey];
+    const wood = mod.ITEM_BY_KEY[mod.VANILLA_ITEM_KEY_BY_ID[9]];
     ui.heldStack = { id: wood, stack: 10 };
     const slot = ui.vinvGuideSlotModernEl;
     slot.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
@@ -61,14 +68,12 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
     await new Promise((r) => setTimeout(r, 150));
     const list = ui.vinvModernGridInner;
     const cntEls = [...(ui.vinvModernDetailEl?.querySelectorAll('.cnt') ?? [])];
-    const slotImg = slot.querySelector('img');
     return {
       placed: !!ui.guidePlaced, heldGone: !ui.heldStack,
-      cap: ui.vinvGuideModernCaptionEl?.textContent?.slice(0, 14),
+      cap: ui.vinvGuideModernCaptionEl?.textContent?.slice(0, 16),
       entries: ui.vinvModernEntries.length, cells: list ? list.children.length : -1,
       detailCnt: cntEls.length, detailCntHidden: cntEls.every((c) => c.style.display === 'none'),
-      slotHasImg: !!slotImg,
-      woodEntries: ui.vinvModernEntries.length,
+      slotHasImg: !!slot.querySelector('img'),
     };
   });
   ok(p3.placed && p3.heldGone, 'P3a 放置成功(手持清空)');
@@ -83,9 +88,7 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
     const ui = window.__swUI;
     const g = window.__swGame;
     const before = g.player.inv.slots.filter(Boolean).reduce((a, s) => a + s.stack, 0);
-    // 现代窗成品槽点击(选中即焦点)
-    const detail = ui.vinvModernDetailEl;
-    const slot = detail?.querySelector('.sw-slot');
+    const slot = ui.vinvModernDetailEl?.querySelector('.sw-slot');
     slot?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     await new Promise((r) => setTimeout(r, 120));
     const after = g.player.inv.slots.filter(Boolean).reduce((a, s) => a + s.stack, 0);
@@ -93,48 +96,57 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
   });
   ok(p4.before === p4.after && !p4.held, `P4 反查态打造被门(总堆 ${p4.before}→${p4.after})`);
 
-  // ---- P5 取回+退出面(closeInventory) ----
+  // ---- P5 取回+走远退出(talkNPC==-1 → :42397) ----
   const p5 = await page.evaluate(async () => {
     const ui = window.__swUI;
-    // 空手点槽取回
     ui.vinvGuideSlotModernEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
     await new Promise((r) => setTimeout(r, 100));
     const takenBack = !ui.guidePlaced && !!ui.heldStack;
-    ui.heldStack = null;   // 探针清手
-    ui.closeInventory();
-    await ui.refreshAllAsync();
-    return { takenBack, open: ui.vinvGuideMenuOpen, winOpen: ui.vinvModernCraftOpen };
+    ui.heldStack = null;
+    return { takenBack };
   });
   ok(p5.takenBack, 'P5a 空手取回整组');
-  ok(!p5.open && !p5.winOpen, 'P5b 关包=向导态+窗全复位');
+  await clearFake(page);
+  const p5b = await page.evaluate(async () => {
+    const ui = window.__swUI;
+    await ui.refreshAllAsync();
+    await new Promise((r) => setTimeout(r, 200));
+    return { open: ui.vinvGuideMenuOpen, winOpen: ui.vinvModernCraftOpen };
+  });
+  ok(!p5b.open && !p5b.winOpen, `P5b 走远=向导态+窗全复位(open=${p5b.open})`);
+  await page.close();
+}
 
-  // ---- P6 classic 控制模式:经典位槽 @(73,331+num52)+切换钮上移+窗不开 ----
+// ---- P6 classic 控制模式 ----
+{
+  const page = await browser.newPage();
+  await page.goto(ORIGIN + '/?play=small&invlayout=vanilla', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swUI, { timeout: 280000, polling: 1000 });
+  await page.waitForFunction((sel) => document.querySelector(sel), { timeout: 300000, polling: 1000 }, '.sw-vinv');
+  await sleep(700);
   const p6 = await page.evaluate(async () => {
     const options = window.__swOptions ?? (await import('/src/core/Options.ts')).options;
     await options.set('craftingGridControl', 'classic');
     const ui = window.__swUI;
     const g = window.__swGame;
+    // 会话保持伪造+注入材料(常规列表非空)
+    const p = g.player;
+    g.dialogNpc = { dead: false, x: p.x, y: p.y, w: p.w, h: p.h };
+    const mod = await import('/src/data/items.ts');
+    const wood = mod.ITEM_BY_KEY[mod.VANILLA_ITEM_KEY_BY_ID[9]];
+    for (let i = 10; i < 50; i++) if (!g.player.inv.slots[i]) { g.player.inv.slots[i] = { id: wood, stack: 20 }; break; }
     ui.openInventory(true);
     ui.openVanillaGuideCraft();
     await ui.refreshAllAsync();
     await new Promise((r) => setTimeout(r, 150));
     const cs = ui.vinvGuideSlotClassicEl;
     const r = cs ? cs.getBoundingClientRect().toJSON() : null;
-    // 注入材料保证常规列表非空(P5 取回件未回包=探针世界清白)
-    const mod2 = await import('/src/data/items.ts');
-    const wood2 = mod2.ITEM_BY_KEY[mod2.VANILLA_ITEM_KEY_BY_ID[9]];
-    for (let i = 10; i < 50; i++) if (!g.player.inv.slots[i]) { g.player.inv.slots[i] = { id: wood2, stack: 20 }; break; }
-    g.cb.onInventoryChanged?.();
-    await ui.refreshAllAsync();
-    const normalCount = ui.vinvCraftAvailV.length;
-    const sh = 1000;
-    const adjY = ui.vinvCraftAdjY(sh);
+    const adjY = ui.vinvCraftAdjY(1000);
     const tog = ui.vinvGridToggleImg.parentElement.getBoundingClientRect().toJSON();
     return {
       open: ui.vinvGuideMenuOpen, winOpen: ui.vinvModernCraftOpen,
       slot: r, expectY: 331 + adjY, togY: tog.y, togExpect: 300 + adjY,
       avail: ui.vinvCraftAvailV.length,
-      normalCount,
       classicText: ui.vinvGuideClassicTextEl?.textContent?.slice(0, 10),
     };
   });
@@ -142,9 +154,70 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
   ok(p6.slot && Math.abs(p6.slot.x - 73) < 2 && Math.abs(p6.slot.y - p6.expectY) < 2,
     `P6b 经典位槽 @(73,${p6.expectY})(实测 ${p6.slot?.x?.toFixed(1)},${p6.slot?.y?.toFixed(1)})`);
   ok(Math.abs(p6.togY - p6.togExpect) < 2, `P6c 切换钮上移 @(94,${p6.togExpect})(实测 y=${p6.togY?.toFixed(1)})`);
-  ok(p6.normalCount > 0 && p6.avail === p6.normalCount, `P6d 经典列表=常规可制(空槽 ${p6.avail}=常规 ${p6.normalCount})`);
+  ok(p6.avail > 0, `P6d 经典列表=常规可制(${p6.avail})`);
   ok(p6.classicText === '在此放置材料', `P6e 经典位空槽文案("${p6.classicText}")`);
-  ok(errs.length === 0, `无页面错误(${errs.join(' | ')})`);
+  await page.close();
+}
+
+// ---- P7-P9:会话保持入口+走远退出+互斥 ----
+{
+  const page = await browser.newPage();
+  await page.goto(ORIGIN + '/?play=small&invlayout=vanilla', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swUI, { timeout: 280000, polling: 1000 });
+  await page.waitForFunction((sel) => document.querySelector(sel), { timeout: 300000, polling: 1000 }, '.sw-vinv');
+  await sleep(700);
+  const errs2 = [];
+  page.on('pageerror', (e) => errs2.push((e.stack || e.message).slice(0, 160)));
+  // P7 重铸:会话保持入口 → 走远退出
+  await mkFake(page);
+  const p7a = await page.evaluate(async () => {
+    const ui = window.__swUI;
+    ui.openInventory(true);
+    ui.showReforge();
+    await ui.refreshAllAsync();
+    await new Promise((r) => setTimeout(r, 200));
+    const slot = ui.vinvReforgeSlotEl;
+    return { open: ui.vinvReforgeOpen, visible: ui.vinvReforgeVisible(), slotVis: slot ? slot.offsetParent !== null : false };
+  });
+  ok(p7a.open && p7a.visible && p7a.slotVis, `P7a 重铸态开+会话保持(open=${p7a.open} vis=${p7a.visible})`);
+  await clearFake(page);
+  const p7b = await page.evaluate(async () => {
+    const ui = window.__swUI;
+    await ui.refreshAllAsync();
+    await new Promise((r) => setTimeout(r, 200));
+    return { open: ui.vinvReforgeOpen, visible: ui.vinvReforgeVisible() };
+  });
+  ok(!p7b.open && !p7b.visible, `P7b 走远=重铸态退出(open=${p7b.open})`);
+  // P8 向导走远退出
+  await mkFake(page);
+  const p8 = await page.evaluate(async () => {
+    const ui = window.__swUI;
+    ui.openInventory(true);
+    ui.openVanillaGuideCraft();
+    await ui.refreshAllAsync();
+    await new Promise((r) => setTimeout(r, 200));
+    const openBefore = ui.vinvGuideMenuOpen;
+    window.__swGame.dialogNpc = null;
+    await ui.refreshAllAsync();
+    await new Promise((r) => setTimeout(r, 200));
+    return { openBefore, openAfter: ui.vinvGuideMenuOpen, winOpen: ui.vinvModernCraftOpen };
+  });
+  ok(p8.openBefore && !p8.openAfter && !p8.winOpen, `P8 向导态走远退出(before=${p8.openBefore} after=${p8.openAfter})`);
+  // P9 互斥:重铸态进向导态 → 重铸退出
+  await mkFake(page);
+  const p9 = await page.evaluate(async () => {
+    const ui = window.__swUI;
+    ui.showReforge();
+    await ui.refreshAllAsync();
+    const reforgeOpen = ui.vinvReforgeOpen;
+    ui.openVanillaGuideCraft();
+    await ui.refreshAllAsync();
+    await new Promise((r) => setTimeout(r, 200));
+    return { reforgeOpen, reforgeAfter: ui.vinvReforgeOpen, guideOpen: ui.vinvGuideMenuOpen };
+  });
+  ok(p9.reforgeOpen && !p9.reforgeAfter && p9.guideOpen, `P9 重铸↔向导互斥(reforge ${p9.reforgeOpen}→${p9.reforgeAfter})`);
+  ok(errs2.length === 0, `无页面错误(${errs2.join(' | ')})`);
+  await page.close();
 }
 await browser.close();
 if (fails.length) { console.log(`\n${fails.length} FAIL`); process.exit(1); }

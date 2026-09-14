@@ -7336,7 +7336,7 @@ export class UI {
     // ★反馈轮7:unlockedBiomeTorches 入签(:48166 start.Y+=24*torchGodIcons 列体位移
     //   + :48370 炬图标显隐)——旗翻(炬神事件结算)不入签则图标列滞留旧位与炬图标重叠
     const bgSig = `${bg.rulerGrid ? 1 : 0}${bg.autoActuator ? 1 : 0}${bg.autoPaint ? 1 : 0}${bg.infoAccMechShowWires ? 1 : 0}${this.game.world.flags.unlockedBiomeTorches ? 1 : 0}`;
-    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}|${this.vinvModernCraftOpen ? 1 : 0}|${this.vinvGuideMenuOpen ? 1 : 0}`;
+    const sig = `${Math.round(vw)}x${Math.round(vh)}|${options.data.uiScale}|${heartShown ? 1 : 0}${masterShown ? 1 : 0}|${chestOpen ? 1 : 0}|${minimapOn ? 1 : 0}${this.game.superCartUnlocked() ? 1 : 0}|${this.vinvPipsUseGrid ? 1 : 0}|${savBanks[0] > 0 ? 1 : 0}${savBanks[1] > 0 ? 1 : 0}${savBanks[2] > 0 ? 1 : 0}${savBanks[3] > 0 ? 1 : 0}|${bgSig}|${this.vinvModernCraftOpen ? 1 : 0}|${this.vinvGuideMenuOpen ? 1 : 0}|${this.vinvReforgeOpen ? 1 : 0}`;   // ★刀19:重铸态入签(vinvReforgeVisible pos 门随拍重估)
     if (sig === this.vinvLayoutSig) return;
     this.vinvLayoutSig = sig;
     for (const it of this.vinvLayoutItems) {
@@ -8697,18 +8697,29 @@ export class UI {
     this.vinvRefreshCraft();                                        // guideItem 空 → GetNumRecipes=0(modern)
   }
 
-  /** 向导态退出面(Main.cs:42396-42400):开箱/开店/重开对话/重铸 → 复位+窗收
-   *  (NewCraftingUI.Close(quiet,returnToInventory))。每刷新拍消费(vinvRefreshCraft 头) */
+  /** ★刀19:双菜单退出面(每刷新拍消费,vinvRefreshCraft 头)。
+   *  重铸态(Main.cs:42282-42285):chest/shop/talkNPC==-1/向导态 → InReforgeMenu=false;
+   *  向导态(Main.cs:42396-42400):chest/shop/talkNPC==-1/重铸态 → 复位+窗收
+   *  (NewCraftingUI.Close(quiet,returnToInventory))。talkNPC==-1 ≡ !npcDialogActive
+   *  (会话保持入口后=走远距离保持链 closeNpcDialog 即触发) */
   private vinvGuideMenuExitCheck(): void {
-    if (!this.vinvGuideMenuOpen) return;
     const g = this.game;
-    const exit = !!this.openChest || !!g?.npcShopOpen || !!g?.npcDialogActive || this.vinvReforgeOpen;
-    if (exit) {
-      this.vinvGuideMenuOpen = false;
-      if (this.vinvModernCraftOpen) this.vinvCloseModernCraft(true);
-      this.vinvLayoutSig = '';
-      this.layoutVanilla();
-      this.vinvRefreshCraft();
+    const dlgNpc = (g as unknown as { dialogNpc?: unknown }).dialogNpc;
+    if (this.vinvReforgeOpen) {
+      if (!!this.openChest || !!g?.npcShopOpen || !dlgNpc || this.vinvGuideMenuOpen) {
+        this.vinvReforgeOpen = false;   // reforgeItem 不清=原版 reforgeItem 静态量同相
+        this.vinvLayoutSig = '';
+        this.layoutVanilla();
+      }
+    }
+    if (this.vinvGuideMenuOpen) {
+      if (!!this.openChest || !!g?.npcShopOpen || !g?.npcDialogActive || this.vinvReforgeOpen) {
+        this.vinvGuideMenuOpen = false;
+        if (this.vinvModernCraftOpen) this.vinvCloseModernCraft(true);
+        this.vinvLayoutSig = '';
+        this.layoutVanilla();
+        this.vinvRefreshCraft();
+      }
     }
   }
 
@@ -8864,10 +8875,12 @@ export class UI {
     } });
   }
 
-  /** 显示门(:42277-42279:chest/npcShop/talkNPC/guide 任一即 InReforgeMenu=false) */
+  /** 显示门(:42277-42285:InReforgeMenu ∧ 无箱 ∧ 无店 ∧ talkNPC!=-1——★刀19:会话
+   *  保持入口后 talkNPC 恒在,走远=closeNpcDialog → 门翻假;旧 !dlgNpc 极性反写
+   *  =对话消失反而保持可见=用户报"远离后格子滞留") */
   private vinvReforgeVisible(): boolean {
     const dlgNpc = (this.game as unknown as { dialogNpc?: unknown }).dialogNpc;   // Game 私有域,运行期读
-    return this.vinvReforgeOpen && !this.openChest && !this.game.npcShopOpen && !dlgNpc;
+    return this.vinvReforgeOpen && !this.openChest && !this.game.npcShopOpen && !!dlgNpc;
   }
 
   /** 重铸拍回写:槽面/费用分档染色/储蓄四库(Main.cs:42286-42320) */

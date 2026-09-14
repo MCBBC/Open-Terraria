@@ -34738,8 +34738,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (id === 'heal') { this.nurseHeal(); return; }
     if (id === 'collect' && npc.npcKey === 'tax_collector') { this.taxCollect(); return; }
     if (id === 'reforge' && npc.npcKey === 'goblin_tinkerer') {
-      // 原版 NPCChatText_TinkererReforge（Main.cs:39431）：关对话进重铸界面
-      this.closeNpcDialog();
+      // 原版 NPCChatText_TinkererReforge（Main.cs:40717-40722）：npcChatText=""+
+      //   PlaySound(12)+InReforgeMenu=true——【talkNPC 不清】=对话会话保持,走远
+      //   SetTalkNPC(-1) → :42283 重铸态退出。★刀19 修:旧 closeNpcDialog 清会话
+      //   =走远后重铸槽滞留(用户报)
+      this.sfx.play('menuTick', 1);
+      this.minimizeNpcDialog();
       this.cb.onReforgeOpen?.();
       return;
     }
@@ -34777,10 +34781,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 切反查模式）。本仓 = 关对话 + 回调 UI 开背包 + 向导配方反查浮层
     if (id === 'craft' && npc.vanillaId === 22) {
       // 原版本路径唯一音效 = 开场 MenuTick(12)（Main.cs:40726）；对话收起是
-      // npcChatText="" 的静默变化——本仓 closeNpcDialog 的 menuClose 会双音，
-      // 故走静默参数（专项审计修复：曾 tick+close 双响）
+      // npcChatText="" 的静默变化——★刀19:会话保持(minimizeNpcDialog 只收面板,
+      // talkNPC 不清=走远即退 :42397;旧 closeNpcDialog 清会话=向导态失走远退出面)
       this.sfx.play('menuTick');
-      this.closeNpcDialog(true);
+      this.minimizeNpcDialog();
       this.cb.onGuideCraftOpen?.();
       return;
     }
@@ -35247,6 +35251,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // NPC 气泡全部由 TownNPC.socialUpdate 掷骰入态 + socialFrame 帧点触发
     // （表情内容 = world/EmotePick.ts PickNPCEmote 全量池）。本函数留空壳守名。
     void this.emoteCooldown;
+  }
+
+  /** ★刀19:对话面板收起但会话保持(npcChatText="" 原版面——重铸/向导菜单入口;
+   *  talkNPC(dialogNpc)不清=对话距离保持链照常监视,走远即 closeNpcDialog →
+   *  菜单退出门(:42283/:42397)消费) */
+  minimizeNpcDialog(): void {
+    this.cb.onNpcDialogClose?.();   // UI 面板收起;dialogNpc/keepAlive 保留
   }
 
   closeNpcDialog(silent = false): void {
