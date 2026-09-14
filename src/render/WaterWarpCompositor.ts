@@ -118,11 +118,9 @@ export class WaterWarpCompositor {
     srcCtx.globalCompositeOperation = 'source-over';
     srcCtx.drawImage(this.fgCanvas, 0, 0);
     srcCtx.restore();
-    // ★IIIII251：合成后清屏 + 解除 armed（下一帧 bg 重画足迹；旧内容不留到下帧）
-    if (this._footprintArmed && this.fgCtx) {
-      this.fgCtx.setTransform(1, 0, 0, 1, 0, 0);
-      this.fgCtx.clearRect(0, 0, this.fgCanvas.width, this.fgCanvas.height);
-    }
+    // ★IIIII251：此处【不清屏】——compositeLight 的 applyFullScreen 还要读本画布
+    //  当 obj19 门控纹理（前景水 + 坡面足迹）；清屏点 = 下一帧 bg 的
+    //  gateFootprintCtx（armed 路径）或未 armed 时的 beginFgPass，均先于本帧写屏。
     this._footprintArmed = false;
     // drawVanillaLiquids 的收尾契约（目标 ctx alpha=1）由本函数承继
     srcCtx.globalAlpha = 1;

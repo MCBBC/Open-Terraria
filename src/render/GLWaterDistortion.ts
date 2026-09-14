@@ -62,7 +62,7 @@
 // 原样直画（无扭曲——CPU 渲染/低端机自动降级，同 ?wwarp=0 逃生门）。
 
 import { glStatUpload, glStatTexCreate, glStatDraw, registerFence, noteContextLost, texBytes } from './GLStats';
-import { swPerf, waveAmpParam } from './perfFlags';   // ★BJ77/BJ78 零语义优化层总闸(?swperf=1;缺省关=逐位不变)
+import { swPerf, waveAmpParam } from './perfFlags';   // ★BJ77/BJ78 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
 export class GLWaterDistortion {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -289,7 +289,7 @@ void main() {
     //   2=2026-08-25 观感校准值,位移×2 令水线边缘"越出水体"的位移采样带加宽
     //   → 背景色直线缝(缩放/相机高度改亚像素相位→隐现);原版 obj19 无此增益。
     //   ?wamp=2 仍可显式取回旧观感。与 WaterWaves.sampleDisplace 同值）
-    // ★BJ78 W2(?swperf=1):上行 amp 原为每帧 `new URLSearchParams`+闭包分配（每帧
+    // ★BJ78 W2(swPerf 快路径):上行 amp 原为每帧 `new URLSearchParams`+闭包分配（每帧
     //   一次,404 行 uploadWave 每帧经 composite 调用）。flag 开 → 缓存读取面
     //   perfFlags.waveAmpParam(按 search 串键控,值逐位同);flag 关 → 原样逐帧解析。
     const amp = swPerf ? waveAmpParam() : (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 1; } catch { return 1; } })();

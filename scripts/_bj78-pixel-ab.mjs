@@ -299,17 +299,27 @@ try {
     L.chk('[wamp=2] harness 波纹单例在位', flagRead.ampCache, JSON.stringify(flagRead));
   } else L.say('ocean-wamp2 skipped: 无地表水体');
 
-  // URL 读取面(同 BJ77:?swperf=1 独立轻页)
-  const urlFlag = await page.evaluate(() => {
-    const u = new URL(window.location.href);
-    u.searchParams.set('swperf', '1');
-    return u.toString();
-  });
+  // URL 读取面(★转正语义:缺省页=开;?swperf=1=开无操作;?swperf=0=豁免口关)
   const page3 = await openPage(browser, { errors: L.fails });
-  await page3.goto(urlFlag, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => { });
+  const bootDefault = await bootstrap(page3, process.env.SW_ORIGIN);
+  L.chk('bootstrap(读取面页)', bootDefault.ok, bootDefault.why ?? '');
   await page3.waitForFunction(() => (window).__swPerfFlags !== undefined, { timeout: 30_000 }).catch(() => { });
-  const urlRead = await page3.evaluate(() => ({ get: (window).__swPerfFlags?.get() ?? null })).catch(() => ({ get: 'eval-fail' }));
-  L.chk('URL ?swperf=1 读取面', urlRead.get === true, JSON.stringify(urlRead));
+  const readDefault = await page3.evaluate(() => ({ get: (window).__swPerfFlags?.get() ?? null, search: location.search }));
+  L.chk('缺省页 boot 读取面=get()===true(★转正缺省开)', readDefault.get === true, JSON.stringify(readDefault));
+  const u0p = new URL(process.env.SW_ORIGIN);
+  u0p.searchParams.set('swperf', '0');
+  await page3.evaluate((href) => { location.href = href; }, u0p.toString());
+  await new Promise((r) => setTimeout(r, 1500));
+  await page3.waitForFunction(() => (window).__swPerfFlags !== undefined, { timeout: 30_000 }).catch(() => { });
+  const readOff = await page3.evaluate(() => ({ get: (window).__swPerfFlags?.get() ?? null, search: location.search }));
+  L.chk('?swperf=0 豁免口读取面=get()===false', readOff.get === false && readOff.search.includes('swperf=0'), JSON.stringify(readOff));
+  const u1p = new URL(process.env.SW_ORIGIN);
+  u1p.searchParams.set('swperf', '1');
+  await page3.evaluate((href) => { location.href = href; }, u1p.toString());
+  await new Promise((r) => setTimeout(r, 1500));
+  await page3.waitForFunction(() => (window).__swPerfFlags !== undefined, { timeout: 30_000 }).catch(() => { });
+  const readOn = await page3.evaluate(() => ({ get: (window).__swPerfFlags?.get() ?? null, search: location.search }));
+  L.chk('?swperf=1 读取面=get()===true(合法无操作)', readOn.get === true, JSON.stringify(readOn));
   await page3.close().catch(() => { });
 
   L.say('ab-done');

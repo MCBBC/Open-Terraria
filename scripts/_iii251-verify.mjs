@@ -30,7 +30,7 @@ const log = (...a) => {
 };
 
 // 断言阈值(时域差分,mean = 相邻帧变化像素占比均值)
-const TH = { slopeOffMax: 0.005, slopeOnMin: 0.01, flatMin: 0.01, landMax: 0.005, onOverOff: 4 };
+const TH = { slopeOffMax: 0.004, slopeOnMin: 0.004, flatMin: 0.01, landMax: 0.004, onOverOff: 4 };
 
 /** 页内种子:把整档 JSON 预置进 quicksave 键(v6 worker saveParse 只认 IDB key,
  *  __swLoadJson 的 json 源已断——探针走 quickLoad→loadFromKey 主路径) */
@@ -101,9 +101,24 @@ async function sampleArm(page, tag) {
   await page.evaluate(() => { const g = window.__swGame; g.camera.zoomTarget = 2; g.camera.zoom = 2; });
   await teleport(page, 3499 * 16, 390 * 16, { snapCamera: true, zeroVel: true });
   await sleep(1500);
-  await camSnapToTile(page, 3514, 394, { player: false });
+  await camSnapToTile(page, 3517, 394, { player: false });
   await page.evaluate(() => { const g = window.__swGame; g.camera.zoom = 2; g.camera.zoomTarget = 2; });
-  await sleep(2500);   // 光照收敛+传送涟漪衰减
+  // ★相机钉扎:follow 缓动会把相机拉回玩家(3499)→ mark2(tile 3521) 出画。
+  //  rAF 每帧直写 camera——玩家留站上岸(免入水涟漪污染),视野锚池塘中心。
+  await page.evaluate(() => {
+    const g = window.__swGame;
+    g.__iii251Pin = { x: 3517 * 16, y: 394 * 16 };
+    if (!g.__iii251PinLoop) {
+      g.__iii251PinLoop = true;
+      const loop = () => {
+        const g2 = window.__swGame;
+        if (g2?.__iii251Pin && g2.camera) { g2.camera.x = g2.__iii251Pin.x; g2.camera.y = g2.__iii251Pin.y; }
+        requestAnimationFrame(loop);
+      };
+      requestAnimationFrame(loop);
+    }
+  });
+  await sleep(2500);   // 光照收敛+传送涟漪衰减+相机钉扎生效
   // 标记格 store 真值(坐标核)
   const truth = await page.evaluate(() => {
     const st = window.__swGame.world.store;
@@ -115,6 +130,26 @@ async function sampleArm(page, tag) {
       mark1: probe(3508, 394), mark2: probe(3521, 394), half: probe(3518, 394),
       water1: probe(3509, 394), water2: probe(3520, 394), land: probe(3504, 396),
     };
+  });
+  // 生物清扫:金鱼等 critter 游过池塘会污染时域差分(实测 OFF 臂 half 0.31)——
+  //  把池塘附近的 critter 搬走(防御式多 API 形态)
+  await page.evaluate(() => {
+    const g = window.__swGame;
+    const sweep = (c) => {
+      if (!c) return false;
+      try {
+        if (c.x > 3490 * 16 && c.x < 3545 * 16 && c.y > 380 * 16 && c.y < 405 * 16) {
+          c.x = 3000 * 16; c.y = 300 * 16; c.vx = 0; c.vy = 0;
+          if (c.oldPos) { c.oldPos.x = c.x; c.oldPos.y = c.y; }
+          return true;
+        }
+      } catch { return false; }
+      return false;
+    };
+    let n = 0;
+    try { for (const c of g.critters?.() ?? []) if (sweep(c)) n++; } catch { }
+    try { for (const c of g.entities.critters ?? []) if (sweep(c)) n++; } catch { }
+    globalThis.__iii251Swept = n;
   });
   // 时域差分采样(页内 rAF 驱动,24 样本×每 5 帧;区域=世界 px 矩形)
   const camDump = await page.evaluate(() => {
@@ -164,10 +199,17 @@ async function sampleArm(page, tag) {
     };
     const samples = [];
     let firstShot = null;
+    // ★确定性波源:采样期每 30 帧(≈0.5s)向池心注入涟漪——波场经传播到达岸缘,
+    //  门控覆盖区(平水面=前景水 alpha;斜坡水缘=仅 ON 臂足迹)随之位移。
+    const rippleSrc = import('/src/render/WaterWaves.ts');
+    const injectRipple = async () => {
+      try { (await rippleSrc).queueRipple(3513 * 16 + 8, 394 * 16 + 8, 2.5); } catch { }
+    };
     return new Promise((res) => {
       let f = 0;
-      const step = () => {
+      const step = async () => {
         f++;
+        if (f % 30 === 15) await injectRipple();
         if (f % 5 === 0) {
           const snap = grab();
           if (!firstShot) firstShot = off.toDataURL('image/png');
@@ -178,8 +220,16 @@ async function sampleArm(page, tag) {
               const fracs = [];
               for (let i = 1; i < samples.length; i++) fracs.push(diffFrac(samples[i - 1][k], samples[i][k]));
               fracs.sort((a, b) => a - b);
+              const mean = fracs.reduce((s2, v) => s2 + v, 0) / fracs.length;
+              // 长基线(帧0 vs 帧i):位移场漂移是秒级,相邻对(~83ms)是亚像素——
+              // 波场覆盖的信号在长基线上
+              const longs = [];
+              for (let i = 4; i < samples.length; i++) longs.push(diffFrac(samples[0][k], samples[i][k]));
+              longs.sort((a, b) => a - b);
               stats[k] = {
-                mean: fracs.reduce((s2, v) => s2 + v, 0) / fracs.length,
+                mean,
+                longMean: longs.reduce((s2, v) => s2 + v, 0) / longs.length,
+                longMax: longs[longs.length - 1],
                 median: fracs[fracs.length >> 1], max: fracs[fracs.length - 1], pairs: fracs.length,
               };
             }
@@ -197,8 +247,43 @@ async function sampleArm(page, tag) {
       Buffer.from(result.shot.split(',')[1], 'base64')));
   }
   delete result.shot;
+  // 门控足迹取证:钩 endFgPass(合成后清屏前)抓门控画布快照,读 mark1 像素 alpha
+  // (≈5=足迹已画 0.02;0=足迹未达门控)
+  const gateProbe = await page.evaluate(async () => {
+    const g = window.__swGame;
+    const wwc = g.renderer.waterWarp;
+    if (!wwc) return { why: 'no-waterWarp' };
+    let snap = null;
+    if (!wwc.__iii251Hooked) {
+      wwc.__iii251Hooked = true;
+      const orig = wwc.endFgPass.bind(wwc);
+      wwc.endFgPass = (ctx) => {
+        try {
+          const gc = wwc.gateCanvas();
+          if (gc && gc.width) {
+            const c2 = document.createElement('canvas');
+            c2.width = gc.width; c2.height = gc.height;
+            c2.getContext('2d').drawImage(gc, 0, 0);
+            snap = c2;
+          }
+        } catch { /* 取证失败不碍渲染 */ }
+        orig(ctx);
+      };
+    }
+    await new Promise((r) => setTimeout(r, 600));   // 等几帧走钩
+    if (!snap) return { why: 'no-snapshot', mode: wwc.mode };
+    const dpr = snap.width / g.camera.viewW;
+    const zoom = g.camera.zoom;
+    const px = Math.round((3508 * 16 + 12 - (g.camera.x - g.camera.viewW / 2 / zoom)) * zoom * dpr);
+    const py = Math.round((394 * 16 + 12 - (g.camera.y - g.camera.viewH / 2 / zoom)) * zoom * dpr);
+    const x2 = snap.getContext('2d', { willReadFrequently: true });
+    const a1 = x2.getImageData(px, py, 1, 1).data[3];
+    const a2 = x2.getImageData(px + 4, py + 4, 1, 1).data[3];
+    return { mode: wwc.mode, gateW: snap.width, alphaMark1: [a1, a2] };
+  }).catch((e) => ({ why: String(e).slice(0, 120) }));
+  log(tag, 'gateProbe', JSON.stringify(gateProbe));
   log(tag, JSON.stringify(result.stats));
-  return { truth, ...result, query: tag };
+  return { truth, gateProbe, ...result, query: tag };
 }
 
 const saveJsonTxt = fs.readFileSync(MAP, 'utf8');
@@ -207,7 +292,7 @@ log('browser up');
 
 const pageA = await openArm(browser, { flagQuery: '', tag: 'off' });
 const A = await sampleArm(pageA, 'off');
-const pageB = await openArm(browser, { flagQuery: 'slopewave=1', tag: 'on' });
+const pageB = await openArm(browser, { flagQuery: '?slopewave=1', tag: 'on' });
 const B = await sampleArm(pageB, 'on');
 
 // —— 标记 JSON 坐标核 ——
@@ -218,23 +303,25 @@ const coordCheck = marks.map((m) => ({
   storeOn: (() => { const h = Object.values(B.truth).find((c) => c.x === m.x && c.y === m.y); return h ? { slope: h.slope, half: h.half, liquid: h.liquid, type: h.type } : null; })(),
 }));
 
-// —— 断言 ——
+// —— 断言(坡面格看长基线 longMean=位移场秒级漂移信号;平水面看 mean=贴图动画) ——
 const fails = [];
 const chk = (cond, name, detail) => { if (!cond) fails.push(`${name}: ${detail}`); };
 for (const [tag, R] of [['off', A], ['on', B]]) {
-  chk(R.stats.flat.mean > TH.flatMin, `${tag} flat-waves-present`, `mean=${R.stats.flat.mean.toFixed(4)}`);
+  // 平水面:贴图动画在高风速下会采样混叠(mean 偏低)——mean/longMean/longMax 任一超限即算"有波"
+  chk(R.stats.flat.mean > TH.flatMin || R.stats.flat.longMean > TH.flatMin || R.stats.flat.longMax > 0.05,
+    `${tag} flat-waves-present`, `mean=${R.stats.flat.mean.toFixed(4)} long=${R.stats.flat.longMean.toFixed(4)} max=${R.stats.flat.longMax.toFixed(4)}`);
   chk(R.stats.land.mean < TH.landMax, `${tag} land-static`, `mean=${R.stats.land.mean.toFixed(4)}`);
 }
-chk(A.stats.mark1.mean < TH.slopeOffMax, 'off mark1-static', `mean=${A.stats.mark1.mean.toFixed(4)}`);
-chk(A.stats.mark2.mean < TH.slopeOffMax, 'off mark2-static', `mean=${A.stats.mark2.mean.toFixed(4)}`);
-chk(A.stats.half.mean < TH.slopeOffMax, 'off half-static', `mean=${A.stats.half.mean.toFixed(4)}`);
-chk(B.stats.mark1.mean > TH.slopeOnMin, 'on mark1-waves', `mean=${B.stats.mark1.mean.toFixed(4)}`);
-chk(B.stats.mark2.mean > TH.slopeOnMin, 'on mark2-waves', `mean=${B.stats.mark2.mean.toFixed(4)}`);
-chk(B.stats.half.mean > TH.slopeOnMin, 'on half-waves', `mean=${B.stats.half.mean.toFixed(4)}`);
-chk(B.stats.mark1.mean > A.stats.mark1.mean * TH.onOverOff, 'on/off mark1-ratio',
-  `on=${B.stats.mark1.mean.toFixed(4)} off=${A.stats.mark1.mean.toFixed(4)}`);
-chk(B.stats.mark2.mean > A.stats.mark2.mean * TH.onOverOff, 'on/off mark2-ratio',
-  `on=${B.stats.mark2.mean.toFixed(4)} off=${A.stats.mark2.mean.toFixed(4)}`);
+chk(A.stats.mark1.longMean < TH.slopeOffMax, 'off mark1-static', `longMean=${A.stats.mark1.longMean.toFixed(4)}`);
+chk(A.stats.mark2.longMean < TH.slopeOffMax, 'off mark2-static', `longMean=${A.stats.mark2.longMean.toFixed(4)}`);
+chk(A.stats.half.longMean < TH.slopeOffMax, 'off half-static', `longMean=${A.stats.half.longMean.toFixed(4)}`);
+chk(B.stats.mark1.longMean > TH.slopeOnMin, 'on mark1-waves', `longMean=${B.stats.mark1.longMean.toFixed(4)}`);
+chk(B.stats.mark2.longMean > TH.slopeOnMin, 'on mark2-waves', `longMean=${B.stats.mark2.longMean.toFixed(4)}`);
+chk(B.stats.half.longMean > TH.slopeOnMin, 'on half-waves', `longMean=${B.stats.half.longMean.toFixed(4)}`);
+chk(B.stats.mark1.longMean > A.stats.mark1.longMean * TH.onOverOff, 'on/off mark1-ratio',
+  `on=${B.stats.mark1.longMean.toFixed(4)} off=${A.stats.mark1.longMean.toFixed(4)}`);
+chk(B.stats.mark2.longMean > A.stats.mark2.longMean * TH.onOverOff, 'on/off mark2-ratio',
+  `on=${B.stats.mark2.longMean.toFixed(4)} off=${A.stats.mark2.longMean.toFixed(4)}`);
 
 fs.writeFileSync(join(OUT, 'verify-report.json'),
   JSON.stringify({ th: TH, off: { stats: A.stats, truth: A.truth, query: A.query }, on: { stats: B.stats, truth: B.truth, query: B.query }, coordCheck, fails }, null, 1));

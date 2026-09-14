@@ -92,7 +92,7 @@
 // · NPC 洗掠 quad 的 rotation（:217 传入 nPC.rotation）未建模——仅蠕虫族视觉
 //   旋转非 0，且洗掠强度本就 ≤0.04，影响不可辨。
 
-import { swPerf, waveAmpParam } from './perfFlags';   // ★BJ77/BJ78 零语义优化层总闸(?swperf=1;缺省关=逐位不变)
+import { swPerf, waveAmpParam } from './perfFlags';   // ★BJ77/BJ78 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
 
 /** 档位门（WaterShaderData.cs:114-118）。q: 0..3 */
 export interface WaveSourceGates {
@@ -441,7 +441,7 @@ class WaterWaveSystem {
     //   与 GLWaterDistortion.uploadWave 同值;2=2026-08-25 观感校准值,可显式 ?wamp=2
     //   取回,但位移×2 会加宽水线边缘"越出水体"的采样带=直线缝复现参数）
     const h = this._readR(px, py);
-    // ★BJ78 W1(?swperf=1):上行 waveAmp 原为每调用 `new URLSearchParams`+闭包热分配
+    // ★BJ78 W1(swPerf 快路径):上行 waveAmp 原为每调用 `new URLSearchParams`+闭包热分配
     //   （本函数每帧×表层水格数百次调用=全链最热分配点）。flag 开 → 走缓存读取面
     //   perfFlags.waveAmpParam(按 search 串键控,值逐位同——同一表达式含 fallback);
     //   flag 关 → 原样逐调用解析(现行行为逐位不变)。
@@ -605,7 +605,7 @@ class WaterWaveSystem {
     const w = this._gW, h = this._gH;
     const R = this._R, G = this._G, R2 = this._R2, G2 = this._G2;
     if (swPerf && dx === 0 && dy === 0) {
-      // ★BJ78 W3(?swperf=1) 快路径：dx=dy=0（静止相机的每一步 + 任何相机下每帧
+      // ★BJ78 W3(swPerf 快路径)：dx=dy=0（静止相机的每一步 + 任何相机下每帧
       //   的第二步 _step(0,0)）时外提不变式成立——
       //     sy0 = y - dy ≡ y、sx0 = x - dx ≡ x，而 0≤y<h、0≤x<w 恒成立
       //     ⇒ clamp(y)=y、clamp(x)=x（yM=y、xM=x），剩余四邻钳制塌缩为

@@ -1,4 +1,4 @@
-// ★BJ77 零语义优化层(?swperf=1)守卫测试(2026-09-14 性能专项)
+// ★BJ77 零语义优化层(?swperf 缺省开/`?swperf=0` 豁免口)守卫测试(2026-09-14 性能专项;★同日转正缺省开)
 //
 // 三层:
 //  ① 行为面:VanillaLiquidRenderer P1 复位扫守卫——flag 关/开两条序列的
@@ -7,7 +7,7 @@
 //     并以 st.idx 调用计数证明 flag 开时 bg 白扫真实被跳过(非 vacuous)。
 //  ② 结构锁(源文本锚):快路径必须是 `if (swPerf) 快 else 原样` 双支、
 //     原循环逐字保留、求和式同操作数同顺序——防静默回退/防把原路径改掉。
-//  ③ 闸门语义:perfFlags 缺省 false(node 无 location)+ 翻面 API 生效。
+//  ③ 闸门语义:perfFlags 缺省 true(★转正;node 无 location 亦开)+ 翻面 API 生效;
 //  像素级等价由实机 scripts/_bj77-pixel-ab.mjs(冻结单帧 md5 对拍)兜底。
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -87,7 +87,7 @@ beforeAll(() => {
     };
   }
 });
-afterAll(() => { swPerfSetForTest(false); });   // 归还缺省(闸门缺省关)
+afterAll(() => { swPerfSetForTest(true); });   // 归还缺省(★转正后缺省开)
 
 describe('★BJ77 P1 复位扫守卫(行为面)', () => {
   it('flag 关/开:同帧 bg+fg 绘制参数序列逐位一致', () => {
@@ -169,20 +169,20 @@ describe('★结构锁(源文本锚)', () => {
     expect(liquidSrc.match(/isSolidA\[i\] = liquidCacheIsSolid/g)?.length).toBe(2);   // P1 首扫 + 复位扫两份
   });
 
-  it('perfFlags 闸门:缺省关(===\'1\' 才开)+探针读取面在位', () => {
-    expect(flagSrc).toContain(".get('swperf') === '1'");
+  it('perfFlags 闸门:缺省开+?swperf=0 豁免口+探针读取面在位', () => {
+    expect(flagSrc).toContain(".get('swperf') !== '0'");
     expect(flagSrc).toContain('__swPerfFlags');
     expect(flagSrc).toContain('swPerfSetForTest');
   });
 });
 
 describe('★BJ77 闸门语义', () => {
-  it('node 环境(无 location)缺省 false;翻面 API 生效且为活绑定', () => {
+  it('node 环境(无 location)缺省 true(★转正);翻面 API 生效且为活绑定', () => {
     swPerfSetForTest(false);
-    expect(swPerf).toBe(false);
+    expect(swPerf).toBe(false);   // 豁免口=旧行为路径(逐位=转正前现行)
     swPerfSetForTest(true);
     expect(swPerf).toBe(true);
-    swPerfSetForTest(false);
-    expect(swPerf).toBe(false);
+    swPerfSetForTest(true);       // 归还缺省(★转正后缺省开)
+    expect(swPerf).toBe(true);
   });
 });

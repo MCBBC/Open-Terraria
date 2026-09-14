@@ -1,19 +1,20 @@
-// ★BJ77 零语义优化层总闸(2026-09-14 性能专项)。
+// ★BJ77 零语义优化层总闸(2026-09-14 性能专项;★同日用户实机确认【转正缺省开】)。
 //
-// 语义契约:缺省 false = 现行行为【逐位不变】(每处消费点都是
-// `if (swPerf) 快路径 else 原路径` 双支结构,原路径逐字保留);
-// `?swperf=1` 启用后只允许「输出逐位不变的零语义优化」落在此闸之后
-// ——任何有取舍的项(降频/降精度/合批改序/降档)禁止接本闸,须独立定谳。
-// 读取面:`?swperf` 查询参数(对齐 Renderer.lightFast/dryWarpSkip 等
-// URLSearchParams 惯例)+ `window.__swPerfFlags.get()`(探针/F5 断言面)。
+// 语义契约(转正后):缺省 true = 零语义优化层(L1/C1/W1-W4)生效——落闸的每一项
+// 都经「输出逐位不变」实证(逐像素 md5 对拍+变异证红,见 tests/bj77/bj78 守卫与
+// scripts/_bj77-*/_bj78-* 仪具);`?swperf=0` = 【准出豁免口】回退旧行为(调试
+// 逃生,逐位=转正前现行行为);`?swperf=1` 合法(从缺省即开,无操作)。
+// 纪律不变:任何有取舍的项(降频/降精度/合批改序/降档)禁止接本闸,须独立定谳。
+// 读取面:`?swperf` 查询参数 + `window.__swPerfFlags.get()`(探针/F5 断言面)。
 //
-// let 而非 const:实机 A/B 对拍(_bj77-pixel-ab.mjs)与守卫测试需同会话
-// 翻面(lightFast/opaqueMain「静态字段 JS 可写」同惯例)。
+// let 而非 const:实机 A/B 对拍(_bj77-pixel-ab.mjs/_bj78-pixel-ab.mjs 运行时
+// 翻面)与守卫测试需同会话翻面(lightFast/opaqueMain「静态字段 JS 可写」同惯例)。
 export let swPerf = (() => {
   try {
-    return typeof location !== 'undefined'
-      && new URLSearchParams(location.search).get('swperf') === '1';
-  } catch { return false; }
+    if (typeof location === 'undefined') return true;   // node/测试环境:缺省开
+    // 豁免口仅认显式 '0';其余(缺省/'1'/他值)=开
+    return new URLSearchParams(location.search).get('swperf') !== '0';
+  } catch { return true; }
 })();
 
 /** 测试/对拍翻面(生产代码禁调——生产只读 URLSearchParams 一次) */

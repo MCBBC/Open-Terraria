@@ -103,7 +103,7 @@ function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
 import type { Camera } from './Camera';
-import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(?swperf=1;缺省关=逐位不变)
+import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -2557,7 +2557,7 @@ function dustTrailCount(d: { type: number; vx: number; vy: number; fadeIn: numbe
 /** 四柱护盾泡破盾/重塑计时器（enemy → 状态;drawEnemy 逐帧推进） */
 const PILLAR_FF = new WeakMap<object, { lastShield: number; breakTick: number; reformTick: number }>();
 
-// ---- ★BJ78 W4（?swperf=1）updateWaterWaves 每帧分配消除（2026-09-14 WaterWaves 区补刀）----
+// ---- ★BJ78 W4（swPerf 快路径）updateWaterWaves 每帧分配消除（2026-09-14 WaterWaves 区补刀）----
 // 现场：updateWaterWaves 每帧 new 2 个【内容恒定】的弹幕表 Set + 3 个闭包
 // （inLiquidAt/push/pushPlayer）+ 2 个对象（_waveCss 帧态、waterWaves.frame 的
 // WaveFrameInput 字面量）。以下模块级资产只被 swPerf 快路径消费；
@@ -4783,7 +4783,7 @@ export class Renderer {
 
     // ---- 实体注入采集（DrawWaves :181-334）----
     const st = world.store;
-    // ★BJ78 W4（?swperf=1）：闭包→模块级直调 + _waveCtx 槽（每帧先覆写再同步消费）；
+    // ★BJ78 W4（swPerf 快路径）：闭包→模块级直调 + _waveCtx 槽（每帧先覆写再同步消费）；
     // flag 关 = 原闭包逐字保留（现行行为逐位不变）
     if (swPerf) {
       _waveCtx.st = st; _waveCtx.camL = camL; _waveCtx.camT = camT;
@@ -5574,7 +5574,7 @@ export class Renderer {
   private _clWX1: Float64Array | null = null;
   /** 满亮行旗（光照图逐行 AND，255=整行全白 → 恒等乘行级跳过；尺寸随 h2 重建） */
   private _clRowWhite: Uint8Array | null = null;
-  /** ★BJ77(#swperf) 光照图构建快路径 scratch（?swperf=1 才消费；尺寸随 w2/h2 重建）。
+  /** ★BJ77(#swperf) 光照图构建快路径 scratch（swPerf 快路径消费；尺寸随 w2/h2 重建）。
    *  权重必须 Float64（同 _clWX0 教训：Float32 舍入破坏逐位一致性） */
   private _bj77TapCol: Int32Array | null = null;
   private _bj77TapColIn: Uint8Array | null = null;
@@ -15836,7 +15836,7 @@ export class Renderer {
     // (2026-08 审计 G2);现采样写入模块级标量缓冲,运算顺序不变、结果逐位一致
     const tapBuf = _lightTap;
     if (swPerf) {
-      // ★BJ77 零语义快路径(#swperf 2026-09-14;?swperf=1 启用,缺省走下方原循环
+      // ★BJ77 零语义快路径(#swperf 2026-09-14;★转正缺省开,?swperf=0 走下方原循环
       //   逐位不变):逐 px/py 预取 4-tap 的窗口判定与下标,内循环免每像素
       //   4 次索引重算 + 12 次 tapBuf 中转读写。
       //   ★等价性论证(输出逐位一致):
@@ -16601,7 +16601,7 @@ export class Renderer {
       ctx.textAlign = 'left';
       ctx.fillText(Lang.text('Mods.SandboxWorld.UI.TimePanel.Title'), px + 10, py + 17);
       ctx.textAlign = 'center';
-      box(px + pw - 26, py + 5, 20, 20, '\u2715', () => { this.timePanelOpen = false; });
+      box(px + pw - 26, py + 5, 20, 20, '✕', () => { this.timePanelOpen = false; });
       const setT = (t: number) => { clock.timeOfDay = ((t % 1) + 1) % 1; };
       box(px + 8, py + 32, 76, 22, '\u2212 1 \u5c0f\u65f6', () => setT(clock.timeOfDay - 1 / 24));
       ctx.fillStyle = '#9aa2cc';
@@ -16653,20 +16653,27 @@ export class Renderer {
         ctx.fillText(label, x + w2 / 2, y + h2 / 2 + 4);
         if (clicked && hov) { act(); this._minimapBtnClicked = true; }
       };
+      // ★SW-BJ81 规格①:标题行 + 显式关闭钮（同时间面板;内容行整体下移 24）
+      ctx.fillStyle = '#9aa2cc';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(Lang.text('Mods.SandboxWorld.UI.WeatherPanel.Title'), px2 + 10, py2 + 17);
+      ctx.textAlign = 'center';
+      box2(px2 + pw2 - 26, py2 + 5, 20, 20, '✕', () => { this.weatherPanelOpen = false; });
       const presetsW: Array<[string, string]> = [
         ['晴朗', 'clear'], ['多云', 'cloudy'], ['小雨', 'lightrain'], ['大雨', 'heavyrain'],
         ['风暴', 'storm'], ['沙尘暴', 'sandstorm'], ['史莱姆雨', 'slimerain'], ['随机', 'random'],
       ];
       presetsW.forEach(([label, name], i) => {
         const col = i % 4, row = Math.floor(i / 4);
-        box2(px2 + 10 + col * 56, py2 + 10 + row * 26, 52, 22, label, () => this.weatherPreset?.(name));
+        box2(px2 + 10 + col * 56, py2 + 34 + row * 26, 52, 22, label, () => this.weatherPreset?.(name));
       });
       // 风力调节（±0.2，钳 ±0.8）
       const wd = world.weather;
       if (wd) {
-        box2(px2 + 10, py2 + 64, 100, 20, `风 ${Math.round(wd.windSpeedTarget * 100) / 100}`, () => {});
-        box2(px2 + 8, py2 + 88, 52, 18, '− 风', () => { wd.windSpeedTarget = Math.max(-0.8, wd.windSpeedTarget - 0.2); });
-        box2(px2 + pw2 - 60, py2 + 88, 52, 18, '+ 风', () => { wd.windSpeedTarget = Math.min(0.8, wd.windSpeedTarget + 0.2); });
+        box2(px2 + 10, py2 + 88, 100, 20, `风 ${Math.round(wd.windSpeedTarget * 100) / 100}`, () => {});
+        box2(px2 + 8, py2 + 112, 52, 18, '− 风', () => { wd.windSpeedTarget = Math.max(-0.8, wd.windSpeedTarget - 0.2); });
+        box2(px2 + pw2 - 60, py2 + 112, 52, 18, '+ 风', () => { wd.windSpeedTarget = Math.min(0.8, wd.windSpeedTarget + 0.2); });
       }
     }
     // ★点击小地图地图区域 → 打开全图（用户实报缺失——原版 DrawMap 全模式共用

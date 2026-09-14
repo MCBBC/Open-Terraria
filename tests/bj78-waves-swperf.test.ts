@@ -1,6 +1,8 @@
 // ★BJ78 WaterWaves 区 W1-W4 零语义分配消除守卫（2026-09-14 波纹区补刀）
 //
-// 前置：BJ77 建 ?swperf=1 总闸（perfFlags.ts，缺省关=现行行为逐位不变）。
+// 前置：BJ77 建 ?swperf 总闸（perfFlags.ts；★2026-09-14 用户实机确认转正缺省开，
+// `?swperf=0` = 准出豁免口回退旧行为逐位）。本文件各断言为关/开相对臂比较，
+// 转正后语义不变：flag 关 = 旧行为恢复、flag 开 = 优化路径。
 // 本文件四层：
 //  ① W1/W2 分配面：URLSearchParams 构造计数——sampleDisplace（W1，每帧×表层水格
 //     数百次）flag 关每调用一次构造（现行行为）、flag 开走缓存读取面零构造；
@@ -50,7 +52,7 @@ function countMinMax(body: () => void): number {
 
 const after: Array<() => void> = [];
 afterAll(() => {
-  swPerfSetForTest(false);          // 归还缺省（闸门缺省关）
+  swPerfSetForTest(true);           // 归还缺省（★转正后缺省开）
   setWaveTextures(null, null);      // 归还波纹单例纹理态
   for (const f of after) f();
 });
@@ -420,4 +422,4 @@ describe('★BJ78 结构锁(源文本锚)', () => {
 });
 
 // swPerf 引用保活（闸门缺省关断言在 BJ77 守卫文件）
-void swPerf;
+void swPerf;   // 转正后缺省开;翻面 API 语义见 perfFlags 头注

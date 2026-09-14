@@ -12,7 +12,7 @@ import { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
 import { texId, texReady } from './texId';
-import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(?swperf=1;缺省关=逐位不变)
+import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 兜底——原版微光无瀑布拖尾分支，DrawShimmer 单独绘制）
 const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
@@ -415,7 +415,7 @@ export function drawVanillaLiquids(
   //  的【状态复位重扫】——它把 bg 调用 P2/P3 已改写的 typeA/visTypeA 重置回 store
   //  值、再由本调用 Unguarded P3 重铺,fg 绘制语义(夹心格/瀑布类型)依赖此复位,
   //  必须保留。而 bg 调用(needsPrep=true)时它与上方守卫块【相邻】且为纯 store
-  //  重读(两次写入值恒等)= 幂等白扫 → ?swperf=1 下仅 bg 跳过(输出逐位不变;
+  //  重读(两次写入值恒等)= 幂等白扫 → swPerf 下仅 bg 跳过(输出逐位不变;
   //  关=原行为恒跑,双支结构见 perfFlags.ts 契约)。
   if (!swPerf || !needsPrep) {
   for (let lx = 0; lx < pw; lx++) {
@@ -1025,6 +1025,9 @@ export function drawLiquidBehindTilesOnly(
     return t;
   };
 
+  // ★IIIII251：足迹离屏默认 identity,而带坐标是世界 px——先对齐主 ctx 当前
+  //  变换(浸润带调用点=世界变换,见 drawVanillaLiquids :792 恢复),循环尾恢复。
+  if (footprintCtx) footprintCtx.setTransform(ctx.getTransform());
   for (let x = Math.max(1, tx0); x <= Math.min(st.w - 2, tx1); x++) {
     for (let y = Math.max(1, ty0); y <= Math.min(st.h - 2, ty1); y++) {
       const i = st.idx(x, y);
@@ -1280,5 +1283,7 @@ export function drawLiquidBehindTilesOnly(
       drawBand(bobDy251);
     }
   }
+  // ★IIIII251：足迹画完恢复 identity（beginFgPass 每帧重设变换，此处为防御复位）
+  if (footprintCtx) footprintCtx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
 }

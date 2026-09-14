@@ -3068,7 +3068,7 @@ export class UI {
         item.title = `${e.name}  [${e.d.key}]`;
         // ★SW-BJ81 规格③:行宽随浮窗自适应(flex-basis 150 → 340 宽浮窗两列,
         //   窄窗退化单列;旧固定 170px 在缩窄后只剩单列)
-        item.style.cssText = 'display:flex; align-items:center; gap:4px; flex:1 1 150px; min-width:0; padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd; user-select:none;';
+        item.style.cssText = 'display:flex; align-items:center; gap:4px; flex:1 1 150px; min-width:0; box-sizing:border-box; padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd; user-select:none;';
         // 悬停 = 背包同款详情气泡（2026-08-27 用户要求）——合成槽语义（stack1 无
         // 词缀/收藏）,锚=行元素;离开即收
         item.addEventListener('mouseenter', () =>
@@ -3083,7 +3083,8 @@ export class UI {
         item.appendChild(img);
         const lbl = el('span');
         lbl.textContent = e.name;
-        lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        // ★SW-BJ81 规格③:flex 子项省略号须 min-width:0(否则名字撑开行宽,双列布局塌单列)
+        lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;';
         item.appendChild(lbl);
         // ★SW-BJ81 规格②⑤⑥:按下即取 1 件上光标（合成抓取同款,数量恒 1——
         //   旧「可堆叠给一组≤99」废止）,按住持续 +1（ITEMSEARCH_GRAB_INTERVAL_MS

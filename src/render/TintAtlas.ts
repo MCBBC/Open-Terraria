@@ -47,6 +47,12 @@ export class TintAtlas {
     const sc = this.scratchCv.getContext('2d', { willReadFrequently: true })!;
     sc.clearRect(0, 0, w, h);
     paint(sc);
+    // ★FX24 2026-09-14 勘误：页矩形是【回收复用】的(evictCold/drop → free-list)，
+    //  旧占主留下的像素未被清过；blit 走 source-over 时【透明像素不覆写目标】，
+    //  新烘焙在自己透明区里透出上一任的内容——鹿角怪 668 实报"行走半透明/攻击帧
+    //  花屏"根因(lai3 渐变窗 tq 键高频 churn → 大量 220×242 矩形回收，新帧透明区
+    //  透出旧 tq 紫色帧残影)。目标矩形先 clearRect 再 blit 即根治(全 tint 族受益)。
+    page.ctx.clearRect(x, y, w, h);
     page.ctx.drawImage(this.scratchCv, 0, 0, w, h, x, y, w, h);
     const rect: TintRect = { c: page.cv, x, y, w, h };
     this.entries.set(key, { rect, page });
