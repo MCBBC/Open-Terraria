@@ -10,7 +10,18 @@
 export const DOM_UI_TARGET_SELECTOR =
   '.sw-root, .sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-chatbox,' +
   '.sw-mobile, .sw-hotbar, .sw-tooltip, .sw-drag-ghost,' +
-  '.sw-ach-panel, .sw-res-panel, .sw-eqdock, .sw-vinv, .sw-summon-panel';
+  '.sw-ach-panel, .sw-res-panel, .sw-eqdock, .sw-vinv, .sw-summon-panel,' +
+  '.sw-npc-dialog, .sw-npc-shop, .sw-happy-panel';
+  // .sw-npc-dialog/.sw-npc-shop/.sw-happy-panel = NPC 对话面板/商店浮面板(classic
+  //  档)/快乐度浮层根（FX22 2026-09-14 用户实报:点对话「关闭」钮有几率开火/耗弹）。
+  //  附着态点击本就靠 .sw-root 祖先命中;但这三个面板的左键处理会在【事件派发中途】
+  //  同步 remove 面板——对话钮 close/refresh 全走重建式 open() 首行 this.close(),
+  //  商店格买入 npcShopBuy→openNpcShop→NpcShop.open() 首行 this.close()——事件继续
+  //  冒泡到 window 时 target 已脱离 .sw-root 子树,closest('.sw-root') 落空 ⇒ Input.ts
+  //  mousedown 门(:229)放行 → mouseDown 置位=世界开火/耗弹。登记面板根类后,detached
+  //  子树 closest 仍命中面板根,守卫与派发时序解耦（2026-08-28 商店案曾在 Input 白名单
+  //  登记 .sw-npc-shop,08-29 名单收口时该类被 .sw-root 覆盖面假设顶掉=洞重开;UI.ts
+  //  heldStack 门对同三类的 closest 早退本就按面板根判,此处对齐同名单同源）。
   // .sw-summon-panel = F6 召唤面板根节点（SW-BJ32 2026-09-08）：裸 div 曾不在本表
   // ⇒ 面板点击漏成世界挥击/挖掘 + inpOverDomUi 盲区（见 DebugSummonPanel.show 注）
   // .sw-eqdock = 右下角无框装备/杂项坞(2026-09-02):无 .sw-panel 底框,不登记会把

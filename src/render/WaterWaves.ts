@@ -92,6 +92,8 @@
 // · NPC 洗掠 quad 的 rotation（:217 传入 nPC.rotation）未建模——仅蠕虫族视觉
 //   旋转非 0，且洗掠强度本就 ≤0.04，影响不可辨。
 
+import { swPerf, waveAmpParam } from './perfFlags';   // ★BJ77/BJ78 零语义优化层总闸(?swperf=1;缺省关=逐位不变)
+
 /** 档位门（WaterShaderData.cs:114-118）。q: 0..3 */
 export interface WaveSourceGates {
   /** NPC 波（恒开，:79） */
@@ -439,7 +441,11 @@ class WaterWaveSystem {
     //   与 GLWaterDistortion.uploadWave 同值;2=2026-08-25 观感校准值,可显式 ?wamp=2
     //   取回,但位移×2 会加宽水线边缘"越出水体"的采样带=直线缝复现参数）
     const h = this._readR(px, py);
-    const waveAmp = (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 1; } catch { return 1; } })();
+    // ★BJ78 W1(?swperf=1):上行 waveAmp 原为每调用 `new URLSearchParams`+闭包热分配
+    //   （本函数每帧×表层水格数百次调用=全链最热分配点）。flag 开 → 走缓存读取面
+    //   perfFlags.waveAmpParam(按 search 串键控,值逐位同——同一表达式含 fallback);
+    //   flag 关 → 原样逐调用解析(现行行为逐位不变)。
+    const waveAmp = swPerf ? waveAmpParam() : (() => { try { return Number(new URLSearchParams(location.search).get('wamp')) || 1; } catch { return 1; } })();
     const hClamp = Math.min(0.3, Math.max(-0.3, (h - 0.5) * waveAmp));
     const I = this.intensity;
     const dispx = gx * 0.1 * I;
@@ -598,6 +604,43 @@ class WaterWaveSystem {
   private _step(dx: number, dy: number): void {
     const w = this._gW, h = this._gH;
     const R = this._R, G = this._G, R2 = this._R2, G2 = this._G2;
+    if (swPerf && dx === 0 && dy === 0) {
+      // ★BJ78 W3(?swperf=1) 快路径：dx=dy=0（静止相机的每一步 + 任何相机下每帧
+      //   的第二步 _step(0,0)）时外提不变式成立——
+      //     sy0 = y - dy ≡ y、sx0 = x - dx ≡ x，而 0≤y<h、0≤x<w 恒成立
+      //     ⇒ clamp(y)=y、clamp(x)=x（yM=y、xM=x），剩余四邻钳制塌缩为
+      //       一次边界三元（yU=y>0?y-1:0 / yD / xL / xR，与 min/max 逐值相同）；
+      //     行基准 rowM = yM·w = y·w ⇒ 像素索引 i = y·w+x ≡ rowM+x（乘法外提）。
+      //   核公式段与下方原路径【逐字同序】（S/wv/newH/双重量化/dv/gq）——
+      //   位恒等由 tests/bj78-waves-swperf.test.ts 双支对拍+Math.min/max 计数锁。
+      //   非零滚动增量（走动帧的第一步）走下方原路径逐字不动。
+      for (let y = 0; y < h; y++) {
+        const yU = y > 0 ? y - 1 : 0;
+        const rowM = y * w, rowU = yU * w, rowD = (y < h - 1 ? y + 1 : h - 1) * w;
+        for (let x = 0; x < w; x++) {
+          const xL = x > 0 ? x - 1 : 0;
+          const xR = x < w - 1 ? x + 1 : w - 1;
+          // 内联 waveProcessorStep（热循环零分配；公式+双重量化见纯函数版）
+          const c = R[rowM + x], cg = G[rowM + x];
+          const signedC = 2 * c - 1;
+          const S = (2 * R[rowM + xL] - 1) + (2 * R[rowM + xR] - 1)
+            + (2 * R[rowU + x] - 1) + (2 * R[rowD + x] - 1);
+          const wv = (cg - 0.5) * (10 / 3);
+          const newH = (signedC + 2 * (S * 0.25 - signedC) + wv * Math.abs(wv)) * WATER_DAMP;
+          const i = rowM + x;
+          const q = Math.round(512 * (newH * 0.5 + 0.5));
+          let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
+          if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
+          R2[i] = rq / 256;
+          const dv = newH - signedC;
+          let gq = Math.round((0.5 + 0.3 * Math.sign(dv) * Math.sqrt(Math.abs(dv))) * 256);
+          if (gq < 0) gq = 0; else if (gq > 256) gq = 256;
+          G2[i] = gq / 256;
+        }
+      }
+      this._R = R2; this._G = G2; this._R2 = R; this._G2 = G;
+      return;
+    }
     for (let y = 0; y < h; y++) {
       const sy0 = y - dy;
       const yU = Math.min(h - 1, Math.max(0, sy0 - 1));   // 上邻（uv y 向下）

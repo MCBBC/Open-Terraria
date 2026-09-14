@@ -67,9 +67,9 @@ import { TILE_DEFS } from '../data/tiles';
 import catRaw from '../data/vanilla-journeycat.json';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { World } from '../world/World';
-import type { ChunkPair } from './ChunkCache';
+import { ChunkCache, type ChunkPair } from './ChunkCache';
 import { TileStore } from '../world/TileStore';
-import { drawVanillaCell, chestLidPoseAt } from './VanillaTiler';
+import { drawVanillaCell, chestLidPoseAt, chestPoseSheet } from './VanillaTiler';
 import { frameMergesWith } from './TileMergeFamily';
 import { isDynamicAnimSheet } from './TileAnim';
 import { getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
@@ -261,6 +261,8 @@ export const shineStats = {
   resumesStalled: 0, // 续烘零进展次数(断行行号未动)——诊断面
   bakeMs: 0,         // 烘焙链毫秒累计(时间盒模式;帧时归因面)
   bakes: 0,         // 全新烘焙（含超线部分烘焙）
+  memoHits: 0,      // ★IIIII252 跨 pair memo 指纹命中（零重烘复用）
+  memoMisses: 0,    // ★IIIII252 指纹未命中（真改动/冷条目，落回常规路径）
   stale: 0,         // 超线最近档旧帧顶替
   skips: 0,         // 超线首烘跳过（null）
   pending: 0,       // 帧初待烘队列长度（上一帧遗留）
@@ -300,6 +302,62 @@ const SCR = TILE + PAD * 2;      // 40
  *  预算外用最近档旧帧顶替=shine 渐进更新无爆发)。平加 Gemspark 消费面用
  *  slots.find(e=>e.add)。 */
 const shineCache = new WeakMap<ChunkPair, { q: number; e: ShineChunkEntry }[]>();
+
+/** ★IIIII252 跨 pair 世代 memo（冰雪掉帧 trace 归因修复）。
+ *  【病灶】shineCache 以 ChunkPair 身份为键（WeakMap），而底图【任意】重烘（LRU
+ *  驱逐重进视野/任意 markDirty 级联）都恒新建 pair 对象（ChunkCache.ts:532）⇒
+ *  键换代 = shine 缓存整条失忆。雪域每 chunk 有数百 shine 格（147/161/163/164 全
+ *  在 Main.tileShine2，Main.cs:10420-10423）⇒ 每 chunk 重烘 = 数百次 stampShineCell
+ *  ×7 次画布操作；默认计数预算 {left:2}/帧 被持续打满 = 用户 trace 实测 TileShine
+ *  烘焙链 5.8s/49s（全程 25.8fps、218 个 ≥50ms 长任务的主 hot 环节，/tmp/iii252-out）。
+ *  【方案】按 chunk key 存 {fp, slots}；fp = 烘焙输入指纹（FNV-1a over 全部 256 格的
+ *  type/frameX/frameY/paint/wire/coat/flags + showInvisibleBlocks + 箱盖态 + shimmerQ）。
+ *  指纹全等 ⇒ 烘焙产物【必然】逐位全等（bakeShineChunk 是这些输入的纯函数，画布
+ *  本体与 pair 无关）⇒ 直接复用 entry，零重烘。指纹不等（真改了格）才重烘并覆写。
+ *  【边界】上限 256 条（≈MAX_CHUNKS 同阶；256² 画布 ≤2 张/条 ⇒ ≤64MB 上界，逐出即
+ *  GC）；LRU 触碰序（delete+set）。__SW_SHINE_MEMO_OFF 逃生门（A/B 探针，同
+ *  __SW_SHINE_OFF 惯例）。 */
+const shineMemo = new Map<number, { fp: number; slots: { q: number; e: ShineChunkEntry }[] }>();
+const SHINE_MEMO_MAX = 256;
+
+/** bake 输入指纹。语义注记：① wire/coat 混【全字节】= bake 门（已致动/隐形/荧光）
+ *  的超集——电路/涂装编辑引发的多余重烘可接受，反向漏烘不可接受；② 箱盖态混入
+ *  world.chests 全表（chestLidPoseAt 输入 x/y/frame；宝箱 21 是 shine2 成员）；
+ *  ③ showInvisibleBlocks 是 bake 门的全局输入（Game.ts 隐形块翻转 → invalidateAll），
+ *  不混入 = 翻转后 memo 误复用。 */
+function shineChunkFingerprint(world: World, cx: number, cy: number, shimmerQ: number): number {
+  const st = world.store;
+  const x0 = cx * CHUNK, y0 = cy * CHUNK;
+  let h = 0x811c9dc5 | 0;
+  const mix2 = (v: number) => {
+    h = ((h ^ (v & 255)) * 0x01000193) | 0;
+    h = ((h ^ ((v >>> 8) & 255)) * 0x01000193) | 0;
+  };
+  for (let ly = 0; ly < CHUNK; ly++) {
+    const row = (y0 + ly) * st.w;
+    for (let lx = 0; lx < CHUNK; lx++) {
+      const i = row + x0 + lx;
+      mix2(st.type[i]); mix2(st.flags[i]);
+      mix2(st.frameX[i] & 255); mix2(st.frameX[i] >>> 8);
+      mix2(st.frameY[i] & 255); mix2(st.frameY[i] >>> 8);
+      mix2(st.paint[i]); mix2(st.wire[i]); mix2(st.coat[i]);
+    }
+  }
+  mix2(st.showInvisibleBlocks ? 1 : 0);
+  mix2(shimmerQ * 255);
+  const chests = world.chests;
+  if (chests) {
+    mix2(chests.length & 255); mix2((chests.length >>> 8) & 255);
+    for (let k = 0; k < chests.length; k++) {
+      const c = chests[k];
+      mix2(c.x & 255); mix2((c.x >>> 8) & 255);
+      mix2(c.y & 255); mix2((c.y >>> 8) & 255);
+      mix2(c.frame ?? 0);
+    }
+  }
+  return h >>> 0;
+}
+
 let scratch: HTMLCanvasElement | null = null;
 let scratchCtx: CanvasRenderingContext2D | null = null;
 let mask: HTMLCanvasElement | null = null;
@@ -407,7 +465,10 @@ function stampShineCell(
     sameFn(type),
     PAD, PAD, fx, fy,
     undefined,
-    chestLidPoseAt(world.chests, x, y, fx, fy),
+    // ★IIIII252：姿态消费面仅 21/467（VanillaTiler.chestPoseSheet 单源）——
+    //   chestLidPoseAt 是 O(chests) 全表线性查,雪域数百 shine 格逐格急切求值 =
+    //   重烘成本放大器（真实长龄世界数千箱 × 256 格）,非容器格零成本短路。
+    chestPoseSheet(sheet) ? chestLidPoseAt(world.chests, x, y, fx, fy) : 0,
   );
   // alpha 蒙版 = delta 烘焙前的格形状（multiply 会把透明像素染成实色——裁回，
   // 手法同 TileFlames.tintedFlameCell :498-500；蒙版须拷贝而非重画源矩形：
@@ -582,6 +643,47 @@ function ensureEntry(
       }
       return e;
     }
+    // ★IIIII252 跨 pair memo 指纹门：档位未命中（典型=底图重烘换代 pair）先查
+    //   跨世代 memo——指纹全等 ⇒ 复用 entry 零重烘（预算外也放行：复用无烘焙成本，
+    //   且语义 = 缓存未换代时本应命中的那份）。指纹不等 = 真改了格 → 落回重烘。
+    if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
+      const key = ChunkCache.key(cx, cy);
+      const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+      const mSlot = shineMemo.get(key)?.slots.find((s2) => s2.q === shimmerQ && s2.fp === fp);
+      if (mSlot) {
+        shineStats.memoHits++;
+        // LRU 触碰序
+        const m = shineMemo.get(key)!;
+        shineMemo.delete(key);
+        shineMemo.set(key, m);
+        if (slots.length >= 3) slots.shift();
+        slots.push({ q: shimmerQ, e: mSlot.e });
+        return mSlot.e;
+      }
+      shineStats.memoMisses++;
+      // 档位未命中:预算内重烘,预算外用最近档旧帧顶替(shine 渐进更新,无爆发)
+      if (budgetExhausted(budget)) {
+        if (budget && 'deadline' in budget) shineStats.stale++;
+        return slots[slots.length - 1].e;
+      }
+      const __tBake = performance.now();
+      const ne = bakeShineChunk(atlas, world, cx, cy, shimmerQ,
+        budget && 'deadline' in budget ? budget.deadline : undefined);
+      if (budget && 'deadline' in budget) {
+        shineStats.bakes++;
+        shineStats.bakeMs += performance.now() - __tBake;
+      }
+      budgetConsume(budget);
+      if (slots.length >= 3) slots.shift();
+      slots.push({ q: shimmerQ, e: ne });
+      shineMemo.delete(key);
+      shineMemo.set(key, { fp, slots: [{ q: shimmerQ, e: ne }] });
+      if (shineMemo.size > SHINE_MEMO_MAX) {
+        const oldest = shineMemo.keys().next().value as number | undefined;
+        if (oldest !== undefined) shineMemo.delete(oldest);
+      }
+      return ne;
+    }
     // 档位未命中:预算内重烘,预算外用最近档旧帧顶替(shine 渐进更新,无爆发)
     if (budgetExhausted(budget)) {
       if (budget && 'deadline' in budget) shineStats.stale++;
@@ -599,6 +701,21 @@ function ensureEntry(
     slots.push({ q: shimmerQ, e: ne });
     return ne;
   }
+  // ★IIIII252 首次(无 slots)同样先过 memo 指纹门(LRU 驱逐重进视野 = 全量重烘主源)
+  if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
+    const key = ChunkCache.key(cx, cy);
+    const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+    const mSlot = shineMemo.get(key)?.slots.find((s2) => s2.q === shimmerQ && s2.fp === fp);
+    if (mSlot) {
+      shineStats.memoHits++;
+      const m = shineMemo.get(key)!;
+      shineMemo.delete(key);
+      shineMemo.set(key, m);
+      shineCache.set(pair, [{ q: shimmerQ, e: mSlot.e }]);
+      return mSlot.e;
+    }
+    shineStats.memoMisses++;
+  }
   // 首次:预算内烘(预算外本帧跳过该 chunk,下帧再烘)
   if (budgetExhausted(budget)) {
     if (budget && 'deadline' in budget) shineStats.skips++;
@@ -613,6 +730,16 @@ function ensureEntry(
   }
   budgetConsume(budget);
   shineCache.set(pair, [{ q: shimmerQ, e: ne }]);
+  if (!(globalThis as { __SW_SHINE_MEMO_OFF?: boolean }).__SW_SHINE_MEMO_OFF) {
+    const key = ChunkCache.key(cx, cy);
+    const fp = shineChunkFingerprint(world, cx, cy, shimmerQ);
+    shineMemo.delete(key);
+    shineMemo.set(key, { fp, slots: [{ q: shimmerQ, e: ne }] });
+    if (shineMemo.size > SHINE_MEMO_MAX) {
+      const oldest = shineMemo.keys().next().value as number | undefined;
+      if (oldest !== undefined) shineMemo.delete(oldest);
+    }
+  }
   return ne;
 }
 

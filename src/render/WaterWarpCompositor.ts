@@ -35,6 +35,8 @@ export class WaterWarpCompositor {
   private fgCtx: CanvasRenderingContext2D | null = null;
   private gl: GLWaterDistortion | null = null;
   private glRetryAt = 0;
+  /** ★IIIII251：本帧 bg 浸润 pass 已把坡面水足迹预画进离屏（beginFgPass 跳过清屏） */
+  private _footprintArmed = false;
   /** ?wwarp=0 关闭 / 2d 强制跳过 GL 全屏（对拍）/ auto（默认 GL 优先） */
   readonly mode: 'auto' | '2d' | 'off' = (() => {
     try {
@@ -52,8 +54,34 @@ export class WaterWarpCompositor {
   }
 
   /**
+   * ★IIIII251 斜坡水缘 GL 门控足迹（?slopewave=1）：bg 浸润 pass 在前景离屏建立
+   * 之前把坡面水形状以 α≈0.02 画进本画布——obj19 门控 aD/aU = min(α×100,1) 在
+   * α≥0.01 即饱和 ⇒ 坡面水缘纳入全屏位移场；离屏合成回场景仅 +2% 水色 tint
+   * （与浸润带同域）不可辨（对比：不透明带入离屏 = "水蓝盖地形"，已撤回方案）。
+   * 每帧清屏 + 置 armed；beginFgPass 见 armed 跳过清屏，endFgPass 合成后清屏复位。
+   * 返回 null = 本帧不画（off 模式/尺寸未定）。
+   */
+  gateFootprintCtx(w: number, h: number): CanvasRenderingContext2D | null {
+    if (this.mode === 'off' || typeof document === 'undefined' || w <= 0 || h <= 0) return null;
+    if (!this.fgCanvas || !this.fgCtx) {
+      this.fgCanvas = document.createElement('canvas');
+      this.fgCtx = this.fgCanvas.getContext('2d');
+      if (!this.fgCtx) { this.fgCanvas = null; return null; }
+    }
+    if (this.fgCanvas.width !== w || this.fgCanvas.height !== h) {
+      this.fgCanvas.width = w; this.fgCanvas.height = h;   // resize 自带清屏
+    } else {
+      this.fgCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.fgCtx.clearRect(0, 0, w, h);
+    }
+    this._footprintArmed = true;
+    return this.fgCtx;
+  }
+
+  /**
    * 开始前景水 pass：离屏 fgCanvas 克隆世界变换后返回其 ctx（调用方把
    * drawVanillaLiquids 前景水画上去）。null = 本帧不走离屏（调用方直画世界层）。
+   * ★IIIII251：armed（本帧 bg 已预画坡面足迹）时跳过清屏——足迹保留给门控。
    */
   beginFgPass(srcCtx: CanvasRenderingContext2D): CanvasRenderingContext2D | null {
     if (typeof document === 'undefined') return null;
@@ -66,7 +94,7 @@ export class WaterWarpCompositor {
     }
     if (this.fgCanvas.width !== w || this.fgCanvas.height !== h) {
       this.fgCanvas.width = w; this.fgCanvas.height = h;   // resize 自带清屏
-    } else {
+    } else if (!this._footprintArmed) {
       this.fgCtx.setTransform(1, 0, 0, 1, 0, 0);
       this.fgCtx.clearRect(0, 0, w, h);
     }
@@ -90,6 +118,12 @@ export class WaterWarpCompositor {
     srcCtx.globalCompositeOperation = 'source-over';
     srcCtx.drawImage(this.fgCanvas, 0, 0);
     srcCtx.restore();
+    // ★IIIII251：合成后清屏 + 解除 armed（下一帧 bg 重画足迹；旧内容不留到下帧）
+    if (this._footprintArmed && this.fgCtx) {
+      this.fgCtx.setTransform(1, 0, 0, 1, 0, 0);
+      this.fgCtx.clearRect(0, 0, this.fgCanvas.width, this.fgCanvas.height);
+    }
+    this._footprintArmed = false;
     // drawVanillaLiquids 的收尾契约（目标 ctx alpha=1）由本函数承继
     srcCtx.globalAlpha = 1;
   }

@@ -19,6 +19,22 @@ const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微�
                                           // 前景水基 0.5(cs:57029),岩浆 ×1.8、蜂蜜 ×1.6 钳 1(cs:57138-57150);
                                           // 微光 = DrawShimmer val×0.75（LiquidRenderer.cs:700）
 
+// ---- ★IIIII251 斜坡水缘波纹覆盖（?slopewave=1 查询参数灰度 flag，用户明示偏差）----
+// 【偏差语义】原版坡面/半砖岸格的水线 = 方块贴图斜边 + 静态浸润带，波场不覆盖
+// （表层逐格 bob 只走 hasTE 液体格；GL 全屏扭曲的 obj19 门控足迹 = 前景水 alpha,
+//   坡面格无前景水 ⇒ gate=0 恒不位移）⇒ 斜坡水缘是全池塘唯一不动的水线。
+// 用户要求波纹线沿斜坡水缘连续。双路径交付：
+//   CPU 路径（?wwarp=0 / CPU 渲染 / GL 死）= 浸润带逐格 bob（waveBob 入参）；
+//   GL 路径（现役默认）= 坡面水形状以 α≈0.02 预画进前景水离屏（footprintCtx
+//   入参）→ obj19 门控 aD/aU×100 在 α≥0.01 即饱和 ⇒ 纳入全屏位移场。
+// 【转正】用户验收后缺省改 true（同 ?shinebudget/?glband 惯例，先灰度）。
+export const slopeWaveEnabled = (() => {
+  try {
+    return typeof location !== 'undefined'
+      && new URLSearchParams(location.search).get('slopewave') === '1';
+  } catch { return false; }
+})();
+
 // 我们的 liquidType（1 水 / 2 岩浆 / 3 蜂蜜 / 4 微光）→ 原版 LiquidType（0/1/2/3）
 function toVanillaType(t: number): number {
   return t === 2 ? 1 : t === 3 ? 2 : t === 4 ? 3 : 0;
@@ -315,6 +331,10 @@ export function drawVanillaLiquids(
   lumAt?: (tx: number, ty: number) => number,
   /** 渲染帧号(同帧 bg/fg 两调用传同值 → P1-P7 第二次调用走缓存复用) */
   frameToken?: number,
+  /** ★IIIII251 斜坡水缘 GL 门控足迹画布（仅 bg 调用传入；Renderer 在 warpOn &&
+   *  ?slopewave=1 时给 waterWarp.gateFootprintCtx()——浸润 pass 把坡面水形状
+   *  以 α≈0.02 预画进去,obj19 门控由此覆盖斜坡水缘。null=不画） */
+  gateFootprintCtx?: CanvasRenderingContext2D | null,
 ): void {
   if (!atlas) { _liqDebug.atlasReady = false; return; }
   const PAD = 2;
@@ -638,7 +658,11 @@ export function drawVanillaLiquids(
   //   FilterWaterDistortion 全屏位移（原版 waterTarget 本体无逐格 bob）。
   const waveOn = waterWaves.quality > 0 && !warpMode;
   const waveInvZ = waveOn ? 1 / Math.max(1e-6, waterWaves.viewZoom()) : 0;
+  // ★IIIII251 斜坡水缘 CPU bob 门（与表层 bob 同门：GL 全屏扭曲路径不双重 bob，
+  //  位移由足迹门控交付——见 Renderer footCtx 接线与 WaterWarpCompositor）
+  const slopeWaveBob = slopeWaveEnabled && waterWaves.quality > 0 && !warpMode;
   const _wdisp: [number, number] = [0, 0];
+  const _slopeDisp251: [number, number] = [0, 0];   // ★IIIII251 斜坡水缘 bob 采样暂存
   // ★整数设备矩形分区（2026-08-22 用户终报"某些缩放下每格水之间浮点像素缝隙"）：
   //   水格矩形=世界整数坐标，但 zoom·dpr 非整数时相邻格共享边落在设备分数像素，
   //   光栅器对每个 drawImage 矩形【独立取边覆盖】→ 共享边 1px 无覆盖缝（背景
@@ -849,8 +873,16 @@ export function drawVanillaLiquids(
         const sh = 16 - num6;
         if (sh <= 0) continue;
         const sx = 18 * (slope - 1);
+        // ★IIIII251（?slopewave=1 CPU 路）：斜面覆盖随波场垂直位移——与浸润带同
+        //  采样点（格中心）/同一 ±16 世界 px 钳,刚性整移保持斜切水线形状
+        let dy251 = 0;
+        if (slopeWaveBob) {
+          waterWaves.sampleDisplace(x * 16 + 8, y * 16 + 8, _slopeDisp251);
+          dy251 = Math.round(Math.min(16, Math.max(-16, _slopeDisp251[1]
+            / Math.max(1e-6, waterWaves.viewZoom()))));
+        }
         ctx.globalAlpha = 1;   // 背景层不透明（前景 0.6 份已撤，见块头注释）
-        ctx.drawImage(slopeTex, sx, num6, 16, sh, x * 16, y * 16 + num6, 16, sh);
+        ctx.drawImage(slopeTex, sx, num6, 16, sh, x * 16, y * 16 + num6 + dy251, 16, sh);
       }
     }
     ctx.globalAlpha = 1;
@@ -869,7 +901,7 @@ export function drawVanillaLiquids(
   // ★浸润带恒内联直画（2026-08-22 全屏扭曲重构：水体不再进离屏分层——浸润带
   //   属于墙/方块层渲染，背景 pass 在墙/方块之前画 = 原版层序；全屏扭曲在
   //   compositeLight 后统一施加，浸润带随场景一起扭，无需离屏足迹机制）
-  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false);
+  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false, 0, slopeWaveBob, gateFootprintCtx ?? null);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;
@@ -942,6 +974,9 @@ export function liquidSlopeSheet(vt: number, waterStyle = 0): string {
  *   false=背景 pass(:451-467,墙层前,普通坡面格走平面 Liquid 全矩形——斜切区
  *   整格覆盖,与实心层斜面带取并集=原版玩家可见结果,见 liquidSlopeSource 头注释)。
  */
+/** ★IIIII251 坡面浸润带 bob 采样暂存（模块级零分配,同 _slopeDisp251 惯例） */
+const _bandDisp251: [number, number] = [0, 0];
+
 export function drawLiquidBehindTilesOnly(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, groundLevel: number,
@@ -953,6 +988,12 @@ export function drawLiquidBehindTilesOnly(
    *  ★前景层禁止带入（前景合成画在方块贴图之上 = 水蓝盖地形——用户实报撤回）；
    *    前景采样落空由 GL 合成的足迹回退兜住（GLWaterDistortion.FRAG uFoot） */
   warpFill = 0,
+  /** ★IIIII251（?slopewave=1 CPU 路）：坡面/半砖浸润带随波场垂直 bob（刚性整移）。
+   *  调用方门 = slopeWaveEnabled && quality>0 && !warpOn（GL 路径不双重 bob） */
+  waveBob = false,
+  /** ★IIIII251（?slopewave=1 GL 路）：坡面水形状 α≈0.02 预画进前景水离屏
+   *  （= 全屏位移 obj19 门控足迹；仅 bg 调用传入，见 Renderer.drawLiquids） */
+  footprintCtx: CanvasRenderingContext2D | null = null,
 ): void {
   // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
   //  ①:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D 近似
@@ -1162,16 +1203,49 @@ export function drawLiquidBehindTilesOnly(
       if (srcW <= 0 || srcH <= 0) continue;
       const dstH = srcH;
       const dstW = srcW;
-      /** 主段 + 越界余段(末行/列边缘重复,= XNA PointClamp) */
-      const drawBand = () => {
-        ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py, dstW, dstH);
+      /** 主段 + 越界余段(末行/列边缘重复,= XNA PointClamp)；oy = ★IIIII251 波 bob 垂直位移 */
+      const drawBand = (oy = 0) => {
+        ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py + oy, dstW, dstH);
         if (rh > srcH) {
-          ctx.drawImage(drawTex, srx, texEdgeY, srcW, 1, px, py + dstH, dstW, rh - srcH);
+          ctx.drawImage(drawTex, srx, texEdgeY, srcW, 1, px, py + oy + dstH, dstW, rh - srcH);
         }
         if (rw > srcW) {
-          ctx.drawImage(drawTex, drawTex.width - 1, ry, 1, srcH, px + dstW, py, rw - srcW, dstH);
+          ctx.drawImage(drawTex, drawTex.width - 1, ry, 1, srcH, px + dstW, py + oy, rw - srcW, dstH);
         }
       };
+
+      // ---- ★IIIII251 斜坡水缘波纹（?slopewave=1）----
+      // CPU 路 bob：坡面/半砖浸润带随波场垂直位移（与表层水面格同一采样点=格中心、
+      // 同一 ±16 世界 px 钳；刚性整移=斜切水线形状不变、顶端随波进退）。GL 全屏
+      // 扭曲路径 waveBob=false（位移由足迹门控交付，防双重 bob）。
+      let bobDy251 = 0;
+      if (waveBob && num4 !== 0) {
+        waterWaves.sampleDisplace(x * 16 + 8, y * 16 + 8, _bandDisp251);
+        bobDy251 = Math.round(Math.min(16, Math.max(-16, _bandDisp251[1]
+          / Math.max(1e-6, waterWaves.viewZoom()))));
+      }
+      // GL 路足迹：坡面格把 LiquidSlope 斜面水形状、半砖格把上半水区以 α≈0.02
+      // 预画进前景水离屏——obj19 门控 aD/aU = min(α×100,1) 在 α≥0.01 即饱和 ⇒
+      // 斜坡水缘纳入全屏位移场（可见合成仅 +2% 水色 tint，与浸润带同域不可辨）。
+      // 半砖带整格宽但水区只在上半（下半是砖体）→ 足迹钳上半。
+      if (footprintCtx && num4 !== 0) {
+        if (slope !== 0) {
+          const stex = slopeTexFor(lt);
+          if (stex && stex.width > 0) {
+            const fsw = Math.min(rw, stex.width - (18 * (slope - 1) + rx));
+            const fsh = Math.min(rh, stex.height - ry);
+            if (fsw > 0 && fsh > 0) {
+              footprintCtx.globalAlpha = 0.02;
+              footprintCtx.drawImage(stex, 18 * (slope - 1) + rx, ry, fsw, fsh,
+                px, py + bobDy251, fsw, fsh);
+            }
+          }
+        } else if (st.half[i]) {
+          footprintCtx.globalAlpha = 0.02;
+          footprintCtx.fillStyle = '#808080';   // 门控只读 alpha,色值无关
+          footprintCtx.fillRect(px, y * 16, rw, 8);
+        }
+      }
 
       // ---- 微光分支（TileDrawing.cs:4188-4191 num2==14）----
       // 原版 SetShimmerVertexColors 把四角顶点色【整体重置】为 White×opacity×
@@ -1182,8 +1256,8 @@ export function drawLiquidBehindTilesOnly(
       // 按源码对齐为"不透明直画 + 2×2 子块波色 multiply"（与前景 DrawShimmer 同式）。
       if (lt === 3) {
         ctx.globalAlpha = 1;
-        drawBand();
-        if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py, dstW, dstH,
+        drawBand(bobDy251);
+        if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py + bobDy251, dstW, dstH,
           (performance.now() / 1000) * 60);
         continue;
       }
@@ -1203,7 +1277,7 @@ export function drawLiquidBehindTilesOnly(
       // 离屏填充模式绕过（带被方块贴图盖住不可见，但保住位移采样足迹）
       if (!warpFill && st.half[i] && Uq > 0 && st.wall[i] > 0) continue;
       ctx.globalAlpha = alpha;
-      drawBand();
+      drawBand(bobDy251);
     }
   }
   ctx.globalAlpha = 1;

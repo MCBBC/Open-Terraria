@@ -116,7 +116,7 @@ const calls = (events: CtxEvent[], name: string) =>
 const sets = (events: CtxEvent[], key: string) =>
   events.filter((e) => e.t === 'set' && e.key === key) as Array<{ t: 'set'; key: string; value: unknown }>;
 
-/** Renderer 原型桩（无构造器;字段按 drawCursorItemIcon 消费面注入） */
+/** Renderer 原型桩（无构造器;字段按 drawCursorItemIcon/drawMouseTextLayer 消费面注入） */
 function stubRenderer(cursorIconCtx: Record<string, unknown>, player: Record<string, unknown>) {
   const r = Object.create(Renderer.prototype) as unknown as AnyGame;
   r.cursorIconCtx = cursorIconCtx;
@@ -128,7 +128,11 @@ function stubRenderer(cursorIconCtx: Record<string, unknown>, player: Record<str
   r.signHoverText = '';
   r.atlasIcon = () => ({ img: {}, sx: 0, sy: 0, sw: 16, sh: 16 });
   const { ctx, events } = recordingCtx();
+  // ★SW-FX21 2026-09-14：cursorItemIconText 文本支自 drawCursorItemIcon 迁出至
+  //   drawMouseTextLayer（DrawPendingMouseText 层序=所有 UI 层之后,信息饰品列不再
+  //   压标签）——本桩按真实帧序连调两段,事件流与旧位逐事件同形
   (r as any).drawCursorItemIcon(ctx, player);
+  (r as any).drawMouseTextLayer(ctx, player);
   return events;
 }
 

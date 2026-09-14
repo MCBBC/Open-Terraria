@@ -436,8 +436,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 向导「制作」（NPCChatText_GuideReverseCrafting :40723）：开背包 +
       // ★刀19 vanilla 布局=原版向导制作菜单（modern 缺省开窗/经典位槽）;
       // classic 布局=自创反查浮层（零变化白名单）
+      // ★FX23:openInventory 必须 force——原版 :40724 `playerInventory = true`
+      //   【无条件置位】(≠Esc 链 ToggleInv 的开/关翻转;Player.OpenInventory
+      //   Player.cs:5071-5075 = force-open)。缺 force=背包已开态点「制作」把
+      //   背包翻转关掉,向导态/modern 窗全落在 display:none 面板内 → 用户只见
+      //   对话收起、无任何制作 UI(FX23 探针 B8/B9 实锤)
       onGuideCraftOpen: () => {
-        ui.openInventory();
+        ui.openInventory(true);
         if (options.data.inventoryLayout === 'vanilla') ui.openVanillaGuideCraft();
         else ui.openGuideSearch();
       },

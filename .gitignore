@@ -31,3 +31,4 @@
 /mobile/twa/.gradle
 /mobile/gecko-shell
 /js-snaps-*
+dist-analyze

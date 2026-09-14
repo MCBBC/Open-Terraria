@@ -6318,8 +6318,10 @@ export class UI {
         if (vid === -1) {
           // EquipPage[5] 快捷图标（Main.cs:40534-40539）：CloseNPCChatOrSign(quiet)+
           // OpenInventory()+EquipPageSelected=1——本仓装备列常驻，开背包即达
+          // ★FX23:force 开(原版 Player.OpenInventory Player.cs:5071-5075 =
+          //   playerInventory=true force-open,非翻转——同 onGuideCraftOpen 定谳)
           this.game?.closeNpcDialog();
-          this.openInventory();
+          this.openInventory(true);
           return;
         }
         // 渔夫任务鱼角标点击 → 开聊天框插 [i:vid]（Main.cs:40505-40512）

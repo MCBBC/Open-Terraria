@@ -1435,7 +1435,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     //  集 = TileID.cs:315 CreateBoolSet(21,467)）。对四格源 Y 一致平移（vanilla 对
     //  每格 drawData.addFrY 同值）。★必须在零帧重建门与分带换算之后叠加（预加会
     //  破坏 (ofx===0&&ofy===0) 重建扫描与 ofx 带折——同 animYOffset 预加禁令同源）
-    if (chestPose > 0 && (sheet === 21 || sheet === 467)) ofy += chestPose * 38;
+    if (chestPose > 0 && chestPoseSheet(sheet)) ofy += chestPose * 38;
     r = atlas.vframeAt(sheet, ofx, ofy);
     let reconFb = false;
     if (!r) { reconFb = true; r = atlas.vframeAt(sheet, 0, 0); }   // ★落空回退(0,0)="整物第一格平铺"指纹
@@ -1662,6 +1662,17 @@ export function tileDrawYOffsetOf(sheet: number, fx: number, fy: number): number
 export function tileTopOf(sheet: number, fx: number, fy: number): number {
   const cond = tileTopCond(sheet, fx, fy);
   return cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
+}
+
+/** ★IIIII252：箱盖姿态消费面单源（与下方 :1438 附近 `sheet===21||sheet===467`
+ *  位移消费同点集——BasicChest 集 TileID.cs:315 CreateBoolSet(21,467)）。
+ *  chestLidPoseAt 是 O(chests) 全表线性查；两处烘焙调用面（ChunkCache 逐格 /
+ *  TileShine.stampShineCell 逐 shine 格）曾对【全部】格急切求值——真实长龄世界
+ *  数千箱 × 每格扫描 = 烘焙成本放大器（冰雪域数百 shine 格/chunk 最烈,用户
+ *  trace TileShine 烘焙链 5.8s/49s）。非消费面格必须零成本短路（0=关盖,与
+ *  查无登记同语义,产物逐位不变）。 */
+export function chestPoseSheet(sheet: number): boolean {
+  return sheet === 21 || sheet === 467;
 }
 
 /** ★SW-BJ17 2026-09-07：宝箱开/关盖姿态解析（TileDrawing.cs CacheSpecialDraws_Part2

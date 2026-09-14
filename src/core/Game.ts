@@ -35958,6 +35958,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.shopSellbackMemo.clear();   // UpdateOldNPCShop(Main.cs:18387-18393)
     }
     this.shopBuybackStock = [];        // Chest.SetupShop 重建(Chest.cs:1357-1361)
+    // ★FX22 开店收对话面板(用户实报:开店后面板残留盖货架):原版 OpenShop
+    //  (Main.cs:41162-41169)首段即 `npcChatText = ""` → GUIChatDraw 门(:47490
+    //  `npcChatText != ""`)关 = 商店态无对话面板,只剩货架;重开对话(openNpcDialog
+    //  链,walk away/同 NPC 门外换体再谈)才重现,关店(npcShopClose)不自动重现
+    //  (npcChatText 仍空)。刀19 minimizeNpcDialog 同语义:只收 DOM 面板不清
+    //  dialogNpc 会话,talkNPC 距离保持链照常。★序在 openNpcShop 前——onNpcDialogClose
+    //  → ui.closeNpcDialog 会顺带收店面板/快乐度浮层,先收对话再开店才不互撕。
+    this.minimizeNpcDialog();
     this.openNpcShop(decor);
   }
   /** 上次经商店按钮开启的会话身份(openShopFromButton 维护;UpdateOldNPCShop oldNPCShop 投影) */

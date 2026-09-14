@@ -232,8 +232,8 @@ function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').A
   return { head, body, legs };
 }
 import { WeatherRenderer } from './WeatherRenderer';
-import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } from './VanillaLiquidRenderer';
-import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
+import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled } from './VanillaLiquidRenderer';
+import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample, type WaveFrameInput } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
 import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, HIGHLIGHT_ANIM_WHEN_LIT, getSelectionGlowColor, highlightCellRect, loadHighlightMask, smartHighlightSampleLight, SMART_CURSOR_ARROW_COLOR } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）;SW-RB11a 补条件动画门;SW-BJ61 用户分歧采样+箭头原版 White
@@ -2557,6 +2557,42 @@ function dustTrailCount(d: { type: number; vx: number; vy: number; fadeIn: numbe
 /** 四柱护盾泡破盾/重塑计时器（enemy → 状态;drawEnemy 逐帧推进） */
 const PILLAR_FF = new WeakMap<object, { lastShield: number; breakTick: number; reformTick: number }>();
 
+// ---- ★BJ78 W4（?swperf=1）updateWaterWaves 每帧分配消除（2026-09-14 WaterWaves 区补刀）----
+// 现场：updateWaterWaves 每帧 new 2 个【内容恒定】的弹幕表 Set + 3 个闭包
+// （inLiquidAt/push/pushPlayer）+ 2 个对象（_waveCss 帧态、waterWaves.frame 的
+// WaveFrameInput 字面量）。以下模块级资产只被 swPerf 快路径消费；
+// flag 关 = updateWaterWaves 内原地逐帧 new/闭包（现行行为逐位不变）。
+/** 弹幕波两表（ProjectileID.cs:195 CanDistortWater 默认 true 的例外 / :333
+ *  NoLiquidDistortion——Terarria1457/Terraria.ID/ProjectileID.cs:289/:425 逐值核对） */
+export const BJ78_NO_WATER_DISTORT = new Set([7, 8, 150, 151, 152, 493, 494]);
+export const BJ78_NO_LIQUID_DISTORT = new Set([511, 512, 513]);
+/** 波纹采集帧上下文槽：updateWaterWaves 每帧【先覆写再同步消费】——采集全链
+ *  （pushPlayer/entities/gore 循环 → injectEntity → injectWash/queueRipple）同步
+ *  无重入、不跨帧保留引用，故持久槽就地覆写与每帧新建闭包捕获逐位同值。 */
+const _waveCtx = { st: null as unknown as TileStore, camL: 0, camT: 0, cssW: 0, cssH: 0, cssZoom: 0 };
+function _waveCtxInLiquidAt(wx: number, wy: number): boolean {
+  const st = _waveCtx.st;
+  const tx = (wx / TILE) | 0, ty = (wy / TILE) | 0;
+  return st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0;
+}
+function _waveCtxPush(s: WaveEntitySample): void {
+  injectEntity(s, _waveCtx.camL, _waveCtx.camT, _waveCtx.cssW, _waveCtx.cssH, _waveCtx.cssZoom);
+}
+function _waveCtxPushPlayer(p: Player): void {
+  if (p.dead) return;
+  _waveCtxPush({
+    kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
+    wet: p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
+  });
+}
+/** WaveFrameInput 复用槽（WaterWaves.frame 同步读字段、不保留入参引用；
+ *  全工程唯一调用面 = Renderer.updateWaterWaves） */
+const _waveFrameInp: WaveFrameInput = {
+  camX: 0, camY: 0, zoom: 1, viewW: 0, viewH: 0,
+  tileX: 0, tileY: 0, maxTilesX: 0, maxTilesY: 0,
+  worldSurface: 0, rockLayer: 0, windAbs: 0, rain: 0, dt: 0,
+};
+
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
@@ -4551,6 +4587,13 @@ export class Renderer {
     // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 1457 跳过提示）——
     //     文字保持偏红原色（灰化已挪 7 段只作用世界画面,2026-08-24 用户修订）
     if (player.dead) this.drawDeathScreen(ctx, player, viewW, viewH);
+
+    // 13. MouseText 缓存层（DrawPendingMouseText Main.cs:45781-45788=DrawInterface
+    //     收尾,所有 UI 层之后、光标之下;消费面=孤儿箱名/BJ1 NPC 名/FX21 信息饰品
+    //     行标签,见 drawMouseTextLayer 注）。★SW-FX21 2026-09-14:原挂
+    //     drawCursorItemIcon（步骤 7b'）→ 早于步骤 9 信息列,行标签被行文字压住;
+    //     全屏地图（9.5 提前返）不画——原与现可见结果一致（列/文本均被图盖）。
+    this.drawMouseTextLayer(ctx, player);
   }
 
   /** 死亡 UI（原版 DrawInterface_35_YouDied :44765-44801 1:1 + 1457 跳过提示）：
@@ -4634,6 +4677,10 @@ export class Renderer {
   private _cssW = 0;
   /** 果冻管线帧级换算态（updateWaterWaves 缓存；drawLiquids 消费——CSS/世界/设备三系互算） */
   private _waveCss: WaterWarpFrameState | null = null;
+  /** ★BJ78 W4 swPerf 复用槽：flag 开时 _waveCss 指向本持久对象就地覆写
+   *  （消费面 drawLiquids:4818 / compositeLight:15948 applyFullScreen 同步读当前
+   *  值、不跨帧保留引用）；flag 关恒 null = 每帧新对象（原行为）。 */
+  private _waveCssScratch: WaterWarpFrameState | null = null;
   /** 本帧视口（±2 格余量）是否含任何液体（updateWaterWaves 每帧探针）。水体全屏
    *  扭曲的门控：obj19 门控以前景水 α 作乘子、波场位移亚像素级——视口确无液体时
    *  applyFullScreen 必然产出与直画一致的恒等画面，整轮「整屏场景纹理上传+GL
@@ -4692,7 +4739,16 @@ export class Renderer {
     const camL = cam.x - viewW / (2 * z), camT = cam.y - viewH / (2 * z);
     // 果冻管线帧态（quality=0 关闭时也缓存——drawLiquids 的激活判定只读 quality，
     // 帧态在激活时必然新鲜：active ⇒ 本函数已跑到这里）
-    this._waveCss = { cssW, cssH, cssScale, cssZoom, camL, camT };
+    if (swPerf) {
+      // ★BJ78 W4：持久对象就地覆写（字段值逐位同新字面量；消费面不跨帧留引用）
+      const wcss = this._waveCssScratch
+        ?? (this._waveCssScratch = { cssW, cssH, cssScale, cssZoom, camL, camT });
+      wcss.cssW = cssW; wcss.cssH = cssH; wcss.cssScale = cssScale;
+      wcss.cssZoom = cssZoom; wcss.camL = camL; wcss.camT = camT;
+      this._waveCss = wcss;
+    } else {
+      this._waveCss = { cssW, cssH, cssScale, cssZoom, camL, camT };   // 原行为
+    }
     if (waterWaves.quality === 0) { waterWaves.disable(); return; }
 
     // ---- 视口液体探针（水体全屏扭曲门控，#perf2026-08-26 trace 批）----
@@ -4727,22 +4783,31 @@ export class Renderer {
 
     // ---- 实体注入采集（DrawWaves :181-334）----
     const st = world.store;
-    const inLiquidAt = (wx: number, wy: number): boolean => {
-      const tx = (wx / TILE) | 0, ty = (wy / TILE) | 0;
-      return st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0;
-    };
+    // ★BJ78 W4（?swperf=1）：闭包→模块级直调 + _waveCtx 槽（每帧先覆写再同步消费）；
+    // flag 关 = 原闭包逐字保留（现行行为逐位不变）
+    if (swPerf) {
+      _waveCtx.st = st; _waveCtx.camL = camL; _waveCtx.camT = camT;
+      _waveCtx.cssW = cssW; _waveCtx.cssH = cssH; _waveCtx.cssZoom = cssZoom;
+    }
+    const inLiquidAt = swPerf ? _waveCtxInLiquidAt
+      : (wx: number, wy: number): boolean => {
+        const tx = (wx / TILE) | 0, ty = (wy / TILE) | 0;
+        return st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0;
+      };
     // 弹幕两表（ProjectileID.cs:195 CanDistortWater 默认 true 的例外 / :333 NoLiquidDistortion）
-    const NO_WATER_DISTORT = new Set([7, 8, 150, 151, 152, 493, 494]);
-    const NO_LIQUID_DISTORT = new Set([511, 512, 513]);
-    const push = (s: WaveEntitySample) => injectEntity(s, camL, camT, cssW, cssH, cssZoom);
+    const NO_WATER_DISTORT = swPerf ? BJ78_NO_WATER_DISTORT : new Set([7, 8, 150, 151, 152, 493, 494]);
+    const NO_LIQUID_DISTORT = swPerf ? BJ78_NO_LIQUID_DISTORT : new Set([511, 512, 513]);
+    const push = swPerf ? _waveCtxPush
+      : (s: WaveEntitySample) => injectEntity(s, camL, camT, cssW, cssH, cssZoom);
     // 玩家（本地 + 联机镜像；q>=2）
-    const pushPlayer = (p: Player) => {
-      if (p.dead) return;
-      push({
-        kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
-        wet: p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
-      });
-    };
+    const pushPlayer = swPerf ? _waveCtxPushPlayer
+      : (p: Player) => {
+        if (p.dead) return;
+        push({
+          kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
+          wet: p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
+        });
+      };
     pushPlayer(player);
     for (const rp of remotePlayers) if (!rp.dead) pushPlayer(rp);
     // NPC（Enemy+TownNPC，恒开——WaterShaderData.cs:79 _useNPCWaves 无档位门）
@@ -4785,17 +4850,33 @@ export class Renderer {
     }
 
     // ---- Update + PreDraw（progress/强度/步进/滚动）----
-    waterWaves.frame({
-      camX: camL, camY: camT, zoom: cssZoom,
-      viewW: cssW, viewH: cssH,
-      tileX: Math.floor((player.x + player.w / 2) / TILE),
-      tileY: Math.floor((player.y + player.h / 2) / TILE),
-      maxTilesX: world.w, maxTilesY: world.h,
-      worldSurface: world.groundLevel, rockLayer: world.rockLevel,
-      windAbs: Math.abs(world.weather?.windSpeedCurrent ?? 0),
-      rain: world.weather?.maxRaining ?? 0,
-      dt,
-    });
+    if (swPerf) {
+      // ★BJ78 W4：WaveFrameInput 复用槽（frame 同步读字段不保留引用；字段值逐位
+      //   同新字面量）。flag 关 = else 支逐帧新对象（原行为）
+      const fi = _waveFrameInp;
+      fi.camX = camL; fi.camY = camT; fi.zoom = cssZoom;
+      fi.viewW = cssW; fi.viewH = cssH;
+      fi.tileX = Math.floor((player.x + player.w / 2) / TILE);
+      fi.tileY = Math.floor((player.y + player.h / 2) / TILE);
+      fi.maxTilesX = world.w; fi.maxTilesY = world.h;
+      fi.worldSurface = world.groundLevel; fi.rockLayer = world.rockLevel;
+      fi.windAbs = Math.abs(world.weather?.windSpeedCurrent ?? 0);
+      fi.rain = world.weather?.maxRaining ?? 0;
+      fi.dt = dt;
+      waterWaves.frame(fi);
+    } else {
+      waterWaves.frame({
+        camX: camL, camY: camT, zoom: cssZoom,
+        viewW: cssW, viewH: cssH,
+        tileX: Math.floor((player.x + player.w / 2) / TILE),
+        tileY: Math.floor((player.y + player.h / 2) / TILE),
+        maxTilesX: world.w, maxTilesY: world.h,
+        worldSurface: world.groundLevel, rockLayer: world.rockLevel,
+        windAbs: Math.abs(world.weather?.windSpeedCurrent ?? 0),
+        rain: world.weather?.maxRaining ?? 0,
+        dt,
+      });
+    }
   }
 
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
@@ -4826,8 +4907,13 @@ export class Renderer {
       return (r + g + b) / 765;
     };
     if (isBackground) {
+      // ★IIIII251（?slopewave=1 GL 路）：bg 浸润 pass 把坡面水形状 α≈0.02 预画进
+      // 前景离屏（本帧 fg pass beginFgPass 跳过清屏）→ obj19 门控覆盖斜坡水缘
+      const footCtx = warpOn && slopeWaveEnabled
+        ? this.waterWarp.gateFootprintCtx(this.ctx.canvas.width, this.ctx.canvas.height)
+        : null;
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt, this.animTick);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt, this.animTick, footCtx);
     } else if (warpOn) {
       const fgCtx = this.waterWarp.beginFgPass(this.ctx);
       drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
@@ -4852,7 +4938,16 @@ export class Renderer {
     const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
     drawLiquidBehindTilesOnly(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this.waterStyle,
-      (x, y) => this.waterfalls.checkForWaterfall(x, y));
+      (x, y) => this.waterfalls.checkForWaterfall(x, y), true, 0,
+      // ★IIIII251（?slopewave=1 CPU 路）：实心层坡面斜面带随波场 bob——门与表层
+      // bob 同构（GL 全屏扭曲路径交付位移,不双重 bob）
+      slopeWaveEnabled && waterWaves.quality > 0 && !this.warpPathActive());
+  }
+
+  /** 全屏扭曲管线本帧激活（drawLiquids warpOn 同式抽提——IIIII251 bob 门复用） */
+  private warpPathActive(): boolean {
+    return !this.isCpuRender() && this._waveCss !== null
+      && waterWaves.quality > 0 && waveTexReady() && this.waterWarp.active();
   }
 
   /** 导线覆盖层(Main.cs:43543-43954 DrawWires 移植:四色行/连接掩码/多色淡化/致动器覆盖) */
@@ -15061,41 +15156,13 @@ export class Renderer {
         }
       }
     }
-    // cursorItemIconText（:44540-44543 MouseText）——孤儿箱/命名箱类型名 tooltip +
-    // BJ1 悬停 NPC 名（HoverOverNPCs :43830 MouseTextHackZoom 同管线,1458 :43836 同）。
-    // MouseTextInner（Main.cs:20365-20430,rare=0 纯文本支）:无面板带影文字,
-    // 白 × mouseTextColor 脉动。
-    // ★SW-BJ7 2026-09-07 锚定改同式（用户实报"名字文本被光标箭头盖住一部分"）：
-    //   X=mouse+14/Y=mouse+14（:20379-20380）+ ThickMouse 再 +6（:20386-20389——
-    //   MouseBorderColor 默认 (64,64,64,64) Main.cs:276 ≠ Transparent →
-    //   ThickMouse :2684 默认档恒 true,本仓无该设置建模取默认）= 实锚 mouse+20;
-    //   此前裸 +14,而本仓光标阴影 pass 右缘 ≈ mouse+1+14×1.1≈+16.4（VUI.drawCursor
-    //   双 pass,呼吸峰 cursorScale=1.1）→ 箭头盖住字首。屏幕右/下缘 40px 收边
-    //   （:20412-20419）同式,度量 = MeasureString 全串（h 取 14px 行盒近似）。
-    //   原版 `!mouseItem.IsAir → X+=34`（:20390-20392）在本仓不可达（uiHeld 整函数
-    //   早退,见上）——helper 留参不接线（债 BJ7-R1）。
-    //   ★canvas fillText 锚 = XNA DrawString origin 零 = 字形【左上】——textAlign/
-    //   textBaseline 显式钉死（MouseText 家族锚语义,同 :14145-14147 前例;裸依赖
-    //   上游 alphabetic 基线时字形顶浮出锚上 ~11px,底缘收边也失准）。
-    if (p.cursorItemIconText !== '') {
-      const mt = this.lighting?.clock.mouseTextColor ?? 255;
-      const c = Math.round((mt / 255) * 255);
-      ctx.font = '14px monospace';
-      const w = ctx.measureText(p.cursorItemIconText).width;
-      const h = 14;
-      const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height);
-      // 字体偏差登记同 InfoAccsLayer:原版 FontAssets.MouseText → 本仓 canvas 字+四向描边
-      ctx.save();
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
-        ctx.fillStyle = '#000';
-        ctx.fillText(p.cursorItemIconText, anchor.x + ox, anchor.y + oy);
-      }
-      ctx.fillStyle = `rgb(${c},${c},${c})`;
-      ctx.fillText(p.cursorItemIconText, anchor.x, anchor.y);
-      ctx.restore();
-    }
+    // cursorItemIconText（MouseText 缓存）文本支已迁 drawMouseTextLayer——层序=所有
+    // UI 层之后的收尾（DrawPendingMouseText Main.cs:45781-45788）。★SW-FX21
+    // 2026-09-14：旧位在本函数=层 40 域（步骤 7b'）,早于步骤 9 信息饰品列（层 28
+    // 域）→ 悬停行标签（「移动速度」等）落在下方行文字像素带且被压在下层（用户
+    // 实报）。原版 MouseTextNoOverride（DrawInfoAccs :48175）只置缓存不即画,实际
+    // 绘制恒在界面最上层;uiHeld/uiBlocking 门随迁文本支（本函数头部门自此只压
+    // 图标/余辉/告示牌面）。
     // 告示牌头顶指示泡（Main.cs:45133-45152 signBubble）：Chat2.png（32×28）挂锚顶
     // 上方 22px、偏玩家异侧 ±(8+宽)，白×mouseTextColor 脉动（乘色，复用 tintIconRect）
     if (this.signBubbleScreen) {
@@ -15174,6 +15241,49 @@ export class Renderer {
       }
       ctx.restore();
     }
+    ctx.restore();
+  }
+
+  /** MouseText 缓存绘制层（DrawPendingMouseText Main.cs:45781-45788:DrawInterface
+   *  全部 UI 层之后的收尾绘制 → MouseTextInner :20365-20430 rare=0 纯文本支,1458
+   *  :20385-20425 同;绘制链 :45783 无 mouseInterface 门）。消费面 = Game 侧
+   *  cursorItemIconText 管线（每帧先清后 claim）:孤儿箱/命名箱类型名 tooltip +
+   *  BJ1 悬停 NPC 名（HoverOverNPCs :43830 同管线）+ FX21 信息饰品行标签
+   *  （「时间/深度/移动速度…」,DrawInfoAccs :48175 MouseTextNoOverride 只置缓存
+   *  不即画）。锚 = mouse+14 + ThickMouse 默认档 +6（:20379-20389）→ 实锚
+   *  mouse+20（> 本仓光标阴影 pass 右缘 ≈+16.4,BJ7 净空不变式）+ 屏幕右/下缘
+   *  40px 收边（:20412-20419,度量=MeasureString 全串,h 取 14px 行盒近似）。
+   *  ★SW-FX21 2026-09-14 自 drawCursorItemIcon（层 40 域,步骤 7b'）迁出:彼处早于
+   *  步骤 9 信息饰品列（层 28 域）→ 悬停行标签被下方行文字叠写压住（用户实报）。
+   *  本层挂 render() 尾（步骤 13,死亡画面之后）=主画布最顶层;光标本体在 VUI
+   *  独立画布（z-index 300）恒在其上,与原版 DrawPendingMouseText 内
+   *  MouseTextInner→DrawInterface_36_Cursor 次序等效。uiHeld/uiBlocking 门随迁
+   *  （BJ7 结构锁「拖拽物/面板态本次不动」维持——原版 mouseItem 域,文本支本就随
+   *  整函数早退;capturePass/photoMode 在步骤 12 前返=不画,同原版无界面层语义）。
+   *  原版 `!mouseItem.IsAir → X+=34`（:20390-20392）helper 留参不接线（债 BJ7-R1
+   *  同前）。字体偏差登记同 InfoAccsLayer:原版 FontAssets.MouseText → 本仓
+   *  canvas 字+四向描边;canvas fillText 锚 = XNA DrawString origin 零 = 字形
+   *  【左上】——textAlign/textBaseline 显式钉死（MouseText 家族锚语义）。 */
+  private drawMouseTextLayer(ctx: CanvasRenderingContext2D, player: Player): void {
+    const c = this.cursorIconCtx;
+    if (c.uiHeld || c.uiBlocking) return;
+    const p = player;
+    if (p.cursorItemIconText === '') return;
+    const mt = this.lighting?.clock.mouseTextColor ?? 255;
+    const col = Math.round((mt / 255) * 255);
+    ctx.font = '14px monospace';
+    const w = ctx.measureText(p.cursorItemIconText).width;
+    const h = 14;
+    const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height);
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+      ctx.fillStyle = '#000';
+      ctx.fillText(p.cursorItemIconText, anchor.x + ox, anchor.y + oy);
+    }
+    ctx.fillStyle = `rgb(${col},${col},${col})`;
+    ctx.fillText(p.cursorItemIconText, anchor.x, anchor.y);
     ctx.restore();
   }
 
