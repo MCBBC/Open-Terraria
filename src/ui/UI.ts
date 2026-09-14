@@ -366,6 +366,22 @@ function slotGhostFrame(where: SlotWhere, i: number): number {
   return -1;
 }
 
+/** 空槽幽灵帧元素（ItemSlot.Draw :2451-2482：TextureAssets.Extra[54] 3×7 图集，
+ *  帧号由 context/slot 映射（slotGhostFrame 同源表）；帧格 34px 取 32px（:2479-2480
+ *  rectangle.Width/Height -= 2 右下内缩）,α=0.35（:2478 num19）,槽心居中） */
+function makeSlotGhostEl(frame: number): HTMLElement {
+  const g = el('div', 'sw-slot-ghost');
+  const col = frame % 3, row = Math.floor(frame / 3);
+  g.style.cssText = `position:absolute; inset:0; margin:auto; width:32px; height:32px;`
+    + `background:url(sprites/vanilla/Extra_54.png) ${-col * 34}px ${-row * 34}px;`
+    + `opacity:0.35; image-rendering:pixelated; pointer-events:none;`;
+  return g;
+}
+
+/** 向导材料槽（context 7）幽灵帧号（ItemSlot.cs:2451 case 7 → num15=18 → col=0,row=6
+ *  = 背景位 0px -204px）。向导反查浮层槽/vinv 经典位槽/modern 窗槽三处共用（②刀） */
+const GUIDE_SLOT_GHOST_FRAME = 18;
+
 const CSS = `
 .sw-root { position:fixed; inset:0; pointer-events:none; font-family:inherit; z-index:10; }
 /* ---- 原版风格：深蓝面板 + 浅蓝描边 ---- */
@@ -1373,14 +1389,7 @@ export class UI {
     // 槽空且 context 有映射时以 0.35 α 画对应帧（-2px 内缩）——头盔/胸甲/护腿/
     // 配饰/时装三件/染料/宠物/光源/矿车/坐骑/抓钩各帧;背包/钱币/弹药槽原版无映射
     const ghostFrame = slotGhostFrame(where, i);
-    if (ghostFrame >= 0) {
-      const g = el('div', 'sw-slot-ghost');
-      const col = ghostFrame % 3, row = Math.floor(ghostFrame / 3);
-      g.style.cssText = `position:absolute; inset:0; margin:auto; width:32px; height:32px;`
-        + `background:url(sprites/vanilla/Extra_54.png) ${-col * 34}px ${-row * 34}px;`
-        + `opacity:0.35; image-rendering:pixelated; pointer-events:none;`;
-      s.appendChild(g);
-    }
+    if (ghostFrame >= 0) s.appendChild(makeSlotGhostEl(ghostFrame));
     s.addEventListener('mousedown', (e) => {
       // ★SW-FX10 债⑪热键锁穿透（Main.cs:44353-44359）：锁定+关包时快捷栏格不是
       //  mouseInterface——不 stopPropagation/preventDefault，事件透传 window（domTargets
@@ -3335,8 +3344,13 @@ export class UI {
     const slotCaption = el('div');
     slotCaption.style.cssText = 'flex:1; color:#e8e8f4; font-size:13px; line-height:1.5;';
     slotBox.title = Lang.inter(24);
-    slotBox.style.cssText = 'width:56px; height:56px; flex:none; display:flex; align-items:center;'
-      + 'justify-content:center; border:2px dashed #55506a; border-radius:6px; background:#232030;'
+    // ★②槽 chrome 1:1（2026-09-14 用户报「虚线框自创」）：Inventory_Back 底图 + 空态
+    //   ctx7 幽灵帧（ItemSlot.Draw :2451-2482 case7→num15=18,0.35α,32px 槽心居中）。
+    //   原版 ctx7 槽底贴图 = InventoryBack4（:2204）,按用户拍板用 Inventory_Back 与
+    //   vinv 两槽同 chrome（登记差异）。旧 2px dashed 自创描边/纯色底退役
+    slotBox.style.cssText = 'width:56px; height:56px; flex:none; position:relative; display:flex;'
+      + 'align-items:center; justify-content:center;'
+      + 'background:url(sprites/vanilla/Inventory_Back.png) 0 0 / 100% 100%;'
       + 'cursor:pointer; image-rendering:pixelated;';
     const closeBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
     closeBtn.style.cssText = 'cursor:pointer; width:auto; margin:0;';
@@ -3388,8 +3402,6 @@ export class UI {
     const refreshHeader = () => {
       slotBox.textContent = '';
       if (this.guidePlaced) {
-        slotBox.style.borderStyle = 'solid';
-        slotBox.style.borderColor = '#8fa1e0';
         const img = el('img') as HTMLImageElement;
         img.src = iconUrl(this.game!, this.guidePlaced.id) || '';
         img.style.cssText = 'max-width:46px; max-height:46px; image-rendering:pixelated;';
@@ -3397,8 +3409,7 @@ export class UI {
         slotBox.appendChild(img);
         slotCaption.textContent = `${Lang.inter(21)} ${itemNameOfVid(this.vidOfItemOf(this.guidePlaced.id))} ×${this.guidePlaced.stack}`;
       } else {
-        slotBox.style.borderStyle = 'dashed';
-        slotBox.style.borderColor = '#55506a';
+        slotBox.appendChild(makeSlotGhostEl(GUIDE_SLOT_GHOST_FRAME));   // 空态 ctx7 幽灵帧（:2451 case7→num15=18）
         slotCaption.textContent = Lang.inter(24);   // 「在此放置材料」
       }
     };
@@ -8839,11 +8850,15 @@ export class UI {
       img.draggable = false;
       host.appendChild(img);
     };
+    // ★②空态 ctx7 幽灵帧（ItemSlot.Draw :2451-2482 case7→num15=18,0.35α;
+    //   2026-09-14 用户报两处向导槽缺图标底图——底图 Inventory_Back 已由
+    //   --slot-bgimg 恒挂,此处补空态幽灵帧,有件态仍清空画图标）
+    const mkGhost = (host: HTMLElement): void => { host.appendChild(makeSlotGhostEl(GUIDE_SLOT_GHOST_FRAME)); };
     // modern 位(DrawChildren NewCraftingUI.cs:441-458)
     const ms = this.vinvGuideSlotModernEl;
     if (ms) {
       ms.replaceChildren();
-      if (pl) mkImg(ms);
+      if (pl) mkImg(ms); else mkGhost(ms);
     }
     if (this.vinvGuideModernCaptionEl) this.vinvGuideModernCaptionEl.textContent = capText;
     if (this.vinvGuideModernReqEl) {
@@ -8855,7 +8870,7 @@ export class UI {
     const cs = this.vinvGuideSlotClassicEl;
     if (cs) {
       cs.replaceChildren();
-      if (pl) mkImg(cs);
+      if (pl) mkImg(cs); else mkGhost(cs);
     }
     if (this.vinvGuideClassicTextEl) {
       const r = this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null;

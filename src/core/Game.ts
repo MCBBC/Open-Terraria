@@ -33333,7 +33333,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
-  private openNpcDialog(npc: TownNPC, chatOverride?: string) {    this.dialogNpc = npc;
+  private openNpcDialog(npc: TownNPC, chatOverride?: string) {
+    // ★④开对话先收物品栏（原版开话链首站 = IngameUIWindows.CloseAll(quiet:true)
+    //   Main.cs:43805-43811，:58-65 `if (Main.playerInventory) playerInventory=false`
+    //   无音效【静默收包】——对话面板不叠物品栏）。写序同原版：收包先于 SetTalkNPC
+    //   （this.dialogNpc=npc）/台词生成/开话音。★互斥语义：开店(OpenShop :41163
+    //   playerInventory=true)/重铸(:40716)/向导(:40725)三链是「开包」方向，
+    //   各走 openShopFromButton/onReforgeOpen/onGuideCraftOpen，不经本门。
+    //   closeInventory = UI 注入实例字段（ui.closeInventory：收面板+heldStack 归包
+    //   +closeChest/npcShopClose——CloseAll 的 chest 臂 :50-57 同域），无音效=quiet 同相
+    if ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen) {
+      this.closeInventory?.();
+    }
+    this.dialogNpc = npc;
     // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记；
     // 首聊才广播——module4，原版 RegisterChatStartWith 的 flag 门 :26-34）
     if (this.world.bestiary.registerChat(npc.vanillaId)) {
@@ -33354,7 +33366,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     npc.talking = true;  // 原版 AI_007:53721 对话中站定面向玩家
     npc.talkCooldown = 30;
-    this.sfx.play('menuOpen'); // 对话面板打开音（原版 UI 面板开合语义 id 10/11）
+    // ★①开话音 = SoundID.Chat（原版 Main.cs:43811 开对话链尾 `SoundEngine.PlaySound(24)`，
+    //   SoundID.cs:70 `Chat = 24`；LegacySoundPlayer.cs case 24 :960-965 直建实例——
+    //   无 Pitch 赋值（零音域变体，全 NPC 同音）、无音量修正、每按必播）。与商店
+    //   OpenShop 的 PlaySound(12)=MenuTick（Main.cs:41168）分属两音：12=菜单滴答，
+    //   24=对话低吟。WAV_MAP.chat=['Chat'] 原版素材在库（Sfx.ts:133），PITCH_CASE 无档
+    //   =恒 1 速率同原版零抖动。旧 'menuOpen'(id 10)=自创替代音退役
+    this.sfx.play('chat');
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;

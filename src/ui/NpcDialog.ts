@@ -129,17 +129,21 @@ const CSS = `
      (NPCChatPanel.cs:81-84)→ 必须 auto:按钮可点 + 世界点击被吞 */
   pointer-events: auto;
 }
-/* Chat_Back 两段绘制（:71-72）：主体 = 源(0,0,500,470) 纵向拉伸到 (500,H-30)；
+/* Chat_Back 两段绘制（:71-72,反编译原文核读）：主体 = Draw(tex, TopLeft,
+   source(0,0,500,rect.H-30))——★源高=目标高,1:1 原尺寸切【顶部 H-30 行】,
+   零拉伸（曾误按「源(0,0,500,470)→H-30 纵向压缩」实现=整幅压扁:顶角 8 源 px
+   弧被压成 ~1px 观感归方,侧壁纹路全部纵向压密,2026-09-14 用户报"顶角方"定谳）;
    底帽 = 源(0,470,500,30) 原尺寸 @ 底缘。乘色 (200,200,200,200)（:62）
    → opacity+brightness 各 200/255（XNA tint RGB×A 近似,预乘暗晕判例） */
 .sw-npc-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none;
-  /* ★2026-09-14 用户报:顶角在两段纵向拉伸里被压扁(Chat_Back 顶圆角≈10 源 px,短面板
-     拉伸系数 ~0.2 → 归方)。容器圆角裁切兜底,底帽原生圆角不受影响 */
-  border-radius: 10px 10px 10px 10px; }
+  /* 圆角兜底=贴图自带顶角弧半径 8 源 px（Chat_Back.png 实测:行 0-1 左缘 x=8,
+     行 2-3 x=4,行 4-7 x=2,行 8 x=0;底帽行 499 同弧）——1:1 绘制下顶角/底帽
+     圆角由贴图自带,border-radius 仅作裁切兜底,与底帽观感统一取 8px */
+  border-radius: 8px; }
 .sw-npc-bg img { position: absolute; left: 0; width: 500px; image-rendering: pixelated;
   opacity: 0.784; filter: brightness(0.784); }
 .sw-npc-bg-body { position: absolute; left: 0; top: 0; width: 100%; height: 60px; overflow: hidden; }
-.sw-npc-bg-body img { top: 0; }   /* height 由 JS 按行数写:(H-30)*500/470 */
+.sw-npc-bg-body img { top: 0; height: 500px; }   /* 自然 500 高,主体盒(H-30)裁切=源顶 H-30 行 1:1 */
 .sw-npc-bg-cap { position: absolute; left: 0; bottom: 0; width: 100%; height: 30px; overflow: hidden; }
 .sw-npc-bg-cap img { top: -470px; height: 500px; }
 /* 台词区（DrawText :217-237）：TopLeft+(20,20) 起,行距 30,换行宽 460,≤10 行
@@ -392,9 +396,7 @@ export class NpcDialog {
       + (btnRows > 0 ? 30 * btnRows + Math.max(0, 2 * (btnRows - 1)) : 0);
     panel.style.height = `${panelH}px`;
     const bodyDiv = panel.querySelector<HTMLElement>('.sw-npc-bg-body');
-    const bodyImg = panel.querySelector<HTMLElement>('.sw-npc-bg-body img');
-    if (bodyDiv) bodyDiv.style.height = `${panelH - 30}px`;
-    if (bodyImg) bodyImg.style.height = `${((panelH - 30) * 500 / 470).toFixed(2)}px`;
+    if (bodyDiv) bodyDiv.style.height = `${panelH - 30}px`;   // 主体盒 = H-30,贴图 1:1 顶部裁切(CSS 定高 500,零拉伸)
     // —— 按钮行定位：锚 = 底左角 + (30,-22n+max(0,2(n-1))-4)；文本行按钮逐个
     // 绝对定位：X 累进 压缩宽+30,:103-107 num%4 换行 ——
     layer.style.top = `${panelH - 22 * btnRows + Math.max(0, 2 * (btnRows - 1)) - 4}px`;
