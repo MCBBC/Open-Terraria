@@ -12,6 +12,7 @@ import { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
 import { texId, texReady } from './texId';
+import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(?swperf=1;缺省关=逐位不变)
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 兜底——原版微光无瀑布拖尾分支，DrawShimmer 单独绘制）
 const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
@@ -390,6 +391,13 @@ export function drawVanillaLiquids(
     }
   }
   }   // P1 结束
+  // ★BJ77(#swperf 2026-09-14)：下方是同帧复用失效路径(fg pass / needsPrep=false)
+  //  的【状态复位重扫】——它把 bg 调用 P2/P3 已改写的 typeA/visTypeA 重置回 store
+  //  值、再由本调用 Unguarded P3 重铺,fg 绘制语义(夹心格/瀑布类型)依赖此复位,
+  //  必须保留。而 bg 调用(needsPrep=true)时它与上方守卫块【相邻】且为纯 store
+  //  重读(两次写入值恒等)= 幂等白扫 → ?swperf=1 下仅 bg 跳过(输出逐位不变;
+  //  关=原行为恒跑,双支结构见 perfFlags.ts 契约)。
+  if (!swPerf || !needsPrep) {
   for (let lx = 0; lx < pw; lx++) {
     const x = px0 + lx;
     for (let ly = 0; ly < ph; ly++) {
@@ -414,6 +422,7 @@ export function drawVanillaLiquids(
         TILE_DEFS[st.type[si]]?.solid) ? 1 : 0;
     }
   }
+  }   // ★BJ77 P1 复位扫守卫结束
   // 液体包围盒(P1 扫描产出,内区坐标):P2-P7 裁剪用。+1 余量覆盖夹心格邻域
   if (needsPrep) {
   let bL = pw, bT = ph, bR = -1, bB = -1, hasAny = false;

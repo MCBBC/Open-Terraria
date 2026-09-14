@@ -103,6 +103,7 @@ function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
 import type { Camera } from './Camera';
+import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(?swperf=1;缺省关=逐位不变)
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -5478,6 +5479,16 @@ export class Renderer {
   private _clWX1: Float64Array | null = null;
   /** 满亮行旗（光照图逐行 AND，255=整行全白 → 恒等乘行级跳过；尺寸随 h2 重建） */
   private _clRowWhite: Uint8Array | null = null;
+  /** ★BJ77(#swperf) 光照图构建快路径 scratch（?swperf=1 才消费；尺寸随 w2/h2 重建）。
+   *  权重必须 Float64（同 _clWX0 教训：Float32 舍入破坏逐位一致性） */
+  private _bj77TapCol: Int32Array | null = null;
+  private _bj77TapColIn: Uint8Array | null = null;
+  private _bj77TapXW0: Float64Array | null = null;
+  private _bj77TapXW1: Float64Array | null = null;
+  private _bj77TapRow: Int32Array | null = null;
+  private _bj77TapRowIn: Uint8Array | null = null;
+  private _bj77TapYW0: Float64Array | null = null;
+  private _bj77TapYW1: Float64Array | null = null;
 
   /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
    *  优先原版 Tiles_85 样式块——四格 16×16 无缝拼到离屏画布再绘制
@@ -13392,7 +13403,7 @@ export class Renderer {
       if (accDollEquip) {
         if (p.buffs.has(BuffType.Werewolf)) accDollEquip = { head: 38, body: 21, legs: 20 };
         if (p.merman) accDollEquip = { head: 39, body: 22, legs: 21 };
-        facePlan = faceLayerSplitPlan(p.equipStats.accDraw, accDollEquip.head ?? 0,
+        facePlan = faceLayerSplitPlan(stEq.accDraw, accDollEquip.head ?? 0,
           p.buffs.has(BuffType.Werewolf) || p.merman);
         // OverrideHelmet 露脸装备（:36256-36259 head=-1）：头盔整件不画 + 发型全隐
         // （PreventHairDraw={2,3,4,19} 与 OverrideHelmet 同集——DrawPlayer_21_Head
@@ -13423,7 +13434,7 @@ export class Renderer {
       // 隐藏翼显形特例（UpdateEquips :12580：!hideVisibleAccessory[n] ||
       // (vy≠0 && mount.CanUseWings)——本仓 mount.CanUseWings ≡ !ridingMount,
       // mnt 非空即骑乘;hidden 旗由聚合侧随翼记录,vy 项不入记忆化键故在此判）
-      const wingAgg = p.equipStats.wing;
+      const wingAgg = stEq.wing;
       // R4-23（P57:26824-26834 + Mount.cs:572-580/:2550-2585）：MountData.CanUseWings
       // 是 C# bool 字段【缺省 false】,仅 SetAsRollerSkate(57-60) 置 true;未骑乘恒 true。
       // 本仓曾骑任何坐骑恒清翼（过严）。vanilla-mounts.json 仅 57-60 带该键(=true),
@@ -13449,7 +13460,7 @@ export class Renderer {
         // 非水中漂浮（mount.CanUseWings 已由上方坐骑清零门覆盖）
         const alwaysOk = !d.alwaysAir
           || (p.vy !== 0 && !p.grappleProjs.some((g) => g.latched)
-            && !(p.inWater && ((p.equipStats.canFloat || (p.ridingMount && p.mount.type === 37))
+            && !(p.inWater && ((stEq.canFloat || (p.ridingMount && p.mount.type === 37))
               && !p.inputDown && (!p.ridingMount || p.mount.type === 37))));   // ShouldFloatInWater :3856-68（canFloat 两源=4404∪buff265 火烈鸟；Flipper 药不入源——R1-F1 同根残留）
         if (alwaysOk) {
           const fr = wingDrawFrame(wingSlot, { frame: p.wingFrame, counter: 0 }, p.miscCounter);
@@ -13621,7 +13632,7 @@ export class Renderer {
             if (tex && tex.width > 0) {
               const ho = FACE_HEAD_OFFSET_IDS.has(facePlan.faceHead)
                 ? (FACE_HEAD_HELMET_OFFSET[facePlan.head] ?? [0, 0]) : [0, 0];
-              this.drawAccBodyFrame(ctx, tex, row, p.equipStats.accDraw.dyeFaceHead, stealthClamp, p.facing, ho[0], ho[1]);
+              this.drawAccBodyFrame(ctx, tex, row, stEq.accDraw.dyeFaceHead, stealthClamp, p.facing, ho[0], ho[1]);
             }
           } else {
             // 分支三（:2617-2647）：皮肤脸（doll 已烘）→ 眼睑 → underHair
@@ -13633,7 +13644,7 @@ export class Renderer {
             const tex = this.atlas?.ensureVImage(`vanilla/Acc_Face_${facePlan.face}.png`);
             if (tex && tex.width > 0) {
               const dx = facePlan.face === 5 && facePlan.faceHead >= 10 && facePlan.faceHead <= 13 ? 2 : 0;
-              this.drawAccBodyFrame(ctx, tex, row, p.equipStats.accDraw.dyeFace, stealthClamp, p.facing, dx, 0);
+              this.drawAccBodyFrame(ctx, tex, row, stEq.accDraw.dyeFace, stealthClamp, p.facing, dx, 0);
             }
           }
           if (facePlan.maskUnderHead) {
@@ -13643,7 +13654,7 @@ export class Renderer {
             if (tex && tex.width > 0) {
               const fo = FACE_HELMET_OFFSET[facePlan.faceMask]?.[facePlan.head] ?? [0, 0];
               const ho = HELMET_DRAW_OFFSET[facePlan.head] ?? [0, 0];
-              this.drawAccBodyFrame(ctx, tex, row, p.equipStats.accDraw.dyeFaceMask, stealthClamp, p.facing, fo[0] + ho[0], fo[1] + ho[1]);
+              this.drawAccBodyFrame(ctx, tex, row, stEq.accDraw.dyeFaceMask, stealthClamp, p.facing, fo[0] + ho[0], fo[1] + ho[1]);
             }
           }
           headFaceDrawn = true;
@@ -13693,7 +13704,7 @@ export class Renderer {
       } else if (!p.onGround) {
         // 空中（:35808-35816/:36121-36161）：无翼升降恒行5（收腿）→ 12；有翼
         // 升/按住跳降=行6（张腿）→ 14；翼 22/28/45 恒行0 → idle
-        const wing = p.equipStats.wing;
+        const wing = stEq.wing;
         if (!wing) frame = af['Player_12'] ?? runFrames[0] ?? idle;
         else if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) frame = idle;
         else frame = ((p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0)
@@ -15714,6 +15725,82 @@ export class Renderer {
     // 4 tap 双线性。此前 tap 每像素返回 4 个 [r,g,b] 元组 ≈ 5.3M 小对象/s
     // (2026-08 审计 G2);现采样写入模块级标量缓冲,运算顺序不变、结果逐位一致
     const tapBuf = _lightTap;
+    if (swPerf) {
+      // ★BJ77 零语义快路径(#swperf 2026-09-14;?swperf=1 启用,缺省走下方原循环
+      //   逐位不变):逐 px/py 预取 4-tap 的窗口判定与下标,内循环免每像素
+      //   4 次索引重算 + 12 次 tapBuf 中转读写。
+      //   ★等价性论证(输出逐位一致):
+      //   ① tap 取数 = 同一表达式 li=(ty-ry)*rw+(tx-rx)(整数加法结合序同);
+      //   ② 窗口谓词 tx∈[rx,rx+rw) ∧ ty∈[ry,ry+rh) 拆轴预存再按位与 = 同四比较合取;
+      //   ③ 权重单乘 w00=wx0*wy0 等四式同操作数(预存 wx0=1-fx/fx、wy0=1-fy/fy,
+      //     表达式逐字同式);
+      //   ④ r/g/b 求和 = 原式同操作数同顺序 t00*w00+t10*w10+t01*w01+t11*w11
+      //     (JS 左结合括号序一致),Math.round/Math.min 钳位链不变。
+      //   守卫:tests/bj77-swperf-zero-semantics.test.ts(结构锁)+
+      //   scripts/_bj77-pixel-ab.mjs(冻结单帧画布逐字节 md5 对拍)。
+      if (!this._bj77TapCol || this._bj77TapCol.length !== w2) {
+        this._bj77TapCol = new Int32Array(w2);
+        this._bj77TapColIn = new Uint8Array(w2);
+        this._bj77TapXW0 = new Float64Array(w2);
+        this._bj77TapXW1 = new Float64Array(w2);
+      }
+      if (!this._bj77TapRow || this._bj77TapRow.length !== h2) {
+        this._bj77TapRow = new Int32Array(h2);
+        this._bj77TapRowIn = new Uint8Array(h2);
+        this._bj77TapYW0 = new Float64Array(h2);
+        this._bj77TapYW1 = new Float64Array(h2);
+      }
+      {
+        const cB = this._bj77TapCol!, fB = this._bj77TapColIn!, wx0a = this._bj77TapXW0!, wx1a = this._bj77TapXW1!;
+        const rB = this._bj77TapRow!, yB = this._bj77TapRowIn!, wy0a = this._bj77TapYW0!, wy1a = this._bj77TapYW1!;
+        for (let px = 0; px < w2; px++) {
+          const gx = px / SS - 0.5;
+          const x0 = Math.floor(gx), fx = gx - x0;
+          wx0a[px] = 1 - fx; wx1a[px] = fx;
+          const tx = tx0 + x0;
+          cB[px] = tx - rx;
+          fB[px] = (tx >= rx && tx < rx + rw ? 1 : 0) | (tx + 1 >= rx && tx + 1 < rx + rw ? 2 : 0);
+        }
+        for (let py = 0; py < h2; py++) {
+          const gy = py / SS - 0.5;
+          const y0 = Math.floor(gy), fy = gy - y0;
+          wy0a[py] = 1 - fy; wy1a[py] = fy;
+          const ty = ty0 + y0;
+          rB[py] = (ty - ry) * rw;
+          yB[py] = (ty >= ry && ty < ry + rh ? 1 : 0) | (ty + 1 >= ry && ty + 1 < ry + rh ? 2 : 0);
+        }
+        let i = 0;
+        for (let py = 0; py < h2; py++) {
+          const wy0 = wy0a[py], wy1 = wy1a[py];
+          const rowA = rB[py], rowB2 = rowA + rw;
+          const fy0 = yB[py] & 1, fy1 = (yB[py] >> 1) & 1;
+          for (let px = 0; px < w2; px++, i += 4) {
+            const wx0 = wx0a[px], wx1 = wx1a[px];
+            const w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
+            const colA = cB[px], fx0 = fB[px] & 1, fx1 = (fB[px] >> 1) & 1;
+            // 4 tap(t00/t10/t01/t11):窗口外恒 0(同原 tapBuf 清零支)
+            let t00r = 0, t00g = 0, t00b = 0;
+            if (fx0 !== 0 && fy0 !== 0) { const li = rowA + colA; t00r = lightR[li]; t00g = lightG[li]; t00b = lightB[li]; }
+            let t10r = 0, t10g = 0, t10b = 0;
+            if (fx1 !== 0 && fy0 !== 0) { const li = rowA + colA + 1; t10r = lightR[li]; t10g = lightG[li]; t10b = lightB[li]; }
+            let t01r = 0, t01g = 0, t01b = 0;
+            if (fx0 !== 0 && fy1 !== 0) { const li = rowB2 + colA; t01r = lightR[li]; t01g = lightG[li]; t01b = lightB[li]; }
+            let t11r = 0, t11g = 0, t11b = 0;
+            if (fx1 !== 0 && fy1 !== 0) { const li = rowB2 + colA + 1; t11r = lightR[li]; t11g = lightG[li]; t11b = lightB[li]; }
+            // 求和式 = 原式同操作数同顺序(t00*w00 + t10*w10 + t01*w01 + t11*w11)
+            const r = t00r * w00 + t10r * w10 + t01r * w01 + t11r * w11;
+            const g = t00g * w00 + t10g * w10 + t01g * w01 + t11g * w11;
+            const b2 = t00b * w00 + t10b * w10 + t01b * w01 + t11b * w11;
+            // 原版语义:无 gamma LUT、无环境光下限(原版光照输出直乘;
+            // 夜晚亮度由天空种子+月相地板决定,洞穴真黑)
+            img.data[i] = Math.min(255, Math.round(r));
+            img.data[i + 1] = Math.min(255, Math.round(g));
+            img.data[i + 2] = Math.min(255, Math.round(b2));
+            img.data[i + 3] = 255;
+          }
+        }
+      }
+    } else {
     for (let py = 0; py < h2; py++) {
       const gy = py / SS - 0.5;              // 亚格坐标（tile 中心在整数处）
       const y0 = Math.floor(gy), fy = gy - y0;
@@ -15747,6 +15834,8 @@ export class Renderer {
         img.data[i + 3] = 255;
       }
     }
+    }   // ★BJ77 swPerf 双支结束(else=原循环逐字保留)
+
     // ★IIIII248 光照图脏行带(④ texSubImage2D 0.40%→仅变化带):逐行与上一帧
     //  已呈现内容(prev 镜像)比对,仅变化行带 putImageData/texSubImage2D。
     //  等价性:lightCanvas 全仓唯一写点=此处 putImageData;prev 恒镜像画布当前

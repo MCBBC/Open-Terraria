@@ -367,7 +367,7 @@ describe('⑧ meleeScaleGlove ×1.1', () => {
 
   it('消费侧：Game 命中盒 ×1.1（:44509-44511 (int) 截断）+ Renderer 贴图 ×1.1（DrawData scale）', () => {
     const g = srcGame();
-    expect(g).toContain('this.player.equipStats.meleeScaleGlove && swingCombat?.melee');
+    expect(g).toContain('eq.meleeScaleGlove && swingCombat?.melee');   // ★IIIII250:updateSwingHits 函数级快照 eq(冻结对象,语义同直读)
     expect(g).toContain('Math.trunc(bw * 1.1)');
     expect(srcRenderer()).toContain('ctx.scale(1.1, 1.1)');
     // 旧"泰坦手套未实装"注释已退役

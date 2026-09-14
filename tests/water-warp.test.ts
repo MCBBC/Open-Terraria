@@ -39,9 +39,9 @@ describe('GLWaterDistortion.FRAG：obj19 位移公式锁（防漂移）', () => 
     expect(f).toContain('vUv + disp / uCssSize');
   });
 
-  it('坐标系统一：位移场以 CSS px 计算（uCssSize；与 sampleDisplace 的 (world−cam)·cssZoom 同系）', () => {
+  it('坐标系统一：位移场以 CSS px 计算（uCssSize；噪声场=世界 css px=wpx/noiseSize——BJ76 世界锚定）', () => {
     expect(f).toContain('vUv * uCssSize');
-    expect(f).toContain('px / uNoiseSize');
+    expect(f).toContain('vec2 nu = wpx / uNoiseSize');
   });
 });
 
@@ -160,6 +160,60 @@ describe('波场纹理喂入约定（GL LUMINANCE 8bit 上传 ↔ _R 值域）',
       const enc = Math.min(255, Math.floor(v * 255 + 0.5)) / 255;
       expect(Math.abs(v - enc)).toBeLessThanOrEqual(maxErr + 1e-9);
     }
+  });
+});
+
+// 噪声场世界锚定（2026-09-14 BJ76 定谳：obj19 #10-12 pixel = t0·uScreenResolution +
+// uScreenPosition，uScreenPosition = UnscaledScreenPosition − offScreenRange = 相机世界左上
+// ⇒ 原版涟漪场锚定世界；本仓曾漏相机项 = 屏幕锚定 = 用户报"走动时波纹跟着角色跑"）
+describe('噪声场世界锚定（BJ76）：FRAG 结构锁 + CPU 不变式', () => {
+  const f = GLWaterDistortion.FRAG;
+
+  it('FRAG：uWorldPx 声明 + wpx = px + uWorldPx（世界 css px = 屏幕 px + cam·cssZoom）', () => {
+    expect(f).toContain('uniform vec2 uWorldPx');
+    expect(f).toContain('vec2 wpx = px + uWorldPx');
+  });
+
+  it('FRAG：波场缓冲读保持屏幕坐标（缓冲随相机滚动,世界锚定在内容侧——不随本刀改动）', () => {
+    expect(f).toContain('texture2D(uWave, px * 0.25 / uWaveSize)');
+  });
+
+  it('CPU 不变式：sampleDisplace 固定世界点在相机平移下恒定（屏幕锚定该值必漂移）', () => {
+    // 高频合成噪声 128²（源码锁无 GL,用 CPU 路径直接验证世界锚定语义）
+    const S = 128;
+    const data = new Uint8ClampedArray(S * S * 4);
+    let seed = 987654321;
+    for (let i = 0; i < S * S; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      data[i * 4] = seed & 0xff;
+      data[i * 4 + 1] = (seed >> 8) & 0xff;
+      data[i * 4 + 2] = (seed >> 16) & 0xff;
+      data[i * 4 + 3] = 255;
+    }
+    setWaveTextures({ w: S, h: S, data }, { data: new Uint8ClampedArray(64 * 128 * 4).fill(128) });
+    waterWaves.setQuality(3);
+    // 分配波场网格（中性）——frame 一次
+    waterWaves.frame({ camX: 1000, camY: 2000, zoom: 1, viewW: 800, viewH: 520,
+      tileX: 500, tileY: 250, maxTilesX: 4200, maxTilesY: 1200,
+      worldSurface: 300, rockLayer: 800, windAbs: 0, rain: 0, dt: 1 / 60 });
+    const out: [number, number] = [0, 0];
+    const wx = 8000, wy = 4000;   // 固定世界点
+    waterWaves.setCamera(1000, 2000, 1);
+    waterWaves.sampleDisplace(wx, wy, out);
+    const d1: [number, number] = [out[0], out[1]];
+    waterWaves.setCamera(1512, 2256, 1);   // 相机平移（512,256）世界 px
+    waterWaves.sampleDisplace(wx, wy, out);
+    const d2: [number, number] = [out[0], out[1]];
+    expect(d2[0]).toBeCloseTo(d1[0], 9);
+    expect(d2[1]).toBeCloseTo(d1[1], 9);
+    // 反证：同一屏幕点（非世界点）在相机平移前后采样值【应】不同（场没跟着屏幕走）
+    waterWaves.setCamera(1000, 2000, 1);
+    waterWaves.sampleDisplace(wx, wy, out);
+    const e1: [number, number] = [out[0], out[1]];
+    waterWaves.setCamera(1512, 2256, 1);
+    waterWaves.sampleDisplace(wx - 512, wy - 256, out);   // 同一屏幕点
+    const e2: [number, number] = [out[0], out[1]];
+    expect(e2[0] !== e1[0] || e2[1] !== e1[1]).toBe(true);
   });
 });
 

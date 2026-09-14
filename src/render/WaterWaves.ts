@@ -72,7 +72,9 @@
 //     num6 = 1 − clamp(3·(tileY−worldSurface)/(rockLayer−worldSurface), 0, 1)
 //     I   *= num6；I += 0.9 − clamp((maxTilesY−tileY−200)/300,0,1)·0.9 + (1−num6)·0.75；钳 [0,2.5]
 //   位移场（obj19 :44-104）：n1 = noise(uv·0.1 + (0, prog·0.04))、n2 = noise(uv·0.2 −
-//   (0, prog·0.04))（uv = 屏幕px/noise 尺寸，LinearWrap 采样）；grad = n1.xy −
+//   (0, prog·0.04))（uv = 世界px/noise 尺寸——pixel = t0·uScreenResolution +
+//   uScreenPosition = 屏幕uv·分辨率+相机世界左上（ScreenShaderData.Apply），LinearWrap
+//   采样；★相机项 2026-09-14 BJ76 补上，此前屏幕锚定=波纹跟人跑）；grad = n1.xy −
 //   n2.xy；h' = (bufR − 0.5)·(1 − 0.4·bufB)（1456 bufB=0）；DISPY = grad.y·0.1·I −
 //   clamp(h',−0.3,0.3)；DISPX = grad.x·0.1·I；屏幕像素位移 = (DISPX·0.1·32,
 //   DISPY·32)（c14/c5 链，uOpacity=1）。X 位移只含噪声项（涟漪只垂直推——
@@ -407,16 +409,26 @@ class WaterWaveSystem {
   /** 位移采样（FilterWaterDistortion obj19 公式）。
    *  worldX/worldY = 世界 px；out = [dxPx, dyPx]（canvas px，z=1 时=原版屏幕 px）。
    *  ★噪声坐标单位修正(2026-08-20 用户实报"静水自然扰动缺失"定罪)：字节码
-   *  obj19 #13-#17 的采样坐标 = 屏幕px/noise尺寸·{0.1,0.2} = 【噪声 UV】(0..1
+   *  obj19 #13-#17 的采样坐标 = pixel/noise尺寸·{0.1,0.2} = 【噪声 UV】(0..1
    *  = 整张贴图)，而 noiseAt 的入参是【texel】。旧实现把 UV 值直接喂 texel 采样
    *  → 全屏落在第 0-1 个 texel 内 = 场恒定 → 静水只剩 ±0.1px 时间漂移抖动。
-   *  正确换算：texel = uv·256(贴图边长)，即 px·{0.1,0.2} 与 prog·0.04·256。 */
+   *  正确换算：texel = uv·256(贴图边长)，即 px·{0.1,0.2} 与 prog·0.04·256。
+   *  ★噪声场世界锚定(2026-09-14 BJ76 定谳，用户报"走动时波纹跟着角色跑")：
+   *  obj19 #10-12 pixel = t0·uScreenResolution + uScreenPosition，其中
+   *  uScreenPosition = UnscaledScreenPosition − offScreenRange = 相机可视左上
+   *  （世界 px，ScreenShaderData.Apply）⇒ 原版噪声涟漪场采样【世界坐标】。
+   *  本仓曾只实现 t0·uScreenResolution（屏幕 px）→ 涟漪场钉在屏幕上,走动时世界
+   *  从场下滑过 = 波纹"跟着角色跑"。修复：噪声 uv 用世界 css px（屏幕 px +
+   *  cam·cssZoom）；波场缓冲读 _readR 仍用屏幕 px（缓冲随相机滚动,内容侧世界
+   *  锚定,不改）。 */
   sampleDisplace(worldX: number, worldY: number, out: [number, number]): void {
     out[0] = 0; out[1] = 0;
     if (this.quality === 0 || !_noiseData) return;
     const px = (worldX - this._camX) * this._zoom;
     const py = (worldY - this._camY) * this._zoom;
-    const u = px / _noiseW, v = py / _noiseH;   // uv = 屏幕px/noise 尺寸（c0）
+    const wpx = px + this._camX * this._zoom;   // 世界 css px = 屏幕 px + cam·cssZoom
+    const wpy = py + this._camY * this._zoom;
+    const u = wpx / _noiseW, v = wpy / _noiseH; // uv = 世界px/noise 尺寸（c0·pixel 域）
     const prog = this.progress;
     const d1v = v * 0.1 + prog * 0.04;          // n1 的 v 漂移（X 无漂移）
     // texel 坐标（noiseAt 吃 texel；×贴图边长 256）
@@ -448,7 +460,9 @@ class WaterWaveSystem {
     if (this.quality === 0 || !_noiseData || lum <= 0.004) return 0;
     const px = (worldX - this._camX) * this._zoom;
     const py = (worldY - this._camY) * this._zoom;
-    const u = px / _noiseW, v = py / _noiseH;
+    const wpx = px + this._camX * this._zoom;   // 噪声场世界锚定（同 sampleDisplace,BJ76）
+    const wpy = py + this._camY * this._zoom;
+    const u = wpx / _noiseW, v = wpy / _noiseH;
     const prog = this.progress;
     const gx = noiseAt(0, (u * 0.1) * _noiseW, (v * 0.1 + prog * 0.04) * _noiseH) - noiseAt(0, (u * 0.2) * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     const gy = noiseAt(1, (u * 0.1) * _noiseW, (v * 0.1 + prog * 0.04) * _noiseH) - noiseAt(1, (u * 0.2) * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);

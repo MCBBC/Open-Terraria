@@ -254,10 +254,14 @@ describe('LoadoutShare 收藏装备跨配装共享', () => {
     expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));  // 共享生效
     // 共享件是聚合输入 → 卸收藏必须失效缓存（键含共享件,与 computeEquipStats 同口径）
     // ★勿钉内部 id 死值（曾钉 1352——注册表增项平移后炸红），动态取 iid(37)
+    // ★IIIII250 数值键:字符串键格式断言（toContain('1350p0.')）随键数值化退役,
+    // 失效语义改由「同输入同键 + 收藏件增/卸键必变」三轮对拍锁定
     const k1 = p['equipStatsKey']();
-    expect(k1).toContain(iid(37) + 'p0.');
-    p.inv.loadouts[1].armor[0] = null;
+    expect(p['equipStatsKey']()).toBe(k1);              // 同输入同键(数值键确定性)
+    p.inv.loadouts[1].armor[0] = null;                  // 卸收藏 → 键必变(共享候选是键输入)
     expect(p['equipStatsKey']()).not.toBe(k1);
+    p.inv.loadouts[1].armor[0] = { id: iid(37), stack: 1, favorited: true };
+    expect(p['equipStatsKey']()).toBe(k1);              // 复原 → 键回 k1
     // 本槽非空 → 恒用本槽
     p.inv.armor[0] = { id: iid(37), stack: 1 };
     expect(p.inv.getEffectiveArmor(0)?.id).toBe(iid(37));

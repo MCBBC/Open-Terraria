@@ -23,6 +23,14 @@
 // 【obj19 位移公式（tools/disasm-fx.mjs 逐指令复原；★负号修饰符三处订正——
 //    #26 add r0.zw, r0, -r1 / #29 mad r0.w, r3.z, -c13 / #59 add r0.x, r2.x, -r2.y，
 //    与 WaterWaves.sampleDisplace 逐项一致）】
+//   ★噪声场世界锚定（2026-09-14 BJ76 定谳，用户报"走动时波纹跟着角色跑"）：
+//     #10-12 pixel = t0·uScreenResolution + uScreenPosition —— 符号表
+//     c7=uScreenResolution c8=uScreenPosition；ScreenShaderData.Apply:
+//     uScreenPosition = UnscaledScreenPosition − offScreenRange = 相机可视左上（世界px）
+//     ⇒ 原版噪声涟漪场采样【世界坐标】（波场缓冲 uImageOffset 补偿滚动亦同域）。
+//     本仓曾只实现 t0·uScreenResolution（屏幕 px）→ 涟漪场钉在屏幕上,走动时世界从
+//     场下滑过 = 波纹"跟着角色跑"。修复：uWorldPx = camL/camT·cssZoom 进 FRAG,
+//     噪声 uv = (px + uWorldPx)/noiseSize；CPU 侧 sampleDisplace/sampleGlint 同刀。
 //   pixel   = t0·uScreenResolution + uScreenPosition          (#10-12)
 //   n1      = noise(pixel/noiseSize·0.1 + (0, prog·0.04))     (#13-15,#21)
 //   n2      = noise(pixel/noiseSize·0.2 − (0, prog·0.04))     (#16-17,#22)
@@ -97,6 +105,7 @@ uniform sampler2D uNoise;
 uniform sampler2D uWave;
 uniform sampler2D uWater;
 uniform vec2 uCssSize;
+uniform vec2 uWorldPx;
 uniform vec2 uNoiseSize;
 uniform vec2 uWaveSize;
 uniform float uProgress;
@@ -105,7 +114,14 @@ varying vec2 vUv;
 void main() {
   // 屏幕 css px（与 sampleDisplace 的 (world−cam)·cssZoom 同一坐标系）
   vec2 px = vUv * uCssSize;
-  vec2 nu = px / uNoiseSize;
+  // ★噪声场世界锚定（2026-09-14 BJ76 定谳）：obj19 #10-12 pixel = t0·uScreenResolution
+  //   + uScreenPosition（ScreenShaderData.Apply: uScreenPosition = UnscaledScreenPosition
+  //   − offScreenRange = 相机可视左上·世界 px）——原版涟漪场采样世界坐标,角色走动时
+  //   波纹相对水面静止。本仓曾漏加该相机项（采样域=屏幕px）→ 涟漪贴屏幕滑移=用户报
+  //   "波纹跟着角色跑"。世界 css px = 屏幕 css px + cam·cssZoom（uWorldPx）。
+  //   波场缓冲读（px·0.25/uWaveSize）不改：缓冲随相机滚动,世界锚定在内容侧。
+  vec2 wpx = px + uWorldPx;
+  vec2 nu = wpx / uNoiseSize;
   // 双噪声采样：0.1/0.2 双尺度反向 Y 滚动（obj19 #13-22；c1/c2=±prog·0.04）
   vec4 n1 = texture2D(uNoise, vec2(nu.x * 0.1, nu.y * 0.1 + uProgress * 0.04));
   vec4 n2 = texture2D(uNoise, vec2(nu.x * 0.2, nu.y * 0.2 - uProgress * 0.04));
@@ -199,7 +215,7 @@ void main() {
       return;
     }
     this.prog = prog;
-    for (const n of ['uCssSize', 'uNoiseSize', 'uWaveSize', 'uProgress', 'uIntensity',
+    for (const n of ['uCssSize', 'uWorldPx', 'uNoiseSize', 'uWaveSize', 'uProgress', 'uIntensity',
       'uScene', 'uNoise', 'uWave', 'uWater']) {
       this.uni[n] = gl.getUniformLocation(prog, n);
     }
@@ -294,7 +310,9 @@ void main() {
    * 每帧全屏合成：scene（带光照世界层，设备像素）按位移场重采样、前景水 alpha
    * 门控 → this.canvas。water = 前景水离屏（waterTarget 门控纹理；null = 无水帧，
    * 门控恒 0 = 原样直通）。cssW/cssH = 位移场坐标系（模拟系 CSS px）；
-   * progress/intensity = waterWaves 公开态；waveR/gridW/gridH = 波场。
+   * worldX/worldY = 相机可视左上·css px（=camL/camT·cssZoom；噪声场世界锚定,
+   * obj19 uScreenPosition 语义——2026-09-14 BJ76）；progress/intensity = waterWaves
+   * 公开态；waveR/gridW/gridH = 波场。
    * 失败返回 false（调用方原样直画）。
    */
   composite(
@@ -302,6 +320,7 @@ void main() {
     noise: TexImageSource | null,
     cssW: number, cssH: number, progress: number, intensity: number,
     waveR: Float32Array, gridW: number, gridH: number,
+    worldX = 0, worldY = 0,
   ): boolean {
     const gl = this.gl;
     if (!gl || !this.prog || this.diedAt) return false;
@@ -361,6 +380,7 @@ void main() {
     gl.uniform1i(this.uni.uWave, 2);
     gl.uniform1i(this.uni.uWater, 3);
     gl.uniform2f(this.uni.uCssSize, cssW, cssH);
+    gl.uniform2f(this.uni.uWorldPx, worldX, worldY);
     gl.uniform2f(this.uni.uNoiseSize, this.noiseW, this.noiseH);
     gl.uniform2f(this.uni.uWaveSize, gridW, gridH);
     gl.uniform1f(this.uni.uProgress, progress);

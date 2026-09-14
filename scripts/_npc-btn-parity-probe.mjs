@@ -183,12 +183,15 @@ const res = await page.evaluate(async () => {
     {
       const healHost = document.querySelector('.sw-npc-dialog button[data-b="heal"]');
       const tag = healHost ? healHost.querySelector('.sw-npc-coins') : null;
-      // P1-1 回归锚：价签=按钮子元素且水平对齐（曾插容器顶层 flex static-position 落最左）
+      // P1-1 回归锚：价签=按钮子元素且锚定本按钮（曾插容器顶层 flex static-position 落最左）。
+      // ★刀20 vanilla 几何：DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106（NPCChatPanel.cs
+      //  :140-144）→ 价签在按钮左 151px（旧 flex 布局左对齐 <40 已随面板 1:1 重写退役）
       let geoOk = false;
       if (tag && healHost) {
-        geoOk = Math.abs(tag.getBoundingClientRect().left - healHost.getBoundingClientRect().left) < 40;
+        const d = healHost.getBoundingClientRect().left - tag.getBoundingClientRect().left;
+        geoOk = Math.abs(d - 151) < 30;
       }
-      ok('B1 治疗按钮旁金币条(几何对齐)', !!tag && /\d/.test(tag.textContent || '') && geoOk,
+      ok('B1 治疗按钮旁金币条(几何对齐 -151 锚)', !!tag && /\d/.test(tag.textContent || '') && geoOk,
         `text=${tag ? tag.textContent : 'null'} cost=${g.nurseHealCost()} geo=${geoOk}`);
     }
     // ---- B2 税务官应收税款条 ----

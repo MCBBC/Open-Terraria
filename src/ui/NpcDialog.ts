@@ -15,6 +15,32 @@ const PORTRAIT_OFFSETS = portraitOffsetsJson as unknown as {
   closeUp: Record<string, [number, number]>;
   fullBodyRetro: Record<string, [number, number]>;
 };
+
+/** 面板底图 TextureAssets.ChatBack（AssetInitializer.cs:864,Images\Chat_Back,500×500） */
+const CHAT_BACK = 'sprites/vanilla/Chat_Back.png';
+/** 头像底框 TextureAssets.NpcPortraitBackground（AssetInitializer.cs:949,112×112） */
+const PORTRAIT_WINDOW = 'sprites/vanilla/Portraits_Portrait_Window.png';
+/** 城镇宠物名单（NPCID.Sets.IsTownPet = CreateBoolSet(637,638,656,670,678..684),NPCID.cs:4446） */
+const PORTRAIT_PETS = [637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684];
+
+/** 开场 hop 动作集（Main.DoNPCPortraitHop 触发面全表）：SetTalkNPC（Player.cs:4386）
+ *  + Main.cs 六站（TavernkeepAdvice:40691/PartyGirlSwapMusic:40743/DoNurseHeal:40870/
+ *  DoTaxCollector:40918/DoAnglerQuest:40956/DryadText_WorldPurityOrStardewValleyBit:40961）
+ *  + NPCInteractions.cs Interact 体五站（StardewValleyBit:99/DryadPurification:121/
+ *  GuideTip:217/ReportHappiness:310/RequestHome:332）。present 层以「按钮 id → 台词
+ *  刷新」等价映射；happiness 走独立浮层不重建面板故不列入。普通刷新（如 plant）不 hop。 */
+const HOP_BUTTONS: ReadonlySet<string> = new Set([
+  'heal', 'collect', 'quest', 'advice', 'music', 'status', 'stardew', 'help', 'home',
+]);
+
+/** hop 关键帧 = Utils.EaseOutBounce（Utils.cs:354-366,BounceEaseOut(t,4,2) =
+ *  1-(1-t)²·|sin(4πt)|）；Main.cs:41049-41055 偏移 = -56·0.25·(1-bounce(clamp(num,0,80)/80))
+ *  = -14·(1-t)²·|sin(4πt)|,80 帧 ≈ 1.333s,窗从原位弹起再落定。 */
+const HOP_KEYFRAMES = `@keyframes sw-npc-hop{${Array.from({ length: 41 }, (_, i) => {
+  const t = i / 40;
+  const off = -14 * (1 - t) * (1 - t) * Math.abs(Math.sin(t * 4 * Math.PI));
+  return `${(t * 100).toFixed(2)}%{transform:translateY(${off.toFixed(3)}px)}`;
+}).join('')}}`;
 // 2026-08-30 对齐 NPCInteractions.Initialize 全注册表（:489-531）：新增
 // shopDecor(画家装饰店 25) / help+craft(向导 22 GuideTip·GuideReverseCrafting)
 // / music(派对女孩 208) / advice(酒馆老板 550 TavernkeepAdvice) / stardew(树妖
@@ -94,55 +120,80 @@ export function medalPriceText(price: number): string {
 }
 
 const CSS = `
+/* ===== 对话面板（NPCChatPanel.cs:52-86 1:1：屏空间 top-center,500 宽,y=100）===== */
 .sw-npc-dialog {
-  position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%);
-  width: 560px; max-width: 94vw; z-index: 22; cursor: auto;
-  /* ★sw-root 是 pointer-events:none(防挡画布),子面板必须显式 auto 否则按钮点不到 */
+  position: fixed; left: calc(50% - 250px); top: 100px; width: 500px;
+  z-index: 22; cursor: auto; user-select: none;
+  font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif; color: #e8e8f4;
+  /* ★sw-root 是 pointer-events:none(防挡画布);原版面板矩形含鼠标即置 mouseInterface
+     (NPCChatPanel.cs:81-84)→ 必须 auto:按钮可点 + 世界点击被吞 */
   pointer-events: auto;
-  background: linear-gradient(160deg, #2b3664, #1c2444);
-  border: 2px solid #7d92d6; border-radius: 6px; padding: 10px 14px; color: #e8e8f4;
-  font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
-  box-shadow: 0 8px 40px rgba(0,0,0,.6);
 }
-.sw-npc-body { display: flex; gap: 10px; align-items: flex-start; }
-.sw-npc-portrait { width: 76px; height: 92px; flex: none; image-rendering: pixelated;
-  border: 2px solid #7d92d6; border-radius: 4px; background: #10142a;
-  animation: sw-portrait-hop 0.35s cubic-bezier(.2,1.6,.4,1); }
-@keyframes sw-portrait-hop { 0% { transform: translateY(14px) scale(0.9); opacity: 0.2; }
-  100% { transform: translateY(0) scale(1); opacity: 1; } }
-.sw-npc-main { flex: 1; min-width: 0; }
-.sw-npc-name { color: #ffe8a0; font-size: 15px; margin-bottom: 6px;
-  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000; }
-.sw-npc-chat { font-size: 14px; line-height: 1.6; color: #e8e8f4; min-height: 44px; position: relative; }
-.sw-npc-btns { display: flex; gap: 8px; margin-top: 8px; position: relative;
-  /* 原版每 4 个换行（NPCChatPanel.DrawButtons :103-107 num%4）——按钮流式排布
-     以 wrap 近似同观感 */
-  flex-wrap: wrap; row-gap: 6px; align-items: center; }
-/* 金币条（TryAddCoins→ItemSlot.DrawMoney 画在按钮左上 −45,−44,NPCChatPanel.cs:142） */
-.sw-npc-coins { position: absolute; bottom: calc(100% + 2px); left: 0; color: #ffd76e;
-  font-size: 11px; white-space: nowrap; text-shadow: 1px 1px 0 #000;
+/* Chat_Back 两段绘制（:71-72）：主体 = 源(0,0,500,470) 纵向拉伸到 (500,H-30)；
+   底帽 = 源(0,470,500,30) 原尺寸 @ 底缘。乘色 (200,200,200,200)（:62）
+   → opacity+brightness 各 200/255（XNA tint RGB×A 近似,预乘暗晕判例） */
+.sw-npc-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.sw-npc-bg img { position: absolute; left: 0; width: 500px; image-rendering: pixelated;
+  opacity: 0.784; filter: brightness(0.784); }
+.sw-npc-bg-body { position: absolute; left: 0; top: 0; width: 100%; height: 60px; overflow: hidden; }
+.sw-npc-bg-body img { top: 0; }   /* height 由 JS 按行数写:(H-30)*500/470 */
+.sw-npc-bg-cap { position: absolute; left: 0; bottom: 0; width: 100%; height: 30px; overflow: hidden; }
+.sw-npc-bg-cap img { top: -470px; height: 500px; }
+/* 台词区（DrawText :217-237）：TopLeft+(20,20) 起,行距 30,换行宽 460,≤10 行
+   （TextDisplayCache.cs:23 WordwrapString(...,460,10)）；色 = (mouseTextColor*2+255)/3
+   灰呼吸（:63-64,190..255 脉冲 → 211..255,±1/帧 ≈ 2.167s 三角波） */
+.sw-npc-chat { position: absolute; left: 20px; top: 20px; width: 460px; line-height: 30px;
+  font-size: 13px; max-height: 300px; overflow: hidden; white-space: pre-wrap;
+  animation: sw-chat-pulse 2.1667s linear infinite alternate; }
+@keyframes sw-chat-pulse { from { color: rgb(211,211,211); } to { color: rgb(255,255,255); } }
+/* 头像窗（Main.DrawNPCPortrait :41031）：窗中心 P = 面板左上角 + (-62,+62)，悬在面板
+   左外侧。本容器 = P-(100,100) 起 200×200（Detailed 200×200 原尺寸直绘域）；
+   Portrait_Window 112×112 底框 @ P-(56,56)（:41069,chatBack 染色）；
+   名字 = ItemStack 字体白字 @ P+(0,57) 中心锚（:41145-41149；本仓以 UI 像素字体近似）。
+   hop = 首帧 EaseOutBounce 80 帧（:41049-41055,HOP_KEYFRAMES）；容器不接指针
+   （原版 mouseInterface 只按面板矩形 :81-84,头像域点击透传世界） */
+.sw-npc-portrait-wrap { position: absolute; left: -162px; top: -38px; width: 200px; height: 200px;
   pointer-events: none; }
-/* 渔夫任务鱼角标（npcChatCornerItem>0,32px 帽缩放 Main.cs:40486-40492） */
-.sw-corner-item { position: absolute; right: -34px; bottom: 0px; width: 30px; height: 30px;
-  image-rendering: pixelated; cursor: pointer; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
-/* -1 态：EquipPage[5] 装备页快捷图标（bottomRight-12 :40518） */
-.sw-corner-equip { width: 26px; height: 26px; bottom: -6px; right: -42px; }
-/* 移动端：负偏移把角标推出视口（360px 下仅 ~7px 可点），收进面板内缘 */
-@media (max-width: 560px), (pointer: coarse) {
-  .sw-corner-item { right: 4px; bottom: -34px; }
-  .sw-corner-equip { width: 26px; height: 26px; bottom: -36px; right: 4px; }
-}
-.sw-npc-btns button {
-  background: #3a4680; color: #e8e8f4; border: 1px solid #7d92d6; border-radius: 4px;
-  padding: 5px 16px; cursor: pointer; font-family: inherit;
-}
-.sw-npc-btns button:hover { background: #4a5aa0; }
-/* NPCChatPanel.cs:136-138 按钮通知图标(UI_quickicon1,文字右+8px;亮度脉冲
-   sin(2πt)白↔半透=Utils.cs:448,rotMul=0 无摇摆) */
-.sw-npc-btns button { position: relative; }
-.sw-npc-excl { width: 6px; height: 16px; image-rendering: pixelated; margin-left: 8px;
-  vertical-align: -3px; animation: sw-excl-pulse 1s linear infinite; }
+.sw-npc-portrait-wrap.sw-portrait-hop { animation: sw-npc-hop 1.3333s linear; }
+.sw-npc-window { position: absolute; left: 44px; top: 44px; width: 112px; height: 112px;
+  image-rendering: pixelated; opacity: 0.784; filter: brightness(0.784); }
+.sw-npc-portrait { position: absolute; left: 0; top: 0; image-rendering: pixelated; }
+.sw-npc-pname { position: absolute; left: 100px; top: 157px; transform: translate(-50%, -50%);
+  color: #fff; font-size: 14px; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
+/* 按钮行（DrawButtons :93-135）：锚 = 面板底左角 + (30, -22n+max(0,2(n-1))-4)；
+   行高 22 / 列距 30 / 4 列换行（:97/:103-107/:135）；文字基准缩放 0.9（:96,本仓以
+   12px 字号近似）悬停 1.2 + 影 Black→Brown（:119-121）；正文色 = (b,b/1.1,b/2,b)
+   b=mouseTextColor 琥珀棕脉冲（:102）。命中盒 = 压缩后文本宽（:118） */
+.sw-npc-btns { position: absolute; left: 30px; }
+.sw-npc-btn { position: absolute; height: 22px; line-height: 22px; padding: 0; margin: 0;
+  background: none; border: none; outline: none; cursor: pointer; font-family: inherit;
+  font-size: 12px; white-space: nowrap;
+  text-shadow: 1px 1px 0 #000; transform-origin: left center;
+  animation: sw-btn-pulse 2.1667s linear infinite alternate; }
+.sw-npc-btn:hover { transform: translateX(-15%) scale(1.3333);   /* 1.2/0.9 基准换算+左扩补偿 :125 */
+  text-shadow: 1px 1px 0 rgb(139,69,19); }                       /* Color.Brown */
+@keyframes sw-btn-pulse { from { color: rgb(190,172,95); } to { color: rgb(255,231,127); } }
+.sw-npc-btn-t { display: inline-block; transform-origin: left center; }   /* >260 压缩承载(:113-115) */
+/* 金币条（TryAddCoins → ItemSlot.DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106
+   :140-144 → 按钮相对 (-151,-44)） */
+.sw-npc-coins { position: absolute; left: -151px; top: -44px; color: #ffd76e;
+  font-size: 11px; white-space: nowrap; text-shadow: 1px 1px 0 #000; pointer-events: none; }
+/* 感叹号（:136-139 文字右 +8px,锚行中,不入命中盒；亮度脉冲 Utils.cs:448） */
+.sw-npc-excl { position: absolute; left: 100%; margin-left: 8px; top: 50%;
+  transform: translateY(-50%); width: 6px; height: 16px; image-rendering: pixelated;
+  animation: sw-excl-pulse 1s linear infinite; }
 @keyframes sw-excl-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+/* 右下角物品（DrawNPCChatBottomRightItem Main.cs:40480-40543：>0=bottomRight-8、
+   -1=bottomRight-12,origin=帧右下,最长边≤32） */
+.sw-corner-item { position: absolute; width: 30px; height: 30px; right: 8px; bottom: 8px;
+  image-rendering: pixelated; cursor: pointer; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
+.sw-corner-equip { width: 26px; height: 26px; right: 12px; bottom: 12px; }
+/* 窄屏/触屏：整体等比缩（内部几何不变；旧 max-width:94vw 压宽会撕 460 换行宽,登记适配） */
+@media (max-width: 620px), (pointer: coarse) {
+  .sw-npc-dialog { transform: scale(0.68); transform-origin: 50% 0; }
+}
+@media (max-width: 420px) {
+  .sw-npc-dialog { transform: scale(0.52); transform-origin: 50% 0; } }
 .sw-npc-shop {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 520px; max-width: 94vw; z-index: 23; cursor: auto;
@@ -213,43 +264,44 @@ export function formatCopper(v: number): string {
 export class NpcDialog {
   private panel: HTMLElement | null = null;
   private escHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** hop 闩：九个 hop 动作按钮点击置位（HOP_BUTTONS），下一次 open() 消费重播
+   *  EaseOutBounce（原版 hop 面 = SetTalkNPC + Interact 体,普通刷新不 hop） */
+  private hopPending = false;
 
   constructor(private parent: HTMLElement, private onButton: (id: NpcButtonId) => void,
     private onCornerItem?: (vid: number) => void) {
     if (!document.getElementById('sw-npc-style')) {
       const style = document.createElement('style');
       style.id = 'sw-npc-style';
-      style.textContent = CSS;
+      style.textContent = `${CSS}\n${HOP_KEYFRAMES}`;
       document.head.appendChild(style);
     }
   }
 
-  /** 打开对话框:name=NPC 名,chat=台词,buttons=选项(原版 Lang.inter 标签);
+  /** 打开对话框:name=NPC 名(GivenOrTypeName),chat=台词,buttons=选项(原版 Lang.inter 标签);
    *  cornerItem: >0=渔夫任务鱼角标(url/name 由 UI 注入) / -1=RequestHome 态 →
    *  DisplaySlots_5 快捷图标点击开背包(Main.cs:40516-40543) / 缺省不画 */
   open(name: string, chat: string, buttons: NpcButtonMeta[], portrait?: DialoguePortraitPayload | null,
     vanillaId?: number, corner?: { vid: number; url: string; name: string }) {
+    const wasOpen = this.panel !== null;
     this.close();
+    // hop 门（D5 修）：原版 hop 只在 SetTalkNPC（open-from-closed 等价）与九个
+    // Interact 动作（HOP_BUTTONS 置 pending）；普通台词刷新（help 之外的 plant 等
+    // 非 hop 动作）重建面板不重播
+    const hop = !wasOpen || this.hopPending;
+    this.hopPending = false;
     const panel = document.createElement('div');
     panel.className = 'sw-npc-dialog';
-    const btns = buttons.map((b) => `<button data-b="${b.id}">${b.label}${b.excl ? '<img class="sw-npc-excl" src="sprites/vanilla-ui/UI_quickicon1.png" alt="!" draggable="false">' : ''}</button>`).join('');
-    // 头像(原版 Main.npcChatPortrait = Images/TownNPCs/Portraits/Portrait_<Name>，SetTalkNPC :4196;
-    // 打开时 DoNPCPortraitHop 弹跳)——无头像类型(如骷髅商人外的野兽)原版也不显示。
-    // ★原版画法（Main.cs DrawNPCPortrait :39745）：200×200 原尺寸画在圆形底框上、
-    //  头部居中——贴图自带 ~50% 透明留白是圆框设计的一部分；本仓是矩形头像框，
-    //  整图塞入头像只占一半 → 打开时 canvas 按 alpha 内容包围盒裁剪 + 等比铺满
-    // 对话头像偏好（Main.DialoguePortraitPreference，IngameOptions.cs:823-836；
-    // CycleNPCPortraitMode :39724 序 Detailed→CloseUp→FullBodyRetro→Disabled）：
-    // Disabled=不画；CloseUp/FullBodyRetro 走 Profile/Retro 变体贴图——变体未
-    // 导入，暂按 Detailed 现行画法渲染（登记：素材变体缺口）——2026-08-30 续批翻案：
-    // CloseUp/Retro 两模式 = NPC 变体贴图行 0 dummy 直绘（Main.DrawNPCPortrait
-    // :41075-41172：scale3+CloseUpOffsets / scale2+RetroOffsets，texture=
-    // Profiles.GetTextureNPCShouldUse → townNpcProfileSheet），**不需要额外资产**，
-    // 登记作废；三模式偏好 DialoguePortraitPreference(IngameOptions.cs:823-836)。
+    // 头像（Main.DrawNPCPortrait Main.cs:41012-41150 四模式消费 + Portrait_Window 底框
+    // :41069）：无 provider(url=null) 或 Disabled = 单点早退（:41015/:41020）——
+    // 连底框也不画。名字行从面板标题迁入窗内（:41145-41149）。
     const mode = options.data.dialoguePortraitMode;
     const portraitOn = !!portrait && !!portrait.url && mode !== 'disabled';
     const portraitHtml = portraitOn
-      ? `<canvas class="sw-npc-portrait" width="152" height="184"></canvas>`
+      ? `<div class="sw-npc-portrait-wrap${hop ? ' sw-portrait-hop' : ''}">`
+        + `<img class="sw-npc-window" src="${PORTRAIT_WINDOW}" alt="" draggable="false">`
+        + `<canvas class="sw-npc-portrait" width="200" height="200"></canvas>`
+        + `<div class="sw-npc-pname">${name}</div></div>`
       : '';
     // 角落：>0=渔夫任务鱼(32 帽缩放 :40486-40492,悬停 tooltip :40514)；-1=RequestHome
     // 态 EquipPage[5] 快捷图标(bottomRight-12 :40518，悬停叠[7]金染 OurFavoriteColor
@@ -259,22 +311,31 @@ export class NpcDialog {
         ? `<img class="sw-corner-item" data-corner="${corner.vid}" src="${corner.url}" title="${corner.name}" alt="" draggable="false">`
         : `<img class="sw-corner-item sw-corner-equip" data-corner="-1" src="sprites/vanilla-ui/UI_DisplaySlots_5.png" alt="" draggable="false">`)
       : '';
-    panel.innerHTML = `<div class="sw-npc-body">${portraitHtml}<div class="sw-npc-main">`
-      + `<div class="sw-npc-name">${name}</div><div class="sw-npc-chat">${chat}${cornerHtml}</div>`
-      + `<div class="sw-npc-btns">${btns}</div></div></div>`;
-    // 金币条（TryAddCoins → ItemSlot.DrawMoney 画在该按钮左上 −45,−44 处
-    // NPCChatPanel.cs:140-144——护士治疗费/税务官应收税款）绝对定位节点
+    panel.innerHTML = `<div class="sw-npc-bg" aria-hidden="true">`
+      + `<div class="sw-npc-bg-body"><img src="${CHAT_BACK}" alt="" draggable="false"></div>`
+      + `<div class="sw-npc-bg-cap"><img src="${CHAT_BACK}" alt="" draggable="false"></div></div>`
+      + `${portraitHtml}<div class="sw-npc-chat">${chat}</div><div class="sw-npc-btns"></div>${cornerHtml}`;
+    // —— 按钮行（DrawButtons :93-135）：先建节点入层；几何/测量在入 DOM 后做
+    // （面板未挂载时 scrollHeight/offsetWidth 全 0——首版在此测出 1 行假行数）——
+    const layer = panel.querySelector<HTMLElement>('.sw-npc-btns')!;
+    const created: Array<{ btn: HTMLButtonElement; meta: NpcButtonMeta; w: number }> = [];
     for (const b of buttons) {
-      if ((b.coins ?? 0) <= 0) continue;
-      const host = panel.querySelector(`button[data-b="${b.id}"]`);
-      if (!host) continue;
-      // 挂在按钮自身（button 已 position:relative）——曾插 .sw-npc-btns 容器：
-      // flex abspos static-position=内容盒左上 ⇒ 永远落在最左按钮上方（审查 P1；
-      // 原版 DrawMoney 锚定该按钮 −45,−44，NPCChatPanel.cs:140-144）
-      const tag = document.createElement('span');
-      tag.className = 'sw-npc-coins';
-      tag.textContent = formatCopper(b.coins!);
-      host.appendChild(tag);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sw-npc-btn';
+      btn.dataset.b = b.id;
+      btn.innerHTML = `<span class="sw-npc-btn-t">${b.label}</span>`
+        + (b.excl ? '<img class="sw-npc-excl" src="sprites/vanilla-ui/UI_quickicon1.png" alt="!" draggable="false">' : '');
+      if ((b.coins ?? 0) > 0) {
+        // 金币条挂按钮自身（审查 P1 回归锚——曾插容器顶层落最左）：原版
+        // DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106（:140-144）→ 按钮相对 (-151,-44)
+        const tag = document.createElement('span');
+        tag.className = 'sw-npc-coins';
+        tag.textContent = formatCopper(b.coins!);
+        btn.appendChild(tag);
+      }
+      layer.appendChild(btn);
+      created.push({ btn, meta: b, w: 0 });
     }
     // 渔夫任务鱼角标：点击把 [i:vid] 物品标签送进聊天输入框（AddChatText 等价；
     // 悬停改名已在 title 注入，:40498-40513 光标形变略）。-1 态=装备页快捷图标：
@@ -291,15 +352,68 @@ export class NpcDialog {
         this.onCornerItem?.(Number(cornerImg.dataset.corner));
       });
     }
-    panel.querySelectorAll('button').forEach((el) => {
-      el.addEventListener('mouseenter', () => UISfx.hover());   // DrawButtons :157-161 悬停换行即响(12)
-      el.addEventListener('click', () => {
+    created.forEach(({ btn, meta }) => {
+      btn.addEventListener('mouseenter', () => UISfx.hover());   // :157-161 悬停音效
+      btn.addEventListener('mouseleave', () => UISfx.hover());   //   = 进/出双边沿(_lastHovered)
+      // 激活接线（与旧实现等价单发）：历史锚 = click（npc-dialog-integration §一）;
+      // 兼容探针直驱 dispatchEvent(mousedown)（_fx19c 全 DOM 链）——armed 闩保证
+      // 同一次按压 mousedown+click 只发一次。Game 层无双触：Input.ts window mousedown
+      // 对 isDomUiTarget(.sw-root 子树)直 return（不会置 mouseDown）。
+      let armed = false;
+      const fire = () => {
         UISfx.click(); // 原版对话按钮 MenuTick(id 12)
-        this.onButton((el as HTMLElement).dataset.b as NpcButtonId);
+        if (HOP_BUTTONS.has(meta.id)) this.hopPending = true;    // Interact 体 DoNPCPortraitHop
+        this.onButton(meta.id);
+      };
+      btn.addEventListener('mousedown', (e) => {
+        if ((e as MouseEvent).button !== 0) return;
+        armed = true;
+        fire();
+      });
+      btn.addEventListener('click', () => {
+        if (armed) { armed = false; return; }   // 本次按压已在 mousedown 沿发过
+        fire();
       });
     });
     this.parent.appendChild(panel);
     this.panel = panel;
+    // —— 面板几何（NPCChatPanel.cs:62-72）：H = 30 + 30·行数 + 30·按钮行数 +
+    // max(0,2·(按钮行数-1))；行数按本仓字体实测（pre-wrap 460px 换行,≤10 行封顶 =
+    // WordwrapString(...,460,10) 等价；超行以 max-height 整行截断）。
+    // ★必须在入 DOM 后测量（未挂载元素无布局）——
+    const chatEl = panel.querySelector<HTMLElement>('.sw-npc-chat')!;
+    const lines = Math.max(1, Math.min(10, Math.round(chatEl.scrollHeight / 30)));
+    chatEl.style.maxHeight = `${lines * 30}px`;
+    const btnRows = Math.ceil(buttons.length / 4);   // AllowedInteractionsPerLine=4(:30/:175)
+    const panelH = 30 + 30 * lines
+      + (btnRows > 0 ? 30 * btnRows + Math.max(0, 2 * (btnRows - 1)) : 0);
+    panel.style.height = `${panelH}px`;
+    const bodyDiv = panel.querySelector<HTMLElement>('.sw-npc-bg-body');
+    const bodyImg = panel.querySelector<HTMLElement>('.sw-npc-bg-body img');
+    if (bodyDiv) bodyDiv.style.height = `${panelH - 30}px`;
+    if (bodyImg) bodyImg.style.height = `${((panelH - 30) * 500 / 470).toFixed(2)}px`;
+    // —— 按钮行定位：锚 = 底左角 + (30,-22n+max(0,2(n-1))-4)；文本行按钮逐个
+    // 绝对定位：X 累进 压缩宽+30,:103-107 num%4 换行 ——
+    layer.style.top = `${panelH - 22 * btnRows + Math.max(0, 2 * (btnRows - 1)) - 4}px`;
+    for (const c of created) {
+      // 超 260 横向压缩（:113-115 num5=260/stringSize.X）——命中盒=压缩后宽(:117)
+      const w0 = c.btn.offsetWidth;
+      c.w = w0;
+      if (w0 > 260) {
+        c.w = 260;
+        c.btn.style.width = '260px';
+        const t = c.btn.querySelector<HTMLElement>('.sw-npc-btn-t');
+        if (t) t.style.transform = `scaleX(${(260 / w0).toFixed(4)})`;
+      }
+    }
+    let cursorX = 0;
+    created.forEach(({ btn, meta, w }, i) => {
+      if (i % 4 === 0) cursorX = 0;                       // :103-107 换行复位
+      if ((meta.coins ?? 0) > 0) cursorX += 106;          // :144 金币占位推进
+      btn.style.left = `${cursorX}px`;
+      btn.style.top = `${Math.floor(i / 4) * 22}px`;      // 行高 22（:97）
+      cursorX += w + 30;                                  // :135 列距 30
+    });
     if (portraitOn) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait!);
     // Esc 优先序对齐 Player.cs:4960-5025 ToggleInv：talkNPC≥0 时 Esc 只关对话、
     // 不落背包/暂停链——捕获阶段拦截截胡其余 window 监听（main.ts Inventory 链）
@@ -316,18 +430,23 @@ export class NpcDialog {
     window.addEventListener('keydown', this.escHandler, true);
   }
 
-  /** 头像绘制三分支（DialoguePortraitPreference 序）：
-   *  Detailed = Portrait 圆框图 alpha 包围盒 cover 铺满 76×92 框；
-   *  CloseUp  = NPC 变体贴图行 0 ×3 直绘（Main.cs:41075-41103：dummy scale=3、
-   *             宠物 num14=-20 特调 + CloseUpOffsets 表——本仓矩形框即天然 scissor，
-   *             头部自然落上半区）；
-   *  FullBodyRetro = 行 0 ×2 底对齐 + RetroOffsets 表（:41104-41123）。 */
+  /** 头像绘制（Main.DrawNPCPortrait Main.cs:41012-41150 四模式；画布 200×200，
+   *  canvas-local 坐标以窗中心 P=(100,100)）：
+   *  Detailed = 200×200 原尺寸直绘中心=P（:41073；贴图自带 alpha 留白成圆框设计——
+   *             旧 alpha 包围盒 cover 画法随矩形框退役,D1 已修）;
+   *  CloseUp  = 帧行 0 ×3（:41084）,帧底=碰撞盒底+4（DrawNPCDirect 尾锚）,
+   *             position=P+(-bw/2,48+num14)（:41085-41098）→ 帧中心 =
+   *             P+(0,52+num14+bh)-fh·1.5;剪裁窗 96×146 @ P+(-48,-98)..P+(+48,+48)
+   *             （:41109-41112,上越窗顶 42px）;宠物 num14=-20/num15=-36+((96-fw)/2/6)·6
+   *             特支（:41086-41095）;偏移表 = dummy.position += value（UI px,不随缩放）;
+   *  FullBodyRetro = ×2（:41127）,position=P+(-bw/2,48-bh)（:41126-41130）→ 帧底 =
+   *             P.y+52,无剪裁（:41140,可越窗顶——本仓以 200×200 画布界近似）。 */
   private drawPortrait(canvas: HTMLCanvasElement | null, payload: DialoguePortraitPayload): void {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const mode = options.data.dialoguePortraitMode;
-    // ---- CloseUp / FullBodyRetro：NPC 变体贴图直绘 ----
+    // ---- CloseUp / FullBodyRetro：NPC 变体贴图行 0 直绘 ----
     if (mode === 'closeUp' || mode === 'fullBodyRetro') {
       const sheet = townNpcProfileSheet(payload.vanillaId, payload.shimmered ? 1 : 0,
         payload.altTexture ?? 0, payload.variationIndex ?? 0)
@@ -358,74 +477,50 @@ export class NpcDialog {
       };
       tryLoad();
       /** 行 0 直绘主体（onload 与兜底共用）：fh = 整条高/帧数
-       *  （vanilla-npcs.json frames=Main.npcFrameCount） */
+       *  （vanilla-npcs.json frames=Main.npcFrameCount;width/height=SetDefaults 碰撞盒） */
       const paintSheet = () => {
-        const frames = VANILLA_NPCS[String(payload.vanillaId)]?.frames ?? 14;
+        const info = VANILLA_NPCS[String(payload.vanillaId)];
+        const frames = info?.frames ?? 14;
         const fh = Math.max(1, Math.floor(img.naturalHeight / frames));
         const fw = img.naturalWidth;
+        const bw = info?.width ?? 18;
+        const bh = info?.height ?? 40;
         ctx.imageSmoothingEnabled = false;
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         if (mode === 'closeUp') {
-          const scale = 6;                                            // dummy scale3 × canvas2x
-          const dw = fw * scale;
-          const isPet = [637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684].includes(payload.vanillaId);
-          const lift = isPet ? -20 : 16;                              // Main.cs num14 缺省 16 / 宠物 -20
-          let x: number; let y: number;
-          if (isPet) {
-            // Main.cs:41088-41098 特支：num15 = -36+((96-fw)/2)/6*6（96 圆框−frameWidth
-            // 按 texel 组取整再水平定位）——缺此支猫头整体偏左出框/狗只剩右 1/3（审查）。
-            // 换算：num15 是 UI 轴偏移（×1），canvas=UI×2 ⇒ baseX=(152)+(num15*2)
-            const n16 = Math.floor(Math.floor((96 - fw) / 2) / 6) * 6;
-            const num15 = -36 + Math.floor(n16 / 6);
-            x = (canvas.width - fw * scale) / 2 + num15 * 2 + off[0] * scale;
-            y = canvas.height - fh * scale - lift * 2 + off[1] * scale;
-          } else {
-            x = (canvas.width - dw) / 2 + off[0] * scale;
-            y = canvas.height - fh * scale + lift * 2 * 0.5 + off[1] * scale;
-          }
-          ctx.drawImage(img, 0, 0, fw, fh, x, y, fw * scale, fh * scale);
+          const s = 3;
+          const isPet = PORTRAIT_PETS.includes(payload.vanillaId);
+          const num14 = isPet ? -20 : 16;                             // :41083/:41088
+          // :41090-41095（96−帧宽 ÷2 ÷6 ×6 整数序;帧宽单列=naturalWidth）
+          const num15 = isPet
+            ? -36 + Math.floor(Math.floor((96 - fw) / 2) / 6) * 6
+            : -bw / 2;
+          const cx = 100 + num15 + bw / 2 + off[0];                   // 帧水平中心=碰撞盒中心
+          const cy = 100 + 52 + num14 + bh - (fh / 2) * s + off[1];   // 帧底=盒底+4
+          ctx.save();
+          ctx.beginPath();                                            // 剪裁窗 96×146（:41109-41112）
+          ctx.rect(100 - 48, 100 - 98, 96, 146);
+          ctx.clip();
+          ctx.drawImage(img, 0, 0, fw, fh, cx - (fw * s) / 2, cy - (fh * s) / 2, fw * s, fh * s);
+          ctx.restore();
         } else {
-          const scale = 4;                                            // dummy scale2 × canvas2x
-          const dw = fw * scale;
-          const x = (canvas.width - dw) / 2 + off[0] * scale;
-          const y = canvas.height - fh * scale - 4 + off[1] * scale;
-          ctx.drawImage(img, 0, 0, fw, fh, x, y, fw * scale, fh * scale);
+          const s = 2;
+          const cx = 100 + off[0];
+          const bottom = 100 + 52 + off[1];                           // 帧底 = P.y+52（盒底锚）
+          ctx.drawImage(img, 0, 0, fw, fh, cx - (fw * s) / 2, bottom - fh * s, fw * s, fh * s);
         }
       };
       img.src = `sprites/${sheet}`;
       return;
     }
-    // ---- Detailed：Portrait 圆框图 cover 铺满（含贴图自带透明留白裁剪）----
+    // ---- Detailed：200×200 原尺寸直绘（中心=P,无剪裁 :41073）----
     const src = payload.url;
     if (!src) return;
     const img = new Image();
     img.onload = () => {
-      // alpha 包围盒（贴图自带大透明留白）
-      const probe = document.createElement('canvas');
-      probe.width = img.naturalWidth; probe.height = img.naturalHeight;
-      const pc = probe.getContext('2d', { willReadFrequently: true });
-      if (!pc) return;
-      pc.drawImage(img, 0, 0);
-      let data: Uint8ClampedArray;
-      try { data = pc.getImageData(0, 0, probe.width, probe.height).data; } catch { return; }
-      let minX = probe.width, minY = probe.height, maxX = -1, maxY = -1;
-      for (let y = 0; y < probe.height; y++) {
-        for (let x = 0; x < probe.width; x++) {
-          if (data[(y * probe.width + x) * 4 + 3] > 8) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
-      }
-      if (maxX < 0) return;   // 全透明防御
-      const bw = maxX - minX + 1, bh = maxY - minY + 1;
       ctx.imageSmoothingEnabled = false;
-      // cover：等比放大铺满，居中裁溢出
-      const scale = Math.max(canvas.width / bw, canvas.height / bh);
-      const dw = bw * scale, dh = bh * scale;
-      ctx.drawImage(img, minX, minY, bw, bh, (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
     };
     img.src = src;
   }

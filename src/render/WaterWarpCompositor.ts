@@ -118,7 +118,8 @@ export class WaterWarpCompositor {
     if (!gl) return null;
     if (gl.composite(scene, this.gateCanvas(), noiseSrc, st.cssW, st.cssH,
       waterWaves.progress, waterWaves.intensity,
-      waterWaves.readGridR(), waterWaves.gridW(), waterWaves.gridH())) {
+      waterWaves.readGridR(), waterWaves.gridW(), waterWaves.gridH(),
+      st.camL * st.cssZoom, st.camT * st.cssZoom)) {
       setWaterWarpDebug('gl');
       return gl.canvas;
     }

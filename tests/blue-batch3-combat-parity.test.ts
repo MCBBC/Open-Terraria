@@ -272,7 +272,8 @@ describe('三批结构锚', () => {
     expect((g.match(/\.projClass = 'melee';/g) ?? []).length).toBeGreaterThanOrEqual(3);
     expect(g.includes("bee.projClass = 'melee'")).toBe(true);
     // 反射站上下文不注入：蜂蜜斗篷块内不应出现 projClass 写入
-    const i = g.indexOf('equipStats.bees');
+    // ★IIIII250:锚随 damagePlayer 函数级快照改 eq.bees(原 equipStats.bees 已随快照化退役)
+    const i = g.indexOf('eq.bees && retaliateOk');
     const slice = g.slice(i, i + 2600);
     expect(slice.includes(".projClass = 'melee'")).toBe(false);
     // 翻案注释勘误语已落（189=Wasp）
@@ -291,7 +292,7 @@ describe('三批结构锚', () => {
     const g = srcGame();
     const i = g.indexOf('const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3))');
     const line = g.slice(i, g.indexOf('\n', i));
-    expect(line).toContain('(this.player.equipStats.kbGlove ? 1 : 0)');
+    expect(line).toContain('(eq.kbGlove ? 1 : 0)');   // ★IIIII250:updateUse 函数级快照 eq(冻结对象,语义同直读)
     expect(line).toContain('+ (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)');
     expect(line.indexOf('kbGlove')).toBeLessThan(line.indexOf('3106'));
   });
