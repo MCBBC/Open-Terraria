@@ -32,7 +32,7 @@ import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
-import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
+import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, biomeCampfirePlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
 import { anchorSpecOf, chooseAnchorFromClick, liquidCellOk, liquidSpecOf, validateAnchors } from '../world/TileAnchorValidator';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
@@ -93,7 +93,7 @@ import {
 import {
   scanPylons, pylonAnchorAt, mapFocusRect, checkPylonTeleport,
   pylonItemTypeFromStyle, pylonStyleFromFrame, hasPylonOfType,
-  positionHasEnoughNpcs, pylonIconHit, pylonDustHex,
+  positionHasEnoughNpcs, pylonIconHit, PYLON_DUST_RGB,
   type TeleportPylonInfo, type NpcHomeLike, type PylonTeleportCheck,
 } from '../world/TeleportPylons';
 import { WALL_DUNGEON_SHEETS } from '../world/DungeonDualZones';   // ★IIIII228 海螺 TileIsDangerous wallDungeon 集
@@ -14415,8 +14415,8 @@ export class Game implements GameHooks {
           // 支内）→已解锁再用 itemTime=0 → 通用消耗门 :43612 永不触发=不耗;
           // 曾注"原版同样白吃"并无条件 consume——与 5343 同族语义,消耗移入门内。
           // :44612 unlockedBiomeTorches=true;:44613 UsingBiomeTorches=true
-          // （builderAccStatus[11]=0 群系炬选择器开——本仓无选装 UI,消费端由
-          // unlockedBiomeTorches 派生等价,见 Torch.ts :114 注）。
+          // （builderAccStatus[11]=0 群系炬选择器开——FX35 已建开关图标 UI.ts
+          // 群系炬图标翻 [11];消费端 Game.usingBiomeTorches 并读两域）。
           // :44615 成就 24 HandleSpecialEvent→GAIN_TORCH_GODS_FAVOR（★曾误挂
           // achCheckEquipState 包内持有判定——原版只在使用的这一刻授予）。
           // :44616-44620 图鉴 SetDefaults(664)+Kills.RegisterKill（事件本体无 664
@@ -23544,8 +23544,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  validTileForReplacementFamilies）。族目标 verdict【完全】由族段决定
         //  （原版族段是整函数早退支）：false 也压掉通用门——平台目标曾因 solidish
         //  `||sheet===19` 逃过 framed 门,炬换平台误放行。style 取实例覆盖后的
-        //  有效值（=HeldItem.placeStyle 域,与 :20112 实例覆盖同口径）;UsingBiomeTorches
-        //  置放面本仓未建（Torch.ts:114 登记）→ 用实际写入的 placeStyle 比较。----
+        //  有效值（=HeldItem.placeStyle 域,与 :20112 实例覆盖同口径）。
+        //  ★SW-FX38b（2026-09-15）：vanilla 在 verdict 与写面前各做一次群系 style 转换
+        //  （PlaceThing_ValidTileForReplacement :40236-40243 / PlaceThing_TryReplacingTiles
+        //  :40210-40217——`UsingBiomeTorches && type∈{4,215}` → BiomeTorch/BiomeCampfire
+        //  PlaceStyle,函数体内再查 style==0）:雪原持普通炬对雪炬=转换后同 style 拒换,
+        //  普通营火对雪营火同理;旧注「置放面本仓未建」已过时（FX37 建了放置面）→
+        //  verdict 与 swapStyle 经 biomeSwapStyle 同管（无命中群系=0=原值,零扰动）。----
+        // 群系 style 转换（块换面统一门;非 4/215 或 style≠0 原值返回）
+        const biomeSwapStyle = (sheet: number, style: number): number => {
+          if (style !== 0 || !this.usingBiomeTorches()) return style;
+          const z = this.biomeTorchZonesAt();
+          if (sheet === 4) return biomeTorchPlaceStyle(z);
+          if (sheet === 215) return biomeCampfirePlaceStyle(z);
+          return style;
+        };
         let styleVerdict: boolean | null = null;
         {
           const ts = tdef?.vanilla?.sheet ?? -1;
@@ -23557,7 +23570,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             styleVerdict = validTileForReplacementFamilies({
               targetSheet: ts,
               placedSheet: placeTileSheet,
-              style: heldInst0?.placeStyle !== undefined ? heldInst0.placeStyle : (itemDef.placeStyle ?? 0),
+              // ★SW-FX38b：verdict 前转换（:40236-40243 同位——先转 style 再进族段）
+              style: biomeSwapStyle(placeTileSheet,
+                heldInst0?.placeStyle !== undefined ? heldInst0.placeStyle : (itemDef.placeStyle ?? 0)),
               targetFrameX: st.frameX[ti] ?? 0, targetFrameY: st.frameY[ti] ?? 0,
               targetLiquid: st.liquid[ti] ?? 0,
               placedItemId: placeVid,
@@ -23704,8 +23719,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.recLog('tile', { x: tx, y: ty, from: TILE_DEFS[targetType]?.key ?? targetType,
               to: TILE_DEFS[tileIdHere]?.key ?? tileIdHere, cause: 'block-swap' });
             const heldSwap = this.player.inv.heldItem() as { placeStyle?: number } | null;
-            const swapStyle = heldSwap?.placeStyle !== undefined
-              ? heldSwap.placeStyle : (itemDef.placeStyle ?? 0);
+            // ★SW-FX38b：写面前转换（vanilla :40210-40217 在 ReplaceTile 前对 4/215
+            //  转换——与 verdict 同值,同型 style 拒换面与写帧两侧一致）
+            const swapStyle = biomeSwapStyle(
+              TILE_DEFS[tileIdHere]?.vanilla?.sheet ?? -1,
+              heldSwap?.placeStyle !== undefined ? heldSwap.placeStyle : (itemDef.placeStyle ?? 0));
             if (this.replaceTileInPlace(tx, ty, tileIdHere, swapStyle)) {
               // 尾奏（vanilla :40221-40226）：SendData(17,21) 单机无操作 → 消耗门
               //  （:42602 域,与通用链 :23057 同式）→ SetItemTime(num4+num5)=方块段+镐段
@@ -23751,6 +23769,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  style 域，不转换；实例位缺省时直接落类级值 = 原版直域语义。
     if (def?.vanilla?.sheet === 91 && heldInst?.placeStyle !== undefined) {
       itemDef = { ...itemDef, placeStyle: bannerStyleOf(heldInst.placeStyle) };
+    }
+    // ★SW-FX38b（2026-09-15）：营火群系自动转换（BiomeCampfirePlaceStyle
+    //  Player.cs:40666-40721 的放置消费面 FigureOutWhatToPlace :43759-43762 1:1——
+    //  `UsingBiomeTorches && tileToCreate==215 && previewPlaceStyle==0` → 查表覆写,
+    //  先于 CanPlace/PlaceTile）。营火 215 在本仓无专用放置支（走通用表驱动路径）
+    //  → 在 itemDef.placeStyle 终值点做一次转换,下游全部 style 消费点
+    //  （chooseAnchorFromClick/validateAnchors/framedCellFrame 写帧）同吃转换值
+    //  =原版 FigureOutWhatToPlace 输出直入 TryPlacing 的时序。门 = UsingBiomeTorches
+    //  （Player.cs:3934-3941 = unlockedBiomeTorches ∧ builderAccStatus[11]==0,
+    //  Game.usingBiomeTorches——与火把转换 FX37 同门同 zone 单源 biomeTorchZonesAt）
+    //  ∧ placeStyle==0（仅普通营火 966 转换,显式群系营火 items.ts SW-BJ50 表不动）。
+    //  查表值域/优先序与火把的差异（glowshroom/temple 前移、值 15/14/13/7/2/12/10/
+    //  11/3/8）见 Torch.ts biomeCampfirePlaceStyle 注。
+    if (def?.vanilla?.sheet === 215 && (itemDef.placeStyle ?? 0) === 0 && this.usingBiomeTorches()) {
+      itemDef = { ...itemDef, placeStyle: biomeCampfirePlaceStyle(this.biomeTorchZonesAt()) };
     }
     // liqGateHerb（★M-3c）：药草 legacy 置放路径岩浆门。定谳（亲读 1457）：种子物品
     //  createTile=82 被 CustomCanPlace 显式排除（Player.cs:40083 `tileToCreate != 82`）
@@ -24130,7 +24163,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const frame = torchAnchorFrame(st, tx, ty);
       // placeStyle（Item.cs placeStyle→TileObjectData subtile）：彩色 427-433 /
       // 群系火把显式表 / 水炬 8/11/17——此前恒 0 = 群系火把放成普通火把（色光全失）
-      const style = torchStyleOfItemKey(itemDef.key);
+      // ★SW-FX37 群系炬自动转换（PlaceThing_Tiles_PlaceIt :40447 → BiomeTorchPlaceStyle
+      //   Player.cs:40550-40585,查表 Torch.ts 提取表）：门 = UsingBiomeTorches
+      //   （:3934-3941）= unlockedBiomeTorches ∧ builderAccStatus[11]==0——背包左群系炬
+      //   图标 OFF（status[11]=1,Main.cs:43282 翻位）时保持普通火把;仅普通炬
+      //   （item placeStyle==0）转换,显式群系炬/水炬/彩炬不动。转换值域
+      //   {23,13,21,7,22,20,18,19,9,16} ∩ 水炬{8,11,17}=∅ → 水下仍拒（原版同序:
+      //   转换在 Player 域先做,PlaceTile 液体门后验）。
+      let style = torchStyleOfItemKey(itemDef.key);
+      if (style === 0 && this.usingBiomeTorches()) {
+        style = biomeTorchPlaceStyle(this.biomeTorchZonesAt());
+      }
       if (frame < 0) return;
       // 液体门（WaterPlacement）：普通火把 NotAllowed、水炬三色 Allowed
       if (st.liquid[st.idx(tx, ty)] > 0 && !isWaterTorchStyle(style * 22)) return;
@@ -26260,31 +26303,83 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return true;
     }
     // 传送（:194-200：落位 = 塔锚 ToWorldCoordinates()）——贴图预载+找位由
-    // teleportWhenReady 统一处理；特效在此刻发（此刻 this.player 仍是旧位 =
-    // Exit 侧，新位 = 塔锚）
-    this.pylonTeleportFx(hit.type, hit.x * TILE, hit.y * TILE);
-    void this.teleportWhenReady(hit.x, hit.y);
+    // teleportWhenReady 统一处理。★FX38b 时序：Entry 半特效在 click 帧（此刻
+    // player 仍在旧位），Exit 半特效延后至落位+相机/光照窗到位后再发
+    this.pylonTeleportFxOrigin(hit.type);
+    const target = hit;
+    void this.teleportWhenReady(target.x, target.y).then((ok) => {
+      // ★FX38b②-续：落位帧 microtask 期相机/光照窗仍在出发点——arrival 尘批
+      // 首次 update 读越窗 lightAt=[0,0,0] → 尘 43 照度门当拍清杀（探针 d0 帧1
+      // active=false 且 scale/alpha 原值实证）。延 ~4 tick 待窗移到位再发=尘存活可见
+      if (ok) setTimeout(() => this.pylonTeleportFxArrival(target.type), 80);
+    });
     return true;
   }
 
   /** 晶塔传送特效（Player.Teleport style 9 → Main.TeleportEffect case 9
-   *  Main.cs:13544-13554：effectRect = 玩家盒 Inflate(15,15)，100 尘 ×
-   *  TeleportPylonsSystem.SpawnInWorldDust（:401-403 尘 43 塔型配色，速度 ×0.1
-   *  后 Y−0.2 慢速上浮）+ SoundID.Item6；Player.Teleport :37740/:37758 Entry/Exit
-   *  双份 = 旧位与新位各一轮）。本仓 spawnParticles 为简化尘池——上浮曲线取
-   *  recallSparkleDust 旧载体同款近似（尘型/配色/数量/音效 1:1） */
-  private pylonTeleportFx(style: number, newX: number, newY: number): void {
+   *  Main.cs:13544-13557）：effectRect = 玩家盒 Inflate(15,15)，100 尘 ×
+   *  TeleportPylonsSystem.SpawnInWorldDust（:401-403 尘 43 塔型配色
+   *  new Color(r,g,b,1)，scale 0.5、alpha 254；:404-406 velocity ×0.1 后 Y−0.2
+   *  慢速上浮）+ SoundID.Item6；Player.Teleport :37740(Entry@旧位)/:37758(Exit@新位)
+   *  双份各一轮。★FX38 初修（2026-09-15 用户报"传送缺光效与音效"）：旧刀
+   *  spawnParticles 简化方块 → 原版尘 43 全参 1:1 + 只播目的塔一声（跨图超
+   *  Sfx.ATTEN 2500px 被 atten=0 整声吞）→ 双播。
+   *  ★★FX38b 时序重构（2026-09-15 用户复测"特效只有第一次有,后面没有了,不稳定"）
+   *  ——初版在 click 帧一次性双位发尘+双播,两条链从第二次传送起整批失效：
+   *  ①音效：Exit 声在远位目的地(atten=0)。R26 case2 槽语义 Item_N=stop-then-play
+   *    （Sfx.slotAction 'stop'）——Exit 调用先 stopSingleSlot 停掉 Entry 实例,
+   *    再走 atten≤0 早退 return 'att'（不建新实例）= 整声吞。首次传送幸免是因
+   *    Item_6 缓冲未解码走 deferPlay('q',解码后按原参补播,彼时槽早已空)——恰好
+   *    复现"只有第一次有"。修=Exit 播放 replace=true（槽管理豁免,永不反噬 Entry
+   *    实例,playWavFileCore `if (!replace)` 跳过槽判定）。
+   *  ②光效：Exit 尘批 spawn 时相机尚在出发点=目的地在光照窗外,
+   *    lighting.lightAt 越窗返 [0,0,0] → 尘 43 照度门（VanillaDust case43
+   *    lr/lg/lb<0.05 即灭）当拍整批清杀;而贴图已暖的后续传送 1-2 帧内瞬移 →
+   *    出发点尘批同因清杀 = 前后都无尘（首传幸免是贴图预载延迟 ~1s 让出发点
+   *    尘批自然播完=用户看到的"第一次有"）。修=Exit 半按原版时序挪到落位帧
+   *    （teleportWhenReady true → pylonTeleportFxArrival,相机已在目的地=尘在
+   *    窗内存活可见）。出发点批仍在 click 帧发（原版 Entry@:37740 同位;瞬移后
+   *    被光照门清杀与原版 GetColor 越窗返 Black 同语义,可见时长=相机窗口滞留）。
+   *  ——尘池游标漂移判例（dust-pool-gate-cursor-drift）已排查排除：6000 池
+   *    200/次的分配密度门 frac=3% 远低于 50% 拒绝档,游标只服务空槽定位（探针
+   *    连续 3 传 spawn 全量零 null 实证,见 scripts/_fx38-pylon.mjs 场景 C）。 */
+  /** 半 A·Entry@旧位（click 帧,Player.cs:37740）：旧位 100 尘 + Item_6 */
+  private pylonTeleportFxOrigin(style: number): void {
     const p = this.player;
-    const hex = pylonDustHex(style);
-    for (const [px, py] of [[p.x, p.y], [newX, newY]] as const) {
-      for (let i = 0; i < 100; i++) {
-        this.spawnParticles(
-          px - 15 + Math.random() * (p.w + 30), py - 15 + Math.random() * (p.h + 30),
-          hex, 1, 0.3, { life: 24 + Math.random() * 16, grav: -0.01, damp: 0.98 },
-        );
-      }
+    this.pylonTeleportDust(style, p.x, p.y);
+    // case 9 :13557 PlaySound(Item6, effectRect.Center)——旧位 = 听众位恒可闻
+    this.playSfxWav('Item_6', 1, p.x + p.w / 2, p.y + p.h / 2);
+  }
+
+  /** 半 B·Exit@新位（落位帧,Player.cs:37758）：新位 100 尘 + Item_6。
+   *  ★replace=true——R26 槽语义豁免：FX38b ①的 stop-then-play 反噬根因面。
+   *  ★无坐标直放（atten 直通）——声源语义 = 玩家新位自身（pan≈0 等价）;带坐标
+   *  会踩 FX38b 复测第二坑：listener=相机每 tick 才校位（Game :8063）,落位帧
+   *  microtask 期 listener 仍在出发点 → 跨图距离 >ATTEN 2500px → 恒 'att'
+   *  （探针三连传实测:Entry 恒 ok/q、Exit 恒 att,坐标模式不可用） */
+  private pylonTeleportFxArrival(style: number): void {
+    const p = this.player;
+    this.pylonTeleportDust(style, p.x, p.y);
+    this.playSfxWav('Item_6', 1, undefined, undefined, undefined, true);
+  }
+
+  /** SpawnInWorldDust（TeleportPylonsSystem.cs:338-406,经 TeleportEffect case 9
+   *  :13547-13553 消费）：盒 = 玩家矩形 Inflate(15,15),100×
+   *  NewDust(盒, 43, 0, 0, 254, Color(r,g,b,1), 0.5) + velocity ×0.1 后 Y−0.2。
+   *  ★DustColor = 字节域（0..255,引擎侧 c.r/255 消费）——PYLON_DUST_RGB 是原版
+   *  float ctor 域（0..1）,×255 折算=Color(float) 字节化（0.8→204,同 pylonDustHex）。
+   *  曾直传 0..1 → 尘 43 照度门（VanillaDust case 43 lr<0.05 即灭）全灭=零尘。 */
+  private pylonTeleportDust(style: number, px: number, py: number): void {
+    const p = this.player;
+    const [fr, fg, fb] = PYLON_DUST_RGB[style] ?? PYLON_DUST_RGB[0];
+    const col = { r: Math.round(fr * 255), g: Math.round(fg * 255), b: Math.round(fb * 255), a: 255 };
+    for (let i = 0; i < 100; i++) {
+      const d = this.spawnDust(px - 15, py - 15, p.w + 30, p.h + 30, 43,
+        0, 0, 254, col, 0.5);
+      if (!d) continue;
+      d.vx *= 0.1; d.vy *= 0.1;      // :404 velocity *= 0.1f
+      d.vy -= 0.2;                   // :405 velocity.Y -= 0.2f（慢速上浮）
     }
-    this.playSfxWav('Item_6', 1, newX, newY + p.h / 2);
   }
 
   /** 晶塔门禁五连（HandleTeleportRequest :100-205）——单人/房主本地与访客请求
@@ -31751,12 +31846,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (msg.sub === PylonSub.TeleportResult) {
       if (msg.ok) {
         // 关图+SoundID 11 已在点击帧（tryPylonMapTeleport，原版 TeleportPylonsMapLayer
-        // .cs:96-100 客户端侧）——回执只落位+特效，避免双响（此刻 this.player 仍
-        // 在旧位 = Exit 侧，新位 = 塔锚）
+        // .cs:96-100 客户端侧）——回执只落位+特效，避免双响。★FX38b 时序（访客）：
+        // Entry@回执帧此刻旧位（player 未动）+ Exit 延至落位+光照窗到位
         this.mapPylonTile = null;
         this.renderer.mapPylonTile = null;
-        this.pylonTeleportFx(msg.type, msg.x * TILE, msg.y * TILE);
-        void this.teleportWhenReady(msg.x, msg.y);
+        const style = msg.type;
+        this.pylonTeleportFxOrigin(style);
+        void this.teleportWhenReady(msg.x, msg.y).then((ok) => {
+          // 同房主侧：落位帧 microtask 期光照窗仍在出发点,延 ~4 tick 待窗到位
+          if (ok) setTimeout(() => this.pylonTeleportFxArrival(style), 80);
+        });
       } else if (msg.fail) {
         this.newText(Lang.text(msg.fail), 255, 240, 20);
       }
@@ -34062,8 +34161,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const held = p.inv.heldItem();
     const heldVid = held ? viIdFromKey(ITEM_DEFS[held.id].key) : 0;
     this.itemIconCache.verify(inp.mouseX, inp.mouseY, heldVid);
-    // 渲染上下文（DrawInterface_40 消费面）
-    const usingBiomeTorches = !!this.world.flags.unlockedBiomeTorches;
+    // 渲染上下文（DrawInterface_40 消费面）——群系炬门 = UsingBiomeTorches
+    // （Player.cs:3934-3941）,原版 :45800 直接读该属性;旧实现只读 unlockedBiomeTorches
+    // 漏 builderAccStatus[11] 位=图标 OFF 后光标仍显群系炬
+    const usingBiomeTorches = this.usingBiomeTorches();
     const zones = this.cursorBiomeZones();
     this.renderer.cursorIconCtx = {
       heldVid,
@@ -35074,7 +35175,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       s.stack--;                                   // :39211-39215 inventory[num].stack--
       if (s.stack <= 0) inv.slots[slot] = null;    // :39212-39214 归零 → new Item()
       gotDye = true;
-      this.sfx.play('pickup');                     // SoundEngine.PlaySound(24) = Grab
+      // ★SW-RB29c F4 勘误:SoundID 24 = Chat（旧注 "= Grab" 系笔误,Grab 是 7）——
+      //   原版 Main.cs:40708 NPCChatText_DyeTrader 交植物成功支 PlaySound(24)
+      this.sfx.play('chat');
       // Player.GetDyeTraderReward（Player.cs:55743-55779，档位池见 DyeTrade.ts）
       const f = this.world.flags;
       const reward = rollDyeTraderReward({
@@ -35137,6 +35240,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (slot >= 0) {
         p.inv.removeAt(slot, 1);            // :39664-39668（stack 归零即清槽）
         done = true;
+        // ★SW-RB29c F5:交鱼成功支 PlaySound(24)=Chat（Main.cs:40937,原版序=
+        //   flag 置位后即播,先于 anglerQuestsFinished++/GetAnglerReward）
+        this.sfx.play('chat');
         p.anglerQuestsFinished++;           // :39671
         this.grantAnglerRewards(npc, questId);   // GetAnglerReward :39672
       }
@@ -42138,6 +42244,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
   }
 
+  /** UsingBiomeTorches（Player.cs:3934-3941 1:1）：unlockedBiomeTorches ∧
+   *  builderAccStatus[11]==0——群系炬开关（背包左图标 Main.cs:43282,FX35）OFF 时
+   *  恒 false。消费面：放置自动转换（PlaceThing_Tiles_PlaceIt :40447）、持物光标
+   *  图标覆写（DrawInterface_40_InteractItemIcon Main.cs:45800）。 */
+  usingBiomeTorches(): boolean {
+    return !!this.world.flags.unlockedBiomeTorches && !this.builderAccOff(BACC.TorchBiome);
+  }
+
+  /** BiomeTorchPlaceStyle 的群系输入快照（BiomeTorchZones,Torch.ts 查表域）——
+   *  放置转换（:40447 等价）与 TorchGodsFlavor（:39529）共用单源,字段源照旧：
+   *  SceneMetrics 群系旗 + zoneUnderworldHeight（UnderworldLayer 门 :39604）+
+   *  belowSurface 反相（`position.Y < worldSurface*16` 沙漠地表门 :39632）+
+   *  seedFlags.remix（Main.remixWorld :39636）。 */
+  private biomeTorchZonesAt() {
+    const scene = this.scene;
+    return {
+      shimmer: !!scene?.zoneShimmer,
+      dungeon: !!scene?.zoneDungeon,
+      temple: !!scene?.zoneTemple,                 // ZoneLihzhardTemple（SceneMetrics 同源墙 87）
+      underworld: !!scene?.zoneUnderworldHeight,
+      glowshroom: !!scene?.zoneGlowshroom,
+      hallow: !!scene?.zoneHallow,
+      corrupt: !!scene?.zoneCorrupt,
+      crimson: !!scene?.zoneCrimson,
+      snow: !!scene?.zoneSnow,
+      jungle: !!scene?.zoneJungle,
+      desert: !!scene?.zoneDesert,
+      undergroundDesert: !!scene?.zoneUndergroundDesert,
+      aboveSurface: !scene?.belowSurface,          // position.Y < worldSurface*16（:39626）
+      remixWorld: !!this.world.seedFlags?.remix,
+    };
+  }
+
   /** 火把神药水 buff 376 效果端——TorchGodsFlavor（Player.cs:39529-39583 每 tick 调）：
    *  1/10 掷（:39531）→ 场上无 1084（:39533-39539 单弹门）→ BiomeTorchPlaceStyle
    *  （:39540 Torch.ts 提取表）定当期群系样式 → 视口 tile 矩形 1000 次随机采样
@@ -42152,22 +42291,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const scene = this.scene;
     const w = this.world;
     const p = this.player;
-    const style = biomeTorchPlaceStyle({
-      shimmer: !!scene?.zoneShimmer,
-      dungeon: !!scene?.zoneDungeon,
-      temple: !!scene?.zoneTemple,                 // ZoneLihzhardTemple（SceneMetrics 同源墙 87）
-      underworld: !!scene?.zoneUnderworldHeight,
-      glowshroom: !!scene?.zoneGlowshroom,
-      hallow: !!scene?.zoneHallow,
-      corrupt: !!scene?.zoneCorrupt,
-      crimson: !!scene?.zoneCrimson,
-      snow: !!scene?.zoneSnow,
-      jungle: !!scene?.zoneJungle,
-      desert: !!scene?.zoneDesert,
-      undergroundDesert: !!scene?.zoneUndergroundDesert,
-      aboveSurface: !scene?.belowSurface,          // position.Y < worldSurface*16（:39626）
-      remixWorld: !!w.seedFlags?.remix,
-    });
+    const style = biomeTorchPlaceStyle(this.biomeTorchZonesAt());
     const st = w.store;
     // 视口 tile 矩形（:39541-39546：Center ± sWidth/sHeight/2 → /16 取整）
     const x0 = Math.floor((p.cx - this.renderer.canvas.width / 2) / TILE);
@@ -45105,17 +45229,19 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
   /** 传送串行门(2026-08-14:调试快速连点地图=多个 teleportWhenReady 并发,
    *  反复相机跳转→chunk 集高频换血→画布分配/释放churn;在飞中忽略新目标) */
   private _tpInFlight = false;
-  private async teleportWhenReady(tx: number, ty: number): Promise<void> {
-    if (this._tpInFlight) return;
+  /** ★FX38b：返回 Promise<boolean>（true=teleportNear 已落位/false=在飞跳过或落位失败）
+   *  ——晶塔传送 Exit 半特效需挂落位帧（pylonTeleportFxArrival），既有 void 调用方不受影响 */
+  private async teleportWhenReady(tx: number, ty: number): Promise<boolean> {
+    if (this._tpInFlight) return false;
     this._tpInFlight = true;
     try {
-      await this.teleportWhenReadyInner(tx, ty);
+      return await this.teleportWhenReadyInner(tx, ty);
     } finally {
       this._tpInFlight = false;
     }
   }
 
-  private async teleportWhenReadyInner(tx: number, ty: number): Promise<void> {
+  private async teleportWhenReadyInner(tx: number, ty: number): Promise<boolean> {
     const a = this.atlas;
     if (a) {
       const { tileSheets, wallIds } = this.collectSheetsAround(tx, ty, 160);
@@ -45135,7 +45261,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       this.renderer.tpMark = null;
       this.renderer.fullMap.open = false;
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.Teleported'));
+      return true;
     }
+    return false;
   }
 
   private teleportNear(tx: number, ty: number): boolean {

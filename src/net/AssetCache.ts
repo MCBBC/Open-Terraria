@@ -873,8 +873,17 @@ async function startZipWarm(): Promise<void> {
   emit();
   try {
     // have-set:与 SW fetch 拦截/legacy warm 同款归一化(相对路径+decode,见 normCacheKey 注)
+    // ★驱逐自愈(2026-09-09 用户实报「have 满 12927 但预载连续 MISS」):浏览器存储
+    //  压力下 Cache Storage 会**保留 keys 条目但驱逐 response body**(部分驱逐)——
+    //  keys() 只对账「条目存在」,被逐 body 的条目 match 永远 MISS 且 warm 永不补
+    //  → 强刷风暴下反复炸。对账改**逐条 match 实测**(body 在才算 have),驱逐条目
+    //  被识别为缺 → 本轮补拉 put 新 body 自愈。成本:12897 次 match ≈ 1-2s(warm 启动一次)
     const cache = await caches.open('sw-assets-v' + state.version);
-    const have = new Set((await cache.keys()).map((r) => normCacheKey(r.url)));
+    const have = new Set<string>();
+    for (const r of await cache.keys()) {
+      const hit = await cache.match(r, { ignoreVary: true }).catch(() => null);
+      if (hit) have.add(normCacheKey(r.url));
+    }
     let base = 0;
     const jobs = zipPlan.parts.map((p) => {
       const missing = p.entries.filter((n) => !have.has(n));
@@ -944,6 +953,31 @@ async function startZipWarm(): Promise<void> {
         emit();
         zipWorker?.terminate();
         zipWorker = null;
+        // ★终局 keys() 实测对账(2026-09-07 用户实报「BGM 停止+硬刷新贴图丢」,
+        //   zipFailedAcc=0 但实测 cache 缺 863 条 opus——have 内存记账与 SW 缓存
+        //   实态脱节:put 静默失败/换代窗口 gc/浏览器驱逐,任一都会造成「记账
+        //   全满、缓存缺货」。keys() 实测是唯一可信源——缺→scheduleZipAutoRetry
+        //   (15s 后 have-set 只补缺)→补完再实测,自洽闭环。)
+        void (async () => {
+          try {
+            const cache = await caches.open('sw-assets-v' + state.version);
+            const keys = await cache.keys();
+            const have = new Set<string>();
+            for (const k of keys) {
+              const hit = await cache.match(k, { ignoreVary: true }).catch(() => null);
+              if (hit) have.add(normCacheKey(k.url));   // ★body 驱逐条目不算 have(与 have-set 同口径)
+            }
+            const missing = (zipPlan?.parts ?? [])
+              .flatMap((p) => p.entries)
+              .filter((e) => !have.has(normCacheKey(e)));
+            if (missing.length > 0) {
+              swTrace(`warm终态实测缺 ${missing.length} 条(记账虚满)→ 15s 补拉`);
+              scheduleZipAutoRetry();
+            } else {
+              swTrace('warm终态实测对账 0 缺');
+            }
+          } catch { /* keys 失败:下轮启动 warmAllAssets(true) 再对账 */ }
+        })();
       }
     };
     zipWorker.onerror = () => {   // worker 崩溃:按当前失败态停机(重新下载可重启)

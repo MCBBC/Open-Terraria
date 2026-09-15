@@ -632,6 +632,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       }
       g.player.builderAccStatus = ba;
     }
+    // ★SW-FX38b：火把神恩宠解锁旗回灌（Player.unlockedBiomeTorches PL:55895 .plr 读/
+    //  :55430 写;原版角色字段随身跨世界,本仓消费面 Game.usingBiomeTorches/TorchGod 挂
+    //  world.flags）。单调置位（true 才写,不回退）——从无旗角色进已解锁世界不清旗,
+    //  与原版「解锁是一次性永久态」同语义（Game.ts:14425 Torch God 事件置位同门）。
+    //  存档侧回填见 SaveFile.buildSave playerData.unlockedBiomeTorches。
+    if (player.unlockedBiomeTorches) g.world.flags.unlockedBiomeTorches = true;
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示
     g.cb.onInventoryChanged();
