@@ -332,9 +332,10 @@ describe('★用户明令分歧 2026-09-14「唇入必响」（超越原版）�
     expect(on.sawInLava).toBe(true);    // 岩浆侧不静默：全盒 LavaCollision 照常命中（:3976 1:1 → 重伤+烈焰）
     expect(on.sfx).toEqual(off.sfx);    // 序列全等 = 掠水支对岩浆零参与（type=2 早退）
     expect(rippleSpy.calls.length).toBe(0);
-    // ★备案（域外观察,非本刀面）：序列含一条 Splash_0 = 状态侧 wasWetAll 四桶并集纳入
-    // 全盒 inLava（:3968）在「探针干+全盒岩浆擦过」姿态下的出浆分支发射——vanilla 湿粘滞
-    // 位只由 num86（居中探针,:28060）驱动,此姿态原版静默。属状态面既存语义,本刀不触。
+    // ★备案销账（BJ89 债2 已清偿）：此前序列含一条 Splash_0 = 状态侧 wasWetAll 四桶
+    // 并集纳入全盒 inLava 在「探针干+全盒岩浆擦过」姿态下的出浆分支幻影发射——已改
+    // 显式 wetSticky 位（≙ vanilla wet，只由 num86 居中探针驱动 :28060/:28073/:28160），
+    // 此姿态恢复原版静默（守卫见 tests/bj89-wet-sticky-parity.test.ts）。
   });
 
   it('蜜袋=蜜档掠水（Splash_1 同款）；微光态整体静默门（:27987 镜像）由实现门序承载', () => {

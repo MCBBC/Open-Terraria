@@ -85,9 +85,13 @@ export interface Body {
   /** 本嵌入会话（embedTicks 未清零期）topEmbedded 横推已消耗预算 px
    *  （2026-09-01 tent 弹飞收敛帽；脱出即清零） */
   embedPushed?: number;
-  /** 原版 Collision.TileCollision 第 9 参 hoik（默认 false）：钻洞弹幕类 AI 显式传
-   *  true 才启用天花板坡链水平穿越放行。普通实体恒 false——曾误开为无条件规则，
-   *  导致天花板坡邻接实心格被永久豁免（tent 悬臂案例：幽灵入场+hitWall 恒 false）。 */
+  /** 原版 Collision.TileCollision 第 10 参 hoik（★Collision.cs:2299 形参缺省【true】，
+   *  旧注"默认 false"系误读=2026-09-01 tent 案定谳错误的病灶）。原版消费面:玩家
+   *  Player.cs:23791 传 `!flag`(20×42 恒 true)、NPC.cs:93868/:93881/:93904 不传吃
+   *  缺省 true、Projectile.cs:17822 快速弹幕 hoik=true。★SW-FX34b 2026-09-15 起
+   *  玩家侧恢复 true(Player.hoik 字段);Body 缺省仍 falsy=NPC 族 2026-09-01 登记
+   *  债维持关(tent 悬臂案例:幽灵入场+hitWall 恒 false——其弹飞本体已由 unembed
+   *  收敛帽 fix,入场半边实为原版本体行为)。 */
   hoik?: boolean;
   /** ★SW-BJ6 2026-09-07：vanilla 嵌固回退漂移活跃旗（AI_001 NPC.cs:62139/:62331
    *  `position.X -= velocity.X + direction` 本拍刚执行时由 AI 置位）。
@@ -360,17 +364,29 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
         const wasAcross = dir > 0 ? oldX + b.w > tx * TILE + 0.01 : oldX < (tx + 1) * TILE - 0.01;
         if (wasAcross) {
           if (st.slope[jw] !== 0 || st.half[jw]) continue; // 坡/半砖跨格态:原放行语义不变
+          // ★SW-FX34b hoik 嵌格自由通行（vanilla Collision.cs:2437-2456 分支全以
+          //  【移前】盒判定:盒已与该格横向重叠 → 左/右撞墙支前提
+          //  `vector3.X+Width<=vector4.X` / `vector3.X>=vector4.X+16` 均假,
+          //  下/顶支亦不命中 → 原版对嵌格【无任何推离】,本子步位移照常生效。
+          //  这是 hoik 穿越的后半程:坡邻豁免(:2412/:2432)放进入口后,靠本语义
+          //  横穿实心柱、从对侧走出（wiki 水平单向墙"glitch into the attached
+          //  block"）。hoik=false 体(NPC 族 2026-09-01 登记债/普通弹幕)维持
+          //  本仓止步兜底不变。
+          if (b.hoik) continue;
           b.x -= dx;                                       // 整块跨格态:止步(移前位),零回拉
           b.vx = 0;
           hitX = true;
           break;
         }
         // hoik 坡链放行（:2412/:2432）：身后格是配套坡面（同向坡链中段）→ 不拦。
-        // ★原版为 TileCollision 形参（默认 false），仅钻洞弹幕 AI 显式传 true，
-        //   普通实体碰撞恒不可达此支。曾无条件启用 → 天花板坡邻接实心格被永久
-        //   豁免：玩家/NPC 幽灵穿入净空不足的悬臂禁区（2026-09-01 tent 案例定罪：
-        //   x591 墙被右邻 (592,328) slope3 放走 1px 入场 → 头顶嵌实心 → 弹飞；
-        //   且 hitWall 恒 false，NPC 检测不到墙无限重试）。对齐 vanilla 默认关。
+        // ★原版为 TileCollision 形参（Collision.cs:2299 缺省【true】——旧注"默认
+        //   false"系误读,玩家/NPC 原版恒可达此支）。★SW-FX34b 2026-09-15:玩家经
+        //   Player.hoik=true 恢复原版半边——wiki 水平单向墙(楼梯平台列贴墙,按下
+        //   右行穿墙/反向被挡)即由此支+嵌格自由通行(hoik 嵌格支)承载。曾无条件
+        //   启用 → 天花板坡邻接实心格被豁免:玩家/NPC 幽灵穿入净空不足的悬臂禁区
+        //  （2026-09-01 tent 案例:x591 墙被右邻 (592,328) slope3 放走 1px 入场 →
+        //   头顶嵌实心 → unembed 弹飞——弹飞元凶已由 unembed 收敛帽另案 fix,
+        //   入场半边=原版本体行为）。NPC 族维持关(登记债),普通弹幕缺省关。
         if (b.hoik) {
           const bj = st.idx(tx - Math.sign(dir), ty);
           if (dir > 0 && (st.slope[bj] === 2 || st.slope[bj] === 4)) continue;
@@ -408,8 +424,11 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
     for (let tx = x0; tx <= x1; tx++) {
       const solid = world.store.isSolid(tx, ty);
       const span = solidSpan(world, tx, ty);
+      // ★SW-FX34b：半砖盒顶 +8（Collision.cs:2350-2354 `vector4.Y += 8`）——平台族
+      //   落地面同步（wiki 竖直单向墙"底部平台"=锤 3 次半砖平台,接人面=格顶+8）
+      const halfTop = st.half[st.idx(tx, ty)] ? 8 : 0;
       const plat = !b.dropThrough && dir > 0 && world.store.isPlatform(tx, ty)
-        && (b.y + b.h) - dy <= ty * TILE + 1; // 上一位置在平台之上
+        && (b.y + b.h) - dy <= ty * TILE + halfTop + 1; // 上一位置在平台之上（半砖平台面=格顶+8）
       if (dir > 0) {
         if (!solid && !plat) continue;
         // ★天花板坡(3/4)顶面=实体地面（原版 topSlopes() 仅指 1/2：slope3/4 只参与
@@ -420,7 +439,7 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
         if (slv !== 3 && slv !== 4 && slopePass(tx, ty, b.x, oldY)) continue; // 坡面格交给 slopeCollide 对角线贴合
         // 落地门槛（Collision.cs:1610/1631）：新底部越过盒顶 且 上一位置在盒顶之上，
         // 否则（嵌入/侧入）不吸附——半砖盒顶是 ty*16+8，只进入行上半不算落地
-        const top = span ? span[0] : ty * TILE;
+        const top = span ? span[0] : ty * TILE + halfTop;
         if (b.y + b.h <= top || (b.y + b.h) - dy > top + 0.01) continue;
         if (top < bestTop) bestTop = top;
       } else {

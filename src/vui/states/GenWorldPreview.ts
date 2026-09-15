@@ -18,77 +18,106 @@ const COLUMNS_PER_FRAME = 64;
 /** 位图帧擦除耗时（ms）：整帧瞬切观感是"跳变"，改为从左到右刷过揭示 */
 const BITMAP_WIPE_MS = 1200;
 
-// ---- ★IIIII243 生成屏预览面板净带布局（叠压修复） ----
-// 用户实报（1080p 天顶生成中截图）：旧布局 vAlign=1/marginBottom=56 把面板底沿钉在
-// H-56，与提示条（锚 H-150、字形上下居中 ±17.6..55）整段叠压。面板是本仓自研叠加物
-// （vanilla 无此子元素），由它让位——放进「进度条绘制下沿 ↔ 提示条字形上沿」净带。
-// 净带几何三锚（全部 vanilla 对齐位，只读不修）：
-//   · 进度条下沿 = topForScreenH(H)+106（UIGenProgressBar.SPRITE——Outer_Lower 532×46
-//     画在 y+60，短条框垂尾伸到 +106；用元素高 70 会与垂尾叠 36px）；
-//   · 提示条上沿 = H-150（GameTipsDisplay TipOffsetY）− 字形半高（上下居中锚定，
-//     worst-case 两行 vecH=35.2 → 半高 17.6；超两行走 110 收缩域，现实提示池不达）；
-//   · 标题（UIHeader）在 barTop-70，全部 H≥600 档与净带零接触（单测断言守）。
+// ---- ★IIIII258 生成屏预览面板布局（可读优先；IIIII243 净带策略反转） ----
+// 用户实报（sandbox.vinlic.com ≈2000×1184 视口截图）：IIIII243 的「等比缩放进净带」
+// 把面板缩到 141×40 逻辑（scale~1.97 → 279×80 CSS），不可读——净带（进度条绘制下沿
+// ↔ 提示条字形上沿）在桌面 UIScale 公式下恒 40.4 逻辑 px 高（aspect≥4/3 的窗口
+// logicalH≡600），且与 CSS 分辨率无关：分辨率越高 scale 越大，面板视觉尺寸占比反而
+// 越小。本批原则反转：**最小可读尺寸优先，缩放是最后手段**——面板按自然尺寸
+// （min(55%W, 520)）放进全屏最大的净空带，放不下才等比缩，再不行才 floor。
+// 净空带几何锚（全部 vanilla 对齐位，只读不修）：
+//   · 标题（UIHeader）顶 = topForScreenH(H)-70（UIWorldLoadState 构造位）→ 标题上方
+//     [0, barTop-78] 是全宽净空（桌面档恒 184 逻辑 px 高）——top 候选带；
+//   · 提示条字形域 = H-150±17.6（GameTipsDisplay TipOffsetY，worst-case 两行）→
+//     字形下沿以下是全宽净空——bottom 候选带（须同时让开进度条绘制外沿 barTop+106）；
+//   · 进度条绘制外沿 = topForScreenH(H)+106（UIGenProgressBar.SPRITE，Outer_Lower
+//     垂尾伸到 +106）；左右侧区受进度条半宽 314 钳（桌面仅 ~211 逻辑 px 宽），
+//     放不下自然宽，不设候选。
+// 两候选带按「可容纳面板面积」择优（同积取 top=桌面语义）；都放不下 MIN_BAND_H
+// 才 floor 贴屏底最小条。探测提示：擦除揭示（BITMAP_WIPE_MS）期间面板左新右旧
+// 常驻分界——小尺寸下被读成"两个并排小矩形"（IIIII258 复现探针实锤 55/58 样本
+// 揭示中途），面板放大后该分界恢复为正常的"从左到右揭示"观感。
 
-/** 净带布局常量（逻辑像素；previewBandLayout 消费，tests/iiiii243-genpreview-layout 钉值） */
+/** 布局常量（逻辑像素；previewBandLayout 消费，tests/iiiii243-genpreview-layout 钉值） */
 export const PREVIEW_BAND = {
-  /** 净带与相邻 vanilla 元素的上下间隙 */
+  /** 净带与相邻 vanilla 元素/屏边的间隙 */
   GAP: 8,
   /** 提示条锚线距屏底（GameTipsDisplay TipOffsetY=-150；UIWorldLoadState.TIP_OFFSET_Y 同值） */
   TIP_ANCHOR_FROM_BOTTOM: 150,
   /** 提示条字形半高 worst-case（两行：2×16×1.1/2——折行域见 GameTipsDisplay.CreateWrappedText） */
   TIP_HALF_H: 17.6,
-  /** 极矮屏兜底阈值：净带高低于此 → 贴净带下沿放最小预览条（floor 模式） */
+  /** 标题顶 = barTop-70（UIWorldLoadState 构造位；UIWorldLoad.cs 布局对齐） */
+  HEADER_ABOVE_BAR: 70,
+  /** 候选带兜底阈值：带高低于此不放（→ floor 贴屏底最小条） */
   MIN_BAND_H: 28,
-  /** 面板自然宽策略（旧 55%/上限 520 保留为带内上限——只有带高放得下时才给满） */
+  /** 面板自然宽策略（55%W / 上限 520——自然尺寸优先的"尺寸基准"） */
   WIDTH_FRAC: 0.55,
   MAX_W: 520,
-  /** 两侧最小余量（水平居中前提下的带宽钳制） */
+  /** 四边最小余量（水平居中前提下的带宽钳制 + 带上下沿离屏边间隙） */
   EDGE_MARGIN: 8,
 } as const;
 
-/** 布局结果（逻辑像素；mode='band'=正常带内放行，'floor'=极矮屏贴底最小条） */
+/** 布局结果（逻辑像素；mode='top'=标题上方带（桌面常态），'bottom'=提示条下方带，
+ *  'floor'=极矮屏贴屏底最小条） */
 export interface PreviewBandRect {
   x: number; y: number; width: number; height: number;
-  mode: 'band' | 'floor';
+  mode: 'top' | 'bottom' | 'floor';
 }
 
-/** ★IIIII243 预览面板净带布局（纯函数，单测钉值）。
- *  净带 = [进度条绘制下沿+8, 提示条字形上沿-8]；面板等比缩放（aspect=h/w）到带高内、
- *  水平居中、带内垂直居中；自然宽（min(logicalW×0.55, 520)）只作上限——超宽矮条
- *  （aspect<带高/naturalW）保自然宽，带宽不足（极窄屏）按宽钳。带高不足 MIN_BAND_H
- *  （logicalH<600 档净带塌缩,如 800×500 窗）→ floor：贴净带下沿放 MIN_BAND_H 高的
- *  最小条（"贴底"，y≥0 钳）。 */
+/** ★IIIII258 预览面板布局（纯函数，单测钉值；IIIII243 净带策略反转）。
+ *  原则：自然尺寸优先（min(logicalW×0.55, 520)），等比缩放（aspect=h/w）只是带高
+ *  不足时的收敛手段，floor 是最后兜底。两个全宽候选带：
+ *    top    = [max(边距, 提示条字形下沿+GAP), min(标题顶-GAP, H-边距)]
+ *             （提示条字形域只在极矮屏上探进该带，届时带顶抬到其下沿之下）；
+ *    bottom = [max(提示条字形下沿+GAP, 进度条绘制外沿+GAP), H-边距]。
+ *  各带内：宽 = min(自然宽, maxW, 带高/aspect)（等比），水平居中 + 带内垂直居中；
+ *  两带都可放取可容纳面积大者（同积取 top——桌面恒 top），单带可放取该带；
+ *  两带都 < MIN_BAND_H（或 aspect 未知）→ floor：贴屏底 MIN_BAND_H 高的最小条
+ *  （y≥0 钳；aspect 未知时高 0=不可见，drawSelf 早退）。 */
 export function previewBandLayout(input: {
   logicalW: number;
   logicalH: number;
-  /** 预览位图纵横比 h/w（等比缩放基准；≤0 视为未知 → floor 最小条兜底） */
+  /** 预览位图纵横比 h/w（等比缩放基准；≤0 视为未知 → floor 兜底） */
   aspect: number;
   /** 自然宽上限（缺省 min(logicalW×0.55, 520)） */
   naturalW?: number;
 }): PreviewBandRect {
   const { logicalW, logicalH, aspect } = input;
+  const edge = PREVIEW_BAND.EDGE_MARGIN;
+  const gap = PREVIEW_BAND.GAP;
   const barTop = UIGenProgressBar.topForScreenH(logicalH);
-  const bandTop = barTop + UIGenProgressBar.SPRITE.y + UIGenProgressBar.SPRITE.h + PREVIEW_BAND.GAP;
-  const bandBottom = logicalH - PREVIEW_BAND.TIP_ANCHOR_FROM_BOTTOM - PREVIEW_BAND.TIP_HALF_H - PREVIEW_BAND.GAP;
-  const bandH = bandBottom - bandTop;
-  const maxW = Math.max(0, logicalW - PREVIEW_BAND.EDGE_MARGIN * 2);
+  const barBottom = barTop + UIGenProgressBar.SPRITE.y + UIGenProgressBar.SPRITE.h;   // 绘制外沿（垂尾 +106）
+  const headerTop = barTop - PREVIEW_BAND.HEADER_ABOVE_BAR;
+  const tipsTop = logicalH - PREVIEW_BAND.TIP_ANCHOR_FROM_BOTTOM - PREVIEW_BAND.TIP_HALF_H;      // 两行 worst-case 字形上沿
+  const tipsBottom = logicalH - PREVIEW_BAND.TIP_ANCHOR_FROM_BOTTOM + PREVIEW_BAND.TIP_HALF_H;   // 两行 worst-case 字形下沿
+  const maxW = Math.max(0, logicalW - edge * 2);
   const natural = input.naturalW ?? Math.min(logicalW * PREVIEW_BAND.WIDTH_FRAC, PREVIEW_BAND.MAX_W);
   const k = aspect > 0 ? aspect : 0;
-  // floor 兜底（极矮屏/未知 aspect）：净带塌缩 → 贴净带下沿的最小条，宽按 maxW 收
-  if (!(bandH >= PREVIEW_BAND.MIN_BAND_H) || k === 0) {
-    const width = Math.min(maxW, k > 0 ? PREVIEW_BAND.MIN_BAND_H / k : maxW);
-    const h = width * k;
-    return { x: (logicalW - width) / 2, y: Math.max(0, bandBottom - h), width, height: h, mode: 'floor' };
-  }
-  // 正常态：等比缩放进带（高不足缩高、宽不足缩宽），水平居中 + 带内垂直居中
-  const width = Math.max(0, Math.min(natural, maxW, bandH / k));
-  const height = width * k;
-  return {
-    x: (logicalW - width) / 2,
-    y: bandTop + (bandH - height) / 2,
-    width, height,
-    mode: 'band',
+
+  const fit = (top: number, bottom: number): { x: number; y: number; width: number; height: number } | null => {
+    const bh = bottom - top;
+    if (!(bh >= PREVIEW_BAND.MIN_BAND_H) || k === 0) return null;   // NaN/负/塌缩同败
+    const width = Math.min(natural, maxW, bh / k);
+    const height = width * k;
+    return { x: (logicalW - width) / 2, y: top + (bh - height) / 2, width, height };
   };
+  // top 候选带：标题上方全宽净空；仅当提示条字形域实际探进带跨（极矮屏）才把带顶
+  // 抬到其下沿之下（桌面档 tipsTop ≫ 带底,不回避——带高吃满 0..headerTop-GAP）
+  const aBottom = Math.min(headerTop - gap, logicalH - edge);
+  const a = fit(tipsTop < aBottom ? Math.max(edge, tipsBottom + gap) : edge, aBottom);
+  // bottom 候选带：提示条字形下沿以下全宽净空（同时让开进度条绘制外沿——矮屏 bar 尾可探到带内）
+  const b = fit(Math.max(tipsBottom + gap, barBottom + gap), logicalH - edge);
+  if (a || b) {
+    // 择带：可容纳面积大者（>= 使同积取 top=桌面语义；两带几何对 aspect 单调同向,
+    // top 带在全部现实档 ≥ bottom 带,此分支实为防御性对称）
+    const pickTop = a && (!b || a.width * a.height >= b.width * b.height);
+    const g = pickTop ? a! : b!;
+    return { ...g, mode: pickTop ? 'top' : 'bottom' };
+  }
+  // floor 兜底（极矮窗/未知 aspect）：贴屏底最小条，宽按 maxW 收，y≥0 钳
+  const width = Math.min(maxW, k > 0 ? PREVIEW_BAND.MIN_BAND_H / k : maxW);
+  const height = width * k;
+  return { x: (logicalW - width) / 2, y: Math.max(0, logicalH - edge - height), width, height, mode: 'floor' };
 }
 
 export class GenWorldPreview extends UIElement {
@@ -163,11 +192,12 @@ export class GenWorldPreview extends UIElement {
     }
   }
 
-  /** 布局（★IIIII243 重排）：放进「进度条绘制下沿 ↔ 提示条字形上沿」净带——旧版
-   *  vAlign=1/marginBottom=56 把面板底沿钉在 H-56，与提示条（锚 H-150 字形居中）
-   *  整段叠压（用户实报截图）；预览是本仓自研叠加物，由它让位（vanilla 对齐位
-   *  标题/进度条/提示条零触碰）。几何全在 previewBandLayout 纯函数（单测钉值）：
-   *  等比缩放进带、水平居中、带内垂直居中，极矮屏贴带下沿。 */
+  /** 布局（★IIIII258 可读优先反转；IIIII243 净带策略的回归修复）：IIIII243 把面板
+   *  等比缩放进「进度条绘制下沿 ↔ 提示条字形上沿」40.4 逻辑 px 净带（桌面档恒值,
+   *  与 CSS 分辨率无关）——用户实报 ≈2000×1184 视口面板仅 279×80 CSS 不可读。
+   *  现按自然尺寸优先放进全屏最大净空带（标题上方 top / 提示条下方 bottom 择优),
+   *  几何全在 previewBandLayout 纯函数（单测钉值）；vanilla 对齐位（标题/进度条/
+   *  提示条）零触碰，极矮屏 floor 贴屏底。 */
   private applyLayout() {
     const g = previewBandLayout({
       logicalW: UIScale.logicalW,

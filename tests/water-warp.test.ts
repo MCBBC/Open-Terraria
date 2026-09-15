@@ -24,8 +24,8 @@ describe('GLWaterDistortion.FRAG：obj19 位移公式锁（防漂移）', () => 
     expect(f).toContain('n1.y - n2.y');
   });
 
-  it('波场：px·0.25/网格尺寸（DISTORTION_BUFFER_SCALE WaterShaderData.cs:47）+ R−0.5 中心', () => {
-    expect(f).toContain('px * 0.25 / uWaveSize');
+  it('波场：(px+uWaveOff)·0.25/网格尺寸（DISTORTION_BUFFER_SCALE WaterShaderData.cs:47）+ R−0.5 中心（★BJ89 读侧亚栅格补偿进坐标）', () => {
+    expect(f).toContain('(px + uWaveOff) * 0.25 / uWaveSize');
     expect(f).toContain('h - 0.5');
   });
 
@@ -174,8 +174,8 @@ describe('噪声场世界锚定（BJ76）：FRAG 结构锁 + CPU 不变式', () 
     expect(f).toContain('vec2 wpx = px + uWorldPx');
   });
 
-  it('FRAG：波场缓冲读保持屏幕坐标（缓冲随相机滚动,世界锚定在内容侧——不随本刀改动）', () => {
-    expect(f).toContain('texture2D(uWave, px * 0.25 / uWaveSize)');
+  it('FRAG：波场缓冲读含 uWaveOff 亚栅格补偿（obj19 c11=uImageOffset 进采样坐标——★BJ89 定谳；旧"屏幕坐标不改"锁随内容移向修正退役）', () => {
+    expect(f).toContain('texture2D(uWave, (px + uWaveOff) * 0.25 / uWaveSize)');
   });
 
   it('CPU 不变式：sampleDisplace 固定世界点在相机平移下恒定（屏幕锚定该值必漂移）', () => {

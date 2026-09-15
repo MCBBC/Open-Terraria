@@ -180,9 +180,15 @@ export class HousingPanel {
     this.draw();
   }
 
-  /** Game 侧单发/取消 → 面板同步(null=自毁) */
-  cursorChanged(m: HousingCursor): void {
-    if (!m) { this.destroy(); return; }
+  /** Game 侧单发/取消 → 面板同步(null=自毁,BJ32 关条通道;★keepPanel=true=仅摘
+   *  选中——分配成功 TryMovingNPC Main.cs:45931 / 右键取消 :45943 原版只清携带,
+   *  住房列表随背包保持) */
+  cursorChanged(m: HousingCursor, keepPanel = false): void {
+    if (!m) {
+      if (keepPanel) { this.cursor = null; this.draw(); return; }
+      this.destroy();
+      return;
+    }
     this.cursor = m;
     this.draw();
   }

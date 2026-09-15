@@ -1,5 +1,11 @@
 // SW-FX30 补债批探针(2026-09-11)——UI 移债刀②+⑦ 实机面:经典网格视图/切换钮/站点过滤。
 // 运行:node tools/probe.mjs run scripts/_fx30-grid-probe.mjs --seed=05162020 --size=small --vite=auto
+// ★陈旧备案(RB28 2026-09-15):本探针 11 红全系 FX41/刀20 前时代期望,非现行为回归——
+//   ①场景 4 起 mode0 期望 'classic',而缺省已回切 modern(Player.cs:363,SW-FX41 逐字),
+//   级联压倒 场景2/3 网格面(左键 modern 态=开窗非开网格)与 站点钩 classic 字段域;
+//   ②悬停名断言读 toggle.title 属性,刀20 起 hover 改自有气泡(showBuffTooltip),属性恒空。
+//   现行域判据 = scripts/_fx41-modern-craft-probe.mjs(30 断言)+ tests/sw-fx30-grid-toggle.test.ts。
+//   再启用前须按上述两锚重写期望,勿以本探针红当回归信号。
 import {
   launchBrowser, openPage, bootstrap, gotoApp, waitForBridge, createGame, ledger, front,
 } from '../tools/probe/lib/index.mjs';

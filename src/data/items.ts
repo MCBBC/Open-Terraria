@@ -32,6 +32,11 @@ export interface ItemDef {
   ammoId?: number;
   /** 原版 item id（战斗数值数据源） */
   vid?: number;
+  /** 原版 Item.rare（Item.cs SetDefaults 终值,名称着色档 GetItemNameColor 15 档）。
+   *  数据源 vanilla-itemrare.json（extract-itemrare.mjs 提取）——自动注册 vi_ def
+   *  随注册面带入（★BJ91 2026-09-15 RB17b note③:3861=5/3862=3/3860=8 此前整缺,
+   *  tooltip 稀有色落蓝档）。负档 -1 垃圾/-11 限量/-13 大师同表。 */
+  rare?: number;
   wall?: string;          // 放置的 wall key
   /** 原版 createWall（Item.cs SetDefaults）：放置的背景墙 vanilla id。
    *  vanilla-wallitems.json 全量 292 项（tools/extract-wallitems.mjs 提取） */
@@ -1003,6 +1008,9 @@ void 0;
 
 // ---- 阶段 5:原版物品全量注册(6146 件,图标走 atlas.vicon(id) 回退) ----
 import vanillaItemMeta from '../../public/sprites/vanilla.json';
+// rare 表（vid → 档位，tools/extract-itemrare.mjs 提取）——自动注册 def 随面带入
+//（★BJ91 2026-09-15 RB17b note③：3860/3861/3862 若链手补终值 8/5/3，见 json 内值）
+import vanillaItemRareJson from './vanilla-itemrare.json';
 import { MUSIC_BOX_ITEM_BY_STYLE } from './musicBoxStyles';   // ★叶子模块(2026-09-03 TDZ 断环,原 wiring/devices)
 /** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
 // ===================== 原版工具力道具补齐（锤/镐梯度,Item.cs 提取） =====================
@@ -1089,7 +1097,12 @@ for (const [idStr, m] of Object.entries(_vim)) {
     continue;
   }
   VANILLA_ITEM_KEY_BY_ID[vid] = ik; // 已注册的同样入表（wld 导入按 id 反查）
-  item({ key: ik, name: '', value: 1 });
+  // ★BJ91（2026-09-15 RB17b note③）：自动 def 此前仅 {key,value:1} 缺 rare——
+  //   原版 Item.rare 随 SetDefaults 落（3861 食人魔袋=5/3862 黑魔法师袋=3/3860
+  //   泰坦袋=8,Item.cs:34145-34164），tooltip 稀有色按 def 键反查 ITEM_RARE 表
+  //   （UI.ts/ItemDrop/Bobber 同源）。def 面 rare 随注册带入=自描述（消费面读表
+  //   不变,两处同源 json）。
+  item({ key: ik, name: '', value: 1, rare: (vanillaItemRareJson as Record<string, number>)[idStr] });
   VID_SEEN_IDX.set(vid, ITEM_DEFS.length - 1);
 }
 

@@ -105,6 +105,16 @@ export const MCRAFT_SEPARATOR_COLOR = css(_sr, _sg, _sb, 229);
 const [_wr, _wg, _wb] = shiftBlueToCyan(35, 40, 83);            // 搜索盒底(UIWrappedSearchBar.cs:135)
 /** 搜索盒面板底(UIWrappedSearchBar.cs:135,Red 主题 ShiftBlueToCyanTheme) */
 export const MCRAFT_SEARCH_BG = css(_wr, _wg, _wb, 255);
+// ---- 染色数值面(★RB28:canvas 白模预染色入参——上行 css 串的同源数值面,
+//      UI.ts vinvBuildModernCraft 九宫/分隔线乘色通道消费;★禁目测,数值即上链) ----
+/** 窗体 UIPanel 底染(= MCRAFT_PANEL_BG 数值面,α 142/255) */
+export const MCRAFT_PANEL_TINT = { r: _pr, g: _pg, b: _pb, a: _pa / 255 } as const;
+/** 窗体 UIPanel 边染(Black*0.8,:331) */
+export const MCRAFT_BORDER_TINT = { r: 0, g: 0, b: 0, a: 0.8 } as const;
+/** 分隔线染(= MCRAFT_SEPARATOR_COLOR 数值面,α 229/255) */
+export const MCRAFT_SEPARATOR_TINT = { r: _sr, g: _sg, b: _sb, a: 229 / 255 } as const;
+/** 搜索盒染(UIWrappedSearchBar.cs:118-124 bg/border 同色,α 1) */
+export const MCRAFT_SEARCH_TINT = { r: _wr, g: _wg, b: _wb, a: 1 } as const;
 
 // =====================================================================
 // —— 11 类筛选(ItemFilters.cs + NewCraftingUI.cs:284-301)——
@@ -353,13 +363,17 @@ export function mcraftIconBgX(icon: number): number {
 export function mcraftTitleXY(panel: { x: number; y: number }): { x: number; y: number } {
   return { x: panel.x + 12 - 1, y: panel.y + 12 - 2 };
 }
-/** 搜索条(UIWrappedSearchBar Top−4/HAlign1/高 24 :340-344) */
+/** 搜索条(UIWrappedSearchBar Top−4/HAlign1/高 24 :340-344)+ UpdateText 宽式
+ *  (:419-429 Width=100%−标题外宽−10)——条右缘 = 内衬右(panel.x+w−8),条左 =
+ *  panel.x+titleW+22(内衬左 12+标题 11+T 与条间缝 11 的合成),宽 = 内衬宽−titleW−10 */
 export const MCRAFT_SEARCH_H = 24;
-export function mcraftSearchBarRect(panel: { x: number; y: number; w: number }): { x: number; y: number; w: number } {
-  // x/w 由文本宽度动态分(UpdateText :426 Width=100%−文本−10)——DOM 走 flex 等价,
-  // 本函数给【右锚+高】基线
-  return { x: panel.x + panel.w - 8 - 22 - 3, y: panel.y + 12 - 4, w: 0 };
+export function mcraftSearchBarRect(panel: { x: number; y: number; w: number }, titleW: number): { x: number; y: number; w: number } {
+  return { x: panel.x + titleW + 22, y: panel.y + 12 - 4, w: panel.w - 12 - 8 - titleW - 10 };
 }
+/** UIPanel 角片 12(UIPanel.cs:10 _cornerSize;九宫 slice/搜索盒圆角共用) */
+export const MCRAFT_PANEL_CORNER = 12;
+/** 搜索盒 ✕ 钮右缘内缩 2(HAlign1+Left −2,UIWrappedSearchBar.cs:144-148) */
+export const MCRAFT_SEARCH_CANCEL_INSET = 2;
 
 /** 网格容器/列表/滚动条几何(:354-388 + UpdateCraftAreaSize :409-417 num=77) */
 export interface MCraftGridGeometry {

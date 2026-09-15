@@ -120,7 +120,8 @@ export interface SaveData {
   /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:1340 写/:2192 读；
    *  旧档缺省 86400 = delayStart，v108 前原版旧档同值 WF:2188） */
   cultistDelay?: number;
-  /** 旗击杀计数（BannerSystem.killCount;BannerSystem.cs:32 随存档——旧档缺省空） */
+  /** 旗击杀计数（BannerSystem.killCount;原版随世界档=WF:1347 Save/:2210 Load,BJ90 勘误
+   *  [曾误锚 BannerSystem.cs:32=网络包写手区]——旧档缺省空） */
   bannerKills?: Record<number, number>;
   /** 天界四塔 NPC 原位（★SW-FX11 2026-09-10：NPC 段尾 SavesAndLoads 段,WF:1744-1755
    *  写/:2937-2955 读;集合=NPCID.Sets.SavesAndLoads NPCID.cs:4807 CreateBoolSet(422,
@@ -492,6 +493,10 @@ export function serializeSave(
       caveBackX: meta.caveBackX,
       worldId: meta.worldId,
       seedFlags: meta.seedFlags,
+      // ★IIIII20b（★BJ90 2026-09-15 激活,BJ71 登记①）：换人一次性迁移标落盘——本键此前
+      //  仅类型声明（:79/:335）无写位,Game.ts IIIII20b 迁移标每次读档恒假（合法补招向导
+      //  可被重复顶替）。undefined 键由 JSON.stringify 丢弃=旧档零迁移语义不变
+      starterSwapMigrated: meta.starterSwapMigrated,
       difficulty: meta.difficulty ?? 0,   // Main.GameMode（旧档缺省=经典）
       journeyTimeRate: meta.journeyTimeRate ?? 1,
       journeyFreezeTime: meta.journeyFreezeTime ?? false,

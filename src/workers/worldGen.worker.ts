@@ -169,15 +169,12 @@ ctx.onmessage = async (e) => {
       const __t0 = performance.now();
       let data: import('../save/SaveFile').SaveData | null;
       {
-        // ★v6 二进制格式(2026-09-06):IndexedDB 存 ArrayBuffer(免 JSON 字符串+base64 膨胀)
-        //  旧 JSON 档自动兼容(kvGetIdb 返回 string → JSON.parse)
-        const raw = (await kvGetIdb(req.key ?? '')) as string | ArrayBuffer | null;
-        if (raw instanceof ArrayBuffer) {
-          const { unpackSaveBinary } = await import('../save/BinarySave');
-          data = unpackSaveBinary(raw);   // binary 通道以 Uint8Array 直出(免 base64)
-        } else {
-          data = JSON.parse(raw ?? 'null') as import('../save/SaveFile').SaveData | null;
-        }
+        // ★BJ90（2026-09-15）债④死路径移除（BJ71 登记②）：v6 二进制分支退役——
+        //  kvSetCompat 写的二进制副本恒被同 key JSON 后写覆盖（IDB 同 store 串行,
+        //  评估定谳=快路径零活跃消费方）;崩溃窗口的二进制残留是 meta={} 元数据全丢
+        //  损毁态（unpack 后 loadSaveData 读 data.header.width 即抛,无法救）。存档
+        //  权威格式=JSON 字符串（kvGetIdb 直读）
+        data = JSON.parse((await kvGetIdb(req.key ?? '')) ?? 'null') as import('../save/SaveFile').SaveData | null;
       }
       if (!data) throw new Error('存档数据缺失');
       __wkLog.push(`idb+parse ${Math.round(performance.now() - __t0)}ms`);

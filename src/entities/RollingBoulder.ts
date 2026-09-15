@@ -13,12 +13,13 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { moveAndCollide } from '../physics/TileCollision';
 import { BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
-import { projSprite } from './Arrow';
+import { projSprite, Arrow } from './Arrow';
 import { beeWallPushDir } from './WeaponProj';   // SW-AF1 2026-09-04（F-3）：1047 滚石踢墙门单源化（与 655/99 同摄取器）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE_DEFS } from '../data/tiles';
-import { shimmerBlockFx, rainbowBoulderFx, rainbowRodHitFx, orchestraHslCss, hexToRgbArr }
+import { f32 } from '../stats/ScaleStats';
+import { shimmerBlockFx, rainbowBoulderFx, rainbowRodHitFx, orchestraHslCss, hexToRgbArr, pooFlyFx }
   from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 
@@ -28,6 +29,34 @@ const KB_X = 10;               // 出生 kb 第二参 = 10f
 // ★SW-BJ67（2026-09-14）彩虹巨石 1047 行为面五债 D1/D2/D5（D4=CutTiles 豁免在
 //   ProjCutTiles/Entity/types/Game 四件,D3=宠 1090 在 PetFollower）。
 //   锚 1457=1458 同域逐字（2026-09-14 对拍 diff 零差,1458 全域行号 +1）。
+// ===========================================================================
+// ★SW-BJ88（2026-09-15）弹幕域四债清偿（全部 1457 锚 1:1;1458 同域逐字对拍 2026-09-15）：
+//   债1 1013 专属分段弹支  P.cs:19129-19191（含 :26365 localAI[0] 拍龄钟、
+//                          :19183-19186 静止杀、:19187-19190 >20 弹 Kill 门）
+//   债2 boss 命中即碎      P.cs:14336-14340（TreatedAsABossForRainbowBoulders
+//                          =NPC.cs:6868-6878 boss ∨ NPCID.cs:4873 集合）→ rbKill
+//   债3 GetAreas 曼哈顿    Player.cs:4933-4957 Player.FindClosest（|Δx|+|Δy|）
+//   债4① rotation 时序     P.cs:26679-26682 AI 段内（=本拍加速/重力/碰撞之前）
+//   债4② cutTilesBox 边界  P.cs:15356-15377 +1=循环排除界（ProjCutTiles.ts）
+// ===========================================================================
+// ★SW-RB20a（2026-09-15）RB20a 溢出发现清偿：
+//   F1 727/1054/1048 三型专属分段弹支
+//     727  = P.cs:19196-19239（落地弹回 −0.65 + 双轴掷 3..5 发 763 碎片;撞墙 Kill
+//            【后】碎片照发——旧仓被 else 桶吞进 99 家族①②,落地弹 0.2/碎面零碎片）
+//     1054 = P.cs:19240-19302（撞墙【不碎】:X 档 0.1/0.25/0.5/0.8、Y 档同式缺省 0.6、
+//            X 门 |lastVX|>2 → localAI[1]++、>1 Kill、静止杀——旧仓撞墙即碎=债本体）
+//     1048 = P.cs:19303-19378（撞墙不碎:X/Y 档 0.1/0.2/0.45/0.75、门 |lastV|>4、
+//            localAI[1]+=3、HitTiles+Item177+尘 322×10+PooFly(2..3)、静止杀、>20 Kill）
+//            ——旧仓撞墙即碎=债本体
+//   F2 :localAI0 字段注勘误：「1048 只写不读」伪——真读站 flag20 :19333 / 静止杀
+//     :19370 / （原注漏读 :19303-19378 全支）;移植 F1 后时钟承重
+//   F4 friendly 弹对玩家伤害面豁免——Damage_EVP 门 P.cs:14848 `!hostile → return`
+//     （1047 SetDefaults :9920-9929 friendly=true 无 hostile 行 → 原版永不伤玩家;
+//     家族余型 friendly+hostile 双旗 → EVP 照适用,旧仓 1047 撞玩家结算伤害=伪伤面）
+//   登记债（域外观察,未落刀）：vanilla Kill() 对家族全型有死亡尘/声面
+//     （P.cs:76379-76400 尘表 1013→243/727→40/1048→322 + 声 Item16/Item14/NPCHit29/
+//     NPCDeath6/缺省 dig(0)）——本仓 rbKill 仅 1047 有爆段,余型静默;BJ88 债1 注
+//     「1013 无专属爆面」系漏读该表（待立案）
 // ===========================================================================
 
 /** Utils.Remap 前向档（GetLerpValue clamped + Lerp,Utils.cs:761-780/:496-502——
@@ -206,6 +235,32 @@ export function rainbowBoulderLight(
   return [r * f, g * f, b * f];
 }
 
+// ===========================================================================
+// ★SW-BJ88（2026-09-15）债2：TreatedAsABossForRainbowBoulders 伤害面（BJ67 登记债）
+// ===========================================================================
+
+/** NPCID.Sets.ShouldBeCountedAsBossForRainbowBoulders（NPCID.cs:4873
+ *  Factory.CreateBoolSet(false,…) 全 38 元素直抄;1458 :4873 逐字同,2026-09-15 对拍。
+ *  语义 = 无 boss 位但按 boss 计入"巨石撞上即碎"面的部件/事件体：世吞三段 13-15、
+ *  毁灭者 134-136、哀木 325、南瓜王 327、霜月 344-346、火把神 664 等（部件名以
+ *  仓内既有对账注释为准,勿凭印象扩注）。 */
+export const RAINBOW_BOULDER_BOSS_IDS = new Set([
+  517, 422, 507, 493, 13, 14, 15, 267, 36, 114, 664, 134, 135, 136, 128, 129,
+  130, 131, 245, 247, 248, 246, 491, 492, 392, 395, 394, 393, 564, 565, 576,
+  577, 551, 325, 327, 344, 345, 346,
+]);
+
+/** NPC.TreatedAsABossForRainbowBoulders（NPC.cs:6868-6878 直译;1458 :6869 同）：
+ *  `boss ? true : ShouldBeCountedAsBossForRainbowBoulders[type]`。boss 位取仓内
+ *  实例/def 双落点（MinionProj.ts:4653 同款口径;VANILLA_BOSS_IDS=SetDefaults
+ *  boss=true 对账集,已含 EoW 头 :79225 动态置位面）。 */
+export function treatedAsABossForRainbowBoulders(
+  vanillaId: number | null | undefined, boss: boolean | undefined,
+): boolean {
+  if (boss) return true;
+  return vanillaId != null && RAINBOW_BOULDER_BOSS_IDS.has(vanillaId);
+}
+
 export class RollingBoulder extends Entity {
   w = 31; h = 31;
   /** 原版弹 id（Atlas: vanilla/Projectile_{id}.png） */
@@ -248,9 +303,21 @@ export class RollingBoulder extends Entity {
   /** D5：ai[1] 弹跳宽限计数（JumpToPosition P.cs:20368 置值；AI :26438-26441 消费——
    *  >0 期间 tileCollide=false 穿墙 + flag9 跳过静止自启,逐拍 −1） */
   ai1 = 0;
-  /** D1：localAI[1] 高速弹跳计数（CheckBounce :20192 ++；★1457/1458 同域核对——
-   *  1047 域内只写不读,与 1013（>20 Kill）/1021（>3 Kill）不同域,1:1 照抄） */
+  /** D1：localAI[1] 高速弹跳/撞墙计数（CheckBounce :20192 ++；★1457/1458 同域核对——
+   *  1047 域内只写不读,1:1 照抄;★SW-BJ88 债1：1013 同计数【写+读】——专属弹支
+   *  :19187-19190 `localAI[1] > 20 → Kill`（20 弹上限门）;1021（>3 Kill）未移植;
+   *  ★SW-RB20a F1：1054【写+读】（X 门 :19285 ++ → :19298 `>1 Kill` 两次撞墙上限）、
+   *  1048【写+读】（flag21 支 :19353 `+= 3` → :19374 `>20 Kill`）） */
   localAI1 = 0;
+  /** ★SW-BJ88 债1（2026-09-15）：localAI[0] 存活拍龄（AI_025 头 :26365-26368 逐字——
+   *  `type==1013||type==1048` 每 tick ++;1458 :26366 同）。1013 专属弹支消费：
+   *  flag16 钟摆门 :19159 `>= 500`（500t 后低速碰撞也计硬弹）+ 静止杀 :19183
+   *  `> 50`。★SW-RB20a F2 勘误（2026-09-15）：旧注「1048 在 1457 全域只写不读
+   *  （:11839/:12152/:19303/:76371/:76480 五站逐一核空）」系漏读 :19303-19378 专属
+   *  支——1048 真读站三处：flag20 钟摆门 :19333 `>= 500`、静止杀 :19370 `> 50`（写+读
+   *  承重）;F1 移植后本钟对 1048 为承重位。1054 不在钟内（:26365 仅 1013/1048）→
+   *  其支内 flag18 :19270 / 静止杀 :19294 恒假 = vanilla 死门,1:1 保留不裁。 */
+  localAI0 = 0;
   /** D5：Projectile.tileCollide 镜像（physics/TileCollision.Body 同名可选位——
    *  AI_025 :26437 每 tick 动态写,moveAndCollide 读 false 时整段跳过碰撞直写位移） */
   tileCollide?: boolean;
@@ -277,6 +344,9 @@ export class RollingBoulder extends Entity {
     for (const [id, t] of [...this.immunities]) {
       if (t <= 1) this.immunities.delete(id); else this.immunities.set(id, t - 1);
     }
+    // ---- ★SW-BJ88 债1 伴生位（AI_025 头 :26365-26368 逐字;1458 :26366 同）：
+    //  1013/1048 每 tick localAI[0]++（存活拍龄;读点与 1048 只写面见字段注）----
+    if (this.projId === 1013 || this.projId === 1048) this.localAI0++;
     // ---- ★SW-BJ67 D5 伴生位（AI_025 :26373 `bool flag9 = false` 的等价前算）：
     //  flag9 仅在 :26440（ai[1]>0 宽限支）被置 !tileCollide（宽限期 tileCollide 恒
     //  false → flag9=true）,唯一消费点 = 下行静止自启门 :26595 `!flag9`。本域 ai[1]
@@ -357,6 +427,14 @@ export class RollingBoulder extends Entity {
         this.cx + Math.cos(ang) * this.w / 2, this.cy + Math.sin(ang) * this.h / 2,
         this.vx * 0.05, this.vy * 0.05);
     }
+    // ---- ★SW-BJ88 债4①（2026-09-15）：rotation += vx×0.06 时序对齐（AI_025
+    //  :26679-26682 `if (type != 1055) rotation += velocity.X * 0.06f`;1458 :26680
+    //  同）——原版在【AI 段内=本拍横向加速/重力/tile 碰撞之前】,读的是上拍末速度;
+    //  旧仓放 moveAndCollide 之后=读碰撞改写后速度,弹跳拍（1047 弹回/家族①②）
+    //  自旋反向一拍（弹跳拍视觉差债）。1055 原版由 :26591 专支自旋（ai[1]==1 追踪
+    //  态改 rotation*=0.6 不在此行）,本仓 1055 未接追踪态→恒常转支同值,维持
+    //  无条件写面（不裁 1055 排除支,裁了反而丢常转）。----
+    this.rotation += this.vx * 0.06;
     // ---- AI_025 运动核 ----
     if (this.vy <= 6) {
       if (this.vx > 0 && this.vx < 7) this.vx += 0.05;
@@ -404,7 +482,6 @@ export class RollingBoulder extends Entity {
       this.trailY[0] = this.y;
       if (this.trailN < 10) this.trailN++;
     }
-    this.rotation += this.vx * 0.06;
     // ---- ★SW-BJ67 D1（2026-09-14）：1047 专支 = RainbowBoulder_CheckBounce
     //  （P.cs:19192-19194 `else if (type == 1047) RainbowBoulder_CheckBounce(ref
     //  lastVelocity)`;1458 :19193 同）——巨石族 ①高速落地/②撞墙碎裂两支对 1047
@@ -412,6 +489,34 @@ export class RollingBoulder extends Entity {
     //  PerformSmartBounce 重新寻的。原仓把 1047 落进 ②Kill 支 = 行为债 D1 本体。
     if (this.projId === 1047) {
       this.rbCheckBounce(lastVX, lastVY, game);
+      if (this.dead) return;
+    } else if (this.projId === 1013) {
+      // ★SW-BJ88 债1（2026-09-15）：1013 专属分段弹支（P.cs:19129-19191 直译;
+      //  1458 :19130-19192 逐字同）——旧仓把 1013 落进家族 ①②支（0.2 弹回+撞墙
+      //  Kill）= 行为债本体;原版 1013 是"永不碎的分段弹跳球"：速度分段弹回
+      //  （与 1047 同系数表）+ flag16 钟摆门/静止杀/20 弹上限三道生命周期门。
+      this.rb1013Bounce(lastVX, lastVY, game);
+      if (this.dead) return;
+    } else if (this.projId === 727) {
+      // ★SW-RB20a F1（2026-09-15）：727 滚刺球专属支（P.cs:19196-19239 直译;
+      //  1458 :19197-19240 逐字同）——旧仓被 else 桶吞进家族 ①②（落地弹 0.2/撞墙
+      //  Kill 无碎片）;原版落地弹 −0.65 且双轴各掷 3..5 发 763 仙人掌刺碎片,
+      //  撞墙 Kill【后】碎片照发（原版 Kill 后代码续行）。
+      this.rb727Bounce(lastVX, lastVY, game);
+      if (this.dead) return;
+    } else if (this.projId === 1054) {
+      // ★SW-RB20a F1（2026-09-15）：1054 蜘蛛球专属支（P.cs:19240-19302 直译;
+      //  1458 :19241-19303 逐字同）——旧仓撞墙即碎（家族②）=债本体;原版撞墙
+      //  【不碎】：分段弹回（X 缺省 0.8/Y 缺省 0.6）+ X 门 |lastVX|>2 计硬弹
+      //  （localAI[1]++）+ 两次撞墙上限（>1 Kill）。
+      this.rb1054Bounce(lastVX, lastVY, game);
+      if (this.dead) return;
+    } else if (this.projId === 1048) {
+      // ★SW-RB20a F1（2026-09-15）：1048 屎球专属支（P.cs:19303-19378 直译;
+      //  1458 :19304-19379 逐字同）——旧仓撞墙即碎（家族②）=债本体;原版撞墙
+      //  【不碎】：分段弹回（X/Y 档 0.1/0.2/0.45/缺省 0.75）+ 门 |lastV|>4 +
+      //  硬弹支 Item177/尘 322×10/PooFly 2..3 + localAI[1]+=3 → >20 Kill。
+      this.rb1048Bounce(lastVX, lastVY, game);
       if (this.dead) return;
     } else {
       // ① 高速落地（lastVy>5）：弹回 20% + 落地尘/声（SoundID 0 = dig 系）
@@ -440,6 +545,7 @@ export class RollingBoulder extends Entity {
     for (const raw of game.enemies() as Array<Record<string, unknown>>) {
       const e = raw as unknown as {
         id: number; dead?: boolean; friendly?: boolean; immortal?: boolean; dontTakeDamage?: boolean;
+        vanillaId?: number | null; boss?: boolean; def?: { boss?: boolean };
         x: number; y: number; w: number; h: number; cx: number; cy: number;
         hurt?: (dmg: number, kbx: number, kby: number, game: unknown) => boolean | void;
       };
@@ -449,9 +555,30 @@ export class RollingBoulder extends Entity {
       this.immunities.set(e.id, 10);
       const dir = e.cx >= this.cx ? 1 : -1;
       e.hurt?.(this.dmg, dir * KB_X, 0, game);
+      // ★SW-BJ88 债2（2026-09-15）：1047 命中 TreatedAsABossForRainbowBoulders →
+      //  Kill()（Damage_PVE_Inner :14336-14340 直译;1458 :14337 同）。原版位序=
+      //  StrikeNPC :13702 之后 → boss 先吃到本拍伤害再自爆;`keepIterating = false`
+      //  → break 不再遍历后续敌怪;Damage() 内 PVE→EVP 无 active 重入闸 → 不加
+      //  dead 早退=字面 1:1（且 1047 friendly 非 hostile,EVP 恒不适用 :14848）。
+      if (this.projId === 1047
+        && treatedAsABossForRainbowBoulders(e.vanillaId,
+          e.boss === true || e.def?.boss === true)) {
+        this.rbKill(game);
+        break;
+      }
     }
     const p = game.player as { dead: boolean; iframes: number; x: number; y: number; w: number; h: number };
-    if (!p.dead && p.iframes <= 0 && !(this.immunities.get(-1) ?? 0)) {
+    // ★SW-RB20a F4（2026-09-15）：friendly 弹对玩家伤害面豁免——Damage_EVP 门
+    //  （Projectile.cs:14848 `if (!hostile || Main.myPlayer >= 255 || damage <= 0 ||
+    //  SkipDamage_EVP[type]) return;`;1458 :14849 逐字同）=【非 hostile 弹恒不伤玩家】。
+    //  家族 SetDefaults 逐值：1047 friendly=true ∧ 无 hostile 行（P.cs:9920-9929,
+    //  ignoreWater @:9928）→ 原版彩虹巨石撞玩家【零结算】;余型（99/1002/1013/1014/
+    //  1048/1053/1054/1055/1057）friendly+hostile 双旗（SetDefaults 逐站核对,
+    //  vanilla-projectiles.json hostile 列同源=recon 双闸门辖域）→ EVP 照适用。
+    //  hostile 取 projectileData（json 列缺省=undefined → falsy → 豁免）,门语义与
+    //  原版 `!hostile` 逐字同构。PVP 半边（hostile 弹打 PVP 队）不适用本仓单地面。
+    if (projectileData(this.projId)?.hostile
+      && !p.dead && p.iframes <= 0 && !(this.immunities.get(-1) ?? 0)) {
       if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
         this.immunities.set(-1, 10);
         // ★SW-BI1 2026-09-06（用户崩溃报告定谳）：不传 this 作 attacker——attacker 槽是
@@ -592,6 +719,187 @@ export class RollingBoulder extends Entity {
     }
   }
 
+  /** ★SW-BJ88 债1：1013 专属分段弹支（P.cs:19129-19191 直译;1458 :19130-19192
+   *  逐字同,2026-09-15 对拍）。num46/num47 弹回系数按 |lastV| 分段（与 1047
+   *  CheckBounce 同表:<0.5→0.1 / <0.75→0.25 / <1→0.5 / 其余 0.95）,差异面：
+   *  ① flag16 = localAI[0] >= 500（:26365 拍龄钟）——≥500t 后任何速度的碰撞都计
+   *  硬弹（防低速贴墙永动）;② flag17 → localAI[1]++ + Collision.HitTiles +
+   *  PlaySound(0)（仓内近似=家族①支灰尘+dig 声,同 rbCheckBounce flag 支注）;
+   *  ③ 双 Kill 门：静止（Length<0.1 且拍龄>50）与弹满（localAI[1]>20）——
+   *  vanilla Kill() 对 1013 无专属爆面,rbKill 单口=仅置 dead（1047 才爆段）。 */
+  private rb1013Bounce(lastVX: number, lastVY: number, game: GameHooks): void {
+    const num44 = Math.abs(lastVX);                    // :19131
+    const num45 = Math.abs(lastVY);                    // :19132
+    let num46 = 0.95;                                  // :19133 X 系数
+    let num47 = 0.95;                                  // :19134 Y 系数
+    if (num44 < 0.5) num46 = 0.1;                      // :19135-19146
+    else if (num44 < 0.75) num46 = 0.25;
+    else if (num44 < 1) num46 = 0.5;
+    if (num45 < 0.5) num47 = 0.1;                      // :19147-19158
+    else if (num45 < 0.75) num47 = 0.25;
+    else if (num45 < 1) num47 = 0.5;
+    const flag16 = this.localAI0 >= 500;               // :19159
+    let flag17 = false;                                // :19160
+    if (this.vy !== lastVY) {                          // :19161-19168
+      if (flag16 || Math.abs(lastVY) > 5) flag17 = true;
+      this.vy = -lastVY * num47;
+    }
+    if (this.vx !== lastVX) {                          // :19169-19176
+      if (flag16 || Math.abs(lastVX) > 5) flag17 = true;
+      this.vx = -lastVX * num46;
+    }
+    if (flag17) {                                      // :19177-19182
+      this.localAI1++;
+      game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });
+      game.playSfx?.('dig', 0.8);                      // PlaySound(0)=dig 系（家族①同款近似）
+    }
+    if (Math.hypot(this.vx, this.vy) < 0.1 && this.localAI0 > 50) {   // :19183-19186
+      this.rbKill(game);
+      return;
+    }
+    if (this.localAI1 > 20) this.rbKill(game);         // :19187-19190（20 弹上限）
+  }
+
+  // ===========================================================================
+  // ★SW-RB20a F1（2026-09-15）：727/1054/1048 三型专属分段弹支（RB20a 溢出发现——
+  //  旧仓三型被 else 桶吞进 99 家族①②支）。三型 SetDefaults 均 aiStyle 25
+  //  （727 :7848 区 / 1054 :9958 区 / 1048 :9930 区）,经 BOULDER_CONVERT_TABLE
+  //  可达（484→727 / 714→1054 / 712→1048）。1458 同域逐字对拍 2026-09-15 零漂移。
+  // ===========================================================================
+
+  /** ★727 滚刺球专属支（P.cs:19196-19239 直译;1458 :19197-19240 同）。落地
+   *  （lastVy>5）弹回 −0.65（−0.2 是 1055||99||1005||1014||1053||1057 支系数,
+   *  727 不在集内）+ HitTiles + PlaySound(0) + 掷 3..5 发 763 碎片;撞墙 X：Kill()
+   *  【后】掷同式 3..5 碎片（原版 Kill 后代码续行,727 撞墙确实碎——与 1054/1048 反）。
+   *  Kill 尘/声面（:76391 尘表 727→40 + 缺省 dig）本仓未接=登记债（见文件头）。 */
+  private rb727Bounce(lastVX: number, lastVY: number, game: GameHooks): void {
+    const num48 = 30;                                  // :19198 碎片伤害
+    const num49 = 2;                                   // :19199 碎片击退
+    const num50 = 2;                                   // :19200 碎片速度
+    if (this.vy !== lastVY && lastVY > 5) {            // :19201
+      game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });   // HitTiles 近似（家族①同款约定）
+      game.playSfx?.('dig', 0.8);                      // :19203 PlaySound(0)
+      this.vy = -lastVY * 0.65;                        // :19204
+      this.rbSpawnCactusSpikes(num48, num49, num50, game);   // :19205-19220（owner==myPlayer 门单机恒真）
+    }
+    if (this.vx !== lastVX) {                          // :19222
+      this.rbKill(game);                               // :19223 Kill()（无爆段,rbKill 面登记债——碎片在下行为 Kill 后续行）
+      this.rbSpawnCactusSpikes(num48, num49, num50, game);   // :19224-19239（Kill 后续行,碎片照发）
+    }
+  }
+
+  /** 727 碎片掷（:19206-19220/:19225-19239 双站同式）：n=Next(3,6)∈[3,5]、
+   *  基相=NextFloat,环布角 (基相+i/n)·2π → 单位向量 ×2,Y>0（朝下）整向量 ×−0.7 翻上;
+   *  出射位=弹心 Center。★循环节距 1/n 走 f32（C# float 累加;JS 双精度 1/3×3 累计
+   *  0.999…<1 会多掷一发=行为差）。763 载体=Arrow（SetDefaults :7857-7866 aiStyle1/
+   *  10×10/friendly+hostile/penetrate=−1/tileCollide/extraUpdates=1——json 全承,
+   *  Arrow 构造按 projectileData(763) 取盒/pierce/extraUpdates;hostile 显式传=原版
+   *  EVP 伤害面）。netSync:true ≙ NewProjectile 内联 SendData(27)（Z-F4 通道）。 */
+  private rbSpawnCactusSpikes(dmg: number, kb: number, spd: number, game: GameHooks): void {
+    const n = 3 + Math.floor(Math.random() * 3);       // :19206/:19225 Next(3,6)
+    const base = Math.random();                        // :19207/:19226 NextFloat
+    for (let f = 0; f < 1; f = f32(f + f32(1 / n))) {  // :19208/:19227 float 累加环（恰 n 发）
+      const ang = (base + f) * Math.PI * 2;            // :19210/:19229（(base+f)×MathF.PI*2f——角度 f32 对拍差 ≤1e-6 rad,不承载行为）
+      let vx = Math.cos(ang) * spd;
+      let vy = Math.sin(ang) * spd;
+      if (vy > 0) { vx *= -0.7; vy *= -0.7; }          // :19212-19214/:19231-19233（整向量 ×−0.7）
+      game.spawnFriendlyProj?.(
+        new Arrow(this.cx - 5, this.cy - 5, vx, vy, dmg, kb, 763, { hostile: true }),
+        { netSync: true });                            // Center 出膛=位+5（NewProjectile 中心语义）
+    }
+  }
+
+  /** ★1054 蜘蛛球专属支（P.cs:19240-19302 直译;1458 :19241-19303 同）——撞墙
+   *  【不碎】（旧仓家族② Kill=债本体）：X 系数档 <0.5→0.1/<0.75→0.25/<1→0.5/缺省
+   *  0.8（:19244-19254 num59）、Y 档同式缺省 0.6（:19255-19263 num60）;flag18 =
+   *  localAI[0]>=500（:19270——★1054 不在拍龄钟 :26365 内→恒假=vanilla 死门,照抄
+   *  勿修）;X 门 |lastVX|>2（非 5!）→ flag19 + localAI[1]++（:19282-19286）;flag19 →
+   *  HitTiles+PlaySound(0)（:19289-19292）;静止杀 :19294-19296（localAI0 恒 0→死门）;
+   *  两次撞墙上限 localAI[1]>1 → Kill（:19298-19300）。 */
+  private rb1054Bounce(lastVX: number, lastVY: number, game: GameHooks): void {
+    const num57 = Math.abs(lastVX);                    // :19242
+    const num58 = Math.abs(lastVY);                    // :19243
+    let num59 = 0.8;                                   // :19244 X 系数
+    let num60 = 0.6;                                   // :19245 Y 系数
+    if (num57 < 0.5) num59 = 0.1;                      // :19246-19254
+    else if (num57 < 0.75) num59 = 0.25;
+    else if (num57 < 1) num59 = 0.5;
+    if (num58 < 0.5) num60 = 0.1;                      // :19255-19263
+    else if (num58 < 0.75) num60 = 0.25;
+    else if (num58 < 1) num60 = 0.5;
+    const flag18 = this.localAI0 >= 500;               // :19270（1054 无钟→恒假,死门照抄）
+    let flag19 = false;                                // :19271
+    if (this.vy !== lastVY) {                          // :19272-19278
+      if (flag18 || Math.abs(lastVY) > 5) flag19 = true;
+      this.vy = -lastVY * num60;
+    }
+    if (this.vx !== lastVX) {                          // :19280-19287
+      if (flag18 || Math.abs(lastVX) > 2) {            // 门 >2（Y 门 >5——两门不同值,勿归一）
+        flag19 = true;
+        this.localAI1++;                               // :19285
+      }
+      this.vx = -lastVX * num59;
+    }
+    if (flag19) {                                      // :19289-19292
+      game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });   // HitTiles 近似
+      game.playSfx?.('dig', 0.8);                      // :19292 PlaySound(0)
+    }
+    if (Math.hypot(this.vx, this.vy) < 0.1 && this.localAI0 > 50) this.rbKill(game);   // :19294-19296（死门）
+    if (this.localAI1 > 1) this.rbKill(game);          // :19298-19300（两次撞墙上限）
+  }
+
+  /** ★1048 屎球专属支（P.cs:19303-19378 直译;1458 :19304-19379 同）——撞墙
+   *  【不碎】（旧仓家族② Kill=债本体）：X/Y 系数档同表 <0.5→0.1/<0.75→0.2/<1→0.45/
+   *  缺省 0.75（:19305-19331 num63/num64）;flag20 = localAI[0]>=500（:19333——拍龄钟
+   *  :26365 对 1048 生效=【承重位】,F2 勘误锚）;门 |lastV|>4（Y/X 同值,与 1054 异）;
+   *  flag21 → localAI[1]+=3（:19353）+ HitTiles + PlaySound(Item177)（:19355,
+   *  LegacySoundStyle(2,177)=便便族落地音）+ 尘 322×10（:19356-19362,盒=Hitbox 内
+   *  随机点−(1,1) 2×2、速度=−v×0.5）+ PooFly 编排 2..3 粒（:19361-19367,clientOnly:
+   *  true 本地直驱=pooFlyFx 单源,PositionInWorld=Hitbox 内随机点+velocity×−1）;
+   *  静止杀 :19370-19372;localAI[1]>20 → Kill（:19374-19376,3/次→七次硬弹出局）。
+   *  Kill 尘/声面（:76391 尘表 1048→322 + Item16）本仓未接=登记债（见文件头）。 */
+  private rb1048Bounce(lastVX: number, lastVY: number, game: GameHooks): void {
+    const num61 = Math.abs(lastVX);                    // :19305
+    const num62 = Math.abs(lastVY);                    // :19306
+    let num63 = 0.75;                                  // :19307 X 系数
+    let num64 = 0.75;                                  // :19308 Y 系数
+    if (num61 < 0.5) num63 = 0.1;                      // :19309-19319
+    else if (num61 < 0.75) num63 = 0.2;
+    else if (num61 < 1) num63 = 0.45;
+    if (num62 < 0.5) num64 = 0.1;                      // :19321-19331
+    else if (num62 < 0.75) num64 = 0.2;
+    else if (num62 < 1) num64 = 0.45;
+    const flag20 = this.localAI0 >= 500;               // :19333（1048 有钟→承重）
+    let flag21 = false;                                // :19334
+    if (this.vy !== lastVY) {                          // :19335-19341
+      if (flag20 || Math.abs(lastVY) > 4) flag21 = true;
+      this.vy = -lastVY * num64;
+    }
+    if (this.vx !== lastVX) {                          // :19343-19349
+      if (flag20 || Math.abs(lastVX) > 4) flag21 = true;
+      this.vx = -lastVX * num63;
+    }
+    if (flag21) {                                      // :19351-19367
+      this.localAI1 += 3;                              // :19353
+      game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });   // :19354 HitTiles 近似
+      game.playSfxFile?.('Item_177', 1, this.x, this.y);   // :19355 SoundID.Item177（Player.ts:9117 同名通道）
+      for (let i = 0; i < 10; i++) {                   // :19356-19362
+        // NextVector2FromRectangle(Hitbox) − Vector2.One,盒 2×2;速度 = −v×0.5（弹后值）
+        const px = this.x + Math.random() * this.w - 1;
+        const py = this.y + Math.random() * this.h - 1;
+        game.spawnDust?.(px, py, 2, 2, 322, -this.vx * 0.5, -this.vy * 0.5);
+      }
+      const flies = 2 + Math.floor(Math.random() * 2); // :19361 2+Next(2)∈[2,3]
+      for (let i = 0; i < flies; i++) {                // :19361-19367
+        const px = this.x + Math.random() * this.w;    // NextVector2FromRectangle(Hitbox)
+        const py = this.y + Math.random() * this.h;
+        pooFlyFx(game, px - this.vx, py - this.vy);    // PositionInWorld = 位 + velocity×−1
+      }
+    }
+    if (Math.hypot(this.vx, this.vy) < 0.1 && this.localAI0 > 50) this.rbKill(game);   // :19370-19372 静止杀
+    if (this.localAI1 > 20) this.rbKill(game);         // :19374-19376（3/次→七次硬弹出局）
+  }
+
   /** D1 防刷门（RainbowBoulder_PreventSpam P.cs:20139-20162 直译）：6000×6000 盒
    *  （Utils.CenteredRectangle）内同 owner 同 type 活跃弹（除自身）≥7 → Kill。
    *  owner 维度单机恒同主（联机弹域本仓统一本地主,与原版 owner==主同向）。 */
@@ -692,7 +1000,11 @@ export class RollingBoulder extends Entity {
   /** D1 GetAreas（RainbowBoulder_GetAreas P.cs:20309-20315 直译）：FindClosest
    *  最近存活玩家（candidatePlayers 槽序镜像 Main.player 扫描;全灭回退首槽=原版
    *  返回 0 槽同构）→ playArea = CenteredRectangle(player.Center, MaxWorldViewSize
-   *  (1920,1200) Main.cs:758) / closeToMe = CenteredRectangle(Center,(300,150))。 */
+   *  (1920,1200) Main.cs:758) / closeToMe = CenteredRectangle(Center,(300,150))。
+   *  ★SW-BJ88 债3（2026-09-15）：Player.FindClosest（Player.cs:4933-4957 直译;
+   *  1458 :4934 同）距离度量=【曼哈顿 |Δx|+|Δy|】,非欧氏——本域仅此一处用
+   *  FindClosest（PerformSmartBounce 敌怪扫描 :20241 Vector2.Distance=欧氏、
+   *  JumpToPlayer <3000 门 :20278 同欧氏,均已对,勿顺手改）。 */
   private rbGetAreas(game: GameHooks): {
     closest: { x: number; y: number; cx: number; cy: number; dead: boolean };
     playArea: { x: number; y: number; w: number; h: number };
@@ -702,10 +1014,10 @@ export class RollingBoulder extends Entity {
       .filter((p) => p && !p.dead);
     if (players.length === 0) players.push(game.player);
     let closest = players[0]!;
-    let bd = Infinity;
+    let bd = -1;                                       // 原版 num=-1f 哨兵（:4946）
     for (const p of players) {
-      const d = Math.hypot(p.cx - this.cx, p.cy - this.cy);
-      if (d < bd) { bd = d; closest = p; }
+      const d = Math.abs(p.cx - this.cx) + Math.abs(p.cy - this.cy);   // :4948 曼哈顿
+      if (bd < 0 || d < bd) { bd = d; closest = p; }   // :4949 `num==-1f || num2<num`
     }
     return {
       closest,
@@ -801,10 +1113,10 @@ export class RollingBoulder extends Entity {
     return num2 !== -1 && bx >= 0 ? [bx, by] : null;   // :20419 return num2 != -1
   }
 
-  /** D2 唯一死亡门（vanilla Kill() 单口——timeLeft 耗尽/PreventSpam/boss 命中
-   *  全走 Kill → type==1047 爆段）。★P.cs:14336 `type==1047 &&
-   *  targetNPC.TreatedAsABossForRainbowBoulders → Kill()`（命中 boss 即碎）登记
-   *  未入本批（伤害面债,不在五债任务书内——后续批次锚 :14336/:14337）。 */
+  /** D2 唯一死亡门（vanilla Kill() 单口——timeLeft 耗尽/PreventSpam/boss 命中/
+   *  1013 静止杀·20 弹上限全走 Kill → type==1047 爆段）。★P.cs:14336
+   *  `type==1047 && targetNPC.TreatedAsABossForRainbowBoulders → Kill()`（命中
+   *  boss 即碎）已由 SW-BJ88 债2 接线（2026-09-15,敌怪伤害环内）。 */
   private rbKill(game: GameHooks): void {
     this.dead = true;
     if (this.projId === 1047) this.rbKillRainbowExplosion(game);

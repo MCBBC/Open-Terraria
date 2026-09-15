@@ -160,7 +160,7 @@ import {
   quickStackXY, sortXY, bestiaryXY, emoteXY,
   mHOf, equipAreaTop, equipRowY, accessoryCheckY,
   EQUIP_COL_X, VANITY_COL_X, DYE_COL_X, ACCESSORY_CHECK_X,
-  loadoutRailRect, loadoutBtnXY, defenseCenterXY,
+  loadoutBtnXY, defenseCenterXY,
   TAB_Y, TAB_MISC_X, TAB_HOUSING_X, TAB_CAMERA_X,
   TAB_MISC_SIZE, TAB_HOUSING_SIZE, TAB_CAMERA_SIZE,
   miscRowY, miscCheckXY, housingSlotPositions,
@@ -179,16 +179,20 @@ import {
 import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源
 import {
   // ★SW-FX41(2026-09-12)UI 移债 modern 窗族 P2-1..P2-4:NewCraftingUI 纯逻辑单源
-  MCRAFT_ALL_BUTTONS, MCRAFT_PANEL_BG, MCRAFT_PANEL_BORDER, MCRAFT_SEARCH_BG,
+  MCRAFT_ALL_BUTTONS, MCRAFT_PANEL_BG, MCRAFT_SEARCH_BG,
   MCRAFT_SEPARATOR_COLOR, MCRAFT_TAB_TEX, MCRAFT_ICON_TEX, MCRAFT_CELL_SCALE,
   mcraftPanelRect, mcraftTitleXY, mcraftGridGeometry, mcraftCellXY,
   mcraftTabFrame, mcraftIconBgX, mcraftDetailOrigin, mcraftMaterialPos,
   mcraftOwnedCountPos, mcraftOwnedCountColor, mcraftWindowToggleXY,
   mcraftFilterBarRect, clampViewPosition, MCRAFT_MISSING_COLOR, MCRAFT_MISSING_KEY,
   MCRAFT_DISABLED_GRAY, MCRAFT_SEARCH_H, MCRAFT_STATE_H_OFF,
+  // ★RB28(2026-09-15)用户实报呈现面对齐:九宫/搜索条/分隔线染色数值 + 搜索条几何
+  MCRAFT_PANEL_TINT, MCRAFT_BORDER_TINT, MCRAFT_SEARCH_TINT, MCRAFT_SEPARATOR_TINT,
+  MCRAFT_PANEL_CORNER, MCRAFT_SEARCH_CANCEL_INSET, mcraftSearchBarRect,
   filterItemOfVid, filtererFits, toggleFilterRadio, normalizeSearch,
   openCloseFilterTransition, type FilterKind, type FilterItem,
 } from './modernCrafting';
+import { tintedSliceDataUrl } from './vanillaKit';   // ★RB28:UIPanel 白模预染色通道(vanillaKit 同 kit)
 import {
   BACC, BUILDER_ACC_ICON_ORDER, builderAccDefaults, builderAccGateSet,
   builderAccTotalIcons, builderAccColumnTopY, cycleWireVisibility, toggleBuilderAccBit,
@@ -1957,7 +1961,8 @@ export class UI {
   }
 
   private installDragListeners() {
-    // 点击面板外的世界区域：光标持有物直接丢出（原版行为）
+    // 右键点击面板外的世界区域：光标持有物丢出（原版 dropItemCheck :5139 右键释放臂;
+    // ★SW-BJ92 左键松手不再丢出——resolveDrop 面板外支已改物品留光标）
     document.addEventListener('mousedown', (e) => {
       if (!this.heldStack) return;
       const t = e.target as HTMLElement | null;
@@ -2008,7 +2013,26 @@ export class UI {
       // 未持有物品时按下并移动 >4px → 整叠拾取开始拖拽
       if (this.dragFrom && !this.heldStack) {
         const d = Math.hypot(e.clientX - this.dragFrom.sx, e.clientY - this.dragFrom.sy);
-        if (d > 4) this.pickUp(this.dragFrom.i, this.dragFrom.where);
+        if (d > 4) {
+          this.pickUp(this.dragFrom.i, this.dragFrom.where);
+          // ★SW-BJ92（2026-09-15 用户实报「开包态光标持物点世界不能放置」）补武世界
+          //  左键电平：原版拾取发生在 ItemSlot.Handle 的 mouseLeft【下帧】（ItemSlot.cs
+          //  :906 LeftClick case-0），此后 Main.mouseLeft 电平在光标离开 UI（mouseInterface
+          //  复位）即驱动 controlUseItem → 使用/放置链——「按住槽位拖到世界」= 连续
+          //  铺放（拖到哪放到哪,松手物品留在光标）。本仓槽位 mousedown 有
+          //  stopPropagation（Input.mouseDown 从未置位）→ updateUse 重入总闸
+          //  `!inp.mouseDown && !holdOk`（Game.ts :12956 区）整拖拽期早退 = 拖拽全程
+          //  零放置,松手又被 resolveDrop 面板外臂丢出（同日拆除）=「取物拖到世界:
+          //  不放还丢」。修 = 拾取沿补武 mouseDown/mouseHeld（MobileControls 触摸合成
+          //  :599 同款先例）；面板悬停期由 inpOverDomUi 门（mouseInterface 等价面）
+          //  压制不误触,松键由 Input.mouseup 复位——与原版电平生命周期同相。
+          //  ★仅拾取成沿才武（pickUp 空槽/异型拒收时 heldStack 未置,补武会让选中
+          //  热键物在松手沿误发一击）。
+          if (this.heldStack) {
+            const inp = this.game?.input;
+            if (inp) { inp.mouseDown = true; inp.mouseHeld = true; }
+          }
+        }
       }
     });
     document.addEventListener('mouseup', (e) => {
@@ -2304,16 +2328,25 @@ export class UI {
       this.placeTrash();
       return;
     }
-    // 面板外：丢进世界；面板内空白：放回原格。★右下角坞同算面板内（2026-09-02
-    // 无框坞在 .sw-panel 之外——漏登记会把拖到坞标签/缝隙的物品当世界抛掷）
+    // 面板外：★SW-BJ92 物品留在光标（原版同相）；面板内空白：放回原格。★右下角坞
+    // 同算面板内（2026-09-02 无框坞在 .sw-panel 之外——漏登记会把拖到坞标签/缝隙
+    // 的物品当世界抛掷）
     // ★.sw-itemsearch 同算面板内（★SW-BJ81 2026-09-14：拖经道具搜索浮窗松手
     //   =放回原格,不当世界抛掷——浮窗为背包子面板,与合成窗同域）
+    // ★SW-BJ92（2026-09-15 用户实报「开包态光标持物点世界不能放置」）：旧「面板外
+    //   松手=丢进世界」系把原版【右键】丢出臂误接到左键松手——vanilla 丢出唯一触发
+    //   = dropItemCheck Player.cs:5139 `mouseRight&&!mouseInterface&&mouseRightRelease`
+    //   （:5141-5144 消费 mouseRightRelease）,左键松手无任何丢出臂（DropSelectedItem
+    //   :5154 只在右键臂内）。且本丢出臂与拾取拖放互斥：按住槽位拖到世界的全程
+    //   （本仓拾取沿 = dragFrom 移动 >4px,见 installDragListeners 电平补武注）在
+    //   resolveDrop 前根本没有放置面,松手即把整叠丢出 = 用户观感「取物拖到世界:
+    //   不放还丢」。修 = 面板外松手 no-op（物品保持持物态,继续点击世界=放置）；
+    //   丢出意图走右键臂/垃圾桶（均原版面）。
     const inPanel = target?.closest?.('.sw-panel, .sw-eqdock, .sw-vinv, .sw-itemsearch');
-    if (!inPanel) {
-      this.throwHeldToWorld();
-    } else {
+    if (inPanel) {
       this.placeHeld(from.i, from.where);
     }
+    // 面板外 = no-op：物品留在光标（★SW-BJ92,见上注）
   }
 
   /** 垃圾桶：丢弃暂存（关闭背包时结算删除） */
@@ -2834,6 +2867,10 @@ export class UI {
 
   closeInventory() {
     this.closeHousingPanel();
+    // ★住房光标随关包解除（Main.cs:46429 !playerInventory → SetMouseNPC(-1,-1);
+    //   死亡强收包 :46435-46440 同面）——HousingPanel 条已由 closeHousingPanel
+    //   自毁清态;vanilla 布局住房页(EquipPage=1)游标滞留则重开背包后仍吞世界点击
+    this.game.housingMode = null;
     this.invPanel.style.display = 'none';
     if (this.eqDockEl) this.eqDockEl.style.display = 'none';   // 右下角坞随关收
     this.closeItemSearch();
@@ -5270,6 +5307,12 @@ export class UI {
 
   private openChestPanel(c: ChestData) {
     this.openChest = c;
+    // ★BJ91（2026-09-15 RB17b note⑤）：换箱开箱臂同收改名对话——原版 tile-interact
+    //   序里 editChest 清理在开新箱前（Player.cs:33135-33141/:33349-33355：旧箱编辑
+    //   态 → Sound 12+清 npcChatText,editedChestName 随 msg33 落）。closeChest 单点
+    //   不覆盖异箱直开路（Game.tryOpenChest 异箱=OpenChest 重赋 chest,旧箱隐式关）,
+    //   对话若滞留会锚在旧箱上。
+    this.closeChestRenameDialog();
     // ★SW-FX30 刀②:PipsUseGrid 清(Player.cs:33787 OpenChest → Main.PipsUseGrid=false
     // ——开箱关网格态,两布局同面;字段仅 vinv 布局消费)
     this.vinvPipsUseGrid = false;
@@ -5303,6 +5346,13 @@ export class UI {
 
   closeChest() {
     this.openChest = null;
+    // ★BJ91（2026-09-15 RB17b note⑤）：改名对话随箱收起——原版 editChest 生命周期：
+    //   关箱拍 Player.cs:33349-33355/:33135-33141（editChest→Sound 12+清 npcChatText）
+    //   与每 tick InputTextChest 的 chest==-1 支（Player.cs:27742-27747,无声）都收
+    //   编辑态。本仓编辑态=模态对话面板域,closeChest=chest==-1 单点收口（走远
+    //   tickChestAutoClose/死亡/关背包/换箱全汇此）——对话滞留=原版不可能态。
+    //   无声对齐 27745 支（Sound 12 只在 tile-interact 序,本支不播）。
+    this.closeChestRenameDialog();
     if (this.chestPanel) this.chestPanel.style.display = 'none';
     this.refreshAll();   // 堆叠钮等随开箱门（chest == -1）复显
   }
@@ -6954,17 +7004,11 @@ export class UI {
         return { x: ACCESSORY_CHECK_X(this.vinvLayoutCtx!.sw), y: accessoryCheckY(this.vinvLayoutCtx!.num20, row) };
       });
     }
-    // 配装轨(DrawLoadoutButtons Main.cs:42651-42707:竖轨 (sw-44,num20+2) 高=可见行数·47.6 截断)
+    // 配装钮(DrawLoadoutButtons Main.cs:42651-42707)——★FX29 定谳:原版只画 3 颗钮,
+    // 42667 的 4px rectangle(sw-44)仅作钮定位锚【不渲染】:全方法无 Draw(rectangle),
+    // 42668 GetLoadoutColor(CurrentLoadoutIndex) 返回值被弃(ItemSlot.cs:2832 纯函数),
+    // Extra_259=114×102=9 帧 38×34 无轨美术。2026-09-15 用户实报右缘竖线=本仓虚元素,摘除。
     {
-      const rail = el('div');
-      rail.style.cssText = 'position:absolute; width:4px; background:rgba(120,130,180,0.45);';
-      pageEquip.appendChild(rail);
-      pagePos(rail, () => {
-        const c = this.vinvLayoutCtx!;
-        const r = loadoutRailRect(c.sw, c.num20, c.visibleRows);
-        rail.style.height = `${r.h}px`;   // 高度随追加槽行数变化(与 pos 同拍)
-        return { x: r.x, y: r.y };
-      });
       this.loadoutBtns = [];
       for (let k = 0; k < 3; k++) {
         const b = el('button', 'vinv-btn sw-loadout-btn') as HTMLButtonElement;
@@ -7497,7 +7541,10 @@ export class UI {
     // :44649-44651)——否则 assign 游标持续吞世界点击
     const hm = this.game.housingMode;
     if (hm && hm.kind === 'assign' && !rows.some((r) => r.npcKey === hm.npcKey)) {
-      this.game.housingMode = null;
+      // ★红队 MINOR-6 清偿:携带 NPC 离场 → 降级【查询器】(Main.cs:45965-45968
+      // !active||type≠ → SetMouseNPC_ToHousingQuery;HousingPanel.refresh 同语义)
+      // ——曾清成 null=比原版多退一档(查询态保留才是原版,:45918-45927 不清携带)
+      this.game.housingMode = { kind: 'query' };
     }
     const sig = rows.map((r) => r.npcKey).join(',');
     if (sig !== this.vinvHousingSig) {
@@ -7568,6 +7615,13 @@ export class UI {
       s.el.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${active ? 14 : 11}.png)`;
       s.img.style.opacity = active ? '0.4' : '1';   // 携带态灰显(HousingPanel.draw 同语义)
     }
+  }
+
+  /** Game 侧住房光标清理 → vanilla 布局住房页选中态重绘（分配成功/右键取消后
+   *  housingMode 已清,本页无每帧重绘点——mainFlow onHousingCursor 回调驱动;
+   *  HousingPanel 条走 cursorChanged(keepPanel) 自绘） */
+  refreshHousingSelection(): void {
+    this.vinvPaintHousingSelection();
   }
 
   private vinvCraftFocusV = 0;
@@ -7857,6 +7911,7 @@ export class UI {
   private vinvModernTitleEl: HTMLElement | null = null;
   private vinvModernSearchInput: HTMLInputElement | null = null;
   private vinvModernSearchClear: HTMLButtonElement | null = null;
+  private vinvModernSearchRowEl: HTMLElement | null = null;   // ★RB28:条几何每拍回填(update)
   private vinvModernGridList: HTMLElement | null = null;
   private vinvModernGridInner: HTMLElement | null = null;
   private vinvModernSeparatorEl: HTMLElement | null = null;
@@ -7921,23 +7976,49 @@ export class UI {
       this.vinvModernFilterHovers.push(false);
       this.vinvSyncModernFilterBtn(i);
     });
-    // ---- 主内衬 UIPanel(:321-332 背景/边框色) ----
+    // ---- 主内衬 UIPanel(:321-332)——★RB28 用户实报:原版 = PanelBackground/
+    //      PanelBorder 28² 白模 9-slice 乘色(UIPanel.cs:50-78 DrawPanel:角 12 条 4),
+    //      无 12px 黑框(SetPadding(12) = 内容内衬非描边,内容几何走 mcraftPanelInner
+    //      单源)——本体保持无边框(绝对定位子层含块 = padding 盒,带边框会把面板内
+    //      容整体挤偏 12px),九宫面挂 inset:0 双层;白模未就绪前退化为纯色圆角底
+    //      (vanillaKit .sw-vpanel 同兜底法),染色数值 = MCRAFT_*_TINT 反编译常量 ----
     const panel = el('div');
-    panel.style.cssText = `position:absolute; left:0; top:38px; width:490px; bottom:0;`
-      + `border:12px solid #000; border-image:none; border-radius:10px; box-sizing:border-box;`
-      + `background:${MCRAFT_PANEL_BG};`;
-    panel.style.borderColor = MCRAFT_PANEL_BORDER;
+    panel.style.cssText = 'position:absolute; left:0; top:38px; width:490px; bottom:0;';
+    const panelBg = el('div');
+    panelBg.style.cssText = `position:absolute; inset:0; pointer-events:none;`
+      + `border-radius:10px; background:${MCRAFT_PANEL_BG};`;
+    const panelBorder = el('div');
+    panelBorder.style.cssText = 'position:absolute; inset:0; pointer-events:none;';
+    panel.appendChild(panelBg);
+    panel.appendChild(panelBorder);
     win.appendChild(panel);
     this.vinvModernPanelEl = panel;
+    void Promise.all([
+      tintedSliceDataUrl('sprites/vanilla-ui/UI_PanelBackground.png',
+        MCRAFT_PANEL_TINT.r, MCRAFT_PANEL_TINT.g, MCRAFT_PANEL_TINT.b, MCRAFT_PANEL_TINT.a),
+      tintedSliceDataUrl('sprites/vanilla-ui/UI_PanelBorder.png',
+        MCRAFT_BORDER_TINT.r, MCRAFT_BORDER_TINT.g, MCRAFT_BORDER_TINT.b, MCRAFT_BORDER_TINT.a),
+    ]).then(([bg, border]) => {
+      if (!bg) return;
+      panelBg.style.border = `${MCRAFT_PANEL_CORNER}px solid transparent`;   // 角 12 条 4(UIPanel.cs:10-12)
+      panelBg.style.borderImage = `url(${bg}) ${MCRAFT_PANEL_CORNER} fill stretch`;
+      if (border) {
+        panelBorder.style.border = `${MCRAFT_PANEL_CORNER}px solid transparent`;
+        panelBorder.style.borderImage = `url(${border}) ${MCRAFT_PANEL_CORNER} fill stretch`;
+      }
+    });
     // 标题(UIPanel 内 UIText Left−1/Top−2 :333-337;UpdateText :419-429)
     const title = el('div', 'vinv-txt');
     title.style.cssText += 'position:absolute; font-size:14px; pointer-events:none; white-space:nowrap;';
     panel.appendChild(title);
     this.vinvModernTitleEl = title;
-    // 搜索条(UIWrappedSearchBar Red 主题 :340-353;宽=100%−文本−10 走 flex 等价:426)
+    // 搜索条(UIWrappedSearchBar Red 主题 :340-353)——★RB28:整条贯通(右缘=内衬右
+    // :482、左缘随标题外宽 +22 让位,UpdateText :419-429 Width=100%−标题外宽−10,
+    // 几何单源 mcraftSearchBarRect + vinvUpdateModernCraft 每拍实测标题宽回填;
+    // 旧 shrink-to-fit 窄条 = 绝对定位未给宽的自由收缩伪影) */
     const searchRow = el('div');
-    searchRow.style.cssText = `position:absolute; right:8px; top:${12 - 4}px; height:${MCRAFT_SEARCH_H}px;`
-      + 'display:flex; align-items:center; gap:3px;';
+    searchRow.style.cssText = `position:absolute; left:22px; right:8px; top:${12 - 4}px;`
+      + `height:${MCRAFT_SEARCH_H}px; display:flex; align-items:center; gap:3px;`;
     const searchBtn = el('button', 'vinv-btn') as HTMLButtonElement;
     searchBtn.style.cssText = 'position:relative; width:22px; height:22px; padding:0; flex:none;';
     const sbImg = document.createElement('img');
@@ -7952,8 +8033,32 @@ export class UI {
     });
     searchRow.appendChild(searchBtn);
     const searchBox = el('div');
-    searchBox.style.cssText = `flex:1; height:${MCRAFT_SEARCH_H}px; position:relative; display:flex; align-items:center;`
-      + `background:${MCRAFT_SEARCH_BG}; border-radius:5px; min-width:60px;`;
+    searchBox.style.cssText = `flex:1; height:${MCRAFT_SEARCH_H}px; position:relative;`
+      + 'display:flex; align-items:center; min-width:0;';
+    // 盒面 = UIPanel 白模 9-slice 乘色(bg/border 同 tint → 实心圆角蓝条;
+    // UIWrappedSearchBar.cs:111-126 角 12 → 24 高条 = 半圆角药丸。旧 radius 5px/直角
+    // 分段面 = 白模缺位伪影);未就绪前纯色圆角兜底 */
+    const boxBg = el('div');
+    boxBg.style.cssText = `position:absolute; inset:0; pointer-events:none;`
+      + `border-radius:${MCRAFT_PANEL_CORNER}px; background:${MCRAFT_SEARCH_BG};`;
+    const boxBorder = el('div');
+    boxBorder.style.cssText = 'position:absolute; inset:0; pointer-events:none;';
+    searchBox.appendChild(boxBg);
+    searchBox.appendChild(boxBorder);
+    void Promise.all([
+      tintedSliceDataUrl('sprites/vanilla-ui/UI_PanelBackground.png',
+        MCRAFT_SEARCH_TINT.r, MCRAFT_SEARCH_TINT.g, MCRAFT_SEARCH_TINT.b, MCRAFT_SEARCH_TINT.a),
+      tintedSliceDataUrl('sprites/vanilla-ui/UI_PanelBorder.png',
+        MCRAFT_SEARCH_TINT.r, MCRAFT_SEARCH_TINT.g, MCRAFT_SEARCH_TINT.b, MCRAFT_SEARCH_TINT.a),
+    ]).then(([bg, border]) => {
+      if (!bg) return;
+      boxBg.style.border = `${MCRAFT_PANEL_CORNER}px solid transparent`;
+      boxBg.style.borderImage = `url(${bg}) ${MCRAFT_PANEL_CORNER} fill stretch`;
+      if (border) {
+        boxBorder.style.border = `${MCRAFT_PANEL_CORNER}px solid transparent`;
+        boxBorder.style.borderImage = `url(${border}) ${MCRAFT_PANEL_CORNER} fill stretch`;
+      }
+    });
     const input = el('input') as HTMLInputElement;
     input.placeholder = Lang.text('UI.PlayerNameSlot');   // 空文案 = UI.PlayerNameSlot(:81 缺省,原版本相)
     input.style.cssText = 'flex:1; min-width:0; background:transparent; border:none; outline:none; color:#fff;'
@@ -7968,8 +8073,9 @@ export class UI {
     input.addEventListener('mousedown', (e) => e.stopPropagation());
     searchBox.appendChild(input);
     const cancel = el('button', 'vinv-btn') as HTMLButtonElement;
-    cancel.style.cssText = 'position:absolute; right:-2px; top:50%; transform:translateY(-50%);'
-      + 'width:24px; height:24px; padding:0; flex:none;';
+    // ✕ = HAlign1+VAlign.5+Left −2(:144-148)→ 右缘内缩 2、24 高占满盒内右端
+    cancel.style.cssText = `position:absolute; right:${MCRAFT_SEARCH_CANCEL_INSET}px; top:50%;`
+      + 'transform:translateY(-50%); width:24px; height:24px; padding:0; flex:none;';
     const cxImg = document.createElement('img');
     cxImg.src = 'sprites/vanilla-ui/UI_SearchCancel.png';
     cxImg.style.cssText = 'width:100%; height:100%; image-rendering:pixelated; pointer-events:none;';
@@ -7992,13 +8098,24 @@ export class UI {
     panel.appendChild(searchRow);
     this.vinvModernSearchInput = input;
     this.vinvModernSearchClear = cancel;
+    this.vinvModernSearchRowEl = searchRow;
     // ---- 网格容器/分隔线/列表/滚动条(:354-388) ----
+    // 分隔线 = UIHorizontalSeparator(Separator1 6×4 白模,EdgeWidth 2,Utils.DrawPanel
+    // 三分:左右 2px 1:1+中段横拉;色 =(89,116,213)*0.9 平移 :364-366)——★RB28:旧面
+    // 白模未乘色直叠(白线伪影),现走 canvas 预染色 border-image 2 fill(CharCreation
+    // .sw-char-sep 同式;盒 4px 高 border 2+2 全覆盖,纯色底仅就绪前兜底)
     const sepEl = el('div');
-    sepEl.style.cssText = `position:absolute; left:4px; height:4px; image-rendering:pixelated;`
-      + `background:${MCRAFT_SEPARATOR_COLOR};`
-      + `background-image:url(sprites/vanilla-ui/UI_CharCreation_Separator1.png); background-size:100% 100%;`;
+    sepEl.style.cssText = `position:absolute; left:4px; height:4px; box-sizing:border-box;`
+      + `image-rendering:pixelated; background:${MCRAFT_SEPARATOR_COLOR};`;
     panel.appendChild(sepEl);
     this.vinvModernSeparatorEl = sepEl;
+    void tintedSliceDataUrl('sprites/vanilla-ui/UI_CharCreation_Separator1.png',
+      MCRAFT_SEPARATOR_TINT.r, MCRAFT_SEPARATOR_TINT.g, MCRAFT_SEPARATOR_TINT.b, MCRAFT_SEPARATOR_TINT.a,
+    ).then((url) => {
+      if (!url) return;
+      sepEl.style.border = '2px solid transparent';
+      sepEl.style.borderImage = `url(${url}) 2 fill stretch`;
+    });
     const gridList = el('div');
     gridList.style.cssText = 'position:absolute; overflow:hidden;';
     panel.appendChild(gridList);
@@ -8307,7 +8424,17 @@ export class UI {
       const f = this.vinvModernCraftFilter;
       const name = f ? Lang.tileName(f.tile) : null;
       const text = f && name ? Lang.text('CombineFormat.Crafting', name) : Lang.inter(25);
-      if (this.vinvModernTitleEl.textContent !== text) this.vinvModernTitleEl.textContent = text;
+      if (this.vinvModernTitleEl.textContent !== text) {
+        this.vinvModernTitleEl.textContent = text;
+        // ★RB28:搜索条让位随标题外宽同拍重算(:426-428 _searchBar.Width=100%−
+        //   标题外宽−10 + Recalculate;DOM 实测 offsetWidth——字体度量与原版异,
+        //   条随动不遮题=登记偏差);文本不变免测(零逐帧 reflow)
+        if (this.vinvModernSearchRowEl) {
+          const sb = mcraftSearchBarRect(panel, this.vinvModernTitleEl.offsetWidth);
+          this.vinvModernSearchRowEl.style.left = `${sb.x - panel.x}px`;
+          this.vinvModernSearchRowEl.style.width = `${sb.w}px`;
+        }
+      }
       const t = mcraftTitleXY(panel);
       this.vinvModernTitleEl.style.left = `${t.x - panel.x}px`;
       this.vinvModernTitleEl.style.top = `${t.y - panel.y}px`;
@@ -8618,8 +8745,10 @@ export class UI {
   }
 
   /** 网格滚轮(Main.cs:17595-17633 DoScrollingInInventory):PipsUseGrid ∧ 鼠标在网格
-   *  矩形 (310,340,cols·42,rows·42) 内 → 每档 ScrollCraftingGrid(CraftingUI.cs:575-594,
-   *  下滚 +=cols+音,上滚 -=cols 无音);★网格支不清 flag(:17600-17608 无 flag=false)
+   *  矩形 (310,340,cols·42,rows·42) 内 → 每档 ScrollCraftingGrid(CraftingUI.cs:585-602,
+   *  mouseWheel<0(下滚)→recStart−=cols 无音;mouseWheel≥0(上滚)→recStart+=cols+音12
+   *  ——★FX32b 勘误:旧注「下滚+=cols」写反,与原版/上滚为正档定谳相反,已正);
+   *  ★网格支不清 flag(:17600-17608 无 flag=false)
    *  → :17629-17632 ScrollCraftingList 同拍仍走 = 网格分页与列表焦点同滚(逐字)。
    *  窗口级监听:网格容器 pointer-events:none(空档不拦世界点击,原版空档不置
    *  mouseInterface 同相),wheel 事件不经容器冒泡,故挂 window 一次(重建守卫)。 */
@@ -9514,13 +9643,27 @@ export class UI {
     el.textContent = bankNames[c.x] ?? ((c as { name?: string }).name || Lang.text('Mods.SandboxWorld.UI.Chest'));
   }
 
-  /** 箱型名（DrawName :122 LegacyChestType[frameX/36] 单源；★BJ69：重命名对话的
-   *  defaultChestName 同源——OpenVirtualKeyboard(2) IngameFancyUI.cs:96-113 型名域） */
+  /** 箱型名（ChestUI.DrawName :118-136 分支序 1:1；★BJ69：重命名对话的
+   *  defaultChestName 同源——OpenVirtualKeyboard(2) IngameFancyUI.cs:102-119
+   *  同一分支结构。★BJ91（2026-09-15 RB17b note④）补 467/88 两支：
+   *  467(Containers2) style 4 = GetItemNameValue(3988) 死人宝箱 / 其余 =
+   *  LegacyChestType2[frameX/36]；88 梳妆台 = LegacyDresserType[frameX/54]
+   *  （54 档 stride=3 tile×18,≠箱 36）。键面 zh-Hans 全量在册
+   *  （LegacyChestType2.0-37/LegacyDresserType.0-64,Lang.cs:48-51 数组源）；
+   *  1458 同域核对 DrawName :102-180/IngameFancyUI :102-119 零漂移） */
   private vinvChestTypeName(c: ChestData): string | null {
     if (c.x < 0 || c.x === undefined) return null;
     const st = this.game.world.store;
-    const fx = st.frameX?.[st.idx(c.x, c.y)] ?? 0;
-    return Lang.text(`LegacyChestType.${Math.floor(fx / 36)}`);
+    const idx = st.idx(c.x, c.y);
+    const sheet = TILE_DEFS[st.type?.[idx] ?? -1]?.vanilla?.sheet ?? -1;
+    const fx = st.frameX?.[idx] ?? 0;
+    if (sheet === 21) return Lang.text(`LegacyChestType.${Math.floor(fx / 36)}`);
+    if (sheet === 467) {
+      if (Math.floor(fx / 36) === 4) return Lang.itemName(3988) ?? '死人宝箱';
+      return Lang.text(`LegacyChestType2.${Math.floor(fx / 36)}`);
+    }
+    if (sheet === 88) return Lang.text(`LegacyDresserType.${Math.floor(fx / 54)}`);
+    return null;
   }
 
   // ---- 箱改名对话（★BJ69 2026-09-14；ChestUI.RenameChest :823-864 + IngameFancyUI.

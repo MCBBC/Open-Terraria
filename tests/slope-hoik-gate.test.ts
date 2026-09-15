@@ -1,10 +1,17 @@
 // hoik 放行门默认关闭回归（2026-09-01 tent 悬臂弹飞定罪）。
+// ★SW-FX34b 2026-09-15 勘误：本文件旧注"hoik 是第 9 形参【默认 false】"系误读
+// ——1457 Collision.cs:2299 形参缺省【true】，且 Player.cs:23791 传 `!flag`=true、
+// NPC.cs:93868 族不传吃缺省 true：原版玩家/NPC/快速弹幕 hoik 恒开，"坡邻实心格
+// 放走 1px 入场"即原版本体行为（tent 案真正病灶=unembedPass 63px 爆推,已由本
+// 文第 2 案 + unembed 收敛帽另案 fix）。玩家侧已恢复 hoik=true（Player.hoik 字段,
+// 见 tests/hoik-oneway-wall.test.ts wiki 构图复现）——本文件仍锁【缺省 falsy 的
+// 裸 Body】不豁免（NPC 族登记债维持关），三案语义不变。
 // 判例：原版 Collision.TileCollision 的天花板坡链水平穿越豁免包在 `if (!hoik)`
-// 内（Collision.cs 左撞墙支 :2412 / 右撞墙支 :2432），hoik 是第 9 形参【默认
-// false】，仅钻洞弹幕 AI 显式传 true。曾误开为无条件规则：从右侧接近"实心格 +
-// 右邻天花板坡(slope3)"组合时被永久放行 1px 幽灵入场（用户存档 tent 结构
-// x591/(592,328) 案），头顶嵌入悬臂实心后由 unembedPass 爆推 63px = "阻尼走到
-// 尽头被弹飞数格"；且 X-pass 从未真拦 → hitWall 恒 false，NPC 检测不到墙无限重试。
+// 内（Collision.cs 左撞墙支 :2412 / 右撞墙支 :2432）。曾误开为无条件规则：从右侧
+// 接近"实心格 + 右邻天花板坡(slope3)"组合时被永久放行 1px 幽灵入场（用户存档
+// tent 结构 x591/(592,328) 案），头顶嵌入悬臂实心后由 unembedPass 爆推 63px =
+// "阻尼走到尽头被弹飞数格"；且 X-pass 从未真拦 → hitWall 恒 false，NPC 检测不到
+// 墙无限重试。
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import type { World } from '../src/world/World';

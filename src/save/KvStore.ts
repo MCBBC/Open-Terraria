@@ -229,27 +229,6 @@ export async function remasterDelete(id: string): Promise<void> {
 }
 
 
-/** 二进制存取(ArrayBuffer 值;IndexedDB 原生支持,免 JSON 序列化) */
-export async function kvSetBinary(key: string, buf: ArrayBuffer): Promise<boolean> {
-  try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put(buf, key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    return true;
-  } catch { return false; }
-}
-export async function kvGetBinary(key: string): Promise<ArrayBuffer | null> {
-  try {
-    const db = await openDb();
-    return await new Promise<ArrayBuffer | null>((resolve) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).get(key);
-      req.onsuccess = () => resolve(req.result instanceof ArrayBuffer ? req.result : null);
-      req.onerror = () => resolve(null);
-    });
-  } catch { return null; }
-}
+/** 二进制存取助手已随 v6 二进制快路径退役（★BJ90 2026-09-15 债④死路径移除,BJ71 登记②
+ *  ——kvSetCompat 同 key 双写竞态使二进制副本恒被 JSON 覆盖=零活跃消费方;唯一读方
+ *  worldGen.worker 二进制分支同批退役,BinarySave.ts 已删）。守卫=tests/save-binary-deadpath.test.ts */

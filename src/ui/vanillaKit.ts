@@ -37,6 +37,40 @@ function tintedDataUrl(src: string, color: string): Promise<string> {
 
 const KIT_STYLE_ID = 'sw-vanilla-kit';
 
+/** 白模染色(XNA Color 乘 RGBA:rgb=multiply、alpha=tex.a×aMul;CharCreation.bakeTint
+ *  同技法)→ dataURL。UIPanel/UIHorizontalSeparator 等 9-slice 白模进 border-image
+ *  前的预染色通道——色值一律由调用侧传反编译常量数值(禁目测)。按 (src|色) 缓存,
+ *  失败解析为 ''(调用侧保留纯色兜底层)。 */
+const sliceTintCache = new Map<string, Promise<string>>();
+export function tintedSliceDataUrl(src: string, r: number, g: number, b: number, aMul: number): Promise<string> {
+  const key = `${src}|${r},${g},${b},${aMul}`;
+  const hit = sliceTintCache.get(key);
+  if (hit) return hit;
+  const p = new Promise<string>((res) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cv = document.createElement('canvas');
+        cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+        const c = cv.getContext('2d', { willReadFrequently: true })!;
+        c.imageSmoothingEnabled = false;
+        c.drawImage(img, 0, 0);
+        c.globalCompositeOperation = 'multiply';
+        c.fillStyle = `rgb(${r},${g},${b})`;
+        c.fillRect(0, 0, cv.width, cv.height);
+        c.globalCompositeOperation = 'destination-in';
+        c.globalAlpha = aMul;
+        c.drawImage(img, 0, 0);
+        res(cv.toDataURL());
+      } catch { res(''); }
+    };
+    img.onerror = () => res('');
+    img.src = src;
+  });
+  sliceTintCache.set(key, p);
+  return p;
+}
+
 /** 注入 kit 样式（幂等；染色完成后写 CSS 变量，未就绪前面板退化为纯色边） */
 export function ensureVanillaKit(): void {
   if (document.getElementById(KIT_STYLE_ID)) return;

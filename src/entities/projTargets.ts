@@ -432,10 +432,17 @@ export const CHASE_EXCLUDED_VIDS: ReadonlySet<number> = new Set(
  *  （2026-08-24 "召唤宠物追打假人"修复的正解层；当时误改 playerCanHitEnemy 致次日
  *  回归） */
 export function canBeChasedBy(e: unknown): boolean {
-  const t = e as { dead?: boolean; vanillaId?: number | null; def?: { friendly?: boolean; lifeMax?: number };
-    dontTakeDamage?: boolean } | null | undefined;
+  const t = e as { dead?: boolean; vanillaId?: number | null; def?: { friendly?: boolean; hp?: number };
+    dontTakeDamage?: boolean; maxHp?: number } | null | undefined;
   if (!t || t.dead) return false;
-  const lm = t.def?.lifeMax;
+  // ★BJ89 幻影字段定谳（bj73-radar-count-phantom-field 姊妹病灶）：EnemyDef 只有
+  //  `hp`（enemies.ts `hp: number`，无 lifeMax 字段）——旧读 def 上的幻影 lifeMax
+  //  恒 undefined，`!== undefined` 守卫降级跳过 = lifeMax>5 门（:91141）整缺，兔/鸟/
+  //  蚱蜢等小生命 critter（原版 lifeMax=5 族）可被随从索敌。修 = 运行时 maxHp
+  //  （≡ 原版 NPC.lifeMax——ScaleStats 后终值，Enemy.ts fromVanilla e.maxHp=ss.lifeMax；
+  //  ScaleStats 对 lifeMax≤5 族不进门 → critter 恒原值）?? def.hp（构造
+  //  this.maxHp=this.def.hp 同源）兜底纯对象夹具。
+  const lm = t.maxHp ?? t.def?.hp;
   if (lm !== undefined && lm <= 5) return false;          // lifeMax > 5(:91141 小生命 critter 族不入索敌）
   if (t.dontTakeDamage) return false;                    // !dontTakeDamage（克脑一阶 266/伪装 690/起飞飞碟 395 等）
   const vid = t.vanillaId;

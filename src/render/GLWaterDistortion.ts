@@ -27,7 +27,9 @@
 //     #10-12 pixel = t0·uScreenResolution + uScreenPosition —— 符号表
 //     c7=uScreenResolution c8=uScreenPosition；ScreenShaderData.Apply:
 //     uScreenPosition = UnscaledScreenPosition − offScreenRange = 相机可视左上（世界px）
-//     ⇒ 原版噪声涟漪场采样【世界坐标】（波场缓冲 uImageOffset 补偿滚动亦同域）。
+//     ⇒ 原版噪声涟漪场采样【世界坐标】（波场缓冲 uImageOffset 补偿滚动亦同域
+//     ——★BJ89 落地：c11=uImageOffset 实证进波场采样坐标 `mad r0.zw, t0·res+c11`
+//     → ×0.25 → texld s2；uWaveOff = waterWaves.waveReadOffset()）。
 //     本仓曾只实现 t0·uScreenResolution（屏幕 px）→ 涟漪场钉在屏幕上,走动时世界从
 //     场下滑过 = 波纹"跟着角色跑"。修复：uWorldPx = camL/camT·cssZoom 进 FRAG,
 //     噪声 uv = (px + uWorldPx)/noiseSize；CPU 侧 sampleDisplace/sampleGlint 同刀。
@@ -109,6 +111,7 @@ uniform vec2 uCssSize;
 uniform vec2 uWorldPx;
 uniform vec2 uNoiseSize;
 uniform vec2 uWaveSize;
+uniform vec2 uWaveOff;
 uniform float uProgress;
 uniform float uIntensity;
 varying vec2 vUv;
@@ -120,14 +123,21 @@ void main() {
   //   − offScreenRange = 相机可视左上·世界 px）——原版涟漪场采样世界坐标,角色走动时
   //   波纹相对水面静止。本仓曾漏加该相机项（采样域=屏幕px）→ 涟漪贴屏幕滑移=用户报
   //   "波纹跟着角色跑"。世界 css px = 屏幕 css px + cam·cssZoom（uWorldPx）。
-  //   波场缓冲读（px·0.25/uWaveSize）不改：缓冲随相机滚动,世界锚定在内容侧。
+  //   波场缓冲读 (px+uWaveOff)·0.25/uWaveSize：内容锚 4px 栅格+读侧亚栅格补偿
+  //   （★BJ89——旧注"读不改"已废,补偿缺=波场走动漂移）。
   vec2 wpx = px + uWorldPx;
   vec2 nu = wpx / uNoiseSize;
   // 双噪声采样：0.1/0.2 双尺度反向 Y 滚动（obj19 #13-22；c1/c2=±prog·0.04）
   vec4 n1 = texture2D(uNoise, vec2(nu.x * 0.1, nu.y * 0.1 + uProgress * 0.04));
   vec4 n2 = texture2D(uNoise, vec2(nu.x * 0.2, nu.y * 0.2 - uProgress * 0.04));
-  // 波场高度（obj19 #23-28；uv=px·0.25/网格尺寸 = _readR 的 texel 中心语义，CLAMP）
-  float h = texture2D(uWave, px * 0.25 / uWaveSize).x;
+  // 波场高度（obj19 #23-28；uv=(px+uWaveOff)·0.25/网格尺寸 = _readR 的 texel 中心语义，CLAMP）。
+  // ★BJ89 读侧亚栅格补偿（uWaveOff = camCss − snapUp(−4F) ∈ (−4,0] css px）：
+  //   obj19 [mad r0.zw, t0·uScreenResolution + c11(uImageOffset)] → ×0.25 → texld s2
+  //   （c11=符号表 uImageOffset，WaterShaderData.Apply :374 UseImageOffset 赋值）——
+  //   波场缓冲内容锚在 4px 栅格（snapUp），补偿把真 cam 亚栅格余量加回采样坐标 =
+  //   涟漪世界精确对齐。曾缺此补偿（+内容移向反）= 走动时波场 ~2× 相机速漂移
+  //   （探针实测：+40px 跳变后世界静止 stamp 表观世界 1004→1080）。
+  float h = texture2D(uWave, (px + uWaveOff) * 0.25 / uWaveSize).x;
   // 梯度 = n1.xy − n2.xy（#26 负号修饰符）。★经验定版（2026-08-25 用户对照
   //  原版观感校准）：反汇编 swizzle 级解码在此 shader 上多义（c5=uOpacity 常量
   //  依赖链），以用户观感为准
@@ -216,7 +226,7 @@ void main() {
       return;
     }
     this.prog = prog;
-    for (const n of ['uCssSize', 'uWorldPx', 'uNoiseSize', 'uWaveSize', 'uProgress', 'uIntensity',
+    for (const n of ['uCssSize', 'uWorldPx', 'uNoiseSize', 'uWaveSize', 'uWaveOff', 'uProgress', 'uIntensity',
       'uScene', 'uNoise', 'uWave', 'uWater']) {
       this.uni[n] = gl.getUniformLocation(prog, n);
     }
@@ -316,7 +326,8 @@ void main() {
    * 门控恒 0 = 原样直通）。cssW/cssH = 位移场坐标系（模拟系 CSS px）；
    * worldX/worldY = 相机可视左上·css px（=camL/camT·cssZoom；噪声场世界锚定,
    * obj19 uScreenPosition 语义——2026-09-14 BJ76）；progress/intensity = waterWaves
-   * 公开态；waveR/gridW/gridH = 波场。
+   * 公开态；waveR/gridW/gridH = 波场；waveOffX/Y = 读侧亚栅格补偿
+   * （waterWaves.waveReadOffset()，obj19 c11=uImageOffset——★BJ89）。
    * 失败返回 false（调用方原样直画）。
    */
   composite(
@@ -325,6 +336,7 @@ void main() {
     cssW: number, cssH: number, progress: number, intensity: number,
     waveR: Float32Array, gridW: number, gridH: number,
     worldX = 0, worldY = 0,
+    waveOffX = 0, waveOffY = 0,
   ): boolean {
     const gl = this.gl;
     if (!gl || !this.prog || this.diedAt) return false;
@@ -387,6 +399,7 @@ void main() {
     gl.uniform2f(this.uni.uWorldPx, worldX, worldY);
     gl.uniform2f(this.uni.uNoiseSize, this.noiseW, this.noiseH);
     gl.uniform2f(this.uni.uWaveSize, gridW, gridH);
+    gl.uniform2f(this.uni.uWaveOff, waveOffX, waveOffY);   // ★BJ89 读侧亚栅格补偿（Apply :374）
     gl.uniform1f(this.uni.uProgress, progress);
     gl.uniform1f(this.uni.uIntensity, intensity);
     const loc = gl.getAttribLocation(this.prog, 'aPos');

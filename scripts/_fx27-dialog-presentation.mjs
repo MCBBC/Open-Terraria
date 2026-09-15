@@ -3,6 +3,9 @@
 //   ②向导两槽空态 ghost 帧(Inventory_Back 底+Extra_54 ctx7 帧 18,ItemSlot.cs:2451-2482);
 //   ③头像卡顶=面板顶±3px+面板顶角圆角(1:1 两段绘制 Chat_Back,NPCChatPanel.cs:71-72);
 //   ④背包开着开对话=背包先收(IngameUIWindows.CloseAll quiet:true :58-65)。
+//   ⑤FX30b(2026-09-15)呈现三案:台词 19px/钮 17px/名 16px(Mouse_Text.xnb+Item_Stack.xnb
+//     逐字形实测:CJK 墨高 17-19/17.4 档,拉丁大写 15-16)/面板高公式/头像窗心=面板顶+62
+//     定谳+紧凑面板中心 ±4;截图 /tmp/fx30b-chatpanel.png
 // 跑法:SW_ORIGIN=http://localhost:5210 node tools/run-diag.mjs scripts/_fx27-dialog-presentation.mjs
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -98,9 +101,16 @@ const spawnGuide = (page, open = true) => page.evaluate(async (doOpen) => {
     window.__swUI.closeInventory();
   });
   await sleep(200);
-  await spawnGuide(page);
-  await sleep(1600);   // 等 hop(EaseOutBounce 80 帧≈1.33s)落定再测——动画期窗整体上浮
+  await spawnGuide(page, false);
+  await sleep(300);
+  // 竞态免疫:同一次 evaluate 内开话+定格 hop(EaseOutBounce 前 1.33s 窗整体上浮
+  // 会污染几何)+测量——不再等 1600ms(NPC AI 游走/距离门自关竞态,曾三连炸 ③)
   const m = await page.evaluate(() => {
+    const g = window.__swGame;
+    const guide = window.__fx27Guide;
+    g.player.x = guide.cx - 30; g.player.y = guide.cy - 8; g.player.vx = 0; g.player.vy = 0;
+    if (!document.querySelector('.sw-npc-dialog')) g.openNpcDialog(guide);
+    document.querySelectorAll('.sw-npc-portrait-wrap').forEach((e) => { e.style.animation = 'none'; });
     const rectOf = (sel) => {
       const e = document.querySelector(sel);
       if (!e) return null;
@@ -239,6 +249,137 @@ for (const control of ['modern', 'classic']) {
       `②[overlay] ctx7 幽灵帧 0.35α @(0px -204px)(${JSON.stringify(s.ghost)})`);
   }
   ok(errs.length === 0, `②[overlay] 无页面错误(${errs.join(' | ')})`);
+  await page.close();
+}
+
+// ================= PHASE 4:FX30b(2026-09-15) 对话呈现三案:字号/面板高公式/头像对齐 =================
+// 字号定谳 = Mouse_Text.xnb 逐字形实测(用户本机 Steam 1.4.5.7,LZX 解包):
+//   MouseText 1.0 lineSpacing 29,中文全块 17-19px('你'19/'好'17/'的'18),拉丁大写 15-16;
+//   按钮 0.9 缩放 ≙17px 钉值;名字行 ItemStack 中文 14-16 → 16px;金币计数 ItemStack 0.75 → 11px 保持。
+// 头像定谳 = Main.cs:41031(1457/1458 同式) P=面板左上+(-62,+62)【无面板高项】,
+//   窗心恒=面板顶+62;"偏上"根因=13px 行数塌缩(面板 90 vs 120),字号修后自愈。
+{
+  const page = await browser.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push((e.stack || e.message).slice(0, 200)));
+  await page.goto(ORIGIN + '/?play=small&invlayout=vanilla', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swUI, { timeout: 280000, polling: 1000 });
+  await sleep(700);
+  await page.evaluate(() => {
+    document.getElementById('sw-welcome-announce')?.remove();
+    window.__swUI.closeInventory();
+  });
+  await sleep(200);
+  await spawnGuide(page, false);
+  await sleep(300);
+  // 同 PHASE 1:单 evaluate 开话+定格 hop+测量(竞态免疫)
+  const g = await page.evaluate(() => {
+    const g = window.__swGame;
+    const guide = window.__fx27Guide;
+    g.player.x = guide.cx - 30; g.player.y = guide.cy - 8; g.player.vx = 0; g.player.vy = 0;
+    if (!document.querySelector('.sw-npc-dialog')) g.openNpcDialog(guide);
+    document.querySelectorAll('.sw-npc-portrait-wrap').forEach((e) => { e.style.animation = 'none'; });
+    const rectOf = (sel) => {
+      const e = document.querySelector(sel);
+      if (!e) return null;
+      const r = e.getBoundingClientRect().toJSON();
+      return { x: +r.x.toFixed(1), y: +r.y.toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) };
+    };
+    const chat = document.querySelector('.sw-npc-chat');
+    const cs = chat ? getComputedStyle(chat) : null;
+    const btn = document.querySelector('.sw-npc-btn');
+    const pname = document.querySelector('.sw-npc-pname');
+    const coins = document.querySelector('.sw-npc-coins');
+    const btnCount = document.querySelectorAll('.sw-npc-btn').length;
+    const chatText = (chat?.textContent ?? '').slice(0, 80);
+    // 公式重推:行数=scrollHeight/30(测量与 UI.ts 同法),按钮行=ceil(n/4)
+    const lines = chat ? Math.max(1, Math.min(10, Math.round(chat.scrollHeight / 30))) : 0;
+    const btnRows = Math.ceil(btnCount / 4);
+    const expectH = 30 + 30 * lines + (btnRows > 0 ? 30 * btnRows + Math.max(0, 2 * (btnRows - 1)) : 0);
+    return {
+      panel: rectOf('.sw-npc-dialog'), win: rectOf('.sw-npc-window'),
+      chatFs: cs?.fontSize, chatLh: cs?.lineHeight, chatW: chat ? chat.getBoundingClientRect().width : 0,
+      btnFs: btn ? getComputedStyle(btn).fontSize : null,
+      pnameFs: pname ? getComputedStyle(pname).fontSize : null,
+      coinsFs: coins ? getComputedStyle(coins).fontSize : null,
+      btnCount, lines, btnRows, expectH, chatText,
+    };
+  });
+  console.log('[fx30b]', JSON.stringify(g));
+  ok(g.chatFs === '19px' && g.chatLh === '30px', `⑤ 台词字号=19px(MouseText 1.0 中文墨高 17-19px 实测,Fusion 19px 档=17.4)/行距 30 保持(实测 ${g.chatFs}/${g.chatLh})`);
+  ok(g.btnFs === '17px', `⑤ 按钮字号=17px(MouseText 0.9 缩放,:96=19×0.9)(实测 ${g.btnFs})`);
+  ok(g.pnameFs === '16px', `⑤ 名字行字号=16px(ItemStack 中文 14-16px 实测,Fusion 16px 档墨高 14.7)(实测 ${g.pnameFs})`);
+  ok(g.coinsFs === null || g.coinsFs === '11px', `⑤ 金币计数=11px 保持(ItemStack 0.75 缩放数字 7.5-11.25px,ItemSlot.cs:3679;向导无价钮=无元素合法)(实测 ${g.coinsFs})`);
+  ok(g.panel && g.panel.w === 500 && Math.abs(g.panel.y - 100) <= 1, `⑤ 面板宽 500/y=100(实测 w${g.panel?.w} y${g.panel?.y})`);
+  ok(g.panel && Math.abs(g.panel.h - g.expectH) <= 1,
+    `⑤ 面板高公式 H=30+30·行数+30·按钮行+max(0,2·(按钮行-1)) 实${g.panel?.h}/算${g.expectH}(行数${g.lines} 按钮行${g.btnRows} 钮${g.btnCount})`);
+  if (g.panel && g.win) {
+    const wcx = g.win.x + g.win.w / 2, wcy = g.win.y + g.win.h / 2;
+    ok(Math.abs(wcx - (g.panel.x - 62)) <= 3 && Math.abs(wcy - (g.panel.y + 62)) <= 3,
+      `⑤ 头像窗心=面板左上+(-62,+62)(Main.cs:41031 定谳,无面板高项;实测 差(${(wcx - (g.panel.x - 62)).toFixed(1)},${(wcy - (g.panel.y + 62)).toFixed(1)}))`);
+    const dc = Math.abs(wcy - (g.panel.y + g.panel.h / 2));
+    console.log(`[fx30b] 窗心 vs 面板中心 Δ=${dc.toFixed(1)}px(面板 H${g.panel.h} 行数${g.lines});原版同相=紧凑面板(H≈120)时 Δ≈2`);
+    if (g.lines <= 2) ok(dc <= 4, `⑤ 头像窗心≈面板垂直中心 ±4(紧凑 2 行面板;实测 Δ${dc.toFixed(1)}px)`);
+  }
+  await page.screenshot({ path: '/tmp/fx30b-chatpanel.png' });
+  console.log('[shot] /tmp/fx30b-chatpanel.png');
+  ok(errs.length === 0, `⑤-err 无页面错误(${errs.join(' | ')})`);
+  await page.close();
+}
+
+// ================= PHASE 5:确定性面板(可控台词长度)=紧凑 2 行+头像中心 ±4 断言 + 字形墨高实测 =================
+{
+  const page = await browser.newPage();
+  const errs = [];
+  page.on('pageerror', (e) => errs.push((e.stack || e.message).slice(0, 200)));
+  await page.goto(ORIGIN + '/?play=small&invlayout=vanilla', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swUI, { timeout: 280000, polling: 1000 });
+  await sleep(700);
+  const r = await page.evaluate(async () => {
+    document.getElementById('sw-welcome-announce')?.remove();
+    await document.fonts.ready;
+    // 字形墨高(canvas 实测):Fusion Pixel 19px 档 ≙ 原版 MouseText 1.0 中文 17-19px(典型 18)
+    const cv = document.createElement('canvas');
+    const ctx = cv.getContext('2d');
+    ctx.font = '19px "Fusion Pixel 12px", "Microsoft YaHei", sans-serif';
+    const m = ctx.measureText('你泰拉');
+    const inkH = +(m.actualBoundingBoxAscent + m.actualBoundingBoxDescent).toFixed(1);
+    // 确定性 2 行台词:按实测推进宽取整倍数,4 钮=1 行 → H=120,头像窗心 162 vs 面板心 160
+    const adv = ctx.measureText('你你你你你你你你你你').width / 10;
+    const perLine = Math.max(4, Math.floor(460 / adv));
+    const text = '你'.repeat(perLine * 2);
+    const { NpcDialog } = await import('/src/ui/NpcDialog.ts');
+    const dlg = new NpcDialog(document.body, () => {});
+    dlg.open('向导', text, [
+      { id: 'help', label: '测试钮甲' }, { id: 'craft', label: '测试钮乙' },
+      { id: 'status', label: '测试钮丙' }, { id: 'close', label: '测试钮丁' },
+    ], { vanillaId: 22, url: 'sprites/vanilla/NPC_22.png' });   // Detailed 头像:窗/名行随建,几何断言需要
+    const rectOf = (sel, root) => {
+      const e = (root ?? document).querySelector(sel);
+      if (!e) return null;
+      const b = e.getBoundingClientRect().toJSON();
+      return { x: +b.x.toFixed(1), y: +b.y.toFixed(1), w: +b.width.toFixed(1), h: +b.height.toFixed(1) };
+    };
+    document.querySelectorAll('.sw-npc-portrait-wrap').forEach((e) => { e.style.animation = 'none'; });   // hop 定格
+    const panel = rectOf('.sw-npc-dialog');
+    const win = rectOf('.sw-npc-window');
+    const chat = panel ? document.querySelector('.sw-npc-dialog .sw-npc-chat') : null;
+    const lines = chat ? Math.max(1, Math.round(chat.scrollHeight / 30)) : 0;
+    return { inkH, adv: +adv.toFixed(2), perLine, panel, win, lines, textLen: text.length };
+  });
+  console.log('[fx30b-det]', JSON.stringify(r));
+  ok(r.inkH >= 16 && r.inkH <= 20, `⑤ 中文墨高 19px 档 ∈[16,20](MouseText 1.0 中文 17-19px 实测,19px 档=17.4;实测 ${r.inkH}px)`);
+  ok(r.lines === 2 && r.panel && Math.abs(r.panel.h - 120) <= 1,
+    `⑤ 确定性 2 行面板 H=120(原版同式紧凑档;实测 H${r.panel?.h} 行数${r.lines} 每行${r.perLine}字)`);
+  if (r.panel && r.win) {
+    const wcy = r.win.y + r.win.h / 2;
+    const pc = r.panel.y + r.panel.h / 2;
+    ok(Math.abs(wcy - (r.panel.y + 62)) <= 3, `⑤[det] 头像窗心=面板顶+62(实测 差${(wcy - r.panel.y - 62).toFixed(1)})`);
+    ok(Math.abs(wcy - pc) <= 4, `⑤[det] 头像窗心=面板垂直中心 ±4(实测 Δ${Math.abs(wcy - pc).toFixed(1)}px)`);
+  }
+  dlgCleanup:
+  await page.evaluate(() => document.querySelectorAll('.sw-npc-dialog').forEach((e) => e.remove()));
+  ok(errs.length === 0, `⑤[det]-err 无页面错误(${errs.join(' | ')})`);
   await page.close();
 }
 

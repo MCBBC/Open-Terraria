@@ -384,8 +384,11 @@ describe('②死亡细胞冲撞符文 B 支（显式入口，1457 :20731-20765 /
 // ---------------------------------------------------------------------------
 
 describe('wetSlime 滴答 + 史莱姆坐骑液体浮力档', () => {
+  // ★SW-RB20a F6③：探针基面 inWater/inLava/inHoney 三桶并集 → wetSticky
+  //  （≙ vanilla wet 粘滞位,Player.cs:28192 `if (wet)`——夹具同名换字段,
+  //  触发/非触发语义不变）
   const P = (o: Record<string, unknown>) => ({
-    inWater: false, inLava: false, inHoney: false, vy: 0, wetSlime: 0,
+    wetSticky: false, vy: 0, wetSlime: 0,
     mount: { active: false, type: 3 }, ...o,
   });
 
@@ -397,32 +400,32 @@ describe('wetSlime 滴答 + 史莱姆坐骑液体浮力档', () => {
 
   it('骑史莱姆族浸液：wetSlime=30 + 浮力档（vy>2 ×0.9 缓降 / -0.5 浮升 / -4 上浮钳制）', () => {
     // vy=3>2：×0.9=2.7 → −0.5=2.2
-    const a = P({ mount: { active: true, type: 3 }, inWater: true, vy: 3 });
+    const a = P({ mount: { active: true, type: 3 }, wetSticky: true, vy: 3 });
     tickSlimeWetState(a as never as Parameters<typeof tickSlimeWetState>[0]);
     expect(a.wetSlime).toBe(30);
     expect(a.vy).toBeCloseTo(2.2);
     // vy=1：不过 ×0.9 门 → −0.5=0.5
-    const b = P({ mount: { active: true, type: 50 }, inWater: true, vy: 1 });
+    const b = P({ mount: { active: true, type: 50 }, wetSticky: true, vy: 1 });
     tickSlimeWetState(b as never as Parameters<typeof tickSlimeWetState>[0]);
     expect(b.vy).toBeCloseTo(0.5);
     // 快速上抛被钳回 −4
-    const c = P({ mount: { active: true, type: 3 }, inWater: true, vy: -10 });
+    const c = P({ mount: { active: true, type: 3 }, wetSticky: true, vy: -10 });
     tickSlimeWetState(c as never as Parameters<typeof tickSlimeWetState>[0]);
     expect(c.vy).toBe(-4);
   });
 
   it('岩浆/蜂蜜同样触发（原版 wet 不分液体种类）；非史莱姆族与非浸液不动', () => {
-    const lava = P({ mount: { active: true, type: 3 }, inLava: true, vy: 0 });
+    const lava = P({ mount: { active: true, type: 3 }, wetSticky: true, vy: 0 });
     tickSlimeWetState(lava as never as Parameters<typeof tickSlimeWetState>[0]);
     expect(lava.wetSlime).toBe(30);
     expect(lava.vy).toBeCloseTo(-0.5);
-    const honey = P({ mount: { active: true, type: 50 }, inHoney: true, vy: 0 });
+    const honey = P({ mount: { active: true, type: 50 }, wetSticky: true, vy: 0 });
     tickSlimeWetState(honey as never as Parameters<typeof tickSlimeWetState>[0]);
     expect(honey.wetSlime).toBe(30);
     const dry = P({ mount: { active: true, type: 3 }, vy: 0 });
     tickSlimeWetState(dry as never as Parameters<typeof tickSlimeWetState>[0]);
     expect(dry.wetSlime).toBe(0);
-    const turtle = P({ mount: { active: true, type: 4 }, inWater: true, vy: 6, wetSlime: 7 });
+    const turtle = P({ mount: { active: true, type: 4 }, wetSticky: true, vy: 6, wetSlime: 7 });
     tickSlimeWetState(turtle as never as Parameters<typeof tickSlimeWetState>[0]);
     expect(turtle.wetSlime).toBe(6);       // 只递减不置位
     expect(turtle.vy).toBe(6);             // 海龟不吃浮力档

@@ -148,15 +148,34 @@ const CSS = `
 .sw-npc-bg-cap img { top: -470px; height: 500px; }
 /* 台词区（DrawText :217-237）：TopLeft+(20,20) 起,行距 30,换行宽 460,≤10 行
    （TextDisplayCache.cs:23 WordwrapString(...,460,10)）；色 = (mouseTextColor*2+255)/3
-   灰呼吸（:63-64,190..255 脉冲 → 211..255,±1/帧 ≈ 2.167s 三角波） */
+   灰呼吸（:63-64,190..255 脉冲 → 211..255,±1/帧 ≈ 2.167s 三角波）
+   ★字号定谳（2026-09-15,Mouse_Text.xnb 逐字形实测,源=用户本机 Steam 1.4.5.7
+   Terraria.app/Content/Fonts/Mouse_Text.xnb,LZX 解包后按 DynamicSpriteFont
+   二进制布局解析,Combat_Text/Item_Stack 已知 JSON 交叉校验）：MouseText 1.0
+   lineSpacing=29（行盒）,中文全块字形 17-19px('你'19/'好'17/'的'18/'泰'18,
+   推进入 17-19)——任务预判 15-16px 系按拉丁大写(15-16px)折算,而 Fusion
+   Pixel 的 cap/em 比(0.75)远小于 MouseText 的(~0.93),中文台词应以 CJK 墨高
+   对齐:Fusion Pixel 12px 在 19px 档墨高实测 17.4px(∈17-19,典型 18)、推进
+   19px vs 原版 18.5 → 460px 换行 24 字/行 ≙ 原版 ~25,行数同相;18px 档墨高
+   16.5 偏小 7%、20px 档推进 20 换行密度漂 2 字/行,均弃。13px 旧钉值中文仅
+   12px 墨高=明显偏小（用户实报"文字偏小"）,且 460px 换行 35 字/行 → 行数
+   塌缩 → 面板 90 vs 原版 120（过扁根因,头像"偏上"观感同源） */
 .sw-npc-chat { position: absolute; left: 20px; top: 20px; width: 460px; line-height: 30px;
-  font-size: 13px; max-height: 300px; overflow: hidden; white-space: pre-wrap;
+  font-size: 19px; max-height: 300px; overflow: hidden; white-space: pre-wrap;
   animation: sw-chat-pulse 2.1667s linear infinite alternate; }
 @keyframes sw-chat-pulse { from { color: rgb(211,211,211); } to { color: rgb(255,255,255); } }
 /* 头像窗（Main.DrawNPCPortrait :41031）：窗中心 P = 面板左上角 + (-62,+62)，悬在面板
-   左外侧。本容器 = P-(100,100) 起 200×200（Detailed 200×200 原尺寸直绘域）；
-   Portrait_Window 112×112 底框 @ P-(56,56)（:41069,chatBack 染色）；
-   名字 = ItemStack 字体白字 @ P+(0,57) 中心锚（:41145-41149；本仓以 UI 像素字体近似）。
+   左外侧。★定谳（2026-09-15 逐字复核 1457:41031 与 1458:41037,两版字节同式）：
+   int num2 = 56; Vector2 vector = npcChatTopLeft + new Vector2(-num2 - 6, num2 + 6);
+   ——调用点 NPCChatPanel.cs:79 传 rectangle.TopLeft(),公式中【没有面板高项】,
+   窗心恒钉 面板顶+62（仅 num6 首帧 hop 有 -56·0.25·(1-bounce) 纵向瞬时偏移）。
+   用户报"头像偏上"根因=台词字号过小致行数塌缩(面板 90 vs 原版 120)——窗卡
+   112 高在扁面板上顶缘贴 panel+6 观感似"挂高";字号修后 H=120,窗心 162 ≈
+   面板中心 160(±4),与原版同相。本容器 = P-(100,100) 起 200×200（Detailed
+   200×200 原尺寸直绘域）；Portrait_Window 112×112 底框 @ P-(56,56)
+   （:41069,chatBack 染色）；名字 = ItemStack 字体白字 @ P+(0,57) 中心锚
+   （:41145-41149；Item_Stack.xnb 实测 lineSpacing=24,中文全块 14-16px('人'15/
+   '你'16) → Fusion 16px 档墨高 14.7 ≙ 15px 钉值）。
    hop = 首帧 EaseOutBounce 80 帧（:41049-41055,HOP_KEYFRAMES）；容器不接指针
    （原版 mouseInterface 只按面板矩形 :81-84,头像域点击透传世界） */
 .sw-npc-portrait-wrap { position: absolute; left: -162px; top: -38px; width: 200px; height: 200px;
@@ -166,15 +185,16 @@ const CSS = `
   image-rendering: pixelated; opacity: 0.784; filter: brightness(0.784); }
 .sw-npc-portrait { position: absolute; left: 0; top: 0; image-rendering: pixelated; }
 .sw-npc-pname { position: absolute; left: 100px; top: 157px; transform: translate(-50%, -50%);
-  color: #fff; font-size: 14px; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
+  color: #fff; font-size: 16px; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
 /* 按钮行（DrawButtons :93-135）：锚 = 面板底左角 + (30, -22n+max(0,2(n-1))-4)；
-   行高 22 / 列距 30 / 4 列换行（:97/:103-107/:135）；文字基准缩放 0.9（:96,本仓以
-   12px 字号近似）悬停 1.2 + 影 Black→Brown（:119-121）；正文色 = (b,b/1.1,b/2,b)
-   b=mouseTextColor 琥珀棕脉冲（:102）。命中盒 = 压缩后文本宽（:118） */
+   行高 22 / 列距 30 / 4 列换行（:97/:103-107/:135）；文字基准缩放 0.9（:96,
+   MouseText 0.9 ≙ 19px 台词档×0.9=17.1 → 17px 钉值）悬停 1.2 + 影 Black→Brown
+   （:119-121）；正文色 = (b,b/1.1,b/2,b) b=mouseTextColor 琥珀棕脉冲（:102）。
+   命中盒 = 压缩后文本宽（:118） */
 .sw-npc-btns { position: absolute; left: 30px; }
 .sw-npc-btn { position: absolute; height: 22px; line-height: 22px; padding: 0; margin: 0;
   background: none; border: none; outline: none; cursor: pointer; font-family: inherit;
-  font-size: 12px; white-space: nowrap;
+  font-size: 17px; white-space: nowrap;
   text-shadow: 1px 1px 0 #000;
   animation: sw-btn-pulse 2.1667s linear infinite alternate; }
 /* ★RB28-F3(2026-09-14) 绘制/命中解耦:悬停缩放只作用文字绘制,承载于内层
@@ -194,7 +214,8 @@ const CSS = `
 .sw-npc-btn:hover .sw-npc-btn-t {
   transform: translateX(calc(-1 * var(--hx, 15%))) scale(calc(var(--cx, 1) * 1.3333)); }
 /* 金币条（TryAddCoins → ItemSlot.DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106
-   :140-144 → 按钮相对 (-151,-44)） */
+   :140-144 → 按钮相对 (-151,-44)；原版计数文本 = ItemStack 0.75 缩放
+   （ItemSlot.cs:3679-3680,数字字形 10-15px×0.75 ≈ 7.5-11.25px）→ 11px 钉值保持） */
 .sw-npc-coins { position: absolute; left: -151px; top: -44px; color: #ffd76e;
   font-size: 11px; white-space: nowrap; text-shadow: 1px 1px 0 #000; pointer-events: none; }
 /* 感叹号（:136-139 文字右 +8px,锚行中,不入命中盒；亮度脉冲 Utils.cs:448）

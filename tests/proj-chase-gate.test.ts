@@ -1,11 +1,17 @@
 // CanBeChasedBy 索敌门回归（NPC.cs:91141-91147,1457 全表核对批 2026-09-02）：
 // 用户实报"叶绿弹对游荡眼球怪不跟踪"根因 = 曾误列 vid 133/416（原版可索敌族）。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { canBeChasedBy } from '../src/entities/projTargets';
 
+// ★BJ89：夹具改喂真实字段——EnemyDef 只有 hp（幻影字段 def.lifeMax 判例
+// bj73-radar-count-phantom-field 姊妹病灶：旧夹具喂 lifeMax 恰好镜像了
+// `def?.lifeMax` 恒 undefined 的降级跳过 = 门整缺仍"绿"）。maxHp = 运行时
+// NPC.lifeMax（Enemy.ts fromVanilla），def.hp = 构造兜底。
 const mk = (vanillaId: number | null, opts: { lifeMax?: number; dontTakeDamage?: boolean; friendly?: boolean; dead?: boolean } = {}) => ({
   vanillaId,
-  def: { lifeMax: opts.lifeMax ?? 300, friendly: opts.friendly ?? false },
+  maxHp: opts.lifeMax ?? 300,
+  def: { hp: opts.lifeMax ?? 300, friendly: opts.friendly ?? false },
   dontTakeDamage: opts.dontTakeDamage,
   dead: opts.dead,
 });
@@ -30,5 +36,27 @@ describe('canBeChasedBy（原版 immortal/chaseable=false 面逐 vid 对齐）',
     expect(canBeChasedBy(mk(1, { dontTakeDamage: true }))).toBe(false);
     expect(canBeChasedBy(mk(1, { friendly: true }))).toBe(false);
     expect(canBeChasedBy(mk(133, { dead: true }))).toBe(false);
+  });
+
+  // ★BJ89 幻影字段守卫（bj73 姊妹病灶）：门读运行时 maxHp ?? def.hp——
+  //  读 `def?.lifeMax` 恒 undefined = 门整缺（兔等 critter 可被随从索敌）。
+  //  变异证红：把实现改回 `t.def?.lifeMax` 本用例即红（lifeMax 不在 EnemyDef）。
+  it('lifeMax>5 门读 maxHp（运行时 NPC.lifeMax）?? def.hp（结构锁：幻影字段死灰复燃即红）', () => {
+    // 仅 maxHp（Enemy 实体主面）：5=兔族拒 / 6=过门 / 300 常规过
+    expect(canBeChasedBy({ vanillaId: 1, maxHp: 5, def: { friendly: false } })).toBe(false);
+    expect(canBeChasedBy({ vanillaId: 1, maxHp: 6, def: { friendly: false } })).toBe(true);
+    // 仅 def.hp（纯对象兜底）：同门
+    expect(canBeChasedBy({ vanillaId: 1, def: { hp: 5, friendly: false } })).toBe(false);
+    expect(canBeChasedBy({ vanillaId: 1, def: { hp: 6, friendly: false } })).toBe(true);
+    // 两者都缺：门降级跳过（未知实体不因缺字段误拒——与旧守卫语义同向）
+    expect(canBeChasedBy({ vanillaId: 1, def: { friendly: false } })).toBe(true);
+    // maxHp 与 def.hp 并存：maxHp 优先（原版读运行时 lifeMax——ScaleStats 终值）
+    expect(canBeChasedBy({ vanillaId: 1, maxHp: 300, def: { hp: 5, friendly: false } })).toBe(true);
+  });
+
+  it('结构锁：canBeChasedBy 源文本不读幻影字段 def?.lifeMax（bj73 判例防复发）', () => {
+    const src = readFileSync(new URL('../src/entities/projTargets.ts', import.meta.url), 'utf8');
+    expect(src).not.toContain('t.def?.lifeMax');
+    expect(src).toContain('t.maxHp ?? t.def?.hp');
   });
 });

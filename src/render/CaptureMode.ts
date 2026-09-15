@@ -45,6 +45,7 @@ import { options } from '../core/Options';
 import { mobileUiScale } from '../ui/MobileControls';
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
+import { CANVAS_MOUSETEXT_FONT, PIXEL_FONT_FAMILY } from '../vui/draw/PixelText';
 import type { LeashedEntityManager } from '../entities/LeashedCritter';
 import type { SceneFlags } from '../world/SceneMetrics';
 
@@ -966,7 +967,7 @@ export class CaptureInterface {
     // 4. 标题（:1032 DrawBorderStringBig,inter[81] @ (W/2,100)）
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 30px "Fusion Pixel 12px zh_hans", monospace';
+    ctx.font = `bold 30px ${PIXEL_FONT_FAMILY}, monospace`;   // ★FX35 族名勘误("zh_hans"非注册族,曾静默回退 monospace)
     ctx.strokeStyle = 'rgba(0,0,0,0.85)';
     ctx.lineWidth = 5;
     const title = Lang.inter(81);
@@ -1202,7 +1203,7 @@ export class CaptureInterface {
     const rect = this.settingsRect();
     // Utils.DrawInvBG（:855,色 (63,65,151,255)×0.485 → 截断整算 rgba(30,31,73,123)）九宫
     drawInvBG(ctx, atlas, rect, 30 / 255, 31 / 255, 73 / 255, 123 / 255);
-    const FONT = '15px "Fusion Pixel 12px zh_hans", monospace';
+    const FONT = `15px ${PIXEL_FONT_FAMILY}, monospace`;   // ★FX35 族名勘误(见 :969 注)
     ctx.font = FONT;
     ctx.textBaseline = 'middle';
     for (let i = 0; i < 7; i++) {
@@ -1279,7 +1280,7 @@ export class CaptureInterface {
     const text = (intPct === 0 ? '' : String(intPct)) + ' ';
     const text2 = '/ 100%';
     const a = Math.min(1, num);
-    ctx.font = 'bold 40px "Fusion Pixel 12px zh_hans", monospace';   // FontAssets.DeathText
+    ctx.font = `bold 40px ${PIXEL_FONT_FAMILY}, monospace`;   // FontAssets.DeathText ★FX35 族名勘误(见 :969 注)
     ctx.textBaseline = 'middle';
     ctx.fillStyle = `rgba(255,255,255,${a.toFixed(3)})`;
     ctx.strokeStyle = `rgba(0,0,0,${(a * 0.8).toFixed(3)})`;
@@ -1403,14 +1404,18 @@ function drawInvBG(
 const invBgTintCache = new Map<string, HTMLCanvasElement>();
 
 /** MouseTextInner（Main.cs:20032-20175 纯文本支）：mouse+14 锚,右/下缘 40px
- *  收边,四向黑影（Renderer.ts:9897 同式）;多行逐行排（原版 MouseText 含 \n） */
+ *  收边,四向黑影（Renderer.ts:9897 同式）;多行逐行排（原版 MouseText 含 \n,
+ *  行距=font.LineSpacing×scale=29,ChatManager.cs:145/:171;FX27 实测 lineSpacing=29）。
+ *  ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(19px 像素字体 ≙ MouseText scale 1;
+ *  旧 14px+"zh_hans"未注册族名双病——族名静默回退 monospace=Windows 四向描边重影
+ *  同根因,lh 17→29 同步归位原版行距) */
 function drawMouseText(ctx: CanvasRenderingContext2D, text: string, mouseX: number, mouseY: number): void {
   const lines = text.split('\n');
   ctx.save();
-  ctx.font = '14px "Fusion Pixel 12px zh_hans", monospace';
+  ctx.font = CANVAS_MOUSETEXT_FONT;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  const lh = 17;
+  const lh = 29;
   let maxW = 0;
   for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
   let x = mouseX + 14, y = mouseY + 14;

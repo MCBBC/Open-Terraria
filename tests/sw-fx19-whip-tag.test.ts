@@ -12,14 +12,16 @@ import type { GameHooks } from '../src/entities/types';
 
 interface MockEnemy {
   id: number; x: number; y: number; w: number; h: number; dead: boolean;
-  cx: number; cy: number; hp: number; vanillaId?: number;
-  def?: { lifeMax?: number; friendly?: boolean };
+  cx: number; cy: number; hp: number; maxHp?: number; vanillaId?: number;
+  def?: { hp?: number; lifeMax?: number; friendly?: boolean };
   hurt: (d: number, kx?: number, ky?: number, g?: GameHooks) => boolean;
   hits: number[];
 }
 const mkEnemy = (id: number, cx: number, cy: number, w = 16, h = 24): MockEnemy => {
   const e: MockEnemy = {
-    id, x: cx - w / 2, y: cy - h / 2, w, h, dead: false, cx, cy, hp: 100000, hits: [],
+    id, x: cx - w / 2, y: cy - h / 2, w, h, dead: false, cx, cy, hp: 100000,
+    maxHp: 100000,   // ★BJ89：真 Enemy 面字段（canBeChasedBy 门读 maxHp ?? def.hp——旧夹具喂幻影 def.lifeMax 恰是病灶镜像）
+    hits: [],
     hurt: (d: number) => { e.hp -= d; e.hits.push(d); return true; },
   };
   return e;
@@ -109,7 +111,7 @@ describe('集火槽失效清除（Player.cs:57682-57685 每 tick）', () => {
   });
   it('③ 目标 !CanBeChasedBy（lifeMax≤5 critter 族 :91141）→ 清 -1', () => {
     const critter = mkEnemy(41, 60 * 16, 90 * 16);
-    critter.def = { lifeMax: 5 };
+    critter.maxHp = 5;   // ★BJ89：夹具换真字段（运行时 NPC.lifeMax ≙ maxHp；def.lifeMax=幻影字段）
     const { player, hooks } = makeHooks([critter]);
     player.minionTargetId = 41;
     player.fixedUpdate(1 / 60, hooks);

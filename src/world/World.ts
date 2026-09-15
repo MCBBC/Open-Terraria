@@ -546,6 +546,9 @@ export class World {
     if (p.clock.eclipse !== undefined) w.clock.eclipse = p.clock.eclipse;
     if (p.clock.moonPhase !== undefined) w.clock.moonPhase = p.clock.moonPhase;
     if (p.seedFlags) w.seedFlags = { ...p.seedFlags };
+    // ★IIIII20b 换人一次性迁移标随包回填（★BJ90 2026-09-15,BJ71 登记①——缺省=不置,
+    //  与 loadSaveData SaveFile.ts:358「只落真值」同口径;旧包零迁移）
+    if (p.starterSwapMigrated) w.starterSwapMigrated = true;
     if (p.moonType !== undefined) w.moonType = p.moonType;
     if (p.invasion) { w.invasionType = p.invasion.type; w.invasionSize = p.invasion.size;
       w.invasionSizeStart = p.invasion.sizeStart; w.invasionX = p.invasion.x; w.invasionDelay = p.invasion.delay; }

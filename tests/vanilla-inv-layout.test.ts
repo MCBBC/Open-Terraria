@@ -131,7 +131,7 @@ import {
   quickStackXY, sortXY, bestiaryXY, emoteXY,
   mHOf, equipAreaTop, equipRowY, accessoryCheckY,
   EQUIP_COL_X, VANITY_COL_X, DYE_COL_X, ACCESSORY_CHECK_X,
-  loadoutRailRect, loadoutBtnXY, defenseCenterXY,
+  loadoutBtnXY, defenseCenterXY,
   TAB_Y, TAB_MISC_X, TAB_HOUSING_X, TAB_CAMERA_X,
   miscRowY, miscCheckXY, housingSlotPositions,
   pvpSwordXY, pvpTeamXY, craftPanelRect, craftCellXY, craftDetailLayout,
@@ -217,9 +217,9 @@ describe('刀1 几何:三列/行 y/勾选框/配装轨/防御(Main.cs:42085-4289
     expect(equipRowY(num20, 8)).toBe(814);    // +trunc(380.8)+4
     expect(accessoryCheckY(num20, 3)).toBe(574);   // 430-2+trunc(142.8)+4
   });
-  it('配装竖轨/钮(sw-44 轨,sw-40+36i 钮)', () => {
-    // ★红队 M1 清偿:轨高 n=装备列可见行数(:42653-42662 缺省 8),y=num20+2,截断
-    expect(loadoutRailRect(sw, num20, 8)).toEqual({ x: 1236, y: 432, w: 4, h: 380 });
+  it('配装钮(sw-40+36i;★FX29 定谳:原版不画轨,42667 4px rectangle 仅钮定位锚)', () => {
+    // DrawLoadoutButtons Main.cs:42651-42707:全方法无 Draw(rectangle);
+    // 42668 GetLoadoutColor(CurrentLoadoutIndex) 返回值被弃;Extra_259 无轨美术 → 无轨
     expect(loadoutBtnXY(sw, num20, 0)).toEqual({ x: 1240, y: 430 });
     expect(loadoutBtnXY(sw, num20, 2)).toEqual({ x: 1240, y: 502 });
   });

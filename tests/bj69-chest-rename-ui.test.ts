@@ -19,6 +19,7 @@ import { join, dirname } from 'node:path';
 
 import { UI } from '../src/ui/UI';
 import { UISfx } from '../src/vui/UISfx';
+import { TILE_DEFS } from '../src/data/tiles';
 
 // node 测试环境无 window（Sfx 构造挂 window 监听）——UISfx.click 以计数桩承载,
 // 观测面=Sound 12 等价位（RenameChest/OpenVirtualKeyboard :89/:837/:860 全 click 口）
@@ -33,6 +34,11 @@ const NET_SRC = readFileSync(join(dirname(__dirname), 'src', 'net', 'ClientNet.t
 
 // ---------------- 夹具 ----------------
 
+/** vanilla sheet → 内部 tile id（TILE_DEFS 反查;BJ91 箱型名分支 stub type 域消费） */
+function sheetInternal(sheet: number): number {
+  return TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === sheet);
+}
+
 /** UI 最小桩（sw-fx21 bagGame 同款惯例:Object.create 直驱私有方法） */
 function mkUi(netImpl?: unknown) {
   const ui = Object.create(UI.prototype) as unknown as Record<string, unknown>;
@@ -40,9 +46,11 @@ function mkUi(netImpl?: unknown) {
   const latched: string[] = [];
   const frameX: Record<number, number> = {};
   frameX[10 * 4096 + 20] = 0;   // LegacyChestType.0（型名域,vincChestTypeName 消费）
+  const type: Record<number, number> = {};
+  type[10 * 4096 + 20] = sheetInternal(21);   // ★BJ91:箱本体=tile 21（型名分支判据）
   ui.game = {
     net: netImpl ?? { chestRenameLatch: (n: string) => { latched.push(n); } },
-    world: { store: { idx: (x: number, y: number) => y * 4096 + x, frameX } },
+    world: { store: { idx: (x: number, y: number) => y * 4096 + x, frameX, type } },
   };
   ui.openChest = chest;
   let refreshed = 0;
@@ -219,7 +227,8 @@ describe('BJ69 全链活：UI 提交 → 闩锁 → msg33 尾段 → Room 改名
     const ui = Object.create(UI.prototype) as unknown as Record<string, unknown>;
     const chest: ChestData = { x: 20, y: 10, items: [], name: undefined };
     const frameX: Record<number, number> = { [10 * 4096 + 20]: 0 };
-    ui.game = { net, world: { store: { idx: (x: number, y: number) => y * 4096 + x, frameX } } };
+    const type: Record<number, number> = { [10 * 4096 + 20]: sheetInternal(21) };   // ★BJ91:型名分支判据
+    ui.game = { net, world: { store: { idx: (x: number, y: number) => y * 4096 + x, frameX, type } } };
     ui.openChest = chest;
     ui.refreshAll = () => {};
     (ui as { chestRenameSubmit(v: string): void }).chestRenameSubmit('秘密基地');
@@ -261,5 +270,111 @@ describe('BJ69 结构锁（防静默回退）', () => {
     expect(NET_SRC).toContain('chestRenameLatch(name: string): void {');
     expect(NET_SRC).toContain('if (rename.length === 0 || rename.length > CHEST_NAME_MAX) w.u8(CHEST_NAME_CLEAR);');
     expect(NET_SRC).toContain('else w.u8(rename.length).str(rename);');
+  });
+});
+
+// ---------------- ⑤ BJ91 RB17b④：箱型名 467/88 分支（DrawName :118-136） ----------------
+// 金标：ChestUI.DrawName :121-136 分支序（1458 同域 :102-180 零漂移）——
+//   tile 21 → LegacyChestType[frameX/36]；467 ∧ frameX/36==4 → GetItemNameValue(3988)
+//   （DeadMansChest,ItemID.cs:9522）；467 其余 → LegacyChestType2[frameX/36]；
+//   88 → LegacyDresserType[frameX/54]（54=梳妆台 3-tile 档 stride,≠箱 36）。
+//   同一分支结构亦 = IngameFancyUI.OpenVirtualKeyboard(2) :102-119 defaultChestName
+//   （本仓 vinvChestTypeName 单源双消费：DrawName 回显 + 改名预填/型名换算）。
+describe('BJ91 RB17b④ 箱型名分支（DrawName :118-136 1:1,此前 467/88 两支整缺）', () => {
+  const mkTyped = (sheet: number, fx: number) => {
+    const ui = Object.create(UI.prototype) as unknown as Record<string, unknown>;
+    const chest: ChestData = { x: 20, y: 10, items: [] };
+    const id = 10 * 4096 + 20;
+    ui.game = { net: {}, world: { store: {
+      idx: () => id,
+      type: { [id]: sheetInternal(sheet) },
+      frameX: { [id]: fx },
+    } } };
+    ui.openChest = chest;
+    return { ui, chest };
+  };
+  const nameOf = (h: { ui: Record<string, unknown>; chest: ChestData }): string | null =>
+    (h.ui as unknown as { vinvChestTypeName(c: ChestData): string | null }).vinvChestTypeName(h.chest);
+
+  it('tile 21 → LegacyChestType[frameX/36]（原支回归不破,fx=36→档 1）', () => {
+    expect(nameOf(mkTyped(21, 36))).toBe(Lang.text('LegacyChestType.1'));
+  });
+
+  it('tile 467 ∧ style 4 → item 3988 名（死人宝箱,GetItemNameValue(3988) 等价）', () => {
+    const got = nameOf(mkTyped(467, 4 * 36));
+    expect(got).toBe(Lang.itemName(3988) ?? '死人宝箱');
+  });
+
+  it('tile 467 其余 style → LegacyChestType2[frameX/36]（fx=0→水晶箱档 0）', () => {
+    expect(nameOf(mkTyped(467, 0))).toBe(Lang.text('LegacyChestType2.0'));
+  });
+
+  it('tile 88 → LegacyDresserType[frameX/54]（54 档 stride:fx=54→档 1;fx=36→档 0）', () => {
+    expect(nameOf(mkTyped(88, 54))).toBe(Lang.text('LegacyDresserType.1'));
+    // 36 在箱表（/36）会落档 1、梳妆台表（/54）落档 0——除数钉死 54
+    expect(nameOf(mkTyped(88, 36))).toBe(Lang.text('LegacyDresserType.0'));
+  });
+
+  it('非 21/467/88 sheet → null（调用方回落通用「宝箱」名,原版该型无名字面）', () => {
+    expect(nameOf(mkTyped(2, 0))).toBeNull();
+  });
+});
+
+// ---------------- ⑥ BJ91 RB17b⑤：改名对话随箱收起（editChest 生命周期） ----------------
+// 金标：关箱拍 Player.cs:33349-33355 / :33135-33141（editChest→清 npcChatText）+
+//   每 tick InputTextChest chest==-1 支 Player.cs:27742-27747（无声）——原版不存在
+//   「箱已关而改名编辑态仍在」的可达态。本仓编辑态=模态对话面板域,收口 = closeChest
+//   （关箱单点:走远 tickChestAutoClose/死亡/关背包全汇）+ openChestPanel（异箱直开臂,
+//   OpenChest 重赋 chest 旧箱隐式关——Game.tryOpenChest 换箱路不经 closeChest）。
+describe('BJ91 RB17b⑤ 改名对话随箱收起（Player.cs:27742-27747/:33135-33141 生命周期等价）', () => {
+  const mkDialogUi = (): { ui: Record<string, unknown>; removed: () => number } => {
+    const ui = Object.create(UI.prototype) as unknown as Record<string, unknown>;
+    let removed = 0;
+    ui.refreshAll = () => {};
+    ui.vinvChestRenameEl = { remove: () => { removed++; } };
+    return { ui, removed: () => removed };
+  };
+
+  it('closeChest → 对话面板随箱收（openChest=null + remove 一次 + 引用清空）', () => {
+    const { ui, removed } = mkDialogUi();
+    ui.openChest = { x: 20, y: 10, items: [] } as ChestData;
+    (ui as unknown as { closeChest(): void }).closeChest();
+    expect(ui.openChest).toBeNull();
+    expect(ui.vinvChestRenameEl).toBeNull();
+    expect(removed()).toBe(1);
+  });
+
+  it('openChestPanel（换箱直开臂）→ 旧箱对话同收（vanilla 开新箱前 editChest 清理序）', () => {
+    const { ui, removed } = mkDialogUi();
+    (ui as unknown as { _builtLayout?: string })._builtLayout = 'vanilla';
+    (ui as unknown as { vinvSyncGridToggle(): void }).vinvSyncGridToggle = () => {};
+    (ui as unknown as { openInventory(force: boolean): void }).openInventory = () => {};
+    (ui as unknown as { openChestPanel(c: ChestData): void }).openChestPanel({ x: 30, y: 11, items: [] });
+    expect(((ui as unknown as { openChest: ChestData | null }).openChest)?.x).toBe(30);
+    expect(ui.vinvChestRenameEl).toBeNull();
+    expect(removed()).toBe(1);
+  });
+
+  it('closeChestRenameDialog 本体幂等（无面板时 no-op 不炸）', () => {
+    const ui = Object.create(UI.prototype) as unknown as Record<string, unknown>;
+    expect(ui.vinvChestRenameEl).toBeUndefined();
+    expect(() => (ui as unknown as { closeChestRenameDialog(): void }).closeChestRenameDialog()).not.toThrow();
+    expect(ui.vinvChestRenameEl).toBeNull();
+  });
+
+  it('结构锁：closeChest 与 openChestPanel 两收口都调 closeChestRenameDialog（防回退）', () => {
+    const bodyOf = (sig: string): string => {
+      const i = UI_SRC.indexOf(sig);
+      expect(i, `方法 ${sig} 在位`).toBeGreaterThanOrEqual(0);
+      const open = UI_SRC.indexOf('{', i);
+      let depth = 0;
+      for (let j = open; j < UI_SRC.length; j++) {
+        if (UI_SRC[j] === '{') depth++;
+        else if (UI_SRC[j] === '}') { depth--; if (depth === 0) return UI_SRC.slice(open, j); }
+      }
+      return '';
+    };
+    expect(bodyOf('closeChest() {')).toContain('this.closeChestRenameDialog();');
+    expect(bodyOf('private openChestPanel(c: ChestData) {')).toContain('this.closeChestRenameDialog();');
   });
 });

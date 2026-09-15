@@ -231,9 +231,13 @@ export class Input {
         // SW-AF1 2026-09-04（F-2 电平重构）：沿位不设 blockMouse 门——电平语义下
         // 旗只存活于按住期（松键即清,mouseup 必经）,新 mousedown 到达时恒 false;
         // 压制消费在按住期 controlUseItem 门（Game.updateUse,见 blockMouse 字段注）。
-        // R4-22：delayUseItem 置位期间吞掉本次使用边沿（mouseHeld 保持——按住不松
-        // 仍不开火,松键才解除,同 TriggersSet 语义）
-        if (this.delayUseItem) return;
+        // ★R4-22 电平化（2026-09-15 用户实报"失焦回焦后首击被吞"定谳修复;
+        //   TriggersSet.cs:853-859 逐字）：沿位不再因 delayUseItem 丢弃——原版旗只压
+        //   controlUseItem（使用意图）,Main.mouseLeft 物理电平照常（地图拖拽/UI 等
+        //   电平消费面不受累）,且逐帧 `if (!p.controlUseItem) p.delayUseItem = false`
+        //   松键即清 ⇒ 回焦时鼠标已松 = 首帧清旗、首击照用（旧"吞整沿 + mouseup 才
+        //   清旗"=原版无此面）。压制点 = Game.updateUse 使用分派门 + inputUseItem +
+        //   智能光标 controlUseItem（与 blockMouse 同族同位）。
         this.mouseDown = true; this.mouseHeld = true;
       }
       if (e.button === 2) { this.rightDown = true; this.pendingRightRelease = 1; }   // SW-AW1 武装
@@ -351,6 +355,11 @@ export class Input {
     this.keys.clear();
     this.releaseAllVirtual();
     this.mouseHeld = false;
+    // ★R4-22 电平化（2026-09-15）：mouseDown 未消费沿一并清——原版 XNA 轮询 OS 电平,
+    // 失焦回焦后 MouseLeft 恒读真实态(松=false),不存在"跨焦点残沿";事件制本仓
+    // 若留残沿,回焦首 tick 会以陈旧沿幻象触发一次使用(松键发生在失焦期=收不到
+    // mouseup)。按住中失焦的连按语义由 mouseHeld 清零承担(回焦后重按)。
+    this.mouseDown = false;
     // SW-RB2 2026-09-06：态0（按住已跨帧/触摸长按脉冲）的右键电平在失焦面同样清零
     // ——releaseAllVirtual 只清兜底态非零（态0 不碰电平）,纯电平态残留 true 会成幽灵
     // 右键:松键发生在失焦期=收不到 mouseup,回焦后 PanControl Hold 档立即平移,且回焦
@@ -490,6 +499,10 @@ export class Input {
    *  留置=RB14d 判例,防浏览器 ±100px/notch 重映射整类吞档,净档数逐值同） */
   endFrame() {
     this.wheelDelta = 0;
+    // ★R4-22 电平化（TriggersSet.cs:853-859 后半逐字）：delayUseItem 只在左键电平
+    // 存续期间压制使用;电平消失（原版 !controlUseItem 本仓等价 = !mouseHeld）的
+    // 首帧即清——旧版只在 mouseup 清,回焦后首击整沿被吞（用户实报③）。
+    if (this.delayUseItem && !this.mouseHeld) this.delayUseItem = false;
     if (this.pendingTapRelease) {
       // 触摸 tap 保住的未消费 mouseDown 到此强制清(已过 updateUse 消费窗,
       // 再留着只会在下一个 tick 假触发第二次使用)

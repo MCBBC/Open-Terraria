@@ -1,7 +1,7 @@
 // 菜单/游戏流程编排（VUI 版）：主菜单 → 世界生成/读取 → 进游戏 → 退出回菜单。
 // main.ts 只做启动装配；本模块持有 Game 生命周期与 VUI/背景的 rAF 驱动。
 import { maybeInstallGpuLoggerFromUrl } from './render/GLStats';
-import { Game } from './core/Game';
+import { Game, grantStarterKit } from './core/Game';
 import { WorldGenAbortedError } from './world/gen/WorldGen';   // ★IIIII229 ① Esc 中止判别
 import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
@@ -16,7 +16,7 @@ import { maybeShowWelcomeAnnounce } from './ui/WelcomeAnnounce';
 import { keybindHintLabel, isBound, keybindCodeLabel } from './core/Keybinds';   // SW-BN2 2026-09-07
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
-import { kvGet, kvHas } from './save/KvStore';
+import { kvGet, kvHas, kvSet } from './save/KvStore';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from './data/items';
 import { VI_KEY } from './data/itemKeys';
 import { parseWldToSave } from './wld/WldImport';
@@ -418,10 +418,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onSortGlow: (slot, hue, chest) => ui.setSlotGlow(chest ? 'chest' : 'inv', slot, hue),
       onToast: (m) => ui.toast(m),
       onAchievementPopup: (name, title) => ui.achievementPopup(name, title),
-      onHousingCursor: (m) => {
-        // Game 单发完成/取消 → 面板同步（m=null 自毁）
-        const p = (window as unknown as { __swHousingPanel?: { cursorChanged: (m: unknown) => void } | undefined }).__swHousingPanel;
-        p?.cursorChanged(m);
+      onHousingCursor: (m, keepPanel) => {
+        // Game 单发完成/取消 → 面板同步（m=null 自毁,BJ32 关条通道;keepPanel=true
+        // =仅摘选中面板保持——分配成功/右键取消原版收口 Main.cs:45931/:45943）
+        const p = (window as unknown as { __swHousingPanel?: { cursorChanged: (m: unknown, keepPanel?: boolean) => void } | undefined }).__swHousingPanel;
+        p?.cursorChanged(m, keepPanel);
+        // vanilla 布局住房页(EquipPage=1)选中态由 game.housingMode 派生且无每帧
+        // 重绘点（paintVanillaInvSlots 只挂 refreshAll 族）——Game 侧清态后补重绘
+        ui.refreshHousingSelection();
       },
       // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)；
       // width = NewTextMultiline WidthLimit（广播盒 460px 折行，-1 不限）
@@ -661,9 +665,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // (原版 Player 初始 inventory:短剑 3507/镐 3509/斧 3506),★不回落世界内嵌
       // player(那是上个存档玩家的状态,回落=选新角色继承他人装备,同 bug 族;
       // 2026-08-26 用户实报"角色 B 拿到角色 A 的装备/血量上限")
-      g.player.inv.slots[0] = { id: ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], stack: 1 };
-      g.player.inv.slots[1] = { id: ITEM_BY_KEY[VI_KEY.STARTER.PICK], stack: 1 };
-      g.player.inv.slots[2] = { id: ITEM_BY_KEY[VI_KEY.STARTER.AXE], stack: 1 };
+      // ★SW-BJ87：与 Game.loadWorld 同源单点——grantStarterKit 逐槽直置（vanilla 锚
+      //   UICharacterCreation.cs:1749-1756 见 Game.ts 头注），不再手写三行
+      //   ★BJ91 2026-09-15（BJ87 登记债 B）：difficulty 入参随角色——旅程角色（==3）
+      //   走旅程支大礼包（UICharacterCreation.cs:1720-1747）；selectedAppearance=
+      //   建号外观权威（applyAppearance 落位前后皆可读）。
+      grantStarterKit(g.player.inv, selectedAppearance?.difficulty ?? g.player.appearance?.difficulty ?? 0);
       g.player.baseMaxHp = 100; g.player.baseMaxMana = 20;
       g.player.hp = 100; g.player.mana = 20;
       g.cb.onInventoryChanged();
@@ -906,9 +913,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 每次导入多出 2×20~50MB 峰值,且让 5 份全图副本并存更久)
       const { world } = loadSaveData(save);
       await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.7 + p * 0.3));
-      g.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.PICK], 1);
-      g.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.AXE], 1);
-      g.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
+      // ★SW-BJ87：三件套逐槽直置（UICharacterCreation.cs:1749-1756 经典支 =
+      //   热键区 [0]短剑/[1]镐/[2]斧；1458:1751-1755 同锚）——曾走 inv.add 落背包尾
+      //   （useStyle 缺数据→热栏臂不可达→降序臂，同 Game.loadWorld 面,见
+      //   grantStarterKit 头注）。火把 20=导入档补济（非原版经典开局件），保留路由。
+      //   ★BJ91 2026-09-15：difficulty 随选中角色（旅程档走旅程支大礼包,同源语义）。
+      grantStarterKit(g.player.inv, selectedAppearance?.difficulty ?? g.player.appearance?.difficulty ?? 0);
       g.player.inv.add(ITEM_BY_KEY[VI_KEY.TORCH], 20);
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.WldImported', save.header.name ?? '', save.header.wldVersion ?? 0));
       // 登记世界槽位并持久化：导入不再是一次性的，重进游戏可在世界列表中看到并继续游玩
@@ -1457,7 +1467,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const playTimeMs = cumulativePlayMs();
     saveClient.ensure();
     void saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave()).then((json) => {
-      void kvSetCompat(json).then((where) => {
+      // ★BJ90（2026-09-15）债④死路径移除（BJ71 登记②）：v6 二进制快路径退役——原
+      //  kvSetCompat 曾先 kvSetBinary 写二进制副本再 kvSet 同 key 写 JSON,IDB 同 store
+      //  串行 → JSON 恒后写覆盖二进制副本（快路径零活跃消费方,评估定谳）;且崩溃窗口
+      //  二进制残留是元数据全丢的损毁态（packSaveBinary meta={} → loadSaveData
+      //  data.header.width TypeError）。守卫=tests/save-binary-deadpath.test.ts
+      void kvSet(QUICK_SAVE_KEY, json).then((where) => {
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
@@ -1513,19 +1528,6 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       console.error('export save failed', e);
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
     });
-  }
-
-  // KvStore 延迟引入避免顶层副作用顺序问题
-  async function kvSetCompat(json: string): Promise<string> {
-    const { kvSet, kvSetBinary } = await import('./save/KvStore');
-    const { packSaveBinary } = await import('./save/BinarySave');
-    // ★v6 二进制副本(2026-09-06):主格式仍 JSON(兼容旧读侧),并行写二进制副本
-    //   供 worker 快速加载(免 JSON.parse 大字符串)。旧 JSON 副本在下次保存时移除。
-    try {
-      const buf = packSaveBinary(JSON.parse(json));
-      void kvSetBinary(QUICK_SAVE_KEY, buf);
-    } catch { /* 二进制副本失败不阻塞 JSON 主写入 */ }
-    return kvSet(QUICK_SAVE_KEY, json);
   }
 
   // 快速存档存在性预查

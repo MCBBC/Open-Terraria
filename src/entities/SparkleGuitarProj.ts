@@ -316,7 +316,8 @@ export class SparkleGuitarProj extends Entity {
 
       // ---- Damage() 子步内旁路（:12513-12518）：CutTiles 先于全部受害循环。
       //      ★三轮蓝队 F3：856 friendly∧owner 本地∧¬npcProj∧¬minion∧type≠1054 全过,
-      //      CanCutTiles(:15407) aiStyle167/type856 不在排除表 → 每子步按本盒(+1 外沿)
+      //      CanCutTiles(:15407) aiStyle167/type856 不在排除表 → 每子步按本盒(右/下
+      //      +1=循环排除界,P.cs:15377——★SW-BJ88 债4②勘误,旧注"+1 外沿"系含端旧语义)
       //      砍 tileCut 物（瓦罐/杂草）。此前缺席=跨类旧账清偿（ProjCutTiles 单点）----
       cutTilesBox(game, this.x, this.y, this.w, this.h);
       // 小动物（Damage_PVE 同一 victim 循环）：一击致死并消耗弹体（MagicProj 形态同构,

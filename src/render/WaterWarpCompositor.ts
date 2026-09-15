@@ -152,7 +152,8 @@ export class WaterWarpCompositor {
     if (gl.composite(scene, this.gateCanvas(), noiseSrc, st.cssW, st.cssH,
       waterWaves.progress, waterWaves.intensity,
       waterWaves.readGridR(), waterWaves.gridW(), waterWaves.gridH(),
-      st.camL * st.cssZoom, st.camT * st.cssZoom)) {
+      st.camL * st.cssZoom, st.camT * st.cssZoom,
+      ...waterWaves.waveReadOffset())) {   // ★BJ89 读侧亚栅格补偿（obj19 c11=uImageOffset）
       setWaterWarpDebug('gl');
       return gl.canvas;
     }

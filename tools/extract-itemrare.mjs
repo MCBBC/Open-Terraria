@@ -206,6 +206,16 @@ for (const [from, to] of REGIONS) {
   while (groups.length) flush(groups[0]);
 }
 
+// ★BJ91 2026-09-15（RB17b note③）共享 case 的 if(type==X) 全覆盖 rare 覆写反哺：
+//   提取器按设计只认 case 体顶层无条件赋值、忽略 if 变体分支（头注口径）——但
+//   case 3860/3861/3862（泰坦袋/食人魔袋/黑魔法师袋）的基础 rare=1 被三型 if 链
+//   【全覆盖】=对每型皆死码，终值 3860=8/3861=5/3862=3（Item.cs:34145-34164；
+//   1456:34120-34140/1458:34145-34165 同链零漂移）。钉值随提取器走=重产不回退
+//   （判例 fx3:重产前必反哺，否则手补被静默洗回提取字面）。守卫=tests/
+//   bj91-bossbag-rare.test.ts（json 值+def 面）+ recon-item-1456-1457.mjs DRIFT。
+const HAND_RARE = { 3860: 8, 3861: 5, 3862: 3 };
+for (const [id, r] of Object.entries(HAND_RARE)) RARE[id] = r;
+
   return { RARE, VALUE };
 }
 

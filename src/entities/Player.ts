@@ -826,6 +826,13 @@ export class Player extends Entity {
   private _skimSplashCooldown = 0;
   /** 脚位带液接触上升沿检测（上一拍接触值；被门拦下的边沿即消费——冷却窗内新袋静默） */
   private _skimContactPrev = false;
+  /** 原版 wet 湿粘滞位（Player.cs:27872 flag23/:27982 `if (!wet)` 读、:28060 num86 支内
+   *  置真、:28071 `else if (wet)` 支首置假、:28160 拍末 `if (!wet)` 清偿读）——溅花块
+   *  出入水翻转的【唯一驱动】。★BJ89 定谳：原版 wet 只由 num86（WetCollision 居中
+   *  探针，任意液体）驱动；旧实现以 inWater∪inLava∪inHoney∪inShimmer 四桶并集近似，
+   *  其中 inLava 是全盒 LavaCollision——「探针干+全盒岩浆擦过」姿态下并集为真而
+   *  原版 wet 为假 → 出浆分支幻影发射（bj80 域外观察坐标，实测 1 条 Splash）。 */
+  private wetSticky = false;
   /** 原版 lavaWet 粘滞镜像（Player.cs:27872 flag24 / :27883 lavaWet=flag25 / :28164 !wet 清）
    *  ——溅花液型门专用：入水门=本拍 flag25（:27989）、出水门=上拍值（:28083）。
    *  与 inLava 桶位分离：inLava 无 :27878 的 !shimmering 门且消费面更广（灼烧/Wet 剥离） */
@@ -1116,6 +1123,17 @@ export class Player extends Entity {
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
   stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
+  /** ★SW-FX34b 2026-09-15：Collision.TileCollision 第 10 参 hoik（Collision.cs:2299
+   *  形参缺省 true）。原版玩家经 Player.TileCollision 包装传 `!flag`
+   *  （Player.cs:23785-23791：flag = width≤16 || height≤16 → 20×42 玩家恒
+   *  false → hoik 恒 true）；NPC 族 TileCollision 不传该参同样吃缺省 true
+   *  （NPC.cs:93868/:93881/:93904）。hoik=true 时撞墙支读取邻格坡向
+   *  （Collision.cs:2412 右行/left 支查 slope2/4、:2432 左行/right 支查 slope1/3）
+   *  ——「实心格+配套坡邻」组合不拦 = wiki 水平单向墙（楼梯平台列贴墙）的
+   *  穿越通道。此前本仓 Body.hoik 缺省 falsy=全局关（2026-09-01 tent 案把缺省
+   *  误读为 vanilla 默认 false），单向墙两向全堵=用户实报。普通 Body/测试裸
+   *  对象缺省仍关（NPC 侧 2026-09-01 登记债不动，仅玩家恢复原版半边）。 */
+  hoik = true;
   stepUpHolds = false;         // holdsMatching（Player.cs:23258 第 8 参 = controlUp，fixedUpdate 灌入）
   stepUpNpc = false;
   /** StepDown 门 = vy===GRAVITY（Player.cs:23252 字面）；★SW-BJ59 滚轴鞋贴轨帧
@@ -3951,21 +3969,29 @@ export class Player extends Entity {
     //   正确居中盒故无此症）。2026-08-22 改与 NPC 侧共用同一实现（含坡面格+上液
     //   满高计 :1635-1654 分支——旧手写盒缺该支，坡面涉水判定偏浅）。
     //   居中盒同样解决旧"脚底单点采样"的水下走坡 1-2px 抖动翻转问题。
-    const wasWetAny = this.inWater || this.inLava || this.inHoney;   // 出水截跳消费位（下方 _wetExitJumpClip 段原口径，不动）
+    //   ★SW-RB20a F6④：旧 wasWetAny（三桶并集快照）已退役——唯一消费位
+    //   _wetExitJumpClip 门改 wasWetAll(wetSticky)∧!wetNow（ vanilla else if (wet)
+    //   :28071 逐位同构,见下方段注）;三桶并集 ≠ wet 粘滞位（BJ89 幻影姿态家族）。
     // 原版 wet 位 = WetCollision 原始返回：Collision.cs:1608 `liquid > 0` 对任意液体
     // 成立（岩浆/微光/蜜都是液体,无排除项）、:1627 首中即返——wet 含岩浆+微光
     // （铁证：Player.cs:28049-28056 岩浆溅花尘 35 与 :28060 `wet = true` 同体）。
     // 旧注"wet 只认 !lava && !shimmer(:1418)"系把 DrownCollision（呼吸口,
     // Collision.cs:1418 `!tile.lava() && !tile.shimmer()`）当 wet 位——勘误退役
     // （红队 R1-F5/F10 2026-09-03）。inWater 是本仓"去岩浆"窄化位,honey/shimmer
-    // 桶与 wetCollision 返回同源同盒 → 四桶并集 ≙ 原版 wet
+    // 桶与 wetCollision 返回同源同盒
     // 原版序（Player.cs:27871-27938）：flag24=lavaWet 上拍留存 → LavaCollision（先于
     // WetCollision）→ WetCollision → shimmer/honey 旗 → 溅花段。原版 lavaWet 带
     // !shimmering 门（:27878-27882）→ 溅花用粘滞镜像字段（见字段注）;inLava 桶位
     // 保持无门原口径（灼烧/Wet 剥离/inWater 窄化消费面不动）
+    // ★BJ89 出入水翻转驱动定谳（bj80 域外观察清偿）：原版 wet 粘滞位【只】由 num86
+    // （WetCollision 居中探针,任意液体）驱动——:28060 num86 支内置真、:28071
+    // `else if (wet)` 支首置假、:28160 拍末 `if (!wet)` 读后值清偿。旧实现以四桶并集
+    // 近似,混入全盒 LavaCollision 的 inLava → 「探针干+全盒岩浆擦过」姿态下并集真
+    // 而原版 wet 假 → 出浆分支幻影发射（vanilla 静默）。修 = 显式 wetSticky 位
+    // （本文件字段注）逐点对齐原版 wet 的置位/复位/清偿三处
     const wasShimmering = this.shimmering;   // 原版 UpdateBuffs(:25763) 先于本段——此刻读值 ≙ 原版 shimmering
     const flag24 = this.splashLavaWet;       // :27872（上拍 lavaWet——出水溅花岩浆门）
-    const wasWetAll = this.inWater || this.inLava || this.inHoney || this.inShimmer;
+    const wasWetAll = this.wetSticky;        // :27872 flag23（上拍 wet 粘滞位——本拍读点）
     // 水上行走缩高 6px（原版 num82,Player.cs:27875-27881:水面行走不因脚尖触浆受伤）
     // 水上行走（装备 waterWalk 族 ∪ 水上行走药水 buff 15,:9706）——原独立块随
     // LavaCollision 前移到此（vanilla 序:27877-27938）。★SW-FX19：倒挂整禁
@@ -4012,29 +4038,44 @@ export class Player extends Entity {
     //      蜜·岩浆缺省 1(:28029/:28056/:28123/:28150)——playSfxWav 直文件;Splash_2/3
     //      ×0.75 音量与各档音高抖动由 Sfx 库层 FILE_CASE_VOL/PITCH 承载 ----
     if (wetNow) {
-      if (!wasWetAll && this.wetCount === 0) {          // :27982-27984 入水翻转
-        this.wetCount = 10;                              // :27986
-        if (!wasShimmering) {                            // :27987 !shimmering
-          if (!flag25) {                                 // :27989 !flag25（非岩浆）
-            if (this.splashShimmerWet) {                 // :27991 shimmerWet
-              this.splashShimmerDust(game, this.y + this.h / 2, 0.8);
-              game.playSfxWav?.('Splash_2', 1, this.x, this.y);   // :28016 style 2
-            } else if (this.splashHoneyWet) {            // :28018 honeyWet
-              this.splashHoneyDust(game, this.y + this.h / 2 - 8);
-              game.playSfxWav?.('Splash_1', 1, this.x, this.y);   // :28029 缺省 style=1
-            } else {                                     // :28031 水
-              this.splashWaterDust(game, this.y + this.h / 2 - 8, 3);   // :28035-28038
-              game.playSfxWav?.('Splash_0', 1, this.x, this.y);   // :28042 style 0
+      // ★SW-RB20a F6①（2026-09-15）入水熄火（:27961-27970 num86 支内 ∧ !lavaWet）：
+      //  OnFire(24)+地狱火(323) 双清（旧仓只清 24=漏 323 臂;旧基面 inWater&&!inLava
+      //  → num86∧!lavaWet,本拍 lavaWet 已于 :27883 赋值=本仓 splashLavaWet）。
+      //  旧注锚 :27426 误标已随迁正。vanilla 按 buffType 逐槽 DelBuff,buffs.remove
+      //  等价单类型口。
+      if (!this.splashLavaWet) {
+        this.buffs.remove(BuffType.OnFire);
+        this.buffs.remove(BuffType.OnFire3);
+      }
+      // ★SW-RB20a F6②（2026-09-15）入液洗恶臭（:27972-27980 num86 支内,无液体种别
+      //  /无 !lavaWet 豁免——岩浆/蜂蜜湿亦洗;RB5a 语义保持,仅探针基面 num86 化）。
+      if (this.buffs.has(BuffType.Stinky)) this.buffs.remove(BuffType.Stinky);
+      if (!wasWetAll) {                                  // :27982 if (!wet)（入水翻转拍）
+        if (this.wetCount === 0) {                       // :27983
+          this.wetCount = 10;                            // :27986
+          if (!wasShimmering) {                          // :27987 !shimmering
+            if (!flag25) {                                 // :27989 !flag25（非岩浆）
+              if (this.splashShimmerWet) {                 // :27991 shimmerWet
+                this.splashShimmerDust(game, this.y + this.h / 2, 0.8);
+                game.playSfxWav?.('Splash_2', 1, this.x, this.y);   // :28016 style 2
+              } else if (this.splashHoneyWet) {            // :28018 honeyWet
+                this.splashHoneyDust(game, this.y + this.h / 2 - 8);
+                game.playSfxWav?.('Splash_1', 1, this.x, this.y);   // :28029 缺省 style=1
+              } else {                                     // :28031 水
+                this.splashWaterDust(game, this.y + this.h / 2 - 8, 3);   // :28035-28038
+                game.playSfxWav?.('Splash_0', 1, this.x, this.y);   // :28042 style 0
+              }
+            } else {                                       // :28045 岩浆
+              this.splashLavaDust(game, this.y + this.h / 2 - 8);   // :28049-28052
+              game.playSfxWav?.('Splash_1', 1, this.x, this.y);     // :28056 缺省 style=1
             }
-          } else {                                       // :28045 岩浆
-            this.splashLavaDust(game, this.y + this.h / 2 - 8);   // :28049-28052
-            game.playSfxWav?.('Splash_1', 1, this.x, this.y);     // :28056 缺省 style=1
           }
         }
+        this.wetSticky = true;                           // :28060 wet = true（num86 支内）
+        // ShouldFloatInWater vy 对折钳 3（:28061-28067）由运动块尾 wetEntryNow 消费（湿态阻尼段）
       }
-      // wet = true（:28060）——本仓 wet 粘滞位由四桶并集承载;ShouldFloatInWater
-      // vy 对折钳 3（:28061-28067）由运动块尾 wetEntryNow 消费（湿态阻尼段）
     } else if (wasWetAll) {                              // :28071 else if (wet)
+      this.wetSticky = false;                            // :28073 wet = false（支首——先于 wetCount 门/出水溅花）
       // 出水截跳（:28074-28076 jump=jumpHeight/5）——本仓 _wetExitJumpClip（下方段）
       if (this.wetCount === 0) {                         // :28078
         this.wetCount = 10;                              // :28080
@@ -4057,11 +4098,13 @@ export class Player extends Entity {
         }
       }
     }
-    // :28155-28168 拍末粘滞清偿（wet 粘滞位本拍后值 = wetNow||wasWetAll——num86 真
-    // →true(:28060)、假→上拍值（:28073 置 false 已并入 wasWetAll 假））
+    // :28155-28168 拍末粘滞清偿——vanilla 读【本拍后值】`if (!wet)`（:28160）。本拍后
+    // wetSticky ≡ wetNow（num86 真→:28060 置真；假且上拍真→:28073 置假；假且上拍假
+    // →维持假）——★BJ89 旧式 `!(wetNow||wasWetAll)` 以四桶并集近似后值，全盒岩浆
+    // 擦过姿态下后值本应假却判真 = 粘滞旗少清一拍
     if (!flag27) this.splashHoneyWet = false;
     if (!shimmerNow) this.splashShimmerWet = false;
-    if (!(wetNow || wasWetAll)) {
+    if (!this.wetSticky) {
       this.splashLavaWet = false;
       this.splashHoneyWet = false;
       this.splashShimmerWet = false;
@@ -4095,15 +4138,20 @@ export class Player extends Entity {
       && !(this.ridingMount && isConsideredASlimeMount(this.mount.type));
     if (this.merman) this.buffs.apply(BuffType.Merfolk, 2 / 60);
     // ★附带① 出水截跳标记（Player.cs:28074 消费段的进入门 = `else if (wet)`，即
-    //   wet 翻转 false 的这一帧）：wet ≙ inWater∪inLava∪inHoney（三桶并集同 :28195
-    //   注释口径）。标记在跳跃段尾消费（clip 对本帧新起跳同样生效——原版 Update 内
-    //   本段后于 JumpMovement 调用位，新预算 set 后立即被截）。
-    if (wasWetAny && !(this.inWater || this.inLava || this.inHoney)) this._wetExitJumpClip = true;
+    //   wet 翻转 false 的这一帧）。★SW-RB20a F6④（2026-09-15）：门基面由
+    //   wasWetAny∧三桶并集反相 → wasWetAll(wetSticky=上拍 wet)∧!wetNow —— 与原版
+    //   else if (wet)（:28071,上拍粘滞位 ∧ 本拍 num86 假）逐位同构;旧三桶并集在
+    //   「探针干+全盒岩浆擦过」姿态下幻影进出（BJ89 同族）。标记在跳跃段尾消费
+    //   （clip 对本帧新起跳同样生效——原版 Update 内本段后于 JumpMovement 调用位，
+    //   新预算 set 后立即被截）。
+    if (wasWetAll && !wetNow) this._wetExitJumpClip = true;
     // ---- 史莱姆坐骑液体态（1457 :28160-28207 / 1456 :27653-27689）：wetSlime--
     //      + 骑史莱姆族（3/50）浸液 → wetSlime=30 + 浮力档（vy>2 ×0.9 / vy-=0.5 /
-    //      vy<-4 钳回）。原版 switch 在 mount.Active 段的 `if (wet)` 内、不分液体种类
-    //      （水/蜜/岩浆同支）→ wet ≙ inWater∪inLava∪inHoney。踩踏循环 A 的
-    //      wetSlime==0 门消费此值（MountCombat.mountJumpStomps）----
+    //      vy<-4 钳回）。原版 switch 在 mount.Active 段的 `if (wet)`（:28192）内、
+    //      不分液体种类；★SW-RB20a F6③：探针基面=wetSticky（原版 wet 读点在
+    //      :28060/:28073 刷新之后≡本拍 num86;本仓调用位在湿流程后,wetSticky 后值
+    //      ≡wetNow 同构——旧三桶并集=幻影姿态家族,见 MountCombat.ts 段注）。
+    //      踩踏循环 A 的 wetSlime==0 门消费此值（MountCombat.mountJumpStomps）----
     tickSlimeWetState(this);
     this.shimmerUnstuckHelperUpdate(game);   // ShimmerUnstuckHelper.Update :23-45（Player.cs:25843 每 tick,先于 AddBuff(353) 门）
     // 微光浸入（Player.cs:27938-27953）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
@@ -4252,14 +4300,13 @@ export class Player extends Entity {
       const lavaMax = eqM.lavaMax;
       if (lavaMax > 0 && this.lavaImmuneTicks < lavaMax) this.lavaImmuneTicks++;
     }
-    // 入水熄灭着火（Player.cs:27426：wet 且非岩浆 → DelBuff 24）
-    if (this.inWater && !this.inLava) this.buffs.remove(BuffType.OnFire);
-    // ★SW-RB5a 2026-09-07 入液洗掉恶臭（Player.cs:27968-27979）：num86=
-    //  WetCollision【任一液湿】→ DelBuff 120——着火臂才有 !lavaWet 豁免,
-    //  恶臭臂无（岩浆/蜂蜜湿亦洗）;缺此臂=洗澡不掉味,HoverOverNPCs 否决
-    //  （Main.cs:43785）与 luck −0.25（:29386）恒挂
-    if (this.inWater || this.inLava || this.inHoney) this.buffs.remove(BuffType.Stinky);
-    // 冷水（专家雪原）：wet 且非岩浆/蜂蜜 → Chilled(46) 150t（1458 Player.cs:28209
+    // ★SW-RB20a F6①/②（2026-09-15）：OnFire/Stinky 入液清洗收口到 num86 探针
+    //  （原版两臂都在 `if (num86)` 支内、先于溅花段 :27982——本仓随湿流程迁入湿流程头,
+    //  消费位=下方 if (wetNow) 块首;探针基面由「inWater&&!inLava / 三桶并集」改
+    //  wetNow（num86 居中探针,Player.cs:27938）——旧桶基面混入全盒 LavaCollision/
+    //  窄化 inWater=BJ89 定谳的幻影姿态家族（探针干+全盒岩浆擦过时原版 num86 假
+    //  → 不洗,旧桶基面真 → 幻影洗）;旧注 :27426 锚系误标（该处为翼帧代码）。
+    //  冷水（专家雪原）：wet 且非岩浆/蜂蜜 → Chilled(46) 150t（1458 Player.cs:28209
     // `expert && ZoneSnow && wet && !lavaWet && !honeyWet && !arcticDivingGear &&
     // environmentBuffImmunityTimer == 0`）；arcticDivingGear（1861 极地潜水装备）免疫。
     // ★终零波批（2026-09-01）：environmentBuffImmunityTimer 实装（Teleport :37701

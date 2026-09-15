@@ -16,8 +16,11 @@
 //   步（渲染跳帧时补 2 步）——q<2 无源时不步进（缓冲清回中性）。
 // · 波场缓冲（WaterShaderData）：DISTORTION_BUFFER_SCALE=0.25（:47）屏幕 1/4
 //   分辨率双缓冲 ping-pong（:138-158 StepLiquids）；中性值 R=G=0.5（清色
-//   :141/:146）；随相机滚动（:148-152 位移增量 floor 到缓冲像素，每步只施加
-//   一次——lastOffset 在 StepLiquids 内更新）。
+//   :141/:146）；世界锚定滚动 = 三件套（★BJ89 定谳移植，BJ76 登记债清偿）：
+//   ①注入锚 snapUp（:183 `Center − vector2`，vector2=−_last/0.25）②传播增量
+//   vector3=F_n−F_{n−1}（:151-156，F=floor(−camCss·0.25)，右/下移≤0=内容反向移）
+//   ③读侧亚栅格补偿 uImageOffset=camCss−snapUp ∈(−4,0]（Apply :374 UseImageOffset；
+//   obj19 c11 实证进波场采样坐标）——内容锚 4px 栅格、读补偿余量=任意龄期 0px 漂移。
 // · 传播内核 = 编译像素着色器 "WaterProcessor"（DyeInitializer.cs:427 注册）。
 //   C# 反编译不含 HLSL——本模块数学由 tools/disasm-fx.mjs 反汇编
 //   terraria-assets/PixelShader.cso obj49（ps_2_0 字节码）逐指令复原：
@@ -345,7 +348,13 @@ class WaterWaveSystem {
   private _R2 = new Float32Array(0);
   private _G2 = new Float32Array(0);
   private _camX = 0; private _camY = 0; private _zoom = 1;
-  /** 相机滚动偏移（缓冲像素，floor；:151-152 _lastDistortionDrawOffset） */
+  /** 相机滚动偏移 F = floor(−camCss·0.25)（WaterShaderData.StepLiquids :148-157：
+   *  `vector−Main.screenPosition`（=−camCss）×0.25 floor——即 _lastDistortionDrawOffset，
+   *  相机右/下移时 ≤0）。★BJ89 定谳（BJ76 登记债清偿）：旧实现存 +camCss·0.25（符号
+   *  反）且注入用真 cam——内容随相机【同向】移（+Δ），真实在环探针：世界静止 stamp
+   *  在 +40px 跳变后表观世界 1004→1080（≈2× 相机速漂移）；原版 = 内容移 vector3
+   *  (=F_n−F_{n−1}, −Δ) + 注入/读两侧 snapUp(−4F) 锚定/补偿（:183/:374）= 任意龄期
+   *  0px 漂移（字节码 obj19 c11=uImageOffset 实证进波场采样坐标） */
   private _scrollX = 0; private _scrollY = 0;
   private _stepsLast = 0;
 
@@ -378,28 +387,36 @@ class WaterWaveSystem {
     const h = Math.max(1, Math.ceil(inp.viewH * 0.25));
     this._ensure(w, h);
 
-    // 相机滚动（缓冲像素 floor；:148-152）——只在第一步施加（lastOffset 在
-    // StepLiquids 内更新，第二步增量 0）
-    const sx = Math.floor(inp.camX * inp.zoom * 0.25);
-    const sy = Math.floor(inp.camY * inp.zoom * 0.25);
+    // 相机滚动 F = floor(−camCss·0.25)（:149 `vector−screenPosition`=−camCss、
+    // :155-157 ×0.25 floor）。★BJ89：dx/dy = F_n − F_{n−1} ≙ 原版 vector3，直接喂
+    // _step（源索引 `x − dx` ≙ "新[p]=旧[p−vector3]"）——右/下移时 F 减小 → dx≤0 →
+    // 内容 −|dx|（原版方向：世界锚定）。
+    const sx = Math.floor(-inp.camX * inp.zoom * 0.25);
+    const sy = Math.floor(-inp.camY * inp.zoom * 0.25);
     const dx = sx - this._scrollX, dy = sy - this._scrollY;
-    this._scrollX = sx; this._scrollY = sy;
 
     if (this.quality === 0) {
       // 0 档：滤镜整体关闭（SceneState :129）——不注入不步进，缓冲回中性
+      //（F 不更新：原版 StepLiquids 只在有源帧运行——重启用时 stale-F 大跳变落在
+      // 中性缓冲上=无感，同原版）
       this._clear();
       _rqCount = 0;
       this._stepsLast = 0;
       return;
     }
 
-    // 涟漪队列注入（DrawWaves :314-327；实体洗掠已由 Renderer 在 frame 前注入）
+    // 涟漪队列注入（DrawWaves :314-327；实体洗掠已由 Renderer 在 frame 前注入）。
+    // ★注入锚=F_prev（DrawWaves :183 `vector2 = −_lastDistortionDrawOffset/0.25` 在
+    // _last 更新【前】消费）——_scrollX 更新必须晚于全部注入（Renderer 实体洗掠在
+    // frame 调用前=天然 F_prev；本处 _drawRipples 亦然）
     this._drawRipples();
 
-    // 步进（PreDraw :343-349 min(queuedSteps,2)；正常 1 步、掉帧补 2）
+    // 步进（PreDraw :343-349 min(queuedSteps,2)；正常 1 步、掉帧补 2）。
+    // F 更新在 StepLiquids 内（:156-157）→ 只在真步进帧落盘（第二步增量 0）
     const steps = this.quality >= 2 ? (inp.dt > 1 / 60 + 1 / 240 ? 2 : 1) : 0;
     this._stepsLast = steps;
     if (steps > 0) {
+      this._scrollX = sx; this._scrollY = sy;
       this._step(dx, dy);
       if (steps > 1) this._step(0, 0);
     } else if (!this._isNeutral()) {
@@ -421,8 +438,8 @@ class WaterWaveSystem {
    *  （世界 px，ScreenShaderData.Apply）⇒ 原版噪声涟漪场采样【世界坐标】。
    *  本仓曾只实现 t0·uScreenResolution（屏幕 px）→ 涟漪场钉在屏幕上,走动时世界
    *  从场下滑过 = 波纹"跟着角色跑"。修复：噪声 uv 用世界 css px（屏幕 px +
-   *  cam·cssZoom）；波场缓冲读 _readR 仍用屏幕 px（缓冲随相机滚动,内容侧世界
-   *  锚定,不改）。 */
+   *  cam·cssZoom）；波场缓冲读 _readR 含读侧亚栅格补偿（uImageOffset 同域，
+   *  ★BJ89——旧注"仍用屏幕 px 不改"已废：内容移向曾反+补偿缺=双速漂移）。 */
   sampleDisplace(worldX: number, worldY: number, out: [number, number]): void {
     out[0] = 0; out[1] = 0;
     if (this.quality === 0 || !_noiseData) return;
@@ -489,8 +506,14 @@ class WaterWaveSystem {
     flowX: number, flowY: number, strength: number): void {
     if (this.quality === 0) return;
     const z = this._zoom;
-    const cx = (centerX - this._camX) * z * 0.25;
-    const cy = (centerY - this._camY) * z * 0.25;
+    // ★BJ89 注入锚 = snapUp 栅格（DrawWaves :183 `vector4 = Center − vector2`，
+    //  vector2 = −_lastDistortionDrawOffset/0.25 = −4F = snapUp(camCss)）——缓冲内容
+    //  世界锚定在 4px 栅格（texel q ↔ 世界 css q·4 + snapUp），传播 shift 保持该锚，
+    //  亚栅格余量由读侧补偿（_readR/waveReadOffset→uWaveOff）。旧实现锚真 cam +
+    //  屏幕锚定读 = 双速漂移（探针实测 +40px 跳变后表观世界 1004→1080）。
+    //  center·z + 4F ≡ center·z − snapUp（F=本帧滚动偏移，注入时= F_prev）
+    const cx = (centerX * z + 4 * this._scrollX) * 0.25;
+    const cy = (centerY * z + 4 * this._scrollY) * 0.25;
     const qw = quadW * z * 0.25, qh = quadH * z * 0.25;
     if (qw < 0.1 || qh < 0.1) return;
     const hw = qw * 0.5, hh = qh * 0.5;
@@ -551,9 +574,17 @@ class WaterWaveSystem {
     return true;
   }
 
-  /** 读缓冲 R（屏幕 px → 缓冲 texel 双线性；非 pow2 缓冲 → clamp 采样语义） */
+  /** 读缓冲 R（屏幕 px → 缓冲 texel 双线性；非 pow2 缓冲 → clamp 采样语义）。
+   *  ★BJ89 读侧亚栅格补偿（WaterShaderData.Apply :374 `UseImageOffset(
+   *  -(vector2 − _lastDistortionDrawOffset/0.25))` = camCss − snapUp(−4F) ∈ (−4,0]；
+   *  字节码 obj19 `mad r0.zw, t0·uScreenResolution + c11(uImageOffset)` → ×0.25 →
+   *  texld s2）：缓冲内容锚在 4px 栅格（snapUp），补偿把真 cam 的亚栅格余量加回
+   *  采样坐标 = 世界精确对齐（内容 texel q ↔ 世界 css q·4+snapUp；采样 (s+off)/4
+   *  命中 s+cam−snap → 世界 s+cam ✓ 任意龄期 0px 漂移） */
   private _readR(px: number, py: number): number {
-    const bx = px * 0.25 - 0.5, by = py * 0.25 - 0.5;
+    const ox = this._camX * this._zoom + 4 * this._scrollX;
+    const oy = this._camY * this._zoom + 4 * this._scrollY;
+    const bx = (px + ox) * 0.25 - 0.5, by = (py + oy) * 0.25 - 0.5;
     const x0 = Math.floor(bx), y0 = Math.floor(by);
     const fx = bx - x0, fy = by - y0;
     const w = this._gW, h = this._gH;
@@ -571,8 +602,9 @@ class WaterWaveSystem {
     const z = this._zoom;
     const R = this._R, G = this._G, w = this._gW, h = this._gH;
     for (let q = 0; q < _rqCount; q++) {
-      const cx = (_rqX[q] - this._camX) * z * 0.25;
-      const cy = (_rqY[q] - this._camY) * z * 0.25;
+      // ★BJ89 注入锚 = snapUp 栅格（同 injectWash 注——:314-327 `Position − vector2`）
+      const cx = (_rqX[q] * z + 4 * this._scrollX) * 0.25;
+      const cy = (_rqY[q] * z + 4 * this._scrollY) * 0.25;
       const qw = _rqW[q] * z * 0.25, qh = _rqH[q] * z * 0.25;
       if (qw < 0.1 || qh < 0.1) continue;
       const hw = qw * 0.5, hh = qh * 0.5;
@@ -599,8 +631,13 @@ class WaterWaveSystem {
     _rqCount = 0;
   }
 
-  /** WaterProcessor 一步（滚动增量 dx/dy 施加在采样侧 = 原版把旧缓冲按位移增量
-   *  画进清空 swap 的语义；越界 clamp = RenderTarget Clamp 采样） */
+  /** WaterProcessor 一步（滚动增量 dx/dy = 原版 vector3 = F_n−F_{n−1}：源索引
+   *  `x − dx` ≙ 新[p]=旧[p−vector3]——旧缓冲按 vector3 偏移画进清空 swap）。
+   *  ★BJ89 两级出界语义（原版 = copy 与滤波同一 draw，旧纹理硬件 Clamp 采样器）：
+   *   ①中心源出界（copy 未覆盖的新暴露区）= 中性 0.5（swap 清屏(0.5,0.5,0.5,1)残留；
+   *     中性是内核不动点——旧 clamp 会把边缘 texel 拉成条带）；
+   *   ②内核邻居采样越界（缓冲数组边缘）= clamp 边缘复制（硬件 sampler Clamp；
+   *     dx=dy=0 时与 BJ78 W3 快路径逐位一致）。 */
   private _step(dx: number, dy: number): void {
     const w = this._gW, h = this._gH;
     const R = this._R, G = this._G, R2 = this._R2, G2 = this._G2;
@@ -647,8 +684,16 @@ class WaterWaveSystem {
       const yM = Math.min(h - 1, Math.max(0, sy0));
       const yD = Math.min(h - 1, Math.max(0, sy0 + 1));
       const rowM = yM * w, rowU = yU * w, rowD = yD * w;
+      // ★BJ89 ①中心源覆盖判定：源出界 = swap 未被 copy 覆盖的中性区（先于内核）；
+      //   ②邻居/中心越界仍 clamp（硬件 sampler Clamp——dx=0 时与 W3 快路径逐位一致）
+      const yIn = sy0 >= 0 && sy0 < h;
       for (let x = 0; x < w; x++) {
         const sx0 = x - dx;
+        const i = y * w + x;
+        if (!yIn || sx0 < 0 || sx0 >= w) {
+          R2[i] = 0.5; G2[i] = 0.5;        // ① 未覆盖区中性（非 clamp 条带）
+          continue;
+        }
         const xL = Math.min(w - 1, Math.max(0, sx0 - 1));
         const xM = Math.min(w - 1, Math.max(0, sx0));
         const xR = Math.min(w - 1, Math.max(0, sx0 + 1));
@@ -659,7 +704,6 @@ class WaterWaveSystem {
           + (2 * R[rowU + xM] - 1) + (2 * R[rowD + xM] - 1);
         const wv = (cg - 0.5) * (10 / 3);
         const newH = (signedC + 2 * (S * 0.25 - signedC) + wv * Math.abs(wv)) * WATER_DAMP;
-        const i = y * w + x;
         const q = Math.round(512 * (newH * 0.5 + 0.5));
         let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
         if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
@@ -678,6 +722,13 @@ class WaterWaveSystem {
   readGridG(): Float32Array { return this._G; }
   gridW(): number { return this._gW; }
   gridH(): number { return this._gH; }
+  /** 波场读侧亚栅格补偿（obj19 c11=uImageOffset；WaterShaderData.Apply :374）——
+   *  = camCss − snapUp(−4F) ∈ (−4,0] css px，GLWaterDistortion uWaveOff 消费
+   *  （与 _readR 的 CPU 侧补偿同式）。必须在 waterWaves.frame() 之后读取
+   *  （_camX/_scrollX 同帧态）。 */
+  waveReadOffset(): [number, number] {
+    return [this._camX * this._zoom + 4 * this._scrollX, this._camY * this._zoom + 4 * this._scrollY];
+  }
   /** 测试用：重置到干净态 */
   resetForTest(): void {
     this._gW = 0; this._gH = 0;

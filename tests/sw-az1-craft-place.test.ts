@@ -311,8 +311,16 @@ describe('SW-AZ1 结构锁', () => {
   it('UI：左键世界点击不再丢出（右键丢出臂保留）', () => {
     expect(ui).toMatch(/if \(e\.button === 0\) return;\s*\n\s*this\.throwHeldToWorld\(\);/);
     expect(ui).toContain('game.uiHeldItemObj = () => this.heldStack;');
-    // 拖拽丢出路径保留（resolveDrop → throwHeldToWorld）
-    expect(ui).toMatch(/this\.throwHeldToWorld\(\);\s*\n\s*\} else \{\s*\n\s*this\.placeHeld/);
+    // ★SW-BJ92（2026-09-15 用户实报）勘误重钉：resolveDrop 面板外松手 = 物品留在光标,
+    // 不再丢出——vanilla 左键无任何丢出臂（丢出唯一触发 = dropItemCheck Player.cs:5139
+    // mouseRightRelease,即 mousedown 的 button2 臂）。旧锁「resolveDrop →
+    // throwHeldToWorld」把右键臂误接到左键松手,与拾取拖放面互斥（拖到世界全程零放置
+    // 且松手即丢=主诉「取物点世界不能放置」）。throwHeldToWorld 剩余调用面 =
+    // 右键 mousedown 臂 + 触摸长按脉冲 uiTouchRightPulse + closeInventory 满包余量链外无。
+    expect(ui).not.toMatch(/if \(!inPanel\) \{[^}]*throwHeldToWorld/);
+    // 拖拽拾取沿补武世界左键电平（原版 ItemSlot 下帧拾取后 mouseLeft 电平驱动放置链;
+    // 门 = 拾取成沿 heldStack 已置,防空拾取沿让热键物误发）
+    expect(ui).toMatch(/this\.pickUp\(this\.dragFrom\.i, this\.dragFrom\.where\);[\s\S]{0,1400}inp\.mouseDown = true; inp\.mouseHeld = true;/);
   });
 
   it('vanillaCraft 数值契约（★SW-BM1 逐轮重构重钉）：每轮扣一轮料/每轮词缀 roll/双门逐轮', () => {

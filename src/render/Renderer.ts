@@ -289,6 +289,7 @@ import { mechQueenUp, getMechQueenCenter } from '../entities/mechQueen';
 import { combatFontReady, drawCombatText } from './CombatTextFont';
 import { InfoAccsLayer } from './InfoAccsLayer';
 import { buildInfoAccRows, type InfoAccCtx } from '../stats/InfoAccs';
+import { CANVAS_MOUSETEXT_FONT, PIXEL_FONT_FAMILY } from '../vui/draw/PixelText';
 
 /** 原版 holdStyle!=0 物品集（Item.cs SetDefaults holdStyle=1 实证 + TEdit 实名核对）：
  *  火把族（8/彩色 427-433/群系 523..5353）+ 荧光棒族 ItemID.Sets.Glowsticks(282,286,3112,3002,4776,5643)。
@@ -3077,7 +3078,9 @@ export class Renderer {
     fm.panX = (worldW * fm.zoom) / 2 - fm.anchorU * fm.zoom;
     fm.panY = (worldH * fm.zoom) / 2 - fm.anchorV * fm.zoom;
     this._mapInit = false;
-    this._mapOpenClick = true;   // 开图的那次点击不参与拖拽（drawFullMap 消费）
+    // 开图的那次按压排除出地图点击传送（Game:8342 消费）;拖拽不再豁免（vanilla
+    // Main.cs:56153-56161 无此面,见 drawFullMap 注）
+    this._mapOpenClick = true;
   }
   private _fmWorldW = 0;
   private _fmWorldH = 0;
@@ -4336,12 +4339,13 @@ export class Renderer {
     //      rgb(61,204,229)（float→byte 截断）,scale 1,origin(0,0.8)——origin y=0.8×
     //      行高 ⇒ 字形主体悬于鼠标上方;描边=Utils.DrawBorderString(:2679)→
     //      DrawColorCodedStringWithShadow spread 1.5（ChatManager.cs:30 四向 ±x±y
-    //      黑影）。字体原版 FontAssets.MouseText → 本仓 14px monospace 替身
-    //      （同 cursorItemIconText 字体偏差登记）。层序=MouseText(33) 在
+    //      黑影）。字体原版 FontAssets.MouseText → 本仓 CANVAS_MOUSETEXT_FONT
+    //      （★FX35 2026-09-15:19px 项目像素字体,原「14px monospace 替身」退役,
+    //      同 cursorItemIconText 字体偏差登记）。层序=MouseText(33) 在
     //      InteractItemIcon(40) 之下 ⇒ 画在 drawCursorItemIcon 之前。）
     if (this.rulerReadout) {
       ctx.save();
-      ctx.font = '14px monospace';
+      ctx.font = CANVAS_MOUSETEXT_FONT;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       const tm = ctx.measureText(this.rulerReadout.text);
@@ -4620,7 +4624,10 @@ export class Renderer {
     ctx.textBaseline = 'middle';
     const cx = viewW / 2;
     // 「你被杀死了……」@ 屏中 -60（原版 num=-60）
-    ctx.font = 'bold 34px "Fusion Pixel 12px zh_hans", monospace';
+    // ★FX35 2026-09-15:族名勘误——"Fusion Pixel 12px zh_hans" 非 UIFont 注册族,
+    //   canvas 曾静默回退 monospace（同信息栏 Windows 重影根因）;死亡屏大字号
+    //   strokeText 同病,统一 PIXEL_FONT_FAMILY（只改族名,字号不动）
+    ctx.font = `bold 34px ${PIXEL_FONT_FAMILY}, monospace`;
     ctx.strokeStyle = `rgba(0,0,0,${(a * 0.85).toFixed(3)})`;
     ctx.lineWidth = 5;
     const died = Lang.text('LegacyInterface.38');
@@ -4630,7 +4637,7 @@ export class Renderer {
     // 掉钱行（原版 num += 50 后写、再 -=26；效果即 Died 下方一行；lostCoins 由 Game 注入）
     const lost = this.deathLostCoins;
     if (lost > 0) {
-      ctx.font = '16px "Fusion Pixel 12px zh_hans", monospace';
+      ctx.font = `16px ${PIXEL_FONT_FAMILY}, monospace`;   // ★FX35 族名勘误(见上)
       // {0} = ValueToCoins 格式化（Main.cs:44777 传 lostCoinString=ValueToCoins(lostCoins)）
       const coins = Lang.text('Game.DroppedCoins', Lang.valueToCoins(lost));
       ctx.strokeText(coins, cx, viewH / 2 - 10);
@@ -4646,7 +4653,7 @@ export class Renderer {
       slide = num3 * num4;
       const skipAlpha = a * num4;                                      // GetDeathAlpha(Transparent)*num4
       const skipText = Lang.text('Mods.SandboxWorld.UI.RespawnSkip');
-      ctx.font = 'bold 20px "Fusion Pixel 12px zh_hans", monospace';
+      ctx.font = `bold 20px ${PIXEL_FONT_FAMILY}, monospace`;   // ★FX35 族名勘误(见上)
       ctx.strokeStyle = `rgba(0,0,0,${(skipAlpha * 0.85).toFixed(3)})`;
       ctx.lineWidth = 4;
       const sy = viewH / 2 + 26 + slide;
@@ -4658,7 +4665,7 @@ export class Renderer {
     }
     // 重生倒计时（原版 num=-60+70=+10，scale 0.7；★位置随提示滑移联动——num 共用）
     const secs = 1 + Math.floor(player.respawnTimer / 60);
-    ctx.font = 'bold 24px "Fusion Pixel 12px zh_hans", monospace';
+    ctx.font = `bold 24px ${PIXEL_FONT_FAMILY}, monospace`;   // ★FX35 族名勘误(见上)
     const cd = Lang.text('Game.RespawnInSuffix', String(secs));
     const cdY = viewH / 2 + (player.respawnSkipUi ? 26 + slide + 40 : 36);
     ctx.strokeText(cd, cx, cdY);
@@ -15187,15 +15194,20 @@ export class Renderer {
         ctx.restore();
       }
     }
-    // 告示牌悬停文本（Main.cs:42354-42397 1:1）：WordwrapString(text,460,10) 断行 →
+    // 告示牌悬停文本（1457 Main.cs:43667-43712 1:1）：WordwrapString(text,460,10) 断行 →
     // 锚=mouse+(16,16)（OpaqueBox 再 +(8,2)）→ 右/下缘钳制（Y>H-行高×行数、
     // X>W-maxW）→ DrawInvBG 底板（x-10,y-5,w+20,行高×行数+7, Color(23,25,81)×
     // 0.925×0.85）→ DrawBorderStringFourWay 白×mouseTextColor 四向描边。
     // ★canvas fillText y=基线而 XNA DrawString y=字形顶（origin 零）——曾按基线画
     //   致文字浮出底板上缘（2026-08-28 用户实报"标牌文字错位"），textBaseline=top 修正
+    // ★FX35 2026-09-15：字体=CANVAS_MOUSETEXT_FONT（19px 像素字体 ≙ MouseText
+    //   scale 1,460px 换行 ≙ 原版 ~24-25 字/行）;行距 lh 20→30 = 原版逐字钉值
+    //   （:43708 `l * 30` / :43690 `screenHeight - 30*lineAmount` / :43704 底板
+    //   `30*lineAmount+7`——旧 20 是 14px 替身时代的代偿值,未登记;19px 墨高 17.4
+    //   在 20 距下已无行隙）。460px 换行宽与底板公式随 lh 同步归位
     if (this.signHoverText) {
-      ctx.font = '14px monospace';
-      const lh = 20;
+      ctx.font = CANVAS_MOUSETEXT_FONT;
+      const lh = 30;
       const lines: string[] = [];
       // 原版 WordwrapString(Utils.cs:874) = CreateWrappedText 后按 '\n' Split——
       // 硬换行（墓碑 epitaph = 死因\n日期）成独立行。曾不切 \n → 日期黏上死因行、
@@ -15255,7 +15267,9 @@ export class Renderer {
    *  （「时间/深度/移动速度…」,DrawInfoAccs :48175 MouseTextNoOverride 只置缓存
    *  不即画）。锚 = mouse+14 + ThickMouse 默认档 +6（:20379-20389）→ 实锚
    *  mouse+20（> 本仓光标阴影 pass 右缘 ≈+16.4,BJ7 净空不变式）+ 屏幕右/下缘
-   *  40px 收边（:20412-20419,度量=MeasureString 全串,h 取 14px 行盒近似）。
+   *  40px 收边（:20412-20419,度量=MeasureString 全串,h 取 19px 行盒近似）。
+   *  ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（原 14px monospace 替身退役,
+   *  箱名/NPC 名/行标签同族统一,理由见 PixelText.CANVAS_MOUSETEXT_FONT 注）。
    *  ★SW-FX21 2026-09-14 自 drawCursorItemIcon（层 40 域,步骤 7b'）迁出:彼处早于
    *  步骤 9 信息饰品列（层 28 域）→ 悬停行标签被下方行文字叠写压住（用户实报）。
    *  本层挂 render() 尾（步骤 13,死亡画面之后）=主画布最顶层;光标本体在 VUI
@@ -15278,9 +15292,14 @@ export class Renderer {
     if (p.cursorItemIconText === '') return;
     const mt = this.lighting?.clock.mouseTextColor ?? 255;
     const col = Math.round((mt / 255) * 255);
-    ctx.font = '14px monospace';
+    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(19px 像素字体 ≙ MouseText
+    //  scale 1;原「14px monospace 替身」在 Windows DirectWrite 下四向 ±2 描边露出
+    //  偏移拷贝=「叠了几层文字」观感,见 PixelText.CANVAS_MOUSETEXT_FONT 注)。
+    //  h=19:下缘收边用的单行盒近似随字号更新(旧 14=同式近似;原版 :20401 用
+    //  MeasureString 全串盒,本仓维持近似式)
+    ctx.font = CANVAS_MOUSETEXT_FONT;
     const w = ctx.measureText(p.cursorItemIconText).width;
-    const h = 14;
+    const h = 19;
     const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height,
       { heldOnCursor: c.uiHeld });   // F2c:持物锚 X+=34(:20390-20392,债 BJ7-R1 清偿)
     ctx.save();
@@ -16701,8 +16720,10 @@ export class Renderer {
     // :57011-57013 → mouseTextString，经 MouseText 光标白字显示）：drawMapHeads
     // 帧内命中后在此出字（尾段=原版 MouseText 画在界面链末端的同层级）。
     // 色 = mouseTextColor 脉动白 + 四向影（Renderer :14070 同偏差登记）
+    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（MouseText 同族,19px 像素字体,
+    //  原 14px monospace 替身退役——同信息栏 Windows 重影根因）
     if (this.mapNpcHeadHoverName) {
-      ctx.font = '14px monospace';
+      ctx.font = CANVAS_MOUSETEXT_FONT;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
       const mtm = this.lighting?.clock.mouseTextColor ?? 255;
@@ -17121,23 +17142,34 @@ export class Renderer {
     const viewW = ctx.canvas.width, viewH = ctx.canvas.height;
     this._fmWorldW = world.w;
     this._fmWorldH = world.h;
-    // 拖动平移：按下首帧只同步基准点不位移（防地图瞬移）
-    // _mapOpenClick：打开地图的那次点击（Game 置位）不参与拖拽，松开后才允许拖
-    if (mouseDown && !this._mapOpenClick) {
+    // 拖动平移（★原版 Main.cs:56153-56161 逐字语义,2026-09-15 用户实报"开图后要
+    // 再点一下才拖得动"定谳修复）：门 = mouseLeft【电平】;按下首帧（原版
+    // mouseLeftRelease 支）只锚 grabMap 基准不位移,按住次帧起按相对增量平移——
+    // 开图的那次按压（小地图点击开图 Main.cs:41799-41813 同帧置 mapFullscreen）
+    // 【没有】"本按压不拖拽"豁免:按住继续移动即拖。旧 _mapOpenClick 把开图按压
+    // 整段排除在拖拽外 = 原版无此面（用户主诉）。旗保留给 Game:8342 的地图点击
+    // 传送排除面（开图点击不得再触发传送/ping）,松开照旧复位。
+    if (mouseDown) {
       if (!this.mapDragging) {
         this.mapDragging = true;
       } else {
-        fm.panX += mouseX - this.lastMouse.x;
-        fm.panY += mouseY - this.lastMouse.y;
-        // 拖动改变 pan 后按当前鼠标重设锚点（缓动中的缩放继续稳定）
-        const viewW = ctx.canvas.width, viewH = ctx.canvas.height;
-        fm.anchorU = (mouseX - (viewW / 2 - (this._fmWorldW * fm.zoom) / 2 + fm.panX)) / fm.zoom;
-        fm.anchorV = (mouseY - (viewH / 2 - (this._fmWorldH * fm.zoom) / 2 + fm.panY)) / fm.zoom;
-        fm.anchorMX = mouseX;
-        fm.anchorMY = mouseY;
+        const dx = mouseX - this.lastMouse.x, dy = mouseY - this.lastMouse.y;
+        // ★位移门:静止按住不重锚——开图缓动期锚点仍钉主角（旧 _mapOpenClick 当年
+        //   防的"飞向主角变飞向点击处"根因=静止按压也重锚到点击处,此处收口不复发）
+        if (dx !== 0 || dy !== 0) {
+          fm.panX += dx;
+          fm.panY += dy;
+          // 拖动改变 pan 后按当前鼠标重设锚点（缓动中的缩放继续稳定）
+          const viewW = ctx.canvas.width, viewH = ctx.canvas.height;
+          fm.anchorU = (mouseX - (viewW / 2 - (this._fmWorldW * fm.zoom) / 2 + fm.panX)) / fm.zoom;
+          fm.anchorV = (mouseY - (viewH / 2 - (this._fmWorldH * fm.zoom) / 2 + fm.panY)) / fm.zoom;
+          fm.anchorMX = mouseX;
+          fm.anchorMY = mouseY;
+        }
       }
     } else {
-      if (!mouseDown) this._mapOpenClick = false; // 松开后恢复正常拖拽
+      // 松开复位旗（Game:8342 开图点击传送排除面在开图按压结束后让位给正常点击）
+      this._mapOpenClick = false;
       this.mapDragging = false;
     }
     this.lastMouse = { x: mouseX, y: mouseY };

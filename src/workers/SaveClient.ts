@@ -77,6 +77,9 @@ export class SaveClient {
       bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
       moonPhase: world.clock.moonPhase, moonType: world.moonType,
       seedFlags: { ...world.seedFlags },   // 彩蛋种子旗标（SeedEasterEggs;loadSaveData header 回填）——★BJ71:曾漏喂=worker 保存丢旗
+      // ★IIIII20b 换人一次性迁移标（★BJ90 2026-09-15 补喂,BJ71 登记①）——本 meta 是生产
+      //  保存主路径的第三份装配,曾漏喂=worker 路径落盘无键（迁移标每次读档恒假复发面）
+      starterSwapMigrated: world.starterSwapMigrated,
       difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
       journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
       // 旅程力量·世界侧（IPersistentPerWorldContent；与 saveGame 主线程路径同源）

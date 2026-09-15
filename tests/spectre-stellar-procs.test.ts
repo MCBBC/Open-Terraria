@@ -540,7 +540,7 @@ describe('★F1③ collectStellarTargets 候选携带 velocity 提前量(:47039 
 });
 
 describe('★F3 弹体 CutTiles/小动物旁路（Projectile.cs:12513-12518→CutTiles :15276）', () => {
-  it('856 子步 CutTiles：单 tick 三子步各自盒(+1 外沿)全数上报 game.cutTile', () => {
+  it('856 子步 CutTiles：单 tick 三子步各自盒(右/下排除界)全数上报 game.cutTile', () => {
     const p = new Player(120, 940, new Inventory());
     const { hooks, cutCalls } = makeHooks([], undefined, p);
     const g = new SparkleGuitarProj(488, 968, 100, 0, 81, 488, 968);
@@ -558,8 +558,12 @@ describe('★F3 弹体 CutTiles/小动物旁路（Projectile.cs:12513-12518→Cu
         { x: 488 + (-g.vx) * (1 - t01 * 3), y: 968 + (-g.vy) * (1 - t01 * 3) }, t01);
       const bx = pos.x - 16, by = pos.y - 16;               // w=h=32 → 左上=心−16
       const x0 = Math.floor(bx / 16), y0 = Math.floor(by / 16);
-      for (let ix = x0; ix <= Math.floor((bx + 32) / 16) + 1; ix++) {
-        for (let iy = y0; iy <= Math.floor((by + 32) / 16) + 1; iy++) {
+      // ★SW-BJ88 债4②：cutTilesBox 右/下 +1=循环排除界（CutTilesAt P.cs:15377/
+      //  :15379 `i < num2`）——末含格 = floor((bx+32)/16);旧期望式 `<= …+1` 把
+      //  排除界当含端再吃一遍=多 1 列/行（陈旧金标随刀更新,三子步盒交叠曾使其
+      //  间歇性假绿）
+      for (let ix = x0; ix <= Math.floor((bx + 32) / 16); ix++) {
+        for (let iy = y0; iy <= Math.floor((by + 32) / 16); iy++) {
           expectedSet.add(`${ix},${iy}`);
         }
       }
@@ -578,10 +582,12 @@ describe('★F3 弹体 CutTiles/小动物旁路（Projectile.cs:12513-12518→Cu
     cutCalls.length = 0;
     ((SparkleGuitarProj.prototype as unknown as Record<string, (gh: GameHooks) => void>)
       .killStellarTune as (gh: GameHooks) => void).call(g, hooks);
-    // 盒左上=(488-64,968-64)=(424,904) → tiles [26..53]×[56..119] 外沿随盒尺寸
+    // 盒左上=(488-64,968-64)=(424,904),右缘 552 → X 末含格 = floor(552/16)=34
+    // （★SW-BJ88 债4②：右/下 +1=排除界,旧 35 列 [560,576) 盒根本不触,不再上报）
     const xs = cutCalls.map((c) => c.ix);
     expect(Math.min(...xs)).toBe(Math.floor(424 / 16));
-    expect(cutCalls.some((c) => c.ix === Math.floor((424 + 128) / 16) + 1)).toBe(true);
+    expect(cutCalls.some((c) => c.ix === Math.floor((424 + 128) / 16))).toBe(true);
+    expect(cutCalls.some((c) => c.ix === Math.floor((424 + 128) / 16) + 1)).toBe(false);
   });
 
   it('356 预热期不砍(friendly=false 早退)；转正后子步照砍', () => {

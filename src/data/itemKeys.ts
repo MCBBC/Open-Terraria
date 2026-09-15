@@ -37,6 +37,15 @@ export const VI_KEY = {
   MECH_WORM: VI(556), MECH_EYE: VI(544), MECH_SKULL: VI(557),
   // 开局三件套(原版新玩家:Copper Pickaxe/Shortsword/Axe)
   STARTER: { PICK: VI(3509), SHORTSWORD: VI(3507), AXE: VI(3506) },
+  // 旅程难度新角色大礼包（★BJ91 2026-09-15 BJ87 债 B;UICharacterCreation.cs:1720-1747
+  //   逐槽连排;ItemID.cs:
+  //   1548 IronPickaxe=1 / 1558 IronShortsword=6 / 1560 IronHammer=7 / 1566 IronAxe=10 /
+  //   10108 BabyBirdStaff=4281 / 1562 Torch=8 / 3476 Rope=965 / 1646 MagicMirror=50 /
+  //   1714 GrapplingHook=84 / 11502 CreativeWings(雏鸟翼)=4978）
+  JOURNEY: {
+    SHORTSWORD: VI(6), PICK: VI(1), AXE: VI(10), HAMMER: VI(7), FINCH_STAFF: VI(4281),
+    TORCH: VI(8), ROPE: VI(965), MAGIC_MIRROR: VI(50), GRAPPLING_HOOK: VI(84), WINGS: VI(4978),
+  },
   // 钱币(单轨,Inventory.COIN_KEYS 同源)
   COIN: { COPPER: VI(71), SILVER: VI(72), GOLD: VI(73), PLATINUM: VI(74) },
   // 饰品(退役本地 accessory 枚举的继任)

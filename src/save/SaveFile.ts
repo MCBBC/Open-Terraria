@@ -87,7 +87,11 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     oreTiersPH: { ...world.oreTiersPH },        // 肉前四档（WF:11294-11320,军火商钨弹门）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
-    bannerKills: world.bannerKills,   // BannerSystem.killCount（BannerSystem.cs:32 随存档）
+    // ★BJ90 勘误（2026-09-15，BJ71 登记③）：原注「BannerSystem.cs:32 随存档」锚错——
+    //  BannerSystem.cs:25-32 区是 NetBannersModule 网络包写手（WriteKillCountPacket/
+    //  WriteKillCountUpdate），非世界档持久化。真锚=WorldFile.cs:1347 BannerSystem.Save
+    //  （:171-79 i16 n + n×i32）/:2210 Load（:183-97 v<109 无段）；1458 同段零变更。
+    bannerKills: world.bannerKills,   // BannerSystem.killCount（WF:1347 Save/:2210 Load 随世界档）
     // ★SW-FX43（2026-09-12）：wld-compat 五通道随档（World→SaveMeta→serializeSave）：
     //  caveBackX/worldId（建模值:自建=worldgen 掷值/导入=原值）+ wldSnap 差量快照
     //  + teSnap/townRooms/bgStyles 透传（FX35 剩债:repo 存档链曾不携行——bgStyles 同族
@@ -191,6 +195,9 @@ export function buildSaveParts(world: World): {
     crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
     timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
     difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）——服务器档随世界下发
+    // ★IIIII20b 换人一次性迁移标（★BJ90 2026-09-15 补喂,BJ71 登记①）——服务器/件路径
+    // 同缝（BJ71 判例:凡 meta 装配多轨必逐轨核对喂入面）
+    starterSwapMigrated: world.starterSwapMigrated,
     chests: world.chests, signs: world.signs, flags: world.flags,
     weather: weatherToSave(world.weather),
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
@@ -209,7 +216,9 @@ export function buildSaveParts(world: World): {
     fastForwardTimeToDawn: world.fastForwardTimeToDawn,
     fastForwardTimeToDusk: world.fastForwardTimeToDusk,
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
-    bannerKills: world.bannerKills,   // BannerSystem.killCount（BannerSystem.cs:32 随存档）
+    // ★BJ90 勘误（2026-09-15，BJ71 登记③）：注同上——真锚=WF:1347 BannerSystem.Save/:2210
+    //  Load（BannerSystem.cs:32 区是网络包写手,非存档位）
+    bannerKills: world.bannerKills,   // BannerSystem.killCount（WF:1347 Save/:2210 Load 随世界档）
     // ★SW-FX43：wld-compat 五通道随档（服务器/worker 件路径与 saveGame 同源,注同上;
     //  bgStyles 同族断链=round-trip 真档验证炸出,一并接通）
     worldId: world.worldId,

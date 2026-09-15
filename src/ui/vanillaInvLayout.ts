@@ -194,13 +194,12 @@ export function accessoryCheckY(num20: number, row: number): number {
   return num20 - 2 + Math.trunc(row * CELL_STEP) + (row >= 3 ? ACC_GAP : 0);
 }
 
-// ---- 配装轨(DrawLoadoutButtons Main.cs:42651-42707) ----
-//   竖轨 (sw-44, num20+2, 4, trunc(可见行数·47.6)):★轨高 n = 装备列可见行数
-//   (:42653-42662 num=10-缺恶魔心-缺大师,缺省 8,非钮数 3!);钮恒 3 颗
-//   32×32 @(sw-40, num20+36i)(:42674 步距 num5+num6=36)
-export function loadoutRailRect(sw: number, num20: number, visibleRows: number) {
-  return { x: sw - 44, y: num20 + 2, w: 4, h: Math.trunc(visibleRows * CELL_STEP) };
-}
+// ---- 配装钮(DrawLoadoutButtons Main.cs:42651-42707) ----
+//   ★FX29 定谳:42667 的 4px rectangle(sw-44, num20, 4, ≈num·47.6)仅作钮定位锚,
+//   原版【不渲染】——全方法无 spriteBatch.Draw(rectangle);42668 GetLoadoutColor
+//   (CurrentLoadoutIndex) 返回值被弃(ItemSlot.cs:2832-2835 纯函数);Extra_259
+//   114×102=9 帧 38×34 无轨美术。钮恒 3 颗 32×32 @(sw-40, num20+36i)
+//   (:42676 rectangle.X+rectangle.Width=sw-40,步距 num5+num6=36)
 export function loadoutBtnXY(sw: number, num20: number, i: number): { x: number; y: number } {
   return { x: sw - 40, y: num20 + 36 * i };
 }

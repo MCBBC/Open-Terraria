@@ -62,6 +62,10 @@ export interface WorldPacket {
   fastForwardTimeToDawn?: boolean; fastForwardTimeToDusk?: boolean;
   /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；血月 1/6 十周年 / drunkWorld 黎明翻转；旧包缺省={}） */
   seedFlags?: import('../world/gen/SeedEasterEggs').SeedFlags;
+  /** ★IIIII20b：StarterNPC 换人一次性迁移标记（worker 读档路径回传——★BJ90 2026-09-15
+   *  补携,BJ71 登记①:曾缺=即使保存面写入,worker 读档包缝即丢,迁移标每次读档恒假复发;
+   *  旧包缺省=未迁移） */
+  starterSwapMigrated?: boolean;
   /** 天气快照（读档路径回传;旧包缺省=晴） */
   weather?: WeatherSave;
   /** 图鉴三桶（读档路径回传;旧包缺省=空） */

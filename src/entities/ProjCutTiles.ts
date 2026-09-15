@@ -1,8 +1,9 @@
 // 弹体 CutTiles 共享助手（Projectile.Damage→CutTiles :12517/:15276 全仓单点）。
 //
 // 原版语义：friendly 玩家弹（!npcProj && !minion && type!=1054）每 tick 在 Damage()
-// 内旁路调 CutTiles()——扫弹盒（CutTilesAt :15454，右/下各 +1 外沿、循环含端）把
-// Main.tileCut 格 KillTile。门 = CanCutTiles(:15407)：aiStyle 45/137/92/105/106、
+// 内旁路调 CutTiles()——扫弹盒（CutTilesAt :15354-15405,右/下 +1 是【循环排除界】,
+// 末含格=(int)((x+w)/16),见 cutTilesBox 注）把 Main.tileCut 格 KillTile。
+// 门 = CanCutTiles(:15407)：aiStyle 45/137/92/105/106、
 // 高尔夫球与排除型 {463,69,70,621,10,11,379,407,476,623,625..628,833..835,818,831,
 // 820,864,970,995,908,1020,1105,1040}，尾支 return type!=1091；外层再套
 // Damage_CanDealDamage(:12461) 排除表（如 535 前 30t / 1092 ai0≤1 段不结算=不砍）。
@@ -19,9 +20,19 @@ import type { GameHooks } from './types';
  *  undefined = 旧无型语义（全部既有调用方零变化）。 */
 export function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h: number,
   vid?: number): void {
+  // ★SW-BJ88（2026-09-15）债4②：右/下边界对齐（CutTilesAt P.cs:15356-15359 +
+  //  :15377/:15379 直译;1458 :15357 同,逐字对拍 2026-09-15）——原版
+  //  `num2=(int)((x+w)/16)+1` 后循环【i < num2】= +1 是排除界,末含格 =
+  //  (int)((x+w)/16);旧仓 `<= x1` 把 +1 当含端再吃一遍 → 右/下各多割 1 列/行
+  //  （31 宽盒 x=104 曾割到第 9 列 [144,160),盒右缘 135 根本不触）。
+  //  对齐后：非对齐缘=恰覆盖半格尾格;盒缘恰落在格界时含界上格（:15357 原版
+  //  字面）。近战侧 mowCutTiles（Game.ts,ItemCheck_CutTiles :45024-45029 同为
+  //  排除界）末含格=trunc((y+h)/16) 本就正确,唯此弹侧助手双计 +1。
+  //  原版 num<0/num2>maxTilesX 钳制（:15360-15375）由 game.cutTile 内界外零操作
+  //  等价承载,不另设钳。
   const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE) + 1;
   const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE) + 1;
-  for (let ix = x0; ix <= x1; ix++) {
-    for (let iy = y0; iy <= y1; iy++) game.cutTile?.(ix, iy, vid);
+  for (let ix = x0; ix < x1; ix++) {                   // i < num2（:15377 排除界,勿回改 <=）
+    for (let iy = y0; iy < y1; iy++) game.cutTile?.(ix, iy, vid);   // j < num4（:15379）
   }
 }

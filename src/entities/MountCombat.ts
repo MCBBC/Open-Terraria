@@ -652,14 +652,19 @@ function playerArmorPenOf(game: GameHooks): number {
 
 /** 史莱姆坐骑液体态滴答：wetSlime--（:28173-28175）；浸液（原版 wet 不分液体种类）
  *  且骑史莱姆族时 wetSlime=30 + 浮力档（:28195-28207：vy>2 ×0.9 缓降、vy-=0.5
- *  浮升、vy<-4 钳回 —— 从史莱姆座上入水会缓缓下沉不被冻住）。 */
+ *  浮升、vy<-4 钳回 —— 从史莱姆座上入水会缓缓下沉不被冻住）。
+ *  ★SW-RB20a F6③（2026-09-15）：探针基面由 inWater∪inLava∪inHoney 三桶并集 →
+ *  wetSticky（≙ vanilla wet 粘滞位,Player.cs:28192 `if (wet)`——原版该读点在
+ *  :28060/:28073 分支【后】,wet 已被本拍 num86 刷新≡num86;本仓调用位 Player.ts
+ *  湿流程后,wetSticky 后值≡wetNow 同构）。三桶并集混入全盒 LavaCollision 幻影
+ *  =BJ89 定谳家族（探针干+全盒岩浆擦过时原版 wet 假→坐骑不入浮力档,并集真→幻影档）。 */
 export function tickSlimeWetState(p: {
-  inWater?: boolean; inLava?: boolean; inHoney?: boolean; vy: number; wetSlime?: number;
+  wetSticky?: boolean; vy: number; wetSlime?: number;
   mount: { active: boolean; type: number };
 }): void {
   if ((p.wetSlime ?? 0) > 0) p.wetSlime = (p.wetSlime ?? 0) - 1;   // :28173-28175
   if (!p.mount.active) return;
-  if (!(p.inWater || p.inLava || p.inHoney)) return;
+  if (!p.wetSticky) return;
   if (!isConsideredASlimeMount(p.mount.type)) return;
   p.wetSlime = 30;                                                // :28196-28197
   if (p.vy > 2) p.vy *= 0.9;                                      // :28198-28200

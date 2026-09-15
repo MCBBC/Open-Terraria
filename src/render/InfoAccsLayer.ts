@@ -7,7 +7,12 @@
 // (备案:原版矮屏走装备页耦合纵排 :48120,本仓背包自研布局不映射)。
 // 交互:悬停 tooltip=行标签(Game 侧接 cursorItemIconText);点击切 hideInfo
 // (:46547-46573);隐藏态图标 = Color(80,80,80,70) 乘色;悬停叠 InfoIcon_13。
-// 字体偏差登记:原版 FontAssets.MouseText;本仓 canvas 常规字体+strokeText 四向描边。
+// 字体偏差登记:原版 FontAssets.MouseText(scale 1,CJK 墨高 17-19/推进 18.5);
+// 本仓 canvas+四向 ±2 描边,字体串 = CANVAS_MOUSETEXT_FONT(19px 项目像素字体,
+// FX27 实测链定谳——★FX35 2026-09-15:原「14px monospace 替身」在 Windows
+// DirectWrite 下四向偏移露出偏移拷贝=「叠了几层文字」观感(用户实报,Mac 同症
+// 不显),像素字体后描边被实心字形吃净;详见 PixelText.CANVAS_MOUSETEXT_FONT 注)。
+import { CANVAS_MOUSETEXT_FONT } from '../vui/draw/PixelText';
 import { UITextures } from '../vui/assets/UITextures';
 import { buildInfoAccRows, type InfoAccCtx, type InfoAccRow } from '../stats/InfoAccs';
 
@@ -151,8 +156,11 @@ export class InfoAccsLayer {
         // 文本(:46594-46639):宽 >215 缩 X;scaleX<0.58 缩 Y;4 遍黑描边+正文;
         // "附近无 X"行文字降灰(:46328/:46388/:46414 等 infoTextColor=Color(100,100,100));
         // 悬停行的**下一行**压暗 1/3(:46629-46632:i>num2 && i<num2+2,无悬停恒不暗)
+        // ★FX35 2026-09-15 字体见头注(19px 像素字体 ≙ MouseText scale 1);19px 档
+        //  CJK 墨高 17.4 → 行距 22 与原版同相(墨高 17-19/距 22);下述 +2 低偏在
+        //  17.4 墨高下 = 图标顶 ≈ 字形顶+3.7 ≙ 原版「图标顶=文本顶+4」
         const dim = hoveredRow >= 0 && i === hoveredRow + 1 ? 0.34 : 1;
-        ctx.font = '14px monospace';
+        ctx.font = CANVAS_MOUSETEXT_FONT;
         const m = ctx.measureText(r.text);
         const w = m.width;
         let scaleX = 1;

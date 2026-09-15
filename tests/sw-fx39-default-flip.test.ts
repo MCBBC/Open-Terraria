@@ -180,14 +180,15 @@ describe('SW-FX39 ③差集审计终态锁(vinv 缺省态逐面在位)', () => {
     expect(v()).toContain('this.miscBuffCol = col;');                     // FX10 债④ 杂项页 buff 列
   });
 
-  it('槽位面:网格 0-49/钱币/弹药/垃圾桶/装备|时装|染料三列/杂项页/配装轨/PvP', () => {
+  it('槽位面:网格 0-49/钱币/弹药/垃圾桶/装备|时装|染料三列/杂项页/配装钮/PvP', () => {
     expect(v()).toContain("this.vinvMakeSlot('inv', COIN_START + k, COIN_AMMO_SCALE);");
     expect(v()).toContain("this.vinvMakeSlot('inv', AMMO_START + k, COIN_AMMO_SCALE);");
     expect(v()).toContain('private vinvBuildTrash(): HTMLElement {');
     expect(v()).toContain("buildEquipCol('vanity', [10, 11, 12, 13, 14, 15, 16, 17, 18, 19], VANITY_COL_X, INV_SCALE);");
     expect(v()).toContain("buildEquipCol('dye', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], DYE_COL_X, INV_SCALE);");
     expect(v()).toContain("this.vinvMakeSlot('misc', m, INV_SCALE);");
-    expect(v()).toContain('loadoutRailRect(c.sw, c.num20, c.visibleRows)');
+    expect(v()).not.toContain('loadoutRailRect');                     // ★FX29 定谳:原版不画轨(42667 仅定位锚),虚元素摘除禁回流
+    expect(v()).not.toContain('rgba(120,130,180');
     expect(v()).toContain('pvpSwordXY(c.sw, c.mH, this.vinvPageCurrent === 2)');
   });
 

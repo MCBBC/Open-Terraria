@@ -2496,6 +2496,45 @@ export function dropInventoryOnDeath(
   inv.miscDyes.fill(null);
   for (const l of inv.loadouts) { l.armor.fill(null); l.dye.fill(null); }
   // 发还铜制起始三件套（原版 1:1 顺序：[0]短剑 3507 / [1]镐 3509 / [2]斧 3506）
+  grantStarterKit(inv);
+}
+
+/** 新角色开局套【逐槽直置】（★SW-BJ87 2026-09-15；★BJ91 2026-09-15 补旅程分支=BJ87
+ *  登记债 B）：UICharacterCreation.cs:1714-1761 SetupPlayerStatsAndInventoryBasedOnDifficulty
+ *  1:1——difficulty==3 旅程支（:1720-1747,1458 同锚零变更）逐槽连排大礼包：
+ *  [0]=6 铁短剑 / [1]=1 铁镐 / [2]=10 铁斧 / [3]=7 铁锤 / [4]=4281 雏鸟杖 /
+ *  [5]=8 火把×100 / [6]=965 藤蔓绳×100 / [7]=50 魔镜 / [8]=84 抓钩 +
+ *  armor[3]=4978 雏鸟翼（ItemID.cs:1548/1558/1566/1560/10108/1562/3476/1646/
+ *  1714/11502；armor[3]=首配饰槽,本仓 Inventory.armor 同布局）。经典支（:1749-1756）：
+ *  inventory[0]=3507 铜短剑 / [1]=3509 铜镐 / [2]=3506 铜斧（ItemID.cs:8558/:8560/:8564），
+ *  各 Prefix(-1)（本仓词缀面=缺省无词缀）。槽 0-9=原版热键区首行。
+ *  ★旅程支原版另有狼宠彩蛋（名 "wolf pet"/"wolfpet" → miscEquips[3]=5130
+ *  :1743-1746）与 AddBuff(216,3600) BabyBird(:1747)——本刀未纳（宠物链/buff 面
+ *  未建模域,登记观察项）;[7]/[8] 两支原版无显式 stack 赋值=1（SetDefaults 缺省）。
+ *  ★原版不走 GetItem 路由（同款直置另见中核死亡发还 Player.DropItems :55010-55015
+ *  ——死亡发还是无条件经典铜三件,不随 difficulty,本仓死亡路 grantStarterKit(inv)
+ *  缺省 difficulty=0 同相）；曾用 inv.add 路由：三件 vanilla-itemfunc 缺 useStyle
+ *  （共享 case 提取盲区）→ itemUseStyleOf exact-only=0 → GetItem 热栏空格臂
+ *  （:39671-39680 useStyle!=0）不可达 → 降序臂（:39688-39700）落背包尾 49/48/47
+ *  （用户实报"三件套在物品栏不在热键区"）。禁止回改为路由写法。
+ *  1458 同锚：1458 UICharacterCreation.cs:1751-1755（经典支）零变更。 */
+export function grantStarterKit(inv: import('../items/Inventory').Inventory, difficulty = 0): void {
+  if (difficulty === 3) {
+    // 旅程支（UICharacterCreation.cs:1724-1741 连排序 verbatim——num 逐槽自增）
+    const kit: Array<[string, number]> = [
+      [VI_KEY.JOURNEY.SHORTSWORD, 1], [VI_KEY.JOURNEY.PICK, 1], [VI_KEY.JOURNEY.AXE, 1],
+      [VI_KEY.JOURNEY.HAMMER, 1], [VI_KEY.JOURNEY.FINCH_STAFF, 1],
+      [VI_KEY.JOURNEY.TORCH, 100], [VI_KEY.JOURNEY.ROPE, 100],
+      [VI_KEY.JOURNEY.MAGIC_MIRROR, 1], [VI_KEY.JOURNEY.GRAPPLING_HOOK, 1],
+    ];
+    kit.forEach(([key, stack], i) => {
+      const id = ITEM_BY_KEY[key];
+      if (id !== undefined) inv.slots[i] = { id, stack };
+    });
+    const wings = ITEM_BY_KEY[VI_KEY.JOURNEY.WINGS];
+    if (wings !== undefined) inv.armor[3] = { id: wings, stack: 1 };   // :1740 armor[3].SetDefaults(4978)
+    return;
+  }
   const starter = [VI_KEY.STARTER.SHORTSWORD, VI_KEY.STARTER.PICK, VI_KEY.STARTER.AXE];
   starter.forEach((key, i) => {
     const id = ITEM_BY_KEY[key];
@@ -2545,8 +2584,11 @@ export interface GameCallbacks {
   onToast: (msg: string) => void;
   /** 死亡收背包（Main.cs:46435-46440 dead ⇒ playerInventory=false;UI 实现,缺省=无 UI 兼容） */
   closeInventory?: () => void;
-  /** 住房光标态变化（激活/单发后置 null——UI 侧同步面板高亮） */
-  onHousingCursor?: (mode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null) => void;
+  /** 住房光标态变化（激活/单发后置 null——UI 侧同步面板高亮）。
+   *  ★keepPanel（缺省 false = BJ32 关条通道,cursorChanged(null) 自毁）：true =
+   *  仅摘选中、面板保持——分配成功/右键取消的原版收口（TryMovingNPC
+   *  Main.cs:45931 / 右键臂 :45943 只清携带,背包与住房列表照开） */
+  onHousingCursor?: (mode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null, keepPanel?: boolean) => void;
   /** 成就解锁弹窗(原版 InGamePopups 底部居中;UI 实现,缺省回退 onToast) */
   onAchievementPopup?: (name: string, title: string) => void;
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
@@ -6815,11 +6857,19 @@ export class Game implements GameHooks {
     this.player.quickManaHook = () => this.quickMana();
     // 坐椅起身钩（Player TryFloatingInFluid :23646-49 isSitting → SitUp）
     this.player.sitUpHook = () => this.standUp();
-    // 初始装备 = 原版经典开局三件套（铜镐 3509/铜斧 3506/铜短剑 3507），其余一概不给——
-    // 调试用道具经背包面板的"搜索添加"按钮获取（UI.ts 道具搜索器）
-    this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.PICK], 1);
-    this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.AXE], 1);
-    this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
+    // 初始装备 = 原版经典开局三件套，其余一概不给——调试用道具经背包面板的
+    // "搜索添加"按钮获取（UI.ts 道具搜索器）
+    // ★SW-BJ87 2026-09-15：落位改逐槽直置 grantStarterKit（vanilla 锚见其头注：
+    //   UICharacterCreation.cs:1749-1756 经典支 = 热键区 [0]短剑/[1]镐/[2]斧）——
+    //   曾走 inv.add（GetItem 路由）：三件 useStyle 数据缺 → 热栏臂不可达 → 降序臂
+    //   落背包尾 49/48/47；新建角色进世界（createWorldFlow 无随身态分支只吃本处
+    //   授予）=热键区全空（用户实报）。有随身态角色由 applyPlayer 整表回填覆盖，
+    //   本处授予对其无残留（旧档不受影响）。
+    // ★BJ91 2026-09-15（BJ87 登记债 B）：difficulty 入参——旅程角色（==3）走
+    //   旅程支大礼包（UICharacterCreation.cs:1720-1747）。此刻外观尚未落位
+    //   （applyAppearance 在 onWorldReady 才跑）→ 读 preloadAppearance（mainFlow
+    //   makeGame 时已置=selectedAppearance），player.appearance 为兜底。
+    grantStarterKit(this.player.inv, this.preloadAppearance?.difficulty ?? this.player.appearance?.difficulty ?? 0);
     this.prefetchInvProjectiles();
     // 载入终态保险(2026-08-17 用户报花墙 68 绿块回退):读档玩家远离出生点时
     // 出生点预载不含玩家区墙表,首烘回退后晚到重烘偶发漏达(挖一格=markDirty
@@ -8272,7 +8322,8 @@ export class Game implements GameHooks {
         fm.panX = (this.world.w * fm.zoom) / 2 - fm.anchorU * fm.zoom;
         fm.panY = (this.world.h * fm.zoom) / 2 - fm.anchorV * fm.zoom;
         this.renderer['_mapInit'] = false;
-        // 打开地图的这次点击不算拖拽（否则按住期间 drawFullMap 会把锚点重设到点击处，飞向主角变飞向点击处）
+        // 开图的这次按压排除出地图点击传送（:8342 消费）;拖拽不豁免（vanilla
+        // Main.cs:56153-56161 无"开图按压不拖拽"面,见 Renderer.drawFullMap 注）
         this.renderer['_mapOpenClick'] = true;
         this._mapClickLatch = true;
       }
@@ -8432,8 +8483,9 @@ export class Game implements GameHooks {
       player.aimWX = awx;
       player.aimWY = awy;
       // SW-AF1 2026-09-04（F-2 电平重构）：inputUseItem 亦为 controlUseItem 等价面
-      //  （坐骑瞄准/致动杆锁消费）——同吃 TriggersSet.cs:838-847 按住期 blockMouse 压制
-      player.inputUseItem = !!inp.mouseDown && !inp.blockMouse;
+      //  （坐骑瞄准/致动杆锁消费）——同吃 TriggersSet.cs:838-847 按住期 blockMouse 压制;
+      //  ★R4-22 电平化：同吃 :853-859 delayUseItem 压制（旗存续=controlUseItem 强制 false）
+      player.inputUseItem = !!inp.mouseDown && !inp.blockMouse && !inp.delayUseItem;
       player.inputUseTile = !!inp.rightDown;
       // 致动魔杖锁清理（★A-6 2026-09-04：Player.cs:43160 releaseUseItem=!controlUseItem
       //  + :18918-18921 `if (releaseUseItem) ActuationRodLock = false`——左键不按即清）
@@ -8838,7 +8890,8 @@ export class Game implements GameHooks {
       const heldF = this.player.inv.heldItem();
       const fDef = heldF ? ITEM_DEFS[heldF.id] : null;
       const fVid = fDef ? (fDef.vid ?? viIdFromKey(fDef.key)) : -1;
-      const channeling = (fVid === 5664 || fVid === 6149) && inp.mouseDown && !inp.uiBlocking && !this.player.dead;
+      const channeling = (fVid === 5664 || fVid === 6149) && inp.mouseDown && !inp.uiBlocking && !this.player.dead
+        && !inp.delayUseItem;   // ★R4-22 电平化：channel 臂同吃 :853-859 压制（controlUseItem 等价面）
       for (const e of this.entities.projectiles) {
         const m = e as MinionProj;
         if (!(m instanceof MinionProj) || m.dead) continue;
@@ -12117,7 +12170,8 @@ export class Game implements GameHooks {
     // 在按住的非首帧恒触发 → 连通锁（GetDesiredDirectionFrom :1442 锁向优先/
     // AllowedForContinuity :1413）永不生效 = 智能平台拖拽续铺原版本面缺失。
     // uiBlocking/inpOverDomUi = mouseInterface 本仓等价面;inp.blockMouse 同名同义。
-    const controlUseItem = !!inp.mouseHeld && !inp.blockMouse
+    // ★R4-22 电平化：同吃 TriggersSet.cs:853-859 delayUseItem 压制（旗存续期强制 false）
+    const controlUseItem = !!inp.mouseHeld && !inp.blockMouse && !inp.delayUseItem
       && !inp.uiBlocking && !this.inpOverDomUi();
     if (sc.updateWanted(controlSmart, controlUseItem, s)) this.sfx.play('menuTick');
     // ★SW-BJ49 2026-09-09：blocked 表摘除 `!!this.minecart`——原版 SmartCursorLookup
@@ -12508,19 +12562,34 @@ export class Game implements GameHooks {
     // if (!flag5) channel = false`）——Dirt Rod 泥球跟鼠标的断链源（松手即落）
     if (!inp.mouseHeld) this._dirtRodChannel = false;
     this.tryFaceHeldAim();
-    // 住房光标激活（mouseNPC 持续态,Main.cs:44664-44688）：左键点世界 = 查询/
-    // 分配并吞点击；右键/开背包取消由 UI 侧处理（清 housingMode + Sound 12）
+    // 住房光标激活（mouseNPC 持续态,DrawInterface_38_MouseCarriedObject
+    // Main.cs:45947-46002）：左键点世界 = 查询/分配并吞点击。
+    // ★退出语义定谳（2026-09-15 用户实报「分配后单击一直=分配」）：
+    //   分配成功 → TryMovingNPC :45929-45936 MoveTownNPC 过 ⇒ SetMouseNPC(-1,-1)
+    //   摘携带+Sound 12（失败无分支=保持携带可重试）；查询 → PerformHousingCheck
+    //   :45918-45927 不清携带（连查多间,原版同款）；右键 → :45941-45945
+    //   mouseRight&&mouseRightRelease ⇒ Sound 12+SetMouseNPC(-1,-1)（全屏任意处,
+    //   不限于条上——此前右键取消只接在 UI 槽位上）；关包 → :46429（UI 侧 closeInventory）
     if (this.housingMode) {
       if (inp.mouseDown && !this._prevMouseDown) {
         const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         if (this.housingMode.kind === 'query') {
           this.housingQuery(Math.floor(wx / TILE), Math.floor(wy / TILE));
         } else {
-          this.housingAssign(Math.floor(wx / TILE), Math.floor(wy / TILE), this.housingMode.npcKey);
+          // 2026-08-27「光标保留」注记仅对查询态成立（连查多间）；分配态成功即退出
+          // ——旧单发语义的 onHousingCursor(null) 曾连带收面板,由 keepPanel 参数解耦
+          if (this.housingAssign(Math.floor(wx / TILE), Math.floor(wy / TILE), this.housingMode.npcKey)) {
+            this.housingMode = null;
+            this.cb.onHousingCursor?.(null, true);   // 仅摘选中,面板保持
+          }
         }
-        // ★光标保留（2026-08-27 用户要求：探查/分配后不切回背包——可连续查询
-        // 多间房屋/把同一 NPC 指到多间；取消 = 右键条上落光标/✕/E）
-        // this.housingMode = null;   // 旧单发语义（曾发 onHousingCursor(null) 连带收面板）
+      }
+      // 右键取消（:45941-45945）：rightDown 纯电平+_prevRightDown 电沿,不清电平
+      // （住房支 return 早于世界右键分派,右键此处被取消臂独占消费）
+      if (this.housingMode && inp.rightDown && !this._prevRightDown) {
+        this.housingMode = null;
+        this.sfx.play('menuTick', 1);   // SoundID 12
+        this.cb.onHousingCursor?.(null, true);
       }
       this.input.mouseDown = false;   // 住房模式期间持续吞使用点击
       return;
@@ -12883,7 +12952,11 @@ export class Game implements GameHooks {
     const holdOk = !!(((cwEarly as { autoReuse?: boolean } | null)?.autoReuse
       || (cwEarly && this.autoReuseAllChain(heldDef!.vid ?? viIdFromKey(heldDef!.key))))
       && inp.mouseHeld && !this.annotateMode);
-    if ((!inp.mouseDown && !holdOk) || this.annotateMode || inp.blockMouse) {
+    // ★R4-22 电平化（TriggersSet.cs:853-859 逐字）：delayUseItem 存续期 = 原版
+    // controlUseItem 强制 false——使用/挖掘/放置/挥击整链压制（旧版在 Input.mousedown
+    // 吞整沿且 mouseup 才清旗=回焦首击全死,原版无此面,见 Input.ts 同注）。
+    // 沿不消费:按住期门恒真,松键(mouseHeld 消失→endFrame 清旗)后下一沿恢复。
+    if ((!inp.mouseDown && !holdOk) || this.annotateMode || inp.blockMouse || inp.delayUseItem) {
       this.mining = null;
       return;
     }
@@ -26051,7 +26124,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     fm.panX = (this.world.w * scale) / 2 - focus.cx * scale;
     fm.panY = (this.world.h * scale) / 2 - focus.cy * scale;
     this.renderer['_mapInit'] = false;
-    this.renderer['_mapOpenClick'] = true;   // 打开地图的这次按压不算拖拽
+    // 开图按压排除出地图点击传送（Game:8342）;拖拽不豁免（vanilla 同款,见 drawFullMap 注）
+    this.renderer['_mapOpenClick'] = true;
     // 渲染层图标/连线数据（TeleportPylonsMapLayer.cs:52-75）
     this.renderer.pylons = this.pylons;
     this.renderer.mapPylonTile = anchor;

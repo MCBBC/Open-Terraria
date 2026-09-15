@@ -52,6 +52,9 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     fastForwardTimeToDawn: world.fastForwardTimeToDawn,                 // WF:1342
     fastForwardTimeToDusk: world.fastForwardTimeToDusk,                 // WF:1416
     seedFlags: world.seedFlags,
+    // ★IIIII20b 换人一次性迁移标随包（★BJ90 2026-09-15 补携,BJ71 登记①——worker 读档
+    //  loadSaveData 已回填 world.starterSwapMigrated,曾缺=包缝丢失,主线程存档恒假）
+    starterSwapMigrated: world.starterSwapMigrated,
     weather: world.weatherToSave(), bestiary: world.bestiary.toSave(),
     // ★BJ71（2026-09-14）：旗击杀计数（BannerSystem.killCount,WF:1347 Save/:2210 Load）随包——
     //  worker 读档（worldGen.worker:215 packWorld）→ 主线程（WorldGenClient:199 fromPacket）
