@@ -1226,6 +1226,19 @@ function unembedPass(b: Body, world: World): void {
   //  干侧救援（凹龛/tent/活埋）不受影响。主 bounce 源=slopeCollide 贴合
   //  （vanilla 同款,另案定谳）。
   if (b.wet) return;
+  // ★RB29/FX34b 2026-09-15（红队 MED findings F1+F2）：hoik 体整段让位——vanilla
+  //  同相 = 原版全文【无任何 unembed 等价机制】, Collision.cs 无此通道。FX34b 玩家侧
+  //  恢复 hoik=true（Player.hoik）后,穿行期（wiki 单向墙 ~12t）盒顶行压进实心墙列 →
+  //  topEmbedded 2t 快速支反复点火 +16px/拍（单墙=抬 16px 站墙内块顶;2 厚墙连锁
+  //  16→32→48 越墙逃逸=vanilla 禁止方向,探针 _rb29-physics.mjs P4b/P6b 实证）；
+  //  2 厚墙转运 >15t 时 centerSolid 15t 支同样介入 → 单支豁免（仅 topEmbedded 加
+  //  !b.hoik）堵不全,取整段让位：hoik 嵌格自由通行（moveAxis :375 支）本就是原版
+  //  穿越通道,穿行期一切抬升/横推均非原版扰动。wet 让位同构。Body 级 wet 消融
+  //  定谳件=tests/_tmp-rb29-hoik-transit.test.ts（已转正为
+  //  tests/hoik-oneway-wall.test.ts 「hoik 穿行期 unembed 让位」断言后删除）。
+  //  NPC 族 hoik=false（2026-09-01 登记债）救援不变;unembed-pass.test.ts 全部
+  //  用例（凹龛/活埋/贴墙/刷角）Body 均缺省 falsy 不受影响。
+  if (b.hoik) return;
   // ★SW-BJ6 2026-09-07：vanilla 嵌固回退漂移活跃期整段让位（consume-once）。
   //  原版嵌入体的唯一自救 = AI_001 的 position.X -= velocity.X + direction
   //  （NPC.cs:62139 贴地支/:62331 滞空支，门 collideY+oldVelocity.Y≠0+

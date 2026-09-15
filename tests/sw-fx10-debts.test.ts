@@ -270,8 +270,10 @@ describe('SW-FX10 登记债⑤⑧ 定谳面反向锁定', () => {
     // 时本锚锁「不出现」；窗落地后反转为【恰一处+原版几何】锁（classic 列表仍不画）
     const hits = uiSrc.match(/vinvModernDetail[\s\S]{0,4000}?UI_Craft\.png/g);
     expect(hits).toHaveLength(1);
-    // 几何原相:origin+(47,13) ×0.8（26×24 贴图 → 20.8×19.2）
-    expect(uiSrc).toMatch(/left:\$\{o\.origin\.x - 20 \+ 47\}px; top:\$\{o\.origin\.y - 312 \+ 13\}px/);
+    // 几何原相:origin+(47,13) ×0.8（26×24 贴图 → 20.8×19.2）——★FX41b(2026-09-15):
+    //   详情子件改 detail 容器相对系(容器由 vinvLayoutItems 定位 origin−state=(24,73),
+    //   子件旧式再写 win 绝对值 = 双重 +24/+73 偏移压向导槽/网格首行,用户实报)
+    expect(uiSrc).toContain("hammer.style.cssText = 'position:absolute; left:47px; top:13px;'");
     expect(uiSrc).toMatch(/width:20\.8px; height:19\.2px/);
   });
 });

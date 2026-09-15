@@ -1,0 +1,95 @@
+{
+ "name": "iii6-celeb-tenth",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "1999040562",
+  "seedFlags": {
+   "tenthAnniversary": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "十周年五初始镇民（x86 w.wld 锚 world）",
+ "generatedAt": "2026-09-15T08:48:42.163Z",
+ "fingerprints": {
+  "type": "9c046527",
+  "flags": "556bf1dc",
+  "wall": "ca03bc4b",
+  "liquid": "eecfd5c0",
+  "frameX": "c20cc911",
+  "frameY": "e077c8be"
+ },
+ "side": {
+  "seedFlags": {
+   "tenthAnniversary": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "guide",
+    "givenName": "Andrew",
+    "x": 4551,
+    "y": 3592,
+    "anchor": [
+     285,
+     229
+    ],
+    "dir": 1
+   },
+   {
+    "key": "steampunker",
+    "givenName": "Whitney",
+    "x": 4583,
+    "y": 3624,
+    "anchor": [
+     287,
+     229
+    ],
+    "dir": -1
+   },
+   {
+    "key": "princess",
+    "givenName": "Yorai",
+    "x": 4519,
+    "y": 3592,
+    "anchor": [
+     283,
+     227
+    ],
+    "dir": 1
+   },
+   {
+    "key": "party_girl",
+    "givenName": "Amanda",
+    "x": 4615,
+    "y": 3640,
+    "anchor": [
+     289,
+     230
+    ],
+    "dir": -1
+   },
+   {
+    "key": "town_bunny",
+    "givenName": "Boof",
+    "x": 4487,
+    "y": 3612,
+    "anchor": [
+     281,
+     227
+    ],
+    "dir": 1,
+    "variationIndex": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "eaf19ed8",
+  "flags": "556bf1dc",
+  "wall": "ca03bc4b",
+  "liquid": "eecfd5c0",
+  "frameX": "0291b8d6",
+  "frameY": "810dbb80"
+ },
+ "ghostsPurged": 1634087
+}

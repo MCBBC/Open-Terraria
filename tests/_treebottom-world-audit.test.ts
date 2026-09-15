@@ -1,12 +1,16 @@
 // 诊断：用户报"模型根基"世界（seed 1814620304, 8400×2400）同屏三棵树底被花草/蘑菇占。
 // 全管线重生成 → 逐树核查底格 + Flowers 覆盖门合规性（m<0.48w 或 m>0.52w）。
+// ★IIIII259（测试世界档案化）：8400×2400 全量生成 ~3-6min→档案载入秒级
+//   （loadFixtureWorld 'tb-8400-1814620304';World.trees 生成期登记不落 SaveData,
+//   由档案侧车回填——生成端同拍采集,断言面同世界同断言）。与 _treebottom-view
+//   共用同一档案（此前两文件各自整生成同一世界）。
 import { describe, it } from 'vitest';
-import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
+import { loadFixtureWorld } from './world-fixtures';
 
 describe('tree-bottom audit seed 1814620304', () => {
   it('regen + scan', async () => {
-    const world = await generateWorld({ width: 8400, height: 2400, seedText: '1814620304', evil: -1 });
+    const world = loadFixtureWorld('tb-8400-1814620304');   // ★IIIII259 档案载入
     const st = world.store;
     const w = st.w;
     const trunk = TILE_BY_KEY['tree'] ?? -1;

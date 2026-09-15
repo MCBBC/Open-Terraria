@@ -495,8 +495,11 @@ function heldSemantics(held: SmartCursorHeld, paintLookup = 0, coatingLookup = 0
 // ===================== SmartCursor 状态机 + 策略链 =====================
 
 // ★SW-BJ84 2026-09-14 开态跨世界保留：Main.SmartCursorWanted_Mouse 是 Main 的 static 字段
-// （Main.cs:2095），全树写点仅 Main.cs:67590-67591（进程启动置 false）与 Player.cs:25649-25650
-// （SmartCursorLookup 异常复位）——进程内退世界/换世界【保留】开态，进程重启即失；config.json
+// （Main.cs:2095），全树【直接赋值点】仅 Main.cs:67590（进程启动置 false）与
+// Player.cs:25650（SmartCursorLookup 异常复位）——★RB20b note④ 措辞勘误
+// （2026-09-15）：原注「全树写点仅 2 处」易误导后车 grep——另有取址翻转站
+// Player.cs:25061/:25069 TryToToggleSmartCursor(ref …)（按键切换经 ref 写回,不在
+// 「直接赋值」列）;进程内退世界/换世界【保留】开态，进程重启即失；config.json
 // 不持久化开态（SaveSettings 只存 SmartCursorToggle 模式键，Main.cs:4199/4422）。本仓每进世界
 // 重建 Game 实例（SmartCursor 随之重建），故以模块级变量承载页面（进程）寿命的开态：实例构造
 // 时读它作初值，仅 updateWanted 切换拍回写；外部直赋 .wanted（测试/触屏钮 MobileControls:695/

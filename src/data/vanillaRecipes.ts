@@ -95,6 +95,33 @@ export function expandStationTiles(tile: number): number[] {
   return out;
 }
 
+/** 站点继承"替身集"：requiredTile R 能被哪些邻近 tile 置位 adjTile[R]——
+ *  {R} ∪ TileCountsAs 后裔（沿"谁 counts-as 谁"反向闭包）。
+ *  原版方向：Player.SetAdjTile(Player.cs:35920-35939) 对【邻近 tile】沿链递归置位
+ *  （Recipe.cs:559-571 表：77→17/133→77/134→16/302→17/96→215/17→215/304→86/355→13/699→13），
+ *  Recipe.cs:325 只查 adjTile[requiredTile]——所以近 T 满足 R ⟺ R ∈ {T}∪chain(T)
+ *  ⟺ T ∈ 后裔(R)。例：R=17 的替身集 = {17,302 玻璃窑,77 地狱熔炉,133 钛金熔炉}。 */
+const STATION_SATISFIERS = new Map<number, ReadonlySet<number>>();
+
+export function stationSatisfierTiles(tile: number): ReadonlySet<number> {
+  const hit = STATION_SATISFIERS.get(tile);
+  if (hit) return hit;
+  const out = new Set<number>([tile]);
+  const stack = [tile];
+  while (stack.length) {
+    const v = stack.pop()!;
+    for (const k of Object.keys(TILE_COUNTS_AS)) {
+      // TILE_COUNTS_AS[k]=v 语义：k 视作 v ⇒ k 是 v 的直接后裔
+      if (TILE_COUNTS_AS[k] === v && !out.has(Number(k))) {
+        out.add(Number(k));
+        stack.push(Number(k));
+      }
+    }
+  }
+  STATION_SATISFIERS.set(tile, out);
+  return out;
+}
+
 /** vi_<id> key → 原版 item id 反解 */
 export function vanillaIdOfItemKey(key: string): number {
   const m = key.match(/^vi_(\d+)_/);
@@ -360,12 +387,20 @@ export interface VanillaCraftCtx {
 /** 环境条件（PlayerMeetsEnvironmentConditions Recipe.cs:321-357） */
 export function envOk(r: VanillaRecipe, ctx: VanillaCraftCtx): boolean {
   if (r.tile >= 0) {
-    const expanded = expandStationTiles(r.tile);
-    // 任一等价站点在附近（adjTile[requiredTile] + CountsAs 继承）
-    const ok = expanded.some((t) => {
+    // adjTile[requiredTile]（Recipe.cs:325）的置位面 = 邻近 tile 沿 TileCountsAs 链
+    // 的继承（Player.SetAdjTile Player.cs:35926-35939 对邻近 tile 递归）——判据是
+    // requiredTile 的"替身集"（后裔闭包 stationSatisfierTiles），不是 requiredTile
+    // 自身的上游链。曾方向反置（expandStationTiles(r.tile) 扩 [17→215]）→ 近地狱
+    // 熔炉(77)/钛金熔炉(133)/玻璃窑(302) 做不了熔炉(17)配方、近秘银砧(134)做不了
+    // 铁砧(16)配方、近营火(215)反而误解锁熔炉配方（2026-09 用户实报+FX36 探针定谳）
+    let ok = false;
+    for (const t of stationSatisfierTiles(r.tile)) {
       const internal = SHEET_TO_INTERNAL.get(t);
-      return internal !== undefined && ctx.nearbyInternal.has(internal);
-    });
+      if (internal !== undefined && ctx.nearbyInternal.has(internal)) {
+        ok = true;
+        break;
+      }
+    }
     if (!ok) return false;
   }
   if (r.water && !ctx.nearWater) return false;

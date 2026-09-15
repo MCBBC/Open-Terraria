@@ -311,7 +311,8 @@ export function tileFilterMatches(a: CraftingTileFilter, b: CraftingTileFilter):
   return false;
 }
 
-/** OpenCloseFilter 判别核(:938-964;向导支 :946-951 本仓无 InGuideCraftMenu 域) */
+/** OpenCloseFilter 判别核(:938-964)。向导支 :946-951 = 执行臂副作用(UI.ts
+ *  vinvOpenCloseModernCraftFilter setFilter 支,★RB29b F1 补齐),不在本判别核域 */
 export function openCloseFilterTransition(s: ModernCraftState, incoming: CraftingTileFilter): MCraftTransition {
   if (!s.visible) return 'open';                                   // :940-943 Open(quiet:false, filter)
   if (s.filter === null || !tileFilterMatches(s.filter, incoming)) return 'setFilter';   // :944-954
@@ -375,17 +376,33 @@ export const MCRAFT_PANEL_CORNER = 12;
 /** 搜索盒 ✕ 钮右缘内缩 2(HAlign1+Left −2,UIWrappedSearchBar.cs:144-148) */
 export const MCRAFT_SEARCH_CANCEL_INSET = 2;
 
+// ---- 滚动条视觉(UIScrollbar.cs:56-70 Cyan 主题 → Scrollbar2 贴图 + ScrollbarInner 柄;
+//      DrawBar :96-101 三分绘制:盖 6px(源行 0-6/10-16)1:1、中段(源行 6-10 高 4)纵向拉伸
+//      = 元素矩形本体、上下盖越界 ±6 绘制 → DOM 盒 = 元素矩形纵向 ±6 扩张;
+//      ★FX41b 2026-09-15:旧面 background-size:100% 16px 把整枚 20×16 胶囊逐 16px 平铺
+//      =「一列粗蓝药丸」伪影,且误用 Blue 主题 UI_Scrollbar.png(本窗 = Cyan :385)) ----
+export const MCRAFT_SCROLLBAR_TEX = {
+  track: 'sprites/vanilla-ui/UI_Scrollbar2.png',
+  handle: 'sprites/vanilla-ui/UI_ScrollbarInner.png',
+  w: 20, h: 16, cap: 6, mid: 4,
+} as const;
+/** 柄色 = White*0.85,拖拽/悬停 1(UIScrollbar.cs:123) */
+export const MCRAFT_SCROLLBAR_HANDLE_ALPHA = 0.85;
+
 /** 网格容器/列表/滚动条几何(:354-388 + UpdateCraftAreaSize :409-417 num=77) */
 export interface MCraftGridGeometry {
   panel: { x: number; y: number; w: number; h: number };
   inner: { x: number; y: number; w: number; h: number };
-  /** 网格容器(gridContainer Height=inner−77,VAlign=1 底对齐) */
+  /** 网格容器(gridContainer Height=(−num,100%) num=77|130 + VAlign=1 底对齐:
+   *  顶边 = inner.y+num、底边 = inner 底;向导态 num=130 顶边随之下移 53px) */
   container: { x: number; y: number; w: number; h: number };
   /** UIList(Width −20/Height −7/VAlign 1/HAlign 0) */
   list: { x: number; y: number; w: number; h: number };
   /** 分隔线(UIHorizontalSeparator Width −8 居中) */
   separator: { x: number; y: number; w: number; h: number };
-  /** 滚动条(Height −19/Top −4/VAlign 1/HAlign 1;宽 20 padding 5) */
+  /** 滚动条(Height −19/Top −4/VAlign 1/HAlign 1;宽 20 padding 5)——y 含 VAlign=1:
+   *  UIElement.cs:326 Y += parentH·VAlign − H·VAlign → −4+containerH−(containerH−19)
+   *  = container.y+15(★FX41b 2026-09-15:旧式 −4 漏乘 VAlign 臂=偏高 19px,RB28 登记) */
   scrollbar: { x: number; y: number; w: number; h: number; innerY: number; innerH: number };
   cols: number; rows: number; contentH: number;
   /** 首格屏坐标(UIDynamicItemCollection.GetGridParameters:startX=中心−44·cols/2) */
@@ -394,14 +411,19 @@ export interface MCraftGridGeometry {
 export function mcraftGridGeometry(sh: number, count: number, guide = false): MCraftGridGeometry {
   const panel = mcraftPanelRect(sh);
   const inner = mcraftPanelInner(panel);
-  // ★刀19:向导态网格域 −130(UpdateCraftAreaSize NewCraftingUI.cs:409-416 num=77|130
-  //   ——向导槽+文案在窗内 detail 区下方,网格域让位 53px)
-  const container = { x: inner.x, y: inner.y + 77, w: inner.w, h: inner.h - (guide ? 130 : 77) };
+  // ★刀19 + RB28b(2026-09-15):网格容器 = Height(−num,100%)+VAlign=1 底对齐
+  //   (NewCraftingUI.cs:354-360 ctor VAlign=1f + :409-417 UpdateCraftAreaSize 只改
+  //   Height.Pixels=num=77|130;UIElement.cs:322-328 Y=Top+parentH·VAlign−H·VAlign
+  //   → 顶边 = inner.y+num、底边 = inner 底)。向导态顶边随 130 下移 53px,网格/
+  //   分隔线/滚动条从向导槽(44,443)+文案(96,458)行下方起排——旧式「顶固定 77 只缩
+  //   高」把网格压回向导槽上=用户实报叠压。normal 态数值不变(=inner.y+77,零回归)。
+  const off = guide ? 130 : 77;
+  const container = { x: inner.x, y: inner.y + off, w: inner.w, h: inner.h - off };
   const list = { x: container.x, y: container.y + 7, w: container.w - 20, h: container.h - 7 };
   const separator = { x: container.x + Math.floor((container.w - (container.w - 8)) / 2), y: container.y, w: container.w - 8, h: 4 };
   const scrollbar = {
-    x: container.x + container.w - 20, y: container.y - 4, w: 20, h: container.h - 19,
-    innerY: container.y - 4 + 5, innerH: container.h - 19 - 10,
+    x: container.x + container.w - 20, y: container.y + 15, w: 20, h: container.h - 19,
+    innerY: container.y + 15 + 5, innerH: container.h - 19 - 10,
   };
   const cols = Math.floor(list.w / 44);            // UIDynamicItemCollection.UpdateSize :width/44
   const rows = Math.max(0, Math.ceil(count / (cols > 0 ? cols : 1)));

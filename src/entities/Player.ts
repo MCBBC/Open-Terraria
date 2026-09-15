@@ -831,8 +831,10 @@ export class Player extends Entity {
    *  出入水翻转的【唯一驱动】。★BJ89 定谳：原版 wet 只由 num86（WetCollision 居中
    *  探针，任意液体）驱动；旧实现以 inWater∪inLava∪inHoney∪inShimmer 四桶并集近似，
    *  其中 inLava 是全盒 LavaCollision——「探针干+全盒岩浆擦过」姿态下并集为真而
-   *  原版 wet 为假 → 出浆分支幻影发射（bj80 域外观察坐标，实测 1 条 Splash）。 */
-  private wetSticky = false;
+   *  原版 wet 为假 → 出浆分支幻影发射（bj80 域外观察坐标，实测 1 条 Splash）。
+   *  ★RB21（2026-09-15）：private 摘除——F6③ 后 MountCombat.tickSlimeWetState 跨模块
+   *  消费本位（结构参数同名遇 private=TS2345），按 wetSlime 先例转 public,零运行时差。 */
+  wetSticky = false;
   /** 原版 lavaWet 粘滞镜像（Player.cs:27872 flag24 / :27883 lavaWet=flag25 / :28164 !wet 清）
    *  ——溅花液型门专用：入水门=本拍 flag25（:27989）、出水门=上拍值（:28083）。
    *  与 inLava 桶位分离：inLava 无 :27878 的 !shimmering 门且消费面更广（灼烧/Wet 剥离） */

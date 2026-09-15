@@ -3,7 +3,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { ITEM_GRAVITY, ITEM_MAX_FALL, MAGNET_RADIUS, PICKUP_DELAY, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { ITEM_DEFS, ITEM_RECOVERABLE_IMPORTANT } from '../data/items';
+import { ITEM_DEFS, ITEM_NO_GRAVITY_VIDS, ITEM_RECOVERABLE_IMPORTANT } from '../data/items';
 import { coinIndexOf } from '../items/Inventory';
 import type { Player } from './Player';
 import { IGNORES_ENCUMBERING_STONE_VIDS } from './Player';
@@ -375,10 +375,22 @@ export class ItemDrop extends Entity {
       } else {
         // 掉落物液体物理（WorldItem.cs:418-450：空气 0.1/7、水 0.08/5、蜂蜜 0.05/3、
         // 微光 0.065/4；浸液加 wetVelocity 阻尼）——独立于玩家 GRAVITY
-        const g = wetType === 1 ? 0.08 : wetType === 3 ? 0.05 : wetType === 4 ? 0.065 : ITEM_GRAVITY;
-        const mf = wetType === 1 ? 5 : wetType === 3 ? 3 : wetType === 4 ? 4 : ITEM_MAX_FALL;
-        this.vy = Math.min(this.vy + g, mf);
-        if (wetType === 1 || wetType === 3) { this.vx *= 0.95; } // 浸液额外阻尼（:440 wetVelocity 近似）
+        // ★FX44（2026-09-15）：ItemID.Sets.ItemNoGravity 族先于重力分流——原版
+        // MoveInWorld（WorldItem.cs:779-794）`if (!shimmered && ItemNoGravity[type])`
+        // 分支【不加 g】，速度双向 ×0.95 阻尼（<0.1 归零）后照常 TileCollision/
+        // SlopeCollision → 魂六件/四塔碎片/星云拾取/4143 等掉落即停在死亡点悬停
+        // 不落地（微光化物品除外——shimmered 走 else 支原版同款,上方 if 已先行）。
+        // 曾整缺该分流 = 魂按常规掉落坠地：飞龙高空杀魂直坠地底/视野外（用户实报
+        // 「不掉飞翔之魂」体验根因）+ 地面怪魂落地不悬停（双向偏差同根）。
+        if (ITEM_NO_GRAVITY_VIDS.has(vid)) {
+          this.vy *= 0.95;
+          if (Math.abs(this.vy) < 0.1) this.vy = 0;
+        } else {
+          const g = wetType === 1 ? 0.08 : wetType === 3 ? 0.05 : wetType === 4 ? 0.065 : ITEM_GRAVITY;
+          const mf = wetType === 1 ? 5 : wetType === 3 ? 3 : wetType === 4 ? 4 : ITEM_MAX_FALL;
+          this.vy = Math.min(this.vy + g, mf);
+          if (wetType === 1 || wetType === 3) { this.vx *= 0.95; } // 浸液额外阻尼（:440 wetVelocity 近似）
+        }
       }
       // 水平摩擦（:927-932 通用段：vx*=0.95，|vx|<0.1 归零）——★shimmered 物品
       // 同样执行。曾误放非 shimmered 分支内：decraft 散射初速永不衰减 → 产物无限

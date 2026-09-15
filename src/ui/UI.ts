@@ -189,6 +189,8 @@ import {
   // ★RB28(2026-09-15)用户实报呈现面对齐:九宫/搜索条/分隔线染色数值 + 搜索条几何
   MCRAFT_PANEL_TINT, MCRAFT_BORDER_TINT, MCRAFT_SEARCH_TINT, MCRAFT_SEPARATOR_TINT,
   MCRAFT_PANEL_CORNER, MCRAFT_SEARCH_CANCEL_INSET, mcraftSearchBarRect,
+  // ★FX41b(2026-09-15)滚动条视觉单源(UIScrollbar Cyan 主题/DrawBar 三分)
+  MCRAFT_SCROLLBAR_TEX, MCRAFT_SCROLLBAR_HANDLE_ALPHA,
   filterItemOfVid, filtererFits, toggleFilterRadio, normalizeSearch,
   openCloseFilterTransition, type FilterKind, type FilterItem,
 } from './modernCrafting';
@@ -1697,8 +1699,12 @@ export class UI {
       // ★SW-AY1 R5 菜单特化支入路由（ItemSlot.cs:631-651 else-if 序）：
       // 研究献祭面板在显（CreativeMenu.IsShowingResearchMenu）/ 向导反查在显
       // （InGuideCraftMenu）——重铸支不可达（showReforge 全屏 overlay,结案不传）
+      // ★SW-RB29c F2:InGuideCraftMenu 是 Main 全局态（Main.cs:1917）——vanilla
+      //   内嵌向导态（guideEl=null,vinvGuideMenuOpen=true）同样要进 cursorOverride 9
+      //   向导支（原版 Utils.Swap(inv[slot], Main.guideItem) 是全局语义,非 classic
+      //   浮层专属;曾只接 guideEl 臂 = vanilla 态 Shift+点材料丢对换落空）
       researchMenuOpen: this.researchMenuShowing(),
-      guideMenuOpen: !!this.guideEl,
+      guideMenuOpen: !!this.guideEl || this.vinvGuideMenuOpen,
       itemMaterial: cur ? curVid > 0 && materialVids().has(curVid) : false,   // ★SW-BJ24 2026-09-07 vid 域池（旧并集池 iid 跨域碰撞：钉鞋 975→iid 24 污染）
     });
     if (!plan) return false;
@@ -1741,7 +1747,7 @@ export class UI {
           this.shiftResearchSacrifice(i, cur);
           return true;
         }
-        if (this.guideEl) {                            // :810-815 Utils.Swap(inv[slot], guideItem)
+        if (this.guideEl || this.vinvGuideMenuOpen) {  // ★RB29c F2:vanilla 内嵌向导态同支（:810-815 Utils.Swap(inv[slot], guideItem)）
           this.shiftGuideSwap(i, cur);
           return true;
         }
@@ -2892,6 +2898,13 @@ export class UI {
     //   (closeNpcDialog→npcShopClose):设置浮层开(openInGamePause 收包)/死亡强收包
     //   (tickChestAutoClose→closeInventory)后 npcShopOpen 残留 → 重开背包货架复活
     //   (原版需重按商店钮)。对话臂先走的路径(Esc 链)此处幂等 no-op。
+    // ★SW-RB29c F1:上臂只清 Game 态——classic 浮动货架 DOM 面(NpcShop 浮层)由
+    //   closeNpcDialog 对称臂才收,商店→右键另一 NPC 换谈走收包链不经 closeNpcDialog
+    //   时浮面滞留(滞留格可点/换谈询价错位)。此处与 closeNpcDialog 同式收面;
+    //   vanilla 内嵌货架无独立面(refreshAll 收面),close() 触发 onClose 幂等回灌
+    //   npcShopClose,vanilla 态 no-op。
+    this.npcShop?.close();
+    this.npcShop = null;
     this.game.npcShopClose();
     // 放回手上物品。★SW-RB4a 2026-09-06 关包光标物归位 1:1（dropItemCheck :5136-5140
     // `!Main.playerInventory` 臂 → GetOrDropItem（ReturnItemFromSlot）→ GetItem + 余量
@@ -7917,6 +7930,8 @@ export class UI {
   private vinvModernSeparatorEl: HTMLElement | null = null;
   private vinvModernScrollbarEl: HTMLElement | null = null;
   private vinvModernScrollHandle: HTMLElement | null = null;
+  private vinvModernSbarWinMove: ((e: MouseEvent) => void) | null = null;   // ★RB29b F5:window mousemove 监听引用(teardown 摘除)
+  private vinvModernSbarWinUp: (() => void) | null = null;                  // ★RB29b F5:window mouseup 监听引用(teardown 摘除)
   private vinvModernDetailEl: HTMLElement | null = null;
   private vinvModernFilterBtns: HTMLButtonElement[] = [];
   private vinvModernFilterHovers: boolean[] = [];
@@ -7993,6 +8008,11 @@ export class UI {
     panel.appendChild(panelBorder);
     win.appendChild(panel);
     this.vinvModernPanelEl = panel;
+    // ★RB29b F2(2026-09-15):筛选钮移到 panel 后 append(原版 :394 totalContainer.Append
+    //   (uICreativeItemsInfiniteFilteringOptions) = 尾位 → 筛选条盖主内衬)——旧序 panel
+    //   顶缘 12px 吃 tab 底带命中/绘制(DOM 序倒置伪影)。appendChild = 既有节点移动,
+    //   定位 cssText 零改(纯抬层,几何零改)。
+    this.vinvModernFilterBtns.forEach((b) => win.appendChild(b));
     void Promise.all([
       tintedSliceDataUrl('sprites/vanilla-ui/UI_PanelBackground.png',
         MCRAFT_PANEL_TINT.r, MCRAFT_PANEL_TINT.g, MCRAFT_PANEL_TINT.b, MCRAFT_PANEL_TINT.a),
@@ -8124,11 +8144,36 @@ export class UI {
     gridInner.style.cssText = 'position:absolute; left:0; top:0;';
     gridList.appendChild(gridInner);
     this.vinvModernGridInner = gridInner;
+    // 滚动条(UIScrollbar Cyan 主题 :56-70 → Scrollbar2 轨 + ScrollbarInner 柄;DrawBar
+    //   :96-101 三分:盖 6px 1:1、中段 4px 源行纵拉;★FX41b:旧面整胶囊逐 16px 平铺+Blue
+    //   主题贴图 =「一列粗蓝药丸」伪影,现 border-image 竖向三分(slice 6 0 fill)1:1。
+    //   ★RB29b F4(2026-09-15):轨/柄 DOM 盒 = 元素矩形/柄矩形本体(命中域 = LeftMouseDown
+    //   :127-145 Contains 域 1:1),盖 ±6 仅绘制越界 → 内层 face(top:−cap/height:+2cap,
+    //   pointer-events:none)承担绘制——旧盒纵向 ±6 扩张 = 点轨/拖拽/悬停域各多 12px)
     const sbar = el('div');
-    sbar.style.cssText = `position:absolute; width:20px; image-rendering:pixelated;`
-      + `background-image:url(sprites/vanilla-ui/UI_Scrollbar.png); background-size:100% ${6 + 4 + 6}px;`;
+    sbar.style.cssText = 'position:absolute; width:20px;';   // 元素矩形 = 命中域
+    const sbarFace = el('div');
+    sbarFace.style.cssText = `position:absolute; left:0; top:${-MCRAFT_SCROLLBAR_TEX.cap}px; width:20px;`
+      + `height:calc(100% + ${MCRAFT_SCROLLBAR_TEX.cap * 2}px); box-sizing:border-box;`
+      + `image-rendering:pixelated; pointer-events:none;`   // 越界面不命中(命中=轨盒本体)
+      + `border-style:solid; border-color:transparent; border-width:${MCRAFT_SCROLLBAR_TEX.cap}px 0;`
+      + `border-image-source:url(${MCRAFT_SCROLLBAR_TEX.track});`
+      + `border-image-slice:${MCRAFT_SCROLLBAR_TEX.cap} 0 fill; border-image-repeat:stretch;`
+      + `border-image-width:${MCRAFT_SCROLLBAR_TEX.cap}px 0; background:rgb(55,109,120);`;
     const handle = el('div');
-    handle.style.cssText = 'position:absolute; left:0; width:20px; image-rendering:pixelated; pointer-events:auto;';
+    handle.style.cssText = `position:absolute; left:0; width:20px; pointer-events:auto;`
+      + `opacity:${MCRAFT_SCROLLBAR_HANDLE_ALPHA};`;   // 柄矩形 = 命中/悬停域(:117/:133 Contains)
+    const handleFace = el('div');
+    handleFace.style.cssText = `position:absolute; left:0; top:${-MCRAFT_SCROLLBAR_TEX.cap}px; width:20px;`
+      + `height:calc(100% + ${MCRAFT_SCROLLBAR_TEX.cap * 2}px); box-sizing:border-box;`
+      + `image-rendering:pixelated; pointer-events:none;`
+      + `border-style:solid; border-color:transparent; border-width:${MCRAFT_SCROLLBAR_TEX.cap}px 0;`
+      + `border-image-source:url(${MCRAFT_SCROLLBAR_TEX.handle});`
+      + `border-image-slice:${MCRAFT_SCROLLBAR_TEX.cap} 0 fill; border-image-repeat:stretch;`
+      + `border-image-width:${MCRAFT_SCROLLBAR_TEX.cap}px 0; background:#fff;`;
+    // 柄悬停/拖拽 α(:117-123 isDragging||isHoveringOverHandle)——监听在 vinvBindModernScrollbar
+    handle.appendChild(handleFace);
+    sbar.appendChild(sbarFace);
     sbar.appendChild(handle);
     panel.appendChild(sbar);
     this.vinvModernScrollbarEl = sbar;
@@ -8187,12 +8232,20 @@ export class UI {
     if (icon) icon.style.opacity = this.vinvModernActive.includes(fb.kind) ? '1' : '0.5';   // White vs White*0.5
   }
 
-  /** ResetRecipes(:575-587):条目池/选中/滚动清;搜索域不清(仅 OnActivate/SetContents 清) */
+  /** ResetRecipes(:575-587):条目池/lookup/滚动清;搜索域不清(仅 OnActivate/SetContents 清)。
+   *  ★FX41b:选中不在此清(:575-587 无 _selectedRecipeIndex 写;清走 :619-623 lookup 空/
+   *  _filter 拒两臂)——lookup 值域 = vinvModernLookup(自上次 Reset 的可用集,:604-609)。
+   *  :578 _resetForGuideItem = InGuideCraftMenu ? Main.guideItem : null(每次重钉);
+   *  向导槽物品变化检测消费位 = UpdateContents :596-598 */
   private vinvModernResetRecipes(): void {
     this.vinvModernEntries = [];
-    this.vinvModernSelected = null;
+    this.vinvModernLookup.clear();
     this.vinvModernViewPos = 0;
+    this.vinvModernResetForGuide = this.vinvGuideMenuOpen ? (this.guidePlaced ? this.guidePlaced.id : -1) : null;
   }
+  private vinvModernResetForGuide: number | null = null;
+  /** _recipeListLookup 值域镜像(自上次 ResetRecipes 的可用集;SelectedEntry 解析域) */
+  private vinvModernLookup = new Set<VanillaRecipeLike>();
 
   /** Open(quiet, filter)(:883-905)+ OnActivate(:907-915):可见即 no-op;置滤器+
    *  openedWithoutFilter+条目池清+搜索/激活集清+预选 availableRecipe[focusRecipe]。
@@ -8215,8 +8268,14 @@ export class UI {
     this.vinvModernCraftOpen = true;
     this.vinvModernCraftFilter = filter;
     this.vinvModernOpenedWithoutFilter = filter === null;       // :907-909(OnActivate)
-    this.vinvModernSelected = this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null;   // :910 预选
     this.vinvModernResetRecipes();                              // :911 ResetRecipes
+    // :910 预选 availableRecipe[focusRecipe](OnActivate 序 = 预选后 ResetRecipes;
+    //   ResetRecipes 不清选中,存活靠首拍 UpdateContents 回填 lookup)——向导态首入
+    //   GetNumRecipes=0(空槽)→ lookup 空 → :619 SelectedEntry==null → 清 = 不预选,
+    //   详情浮层不画(★FX41b:旧式无差别预选+陈旧选中 = 向导态多画详情浮层)
+    this.vinvModernSelected = this.vinvGuideMenuOpen
+      ? null
+      : (this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null);
     this.vinvModernSearch = '';
     this.vinvModernActive = [];                                 // :912-913 ActiveFilters.Clear
     if (this.vinvModernSearchInput) this.vinvModernSearchInput.value = '';
@@ -8291,8 +8350,10 @@ export class UI {
     else this.vinvOpenModernCraft(null, quiet);
   }
 
-  /** OpenCloseFilter 执行器(:938-964 四支;向导支 :946-951 本仓无域)。modern 支消费点
-   *  = InteractWithCraftingStation(Player.cs:33555-33557) → openCraftingStationFilter */
+  /** OpenCloseFilter 执行器(:938-964 四支)。modern 支消费点
+   *  = InteractWithCraftingStation(Player.cs:33555-33557) → openCraftingStationFilter。
+   *  ★RB29b F1(2026-09-15):向导支 :946-951 补齐(旧「本仓无域」定谳被红队推翻——
+   *  向导态 modern 窗开着右键合成站同样落本臂 setFilter 支) */
   vinvOpenCloseModernCraftFilter(f: CraftingTileFilter): void {
     const t = openCloseFilterTransition(
       { visible: this.vinvModernCraftOpen, filter: this.vinvModernCraftFilter, openedWithoutFilter: this.vinvModernOpenedWithoutFilter },
@@ -8303,8 +8364,18 @@ export class UI {
         this.vinvOpenModernCraft(f, false);                     // Open(quiet:false, filter) :942
         break;
       case 'setFilter':                                         // :952-953 Sound 12 + SetFilter
-        this.game.sfx.play('menuTick', 1);
-        this.vinvModernCraftFilter = f;
+        // 向导支(:946-951):SetTalkNPC(-1)→InGuideCraftMenu=false→dropItemCheck——
+        // 同拍同步完成,不落 vinvGuideMenuExitCheck 逐拍退出臂(原版同相:窗保持开+滤新
+        // 滤器,Next 拍退出检查见旗已摘 no-op)。窗口不关(原版 :953 SetFilter 续走)。
+        if (this.vinvGuideMenuOpen) {                           // :946 if (Main.InGuideCraftMenu)
+          this.game.closeNpcDialog(true);                       // SetTalkNPC(-1) :948(静默;IngameUIWindows 同相映射)
+          this.vinvGuideMenuOpen = false;                       // InGuideCraftMenu=false :949
+          this.vinvReturnGuidePlaced();                         // dropItemCheck :950 → guideItem 支 GetOrDrop(:5110-5114)
+          this.vinvLayoutSig = '';                              // 向导槽/文案/需求行隐+钮锚回位 → 强制重排
+          this.layoutVanilla();
+        }
+        this.game.sfx.play('menuTick', 1);                      // :952 Sound 12
+        this.vinvModernCraftFilter = f;                         // :953 SetFilter → ResetRecipes
         this.vinvModernOpenedWithoutFilter = false;
         this.vinvModernResetRecipes();
         this.vinvUpdateModernCraft();
@@ -8321,37 +8392,67 @@ export class UI {
     }
   }
 
-  /** 窗内滚动条绑定(UIScrollbar.cs:109-180 拖拽/点轨 1:1) */
+  /** 窗内滚动条绑定(UIScrollbar.cs:103-151 拖拽/点轨/进柄音 1:1)。★RB29b F4:轨/柄
+   *  DOM 盒 = 元素矩形/柄矩形本体,mousedown 域天然 = 原版 Contains 域(无 JS 收口)。
+   *  ★RB29b F5:window mousemove/mouseup 监听存实例字段,teardown 对称摘除
+   *  (vinvGridWheelHandler 同式)——旧匿名闭包随重建逐次滞留 window */
   private vinvBindModernScrollbar(sbar: HTMLElement, handle: HTMLElement): void {
+    this.vinvUnbindModernScrollbar();                            // 防御:重挂前先摘旧
     let dragging = false;
     let dragYOffset = 0;
+    let hovering = false;
+    let hoverSounded = false;   // :116-121 isHoveringOverHandle 沿触发;拖拽中不重播(RB29b F3 判)
     const myOf = (e: MouseEvent): number => e.clientY / this.vinvModernScaleK();
+    // 柄色 = White*(拖拽|悬停 ? 1 : 0.85)(:123)——enter/leave 即 isHoveringOverHandle 域
+    handle.addEventListener('mouseenter', () => {
+      hovering = true;
+      handle.style.opacity = '1';
+      if (!hoverSounded) {
+        hoverSounded = true;
+        if (!dragging) this.game.sfx.play('menuTick', 1);        // ★RB29b F3:进柄 Sound 12(:118-121)
+      }
+    });
+    handle.addEventListener('mouseleave', () => {
+      hovering = false;
+      hoverSounded = false;
+      if (!dragging) handle.style.opacity = `${MCRAFT_SCROLLBAR_HANDLE_ALPHA}`;
+    });
     handle.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       const g = this.vinvModernGridGeometry();
       if (!g) return;
       dragging = true;
+      handle.style.opacity = '1';                                // :123 拖拽 α 1
       // _dragYOffset = mouseY − handleRect.Y(:146-148;handleRect.Y = sbarY + 5 +
       //   innerH·(pos/max) − 3,即 GetHandleRectangle :78-84 屏位)
       const handleRectY = g.scrollbar.y + 5 + Math.trunc(g.scrollbar.innerH * (this.vinvModernViewPos / Math.max(1, g.contentH))) - 3;
       dragYOffset = myOf(e) - handleRectY;
+      // ★RB29b F3 含鼠标拍:柄随滚动走到静鼠下无 enter 事件(原版逐帧 Contains 会响),
+      //   压下即视为进柄补一响(已在柄上悬停过则不重播)
+      if (!hoverSounded) { hoverSounded = true; this.game.sfx.play('menuTick', 1); }
     });
-    window.addEventListener('mousemove', (e) => {
+    this.vinvModernSbarWinMove = (e) => {
       if (!dragging) return;
       const g = this.vinvModernGridGeometry();
       if (!g) return;
       const num = myOf(e) - g.scrollbar.innerY - dragYOffset;    // :111-115
       this.vinvModernViewPos = clampViewPosition(num / g.scrollbar.innerH * g.contentH, g.list.h, g.contentH);
       this.vinvSyncModernScroll();
-    });
-    window.addEventListener('mouseup', () => { dragging = false; });
+    };
+    this.vinvModernSbarWinUp = () => {
+      if (dragging) handle.style.opacity = hovering ? '1' : `${MCRAFT_SCROLLBAR_HANDLE_ALPHA}`;   // :123 松手仍在柄上=悬停 1
+      dragging = false;
+    };
+    window.addEventListener('mousemove', this.vinvModernSbarWinMove);
+    window.addEventListener('mouseup', this.vinvModernSbarWinUp);
     sbar.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       if (dragging) return;
-      // 点轨支(:151-159):num = mouseY − innerY − handleH/2
+      // 点轨支(:151-159):num = mouseY − innerY − handleH/2——handleH = GetHandleRectangle
+      //   高(柄矩形本体;★RB29b F4:柄盒 = 柄矩形本体,盖带点击落轨盒不再入柄支)
       const g = this.vinvModernGridGeometry();
       if (!g) return;
-      const handleH = parseFloat(handle.style.height || '0') || 0;
+      const handleH = Math.trunc(g.scrollbar.innerH * (g.list.h / Math.max(1, g.contentH))) + 7;
       const num = myOf(e) - g.scrollbar.innerY - handleH / 2;
       this.vinvModernViewPos = clampViewPosition(num / g.scrollbar.innerH * g.contentH, g.list.h, g.contentH);
       this.vinvSyncModernScroll();
@@ -8360,6 +8461,18 @@ export class UI {
       e.stopPropagation();
       this.vinvModernScrollBy(e);
     }, { passive: true });
+  }
+
+  /** ★RB29b F5:window 级滚动条拖拽监听对称摘除(构建重挂/teardown 共用单点) */
+  private vinvUnbindModernScrollbar(): void {
+    if (this.vinvModernSbarWinMove) {
+      window.removeEventListener('mousemove', this.vinvModernSbarWinMove);
+      this.vinvModernSbarWinMove = null;
+    }
+    if (this.vinvModernSbarWinUp) {
+      window.removeEventListener('mouseup', this.vinvModernSbarWinUp);
+      this.vinvModernSbarWinUp = null;
+    }
   }
 
   private vinvModernScaleK(): number {
@@ -8394,14 +8507,15 @@ export class UI {
     this.vinvModernScrollbarEl!.style.display = canScroll ? '' : 'none';
     if (!canScroll) return;
     // GetHandleRectangle(:78-84):Y = innerY + innerH·(pos/max) − 3;H = innerH·(view/max) + 7
-    //   (handle 位 = sbar 内相对;innerY − sbar.y = padding top 5)
+    //   ——★FX41b:柄矩形照录(不设最小高钳:原版 +7 下限自带)。★RB29b F4:DOM 盒 =
+    //   柄矩形本体(命中/悬停域 1:1),DrawBar 盖 ±6 越界由内层 face 绘制(构建面 cssText);
+    //   子盒含块 = sbar padding 盒(=元素矩形,盒无边框) → top = 柄矩形Y−sbar.y
+    //   = (innerY−3+sbar.y)−sbar.y = 5−3+off = off+2。
     const maxV = Math.max(1, g.contentH);
     const handleH = Math.trunc(g.scrollbar.innerH * (g.list.h / maxV)) + 7;
-    const handleY = 5 + Math.trunc(g.scrollbar.innerH * (this.vinvModernViewPos / maxV)) - 3;
-    this.vinvModernScrollHandle.style.height = `${Math.max(12, handleH)}px`;
+    const handleY = Math.trunc(g.scrollbar.innerH * (this.vinvModernViewPos / maxV)) + 2;
+    this.vinvModernScrollHandle.style.height = `${handleH}px`;
     this.vinvModernScrollHandle.style.top = `${handleY}px`;
-    this.vinvModernScrollHandle.style.backgroundImage = 'url(sprites/vanilla-ui/UI_ScrollbarInner.png)';
-    this.vinvModernScrollHandle.style.backgroundSize = '100% 16px';
   }
 
   /** 窗内网格条目构建(UpdateContents :589-634 + ItemGrid.DrawSlot :56-76)。
@@ -8441,6 +8555,12 @@ export class UI {
     }
     // 搜索域(EntryFilterer.SetSearchFilter :85-94 IsNullOrWhiteSpace→null)
     const search = normalizeSearch(this.vinvModernSearch);
+    // ★FX41b(:596-598):向导态槽内物品变化 → ResetRecipes——条目池/选中/滚动全清,
+    //   选中随池清 = 详情浮层不画直到点选(旧缺:跨向导物残留条目+陈旧选中多画)
+    {
+      const guideKey = this.guidePlaced ? this.guidePlaced.id : -1;
+      if (this.vinvGuideMenuOpen && guideKey !== this.vinvModernResetForGuide) this.vinvModernResetRecipes();
+    }
     // ---- 条目池增量(:596-617:availableRecipe 逐条入池,FitsFilter 过滤入 _filteredRecipes) ----
     // ★刀19:向导反查(NewCraftingUI.GetNumRecipes :256-262)——空槽=0 配方;有件=
     //   CollectGuideRecipes 集(与经典支同源,vinvRefreshCraft 的 vinvCraftAvailV 已带,
@@ -8459,17 +8579,20 @@ export class UI {
       avail = game.vanillaAvailableRecipes();
     }
     for (const row of avail) {
+      // :604-609 lookup 回填 = 可用集全量(FitsFilter 判定前;SelectedEntry 解析域)
+      if (!this.vinvModernLookup.has(row.r)) this.vinvModernLookup.add(row.r);
       if (this.vinvModernEntries.some((e) => e.r === row.r)) continue;
       if (!this.vinvModernRecipeFits(row.r, search, this.vinvModernActive)) continue;
       this.vinvModernEntries.push({ r: row.r, count: row.count, seen: true });
     }
-    // 选中同步(:618-629:SelectedEntry==null→清;滤器拒→清;可用→focusRecipe 回写)
+    // 选中同步(:618-629)——★FX41b:SelectedEntry = _recipeListLookup[idx](可用集键控,
+    //   ResetRecipes Array.Clear → 本拍回填):lookup 无此条目(向导态空槽首入/Reset 后
+    //   不再可用)→ _selectedRecipeIndex=null;_filter 拒 → 清;可用 → focusRecipe 回写
     if (this.vinvModernSelected !== null) {
-      const sel = this.vinvModernEntries.find((e) => e.r === this.vinvModernSelected);
-      const stillAvail = sel !== undefined && avail.some((row) => row.r === sel.r);
-      if (this.vinvModernCraftFilter !== null && !recipeFilterAccepts(this.vinvModernSelected, this.vinvModernCraftFilter)) this.vinvModernSelected = null;
-      else if (stillAvail && sel) {
-        const idx = avail.findIndex((row) => row.r === sel.r);
+      if (!this.vinvModernLookup.has(this.vinvModernSelected)) this.vinvModernSelected = null;   // :619-620
+      else if (this.vinvModernCraftFilter !== null && !recipeFilterAccepts(this.vinvModernSelected, this.vinvModernCraftFilter)) this.vinvModernSelected = null;   // :621-623
+      else {
+        const idx = avail.findIndex((row) => row.r === this.vinvModernSelected);
         if (idx >= 0 && this.vinvCraftFocusV !== idx) {
           this.vinvCraftFocusGoto(idx);                        // :626-629 focusRecipe 双向回写
           this.vinvUpdateCraftList();
@@ -8489,6 +8612,8 @@ export class UI {
       this.vinvModernSeparatorEl.style.width = `${g.separator.w}px`;
     }
     if (this.vinvModernScrollbarEl) {
+      // ★RB29b F4(2026-09-15):轨 DOM 盒 = 元素矩形本体(命中域 1:1)——DrawBar(:96-101)
+      //   盖 6px 越界 ±6 绘制由内层 face(top:−cap/height:+2cap)承担,盒定位/高度不再扩张
       this.vinvModernScrollbarEl.style.left = `${g.scrollbar.x - panel.x}px`;
       this.vinvModernScrollbarEl.style.top = `${g.scrollbar.y - panel.y}px`;
       this.vinvModernScrollbarEl.style.height = `${g.scrollbar.h}px`;
@@ -8504,6 +8629,9 @@ export class UI {
     }
     this.vinvSyncModernScroll();
     this.vinvUpdateModernDetail(avail);
+    // ★FX41b:向导槽文案/需求行随拍(原版 :447/:452-456 逐帧绘制域)——点选/条目变化同拍
+    //   刷新(旧缺:只挂 vinvRefreshCraft,点选后需求行滞留空串至下一刷新拍)
+    if (this.vinvGuideMenuOpen) this.vinvPaintGuideCraft();
   }
   private vinvModernCellsSig = '';
 
@@ -8587,6 +8715,10 @@ export class UI {
       }
       // :524-527 else 支 = Main.HoverOverCraftingItemButton(Main.focusRecipe) 合成
       //   (Main.cs:42971-43036:焦点即配方→CraftItem;Shift×10 = num2·10 :43011-43013)
+      //   ★FX41b::42988 `focusRecipe == recipeIndex && guideItem.IsAir` 门——向导态
+      //   (反查)已选格点按不合成,落 :43020 else-if(flag) 臂 = 仅音 12(与详情槽
+      //   guidePlaced 门同源;旧缺 = 反查态点格直接开炉)
+      if (this.guidePlaced) { this.game.sfx.play('menuTick', 1); return; }
       this.game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
       this.refreshAll();
     });
@@ -8594,11 +8726,13 @@ export class UI {
 
   /** 详情浮层(DrawChildren :450-487):hover ?? Selected;成品槽 ctx42(scale1,
    *  底 White*0.749 :566)/锤图标 +(47,13) scale0.8/材料行 34·num 步距+拥有数
-   *  (DrawOwnedItemCount :555-561)/向导槽 ctx7 = 本仓无 InGuideCraftMenu 域(备案) */
+   *  (DrawOwnedItemCount :555-561)/向导槽 ctx7 = 本仓无 InGuideCraftMenu 域(备案)。
+   *  ★FX41b(2026-09-15 用户实报向导态叠压):子件坐标 = detail 容器【相对】系——
+   *  容器由 vinvLayoutItems 定位在 origin−state=(24,73),旧式子件再写 win 绝对值
+   *  (origin.x−20 等)= 双重 +24/+73 偏移,整块压到向导槽行/网格首行上 */
   private vinvUpdateModernDetail(avail: Array<{ r: VanillaRecipeLike; count: number }>): void {
     const detail = this.vinvModernDetailEl;
     if (!detail || !this.game) return;
-    const o = mcraftDetailOrigin();
     // hover 优先(:451 _hoveredEntry ?? SelectedEntry)——DOM hover 由 CSS :hover 承担,
     //   此处重建 = 选中态拍面(hover tooltip 逐帧面不合事件驱动;登记偏差)
     const r = this.vinvModernSelected;
@@ -8606,9 +8740,9 @@ export class UI {
     detail.style.display = '';
     detail.replaceChildren();
     const availNow = avail.some((row) => row.r === r);
-    // 成品槽(ctx 42;DrawRecipeSlot :563-573 底 White×0.749)
+    // 成品槽(ctx 42;DrawRecipeSlot :563-573 底 White×0.749)= origin 本位(容器相对 0,0)
     const slot = el('div', 'sw-slot');
-    slot.style.cssText = `position:absolute; left:${o.origin.x - 20}px; top:${o.origin.y - 312}px;`
+    slot.style.cssText = 'position:absolute; left:0; top:0;'
       + 'width:52px; height:52px; background-image:none; --slot-alpha:0.749; pointer-events:auto;';
     const iid = this.game.itemId(vanillaItemKey(r.create) ?? '');
     const img = el('img') as HTMLImageElement;
@@ -8636,19 +8770,19 @@ export class UI {
     const hammer = el('img') as HTMLImageElement;
     hammer.draggable = false;
     hammer.src = 'sprites/vanilla-ui/UI_Craft.png';
-    hammer.style.cssText = `position:absolute; left:${o.origin.x - 20 + 47}px; top:${o.origin.y - 312 + 13}px;`
+    hammer.style.cssText = 'position:absolute; left:47px; top:13px;'
       + 'width:20.8px; height:19.2px; image-rendering:pixelated; pointer-events:none;';
     detail.appendChild(hammer);
-    // 材料行(:465-486)
+    // 材料行(:465-486)——mcraftMaterialPos 以零 origin 调 = 容器相对系
     r.items.forEach((req, j) => {
-      const mp = mcraftMaterialPos({ x: o.origin.x, y: o.origin.y }, j, r.items.length);
+      const mp = mcraftMaterialPos({ x: 0, y: 0 }, j, r.items.length);
       const owned = this.vinvModernOwnedOf(r, req.id);
       // ★刀19:向导态材料全亮(:474 InGuideCraftMenu ∨ 满足)+拥有数整支不画(:482 !InGuideCraftMenu 门)
       const enough = this.vinvGuideMenuOpen || owned >= req.stack;
       const showOwned = !this.vinvGuideMenuOpen;
       const k2 = ingredientKey(req.id);
       const box = el('div', 'sw-slot');
-      const px = mp.x - 20, py = mp.y - 312;
+      const px = mp.x, py = mp.y;
       box.style.cssText = `position:absolute; left:${px}px; top:${py}px; width:52px; height:52px;`
         + 'background-image:none; --slot-alpha:0.749;'
         + `transform:scale(${mp.scale}); transform-origin:top left; pointer-events:auto;`;
@@ -8979,6 +9113,27 @@ export class UI {
     this.vinvRefreshCraft();                                        // guideItem 空 → GetNumRecipes=0(modern)
   }
 
+  /** dropItemCheck guideItem 支等价(Player.cs:5110-5114:!InGuideCraftMenu ∧ guideItem
+   *  type>0 → GetOrDropItem(ReturnItemFromSlot) 回包+余量 RequestNewItem(base.Center)
+   *  落地+guideItem 清)——本仓 guidePlaced 回包(inv.add 余量 spawnDrop)+清;favorited/
+   *  prefix/placeStyle 随行 = closeGuideSearch ★SW-BP1 同式。
+   *  消费面 = vinvGuideMenuExitCheck 退出臂(走远/开箱/开店,★SW-RB29c F3)+
+   *  vinvOpenCloseModernCraftFilter setFilter 臂(NewCraftingUI.cs:946-951,★RB29b F1)。
+   *  mouseItem 支(:5133 !playerInventory 才落)本域不建模:站点臂恒背包开态 */
+  private vinvReturnGuidePlaced(): void {
+    const g = this.game;
+    const pl = this.guidePlaced;
+    if (pl && g) {
+      const left = g.player.inv.add(pl.id, pl.stack, pl.prefix, pl.placeStyle, false, false, !!pl.favorited);
+      if (left > 0) {
+        const key = ITEM_DEFS[pl.id]?.key ?? '';
+        g.spawnDrop(g.player.cx, g.player.cy, key, left);
+      }
+      g.cb.onInventoryChanged?.();
+    }
+    this.guidePlaced = null;
+  }
+
   /** ★刀19:双菜单退出面(每刷新拍消费,vinvRefreshCraft 头)。
    *  重铸态(Main.cs:42282-42285):chest/shop/talkNPC==-1/向导态 → InReforgeMenu=false;
    *  向导态(Main.cs:42396-42400):chest/shop/talkNPC==-1/重铸态 → 复位+窗收
@@ -8996,6 +9151,9 @@ export class UI {
     }
     if (this.vinvGuideMenuOpen) {
       if (!!this.openChest || !!g?.npcShopOpen || !g?.npcDialogActive || this.vinvReforgeOpen) {
+        // ★SW-RB29c F3:退出向导态时归还放置材料(dropItemCheck guideItem 支,单源
+        //   vinvReturnGuidePlaced;此前 guidePlaced 滞留不还包)
+        this.vinvReturnGuidePlaced();
         this.vinvGuideMenuOpen = false;
         if (this.vinvModernCraftOpen) this.vinvCloseModernCraft(true);
         this.vinvLayoutSig = '';
@@ -9060,7 +9218,10 @@ export class UI {
     }
     if (this.vinvGuideModernCaptionEl) this.vinvGuideModernCaptionEl.textContent = capText;
     if (this.vinvGuideModernReqEl) {
-      const r = this.vinvModernSelected ?? this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null;
+      // :452-456 需求行域 = recipeEntry(_hoveredEntry ?? SelectedEntry)——向导态首入
+      //   SelectedEntry==null 整行不画;★FX41b:经典列表 fallback 摘除(旧式以经典焦点行
+      //   多画需求行;经典位文案仍吃 vinvCraftAvailV[focus]=DrawGuideCraftText :42906 域)
+      const r = this.vinvModernSelected;
       this.vinvGuideModernReqEl.textContent = r ? this.recipeEnvReqText(r, false) : '';
     }
     // 经典位(DrawGuideCraftText Main.cs:42901-42924:空=inter[24] 单行;有件=「需要 X」
@@ -9344,12 +9505,20 @@ export class UI {
     this.vinvPulseLast = ts;
     // ★SW-FX38 列表吸附步进(CraftingUI.cs:376-404 每绘制拍):原版 Frame Skip 缺省
     //   60fps ⇒ dt 累积整数步配额(高刷屏不 2× 快进,后台回前台 dt=100ms 钳 6 步防跳变)
-    this.vinvCraftGlideAcc += dt / (1000 / 60);
-    if (this.vinvCraftGlideAcc >= 1) {
-      let steps = Math.floor(this.vinvCraftGlideAcc);
-      this.vinvCraftGlideAcc -= steps;
-      if (steps > 6) steps = 6;
-      for (let k = 0; k < steps; k++) this.vinvCraftSnapStep();
+    //   ★FX41b(2026-09-15 用户实报「modern 窗点格播滚动音序」):modern 窗开 =
+    //   Main.cs:42418-42428 NewCraftingUI.Visible → else 分支(DrawRecipesList →
+    //   AdjustRecipeOffsets CraftingUI.cs:174)整支不画 ⇒ 吸附步进停摆;modern 点格
+    //   只移植 HandleCraftSlot 的 Sound 12+focusRecipe 播种,滑行账(glideY)在窗关后
+    //   由 PipsFastScroll(:871)首拍瞬吸清账=原版同相。旧缺:rAF 无视窗态步进,
+    //   点格播种 → 隐藏列表滑行 N 越行 N 响(取证=点 1 格 900ms 20 响)。
+    if (!this.vinvModernCraftOpen) {
+      this.vinvCraftGlideAcc += dt / (1000 / 60);
+      if (this.vinvCraftGlideAcc >= 1) {
+        let steps = Math.floor(this.vinvCraftGlideAcc);
+        this.vinvCraftGlideAcc -= steps;
+        if (steps > 6) steps = 6;
+        for (let k = 0; k < steps; k++) this.vinvCraftSnapStep();
+      }
     }
     this.vinvPulseA += this.vinvPulseDir * 0.2 * (dt / 16.67);
     if (this.vinvPulseA > 240) { this.vinvPulseA = 240; this.vinvPulseDir = -1; }
@@ -10348,6 +10517,7 @@ export class UI {
     this.vinvModernSeparatorEl = null;
     this.vinvModernScrollbarEl = null;
     this.vinvModernScrollHandle = null;
+    this.vinvUnbindModernScrollbar();   // ★RB29b F5:window mousemove/mouseup 监听对称摘除
     this.vinvModernDetailEl = null;
     this.vinvModernFilterBtns = [];
     this.vinvModernFilterHovers = [];

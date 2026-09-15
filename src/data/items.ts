@@ -34,8 +34,9 @@ export interface ItemDef {
   vid?: number;
   /** 原版 Item.rare（Item.cs SetDefaults 终值,名称着色档 GetItemNameColor 15 档）。
    *  数据源 vanilla-itemrare.json（extract-itemrare.mjs 提取）——自动注册 vi_ def
-   *  随注册面带入（★BJ91 2026-09-15 RB17b note③:3861=5/3862=3/3860=8 此前整缺,
-   *  tooltip 稀有色落蓝档）。负档 -1 垃圾/-11 限量/-13 大师同表。 */
+   *  随注册面带入（★BJ91 2026-09-15 RB17b note③ + ★RB20b 同日追加:3860=8/3861=5/
+   *  3862=3 与 3320-3332 十三主袋覆写链——旧账「此前整缺」系误记,实为【错值非缺键】
+   *  （旧值=1,tooltip 稀有色落蓝档;键一直在,值错）。负档 -1 垃圾/-11 限量/-13 大师同表。 */
   rare?: number;
   wall?: string;          // 放置的 wall key
   /** 原版 createWall（Item.cs SetDefaults）：放置的背景墙 vanilla id。
@@ -2299,6 +2300,16 @@ export function placeableSheetsForItems(itemIds: Iterable<number>): { tileSheets
  *  星云 booster/4143 等）：Main.item 满槽时 NewItem 优先回收其中最老者的槽位
  *  （Item.cs:49781-49800），普通掉落从不被抢占 */
 export const ITEM_IS_A_PICKUP = new Set([58, 184, 1734, 1735, 1867, 1868, 3453, 3454, 3455, 4143]);
+
+/** ItemID.Sets.ItemNoGravity（ItemID.cs:1108 BoolSet 16 项逐字）——无重力掉落族：
+ *  魂六件 520 光/521 夜/547 惧/548 力/549 视/575 飞翔 + 星云拾取 3453-3455 +
+ *  四塔碎片 3456-3459 + 3580/3581 + 4143 法力斗篷星。原版 WorldItem.MoveInWorld
+ *  （WorldItem.cs:779-794）在重力施加【前】分流：该族不加 g、速度双向 ×0.95
+ *  阻尼（<0.1 归零）→ 掉落即停在死亡点悬停不落地（NewItem 初速双向 Next(-30,31)×0.1,
+ *  Item.cs:49746-49756；drops 侧初速同源 dropVelocity）。消费点：ItemDrop.fixedUpdate
+ *  重力门 + NpcDrops.dropVelocity 初速门（单一权威=本表） */
+export const ITEM_NO_GRAVITY_VIDS = new Set([520, 521, 575, 549, 548, 547, 3453, 3454, 3455,
+  3456, 3457, 3458, 3459, 3580, 3581, 4143]);
 
 /** ItemID.Sets.RecoverableImportantItem（ItemID.cs:1221 BoolSet）——出界回收类：
  *  Boss 掉落袋族 3318-3332/3860-3862/4782/4957/5111，出界（InWorld 20 格余量外）

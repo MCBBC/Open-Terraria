@@ -1,0 +1,97 @@
+{
+ "name": "iii6-celeb-remix",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "1999040562",
+  "seedFlags": {
+   "tenthAnniversary": true,
+   "remix": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "十周年×remix 首臂=税务员",
+ "generatedAt": "2026-09-15T08:55:58.113Z",
+ "fingerprints": {
+  "type": "0be50acf",
+  "flags": "752eb6e4",
+  "wall": "74a27482",
+  "liquid": "724ddb5e",
+  "frameX": "fe318c8f",
+  "frameY": "23adee83"
+ },
+ "side": {
+  "seedFlags": {
+   "tenthAnniversary": true,
+   "remix": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "tax_collector",
+    "givenName": "Andrew",
+    "x": 33591,
+    "y": 16808,
+    "anchor": [
+     2100,
+     1054
+    ],
+    "dir": 1
+   },
+   {
+    "key": "steampunker",
+    "givenName": "Whitney",
+    "x": 33623,
+    "y": 16808,
+    "anchor": [
+     2102,
+     1053
+    ],
+    "dir": -1
+   },
+   {
+    "key": "princess",
+    "givenName": "Yorai",
+    "x": 33559,
+    "y": 16808,
+    "anchor": [
+     2098,
+     1053
+    ],
+    "dir": 1
+   },
+   {
+    "key": "party_girl",
+    "givenName": "Amanda",
+    "x": 33655,
+    "y": 16808,
+    "anchor": [
+     2104,
+     1053
+    ],
+    "dir": -1
+   },
+   {
+    "key": "town_slime_diva",
+    "givenName": "Slimestar",
+    "x": 33527,
+    "y": 16808,
+    "anchor": [
+     2096,
+     1053
+    ],
+    "dir": 1,
+    "variationIndex": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "ca247aa2",
+  "flags": "752eb6e4",
+  "wall": "74a27482",
+  "liquid": "724ddb5e",
+  "frameX": "2548be11",
+  "frameY": "b78e9bc1"
+ },
+ "ghostsPurged": 1612302
+}

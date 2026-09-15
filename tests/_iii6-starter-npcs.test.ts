@@ -15,9 +15,19 @@
 //   终名预言 = pass 头重播种子后第 2 掷落池名（第 1 掷被 GetNameForVariant 覆写；
 //   各臂 NewNPC 是该 pass 的首个掷骰消费点，故 UnifiedRandom(seed) 前 2 掷即命名双掷），
 //   与探针 /tmp/iii20-out/probe.json 五分支五中全等。
+// ★IIIII259（测试世界档案化）：10 用例断言面全部落在固定种子世界的静态产物
+//   （starterTownNpcs/flags/spawn——SaveData 随档域+侧车），世界改经档案库载入
+//   （loadFixtureWorld，游戏读档路径 loadSave 秒级；cfg 与原 generateWorld 逐字
+//   同构，见 tests/world-fixture-gen.test.ts SPECS iii6-*；同世界同断言）。
+//   ★pass 活性守卫：档案不随生成代码漂移——文件尾 canary 用例在档案世界上以
+//   UnifiedRandom(seed) 独立重放 starterNpcsPass（RunPass 槽头 reseed 语义，
+//   WorldGen.ts:541；pass 只读 world.spawnX/spawnY/seedFlags 与 spawn±10 窗口
+//   地形（getAdjustedFloorPosition），出生带=spawnPointPass 清整域/沙滩无树，
+//   档案世界与 pass 时点同形）,与 x86 锚名单硬等。
 import { describe, it, expect } from 'vitest';
-import { generateWorld } from '../src/world/gen/WorldGen';
-import { UnifiedRandom } from '../src/core/rng';
+import { RNG, UnifiedRandom } from '../src/core/rng';
+import { starterNpcsPass } from '../src/world/gen/vanilla/StarterNPCsPass';
+import { loadFixtureWorld } from './world-fixtures';
 
 const CELEB_SEED = '1999040562';
 const W = 4200, H = 1200;
@@ -60,12 +70,8 @@ const X86_STARTERS: Array<{ key: string; givenName: string; anchor: [number, num
 
 describe('IIIIIII6 SpawnStarterNPCs（celebrationmk10 起始镇民）', () => {
   it('十周年世界播种五名初始镇民：名单/名字掷流/homeless 锚与 x86 w.wld 全等', { timeout: 180_000 }, async () => {
-    const world = await generateWorld({
-      width: W, height: H,
-      seedText: CELEB_SEED,
-      seedFlags: { tenthAnniversary: true },
-      evil: 0,
-    });
+    // ★IIIII259 档案载入（cfg=celeb-tenth，见 world-fixture-gen SPECS；下同）
+    const world = loadFixtureWorld('iii6-celeb-tenth');
     // 播种记录
     const starters = world.starterTownNpcs;
     expect(starters, 'starterTownNpcs 应由 pass 填充').toBeDefined();
@@ -94,12 +100,7 @@ describe('IIIIIII6 SpawnStarterNPCs（celebrationmk10 起始镇民）', () => {
   });
 
   it('非十周年世界零副作用早退（starterTownNpcs 不产生、旗标不置位）', { timeout: 180_000 }, async () => {
-    const world = await generateWorld({
-      width: W, height: H,
-      seedText: CELEB_SEED,
-      seedFlags: {},
-      evil: 0,
-    });
+    const world = loadFixtureWorld('iii6-celeb-plain');   // ★IIIII259 档案载入
     expect(world.starterTownNpcs).toBeUndefined();
     expect(world.flags.boughtBunny).toBeFalsy();
     expect(world.flags.unlockedPrincessSpawn).toBeFalsy();
@@ -129,9 +130,7 @@ describe('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () =>
 
   for (const b of BRANCHES) {
     it(`${b.name} 世界起始 NPC=${b.key}：记录/掷流终名/旗标硬等`, { timeout: 240_000 }, async () => {
-      const world = await generateWorld({
-        width: W, height: H, seedText: b.seedText, seedFlags: b.flags, evil: 0,
-      });
+      const world = loadFixtureWorld(`iii6-${b.name}`);   // ★IIIII259 档案载入（cfg=b.seedText/b.flags）
       const starters = world.starterTownNpcs;
       expect(starters, `${b.name}: pass 应产出单条 starter`).toBeDefined();
       expect(starters!.length).toBe(1);
@@ -160,9 +159,7 @@ describe('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () =>
   }
 
   it('infected(purifythis) 世界起始=德鲁伊 20 var1（Lilith 族），名字走 DryadNames 第二掷', { timeout: 240_000 }, async () => {
-    const world = await generateWorld({
-      width: W, height: H, seedText: 'purifythis', seedFlags: { infectedSeed: true }, evil: 0,
-    });
+    const world = loadFixtureWorld('iii6-purifythis');   // ★IIIII259 档案载入
     const s = world.starterTownNpcs![0]!;
     expect(s.key).toBe('dryad');
     expect(s.variationIndex).toBe(1);                               // townNpcVariationIndex（cs:19993）
@@ -172,10 +169,7 @@ describe('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () =>
   });
 
   it('优先级：drunk×notBees 组合世界由 notBees 臂受理（else 树上游否定）', { timeout: 240_000 }, async () => {
-    const world = await generateWorld({
-      width: W, height: H, seedText: '05162020',
-      seedFlags: { drunkWorld: true, notTheBees: true }, evil: 0,
-    });
+    const world = loadFixtureWorld('iii6-drunknotbees');   // ★IIIII259 档案载入
     const starters = world.starterTownNpcs!;
     expect(starters.length).toBe(1);
     expect(starters[0].key).toBe('merchant');   // cs:20025 在 cs:20043 之前截胡（旧门曾误接派对女孩臂）
@@ -185,10 +179,7 @@ describe('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () =>
   });
 
   it('十周年×remix 组合首臂=税务员 "Andrew"+savedTaxCollector（zenith 主线;类型臂≠命名臂）', { timeout: 240_000 }, async () => {
-    const world = await generateWorld({
-      width: W, height: H, seedText: CELEB_SEED,
-      seedFlags: { tenthAnniversary: true, remix: true }, evil: 0,
-    });
+    const world = loadFixtureWorld('iii6-celeb-remix');   // ★IIIII259 档案载入
     const starters = world.starterTownNpcs!;
     expect(starters.length).toBe(5);
     expect(starters[0].key).toBe('tax_collector');                  // cs:19869 NewNPC(441)
@@ -202,10 +193,7 @@ describe('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () =>
   });
 
   it('十周年×infected 组合首臂=德鲁伊 "Lilith" var1（serverconfig 形态;余四席不变）', { timeout: 240_000 }, async () => {
-    const world = await generateWorld({
-      width: W, height: H, seedText: CELEB_SEED,
-      seedFlags: { tenthAnniversary: true, infectedSeed: true }, evil: 0,
-    });
+    const world = loadFixtureWorld('iii6-celeb-infected');   // ★IIIII259 档案载入
     const starters = world.starterTownNpcs!;
     expect(starters.map((s) => s.key)).toEqual([
       'dryad', 'steampunker', 'princess', 'party_girl', 'town_bunny',
@@ -215,5 +203,25 @@ describe('IIIII20 SpawnStarterNPCs else 链换人支（cs:19986-20059）', () =>
     // 其余席位与纯 celeb 五人组同构（D 批金标名单尾部抽查）
     expect(starters[3].givenName).toBe('Amanda');
     expect(starters[4].givenName).toBe('Boof');                     // 白兔 B 掷（种子同源复现）
+  });
+
+  // ★IIIII259 pass 活性 canary：档案=生成快照不随生成代码漂移——本用例在档案世界上
+  //   以 new RNG(seed)（≡槽头 rng.reseed(seed),RNG.ts:164-166 同构）独立重放
+  //   SpawnStarterNPCs，与 x86 锚名单/开局旗标硬等=StarterNPCsPass 的实时回归面
+  //   （零整世界生成成本）。
+  it('★IIIII259 canary：档案世界独立重放 SpawnStarterNPCs ≡ x86 名单（pass 活性守卫）', () => {
+    const world = loadFixtureWorld('iii6-celeb-tenth');
+    world.starterTownNpcs = undefined;
+    world.flags = {};
+    starterNpcsPass({ store: world.store, rng: new RNG(world.seed), world });
+    expect(world.starterTownNpcs!.map((s) => s.key)).toEqual(X86_STARTERS.map((s) => s.key));
+    world.starterTownNpcs!.forEach((s, i) => {
+      expect(s.givenName, `#${i} ${s.key} 名`).toBe(X86_STARTERS[i].givenName);
+      expect(s.anchor, `#${i} ${s.key} homeless 锚`).toEqual(X86_STARTERS[i].anchor);
+      expect(s.dir, `#${i} ${s.key} 朝向`).toBe(X86_STARTERS[i].dir);
+    });
+    expect(world.flags.boughtBunny).toBe(true);
+    expect(world.flags.unlockedPrincessSpawn).toBe(true);
+    expect(world.flags.unlockedPartyGirlSpawn).toBe(true);
   });
 });

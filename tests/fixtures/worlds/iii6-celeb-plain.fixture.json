@@ -1,0 +1,33 @@
+{
+ "name": "iii6-celeb-plain",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "1999040562",
+  "seedFlags": {},
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "非十周年零副作用早退负例",
+ "generatedAt": "2026-09-15T08:49:25.217Z",
+ "fingerprints": {
+  "type": "5bdfbdca",
+  "flags": "e79be8ec",
+  "wall": "4bd00fc0",
+  "liquid": "2f95b194",
+  "frameX": "8bf598cd",
+  "frameY": "fafeb19d"
+ },
+ "side": {
+  "seedFlags": {}
+ },
+ "genFingerprints": {
+  "type": "1589ae6d",
+  "flags": "e79be8ec",
+  "wall": "4bd00fc0",
+  "liquid": "2f95b194",
+  "frameX": "4d0ed1f5",
+  "frameY": "9b5f2fbf"
+ },
+ "ghostsPurged": 1649007
+}

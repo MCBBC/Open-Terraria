@@ -10,7 +10,7 @@
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const URL = (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?dev=1';
-const FONT_STR = '19px "Fusion Pixel 12px", monospace';
+const FONT_STR = '14px "Fusion Pixel 12px", monospace';   // ★用户拍板 16px 紧凑折中
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800, deviceScaleFactor: 2 } });
 const page = await browser.newPage();
 const errors = [];
@@ -51,7 +51,7 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${n}${x
 const fontState = await page.evaluate(async () => {
   await document.fonts.ready;
   return {
-    loaded: document.fonts.check('19px "Fusion Pixel 12px"'),
+    loaded: document.fonts.check('14px "Fusion Pixel 12px"'),
     faces: [...document.fonts].filter((f) => /Fusion/.test(f.family)).map((f) => `${f.family}/${f.status}`),
   };
 });

@@ -75,7 +75,9 @@ export interface SaveData {
     worldId?: number;
     /** ★IIIII20b：StarterNPC 换人一次性迁移标记——换人族旗标在身而存档还是
      *  换人支实装前生成的向导起始位时，首次以修复后客户端载入做顶替并打标。
-     *  打标后该世界的后续合法入城（如派对女孩世界玩家补招的向导）不再被动 */
+     *  打标后该世界的后续合法入城（如派对女孩世界玩家补招的向导）不再被动。
+     *  ★RB20b note③（2026-09-15）：SW 自创域，原版 WorldFile/WorldHeader 无对应物
+     *  （原版无换人迁移语义）——本键仅存于仓内 kv 存档 JSON，不进 .wld 二进制 */
     starterSwapMigrated?: boolean;
     /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程；
      *  原版随 WorldFileData 持久化；旧档缺省 0=经典） */
@@ -219,6 +221,12 @@ export interface SaveData {
     /** 建筑配件开关位（★SW-FX19；Player.builderAccStatus[12],PL:55553-55555 写/
      *  :56306-56325 读。旧档缺省=ResetData 形 [0]=1 余 0（Player.cs:56749）） */
     builderAccStatus?: number[];
+    /** 火把神恩宠解锁旗（★SW-FX38b；Player.unlockedBiomeTorches,PL:55430 写/
+     *  :55895 读 .plr≥229 单字节 bool）。原版是【角色字段】随身跨世界;本仓在-session
+     *  权威落 world.flags.unlockedBiomeTorches（buildSave 快照时回填本字段,
+     *  mainFlow.applyPlayer 读档单调回灌 world.flags——只置 true 不回退）。旧档
+     *  缺省 undefined=false（原版新角缺省同形） */
+    unlockedBiomeTorches?: boolean;
     /** 永久升级族(Player.cs:44575-44802;旧档缺省全 false) */
     permanentUpgrades?: {
       extraAccessory?: boolean;

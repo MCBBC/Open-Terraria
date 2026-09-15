@@ -45,11 +45,56 @@ describe('BJ91 RB17b③ BossBag 族 rare 终值（Item.cs:34145-64）', () => {
 
   it('结构锁①：提取器 HAND_RARE 反哺钉值在位（重产不回退;DRIFT 闸门随提取器守卫）', () => {
     const src = EXTRACTOR_SRC();
-    expect(src).toContain('const HAND_RARE = { 3860: 8, 3861: 5, 3862: 3 };');
+    expect(src).toMatch(/const HAND_RARE = \{\s*3860: 8, 3861: 5, 3862: 3,/);
     expect(src).toMatch(/for \(const \[id, r\] of Object\.entries\(HAND_RARE\)\) RARE\[id\] = r;/);
   });
 
   it('结构锁②：items.ts 自动注册 def 带 rare（防注册面回退为裸 {key,value:1}）', () => {
     expect(ITEMS_SRC()).toMatch(/item\(\{ key: ik, name: '', value: 1, rare: /);
+  });
+});
+
+// ==================== ★RB20b（2026-09-15）追加：13 主 Boss 宝袋 3320-3332 ====================
+// RB20b 定谳：共享 case 3319-3332 基础 rare=1（1457 Item.cs:30562）+ 13 条 if(type==X)
+// 覆写链（:30563-30589;1456 :30539-30588 同链零漂移）——与 3860-3862 同构的提取器
+// if 链盲区残留。★错值非缺键：json 一直有键（旧值全=1）。3319 眼袋无覆写行=1 正确。
+
+/** Item.cs:30563-30589 if 链终值（1456/1457 同链亲读;顺序=吞噬/克脑/蜂王/骷髅/肉山/
+ *  毁灭者/双子/ Prime /世纪花/石巨人/猪龙鱼/拜月教主） */
+const BOSS_BAG_RARE: Record<number, number> = {
+  3320: 2, 3321: 2, 3322: 3, 3323: 3, 3324: 4, 3325: 5, 3326: 5, 3327: 5,
+  3328: 6, 3329: 7, 3330: 7, 3331: 8, 3332: 8,
+};
+
+describe('RB20b 13 主 Boss 宝袋 3320-3332 rare 终值（Item.cs:30563-30589 if 链）', () => {
+  it('vanilla-itemrare.json：13 袋 2/2/3/3/4/5/5/5/6/7/7/8/8；3319 眼袋无覆写行守 1（手改回 1=红）', () => {
+    for (const [id, rare] of Object.entries(BOSS_BAG_RARE)) {
+      expect(RARE[id], `rare[${id}]`).toBe(rare);
+    }
+    expect(RARE['3319']).toBe(1);
+  });
+
+  it('自动注册 def 面：vi_3320..vi_3332 def.rare 随注册带入（tooltip/拾取飘名稀有色自描述）', () => {
+    for (const [vid, rare] of Object.entries(BOSS_BAG_RARE)) {
+      const key = VANILLA_ITEM_KEY_BY_ID[Number(vid)];
+      expect(key, `vid ${vid} 已注册`).toBeTruthy();
+      const def = ITEM_DEFS[ITEM_BY_KEY[key!]];
+      expect(def, `def ${key}`).toBeTruthy();
+      expect(def.rare, `${key}.rare`).toBe(rare);
+    }
+  });
+
+  it('id 锚：3320/3332 确为 EaterOfWorlds/MoonLord BossBag（防 id 平移后守卫钉错对象）', () => {
+    expect(VANILLA_ITEM_KEY_BY_ID[3320]).toMatch(/3320/);
+    expect(VANILLA_ITEM_KEY_BY_ID[3332]).toMatch(/3332/);
+  });
+
+  it('结构锁③：提取器 HAND_RARE 含 13 袋钉值（重产不回退;判例 fx3）', () => {
+    const src = EXTRACTOR_SRC();
+    for (const [id, rare] of Object.entries(BOSS_BAG_RARE)) {
+      expect(src).toContain(`${id}: ${rare},`);
+    }
+    expect(src).toContain('3320: 2, 3321: 2, 3322: 3');
+    expect(src).toContain('错值非缺键');   // RB20b note① 勘误在位（防旧注复辟）
   });
 });

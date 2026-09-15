@@ -1,0 +1,31 @@
+{
+ "name": "bj48-a",
+ "cfg": {
+  "width": 2000,
+  "height": 700,
+  "seedText": "bj48-a"
+ },
+ "source": "tests/sw-bj48-teleport-potion.test.ts",
+ "notes": "传送药水真世界落点种子 bj48-a",
+ "generatedAt": "2026-09-15T08:53:23.862Z",
+ "fingerprints": {
+  "type": "276bde21",
+  "flags": "9a950ffd",
+  "wall": "ccdb2ab1",
+  "liquid": "e1e13d85",
+  "frameX": "8e6c0e6c",
+  "frameY": "f34e9201"
+ },
+ "side": {
+  "seedFlags": {}
+ },
+ "genFingerprints": {
+  "type": "4678eaea",
+  "flags": "9a950ffd",
+  "wall": "ccdb2ab1",
+  "liquid": "e1e13d85",
+  "frameX": "a7f164b5",
+  "frameY": "c8e11ec1"
+ },
+ "ghostsPurged": 472790
+}

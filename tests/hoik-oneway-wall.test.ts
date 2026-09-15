@@ -407,3 +407,51 @@ describe('本仓：垂直单向墙（wiki 构图,2宽平台井）', () => {
     expect(b.y + 42).toBeLessThanOrEqual(REPO_TOP + 1);  // 越出天花板顶
   });
 });
+
+// ★RB29/FX34b 2026-09-15：hoik 穿行期 unembedPass 让位（转正断言）。
+//  取证史:红队临时件 tests/_tmp-rb29-hoik-transit.test.ts（已删）以 wet 消融定谳
+//  ——b.wet=true 跳过 unembedPass 后末态与 vanilla 参考机逐像素一致 ⇒ 穿行期
+//  +16px/拍抬升源 = unembedPass topEmbedded 2t 快速支（本仓自愈发明,vanilla 无）。
+//  修 = unembedPass 头部 `if (b.hoik) return` 整段让位（TileCollision.ts,RB29/FX34b
+//  注）。本组断言锁死修后行为:dry 正常玩家（hoik=true,无 wet）即 vanilla 贴地穿越;
+//  2 厚墙 = vanilla 同款 blocked（修前 unembed 连锁 16→32→48px 越墙逃逸）。
+describe('本仓：hoik 穿行期 unembed 让位（RB29 转正断言）', () => {
+  function buildTransit(st: TileStore, thick: number) {
+    for (let x = 20; x <= 56; x++) st.setTile(x, 32, DIRT);
+    for (let y = 29; y <= 31; y++) for (let k = 0; k < thick; k++) st.setTile(36 + k, y, DIRT);
+    for (let y = 29; y <= 31; y++) { st.setTile(35, y, PLATFORM); st.setSlope(35, y, 2); }
+  }
+  /** 与取证件同参逐 tick 驱动;统计穿行窗（x∈[墙左缘−20, 越墙点)）内 feet 抬升帧 */
+  function transit(thick: number, ticks = 200) {
+    const W = makeWorld(); buildTransit(W.store, thick);
+    const b: RB = { x: 33 * TILE, y: 32 * TILE - 42, w: 20, h: 42, vx: 0, vy: 0,
+      onGround: false, hitWall: false, hitHead: false, stepUp: true, stepUpHolds: false,
+      dropThrough: true, hoik: true };
+    const FLOOR = 32 * TILE;
+    const endX = (36 + thick) * TILE + 24;
+    let liftFrames = 0, maxLift = 0, crossed = false;
+    for (let t = 0; t < ticks; t++) {
+      b.vy = Math.min(b.vy + 0.4, 10);
+      b.vx = 3;
+      moveAndCollide(b as never, W, b.vx, b.vy);
+      if (b.x < endX && b.x >= 36 * TILE - 20) {
+        const lift = FLOOR - (b.y + b.h);
+        if (lift > 10) { liftFrames++; maxLift = Math.max(maxLift, lift); }
+      }
+      if (b.x > endX) { crossed = true; break; }
+    }
+    return { crossed, x: b.x, feet: b.y + b.h, liftFrames, maxLift };
+  }
+  it('1 厚墙水平穿行:贴地 0 抬升帧（修前 ~11 帧 +16px/拍站墙内块顶）', () => {
+    const r = transit(1);
+    expect(r.crossed).toBe(true);      // 正控制:hoik 穿越通道不被本刀破坏
+    expect(r.liftFrames).toBe(0);      // 穿行窗内零抬升（feet ≥ 地线−10px）
+    expect(r.maxLift).toBe(0);
+  });
+  it('2 厚墙:vanilla 同款 blocked（嵌第一列内不可越）且 0 抬升（修前 16→32→48 越墙逃逸）', () => {
+    const r = transit(2);
+    expect(r.x).toBeLessThanOrEqual(38 * TILE);   // 不得越出墙右缘(vanilla 参考机 crossed=false)
+    expect(r.liftFrames).toBe(0);
+    expect(r.maxLift).toBe(0);
+  });
+});

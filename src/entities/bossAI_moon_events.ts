@@ -1126,7 +1126,19 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
     if (e.ai0 === 2) {
       e.x += e.vx;
       e.y += e.vy;
-      game.spawnParticles(e.cx, e.cy, '#7A4FB0', 3, 1.2, { life: 30, damp: 0.9 });
+      // FX45（2026-09-16,用户实报"弹幕只有球体没粒子"）：出生相原版站 1:1 化——
+      // 原版 :21563 PlaySound(4,x,y,9)（case4=NPC_Killed 库 → NPC_Killed_9）+
+      // :21564-21571 出膛爆裂 20× 尘 18 CorruptGibs（盒 pos.X/pos.Y+2/w/h、
+      // sp0/0、α100、scale1.8、尘速 ×1.3 后 += 弹速、noGravity）。曾是 3 粒
+      // '#7A4FB0' 泛色 spawnParticles 伪造（尘型/频数/速度三差）
+      game.playSfxFiles?.(['NPC_Killed_9'], 1, e.x, e.y);
+      for (let k = 0; k < 20; k++) {
+        const d = game.spawnDust?.(e.x, e.y + 2, e.w, e.h,
+          18, 0, 0, 100, null, 1.8, true);
+        if (!d) continue;
+        d.vx = d.vx * 1.3 + e.vx;
+        d.vy = d.vy * 1.3 + e.vy;
+      }
     }
     // 进实心块自爆(:21463-21468)——noTileCollide 穿墙飞行途中入墙即碎
     if (solidRect(game, e.x, e.y, e.w, e.h)) {
@@ -1196,6 +1208,17 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
       for (let loop = 0; loop < 2; loop++) {
         const d = game.spawnDust?.(e.x, e.y + 2, e.w, e.h,
           6, e.vx * 0.2, e.vy * 0.2, 100, null, 2, true);
+        if (!d) continue;
+        d.vx *= 0.3; d.vy *= 0.3;
+      }
+    } else if (vid === 112 || vid === 666) {
+      // FX45（2026-09-16）：飞行尾迹原版真尘（NPC.cs:21644-21650,在 num133<2 双
+      // 循环内=每 tick 2 粒）：尘 18 CorruptGibs、盒 (pos.X, pos.Y+2, w, h)、
+      // sp=v×0.1、α80（≠同族其余支的 100）、scale1.3、尘速 ×0.3、noGravity——
+      // 此前整支缺失（弹体飞行时零粒子,用户实报根因）
+      for (let loop = 0; loop < 2; loop++) {
+        const d = game.spawnDust?.(e.x, e.y + 2, e.w, e.h,
+          18, e.vx * 0.1, e.vy * 0.1, 80, null, 1.3, true);
         if (!d) continue;
         d.vx *= 0.3; d.vy *= 0.3;
       }

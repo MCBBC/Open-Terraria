@@ -238,7 +238,7 @@ import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompos
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
 import { TILE_HAS_OUTLINES, HIGHLIGHT_ANIM_EXCLUDED, HIGHLIGHT_ANIM_WHEN_LIT, getSelectionGlowColor, highlightCellRect, loadHighlightMask, smartHighlightSampleLight, SMART_CURSOR_ARROW_COLOR } from './TileHighlight';   // ★SW-BJ54：智能交互 tile 高亮（GetTileOutlineInfo 链）;SW-RB11a 补条件动画门;SW-BJ61 用户分歧采样+箭头原版 White
 import { smartInteractTileFrame } from '../core/SmartInteractTiles';   // ★SW-BJ54：候选帧态（Game.update 侧每帧写）
-import { isDynamicAnimSheet, campfireYOffset, fountainYOffset } from './TileAnim';
+import { isDynamicAnimSheet, campfireYOffset, fountainYOffset, tileAnim } from './TileAnim';
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
@@ -628,7 +628,7 @@ export function sparkleArmGeometry(
 }
 
 import { Lang } from '../i18n/Lang';
-import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
+import { pylonItemTypeFromStyle, PYLON_DUST_RGB } from '../world/TeleportPylons';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
@@ -3783,6 +3783,17 @@ export class Renderer {
       drawTileFlames(ctx, this.atlas, world.store, ftx0, fty0, ftx1, fty1, flicker);
     }
 
+    // 2c'.1 晶塔悬浮水晶层（TileDrawing.DrawTeleportationPylons :8806-8888——原版
+    //   tile 批内的 special point 尾扫,本体画在 tile 层之上、NPC 之下）。★FX38 修
+    //   （2026-09-15 用户实报两连：①"晶塔只画基座枝干缺悬浮水晶"——水晶层在
+    //   Extra_181 独立贴图,本体一直从缺；②首版画在光照合成后压在角色上方——
+    //   用户明令层级不得高于角色,现挪入世界层 tile 批位=原版层序,随合成吃光照
+    //   （塔自灯 specialTileLight 0.75 使暗处仍亮;本仓无逐精灵顶点色通道,合成乘光
+    //   即世界层统一光照语义,与火苗层同构）。）
+    if (this.atlas) {
+      this.drawPylonCrystals(cam, world, viewW, viewH, z);
+    }
+
     // 2c''.4 高尔夫蓄力显示：预测弹道点（FancyGolfPredictionLine 近似：同物理步进）+
     //   力度条（GolfSwingBarFill：宽 54×rel，玩家脚下）
     if (this.golfPower) {
@@ -4340,7 +4351,8 @@ export class Renderer {
     //      行高 ⇒ 字形主体悬于鼠标上方;描边=Utils.DrawBorderString(:2679)→
     //      DrawColorCodedStringWithShadow spread 1.5（ChatManager.cs:30 四向 ±x±y
     //      黑影）。字体原版 FontAssets.MouseText → 本仓 CANVAS_MOUSETEXT_FONT
-    //      （★FX35 2026-09-15:19px 项目像素字体,原「14px monospace 替身」退役,
+    //      （★FX35 2026-09-15 项目像素字体,原「14px monospace 替身」退役;
+    //      ★16px=用户拍板档(墨高 ~14.7),19px 等值档链在 PixelText 注——
     //      同 cursorItemIconText 字体偏差登记）。层序=MouseText(33) 在
     //      InteractItemIcon(40) 之下 ⇒ 画在 drawCursorItemIcon 之前。）
     if (this.rulerReadout) {
@@ -15200,11 +15212,12 @@ export class Renderer {
     // 0.925×0.85）→ DrawBorderStringFourWay 白×mouseTextColor 四向描边。
     // ★canvas fillText y=基线而 XNA DrawString y=字形顶（origin 零）——曾按基线画
     //   致文字浮出底板上缘（2026-08-28 用户实报"标牌文字错位"），textBaseline=top 修正
-    // ★FX35 2026-09-15：字体=CANVAS_MOUSETEXT_FONT（19px 像素字体 ≙ MouseText
-    //   scale 1,460px 换行 ≙ 原版 ~24-25 字/行）;行距 lh 20→30 = 原版逐字钉值
-    //   （:43708 `l * 30` / :43690 `screenHeight - 30*lineAmount` / :43704 底板
-    //   `30*lineAmount+7`——旧 20 是 14px 替身时代的代偿值,未登记;19px 墨高 17.4
-    //   在 20 距下已无行隙）。460px 换行宽与底板公式随 lh 同步归位
+    // ★FX35 2026-09-15：字体=CANVAS_MOUSETEXT_FONT（16px 用户拍板档,墨高 ~14.7;
+    //   19px 墨高严格等值档 ≙ MouseText scale 1 链在 PixelText 注）;行距 lh 20→30
+    //   = 原版逐字钉值（:43708 `l * 30` / :43690 `screenHeight - 30*lineAmount` /
+    //   :43704 底板 `30*lineAmount+7`——旧 20 是 14px 替身时代的代偿值,未登记;
+    //   19px 档墨高 17.4 在 20 距下已无行隙故钉 30;16px 拍板后行距 30 维持原版
+    //   钉值不动）。460px 换行宽与底板公式随 lh 同步归位
     if (this.signHoverText) {
       ctx.font = CANVAS_MOUSETEXT_FONT;
       const lh = 30;
@@ -15267,7 +15280,8 @@ export class Renderer {
    *  （「时间/深度/移动速度…」,DrawInfoAccs :48175 MouseTextNoOverride 只置缓存
    *  不即画）。锚 = mouse+14 + ThickMouse 默认档 +6（:20379-20389）→ 实锚
    *  mouse+20（> 本仓光标阴影 pass 右缘 ≈+16.4,BJ7 净空不变式）+ 屏幕右/下缘
-   *  40px 收边（:20412-20419,度量=MeasureString 全串,h 取 19px 行盒近似）。
+   *  40px 收边（:20412-20419,度量=MeasureString 全串,h 取 19px 行盒近似——19px
+   *  时代钉值,16px 拍板后未随调）。
    *  ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（原 14px monospace 替身退役,
    *  箱名/NPC 名/行标签同族统一,理由见 PixelText.CANVAS_MOUSETEXT_FONT 注）。
    *  ★SW-FX21 2026-09-14 自 drawCursorItemIcon（层 40 域,步骤 7b'）迁出:彼处早于
@@ -15292,10 +15306,11 @@ export class Renderer {
     if (p.cursorItemIconText === '') return;
     const mt = this.lighting?.clock.mouseTextColor ?? 255;
     const col = Math.round((mt / 255) * 255);
-    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(19px 像素字体 ≙ MouseText
-    //  scale 1;原「14px monospace 替身」在 Windows DirectWrite 下四向 ±2 描边露出
-    //  偏移拷贝=「叠了几层文字」观感,见 PixelText.CANVAS_MOUSETEXT_FONT 注)。
-    //  h=19:下缘收边用的单行盒近似随字号更新(旧 14=同式近似;原版 :20401 用
+    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(16px 用户拍板档,墨高 ~14.7;
+    //  19px 墨高严格等值档 ≙ MouseText scale 1 链在 PixelText.CANVAS_MOUSETEXT_FONT
+    //  注;原「14px monospace 替身」在 Windows DirectWrite 下四向 ±2 描边露出
+    //  偏移拷贝=「叠了几层文字」观感)。
+    //  h=19:下缘收边用的单行盒近似(19px 时代钉值,16px 拍板未随调;原版 :20401 用
     //  MeasureString 全串盒,本仓维持近似式)
     ctx.font = CANVAS_MOUSETEXT_FONT;
     const w = ctx.measureText(p.cursorItemIconText).width;
@@ -15785,6 +15800,140 @@ export class Renderer {
     if (!this.worldLayerActive) return;
     this.ctx = mainCtx;
   }
+
+  /** 晶塔悬浮水晶（TileDrawing.DrawTeleportationPylons TileDrawing.cs:8806-8888 1:1）：
+   *  水晶层不在 Tiles_597 基座贴图内，在独立 Extra_181（420×368 = 14 列×8 行帧，
+   *  30×46/帧——列 0..2 为保留/选中辉光列，列 3+style 为 11 塔型水晶列）。
+   *  逐座锚点（this.pylons 缓存，锚判据 frameX%54==0 且 frameY==0 :8816 同源）：
+   *  · 中心 = 锚点 ToWorldCoordinates(24,64) + (0,-40)（:8821-8823）——锚 3×4 足迹
+   *    底中点上方 40px；浮动 = sin(GlobalTimeWrappedHourly×2π/5)×4（:8824-8825）；
+   *  · 帧 = (tileFrameCounter[597] + x + y) % 64 / 8（:8818——Main.cs:19467 计数器
+   *    每 tick +1 回卷 64，8 tick/帧；本仓 tileAnim.tick 同拍等价，8 相位错相）；
+   *  · 本体 = sprite×0.7（:8846），光照白化项 Lerp(光照,White,0.8)（:8837-8842）由
+   *    世界层合成乘光承载（画在世界层 tile 批位=原版层序——首版画在合成后压在
+   *    角色上方,用户明令层级不得高于角色,已挪入 2c'.1；不再自乘 lightAt=防双重受光）；
+   *  · 辉光 = 6 向加算重画本体（XNA A=0 纯加法惯式），α = (sin(t×2π)×0.2+0.8)×0.1，
+   *    半径 = 6 + 浮动×2（:8849-8854）；
+   *  · 悬浮尘 = 未暂停时每帧 1/4×1/10 概率向水晶盒 SpawnInWorldDust（:8827-8832，
+   *    尘 43 塔型配色，TeleportPylonsSystem.cs:338-406）；
+   *  · 智能光标选中 = 列 2 帧以 GetSelectionGlowColor 叠画（:8856-8870，avg>10 门）。
+   *  层序 = render 2c'.1（tile 层后、实体前——原版 tile 批 special point 同位,
+   *  角色/NPC 画在其后=水晶恒在角色之下）。 */
+  private drawPylonCrystals(cam: Camera, world: World, viewW: number, viewH: number, z: number): void {
+    const atlas = this.atlas;
+    if (!atlas || !this.pylons.length) return;
+    const tex = atlas.vmisc('vanilla/Extra_181.png');
+    if (!tex) return;
+    const pylonTile = TILE_BY_KEY['v_597_pylons'];
+    if (!pylonTile) return;
+    const store = world.store;
+    const FW = 30, FH = 46;                       // Extra_181 帧 30×46（420/14 × 368/8）
+    const t = this.lighting?.clock?.globalTimeWrappedHourly ?? 0;   // GlobalTimeWrappedHourly
+    const tick = tileAnim.tick;                   // ⟺ tileFrameCounter[597]（每 tick +1）
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    const wKg = this._worldLowK || 1;
+    const lwg = Math.round(viewW * wKg), lhg = Math.round(viewH * wKg);
+    const ox = Math.round(lwg / 2), oy = Math.round(lhg / 2);
+    const zz = z * wKg;
+    // 可视域裁剪（原版 = special point 仅随可视 tile 循环登记，:8811-8818）
+    const tx0 = cam.x - viewW / 2 / z - TILE * 2;
+    const tx1 = cam.x + viewW / 2 / z + TILE * 2;
+    const ty0 = cam.y - viewH / 2 / z - TILE * 4;
+    const ty1 = cam.y + viewH / 2 / z + TILE * 4;
+    const ctx = this.ctx;
+    const scr = this._pylonScr ??= (typeof document !== 'undefined'
+      ? document.createElement('canvas') : null);
+    const sc = scr?.getContext('2d') ?? null;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    try {
+      for (const py of this.pylons) {
+        // 锚格活性校验（原版 AddSpecialPoint 只在 tile active 时登记；缓存对已破坏
+        // 塔的竞态防幽灵水晶——scanPylons 锚判据同源）
+        if (!store.inBounds(py.x, py.y)) continue;
+        const si = store.idx(py.x, py.y);
+        if (store.type[si] !== pylonTile || (store.flags[si] & 1) === 0) continue;
+        if (store.frameY[si] !== 0 || store.frameX[si] % 54 !== 0) continue;
+        const cx = py.x * TILE + 24;              // ToWorldCoordinates(24,64) X
+        const cyBase = py.y * TILE + 64 - 40;     // 同上 Y − 40（悬浮位）
+        if (cx < tx0 || cx > tx1 || cyBase < ty0 || cyBase > ty1) continue;
+        const style = Math.floor(store.frameX[si] / 54);              // :8819 frameX/54
+        const frameY = Math.floor(((tick + py.x + py.y) % 64) / 8);   // :8818（8 相位错相）
+        const bob = Math.sin(t * (Math.PI * 2) / 5) * 4;              // :8824 num5（±4px,5s）
+        const pulse = Math.sin(t * Math.PI * 2) * 0.2 + 0.8;          // :8849 num6（1s 呼吸）
+        const sx = (3 + style) * FW, sy = frameY * FH;                // 列 3+style / 行 frameY
+        const dw = Math.max(1, Math.round(FW * zz)), dh = Math.max(1, Math.round(FH * zz));
+        const xd = ox + Math.round((cx - camRX) * zz) - dw / 2;
+        const yd = oy + Math.round((cyBase + bob - camRY) * zz) - dh / 2;
+        // 乘色帧画笔（draw → multiply → destination-in 恢复 alpha——tintIconRect
+        // 同惯式三步,★禁止主画布直接 source-atop=黑方块事故 2026-08-18）
+        const paintTinted = (col: number, row: number, r: number, g: number, b: number, alpha: number) => {
+          if (!scr || !sc) return;
+          if (scr.width !== FW || scr.height !== FH) { scr.width = FW; scr.height = FH; }
+          sc.globalCompositeOperation = 'source-over';
+          sc.clearRect(0, 0, FW, FH);
+          sc.imageSmoothingEnabled = false;
+          sc.drawImage(tex.img, tex.sx + col * FW, tex.sy + row * FH, FW, FH, 0, 0, FW, FH);
+          sc.globalCompositeOperation = 'multiply';
+          sc.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+          sc.fillRect(0, 0, FW, FH);
+          sc.globalCompositeOperation = 'destination-in';
+          sc.drawImage(tex.img, tex.sx + col * FW, tex.sy + row * FH, FW, FH, 0, 0, FW, FH);
+          sc.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = alpha;
+          ctx.drawImage(scr, xd, yd, dw, dh);
+          ctx.globalAlpha = 1;
+        };
+        // 本体 = sprite×0.7（:8846 的 0.7f 系数；白化项 Lerp(光照,White,0.8) 由
+        // 世界层合成乘光承载——画在世界层=吃统一光照,塔自灯
+        // specialTileLight 0.75 使暗处仍亮。★不得再自乘 lightAt 白化=双重受光）
+        ctx.globalAlpha = 0.7;
+        ctx.drawImage(tex.img, tex.sx + sx, tex.sy + sy, FW, FH, xd, yd, dw, dh);
+        ctx.globalAlpha = 1;
+        // 辉光 = 6 向加算重画本体（:8849-8854，XNA A=0 纯加法 → 'lighter'）：
+        // α = 0.1×pulse、半径 = 6 + bob×2（世界像素,绕 2π/6 取向）
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 0.1 * pulse;
+        for (let k = 0; k < 6; k++) {
+          const ang = (Math.PI * 2 * k) / 6;
+          const hx = ox + Math.round((cx + Math.cos(ang) * (6 + bob * 2) - camRX) * zz) - dw / 2;
+          const hy = oy + Math.round((cyBase + bob + Math.sin(ang) * (6 + bob * 2) - camRY) * zz) - dh / 2;
+          ctx.drawImage(tex.img, tex.sx + sx, tex.sy + sy, FW, FH, hx, hy, dw, dh);
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
+        // 悬浮尘（:8827-8832：_rand.Next(4)==0 且 Next(10)==0 → 水晶盒 SpawnInWorldDust；
+        // _isActiveAndNotPaused 门 → !this._worldPaused。尘 43 塔型配色 + 速度修型）
+        if (this.vanillaDust && !this._worldPaused && Math.random() < 1 / 40) {
+          const [fr, fg, fb] = PYLON_DUST_RGB[style] ?? PYLON_DUST_RGB[0];
+          // ★DustColor=字节域（×255 折算,0..1 直传会被尘 43 照度门整灭——见 Game.pylonTeleportFx 注）
+          const d = this.vanillaDust.spawn(
+            cx - FW / 2, cyBase + bob - FH / 2, FW, FH, 43, 0, 0, 254,
+            { r: Math.round(fr * 255), g: Math.round(fg * 255), b: Math.round(fb * 255), a: 255 }, 0.5);
+          if (d) { d.vx *= 0.1; d.vy *= 0.1; d.vy -= 0.2; }
+        }
+        // 智能光标选中辉光（:8856-8870：InSmartCursorHighlightArea(锚) → 列 2 帧
+        // Colors.GetSelectionGlowColor(selected, avg)，avg = 光带 (R+G+B)/3 整除、>10 门）
+        const frame = smartInteractTileFrame;
+        if (frame.tileWon && frame.coords.some((c) => c.x === py.x && c.y === py.y)) {
+          const [lr2, lg2, lb2] = this.lighting?.lightAt(py.x, py.y) ?? [255, 255, 255];
+          const avg = Math.floor((lr2 + lg2 + lb2) / 3);
+          if (avg > 10) {
+            const [gr, gg, gb, ga] = getSelectionGlowColor(
+              frame.selected.has(`${py.x},${py.y}`), avg);
+            paintTinted(2, frameY, gr, gg, gb, ga / 255);
+          }
+        }
+      }
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  /** 晶塔水晶乘色 scratch（30×46,drawPylonCrystals 每帧复用） */
+  private _pylonScr: HTMLCanvasElement | null = null;
 
   /** 荧光涂层叠层（render 7-涂层钩子）：把各 chunk 的 pair.glow（荧光涂层格 16×16
    *  拷贝，ChunkCache.bakeChunkInto 烘焙）在光照合成【后】按整数设备矩形叠回主画布
@@ -16720,8 +16869,9 @@ export class Renderer {
     // :57011-57013 → mouseTextString，经 MouseText 光标白字显示）：drawMapHeads
     // 帧内命中后在此出字（尾段=原版 MouseText 画在界面链末端的同层级）。
     // 色 = mouseTextColor 脉动白 + 四向影（Renderer :14070 同偏差登记）
-    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（MouseText 同族,19px 像素字体,
-    //  原 14px monospace 替身退役——同信息栏 Windows 重影根因）
+    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（MouseText 同族,16px 用户拍板档
+    //  墨高 ~14.7,19px 等值档链在 PixelText 注;原 14px monospace 替身退役——同
+    //  信息栏 Windows 重影根因）
     if (this.mapNpcHeadHoverName) {
       ctx.font = CANVAS_MOUSETEXT_FONT;
       ctx.textAlign = 'left';

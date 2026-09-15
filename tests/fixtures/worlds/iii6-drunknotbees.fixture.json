@@ -1,0 +1,52 @@
+{
+ "name": "iii6-drunknotbees",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "05162020",
+  "seedFlags": {
+   "drunkWorld": true,
+   "notTheBees": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "优先级臂（notBees 截胡）",
+ "generatedAt": "2026-09-15T08:54:50.035Z",
+ "fingerprints": {
+  "type": "e716cc0e",
+  "flags": "32037614",
+  "wall": "ac44dd01",
+  "liquid": "df112049",
+  "frameX": "0d0077f1",
+  "frameY": "02e9888f"
+ },
+ "side": {
+  "seedFlags": {
+   "drunkWorld": true,
+   "notTheBees": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "merchant",
+    "givenName": "Humphrey",
+    "x": 33640,
+    "y": 4272,
+    "anchor": [
+     2102,
+     269
+    ],
+    "dir": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "d81d2c73",
+  "flags": "32037614",
+  "wall": "ac44dd01",
+  "liquid": "df112049",
+  "frameX": "632f2042",
+  "frameY": "e55cc5dd"
+ },
+ "ghostsPurged": 1704313
+}

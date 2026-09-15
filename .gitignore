@@ -32,3 +32,6 @@
 /mobile/gecko-shell
 /js-snaps-*
 dist-analyze
+
+# —— IIIII259 测试世界档案库（tests/world-fixture-gen.test.ts 本地再产；脚本+清单随仓）——
+/tests/fixtures/worlds/*.wld.json.gz

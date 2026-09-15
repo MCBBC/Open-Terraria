@@ -65,11 +65,12 @@ describe('SW-FX18 成就页双入口（Main.cs:49733 + IngameOptions.cs:294）',
     expect(title).toContain('onAchievements');               // 流回调
   });
 
-  it('游戏内设置左列入口（IngameOptions DrawLeftSide(menu[131]) → OpenAchievements）', () => {
+  it('游戏内设置左列入口已随轮8摘除（用户令 2026-09-14:CatTouch/成就页签移除;负守卫防回流）', () => {
     const settings = readSrc('ui/Settings.ts');
-    expect(settings).toContain("div.dataset.cat = 'achievements'");
-    expect(settings).toContain('LegacyMenu.131');
-    expect(settings).toContain('flow.onAchievements');
+    // 原锚（IngameOptions DrawLeftSide(menu[131])→OpenAchievements 的 DOM 等价）
+    // 已随「设置页签清理」摘除——成就仍经标题主菜单/背包 Advisor 卡可达。
+    expect(settings).not.toContain("div.dataset.cat = 'achievements'");
+    expect(settings).not.toContain('flow.onAchievements');
   });
 
   it('两入口喂同一面板（Main.cs:112 全局单面板语义 = AchievementsHost 结构化宿主）', () => {

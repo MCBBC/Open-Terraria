@@ -262,13 +262,14 @@ export interface BiomeTorchZones {
 }
 
 /**
- * BiomeTorchPlaceStyle（Player.cs:39586-39635 1:1 提取）：当期群系 → 应使用的火把样式。
+ * BiomeTorchPlaceStyle（Player.cs:40550-40585 [1457] 1:1 提取）：当期群系 → 应使用的火把样式。
  * 消费端①TorchGodsFlavor（:39529，buff 376 火把神药水每 tick 1/10 扫屏把**异群系群系炬**
- * 转成本表样式）；②原版手持火把自动换样式（UsingBiomeTorches，unlockedBiomeTorches
- * 消费端，本仓未建——登记）。无命中群系 = 0（普通炬，不触发转换）。
+ * 转成本表样式）；②放置自动转换（PlaceThing_Tiles_PlaceIt :40447 门 `UsingBiomeTorches
+ * && tileToCreate==4 && style==0`）——★SW-FX37 落地（Game.ts 火把放置支,普通炬解锁后
+ * 按当期群系转换）。无命中群系 = 0（普通炬，不触发转换）。
  * ★SW-FX19：UsingBiomeTorches 真形（Player.cs:3934-3941）= `unlockedBiomeTorches &&
- * builderAccStatus[11]==0`——开关位面已建（背包左群系炬图标 Main.cs:43282 翻 [11]），
- * 自动换样式本体仍为本登记缺口,建时须并读 [11] 位。
+ * builderAccStatus[11]==0`——Game.usingBiomeTorches() 并读两域（背包左群系炬图标
+ * Main.cs:43282 翻 [11],FX35 开关 UI 已建）。
  */
 export function biomeTorchPlaceStyle(z: BiomeTorchZones): number {
   if (z.shimmer) return 23;          // :39592-39594
@@ -283,6 +284,37 @@ export function biomeTorchPlaceStyle(z: BiomeTorchZones): number {
   if (z.jungle) return 21;           // :39628-39630
   if ((z.desert && z.aboveSurface) || z.undergroundDesert) return 16;  // :39632-39634
   if (z.desert && z.remixWorld) return 16;                             // :39636-39638
+  return 0;
+}
+
+/**
+ * BiomeCampfirePlaceStyle（Player.cs:40666-40721 [1457] 1:1 提取）——BiomeTorchPlaceStyle
+ * 同域同构的营火版（消费面①FigureOutWhatToPlace :43759-43762 放置解析——普通+智能光标
+ * 放置同路;②PlaceThing_TryReplacingTiles :40214-40217 块换写面;③
+ * PlaceThing_ValidTileForReplacement :40240-40243 块换 verdict）。门 = UsingBiomeTorches
+ * ∧ style==0（:40668,调用位 :43759 再前置 style==0 检查）——仅普通营火（item 966,
+ * placeStyle 0）转换,显式群系营火（3046-3050/3723-3724/4689-4694/5299/5357,placeStyle
+ * 1-15,items.ts SW-BJ50 补列表）不动。
+ * ★与火把查表【两处差异】（逐字比对）：
+ *   ①优先序不同——glowshroom/temple 提前到 dungeon 之前（火把序 dungeon→temple→…→
+ *     glowshroom,营火序 glowshroom→temple→dungeon）,地牢/神庙同挤 13 时归属随序翻转;
+ *   ②值域不同——{15 微光,14 蘑菇,13 丛林/神庙,7 地牢,2 地狱,12 神圣,10 腐化,11 猩红,
+ *     3 雪原,8 沙漠}（对照火把 {23,13,21,7,22,20,18,19,9,16}）。
+ * 无命中群系 = 0（普通营火,不触发转换）。与火把共用 BiomeTorchZones 单源。
+ */
+export function biomeCampfirePlaceStyle(z: BiomeTorchZones): number {
+  if (z.shimmer) return 15;          // :40670-40672
+  if (z.glowshroom) return 14;       // :40674-40676
+  if (z.temple) return 13;           // :40678-40680 ZoneLihzhardTemple
+  if (z.dungeon) return 7;           // :40682-40684
+  if (z.underworld) return 2;        // :40686-40688 position.Y > UnderworldLayer*16
+  if (z.hallow) return 12;           // :40690-40692
+  if (z.corrupt) return 10;          // :40694-40696
+  if (z.crimson) return 11;          // :40698-40700
+  if (z.snow) return 3;              // :40702-40704
+  if (z.jungle) return 13;           // :40706-40708
+  if ((z.desert && z.aboveSurface) || z.undergroundDesert) return 8;   // :40710-40712
+  if (z.desert && z.remixWorld) return 8;                              // :40714-40716
   return 0;
 }
 

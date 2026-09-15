@@ -1,0 +1,50 @@
+{
+ "name": "iii6-vampire",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "whatahorriblenighttohaveacurse",
+  "seedFlags": {
+   "vampireSeed": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "动物学家臂",
+ "generatedAt": "2026-09-15T08:50:08.538Z",
+ "fingerprints": {
+  "type": "76f4a40c",
+  "flags": "061d8e04",
+  "wall": "583c55f3",
+  "liquid": "56f4b5e6",
+  "frameX": "14358726",
+  "frameY": "148894c5"
+ },
+ "side": {
+  "seedFlags": {
+   "vampireSeed": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "zoologist",
+    "givenName": "Tia",
+    "x": 33576,
+    "y": 3632,
+    "anchor": [
+     2098,
+     229
+    ],
+    "dir": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "9be5bbc7",
+  "flags": "061d8e04",
+  "wall": "583c55f3",
+  "liquid": "56f4b5e6",
+  "frameX": "5f18db37",
+  "frameY": "8ac29e61"
+ },
+ "ghostsPurged": 1641538
+}

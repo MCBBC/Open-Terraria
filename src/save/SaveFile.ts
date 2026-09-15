@@ -155,6 +155,12 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     hbLocked: player.hbLocked ?? false,         // SW-FX10 债⑪:PL:55543 hbLocked bool
     enabledSuperCart: player.enabledSuperCart ?? true,  // SW-FX10 债⑩:PL:55572 位[1] enabledSuperCart
     builderAccStatus: [...player.builderAccStatus],     // SW-FX19 债:PL:55553-55555 builderAccStatus[12]
+    // ★SW-FX38b：火把神恩宠解锁旗（Player.unlockedBiomeTorches,PL:55430 写/:55895 读）。
+    //  原版角色字段随身跨世界;本仓在-session 权威=world.flags（原版语义=Player 域,
+    //  但本仓 TorchGod/Game.usingBiomeTorches 消费面均挂 world.flags）——快照在此
+    //  回填,CharacterStore 同步（doSave→setState JSON.parse(json).player）与 .plr
+    //  导出（exportPlr）同吃该字段。旧档缺省 undefined=false
+    unlockedBiomeTorches: !!world.flags.unlockedBiomeTorches,
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
 }

@@ -21,6 +21,7 @@ import {
   mcraftGridGeometry, mcraftCellXY, clampViewPosition, mcraftMaterialPos,
   mcraftOwnedCountPos, mcraftOwnedCountColor, mcraftWindowToggleXY, mcraftDetailOrigin,
   mcraftTitleXY, MCRAFT_MISSING_KEY,
+  MCRAFT_SCROLLBAR_TEX, MCRAFT_SCROLLBAR_HANDLE_ALPHA,
   filterItemOfVid, filterFits, filtererFits, toggleFilterRadio, searchFits, normalizeSearch,
   tileFilterMatches, openCloseFilterTransition, TOOL_ACCEPTED_IDS, TILE_WAND_ITEMS,
   shiftBlueToCyan, type FilterKind, type FilterItem,
@@ -71,7 +72,7 @@ describe('SW-FX41 P2-1 窗体几何(NewCraftingUI.cs:302-317)', () => {
     expect(read('public/sprites/vanilla-ui/UI_CharCreation_Separator1.png').length).toBeGreaterThan(50);
     expect(read('public/sprites/vanilla-ui/UI_Craft.png').length).toBeGreaterThan(50);   // 锤图标(:464)
   });
-  it('网格几何 1080p:cols=10/list (32,446,450,584)/滚动条 (482,435) 高 572(:354-388+UpdateCraftAreaSize :409-417)', () => {
+  it('网格几何 1080p:cols=10/list (32,446,450,584)/滚动条 (482,454) 高 572(:354-388+UpdateCraftAreaSize :409-417)', () => {
     const g = mcraftGridGeometry(1080, 0);
     expect(g.panel).toEqual({ x: 20, y: 350, w: 490, h: 692 });
     expect(g.inner).toEqual({ x: 32, y: 362, w: 470, h: 668 });         // padding 12/右 8
@@ -79,9 +80,22 @@ describe('SW-FX41 P2-1 窗体几何(NewCraftingUI.cs:302-317)', () => {
     expect(g.list).toEqual({ x: 32, y: 446, w: 450, h: 584 });          // Width−20/Height−7
     expect(g.cols).toBe(10);                                            // floor(450/44) UpdateSize
     expect(g.separator).toEqual({ x: 36, y: 439, w: 462, h: 4 });       // Width−8 居中
-    expect(g.scrollbar).toMatchObject({ x: 482, y: 435, w: 20, h: 572, innerY: 440, innerH: 562 });  // HAlign1/Top−4/Height−19
+    // ★FX41b(2026-09-15):VAlign=1 竖臂补正(UIElement.cs:326)→ y=container.y+15=454
+    //   (旧 435=−4 漏乘 VAlign 臂,偏高 19px=RB28 登记项)
+    expect(g.scrollbar).toMatchObject({ x: 482, y: 454, w: 20, h: 572, innerY: 459, innerH: 562 });  // HAlign1/Top−4/VAlign1/Height−19
     expect(g.startX).toBe(37);                                          // 中心 257−220(GetGridParameters)
     expect(g.startY).toBe(446);
+  });
+  it('向导态网格域:VAlign=1 底对齐 → 顶边=inner.y+130(下移 53px),格行从向导槽(44,443..495)/文案(96,458)下方起排(RB28b 2026-09-15 用户实报叠压)', () => {
+    const g = mcraftGridGeometry(1080, 30, true);
+    expect(g.container).toEqual({ x: 32, y: 492, w: 470, h: 538 });     // inner.y+130 / inner.h−130
+    expect(g.container.y + g.container.h).toBe(362 + 668);              // 底边 = 内衬底(底对齐不变式)
+    expect(g.list).toEqual({ x: 32, y: 499, w: 450, h: 531 });          // Height−7/VAlign1 → +7
+    expect(g.separator).toEqual({ x: 36, y: 492, w: 462, h: 4 });
+    expect(g.startY).toBe(499);                                         // 首行 y ≥ 向导槽底 495
+    expect(g.startY).toBeGreaterThanOrEqual(mcraftDetailOrigin().guideSlot.y + 52);
+    // normal 态几何不随向导支漂移(零回归锚)
+    expect(mcraftGridGeometry(1080, 30).container).toEqual({ x: 32, y: 439, w: 470, h: 591 });
   });
   it('格步距 44/行主序;槽视觉缩放 = 44/52 = 0.84615386(UIDynamicItemCollection :20-22/:41)', () => {
     const g = mcraftGridGeometry(1080, 100);
@@ -96,6 +110,32 @@ describe('SW-FX41 P2-1 窗体几何(NewCraftingUI.cs:302-317)', () => {
     expect(clampViewPosition(700, 100, 500)).toBe(400);
     expect(clampViewPosition(250, 100, 500)).toBe(250);
     expect(clampViewPosition(50, 100, 80)).toBe(0);                     // max<view(内容不足)=0
+  });
+  it('滚动条几何双态+视觉单源(★FX41b 2026-09-15:VAlign=1 竖臂 y=container.y+15;Cyan 主题 Scrollbar2;DrawBar 盖6/中4;柄 α0.85)', () => {
+    // UIElement.cs:326 Y += parentH·VAlign − H·VAlign → −4+containerH−(containerH−19)
+    //   = container.y+15(旧 −4 漏乘 VAlign 臂 = 偏高 19px,RB28 登记项;双态同式)
+    const gn = mcraftGridGeometry(1080, 30);
+    const gg = mcraftGridGeometry(1080, 30, true);
+    expect(gn.scrollbar.y).toBe(gn.container.y + 15);
+    expect(gg.scrollbar.y).toBe(gg.container.y + 15);
+    expect(gn.scrollbar).toMatchObject({ x: 482, y: 454, w: 20, h: 572, innerY: 459, innerH: 562 });
+    expect(gg.scrollbar).toMatchObject({ x: 482, y: 507, w: 20, h: 519, innerY: 512, innerH: 509 });
+    expect(MCRAFT_SCROLLBAR_TEX).toMatchObject({
+      track: 'sprites/vanilla-ui/UI_Scrollbar2.png',                    // Cyan 主题(:61-66;旧误用 Blue=UI_Scrollbar.png)
+      handle: 'sprites/vanilla-ui/UI_ScrollbarInner.png',
+      w: 20, h: 16, cap: 6, mid: 4,                                     // DrawBar :96-101 源行 0-6/6-10/10-16
+    });
+    expect(MCRAFT_SCROLLBAR_HANDLE_ALPHA).toBe(0.85);                   // :123 White*0.85(拖拽/悬停 1)
+    expect(read('public/sprites/vanilla-ui/UI_Scrollbar2.png').length).toBeGreaterThan(50);
+    // 消费面锚:UI.ts 轨/柄 border-image 三分(slice 6 0 fill)+盒=元素矩形本体、
+    //   盖 ±6 绘制走内层 face(★RB29b F4 2026-09-15 命中域收口:±6 仅绘制越界,
+    //   旧盒 ±6 扩张 = 点轨/拖拽/悬停域各多 12px)
+    expect(uiSrc).toContain('border-image-slice:${MCRAFT_SCROLLBAR_TEX.cap} 0 fill');
+    expect(uiSrc).toContain('g.scrollbar.y - panel.y');
+    expect(uiSrc).toContain('height:calc(100% + ${MCRAFT_SCROLLBAR_TEX.cap * 2}px)');
+    expect(uiSrc).toContain('top:${-MCRAFT_SCROLLBAR_TEX.cap}px');   // face 越界面绘制位
+    expect(uiSrc).not.toContain('g.scrollbar.y - MCRAFT_SCROLLBAR_TEX.cap - panel.y');
+    expect(uiSrc).not.toContain('handleH + MCRAFT_SCROLLBAR_TEX.cap * 2');
   });
   it('详情浮层 origin=(44,385)(:440 GetInnerDimensions.TopLeft+(24,73);FX30 craftDetailLayout 单源)', () => {
     const o = mcraftDetailOrigin();
@@ -354,6 +394,38 @@ describe('SW-FX41 P2-2 切换钮 modern 支接线(CraftingUI.cs:294-331)', () =>
     for (const f of ['UI_Craft_Toggle_4.png', 'UI_Craft_Toggle_5.png']) {
       expect(read(`public/sprites/vanilla-ui/${f}`).length).toBeGreaterThan(100);
     }
+  });
+});
+
+// ============================================================
+// ★FX41b(2026-09-15 用户实报三缺陷):详情/向导槽叠压+滚动条样式+点格滚动音序
+// ============================================================
+describe('SW-FX41b 详情浮层容器相对系+向导态显示语义(NewCraftingUI.cs:440-487)', () => {
+  it('详情子件 = detail 容器相对系(容器由 vinvLayoutItems 定位 origin−state=(24,73);子件不得再写 win 绝对值=双重偏移压向导槽/网格首行)', () => {
+    // 成品槽 = 容器原位(0,0)(DrawChildren :454 vector 本位);锤 +(47,13)(:464);
+    // 材料行 = mcraftMaterialPos 零 origin 调(:469-485 相对臂)
+    expect(uiSrc).toContain("slot.style.cssText = 'position:absolute; left:0; top:0;'");
+    expect(uiSrc).toContain("hammer.style.cssText = 'position:absolute; left:47px; top:13px;'");
+    expect(uiSrc).toContain('const mp = mcraftMaterialPos({ x: 0, y: 0 }, j, r.items.length);');
+    // 旧双重偏移面(win 绝对值)不得回归
+    expect(uiSrc).not.toContain('left:${o.origin.x - 20}px; top:${o.origin.y - 312}px');
+  });
+  it('向导态首入不画详情(:910 预选经 :619 SelectedEntry==null 清)+槽变 ResetRecipes(:596-598)+需求行不吃经典 fallback(:452-456)', () => {
+    expect(uiSrc).toMatch(/this\.vinvModernSelected = this\.vinvGuideMenuOpen\s*\n\s*\? null\s*\n\s*: \(this\.vinvCraftAvailV\[this\.vinvCraftFocusV\]\?\.r \?\? null\);/);
+    expect(uiSrc).toContain('if (this.vinvGuideMenuOpen && guideKey !== this.vinvModernResetForGuide) this.vinvModernResetRecipes();');
+    expect(uiSrc).toContain('_resetForGuideItem');   // 反编译锚注释在档
+    // SelectedEntry 解析域 = lookup 镜像(:619-620 lookup 空 → 清;ResetRecipes :575-587 本身不清选中)
+    expect(uiSrc).toContain('private vinvModernLookup = new Set<VanillaRecipeLike>();');
+    expect(uiSrc).toContain('if (!this.vinvModernLookup.has(this.vinvModernSelected)) this.vinvModernSelected = null;');
+    expect(uiSrc).toMatch(/private vinvModernResetRecipes\(\): void \{\s*\n\s*this\.vinvModernEntries = \[\];\s*\n\s*this\.vinvModernLookup\.clear\(\);/);
+    expect(uiSrc).toContain('if (!this.vinvModernLookup.has(row.r)) this.vinvModernLookup.add(row.r);');
+    expect(uiSrc).toContain("const r = this.vinvModernSelected;\n      this.vinvGuideModernReqEl.textContent = r ? this.recipeEnvReqText(r, false) : '';");
+  });
+  it('向导态点选已选格不合成(Main.cs:42988 focusRecipe==recipeIndex && guideItem.IsAir 门;else-if(flag) 臂仅音 12)', () => {
+    expect(uiSrc).toContain("if (this.guidePlaced) { this.game.sfx.play('menuTick', 1); return; }");
+  });
+  it('modern 窗开 = 吸附步进停摆(Main.cs:42418-42428 NewCraftingUI.Visible → else 分支 DrawRecipesList/AdjustRecipeOffsets 不画;窗关 PipsFastScroll 首拍瞬吸清账)', () => {
+    expect(uiSrc).toMatch(/if \(!this\.vinvModernCraftOpen\) \{\s*\n\s*this\.vinvCraftGlideAcc \+= dt \/ \(1000 \/ 60\);/);
   });
 });
 

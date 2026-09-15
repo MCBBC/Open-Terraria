@@ -1,0 +1,35 @@
+{
+ "name": "bj42-d",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "bj42-d"
+ },
+ "source": "tests/sw-bj42-magic-conch.test.ts",
+ "notes": "沙漠箱海螺普查种子 bj42-d（lastGenState 域常量侧车化）",
+ "generatedAt": "2026-09-15T08:51:51.111Z",
+ "fingerprints": {
+  "type": "55a527e6",
+  "flags": "6257b934",
+  "wall": "bf3a2425",
+  "liquid": "d01c8cea",
+  "frameX": "835b47f3",
+  "frameY": "a1a5d3a0"
+ },
+ "side": {
+  "seedFlags": {},
+  "gs": {
+   "desertHiveHigh": 335,
+   "desertHiveLow": 987
+  }
+ },
+ "genFingerprints": {
+  "type": "005668a3",
+  "flags": "6257b934",
+  "wall": "bf3a2425",
+  "liquid": "d01c8cea",
+  "frameX": "c1dd9d23",
+  "frameY": "7161d071"
+ },
+ "ghostsPurged": 1581407
+}

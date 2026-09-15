@@ -28,6 +28,7 @@
 import dropData from '../data/vanilla-npcdrops.json';
 import npcValueJson from '../data/vanilla-npcvalue.json';
 import { STATUES } from '../data/vanillaStyleDrops';
+import { ITEM_NO_GRAVITY_VIDS } from '../data/items';
 import type { RNG } from '../core/rng';
 import { Lang } from '../i18n/Lang';
 
@@ -852,9 +853,10 @@ export function rollBossPotionsAndHearts(ctx: NpcDropCtx): ResolvedDrop[] {
 // 曾写成 [-40,-15] 差 0.1）；:49330-49333 859/4743 恒零速；:49334-49337 520/521/星云拾取
 // 族（ItemID.cs:1110 NebulaPickup={3453,3454,3455}）双向 Next(-30,31)
 const NEBULA_PICKUP = new Set([3453, 3454, 3455]);
-/** ItemID.Sets.ItemNoGravity（ItemID.cs:1108,17 项机械提取）——掉落初速双向飘 */
-const ITEM_NO_GRAVITY = new Set([520, 521, 575, 549, 548, 547, 3453, 3454, 3455, 3456,
-  3457, 3458, 3459, 3580, 3581, 4143]);
+/** ItemID.Sets.ItemNoGravity（ItemID.cs:1108,16 项逐字）——掉落初速双向飘。
+ *  ★FX44 权威收敛到 src/data/items.ts ITEM_NO_GRAVITY_VIDS（与 ItemDrop.fixedUpdate
+ *  重力门同源——曾本文件私拷贝一份,两处清单漂移=物理与初速分家） */
+const ITEM_NO_GRAVITY = ITEM_NO_GRAVITY_VIDS;
 
 export function dropVelocity(rng: RNG, id?: number): { vx: number; vy: number } {
   // R14-A6：ITM57:49746-49756 三分支——①velocity.HasValue（调用方显式给,不走此函数）

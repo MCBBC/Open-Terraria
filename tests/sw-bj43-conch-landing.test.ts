@@ -19,7 +19,6 @@
 // 判别力：本文件内置 OLD 复刻体（4×4 外扩盒 + 头格顶落位）同瓦对拍——每处新行为
 // 断言在 OLD 语义下取相反值（修复前实机 live=null 的三例已由 _bj43-crawl-probe 记录）。
 import { describe, it, expect } from 'vitest';
-import { generateWorld } from '../src/world/gen/WorldGen';
 import { Game } from '../src/core/Game';
 import { World } from '../src/world/World';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
@@ -27,6 +26,7 @@ import { TileStore, LIQUID_TYPE } from '../src/world/TileStore';
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../src/stats/TouchDamage';
 import { WALL_DUNGEON_SHEETS } from '../src/world/DungeonDualZones';
 import { TILE } from '../src/core/constants';
+import { loadFixtureWorld } from './world-fixtures';   // ★IIIII259 测试世界档案库
 
 const PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]); // TileID.Sets.Platforms
 
@@ -239,7 +239,7 @@ describe('SW-BJ43 魔法海螺落点（TeleportHelpers.cs:49-241 金标）', () 
   // （迭代帽燃尽）、bj43-c 双洋全败 → 用户原地不动。金标复刻在同瓦全部成功落位。
   it('真世界同瓦对拍：仓库爬行体与金标成败/落格全等（含修复前 null 种子）', async () => {
     for (const seed of ['bj43-b', 'bj43-c']) {
-      const world = await generateWorld({ width: 4200, height: 1200, seedText: seed });
+      const world = loadFixtureWorld(seed);   // ★IIIII259 档案载入（同种子同世界同落格）
       const ctx = makeCtx(world);
       const g = stubGame(world);
       for (const side of [false, true]) {

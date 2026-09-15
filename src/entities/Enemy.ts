@@ -6279,6 +6279,17 @@ export class Enemy extends Entity {
     void st;                                      // st 形参保留:嵌墙自检已删
     const oldMax = this.maxHp;
     this.vanillaId = id;
+    // ★netID 重推导（实报 2026-09-15「杀宁芙不触发傻瓜骗子」定谳）：原版 Transform
+    // → SetDefaults(newType) 尾 NPC.cs:17849 `netID = type`——变身即脱变体，出生
+    // netId 不跟随。本仓 spawnNPC 无条件 `vanillaNetId = netId`（VanillaSpawner.ts:676，
+    // 失落女孩 195 出生即 netId=195）→ tryTransformTo 换 vanillaId 后 netId 陈旧，
+    // 击杀链 `vanillaNetId!==0 ? netId : id`（Game.onEnemyKilled killAchId/图鉴
+    // killNetId/旗 recordBannerKill/Enemy.hurt lastCreatureHit 四消费点）全按 195 计：
+    // DECEIVER_OF_FOOLS（NPCKilledCondition 196,AchievementInitializer.cs:207）永不
+    // 完成、宁芙旗（BannerID()=netID,NPC.cs:7672）不进账。原版 Transform 后 netID 恒
+    // 等于新 type（恒正 id），本仓编码 0≙"无变体=vanillaId"（四消费点统一
+    // `!==0 ? netId : id` 归一，Enemy.ts:14109 同惯例）→ 置 0 即 1:1。
+    this.vanillaNetId = 0;
     this.vanilla = v;
     this.w = nw; this.h = nh;
     this.x = nx; this.y = ny;
@@ -13950,6 +13961,21 @@ export class Enemy extends Entity {
     // 行为录制：受击（防后结算值 + 剩余 hp；受击本身低频——无敌帧天然节流）
     game.recLog?.('hurt', { id: this.id, vid: this.vanillaId ?? null, dmg, hp: this.hp });
     if (this.hp <= 0) {
+      // ★FX44b（2026-09-16 用户实报飞龙不掉飞翔之魂 F5 日志定谳）：realLife 共享池
+      // 死亡归属门——原版 checkDead 首行（NPC.cs:78846）`realLife>=0 && realLife!=whoAmI
+      // → return`（段自身【永不】进死亡管线），StrikeNPC 尾（:82392-82398）
+      // `if (realLife>=0) Main.npc[realLife].checkDead(); else checkDead();`——共享池
+      // （87 飞龙 :51703/:51727 段 realLife=头、454 幻影龙、621 血鳗、134 毁灭者族）
+      // 生命池全在头，池空时死亡【唯一归属头】= 头的 checkDead→NPCLoot（飞翔之魂
+      // 575 @100%/风筝/钱币全挂头）。曾缺门：末击落在段 hitbox 时段先走死亡分支→
+      // 级联 `.dead=true` 静默杀头（头 hurt 死亡分支被整体绕过）=整链死而零掉落
+      // （F5 日志 t=8378：仅段 979/vid88 一条 death+段位钱币，头 961 无死亡无 575）。
+      // 修复=段 hp≤0 且头仍活 → 头走标准死亡管线（die() 清 iframes 后 hurt 全管线，
+      // 掉落/事件/级联清链全在头）；段自身不做任何死亡结算（vanilla 同款早退）。
+      if (this.realLifeHost && !this.realLifeHost.dead) {
+        this.realLifeHost.die(game);
+        return false;
+      }
       // 月总族(396/397/398)血尽不直死:原版 checkDead(:78841-78867)转为闭眼残肢/死亡演出,
       // 转换逻辑在各自 AI 首行(hp<=0 → ai0 置态+满血续命),此处放行让 AI 下一 tick 接管
       // 月总族:血尽转 -2/-3/演出在各 AI 首行,放行。★398 死亡演出态(ai0==2)
@@ -14438,7 +14464,21 @@ export class Enemy extends Entity {
           if (d) { d.vx *= 2; d.vy *= 2; }
         }
       }
-      if (!birdExactDust && !wofExactDust && !dukeExactDust && !paladinDeathDust) {
+      // 腐化者唾液 112/666 死亡尘（HitEffect 顶层支——无 life 门,本仓 death 管线
+      // 等价可锚,FX45 2026-09-16 补,NPC.cs:86360-86374）：20× 尘 18 CorruptGibs、
+      // 盒 (pos.X, pos.Y+2, w, h)、sp0/0、α100、scale2、Next(2)==0 → scale×0.6,
+      // 否则尘速 ×1.4 + noGravity——此前落通用彩色粒子近似（def.gore 三簇）
+      const vileSpitDeathDust = this.vanillaId === 112 || this.vanillaId === 666;
+      if (vileSpitDeathDust) {
+        for (let k = 0; k < 20; k++) {
+          const d = game.spawnDust?.(this.x, this.y + 2, this.w, this.h, 18, 0, 0, 100, null, 2);
+          if (!d) continue;
+          if (Math.random() < 0.5) d.scale *= 0.6;
+          else { d.vx *= 1.4; d.vy *= 1.4; d.noGravity = true; }
+        }
+      }
+      if (!birdExactDust && !wofExactDust && !dukeExactDust && !paladinDeathDust
+        && !vileSpitDeathDust) {
         game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });

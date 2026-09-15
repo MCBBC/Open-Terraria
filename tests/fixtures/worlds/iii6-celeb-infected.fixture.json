@@ -1,0 +1,98 @@
+{
+ "name": "iii6-celeb-infected",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "1999040562",
+  "seedFlags": {
+   "tenthAnniversary": true,
+   "infectedSeed": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "十周年×infected 首臂=德鲁伊",
+ "generatedAt": "2026-09-15T08:56:45.919Z",
+ "fingerprints": {
+  "type": "5a218ba1",
+  "flags": "dac759fd",
+  "wall": "e7050776",
+  "liquid": "eecfd5c0",
+  "frameX": "eac3f111",
+  "frameY": "592cb4b0"
+ },
+ "side": {
+  "seedFlags": {
+   "tenthAnniversary": true,
+   "infectedSeed": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "dryad",
+    "givenName": "Lilith",
+    "x": 4551,
+    "y": 3592,
+    "anchor": [
+     285,
+     229
+    ],
+    "dir": 1,
+    "variationIndex": 1
+   },
+   {
+    "key": "steampunker",
+    "givenName": "Whitney",
+    "x": 4583,
+    "y": 3624,
+    "anchor": [
+     287,
+     229
+    ],
+    "dir": -1
+   },
+   {
+    "key": "princess",
+    "givenName": "Yorai",
+    "x": 4519,
+    "y": 3592,
+    "anchor": [
+     283,
+     227
+    ],
+    "dir": 1
+   },
+   {
+    "key": "party_girl",
+    "givenName": "Amanda",
+    "x": 4615,
+    "y": 3640,
+    "anchor": [
+     289,
+     230
+    ],
+    "dir": -1
+   },
+   {
+    "key": "town_bunny",
+    "givenName": "Boof",
+    "x": 4487,
+    "y": 3612,
+    "anchor": [
+     281,
+     227
+    ],
+    "dir": 1,
+    "variationIndex": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "13b1b0fe",
+  "flags": "dac759fd",
+  "wall": "e7050776",
+  "liquid": "eecfd5c0",
+  "frameX": "5a74f672",
+  "frameY": "6ba81816"
+ },
+ "ghostsPurged": 1634087
+}

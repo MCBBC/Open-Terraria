@@ -189,6 +189,147 @@ await sleep(150);
 await page.screenshot({ path: '/tmp/fx29b-modern.png', fullPage: false });
 console.log('截图: /tmp/fx29b-modern.png');
 
+// ============================================================ F 向导态网格域
+// RB28b(2026-09-15 用户实报「modern 窗向导态乱七八糟」):向导态 gridContainer
+// VAlign=1 底对齐(NewCraftingUI.cs:354-360 ctor + :409-417 num=130 只改 Height
+// .Pixels;UIElement.cs:322-328)→ 顶边 = inner.y+130,网格/分隔线/滚动条从向导槽
+// (win-rel 24,131)+文案(76,146)/需求行(76,109)下方起排。旧式顶固定 77 = 网格压
+// 向导槽。真链:真实 TownNPC 22 会话 + 「制作」DOM 钮 + 向导槽放木材。
+{
+  await page.evaluate(async () => {
+    const { options } = await import('/src/core/Options.ts');
+    if (options.data.craftingGridControl !== 'modern') await options.set('craftingGridControl', 'modern');
+  });
+  // 真实向导会话(fx28 spawnGuideDialog 同链:真实 TownNPC + 落地吸附 + openNpcDialog)
+  const spawned = await page.evaluate(async () => {
+    const g = window.__swGame;
+    const { TownNPC } = await import('/src/entities/TownNPC.ts');
+    if (!window.__rb28Guide) {
+      const guide = new TownNPC('guide', g.player.x + 30, g.world.groundLevel * 16 - 48);
+      guide.home = null;
+      g.entities.add(guide, 'npcs');
+      window.__rb28Guide = guide;
+    }
+    const guide = window.__rb28Guide;
+    guide.dead = false;
+    const st = g.world.store;
+    const col = Math.floor(guide.cx / 16);
+    let gy = Math.max(0, Math.floor((guide.y + guide.h + 2) / 16));
+    let solid = st.get(col, gy) !== 0 && st.hasTile(col, gy);
+    for (let k = 0; k < 40 && !solid; k++) { gy++; solid = st.get(col, gy) !== 0 && st.hasTile(col, gy); }
+    g.player.x = guide.cx - g.player.w / 2;
+    g.player.y = gy * 16 - g.player.h - 1;
+    g.player.vx = 0; g.player.vy = 0;
+    g.openNpcDialog(guide);
+    return { session: !!g.dialogNpc };
+  });
+  ok(spawned.session, 'F1 向导会话建立(真实 TownNPC+openNpcDialog)');
+  // 真实鼠标点「制作」→ modern 控制模式 = NewCraftingUI.Open(quiet) + InGuideCraftMenu
+  const craftPos = await page.evaluate(() => {
+    const b = document.querySelector('.sw-npc-dialog .sw-npc-btn[data-b="craft"]');
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  if (craftPos) { await page.mouse.click(craftPos.x, craftPos.y); await sleep(400); }
+  const gOpen = await page.evaluate(() => {
+    const ui = window.__swUI;
+    return { guide: ui.vinvGuideMenuOpen, modern: ui.vinvModernCraftOpen, session: !!window.__swGame.dialogNpc };
+  });
+  ok(gOpen.guide && gOpen.modern && gOpen.session, 'F2 「制作」→ 向导态+modern 窗双开(会话保持)', `guide=${gOpen.guide} modern=${gOpen.modern} session=${gOpen.session}`);
+  // 向导槽放木材(真实 mousedown 链:heldStack → guidePlaced → 重刷条目池)
+  await page.evaluate(() => {
+    const ui = window.__swUI, g = window.__swGame;
+    const wid = g.itemId('vi_9_Wood');
+    ui.heldStack = { id: wid, stack: 300 };
+    ui.vinvGuideSlotModernEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+  });
+  await page.waitForFunction(() => {
+    const ui = window.__swUI;
+    return ui.vinvModernEntries.length > 0 && !!ui.vinvModernGridList?.querySelector('.sw-slot');
+  }, { timeout: 15000, polling: 120 });
+  // 几何读面:期望值 = mcraftGridGeometry(sh,·,guide=true) 模块面(玻璃门:模块已被
+  //   sw-fx41 vitest 金标钉死 492/499),屏坐标 = root 原点 + (逻辑−312)·K(win@(20,312))
+  const F = await page.evaluate(async () => {
+    const ui = window.__swUI, g = window.__swGame;
+    const root = document.querySelector('.sw-vinv');
+    const tr = getComputedStyle(root).transform;
+    const K = tr && tr !== 'none' ? parseFloat(tr.slice(7).split(',')[0]) : 1;
+    const rr = root.getBoundingClientRect();
+    const sh = window.innerHeight / K;
+    const mc = await import('/src/ui/modernCrafting.ts');
+    const gg = mc.mcraftGridGeometry(sh, ui.vinvModernEntries.length, true);
+    const sx = (stateY) => rr.top + stateY * K;                  // 模块面=状态空间绝对 y(.sw-vinv 原点)
+    const rectOf = (el) => el ? el.getBoundingClientRect().toJSON() : null;
+    const slot = rectOf(ui.vinvGuideSlotModernEl);
+    const cap = rectOf(ui.vinvGuideModernCaptionEl);
+    const req = rectOf(ui.vinvGuideModernReqEl);
+    const sep = rectOf(ui.vinvModernSeparatorEl);
+    const list = rectOf(ui.vinvModernGridList);
+    const cell = rectOf(ui.vinvModernGridList.querySelector('.sw-slot'));
+    const hit = (a, b) => !(a.right <= b.left + 0.5 || b.right <= a.left + 0.5 || a.bottom <= b.top + 0.5 || b.bottom <= a.top + 0.5);
+    return {
+      K, sh,
+      expContainerY: gg.container.y, expInnerY: gg.inner.y, expStartY: gg.startY, expListY: gg.list.y,
+      sepTop: sep ? +sep.y.toFixed(1) : null, expSepTop: +sx(gg.separator.y).toFixed(1),
+      listTop: list ? +list.y.toFixed(1) : null, expListTop: +sx(gg.list.y).toFixed(1),
+      cellTop: cell ? +cell.y.toFixed(1) : null, expCellTop: +sx(gg.startY).toFixed(1),
+      slotBottom: slot ? +slot.bottom.toFixed(1) : null, expSlotBottom: +sx(312 + 131 + 52).toFixed(1),   // 槽=win@(20,312)+win-rel(24,131)+52
+      capRect: cap ? { t: +cap.y.toFixed(1), b: +cap.bottom.toFixed(1) } : null,
+      reqRect: req ? { t: +req.y.toFixed(1), b: +req.bottom.toFixed(1) } : null,
+      cellHitSlot: cell && slot ? hit(cell, slot) : null,
+      cellHitCap: cell && cap ? hit(cell, cap) : null,
+      cellHitReq: cell && req ? hit(cell, req) : null,
+      sepHitSlot: sep && slot ? hit(sep, slot) : null,
+      sepZUnder: sep && slot ? true : null,                 // 槽在 DOM 后=覆盖分隔线(原版 DrawChildren 序)
+      entries: ui.vinvModernEntries.length,
+    };
+  });
+  ok(F.expContainerY === F.expInnerY + 130, `F3 模块面:向导态容器顶 = inner.y+130=${F.expContainerY}(底对齐 VAlign=1)`, `innerY=${F.expInnerY}`);
+  ok(Math.abs(F.sepTop - F.expSepTop) <= 1, `F4 分隔线顶=容器顶(inner.y+130 屏映射)`, `got=${F.sepTop} exp=${F.expSepTop}`);
+  ok(Math.abs(F.listTop - F.expListTop) <= 1, `F5 网格列表顶 = 容器+7`, `got=${F.listTop} exp=${F.expListTop}`);
+  ok(Math.abs(F.cellTop - F.expCellTop) <= 1, `F6 网格首行 y = startY=${F.expStartY}(逻辑;=内衬 362+130+7 下方)`, `got=${F.cellTop} exp=${F.expCellTop}`);
+  ok(F.cellTop >= F.slotBottom - 0.5, `F7 首行与向导槽零交叠(首行 ${F.cellTop} ≥ 槽底 ${F.slotBottom})`);
+  ok(F.cellHitSlot === false, 'F8 首行矩形 ∩ 向导槽矩形 = 空集');
+  ok(F.cellHitCap === false && F.cellHitReq === false, 'F9 首行 ∩ 文案/需求行 = 空集', `cap=${F.cellHitCap} req=${F.cellHitReq}`);
+  ok(F.sepHitSlot === true, 'F10 分隔线与槽几何相接(492..496 ⊃ 495)=原版同相,槽 DOM 后画覆盖(:441 DrawChildren 序)');
+  // 向导态对照截图(对照用户原版图)
+  await page.screenshot({ path: '/tmp/fx40b-modern-guide.png', fullPage: false });
+  console.log('截图: /tmp/fx40b-modern-guide.png');
+  // G:退向导 → normal 态几何零回归(=预修值 439/446)
+  await page.evaluate(() => { window.__swGame.closeNpcDialog(false); });
+  await page.waitForFunction(() => !window.__swUI.vinvGuideMenuOpen, { timeout: 10000, polling: 120 });
+  await sleep(300);
+  const reopened = await page.evaluate(async () => {
+    const ui = window.__swUI;
+    if (!ui.vinvModernCraftOpen) {
+      const vinv = document.querySelector('.sw-vinv');
+      const toggle = [...vinv.querySelectorAll('.vinv-btn')].find((b) => b.querySelector('img')?.src.includes('Craft_Toggle_'));
+      toggle.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    const root = document.querySelector('.sw-vinv');
+    const tr = getComputedStyle(root).transform;
+    const K = tr && tr !== 'none' ? parseFloat(tr.slice(7).split(',')[0]) : 1;
+    const rr = root.getBoundingClientRect();
+    const mc = await import('/src/ui/modernCrafting.ts');
+    const gg = mc.mcraftGridGeometry(window.innerHeight / K, ui.vinvModernEntries.length, false);
+    const sep = ui.vinvModernSeparatorEl.getBoundingClientRect();
+    const list = ui.vinvModernGridList.getBoundingClientRect();
+    return {
+      guide: ui.vinvGuideMenuOpen, modern: ui.vinvModernCraftOpen,
+      expSep: +(rr.top + gg.separator.y * K).toFixed(1),
+      gotSep: +sep.y.toFixed(1),
+      expList: +(rr.top + gg.list.y * K).toFixed(1),
+      gotList: +list.y.toFixed(1),
+      containerY: gg.container.y,
+    };
+  });
+  ok(!reopened.guide && reopened.modern, 'F11 退向导重开 = normal 态(guide=false,modern 窗开)', `guide=${reopened.guide} modern=${reopened.modern}`);
+  ok(reopened.containerY === 439 && Math.abs(reopened.gotSep - reopened.expSep) <= 1, `F12 normal 态容器顶回归 inner.y+77=${reopened.containerY}(零回归锚)`, `sep got=${reopened.gotSep} exp=${reopened.expSep}`);
+  ok(Math.abs(reopened.gotList - reopened.expList) <= 1, 'F13 normal 态列表顶 = 446 屏映射(零回归锚)', `got=${reopened.gotList} exp=${reopened.expList}`);
+}
+
 ok(errs.length === 0, `E1 零页面错误(${errs.slice(0, 2).join(' | ')})`);
 await page.close();
 await browser.close();

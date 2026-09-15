@@ -1,0 +1,50 @@
+{
+ "name": "iii6-notbees",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "notthebees",
+  "seedFlags": {
+   "notTheBees": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "商人臂",
+ "generatedAt": "2026-09-15T08:51:54.151Z",
+ "fingerprints": {
+  "type": "56fe42e4",
+  "flags": "2ba3d97c",
+  "wall": "d967e0a1",
+  "liquid": "35a2beb0",
+  "frameX": "748692dd",
+  "frameY": "8d49619a"
+ },
+ "side": {
+  "seedFlags": {
+   "notTheBees": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "merchant",
+    "givenName": "Frederick",
+    "x": 33928,
+    "y": 4672,
+    "anchor": [
+     2120,
+     294
+    ],
+    "dir": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "230c7ce4",
+  "flags": "2ba3d97c",
+  "wall": "d967e0a1",
+  "liquid": "35a2beb0",
+  "frameX": "551f1c0e",
+  "frameY": "ad51a741"
+ },
+ "ghostsPurged": 1557352
+}

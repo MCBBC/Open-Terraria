@@ -224,7 +224,10 @@ function clampMove(ent: ConveyorBody, st: TileStore, dx: number, dy: number): vo
       if (dir > 0) {
         const solid = st.isSolid(tx, ty) && st.slope[j] === 0;
         const top = solid ? ty * TILE + (st.half[j] ? 8 : 0)
-          : (!ent.dropThrough && st.isPlatform(tx, ty)) ? ty * TILE : -1;
+          // ★RB29/FX34b（F3）：半砖平台落面 = 格顶 +8（Collision.cs:2350-2354
+          //  `vector4.Y += 8`,与 TileCollision.ts Y 轴 halfTop 同源）——传送带
+          //  输送到半砖平台带的接人高度与玩家落面一致（曾按整格顶接=低 8px 失配）。
+          : (!ent.dropThrough && st.isPlatform(tx, ty)) ? ty * TILE + (st.half[j] ? 8 : 0) : -1;
         if (top < 0) continue;
         // 落地门槛（moveAxis :96-97 同款）：新底越过盒顶且上一位置在盒顶之上
         if (ent.y + ent.h <= top || prevBottom > top + 0.01) continue;

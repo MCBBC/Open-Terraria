@@ -1,0 +1,32 @@
+{
+ "name": "small",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "9293480",
+  "evil": 0
+ },
+ "source": "通用（本仓测试标准种子）",
+ "notes": "小档位 4200×1200（_b4-1457-probe 两用例同款配置）",
+ "generatedAt": "2026-09-15T08:48:06.929Z",
+ "fingerprints": {
+  "type": "115f524f",
+  "flags": "e1c7adcd",
+  "wall": "178c5701",
+  "liquid": "0ec752c3",
+  "frameX": "57112236",
+  "frameY": "235b241b"
+ },
+ "side": {
+  "seedFlags": {}
+ },
+ "genFingerprints": {
+  "type": "4b875af3",
+  "flags": "e1c7adcd",
+  "wall": "178c5701",
+  "liquid": "0ec752c3",
+  "frameX": "254cbcea",
+  "frameY": "99a21e4b"
+ },
+ "ghostsPurged": 1632835
+}

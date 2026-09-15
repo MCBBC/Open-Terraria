@@ -17,7 +17,9 @@ const BASE_PX = 12;
  *  就绪态：UIFont.load() 启动已 await document.fonts.load；webfont 未就绪窗口由
  *  浏览器按降级序列原生回退 monospace，每帧重绘自愈——无需逐帧 fonts.check（省
  *  每帧查询开销）。 */
-export const CANVAS_MOUSETEXT_FONT = '19px "Fusion Pixel 12px", monospace';
+// ★2026-09-16 用户两轮拍板终值 14px(与旧 monospace 观感尺寸一致,族改像素字体修
+//   Windows 叠层);墨高等值档=19px、折中档=16px(FX27 实测链注释保留,可随时切回)
+export const CANVAS_MOUSETEXT_FONT = '14px "Fusion Pixel 12px", monospace';
 /** 仅族名（DeathText 大字号/相机模式等自定字号处拼用）。★曾有多处误写
  *  "Fusion Pixel 12px zh_hans"——该名未注册（UIFont.ts 只注册本名），canvas 静默
  *  回退 monospace，与信息栏同病（FX35 2026-09-15 一并勘误） */

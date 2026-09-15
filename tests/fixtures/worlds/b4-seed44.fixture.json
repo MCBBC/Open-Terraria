@@ -1,0 +1,32 @@
+{
+ "name": "b4-seed44",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "44",
+  "evil": 0
+ },
+ "source": "tests/_b4-1457-probe.test.ts",
+ "notes": "makeTemple 蜥蜴砖体量用例",
+ "generatedAt": "2026-09-15T08:53:44.245Z",
+ "fingerprints": {
+  "type": "3c42a983",
+  "flags": "1c8bfbc4",
+  "wall": "2458f6e4",
+  "liquid": "2fc48029",
+  "frameX": "1776a046",
+  "frameY": "e3aa0bbc"
+ },
+ "side": {
+  "seedFlags": {}
+ },
+ "genFingerprints": {
+  "type": "488ed5c2",
+  "flags": "1c8bfbc4",
+  "wall": "2458f6e4",
+  "liquid": "2fc48029",
+  "frameX": "0cd3d1d5",
+  "frameY": "42c2193a"
+ },
+ "ghostsPurged": 1577146
+}

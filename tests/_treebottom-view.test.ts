@@ -1,11 +1,13 @@
 // 被篡改树精查：干列下方是植物(3/73/24)且再下方是草/泥土 = Flowers/Mushrooms 覆写受害者。
+// ★IIIII259（测试世界档案化）：档案载入（与 _treebottom-world-audit 共用
+//   'tb-8400-1814620304';断言面 flags 门控,读档口径守恒）。
 import { describe, it } from 'vitest';
-import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_DEFS } from '../src/data/tiles';
+import { loadFixtureWorld } from './world-fixtures';
 
 describe('vandalized trunks scan', () => {
   it('scan full world', async () => {
-    const world = await generateWorld({ width: 8400, height: 2400, seedText: '1814620304', evil: -1 });
+    const world = loadFixtureWorld('tb-8400-1814620304');   // ★IIIII259 档案载入
     const st = world.store;
     const info = (x: number, y: number) => {
       const i = st.idx(x, y);

@@ -212,7 +212,11 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     usedGalaxyPearl = false, usedGummyWorm = false, usedAmbrosia = false;
   if (version >= 229) {
     unlockedBiomeTorches = r.boolean();
-    r.boolean();                                     // UsingBiomeTorches(运行态不持久化)
+    // UsingBiomeTorches(:55896)——原版是计算属性（Player.cs:3934-3941:读=
+    // unlockedBiomeTorches ∧ builderAccStatus[11]==0,写=反写 builderAccStatus[11]）,
+    // 落盘值进 [11] 位面;本仓 builderAccStatus 已全量持久化(下方 :56306 域),此处
+    // 读后即弃不丢信息（写侧 w.bool(false) 同语义=重导会话态,见 exportPlr 注）
+    r.boolean();                                     // UsingBiomeTorches(经 [11] 位面承载)
     if (version >= 256) ateArtisanBread = r.boolean();
     if (version >= 324) r.boolean();                 // 1.4.5 新增未命名旗
     if (version >= 260) {
@@ -368,6 +372,11 @@ export function parsePlr(raw: Uint8Array): PlrImported {
       usedAegisCrystal, usedAegisFruit, usedArcaneCrystal,
       usedGalaxyPearl, usedGummyWorm, usedAmbrosia,
     },
+    // ★SW-FX38b（2026-09-15）：火把神恩宠解锁旗（Player.unlockedBiomeTorches,PL:55895
+    //  读/:55430 写,version≥229 域单字节 bool,位置在 extraAccessory 后 ateArtisanBread
+    //  前——曾读后即弃=导出恒写 false 登记债）。本仓在-session 权威落 world.flags
+    //  （monotonic 解锁,mainFlow.applyPlayer 回灌）,此字段=角色随身态跨世界面
+    unlockedBiomeTorches,
   };
   return { appearance, playerState, version };
 }
@@ -522,8 +531,14 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
   w.i32(Math.min(200, Math.max(20, st.baseMaxMana ?? 20)));
   const up = st.permanentUpgrades ?? {};
   w.bool(!!up.extraAccessory);
-  w.bool(false);                              // unlockedBiomeTorches(本仓未持久化)
-  w.bool(false);                              // UsingBiomeTorches(会话态)
+  // ★SW-FX38b：unlockedBiomeTorches 写真值（PL:55430 `fileIO.Write(newPlayer
+  //  .unlockedBiomeTorches)`;本仓曾恒写 false=解锁旗不出档）。源=playerState 字段
+  //  （parsePlr 落 / doSave 快照 SaveFile.buildSave 从 world.flags 回填）
+  w.bool(!!st.unlockedBiomeTorches);          // unlockedBiomeTorches(PL:55430)
+  w.bool(false);                              // UsingBiomeTorches(PL:55431,会话态)——
+  //  原版写的是计算属性值（Player.cs:3934-3941）,但其读侧 setter 反写
+  //  builderAccStatus[11] 后,:56306 的 builderAccStatus 数组读紧随覆写 [11] →
+  //  该字节对载入结果是死数据,恒 false 无损
   w.bool(false);                              // ateArtisanBread
   w.bool(false);                              // ≥324 未命名旗
   w.bool(!!up.usedAegisCrystal).bool(!!up.usedAegisFruit).bool(!!up.usedArcaneCrystal);

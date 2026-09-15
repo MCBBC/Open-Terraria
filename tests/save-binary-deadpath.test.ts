@@ -3,8 +3,10 @@
 //  · packSaveBinary/kvSetBinary 唯一调用方=mainFlow kvSetCompat（快照写）——先 kvSetBinary
 //    写二进制副本、再 kvSet 同 key 写 JSON；IDB 同 store readwrite 串行（创建序提交）→
 //    JSON 恒后写覆盖二进制副本 ⇒ 快路径零活跃消费方（worldGen.worker:174 的 ArrayBuffer
-//    分支只在两事务提交间隙的崩溃窗口才可能命中,且该残留是 meta={} 元数据全丢损毁态:
-//    unpack 后 loadSaveData 读 data.header.width 即 TypeError,无法救）。
+//    分支★RB20b 勘误 2026-09-15:连该「崩溃窗口」都不可达——worker 读侧 kvGetIdb 是
+//    string-only 过滤,二进制副本在落库后即被同拍 JSON 覆写+读侧先滤,死码三重;
+//    且该残留是 meta={} 元数据全丢损毁态: unpack 后 loadSaveData 读 data.header.width
+//    即 TypeError,无法救）。
 //  · isBinarySave/kvGetBinary 全库零调用方；BinarySave.ts:4 头注引用的 loadFromKey
 //    自动迁移链不存在。宣称的「-300MB 峰值」收益从未实现（二进制副本活不过同帧）。
 // 处置=移除死路径：kvSetCompat 二进制分支/worker 二进制读分支/BinarySave.ts/

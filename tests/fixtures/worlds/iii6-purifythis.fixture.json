@@ -1,0 +1,51 @@
+{
+ "name": "iii6-purifythis",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "purifythis",
+  "seedFlags": {
+   "infectedSeed": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "德鲁伊 var1 臂",
+ "generatedAt": "2026-09-15T08:53:27.923Z",
+ "fingerprints": {
+  "type": "2bb6ff6c",
+  "flags": "7104f2b5",
+  "wall": "9a41be84",
+  "liquid": "72ad4237",
+  "frameX": "af973778",
+  "frameY": "13334b3a"
+ },
+ "side": {
+  "seedFlags": {
+   "infectedSeed": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "dryad",
+    "givenName": "Faye",
+    "x": 33640,
+    "y": 4368,
+    "anchor": [
+     2102,
+     275
+    ],
+    "dir": 1,
+    "variationIndex": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "4b2f3f38",
+  "flags": "7104f2b5",
+  "wall": "9a41be84",
+  "liquid": "72ad4237",
+  "frameX": "e71286dc",
+  "frameY": "ce09a3f2"
+ },
+ "ghostsPurged": 1651112
+}

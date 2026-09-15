@@ -31,12 +31,11 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generateWorld, lastGenState } from '../src/world/gen/WorldGen';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { TILE_DEFS } from '../src/data/tiles';
 import { openFishingCrate } from '../src/data/vanillaFishingCrates';
 import { seededRandom } from './seeded-rng';
-import type { World } from '../src/world/World';
+import { loadFixture } from './world-fixtures';   // ★IIIII259 测试世界档案库
 
 const ROOT = join(__dirname, '..');
 // 1457 WorldGen.cs:36424 两池 + Player.cs:8750-8759 八选一
@@ -105,9 +104,11 @@ describe('SW-BJ42 魔法海螺获得链', () => {
     let conchShallow = 0;
     let conchDeep = 0;
     for (const seed of ['bj42-a', 'bj42-b', 'bj42-c', 'bj42-d', 'bj42-e', 'bj42-f']) {
-      const world: World = await generateWorld({ width: 4200, height: 1200, seedText: seed });
+      // ★IIIII259 档案载入（同种子同世界同断言;箱表/瓦片随档）。gs 域常量
+      //   （cs:36422 深度分位）由档案侧车回填（生成端 lastGenState 同拍钉值）。
+      const { world, fixture } = loadFixture(seed);
       const st = world.store;
-      const gs = lastGenState();
+      const gs = fixture.side?.gs as { desertHiveHigh: number; desertHiveLow: number };
       const thr = (gs!.desertHiveHigh * 3 + gs!.desertHiveLow * 4) / 7;   // cs:36422
       let mains = 0;
       let conch = 0;

@@ -265,8 +265,10 @@ describe('SW-BD1 结构锁（点击路由 / 点击即消费 / 落位 / 特效 / 
 
   it('访客回执双响守卫：TeleportResult ok 支只补特效+落位，不再播 menuClose', () => {
     const at = gameSrc.indexOf('PylonSub.TeleportResult) {');
-    const okBranch = gameSrc.slice(at, at + 700);
-    expect(okBranch).toContain('pylonTeleportFx(');
+    const okBranch = gameSrc.slice(at, at + 800);
+    // ★FX38b：访客双半都在回执帧——Entry@此刻旧位 + Exit 挂落位帧 .then(ok)
+    expect(okBranch).toContain('pylonTeleportFxOrigin(');
+    expect(okBranch).toContain('pylonTeleportFxArrival(');
     expect(okBranch).not.toContain("playWav('menuClose')");
   });
 
@@ -292,15 +294,29 @@ describe('SW-BD1 结构锁（点击路由 / 点击即消费 / 落位 / 特效 / 
     expect(mod).toContain('15 * scale, hh = 19 * scale');
   });
 
-  it('特效（TeleportEffect case 9 Main.cs:13544-13554）：Entry/Exit 双份 + Item6 + 塔型配色', () => {
+  it('特效（TeleportEffect case 9 Main.cs:13544-13557）：Entry/Exit 双份拆时序 + Item6 + 塔型配色', () => {
     const fx = gameSrc.slice(
-      gameSrc.indexOf('private pylonTeleportFx'),
-      gameSrc.indexOf('private pylonTeleportFx') + 1400,
+      gameSrc.indexOf('★FX38b 时序重构'),
+      gameSrc.indexOf('★FX38b 时序重构') + 3600,
     );
-    expect(fx).toContain("for (const [px, py] of [[p.x, p.y], [newX, newY]] as const)");
-    expect(fx).toContain("playSfxWav('Item_6'");
-    expect(fx).toContain('pylonDustHex(style)');
+    // ★FX38（2026-09-15 用户实报"传送缺光效与音效"）：尘走原版尘池（spawnDust
+    //   尘 43 全参 1:1）替代旧 spawnParticles 简化方块;配色直取 PYLON_DUST_RGB
+    //   字节化（SpawnInWorldDust :343-399 的 Color(r,g,b,1) 塔型表）
+    expect(fx).toContain('pylonTeleportDust(');
+    expect(fx).toContain('spawnDust(');
+    expect(fx).toContain('PYLON_DUST_RGB[style]');
     expect(fx).toContain('i < 100');
+    expect(fx).toContain('p.x + p.w / 2, p.y + p.h / 2');
+    // ★FX38b（用户复测"特效只有第一次有"）时序拆半：Origin@click 帧（Entry@旧位
+    //   :37740）/Arrival@落位帧（Exit@新位 :37758,相机已到=尘在光照窗内存活）；
+    //   Exit 声 replace=true（R26 槽语义 stop-then-play 在远位 'att' 早退前会把
+    //   Entry 实例 Stop 掉=首传后整声吞的根因,槽豁免后恒双声）
+    expect(fx).toContain('pylonTeleportFxOrigin(style: number)');
+    expect(fx).toContain('pylonTeleportFxArrival(style: number)');
+    expect(fx).toContain("undefined, true)");
+    // 落位帧链路：tryPylonMapTeleport 与访客 netApplyPylon 均挂 .then(ok)
+    expect(gameSrc).toContain(".then((ok) => {");
+    expect(gameSrc.match(/pylonTeleportFxArrival\(target\.type\)|pylonTeleportFxArrival\(style\)/g)?.length).toBe(2);
   });
 });
 

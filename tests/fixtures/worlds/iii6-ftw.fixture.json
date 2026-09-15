@@ -1,0 +1,50 @@
+{
+ "name": "iii6-ftw",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "fortheworthy",
+  "seedFlags": {
+   "getGoodWorld": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "爆破匠臂",
+ "generatedAt": "2026-09-15T08:52:40.778Z",
+ "fingerprints": {
+  "type": "5f045a01",
+  "flags": "8ea16765",
+  "wall": "335fa685",
+  "liquid": "61b14ed4",
+  "frameX": "f8445efe",
+  "frameY": "1b6c74ea"
+ },
+ "side": {
+  "seedFlags": {
+   "getGoodWorld": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "demolitionist",
+    "givenName": "Boften",
+    "x": 33624,
+    "y": 4448,
+    "anchor": [
+     2101,
+     280
+    ],
+    "dir": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "e2298be5",
+  "flags": "8ea16765",
+  "wall": "335fa685",
+  "liquid": "61b14ed4",
+  "frameX": "38d9325e",
+  "frameY": "25709263"
+ },
+ "ghostsPurged": 1745118
+}

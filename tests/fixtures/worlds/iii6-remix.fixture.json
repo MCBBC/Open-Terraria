@@ -1,0 +1,50 @@
+{
+ "name": "iii6-remix",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "dontdigup",
+  "seedFlags": {
+   "remix": true
+  },
+  "evil": 0
+ },
+ "source": "tests/_iii6-starter-npcs.test.ts",
+ "notes": "税务员臂",
+ "generatedAt": "2026-09-15T08:51:04.643Z",
+ "fingerprints": {
+  "type": "06718328",
+  "flags": "1ccb877c",
+  "wall": "3adc361b",
+  "liquid": "2e5d6afe",
+  "frameX": "6259e2dd",
+  "frameY": "fc304209"
+ },
+ "side": {
+  "seedFlags": {
+   "remix": true
+  },
+  "starterTownNpcs": [
+   {
+    "key": "tax_collector",
+    "givenName": "McKinly",
+    "x": 33608,
+    "y": 16848,
+    "anchor": [
+     2100,
+     1055
+    ],
+    "dir": 1
+   }
+  ]
+ },
+ "genFingerprints": {
+  "type": "857f9a6c",
+  "flags": "1ccb877c",
+  "wall": "3adc361b",
+  "liquid": "2e5d6afe",
+  "frameX": "98974c8d",
+  "frameY": "8fa42f7b"
+ },
+ "ghostsPurged": 1663962
+}

@@ -1,0 +1,32 @@
+{
+ "name": "medium",
+ "cfg": {
+  "width": 6400,
+  "height": 1800,
+  "seedText": "9293480",
+  "evil": 0
+ },
+ "source": "通用",
+ "notes": "中档位 6400×1800（新测试默认先取 small/medium）",
+ "generatedAt": "2026-09-15T08:49:05.499Z",
+ "fingerprints": {
+  "type": "bbcbbd90",
+  "flags": "5b927764",
+  "wall": "fd2c7077",
+  "liquid": "b0fe2f63",
+  "frameX": "7a491894",
+  "frameY": "182238b6"
+ },
+ "side": {
+  "seedFlags": {}
+ },
+ "genFingerprints": {
+  "type": "80d6f0d2",
+  "flags": "5b927764",
+  "wall": "fd2c7077",
+  "liquid": "b0fe2f63",
+  "frameX": "74a3e5a6",
+  "frameY": "5e9d069e"
+ },
+ "ghostsPurged": 3468214
+}

@@ -1,0 +1,31 @@
+{
+ "name": "bj43-b",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "bj43-b"
+ },
+ "source": "tests/sw-bj43-conch-landing.test.ts",
+ "notes": "金标落点对拍种子 b",
+ "generatedAt": "2026-09-15T08:54:22.363Z",
+ "fingerprints": {
+  "type": "7d6e1be6",
+  "flags": "97b31b1d",
+  "wall": "c1b32444",
+  "liquid": "5adba53e",
+  "frameX": "86be9110",
+  "frameY": "52e0c4f3"
+ },
+ "side": {
+  "seedFlags": {}
+ },
+ "genFingerprints": {
+  "type": "cf6561f9",
+  "flags": "97b31b1d",
+  "wall": "c1b32444",
+  "liquid": "5adba53e",
+  "frameX": "8cd4b0f1",
+  "frameY": "68d9bf84"
+ },
+ "ghostsPurged": 1603168
+}

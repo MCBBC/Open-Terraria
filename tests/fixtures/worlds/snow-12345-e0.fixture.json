@@ -1,0 +1,33 @@
+{
+ "name": "snow-12345-e0",
+ "cfg": {
+  "width": 4200,
+  "height": 1200,
+  "seedText": "12345",
+  "name": "b",
+  "evil": 0
+ },
+ "source": "tests/snow-biome-plants.test.ts",
+ "notes": "evil=0（t2 直方图）",
+ "generatedAt": "2026-09-15T08:49:39.091Z",
+ "fingerprints": {
+  "type": "cb7d488a",
+  "flags": "cfa234dd",
+  "wall": "fa6063e5",
+  "liquid": "511f4eb8",
+  "frameX": "a103d07c",
+  "frameY": "e9fcd5be"
+ },
+ "side": {
+  "seedFlags": {}
+ },
+ "genFingerprints": {
+  "type": "ffebe097",
+  "flags": "cfa234dd",
+  "wall": "fa6063e5",
+  "liquid": "511f4eb8",
+  "frameX": "f0ea11ef",
+  "frameY": "06661de1"
+ },
+ "ghostsPurged": 1637781
+}

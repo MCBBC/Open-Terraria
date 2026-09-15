@@ -1406,9 +1406,11 @@ const invBgTintCache = new Map<string, HTMLCanvasElement>();
 /** MouseTextInner（Main.cs:20032-20175 纯文本支）：mouse+14 锚,右/下缘 40px
  *  收边,四向黑影（Renderer.ts:9897 同式）;多行逐行排（原版 MouseText 含 \n,
  *  行距=font.LineSpacing×scale=29,ChatManager.cs:145/:171;FX27 实测 lineSpacing=29）。
- *  ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(19px 像素字体 ≙ MouseText scale 1;
- *  旧 14px+"zh_hans"未注册族名双病——族名静默回退 monospace=Windows 四向描边重影
- *  同根因,lh 17→29 同步归位原版行距) */
+ *  ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT——旧 14px+"zh_hans"未注册族名双病
+ *  (族名静默回退 monospace=Windows 四向描边重影同根因)。★16px=用户拍板档
+ *  (2026-09-15 紧凑折中,CJK 墨高 ~14.7);19px 墨高严格等值档链(≙ MouseText
+ *  scale 1)保留于 PixelText.CANVAS_MOUSETEXT_FONT 注,行距 29 等几何钉值未随
+ *  拍板调整 */
 function drawMouseText(ctx: CanvasRenderingContext2D, text: string, mouseX: number, mouseY: number): void {
   const lines = text.split('\n');
   ctx.save();
