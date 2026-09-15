@@ -221,7 +221,10 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
         // （118 身节 ai[2]>0 逐节递减克隆、归零转尾 119）→ 身{3,4,5}+尾=全链{4,5,6}段。
         // spawnWormChainFor(n)="body×(n-1)+尾"——曾把 Next(3,6) 当"身+尾总数"传
         // 3+rnd(3)，身节只剩{2,3,4}短一节（off-by-one,R23a 修）
-        spawnWormChainFor(game, leech, 4 + Math.floor(Math.random() * 3));
+        // ★RB30b-F2（2026-09-16）：建链块 :51859-51861/:51904-51906 头 117 realLife=
+        // whoAmI、段全继承 → 共享头血池（:51675-51679 每 tick 重申 realLife=ai[3]），
+        // 段杀=扣头血+掉落/旗/图鉴/成就全归头；曾漏传 sharedLife=段独立血+段掉落
+        spawnWormChainFor(game, leech, 4 + Math.floor(Math.random() * 3), true);
       }
     }
   }

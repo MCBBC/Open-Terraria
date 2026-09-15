@@ -24,7 +24,8 @@ export const CHEATSHEET = {
     { name: '__swVANILLA_ITEM_KEY_BY_ID', file: 'src/main.ts', token: '.__swVANILLA_ITEM_KEY_BY_ID = VANILLA_ITEM_KEY_BY_ID;', note: '原版 vid → 物品定义键(vid 反查第一跳)' },
     { name: '__swGore', file: 'src/main.ts', token: '.__swGore = liveGorePieces;', note: 'gore 池只读视图(气泡/碎块推进断言)' },
     { name: '__swGenUi', file: 'src/mainFlow.ts', token: '__swGenUi?: UIWorldLoadState', note: '生成中态采样句柄(60ms 高频采样,createGame(ui) 模式)' },
-    { name: '__swAudio', file: 'src/mainFlow.ts', token: '__swAudio?: AudioSystem', note: '音频系统(sfx/bgm 双通道环,F5 录制用)' },
+    { name: '__swAudio', file: 'src/mainFlow.ts', token: '__swAudio?: AudioSystem', note: '音频系统诊断面(bgm trace 环/curMusic/ac——DebugReport.musicTrace 消费;★BJ95 与录制器桥拆名)' },
+    { name: '__swAudioRec', file: 'src/core/Game.ts', token: '__swAudioRec?: AudioRecorder', note: 'F5 音效录制器(.sfx/.bgm 环/.tail(n,n)/.toggle/.export;probe record.mjs 消费)' },
   ],
 
   /** TileStore(src/world/TileStore.ts:18,SoA 平面数组)——st = g.world.store */

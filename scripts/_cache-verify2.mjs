@@ -13,6 +13,17 @@ const page = await browser.newPage();
 await page.goto('https://sandbox.vinlic.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 30000 }).catch(() => {});
 log('SW controlled');
+// 预置:等待首次 warm 完成
+for (let i = 0; i < 100; i++) {
+  await new Promise((r) => setTimeout(r, 3000));
+  const d = await page.evaluate(() => globalThis.__swAssetCache?.state?.().phase === 'done').catch(() => false);
+  if (d) { log('first-warm done'); break; }
+}
+// ★模拟用户硬刷(CDP ignoreCache)
+const CDP = await page.createCDPSession();
+await CDP.send('Page.reload', { ignoreCache: true });
+await page.waitForFunction(() => navigator.serviceWorker?.controller, { timeout: 60000 }).catch(() => {});
+log('hard-reload done, watching warm');
 let prev = -1, stable = 0;
 for (let i = 0; i < 120; i++) {
   await new Promise((r) => setTimeout(r, 3000));

@@ -103,7 +103,7 @@ function npcFootBiasExempt(id: number): boolean {
   return FOOT_FLUSH_EXEMPT.has(id);
 }
 import type { Camera } from './Camera';
-import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
+import { swPerf, searchHasParam } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)+★BJ94 D1 渲染循环 has 缓存读取面
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -2583,7 +2583,18 @@ function _waveCtxPushPlayer(p: Player): void {
   if (p.dead) return;
   _waveCtxPush({
     kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
-    wet: p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
+    // ★BJ94 D3（湿位对齐，2026-09-16）：注入章基面由 inWater（去岩浆窄化位,
+    //   Player.ts:4012 `r.wet && !inLava`）改为 wetSticky ∪ inWater——原版玩家注入章
+    //   WaterShaderData.cs:251 `if (player.wet)`【粘滞位】（NPC 同构 :215 `if (nPC.wet)`,
+    //   涟漪反相 :256-259 `if (!player.wet) num4 = -20f` 也读 wet）——wetSticky ≙ 原版
+    //   wet（BJ89 定谳）。岩浆中湿位旧值假 → 原版恒画的注入章整缺+涟漪方向反。
+    //   OR 臂仅服务联机代理：远端代理不走 fixedUpdate 液体链（Game.stepRemoteProxy
+    //   只喂 inWater 足部粗判,wetSticky 恒假）→ OR 臂保持其现行为逐位不变。
+    //   全链玩家数学恒等 wetSticky：inWater = wetNow∧!inLava 而 wetSticky ≡ wetNow
+    //   （:28060 置真/:28073 置假同拍），故 inWater=true ⟹ wetSticky=true,OR 臂
+    //   对全链玩家是恒等 no-op（非四桶并集复辟）。代理 wetSticky 维护（Game 一行）
+    //   登记 BJ94 移交债（stepRemoteProxy 属 Player 湿区,与 BJ93 区避让）。
+    wet: p.wetSticky || p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
   });
 }
 /** WaveFrameInput 复用槽（WaterWaves.frame 同步读字段、不保留入参引用；
@@ -3642,8 +3653,12 @@ export class Renderer {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
       // ★chunk 格线调试(?gutterdbg=1):每 chunk 边界画 1px 品红——旗标活性可视化
-      const gutterDbg = typeof location !== 'undefined'
-        && new URLSearchParams(location.search).has('gutterdbg');
+      // ★BJ94 D1(swPerf 快路径):本闭包每帧×2 调用('wall'/'tile'),原每调 1 次
+      //   URLSearchParams 构造(实测 2 次/帧)→ searchHasParam 缓存读取面(perfFlags,
+      //   按 search 串键控);flag 关 = 原地逐调用解析(现行行为逐位不变)
+      const gutterDbg = swPerf ? searchHasParam('gutterdbg')
+        : (typeof location !== 'undefined'
+          && new URLSearchParams(location.search).has('gutterdbg'));
       // ★低清档(#perf-gpulog):矩形直接在【低清整数空间】取整——zz=z·wK、中心
       // lw/lh。防缝前提 = 相邻块共享边同 round 值(整数设备边);若改套 ctx.scale(K),
       // 整数边被打回半像素,相邻矩形各自取整 → 逐 chunk 边界发丝缝(K=0.5 用户实报
@@ -4824,7 +4839,9 @@ export class Renderer {
         if (p.dead) return;
         push({
           kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
-          wet: p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
+          // ★BJ94 D3：湿位对齐原版 player.wet（WaterShaderData.cs:251 粘滞位）——
+          //   同 _waveCtxPushPlayer 注（全链玩家恒等 wetSticky;OR 臂=联机代理豁免）
+          wet: p.wetSticky || p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
         });
       };
     pushPlayer(player);
@@ -5059,8 +5076,9 @@ export class Renderer {
     //   逐格算共享边设备矩形（dxa/dxb 同 round 函数），格内内容以 s=宽/16 缩放
     //   回放——任意 zoom/相机下动态格边恒整数，且与 chunk 邻边同函数同值。
     const devOn = dev && (globalThis as { __SW_DYNSNAP_OFF?: boolean }).__SW_DYNSNAP_OFF !== true
-      && (typeof location === 'undefined'
-        || !new URLSearchParams(location.search).has('dynsnap0'));
+      && (swPerf ? !searchHasParam('dynsnap0')   // ★BJ94 D1(每帧 1 次解析→缓存读取面;flag 关=原式逐位)
+        : (typeof location === 'undefined'
+          || !new URLSearchParams(location.search).has('dynsnap0')));
     if (devOn) {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -5152,8 +5170,9 @@ export class Renderer {
     //  (对齐 doctrine 源的 else 分支,绝不静默消失);devOn 逃生门同源。
     const devOn = !!dev
       && (globalThis as { __SW_DYNSNAP_OFF?: boolean }).__SW_DYNSNAP_OFF !== true
-      && (typeof location === 'undefined'
-        || !new URLSearchParams(location.search).has('dynsnap0'));
+      && (swPerf ? !searchHasParam('dynsnap0')   // ★BJ94 D1(每帧 1 次解析→缓存读取面;flag 关=原式逐位)
+        : (typeof location === 'undefined'
+          || !new URLSearchParams(location.search).has('dynsnap0')));
     if (devOn) {
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -263,11 +263,14 @@ export function spawnVanillaEnemy(game: GameHooks, id: number, x: number, y: num
 }
 
 /** Enemy.spawnWormChain 的代理出口（外部 AI 文件以 type-only 导入 Enemy，
- *  运行时引用会成环——绑定源同 spawnPart 的 enemyCtor）：建链并入 enemies 桶 */
-export function spawnWormChainFor(game: GameHooks, head: Enemy, segCount: number): Enemy[] {
+ *  运行时引用会成环——绑定源同 spawnPart 的 enemyCtor）：建链并入 enemies 桶。
+ *  sharedLife 直通 spawnWormChain——★RB30b-F2：非 EoW 蠕虫全族共享头血池
+ *  （NPC.cs:51675-51679 realLife=ai[3] 每 tick 重申 + 建链块 :51845-51905 段继承
+ *  realLife；EoW 13/14/15 显式 realLife=-1 例外），WoF 水蛭 117 漏传=段独立血/段掉落 */
+export function spawnWormChainFor(game: GameHooks, head: Enemy, segCount: number, sharedLife = false): Enemy[] {
   const enemyCtor = getEnemyCtor();
   if (!enemyCtor) return [];
-  const segs = enemyCtor.spawnWormChain(head, segCount);
+  const segs = enemyCtor.spawnWormChain(head, segCount, undefined, sharedLife);
   const em = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
   for (const s of segs) em?.add?.(s, 'enemies');
   return segs;

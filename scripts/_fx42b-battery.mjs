@@ -159,8 +159,14 @@ await page.evaluate(async () => {
   }
   const guide = window.__fx42bGuide;
   guide.dead = false;
-  guide.x = g.player.x + 30;
-  guide.y = g.world.groundLevel * 16 - 48;
+  const st2 = g.world.store;
+  const col = Math.floor(guide.cx / 16);
+  let gy = Math.max(0, Math.floor((guide.y + guide.h + 2) / 16));
+  let solid = st2.get(col, gy) !== 0 && st2.hasTile(col, gy);
+  for (let k = 0; k < 40 && !solid; k++) { gy++; solid = st2.get(col, gy) !== 0 && st2.hasTile(col, gy); }
+  g.player.x = guide.cx - g.player.w / 2;
+  g.player.y = gy * 16 - g.player.h - 1;
+  g.player.vx = 0; g.player.vy = 0;
   let err = null;
   try { g.openNpcDialog(guide); } catch (e) { err = String(e && e.stack || e).slice(0, 300); }
   window.__dlgErr = err;

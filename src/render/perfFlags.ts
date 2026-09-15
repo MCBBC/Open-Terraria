@@ -53,3 +53,37 @@ export function waveAmpParam(): number {
 
 /** 缓存重置(仅测试/对拍仪具;生产禁调) */
 export function waveAmpResetForTest(): void { _wampSearchKey = null; _wampVal = 1; }
+
+// ---------------------------------------------------------------------------
+// ★BJ94 D1:渲染循环 URLSearchParams 构造点缓存读取面(2026-09-16 渲染性能域补刀)。
+//
+// 现场定谳(scripts/_bj94-set-census.mjs 构造器计数子类法,land/water 双场景实测
+//   4.00 次/帧):Renderer.drawChunkGrid【每帧×2 调用,'wall'/'tile' 各 1 次】
+//   (?gutterdbg)+ Renderer.drawAnimatedTileLayer【每帧×1】+ Renderer.drawDummyTileAnim
+//   【每帧×1】(均 ?dynsnap0)——每帧 4 次 new URLSearchParams(location.search)
+//   (BJ78 W1/W2 消除后的渲染循环域外残账,即 _bj78-wave-census.mjs 注记的
+//   「两臂对称抵消」背景项)。
+// location.search 每页加载恒定(全工程无 pushState/replaceState)→ has 值可缓存;
+// 缓存按 search 串键控(若发生历史态替换自动失效,防御性同 W1/W2);槽按参数名惰性
+// 填充(首个查询参数冷启动构造 1 次,此后零构造)。值语义与逐调用解析【逐位同值】
+// ——同一表达式 new URLSearchParams(q).has(name)(含缺失名=false)。
+// 仅 swPerf 快路径消费;flag 关 = 调用点保留原地逐调用解析(现行行为逐位不变)。
+let _spHasSearchKey: string | null = null;
+const _spHasCache = new Map<string, boolean>();
+export function searchHasParam(name: string): boolean {
+  let q: string;
+  try { q = location.search; } catch { return false; }
+  if (q !== _spHasSearchKey) {
+    _spHasSearchKey = q;
+    _spHasCache.clear();
+  }
+  const hit = _spHasCache.get(name);
+  if (hit !== undefined) return hit;
+  let v: boolean;
+  try { v = new URLSearchParams(q).has(name); } catch { v = false; }
+  _spHasCache.set(name, v);
+  return v;
+}
+
+/** 缓存重置(仅测试/对拍仪具;生产禁调) */
+export function searchHasResetForTest(): void { _spHasSearchKey = null; _spHasCache.clear(); }

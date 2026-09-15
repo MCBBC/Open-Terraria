@@ -4,6 +4,10 @@
  * 坑史锚(memory: audio-recorder-f5-falling-sand-dig-conviction、
  * ambient-cue-audio-alignment、_iii215b-sfx):
  *  - F5 录制双通道 = game.audioRec.sfx/bgm(BehaviorRecorder 环,恒开);
+ *    探针口 = window.__swAudioRec(★SW-BJ95 2026-09-16 由 __swAudio 改名——
+ *    原与 mainFlow 的 AudioSystem 桥同名互相覆写:进世界后 AudioRecorder 顶掉
+ *    AudioSystem,DebugReport.musicTrace 读 __swAudio.trace 变 null=BJ74 trace
+ *    域内失明;现 __swAudio=AudioSystem 恒定,__swAudioRec=录制器恒定);
  *    事件类:sfx {wav(out 结局码 o/syn/loop/cue)} bgm {sel/start/stop/fail/mute};
  *    ★无坐标 sfx = 调用点漏位置(距离衰减失效=满响)——断言先看 d.x/d.y 有无;
  *    ★syn 键 = 素材缺失/负缓存回退("音色不对"直接证据);
@@ -44,7 +48,7 @@ export async function drainSfxSpy(page) {
  */
 export async function audioTail(page, { sfx = 800, bgm = 200 } = {}) {
   return page.evaluate(({ sfx, bgm }) => {
-    const rec = window.__swAudio;
+    const rec = window.__swAudioRec;
     if (!rec) return null;
     return rec.tail(sfx, bgm);
   }, { sfx, bgm });
@@ -53,7 +57,7 @@ export async function audioTail(page, { sfx = 800, bgm = 200 } = {}) {
 /** 开录制窗(等价长按 F5 开窗)。 */
 export async function audioRecordStart(page) {
   return page.evaluate(() => {
-    const rec = window.__swAudio;
+    const rec = window.__swAudioRec;
     if (!rec) return false;
     return rec.recording ? true : rec.toggle();
   });
@@ -62,7 +66,7 @@ export async function audioRecordStart(page) {
 /** 关录制窗并导出两通道全量(等价长按 F5 关窗 export)。 */
 export async function audioRecordStopExport(page) {
   return page.evaluate(() => {
-    const rec = window.__swAudio;
+    const rec = window.__swAudioRec;
     if (!rec) return null;
     if (rec.recording) rec.toggle();
     return rec.export();

@@ -75,6 +75,16 @@ import { isDynamicAnimSheet, tileAnim } from './TileAnim';
 import { getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
 import { tintRegion } from './TileTint';
 import type { Camera } from './Camera';
+import { swPerf } from './perfFlags';   // ★BJ94 D2 每帧去重集复用快路径
+
+// ---- ★BJ94 D2（2026-09-16 渲染性能域分配普查）：planShineWork/scheduleShineBakes
+// 每帧各重建 1 个 seen 去重集（scripts/_bj94-set-census.mjs 构造器计数子类法实锤：
+// 各 1 次/帧）。两集均【局部不逃逸】（不返回不外存，函数返回后即弃）且【无重入】
+// （planShineWork 纯函数不自调；scheduleShineBakes 先调完 planShineWork 再用本槽，
+// 两个槽严格先后不重叠）→ 模块级复用槽，clear 后就地重填与每帧新建逐位同值。
+// swPerf 快路径消费；flag 关 = 原地 new（旧行为逐位不变）。
+const BJ94_SEEN_PLAN = new Set<ChunkPair>();
+const BJ94_SEEN_SCHED = new Set<ChunkPair>();
 
 // ---- Main.tileShine2 全表（Main.cs 赋值点见文件头；名字取 Terraria.ID.TileID.cs）----
 export const SHINE2_SHEETS: ReadonlySet<number> = new Set([
@@ -640,7 +650,10 @@ export function planShineWork<T extends ShineWorkItem>(
   const byDist = (a: T, b: T) =>
     d2(a.cx, a.cy) - d2(b.cx, b.cy) || a.cy - b.cy || a.cx - b.cx;
   const out: T[] = [];
-  const seen = new Set<ChunkPair>();
+  // ★BJ94 D2（swPerf 快路径）：复用槽 clear 后重填（槽注）；flag 关 = 原地 new
+  let seen: Set<ChunkPair>;
+  if (swPerf) { BJ94_SEEN_PLAN.clear(); seen = BJ94_SEEN_PLAN; }
+  else seen = new Set<ChunkPair>();
   for (const it of [[...pending].sort(byDist), [...fresh].sort(byDist)].flat()) {
     if (seen.has(it.pair)) continue;
     seen.add(it.pair);
@@ -902,7 +915,11 @@ function scheduleShineBakes(
   //   完成判据用缺额谓词(非条目完成态):超线 stale 顶替返回的是旧档条目,
   //   当前 q 仍缺 → 必须继续留队,不得误记完成。
   const order = planShineWork(carry, fresh, camX, camY);
-  const seen = new Set<ChunkPair>();
+  // ★BJ94 D2（swPerf 快路径）：复用槽 clear 后重填（槽注；本槽与 planShineWork 槽
+  //   严格先后使用不重叠）;flag 关 = 原地 new
+  let seen: Set<ChunkPair>;
+  if (swPerf) { BJ94_SEEN_SCHED.clear(); seen = BJ94_SEEN_SCHED; }
+  else seen = new Set<ChunkPair>();
   const newPending: PendingShine[] = [...keep];
   for (const it of order) {
     seen.add(it.pair);

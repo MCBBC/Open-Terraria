@@ -118,7 +118,7 @@ async function census(page, water, label) {
 
 try {
   // ================= 场景 B:?wwarp=0(bob 路径=W1 主场) =================
-  // ★bootstrap 的 gotoApp 用裸 origin 重导航会洗掉查询参数——先正常 boot 清存储,
+  // ★历史坑(已修,SW-BJ95 2026-09-16:bootstrap 现透传入口查询串)——旧版裸 origin 洗参,
   //   再带参二次导航重等桥(参数真在位由页内 location.search 断言)。
   const page0 = await openPage(browser, { errors: L.fails });
   const boot0 = await bootstrap(page0, process.env.SW_ORIGIN);

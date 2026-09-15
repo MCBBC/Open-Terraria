@@ -7,7 +7,7 @@
 //   + 8 层随机放大 + 贪心拆币（rollCoins,与原版同源 luck——非 luck=0）
 // - 心/星：NPC.cs NPCLoot_DropCommonLifeAndMana(:80332)
 // - Boss 药水+心：DoDeathEvents_DropBossPotionsAndHearts(:79790)
-// - 初速度：Item.cs:49325-49337 vx∈[-3,3] vy∈[-4,-1.5]
+// - 初速度：Item.cs:49746-49756 vx∈[-3,3] vy∈[-4.0,-1.6]（Next(-40,-15) 上界开,RB30b-F4）
 // luck 链（2026-08-14 复核全通）：ctx.luck = 击杀处注入 Player.luck（Enemy 侧,
 //   Enemy.ts dropCtx luck: p.luck）——src/stats/Luck.ts RecalculateLuck（:28672-28697）
 //   全来源已接：瓢虫 604/605（击杀坏运/触碰好运）、微光化币 coinLuck、火炬正确性
@@ -848,9 +848,10 @@ export function rollBossPotionsAndHearts(ctx: NpcDropCtx): ResolvedDrop[] {
   return drops;
 }
 
-// ============ 掉落初速度（Item.cs:49325-49337） ============
-// :49328-49329 vx=Next(-30,31)*0.1 / vy=Next(-40,-15)*0.1（闭区间口 Next(-40,-15)=[-40,-16]，
-// 曾写成 [-40,-15] 差 0.1）；:49330-49333 859/4743 恒零速；:49334-49337 520/521/星云拾取
+// ============ 掉落初速度（Item.cs:49746-49756,RB30b-F4 修正区间） ============
+// :49753-49754 vx=Next(-30,31)*0.1 / vy=Next(-40,-15)*0.1（闭区间口换算 Next(-40,-15)
+// =[-40,-16]；曾写 int(-40,-15) 多含 -1.5 一档,RB30b-F4 改 int(-40,-16)）；859/4743 零速
+// 特判已删（不在 ItemNoGravity 集,见下方 R14-A6 注）；:49747-49750 520/521/星云拾取
 // 族（ItemID.cs:1110 NebulaPickup={3453,3454,3455}）双向 Next(-30,31)
 const NEBULA_PICKUP = new Set([3453, 3454, 3455]);
 /** ItemID.Sets.ItemNoGravity（ItemID.cs:1108,16 项逐字）——掉落初速双向飘。
@@ -866,7 +867,9 @@ export function dropVelocity(rng: RNG, id?: number): { vx: number; vy: number } 
   if (id !== undefined && ITEM_NO_GRAVITY.has(id)) {
     return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-30, 30) * 0.1 };
   }
-  return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-40, -15) * 0.1 };
+  // ★RB30b-F4：rng.int 是闭区间 ≡ Next(a,b+1)——原版 Next(-40,-15) 上界【开】
+  // =[-40,-16]，×0.1=[-4.0,-1.6]。曾写 int(-40,-15) 多含 -1.5 一档（注释自知未改码）
+  return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-40, -16) * 0.1 };
 }
 
 export { SLIME_BODY };

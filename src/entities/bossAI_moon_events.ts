@@ -23,6 +23,7 @@ import { ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
+import { getAttackDamageCappedAtMaster } from '../stats/ScaleStats';
 
 /** 原版 localAI[0..3]（Enemy 的 ai0-ai3 对应 ai[]，localAI 是独立数组 → WeakMap 落盘） */
 const localAI = new WeakMap<Enemy, number[]>();
@@ -1121,6 +1122,12 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
   }
   // 毒唾(:21425-21451)：ai[0] 1→3 渐进；==2 时双倍位移 + 爆裂尘
   if (vid === 112 || vid === 666) {
+    // ★RB30b-F3（2026-09-16）：每 tick 伤害档覆写（:21548-21555 `damage=defDamage;
+    //  type==666 → damage=GetAttackDamage_CappedAtMaster(32)`）——666 恒 32×难度乘区
+    // （经典 32/专家 64/大师 96，journey 16；SetDefaults 65 只是静态基线,活体每拍被
+    // AI 覆写）。曾缺=接触伤恒走 def.damage 快照。112 的 `damage=defDamage` 在本仓
+    // 等价恒等（无他处覆写）不重复写。fromVanilla def 已实例私有,直写安全（同族惯例）
+    if (vid === 666) e.def.damage = getAttackDamageCappedAtMaster(32, e.difficulty);
     e.ai0 += 1;
     if (e.ai0 > 3) e.ai0 = 3;
     if (e.ai0 === 2) {

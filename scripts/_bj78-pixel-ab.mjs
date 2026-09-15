@@ -269,7 +269,7 @@ try {
   }
 
   // ================= 页 3:?wamp=2(W1/W2 amp 缓存读取面的增益路径) =================
-  // ★bootstrap 的 gotoApp 用裸 origin 重导航会洗掉查询参数——先正常 boot,
+  // ★历史坑(已修,SW-BJ95 2026-09-16:bootstrap 现透传入口查询串)——旧版裸 origin 重导航洗参,
   //   再带参二次导航重等桥;参数生效以页内 waveAmpParam()===2 断言(真值面)。
   const page2 = await openPage(browser, { errors: L.fails });
   const boot2 = await bootstrap(page2, process.env.SW_ORIGIN);

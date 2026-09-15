@@ -10510,6 +10510,7 @@ export class UI {
     this.vinvModernCraftEl = null;
     this.vinvModernPanelEl = null;
     this.vinvModernTitleEl = null;
+    this.vinvModernSearchRowEl = null;   // ★RB28 字段随 teardown 一并清(RB28 归并补漏:曾只清 SearchInput/Clear,行元素滞留死引用)
     this.vinvModernSearchInput = null;
     this.vinvModernSearchClear = null;
     this.vinvModernGridList = null;

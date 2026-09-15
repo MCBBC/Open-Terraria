@@ -15,9 +15,13 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
 import { projSprite, Arrow } from './Arrow';
 import { beeWallPushDir } from './WeaponProj';   // SW-AF1 2026-09-04（F-3）：1047 滚石踢墙门单源化（与 655/99 同摄取器）
+import { cutTilesBox } from './ProjCutTiles';   // ★SW-BJ93 债1：CutTiles 面（:12517/:15276 共享体;vid 穿线 1047 幼虫豁免）
+import { GorePiece } from './GorePiece';        // ★SW-BJ93 债2：1053 Kill gore 61..63（Game.explodeAt 同引擎,30:28419 先例）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE_DEFS } from '../data/tiles';
+import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';   // ★SW-BJ93 债2：Kill 掉落 vid→键反查（Player.ts:6333 同款）
+import { damageVarRoll } from '../stats/DamageVar';       // ★SW-BJ93 债4：SelfHurtPlayers DV 单源（:15118;Game bit7 同源）
 import { f32 } from '../stats/ScaleStats';
 import { shimmerBlockFx, rainbowBoulderFx, rainbowRodHitFx, orchestraHslCss, hexToRgbArr, pooFlyFx }
   from '../fx/orchestraFx';
@@ -56,8 +60,67 @@ const KB_X = 10;               // 出生 kb 第二参 = 10f
 //   登记债（域外观察,未落刀）：vanilla Kill() 对家族全型有死亡尘/声面
 //     （P.cs:76379-76400 尘表 1013→243/727→40/1048→322 + 声 Item16/Item14/NPCHit29/
 //     NPCDeath6/缺省 dig(0)）——本仓 rbKill 仅 1047 有爆段,余型静默;BJ88 债1 注
-//     「1013 无专属爆面」系漏读该表（待立案）
+//     「1013 无专属爆面」系漏读该表（待立案）→ ★SW-BJ93 债2 落刀（2026-09-16）
 // ===========================================================================
+// ★SW-BJ93（2026-09-16）新登记账五债清偿（全部 1457 锚 1:1;1458 同域逐字对拍
+//   2026-09-16:Kill 家族块/宽限门/两段伴生尘 byte-diff 全等,行号偏移见各锚）：
+//   债1 aiStyle25 出膛宽限门（BJ88 立案）Damage_CanDealDamage 尾 P.cs:12491
+//     （1458 :12491 逐字同）`aiStyle==25 && type∉{1021,1047,1005,1014} &&
+//     localAI[2]<=7 → false`——Damage() :12512 门内四面（CutTiles/PVE/PVP/EVP）
+//     出生全免。localAI[2] = 出生计数（AI_025 头 :26360 每 tick++,1458 :26361;
+//     无人置初值=0 起,出生 1..7 拍无伤,第 8 拍首伤;1002=aiStyle16 无此钟）。
+//     本仓伤害环（PVE+EVP）与 CutTiles 收口（:12515 friendly∧type!=1054 门;
+//     CanCutTiles :15407 排除表无家族成员）此前均未接=债本体,CutTiles 面整缺同债补。
+//   债2 Kill() 家族死亡尘/声面（BJ92 登记债）P.cs:76355-76500（1458 :76356-76501
+//     同域逐字）——尘表 :76361-69（1013→243/727→40/1014→12/1021→323/1048→322/
+//     缺省 1）+ 声 :76370-89（1048→Item16/1053→Item14/1054→NPCHit29/1055→
+//     NPCDeath6/缺省 PlaySound(0)=dig）+ 1053 专属 :76390-76446（64 盒尘 31×25 +
+//     尘 6×(40×2) + gore 61..63×4 + 盒还原）+ 1054 :76447-52（尘 30×20,vy=-1）+
+//     1055 :76453-66（尘 192×50,scale×1.5/vel×2/noGravity）+ 缺省 :76467-78
+//     （尘 num623×30,rand scale×1.4;:76476 `velocity *= 1.9f` 在环内=死写[弹已
+//     Kill,velocity 无观察面],1:1 不移植）+ 掉落 :76479-87（1057→Item 5523/
+//     1014→Item 29,owner==myPlayer 门单机恒真）+ :76488-76490 netMode!=1 支
+//     （1048 SpreadPoopPyramid / 1053 LavaBoulderExplosion = 地形面,本刀未移植=
+//     邻接债登记）。1047 不在族表（:72354 专属爆段=rbKillRainbowExplosion 已接）。
+//   债3 aiStyle25 头部伴生尘：1053 三色尘 :26390-26410（1458 :26391-26411 逐字同;
+//     尘 31/6/6 各 1/3 拍率）+ 1048 滚动尘 :26745-26749（1458 :26746-26750 同;
+//     netMode!=2 ∧ |v|>1 门,Center+NextVector2Circular(w*0.4,h*0.4) 线性半径）。
+//   债4 1002 TNTBarrel 双向偏差（RB21 新登记）：①EVP 豁免集 SkipDamage_EVP=
+//     CreateBoolSet(108,164,1002)（ProjectileID.cs:275,1458 同行;全库唯一消费=
+//     Damage_EVP 门 :14848/1458 :14848）——1002 原版 EVP 恒不适用=零接触伤玩家;
+//     ②其玩家伤害面在 aiStyle16 Kill 支 SelfHurtPlayers（:71766-71795,调用 :71790
+//     flag4=friendly∧!npcProj∧!RocketsSkip[1002=不在集 :189]、flag5=owner 三臂
+//     单机恒真;本体 :15104-15152,FixedSelfDamageForPlayers :193 无 1002 行=自然伤,
+//     trap=true :9539 → sweater cap 臂 :15119-22 适用;playerIndex=-1/pvp=false
+//     :15124-27 hostile 弹）;③名实勘误 BoulderMech.ts「654 大石柱仙人掌球」→
+//     TNTBarrel（TileID.cs:1745;WorldGen :49178 出生 dmg=400/kb=10）。
+//   债5 Chilled 门同族幻影姿态（BJ80 域外观察）：vanilla Player.cs:28211
+//     （1458 :28209 逐字同）`expertMode && ZoneSnow && wet && !lavaWet &&
+//     !honeyWet && !arcticDivingGear && environmentBuffImmunityTimer==0`——
+//     探针基面=湿粘滞位（读点在 num86 刷新 :28060/:28073 之后≡本拍 wet;RB20a F6
+//     同族判例）;本仓 Player.ts 用 inWater&&!inLava&&!inHoney 桶位=同族幻影姿态
+//     → wetSticky/splashLavaWet/splashHoneyWet 化（Player.ts）。
+// ===========================================================================
+
+// ===========================================================================
+// ★SW-BJ93 债4①（2026-09-16）：ProjectileID.Sets.SkipDamage_EVP（ProjectileID.cs:275
+//  Factory.CreateBoolSet(108,164,1002);1458 :275 逐字同）——原版全库唯一消费 =
+//  Damage_EVP 门（P.cs:14848/1458 :14848 `… || SkipDamage_EVP[type] → return`）：
+//  集 108 Explosives/164 Landmine/1002 TNTBarrel 三型【永不】经弹幕接触 EVP 伤玩家
+//  （1002=tile 654 TNTBarrel 出生弹,aiStyle16,玩家伤害面唯一在 aiStyle16 Kill 支
+//  SelfHurtPlayers :71766-71795）。108/164 本仓无活体弹实体（接线引爆走 Game.explodeAt
+//  自伤段=SelfHurtPlayers 同构面,EVP 面结构性不存在）→ 本集在本仓唯一活消费 = 本类
+//  1002 的 EVP 环（fixedUpdate 尾）。1002 SetDefaults :9525-9539 friendly+hostile
+//  双旗,旧仓 hostile 门照伤接触=双向偏差之正向（RB21 R3 定谳）。
+// ===========================================================================
+export const SKIP_DAMAGE_EVP: ReadonlySet<number> = new Set([108, 164, 1002]);
+
+/** ★SW-BJ93 债2：Kill() 家族尘/声臂族表（P.cs:76355 `else if (type == 99 || 1013 ||
+ *  727 || 1014 || 1021 || 1048 || 1053 || 1054 || 1055 || 1057)`;1458 :76356 同）——
+ *  1047 :72354/1005 :76487/1078 :76497 各有专属支不落族表;1002=aiStyle16 支
+ *  （:71766）亦不落（本仓 1002 走 SelfHurtPlayers 面,无族尘）。 */
+const RB_KILL_FAMILY: ReadonlySet<number> = new Set(
+  [99, 1013, 727, 1014, 1021, 1048, 1053, 1054, 1055, 1057]);
 
 /** Utils.Remap 前向档（GetLerpValue clamped + Lerp,Utils.cs:761-780/:496-502——
  *  本域唯二调用 :20342 Remap(len,0,200,4,32) 恒 from<to;反向 GetLerpValue(10,0,i)
@@ -278,7 +341,7 @@ export class RollingBoulder extends Entity {
   //  · :1835-1852 共块 {99,727,1013,1014,1053,1054,1055,1057} 无 ignoreWater 行 → 受段
   //  · 1048 :9930-9939 无行 → 受段;1047 :9920-9929 `ignoreWater=true`@:9928 → 豁免
   //    （共享体整段门早退,四旗恒 false,溅花/阻尼零触发——与原版 :16903 同向）
-  //  · 1002（sheet 654 大石柱仙人掌球）:9525-9539 无行 → 受段（注：原版 1002 是
+  //  · 1002（sheet 654 TNTBarrel,TileID.cs:1745）:9525-9539 无行 → 受段（注：原版 1002 是
   //    aiStyle 16 弹,本类按既有模型同跑 AI_025——湿段仍按真 id 1002 传参接线）----
   //  位序口径：AI_025（踢门/滚转/滚地加速/重力/:26748 AnyWet 消费）→ 湿段(:16903)
   //  → moveAndCollide（HandleMovement :17721-17764 湿阻尼读【本拍刷新后】旗,乘进
@@ -318,6 +381,14 @@ export class RollingBoulder extends Entity {
    *  承重）;F1 移植后本钟对 1048 为承重位。1054 不在钟内（:26365 仅 1013/1048）→
    *  其支内 flag18 :19270 / 静止杀 :19294 恒假 = vanilla 死门,1:1 保留不裁。 */
   localAI0 = 0;
+  /** ★SW-BJ93 债1（2026-09-16）：localAI[2] 出生拍龄计数（AI_025 头 :26360 每 tick
+   *  ++,1458 :26361 同;无人置初值 → 0 起）——Damage_CanDealDamage 尾 :12491 消费：
+   *  aiStyle25 ∧ type∉{1021,1047,1005,1014} ∧ localAI[2]<=7 → 伤害四面全免（出生
+   *  1..7 拍,第 8 拍首伤）。vanilla Update 序 = AI(:16880 先++) → Damage(:17184 后读),
+   *  本仓同序（fixedUpdate 头 ++/尾环读）。★1002=aiStyle16（SetDefaults :9525-9539）
+   *  不在 aiStyle25 钟内 → 不计数不受门;1021/1047/1014 豁免（1005 MiniBoulder 本仓
+   *  不可达,集照抄）。原版 localAI 不同步联机（单源本地）=单机面零差。 */
+  localAI2 = 0;
   /** D5：Projectile.tileCollide 镜像（physics/TileCollision.Body 同名可选位——
    *  AI_025 :26437 每 tick 动态写,moveAndCollide 读 false 时整段跳过碰撞直写位移） */
   tileCollide?: boolean;
@@ -347,12 +418,38 @@ export class RollingBoulder extends Entity {
     // ---- ★SW-BJ88 债1 伴生位（AI_025 头 :26365-26368 逐字;1458 :26366 同）：
     //  1013/1048 每 tick localAI[0]++（存活拍龄;读点与 1048 只写面见字段注）----
     if (this.projId === 1013 || this.projId === 1048) this.localAI0++;
+    // ---- ★SW-BJ93 债1 伴生位（AI_025 头 :26359-26360 逐字;1458 :26360-26361 同）：
+    //  aiStyle25 全型每 tick localAI[2]++（出生拍龄;无型别门,原版 else-if aiStyle==25
+    //  支首行）——1002=aiStyle16 不进支=不计数（rbDamageCanDeal 门同构排除）----
+    if (this.projId !== 1002) this.localAI2++;
     // ---- ★SW-BJ67 D5 伴生位（AI_025 :26373 `bool flag9 = false` 的等价前算）：
     //  flag9 仅在 :26440（ai[1]>0 宽限支）被置 !tileCollide（宽限期 tileCollide 恒
     //  false → flag9=true）,唯一消费点 = 下行静止自启门 :26595 `!flag9`。本域 ai[1]
     //  只在弹跳宽限支内递减,本拍前置点读 ai[1] 与 :26437 门读值同拍（递减在后），
     //  故 flag9 ≡ (ai1 > 0)。 ----
     const flag9 = this.ai1 > 0;
+    // ---- ★SW-BJ93 债3（2026-09-16）：1053 三色伴生尘（AI_025 :26390-26410 逐字;
+    //  1458 :26391-26411 同,原版位序=flag9 置位后/1054 蛛网支与 1047 专支之前）——
+    //  三支独立 1/3 拍率：①尘 31 烟（盒 pos+(6,6) 尺 (w-12,h-12)、α100、scale1.5、
+    //  vel×0.3 后 vy−2）②尘 6 火（盒 pos+(4,4) 尺 (w-8,h-8)、α100、scale1.5、
+    //  noGravity）③尘 6 火（盒 pos 全盒、α100、无 scale、vy−1）。1053 = 熔岩巨石
+    //  （滚过留火痕的可见面,旧仓整缺）。----
+    if (this.projId === 1053) {
+      if (Math.floor(Math.random() * 3) === 0) {            // :26390 Next(3)==0
+        const d = game.spawnDust?.(this.x + 6, this.y + 6, this.w - 12, this.h - 12,
+          31, 0, 0, 100, null, 1.5);
+        if (d) { d.vx *= 0.3; d.vy *= 0.3; d.vy -= 2; }     // :26395-26396 vel×0.3 → vy−2
+      }
+      if (Math.floor(Math.random() * 3) === 0) {            // :26398 Next(3)==0
+        const d = game.spawnDust?.(this.x + 4, this.y + 4, this.w - 8, this.h - 8,
+          6, 0, 0, 100, null, 1.5);
+        if (d) d.noGravity = true;                          // :26401
+      }
+      if (Math.floor(Math.random() * 3) === 0) {            // :26403 Next(3)==0
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
+        if (d) d.vy -= 1;                                   // :26406 velocity.Y--
+      }
+    }
     // ---- 静止自启（cs:26684-26711 verbatim 门：ai[0]!=0 && vy<=0 && vx==0）——
     // 落入柱龛停稳后朝开阔侧踢 ±0.5，三级探柱(0/16/32px 外扩)都堵则按 cx 奇偶定边
     // SW-AF1 2026-09-04（F-3 收敛）：踢墙摄取器单源化 → WeaponProj.beeWallPushDir
@@ -441,16 +538,35 @@ export class RollingBoulder extends Entity {
       if (this.vx < 0 && this.vx > -7) this.vx -= 0.05;
     }
     this.vy = Math.min(this.vy + 0.3, 16);
-    // ---- AI_025 AnyWet 消费（:26748-26762,原版 AI 段尾——读【上拍】湿旗字段）----
+    // ---- ★SW-BJ93 债3（2026-09-16）：1048 滚动伴生尘（AI_025 :26745-26749 逐字;
+    //  1458 :26746-26750 同;原版位序=重力写后/AnyWet 消费前,读【本拍】重力后速度）——
+    //  门 = netMode!=2（单机恒真）∧ |velocity|>1;位 = Center + NextVector2Circular
+    //  (w×0.4,h×0.4)（Utils.cs:1301-1303 = NextVector2Unit×(w,h)×NextFloat——角均匀×
+    //  线性半径,2 掷;rbHighlightNearbyTreasure F6 口径同）−(1,1) → 盒 2×2;
+    //  尘 322、速 = −velocity×0.5、α0、scale 0.75+NextFloat×0.25、noGravity。
+    //  NextVector2Unit 的角扫向（sin,−cos）与 cos/sin 仅差常数相移,角均匀同分布
+    //  （rbHighlightNearbyTreasure 既有 cos/sin 口径,不另造掷形）。----
+    if (this.projId === 1048 && Math.hypot(this.vx, this.vy) > 1) {   // :26745（netMode!=2 单机恒真）
+      const ang = Math.random() * Math.PI * 2;                        // NextVector2Unit 角（掷1）
+      const rr = Math.random();                                       // NextFloat 线性半径（掷2）
+      const px = this.cx + Math.cos(ang) * rr * (this.w * 0.4);
+      const py = this.cy + Math.sin(ang) * rr * (this.h * 0.4);
+      const d = game.spawnDust?.(px - 1, py - 1, 2, 2, 322,
+        -this.vx * 0.5, -this.vy * 0.5, 0, null, 0.75 + Math.random() * 0.25);
+      if (d) d.noGravity = true;                                      // :26749
+    }
+    // ---- AI_025 AnyWet 消费（:26748-26765,原版 AI 段尾——读【上拍】湿旗字段）----
     //  `if (AnyWet && netMode != 1)`: 1053 → Kill(任一液) / wet∧655 → Kill(蜂巢,
     //  WeaponProj GrenadeProj 域已接) / lavaWet∧(727|1054) → Kill。99/1013/1014/
     //  1047/1048/1055/1057 无湿杀面;1002 原版 aiStyle 16 无此块 → 显式排除。
     //  1047 豁免湿段 → 四旗恒 false → 恒不触发（与原版同向）。
+    //  ★SW-BJ93 债2（2026-09-16）：原版此处调 Kill()（:26752/:26760）→ 死亡尘/声面
+    //  随 Kill 面（债2）发放;旧仓直写 dead=静默消亡=同债面整缺 → 收口 rbKill 单口。
     if (this.projId !== 1002
       && (this.wet || this.lavaWet || this.honeyWet || this.shimmerWet)) {
-      if (this.projId === 1053) this.dead = true;                     // :26750-26752
+      if (this.projId === 1053) this.rbKill(game);                    // :26750-26752 Kill()
       else if (this.lavaWet && (this.projId === 727 || this.projId === 1054)) {
-        this.dead = true;                                             // :26758-26760
+        this.rbKill(game);                                            // :26758-26760 Kill()
       }
     }
     if (this.dead) return;
@@ -524,14 +640,23 @@ export class RollingBoulder extends Entity {
         this.vy = -lastVY * 0.2;
         game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });
         game.playSfx?.('dig', 0.8);
-        if (this.projId === 1057) { this.dead = true; return; }   // 1057 落地即碎
+        // ★SW-BJ93 债2（2026-09-16）：vanilla :19089-19092 `else if (type == 1057)
+        //  { Kill(); }`——落地即碎走 Kill 单口（尘被 :76467 type!=1057 排除,声=dig
+        //  缺省支 + Item 5523 掉落）;旧仓直写 dead=静默=债面整缺 → rbKill 收口。
+        if (this.projId === 1057) { this.rbKill(game); return; }  // 1057 落地即碎
       }
       // ② 横向撞墙：**Kill()（碎裂）**——不是反弹！ping-pong 根因即漏了这条
       // （cs:19097-19100 else 支；1055 荧光石球例外不碎走追踪切换）
+      //  ★SW-BJ93 债2（2026-09-16）：vanilla 撞墙支 {99,1005,1014,1053,1057} 直调
+      //  Kill()（:19098-19100）,【无】HitTiles 前置尘（旧仓 #9A9A9A 灰尘系 Kill 面
+      //  整缺期的自造替身,真面=Kill 尘/声,随本刀就位 → 替身退役）;死亡面经 rbKill
+      //  （99→尘1×30+dig / 1013 已专支 / 1014→尘12×30+dig+Item29 / 1021→尘323×30
+      //  +dig / 1053→64 盒尘+gore+Item14 / 1057→dig+Item5523）。★1021 vanilla 有
+      //  专属弹跳支（:19101-19125,四次内弹回/limit Kill）本仓仍落本支即碎=既有
+      //  建模偏差非本刀域（BJ88 债1 家族弹支逐型移植的余项,登记未动）。
       if (this.vx !== lastVX) {
         if (this.projId !== 1055) {
-          game.spawnParticles?.(this.cx, this.cy, '#9A9A9A', 10, 1.6, { life: 18 });
-          this.dead = true;
+          this.rbKill(game);
           return;
         }
       }
@@ -541,55 +666,81 @@ export class RollingBoulder extends Entity {
     this.life--;
     if (this.life <= 0) { this.rbKill(game); return; }   // ★SW-BJ67 D2：唯一死亡门
 
-    // ---- 双面接触伤害（friendly+hostile → NPC 与玩家都结算）----
-    for (const raw of game.enemies() as Array<Record<string, unknown>>) {
-      const e = raw as unknown as {
-        id: number; dead?: boolean; friendly?: boolean; immortal?: boolean; dontTakeDamage?: boolean;
-        vanillaId?: number | null; boss?: boolean; def?: { boss?: boolean };
-        x: number; y: number; w: number; h: number; cx: number; cy: number;
-        hurt?: (dmg: number, kbx: number, kby: number, game: unknown) => boolean | void;
-      };
-      if (!e || e.dead || e.friendly || e.immortal || e.dontTakeDamage) continue;
-      if ((this.immunities.get(e.id) ?? 0) > 0) continue;
-      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      this.immunities.set(e.id, 10);
-      const dir = e.cx >= this.cx ? 1 : -1;
-      e.hurt?.(this.dmg, dir * KB_X, 0, game);
-      // ★SW-BJ88 债2（2026-09-15）：1047 命中 TreatedAsABossForRainbowBoulders →
-      //  Kill()（Damage_PVE_Inner :14336-14340 直译;1458 :14337 同）。原版位序=
-      //  StrikeNPC :13702 之后 → boss 先吃到本拍伤害再自爆;`keepIterating = false`
-      //  → break 不再遍历后续敌怪;Damage() 内 PVE→EVP 无 active 重入闸 → 不加
-      //  dead 早退=字面 1:1（且 1047 friendly 非 hostile,EVP 恒不适用 :14848）。
-      if (this.projId === 1047
-        && treatedAsABossForRainbowBoulders(e.vanillaId,
-          e.boss === true || e.def?.boss === true)) {
-        this.rbKill(game);
-        break;
+    // ---- ★SW-BJ93 债1（2026-09-16）：Damage() 结算面收口（P.cs:12512-12539 直译;
+    //  1458 :12513-12540 同域逐字）——Damage_CanDealDamage()（:12461,尾支 :12491=
+    //  aiStyle25 出膛宽限门,见 rbDamageCanDeal 注）【门内】才有 CutTiles/PVE/PVP/EVP
+    //  四面;出生 localAI[2]∈[1..7] 拍（第 8 拍首伤）全免。旧仓伤害环（PVE+EVP）与
+    //  CutTiles 均未接此门=债本体（BJ88 立案;RB21 :12520 亲见同域）。
+    //  ★CutTiles 面（:12515-12518;1458 :12516-12519 同）整缺同债补——门 =
+    //  friendly ∧ owner==myPlayer（单机恒真）∧ !npcProj ∧ !minion（家族无此二位）
+    //  ∧ type!=1054（原版唯一排除型）;CanCutTiles（:15407,ProjCutTiles.ts 头注）
+    //  排除表 aiStyle45/137/92/105/106 与 {463,69,70,621,10,11,379,407,476,623,
+    //  625..628,833..835,818,831,820,864,970,995,908,1020,1105,1040} 无家族成员、
+    //  尾支 return type!=1091 → 家族全过=调用方自证。vid 穿线（1047 幼虫豁免
+    //  :15391-93）。1021 json 无 friendly 行（hostile-only）→ 不砍=原版同向。----
+    if (this.rbDamageCanDeal()) {
+      if (!!projectileData(this.projId)?.friendly && this.projId !== 1054) {
+        cutTilesBox(game, this.x, this.y, this.w, this.h, this.projId);   // :12517 CutTiles()
       }
-    }
-    const p = game.player as { dead: boolean; iframes: number; x: number; y: number; w: number; h: number };
-    // ★SW-RB20a F4（2026-09-15）：friendly 弹对玩家伤害面豁免——Damage_EVP 门
-    //  （Projectile.cs:14848 `if (!hostile || Main.myPlayer >= 255 || damage <= 0 ||
-    //  SkipDamage_EVP[type]) return;`;1458 :14849 逐字同）=【非 hostile 弹恒不伤玩家】。
-    //  家族 SetDefaults 逐值：1047 friendly=true ∧ 无 hostile 行（P.cs:9920-9929,
-    //  ignoreWater @:9928）→ 原版彩虹巨石撞玩家【零结算】;余型（99/1002/1013/1014/
-    //  1048/1053/1054/1055/1057）friendly+hostile 双旗（SetDefaults 逐站核对,
-    //  vanilla-projectiles.json hostile 列同源=recon 双闸门辖域）→ EVP 照适用。
-    //  hostile 取 projectileData（json 列缺省=undefined → falsy → 豁免）,门语义与
-    //  原版 `!hostile` 逐字同构。PVP 半边（hostile 弹打 PVP 队）不适用本仓单地面。
-    if (projectileData(this.projId)?.hostile
-      && !p.dead && p.iframes <= 0 && !(this.immunities.get(-1) ?? 0)) {
-      if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
-        this.immunities.set(-1, 10);
-        // ★SW-BI1 2026-09-06（用户崩溃报告定谳）：不传 this 作 attacker——attacker 槽是
-        //  Enemy 受击反击面（荆棘/仙人掌套/日曜爆闪 → attacker.hurt(...)），弹体无 hurt
-        //  方法，把滚石自身送进反击槽 → `k.hurt is not a function` → 帧循环守卫停机
-        //  （沙漠滚仙人掌球实报，2026-09-06 报告 SW-BI1）。与全弹族调用约定对齐
-        //  （FallingBlock:275/MeteorChunk:126/Dart 系/bossAI_* 均不传 attacker）：
-        //  原版弹侧命中无 NPC 可反（PlayerDeathReason.ByProjectile），本无攻击者槽语义。
-        game.damagePlayer(this.dmg, this.cx, this.cy);
+
+      // ---- 双面接触伤害（friendly+hostile → NPC 与玩家都结算）----
+      //  ★SW-BJ93 债1：Damage_PVE/PVP（:12523-12525）在 CanDealDamage 门内 →
+      //  宽限期不结算（出生 8 拍 PVE/EVP 全免,含 BJ88 债2 的 1047 boss 命中即碎支
+      //  =Damage_PVE_Inner :14336 同门内）。
+      for (const raw of game.enemies() as Array<Record<string, unknown>>) {
+        const e = raw as unknown as {
+          id: number; dead?: boolean; friendly?: boolean; immortal?: boolean; dontTakeDamage?: boolean;
+          vanillaId?: number | null; boss?: boolean; def?: { boss?: boolean };
+          x: number; y: number; w: number; h: number; cx: number; cy: number;
+          hurt?: (dmg: number, kbx: number, kby: number, game: unknown) => boolean | void;
+        };
+        if (!e || e.dead || e.friendly || e.immortal || e.dontTakeDamage) continue;
+        if ((this.immunities.get(e.id) ?? 0) > 0) continue;
+        if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+        this.immunities.set(e.id, 10);
+        const dir = e.cx >= this.cx ? 1 : -1;
+        e.hurt?.(this.dmg, dir * KB_X, 0, game);
+        // ★SW-BJ88 债2（2026-09-15）：1047 命中 TreatedAsABossForRainbowBoulders →
+        //  Kill()（Damage_PVE_Inner :14336-14340 直译;1458 :14337 同）。原版位序=
+        //  StrikeNPC :13702 之后 → boss 先吃到本拍伤害再自爆;`keepIterating = false`
+        //  → break 不再遍历后续敌怪;Damage() 内 PVE→EVP 无 active 重入闸 → 不加
+        //  dead 早退=字面 1:1（且 1047 friendly 非 hostile,EVP 恒不适用 :14848）。
+        if (this.projId === 1047
+          && treatedAsABossForRainbowBoulders(e.vanillaId,
+            e.boss === true || e.def?.boss === true)) {
+          this.rbKill(game);
+          break;
+        }
       }
-    }
+      const p = game.player as { dead: boolean; iframes: number; x: number; y: number; w: number; h: number };
+      // ★SW-RB20a F4（2026-09-15）：friendly 弹对玩家伤害面豁免——Damage_EVP 门
+      //  （Projectile.cs:14848 `if (!hostile || Main.myPlayer >= 255 || damage <= 0 ||
+      //  SkipDamage_EVP[type]) return;`;1458 :14849 逐字同）=【非 hostile 弹恒不伤玩家】。
+      //  家族 SetDefaults 逐值：1047 friendly=true ∧ 无 hostile 行（P.cs:9920-9929,
+      //  ignoreWater @:9928）→ 原版彩虹巨石撞玩家【零结算】;余型（99/1002/1013/1014/
+      //  1048/1053/1054/1055/1057）friendly+hostile 双旗（SetDefaults 逐站核对,
+      //  vanilla-projectiles.json hostile 列同源=recon 双闸门辖域）→ EVP 照适用。
+      //  hostile 取 projectileData（json 列缺省=undefined → falsy → 豁免）,门语义与
+      //  原版 `!hostile` 逐字同构。PVP 半边（hostile 弹打 PVP 队）不适用本仓单地面。
+      //  ★SW-BJ93 债4①（2026-09-16）：SkipDamage_EVP 豁免集补门（:14848 第 4 因子;
+      //  本域活消费=1002 TNTBarrel,108/164 无活体弹实体见集注）——旧仓 1002 hostile
+      //  门照伤接触=RB21 R3 双向偏差之正向;豁免后 1002 玩家伤害面唯一=Kill 自伤
+      //  （rbSelfHurtPlayers,见 rbKill 注）。
+      if (projectileData(this.projId)?.hostile
+        && !SKIP_DAMAGE_EVP.has(this.projId)
+        && !p.dead && p.iframes <= 0 && !(this.immunities.get(-1) ?? 0)) {
+        if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
+          this.immunities.set(-1, 10);
+          // ★SW-BI1 2026-09-06（用户崩溃报告定谳）：不传 this 作 attacker——attacker 槽是
+          //  Enemy 受击反击面（荆棘/仙人掌套/日曜爆闪 → attacker.hurt(...)），弹体无 hurt
+          //  方法，把滚石自身送进反击槽 → `k.hurt is not a function` → 帧循环守卫停机
+          //  （沙漠滚仙人掌球实报，2026-09-06 报告 SW-BI1）。与全弹族调用约定对齐
+          //  （FallingBlock:275/MeteorChunk:126/Dart 系/bossAI_* 均不传 attacker）：
+          //  原版弹侧命中无 NPC 可反（PlayerDeathReason.ByProjectile），本无攻击者槽语义。
+          game.damagePlayer(this.dmg, this.cx, this.cy);
+        }
+      }
+    }   // ★SW-BJ93 债1：Damage_CanDealDamage 门收括号（CutTiles+PVE+EVP 四面全在内）
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -1117,9 +1268,163 @@ export class RollingBoulder extends Entity {
    *  1013 静止杀·20 弹上限全走 Kill → type==1047 爆段）。★P.cs:14336
    *  `type==1047 && targetNPC.TreatedAsABossForRainbowBoulders → Kill()`（命中
    *  boss 即碎）已由 SW-BJ88 债2 接线（2026-09-15,敌怪伤害环内）。 */
+  /** ★SW-BJ93 债1（2026-09-16）：Damage_CanDealDamage 本域适用支（P.cs:12461 全函数,
+   *  尾支 :12491 直译;1458 :12491 逐字同,byte-diff 全等 2026-09-16）——aiStyle25 ∧
+   *  type∉{1021,1047,1005,1014} ∧ localAI[2]<=7 → false（出生 1..7 拍四面全免,
+   *  第 8 拍首伤;localAI[2]=AI_025 头 :26360 出生计数,AI 先++/结算后读=Update 序）。
+   *  全函数其余支（aiStyle10 localAI1==-1 / 85·1106 localAI0>=54 / 1091·1122
+   *  localAI0<=0 / projPet 大表）对本家族逐条核空（99/727/1013/1014/1021/1047/1048/
+   *  1053/1054/1055/1057/1002 无一命中）=仅尾支适用（ProjCutTiles「调用方自证」
+   *  同款口径）;1002=aiStyle16（SetDefaults :9531）不进 aiStyle25 支=不受门
+   *  （本仓钟也对其停计）。PVP 面本仓单机不建模;pet 大表全 miss（家族非宠）。 */
+  private rbDamageCanDeal(): boolean {
+    if (this.projId !== 1002
+      && this.projId !== 1021 && this.projId !== 1047
+      && this.projId !== 1005 && this.projId !== 1014
+      && this.localAI2 <= 7) return false;             // :12491（字面序:1021→1047→1005→1014）
+    return true;
+  }
+
   private rbKill(game: GameHooks): void {
     this.dead = true;
-    if (this.projId === 1047) this.rbKillRainbowExplosion(game);
+    if (this.projId === 1047) { this.rbKillRainbowExplosion(game); return; }
+    // ★SW-BJ93 债2（2026-09-16）：家族死亡尘/声面接通（BJ92 登记债——旧仓家族
+    //  Kill 面整缺,本行前 rbKill 仅 1047 爆段）。
+    this.rbKillFamilyFace(game);
+    // ★SW-BJ93 债4②（2026-09-16）：1002 aiStyle16 Kill 支（P.cs:71766-71795,
+    //  SelfHurtPlayers 调用 :71790）——vanilla 1002 玩家伤害唯一口;族表外,
+    //  与家族尘面互斥（类型集不相交,序无歧义）。
+    if (this.projId === 1002) this.rbSelfHurtPlayers(game);
+  }
+
+  /** ★SW-BJ93 债2（2026-09-16）：Kill() 家族死亡尘/声面（P.cs:76355-76500 直译;
+   *  1458 :76356-76501 同域逐字,byte-diff 全等 2026-09-16）——BJ92 登记债：
+   *  「本仓 rbKill 仅 1047 有爆段=家族 Kill 面整缺」。声名轨映射 vanillaSoundName
+   *  （vanillaNpcs.ts:267 NPCHit29→NPC_Hit_29/NPCDeath6→NPC_Killed_6）;dig=
+   *  SoundEngine.PlaySound(0) 缺省支（AshBallProj:207/Arrow:3125 同款通道）。 */
+  private rbKillFamilyFace(game: GameHooks): void {
+    if (!RB_KILL_FAMILY.has(this.projId)) return;
+    // :76356-76359 NetMessage.SendData(27,…,whoAmI)（owner==myPlayer ∧ netMode!=0）
+    //  ——联机弹状态同步;单机 no-op（rbKillRainbowExplosion 同款不广播,登记）。
+    // :76361-76369 num623 尘型 switch 直译（缺省 _ => 1）
+    const num623 = this.projId === 1013 ? 243
+      : this.projId === 727 ? 40
+      : this.projId === 1014 ? 12
+      : this.projId === 1021 ? 323
+      : this.projId === 1048 ? 322
+      : 1;
+    // :76370-76389 声面——(int)position.X/Y = Kill 拍弹盒左上截断
+    const px = Math.trunc(this.x), py = Math.trunc(this.y);
+    if (this.projId === 1048) game.playSfxWav?.('Item_16', 1, px, py);        // SoundID.Item16
+    else if (this.projId === 1053) game.playSfxFile?.('Item_14', 1, px, py);
+    else if (this.projId === 1054) game.playSfxFile?.('NPC_Hit_29', 1, px, py);
+    else if (this.projId === 1055) game.playSfxFile?.('NPC_Killed_6', 1, px, py);
+    else game.playSfx?.('dig', 1, px, py);                                    // PlaySound(0)=dig
+    if (this.projId === 1053) {
+      // :76390-76446 专属爆面——盒 31→64 居中（position+=15/width=64/position-=32
+      //  净效=(x-17,y-17,64,64),尾段还原;本仓算术化非变异=后续语句读原盒同构）。
+      const bx = this.x - 17, by = this.y - 17;
+      for (let i = 0; i < 25; i++) {                                          // :76399-76403
+        const d = game.spawnDust?.(bx, by, 64, 64, 31, 0, 0, 100, null, 2);
+        if (d) { d.vx *= 1.4; d.vy *= 1.4; }
+      }
+      for (let i = 0; i < 40; i++) {                                          // :76405-76415
+        const d1 = game.spawnDust?.(bx, by, 64, 64, 6, 0, 0, 100, null, 3);
+        if (d1) { d1.noGravity = true; d1.vx *= 5; d1.vy *= 5; }
+        const d2 = game.spawnDust?.(bx, by, 64, 64, 6, 0, 0, 100, null, 2);
+        if (d2) { d2.vx *= 3; d2.vy *= 3; }
+      }
+      for (let i = 0; i < 4; i++) {                                           // :76417-76435
+        // Gore.NewGore(展开盒心−(24,24), default, Next(61,64)) = (x-9,y-9);scale1.5;
+        // velocity 逐件 ±1.5 对角四向（原文四连写 vel.X±=1.5/vel.Y±=1.5）。
+        const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3), this.x - 9, this.y - 9, 0, 0, 1.5);
+        if (g) {
+          g.vx += i % 2 === 0 ? 1.5 : -1.5;
+          g.vy += i < 2 ? 1.5 : -1.5;
+        }
+      }
+    } else if (this.projId === 1054) {
+      for (let i = 0; i < 20; i++) {                                          // :76447-76452
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 30, 0, -1);
+      }
+    } else if (this.projId === 1055) {
+      for (let i = 0; i < 50; i++) {                                          // :76453-76466
+        const d = game.spawnDust?.(this.x + 4, this.y + 4, this.w - 8, this.h - 8, 192,
+          this.vx * 0.5, this.vy * 0.5, 100, { r: 100, g: 100, b: 100, a: 100 });
+        if (d) { d.scale *= 1.5; d.vx *= 2; d.vy *= 2; d.noGravity = true; }
+      }
+    } else if (this.projId !== 1057) {
+      // :76467-76478 缺省支——尘 num623×30、半数 scale×1.4（Next(2)==0）。:76476
+      //  `velocity *= 1.9f` 在环内=弹体速度死写（Kill 后 velocity 无观察面）,
+      //  1:1 不移植（登记,防后车当漏）。
+      for (let i = 0; i < 30; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, num623);
+        if (d && Math.floor(Math.random() * 2) === 0) d.scale *= 1.4;
+      }
+    }
+    // :76479-76487 掉落（owner==myPlayer 门单机恒真;Item.NewItem(EntitySource_Loot,
+    //  Center, …)=Center 出膛）——1057→5523 Friendly Boulder（BoulderThatSpawnsPet
+    //  专属）/ 1014→29 Life Crystal（LifeCrystalBoulder 专属）。
+    if (this.projId === 1057) {
+      game.spawnDrop?.(this.cx, this.cy, VANILLA_ITEM_KEY_BY_ID[5523] ?? 'vi_5523_BoulderPet', 1);
+    }
+    if (this.projId === 1014) {
+      game.spawnDrop?.(this.cx, this.cy, VANILLA_ITEM_KEY_BY_ID[29] ?? 'vi_29_LifeCrystal', 1);
+    }
+    // :76488-76490 netMode!=1 支——1048→Kill_DirtAndFluidProjectiles_…(pt,2f,
+    //  SpreadPoopPyramid)（便便金字塔置地,DelegateMethods.cs:469）/ 1053→
+    //  LavaBoulderExplosion()（:71647,半径 4 CanHitLine 置岩浆）=地形修改面,
+    //  本刀未移植=邻接债（BJ92 移交件口径=尘/声面;登记未动）。
+  }
+
+  /** ★SW-BJ93 债4②（2026-09-16）：1002 TNTBarrel aiStyle16 Kill 支 SelfHurtPlayers
+   *  （P.cs:71766-71795 调用侧 :71790;本体 :15104-15152 直译;1458 同域 :71767-71796/
+   *  :71791/:15105,对拍零差）——RB21 R3 双向偏差之反向补面：vanilla 1002 玩家伤害
+   *  唯一口（EVP 被 SkipDamage_EVP 集封死,见债4①）。
+   *  调用侧门 :71785-71789：flag3=ai[0]!=1000（WorldGen :49178 出生 ai[0]=0 → 真）;
+   *  flag4=friendly(:9531 ✓) ∧ !npcProj(✓) ∧ !RocketsSkipDamageForPlayers[1002]
+   *  （ProjectileID.cs:189 集 16 元素无 1002）;flag5=owner==myPlayer ∨ owner==255 ∨
+   *  getGoodWorld（单机 owner=本地主 → 真）。Kill 序=SelfHurt 先于 Damage()（:71790
+   *  → :71792;本仓 1002 无 Kill 时 Damage() 再结算面——PVE 已在 fixedUpdate 常规环,
+   *  Kill 拍重复结算面=aiStyle16 建模余波,登记未动）。 */
+  private rbSelfHurtPlayers(game: GameHooks): void {
+    const p = game.player as { dead: boolean; iframes: number; x: number; y: number;
+      w: number; h: number; cx: number; cy: number; luck?: number;
+      equipStats?: { deadMansSweater?: boolean } } | undefined;
+    // :15106-15108 门：!active ∨ dead ∨ immune ∨ (ownerHitCheck ∧ !CanHitWithMelee)
+    //  ∨ !Colliding(Hitbox, player.Hitbox) → return。ownerHitCheck=1002 无行（缺省
+    //  false）;immune ⇔ iframes>0（MountCombat 统一时钟桥口径 :367）;
+    //  Colliding=缺省矩形语义（Projectile.Colliding 无 1002 特支）——盒取 vanilla
+    //  SetDefaults 260×260（:9526-9527,json width/height 承载;本类建模盒 31×31 系
+    //  aiStyle16→25 建模偏差面,结算面按原版弹盒）。
+    const hd = projectileData(1002);
+    const hw = hd?.width ?? this.w, hh = hd?.height ?? this.h;
+    if (!p || p.dead || p.iframes > 0) return;
+    if (!(this.x < p.x + p.w && this.x + hw > p.x && this.y < p.y + p.h && this.y + hh > p.y)) return;
+    // :15110 direction：玩家心在弹心【左】→ −1（推离弹）,右/等位 → +1（原文三元 !…）
+    //  = Hurt 第 3 参（击退向）——damagePlayer 内部 sign(p.cx−srcX)||1 同式派生
+    //  （srcX=弹心 cx）,不再显式携带（Player.center≥proj.center ⇔ sign≥0 → +1 同值域）。
+    // :15112-15116 value=damage（FixedSelfDamageForPlayers :193 无 1002 行 → 自然伤;
+    //  出生表 400=WorldGen :49178 NewProjectile 字面,BoulderMech 表同值）。
+    // :15118 DV ±15% 单源掷,luck 取负（SW-T1 单源;Game.ts bit7 面 :4231 同式）。
+    let num2 = damageVarRoll(this.dmg, -(p.luck ?? 0));
+    // :15119-15122 Dead Man's Sweater 分支——trap(:9539 ✓) ∧ deadMansSweater（胸甲
+    //  vi_5007,Player.equipStats 承载）→ ×0.5 截断【再】min 300（顺序钉死）。
+    //  Game.selfHurtSweaterCap 同式纯函数;static 在 Game 类内,本文件 import Game 成
+    //  环（Game.ts:167 → RollingBoulder）,就地逐式直译+双锚钉死（变异=测试红）。
+    if (p.equipStats?.deadMansSweater) {
+      num2 = Math.min(Math.trunc(num2 * 0.5), 300);
+    }
+    // :15124 flag=!hostile ∧ type!=949 → 1002 hostile=true → false → playerIndex=−1
+    //  （PlayerDeathReason.ByProjectile(−1, whoAmI)）;pvp=false 同值（Game.
+    //  SELF_HURT_NON_PVP_PROJS 表内成员）。:15129 IsDamageDodgeable → 1002 不在
+    //  871-874/919/923-924 定值伤清单 → dodgeable=true。
+    //  :15131 Hurt(…) —— damagePlayer 统一漏斗（pvp=false → 尾通用 msg117 通道）。
+    //  死因归因面：damagePlayer(attacker=undefined) 不投影射名 lastDamageCause
+    //  （vanilla = ByProjectile 'TNT Barrel'）=弹域既有约定缺口,登记未动。
+    game.damagePlayer(num2, this.cx, this.cy);
+    // :15133 StatusPlayer（Hurt>0 ∧ !dead）——StatusPlayer 全表无 1002 支 = no-op;
+    //  :15135-15140 trapDebuffSource 本仓无承载位（proj1457.ts:1526 同判例）。
   }
 
   /** D2 Kill 彩虹爆（P.cs:72354-72427 直译;1458 :72355 同域逐字）：沿 oldPos 环

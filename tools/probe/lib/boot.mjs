@@ -128,15 +128,37 @@ export async function dismissWelcome(page) {
 }
 
 /**
+ * 从 URL 提取查询串(?a=1&b=2),恒剥 t=(gotoApp 每次自补新鲜 t= 击穿参数,旧 t
+ * 留着会叠成 &t=…&t=…),另剥调用方 extraDrops。about:blank/解析失败 = ''。
+ * ★SW-BJ95(2026-09-16,IIII236 框架域):bootstrap 内部三次 gotoApp 原用裸 origin,
+ *   会把调用方预导航带来的查询参数(?swperf=0/?slopewave=1 等 perfFlags)整批洗掉
+ *   ——flags 读 location.search,洗掉 = flag 静默失明(实报 _bj78 探针被迫
+ *   「先 boot 再 location.href=带参URL 重等桥」绕行)。修 = 入口快照当前查询串
+ *   统一透传;既有调用方(openPage 起步=about:blank/裸 origin)快照为空 = 零变化。
+ */
+export function carryQuery(url, ...extraDrops) {
+  try {
+    const q = new URL(url, 'http://placeholder.invalid').searchParams;
+    q.delete('t');
+    for (const k of extraDrops) q.delete(k);
+    const s = q.toString();
+    return s ? `?${s}` : '';
+  } catch { return ''; }
+}
+
+/**
  * 引导全程:导航 → 清存储 → reload → 等桥 → 预置 ack。
+ * ★SW-BJ95:入口快照 page.url() 的查询串(剥 t=)并在全部内部导航透传——
+ *   带参页面经 bootstrap 不再洗参数;keepQuery:false = 旧行为逃生门。
  * 返回 { ok, cleaned, errors }。失败方调用方自行 exit(1)。
  */
-export async function bootstrap(page, origin, { clean = true, welcomeAck = true, timeout = 180_000 } = {}) {
-  if (!(await gotoApp(page, origin))) return { ok: false, why: 'goto' };
+export async function bootstrap(page, origin, { clean = true, welcomeAck = true, timeout = 180_000, keepQuery = true } = {}) {
+  const carried = keepQuery ? carryQuery(page.url?.() ?? '') : '';
+  if (!(await gotoApp(page, origin, { extraQuery: carried }))) return { ok: false, why: 'goto' };
   let cleaned = null;
   if (clean) {
     cleaned = await cleanStorage(page, { welcomeAck }).catch(() => null);
-    if (!(await gotoApp(page, origin, { tries: 40 }))) return { ok: false, why: 'reload' };
+    if (!(await gotoApp(page, origin, { tries: 40, extraQuery: carried }))) return { ok: false, why: 'reload' };
   }
   if (!(await waitForBridge(page, { timeout }))) return { ok: false, why: 'bridge-timeout' };
   if (welcomeAck) await ackWelcome(page, true);

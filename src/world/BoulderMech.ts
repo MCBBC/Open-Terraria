@@ -1,6 +1,6 @@
 // WorldGen.Check2x2 巨石族支撑完整性校验（Terraria/WorldGen.cs:48811-49232）移植。
 // 触发链：邻格变化（KillTile→TileFrameImportant）对 2×2 多格物调 Check2x2；
-//   巨石族(Sets.Boulders:195={138,484,664,665,711,712,713,714,715,716} ∪ 654 柱仙人掌球)
+//   巨石族(Sets.Boulders:195={138,484,664,665,711,712,713,714,715,716} ∪ 654 TNTBarrel)
 //   完整性失败时【不落物】——转滚石弹（cs:49171-49235 每型一张 NewProjectile 表）。
 // 判定要点（cs:48968-48984 verbatim）：
 //   flag = 四格任一缺失/类型不符/帧不符；
@@ -26,7 +26,11 @@ export interface BoulderConvertRow { proj: number; dmg: number }
 export const BOULDER_CONVERT_TABLE: Readonly<Record<number, BoulderConvertRow>> = {
   138: { proj: 99, dmg: 70 },     // Boulder
   484: { proj: 727, dmg: 35 },    // CactusBall(仙人掌球)
-  654: { proj: 1002, dmg: 400 },  // 大石柱仙人掌球（偏移 num2*16+8 / num6*16+8）
+  654: { proj: 1002, dmg: 400 },  // TNTBarrel（TNT 炸药桶;TileID.cs:1745=654 弹 1002——
+                                  //  ★SW-BJ93 债4③ 勘误：旧注「大石柱仙人掌球」名实不符
+                                  //  （仙人掌球=484 RollingCactus→727）。出生=WorldGen.cs:49178
+                                  //  NewProjectile(…,1002,400,10f,myPlayer)：dmg 400/kb 10、
+                                  //  偏移 num2*16+8 / num6*16+8）
   664: { proj: 1013, dmg: 70 },
   665: { proj: 1014, dmg: 70 },
   711: { proj: 1047, dmg: 100 },

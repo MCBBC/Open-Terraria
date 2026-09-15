@@ -3,6 +3,16 @@ import { TILE, GRAVITY } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import type { World } from '../world/World';
 
+// ★BJ94 D2（2026-09-16 渲染性能域分配普查）：applyStepUp 每调重建的【内容恒定】Set
+// （scripts/_bj94-set-census.mjs 构造器计数子类法实锤：moveAndCollide 逐实体调用 =
+//   每帧 ≥1 次——TownNPC 恒 1/帧+敌群 AI 走 physics 路径再叠加；字面量内容、
+//   仅 .has 只读消费、引用不逃逸）→ 模块级单例提为纯常量（行为零差）。
+// ★不挂 ?swperf 闸的判据：本提升属字面量外提级零语义（无任何行为面可回退），
+//   而挂闸需 physics→render 的 perfFlags 交叉 import（本文件现有依赖仅
+//   core/data/world）——为不新开层间边而保持无闸；与 Game.ts 挂闸三表判据分列。
+/** IgnoredByNpcStepUp（TileID.cs:209：14 篝火桌?/469 Tables2/18 工作台/16 铁砧/134 秘银砧——NPC 不踏） */
+export const NPC_STEPUP_IGNORE = new Set([14, 469, 18, 16, 134]);
+
 export interface Body {
   x: number; y: number;       // 左上角（px）
   w: number; h: number;
@@ -141,8 +151,7 @@ function applyStepUp(b: Body, world: World, holds: boolean, npcMode: boolean): v
   //  在 isPlatform（平台行为族含 239）基础上排除
   const platAt = (x: number, y: number): boolean => st.inBounds(x, y) && st.isPlatform(x, y)
     && TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet !== 239;
-  // IgnoredByNpcStepUp（TileID.cs:209：14 篝火桌?/469 Tables2/18 工作台/16 铁砧/134 秘银砧——NPC 不踏）
-  const NPC_STEPUP_IGNORE = new Set([14, 469, 18, 16, 134]);
+  // IgnoredByNpcStepUp 集已提为模块级 NPC_STEPUP_IGNORE（★BJ94 D2——每调 1 次构造消除）
   const sheetAt = (x: number, y: number): number => {
     const d = st.inBounds(x, y) ? TILE_DEFS[st.type[st.idx(x, y)]] : undefined;
     return (d as unknown as { vanilla?: { sheet?: number } })?.vanilla?.sheet ?? -1;

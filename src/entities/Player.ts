@@ -4308,13 +4308,23 @@ export class Player extends Entity {
     //  wetNow（num86 居中探针,Player.cs:27938）——旧桶基面混入全盒 LavaCollision/
     //  窄化 inWater=BJ89 定谳的幻影姿态家族（探针干+全盒岩浆擦过时原版 num86 假
     //  → 不洗,旧桶基面真 → 幻影洗）;旧注 :27426 锚系误标（该处为翼帧代码）。
-    //  冷水（专家雪原）：wet 且非岩浆/蜂蜜 → Chilled(46) 150t（1458 Player.cs:28209
-    // `expert && ZoneSnow && wet && !lavaWet && !honeyWet && !arcticDivingGear &&
-    // environmentBuffImmunityTimer == 0`）；arcticDivingGear（1861 极地潜水装备）免疫。
+    //  冷水（专家雪原）：wet 且非岩浆/蜂蜜 → Chilled(46) 150t（1457 Player.cs:28211 /
+    // 1458 :28209 逐字同,2026-09-16 对拍）`expert && ZoneSnow && wet && !lavaWet &&
+    // !honeyWet && !arcticDivingGear && environmentBuffImmunityTimer == 0`）；
+    // arcticDivingGear（1861 极地潜水装备）免疫。
+    // ★SW-BJ93 债5（2026-09-16）定谳=同族幻影姿态 → 落刀：原版探针基面=湿粘滞位
+    //  `wet`（读点 :28211 在 num86 刷新 :28060/:28073 之后≡本拍 wet；RB20a F6 同族
+    //  判例——湿旗由居中探针驱动,非盒位）+ 当拍 lavaWet(:27883)/honeyWet(:27957)。
+    //  旧仓用 inWater&&!inLava&&!inHoney 桶位=inWater 全盒 WetCollision 窄化位+
+    //  inLava 全盒 LavaCollision（BJ89 定谳的幻影姿态家族：探针干+盒缘擦水/擦浆时
+    //  原版 wet 假而桶位真 → 幻影冻结）→ 改 wetSticky（≡vanilla wet,本仓调用位在
+    //  湿流程后=后值同构）/splashLavaWet/splashHoneyWet（粘滞镜像=当拍 flag25/
+    //  honey 旗;:28164 !wet 清偿两镜像在湿流程内已同构落）。
     // ★终零波批（2026-09-01）：environmentBuffImmunityTimer 实装（Teleport :37701
     // 置 4/递减 :24778）——旧注"十字盾族第 6 门未实装恒 0"系门源误标（该 timer 与
     // 十字盾无关,是传送后的环境 buff 免疫窗;仓内写位=shimmerUnstuck 微光脱困传送）
-    if (world.isExpert && game.scene?.zoneSnow && this.inWater && !this.inLava && !this.inHoney
+    if (world.isExpert && game.scene?.zoneSnow && this.wetSticky && !this.splashLavaWet
+      && !this.splashHoneyWet
       && !eqM.arcticDivingGear && this.environmentBuffImmunityTimer === 0) {
       this.buffs.apply(BuffType.Chilled, 2.5); // AddBuff(46,150)=2.5s max 合并 = 浸着恒挂
     }

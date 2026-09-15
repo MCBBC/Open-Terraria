@@ -327,6 +327,21 @@ export function mountAssetBadge(): void {
   };
   update(s);
   badgeUnsub = onAssetProgress(update);
+  // ★轮询兜底(2026-09-09):update 靠 emit 推送——挂载晚于最后一次 emit(骨架换绑/
+  //  事件在订阅前已发)时 done 相位永远收不到=badge 永久卡「资源加载中」(用户实报
+  //  658s 不消失)。每 2s 实测 assetCacheState(),done 即走同一淡出路径
+  const poll = setInterval(() => {
+    if (!badgeEl) { clearInterval(poll); return; }
+    const st = assetCacheState();
+    if (!st.enabled) return;
+    if (st.phase === 'done' && !(st.failed > 0)) {
+      clearInterval(poll);
+      const fake = { ...st };
+      update(fake);
+    }
+  }, 2000);
+  const prevUnsub = badgeUnsub;
+  badgeUnsub = () => { clearInterval(poll); prevUnsub?.(); };
 }
 
 export function unmountAssetBadge(): void {

@@ -13972,7 +13972,13 @@ export class Enemy extends Entity {
       // （F5 日志 t=8378：仅段 979/vid88 一条 death+段位钱币，头 961 无死亡无 575）。
       // 修复=段 hp≤0 且头仍活 → 头走标准死亡管线（die() 清 iframes 后 hurt 全管线，
       // 掉落/事件/级联清链全在头）；段自身不做任何死亡结算（vanilla 同款早退）。
-      if (this.realLifeHost && !this.realLifeHost.dead) {
+      // ★RB30b-F1（2026-09-16 P0 停机定谳）：自指豁免——原版首行
+      // `realLife>=0 && realLife!=whoAmI`（NPC.cs:78846）第二支=whoAmI 比对，头自身
+      // realLife=whoAmI（建链块 :51859-51861 `ai[3]=whoAmI; realLife=whoAmI`，毁灭者
+      // :50208 同式）→ checkDead 对头【不】早退。曾缺此支：头 realLifeHost===this 时
+      // 门判"头活着"→ head.die→hurt→本门→die 无限递归 → RangeError → rAF 熔断整机
+      // 停机（末击落在毁灭者/千足蜈蚣/Mechdusa 头 hitbox 时复现×4）。
+      if (this.realLifeHost && this.realLifeHost !== this && !this.realLifeHost.dead) {
         this.realLifeHost.die(game);
         return false;
       }

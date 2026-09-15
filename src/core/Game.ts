@@ -1,6 +1,7 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { Achievements } from './Achievements';
 import { tileAnim } from '../render/TileAnim';
+import { swPerf } from '../render/perfFlags';   // ★BJ94 D2 fixedUpdate 每帧常量 Set 消除快路径
 import { prewarmTrailTextures } from '../fx/TrailShader';
 import { GrappleProj, GRAPPLE_LATCH } from '../entities/GrappleProj';
 import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
@@ -594,6 +595,17 @@ export function npcHitboxDistance(
 export function particleGravDefault(p: { grav?: number; ax?: number; ay?: number }): number {
   return p.grav ?? (p.ax != null || p.ay != null ? 0 : 0.05);
 }
+
+// ---- ★BJ94 D2（2026-09-16 渲染性能域分配普查）：fixedUpdate 每帧重建的【内容恒定】
+// Set 三表（scripts/_bj94-set-census.mjs 构造器计数子类法实锤：每帧各 1 次构造；
+// 字面量内容、仅 .has 只读消费、引用不逃逸）→ 模块级单例；swPerf 快路径消费，
+// flag 关 = 调用点原地 new（旧行为逐位不变）。
+/** scope 配饰（Player.cs:14356-14360 佩戴判定） */
+export const BJ94_SCOPE_ACC = new Set([1300, 1858, 4005]);
+/** scope 可用弹药族（useAmmo ∈ {97,1783,1836,283,780}） */
+export const BJ94_AMMO_SCOPE = new Set([97, 1783, 1836, 283, 780]);
+/** 水炬（ItemID.Sets.WaterTorches = 523/1333/4384，ItemID.cs:1194） */
+export const BJ94_WATER_TORCH_ITEMS = new Set([523, 1333, 4384]);
 
 /** ★GA4 弹幕 crit 掷点上下文编码（PvP 弹快照 aux 高位段）。
  *  ★ε#3（终局扫尾批）位语义升级——携【持械 item.crit 含词缀折入】的完整终值：
@@ -5721,8 +5733,16 @@ export class Game implements GameHooks {
     };
     // 探针口（puppeteer / 控制台）：__swRec.toggle()/.buffer/.export()
     (window as unknown as { __swRec?: BehaviorRecorder }).__swRec = this.recorder;
-    // 音效录制探针口：__swAudio.sfx/.bgm 环只读视图 + .tail(n,n)（控制台手取）
-    (window as unknown as { __swAudio?: AudioRecorder }).__swAudio = this.audioRec;
+    // 音效录制探针口：__swAudioRec.sfx/.bgm 环只读视图 + .tail(n,n)（控制台手取）
+    // ★SW-BJ95（2026-09-16）由 __swAudio 改名定谳：与 mainFlow.ts AudioSystem 探针桥
+    // 同名互相覆写——进世界后本行顶掉 AudioSystem，消费面实测三断：
+    // ① DebugReport.ts musicTrace 读 __swAudio.trace 恒 null（AudioRecorder 无 trace
+    //    字段——BJ74 建的 bgm 诊断环在 F5 报告域内失明）；② _focus-audio-probe 读
+    //    .ac 断链 ③ _biomeaudio 读 .curMusic 断链。而 tools/probe/lib/record.mjs
+    //    （tail/toggle/export）则【依赖】被覆写才能拿到录制器——双向互踩。
+    // 修 = 录制器独立名 __swAudioRec（record.mjs 同步改读）；__swAudio 恒 = AudioSystem
+    //    （mainFlow.ts，菜单期即挂）。原版无此桥（自创调试面），无对拍面。
+    (window as unknown as { __swAudioRec?: AudioRecorder }).__swAudioRec = this.audioRec;
     // 帧捕获探针口：__swTileCap.sheets/.anoms/.snaps/.exportAndStop()（控制台手取）
     (window as unknown as { __swTileCap?: typeof tileFrameCapture }).__swTileCap = tileFrameCapture;
     // ---- 键位动作边沿派发（M5：全部经 core/Keybinds.ts 绑定表读用户自定义；
@@ -8430,7 +8450,12 @@ export class Game implements GameHooks {
     }
     // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用；同款按下边沿门——
     //      annotateMode 下 updateUse 不消费点击，电平按住扫过新格会误标） ----
-    if (this.annotateMode && inp.mouseDown && !this._prevMouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
+    //      ★SW-BJ95（2026-09-16）补 inpOverDomUi 门（mouseInterface 等价面）：此前
+    //      标注沿只可能来自 canvas 按压（槽位/面板 mousedown 不入 Input），BJ92 拖拽
+    //      拾取沿补武 mouseDown 后，「槽位拖拽拾取」也会生成带边沿——悬停面板上落
+    //      标注 = 面板 tile 坐标误标（本门恢复"标注沿只出自世界按压"不变量，对既有
+    //      世界点击零变化：canvas 按压时 inpOverDomUi 恒 false）。
+    if (this.annotateMode && inp.mouseDown && !this._prevMouseDown && !this._annoLatch && !inp.uiBlocking && !this.inpOverDomUi() && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
       this._annoLatch = true;
       const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
       if (this.fixTexMode) {
@@ -10526,8 +10551,9 @@ export class Game implements GameHooks {
       const hVid = hDef ? (hDef.vid ?? viIdFromKey(hDef.key)) : -1;
       // scope 配饰佩戴判定（Player.cs:14356-14360：饰品在身 + 手持武器 useAmmo
       // ∈ {97 子弹,1783 糖玉米,1836 木桩,283 飞镖,780 溶液}）
-      const SCOPE_ACC = new Set([1300, 1858, 4005]);
-      const AMMO_SCOPE = new Set([97, 1783, 1836, 283, 780]);
+      // ★BJ94 D2（swPerf 快路径）：每帧 2 次构造 → 模块级单例（见 BJ94_SCOPE_ACC 注）
+      const SCOPE_ACC = swPerf ? BJ94_SCOPE_ACC : new Set([1300, 1858, 4005]);
+      const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 283, 780]);
       const hasScopeAcc = player.inv.armor.some((s, i) =>
         i >= 3 && s && SCOPE_ACC.has(ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]!.key) ?? -1));
       const heldAmmo = itemCombat(hVid)?.useAmmo ?? -1;
@@ -10665,7 +10691,8 @@ export class Game implements GameHooks {
     }
     // 水炬三色（ItemID.Sets.WaterTorches = 523/1333/4384，ItemID.cs:1194）：
     // EmitHeldItemLight 的 (Torches && !wet) || WaterTorches——水炬水下也亮
-    const WATER_TORCH_ITEMS = new Set([523, 1333, 4384]);
+    // ★BJ94 D2（swPerf 快路径）：每帧 1 次构造 → 模块级单例（见 BJ94_WATER_TORCH_ITEMS 注）
+    const WATER_TORCH_ITEMS = swPerf ? BJ94_WATER_TORCH_ITEMS : new Set([523, 1333, 4384]);
     const heldVid0 = heldDef ? viIdFromKey(heldDef.key) : -1;
     if (!heldRGB && heldDef && WATER_TORCH_ITEMS.has(heldVid0)) {
       const BIOME_TORCH_ITEM2: Record<number, number> = {
@@ -12571,7 +12598,12 @@ export class Game implements GameHooks {
     //   mouseRight&&mouseRightRelease ⇒ Sound 12+SetMouseNPC(-1,-1)（全屏任意处,
     //   不限于条上——此前右键取消只接在 UI 槽位上）；关包 → :46429（UI 侧 closeInventory）
     if (this.housingMode) {
-      if (inp.mouseDown && !this._prevMouseDown) {
+      // ★SW-BJ95（2026-09-16）查询/分配沿补 inpOverDomUi 门：BJ92 拖拽拾取沿补武
+      // mouseDown 后，住房携带态下拖槽位拾取会在此误发一次面板 tile 坐标的
+      // housingQuery（原版同位消费序 = ItemSlot.Handle 先吃 mouseLeftRelease，
+      // ItemSlot.cs:894/:4210——槽位按压到不了住房查询，本门恢复同效）。既有世界
+      // 点击零变化（canvas 按压时 inpOverDomUi 恒 false）；UI 侧边沿由 :12594+ 照旧吞。
+      if (inp.mouseDown && !this._prevMouseDown && !this.inpOverDomUi()) {
         const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         if (this.housingMode.kind === 'query') {
           this.housingQuery(Math.floor(wx / TILE), Math.floor(wy / TILE));
