@@ -170,3 +170,62 @@ describe('结构锁（变异即红）', () => {
     expect(tickBody).not.toContain('this.renderer.cursorIconCtx');
   });
 });
+
+// ===================== SW-BJ99（2026-09-16）：暂停帧绘制相悬停回填 =====================
+// BJ72 偏差登记清偿——原版绘制相悬停族挂 DrawMouseOver（Main.cs:43595 → 接口层
+// "Vanilla: Mouse Over" :45659-45663 → DrawInterface_39_MouseOver :45902→:45906,每
+// 【绘制】帧重 claim,不受 CanPauseGame :17372/:17493 暂停门控）：本仓该族唯一已实现
+// 面 = HoverOverNPCs NPC 名（:43664→:43820-43832）,claim CPU 曾只在 fixedUpdate
+// （tickCursorIcon 尾）→ 暂停拍 frame 头清零后不回填 =「少显」（BJ72 登记原文）。
+// 修刀 = frame() render 前 `if (this.paused && this.world) this.tickHoverNpcName();`
+// （非暂停帧 fixedUpdate claim 面逐位不动;update 相族箱/手持图标暂停不回填 = 原版
+// 同相;掉落物名/他玩家血名本仓无 claim 面 = 独立功能缺口另行登记）。
+// 变异证红：删 frame() 回填行 → 结构锁红（行缺失/拍位漂移）。
+describe('SW-BJ99 暂停帧绘制相悬停回填（DrawMouseOver 同相）', () => {
+  const src99 = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/core/Game.ts'), 'utf8');
+
+  function frameBody99(): string {
+    const s = src99.indexOf('private frame(now: number) {');
+    const e = src99.indexOf('private scanBoulderFamilyNear', s);
+    expect(s).toBeGreaterThan(0);
+    expect(e).toBeGreaterThan(s);
+    return src99.slice(s, e);
+  }
+
+  it('行为面：暂停拍 清零→回填 → NPC 名重 claim;光标离开则保持清零（先清后 claim 往复）', () => {
+    const g = bj72Game();
+    (g as unknown as { paused: boolean }).paused = true;
+    const p = g.player;
+    // 城镇 NPC 在光标下（camera 桩 = 恒等映射;renderer 无 atlas → npcHoverHit ±8px 回退盒）
+    (g.entities as { npcs: unknown[] }).npcs = [{
+      dead: false, vanillaId: 22, givenName: 'April', hp: 100, maxHp: 100,
+      x: 90, y: 90, w: 20, h: 42,
+    }];
+    (g.input as { mouseX: number }).mouseX = 95;
+    (g.input as { mouseY: number }).mouseY = 95;
+    const drive = g as unknown as { mouseOversClear(): void; tickHoverNpcName(): void };
+    drive.mouseOversClear();          // frame 头（暂停拍照清,BJ72 主修,不回退）
+    expect(p.cursorItemIconText).toBe('');
+    drive.tickHoverNpcName();          // render 前回填（BJ99）
+    expect(p.cursorItemIconText).toBe('April: 100/100');   // :43827-43829 血量行同式
+    // 光标离开 → 下一暂停帧 清零→回填无命中 → 无残留
+    (g.input as { mouseX: number }).mouseX = 900;
+    (g.input as { mouseY: number }).mouseY = 900;
+    drive.mouseOversClear();
+    drive.tickHoverNpcName();
+    expect(p.cursorItemIconText).toBe('');
+  });
+
+  it('结构锁：回填行挂 frame() 暂停门下、refreshCursorIconDrawState 之后 render 之前（变异删行即红）', () => {
+    const f = frameBody99();
+    const iClear = f.indexOf('this.mouseOversClear()');
+    const iRefresh = f.indexOf('this.refreshCursorIconDrawState()');
+    const iReclaim = f.indexOf('if (this.paused && this.world) this.tickHoverNpcName();');
+    const iRender = f.indexOf('this.render()');
+    for (const [n, i] of [['clear', iClear], ['refresh', iRefresh], ['reclaim', iReclaim], ['render', iRender]] as const) {
+      expect(i, n).toBeGreaterThan(0);
+    }
+    expect(iReclaim).toBeGreaterThan(iRefresh);
+    expect(iReclaim).toBeLessThan(iRender);
+  });
+});

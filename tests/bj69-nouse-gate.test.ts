@@ -9,6 +9,13 @@
 //    switch(type)、if(type==N) 条件支、DefaultTo* 辅助族 useStyle 种子（DefaultToFood
 //    条件于 useGulpSound 实参）、
 //    Variant 条件基态口径（FX53：`== EnabledVariant` 恒假/`!= Disabled` 恒真））。
+//    ★RB17b note①（2026-09-16）：提取域从「仅 switch(type) 块」推广为【全方法体
+//    线性执行】——SetDefaults2/3/4 体存在 35 支顶层区间 if（如 :18300 1479-1494、
+//    :18596 1543-1545 漆具、:21236 1977-1986 染发剂 useStyle=9）+1 支补集守卫
+//    （:22289）+ 顶层落穿尾支（:27621 `useStyle = 1;`，2192-2198 蜡烛族真值唯一
+//    来源）,旧 switch-only 提取器全部漏提（231 vid 真值 0 vs 实值 1/9）,因全部被
+//    确定消费支（tile/paintTool/hairDye）接管不入行为断言域而从未爆红=「盲」。
+//    封口三哨兵见「RB17b note① 顶层区间支哨兵」describe。
 //  - 仓内门数据源 = vanilla-itemfunc.useStyle + Game.NO_USE_STYLE_BACKFILL_1457
 //    （fallthrough 组共享体只落组末标签的提取器既有盲区,SW-FX53 族;运行时纠偏
 //    先例=items.ts SHARED_GROUP_PLACE_STYLE_1457）。
@@ -30,7 +37,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
-import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS } from '../src/data/items';
 
 const REPO = join(dirname(__dirname), '..');
 const ITEM_CS = readFileSync(join(REPO, 'Terarria1457', 'Terraria', 'Item.cs'), 'utf8');
@@ -218,34 +225,27 @@ function execCaseBody(vid: number, start: number, end: number, capture: (v: numb
 
 /** per-id useStyle 真值。Item.SetDefaults（Item.cs:48666-48711）为【独占分派】：
  *  IsFood → SetFoodDefaults；否则按 type 区间唯一命中 SetDefaults1(≤1000)/2(≤2001)/
- *  3(≤3000)/4(≤3989)/5(其余)——非顺序多区执行。命中区内 switch(type) 按行序执行,
- *  命中组跑体（嵌套 switch+default 兜底递归）,return 终止该区。 */
+ *  3(≤3000)/4(≤3989)/5(其余)——非顺序多区执行。
+ *  ★RB17b note①（2026-09-16）：区内改【全方法体线性执行】（execCaseBody 直跑
+ *  from+1..to）——不再只走 switch(type) 块：顶层区间 if（35 支,如 :18300/:18596/
+ *  :21236）随条件栈求值执行、顶层落穿尾支（:27621,补集守卫 :22289 假支或其体内
+ *  嵌套守卫不 return 时可达）按顺序执行、return 语义经条件栈门控后终止整区。
+ *  旧 switch-only 版对这些支整块漏提（231 vid 真值被低估为 0,实值 1/9）,
+ *  诸件均被确定消费支接管故行为面无感——真值面由此完备。 */
 function vanillaUseStyle(vid: number): number {
   if (vid <= 0) return 0;
   let v = 0;
   const capture = (nv: number) => { v = nv; };
-  const runRegion = (name: string): boolean => {
+  const runRegionLinear = (name: string): boolean => {
     const [, [from, to]] = REGIONS.find(([n]) => n === name)!;
-    let terminated = false;
-    let i = from;
-    while (i <= to && !terminated) {
-      if (!/^\t*switch \(type\)\s*$/.test(LINES[i])) { i++; continue; }
-      const { cases, bodyEnd } = switchCases(from, to, i);
-      const hit = cases.filter((c) => c.ids.includes(vid));
-      const grp = hit.length ? hit : cases.filter((c) => c.ids.includes(-1));   // default 兜底
-      for (const c of grp) {
-        if (execCaseBody(vid, c.start, c.end, capture)) { terminated = true; break; }
-      }
-      i = bodyEnd + 1;
-    }
-    return terminated;
+    return execCaseBody(vid, from + 1, to, capture);
   };
   // IsFood 面 = SetFoodDefaults 有该 id 显式 case（ItemID.Sets.IsFood 集的运行时等价域）
   const foodR = REGIONS.find(([n]) => n === 'SetFoodDefaults')![1];
-  if (regionHasCase(foodR, vid)) { runRegion('SetFoodDefaults'); return v; }
+  if (regionHasCase(foodR, vid)) { runRegionLinear('SetFoodDefaults'); return v; }
   const name = vid <= 1000 ? 'SetDefaults1' : vid <= 2001 ? 'SetDefaults2'
     : vid <= 3000 ? 'SetDefaults3' : vid <= 3989 ? 'SetDefaults4' : 'SetDefaults5';
-  runRegion(name);
+  runRegionLinear(name);
   return v;
 }
 
@@ -260,6 +260,77 @@ function regionHasCase([from, to]: readonly [number, number], vid: number): bool
   }
   return false;
 }
+
+// ================= RB17b note① 顶层区间支哨兵（2026-09-16） =================
+// 红队定谳：六区体在 switch(type) 之外存在顶层（方法体一级）区间 if 与落穿尾支——
+//  · 区间支 35 支（如 Item.cs:18300 `if (type >= 1479 && type <= 1494) { useStyle = 1;
+//    ...; return; }`、:18596 1543-1545 漆具、:21236 1977-1986 染发剂 useStyle=9）
+//  · 补集守卫 1 支（:22289 `if (type < 2192 || type > 2198)`）+ 顶层落穿尾支
+//    （:27621 `useStyle = 1;`——2192-2198 蜡烛族直落 + 守卫体内嵌套守卫不 return
+//    的落穿（如 2205）共用）
+// 旧 switch-only 提取器对此整块漏提（231 vid 真值 0 vs 实值 1/9）,因全被确定消费支
+// （tile 218 件/paintTool 3 件/hairDye 10 件）接管、不入行为断言域,守卫从未爆红。
+// 哨兵：(B) 支表反解钉死+逐支真值锚+区间∩臂可达 DRIFT 对拍;(C) 词法形态哨兵。
+
+type TopBranch = { region: string; line: number; head: string; lo: number | null; hi: number | null; useStyle: number | null; solvable: boolean };
+
+/** 反解区内顶层（方法体一级,2 tab）`if (type…)` 支：谓词可解出连续区间者记 [lo,hi],
+ *  并捕获支体直属（相对 depth1）首个 useStyle 直赋值（无则 null）。 */
+function topLevelTypeIfs(regionName: string): TopBranch[] {
+  const [, [from, to]] = REGIONS.find(([n]) => n === regionName)!;
+  const out: TopBranch[] = [];
+  let depth = 0;
+  for (let k = from + 1; k <= to; k++) {
+    const opens = (LINES[k].match(/{/g) ?? []).length;
+    const closes = (LINES[k].match(/}/g) ?? []).length;
+    const before = depth;
+    depth += opens - closes;
+    if (before === 1 && /^\t\tif \((.+)\)\s*$/.test(LINES[k])) {
+      const head = LINES[k].trim().replace(/^if\s*\(/, '').replace(/\)\s*$/, '').trim();
+      let lo: number | null = null, hi: number | null = null;
+      let m = head.match(/^type >= (\d+) && type <= (\d+)$/);
+      if (m) { lo = +m[1]; hi = +m[2]; }
+      if (lo === null) { m = head.match(/^type == (\d+)$/); if (m) { lo = +m[1]; hi = +m[1]; } }
+      // 支体 span（头行后的 { 起至配对 }）与支体直属首个 useStyle 直赋
+      let d2 = 0, bodyStart = -1, bodyEnd = -1, useStyle: number | null = null;
+      for (let j = k; j <= to; j++) {
+        d2 += (LINES[j].match(/{/g) ?? []).length - (LINES[j].match(/}/g) ?? []).length;
+        if (bodyStart < 0 && d2 > 0) bodyStart = j + 1;
+        else if (bodyStart >= 0 && d2 === 0) { bodyEnd = j - 1; break; }
+      }
+      if (bodyStart >= 0 && bodyEnd >= bodyStart) {
+        let rel = 0;
+        for (let j = bodyStart; j <= bodyEnd; j++) {
+          const rb = rel;
+          rel += (LINES[j].match(/{/g) ?? []).length - (LINES[j].match(/}/g) ?? []).length;
+          if (rb === 0) {
+            const um = LINES[j].trim().match(/^useStyle = (\d+);$/);
+            if (um) { useStyle = +um[1]; break; }
+          }
+        }
+      }
+      out.push({ region: regionName, line: k + 1, head, lo, hi, useStyle, solvable: lo !== null });
+    }
+  }
+  return out;
+}
+
+const RANGE_TABLE: TopBranch[] = REGIONS.flatMap(([n]) => topLevelTypeIfs(n));
+// 支数钉死（2026-09-16 源态金标）：SetDefaults2=12 / SetDefaults3=15（13 区间+:22289
+// 补集守卫+:27621 前方 2 单点）/ SetDefaults4=9，1·5·SetFoodDefaults=0。
+// 带无条件 useStyle 锚的支=27。Item.cs 刷新致数值漂移即红→重走提取审计,禁无脑改钉值。
+const RANGE_BRANCH_PIN = 36;
+const RANGE_SOLVABLE_PIN = 35;
+const RANGE_ANCHORED_PIN = 27;
+
+/** 漆具支标记集（items.ts PAINT_TOOL_TABLE 注册面：1071/1543 刷、1072/1544 滚、
+ *  1100/1545 刮——Player.cs PlaceThing 分派 :41152/:41236/:41254,updateUse 漆臂
+ *  先于通用门臂接管,其门值无行为义）。 */
+const PAINT_TOOL_VIDS = new Set(
+  Object.entries(VANILLA_ITEM_KEY_BY_ID)
+    .filter(([, k]) => !!ITEM_DEFS[ITEM_BY_KEY[k]]?.paintTool)
+    .map(([v]) => Number(v)),
+);
 
 // ================= ①门数据 ≡ Item.cs 真值（全量逐 id） =================
 
@@ -298,6 +369,10 @@ function consumersOf(vid: number): string[] {
   const meta = (vanillaMeta as { items: Record<string, { createTile?: number | null }> }).items[String(vid)] ?? {};
   const cons: string[] = [];
   if ((f.pick ?? 0) > 0 || (f.axe ?? 0) > 0 || (f.hammer ?? 0) > 0) cons.push('tool');
+  // ★RB17b note①：漆具支标记（updateUse 漆臂 heldDef?.paintTool 先于通用门臂接管,
+  //  其门值无行为义不入臂可达域——1543-1545 曾以「无消费支」误入域,真值勘误后须靠
+  //  本支排除,否则主循环误报误杀面）
+  if (PAINT_TOOL_VIDS.has(vid)) cons.push('paintTool');
   if (meta.createTile != null || f.createTile != null) cons.push('tile');
   if (f.createWall != null) cons.push('wall');
   if (HOOK_ITEMS[vid]) cons.push('hook');
@@ -424,8 +499,9 @@ describe('BJ69 行为面：门静默集左键一帧零副作用 / 门数据>0 �
   });
 
   it('门静默抽样（真值=0 表/凝胶/条 combos 族）：一帧 no-op（RB15a 袋面的推广面）', () => {
-    // ★71/999 等在 1457 系真使用物（func useStyle=1,金币=投掷武器 1.4.5 新制）——
-    //  不入静默集;本组逐件先断真值=0（真值面漂移即在此爆红,不静默错杀）
+    // ★71/999 等在 1457 系真使用物（func useStyle=1;金币 71-74 数据面 Item.cs:2219-2301
+    //  useStyle1+shoot 158/159/160/161,直掷被 IsACoin 门 Player.cs:47510-47513 禁,shoot
+    //  仅作金币枪 905 弹药面）——不入静默集;本组逐件先断真值=0（真值面漂移即在此爆红,不静默错杀）
     for (const vid of [15, 16, 17, 18, 23, 3456]) {
       expect(vanillaUseStyle(vid), `vid ${vid} 真值锚定`).toBe(0);
       expect(heldItemUseStyle(vid), `vid ${vid} 门数据`).toBe(0);
@@ -468,5 +544,87 @@ describe('BJ69 结构锁', () => {
     expect(gameSrc).not.toContain('BOSS_BAG_NO_USE_VIDS');
     // 左键开包入口回潮禁令延续（§五/RB15a 锁面）
     expect(gameSrc).not.toContain('openBossBag');
+  });
+});
+
+// ================= RB17b note① 哨兵：区间支反解对拍 + 漆具支标记 =================
+
+describe('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', () => {
+  // 逐支锚 vid = 支内首个不被更早支区间覆盖的 id（支区间现互斥,首 id 即锚）
+  const anchored: Array<{ vid: number; useStyle: number; branch: TopBranch }> = [];
+  {
+    const covered: Array<[number, number]> = [];
+    for (const b of RANGE_TABLE) {
+      if (b.solvable && b.useStyle !== null && b.lo !== null && b.hi !== null) {
+        for (let v = b.lo; v <= b.hi; v++) {
+          if (!covered.some(([l, h]) => v >= l && v <= h)) { anchored.push({ vid: v, useStyle: b.useStyle, branch: b }); break; }
+        }
+      }
+      if (b.solvable && b.lo !== null && b.hi !== null) covered.push([b.lo, b.hi]);
+    }
+  }
+
+  it('区间表钉死（36 支/可解 35/带锚 27;源刷新漂移即红→重走提取审计）', () => {
+    expect(RANGE_TABLE.length, `顶层支数漂移: ${RANGE_TABLE.map((b) => `${b.region}:${b.line} ${b.head}`).join(' | ')}`).toBe(RANGE_BRANCH_PIN);
+    expect(RANGE_TABLE.filter((b) => b.solvable), '可解区间支数').toHaveLength(RANGE_SOLVABLE_PIN);
+    expect(anchored, '带无条件 useStyle 锚的支数').toHaveLength(RANGE_ANCHORED_PIN);
+    // 补集守卫支在位（Item.cs:22289——其假支与体内落穿共用 :27621 尾支）
+    expect(RANGE_TABLE.some((b) => b.head === 'type < 2192 || type > 2198'), '补集守卫支').toBe(true);
+    // 落穿尾支锚：2192 蜡烛（守卫假支直落）与 2205（守卫真支内嵌套守卫不 return 落穿）
+    // 的 useStyle=1 唯一来源=尾支——旧 switch-only 提取器=0
+    expect(vanillaUseStyle(2192), '尾支锚 2192').toBe(1);
+    expect(vanillaUseStyle(2205), '尾支落穿锚 2205').toBe(1);
+  });
+
+  it('逐支真值锚：27 支每支锚 vid 真值 ≡ 支内无条件 useStyle（提取器退回 switch-only 即红）', () => {
+    for (const a of anchored) {
+      expect(vanillaUseStyle(a.vid), `${a.branch.region}:${a.branch.line} ${a.branch.head} 锚 vid ${a.vid}`).toBe(a.useStyle);
+    }
+  });
+
+  it('区间∩臂可达件 门数据 ≡ 真值（DRIFT=0;实测 34 件活检查——区间支中无确定消费支的 id 逐件对拍,漆具/染发剂/placeable 等消费支件在域外）', () => {
+    let checked = 0;
+    const drift: string[] = [];
+    for (const b of RANGE_TABLE) {
+      if (!b.solvable || b.lo === null || b.hi === null) continue;
+      for (let vid = b.lo; vid <= b.hi; vid++) {
+        if (!reachesGenericArm(vid)) continue;
+        checked++;
+        if (heldItemUseStyle(vid) !== vanillaUseStyle(vid)) drift.push(`${b.region}:${b.line} vid ${vid} 门=${heldItemUseStyle(vid)} 真值=${vanillaUseStyle(vid)}`);
+      }
+    }
+    expect(drift, `区间∩臂可达 DRIFT: ${drift.join(' | ')}`).toEqual([]);
+  });
+
+  it('词法形态哨兵：useStyle 赋值行全为简单直赋式（防三元/表达式形态静默漏提）;switch(type) 书写形态全量被检测正则覆盖', () => {
+    for (const [name, [from, to]] of REGIONS) {
+      for (let k = from; k <= to; k++) {
+        if (/^\t+useStyle/.test(LINES[k])) {
+          expect(LINES[k].trim(), `${name}:${k + 1} 非简单直赋式（提取器只识别 "useStyle = N;"）`).toMatch(/^useStyle = \d+;$/);
+        }
+      }
+    }
+    let allForms = 0, detected = 0;
+    for (const [, [from, to]] of REGIONS) {
+      for (let k = from; k <= to; k++) {
+        if (/switch\s*\(\s*type\s*\)/.test(LINES[k].trim())) allForms++;
+        if (/^\t*switch \(type\)\s*$/.test(LINES[k])) detected++;
+      }
+    }
+    expect(allForms, 'switch(type) 出现次数（区体内）').toBeGreaterThan(100);
+    expect(detected, `switch(type) 书写形态漂移:全 ${allForms} vs 检测正则覆盖 ${detected}`).toBe(allForms);
+  });
+
+  it('paintTool 支标记：6 件注册钉死 + 逐件臂可达域排除 + 漆臂先于门臂（标记的行为前提）', () => {
+    expect([...PAINT_TOOL_VIDS].sort((a, b) => a - b), '漆具注册集（items.ts PAINT_TOOL_TABLE 经 ITEM_DEFS.paintTool 侧）').toEqual([1071, 1072, 1100, 1543, 1544, 1545]);
+    for (const vid of PAINT_TOOL_VIDS) {
+      expect(consumersOf(vid), `vid ${vid} 消费支含 paintTool`).toContain('paintTool');
+      expect(reachesGenericArm(vid), `vid ${vid} 应被漆臂接管（不入通用臂断言域）`).toBe(false);
+    }
+    const paintArm = GAME_SRC.indexOf('heldDef?.paintTool && inp.mouseDown');
+    const gateArm = GAME_SRC.indexOf('heldItemUseStyle(viIdFromKey(heldDef.key) ?? -1) > 0');
+    expect(paintArm, '漆臂在位（Game.ts updateUse）').toBeGreaterThan(0);
+    expect(gateArm, '通用门臂在位').toBeGreaterThan(0);
+    expect(paintArm, '漆臂必须先于通用门臂（后撤/删除即红——届时漆具门值变为行为活值）').toBeLessThan(gateArm);
   });
 });

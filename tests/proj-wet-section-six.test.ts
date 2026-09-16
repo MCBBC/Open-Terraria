@@ -275,16 +275,80 @@ describe('RollingBoulder ★通用湿段（AI_025 家族）', () => {
     const w = mkWorld();
     liquidAt(w, WX0, WX1, WY0, WY1);
     const { g, dust, splash } = makeGame(w);
+    // ★BJ93 债⑤重锚（2026-09-16）：夹具玩家下移 cy=970——playArea=
+    //  CenteredRectangle(最近玩家,MaxWorldViewSize 1920×1200)（P.cs:20309-20315 +
+    //  Main.cs:758）y 域变 [370,1570] 罩住全程落轨 → 原版 1/4 拍越区召回臂
+    //  （:26444-26451）恒不触发,本测只暴露 1/180 无条件臂（:26453-26455）。
+    //  （原夹具 cy=341 → playArea 底缘 941,水带顶 960 在区外——窗口一延伸越区臂
+    //  即以 25%/拍概率引入跃迁分支,判别面被搅浑）
+    const p = (g as unknown as { player: { y: number; cy: number } }).player;
+    p.y = 970 - 21; p.cy = 970;
     const b = new RollingBoulder(34 * TILE, 850, 711);            // sheet 711 → 1047
     (b as { vy: number }).vy = 10;
-    const y0 = b.y;
-    for (let t = 0; t < 6 && !b.dead; t++) b.fixedUpdate(1 / 60, g);
+    // ★同债⑤：窗口 6→14 拍。旧 6 拍总落程 66px、盒心行 ~57.8,恒在水面（行 60）
+    //  上方——四旗/溅花断言对豁免缺失【零判别力】（变异实测:711→138 受段弹整测
+    //  仍绿=账本过时）。延窗后 ~第 9 拍盒心入水,豁免面（四旗/溅花/阻尼/不杀）
+    //  才真正被测到。
+    let jumped = false;
+    for (let t = 0; t < 14 && !b.dead; t++) {
+      const y0 = b.y;
+      b.fixedUpdate(1 / 60, g);
+      if ((b as unknown as { ai1: number }).ai1 > 0) jumped = true;   // 宽限置位=跃迁已发生
+      // 无阻尼逐拍不变式：位移=速度场原值（wet=false → df=1,projWaterDragFactor
+      // wet 前置门）——入水后（豁免面）依旧成立;×0.5 阻尼化即刻爆红。
+      // 跃迁后轨迹被 JumpToPosition 重定向（原版 :26455 域,非本测断言对象）→ 跳过。
+      if (!jumped) expect(b.y - y0).toBeCloseTo(b.vy, 6);
+    }
     expect(b.wet).toBe(false); expect(b.lavaWet).toBe(false);
     expect(b.honeyWet).toBe(false); expect(b.shimmerWet).toBe(false);
-    expect(splash.length).toBe(0); expect(dust.length).toBe(0);
+    expect(splash.length).toBe(0);
+    // ★BJ93 债⑤定谳+重锚（2026-09-16）——旧 `dust.length === 0` ≈3% 翻红=确定性支非噪声：
+    //  1/180 拍【无条件】smart bounce 是原版行为——Projectile.cs:26453
+    //  `if (owner == Main.myPlayer && Main.rand.Next(180) == 0)` → :26455
+    //  RainbowBoulder_PerformSmartBounce()（1458 :26454-26456 逐字同,域 byte-diff
+    //  零差;调用点无任何活性过滤）。跳向目标=RainbowBoulder_GetAreas（:20309-20315）
+    //  → Player.FindClosest（Player.cs:4934-4957;1458 :4934 同体）：距离环
+    //  `active && !dead` 排死,但【全灭回退环只查 active 不排死】→ 夹具唯一玩家
+    //  dead=true 时落回首槽 dead 玩家 → JumpToPlayer(dead)（:20274-20278 `<3000f`
+    //  距离门亦无活性检查）=原版同相;本仓 rbGetAreas「全灭回退首槽」即此回退臂直译。
+    //  每次跃迁 RB4 编排爆（JumpToPosition :20346-20353
+    //  ParticleOrchestrator.RainbowBoulder4,与目标活性无关,敌/宝/玩家三臂同发）
+    //  → orchestraFx.rainbowBoulderFx v4 → spawnDust 14×【型 66,1×1 盒】。
+    //  翻红率 ≈1−(179/180)^14≈7.5%（BJ93 探针 9/300 实证旧 6 拍窗=3.3%）。
+    //  豁免判别面收窄为【除 RB4 跃迁编排尘外零尘】：湿段溅花尘（弹面盒 (w+12)×24、
+    //  型 33/35/152/308,wetSplashStepShared）或任何其他尘源漏入即红;
+    //  Splash 音/四旗/不杀断言原样保留。
+    const rb4Burst = dust.filter((d) => d.type === 66 && d.w === 1 && d.h === 1);
+    expect(dust.length).toBe(rb4Burst.length);
     expect(b.dead).toBe(false);
-    // 无阻尼：全程全速位移（对照 99 用例的 ×0.5）
-    expect(b.y - y0).toBeGreaterThan(6 * 10 * 0.5);
+  });
+
+  it('1047 豁免 × 1/180 smart bounce 跃迁相（RNG 钉 0 强制命中）:RB4 编排尘全容/湿面仍恒闭', () => {
+    // ★BJ93 债⑤配套（2026-09-16）：把上一用例的容跳语义钉成确定性回归面——
+    //  Math.random≡0 → Next(4)==0（1/4 越区臂:弹在 playArea 内不触发）与
+    //  Next(180)==0（:26453 无条件臂）双双逐拍命中 → 首拍即 smart bounce、
+    //  宽限(a)1 期满后再跃迁,跃迁相被【必然】走到（上例靠 7.5% 天然率,此例钉死）。
+    //  断言面=跃迁相豁免语义:RB4 跃迁编排尘（14×型66 1×1/次,JumpToPosition
+    //  :20346-20353 → rainbowBoulderFx v4）全容、且仍是唯一尘源;Splash/四旗/
+    //  不杀恒闭不变。若有人把上一用例的 dust 断言改回 `dust.length===0`
+    //  （重新引入 ≈3-8% flaky）或断开 smart bounce→RB4 链,本用例即红。
+    const w = mkWorld();
+    liquidAt(w, WX0, WX1, WY0, WY1);
+    const { g, dust, splash } = makeGame(w);
+    const p = (g as unknown as { player: { y: number; cy: number } }).player;
+    p.y = 970 - 21; p.cy = 970;                      // 同上:playArea 罩全程,1/4 臂恒哑
+    const b = new RollingBoulder(34 * TILE, 850, 711);            // sheet 711 → 1047
+    (b as { vy: number }).vy = 10;
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0);
+    for (let t = 0; t < 14 && !b.dead; t++) b.fixedUpdate(1 / 60, g);
+    spy.mockRestore();
+    const rb4Burst = dust.filter((d) => d.type === 66 && d.w === 1 && d.h === 1);
+    expect(rb4Burst.length).toBeGreaterThanOrEqual(14);            // ≥1 次跃迁已发生（每跃 14×型66）
+    expect(dust.length).toBe(rb4Burst.length);                     // 除 RB4 跃迁编排尘外零尘
+    expect(b.wet).toBe(false); expect(b.lavaWet).toBe(false);
+    expect(b.honeyWet).toBe(false); expect(b.shimmerWet).toBe(false);
+    expect(splash.length).toBe(0);
+    expect(b.dead).toBe(false);
   });
 });
 

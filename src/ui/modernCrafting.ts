@@ -471,16 +471,21 @@ export function mcraftDetailOrigin(): CraftDetailLayout {
   return craftDetailLayout(MCRAFT_STATE_XY.x, MCRAFT_STATE_XY.y);
 }
 /** 材料行几何(:469-485:num=min(11/材料数,1);列距 34·num、槽 52×0.7·num、
- *  起点 origin+(72, 22−16·num)) */
-export function mcraftMaterialPos(origin: { x: number; y: number }, j: number, matCount: number): { x: number; y: number; scale: number } {
+ *  起点 origin+(72, 22−16·num))。num = 行收缩系数,原版逐字传 :485
+ *  DrawOwnedItemCount(·, vector2, num)——★FX41b 合并后遗留(2026-09-16):拥有数偏移
+ *  (3,32)·mscale 的 mscale = num 非 draw scale 0.7·num,旧传 mp.scale = 偏移×0.7
+ *  塌回格内与需求数叠字(用户实报),故 num 随返回值外露供消费侧直传 */
+export function mcraftMaterialPos(origin: { x: number; y: number }, j: number, matCount: number): { x: number; y: number; scale: number; num: number } {
   const num = Math.min(11 / Math.max(1, matCount), 1);
   return {
     x: origin.x + 72 + j * 34 * num,
     y: origin.y + (22 - 16 * num),
     scale: 0.7 * num,
+    num,
   };
 }
-/** 拥有数文字位(DrawOwnedItemCount :555-558:mpos += (3,32)·mscale) */
+/** 拥有数文字位(DrawOwnedItemCount :555-558:mpos += (3,32)·mscale;★mscale = :485
+ *  实参 num(行收缩系数),非槽 draw scale 0.7·num——scale 入参契约 = 传 mp.num) */
 export function mcraftOwnedCountPos(pos: { x: number; y: number; scale: number }): { x: number; y: number } {
   return { x: pos.x + 3 * pos.scale, y: pos.y + 32 * pos.scale };
 }

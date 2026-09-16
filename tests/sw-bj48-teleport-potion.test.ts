@@ -326,7 +326,9 @@ describe('SW-BJ48 传送药水 2351 随机落点（Player.cs:56922/Utils.cs:518 
 
   it('路由 tripwire：Game.ts 2351→random 接线在位（防并行会话整文件回写回归）', () => {
     const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
-    expect(src).toMatch(/type RecallKind = 'spawn' \| 'ocean' \| 'hell' \| 'random';/);
+    // ★FX51-SP 2026-09-16：并入 'worldSpawn'（5359 世界出生点,Shellphone_Spawn :56821）——
+    //  加法扩张,原四成员钉不变
+    expect(src).toMatch(/type RecallKind = 'spawn' \| 'ocean' \| 'hell' \| 'random' \| 'worldSpawn';/);
     expect(src).toMatch(/tvid === 2351 \? 'random'/);                    // 路由臂
     expect(src).toMatch(/tvid === 2351 \? 2 :/);                         // itemTime==2（Player.cs:43508）
     expect(src).toMatch(/consume: tvid === 2350 \|\| tvid === 2351/);    // 消耗面（:43519）

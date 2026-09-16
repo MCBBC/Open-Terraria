@@ -139,6 +139,11 @@ export interface GameHooks {
   placePortal?(x: number, y: number, vx: number, vy: number, form: number): void;
   /** 破坏 tile（掉落+音效+帧刷新；Enemy 攻门拆门 = WorldGen.KillTile 语义） */
   breakTile?(x: number, y: number): void;
+  /** ★SW-BJ93 债②（2026-09-16）滚石地形面薄委托：WorldGen.SlopeTile(i, j, 0, false,
+   *  true)（WorldGen.cs:82045-82080 直译面）——SpreadTile 邻坡拍平（DelegateMethods.
+   *  cs:534/:543,便便金字塔落位把下/上邻斜台拍回整块）消费。Game 实现 =
+   *  worldGenSlopeTile(x, y, 0, false) 既有 1:1 面包装;缺省（测试 mock）= 静默跳过 */
+  slopeTileAt?(x: number, y: number): boolean;
   /** 仙人掌支撑复查+整株断根(CheckCactus :54132 级联)——沙落/邻格变化后触发 */
   fellCactus?(x: number, y: number): void;
   /** 敌人死亡。opts.petrifyBypassInteractionGate（H2-2）：624 侏儒石化路径——

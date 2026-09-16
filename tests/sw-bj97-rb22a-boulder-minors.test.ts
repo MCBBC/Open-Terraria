@@ -30,14 +30,16 @@ import type { GameHooks } from '../src/entities/types';
 
 function fakeStore(w = 64, h = 64, placed?: Map<number, number>) {
   const cells = placed ?? new Map<number, number>();
+  const liquidArr = new Float32Array(w * h);            // ★债② wave2：地形面注液闭包量
+  const liquidTypeArr = new Float32Array(w * h);
   return {
     w, h,
     type: new Uint8Array(w * h),
     flags: new Uint8Array(w * h),
     slope: new Uint8Array(w * h),
     half: new Uint8Array(w * h),
-    liquid: new Float32Array(w * h),
-    liquidType: new Float32Array(w * h),
+    liquid: liquidArr,
+    liquidType: liquidTypeArr,
     idx: (x: number, y: number) => y * w + x,
     inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h,
     isSolid: (x: number, y: number) => {
@@ -50,6 +52,15 @@ function fakeStore(w = 64, h = 64, placed?: Map<number, number>) {
     hasTile: (x: number, y: number) => cells.has(y * w + x),
     isActuated: () => false,
     get: (x: number, y: number) => cells.get(y * w + x) ?? 0,
+    // ★SW-BJ93 债② wave2（2026-09-16）fixture 补齐：1054 蛛网铺置 setTile、
+    //  1048 金字塔 setTile、Kill 地形面 canHit/solidTileAt 的 wire 位——真
+    //  TileStore 原语最小镜像,旧桩缺 → TypeError 假红。
+    setTile: (x: number, y: number, type: number) => { cells.set(y * w + x, type); },
+    setLiquid: (x: number, y: number, amount: number, lt: number) => {
+      liquidArr[y * w + x] = amount;
+      liquidTypeArr[y * w + x] = lt;
+    },
+    wire: new Uint8Array(w * h),
   };
 }
 type Store = ReturnType<typeof fakeStore>;
@@ -118,7 +129,10 @@ describe('SW-BJ97/RB22a 债1 rbKill 头幂等闸（同拍多 Kill 支齐发第�
     // 低速碰撞（lastV=0.3 → 双系数 0.1 :19309-19331 → 弹后 |v|=0.0424<0.1 :19370）
     iv.rb1048Bounce(0.3, 0.3, game);
     expect(b.dead).toBe(true);
-    expect(game.dusts.filter((d) => d.type === 322).length).toBe(30);       // 无闸=60（M1 红）
+    // ★SW-BJ93 债② wave2 重锚（2026-09-16）：地形面（:76478-76489）落刀后,1048 的
+    //  rbKill 追加金字塔逐格 3×2 尘 322（16×16 盒×12 格）——幂等闸判据按死亡尘面
+    //  原盒 31×31 过滤（无闸双发=60 的变异判别力不变）。
+    expect(game.dusts.filter((d) => d.type === 322 && d.w === 31).length).toBe(30);   // 无闸=60（M1 红）
     expect(game.sfx.filter((s) => s.name === 'Item_16').length).toBe(1);    // 无闸=2（M1 红）
   });
 

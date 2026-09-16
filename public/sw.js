@@ -44,6 +44,19 @@ function mimeOk(path, res) {
   const ct = res.headers.get('content-type') || '';
   return want.test(ct);
 }
+// 规范 CT 表(zipExtract 落库用;与 src/net/assetMime.ts WARM_MIME 同族双侧同步,
+// 与 normCacheKey 同款约定):★2026-09-16 修——旧表达式 mimeOk(path,new Response())
+// 恒 false(裸 Response 无 CT 头),按需解压产物全落 application/octet-stream,
+// 曾是清扫误杀同族的第三个潜伏病灶(音频解码不读 CT,仅卫生问题)。
+const CT_BY_EXT = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+  opus: 'audio/ogg', ogg: 'audio/ogg', wav: 'audio/wav', mp3: 'audio/mpeg',
+  woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', json: 'application/json', txt: 'text/plain',
+};
+function ctOf(path) {
+  const m = /\.([a-z0-9]+)$/.exec(path);
+  return (m && CT_BY_EXT[m[1]]) || 'application/octet-stream';
+}
 // ★warm 窗口 404 静默(2026-09-04):冷启动分片 warm 进行中,懒加载 miss 会穿透
 // 到网络的真 404(prune 形态散件不存在,HAR 实报 Sun/Moon 5 连红)。功能上无碍
 // (204 与 404 同样触发消费方 onerror/退避重试链,自愈语义零变化),但 DevTools
@@ -137,6 +150,66 @@ async function recoverVersion() {
 }
 
 /** 资产服务主逻辑(fetch handler 主体;返回 null = 放行网络) */
+// ---- zip 分片按需提取(2026-09-09):cache miss 时从分片解压单文件返回 ----
+// 解决「SW 缓存条目被驱逐/丢失 → 散件又不存在 → 贴图/音效 404」的整类问题。
+// SW 内存缓存 manifest + 最近使用的分片 ArrayBuffer,避免重复网络请求。
+let _zipManifest = null, _zipBuf = null, _zipName = '';
+async function _getZipManifest() {
+  if (_zipManifest) return _zipManifest;
+  const cache = await getCache();
+  let r = await cache.match('assets-zip/manifest.json').catch(() => null);
+  if (!r) { r = await fetch('assets-zip/manifest.json'); if (r.ok) try { cache.put('assets-zip/manifest.json', r.clone()); } catch {} }
+  if (!r || !r.ok) return null;
+  _zipManifest = await r.json();
+  return _zipManifest;
+}
+async function zipExtract(path) {
+  const m = await _getZipManifest();
+  if (!m) return null;
+  for (const part of m.parts) {
+    const entries = part.entries || [];
+    if (!entries.includes(path)) continue;
+    const zipUrl = 'assets-zip/' + part.file;
+    if (_zipName !== part.file || !_zipBuf) {
+      const r = await fetch(zipUrl);
+      if (!r.ok) return null;
+      _zipBuf = await r.arrayBuffer(); _zipName = part.file;
+    }
+    const dv = new DataView(_zipBuf);
+    let eocd = -1;
+    for (let i = _zipBuf.byteLength - 22; i >= Math.max(0, _zipBuf.byteLength - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) return null;
+    let off = dv.getUint32(eocd + 16, true);
+    const cnt = dv.getUint16(eocd + 10, true);
+    for (let i = 0; i < cnt; i++) {
+      if (dv.getUint32(off, true) !== 0x02014b50) break;
+      const fnLen = dv.getUint16(off + 28, true);
+      const exLen = dv.getUint16(off + 30, true);
+      const cmLen = dv.getUint16(off + 32, true);
+      const lhOff = dv.getUint32(off + 42, true);
+      const method = dv.getUint16(off + 10, true);
+      const cSize = dv.getUint32(off + 20, true);
+      const fn = new TextDecoder().decode(new Uint8Array(_zipBuf, off + 46, fnLen));
+      if (fn === path) {
+        const lhFnLen = dv.getUint16(lhOff + 26, true);
+        const lhExLen = dv.getUint16(lhOff + 28, true);
+        const dataStart = lhOff + 30 + lhFnLen + lhExLen;
+        const data = new Uint8Array(_zipBuf, dataStart, cSize);
+        // ★规范 CT(2026-09-16):stored/deflate 两路统一按扩展名给 CT(见 CT_BY_EXT 注)
+        if (method === 0) return new Response(data, { headers: { 'Content-Type': ctOf(path) } });
+        const ds = new DecompressionStream('deflate-raw');
+        const buf = await new Response(new Blob([data]).stream().pipeThrough(ds)).arrayBuffer();
+        return new Response(buf, { headers: { 'Content-Type': ctOf(path) } });
+      }
+      off += 46 + fnLen + exLen + cmLen;
+    }
+    return null;   // 该分片里没找到(分片遍历已含所有 entries)
+  }
+  return null;   // 不在任何分片
+}
+
 async function serveAsset(req, path) {
   const cache = await getCache();
   const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
@@ -146,8 +219,17 @@ async function serveAsset(req, path) {
     // SPA 兜底(200+text/html)或异常:拒入缓存,并以真 404 应答——上层
     // onerror 立即稳定,不再因 HTML 解码失败进入帧循环重试(HAR:单图 5 连击)
     if (!res || !res.ok || res.type !== 'basic' || !mimeOk(path, res)) {
+      // ★cache miss → 网络也 404 → 从 zip 分片按需解压(2026-09-09)
+      try {
+        const extracted = await zipExtract(path);
+        if (extracted) {
+          const clone = extracted.clone();
+          cache.put(req, clone).catch(() => {});
+          return extracted;
+        }
+      } catch { /* zip 提取失败继续走 404 */ }
       if (res && !res.ok) {
-        return (await silentWarmMiss(req, path)) || res;   // warm 窗口图片 miss → 204 静默
+        return (await silentWarmMiss(req, path)) || res;
       }
       return (await silentWarmMiss(req, path)) || new Response('', { status: 404 });
     }
@@ -402,7 +484,14 @@ async function _scrubInner(force = false) {
       if (!MIME_BY_EXT.some(([re]) => re.test(p))) continue;
       const res = await cache.match(req, { ignoreVary: true });
       if (!res) continue;
-      if (!mimeOk(p, res)) bad.push(req);
+      // ★判据窄化(2026-09-16 根修):毒丸唯一来源=CF Pages SPA 兜底的
+      //  「200+text/html 伪资产」,只删 text/html。旧判据 !mimeOk(p,res) 会把
+      //  自家 zip warm 落库的合法 CT 一并判死——worker MIME 表漏 opus 时 863 条
+      //  音效以 application/octet-stream 落缓存,每会话 gc 强扫整批删除 → 次会话
+      //  have-set 对账判缺重拉 p4/p5(恰 40MB,HAR 三连会话实锤)→ CT 依旧错 →
+      //  循环。非 text/html 的 CT 偏差不影响消费(audio 解码不读 CT),非毒。
+      const ct = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (ct === 'text/html') bad.push(req);
     }
     for (const r of bad) await cache.delete(r);
     if (bad.length) console.log(`[sw] 清除 SPA 兜底伪图 ${bad.length} 条`);
@@ -452,10 +541,13 @@ self.addEventListener('message', (e) => {
   } else if (d.type === 'gc') {
     if (typeof d.version === 'string' && d.version) {
       if (d.version !== currentVersion) { currentVersion = d.version; cacheReady = null; }
-      // gc = 页面显式清理(清理按钮/检测)——顺带强制重扫本版本毒条目
-      // (scrub 每版本一次的逃生门:同版本若再现毒条目,这里兜底)
+      // gc = 页面显式清理(清理按钮/检测)。★scrub 收编回每版本一次标记
+      //  (2026-09-16 根修):曾 _scrubInner(true) 每会话强扫全缓存,配合 worker
+      //  MIME 表漏 opus 酿成 863 条音效每会话整批误删+40MB 重下循环。毒源已被
+      //  入口 MIME 门(serveAsset/warm 回填)+窄化判据(只删 text/html)双重
+      //  堵死,强制逃生门失去存在意义;附带省掉每会话 1.3 万条 match 的扫。
       e.waitUntil((async () => {
-        try { await gcOldCaches(); await _scrubInner(true); }
+        try { await gcOldCaches(); await scrubPoisonedEntries(); }
         catch (err) { self.__swLastGcErr = String(err && err.message || err); }
       })());
     }

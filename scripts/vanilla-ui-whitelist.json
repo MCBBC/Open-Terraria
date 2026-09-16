@@ -39,6 +39,7 @@
 "UI/ScrollbarInner.png",
 "UI/Cursor_0.png",
 "UI/Cursor_1.png",
+"UI/Cursor_2.png",
 "UI/Sunflower_Loading.png",
 "Inventory_Back.png",
 "Inventory_Back2.png",
@@ -218,5 +219,7 @@
 "UI/MapPing.png",
 "UI/Cursor_4.png",
 "UI/Cursor_5.png",
+"UI/Cursor_11.png",
+"UI/Cursor_12.png",
 "UI/Radial.png"
 ]

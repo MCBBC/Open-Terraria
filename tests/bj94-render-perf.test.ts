@@ -257,7 +257,9 @@ describe('★BJ98 AMMO_SCOPE=原版 Player.cs:15004 五支析取（Gel 进 Dart 
     const g = src('../src/core/Game.ts');
     expect(g).toContain('const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 23, 780]);');
     expect(g).not.toContain('new Set([97, 1783, 1836, 283, 780])');
-    expect(g).toContain('Player.cs:15002-15008');
+    // ★BJ98 债①重锚（2026-09-16）：注释锚由 15002-15008 精化为 15002-15007
+    // （scope=true 佩戴判定域,Player.cs:15008 起是死码 `if (0 == 1)` 块,不入引）
+    expect(g).toContain('Player.cs:15002-15007');
     expect(g).not.toContain('14356-14360');
   });
 });

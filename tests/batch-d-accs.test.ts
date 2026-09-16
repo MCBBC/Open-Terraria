@@ -1,7 +1,7 @@
 // 批 D 第二组：1457 新配饰行为链 + LoadoutShare + PanControl 四档
 //  权威：Terarria1457 Player.cs（:13054-13057 ammoCyclerDamage / :14716-14739 新配饰 /
 //  :5679-5758 GetEffectiveArmor/GetEffectiveDye / :2837 hasClickPanOn /
-//  :359 PanControl_Keyboard）+ Projectile.cs:13439-13450/:14347-14420 拍击石系 +
+//  :359 PanControl_Keyboard）+ Projectile.cs:13439-13450/:14347-14464 拍击石系 +
 //  Main.cs:63719-63778 PanControl 四档门
 import { describe, it, expect } from 'vitest';
 import { Player } from '../src/entities/Player';
@@ -60,7 +60,7 @@ const mkEnemy = (id: number, cx: number, cy: number, w = 16, h = 24): MockEnemy 
   return e;
 };
 
-// ============ 弹药循环四件 + 远程配饰旗（:14634-14725） ============
+// ============ 弹药循环四件 + 远程配饰旗（测试覆盖 case 6166-6189 :14596-14740;弹药循环四件 :14634-14649） ============
 describe('1457 远程配饰旗', () => {
   it('弹药循环四件 6168/6169/6193/6194：mode 各档 + 共有 rangedDamage+8%（:13054-13057）', () => {
     const cases: Array<[number, number]> = [[6168, 1], [6169, 2], [6193, 3], [6194, 0]];
@@ -183,9 +183,9 @@ describe('1457 远程配饰旗', () => {
   });
 });
 
-// ============ 拍击石系三脉冲（TryMakingSnappingStoneStrike :14347-14420） ============
+// ============ 拍击石系三脉冲（TryMakingSnappingStoneStrike :14347-14464） ============
 describe('拍击石系三脉冲', () => {
-  it('毁灭臂镗 kind2（tag 命中触发）：150×召唤伤/400px/2 目标/360t 共用冷却（:14364-14383）', () => {
+  it('毁灭臂镗 kind2（tag 命中触发）：150×召唤伤/400px/2 目标/360t 共用冷却（:14372-14383）', () => {
     const victims = [mkEnemy(1, 60 * 16, 90 * 16), mkEnemy(2, 60 * 16 + 100, 90 * 16), mkEnemy(3, 60 * 16 + 200, 90 * 16)];
     const { hooks, player, added } = makeHooks(victims);
     player.inv.armor[3] = { id: iid(6179), stack: 1 };
@@ -199,7 +199,7 @@ describe('拍击石系三脉冲', () => {
     expect(trySnapStrike(hooks, player, 2, victims[0].cx, victims[0].cy, victims[0].id)).toBe(0);   // 冷却拦下=加伤 0（旧布尔 false 档）
   });
 
-  it('焰爆石 kind1：45×近战伤/300px + 目标 323 Hellfire 180t（:14360-14362/:14396-14401）', () => {
+  it('焰爆石 kind1：45×近战伤/300px + 目标 323 Hellfire 180t（:14365-14370/:14413）', () => {
     const victims = [mkEnemy(4, 60 * 16, 90 * 16), mkEnemy(5, 60 * 16 + 100, 90 * 16)];
     const { hooks, player, added } = makeHooks(victims);
     player.inv.armor[3] = { id: iid(6178), stack: 1 };
@@ -210,7 +210,7 @@ describe('拍击石系三脉冲', () => {
     expect(victims[1].onFire3T).toBe(3);                  // AddBuff(323,180)=3s
   });
 
-  it('无对应饰品 → 不触发（门在调用侧,此处兜底）;拍击石 kind0 伤 = 30×远程伤（:14356-14358）', () => {
+  it('无对应饰品 → 不触发（门在调用侧,此处兜底）;拍击石 kind0 伤 = 30×远程伤（:14356-14358,:14363 乘式）', () => {
     const v = [mkEnemy(6, 60 * 16, 90 * 16), mkEnemy(7, 60 * 16 + 100, 90 * 16)];
     const { hooks, player, added } = makeHooks(v);
     expect(trySnapStrike(hooks, player, 0, v[0].cx, v[0].cy, v[0].id)).toBe(0);   // 无饰品=不触发

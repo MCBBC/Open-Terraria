@@ -1277,7 +1277,13 @@ export class Dart extends Entity {
         killBloodShot(game, this.x, this.y, this.w, this.h);
         this.dead = true;
       }
-      else this.dead = true;
+      else {
+        // ★FX53（2026-09-16）：寿终 Kill 亦走 Kill()（:17307-17311 timeLeft<=0 → Kill）
+        // ——射手箭族尘站（killShooterDust,2/82→:77165、1/81/98/980/1073→:75447、
+        // 507/508→:75392）自此三死亡口全覆盖（寿终/撞块/命中）
+        this.killShooterDust(game);
+        this.dead = true;
+      }
       return;
     }
     if (!st) { this.legacyStep(game); return; }
@@ -1341,6 +1347,92 @@ export class Dart extends Entity {
     if (this.projId === 44) {
       for (let i = 0; i < 2; i++) {
         game.spawnDust?.(this.x, this.y, this.w, this.h, 27, 0, 0, 100, null, 1, true);
+      }
+    }
+    // ---- ★FX53 同族清偿（2026-09-16）：NPC 射手弹 AI 尾尘站 1:1——DART_STYLE 表内
+    //      55/96/128/177/288/572 六型旧以泛色 spawnParticles((tick&1) 半频、单点、
+    //      任意色)近似,与原版「同 id 同 dust 同频」不符;44/31/293/299 先例同式退役
+    //      泛色 trail、改真尘站。全部为 AI 段内每 update 一跑（原版 AI 在位移前 →
+    //      尘用 pre-move 盒,本块在位移行之前同位）;EU=0 型每 tick 1 跑 ----
+    //  · 55 黄蜂毒刺（AI_001 :56456-56460）：1×d18,速(0,0),α0,scale0.9,noGravity
+    if (this.projId === 55) {
+      game.spawnDust?.(this.x, this.y, this.w, this.h, 18, 0, 0, 0, null, 0.9, true);
+    }
+    //  · 96 诅咒焰（aiStyle8 :24588-24593）：1×d75,盒=position+v（pre-move+弹速偏移）,
+    //    速=弹速,α100,scale=3×弹 scale(SetDefaults 1.3→3.9),noGravity
+    if (this.projId === 96) {
+      game.spawnDust?.(this.x + this.vx, this.y + this.vy, this.w, this.h, 75,
+        this.vx, this.vy, 100, null, 3 * this.scale, true);
+    }
+    //  · 572 蝾螈吐息（AI_001 :57254-57271）：2×d40,速=弹速,α100;vel=vel×0.5+弹速
+    //    再 ×0.5（原文 ×0.5/+=v/×0.5 三连）;scale1.2,noGravity,位=(Center+position)/2
+    //    （首拍 Item17 由表 sfx 承载,原文本站 localAI[0]==0 支,发射位等价）
+    if (this.projId === 572) {
+      for (let i = 0; i < 2; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 40, this.vx, this.vy, 100);
+        if (d) {
+          d.vx = d.vx * 0.5 + this.vx; d.vy = d.vy * 0.5 + this.vy;
+          d.vx *= 0.5; d.vy *= 0.5;
+          d.noGravity = true;
+          d.scale = 1.2;
+          d.x = (this.cx + this.x) / 2; d.y = (this.cy + this.y) / 2;
+        }
+      }
+    }
+    //  · 128 霜爆（aiStyle28 :26983-26992）：3×d92,速=弹速,α50,scale1.2,noGravity,vel×0.3
+    if (this.projId === 128) {
+      for (let i = 0; i < 3; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 92, this.vx, this.vy, 50, null, 1.2, true);
+        if (d) { d.vx *= 0.3; d.vy *= 0.3; }
+      }
+    }
+    //  · 177 冰水吐涎（aiStyle28 :26966-26977）：3×d137,速=弹速,α=rand(0,101),
+    //    scale=1+rand(-20,40)×0.01,noGravity,vel×0.3
+    if (this.projId === 177) {
+      for (let i = 0; i < 3; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 137, this.vx, this.vy,
+          Math.floor(Math.random() * 101), null,
+          1 + (Math.floor(Math.random() * 60) - 20) * 0.01, true);
+        if (d) { d.vx *= 0.3; d.vy *= 0.3; }
+      }
+    }
+    //  · 288 金雨（aiStyle12 :24788-24829）：★ai[0]=4 每 update 强制赋值(:24795-24798)
+    //    → ai[0]>3 恒真,尘站【每 update】一跑（else 支 ai[0]++ 仅 280 可达=288 死码）;
+    //    3×d170,盒=(x+14,y+14,w-28,h-28)(num93=14),速(0,0),α100,noGravity,
+    //    vel=vel×0.1+弹速×0.5,位 −= 弹速/3×k(k=0,1,2);另 1/8 掷 +1×d170
+    //    (盒 num95=16 → +16/−32,scale0.5,vel×0.25+弹速×0.5,无 noGravity)
+    if (this.projId === 288) {
+      for (let k = 0; k < 3; k++) {
+        const d = game.spawnDust?.(this.x + 14, this.y + 14, this.w - 28, this.h - 28, 170, 0, 0, 100, null, 1, true);
+        if (d) {
+          d.vx = d.vx * 0.1 + this.vx * 0.5;
+          d.vy = d.vy * 0.1 + this.vy * 0.5;
+          d.x -= (this.vx / 3) * k;
+          d.y -= (this.vy / 3) * k;
+        }
+      }
+      if (Math.random() < 0.125) {
+        const d8 = game.spawnDust?.(this.x + 16, this.y + 16, this.w - 32, this.h - 32, 170, 0, 0, 100, null, 0.5);
+        if (d8) {
+          d8.vx = d8.vx * 0.25 + this.vx * 0.5;
+          d8.vy = d8.vy * 0.25 + this.vy * 0.5;
+        }
+      }
+    }
+    //  · 577 星旋激光喷口爆发（AI_001 :56334-56348,首 update 一次）：5×d229,
+    //    盒 8×8@Center、位=Center、α100、scale=1+rand×0.5、noGravity;k=0 尘速=
+    //    norm(弹速)×(12+8×rand),k>0 = norm(弹速)×(12×rand)+圆周(±1)×3
+    if (this.projId === 577 && this.age === 1) {
+      const sp577 = Math.hypot(this.vx, this.vy) || 1;
+      for (let k = 0; k < 5; k++) {
+        const d = game.spawnDust?.(this.cx, this.cy, 8, 8, 229, 0, 0, 100, null, 1 + Math.random() * 0.5, true);
+        if (!d) break;
+        const jit = k !== 0 ? 3 : 0;
+        const spd = k === 0 ? 12 + 8 * Math.random() : 12 * Math.random();
+        const a577 = Math.random() * Math.PI * 2;        // NextVector2Circular(1,1) 角度式(811 先例)
+        d.vx = (this.vx / sp577) * spd + Math.cos(a577) * jit;
+        d.vy = (this.vy / sp577) * spd + Math.sin(a577) * jit;
+        d.x = this.cx; d.y = this.cy;   // NewDust 后 position=Center 整覆写(:56347;811 同式)
       }
     }
     // ---- 290 暗影束 AI 段（aiStyle48 :28608-28646,每子步;EU=100 → ×101/拍）----
@@ -1781,8 +1873,22 @@ export class Dart extends Entity {
           const num18Flag2 = onConveyor ? 169 : 0;
           if (num18Flag2 > 0) game.spawnDrop?.(this.cx, this.cy - 2, 'vi_169_SandBlock', 1);
         }
+        this.killShooterDust(game);   // ★FX53：撞块 Kill 尘站（原版 TileCollision→Kill :71752）
         this.dead = true; return;
       }
+    }
+    // ---- Update 尾通用尘站（Projectile.Update :17141-17182;★FX53 定谳 2026-09-16）:
+    //  原版站与 owner/npcProj 无关——NPC 弹与玩家弹同站同频。Arrow 载体已在
+    //  subStep 实现该段,本载体（spawnHostileProj=NPC 射手弹通道）整缺 →
+    //  骷髅弓箭手 110（NPC.cs:59612 表内,弹 num171 缺省=82 :59797）射出的燃烧箭
+    //  无火焰尾迹（用户报"NPC 燃烧箭无火粒子,玩家的有"）。段在原版 numUpdates
+    //  子步循环【内】(while 体延伸至 :17345)→ 每【子步】1 粒;82 EU=0 → 每 tick
+    //  恰 1 粒。2/82→d6(α100,speed(0,0)=纯 NewDust 内建 ±2 抖动)——本表域内仅 82
+    //  命中该链（2/172/103/278/4/5 不走本载体;81/98/980/1073 原版本链无分支=
+    //  木箭族无尾迹,尘面只在 Kill 站）。死亡拍不撒:下方 tileHit 口 return=
+    //  原版 HandleMovement 内 Kill → :17132 !active 早退同语义 ----
+    if (this.projId === 82) {
+      game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
     }
     // ---- 命中玩家(敌对):矩形相交即消耗弹体;伤害走 damagePlayer(防御减算/受击音/
     // iframes 去重——无敌帧内命中不扣血但弹体照常销毁,原版语义) ----
@@ -1813,7 +1919,10 @@ export class Dart extends Entity {
       //  437/682、timeLeft=0 仅 681）,penetrate=-1（SetDefaults :3908-3916）穿过玩家
       //  继续飞;tileCollide=false 也撞不了墙 → 唯一寿命=timeLeft 3600。曾命中即灭=
       //  圣骑士一把锤只摸一次（原版可来回穿人反复施压）
-      if (this.projId !== 811 && this.projId !== 814 && this.projId !== 300) this.dead = true;
+      if (this.projId !== 811 && this.projId !== 814 && this.projId !== 300) {
+        this.killShooterDust(game);   // ★FX53：命中消耗 Kill 尘站（原版 penetrate 耗尽→Kill）
+        this.dead = true;
+      }
     }
     // ---- 75 HappyBomb 近身引信（AI_016 :47809-47820）：距存活玩家中心 <40px
     //      即 Kill(=爆炸;tenthAnniversaryWorld 豁免本仓无此世界) ----
@@ -1850,6 +1959,48 @@ export class Dart extends Entity {
       for (let i = 0; i < 9; i++) {
         const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 175, 0, 0, 100, null, 1.3);
         if (d) { d.vx = 0; d.vy = 0; d.noGravity = true; }
+      }
+    }
+  }
+
+  /** ★FX53（2026-09-16）：射手箭族 Kill 尘站（Projectile.Kill :71752 起分档链）。
+   *  Arrow 载体 Kill 链（Arrow.ts killNow 分档,tests/arrow-flight-trail-dust 金标）
+   *  已接,本载体（spawnHostileProj=NPC 射手弹）整缺——同 FX53 根因（载体分家）。
+   *  三个死亡口（寿终/撞块/命中消耗）同调本站,与原版 Kill() 唯一入口一致：
+   *  · 2/82 燃烧箭：legacy PlaySound(0)=dig + 10×d6 α100（:77165-77171）
+   *  · 1/81/98/980/1073 木箭族：dig + 10×d7（:75447-75455;98/980 走 TrapShot 载体
+   *    不达本站,登记 TrapShot 侧同族债）
+   *  · 507/508 标枪（希腊骷髅 481）：dig + 20×d81——出生位沿 -oldVelocity 归一向
+   *    从 pos+16 起每粒退 8px（:75392-75410 vector54/vector55），尘位=(尘位+Center)/2、
+   *    尘速=(尘速+oldVel×0.4)×0.5、noGravity。oldVelocity 取死亡拍速度（本仓位移
+   *    无 lastVelocity 快照,撞块口速度未被清零=同值域） */
+  private killShooterDust(game: GameHooks): void {
+    switch (this.projId) {
+      case 2: case 82:
+        game.playSfx('dig', 1, this.cx, this.cy);
+        for (let i = 0; i < 10; i++) game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 0, 0, 100);
+        break;
+      case 1: case 81: case 98: case 980: case 1073:
+        game.playSfx('dig', 1, this.cx, this.cy);
+        for (let i = 0; i < 10; i++) game.spawnDust?.(this.x, this.y, this.w, this.h, 7);
+        break;
+      case 507: case 508: {
+        game.playSfx('dig', 1, this.cx, this.cy);
+        const sp = Math.hypot(this.vx, this.vy) || 1;
+        const ux = this.vx / sp, uy = this.vy / sp;        // oldVelocity.SafeNormalize(:75397-75399)
+        let dx = this.x + ux * 16, dy = this.y + uy * 16;  // vector54 = position + norm×16(:75400)
+        for (let i = 0; i < 20; i++) {
+          const d = game.spawnDust?.(dx, dy, this.w, this.h, 81);
+          if (d) {
+            d.x = (d.x + this.cx) / 2;                     // (dust.position + Center)/2(:75403)
+            d.y = (d.y + this.cy) / 2;
+            d.vx += this.vx * 0.4; d.vy += this.vy * 0.4;  // += oldVelocity×0.4(:75404)
+            d.vx *= 0.5; d.vy *= 0.5;                      // ×0.5(:75405)
+            d.noGravity = true;
+          }
+          dx -= ux * 8; dy -= uy * 8;                      // -= norm×8(:75407)
+        }
+        break;
       }
     }
   }
@@ -2453,7 +2604,7 @@ export const DART_STYLE: Record<number, DartStyle> = {
   596: { w: 8, h: 8, rot: 'align90', life: 180, noTile: true, noPlayerHit: true,
     alpha0: 255, animEvery: 5, frames: 4,
     home: { range: 40, spd: 7.5, lerp: 9 },
-    trail: { color: '#8A5AE8', count: 2 }, fallback: '#9A6AF0' },
+    fallback: '#9A6AF0' },   // ★FX53 普查尾修：泛色 trail 退役（尘面=AI_107 d27 环 :34243,真尘段已接）
   // 811 BloodShot（Projectile.cs:7927-7939，NPC.cs:51435 血月骑手 619/620 射弹，
   // 速15/伤35）：10×10 aiStyle1 hostile α=255 penetrate=-1 tileCollide=true；
   // fade:20=AI 每拍 α−20（:57347-57351）→13 拍渐显；
@@ -2470,8 +2621,9 @@ export const DART_STYLE: Record<number, DartStyle> = {
   // fallback 近似血红目测（PNG 主色未取,811 撞墙即消极少见兜底态,登记）
   811: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, life: 3600, whiteLerp: 1.0,
     sfx: ['Item_17'], fallback: '#8A3038' },
-  // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾(:52612)
-  55: { w: 10, h: 10, rot: 'align90', life: 300, trail: { color: '#B8A070', count: 1 }, fallback: '#D8C890' },
+  // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾 = AI_001 :56456-56460
+  //  （★FX53:泛色 trail 退役,真尘站见 dartStep 55 支——每 update 1×d18 scale0.9）
+  55: { w: 10, h: 10, rot: 'align90', life: 300, fallback: '#D8C890' },
   // 81/82 木箭/燃烧箭(战士族 num172 :59797/:59821):10×10,重力 0.07@20(:54009);发射音 Item5
   81: { w: 10, h: 10, rot: 'align90', grav: 0.07, gravDelay: 20, sfx: ['Item_5'], fallback: '#D8C8A0' },
   82: { w: 10, h: 10, rot: 'align90', grav: 0.07, gravDelay: 20, sfx: ['Item_5'], fallback: '#FFB060' },
@@ -2480,16 +2632,18 @@ export const DART_STYLE: Record<number, DartStyle> = {
   84: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 'speed', updates: 2, life: 600,
     sfx: ['Item_12'], fallback: '#FF70E0' },
   // 96 诅咒焰(爬行者 101 :22846):16×16,alpha100(恒),spin 0.3,光=0.8×(0.35,1,0) 绿(ProjLight);
-  //    尘 75 拖尾;Item20
-  96: { w: 16, h: 16, rot: 'spin', spinRate: 0.3, alpha0: 100,
-    trail: { color: '#9A6AFF', count: 1 }, sfx: ['Item_20'], fallback: '#8A5AE8' },
+  //    尘 75 拖尾 = aiStyle8 :24588-24593（★FX53:泛色 trail 退役,真尘站见 dartStep 96 支
+  //    ——每 update 1×d75 scale=3×弹scale）;scale=SetDefaults :1811-1812 双写终值 1.3（曾缺）
+  96: { w: 16, h: 16, rot: 'spin', spinRate: 0.3, alpha0: 100, scale: 1.3,
+    sfx: ['Item_20'], fallback: '#8A5AE8' },
   // 115 邪恶三叉戟(红恶魔 156 :23533):16×16,a45,alpha255 呼吸脉冲,加速 ×1.125@ai0<30(:24753),
   //    光=ProjLight 0.5×(0.5,0.05,1)(:15205);Item8
   115: { w: 16, h: 16, rot: 'a45', alpha0: 255, fade: 50, pulse: true, life: 300,
     accel: { from: 0, to: 30, mul: 1.125 }, sfx: ['Item_8'], fallback: '#B060FF' },
-  // 128 霜爆(冰元素 169 :24933):14×14 旋转恒 0,alpha255 渐入;尘 92 ×3;Item28
+  // 128 霜爆(冰元素 169 :24933):14×14 旋转恒 0,alpha255 渐入;尘 92 ×3 = aiStyle28
+  //  :26983-26992（★FX53:泛色 trail 退役,真尘站见 dartStep 128 支）;Item28
   128: { w: 14, h: 14, rot: 'none', alpha0: 255, fade: 50,
-    trail: { color: '#A8D8F0', count: 2 }, sfx: ['Item_28'], fallback: '#C8ECFF' },
+    sfx: ['Item_28'], fallback: '#C8ECFF' },
   // 174 冰刺/176 丛林刺/605 尖刺史莱姆刺(尖刺史莱姆 184/204/535):
   //    6×6,重力 174/605:0.15@5(:54017)/176:0.05@15(:54310)
   174: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5,
@@ -2502,9 +2656,10 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //   直飞伤 20 kb2；SetDefaults Projectile.cs:9754-9761：10×10 aiStyle1 hostile
   //   penetrate-1 trap——无重力直飞；命中 Poisoned(20) 600t 由 projTargets :11660 接）
   1073: { w: 10, h: 10, rot: 'align90', life: 600, fallback: '#7AB8E8' },
-  // 177 冰水吐涎(冰鱼人 206 :59859):10×10 旋转恒 0,alpha255;尘 137 ×3
+  // 177 冰水吐涎(冰鱼人 206 :59859):10×10 旋转恒 0,alpha255;尘 137 ×3 = aiStyle28
+  //  :26966-26977（★FX53:泛色 trail 退役,真尘站见 dartStep 177 支）
   177: { w: 10, h: 10, rot: 'none', alpha0: 255, fade: 50,
-    trail: { color: '#BFE8F0', count: 2 }, fallback: '#A8D8E8' },
+    fallback: '#A8D8E8' },
   // 180 死眼弹(海盗 214/216/292 :59895):4×4,scale1.2,alpha255 渐入(|v|*0.9),extraUpdates1,life600,
   //    光=ProjLight 0.5×(1,0.7,0.1)(:14990);Item11
   180: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 'speed', updates: 1, life: 600,
@@ -2514,10 +2669,11 @@ export const DART_STYLE: Record<number, DartStyle> = {
   257: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 10, updates: 1, life: 600,
     sfx: ['Item_12'], fallback: '#A8E8FF' },
   // 288 金雨(脓水粘怪 268 :25032):32×32,重力 0.075(:22835),scale -0.002/更新(:22824),
-  //    extraUpdates2,旋转恒 0;尘 170 ×3;Item17
+  //    extraUpdates2,旋转恒 0;尘 170 ×3 = aiStyle12 :24805-24816（★FX53:泛色 trail
+  //    退役,真尘站见 dartStep 288 支——ai[0]=4 每 update 强制赋值 :24795,恒频）;Item17
   288: { w: 32, h: 32, rot: 'none', alpha0: 255, fade: 50, grav: 0.075, updates: 2, shrink: 0.002,
     tileBox: 10,   // ★SW-FX7：GetCollisionParams 缩盒名单（P.cs:20072）
-    trail: { color: '#E8C060', count: 2 }, sfx: ['Item_17'], fallback: '#E0B040' },
+    sfx: ['Item_17'], fallback: '#E0B040' },
   // 299 暗影焰(巨型诅咒颅 289 :21795):6×6,alpha255,tileCollide=false 穿墙,extraUpdates2,
   //    贴图 1×1 空桩→纯尘埃(尘 181);Item8@第6更新(:53761)
   299: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, updates: 2, noTile: true, noTex: true,
@@ -2556,9 +2712,10 @@ export const DART_STYLE: Record<number, DartStyle> = {
   471: { w: 16, h: 16, rot: 'roll', scale: 1.2, grav: 0.4, gravDelay: 20, xDamp: 0.97, fallback: '#E0D8C8' },
   // 508 标枪(希腊骷髅 481 :59855):16×16,重力 0.3+xDamp0.98@ai0>60(:54589)
   508: { w: 16, h: 16, rot: 'align90', grav: 0.3, gravDelay: 61, xDamp: 0.98, fallback: '#C0A880' },
-  // 572 蝾螈吐息(蝾螈族 498-506 :59849):10×10,alpha255 渐入;尘 40 ×2;Item17
+  // 572 蝾螈吐息(蝾螈族 498-506 :59849):10×10,alpha255 渐入;尘 40 ×2 = AI_001
+  //  :57254-57271（★FX53:泛色 trail 退役,真尘站见 dartStep 572 支）;Item17
   572: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 50,
-    trail: { color: '#8AD8A0', count: 2 }, sfx: ['Item_17'], fallback: '#8AD8A0' },
+    sfx: ['Item_17'], fallback: '#8AD8A0' },
   // 44 魔鬼飞镰(恶魔 62/66 NPC.cs:23533 弹型 44):48×48,scale0.9,alpha100,spin 0.8×direction
   //    (AI_018 P.cs:25780),加速 ×1.06@ai0[30,100)(:25782-25792),光=ProjLight 0.2×(0.6,0.1,B=1
   //    绝对)(:15054);Item8(:23723)。★尾迹=原版 AI 尾尘链(见 dartStep 44 支)——曾用通用
@@ -2646,7 +2803,8 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //    每 oldPos 槽 1/3 掷)——本仓 Dart 无 oldPos 快照带,随载体批再议;
   //    绘前白化 Lerp(projectileColor,White,0.35) 常数(DrawProjDirect :30849-30856)
   814: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, noTile: true, life: 3600, whiteLerp: 0.35,
-    trail: { color: '#C83848', count: 1 },
+    // ★FX53 普查尾修：泛色 trail 退役（尘面=AI 段 d5 轨迹/爆发 :57403-57435,真尘段已接;
+    //  曾双发=真 d5 + 泛色每两拍一粒）
     sfx: ['Item_171'], fallback: '#B03040' },
   // 577 星旋激光 VortexLaser(风暴潜水员 425 满蓄四连发,NPC.cs:59202 速 20/kb1 →
   //    fighterFamilies.ts:1019):4×4 aiStyle1 直飞,scale1.2,alpha255 渐入 -15/更新

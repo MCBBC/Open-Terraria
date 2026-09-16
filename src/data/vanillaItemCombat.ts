@@ -412,11 +412,17 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
 }
 
 /** 可直掷的"武器+弹药"双职件白名单：雪球 949（useStyle1+shoot166+consumable，
- *  Item.cs:12337-12353——手持左键直接掷出弹 166，同时是雪球炮 1319 的弹药）。
- *  金币 71-74 虽同为双职数据面（useStyle1+shoot158-161），但原版 ItemCheck_Shoot
- *  有显式 IsACoin 门（Player.cs:46473-46476 `if (sItem.IsACoin) canShoot = false`）
- *  ——四币【不可】掷出（补 B 审计"金币可投掷"系误读，:52594-52605 是金币枪
- *  PickAmmo 的币槽扫描非投掷链）；种子 283 等无 useStyle 永不入使用链。 */
+ *  Item.cs:12356-12372——手持左键直接掷出弹 166，同时是雪球炮 1319 的弹药）。
+ *  金币 71-74 虽同为双职数据面（useStyle1+shoot 逐件 158/159/160/161——铜/银/金/铂
+ *  Item.cs:2225/:2248/:2269/:2289，dmg 25/50/100/200 :2227/:2247/:2268/:2288，
+ *  shootSpeed 1/2/3/4 :2228/:2249/:2270/:2290，SetDefaults 全块 :2219-2301；1458 同块
+ *  :2219-2301 逐字全等），但原版 ItemCheck_Shoot（Player.cs:47463）有显式 IsACoin 门
+ *  （:47510-47513 `if (sItem.IsACoin) canShoot = false`；IsACoin = Item.cs:373-380
+ *  type 71-74；1458 同门在 Player.cs:47508）——四币【不可】直掷（补 B 审计
+ *  "金币可投掷"系误读；旧注锚 :46473-46476 实为 tile frame switch 已重锚；
+ *  PickAmmo 币槽扫描 = Player.cs:54368-54376 PickAmmo_PickAmmoItem +
+ *  AmmoSlotOrder_CoinsOnly=币槽 50-53（:3180），是金币枪 905（Item.cs:11825-11840
+ *  useAmmo=Coin）的弹药面非投掷链）；种子 283 等无 useStyle 永不入使用链。 */
 const THROWABLE_AMMO_DUAL = new Set([949]);
 
 /** thrownCombat 显式退出群（2026-08-30 孤儿武器 A 波）：消耗型但弹体非 ai2 抛物刀——

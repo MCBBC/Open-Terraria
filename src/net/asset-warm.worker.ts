@@ -13,12 +13,10 @@
 //       {type:'done', failed}                全部跑完
 import '../workers/procShim';   // ★process 兜底首导入(见 workers/procShim.ts;2026-09-02 扩面)
 import { unzipSync } from 'fflate';
-
-const MIME: Record<string, string> = {
-  png: 'image/png', wav: 'audio/wav', mp3: 'audio/mpeg',
-  woff2: 'font/woff2', json: 'application/json',
-};
-const mimeOf = (n: string) => MIME[n.slice(n.lastIndexOf('.') + 1)] ?? 'application/octet-stream';
+// ★CT 表单源化(2026-09-16 根修):旧本地表漏 opus → 863 条音效以
+//   application/octet-stream 落缓存,被 sw.js 会话清扫按 ^audio/ogg 判异整批删除
+//   → 每会话重拉 p4/p5(40MB)循环。表迁 assetMime.ts(与页面 put 侧同源)。
+import { mimeOf } from './assetMime';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

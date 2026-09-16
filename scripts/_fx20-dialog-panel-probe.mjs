@@ -45,7 +45,7 @@ const A = await page.evaluate(async () => {
   const lines = Math.max(1, Math.round(chat.scrollHeight / 30));
   const btnRows = 2;
   const H = 30 + 30 * lines + 30 * btnRows + 2 * (btnRows - 1);
-  // 金币条（heal 钮 −151,−44）
+  // 金币条（heal 钮右侧同行:左缘=钮右+19,顶=钮顶−5;FX52 定谳 NPCChatPanel.cs:135+140-144）
   const healBtn = panel.querySelector('button[data-b="heal"]');
   const tag = healBtn?.querySelector('.sw-npc-coins');
   const hr = healBtn?.getBoundingClientRect();
@@ -62,7 +62,7 @@ const A = await page.evaluate(async () => {
     btnTops: btns.map((b) => b.top), btnLefts: btns.map((b) => b.left),
     btnHeights: btns.map((b) => b.height),
     btnRow0TopDelta: btns.length ? btns[0].top - pr.bottom : -1,
-    coinsDeltaX: tr && hr ? hr.left - tr.left : -1,
+    coinsRightDelta: tr && hr ? tr.left - (hr.left + hr.width) : -1,
     coinsDeltaY: tr && hr ? tr.top - hr.top : -1,
     hasCoins: !!tag, coinsText: tag?.textContent ?? '',
   };
@@ -90,8 +90,11 @@ const colGap = await page.evaluate(() => {
 });
 ok('A12 列距 30', approx(colGap, 30, 1), `gap=${colGap}`);
 ok('A13 行高 22(第 2 行 top 差)', approx(A.btnTops[4] - A.btnTops[0], 22, 1));
-// 金币条：DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106 → 按钮相对 (-151,-44)
-ok('A14 金币条 @按钮(-151,-44)', A.hasCoins && approx(A.coinsDeltaX, 151, 3) && approx(A.coinsDeltaY, -44, 3), `dx=${A.coinsDeltaX} dy=${A.coinsDeltaY} text=${A.coinsText}`);
+// 金币条：DrawMoney @ (rect.X-45,rect.Y-44)——:135 已先 rect.X+=压缩宽+30 越过本钮,
+// 与 DrawMoney 内部 horizontal 支 +45（首枚币心=rect.X,ItemSlot.cs:3689）相消 →
+// 币条=钮右侧 106 预留槽:左缘墨=首计数 rect.X-11=钮右+19,币心带 y=rect.Y+6
+// （FX52 定谳;旧 (-151,-44) 系漏乘 :135 推进=悬钮左上压台词,用户实报后翻案）
+ok('A14 金币条 @钮右+19/顶-5', A.hasCoins && approx(A.coinsRightDelta, 19, 3) && approx(A.coinsDeltaY, -5, 3), `dx=${A.coinsRightDelta} dy=${A.coinsDeltaY} text=${A.coinsText}`);
 
 // ============ B. 头像四模式（真实 Game 开商人对话 + options 切换）============
 await page.evaluate(async () => {

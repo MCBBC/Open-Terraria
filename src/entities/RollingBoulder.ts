@@ -19,7 +19,9 @@ import { cutTilesBox } from './ProjCutTiles';   // ★SW-BJ93 债1：CutTiles �
 import { GorePiece } from './GorePiece';        // ★SW-BJ93 债2：1053 Kill gore 61..63（Game.explodeAt 同引擎,30:28419 先例）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/tiles';
+import { LIQUID_TYPE } from '../world/TileStore';   // ★SW-BJ93 债②：液体编码（repo +1 域）
+import { canHit, solidTileAt } from '../physics/LineOfSight';   // ★SW-BJ93 债②：CanHit/SolidTile 1:1
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';   // ★SW-BJ93 债2：Kill 掉落 vid→键反查（Player.ts:6333 同款）
 import { damageVarRoll } from '../stats/DamageVar';       // ★SW-BJ93 债4：SelfHurtPlayers DV 单源（:15118;Game bit7 同源）
 import { f32 } from '../stats/ScaleStats';
@@ -134,6 +136,44 @@ const KB_X = 10;               // 出生 kb 第二参 = 10f
 //   ⑥ 池满掷形            spawnDust 池满时掷形（vanilla Dust 槽复用序 vs 本仓）
 //                         RB22a 观察项,未定谳未落刀
 // ===========================================================================
+// ★SW-BJ93 债③/④/②（2026-09-16 wave2）三债清偿（全部 1457 锚 1:1;1458 同域逐字
+//   byte-diff 全等 2026-09-16——1021 弹支 :19101-19128↔:19102-19129、家族①落地支
+//   :19055-19099↔:19056-19100、1054 蛛网 :26394-26410↔:26395-26411、Kill 地形面
+//   :76478-76489↔:76479-76490、LavaBoulderExplosion :71647-71661↔:71648-71662、
+//   SpreadTile/SpreadPoopPyramid DelegateMethods.cs:469-599 同行、FloodFillTile
+//   Utils.cs:2548-2592 同行、PlaceLiquid WorldGen.cs:4495-4546 同行）：
+//   债③ 1021 MoonBoulder 专属弹跳支 :19101-19128——撞墙【不即碎】：Y 高速(>4)落地
+//        弹回 −0.9、低速下落置 localAI[1]=999（停稳标记）;X 撞墙 localAI[1]<=3 →
+//        弹回 −0.75++（四次内弹回）,>3 → Kill。旧仓落通用②即碎=BJ67 登记偏差。
+//        ★本支零 RNG（无 Main.rand 掷,亲读定谳）→ 无掷序面;运动核参数（X 加速
+//        0.025/帽 ±3.5/重力 0.06,:26702-26730）仍属 RB22a note② 登记债未动。
+//   债④a 1053 落地 20 尘（家族①落地支 :19059-19071）——10 迭代×2 尘 6（盒=
+//        (pos.X,pos.Y+8,w,h−8)、α100）:①scale2→v×8+noGravity ②scale1.25→v×2→
+//        X×1.5→Y−2（原文三连写序）;位序=HitTiles 近似【前】。BJ93 债2 只接了
+//        Kill 死亡面,落地尘整缺=本刀。
+//   债④b 1054 蛛网铺置（AI_025 :26394-26410）——扫盒 x∈[(int)(px+1)/16,(int)(px+w)/16]
+//        （y 同式,C# (int) 截断+int÷;31px 盒=3×3 格域）逐格 x 外 y 内,门=!active()
+//        ∧ liquid==0 ∧ Next(7)==0（短路,空干格才掷）;铺置=PlaceTile(51,mute)——
+//        tileSolid[51]=false → PlaceTile :59864 门经 `!tileSolid` 臂直过（EmptyTile
+//        玩家/NPC 占用面【不适用】;AI 门已保空格）→ active+type 直写+SquareTileFrame。
+//        ★放置占位豁免面判例（tileCut∪BreakableWhenPlacing 并集）在此【无】消费位
+//        （该判例属 TileObject.CanPlace/Place 域;本处只往空格铺）;cutTilesBox 语义
+//        核对：蛛网 sheet 51 ∈ TILE_CUT_SHEETS → 1054 滚过蛛网被 CutTiles 割除,
+//        既有 cutTilesBox 面（TILE_CUT 单源）已 1:1 承载。
+//   债② Kill 地形面（:76478-76489 netMode!=1 支,单机恒真）——1048→
+//        SpreadPoopPyramid / 1053→LavaBoulderExplosion。★原版 Kill() 调用序亲读
+//        定谳：尘表(:76361)→声(:76370)→1053 专属爆面(:76391)→1054/1055/缺省尘
+//        (:76438-76469)→掉落(:76470-77)→【地形面最后】→ 故插 rbKillFamilyFace
+//        掉落臂之后=掷序 1:1（1048 金字塔铺置尘 322 逐格 3×2 掷在家族死亡尘之后）。
+//        1048 链=RunDelegateMethodPushUpForHalfBricks(:71627-71645 半砖顶推)→
+//        FloodFillTile(Utils.cs:2548 BFS,7×7 位域,四邻序 左右上下,经 plot==true 格
+//        扩散)→SpreadTile(666,322,pyramid)（DelegateMethods.cs:474-599:金字塔形门
+//        1/3/5/3 行、TryKillingReplaceableTile、PlaceTile(EmptyTile 语义=空格∧无玩家
+//        ∧无 NPC)、成功面 3×2 尘 322+邻坡拍平+草族 3×3 全围实心 KillTile(fail:true)
+//        转化）。1053 链=半径 4 圆盘（81 盒内 Distance<4）∧CanHit 线→PlaceLiquid
+//        (1,255)（WorldGen.cs:4495-4546:实心门/注液满 255/异液合并 岩浆×水→黑曜石
+//        56、×蜂蜜→脆蜂蜜 230、×微光→659）。本面零掷序交叉（1053 零 RNG）。
+// ===========================================================================
 
 // ===========================================================================
 // ★SW-BJ93 债4①（2026-09-16）：ProjectileID.Sets.SkipDamage_EVP（ProjectileID.cs:275
@@ -154,6 +194,20 @@ export const SKIP_DAMAGE_EVP: ReadonlySet<number> = new Set([108, 164, 1002]);
  *  （:71766）亦不落（本仓 1002 走 SelfHurtPlayers 面,无族尘）。 */
 const RB_KILL_FAMILY: ReadonlySet<number> = new Set(
   [99, 1013, 727, 1014, 1021, 1048, 1053, 1054, 1055, 1057]);
+
+// ---- ★SW-BJ93 债②（2026-09-16）地形面世界写入伴生表（sheet 域,勿用 def.platform
+//  超集替代——SW-AW1b 判例:Platform 门必须按 TileID.cs:243 表读）----
+/** TileID.Sets.Platforms（TileID.cs:243 全 7 元素直抄）——SpreadTile 邻坡拍平门 */
+const RB_PLATFORM_SHEETS: ReadonlySet<number> = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** TileID.Sets.IsADripTile（TileID.cs:157 全 5 元素直抄）——TryKillingReplaceableTile
+ *  可杀面第三支（:59809） */
+const RB_DRIP_SHEETS: ReadonlySet<number> = new Set([373, 374, 375, 461, 709]);
+/** SpreadTile 草族转化表（:554 白名单 {2,23,60,70,109,199,477,492} × KillTile(fail:true)
+ *  转化支 :64228-64239——2/23/109/199/477/492→0 土、60/70→59 泥） */
+const RB_GRASS_TO_BARE: Record<number, 'dirt' | 'mud'> = {
+  2: 'dirt', 23: 'dirt', 109: 'dirt', 199: 'dirt', 477: 'dirt', 492: 'dirt',
+  60: 'mud', 70: 'mud',
+};
 
 /** ★SW-BJ97/RB22a 债2（2026-09-16）：家族 timeLeft 终值单源（ctor 消费;Arrow.ts
  *  life 先例=ctor 读 vanilla-projectiles.json timeLeft 列）。
@@ -520,6 +574,32 @@ export class RollingBoulder extends Entity {
         if (d) d.vy -= 1;                                   // :26406 velocity.Y--
       }
     }
+    // ---- ★SW-BJ93 债④b（2026-09-16）：1054 蛛网铺置（AI_025 :26394-26410 逐字;
+    //  1458 :26395-26411 同域 byte-diff 全等;原版位序=1053 三色尘后/1047 专支与
+    //  静止自启前,读【本拍 AI 头】的弹盒位置）。门序=!active() ∧ liquid==0 ∧
+    //  Next(7)==0（短路:空干格才掷,RNG 消费随格遍历 x 外 y 内逐位同序）;铺置=
+    //  PlaceTile(51,mute:true)（tileSolid[51]=false → :59864 门经 `!tileSolid` 臂
+    //  直过,EmptyTile 玩家/NPC 占用面不适用——AI 门已保空格）→ active+type 直写+
+    //  SquareTileFrame(:60746-60753,本仓 setTile 监听链承载);netMode==2
+    //  SendTileSquare 单机不达。OOB 格本仓 inBounds 跳过（vanilla 裸 Main.tile
+    //  越界会炸,弹体活着到不了世界外=守卫面）。----
+    if (this.projId === 1054) {
+      const stW = game.world.store;
+      const fxW = Math.fround(this.x), fyW = Math.fround(this.y);
+      const tw0 = Math.trunc(Math.trunc(Math.fround(fxW + 1)) / 16);          // :26396 (int)(px+1)/16
+      const tw1 = Math.trunc(Math.trunc(Math.fround(fxW + this.w)) / 16);     // (int)(px+w)/16
+      const th0 = Math.trunc(Math.trunc(Math.fround(fyW + 1)) / 16);          // :26398 (int)(py+1)/16
+      const th1 = Math.trunc(Math.trunc(Math.fround(fyW + this.h)) / 16);     // (int)(py+h)/16
+      const webId = TILE_BY_KEY['v_51_cobweb'];
+      for (let tw = tw0; tw <= tw1; tw++) {
+        for (let th = th0; th <= th1; th++) {
+          if (!stW.inBounds(tw, th) || stW.hasTile(tw, th)) continue;         // !active()
+          if (stW.liquid[stW.idx(tw, th)] !== 0) continue;                    // liquid==0
+          if (Math.floor(Math.random() * 7) !== 0) continue;                  // Next(7)==0
+          if (webId !== undefined) stW.setTile(tw, th, webId);                // :26402 PlaceTile(51,mute)
+        }
+      }
+    }
     // ---- 静止自启（cs:26684-26711 verbatim 门：ai[0]!=0 && vy<=0 && vx==0）——
     // 落入柱龛停稳后朝开阔侧踢 ±0.5，三级探柱(0/16/32px 外扩)都堵则按 cx 奇偶定边
     // SW-AF1 2026-09-04（F-3 收敛）：踢墙摄取器单源化 → WeaponProj.beeWallPushDir
@@ -676,6 +756,17 @@ export class RollingBoulder extends Entity {
     if (this.projId === 1047) {
       this.rbCheckBounce(lastVX, lastVY, game);
       if (this.dead) return;
+    } else if (this.projId === 1021) {
+      // ★SW-BJ93 债③（2026-09-16）：1021 月球巨石专属弹跳支（P.cs:19101-19128 直译;
+      //  1458 :19102-19129 同域逐字 byte-diff 全等 2026-09-16）——旧仓落通用②撞墙
+      //  即碎=BJ67 登记建模偏差;原版撞墙【不即碎】：X 向最多四次内弹回（localAI[1]
+      //  0..3 弹、第 5 次撞墙 >3 → Kill）、系数 −0.75;Y 向高速(>4)落地弹回 −0.9、
+      //  低速下落(0<lastVY≤4)置 localAI[1]=999（停稳标记,此后任一 X 撞墙即 Kill）。
+      //  弹面次序=HitTiles(:19107)→PlaySound(0)(:19108)→速度覆写(:19109)（家族①同
+      //  序）;★本支零 RNG（无 Main.rand 掷,亲读定谳）→ 无掷序面。宽限门豁免集/
+      //  boulderTimeLeft(10800)/rbKill 幂等闸均未触碰。
+      this.rb1021Bounce(lastVX, lastVY, game);
+      if (this.dead) return;
     } else if (this.projId === 1013) {
       // ★SW-BJ88 债1（2026-09-15）：1013 专属分段弹支（P.cs:19129-19191 直译;
       //  1458 :19130-19192 逐字同）——旧仓把 1013 落进家族 ①②支（0.2 弹回+撞墙
@@ -707,6 +798,21 @@ export class RollingBoulder extends Entity {
     } else {
       // ① 高速落地（lastVy>5）：弹回 20% + 落地尘/声（SoundID 0 = dig 系）
       if (this.vy !== lastVY && lastVY > 5) {
+        // ★SW-BJ93 债④a（2026-09-16）：1053 落地 20 尘（家族①落地支 :19059-19071
+        //  逐字;1458 :19060-19072 同域 byte-diff 全等）——10 迭代×2 尘 6（盒=
+        //  (pos.X,pos.Y+8,w,h−8)、α100）:①scale2 → v×8+noGravity ②scale1.25 →
+        //  v×2→X×1.5→Y−2（原文三连写序）。位序=HitTiles 近似【前】（vanilla 尘
+        //  :19061-71 → HitTiles :19072 → 声 :19073 → 速度覆写 :19074;BJ93 债2 只接
+        //  Kill 死亡面,落地尘整缺=本刀。速度覆写行序为旧仓既置（粒子/声不读 vy,
+        //  观测中性,RNG 序不受影响）。----
+        if (this.projId === 1053) {
+          for (let i = 0; i < 10; i++) {
+            const d1 = game.spawnDust?.(this.x, this.y + 8, this.w, this.h - 8, 6, 0, 0, 100, null, 2);
+            if (d1) { d1.vx *= 8; d1.vy *= 8; d1.noGravity = true; }        // :19064-19065
+            const d2 = game.spawnDust?.(this.x, this.y + 8, this.w, this.h - 8, 6, 0, 0, 100, null, 1.25);
+            if (d2) { d2.vx *= 2; d2.vx *= 1.5; d2.vy *= 2; d2.vy -= 2; }   // :19067-19069
+          }
+        }
         this.vy = -lastVY * 0.2;
         game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });
         game.playSfx?.('dig', 0.8);
@@ -721,9 +827,9 @@ export class RollingBoulder extends Entity {
       //  Kill()（:19098-19100）,【无】HitTiles 前置尘（旧仓 #9A9A9A 灰尘系 Kill 面
       //  整缺期的自造替身,真面=Kill 尘/声,随本刀就位 → 替身退役）;死亡面经 rbKill
       //  （99→尘1×30+dig / 1013 已专支 / 1014→尘12×30+dig+Item29 / 1021→尘323×30
-      //  +dig / 1053→64 盒尘+gore+Item14 / 1057→dig+Item5523）。★1021 vanilla 有
-      //  专属弹跳支（:19101-19125,四次内弹回/limit Kill）本仓仍落本支即碎=既有
-      //  建模偏差非本刀域（BJ88 债1 家族弹支逐型移植的余项,登记未动）。
+      //  +dig【Kill 面同源,弹跳面已专支】 / 1053→64 盒尘+gore+Item14 / 1057→dig+
+      //  Item5523）。★1021 vanilla 专属弹跳支（:19101-19128,四次内弹回/limit Kill）
+      //  已由 ★SW-BJ93 债③ 落刀（2026-09-16）——本支余型 {99,1005,1014,1053,1057}。
       if (this.vx !== lastVX) {
         if (this.projId !== 1055) {
           this.rbKill(game);
@@ -979,6 +1085,34 @@ export class RollingBoulder extends Entity {
       return;
     }
     if (this.localAI1 > 20) this.rbKill(game);         // :19187-19190（20 弹上限）
+  }
+
+  /** ★SW-BJ93 债③（2026-09-16）：1021 专属弹支（P.cs:19101-19128 直译;1458
+   *  :19102-19129 同域逐字 byte-diff 全等,2026-09-16 对拍）。与 1013/1047 的分段
+   *  弹表不同构——独立三段：①Y 高速（lastVY>4）落地弹回 −0.9 + HitTiles+PlaySound(0)
+   *  （:19105-19110,HitTiles 近似=家族①同款约定）;②Y 低速下落（0<lastVY≤4）置
+   *  localAI[1]=999（:19111-19114 停稳标记——标记后 X 撞墙必 >3 → Kill=着陆后贴墙
+   *  推死）;③X 撞墙 localAI[1]<=3 → 弹回 −0.75++（:19118-19122,四次内弹回）,>3 →
+   *  Kill（:19123-19126,尘 323+dig 族面随 rbKill）。无静止杀/无拍龄钟消费（1021
+   *  不在 :26365 钟内）;本支零 RNG（无 Main.rand 掷）。 */
+  private rb1021Bounce(lastVX: number, lastVY: number, game: GameHooks): void {
+    if (this.vy !== lastVY) {                          // :19103
+      if (lastVY > 4) {                                // :19105
+        game.spawnParticles?.(this.cx, this.y + this.h, '#8A8A8A', 6, 1.2, { life: 14 });   // HitTiles 近似（家族①同款约定）
+        game.playSfx?.('dig', 0.8);                    // :19108 PlaySound(0)
+        this.vy = -lastVY * 0.9;                       // :19109
+      } else if (lastVY > 0) {                         // :19111
+        this.localAI1 = 999;                           // :19113（停稳标记）
+      }
+    }
+    if (this.vx !== lastVX) {                          // :19116
+      if (this.localAI1 <= 3) {                        // :19118（0..3 四次内弹回）
+        this.vx = lastVX * -0.75;                      // :19120
+        this.localAI1++;                               // :19121
+      } else {
+        this.rbKill(game);                             // :19125（limit Kill）
+      }
+    }
   }
 
   // ===========================================================================
@@ -1452,10 +1586,292 @@ export class RollingBoulder extends Entity {
     if (this.projId === 1014) {
       game.spawnDrop?.(this.cx, this.cy, VANILLA_ITEM_KEY_BY_ID[29] ?? 'vi_29_LifeCrystal', 1);
     }
-    // :76488-76490 netMode!=1 支——1048→Kill_DirtAndFluidProjectiles_…(pt,2f,
-    //  SpreadPoopPyramid)（便便金字塔置地,DelegateMethods.cs:469）/ 1053→
-    //  LavaBoulderExplosion()（:71647,半径 4 CanHitLine 置岩浆）=地形修改面,
-    //  本刀未移植=邻接债（BJ92 移交件口径=尘/声面;登记未动）。
+    // :76488-76490（1458 :76489-76491）netMode!=1 支——★SW-BJ93 债②（2026-09-16）
+    //  地形面已落刀（原 rbKillFamilyFace 尾注「本刀未移植=邻接债登记」退役）：
+    //  1048→SpreadPoopPyramid / 1053→LavaBoulderExplosion,见 rbKillTerrainFace 注。
+    this.rbKillTerrainFace(game);
+  }
+
+  /** ★SW-BJ93 债②（2026-09-16）：Kill() 地形面（P.cs:76478-76489 `if
+   *  (Main.netMode != 1)` 支直译;1458 :76479-76490 同域逐字 byte-diff 全等 2026-09-16）。
+   *  ★原版 Kill() 调用序亲读定谳：尘表(:76361-69)→声(:76370-89)→1053 专属爆面
+   *  (:76391-76446)→1054/1055/缺省尘(:76438-76469)→掉落(:76470-77)→【地形面最后】
+   *  (:76478-76489)——故本面插在 rbKillFamilyFace 掉落臂之后=1048 铺置面/1053 注液
+   *  面的 RNG（金字塔逐格铺置尘 322 掷+TryKillingReplaceableTile 破格面）恒在家族
+   *  死亡尘/掉落掷【之后】,逐位同序。netMode!=1 = 单机恒真（本仓单机域无条件跑）。 */
+  private rbKillTerrainFace(game: GameHooks): void {
+    if (this.projId === 1048) {
+      // :76482 pt=Center.ToTileCoordinates();:76483 RunDelegateMethodPushUpForHalfBricks(pt,2f,SpreadPoopPyramid)
+      this.rbSpreadPoopPyramid(game);
+    }
+    if (this.projId === 1053) {
+      this.rbLavaBoulderExplosion(game);               // :76487 LavaBoulderExplosion()（:71647-71661）
+    }
+  }
+
+  // ---- ★SW-BJ93 债② 世界写入面（RollingBoulder 内直译,委托面最小化：唯一新增
+  //  GameHooks 薄委托 = slopeTileAt（Game.worldGenSlopeTile(SlopeTile :82045) 既有
+  //  1:1 面的 3 行包装）;其余写位走 TileStore.setTile/setLiquid 既有原语）----
+
+  /** Entity.Center tile 化（Utils.ToTileCoordinates Utils.cs:1899-1902 =
+   *  `(int)vec.X >> 4` 算术右移;Center=position+(float)width/2f Entity.cs:53-55 浮点
+   *  半宽——入口 fround 物化 Vector2 f32 存储域,LineOfSight F4 批同口径）。 */
+  private rbCenterTileX(): number {
+    return Math.trunc(Math.fround(Math.fround(this.x) + Math.fround(this.w / 2))) >> 4;
+  }
+
+  private rbCenterTileY(): number {
+    return Math.trunc(Math.fround(Math.fround(this.y) + Math.fround(this.h / 2))) >> 4;
+  }
+
+  /** WorldGen.SolidOrSlopedTile(Tile)（WorldGen.cs:70515-70537 直译）——tile≠null ∧
+   *  active ∧ tileSolid ∧ !tileSolidTop ∧ !inActive（"OrSloped"名不副实:坡位不参与
+   *  判,原文如此;:71636 半砖顶推消费）。 */
+  private rbSolidOrSlopedTile(st: { inBounds(x: number, y: number): boolean;
+    hasTile(x: number, y: number): boolean; isActuated(x: number, y: number): boolean;
+    idx(x: number, y: number): number; get(x: number, y: number): number;
+    half: ArrayLike<number> }, x: number, y: number): boolean {
+    if (!st.inBounds(x, y) || !st.hasTile(x, y) || st.isActuated(x, y)) return false;
+    const d = TILE_DEFS[st.get(x, y)];
+    return !!d && !!d.solid && !d.platform;
+  }
+
+  /** ★1048 便便金字塔（Kill_DirtAndFluidProjectiles_RunDelegateMethodPushUpForHalfBricks
+   *  P.cs:71627-71645 + Utils.FloodFillTile Utils.cs:2548-2592 + DelegateMethods.
+   *  SpreadPoopPyramid→SpreadTile DelegateMethods.cs:469/474-599 全链直译）：
+   *  ①半砖顶推（:71630-71641——pt 格 active∧halfBrick ∧ 上格非 SolidOrSlopedTile →
+   *  pt.Y--）;②v2_1=pt/f_1=2f;③洪水填充 BFS（BitSet2D.Reset(pt,⌈2⌉+1=3)=7×7 位域、
+   *  FIFO 层序、出队格 plot 真 → 四邻【左,右,上,下】序 InWorld∧未访 → 入队;扩散界=
+   *  金字塔形门,plot 真 ⊆ 12 格形域）。 */
+  private rbSpreadPoopPyramid(game: GameHooks): void {
+    const st = game.world.store;
+    let px = this.rbCenterTileX();
+    let py = this.rbCenterTileY();
+    if (!st.inBounds(px, py)) return;                  // FloodFillTile 头 WorldGen.InWorld(point)
+    if (st.hasTile(px, py) && st.half[st.idx(px, py)] !== 0) {          // :71630
+      if (py - 1 >= 0 && !this.rbSolidOrSlopedTile(st, px, py - 1)) py--;   // :71632-71640
+    }
+    const plot = (x: number, y: number): boolean => this.rbSpreadTilePoop(x, y, px, py, game);
+    const visited = new Set<number>();
+    const queue: Array<[number, number]> = [[px, py]];
+    visited.add(py * st.w + px);
+    for (let qi = 0; qi < queue.length; qi++) {
+      const cur = queue[qi]!;
+      if (!plot(cur[0], cur[1])) continue;             // :2567 plot 假 → 不扩散
+      for (const [nx, ny] of [[cur[0] - 1, cur[1]], [cur[0] + 1, cur[1]],
+        [cur[0], cur[1] - 1], [cur[0], cur[1] + 1]] as const) {
+        if (!st.inBounds(nx, ny)) continue;            // :2570/:2575/:2580/:2585 InWorld
+        const key = ny * st.w + nx;
+        if (visited.has(key)) continue;                // floodFillBitset.Add
+        visited.add(key);
+        queue.push([nx, ny]);
+      }
+    }
+  }
+
+  /** DelegateMethods.SpreadTile(x, y, 666, 322, pyramidShape:true)（:474-599 直译,
+   *  overLiquidType=-1 支域）。返回值=FloodFillTile 扩散判据（:2567 plot）。 */
+  private rbSpreadTilePoop(x: number, y: number, ax: number, ay: number, game: GameHooks): boolean {
+    const st = game.world.store;
+    const num = 2;                                     // :476 Math.Max(0.1f, f_1)
+    // :477-487 金字塔形门（num3=ay+num/2、num4=|y−num3|/num、num2=num×(1−num4)）
+    const num2 = num * (1 - Math.abs(y - (ay + num / 2)) / num);
+    if (Math.abs(x - ax) > num2 || Math.abs(y - ay) > num) return false;
+    this.rbTryKillingReplaceableTilePoop(x, y, game);  // :500
+    if (this.rbPlacePoopBlock(x, y, game)) {           // :501 WorldGen.PlaceTile(x,y,666)
+      // :520-530 成功面：3 迭代×2 尘 322（盒=格 16×16、α100）——①scale2.2:
+      //  noGravity→Y−1.2→v×4（原文 Y 先于 ×4=Y 净 ×4 后 −4.8）②scale1.3:Y−1.2→v×2
+      const wx = x * 16, wy = y * 16;
+      for (let i = 0; i < 3; i++) {
+        const d = game.spawnDust?.(wx, wy, 16, 16, 322, 0, 0, 100, null, 2.2);
+        if (d) { d.noGravity = true; d.vy -= 1.2; d.vx *= 4; d.vy *= 4; }
+        const d2 = game.spawnDust?.(wx, wy, 16, 16, 322, 0, 0, 100, null, 1.3);
+        if (d2) { d2.vy -= 1.2; d2.vx *= 2; d2.vy *= 2; }
+      }
+      // :531-548 邻坡拍平——下格 非平台∧(topSlope{1,2}∨halfBrick) → SlopeTile(x,y+1);
+      //  上格 非平台∧bottomSlope{3,4} → SlopeTile(x,y−1)（game.slopeTileAt=
+      //  WorldGen.SlopeTile(i,j,0,false,true) 1:1 面,见 GameHooks 委托注）
+      const below = st.inBounds(x, y + 1) ? st.idx(x, y + 1) : -1;
+      if (below >= 0) {
+        const bd = TILE_DEFS[st.type[below]];
+        const bs = bd?.vanilla?.sheet ?? -1;
+        if (bd && !RB_PLATFORM_SHEETS.has(bs)
+          && (st.slope[below] === 1 || st.slope[below] === 2 || st.half[below] !== 0)) {
+          game.slopeTileAt?.(x, y + 1);
+        }
+      }
+      const above = st.inBounds(x, y - 1) ? st.idx(x, y - 1) : -1;
+      if (above >= 0) {
+        const ad = TILE_DEFS[st.type[above]];
+        const asheet = ad?.vanilla?.sheet ?? -1;
+        if (ad && !RB_PLATFORM_SHEETS.has(asheet)
+          && (st.slope[above] === 3 || st.slope[above] === 4)) {
+          game.slopeTileAt?.(x, y - 1);
+        }
+      }
+      // :549-578 草族 3×3（自身 666 除外）全围 SolidTile → KillTile(fail:true) 转化
+      this.rbKillGrassAround(x, y, game);
+      return true;                                     // :579
+    }
+    // :581-598 PlaceTile 失败 fall-through（overLiquidType=-1 → :581 支跳过）——
+    //  残型非实心（或平台/380）→ 真=BFS 仍经此扩散;实心 → 假。★残型 type 域对拍：
+    //  vanilla 残型 type=0=土块（tileSolid[0]=true → :594-597 假）——本仓 id 0 是
+    //  'empty' 非实心 def,须按 vanilla 语义显式早退（幽灵残型 type≠0 照常按域判）。
+    if (!st.inBounds(x, y)) return false;              // :586 tile2 == null
+    const resid = st.get(x, y);
+    if (resid === 0) return false;                     // vanilla type 0（土）实心 → 假
+    const d = TILE_DEFS[resid];
+    const sheet = d?.vanilla?.sheet ?? -1;
+    if (d && d.solid && !d.platform) return sheet === 380;   // :594-597（380 种植箱特例）
+    return true;                                       // :598
+  }
+
+  /** SpreadTile 草族围杀面（DelegateMethods.cs:549-578 直译）——放置格 3×3 邻域内
+   *  草族 {2,23,60,70,109,199,477,492}（自身 666 除外）且其自身 3×3 全 WorldGen.
+   *  SolidTile → KillTile(j,k,fail:true)（:64222-64250 转化支:草→土/泥零掉落+
+   *  SquareTileFrame;dustAmount fail 档=3 :67124-67127=killTile 尘近似〔spawnParticles
+   *  灰粒约定〕;声面=dig 近似〔repo SlopeTile fail-kill 同款,登记:vanilla 按
+   *  KillTile_PlaySounds fail 档变体〕）。 */
+  private rbKillGrassAround(x: number, y: number, game: GameHooks): void {
+    const st = game.world.store;
+    for (let j = x - 1; j <= x + 1; j++) {
+      for (let k = y - 1; k <= y + 1; k++) {
+        if (!st.inBounds(j, k) || !st.hasTile(j, k)) continue;           // :553 !tile.active()
+        const tid = st.type[st.idx(j, k)];
+        const sheet = TILE_DEFS[tid]?.vanilla?.sheet ?? -1;
+        if (sheet === 666) continue;                                     // :554 tileType == tile.type
+        const bare = RB_GRASS_TO_BARE[sheet];
+        if (bare === undefined) continue;                                // :554 草族白名单
+        let flag = true;                                                 // :558
+        for (let l = j - 1; l <= j + 1; l++) {
+          for (let m = k - 1; m <= k + 1; m++) {
+            if (!solidTileAt(st, l, m)) flag = false;                    // :563 WorldGen.SolidTile（OOB→true 怪癖在 solidTileAt 内）
+          }
+        }
+        if (flag) {
+          game.spawnParticles?.(j * 16 + 8, k * 16 + 8,
+            TILE_DEFS[tid]?.mapColor ?? '#8B7553', 3, 1.2);              // KillTile(fail) 尘 3
+          const bareId = TILE_BY_KEY[bare];
+          if (bareId !== undefined) st.setTile(j, k, bareId);            // :64230/:64238 转化+SquareTileFrame(:64248)
+        }
+      }
+    }
+  }
+
+  /** WorldGen.TryKillingReplaceableTile(x, y, 666)（WorldGen.cs:59803-59831 直译）——
+   *  可杀面=tileCut∨BreakableWhenPlacing∨IsADripTile（≠666）;flag3=tileAlch[666]=假
+   *  → `num || ((flag|flag2)&flag3)` ≡ num（下格∉{78,380,579} 花盆族）,真 →
+   *  KillTile(x,y)（全语义:掉落+声,game.breakTile 既有 1:1 委托）。 */
+  private rbTryKillingReplaceableTilePoop(x: number, y: number, game: GameHooks): void {
+    const st = game.world.store;
+    if (x < 2 || y < 2 || x >= st.w - 2 || y >= st.h - 2) return;   // :59805 InWorld(x,y,2) fluff=2
+    if (!st.hasTile(x, y)) return;                     // :59809 active()
+    const tid = st.type[st.idx(x, y)];
+    const sheet = TILE_DEFS[tid]?.vanilla?.sheet ?? -1;
+    if (!(TILE_CUT_SHEETS.has(sheet) || BREAKABLE_WHEN_PLACING_SHEETS.has(sheet)
+      || RB_DRIP_SHEETS.has(sheet))) return;
+    if (sheet === 666) return;                         // :59811 type != tileType
+    const belowSheet = TILE_DEFS[st.get(x, y + 1)]?.vanilla?.sheet ?? 0;   // :59813（y+1 界内,InWorld(2) 保证）
+    const num = belowSheet !== 78 && belowSheet !== 380 && belowSheet !== 579;
+    if (num) {
+      game.breakTile?.(x, y);                          // :59819 KillTile(x, y)（全语义）
+    }
+  }
+
+  /** Collision.EmptyTile(i, j)（Collision.cs:1361-1383 直译）——!active ∧ 无活玩家
+   *  （active∧!dead∧!ghost）∧ 无活 NPC（Main.npc 全桶;本仓 enemies+npcs+critters
+   *  三桶并集）矩形不相交。Rectangle.Intersects 闭开语义=rectsIntersect;实体矩形
+   *  坐标 (int)position 截断（Collision.cs:1370 玩家/:1377 NPC;1458 同域 :1370/:1377
+   *  全等）→ Math.trunc 朝零截断同构。 */
+  private rbEmptyTile1457(x: number, y: number, game: GameHooks): boolean {
+    const st = game.world.store;
+    if (!st.inBounds(x, y) || st.hasTile(x, y)) return false;
+    const rx = x * 16, ry = y * 16;
+    for (const p of (game.candidatePlayers?.() ?? [game.player])) {
+      const pp = p as { dead?: boolean; ghost?: boolean; x: number; y: number; w: number; h: number };
+      if (!pp || pp.dead || pp.ghost) continue;
+      if (rectsIntersect(rx, ry, 16, 16, Math.trunc(pp.x), Math.trunc(pp.y), pp.w, pp.h)) return false;   // (int)position :1370
+    }
+    const buckets = [game.enemies(), game.npcs?.() ?? [], game.critters?.() ?? []];
+    for (const bucket of buckets) {
+      for (const raw of bucket as unknown[]) {
+        const e = raw as { dead?: boolean; x: number; y: number; w: number; h: number } | null;
+        if (!e || e.dead) continue;                    // Main.npc[l].active
+        if (rectsIntersect(rx, ry, 16, 16, Math.trunc(e.x), Math.trunc(e.y), e.w, e.h)) return false;       // (int)position :1377
+      }
+    }
+    return true;
+  }
+
+  /** WorldGen.PlaceTile(i, j, 666)（WorldGen.cs:59833-59845+:60725-60759 最小语义面）——
+   *  666 实心 → :59864 门走 Collision.EmptyTile 臂（forced=假、其余覆写臂对 666 全
+   *  不匹配）;:59945 液格门对 666 不在排除表 {3,20,24,27,32,51,69,72,201,352,529,624,
+   *  700,637,656,701,697} → 液上【可】铺（1:1）;写位=default 支 active+type
+   *  （:60725-60727）+SquareTileFrame（:60752→本仓 setTile 监听链）→ result=true。 */
+  private rbPlacePoopBlock(x: number, y: number, game: GameHooks): boolean {
+    const st = game.world.store;
+    if (!st.inBounds(x, y)) return false;
+    if (!this.rbEmptyTile1457(x, y, game)) return false;
+    const pooId = TILE_BY_KEY['v_666_poo'];
+    if (pooId === undefined) return false;
+    st.setTile(x, y, pooId);
+    return true;
+  }
+
+  /** ★1053 熔岩巨石爆炸地形面（Projectile.LavaBoulderExplosion P.cs:71647-71661 直译）——
+   *  心 tile ±4 盒（81 格）内 Distance(心,格)<4 圆盘 ∧ Collision.CanHit(弹盒→格盒)
+   *  → WorldGen.PlaceLiquid(i, j, 1, 255)。零 RNG。 */
+  private rbLavaBoulderExplosion(game: GameHooks): void {
+    const st = game.world.store;
+    const num = 4;                                     // :71649
+    const vx = this.rbCenterTileX();                   // :71650 value=((int)Center.X/16,(int)Center.Y/16)
+    const vy = this.rbCenterTileY();
+    for (let i = vx - num; i <= vx + num; i++) {       // :71651（(float)i<=value.X+num 整域等价）
+      for (let j = vy - num; j <= vy + num; j++) {     // :71653
+        if (Math.hypot(i - vx, j - vy) < num
+          && canHit(st, this.x, this.y, this.w, this.h, i * 16, j * 16, 16, 16)) {
+          this.rbPlaceLiquidLava(i, j, game);          // :71657 PlaceLiquid(i,j,1,255)
+        }
+      }
+    }
+  }
+
+  /** WorldGen.PlaceLiquid(x, y, 1, 255)（WorldGen.cs:4495-4546 直译,lava 255 支域;
+   *  1458 同域 :4495-4546 逐字全等 2026-09-16）——①实心门 nactive∧tileSolid∧
+   *  !tileSolidTop → false;②本格无液∧同液型 → 注满（amount 钳 255−liquid → 恒 255）;
+   *  ③异液合并 GetLiquidMergeTypes(this=1)——水→黑曜石 56/蜂蜜→脆蜂蜜 230/微光→659。
+   *  ★原版序（:4533-4544 亲读定谳）：【先】清液（:4535-4536 tile.liquid=0;
+   *  liquidType(0)）【后】PlaceTile（:4537,mute,forced=缺省假）——mergeTile 56/230/659
+   *  全 solid（tileSolid[56]=Main.cs:8079/[230]=:10362/[659]=:9767）∧非 moss∧非覆写
+   *  特支 → :59864 析取链化简为 Collision.EmptyTile(i,j) 臂;拒铺（实体罩格/格上
+   *  active 件）→【止于液清零、块不落】=原版序。:59945 液格门不适用（进 PlaceTile
+   *  时液已清零）。SquareTileFrame(:4538 无条件)/sendWater=联机面（单机 no-op;
+   *  setLiquid/setTile 监听链承载光照侧）。 */
+  private rbPlaceLiquidLava(x: number, y: number, game: GameHooks): void {
+    const st = game.world.store;
+    if (!st.inBounds(x, y)) return;                    // :4497 InWorld
+    if (st.isActive(x, y)) {
+      const d = TILE_DEFS[st.get(x, y)];
+      if (d && d.solid && !d.platform) return;         // :4507 实心门
+    }
+    const i = st.idx(x, y);
+    const liq = st.liquid[i];
+    const ltype = st.liquidType[i];                    // repo +1 编码（1水/2岩浆/3蜜/4微光）
+    if (liq === 0 || ltype === LIQUID_TYPE.LAVA) {     // :4511（liquidType==b;b=岩浆↔repo 2）
+      st.setLiquid(x, y, 255, LIQUID_TYPE.LAVA);       // :4513-4518（amount 钳后恒满 255）
+      return;
+    }
+    const mergeSheet = ltype === LIQUID_TYPE.WATER ? 56            // b=水 → :4532 case 1 → 56
+      : ltype === LIQUID_TYPE.HONEY ? 230                          // b=蜜 → case 1 → 230
+      : ltype === LIQUID_TYPE.SHIMMER ? 659 : 0;                   // b=微光 → case 1 → 659
+    if (mergeSheet === 0) return;                      // :4533 mergeTileType==0 → false
+    st.setLiquid(x, y, 0, LIQUID_TYPE.NONE);           // :4535-4536 tile.liquid=0;liquidType(0)【先】
+    const mergeId = mergeSheet === 56 ? TILE_BY_KEY['obsidian']
+      : mergeSheet === 230 ? TILE_BY_KEY['v_230_crispy_honey_block']
+      : TILE_BY_KEY['v_659_aetherium_block'];
+    if (mergeId === undefined) return;                 // 数据面缺键护栏（:59839 TileID.Count 门域）
+    if (!this.rbEmptyTile1457(x, y, game)) return;     // :4537 PlaceTile → :59864 EmptyTile 臂【后】;拒=止于液清零
+    st.setTile(x, y, mergeId);                         // PlaceTile default 写位（:60725-60727+SquareTileFrame :60752→监听链）
   }
 
   /** ★SW-BJ93 债4②（2026-09-16）：1002 TNTBarrel aiStyle16 Kill 支 SelfHurtPlayers

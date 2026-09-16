@@ -49,14 +49,16 @@ const SOLID_ID = TILE_DEFS.findIndex((d) => d && d.solid && !d.platform);
 
 function fakeStore(w = 64, h = 64, placed?: Map<number, number>) {
   const cells = placed ?? new Map<number, number>();
+  const liquid = new Float32Array(w * h);            // ★债② wave2：提本地量供 setLiquid 闭包
+  const liquidType = new Float32Array(w * h);
   return {
     w, h,
     type: new Uint8Array(w * h),
     flags: new Uint8Array(w * h),
     slope: new Uint8Array(w * h),
     half: new Uint8Array(w * h),
-    liquid: new Float32Array(w * h),
-    liquidType: new Float32Array(w * h),
+    liquid,
+    liquidType,
     idx: (x: number, y: number) => y * w + x,
     inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h,
     isSolid: (x: number, y: number) => {
@@ -69,6 +71,19 @@ function fakeStore(w = 64, h = 64, placed?: Map<number, number>) {
     hasTile: (x: number, y: number) => cells.has(y * w + x),
     isActuated: () => false,
     get: (x: number, y: number) => cells.get(y * w + x) ?? 0,
+    // ★BJ93 债⑤清账批（2026-09-16）fixture 补齐：债④b 1054 蛛网铺置支
+    //  （RollingBoulder AI_025 :26402 PlaceTile(51,mute) → 仓内 setTile 监听链）
+    //  在 10 拍 G5 窗内 1/7 掷必中,旧桩缺 setTile → TypeError 假红
+    //  （TileStore.setTile(x,y,type,frameX=0,frameY=0) 直写;桩只记账 type 面）。
+    setTile: (x: number, y: number, type: number) => { cells.set(y * w + x, type); },
+    // ★SW-BJ93 债② wave2（2026-09-16）fixture 补齐：Kill 地形面 1053 注液
+    //  （WorldGen.PlaceLiquid 仓内 setLiquid 原语）+ canHit/solidTileAt 的 wire 位
+    //  （真 TileStore 域;旧桩缺 → TypeError 假红）。
+    setLiquid: (x: number, y: number, amount: number, lt: number) => {
+      liquid[y * w + x] = amount;
+      liquidType[y * w + x] = lt;
+    },
+    wire: new Uint8Array(w * h),
   };
 }
 type Store = ReturnType<typeof fakeStore>;
@@ -207,9 +222,12 @@ describe('SW-BJ93 债2 Kill 家族尘/声面（BJ92 登记债;rbKill 家族面�
     for (const [sheet, dustType] of cases) {
       const game = fakeGame(fakeStore());
       internals(mkBoulder(sheet)).rbKill(game);
-      expect(game.dusts.length).toBe(30);
-      expect(game.dusts.every((d) => d.type === dustType)).toBe(true);
-      const scaled = game.dusts.filter((d) => d.scale !== 1);
+      // ★SW-BJ93 债② wave2 重锚（2026-09-16）：地形面（:76478-76489）落刀后,1048 的
+      //  rbKill 追加金字塔逐格 3×2 尘 322（16×16 盒×72）——死亡尘面断言按原盒 31×31 过滤。
+      const death = game.dusts.filter((d) => d.w === 31 && d.h === 31);
+      expect(death.length).toBe(30);
+      expect(death.every((d) => d.type === dustType)).toBe(true);
+      const scaled = death.filter((d) => d.scale !== 1);
       expect(scaled.length).toBeGreaterThan(0);
       expect(scaled.length).toBeLessThan(30);          // Next(2)==0 半数（确定性掷域内非全量）
     }

@@ -371,7 +371,7 @@ for (const mode of ['vanilla-embedded', 'classic-overlay']) {
     const coin = document.querySelector('.sw-npc-coins');
     const btn = document.querySelector('.sw-npc-btn');
     const coinSt = coin ? { fs: getComputedStyle(coin).fontSize, left: coin.style.left, top: coin.style.top, x: +coin.getBoundingClientRect().x.toFixed(1), w: +coin.getBoundingClientRect().width.toFixed(1) } : null;
-    const btnSt = btn ? { fs: getComputedStyle(btn).fontSize, x: +btn.getBoundingClientRect().x.toFixed(1) } : null;
+    const btnSt = btn ? { fs: getComputedStyle(btn).fontSize, x: +btn.getBoundingClientRect().x.toFixed(1), w: +btn.getBoundingClientRect().width.toFixed(1) } : null;
     dlg.close();
     return { one, ten, coinSt, btnSt, perLine, adv: +adv.toFixed(2) };
   });
@@ -386,7 +386,7 @@ for (const mode of ['vanilla-embedded', 'classic-overlay']) {
   if (coinSt) {
     ok(coinSt.fs === '11px', `F 金币计数 11px(实测 ${coinSt.fs})`);
     ok(btnSt.fs === '17px', `F 按钮 17px(实测 ${btnSt.fs})`);
-    ok(coinSt.x + coinSt.w <= btnSt.x + 1, `F 金币条不压按钮文字(金币右缘 ${coinSt.x + coinSt.w} ≤ 钮左 ${btnSt.x})`);
+    ok(coinSt.x >= btnSt.x + btnSt.w - 1, `F 金币条不压按钮文字=起于钮右(FX52 定谳:币条左缘 ${coinSt.x} ≥ 钮右 ${(btnSt.x + btnSt.w).toFixed(1)},NPCChatPanel.cs:135 推进后 :142 画于预留槽)`);
   }
   // 窄屏 scale 态(420px 级 viewport → 0.52):相对几何保形
   await page.setViewport({ width: 400, height: 800 });

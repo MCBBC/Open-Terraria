@@ -13869,8 +13869,9 @@ export class Enemy extends Entity {
     // 毁灭者身段受击出探针（HitEffect :90265-90281：135 身段存活受击时,ai[2]==0
     // （本段未出过探针）掷 1/25（Mechdusa 合体态 1/50）→ 置 ai[2]=1 并于段底中心
     // 生成探针 139——每身段至多一只。★底锚换算：原版 NewNPC(X,Y) 为 Bottom 锚
-    // （:81521 nPC.Bottom=(X,Y)）→ 探针底=节底;本仓 fromVanilla 中心锚 → Y 补
-    // +h/2(139.h=20 → -10 修正前旧码低 10px)。ai[2]=1 由 FindFrame case 135
+    // （NewNPC 体 :81594 nPC.Bottom=(X,Y)）→ 探针底=节底;本仓 fromVanilla 中心锚 → Y 补
+    // +h/2（★139.h=30→15,RB15c 勘误见下方生成点——本行旧「h=20→-10」前提已废,勿据
+    // 此回改;结构锁=tests/mech-gaps.test.ts ①）。ai[2]=1 由 FindFrame case 135
     // （:74229 灭帧）与 destroyerSegmentLight 灯熄门消费——帧分支见 Renderer
     // vanillaFrameIdx（2026-09-03 接上:此前帧选择未跟随 ai2=亮灭闪根因）。
     if (this.vanillaId === 135 && this.hp > 0 && this.ai2 === 0) {

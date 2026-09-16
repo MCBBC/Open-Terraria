@@ -7637,10 +7637,17 @@ export class Player extends Entity {
   }
 
   /** Player.CCed（1457 Player.cs:6291/:21738 等消费；1456 为 frozen||webbed||stoned
-   *  内联三元，1457 收敛为属性，语义同）——硬控三件套 */
+   *  内联三元，1457 收敛为属性，语义同）——硬控三件套。
+   *  ★SW-FX52（2026-09-16）：补 shimmering 腿——原版 buff 353 处理段同时置
+   *  `shimmering = true; frozen = true`（Player.cs:11872-11876），即微光化态在原版
+   *  经 frozen 字段恒入 CCed（:3361-3372）⇒ ItemCheck 早退（:42924-42930）、
+   *  QuickGrapple 早退（:6292-6294）、controlUseItem/controlUseTile 清零（:25432-25442）
+   *  全部生效=微光态不可用物品/不可发射钩爪。本仓 buff 353 只写 shimmering 字段
+   *  （不挂 Frozen buff）,旧三件套缺微光腿 ⇒ 微光下沉中左键/E 键照发钩爪,牵引把
+   *  穿落中的玩家拖进岩层（用户实报「卡进地里」）。 */
   get cced(): boolean {
     return this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Webbed)
-      || this.buffs.has(BuffType.Stoned);
+      || this.buffs.has(BuffType.Stoned) || this.shimmering;
   }
   // ---- 钩爪（AI_007 + GrappleMovement 1:1）----
   /** 本 tick 锚点表（原版 player.grappling[10] + grapCount，Player.cs:2608/:2828）：

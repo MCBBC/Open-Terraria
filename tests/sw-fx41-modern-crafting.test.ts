@@ -145,12 +145,14 @@ describe('SW-FX41 P2-1 窗体几何(NewCraftingUI.cs:302-317)', () => {
     expect(o.guideSlot).toEqual({ x: 44, y: 443 });                     // +(0,58)(ctx7=本仓无域,备案)
   });
   it('材料行压缩(:469-485 num=min(11/材料数,1);列距 34·num、槽 0.7·num)', () => {
-    expect(mcraftMaterialPos({ x: 44, y: 385 }, 0, 3)).toEqual({ x: 116, y: 391, scale: 0.7 });
+    // ★FX41b 遗留修(2026-09-16):返回值外露 num(:485 DrawOwnedItemCount mscale 契约)
+    expect(mcraftMaterialPos({ x: 44, y: 385 }, 0, 3)).toEqual({ x: 116, y: 391, scale: 0.7, num: 1 });
     expect(mcraftMaterialPos({ x: 44, y: 385 }, 2, 3).x).toBeCloseTo(116 + 68, 6);   // 34·1·2
     const m12 = mcraftMaterialPos({ x: 44, y: 385 }, 1, 12);            // num=11/12
     expect(m12.x).toBeCloseTo(116 + 34 * (11 / 12), 6);
     expect(m12.y).toBeCloseTo(385 + (22 - 16 * (11 / 12)), 6);
     expect(m12.scale).toBeCloseTo(0.7 * (11 / 12), 8);
+    expect(m12.num).toBeCloseTo(11 / 12, 8);
   });
   it('拥有数位/配色(DrawOwnedItemCount :555-561:+(3,32)·scale;足 (144,238,144)/缺 (255,140,160))', () => {
     expect(mcraftOwnedCountPos({ x: 116, y: 391, scale: 1 })).toEqual({ x: 119, y: 423 });

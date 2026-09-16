@@ -19,6 +19,7 @@ import assetsIndexJson from '../../public/assets-index.json';
 import { MUSIC } from '../data/Music';
 import { unzipSync } from 'fflate';   // zip 快路径页面直给解压(SW 不参与 warming)
 import { VANILLA_MISC } from '../assets/SpriteAtlas';
+import { mimeOf } from './assetMime';   // ★落库 CT 单源(2026-09-16 根修,见 assetMime.ts 头注)
 
 /** 手动版本闸:仅 sounds/audios/fonts/l10n 内容变更时 +1(贴图走 JSON 内容 hash 自动)。
  *  ★2(2026-08-21):public/sprites/vanilla/*.png 字节被并行会话 remaster 测试替换又
@@ -584,11 +585,15 @@ async function doInitAssetCache(): Promise<void> {
       // 不 return:继续走下方 controller 检查——ready 慢不代表最终不激活,
       // controller 到位仍可正常启用(原行为保留,仅补告警原因)
     }
-    const sw = navigator.serviceWorker.controller ?? reg.active ?? null;
-    if (!sw) {
-      notePipelineDown(readyRace === 'timeout'
-        ? 'SW 激活超时且未取得页面控制权(controller/active 均空)'
-        : 'SW 未取得页面控制权(controller/active 均空)', true);
+    // ★硬刷检测(2026-09-09 修正):controller=null = 页面未被 SW 控制(硬刷绕过)。
+    //  不看 reg.active——即使 SW 进程活着,controller=null 就意味着 SW 不服务此页面。
+    //  reg.active 有值只说明 SW 进程在,但 fetch handler 被绕过 = 等同无 SW。
+    // ★每次硬刷都需要一次 reload 让 SW 重新接管(Cmd+Shift+R 绕过 SW 是
+    //  Chrome 设计行为,每次都会发生)。不做防循环守卫——普通 reload 后 SW
+    //  必然接管,不会死循环。
+    if (!navigator.serviceWorker.controller && !!reg.active) {
+      console.warn('[AssetCache] 硬刷绕过 SW(controller=null) → 自动刷新恢复控制');
+      location.reload();
       return;
     }
     state.enabled = true;
@@ -609,7 +614,7 @@ async function doInitAssetCache(): Promise<void> {
     (globalThis as unknown as { __swAssetCache?: unknown }).__swAssetCache = {
       state: assetCacheState, warm: warmAllAssets, complete: assetsComplete,
     }; // 调试/探针句柄
-    sw.postMessage({ type: 'init', version: state.version });
+    (reg.active ?? reg.installing ?? reg.waiting)?.postMessage({ type: 'init', version: state.version });
     // warm 窗口旗显式补发(2026-09-04):纠偏上会话崩溃遗留的 stale true——
     // 页面启动即声明"当前未在 warm",之后 warming 翻转由 emit() 跟随同步
     lastWarmFlagSent = state.warming;
@@ -617,7 +622,7 @@ async function doInitAssetCache(): Promise<void> {
     // ★gc 显式授权(2026-08-27):仅清单在手的会话允许 SW 清理旧版本缓存——
     // manifest 失败会话不发本消息,version 即便回退 base 形态也无破坏权
     // (localStorage 锚定失效的极端情况[崩溃丢盘]下缓存照样安全)。
-    if (zipPlan) sw.postMessage({ type: 'gc', version: state.version });
+    if (zipPlan) (reg.active ?? reg.installing ?? reg.waiting)?.postMessage({ type: 'gc', version: state.version });
     postToSw({ type: 'status' });
     // ★监听只绑一次(2026-09-03 retryAssetCacheInit 重入保护):重试成功会二进
     //   doInitAssetCache,重复 addEventListener 会让 onSwMessage 双跑(legacy
@@ -855,8 +860,8 @@ function scheduleZipAutoRetry(immediate = false): void {
   zipAutoRetries++;
   swTrace(`zip自动补拉排定 第${zipAutoRetries}/5轮(${immediate ? 'online即时' : '15s后'})`);
   const run = () => {
-    // 失败终态才补拉;用户已手动重启/状态已自愈则跳过(不叠跑)
-    if (!state.warming && state.phase === 'done' && state.failed > 0) {
+    // 失败或未完整都要补拉;状态已自愈(缺0)则跳过(不叠跑)
+    if (!state.warming && (state.failed > 0 || state.phase !== 'done')) {
       swTrace(`zip自动补拉 第${zipAutoRetries}轮执行(failed=${state.failed})`);
       warmAllAssets(true);
     }
@@ -901,6 +906,10 @@ async function startZipWarm(): Promise<void> {
     if (state.done >= state.total) {   // 已全就位(被清后自愈完成/重复调用)
       state.warming = false;
       state.phase = 'done';
+      // ★全就位即清失败账(2026-09-16 无痕首装死锁修):放行条件 assetsComplete()
+      //  含 failed===0,残留失败账=phase done+failed>0 自锁态(门槛永挂+重下按钮常亮)
+      state.failed = 0;
+      zipFailedAcc = 0;
       writeCompleteFlag(true);
       emit();
       return;
@@ -909,12 +918,15 @@ async function startZipWarm(): Promise<void> {
     zipWorker?.terminate();
     zipWorker = new Worker(new URL('./asset-warm.worker.ts', import.meta.url), { type: 'module' });
     const myRun = ++zipRun;
-    zipWorker.onmessage = async (ev: MessageEvent) => {
+    // ★消息串行化(2026-09-16):async 处理器在首个 await 处让出控制权,'done' 终验
+    //  可与末批 'files' 的 cache.put 并发——终验快照把在途条目误判缺失。链式排队
+    //  保序,'done' 必然看到全部批次落库后的真实缓存态。
+    let msgTail: Promise<void> = Promise.resolve();
+    const handleZipMsg = async (d: {
+      type: string; names?: string[]; bufs?: ArrayBuffer[];
+      mime?: string[]; failed?: number; done?: number; got?: number;
+    }): Promise<void> => {
       if (myRun !== zipRun) return;   // 已被 force 重启取代,丢弃旧 worker 消息
-      const d = ev.data as {
-        type: string; names?: string[]; bufs?: ArrayBuffer[];
-        mime?: string[]; failed?: number; done?: number; got?: number;
-      };
       if (d.type === 'dl' && d.got) {
         // ★全局字节直通(2026-09-04 worker 并发化):worker 内部统一全局计数
         //  (片重试回卷由 worker 修正),页面直用不再分账(dlPartGot/dlCommitted 废止)
@@ -928,7 +940,10 @@ async function startZipWarm(): Promise<void> {
         lastProgressAt = Date.now();
         for (let i = 0; i < d.names.length; i++) {
           try {
-            await cache.put(d.names[i], new Response(d.bufs[i], { headers: { 'Content-Type': d.mime?.[i] ?? 'application/octet-stream' } }));
+            // ★CT 页面侧重算(2026-09-16 根修):不信任 worker 消息里的 mime(旧表
+            //  漏 opus 曾致 863 条音效以 octet-stream 落库,被 sw.js 会话清扫整批
+            //  删除=40MB/会话重下循环)。与 worker 同引 assetMime 单源,漂移即同错。
+            await cache.put(d.names[i], new Response(d.bufs[i], { headers: { 'Content-Type': mimeOf(d.names[i]) } }));
             state.done++;
           } catch { zipFailedAcc++; }
         }
@@ -941,44 +956,52 @@ async function startZipWarm(): Promise<void> {
         emit();
       } else if (d.type === 'done') {
         zipFailedAcc += 0;   // 条目级已实时累计
-        state.failed = zipFailedAcc;
-        state.warming = false;
-        state.phase = 'done';
-        if (zipFailedAcc === 0) state.done = state.total;
-        writeCompleteFlag(zipFailedAcc === 0);
-        swTrace(`warm终态 failed=${zipFailedAcc} done=${state.done}/${state.total} bytes=${Math.round(state.bytesDone / 1048576)}MB flag=${zipFailedAcc === 0}`);
-        // ★失败终态自动补拉(2026-08-27):网络瞬断/切网导致片 3 连败停机后,
-        //   15s 后自动 force 重扫 have-set 只补缺——换网自愈无需刷新/手点
-        if (zipFailedAcc > 0) scheduleZipAutoRetry();
+        // ★终局完整性验证(2026-09-16 无痕首装死锁修,两层):
+        //  ①【精确差集】缓存混有壳 JS/文档/l10n/__sw_meta__ 等非清单条目,曾按
+        //    have.size >= manifestTotal 计数——个位数真缺失被额外条目掩码成假
+        //    "完整✓";改逐条比对清单,缺 0 条才算完整。
+        //  ②【verified 必清 failed】旧 verified 分支只清 zipFailedAcc 不清
+        //    state.failed(worker 条目级失败残留)→ phase='done'+failed>0:
+        //    assetsComplete() 恒 false,单人门槛永久拦截(99%·完成·重新下载 态),
+        //    且此分支不排补拉=永远自锁。
+        //  真缺 → 不标 done,failed=缺失数 → scheduleZipAutoRetry 15s 后只补缺,
+        //  补完再进此分支重验,直至完整或 5 轮耗尽。
+        const keys = await cache.keys();
+        const have = new Set<string>();
+        for (const k of keys) {
+          const hit = await cache.match(k, { ignoreVary: true }).catch(() => null);
+          if (hit) have.add(normCacheKey(k.url));
+        }
+        const missing: string[] = [];
+        for (const p of zipPlan!.parts) {
+          for (const n of p.entries) if (!have.has(n)) missing.push(n);
+        }
+        const verified = missing.length === 0;
+        swTrace(`warm终态 keys=${keys.length} 缺${missing.length}条${missing.length ? ` 样本:${missing.slice(0, 12).join(', ')}` : ''} failed=${zipFailedAcc} bytes=${Math.round(state.bytesDone / 1048576)}MB`);
+        if (verified) {
+          state.warming = false;
+          state.done = state.total;
+          state.failed = 0;                    // ★门槛放行条件含 failed===0,必清
+          zipFailedAcc = 0;
+          state.bytesDone = state.bytesTotal;  // 'dl' 512KB 节流尾差补齐(99%→100%)
+          state.phase = 'done';
+          writeCompleteFlag(true);
+        } else {
+          // 缺:不标 done → hold 不放行;failed 必须非零让补拉轮条件满足
+          state.warming = false;
+          state.failed = Math.max(1, missing.length);
+          state.phase = zipPhaseAt(zipPlan!.parts, state.done);
+        }
         emit();
         zipWorker?.terminate();
         zipWorker = null;
-        // ★终局 keys() 实测对账(2026-09-07 用户实报「BGM 停止+硬刷新贴图丢」,
-        //   zipFailedAcc=0 但实测 cache 缺 863 条 opus——have 内存记账与 SW 缓存
-        //   实态脱节:put 静默失败/换代窗口 gc/浏览器驱逐,任一都会造成「记账
-        //   全满、缓存缺货」。keys() 实测是唯一可信源——缺→scheduleZipAutoRetry
-        //   (15s 后 have-set 只补缺)→补完再实测,自洽闭环。)
-        void (async () => {
-          try {
-            const cache = await caches.open('sw-assets-v' + state.version);
-            const keys = await cache.keys();
-            const have = new Set<string>();
-            for (const k of keys) {
-              const hit = await cache.match(k, { ignoreVary: true }).catch(() => null);
-              if (hit) have.add(normCacheKey(k.url));   // ★body 驱逐条目不算 have(与 have-set 同口径)
-            }
-            const missing = (zipPlan?.parts ?? [])
-              .flatMap((p) => p.entries)
-              .filter((e) => !have.has(normCacheKey(e)));
-            if (missing.length > 0) {
-              swTrace(`warm终态实测缺 ${missing.length} 条(记账虚满)→ 15s 补拉`);
-              scheduleZipAutoRetry();
-            } else {
-              swTrace('warm终态实测对账 0 缺');
-            }
-          } catch { /* keys 失败:下轮启动 warmAllAssets(true) 再对账 */ }
-        })();
+        if (!verified) scheduleZipAutoRetry();
       }
+    };
+    zipWorker.onmessage = (ev: MessageEvent) => {
+      msgTail = msgTail
+        .then(() => handleZipMsg(ev.data as Parameters<typeof handleZipMsg>[0]))
+        .catch((e) => swTrace(`zip 消息处理异常 ${String(e instanceof Error ? e.message : e).slice(0, 80)}`));
     };
     zipWorker.onerror = () => {   // worker 崩溃:按当前失败态停机(重新下载可重启)
       if (myRun !== zipRun) return;
@@ -1048,7 +1071,27 @@ export function warmAllAssets(force = false): void {
   //   否则换控重启被 warming 守卫吞掉 = 修复失效
   if (!force && state.warming) return;
   const finished = zipPlan ? state.phase === 'done' : chunkCursor >= plan.urls.length;
-  if (!force && state.done >= state.total && finished) return; // 已完成(幂等)
+  // ★幂等守卫修正(2026-09-09 硬刷复现):state.done/state.phase 是内存状态,
+  //  硬刷/换代后 SW 缓存可能已被浏览器部分清除——keys() 实测才是唯一可信源。
+  //  旧幂等守卫 `state.done >= state.total && finished` 信任内存状态 → 硬刷后
+  //  内存仍记 done → 守卫短路 → warm 不跑 → 贴图/声音全丢+badge 永久卡。
+  if (!force && state.done >= state.total && finished) {
+    // 实测对账:keys 数 < manifest totalFiles → 有丢失,不短路(继续 warm)
+    const zp = zipPlan;
+    if (zp) {
+      void caches.open('sw-assets-v' + state.version).then(async (c) => {
+        const keyCount = (await c.keys()).length;
+        const manifestTotal = zp.parts.reduce((a, p) => a + p.files, 0);
+        if (keyCount < manifestTotal) {
+          swTrace(`幂等守卫: 实测 keys=${keyCount} < ${manifestTotal} → 强制重warm`);
+          state.done = keyCount;   // 校准到实况
+          state.phase = zipPhaseAt(zp.parts, keyCount);
+          warmAllAssets(true);     // force 重跑(have-set 实测只补缺)
+        }
+      }).catch(() => {});
+    }
+    return;
+  }
   if (force) {
     zipRun++;                  // 旧 worker 消息作废
     zipWorker?.terminate();

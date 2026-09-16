@@ -4,6 +4,7 @@
 // 台词与商店内容在 Game 侧生成(NPC.GetChat / Chest.SetupShop 1:1),本文件纯渲染。
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
+import { VUI } from '../vui/VUI';
 import { options } from '../core/Options';
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { townNpcProfileSheet } from '../data/townNpcProfiles';
@@ -214,9 +215,19 @@ const CSS = `
 .sw-npc-btn:hover .sw-npc-btn-t {
   transform: translateX(calc(-1 * var(--hx, 15%))) scale(calc(var(--cx, 1) * 1.3333)); }
 /* 金币条（TryAddCoins → ItemSlot.DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106
-   :140-144 → 按钮相对 (-151,-44)；原版计数文本 = ItemStack 0.75 缩放
-   （ItemSlot.cs:3679-3680,数字字形 10-15px×0.75 ≈ 7.5-11.25px）→ 11px 钉值保持） */
-.sw-npc-coins { position: absolute; left: -151px; top: -44px; color: #ffd76e;
+   :140-144。★FX52 定谳（2026-09-16 逐字复核 1457）：NPCChatPanel.cs:135 在 DrawMoney
+   之前已 rect.X += 压缩宽+30 越过本钮 → DrawMoney 的 shopx=rect.X-45 与其内部
+   horizontal 支首枚币位 +45+24i（text="" 时 GetStringSize=0,ItemSlot.cs:3689）恰
+   相消 → 首枚币心 = rect.X,币心带 y = shopy+50-44 = rect.Y+6（CoinSlot.cs:254-272
+   币图以传入点为中心）——币条 =【本钮右侧同行的 106 预留槽】：左缘墨 = 首枚计数
+   文本 rect.X-11 = 钮右+19（ItemSlot.cs:3691,vector.X-11 起笔）,竖向 = 钮文字中心
+   (+11) 上 5px 的 +6 带;top:-5px+继承钮 line-height:22px → 字心 = 钮顶+6。
+   :143 的 +=106 只推进【后续】钮位（换行 :105 复位即吞）。旧钉 (-151,-44) 系漏乘
+   :135 推进（币条悬钮左上,2 行台词面板 H=120 时 y=50..65 正压台词第 2 行 = 用户实报）。
+   锚 = 钮元素自身:left:100% = 压缩后钮宽(:117 钉 260 同源),换行/列位随动。
+   原版计数文本 = ItemStack 0.75 缩放（ItemSlot.cs:3691,数字字形 10-15px×0.75 ≈
+   7.5-11.25px）→ 11px 钉值保持） */
+.sw-npc-coins { position: absolute; left: calc(100% + 19px); top: -5px; color: #ffd76e;
   font-size: 11px; white-space: nowrap; text-shadow: 1px 1px 0 #000; pointer-events: none; }
 /* 感叹号（:136-139 文字右 +8px,锚行中,不入命中盒；亮度脉冲 Utils.cs:448）
    ★RB28-F3:原版命中矩形=:117-118 文字宽,图标悬在盒外——pointer-events:none
@@ -370,8 +381,9 @@ export class NpcDialog {
       btn.innerHTML = `<span class="sw-npc-btn-t">${b.label}</span>`
         + (b.excl ? '<img class="sw-npc-excl" src="sprites/vanilla-ui/UI_quickicon1.png" alt="!" draggable="false">' : '');
       if ((b.coins ?? 0) > 0) {
-        // 金币条挂按钮自身（审查 P1 回归锚——曾插容器顶层落最左）：原版
-        // DrawMoney @ (rect.X-45,rect.Y-44) 后 rect.X+=106（:140-144）→ 按钮相对 (-151,-44)
+        // 金币条挂按钮自身（审查 P1 回归锚——曾插容器顶层落最左）。FX52 定谳：币条
+        // = 本钮右侧同行 106 预留槽（钮右+19 / 币心带 y=钮顶+6）,偏移推导见
+        // .sw-npc-coins 注（NPCChatPanel.cs:135 先推进 → :140-144 相消后剩右侧槽）
         const tag = document.createElement('span');
         tag.className = 'sw-npc-coins';
         tag.textContent = formatCopper(b.coins!);
@@ -389,6 +401,12 @@ export class NpcDialog {
         cornerImg.title = Lang.text('UI.NPCHousing');
         cornerImg.addEventListener('mouseenter', () => { cornerImg.src = 'sprites/vanilla-ui/UI_DisplaySlots_7.png'; });
         cornerImg.addEventListener('mouseleave', () => { cornerImg.src = 'sprites/vanilla-ui/UI_DisplaySlots_5.png'; });
+      } else {
+        // 任务鱼角标（vid>0）悬停 → cursorOverride=2 白帧光标（DrawNPCChatBottomRightItem
+        // Main.cs:40497-40502 悬停矩形 Contains 置位;RequestHome -1 态不置,只换金染
+        // 图标 :40530-40539。事件驱动 ≙ 原版每帧重算,复位兜底在 close()）
+        cornerImg.addEventListener('mouseenter', () => { VUI.cursorOverride = 2; });
+        cornerImg.addEventListener('mouseleave', () => { VUI.cursorOverride = -1; });
       }
       cornerImg.addEventListener('click', () => {
         UISfx.click();
@@ -454,10 +472,13 @@ export class NpcDialog {
     let cursorX = 0;
     created.forEach(({ btn, meta, w }, i) => {
       if (i % 4 === 0) cursorX = 0;                       // :103-107 换行复位
-      if ((meta.coins ?? 0) > 0) cursorX += 106;          // :144 金币占位推进
       btn.style.left = `${cursorX}px`;
       btn.style.top = `${Math.floor(i / 4) * 22}px`;      // 行高 22（:97）
       cursorX += w + 30;                                  // :135 列距 30
+      // ★FX52：:143 的 +=106 在本钮赋位【之后】（与 :135 同属越钮推进）→ 只右移
+      // 后续钮（币条占本钮右侧 106 槽,带币钮本身停在常规流位）。旧版把 +106 提前到
+      // 赋位前 = 带币钮自身被右推 106 且币条反向悬钮左上,与原版序相反
+      if ((meta.coins ?? 0) > 0) cursorX += 106;          // :143 金币占位推进
     });
     if (portraitOn) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait!);
     // Esc 优先序对齐 Player.cs:4960-5025 ToggleInv：talkNPC≥0 时 Esc 只关对话、
@@ -575,6 +596,9 @@ export class NpcDialog {
     // 暂停/设置/聊天全哑到刷新页。审查 P0）
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler, true);
     this.escHandler = null;
+    // cursorOverride 复位（≙ 原版每帧 Main.cs:45696；面板移除时悬停中的
+    // mouseleave 不再保证触发,不兜底 = 白帧光标悬死在世界/全屏地图上）
+    VUI.cursorOverride = -1;
     this.panel?.remove();
     this.panel = null;
   }

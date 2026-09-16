@@ -284,25 +284,33 @@ export class VUI {
   private static drawCursorLocal(lx: number, ly: number) {
     if (!VUI.batch || !VUI.enabled) return;
     if (resolveTouchMode() === 'touch') return;
-    const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
-    if (!tex) return;
-    const cc = VUI.cursorColorState();
-    // 双 pass 同 drawCursor（阴影垫底 + 本色）
-    VUI.batch.draw(tex, Math.round(lx) + 1, Math.round(ly) + 1, {
-      color: rgb(Math.round(cc.color.r * 0.2), Math.round(cc.color.g * 0.2),
-        Math.round(cc.color.b * 0.2), Math.round(cc.color.a * 0.5)),
-      scale: cc.scale * 1.1,
-    });
-    VUI.batch.draw(tex, Math.round(lx), Math.round(ly), { color: cc.color, scale: cc.scale });
+    VUI.paintCursor(Math.round(lx), Math.round(ly));
   }
 
-  /** 智能光标激活中（Game 每帧写入）：指针切换到 Cursors[12] 帧（Main.cs:47442-47513 num=11+smart） */
+  /** 智能光标激活中（Game 每帧写入）：指针切换到 Cursors[12] 帧（Main.cs:48888 num=11+smart，1456 :47465 同式） */
   static smartCursorOn = false;
 
-  /** 光标染色态（Main.CursorColor :51886-51906 1:1）：
-   *  mouseColor 默认 = RGB(255,50,95) 粉红（:66111——曾画纯白=丢染色链）；
+  /** Main.cursorOverride（:2131）：非 -1 = 光标本体整帧替换为 Cursors[override] 白帧
+   *  （DrawInterface_36_Cursor :46026-46067）。1457 原版唯一置位面 = npcChatCornerItem>0
+   *  悬停（渔夫任务鱼角标,DrawNPCChatBottomRightItem :40502 置 2、:45696 每帧复位;
+   *  RequestHome -1 态角标【不】置,只叠 EquipPage[7] 金染 :40530-40539）。
+   *  本仓 = 事件驱动:NpcDialog 任务鱼角标 mouseenter/leave 置/复位（等价每帧
+   *  重算,面板关闭由 close() 兜底复位防悬死）。原版其余 override 值 3..10 仅在
+   *  白帧白名单（:46042-46047）中备用、无置位方——本仓只接 2。 */
+  static cursorOverride = -1;
+
+  /** MouseBorderColor 默认档（Main.cs:276 = (64,64,64,64);LoadSettings :4554-4570 可被
+   *  config.json 覆盖,本机实机 config.json 实测同值;本仓无该设置建模,钉默认档）。
+   *  ★XNA 预乘语义（α=0 纯加法同族判例）:R=G=B=A=64 =「白色 ×α 64/255」半透明白,
+   *  非深灰——这就是用户所见的白色描边。画布直 α 转写 = 白帧 + globalAlpha=64/255
+   *  （tinted() 吃 color.a,透明度必须走 opts.alpha,尘预乘 add 面 α 判例同源） */
+  private static readonly BORDER_ALPHA = 64 / 255;
+
+  /** 光标染色态（Main.CursorColor :53275-53294 1:1，1456 :51886-51906 同式）：
+   *  mouseColor 默认 = RGB(255,50,95) 粉红（:67610——曾画纯白=丢染色链）；
    *  cursorAlpha 在 0.6..1 呼吸（±0.015/t）；RGB×alpha、A=255×(alpha×0.3+0.7)、
-   *  scale=alpha×0.3+0.8 同步呼吸。hasRainbowCursor → HSL 环转（:47373-47375） */
+   *  scale=alpha×0.3+0.8 同步呼吸。hasRainbowCursor → HSL 环转（:48806-48807,
+   *  ★!gameMenu 门:菜单恒本色——本仓 Game 侧未接 rainbow 写入,恒 false 备案） */
   static cursorAlpha = 1;
   static cursorColorDirection = 1;
   static rainbowCursor = false;   // Player.hasRainbowCursor（Game 每帧写入）
@@ -312,7 +320,7 @@ export class VUI {
     if (VUI.cursorAlpha >= 1) { VUI.cursorAlpha = 1; VUI.cursorColorDirection = -1; }
     if (VUI.cursorAlpha <= 0.6) { VUI.cursorAlpha = 0.6; VUI.cursorColorDirection = 1; }
     if (VUI.rainbowCursor) {
-      // HSL 环转（Main.cs:47374 hslToRgb(hourly*0.25%1,1,0.5)；标准 HSL→RGB）
+      // HSL 环转（Main.cs:48807 hslToRgb(hourly*0.25%1,1,0.5)；标准 HSL→RGB）
       const h = (performance.now() / 1000 * 0.25) % 1;
       const f = (n: number) => {
         const k = (n + h * 12) % 12;
@@ -329,26 +337,86 @@ export class VUI {
     };
   }
 
+  /** ThickMouse 白描边（Main.DrawThickCursor :48865-48913，1456 :47442 同式）：
+   *  Cursors[11+smart] 沿四向 (0,1)(1,0)(0,-1)(-1,0)+Vector2.One*2、origin(2,2)、
+   *  scale=cursorScale×1.1、色=MouseBorderColor（默认档=预乘白×64/255）——白描边
+   *  本体,默认设置恒画（ThickMouse=(MouseBorderColor≠Transparent) :2684,默认非
+   *  Transparent）。返回 bonus=(2,2)：阴影/主 pass 整体右下移（无 ThickMouse 才
+   *  为零向量;贴图未就绪只缺描边不挪位,防懒载首帧光标跳 2px）。
+   *  游戏柄覆盖帧 num=13/15（:48892-48903）本仓无游戏柄光标,备案不移植。 */
+  private static drawThickCursor(x: number, y: number, smart: boolean,
+    cc: { scale: number }): { x: number; y: number } {
+    const tex = UITextures.get(smart ? 'UI_Cursor_12' : 'UI_Cursor_11');
+    if (tex && VUI.batch) {
+      for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]] as const) {
+        VUI.batch.draw(tex, x + 2 + dx, y + 2 + dy, {
+          color: rgb(255, 255, 255), alpha: VUI.BORDER_ALPHA,
+          scale: cc.scale * 1.1, originX: 2, originY: 2,
+        });
+      }
+    }
+    return { x: 2, y: 2 };
+  }
+
+  /** cursorOverride 白帧支（:46035-46047）：Cursors[2] 单 pass——纯白、
+   *  scale=cursorScale×0.7（num3）、origin=帧×0.1（vector=(0.1,0.1)×Size）、
+   *  flag=false 无阴影、且不画 ThickMouse 描边（override 分支不调 DrawThickCursor）。
+   *  贴图未就绪回 false 落回普通链（清单键已入 vanilla-ui.json,懒载首帧短暂回落）。 */
+  private static drawOverrideCursor(x: number, y: number, cc: { scale: number }): boolean {
+    if (VUI.cursorOverride !== 2 || !VUI.batch) return false;
+    const tex = UITextures.get('UI_Cursor_2');
+    if (!tex) return false;
+    VUI.batch.draw(tex, x, y, {
+      color: rgb(255, 255, 255), scale: cc.scale * 0.7,
+      originX: tex.sw * 0.1, originY: tex.sh * 0.1,
+    });
+    return true;
+  }
+
   /** Canvas 原版光标：菜单与游戏内统一绘制（系统光标已被 #sw-cursor-style 全树隐藏）。
    *  触屏设备不画指针（原版移动端同语义——触摸定位无需指针精灵）。
-   *  双 pass（Main.DrawCursor :47436-47439 鼠标分支）：①阴影垫底 = 同贴图
-   *  offset(+1,+1)、RGB×0.2/A×0.5、scale×1.1（深色描边观感来源）；②主 pass 本色。 */
+   *  DrawInterface_36_Cursor（:46007-46073）三支 1:1：⓪cursorOverride 白帧支 →
+   *  ①ThickMouse 白描边（DrawThickCursor,先画=垫底）→ ②DrawCursor 鼠标分支
+   *  （:48848-48849）阴影垫底 + 本色,均吃 bonus=(2,2)。
+   *  ★预乘→直 α 转写（XNA SpriteBatch src=tex×color 预乘,画布=直 α）:
+   *  fill 强度 = 预乘RGB÷α、globalAlpha = α——旧实现把 A 项喂进 tinted() 的
+   *  multiply 强度（该通道只衰减染色不产透明）=阴影恒不透明 3 倍浓、主 pass
+   *  呼吸谷不透底,本次对齐。悬停对象类别不换帧:原版鼠标光标无 NPC/敌怪悬停
+   *  变体（换帧仅 smart :48868 与 override :40502 两面;锁敌括弧=LockOnHelper.Draw
+   *  世界层覆盖物,本仓未建该子系统,备案）。 */
+  private static paintCursor(x: number, y: number) {
+    const batch = VUI.batch;
+    if (!batch) return;
+    const cc = VUI.cursorColorState();   // 每帧恰一次推进（0.6..1 呼吸）
+    // ⓪ cursorOverride 支（:46026-46067）
+    if (VUI.drawOverrideCursor(x, y, cc)) return;
+    const smart = VUI.smartCursorOn;
+    // ① ThickMouse 描边（:48860,先于阴影/本体=垫底）
+    const bonus = VUI.drawThickCursor(x, y, smart, cc);
+    // ② 箭头本体（DrawCursor 鼠标分支 :48848-48849）
+    const tex = UITextures.get(smart ? 'UI_Cursor_1' : 'UI_Cursor_0');
+    if (!tex) return;
+    const aMain = cc.color.a / 255;
+    const aShad = aMain * 0.5;
+    // 阴影 pass（:48848）：预乘 RGB×0.2 / A×0.5、offset bonus+(1,1)、scale×1.1
+    batch.draw(tex, x + bonus.x + 1, y + bonus.y + 1, {
+      color: rgb(Math.round((cc.color.r * 0.2) / aShad), Math.round((cc.color.g * 0.2) / aShad),
+        Math.round((cc.color.b * 0.2) / aShad)),
+      alpha: aShad, scale: cc.scale * 1.1,
+    });
+    // 主 pass（:48849）：预乘 cursorColor / A
+    batch.draw(tex, x + bonus.x, y + bonus.y, {
+      color: rgb(Math.round(cc.color.r / aMain), Math.round(cc.color.g / aMain),
+        Math.round(cc.color.b / aMain)),
+      alpha: aMain, scale: cc.scale,
+    });
+  }
+
+  /** Canvas 原版光标入口（菜单全屏模式）：坐标取 UI 逻辑鼠标位 */
   private static drawCursor() {
     if (!VUI.batch || !VUI.enabled) return;
     if (resolveTouchMode() === 'touch') return;
-    const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
-    if (!tex) return;
-    const x = Math.round(UIScale.mouseX);
-    const y = Math.round(UIScale.mouseY);
-    const cc = VUI.cursorColorState();
-    // ① 阴影 pass（:47437）：色×0.2/A×0.5、offset(+1,+1)、scale×1.1
-    VUI.batch.draw(tex, x + 1, y + 1, {
-      color: rgb(Math.round(cc.color.r * 0.2), Math.round(cc.color.g * 0.2),
-        Math.round(cc.color.b * 0.2), Math.round(cc.color.a * 0.5)),
-      scale: cc.scale * 1.1,
-    });
-    // ② 主 pass（:47438）
-    VUI.batch.draw(tex, x, y, { color: cc.color, scale: cc.scale });
+    VUI.paintCursor(Math.round(UIScale.mouseX), Math.round(UIScale.mouseY));
   }
 
   /** 当前鼠标下的 UI 元素（供游戏输入分流：非空则 UI 消费了指针） */

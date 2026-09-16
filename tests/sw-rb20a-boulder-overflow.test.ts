@@ -43,14 +43,16 @@ const SOLID_ID = TILE_DEFS.findIndex((d) => d && d.solid && !d.platform);
 
 function fakeStore(w = 64, h = 64, placed?: Map<number, number>) {
   const cells = placed ?? new Map<number, number>();
+  const liquidArr = new Float32Array(w * h);            // ★债② wave2：地形面注液闭包量
+  const liquidTypeArr = new Float32Array(w * h);
   return {
     w, h,
     type: new Uint8Array(w * h),
     flags: new Uint8Array(w * h),
     slope: new Uint8Array(w * h),
     half: new Uint8Array(w * h),
-    liquid: new Float32Array(w * h),
-    liquidType: new Float32Array(w * h),
+    liquid: liquidArr,
+    liquidType: liquidTypeArr,
     idx: (x: number, y: number) => y * w + x,
     inBounds: (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h,
     isSolid: (x: number, y: number) => {
@@ -63,6 +65,15 @@ function fakeStore(w = 64, h = 64, placed?: Map<number, number>) {
     hasTile: (x: number, y: number) => cells.has(y * w + x),
     isActuated: () => false,
     get: (x: number, y: number) => cells.get(y * w + x) ?? 0,
+    // ★SW-BJ93 债② wave2（2026-09-16）fixture 补齐：1054 蛛网铺置 setTile、
+    //  1048 金字塔 setTile、Kill 地形面 canHit/solidTileAt 的 wire 位——真
+    //  TileStore 原语最小镜像,旧桩缺 → TypeError 假红。
+    setTile: (x: number, y: number, type: number) => { cells.set(y * w + x, type); },
+    setLiquid: (x: number, y: number, amount: number, lt: number) => {
+      liquidArr[y * w + x] = amount;
+      liquidTypeArr[y * w + x] = lt;
+    },
+    wire: new Uint8Array(w * h),
   };
 }
 type Store = ReturnType<typeof fakeStore>;

@@ -8070,12 +8070,24 @@ export class UI {
     searchBtn.addEventListener('mouseleave', () => { sbImg.src = 'sprites/vanilla-ui/UI_Bestiary_Button_Search_2.png'; });
     searchBtn.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      // ★FX41b 遗留(2026-09-16 用户实报「输入框打不了字」根因):mousedown 缺
+      //   preventDefault —— 处理器内 focus(input) 后浏览器缺省动作仍把焦点交给
+      //   button(target),input 立即失焦,后续键入全落按钮上(探针 I5:ae=BUTTON)。
+      //   Click_SearchArea 域 = 原版整条搜索区吃输入(UISearchBar takingInput)
+      e.preventDefault();
       this.vinvModernSearchInput?.focus();            // Click_SearchArea
     });
     searchRow.appendChild(searchBtn);
     const searchBox = el('div');
     searchBox.style.cssText = `flex:1; height:${MCRAFT_SEARCH_H}px; position:relative;`
       + 'display:flex; align-items:center; min-width:0;';
+    // 盒体点击 = 同一 Click_SearchArea 域(:113 盒随条贯通):点中输入框本体的
+    // mousedown 由 input 分支 stopPropagation 独走;点盒体衬域(右衬 24px/边)时
+    // 缺省 = div 不可聚焦 → activeElement 塌回 body 吞焦点,此处收拢到 input
+    searchBox.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      this.vinvModernSearchInput?.focus();            // Click_SearchArea
+    });
     // 盒面 = UIPanel 白模 9-slice 乘色(bg/border 同 tint → 实心圆角蓝条;
     // UIWrappedSearchBar.cs:111-126 角 12 → 24 高条 = 半圆角药丸。旧 radius 5px/直角
     // 分段面 = 白模缺位伪影);未就绪前纯色圆角兜底 */
@@ -8128,6 +8140,8 @@ export class UI {
     cancel.addEventListener('mouseenter', () => this.game.sfx.play('menuTick', 1));   // :196-199
     cancel.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      // ★同 🔍 钮:压 button 缺省抢焦,否则处理器内 focus(input) 被缺省动作覆盖
+      e.preventDefault();
       if (this.vinvModernSearch !== '') {             // searchCancelButton_OnClick :189-195
         this.vinvModernSearch = '';
         input.value = '';
@@ -8137,6 +8151,10 @@ export class UI {
       } else {
         this.game.sfx.play('menuTick', 1);
       }
+      // ★FX41b 遗留修同批:✕ 挂在盒面板内,原版 UI 事件冒泡 → ✕ 点击同时触发
+      //   uIPanel.OnLeftClick=Click_SearchArea(UIWrappedSearchBar.cs:136/:151)取输入;
+      //   本仓 stopPropagation 拦死冒泡 → ✕ 后键入落按钮(同「打不了字」族),补冒泡等价面
+      this.vinvModernSearchInput?.focus();
     });
     searchBox.appendChild(cancel);
     searchRow.appendChild(searchBox);
@@ -8841,11 +8859,22 @@ export class UI {
       mimg.draggable = false;
       mimg.src = k2 ? iconUrl(this.game, this.game.itemId(k2)) : '';
       box.appendChild(mimg);
-      if (req.stack > 1) box.appendChild(el('span', 'cnt', String(req.stack)));
-      // 拥有数(DrawOwnedItemCount :555-561:槽 +(3,32)·scale,ItemStack 字体 0.8·scale)
+      if (req.stack > 1) {
+        const reqCnt = el('span', 'cnt', String(req.stack));
+        // ★ItemSlot.cs:2683-2691 ctx43 支:vector4=(10,26+LS)+(−5,+7) = 左 5u/墨底
+        //   45/52u(字顶对齐 ItemStack 字体 bearing 0 实测)——共享 .cnt = 缺省臂
+        //   (bottom 0 ≈ 50u),材料槽不抬此 5u 则与拥有数带(45.7u 起)叠字
+        //   (FX41b 合并后用户实报「绿白两数同位」缺的那半刀)
+        reqCnt.style.left = '5px';
+        reqCnt.style.bottom = '7px';
+        box.appendChild(reqCnt);
+      }
+      // 拥有数(DrawOwnedItemCount :555-561:槽 +(3,32)·mscale,:485 mscale = num 非
+      //   draw scale——★FX41b 合并遗留:旧传 mp.scale = 偏移×0.7 塌回格内 22.4px 处,
+      //   正确位 32·num = 槽底缘下带,与抬格后的需求数墨底 45u 隔 0.5px 原版堆叠)
       const cnt = el('div');
       cnt.textContent = owned > 999 ? '999+' : String(owned);
-      const cp = mcraftOwnedCountPos({ x: px, y: py, scale: mp.scale });
+      const cp = mcraftOwnedCountPos({ x: px, y: py, scale: mp.num });
       cnt.style.cssText = `position:absolute; left:${cp.x}px; top:${cp.y}px; color:${mcraftOwnedCountColor(enough)};`
         + `font-size:${Math.max(8, Math.trunc(11 * mp.scale))}px; text-shadow:1px 1px 0 #000; pointer-events:none;`
         + (showOwned ? '' : 'display:none;');
