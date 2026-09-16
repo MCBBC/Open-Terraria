@@ -105,6 +105,25 @@ export const MCRAFT_SEPARATOR_COLOR = css(_sr, _sg, _sb, 229);
 const [_wr, _wg, _wb] = shiftBlueToCyan(35, 40, 83);            // 搜索盒底(UIWrappedSearchBar.cs:135)
 /** 搜索盒面板底(UIWrappedSearchBar.cs:135,Red 主题 ShiftBlueToCyanTheme) */
 export const MCRAFT_SEARCH_BG = css(_wr, _wg, _wb, 255);
+// ---- 槽视觉(ItemSlot.cs :2126+:ctx 41 网格格/42 成品/43 材料 = InventoryBack18 白模
+//      × ((16,36,56,180)×0.9 → ShiftBlueToCyan) = (10,58,74)@162——非经典 Inventory_Back
+//      ×Main.inventoryBack 链!★FX43(2026-09-16 双图实测):本仓槽错用经典 Back14/Back
+//      系(白框方角实底)= 用户实报「格底白框 vs 原版柔格」根因。 compensated 面同上:
+//      CSS multiply 色 = tint÷α(16,91,116)、层 opacity = α 162/255,见 vanillaKit 注) ----
+/** 配方格/成品槽/材料槽白模(ItemSlot.cs :2253/:2270 InventoryBack18;52² 白剪影,圆角) */
+export const MCRAFT_SLOT_TEX = 'sprites/vanilla/Inventory_Back18.png';
+/** 槽乘色 CSS 面 = (10,58,74)÷(162/255) 预乘补偿(XNA 预乘管 src.rgb 不乘 α) */
+export const MCRAFT_SLOT_TINT_CSS = 'rgb(16,91,116)';
+/** 槽层 α = 162/255(ItemSlot.cs :2251 (16,36,56,180)×0.9 α 位) */
+export const MCRAFT_SLOT_ALPHA = 162 / 255;
+/** 选中金框/向导槽高亮 α = White×0.7490196(NewCraftingUI.cs:566 DrawRecipeSlot 覆写
+ *  Main.inventoryBack;补偿后 rgb 恒等 = 原贴图原色,只压 α) */
+export const MCRAFT_SLOT_HL_ALPHA = 191 / 255;
+/** 选中金框白模(ItemSlot.cs :2355-2357 ctx41∧DrawSelectionHighlightForGridSlot →
+ *  InventoryBack24 × Main.inventoryBack;格层级,物品图标之下 :2339-2358 绘序) */
+export const MCRAFT_SEL_TEX = 'sprites/vanilla/Inventory_Back24.png';
+/** 向导槽底(ctx 7 = 缺省臂 TextureAssets.InventoryBack × Main.inventoryBack 同 0.749) */
+export const MCRAFT_GUIDE_TEX = 'sprites/vanilla/Inventory_Back.png';
 // ---- 染色数值面(★RB28:canvas 白模预染色入参——上行 css 串的同源数值面,
 //      UI.ts vinvBuildModernCraft 九宫/分隔线乘色通道消费;★禁目测,数值即上链) ----
 /** 窗体 UIPanel 底染(= MCRAFT_PANEL_BG 数值面,α 142/255) */

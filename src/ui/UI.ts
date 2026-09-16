@@ -191,6 +191,9 @@ import {
   MCRAFT_PANEL_CORNER, MCRAFT_SEARCH_CANCEL_INSET, mcraftSearchBarRect,
   // ★FX41b(2026-09-15)滚动条视觉单源(UIScrollbar Cyan 主题/DrawBar 三分)
   MCRAFT_SCROLLBAR_TEX, MCRAFT_SCROLLBAR_HANDLE_ALPHA,
+  // ★FX43(2026-09-16)槽视觉面(ItemSlot ctx41/42/43 InventoryBack18 链 + 选中金框)
+  MCRAFT_SLOT_TEX, MCRAFT_SLOT_TINT_CSS, MCRAFT_SLOT_ALPHA, MCRAFT_SLOT_HL_ALPHA,
+  MCRAFT_SEL_TEX, MCRAFT_GUIDE_TEX,
   filterItemOfVid, filtererFits, toggleFilterRadio, normalizeSearch,
   openCloseFilterTransition, type FilterKind, type FilterItem,
 } from './modernCrafting';
@@ -6783,6 +6786,20 @@ export class UI {
   opacity:var(--slot-alpha, calc(0.706 + var(--invpulse, 0) * 0.235)); }
 .sw-vinv .sw-slot:hover::after { opacity:1; }
 .sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
+/* ★FX43(2026-09-16)modern 合成窗(.sw-mcraft)槽视觉面 1:1——
+   ①格/成品/材料槽层 α 定值(ItemSlot.cs ctx41/42/43 InventoryBack18 × (10,58,74)@162;
+     :2341-2351 开包脉冲只挂 ctx0/1/2/32=现代格域外,--slot-alpha 内联已供定值,此处
+     兜底缺省;hover 不改槽底 α(vanilla 仅 tooltip),压掉基础 hover 全亮跳变)
+   ②图标盒 1:1(ItemSlot.cs:2747-2751 position6 = position+52s/2−32s/2 = 盒内 (10,10)
+     32px → inset 19.2%/61.5%;旧 15.4%/69.2%=36px 盒偏大 12.5%,双图营火实测 40 vs 34px)
+   ③选中金框 .sw-mcsel(InventoryBack24 × White×0.7490196 :2355-2357;补偿后原色压 α)
+   ④搜索占位色 = Color.Gray(UISearchBar.cs:74 !takingInput 臂) */
+.sw-vinv .sw-mcraft .sw-slot::after { opacity: var(--slot-alpha, ${MCRAFT_SLOT_ALPHA}); }
+.sw-vinv .sw-mcraft .sw-slot:hover::after { opacity: var(--slot-alpha, ${MCRAFT_SLOT_ALPHA}); }
+.sw-vinv .sw-mcraft .sw-slot img { inset:19.2%; width:61.5%; height:61.5%; }
+.sw-vinv .sw-mcraft .sw-mcsel { position:absolute; inset:0; pointer-events:none;
+  background:url(${MCRAFT_SEL_TEX}) 0 0 / 100% 100%; opacity:${MCRAFT_SLOT_HL_ALPHA}; }
+.sw-vinv .sw-mcraft input::placeholder { color:rgb(128,128,128); opacity:1; }
 .sw-vinv .vinv-btn { position:absolute; pointer-events:auto; margin:0; padding:0;
   border:none; background-color:transparent; background-repeat:no-repeat;
   image-rendering:pixelated; cursor:pointer; }
@@ -7945,7 +7962,7 @@ export class UI {
   private vinvBuildModernCraft(): void {
     const root = this.vinvRoot;
     if (!root) return;
-    const win = el('div');
+    const win = el('div', 'sw-mcraft');
     win.style.cssText = 'position:absolute; width:490px; pointer-events:auto; display:none; z-index:5;';
     root.appendChild(win);
     this.vinvModernCraftEl = win;
@@ -8020,6 +8037,9 @@ export class UI {
         MCRAFT_BORDER_TINT.r, MCRAFT_BORDER_TINT.g, MCRAFT_BORDER_TINT.b, MCRAFT_BORDER_TINT.a),
     ]).then(([bg, border]) => {
       if (!bg) return;
+      // ★FX43:九宫就绪即撤纯色兜底层——α<1 时兜底(background)与九宫(fill)双绘 =
+      //  有效 α 1−(1−α)²(0.557→0.804),54 图实测 intercept 21.5/αeff≈0.80 双绘实证
+      panelBg.style.background = 'transparent';
       panelBg.style.border = `${MCRAFT_PANEL_CORNER}px solid transparent`;   // 角 12 条 4(UIPanel.cs:10-12)
       panelBg.style.borderImage = `url(${bg}) ${MCRAFT_PANEL_CORNER} fill stretch`;
       if (border) {
@@ -8028,8 +8048,9 @@ export class UI {
       }
     });
     // 标题(UIPanel 内 UIText Left−1/Top−2 :333-337;UpdateText :419-429)
+    // ★FX43:14→18px——双图实测标题墨高 53=31px/54=24px 同尺(84px 节距归一),×31/24≈18
     const title = el('div', 'vinv-txt');
-    title.style.cssText += 'position:absolute; font-size:14px; pointer-events:none; white-space:nowrap;';
+    title.style.cssText += 'position:absolute; font-size:18px; pointer-events:none; white-space:nowrap;';
     panel.appendChild(title);
     this.vinvModernTitleEl = title;
     // 搜索条(UIWrappedSearchBar Red 主题 :340-353)——★RB28:整条贯通(右缘=内衬右
@@ -8072,6 +8093,7 @@ export class UI {
         MCRAFT_SEARCH_TINT.r, MCRAFT_SEARCH_TINT.g, MCRAFT_SEARCH_TINT.b, MCRAFT_SEARCH_TINT.a),
     ]).then(([bg, border]) => {
       if (!bg) return;
+      boxBg.style.background = 'transparent';   // ★FX43 同 panelBg:撤兜底防双绘
       boxBg.style.border = `${MCRAFT_PANEL_CORNER}px solid transparent`;
       boxBg.style.borderImage = `url(${bg}) ${MCRAFT_PANEL_CORNER} fill stretch`;
       if (border) {
@@ -8081,8 +8103,11 @@ export class UI {
     });
     const input = el('input') as HTMLInputElement;
     input.placeholder = Lang.text('UI.PlayerNameSlot');   // 空文案 = UI.PlayerNameSlot(:81 缺省,原版本相)
+    // ★FX43:字号 13→16(UISearchBar 0.8f×MouseText 20px em=16 :127);左衬 4→12
+    //  (53 图实测占位墨左距盒缘 ≈11.5 UI≈UIPanel 圆角衬);占位色 = Color.Gray
+    //  (UISearchBar.cs:74 ! takingInput 臂)——scoped 规则在 vinvStyleEnsure
     input.style.cssText = 'flex:1; min-width:0; background:transparent; border:none; outline:none; color:#fff;'
-      + 'font-size:13px; padding:0 24px 0 4px; font-family:inherit;';
+      + 'font-size:16px; padding:0 24px 0 12px; font-family:inherit;';
     input.addEventListener('input', () => {
       this.vinvModernSearch = input.value;
       // SetSearchFilter+ResetRecipes(OnSearchContentsChanged :649-653);空白归零走
@@ -8133,6 +8158,7 @@ export class UI {
       MCRAFT_SEPARATOR_TINT.r, MCRAFT_SEPARATOR_TINT.g, MCRAFT_SEPARATOR_TINT.b, MCRAFT_SEPARATOR_TINT.a,
     ).then((url) => {
       if (!url) return;
+      sepEl.style.background = 'transparent';   // ★FX43 同 panelBg:撤兜底防双绘
       sepEl.style.border = '2px solid transparent';
       sepEl.style.borderImage = `url(${url}) 2 fill stretch`;
     });
@@ -8183,8 +8209,13 @@ export class UI {
     //      槽=detailOrigin+(0,58)=(24,131) ctx7 scale1/文案=+(52,73)=(76,146)/
     //      环境需求=+(52,36)=(76,109);仅向导态+窗开可见) ----
     const gSlot = el('div', 'sw-slot');
+    // ★FX43:ctx7 = 缺省臂 Inventory_Back × Main.inventoryBack = White×0.7490196
+    //  (NewCraftingUI.cs:566 覆写;ItemSlot.cs :2127 缺省 color2)——半透 0.749 + 原色
+    //  (预乘补偿后 rgb 恒等);旧面无 α 全实底
     gSlot.style.cssText = 'position:absolute; left:24px; top:131px; width:52px; height:52px;'
-      + 'background-image:none; --slot-bgimg:url(sprites/vanilla/Inventory_Back.png); pointer-events:auto;';
+      + 'background-image:none; pointer-events:auto;'
+      + `--slot-bgimg:url(${MCRAFT_GUIDE_TEX}); --slot-tint:rgb(255,255,255);`
+      + `--slot-alpha:${MCRAFT_SLOT_HL_ALPHA};`;
     gSlot.addEventListener('contextmenu', (e) => e.preventDefault());
     gSlot.addEventListener('mousedown', (e) => {
       this.guideSlotMouseDown(e as MouseEvent, () => { this.vinvPaintGuideCraft(); this.vinvRefreshCraft(); });
@@ -8278,7 +8309,11 @@ export class UI {
       : (this.vinvCraftAvailV[this.vinvCraftFocusV]?.r ?? null);
     this.vinvModernSearch = '';
     this.vinvModernActive = [];                                 // :912-913 ActiveFilters.Clear
-    if (this.vinvModernSearchInput) this.vinvModernSearchInput.value = '';
+    if (this.vinvModernSearchInput) {
+      this.vinvModernSearchInput.value = '';
+      // ★FX43:占位随开重钉(构建期 l10n 若未就绪 placeholder 落空 = 54 图空搜索条根因)
+      this.vinvModernSearchInput.placeholder = Lang.text('UI.PlayerNameSlot');
+    }
     this.vinvSyncGridToggle();
     this.vinvLayoutSig = '';
     this.layoutVanilla();
@@ -8661,10 +8696,20 @@ export class UI {
       const e = entries[i]!;
       const pos = mcraftCellXY(g, i);
       const slotEl = el('div', 'sw-slot');   // ★变量名 slotEl:classic「cell 不绑 wheel」反向锚不扰
+      // ★FX43:槽底 = ItemSlot ctx41 链(InventoryBack18 × (10,58,74)@162;:2250-2253)——
+      //  旧面经典 Inventory_Back×220 = 白框方角实底伪影;--slot-tint 已含预乘补偿
       slotEl.style.cssText = `position:absolute; left:${pos.x - g.list.x}px; top:${pos.y - g.list.y}px;`
         + 'width:52px; height:52px; background-image:none; transform-origin:top left;'
+        + `--slot-bgimg:url(${MCRAFT_SLOT_TEX}); --slot-tint:${MCRAFT_SLOT_TINT_CSS};`
+        + `--slot-alpha:${MCRAFT_SLOT_ALPHA};`
         + `transform:scale(${MCRAFT_CELL_SCALE}); pointer-events:auto;`;
       const iid = this.game.itemId(vanillaItemKey(e.r.create) ?? '');
+      // 选中金框(ItemSlot.cs :2355-2357:ctx41∧DrawSelectionHighlightForGridSlot →
+      //  InventoryBack24 × Main.inventoryBack(White×0.7490196);绘序在物品图标之前)
+      if (this.vinvModernSelected === e.r) {
+        const ring = el('div', 'sw-mcsel');
+        slotEl.appendChild(ring);
+      }
       const img = el('img') as HTMLImageElement;
       img.draggable = false;
       img.src = iconUrl(this.game, iid);
@@ -8740,10 +8785,14 @@ export class UI {
     detail.style.display = '';
     detail.replaceChildren();
     const availNow = avail.some((row) => row.r === r);
-    // 成品槽(ctx 42;DrawRecipeSlot :563-573 底 White×0.749)= origin 本位(容器相对 0,0)
+    // 成品槽(ctx 42 = InventoryBack18 × (10,58,74)@162,同网格格;:2253-2260;
+    //  ★FX43 旧面 --slot-alpha:0.749 误挂 DrawRecipeSlot 的 Main.inventoryBack 覆写——
+    //  该覆写只喂 ctx7/缺省臂与金框,ctx42/43 在 ItemSlot switch 内整体改写 color2)
     const slot = el('div', 'sw-slot');
     slot.style.cssText = 'position:absolute; left:0; top:0;'
-      + 'width:52px; height:52px; background-image:none; --slot-alpha:0.749; pointer-events:auto;';
+      + 'width:52px; height:52px; background-image:none; pointer-events:auto;'
+      + `--slot-bgimg:url(${MCRAFT_SLOT_TEX}); --slot-tint:${MCRAFT_SLOT_TINT_CSS};`
+      + `--slot-alpha:${MCRAFT_SLOT_ALPHA};`;
     const iid = this.game.itemId(vanillaItemKey(r.create) ?? '');
     const img = el('img') as HTMLImageElement;
     img.draggable = false;
@@ -8784,7 +8833,9 @@ export class UI {
       const box = el('div', 'sw-slot');
       const px = mp.x, py = mp.y;
       box.style.cssText = `position:absolute; left:${px}px; top:${py}px; width:52px; height:52px;`
-        + 'background-image:none; --slot-alpha:0.749;'
+        + 'background-image:none;'
+        + `--slot-bgimg:url(${MCRAFT_SLOT_TEX}); --slot-tint:${MCRAFT_SLOT_TINT_CSS};`
+        + `--slot-alpha:${MCRAFT_SLOT_ALPHA};`
         + `transform:scale(${mp.scale}); transform-origin:top left; pointer-events:auto;`;
       const mimg = el('img') as HTMLImageElement;
       mimg.draggable = false;

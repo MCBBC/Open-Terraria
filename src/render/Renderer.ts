@@ -3268,6 +3268,15 @@ export class Renderer {
       this.mapWormholeHead = null;   // 关图清悬停态（防下次开图读到陈旧命中）
       this.mapHeadHoverName = null;
       this.mapNpcHeadHoverName = null;   // ★SW-BJ1 同上（NPC 头像悬停名）
+      // ★RB30a MED-2（2026-09-16）关图站统一复位拖拽态：drawFullMap 只在开图期跑，
+      // 按住关图（晶塔/虫洞 release 帧关图、M 键/Esc 关图）后 mapDragging/lastMouse
+      // 滞留 → 重开首帧 dx 全额入 pan（27-40tile 跳变）。原版拖拽=UpdateMapFullscreen
+      // :56153-56161 每帧由 mouseLeft 电平现推、无跨会话旗，本关图过渡站（任一
+      // fullMap.open→false 路径的首个渲染帧:toggleFullMap/晶塔/虫洞/调试传送/Esc）
+      // 复位即覆盖全部站;R4-22 位移门（静止按住不重锚）不动,重开首帧走
+      // `!mapDragging` 臂只锚不位移,lastMouse 由该帧尾刷新。
+      this.mapDragging = false;
+      this.lastMouse = { x: 0, y: 0 };
     }
     this._fmWasOpen = this.fullMap.open;
     // GPU 熔断期跳过全部画布工作(contextlost 抖动环,见 installGpuPressureGuard):

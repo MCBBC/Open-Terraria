@@ -108,21 +108,30 @@ async function installHarness(page) {
 }
 
 const md5 = (b64) => createHash('md5').update(Buffer.from(b64, 'base64')).digest('hex');
-const diffCount = (page) => async (a, b) => page.evaluate(({ x, y }) => {
+const diffCount = (page, maskOn = true) => async (a, b) => page.evaluate(({ x, y, maskOn }) => {
   const dec = (b64) => { const s = atob(b64); const u = new Uint8ClampedArray(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; };
   const A = dec(x), B = dec(y);
   let n = 0, minX = 1e9, minY = 1e9, maxX = -1, maxY = -1;
   const W = (window.__swGame.renderer.canvas.width) || 1;
+  let total = 0;
+  // ★BJ94:小地图 blip 域掩蔽(仪具侧;minimapRect+4px 余量)——blip 为已登记的
+  //   render 侧逐帧本底漂(trace-20260907/minimap-heads 家族),与 ?swperf 无关
+  //   (本仪具 off-off 自检同域自证),掩蔽后其余像素仍做全量逐位对比。
+  const mr = window.__swGame.renderer.minimapRect;
+  const mask = (maskOn && mr && mr.w > 0)
+    ? { x0: mr.x - 4, y0: mr.y - 4, x1: mr.x + mr.w + 4, y1: mr.y + mr.h + 4 } : null;
   for (let i = 0; i < Math.min(A.length, B.length); i += 4) {
     if (A[i] !== B[i] || A[i + 1] !== B[i + 1] || A[i + 2] !== B[i + 2] || A[i + 3] !== B[i + 3]) {
-      n++;
+      total++;
       const px = (i >> 2) % W, py = (i >> 2) / W | 0;
+      if (mask && px >= mask.x0 && px <= mask.x1 && py >= mask.y0 && py <= mask.y1) continue;   // 小地图 blip 域
+      n++;
       if (px < minX) minX = px; if (px > maxX) maxX = px;
       if (py < minY) minY = py; if (py > maxY) maxY = py;
     }
   }
-  return { n, len: A.length === B.length, bbox: [minX, minY, maxX, maxY] };
-}, { x: a, y: b });
+  return { n, total, len: A.length === B.length, bbox: [minX, minY, maxX, maxY] };
+}, { x: a, y: b, maskOn });
 
 /** 场景对拍矩阵(与 _bj77-pixel-ab.mjs 逐字同式) */
 async function scene(page, name, setup, { waveQ = null } = {}) {
@@ -154,24 +163,27 @@ async function scene(page, name, setup, { waveQ = null } = {}) {
   const C1 = await page.evaluate(() => { window.__R(++window.__warm); return [window.__snapB64(), window.__snapLightB64()]; });
 
   const [lA1, lA2, lB1, lB2, lC1] = [A1[1], A2[1], B1[1], B2[1], C1[1]];
-  const dl = await dc(lA1, lA2);
+  const dlc0 = (x, y) => dc(x, y, false);            // 光照图无小地图(掩蔽不适用)
+  const dl = await dlc0(lA1, lA2);
   L.chk(`[${name}] 光照图自检(lA1==lA2)`, dl.n === 0, `diff=${dl.n}`);
   const mLB1 = md5(lB1);
-  const dlb = await dc(lA1, lB1);
+  const dlb = await dlc0(lA1, lB1);
   L.chk(`[${name}] 光照图 flag ON 逐位一致(lB1==lA1)`, md5(lA1) === mLB1 && dlb.n === 0, `diff=${dlb.n}`);
-  const dlb2 = await dc(lA2, lB2);
+  const dlb2 = await dlc0(lA2, lB2);
   L.chk(`[${name}] 光照图 flag ON 连续帧一致(lB2==lA2)`, md5(lA2) === md5(lB2) && dlb2.n === 0, `diff=${dlb2.n}`);
-  const dlc = await dc(lA1, lC1);
+  const dlc = await dlc0(lA1, lC1);
   L.chk(`[${name}] 光照图翻回恢复(lC1==lA1)`, md5(lA1) === md5(lC1) && dlc.n === 0, `diff=${dlc.n}`);
 
+  // 主画布判据 = 【掩蔽域外】逐位一致(n===0;md5 含 blip 域不作判据,blip 域差分
+  //   total−n 单列透明审计——off-off 自检同域自证与本底漂无关)。
   const dSelf = await dc(A1[0], A2[0]);
-  L.chk(`[${name}] 全帧确定性自检(A1==A2)`, dSelf.n === 0 && dSelf.len, `diff=${dSelf.n} lenEq=${dSelf.len}`);
+  L.chk(`[${name}] 全帧确定性自检(A1==A2)`, dSelf.n === 0 && dSelf.len, `diff=${dSelf.n}(+blip${dSelf.total - dSelf.n}) lenEq=${dSelf.len}`);
   const dB1 = await dc(A1[0], B1[0]);
-  L.chk(`[${name}] 全帧 flag ON 逐位一致(B1==A1)`, md5(A1[0]) === md5(B1[0]) && dB1.n === 0, `diff=${dB1.n} bbox=${JSON.stringify(dB1.bbox)}`);
+  L.chk(`[${name}] 全帧 flag ON 逐位一致(B1==A1)`, dB1.n === 0 && dB1.len, `diff=${dB1.n}(+blip${dB1.total - dB1.n}) bbox=${JSON.stringify(dB1.bbox)}`);
   const dB2 = await dc(A2[0], B2[0]);
-  L.chk(`[${name}] 全帧 flag ON 连续帧一致(B2==A2)`, md5(A2[0]) === md5(B2[0]) && dB2.n === 0, `diff=${dB2.n} bbox=${JSON.stringify(dB2.bbox)}`);
+  L.chk(`[${name}] 全帧 flag ON 连续帧一致(B2==A2)`, dB2.n === 0 && dB2.len, `diff=${dB2.n}(+blip${dB2.total - dB2.n}) bbox=${JSON.stringify(dB2.bbox)}`);
   const dC1 = await dc(A1[0], C1[0]);
-  L.chk(`[${name}] 全帧翻回恢复(C1==A1)`, md5(A1[0]) === md5(C1[0]) && dC1.n === 0, `diff=${dC1.n} bbox=${JSON.stringify(dC1.bbox)}`);
+  L.chk(`[${name}] 全帧翻回恢复(C1==A1)`, dC1.n === 0 && dC1.len, `diff=${dC1.n}(+blip${dC1.total - dC1.n}) bbox=${JSON.stringify(dC1.bbox)}`);
   const dSelf2 = await dc(A2[0], A1[0]);
   if (dSelf2.n !== 0) L.say(`[${name}] 备注:off 臂跨帧本底漂 bbox=${JSON.stringify(dSelf2.bbox)} diff=${dSelf2.n}`);
 }

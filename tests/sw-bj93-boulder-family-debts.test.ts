@@ -26,9 +26,10 @@
 //   债2-M1 尘表 1013→1 → K2 红 / 债2-M2 声臂摘 NPCDeath6 → K5 红 / 债2-M3 摘
 //   1053 gore 环 → K3 红 / 债2-M4 摘掉落臂 → K6/K7 红 / 债2-M5 撞墙回直写 dead →
 //   K8 红 / 债3-M1 1048 尘门 |v|>1 摘除 → D3 红 / 债3-M2 1053 拍率改 1/2 → D1 红 /
-//   债4-M1 摘 SKIP_DAMAGE_EVP 门 → E1 红 / 债4-M2 摘 sweater cap → E2 红 /
-//   债4-M3 self-hurt 盒回建模盒 31×31 → E2b 红 / 债5-M1 探针回 inWater 桶位 → C3 红 /
-//   债5-M2 摘 lavaWet 臂 → C4 红。
+//   债4-M1 摘 SKIP_DAMAGE_EVP 门 → E1 红 / 债4-M2 摘 sweater cap → E2b 红 /
+//   债4-M3 self-hurt 盒回建模盒 31×31 → E2 红（玩家位在 260 盒内/建模盒外）。
+//   债5 无行为判别线（水域/岩浆/蜂蜜主车道新旧行为同相,见 C3 定谳记录）——守卫=
+//   C5 结构锁（vanilla 三旗原文钉死;回退桶位即红）+ C1/C2/C4 车道行为锚。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -332,6 +333,10 @@ describe('SW-BJ93 债3 头部伴生尘（1053 三色尘 / 1048 滚动尘）', ()
     expect(g2.dusts[1].type).toBe(6);                   // 尘②火：noGravity（:26401）
     expect(g2.dusts[1].noGravity).toBe(true);
     expect(g2.dusts[2].type).toBe(6);                   // 尘③火：全盒（:26405）
+    mock.mockReturnValue(0.4);                          // 0.4 档：Next(3)=1 全假 / Next(2)=0 全真
+    const g3 = fakeGame(fakeStore());                   // —— 1/2 拍率变异体在此误发 3 尘（M11 红）
+    mkBoulder(713).fixedUpdate(1 / 60, g3);
+    expect(g3.dusts.length).toBe(0);                    // 1/3 拍率守卫（变异 M11 判别线）
     mock.mockRestore();
   });
 
@@ -383,9 +388,11 @@ describe('SW-BJ93 债4 1002 TNTBarrel（SkipDamage_EVP :14848 + SelfHurtPlayers 
   });
 
   it('E2 Kill 自伤面（:15104-15152）：DV 掷域 [340,460]=400±15%、盒=vanilla 260×260（非建模盒）', () => {
-    const game = fakeGame(fakeStore(), { player: pOver() });
+    // 玩家位 (200,200)：在 vanilla 260 盒 [90,350) 内、建模盒 31×31 [90,121) 外
+    // （盒变异体=建模盒 → 玩家盒外早退 → 变异红）
+    const game = fakeGame(fakeStore(), { player: pOver({ x: 200, y: 200, cx: 210, cy: 221 }) });
     const b = mkBoulder(654);
-    b.x = 90; b.y = 90;                                // 260×260 盒自 (90,90) 罩住玩家 (100,100)
+    b.x = 90; b.y = 90;
     internals(b).rbKill(game);
     expect(game.playerHits.length).toBe(1);
     expect(game.playerHits[0]).toBeGreaterThanOrEqual(340);   // DamageVar ±15%（:15118 单源掷）
@@ -482,23 +489,26 @@ describe('SW-BJ93 债5 Chilled 门探针基面（wet&&!lavaWet&&!honeyWet :28211
     expect(p.buffs.has(BuffType.Chilled)).toBe(false);
   });
 
-  it('C3 幻影姿态定谳（本刀落点）：居中探针干+盒缘擦水（wetSticky 恒假,inWater 曾真）→ 不冻', () => {
-    // rb20a F6-② 唇袋横穿口径（LIP_TOP−PH 出生=盒缘恰搭液面,全盒 WetCollision 可及、
-    //  num86 居中探针恒干）——全盒臂=盒缘擦水,居中探针不达
+  it('C3 幻影假设证伪备案（定谳记录）：水缘擦过两门同相——inWater=居中探针湿∧!inLava ⊆ wetSticky', () => {
+    // ★BJ93 债5 定谳（2026-09-16,探针实测）：登记债假设「inWater 全盒擦水幻影」被
+    //  证伪——vanilla num86=Collision.WetCollision 内部【居中小盒】探针（Collision.cs
+    //  WetCollision 头 10×Height/2 窗）,仓内 wetCollision（npcLiquid,居中盒 1:1）同构,
+    //  inWater = r.wet ∧ !inLava ⊆ r.wet ≡ wetNow ≡ wetSticky → 水域两门恒同相。
+    //  残余可达偏差仅限微光交叠边（vanilla lavaWet/honeyWet 的 !shimmering 置位门 vs
+    //  旧仓裸 inLava/inHoney 桶位）与本仓 inHoney :4128 二次盒覆写——C5 结构锁钉死
+    //  vanilla 三旗原文防回退。本测=唇袋横穿（rb20a F6-② 口径）留证：居中探针恒干、
+    //  两门同相不冻。
     const LIP_TOP = ROW5 * TILE + 8;
     const { p, hooks } = chilledDriver(pocketWorld5(1), 28 * TILE, LIP_TOP - 42);
     const self = p as unknown as { wetSticky: boolean; inWater: boolean };
-    let sawBoxWet = false;
     let chilledEver = false;
     for (let t = 0; t < 44; t++) {
       p.x += 2.5;
       p.fixedUpdate(1 / 60, hooks);
-      sawBoxWet = sawBoxWet || self.inWater;           // 旧桶基面真=幻影源（变异 M1 红线）
       chilledEver = chilledEver || p.buffs.has(BuffType.Chilled);
     }
-    expect(sawBoxWet).toBe(true);                      // 盒位确曾湿（旧仓在此幻影冻结）
-    expect(self.wetSticky).toBe(false);                // vanilla wet 恒假（rb20a F6-② 同判）
-    expect(chilledEver).toBe(false);                   // → 不冻（旧仓此处红）
+    expect(self.wetSticky).toBe(false);                // 居中探针恒干（rb20a F6-② 同判）
+    expect(chilledEver).toBe(false);                   // 新门不冻=vanilla 静默
   });
 
   it('C4 lavaWet/honeyWet 门：深岩浆/深蜂蜜浸着不冻（:28211 第 4/5 因子;变异 M2 红线）', () => {

@@ -89,10 +89,16 @@ const A = await page.evaluate(async () => {
 });
 ok(A.open, 'A0 modern 窗开(vinvModernCraftOpen)');
 ok(A.panelBorderWidth === '0px' && A.panelBorderStyle === 'none', 'A1 面板无 12px 黑框(border 0/none)', `w=${A.panelBorderWidth} s=${A.panelBorderStyle}`);
-ok(A.bgHasImage, 'A2 白模就绪前纯色兜底仍在(background 保留)', A.bgHasImage ? '' : JSON.stringify(A.bgHasImage));
+ok(!A.bgHasImage, 'A2 兜底纯色底已撤(九宫就绪即 transparent;α<1 时 background+fill 双绘 = 有效 α 1−(1−α)² 0.557→0.804 偏实,FX43)', A.bgHasImage ? 'background 仍在' : '');
 ok(A.bgSlice.includes('12') && A.bgSlice.includes('fill'), 'A3 面板底九宫 slice 12 fill(UIPanel.cs:10-12)', A.bgSlice);
 ok(A.borderSlice.includes('12') && A.borderSlice.includes('fill'), 'A4 面板边九宫 slice 12 fill', A.borderSlice);
-ok(A.bgPx.every((v, i) => Math.abs(v - A.expPanel[i]) <= 1) && A.bgPx[3] === A.expPanel[3], 'A5 面板底色 = ShiftBlueToCyan((63,82,151)*0.7)*0.8(反编译链重算;±1=canvas 8bit 预乘读回量化,α=142 半透白模固有;乘色本身逐字精确=对照诊断)', `got=${A.bgPx} exp=${A.expPanel}`);
+// ★FX43(2026-09-16 双图实测):XNA 预乘管(UIPanel.cs:50-78 DrawPanel→SpriteBatch
+//   BlendState.AlphaBlend)下 out.rgb = texel.rgb×tint(**不乘 α**)——canvas source-over
+//   会把 rgb×α,故烘焙面 = tint÷α_texel 预乘补偿,α 位不变;上屏合成 = tint 全亮 +
+//   dst×(1−α)。53 图原版面板自身贡献实测 (26,64,108)=tint 全亮(非 ×0.557)。
+const pa = A.expPanel[3] / 255;
+const expPanelBake = [0, 1, 2].map((i) => Math.round(A.expPanel[i] / pa)).concat([A.expPanel[3]]);
+ok(A.bgPx.every((v, i) => Math.abs(v - expPanelBake[i]) <= 1) && A.bgPx[3] === expPanelBake[3], 'A5 面板烘焙色 = tint÷α 预乘补偿(上屏=tint 全亮+dst×(1−142/255);53 实测 P=(26,64,108)=tint 全亮,FX43;±1=canvas 8bit 预乘量化)', `got=${A.bgPx} exp=${expPanelBake}`);
 ok(JSON.stringify(A.borderPx) === JSON.stringify(A.expBorder), 'A6 面板边色 = Black*0.8', `got=${A.borderPx} exp=${A.expBorder}`);
 
 // ============================================================ B 搜索条
@@ -155,7 +161,11 @@ const C = await page.evaluate(async () => {
 });
 ok(C.h === '4px' && C.slice.includes('2'), 'C1 分隔线高 4 + 边 2 三分(Separator1/EdgeWidth 2)', `h=${C.h} slice=${C.slice}`);
 ok(C.size[0] === 6 && C.size[1] === 4, 'C2 乘色贴图 = Separator1 6×4 原尺寸', JSON.stringify(C.size));
-ok(JSON.stringify(C.px) === JSON.stringify(C.exp), 'C3 分隔线色 = ShiftBlueToCyan((89,116,213)*0.9) α0.9(反编译链重算)', `got=${C.px} exp=${C.exp}`);
+// ★FX43:烘焙面 = tint÷α 预乘补偿(同 A5;Separator1 白模 texel 255,α=229/255<1 →
+//   上屏 = texel×tint + panel×(1−0.898),53 实测原版线色 (77,150,232)=tint(73,139,218)+panel×0.102)
+const sa = C.exp[3] / 255;
+const expSepBake = [0, 1, 2].map((i) => Math.round(C.exp[i] / sa)).concat([C.exp[3]]);
+ok(JSON.stringify(C.px) === JSON.stringify(expSepBake), 'C3 分隔线烘焙色 = tint÷α 预乘补偿(上屏=texel×tint 全亮+panel×(1−α);FX43)', `got=${C.px} exp=${expSepBake}`);
 ok(C.bgWhiteGone, 'C4 旧未染色白模直叠已摘(background-image none)');
 
 // ============================================================ D 提示文案 zh(案2)

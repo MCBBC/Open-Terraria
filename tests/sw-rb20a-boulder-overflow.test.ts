@@ -177,9 +177,10 @@ describe('SW-RB20a F1-727 专属支（P.cs:19196-19239）', () => {
     const game = fakeGame(fakeStore(64, 64, wallCells(64, 9, 4, 7)));
     const b = new RollingBoulder(112, 104, 484);     // 盒 112..143,墙列 9=[144,160)
     b.vx = 7; b.vy = 0;
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.2)                      // n=3
-      .mockReturnValueOnce(0.5);
+    // ★SW-BJ93 债2（2026-09-16）随刀更新：撞墙 Kill 现发家族尘/声面（:76355,缺省
+    //  支 30 尘各 1 掷 scale 半数）→ 掷序在碎片掷【前】消耗——改基准掷 0.2 全程
+    //  （Next(3,6)=3 恰 3 发;尘 scale 掷 floor(0.4)=0 无碍断言）。
+    vi.spyOn(Math, 'random').mockReturnValue(0.2);   // n=3 + 尘 scale 掷域内恒定
     b.fixedUpdate(1 / 60, game);
     expect(b.dead).toBe(true);                       // :19223 Kill()（727 撞墙确实碎）
     expect(game.frags.length).toBe(3);               // Kill 后碎片照掷（:19224-19239）
@@ -364,6 +365,9 @@ describe('SW-RB20a F2 勘误结构锁 / F4 Damage_EVP 豁免', () => {
       player: { dead: false, iframes: 0, x: 110, y: 110, w: 20, h: 42, cx: 120, cy: 131, vx: 0, vy: 0 },
     });
     const b = mkBoulder(138);                        // sheet 138 → 99（friendly+hostile 双旗）
+    // ★SW-BJ93 债1（2026-09-16）随刀更新：aiStyle25 出膛宽限门（:12491 localAI[2]<=7
+    //  → 伤害四面全免,EVP 同门）——出生拍撞玩家不结算,置拍龄 8（第 8 拍首伤）。
+    (b as unknown as { localAI2: number }).localAI2 = 8;
     b.fixedUpdate(1 / 60, game);
     expect(game.playerHits.length).toBe(1);
     expect(game.playerHits[0]).toBe(70);             // BOULDER_CONVERT_TABLE dmg 70

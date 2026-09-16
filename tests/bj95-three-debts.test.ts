@@ -58,8 +58,10 @@ describe('SW-BJ95 债1 BJ92 拖拽面结构锁（对拍判语钉源）', () => {
     // ★BJ95 新守卫：补武前,槽位/面板按压不入 Input（DOM 事件不达 canvas 监听）→
     // 这两个世界沿消费点天然只见 canvas 按压;补武后拖拽拾取也产生带沿 —— 两个缺
     // mouseInterface 等价门的消费点会把沿落成「面板 tile 坐标」的世界动作（误标/
-    // 误查房）。vanilla 同位消费序：ItemSlot.Handle 先吃 mouseLeftRelease（ItemSlot.cs:894,
-    // :4210 置 false）→ 槽位按压到不了住房查询（Main.cs:45985 `!mouseLeftRelease → return`）。
+    // 误查房）。vanilla 同位消费序：ItemSlot.Handle→LeftClick 先吃 mouseLeftRelease
+    // （ItemSlot.cs:894 读沿；:4210 置 false 系 TogglePet/ToggleLight 专用臂非通用点，
+    // 通用 release 消费点=Main.cs DrawInterface 各臂）→ 槽位按压到不了住房查询
+    // （Main.cs:45985 `!mouseLeftRelease → return`）。
     expect(game).toMatch(/this\.annotateMode && inp\.mouseDown && !this\._prevMouseDown && !this\._annoLatch && !inp\.uiBlocking && !this\.inpOverDomUi\(\)/);
     expect(game).toMatch(/if \(inp\.mouseDown && !this\._prevMouseDown && !this\.inpOverDomUi\(\)\) \{/);
   });

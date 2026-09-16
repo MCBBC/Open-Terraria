@@ -600,10 +600,15 @@ export function particleGravDefault(p: { grav?: number; ax?: number; ay?: number
 // Set 三表（scripts/_bj94-set-census.mjs 构造器计数子类法实锤：每帧各 1 次构造；
 // 字面量内容、仅 .has 只读消费、引用不逃逸）→ 模块级单例；swPerf 快路径消费，
 // flag 关 = 调用点原地 new（旧行为逐位不变）。
-/** scope 配饰（Player.cs:14356-14360 佩戴判定） */
+/** scope 配饰（Player.cs:15002 ApplyEquipFunctional 佩戴判定 1300/1858/4005，1458:15001） */
 export const BJ94_SCOPE_ACC = new Set([1300, 1858, 4005]);
-/** scope 可用弹药族（useAmmo ∈ {97,1783,1836,283,780}） */
-export const BJ94_AMMO_SCOPE = new Set([97, 1783, 1836, 283, 780]);
+/** scope 可用弹药族（useAmmo 五支析取 = Player.cs:15004：97 子弹/1783 糖玉米/
+ *  1836 木桩/23 凝胶/780 溶液，1458:15003 同；23=Gel，AmmoID.cs:114）
+ *  ★BJ98 勘误（RB22b CONFIRMED vanilla 偏差）：283 飞镖系 2026-08-18 2bc3f288 误读
+ *  ——:14356-60 实为 monolith shader switch，原版析取无 Dart：飞镖四武器（281 吹管/
+ *  986 吹枪/3007 飞镖手枪/3008 飞镖步枪，useAmmo=283）本仓曾误 pan、焰喷 506/
+ *  精灵熔枪 1910（useAmmo=23）曾漏 pan */
+export const BJ94_AMMO_SCOPE = new Set([97, 1783, 1836, 23, 780]);
 /** 水炬（ItemID.Sets.WaterTorches = 523/1333/4384，ItemID.cs:1194） */
 export const BJ94_WATER_TORCH_ITEMS = new Set([523, 1333, 4384]);
 
@@ -8953,7 +8958,11 @@ export class Game implements GameHooks {
       };
       if (club && !inp.uiBlocking && !this.player.dead && this.player.gravDir === 1) {
         const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-        if (!this.golfAim && inp.mouseDown && this.player.useTime === 0) {
+        // ★RB30a MINOR-4（2026-09-16）开瞄沿补 delayUseItem 压制（R4-22 电平化四消费
+        // 面同式——TriggersSet.cs:853-859 旗存续期 controlUseItem 强制 false；原版
+        // 高尔夫整面下沉于 controlUseItem，开瞄沿/维持臂同吃。真实到达窗=回焦按住
+        // （旗存续至松键），旧版缺门=旗存续期按杆开瞄/摆球绕过压制）
+        if (!this.golfAim && inp.mouseDown && this.player.useTime === 0 && !inp.delayUseItem) {
           // 开瞄（AI_150 :49507-49525）：500×500 盒（玩家中心）内无自有球 → 自动摆球
           const ball500 = this.entities.projectiles.some((e) => {
             const b = e as GolfBall;
@@ -8980,8 +8989,10 @@ export class Game implements GameHooks {
             this.player.useTime = 0;
           } else if (!ball) {
             this.golfAim = false; this.golfAimBall = null;
-          } else if (inp.mouseDown) {
-            // 瞄准维持（SetDummyItemTime :49624-49627）
+          } else if (inp.mouseDown && !inp.delayUseItem) {
+            // 瞄准维持（SetDummyItemTime :49624-49627）——★RB30a MINOR-4 同式补门：
+            // 旗存续=channel 掉（vanilla AI_150 :53376 !player.channel 支=击球），
+            // 本臂让位后走下方松手击球支=channel 掉同相
             this.player.useTime = Math.max(this.player.useTime, 12);
             const shot = golfShot(mwx, mwy, ball, club);
             this.renderer.golfPower = { x: this.player.cx, y: this.player.y + this.player.h + 8, rel: shot.rel, ball };
@@ -10539,7 +10550,7 @@ export class Game implements GameHooks {
     this.camera.easeZoom();
     // 望远镜/狙击镜手持镜头平移（Main.cs:62195-62253 GetPlayerControlledCameraPan
     // 全档 1:1）：num 档位——scope 配饰(1300 步枪镜/1858 狙击镜/4005 侦察镜)且手持
-    // 子弹/糖玉米/木桩/飞镖/溶液武器 → 0.5（:62216，须右键按住）；1254 狙击步枪 →
+    // 子弹/糖玉米/木桩/凝胶/溶液武器 → 0.5（:62216，须右键按住）；1254 狙击步枪 →
     // 2/3，带镜 → 0.8（:62219-62226，须右键）；1299 望远镜 → 2/3 无右键门
     // （flag=false :62229-62231）。targetPan = vector×ScaledSize/2×num（:62252）。
     // lastMouseInterface 门以 uiBlocking+光标悬 DOM UI 近似（原版 noThrow||
@@ -10549,11 +10560,11 @@ export class Game implements GameHooks {
     if (!this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {
       const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
       const hVid = hDef ? (hDef.vid ?? viIdFromKey(hDef.key)) : -1;
-      // scope 配饰佩戴判定（Player.cs:14356-14360：饰品在身 + 手持武器 useAmmo
-      // ∈ {97 子弹,1783 糖玉米,1836 木桩,283 飞镖,780 溶液}）
+      // scope 配饰佩戴判定（Player.cs:15002-15008：饰品在身 + 手持武器 useAmmo
+      // ∈ {97 子弹,1783 糖玉米,1836 木桩,23 凝胶,780 溶液}，1458:15001-15007）
       // ★BJ94 D2（swPerf 快路径）：每帧 2 次构造 → 模块级单例（见 BJ94_SCOPE_ACC 注）
       const SCOPE_ACC = swPerf ? BJ94_SCOPE_ACC : new Set([1300, 1858, 4005]);
-      const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 283, 780]);
+      const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 23, 780]);
       const hasScopeAcc = player.inv.armor.some((s, i) =>
         i >= 3 && s && SCOPE_ACC.has(ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]!.key) ?? -1));
       const heldAmmo = itemCombat(hVid)?.useAmmo ?? -1;
@@ -12598,10 +12609,37 @@ export class Game implements GameHooks {
     //   mouseRight&&mouseRightRelease ⇒ Sound 12+SetMouseNPC(-1,-1)（全屏任意处,
     //   不限于条上——此前右键取消只接在 UI 槽位上）；关包 → :46429（UI 侧 closeInventory）
     if (this.housingMode) {
+      // ★RB30a MED-1/MINOR-3（2026-09-16）全屏地图门：mapFullscreen 期整条界面链
+      // 不跑（Main.cs:63384 `if(!mapFullscreen) DrawInterface`——DrawInterface_38_
+      // MouseCarriedObject :45938 在链内），住房光标不消费左键（查询/分配）、不吞
+      // 右键取消、不吞 mouseDown——本支在 :12709 fullMap 早退门之前裸跑，assign 态
+      // 曾可从地图视图搬 NPC。★MED-1b 开图清携带（原版定谳：开图入口
+      // TryOpeningFullscreenMap Player.cs:29340 / 小地图钮 Main.cs:41806 均置
+      // playerInventory=false → DrawInterface_26_InterfaceLogic3 :46434-46440
+      // !playerInventory 臂 SetMouseNPC(-1,-1) 静默清携带=开图后携带不存活；本仓
+      // 背包不随开图收，同相=开图即清。单点写在此处覆盖 M 键/小地图按压/晶塔右键/
+      // renderer 小地图块全部开图入口，keepPanel=true 仅摘选中面板保持）。
+      if (this.renderer.fullMap.open) {
+        this.housingMode = null;
+        this.cb.onHousingCursor?.(null, true);
+        return;
+      }
+      // ★RB30a MINOR-5 每帧降级（Main.cs:45965-45968 同相）：携带 NPC 死亡/离场 →
+      // assign 静默降 query（SetMouseNPC_ToHousingQuery :45968，无音效；此前
+      // HousingPanel.refresh 降级臂无每帧调用者=classic 半边死代码），右键/E 取消不变
+      if (this.housingMode.kind === 'assign') {
+        const heldKey = this.housingMode.npcKey;
+        if (!this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === heldKey)) {
+          this.housingMode = { kind: 'query' };
+          this.cb.onHousingCursor?.(this.housingMode, true);
+        }
+      }
       // ★SW-BJ95（2026-09-16）查询/分配沿补 inpOverDomUi 门：BJ92 拖拽拾取沿补武
       // mouseDown 后，住房携带态下拖槽位拾取会在此误发一次面板 tile 坐标的
-      // housingQuery（原版同位消费序 = ItemSlot.Handle 先吃 mouseLeftRelease，
-      // ItemSlot.cs:894/:4210——槽位按压到不了住房查询，本门恢复同效）。既有世界
+      // housingQuery（原版同位消费序 = ItemSlot.Handle→LeftClick 先吃 mouseLeftRelease
+      // （ItemSlot.cs:894 读沿；:4210 置 false 系 TogglePet/ToggleLight 专用臂非通用点，
+      // 通用 release 消费点=Main.cs DrawInterface 各臂）——槽位按压到不了住房查询，
+      // 本门恢复同效）。既有世界
       // 点击零变化（canvas 按压时 inpOverDomUi 恒 false）；UI 侧边沿由 :12594+ 照旧吞。
       if (inp.mouseDown && !this._prevMouseDown && !this.inpOverDomUi()) {
         const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);

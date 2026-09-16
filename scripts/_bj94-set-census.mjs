@@ -124,7 +124,7 @@ try {
   const [w0, w1] = water.runs[0];
   await teleport(page, (w1 + 6) * 16, water.gl * 16 - 48);
   const a = await census(page, 'water');
-  L.chk('D1 基线: URLSearchParams/帧 ≈4(修复前)', a.usp >= 3.5, `usp/f=${a.usp}`);
+  L.chk('D1 计数: URLSearchParams/帧 ∈ {≈4 修复前基线, 0 修复后}(两态判据)', a.usp >= 3.5 || a.usp <= 0.05, `usp/f=${a.usp}`);
   L.say('census-done');
   process.exit(L.exitCode());
 } finally {

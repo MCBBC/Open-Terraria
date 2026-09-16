@@ -101,6 +101,39 @@ const KB_X = 10;               // 出生 kb 第二参 = 10f
 //     同族判例）;本仓 Player.ts 用 inWater&&!inLava&&!inHoney 桶位=同族幻影姿态
 //     → wetSticky/splashLavaWet/splashHoneyWet 化（Player.ts）。
 // ===========================================================================
+// ★SW-BJ97/RB22a（2026-09-16）minor 清偿两债 + note 登记（全部 1457 锚 1:1;
+//   1458 同域核对 2026-09-16:Kill 头闸/SetDefaults timeLeft/子更新环——行号见各注）：
+//   债1 rbKill 头幂等闸   P.cs:71763-71765 `if (!active) return;`（1458 :71764-66;
+//                         Kill 本体 :71752/:71753）——同拍多 Kill 支齐发第二发空转
+//                         （1048 静止杀 :19370-72 + >20 弹杀 :19374-76 同拍可达齐发
+//                         →家族死亡面双发尘 322×60+Item_16×2;1013 :19183-90、
+//                         1054 :19294-300 同构双门同受本闸保护）
+//   债2 json timeLeft 承接 ctor 读 vanilla-projectiles.json timeLeft 列（Arrow.ts
+//                         life 先例）：1054=300/:1846、1055=900/:1850、1047=3600/
+//                         :9927;1021 `timeLeft *= 3`=:1871（=缺省×3=10800,json 不载
+//                         算术覆写→特支）;1002=2/:9535【独不承接】——本仓爆炸面已拆
+//                         tntBarrelBlast（t+0 持自伤+NPC 面）,承接 2 = Check2x2 完整
+//                         性流双自伤面及时可达（原版=弹体单面）,单面归一归 BJ93 债①
+//   登记项（RB22a note,只登记未落刀）：
+//   ① vy 帽位次          原版帽在 AI 段内重力支【前】（:26683-26686 velY>16→16,
+//                         后重力 +0.3/:26738 → 终速 16.3;1021 重力 0.06/:26728 →
+//                         16.06）——本仓 min(vy+0.3,16) 帽在加后=终速 16.0（差 0.3px/t）
+//   ② 1021 运动核参数     X 加速 0.025/帽 ±3.5/门 |velY|<=1（:26703-26713）与重力
+//                         0.06（:26728）未移植——本仓落通用支 0.05/7、0.3;专属弹跳支
+//                         :19101-19125 未移植=BJ93 登记债③同面
+//   ③ 1055 追踪切换面     落地 ai[1]=1（:19077-19080）/撞墙 ai[1]!=1→置1+HitTiles+
+//                         声（:19095-19101）/AI 追踪支+rotation×0.6（:26591 区）整缺
+//                         ——本仓 1055 撞墙静默不碎、无 ai[1] 面
+//   ④ 注释线锚漂移        债账/字段注行号与现盘漂移（连续落刀所致,行为面无差=
+//                         记账瑕疵;引用以锚语句文本为准）
+//   ⑤ 1002 CutTiles 面    RB22a 原记「每拍面」——定谳修正：vanilla Damage() 无型别门
+//                         （:17183 无条件每子更新,CutTiles :12515-18 门 friendly∧
+//                         owner∧!npcProj∧!minion∧type!=1054）→ 面率与原版同相;
+//                         真偏差=盒（本仓 31×31 vs 原版 260×260）与时长（本仓 life=
+//                         3600 vs 原版 t+2 即 Kill）两维——归 BJ93 债①整建模范畴
+//   ⑥ 池满掷形            spawnDust 池满时掷形（vanilla Dust 槽复用序 vs 本仓）
+//                         RB22a 观察项,未定谳未落刀
+// ===========================================================================
 
 // ===========================================================================
 // ★SW-BJ93 债4①（2026-09-16）：ProjectileID.Sets.SkipDamage_EVP（ProjectileID.cs:275
@@ -121,6 +154,29 @@ export const SKIP_DAMAGE_EVP: ReadonlySet<number> = new Set([108, 164, 1002]);
  *  （:71766）亦不落（本仓 1002 走 SelfHurtPlayers 面,无族尘）。 */
 const RB_KILL_FAMILY: ReadonlySet<number> = new Set(
   [99, 1013, 727, 1014, 1021, 1048, 1053, 1054, 1055, 1057]);
+
+/** ★SW-BJ97/RB22a 债2（2026-09-16）：家族 timeLeft 终值单源（ctor 消费;Arrow.ts
+ *  life 先例=ctor 读 vanilla-projectiles.json timeLeft 列）。
+ *  · 1021：原版 `timeLeft *= 3`（P.cs:1871,1458 同行）= 缺省 3600×3=10800——算术
+ *    覆写,json 只有字面赋值列（1021 行仅 extraUpdates=1）→ 特支锚终值。原版递减
+ *    在 Update 子更新环（:17307,环 :16780-81）每帧 extraUpdates+1=2 次 → 实时 90s;
+ *    本仓 extraUpdates 未消费每帧 −1 → 180s（字段值 1:1,速率差=既有登记债,勿把
+ *    ÷2 烘进初值——会掩盖 extraUpdates 债）。
+ *  · 1002【独不承接】：json/原版 timeLeft=2（P.cs:9535,1458 同）是弹体单面引信——
+ *    原版 Kill(t+2)→SelfHurtPlayers=玩家伤害唯一口;本仓爆炸面已拆 tntBarrelBlast
+ *    （Game.ts:44101,❌1/SW-J1 定谳）在桶破拍(t+0)发放自伤+NPC+视效,BJ93 债4②又把
+ *    自伤面接在弹体 rbKill——若承接 2,BoulderMech Check2x2 完整性流（breakCell→
+ *    tntBarrelBlast + convert 出生弹）双自伤面变及时可达（400×2 vs 原版单面 400）
+ *    =玩家面回归 → 留 3600（令双面之一保持实际不可达）,单面归一归 BJ93 登记债①
+ *    「1002 整建模范畴」后刀。
+ *  · 余型：json 有列按列（1054=300/:1846、1055=900/:1850、1047=3600/:9927）,
+ *    无列=原版无覆写 → 缺省 3600（P.cs:789）。 */
+export function boulderTimeLeft(projId: number): number {
+  if (projId === 1021) return 10800;                 // P.cs:1871 timeLeft *= 3（json 无列）
+  if (projId === 1002) return 3600;                  // 独不承接（双自伤面回归线,见上注）
+  const jt = projectileData(projId)?.timeLeft;
+  return jt !== undefined ? jt : 3600;
+}
 
 /** Utils.Remap 前向档（GetLerpValue clamped + Lerp,Utils.cs:761-780/:496-502——
  *  本域唯二调用 :20342 Remap(len,0,200,4,32) 恒 from<to;反向 GetLerpValue(10,0,i)
@@ -328,7 +384,17 @@ export class RollingBoulder extends Entity {
   w = 31; h = 31;
   /** 原版弹 id（Atlas: vanilla/Projectile_{id}.png） */
   readonly projId: number;
-  /** timeLeft 基线（vanilla-projectiles.json 无覆盖 → 引擎通用 life 兜底同位） */
+  /** timeLeft 基线（vanilla 缺省 3600,P.cs:789;1458 :789 同）。★SW-BJ97/RB22a 债2
+   *  （2026-09-16）：SetDefaults 逐型覆写终值 ctor 读 vanilla-projectiles.json
+   *  timeLeft 列承接（Arrow.ts life 先例同款）——1054=300（:1846）/1055=900（:1850）/
+   *  1047=3600（:9927 显式行）/1002=2（:9535,【独不承接】见 ctor 注）;旧注「json
+   *  无覆盖 → 引擎通用 life 兜底同位」对 1054/1055/1002 失实（json 有列而 ctor 不读）
+   *  =RB22a 勘误退役。1021 原版 `timeLeft *= 3`（:1871,=缺省 3600×3=10800;1458 同行）
+   *  算术覆写 json 提取器不载 → ctor 特支锚终值。递减语义：vanilla timeLeft-- 在
+   *  Update 子更新环内（P.cs:17307,环 :16780-81 `numUpdates = extraUpdates` while≥0;
+   *  1458 :17306,环 :16781-82）每帧 extraUpdates+1 次 → 1021 原版实时 10800÷2=5400t
+   *  =90s;本仓 extraUpdates 未消费（BJ93 登记债①邻接域,非本刀）每帧 −1 → 10800t
+   *  =180s 实时（字段值 1:1,速率差=债面;勿把 ÷2 烘进初值——会掩盖 extraUpdates 债）。 */
   life = 3600;
   /** 出生表伤害 */
   readonly dmg: number;
@@ -405,6 +471,10 @@ export class RollingBoulder extends Entity {
     const row = BOULDER_CONVERT_TABLE[sheet];
     this.projId = row?.proj ?? 99;
     this.dmg = row?.dmg ?? 70;
+    // ★SW-BJ97/RB22a 债2（2026-09-16）：json timeLeft 承接（Arrow.ts life 先例）——
+    //  终值规则单源 boulderTimeLeft()（1021 无 tile sheet 行 ctor 不可达,测试面直调
+    //  锚定;1002 独不承接=双自伤面回归线,逐条锚见该函数注）。
+    this.life = boulderTimeLeft(this.projId);
   }
 
   /** ai[0]：首 tick 后恒 1（cs:26682）；静止自启支的前置门 */
@@ -1286,6 +1356,17 @@ export class RollingBoulder extends Entity {
   }
 
   private rbKill(game: GameHooks): void {
+    // ★SW-BJ97/RB22a 债1（2026-09-16）：Kill() 头幂等闸——vanilla Kill() 首支
+    //  `if (!active) return;`（P.cs:71763-71765;1458 :71764-71766 同域逐字,Kill
+    //  本体 :71752/:71753）——同拍多 Kill 支齐发时第二发空转=原版唯一防双发面。
+    //  本仓同构多站（vanilla 亦两连 Kill 依赖此闸,见各支注）：1048 静止杀
+    //  （rb1048Bounce :19370-72 站,本仓 :1120 无 return）与 >20 弹杀（:19374-76 站,
+    //  本仓 :1121）【同拍可达齐发】（弹后 |v|<0.1 ∧ localAI[1]>20）→ 无闸家族死亡
+    //  面双发（尘 322×60 + Item_16×2）;1013（:19183-90 两连 Kill,本仓 :977/:981）、
+    //  1054（:19294-300 双门,本仓 :1068/:1069）同构（caller dead 早退 / 1054 不在
+    //  拍龄钟 → 静止门恒假=现不可达,结构 1:1 照抄原版=本闸保护面）。
+    //  dead ≡ vanilla active 位。
+    if (this.dead) return;
     this.dead = true;
     if (this.projId === 1047) { this.rbKillRainbowExplosion(game); return; }
     // ★SW-BJ93 债2（2026-09-16）：家族死亡尘/声面接通（BJ92 登记债——旧仓家族

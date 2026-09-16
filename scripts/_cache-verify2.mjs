@@ -40,8 +40,8 @@ for (let i = 0; i < 120; i++) {
   }).catch(() => ({ total: -1, opus: -1 }));
   log(`t${i * 3}s total=${cnt.total} opus=${cnt.opus}`);
   if (cnt.opus >= 863) { log('ALL-OPUS-LANDED'); break; }
-  if (cnt.total === prev && cnt.total > 12000) { stable++; if (stable >= 4) { log('STABLE-Without-full-opus'); break; } }
-  else { prev = cnt.total; stable = 0; }
+  // 观察窗 150s:40MB 经腾讯 CDN 下载+分批 put 需要时间(不早退)
+  if (i >= 50) { log('TIMEOUT-150s opus=' + cnt.opus); break; }
 }
 const fin = await page.evaluate(async () => {
   const names = await caches.keys();

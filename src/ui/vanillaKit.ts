@@ -37,10 +37,18 @@ function tintedDataUrl(src: string, color: string): Promise<string> {
 
 const KIT_STYLE_ID = 'sw-vanilla-kit';
 
-/** 白模染色(XNA Color 乘 RGBA:rgb=multiply、alpha=tex.a×aMul;CharCreation.bakeTint
- *  同技法)→ dataURL。UIPanel/UIHorizontalSeparator 等 9-slice 白模进 border-image
- *  前的预染色通道——色值一律由调用侧传反编译常量数值(禁目测)。按 (src|色) 缓存,
- *  失败解析为 ''(调用侧保留纯色兜底层)。 */
+/** 白模染色(XNA SpriteBatch 预乘管 1:1)→ dataURL。UIPanel/UIHorizontalSeparator 等
+ *  9-slice 白模进 border-image 前的预染色通道——色值一律由调用侧传反编译常量数值
+ *  (禁目测)。按 (src|色) 缓存,失败解析为 ''(调用侧保留纯色兜底层)。
+ *  ★FX43(2026-09-16 用户双图实测:原版面板亮/透,本仓暗/实)定谳:XNA BlendState.
+ *  AlphaBlend = 预乘管(UIPanel.cs:50-78 DrawPanel→spriteBatch.Draw(tex,rect,src,color)),
+ *  合成 out.rgb = texel.rgb×color.rgb + dst.rgb×(1−texel.a×color.a)——src.rgb **不乘
+ *  src.a**(同「XNA α=0 纯加法」族);canvas source-over 则 rgb×α。旧 bake(multiply+
+ *  destination-in)出图 rgb=texel×tint、α=texel.a×aMul,上屏再乘一次 α → 面板/分隔线
+ *  等 α<1 白模整体暗 (1−α) 倍(53 图实测原版面板自身贡献 P=(26,64,108)=tint 全亮;
+ *  旧 bake 呈 26×0.557)。修 = 预乘补偿:bake rgb' = texel.rgb×tint ÷ α_texel(钳 255),
+ *  α' = texel.a×aMul → source-over 还原 out = texel.rgb×tint + dst×(1−α) 逐 texel 1:1。
+ *  α=1 消费面(搜索盒)恒等不变;黑边框 rgb=0 补偿不变。 */
 const sliceTintCache = new Map<string, Promise<string>>();
 export function tintedSliceDataUrl(src: string, r: number, g: number, b: number, aMul: number): Promise<string> {
   const key = `${src}|${r},${g},${b},${aMul}`;
@@ -55,12 +63,18 @@ export function tintedSliceDataUrl(src: string, r: number, g: number, b: number,
         const c = cv.getContext('2d', { willReadFrequently: true })!;
         c.imageSmoothingEnabled = false;
         c.drawImage(img, 0, 0);
-        c.globalCompositeOperation = 'multiply';
-        c.fillStyle = `rgb(${r},${g},${b})`;
-        c.fillRect(0, 0, cv.width, cv.height);
-        c.globalCompositeOperation = 'destination-in';
-        c.globalAlpha = aMul;
-        c.drawImage(img, 0, 0);
+        const d = c.getImageData(0, 0, cv.width, cv.height);
+        const px = d.data;
+        const kr = r / 255, kg = g / 255, kb = b / 255;
+        for (let i = 0; i < px.length; i += 4) {
+          const a = (px[i + 3] / 255) * aMul;
+          if (a <= 0) { px[i] = 0; px[i + 1] = 0; px[i + 2] = 0; px[i + 3] = 0; continue; }
+          px[i] = Math.min(255, Math.round((px[i] * kr) / a));
+          px[i + 1] = Math.min(255, Math.round((px[i + 1] * kg) / a));
+          px[i + 2] = Math.min(255, Math.round((px[i + 2] * kb) / a));
+          px[i + 3] = Math.round(a * 255);
+        }
+        c.putImageData(d, 0, 0);
         res(cv.toDataURL());
       } catch { res(''); }
     };

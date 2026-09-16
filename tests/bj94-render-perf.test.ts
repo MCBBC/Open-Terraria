@@ -28,6 +28,7 @@ import { swPerf, swPerfSetForTest, searchHasParam, searchHasResetForTest } from 
 import {
   BJ94_SCOPE_ACC, BJ94_AMMO_SCOPE, BJ94_WATER_TORCH_ITEMS,
 } from '../src/core/Game';
+import { itemCombat } from '../src/data/vanillaItemCombat';
 import { NPC_STEPUP_IGNORE } from '../src/physics/TileCollision';
 import { planShineWork } from '../src/render/TileShine';
 
@@ -113,7 +114,7 @@ describe('★BJ94 D1 searchHasParam（渲染循环 has 缓存读取面）', () =
 describe('★BJ94 D2 Set 分配消减', () => {
   it('内容恒定三表+NPC_STEPUP_IGNORE：字面量逐位锁定（防内容漂移）', () => {
     expect([...BJ94_SCOPE_ACC].sort((a, b) => a - b)).toEqual([1300, 1858, 4005]);
-    expect([...BJ94_AMMO_SCOPE].sort((a, b) => a - b)).toEqual([97, 283, 780, 1783, 1836]);
+    expect([...BJ94_AMMO_SCOPE].sort((a, b) => a - b)).toEqual([23, 97, 780, 1783, 1836]);
     expect([...BJ94_WATER_TORCH_ITEMS].sort((a, b) => a - b)).toEqual([523, 1333, 4384]);
     expect([...NPC_STEPUP_IGNORE].sort((a, b) => a - b)).toEqual([14, 16, 18, 134, 469]);
   });
@@ -121,7 +122,7 @@ describe('★BJ94 D2 Set 分配消减', () => {
   it('结构锁：Game.ts 三表挂 swPerf 双支（关臂逐字保留原地 new）;TileCollision 纯外提', () => {
     const g = src('../src/core/Game.ts');
     expect(g).toContain('const SCOPE_ACC = swPerf ? BJ94_SCOPE_ACC : new Set([1300, 1858, 4005]);');
-    expect(g).toContain('const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 283, 780]);');
+    expect(g).toContain('const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 23, 780]);');
     expect(g).toContain('const WATER_TORCH_ITEMS = swPerf ? BJ94_WATER_TORCH_ITEMS : new Set([523, 1333, 4384]);');
     const tc = src('../src/physics/TileCollision.ts');
     // 模块级唯一构造点；函数体内旧构造已移除（applyStepUp 每调 new 不复存在）
@@ -222,5 +223,41 @@ describe('★BJ94 D3 玩家波注入湿位 = vanilla player.wet（WaterShaderDat
     expect(r.split('wet: p.wetSticky || p.inWater,').length - 1).toBe(2);   // _waveCtxPushPlayer + 关臂闭包
     expect(r).not.toContain('wet: p.inWater,');     // 旧窄化基面零残留
     expect(r).toContain('WaterShaderData.cs:251');  // 原版注入章锚在位
+  });
+});
+
+// =====================================================================
+// ★BJ98 AMMO_SCOPE 口径勘误守卫（2026-09-16；RB22b CONFIRMED vanilla 偏差清偿）
+// =====================================================================
+describe('★BJ98 AMMO_SCOPE=原版 Player.cs:15004 五支析取（Gel 进 Dart 出）', () => {
+  it('值表逐 id 定谳：1457:15004（1458:15003）五支 = 97 子弹/1783 糖玉米/1836 木桩/23 凝胶/780 溶液', () => {
+    expect([...BJ94_AMMO_SCOPE].sort((a, b) => a - b)).toEqual([23, 97, 780, 1783, 1836]);
+    for (const ammo of [23, 97, 780, 1783, 1836]) expect(BJ94_AMMO_SCOPE.has(ammo)).toBe(true);
+    // 283=Dart（AmmoID.cs:126）非原版析取支——2bc3f288 曾误配（:14356-60 实为
+    // monolith shader switch）；23=Gel（AmmoID.cs:114）为原版第 4 支
+    expect(BJ94_AMMO_SCOPE.has(283)).toBe(false);
+  });
+
+  it('变异哨兵：scoped 谓词随集合翻转（镜佩 1300/1858/4005 外层门 + useAmmo 内层门）', () => {
+    const scoped = (useAmmo: number, hasScopeAcc = true): boolean =>
+      hasScopeAcc && BJ94_AMMO_SCOPE.has(useAmmo);
+    // 506 火焰喷射器/1910 精灵熔枪 useAmmo=23 → pan 0.5（本仓曾漏 pan）
+    expect(itemCombat(506)?.useAmmo).toBe(23);
+    expect(itemCombat(1910)?.useAmmo).toBe(23);
+    expect(scoped(itemCombat(506)?.useAmmo ?? -1)).toBe(true);
+    // 飞镖四武器（281 吹管/986 吹枪/3007 飞镖手枪/3008 飞镖步枪）useAmmo=283 → 不 pan（本仓曾误 pan）
+    for (const vid of [281, 986, 3007, 3008]) {
+      expect(itemCombat(vid)?.useAmmo).toBe(283);
+      expect(scoped(itemCombat(vid)?.useAmmo ?? -1)).toBe(false);
+    }
+    // 原版五支恒 pan；无镜（外层门 :15002）恒不 pan
+    for (const ammo of [23, 97, 780, 1783, 1836]) expect(scoped(ammo)).toBe(true);
+    expect(scoped(23, false)).toBe(false);
+    // 消费点锁：关 swPerf 臂字面量与模块级单例同值；旧值/错引零残留
+    const g = src('../src/core/Game.ts');
+    expect(g).toContain('const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 23, 780]);');
+    expect(g).not.toContain('new Set([97, 1783, 1836, 283, 780])');
+    expect(g).toContain('Player.cs:15002-15008');
+    expect(g).not.toContain('14356-14360');
   });
 });

@@ -167,7 +167,12 @@ describe('SW-BJ88 债1 1013 分段弹支（P.cs:19129-19191）', () => {
     (b2 as unknown as { rb1013Bounce: (lx: number, ly: number, g: GameHooks) => void })
       .rb1013Bounce(0.3, 0, game2);
     expect(b2.localAI1).toBe(0);
-    expect(game2.sfx.length).toBe(0);
+    // ★SW-BJ93 债2（2026-09-16）随刀更新：499t 低速弹回后 |v|=0.03<0.1 ∧ 拍龄>50 →
+    //  静止杀 :19183 rbKill → Kill 家族尘/声面（尘 243×30 + dig）——旧断言 sfx.length
+    //  ===0 编码的是 Kill 面整缺期静默;vanilla :76355 族面本就随静止杀发声。
+    expect(b2.dead).toBe(true);
+    expect(game2.dusts.filter((d) => d.type === 243).length).toBe(30);
+    expect(game2.sfx.some((s) => s.name === 'dig')).toBe(true);
   });
 
   it('债1-4 静止杀（:19183-19186 Length<0.1 ∧ localAI[0]>50）：51 杀 / 50 不杀（摘除变异体红）', () => {

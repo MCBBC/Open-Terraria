@@ -78,6 +78,9 @@ describe('SW-BI1 RollingBoulder 命中玩家的 attacker 槽', () => {
     };
     const shot = new RollingBoulder(104, 104, 484);   // 仙人掌球（表值 proj727/dmg35）
     (shot as unknown as { tileCollide?: boolean }).tileCollide = false; // 纯积分（测漏斗不测碰撞）
+    // ★SW-BJ93 债1（2026-09-16）随刀更新：aiStyle25 出膛宽限门（:12491 localAI[2]<=7
+    //  → PVE/EVP 四面全免）——置拍龄 8 出宽限期（本测主旨=attacker 槽形状,非门面）。
+    (shot as unknown as { localAI2: number }).localAI2 = 8;
     shot.vx = 1; shot.vy = 0;
     expect(() => shot.fixedUpdate(1 / 60, game)).not.toThrow();
     expect(game.damagePlayerCalls.length).toBe(1);

@@ -195,7 +195,11 @@ export class HousingPanel {
 
   private loop(): void {
     if (this.disposed) return;
-    this.draw();
+    // ★RB30a MINOR-5（2026-09-16）：改走 refresh()——原版住房列表每界面帧由
+    // 在世 NPC 现刷（Main.cs:41452-41461 头像持有表在 DrawNPCHousesInUI 每帧重建）
+    // + 携带 NPC 离场降级 :45965-45968 每帧跑；此前 refresh() 仅构造期一调
+    // （无每帧调用者=classic 半边死代码），行表/降级全停在挂载拍。
+    this.refresh();
     this.raf = requestAnimationFrame(() => this.loop());
   }
 
