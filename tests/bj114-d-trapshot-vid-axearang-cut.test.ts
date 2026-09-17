@@ -66,6 +66,12 @@ function cutGame(tiles: Map<number, number>, acc5309: boolean) {
       inBounds: () => true,
       hasTile: () => true,
       get: (x: number, y: number) => tiles.get(x * 100000 + y) ?? 0,
+      // ★红蓝-C 门配套（2026-09-17）：Game.cutTile 候选格现求值 canCutTile——
+      //  谓词读 idx/wall/frameX（wall 350 / 254 frameX 面）。本测候选格恒
+      //  零墙/零帧，全零表即可（idx 只需落表内，坐标个位数无混叠）。
+      idx: (x: number, y: number) => (x & 255) * 256 + (y & 255),
+      wall: new Uint16Array(256 * 256),
+      frameX: new Uint16Array(256 * 256),
     },
   };
   game.player = {

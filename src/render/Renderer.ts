@@ -130,6 +130,7 @@ import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene,
 import { GLScreenFilters, TOWER_FILTER_PRESETS, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo, setFrameRemix, setFrameDontStarve } from '../lighting/SkyColor';
+import { raiseShimmerLiquidLightFloor, restoreShimmerLiquidLightFloor, type ShimmerFloorLedger } from '../lighting/TileLightScanner';
 import { showJourneyQuickGate } from '../ui/QuickGate';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale, hudTier } from '../ui/MobileControls';
@@ -4197,9 +4198,18 @@ export class Renderer {
     //    =暗处仍亮；本仓实体层（含弹）画在本合成之前 → 暗处被乘黑。合成前把这些
     //    弹所在格光值抬到白地板、合成后立即还原数组（下游 applyMoonLordLightFloor/
     //    drawBrightVines 等光照读点保持真值）——写入口方案,见 SELF_LUMINOUS_PROJS 注）
+    // ★FX62 微光液体自发光白地板（用户实报"湖体偏暗紫"）：原版 DrawShimmer
+    //    LiquidRenderer.cs:713 SetShimmerVertexColors 把四角顶点色【整体重置】为
+    //    White×opacity×GetShimmerBaseColor——GetCornerColors 的光照读值被丢弃 =
+    //    微光液体像素免乘光（自发光）。本仓乘光面 = compositeLight 全屏光照图,
+    //    液体格图值 = 发射色(暗紫) → 湖体被乘暗。合成窗内把微光液体格光值抬 255
+    //    白地板（=顶点色 White 等效）,合成后立即还原（同 selfLuminous 律）。
     this.raiseSelfLuminousProjLight(entities, lightR, lightG, lightB,
       lightRX, lightRY, lightRW, lightRH);
+    raiseShimmerLiquidLightFloor(lightR, lightG, lightB,
+      lightRX, lightRY, lightRW, lightRH, world.store, this._shimFloorTouched);
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    restoreShimmerLiquidLightFloor(lightR, lightG, lightB, this._shimFloorTouched);
     this.restoreSelfLuminousProjLight(lightR, lightG, lightB);
 
     // 7-死亡灰化（★用户需求 2026-08-24 修订：灰化只作用于【世界画面】——地形/实体/
@@ -8043,6 +8053,10 @@ export class Renderer {
   /** 同账本去重面（★2026-09-02 对抗附带项：原 includes 线性扫 = 大弹跨格/多弹同格
    *  O(n²)——Set O(1) 命中等价,首触记账语义不变（先记原值再抬亮） */
   private _lumFloorSeen = new Set<number>();
+  /** ★FX62 微光液体自发光白地板账本（raiseShimmerLiquidLightFloor 抬白过的格,
+   *  四元组平铺 li,r,g,b——compositeLight 后 restoreShimmerLiquidLightFloor 按此
+   *  还原原值;纯函数在 lighting/TileLightScanner.ts,本字段仅持账本数组） */
+  private _shimFloorTouched: ShimmerFloorLedger = [];
 
   // ===================== NPC GlowMask 体系（Main.cs DrawNPC 硬编码发光层） =====================
   // 原版 NPC 无通用 glowMask 字段（与 Projectile/Item 不同）：发光层是 DrawNPC 里

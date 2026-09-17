@@ -38442,6 +38442,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★SW-BJ67 D4：1047×幼虫豁免（vanilla 是 flag=false → 不进 KillTile 支;
     //  瓦罐支在 TILE_CUT 判之前,231 非瓦罐,豁免位次与原版同向）
     if (cutTilesTypeExempt(vid, t)) return;
+    // ★红蓝-C（2026-09-17）弹域 CanCutTile 门（债三定谳：近战 :20811/:31383、
+    //  放置 :21075、裂砖 :30132 均已挂,唯本中央收口整缺→弹割越权面）：
+    //  CutTilesAt :15395 `flag && WorldGen.CanCutTile(i,j,AttackProjectile)` →
+    //  KillTile（1458 :15396 同;弹线 DelegateMethods.CutTiles :889 tilecut_0=
+    //  AttackProjectile[Projectile.cs:15285] 同吃）——门=KillTile 前末门,位次
+    //  照抄：上方 1047 豁免即 vanilla flag=false 短路,候选面（POT 28∪TILE_CUT
+    //  ∪1052 加砍）之外零求值=原版 `flag &&` 短路同相。拒切三族（WorldGen.cs
+    //  :88111-24,1458 :88119 同文,单源 world/CanCutTile.ts）：wall 350 / 下格
+    //  ∈{78 ClayPot,380 PlanterBox,579 RockGolemHead}（盆上植物不割=1.0.5 起原版
+    //  铁则,盆栽采收走镐/法杖矿道非割道,Herbs.md:179）/ 未熟南瓜 254 frameX<144。
+    //  context 形参原文未消费（:88111 体对三档恒同）,按调用位自述 AttackProjectile。
+    if ((t === POT_TILE || TILE_CUT.has(t) || axearangExtraCut)
+      && !canCutTile(st, x, y, 'AttackProjectile')) return;
     if (t === POT_TILE) this.smashPot(x, y);
     else if (TILE_CUT.has(t)) {
       if (t === TILE_BY_KEY['v_83_herbs_mature'] || t === TILE_BY_KEY['v_84_herbs_bloom']) {

@@ -22,6 +22,8 @@ const CANT_TAKE_LUNCH_MONEY = new Set([394, 393, 392, 690, 492, 491, 662, 384, 4
   658, 659, 660, 128, 131, 129, 130, 139, 267, 247, 248, 246, 249, 245, 409, 410,
   397, 396, 401, 400, 440, 68, 534, 316, 259, 260, 43, 175, 101]);
 import { liquidCollision } from '../stats/TouchDamage';
+import { wetCollision } from './npcLiquid';
+import { dustWaterFor } from '../render/WeatherRenderer';   // Dust.dustWater()（Dust.cs:405-421,waterStyle 映射）
 import itemRareJson from '../data/vanilla-itemrare.json';
 import { spawnWOF } from './bossAI_wof';
 import type { TownNPC } from './TownNPC';
@@ -78,6 +80,20 @@ export class ItemDrop extends Entity {
   netLocalOnly = false;
   /** 被玩家拉取/抓取中（原版 beingGrabbed——星白天消失的豁免位,拉取路径置位） */
   grabbed = false;
+  // ---- 出入液溅花粘滞镜像（WorldItem.cs:884-1051；语义同 Player.wetSticky 族,
+  //      2026-09-17 微光发声面普查接线——溅花支此前整缺）----
+  /** 原版 wet 粘滞位（WetCollision 任意液体;:901 置真/:981 支首置假） */
+  wetSticky = false;
+  /** 原版 wetCount（:907/:997 置 20;:1049-1051 逐帧 --）——出入水去抖 */
+  wetCount = 0;
+  /** 原版 lavaWet（:884-887 本拍 LavaCollision 置;:1045 !wet 清） */
+  splashLavaWet = false;
+  /** 原版 honeyWet（:946-948 WetCollision 首中旗置;:1045-1047 !wet 清） */
+  splashHoneyWet = false;
+  /** 原版 shimmerWet 溅花镜像（:949-951 WetCollision 首中旗置;:1045-1049 !wet 清）
+   *  ——与状态域 this.shimmerWet（整盒微光探针,转化判定定谳口径）分离：混合液池
+   *  （水垫微光）首中水格时原版 Collision.shimmer 不置 → 溅花支走水档 */
+  splashShimmerWet = false;
 
   constructor(x: number, y: number, itemId: number, stack = 1, vx = 0, vy = -2) {
     super();
@@ -400,19 +416,20 @@ export class ItemDrop extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       // 岩浆死亡（WorldItem.Update :576-580：MoveInWorld 后 lavaWet → CheckLavaDeath）。
       // 仅非抓取帧（else 分支）——被抓取帧走 ApplyMovement 不检岩浆
-      if (liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 2)) {
+      const lavaNow = liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 2);
+      if (lavaNow) {
         this.checkLavaDeath(game);
         if (this.dead) return;
       }
+      // 出入液溅花 1:1（WorldItem.cs MoveInWorld :884-1050——原版位次即非抓取帧
+      // 物理段内,被抓取帧整段跳过）——见 itemSplashFace
+      this.itemSplashFace(game, lavaNow);
     }
-    // 入水小水花声（掉落物轻，音量小）。wet 判定排除岩浆/微光（Collision.cs:1418
-    // WetCollision 只认 !lava && !shimmer）；微光入池走专属 Shimmer 音（:19 style 4）
-    const st = game.world.store;
-    const li = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
-    const liqType = st.liquidType[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
-    const wasWater = this.inWater;
-    this.inWater = li > 80 && (liqType === 1 || liqType === 3);
-    if (this.inWater && !wasWater && this.vy > 1.2) game.playSfx('splash', 1);
+    // （出入液溅花已 1:1 移入非抓取帧物理段尾 itemSplashFace——WorldItem.cs:884-1050
+    //   位次；旧实现"中心格>80 水/蜜 ∧ vy>1.2 + playSfx 六变体乱掷"退役,转化共尾
+    //   伴发的 shimmerSplash 名路由亦退役——见 tryDecraft 尾注。旧注"WetCollision
+    //   只认 !lava && !shimmer"系把 DrownCollision 当 WetCollision 的误读——
+    //   WetCollision 对任意液体为真）
     if (this.shimmerWet && !this.shimmered) {
       this.updateShimmer(game);
     } else if (this.shimmerTime > 0) {
@@ -555,7 +572,6 @@ export class ItemDrop extends Entity {
         this.shimmered = true;    // 上浮漂浮
         this.shimmerTime = 1;
         this.vx *= 0.1; this.vy *= 0.1;
-        game.playSfx('shimmerSplash', 1, this.cx, this.cy);
         shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
         return;
       }
@@ -577,7 +593,6 @@ export class ItemDrop extends Entity {
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1832-1836 type=0
       else this.shimmerTime = 1;                                   // :1948-1951 共尾
       this.vx *= 0.1; this.vy *= 0.1;                              // :1958
-      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
       shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
       return;
     }
@@ -589,7 +604,6 @@ export class ItemDrop extends Entity {
       this.stack--;
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1845-1848
       else this.shimmered = true;                                  // :1850-1853
-      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
       shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
       return;
     }
@@ -611,7 +625,6 @@ export class ItemDrop extends Entity {
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1873-1876
       else this.shimmerTime = 1;
       this.vx *= 0.1; this.vy *= 0.1;
-      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
       shimmerDoneSfx();                                      // Item176（WorldItem.cs:1875 共尾）
       return;
     }
@@ -654,15 +667,118 @@ export class ItemDrop extends Entity {
     this.stack -= outcome.consumed;              // :1927 stack -= 次数×createStack
     if (this.stack <= 0) { this.stack = 0; this.dead = true; }
     else this.shimmerTime = 1;                   // :1936 剩余 stack 保留并重置浸入进度
-    game.playSfx('shimmerSplash', 1, this.cx, this.cy);
     // Item176 转化音（WorldItem.cs:1875 GetShimmered 共尾 → ShimmerEffect :1689-1696；
-    // ×0.9 = LegacySoundPlayer.cs:520）——decraft 支同走该尾；prog 27 同共尾（:1878）
+    // ×0.9 = LegacySoundPlayer.cs:520）——decraft 支同走该尾；prog 27 同共尾（:1878）。
+    // （旧伴发的 shimmerSplash 名路由退役：原版转化共尾只发 Item176,入池
+    //   Splash_4 在 WetCollision 翻转拍由 itemSplashFace 发——2026-09-17 发声面对齐）
     game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
     game.achievements?.notifyProgressionEvent(27);
     return true;
   }
 
-  inWater = false;
+  // ---- 出入液溅花 1:1（WorldItem.cs MoveInWorld :884-1050；2026-09-17 微光发声面
+  //      普查接线——旧实现为中心格>80 水/蜜 ∧ vy>1.2 近似 + playSfx('splash')
+  //      Splash_0..5 六变体乱掷,微光入/出池两支整缺）：
+  //      wet = WetCollision（npcLiquid 1:1 移植体,任意液体含岩浆/微光——物品无
+  //      shimmering 豁免）翻转 + wetCount==0（:904-907/:995-997）;wetCount=20。
+  //      音 = PlaySound(19)=Splash_N（SoundEngine.cs:102 Style 缺省 1）：微光入 4
+  //      (:921)/微光出 5(:1000)/水/蜜/岩浆缺省 1(:934/:947/:961/:1013/:1026/:1040)
+  //      ——与玩家档(水0/微光入2出3)、NPC 档(水0+静音名单)均不同,物品无静音名单;
+  //      Splash_4/5 ×0.75 音量与 [-20,0] 音高抖动由 Sfx 库 FILE_CASE_VOL/PITCH 承载
+  //      尘 = 微光 10×308 四色(Next(6) 1:1:1:3) scale0.8 vy−4 vx×2.5 noGravity
+  //      （入:899-919/出:1002-1017,盒 y+h/2−8）、水 10×dustWater() α100 scale0.8
+  //      （入:926-935 盒−8/出:1026-1034 盒无−8）、蜜 5×152（:937-946/:1019-1025）、
+  //      岩浆 5×35（:953-962/:1035-1043,盒−8）；粘滞三旗 !wet 拍末清偿（:1045-1049）----
+  private itemSplashFace(game: GameHooks, lavaNow: boolean): void {
+    const r = wetCollision(game.world.store, this.x, this.y, this.w, this.h);
+    const wetNow = r.wet;
+    if (r.honey) this.splashHoneyWet = true;
+    if (r.shimmer) this.splashShimmerWet = true;
+    if (lavaNow) this.splashLavaWet = true;
+    if (wetNow) {
+      if (!this.wetSticky) {                              // :900 if (!wet)
+        if (this.wetCount === 0) {                        // :906
+          this.wetCount = 20;                             // :907
+          if (!lavaNow) {                                 // :908（本拍 LavaCollision）
+            if (this.splashShimmerWet) {                  // :909
+              this.splashDust(game, 'shimmer', this.y + this.h / 2 - 8);
+              game.playSfxWav?.('Splash_4', 1, this.x, this.y);   // :921 style 4
+            } else if (this.splashHoneyWet) {             // :936
+              this.splashDust(game, 'honey', this.y + this.h / 2 - 8);
+              game.playSfxWav?.('Splash_1', 1, this.x, this.y);   // :934 缺省 style 1
+            } else {                                      // :937-947 水
+              this.splashDust(game, 'water', this.y + this.h / 2 - 8);
+              game.playSfxWav?.('Splash_1', 1, this.x, this.y);   // :947 缺省 style 1
+            }
+          } else {                                        // :948 岩浆 else 支
+            this.splashDust(game, 'lava', this.y + this.h / 2 - 8);
+            game.playSfxWav?.('Splash_1', 1, this.x, this.y);     // :961 缺省 style 1
+          }
+        }
+        this.wetSticky = true;                            // :978 wet = true
+      }
+    } else if (this.wetSticky) {                          // :979 else if (wet)
+      this.wetSticky = false;                             // :981 wet = false（支首）
+      if (this.wetCount === 0) {                          // :995
+        this.wetCount = 20;                               // :997
+        if (!this.splashLavaWet) {                        // :998（粘滞 lavaWet）
+          if (this.splashShimmerWet) {                    // :999
+            this.splashDust(game, 'shimmer', this.y + this.h / 2 - 8);
+            game.playSfxWav?.('Splash_5', 1, this.x, this.y);     // :1000 style 5
+          } else if (this.splashHoneyWet) {               // :1018
+            this.splashDust(game, 'honey', this.y + this.h / 2 - 8);
+            game.playSfxWav?.('Splash_1', 1, this.x, this.y);     // :1013 缺省 style 1
+          } else {                                        // :1019-1026 水
+            this.splashDust(game, 'water', this.y + this.h / 2);
+            game.playSfxWav?.('Splash_1', 1, this.x, this.y);     // :1026 缺省 style 1
+          }
+        } else {                                          // :1027 岩浆 else 支
+          this.splashDust(game, 'lava', this.y + this.h / 2 - 8);
+          game.playSfxWav?.('Splash_1', 1, this.x, this.y);       // :1040 缺省 style 1
+        }
+      }
+    }
+    if (!wetNow) {                                        // :1044-1049 !wet 清粘滞三旗
+      this.splashLavaWet = false;
+      this.splashHoneyWet = false;
+      this.splashShimmerWet = false;
+    }
+    if (this.wetCount > 0) this.wetCount--;               // :1050-1052
+  }
+
+  /** 溅花尘（WorldItem.cs 四支;物品档 counts=微光10/水10/蜜5/岩浆5,玩家档 50/50/20/20）
+   *  ——复用 spawnDust 原版尘池 + NewDust 分型补链,与 Player.splash*Dust 同式 */
+  private splashDust(game: GameHooks, kind: 'shimmer' | 'water' | 'honey' | 'lava',
+    boxY: number): void {
+    const waterStyle = (game as { renderer?: { waterStyle?: number } }).renderer?.waterStyle ?? 0;
+    const n = kind === 'honey' || kind === 'lava' ? 5 : 10;
+    const type = kind === 'shimmer' ? 308
+      : kind === 'water' ? dustWaterFor(waterStyle)
+        : kind === 'honey' ? 152 : 35;
+    for (let i = 0; i < n; i++) {
+      const d = game.spawnDust?.(this.x - 6, boxY, this.w + 12, 24, type);
+      if (!d) continue;
+      if (kind === 'shimmer') {
+        d.vx *= 0.5; d.vy = d.vy * 0.5 + 1;   // NewDust 308 支补链（Dust.cs:227-231）
+        d.vy -= 4; d.vx *= 2.5;
+        d.scale = 0.8;
+        d.noGravity = true;
+        const roll = (Math.random() * 6) | 0;   // Main.rand.Next(6)（:905/:1008）
+        d.color = roll === 0 ? { r: 255, g: 255, b: 210, a: 255 }
+          : roll === 1 ? { r: 190, g: 245, b: 255, a: 255 }
+          : roll === 2 ? { r: 255, g: 150, b: 255, a: 255 }
+          : { r: 190, g: 175, b: 255, a: 255 };
+      } else if (kind === 'water') {
+        d.vy -= 4; d.vx *= 2.5;
+        d.scale = 0.8; d.alpha = 100; d.noGravity = true;
+      } else {
+        d.vx *= 0.1; d.vy = -0.5;             // NewDust 34/35/152 支补链（Dust.cs:246-254）
+        d.vy -= kind === 'honey' ? 1 : 1.5;
+        d.vx *= 2.5;
+        d.scale = 1.3; d.alpha = 100; d.noGravity = true;
+      }
+    }
+  }
 
   /** WorldItem.CheckLavaDeath（:731-804）1:1：
    *  - vid 267 向导巫毒娃娃：TurnToAir → 场上每只向导（type 22）

@@ -563,6 +563,72 @@ export function specialTileLight(
   }
 }
 
+// ---- FX62 微光液体发射色 + 自发光白地板（2026-09-17 用户实报"湖体偏暗紫"）----
+/** 微光液体发射色（ApplyLiquidLight :133-151 纯函数单源）：num2=0.7+(270-mt)/900、
+ *  num3=0.7+(270-mt)/125 → (num2×0.6, num3×0.25, num2×0.9)。mt=Main.mouseTextColor
+ *  (65..255 脉冲) → R 0.43-0.56 / G 0.2-0.58 / B 0.65-0.84 紫蓝呼吸。
+ *  原版怪癖照录：门是 `X < num2` 写入 `num2×0.6`（判据与写入值不同系数）。 */
+export function shimmerLiquidEmission(mouseTextColor: number): [number, number, number] {
+  const n2 = 0.7 + (270 - mouseTextColor) / 900;
+  const n3 = 0.7 + (270 - mouseTextColor) / 125;
+  return [n2 * 0.6, n3 * 0.25, n2 * 0.9];
+}
+
+/** 微光液体自发光白地板账本（四元组平铺 li,r,g,b——restore 按此还原原值） */
+export type ShimmerFloorLedger = number[];
+
+/**
+ * 合成窗内把微光液体格（repo liquidType 4 = 原版 LiquidID.Shimmer）光照三通道
+ * 抬到 255 白地板。原版 DrawShimmer（LiquidRenderer.cs:682-730）:713 调
+ * SetShimmerVertexColors :745-759 把四角顶点色【整体重置】为
+ * White×opacity×GetShimmerBaseColor——Lighting.GetCornerColors 的读值被丢弃 =
+ * 微光液体像素不参与顶点色乘光（自发光,暗处亦亮紫）。本仓光照 = compositeLight
+ * 全屏光照图乘法,液体格图值 = 发射色（暗紫）→ 湖体被乘成暗紫（用户实报）。
+ * 白地板 = 顶点色 White 的合成等效（world.rgb×1 = 原版输出）。
+ * ★只升不降只对液体格;restore 必须在 compositeLight 之后立即调用（下游
+ * lightAt 读点保持真值——raiseSelfLuminousProjLight 同律）。粒度=整格：
+ * 同格实体（湖中角色/掉物）一并免乘光,与原版"格光=发射色乘实体"有出入,
+ * 登记粒度债（同 SW-BJ41 逐像素 vs 逐格登记例）。纯函数供 vitest 变异复核。
+ */
+export function raiseShimmerLiquidLightFloor(
+  lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+  rx: number, ry: number, rw: number, rh: number,
+  st: { w: number; h: number; liquid: Uint8Array; liquidType: Uint8Array },
+  touched: ShimmerFloorLedger,
+): void {
+  touched.length = 0;
+  const x0 = Math.max(0, rx), x1 = Math.min(st.w, rx + rw);
+  const y0 = Math.max(0, ry), y1 = Math.min(st.h, ry + rh);
+  if (x1 <= x0 || y1 <= y0) return;
+  const liq = st.liquid, liqT = st.liquidType;
+  for (let ty = y0; ty < y1; ty++) {
+    const row = ty * st.w;
+    const mr = (ty - ry) * rw;
+    for (let tx = x0; tx < x1; tx++) {
+      const si = row + tx;
+      if (liq[si] > 0 && liqT[si] === 4) {
+        const li = mr + (tx - rx);
+        if (lightR[li] === 255 && lightG[li] === 255 && lightB[li] === 255) continue;
+        touched.push(li, lightR[li], lightG[li], lightB[li]);
+        lightR[li] = 255; lightG[li] = 255; lightB[li] = 255;
+      }
+    }
+  }
+}
+
+/** 合成后还原白地板账本（与 raiseShimmerLiquidLightFloor 配对） */
+export function restoreShimmerLiquidLightFloor(
+  lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+  touched: ShimmerFloorLedger,
+): void {
+  for (let i = 0; i < touched.length; i += 4) {
+    lightR[touched[i]] = touched[i + 1];
+    lightG[touched[i]] = touched[i + 2];
+    lightB[touched[i]] = touched[i + 3];
+  }
+  touched.length = 0;
+}
+
 export class TileLightScanner {
   /** 挡光表(Main.tileBlockLight,lightTables.TILE_BLOCK_LIGHT_SHEETS 按 sheet 展开;
    *  LightIsBlocked :154-165)——718 昼云为昼夜动态,每帧在 exportTo 覆写(Main.cs:66134-66141) */
@@ -968,9 +1034,9 @@ export class TileLightScanner {
         //    微光（:133-151 num2/num3 双通道）发光，水/蜂蜜不发光
         if (st.liquid[i] > 0 && st.liquidType[i] === 4) {
           // 微光液体（ApplyLiquidLight:133-151）：R=0.6num2、G=0.25num3、B=0.9num2
-          const n2 = 0.7 + (270 - osc) / 900;
-          const n3 = 0.7 + (270 - osc) / 125;
-          lr = Math.max(lr, n2 * 0.6); lg = Math.max(lg, n3 * 0.25); lb = Math.max(lb, n2 * 0.9);
+          // ★FX62 纯函数单源 shimmerLiquidEmission（头部注释）
+          const [er2, eg2, eb2] = shimmerLiquidEmission(osc);
+          lr = Math.max(lr, er2); lg = Math.max(lg, eg2); lb = Math.max(lb, eb2);
         } else if (st.liquid[i] > 0 && st.liquidType[i] === 2) {
           lr = Math.max(lr, lavaV); lg = Math.max(lg, lavaV * 0.6); lb = Math.max(lb, lavaV * 0.2);
         }

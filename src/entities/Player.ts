@@ -4223,12 +4223,13 @@ export class Player extends Entity {
     }
     if (this.wetCount > 0) this.wetCount--;   // Player.cs:27649-27651
     // shimmerTransparency（Player.cs:18147-18162）：shimmering +0.015/t 钳 0.8；
-    // 解除后 -0.015/t 回 0，衰减起始帧（恰 0.8）播 Sound 19 style 3
-    // （本作 sfx 库无独立 style 3 样本，shimmerSplash 近似）
+    // 解除后 -0.015/t 回 0，衰减起始帧（恰 0.8）播 PlaySound(19,…,3)=Splash_3
+    // （Player.cs:18422。旧注"无 style 3 样本,shimmerSplash=Splash_4 近似"退役——
+    // Splash_3 素材在库且出水溅花支 :28110 已直用,2026-09-17 发声面对齐改真声）
     if (this.shimmering) {
       this.shimmerTransparency = Math.min(0.8, this.shimmerTransparency + 0.015);
     } else if (this.shimmerTransparency > 0) {
-      if (this.shimmerTransparency >= 0.8) game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+      if (this.shimmerTransparency >= 0.8) game.playSfxWav?.('Splash_3', 1, this.x, this.y);
       this.shimmerTransparency = Math.max(0, this.shimmerTransparency - 0.015);
     }
     // TryToShimmerUnstuck（:28377-28389）：timeShimmering 钳 0-7200（shimmering +1/
@@ -9755,6 +9756,10 @@ export class Player extends Entity {
         this.startShimmerUnstuckHelper();
       }
       this.buffs.remove(BuffType.Shimmered);   // :29111 ClearBuff(353)
+      // ShimmerTownNPC 到场音（Spawn_ShimmerTownNPC ParticleOrchestrator.cs:2321
+      // SoundEngine.PlaySound(SoundID.Item29, PositionInWorld)——Broadcast 双生子
+      // 本地也触发处理器;TownNPC shimmerRise 尾同款。2026-09-17 普查补）
+      game.playSfx('manaCrystal', 1, this.cx, this.y + this.h);
       game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShimmerTownNPC, this.cx, this.y + this.h);
       return;
     }
@@ -9775,7 +9780,11 @@ export class Player extends Entity {
     this.buffs.remove(BuffType.Shimmered); // :28406 ClearBuff(353)——传送即解除微光化
     this.iframes = Math.max(this.iframes, PLAYER_IFRAME_TICKS);
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
-    game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+    // ShimmerTownNPC 到场音 = SoundID.Item29（Spawn_ShimmerTownNPC 处理器尾
+    // ParticleOrchestrator.cs:2321——Broadcast 双生子本地也触发;旧 shimmerSplash
+    // （Splash_4 微光液配对音）系错档,2026-09-17 普查对齐。TownNPC shimmerRise
+    // 尾 manaCrystal 已接,同源）
+    game.playSfx('manaCrystal', 1, this.cx, this.cy);
     // module8 广播（Player.cs:28402 BroadcastOrRequestParticleSpawn(ShimmerTownNPC,
     // PositionInWorld = Bottom)）——原版在 Teleport 之后取 base.Bottom（= 新位脚底）,
     // 此处 x/y 已更新,同语义照抄

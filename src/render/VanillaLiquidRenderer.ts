@@ -101,7 +101,7 @@ function shimmerGlitterOpacity(top: boolean, x: number, y: number, tVis: number)
 function shimmerFrame(top: boolean, x: number, y: number, tVis: number): number {
   let num = ((x + 0.5 + (y + 0.5) / 6) / 10) - tVis / 360;
   if (!top) num += (x + 0.5) + (y + 0.5);
-  return ((Math.floor(num) % 16) + 16) % 16;
+  return ((Math.trunc(num) % 16) + 16) % 16;   // ★FX61：(int)num = 向零截断（C# 强转），floor 在负相位差 1 帧
 }
 
 /** sparkle 源矩形（DrawShimmer :716-721）：先把 sourceRectangle 重置回【原始
@@ -110,6 +110,16 @@ function shimmerFrame(top: boolean, x: number, y: number, tVis: number): number 
  *  旧实现误传 1280：fr≥1 全部越界被跳过（彩虹条消失），fr=0 命中 Y=1280 黑底块画出黑斑。 */
 export function shimmerSparkleSource(sx: number, sy: number, fr: number): [number, number] {
   return [sx + 48, sy + 80 * fr];
+}
+
+/** sparkle 绘制门（DrawShimmer :717 `flag`）纯函数：原始 SourceRectangle 非满格
+ *  内部态 (X==16 ∧ Y%80==48)。★De Morgan 直译 = `X!==16 || Y%80!==48`——曾误写
+ *  `!(X===16 || Y%80===48)`（逻辑等价于 ∧），把表层格 (sx=16, sy=0) 判成 body：
+ *  sparkle 退化为棋盘格 × 噪声微闪（GetShimmerGlitterOpacity body 支常在 0.02
+ *  阈下）= 用户实报"微光液面顶缘彩虹渐变线整缺"的根因（FX61，2026-09-17）。
+ *  top=true（表层/边缘格）四角 glitter 恒 0.5（:775-778）→ 常驻彩虹条。 */
+export function shimmerSparkleGate(sx: number, sy: number): boolean {
+  return sx !== 16 || sy % 80 !== 48;
 }
 
 /**
@@ -162,6 +172,13 @@ function hslToRgb(hue: number, sat: number, lum: number): [number, number, numbe
   const v2 = lum < 0.5 ? lum * (1 + sat) : lum + sat - lum * sat;
   const v1 = 2 * lum - v2;
   return [hue2rgb(v1, v2, hue + 1 / 3), hue2rgb(v1, v2, hue), hue2rgb(v1, v2, hue - 1 / 3)];
+}
+
+/** GetShimmerGlitterColor :768 彩虹相位（纯函数）：(((x + y/6) + tVis/30) / 6) % 1。
+ *  空间项 x/6 → 相邻液面格相位差 1/6（≈60° 色相）= 液面顶缘逐格彩虹渐变；
+ *  时间项 → dHue/d帧 = 1/180 → 180 帧（60fps 下 3s）一个整周期漂移。 */
+export function shimmerGlitterHue(x: number, y: number, tVis: number): number {
+  return (((x + y / 6) + tVis / 30) / 6) % 1;
 }
 
 // ---- sparkle 染色变体缓存（离线预渲染）----
@@ -701,8 +718,10 @@ export function drawVanillaLiquids(
       const sy = Math.floor(16 - n5 * 16) + fy[i];
       const sw = Math.ceil((n3 - n2) * 16), sh = Math.ceil((n5 - n4) * 16);
       const isSurface = fx[i] === 16 && fy[i] === 0 && y > groundLevel - 40;
-      // 帧选择 1:1（DrawNormalLiquids :636-644）：中列（sx==16,下落柱/池体）走慢速瀑布帧
-      const srcY = isSurface ? 1280 : sy + (sx === 16 ? waterfallFrame : animFrame) * 80;
+      // 帧选择 1:1（DrawNormalLiquids :636-644）：中列（sx==16,下落柱/池体）走慢速瀑布帧。
+      // ★微光除外（FX61 对拍补刀）：DrawShimmer :697-705 恒走 _animationFrame，
+      // 无 X==16 瀑布中列分支——池体内部格曾误用慢速瀑布帧（16s/格 vs 风速驱动）
+      const srcY = isSurface ? 1280 : sy + (vt !== 3 && sx === 16 ? waterfallFrame : animFrame) * 80;
       if (sw <= 0 || sh <= 0 || sx + sw > tex.width || srcY + sh > tex.height) continue;
       // ---- 水波位移（表层水线 bob；WaterWaves.ts 头部 Canvas2D 取舍登记）----
       let dstY = y * 16 + Math.floor(n4 * 16);
@@ -748,7 +767,7 @@ export function drawVanillaLiquids(
         ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
         ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dstX, dstY, sw, drawSh);
         if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
-        const flag = !(sx === 16 || sy % 80 === 48);           // :719
+        const flag = shimmerSparkleGate(sx, sy);               // :717（★FX61：曾误写 !(A||B)=∧，表层格彩虹条整缺）
         if (flag || (x + y) % 2 === 0) {
           // alpha = 像素亮度（tintSparkleBand 已把灰度写进 alpha）× 四角
           // GetShimmerGlitterOpacity 均值。四角均值与原版逐顶点双线性插值的面积均值
@@ -769,7 +788,7 @@ export function drawVanillaLiquids(
             // 越界被跳过（=表层"彩虹条"消失），仅 fr=0 时命中 Y=1280 的黑底块反而画出黑斑。
             const [sSrcX, sSrcY] = shimmerSparkleSource(sx, sy, fr);
             if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
-              const hue = (((x + y / 6) + tVis / 30) / 6) % 1; // :767 彩虹相位
+              const hue = shimmerGlitterHue(x, y, tVis);       // :768 彩虹相位（纯函数单源）
               const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)
                 + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
               const spark = shimmerSparkleTint(tex, hueIdx);   // 染色带；null 则退回原图（无彩虹）

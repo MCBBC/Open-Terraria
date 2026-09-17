@@ -14,7 +14,7 @@ import { join } from 'node:path';
 // pngjs 无类型声明（同 scripts/*.mjs 的既有用法，仅本像素探针在 ts 侧引用）
 // @ts-ignore
 import { PNG } from 'pngjs';
-import { tintSparkleBand, shimmerSparkleSource } from '../src/render/VanillaLiquidRenderer';
+import { tintSparkleBand, shimmerSparkleSource, shimmerSparkleGate, shimmerGlitterHue } from '../src/render/VanillaLiquidRenderer';
 
 const TEX = PNG.sync.read(
   readFileSync(join(__dirname, '..', 'public', 'sprites', 'vanilla', 'Misc_water_14.png')));
@@ -107,5 +107,63 @@ describe('② 表层 sparkle 源 Y（DrawShimmer :716-721 重置语义）', () =
       }
     }
     expect(stray).toBe(0);
+  });
+});
+
+// ---- ③ FX61（2026-09-17）：sparkle 绘制门 De Morgan 回归 + 彩虹相位直方图 ----
+// 用户实报"微光液面顶缘缺原版彩虹渐变线"。根因 = 门误写 !(A||B)（≡A∧B），
+// 表层格 (sx=16, sy=0) 被判成 body → sparkle 退化棋盘格×噪声微闪。标杆 =
+// LiquidRenderer.cs:717 `sourceRectangle.X != 16 || sourceRectangle.Y % 80 != 48`。
+describe('③ FX61 sparkle 绘制门（:717 De Morgan 直译）', () => {
+  // 独立参照实现（与 src 内实现零共享，防同源盲区）
+  const ref = (sx: number, sy: number): boolean => sx !== 16 || sy % 80 !== 48;
+
+  it('回归钉：表层格 (16,0) 必须 top=true（常驻 0.5 glitter = 彩虹条的载体）', () => {
+    expect(shimmerSparkleGate(16, 0)).toBe(true);
+  });
+
+  it('真值表全扫：参照式 (X!==16 || Y%80!==48) 逐对同值（body 内部格 (16,48) 恒 false）', () => {
+    expect(shimmerSparkleGate(16, 48)).toBe(false);   // 满格内部态 = 唯一 false
+    for (const sx of [0, 4, 16, 32, 48, 64, 96, 140]) {
+      for (const sy of [0, 4, 16, 32, 47, 48, 49, 64, 128, 1280]) {
+        expect(shimmerSparkleGate(sx, sy)).toBe(ref(sx, sy));
+      }
+    }
+  });
+
+  it('彩虹相位（:768）：参照式同值 + 相邻液面格相位差 ≈1/6（逐格彩虹渐变）+ 180s 整周期', () => {
+    const refHue = (x: number, y: number, t: number): number =>
+      ((((x + y / 6)) + t / 30) / 6) % 1;
+    for (const [x, y, t] of [[0, 0, 0], [100, 200, 600], [3333, 471, 12345]] as const) {
+      expect(shimmerGlitterHue(x, y, t)).toBeCloseTo(refHue(x, y, t), 10);
+    }
+    // 空间渐变：同一时刻液面行相邻格 hue 差 = 1/6（模 1）
+    const h0 = shimmerGlitterHue(500, 300, 1000);
+    const h1 = shimmerGlitterHue(501, 300, 1000);
+    const d = ((h1 - h0) % 1 + 1) % 1;
+    expect(Math.abs(d - 1 / 6)).toBeLessThan(1e-9);
+    // 时间漂移：Δt=180s → 相位整退一周期（同格同色回绕）
+    expect(shimmerGlitterHue(500, 300, 1000))
+      .toBeCloseTo(shimmerGlitterHue(500, 300, 1000 + 180 * 60), 6);
+  });
+
+  it('彩虹多色相存在判据（desert-style4 直方图指纹法）：空间 6 格一整周期彩虹 + 时间轴 16 档全可达', () => {
+    const STEPS = 16;
+    const hueIdx = (x: number, y: number, t: number): number =>
+      ((Math.floor(shimmerGlitterHue(x, y, t) * STEPS) % STEPS) + STEPS) % STEPS;
+    // 空间率 1:1（:768 空间项 /6）：相邻格 hue 步进 1/6（≈60°）→ 每 6 格回绕一整圈
+    // = 液面顶缘逐格红→绿→蓝循环（用户截图的彩虹渐变带）；32 格行 ≥5 个整周期。
+    // 顶点色在原版为 GPU 连续插值（Canvas 口 16 档量化下整格采样每周期 6 档）
+    const h0 = shimmerGlitterHue(500, 300, 9000);
+    const h6 = shimmerGlitterHue(506, 300, 9000);
+    expect(Math.abs((h6 - h0) % 1)).toBeLessThan(1e-9);
+    const row = new Set<number>();
+    for (let x = 0; x < 32; x++) row.add(hueIdx(x, 300, 9000));
+    expect(row.size).toBeGreaterThanOrEqual(6);
+    // 时间轴：dHue/d帧 = 1/180 → 180 帧（3s）一个整周期，逐帧扫 16 档全可达
+    // （漂移彩虹；60 帧步长 = 每步 1/3 周期会走样成 3 档）
+    const col = new Set<number>();
+    for (let t = 0; t < 180; t++) col.add(hueIdx(300, 300, t));
+    expect(col.size).toBe(STEPS);
   });
 });

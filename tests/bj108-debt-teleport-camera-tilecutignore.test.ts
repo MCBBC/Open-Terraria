@@ -169,7 +169,12 @@ function cutHarness(tiles: Map<number, number>, acc5309: boolean) {
       inBounds: () => true,
       get: (_x: number, _y: number) => 0,
       hasTile: () => true,
-      ...{},
+      // ★红蓝-C 门配套（2026-09-17）：Game.cutTile 候选格现求值 canCutTile——
+      //  谓词读 idx/wall/frameX（wall 350 / 254 frameX 面）。本测候选格恒
+      //  零墙/零帧，全零表即可（idx 只需落表内，坐标个位数无混叠）。
+      idx: (x: number, y: number) => (x & 255) * 256 + (y & 255),
+      wall: new Uint16Array(256 * 256),
+      frameX: new Uint16Array(256 * 256),
     },
   };
   // 逐格表（key = x*100000+y,与 mowCutTiles swingTileCutSet 同式）

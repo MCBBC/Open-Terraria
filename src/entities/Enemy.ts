@@ -6498,13 +6498,21 @@ export class Enemy extends Entity {
     // 空操作门：非雕像产怪且无任何转化目标 → 原版同帧不产生任何副作用
     if (!this.spawnedFromStatue && !(toNpc >= 0 && toNpc !== this.vanillaId) && toItem < 0) return;
     this.shimmerT = 0;
-    game.spawnParticles(this.cx, this.cy, '#BFE8FF', 10, 1.4, { life: 30, grav: -0.04 });
+    // 发声/尘面 = WorldItem.ShimmerEffect（WorldItem.cs:1690-1727）：SoundID.Item176
+    // （LegacySoundPlayer.cs:519-523 case2 num==176 → 音量 ×0.9）+ 20× dust 309
+    // （scale×1.2 + Next(6) 四色表）——原版三实支（雕像消散 :92672 / Transform 后
+    // :92684 / 化物 :92689）各调一次；城镇变体支（:92691-92704,本仓 TownNPC 侧）
+    // 不调（其到位音 = Spawn_ShimmerTownNPC 的 Item29/manaCrystal,TownNPC 尾部已接）。
+    // ★2026-09-17 微光发声面普查接线：此前整缺（旧 '#BFE8FF' 10 粒泛用粒子系
+    // ShimmerEffect 尘的近似替身,已随本刀退役为原版 309 四色直尘）
     if (this.spawnedFromStatue) {           // SpawnedFromStatue → active=false（:92508-92514）
+      this.shimmerEffectFace(game);         // ShimmerEffect(base.Center)（:92672）
       this.dead = true;
       return;
     }
     if (toNpc >= 0 && toNpc !== this.vanillaId) {
       this.transformTo(toNpc, game.world.store, false, game);
+      this.shimmerEffectFace(game);         // Transform() 后 ShimmerEffect(base.Center)（:92684）
       return;
     }
     if (toItem >= 0) {
@@ -6513,7 +6521,26 @@ export class Enemy extends Entity {
         const d = game.spawnDrop(this.cx, this.cy, key, 1);
         if (d) { d.shimmered = true; d.shimmerTime = 1; }  // 微光化物品上浮（:92540-92545）
       }
+      this.shimmerEffectFace(game);         // ShimmerEffect(base.Center)（:92689）
       this.dead = true;                    // noSpawnCycle + active=false（:92557-92559）
+    }
+  }
+
+  /** WorldItem.ShimmerEffect（WorldItem.cs:1690-1727）本体面：Item_176 ×0.9 +
+   *  20× dust 309（NewDust(Center,1,1,309) 后 scale×1.2 + Next(6) 四色表）。
+   *  消费位 = npcGetShimmered 三实支（上注）——2026-09-17 接线 */
+  private shimmerEffectFace(game: GameHooks): void {
+    game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
+    for (let i = 0; i < 20; i++) {
+      const d = game.spawnDust?.(this.cx, this.cy, 1, 1, 309);
+      if (d) {
+        d.scale *= 1.2;                     // :1701 scale *= 1.2f
+        const roll = (Math.random() * 6) | 0;   // Main.rand.Next(6)（:1702）
+        d.color = roll === 0 ? { r: 255, g: 255, b: 210, a: 255 }
+          : roll === 1 ? { r: 190, g: 245, b: 255, a: 255 }
+          : roll === 2 ? { r: 255, g: 150, b: 255, a: 255 }
+          : { r: 190, g: 175, b: 255, a: 255 };
+      }
     }
   }
 
