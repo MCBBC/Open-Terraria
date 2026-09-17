@@ -2552,7 +2552,17 @@ function frame178Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, reset
   if (num22 > -1) st.frameY[i] = num22 + num21;
 }
 
-/** case 129/149（cs:85727-85752）：CheckAndAdjustMultiDirectionalTile（cs:60338）失败杀 */
+/** case 129/149（WorldGen.cs:86339-86369,FinalCleanup 大循环 TileFrame(i,j) :22575
+ *  逐格到达）：CheckAndAdjustMultiDirectionalTile（cs:60805-60857,锚向优先
+ *  下>左>右>上）成功 → ★帧向重落 frameY（TileFrameImportant case 129 无条件写：
+ *  dir0 下方锚→0、dir1 上锚→18、dir2 左锚→54、dir3 右锚→36——cs:86347-86362
+ *  switch 四相全覆盖,num4 初值 frameY 恒被覆写）;失败 → KillTile。
+ *  ★BJ118③（2026-09-18）补重落：旧实现只杀不落——worldgen 期锚向变化（邻块
+ *  后生成/被杀）后碎块残留旧朝向带 → 绘制 wobble（vectorOffset case 129 按帧行
+ *  ±2px 向锚偏）方向错 + 与运行时臂（WorldEvolution.multiDirCheckAt 同语义）
+ *  不对称。锚有效谓词与杀面保持原状（ValidAnchorForMultiDirectionalTile
+ *  cs:60788-60803:非 Boulders/非 10 + 按向 SolidTileAllow*Slope;二段门
+ *  tileSolid && !tileSolidTop）。 */
 function frame129Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   if (!(x >= 2 && y >= 2 && x < st.w - 2 && y < st.h - 2)) { killTileGen(st, ctx, x, y); return; }
   const valid = (xx: number, yy: number, dir: number): number => {
@@ -2572,9 +2582,16 @@ function frame129Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void
     const id = REV_SHEET_ID.get(sh);
     return id !== undefined && genSolidType(id) && !TILE_DEFS[id]?.platform;
   };
-  const ok = (below >= 0 && solidNS(below)) || (leftT >= 0 && solidNS(leftT))
-    || (rightT >= 0 && solidNS(rightT)) || (up >= 0 && solidNS(up));
-  if (!ok) killTileGen(st, ctx, x, y);
+  // 锚向优先（cs:60836-60854）：下方(dir0) > 左(dir2) > 右(dir3) > 上(dir1),
+  // 每向=ValidAnchor + 二段 tileSolid && !tileSolidTop 门
+  let frameY = -1;
+  if (below >= 0 && solidNS(below)) frameY = 0;
+  else if (leftT >= 0 && solidNS(leftT)) frameY = 54;
+  else if (rightT >= 0 && solidNS(rightT)) frameY = 36;
+  else if (up >= 0 && solidNS(up)) frameY = 18;
+  if (frameY < 0) { killTileGen(st, ctx, x, y); return; }
+  const i = st.idx(x, y);
+  if (st.frameY[i] !== frameY) st.frameY[i] = frameY;
 }
 
 /** case 529（cs:85954-85970）：下须实心底坡容许且沙族，否则杀 */

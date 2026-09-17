@@ -19,7 +19,7 @@ import { tintedVanillaRegion } from './TileTint';
 import { getTreeFoliageSettings, type LeafPaintSettings } from '../world/Paint';
 import { inAPlaceWithWindTiles } from '../entities/Mounts';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
-import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, crystalShardAddFrX, TILE_ANIM_RATE } from './TileAnim';
+import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, crystalShardAddFrX, volcanoFrame59x, TILE_ANIM_RATE } from './TileAnim';
 import { tileFrameCapture as cap } from '../debug/TileFrameCapture';
 
 /** 捕获用素材宽读取（vmeta.sheet → ensureVImage 缓存直取，无请求副作用路径已有） */
@@ -1598,6 +1598,14 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   const fdx = px - (sheet === 711 ? 0 : (asw - TILE) / 2);
   // C 类手动偏移(DrawSingleTile :1032-1186)
   const [vx, vy] = vectorOffset(sheet, fx, fy, slope);
+  // ★BJ118① 水晶碎块质感层（TileDrawing.cs:1101-1118 + :1276-1293 净效果）:
+  //   基底 α100 全亮 + 大簇 4 向彩虹辉光——接管常规尾画（129 不在 FLIP_X_EVEN/
+  //   无坡/无半砖,早退安全）
+  if (sheet === 129) {
+    drawShardCell(ctx, r, asx, asy, fdx + vx, dpy + vy, x, y, fx);
+    void fw; void fh;
+    return;
+  }
   // X 镜像(植物/藤蔓变体:x%2==0 翻转)
   if (FLIP_X_EVEN.has(sheet) && x % 2 === 0) {
     ctx.save();
@@ -1903,7 +1911,9 @@ function biomeVariant529(st: TileStore, x: number, y: number, w: number): number
 
 /** 帧源/尺寸调整(GetTileDrawData 的 tileWidth/Height 覆写 + addFrX/Y 帧重排)。
  *  返回部分覆盖;null 项 = 用 r 原值 */
-function drawAdjust(
+/** ★导出面（BJ118② 变异证红用）：帧源/尺寸调整（tileWidth/Height 覆写 + addFrX/Y
+ *  帧重排）——单测直调验证碑族门/横移钟/火山相位域,行为面与生产共用同一函数。 */
+export function drawAdjust(
   sheet: number, fx: number, fy: number, x: number, y: number,
   imgW: number, imgH: number, st: TileStore, w: number,
 ): { sx?: number; sy?: number; sw?: number; sh?: number } {
@@ -1957,8 +1967,12 @@ function drawAdjust(
     case 624: case 700: if (fit(fx, fy, 20, 16)) { a.sw = 20; a.sh = 16; } break; // :5153-5162(20×16;700 同组,2026-08-28 对账补)
     case 711: if (fx > 0 && fit(fx, fy, 18, 20)) { a.sw = 18; a.sh = 20; } break; // :5000-5008
     case 561: a.sh = 20; break;                                            // 落穿 388 前预置高 20
-    case 270: case 271: case 581: {   // :5627-5648:旋转 6 帧
-      let n = animRot() + (x % 6);
+    case 270: case 271: case 581: {   // :5632-5659:横移 6 帧（萤火/闪电/熔岩瓶）
+      // ★BJ118② 钟归正 animRot()→animFrameIdx(270)（原版 tileFrame[270] 每 9tick
+      //   推进/6 帧回卷,Main.cs:18952-18964;271/581 别名同钟 verbatim）——旧 tick/6
+      //   相位率快 50%。纵向 addFrY=0（:5654 verbatim）由 TILE_ANIM_PITCH[270]=0
+      //   承担（旧默认 38:270/581 素材 36 高被越界钳制掩蔽、581 同;全表普查案）。
+      let n = animFrameIdx(270, 36) + (x % 6);
       if (x % 2 === 0) n += 3;
       if (x % 3 === 0) n += 3;
       if (x % 4 === 0) n += 3;
@@ -1966,8 +1980,8 @@ function drawAdjust(
       a.sx = fx + n * 18;
       break;
     }
-    case 660: {   // :5649-5671:旋转 5 帧
-      let n = animRot() + (x % 5);
+    case 660: {   // :5661-5686:横移 5 帧（精灵瓶）——钟归正同 270（:5663 每 9tick/5 帧）
+      let n = animFrameIdx(660, 36) + (x % 5);
       if (x % 2 === 0) n += 3;
       if (x % 3 === 0) n += 3;
       if (x % 4 === 0) n += 3;
@@ -1975,28 +1989,45 @@ function drawAdjust(
       a.sx = fx + n * 18;
       break;
     }
-    case 572: {   // :5672-5690:旋转 4 帧
-      let n = animRot() + (x % 4);
+    case 572: {   // :5688-5700:横移 4 帧（魂瓶）——钟 animFrameIdx(572)（rate 6=原版
+      //   counter>=6 verbatim,Main.cs:19459）;addFrY=0（:5695）由 PITCH[572]=0 承担
+      //   （素材 216 高不被钳,旧 38 纵走=可见乱带,129 同族病第二例）
+      let n = animFrameIdx(572, 216) + (x % 4);
       while (n > 3) n -= 4;
       a.sx = fx + n * 18;
       break;
     }
-    case 593:   // :5547-5579:fx>=18 → -18;fx<18 时帧行动画(临时帧未移植)
-      if (fx >= 18) a.sx = fx - 18;
-      else a.sy = fy + (animRot() % 8) * 18;
+    // ★BJ118② 火山 593/594（:5541-5560/:5562-5583 verbatim）：预热走 1..8 后恒
+    //   5..8 四相（volcanoFrame59x）。★fx≥18/≥36 静止支原版 addFrY=0——须显式
+    //   a.sy=fy 整替通用 animYOffset 纵偏（RATE 在表,漏整替则样式带照走=129 同族）;
+    //   fx<18/<36 动画支旧 animRot()%8 踏进 0..4 样式带（原版恒 5..8）=乱帧真凶。
+    //   （594 旧 fx≥18 → sx−18 中臂系 1456/1457 均无的自创支——大火山 style0 右格
+    //   fx=18 应纵向动画而非横向折列,摘除。临时帧 Animation.GetTemporaryFrame 未移植,
+    //   备案同前。）
+    case 593:
+      if (fx >= 18) { a.sx = fx - 18; a.sy = fy; }
+      else a.sy = fy + 18 * volcanoFrame59x(tileAnim.tick);
       break;
     case 594:
-      if (fx >= 36) a.sx = fx - 36;
-      else if (fx >= 18) a.sx = fx - 18;
-      else a.sy = fy + (animRot() % 8) * 18;
+      if (fx >= 36) { a.sx = fx - 36; a.sy = fy; }
+      else a.sy = fy + 36 * volcanoFrame59x(tileAnim.tick);
       break;
-    case 507: case 508:   // :6101-6108:90*(counter+x*11+y*27)%160/20
-      a.sy = fy + 90 * Math.floor(((animRot() + x * 11 + y * 27) % 160) / 20);
+    case 507: case 508:   // :6106-6112:90*((counter+x*11+y*27)%160)/20——原版 counter
+      //   逐 tick ++（Main.cs:19166,num2=20×8 周期）,钟归正 animRot()（tick/6,慢 6 倍）
+      //   → tileAnim.tick。登记债：507/508 不在 RATE 表（无 tileFrame 写位）→ 仍走
+      //   chunk 烘焙,相位在烘焙时定格（原版为连续动画）;进动态层须先过密度 perf 关
+      //   （272 齿轮判例:块状动画进动态层=重烘风暴同量级）。
+      a.sy = fy + 90 * Math.floor(((tileAnim.tick + x * 11 + y * 27) % 160) / 20);
       break;
-    case 336: case 340: case 341: case 342: case 343: case 344:  // :6109-6117
-    case 739: case 748:                                          // :4590-4596
-      a.sy = fy + 90 * (animRot() % 4);
+    // ★BJ118② 钟逐单归正（原版各单 tileFrame 域不同,不得共用 animRot）：
+    //   336/340-344 rate5/4 帧（:6114-6121*90;340-344 系 for-loop 钟 Main.cs:19173,
+    //   提取器盲区→RATE 键 PIN 备案）;739 rate11/4 帧、748 rate8/8 帧（:4595-4600,
+    //   旧 %4 把 748 的 8 帧域砍半）。
+    case 336: case 340: case 341: case 342: case 343: case 344:
+      a.sy = fy + 90 * animFrameIdx(sheet, 360);
       break;
+    case 739: a.sy = fy + 90 * animFrameIdx(739, 360); break;   // :4595-4600
+    case 748: a.sy = fy + 90 * animFrameIdx(748, 720); break;
     case 617: a.sx = fx % 54; a.sy = fy % 144; break;    // :5351-5355
     case 129: { // :4682-4690 ★2026-09-18：钟归正 animRot()→crystalShardAddFrX（=tileFrame[129]
       //   每 8tick 推进/6 帧回卷 verbatim,此前 tick/6 相位率差 33%）；纵向 addFrY=0
@@ -2063,11 +2094,46 @@ function drawAdjust(
       break;
     }
     // （case 405/406 已删：见上方 2026-08-30 移除注——chimney/fireplace 走顶层 helper）
-    case 452: a.sy = fy + (fx >= 54 ? 0 : animRot() % 8) * 54; break;  // :5463-5470
-    case 454: a.sy = fy + (animRot() % 8) * 54; break;                 // :5494-5496
-    case 453: a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 20) + (y - Math.floor(fy / 18)) + x) % 3 + 3) % 3); break; // :5485-5493
-    case 456: a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 20) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 4 + 4) % 4); break; // :5497-5508
-    // 455(:5471-5484):派对挂件——无派对系统,原版非派对时 addFrY=0,tileTop 2 已在表内
+    // ★BJ118② 钟归正批（2026-09-18 全表普查）：452 气球机 animRot()→animFrameIdx(452)
+    //   （原版 tileFrame[452] counter>=5 推进/15 帧回卷,Main.cs:19263——旧 tick/6 且 %8
+    //   把 15 帧域砍半）;454 皮纳塔原版 tileFrame[454] 无任何写入（grep 全量零命中）
+    //   → addFrY = 0×54 = 0 恒静止——旧 animRot()%8·54 凭空动画（真实偏差,摘除）。
+    case 452: a.sy = fy + (fx >= 54 ? 0 : animFrameIdx(452, 810)) * 54; break;  // :5468-5476
+    case 454: break;   // :5490-5492 addFrY = tileFrame[454]×54,钟恒 0 → 静止（带 0）
+    case 453: a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 20) + (y - Math.floor(fy / 18)) + x) % 3 + 3) % 3); break; // :5493-5501
+    // 456 气球束(:5503-5511):addFrY = (counter/20 坐标相位 %4)×54——原版 counter 每
+    // tick += rand.Next(3)+1（均值 2/tick,Main.cs:19301）,本仓 tick/20 均速近似（APPROX
+    // 备案同 453）。★步距 38→54 勘正（216=4×54 恰满,旧 PIN 38 缺证值）。
+    case 456: a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 20) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 4 + 4) % 4); break;
+    // 455 派对碑(:5478-5488):addFrY = (PartyIsUp ? 1+tileFrame[455] : 0)×54——本仓无
+    // 派对系统 → 恒 0 静止（band 0）。★须显式 a.sy=fy 整替通用 animYOffset(455) 纵偏
+    // （455 在 RATE 表,不整替则 6 帧派对动画照播=真实偏差）。派对面落地时接事件旗。
+    case 455: a.sy = fy; break;
+    // ★BJ118② 碑族门面（2026-09-18 普查转正,case :6029-6079 verbatim）——表值只记
+    //   步距（54/56）,「band0 静止档」门在此承担:通用 animYOffset 无门,不接管则
+    //   静止档照走带（素材 1静+N动 带布局,PNG 容量互证见 TileAnim PITCH 表注）。
+    case 410:   // 月主碑 :6029-6042:fy>=56 → tileFrame×56,否则静止;fy==36 → 高 18
+      //   （原 tileHeight 覆写 verbatim——本 case 接管后 HEIGHT_18 默认臂不再命中,
+      //   按原版收窄为 fy==36 单格,±2px 均透明 padding 无视觉差）
+      if (fy === 36) a.sh = 18;
+      a.sy = fy >= 56 ? fy + animFrameIdx(410, 504) * 56 : fy;
+      break;
+    case 480: case 509: case 657: case 720: case 721: case 725:
+      // 血月/虚空/回响/CRT/复古/放映机碑 :6044-6059:fy>=54 → tileFrame×54,否则静止
+      a.sy = fy >= 54 ? fy + animFrameIdx(sheet, 486) * 54 : fy;
+      break;
+    case 658: { // 微光碑 :6061-6079:tileFrame×54 + 变体子表基（fy/54==1 → +486、
+      //   ==2 → +972;default 含 0 与 ≥3）。1620=30×54 容量互证。
+      const band = Math.floor(fy / 54);
+      a.sy = fy + animFrameIdx(658, 1620) * 54 + (band === 1 ? 486 : band === 2 ? 972 : 0);
+      break;
+    }
+    case 244:   // 气泡机 :5595-5604:fx<54 → tileFrame×36,else 静止（style1 列静态）
+      a.sy = fx < 54 ? fy + animFrameIdx(244, 216) * 36 : fy;
+      break;
+    case 565:   // 雾机 :5606-5615:fx<36 → tileFrame×36,else 静止（style1 列静态）
+      a.sy = fx < 36 ? fy + animFrameIdx(565, 180) * 36 : fy;
+      break;
     case 428:   // :5697-5703:被踩 → addFrX += 18
       if (plates428Pressed.has(st.idx(x, y))) a.sx = fx + 18;
       break;
@@ -2076,6 +2142,115 @@ function drawAdjust(
       break;
   }
   return a;
+}
+
+// ================= ★BJ118①（G-129 质感层,2026-09-18）水晶碎块半透明 + 大簇彩虹辉光 =================
+// TileDrawing.cs:1101-1118 case 129 第一段:finalColor = new Color(255,255,255,100)
+// （半透明、全亮——覆写 GetFinalLight 光照结果 = 碎块暗处可见,原版相）;frameX>=324 →
+// finalColor = Transparent,基底改由 glow 段 :1292 重画回 white/100——两态净效果同
+// = 基底恒 α100。:1276-1293 glow 段:大簇 4 向 2px 叠画（num12 ∈ {0,π/2,π,3π/2} →
+// ±(2,0)/(0,2)）,源带 = 帧带 +72（Tiles_129 432×144:上半 0..126 本体四朝向带、
+// 72..144 平行辉光带,小簇 flag3=true 跳过）。色 = Main.hslToRgb(0.7 + sin(2π·
+// GlobalTimeWrappedHourly·0.16 + x·0.3 + y·0.7)·0.16, 1, 0.5) → A/=2(=127) →
+// ×0.3（FNA Color*float 逐通道 byte 截断）→ 有效 tint ≈ (r·0.3,g·0.3,b·0.3,α38)。
+// ★钟源定谳：GlobalTimeWrappedHourly（:1284 实文;非 FlickerClock、非 Disco——
+//   160/692 彩虹 moss 才走 Disco 钟）。本仓口径 = SkyColor.globalTimeWrappedHourly
+//   同款 performance.now 秒 %3600（Main.cs:17014 TotalGameTime 秒 %3600）。
+
+/** 基底 α（(255,255,255,100) → 纹理 α×100/255） */
+export const SHARD_BASE_ALPHA = 100 / 255;
+
+/** Main.GlobalTimeWrappedHourly（真实运行秒 %3600;无 performance 环境恒 0） */
+export function shardGlowClock(): number {
+  return typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+}
+
+/** Main.hslToRgb + hue2rgb verbatim（Main.cs:48689-48741,Math.Round ×255） */
+export function shardHslToRgb(hue: number, sat: number, lum: number): [number, number, number] {
+  if (sat === 0) {
+    const v = Math.round(lum * 255);
+    return [v, v, v];
+  }
+  const t2 = lum < 0.5 ? lum * (1 + sat) : lum + sat - lum * sat;
+  const t1 = 2 * lum - t2;
+  return [
+    Math.round(hue2rgb(hue + 1 / 3, t1, t2) * 255),
+    Math.round(hue2rgb(hue, t1, t2) * 255),
+    Math.round(hue2rgb(hue - 1 / 3, t1, t2) * 255),
+  ];
+}
+
+function hue2rgb(c: number, t1: number, t2: number): number {
+  if (c < 0) c++;
+  if (c > 1) c--;
+  if (6 * c < 1) return t1 + (t2 - t1) * 6 * c;
+  if (2 * c < 1) return t2;
+  if (3 * c < 2) return t1 + (t2 - t1) * (2 / 3 - c) * 6;
+  return t1;
+}
+
+/** 辉光 tint（:1284-1286 verbatim:A/=2 → ×0.3 截断）——纯函数供金标测试/变异证红 */
+export function shardGlowTint(clockSec: number, x: number, y: number): [number, number, number, number] {
+  const hue = 0.7 + Math.sin(Math.PI * 2 * clockSec * 0.16 + x * 0.3 + y * 0.7) * 0.16;
+  const [r, g, b] = shardHslToRgb(hue, 1, 0.5);
+  return [Math.floor(r * 0.3), Math.floor(g * 0.3), Math.floor(b * 0.3), Math.floor(255 / 2 * 0.3)];
+}
+
+const shardTintCache = new Map<string, HTMLCanvasElement>();
+const shardTintImgIds = new WeakMap<object, number>();
+let shardTintNextId = 1;
+const SHARD_TINT_CACHE_CAP = 512;
+
+/** 辉光带染色副本缓存（键=图像身份|源矩形|tint——tint 随 hue 量化连续变化,LRU 淘汰;
+ *  逐像素 = XNA SpriteBatch 调制语义 texel×tint/255,α 同乘后 source-over 合成等价） */
+function shardTintedCopy(r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+  tint: [number, number, number, number]): HTMLCanvasElement | null {
+  let imgId = shardTintImgIds.get(r.img as object);
+  if (imgId === undefined) { imgId = shardTintNextId++; shardTintImgIds.set(r.img as object, imgId); }
+  const key = `${imgId}|${r.sx}|${r.sy}|${tint[0]},${tint[1]},${tint[2]}`;
+  const hit = shardTintCache.get(key);
+  if (hit) { shardTintCache.delete(key); shardTintCache.set(key, hit); return hit; }
+  const c = document.createElement('canvas');
+  c.width = r.sw; c.height = r.sh;
+  const cx = c.getContext('2d', { willReadFrequently: true });
+  if (!cx) return null;
+  cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
+  const im = cx.getImageData(0, 0, r.sw, r.sh);
+  const d = im.data;
+  const [tr, tg, tb, ta] = tint;
+  for (let p = 0; p < d.length; p += 4) {
+    if (d[p + 3] === 0) continue;
+    d[p] = Math.floor(d[p] * tr / 255);
+    d[p + 1] = Math.floor(d[p + 1] * tg / 255);
+    d[p + 2] = Math.floor(d[p + 2] * tb / 255);
+    d[p + 3] = Math.floor(d[p + 3] * ta / 255);
+  }
+  cx.putImageData(im, 0, 0);
+  if (shardTintCache.size >= SHARD_TINT_CACHE_CAP) {
+    const oldest = shardTintCache.keys().next().value;
+    if (oldest !== undefined) shardTintCache.delete(oldest);
+  }
+  shardTintCache.set(key, c);
+  return c;
+}
+
+/** 水晶碎块整格绘制（TileDrawing.cs:1101-1118 + 1276-1293 净效果 1:1）：
+ *  基底 α100 全亮;大簇（fx>=324）另加 4 向 2px 辉光副本（源带 sy+72,色随
+ *  GlobalTimeWrappedHourly + 世界坐标相位脉动）。 */
+function drawShardCell(ctx: CanvasRenderingContext2D,
+  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+  sx: number, sy: number, dx: number, dy: number, x: number, y: number, fx: number): void {
+  ctx.globalAlpha = SHARD_BASE_ALPHA;
+  ctx.drawImage(r.img, sx, sy, r.sw, r.sh, dx, dy, r.sw, r.sh);
+  ctx.globalAlpha = 1;
+  if (fx < 324) return;
+  if (sy + 72 + r.sh > r.img.height || sy + 72 < 0) return;   // 辉光带越界防御
+  const tint = shardGlowTint(shardGlowClock(), x, y);
+  const tex = shardTintedCopy({ img: r.img, sx, sy: sy + 72, sw: r.sw, sh: r.sh }, tint);
+  if (!tex) return;
+  for (const [ox, oy] of [[2, 0], [0, 2], [-2, 0], [0, -2]] as const) {
+    ctx.drawImage(tex, 0, 0, r.sw, r.sh, dx + ox, dy + oy, r.sw, r.sh);
+  }
 }
 
 /** ★SW-BJ3（2026-09-06）：半砖格绘制 1:1（TileDrawing.cs:1016/:1022/:1653-1666）。

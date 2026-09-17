@@ -51,10 +51,16 @@ const WING_C = idOfVid(665);
 const RED_DYE = idOfVid(1007);    // Red Dye（染料,maxStack>1）
 const CARROT = idOfVid(603);      // Carrot（宠物,杂项段）
 const FALLING_STAR = idOfVid(75); // 坠落星 rare=1（可重铸魔法武器）
+// 功能配饰段预填充族（acc:1,互异防 armorAccepts 同款互斥）
+const WATCH_COPPER = idOfVid(15);
+const WATCH_SILVER = idOfVid(16);
+const WATCH_GOLD = idOfVid(17);
+const DEPTH_METER = idOfVid(18);
+const BAND_REGEN = idOfVid(49);
 const PREFIX_LEGENDARY = 81;      // valueMul 1.760 ≥1.2 → rare+2
 const PREFIX_QUICK = 42;          // 1.100 ≥1.05 → +1
 const PREFIX_AWFUL = 22;          // 0.689 ≤0.8 → −2
-const PREFIX_LAZY = 49;           // 0.920 ≤0.95 → −1
+const PREFIX_SMALL = 9;           // 0.900 ≤0.95 → −1（Lazy 49 同档,l10n 键缺=告警污染改 Small）
 
 /** UI 原型桩：真实现 + 真 Inventory + sfx/成就录音 */
 function mkUi(): { ui: AnyUI; sfx: string[]; achCalls(): number } {
@@ -145,14 +151,17 @@ describe('BJ116 ① 装备/染料/杂项列右键=取 1 到光标（RightClick :
     expect(ui.heldStack).toMatchObject({ id: DIVING, stack: 1 });
     expect(inv.armor[0]).toBeNull();
     inv.miscEquips[0] = { id: CARROT, stack: 1 };
+    ui.heldStack = null;
     ui.pickupEquipIntoMouse('misc', 0);
     expect(ui.heldStack).toMatchObject({ id: CARROT, stack: 1 });
     expect(inv.miscEquips[0]).toBeNull();
     inv.miscDyes[0] = { id: RED_DYE, stack: 5 };
+    ui.heldStack = null;
     ui.pickupEquipIntoMouse('miscDye', 0);
     expect(ui.heldStack!.stack).toBe(1);
     expect(inv.miscDyes[0]!.stack).toBe(4);
     inv.dye[0] = { id: RED_DYE, stack: 2 };
+    ui.heldStack = null;
     ui.pickupEquipIntoMouse('dye', 0);
     expect(inv.dye[0]!.stack).toBe(1);
     expect(sfx).toEqual(['menuTick', 'menuTick', 'menuTick', 'menuTick']);
@@ -243,30 +252,37 @@ describe('BJ116 ① 时装列右键=SwapVanityEquip（:1845-1877 同序互换,�
     expect(inv.armor[13]).toMatchObject({ id: WING_A });
   });
 
-  it('context 11 段内同款阻断（:3462 CanEquipBothAccessories same type）', () => {
+  it('context 11 段内同款阻断（:3462 CanEquipBothAccessories same type,载入态构造）', () => {
     const { ui } = mkUi();
     const inv = ui.game.player.inv as Inventory;
-    inv.armor[3] = { id: WING_C, stack: 1 };
+    inv.armor[3] = { id: HALO, stack: 1 };                   // 功能段 HALO（跨段同款=载入态构造）
     inv.armor[13] = { id: WING_A, stack: 1 };
-    inv.armor[14] = { id: WING_B, stack: 1 };                // 时装段已双翅=载入态构造
-    ui.swapVanityEquip(13);                                  // WING_C 换入时装段：k=14 翅撞翅
-    expect(inv.armor[3]).toMatchObject({ id: WING_C });
+    inv.armor[14] = { id: HALO, stack: 1 };                  // 时装段已有同款 HALO
+    ui.swapVanityEquip(13);                                  // HALO(armor[3]) 换入时装段:k=14 同款
+    expect(inv.armor[3]).toMatchObject({ id: HALO });        // 全部未动
     expect(inv.armor[13]).toMatchObject({ id: WING_A });
+    expect(inv.armor[14]).toMatchObject({ id: HALO });
   });
 });
 
 // ============ ① case 0/3/4/32 SwapEquip 容器向 src 修复 ============
 describe('BJ116 ① 容器右键装备 src 修复（旧码误读 inv.dye[i]）', () => {
-  it('箱中配饰右键=装备该件+被换下件回箱（SwapEquip 直换容器格↔装备位 :3287）', () => {
+  it('箱中配饰右键=装备该件+功能段满时被换下件回箱（SwapEquip 直换容器格↔装备位 :3287）', () => {
     const { ui, sfx } = mkUi();
     const inv = ui.game.player.inv as Inventory;
     inv.dye[0] = { id: RED_DYE, stack: 1 };                  // 旧码 canary：src 误读 inv.dye[0]
     ui.openChest = { x: 0, items: Array(40).fill(null) } as never;
     ui.openChest.items[0] = { id: BOOTS, stack: 1 };
-    inv.armor[3] = { id: HALO, stack: 1 };
+    // 功能配饰段 3-7 填满（accSlotMax 基座 5）→ first-empty 落空 → 交换段首槽
+    inv.armor[3] = { id: BAND_REGEN, stack: 1 };
+    inv.armor[4] = { id: WATCH_COPPER, stack: 1 };
+    inv.armor[5] = { id: WATCH_SILVER, stack: 1 };
+    inv.armor[6] = { id: WATCH_GOLD, stack: 1 };
+    inv.armor[7] = { id: DEPTH_METER, stack: 1 };
     ui.swapEquipItem({ id: BOOTS, stack: 1 }, 'chest', 0);
     expect(inv.armor[3]).toMatchObject({ id: BOOTS });       // 箱中件上装备位
-    expect(ui.openChest.items[0]).toMatchObject({ id: HALO });           // 被换下件回箱
+    expect(ui.openChest.items[0]).toMatchObject({ id: BAND_REGEN });     // 被换下件回箱
+    expect(inv.armor[4]).toMatchObject({ id: WATCH_COPPER });            // 其余段位不动
     expect(inv.dye[0]).toMatchObject({ id: RED_DYE });       // 染料格不被误读/误装
     expect(inv.miscDyes[0]).toBeNull();                      // 旧码错位回写格不落在
     expect(sfx).toEqual(['menuTick']);
@@ -281,14 +297,18 @@ describe('BJ116 ① 容器右键装备 src 修复（旧码误读 inv.dye[i]）',
     expect(ui.openChest.items[0]).toBeNull();
   });
 
-  it('背包向回归不变（inv.slots 取件→armor[3],被换下件回背包）', () => {
+  it('背包向回归不变（inv.slots 取件→装备位,段满时被换下件回背包）', () => {
     const { ui } = mkUi();
     const inv = ui.game.player.inv as Inventory;
     inv.slots[10] = { id: BOOTS, stack: 1 };
-    inv.armor[3] = { id: HALO, stack: 1 };
+    inv.armor[3] = { id: BAND_REGEN, stack: 1 };
+    inv.armor[4] = { id: WATCH_COPPER, stack: 1 };
+    inv.armor[5] = { id: WATCH_SILVER, stack: 1 };
+    inv.armor[6] = { id: WATCH_GOLD, stack: 1 };
+    inv.armor[7] = { id: DEPTH_METER, stack: 1 };
     ui.swapEquipItem({ id: BOOTS, stack: 1 }, 'inv', 10);
     expect(inv.armor[3]).toMatchObject({ id: BOOTS });
-    expect(inv.slots[10]).toMatchObject({ id: HALO });
+    expect(inv.slots[10]).toMatchObject({ id: BAND_REGEN });
   });
 });
 
@@ -355,9 +375,9 @@ describe('BJ116 ③ 重铸槽 tooltip 词缀档位移（:588-614 烘入 rare,too
     expect(ui.tooltip.innerHTML).toContain('color:rgb(130,130,130)');
   });
 
-  it('Lazy(49, mul 0.920≤0.95) −1 档 → rare 0 White', () => {
+  it('Small(9, mul 0.900≤0.95) −1 档 → rare 0 White', () => {
     const { ui } = mkUi();
-    ui.reforgeItem = { id: FALLING_STAR, stack: 1, prefix: PREFIX_LAZY };
+    ui.reforgeItem = { id: FALLING_STAR, stack: 1, prefix: PREFIX_SMALL };
     ui.showReforgeTooltip();
     expect(ui.tooltip.innerHTML).toContain('color:rgb(255,255,255)');
   });

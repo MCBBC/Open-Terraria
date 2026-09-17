@@ -131,4 +131,61 @@ describe('bound 救援 NPC 原版链（生成期放置已移除）', () => {
       expect(s123.get(123) ?? 0).toBe(0);
     }
   }, 300000);
+
+  it('123 门序 RNG 流对齐（BJ117-①）：savedMech=true 时机械师门零掷', async () => {
+    // 定谳锚：1457=1458 NPC.cs:2656 `downedBoss3 && !savedMech && Next(5)==0 && ...`
+    // ——!savedMech 短路先于 Next(5)。旧仓 N(5) 先掷 → savedMech=true 时同链后续
+    // RNG 消费与原版错一位（产出面等价）。判别器：恒 miss 掷流（0.99 → 一切 1/N
+    // 门必 miss、无状态副作用,掷值与流位无关）直驱 spawnAnNPC——savedMech 两态
+    // 唯一差异 = 机械师门那一掷：对齐版 off.calls = on.calls + 1；
+    // 变异（回退旧序 N(5) 先掷）→ 两跑等数 → 红。
+    const world = await generateWorld({ width: 4200, height: 1200, seedText: 'bound-chains-9', evil: 0 });
+    const spawner = new VanillaSpawner(world);
+    const st = world.store;
+    const DUNG_WALL = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+    const deepY = Math.floor((world.groundLevel * 4 + world.rockLevel) / 5) + 40;
+    let spot: { x: number; y: number } | null = null;
+    for (let y = deepY; y < st.h - 250 && !spot; y += 2) {
+      for (let x = 100; x < st.w - 100 && !spot; x += 3) {
+        if (!DUNG_WALL.has(st.wall[st.idx(x, y)])) continue;
+        if (!st.isSolid(x, y)) continue;
+        if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;
+        if (st.liquid[st.idx(x, y - 1)] > 0) continue;
+        spot = { x, y };
+      }
+    }
+    expect(spot).not.toBeNull();
+    const s = spawner as unknown as {
+      spawnTileX: number; spawnTileY: number; spawnTileType: number;
+      spawnAnNPC(rng: unknown): { vanillaId?: number } | null;
+    };
+    s.spawnTileX = spot!.x;
+    s.spawnTileY = spot!.y;
+    s.spawnTileType = st.type[st.idx(spot!.x, spot!.y)];
+    // nextInt(1)≡0 例外 = 原版 Next(1) 恒中同相
+    const missRng = () => ({
+      calls: 0,
+      next() { this.calls++; return 0.99; },
+      int(a: number, b: number) { this.calls++; return a + Math.floor(0.99 * (b - a + 1)); },
+      nextInt(m: number) { this.calls++; return Math.floor(0.99 * m); },
+      nextIntRange(a: number, b: number) { this.calls++; return a + Math.floor(0.99 * (b - a + 1)); },
+    });
+    const run = () => {
+      const r = missRng();
+      const out = s.spawnAnNPC(r);   // 先跑后取数——对象字面量按序求值,r.calls 须在跑后读
+      return { calls: r.calls, out };
+    };
+    // 可达证人：downedBoss3=false → 地牢分支内守卫 68 支必 return（链已进地牢支）
+    spawner.setPlayerFlags(true, false);
+    delete world.flags['savedMech'];
+    expect(run().out?.vanillaId).toBe(68);
+    // savedMech 两态对拍：唯一差异 = 机械师门 Next(5)
+    spawner.setPlayerFlags(true, true);
+    delete world.flags['savedMech'];
+    const off = run();                    // 门掷 1 发（miss）→ 落空续链
+    world.flags['savedMech'] = true;
+    const on = run();                     // ★1457 短路：门零掷
+    expect(on.out?.vanillaId).not.toBe(123);
+    expect(off.calls).toBe(on.calls + 1);
+  }, 300000);
 });

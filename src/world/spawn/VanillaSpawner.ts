@@ -734,10 +734,11 @@ export class VanillaSpawner {
     return e;
   }
 
-  /** 绑缚三人组占位造怪（NPC.cs:1994-2005）：105/106/685 在本仓的产出是 bound
-   *  TownNPC——Game.trySpawnEnemy 只读 vanillaId 做转换，占位体随即弃置。
-   *  不走 spawnNPC/fromVanilla：vanilla-npcs.json 缺 685 条目（fromVanilla null 静默
-   *  丢弃，同 686 先例），三 id 统一走 PLACEHOLDER_DEF 保证链路可达 */
+  /** 绑缚救援族占位造怪（105/106/685/589 四链）：在本仓的产出是 bound TownNPC——
+   *  Game.trySpawnEnemy 只读 vanillaId 转 bound TownNPC（trySpawnBoundTownNpc；
+   *  123/354 走真体 D() 链同转换），占位体随即弃置。不走 spawnNPC/fromVanilla 系
+   *  链路决策（★BJ117-③ 勘误：vanilla-npcs.json 现已含 685/589 真条目——旧注
+   *  "缺 685 条目、fromVanilla null 静默丢弃（同 686 先例）"已过时） */
   private spawnBound(id: number): Enemy {
     const e = new Enemy(`v_${id}`, this.spawnTileX * TILE + 8, this.spawnTileY * TILE);
     e.vanillaId = id;
@@ -2116,7 +2117,8 @@ export class VanillaSpawner {
       if (this.spawnTileY > (this.world.rockLevel * 2 + st.h) / 3) num11 *= 0.5;
       else if (this.spawnTileY > this.world.rockLevel) num11 *= 0.85;
       // L1600：高尔夫球手 589（1/20，非水域，!savedGolfer，场内唯一）——
-      //  json 缺 589 条目 → spawnBound 占位体（同三人组），Game 侧转 bound TownNPC。
+      //  spawnBound 占位体（同三人组），Game 侧转 bound TownNPC（json 已有 589
+      //  条目，占位走法系转桶单源决策非缺条目；BJ117-③ 勘误）。
       //  savedGolfer 由 freeBoundNpc 解救时写（"未跟踪恒 false"注释已过时）
       if (N(20) && !this.waterTile && !this.world.flags['savedGolfer'] && !any(589)) {
         return this.spawnBound(589);
@@ -2346,8 +2348,9 @@ export class VanillaSpawner {
     //  公共门：RollLuck(20)==0 && !waterTile && deeperThanRockLayer &&
     //  spawnTileY < maxTilesY-210 && 前置旗 && !savedXxx && 场上唯一（AnyNPCs）。
     //  ★&& 求值序与原版一致（前置旗在 RollLuck 之前短路）——RNG 消费流不变。
-    //  产出为占位 Enemy（spawnBound——vanilla-npcs.json 缺 685 条目，fromVanilla 会
-    //  null；Game.trySpawnEnemy 按 vanillaId 转 bound TownNPC，占位体随即弃置）：
+    //  产出为占位 Enemy（spawnBound——Game.trySpawnEnemy 按 vanillaId 转 bound
+    //  TownNPC，占位体随即弃置；json 现已含 685 真条目，旧注"缺条目 fromVanilla
+    //  会 null"过时——占位系转桶单源决策，BJ117-③ 勘误）：
     //    105 BoundGoblin  ← downedGoblins && !savedGoblin
     //    106 BoundWizard  ← hardMode && !savedWizard
     //    685 BoundTownSlimeOld ← downedBoss3 && !unlockedSlimeOldSpawn
@@ -2654,9 +2657,12 @@ export class VanillaSpawner {
         // 未杀骷髅王（flag12）→ 地牢守卫 68（9999 伤，1:1 原版劝退机制）
         if (!this.downedBoss3) return D(68);
         // L2562 机械师(123)：1/5，未救出(!savedMech)+场内唯一+深层门（(ws*4+rl)/5）
+        //  ★BJ117-① 门序对齐（1457=1458 NPC.cs:2656 `downedBoss3 && !savedMech &&
+        //  Main.rand.Next(5)==0 && ...`）：!savedMech 先于 N(5) 短路——savedMech=true
+        //  时本门零掷；旧序 N(5) 先掷 → 同链后续 RNG 消费与原版错一位（产出面等价）
         const hardDungeon = this.hardMode && !!this.world.flags['downed_262']; // downedPlantBoss（世花 262，Game 击杀通用置位链 downed_{id}）
-        if (this.downedBoss3 && N(5) && !this.waterTile
-          && !this.world.flags['savedMech'] && !any(123)
+        if (this.downedBoss3 && !this.world.flags['savedMech'] && N(5) && !this.waterTile
+          && !any(123)
           && this.spawnTileY > (this.world.groundLevel * 4 + this.world.rockLevel) / 5) {
           return D(123);
         }

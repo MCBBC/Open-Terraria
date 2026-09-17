@@ -4,8 +4,9 @@
 //  ② PowderProj（proj 10/11/463，aiStyle 6，Projectile.cs:22399-22533）：64×64 云、
 //    速度 ×0.95 衰减、180 tick 寿命、每帧 applyPowder 回调
 //  ③ bound 姿态贴图表：五张独立捆绑类型表（105/106/123/354/589）+ 税务官酷刑者
-//    534 落位 sprites/vanilla；589 是 62×624 十三帧表（vanilla-npcs.json 缺登记，
-//    显式帧高切片——vnpc 懒加载 frames=1 会把整条画出）
+//    534 落位 sprites/vanilla；589 是 62×624 十三帧表（★BJ117-③ 勘误：json 现已
+//    登记 frames:13——显式帧高切片保留为渲染域防御,vnpc 懒加载 frames=1 时仍会
+//    把整条画出）
 import { describe, it, expect, vi } from 'vitest';
 import { RNG } from '../src/core/rng';
 import { readFileSync } from 'node:fs';

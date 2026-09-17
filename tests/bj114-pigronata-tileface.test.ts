@@ -41,22 +41,43 @@ interface Rec { drops: Drop[]; digs: number; chops: number; parts: Array<{ x: nu
 
 /** breakTile+tryPlace 可驱动面最小桩（shell 形制同 tests/bj113-breakhive-tileface.test.ts
  *  ×tests/placement-pipeline-debt.test.ts 合集） */
-function mkShell(seed = 7): { g: Game & Record<string, (...a: unknown[]) => unknown>; w: World; rec: Rec } {
+interface GShell {
+  world: World;
+  player: Record<string, unknown> & { useTime: number };
+  smartCursor: { lockedContinuity: null; showing: boolean; x: number; y: number };
+  chunks: { markDirtyArea: (...a: unknown[]) => void };
+  sfx: { play: (name: string, v?: number, x?: number, y?: number) => void; playWavFile: (...a: unknown[]) => void };
+  cb: { onInventoryChanged: () => void };
+  entities: Record<string, unknown>;
+  spawnParticles: (x: number, y: number, color: string, n: number, s?: number) => void;
+  spawnDrop: (x: number, y: number, key: string, n: number, vx?: number, vy?: number) => unknown;
+  recLog: (...a: unknown[]) => void;
+  dumpChest: () => void;
+  killTileDropBait: () => void;
+  trackTile: number;
+  scene: unknown;
+  hitTiles: { addDamage: () => number; clear: () => void };
+  achievements: unknown;
+  tryPlace: (x: number, y: number, def: unknown) => void;
+  breakTile: (x: number, y: number, byPlayer?: boolean, noItem?: boolean, pickHit?: boolean) => void;
+  checkFurnitureSupport: (x: number, y: number) => void;
+}
+function mkShell(seed = 7): { g: GShell; w: World; rec: Rec } {
   const w = new World(40, 40, seed, 'bj114-pigronata');
   const rec: Rec = { drops: [], digs: 0, chops: 0, parts: [] };
-  const g = Object.create(Game.prototype) as unknown as Game & Record<string, (...a: unknown[]) => unknown>;
+  const g = Object.create(Game.prototype) as unknown as GShell;
   g.world = w;
   g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
-  g.chunks = { markDirtyArea: () => {} } as never;
+  g.chunks = { markDirtyArea: () => {} };
   g.sfx = {
     play: (name: string) => {
       if (name === 'dig') rec.digs++;
       if (name === 'chop') rec.chops++;
     },
     playWavFile: () => {},
-  } as never;
+  };
   g.cb = { onInventoryChanged: () => {} };
-  g.entities = { nextId: 1, add: () => {}, critters: [], drops: [], enemies: [], npcs: [], projectiles: [] } as never;
+  g.entities = { nextId: 1, add: () => {}, critters: [], drops: [], enemies: [], npcs: [], projectiles: [] };
   g.spawnParticles = (x: number, y: number, color: string, n: number) => {
     rec.parts.push({ x, y, color, n });
   };
@@ -69,8 +90,8 @@ function mkShell(seed = 7): { g: Game & Record<string, (...a: unknown[]) => unkn
   g.killTileDropBait = () => {};
   g.trackTile = 0;
   g.scene = null;
-  g.hitTiles = { addDamage: () => 100, clear: () => {} } as never;
-  g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {}, plantedAcorn: () => {} } as never;
+  g.hitTiles = { addDamage: () => 100, clear: () => {} };
+  g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {}, plantedAcorn: () => {} };
   g.player = {
     placeSpeedTileRaw: () => 1,
     cx: 10 * 16 + 8, cy: 13 * 16 + 8, x: 10 * 16 + 2, y: 13 * 16 - 6, w: 12, h: 28,
@@ -80,7 +101,7 @@ function mkShell(seed = 7): { g: Game & Record<string, (...a: unknown[]) => unkn
       selected: 0, slots: new Array(60).fill(null),
       heldItem: () => ({ id: -1, stack: 9 }), removeHeld: () => {}, removeAt: () => {}, countOf: () => 0,
     },
-  } as never;
+  };
   return { g, w, rec };
 }
 

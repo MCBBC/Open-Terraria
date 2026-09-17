@@ -13,8 +13,18 @@ console.log('STAGE goto done');
 console.log('STAGE swFlow wait');
 await page.waitForFunction(() => typeof window.__swFlow === 'object' && !!window.__swFlow?.loadJson, { timeout: 120000 });
 console.log('STAGE swFlow ready');
-await page.evaluate(async (t) => { await window.__swFlow.loadJson(t); }, fs.readFileSync(MAP, 'utf8'));
-await page.waitForFunction(() => !!window.__swGame?.world?.store?.w, { timeout: 240000 });
+console.log('STAGE loadJson begin');
+await Promise.race([
+  page.evaluate(async (t) => { await window.__swFlow.loadJson(t); }, fs.readFileSync(MAP, 'utf8')),
+  new Promise((r) => setTimeout(() => { console.log('STAGE loadJson 120s race-timeout'); r(null); }, 120000)),
+]);
+console.log('STAGE loadJson done');
+for (let i = 0; i < 120; i++) {
+  const ok = await page.evaluate(() => !!window.__swGame?.world?.store?.w).catch(() => false);
+  if (ok) break;
+  if (i % 8 === 0) console.log('STAGE game wait', i);
+  await new Promise((r) => setTimeout(r, 3000));
+}
 const out = await page.evaluate(async () => {
   const g = window.__swGame;
   const st = g.world.store;

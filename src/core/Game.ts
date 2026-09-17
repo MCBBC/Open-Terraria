@@ -7403,6 +7403,33 @@ export class Game implements GameHooks {
     this.checkAchievementRealEstateAndTownSlimes();
   }
 
+  /** bound 解救一体对话的首台词（★BJ117-② 2026-09-18）：原版解救 = talk →
+   *  AI_000_TransformBoundNPC（1457=1458 NPC.cs:45371-45381）Transform+置 saved 旗
+   *  后同拍 SetTalkNPC → 对话面板立即打开（点击拍 Main.cs:43812 已把【换型前】
+   *  bound 型 GetChat 捕获进 npcChatText,整场对话不再刷新——首句即唤醒语）：
+   *    105→dialog120(:95218) / 106→dialog137(:95268) / 123→dialog156(:95361) /
+   *    354→dialog315..318(:95756 rand.Next(4)) / 376→dialog353..355(:95900 rand.Next(3)) /
+   *    579→BartenderSpecialText.FirstMeeting(:95926) / 589→GolferFirstMeeting1/2(:95934)
+   *  返回 null = 原版该链不开对话：685 抖箱支（Main.cs:43765-43772
+   *  TryFreeingElderSlime+TransformElderSlime+PlaySound(22),无 SetTalkNPC）/
+   *  534 税务官（不在 :43781 交互名单,唯净化粉链 Transform 441）/ 686 气球
+   *  （aiStyle125 漂浮体,撞水/受击 Transform）。wakeBoundEnemyNpc（敌怪桶 376/579）
+   *  与右键解救支共用本表——台词键单源,防双轨装配漂移（BJ71 族教训） */
+  private boundWakeChat(key: string): string | null {
+    switch (key) {
+      case 'goblin_tinkerer': return Lang.text('LegacyDialog.120');
+      case 'wizard': return Lang.text('LegacyDialog.137');
+      case 'mechanic': return Lang.text('LegacyDialog.156');
+      case 'stylist': return Lang.text(`LegacyDialog.${315 + Math.floor(Math.random() * 4)}`);
+      case 'golfer': return Math.random() < 0.5
+        ? Lang.text('GolferSpecialText.FirstMeeting1')
+        : Lang.text('GolferSpecialText.FirstMeeting2');
+      case 'angler': return Lang.text(`LegacyDialog.${353 + Math.floor(Math.random() * 3)}`);
+      case 'tavernkeep': return Lang.text('BartenderSpecialText.FirstMeeting');
+      default: return null;   // town_slime_old / tax_collector / town_slime_clumsy / 非 bound 族
+    }
+  }
+
   /** 粉末云实效（PowderProj 每帧回调；原版 AI_006 cs:22460-22533 逐格 Convert +
    *  Damage_TryUsingPowders cs:13646-13680 NPC 转化）：
    *  proj 10 净化 → Convert case 11；11 → 腐化 1；463 → 猩红 4（均 tiles+walls）
@@ -23949,6 +23976,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** ★BJ121（2026-09-18）：WorldGen.CanCutTile（WorldGen.cs:88111-88125,1458 :88109 同文
+   *  diff=same）放置语境 1:1——南瓜 254 重复放置门（Player.cs:41682-41697）逐格谓词。
+   *  context 参（TileCuttingContext）原版体内未读=两语境同判,不建模。
+   *  语义：(x,y) 处植株可否收割——①下方格存在（原版 Main.tile[y+1]!=null=界内,
+   *  越界→null→false）②自身格墙≠350 UnbreakableBlockWall（WallID.cs:769）
+   *  ③下方格型∉{78 陶盆 TileID.cs:593/380 种植箱 :1197/579 石魔头 :1595}
+   *  （裸 type 直读含非活格=原版 .type 同口径）④自身=254 时 frameX≥144（成熟档,
+   *  GrowPumpkin WorldGen.cs:52997 frameX+=36 逐级 {0,18}=新植 stage0→{144,162}=
+   *  stage4;原版本相=仅成熟株可被"换植"吞位,与 CanCutTile 收割判据共用同一帧域）。
+   *  空格（type 0）恒过=原版同（air 不触 254 支）。 */
+  private canCutTilePlacement(st: TileStore, x: number, y: number): boolean {
+    if (!st.inBounds(x, y + 1)) return false;                 // Main.tile[x, y+1] != null
+    if (st.wall[st.idx(x, y)] === 350) return false;          // Main.tile[x, y].wall != 350
+    const belowId = st.type[st.idx(x, y + 1)];
+    const belowSheet = TILE_DEFS[belowId]?.vanilla?.sheet ?? -1;
+    if (belowSheet === 78 || belowSheet === 380 || belowSheet === 579) return false;
+    const selfId = st.type[st.idx(x, y)];
+    if (selfId !== 0 && TILE_DEFS[selfId]?.vanilla?.sheet === 254
+      && st.frameX[st.idx(x, y)] < 144) return false;         // 254 → frameX >= 144
+    return true;
+  }
+
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     if (!this.inTileRange(tx, ty, this.blockRange())) return;   // 射程门（原版 PlaceThing IsTargetTileInRange；曾无门=指哪放哪）
@@ -32914,8 +32963,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   // ================= 生成 =================
 
   /** 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
-   *  近似；同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体——589/685
-   *  json 缺条目，105/106/123/354 为真条目）。覆盖全部（2026-08-13 扩展：生成期
+   *  近似；同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体——json 现已含
+   *  589/685 真条目（★BJ117-③ 勘误,旧注"缺条目"过时;占位系转桶单源决策非缺条目））。
+   *  覆盖全部（2026-08-13 扩展：生成期
    *  placeBoundRescueNpcs 移除后，123 机械师/354 造型师/589 高尔夫球手的链命中
    *  也走本转换；534 税务员除外——原版是地狱敌怪 + 净化粉 Transform(441) 链）：
    *    105 BoundGoblin(:1996) / 106 BoundWizard(:1999) / 685 BoundTownSlimeOld(:2002)
@@ -34030,10 +34080,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 敌怪桶 bound 形态 NPC → 对应城镇 NPC key（原版 AI_000 talkNPC 触发的
- *  Transform 表 NPC.cs:19782-19810：589→588/105→107/106→108/123→124/354→353/
- *  376→369/579→550）。105/106/123/354/589/579 六型由 trySpawnBoundTownNpc 在
- *  spawner 投放时上游转桶（bound TownNPC），本表覆盖剩余的 376 睡渔夫
- *  （placeSleepingAngler 真实体）+ 579 兜底。 */
+ *  Transform 表 NPC.cs:19874-19912（表体 :19885-19909）：589→588/105→107/106→108/
+ *  123→124/354→353/376→369/579→550）。105/106/123/354/589/579 六型由
+ *  trySpawnBoundTownNpc 在 spawner 投放时上游转桶（bound TownNPC），本表覆盖剩余的
+ *  376 睡渔夫（placeSleepingAngler 真实体）+ 579 兜底。 */
   private static readonly ENEMY_BOUND_TOWN_KEY: Record<number, string> = {
     376: 'angler',
     579: 'tavernkeep',
@@ -34186,7 +34236,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private talkToNearbyNpc(mx: number, my: number): boolean {
     // 敌怪桶 bound 形态（睡渔夫 376 等）：原版同为右键 SetTalkNPC 触发（AI_000
-    // :19782-19810 player.talkNPC==whoAmI → Transform 城镇型 + 置 saved 旗 +
+    // :19874-19912 player.talkNPC==whoAmI → Transform 城镇型 + 置 saved 旗 +
     // 图鉴聊天登记 + 重挂 talkNPC）——wakeBoundEnemyNpc 一体实现。
     // 距离/悬停同门：376/579 在 Main.cs:43775 townNPC 族名单内
     // ★SW-BJ1：stinky 否决同压此臂（:43785 在 townNPC 族判定后统一清 flag3）
@@ -34216,23 +34266,32 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!this.npcHoverHit(npc.vanillaId, mx, my, npc.x, npc.y, npc.w, npc.h)
         && smartId !== npc.id) continue;
       if (stinky) return false;                            // flag3 否决,首个 flag2 收口
-      if (npc.bound) { this.freeBoundNpc(npc); return true; } // 救援 NPC：右键直接解救
+      if (npc.bound) {
+        // 右键解救 + 一体对话（★BJ117-②：原版 talk→AI_000_TransformBoundNPC
+        // :19874-19912/:45371 同拍 SetTalkNPC,解救即开对话——旧仓"解救后需再右键
+        // 才开对话"=BJ31 族债收口）。首台词=换型前 bound 型 GetChat（boundWakeChat
+        // 表）;685/534 原版无对话（抖箱支/净化粉链）→ null 仅解救。触碰解救
+        // （boundTouchCheck）保留 = 登记 UX 近似（spawn-parity-gaps.md）,不经对话
+        this.freeBoundNpc(npc);
+        const wake = this.boundWakeChat(npc.npcKey);
+        if (wake) this.openNpcDialog(npc, wake);
+        return true;
+      }
       this.openNpcDialog(npc);
       return true;
     }
     return false;
   }
 
-  /** 敌怪桶 bound 形态解救（原版 AI_000_TransformBoundNPC NPC.cs:45219-45232 1:1）：
+  /** 敌怪桶 bound 形态解救（原版 AI_000_TransformBoundNPC NPC.cs:45371-45381 1:1）：
  *  Transform(townType)（换型 + 保血量比例 life*newMax/oldMax + 底边对齐 +
  *  homeless 锚脚下）→ AI_007_UpdateSavedStates 置 saved 旗 → 图鉴聊天登记
  *  （openNpcDialog 内）→ SetTalkNPC 开对话——台词取【换型前】类型的 GetChat
  *  （376 睡渔夫 = dialog 353-355 唤醒语 / 579 = BartenderSpecialText.FirstMeeting，
- *  NPC.cs:95962/:95976——原版 SetTalkNPC 时先取文本后 Transform，同序）。 */
+ *  NPC.cs:95900/:95926——原版 SetTalkNPC 时先取文本后 Transform，同序）。
+ *  ★BJ117-②：首台词并入 boundWakeChat 单源（原 376/579 内联表=双轨漂移风险）。 */
   private wakeBoundEnemyNpc(e: Enemy, key: string): void {
-    const wakeChat = e.vanillaId === 376
-      ? Lang.text(`LegacyDialog.${353 + Math.floor(Math.random() * 3)}`)
-      : e.vanillaId === 579 ? Lang.text('BartenderSpecialText.FirstMeeting') : null;
+    const wakeChat = this.boundWakeChat(key);
     const ratio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
     const feetY = e.y + e.h;
     e.dead = true;                      // 原版同槽 Transform → 本仓死 + 新生成等价（税务官链 :3236 同法）
