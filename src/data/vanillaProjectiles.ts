@@ -137,8 +137,17 @@ for (const k of Object.keys(DATA_PATCH)) {
 export function projectileData(type: number): ProjectileData | null {
   const d = TABLE[String(type)];
   if (!d) return null;
-  // ignoreWater 不入 json——SetDefaults 逐块提取面（PROJ_IGNORE_WATER）为准,
-  // 读出时合并（数据 json 携带则优先,现两者不并存）
+  // ★BJ104 勘误（2026-09-16）：ignoreWater 实为【双载并存】——vanilla-projectiles.json
+  // 全 270 id 均自带 ignoreWater:true（提取器产物,tools/extract-projectiles.mjs:218
+  // BOOL_FIELDS 含该字段）,与下方 PROJ_IGNORE_WATER 集合（2026-09-04 回溯归属法独立
+  // 重产）270/270 完全重合。旧注「不入 json/现两者不并存」与事实相反（BJ104 以 1047
+  // 彩虹巨石弹立案,实为全表面貌）。读路径 json 优先（下一行提前返回）且两源同值
+  // true → 零行为差；集合在【本读路径】实为死支,但 proj-wet-boomerang-yoyo 等测试
+  // 仍消费其负成员面,保留。
+  // ⚠数据变异/审计警告：对集合做 delete【不会】改变任何行为（json 优先）——勿以
+  // 集合摘除当勘误手段；两源必须同步改（改 json 须同步集合、反之亦然）,或以
+  // 「json 为准、集合为审计镜像」纪律执行。摘 json 侧冗余字段虽零行为差,但触发
+  // 提取器重产面+金标对账漂移（recon 闸门）,收益不抵风险=维持双载,注释写真。
   if (d.ignoreWater !== undefined) return d;
   return PROJ_IGNORE_WATER.has(type) ? { ...d, ignoreWater: true } : d;
 }
@@ -146,8 +155,10 @@ export function projectileData(type: number): ProjectileData | null {
 // ---- aiStyle 家族常量（ProjectileAIStyleIDs / 源码辅助方法实测值） ----
 /** Projectile.SetDefaults `ignoreWater = true` 全 270 id（P.cs:699-10676 逐块,回溯归属法重产——v1 启发式漏嵌套块 5 id {76,78,568,625,628}+DefaultToSpray() :10703 展开 1015/1016/1017
  *  提取,2026-09-04 溅花缺口清偿批——通用湿段 :16903 `if (!ignoreWater)` 整段门
- *  的豁免面;缺行=不豁免=原版缺省 false=入水溅花）。消费=projectileData 读出时
- *  合并(数据 json 不携带该字段,集合为准)。 */
+ *  的豁免面;缺行=不豁免=原版缺省 false=入水溅花）。★BJ104 勘误（2026-09-16）：
+ *  本集合与 vanilla-projectiles.json 自带的 ignoreWater:true（提取器 BOOL_FIELDS
+ *  产物）270/270 完全重合=双载镜像,读路径 json 优先、集合为审计镜像（负成员
+ *  测试消费面）；集合 delete 静默无效（见 projectileData 注）——两源须同步改。 */
 export const PROJ_IGNORE_WATER: ReadonlySet<number> = new Set([
   5,7,8,10,11,16,17,18,22,72,76,77,78,79,86,87,
   94,145,146,147,148,149,150,151,152,186,187,199,211,221,226,238,

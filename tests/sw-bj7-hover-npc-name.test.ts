@@ -38,7 +38,7 @@ function stubGame(): AnyGame {
     cursorItemIconID: 0,
     cursorItemIconText: '',
   };
-  g.entities = { enemies: [], npcs: [] };
+  g.entities = { enemies: [], npcs: [], critters: [] };   // ★FX56 补 critters 空桶（tickHoverNpcName 小动物臂）
   g.renderer = { atlas: { vnpc: () => ({ sw: 40, sh: 56 }) }, fullMap: { open: false } };
   g.input = { mouseX: 0, mouseY: 0 };
   g.camera = { screenToWorld: (sx: number, sy: number) => [sx, sy] };

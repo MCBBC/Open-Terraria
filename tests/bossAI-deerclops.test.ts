@@ -4,6 +4,8 @@
 //   尖刺弹幕 961 落地/影手 965 六连/Movement 自管重力跳跃。
 // 参照：NPC.cs:44338-44752（AI_123）/ :44754-44955（尖刺碎石）/ :44957-45042（Movement）
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { Enemy } from '../src/entities/Enemy';
 import { deerclopsAI, DeerclopsSpikeProj, InsanityShadowProj } from '../src/entities/bossAI_deerclops';
 import { World } from '../src/world/World';
@@ -197,5 +199,39 @@ describe('鹿角怪 668 数据 + AI_123', () => {
     tick(e, h, 45);
     expect(e.dead).toBe(true);
     expect(e.hp).toBe(-1);
+  });
+});
+
+// ================= SW-F4（2026-09-16）自然生成落位定谳：SpawnOnPlayer 通用支地面扫描 =================
+// 原版锚（1457）：Main.cs:66109（1458 :66115）`NPC.SpawnOnPlayer(n, 668)` → NPC.cs
+//   :81296 switch 仅 245/370/398 三特化,668 落通用支 :81391-81425 = GetSpawnArea
+//   （:932,0.7×屏幕格盒）随机取点+向下扫首个实心+非末次尝试须出 safeArea（0.52 盒）
+//   → spawnPositionX=num10*16+8 / Y=num11*16（:81452-81454;1458 :81453 同值）→
+//   SpawnBoss → NewNPC Bottom=(X,Y)。旧实现"直接落在玩家身上"（中心锚 e.y=p.cy−e.h/2）
+//   = 对 668 误抄 case 398 月总语义,已推翻；现走 findOffscreenSpawnPoint 近似
+//   （与物品召唤/花苞链同一 SpawnOnPlayer 通用支近似面,偏差登记）+ SpawnBoss
+//   timeLeft×20（:81485 → despawnTimer 15000）。
+// 结构锁（变异即红）：回挂中心锚/玩家身上落位即红。
+describe('SW-F4 鹿角怪自然生成落位（SpawnOnPlayer 通用支近似）', () => {
+  const gameSrc = readFileSync(
+    fileURLToPath(new URL('../src/core/Game.ts', import.meta.url)), 'utf8',
+  );
+
+  function fnBody(): string {
+    const s = gameSrc.indexOf('private spawnDeerclopsOnPlayer(): void {');
+    const e = gameSrc.indexOf('private ', s + 10);
+    expect(s).toBeGreaterThan(0);
+    expect(e).toBeGreaterThan(s);
+    return gameSrc.slice(s, e);
+  }
+
+  it('走 findOffscreenSpawnPoint 寻点（通用支近似,非玩家身上直落）+ despawnTimer=15000（SpawnBoss :81485）', () => {
+    const body = fnBody();
+    expect(body).toContain('this.findOffscreenSpawnPoint()');
+    expect(body).toContain('e.despawnTimer = 15000');
+    expect(body).toContain('this.announceBossSummon(668)');
+    // 中心锚伪影禁回流（旧实现 e.y = p.cy − e.h/2 = 中心重叠玩家）
+    expect(body).not.toContain('p.cy - e.h / 2');
+    expect(body).not.toContain('p.cy - 150 - e.h');   // case 398 月总专属语义不得混入
   });
 });

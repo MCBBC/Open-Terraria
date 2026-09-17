@@ -399,7 +399,9 @@ export interface MonolithEnv {
   fullMoon: boolean;         // Main.GetMoonPhase()==Full
   worldBloodMoon: boolean;   // Main.bloodMoon
   cloudAlpha: number;        // Main.cloudAlpha
-  /** SceneState.cs:110 flag4：四天塔在附近时压掉柱滤镜（引擎暂无塔邻接，默认 false） */
+  /** SceneState.cs:110 flag4：四天塔在附近时压掉柱滤镜（★BJ109-I 2026-09-16 已接真喂数
+   *  = 任一存活塔 NPC 距玩家中心 ≤4000px（CloseEnoughTo*Tower 四者析取，无事件旗参与）；
+   *  Renderer._lunarTowerFilterTarget 同源扫描，未喂=旧 stub 语义 false） */
   lunarTowersNear?: boolean;
   /** Moon Lord Core（NPC type 398）世界 px 中心；null=不存在。
    *  SceneState.cs:109 激活门 = ClosestNPCPosition[398] ≠ Zero（SceneMetrics.cs:739-763

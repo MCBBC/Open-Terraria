@@ -37,6 +37,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { Game } from '../src/core/Game';
+import { Camera } from '../src/render/Camera';   // ★BJ103-A1b 测试台相机实例
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
@@ -84,7 +85,8 @@ function fireStub(world: World, playerPos = { x: 130 * TILE, y: 140 * TILE }): {
     equipStats: { fireWalk: false },
     buffs: null,
   };
-  g.camera = { x: 0, y: 0 };
+  g.camera = new Camera(800, 600);          // ★BJ103-A1b：过渡消费面（pan/teleportLerp/黑幕阈）
+  g.golfState = { tryGetCameraTrackingPosition: () => null };   // 无高尔夫跟踪
   g.cb = {};
   g.net = null;
   g.spectatingSlot = -1;

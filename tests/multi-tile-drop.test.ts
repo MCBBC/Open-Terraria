@@ -40,7 +40,7 @@ import funcJson from '../src/data/vanilla-itemfunc.json';
 import vanillaItemMeta from '../public/sprites/vanilla.json';
 import { NO_RETURN_RECYCLE_SHEETS, Game, multiTileDropKey, chestDestroyableAt } from '../src/core/Game';
 import { shouldTileSurviveAt } from '../src/entities/Mounts';
-import { TrapShot } from '../src/entities/Dart';
+import { RollingBoulder } from '../src/entities/RollingBoulder';
 
 const placeable = vanillaPlaceableTileKeys();
 const keyOf = (k: string) => TILE_BY_KEY[k]!;
@@ -51,9 +51,11 @@ const dropKeyOf = (k: string) => {
 };
 
 interface Drop { key: string; n: number }
-/** breakTile 运行时 harness（同 style-drop-restore breakShell + TrapShot 捕获;
- *  player={} = spawnBoulderRoll 的 cs:48764 生成/读档门近似） */
-function boulderShell(w: World, drops: Drop[], projs: TrapShot[]) {
+/** breakTile 运行时 harness（同 style-drop-restore breakShell + 滚石弹捕获;
+ *  ★SW-BJ102 债② 2026-09-16 归一后 Spawn 单口=convertBoulderRoll→RollingBoulder,
+ *  旧 spawnBoulderRoll/TrapShot 直发退役;player={} = spawnBoulderFamilyRoll 的
+ *  cs:48764 生成/读档门近似） */
+function boulderShell(w: World, drops: Drop[], projs: RollingBoulder[]) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
     world: World; breakTile: (x: number, y: number, byPlayer?: boolean) => void;
   };
@@ -64,9 +66,9 @@ function boulderShell(w: World, drops: Drop[], projs: TrapShot[]) {
   g.spawnDrop = (x: number, y: number, key: string, n: number) => { drops.push({ key, n }); return null; };
   g.recLog = () => {};
   g.dumpChest = () => {};
-  g.entities = { add: (e: unknown) => { if (e instanceof TrapShot) projs.push(e); }, drops: [], critters: [], enemies: [] };
+  g.entities = { add: (e: unknown) => { if (e instanceof RollingBoulder) projs.push(e); }, drops: [], critters: [], enemies: [] };
   g.trackTile = 0;
-  g.player = { equipStats: {}, cx: 0, cy: 0 };   // spawnBoulderRoll 门 + killTileDropBait 花靴门读 equipStats
+  g.player = { equipStats: {}, cx: 0, cy: 0 };   // spawnBoulderFamilyRoll 门 + killTileDropBait 花靴门读 equipStats
   return g as unknown as { breakTile: (x: number, y: number, byPlayer?: boolean) => void };
 }
 
@@ -124,10 +126,12 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
   it('巨石族挖掉=整件清+滚石弹+无物品（❌2：Check2x2 :48579-48755 无 num14+KillTile no-drop :66120-66140——原版永不返还,wiki "cannot be picked up again once placed"）', () => {
     // 运行时拦截在 object 分支前（Game.breakTile 巨石支路）——multiTileDropKey 纯函数
     // 对有放置物品档仍返回 place_（D 段 oracle 不动）,运行时不消费。逐 sheet 弹伤表
-    // （cs:48766-48801）;716 也滚（case 716→弹 1057 伤 70）
+    // （Check2x2 :49171-49235 BOULDER_CONVERT_TABLE）;716 也滚（case 716→弹 1057 伤 70）。
+    // ★SW-BJ102 债②（2026-09-16）：Spawn 单口=convertBoulderRoll→RollingBoulder
+    // （旧 spawnBoulderRoll/TrapShot 直发退役=多口多弹归一）。
     const w = new World(40, 40, 7, 'mtd-boulder');
     const drops: Drop[] = [];
-    const projs: TrapShot[] = [];
+    const projs: RollingBoulder[] = [];
     const g = boulderShell(w, drops, projs);
     const dmgOf: Record<string, number> = {
       v_138_boulder: 70, v_484_rolling_cactus: 35, v_664_bouncy_boulder: 70, v_665_life_crystal_boulder: 70,
@@ -142,9 +146,8 @@ describe('多格家具破坏返还 place_v_（审计 ⚠️1 名录族）', () =
       }
       g.breakTile(11, 11, false);          // 右下格命中（非锚格也整件清）
       expect(drops, k).toEqual([]);        // 永不返还物品
-      expect(projs.length, k).toBe(1);     // 滚石弹（弹种贴图恒 'boulder',伤害逐档）
-      expect(projs[0].kind).toBe('boulder');
-      expect(projs[0].damage).toBe(dmgOf[k]);
+      expect(projs.length, k).toBe(1);     // 滚石弹（单口单发,伤害逐档）
+      expect(projs[0].dmg).toBe(dmgOf[k]);
       expect(w.store.get(10, 10), k).toBe(0);
       expect(w.store.get(11, 10), k).toBe(0);
     }

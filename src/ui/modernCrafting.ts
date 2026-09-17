@@ -503,9 +503,12 @@ export const MCRAFT_DISABLED_GRAY = 160 / 255;
 
 /** 窗内网格切换钮/就近箱钮锚(DrawChildren :486-499:num2=42 旅程 +40,num3=285;
  *  就近箱钮 = num2+40,ChestOrShopUIVisible 域外恒画——本仓无 InGuideCraftMenu 域)。
- *  ★journey 判据 = Main.LocalPlayer.difficulty==3 ∧ !CreativeMenu.Blocked——本仓
- *  world.isJourney(Blocked 未建模,备案) */
+ *  ★FX43b(2026-09-16 用户实报「切换钮贴窗」):原版 DrawGridToggle(CraftingUI.cs:267-279)
+ *  以 (craftX,craftY) 为【钮心】origin=size/2(Craft_Toggle 32×34)→ top-left = 钮心
+ *  −16/−17 = (26,268);窗顶 312 − 钮底 302 = 原版间隙 10px。旧面把钮心当 top-left 消费
+ *  (+16/+17 备案偏差)= 钮底 319 叠压窗顶 312 达 7px。★journey 判据 = Main.LocalPlayer
+ *  .difficulty==3 ∧ !CreativeMenu.Blocked——本仓 world.isJourney(Blocked 未建模,备案) */
 export function mcraftWindowToggleXY(journey: boolean): { toggle: { x: number; y: number }; nearby: { x: number; y: number } } {
   const x = journey ? 82 : 42;
-  return { toggle: { x, y: 285 }, nearby: { x: x + 40, y: 285 } };
+  return { toggle: { x: x - 16, y: 268 }, nearby: { x: x + 40 - 16, y: 268 } };
 }

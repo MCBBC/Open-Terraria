@@ -46,7 +46,7 @@ function bj72Game() {
   g.camera = { screenToWorld: (mx: number, my: number) => [mx, my] as [number, number] };
   g.renderer = {};
   g.itemIconCache = new ItemIconCache();
-  g.entities = { npcs: [], enemies: [], projectiles: [] };
+  g.entities = { npcs: [], enemies: [], projectiles: [], critters: [] };   // ★FX56 补 critters 空桶（tickHoverNpcName 小动物臂）
   return g;
 }
 
@@ -180,6 +180,9 @@ describe('结构锁（变异即红）', () => {
 // 修刀 = frame() render 前 `if (this.paused && this.world) this.tickHoverNpcName();`
 // （非暂停帧 fixedUpdate claim 面逐位不动;update 相族箱/手持图标暂停不回填 = 原版
 // 同相;掉落物名/他玩家血名本仓无 claim 面 = 独立功能缺口另行登记）。
+// ★SW-F1（2026-09-16）块条件转无条件 `if (this.world)`：三族 claim 自 tickCursorIcon
+// 退役（原版 DrawMouseOver 三族全在绘制相）后,本块 = 唯一 claim 面,暂停/非暂停帧
+// 每绘制帧先清后 claim 往复（0 步进帧空窗清偿）;结构锁同步（暂停门回滚即红）。
 // 变异证红：删 frame() 回填行 → 结构锁红（行缺失/拍位漂移）。
 describe('SW-BJ99 暂停帧绘制相悬停回填（DrawMouseOver 同相）', () => {
   const src99 = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/core/Game.ts'), 'utf8');
@@ -216,16 +219,20 @@ describe('SW-BJ99 暂停帧绘制相悬停回填（DrawMouseOver 同相）', () 
     expect(p.cursorItemIconText).toBe('');
   });
 
-  it('结构锁：回填行挂 frame() 暂停门下、refreshCursorIconDrawState 之后 render 之前（变异删行即红）', () => {
+  it('结构锁：claim 块挂 frame()（★F1 无条件）、refreshCursorIconDrawState 之后 render 之前（变异删块/回滚暂停门即红）', () => {
     const f = frameBody99();
     const iClear = f.indexOf('this.mouseOversClear()');
     const iRefresh = f.indexOf('this.refreshCursorIconDrawState()');
-    const iReclaim = f.indexOf('if (this.paused && this.world) this.tickHoverNpcName();');
+    // ★SW-BJ105 2026-09-16：回填行扩为回填块（三族 NPC 名/血名/掉落物名 + 绘制相
+    // tickInfoAccsHover）;★SW-F1 2026-09-16：块条件转无条件 `if (this.world) {`
+    // ——自 refresh 之后起找（避开 frame 头 audioAcc 同形块）
+    const iReclaim = f.indexOf('if (this.world) {', iRefresh);
     const iRender = f.indexOf('this.render()');
     for (const [n, i] of [['clear', iClear], ['refresh', iRefresh], ['reclaim', iReclaim], ['render', iRender]] as const) {
       expect(i, n).toBeGreaterThan(0);
     }
     expect(iReclaim).toBeGreaterThan(iRefresh);
     expect(iReclaim).toBeLessThan(iRender);
+    expect(f.slice(iReclaim)).toContain('this.tickHoverNpcName();');
   });
 });

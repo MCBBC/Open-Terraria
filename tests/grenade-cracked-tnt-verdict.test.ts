@@ -3,6 +3,7 @@ import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { isCrackedAt } from '../src/world/CrackedBricks';
+import { RollingBoulder } from '../src/entities/RollingBoulder';
 
 // SW-J1 2026-09-03 回归两账：①手雷族 30/397/517/588 Kill 裂砖专破（Kill_ExplodeTiles
 // Projectile.cs:79001-79033 → ExplodeCrackedTiles :80505-80525——爆心=base.Center,
@@ -62,17 +63,19 @@ describe('SW-J1 手雷族裂砖专破（:79001-79033 → :80505-80525）', () =>
   });
 });
 
-describe('SW-J1 TNT 桶 1002 定谳锚（:79027-79030 无 1002,:79064 死代码 → 不炸地形）', () => {
-  it('挖毁 654 → 整件清+无掉落;r10 旧盘域地形零破坏（explodeAt r=0/destroyTiles=false）', () => {
+describe('SW-J1 TNT 桶 1002 定谳锚（:79027-79030 无 1002,:79064 死代码 → 不炸地形;★BJ102 归一重锚）', () => {
+  it('挖毁 654 → 整件清+无掉落+格侧零爆炸面;r10 旧盘域地形零破坏（面迁弹体首拍,r=0 沿立）', () => {
     const world = new World(64, 64, 7, 'j1');
     const st = world.store;
     const g = mkGame(world);
     g.logs = [];
+    const spawns: unknown[] = [];
+    g.entities.add = (e: unknown) => { spawns.push(e); };            // 弹体捕获（原 no-op 桩）
     const barrel = TILE_BY_KEY['v_654_tnt_barrel']!;
     const stone = TILE_BY_KEY['stone']!;
     for (let x = 0; x < 64; x++) for (let y = 0; y < 64; y++) st.setTileSilent(x, y, stone);
     for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) st.setTileSilent(10 + dx, 10 + dy, barrel, dx * 18, dy * 18);
-    g.breakTile(10, 10, false);   // 真实 breakTile → tntBarrelBlast → 真实 explodeAt
+    g.breakTile(10, 10, false);   // 真实 breakTile → 654 挖除臂 → spawnTntBarrelRoll（单发）
     expect(st.get(10, 10)).toBe(0);
     expect(st.get(11, 11)).toBe(0);                                  // 整件清
     const oldDisc = Game.explodeDiscTiles(10 * 16 + 8, 10 * 16 + 8, 10, st.w, st.h);
@@ -80,6 +83,11 @@ describe('SW-J1 TNT 桶 1002 定谳锚（:79027-79030 无 1002,:79064 死代码 
       if ((x === 10 || x === 11) && (y === 10 || y === 11)) continue; // 桶体四格已清
       expect(st.get(x, y), `旧 r10 盘 ${x},${y} 应保留`).toBe(stone);
     }
-    expect(g.logs).toContainEqual(expect.objectContaining({ projId: 1002, r: 0, destroyTiles: false }));
+    // ★SW-BJ102 归一（2026-09-16）：旧钉「logs 含 t+0 格侧 1002 爆炸」退役——
+    //  vanilla 格侧无爆炸面（KillTile 654 只 NewProjectile :49178）,爆炸面（r=0/
+    //  destroyTiles=false 参沿立）在弹体首 AI 拍 Kill 单发（sw-bj102 F2 钉参）。
+    expect(g.logs).not.toContainEqual(expect.objectContaining({ projId: 1002 }));
+    expect(spawns.length).toBe(1);                                   // 弹体单发
+    expect(spawns[0]).toBeInstanceOf(RollingBoulder);
   });
 });

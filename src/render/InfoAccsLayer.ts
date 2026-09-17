@@ -8,12 +8,19 @@
 // 交互:悬停 tooltip=行标签(Game 侧接 cursorItemIconText);点击切 hideInfo
 // (:46547-46573);隐藏态图标 = Color(80,80,80,70) 乘色;悬停叠 InfoIcon_13。
 // 字体偏差登记:原版 FontAssets.MouseText(scale 1,CJK 墨高 17-19/推进 18.5);
-// 本仓 canvas+四向 ±2 描边,字体串 = CANVAS_MOUSETEXT_FONT(16px 用户拍板档
-// 2026-09-15 紧凑折中,墨高 ~14.7;19px 墨高严格等值档链(FX27 实测)在
-// PixelText.CANVAS_MOUSETEXT_FONT 注保留——★FX35 2026-09-15:原「14px monospace
+// 本仓 canvas+四向 ±2 描边,字体串 = CANVAS_MOUSETEXT_FONT(14px 用户拍板终值
+// 2026-09-16 两轮拍板;墨高等值档 19px/折中 16px 链见 PixelText.ts 注保留——
+// ★FX35 2026-09-15:原「14px monospace
 // 替身」在 Windows DirectWrite 下四向偏移露出偏移拷贝=「叠了几层文字」观感
 // (用户实报,Mac 同症不显),像素字体后描边被实心字形吃净)。
+// ★FX57 2026-09-16 字形改「离屏 12px 烘焙+最近邻放大」(用户 Windows 实报:灰字
+//  在背景越亮处越模糊,Mac 较轻——像素字体非整数倍字号 fillText 必然抗锯齿,
+//  imageSmoothingEnabled 管不了 fillText,见 MouseTextBake.ts 头注根因/修法)。
+//  本层只换字形出处:测宽/墨盒仍目标字号 measureText(215 钳制/图标 iy/行距
+//  22/锚点/claim 序零漂移),grayed(100,100,100)行/悬停次行 α0.34 压暗行同
+//  管线(色=运行时染色,α=主画布 globalAlpha);bake 不可用回退下方旧直绘。
 import { CANVAS_MOUSETEXT_FONT } from '../vui/draw/PixelText';
+import { drawBakedMouseText } from '../vui/draw/MouseTextBake';
 import { UITextures } from '../vui/assets/UITextures';
 import { buildInfoAccRows, type InfoAccCtx, type InfoAccRow } from '../stats/InfoAccs';
 
@@ -157,9 +164,9 @@ export class InfoAccsLayer {
         // 文本(:46594-46639):宽 >215 缩 X;scaleX<0.58 缩 Y;4 遍黑描边+正文;
         // "附近无 X"行文字降灰(:46328/:46388/:46414 等 infoTextColor=Color(100,100,100));
         // 悬停行的**下一行**压暗 1/3(:46629-46632:i>num2 && i<num2+2,无悬停恒不暗)
-        // ★FX35 2026-09-15 字体见头注(16px 用户拍板档,墨高 ~14.7;19px 墨高严格
-        //  等值档 ≙ MouseText scale 1 链在 PixelText 注)——19px 档 CJK 墨高 17.4 →
-        //  行距 22 与原版同相(墨高 17-19/距 22)的等值断言挂 19px 档;16px 拍板后
+        // ★FX35 2026-09-15 字体见头注(14px 用户拍板终值 2026-09-16;墨高等值档
+        //  19px/折中 16px 链见 PixelText.ts)——19px 档 CJK 墨高 17.4 →
+        //  行距 22 与原版同相(墨高 17-19/距 22)的等值断言挂 19px 档;14px 终值后
         //  行距 22 钉值未随调(下述 +2 低偏的「图标顶=文本顶+4」等值同挂 19px 档)
         const dim = hoveredRow >= 0 && i === hoveredRow + 1 ? 0.34 : 1;
         ctx.font = CANVAS_MOUSETEXT_FONT;
@@ -180,17 +187,27 @@ export class InfoAccsLayer {
           : ty - 3;
         this.drawIcon(ctx, t, X, iy, false, r.row === hoveredRow, iconTex(13));
         this.state.iconRects.push({ x: X, y: iy, w: t ? t.sw : 14, h: ih, row: r });
-        ctx.save();
-        ctx.translate(X + 20, ty);
-        ctx.scale(scaleX, scaleY);
-        ctx.globalAlpha = dim;
-        for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
-          ctx.fillStyle = '#000';
-          ctx.fillText(r.text, ox, oy);
+        // ★FX57 2026-09-16:字形=离屏 12px 烘焙+主画布最近邻放大(MouseTextBake.ts
+        //  头注)。墨顶 = 旧 translate(X+20,ty)+scale(scaleX,scaleY)+'middle' 直绘
+        //  同位(bake 侧按同源 'middle' 墨盒反推);压暗 dim 走主画布 globalAlpha。
+        if (!drawBakedMouseText(ctx, r.text, X + 20, ty, {
+          anchor: 'middle',
+          color: r.gold ? '#FFE745' : r.grayed ? '#646464' : '#e8e4f0',
+          alpha: dim, scaleX, scaleY,
+        })) {
+          // 回退:旧直绘(无 DOM/字体未就绪窗口;与 FX57 前逐字节同形)
+          ctx.save();
+          ctx.translate(X + 20, ty);
+          ctx.scale(scaleX, scaleY);
+          ctx.globalAlpha = dim;
+          for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+            ctx.fillStyle = '#000';
+            ctx.fillText(r.text, ox, oy);
+          }
+          ctx.fillStyle = r.gold ? '#FFE745' : r.grayed ? '#646464' : '#e8e4f0';
+          ctx.fillText(r.text, 0, 0);
+          ctx.restore();
         }
-        ctx.fillStyle = r.gold ? '#FFE745' : r.grayed ? '#646464' : '#e8e4f0';
-        ctx.fillText(r.text, 0, 0);
-        ctx.restore();
         // 悬停 tooltip 上报(渲染层只报,DOM tooltip 由 UI 消费)
         if (r.row === hoveredRow && onRowLabel) onRowLabel(r.label);
       }

@@ -191,10 +191,11 @@ describe('CaveHousePass.placeFurniture Place2x2（cs:51433-51443 frameX=k*18 / f
 // 语义保留（本段前两测锁负控）。★破坏侧勘误（❌1 复核 2026-08-23）：前判"Check2x2
 // case 654 不可达死码"系漏看 goto——TileFrameImportant no-op break 组（:86409-86428,
 // 654 在 :86427）switch 闭合后 `goto case 132`（:86670）→ 654 仍进 Check2x2（:86688）
-// → 整件失撑/缺件即 Projectile.NewProjectile(1002, 400)（:48771-48772,桶中心
-// num2*16+8/num6*16+8）。挖/毁 TNT 桶=整件清+爆炸;爆炸波及他桶经 breakTile 再触发=
-// 自然殉爆（tntBarrelBlast 队列防重入,等价原版 destroyObject 旗 :48567/:48800）。
-describe('TNT 桶 654（原版语义：电线无致动 / 破坏=无掉落+1002 等效爆炸）', () => {
+// → 整件失撑/缺件即 Projectile.NewProjectile(1002, 400)（:49178,桶中心
+// num2*16+8/num6*16+8）。★SW-BJ102（2026-09-16）归一重锚：挖/毁 TNT 桶=整件清+弹体
+// 单发（爆炸面全在弹体首 AI 拍 Kill——格侧旧"等效爆炸面"与 _tntPending 队列退役;
+// 殉爆=他因破桶格各链发 1002,详见下方两测的重锚注与 sw-bj102 套件）。
+describe('TNT 桶 654（★BJ102：电线无致动 / 破坏=无掉落+1002 弹体单发,格侧零爆炸面）', () => {
   it('deviceTable(654) = false（无 case）+ 帧/格不变 + explode 零调用（对照 case 141 炸药才引爆）', () => {
     const { w } = wiringFixture();
     const t = keyOf('v_654_tnt_barrel');
@@ -224,7 +225,7 @@ describe('TNT 桶 654（原版语义：电线无致动 / 破坏=无掉落+1002 �
     expect(w.st.frameX[w.st.idx(10, 10)]).toBe(0);
   });
 
-  it('破坏对照：654 无样式掉落表 + breakTile 无掉落但整件清+桶中心 1002 爆炸一次（❌1:cs:48771-48772）', () => {
+  it('破坏对照：654 无样式掉落表 + breakTile 无掉落但整件清+1002 弹体单发（★BJ102 归一重锚：格侧零爆炸面,面在弹体首 AI 拍 Kill）', () => {
     expect(styleDropVidOfFrames(654, 0, 0)).toBe(0);
     expect(styleDropVidOfFrames(654, 18, 36)).toBe(0);
     const w = new World(40, 40, 7, 'pfd');
@@ -235,6 +236,11 @@ describe('TNT 桶 654（原版语义：电线无致动 / 破坏=无掉落+1002 �
       (tx: number, ty: number, dmg: number, radius: number, _dt: boolean, _hb: unknown, _pen: unknown, projId: number) => {
         blasts.push([tx, ty, dmg, radius, projId]);
       };
+    const spawns: number[] = [];
+    (g as unknown as Record<string, unknown>).entities = {
+      add: (e: unknown) => spawns.push((e as { projId?: number }).projId ?? -1),
+      drops: [],
+    };
     (g as unknown as Record<string, unknown>).player = { equipStats: {} };   // cs:48764 生成/读档门近似
     const t = keyOf('v_654_tnt_barrel');
     for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
@@ -244,14 +250,17 @@ describe('TNT 桶 654（原版语义：电线无致动 / 破坏=无掉落+1002 �
     expect(drops).toEqual([]);                     // 无物品返还（KillTile :66114 no-drop）
     expect(w.store.get(10, 10)).toBe(0);
     expect(w.store.get(11, 11)).toBe(0);           // 整件清（2×2 锚点算法）
-    // 桶中心 (10*16+8, 10*16+8) 1002 等效爆炸恰一次：基伤 400;
-    // ★SW-J1 2026-09-03 定谳：radius 10→0/destroyTiles=true→false——Kill_ExplodeTiles
-    // 闸门表（P.cs:79027-79030）不含 1002,:79064 `type==1002→num6=10` 是死代码
-    // （1456 :75297 同构）=原版 1002 Kill 不炸地形（曾误依死代码行 r10 破地形）
-    expect(blasts).toEqual([[10, 10, 400, 0, 1002]]);
+    // ★SW-J1 2026-09-03 定谳（沿立）：radius 10→0/destroyTiles=true→false——
+    //  Kill_ExplodeTiles 闸门表（P.cs:79027-79030）不含 1002,:79064 `type==1002→num6=10`
+    //  是死代码=原版 1002 Kill 不炸地形。★SW-BJ102 2026-09-16 归一：vanilla 格侧
+    //  【无】爆炸面——KillTile case 654 只经 Check2x2 destroy 块 NewProjectile
+    //  （WorldGen.cs:49178 dmg 400）,爆炸面（自伤+NPC dmg/2+大族视觉,r=0）全在
+    //  弹体首 AI 拍 Kill（RollingBoulder.rbKill1002Face,sw-bj102 F2 钉）：
+    expect(blasts).toEqual([]);                    // 格侧零爆炸面（旧「等效爆炸一次」钉退役）
+    expect(spawns).toEqual([1002]);                // 弹体单发（spawnTntBarrelRoll→convert 单口）
   });
 
-  it('殉爆：两桶相邻挖一 → 另桶经爆炸波及 breakTile 入队,本爆结算后再爆（❌1 防重入门=destroyObject 旗等价）', () => {
+  it('殉爆（★BJ102 归一重锚）：两桶各破 → 各自弹体单发+零格侧面——vanilla 1002 自身不破格（SW-J1 死代码定谳）=无自续链,串行面在弹体首拍', () => {
     const w = new World(40, 40, 7, 'pfd');
     const drops: Array<{ key: string; n: number }> = [];
     const g = breakShell(w, drops);
@@ -265,13 +274,21 @@ describe('TNT 桶 654（原版语义：电线无致动 / 破坏=无掉落+1002 �
     const blasts: Array<[number, number]> = [];
     (g as unknown as Record<string, unknown>).explodeAt = (tx: number, ty: number) => {
       blasts.push([tx, ty]);
-      // 模拟爆炸波及：炸点右侧 3 格处他桶整件破坏（真实 explodeAt 逐格 breakTile）
-      if (w.store.get(tx + 3, ty) === t) g.breakTile(tx + 3, ty);
+    };
+    const spawns: number[] = [];
+    (g as unknown as Record<string, unknown>).entities = {
+      add: (e: unknown) => spawns.push((e as { projId?: number }).projId ?? -1),
+      drops: [],
     };
     (g as unknown as Record<string, unknown>).player = { equipStats: {} };
     g.breakTile(10, 10, false);
-    // 串行殉爆：本爆 (10,10) 结算中他桶只入队,队首 (13,10) 在本爆后补爆
-    expect(blasts).toEqual([[10, 10], [13, 10]]);
+    g.breakTile(13, 10, false);
+    // 旧钉「本爆入队→他桶补爆」退役：其前提=1002 爆炸面破他桶格,与 SW-J1 死代码
+    // 定谳相悖（1002 不破地形）。vanilla 真链=他因（炸弹/镐/电路）破桶格 → KillTile
+    // case 654 各链发 1002（WorldGen :49178）→ 各弹首 AI 拍各自 Kill（跨拍串行,
+    // sw-bj102 F 域）;面计数=弹体数×1。
+    expect(blasts).toEqual([]);                    // 格侧零爆炸面
+    expect(spawns).toEqual([1002, 1002]);          // 两桶两弹（单口各一）
     expect(w.store.get(13, 10)).toBe(0);
   });
 });

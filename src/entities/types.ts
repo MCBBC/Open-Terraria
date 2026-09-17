@@ -122,6 +122,14 @@ export interface GameHooks {
    *  重发焦点帧。target==spectating 早退（:17349-17351）保证逐拍重入零重发。
    *  Game 实现 askSpectateExit → setSpectating(-1)；缺省（测试 mock）= 静默跳过 */
   askSpectateExit?(): void;
+  /** ★BJ108 登记债①清偿（2026-09-17）：玩家传送相机过渡实体侧单口——Main.
+   *  StartCameraTransitionForPlayerTeleport（Main.cs:63526-63542/1458 :63532-63548）
+   *  由 Player.Teleport :37747 全 style 汇聚调用（lerpSpeedupDelay 仅 Style==1 为 10,
+   *  其余含 style12 微光脱困 Player.cs:29095 / style10 皇后钩瞬移 :22937 均 0）。
+   *  Game 实现 = startCameraTransitionForPlayerTeleport（近滑行/远黑幕 BJ103-A1b
+   *  单源）。消费面 = Player.shimmerUnstuck（style12）/doQueenSlimeHookTeleport
+   *  （style10）；缺省（测试 mock/SimHost 无此钩）= 静默跳过 */
+  startCameraTransitionForPlayerTeleport?(oldX: number, oldY: number, lerpSpeedupDelay?: number): void;
   /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
   /** 入侵开启 + 逼近公告（Game.startInvasionAndAnnounce 实体侧通道——火星探测器

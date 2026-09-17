@@ -327,6 +327,14 @@ const CSS = `
 .sw-char-panel {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 500px; max-width: 96vw; z-index: 20; cursor: auto;
+  /* ★2026-09-16 用户实报(梳妆台更衣窗悬停/点击全死):.sw-root 是 pointer-events:none
+     (UI.ts:395 防挡画布),pointer-events 可继承 ⇒ 子面板缺显式 auto 即整体对命中
+     测试透明——elementFromPoint(面板任意点)=CANVAS、:hover 不可达、点击漏成世界
+     输入(探针 scripts/_wardrobe-hit-test.mjs 定谳:四点全命中画布,面板 computed
+     pointer-events=none)。同族先例=NpcDialog.ts:129-131(.sw-npc-dialog 同因同修)。
+     标题屏角色创建页不受累:那路挂 mainFlow 根(无 pointer-events:none),只有
+     showClothesWindow/showHairWindow 挂 .sw-root 的两形态中招 */
+  pointer-events: auto;
   opacity: 0.9;   /* 与 .sw-vsel 选择面板同族 90% 微半透（2026-08-25 用户实报缺） */
   display: flex; flex-direction: column; align-items: center;
   color: #e8e8f4; user-select: none;

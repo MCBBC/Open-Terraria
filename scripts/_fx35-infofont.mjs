@@ -2,6 +2,9 @@
 // 文字」——四向 ±2 描边在 monospace 系统字体(DirectWrite=Courier/Consolas)上露出
 // 偏移拷贝;Mac 同症不显。修复 = MouseText 家族 canvas 字体统一 CANVAS_MOUSETEXT_FONT
 // =19px "Fusion Pixel 12px", monospace)。
+// ★FX57 2026-09-16 起本探针②③的「信息行/标签 fillText 字体串」断言已被取代:
+//   信息行与悬停标签改「离屏 12px 烘焙+最近邻放大」(MouseTextBake.ts),不再逐帧
+//   fillText——本探针留档 FX35 时代直绘机制,新断言见 scripts/_fx57-text-bake.mjs。
 // 断言:①document.fonts 就绪态(像素字体真实解析,非 monospace 兜底);
 //       ②信息行 fillText 时 ctx.font === 19px 像素字体串;
 //       ③悬停行标签(drawMouseTextLayer)同字体串(MouseText 家族同源);

@@ -127,7 +127,7 @@ import { VanillaResourceBars } from './ResourceBars';
 import { FancyResourceBars } from './FancyResourceBars';
 import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
-import { GLScreenFilters, type ScreenFxPass } from './GLScreenFilters';
+import { GLScreenFilters, TOWER_FILTER_PRESETS, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo, setFrameRemix, setFrameDontStarve } from '../lighting/SkyColor';
 import { showJourneyQuickGate } from '../ui/QuickGate';
@@ -290,6 +290,7 @@ import { combatFontReady, drawCombatText } from './CombatTextFont';
 import { InfoAccsLayer } from './InfoAccsLayer';
 import { buildInfoAccRows, type InfoAccCtx } from '../stats/InfoAccs';
 import { CANVAS_MOUSETEXT_FONT, PIXEL_FONT_FAMILY } from '../vui/draw/PixelText';
+import { drawBakedMouseText } from '../vui/draw/MouseTextBake';
 
 /** 原版 holdStyle!=0 物品集（Item.cs SetDefaults holdStyle=1 实证 + TEdit 实名核对）：
  *  火把族（8/彩色 427-433/群系 523..5353）+ 荧光棒族 ItemID.Sets.Glowsticks(282,286,3112,3002,4776,5643)。
@@ -643,12 +644,11 @@ import { mapPaintColor, PAINT_RGB } from '../world/Paint';
 import { MAP_SNOW_TYPES, mapSnowinessB, snowDirtBg, snowRockBg, sceneSnowinessB } from './MapColors';   // ★IIIII229 ⑤ snowiness 通道
 import { Enemy } from '../entities/Enemy';
 import { drawForceFieldBubble } from '../fx/ForceFieldBubble';
-import { shieldMax as shieldMaxOf } from '../world/LunarEvent';
 import { visEffectFrames } from '../entities/Enemy';
 import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
 import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
 import { Bobber, hackHoldStyleActive } from '../entities/Bobber';
-import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
+import { TOWER_KEY, TOWER_SHIELD_COLOR, TOWER_ZONE_RADIUS, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
 import { drawFakeFishSchool } from '../entities/FakeFish';
 import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
@@ -1906,19 +1906,25 @@ export function mouseTextAnchor(
  *  ★SW-BJ105 2026-09-16 接入消费面：cursorItemIconRare/Diff claim 域（掉落物名
  *  MouseTextHackZoom(text,rare,0) :43628 / 他玩家血名 (text,0,difficulty) :43655）。
  *  -12 专家 = Main.DiscoR/G/B（:20433-20435）——本仓 FlickerClock.discoColor 同源
- *  时钟直读;-13 大师 = masterColor×200 脉冲（:18408 masterColor 0..1 步进 0.05
- *  ping-pong）——本仓时钟无 masterColor 态,按 UI.rarityColor 既有惯例取中点定值
- *  (255,100,0),脉冲欠接登记债（BJ105：master 只影响 rare=-13 物品名色相的动画维）。
- *  node/无 DOM 环境纯函数直测。 */
+ *  时钟直读;-13 大师 = masterColor×200 脉冲（Main.cs:18408-18418
+ *  DoUpdate_AnimateCursorColors:0..1 步进 0.05 ping-pong;消费 :20430-20432 →
+ *  (byte)(masterColor×200f) ∈ {0,10,…,200}）——★SW-清债① 2026-09-17 接活色:
+ *  FlickerClock.masterColor/masterColorDir 同源钟直读（与 discoColor 同构,同 tick
+ *  域推进）;无钟（node/无 DOM 环境纯函数直测）回退中点 0.5=旧定值 (255,100,0)。
+ *  同族定值欠接另账登记：UI.rarityColor（UI.ts rare≤-13 '#FF6400' 定值）/
+ *  PopupText.cs:676 拾取文本 / TileDrawing.cs:9738 世界段消费面本仓未接脉冲。 */
 export function mouseTextInnerColor(
   rare: number, diff: number, mt: number,
-  clock?: { discoColor(): [number, number, number] } | null,
+  clock?: { discoColor(): [number, number, number]; masterColor?: number } | null,
 ): string {
   const num3 = Math.trunc(mt) / 255;
   const c = (r: number, g: number, b: number) =>
     `rgb(${Math.floor(r * num3)},${Math.floor(g * num3)},${Math.floor(b * num3)})`;
   let out = `rgb(${Math.round(mt)},${Math.round(mt)},${Math.round(mt)})`;   // :20429 默认档
-  if (rare === -13) out = c(255, 100, 0);        // :20430-20432 masterColor×200(中点定值,债)
+  if (rare === -13) {                            // :20430-20432 masterColor×200
+    const mc = clock?.masterColor ?? 0.5;        // 无钟回退中点（旧定值档,直测同相）
+    out = c(255, Math.floor(mc * 200), 0);       // (byte) 截断:G∈{0,10,…,200}
+  }
   if (rare === -12) {                            // :20433-20435 DiscoR/G/B
     const d = clock?.discoColor();
     out = d ? c(255 * d[0], 255 * d[1], 255 * d[2]) : c(255, 255, 255);
@@ -1938,7 +1944,13 @@ export function mouseTextInnerColor(
   if (rare === 10) out = c(255, 40, 100);        // :20472-20474
   if (rare >= 11) out = c(180, 40, 255);         // :20475-20477
   if (diff === 1) out = c(255, 153, 0);          // :20478-20480 mcColor (1f,0.6f,0f) Main.cs:978
-  if (diff === 2) out = c(255, 38, 26);          // :20481-20483 hcColor (1f,0.15f,0.1f) Main.cs:980
+  // ★SW-F3 2026-09-16：蓝通道 26→25——FNA Color(float,float,float) 构造器逐通道
+  //  (byte)Clamp(v*255f) 截断（FNA src Color.cs Color(float r,float g,float b,float a):
+  //  R=(byte)Clamp(r*255f) 族;0.1f×255=25.5000004 → 截断 25,非四舍五入 26;
+  //  0.15f×255=38.2500015 → 38 同理）。原版两处同消费 :20481-20483 MouseTextInner
+  //  hcColor 档（本函数）/:20807-20811 Player.ChatColor（ChatCommands.ts:79 已 25,
+  //  两面曾矛盾）。乘 num3 前的基色字节必须先取对。
+  if (diff === 2) out = c(255, 38, 25);          // :20481-20483 hcColor (1f,0.15f,0.1f) Main.cs:980
   return out;
 }
 
@@ -2597,9 +2609,6 @@ function dustTrailCount(d: { type: number; vx: number; vy: number; fadeIn: numbe
   else if (t === 331 && d.fadeIn === 0) n = (Math.abs(d.vx) + Math.abs(d.vy)) * 3;
   return n > 10 ? 10 : n;
 }
-
-/** 四柱护盾泡破盾/重塑计时器（enemy → 状态;drawEnemy 逐帧推进） */
-const PILLAR_FF = new WeakMap<object, { lastShield: number; breakTick: number; reformTick: number }>();
 
 // ---- ★BJ78 W4（swPerf 快路径）updateWaterWaves 每帧分配消除（2026-09-14 WaterWaves 区补刀）----
 // 现场：updateWaterWaves 每帧 new 2 个【内容恒定】的弹幕表 Set + 3 个闭包
@@ -3321,7 +3330,12 @@ export class Renderer {
       this.mapDragging = false;
       this.lastMouse = { x: 0, y: 0 };
     }
-    this._fmWasOpen = this.fullMap.open;
+    // ★RB31a-F1(2026-09-16):拍照分块渲染期不写——嵌套 render 走到此处时
+    // fullMap.open 已被 CaptureMode.renderChunk 换装成 false(:877),其 finally
+    // 只还原 open 不还原本旗 ⇒ 分块帧末写会把 _fmWasOpen 钉 false,紧随的
+    // 真实关图帧在 :3306 门读到 false → 关图复位站(拖拽态/GL 纹理/悬停清理)
+    // 整站跳过。主渲染路径照旧逐帧写。
+    if (!this._capturePass) this._fmWasOpen = this.fullMap.open;
     // GPU 熔断期跳过全部画布工作(contextlost 抖动环,见 installGpuPressureGuard):
     // 世界模拟照跑(fixedUpdate 独立),画面冻结——向已死上下文刷绘制只会喂大事件风暴
     if (this.gpuDegraded) return;
@@ -3410,6 +3424,12 @@ export class Renderer {
       // SceneMetrics.cs:739-763 全场 NPC 扫描，核心屏外也激活）：取首个在场
       // 核心（vanillaId 398）中心；drawScreenFilterChain 同源取其屏幕位
       moonLordCore: this._moonLordFilterTarget(entities),
+      // ★BJ109-I（2026-09-16）：SceneState.cs:110 flag4 = 任一塔 Zone
+      // （CloseEnoughTo*Tower 四者析取，SceneMetrics.cs:276-282 ≤4000px 无事件门）
+      // ——旧 stub 恒 false → 塔旁独石滤镜不被压制（错升 Monolith* 支）；
+      // 同时为 FilterTower 染色产位（最近塔，drawScreenFilterChain 同源扫描）
+      lunarTowersNear: this._lunarTowerFilterTarget(
+        entities, player.cx, player.cy, world) != null,
       // ★SW-BJ41 2026-09-09：以太域驱动位（SceneState.UpdateShimmer :331
       // `metrics.ZoneShimmer` 项——SceneMetrics.cs:712 ZoneShimmer 判定链产位）。
       // 此前 env 漏喂该位 → flag 恒只剩独石支 → shimmerAlpha 恒 0 →
@@ -4410,38 +4430,21 @@ export class Renderer {
         }
       }
     }
-    // 7a''. 标尺 W×H 计数控（★SW-FX36；Main.cs:46187-46195 DrawInterface_33_MouseText：
-    //      门=rulerLine(:18809 恒真)∧status[0]==0∧spectating<0∧velocity≤6（世界段
-    //      同款门,Game 注入/Renderer 双重承载）∧num>1||num2>1;内容=(|X|+1)+"x"+(|Y|+1)
-    //      纯数字拼串无 l10n 键;@ MouseScreen+(16,0),色 Color(0.24,0.8,0.9,1)=
-    //      rgb(61,204,229)（float→byte 截断）,scale 1,origin(0,0.8)——origin y=0.8×
-    //      行高 ⇒ 字形主体悬于鼠标上方;描边=Utils.DrawBorderString(:2679)→
-    //      DrawColorCodedStringWithShadow spread 1.5（ChatManager.cs:30 四向 ±x±y
-    //      黑影）。字体原版 FontAssets.MouseText → 本仓 CANVAS_MOUSETEXT_FONT
-    //      （★FX35 2026-09-15 项目像素字体,原「14px monospace 替身」退役;
-    //      ★16px=用户拍板档(墨高 ~14.7),19px 等值档链在 PixelText 注——
-    //      同 cursorItemIconText 字体偏差登记）。层序=MouseText(33) 在
-    //      InteractItemIcon(40) 之下 ⇒ 画在 drawCursorItemIcon 之前。）
-    if (this.rulerReadout) {
-      ctx.save();
-      ctx.font = CANVAS_MOUSETEXT_FONT;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      const tm = ctx.measureText(this.rulerReadout.text);
-      const th = (tm.actualBoundingBoxAscent || 11) + (tm.actualBoundingBoxDescent || 3);
-      const roX = this._mouseX + 16;
-      const roY = this._mouseY - 0.8 * th;        // origin=(0,0.8·行高) :46194
-      ctx.fillStyle = '#000';
-      for (const [oxs, oys] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) {
-        ctx.fillText(this.rulerReadout.text, roX + oxs, roY + oys);
-      }
-      ctx.fillStyle = 'rgb(61,204,229)';
-      ctx.fillText(this.rulerReadout.text, roX, roY);
-      ctx.restore();
-    }
-    // 7b'. 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房光标
-    //      携带头像（:44622-44688 DrawInterface_38）——屏幕空间最后层
-    this.drawCursorItemIcon(ctx, player);
+    // 7a''. 标尺 W×H 计数控——★SW-清债③ 2026-09-17 层位后移（FX36 同族黑幕残差
+    //      清偿）：原挂本位（黑幕 BJ103-A1 之前）=11 帧渐熄窗内被压暗,且全屏地图
+    //      （9.5 提前返之前=误画）/拍照重渲（_capturePass 提前返之前=误画）。原版
+    //      读数属 DrawInterface_33_MouseText :46187-46195,在 DrawInterface :63386
+    //      （黑幕 :63367-63381 之后;1458 :63373-63392 同序）内 ⇒ 恒在黑幕上、
+    //      mapFullscreen :63385 整层门/拍照 CheckCaptureManager 截断之下不画。
+    //      落位=步骤 11b'（呼吸计 11b 之后、死亡画面 12 之前）,门/样式/锚全值
+    //      1:1 未动,层内次序亲读注见彼处。
+    // 7b'. 指针物品/交互图标（DrawInterface_40 InteractItemIcon Main.cs:44474-44562/
+    //      :45792）+ 住房光标携带头像（:44622-44688 DrawInterface_38）+ 告示牌泡/悬停
+    //      文本——★SW-F2 2026-09-16 调用位后移至步骤 12b（黑幕之后）:原版本仓画在
+    //      黑幕 BJ103-A1 之前,11 帧渐熄窗内图标/告示牌泡/文本被黑幕压暗;原版黑幕画于
+    //      DoDraw 尾 :63367-63381（1458 :63373-63387）,DrawInterface :63394 全层
+    //      【之后】= 图标族恒在黑幕之上。层内序 = SetupDrawInterfaceLayers 接口层表
+    //      （:45473-45676）亲读对齐,见步骤 12b 注。
 
     // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
     this.drawMoonLordShake(ctx, cam, viewW, viewH);
@@ -4681,9 +4684,72 @@ export class Renderer {
     //      100px 屏幕 10 气泡；岩浆宽限耗损时换火焰条）
     this.breathMeter.draw(ctx, player, cam, viewH, this.atlas, this.playerInventory);
 
+    // 11b'. 标尺 W×H 计数控（★SW-FX36；Main.cs:46187-46195 DrawInterface_33_MouseText：
+    //      门=rulerLine(:18809 恒真)∧status[0]==0∧spectating<0∧velocity≤6（世界段
+    //      同款门,Game 注入/Renderer 双重承载）∧num>1||num2>1;内容=(|X|+1)+"x"+(|Y|+1)
+    //      纯数字拼串无 l10n 键;@ MouseScreen+(16,0),色 Color(0.24,0.8,0.9,1)=
+    //      rgb(61,204,229)（float→byte 截断）,scale 1,origin(0,0.8)——origin y=0.8×
+    //      行高 ⇒ 字形主体悬于鼠标上方;描边=Utils.DrawBorderString(:2679)→
+    //      DrawColorCodedStringWithShadow spread 1.5（ChatManager.cs:30 四向 ±x±y
+    //      黑影）。字体原版 FontAssets.MouseText → 本仓 CANVAS_MOUSETEXT_FONT
+    //      （★FX35 2026-09-15 项目像素字体,原「14px monospace 替身」退役;
+    //      ★14px=用户拍板终值(2026-09-16 两轮拍板),墨高等值档 19px/折中 16px
+    //      链在 PixelText 注——同 cursorItemIconText 字体偏差登记）。
+    //      ★SW-清债③ 2026-09-17 层位对齐：原挂步骤 7a''（黑幕 BJ103-A1 之前）=
+    //      11 帧渐熄窗内被压暗+全屏地图/拍照通道误画。原版本层属 DrawInterface
+    //      :63386——黑幕 :63367-63381（1458 :63373-63392 同序）之后、mapFullscreen
+    //      :63385 整层门/拍照 CheckCaptureManager 截断之下 ⇒ 读数恒在黑幕上、
+    //      全屏地图/拍照不画。落位按接口层表（SetupDrawInterfaceLayers
+    //      :45473-45676）亲读：信息列 28/小地图 16/Boss 条 14/资源条 25/呼吸计
+    //      （Resources_Breath :42824 ∈ 25 族）在其下（本位在 9.45/9/10/11/11b 之后
+    //      =其上,原版同序）;YouDied 36（步 12）/InteractItemIcon 40（步 12b）/
+    //      MouseText 收尾（步 13）在其上（本位在其前,原版同序）。
+    if (this.rulerReadout) {
+      ctx.save();
+      ctx.font = CANVAS_MOUSETEXT_FONT;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      const tm = ctx.measureText(this.rulerReadout.text);
+      const th = (tm.actualBoundingBoxAscent || 11) + (tm.actualBoundingBoxDescent || 3);
+      const roX = this._mouseX + 16;
+      const roY = this._mouseY - 0.8 * th;        // origin=(0,0.8·行高) :46194
+      ctx.fillStyle = '#000';
+      for (const [oxs, oys] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) {
+        ctx.fillText(this.rulerReadout.text, roX + oxs, roY + oys);
+      }
+      ctx.fillStyle = 'rgb(61,204,229)';
+      ctx.fillText(this.rulerReadout.text, roX, roY);
+      ctx.restore();
+    }
+
     // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 1457 跳过提示）——
     //     文字保持偏红原色（灰化已挪 7 段只作用世界画面,2026-08-24 用户修订）
     if (player.dead) this.drawDeathScreen(ctx, player, viewW, viewH);
+
+    // 12b. 指针物品/交互图标（DrawInterface_40 InteractItemIcon Main.cs:45792→
+    //      :44474-44562 + 住房头像 DrawInterface_38 :44622-44688 + 告示牌泡/悬停文本
+    //      随函数同画）。★SW-F2 2026-09-16 黑幕层位清偿：原挂步骤 7b'（黑幕
+    //      BJ103-A1 之前）=11 帧渐熄窗内被压暗;原版黑幕 :63367-63381 之后 DrawInterface
+    //      :63394 全层照画 → 图标族恒在黑幕上。落位按原版接口层表
+    //      （SetupDrawInterfaceLayers :45473-45676）亲读对齐：…35 YouDied（步 12）→
+    //      36/37/38 → 39 MouseOver（三族 claim）→ 40 本图标 → DrawPendingMouseText
+    //      :45694（MouseText 文本+光标 = 步骤 13）——步 12 之后、步 13 之前 ≙ 原版
+    //      40 层序 < MouseText 收尾,信息饰品列(28)/小地图(16)/Boss 条(14)/资源条(25)
+    //      亦在本图标之下（原版同序）。★全屏地图（mapFullscreen :63393 门）与
+    //      拍照模式（DrawInterface_10_CheckCaptureManager 截断层枚举）下原版本层不画
+    //      = 本位先后置 return（:fullMap/:_capturePass/captureMode.active）天然同相。
+    //      层内残差（★SW-清债② 2026-09-17 翻案定谳）：黑幕轴无偏差——原版黑幕
+    //      :63367-63381 之后才是 DrawInterface :63386 全层（1458 :63373-63392 同序;
+    //      接口层表 :45473-45676 亲读：泡=DrawInterface_19_SignTileBubble :46502-46526
+    //      列表位 20,只画 Chat2 泡面;文本面=39 MouseOver→DrawMouseOver :43665-43712;
+    //      图标面=40 InteractItemIcon）⇒ 泡/文本/图标三面原版同在黑幕【上】,BJ112-a
+    //      整函数后移 1:1 同相,"泡回黑幕前"提案作废（bj103 结构锁钉 drawCursorItemIcon
+    //      调用位+清债②泡面锁,回挂黑幕前即红）。唯一真残差=接口层【内】亚层序：
+    //      泡（位 20）原版在资源条 25/信息列 28/Inventory 27/YouDied 36【之下】、
+    //      小地图 18【之上】;随本函数画在上述全部之上——亚层微差维持登记
+    //      （正确拆分锚=列表位 [19 DiagnoseNet,21 HairWindow] 区间内、黑幕后资源条
+    //      前落位,泡/文本/图标三体异层同函数拆分面独立刀,非黑幕轴刀）。
+    this.drawCursorItemIcon(ctx, player);
 
     // 13. MouseText 缓存层（DrawPendingMouseText Main.cs:45781-45788=DrawInterface
     //     收尾,所有 UI 层之后、光标之下;消费面=孤儿箱名/BJ1 NPC 名/FX21 信息饰品
@@ -7954,36 +8020,11 @@ export class Renderer {
       ctx.restore();
       ctx.filter = 'none';
     }
-    // ★shader 修齐批①：四柱护盾泡（Main.cs:24551-24583——盾在=Perlin 泡 White×
-    //   (frac×0.8+0.2)+ForceField pass;破盾=膨胀淡出波 scale×(1+num321)/色(1−√num321)）。
-    //   盾量源=world.lunarEvent.shield（R23b 清怪解锁机制）;破盾计时器本处逐帧推进
-    if (e.vanillaId === 517 || e.vanillaId === 422 || e.vanillaId === 507 || e.vanillaId === 493) {
-      const key = e.vanillaId === 517 ? 'solar' : e.vanillaId === 422 ? 'vortex'
-        : e.vanillaId === 507 ? 'nebula' : 'stardust';
-      const le = world.lunarEvent;
-      const cur = le?.shield?.[key] ?? 0;
-      const max = Math.max(1, shieldMaxOf(world));
-      let st = PILLAR_FF.get(e);
-      if (!st) { st = { lastShield: cur, breakTick: -1, reformTick: -1 }; PILLAR_FF.set(e, st); }
-      if (st.lastShield > 0 && cur === 0) st.breakTick = 0;         // 盾破沿起
-      if (st.lastShield === 0 && cur > 0) st.reformTick = 0;        // 重塑淡入沿起
-      if (st.breakTick >= 0 && st.breakTick <= 120) st.breakTick++;
-      if (st.reformTick >= 0 && st.reformTick <= 30) st.reformTick++;
-      st.lastShield = cur;
-      if (!e.dead && (cur > 0 || (st.breakTick >= 0 && st.breakTick <= 120))) {
-        const tint: [number, number, number] = e.vanillaId === 517 ? [1, 0.45, 0.1]
-          : e.vanillaId === 422 ? [0.4, 0.45, 1]
-          : e.vanillaId === 507 ? [1, 0.35, 0.8] : [0.3, 0.9, 1];
-        drawForceFieldBubble(ctx, this, {
-          cx: e.cx, cy: e.cy,
-          radius: Math.max(e.w, e.h) * 0.9 + 40,
-          tint, frac: Math.min(1, cur / max),
-          breakT: cur === 0 && st.breakTick >= 0 ? Math.min(1, st.breakTick / 120) : -1,
-          reformT: cur > 0 && st.reformTick >= 0 ? Math.min(1, st.reformTick / 30) : -1,
-          time: performance.now() / 1000,
-        });
-      }
-    }
+    // ★BJ109-G（2026-09-16）：此处的旧 PILLAR_FF 护盾泡支已拆——它是"shader 修齐批①"
+    //  的半落点（bubble 只接在 Maples 回退路径,四塔走 vanilla 表路径在上方 return,
+    //  实际从不执行=死码;活路径仍是旧方罩 towerShieldTex）。现盾渲染单源于
+    //  drawTowerShield（vanilla 表路径 :7832 调用点）走 SM2 ForceField pass。
+    //  PILLAR_FF 自造破盾/重塑计时器亦废（原版就是塔 ai[3] 1→120 计数,towerAI 已 1:1）
     void world;
   }
 
@@ -8635,8 +8676,25 @@ export class Renderer {
         }
       }
     } else if (g.mode === 'vel4') {
-      // vel4：velocity.RotatedBy(k*π/2) × num 偏移画 4 份灰 A=64（:23750/:24535）
-      const num = g.velMult ?? 4; // (GetAlpha-0.5).Length()*k 光照项恒 0（我们无逐 NPC 光照）
+      // vel4：velocity.RotatedBy(k*π/2) × num 偏移画 4 份灰 A=64（Main.cs:24483-24520）
+      // ★BJ109-H 三修（2026-09-16）：
+      //  ①补光照脉动项——原版 num = base + |GetAlpha(npcColor)−(0.5,0.5,0.5)|·mult
+      //    （493 GlowMask132/507[143]/422[149] = 4+|·|·4；517[162] = 2+|·|·9 :24509/:24486）。
+      //    GetAlpha = 格光色（塔 SetDefaults 无 alpha=0 → rgb×1，NPC.cs:94549-94556）；
+      //    本仓 alpha 获取面 = lighting.lightAt（塔心格,0-255 归一）
+      //  ③净半径对齐：塔悬浮速度 vy=sin(2π·ai0/300)×0.5（AI_094 :39519,towerAI 同源）
+      //    ×num → max |offset| = 0.5×(4+0.866×4) ≈ 3.73px ≈ 原版 ~3.7px 呼吸半径
+      let base = 4;
+      let mult = 4;
+      if (e.vanillaId === 517) { base = 2; mult = 9; }
+      let num = base;
+      const lt = this.lighting?.lightAt(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
+      if (lt) {
+        const dr = lt[0] / 255 - 0.5, dg = lt[1] / 255 - 0.5, db = lt[2] / 255 - 0.5;
+        num = base + Math.sqrt(dr * dr + dg * dg + db * db) * mult;
+      }
+      // ②517 恒定偏移 = +Vector2.UnitX×2（:24518）——旧实现错挂在 dy
+      const xoff = e.vanillaId === 517 ? 2 : 0;
       // 416 骑手速度恒 0（AI_075 吸附零速）——原版此处取坐骑 415 的速度
       // （Main.cs:24516 spinningpoint3 = npc[415].velocity）
       const svx = e.vanillaId === 416 && e.master && !e.master.dead ? e.master.vx : e.vx;
@@ -8645,9 +8703,8 @@ export class Renderer {
       for (let k = 0; k < 4; k++) {
         const a = k * Math.PI / 2;
         // 世界坐标偏移 → 本变换局部（当前原点=精灵锚点，除 scale 还原）
-        const dx = ((svx * Math.cos(a) - svy * Math.sin(a)) * num) / scale;
-        const dy = ((svx * Math.sin(a) + svy * Math.cos(a)) * num) / scale
-          + (e.vanillaId === 517 ? 2 : 0);
+        const dx = ((svx * Math.cos(a) - svy * Math.sin(a)) * num) / scale + xoff / scale;
+        const dy = ((svx * Math.sin(a) + svy * Math.cos(a)) * num) / scale;
         ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
       }
     } else {
@@ -10361,76 +10418,34 @@ export class Renderer {
     ctx.restore();
   }
 
-  // ===================== 塔护盾 ForceField（Main.cs:23797-23846） =====================
-  /** 分塔 Perlin 纹理缓存：原版 = Misc/Perlin（512×512）以 600×600 PointWrap 采样进
-   *  ForceField 像素着色器（Filters.Scene[塔名] 分塔预设色 + UseColor(1+flash*0.5)）。
-   *  Canvas 无着色器——预生成分塔着色 Perlin 纹理作近似载体（噪声本身 1:1 原版贴图，
-   *  分塔色预设对齐 TOWER_SHIELD_COLOR；着色器的流动/边缘扫描线未还原，登记） */
-  private towerShieldTexCache = new Map<string, HTMLCanvasElement>();
-  private towerShieldTex(key: string, col: string, bright = 1): HTMLCanvasElement | null {
-    if (!this.atlas) return null;
-    const ck = `${key}|${bright.toFixed(2)}`;
-    const hit = this.towerShieldTexCache.get(ck);
-    if (hit) return hit;
-    const perlin = this.atlas.ensureVImage('vanilla/Misc_Perlin.png');
-    if (!perlin) return null;
-    const c = document.createElement('canvas');
-    c.width = 600; c.height = 600;
-    const cx = c.getContext('2d')!;
-    cx.imageSmoothingEnabled = false;
-    // PointWrap 采样语义：源 512×512 → 目标 600×600 单次放大（右/下 88px 由 wrap 补，
-    // 此处以源左上 88px 接续，观感与噪声连续性无差）
-    cx.drawImage(perlin, 0, 0, 512, 512, 0, 0, 600, 600);
-    const [r, g, b] = col.split(',').map((n) => Math.min(255, Math.round(Number(n) * bright)));
-    cx.globalCompositeOperation = 'multiply';
-    cx.fillStyle = `rgb(${r},${g},${b})`;
-    cx.fillRect(0, 0, 600, 600);
-    cx.globalCompositeOperation = 'destination-in';
-    cx.drawImage(c, 0, 0);
-    this.towerShieldTexCache.set(ck, c);
-    if (this.towerShieldTexCache.size > 16) {
-      const first = this.towerShieldTexCache.keys().next().value;
-      if (first !== undefined) this.towerShieldTexCache.delete(first);
-    }
-    return c;
-  }
-
-  /** 塔护盾（Main.cs:23802-23831 盾存分支 + :23832-23846 盾破碎裂分支）：
-   *  alpha = ratio*0.8+0.2、scale×(1+flash*0.05)、着色 UseColor(1+flash*0.5)；
-   *  盾破（shield==0 且 ai3>0）：progress=ai3/120、color alpha=1-√(min(ai3/30,1))、
-   *  scale×(1+num268)——膨胀渐隐的碎裂残罩 */
+  // ===================== 塔护盾 ForceField（Main.cs:24551-24583） =====================
+  // ★BJ109-G（2026-09-16）重写：旧 towerShieldTex 把 Misc/Perlin 600² multiply 塔色后
+  //  整幅直画 = 600×600 不透明棕烟方罩。定谳：原版 Perlin 512×512 α 恒 255（实测
+  //  PNG 全图 α=255），泡形全由 ForceField 像素着色器（PixelShader.cso obj48,
+  //  DyeInitializer.cs:426 注册）径向衰减产生；本仓 SM2 直连 pass（getPass('ForceField')
+  //  + px_ForceField.gen 字节码逐指令）已移植 → 盾路径改走 fx/ForceFieldBubble
+  //  （极坐标 swirl 采 Perlin,径向 α 衰减）+ 原版包络（盾在 α=ratio×0.8+0.2、
+  //  scale×(1+num319×0.05)、uColor=1+num319×0.5；破盾 α=1−√(min(ai3/30,1))、
+  //  scale×(1+num321)、uColor=2）。BlendState.AlphaBlend → source-over（非 lighter）。
+  /** 塔护盾（Main.cs:24551-24583 盾存分支 + :24584-24598 盾破碎裂分支） */
   private drawTowerShield(e: Enemy, world: World) {
     const key = TOWER_KEY[e.vanillaId ?? -1];
     if (!key) return;
-    const ctx = this.ctx;
-    const col = TOWER_SHIELD_COLOR[e.vanillaId!];
     const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
     const shield = world.lunarEvent.shield[key];
-    let alpha: number, size: number, bright: number;
-    if (shield > 0) {
-      const ratio = shield / shieldMax(world);
-      let flash = 0;
-      if (e.ai3 > 0 && e.ai3 <= 30) flash = 1 - e.ai3 / 30;   // :23803-23806
-      alpha = Math.min(1, ratio * 0.8 + 0.2);
-      size = 600 * scale * (1 + flash * 0.05);
-      bright = 1 + flash * 0.5;
-    } else if (e.ai3 > 0) {
-      // 盾破碎裂环（:23832-23845）
-      const num267 = e.ai3 / 120;
-      const num268 = Math.min(e.ai3 / 30, 1);
-      alpha = 1 - Math.sqrt(num268);
-      size = 600 * scale * (1 + num268);
-      bright = 2;                                               // UseColor(new Vector3(2f))
-      void num267;                                              // 着色器 progress（未还原，登记）
-    } else return;
-    if (alpha <= 0.01) return;
-    const tex = this.towerShieldTex(key, col, bright);
-    if (!tex) return;
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.drawImage(tex, e.cx - size / 2, e.cy - size / 2 + 10 * scale, size, size);
-    ctx.restore();
+    const breaking = shield <= 0 && e.ai3 > 0;
+    if (shield <= 0 && !breaking) return;
+    drawForceFieldBubble(this.ctx, this, {
+      cx: e.cx,
+      cy: e.cy - 10 * scale,          // 绘制位 = 塔心−(0,10)（:24547 vector71+(300,300)）
+      radius: 300 * scale,            // 600×600 源矩形绕 (300,300) origin → 半径 300×scale
+      tint: (TOWER_SHIELD_COLOR[e.vanillaId!] ?? '255,255,255')
+        .split(',').map(Number) as [number, number, number],
+      frac: Math.max(0, Math.min(1, shield / shieldMax(world))),
+      breakT: breaking ? Math.min(1, e.ai3 / 30) : -1,    // num321=min(ai3/30,1)（:24586-24587）
+      reformT: !breaking && e.ai3 > 0 && e.ai3 <= 30 ? 1 - e.ai3 / 30 : -1,  // num319（:24562）
+      time: performance.now() / 1000,
+    });
   }
 
   /** 568/569 出生态紫雾（Main.cs:25899-25907 参数 + 拷贝循环 :26060-26076）：
@@ -10730,6 +10745,19 @@ export class Renderer {
     [811, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
     // 814: whiteLerp k=0.35 × (255−α)/255 —— 顶点色=Lerp(格光,White,0.35)【读格光】
     //  （Main.cs:30068+:30855）→ whiten=false:逐通道 max 旧形（保留 65% 光色相）
+    // ★BJ109-B/J（2026-09-16）：月族弹「暗处弹不发亮」残余面 5 件补齐——
+    //  GetAlpha 专支（Projectile.cs:80895-80931）灰度白化族：
+    //  538（:80928 Color(255−α,255−α,255−α,255−α)，SetDefaults α=255 AI 渐显）、
+    //  573（:80895 同族）、575（:80903 与 596 同式 Color(255−α,…,128−α/2)+timeLeft<30 渐隐窗）
+    //  → floor=(255−α)/255、whiten=true（顶点色恒白,同 596/811 判例）；
+    //  578/579（:80895 同族；aiStyle108 仅 ai0∈50..90 上膛窗有 α=255−255·scale
+    //  渐入,实弹相 alpha=0 恒——本仓不建模上膛窗）→ floor=1、whiten=true。
+    //  537/540/539/574/580 加算族维持 world 层 lighter（455 先例,不追）。
+    [538, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
+    [573, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
+    [575, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
+    [578, () => ({ floor: 1, whiten: true })],
+    [579, () => ({ floor: 1, whiten: true })],
     [814, (proj) => ({ floor: 0.35 * (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: false })],
     // ★SW-BJ56 2026-09-10：946 泰拉棱镜——DrawProj_EmpressBlade（Main.cs:36562-36601）
     //  全层硬编码色（本体 White×Opacity :36576-36577、幻影/环晕/色罩=女皇色,均不读
@@ -15302,11 +15330,11 @@ export class Renderer {
     // 0.925×0.85）→ DrawBorderStringFourWay 白×mouseTextColor 四向描边。
     // ★canvas fillText y=基线而 XNA DrawString y=字形顶（origin 零）——曾按基线画
     //   致文字浮出底板上缘（2026-08-28 用户实报"标牌文字错位"），textBaseline=top 修正
-    // ★FX35 2026-09-15：字体=CANVAS_MOUSETEXT_FONT（16px 用户拍板档,墨高 ~14.7;
-    //   19px 墨高严格等值档 ≙ MouseText scale 1 链在 PixelText 注）;行距 lh 20→30
+    // ★FX35 2026-09-15：字体=CANVAS_MOUSETEXT_FONT（14px 用户拍板终值 2026-09-16;
+    //   墨高等值档 19px/折中 16px 链 ≙ MouseText scale 1 见 PixelText.ts 注）;行距 lh 20→30
     //   = 原版逐字钉值（:43708 `l * 30` / :43690 `screenHeight - 30*lineAmount` /
     //   :43704 底板 `30*lineAmount+7`——旧 20 是 14px 替身时代的代偿值,未登记;
-    //   19px 档墨高 17.4 在 20 距下已无行隙故钉 30;16px 拍板后行距 30 维持原版
+    //   19px 档墨高 17.4 在 20 距下已无行隙故钉 30;14px 终值后行距 30 维持原版
     //   钉值不动）。460px 换行宽与底板公式随 lh 同步归位
     if (this.signHoverText) {
       ctx.font = CANVAS_MOUSETEXT_FONT;
@@ -15371,7 +15399,7 @@ export class Renderer {
    *  不即画）。锚 = mouse+14 + ThickMouse 默认档 +6（:20379-20389）→ 实锚
    *  mouse+20（> 本仓光标阴影 pass 右缘 ≈+16.4,BJ7 净空不变式）+ 屏幕右/下缘
    *  40px 收边（:20412-20419,度量=MeasureString 全串,h 取 19px 行盒近似——19px
-   *  时代钉值,16px 拍板后未随调）。
+   *  时代钉值,14px 终值后未随调）。
    *  ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（原 14px monospace 替身退役,
    *  箱名/NPC 名/行标签同族统一,理由见 PixelText.CANVAS_MOUSETEXT_FONT 注）。
    *  ★SW-FX21 2026-09-14 自 drawCursorItemIcon（层 40 域,步骤 7b'）迁出:彼处早于
@@ -15402,27 +15430,36 @@ export class Renderer {
     //  num3=(int)mouseTextColor/255 乘区只作用于色档,默认档直读 mt（:20429 同式）。
     const fill = mouseTextInnerColor(p.cursorItemIconRare, p.cursorItemIconDiff, mt,
       this.lighting?.clock ?? null);
-    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(16px 用户拍板档,墨高 ~14.7;
-    //  19px 墨高严格等值档 ≙ MouseText scale 1 链在 PixelText.CANVAS_MOUSETEXT_FONT
+    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(14px 用户拍板终值 2026-09-16;
+    //  墨高等值档 19px/折中 16px 链 ≙ MouseText scale 1 见 PixelText.CANVAS_MOUSETEXT_FONT
     //  注;原「14px monospace 替身」在 Windows DirectWrite 下四向 ±2 描边露出
     //  偏移拷贝=「叠了几层文字」观感)。
-    //  h=19:下缘收边用的单行盒近似(19px 时代钉值,16px 拍板未随调;原版 :20401 用
+    //  h=19:下缘收边用的单行盒近似(19px 时代钉值,14px 终值后未随调;原版 :20401 用
     //  MeasureString 全串盒,本仓维持近似式)
     ctx.font = CANVAS_MOUSETEXT_FONT;
     const w = ctx.measureText(p.cursorItemIconText).width;
     const h = 19;
     const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height,
       { heldOnCursor: c.uiHeld });   // F2c:持物锚 X+=34(:20390-20392,债 BJ7-R1 清偿)
-    ctx.save();
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
-      ctx.fillStyle = '#000';
-      ctx.fillText(p.cursorItemIconText, anchor.x + ox, anchor.y + oy);
+    // ★FX57 2026-09-16:字形=离屏 12px 烘焙+主画布最近邻放大(MouseTextBake.ts 头注
+    //  根因/修法;与信息行同管线)。锚(mouseTextAnchor)/claim 序/门拓扑零漂移;
+    //  墨顶 = 旧 textBaseline='top' 直绘同位(bake 侧按 'top' 墨盒反推)。
+    //  mouseTextColor 脉动灰(190↔255)不进缓存键——白字形 mask 每帧染色
+    //  (scratch source-in),缓存只按文本键控(InfoAccsLayer 同管线的 grayed/
+    //  压暗行亦然:色=染色,α=主画布 globalAlpha)。bake 不可用(无 DOM/字体未
+    //  就绪)回退下方旧直绘(与 FX57 前逐字节同形,BJ7 结构锁/事件流同形)。
+    if (!drawBakedMouseText(ctx, p.cursorItemIconText, anchor.x, anchor.y, { anchor: 'top', color: fill })) {
+      ctx.save();
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+        ctx.fillStyle = '#000';
+        ctx.fillText(p.cursorItemIconText, anchor.x + ox, anchor.y + oy);
+      }
+      ctx.fillStyle = fill;
+      ctx.fillText(p.cursorItemIconText, anchor.x, anchor.y);
+      ctx.restore();
     }
-    ctx.fillStyle = fill;
-    ctx.fillText(p.cursorItemIconText, anchor.x, anchor.y);
-    ctx.restore();
   }
 
   /** 图格网格 α 状态机（Main.MouseBuildingGridAlpha Main.cs:271；on 每 0.2 帧
@@ -15719,8 +15756,20 @@ export class Renderer {
       ? Math.min(1, Math.max(0, Math.sin(lec.moonLordCountdown / 60 * 0.5) * 2))
         * (0.75 - 0.5 * lec.moonLordCountdown / Math.max(1, lec.moonLordCountdownMax))
       : 0;
-    const cd = lec?.crystalDeath ?? null;
-    if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !cd) return;
+    // ★BJ109-I：塔邻接 FilterTower 染色产位（SceneState.cs:107-110）+ Filter.Opacity
+    // 1/s 斜坡（FilterManager.cs:95-101）。★BJ109-D 拆 crystalDeath：旧「天柱死亡
+    // 水晶 tint+vortex」产位已随假锚拆除（该屏效实为 DD2 弹 672 aiStyle 132 专有）
+    const tow = world ? this._lunarTowerFilterTarget(this._frameEntities, player.cx, player.cy, world) : null;
+    {
+      const nowMs = performance.now();
+      const dt = Math.min(0.25, Math.max(0, (nowMs - this._towerFilterLastMs) / 1000));
+      this._towerFilterLastMs = nowMs;
+      this._towerFilterOpacity = tow
+        ? Math.min(this._towerFilterOpacity + dt, 1)
+        : Math.max(this._towerFilterOpacity - dt, 0);
+    }
+    const towVisible = tow != null && this._towerFilterOpacity > 0;
+    if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !towVisible) return;
     // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
     // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
     // 语义等价——vanilla 垫值只是为比屏幕大的离屏采集目标)
@@ -15743,17 +15792,27 @@ export class Renderer {
         passes.push({ kind: 'FilterMoonLordShake', intensity: shakeI,
           time: (performance.now() / 1000) % 3600 });
       }
-      // 天柱死亡水晶 tint+vortex（Projectile.cs:37019-37075 三相序；t 由
-      // LunarEvent.tickCrystalDeath 驱动,480t 归零）
-      if (cd) {
-        const nI = cd.t < 120 ? Math.min(1, cd.t / 120) : 1;              // 相0 淡入/相1 恒1
-        passes.push({ kind: 'FilterCrystalDestructionColor', color: [1, 0, 0.75],
-          intensity: nI, opacity: 1 });
-        const vI = (cd.t < 420 ? nI : 2);                                  // 相2 I=2（:37057）
-        const prog = cd.t >= 420 ? (cd.t - 420) / 60 * 30 : 0;             // 相2 (t/60)×30（:37060）
-        passes.push({ kind: 'FilterCrystalDestructionVortex', screenRes,
-          targetPx: [cd.x - screenPos[0], cd.y - screenPos[1]],
-          intensity: vI, progress: prog, time: (performance.now() / 1000) % 3600 });
+      // ★BJ109-I 塔邻接染色（SceneState.cs:107-110 ManageSpecialBiomeVisuals +
+      //  ScreenEffectInitializer.cs:14-17 分塔预设；UseTargetPosition=塔心−(0,10)。
+      //  uIntensity/uProgress=盾态（Main.cs:24565 盾在 1+num319/0；:24584 破盾
+      //  min(5,15·num320)+1/num320，num320=ai3/120））
+      if (tow && towVisible) {
+        const preset = TOWER_FILTER_PRESETS[tow.key];
+        let intensity = 1, progress = 0;
+        if (!tow.shieldUp && tow.ai3 > 0) {
+          const num320 = Math.min(1, tow.ai3 / 120);
+          intensity = Math.min(5, 15 * num320) + 1;
+          progress = tow.ai3 / 120;
+        } else if (tow.shieldUp && tow.ai3 > 0 && tow.ai3 <= 30) {
+          intensity = 1 + (1 - tow.ai3 / 30);   // num319=1−ai3/30（:24562-24564）
+        }
+        passes.push({
+          kind: 'FilterTower', color: preset.color,
+          opacity: preset.useOpacity * this._towerFilterOpacity,
+          screenRes, screenPos,
+          targetPx: [tow.x - screenPos[0], tow.y - screenPos[1]],
+          intensity, progress, time: (performance.now() / 1000) % 3600,
+        });
       }
       for (const f of mono.visibleFilters()) {
         switch (f.def.kind) {
@@ -15826,6 +15885,40 @@ export class Renderer {
 
   /** 本帧实体列表快照（_moonLordFilterTarget 消费用；render() 每帧刷新） */
   private _frameEntities: Entity[] = [];
+  /** FilterTower 染色产位（★BJ109-I，SceneState.cs:107-110）：4000px Zone 内最近
+   *  存活塔（SceneMetrics.ScanNPCPositions :738-749 全表扫最近,CloseEnoughTo*Tower
+   *  无事件门）。返回塔心（ManageSpecialBiomeVisuals 尾参 ClosestNPCPosition[id]−
+   *  (0,10) 的 −10px 由组装端加）+ 盾态（Main.cs:24565/:24584 驱动 uIntensity/
+   *  uProgress）。null=Zone 无塔 */
+  private _lunarTowerFilterTarget(
+    entities: Entity[], px: number, py: number, world?: World | null,
+  ): { key: 'solar' | 'vortex' | 'nebula' | 'stardust'; x: number; y: number; ai3: number; shieldUp: boolean } | null {
+    let best: Enemy | null = null;
+    let bestD2 = Infinity;
+    for (const e of entities) {
+      const en = e as Entity & { vanillaId?: number | null; dead?: boolean };
+      if (en.dead || !isTowerId(en.vanillaId)) continue;
+      const t = e as Enemy;
+      const dx = t.cx - px, dy = t.cy - py;
+      const d2 = dx * dx + dy * dy;   // ≤4000（SceneMetrics.cs:917 DistanceSquared<=range²）
+      if (d2 <= TOWER_ZONE_RADIUS * TOWER_ZONE_RADIUS && d2 < bestD2) {
+        best = t;
+        bestD2 = d2;
+      }
+    }
+    if (!best) return null;
+    const key = TOWER_KEY[best.vanillaId ?? -1];
+    if (!key) return null;
+    return {
+      key,
+      x: best.cx, y: best.cy - 10,   // SceneState.cs:107-110 −(0,10)
+      ai3: best.ai3,
+      shieldUp: !!world && key != null && (world.lunarEvent.shield[key] ?? 0) > 0,
+    };
+  }
+  /** FilterTower 的 Filter.Opacity 斜坡（FilterManager.cs:95-101 1/s,与柱族同速率） */
+  private _towerFilterOpacity = 0;
+  private _towerFilterLastMs = 0;
   /** Moon Lord 滤镜目标位（MoonLordScreenShaderData.UpdateMoonLordIndex
    *  MoonLordScreenShaderData.cs:24-66,1457 重写——蓝队 R1-07a 补):
    *  基准 = 核心 398 中心;①真眼 400 ai0==4(死光炮)按攻击包络
@@ -16978,9 +17071,9 @@ export class Renderer {
     // :57011-57013 → mouseTextString，经 MouseText 光标白字显示）：drawMapHeads
     // 帧内命中后在此出字（尾段=原版 MouseText 画在界面链末端的同层级）。
     // 色 = mouseTextColor 脉动白 + 四向影（Renderer :14070 同偏差登记）
-    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（MouseText 同族,16px 用户拍板档
-    //  墨高 ~14.7,19px 等值档链在 PixelText 注;原 14px monospace 替身退役——同
-    //  信息栏 Windows 重影根因）
+    // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT（MouseText 同族,14px 用户拍板
+    //  终值 2026-09-16 两轮拍板,墨高等值档 19px/折中 16px 链见 PixelText 注;原
+    //  14px monospace 替身退役——同信息栏 Windows 重影根因）
     if (this.mapNpcHeadHoverName) {
       ctx.font = CANVAS_MOUSETEXT_FONT;
       ctx.textAlign = 'left';

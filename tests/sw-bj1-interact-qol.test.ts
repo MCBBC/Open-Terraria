@@ -46,7 +46,7 @@ function stubGame(playerBox = { x: 160, y: 160, w: 20, h: 42 }): AnyGame {
     cursorItemIconText: '',
   };
   g.world = { isJourney: false };
-  g.entities = { enemies: [], npcs: [] };
+  g.entities = { enemies: [], npcs: [], critters: [] };   // critters 空桶（★FX56 补:tickHoverNpcName 遍历小动物桶,stub 缺桶=not iterable）
   g.renderer = { atlas: null, fullMap: { open: false } };
   g.input = { mouseX: 0, mouseY: 0 };
   g.camera = { screenToWorld: (sx: number, sy: number) => [sx, sy] };

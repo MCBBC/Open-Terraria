@@ -712,6 +712,18 @@ export class BiomeBackground {
     this.warmStyle(style);
   }
 
+  /** ★BJ103-A1b（2026-09-16）：传送黑幕面地表背景瞬切（BlackFadeCameraTeleport 内
+   *  instantBGTransitionCounter=10 + bgDelay=0 + bgStyle=GetPreferredBGStyleForPlayer,
+   *  Main.cs:63513/:63519-63521）。本仓等价面：计数置 10（update() 既有消费位
+   *  instantBG>0 → bgStyle=want + speed=1 一帧吸合）+ bgDelay 清零;bgStyle 本体不在此
+   *  直写——want 由 update() 的 preferredStyle(scene,centerTileX) 推导（scene 旗标已由
+   *  Game 远距面强制重扫,UpdateBiomesIfMovedEnoughForBlackFade Player.cs:16788-16794
+   *  等价）,直写会绕过 flash 登记与沙漠侵染列解析。调用方=Game.blackFadeCameraTeleport。 */
+  instantBGTransition(): void {
+    this.bgDelay = 0;
+    this.instantBG = 10;
+  }
+
   /** 拍照群系档贴图预热：style(0-14) → 该风格贴图 id 集 → loadBg（变体取当前
    *  世界掷定的 corruptStyle/jungleStyle 等，与 draw 解析同表同变体）。
    *  ★终清波：行可能是结构化行（雪 m/t 山+树、沙漠 p/c/h/r 四列）——统一经

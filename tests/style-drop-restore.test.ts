@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RNG } from '../src/core/rng';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
+import { RollingBoulder } from '../src/entities/RollingBoulder';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { styleDropVid, styleDropVidOfFrames, styleFromFrame, holidayLightVid, pileDecoDropVid, gemLockKeyVid } from '../src/data/vanillaStyleDrops';
 import { framedCellFrame, furnitureStyleBase } from '../src/world/FurnitureStyle';
@@ -840,54 +841,91 @@ describe('checkFurnitureSupport（⚠️2 失撑样式掉落 + ⚠️3 巨石/�
     expect(w.store.get(10, 10)).toBe(0);
   });
 
-  it('巨石 138 失撑 → 2×2 清 + 滚石弹（Check2x2 :86688→cs:48766 弹 99 伤 70）,无物品掉落', () => {
+  /** ★SW-BJ102 债②（2026-09-16）巨石族支撑/Spawn 单口归一后的运行时台：
+   *  真实监听装配（Game afterWorldLoad 双监听同序 scanBoulderFamilyNear→
+   *  checkFurnitureSupport(x,y-1)）——巨石 138 族支撑判据=Check2x2 判据② BOTH 柱
+   *  SolidTileAllowBottomSlope（WorldGen.cs:48968-48984/1458 :48899,单柱仍在=保留）,
+   *  Spawn 单口=convertBoulderRoll（:49171-49235 NewProjectile 位,RollingBoulder）;
+   *  旧「家具臂 ANY 柱判据+TrapShot 直发」三口并上面已退役（BJ102 实证挖一格 3 弹）。 */
+  function boulderSupportShell(world: World, drops: Drop[], projs: RollingBoulder[], extra?: Record<string, unknown>) {
+    const g = Object.create(Game.prototype) as unknown as Record<string, unknown> & {
+      breakTile: Game['breakTile'];
+    };
+    g.world = world;
+    g.chunks = { markDirtyArea: () => {} };
+    g.spawnParticles = () => {};
+    g.sfx = { play: () => {} };
+    g.spawnDrop = (x: number, y: number, key: string, n: number) => { drops.push({ key, n }); return null; };
+    g.recLog = () => {};
+    g.dumpChest = () => {};
+    g.entities = { add: (e: unknown) => { if (e instanceof RollingBoulder) projs.push(e); }, drops: [], critters: [], enemies: [], npcs: [], projectiles: [], props: [] };
+    g.trackTile = 0;
+    g.player = { equipStats: {} };
+    g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
+    if (extra) Object.assign(g, extra);
+    world.store.onTileChanged((cx: number, cy: number) => {
+      (g as unknown as { scanBoulderFamilyNear(x: number, y: number): void }).scanBoulderFamilyNear(cx, cy);
+    });
+    world.store.onTileChanged((x: number, y: number) => {
+      (g as unknown as { checkFurnitureSupport(x: number, y: number): void }).checkFurnitureSupport(x, y - 1);
+    });
+    return g as unknown as { breakTile: Game['breakTile']; checkFurnitureSupport: (x: number, y: number) => void };
+  }
+
+  it('巨石 138 失撑 → 判据②双柱失 → 2×2 清 + 滚石弹 1 发（Check2x2 :48968-48984/:49171,弹 99 伤 70）,无物品掉落', () => {
     const w = new World(40, 40, 7, 'sdr');
     const drops: Drop[] = [];
-    const projs: TrapShot[] = [];
-    const g = supportShell(w, drops, projs);
+    const projs: RollingBoulder[] = [];
+    const g = boulderSupportShell(w, drops, projs);
     const t = keyOf('v_138_boulder');
     for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
       w.store.setTileSilent(10 + dx, 10 + dy, t, dx * 18, dy * 18);
     }
     w.store.setTileSilent(10, 12, idOfSheet(1));
     w.store.setTileSilent(11, 12, idOfSheet(1));
-    w.store.setTile(10, 12, 0);   // 挖左下支撑
-    g.checkFurnitureSupport(10, 11);
+    w.store.setTile(10, 12, 0);   // 挖左下支撑——右柱仍在 ⇒ 判据②不触发=原版保留
+    expect(w.store.get(10, 10)).toBe(t);      // ★BJ102：旧 ANY 柱判据在此误塌+误发=偏差已归一
+    expect(projs.length).toBe(0);
+    w.store.setTile(11, 12, 0);   // 再挖右柱 → 双柱失 → Check2x2 destroy+单发
     expect(w.store.get(10, 10)).toBe(0);
     expect(w.store.get(11, 11)).toBe(0);      // 整件清
     expect(projs.length).toBe(1);
-    expect(projs[0].kind).toBe('boulder');
-    expect(projs[0].damage).toBe(70);         // cs:48766 138→99 伤 70
+    expect(projs[0]).toBeInstanceOf(RollingBoulder);
+    expect(projs[0].dmg).toBe(70);            // Check2x2 :49171 138→99 伤 70
     expect(drops).toEqual([]);                // 原版不掉物品（滚石压人语义）
   });
 
-  it('巨石 712 屎堆失撑 → 伤 50（cs:48796 逐 sheet 伤害表）；有支撑不触发', () => {
+  it('巨石 712 屎堆失撑 → 伤 50（Check2x2 :49171 逐 sheet 伤害表）；支撑在/单柱失均不触发', () => {
     const w = new World(40, 40, 7, 'sdr');
-    const projs: TrapShot[] = [];
-    const g = supportShell(w, [], projs);
+    const projs: RollingBoulder[] = [];
+    const g = boulderSupportShell(w, [], projs);
     const t = keyOf('v_712_poo_boulder');
     for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
       w.store.setTileSilent(10 + dx, 10 + dy, t, dx * 18, dy * 18);
     }
     w.store.setTileSilent(10, 12, idOfSheet(1));
     w.store.setTileSilent(11, 12, idOfSheet(1));
-    g.checkFurnitureSupport(10, 11);          // 支撑还在
+    g.checkFurnitureSupport(10, 11);          // 家具臂已退役（巨石早退）——支撑还在零触发
     expect(projs.length).toBe(0);
-    w.store.setTile(11, 12, 0);
-    g.checkFurnitureSupport(11, 11);
+    w.store.setTile(11, 12, 0);               // 单柱失（右）→ 判据②双柱门不触发
+    expect(projs.length).toBe(0);
+    expect(w.store.get(10, 10)).toBe(t);
+    w.store.setTile(10, 12, 0);               // 双柱失 → destroy+单发
     expect(projs.length).toBe(1);
-    expect(projs[0].damage).toBe(50);
+    expect(projs[0].dmg).toBe(50);
   });
 
-  it('TNT 桶 654 失撑 → 整件清+桶中心 1002 爆炸（❌1:非 Boulders 表走 :48464-48470 支撑支,cs:48771-48772）', () => {
+  it('TNT 桶 654 失撑 → 整件清+桶中心 1002 爆炸（❌1:非 Boulders 表走 :48866-48877 逐列支,cs:49178 Spawn→弹首拍 Kill 爆）', () => {
     const w = new World(40, 40, 7, 'sdr');
     const drops: Drop[] = [];
-    const g = supportShell(w, drops, []);
+    const projs: RollingBoulder[] = [];
     const blasts: Array<[number, number, number, number, number]> = [];
-    (g as unknown as Record<string, unknown>).explodeAt =
-      (tx: number, ty: number, dmg: number, radius: number, _dt: boolean, _hb: unknown, _pen: unknown, projId: number) => {
+    const g = boulderSupportShell(w, drops, projs, {
+      explodeAt: (tx: number, ty: number, dmg: number, radius: number, _dt: boolean, _hb: unknown, _pen: unknown, projId: number) => {
         blasts.push([tx, ty, dmg, radius, projId]);
-      };
+      },
+      playSfx: () => {}, playSfxFile: () => {}, playSfxWav: () => {}, spawnDust: () => {},
+    });
     const t = keyOf('v_654_tnt_barrel');
     for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
       w.store.setTileSilent(10 + dx, 10 + dy, t, dx * 18, dy * 18);
@@ -897,19 +935,25 @@ describe('checkFurnitureSupport（⚠️2 失撑样式掉落 + ⚠️3 巨石/�
     g.checkFurnitureSupport(10, 11);          // 支撑还在 → 不爆
     expect(blasts).toEqual([]);
     expect(w.store.get(10, 10)).toBe(t);
-    // 桌面（tileTable）也算支撑（:48464-48470 solid||table）→ 仍不爆
-    w.store.setTile(10, 12, 0);
+    // 桌面（tileTable）也算支撑（:48866-48877 solid||table）→ 仍不爆。
+    // ★监听语义下换桌须走静默（setTile 非静默的中间空态即触发逐列支释放）：
+    // 静默换桌后直调 checkFurnitureSupport 验「桌=承放」判定面。
+    w.store.setTileSilent(10, 12, 0);
     w.store.setTileSilent(10, 12, idOfSheet(14), 0, 0);
     w.store.setTileSilent(11, 12, idOfSheet(14), 18, 0);
     g.checkFurnitureSupport(10, 11);
     expect(blasts).toEqual([]);
-    w.store.setTile(11, 12, 0);               // 挖右支撑 → 失撑爆
-    g.checkFurnitureSupport(11, 11);
+    expect(projs.length).toBe(0);
+    w.store.setTile(11, 12, 0);               // 挖右桌 → 逐列支失撑 → 清+convert 单发
     expect(w.store.get(10, 10)).toBe(0);      // 整件清
     expect(w.store.get(11, 11)).toBe(0);
     expect(drops).toEqual([]);                // 无物品返还
-    // ★SW-J1 2026-09-03：radius 10→0/destroyTiles=false——1002 不在 Kill_ExplodeTiles
-    // 闸门表（P.cs:79027-79030）,:79064 为死代码 = 原版 1002 Kill 不炸地形
+    expect(projs.length).toBe(1);             // ★BJ102：Spawn 单口=convert（1002 弹）
+    expect(projs[0].projId).toBe(1002);
+    // 弹首拍 Kill → rbKill1002Face → explodeAt。★SW-J1 2026-09-03：radius 0/
+    // destroyTiles=false——1002 不在 Kill_ExplodeTiles 闸门表（P.cs:79027-79030），
+    // :79064 为死代码 = 原版 1002 Kill 不炸地形
+    (projs[0] as RollingBoulder).fixedUpdate(1 / 60, g as unknown as Parameters<RollingBoulder['fixedUpdate']>[1]);
     expect(blasts).toEqual([[10, 10, 400, 0, 1002]]);   // 桶中心 (168,168)
   });
 });

@@ -352,7 +352,15 @@ describe('SW-BJ102 W3 心 tile 提取分式（负带分叉：trunc 除 vs >>4）
   });
 
   it('W3b 1053 注液面接线：rbLavaBoulderExplosion 用截断除（S 锁+正域 span 烟测）', () => {
-    const srcLike = (b: RollingBoulder) => internals(b).rbLavaBoulderExplosion;
+    // ★S 锁（M8 判别线）：rbLavaBoulderExplosion 消费截断除变体——正域两式同值
+    //  （W3a 钉负带分叉值,本锁钉 1053 面→截断除的接线,防「顺手统一成 >>4」回退）
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    const { join } = require('node:path') as typeof import('node:path');
+    const src = readFileSync(join(__dirname, '../src/entities/RollingBoulder.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('private rbLavaBoulderExplosion'), src.indexOf('private rbPlaceLiquidLava'));
+    expect(fn).toContain('this.rbCenterTileTruncX()');
+    expect(fn).toContain('this.rbCenterTileTruncY()');
+    expect(fn).not.toContain('this.rbCenterTileX()');
     const g = fakeGame(fakeStore(64, 64));
     const st = (g.world as unknown as { store: Store }).store;
     const b = mkBoulder(713);                          // 1053
@@ -367,6 +375,5 @@ describe('SW-BJ102 W3 心 tile 提取分式（负带分叉：trunc 除 vs >>4）
       const [x, y] = c.split(',').map(Number);
       expect(Math.hypot(x - 13, y - 13)).toBeLessThan(4);   // 心=(13,13)（两式正域同值=接线烟测）
     }
-    expect(srcLike(b)).toBeTypeOf('function');
   });
 });

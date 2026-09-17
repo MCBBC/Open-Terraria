@@ -89,9 +89,9 @@ function shell(w: World, o: Opts = {}) {
 }
 
 function mkWorld(seedFlags?: { remix?: boolean }): { st: TileStore; w: World } {
-  const st = new TileStore(64, 64);
+  const st = new TileStore(64, 640);
   const w = {
-    store: st, w: 64, h: 64, flags: {}, chests: [], furnitureItems: [],
+    store: st, w: 64, h: 640, flags: {}, chests: [], furnitureItems: [],
     groundLevel: 40, seedFlags, oldOnesArmy: { ongoing: false },
   } as unknown as World;
   return { st, w };
@@ -119,7 +119,9 @@ describe('SW-FX38b 营火群系自动转换：解锁后放普通营火按当期�
       const { st, w } = mkWorld();
       (w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
       const g = shell(w, { unlocked: true, zones: { [flag]: true } });
-      const r = placeCampfire(st, g);
+      const deep = flag === 'zoneUnderworldHeight';
+      if (deep) g.player.y = 450 * TILE;                              // 地狱带(像素门)
+      const r = placeCampfire(st, g, 20, deep ? 449 : 29);
       expect(r.type, flag).toBe(CAMPFIRE_TILE);
       expect(r.frameX, flag).toBe(style * 54);
     }
@@ -133,11 +135,13 @@ describe('SW-FX38b 营火群系自动转换：解锁后放普通营火按当期�
     const r2 = mkWorld();
     (r2.w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
     const g2 = shell(r2.w, { zones: { zoneDesert: true, belowSurface: true, zoneUndergroundDesert: true } });
-    expect(placeCampfire(r2.st, g2).frameX).toBe(8 * 54);
+    g2.player.y = 1000;                                                        // 地下带(<7040)
+    expect(placeCampfire(r2.st, g2, 20, 61).frameX).toBe(8 * 54);
     const r3 = mkWorld();
     (r3.w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
     const g3 = shell(r3.w, { zones: { zoneDesert: true, belowSurface: true } });
-    expect(placeCampfire(r3.st, g3).frameX).toBe(0);                           // 地下普通沙漠无营火
+    g3.player.y = 1000;
+    expect(placeCampfire(r3.st, g3, 20, 61).frameX).toBe(0);                           // 地下普通沙漠无营火
     // remix 补支 :40714-40716
     const r4 = mkWorld({ remix: true });
     (r4.w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
@@ -150,7 +154,7 @@ describe('SW-FX38b 营火群系自动转换：解锁后放普通营火按当期�
       { zoneGlowshroom: true, zoneDungeon: true },     // 营火 glowshroom 先 → 14;火把同景 dungeon 先
       { zoneTemple: true, zoneDungeon: true },         // 营火 temple 先 → 13;火把同景 dungeon 先
       { zoneDungeon: true, zoneUnderworldHeight: true }, // 两表同序 dungeon → 7
-      { zoneUnderworldHeight: true, zoneGlowshroom: true }, // glowshroom 先 → 14
+      { zoneUnderworldHeight: true, zoneGlowshroom: true, deep: true }, // glowshroom 先 → 14
       { zoneSnow: true, zoneJungle: true },            // snow → 3
       { zoneHallow: true, zoneCorrupt: true, zoneCrimson: true },   // 12
       { zoneCorrupt: true, zoneCrimson: true },        // 10

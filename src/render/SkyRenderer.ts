@@ -2282,6 +2282,13 @@ export class SkyRenderer {
   /** 原版三层绘制（DrawClouds_Distant/Closer/Closest + NextHorizonRenderer.DrawCloud）：
    *  按视口宽缩放（cloud.position.Y*(H/600) 语义近似为 y 带），远景(scale<1)压暗 R/G 通道。 */
   private lastCloudCamX: number | null = null;
+  /** ★BJ103-A1b（2026-09-16）：传送黑幕面云视差锚清零（Cloud.lastCameraCenter=null,
+   *  Main.cs:63518）——updateClouds 视差支（Cloud.cs:307-311 UpdateCloudParallax）对
+   *  null 锚按位移 0 处理,远距跳镜不把传送距离当云层视差位移。调用方=Game.
+   *  blackFadeCameraTeleport。 */
+  resetCloudCamAnchor(): void {
+    this.lastCloudCamX = null;
+  }
   /** 垂直视差因子与 bgTopY（DrawSurfaceBG :58743-58744）：num3 = (300−camTop)/(worldSurface×16)、
    *  bgTopY = num3×1200+1190（scAdj=0）——云三通道 Y 变换的锚（fx.surfaceY=groundLevel×16） */
   private cloudBgTop(camY: number, viewH: number): { num3: number; bgTopY: number } {

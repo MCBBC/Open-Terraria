@@ -141,82 +141,112 @@ function evalCond(head: string, vid: number): boolean | null {
   } catch { return null; }
 }
 
-/** case 体执行（花括号条件栈解释器）：
+/** case 体执行（花括号条件栈 + 逐深度链态解释器）：
  *  · 嵌套 switch(type) 递归=仅命中该 id 的嵌套组（+default 兜底）生效;
  *  · 条件块栈：useStyle/return/DefaultTo* 仅在【无任何 false 外层条件】时生效
  *    （null=不可解=乐观真）;
  *  · ★C1 复核修复（2026-09-16）else/else-if 链语义：分支闭括号后的 else 系行
  *    （多行形态=1457 全部 else 系的实测形态,单行 `} else` 形态=0）按链入栈——
  *    else 守卫 = 前序各支条件取反之合取;`else if (pred)` 守卫 = 该合取 ∧ pred。
- *    旧版对多行形态整行忽略 → else 体被【无条件采用】（前支守卫被忽略,else 体
- *    一带 useStyle 即产假真值;实测六区 5 else 体均不带 useStyle 故真值零漂,
- *    形态/语义双哨兵防 Item.cs 刷新回潮）。链态经栈帧 saved 随嵌套构造存取,
- *    嵌套 if/else 不污染外链;else 头取消懒恢复=链延续,其余行应用=构念终结。
+ *    旧版对多行形态整行忽略 → else 体被【无条件采用】。
+ *  · ★F4 定谳修复（2026-09-16 红蓝2,探针实证 divergent）：旧版链态=单变量 chain
+ *    +栈帧 saved 懒恢复——嵌套构念的内层 else 帧无 saved→外层构念链被内链覆盖
+ *    且永不恢复;外层 else 头又取消懒恢复→从陈旧内链求守卫（null=乐观真）→嵌套
+ *    混合 `if A{if B{X}else{Y}}else{Z}` 守卫错（探针: vid=50 解释器=9,C#=5）。
+ *    红队处方「pendingRestore 存入 else 帧 saved」经模拟不充分（多层闭括号同拍
+ *    pop 串灭该 saved;无括号 else 支体不入栈=父 else 仍读陈旧链）,按 C# 语义
+ *    落刀=【逐深度链态 chainAt[d]】：d 层 else 系头读 chainAt[d]（=同层前一兄弟
+ *    头写入的链态;else 必紧跟其构念闭括号,层间无同层头可改写）;嵌套构念头写
+ *    chainAt[d+1] 天然不污染外层——链变量/saved/懒恢复整套机械删除。
+ *  · 无括号支体（C# 单语句体;1457 六区实测=0,防御形态回潮）：行首 if/else 头
+ *    的守卫经 pendingHead 直施于紧随单条语句（singleOk,false=阻断/null=乐观真）;
+ *    同行 `if (…) {` 形态同防（`{` 在位即入栈,谓词先剥尾括号再求值）。
+ *    ★BJ112-c（2026-09-17）：无括号体首语句=嵌套 if（`if (A) if (B) X;`）时,内层
+ *    构念头叠加外层守卫（A∧B）且悬空 else 归最近未配对 if（内层 else=A∧¬B）——
+ *    旧版外层守卫被内层 if 头覆写丢弃;Item.cs 全文件普查该形态=0,纯防御。
  *  · return=true 终止整个方法（同受条件栈门控）。 */
 function execCaseBody(vid: number, start: number, end: number, capture: (v: number) => void,
   lines: readonly string[] = LINES): boolean {
   let depth = 0;
   let pendingHead: boolean | null | undefined = undefined;   // 已求值待入栈的分支头
-  let pendingFromElse = false;                               // 头来自 else 系（链态已在头行更新）
-  type ChainState = { accum: boolean | null; lastCond: boolean | null } | undefined;
-  const stack: Array<{ depth: number; pred: boolean | null; saved?: { state: ChainState } }> = [];
-  let chain: ChainState = undefined;      // 活跃 if/else-if 链：accum=已闭支取反之合取,lastCond=最近闭支自身条件
-  let pendingRestore: ChainState = undefined;
-  let hasRestore = false;
+  type ChainState = { accum: boolean | null; lastCond: boolean | null };
+  const stack: Array<{ depth: number; pred: boolean | null }> = [];
+  const chainAt: Array<ChainState | undefined> = [];   // 逐深度活跃 if/else-if/else 链态（下标=头行所在深度）
   const and3 = (a: boolean | null, b: boolean | null): boolean | null =>
     (a === false || b === false) ? false : (a === null || b === null) ? null : true;
   const not3 = (p: boolean | null): boolean | null => (p === null ? null : !p);
   const closeBrace = (): void => {
     depth--;
-    while (stack.length && stack[stack.length - 1].depth > depth) {
-      const f = stack.pop()!;
-      if (f.saved) { pendingRestore = f.saved.state; hasRestore = true; }   // 懒恢复:else 跟上则取消
-    }
+    while (stack.length && stack[stack.length - 1].depth > depth) stack.pop();
   };
   const openBlock = (): void => {
     depth++;
     if (pendingHead !== undefined) {
-      if (pendingFromElse) stack.push({ depth, pred: pendingHead });
-      else { stack.push({ depth, pred: pendingHead, saved: { state: chain } }); chain = { accum: true, lastCond: pendingHead }; }
-      pendingHead = undefined; pendingFromElse = false;
+      stack.push({ depth, pred: pendingHead });
+      pendingHead = undefined;
     }
   };
   const taken = (): boolean => !stack.some((f) => f.pred === false);   // 任一 false=块未采用
+  /** 单条语句守卫（无括号支体）：pendingHead 在位（行首 if/else 头未被 `{` 消费）
+   *  时直施于本语句——false=阻断,null=乐观真放行;消费后清除（后续语句出支体）。 */
+  const singleOk = (): boolean => {
+    if (pendingHead !== undefined) {
+      const g = pendingHead;
+      pendingHead = undefined;
+      if (g === false) return false;
+    }
+    return taken();
+  };
   for (let k = start; k <= end; k++) {
     let s = lines[k].trim();
-    if (!s) continue;
+    if (!s || s.startsWith('//')) continue;              // 空行/注释不消费链态（防注释行插入形态）
     // 单行形态 `} else …`：行首 `}` 先闭前支,余下按 else 头处理（1457 实测=0,防御形态回潮）
     if (s.startsWith('}') && /^}\s*else/.test(s)) { closeBrace(); s = s.replace(/^}/, '').trim(); }
     const mElseIf = s.match(/^else\s+if\s*\(/);
     const isElseHead = !!mElseIf || s === 'else' || /^else\s*\{/.test(s);
     if (isElseHead) {
-      hasRestore = false; pendingRestore = undefined;      // else 跟上=链延续,取消懒恢复
-      const prev = chain ?? { accum: null, lastCond: null };   // 孤立 else（无前支）=前链不可解→乐观真
+      const prev = chainAt[depth] ?? { accum: null, lastCond: null };   // 孤立 else（本层无前支）=前链不可解→乐观真
       const accum = and3(prev.accum, not3(prev.lastCond));
       const hadBrace = /\{\s*$/.test(s);                   // 单行形态尾 `{`（else { / else if (…) {）
       if (mElseIf) {
         const cond = evalCond(s.replace(/\{\s*$/, '').replace(/^else\s+if/, 'if'), vid);
         pendingHead = and3(accum, cond);
-        chain = { accum, lastCond: cond };
+        chainAt[depth] = { accum, lastCond: cond };
       } else {
         pendingHead = accum;                               // else 守卫=前序全取反之合取
-        chain = { accum, lastCond: null };                 // else 终结链
+        chainAt[depth] = { accum, lastCond: null };        // else 终结链
       }
-      pendingFromElse = true;
       if (hadBrace) openBlock();
       continue;
     }
-    if (hasRestore) { chain = pendingRestore; hasRestore = false; }   // 非 else 行=最近构念已终结
     if (s === '{') { openBlock(); continue; }
     if (s === '}') { closeBrace(); continue; }
     if (/^if\s*\(/.test(s)) {
-      pendingHead = evalCond(s, vid);
-      pendingFromElse = false;
+      const hadBrace = /\{\s*$/.test(s);                   // 同行 `{` 形态（1457 六区=0,防御）
+      const head = hadBrace ? s.replace(/\{\s*$/, '').trim() : s;
+      const cond = evalCond(head, vid);
+      const outer = pendingHead;
+      if (outer !== undefined) {
+        // ★BJ112-c（2026-09-17）无括号 if 体首语句=嵌套 if（`if (A) if (B) X;`）：
+        //  内层构念头是外层的单语句体——外层守卫不得被覆写丢弃（旧版 pendingHead
+        //  直接覆盖=X 仅受内层 B 门,A 假仍误采/null 乐观真放大误采面）。合成 A∧B
+        //  作内层体守卫（singleOk 单语句路与 hadBrace 入栈路同源）;chainAt 记
+        //  {accum:A, lastCond:B} 使悬空 else 归最近未配对 if（C# 语义）=内层 else
+        //  守卫 A∧¬B。边界：三层连环悬空 else（`if A if B if C X; else Y; else Z;`
+        //  的 Z 守卫）本式不保——Item.cs 全文件普查=0（2026-09-17 定谳）,哨兵钉
+        //  两支构造防回潮。
+        pendingHead = and3(outer, cond);
+        chainAt[depth] = { accum: outer, lastCond: cond };
+      } else {
+        pendingHead = cond;
+        chainAt[depth] = { accum: true, lastCond: cond };   // 新构念=重置本层链态
+      }
+      if (hadBrace) openBlock();
       continue;
     }
     // 嵌套 switch(type)：仅执行该 id 命中的嵌套组（+default 兜底），整块跳出
     if (/^\t*switch \(type\)\s*$/.test(lines[k])) {
-      if (taken()) {
+      if (singleOk()) {
         const { cases, bodyEnd } = switchCases(start, end, k, lines);
         const hit = cases.filter((c) => c.ids.includes(vid));
         const grp = hit.length ? hit : cases.filter((c) => c.ids.includes(-1));
@@ -234,14 +264,14 @@ function execCaseBody(vid: number, start: number, end: number, capture: (v: numb
     }
     const um = s.match(/^useStyle = (\d+);$/);
     if (um) {
-      if (taken()) capture(+um[1]);
+      if (singleOk()) capture(+um[1]);
       continue;
     }
-    if (/^return/.test(s)) { if (taken()) return true; continue; }
+    if (/^return/.test(s)) { if (singleOk()) return true; continue; }
     if (s === 'break;') continue;
     const hm = s.match(/^(DefaultTo\w+)\(/);
     if (hm) {
-      if (taken()) {
+      if (singleOk()) {
         // DefaultToFood 的 useStyle 条件于 useGulpSound 实参（Item.cs:48554-48561）
         if (hm[1] === 'DefaultToFood') capture(/useGulpSound:\s*true/.test(s) ? 9 : 2);
         else {
@@ -251,7 +281,8 @@ function execCaseBody(vid: number, start: number, end: number, capture: (v: numb
       }
       continue;
     }
-    // 其余赋值/调用：不影响条件栈
+    // 其余赋值/调用：不影响条件栈;作为未加括号支体语句时消费行首守卫（单语句体）
+    singleOk();
   }
   return false;
 }
@@ -709,8 +740,8 @@ describe('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
     }
     expect(singleLine, '单行 `} else` 形态（1457 Item.cs=0;出现即扩解释器+重走全量对拍）').toBe(0);
     expect(elseIf, 'else if 头（1457 六区=0;出现即走真值全量对拍）').toBe(0);
-    expect(noBrace, 'bare else 未后随 `{`（无括号 else 体=解释器不支持形态）').toBe(0);
-    expect(notAfterClose, 'bare else 前非空行非闭括号（注释插入 } 与 else 之间=链态恢复形态,解释器未支持）').toBe(0);
+    expect(noBrace, 'bare else 未后随 `{`（无括号 else 体;F4 后解释器已防御支持,出现仍须重走真值全量对拍）').toBe(0);
+    expect(notAfterClose, 'bare else 前非空行非闭括号（注释插入 } 与 else 之间;F4 逐深度链态已支持,出现仍须重走全量对拍）').toBe(0);
     expect(bare, `六区 bare else 总数漂移: ${bareLines.join(',')}`).toBe(5);
   });
 
@@ -754,5 +785,181 @@ describe('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
     let v2 = 0;
     execCaseBody(1, 0, unsolvable.length - 1, (n) => { v2 = n; }, unsolvable);
     expect(v2, '不可解条件=乐观真双支皆采（null 口径延续）').toBe(7);
+  });
+});
+
+// ================= F4 嵌套 else 链态哨兵（2026-09-16 红蓝2 定谳,探针实证 divergent） =================
+// 定谳：execCaseBody 旧版（单变量 chain+栈帧 saved 懒恢复）在【嵌套混合】构造下
+// 外链态被内链覆盖且永不恢复——内层 else 分支出栈帧无 saved,外层 else 头又取消
+// 懒恢复→从陈旧内链求守卫（null=乐观真）→ C# 语义错（探针: 嵌套构造 vid=50
+// 解释器=9,C#=5;三层嵌套 3/4 cell 错）。红队处方「else 头取消懒恢复时把
+// pendingRestore 存入所推帧 saved」经模拟不充分（多层闭括号同拍 pop 串灭该
+// saved;无括号 else 支体不入栈=父 else 仍读陈旧链,vid=10 仍 9≠3）→ 按 C# 语义
+// 落刀=逐深度链态 chainAt[d]（d 层 else 系头读同层前一兄弟头写入的链态;嵌套构念
+// 头写 chainAt[d+1] 天然不污染外层）。修复后全量对拍 6280 vid DIFF=0（六区 5 else
+// 体均不带 useStyle 且全扁平,真值面零漂）。本三哨兵钉死三类构造的 C# 真值:
+//  · 构造① 嵌套混合（全括号） `if A{if B{X}else{Y}}else{Z}`
+//  · 构造② 内层无括号     `if A{if B{X}else Y}else{Z}`
+//  · 构造③ 三层嵌套       `if A{if B{if C{X}else{Y}}else{W}}else{Z}`
+// C# 语义（标准语言语义,else 绑定最近未配对 if）: A 假→末 else;A 真入体内,
+// B/C 同理逐层。vid=10 锚=判决 prescribed 值（A 假→9）。
+describe('F4 嵌套 else 链态哨兵（红蓝2 定谳封口）', () => {
+  const run = (vid: number, body: readonly string[]): number => {
+    let v = 0;
+    execCaseBody(vid, 0, body.length - 1, (n) => { v = n; }, body);
+    return v;
+  };
+  const L3 = (indent: number, s: string): string => `${'\t'.repeat(indent)}${s}`;
+
+  it('构造① 嵌套混合（全括号）: vid=10→9 / 25→5 / 30→3 —— 外层 else 守卫须取外层前支之反（陈旧内链即红）', () => {
+    // A=`type >= 20`, B=`type == 30`; X=3(A∧B) Y=5(A∧¬B) Z=9(¬A)
+    const body: string[] = [
+      L3(3, 'if (type >= 20)'),
+      L3(3, '{'),
+      L3(4, 'if (type == 30)'),
+      L3(4, '{'),
+      L3(5, 'useStyle = 3;'),
+      L3(4, '}'),
+      L3(4, 'else'),
+      L3(4, '{'),
+      L3(5, 'useStyle = 5;'),
+      L3(4, '}'),
+      L3(3, '}'),
+      L3(3, 'else'),
+      L3(3, '{'),
+      L3(4, 'useStyle = 9;'),
+      L3(3, '}'),
+    ];
+    expect(run(10, body), '¬A 支:外层 else 守卫=外层前支取反（旧版读陈旧内链→乐观真/假阴错支）').toBe(9);
+    expect(run(25, body), 'A∧¬B 支:内层 else 命中后,外层 else 体不得再采用（旧版乐观真误采=9）').toBe(5);
+    expect(run(30, body), 'A∧B 支:两层 if 全真,else 系全不采用').toBe(3);
+  });
+
+  it('构造② 内层无括号 else 体 `if A{if B{X}else Y}else{Z}`: 单语句守卫须施于无括号支体（守卫被弃即红）', () => {
+    // 同①条件;Y 无括号单语句——旧版 pendingHead 无 `{` 消费=守卫整弃（Y 无条件采用）
+    const body: string[] = [
+      L3(3, 'if (type >= 20)'),
+      L3(3, '{'),
+      L3(4, 'if (type == 30)'),
+      L3(4, '{'),
+      L3(5, 'useStyle = 3;'),
+      L3(4, '}'),
+      L3(4, 'else'),
+      L3(5, 'useStyle = 5;'),
+      L3(3, '}'),
+      L3(3, 'else'),
+      L3(3, '{'),
+      L3(4, 'useStyle = 9;'),
+      L3(3, '}'),
+    ];
+    expect(run(10, body), '¬A 支:外层 else 守卫不受无括号内层影响').toBe(9);
+    expect(run(25, body), 'A∧¬B 支:无括号 else 体守卫=¬B∧外层栈（旧版守卫被弃仍误采,外层误采=9）').toBe(5);
+    expect(run(30, body), 'A∧B 支:无括号 else 体不得采用（旧版=5）').toBe(3);
+  });
+
+  it('构造③ 三层嵌套 `if A{if B{if C{X}else{Y}}else{W}}else{Z}`: 逐层 else 各取本层前支之反（错层读链即红）', () => {
+    // A=`type >= 20`, B=`type >= 30`, C=`type >= 40`（区间条件使四支两两可达）; X=3 Y=4 W=7 Z=9
+    const body: string[] = [
+      L3(3, 'if (type >= 20)'),
+      L3(3, '{'),
+      L3(4, 'if (type >= 30)'),
+      L3(4, '{'),
+      L3(5, 'if (type >= 40)'),
+      L3(5, '{'),
+      L3(6, 'useStyle = 3;'),
+      L3(5, '}'),
+      L3(5, 'else'),
+      L3(5, '{'),
+      L3(6, 'useStyle = 4;'),
+      L3(5, '}'),
+      L3(4, '}'),
+      L3(4, 'else'),
+      L3(4, '{'),
+      L3(5, 'useStyle = 7;'),
+      L3(4, '}'),
+      L3(3, '}'),
+      L3(3, 'else'),
+      L3(3, '{'),
+      L3(4, 'useStyle = 9;'),
+      L3(3, '}'),
+    ];
+    expect(run(10, body), '¬A 支:最外层 else（旧版错支=9 侥幸同值,错层读链时 25/35 层爆红）').toBe(9);
+    expect(run(25, body), 'A∧¬B 支:中层 else=W（旧版内链上浮→乐观真误采 Z=9）').toBe(7);
+    expect(run(35, body), 'A∧B∧¬C 支:内层 else=Y（旧版=9）').toBe(4);
+    expect(run(45, body), 'A∧B∧C 支:三层 if 全真').toBe(3);
+  });
+});
+
+// ================= BJ112-c 无括号 if 体嵌套 if 哨兵（2026-09-17 登记遗留清偿） =================
+// 普查定谳（2026-09-17 python 全文件扫描）：Terarria1457/Terraria/Item.cs 全文
+// 「无括号 if 体首语句=嵌套 if」形态计数=0——多行（if 头行的下一非空非注释行仍是
+// if 头）=0、单行 `if(…) if(…)`=0、六区 SetDefaults1..5+SetFoodDefaults 各=0。
+// ⇒ 解释器合成修复纯防御（真值面零漂,全量对拍不受扰）;本 describe 三哨兵钉死：
+//   · 形态哨兵：六区两形态计数钉 0（Item.cs 刷新引入该形态即红→重走对拍）
+//   · 构造④ `if (A) if (B) X;`：X 仅 A∧B 支采用（旧版 pendingHead 被内层 if 头
+//     覆写=外层守卫整弃,¬A∧B 支误采即红）
+//   · 构造⑤ `if (A) if (B) X; else Y;`：悬空 else 归最近未配对 if（C# 语义）——
+//     Y 取 A∧¬B（旧版 else 读内层链态=仅 ¬B,¬A 支误采即红）
+describe('BJ112-c 无括号 if 体嵌套 if 哨兵（C# 单语句体语义封口）', () => {
+  const run = (vid: number, body: readonly string[]): number => {
+    let v = 0;
+    execCaseBody(vid, 0, body.length - 1, (n) => { v = n; }, body);
+    return v;
+  };
+  const L3 = (indent: number, s: string): string => `${'\t'.repeat(indent)}${s}`;
+
+  it('形态哨兵：六区「无括号 if 体首语句=嵌套 if」两形态计数=0（回潮即红→重走提取审计）', () => {
+    const headRe = /^\s*(\}\s*)?(else\s+)?if\s*\(/;
+    const isIfHead = (s: string): boolean => {
+      if (!headRe.test(s)) return false;
+      if (/\{\s*$/.test(s)) return false;                  // 行尾 `{`=括号体,非本形态
+      return s.trimEnd().endsWith(')');                    // ) 后不得有单行体语句
+    };
+    let multi = 0, single = 0;
+    const hits: string[] = [];
+    for (const [name, [from, to]] of REGIONS) {
+      for (let k = from + 1; k <= to; k++) {
+        const t = LINES[k].trim();
+        if (/\)\s*if\s*\(/.test(t) && !t.includes('{') && headRe.test(t)) {   // 单行 if(..) if(..)
+          single++; hits.push(`${name}:${k + 1} 单行 ${t}`);
+        }
+        if (isIfHead(LINES[k]) && !t.startsWith('}')) {
+          let j = k + 1;
+          while (j <= to) {
+            const nx = LINES[j].trim();
+            if (!nx || nx.startsWith('//')) { j++; continue; }
+            if (isIfHead(LINES[j])) { multi++; hits.push(`${name}:${k + 1}→${j + 1} 多行嵌套`); }
+            break;
+          }
+        }
+      }
+    }
+    expect(single, `单行 if(…) if(…) 形态回潮: ${hits.join(' | ')}`).toBe(0);
+    expect(multi, `无括号 if 体首语句=嵌套 if 形态回潮: ${hits.join(' | ')}`).toBe(0);
+  });
+
+  it('构造④ `if (A) if (B) X;`：X 仅 A∧B 支采用（¬A∧B 支误采=外层守卫被覆写丢弃=红）', () => {
+    // A=`type < 20`, B=`type >= 10`——A 假 ∧ B 真的 vid 必须存在（判别子）
+    const body: string[] = [
+      L3(3, 'if (type < 20)'),
+      L3(4, 'if (type >= 10)'),
+      L3(5, 'useStyle = 3;'),
+    ];
+    expect(run(10, body), 'A∧B 支:两层全真,X 采用').toBe(3);
+    expect(run(5, body), 'A∧¬B 支:外层真内层假,X 不得采用').toBe(0);
+    expect(run(25, body), '¬A∧B 支:X 不得采用（★判别:旧版覆写后仅看 B=true→误采 3=红）').toBe(0);
+  });
+
+  it('构造⑤ `if (A) if (B) X; else Y;`：悬空 else 归最近未配对 if（C#）——Y 取 A∧¬B', () => {
+    const body: string[] = [
+      L3(3, 'if (type >= 20)'),
+      L3(4, 'if (type == 30)'),
+      L3(5, 'useStyle = 3;'),
+      L3(4, 'else'),
+      L3(5, 'useStyle = 5;'),
+    ];
+    expect(run(30, body), 'A∧B 支:X=3,else 不采用').toBe(3);
+    expect(run(25, body), 'A∧¬B 支:悬空 else 归内层 if(B),Y=5').toBe(5);
+    expect(run(10, body), '¬A 支:整个内层构念不执行（★判别:旧版 else 仅读内层链态 ¬B→误采 5=红）').toBe(0);
   });
 });

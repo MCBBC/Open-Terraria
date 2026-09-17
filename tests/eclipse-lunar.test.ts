@@ -632,14 +632,13 @@ describe('逐塔出怪表结构（NPC.cs:1204-1289）', () => {
     expect(TOWER_KEY[493]).toBe('stardust');
   });
 
-  it('newLunarEventState 初始态', () => {
+  it('newLunarEventState 初始态（★BJ109-D：crystalDeath 伪影支已拆）', () => {
     expect(newLunarEventState()).toEqual({
       active: false,
       towerActive: { solar: false, vortex: false, nebula: false, stardust: false },
       shield: { solar: 0, vortex: 0, nebula: 0, stardust: 0 },
       moonLordCountdown: 0,
       moonLordCountdownMax: 0,
-      crystalDeath: null,   // ★批III尾窗：天柱死亡水晶屏效（运行时不进存档）
     });
   });
 });

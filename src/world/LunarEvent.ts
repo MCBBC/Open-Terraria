@@ -62,9 +62,11 @@ export interface LunarEventState {
   /** NPC.MoonLordCountdown / MaxMoonLordCountdown（不进存档；0=无倒计时） */
   moonLordCountdown: number;
   moonLordCountdownMax: number;
-  /** ★批 III 尾窗：天柱死亡水晶屏效（Projectile.cs:37019-37075 三相序；不进存档）。
-   *  t=已进行 tick（480 = 120+300+60 归零灭），x/y=死亡塔水晶中心（vortex uTargetPosition） */
-  crystalDeath: { t: number; x: number; y: number } | null;
+  // ★BJ109-D（2026-09-16）拆除项：旧「crystalDeath 天柱死亡水晶屏效」整支已删。
+  //   定谳=其锚 Projectile.cs:37019-37075 实为 aiStyle 132 = 弹 672（DD2 败北水晶
+  //   CrystalDestructionVortex/Color 屏效），与天柱死亡链无关——原版塔死
+  //   （NPC.cs:80125-80146）只写 downedTower_*/TowerActive_* + Update/Message
+  //   LunarApocalypse，无弹体无滤镜。
 }
 
 export function newLunarEventState(): LunarEventState {
@@ -74,7 +76,6 @@ export function newLunarEventState(): LunarEventState {
     shield: { solar: 0, vortex: 0, nebula: 0, stardust: 0 },
     moonLordCountdown: 0,
     moonLordCountdownMax: 0,
-    crystalDeath: null,
   };
 }
 
@@ -113,7 +114,6 @@ export function applyLunarSave(w: World): void {
   }
   s.moonLordCountdown = 0;
   s.moonLordCountdownMax = 0;
-  s.crystalDeath = null;
 }
 
 /** 区域 x1..x2 / y1..y2 是否全非实心（Collision.SolidTiles 近似——本仓无视 slope） */
@@ -244,15 +244,13 @@ export function startImpendingDoom(w: World, countdownTime: number, host: LunarH
 
 /** 塔真死（NPC.cs:80122-80146）：downedTower_X=true、TowerActive_X=false、
  *  UpdateLunarApocalypse + MessageLunarApocalypse（顺序 1:1——Update 可能触发 doom 关事件，
- *  随后的 Message 因 active=false 不播）。★at=死亡塔中心 → 水晶死亡屏效三相序
- *  （Projectile.cs:37019 塔死时起 crystal 弹序列——本仓无该弹体,状态直接挂 here） */
-export function onTowerKilled(w: World, towerId: number, has: (id: number) => boolean, host: LunarHost,
-  at?: { x: number; y: number }): void {
+ *  随后的 Message 因 active=false 不播）。★BJ109-D：旧 at=死亡塔中心 → crystalDeath
+ *  屏效参数已整支拆除（该屏效锚实为 DD2 弹 672 aiStyle 132，与塔死链无关）。 */
+export function onTowerKilled(w: World, towerId: number, has: (id: number) => boolean, host: LunarHost): void {
   const key = TOWER_KEY[towerId];
   if (!key) return;
   w.flags[`downedTower${TOWER_CAP[key]}`] = true;
   w.lunarEvent.towerActive[key] = false;
-  if (at) startCrystalDeath(w, at);
   persist(w);
   updateLunarApocalypse(w, has, host);
   messageLunarApocalypse(w, host);
@@ -297,7 +295,7 @@ export function onTowerBoltHit(w: World, towerId: number): { flash: boolean; shi
   return { flash: before !== 0, shieldZero: s.shield[key] === 0 };
 }
 
-/** SceneMetrics.NPCEventZoneRadius（SceneMetrics.cs:31）= 250 格 */
+/** SceneMetrics.NPCEventZoneRadius（SceneMetrics.cs:130）= 4000px（=250 格） */
 export const TOWER_ZONE_RADIUS = 4000;
 
 /** 月总倒计时递减（Main.cs:64452-64459）：>0 每 tick -1，归零由调用方召 398。
@@ -309,17 +307,10 @@ export function tickMoonLordCountdown(w: World): boolean {
   return s.moonLordCountdown <= 0;
 }
 
-/** ★批 III 尾窗：天柱死亡水晶屏效三相序（Projectile.cs:37019-37075）：
- *  相0（0-120t）Color/Vortex 强度=min(1,t/120)；相1（120-420）恒 1；相2（420-480）
- *  Vortex.UseProgress=(t-420)/60×30、Color I=1、Vortex I=2；480t 归零（:37068-37074
- *  Deactivate+Kill）。at = 死亡塔水晶中心（UseTargetPosition base.Center）。 */
-export const CRYSTAL_DEATH_TICKS = 480;
-export function startCrystalDeath(w: World, at: { x: number; y: number }): void {
-  w.lunarEvent.crystalDeath = { t: 0, x: at.x, y: at.y };
-}
-export function tickCrystalDeath(w: World): void {
-  const cd = w.lunarEvent.crystalDeath;
-  if (!cd) return;
-  cd.t++;
-  if (cd.t >= CRYSTAL_DEATH_TICKS) w.lunarEvent.crystalDeath = null;
+/** 月总（398）死 → 关事件（NPC.cs:80213-80216 case 398：SetEventFlagCleared(
+ *  downedMoonlord,10) + LunarApocalypseIsUp=false——downed_398 旗由 Game 击杀链
+ *  通用置位处写，此处只承接 IsUp=false；persist 同步 flags 落档）。 */
+export function clearLunarApocalypse(w: World): void {
+  w.lunarEvent.active = false;
+  persist(w);
 }

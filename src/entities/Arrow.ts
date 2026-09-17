@@ -5426,6 +5426,16 @@ export class Arrow extends Entity {
         if (this.alpha > 0) this.alpha -= 15;
         if (this.alpha < 0) this.alpha = 0;
       }
+    } else if (this.projId === 575) {
+      // ---- ★BJ109-B（2026-09-16）：星云兽蓄能球 575 AI 侧点光——aiStyle 107
+      //  type==575 支 Lighting.AddLight(Center, 0.5, 0.1, 0.3)（P.cs:34200，AI 每
+      //  拍无条件直发；★vanilla ProjLight()（P.cs:16246-17140 全表）不含 575，
+      //  四柱系弹的光照全部散在 AI 侧——本支是其中唯一漏接的世界光面）。
+      //  本仓通用光路（Game.ts ProjLight 转写段）按数据 light 列驱动，575 无
+      //  light 行 → 走实体自报通道 lightRGB（94/1114 同款先例），Game 侧 projectile
+      //  桶结算（实体 lightRGB 存在即跳过通用表，防双重注入）。AI 另面（α 255 起
+      //  −25/子步渐显 + 实心盒钳 128 + 4 帧/5t 动画，:34181-34199）不在本刀，登记。
+      this.lightRGB = [0.5, 0.1, 0.3];
     } else if (this.projId === 968) {
       // ---- ★2026-09-01 批四（T2/H7）：968 渐显——AI() aiStyle2 顶层 type 段
       //  （Projectile.cs:23413-23431）：alpha = Math.Max(0, alpha − 50) 每拍

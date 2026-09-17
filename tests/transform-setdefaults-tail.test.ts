@@ -26,6 +26,7 @@ import { Enemy } from '../src/entities/Enemy';
 import {
   bindScaleStatsWorld, scaleStatsWorldOf, GDL, f32,
 } from '../src/stats/ScaleStats';
+import { NPC_DONT_COUNT_ME_1457, radarCountsEnemy } from '../src/stats/InfoAccs';
 
 beforeEach(() => { bindScaleStatsWorld(scaleStatsWorldOf(new World(100, 100, 7, 't'), () => false)); });
 afterEach(() => { bindScaleStatsWorld(null); });
@@ -331,5 +332,162 @@ describe('BJ101 结构锁：Transform 链 = fromVanilla 单源复用', () => {
     const fv = bodyOf('static fromVanilla(');
     expect(fv).toContain('seedTailBox(v.width, v.height, vScale, seedS.scale, seedBox)');
     expect(fv).not.toContain('Math.trunc(f32(Math.trunc(f32(v.width');
+  });
+});
+
+// ===========================================================================
+// 7. ★BJ101 尾刀（2026-09-16）：SetDefaults 其余复位面——spawnAlpha/alphaFade、
+//    colorRGBA、TargetClosest(:81926)、dontCountMe(:8472 隐式跟随)。
+//    原版锚：Transform → SetDefaults(newType)（:81921）全链重跑（1458 byte-diff
+//    全等 :8449-8475/:81909-81970/:52797-52820）。
+//      - alpha：:8553 alpha=0 → per-type 终值（13 :8949 / 14 :8969 / 15 :8989 =255）；
+//        AI_006 尾段 :52797-52819 渐显门（位移>2px -42/t + 尘 14 ×2/t）按 alphaFade 重启
+//      - color：:8554 color=default → per-type（1/16/537 :8611/:9003/:15897，三型色
+//        已在 vanilla-npcs.json（v.color → initSetDefaultsAlphaColor）且 recon-npc
+//        闸门已扩 color 对账面（★BJ106 债刀 2026-09-17 清偿"无闸裸奔"债）；
+//        净Id变体 -3/-4/-7 的 color 由 AI 直写）
+//      - TargetClosest：:81926 变身即重索敌（单人单候选退化；联机 1 拍窗）
+//      - dontCountMe：:8472 复位 → per-type；本仓=静态表按当前 vanillaId 求值隐式跟随
+// ===========================================================================
+describe('BJ101 尾刀：alpha 复位（变身重渐显，EoW 晋升实害正主）', () => {
+  it('spawn 侧前置锚（helper 单源重构不漂移出生面）：13/14 出生态 255+alphaFade', () => {
+    worldOf(0);
+    const head = Enemy.fromVanilla(13, 0, 0)!;
+    const body = Enemy.fromVanilla(14, 0, 0)!;
+    expect(head.spawnAlpha).toBe(255);
+    expect(head.alphaFade).toBe(true);
+    expect(body.spawnAlpha).toBe(255);
+    expect(body.alphaFade).toBe(true);
+    // 静态 alpha 族（非 255）不置 alphaFade：史莱姆 1=175、毁灭者 134=255 但 AI_037 接管
+    const slime = Enemy.fromVanilla(1, 0, 0)!;
+    expect(slime.spawnAlpha).toBe(175);
+    expect(slime.alphaFade).toBe(false);
+    const dest = Enemy.fromVanilla(134, 0, 0)!;
+    expect(dest.spawnAlpha).toBe(255);
+    expect(dest.alphaFade).toBe(false);
+  });
+
+  it('渐显已完成的身段 14 晋升 13：spawnAlpha 0→255 + alphaFade 复位（SetDefaults(13) :8949）', () => {
+    const w = worldOf(0);
+    const body = Enemy.fromVanilla(14, 0, 0)!;
+    body.spawnAlpha = 0;               // 模拟出生渐显已完成（-42/t ×6 拍耗尽）
+    body.alphaFade = false;            // （AI_006 尾段 :52815-52818 归零即清旗）
+    transform(body, 13, w.store);
+    expect(body.spawnAlpha).toBe(255); // 旧实现残留 0 → 晋升头恒可见、尘 14 死链
+    expect(body.alphaFade).toBe(true); // 渐显段 alphaFade 门重启（-42/t + 尘 14 ×2/t）
+  });
+
+  it('渐显已完成的身段 14 收尾 15：同走 255 重渐显（SetDefaults(15) :8989）', () => {
+    const w = worldOf(0);
+    const body = Enemy.fromVanilla(14, 0, 0)!;
+    body.spawnAlpha = 0;
+    body.alphaFade = false;
+    transform(body, 15, w.store);
+    expect(body.spawnAlpha).toBe(255);
+    expect(body.alphaFade).toBe(true);
+  });
+
+  it('渐显中变身=重启非续传：残 200 晋升 → 255（续传伪值 158 变异爆红）', () => {
+    const w = worldOf(0);
+    const body = Enemy.fromVanilla(14, 0, 0)!;
+    body.spawnAlpha = 200;             // 渐显中（255-42×1≈213 拍内近似残值）
+    transform(body, 13, w.store);
+    expect(body.spawnAlpha).toBe(255); // 原版 SetDefaults 重置 alpha=255 → 从头渐显
+  });
+
+  it('静态 alpha 残迹随型重置：stale 120 → 196 宁芙 per-type 0（alphaFade 归零）', () => {
+    const w = worldOf(0);
+    const girl = Enemy.fromVanilla(195, 0, 0)!;
+    girl.spawnAlpha = 120;             // 合成残迹（当前移植链无源 alpha>0 实例,判别 helper 求值面）
+    girl.alphaFade = true;
+    transform(girl, 196, w.store);
+    expect(girl.spawnAlpha).toBe(0);   // NPC_STATIC_ALPHA[196] ?? v.alpha ?? 0
+    expect(girl.alphaFade).toBe(false);
+  });
+});
+
+describe('BJ101 尾刀：colorRGBA 复位（:8554 color=default → per-type）', () => {
+  it('净Id变体史莱姆（AI 直写色）微光化 676：残色归 null（旧实现残色二次绘制）', () => {
+    const w = worldOf(0);
+    const slime = Enemy.fromVanilla(1, 0, 0)!;
+    slime.colorRGBA = [250, 30, 90, 90];   // 模拟 -4 金史莱姆 AI 直写（Enemy.ts windyBalloonAI）
+    transform(slime, 676, w.store);        // 微光化 1→676（shimmer 表 npcTransformTo）
+    expect(slime.colorRGBA).toBeNull();    // SetDefaults(676) color=default（676 无 per-type 色）
+  });
+
+  it('colorless 源零漂移（负控）：195→196 恒 null', () => {
+    const w = worldOf(0);
+    const girl = Enemy.fromVanilla(195, 0, 0)!;
+    expect(girl.colorRGBA).toBeNull();
+    transform(girl, 196, w.store);
+    expect(girl.colorRGBA).toBeNull();
+  });
+});
+
+describe('BJ101 尾刀：TargetClosest（:81926 变身即重索敌）', () => {
+  /** 双玩家槽桩（TryTrackingTarget :78501-78505 选距字段）：near 曼哈顿距恒小于 far */
+  const mkPlayer = (x: number) => ({ x, y: 0, w: 20, h: 42, dead: false, aggro: 0 });
+
+  it('变身拍内同拍重选：旧 target=far → transform 后 targetPlayer=near', () => {
+    const w = worldOf(0);
+    const girl = Enemy.fromVanilla(195, 0, 0)!;
+    const far = mkPlayer(5000), near = mkPlayer(30);
+    const game = { candidatePlayers: () => [far, near] };
+    girl.targetPlayer = far as never;      // 变身前旧目标（历史索敌残留）
+    expect(girl.transformTo(196, w.store, false, game as never)).toBe(true);
+    expect(girl.targetPlayer).toBe(near);  // :81926 旧实现沿用 far 一拍（下拍才刷新）
+  });
+
+  it('无 game 桩（既有调用面）零回归：targetPlayer 粘性保留,下拍头 targetClosest 承接', () => {
+    const w = worldOf(0);
+    const girl = Enemy.fromVanilla(195, 0, 0)!;
+    const stale = mkPlayer(5000);
+    girl.targetPlayer = stale as never;
+    transform(girl, 196, w.store);
+    expect(girl.targetPlayer).toBe(stale as never);
+  });
+});
+
+describe('BJ101 尾刀：dontCountMe（:8472 复位）=静态表按当前 vanillaId 隐式跟随（登记判据行为锁）', () => {
+  it('14(表内,雷达不计) → 13(表外,计入) / → 15(仍在表,不计)', () => {
+    const w = worldOf(0);
+    expect(NPC_DONT_COUNT_ME_1457.has(14)).toBe(true);
+    expect(NPC_DONT_COUNT_ME_1457.has(13)).toBe(false);
+    expect(NPC_DONT_COUNT_ME_1457.has(15)).toBe(true);
+    const body = Enemy.fromVanilla(14, 0, 0)!;
+    expect(radarCountsEnemy(body)).toBe(false);   // 段族不入雷达（Main.cs:47813 !dontCountMe 门）
+    transform(body, 13, w.store);                 // 晋升头：vanilla dontCountMe=false（:8472）
+    expect(radarCountsEnemy(body)).toBe(true);    // 表求值随 vanillaId 13 出表=计入（隐式复位）
+    const body2 = Enemy.fromVanilla(14, 0, 0)!;
+    transform(body2, 15, w.store);
+    expect(radarCountsEnemy(body2)).toBe(false);  // 收尾：15 在表=仍不计（同 vanilla per-type）
+  });
+});
+
+describe('BJ101 尾刀：结构锁（复位面单源 + :81926 接线）', () => {
+  const src = readFileSync(new URL('../src/entities/Enemy.ts', import.meta.url), 'utf8');
+  const bodyOf = (name: string): string => {
+    const start = src.indexOf(name);
+    expect(start, `${name} 存在`).toBeGreaterThan(-1);
+    return src.slice(start, src.indexOf('\n  }\n', start) + 6);
+  };
+
+  it('tryTransformTo 复位面接线：initSetDefaultsAlphaColor + targetClosest(game)', () => {
+    const tt = bodyOf('private tryTransformTo(');
+    expect(tt).toContain('this.initSetDefaultsAlphaColor(id, v)');
+    expect(tt).toContain('if (game) this.targetClosest(game)');
+    expect(tt.indexOf('this.initSetDefaultsAlphaColor(id, v)'))
+      .toBeLessThan(tt.indexOf('if (game) this.targetClosest(game)'));
+  });
+
+  it('fromVanilla 不再内联 alpha/color 初始化（单源防双写,fx43 同族）', () => {
+    const fv = bodyOf('static fromVanilla(');
+    expect(fv).toContain('e.initSetDefaultsAlphaColor(id, v)');
+    expect(fv).not.toContain('NPC_STATIC_ALPHA[');
+    expect(fv).not.toContain('e.colorRGBA =');
+    const helper = bodyOf('private initSetDefaultsAlphaColor(');
+    expect(helper).toContain('NPC_STATIC_ALPHA[id]');
+    expect(helper).toContain('this.alphaFade = false');
+    expect(helper).toContain('v.color ?');
   });
 });

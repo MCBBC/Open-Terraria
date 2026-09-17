@@ -100,6 +100,47 @@ export class Camera {
     return false;
   }
 
+  // ★BJ103-A1b（2026-09-16）：玩家传送相机过渡滑行面（Main.SetCameraLerp :3235-3240
+  //  置位 / UpdateCameraLerp :18326-18340 计时+加速率 / 消费段 DoDraw_UpdateCameraPosition
+  //  尾 :63580-63600——消费在 60Hz 更新拍（Main.Update :62781 调 DoDraw_UpdateCameraPosition,
+  //  :17998 调 UpdateCameraLerp）,本仓同拍进 fixedUpdate,非渲染拍）。
+  /** 滑行率（vanilla cameraLerp,Player.Teleport :37747 恒传 0.1f;>0 = 过渡窗内） */
+  teleportLerp = 0;
+  private teleportLerpTimer = 0;      // cameraLerpTimer :469
+  private teleportLerpTimeToggle = 0; // cameraLerpTimeToggle :471（Style==1 地图杖族=10,其余 0）
+  /** SetCameraLerp(lerp,time)（:3235-3240）：率置位+计时清零。调用方=Game.
+   *  startCameraTransitionForPlayerTeleport 近距支。 */
+  startTeleportLerp(lerp: number, speedupDelay: number): void {
+    this.teleportLerp = lerp;
+    this.teleportLerpTimer = 0;
+    this.teleportLerpTimeToggle = speedupDelay;
+  }
+  /**
+   * 滑行推进+消费（UpdateCameraLerp :18328-18338 与消费段 :63580-63600 逐式）：
+   * ①timer++；timer≥toggle 后每 tick `lerp += ((timer−toggle)/3+1)×0.001` 钳 1（:18333）；
+   * ②到位判据（:63588-63593）`dist(prev,hard) − |player.v| < 0.25` → lerp=0 并吸合
+   *   硬位（原版该帧 screenPosition 已=硬位、lerp=0 不再插值=同拍吸合）；
+   * ③否则 prev → Lerp(prev, hard, lerp)（:63596 Vector2.Lerp）。
+   * hard = PlayerFocusedScreenPosition 等价（本仓 follow 目标锚）；过渡窗内由调用方
+   * （Game fixedUpdate 相机段）以本方法替代常驻 follow——原版相机常态硬跟随,本仓
+   * follow 是自创常驻缓动,过渡窗收编为原版语义（窗外维持 follow=仓内既有模型）。 */
+  advanceTeleportLerp(hardX: number, hardY: number, playerSpeed: number): void {
+    if (this.teleportLerp <= 0) return;
+    this.teleportLerpTimer++;
+    if (this.teleportLerpTimer >= this.teleportLerpTimeToggle) {
+      this.teleportLerp += ((this.teleportLerpTimer - this.teleportLerpTimeToggle) / 3 + 1) * 0.001;
+      if (this.teleportLerp > 1) this.teleportLerp = 1;
+    }
+    if (Math.hypot(hardX - this.x, hardY - this.y) - playerSpeed < 0.25) {
+      this.teleportLerp = 0;
+      this.x = hardX;
+      this.y = hardY;
+      return;
+    }
+    this.x += (hardX - this.x) * this.teleportLerp;
+    this.y += (hardY - this.y) * this.teleportLerp;
+  }
+
   /** CameraModifierStack（Main.instance.CameraModifiers，Terraria.Graphics.CameraModifiers
    *  1:1，2026-08-20）：punch 旧"线性衰减近似"退役——现为标准修饰器栈
    *  （PunchCameraModifier 余弦振动 × 线性包络 × 距离衰减），ApplyTo 每渲染帧一次 */

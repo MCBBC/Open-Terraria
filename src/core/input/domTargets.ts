@@ -11,7 +11,7 @@ export const DOM_UI_TARGET_SELECTOR =
   '.sw-root, .sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-chatbox,' +
   '.sw-mobile, .sw-hotbar, .sw-tooltip, .sw-drag-ghost,' +
   '.sw-ach-panel, .sw-res-panel, .sw-eqdock, .sw-vinv, .sw-summon-panel,' +
-  '.sw-npc-dialog, .sw-npc-shop, .sw-happy-panel';
+  '.sw-npc-dialog, .sw-npc-shop, .sw-happy-panel, .sw-char-panel';
   // .sw-npc-dialog/.sw-npc-shop/.sw-happy-panel = NPC 对话面板/商店浮面板(classic
   //  档)/快乐度浮层根（FX22 2026-09-14 用户实报:点对话「关闭」钮有几率开火/耗弹）。
   //  附着态点击本就靠 .sw-root 祖先命中;但这三个面板的左键处理会在【事件派发中途】
@@ -28,6 +28,14 @@ export const DOM_UI_TARGET_SELECTOR =
   // 坞上标签/缝隙点击漏成世界挥击(槽/钮本身已被 .sw-slot/.sw-btn 覆盖)
   // .sw-vinv = 原版布局全屏层(2026-09-07 刀 2):pointer-events:none 根+绝对定位子元素,
   // 不登记则列间缝隙点击穿透成世界挥剑(eqdock 同族事故)
+  // .sw-char-panel = 衣柜/理发窗(CharCreation 梳妆台更衣窗+造型师理发窗,标题屏角色
+  //  创建页同根类)(2026-09-16):附着态命中靠 .sw-root 祖先(closest),但面板内按钮类
+  //  (.sw-vbtn/.sw-cc-tab/.sw-cc-stylebtn)均不在本表 ⇒ 一旦【派发中途】同步 remove
+  //  (close() 于取/确钮 click 首行 panel.remove(),CharCreation.ts:899——与 .sw-npc-dialog
+  //  RB28/FX22 同族),detached target 的 closest('.sw-root') 落空即裸奔成世界输入。
+  //  登记面板根类=守卫与派发时序解耦(分离子树 closest 仍命中根类)。主刀=
+  //  CharCreation.css .sw-char-panel pointer-events:auto(.sw-root 继承 none 吞层,
+  //  scripts/_wardrobe-hit-test.mjs 探针定谳),本条为同族深防。
 
 /** event.target 是否落在 DOM UI 上(命中=点击归 UI,不透传为世界输入)。
  *  ★SW-FX10 债⑪：`data-sw-world-passthrough="1"` 子树豁免——热键锁开启且关包时,

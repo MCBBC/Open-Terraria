@@ -377,6 +377,11 @@ export class FlickerClock {
    *  四柱魂掉落光/夜爬虫光乘区 */
   essScale = 1;
   private essDir = -1;
+  /** Main.masterColor（Main.cs:1312 初值 1f）+ masterColorDir（:1314 初值 1）——
+   *  rare=-13 大师物品名色相脉冲时钟（★SW-清债① 2026-09-17 接活色,discoColor
+   *  同构;消费=MouseTextInner :20430-20432 (byte)(masterColor×200f)） */
+  masterColor = 1;
+  masterColorDir = 1;
   /** Main.timeForVisualEffects（Main.cs:17110 每帧 +1，钳 216000）——微光波形/瓶中物动画时钟 */
   timeForVisualEffects = 0;
   /** 水母笼动画态（Main.cs:16470-16530 jellyfishCageMode[3,25]：0 静息/1 起跳/2 高亮/3 落回
@@ -406,6 +411,14 @@ export class FlickerClock {
     this.mouseTextColor += this.mouseDir;
     if (this.mouseTextColor >= 255) this.mouseDir = -1;
     else if (this.mouseTextColor <= 190) this.mouseDir = 1;
+
+    // masterColor ping-pong（Main.cs:18408-18418 DoUpdate_AnimateCursorColors:0..1
+    // 步进 0.05/帧,>1 钳 1 反向、<0 钳 0 反向——消费 rare=-13 :20430-20432 →
+    // (byte)(masterColor×200f) ∈ {0,10,…,200};紧跟 mouseTextColor=原版函数内次序。
+    // 底部怪癖照抄：恰 0 不触 <0 门（dir 仍 −1）,下一拍 −0.05 才钳 0 反向）
+    this.masterColor += this.masterColorDir * 0.05;
+    if (this.masterColor > 1) { this.masterColor = 1; this.masterColorDir = -1; }
+    else if (this.masterColor < 0) { this.masterColor = 0; this.masterColorDir = 1; }
 
     this.demonTorch += this.demonDir * 0.01;
     if (this.demonTorch > 1) { this.demonTorch = 1; this.demonDir = -1; }

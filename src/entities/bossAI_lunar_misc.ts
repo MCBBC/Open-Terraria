@@ -1937,6 +1937,134 @@ function lai0Of(e: Enemy): number { return lunarLocalAI(e)[0]; }
 function setLai0(e: Enemy, v: number): void { lunarLocalAI(e)[0] = v; }
 
 // ---------------------------------------------------------------------------
+// ★BJ112-④ 三角分布单源（Utils.cs:1785-1788 RotatedByRandom = NextDouble×max −
+//  NextDouble×max = 对称【三角分布】，orchestraFx F6/FX24 判例同式）。本仓
+//  Enemy.towerRotSpread（塔尘族,2026-09 F6 清偿）已按此实现；415 喷火尘 /
+//  516 出膛角 / 428 分裂初速三处消费此同源（旧 uniform 掷已全部收编）。
+/** Utils.cs:1785-1788 角度源：(NextDouble − NextDouble) × maxRadians —— 对称三角
+ *  分布（密度峰在 0、±max 处为 0），非 uniform。 */
+export function rotSpreadAngle(maxRadians: number): number {
+  return (Math.random() - Math.random()) * maxRadians;
+}
+/** Vector2.UnitY.RotatedByRandom(maxRadians)（Utils.cs:1785-1788 掷角 + Vector2.
+ *  RotatedBy 矩阵 [x·c−y·s, x·s+y·c] 作用于 (0,1) → (−sin a, cos a)）。 */
+export function unitYRotatedByRandom(maxRadians: number): [number, number] {
+  const a = rotSpreadAngle(maxRadians);
+  return [-Math.sin(a), Math.cos(a)];
+}
+
+// ---------------------------------------------------------------------------
+// AI_003 火蜥蜴 415 喷火段（NPC.cs:57362-57430，ai[2] 三态：冷却>0 / 触发 ==0 /
+//   喷吐 -1..-42）。触发门 = 同向 + Center 视线；场上 516 太阳耀斑 >6 → 冷却 90。
+//   ★justHit 重置臂（:57366-57370）：受击当拍 ai[2]=120——打断喷吐（负段归正）
+//   且推迟/压制触发（冷却重排）。
+//   喷吐期每 tick vx×0.8 且 return 跳过行走链；ai[2]==-18/-26/-34 三拍各撒尘 259
+//   ×20（Center + UnitX×spriteDirection×40，UnitY 掷向×2 + 水平偏置）并在权威端
+//   NewNPC(Bottom=(Center.X+spriteDirection*45, Center.Y+8), 516)（:57420-57428）。
+//   返回 true = 本 tick 原版已 return（喷吐风停段），调用方跳过行走/跳跃/远程链。
+// ---------------------------------------------------------------------------
+export function drakomireBreathAI(e: Enemy, game: GameHooks, player: Player | null): boolean {
+  if (e.justHit) e.ai2 = 120;                     // :57366-57370 justHit 重置臂（受击打断/推迟喷火；netUpdate 位本仓无此链,Enemy.ts:1793 同案）
+  if (e.ai2 > 0) e.ai2 -= 1;
+  if (e.ai2 === 0) {
+    // 场上 516 计数（:57376-57382）>6 → 冷却 90
+    let alive516 = 0;
+    for (const o of enemies(game)) if (!o.dead && o.vanillaId === 516) alive516 += 1;
+    if (alive516 > 6) {
+      e.ai2 = 90;
+    } else if (player && !player.dead
+      && ((player.cx < e.cx && e.facing < 0) || (player.cx > e.cx && e.facing > 0))
+      && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
+      e.ai2 = -1;                                   // :57383-57387 进喷吐
+      e.facing = player.cx >= e.cx ? 1 : -1;        // TargetClosest
+    }
+    return false;                                   // 待机段不拦截行走
+  }
+  if (e.ai2 < 0 && e.ai2 > -42) {
+    e.ai2 -= 1;
+    if (e.ai2 === -42) e.ai2 = 180 + 30 * Math.floor(Math.random() * 10);   // :57401
+    e.vx *= 0.8;                                    // :57402
+    if (e.ai2 === -18 || e.ai2 === -26 || e.ai2 === -34) {
+      // 尘 259 ×20（:57403-57416）：锚 Center+UnitX×spriteDirection×40，
+      // vector18 = UnitY.RotatedByRandom(2π)（三角分布,BJ112-④）；速度 =
+      // vector18×2 + UnitX×NextFloat×spriteDirection×3（:57413）；position =
+      // vector17+vector18×4（:57412）、scale = 0.3+vector18.X×(−spriteDirection)
+      //（:57414）、fadeIn = 0.7（:57415）（BJ112-⑤ 三参补齐）。掷序=原版：角 2 掷→
+      // NextFloat 1 掷。
+      for (let k = 0; k < 20; k++) {
+        const [rx, ry] = unitYRotatedByRandom(Math.PI * 2);   // vector18（:57411）
+        const dvx = rx * 2 + Math.random() * e.facing * 3;    // :57413
+        const dvy = ry * 2;
+        const d = game.spawnDust?.(e.cx + e.facing * 40, e.cy, 0, 0, 259, dvx, dvy, 0, null, 1, true);
+        if (d) {
+          d.x = e.cx + e.facing * 40 + rx * 4;                // position = vector17 + vector18×4（:57412）
+          d.y = e.cy + ry * 4;
+          d.scale = 0.3 + rx * (-e.facing);                   // 0.3 + vector18.X×(−spriteDirection)（:57414）
+          d.fadeIn = 0.7;                                     // :57415
+        }
+      }
+      if (e.vx > -0.5 && e.vx < 0.5) e.vx = 0;      // :57417-57421
+      if (!e.netPuppet) {
+        // NewNPC Bottom 锚（NPC.cs:81621 nPC.Bottom=(X,Y)）→ 左上 = (bx−w/2, by−h)
+        const f = spawnVanillaEnemy(game, 516, e.cx + e.facing * 45, e.cy + 8);
+        if (f) { f.x -= f.w / 2; f.y -= f.h; }
+      }
+    }
+    return true;                                    // :57429 喷吐段 return
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// 太阳耀斑 516（aiStyle 9 type==516 专属支，NPC.cs:21463-21481 + :21582-21600）：
+//   出膛渐隐 alpha 0→220（+40/t）；首拍朝玩家单位向量 RotatedByRandom(π/2)×
+//   RotatedBy(−π/4)（净 ±3π/4 三角分布,Utils.cs:1785-88——BJ112-④ 勘误）钳 Y 分量
+//   ≤0.2 后 ×(6+rand×4)；
+//   擦墙/近玩家 20px → StrikeNPCNoInteraction(9999) 自爆（走标准死亡管线）；
+//   EncourageDespawn(100)；追踪 = 15 步进朝玩家 + 1/12 加速 + 速 <6 时 ×1.05，
+//   rotation += 0.1×direction。noTileCollide=false（撞墙即爆）、noGravity=true。
+// ---------------------------------------------------------------------------
+export function solarFlareAI(e: Enemy, game: GameHooks, player: Player | null): void {
+  if (e.spawnAlpha < 220) e.spawnAlpha = Math.min(220, e.spawnAlpha + 40);   // :21465-21469
+  const p = player && !player.dead ? player : null;
+  if (e.ai0 === 0) {
+    e.ai0 = 1;                                      // :21470-21472
+    let dx = p ? p.cx - e.cx : 0, dy = p ? p.cy - e.cy : 0;
+    let d = Math.hypot(dx, dy);
+    if (d < 0.001) { dx = 0; dy = -1; d = 1; }      // NaN → -UnitY（:21475-21478）
+    const ux = dx / d, uy = dy / d;
+    // RotatedByRandom(1.5708).RotatedBy(-0.7854)：净角 = 三角掷(±π/2) − π/4
+    //（:21479-21480 + Utils.cs:1785-88；★BJ112-④ 勘误：旧注释"均匀"与 uniform
+    //  实现均误——RotatedByRandom 是 (r−r)×max 三角分布）
+    const ang = rotSpreadAngle(Math.PI / 2) - Math.PI / 4;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const rx = ux * ca - uy * sa, ry = ux * sa + uy * ca;
+    const spd = 6 + Math.random() * 4;              // :21482 (6f + NextFloat * 4f)
+    e.vx = rx * spd;
+    e.vy = Math.min(ry, 0.2) * spd;                 // :21481 Y 分量钳 0.2（单位向量段）
+  }
+  e.encourageDespawn(100);                          // :21581 EncourageDespawn(100)
+  // 追踪舵（:21585-21599）：rotation += 0.1×direction；15 步进 + num132=1/12 加速
+  e.visAngle += 0.1 * (e.facing || 1);
+  const spdNow = Math.hypot(e.vx, e.vy);
+  if (p) {
+    const dx = p.cx - e.cx, dy = p.cy - e.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    e.vx = (e.vx * 14 + (dx / d) * (spdNow + 1 / 12)) / 15;
+    e.vy = (e.vy * 14 + (dy / d) * (spdNow + 1 / 12)) / 15;
+    if (spdNow < 6) { e.vx *= 1.05; e.vy *= 1.05; }   // :21597-21599
+  }
+  moveAndCollide(e, game.world, e.vx, e.vy);        // noTileCollide=false：撞块写碰撞位
+  // 自爆（:21478-21481 擦墙 / 近身 20px）→ StrikeNPCNoInteraction(9999) 标准死
+  if (e.hitWall || e.hitHead || e.collideY
+    || (p && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 20)) {
+    e.iframes = 0;
+    e.hp = 0;
+    e.hurt(9999, 0, 0, game);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // AI_006 爬尾虫族 412/413/414（NPC.cs:51357-52671 的 412 专属段，1.4.5.6 1:1）
 //   头 412 首帧自建 30 段链（29×413 身 + 1×414 尾，:51764-51785 num35=30），
 //   全链 realLife=头（:51770/:51782——受击传导扣头 10000 总血，段不可单杀）；
@@ -2132,6 +2260,14 @@ function findClosestPlayer(game: GameHooks, cx: number, cy: number): Player | nu
   }
   return best;
 }
+// ★BJ109-B（2026-09-16）：GlowMask 加色外发光贴图懒加载——原版 DrawProjDirect
+//  539 支 DrawProjectionGlowMask[140]（Main.cs:34491-34496）/ 574 支 GlowMask[148]
+//  （:34503-34508），色 Color(255,255,255,0)=XNA 预乘 A=0 纯加算白、源矩形=本体帧
+//  矩形（Glow_140 24×136=4×34 与 Projectile_539 同排版 / Glow_148 24×48=2×24 同 574）。
+//  TtlSprite 直载（LightningBoltProj Extra_33 同款通道,public/sprites/vanilla 已在库）。
+const orbGlow140Ttl = new TtlSprite('sprites/vanilla/Glow_140.png');
+const orbGlow148Ttl = new TtlSprite('sprites/vanilla/Glow_148.png');
+
 export class LunarOrb extends Entity {
   w = 18; h = 18;
   vx: number; vy: number;
@@ -2342,6 +2478,24 @@ export class LunarOrb extends Entity {
       // 原生帧 × scale=1（SetDefaults 539/574 无 scale;origin = 帧格 Size/2,Main.cs:32812
       // 列表族 :32889）。曾归一到判定盒 18×30/18×18 → 539 纵横比失真（G11）
       ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
+      // ★BJ109-B：GlowMask 加色外发光 pass（Main.cs:34491-34496 539=GlowMask[140]/
+      //  :34503-34508 574=GlowMask[148]）——色 Color(255,255,255,0)=A=0 纯加算白满强
+      //  （不读 α/不取格光，原版自发光），源矩形=本体当前帧矩形、同 rotation 同 origin。
+      //  本仓 world 层直绘 lighter 后仍吃 compositeLight 乘光（黑暗处弱于原版）——
+      //  与 537/540/455/580 加算族同批登记偏差；Self-luminous 地板面归 Renderer
+      //  SELF_LUMINOUS_PROJS（交接单另列）。
+      const glowTtl = this.kind === 539 ? orbGlow140Ttl : orbGlow148Ttl;
+      const glow = glowTtl.get();
+      if (glow && glow.width > 0) {
+        const frames = this.kind === 539 ? 4 : 2;
+        const fIdx = this.kind === 574 ? 1 : this.frame;
+        const fh = Math.floor(glow.height / frames);
+        const sy = Math.min(frames - 1, Math.max(0, fIdx)) * fh;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(glow, 0, sy, glow.width, fh,
+          -img.width / 2, -img.height / 2, img.width, img.height);
+        ctx.globalCompositeOperation = 'source-over';
+      }
     } else {
       ctx.fillStyle = this.kind === 539 ? '#8FE8FF' : '#C060FF';
       ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);

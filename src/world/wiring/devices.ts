@@ -1053,7 +1053,8 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
 /** 装配:把器件表挂到 Wiring(器件 case 之外的默认落点)。
  *  ★R20-I4:boulderFall 钩子已摘除——原版致动缩入不构成巨石失撑
  *  （Check2x2 判据不含 inActive 位,WorldGen.cs:48937-48944）,
- *  巨石滚出只挂"支撑被真实破坏"链（Game.breakTile spawnBoulderRoll） */
+ *  巨石滚出只挂"支撑被真实破坏"链（Game.breakTile → spawnBoulderFamilyRoll →
+ *  convertBoulderRoll 单口,BJ102 债② 2026-09-16） */
 export function attachDevices(w: Wiring, ctx: DeviceCtx): void {
   w.device = (ww, sheet, x, y) => deviceTable(ww, ctx, sheet, x, y);
   w.teleportPair = (a, b) => ctx.teleportPair(a, b);

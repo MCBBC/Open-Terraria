@@ -5,6 +5,9 @@
 // 覆盖面(与提取器同源,防"闸门与修复器两套逻辑漂移"):
 //   vanilla-itemcombat.json  ← tools/extract-itemcombat.mjs(SW_ITEM_VER 双实例)
 //   vanilla-itemrare.json / vanilla-itemvalue.json ← tools/extract-itemrare.mjs(同上)
+//   vanilla-expert.json(vid→1 旗表,SetDefaults `expert = true` 43 id) ← tools/
+//     extract-expert.mjs(同上)——★BJ105 债刀 2026-09-17 扩面(掉落物名 expert→rare=-12
+//     专家彩虹支数据面);1456/1457/1458 三树 id 集全等,CLASS B 应恒零
 //   vanilla-itemstats.json(def/life 两字段) ← 本文件内嵌 case 段扫描(与 extract-equip-prefix.mjs
 //     的 outerCaseSegments/resolveCaseField 同法——该文件是多产物顶层脚本不宜参数化)
 //   vanilla-whips.json(dmg/proj/kb/speed) ← DefaultToWhip(...) 形参直读
@@ -194,6 +197,8 @@ export async function recon() {
   const c57 = loadExtractor('extract-itemcombat.mjs', '1457');
   const r56 = loadExtractor('extract-itemrare.mjs', '1456');
   const r57 = loadExtractor('extract-itemrare.mjs', '1457');
+  const e56 = loadExtractor('extract-expert.mjs', '1456');
+  const e57 = loadExtractor('extract-expert.mjs', '1457');
   const src56 = readFileSync(join(ROOT, 'Terarria1456/Terraria/Item.cs'), 'utf8');
   const src57 = readFileSync(join(ROOT, 'Terarria1457/Terraria/Item.cs'), 'utf8');
   const s56 = scanStats(src56);
@@ -211,6 +216,7 @@ export async function recon() {
     whips: J('vanilla-whips.json'),
     func: J('vanilla-itemfunc.json'),
     proj: J('vanilla-projectiles.json'),
+    expert: J('vanilla-expert.json'),
   };
 
   // 字段面:file → Map(id → {field: 1457值})(undefined = 1457 删除该字段)
@@ -231,6 +237,7 @@ export async function recon() {
     'ranged', 'magic', 'summon', 'useTurn', 'noUseGraphic']);
   for (const [id, v] of Object.entries(r57.RARE)) surfaces.push({ file: 'rare', id, field: 'rare', v57: v });
   for (const [id, v] of Object.entries(r57.VALUE)) surfaces.push({ file: 'value', id, field: 'value', v57: v });
+  for (const [id, v] of Object.entries(e57.EXPERT)) surfaces.push({ file: 'expert', id, field: 'expert', v57: v });
   for (const [id, v] of s57.def) surfaces.push({ file: 'stats', id: String(id), field: 'def', v57: v });
   for (const [id, v] of s57.life) surfaces.push({ file: 'stats', id: String(id), field: 'life', v57: v });
   for (const [id, v] of s57.healMana) surfaces.push({ file: 'func', id: String(id), field: 'healMana', v57: v });
@@ -311,6 +318,7 @@ export async function recon() {
       case 'combat': return c56.items[id]?.[field];
       case 'rare': return r56.RARE[id];
       case 'value': return r56.VALUE[id];
+      case 'expert': return e56.EXPERT[id];
       case 'stats': return (field === 'def' ? s56.def.get(Number(id)) : s56.life.get(Number(id)));
       case 'func': return s56.healMana.get(Number(id));
       case 'whips': return s56.whip.get(Number(id))?.[field];
@@ -323,6 +331,7 @@ export async function recon() {
       case 'combat': return json.combat[id]?.[field];
       case 'rare': return json.rare[id];
       case 'value': return json.value[id];
+      case 'expert': return json.expert[id];
       case 'stats': return json.stats[id]?.[field];
       case 'func': return json.func[id]?.[field];
       case 'whips': return json.whips[id]?.[field];
@@ -369,6 +378,15 @@ export async function recon() {
   }
   // ② json 独有条目(1457 面内无该 id/字段):1456 亦无 = 数据面多写(仅审阅);
   //    1456 有而 1457 无 = 1457 删除字段(--fix 需删键)
+  //  ②b expert 标量旗表幻影键(rare/value 同形标量表 ② 循环不覆盖,独立对账):
+  //    json 有而 1457 面无 = 提取盲区回退/无据手补 → DRIFT(--fix 删键);
+  //    1456 有而 1457 无 = 1457 删旗 → CLASS B + DRIFT(--fix 删键)
+  for (const [id, v] of Object.entries(json.expert)) {
+    if (e57.EXPERT[id] !== undefined) continue;
+    if (e56.EXPERT[id] !== undefined) classB.push(`expert[${id}]: 1456=${JSON.stringify(e56.EXPERT[id])} → 1457=无(删除)`);
+    drift.push(`expert[${id}]: json=${JSON.stringify(v)} → 1457=无(删除)`);
+    fixes.push(['expert', id, 'expert', undefined]);
+  }
   for (const file of ['combat', 'rare', 'value', 'stats', 'whips', 'func', 'proj']) {
     const tbl = json[file];
     const fieldsOf = file === 'combat'
@@ -402,6 +420,7 @@ export async function recon() {
     value1457: Object.keys(r57.VALUE).length,
     statsDef57: s57.def.size, statsLife57: s57.life.size, whips57: s57.whip.size,
     proj1456: Object.keys(p56).length, proj1457: Object.keys(p57).length,
+    expert1457: Object.keys(e57.EXPERT).length,
   };
   return { classB, drift, deferredDrift, legacy, handPatches, fixes, coverage };
 }
@@ -415,7 +434,7 @@ export const FIX_SHOOT_KEEP = new Set([]);
 
 async function main() {
   const { classB, drift, deferredDrift, legacy, handPatches, fixes, coverage } = await recon();
-  console.log(`== 覆盖 == combat ${coverage.combat1456}→${coverage.combat1457} / rare ${coverage.rare1456}→${coverage.rare1457} / value ${coverage.value1457} / stats def ${coverage.statsDef57} life ${coverage.statsLife57} / whips ${coverage.whips57}`);
+  console.log(`== 覆盖 == combat ${coverage.combat1456}→${coverage.combat1457} / rare ${coverage.rare1456}→${coverage.rare1457} / value ${coverage.value1457} / stats def ${coverage.statsDef57} life ${coverage.statsLife57} / whips ${coverage.whips57} / expert ${coverage.expert1457}`);
   console.log(`\n== CLASS B: 1456→1457 变化 ${classB.length} 条(移植确认清单)==`);
   for (const l of classB) console.log(l);
   console.log(`\n== DRIFT: json→1457 ${drift.length} 条(--fix 载荷)==`);
@@ -437,6 +456,7 @@ async function main() {
       whips: 'vanilla-whips.json',
       func: 'vanilla-itemfunc.json',
       proj: 'vanilla-projectiles.json',
+      expert: 'vanilla-expert.json',
     };
     const tbl = {};
     for (const [k, f] of Object.entries(FILES)) {
@@ -444,8 +464,8 @@ async function main() {
       copyFileSync(join(ROOT, 'game/src/data', f), join(dir, f + '.bak'));
     }
     let applied = 0;
-    // rare/value 是 id → 标量;其余是 id → 对象
-    const SCALAR = new Set(['rare', 'value']);
+    // rare/value/expert 是 id → 标量;其余是 id → 对象
+    const SCALAR = new Set(['rare', 'value', 'expert']);
     for (const [file, id, field, v57] of fixes) {
       if (file === 'combat' && field === 'shoot' && FIX_SHOOT_KEEP.has(id)) continue;
       if (SCALAR.has(file)) {

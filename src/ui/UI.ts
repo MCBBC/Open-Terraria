@@ -7742,11 +7742,13 @@ export class UI {
       if (!c) return null;
       // ★刀19:向导态整隐(Main.cs:42440 !InGuideCraftMenu 门/NewCraftingUI.cs:496 同门)
       if (this.vinvGuideMenuOpen) return null;
-      // ★SW-FX41:窗开态 = 窗内就近箱钮锚(DrawChildren :495-499 num2+40 → (82|122,285);
-      //   经典锚 (94,490+adjY) 在 else 分支,窗开不画——同一对象换锚,两态互斥)
+      // ★SW-FX41:窗开态 = 窗内就近箱钮锚(DrawChildren :495-499 num2+40,钮心 (82|122,285)
+      //   → top-left (66|106,268) FX43b;经典锚 (94,490+adjY) 在 else 分支,窗开不画——同一对象换锚,两态互斥)
       if (this.vinvModernCraftOpen) {
         return mcraftWindowToggleXY(!!this.game?.world?.isJourney).nearby;
       }
+      // ★重铸态整隐(Main.cs:42418 else-if !InReforgeMenu——经典锚 (94,490+adjY) 在该支)
+      if (this.vinvReforgeVisible()) return null;
       return { x: 94, y: 490 + this.vinvCraftAdjY(c.sh) };
     } });
     this.vinvLayoutItems.push({ el: title, pos: () => {
@@ -7829,8 +7831,9 @@ export class UI {
     this.vinvLayoutItems.push({ el: bar, pos: () => {
       const c = this.vinvLayoutCtx;
       if (!c) return null;
-      // ★SW-FX41:窗开态锚随窗内切换钮(DrawChildren :486-499 (42|82,285);:275-278
-      //   指示条在钮下层恒画——Recipes 页本仓恒真)
+      // ★SW-FX41:窗开态锚随窗内切换钮(DrawChildren :486-499 钮心 (42|82,285) → top-left
+      //   (26|66,268),FX43b;条顶=钮心(CraftingUI.cs:275-278 Utils.DrawSelectedCraftingBar
+      //   Indicator 行域 craftY..craftY+19)= 钮 top+17 = CRAFT_BAR_TOP_OFF;指示条在钮下层恒画)
       if (this.vinvModernCraftOpen) {
         const t = mcraftWindowToggleXY(!!this.game?.world?.isJourney).toggle;
         return { x: t.x, y: t.y + CRAFT_BAR_TOP_OFF };
@@ -7917,6 +7920,8 @@ export class UI {
       }
       // ★刀19:向导态切换钮上移(Main.cs:42438 num67=InGuideCraftMenu ? 300 : 450)+num52)
       if (this.vinvGuideMenuOpen && !this.vinvModernCraftOpen) return { x: 94, y: 300 + this.vinvCraftAdjY(c.sh) };
+      // ★重铸态整隐(Main.cs:42418 else-if !InReforgeMenu——经典锚 (94,450+adjY) 在该支)
+      if (this.vinvReforgeVisible()) return null;
       return { x: 94, y: 450 + this.vinvCraftAdjY(c.sh) };
     } });
   }
@@ -7954,9 +7959,12 @@ export class UI {
   private vinvModernFilterHovers: boolean[] = [];
   private vinvModernCellEls: Array<{ el: HTMLElement; r: VanillaRecipeLike }> = [];
 
-  /** 经典合成面可见门(Main.cs:42418-42421 NewCraftingUI.Visible → else 分支跳过) */
+  /** 经典合成面可见门(Main.cs:42418-42421 NewCraftingUI.Visible → else 分支跳过;
+   *  ★2026-09-16 用户实报「重铸槽压配方列」:同 else-if 头还有 !InReforgeMenu
+   *  (:42418)——重铸开启 = DrawRecipesList/标题/材料行/经典锚切换钮【整支不画】
+   *  (带互斥,原版无重铸态右移/列表移位)⇒ 门加 vinvReforgeVisible 同支) */
   private vinvClassicCraftVisible(): boolean {
-    return !this.vinvModernCraftOpen;
+    return !this.vinvModernCraftOpen && !this.vinvReforgeVisible();
   }
 
   private vinvBuildModernCraft(): void {
@@ -8533,20 +8541,29 @@ export class UI {
   }
 
   /** UIList.ScrollWheel(UIList.cs:109-115):ViewPosition −= ScrollWheelDeltaForUI
-   *  (±120/notch,PlayerInput.cs:902;XNA 上滚为正 = 浏览器 deltaY 取负) */
+   *  (±120/notch,PlayerInput.cs:902;XNA 上滚为正 = 浏览器 deltaY 取负)
+   *  ★FX43b(2026-09-16 用户实报「modern 窗滚很远才动」):余数累计器(RB14d/FX51 同款
+   *  vinvCraftWheelPendPx/_wheelPxCarry 三面同构)——Chrome ±100px/notch 重映射下逐事件
+   *  trunc(−100/120)=0 整类吞零;原版 ScrollWheelValue 跨事件累计(PlayerInput.cs:1407)
+   *  帧差分量化(:901-902)= 先累计再 /120、整档消费余数留置。 */
   private vinvModernScrollBy(e: WheelEvent): void {
     // ★BJ103 失焦旁支同律（元素级宿主 :8513/:8769——modern 窗随背包,失焦暂停期
     //   原版 :17316 return 同截断 :17549 宿主,滚轮死;autoPause 暂停期保持活面）
     if (this.game?.focusPaused) return;
+    e.stopPropagation();   // 窗口级 vinvGridWheelTick 不得二次入账(窗开其 flag 支本跳过,防御+防未来宿主双计)
     const g = this.vinvModernGridGeometry();
     if (!g || g.contentH <= g.list.h) return;
-    const notches = vanillaWheelNotches(e.deltaY, e.deltaMode);   // ★SW-RB14d：补传 deltaMode（旧缺省 0=Firefox 行模式整类吞零）
-    if (notches === 0) return;
+    this.vinvModernWheelPendPx += wheelEventPx(e.deltaY, e.deltaMode);   // deltaMode 归一(RB14d 单源)
+    const notches = vanillaWheelNotches(this.vinvModernWheelPendPx);     // Main.cs:17593(取负=浏览器同手势)
+    if (notches === 0) return;                           // 子档拍:ScrollWheelDeltaForUI=0 零位移(余数留置)
+    this.vinvModernWheelPendPx += notches * 120;         // 消费整档,余数留累计器
     this.vinvModernViewPos = clampViewPosition(
       this.vinvModernViewPos - notches * 120, g.list.h, g.contentH,
     );
     this.vinvSyncModernScroll();
   }
+  /** modern 窗滚轮 px 余数累计器(RB14d/FX51 同款;跨事件留置,面板重建清零) */
+  private vinvModernWheelPendPx = 0;
 
   private vinvModernGridGeometry(): ReturnType<typeof mcraftGridGeometry> | null {
     const c = this.vinvLayoutCtx;
@@ -9604,7 +9621,9 @@ export class UI {
     //   只移植 HandleCraftSlot 的 Sound 12+focusRecipe 播种,滑行账(glideY)在窗关后
     //   由 PipsFastScroll(:871)首拍瞬吸清账=原版同相。旧缺:rAF 无视窗态步进,
     //   点格播种 → 隐藏列表滑行 N 越行 N 响(取证=点 1 格 900ms 20 响)。
-    if (!this.vinvModernCraftOpen) {
+    if (!this.vinvModernCraftOpen && !this.vinvReforgeVisible()) {
+      // ★重铸态步进停摆(Main.cs:42418 else-if !InReforgeMenu → AdjustRecipeOffsets
+      //   CraftingUI.cs:174 随 DrawRecipesList 整支不画;modern 同相先例=FX41b C 刀)
       this.vinvCraftGlideAcc += dt / (1000 / 60);
       if (this.vinvCraftGlideAcc >= 1) {
         let steps = Math.floor(this.vinvCraftGlideAcc);
@@ -10576,6 +10595,7 @@ export class UI {
     this.vinvCraftFocusV = 0;   // 经典列表缺省聚焦首配方(-1 是 Modern 时代哨兵,已退役)
     this.vinvCraftGlideY = 0;   // ★SW-FX38 重建=吸附态整帧清零(availableRecipeY 族随面板重建)
     this.vinvCraftWheelPendPx = 0;   // ★SW-RB14d（FX38-F2）累计器随面板重建清零
+    this.vinvModernWheelPendPx = 0;  // ★FX43b 同律(modern 窗滚轮余数累计器随面板重建清零)
     this.vinvCraftFastScroll = false;
     this.vinvCraftGlideAcc = 0;
     this.vinvCraftAvailV = [];

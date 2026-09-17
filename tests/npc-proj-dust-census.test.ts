@@ -250,7 +250,7 @@ describe('★普查 HIGH：Arrow 载体尾尘站（bossAI.shoot 直飞桶）', (
     flyTicks(p, hooks, 12);
     const d229 = of(dusts, 229);
     expect(d229.length).toBeGreaterThan(0);
-    expect(d229.length).toBeLessThanOrEqual(24 + 3);       // 3 子步 × 2/3 × 12（死亡拍 +≤3）
+    expect(d229.length).toBeLessThanOrEqual(36);           // 硬上限=3 子步 × 12 tick（2/3 掷,概率尾不设窄界）
     expect(d229.every((x) => x.noGravity && x.scale === 1.2)).toBe(true);
     expect(d229[0].boxW).toBe(2);                          // w−8 = 10−8
   });

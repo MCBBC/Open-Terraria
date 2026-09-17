@@ -20,6 +20,7 @@
 // 断言在 OLD 语义下取相反值（修复前实机 live=null 的三例已由 _bj43-crawl-probe 记录）。
 import { describe, it, expect } from 'vitest';
 import { Game } from '../src/core/Game';
+import { Camera } from '../src/render/Camera';   // ★BJ103-A1b 测试台相机实例
 import { World } from '../src/world/World';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 import { TileStore, LIQUID_TYPE } from '../src/world/TileStore';
@@ -368,7 +369,8 @@ describe('SW-BJ43 ★SW-RB10a fireRecallTeleport 调用面（Player.cs:56785-568
     };
     g.sfx = { play: (k: string) => { state.sounds.push(k); } };
     g.spawnParticles = () => {};
-    g.camera = { x: 0, y: 0 };
+    g.camera = new Camera(800, 600);          // ★BJ103-A1b：过渡消费面（pan/teleportLerp/黑幕阈）
+  g.golfState = { tryGetCameraTrackingPosition: () => null };   // 无高尔夫跟踪
     g.cb = {};
     g.net = null;
     g.spectatingSlot = -1;

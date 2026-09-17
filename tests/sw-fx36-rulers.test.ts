@@ -10,6 +10,9 @@
 //  1458 同域逐字节相同（Main.cs 47046-47224 / Player.cs RefreshMechanicalAccs diff=0）。
 //  ★变异证红：各断言注释给出「旧实现退化值」。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
   builderAccGateSet, builderAccDefaults, builderAccTotalIcons,
   playerAccessoryVidEquipped, playerVidCarried,
@@ -204,5 +207,36 @@ describe('fixedUpdate 相位（:24885 每拍恰一次,移动前）', () => {
     expect(p.shadowCount).toBe(2);
     p.updateSocialShadow();
     expect(p.shadowCount).toBe(0);                   // ≥3 归零并写 [0]
+  });
+});
+
+// ============================================================
+// ★SW-清债③ 2026-09-17：W×H 读数黑幕层位结构锁（FX36 同族黑幕残差清偿）。
+//  金标：DrawInterface_33_MouseText :46187-46195 属 DrawInterface :63386（黑幕
+//  :63367-63381 之后;1458 :63373-63392 同序）⇒ 读数恒在黑幕上;mapFullscreen
+//  :63385 整层门/拍照 CheckCaptureManager 截断 ⇒ 全屏地图/拍照重渲不画。本仓
+//  落位=步骤 11b'（呼吸计 11b 之后、死亡画面 12 之前）;回挂旧位（步骤 7a''、
+//  黑幕之前）即红。变异证红：绘制块整体剪切回 7a'' 位 → ①红;挪到 12b/13 之后
+//  → ②红。
+// ============================================================
+describe('W×H 读数绘制位=黑幕之后/HUD 尾段（Renderer 结构锁,清债③）', () => {
+  const rendererSrc = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'src/render/Renderer.ts'), 'utf8');
+  const at = (s: string): number => rendererSrc.indexOf(s);
+
+  it('① 读数消费位在黑幕块（BJ103-A1）之后——11 帧渐熄窗不再压暗（回挂黑幕前即红）', () => {
+    const iFade = at('if (this.blackFadeIn > 0) {');
+    const iReadout = at('if (this.rulerReadout) {');
+    expect(iFade).toBeGreaterThan(-1);
+    expect(iReadout).toBeGreaterThan(iFade);
+    expect(rendererSrc.slice(0, iFade)).not.toContain('if (this.rulerReadout) {');
+  });
+  it('② 层内序：资源条(11)/呼吸计(11b)在其下,死亡画面(12)/交互图标(12b)/MouseText 收尾(13)在其上', () => {
+    const iReadout = at('if (this.rulerReadout) {');
+    expect(iReadout).toBeGreaterThan(at('this.fancyBars.draw('));
+    expect(iReadout).toBeGreaterThan(at('this.breathMeter.draw('));
+    expect(iReadout).toBeLessThan(at('if (player.dead) this.drawDeathScreen('));
+    expect(iReadout).toBeLessThan(at('this.drawCursorItemIcon(ctx, player);'));
+    expect(iReadout).toBeLessThan(at('this.drawMouseTextLayer(ctx, player);'));
   });
 });

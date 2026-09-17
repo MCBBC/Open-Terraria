@@ -7442,11 +7442,16 @@ export class Player extends Entity {
     return [pvx, pvy, preferredDir];
   }
 
-  /** Player.DoQueenSlimeHookTeleport（Player.cs:22486-22506）1:1：
+  /** Player.DoQueenSlimeHookTeleport（Player.cs:22486-22506;1457 :22924-22938）1:1：
    *  150 步 × 12px 朝目标步进（TileCollision 碰撞贴墙停），落点即传送。
-   *  AI_007 挂墙回调（Projectile.cs:49876-49878 type==935） */
+   *  AI_007 挂墙回调（Projectile.cs:49876-49878 type==935;1457 :53704） */
   doQueenSlimeHookTeleport(targetX: number, targetY: number, game: GameHooks): void {
     const steps = 150;                                     // :22488 num = 150
+    // ★BJ108 登记债①清偿（2026-09-17）：Teleport(vector,10)（:22499→:22505/:22937）→
+    // StartCameraTransitionForPlayerTeleport(oldPos,0.1,0)（style10 走 :37747 全 style
+    // 汇聚,delay=0;style10 仅免 RemoveAllGrapplingHooks :37702——钩保持挂墙,本仓
+    // 不摘钩本就同相）。oldPos = 步进行走前 position（Teleport :37705 vector=position）
+    const tpOldX = this.x, tpOldY = this.y;
     let px = this.x;
     let py = this.y;
     let sx = 0;
@@ -7470,6 +7475,7 @@ export class Player extends Entity {
     this.y = py;
     this.vx = 0;
     this.vy = 0;
+    game.startCameraTransitionForPlayerTeleport?.(tpOldX, tpOldY);   // ★BJ108 债①（Teleport(vector,10)→:37747,delay=0）
     game.spawnBurst?.(this.cx, this.cy, '#58B8E8', 14, 3, -Math.PI / 2, Math.PI, { life: 24 });
   }
 
@@ -9708,8 +9714,14 @@ export class Player extends Entity {
     }
     const p = shimmerTeleportPos(spot, this.w, this.h);
     this.environmentBuffImmunityTimer = 4;        // Teleport :37701（环境 buff 免疫窗）
+    // ★BJ108 登记债①清偿（2026-09-17）：Teleport(pos,12) :37747 全 style 汇聚 →
+    // StartCameraTransitionForPlayerTeleport(oldPos,0.1,0)（style12 无 delay 特支,
+    // 仅 Style==1 delay=10 :37744-37746）——近距滑行/远距黑幕由 BJ103-A1b 单源分道。
+    // oldPos = 传送前 position（Teleport :37705 vector=position,位移前捕获）
+    const tpOldX = this.x, tpOldY = this.y;
     this.x = p.x;
     this.y = p.y;
+    game.startCameraTransitionForPlayerTeleport?.(tpOldX, tpOldY);   // ★BJ108 债①（:37747,delay=0）
     this.vx = 0;
     this.vy = 0.0001;
     this.shimmering = false;

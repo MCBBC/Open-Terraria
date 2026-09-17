@@ -13,14 +13,24 @@ import type { Renderer } from '../render/Renderer';
 interface ImgData { data: Uint8ClampedArray; width: number; height: number }
 const SIZE = 128;
 let perlinCache: ImgData | null = null;
-let perlinTried = 0;
+
+/** 测试钩：清模块态（冷启动重放） */
+export function __resetForceFieldBubbleForTest(): void { perlinCache = null; }
 
 function perlinData(renderer: Renderer): ImgData | null {
   if (perlinCache) return perlinCache;
-  if (performance.now() - perlinTried < 15000) return null;   // 负缓存 15s（vulture 教训）
-  perlinTried = performance.now();
+  // ★BJ112-① 死窗修复（2026-09-16）：良性 miss 不吃负缓存——图集懒载语义下
+  // null≠404。ensureVImage 首帧必 null（加载在途/_iconPending，SpriteAtlas.ts:635），
+  // 旧 15s 时间负缓存把"未就绪"钉成"失败"→盾=100 下 0..15s 零绘制（原版塔一进屏
+  // 泡即随,Main.cs:24551-24583）；且 perlinTried=0 初值使页面生命前 15s 连首拍尝试
+  // 都不发（预武装死窗）。真失败（404/坏字节）由图集自身 _vImageFailed 10s TTL 负
+  // 缓存+瞬态自动重试背书（SpriteAtlas.ts:651-686 onerror 链），消费面逐帧重查 =
+  // SpriteAtlas.ts:360 "未就绪返回 null,消费方下帧自愈"的既定契约（同案 Dart.ts:314、
+  // VANILLA_MISC 瘦身批对 Misc_Perlin 的既定决策——注释明载"未就绪跳帧、下帧自愈"）。
   try {
-    const img = renderer.atlas?.ensureVImage('vanilla/Perlin.png');
+    // ★BJ109-G：塔盾源贴图 = Images/Misc/Perlin（Main.cs:24554）→ Misc_Perlin.png
+    //（旧键 vanilla/Perlin.png 同字节,但键面按原版请求路径归一）
+    const img = renderer.atlas?.ensureVImage('vanilla/Misc_Perlin.png');
     if (!img || !(img.width > 0)) return null;
     const cv = document.createElement('canvas');
     cv.width = SIZE; cv.height = SIZE;
@@ -97,7 +107,9 @@ export function drawForceFieldBubble(
     }
   }
   if (!drawn) {
-    // 回退：双层反向旋转 Perlin（swirl 观感近似）
+    // 回退：双层反向旋转 Perlin（swirl 观感近似）——源贴图同 Misc_Perlin
+    const perlinImg = renderer.atlas?.ensureVImage('vanilla/Misc_Perlin.png') ?? scratch;
+    if (!perlinImg) return false;
     ctx.save();
     ctx.globalAlpha = Math.min(1, alpha);
     ctx.globalCompositeOperation = 'lighter';
@@ -106,9 +118,7 @@ export function drawForceFieldBubble(
       ctx.save();
       ctx.translate(o.cx, o.cy);
       ctx.rotate(o.time * 0.4 * dir);
-      ctx.drawImage(
-        (renderer.atlas?.ensureVImage('vanilla/Perlin.png') as CanvasImageSource) ?? scratch!,
-        -r / 2, -r / 2, r, r);
+      ctx.drawImage(perlinImg as CanvasImageSource, -r / 2, -r / 2, r, r);
       ctx.restore();
     }
     ctx.restore();

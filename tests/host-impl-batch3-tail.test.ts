@@ -1,14 +1,16 @@
 // 批III尾窗三件回归：事件屏效三 pass + RainbowTownSlime 烘焙 + Stardew 编排器时间轴。
 // 权威 = 反汇编 /tmp/fx-screen.txt（FilterMoonLordShake :509-547 / FilterCrystal-
 // DestructionColor :986-1014 / FilterCrystalDestructionVortex :1016-1108）与
-// Projectile.cs:37019-37075（水晶三相序）/ Main.cs:65956-65965（shake 强度）/
-// StardewValleyAnimation.cs（彩蛋时间轴）/ Segments.cs:305-364（MaskedFadeEffect）。
+// Main.cs:65956-65965（shake 强度）/ StardewValleyAnimation.cs（彩蛋时间轴）/
+// Segments.cs:305-364（MaskedFadeEffect）。
+// ★BJ109-D（2026-09-16）改判：旧件1a「天柱死亡水晶三相序状态机」固化测试整组拆除——
+//  其锚 Projectile.cs:37019-37075 实为 aiStyle 132 = 弹 672（DD2 败北水晶
+//  CrystalDestructionVortex/Color 屏效），天柱死亡链（NPC.cs:80125-80146）无弹体无滤镜
+//  → crystalDeath 字段/start/tick/onTowerKilled at 参数均为伪影已拆除。改判后固化
+//  「拆除态」：复辟该支（字段回补/调用面回挂）→ 本组爆红。
 import { describe, it, expect } from 'vitest';
 import { SCREEN_FX_FRAGS } from '../src/render/GLScreenFilters';
-import {
-  startCrystalDeath, tickCrystalDeath, onTowerKilled, CRYSTAL_DEATH_TICKS,
-  newLunarEventState, type LunarHost,
-} from '../src/world/LunarEvent';
+import { onTowerKilled, newLunarEventState, type LunarHost } from '../src/world/LunarEvent';
 import { World } from '../src/world/World';
 import { defaultUniforms, getPass, runPassOnImageData } from '../src/fx/SM2Effect';
 
@@ -16,28 +18,22 @@ const host: LunarHost = {
   broadcast: () => {}, clearCultists: () => {},
 } as unknown as LunarHost;
 
-// ---- 件1a：水晶死亡三相序状态机（Projectile.cs:37019-37075） ----
-describe('R33 尾窗：天柱死亡水晶三相序状态机', () => {
-  it('startCrystalDeath 落点+tickCrystalDeath 480t 归零（120+300+60）', () => {
-    const w = new World(60, 40, 11, 'crystal-seq');
-    startCrystalDeath(w, { x: 1000, y: 500 });
-    expect(w.lunarEvent.crystalDeath).toEqual({ t: 0, x: 1000, y: 500 });
-    for (let i = 0; i < CRYSTAL_DEATH_TICKS - 1; i++) tickCrystalDeath(w);
-    expect(w.lunarEvent.crystalDeath?.t).toBe(CRYSTAL_DEATH_TICKS - 1);   // 相2 尾帧仍活
-    tickCrystalDeath(w);
-    expect(w.lunarEvent.crystalDeath).toBeNull();                          // :37068-37074 Deactivate
+// ---- 件1a（改判）：crystalDeath 伪影拆除态 ----
+describe('BJ109-D：天柱死亡水晶伪影拆除态（原 R33 件1a 改判）', () => {
+  it('LunarEventState 无 crystalDeath 字段（newLunarEventState 全键集）', () => {
+    const s = newLunarEventState();
+    expect(Object.keys(s).sort()).toEqual(
+      ['active', 'moonLordCountdown', 'moonLordCountdownMax', 'shield', 'towerActive']);
   });
-  it('onTowerKilled 携 at → 水晶序列启动（塔死即 crystal 弹序,Projectile.cs:37019）', () => {
-    const w = new World(60, 40, 11, 'crystal-trigger');
+  it('onTowerKilled 落档面不受水晶支影响（downedTower_* + TowerActive_* 照写）', () => {
+    const w = new World(60, 40, 11, 'crystal-removed');
     w.flags['downedTowerStardust'] = false;
-    onTowerKilled(w, 493, () => false, host, { x: 320, y: 200 });
-    expect(w.lunarEvent.crystalDeath).toEqual({ t: 0, x: 320, y: 200 });
+    w.lunarEvent.active = true;
+    w.lunarEvent.towerActive.stardust = true;
+    onTowerKilled(w, 493, () => false, host);
     expect(w.flags['downedTowerStardust']).toBe(true);
-  });
-  it('onTowerKilled 不带 at（旧调用面）不启动序列（兼容回归）', () => {
-    const w = new World(60, 40, 11, 'crystal-noat');
-    onTowerKilled(w, 422, () => false, host);
-    expect(w.lunarEvent.crystalDeath).toBeNull();
+    expect(w.lunarEvent.towerActive.stardust).toBe(false);
+    expect('crystalDeath' in w.lunarEvent).toBe(false);   // 伪影键不得复辟
   });
 });
 

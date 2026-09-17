@@ -182,6 +182,26 @@ describe('BJ103-A1 接线结构锁（Game.ts/Renderer.ts）', () => {
     expect(camSrc).toContain('static blackFadeDist(viewW: number, viewH: number)');
     expect(camSrc).toContain('panX = 0; panY = 0;');
   });
+
+  it('★SW-F2 黑幕层位：drawCursorItemIcon 调用位在黑幕块之后、drawMouseTextLayer 之前（层 40<MouseText 收尾,DrawInterface :63394 在黑幕 :63367-63381 之后）', () => {
+    const iFade = rendererSrc.indexOf('if (this.blackFadeIn > 0) {');
+    const iIcon = rendererSrc.indexOf('this.drawCursorItemIcon(ctx, player);');
+    const iIconNext = rendererSrc.indexOf('this.drawCursorItemIcon(ctx, player);', iIcon);
+    const iMt = rendererSrc.indexOf('this.drawMouseTextLayer(ctx, player);');
+    expect(iFade).toBeGreaterThan(-1);
+    expect(iIcon, '调用位唯一且在黑幕之后').toBe(iIconNext);
+    expect(iIcon).toBeGreaterThan(iFade);
+    expect(iMt).toBeGreaterThan(iIcon);   // 层序：图标(40) 在 MouseText 收尾(:45694) 之下
+    // 黑幕窗内不再有图标前置绘制位（回挂步骤 7b'=黑幕前即红）
+    expect(rendererSrc.slice(0, iFade)).not.toContain('this.drawCursorItemIcon(ctx, player);');
+  });
+
+  it('★SW-清债② 2026-09-17 翻案锁：告示牌泡面（signBubbleScreen 消费）随 drawCursorItemIcon 在黑幕块之后（接口层表位 20 SignTileBubble 原版亦在 DrawInterface :63386 黑幕 :63367-63381 之后;「泡回黑幕前」提案已翻案作废,回挂即红）', () => {
+    const iFade = rendererSrc.indexOf('if (this.blackFadeIn > 0) {');
+    const iBubble = rendererSrc.indexOf('if (this.signBubbleScreen) {');
+    expect(iFade).toBeGreaterThan(-1);
+    expect(iBubble, '泡面在黑幕之后=原版同相（清债②亲读 :46502-46526/:63367-63392）').toBeGreaterThan(iFade);
+  });
 });
 
 // ============================================================

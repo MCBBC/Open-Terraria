@@ -173,6 +173,35 @@ const KB_X = 10;               // 出生 kb 第二参 = 10f
 //        (1,255)（WorldGen.cs:4495-4546:实心门/注液满 255/异液合并 岩浆×水→黑曜石
 //        56、×蜂蜜→脆蜂蜜 230、×微光→659）。本面零掷序交叉（1053 零 RNG）。
 // ===========================================================================
+// ★SW-BJ93 债①/BJ102（2026-09-16）1002 aiStyle16 建模余波单面归一（四件同刀;
+//   全部 1457 锚 1:1;1458 同域逐字 2026-09-16——Kill 支 :71766-71795↔:71767-71796、
+//   AI_016 Kill 闸 :48031-48035↔:48032-48036、SetDefaults :9525-9539↔:9526-9540、
+//   Damage 减半 :12971-12975↔同行、NewProjectile :49178↔同域、Utils.ToTileCoordinates
+//   :1899-1902↔同行、DelegateMethods.SpreadTile :474-599↔同域）：
+//   ① life=2 承接（json :9535 列;BJ97 3600 carve-out 退役——其存在前提「格侧爆炸面
+//     已拆 tntBarrelBlast」随格侧面归零而消失,双自伤面不复存在）
+//   ② 爆炸面=弹侧 rbKill1002Face→Game.explodeAt 单发（vanilla aiStyle16 Kill flag3
+//     臂全序:PrepareBombToBlow[1002 无 resize 支]→SelfHurtPlayers :71790→Damage
+//     :71792→Kill_Bombs_DoUsualKillCode :80125 大族视觉→Kill_ExplodeTiles :79027
+//     闸门表无 1002=零地形破坏[:79064 死代码,SW-J1 定谳沿立]）;格侧 tntBarrelBlast
+//     改 spawnTntBarrelRoll Spawn-only（Game.ts,vanilla 格侧无爆炸面——KillTile 654
+//     只经 Check2x2 destroy 块 NewProjectile :49178;destroyObject 单飞闸
+//     boulderDestroyGuard 收编 Game 654 挖除臂,改前实证挖一格=3×格侧爆炸面+2×幻影弹）
+//   ③ Kill 拍 Damage() 面=dmg=DV(400)/2（:12971-75 逐字,explodeAt 1002 链承载;
+//     usesIDStaticNPCImmunity 15t 对 1 拍寿命弹无观察面）;旧 rbSelfHurtPlayers
+//     单臂面退役（SelfHurt+Damage 同在 Kill flag3 臂,拆两处=建模余波本体）
+//   ④ tileCollide=false（SetDefaults :9533/json 列;首拍即 Kill=零位移,声明位 1:1）
+//   拍序表（vanilla 单机）:出生(KillTile 654→:49178 NewProjectile,260×260/
+//   timeLeft=2/零速)→t+0 首 AI 拍:AI_016 :48031 timeLeft≤3→Kill→自伤 400(DV)+NPC
+//   200(dmg/2)+视觉(Item14+尘31×50+尘6×160+gore×8,盒 pos..pos+260)→active=false;
+//   t+1 桶扫移除。本仓同相（fixedUpdate 头=计数器→Kill 闸,先于运动核/湿段/伤害环）。
+//   邻接登记（域外观察,未落刀）:①explodeAt 全域无 CutTiles 支——vanilla Damage()
+//   :12515-12518 门内 CutTiles 每拍（炸弹/1002 爆炸应割 tileCut 草族）,本仓爆炸面
+//   整缺=独立债;②真实巨石挖路径多 Spawn（TrapShot×2+RollingBoulder×1,挖 138 实证
+//   3 弹）=家族挖除臂与 Check2x2 convert 双口并存,654 已单飞归一,余型待立案;
+//   ③654 出生位已还原 vanilla :49178 字面 +8/+8（260 盒无嵌柱问题,余型 +0.5 冻结
+//   偏差延续）。
+// ===========================================================================
 
 // ===========================================================================
 // ★SW-BJ93 债4①（2026-09-16）：ProjectileID.Sets.SkipDamage_EVP（ProjectileID.cs:275
@@ -225,7 +254,6 @@ const RB_GRASS_TO_BARE: Record<number, 'dirt' | 'mud'> = {
  *    无列=原版无覆写 → 缺省 3600（P.cs:789）。 */
 export function boulderTimeLeft(projId: number): number {
   if (projId === 1021) return 10800;                 // P.cs:1871 timeLeft *= 3（json 无列）
-  if (projId === 1002) return 3600; // M1-MUTATION
   const jt = projectileData(projId)?.timeLeft;
   return jt !== undefined ? jt : 3600;               // 1002=2（json :9535 列,BJ102 归一承接）
 }
@@ -1548,6 +1576,7 @@ export class RollingBoulder extends Entity {
     const half = (hd?.width ?? 260) / 2;               // SetDefaults 260×260（json 承载）
     game.explodeAt?.(Math.trunc(this.x / 16), Math.trunc(this.y / 16), this.dmg,
       0, false, half, 0, 1002, this.x + half, this.y + half, KB_X, 1);
+
   }
 
   /** ★SW-BJ93 债2（2026-09-16）：Kill() 家族死亡尘/声面（P.cs:76355-76500 直译;

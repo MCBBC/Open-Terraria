@@ -6,16 +6,25 @@
 // (无 this. 前缀——与 1405 的 this.type 链不同,故不能用 extract-npcs.mjs 直跑)。
 // 用法:node tools/recon-npc-1456-1457.mjs          (在 game/ 下,只读对账)
 //      node tools/recon-npc-1456-1457.mjs --fix   (应用 A 类修正到 json,先备份)
-import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-// 与 extract-npcs.mjs 的 KEYS 契约一致(json schema 面);value/color 等另有数据归属
+// 与 extract-npcs.mjs 的 KEYS 契约一致(json schema 面);value 等另有数据归属。
+// ★BJ106 债刀 2026-09-17 扩面(显式声明):KEYS + 'color'——SetDefaults per-type 色
+// (仅 1/16/537 三型 :8611/:9003/:15897,1456/1457/1458 三树同值;json 侧
+// public/sprites/vanilla-npcs.json 自 2026-08-21 起带 color 字段,此前无闸裸奔:
+// extract-npcs.mjs(1405 锚)KEYS 无 color,重跑即静默洗掉三型色)。解析形态:
+//   `new Color(r, g, b[, a])` → [r,g,b,a(缺省 255)]
+//   `new Color(255, 250, 0, 0) * 0.2f` → FNA Color×float 逐通道(含 α)舍入
+//     (FNA Color.op_Multiply → float ctor PackUnsigned,255×0.2=51/250×0.2=50);
+//   `color = default(Color)`(SetDefaults 头 :8554 复位,链外不进块)若入块则跳过不落表。
+// 数组值等价:CLASS A/B 比对用逐通道全等(此前无数组字段,纯增量语义)。
 const KEYS = ['lifeMax', 'damage', 'defense', 'knockBackResist', 'aiStyle', 'width', 'height',
   'npcSlots', 'noGravity', 'noTileCollide', 'friendly', 'townNPC', 'HitSound', 'DeathSound',
-  'scale', 'alpha', 'catchItem', 'lavaImmune', 'behindTiles'];
+  'scale', 'alpha', 'catchItem', 'lavaImmune', 'behindTiles', 'color'];
 const KEY_RE = new RegExp(`\\b(${KEYS.join('|')})\\s*(=|\\+=|-=)\\s*([^;]+);`, 'g');
 
 const MAX_ID = 750;
@@ -68,7 +77,8 @@ function condIds(cond) {
   return null;
 }
 
-/** 字面量 → json 标量;非字面量返回 undefined(计入 unparsedAssign 供人工核) */
+/** 字面量 → json 标量;非字面量返回 undefined(计入 unparsedAssign 供人工核)。
+ *  color 形态(★BJ106 扩面):new Color(r,g,b[, a]) [* Nf] → [r,g,b,a](FNA 逐通道舍入) */
 function parseVal(raw) {
   const s = raw.trim();
   let m = s.match(/^SoundID\.(\w+)$/);
@@ -78,6 +88,15 @@ function parseVal(raw) {
   if (s === 'false') return false;
   m = s.match(/^-?\d+(?:\.\d+)?f?$/);
   if (m) return parseFloat(s.replace(/f$/, ''));
+  m = s.match(/^new Color\((\d+),\s*(\d+),\s*(\d+)(?:,\s*(\d+))?\)(?:\s*\*\s*([\d.]+)f)?$/);
+  if (m) {
+    const rgba = [+m[1], +m[2], +m[3], m[4] !== undefined ? +m[4] : 255];
+    if (m[5] !== undefined) {
+      const sc = parseFloat(m[5]);
+      for (let i = 0; i < 4; i++) rgba[i] = Math.min(255, Math.round(rgba[i] * sc));
+    }
+    return rgba;
+  }
   return undefined;
 }
 
@@ -100,6 +119,7 @@ function scanAssignments(text) {
     let m;
     while ((m = KEY_RE.exec(t))) {
       const [, prop, op, raw] = m;
+      if (prop === 'color' && /^default\(Color\)$/.test(raw.trim())) continue;   // :8554 头复位=缺省色
       const val = parseVal(raw);
       if (val === undefined) { unparsed.push(`${prop} ${op} ${raw.trim()}`); continue; }
       if (op === '=') out[prop] = val;
@@ -261,11 +281,13 @@ export function recon() {
     const j = json[id] ?? null;
     const r56 = a56.results[id] ?? null;
     const r57 = a57.results[id] ?? null;
-    // CLASS B:1456 vs 1457(键并集;含 frames)
+    // CLASS B:1456 vs 1457(键并集;含 frames)。★BJ106 扩面:color 为数组值,逐通道全等
+    const sameVal = (a, b) => a === b
+      || (Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]));
     const bkeys = new Set([...Object.keys(r56 ?? {}), ...Object.keys(r57 ?? {})]);
     for (const k of bkeys) {
       const v56 = r56?.[k], v57 = r57?.[k];
-      if (v56 !== v57) classB.push(`[${id}] ${k}: 1456=${JSON.stringify(v56)} → 1457=${JSON.stringify(v57)}`);
+      if (!sameVal(v56, v57)) classB.push(`[${id}] ${k}: 1456=${JSON.stringify(v56)} → 1457=${JSON.stringify(v57)}`);
     }
     if ((a56.frames[id] ?? null) !== (a57.frames[id] ?? null)) {
       classB.push(`[${id}] frames: 1456=${a56.frames[id] ?? '无'} → 1457=${a57.frames[id] ?? '无'}`);
@@ -282,7 +304,7 @@ export function recon() {
       }
       const eq = isSound(k)
         ? soundResolve(vj) === soundResolve(v56)
-        : numEq(vj, v56) || norm(k, vj) === norm(k, v56);
+        : sameVal(vj, v56) || numEq(vj, v56) || norm(k, vj) === norm(k, v56);
       if (!eq) {
         classA.push(`[${id}] ${k}: json=${JSON.stringify(vj)} → 1456=${JSON.stringify(v56)}`);
         fixes.push([id, k, v56]);
@@ -309,6 +331,7 @@ function main() {
   // ---- --fix:应用 A 类修正(浮点尾差取 6 位小数;写前备份) ----
   if (process.argv.includes('--fix')) {
     const JSON_PATH = join(ROOT, 'game/public/sprites/vanilla-npcs.json');
+    mkdirSync('/tmp/recon', { recursive: true });   // ★债刀 2026-09-17:目录缺在时 --fix 曾 ENOENT 崩(修复通道地雷)
     copyFileSync(JSON_PATH, '/tmp/recon/vanilla-npcs.json.bak');
     const json = JSON.parse(readFileSync(JSON_PATH, 'utf8'));
     for (const [id, k, raw] of fixes) {

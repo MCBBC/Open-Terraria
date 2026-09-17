@@ -121,18 +121,30 @@ function sm2FrameCtx(set: ExtraSet, opacity: number, timeSec: number,
 }
 
 interface ImgData { data: Uint8ClampedArray; w: number; h: number }
-const imgCache = new Map<string, ImgData | null>();
+const imgCache = new Map<string, ImgData>();
 
-/** atlas 图 → 像素域缓存（懒加载；失败负缓存防逐帧重试——vulture 教训的 15s 窗口化） */
-function extraData(atlas: NonNullable<Renderer['atlas']>, path: string, _tMs: number): ImgData | null {
+/** 测试钩：清模块态（imgCache 正像缓存/rawImgs 直连链/sm2 帧上下文——冷启动重放） */
+export function __resetTrailShaderForTest(): void {
+  imgCache.clear();
+  rawImgs.clear();
+  sm2CtxCache = null;
+}
+
+/** atlas 图 → 像素域缓存（懒加载，只缓存正像）。
+ *  ★BJ112-c 死窗修复（2026-09-17，ForceFieldBubble BJ112-① 同族方案 a）：良性 miss
+ *  不吃时间负缓存——ensureVImage 的 null 是【三义】（加载在途 _iconPending‖失败冷却
+ *  _vImageFailed‖本拍刚发起，SpriteAtlas.ts:621-644），旧 15s setTimeout 负缓存把
+ *  "懒载未就绪"钉成"失败"→贴图落地后仍被压在兜底近似公式下最多 15s（重负载
+ *  createImageBitmap 升级排队数秒时=整段 SM2 真值面丢失窗口，P2 家族）。摘除后
+ *  逐帧重查 = SpriteAtlas.ts:360 "未就绪返回 null,消费方下帧自愈"既定契约；节流权
+ *  归图集——真失败（404/坏字节）由图集侧 _vImageFailed 10s TTL 早退+瞬态重试背书
+ *  （同案 ForceFieldBubble perlinData/Dart.ts:314），本面重查成本仅 Map 探测。
+ *  正像（解码 ImgData）仍永久缓存。 */
+function extraData(atlas: NonNullable<Renderer['atlas']>, path: string): ImgData | null {
   const hit = imgCache.get(path);
   if (hit !== undefined) return hit;
   const img = atlas.ensureVImage(path);
-  if (!img || !(img.width > 0)) {
-    if (!imgCache.has(path)) imgCache.set(path, null);
-    setTimeout(() => imgCache.delete(path), 15000).unref?.();
-    return null;
-  }
+  if (!img || !(img.width > 0)) return null;   // 三义 null：pending‖failed‖刚发起——下帧重查
   try {
     const cv = document.createElement('canvas');
     cv.width = img.width; cv.height = img.height;
@@ -237,9 +249,9 @@ export function drawStripTrail(
   const atlas = renderer.atlas;
   if (!atlas) return false;
   const set = EXTRA_SETS[spec.set] ?? EXTRA_SETS.MagicMissile;
-  const s0im = extraData(atlas, set.imgs[0], performance.now());
-  const s1im = extraData(atlas, set.imgs[1], performance.now());
-  const s2im = set.imgs[2] ? extraData(atlas, set.imgs[2], performance.now()) : null;
+  const s0im = extraData(atlas, set.imgs[0]);
+  const s1im = extraData(atlas, set.imgs[1]);
+  const s2im = set.imgs[2] ? extraData(atlas, set.imgs[2]) : null;
   // obj55 SM2 字节码帧级上下文（贴图未就位=首帧懒加载窗 → null,走兜底近似回退）
   const sm2f = set.sm2 !== undefined
     ? sm2FrameCtx(set, spec.opacity, spec.time, s0im, s1im, s2im)

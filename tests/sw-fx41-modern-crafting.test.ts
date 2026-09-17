@@ -26,7 +26,7 @@ import {
   tileFilterMatches, openCloseFilterTransition, TOOL_ACCEPTED_IDS, TILE_WAND_ITEMS,
   shiftBlueToCyan, type FilterKind, type FilterItem,
 } from '../src/ui/modernCrafting';
-import { craftToggleFrame, cycleCraftingGridControl, recipeFilterAccepts, type CraftingTileFilter } from '../src/ui/craftingGrid';
+import { craftToggleFrame, cycleCraftingGridControl, recipeFilterAccepts, CRAFT_BAR_TOP_OFF, vanillaWheelNotches, type CraftingTileFilter } from '../src/ui/craftingGrid';
 import { tileUsedInRecipes } from '../src/core/SmartInteractTiles';
 import { VANILLA_RECIPES } from '../src/data/vanillaRecipes';
 
@@ -159,9 +159,13 @@ describe('SW-FX41 P2-1 窗体几何(NewCraftingUI.cs:302-317)', () => {
     expect(mcraftOwnedCountColor(true)).toBe('rgb(144,238,144)');
     expect(mcraftOwnedCountColor(false)).toBe('rgb(255,140,160)');
   });
-  it('窗内钮锚(:486-499 num2=42 旅程 +40,num3=285;就近箱 = +40)', () => {
-    expect(mcraftWindowToggleXY(false)).toEqual({ toggle: { x: 42, y: 285 }, nearby: { x: 82, y: 285 } });
-    expect(mcraftWindowToggleXY(true)).toEqual({ toggle: { x: 82, y: 285 }, nearby: { x: 122, y: 285 } });
+  it('窗内钮锚(:486-499 钮心 num2=42 旅程 +40,num3=285;DrawGridToggle origin=size/2 → top-left=钮心−16/−17,FX43b)', () => {
+    // 钮心 (42,285)/32×34 → rect (26,268)-(58,302);窗顶 312 − 钮底 302 = 原版间隙 10px
+    expect(mcraftWindowToggleXY(false)).toEqual({ toggle: { x: 26, y: 268 }, nearby: { x: 66, y: 268 } });
+    expect(mcraftWindowToggleXY(true)).toEqual({ toggle: { x: 66, y: 268 }, nearby: { x: 106, y: 268 } });
+    // 条锚 = 钮心(CraftingUI.cs:275-278 Utils.DrawSelectedCraftingBarIndicator 行域 craftY..craftY+19)
+    //  = 钮 top + CRAFT_BAR_TOP_OFF(17)——x = 钮 top-left(craftX−16)同列
+    expect(268 + CRAFT_BAR_TOP_OFF).toBe(285);
   });
   it('面板色 = ShiftBlueToCyan((63,82,151)×0.7)×0.8(:328-331;XNA 逐通道乘截断)', () => {
     // (44,57,105) → hue−0.04/sat+0.2/lum+0.04 = (33,80,136) → ×0.8 = (26,64,108,142)
@@ -375,8 +379,9 @@ describe('SW-FX41 P2-2 切换钮 modern 支接线(CraftingUI.cs:294-331)', () =>
   it('UI.ts 接线:窗族生命周期(Main.cs:42418/17636/46438-46444/:3037)', () => {
     // 窗构建挂 vinvBuildCraft 尾(vinvBuildModernCraft)
     expect(uiSrc).toMatch(/this\.vinvBuildModernCraft\(\);/);
-    // 经典合成面 = vinvClassicCraftVisible 门(else 分支不画)
-    expect(uiSrc).toMatch(/private vinvClassicCraftVisible\(\): boolean \{\s*\n\s*return !this\.vinvModernCraftOpen;\s*\n\s*\}/);
+    // 经典合成面 = vinvClassicCraftVisible 门(else 分支不画;★2026-09-16 重铸态同支
+    //   Main.cs:42418 else-if 头 !InReforgeMenu——重铸开启=列表/标题/材料行整支不画)
+    expect(uiSrc).toMatch(/private vinvClassicCraftVisible\(\): boolean \{\s*\n\s*return !this\.vinvModernCraftOpen && !this\.vinvReforgeVisible\(\);\s*\n\s*\}/);
     // 列表滚停(Main.cs:17636-17639 flag=false)
     expect(uiSrc).toMatch(/if \(!this\.vinvModernCraftOpen\) \{\s*\n\s*this\.vinvCraftWheel\(e\);/);
     // 关包静默收窗(Main.cs:46444)
@@ -426,8 +431,8 @@ describe('SW-FX41b 详情浮层容器相对系+向导态显示语义(NewCrafting
   it('向导态点选已选格不合成(Main.cs:42988 focusRecipe==recipeIndex && guideItem.IsAir 门;else-if(flag) 臂仅音 12)', () => {
     expect(uiSrc).toContain("if (this.guidePlaced) { this.game.sfx.play('menuTick', 1); return; }");
   });
-  it('modern 窗开 = 吸附步进停摆(Main.cs:42418-42428 NewCraftingUI.Visible → else 分支 DrawRecipesList/AdjustRecipeOffsets 不画;窗关 PipsFastScroll 首拍瞬吸清账)', () => {
-    expect(uiSrc).toMatch(/if \(!this\.vinvModernCraftOpen\) \{\s*\n\s*this\.vinvCraftGlideAcc \+= dt \/ \(1000 \/ 60\);/);
+  it('modern 窗开 = 吸附步进停摆(Main.cs:42418-42428 NewCraftingUI.Visible → else 分支 DrawRecipesList/AdjustRecipeOffsets 不画;窗关 PipsFastScroll 首拍瞬吸清账;★重铸态同支 !InReforgeMenu 步进同停)', () => {
+    expect(uiSrc).toMatch(/if \(!this\.vinvModernCraftOpen && !this\.vinvReforgeVisible\(\)\) \{\s*\n(?:\s*\/\/[^\n]*\n)*\s*this\.vinvCraftGlideAcc \+= dt \/ \(1000 \/ 60\);/);
   });
 });
 
@@ -466,5 +471,49 @@ describe('SW-FX41 守恒:FX30 基线共存(两态共存回归)', () => {
     const mod = read('src/ui/modernCrafting.ts');
     expect(mod).not.toMatch(/document\.|window\.|addEventListener/);
     expect(statSync(join(ROOT, 'src/ui/modernCrafting.ts')).size).toBeGreaterThan(8000);
+  });
+});
+
+// ============================================================
+// FX43b 滚轮手感三面同构(热栏/网格/经典列表;用户实报「modern 窗滚很远才动」)
+// ============================================================
+describe('SW-FX43b 滚轮三面同构:热栏(Input._wheelPxCarry)/网格(vinvModernWheelPendPx)/经典列表(vinvCraftWheelPendPx) 同一 RB14d/FX51 余数累计器语义', () => {
+  // 原版语义:ScrollWheelValue 跨事件累计(PlayerInput.cs:1407)→ 帧差分 /120 量化
+  //  (:901-902,Main.cs:17593)。Chrome ±100px/notch 重映射下逐事件 trunc 整类吞零。
+  const model = (deltas: number[]): number[] => {   // RB14d 累计器转录(事件界量化)
+    let carry = 0; const out: number[] = [];
+    for (const d of deltas) {
+      carry += d;
+      const n = Math.trunc(-carry / 120);
+      if (n !== 0) { carry += n * 120; out.push(n); } else out.push(0);
+    }
+    return out;
+  };
+  it('手感等价:Chrome 3×100px 下滚 = 300px→2 档(第 2 拍起;旧逐事件 trunc 面恒 0=迟滞根因),余数跨事件留置', () => {
+    expect(model([100, 100, 100])).toEqual([0, -1, -1]);        // 300px→2 档,余 60
+    expect(model([100, 100, 100, 100])).toEqual([0, -1, -1, -1]);
+    expect(model([120, 120])).toEqual([-1, -1]);      // OS 原生 120/notch 一拍一档不回退
+  });
+  it('源锁:modern 面走「px 累计 → vanillaWheelNotches(carry) → 整档消费余数留置」(逐事件量化面退役);热栏/经典列表两基准面不回退', () => {
+    const ui = read('src/ui/UI.ts');
+    const fn = ui.slice(
+      ui.indexOf('private vinvModernScrollBy'),
+      ui.indexOf('private vinvModernGridGeometry'),
+    );
+    expect(fn).toContain('this.vinvModernWheelPendPx += wheelEventPx(e.deltaY, e.deltaMode);');
+    expect(fn).toContain('const notches = vanillaWheelNotches(this.vinvModernWheelPendPx);');
+    expect(fn).toContain('this.vinvModernWheelPendPx += notches * 120;');   // 消费整档余数留置
+    expect(fn).not.toContain('vanillaWheelNotches(e.deltaY');               // 逐事件量化退役
+    expect(ui).toContain('this.vinvModernWheelPendPx = 0;');                // 面板重建清零(经典面同律)
+    expect(ui).toContain('this.vinvCraftWheelPendPx += wheelEventPx(e.deltaY, e.deltaMode);');   // 经典列表基准面
+    const input = read('src/core/Input.ts');
+    expect(input).toContain('this._wheelPxCarry -= wheelEventPx(e.deltaY, e.deltaMode);');       // 热栏基准面(FX51)
+    expect(input).toContain('Math.trunc(this._wheelPxCarry / 120)');
+  });
+  it('符号/量纲:共享 vanillaWheelNotches(deltaMode 归一;XNA 上滚为正)', () => {
+    expect(vanillaWheelNotches(-100, 0)).toBe(0);      // 子档拍零位移(累计器面留置)
+    expect(vanillaWheelNotches(-120, 0)).toBe(1);
+    expect(vanillaWheelNotches(120, 0)).toBe(-1);
+    expect(vanillaWheelNotches(4, 1)).toBe(-1);        // 行模式 4 行×40=160>120
   });
 });

@@ -100,7 +100,8 @@ import {
   cultistArcherStandbyAI, cultistArcherWake, phantomAI, bigMimicAI,
   mothronAI, mothronEggAI, babyMothronAI, graniteElementalAI,
   starCellAI, smallStarCellAI, flowInvaderAI, nebulaFloaterAI, solarSlimeAI,
-  crawltipedeAI, lunarLocalAI, VortexPortalProj,
+  crawltipedeAI, lunarLocalAI, VortexPortalProj, drakomireBreathAI, solarFlareAI,
+  unitYRotatedByRandom,
 } from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
@@ -110,6 +111,7 @@ import {
   attemptToFindTeleportSpotNearBooks,
   psychoStealthStep, nailheadHitScatter, butcherKbStep, possessedStep, fritzPounceStep,
   stormDiverStep, FIGHTER_NO_DOOR, FIGHTER_DOOR_WHITELIST, alienFlightStep, getChaseResults, factorAcceleration,
+  alienLarvaMaturationStep,
 } from './fighterFamilies';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -1252,9 +1254,47 @@ export class Enemy extends Entity {
       if (sharedLife) s.realLifeHost = head;
       segs.push(s);
     }
+    // ★RB31:共享池族头自指(原版建链块给头写 realLife=whoAmI——NPC.cs:51703/51738/
+    //   51776/51800/51824/51852/:51897;头 realLife≥0 ⇒ checkDead 首行 :78846 第二支
+    //   豁免+魂镰 DoT 免疫门 NPC.cs:92802 覆盖;毁灭者/千足蜈蚣两处已显式 self 同式)
+    if (sharedLife) head.realLifeHost = head;
     return segs;
   }
 
+  /** SetDefaults alpha/color 复位面（NPC.cs:8553 `alpha = 0` / :8554 `color = default`
+   *  → per-type 终值）。fromVanilla 出生与 tryTransformTo 变身（★BJ101 尾刀
+   *  2026-09-16）共用单源——原版 Transform → SetDefaults(newType)（:81921）全链重跑
+   *  会复位这两面，旧实现变身保留旧 spawnAlpha/alphaFade/colorRGBA：
+   *  EoW 身段晋升（Transform(13),1457 NPC.cs:52057）不重渐显 + AI_006 尾段尘 14 死链（渐显段
+   *  alphaFade 门）、净Id变体史莱姆（-3/-4/-7 由 AI 直写 color）微光化 676 后残色。
+   *  1458 对拍：SetDefaults 头段 :8449-8475 / Transform :81909-81970 / AI_006 尾段
+   *  :52797-52820 三区 byte-diff 全等（2026-09-16）。
+   *  消费面：spawnAlpha/colorRGBA 渲染链（drawEnemy Opacity + GetColor 二次绘制、
+   *  slimeColorTick 踩漆 lerp、掉落 drop.color）。
+   *  dontCountMe（:8472 复位→per-type）本仓无 per-instance 位——由
+   *  NPC_DONT_COUNT_ME_1457 静态表按当前 vanillaId 求值隐式跟随（雷达谓词唯一读点,
+   *  InfoAccs.ts；vanilla 31 处写点全在 SetDefaults 主体块内=按型常量,同构）。 */
+  private initSetDefaultsAlphaColor(id: number, v: VanillaNpc): void {
+    this.alphaFade = false;   // ★变身复用须显式归零（fromVanilla 新实体字段缺省 false 等价）
+    this.spawnAlpha = NPC_STATIC_ALPHA[id] ?? v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255；2026-08-20 补全表：史莱姆 175 等曾恒 0=浊暗）
+    // alpha=255 = 出生全透明渐显标记（13-15 世吞 / 134-136 毁灭者；其余 alpha 为
+    // 静态不透明度,勿动）：置 alphaFade 交渐显路径逐 tick 减回 0。EoW 族保持原版
+    // 初值 255（AI_006 尾段 :52650-52670 移动门 -42/t，见 fixedUpdate 渐显段）；
+    // 134-136 毁灭者同保 255 但【不置 alphaFade】——AI_037 链门淡入（头恒过/
+    // 段须前段<128、无条件 -42/t+红尘 182，:50162-50182，destroyerAI 内）接管，
+    // 通用 -1/t 近似对其已退役；其余 alpha=255 族沿用 254 起步走 -1/t 近似
+    if (this.spawnAlpha >= 255) {
+      if (id >= 134 && id <= 136) { /* 保持 255 初值，AI_037 链门淡入接管 */ }
+      // 586 僵尸人鱼出水演出（F16，NPC.cs:56445-56466）：保持 255 初值，fighterAI 内
+      // 首帧 TargetClosest+vy=-6+35 尘爆发后 −15/t 渐显（alpha==255 门须原值）
+      else if (id === 586) { /* fighterAI 586 出水演出接管 */ }
+      // 621-623 血鳗鱼（SetDefaults alpha=255）：AI_006 头段链门渐显 -42/t
+      // （:51399-51421）保持 255 原值起步（勿走通用 254/-1t 近似）
+      else if (id >= 621 && id <= 623) { this.alphaFade = true; }
+      else { this.alphaFade = true; this.spawnAlpha = (id >= 13 && id <= 15) ? 255 : 254; }
+    }
+    this.colorRGBA = v.color ? [v.color[0], v.color[1], v.color[2], v.color[3] ?? 255] : null; // 原版 color 字段
+  }
 
   /** 用原版数据造怪：属性/碰撞/音效全部来自 SetDefaults 提取值 */
   static fromVanilla(id: number, x: number, y: number): Enemy | null {
@@ -1385,24 +1425,7 @@ export class Enemy extends Entity {
     // （ScaleStats.getGoodAdjustments :17945/:17950/:17955）。原版两处消费
     // （染色门 :92026 / 鞭标 VFX 门 :92135）本仓均未移植——字段先行保数据链一致
     e.canDisplayBuffs = seedS.canDisplayBuffs !== false;
-    e.spawnAlpha = NPC_STATIC_ALPHA[id] ?? v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255；2026-08-20 补全表：史莱姆 175 等曾恒 0=浊暗）
-    // alpha=255 = 出生全透明渐显标记（13-15 世吞 / 134-136 毁灭者；其余 alpha 为
-    // 静态不透明度,勿动）：置 alphaFade 交渐显路径逐 tick 减回 0。EoW 族保持原版
-    // 初值 255（AI_006 尾段 :52650-52670 移动门 -42/t，见 fixedUpdate 渐显段）；
-    // 134-136 毁灭者同保 255 但【不置 alphaFade】——AI_037 链门淡入（头恒过/
-    // 段须前段<128、无条件 -42/t+红尘 182，:50162-50182，destroyerAI 内）接管，
-    // 通用 -1/t 近似对其已退役；其余 alpha=255 族沿用 254 起步走 -1/t 近似
-    if (e.spawnAlpha >= 255) {
-      if (id >= 134 && id <= 136) { /* 保持 255 初值，AI_037 链门淡入接管 */ }
-      // 586 僵尸人鱼出水演出（F16，NPC.cs:56445-56466）：保持 255 初值，fighterAI 内
-      // 首帧 TargetClosest+vy=-6+35 尘爆发后 −15/t 渐显（alpha==255 门须原值）
-      else if (id === 586) { /* fighterAI 586 出水演出接管 */ }
-      // 621-623 血鳗鱼（SetDefaults alpha=255）：AI_006 头段链门渐显 -42/t
-      // （:51399-51421）保持 255 原值起步（勿走通用 254/-1t 近似）
-      else if (id >= 621 && id <= 623) { e.alphaFade = true; }
-      else { e.alphaFade = true; e.spawnAlpha = (id >= 13 && id <= 15) ? 255 : 254; }
-    }
-    e.colorRGBA = v.color ? [v.color[0], v.color[1], v.color[2], v.color[3] ?? 255] : null; // 原版 color 字段
+    e.initSetDefaultsAlphaColor(id, v);   // alpha/color 复位面单源（★BJ101 尾刀：变身同参复用）
     // 266 克脑 SetDefaults :12372 dontTakeDamage=true——一阶段（爬行者存活）不可击，
     // AI_054 二阶段入场段 :32589 自行解除（存档载入即二阶段也由该段下一 tick 清除）
     if (id === 266) e.dontTakeDamage = true;
@@ -2227,7 +2250,13 @@ export class Enemy extends Entity {
         case 62: elfCopterAI(this, game, p); break;                       // AI_062 玩具直升机 347（cs:34155 近距悬停点射）
         case 63: flockoAI(this, game, p); break;                          // AI_063 弗洛科 352（cs:34208 追踪+旋冲）
         case 38: snowmanAI(this, game, p); break;                         // AI_038 雪人三兄弟 143/144/145（cs:29115 跳扑/停顿/雪球）
-        case 9: bouncingBallAI(this, game, p); break;                     // AI_009 弹跳球族 25/30/33/112/516/665/666（cs:21349 直飞球）
+        case 9:
+          // 516 太阳耀斑走专属支（AI_009 内 type==516 段 NPC.cs:21463-21481 + :21582-21600
+          // ——火蜥蜴 415 喷火产物：出膛渐隐 alpha→220 + 锥形出膛 + 15 步进追踪 + 擦墙/
+          // 近身 20px 自爆；曾误入弹跳球族通用档 = 516 永不爆且追踪全缺）
+          if (this.vanillaId === 516) solarFlareAI(this, game, p);
+          else bouncingBallAI(this, game, p);                             // AI_009 弹跳球族 25/30/33/112/665/666（cs:21349）
+          break;
         // ---- 火星疯狂族 1:1（bossAI_martian.ts）----
         case 80: martianProbeAI(this, game, p); break;                    // AI_080 火星探测器 399（cs:38129 逃逸→StartInvasion(4)）
         case 76: martianSaucerAI(this, game, p); break;                   // AI_076 火星飞碟核心 395（cs:36322 600t 六窗口+部件生成）
@@ -4982,6 +5011,16 @@ export class Enemy extends Entity {
       this.reflectsProjectiles = false;
       this.takenDamageMultiplier = 1;
     }
+    // ---- 415 火蜥蜴喷火（AI_003_Fighters cs:57362-57430 type==415 段）：喷吐风停段
+    //  原版 return 跳过行走/跳跃链（三拍 -18/-26/-34 各撒尘 259 + 权威端生 516），
+    //  待机/冷却段照走行走链；场上 516 >6 → 冷却 90 ----
+    if (this.vanillaId === 415 && drakomireBreathAI(this, game, rawPlayer)) {
+      return;
+    }
+    // ---- 428 外星幼虫 / 427 外星蜂 羽化变身（cs:57431-57468 AI_003 顶层段，不拦截
+    //  行走链）：428 满龄 300t + 3×2 净空 → Transform(427)；427 满龄 1200t
+    //  （1+|vx|/2 累计）+ 5×5 净空 → Transform(426)；蜂群升级链主干 ----
+    alienLarvaMaturationStep(this, game);
     const dir = this.facing;
     // 前方探测点（1457 :60545-60550）：默认体中心前 15px、脚底上 15px；宽探针 19 型
     // （109/163/164/199/236/239/257/258/290/391/425/426/427/580/508/415/530/532/582）
@@ -5511,8 +5550,12 @@ export class Enemy extends Entity {
             }
           } else if (vidR === 409) {
             // 闪爆虫（:59981-59985）：发射 = 生 NPC 410 子弹星，速度 (vx, −6+vy)
+            // ★Bottom 锚（NPC.cs:81621 NewNPC nPC.Bottom=(Center.X, Center.Y)）：
+            //  左上 = (cx−w/2, cy−h/2)——曾以 (cx, cy) 直传顶左 = 半盒右下偏移 11/13px
             const star = Enemy.fromVanilla(410, this.cx, this.cy);
             if (star) {
+              star.x = this.cx - star.w / 2;
+              star.y = this.cy - star.h / 2;
               star.vx = vx;
               star.vy = -6 + vy;
               addEnemy(game, star);
@@ -6302,7 +6345,8 @@ export class Enemy extends Entity {
     // 击杀链 `vanillaNetId!==0 ? netId : id`（Game.onEnemyKilled killAchId/图鉴
     // killNetId/旗 recordBannerKill/Enemy.hurt lastCreatureHit 四消费点）全按 195 计：
     // DECEIVER_OF_FOOLS（NPCKilledCondition 196,AchievementInitializer.cs:207）永不
-    // 完成、宁芙旗（BannerID()=netID,NPC.cs:7672）不进账。原版 Transform 后 netID 恒
+    // 完成、图鉴 killNetId 错账(★RB31 勘误:旗半边不成立——BannerSystem.cs:618-620
+    // case 195/196 同旗 80,旗/lastCreatureHit 修复前后照样进账)。原版 Transform 后 netID 恒
     // 等于新 type（恒正 id），本仓编码 0≙"无变体=vanillaId"（四消费点统一
     // `!==0 ? netId : id` 归一，Enemy.ts:14109 同惯例）→ 置 0 即 1:1。
     this.vanillaNetId = 0;
@@ -6350,6 +6394,26 @@ export class Enemy extends Entity {
     // Transform 换音组（如蝙蝠 158→吸血鬼 159 换 NPCHit/Death）同样预热——
     // 变形态首击的懒加载竞态与出生路径同构
     enemySoundPrewarm?.([...this.def.hitSound, ...this.def.killedSound]);
+    // ★BJ101 尾刀（2026-09-16）：SetDefaults 其余复位面随刀——alpha/color/dontCountMe/
+    // TargetClosest（各自在 Transform :81909-81970 变身序内的锚）：
+    //  - alpha/color：SetDefaults :8553 alpha=0 / :8554 color=default → per-type 终值
+    //    （13/14/15 :8949/:8969/:8989 =255；color 全库仅 1/16/537 三型 :8611/:9003/
+    //    :15897，本仓数据面未提取=登记债）。旧实现变身保留旧 spawnAlpha/alphaFade/
+    //    colorRGBA → EoW 身段晋升（Transform(13),1457 :52057/:52061）不重渐显 + AI_006 尾段尘 14
+    //    死链（渐显段 alphaFade 门 Enemy.ts:2333）、净Id变体史莱姆残色二次绘制。
+    //    与 fromVanilla 出生初始化单源 initSetDefaultsAlphaColor（fx43 双源防漂移）。
+    //  - dontCountMe：:8472 复位=false → per-type（14/15 等 32 id 置 true）。本仓无
+    //    per-instance 位——NPC_DONT_COUNT_ME_1457 静态表按当前 vanillaId 求值（雷达
+    //    谓词唯一读点），上一行换 id 即隐式复位（vanilla 31 处写点全在 SetDefaults
+    //    主体块内=按型常量，表求值与字段复位同构；tests/transform-setdefaults-tail 有行为锁）。
+    this.initSetDefaultsAlphaColor(id, v);
+    //  - TargetClosest（:81926，SetDefaults ClearTarget 后重建）：变身即重索敌。本仓
+    //    架构 targetClosest 每 AI tick 于 fixedUpdate 头刷新（:2069）且只选目标不抢
+    //    朝向（facing 由各 AI 族 seekDirX 消费——鱼链 retarget 补的是朝向半边）；此处
+    //    补 :81926 的【同拍】重选。旧实现变身沿用旧 targetPlayer 一拍：单人单候选退化
+    //    零观察，联机平距边例 1 拍窗。game 缺省（无 game 的调用点/测试桩）= 下拍头
+    //    targetClosest 承接（原版语义下拍同值）。
+    if (game) this.targetClosest(game);
     this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
     this.transformVisuals(game, oldType, id);
     return true;
@@ -13359,11 +13423,19 @@ export class Enemy extends Entity {
   }
 
   /** AI_094 星璇四塔（NPC.cs:41029-41443，1:1）。塔 = NPC（非 tile entity）。
-   *  原版 dontTakeDamage（盾>0 完全免伤，:41162-41176 每 tick 重算）用 iframes=2 每 tick
-   *  刷新近似（同 bossAI 克脑一阶段先例）。血尽先由 hurt() 转 ai2=1 死亡演出（checkDead
+   *  原版 dontTakeDamage（盾>0 完全免伤，:41162-41176 每 tick 重算）= 真 dontTakeDamage
+   *  全通道闸（R23b-P1 落刀,见下方 §3——旧「iframes=2 每 tick 刷新近似」被 pierce===1
+   *  单发弹绕过,已退役）。血尽先由 hurt() 转 ai2=1 死亡演出（checkDead
    *  :78867-78875），180t 渐隐后走标准死亡管线（碎片掉落/塔灭公告）。
-   *  分塔支线（493 星尘标记/422 星旋传送门/517 日耀耀斑）按文档简化许可折叠为
-   *  "直接在标记点 spawnNPC"（540/578/579 传送门演出二期补） */
+   *  分塔支线【已全量实装】（旧头注「按文档简化许可折叠为直接 spawnNPC/传送门演出
+   *  二期补」失真,BJ112-c 清债 2026-09-17 更真;实装清单见 §7 :13559-13660）：
+   *  · 493 星尘 = 真 540 标记链（StardustMarkProj.spawnStardustMarks 'tower' 档,
+   *    :44142-44228,「折叠直生」已退役）
+   *  · 422 星旋 = 玩家头顶门+空中随机点门双支线（578/579=VortexPortalProj,90t 演出
+   *    门,!CanHitLine 视线门;1458 :39694-39737 支线 b 在位）
+   *  · 517 日耀 = 塔顶直投 519（RotatedByRandom 斜抛）
+   *  · 507 星云 = 仅环境尘（ai1 无消费面,怪全靠 Zone 刷怪表）
+   *  · 四塔共用 = 环境尘（柱身 241+顶晶分塔 id/黑染色）+ 死亡演出尘（towerDeathDust） */
   private towerAI(game: GameHooks, player: Player | null) {
     const w = game.world;
     const key = TOWER_KEY[this.vanillaId ?? -1];
@@ -13397,24 +13469,17 @@ export class Enemy extends Entity {
         const opacity = Math.max(0, 1 - (this.ai1 - 120) / 60);
         this.spawnAlpha = Math.round((1 - opacity) * 255);
       }
-      // 分塔爆散尘（:41048-41117：三组粒子 + 241 白尘；此处按塔色近似两组）
-      const dustCol = this.vanillaId === 517 ? '#FFB060' : this.vanillaId === 422 ? '#8CE8C8'
-        : this.vanillaId === 507 ? '#E070E0' : '#7CB8FF';
-      if (Math.random() < 0.2 && this.ai1 < 120) {
-        game.spawnParticles(this.cx + (Math.random() - 0.5) * this.w, this.cy, dustCol, 3, 1.2,
-          { life: 40, grav: -0.02 });
-      }
-      if (Math.random() < 0.2 && this.ai1 < 150) {
-        game.spawnParticles(this.cx, this.y - 20, dustCol, 6, 2.4, { life: 40, grav: -0.05 });
-        game.spawnParticles(this.cx, this.cy, '#F0F0F0', 1, 0.8, { life: 30, grav: 0.02 });
-      }
-      // 每 60t 音效（:41118-41121）= PlaySound(4,…,22) = **NPC_Killed_22**(case4 死音
-      // 库)——曾误配 Killed_1+Unlock 双音(旧批查的是 aiStyle 92 木桩段,终审修)
+      // 分塔演出尘（1457 :39375-39444 逐组 1:1；1458 同域 diff 零变更）——四组全走
+      // 原版 Dust 池（towerDeathDust），dustId 分塔（:39375-39389 switch 序）：
+      // 日耀 127 / 星旋 229 / 星云 242 / 星尘 135（柱体环境尘是 6/229/242/135，
+      // 死亡演出日耀换 127=柱身白烟同族）。BJ109-D 登记的「三组折二组+塔色 hex
+      // 近似」在本刀清偿。爆散声在组 3 内逐处播（每 tick 0-3 次，:39435）。
+      const ddust = this.vanillaId === 517 ? 127 : this.vanillaId === 422 ? 229
+        : this.vanillaId === 507 ? 242 : this.vanillaId === 493 ? 135 : 6;
+      this.towerDeathDust(game, ddust);
+      // 每 60t 音效（1457 :39445-39448）= PlaySound(4,…,22) = **NPC_Killed_22**(case4
+      // 死音库)——曾误配 Killed_1+Unlock 双音(旧批查的是 aiStyle 92 木桩段,终审修)
       if (this.ai1 % 60 === 1) game.playSfxWav?.('NPC_Killed_22', 1, this.cx, this.cy);
-      // 1/5 随机爆散声（:41108）= PlaySound(3, SelectRandom(1,18)) → NPC_Hit_1/18 池
-      if (this.ai1 < 120 && Math.floor(Math.random() * 5) === 0) {
-        game.playSfxWav?.(Math.random() < 0.5 ? 'NPC_Hit_1' : 'NPC_Hit_18', 1, this.cx, this.cy);
-      }
       this.x += this.vx;
       this.y += this.vy;
       if (this.ai1 >= 180) {
@@ -13501,7 +13566,9 @@ export class Enemy extends Entity {
 
     // ---- 7. 分塔支线 ----
     if (this.vanillaId === 493) {
-      // 星尘（:41257-41286）：环境尘略；SpawnStardustMark_StardustTower（:44142-44228）
+      // 星尘（1456 :41257-41286 = 1457 :39584-39603）：环境尘（柱身 241 + 顶晶 135）
+      // + SpawnStardustMark_StardustTower（:44142-44228）
+      this.towerEnvDust(game, 135, false);
       if (this.ai1 > 0) this.ai1--;
       if (this.ai1 <= 0 && player && !player.dead
         && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 400) {
@@ -13513,7 +13580,9 @@ export class Enemy extends Entity {
         this.ai1 = marks ? 30 * (5 + ((Math.random() * 11) | 0)) : 30;   // 30*Next(5,16) / :44225-44227
       }
     } else if (this.vanillaId === 422) {
-      // 星旋（:41310-41406）：玩家头顶传送门 + 空中随机点传送门（均先 90t 门演出再开门）
+      // 星旋（1456 :41310-41406 = 1457 :39637-39734）：环境尘（柱身 241 + 顶晶 229
+      // 黑染色）+ 玩家头顶传送门 + 空中随机点传送门（均先 90t 门演出再开门）
+      this.towerEnvDust(game, 229, true);
       if (this.ai1 > 0) this.ai1--;
       // 支线 a（:41336-41361）：3240px 内且【塔→玩家视线被阻】(!CanHitLine) → 玩家头顶门；
       // n428+n427+n426<14 → 579 门（90t 后生 2× Alien Hornet 427，VortexPortalProj）否则
@@ -13575,7 +13644,9 @@ export class Enemy extends Entity {
         }
       }
     } else if (this.vanillaId === 517) {
-      // 日耀（:41431-41443）：1080px 内且低于塔顶 700px → 塔顶直投 519（斜抛 7-12px/t）
+      // 日耀（1456 :41431-41443 = 1457 :39736-39761）：环境尘（柱身 241 + 顶晶 6）
+      // + 1080px 内且低于塔顶 700px → 塔顶直投 519（斜抛 7-12px/t）
+      this.towerEnvDust(game, 6, false);
       if (this.ai1 > 0) this.ai1--;
       if (this.ai1 <= 0 && player && !player.dead
         && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 700) {
@@ -13590,13 +13661,141 @@ export class Enemy extends Entity {
         }
         this.ai1 = 60;
       }
+    } else if (this.vanillaId === 507) {
+      // 星云（1456 :41287-41309 = 1457 :39614-39636）：仅环境尘（柱身 241 + 顶晶 242
+      // 黑染色）——ai1 无消费面，怪全靠 Zone 刷怪表
+      this.towerEnvDust(game, 242, true);
     }
-    // 507 星云仅环境粒子（:41287-41309），怪全靠 Zone 刷怪表——略
 
     // noTileCollide + noGravity：直接位移（原版速度由引擎积分）
     this.x += this.vx;
     this.y += this.vy;
     this.onGround = false;
+  }
+
+  /** Vector2.UnitY.RotatedByRandom(maxRadians)（Utils.cs:1785-1787：NextDouble×max −
+   *  NextDouble×max = 对称【三角分布】，orchestraFx F6 清偿同式）——RotatedBy 矩阵
+   *  [x·c−y·s, x·s+y·c] 作用于 (0,1) → (−sin a, cos a)。
+   *  ★BJ112-④ 单源收编：实现委托 bossAI_lunar_misc.unitYRotatedByRandom——415 喷火
+   *  尘 / 516 出膛角 / 428 分裂初速三处消费与塔尘族共用同一掷（旧三处 uniform 已收编）。 */
+  private towerRotSpread(maxRadians: number): [number, number] {
+    return unitYRotatedByRandom(maxRadians);
+  }
+
+  /** 四柱环境尘（每 tick，1457 :39584-39603 星尘 / :39614-39636 星云 / :39637-39660
+   *  星旋 / :39736-39761 日耀；四段同构仅两参不同，1458 同域 diff 零变更）：
+   *  ① 1/5 柱身 241 白烟——NewDust(Left, w, h/2, 241) 后 position 覆写为
+   *     Center + UnitY.RotatedByRandom(2π/3)×(w/2, h/2)×(0.8..1)（:39589）、vx=0、
+   *     vy=|NewDust 抖 vy|×0.25（:39591）；241 不在烟雾族初速表（Dust.cs:216-222），
+   *     抖 vy 是原始 ±2 域。
+   *  ② 顶晶 3 连掷各 1/5——盒 Top+(−w·(0.33−0.11i), −20) 宽 (int)(w·(0.66−0.22i))×20
+   *     随 i 收窄；vx=0、vy=−|抖 vy−i+悬停 vy−4|（×1 :39599）、noGravity、fadeIn=1、
+   *     scale=1+rand+i·0.3（覆写 NewDust 结果，含烟雾族 ×0.7 :39602）。分塔尘 id：
+   *     493→135 / 507→242 / 422→229 / 517→6；507/422 两柱 dust.color=Color.Black
+   *     黑染色（:39632/:39655）。 */
+  private towerEnvDust(game: GameHooks, crystalDust: number, blackTint: boolean): void {
+    if (Math.floor(Math.random() * 5) === 0) {          // Main.rand.Next(5) == 0（:39586）
+      const d = game.spawnDust?.(this.x, this.cy, this.w, this.h / 2, 241);
+      if (d) {
+        const m = 0.8 + Math.random() * 0.2;            // :39589 尺度因子（两轴共享单掷）
+        const [rx, ry] = this.towerRotSpread(2.094395160675049);
+        d.x = this.cx + rx * (this.w / 2) * m;
+        d.y = this.cy + ry * (this.h / 2) * m;
+        d.vx = 0;                                       // :39590
+        d.vy = Math.abs(d.vy) * 0.25;                   // :39591（读 NewDust 抖 vy）
+      }
+    }
+    for (let i = 0; i < 3; i++) {                       // :39593 顶晶 3 连掷
+      if (Math.floor(Math.random() * 5) !== 0) continue;
+      const d = game.spawnDust?.(this.cx - this.w * (0.33 - 0.11 * i), this.y - 20,
+        Math.trunc(this.w * (0.66 - 0.22 * i)), 20, crystalDust);
+      if (!d) continue;
+      d.vx = 0;                                         // :39598
+      d.vy = -Math.abs(d.vy - i + this.vy - 4);         // :39599（this.vy=悬停 ±0.5）
+      d.noGravity = true;                               // :39600
+      d.fadeIn = 1;                                     // :39601
+      d.scale = 1 + Math.random() + i * 0.3;            // :39602
+      if (blackTint) d.color = { r: 0, g: 0, b: 0, a: 255 };   // Color.Black（:39632/:39655）
+    }
+  }
+
+  /** 四柱死亡演出尘（ai2==1 每 tick，1457 :39375-39444 逐组 1:1；1458 同域 diff 零变更）。
+   *  dustId 分塔：517→127 / 422→229 / 507→242 / 493→135（:39375-39389）。四组：
+   *  ① 柱身 3 粒（1/5 且 ai1<120 :39391）——位 Center±RotatedByRandom(4π/3)×
+   *     (w×1.5, h×1.1)×0.8×(0.8..1)（:39396）、vx=0、vy=−|抖 vy−i+上升 vy−4|×3
+   *     （:39398）、noGravity/fadeIn=1/scale=1+rand+i·0.3（:39401）；
+   *  ② 顶晶 3 掷各 1/4（ai1<150 :39404）——同环境顶晶盒；vy×(1+ai1/180×0.5) 渐强
+   *     （:39412）；位不覆写（留 NewDust 盒抖）；
+   *  ③ 爆散 3 处×6 粒（1/5 且 ai1<150 :39419）——处位 Center±Rot(4π/3)×(w,h)×0.7×rand
+   *     （:39423）、功率 num1372=1+rand×2+ai1/180×4（:39424）、粒位=处位（:39428）、
+   *     vx=抖 vx×功率 / vy=−|抖 vy|×功率（:39429-39430）、scale=1.5+rand+j·0.13
+   *     （:39433）；逐处 PlaySound(3, SelectRandom(1,18))（:39435 → NPC_Hit_1/18 各半）；
+   *  ④ 241 白烟（2/3 且 ai1<150 :39438）——同①盒；位 Center±Rot(4π/3)×(w/2,h/2)×
+   *     (0.8..1)（:39441）、vx=0、vy=|抖 vy|×0.25（:39443）。 */
+  private towerDeathDust(game: GameHooks, dustId: number): void {
+    // ① 柱身（:39391-39404）
+    if (Math.floor(Math.random() * 5) === 0 && this.ai1 < 120) {
+      for (let i = 0; i < 3; i++) {
+        const d = game.spawnDust?.(this.x, this.cy, this.w, this.h / 2, dustId);
+        if (!d) continue;
+        const m = 0.8 * (0.8 + Math.random() * 0.2);    // :39396 ×0.8×(0.8..1)
+        const [rx, ry] = this.towerRotSpread(4.188790321350098);
+        d.x = this.cx + rx * (this.w * 1.5) * m;
+        d.y = this.cy + ry * (this.h * 1.1) * m;
+        d.vx = 0;                                       // :39397
+        d.vy = -Math.abs(d.vy - i + this.vy - 4) * 3;   // :39398（this.vy=上升钳值）
+        d.noGravity = true;
+        d.fadeIn = 1;
+        d.scale = 1 + Math.random() + i * 0.3;          // :39401
+      }
+    }
+    // ② 顶晶（:39404-39419）
+    if (this.ai1 < 150) {
+      for (let i = 0; i < 3; i++) {
+        if (Math.floor(Math.random() * 4) !== 0) continue;   // Main.rand.Next(4) == 0
+        const d = game.spawnDust?.(this.cx - this.w * (0.33 - 0.11 * i), this.y - 20,
+          Math.trunc(this.w * (0.66 - 0.22 * i)), 20, dustId);
+        if (!d) continue;
+        d.vx = 0;                                       // :39411
+        d.vy = -Math.abs(d.vy - i + this.vy - 4) * (1 + this.ai1 / 180 * 0.5);   // :39412
+        d.noGravity = true;
+        d.fadeIn = 1;
+        d.scale = 1 + Math.random() + i * 0.3;          // :39415
+      }
+    }
+    // ③ 爆散（:39419-39437）
+    if (Math.floor(Math.random() * 5) === 0 && this.ai1 < 150) {
+      for (let k = 0; k < 3; k++) {
+        const m = 0.7 * Math.random();                  // :39423 ×(w,h)×0.7×rand
+        const [rx, ry] = this.towerRotSpread(4.188790321350098);
+        const bx = this.cx + rx * this.w * m;
+        const by = this.cy + ry * this.h * m;
+        const pw = 1 + Math.random() * 2 + this.ai1 / 180 * 4;   // :39424 num1372
+        for (let j = 0; j < 6; j++) {
+          const d = game.spawnDust?.(bx, by, 4, 4, dustId);      // :39427 盒 4×4
+          if (!d) continue;
+          d.x = bx; d.y = by;                          // :39428 position = vector193
+          d.vx *= pw;                                  // :39429（抖 vx×功率）
+          d.vy = -Math.abs(d.vy) * pw;                 // :39430
+          d.noGravity = true;
+          d.fadeIn = 1;
+          d.scale = 1.5 + Math.random() + j * 0.13;    // :39433
+        }
+        game.playSfxWav?.(Math.random() < 0.5 ? 'NPC_Hit_1' : 'NPC_Hit_18', 1, bx, by);
+      }
+    }
+    // ④ 241 白烟（:39438-39444）
+    if (Math.floor(Math.random() * 3) !== 0 && this.ai1 < 150) {   // Next(3) != 0 = 2/3
+      const d = game.spawnDust?.(this.x, this.cy, this.w, this.h / 2, 241);
+      if (d) {
+        const m = 0.8 + Math.random() * 0.2;            // :39441
+        const [rx, ry] = this.towerRotSpread(4.188790321350098);
+        d.x = this.cx + rx * (this.w / 2) * m;
+        d.y = this.cy + ry * (this.h / 2) * m;
+        d.vx = 0;                                       // :39442
+        d.vy = Math.abs(d.vy) * 0.25;                   // :39443
+      }
+    }
   }
 
   /** 受击。返回是否死亡。
@@ -14123,6 +14322,52 @@ export class Enemy extends Entity {
           b.vx = (Math.random() - 0.5) * 4;
           b.vy = -3 - Math.random() * 2;
           add?.add(b, 'enemies');
+        }
+      }
+      // ---- 四柱小怪死亡分裂链（HitEffect 死亡段 life≤0 支，权威端）----
+      // 426 外星蜂后死 → 3× 外星幼虫 428（NPC.cs:83981-83996）：场上 428+427+426×3
+      //  <20 才分裂（★CountNPCS 含垂死本体——原版 active=false 在 NPCLoot 之后才置，
+      //  本仓 dead=true 已先置 → 426 项显式 +3 补回自身）；初速 -UnitY.RotatedByRandom
+      //  (2π)×Next(3,6) − UnitY×2（★三角分布 Utils.cs:1785-88,BJ112-④；★BJ112-c
+      //  清债 2026-09-17：乘数已整数化=Next(3,6) 语义{3,4,5},旧 3+rand×3 连续
+      //  浮点域外偏差已收;405 侧 3f+NextFloat()×4f 原版本就浮点,不动）；Bottom 锚
+      //  (Center.X, Center.Y)（:83989 NewNPC → :81594 nPC.Bottom=(X,Y)，BJ112-② 勘误：
+      //  旧 cy−h/2 = 中心锚半格偏低）。
+      if (this.vanillaId === 426 && !this.netPuppet) {
+        const aliveQ = (t: number) => (game.enemies() as Enemy[])
+          .filter((o) => o !== this && !o.dead && o.vanillaId === t).length;
+        if (aliveQ(428) + aliveQ(427) + (aliveQ(426) + 1) * 3 < 20) {
+          for (let k = 0; k < 3; k++) {
+            const larva = Enemy.fromVanilla(428, this.cx, this.cy);
+            if (!larva) continue;
+            larva.x = this.cx - larva.w / 2;
+            larva.y = this.cy - larva.h;                     // Bottom 锚（:83989+:81594）
+            const [rx, ry] = unitYRotatedByRandom(Math.PI * 2);   // −UnitY.RotatedByRandom(2π)（:83992）
+            const s = 3 + Math.floor(Math.random() * 3);          // Next(3,6)=整数{3,4,5}（:83992,BJ112-c）
+            larva.vx = -rx * s;
+            larva.vy = -ry * s - 2;
+            addEnemy(game, larva);
+          }
+        }
+      }
+      // 405 星细胞死 → 最多 4× 小星细胞 406（NPC.cs:84381-84405）：场上 406+405
+      //  ≥10/7/4 → 1/2/3 只，否则 4（CountNPCS 含垂死本体 → +1）；速度
+      //  UnitY.RotatedByRandom(2π)×(3+rand×4)；Bottom 锚 (Center.X, Bottom.Y)。
+      if (this.vanillaId === 405 && !this.netPuppet) {
+        const aliveC = (t: number) => (game.enemies() as Enemy[])
+          .filter((o) => o !== this && !o.dead && o.vanillaId === t).length;
+        const cnt = aliveC(406) + aliveC(405) + 1;
+        const n = cnt >= 10 ? 1 : cnt >= 7 ? 2 : cnt >= 4 ? 3 : 4;
+        for (let k = 0; k < n; k++) {
+          const mini = Enemy.fromVanilla(406, this.cx, this.y + this.h);
+          if (!mini) continue;
+          mini.x = this.cx - mini.w / 2;
+          mini.y = this.y + this.h - mini.h;
+          const a = Math.random() * Math.PI * 2;
+          const s = 3 + Math.random() * 4;
+          mini.vx = -Math.sin(a) * s;
+          mini.vy = -Math.cos(a) * s;
+          addEnemy(game, mini);
         }
       }
       // 蠕虫任一段死亡 → 整链同死（原版 realLife 共享生命，L18152-18156）

@@ -863,6 +863,61 @@ export function fritzPounceStep(e: Enemy, p: Player | null): void {
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// 428 外星幼虫 / 427 外星蜂 羽化变身段（AI_003_Fighters 顶层 type 段，
+//   NPC.cs:57431-57468——非移动链分支，每 tick 无条件跑，之后照走行走链）：
+//   428 幼虫 lai0 1/t；≥300 且 3×2 格净空（(x/16)-1..+1, (y/16)-1..y）→
+//   life=lifeMax + Transform(427)（:57437-57445），lai0 归零；
+//   427 蜂 lai0 += 1 + |vx|/2；≥1200 且 5×5 格净空（(x/16)-2..+2, (y/16)-3..+1）→
+//   Transform(426)（:57447-57468）。两型同 tick 撒尘 229（noGravity/noLight），
+//   掷中概率随龄收窄（428: 16/8/4/2/1 每 60t 换档；427: 32/16/6/2/1 每 360t 换档）。
+//   变身动作与死亡分裂链（426 死 → 3×428）配对构成蜂群升级链。
+// ---------------------------------------------------------------------------
+export function alienLarvaMaturationStep(e: Enemy, game: GameHooks): void {
+  const id = e.vanillaId ?? -1;
+  if (id !== 428 && id !== 427) return;
+  const st = game.world.store;
+  const cxT = Math.floor(e.cx / TILE), cyT = Math.floor(e.cy / TILE);
+  const solidAny = (x0: number, x1: number, y0: number, y1: number): boolean => {
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        if (st.inBounds(x, y) && st.isSolid(x, y)) return true;
+      }
+    }
+    return false;
+  };
+  if (id === 428) {
+    e.lai0 += 1;                                             // :57432 localAI[0]++
+    if (e.lai0 >= 300 && !e.netPuppet
+      && !solidAny(cxT - 1, cxT + 1, cyT - 1, cyT)) {        // :57437-57439 3×2 净空
+      e.hp = e.maxHp;                                        // :57440 life=lifeMax
+      e.transformTo(427, st, false, game);                   // :57441 Transform(427)
+      e.lai0 = 0;
+      return;
+    }
+    // 尘 229（:57447-57468 掷中带 16/8/4/2/1）：position−vel×5 倒放 + X 向前 6/Y+4
+    const n = e.lai0 < 60 ? 16 : e.lai0 < 120 ? 8 : e.lai0 < 180 ? 4 : e.lai0 < 240 ? 2 : 1;
+    if (Math.floor(Math.random() * n) === 0) {
+      game.spawnDust?.(e.cx + (e.facing || 1) * 6, e.cy + 4, 0, 0, 229,
+        0, 0, 0, null, 1, true);
+    }
+  } else {
+    e.lai0 += 1 + Math.abs(e.vx) / 2;                        // :57469+1+|vx|/2
+    if (e.lai0 >= 1200 && !e.netPuppet
+      && !solidAny(cxT - 2, cxT + 2, cyT - 3, cyT + 1)) {    // :57450-57453 5×5 净空
+      e.hp = e.maxHp;                                        // :57454
+      e.transformTo(426, st, false, game);                   // :57455 Transform(426)
+      e.lai0 = 0;
+      return;
+    }
+    const n = e.lai0 < 360 ? 32 : e.lai0 < 720 ? 16 : e.lai0 < 1080 ? 6 : e.lai0 < 1440 ? 2 : 1;
+    if (Math.floor(Math.random() * n) === 0) {
+      game.spawnDust?.(e.cx, e.cy, e.w, e.h, 229, 0, 0, 0, null, 1, true);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 425 风暴潜水员（AI_003_Fighters 内 type==425 专属段，NPC.cs:58865-59013）
 //   原版与横向移动链（:57799-58598，fighterMoveStep）是两段独立 if/else-if 阶梯
 //   ——425 两段都命中（链上 num84=6 档 + 本段喷包/蓄力），故 hook 在

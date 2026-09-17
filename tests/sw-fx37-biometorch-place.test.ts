@@ -81,9 +81,9 @@ function shell(w: World, o: Opts = {}) {
 }
 
 function mkWorld(): { st: TileStore; w: World } {
-  const st = new TileStore(64, 64);
+  const st = new TileStore(64, 640);
   const w = {
-    store: st, w: 64, h: 64, flags: {}, chests: [], furnitureItems: [],
+    store: st, w: 64, h: 640, flags: {}, chests: [], furnitureItems: [],
     groundLevel: 40, seedFlags: undefined, oldOnesArmy: { ongoing: false },
   } as unknown as World;
   return { st, w };
@@ -109,6 +109,11 @@ describe('SW-FX37 群系炬自动转换：解锁后放普通炬按当期群系�
       const { st, w } = mkWorld();
       (w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
       const g = shell(w, { unlocked: true, zones: { [flag]: true } });
+      if (flag === 'zoneUnderworldHeight') {
+        g.player.y = 450 * TILE;                                        // 地狱带(像素门)
+        expect(place(st, g, 20, 449), flag).toBe(style * 22);
+        continue;
+      }
       expect(place(st, g, 20, 29), flag).toBe(style * 22);
     }
   });
@@ -117,15 +122,17 @@ describe('SW-FX37 群系炬自动转换：解锁后放普通炬按当期群系�
     const { st, w } = mkWorld();
     (w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
     const g = shell(w, { zones: { zoneDesert: true } });                       // belowSurface 未置=地表
-    expect(place(st, g, 20, 29)).toBe(16 * 22);
+    expect(place(st, g, 20, 29)).toBe(16 * 22);                                // 玩家 y=480:地表带(<640)
     const r2 = mkWorld();
     (r2.w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
     const g2 = shell(r2.w, { zones: { zoneDesert: true, belowSurface: true, zoneUndergroundDesert: true } });
-    expect(place(r2.st, g2, 20, 29)).toBe(16 * 22);
+    g2.player.y = 1000;                                                        // 地下带(>640,<7040)
+    expect(place(r2.st, g2, 20, 61)).toBe(16 * 22);                            // 放置格随玩家下移(触及域)
     const r3 = mkWorld();
     (r3.w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
     const g3 = shell(r3.w, { zones: { zoneDesert: true, belowSurface: true } });
-    expect(place(r3.st, g3, 20, 29)).toBe(0);                                  // 地下普通沙漠无炬
+    g3.player.y = 1000;
+    expect(place(r3.st, g3, 20, 61)).toBe(0);                                  // 地下普通沙漠无炬
   });
 
   it('优先级序：shimmer>dungeon>temple>underworld、hall>cor>cri、snow>jungle、dungeon>snow', () => {
@@ -142,6 +149,11 @@ describe('SW-FX37 群系炬自动转换：解锁后放普通炬按当期群系�
       const { st, w } = mkWorld();
       (w.flags as Record<string, boolean>).unlockedBiomeTorches = true;
       const g = shell(w, { zones });
+      if (k === 2) {
+        g.player.y = 450 * TILE;             // underworld 案:玩家顶缘入地狱带(像素门)
+        expect(place(st, g, 20, 449), `case ${k}`).toBe(want[k] * 22);
+        return;
+      }
       expect(place(st, g, 20, 29), `case ${k}`).toBe(want[k] * 22);
     });
   });

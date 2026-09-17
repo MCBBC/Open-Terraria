@@ -39,6 +39,14 @@ export type ScreenFxPass =
     time: number;
   }
   | { kind: 'FilterMiniTower'; color: readonly [number, number, number]; opacity: number }
+  /** ★BJ109-I：塔邻接屏幕染色（SceneState.cs:107-110 ManageSpecialBiomeVisuals
+   *  "Solar/Nebula/Vortex/Stardust"；ScreenEffectInitializer.cs:14-17 分塔预设）。
+   *  uTargetPosition=最近塔心−(0,10)（SceneState.cs:107-110 尾参）；uIntensity/
+   *  uProgress=塔盾态驱动（Main.cs:24565 盾在 UseIntensity(1+num319).UseProgress(0)/
+   *  :24584 破盾 UseIntensity(min(5,15·num320)+1).UseProgress(num320)） */
+  | { kind: 'FilterTower'; color: readonly [number, number, number]; opacity: number;
+    screenRes: [number, number]; screenPos: [number, number]; targetPx: [number, number];
+    intensity: number; progress: number; time: number }
   | { kind: 'FilterGraveyard'; intensity: number; progress: number; opacity: number }
   | { kind: 'FilterBloodMoon'; color: readonly [number, number, number]; intensity: number; opacity: number }
   | { kind: 'FilterTest2'; opacity: number }
@@ -129,6 +137,49 @@ void main() {
   vec3 lo = sum * uColor;                                         // :499
   vec3 tgt = k >= 0.0 ? hi : lo;                                  // :498,500(cmp r2.x=k/2)
   gl_FragColor = vec4(mix(s.rgb, tgt * s.a, uOpacity), 1.0); // :501-502（★v0 死参数,见 FRAG_HEAT 注）
+}`;
+
+/** ★BJ109-I FilterTower（obj9 :342-412，SceneShader.cso 反汇编直读）：目标向极坐标
+ *  sin 扫描微扰采样（dir=rel/len（len 按 ×(1.5,1) 纵横度量 c11.xy）、
+ *  amp=min(|50/(len−uProgress)|,5)×uIntensity、ph=frac(len·0.2+…)×2π−π、
+ *  采样位=dir·(sin(ph)·amp+len)+target）+ V+min 亮度度量塔色推色
+ *  （k=V+mn−1；hi=uColor+k·(1−2uColor)——与 FilterMiniTower :496-500 同度量族，
+ *  字节码 cmp r3.w 恒负→恒走 hi 支）+lerp uOpacity；尾段 tapA.b−tapC.b/tapB.g−tapC.g
+ *  两通道色差修正（:397-403，三 tap=uv→u 存插值 1/2.25/3.5）。
+ *  ★近似备案：c1/c2 相位系数（preshader 输出）按 defs 邻值以 uTime 滚动近似；
+ *  尾段两通道修正按主项重构。 */
+const FRAG_TOWER = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;      // s0
+uniform vec3 uColor;            // c5 = UseColor（ScreenEffectInitializer.cs:14-17 分塔）
+uniform float uOpacity;         // c9 = UseOpacity×Filter.Opacity
+uniform float uIntensity;       // c10 = UseIntensity（塔盾态）
+uniform float uProgress;        // c0 = UseProgress（破盾波前）
+uniform vec2 uScreenRes;        // c6
+uniform vec2 uScreenPos;        // c7
+uniform vec2 uTargetPx;         // c8 = 塔心−(0,10) 世界px
+uniform float uTime;
+void main() {
+  vec2 world = vUv * uScreenRes + uScreenPos;                     // :347-348
+  vec2 rel = world - uTargetPx;                                   // :349
+  float len = length(rel * vec2(1.5, 1.0));                       // :350-356（c11=(1.5,1,…)）
+  vec2 dir = rel / max(len, 1e-4);                                // :357
+  float amp = min(abs(50.0 / max(len - uProgress, 1e-3)), 5.0) * uIntensity; // :358-363
+  float ph = fract(len * 0.2 + uTime * 0.045) * 6.2831853 - 3.1415927; // :364-370（相位近似,备案）
+  float r2 = sin(ph) * amp + len;                                 // :371
+  vec2 duv = (dir * r2 + uTargetPx - uScreenPos) / uScreenRes;    // :372-377
+  vec4 sA = texture2D(uScreen, duv);                              // :378 tapA=全失真位
+  vec4 sB = texture2D(uScreen, vUv + 2.25 * (duv - vUv));         // :379-380 tapB（c13.z=2.25）
+  vec4 sC = texture2D(uScreen, vUv + 3.5 * (duv - vUv));          // :381-382 tapC（c13.w=3.5）
+  float V = max(max(sC.r, sC.g), sC.b);                           // :384-386
+  float mn = min(min(sC.r, sC.g), sC.b);                          // :387-389
+  float k = (V + mn) - 1.0;                                       // :390-391（c11.y=1）
+  vec3 tgt = uColor + k * ((vec3(1.0) - uColor) * 2.0 - uColor);  // :392-396（hi 支,c4=1−2uColor 近似）
+  vec3 col = mix(sC.rgb, tgt * sC.a, uOpacity);                   // :404-406
+  col.b += sA.b - sC.b;                                           // :397-399
+  col.g += sB.g - sC.g;                                           // :401-403
+  gl_FragColor = vec4(col, 1.0);
 }`;
 
 /** FilterGraveyard（obj6 :159-175）：intensity 标定灰度 + progress 去饱和 */
@@ -400,6 +451,7 @@ void main() {
 const FRAGS: Record<ScreenFxPass['kind'], string> = {
   FilterHeatDistortion: FRAG_HEAT,
   FilterMiniTower: FRAG_MINITOWER,
+  FilterTower: FRAG_TOWER,
   FilterGraveyard: FRAG_GRAVEYARD,
   FilterBloodMoon: FRAG_BLOODMOON,
   FilterTest2: FRAG_TEST2,
@@ -414,6 +466,16 @@ const FRAGS: Record<ScreenFxPass['kind'], string> = {
 
 /** 各 pass 的 GLSL 源（测试锁字节码衍生常量用；键=ScreenShader.cso pass 名） */
 export const SCREEN_FX_FRAGS: Readonly<Record<string, string>> = FRAGS;
+
+/** ★BJ109-I 四塔 FilterTower 预设（ScreenEffectInitializer.cs:14-17 1:1）：
+ *  key → UseColor + UseOpacity（塔 id 表见 LunarEvent.TOWER_IDS） */
+export const TOWER_FILTER_PRESETS: Readonly<Record<'solar' | 'vortex' | 'nebula' | 'stardust',
+  { color: readonly [number, number, number]; useOpacity: number }>> = {
+  nebula: { color: [1, 0, 0.9], useOpacity: 0.35 },    // :14（507）
+  solar: { color: [1, 0.7, 0], useOpacity: 0.3 },      // :15（517）
+  stardust: { color: [0, 0.5, 1], useOpacity: 0.5 },   // :16（493）
+  vortex: { color: [0, 0.7, 0.7], useOpacity: 0.5 },   // :17（422）
+};
 
 /** 噪声贴图（Images/Misc/noise → public/sprites/vanilla/Misc_noise.png，256²） */
 let noiseImage: HTMLImageElement | null = null;
@@ -673,6 +735,15 @@ export class GLScreenFilters {
       } else if (p.kind === 'FilterMiniTower') {
         gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
         gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else if (p.kind === 'FilterTower') {
+        gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+        gl.uniform1f(entry.uni.uIntensity, p.intensity);
+        gl.uniform1f(entry.uni.uProgress, p.progress);
+        gl.uniform2f(entry.uni.uScreenRes, p.screenRes[0], p.screenRes[1]);
+        gl.uniform2f(entry.uni.uScreenPos, p.screenPos[0], p.screenPos[1]);
+        gl.uniform2f(entry.uni.uTargetPx, p.targetPx[0], p.targetPx[1]);
+        gl.uniform1f(entry.uni.uTime, p.time);
       } else if (p.kind === 'FilterGraveyard') {
         gl.uniform1f(entry.uni.uIntensity, p.intensity);
         gl.uniform1f(entry.uni.uProgress, p.progress);

@@ -631,6 +631,20 @@ export function martianDroneAI(e: Enemy, game: GameHooks, player: Player | null)
   const minSpd = 7;
   const canExplode = !corite;   // flag68（:35491）
 
+  // 418 火尘拖尾（:35592-35610，位于态机之前每 tick 跑）：双掷、掷数 = 态2(冲刺) ? 2 : 1
+  //  → 概率 2/3 或 1/3；锚盒 = 态2 ? ±30 : ±20；尘 6 noGravity α90 scale1.5、
+  //  初速 = velocity×0.5 后 ×0.2、fadeIn=1。
+  if (corite) {
+    const rolls = e.ai0 === 2 ? 2 : 1;
+    const box = e.ai0 === 2 ? 30 : 20;
+    for (let k = 0; k < 2; k++) {
+      if (Math.random() * 3 >= rolls) continue;
+      const d = game.spawnDust?.(e.cx - box, e.cy - box, box * 2, box * 2, 6,
+        e.vx * 0.5, e.vy * 0.5, 90, null, 1.5, true);
+      if (d) { d.vx *= 0.2; d.vy *= 0.2; d.fadeIn = 1; }
+    }
+  }
+
   // 朝向（:35454-35469）
   if (sign(e.vx) !== 0) e.facing = corite ? sign(e.vx) : -sign(e.vx);
 
