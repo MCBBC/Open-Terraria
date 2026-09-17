@@ -293,17 +293,24 @@ export function canHitLine(st: Store, x1: number, y1: number, w1: number, h1: nu
   }
 }
 
-/** WorldGen.SolidTile(i,j) 公共口（Terarria1457 WorldGen.cs:70642-70661；1456 :70155
+/** WorldGen.SolidTile(i,j) 公共口（Terarria1457 WorldGen.cs:70642-70663；1456 :70155
  *  同式）：active && tileSolid && !tileSolidTop(platform) && !halfBrick && slope==0
  *  && !inActuated——与 fullSolid 同判定式的越界安全版。语义要点：
  *  - 不含平台族（tileSolidTop）——与 TileStore.isSolid（含平台）互斥，消费方须按
- *    调用点选对：目标格快退（AI_137_CanHit Projectile.cs:71577）等 WorldGen.SolidTile
+ *    调用点选对：目标格快退（AI_137_CanHit Projectile.cs:71576）等 WorldGen.SolidTile
  *    站点一律本式；
- *  - 出界/未加载格原版返回 true（Main.tile[i,j]==null → return true 的守门怪癖
- *    :70646-70649），照搬保真——目标态常态在界内,少触发。
- *  （2026-08-30 实体侧对账批新增导出；既有函数体零改动） */
+ *  - ★SW-BJ102 域勘误（2026-09-16，纠正旧注「null→true 怪癖安到 OOB 上」）——
+ *    原文两个域必须分开：①未加载格 `Main.tile[i,j] == null → return true`
+ *    （:70646-70649 守门怪癖,真值域=槽位存在但 tile 对象为 null 的未加载区）;
+ *    ②出界格走 :70659-70662 catch 臂 → **false**（数组下标越界抛异常被吞）。
+ *    本仓 TileStore 无「未加载」域（界内格恒有槽位）→ ①无消费域;OOB 域按原文
+ *    catch 臂=**false**（旧实现 !inBounds→true 系把①误安到②上,变异=测试红）。
+ *    消费面：MinionProj AI_137 目标格快退（:71576,目标常态界内）、滚石
+ *    rbKillGrassAround 3×3 全实心判（DelegateMethods.cs:563 同站——草贴世界缘时
+ *    OOB 臂拉 flag=false=不转化,旧 true 会误转化）。
+ *  （2026-08-30 实体侧对账批新增导出；2026-09-16 OOB 域勘误） */
 export function solidTileAt(st: Store, x: number, y: number): boolean {
-  if (!st.inBounds(x, y)) return true;                         // Main.tile==null → true（怪癖保真）
+  if (!st.inBounds(x, y)) return false;                        // OOB → catch 臂 :70659-70662 → false（★BJ102 勘误,旧=true）
   const i = st.idx(x, y);
   const t = st.type[i];
   // ★幽灵保域（2026-09-03）：active 门读 flags bit0（原版 WorldGen.cs:70652

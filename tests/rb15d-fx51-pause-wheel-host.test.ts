@@ -73,7 +73,7 @@ describe('RB15d-FX51 暂停期滚轮：宿主死机制结构锁（翻案存证�
     expect(block).toContain('} else if (!this.paused) {');
   });
 
-  it('H4 【禁门锁·②二次翻案】UI.ts 背包两滚轮处理器不得加 paused 早退（原版暂停宿主 DoUpdate_WhilePaused Main.cs:17547-17551 在 playerInventory 态重跑 DoScrollingInInventory=暂停∧背包开滚轮活面;补门=砍 autoPause 暂停期合成滚轮真回归）', () => {
+  it('H4 【禁门锁·②二次翻案+BJ103 失焦旁支例外】UI.ts 背包两滚轮处理器不得加全暂停态早退（原版暂停宿主 DoUpdate_WhilePaused Main.cs:17547-17551 在 playerInventory 态重跑 DoScrollingInInventory=暂停∧背包开滚轮活面;补门=砍 autoPause 暂停期合成滚轮真回归）；但失焦暂停旁支例外：原版 FocusHelper.UpdateFocus→Main.cs:17303-17316/1458 :17309-17322 在 CanPauseGame(:17371)【之前】return → :17547-17551 宿主失焦期整段不可达=滚轮死（BJ103 刀,game.focusPaused 专名早退,大写 P 不命中本条 /paused/ 小写锁）', () => {
     const span = (startMark: string, endMark: string): string => {
       const a = uiSrc.indexOf(startMark);
       expect(a, `锚缺失：${startMark}`).toBeGreaterThan(-1);
@@ -85,6 +85,9 @@ describe('RB15d-FX51 暂停期滚轮：宿主死机制结构锁（翻案存证�
     const craft = span('private vinvCraftWheel(e: WheelEvent): void {', 'private vinvCraftFocusGoto');
     for (const [name, body] of [['vinvGridWheelTick', tick], ['vinvCraftWheel', craft]] as const) {
       expect(body, `${name} 出现 paused 门：与原版 Main.cs:17549（DoUpdate_WhilePaused 暂停宿主重跑背包滚轮,autoPause∧背包开=活面）相悖——若仅为注释措辞提及 paused 请换精确门形断言;若真要加门须先推翻 :17549 证据并重走定谳`).not.toMatch(/paused/);
+      // ★BJ103 失焦旁支例外门（唯一允许的暂停族早退形态）：focusPaused 专名——
+      // 摘除即红（失焦∧背包开滚轮复活=态矩阵缺行复辟）
+      expect(body, `${name} 缺 game.focusPaused 失焦旁支早退（BJ103;Main.cs:17303-17316 先于 :17371 → :17549 宿主失焦期不可达=滚轮死）`).toContain('.focusPaused) return;');
     }
     // 同相可达面守卫：tick 的 playerInventory 门（原版 :17547 块的同相门）必须在——
     // 浮层态（IngameOptions.Open :70 收背包）滚轮死的机制正是它,摘除才造真偏差

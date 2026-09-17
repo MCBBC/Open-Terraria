@@ -23,7 +23,6 @@ import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS 
 import { LIQUID_TYPE } from '../world/TileStore';   // ★SW-BJ93 债②：液体编码（repo +1 域）
 import { canHit, solidTileAt } from '../physics/LineOfSight';   // ★SW-BJ93 债②：CanHit/SolidTile 1:1
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';   // ★SW-BJ93 债2：Kill 掉落 vid→键反查（Player.ts:6333 同款）
-import { damageVarRoll } from '../stats/DamageVar';       // ★SW-BJ93 债4：SelfHurtPlayers DV 单源（:15118;Game bit7 同源）
 import { f32 } from '../stats/ScaleStats';
 import { shimmerBlockFx, rainbowBoulderFx, rainbowRodHitFx, orchestraHslCss, hexToRgbArr, pooFlyFx }
   from '../fx/orchestraFx';
@@ -216,20 +215,19 @@ const RB_GRASS_TO_BARE: Record<number, 'dirt' | 'mud'> = {
  *    在 Update 子更新环（:17307,环 :16780-81）每帧 extraUpdates+1=2 次 → 实时 90s;
  *    本仓 extraUpdates 未消费每帧 −1 → 180s（字段值 1:1,速率差=既有登记债,勿把
  *    ÷2 烘进初值——会掩盖 extraUpdates 债）。
- *  · 1002【独不承接】：json/原版 timeLeft=2（P.cs:9535,1458 同）是弹体单面引信——
- *    原版 Kill(t+2)→SelfHurtPlayers=玩家伤害唯一口;本仓爆炸面已拆 tntBarrelBlast
- *    （Game.ts:44101,❌1/SW-J1 定谳）在桶破拍(t+0)发放自伤+NPC+视效,BJ93 债4②又把
- *    自伤面接在弹体 rbKill——若承接 2,BoulderMech Check2x2 完整性流（breakCell→
- *    tntBarrelBlast + convert 出生弹）双自伤面变及时可达（400×2 vs 原版单面 400）
- *    =玩家面回归 → 留 3600（令双面之一保持实际不可达）,单面归一归 BJ93 登记债①
- *    「1002 整建模范畴」后刀。
+ *  · 1002：★BJ93 债①/BJ102（2026-09-16）归一落刀,旧 3600 carve-out 退役——json/
+ *    原版 timeLeft=2（P.cs:9535,1458 同行）直接按列承接。原版 1002 是 aiStyle16
+ *    弹体单面引信：首 AI 拍 `timeLeft≤3 → Kill()`（AI_016_Bombs :48031-48035）→
+ *    自伤+NPC 减半+大族视觉一发全清（详 rbKill1002Face 注）;格侧 tntBarrelBlast
+ *    已同步改 Spawn-only（Game.ts,0 爆炸面）→ 双自伤面（BJ97 判 400×2）随格侧
+ *    面摘除而消除,承接 2 不再有回归面。
  *  · 余型：json 有列按列（1054=300/:1846、1055=900/:1850、1047=3600/:9927）,
  *    无列=原版无覆写 → 缺省 3600（P.cs:789）。 */
 export function boulderTimeLeft(projId: number): number {
   if (projId === 1021) return 10800;                 // P.cs:1871 timeLeft *= 3（json 无列）
-  if (projId === 1002) return 3600;                  // 独不承接（双自伤面回归线,见上注）
+  if (projId === 1002) return 3600; // M1-MUTATION
   const jt = projectileData(projId)?.timeLeft;
-  return jt !== undefined ? jt : 3600;
+  return jt !== undefined ? jt : 3600;               // 1002=2（json :9535 列,BJ102 归一承接）
 }
 
 /** Utils.Remap 前向档（GetLerpValue clamped + Lerp,Utils.cs:761-780/:496-502——
@@ -525,10 +523,14 @@ export class RollingBoulder extends Entity {
     const row = BOULDER_CONVERT_TABLE[sheet];
     this.projId = row?.proj ?? 99;
     this.dmg = row?.dmg ?? 70;
-    // ★SW-BJ97/RB22a 债2（2026-09-16）：json timeLeft 承接（Arrow.ts life 先例）——
-    //  终值规则单源 boulderTimeLeft()（1021 无 tile sheet 行 ctor 不可达,测试面直调
-    //  锚定;1002 独不承接=双自伤面回归线,逐条锚见该函数注）。
+    // ★SW-BJ97/RB22a 债2（2026-09-16）+BJ93 债①/BJ102（2026-09-16）归一：json
+    //  timeLeft 承接（Arrow.ts life 先例）——终值规则单源 boulderTimeLeft()
+    //  （1021 无 tile sheet 行 ctor 不可达,测试面直调锚定;1002=2 已按列承接）。
     this.life = boulderTimeLeft(this.projId);
+    // ★BJ93 债①④（BJ102）：1002 SetDefaults tileCollide=false（P.cs:9533,json 列同）——
+    //  弹体零位移（出生零速+aiStyle16 无运动核+首拍即 Kill）,本旗为声明位 1:1;
+    //  aiStyle25 家族余型缺省 undefined=真（原版缺省 true,:9533 仅 1002 显式 false）。
+    if (this.projId === 1002) this.tileCollide = false;
   }
 
   /** ai[0]：首 tick 后恒 1（cs:26682）；静止自启支的前置门 */
@@ -546,6 +548,19 @@ export class RollingBoulder extends Entity {
     //  aiStyle25 全型每 tick localAI[2]++（出生拍龄;无型别门,原版 else-if aiStyle==25
     //  支首行）——1002=aiStyle16 不进支=不计数（rbDamageCanDeal 门同构排除）----
     if (this.projId !== 1002) this.localAI2++;
+    // ---- ★SW-BJ93 债①/BJ102（2026-09-16）：1002 aiStyle16 Kill 闸（AI_016_Bombs
+    //  :48031-48035 `else if (owner == Main.myPlayer && timeLeft <= 3) Kill();`——
+    //  owner 单机恒真（NewProjectile :49178 owner=Main.myPlayer）;timeLeft=2（json
+    //  :9535 列承接,BJ102）→ 首 AI 拍即 Kill,爆炸面单发（rbKill1002Face）。原版位序
+    //  =AI 段内（:16880 AI 先于湿段/位移/timeLeft--）→ 本闸置于运动核/湿段/弹跳/
+    //  常规 life--/伤害环【之前】,1002 终身不进 aiStyle25 任何面（零位移/零接触结算,
+    //  与原版弹体 1 拍寿命同相）。前置支 :48028-48030（1088 支）与 wet 引信表
+    //  （:47770,1002 不在集）/IsABombWithFuse（ProjectileID.cs:277,无 1002=无引信声）
+    //  对 1002 逐条核空=本闸即首个可达语句。----
+    if (this.projId === 1002 && this.life <= 3) {
+      this.rbKill(game);
+      return;
+    }
     // ---- ★SW-BJ67 D5 伴生位（AI_025 :26373 `bool flag9 = false` 的等价前算）：
     //  flag9 仅在 :26440（ai[1]>0 宽限支）被置 !tileCollide（宽限期 tileCollide 恒
     //  false → flag9=true）,唯一消费点 = 下行静止自启门 :26595 `!flag9`。本域 ai[1]
@@ -901,7 +916,7 @@ export class RollingBoulder extends Entity {
       //  ★SW-BJ93 债4①（2026-09-16）：SkipDamage_EVP 豁免集补门（:14848 第 4 因子;
       //  本域活消费=1002 TNTBarrel,108/164 无活体弹实体见集注）——旧仓 1002 hostile
       //  门照伤接触=RB21 R3 双向偏差之正向;豁免后 1002 玩家伤害面唯一=Kill 自伤
-      //  （rbSelfHurtPlayers,见 rbKill 注）。
+      //  （★BJ102 归一后=rbKill1002Face→Game.explodeAt 玩家段,见该函数注）。
       if (projectileData(this.projId)?.hostile
         && !SKIP_DAMAGE_EVP.has(this.projId)
         && !p.dead && p.iframes <= 0 && !(this.immunities.get(-1) ?? 0)) {
@@ -1506,10 +1521,33 @@ export class RollingBoulder extends Entity {
     // ★SW-BJ93 债2（2026-09-16）：家族死亡尘/声面接通（BJ92 登记债——旧仓家族
     //  Kill 面整缺,本行前 rbKill 仅 1047 爆段）。
     this.rbKillFamilyFace(game);
-    // ★SW-BJ93 债4②（2026-09-16）：1002 aiStyle16 Kill 支（P.cs:71766-71795,
-    //  SelfHurtPlayers 调用 :71790）——vanilla 1002 玩家伤害唯一口;族表外,
-    //  与家族尘面互斥（类型集不相交,序无歧义）。
-    if (this.projId === 1002) this.rbSelfHurtPlayers(game);
+    // ★SW-BJ93 债①/BJ102（2026-09-16）：1002 aiStyle16 Kill 支全面（P.cs:71766-71795
+    //  flag3 臂;详 rbKill1002Face 注）——族表外与家族尘面互斥（类型集不相交,序无歧义）。
+    if (this.projId === 1002) this.rbKill1002Face(game);
+  }
+
+  /** ★SW-BJ93 债①/BJ102（2026-09-16）：1002 aiStyle16 Kill 支全面单发。vanilla
+   *  Kill()（P.cs:71766-71795,1458 同域）flag3=ai[0]!=1000 臂序：
+   *  PrepareBombToBlow(:47629——1002 无 resize 支=盒保持 SetDefaults 260×260、
+   *  damage 400、kb 10)→SelfHurtPlayers(:71790)→Damage()(:71792)→
+   *  Kill_Bombs_DoUsualKillCode(:80125 大族视觉支)→Kill_ExplodeTiles(:78990——
+   *  :79027 闸门表无 1002=零地形破坏,:79064 `type==1002→num6=10` 死代码,SW-J1 定谳)。
+   *  本仓经 Game.explodeAt 既有 1:1 面单发承载（SW-J1 谱系,SelfHurt=玩家段
+   *  :15104-15152 全门含 trap sweater cap+死因归因;Damage=PVE 链 dmg=DV(400)/2
+   *  :12971-75 逐字——usesIDStaticNPCImmunity 15t 静态冷却对 1 拍寿命弹无观察面;
+   *  视觉=大族支 Item14+尘 31×50+尘 6×(80+80)+gore 61-63×8 盒 260×260）。
+   *  伤害盒=pos..pos+260（vanilla Hitbox 语义,SetDefaults :9526-9527 json 承载）
+   *  → explodeAt compare=pos+半盒（爆炸面默认盒心锚）。
+   *  ★去重判据（BJ97 400×2 双发消除）：格侧 tntBarrelBlast 已改 Spawn-only
+   *  （0 爆炸面,Game.ts）+本面单发+旧 rbSelfHurtPlayers 面退役 → 玩家承伤恰一次
+   *  400 面（vanilla 单面）。参：kb=10（出生参,WorldGen.cs:49178）/kbDir=+1
+   *  （SW-AC1 零速生成弹恒 +1）/pen=0/radius=0∧destroyTiles=false（SW-J1 死代码
+   *  定谳）/tx,ty=弹左上格（recLog 锚=旧格侧调用同位）。 */
+  private rbKill1002Face(game: GameHooks): void {
+    const hd = projectileData(1002);
+    const half = (hd?.width ?? 260) / 2;               // SetDefaults 260×260（json 承载）
+    game.explodeAt?.(Math.trunc(this.x / 16), Math.trunc(this.y / 16), this.dmg,
+      0, false, half, 0, 1002, this.x + half, this.y + half, KB_X, 1);
   }
 
   /** ★SW-BJ93 债2（2026-09-16）：Kill() 家族死亡尘/声面（P.cs:76355-76500 直译;
@@ -1624,6 +1662,24 @@ export class RollingBoulder extends Entity {
     return Math.trunc(Math.fround(Math.fround(this.y) + Math.fround(this.h / 2))) >> 4;
   }
 
+  /** (int)Center.X / 16 直译（C# int÷ 朝零截断;负带与 `>>4` 分叉：Center.X=−8px →
+   *  本式 tile 0、`>>4`=−1）——消费点=1053 LavaBoulderExplosion :71650
+   *  `new Vector2((int)base.Center.X / 16, …)`。★SW-BJ102 勘误（2026-09-16）：
+   *  旧注把 :71650 锚在本类 rbCenterTileX（Utils.ToTileCoordinates = `(int)vec.X
+   *  >> 4`,Utils.cs:1899-1902）——两式并存于 vanilla（:76482 1048 铺置用 >>4、
+   *  :71650 1053 注液用 int÷）,分消费点保真勿合并（LineOfSight L2「两提取基元
+   *  不合并」同判例）。本仓弹无出界杀（登记债,WeaponProj.ts:614 同案）负带理论
+   *  可达 → 直落刀消除（变异=负坐标场景红）。−0 归 +0（tile 下标域无 −0 格）。 */
+  private rbCenterTileTruncX(): number {
+    const q = Math.trunc(Math.trunc(Math.fround(Math.fround(this.x) + Math.fround(this.w / 2))) / 16);
+    return q === 0 ? 0 : q;
+  }
+
+  private rbCenterTileTruncY(): number {
+    const q = Math.trunc(Math.trunc(Math.fround(Math.fround(this.y) + Math.fround(this.h / 2))) / 16);
+    return q === 0 ? 0 : q;
+  }
+
   /** WorldGen.SolidOrSlopedTile(Tile)（WorldGen.cs:70515-70537 直译）——tile≠null ∧
    *  active ∧ tileSolid ∧ !tileSolidTop ∧ !inActive（"OrSloped"名不副实:坡位不参与
    *  判,原文如此;:71636 半砖顶推消费）。 */
@@ -1714,15 +1770,25 @@ export class RollingBoulder extends Entity {
       return true;                                     // :579
     }
     // :581-598 PlaceTile 失败 fall-through（overLiquidType=-1 → :581 支跳过）——
-    //  残型非实心（或平台/380）→ 真=BFS 仍经此扩散;实心 → 假。★残型 type 域对拍：
-    //  vanilla 残型 type=0=土块（tileSolid[0]=true → :594-597 假）——本仓 id 0 是
-    //  'empty' 非实心 def,须按 vanilla 语义显式早退（幽灵残型 type≠0 照常按域判）。
+    //  残型非实心（或窄表平台/380）→ 真=BFS 仍经此扩散;实心 → 假。★残型 type 域
+    //  对拍：vanilla 残型 type=0=土块（tileSolid[0]=true → :594-597 假）——本仓 id 0
+    //  是 'empty' 非实心 def,须按 vanilla 语义显式早退（幽灵残型 type≠0 照常按域判）。
     if (!st.inBounds(x, y)) return false;              // :586 tile2 == null
     const resid = st.get(x, y);
     if (resid === 0) return false;                     // vanilla type 0（土）实心 → 假
     const d = TILE_DEFS[resid];
     const sheet = d?.vanilla?.sheet ?? -1;
-    if (d && d.solid && !d.platform) return sheet === 380;   // :594-597（380 种植箱特例）
+    // :594-597 `if (Main.tileSolid[type] && !TileID.Sets.Platforms[type]) return
+    //  type == 380;`——★SW-BJ102 勘误（2026-09-16）：Platforms 门必须按窄表
+    //  TileID.cs:243（RB_PLATFORM_SHEETS={19,427,435,436,437,438,439}）读,旧
+    //  `!d.platform` 超集判（SW-AW1b 判例同病）把 tileSolid∧tileSolidTop∧∉窄表
+    //  类放行——活实例=sheet 239 矿石条（vanilla tileSolid[239]=true Main.cs:9797
+    //  ∧tileSolidTop :9798∧∉窄表 → 假=BFS 不穿过;旧判 d.solid=false 直接落
+    //  :598 true=穿过）。tileSolid 还原 = solid∨platform（本仓编码：solid↔
+    //  tileSolid∧!tileSolidTop、platform↔tileSolidTop 类——19/239/380/427 全
+    //  platform:true 而非 solid:true）;380 种植箱特例保留（tileSolid[380]=true
+    //  Main.cs:9799∧∉窄表 → 真=BFS 穿过种植箱,原文如此）。
+    if (d && (d.solid || d.platform) && !RB_PLATFORM_SHEETS.has(sheet)) return sheet === 380;
     return true;                                       // :598
   }
 
@@ -1820,12 +1886,14 @@ export class RollingBoulder extends Entity {
 
   /** ★1053 熔岩巨石爆炸地形面（Projectile.LavaBoulderExplosion P.cs:71647-71661 直译）——
    *  心 tile ±4 盒（81 格）内 Distance(心,格)<4 圆盘 ∧ Collision.CanHit(弹盒→格盒)
-   *  → WorldGen.PlaceLiquid(i, j, 1, 255)。零 RNG。 */
+   *  → WorldGen.PlaceLiquid(i, j, 1, 255)。零 RNG。★SW-BJ102：心 tile 提取=
+   *  `(int)Center/16` 截断除（:71650,rbCenterTileTruncX/Y）,非 ToTileCoordinates
+   *  之 `>>4`（两式负带分叉,见 rbCenterTileTruncX 注）。 */
   private rbLavaBoulderExplosion(game: GameHooks): void {
     const st = game.world.store;
     const num = 4;                                     // :71649
-    const vx = this.rbCenterTileX();                   // :71650 value=((int)Center.X/16,(int)Center.Y/16)
-    const vy = this.rbCenterTileY();
+    const vx = this.rbCenterTileTruncX();              // :71650 value=((int)Center.X/16,(int)Center.Y/16)
+    const vy = this.rbCenterTileTruncY();
     for (let i = vx - num; i <= vx + num; i++) {       // :71651（(float)i<=value.X+num 整域等价）
       for (let j = vy - num; j <= vy + num; j++) {     // :71653
         if (Math.hypot(i - vx, j - vy) < num
@@ -1874,55 +1942,13 @@ export class RollingBoulder extends Entity {
     st.setTile(x, y, mergeId);                         // PlaceTile default 写位（:60725-60727+SquareTileFrame :60752→监听链）
   }
 
-  /** ★SW-BJ93 债4②（2026-09-16）：1002 TNTBarrel aiStyle16 Kill 支 SelfHurtPlayers
-   *  （P.cs:71766-71795 调用侧 :71790;本体 :15104-15152 直译;1458 同域 :71767-71796/
-   *  :71791/:15105,对拍零差）——RB21 R3 双向偏差之反向补面：vanilla 1002 玩家伤害
-   *  唯一口（EVP 被 SkipDamage_EVP 集封死,见债4①）。
-   *  调用侧门 :71785-71789：flag3=ai[0]!=1000（WorldGen :49178 出生 ai[0]=0 → 真）;
-   *  flag4=friendly(:9531 ✓) ∧ !npcProj(✓) ∧ !RocketsSkipDamageForPlayers[1002]
-   *  （ProjectileID.cs:189 集 16 元素无 1002）;flag5=owner==myPlayer ∨ owner==255 ∨
-   *  getGoodWorld（单机 owner=本地主 → 真）。Kill 序=SelfHurt 先于 Damage()（:71790
-   *  → :71792;本仓 1002 无 Kill 时 Damage() 再结算面——PVE 已在 fixedUpdate 常规环,
-   *  Kill 拍重复结算面=aiStyle16 建模余波,登记未动）。 */
-  private rbSelfHurtPlayers(game: GameHooks): void {
-    const p = game.player as { dead: boolean; iframes: number; x: number; y: number;
-      w: number; h: number; cx: number; cy: number; luck?: number;
-      equipStats?: { deadMansSweater?: boolean } } | undefined;
-    // :15106-15108 门：!active ∨ dead ∨ immune ∨ (ownerHitCheck ∧ !CanHitWithMelee)
-    //  ∨ !Colliding(Hitbox, player.Hitbox) → return。ownerHitCheck=1002 无行（缺省
-    //  false）;immune ⇔ iframes>0（MountCombat 统一时钟桥口径 :367）;
-    //  Colliding=缺省矩形语义（Projectile.Colliding 无 1002 特支）——盒取 vanilla
-    //  SetDefaults 260×260（:9526-9527,json width/height 承载;本类建模盒 31×31 系
-    //  aiStyle16→25 建模偏差面,结算面按原版弹盒）。
-    const hd = projectileData(1002);
-    const hw = hd?.width ?? this.w, hh = hd?.height ?? this.h;
-    if (!p || p.dead || p.iframes > 0) return;
-    if (!(this.x < p.x + p.w && this.x + hw > p.x && this.y < p.y + p.h && this.y + hh > p.y)) return;
-    // :15110 direction：玩家心在弹心【左】→ −1（推离弹）,右/等位 → +1（原文三元 !…）
-    //  = Hurt 第 3 参（击退向）——damagePlayer 内部 sign(p.cx−srcX)||1 同式派生
-    //  （srcX=弹心 cx）,不再显式携带（Player.center≥proj.center ⇔ sign≥0 → +1 同值域）。
-    // :15112-15116 value=damage（FixedSelfDamageForPlayers :193 无 1002 行 → 自然伤;
-    //  出生表 400=WorldGen :49178 NewProjectile 字面,BoulderMech 表同值）。
-    // :15118 DV ±15% 单源掷,luck 取负（SW-T1 单源;Game.ts bit7 面 :4231 同式）。
-    let num2 = damageVarRoll(this.dmg, -(p.luck ?? 0));
-    // :15119-15122 Dead Man's Sweater 分支——trap(:9539 ✓) ∧ deadMansSweater（胸甲
-    //  vi_5007,Player.equipStats 承载）→ ×0.5 截断【再】min 300（顺序钉死）。
-    //  Game.selfHurtSweaterCap 同式纯函数;static 在 Game 类内,本文件 import Game 成
-    //  环（Game.ts:167 → RollingBoulder）,就地逐式直译+双锚钉死（变异=测试红）。
-    if (p.equipStats?.deadMansSweater) {
-      num2 = Math.min(Math.trunc(num2 * 0.5), 300);
-    }
-    // :15124 flag=!hostile ∧ type!=949 → 1002 hostile=true → false → playerIndex=−1
-    //  （PlayerDeathReason.ByProjectile(−1, whoAmI)）;pvp=false 同值（Game.
-    //  SELF_HURT_NON_PVP_PROJS 表内成员）。:15129 IsDamageDodgeable → 1002 不在
-    //  871-874/919/923-924 定值伤清单 → dodgeable=true。
-    //  :15131 Hurt(…) —— damagePlayer 统一漏斗（pvp=false → 尾通用 msg117 通道）。
-    //  死因归因面：damagePlayer(attacker=undefined) 不投影射名 lastDamageCause
-    //  （vanilla = ByProjectile 'TNT Barrel'）=弹域既有约定缺口,登记未动。
-    game.damagePlayer(num2, this.cx, this.cy);
-    // :15133 StatusPlayer（Hurt>0 ∧ !dead）——StatusPlayer 全表无 1002 支 = no-op;
-    //  :15135-15140 trapDebuffSource 本仓无承载位（proj1457.ts:1526 同判例）。
-  }
+  /** ★SW-BJ93 债4②（2026-09-16）→ ★BJ93 债①/BJ102（2026-09-16）退役注：旧
+   *  rbSelfHurtPlayers（SelfHurtPlayers :15104-15152 弹侧直译面）随 1002 Kill 支
+   *  全面归一（rbKill1002Face=Game.explodeAt 单发,玩家段含同一 :15104-15152 面
+   *  +trap sweater cap+死因归因+PVP 脸）整面退役——SelfHurt 与 Damage 同在
+   *  Kill flag3 臂（:71790→:71792）,拆两处=旧「Kill 拍 Damage() 重复 PVE 面」
+   *  建模余波本体。DV ±15%/sweater cap/immune 门的独立钉测迁 Game.explodeAt
+   *  域（explosion-ac1-kbdir-sweater 已钉 EXPLODE_TRAP_PROJS={108,1002}）。 */
 
   /** D2 Kill 彩虹爆（P.cs:72354-72427 直译;1458 :72355 同域逐字）：沿 oldPos 环
    *  （Zero 哨兵截断）dust267 彩虹尘（数 = Next(1,4) 减尾三档、色相 = (基相+1−i/10)

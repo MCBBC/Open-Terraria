@@ -571,6 +571,27 @@ export function applySeedAdjustments(
   return false;
 }
 
+/** SetDefaults 尾段两级 (int) 截断扩盒（首盒 :17842-17843 + 种子档二盒 getGood
+ *  :18122-18123 / 十周年 :17958-17959；1456:17745-17746/:18025-18026/:17861-17862）。
+ *  ★单源（BJ101 2026-09-16）：fromVanilla（NewNPC→SetDefaults）与 tryTransformTo
+ *  （Transform→SetDefaults :81921 全链重跑）共用本函数——盒链禁止第二套实现
+ *  （fx43 双源漂移同族）。
+ *  @param baseScale 首盒乘数 = remix 块【后】、种子档【前】的 npc.scale
+ *    （★SC1 读取点纪律：调用侧必须在 applySeedAdjustments 之前捕获）；
+ *  @param seedScale 种子档调整后总 scale（= s.scale 终态）；
+ *  @param seedHit  applySeedAdjustments 返回值（=命中扩盒分支；十周年恒 true、
+ *    zenith-only 恒 false——zenith 只改 lifeMax 不扩盒）。
+ *  未命中支原版同为 (int) 截断（:17842 恒 (int)——★RB15b-F1：旧 Math.round 曾使
+ *    史莱姆王 50 盒宽 123 vs 原版 122（98×1.25=122.5））。 */
+export function seedTailBox(
+  rawW: number, rawH: number, baseScale: number, seedScale: number, seedHit: boolean,
+): { w: number; h: number } {
+  const w = Math.trunc(f32(rawW * baseScale));
+  const h = Math.trunc(f32(rawH * baseScale));
+  if (!seedHit) return { w, h };
+  return { w: Math.trunc(f32(w * f32(seedScale))), h: Math.trunc(f32(h * f32(seedScale))) };
+}
+
 // ---------------------------------------------------------------------------
 // NPCSpawnParams.sizeScaleOverride 消费链（批次B 落地）——netID 变体刷出的体型语义：
 //   来源 = SetDefaultsFromNetId（NPC.cs:7633+ 各 case 的 0.6/0.9/1.05/1.2… 经

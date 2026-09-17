@@ -144,6 +144,15 @@ export interface GameHooks {
    *  cs:534/:543,便便金字塔落位把下/上邻斜台拍回整块）消费。Game 实现 =
    *  worldGenSlopeTile(x, y, 0, false) 既有 1:1 面包装;缺省（测试 mock）= 静默跳过 */
   slopeTileAt?(x: number, y: number): boolean;
+  /** ★SW-BJ93 债①/BJ102（2026-09-16）1002 Kill 支爆炸面薄委托：Game.explodeAt
+   *  既有 1:1 面（SW-J1 谱系）——aiStyle16 Kill flag3 臂全序（SelfHurtPlayers
+   *  :15104-15152 玩家段 / Damage PVE 链 dmg/2 :12971-75 / Kill_Bombs_DoUsualKillCode
+   *  :80125 大族视觉）由 RollingBoulder.rbKill1002Face 单发消费。参表同 Game 私有
+   *  explodeAt（tx/ty=格锚、radius、destroyTiles、hurtBox=伤害盒半宽、pen、projId、
+   *  comparePx/Py=弹心像素、kb、kbDir）;缺省（测试 mock 无此钩）= 静默跳过 */
+  explodeAt?(tx: number, ty: number, damage: number, radius: number, destroyTiles: boolean,
+    hurtBox?: number, pen?: number, projId?: number, comparePx?: number, comparePy?: number,
+    kb?: number, kbDir?: -1 | 0 | 1): unknown;
   /** 仙人掌支撑复查+整株断根(CheckCactus :54132 级联)——沙落/邻格变化后触发 */
   fellCactus?(x: number, y: number): void;
   /** 敌人死亡。opts.petrifyBypassInteractionGate（H2-2）：624 侏儒石化路径——

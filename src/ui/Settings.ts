@@ -472,6 +472,23 @@ export class SettingsPanel {
             void options.set('lightMode', order[(order.indexOf(d.lightMode) + 1) % order.length]);
           },
         ),
+        // ★UI 缩放滑条(2026-09-16 半成品收尾):Options.uiScale(0.75~1.5)/l10n
+        //  标签/应用链(UIScale.userScale + 背包布局 K=vanillaScaleFor)早已就位,
+        //  仅面板控件缺位。set 后须显式 recompute(canvas 面 onResize→recalculate;
+        //  userScale 裸赋值不触发)+window resize 事件(DOM 背包面板失效重排,
+        //  vinvResizeHandler 同通道);options.set → onChange 下发其余消费方。
+        //  跨域布局对齐口径:设置→UI 缩放三环境调同值(见 UiScaleHint)。
+        this.slider(
+          Lang.text('Mods.SandboxWorld.Settings.UiScale'),
+          0.75, 1.5, 0.05,
+          () => d.uiScale,
+          (v) => {
+            void options.set('uiScale', v);
+            UIScale.userScale = v;
+            UIScale.recompute();
+            window.dispatchEvent(new Event('resize'));
+          },
+        ),
       );
       const hint = document.createElement('div');
       hint.className = 'sw-set-hint';

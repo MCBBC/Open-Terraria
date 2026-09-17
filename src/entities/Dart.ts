@@ -10,7 +10,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { blockBelowMakesSandFall } from './FallingBlock';   // ★④ BBMSF 单源（掉落/沙族批 2026-09-04）
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
-import { prefetchProjectiles } from './Arrow';
+import { prefetchProjectiles, BULLET_KILL_SFX } from './Arrow';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -1300,6 +1300,9 @@ export class Dart extends Entity {
   private dartStep(game: GameHooks, st: DartStyle): void {
     this.age++;
     this.tick++;
+    // oldVelocity 快照（原版 Update :17118 `oldVelocity = velocity` 在 AI 前——115
+    // 三叉戟尘站的尘速消费位。★尘站普查批 2026-09-16）
+    this.ovx = this.vx; this.ovy = this.vy;
     // AI_016_Bombs 摩擦门读数：原版在同一 AI 拍里「先判 velocity.Y==0(:48387) 再
     // vy+=0.2(:48412)」——门读的是上拍碰撞后的静止态，本仓重力在上游通用段先加,
     // 故在此快照（spiky 支摩擦在其加重力之前,天然同序无需快照）
@@ -1433,6 +1436,123 @@ export class Dart extends Entity {
         d.vx = (this.vx / sp577) * spd + Math.cos(a577) * jit;
         d.vy = (this.vy / sp577) * spd + Math.sin(a577) * jit;
         d.x = this.cx; d.y = this.cy;   // NewDust 后 position=Center 整覆写(:56347;811 同式)
+      }
+    }
+    // ---- ★NPC 弹幕尘站普查批②（2026-09-16,docs/npc-proj-dust-census.md §4 HIGH/MED）：
+    //      本组六支全为 AI 段内每 update 一跑（EU=0 型每 tick 1 跑）,原版 AI 在位移前
+    //      → 尘盒用 pre-move 位;alpha==0 门型的渐入由通用 fade 块（st.fade=50）承载,
+    //      本块在 fade 之前=门读「本拍 fade 前」值,与原文块序（先尘掷后 α−50）同相 ----
+    //  · 472 诅咒颅（AI_001 :55078-55097）：每 update 1×d30（noGravity,vel×0.25 后
+    //    += 弹速×0.75）+ 首拍（localAI[0]==0）Item17 音 + 20×d30（noGravity,vel×0.25
+    //    += 弹速【全额】,vel.X/Y 再 ×(1+rand(−0.5..0.5))）——首拍音由表 sfx 承载
+    if (this.projId === 472) {
+      const d472 = game.spawnDust?.(this.x, this.y, this.w, this.h, 30);
+      if (d472) {
+        d472.noGravity = true;
+        d472.vx = d472.vx * 0.25 + this.vx * 0.75;
+        d472.vy = d472.vy * 0.25 + this.vy * 0.75;
+      }
+      if (this.age === 1) {
+        for (let i = 0; i < 20; i++) {
+          const db = game.spawnDust?.(this.x, this.y, this.w, this.h, 30);
+          if (!db) break;
+          db.noGravity = true;
+          db.vx = db.vx * 0.25 + this.vx;
+          db.vy = db.vy * 0.25 + this.vy;
+          db.vx *= 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;   // Next(-50,51)×0.01
+          db.vy *= 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;
+        }
+      }
+    }
+    //  · 174 冰刺（AI_001 :55998-56009,α==0 门）：1×d76 盒=oldPos−弹速×3,α50,
+    //    noGravity+noLight,vel×0.5——oldPos=pre-move 位（本块在位移行前=同位）
+    if (this.projId === 174 && this.alpha === 0) {
+      const d174 = game.spawnDust?.(this.x - this.vx * 3, this.y - this.vy * 3, this.w, this.h,
+        76, 0, 0, 50);
+      if (d174) { d174.noGravity = true; d174.noLight = true; d174.vx *= 0.5; d174.vy *= 0.5; }
+    }
+    //  · 605 史莱姆刺（AI_001 :56013-56045,α==0 门+1/3 掷）：1×d4（史莱姆胶尘,
+    //    色(78,136,255,150),scale1.2,盒=position+弹速（num72=0 不加宽）,α50）,
+    //    vel×0.3 后 += 弹速×0.3,noGravity——920/921 明文排除同门(:56025),无此站
+    if (this.projId === 605 && this.alpha === 0 && Math.floor(Math.random() * 3) === 0) {
+      const d605 = game.spawnDust?.(this.x + this.vx, this.y + this.vy, this.w, this.h,
+        4, 0, 0, 50, { r: 78, g: 136, b: 255, a: 150 }, 1.2);
+      if (d605) {
+        d605.vx = d605.vx * 0.3 + this.vx * 0.3;
+        d605.vy = d605.vy * 0.3 + this.vy * 0.3;
+        d605.noGravity = true;
+      }
+    }
+    //  · 176 丛林刺（AI_001 :56075-56087,α==0 门）：1×d22 盒=oldPos,α100,scale0.5,
+    //    noGravity+noLight,vel×0.15,fadeIn 0.8
+    if (this.projId === 176 && this.alpha === 0) {
+      const d176 = game.spawnDust?.(this.x, this.y, this.w, this.h, 22, 0, 0, 100, null, 0.5);
+      if (d176) {
+        d176.noGravity = true; d176.noLight = true;
+        d176.vx *= 0.15; d176.vy *= 0.15; d176.fadeIn = 0.8;
+      }
+    }
+    //  · 581 破甲刺（AI_001 :57288-57302,首拍 Item17 由表 sfx 承载）：每 update
+    //    2×SelRandom(229,161,161)（1/3 d229 / 2/3 d161）,尘速=v×0.25+弹速×0.5,
+    //    noGravity+noLight,scale1.2,位=Center 整覆写
+    if (this.projId === 581) {
+      for (let i = 0; i < 2; i++) {
+        const dt581 = Math.random() < 1 / 3 ? 229 : 161;   // SelectRandom(229,161,161)
+        const d581 = game.spawnDust?.(this.x, this.y, this.w, this.h, dt581,
+          this.vx, this.vy, 100);
+        if (d581) {
+          d581.vx = d581.vx / 4 + this.vx / 2;
+          d581.vy = d581.vy / 4 + this.vy / 2;
+          d581.noGravity = true; d581.noLight = true;
+          d581.scale = 1.2;
+          d581.x = this.cx; d581.y = this.cy;
+        }
+      }
+    }
+    //  · 836 蒲公英籽首拍尘（aiStyle112 :34744-34752,localAI[0]==0 一次）：3×d31
+    //    （White,scale1.2,α50,vel×0.3,noGravity）——帧动画已由表 animEvery 承载
+    if (this.projId === 836 && this.age === 1) {
+      for (let i = 0; i < 3; i++) {
+        const d836 = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 50,
+          { r: 255, g: 255, b: 255, a: 255 }, 1.2);
+        if (d836) { d836.vx *= 0.3; d836.vy *= 0.3; d836.noGravity = true; }
+      }
+    }
+    //  · 115 三叉戟（AI_027 :26814-26860）——oldVelocity=本拍 AI 改速前快照（ovx/ovy,
+    //    dartStep 头快照）：首拍（localAI[1]<5 → 置 5）沿弹道反向撒 20×d27
+    //    （num217=5..24,位=position−弹速×(30/num217)×80,速=oldVel,α100,scale0.9,
+    //    vel×0.25 后 −= 弹速×5）;localAI[1] 计满 15（首拍置 5 → 第 13 update 起）
+    //    每 update 1×d27（盒=position+(0,4) 8×8,速=oldVel,α100,scale0.6,vel×−0.25）
+    if (this.projId === 115) {
+      if (this.ai115L1 < 5) {
+        this.ai115L1 = 5;
+        for (let k = 5; k < 25; k++) {
+          const bx = this.x - this.vx * (30 / k) * 80;
+          const by = this.y - this.vy * (30 / k) * 80;
+          const d = game.spawnDust?.(bx, by, 8, 8, 27, this.ovx, this.ovy, 100, null, 0.9);
+          if (!d) break;
+          d.vx = d.vx * 0.25 - this.vx * 5;
+          d.vy = d.vy * 0.25 - this.vy * 5;
+        }
+      } else if (this.ai115L1 < 15) {
+        this.ai115L1++;
+      } else {
+        const d = game.spawnDust?.(this.x, this.y + 4, 8, 8, 27, this.ovx, this.ovy, 100, null, 0.6);
+        if (d) { d.vx *= -0.25; d.vy *= -0.25; }
+      }
+    }
+    //  · 129 符文爆弹（aiStyle28 :27009-27019,每 update）——泛色 trail 已退役：
+    //    6×d106（速=弹速,α100）→ noGravity、vel×(0.1+Next(4)×0.1)、
+    //    scale×(1+Next(5)×0.1)
+    if (this.projId === 129) {
+      for (let i = 0; i < 6; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 106,
+          this.vx, this.vy, 100);
+        if (!d) break;
+        d.noGravity = true;
+        d.vx *= 0.1 + Math.floor(Math.random() * 4) * 0.1;
+        d.vy *= 0.1 + Math.floor(Math.random() * 4) * 0.1;
+        d.scale *= 1 + Math.floor(Math.random() * 5) * 0.1;
       }
     }
     // ---- 290 暗影束 AI 段（aiStyle48 :28608-28646,每子步;EU=100 → ×101/拍）----
@@ -1919,7 +2039,10 @@ export class Dart extends Entity {
       //  437/682、timeLeft=0 仅 681）,penetrate=-1（SetDefaults :3908-3916）穿过玩家
       //  继续飞;tileCollide=false 也撞不了墙 → 唯一寿命=timeLeft 3600。曾命中即灭=
       //  圣骑士一把锤只摸一次（原版可来回穿人反复施压）
-      if (this.projId !== 811 && this.projId !== 814 && this.projId !== 300) {
+      //  ★尘站普查批（2026-09-16）：581 破甲刺并入同族——SetDefaults penetrate=-1
+      //  （P.cs:6312,Dart 载体投影）穿透不消亡继续飞（命中口旧即死=投影面缺）
+      if (this.projId !== 811 && this.projId !== 814 && this.projId !== 300
+        && this.projId !== 581) {
         this.killShooterDust(game);   // ★FX53：命中消耗 Kill 尘站（原版 penetrate 耗尽→Kill）
         this.dead = true;
       }
@@ -1975,6 +2098,15 @@ export class Dart extends Entity {
    *    尘速=(尘速+oldVel×0.4)×0.5、noGravity。oldVelocity 取死亡拍速度（本仓位移
    *    无 lastVelocity 快照,撞块口速度未被清零=同值域） */
   private killShooterDust(game: GameHooks): void {
+    // ---- ★尘站普查批④（2026-09-16）：撞击面组（Projectile.Kill :77649-77652
+    //      Collision.HitTiles+SoundID.Item10 共享列表——敌弹在域成员 83/84/180/302/
+    //      577）。原版该支在 Kill() 单口体内=撞块/寿终/命中三死亡口均达（Game.ts
+    //      :38904 消亡原因矩阵同判）;尘面几何门在 hitTilesFx 内=悬空到期自然无尘。
+    //      Dart 载体不路由 onProjectileDeath → 本口承载（Arrow 载体同组面在 Game 侧）----
+    if (BULLET_KILL_SFX.has(this.projId)) {
+      game.hitTilesFx?.(this.x, this.y, this.w, this.h, this.vx, this.vy);
+      game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
+    }
     switch (this.projId) {
       case 2: case 82:
         game.playSfx('dig', 1, this.cx, this.cy);
@@ -2002,6 +2134,173 @@ export class Dart extends Entity {
         }
         break;
       }
+      // ---- ★NPC 弹幕尘站普查批③（2026-09-16,docs/npc-proj-dust-census.md §6）：
+      //      Kill 站补齐。Dart 载体不路由 onProjectileDeath（Game.ts:554 注）,同 id
+      //      玩家武器版（Arrow 载体）的 K 面由 Game 侧独立承载,两侧不重复撒。
+      //      行号锚 1457 Projectile.Kill() 分档链 ----
+      case 38:                                            // 哈比羽（:77933-77938）
+        for (let i = 0; i < 10; i++) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 42,
+            this.vx * 0.1, this.vy * 0.1);
+        }
+        break;
+      case 44:                                            // 魔镰（:77940-77947）
+        game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
+        for (let i = 0; i < 30; i++) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 27, this.vx, this.vy, 100, null, 1.7, true);
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 27, this.vx, this.vy, 100);
+        }
+        break;
+      case 55:                                            // 毒刺（:77139-77144,55/719 共组）
+        for (let i = 0; i < 5; i++) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 18, 0, 0, 0, null, 1.5, true);
+        }
+        break;
+      case 96:                                            // 诅咒焰（:77792-77802,95/96 共组）
+        game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
+        for (let i = 0; i < 20; i++) {
+          const dA = game.spawnDust?.(this.x, this.y, this.w, this.h, 75,
+            -this.vx * 0.2, -this.vy * 0.2, 100, null, 2 * this.scale, true);
+          if (dA) { dA.vx *= 2; dA.vy *= 2; }
+          const dB = game.spawnDust?.(this.x, this.y, this.w, this.h, 75,
+            -this.vx * 0.2, -this.vy * 0.2, 100, null, 1 * this.scale);
+          if (dB) { dB.vx *= 2; dB.vy *= 2; }
+        }
+        break;
+      case 128:                                           // 霜爆（:76878-76890,119/118/128/359 共组）
+        game.playSfxFiles?.(['Item_27'], 1, this.cx, this.cy);
+        for (let i = 0; i < 10; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 92);
+          if (!d) break;
+          if (Math.floor(Math.random() * 3) !== 0) {
+            d.vx *= 2; d.vy *= 2; d.noGravity = true; d.scale *= 1.75;
+          } else {
+            d.scale *= 0.5;
+          }
+        }
+        break;
+      case 177:                                           // 冰涎（:76852-76867）
+        for (let i = 0; i < 20; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 137, 0, 0,
+            Math.floor(Math.random() * 101), null,
+            1 + (Math.floor(Math.random() * 60) - 20) * 0.01);
+          if (!d) break;
+          d.vx -= this.vx * 0.2; d.vy -= this.vy * 0.2;   // velocity -= oldVelocity×0.2
+          if (Math.floor(Math.random() * 3) === 0) {
+            d.scale *= 0.8; d.vx *= 0.5; d.vy *= 0.5;
+          } else {
+            d.noGravity = true;
+          }
+        }
+        break;
+      case 471:                                           // 投骨（:77893-77898,21/471/532/1111 共组）
+        game.playSfx('dig', 1, this.cx, this.cy);
+        for (let i = 0; i < 10; i++) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 26, 0, 0, 0, null, 0.8);
+        }
+        break;
+      case 572:                                           // 蝾螈吐息（:73976-73985）
+        for (let i = 0; i < 15; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 40,
+            this.vx * 0.1, this.vy * 0.1, 100);
+          if (!d) break;
+          d.vx *= 3; d.vy *= 3;
+          d.noGravity = true; d.scale = 1.25;
+          d.x = (this.cx + this.x) / 2; d.y = (this.cy + this.y) / 2;
+        }
+        break;
+      case 836:                                           // 蒲公英籽（:75137-75144）
+        for (let i = 0; i < 3; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 50,
+            { r: 255, g: 255, b: 255, a: 255 }, 0.8);
+          if (d) { d.vx *= 0.5; d.vy *= 0.5; d.noGravity = true; }
+        }
+        break;
+      case 909:                                           // 岩石（:77226-77230,3/48/54/599/909 共组）
+        game.playSfx('dig', 1, this.cx, this.cy);
+        for (let i = 0; i < 10; i++) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 1,
+            this.vx * 0.1, this.vy * 0.1, 0, null, 0.75);
+        }
+        break;
+      case 31:                                            // 沙球（:77814-77819,31/42 共组）
+        game.playSfx('dig', 1, this.cx, this.cy);
+        for (let i = 0; i < 5; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 32);
+          if (d) { d.vx *= 0.6; d.vy *= 0.6; }
+        }
+        break;
+      case 472:                                           // 诅咒颅（:74805-74813）
+        for (let i = 0; i < 20; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 30);
+          if (!d) break;
+          d.noGravity = true;
+          d.vx = d.vx * 0.45 + this.vx * 0.9;
+          d.vy = d.vy * 0.45 + this.vy * 0.9;
+        }
+        break;
+      case 501: {                                         // 蝇瓶体毒爆（:74219-74251）
+        game.playSfxWav?.('Shatter', 1, this.cx, this.cy);   // PlaySound(13)=Shatter
+        for (let i = 0; i < 20; i++) {
+          const d = game.spawnDust?.(this.x - 20, this.y - 20, this.w + 40, this.h + 40,
+            188, 0, 0, 100, null, 1.5);
+          if (d) { d.vx *= 0.5; d.vy *= 0.5; }
+        }
+        for (let i = 0; i < 5; i++) {
+          const g = GorePiece.newGore(435 + Math.floor(Math.random() * 3),   // Next(435,438)
+            this.x - 20 + Math.random() * (this.w + 40),
+            this.y - 20 + Math.random() * (this.h + 40), 0, 0);
+          if (g) {
+            const qx = i === 0 || i === 2 ? 1 : -1;      // case0/2 X++ else X--
+            const qy = i === 0 || i === 1 ? 1 : -1;      // case0/1 Y++ else Y--
+            g.vx = (g.vx * 0.5 + qx) * 0.5;              // ×0.5（switch 前）→ ±1 → ×0.5（尾）
+            g.vy = (g.vy * 0.5 + qy) * 0.5;
+          }
+        }
+        break;
+      }
+      case 436:                                           // 火星弹（:74894-74902）
+        for (let i = 0, n = 5 + Math.floor(Math.random() * 5); i < n; i++) {
+          const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 220, 0, 0, 100, null, 0.5);
+          if (!d) break;
+          d.vx *= 1.6; d.vy = d.vy * 1.6 - 1;
+          d.x = (d.x + this.cx) / 2; d.y = (d.y + this.cy) / 2;   // Lerp(position,Center,0.5)
+        }
+        break;
+      case 115: {                                         // 三叉戟（:78774-78792）
+        game.playSfxFiles?.(['Item_10'], 1, this.cx, this.cy);
+        for (let k = 4; k < 31; k++) {
+          const bx = this.x - this.ovx * (30 / k);        // position − oldVel×(30/k)
+          const by = this.y - this.ovy * (30 / k);
+          const dA = game.spawnDust?.(bx, by, 8, 8, 27, this.ovx, this.ovy, 100, null, 1.4);
+          if (dA) { dA.noGravity = true; dA.vx *= 0.5; dA.vy *= 0.5; }
+          const dB = game.spawnDust?.(bx, by, 8, 8, 27, this.ovx, this.ovy, 100, null, 0.9);
+          if (dB) { dB.vx *= 0.5; dB.vy *= 0.5; }
+        }
+        break;
+      }
+      case 581:                                           // 破甲刺（:73993-74003）
+        for (let i = 0; i < 30; i++) {
+          const dt = Math.random() < 2 / 3 ? 229 : 161;    // SelectRandom(229,229,161)
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, dt);
+          if (!d) break;
+          d.noGravity = true; d.noLight = true;
+          d.scale = 1.25 + Math.random();
+          d.fadeIn = 0.25;
+          d.vx *= 2; d.vy *= 2;
+        }
+        break;
+      case 920:                                           // 史莱姆箭矢（:72761-72770）
+        for (let i = 0; i < 6; i++) {
+          const ang = i * Math.PI * 2 + Math.random() * Math.PI;   // UnitY.RotatedBy(i2π+rand·π)
+          const spd = 2 + Math.random() * 0.5;
+          const px = this.x + this.w * Math.random();      // position + Size×randSquare(0,1)
+          const py = this.y + this.h * Math.random();
+          const d = game.spawnDust?.(px, py, 4, 4, 4, -Math.sin(ang) * spd, Math.cos(ang) * spd,
+            80, { r: 78, g: 136, b: 255, a: 150 }, 1.5);
+          if (d) d.noGravity = true;
+        }
+        break;
     }
   }
 
@@ -2261,13 +2560,35 @@ export class Dart extends Entity {
       game.addLightAt?.(this.cx + dirX * d - dirY * half, this.cy + dirY * d + dirX * half, 0.4, 0.85, 0.9);
       game.addLightAt?.(this.cx + dirX * d + dirY * half, this.cy + dirY * d - dirX * half, 0.4, 0.85, 0.9);
     }
-    // 束端尘 226（:30593-30616）：数量 = 2×clamp(age/30)，束端 Center+dir·(len−8) 侧抛
+    // 束端尘（AI_084 537 支 :32246-32268,每 update）——★尘站普查批（2026-09-16）
+    //  泛色 spawnBurst 退役改真尘站 1:1：
+    //  · num721 = Clamp(Lerp(0,1,localAI[0]/30))（age/30 渐强）;束端 vector73 =
+    //    Center + 弹速×(localAI[1]−8)（velocity 归一 ×1,beamLen=localAI[1]）;
+    //  · 锥形 d226 ×int(2×num721)：束角 ±π/2 随机侧,速率 rand(0..1)×0.8+1,
+    //    NewDust(束端,0,0,226,侧向速度) → noGravity+scale=1.2（整写）;
+    //  · 束缘 d31 1/(5..10) 掷：maxValue2 = 5+int((1−num721)×5),掷中 →
+    //    弹速 RotatedBy(π/2)×(rand−0.5)×width 侧偏,NewDust(束端+侧偏−(4,4),8,8,31,
+    //    α100,scale1.5) → vel×0.5、vel.Y = −|vel.Y|（上浮）
     const prog = Math.min(1, Math.max(0, this.age / 30));
     const tipX = this.cx + dirX * (this.beamLen - 8), tipY = this.cy + dirY * (this.beamLen - 8);
-    for (let k = 0; k < 2 * prog; k++) {
+    const n226 = Math.floor(2 * prog);                       // (int)(2f×num721)
+    for (let k = 0; k < n226; k++) {
       const da = Math.atan2(dirY, dirX) + (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 2);
-      game.spawnBurst?.(tipX, tipY, '#8FE8FF', 1, Math.random() * 0.8 + 1, da, 0,
-        { life: 24, damp: 0.95 });
+      const mag = Math.random() * 0.8 + 1;                   // NextDouble×0.8+1
+      const d = game.spawnDust?.(tipX, tipY, 0, 0, 226, Math.cos(da) * mag, Math.sin(da) * mag);
+      if (d) { d.noGravity = true; d.scale = 1.2; }
+    }
+    const gate31 = 5 + Math.floor((1 - prog) * 5);           // 5..10
+    if (Math.floor(Math.random() * gate31) === 0) {
+      const rotV = dirX * Math.cos(Math.PI / 2) - dirY * Math.sin(Math.PI / 2);   // RotatedBy(π/2)
+      const rotVY = dirX * Math.sin(Math.PI / 2) + dirY * Math.cos(Math.PI / 2);
+      const side = (Math.random() - 0.5) * this.w;          // (rand−0.5)×width
+      const bx = tipX + rotV * side - 4, by = tipY + rotVY * side - 4;
+      const d31 = game.spawnDust?.(bx, by, 8, 8, 31, 0, 0, 100, null, 1.5);
+      if (d31) {
+        d31.vx *= 0.5; d31.vy *= 0.5;
+        d31.vy = -Math.abs(d31.vy);
+      }
     }
     // 命中（:14703）：线段 Center→Center+dir·len，宽 22·scale；iframes 由
     // damagePlayer→Player.damage 内建去重（对应原版 player.immune 门）
@@ -2294,9 +2615,16 @@ export class Dart extends Entity {
       if (!host) this.age = 90;
       else {
         this.alpha = 255;                                      // :32112 隐形
-        if (Math.random() < 0.5) {                             // :32104-32110 尘 242 ×1/2
-          const c = { x: this.cx - 4, y: this.cy - 4, w: 8, h: 8 };
-          game.spawnParticles(c.x, c.y, '#9FD8FF', 1, 1.5, { life: 26, damp: 0.93, grav: 0 });
+        // 蓄能尾尘（:33937-33944,1/2 掷）——★尘站普查批（2026-09-16）泛色
+        //  spawnParticles 退役改真尘站：NewDust(Center,8,8,242) → position=Center
+        //  整覆写、velocity=弹速（蓄能期原地 → 近零）、noGravity、scale=1.5（整写）
+        if (Math.random() < 0.5) {
+          const d = game.spawnDust?.(this.cx, this.cy, 8, 8, 242, this.vx, this.vy);
+          if (d) {
+            d.x = this.cx; d.y = this.cy;
+            d.noGravity = true;
+            d.scale = 1.5;
+          }
         }
       }
     }
@@ -2315,12 +2643,18 @@ export class Dart extends Entity {
       }
     }
     if (this.age < 90) { this.x += this.vx; this.y += this.vy; return; }
-    // 齐射后（:32218-32232）：显形 alpha0、rotation 随弹向 0.4 lerp、尘 242 ×1/4
+    // 齐射后（:32218-32232）：显形 alpha0、rotation 随弹向 0.4 lerp——★尘站普查批
+    //  （2026-09-16）泛色退役改真尘站：释放尾尘 242 ×1/4（:34054-34062,NewDust
+    //  (Center,8,8,242) 无位覆写=8×8 盒内随机、vel×0.2、noGravity、scale=1.5 整写）
     this.alpha = 0;
     this.rot += (Math.atan2(this.vy, this.vx) + Math.PI / 2 - this.rot) * 0.4;
     if (Math.random() < 0.25) {
-      game.spawnParticles(this.cx - 4, this.cy - 4, '#9FD8FF', 1, 0.5,
-        { life: 26, damp: 0.93, grav: 0 });
+      const d = game.spawnDust?.(this.cx, this.cy, 8, 8, 242);
+      if (d) {
+        d.vx *= 0.2; d.vy *= 0.2;
+        d.noGravity = true;
+        d.scale = 1.5;
+      }
     }
     this.x += this.vx; this.y += this.vy;
     // 撞实心（tileCollide 默认 true）：TileCollision 语义 = 速度截停（粘墙不灭）
@@ -2349,6 +2683,11 @@ export class Dart extends Entity {
   // ---- 原版 Projectile 字段映射 ----
   private age = 0;          // ai[0]/localAI 计数
   private tick = 0;         // 拖尾节拍
+  /** oldVelocity 快照（Update :17118,dartStep 头刷新;115 尘站尘速消费） */
+  private ovx = 0;
+  private ovy = 0;
+  /** 115 三叉戟 localAI[1] 镜像（AI_027 :26814 首拍置 5/:26852 计满 15 门） */
+  private ai115L1 = 0;
   private rot = 0;          // projectile.rotation
   private alpha = 0;        // projectile.alpha(255=全透明,渐入)
   private scale = 1;        // projectile.scale
@@ -2588,7 +2927,9 @@ export const DART_STYLE: Record<number, DartStyle> = {
   38: { w: 14, h: 14, rot: 'align90', life: 300, fallback: '#E8E0D0' },
   // 129 符文爆弹（172 符文法师 :21228-21240）：14×14 穿墙直飞 timeLeft 300，
   //  aiStyle 28（tileCollide false / penetrate -1）——穿墙不消
-  129: { w: 14, h: 14, rot: 'align90', life: 300, trail: { color: '#E8C85A', count: 1 }, fallback: '#F0D060' },
+  //  ★尘站普查批（2026-09-16）：泛色 trail 退役（曾每两拍任意金色 1 粒,与原版
+  //  6×d106/update 不同源）——真尘站见 dartStep 129 支（P.cs:27009-27019）
+  129: { w: 14, h: 14, rot: 'align90', life: 300, fallback: '#F0D060' },
   // 596 沙漠幽焰（533 沙漠精灵 :21104-21135）：8×8 aiStyle 107、timeLeft 180、
   //  tileCollide=false、penetrate=-1、α=255 渐显（NewProjectile damage=0 → noPlayerHit）。
   //  ★批六 M2：home = AI_107 共通尾（P.cs:34277-34286）——num839=40 距离门（欧氏
@@ -2652,6 +2993,43 @@ export const DART_STYLE: Record<number, DartStyle> = {
     sfx: ['Item_17'], fallback: '#7AC868' },   // :52241-52245
   605: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5,
     sfx: ['Item_154'], fallback: '#D8D0C0' },  // 605 族 Item154(:52213-52223)
+  // ---- ★NPC 弹幕尘站普查批（2026-09-16,docs/npc-proj-dust-census.md §6 Carrier 面）：
+  //      472/920/436/438/581/592 六型此前无表项走 legacyStep 色块,本批补 SetDefaults
+  //      投影(盒/α/life/EU/首帧音)——尘站见 dartStep 各支与 killShooterDust ----
+  // 472 诅咒颅（地牢蜘蛛 163/236-238 吐射,Enemy.ts spawnHostileProj :5335/:6520）：
+  //    SetDefaults :5465-5473 8×8 aiStyle1 hostile penetrate-1 tileCollide timeLeft 60;
+  //    AI 尾焰 d30×1/update+首拍 d30×20(:55078-55097)、Kill d30×20(:74803-74813)。
+  //    首拍音 Item17 在 AI localAI[0]==0 支(:55087-55089),发射点无音 → 表 sfx 承载
+  472: { w: 8, h: 8, rot: 'align90', life: 60, sfx: ['Item_17'], fallback: '#7CE8C8' },
+  // 920 史莱姆箭矢（地牢蓝史莱姆 658 母体吐射,Enemy.ts :4124 spawnHostileProj）：
+  //    SetDefaults :8729-8736 6×6 aiStyle1 hostile α255 penetrate1;重力同 174/605 族
+  //    0.15@5(:57877);首拍随机帧 frame=rand(3)(:56020-56024,ctor frameRand 同义);
+  //    首拍音 Item154(:56065-56070 else 支,926 才走 Item155)。★原版 AI 块 :56025
+  //    明文排除 920/921 的尘掷(`type != 920 && type != 921 && ...`)→ 920 无 A 尘站
+  //    (普查报告"56052 变量尘"系扫描器把外层 type∈{605,920,...} 当尘站条件,亲读证伪);
+  //    尘面唯一来源 = Kill d4×6 环(:72760-72770,killShooterDust 920 支)
+  920: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5,
+    sfx: ['Item_154'], frameRand: 3, fallback: '#5888FF' },
+  // 436 火星弹（脑洗器 381,RANGED_TABLE :6086 proj:436 → spawnHostileProj）：
+  //    SetDefaults :5066-5072 10×10 aiStyle1 hostile ignoreWater（α 缺省 0=本体常显）;
+  //    AI :55106-55128 首拍 Item12 + 4 帧动画(每 3 update 步进)+AddLight——EU=0
+  436: { w: 10, h: 10, rot: 'align90', sfx: ['Item_12'], animEvery: 3, frames: 4,
+    fallback: '#B0F0A0' },
+  // 438 火星激光（射线枪手 382,RANGED_TABLE :6090 proj:438）：SetDefaults :5083-5090
+  //    8×8 aiStyle1 hostile α255 extraUpdates=3 ignoreWater;fade = |v|×0.9 积分式
+  //    (:56631,与 302 同式);首拍音 Item12(:56220-56224)。本体无尘站(仅 AddLight)
+  438: { w: 8, h: 8, rot: 'align90', alpha0: 255, fade: 'speed', updates: 3,
+    sfx: ['Item_12'], fallback: '#F0A0B0' },
+  // 581 破甲刺（漩涡蜂后 426,RANGED_TABLE :6113 proj:581）：SetDefaults :6308-6316
+  //    10×10 aiStyle1 α255 penetrate-1 hostile——α 恒 255 无 fade（AI 全程无 α 写支）
+  //    =本体恒隐、可视面全在 AI 尾尘 2×SelRandom(229,161,161)/update(:57288-57302);
+  //    首拍音 Item17(:57291-57294);penetrate-1 穿透不消亡 → 命中口豁免(见 fixedUpdate)
+  581: { w: 10, h: 10, rot: 'align90', alpha0: 255, sfx: ['Item_17'], fallback: '#C8D0F0' },
+  // 592 火星弹（火星行者 520,RANGED_TABLE :6122 proj:592）：SetDefaults :6411-6418
+  //    8×8 aiStyle1 hostile α255 extraUpdates=3 ignoreWater;fade = |v|×0.9(:56631);
+  //    首拍音 Item12(:56230-56234);无尘站(仅 AddLight :55821-55823)
+  592: { w: 8, h: 8, rot: 'align90', alpha0: 255, fade: 'speed', updates: 3,
+    sfx: ['Item_12'], fallback: '#90A0F0' },
   // 1073 史莱姆凝胶弹（携 539 史莱姆法杖物史莱姆 AI_001 :61099-61103：direction×12
   //   直飞伤 20 kb2；SetDefaults Projectile.cs:9754-9761：10×10 aiStyle1 hostile
   //   penetrate-1 trap——无重力直飞；命中 Poisoned(20) 600t 由 projTargets :11660 接）

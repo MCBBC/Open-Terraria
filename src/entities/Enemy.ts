@@ -123,7 +123,7 @@ import {
   scaleStats, getAttackDamageForProjectiles, type ScalingStats,
   GDL, remap, mainDifficulty, mainExpertMode, getAttackDamageCappedAtMaster,
   getKnockbackMultiplierScaledByDifficulty,
-  scaleStatsWorld, applySeedAdjustments, applyRemixSetDefaults, type SeedAdjustStats, f32, damageVar,
+  scaleStatsWorld, applySeedAdjustments, applyRemixSetDefaults, seedTailBox, type SeedAdjustStats, f32, damageVar,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
@@ -1311,19 +1311,17 @@ export class Enemy extends Entity {
     const seedBox = applySeedAdjustments(seedS, scaleStatsWorld());
     // 碰撞盒：:17842 基扩盒 (int)(w×scale)（1456:17745）之后，种子档命中分支再
     // (int)(w×scaleNew)（getGood :18122 / 十周年 :17958；1456:18025-18026/:17861-17862）
-    // ——按原文两级 (int) 截断重算（不沿用下方 round
-    // 基盒，s≠1 族 113/114/134-136 差 1px）；未命中走既有 round 路径。
+    // ——按原文两级 (int) 截断重算（s≠1 族 113/114/134-136 差 1px）；
+    // ★BJ101（2026-09-16）：两级 (int) 截断抽为 seedTailBox 单源——Transform→
+    // SetDefaults(:81921) 全链重跑的 tryTransformTo 与本处共用（fx43 双源漂移防）。
+    // 表达式逐位等价迁移（双未命中支原文同式，RB15b-F1 注释随迁 ScaleStats.ts）。
     // ★remix 命中时基 scale 已含 ×1.3/×1.2/×1.1（原版 scale *= 语句）——非种子档
     // 分支也须走 (int) 截断（原版 :17842 恒 (int)，remix 非 1.0 尺度下 round/trunc
     // 会出现 1px 差，如 22×1.3=28.6）
-    const boxW = seedBox
-      ? Math.trunc(f32(Math.trunc(f32(v.width * vScale)) * f32(seedS.scale)))
-      // ★RB15b-F1(2026-09-13)：双未命中支原版同为 (int) 截断（NPC.cs:17842 首盒）——
-      //   旧 Math.round 曾使普通世界史莱姆王 50 盒宽 123 vs 原版 122（98×1.25=122.5）
-      : (remixHit ? Math.trunc(f32(v.width * vScale)) : Math.trunc(f32(v.width * vScale)));
-    const boxH = seedBox
-      ? Math.trunc(f32(Math.trunc(f32(v.height * vScale)) * f32(seedS.scale)))
-      : (remixHit ? Math.trunc(f32(v.height * vScale)) : Math.trunc(f32(v.height * vScale)));
+    // ★BJ101（2026-09-16）：两级 (int) 截断抽为 seedTailBox 单源——Transform→
+    // SetDefaults(:81921) 全链重跑的 tryTransformTo 与本处共用（fx43 双源漂移防）。
+    // 表达式逐位等价迁移（双未命中支原文同式，RB15b-F1 注释随迁 ScaleStats.ts）。
+    const { w: boxW, h: boxH } = seedTailBox(v.width, v.height, vScale, seedS.scale, seedBox);
     const ss: ScalingStats = {
       type: id, lifeMax: seedS.lifeMax, damage: seedS.damage,
       value: seedS.value ?? npcValueOf(id),   // ★IIIII228：remix value ×scale 已并入
@@ -6272,12 +6270,30 @@ export class Enemy extends Entity {
     //  unembedPass/物理救援承接(原版同态)。锚定差异表：
     //   旧 nx=cx−nw/2 → 原版语义左缘不动(nx=this.x)；ny 两版同（底边对齐）
     const oldType = this.vanillaId;
-    const s = v.scale ?? 1;
-    const nw = Math.round(v.width * s), nh = Math.round(v.height * s);
     const nx = this.x;                            // X 恒左缘保持（原版无水平位移）
-    const ny = this.y + this.h - nh;              // Y 底边对齐(:81912-81918)
     void st;                                      // st 形参保留:嵌墙自检已删
-    const oldMax = this.maxHp;
+    const oldMax = this.maxHp;                    // :81916 num3 = 旧 lifeMax（缩放后终值）
+    // ★BJ101（2026-09-16）：Transform → SetDefaults(newType)（:81921）= SetDefaults
+    // 【全链】重跑——remix 主体块 → 首盒 (int) 截断（:17842-17843）→ defDamage 快照
+    // （:17846-17848）→ zenith（:17871-17874 只改 lifeMax）/getGood（:17875-17878，13
+    // ×1.35+def+2 / 14,15 ×1.4+def+2、二盒 :18122-18123）/十周年（:17879-17882，列族
+    // ×0.5、二盒 :17958-17959 恒乘）→ ScaleStats（:17888，活体 Main.Difficulty+玩家数
+    // 门）→ life=lifeMax（:17889）。旧实现全取基表值（盒 round 无二盒、maxHp/damage/
+    // defense/kb/value 停经典档）= 与已移植 spawn 段（fromVanilla 同链）内部不一致。
+    // 链体经 seedTailBox/applyRemixSetDefaults/applySeedAdjustments/scaleStats 单源复用
+    // （禁止第二套种子/难度实现，fx43 同族），与 fromVanilla 逐式同参。
+    const rawDamage = (v.critter || v.friendly) ? 0 : v.damage;   // defDamage 基线（:17846 快照在种子/难度乘【前】）
+    const rawKb = v.knockBackResist ?? 1;          // SetDefaults 缺省 1f（NPC.cs:8449）
+    const seedS: SeedAdjustStats = {
+      type: id, scale: v.scale ?? 1, lifeMax: v.lifeMax, defense: v.defense, damage: v.damage,
+      value: npcValueOf(id),
+      canDisplayBuffs: true,   // NPC.canDisplayBuffs 默认 true（NPC.cs:6124）
+    };
+    const remixHit = applyRemixSetDefaults(seedS, scaleStatsWorld());
+    const vScale = seedS.scale;                    // ★首盒乘数=remix 后种子档前（SC1 读取点纪律）
+    const seedBox = applySeedAdjustments(seedS, scaleStatsWorld());
+    const { w: nw, h: nh } = seedTailBox(v.width, v.height, vScale, seedS.scale, seedBox);
+    const ny = this.y + this.h - nh;              // Y 底边对齐(:81912-81918)
     this.vanillaId = id;
     // ★netID 重推导（实报 2026-09-15「杀宁芙不触发傻瓜骗子」定谳）：原版 Transform
     // → SetDefaults(newType) 尾 NPC.cs:17849 `netID = type`——变身即脱变体，出生
@@ -6293,22 +6309,44 @@ export class Enemy extends Entity {
     this.vanilla = v;
     this.w = nw; this.h = nh;
     this.x = nx; this.y = ny;
-    this.maxHp = v.lifeMax;
-    this.hp = Math.max(1, Math.round((this.hp * v.lifeMax) / oldMax)); // life = life*lifeMax/old
+    const ss: ScalingStats = {
+      type: id, lifeMax: seedS.lifeMax, damage: seedS.damage,
+      value: seedS.value ?? npcValueOf(id),   // ★IIIII228：remix value ×scale 已并入（同 fromVanilla）
+      defense: seedS.defense, knockBackResist: rawKb,
+      boss: VANILLA_BOSS_IDS.has(id), friendly: !!v.friendly, townNPC: !!v.townNPC,
+      scale: seedS.scale, difficulty: 0,
+    };
+    scaleStats(ss);                            // :17888 ScaleStats（活体难度/玩家数门，同 fromVanilla 无显式参）
+    this.difficulty = ss.difficulty;           // npc.difficulty（AI 段 GetAttackDamage_* 消费）
+    this.baseDamage = rawDamage;               // :17846 defDamage 快照语义（未缩放基线，弹幕出膛用）
+    // HP 结转 life = num2 * lifeMax / num3（:81931，C# int 乘除=逐级 (int) 截断，
+    // ≤0 钳 1 :81933-81935）——num2=旧 life、num3=旧【缩放】lifeMax、lifeMax=新【缩放】
+    // lifeMax ⇒ 新缩/旧缩比例结转。旧实现 Math.round 且分子用【基表】lifeMax（新基/旧缩
+    // =伪值），专家/大师世界 HP 比例错档 + .5 处舍入偏差。
+    this.maxHp = ss.lifeMax;
+    this.hp = Math.max(1, Math.trunc((this.hp * ss.lifeMax) / oldMax));
     // 飞行档表达式与 fromVanilla 同源（noGravity 数据族 + aiStyle 2/5/14/23/44）
     const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14
       || v.aiStyle === 23 || v.aiStyle === 44;
     this.noGravity = flying;   // 运行时位随 Transform 重置（原版 SetDefaults 复位语义）
     this.def = {
       ...this.def,
-      name: v.name, hp: v.lifeMax, damage: v.damage, defense: v.defense,
+      name: v.name, hp: ss.lifeMax, damage: rawDamage !== 0 ? ss.damage : 0, defense: ss.defense,
       width: nw, height: nh,
+      // ScaleStats 终态击退承受比例/掉钱值（:18211 GetKnockbackMultiplier_*、
+      // :18208 EnemyMoneyDropMultiplier）——旧实现残留旧型值（348→349 kb/value 停旧档）
+      knockbackResist: ss.knockBackResist,
+      value: ss.value,
       flying,
       boss: VANILLA_BOSS_IDS.has(id),
       hitSound: vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'],
       killedSound: v.DeathSound === null ? [] : vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'],
       drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
     };
+    // 种子档 canDisplayBuffs（FTW 245-248 石巨人族 false）+ 渲染乘区（与 fromVanilla
+    // 同式：种子/remix 命中才写，经典世界不写=缺省 1 零漂移）
+    this.canDisplayBuffs = seedS.canDisplayBuffs !== false;
+    if (seedBox || remixHit) this.vanillaScale = seedS.scale / (v.scale ?? 1);
     // Transform 换音组（如蝙蝠 158→吸血鬼 159 换 NPCHit/Death）同样预热——
     // 变形态首击的懒加载竞态与出生路径同构
     enemySoundPrewarm?.([...this.def.hitSound, ...this.def.killedSound]);

@@ -327,20 +327,36 @@ describe('RollingBoulder ★通用湿段（AI_025 家族）', () => {
     // ★BJ93 债⑤配套（2026-09-16）：把上一用例的容跳语义钉成确定性回归面——
     //  Math.random≡0 → Next(4)==0（1/4 越区臂:弹在 playArea 内不触发）与
     //  Next(180)==0（:26453 无条件臂）双双逐拍命中 → 首拍即 smart bounce、
-    //  宽限(a)1 期满后再跃迁,跃迁相被【必然】走到（上例靠 7.5% 天然率,此例钉死）。
+    //  宽限 ai1 期满后再跃迁,跃迁相被【必然】走到（上例靠 7.5% 天然率,此例钉死）。
+    //  ★E 复核修复（2026-09-16）：夹具玩家从 (cx=330,970) 挪到水柱正上方 cx=568
+    //  （水柱 px [480,656] 中心）——JumpToPlayer 目标=player.Center（P.cs:20317-20319
+    //  → JumpToPosition(target=Center,:20338-20371 弹道核)）,旧 x=330 时跃迁弹道向左
+    //  越出柱（探针实证 20 拍 liq 恒 0）→ 钉 0 相测不到湿段豁免（翻 ignoreWater 变异
+    //  wet/splash 全不红=零判别）。x=568 后弹道全程在柱内（t5 起 liq=255）,湿面豁免
+    //  断言真被暴露:翻豁免变异 → wet=true/splash>0 → 本用例红（2×2 探针矩阵定谳）。
+    //  sawColumnWater 见证断言钉住该覆盖（夹具回退/弹道漂移出柱即红）。
     //  断言面=跃迁相豁免语义:RB4 跃迁编排尘（14×型66 1×1/次,JumpToPosition
     //  :20346-20353 → rainbowBoulderFx v4）全容、且仍是唯一尘源;Splash/四旗/
-    //  不杀恒闭不变。若有人把上一用例的 dust 断言改回 `dust.length===0`
-    //  （重新引入 ≈3-8% flaky）或断开 smart bounce→RB4 链,本用例即红。
+    //  不杀恒闭不变。
+    //  ★E 复核勘误（过称修正）：本用例与上一用例为【独立 it】——上一用例的断言
+    //  形态（dust 容跳 vs `dust.length===0`）对本用例无约束力,「改回 dust===0 本
+    //  用例即红」系过称（case1 改回 ===0 只会令其自身 ≈3-8% flaky;case2 的判别力
+    //  由本用例自身断言面+覆盖见证承载）。
     const w = mkWorld();
     liquidAt(w, WX0, WX1, WY0, WY1);
     const { g, dust, splash } = makeGame(w);
-    const p = (g as unknown as { player: { y: number; cy: number } }).player;
+    const p = (g as unknown as { player: { x: number; y: number; cx: number; cy: number } }).player;
     p.y = 970 - 21; p.cy = 970;                      // 同上:playArea 罩全程,1/4 臂恒哑
+    p.x = 568 - 10; p.cx = 568;                      // ★E 复核:x 挪到水柱中心（JumpToPlayer 落点随之入柱）
     const b = new RollingBoulder(34 * TILE, 850, 711);            // sheet 711 → 1047
     (b as { vy: number }).vy = 10;
     const spy = vi.spyOn(Math, 'random').mockReturnValue(0);
-    for (let t = 0; t < 14 && !b.dead; t++) b.fixedUpdate(1 / 60, g);
+    let sawColumnWater = false;                      // 覆盖见证:盒心格触液（湿段豁免面被真暴露的前提）
+    for (let t = 0; t < 14 && !b.dead; t++) {
+      b.fixedUpdate(1 / 60, g);
+      const tx = Math.floor(b.cx / 16), ty = Math.floor(b.cy / 16);
+      sawColumnWater = sawColumnWater || w.store.liquid[w.store.idx(tx, ty)] > 0;
+    }
     spy.mockRestore();
     const rb4Burst = dust.filter((d) => d.type === 66 && d.w === 1 && d.h === 1);
     expect(rb4Burst.length).toBeGreaterThanOrEqual(14);            // ≥1 次跃迁已发生（每跃 14×型66）
@@ -348,6 +364,7 @@ describe('RollingBoulder ★通用湿段（AI_025 家族）', () => {
     expect(b.wet).toBe(false); expect(b.lavaWet).toBe(false);
     expect(b.honeyWet).toBe(false); expect(b.shimmerWet).toBe(false);
     expect(splash.length).toBe(0);
+    expect(sawColumnWater, '跃迁相覆盖见证:弹道确入水柱——否则湿段豁免断言零判别（E 复核,夹具回退即红）').toBe(true);
     expect(b.dead).toBe(false);
   });
 });

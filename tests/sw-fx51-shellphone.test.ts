@@ -218,6 +218,33 @@ describe('FX51-SP C/D 四态路由分型（5358 床点/5359 世界点/5360 海�
     expect(rWorld.g.player.x, '5359 落世界点（非床 200）').toBe(150 * TILE + 8);
   });
 
+  it('5360→ocean 他侧优先序（Player.cs:56786-56790 1:1）:首试=对侧(rightOcean=leftHalf),败回退当前侧', () => {
+    const w = new World(300, 240, 7, 'fx51-ocean-order');
+    w.groundLevel = 128;
+    const calls: boolean[] = [];
+    const mk = (playerX: number, firstHit: boolean) => {
+      const r = fireStub(w, { x: playerX, y: 140 * TILE });
+      (r.g as unknown as { requestMagicConchTeleportPosition(ro: boolean): { x: number; y: number } | null })
+        .requestMagicConchTeleportPosition = (ro: boolean) => {
+          calls.push(ro);
+          return firstHit && calls.length === 1 ? { x: 250 * TILE, y: 120 * TILE } : null;
+        };
+      return r.g;
+    };
+    // 左半玩家:首试 rightOcean=true（右洋）;首试败 → 回退 rightOcean=false（左洋=当前侧）
+    calls.length = 0;
+    fire(mk(50 * TILE, false), { vid: 5360, kind: 'ocean', triggerAt: 45, consume: false });
+    expect(calls, '左半:首试对侧右洋(true)→回退左洋(false)').toEqual([true, false]);
+    // 右半玩家:首试 rightOcean=false（左洋）
+    calls.length = 0;
+    fire(mk(250 * TILE, true), { vid: 5360, kind: 'ocean', triggerAt: 45, consume: false });
+    expect(calls, '右半:首试对侧左洋(false)——首中即止不重掷').toEqual([false]);
+    // 门基:左半判别式 = p.x/16 < w/2（Player.cs:56756 position.X/16 < maxTilesX/2）
+    const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    expect(src.includes("const leftHalf = p.x / TILE < st.w / 2;"), 'leftHalf 判别式在位').toBe(true);
+    expect(src.includes('?? this.requestMagicConchTeleportPosition(!leftHalf)'), '回退臂=当前侧取反在位').toBe(true);
+  });
+
   it('5360→ocean 路由:style5 水尘×100（Entry+Exit 各 50）+splash 音;5361→hell:尘35×50+item8 音;2351→random 零音', () => {
     const w = new World(300, 240, 7, 'fx51-sp-f');
     w.groundLevel = 128;
@@ -233,13 +260,96 @@ describe('FX51-SP C/D 四态路由分型（5358 床点/5359 世界点/5360 海�
     expect(new Set(water.map((d: { noGravity: boolean }) => d.noGravity))).toEqual(new Set([true]));
 
     const rH = fireStub(w);
-    (rH.g as unknown as { findTeleportSpot(x0: number, x1: number, y0: number, y1: number): { x: number; y: number } | null })
-      .findTeleportSpot = () => ({ x: 149 * TILE, y: 220 * TILE });
+    (rH.g as unknown as { requestDemonConchSpot(): { x: number; y: number } | null })
+      .requestDemonConchSpot = () => ({ x: 149 * TILE, y: 220 * TILE });
     fire(rH.g, { vid: 5361, kind: 'hell', triggerAt: 45, consume: false });
     expect(rH.g.player.x).toBe(149 * TILE);
     expect(rH.sfxLog, 'style7=Item8（Main.cs:13542,★SW-RB10a）').toEqual(['item8']);
     expect(d35(rH.g).length, '50×尘 35（:13516-13532）').toBe(100);   // Entry+Exit 各 50
     expect(d267(rH.g).length, '5361 不走 267').toBe(0);
+  });
+});
+
+describe('FX51-SP2 恶魔海螺/5361 九窗级联带宽（Player.cs:56840-56896 + Utils.cs:518-647）', () => {
+  /** 带内实心板（用户实报「1608 英尺洞穴 1」判别场）：板顶=h−110 行（die ∈ [h−180,h−100]
+   *  时下坠 ≤70 行必达;die 行自身在板内=拒）。返回 feetRow 断言闭包 */
+  function paintHellSlab(st: import('../src/world/TileStore').TileStore, w: number, h: number,
+    x0: number, x1: number): void {
+    paintRect(st, x0, x1, h - 110, h - 108, TILE_BY_KEY['stone']);
+  }
+  const feetRowOf = (g: { player: { x: number; y: number; h: number } }) =>
+    Math.round((g.player.y + g.player.h) / 16);
+
+  it('三世界档(h=300/600/900,UnderworldLayer=h−200):8 连掷脚行恒=h−110 板顶 ∈ 带内,绝不高于带下界', () => {
+    for (const [w, h] of [[200, 300], [200, 600], [200, 900]] as const) {
+      const world = new World(w, h, 7, `fx51-hell-${h}`);
+      world.groundLevel = 40;
+      paintHellSlab(world.store, w, h, 40, w - 40);
+      const { g } = fireStub(world, { x: 100 * TILE, y: 40 * TILE });
+      const probe = (g as unknown as { requestDemonConchSpot(): { x: number; y: number } | null });
+      const xs: number[] = [];
+      for (let k = 0; k < 8; k++) {
+        const r = probe.requestDemonConchSpot();
+        expect(r, `h=${h} 第${k}掷:中心窗必命中（带内板在场）`).not.toBeNull();
+        const feet = Math.round((r!.y + 42) / 16);
+        // 板顶=h−110:die ∈ [h−180,h−100] 下坠 ≤70 行必钉板顶=vanilla anchor 深度可精确断言
+        expect(feet, `h=${h} 第${k}掷脚行 ${feet}=板顶 h−110（★旧刀 lavaLine 锚会落带上方）`).toBe(h - 110);
+        expect(feet, `h=${h} ≥ 带下界 h−180`).toBeGreaterThanOrEqual(h - 180);
+        const tx = Math.round((r!.x + 10) / 16);
+        expect(tx, `h=${h} 第${k}掷 x ${tx} ∈ 板域`).toBeGreaterThanOrEqual(40);
+        expect(tx).toBeLessThanOrEqual(w - 40);
+        xs.push(tx);
+      }
+      expect(new Set(xs).size, `h=${h} 多落点（非钉死一格）`).toBeGreaterThan(1);
+    }
+  });
+
+  it('★lavaLine 陷阱回归（用户实报根因判别子）:world.lavaLine=0.75h（带上方）不锚扫描,仍落 [h−180,∞) 带', () => {
+    const h = 300;
+    const world = new World(200, h, 7, 'fx51-hell-lavatrap');
+    world.groundLevel = 40;
+    world.lavaLine = Math.floor(h * 0.75);          // 225 ≫ UnderworldLayer=100（旧刀锚它 → 扫 [245,325]）
+    paintHellSlab(world.store, 200, h, 40, 160);    // 板只在新带内（旧带 [245,255] 无板）
+    const { g } = fireStub(world, { x: 100 * TILE, y: 40 * TILE });
+    const r = (g as unknown as { requestDemonConchSpot(): { x: number; y: number } | null }).requestDemonConchSpot();
+    expect(r, '新刀九窗带 [120,200] 命中板（旧刀扫旧带必 null）').not.toBeNull();
+    const feet = Math.round((r!.y + 42) / 16);
+    expect(feet, `脚行 ${feet} ∈ 新带（≥${h - 180}）——旧刀此场景落洞穴层`).toBeGreaterThanOrEqual(h - 180);
+    expect(feet).toBeLessThanOrEqual(h - 1);
+  });
+
+  it('边窗级联可达:中心带无板（窗①②③全败）→ 侧翼 flag 三窗命中,落点仍带内且在侧翼 x 域', () => {
+    const w = 700;
+    const h = 300;
+    const world = new World(w, h, 7, 'fx51-hell-edge');
+    world.groundLevel = 40;
+    // 中心窗域 [250,400] 留空;侧翼 A 窗② (num−100,50)=die[200,250) 有板（num=300）
+    paintHellSlab(world.store, w, h, 200, 244);
+    const { g } = fireStub(world, { x: 350 * TILE, y: 40 * TILE });
+    const r = (g as unknown as { requestDemonConchSpot(): { x: number; y: number } | null }).requestDemonConchSpot();
+    expect(r, '侧翼窗命中（级联穿透中心三窗）').not.toBeNull();
+    const ax = Math.round((r!.x + 10) / 16);        // p 中心→tile: r.x=p.x=中心 → −10 回盒
+    const feet = Math.round((r!.y + 42) / 16);
+    expect(feet, '侧翼命中仍带内').toBeGreaterThanOrEqual(h - 180);
+    expect(ax, `落点 tile ${ax} ∈ 侧翼 A 板域 [200,244]`).toBeGreaterThanOrEqual(200);
+    expect(ax).toBeLessThanOrEqual(244);
+  });
+
+  it('结构锁:九窗级联/UnderworldLayer 锚/settings 全参在位;findTeleportSpot 死码已删', () => {
+    const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    expect(src.includes('private requestDemonConchSpot('), '九窗级联方法在位').toBe(true);
+    expect(src.includes('const startY = st.h - 200 + 20;'), '深度带=UnderworldLayer+20（Main.cs:2886）').toBe(true);
+    expect(src.includes('const rangeY = 80;'), 'teleportRangeY=80').toBe(true);
+    expect(src.includes('const flag = Math.random() * 2 < 1;'), '侧骰 Next(2) 在位').toBe(true);
+    expect(src.includes('mostlySolidFloor: true,') && src.includes('allowSolidTopFloor: true,')
+      && src.includes('avoidWalls: true,') && src.includes('avoidAnyLiquid: true,'),
+      'DemonConch settings 全参（:56846-56857）').toBe(true);
+    expect(src.includes('findTeleportSpot('), 'IIIII110b 最小核死码整删').toBe(false);
+    // 旧 lavaLine 锚销核（判别子=hell 臂体内零 lavaLine 消费面;他处 41559/41574/45396
+    //  的 `lavaLine || st.h - 200` 惯用法属 F10 探针/展示娃娃等合法域,不在本锁域）
+    const hellArm = src.match(/} else if \(c\.kind === 'hell'\) \{([\s\S]*?)\} else if \(c\.kind === 'worldSpawn'\)/);
+    expect(hellArm, 'hell 臂体截取').toBeTruthy();
+    expect(/lavaLine\s*\|\|/.test(hellArm![1]), 'hell 臂无 lavaLine|| 消费（用户实报根因面）').toBe(false);
   });
 });
 

@@ -61,6 +61,25 @@ export interface BoulderAnchorCtx {
 
 let _destroying = false;   // cs 全局 destroyObject：递归熔断
 
+/** ★SW-BJ102（2026-09-16）：destroyObject（WorldGen.cs:48973 置位 / :49206 复位）
+ *  单飞闸外置口——Check2x2 之外的整件破坏路径（Game 654 TNTBarrel 挖除臂）复用
+ *  同一闸：闸内清格监听（scanBoulderFamilyNear→checkBoulderFamily）中途级联被吞，
+ *  同件 Spawn 单发（改前实证：挖一格=3×爆炸面+2×幻影弹）。restore 取外层值
+ *  （嵌套安全）；isBoulderDestroying 供重入臂判「外层已持闸」。 */
+export function isBoulderDestroying(): boolean {
+  return _destroying;
+}
+
+export function boulderDestroyGuard<T>(fn: () => T): T {
+  const outer = _destroying;
+  _destroying = true;
+  try {
+    return fn();
+  } finally {
+    _destroying = outer;
+  }
+}
+
 /** PlatformProperTopFrame（WorldGen.cs:70684-70694）：frameX/PlatformFrameWidth()
  *  ∈ [0,7]∪[12,16]∪[25,26]——平台"平顶"连接帧域。PlatformFrameWidth() =
  *  _data[19].CoordinateFullWidth = (CoordinateWidth16+Padding2)×Width1 = 18

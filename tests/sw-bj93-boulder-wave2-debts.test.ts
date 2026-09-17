@@ -472,7 +472,7 @@ describe('SW-BJ93 wave2 结构锁（判据表达式与调用序钉死）', () =>
 
   it('S2 Kill 地形面在家族面尾（掉落臂后=原版 :76470-77 → :76478-89 调用序）且两型接线', () => {
     const src = rb();
-    const fam = src.slice(src.indexOf('private rbKillFamilyFace'), src.indexOf('private rbSelfHurtPlayers'));
+    const fam = src.slice(src.indexOf('private rbKillFamilyFace'), src.indexOf('private rbCenterTileX'));   // ★BJ102：旧 rbSelfHurtPlayers 终点标记随面退役
     const dropIdx = fam.indexOf("VANILLA_ITEM_KEY_BY_ID[29]");
     const terrainIdx = fam.indexOf('this.rbKillTerrainFace(game)');
     expect(dropIdx).toBeGreaterThan(-1);

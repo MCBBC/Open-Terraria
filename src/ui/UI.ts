@@ -8535,6 +8535,9 @@ export class UI {
   /** UIList.ScrollWheel(UIList.cs:109-115):ViewPosition −= ScrollWheelDeltaForUI
    *  (±120/notch,PlayerInput.cs:902;XNA 上滚为正 = 浏览器 deltaY 取负) */
   private vinvModernScrollBy(e: WheelEvent): void {
+    // ★BJ103 失焦旁支同律（元素级宿主 :8513/:8769——modern 窗随背包,失焦暂停期
+    //   原版 :17316 return 同截断 :17549 宿主,滚轮死;autoPause 暂停期保持活面）
+    if (this.game?.focusPaused) return;
     const g = this.vinvModernGridGeometry();
     if (!g || g.contentH <= g.list.h) return;
     const notches = vanillaWheelNotches(e.deltaY, e.deltaMode);   // ★SW-RB14d：补传 deltaMode（旧缺省 0=Firefox 行模式整类吞零）
@@ -8978,6 +8981,12 @@ export class UI {
     //   playerInventory(:17547)+ _builtLayout 域守卫;PipsUseGrid 支只管网格分页
     //   且【不清 flag】,flag 支(列表滚)恒走=网格外/关网格态列表照滚(:17633-17640)。
     if (!this.game || this._builtLayout !== 'vanilla') return;
+    // ★BJ103（2026-09-16）失焦暂停旁支：原版 FocusHelper.UpdateFocus→Main.cs:17303-17316/
+    //   1458 :17309-17322 在 CanPauseGame(:17371)【之前】return → 暂停宿主
+    //   DoUpdate_WhilePaused 的 playerInventory 块(:17547-17551,autoPause 暂停期滚轮活面)
+    //   失焦期整段不可达=滚轮死。本仓 applyFocusPause 置 game.focusPaused（专名;勿改用
+    //   游戏全暂停态总门——rb15d H4 禁门锁:autoPause∧背包开滚轮须保持活面）。
+    if (this.game.focusPaused) return;
     if (this.invPanel.style.display !== 'block') return;   // playerInventory 门(:17547)
     const c = this.vinvLayoutCtx;
     if (!c) return;
@@ -9502,6 +9511,10 @@ export class UI {
    *  deltaY<0(上滚)→ +1。★音效不在本面(:572-583 全程无 PlaySound)——吸附步进
    *  每越 65px 行界一响(:388-393,vinvCraftSnapStep)。 */
   private vinvCraftWheel(e: WheelEvent): void {
+    // ★BJ103 失焦旁支：元素级宿主（:10328/:10420 绑定）与窗口宿主(vinvGridWheelTick)
+    //   同态——失焦暂停期原版 :17303-17316 return 先于 :17371,:17549 宿主不可达=死;
+    //   autoPause 暂停期保持活面（勿用游戏全暂停态总门,rb15d H4 禁门锁）
+    if (this.game?.focusPaused) return;
     e.stopPropagation();
     const rows = this.vinvCraftAvailV;
     if (!rows.length) return;

@@ -1899,6 +1899,49 @@ export function mouseTextAnchor(
   return { x, y };
 }
 
+/** MouseTextInner 文本色（Main.cs:20429-20480 1:1；1458 :20435-20486 同）：
+ *  num3 = (int)mouseTextColor/255 乘区只作用于色档,默认档（rare=0 且 diff=0）
+ *  = 直读 mouseTextColor 灰白;色档逐通道 byte 截断（C# (byte) cast）。diff 档在
+ *  rare 档【之后】覆写（:20473-20480 次序）。
+ *  ★SW-BJ105 2026-09-16 接入消费面：cursorItemIconRare/Diff claim 域（掉落物名
+ *  MouseTextHackZoom(text,rare,0) :43628 / 他玩家血名 (text,0,difficulty) :43655）。
+ *  -12 专家 = Main.DiscoR/G/B（:20433-20435）——本仓 FlickerClock.discoColor 同源
+ *  时钟直读;-13 大师 = masterColor×200 脉冲（:18408 masterColor 0..1 步进 0.05
+ *  ping-pong）——本仓时钟无 masterColor 态,按 UI.rarityColor 既有惯例取中点定值
+ *  (255,100,0),脉冲欠接登记债（BJ105：master 只影响 rare=-13 物品名色相的动画维）。
+ *  node/无 DOM 环境纯函数直测。 */
+export function mouseTextInnerColor(
+  rare: number, diff: number, mt: number,
+  clock?: { discoColor(): [number, number, number] } | null,
+): string {
+  const num3 = Math.trunc(mt) / 255;
+  const c = (r: number, g: number, b: number) =>
+    `rgb(${Math.floor(r * num3)},${Math.floor(g * num3)},${Math.floor(b * num3)})`;
+  let out = `rgb(${Math.round(mt)},${Math.round(mt)},${Math.round(mt)})`;   // :20429 默认档
+  if (rare === -13) out = c(255, 100, 0);        // :20430-20432 masterColor×200(中点定值,债)
+  if (rare === -12) {                            // :20433-20435 DiscoR/G/B
+    const d = clock?.discoColor();
+    out = d ? c(255 * d[0], 255 * d[1], 255 * d[2]) : c(255, 255, 255);
+  }
+  if (rare === -11) out = c(255, 175, 0);        // :20436-20438
+  if (rare === -10) out = c(65, 255, 110);       // :20439-20441
+  if (rare === -1) out = c(130, 130, 130);       // :20442-20444
+  if (rare === 1) out = c(150, 150, 255);        // :20445-20447
+  if (rare === 2) out = c(150, 255, 150);        // :20448-20450
+  if (rare === 3) out = c(255, 200, 150);        // :20451-20453
+  if (rare === 4) out = c(255, 150, 150);        // :20454-20456
+  if (rare === 5) out = c(255, 150, 255);        // :20457-20459
+  if (rare === 6) out = c(210, 160, 255);        // :20460-20462
+  if (rare === 7) out = c(150, 255, 10);         // :20463-20465
+  if (rare === 8) out = c(255, 255, 10);         // :20466-20468
+  if (rare === 9) out = c(5, 200, 255);          // :20469-20471
+  if (rare === 10) out = c(255, 40, 100);        // :20472-20474
+  if (rare >= 11) out = c(180, 40, 255);         // :20475-20477
+  if (diff === 1) out = c(255, 153, 0);          // :20478-20480 mcColor (1f,0.6f,0f) Main.cs:978
+  if (diff === 2) out = c(255, 38, 26);          // :20481-20483 hcColor (1f,0.15f,0.1f) Main.cs:980
+  return out;
+}
+
 /** 飘字。数字类 1:1 CombatText.cs（spawn: NewText:59-121 / update: Update:131-206）:
  *  vy 普通恒 -7/t、暴击 -14/t、dot -4/t;life 60/120/40;scale 从 0 每 t+0.1 长到 1
  *  （dot +0.5 封顶 0.8）;alpha 0.6~1 闪烁;寿命归零后 scale 收缩至 0.1 消亡。
@@ -4488,6 +4531,20 @@ export class Renderer {
     }
     ctx.restore();
 
+    // ★BJ103-A1（2026-09-16）：黑幕渐熄（Main.BlackFadeIn :558；DoDraw 尾
+    // :63367-63381/1458 :63373-63387——战斗文本 :63330-63345 之后、DrawInterface
+    // :63382-63390 之前 = 全 HUD 之下的最后一层世界画面）。SplashTexture16x9 全屏
+    // Color(0,0,0,α),α=clamp(BlackFadeIn,0,255),画后 BlackFadeIn-=25/帧（:63378/
+    // 1458 :63384）→ 255 起共 11 帧渐熄;置位点=Game.blackFadeCameraTeleport。
+    // 本仓 HUD 面（DOM 面板/画布小地图条）在其上=原版 DrawInterface 在黑幕之后
+    // 同序。capturePass 提前返之前画+衰减（原版 DrawCapture 内部亦走 DoDraw 同相）
+    if (this.blackFadeIn > 0) {
+      const bfa = Math.min(this.blackFadeIn, 255);
+      ctx.fillStyle = `rgba(0,0,0,${(bfa / 255).toFixed(4)})`;
+      ctx.fillRect(0, 0, viewW, viewH);
+      this.blackFadeIn -= 25;
+    }
+
     this._lastPlayer = player;
 
     // ==== M6 拍照模式（F4,CaptureInterface 1:1;src/render/CaptureMode.ts）====
@@ -4710,6 +4767,11 @@ export class Renderer {
   }
   /** Game 每帧注入：本次死亡掉落钱数（LocalPlayer.lostCoins） */
   deathLostCoins = 0;
+
+  /** ★BJ103-A1（2026-09-16）：黑幕计数（Main.BlackFadeIn :558,初值 0）。写点=
+   *  Game.blackFadeCameraTeleport（=255,Main.cs:63506/:63512）;读+衰减=render() 尾
+   *  黑幕层（Main.cs:63367-63381/1458 :63373-63387,每画一次 -25）。 */
+  blackFadeIn = 0;
 
   /** 水面波动系统每帧驱动（render() 顶部调用；WaterWaves.ts 内有完整原版行号）：
    *  贴图懒提取 → 档位同步(options.waveQuality) → 相机态 → 实体注入采集
@@ -15334,6 +15396,12 @@ export class Renderer {
     if (p.cursorItemIconText === '') return;
     const mt = this.lighting?.clock.mouseTextColor ?? 255;
     const col = Math.round((mt / 255) * 255);
+    // ★SW-BJ105 2026-09-16：MouseTextInner rare/diff 色域接入（Main.cs:20430-20480
+    //  1:1 色表,值域见 mouseTextInnerColor;rare=0/diff=0 = 默认灰白 ——NPC 名/箱名/
+    //  行标签 claim 恒 0,与本层旧灰白同相;掉落物名 rare 档/他玩家血名 diff 档新进）。
+    //  num3=(int)mouseTextColor/255 乘区只作用于色档,默认档直读 mt（:20429 同式）。
+    const fill = mouseTextInnerColor(p.cursorItemIconRare, p.cursorItemIconDiff, mt,
+      this.lighting?.clock ?? null);
     // ★FX35 2026-09-15:字体=CANVAS_MOUSETEXT_FONT(16px 用户拍板档,墨高 ~14.7;
     //  19px 墨高严格等值档 ≙ MouseText scale 1 链在 PixelText.CANVAS_MOUSETEXT_FONT
     //  注;原「14px monospace 替身」在 Windows DirectWrite 下四向 ±2 描边露出
@@ -15352,7 +15420,7 @@ export class Renderer {
       ctx.fillStyle = '#000';
       ctx.fillText(p.cursorItemIconText, anchor.x + ox, anchor.y + oy);
     }
-    ctx.fillStyle = `rgb(${col},${col},${col})`;
+    ctx.fillStyle = fill;
     ctx.fillText(p.cursorItemIconText, anchor.x, anchor.y);
     ctx.restore();
   }
@@ -16500,12 +16568,25 @@ export class Renderer {
     return null;
   }
 
-  /** 洞穴探险/危险感/狩猎/群系视觉 tile 高亮集（TILE_DEFS key 启发式，模块级缓存） */
+  /** Main.tileSpelunker 全表（Main.cs:9559-9700，49 条字面量 1:1，按 sheet id 存放）。
+   *  ★fx54（2026-09-16）：旧实现按 TILE_DEFS key 正则（ore_|gem|fossil|crystal）近似，
+   *  漏原版在册的 751/752（掘地鼬蛋/巨型龙蛋）、639（生命果）、531/506/337/349 等
+   *  ⇒ 巨型龙蛋不被洞穴探险增益高亮（原版 wiki 明示蛋可高亮）＝用户"看不到蛋"的
+   *  发现性缺口之一。金属探测器面（ORE_FINDER_PRIORITY 752=770）本已覆盖，不动。 */
+  private static readonly TILE_SPELUNKER_SHEETS = new Set<number>([
+    6, 7, 8, 9, 12, 21, 467, 441, 468, 28, 107, 108, 111, 63, 64, 65, 66, 67, 68,
+    566, 166, 167, 168, 169, 178, 211, 221, 222, 223, 236, 702, 37, 407, 227,
+    84, 83, 404, 242, 240, 246, 245, 105, 349, 337, 531, 506, 751, 752, 639,
+  ]);
+
+  /** 洞穴探险/危险感/狩猎/群系视觉 tile 高亮集（模块级缓存；spelunker=原版全表 1:1，
+   *  danger/biome 仍为 key 启发式备案） */
   private static HIGHLIGHT_SETS = (() => {
     const spelunker = new Set<number>(), danger = new Set<number>(), biome = new Set<number>();
     for (let i = 0; i < TILE_DEFS.length; i++) {
-      const k = TILE_DEFS[i]?.key ?? '';
-      if (/ore_|gem|fossil|v_\d+_.*gem|crystal/i.test(k)) spelunker.add(i);
+      const d = TILE_DEFS[i];
+      const k = d?.key ?? '';
+      if (d?.vanilla?.sheet !== undefined && Renderer.TILE_SPELUNKER_SHEETS.has(d.vanilla.sheet)) spelunker.add(i);
       if (/spike|dart_trap|boulder|landmine|geyser|flame_trap|v_21[3-9]|v_137|v_138|v_139|v_140/i.test(k)) danger.add(i);
       if (/corrupt|crimson|ebon|crims|hallow|pearl/i.test(k)) biome.add(i);
     }

@@ -11,13 +11,14 @@
 //   债2 json timeLeft 承接 ctor 读 vanilla-projectiles.json timeLeft 列（Arrow.ts
 //                         life 先例）：1054=300/:1846、1055=900/:1850、1047=3600/
 //                         :9927;1021 `timeLeft *= 3`=:1871（=缺省 3600×3=10800,json
-//                         不载算术覆写→特支）;1002=2/:9535【独不承接】——本仓爆炸
-//                         面已拆 tntBarrelBlast（Game.ts:44101,t+0 持自伤+NPC 面）,
-//                         承接 2 = Check2x2 完整性流双自伤面及时可达（原版=弹体单面）
-// 变异证红（开发期逐组实测,每债至少一线）：
+//                         不载算术覆写→特支）;1002=2/:9535 —— ★BJ102（2026-09-16）
+//                         债①归一后 carve-out 退役：格侧 tntBarrelBlast 已改 Spawn-only
+//                         （0 爆炸面）,承接 2 + AI_016 Kill 闸（:48031-35）=原版弹体
+//                         单面（t+0 首 AI 拍即爆）,双自伤面不复存在（详 sw-bj102 套件）
+// 变异证红（开发期逐组实测,每债至少一线;★BJ102 重锚后 M3 旧义退役）：
 //   M1 摘 rbKill 头闸（`if (this.dead) return;`）→ K1/K2/K3/K4 全红（尘/声计数翻倍）
 //   M2 boulderTimeLeft 恒返 3600 → L1/L2/L3 红（承接回退）
-//   M3 boulderTimeLeft 摘 1002 carve-out → L4 红（双自伤面回归线）
+//   M3 旧义（摘 carve-out）退役=BJ102 落刀本体;新义回退（1002 特支烘回 3600）→ L1 红
 //   M4 1021 特支值改 5400（把子更新 ÷2 烘进初值）→ L1 红（字段值 1:1 线）
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -178,13 +179,13 @@ describe('SW-BJ97/RB22a 债1 rbKill 头幂等闸（同拍多 Kill 支齐发第�
 });
 
 // ================= 债2：json timeLeft 承接（ctor → boulderTimeLeft 单源） =================
-describe('SW-BJ97/RB22a 债2 json timeLeft 承接（1054=300/1055=900/1021=10800;1002 独不承接）', () => {
-  it('L1 终值表：1054=300(:1846)/1055=900(:1850)/1047=3600(:9927)/99=缺省 3600(:789)/1002=3600(carve-out)/1021=10800(:1871 *=3)', () => {
+describe('SW-BJ97/RB22a 债2 json timeLeft 承接（1054=300/1055=900/1021=10800;★1002=2 经 BJ102 归一承接）', () => {
+  it('L1 终值表：1054=300(:1846)/1055=900(:1850)/1047=3600(:9927)/99=缺省 3600(:789)/1002=2(:9535 列,BJ102)/1021=10800(:1871 *=3)', () => {
     expect(mkBoulder(714).life).toBe(300);             // 1054（M2 红=3600）
     expect(mkBoulder(715).life).toBe(900);             // 1055（M2 红=3600）
     expect(mkBoulder(711).life).toBe(3600);            // 1047 显式行,同值锚
     expect(mkBoulder(138).life).toBe(3600);            // 99 无覆写 → 缺省同位
-    expect(mkBoulder(654).life).toBe(3600);            // 1002 carve-out（M3 红=2）
+    expect(mkBoulder(654).life).toBe(2);               // 1002 json 列承接（★BJ102 归一,M3 旧钉=3600 退役）
     expect(boulderTimeLeft(1021)).toBe(10800);         // P.cs:1871 `timeLeft *= 3`（M2/M4 红）
   });
 
@@ -209,12 +210,14 @@ describe('SW-BJ97/RB22a 债2 json timeLeft 承接（1054=300/1055=900/1021=10800
     expect(game.dusts.filter((d) => d.type === 30).length).toBe(20);        // 死门经 rbKill 单口=家族面在场
   });
 
-  it('L4 1002 carve-out 行为线：第 2 拍不 Kill、零自伤（承接 timeLeft=2 → Check2x2 完整性流双自伤面及时可达）', () => {
+  it('L4（★BJ102 归一重锚）1002 引信=首 AI 拍 Kill（:48031-35 timeLeft≤3）：t+0 dead、零接触结算、二次更新零追加', () => {
     const game = fakeGame(fakeStore());
-    const b = mkBoulder(654);                          // 1002 TNTBarrel（原版引信 t+2=弹体单面）
-    for (let t = 0; t < 2; t++) b.fixedUpdate(1 / 60, game);
-    expect(b.dead).toBe(false);                        // M3 红：摘 carve-out → 此处 dead=true
-    expect(game.playerHits.length).toBe(0);            // 弹体 rbSelfHurtPlayers 未被引信提前触发
+    const b = mkBoulder(654);                          // 1002 TNTBarrel（timeLeft=2 弹体单面引信）
+    b.fixedUpdate(1 / 60, game);                       // t+0：AI_016 Kill 闸 → rbKill1002Face
+    expect(b.dead).toBe(true);                         // 承接 2 后首拍即 Kill（旧 M3 钉「第 2 拍不 Kill」退役——
+                                                       //  格侧爆炸面已摘,双自伤面不复存在,详 sw-bj102 套件）
+    b.fixedUpdate(1 / 60, game);                       // t+1：!active 闸空转
+    expect(game.playerHits.length).toBe(0);            // 单测 mock 无 explodeAt 钩 → 面 no-op（bj102 套件钉参）
   });
 });
 
@@ -230,14 +233,14 @@ describe('SW-BJ97/RB22a 结构锁', () => {
     expect(gate).toBeLessThan(kill.indexOf('this.dead = true;'));
   });
 
-  it('S2 boulderTimeLeft 单源：ctor 消费+1021 特支+1002 carve-out+json 直读（序：1021→1002→json）', () => {
+  it('S2 boulderTimeLeft 单源：ctor 消费+1021 特支+json 直读（★BJ102：1002 carve-out 行退役,终值归 json 列）', () => {
     const src = rb();
     expect(src).toContain('this.life = boulderTimeLeft(this.projId);');
     const fn = src.slice(src.indexOf('export function boulderTimeLeft'), src.indexOf('/** Utils.Remap 前向档'));
     expect(fn.indexOf('1021')).toBeGreaterThan(-1);
     expect(fn).toContain('10800');
-    expect(fn.indexOf('1002')).toBeGreaterThan(-1);
+    expect(fn).not.toContain('return 3600;                  // 独不承接');   // carve-out 行不得复辟
     expect(fn).toContain("projectileData(projId)?.timeLeft");
-    expect(fn.indexOf('1021')).toBeLessThan(fn.indexOf('1002'));   // 特支先于 carve-out
+    expect(fn.indexOf('1021')).toBeLessThan(fn.indexOf('projectileData')); // 特支先于 json 直读
   });
 });

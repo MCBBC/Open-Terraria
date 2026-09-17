@@ -66,12 +66,28 @@ const result = await page.evaluate(async (IDS) => {
       proj.hostile = true;
       entry.life0 = proj.life;
       let diedAt = -1;
+      // ★尘站普查批（2026-09-16）探针修正：diedAt 原在下一拍头顶检测（dead 快照
+      //  滞后一拍）→ 死亡拍 Kill 尘全落 flight 桶、die 桶恒空。改为 fixedUpdate 后
+      //  即查 dead=diedAt 同拍;并在 90 tick 未死者强制 life=1 走自然死亡口（原版
+      //  timeLeft 尽 → Kill 同口）——使 Kill 站（killShooterDust/killNow/镜像口）
+      //  进入可测域。宿主绑定/纯绘制死（537 束体 age>=90 无尘面）/stub 世界无块
+    //  而尘面依赖实心格的（922 砸地）仍为盲区,以仓内代码锚+vitest 判定（§7）。
       for (let t = 0; t < TICKS; t++) {
-        if (proj.dead && diedAt < 0) diedAt = t;
-        if (diedAt >= 0) break;
         const before = dusts.length;
         proj.fixedUpdate(1 / 60, ctx);
         for (let k = before; k < dusts.length; k++) dusts[k].tick = t;
+        if (proj.dead && diedAt < 0) diedAt = t;
+        if (diedAt >= 0) break;
+      }
+      if (diedAt < 0) {
+        proj.life = 1;
+        for (let t = TICKS; t < TICKS + 4 && !proj.dead; t++) {
+          const before = dusts.length;
+          proj.fixedUpdate(1 / 60, ctx);
+          for (let k = before; k < dusts.length; k++) dusts[k].tick = t;
+          if (proj.dead && diedAt < 0) diedAt = t;
+        }
+        entry.forceKilled = diedAt >= 0;
       }
       entry.diedAt = diedAt < 0 ? -1 : diedAt;
       entry.flightTicks = diedAt < 0 ? TICKS : diedAt;

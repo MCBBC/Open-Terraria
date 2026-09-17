@@ -1,19 +1,19 @@
 {
- "at": "2026-09-16T05:23:01.920Z",
+ "at": "2026-09-16T06:08:01.955Z",
  "release": true,
- "totalJsMb": 19.3,
+ "totalJsMb": 19.28,
  "chunks": [
   {
-   "file": "assets/index-D-cdzGfk.js",
-   "kb": 11772.4
+   "file": "assets/index-CI4Lxr5E.js",
+   "kb": 11772.7
   },
   {
    "file": "assets/worldGen.worker-CgEXGzvC.js",
-   "kb": 5081.9
+   "kb": 5072.2
   },
   {
    "file": "assets/save.worker-BGSFhMPU.js",
-   "kb": 2857.7
+   "kb": 2856.2
   },
   {
    "file": "sw.js",
@@ -21,11 +21,11 @@
   },
   {
    "file": "assets/asset-warm.worker-B-VjK1d3.js",
-   "kb": 9.9
+   "kb": 10.1
   },
   {
-   "file": "assets/RemasterPanel-Bn1UPBbV.js",
-   "kb": 8.3
+   "file": "assets/RemasterPanel-BOJkk53u.js",
+   "kb": 8.1
   }
  ]
 }

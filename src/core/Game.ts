@@ -11,6 +11,7 @@ import { alignmentPcts, dryadWorldStatus } from '../world/WorldAlignment';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
 import { statOfInternal } from '../data/vanillaItemStats';
+import { variantRareOfVid } from '../data/vanillaItemVariants';   // ★SW-BJ105 掉落物名 rare 覆写
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
@@ -164,7 +165,8 @@ import { trySnapStrike, snapStrikeDust } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { equipKindOfInternal, isDyeItem } from '../data/vanillaEquip';
 import { emergencyStackItemsToMakeSpace } from '../world/EmergencyStacking';
-import { checkBoulderFamily, BOULDER_FAMILY_SHEETS, BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
+import { checkBoulderFamily, isBoulderDestroying, boulderDestroyGuard,
+  BOULDER_FAMILY_SHEETS, BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
 import { RollingBoulder } from '../entities/RollingBoulder';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
 import { playDeathVoice, playHurtVoice, voiceSlotOfItem } from '../player/PlayerVoice';
@@ -6349,6 +6351,7 @@ export class Game implements GameHooks {
     this.dontStarveDarkness.reset();
     this._autoSaveAt = 0;              // 自动保存墙钟重起（换世界 Stopwatch.Reset）
     this._autoPausedByFocus = false;
+    this._focusPaused = false;         // ★BJ103：换世界收失焦旁支旗（与新 Camera panX/panY 同律）
     // WorldGen.Skyblock 普查（CountTiles :71160 逐列扫至 X==maxTilesX-1 →
     // Skyblock.Calculate :3146-3167：hasTile[26] 无恶魔祭坛 → noAltars=true）。
     // ★IIIII61 升级：静态单次普查 → SkyblockRuntime 滚动巡检（30t/列，尾列重算
@@ -7737,15 +7740,22 @@ export class Game implements GameHooks {
     // 接口层 "Vanilla: Mouse Over" :45659-45663 每【绘制】帧重 claim,不受 CanPauseGame
     // :17372/:17493 暂停门控——清零在 Update 头 MouseOversClear :17213,claim 在 Draw 相,
     // 暂停期先清后 claim 往复照常）：掉落物名（:43608-43638）/他玩家血名（:43639-43662）/
-    // HoverOverNPCs NPC 名（:43664→:43820-43832）。本仓该族唯一已实现面 = NPC 名,
-    // claim CPU 在 fixedUpdate（tickCursorIcon 尾 tickHoverNpcName,F2b 仲裁位）→ 暂停拍
-    // frame 头清零后不回填 =「少显」偏差（BJ72 登记原文）。此处仅暂停拍补回填（原版
-    // Draw 相同相;非暂停帧 fixedUpdate claim 面逐位不动——信息饰品行标签 claim 在
-    // tickInfoAccs 后跑 = 原版 28 层先 claim 锁后续仲裁,不在本刀重排）。掉落物名/
-    // 他玩家血名本仓无 claim 面（非暂停期亦缺,独立功能缺口另行登记）;信息饰品行标签
-    // （DrawInfoAccs :48075 MouseTextNoOverride 亦绘制相）同族暂停缺口连行高亮/
-    // 点击翻转整链,另行登记。
-    if (this.paused && this.world) this.tickHoverNpcName();
+    // HoverOverNPCs NPC 名（:43664→:43820-43832）。
+    // ★SW-BJ99（2026-09-16）BJ72 登记清偿（NPC 名）；★SW-BJ105（2026-09-16）三族补全：
+    //  掉落物名 tickHoverDropName + 他玩家血名 tickHoverRemotePlayerName 落地（此前本仓
+    //  无 claim 面,非暂停期亦缺）+ 信息饰品行标签/行高亮/hideInfo 点击整链自 tickInfoAccs
+    //  （fixedUpdate）拆到绘制相 tickInfoAccsHover（原版 DrawInfoAccs :47960-48076 同相,
+    //  暂停帧照跑——BJ72「要接须拆 draw 相 claim 面」判词清偿）。回填序 = 原版层序反写：
+    //  本仓 cursorItemIconText 域后写者胜（F2a/F2b 同构）,原版 layer 39 内先 claim 先得
+    //  （drops→players→NPC 逐级 !mouseText 门）+ layer 28 行标签 noOverride 恒胜
+    //  ⇒ 调用序 NPC→血名→掉落物名→行标签 ≡ 原版优先级。SuppressDraw 抑制帧不进
+    //  = 原版抑制帧不进 Draw 同相（清零照跑、claim 停摆,悬停文字单帧隐没同相）。
+    if (this.paused && this.world) {
+      this.tickHoverNpcName();
+      this.tickHoverRemotePlayerName();
+      this.tickHoverDropName();
+    }
+    if (this.world) this.tickInfoAccsHover();   // 绘制相族:暂停拍照跑（DrawInfoAccs 同相）
     const r0 = performance.now();
     this.render();
     gfxQuality.drawsThisSecond++;
@@ -7789,14 +7799,30 @@ export class Game implements GameHooks {
         this.paused = false;
         this._autoPausedByFocus = false;
       }
+      this._focusPaused = false;   // ★BJ103：焦点恢复即收旗（原版复走 CanPauseGame :17371）
       return;
     }
-    if (options.data.playWhenUnfocused) return;   // 开关开=失焦不暂停游戏（②）
-    if (this.net?.active) return;                 // MP 豁免（netMode==0 门,FocusHelper.cs:141）
-    if (!this.world || this.paused) return;
+    if (options.data.playWhenUnfocused) { this._focusPaused = false; return; }   // 开关开=失焦不暂停游戏（②）
+    if (this.net?.active) { this._focusPaused = false; return; }                 // MP 豁免（netMode==0 门,FocusHelper.cs:141）
+    if (!this.world) return;
+    this._focusPaused = true;   // ★BJ103：失焦期旁支旗（原版 :17303-17316 return 先于 :17371,见字段注）
+    if (this.paused) return;    // 已有暂停（手动/autoPause）叠加失焦——原版 :17316 return 同截断 :17549 宿主
     this.paused = true;
     this._autoPausedByFocus = true;
   }
+  /** ★BJ103（2026-09-16）失焦暂停旁支旗（公开只读 focusPaused）：滚轮消费面早退用。
+   *  原版失焦暂停 wantsToPause3（FocusHelper.UpdateFocus → Main.cs:17303-17316/1458
+   *  :17309-17322 gamePaused=true 后 return）【先于】CanPauseGame（:17371）→ 暂停宿主
+   *  DoUpdate_WhilePaused（:17372 调用,其 playerInventory 块 :17547-17551 重跑
+   *  DoScrollingInInventory=autoPause 暂停期滚轮活面,RB15d-H4 二次翻案锚）在失焦期
+   *  【整段不可达】→ 失焦∧背包开滚轮死（Player.Update 宿主 :25402 同死）。本仓
+   *  applyFocusPause 原只置 this.paused 不动背包 → invPanel block → UI.ts DOM 滚轮活
+   *  =态矩阵缺行。修复面=滚轮消费面按 focusPaused 早退；【禁用 this.paused 总门】
+   *  ——那会误杀 autoPause∧背包开活面（rb15d H4 禁门锁语义）。专名 focusPaused
+   *  大写 P 不命中 H4 的 /paused/ 小写正则=锁相容；语义=「本次 world 存在且失焦
+   *  暂停生效中」（叠加于既有手动/autoPause 暂停之上也置位——原版同截断）。 */
+  private _focusPaused = false;
+  get focusPaused(): boolean { return this._focusPaused; }
   /** autoPause 独立语义="开界面暂停"（CanPauseGame Main.cs:17493-17508 逐帧重算 →
    *  :17372-17376 gamePaused）：背包面板打开即暂停、关面板即恢复——原版是逐帧态
    *  非事件开关,故挂 frame() 每帧。本仓 playerInventory 等价态 = __swUI.inventoryOpen
@@ -7843,18 +7869,7 @@ export class Game implements GameHooks {
     const ctx = {
       sheetOfInternal: (tid: number) => TILE_DEFS[tid]?.vanilla?.sheet ?? -1,
       breakCell: (bx: number, by: number) => this.breakTile(bx, by),
-      convert: (axc: number, ayc: number, sheet: number) => {
-        const row = BOULDER_CONVERT_TABLE[sheet];
-        if (!row) return;
-        // cs:49172 原文字面偏移 (+15.5,+16)/(654:+8,+8) 会把 31px 盒半嵌右/下邻
-        // 实心柱——原版靠内嵌弹射消化,本仓碰撞无该语义 → 冻结(2026-08-28 用户实报)。
-        // 等价改写：盒心对齐被清 2×2（31px 在 32px 内余 0.5 边距），观察行为同原版
-        // （从柱顶下落+自启滚出），备案偏差。
-        const px = axc * TILE + 0.5;
-        const py = ayc * TILE + 0.5;
-        this.entities.add(new RollingBoulder(px, py, sheet), 'projectiles');
-        this.recLog('boulderRoll', { sheet, x: axc, y: ayc });
-      },
+      convert: (axc: number, ayc: number, sheet: number) => this.convertBoulderRoll(axc, ayc, sheet),
     };
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
@@ -7869,6 +7884,26 @@ export class Game implements GameHooks {
         checkBoulderFamily(stb, nx, ny, ctx);
       }
     }
+  }
+
+  /** 巨石族完整性失败 → 弹体单点（=vanilla Check2x2 destroy 块内 NewProjectile
+   *  WorldGen.cs:49171-49235 逐 sheet 表的仓内唯一 Spawn 口,BoulderMech convert
+   *  回调与本类 654 挖除臂共用——防多口多 Spawn）。★SW-BJ102（2026-09-16）：
+   *  654 出生位还原 vanilla 字面 num2*16+8/num6*16+8（:49178）——260×260 弹盒
+   *  无 31px 滚石盒的嵌柱问题（冻结偏差 2026-08-28 只对运动盒成立,1002 首拍即
+   *  Kill 零位移）,还原后 Kill 爆炸盒 [ax+8, ax+268] 与原版逐像素同位;
+   *  余型维持 +0.5 冻结位（备案偏差延续）。 */
+  private convertBoulderRoll(ax: number, ay: number, sheet: number): void {
+    const row = BOULDER_CONVERT_TABLE[sheet];
+    if (!row) return;
+    // cs:49172 原文字面偏移 (+15.5,+16) 会把 31px 盒半嵌右/下邻实心柱——原版靠
+    // 内嵌弹射消化,本仓碰撞无该语义 → 冻结(2026-08-28 用户实报)。等价改写：盒心
+    // 对齐被清 2×2（31px 在 32px 内余 0.5 边距），观察行为同原版（从柱顶下落+自启
+    // 滚出），备案偏差。654 例外还原原文字面（见上注,BJ102）。
+    const px = sheet === 654 ? ax * TILE + 8 : ax * TILE + 0.5;
+    const py = sheet === 654 ? ay * TILE + 8 : ay * TILE + 0.5;
+    this.entities.add(new RollingBoulder(px, py, sheet), 'projectiles');
+    this.recLog('boulderRoll', { sheet, x: ax, y: ay });
   }
 
   // ================= 固定步逻辑 =================
@@ -10595,7 +10630,9 @@ export class Game implements GameHooks {
     // 为 1456 旧档（62195 族六处：主函数域/0.5 档/1254 双档/1299 档/targetPan/
     // lastMouseInterface 门）——1457 起档位面由 Main.cs 内联迁
     // Player.GetPanControlValues（Player.cs:6268），Main.cs 只剩四档门+门序。
-    // 仅手持期间叠加（follow 每帧重锚玩家——卸枪即复位，无残留状态）
+    // 仅手持期间置位 targetPan（follow 每帧重锚玩家;门关→targetPan 归零,残余滑回见
+    // 下方 ★BJ103-A1 注）
+    let targetPanX = 0, targetPanY = 0;   // targetPan（UpdateCameraPan 局部 :63643/1458 :63649,零向量起始）
     if (!this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {
       const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
       const hVid = hDef ? (hDef.vid ?? viIdFromKey(hDef.key)) : -1;
@@ -10631,12 +10668,32 @@ export class Game implements GameHooks {
           const cam = this.camera;
           const vx = Math.min(Math.max(this.input.mouseX / cam.viewW, 0), 1) * 2 - 1;
           const vy = Math.min(Math.max(this.input.mouseY / cam.viewH, 0), 1) * 2 - 1;
-          cam.x += vx * (cam.viewW / cam.zoom) / 2 * panNum;
-          cam.y += vy * (cam.viewH / cam.zoom) / 2 * panNum;
+          // vector×ScaledSize/2×panFactor（:63778/1458 :63784;ScaledSize=UnscaledSize/zoom
+          // ——Terraria.Graphics/Camera.cs:8-14 Translation 项展开）。暂存 targetPan,
+          // 施加统一走下方 CurrentPan 平滑通道（★BJ103-A1）
+          targetPanX = vx * (cam.viewW / cam.zoom) / 2 * panNum;
+          targetPanY = vy * (cam.viewH / cam.zoom) / 2 * panNum;
         }
       }
     }
     this._panPrevRight = this.input.rightDown;   // Click 档边沿检测推进
+    // ★BJ103-A1（2026-09-16）：CurrentPan 平滑+黑幕传送（UpdateCameraPan 尾段
+    // Main.cs:63662-63669/1458 :63668-63675;1457/1458 该域逐字同文——本轮 sed 区间
+    // diff 实证零内容差）。原版 CurrentPan（:554）每 tick MoveTowards（Utils.cs:1862-
+    // 1870：距<步长→直落目标,否则单位向量×步长）趋近 targetPan；玩家受控档恒速
+    // 36px/tick（:63652 maxPanSpeed=36f;手柄 48f :63778/1458 :63784——本仓无手柄
+    // pan 通道=登记债）；门关（松右键/卸枪/悬 UI）targetPan 归零 → CurrentPan 同速
+    // 滑回（卸枪不再瞬回,残留态=原版本相）。距离≥BlackFadeDist（:3127 =
+    // UnscaledSize.Length()/2+100,未缩放 px）→ CurrentPan=targetPan 瞬移+黑幕
+    // （:63662-63666 → BlackFadeCameraTeleport :63500-63524）。可达性：panFactor≤0.8<1,
+    // 屏对角>333px 时对角甩镜即触发（2×0.8×halfDiag ≥ halfDiag+100）。
+    // 物体跟踪支（观战/高尔夫 :63648-63657 比例率 num×panRate）本仓以 follow 目标重锚
+    // 等价承载（:10570 注,不双平滑）→ CurrentPan 仅玩家受控支置位。
+    if (this.camera.advancePan(targetPanX, targetPanY)) this.blackFadeCameraTeleport();
+    // CurrentPan 施加（PlayerFocusedScreenPosition :63523 组合项;follow 已重锚玩家,
+    // 叠加在 clamp 之前——原版 ClampScreenPositionToWorld :63615 亦在组合之后）
+    this.camera.x += this.camera.panX;
+    this.camera.y += this.camera.panY;
     this.camera.clamp();
     // Main.screenPosition/screenWidth/Height 快照（视区左上角世界坐标 + 画布尺寸）——
     // gore 屏幕坐标档（肉山死亡尘幕 NPC.cs:88307-88327）的求值源，实体 tick 前注入
@@ -11245,6 +11302,25 @@ export class Game implements GameHooks {
    *  按 Player.cs:45040-45045 语义单物品同时携带多力：主类型仍取 pick>axe>hammer
    *  供挥击/智能光标用，三力附在 pickPower/axePower/hammerPower 上——挖掘入口
    *  dualToolResolve 按目标 tile 族（tileAxe/tileHammer）分流取对应力 */
+  /** ★BJ103-A1（2026-09-16）：BlackFadeCameraTeleport（Main.cs:63500-63524/1458
+   *  :63506-63530）最小等价面——黑幕计数 255（渲染端 DoDraw 尾每帧画后 -25 渐熄,
+   *  Main.cs:63367-63381/1458 :63373-63387,255→0 共 11 帧）。触发面二：
+   *  ①pan 黑幕门（UpdateCameraPan :63662-63666,fixedUpdate CurrentPan 通道）；
+   *  ②玩家传送面 StartCameraTransitionForPlayerTeleport（Main.cs:63527-63542,由
+   *  Player.Teleport :37747/1458 :37753 调用——dist≥BlackFadeDist → 黑幕+瞬移,
+   *  dist< → SetCameraLerp 滑行）本仓【未接】：传送路径相机一律直跟瞬移
+   *  （fireRecallTeleport 等 `camera.x=p.cx` 面,近距滑行+远距黑幕两面皆缺）
+   *  =登记债（BJ103-A1b）。其余副作用与渲染/背景架构耦合,逐项登记不移植：
+   *  renderNow=true（本仓 rAF 恒画=恒真）；NPC/Player.ResetNetOffsets（MP net
+   *  offset 面本仓无残留形态）；Lighting.Clear（本仓光照无跨帧缓存不清即脏形态,
+   *  若现传送光照残影再扩）；instantBGTransitionCounter=10/bgStyle=GetPreferred…/
+   *  Cloud.lastCameraCenter=null（背景切换面——pan 触发场景近距无 bg 变化;远距
+   *  传送面随 BJ103-A1b 一并补）；mapTime<5→5/maxQ=true/SceneState.skipTransitions
+   *  （小地图全亮+过场抑制面,同随传送面）。 */
+  private blackFadeCameraTeleport(): void {
+    if (this.renderer) this.renderer.blackFadeIn = 255;
+  }
+
   /** 魔力花族自动喝蓝（manaFlower：施法魔力不足时自动消耗背包魔力药水，
    *  Player.cs QuickMana 原理同 QuickHeal；返回 true=已补蓝可重试施法） */
   private tryAutoManaPotion(): boolean {
@@ -14856,8 +14932,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.player.facing = Math.cos(angFace) > 0 ? 1 : -1;
       // PickAmmo：弹药栏 54-57 优先，再背包 0-53 第一组 useAmmo 匹配
       // （def.ammoId = legacy 注册；vi_ 弹药经 combat.ammo 反查）
-      // ★金币枪 905（useAmmo==AmmoID.Coin 71）：先扫钱币槽 50-53（PickAmmo
-      //   :52593-52605 专设前置环）——混币时先耗币槽 ≠ 此前先耗背包币
+      // ★金币枪 905（useAmmo==AmmoID.Coin 71）：先扫钱币槽 50-53——真锚
+      //   PickAmmo_PickAmmoItem（:54368-54390）：币槽专设前置支仅在
+      //   ammoCyclingMode==AmmoSlots（:54370-54377,cycler 6168 置档 :14635）；
+      //   但缺省 None 档（字段默认 :18595）走 AmmoSlotOrder_Default（:3175-3176 =
+      //   50-53 币槽,54-57 弹药,0-53 背包）同样币槽打头 → 混币先耗币槽全档同相
+      //   ≠ 此前先耗背包币。（★BJ103-B2 勘误 2026-09-16：旧注锚 :52593-52605 误——
+      //   该区间实为 UndoSlowMagicUse :52593/ApplyManaPotionManaHeat :52605）
       // ★1457 弹药轮换（ammoCycler 6168/6169/6193/6194）：选槽走
       //   Player.pickAmmoSlot（PickAmmo_PickAmmoItem :54368-54390 +
       //   PickAmmo_IterateRange :54326-54366——AmmoSlots=仅弹药槽内轮换 /
@@ -21405,6 +21486,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // （fw2：fx=style*36+col*18 / fy=row*18 → 帧反推锚格精确）
     {
       const bsheet = def.vanilla?.sheet ?? -1;
+      // ★SW-BJ93 债①/BJ102（2026-09-16）TNT 桶 654 挖除单飞——vanilla destroyObject
+      //  单飞语义（WorldGen.cs:48973 置位 → KillTile 循环 → :49178 NewProjectile(1002)
+      //  → :49206 复位）：格侧零爆炸面（Kill_ExplodeTiles 闸门表 :79027 无 1002=不炸
+      //  地形,SW-J1 定谳;旧「tntBarrelBlast=桶中心等效爆炸」在此域多发,改前实证挖一格
+      //  =3×explodeAt+2×幻影弹）,爆炸面全在弹体 aiStyle16 Kill 拍（RollingBoulder
+      //  rbKill1002Face,timeLeft=2≤3 首 AI 拍即爆,单面 400）。分域：
+      //  · 顶层（玩家挖/爆炸破,外层无闸）：boulderDestroyGuard 包清格循环——setTile
+      //    监听（scanBoulderFamilyNear→checkBoulderFamily）中途级联被闸吞,尾发单 Spawn;
+      //  · 重入（Check2x2 destroy 循环 breakCell→breakTile 到达,_destroying=true）：
+      //    只清格,Spawn 由外层 checkBoulderFamily convert 单发（=vanilla NewProjectile 位）。
+      //  掉落/声/尘沿用 object 支 654 尾段同参（dropKey='' no-drop :66114、尘 8×1.8）。
+      if (bsheet === 654) {
+        const ti0 = st.idx(x, y);
+        const tax = x - (Math.floor(st.frameX[ti0] / 18) % 2);
+        const tay = y - (Math.floor(st.frameY[ti0] / 18) % 2);
+        const clearPiece = () => {
+          for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+            if (st.inBounds(tax + dx, tay + dy) && st.get(tax + dx, tay + dy) === type) {
+              st.setTile(tax + dx, tay + dy, 0);
+            }
+          }
+        };
+        if (isBoulderDestroying()) clearPiece();
+        else boulderDestroyGuard(clearPiece);
+        this.killTileBreakSound(type, x, y);
+        this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
+        this.spawnTntBarrelRoll(tax, tay);
+        return;
+      }
       if (Game.BOULDER_SUPPORT_SHEETS.has(bsheet)) {
         const bi0 = st.idx(x, y);
         const bax = x - (Math.floor(st.frameX[bi0] / 18) % 2);
@@ -21527,10 +21637,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 共享 no-drop 表（:66114）+0 尘（:66664）,dropKey='' 保留。★爆炸链在（前判
       // "不可达死码"系漏看 goto）：TileFrameImportant no-op break 组（:86409-86428,
       // 含 654/713-716）switch 闭合后 `goto case 132`（:86670）→ 654 仍进 Check2x2
-      // （:86688）→ 整件失撑/缺件即 Projectile.NewProjectile(1002, 400)（:48771-48772）
-      // ——挖/毁 TNT 桶=整件清+桶中心 1002 等效爆炸（tntBarrelBlast,爆炸波及他桶经
-      // breakTile 再触发=自然殉爆）。「电线不致动」语义保留：Wiring.cs HitWireSingle
-      // 器件表（:1012-3229 全 case 清单）确无 case 654（devices.ts 同构无 654,勿"补接"）
+      // （:86688）→ 整件失撑/缺件即 Projectile.NewProjectile(1002, 400)（:49178）
+      // ——★BJ102（2026-09-16）归一：挖/毁 TNT 桶=整件清+弹体单发（spawnTntBarrelRoll,
+      //  爆炸面在弹体首 AI 拍 Kill=原版单面;格侧旧"等效爆炸"面退役,殉爆=他弹爆炸
+      //  破桶格经本链自然串发）。「电线不致动」语义保留：Wiring.cs HitWireSingle
+      //  器件表（:1012-3229 全 case 清单）确无 case 654（devices.ts 同构无 654,勿"补接"）
       if (def.vanilla?.sheet === 654) dropKey = '';
       // 八音盒/喷泉按帧带掉对应唱片/喷泉（CheckMB :51288-51292 /
       // Check2xX :38199-38226——139 style=frameY/36、207 style=frameX/36；
@@ -21614,9 +21725,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (FURNITURE_TILE_KIND.has(type)) removeFurnitureAt(this.world.furnitureItems, ax, ay);
       this.killTileBreakSound(type, x, y);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
-      // TNT 桶 654：整件已清 → 桶中心 1002 等效爆炸（❌1,cs:48771-48772;殉爆经
-      // tntBarrelBlast 队列串行——本爆 explodeAt 扫格 breakTile 他桶时入队延后）
-      if (framedSheet === 654) this.tntBarrelBlast(ax, ay);
+      // ★SW-BJ93 债①/BJ102（2026-09-16）：旧「TNT 桶 654 → 桶中心 1002 等效爆炸」
+      //  支退役（格侧零爆炸面定谳：Kill_ExplodeTiles 闸门表 :79027 无 1002=不炸地形,
+      //  SW-J1;且本支被 Check2x2 destroy 循环 breakCell 重入,逐格多发面=改前实证
+      //  3×explodeAt+2×幻影弹根源）。654 破坏的 Spawn 单口=挖除拦截臂（顶层）/
+      //  checkBoulderFamily convert（重入域）,爆炸面在弹体首 AI 拍 Kill（单面 400）。
       return;
     }
     // 可砍植物（Main.tileCut）：清格 + 拂草声（SoundID 6 = Grass.wav）。
@@ -28056,7 +28169,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  108/164/1002 恒 +1）;kbDir=0（纯格调用点）维持旧径向推导。敌怪/小动物/
    *  城镇(巫毒)三支统一吃 kbDir;玩家自伤段原版 SelfHurtPlayers 本就逐 victim
    *  径向（:15121 direction=受击体相对位推导）,不经此参。 */
-  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0, comparePx?: number, comparePy?: number, kb?: number, kbDir: -1 | 0 | 1 = 0) {
+  // ★SW-BJ93 债①/BJ102（2026-09-16）：visibility private→public——GameHooks.explodeAt
+  //  薄委托（RollingBoulder.rbKill1002Face 1002 Kill 支爆炸面单发）要求接口成员可达;
+  //  面本身零改动。
+  explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0, comparePx?: number, comparePy?: number, kb?: number, kbDir: -1 | 0 | 1 = 0) {
     // 行为录制：爆炸汇总一条（盘内逐格破坏走 breakTile 各自记录，此处锚定
     // 风暴起点/半径——DebugReport 侧按 t 邻近聚合即可还原爆炸半径）
     this.recLog('bomb', { x: tx, y: ty, r: radius, dmg: damage, destroyTiles, projId });
@@ -29019,27 +29135,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** 传送落点检查（Utils.CheckForGoodTeleportationSpot :55250-55320 的最小移植）：
-   *  玩家盒(20×42→2×3 格)全空 + 底部实心 + 无岩浆/无伤害块。失败返回 null */
-  private findTeleportSpot(x0: number, x1: number, y0: number, y1: number): { x: number; y: number } | null {
-    const st = this.world.store;
-    for (let attempt = 0; attempt < 1000; attempt++) {
-      const tx = x0 + Math.floor(Math.random() * Math.max(1, x1 - x0));
-      const ty = y0 + Math.floor(Math.random() * Math.max(1, y1 - y0));
-      let ok = true;
-      for (let dx = 0; dx < 2 && ok; dx++) {
-        for (let dy = 0; dy < 3 && ok; dy++) {
-          const i = st.idx(tx + dx, ty + dy);
-          if (st.flags[i] && st.isSolid(tx + dx, ty + dy)) ok = false;
-          if (st.liquid[i] > 0 && st.liquidType[i] === 2) ok = false; // avoidLava
-        }
-      }
-      if (!ok || !st.isSolid(tx, ty + 3)) continue; // mostlySolidFloor
-      return { x: tx * TILE + 6, y: ty * TILE };
-    }
-    return null;
-  }
-
   /** ★IIIII228 TeleportHelpers.RequestMagicConchTeleportPosition（Terraria.GameContent/
    *  TeleportHelpers.cs:49-241 1:1）——魔法海螺对侧海滩落点爬行搜索。旧实现=
    *  「两缘 380 格带随机掷位」近似（226 登记债），本刀按原文逐臂移植：
@@ -29255,17 +29350,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       dest = hit ?? { x: p.x, y: p.y };
       conchFailBoth = !hit;
     } else if (c.kind === 'hell') {
-      // DemonConch：中心 ±50，[UnderworldLayer+20, +100]，实心底/避液
-      // ★SW-RB10a：败臂收原版（Player.cs:56907-56920）——DemonConch 无"取消"结局，
-      //  canSpawn=false → Teleport(position,7) 原地 + velocity=(0,0.001f)（:56914），
-      //  音/尘照走。旧刀 null → 整链取消不传送不响不耗=偏离原文。
-      //  【找点面债务登记】findTeleportSpot=IIIII110b 最小移植（2×3 盒+实心底+避岩浆），
-      //  原文=CheckForGoodTeleportationSpot 八窗级联（:56862-56896,center±50/±100 两段
-      //  +Main.rand.Next(2) 侧骰）带 mostlySolidFloor/avoidWalls/allowSolidTopFloor/
-      //  avoidAnyLiquid——待专批接线（checkForGoodTeleportationSpot 核已支持全参）。
-      const cx = Math.floor(st.w / 2);
-      const y0 = Math.floor((this.world.lavaLine || st.h - 200)) + 20;
-      const hellHit = this.findTeleportSpot(cx - 50, cx + 50, y0, y0 + 80);
+      // DemonConch（★FX51-SP2 2026-09-16 九窗级联 1:1 收原版,Player.cs:56840-56896;
+      //  1458 同域 diff=same）。落点=searchDemonConchSpot()——起点深度=Main.UnderworldLayer
+      //  +20（=maxTilesY−200+20,Main.cs:2886）;★用户实报「1608 英尺洞穴 1」根因=旧刀锚
+      //  world.lavaLine（世界生成熔岩线,小世界≈898 < UnderworldLayer=1000）→ 扫描带整体
+      //  悬在洞穴 1 层。败臂=Teleport(position,7) 原地+velocity=(0,0.001f)（:56907-56920,
+      //  ★SW-RB10a 已收）。
+      const hellHit = this.requestDemonConchSpot();
       dest = hellHit ?? { x: p.x, y: p.y };
       conchFailBoth = !hellHit;
     } else if (c.kind === 'worldSpawn') {
@@ -29415,7 +29506,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private requestTeleportationPotionSpot(): { x: number; y: number } | null {
     const st = this.world.store;
     const p = this.player;
-    const sf = this.world.seedFlags ?? {};
     const res = checkForGoodTeleportationSpot(st,
       { nextIntRange: (a, b) => a + Math.floor(Math.random() * (b - a)) },
       {
@@ -29426,22 +29516,90 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         attemptsBeforeGivingUp: 1000,                // :56936
       },
       100, st.w - 200, 100, st.h - 200,              // startX=100/rangeX=maxTilesX-200/startY=100/rangeY=UnderworldLayer（:56925-56928）
-      {
-        worldSurface: this.world.groundLevel,
-        rockLevel: this.world.rockLevel,
-        downedPlantBoss: !!this.world.flags['downed_262'],                    // Plantera（Utils.cs:552,SW-BJ43 同参）
-        downedBoss3: !!(this.world.flags.downedSkeletron || this.world.flags['downed_35']),  // Skeletron（Utils.cs:552）
-        dualDungeonsSeed: !!sf.dualDungeons,
-        getGoodWorld: !!sf.getGoodWorld,
-        dontStarveWorld: !!sf.theConstant,
-        // 双地牢不可破墙臂（Utils.cs:641-645 UnbreakableWallScan）——运行时逐点重扫
-        //（Player.insideUnbreakableWalls 缓存旗=玩家现位,落点须按目标点重扫;
-        //  insideUnbreakableWallsScan 入参=格坐标,Player.updateUnbreakableWallScan :1177 同参）
-        unbreakableWallAt: sf.dualDungeons
-          ? (x, y) => insideUnbreakableWallsScan(st, x, y)
-          : undefined,
-      });
+      this.teleportSpotCtx(st));                     // ★FX51-SP2：ctx 面 2351/4819 双链共源（禁双抄）
     return res.canSpawn ? { x: res.x, y: res.y } : null;
+  }
+
+  /** CheckForGoodTeleportationSpot 运行时取参（世界面/旗标/不可破墙重扫）——
+   *  ★FX51-SP2 2026-09-16 从 requestTeleportationPotionSpot 抽出（SW-BJ48 ctx 面
+   *  1:1 不变）,传送药水 2351 与恶魔海螺 4819/5361 两链共源。 */
+  private teleportSpotCtx(st: import('../world/TileStore').TileStore): Parameters<typeof checkForGoodTeleportationSpot>[7] {
+    const sf = this.world.seedFlags ?? {};
+    return {
+      worldSurface: this.world.groundLevel,
+      rockLevel: this.world.rockLevel,
+      downedPlantBoss: !!this.world.flags['downed_262'],                    // Plantera（Utils.cs:552,SW-BJ43 同参）
+      downedBoss3: !!(this.world.flags.downedSkeletron || this.world.flags['downed_35']),  // Skeletron（Utils.cs:552）
+      dualDungeonsSeed: !!sf.dualDungeons,
+      getGoodWorld: !!sf.getGoodWorld,
+      dontStarveWorld: !!sf.theConstant,
+      // 双地牢不可破墙臂（Utils.cs:641-645 UnbreakableWallScan）——运行时逐点重扫
+      //（Player.insideUnbreakableWalls 缓存旗=玩家现位,落点须按目标点重扫;
+      //  insideUnbreakableWallsScan 入参=格坐标,Player.updateUnbreakableWallScan :1177 同参）
+      unbreakableWallAt: sf.dualDungeons
+        ? (x, y) => insideUnbreakableWallsScan(st, x, y)
+        : undefined,
+    };
+  }
+
+  /** ★FX51-SP2 2026-09-16 恶魔海螺/贝壳手机·地狱落点（Player.DemonConch
+   *  Player.cs:56840-56896 九窗级联 1:1，1458 同域 diff=same）：
+   *  · 深度带：teleportStartY=Main.UnderworldLayer+20、teleportRangeY=80
+   *    （:56844-56845 → y∈[maxTilesY−180, maxTilesY−100]；UnderworldLayer=maxTilesY−200,
+   *    Main.cs:2886）——旧刀锚 world.lavaLine（生成期熔岩线,恒在 UnderworldLayer 之上：
+   *    小世界 1200 高时 lavaLine≈898<1000）→ 扫描带整体悬在洞穴层=用户实报
+   *    「1608 英尺洞穴 1」根因,本刀销核。
+   *  · 窗序（:56853-56896,rect=(startX,startY,rangeX+1,rangeY+1)）：
+   *    ①中心 num=cx → (cx−50,宽 100)；②(cx−100,宽 50)；③(cx+50,宽 50)；
+   *    ④败臂 Main.rand.Next(2) 掷 flag 一次定边：num=flag?300:maxW−300 →
+   *    (num−50,宽50)/(num−100,宽50)/(num+50,宽50)；⑤反侧同三窗（flag 复用同骰,不重掷）。
+   *  · settings（:56846-56852 DemonConch 全参）：mostlySolidFloor/avoidAnyLiquid/
+   *    avoidLava/avoidHurtTiles/avoidWalls/allowSolidTopFloor/尝试 1000/下坠 100。
+   *  · teleporteeVelocity/gravDir：III41 定谳=SlopeCollision 省略精确等价（核只收
+   *    盒尺寸,Utils.cs:571 逐帧下坠对找点面无效果）,备案沿用。
+   *  返回 null = 九窗全败（调用方 fallback=Teleport(position,7) 原地,:56907-56920）。 */
+  private requestDemonConchSpot(): { x: number; y: number } | null {
+    const st = this.world.store;
+    const p = this.player;
+    const settings = {
+      teleporteeW: p.w, teleporteeH: p.h,          // teleporteeSize=Size（:56847）
+      mostlySolidFloor: true,                      // :56849
+      avoidAnyLiquid: true,                        // :56850
+      avoidLava: true,                             // :56851
+      avoidHurtTiles: true,                        // :56852
+      avoidWalls: true,                            // :56853
+      attemptsBeforeGivingUp: 1000,                // :56855
+      maximumFallDistanceFromOrignalPoint: 100,    // :56856
+      allowSolidTopFloor: true,                    // :56857
+    };
+    const rng = { nextIntRange: (a: number, b: number) => a + Math.floor(Math.random() * (b - a)) };
+    const ctx = this.teleportSpotCtx(st);
+    const startY = st.h - 200 + 20;                // Main.UnderworldLayer+20（:56844）
+    const rangeY = 80;                             // teleportRangeY（:56845）
+    const cx = Math.trunc(st.w / 2);               // num=maxTilesX/2（:56841）
+    const tryWindow = (startX: number, rangeX: number): { x: number; y: number } | null => {
+      const r = checkForGoodTeleportationSpot(st, rng, settings, startX, rangeX, startY, rangeY, ctx);
+      return r.canSpawn ? { x: r.x, y: r.y } : null;
+    };
+    const num2 = 100;
+    const num3 = 50;                               // num3=num2/2（:56843）
+    let hit = tryWindow(cx - num3, num2);          // ①(num−num3, num2)（:56854）
+    if (!hit) hit = tryWindow(cx - num2, num3);    // ②(num−num2, num3)（:56860-56862）
+    if (!hit) hit = tryWindow(cx + num3, num3);    // ③(num+num3, num3)（:56863-56865）
+    if (!hit) {
+      const flag = Math.random() * 2 < 1;          // Main.rand.Next(2)==0（:56867）
+      let num = flag ? num2 * 3 : st.w - num2 * 3; // :56868-56869（300 | maxW−300）
+      hit = tryWindow(num - num3, num3);           // :56870-56872
+      if (!hit) hit = tryWindow(num - num2, num3); // :56873-56875
+      if (!hit) hit = tryWindow(num + num3, num3); // :56876-56878
+      if (!hit) {
+        num = flag ? st.w - num2 * 3 : num2 * 3;   // :56879-56880 反侧（flag 复用同骰）
+        hit = tryWindow(num - num3, num3);         // :56881-56883
+        if (!hit) hit = tryWindow(num - num2, num3); // :56884-56886
+        if (!hit) hit = tryWindow(num + num3, num3); // :56887-56889
+      }
+    }
+    return hit;
   }
 
   /** ★SW-BJ48 TeleportEffect style 2（Main.cs:13454-13462）：50×尘 58（GhostWhite/
@@ -34391,6 +34549,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ItemCheck 悬停扫描之后,覆写其结果:cursorItemIconEnabled=false + MouseText),
       // 先于信息饰品行标签（原版 mouseText=true 后 :46578/:46627 不再 claim）
       this.tickHoverNpcName();
+      // ★SW-BJ105 2026-09-16：他玩家血名 + 掉落物名（DrawMouseOver :43639-43662/
+      // :43608-43638——层 39 内先 claim 先得,drops→players→NPC;本仓 cursorItemIconText
+      // 域后写者胜（F2a/F2b 同构）⇒ 调用序反写 NPC→血名→掉落物名 = 同一优先级）
+      this.tickHoverRemotePlayerName();
+      this.tickHoverDropName();
     }
     // ★SW-BJ72 2026-09-14：余辉验证+渲染上下文组装拆出（refreshCursorIconDrawState,
     //  frame() 绘制拍逐帧调用）——本函数挂 fixedUpdate,暂停拍不跑;若保留组装,暂停拍
@@ -34440,10 +34603,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  signBubble,再由当帧 claim 面重写——先清后 claim 每帧往复=悬停文字/图标不可能
    *  残留。本仓等价面：_mouseTextCache 域=cursorItemIconText 字段;signHover/signBubble
    *  是 Renderer 渲染拍局部态（每绘制帧自清重claim,Renderer :4257-4258）不在此域。
-   *  claim 面在 fixedUpdate（tickCursorIcon/tickInfoAccs）,本方法挂 frame() 头
-   *  （world 门内）保证暂停拍也清零。★SW-BJ99：暂停拍清零后由 render 前的
-   *  tickHoverNpcName 回填（绘制相族,原版 DrawMouseOver 暂停帧照 claim 同相）;
-   *  update 相族（箱文本/手持图标）暂停不回填 = 原版同相（update 相停摆）。 */
+   *  claim 面在 fixedUpdate（tickCursorIcon）+ 绘制相（tickInfoAccsHover,BJ105 拆出;
+   *  原版 DrawInfoAccs 同相）,本方法挂 frame() 头（world 门内）保证暂停拍也清零。
+   *  ★SW-BJ99：暂停拍清零后由 render 前的 tickHoverNpcName 回填（绘制相族,原版
+   *  DrawMouseOver 暂停帧照 claim 同相）;★SW-BJ105：回填面扩到三族（NPC 名/他玩家
+   *  血名/掉落物名）+ tickInfoAccsHover 绘制相族;update 相族（箱文本/手持图标）暂停
+   *  不回填 = 原版同相（update 相停摆）。 */
   private mouseOversClear(): void {
     const p = this.player;
     p.cursorItemIconEnabled = false;
@@ -34451,6 +34616,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.cursorItemIconPush = 0;
     p.cursorItemIconText = '';
     p.cursorItemIconReversed = false;
+    p.cursorItemIconRare = 0;      // ★SW-BJ105：_mouseTextCache 重建域（rare/diff 随缓存清）
+    p.cursorItemIconDiff = 0;
   }
 
   /** 悬停 NPC 名 MouseText（★SW-BJ1 2026-09-06：Main.HoverOverNPCs Main.cs:43820-43832
@@ -34518,6 +34685,93 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.cursorItemIconEnabled = false;               // :43822 压悬停/手持图标
     // :43827-43829 `lifeMax > 1 && ShowLife` → "名: hp/maxHp"（ShowLife 恒 true,见上注）
     p.cursorItemIconText = maxHp > 1 ? `${name}: ${Math.max(0, hp)}/${maxHp}` : name;
+  }
+
+  /** 悬停他玩家血名（★SW-BJ105 2026-09-16：Main.DrawMouseOver :43639-43662 1:1；
+   *  1458 :43645-43668 同位零漂移）：光标 ∩ 远端玩家帧盒（32×48,底缘中心锚
+   *  position.X+width/2-16, position.Y+height-48）→ cursorItemIconEnabled=false +
+   *  "名: life/statLifeMax2",hostile 追加 "（PvP）"（Game.PvPFlag :43653-43654）,
+   *  MouseTextHackZoom(text, 0, difficulty)（:43655）→ diff 位走中核/硬核名色
+   *  （MouseTextInner :20473-20480 mcColor/hcColor,渲染端消费）。
+   *  排除门（:43641-43642）：!active/myPlayer==j/dead/ShouldNotDraw/stealth≤0.5——
+   *  本仓代理只入 active 非 mySlot 槽（simulateRemotePlayers 过滤面）；ShouldNotDraw
+   *  （隐身斗篷族）本仓无建模位=豁免（NPC 族缺位同口径）；stealth 读代理同名位
+   *  （Player.stealth 缺省 1,代理不走 stealth 甲链=非潜行恒过门,原版同相）。
+   *  原版 !mouseText 门=帧内先 claim 先得——本仓后写者胜域（F2a/F2b）以调用序
+   *  （血名在掉落物名前）同效。 */
+  private tickHoverRemotePlayerName(): void {
+    const net = this.net;
+    if (!net?.active) return;                      // netMode==1 才有他玩家（单人槽循环全 inactive）
+    const inp = this.input;
+    const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+    const mx = Math.floor(wx);
+    const my = Math.floor(wy);                     // :43600 mouseRectangle=(int)X,(int)Y 1×1
+    for (const rpEnt of this.remotePlayerProxies) {
+      const rp = rpEnt as Player;
+      const slot = (rpEnt as unknown as { __netSlot?: number }).__netSlot;
+      const st = slot != null ? net.players.get(slot) : undefined;
+      if (!st) continue;                           // 槽态缺席（陈旧代理防御）
+      if (slot === net.mySlot) continue;           // :43641 myPlayer == j
+      if (rp.dead) continue;                       // :43641 player[j].dead
+      if (!((rp.stealth as number) > 0.5)) continue;   // :43642 隐身/潜行半透不显名
+      // :43643-43644 帧盒 32×48（底缘中心锚；正面 sprite 40×56 的收窄盒）
+      const rx = Math.floor(rp.x + rp.w / 2 - 16);
+      const ry = Math.floor(rp.y + rp.h - 48);
+      if (mx < rx || mx >= rx + 32 || my < ry || my >= ry + 48) continue;
+      const p = this.player;
+      p.cursorItemIconEnabled = false;             // :43647 压悬停/手持图标
+      const life = Math.max(0, st.hp);             // :43649-43651 statLife<0 钳 0
+      let text = `${st.name}: ${life}/${rp.maxHp}`;   // :43652 name: life/statLifeMax2
+      if (rp.hostile) text += ` ${Lang.text('Game.PvPFlag')}`;   // :43653-43654 PvP 旗标
+      p.cursorItemIconText = text;
+      p.cursorItemIconRare = 0;                    // :43655 rare=0
+      // :43655 diff=difficulty（0 软核/1 中核/2 硬核/3 旅程——msg4 appearance 整包承载）
+      p.cursorItemIconDiff = (rp.appearance as { difficulty?: number } | undefined)?.difficulty ?? 0;
+      return;                                      // 帧内首中即得（!mouseText 门同效）
+    }
+  }
+
+  /** 悬停掉落物名（★SW-BJ105 2026-09-16：Main.DrawMouseOver :43608-43638 1:1；
+   *  1458 :43614-43644 同位零漂移）：光标 ∩ 掉落物绘制帧盒 → cursorItemIconEnabled
+   *  =false + AffixName[（词缀]+本名）[ " (stack)"（stack>1）],MouseTextHackZoom(text,
+   *  rare, 0)（:43628）——rare 位走稀有度名色（渲染端 MouseTextInner 色表消费）。
+   *  绘制帧盒 = Item.GetDrawHitbox(type)（贴图单帧原尺寸,动画族取当前帧
+   *  :49600-49631）锚 WorldItem.Bottom 底缘中心（:43615-43618 ≙ DrawItem
+   *  :39271-39273 vector2 同式——盒与精灵同位;1456/1458 三版同式）。本仓贴图
+   *  单帧尺寸取 renderer.atlasIcon（同 drawDrop 绘制源,含动画切片）;缺图回退
+   *  物理盒 12×12（drawDrop 程序化兜底绘制盒同径）。
+   *  遍历序 = 桶数组序首中即得（:43610-43638 400 槽序 + break 同语义）。 */
+  private tickHoverDropName(): void {
+    const inp = this.input;
+    const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+    const mx = Math.floor(wx);
+    const my = Math.floor(wy);                     // :43600 mouseRectangle 1×1
+    for (const ent of this.entities.drops as ItemDrop[]) {
+      if (ent.dead) continue;                      // :43611 !item[i].active
+      const d = ent as ItemDrop;
+      const def = ITEM_DEFS[d.itemId];
+      if (!def) continue;
+      // :43615-43618 绘制帧盒（贴图单帧 = GetDrawHitbox;底缘中心锚）
+      const ar = this.renderer?.atlasIcon ? this.renderer.atlasIcon(d.itemId) : null;
+      const dw = ar ? ar.sw : d.w;
+      const dh = ar ? ar.sh : d.h;
+      const rx = Math.floor(d.x + d.w / 2 - dw / 2);
+      const ry = Math.floor(d.y + d.h - dh);
+      if (mx < rx || mx >= rx + dw || my < ry || my >= ry + dh) continue;   // Intersects
+      const p = this.player;
+      p.cursorItemIconEnabled = false;             // :43630 压悬停/手持图标
+      // :43620 AffixName（Item.cs:1195-1203 词缀+本名）;:43621-43623 stack>1 加 " (N)"
+      const name = popupAffixName(d.prefix, Lang.itemNameByKey(def.key));
+      p.cursorItemIconText = d.stack > 1 ? `${name} (${d.stack})` : name;
+      // :43624-43627 rare=inner.rare; expert→-12（专家彩虹）。★expert 物品旗表本仓
+      // 未提取（Item.cs SetDefaults `expert = true` 66 处,Item.cs:13924 等）→ 该支
+      // 暂不可达,登记债（提取配方同 tools/extract-itemrare.mjs）。变体稀有度覆写
+      // 先于表查（同 UI tooltip 组合式 variantRareOfVid(vid) ?? ITEM_RARE[vid]）
+      const vid = vanillaIdOfItem(d.itemId);
+      p.cursorItemIconRare = vid > 0 ? (variantRareOfVid(vid) ?? ITEM_RARE[String(vid)] ?? 0) : 0;
+      p.cursorItemIconDiff = 0;                    // :43628 diff=0
+      return;                                      // :43637 break（首中即得）
+    }
   }
 
   /** 手持工具/放置物悬停图标置位（Player.cs ItemCheck 内七支 1:1，条件转录见
@@ -35724,26 +35978,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ResetEffects(Player.cs:12623-12626):卸下雷达 → accThirdEyeCounter 归零,
     // 重装备时立即重扫(CritterGuide 无此重置——保持原版不对称)
     if (!gates.accThirdEye) p.accThirdEyeCounter = 0;
-    // 悬停行;背包内点图标切换 hideInfo(Main.cs:46547-46573:Sound 12 + 翻转;
-    // num==8 已在 buildInfoAccRows 归并 7)。
-    // ★F2b/RB28 2026-09-14：悬停检测不再以 cursorItemIconText==='' 为门——原版 layer 28
-    //  MouseTextNoOverride 先 claim 锁死后续(Main.cs:20345-20348 noOverride 锁缓存,
-    //  :48075 DrawInfoAccs 调用站);世界物件文本(箱名等)属 40 层绘制域、非本层 mouseText
-    //  让位集,旧门读 tickCursorIcon 先行写入的世界 claim → infoAccHover 恒 -1,
-    //  hideInfo 点击(下方 hovering 域)整链丢失。现无条件 hitTest,命中即覆盖 claim
-    //  （=label 置前锁后续;对 NPC 名/箱文本的仲裁=原版 28 层先 claim 语义同效）
+    // ★SW-BJ105 2026-09-16：悬停行/行标签/hideInfo 点击整链拆到绘制相
+    // tickInfoAccsHover()（frame() render 前逐帧调用,暂停帧照跑）——原版整链挂
+    // DrawInfoAccs（:47960-48076,BJ72「要接须拆 draw 相 claim 面」判词）,此前挂
+    // 本函数（fixedUpdate）暂停拍整链冻结 = BJ99-A 登记债。本函数自此只落数据面
+    // （infoAccCtx 组装 + 雷达 tick + 渔情粘性缓存,暂停冻结 = 原版数据源停摆同相——
+    //  ★登记边界：speedSlice 推进在原版也挂 DrawInfoAccs 绘制相（:47880-47916）,
+    //  本仓挂 r.infoAccs.tick(fixedUpdate)→ 暂停拍 MPH 读数原版衰减至 0、本仓冻结,
+    //  随本刀同族登记,未随拆（行为面偏差方向「少变」非「残留」）。
+  }
+
+  /** 信息饰品行悬停绘制相面（★SW-BJ105 2026-09-16 自 tickInfoAccs(fixedUpdate) 拆出;
+   *  挂 frame() render 前、三族回填之后——原版整链 DrawInfoAccs :47960-48076 绘制相
+   *  每绘制帧照跑,不受 CanPauseGame :17372 暂停门控）：
+   *  ①悬停行 r.infoAccHover（行高亮+次行压暗,消费在同帧 InfoAccsLayer.draw）;
+   *  ②行标签 tooltip（Main.cs:46636 MouseTextNoOverride(text3) → rare=0/diff=0 重建
+   *    缓存——【覆盖】此前掉落物名 rare 档=layer 28 noOverride 先 claim 锁后续语义,
+   *    F2b 仲裁同构:本仓 cursorItemIconText 域后写者胜,本面最后写=恒胜同效）;
+   *  ③hideInfo 点击翻转（:46547-46573 Sound 12+翻转;playerInventory 支 :47988 同时置
+   *    mouseInterface——本仓 timeUiHover 吞点击口径不变,写入拍位随拆面移动）。
+   *  ★F2b/RB28 门语义保持:悬停检测不以 cursorItemIconText==='' 为门,无条件
+   *  hitTest,命中即覆盖 claim。 */
+  private tickInfoAccsHover(): void {
+    const r = this.renderer;
+    if (!r) return;
+    const p = this.player;
     r.infoAccHover = r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY);
-    // 行标签 tooltip(Main.cs:46636 MouseTextNoOverride(text3)):悬停图标 →
-    // 行标题(Lang.inter 95-106「时间/深度/…」)随光标,复用 cursorItemIconText
-    // 管线(锚 mouse+14 + 屏缘收边,Main.cs:20032 MouseTextInner 同语义)
     if (r.infoAccHover >= 0) {
       const hr = r.infoAccs.state.rows[r.infoAccHover];
-      if (hr) p.cursorItemIconText = hr.label;
+      if (hr) {
+        p.cursorItemIconText = hr.label;
+        p.cursorItemIconRare = 0;      // MouseTextNoOverride(text,0,0)——缓存 rare 域重建
+        p.cursorItemIconDiff = 0;
+      }
     }
     const hovering = r.infoAccHover >= 0 && r.infoAccs.state.inventoryOpen;
     if (hovering) {
       // 吞挖掘/放置点击(与 timeUiHover 同语义)
-      this.renderer.timeUiHover = true;
+      r.timeUiHover = true;
       if (this.input.mouseDown && !this._infoAccClickLatch) {
         const row = r.infoAccs.state.rows[r.infoAccHover];
         if (row) {
@@ -38966,14 +39238,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   entities/ThrowKillFx.stinkPotionBurst 承载：音/尘/gore/80px 圈玩家+NPC
     //   全量；同族 370→119/936→320 同表）。此处原 partial 版（仅本地玩家 Stinky,
     //   注"370/936 未实装"）已删除防双施加——见 ThrowKillFx.ts 头注选型说明。
-    // 月总幻影矢/球 452/454 消亡爆(Projectile.cs:69827-69897):音+尘+范围伤二次
-    // 结算(判定盒外扩 144/208×2;gore 61-63 略)——2026-08-19 终审补
+    // 月总幻影矢/球 452/454 消亡爆(Projectile.cs:74329-74395):音+尘+范围伤二次
+    // 结算(判定盒外扩 144/208×2;gore 61-63 略)——2026-08-19 终审补。★尘站普查批
+    // （2026-09-16）：旧泛色 spawnParticles 退役,真尘站(d31×4/7 + d229×40/60 对)
+    // 迁 Arrow.killNow 单口承载(452/454 唯一载体),本支保留音/判定盒 Damage 面
     if (projId === 452 || projId === 454) {
       const cx = x + w / 2, cy = y + h / 2;
       const R = projId === 452 ? 144 / 2 : 208 / 2;   // 判定盒半宽
       this.playSfxWav(projId === 452 ? 'Zombie_103' : 'NPC_Killed_6', 1, cx, cy);
-      const n = projId === 452 ? 44 : 67;             // 31×4+229×40 / 31×7+229×60
-      this.spawnParticles(cx, cy, '#B040D0', n, 3, { life: 30, damp: 0.94 });
       const p = this.player;
       if (p && !p.dead && p.x < cx + R && p.x + p.w > cx - R
         && p.y < cy + R && p.y + p.h > cy - R) {
@@ -42621,8 +42893,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （植物帧表 killTileDropItems、药草 TILE_CUT 收获门、瓦罐 smashPot、向日葵/
    *  水晶心 object 支 def.drop、逻辑件 1×1 尾 style 表全在 breakTile 内）。
    *  级联（breakTile→setTile→onTileChanged→本链再触发）用队列+预算上限防递归
-   *  爆炸——原版 TileFrame 同构递归但 C# 栈深,JS 侧显式排队（同 breakTile 殉爆
-   *  队列 tntBarrelBlast 式）。 */
+   *  爆炸——原版 TileFrame 同构递归但 C# 栈深,JS 侧显式排队（旧 breakTile 殉爆
+   *  队列 tntBarrelBlast 式——★BJ102 起该队列已随格侧爆炸面退役,本队列独立存续）。 */
   private _decorKillQueue: Array<[number, number]> = [];
   private _decorKillDraining = false;
   /** 多格件放置写循环构造旗（债 A）：原版多格放置 = TileObject.Place :94-110 对
@@ -44243,9 +44515,13 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       // spawnBoulderRoll）
       this.spawnBoulderRoll(ax, ay, sheet);
     } else if (isTnt) {
-      // TNT 桶失撑 → 整件清+桶中心 1002 爆炸（❌1,cs:48771-48772——654 经 no-op
-      // break 组 :86409-86428 闭合后 goto case 132 :86670 → Check2x2 :86688 可达）
-      this.tntBarrelBlast(ax, ay);
+      // TNT 桶失撑 → 整件清（★BJ102 归一：Spawn 单口=checkBoulderFamily convert——
+      //  本支清格循环首格 setTile 即触发 scanBoulderFamilyNear→checkBoulderFamily
+      //  完整性链 → convert 单发（=vanilla :49178 NewProjectile 位）;若此处再发
+      //  即双弹（改前实证）。vanilla 判据域：654 ∉ Boulders → 走 :48866-48877
+      //  逐列下支撑支（本支=该站的仓内承载）+ 四格完整性支（checkBoulderFamily
+      //  承载）——两站在 vanilla 同属一次 destroy 单事件,仓内以 convert 单口归一。
+      //  爆炸面在弹体首 AI 拍 Kill（rbKill1002Face）,格侧零爆炸面。）
     } else {
       let dropKey = multiTileDropKey(def, vanillaPlaceableTileKeys());
       const sv = styleDropVidOfFrames(sheet, afx, afy);
@@ -44298,44 +44574,24 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     this.entities.add(e, 'projectiles');
   }
 
-  /** TNT 桶 654 爆炸（❌1,Check2x2 case 654 :48771-48772：桶中心 num2*16+8/num6*16+8
-   *  生成弹 1002 基伤 400）。1002 SetDefaults（Projectile.cs:9525-9536）260×260 盒
-   *  （=伤害盒半宽 130）/hostile=true（玩家侧 SelfHurtPlayers 全额 400 自然伤,
-   *  FixedSelfDamageForPlayers 无 1002 条目;NPC 侧减半面=Damage_PVE_Inner :12971,
-   *  SW-J1 起由 explodeAt 按弹型承载）。★SW-J1 2026-09-03 地形面定谳（F 代理发现复核成立）：Kill_ExplodeTiles
-   *  （:78995）闸门表（:79027-79030）**不含 1002** → :79064 `if (type == 1002) num6
-   *  = 10` 为死代码（1456 :75297 同构,历史残留）= 原版 1002 Kill **不炸地形**；
-   *  aiStyle 16 主循环 AI_016_Bombs（:47763-48120）对 1002 亦无 KillTile 支,
-   *  地形破坏唯一入口即该闸门表 → 本调用 r10/destroyTiles 曾误依死代码行,已去
-   *  （radius=0/destroyTiles=false;殉爆仍成立=CanExplodeTile :80383 对 654 无黑
-   *  名单支,他弹爆炸破桶格 → KillTile case 654 链发 1002）。NPC 侧减半面改由
-   *  explodeAt 按弹型承载（:12971,SW-J1）。殉爆防重入：爆炸波及
-   *  他桶经 breakTile 再触发 → 入队延后到本爆结算后（等价原版 destroyObject 旗
-   *  :48567/:48800 + 1002 timeLeft=2 跨 tick 串行,防同帧递归栈深） */
-  private _tntBlasting = false;
-  private _tntPending: Array<[number, number]> = [];
-  private tntBarrelBlast(ax: number, ay: number): void {
+  /** TNT 桶 654 破坏 → 弹体单发（★SW-BJ93 债①/BJ102 2026-09-16 归一改口：
+   *  旧「等效爆炸」面退役——vanilla 格侧【无】爆炸面,KillTile case 654 只经
+   *  Check2x2 destroy 块 NewProjectile（WorldGen.cs:49178,num2*16+8/num6*16+8、
+   *  dmg 400/kb 10f/owner=myPlayer）,爆炸面全在弹体 aiStyle16 Kill 拍
+   *  （AI_016_Bombs :48031-35 timeLeft=2≤3 → Kill → SelfHurt+Damage(dmg/2)+
+   *  DoUsualKillCode,详 RollingBoulder.rbKill1002Face 注）。SW-J1 2026-09-03
+   *  地形面定谳沿立：Kill_ExplodeTiles（:78995）闸门表（:79027-79030）**不含
+   *  1002** → :79064 `if (type == 1002) num6 = 10` 为死代码 = Kill 不炸地形;
+   *  殉爆唯一通道=他弹爆炸破桶格（CanExplodeTile :80383 对 654 无黑名单支）
+   *  → KillTile case 654 链发 1002。旧 _tntBlasting/_tntPending 防重入队列随
+   *  格侧爆炸面一并退役（Spawn 无重入面;重入域由 isBoulderDestroying 单飞闸
+   *  承担——Check2x2 destroy 循环内重入只清格不 Spawn,外层 convert 单发）。 */
+  private spawnTntBarrelRoll(ax: number, ay: number): void {
     if (!this.player) return;   // cs:48764 生成/读档门（同 spawnBoulderRoll）
-    const pending = (this._tntPending ??= []);   // ??=：Object.create 壳测试实例无构造器字段
-    if (this._tntBlasting) { pending.push([ax, ay]); return; }
-    this._tntBlasting = true;
-    try {
-      // SW-S1 2026-09-04：1002 SetDefaults 无 knockBack 行（:9525-9539,缺省
-      // :95=0f）,PrepareBombToBlow 亦无分支——但 kb 真值来自 NewProjectile 生成参
-      // SW-AC1 2026-09-04：kbDir=+1——桶爆弹 1002 出生零速（WorldGen.cs:49178
-      //  `NewProjectile(...,num2*16+8,num6*16+8,0f,0f,1002,400,10f,...)`）→ 弹体朝向恒 +1
-      //  （Entity.direction 缺省 1=自动面 else 档）,全 victim 击退同向;
-      // SW-AD1 2026-09-04：kb=10（生成参 knockBack=10f,WorldGen.cs:49178+Projectile.cs:
-      //  10884 赋值链——SW-S1"击退 0"系漏算生成参,红蓝四轮 AC1 定谳后本批落地）
-      this.explodeAt(ax, ay, 400, 0, false, 130, 0, 1002, undefined, undefined, 10, 1);   // SW-J1 2026-09-03:1002 Kill 不炸地形（死代码定谳,见上注）
-      while (pending.length) {
-        const [px, py] = pending.shift()!;
-        this.explodeAt(px, py, 400, 0, false, 130, 0, 1002, undefined, undefined, 10, 1);   // SW-J1 同上;SW-AC1 kbDir 同上
-      }
-    } finally {
-      this._tntBlasting = false;
-      pending.length = 0;
-    }
+    // 重入（Check2x2 destroy 循环 breakCell→breakTile）：外层 checkBoulderFamily
+    // convert=vanilla NewProjectile 位,此处不发防双弹（destroyObject 单飞闸）
+    if (isBoulderDestroying()) return;
+    this.convertBoulderRoll(ax, ay, 654);
   }
 
   /** 丛林钱币带 186 掷串（⚠️4 接档,Check3x2 case 186 :49726-49836）：铜 71 三保底

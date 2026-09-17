@@ -81,8 +81,9 @@ for (const n of ['DefaultToPlaceableTile', 'DefaultToPlaceableWall', 'DefaultToC
 expect(Object.keys(HELPERS).length, 'DefaultTo* useStyle 种子表不得为空（提取器面漂移即断）').toBeGreaterThanOrEqual(15);
 
 /** 单个 switch(type) 块的 case 标签组收集（花括号层级感知,不依赖 tab 深度;
- *  连续标签=fallthrough 组共享同一体） */
-function switchCases(from: number, to: number, startLine: number): { cases: Array<{ ids: number[]; start: number; end: number }>; bodyEnd: number } {
+ *  连续标签=fallthrough 组共享同一体）。lines 形参=可注入行源（else 链语义哨兵
+ *  以合成多行体直测解释器;缺省 LINES,非生产旁路）。 */
+function switchCases(from: number, to: number, startLine: number, lines: readonly string[] = LINES): { cases: Array<{ ids: number[]; start: number; end: number }>; bodyEnd: number } {
   let level = 0, bodyEnd = to;
   const cases: Array<{ ids: number[]; start: number; end: number }> = [];
   let curIds: number[] = [], curStart = -1, curEnd = -1;
@@ -91,8 +92,8 @@ function switchCases(from: number, to: number, startLine: number): { cases: Arra
     curIds = []; curStart = -1; curEnd = -1;
   };
   for (let k = startLine; k <= to; k++) {
-    const opens = (LINES[k].match(/{/g) ?? []).length;
-    const closes = (LINES[k].match(/}/g) ?? []).length;
+    const opens = (lines[k].match(/{/g) ?? []).length;
+    const closes = (lines[k].match(/}/g) ?? []).length;
     const before = level;
     level += opens - closes;
     if (k > startLine && level === 0 && before === 1) {
@@ -102,7 +103,7 @@ function switchCases(from: number, to: number, startLine: number): { cases: Arra
       return { cases, bodyEnd };
     }
     if (level === 1) {
-      const cl = LINES[k].trim().match(/^(?:case (\d+)|default):\s*$/);
+      const cl = lines[k].trim().match(/^(?:case (\d+)|default):\s*$/);
       if (cl) {
         if (curStart >= 0 && curEnd >= curStart) flush();
         curIds.push(cl[1] ? +cl[1] : -1);   // -1 = default 组标签（C# 无 case 命中时执行）
@@ -143,58 +144,90 @@ function evalCond(head: string, vid: number): boolean | null {
 /** case 体执行（花括号条件栈解释器）：
  *  · 嵌套 switch(type) 递归=仅命中该 id 的嵌套组（+default 兜底）生效;
  *  · 条件块栈：useStyle/return/DefaultTo* 仅在【无任何 false 外层条件】时生效
- *    （null=不可解=乐观真）;} else { 携 else 谓词再入栈;
+ *    （null=不可解=乐观真）;
+ *  · ★C1 复核修复（2026-09-16）else/else-if 链语义：分支闭括号后的 else 系行
+ *    （多行形态=1457 全部 else 系的实测形态,单行 `} else` 形态=0）按链入栈——
+ *    else 守卫 = 前序各支条件取反之合取;`else if (pred)` 守卫 = 该合取 ∧ pred。
+ *    旧版对多行形态整行忽略 → else 体被【无条件采用】（前支守卫被忽略,else 体
+ *    一带 useStyle 即产假真值;实测六区 5 else 体均不带 useStyle 故真值零漂,
+ *    形态/语义双哨兵防 Item.cs 刷新回潮）。链态经栈帧 saved 随嵌套构造存取,
+ *    嵌套 if/else 不污染外链;else 头取消懒恢复=链延续,其余行应用=构念终结。
  *  · return=true 终止整个方法（同受条件栈门控）。 */
-function execCaseBody(vid: number, start: number, end: number, capture: (v: number) => void): boolean {
+function execCaseBody(vid: number, start: number, end: number, capture: (v: number) => void,
+  lines: readonly string[] = LINES): boolean {
   let depth = 0;
-  let pendingHead: boolean | null | undefined = undefined;   // 已求值待入栈的 if 头
-  let pendingElse: boolean | null | undefined = undefined;
-  const stack: Array<{ depth: number; pred: boolean | null }> = [];
+  let pendingHead: boolean | null | undefined = undefined;   // 已求值待入栈的分支头
+  let pendingFromElse = false;                               // 头来自 else 系（链态已在头行更新）
+  type ChainState = { accum: boolean | null; lastCond: boolean | null } | undefined;
+  const stack: Array<{ depth: number; pred: boolean | null; saved?: { state: ChainState } }> = [];
+  let chain: ChainState = undefined;      // 活跃 if/else-if 链：accum=已闭支取反之合取,lastCond=最近闭支自身条件
+  let pendingRestore: ChainState = undefined;
+  let hasRestore = false;
+  const and3 = (a: boolean | null, b: boolean | null): boolean | null =>
+    (a === false || b === false) ? false : (a === null || b === null) ? null : true;
+  const not3 = (p: boolean | null): boolean | null => (p === null ? null : !p);
+  const closeBrace = (): void => {
+    depth--;
+    while (stack.length && stack[stack.length - 1].depth > depth) {
+      const f = stack.pop()!;
+      if (f.saved) { pendingRestore = f.saved.state; hasRestore = true; }   // 懒恢复:else 跟上则取消
+    }
+  };
+  const openBlock = (): void => {
+    depth++;
+    if (pendingHead !== undefined) {
+      if (pendingFromElse) stack.push({ depth, pred: pendingHead });
+      else { stack.push({ depth, pred: pendingHead, saved: { state: chain } }); chain = { accum: true, lastCond: pendingHead }; }
+      pendingHead = undefined; pendingFromElse = false;
+    }
+  };
   const taken = (): boolean => !stack.some((f) => f.pred === false);   // 任一 false=块未采用
   for (let k = start; k <= end; k++) {
-    const s = LINES[k].trim();
+    let s = lines[k].trim();
     if (!s) continue;
-    if (s === '{') {
-      depth++;
-      if (pendingHead !== undefined) { stack.push({ depth, pred: pendingHead }); pendingHead = undefined; pendingElse = undefined; }
+    // 单行形态 `} else …`：行首 `}` 先闭前支,余下按 else 头处理（1457 实测=0,防御形态回潮）
+    if (s.startsWith('}') && /^}\s*else/.test(s)) { closeBrace(); s = s.replace(/^}/, '').trim(); }
+    const mElseIf = s.match(/^else\s+if\s*\(/);
+    const isElseHead = !!mElseIf || s === 'else' || /^else\s*\{/.test(s);
+    if (isElseHead) {
+      hasRestore = false; pendingRestore = undefined;      // else 跟上=链延续,取消懒恢复
+      const prev = chain ?? { accum: null, lastCond: null };   // 孤立 else（无前支）=前链不可解→乐观真
+      const accum = and3(prev.accum, not3(prev.lastCond));
+      const hadBrace = /\{\s*$/.test(s);                   // 单行形态尾 `{`（else { / else if (…) {）
+      if (mElseIf) {
+        const cond = evalCond(s.replace(/\{\s*$/, '').replace(/^else\s+if/, 'if'), vid);
+        pendingHead = and3(accum, cond);
+        chain = { accum, lastCond: cond };
+      } else {
+        pendingHead = accum;                               // else 守卫=前序全取反之合取
+        chain = { accum, lastCond: null };                 // else 终结链
+      }
+      pendingFromElse = true;
+      if (hadBrace) openBlock();
       continue;
     }
-    if (/^\}\s*else\s+if\s*\(/.test(s)) {
-      const head = s.replace(/^\}\s*/, '');
-      pendingHead = evalCond(head.replace(/^else if/, 'if'), vid);
-      pendingElse = pendingHead === null ? undefined : !pendingHead;
-      continue;
-    }
-    if (/^\}\s*else\s*\{\s*$/.test(s)) {
-      depth--;   // else 随 if 块闭括号
-      if (pendingElse !== undefined && pendingElse !== undefined) stack.push({ depth, pred: pendingElse });
-      pendingElse = undefined;
-      continue;
-    }
-    if (s === '}') {
-      depth--;
-      while (stack.length && stack[stack.length - 1].depth > depth) stack.pop();
-      continue;
-    }
+    if (hasRestore) { chain = pendingRestore; hasRestore = false; }   // 非 else 行=最近构念已终结
+    if (s === '{') { openBlock(); continue; }
+    if (s === '}') { closeBrace(); continue; }
     if (/^if\s*\(/.test(s)) {
       pendingHead = evalCond(s, vid);
-      pendingElse = pendingHead === null ? undefined : !pendingHead;
+      pendingFromElse = false;
       continue;
     }
     // 嵌套 switch(type)：仅执行该 id 命中的嵌套组（+default 兜底），整块跳出
-    if (/^\t*switch \(type\)\s*$/.test(LINES[k])) {
+    if (/^\t*switch \(type\)\s*$/.test(lines[k])) {
       if (taken()) {
-        const { cases, bodyEnd } = switchCases(start, end, k);
+        const { cases, bodyEnd } = switchCases(start, end, k, lines);
         const hit = cases.filter((c) => c.ids.includes(vid));
         const grp = hit.length ? hit : cases.filter((c) => c.ids.includes(-1));
         for (const c of grp) {
-          if (execCaseBody(vid, c.start, c.end, capture)) return true;
+          if (execCaseBody(vid, c.start, c.end, capture, lines)) return true;
         }
       }
       // 跳过嵌套块（无论是否采用——case 体界至本组尾）
       let lv = 0;
       for (let j = k; j <= end; j++) {
-        lv += (LINES[j].match(/{/g) ?? []).length - (LINES[j].match(/}/g) ?? []).length;
+        lv += (lines[j].match(/{/g) ?? []).length - (lines[j].match(/}/g) ?? []).length;
         if (j > k && lv === 0) { k = j; break; }
       }
       continue;
@@ -228,8 +261,9 @@ function execCaseBody(vid: number, start: number, end: number, capture: (v: numb
  *  3(≤3000)/4(≤3989)/5(其余)——非顺序多区执行。
  *  ★RB17b note①（2026-09-16）：区内改【全方法体线性执行】（execCaseBody 直跑
  *  from+1..to）——不再只走 switch(type) 块：顶层区间 if（35 支,如 :18300/:18596/
- *  :21236）随条件栈求值执行、顶层落穿尾支（:27621,补集守卫 :22289 假支或其体内
- *  嵌套守卫不 return 时可达）按顺序执行、return 语义经条件栈门控后终止整区。
+ *  :21236）随条件栈求值执行、顶层落穿尾支（:27621,补集守卫 :22289 假支（2192-2198）
+ *  直落或其真支内嵌套 switch break（2203/2204）落穿时可达——2205 系 helper+return,
+ *  尾支不可达）按顺序执行、return 语义经条件栈门控后终止整区。
  *  旧 switch-only 版对这些支整块漏提（231 vid 真值被低估为 0,实值 1/9）,
  *  诸件均被确定消费支接管故行为面无感——真值面由此完备。 */
 function vanillaUseStyle(vid: number): number {
@@ -266,8 +300,10 @@ function regionHasCase([from, to]: readonly [number, number], vid: number): bool
 //  · 区间支 35 支（如 Item.cs:18300 `if (type >= 1479 && type <= 1494) { useStyle = 1;
 //    ...; return; }`、:18596 1543-1545 漆具、:21236 1977-1986 染发剂 useStyle=9）
 //  · 补集守卫 1 支（:22289 `if (type < 2192 || type > 2198)`）+ 顶层落穿尾支
-//    （:27621 `useStyle = 1;`——2192-2198 蜡烛族直落 + 守卫体内嵌套守卫不 return
-//    的落穿（如 2205）共用）
+//    （:27621 `useStyle = 1;`——2192-2198 蜡烛族守卫假支直落 + 真支内嵌套 switch
+//    `break;` 落穿（2203/2204,createTile 307/308 vanilla.json 独立互证）共用;
+//    ★C1 复核勘误:2205 非落穿件——case 2205=DefaultToCapturedCritter(148);return;
+//    （Item.cs:22328-22330）,useStyle=1 来自 helper 种子,尾支对其不可达）
 // 旧 switch-only 提取器对此整块漏提（231 vid 真值 0 vs 实值 1/9）,因全被确定消费支
 // （tile 218 件/paintTool 3 件/hairDye 10 件）接管、不入行为断言域,守卫从未爆红。
 // 哨兵：(B) 支表反解钉死+逐支真值锚+区间∩臂可达 DRIFT 对拍;(C) 词法形态哨兵。
@@ -570,10 +606,23 @@ describe('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', ()
     expect(anchored, '带无条件 useStyle 锚的支数').toHaveLength(RANGE_ANCHORED_PIN);
     // 补集守卫支在位（Item.cs:22289——其假支与体内落穿共用 :27621 尾支）
     expect(RANGE_TABLE.some((b) => b.head === 'type < 2192 || type > 2198'), '补集守卫支').toBe(true);
-    // 落穿尾支锚：2192 蜡烛（守卫假支直落）与 2205（守卫真支内嵌套守卫不 return 落穿）
-    // 的 useStyle=1 唯一来源=尾支——旧 switch-only 提取器=0
-    expect(vanillaUseStyle(2192), '尾支锚 2192').toBe(1);
-    expect(vanillaUseStyle(2205), '尾支落穿锚 2205').toBe(1);
+    // ★C1 复核勘误（2026-09-16）：落穿尾支锚=2192（守卫假支直落）与 2203/2204
+    // （守卫真支内嵌套 switch `break;`→守卫体尽→落 :27621;Item.cs case 2203/2204
+    // :22293-22295 亲读=裸 break,尾支 switch :27629-27634 createTile 307/308,
+    // vanilla.json 同值独立互证）。2205 非落穿件——case 2205:22328-22330=
+    // `DefaultToCapturedCritter(148); return;`（helper 种子 useStyle=1+createTile 724,
+    // 尾支对其不可达）;判别力由 2192/2203/2204 独立承载,值不变。
+    expect(vanillaUseStyle(2192), '尾支锚 2192（守卫假支直落）').toBe(1);
+    expect(vanillaUseStyle(2203), '尾支落穿锚 2203（嵌套 switch break 落穿）').toBe(1);
+    expect(vanillaUseStyle(2204), '尾支落穿锚 2204（同 2203）').toBe(1);
+    expect(vanillaUseStyle(2205), 'helper 种子锚 2205（DefaultToCapturedCritter+return;非尾支落穿）').toBe(1);
+    // vanilla.json createTile 独立互证（尾支 300+type-2192 面与 helper 724 面分立）
+    const metaOf = (v: number): number | null =>
+      (vanillaMeta as { items: Record<string, { createTile?: number | null }> }).items[String(v)]?.createTile ?? null;
+    expect(metaOf(2192), '2192 createTile=300（尾支 default 臂 :27636）').toBe(300);
+    expect(metaOf(2203), '2203 createTile=307（尾支 switch :27629-27631）').toBe(307);
+    expect(metaOf(2204), '2204 createTile=308（尾支 switch :27632-27634）').toBe(308);
+    expect(metaOf(2205), '2205 createTile=724（DefaultToCapturedCritter :48013;非尾支面）').toBe(724);
   });
 
   it('逐支真值锚：27 支每支锚 vid 真值 ≡ 支内无条件 useStyle（提取器退回 switch-only 即红）', () => {
@@ -626,5 +675,84 @@ describe('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', ()
     expect(paintArm, '漆臂在位（Game.ts updateUse）').toBeGreaterThan(0);
     expect(gateArm, '通用门臂在位').toBeGreaterThan(0);
     expect(paintArm, '漆臂必须先于通用门臂（后撤/删除即红——届时漆具门值变为行为活值）').toBeLessThan(gateArm);
+  });
+});
+
+// ================= C1 复核封口哨兵（2026-09-16）：else 系形态 + 链语义 =================
+// 红蓝定谳：execCaseBody 旧版 `^\}\s*else` 两正则只匹配单行形态,而 1457 Item.cs
+// 单行形态=0（六区 5 处 bare else 全独立行,else-if=0）→ 多行 else/else-if 体被
+// 【无条件采用】（前支守卫被忽略）。今日六区 5 else 体（:18315 value/:23091
+// fishingPole/:25558·25733 placeStyle/:38636 value）均不带 useStyle → 真值零漂
+// （修复前后全量对拍 6280 vid diff=0）;Item.cs 刷新引入带 useStyle 的 else 支
+// 即产假真值——本双哨兵封口：形态清单钉源态,合成体钉链语义。
+
+describe('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
+  it('形态哨兵：六区 else 系行形态清单钉死（全多行 bare else+后随 {,无 else-if/单行/无括号形态）', () => {
+    let bare = 0, elseIf = 0, singleLine = 0, noBrace = 0, notAfterClose = 0;
+    const bareLines: string[] = [];
+    for (const [name, [from, to]] of REGIONS) {
+      for (let k = from + 1; k <= to; k++) {
+        const s = LINES[k].trim();
+        if (/^}\s*else/.test(s)) singleLine++;                 // 单行形态（1457=0）
+        if (/^else\s+if\b/.test(s)) elseIf++;                  // else-if 头（1457 六区=0）
+        if (s === 'else' || /^else\s*\{/.test(s)) {
+          bare++;
+          bareLines.push(`${name}:${k + 1}`);
+          let j = k + 1;
+          while (j <= to && !LINES[j].trim()) j++;             // 下一非空行
+          if (!/^\{/.test((LINES[j] ?? '').trim())) noBrace++;
+          let b2 = k - 1;
+          while (b2 > from && !LINES[b2].trim()) b2--;         // 上一非空行
+          if (!/\}\s*$/.test(LINES[b2] ?? '')) notAfterClose++;   // else 系行必紧随闭括号（注释行插入=链断裂形态）
+        }
+      }
+    }
+    expect(singleLine, '单行 `} else` 形态（1457 Item.cs=0;出现即扩解释器+重走全量对拍）').toBe(0);
+    expect(elseIf, 'else if 头（1457 六区=0;出现即走真值全量对拍）').toBe(0);
+    expect(noBrace, 'bare else 未后随 `{`（无括号 else 体=解释器不支持形态）').toBe(0);
+    expect(notAfterClose, 'bare else 前非空行非闭括号（注释插入 } 与 else 之间=链态恢复形态,解释器未支持）').toBe(0);
+    expect(bare, `六区 bare else 总数漂移: ${bareLines.join(',')}`).toBe(5);
+  });
+
+  it('链语义哨兵：多行 if/else-if/else 链按分支守卫采用——解释器退回无条件采用/naive 取反即红', () => {
+    // 合成体=多行形态（1457 全部 else 系实测形态）;行源注入 execCaseBody（lines 形参）
+    const body = [
+      '\t\t\tif (type == 10)',
+      '\t\t\t{',
+      '\t\t\t\tuseStyle = 1;',
+      '\t\t\t}',
+      '\t\t\telse if (type == 20)',
+      '\t\t\t{',
+      '\t\t\t\tuseStyle = 5;',
+      '\t\t\t}',
+      '\t\t\telse',
+      '\t\t\t{',
+      '\t\t\t\tuseStyle = 9;',
+      '\t\t\t}',
+    ];
+    const run = (vid: number): number => {
+      let v = 0;
+      execCaseBody(vid, 0, body.length - 1, (n) => { v = n; }, body);
+      return v;
+    };
+    // vid=10=链语义判别子:if 支命中后 else 系体不得采用（旧无条件采用=9;
+    //  naive「栈顶取反」末 else 守卫=!(前支守卫)=A∨!B 亦误采=9）
+    expect(run(10), 'if 支命中:else 系体不得采用（退回无条件采用/naive 取反即 9）').toBe(1);
+    expect(run(20), 'else-if 支:守卫=前支取反∧自身条件').toBe(5);
+    expect(run(30), 'else 支:守卫=前序全取反之合取').toBe(9);
+    // 不可解条件=乐观真（null 恒不阻塞,两支皆采,末值胜）——既有口径延续钉死
+    const unsolvable = [
+      '\t\t\tif (Main.expertMode)',
+      '\t\t\t{',
+      '\t\t\t\tuseStyle = 3;',
+      '\t\t\t}',
+      '\t\t\telse',
+      '\t\t\t{',
+      '\t\t\t\tuseStyle = 7;',
+      '\t\t\t}',
+    ];
+    let v2 = 0;
+    execCaseBody(1, 0, unsolvable.length - 1, (n) => { v2 = n; }, unsolvable);
+    expect(v2, '不可解条件=乐观真双支皆采（null 口径延续）').toBe(7);
   });
 });

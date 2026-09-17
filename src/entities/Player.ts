@@ -1256,6 +1256,13 @@ export class Player extends Entity {
   cursorItemIconText = '';
   /** 图标水平翻转(高门族) */
   cursorItemIconReversed = false;
+  /** MouseText 缓存 rare/diff 域(Main._mouseTextCache.rare/diff Main.cs:2449 域,
+   *  ★SW-BJ105 2026-09-16)：掉落物名 MouseTextHackZoom(text, rare, 0)(:43628-43628)/
+   *  他玩家血名 (text, 0, difficulty)(:43655) 携带;渲染端 drawMouseTextLayer 按
+   *  MouseTextInner :20430-20474 色表消费。rare=0/diff=0=默认灰白(NPC 名/箱名/行标签
+   *  同相);Game.mouseOversClear 每帧清零(=缓存 isValid=false 重建域) */
+  cursorItemIconRare = 0;
+  cursorItemIconDiff = 0;
   /** 雷达/稀有生物节流(Player.accThirdEyeCounter/accCritterGuideCounter :2462/:2472,
    *  byte;ResetEffects :12625 卸下雷达时 accThirdEyeCounter 归零 → 重装备立即重扫) */
   accThirdEyeCounter = 0;

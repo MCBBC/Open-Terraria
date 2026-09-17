@@ -57,6 +57,49 @@ export class Camera {
     if (this.worldH * TILE < halfH * 2) this.y = this.worldH * TILE / 2;
   }
 
+  // ★BJ103-A1（2026-09-16）：CurrentPan 平滑+黑幕传送（Main.UpdateCameraPan 尾段
+  // Main.cs:63634-63675/1458 :63640-63681,两版逐字同文——本轮 sed 区间 diff 实证）。
+  // CurrentPan（Main.cs:554）= 玩家受控镜头平移的持续偏移量（世界 px）,每 tick 以
+  // Utils.MoveTowards（Utils.cs:1862-1870）趋近 targetPan;施加点 = screenPosition 组合
+  // （PlayerFocusedScreenPosition Main.cs:63523）。本仓 Camera 每世界重建
+  // （Game fixedUpdate 构造点）= WorldGen.cs:6952 CurrentPan=Zero 的进图复位同相。
+  panX = 0; panY = 0;
+  /** maxPanSpeed 玩家受控档恒值（Main.cs:63652 `float maxPanSpeed = 36f`;手柄支
+   *  :63778/1458 :63784 覆写 48f——本仓无手柄 pan 通道,登记债）。物体跟踪档
+   *  （观战/高尔夫 :63648-63657）为比例率 num×panRate,本仓由 follow 重锚承载不经此。 */
+  static PAN_MAX_SPEED = 36;
+  /** BlackFadeDist（Main.cs:3127 `Camera.UnscaledSize.Length()/2f + 100f`）——
+   *  UnscaledSize=(screenWidth,screenHeight)（Terraria.Graphics/Camera.cs:10）=本仓
+   *  viewW/viewH（CSS px）。原版即拿未缩放 px 阈值比世界 px 距离（zoom>1 偏保守）,
+   *  1:1 照录该混用。 */
+  static blackFadeDist(viewW: number, viewH: number): number {
+    return Math.hypot(viewW, viewH) / 2 + 100;
+  }
+  /**
+   * UpdateCameraPan 尾段（Main.cs:63638-63669/1458 :63644-63675）：
+   *   ①NaN 守卫（:63638-63645 float.IsNaN→归零,Number.isFinite 等价面）；
+   *   ②黑幕门（:63662-63666）dist(CurrentPan,targetPan) ≥ BlackFadeDist →
+   *     CurrentPan=targetPan 瞬移,返回 true（调用方接 BlackFadeCameraTeleport 等价面）；
+   *   ③否则 MoveTowards（Utils.cs:1862-1870：v=target−cur,v 长<步长→直落目标;
+   *     否则 cur+v.SafeNormalize×步长——step=min(d,max) 逐步合流同式）。
+   * 返回 true = 本拍触发黑幕传送。 */
+  advancePan(targetX: number, targetY: number): boolean {
+    if (!Number.isFinite(this.panX)) this.panX = 0;
+    if (!Number.isFinite(this.panY)) this.panY = 0;
+    const d = Math.hypot(this.panX - targetX, this.panY - targetY);
+    if (d >= Camera.blackFadeDist(this.viewW, this.viewH)) {
+      this.panX = targetX;
+      this.panY = targetY;
+      return true;
+    }
+    if (d > 0) {
+      const step = Math.min(d, Camera.PAN_MAX_SPEED);
+      this.panX += (targetX - this.panX) / d * step;
+      this.panY += (targetY - this.panY) / d * step;
+    }
+    return false;
+  }
+
   /** CameraModifierStack（Main.instance.CameraModifiers，Terraria.Graphics.CameraModifiers
    *  1:1，2026-08-20）：punch 旧"线性衰减近似"退役——现为标准修饰器栈
    *  （PunchCameraModifier 余弦振动 × 线性包络 × 距离衰减），ApplyTo 每渲染帧一次 */

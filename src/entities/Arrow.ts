@@ -370,6 +370,9 @@ export interface ArrowOpts {
   /** 270 骷髅王髅骨（Projectile.cs:53192-53213）：ai1 30-110 窗口向最近玩家
    *  转向（(v*24+dir*spd)/25 保速）；速 <18 ×1.02/t 自加速；每帧 5 号尘尾迹。 */
   skullBone?: boolean;
+  /** 873 光鞭 Kill 尘色相位（NPC.ai[1]/60,P.cs:46790 发射点注入——AI_171_GetColor
+   *  :46398 hue=(ai[1]+0.5)%1;缺省 0=hue 0.5。★尘站普查批 2026-09-16） */
+  empressHue?: number;
   /** 351 礼盒（aiStyle 58，Projectile.cs:27727-27757）：两段重力——前 30t 平飞，
    *  之后 vy+0.1；一旦 vy>=0 转二段（恒 +0.1 钳 3、vx×0.99）；帧 0/1 随段切换。 */
   present?: boolean;
@@ -857,6 +860,7 @@ const PROJ_ALPHA0: Record<number, number> = {
   675: 255, 676: 255, 357: 255, 344: 255, 275: 255, 276: 255,
   593: 255, 242: 255, 438: 255, 462: 255, 592: 255, 638: 255,
   684: 255, 711: 255,
+  926: 255,                                           // :56057（605/920/926/937 共段 α−50 恒率;普查批 2026-09-16 补键——缺键=α≡0,α==0 门尘相位与本体渐显面双失真）
   //  440/449/606 :55741 α−25——GetAlpha :81087 r/g=b=255−α 三写为死存储（后落 :81507
   //  缺省路径被 num14 重算覆写）→ 有效读 α ✓。★R4(T3,2026-09-02)：有效面=纯缺省,
   //  专属 GA 档/drawXenoFilter 白剪影/XENO_GLOW 叠画已摘（原版无滤镜无 glow）,
@@ -906,6 +910,7 @@ const PROJ_ALPHA0: Record<number, number> = {
  *  （SetDefaults aiStyle=33 → 实走 AI_033 −50，本仓 flare 支已接），不入表防双减。 */
 const AI001_FADE_RATE: Record<number, number> = {
   323: 50, 468: 40, 684: 40, 408: 40, 937: 50,
+  926: 50,                                            // :56057 同支（605/920/926/937 共段 α−50;926 补键配套 α==0 门尘,普查批 2026-09-16）
   710: 25, 671: 20, 675: 20, 676: 20, 357: 25,
   275: 30, 276: 30, 593: 10,
   440: 25, 449: 25, 606: 25,                          // :55741（Xenopopper 弹,EU=2/1/2；白剪影档已摘=T3）
@@ -1033,6 +1038,21 @@ const GEM_BOLT_LIGHT: Readonly<Record<number, [number, number, number]>> = {
 export const BULLET_KILL_SFX = new Set([14, 20, 88, 36, 83, 84, 389, 104, 279, 100, 110,
   180, 207, 357, 242, 302, 257, 259, 285, 287, 576, 577, 876, 968]);
 
+/** Main.hslToRgb(h,1,0.5) 的本地副本（873 Kill 尘色 AI_171_GetColor :46398 消费；
+ *  l=0.5/s=1 固定 → c=1、m=0,标准 HSL→RGB 解析式）。不引 AuroraSky/Appearance 的
+ *  现成实现=避免 entities → render/player 反向依赖 */
+function empressHslRgb(hue: number): [number, number, number] {
+  const h = ((hue % 1) + 1) % 1 * 6;
+  const x = 1 - Math.abs((h % 2) - 1);
+  const seg = Math.floor(h) % 6;
+  const rgb: [number, number, number] = seg === 0 ? [1, x, 0]
+    : seg === 1 ? [x, 1, 0]
+      : seg === 2 ? [0, 1, x]
+        : seg === 3 ? [0, x, 1]
+          : seg === 4 ? [x, 0, 1] : [1, 0, x];
+  return [Math.round(rgb[0] * 255), Math.round(rgb[1] * 255), Math.round(rgb[2] * 255)];
+}
+
 /** 荆棘链族（Vilethorn 7/8 + Nettle Burst 150/151/152，aiStyle 4，红队 R27 §10/§11）：
  *  UpdatePosition 对 aiStyle==4 整体早退（Projectile.cs:20552）= 链段【全程静止】；
  *  AI_004 :23943-24080 状态机：alpha −50(/−75 nettle)/update 渐显期不动 → 归零转 ai[0]=1
@@ -1137,6 +1157,8 @@ export class Arrow extends Entity {
   /** aiStyle 14 荆棘球档（277）：撞块按 Projectile.cs:18306-18314 反弹 */
   thornBounce: boolean;
   skullBoneT = 0;   // ai[1] 计数（270 转向窗口）
+  /** 873 光鞭 Kill 尘色相位（发射点注入,见 opts 注） */
+  empressHue = 0;
   /** 延迟重力（AI_001 链）：age（update 计）超过此值才施加 grav；-1=不延迟 */
   gravDelay: number;
   /** 二段重力（686/711）：age 超过 grav2At 再加 grav2；0=无 */
@@ -2196,6 +2218,9 @@ export class Arrow extends Entity {
     this.present = !!opts?.present;
     // 452/454/1021/448 per-proj 档（skullBone 同模式：opts 激活 + subStep 消费）
     if (opts?.phantasm) { this.phantasm = true; this.phSpin = opts.phantasm.spin; }
+    // ★尘站普查批（2026-09-16）：873 光鞭 Kill 尘色的 ai[1] 通道（发射点注入
+    //  NPC.ai[1]/60,P.cs:46790——AI_171_GetColor :46398 hue=(ai[1]+0.5)%1）
+    if (opts?.empressHue !== undefined) this.empressHue = opts.empressHue;
     if (opts?.phantomOrb) {
       this.phantomOrb = true;
       this.orbOwnerId = opts.phantomOrb.ownerId;
@@ -3617,6 +3642,134 @@ export class Arrow extends Entity {
     // entities/ThrowKillFx.ts 头注——1085 镜在 Game.onProjectileDeath 不重复挂）
     if (this.projId === 370 || this.projId === 371 || this.projId === 936) {
       applyThrownKillFx(this, game);
+    }
+    // ---- ★NPC 弹幕尘站普查批③（2026-09-16,docs/npc-proj-dust-census.md §6）：
+    //      Arrow 载体敌弹 Kill 站补齐（Projectile.Kill() 分档链,行号锚 1457）。
+    //      同 id 玩家武器版如另有 Game.onProjectileDeath 面（452/454 泛色已被本真值
+    //      替代）不重复撒 ----
+    // · 719 蜂刺（:77139-77144,55/719 共组;55 的 Dart 载体版在 Dart.killShooterDust）
+    if (this.projId === 719) {
+      for (let i = 0; i < 5; i++) {
+        game.spawnDust?.(this.x, this.y, this.w, this.h, 18, 0, 0, 0, null, 1.5, true);
+      }
+    }
+    // · 462 幻影矢（:74905-74914）：Next(5,10)×d229（NewDust(Center,0,0),α100,
+    //   scale0.5）→ vel×1.6、vel.Y--、position −= One×4、position=Lerp(position,
+    //   Center,0.5)
+    if (this.projId === 462) {
+      const n462 = 5 + Math.floor(Math.random() * 5);
+      for (let i = 0; i < n462; i++) {
+        const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 229, 0, 0, 100, null, 0.5);
+        if (!d) break;
+        d.vx *= 1.6; d.vy = d.vy * 1.6 - 1;
+        d.x -= 4; d.y -= 4;
+        d.x = (d.x + this.cx) / 2; d.y = (d.y + this.cy) / 2;
+      }
+    }
+    // · 926 凝胶弹（:72773-72781）：22×d31（NewDust(position−(8,8),w+16,h+16),α40,
+    //   QueenSlime 色,scale1.5）→ noGravity,vel = UnitY.RotatedBy(i·2π+rand·π)×
+    //   (3+rand·0.5)
+    if (this.projId === 926) {
+      for (let i = 0; i < 22; i++) {
+        const ang = i * Math.PI * 2 + Math.random() * Math.PI;
+        const spd = 3 + Math.random() * 0.5;
+        const r1 = Math.random(), r2 = Math.random();
+        const l1 = 200 + (255 - 200) * r1, g1 = 200 + (80 - 200) * r1, b1 = 200 + (255 - 200) * r1;
+        const d = game.spawnDust?.(this.x - 8, this.y - 8, this.w + 16, this.h + 16, 31,
+          -Math.sin(ang) * spd, Math.cos(ang) * spd, 40,
+          { r: Math.round(0 + (l1 - 0) * r2), g: Math.round(160 + (g1 - 160) * r2),
+            b: Math.round(255 + (b1 - 255) * r2), a: 255 }, 1.5);
+        if (d) d.noGravity = true;
+      }
+    }
+    // · 1021 月总巨砾（:76364-76467,99/1013/727/1014/1021/1048/1053/1054/1055/1057
+    //   共组——1021 走尾支 num623=323）：PlaySound(0)=dig + 30×d323（1/2 scale×1.4;
+    //   环内 `velocity *= 1.9f` 在弹已死面=死写不移植,见 RollingBoulder.ts:82 同判）
+    if (this.projId === 1021) {
+      game.playSfx?.('dig', 1, this.cx, this.cy);
+      for (let i = 0; i < 30; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 323);
+        if (!d) break;
+        if (Math.floor(Math.random() * 2) === 0) d.scale *= 1.4;
+      }
+    }
+    // · 873 光鞭（:72691-72721）：20×NewDustPerfect(Center,267)——fadeIn1、noGravity、
+    //   α100、color=Lerp(AI_171_GetColor(),White,rand·0.4)（AI_171_GetColor :46398=
+    //   hslToRgb((ai[1]+0.5)%1,1,0.5),ai[1]=发射点 NPC.ai[1]/60 → 本仓发射点注入
+    //   empressHue）、角向均布 num87=velocity 角 + i·2π/20：i%4==0 → vel=角向×3.2
+    //   scale2.3 / i%2==0 → ×1.8 scale1.9 / else ×1 scale1.6,尾段 vel+=弹速×rand·0.5
+    if (this.projId === 873) {
+      const hue = (((this.empressHue ?? 0) + 0.5) % 1 + 1) % 1;
+      const [cr, cg, cb] = empressHslRgb(hue);
+      for (let i = 0; i < 20; i++) {
+        const d = game.spawnDust?.(0, 0, 0, 0, 267, 0, 0, 100, null, 1, false, true);
+        if (!d) break;
+        d.x = this.cx; d.y = this.cy;
+        d.fadeIn = 1; d.noGravity = true; d.alpha = 100;
+        const wl = Math.random() * 0.4;
+        d.color = {
+          r: Math.round(cr + (255 - cr) * wl),
+          g: Math.round(cg + (255 - cg) * wl),
+          b: Math.round(cb + (255 - cb) * wl),
+          a: 255,
+        };
+        const ang = Math.atan2(this.vy, this.vx) + i * (Math.PI * 2 / 20);
+        if (i % 4 === 0) { d.vx = Math.cos(ang) * 3.2; d.vy = Math.sin(ang) * 3.2; d.scale = 2.3; }
+        else if (i % 2 === 0) { d.vx = Math.cos(ang) * 1.8; d.vy = Math.sin(ang) * 1.8; d.scale = 1.9; }
+        else { d.vx = Math.cos(ang); d.vy = Math.sin(ang); d.scale = 1.6; }
+        d.vx += this.vx * Math.random() * 0.5;
+        d.vy += this.vy * Math.random() * 0.5;
+      }
+    }
+    // · 270 骷髅髅骨（:75816-75856,type 270 支）：PlaySound(0)=dig（legacy case0 无
+    //   style=随机 Dig_0/1/2）+ 20 循环 ×{d26（α100,noGravity,vel×1.2,scale=1.3,
+    //   vel −= oldVel×0.3）+ d5（盒=position+(4,4) 缩 8,scale1.5,noGravity,vel×3）}
+    if (this.projId === 270) {
+      game.playSfx?.('dig', 1, this.cx, this.cy);
+      for (let i = 0; i < 20; i++) {
+        const dA = game.spawnDust?.(this.x, this.y, this.w, this.h, 26, 0, 0, 100);
+        if (dA) {
+          dA.noGravity = true; dA.scale = 1.3;
+          dA.vx = dA.vx * 1.2 - this.vx * 0.3;
+          dA.vy = dA.vy * 1.2 - this.vy * 0.3;
+        }
+        const dB = game.spawnDust?.(this.x + 4, this.y + 4, this.w - 8, this.h - 8, 5,
+          0, 0, 100, null, 1.5);
+        if (dB) { dB.noGravity = true; dB.vx *= 3; dB.vy *= 3; }
+      }
+    }
+    // · 452/454 月总幻影矢/球爆（:74329-74395）：真尘站接于 killNow（原 Game.
+    //   onProjectileDeath 泛色 spawnParticles 已退役防双撒,音/判定盒面仍在 Game 侧）
+    //   452：4×d31（scale1.5,α100）+ 40×{d229(α0,scale2.5,noGravity,vel×3) +
+    //   d229(α100,scale1.5,noGravity,vel×2)}——盒=Resize(144) 后 ±72;
+    //   454：7×d31+60×{d229(α0,scale2.5,noGravity)+d229(α100,scale1.5,noGravity)}——
+    //   盒=Resize(208) 后 ±104,尘位=Center+(104,0).RotatedBy(2π·rand)·rand 径向
+    if (this.projId === 452 || this.projId === 454) {
+      const R = this.projId === 452 ? 72 : 104;
+      const nD = this.projId === 452 ? 4 : 7;
+      const nL = this.projId === 452 ? 40 : 60;
+      for (let i = 0; i < nD; i++) {
+        game.spawnDust?.(this.cx - R, this.cy - R, R * 2, R * 2, 31, 0, 0, 100, null, 1.5);
+      }
+      for (let i = 0; i < nL; i++) {
+        // 454 每粒各自掷径向角/半径：(w/2,0).RotatedBy(2π·rand)·rand + Center
+        const radOf = (): [number, number] => {
+          const th = Math.random() * Math.PI * 2, rr = Math.random();
+          return [this.cx + Math.cos(th) * R * rr, this.cy + Math.sin(th) * R * rr];
+        };
+        const dA = game.spawnDust?.(this.cx - R, this.cy - R, R * 2, R * 2, 229, 0, 0, 0, null, 2.5);
+        if (dA) {
+          dA.noGravity = true;
+          if (this.projId === 452) { dA.vx *= 3; dA.vy *= 3; }
+          if (this.projId === 454) { const [px, py] = radOf(); dA.x = px; dA.y = py; }
+        }
+        const dB = game.spawnDust?.(this.cx - R, this.cy - R, R * 2, R * 2, 229, 0, 0, 100, null, 1.5);
+        if (dB) {
+          dB.noGravity = true;
+          if (this.projId === 452) { dB.vx *= 2; dB.vy *= 2; }
+          if (this.projId === 454) { const [px, py] = radOf(); dB.x = px; dB.y = py; }
+        }
+      }
     }
     this.dead = true;
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy,
@@ -6647,6 +6800,26 @@ export class Arrow extends Entity {
           d937.vy = d937.vy * 0.3 + this.vy * 0.3;
         }
       }
+      // ★NPC 弹幕尘站普查批（2026-09-16）：926 凝胶弹（AI_001 :56018-56045 与 937
+      //  同支,fade 同段 −50——补 PROJ_ALPHA0/AI001_FADE_RATE 键后接同款 α==0 门尘）：
+      //  1/3 掷 ×1×d4（史莱姆胶尘,QueenSlime 色 A=150,scale1.2,盒=position−(8,8)+
+      //  弹速 加宽 16——num72=8）,vel×0.3 后 += 弹速×0.3,noGravity = 1/2 掷
+      if (this.projId === 926 && this.alpha === 0 && Math.floor(Math.random() * 3) === 0) {
+        const r1 = Math.random(), r2 = Math.random();
+        const l1 = 200 + (255 - 200) * r1, g1 = 200 + (80 - 200) * r1, b1 = 200 + (255 - 200) * r1;
+        const c926 = {
+          r: Math.round(0 + (l1 - 0) * r2),
+          g: Math.round(160 + (g1 - 160) * r2),
+          b: Math.round(255 + (b1 - 255) * r2),
+          a: 150,
+        };
+        const d926 = game.spawnDust?.(this.x - 8 + this.vx, this.y - 8 + this.vy,
+          this.w + 16, this.h + 16, 4, 0, 0, 50, c926, 1.2, Math.floor(Math.random() * 2) === 0);
+        if (d926) {
+          d926.vx = d926.vx * 0.3 + this.vx * 0.3;
+          d926.vy = d926.vy * 0.3 + this.vy * 0.3;
+        }
+      }
       this.alpha = Math.max(0, this.alpha - AI001_FADE_RATE[this.projId]);
       // ---- ★2026-09-02 观感面缺口批（同表键的配套尘/消亡段,原位次=fade 后）----
       // 710 空中祸害（:56348-56380）：1/4 子步掷——1/2 再掷 d31 烟（α100,scale1.6,
@@ -7300,6 +7473,260 @@ export class Arrow extends Entity {
             d.vy = d.vy * 0.1 - this.vy * (1.3 - scale496);
             d.fadeIn = 100;                                    // :33136 =100+owner
             d.scale += scale496 * 0.75;                        // :33138-33139
+          }
+        }
+      }
+    }
+    // ---- ★NPC 弹幕尘站普查批②（2026-09-16,docs/npc-proj-dust-census.md §4）：
+    //      Arrow 载体敌弹（bossAI.shoot 直飞桶）的 AI 段尘站补齐。全部为 AI_001
+    //      per-type 块（原版 AI 在 UpdatePosition 前 → 本位在通用位移行前=pre-move
+    //      盒;EU 型每子步一跑与原版 numUpdates 循环同拍）----
+    //  · 101 石巨人火球（aiStyle23 :26213-26262,ai[0]>7 门——ai[0] 出生 0,每 update
+    //    ++,>7 即第 9 update 起掷）：1/2 掷 ×1×d75（速=v×0.2,α100）;掷中后
+    //    2/3+1/9 → noGravity+scale×3+vel×2;scale×1.5×num193（num193=ai[0]∈{8,9,10}
+    //    时 0.25/0.5/0.75 起步爬升）;num194==75 尾段 vel+=弹速,!noGravity → vel×0.5
+    if (this.projId === 101 && this.age > 8 && Math.floor(Math.random() * 2) === 0) {
+      const num193 = this.age === 9 ? 0.25 : this.age === 10 ? 0.5 : this.age === 11 ? 0.75 : 1;
+      const d101 = game.spawnDust?.(this.x, this.y, this.w, this.h, 75,
+        this.vx * 0.2, this.vy * 0.2, 100);
+      if (d101) {
+        const noG = Math.floor(Math.random() * 3) !== 0
+          || Math.floor(Math.random() * 3) === 0;              // Next(3)!=0 || (75∧Next(3)==0)
+        if (noG) { d101.vx *= 2; d101.vy *= 2; d101.scale *= 3; }
+        d101.vx *= 1.2; d101.vy *= 1.2;                        // :26251-26252 恒 ×1.2
+        d101.scale = d101.scale * 1.5 * num193;                // :26254-26257 非 188 → ×1.5×num193
+        d101.vx += this.vx; d101.vy += this.vy;                // :26259-26261 num194==75 → += 弹速
+        if (!noG) { d101.vx *= 0.5; d101.vy *= 0.5; }
+        d101.noGravity = noG;
+      }
+    }
+    //  · 462 月总幻影矢（AI_001 :55826-55836,每 update）：1×d229（NewDust(Center,0,0),
+    //    α100）→ noLight+noGravity、velocity=弹速、position −= One×4、scale=0.8
+    if (this.projId === 462) {
+      const d = game.spawnDust?.(this.cx, this.cy, 0, 0, 229, 0, 0, 100);
+      if (d) {
+        d.noLight = true; d.noGravity = true;
+        d.vx = this.vx; d.vy = this.vy;
+        d.x -= 4; d.y -= 4;
+        d.scale = 0.8;
+      }
+    }
+    //  · 622 猪鲨水弹（AI_001 :57145-57158,每 update 2/3 掷）：1×d229（盒=position+
+    //    (4,4) 缩 (w−8,h−8),速=v×0.2,α0,scale1.2）→ position −= 弹速×2、noLight+
+    //    noGravity、vel×0.3
+    if (this.projId === 622 && Math.floor(Math.random() * 3) !== 0) {
+      const d = game.spawnDust?.(this.x + 4, this.y + 4, this.w - 8, this.h - 8, 229,
+        this.vx * 0.2, this.vy * 0.2, 0, null, 1.2);
+      if (d) {
+        d.x -= this.vx * 2; d.y -= this.vy * 2;
+        d.noLight = true; d.noGravity = true;
+        d.vx *= 0.3; d.vy *= 0.3;
+      }
+    }
+    //  · 719 蜂王蜂刺（AI_001 :56460-56481,每 update）：1/2 掷 ×1×d147
+    //    （NewDustDirect 盒=position−弹速,α0,scale0.9）→ noGravity;首拍
+    //    （localAI[0]==0）20×d147（scale1.3,noGravity,vel+=弹速×0.75）+
+    //    10×d147（scale1.3,noGravity,vel×2）
+    if (this.projId === 719) {
+      if (Math.floor(Math.random() * 2) === 0) {
+        const d = game.spawnDust?.(this.x - this.vx, this.y - this.vy, this.w, this.h,
+          147, 0, 0, 0, null, 0.9);
+        if (d) d.noGravity = true;
+      }
+      if (this.age === 1) {
+        for (let i = 0; i < 20; i++) {
+          const d = game.spawnDust?.(this.x - this.vx, this.y - this.vy, this.w, this.h,
+            147, 0, 0, 0, null, 1.3);
+          if (!d) break;
+          d.noGravity = true;
+          d.vx += this.vx * 0.75; d.vy += this.vy * 0.75;
+        }
+        for (let i = 0; i < 10; i++) {
+          const d = game.spawnDust?.(this.x - this.vx, this.y - this.vy, this.w, this.h,
+            147, 0, 0, 0, null, 1.3);
+          if (!d) break;
+          d.noGravity = true;
+          d.vx *= 2; d.vy *= 2;
+        }
+      }
+    }
+    //  · 468 远古教徒光珠（AI_001 :55360-55421,每 update;localAI[0]==12 节拍环——
+    //    本仓以 age%12==0 承载）：环 12×d27（α160,scale1.1,noGravity,位=Center+
+    //    spinningpoint2 RotatedBy(rot−π/2)、vel=norm(Center−弹速×3−尘位)×1.25）+
+    //    1/4 掷 ×1×d31（α100,vel×0.1,位=Center+侧偏×w/2,fadeIn0.9）+ 1/32 掷 ×1×d31
+    //    （α155,scale0.8,vel×0.3,1/2 fadeIn1.4）+ 1/2 掷 ×2×d27（α0,scale1.2,vel×0.3,
+    //    noGravity,1/2 fadeIn1.4）——侧偏 = −UnitX.RotatedByRandom(σ).RotatedBy(弹向角)
+    if (this.projId === 468) {
+      if (this.age % 12 === 0) {
+        const rotA = Math.atan2(this.vy, this.vx) + Math.PI / 2;   // AI_001 缺省姿态角
+        for (let l = 0; l < 12; l++) {
+          const th = (l * Math.PI) / 6;
+          const px = -this.w / 2 + 8 * Math.sin(th);               // UnitX·(−w/2) − UnitY.Rot(θ)·(8,16)
+          const py = -16 * Math.cos(th);
+          const ca = Math.cos(rotA - Math.PI / 2), sa = Math.sin(rotA - Math.PI / 2);
+          const ox = px * ca - py * sa, oy = px * sa + py * ca;
+          const d = game.spawnDust?.(this.cx + ox, this.cy + oy, 0, 0, 27, 0, 0, 160);
+          if (d) {
+            d.scale = 1.1; d.noGravity = true;
+            d.vx = this.vx * 0.1; d.vy = this.vy * 0.1;            // 原文先 ×0.1 再被覆写
+            const nvx = this.cx - this.vx * 3 - d.x, nvy = this.cy - this.vy * 3 - d.y;
+            const nl = Math.hypot(nvx, nvy) || 1;
+            d.vx = (nvx / nl) * 1.25; d.vy = (nvy / nl) * 1.25;
+          }
+        }
+      }
+      const velA = Math.atan2(this.vy, this.vx);
+      const sideOf = (sig: number): [number, number] => {
+        const th = velA + (Math.random() * 2 - 1) * sig;      // RotatedByRandom(σ)=(r·2−1)·σ
+        return [-Math.cos(th), -Math.sin(th)];                 // −(UnitX.Rot(θ))
+      };
+      if (Math.floor(Math.random() * 4) === 0) {
+        const [ox, oy] = sideOf(0.19634954631328583);
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100);
+        if (d) {
+          d.vx *= 0.1; d.vy *= 0.1;
+          d.x = this.cx + ox * this.w / 2; d.y = this.cy + oy * this.w / 2;
+          d.fadeIn = 0.9;
+        }
+      }
+      if (Math.floor(Math.random() * 32) === 0) {
+        const [ox, oy] = sideOf(0.39269909262657166);
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 155, null, 0.8);
+        if (d) {
+          d.vx *= 0.3; d.vy *= 0.3;
+          d.x = this.cx + ox * this.w / 2; d.y = this.cy + oy * this.w / 2;
+          if (Math.floor(Math.random() * 2) === 0) d.fadeIn = 1.4;
+        }
+      }
+      if (Math.floor(Math.random() * 2) === 0) {
+        for (let m = 0; m < 2; m++) {
+          const [ox, oy] = sideOf(0.7853981852531433);
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 27, 0, 0, 0, null, 1.2);
+          if (!d) break;
+          d.vx *= 0.3; d.vy *= 0.3;
+          d.noGravity = true;
+          d.x = this.cx + ox * this.w / 2; d.y = this.cy + oy * this.w / 2;
+          if (Math.floor(Math.random() * 2) === 0) d.fadeIn = 1.4;
+        }
+      }
+    }
+    //  · 270 骷髅髅骨（AI_001 :57061-57076 首拍 + :57658-57689 每拍）——首拍
+    //    （localAI[0]==0）10×d5（scale2,α0,noGravity,vel=norm(Center−尘位)×−5+
+    //    弹速/2,出生音 Item8 由发射点 bossAI.ts:138 承载）;每拍 2×d5（盒=position+
+    //    (4,4) 缩 8,速=v×0.2,α100,scale1.5,position −= 弹速,noGravity,vel×0.3）
+    if (this.projId === 270) {
+      if (this.age === 1) {
+        for (let i = 0; i < 10; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 5,
+            this.vx, this.vy, 0, null, 2);
+          if (!d) break;
+          d.noGravity = true;
+          const nx = this.cx - d.x, ny = this.cy - d.y;
+          const nl = Math.hypot(nx, ny) || 1;
+          d.vx = (nx / nl) * -5 + this.vx / 2;
+          d.vy = (ny / nl) * -5 + this.vy / 2;
+        }
+      }
+      for (let k = 0; k < 2; k++) {
+        const d = game.spawnDust?.(this.x + 4, this.y + 4, this.w - 8, this.h - 8, 5,
+          this.vx * 0.2, this.vy * 0.2, 100, null, 1.5);
+        if (d) {
+          d.x -= this.vx; d.y -= this.vy;
+          d.noGravity = true;
+          d.vx *= 0.3; d.vy *= 0.3;
+        }
+      }
+    }
+    //  · 576 星旋弹（AI_001 :57278-57287,每 update）：5×d242（速=v 后清零,位 −= 弹速/
+    //    5×i,noGravity,scale0.8,noLight）——本体 α=255+fadeDelay 门=尾尘即主要观感
+    if (this.projId === 576) {
+      for (let i = 0; i < 5; i++) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 242,
+          this.vx, this.vy, 100);
+        if (!d) break;
+        d.vx = 0; d.vy = 0;
+        d.x -= (this.vx / 5) * i; d.y -= (this.vy / 5) * i;
+        d.noGravity = true; d.scale = 0.8; d.noLight = true;
+      }
+    }
+    //  · 538 加农弹上升期尾尘（aiStyle14 :25477-25492,vy<0 且 ai[0]<60 门）：
+    //    1/4 掷 ×1×d180（位=Center 整覆写,scale+=rand(0..50)×0.01,noGravity,vel.Y−=2）+
+    //    1/6 掷 ×1×d176（位=Center 整覆写,scale+=0.3+rand(0..50)×0.01,noGravity,vel×0.1）
+    if (this.projId === 538 && this.vy < 0 && this.age < 60) {
+      if (Math.floor(Math.random() * 4) === 0) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 180);
+        if (d) {
+          d.x = this.cx; d.y = this.cy;
+          d.scale += Math.floor(Math.random() * 50) * 0.01;
+          d.noGravity = true;
+          d.vy -= 2;
+        }
+      }
+      if (Math.floor(Math.random() * 6) === 0) {
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 176);
+        if (d) {
+          d.x = this.cx; d.y = this.cy;
+          d.scale += 0.3 + Math.floor(Math.random() * 50) * 0.01;
+          d.noGravity = true;
+          d.vx *= 0.1; d.vy *= 0.1;
+        }
+      }
+    }
+    //  · 922 食人魔砸地冲击（AI_135_OgreStomp :69740-69855 尘面——★尘站普查批
+    //    2026-09-16）。原文本支 = 扩张盒内逐格 KillTile+尘;本仓 922 无毁块面
+    //    （行为债另账）,此处 1:1 移植尘站几何：ai[0]>9 Kill 不移植（本仓 life 240
+    //    承载存量命面）,尘窗=ai[0]∈{3,6,9} 三波（num4=ai[0]/3）。
+    //    盒 Size=16×Lerp(5,30,ai[0]/9)(num=30)→半宽 num3=Size/2;实心非框架格
+    //    距心 ≤num3 内逐格：num5=KillTile_GetTileDustAmount(fail:true)——缺省 3
+    //    （零尘/异型档为 Game.killTileHitDustAmount 单源,本载体不可反向 import,
+    //    砸地目标=地面实心块恒走缺省档,登记近似）;d4 站 num4≥2 起（num5−1 粒）、
+    //    d31 站 1/3 掷跳（3 粒,scale=2−num4×0.15+num7×0.5,num7=|心格−格|/(30/2)）
+    if (this.projId === 922 && this.age <= 9 && this.age % 3 === 0) {
+      const st922 = game.world.store;
+      const num4 = Math.floor(this.age / 3);                      // 环号 1..3
+      const half922 = 8 * (5 + (30 - 5) * Math.min(1, Math.max(0, this.age / 9)));
+      const num3 = half922;                                       // width/2 = Size/2
+      const num = 30;
+      const tx0 = Math.floor((this.cx - half922) / 16), tx1 = Math.floor((this.cx + half922) / 16);
+      const ty0 = Math.floor((this.cy - half922) / 16), ty1 = Math.floor((this.cy + half922) / 16);
+      const ctX = Math.floor(this.cx / 16);                       // num2 = 心格 X
+      for (let i = tx0; i <= tx1; i++) {
+        for (let j = ty0; j <= ty1; j++) {
+          if (!st922.inBounds(i, j)) continue;
+          if (Math.hypot(this.cx - i * 16, this.cy - j * 16) > num3) continue;
+          const ti = st922.idx(i, j);
+          if (!st922.hasTile(i, j)) continue;
+          const def = TILE_DEFS[st922.type[ti]];
+          if (!def || !def.solid || def.platform || def.framed) continue;
+          const num5 = 3;                                          // fail:true 缺省档（见注）
+          if (num4 >= 2) {
+            for (let l = 0; l < num5 - 1; l++) {
+              const d = game.spawnDust?.(this.cx, this.cy, 12, 12, 4, 0, 0, 50,
+                { r: 0, g: 160, b: 255, a: 150 }, 1.5);            // QueenSlime 色 A=150
+              if (!d) break;
+              d.vy -= 0.1 + num4 * 0.5;
+              d.vy *= Math.random();
+              d.vx *= (Math.random() * 2 - 1) * 3;                 // NextFloatDirection×3
+              d.x = i * 16 + Math.floor(Math.random() * 16);
+              d.y = j * 16 + Math.floor(Math.random() * 16);
+              if (Math.floor(Math.random() * 3) !== 0) {
+                d.vx *= 0.5; d.vy *= 0.5; d.noGravity = true;
+              }
+            }
+          }
+          if (Math.floor(Math.random() * 3) === 0) continue;       // num5<=0∨Next(3)==0 → skip
+          const num7 = Math.abs(ctX - i) / (num / 2);
+          for (let n = 0; n < 3; n++) {
+            const d = game.spawnDust?.(this.cx, this.cy, this.w, this.h, 31, 0, 0, 50,
+              { r: 0, g: 160, b: 255, a: 150 }, 2 - num4 * 0.15 + num7 * 0.5);
+            if (!d) break;
+            d.vy -= 0.1 + num4 * 0.5 + num7 * num4;
+            d.vy *= Math.random();
+            d.vx *= (Math.random() * 2 - 1) * 3;
+            d.x = i * 16 + 20; d.y = j * 16 + 20;
+            if (Math.floor(Math.random() * 3) !== 0) {
+              d.vx *= 0.5; d.vy *= 0.5; d.noGravity = true;
+            }
           }
         }
       }

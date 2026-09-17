@@ -1736,7 +1736,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       const num91 = flag2 ? 2 : 3;          // :46631-46635 flag2 射速加密
       if (Math.floor(e.ai1) % num91 === 0 && e.ai1 < 60) {
         const [dvx, dvy] = rot(0, -6, (Math.PI / 2) * (Math.random() * 2 - 1));
-        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, num8, 873);  // num8 :46333（Remap 见上）
+        // ai3 = NPC.ai[1]/60（:46790）→ 弹 ai[1]（Kill 尘色相位,P.cs:46398;
+        // ★尘站普查批 2026-09-16 补注入通道）
+        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, num8, 873, 300,
+          { empressHue: e.ai1 / 60 });   // num8 :46333（Remap 见上）
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }

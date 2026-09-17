@@ -183,13 +183,16 @@ describe('SW-BJ93 债1 出膛宽限门（P.cs:12491;出生 localAI[2]<=7 伤害�
     expect(e.hurt).toHaveBeenCalledTimes(1);
   });
 
-  it('G3 1002（aiStyle16）不在 aiStyle25 钟内：localAI2 恒 0 且出生即伤（门 aiStyle==25 scoped）', () => {
+  it('G3 1002（aiStyle16）不在 aiStyle25 钟内：localAI2 恒 0 且首拍即 Kill（★BJ102 归一重锚）', () => {
     const e = bigEnemy(40, 60);
     const game = fakeGame(fakeStore(), { enemies: [e] });
     const b = mkBoulder(654);                          // sheet 654 → 1002
     b.fixedUpdate(1 / 60, game);
-    expect(internals(b).localAI2).toBe(0);
-    expect(e.hurt).toHaveBeenCalledTimes(1);           // 无宽限（aiStyle16 不进 :12491 支）
+    expect(internals(b).localAI2).toBe(0);             // 不进 aiStyle25 钟（:26360 支外,原钉保持）
+    expect(b.dead).toBe(true);                         // timeLeft=2≤3 → 首 AI 拍 Kill（:48031-35,BJ102）
+    expect(e.hurt).not.toHaveBeenCalled();             // aiStyle25 接触环不可达——原钉「出生即伤」=
+    //  400 全额 PVE 接触面,BJ102 定谳其属 aiStyle16 建模余波退役;Kill 拍 NPC 面=
+    //  rbKill1002Face→explodeAt dmg/2 单发（bj102 套件钉参）,本单测 mock 无钩=no-op
   });
 
   it('G4 CutTiles 门=CanDealDamage 门内（:12512→:12515）：宽限期不砍、第 8 拍起扫盒', () => {
@@ -405,33 +408,39 @@ describe('SW-BJ93 债4 1002 TNTBarrel（SkipDamage_EVP :14848 + SelfHurtPlayers 
     expect(game.playerHits.length).toBe(1);
   });
 
-  it('E2 Kill 自伤面（:15104-15152）：DV 掷域 [340,460]=400±15%、盒=vanilla 260×260（非建模盒）', () => {
-    // 玩家位 (200,200)：在 vanilla 260 盒 [90,350) 内、建模盒 31×31 [90,121) 外
-    // （盒变异体=建模盒 → 玩家盒外早退 → 变异红）
-    const game = fakeGame(fakeStore(), { player: pOver({ x: 200, y: 200, cx: 210, cy: 221 }) });
+  it('E2（★BJ102 归一重锚）Kill 面=rbKill1002Face→Game.explodeAt 单发：参 1:1 钉（dmg400/r0/noDestroy/盒半宽130/compare=pos+130/kb10/dir+1）', () => {
+    // 旧钉「DV 掷域 [340,460]+260 盒含玩家」→ 面+门已随归一迁 explodeAt 玩家段
+    // （Game 域:trap 集 {108,1002}=explosion-ac1 钉、DV±15%=explosion 域钉、
+    //  immune/盒外=damagePlayer 漏斗域）;弹侧只保「单发+参 1:1」。
+    const game = fakeGame(fakeStore());
+    const ex: unknown[][] = [];
+    (game as unknown as { explodeAt: unknown }).explodeAt = (...a: unknown[]) => { ex.push(a); return 0; };
     const b = mkBoulder(654);
     b.x = 90; b.y = 90;
     internals(b).rbKill(game);
-    expect(game.playerHits.length).toBe(1);
-    expect(game.playerHits[0]).toBeGreaterThanOrEqual(340);   // DamageVar ±15%（:15118 单源掷）
-    expect(game.playerHits[0]).toBeLessThanOrEqual(460);
+    expect(ex.length).toBe(1);                                // 单发（BJ97 400×2 双发自伤面已消除）
+    const [tx, ty, dmg, radius, destroyTiles, hurtBox, , projId, cpx, cpy, kb, kbDir] = ex[0]! as unknown[];
+    expect(dmg).toBe(400);                                    // 出生表 dmg（WorldGen :49178）
+    expect(radius).toBe(0);                                   // SW-J1 死代码定谳：Kill 不炸地形
+    expect(destroyTiles).toBe(false);
+    expect(hurtBox).toBe(130);                                // SetDefaults 260×260 半宽（:9526-27）
+    expect(projId).toBe(1002);
+    expect(cpx).toBe(90 + 130);                               // compare=弹盒心 pos+130（vanilla Hitbox）
+    expect(cpy).toBe(90 + 130);
+    expect(kb).toBe(10);                                      // 生成参 knockBack=10f（SW-AD1）
+    expect(kbDir).toBe(1);                                    // 零速生成弹恒 +1（SW-AC1）
+    void tx; void ty;                                         // recLog 锚=弹左上格（非本钉面）
   });
 
-  it('E2b self-hurt 三门：immune 窗/盒外 → 零结算;sweater（trap ✓ :9539）→ ×0.5 截断 min 300（:15119-22）', () => {
-    const g1 = fakeGame(fakeStore(), { player: pOver({ iframes: 3 }) });
-    const b1 = mkBoulder(654);
-    internals(b1).rbKill(g1);
-    expect(g1.playerHits.length).toBe(0);              // immune（:15107 localPlayer.immune）
-    const g2 = fakeGame(fakeStore(), { player: pOver({ x: 5000, y: 5000, cx: 5010, cy: 5021 }) });
-    internals(mkBoulder(654)).rbKill(g2);
-    expect(g2.playerHits.length).toBe(0);              // Colliding 门（260 盒外 :15108）
-    const g3 = fakeGame(fakeStore(), {
-      player: pOver({ equipStats: { deadMansSweater: true } }),
-    });
-    const b3 = mkBoulder(654);
-    internals(b3).rbKill(g3);
-    expect(g3.playerHits.length).toBe(1);
-    expect(g3.playerHits[0]).toBeLessThanOrEqual(300); // sweater cap（DV 后截断再 min）
+  it('E2b（★BJ102 归一重锚）rbKill 幂等+1002 面单发：二次/三次 Kill 零追加面', () => {
+    const game = fakeGame(fakeStore());
+    const ex: unknown[][] = [];
+    (game as unknown as { explodeAt: unknown }).explodeAt = (...a: unknown[]) => { ex.push(a); return 0; };
+    const b = mkBoulder(654);
+    internals(b).rbKill(game);
+    internals(b).rbKill(game);                         // !active 闸（BJ97 债1,Kill :71763）第二发空转
+    internals(b).rbKill(game);
+    expect(ex.length).toBe(1);
   });
 
   it('E3 名实勘误（TileID.cs:1745=TNTBarrel）：654 行权威=TNTBarrel、行尾不再以仙人掌球为名', () => {
@@ -568,11 +577,12 @@ describe('SW-BJ93 结构锁（判据表达式与位序钉死）', () => {
     expect(src.indexOf('?.hostile')).toBeLessThan(src.indexOf('SKIP_DAMAGE_EVP.has'));
   });
 
-  it('S3 Kill 单口：rbKill 内家族面+1002 自伤双臂接线（1047 早退保持专属爆段）', () => {
+  it('S3（★BJ102 归一重锚）Kill 单口：rbKill 内家族面+1002 归一面（rbKill1002Face）接线（1047 早退保持专属爆段）', () => {
     const src = rb();
     expect(src).toContain('this.rbKillFamilyFace(game)');
-    expect(src).toContain('if (this.projId === 1002) this.rbSelfHurtPlayers(game)');
-    const fam = src.slice(src.indexOf('private rbKillFamilyFace'), src.indexOf('private rbSelfHurtPlayers'));
+    expect(src).toContain('if (this.projId === 1002) this.rbKill1002Face(game)');
+    expect(src).not.toContain('rbSelfHurtPlayers(game)');   // 旧 SelfHurt 单臂面退役（随归一并入 explodeAt 玩家段）
+    const fam = src.slice(src.indexOf('private rbKillFamilyFace'), src.indexOf('private rbCenterTileX'));
     expect(fam).toContain('SpreadPoopPyramid');        // 地形面登记注在场（邻接债防散佚）
     expect(fam).toContain('LavaBoulderExplosion');
   });
