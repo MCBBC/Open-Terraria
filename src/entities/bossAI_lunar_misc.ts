@@ -2044,14 +2044,17 @@ export function solarFlareAI(e: Enemy, game: GameHooks, player: Player | null): 
     e.vy = Math.min(ry, 0.2) * spd;                 // :21481 Y 分量钳 0.2（单位向量段）
   }
   e.encourageDespawn(100);                          // :21581 EncourageDespawn(100)
-  // 追踪舵（:21585-21599）：rotation += 0.1×direction；15 步进 + num132=1/12 加速
-  e.visAngle += 0.1 * (e.facing || 1);
-  const spdNow = Math.hypot(e.vx, e.vy);
+  // 追踪舵（1457 :21586-21599）：rotation += 0.1×direction；15 步进 + num132=1/12 加速。
+  // ★NaN 回退对齐（2026-09-17 清债⑥）：原版 Normalize 后 HasNaNs() → (direction, 0)
+  // （:21589-21592,零距玩家退化支）——旧 d‖1 回退成 (0,0) 舵=原地滞留,非原版
   if (p) {
     const dx = p.cx - e.cx, dy = p.cy - e.cy;
-    const d = Math.hypot(dx, dy) || 1;
-    e.vx = (e.vx * 14 + (dx / d) * (spdNow + 1 / 12)) / 15;
-    e.vy = (e.vy * 14 + (dy / d) * (spdNow + 1 / 12)) / 15;
+    const len = Math.hypot(dx, dy);
+    const ux = len > 0 ? dx / len : (e.facing || 1);
+    const uy = len > 0 ? dy / len : 0;
+    const spdNow = Math.hypot(e.vx, e.vy);
+    e.vx = (e.vx * 14 + ux * (spdNow + 1 / 12)) / 15;
+    e.vy = (e.vy * 14 + uy * (spdNow + 1 / 12)) / 15;
     if (spdNow < 6) { e.vx *= 1.05; e.vy *= 1.05; }   // :21597-21599
   }
   moveAndCollide(e, game.world, e.vx, e.vy);        // noTileCollide=false：撞块写碰撞位

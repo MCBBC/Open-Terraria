@@ -250,6 +250,17 @@ export class TrapShot extends Entity {
   vy: number;
   damage: number;
   kind: TrapShotKind;
+  /** 原版弹 id（kind(+form) → trapWetProjId 全映射,构造器填）。
+   *  ★债刀-4 清偿（2026-09-17）TrapShot vid 穿线:此前无 projId 槽 → 中央 CutTiles
+   *  收口（Entity.ts `vanillaId ?? projId ?? 0`）恒传 0 → Game.cutTile vid=0 视同
+   *  非陷阱 → book（5309/5323）佩戴时 natureGuard 误罩陷阱弹。原版 trap=true 是
+   *  SetDefaults 型录旗（1457 Projectile.cs 20 站 27 id;全仓无其它写点——fire 时刻
+   *  不置位,1458 逐站同表）→ 弹型身份即 trap 语义:本仓 trap 族 kind（98/184/185/
+   *  186/187/99/654/980/1049）落在 TRAP_PROJ_VIDS 表内=免保护,非陷阱 kind
+   *  （162/166/281/601/167-170/415-418/419-422/733）恒在表外=与原版 trap=false 同相。
+   *  消费面:①中央收口→cutTile natureGuard 门 ②开关板 objType 路由（Game.ts
+   *  switchTiles `pe.projId ?? …`——boulder≡99 反查 fallback 因此转 legacy）。 */
+  projId: number;
   /** 巨石 ai[0] 落地旗(:24666 置 1 后恒 1;转角踢门 :24578 的 ai[0]≠0 条件) */
   boulderLanded = false;
   /** 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：0 橙门 / 1 蓝门）；
@@ -341,6 +352,7 @@ export class TrapShot extends Entity {
     this.damage = damage;
     this.kind = kind;
     this.form = form;
+    this.projId = trapWetProjId(kind, form);   // ★债刀-4：vid 穿线（fireworks/toilet 按 form 展开,详字段注）
     if (anchor) { this.ax = anchor[0]; this.ay = anchor[1]; }
     this.w = s.w; this.h = s.h;
     if (kind === 'spiky') this.life = 900; // 原版 185 timeLeft 900(1405/1456 SetDefaults 同)

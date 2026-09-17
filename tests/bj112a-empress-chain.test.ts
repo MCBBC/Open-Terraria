@@ -157,7 +157,7 @@ describe('BJ112-a ② 661 死亡 → 636 生成链（NPC.cs:80309-80319）', () 
     // Bottom 锚（NPC.cs:81594）：position=(X−w/2, Y−h) → 底边=py、盒心 x=px
     expect(eol.y + eol.h).toBeCloseTo(bfly.cy - 200, 6);   // ★旧盒心式=cy−150（变异红）
     expect(eol.x + eol.w / 2).toBeCloseTo(bfly.cx - 25, 6);
-    expect(eol.despawnTimer).toBe(15000);                   // SpawnBoss timeLeft×20
+    expect(eol.despawnTimer).toBe(18740);                   // SpawnBoss:timeLeft=(int)(750×1.25)=937 ×20（NPC.cs:81596+:81485,2026-09-17 清债⑤）
     expect((g as unknown as { boss: Enemy | null }).boss?.vanillaId).toBe(636);
   });
 

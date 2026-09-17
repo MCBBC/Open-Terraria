@@ -17,9 +17,14 @@ import type { GameHooks } from './types';
  *  ★SW-BJ67（2026-09-14）vid 穿线（最小刀）：Projectile.CutTiles 逐型豁免面
  *  （P.cs:15391-15393 `type==1047 && tile.type==231 → flag=false` 滚过幼虫不召
  *  蜂王;1458 :15392 同）需要弹型上下文——vid 由中央收口/调用侧传入,缺省
- *  undefined = 旧无型语义（全部既有调用方零变化）。 */
+ *  undefined = 旧无型语义（全部既有调用方零变化）。
+ *  ★债刀-4 ②（2026-09-17）1052 Axearang 加砍面穿线：CutTilesAt :15384-86
+ *  （1458 :15386-88 同）`type==1052 && ai[0]==0` → flag 并入 IsATreeTrunk∪{323}。
+ *  type 位=vid（第 6 参）,ai[0]==0 位=出程旗（第 7 参,由载体 Boomerang
+ *  cutExtraTreeCactus 提供——缺省 false=非 1052 调用方零变化;Game.cutTile 收口处
+ *  对 vid==1052 重验,type/ai0 两因不因穿线拆散）。 */
 export function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h: number,
-  vid?: number): void {
+  vid?: number, extraCutTreeCactus?: boolean): void {
   // ★SW-BJ88（2026-09-15）债4②：右/下边界对齐（CutTilesAt P.cs:15356-15359 +
   //  :15377/:15379 直译;1458 :15357 同,逐字对拍 2026-09-15）——原版
   //  `num2=(int)((x+w)/16)+1` 后循环【i < num2】= +1 是排除界,末含格 =
@@ -33,6 +38,6 @@ export function cutTilesBox(game: GameHooks, x: number, y: number, w: number, h:
   const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE) + 1;
   const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE) + 1;
   for (let ix = x0; ix < x1; ix++) {                   // i < num2（:15377 排除界,勿回改 <=）
-    for (let iy = y0; iy < y1; iy++) game.cutTile?.(ix, iy, vid);   // j < num4（:15379）
+    for (let iy = y0; iy < y1; iy++) game.cutTile?.(ix, iy, vid, extraCutTreeCactus);   // j < num4（:15379）
   }
 }

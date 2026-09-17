@@ -208,9 +208,10 @@ describe('鹿角怪 668 数据 + AI_123', () => {
 //   （:932,0.7×屏幕格盒）随机取点+向下扫首个实心+非末次尝试须出 safeArea（0.52 盒）
 //   → spawnPositionX=num10*16+8 / Y=num11*16（:81452-81454;1458 :81453 同值）→
 //   SpawnBoss → NewNPC Bottom=(X,Y)。旧实现"直接落在玩家身上"（中心锚 e.y=p.cy−e.h/2）
-//   = 对 668 误抄 case 398 月总语义,已推翻；现走 findOffscreenSpawnPoint 近似
-//   （与物品召唤/花苞链同一 SpawnOnPlayer 通用支近似面,偏差登记）+ SpawnBoss
-//   timeLeft×20（:81485 → despawnTimer 15000）。
+//   = 对 668 误抄 case 398 月总语义,已推翻；2026-09-17 清债③ findOffscreenSpawnPoint
+//   已按通用支 1:1 重写（500×50/环带/下扫实心/HasTileSpawnSpace/穷尽静默失败）,
+//   spawnDeerclopsOnPlayer 补 Bottom 换算（e.y=ty*TILE−e.h）+ 穷尽 null 早退 +
+//   SpawnBoss timeLeft=(int)(750×1.25)=937×20=18740（:81596+:81485）。
 // 结构锁（变异即红）：回挂中心锚/玩家身上落位即红。
 describe('SW-F4 鹿角怪自然生成落位（SpawnOnPlayer 通用支近似）', () => {
   const gameSrc = readFileSync(
@@ -225,10 +226,12 @@ describe('SW-F4 鹿角怪自然生成落位（SpawnOnPlayer 通用支近似）',
     return gameSrc.slice(s, e);
   }
 
-  it('走 findOffscreenSpawnPoint 寻点（通用支近似,非玩家身上直落）+ despawnTimer=15000（SpawnBoss :81485）', () => {
+  it('走 findOffscreenSpawnPoint 寻点（通用支 1:1,非玩家身上直落）+ 穷尽早退 + Bottom 换算 + despawnTimer=18740', () => {
     const body = fnBody();
     expect(body).toContain('this.findOffscreenSpawnPoint()');
-    expect(body).toContain('e.despawnTimer = 15000');
+    expect(body).toContain('if (!pt) return;');              // 穷尽静默失败（:81451）
+    expect(body).toContain('e.y = pt.ty * TILE - e.h;');     // Bottom=(X,Y)=落点格顶
+    expect(body).toContain('e.despawnTimer = 18740');
     expect(body).toContain('this.announceBossSummon(668)');
     // 中心锚伪影禁回流（旧实现 e.y = p.cy − e.h/2 = 中心重叠玩家）
     expect(body).not.toContain('p.cy - e.h / 2');

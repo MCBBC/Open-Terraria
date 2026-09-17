@@ -283,6 +283,11 @@ export class CultistRitualCircle extends Entity {
       const id = hasDragon ? 521 : 454;
       const head = Enemy.fromVanilla(id, this.cx, this.cy);
       if (head) {
+        // ★Bottom 锚勘误（1457 Projectile.cs:32931/:32935 NewNPC((int)Center.X,
+        //  (int)Center.Y,454/521) → NPC.cs:81594 nPC.Bottom=(X,Y)）:龙/幻象【底边】
+        //  = 仪式弹中心——X 经 fromVanilla 中心锚恰同值,仅 Y 旧中心锚低 h/2
+        //  （BJ113 域外登记②,2026-09-17 落刀）;链段随头位,须先换算再 spawnWormChain
+        head.y = this.cy - head.h;
         addEnemy(game, head);
         this.srcId = head.id;              // ai[1] = NewNPC 返回索引（:31283/:31287）
         if (id === 454) {

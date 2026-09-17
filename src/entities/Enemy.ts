@@ -1187,6 +1187,9 @@ export class Enemy extends Entity {
     if (!canHit(st, this.cx, this.cy, 1, 1, tgt.cx, tgt.cy, 1, 1)) return;
     const spit = Enemy.fromVanilla(666, this.cx + this.vx, this.cy + this.vy);
     if (!spit) return;
+    // ★Bottom 锚（1457 :51635 NewNPC((int)(cx+vx),(int)(cy+vy)) → nPC.Bottom=(X,Y)）:
+    //  毒唾顶 = cy+vy−h——旧中心锚低 h/2
+    spit.y = this.cy + this.vy - spit.h;
     spit.ai0 = 0; spit.ai1 = 1;
     addEnemy(game, spit);
   }
@@ -3725,6 +3728,9 @@ export class Enemy extends Entity {
         if (roll(60) === 7 && player && !player.dead && this.canSeePlayer(stL, player)) {
           const bee = Enemy.fromVanilla(210 + roll(2), this.cx, this.cy);
           if (bee) {
+            // ★Bottom 锚勘误（1457 :61466 NewNPC((int)Center.X,(int)Center.Y) →
+            //  nPC.Bottom=(Center.X,Center.Y)）:蜂顶 = 父 cy−h——旧中心锚低 h/2
+            bee.y = this.cy - bee.h;
             const bx = (Math.floor(Math.random() * 41) - 20) * 0.1, by = -1;
             const bl = Math.hypot(bx, by);
             bee.vx = (bx / bl) * 3;
@@ -5549,13 +5555,14 @@ export class Enemy extends Entity {
                 (-3 + 2 * k) * 0.15, -Math.floor(Math.random() * 3) * 0.2 - 0.1, dmgF, proj, this.id);
             }
           } else if (vidR === 409) {
-            // 闪爆虫（:59981-59985）：发射 = 生 NPC 410 子弹星，速度 (vx, −6+vy)
-            // ★Bottom 锚（NPC.cs:81621 NewNPC nPC.Bottom=(Center.X, Center.Y)）：
-            //  左上 = (cx−w/2, cy−h/2)——曾以 (cx, cy) 直传顶左 = 半盒右下偏移 11/13px
+            // 闪爆虫（1457 :60178-60181 type==409 支）：发射 = 生 NPC 410 子弹星，
+            // 速度 (vx, −6+vy)。★Bottom 锚（NPC.cs:81594 NewNPC nPC.Bottom=(Center.X,
+            //  Center.Y)）→ 左上 = (cx−w/2, cy−h)——★勘误：旧注释"cy−h/2"系算术错
+            //  （h/2 是中心锚换算），曾致子弹星低 11px（h=22）
             const star = Enemy.fromVanilla(410, this.cx, this.cy);
             if (star) {
               star.x = this.cx - star.w / 2;
-              star.y = this.cy - star.h / 2;
+              star.y = this.cy - star.h;
               star.vx = vx;
               star.vy = -6 + vy;
               addEnemy(game, star);
@@ -5838,7 +5845,9 @@ export class Enemy extends Entity {
       if (this.lai3 > 20 + Math.floor(Math.random() * 160)) {  // :56906 Next(20,180)
         this.lai3 = 0;
         const ball = Enemy.fromVanilla(30, this.cx + this.vx, this.cy + this.vy);
-        if (ball) addEnemy(game, ball);                        // :56911 生混沌球 30
+        // ★Bottom 锚（1457 :57092 center6=Center+velocity → NewNPC Bottom=(X,Y)）:
+        //  球顶 = cy+vy−h——旧中心锚低 h/2
+        if (ball) { ball.y = this.cy + this.vy - ball.h; addEnemy(game, ball); }   // :57092
       }
     } else {
       this.lai3 = 0;                                           // :56917
@@ -5930,7 +5939,9 @@ export class Enemy extends Entity {
       this.ai2 += 1;
       if (this.ai2 === 60) {
         const phantom = Enemy.fromVanilla(472, center7.x, center7.y + 18);
-        if (phantom) addEnemy(game, phantom);                  // :57048 召 472 暗焰幻影
+        // ★Bottom 锚（1457 :57229 NewNPC((int)center7.X,(int)center7.Y+18) →
+        //  Bottom=(X,Y)）:幻影顶 = cy−52−h——旧中心锚低 h/2
+        if (phantom) { phantom.y = center7.y + 18 - phantom.h; addEnemy(game, phantom); }   // :57229
       } else if (this.ai2 >= 90) {
         this.ai3 = -2;                                         // :57051-57054
         this.ai2 = 0;
@@ -7745,6 +7756,9 @@ export class Enemy extends Entity {
           dyS = (dyS / dS) * num225;
           const spore = Enemy.fromVanilla(261, this.cx, this.cy);
           if (spore) {
+            // ★Bottom 锚（1457 :22942 NewNPC((int)Center.X,(int)Center.Y,261) →
+            //  Bottom=(Center.X,Center.Y)）:孢子顶 = cy−h——旧中心锚低 h/2
+            spore.y = this.cy - spore.h;
             spore.vx = dxS;                                     // :22884-22885 NewNPC 261
             spore.vy = dyS;
             addEnemy(game, spore);
@@ -8061,7 +8075,9 @@ export class Enemy extends Entity {
       if (this.lai0 === 180) {
         if (player && !player.dead && this.canSeePlayer(st, player)) {
           const spit = Enemy.fromVanilla(112, this.cx + this.vx, this.cy + this.vy);
-          if (spit) addEnemy(game, spit);
+          // ★Bottom 锚（1457 :51412 NewNPC((int)(cx+vx),(int)(cy+vy),112)）:
+          //  唾液顶 = cy+vy−h——旧中心锚低 h/2
+          if (spit) { spit.y = this.cy + this.vy - spit.h; addEnemy(game, spit); }
         }
         this.lai0 = 0;
       }
@@ -13069,6 +13085,9 @@ export class Enemy extends Entity {
             const num18 = expert ? 6 : 5;
             const s = Enemy.fromVanilla(5, this.cx + (dx / dist) * 10, this.cy + (dy / dist) * 10);
             if (s) {
+              // ★Bottom 锚（1457 :20233 NewNPC((int)vector2.X,(int)vector2.Y,5),
+              //  vector2=Center+dir×10 → Bottom=(X,Y)）:仆从顶 = 锚点 y−h——旧中心锚低 h/2
+              s.y = this.cy + (dy / dist) * 10 - s.h;
               s.vx = (dx / dist) * num18;
               s.vy = (dy / dist) * num18;
               (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(s, 'enemies');
@@ -13150,6 +13169,9 @@ export class Enemy extends Entity {
         const rl = Math.hypot(rx, ry) || 1;
         const s = Enemy.fromVanilla(5, this.cx + (rx / rl) * 10, this.cy + (ry / rl) * 10);
         if (s) {
+          // ★Bottom 锚（1457 :20389 vector6=Center+dir×10 → Bottom=(X,Y)）:
+          //  仆从顶 = 锚点 y−h——旧中心锚低 h/2
+          s.y = this.cy + (ry / rl) * 10 - s.h;
           s.vx = (rx / rl) * 5;
           s.vy = (ry / rl) * 5;
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(s, 'enemies');
@@ -14275,13 +14297,15 @@ export class Enemy extends Entity {
         const slave = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
         if (slave) { slave.ai0 = 0; slave.y -= 10; }
       }
-      // 饥饿者 115 死亡 → 饿魂 116（NPC.HitEffect :88333-88335：type==115 且 life<=0 →
-      // NewNPC(底部中心, 116)——aiStyle 2 飘浮眼独立追击，80hp/防6，不锚定墙）。
-      // 联机傀儡跳过（分裂权威在房主，同母史莱姆门）
+      // 饥饿者 115 死亡 → 饿魂 116（1457 :88413 HitEffect：type==115 且 life<=0 →
+      // NewNPC((int)(position.X+width/2),(int)(position.Y+height), 116)——aiStyle 2
+      // 飘浮眼独立追击，80hp/防6，不锚定墙）。联机傀儡跳过（分裂权威在房主，同母史莱姆门）
       if (this.vanillaId === 115 && !this.netPuppet) {
         const h2 = Enemy.fromVanilla(116, this.cx, this.y + this.h);
         if (h2) {
-          h2.x = this.cx - h2.w / 2;   // NewNPC Bottom 锚点（NPC.cs:81547）
+          // ★Bottom 锚（:88413 → nPC.Bottom=(cx, 父底)）:顶 = 父底−h——旧 y 半盒低 h/2
+          h2.x = this.cx - h2.w / 2;
+          h2.y = this.y + this.h - h2.h;
           (game as unknown as { entities?: { add?: (en: unknown, b: string) => void } })
             .entities?.add?.(h2, 'enemies');
         }
@@ -14292,26 +14316,41 @@ export class Enemy extends Entity {
       // 体内——0 会让 slimeRollContainedItem 触发吞物掷,C-18）
       if (this.vanillaId === 50 && !this.netPuppet) {
         const add = (game as unknown as { entities?: { add: (en: unknown, b: string) => void; nextId?: number } }).entities;
-        const n = 4 + Math.floor(Math.random() * 4);   // Next(4,8) 含头不含尾 = 4-7
+        const n = 4 + Math.floor(Math.random() * 4);   // Next(4)+4 = 4-7（1457 :86666）
         for (let k = 0; k < n; k++) {
-          const b = Enemy.fromVanilla(1, this.x + Math.random() * this.w, this.y + Math.random() * this.h);
+          // ★Bottom 锚勘误（1457 :86668-86669）：落点 = 体内 inset32 整数随机点
+          // (x+Next(w−32), y+Next(h−32)) 作【底中】锚 → 顶 = 点−h；旧 (rand×w, rand×h)
+          // 中心锚 = 半盒低 h/2 且无 inset。初速 Next(−15,16)×0.1 / Next(−30,1)×0.1
+          // （:86671-86672，旧 (rand−0.5)×6 / −3−rand×3 自造域）
+          const px = this.x + Math.floor(Math.random() * (this.w - 32));
+          const py = this.y + Math.floor(Math.random() * (this.h - 32));
+          const b = Enemy.fromVanilla(1, px, py);
           if (!b) continue;
-          b.vx = (Math.random() - 0.5) * 6;
-          b.vy = -3 - Math.random() * 3;
+          b.x = px - b.w / 2;
+          b.y = py - b.h;
+          b.vx = (Math.floor(Math.random() * 31) - 15) * 0.1;
+          b.vy = (Math.floor(Math.random() * 31) - 30) * 0.1;
           b.ai0 = -1000 * Math.floor(Math.random() * 3);   // :86675
           b.ai1 = -1;                                      // :86676（1457:0→-1）
           add?.add(b, 'enemies');
         }
       }
-      // 母史莱姆死亡分裂（Wiki 权威：1-3 只 Baby Slime，netID -5 = 半透明灰黑小史莱姆；
-      // SetDefaultsFromNetId -5：base 1 × scale 0.9 + color(0,0,0,50) + alpha 120，hp30/dmg13/def4）。
-      // 联机傀儡跳过：分裂权威在房主（其真身分裂后经 msg23 快照下发，本地生成会留幽灵实体）
+      // 母史莱姆死亡分裂（1457 :85716-85735 HitEffect：type==16 → Next(2)+2 = 2-3 只，
+      // ★旧"Wiki 权威 1-3"与代码不符；netID -5 = 半透明灰黑小史莱姆（base 1 × scale 0.9
+      // + color(0,0,0,50) + alpha 120，hp30/dmg13/def4）。落点 = (cx, 父底)【底中】锚
+      // （:85719 NewNPC((int)(x+w/2),(int)(y+h),1)）——旧 cx±14 散布+cy−6 中心锚系自造。
+      // 初速 = 父 vx×2 + Next(−20,20)×0.1 + k×direction×0.3 / 父 vy − Next(0,10)×0.1 − k
+      // （:85724-85727）。联机傀儡跳过：分裂权威在房主（其真身分裂后经 msg23 快照下发，
+      // 本地生成会留幽灵实体）。★登记：原版 NewNPC 后才 SetDefaults(-5) 重定尺寸且
+      // 顶左不动 → 有效底=父底−(h₁₆−h₅)≈1px——本仓按"底=父底"锚（差 1px 不可观测）
       if (this.vanillaId === 16 && !this.netPuppet) {
-        const n = 1 + Math.floor(Math.random() * 3);
+        const n = 2 + Math.floor(Math.random() * 2);
         const add = (game as unknown as { entities?: { add: (en: unknown, bucket: string) => void; nextId?: number } }).entities;
         for (let k = 0; k < n; k++) {
-          const b = Enemy.fromVanilla(1, this.cx + (Math.random() - 0.5) * 28, this.cy - 6);
+          const b = Enemy.fromVanilla(1, this.cx, this.y + this.h);
           if (!b) continue;
+          b.x = this.cx - b.w / 2;
+          b.y = this.y + this.h - b.h;
           b.vanillaNetId = -5;
           b.vanillaScale = 0.9;
           b.colorRGBA = [0, 0, 0, 50];
@@ -14319,8 +14358,9 @@ export class Enemy extends Entity {
           b.hp = b.maxHp = 30;
           b.def.damage = 13;
           b.def.defense = 4;
-          b.vx = (Math.random() - 0.5) * 4;
-          b.vy = -3 - Math.random() * 2;
+          b.vx = this.vx * 2 + (Math.floor(Math.random() * 41) - 20) * 0.1 + k * this.facing * 0.3;
+          b.vy = this.vy - Math.floor(Math.random() * 10) * 0.1 - k;
+          b.ai0 = -1000 * Math.floor(Math.random() * 3);   // :85728
           add?.add(b, 'enemies');
         }
       }
@@ -14350,9 +14390,11 @@ export class Enemy extends Entity {
           }
         }
       }
-      // 405 星细胞死 → 最多 4× 小星细胞 406（NPC.cs:84381-84405）：场上 406+405
+      // 405 星细胞死 → 最多 4× 小星细胞 406（1457 :84395-84405）：场上 406+405
       //  ≥10/7/4 → 1/2/3 只，否则 4（CountNPCS 含垂死本体 → +1）；速度
-      //  UnitY.RotatedByRandom(2π)×(3+rand×4)；Bottom 锚 (Center.X, Bottom.Y)。
+      //  UnitY.RotatedByRandom(2π)×(3+rand×4)（★BJ112-④ 收编 2026-09-17：旧 uniform
+      //  均匀角改三角分布单源 unitYRotatedByRandom——与 428 分裂/415 喷火尘同源）；
+      //  Bottom 锚 (Center.X, Bottom.Y)。
       if (this.vanillaId === 405 && !this.netPuppet) {
         const aliveC = (t: number) => (game.enemies() as Enemy[])
           .filter((o) => o !== this && !o.dead && o.vanillaId === t).length;
@@ -14363,10 +14405,10 @@ export class Enemy extends Entity {
           if (!mini) continue;
           mini.x = this.cx - mini.w / 2;
           mini.y = this.y + this.h - mini.h;
-          const a = Math.random() * Math.PI * 2;
-          const s = 3 + Math.random() * 4;
-          mini.vx = -Math.sin(a) * s;
-          mini.vy = -Math.cos(a) * s;
+          const [rx, ry] = unitYRotatedByRandom(Math.PI * 2);   // UnitY.RotatedByRandom(2π)（:84399）
+          const s = 3 + Math.random() * 4;                      // 3f+NextFloat()×4f（浮点,原版同型）
+          mini.vx = rx * s;
+          mini.vy = ry * s;
           addEnemy(game, mini);
         }
       }

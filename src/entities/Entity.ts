@@ -145,12 +145,16 @@ export class EntityManager {
         //     （NPC.cs:54903/:55175/:55325/:55490 族）不割草;TownShot.npcProj
         //     承载（玩家弹无此位=行为不变）
         if (list === this.projectiles) {
-          const m = e as { vanillaId?: number; projId?: number; minion?: boolean; npcProj?: boolean };
+          const m = e as { vanillaId?: number; projId?: number; minion?: boolean; npcProj?: boolean;
+            cutExtraTreeCactus?: boolean };
           const vid = m.vanillaId ?? m.projId ?? 0;
           if (!m.minion && m.npcProj !== true && !CUT_EXCLUDE_VIDS.has(vid)) {
             // ★SW-BJ67（2026-09-14）：vid 随盒穿线——CutTiles 逐型豁免面
             //   （P.cs:15391-15393 1047 滚过幼虫 231 不割,详 ProjCutTiles.ts 注）
-            cutTilesBox(game, e.x, e.y, e.w, e.h, vid);
+            // ★债刀-4 ②（2026-09-17）：出程旗随盒穿线——CutTilesAt :15384-86
+            //   `type==1052 && ai[0]==0` 加砍面,ai[0] 位由载体（Boomerang getter）
+            //   自报,vid==1052 重验在 Game.cutTile 收口处（详 ProjCutTiles.ts 注）
+            cutTilesBox(game, e.x, e.y, e.w, e.h, vid, m.cutExtraTreeCactus === true);
           }
         }
       }

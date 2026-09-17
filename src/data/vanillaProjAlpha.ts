@@ -260,7 +260,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   650: { kind: 'fade', bright: 1.5 },  // :76123 | rgb×1.5 钳 255 后落缺省 fade
   658: { kind: 'invisible', off: 1 },  // (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
   659: { kind: 'afade', rgba: [255,255,255,128], slope: 0.5, inv: 1, tail: 30 },  // :76232 | timeLeft<30 门：α=255−255·tL/30 后 (255−α,…,128−α/2)（本仓 life 可消费）
-  660: { kind: 'invisible', off: 1 },  // (150,255,255,0)*Opacity A=0 彩色加算（青白）×Opacity——非隐形（本仓加算机制=globalAlpha 标量,逐通道色相未建模=亮度近似债）;SKIP→正确承接=GA (255−α)/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  660: { kind: 'alpha0additive' },  // :81373 | (150,255,255,0)*Opacity（Opacity=1−α/255 :542-552）A=0 彩色加算青白——SetDefaults α=255 出生首拍 Opacity=0 全隐,AI 首子步白闪门 α→0（:56653）后恒满强 → alpha0additive（GA α==0?1:0）+ ADDITIVE_GLOW_PROJS 'lighter' 承接（2026-09-17 接线,off 登记残留清偿）;彩色色相未建模=亮度近似债（表头注约定）;charm 态 :80605 White*Opacity 截走=drawTableAlpha case 内建分流
   664: { kind: 'lerp', k: 0.5, mul: 0.7843 },  // :76367 | Lerp(White,0.5) 后 (r,g,b,200)*Opacity
   666: { kind: 'lerp', k: 0.5, mul: 0.7843 },  // :76367 | Lerp(White,0.5) 后 (r,g,b,200)*Opacity
   668: { kind: 'lerp', k: 0.5, mul: 0.7843 },  // :76367 | Lerp(White,0.5) 后 (r,g,b,200)*Opacity

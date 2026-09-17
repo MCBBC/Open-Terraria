@@ -1623,7 +1623,9 @@ export class ClientNet {
 
   /** 召唤类物品使用意图（v8 msg202，仅 serverAuth 房；SimHost 校验规则门后生成 NPC。
    *  Game 在服务器房把召唤物本地 NewNPC 分支改投此消息——对齐设计文档 P4
-   *  "netMode==1 短路改发消息"。中继房不调用（仍走房主本地生成） */
+   *  "netMode==1 短路改发消息"。中继房不调用（仍走房主本地生成）。
+   *  ★(x,y) = NewNPC Bottom 锚点（NPC.cs:81594;SummonIntent=202 线契约注）——
+   *  调用方传 tile 中心 X 与 Bottom 锚行 Y,SimHost.summon 底边落点 */
   sendSummonIntent(itemKey: string, x: number, y: number, vx = 0, vy = 0) {
     this.send(new NetWriter(Msg.SummonIntent).str(itemKey).f32(x).f32(y).f32(vx).f32(vy).finish());
   }

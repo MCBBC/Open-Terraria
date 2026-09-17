@@ -4838,6 +4838,15 @@ export class Player extends Entity {
         wingAccMul = hoverDownMove ? ws.hoverAccelMult : ws.accelMult;   // :28852/:28856
       }
       let runSlow = RUN_SLOWDOWN * eqM.runSlowMul;   // 暗影套 ×1.75(:26195-26201)
+      // ★FX58b：加法坐骑（滚轴鞋 57-60,MovementStatsAreAdditive=Mount.cs:2580）的乘区
+      // 序代数。原版荧光体(:26704-26710)/沙丘支(:26742-26749)/地面材质链(:26722-26772)
+      // 都作用在坐骑 stats 叠加(:26838-26842)【之前】的基底上;本仓叠加先行(上方 mnt 支),
+      // 故以 mulPreAdd=(v−add)×m+add 还原「先乘后加」序——add=0(步行/赋值坐骑)时退化
+      // 为 ×m,既有路径逐位不变。
+      const additiveRun = mnt && mnt.movementStatsAdditive ? mnt.runSpeed() : 0;
+      const additiveDash = mnt && mnt.movementStatsAdditive ? mnt.dashSpeed : 0;
+      const additiveAcc = mnt && mnt.movementStatsAdditive ? mnt.acceleration : 0;
+      const mulPreAdd = (v: number, m: number, add: number): number => (v - add) * m + add;
       // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）。
       // ★SW-FX44 定谳（a-batch1 沙丘 5.25 红根因）：maxRun 的 ×1.75 已由 speedMult
       // 承载（:4296 duneBoost 因子→:4520 maxRun=3×speedMult）——此处再乘=双 ×1.75
@@ -4845,7 +4854,12 @@ export class Player extends Entity {
       // maxRunSpeed=5.25）。本行只补 accRun 的 ×1.75（accRun=equipStats 值,无 speedMult
       // 路由）——原版 :26743-26744 maxRunSpeed/accRunSpeed 各恰一次。maxRun 经 speedMult
       // 的消费面（:5543 滑行步行支 mRun=滑行中落步行分支=乘区后值;:5592 num15）同取单次。
-      if (duneBoost && !mnt) { accRun *= 1.75; }
+      // ★FX58b：加法坐骑也吃沙丘支 accRun×1.75——原版 :26746 无坐骑门且先于叠加
+      // (:26838-26842)：滚轴鞋+沙丘行者靴+沙 accRun=(6×1.75)+1=11.5 → 极速帽 11.5
+      // px/t ≈ 58.8mph（秒表实测 ~58 的出处）。旧 !mnt 门整支跳过 → 6+1=7 ≈ 35.8mph。
+      if (duneBoost && (!mnt || mnt.movementStatsAdditive)) {
+        accRun = mulPreAdd(accRun, 1.75, additiveDash);
+      }
       // D3（1457 :26206 runAcceleration *= moveSpeed）：步行支加速度也吃 moveSpeed
       // 乘区——构成 = moveSpeedMult×装备 moveMult×strongestSlow（含盾举,上方合成）。
       // ★勿整乘 speedMult：inHoney 0.5/星璇潜行 0.3 是场景因子,原版不走 moveSpeed 链
@@ -4865,33 +4879,60 @@ export class Player extends Entity {
       // onGround;手持光走 emitMagiluminescenceLight——ApplyEquipFunctional case 5107
       // :14663-14669 无地面门）
       if (this.onGround && eqM.magiluminescence) {
-        runAcc *= 1.75; maxRun *= 1.15; accRun *= 1.15; runSlow *= 1.75;
+        // ★FX58b：加法坐骑乘叠加前基底（原版 :26704-26710 先于 :26838-26842 叠加）——
+        // 滚轴鞋地面 maxRun=(3×1.15)+1=4.45、acc=(0.08×1.75)+0.1=0.24；旧序乘在已
+        // 叠加值上 =(3+1)×1.15=4.6 / (0.08+0.1)×1.75=0.315。add=0 时退化 ×m 不变。
+        runAcc = mulPreAdd(runAcc, 1.75, additiveAcc);
+        maxRun = mulPreAdd(maxRun, 1.15, additiveRun);
+        accRun = mulPreAdd(accRun, 1.15, additiveDash);
+        runSlow *= 1.75;
       }
-      // ---- 地面材质链（Player.cs:26210-26255 原版 else-if 真序：sticky→powerrun→
+      // ★FX58c：暗影套/远古暗影运动四参的缺失三参（:26711-26717 acc×1.75/maxRun×1.15/
+      // accRun×1.15——第四参 slowdown 已由 runSlowMul 在 runSlow 基底消费;runAccMul/
+      // maxRunMul 曾零消费死数据,vanillaArmorSets.ts '5|5|5'/'74|48|44'）。原版
+      // shadowArmor 无地面门（与荧光体 :26704 的 velocity.Y==0 门不同）。加法坐骑乘
+      // 叠加前基底;add=0 时补齐裸装暗影套同面（×1 恒等,漂移为零）。
+      if (eqM.runAccMul !== 1 || eqM.maxRunMul !== 1) {
+        runAcc = mulPreAdd(runAcc, eqM.runAccMul, additiveAcc);
+        maxRun = mulPreAdd(maxRun, eqM.maxRunMul, additiveRun);
+        accRun = mulPreAdd(accRun, eqM.maxRunMul, additiveDash);
+      }
+      // ---- 地面材质链（1457 :26722-26772 原版 else-if 真序：sticky→powerrun→
       //      sand→slippy2→slippy；floorTileT 已带坡面门 :23466）----
-      // sticky 蜂蜜块地面（:26210-26221）：maxRun/acc×0.25、slowdown×2 + 钳 ±maxRun
+      // sticky 蜂蜜块地面（:26722-26735）：maxRun/acc×0.25、slowdown×2 + 钳 ±maxRun
       //   ——与 StickyTiles 泡块阻尼（:22650+，上面已接）是两条链
-      // powerrun 沥青（:26222-26224）：maxRun×3.5、slowdown×2（跑道）
-      // slippy2 冻结史莱姆块（:26234-26240）：acc×0.6、slowdown=0（无摩擦滑到底）；
+      // powerrun 沥青（:26736-26741）：maxRun×3.5、slowdown×2（跑道）
+      // slippy2 冻结史莱姆块（:26750-26759）：acc×0.6、slowdown=0（无摩擦滑到底）；
       //   冰刀族 acc 再×3.5+maxRun×1.25
-      // slippy 冰族七 tile（:26244-26255）：acc×0.7；冰刀 acc×3.5+maxRun×1.25，
+      // slippy 冰族七 tile（:26760-26772）：acc×0.7；冰刀 acc×3.5+maxRun×1.25，
       //   无冰刀 slowdown×0.1（打滑）
-      if (!mnt && this.floorTileT >= 0) {
+      // ★FX58b（1457 坐骑门勘误）：原版此链无坐骑门,且先于坐骑 stats 叠加
+      //   (:26838-26842)与 RollerSkateMovement 的沥青 ×2.25(:28769-28774)。旧
+      //   `!mnt` 门把加法坐骑（滚轴鞋）整链跳过：沥青极速帽 (3+1)=4,原版
+      //   (3×3.5+1)×2.25=25.875 px/t ≈ 132mph（wiki 沥青面"基速×7.875+12mph"）。
+      //   加法族按叠加前基底乘（mulPreAdd/additive*）；非加法坐骑 maxRun/runAcc
+      //   会被 :26840-26842 赋值覆盖、链仅余 sticky 钳+slowdown 面——独立坐骑族
+      //   保持 !mnt 跳过（FX58b 登记,另刀处置）。
+      if ((!mnt || mnt.movementStatsAdditive) && this.floorTileT >= 0) {
         const iceSkate = !!eqEarly.iceSkate;
         const ft = this.floorTileT;
-        if (ft === HONEY_FLOOR_ID) {                        // sticky（:26210-26221）
-          maxRun *= 0.25; runAcc *= 0.25; runSlow *= 2;
-          if (this.vx > maxRun) this.vx = maxRun;
+        if (ft === HONEY_FLOOR_ID) {                        // sticky（:26722-26735）
+          maxRun = (maxRun - additiveRun) * 0.25;           // :26724 链时基底
+          runAcc = (runAcc - additiveAcc) * 0.25;           // :26725
+          runSlow *= 2;                                     // :26726
+          if (this.vx > maxRun) this.vx = maxRun;           // :26727-26734 钳【未叠加】maxRun
           if (this.vx < -maxRun) this.vx = -maxRun;
-        } else if (ft === ASPHALT_ID) {                     // powerrun（:26222-26224）
-          maxRun *= 3.5; runSlow *= 2;
-        } else if (ft === FROZEN_SLIME_ID) {                // slippy2（:26234-26240）
-          runAcc *= 0.6;
+          maxRun += additiveRun; runAcc += additiveAcc;     // :26838-26842 叠加补位
+        } else if (ft === ASPHALT_ID) {                     // powerrun（:26736-26741）
+          maxRun = mulPreAdd(maxRun, 3.5, additiveRun);     // = 3×3.5+1 = 11.5（×2.25 后 25.875）
+          runSlow *= 2;
+        } else if (ft === FROZEN_SLIME_ID) {                // slippy2（:26750-26759）
+          runAcc = mulPreAdd(runAcc, 0.6, additiveAcc);
           runSlow = 0;
-          if (iceSkate) { runAcc *= 3.5; maxRun *= 1.25; }
-        } else if (ICE_SLIP_IDS.has(ft)) {                  // slippy（:26244-26255）
-          runAcc *= 0.7;
-          if (iceSkate) { runAcc *= 3.5; maxRun *= 1.25; }
+          if (iceSkate) { runAcc = mulPreAdd(runAcc, 3.5, additiveAcc); maxRun = mulPreAdd(maxRun, 1.25, additiveRun); }
+        } else if (ICE_SLIP_IDS.has(ft)) {                  // slippy（:26760-26772）
+          runAcc = mulPreAdd(runAcc, 0.7, additiveAcc);
+          if (iceSkate) { runAcc = mulPreAdd(runAcc, 3.5, additiveAcc); maxRun = mulPreAdd(maxRun, 1.25, additiveRun); }
           else runSlow *= 0.1;
         }
       }
@@ -4929,7 +4970,12 @@ export class Player extends Entity {
           !!this.grappling[0], accRun, maxRun, runSlow,
           glideCap, this.floorTileT === ASPHALT_ID);
         if (step.dampedVx !== undefined) this.vx = step.dampedVx;
-        runSlow = step.runSlow;               // :28774 clamp(|vx|−max(maxRun,accRun),0,slow)
+        runSlow = step.runSlow;               // :28775-28776 clamp(|vx|−max(maxRun,accRun),0,slow)
+        // ★FX58b：powerrun ×2.25 外层帽同步（:28769-28774 原版在 RollerSkateMovement
+        // 入口就地乘 maxRunSpeed,HorizontalMovement 全速帽 :20033 消费同一步长变量;
+        // step 内 mr 是局部副本仅及尾钳——外层帽不同乘则沥青极速止步 11.5）:
+        // 11.5×2.25 = 25.875 px/t ≈ 132mph。
+        if (this.floorTileT === ASPHALT_ID) maxRun *= 2.25;
         // fullRotation 归零段（:28775-28777）：vy==0 且上一拍未贴轨 → 倾角清零
         //（贴轨/滞空保留 = 原版语义；onTrack 在本 tick 尾部轨骑段重算）
         if (this.vy === 0 && !this.onTrack) mnt.fullRotation = 0;

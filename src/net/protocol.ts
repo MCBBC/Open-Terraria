@@ -307,6 +307,10 @@ export const enum Msg {
                       //   SimHost 反查物品表确认召唤类 + 规则门（forbidBossSummon）后按原版
                       //   语义生成（含 Boss 公告链）；非 serverAuth 房整包丢弃（中继房仍走
                       //   房主本地生成路径）。对齐设计文档 §P4"netMode==1 短路改发消息"。
+                      //   ★(x,y) 线契约 = NewNPC Bottom 锚点（SpawnOnPlayer :81452-81454
+                      //   X=num10*16+8/Y=num11*16 → NPC.cs:81594 Bottom=(X,Y)）——
+                      //   2026-09-17 双端合流（旧中心锚 +8 约定废除,BJ113 域外登记③;
+                      //   server 与 game 同仓发布不做向后兼容,PROTO_VER 注 v6 先例）。
                       //   不升 PROTO_VER（增量通道纪律,同 SpectateFocus=150 先例）
   ServerPingProbe = 203, // S→C {f64 serverTs, u8 n, [u8 slot, u16 rttMs]×n}（玩家列表面板
                       //   RTT 数据源——服务器 10s 主动探测 + 全房 RTT 表捎带）；

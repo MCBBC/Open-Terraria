@@ -1,6 +1,6 @@
 // 弹 813 血云（Projectile.cs:6002 SetDefaults 32×32 aiStyle108 穿墙悬停；
 // AI_108 :32503-32760）：前 50t 隐形蓄积 → 51-120t 红尘漩涡显形（每帧双尘近似），
-// ai[0]==90t 生成 NPC 619 血鱿鱼（:32711-32716）；>120t 未在可见段后自然消散
+// ai[0]==90t 生成 NPC 619 血鱿鱼（1457 aiStyle 108 块 Projectile.cs:34507-34511）；>120t 未在可见段后自然消散
 // （timeLeft 600 由本类 life 收紧到 150 等效其视觉寿命）。
 // 由 AI_117 CallForHelp（恐惧鹦鹉螺召唤）投掷（NPC.cs:47874）。
 //
@@ -56,11 +56,15 @@ export class SquidCloud extends Entity {
           '#8A1828', 1, 0.6, { life: 26 });
       }
     }
-    // ai[0]==90：出鱿鱼（:32711）
+    // ai[0]==90：出鱿鱼（aiStyle 108 块,Projectile.cs:34507-34511）
     if (this.t === 90 && !this.spawned) {
       this.spawned = true;
       const squid = Enemy.fromVanilla(619, this.cx, this.cy);
       if (squid) {
+        // ★Bottom 锚勘误（:34509 NewNPC((int)Center.X,(int)Center.Y,619) →
+        //  NPC.cs:81594 nPC.Bottom=(X,Y)）:鱿鱼【底边】= 云中心——X 经 fromVanilla
+        //  中心锚恰同值,仅 Y 旧中心锚低 h/2（BJ113 域外登记①,2026-09-17 落刀）
+        squid.y = this.cy - squid.h;
         squid.id = (game as unknown as { entities: { nextId: number } }).entities.nextId++;
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(squid, 'enemies');
       }

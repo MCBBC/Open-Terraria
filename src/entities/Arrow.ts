@@ -161,12 +161,19 @@ const PROJ_FRAMES = projFramesJson as Record<string, number>;
  *    ★Main.projFrames 无此二型赋值（恒 1）——帧数由本表 cols*rows 供出,勿补 json。
  *  · 1092 图书管理员书（1457 Main.cs:33719-33726 / 1456 :32834-32838）：
  *    Frame(6,9,frame/9,frame%9) = 240×360 整格 40×40（projFrames[1092]=54 与格积一致,
- *    BookProj 帧语义本就是列主序：出生 Next(6)*9+Next(3)）。 */
+ *    BookProj 帧语义本就是列主序：出生 Next(6)*9+Next(3)）。
+ *  · 660 天界碎裂剑（2026-09-17 用户实报「一排剑」定谳）：贴图 Projectile_660.png
+ *    = 532×38 横条 14 帧 38×38，Main.DrawProj 专支【横切】Rectangle(38*proj.frame,
+ *    0,38,38)（1457 Main.cs:30974-30980），frame=出生 Next(14) 掷定恒定（AI_001
+ *    :56651 写入——旧注「死写入」系误判,本表即其消费端）。Main.projFrames[660]
+ *    无赋值（恒 1）→ 帧数 14 由本表供出。rows=1 → col=⌊frame/1⌋=frame、row=0,
+ *    恰为原版横切式。伤害判定盒独立于贴图（SetDefaults 10×10,Projectile.cs:7099）。 */
 interface ProjGrid { cols: number; rows: number; cw: number; ch: number; fw: number; fh: number }
 const PROJ_GRID: Record<string, ProjGrid> = {
   1094: { cols: 6, rows: 9, cw: 64, ch: 46, fw: 62, fh: 44 },
   1113: { cols: 6, rows: 9, cw: 64, ch: 46, fw: 62, fh: 44 },
   1092: { cols: 6, rows: 9, cw: 40, ch: 40, fw: 40, fh: 40 },
+  660: { cols: 14, rows: 1, cw: 38, ch: 38, fw: 38, fh: 38 },
 };
 
 export function projFrameCount(projId: number): number {
@@ -709,7 +716,13 @@ const ADDITIVE_GLOW_PROJS = new Set([15, 93, 94, 95, 96, 1114, 253, 258, 102,
   //  可见面=AI d163/d205 毒泡;落通用兜底渐显 ramp 曾错画本体淡入+普通合成白贴）。
   //  PROJ_ALPHA_MOD alpha0additive 档配对（GA α==0?1:0）；charm 态（aiStyle=1）
   //  被 :80605-80611 White*Opacity 截走=常规合成——draw 侧 M-2 分流同 5/91。
-  265, 355]);
+  265, 355,
+  // ★2026-09-17 用户实报「一排剑」批：660 天界碎裂剑入组——GetAlpha :81373
+  //  `(150,255,255,0)*Opacity`（Opacity=1−α/255 :542-552）——A=0 彩色加算青白;
+  //  SetDefaults α=255 出生首拍 Opacity=0 全隐,AI 首子步白闪门 α→0 后恒满强。
+  //  PROJ_ALPHA_MOD[660] alpha0additive 档配对（GA α==0?1:0,同表登记残留清偿）;
+  //  彩色色相未建模=亮度近似债（vanillaProjAlpha 表头注约定）。
+  660]);
 /** GetAlpha :81457 支里走共享 −15/update 渐显的成员（Projectile.cs:56570-56592
  *  case 组 14/20/36/83/84/89/100/104/110/158-161/180/279/283-287/389 的本族子集，
  *  组体在 AI_001() 内(:54950 起)，全部 aiStyle=1 型每 AI update 恰一消费）。
@@ -726,7 +739,7 @@ const LASER_FADE15_PROJS = new Set([
   83, 89, 100, 104, 279, 283, 284, 285, 286, 287,
   // 批二扩员（P.cs 共享 −15 case 组成员）
   36, 84, 110, 158, 159, 160, 161, 180, 389]);
-const PROJ_ALPHA0: Record<number, number> = {
+export const PROJ_ALPHA0: Record<number, number> = {
   5: 100, 94: 50, 95: 100, 280: 255, 477: 255, 478: 255, 521: 255, 639: 255, 932: 0,
   640: 255,                                    // 月总箭衍生体（SetDefaults :6902 alpha=255；
                                                 //  AI −25/substep 渐显并入 639 支,Kill 批 2026-09-02）
@@ -2852,6 +2865,34 @@ export class Arrow extends Entity {
         ctx.restore();
       }
     }
+    // ---- 660 天界碎裂残影（Main.cs:30609 入 trail 块;:30974-30980 num164=3/
+    //      num165=1/num167=8f + 帧矩形同本体;循环 num170=1,2——oldPos[1]/[2] 两帧
+    //      残影,α=GetAlpha×(3−k)/(TrailCacheLength[660]=10×1.5),scale=Lerp(proj.
+    //      scale=1.1, 8, k/num168=15)——'lighter' 加算淡青拖尾;TrailingMode[660]=0
+    //      → 旋转用当前 proj.rotation（=速度角+π/4,PROJ_ROT_DIAG 同本体）----
+    if (this.projId === 660 && this.starTrail.length >= 6) {
+      const imgT660 = projFrameImg(660, this.f712Frame);
+      if (imgT660 && imgT660.width > 0) {
+        const pts660 = this.starTrail;
+        const m660 = pts660.length / 2;
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalCompositeOperation = 'lighter';
+        for (let k = 1; k <= 2 && k <= m660 - 1; k++) {
+          const px = pts660[(m660 - k) * 2], py = pts660[(m660 - k) * 2 + 1];
+          const ga660 = Math.max(0, (3 - k) / 15);            // num176/(CacheLen×1.5)
+          const sc660 = 1.1 + (8 - 1.1) * (k / 15);           // Lerp(1.1, num167, k/15)
+          ctx.save();
+          ctx.globalAlpha = ga660;
+          ctx.translate(px + this.w / 2, py + this.h / 2);
+          ctx.rotate(ang + Math.PI / 4);                      // :58632 rotation 同本体
+          ctx.drawImage(imgT660, -imgT660.width * sc660 / 2, -imgT660.height * sc660 / 2,
+            imgT660.width * sc660, imgT660.height * sc660);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+    }
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     // alpha 通道（修复4）：GetAlpha 近似 → globalAlpha（present/phantasm/piranha 等
@@ -3001,7 +3042,11 @@ export class Arrow extends Entity {
               : this.bee36Tilt !== null ? this.bee36Frame   // aiStyle 36 蜂族：3/6 拍/帧（:27699/:27720）
                 : this.pinFrame !== null ? this.pinFrame    // ★R28 337 帧恒 ai[1]（发射掷,AI 不推进 :57927）
                   : this.projId === 467 ? this.f467Frame    // 教徒火球：3 拍/帧 4 帧循环（:55208-55218）
-                    : this.projId === 712 ? this.f712Frame  // 712 书杖弹：AI 推帧 4 拍/帧两带各 4 帧（:56664-56678,projFrames=8 :8596）
+                    : (this.projId === 660 || this.projId === 712) ? this.f712Frame
+                      // 660 天界碎裂：出生 Next(14) 掷定恒定帧（AI_001 :56651 写入,
+                      //   DrawProj 手切 38×frame 横切 :30974-30980——本表 PROJ_GRID[660]
+                      //   消费;无逐帧动画）/ 712 书杖弹：AI 推帧 4 拍/帧两带各 4 帧
+                      //   （:56664-56678,projFrames=8 :8596）
                       : Math.floor(this.age / 5) % frames;
     const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     let drawImg: CanvasImageSource | null = frameImg ?? img;
@@ -5021,7 +5066,7 @@ export class Arrow extends Entity {
         if (this.projId === 660) game.playSfxFiles?.(['Item_9'], 1, this.cx, this.cy);
         this.alpha = 0;
         this.drawScale = 1.1;
-        this.f712Frame = Math.floor(Math.random() * 14);   // frame=rand.Next(14)（:56651/:56684）——660 贴图恒 1 帧=死写入;712 8 帧表越界值由 projFrameImg 钳末帧（XNA 无钳=原版采样越界瑕疵,登记）
+        this.f712Frame = Math.floor(Math.random() * 14);   // frame=rand.Next(14)（:56651/:56684）——660 帧由 DrawProj 手切横条 Rectangle(38*frame,0,38,38) 消费（Main.cs:30974-30980,PROJ_GRID[660] 承载=非死写入,旧注误判已勘）;712 8 帧表越界值由 projFrameImg 钳末帧（XNA 无钳=原版采样越界瑕疵,登记）
         // 环形白闪：n=16（660）/ 4（712）,偏移=−UnitY.Rot(θ)×(1,4) 再 Rot(速度角)
         const n660 = this.projId === 660 ? 16 : 4;
         for (let i = 0; i < n660; i++) {
@@ -5176,7 +5221,9 @@ export class Arrow extends Entity {
     if (this.dragAlways !== 0) this.vx *= this.dragAlways;
     // ---- aiStyle 24 书族（94/1114）oldPos 环推进（Main.cs:35251/:35299 消费）----
     // ★95 诅咒之焰无 oldPos 拖尾块（其绿尘即尾,Main.cs 只画 94/1114 两支）——曾误入
-    if (this.projId === 94 || this.projId === 1114) {
+    // ★660 天界碎裂同推（DrawProj 残影 oldPos[1]/[2] 消费,Main.cs:31363/:31385;
+    //   1457 Main.cs:30974-30980 入 trail 块）——每 tick 一点,残影取尾 1/2 点
+    if (this.projId === 94 || this.projId === 1114 || this.projId === 660) {
       this.starTrail.push(this.x, this.y);
       if (this.starTrail.length > 20) this.starTrail.splice(0, this.starTrail.length - 20);   // oldPos 10 点
     }

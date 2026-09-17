@@ -472,7 +472,9 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.despawnEncouraged = false;
     } else {
       e.despawnEncouraged = true;
-      if (e.despawnTimer > 15000) e.despawnTimer = 15000;
+      // 上界随 SpawnBoss timeLeft 口径 1:1 化（2026-09-17）:timeLeft=(int)(750×1.25)
+      // =937 ×20=18740（NPC.cs:81596+:81485）——原版无此钳,仅作 despawnTimer 卫生上界
+      if (e.despawnTimer > 18740) e.despawnTimer = 18740;
     }
   }
   // 钩蔓中心(:31893-31913):场上前 3 只 aiStyle 52 的位置均值

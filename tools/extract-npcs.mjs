@@ -1,13 +1,64 @@
 // 从 Terarria1405 反编译源码提取全量 NPC 属性。
+// ★producer 退役态（债刀-3 2026-09-17）：本脚本是 1405 锚时代 producer，自 1457 基准
+//   切换（2026-08-23）后不再承担 vanilla-npcs.json 的再生产——现库已是 1457 终值态
+//   （recon-npc --fix 活通道修正）+ 1405 输出面之外的增量（id 587-696 共 110 条 1405 后
+//   新增 NPC；critter/color/value/boss/rarity/hide 等白名单外字段）。误重跑=对现库纯全量
+//   覆写（不读现有），一次洗掉上述全部增量并把 586 以内数值打回 1405 态——vanilla-atlas.mjs
+//   全量重跑四连事故同族（atlas era guard 判例 / recipes R25-B5② 强制门判例）。
+//   故★追加时代守卫：检测到现库含本 producer 输出面之外的键（id>586 或白名单外字段）即拒 exit 1。
+// 活通道：数值对账/修正走 node tools/recon-npc-1456-1457.mjs（--fix 一键重放 1457 终值）；
+//   增量字段/条目走合并语义专用提取器（extract-critters / extract-npccolors 皆读现有合入）。
+//   清空产物后的全量重建守卫天然不拦；原地强推须 --force-full --overwrite-append-era 双旗
+//   （--force-full 单旗仍拒，rm -rf 式双键防误触），事后必须全绿 recon-npc 双闸门 +
+//   tests/npc-stats-golden + tests/npc-frame-golden。测试注入面：SW_NPCS_JSON（守卫探测
+//   路径）/ SW_OUT（写盘路径），缺省行为不变。
 // SetDefaults 反编译为 if/else-if 的 type 区间链（非 switch）：
 //   if (this.type == N) {...} else if (this.type >= A && this.type <= B) {...} ...
 // 每个 id 取链上首个命中的块（else-if 语义：命中后续块跳过）。
 // 块内取深度1的 this.prop 赋值；块内嵌套小 switch 的 case {id} += 增量也并入。
 // 另提取 Main.cs npcFrameCount[663]、TEdit bestiary 名字表。
 // 输出 public/sprites/vanilla-npcs.json
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+
+// producer 输出面（守卫判据基线）：19 个 SetDefaults 白名单字段 + id/name/frames 框架字段
+const KEYS = ['lifeMax', 'damage', 'defense', 'knockBackResist', 'aiStyle', 'width', 'height',
+  'npcSlots', 'noGravity', 'noTileCollide', 'friendly', 'townNPC', 'HitSound', 'DeathSound',
+  'scale', 'alpha', 'catchItem', 'lavaImmune', 'behindTiles'];
+const MAX_ID = 586; // 1.4.0.5 最大 npc id（1457 NPCID.Count=696；现库 587-696 均为 1405 后增量）
+
+// ★追加时代守卫（债刀-3 2026-09-17）：vanilla-npcs.json 已进入 recon-npc 活通道时代
+//   （1457 终值 + 白名单外增量字段 + 587-696 新增 NPC）。本 producer 重跑=纯全量覆写，
+//   与 vanilla-atlas.mjs 全量重跑事故（四连）同族，故照 atlas 判例设守卫。
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+const OUT_JSON = process.env.SW_OUT ?? `${ROOT}/game/public/sprites/vanilla-npcs.json`;
+const GUARD_JSON = process.env.SW_NPCS_JSON ?? OUT_JSON;
+if (existsSync(GUARD_JSON)) {
+  try {
+    const prev = JSON.parse(readFileSync(GUARD_JSON, 'utf8'));
+    const producerFields = new Set([...KEYS, 'id', 'name', 'frames']);
+    const beyondIds = Object.keys(prev).filter((k) => Number(k) > MAX_ID);
+    const extraFields = new Set();
+    for (const e of Object.values(prev)) {
+      if (e == null || typeof e !== 'object') continue;
+      for (const k of Object.keys(e)) if (!producerFields.has(k)) extraFields.add(k);
+    }
+    const appendEra = beyondIds.length > 0 || extraFields.size > 0;
+    if (appendEra && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+      console.error('[extract-npcs] 拒绝全量重写：vanilla-npcs.json 已含 1405 producer 输出面之外的增量（追加时代）。');
+      console.error(`  物证：id>${MAX_ID} 条目 ${beyondIds.length} 条（如 ${beyondIds.slice(0, 5).join(',')}…）；白名单外字段 {${[...extraFields].join(', ')}}。`);
+      console.error('  全量重写会把现库打回 1405 锚态：洗掉 587-696 全部新增 NPC 与增量字段，并把 586 以内数值回退 1405（1457 终值修正全失）。');
+      console.error('  数值对账/修正请走：node tools/recon-npc-1456-1457.mjs（--fix 一键重放 1457 终值，活通道）。');
+      console.error('  增量字段/条目走合并语义提取器（tools/extract-critters.mjs / tools/extract-npccolors.mjs，读现有合入）。');
+      console.error('  确需全量重建：清空 public/sprites/vanilla-npcs.json 后重跑（守卫天然不拦空产物）。');
+      console.error('  原地强推须双旗 --force-full --overwrite-append-era（--force-full 单旗仍拒）；事后必须全绿 recon-npc 双闸门 + tests/npc-stats-golden + tests/npc-frame-golden。');
+      process.exit(1);
+    }
+  } catch { /* GUARD_JSON 坏损时不拦（让正常流程自行报错） */ }
+}
+
 const npcCs = readFileSync(`${ROOT}/Terarria1405/NPC.cs`, 'utf8');
 const mainCs = readFileSync(`${ROOT}/Terarria1405/Main.cs`, 'utf8');
 
@@ -101,7 +152,6 @@ const parseBlock = (blockText, exactId) => {
 };
 
 // ---------- 3) 逐 id 求值 ----------
-const MAX_ID = 586; // 1.4.0.5 最大 npc id
 const results = {};
 for (let id = 1; id <= MAX_ID; id++) {
   for (const b of blocks) {
@@ -122,9 +172,6 @@ const bestiary = JSON.parse(readFileSync(`${ROOT}/Terraria-Map-Editor/src/TEdit.
 const names = {};
 for (const e of bestiary.npcData) if (typeof e.id === 'number' && e.id >= 1) names[e.id] = e.fullName ?? e.name;
 
-const KEYS = ['lifeMax', 'damage', 'defense', 'knockBackResist', 'aiStyle', 'width', 'height',
-  'npcSlots', 'noGravity', 'noTileCollide', 'friendly', 'townNPC', 'HitSound', 'DeathSound',
-  'scale', 'alpha', 'catchItem', 'lavaImmune', 'behindTiles'];
 const out = {};
 for (let id = 1; id <= MAX_ID; id++) {
   const r = results[id] ?? {};
@@ -136,6 +183,6 @@ for (let id = 1; id <= MAX_ID; id++) {
   }
   if (any) out[id] = e;
 }
-writeFileSync(`${ROOT}/game/public/sprites/vanilla-npcs.json`, JSON.stringify(out));
-console.log('written vanilla-npcs.json:', Object.keys(out).length, 'npcs');
+writeFileSync(OUT_JSON, JSON.stringify(out));
+console.log('written', OUT_JSON, ':', Object.keys(out).length, 'npcs');
 for (const id of [1, 3, 16, 25, 49, 111, 113, 525]) console.log(id, JSON.stringify(out[id]));

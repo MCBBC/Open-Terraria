@@ -714,7 +714,7 @@ describe('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', ()
 // 单行形态=0（六区 5 处 bare else 全独立行,else-if=0）→ 多行 else/else-if 体被
 // 【无条件采用】（前支守卫被忽略）。今日六区 5 else 体（:18315 value/:23091
 // fishingPole/:25558·25733 placeStyle/:38636 value）均不带 useStyle → 真值零漂
-// （修复前后全量对拍 6280 vid diff=0）;Item.cs 刷新引入带 useStyle 的 else 支
+// （修复前后全量对拍 6176 vid diff=0（★2026-09-17 勘误:vid 总数随提取域演进,现行 6176,同 tests/bj69-nouse-gate.test.ts:23 口径））;Item.cs 刷新引入带 useStyle 的 else 支
 // 即产假真值——本双哨兵封口：形态清单钉源态,合成体钉链语义。
 
 describe('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
@@ -796,7 +796,7 @@ describe('C1 else 形态/链语义哨兵（提取器覆盖域封口）', () => {
 // pendingRestore 存入所推帧 saved」经模拟不充分（多层闭括号同拍 pop 串灭该
 // saved;无括号 else 支体不入栈=父 else 仍读陈旧链,vid=10 仍 9≠3）→ 按 C# 语义
 // 落刀=逐深度链态 chainAt[d]（d 层 else 系头读同层前一兄弟头写入的链态;嵌套构念
-// 头写 chainAt[d+1] 天然不污染外层）。修复后全量对拍 6280 vid DIFF=0（六区 5 else
+// 头写 chainAt[d+1] 天然不污染外层）。修复后全量对拍 6176 vid DIFF=0（★2026-09-17 勘误:现行 6176,同 :23 口径）（六区 5 else
 // 体均不带 useStyle 且全扁平,真值面零漂）。本三哨兵钉死三类构造的 C# 真值:
 //  · 构造① 嵌套混合（全括号） `if A{if B{X}else{Y}}else{Z}`
 //  · 构造② 内层无括号     `if A{if B{X}else Y}else{Z}`

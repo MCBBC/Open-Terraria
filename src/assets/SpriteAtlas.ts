@@ -671,7 +671,8 @@ export class SpriteAtlas {
         this._vImageFailed.set(file, performance.now());
         // ★evict 移除(2026-09-04):发布形态缓存内容全部来自自家 zip(CRC 校验),
         //  无"投毒来源";SW 空窗期的加载失败曾误删完好条目(累计 94 条天空族)。
-        //  持续性失败由 15s TTL 重试+对账补下自愈。
+        //  持续性失败由 10s TTL 重试+对账补下自愈（★2026-09-17 勘误:旧注"15s"
+        //  与 vImageFailed 冷却 10_000ms 不符,以代码为准）。
       };
       retry.src = im.src;
     };

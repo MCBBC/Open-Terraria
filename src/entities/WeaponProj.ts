@@ -714,6 +714,12 @@ export class Boomerang extends Entity {
   recallGate?: () => boolean;
   /** ★ai[0]（:36783 起）：0 飞出 / 1 返回 / 2 光刃撞墙悬停（:17975-17990 置 2） */
   ai0 = 0;
+  /** ★债刀-4 ②（2026-09-17）：CutTilesAt :15384-86（1458 :15386-88 同文）1052 出程
+   *  加砍旗——`type==1052 && ai[0]==0` 时 flag 再并 TileID.Sets.IsATreeTrunk∪{323 棕榈}。
+   *  中央 CutTiles 收口（Entity.ts）读本 getter → cutTilesBox 第 7 参 → Game.cutTile
+   *  收口（vid==1052 重验）。1052=Axearang（1.4.5 新回旋斧,物品 5519,Axearang 砍树
+   *  面的弹载体）;其余型号/返回段（ai0≠0）恒 false=与原版逐位同相。 */
+  get cutExtraTreeCactus(): boolean { return this.projId === 1052 && this.ai0 === 0; }
   /** 探针 _weapons-family-probe 读 returning——ai[0]==1 即返回段（保留旧名兼容） */
   get returning(): boolean { return this.ai0 === 1; }
   /** direction：掷出瞬间玩家 facing（NewProjectile 语义;旋转自旋符号 :37294 起） */

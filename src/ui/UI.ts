@@ -21,8 +21,13 @@ import {
 import { petInfoOfVid } from '../data/vanillaPets';
 import { showJourneyQuickGate } from './QuickGate';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
+import vanillaExpertJson from '../data/vanilla-expert.json';
+import { mouseTextInnerColor } from '../render/Renderer';
 import { VANILLA_ITEM_COLOR, VANILLA_ITEM_ALPHA, blendItemColorTint } from '../data/vanillaItemColor';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
+/** 专家旗表（vanilla-expert.json：Item.cs SetDefaults `expert = true` 25 处→43 id→1；
+ *  tools/extract-expert.mjs 提取，recon-item 闸门对账——Game.ts:287 同源表） */
+const ITEM_EXPERT = vanillaExpertJson as Record<string, number>;
 
 /** 原版像素面板底(IngameOptions.Draw + Utils.DrawInvBG 1:1):
  *  Inventory_Back13(52×52)九宫——角 10×10、边/心拉伸(Utils.DrawInvBG :2681-2691 同式),
@@ -2451,10 +2456,19 @@ export class UI {
     this.ghostEl.style.transform = `translate(${this.mouseX - 20}px, ${this.mouseY - 20}px)`;
   }
 
-  /** 稀有度着色（Main.cs GetItemNameColor :20415-20473 主干） */
+  /** 稀有度着色（Main.cs GetItemNameColor :20742-20814 主干）。
+   *  ★SW-清债④ 2026-09-17 两档接活色（单源换算=Renderer.mouseTextInnerColor,
+   *  mt 传 255 → num3=1 = GetItemNameColor 无 mouseTextColor 乘区的原生语义；
+   *  钟=Game.lighting.clock,与 Renderer.drawMouseTextLayer :15431 同源注入）：
+   *  · −13 大师（:20745-20747）= (255,(byte)(masterColor×200f),0) 脉冲——旧
+   *    '#FF6400' 定值即中点 0.5 档（无钟回退同相,直测不破）；
+   *  · −12 专家（:20749-20751）= (byte)DiscoR/G/B 彩虹——旧绿脉冲近似撤除。
+   *  同源钟:FlickerClock.masterColor 0..1 步进 0.05 ping-pong（Main.cs:18408-18418）/
+   *  disco 6 相循环（SkyColor.tick :427-436）。其余档位表暂维持（−11/9/10/11 档
+   *  与原版表有漂移,登记债不属本刀）。 */
   private rarityColor(rare: number): string {
-    if (rare <= -13) return '#FF6400';
-    if (rare === -12) return `rgb(255,${Math.floor((Math.sin(performance.now() / 60) + 1) * 127)},0)`; // expert Disco
+    if (rare <= -13) return mouseTextInnerColor(-13, 0, 255, this.game?.lighting?.clock ?? null);
+    if (rare === -12) return mouseTextInnerColor(-12, 0, 255, this.game?.lighting?.clock ?? null);
     if (rare === -11 || rare === -1) return '#828282';
     if (rare === 0) return '#ffffff';
     if (rare === 1) return '#9696ff';
@@ -2508,6 +2522,15 @@ export class UI {
       else if (pv <= 0.8) rare = Math.max(-1, rare - 2);
       else if (pv <= 0.95) rare = Math.max(-1, rare - 1);
     }
+    // ★SW-清债④ 2026-09-17 专家件 rare→−12 覆写（Main.cs:20511-20515：rare=
+    //  hoverItem.rare → if (hoverItem.expert) rare=-12——Item.cs SetDefaults 全表
+    //  零处 `rare = -12`（专家件表值 1..10,如 3090 rare=2+expert=true :28598-28600）,
+    //  名色全靠 tooltip 时末位覆写进 −12 disco 档。原版序=变体覆写（SetDefaults 域,
+    //  :2501 同相）在前、expert 覆写最后（词缀档位移之后）;旗与稀有度正交（3332
+    //  主袋 rare=8 仍覆写）,旗源=vanilla-expert.json（vanilla-itemrare 全表无 −12）
+    const isExpert = def.key.startsWith('vi_')
+      && ITEM_EXPERT[String(parseInt(def.key.slice(3), 10))] === 1;
+    if (isExpert) rare = -12;
     const nameColor = this.rarityColor(rare);
     // 词缀名前缀（Lang.GetPrefixedItemName：Prefix.{ConstName} + 物品名）
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
@@ -2525,7 +2548,13 @@ export class UI {
         return label ? ` <span style="color:#7899ec">(${label})</span>` : '';
       })()
       : '';
-    let html = `<span style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}${stackSuffix}</span>${variantSuffix}`;
+    // ★SW-清债④：−12/−13 活色档名称 span 钉档（data-rare）——startTooltipPulse
+    //  rAF 循环逐帧重染（原版 MouseText 每帧重绘 → disco/masterColor 连续推进;
+    //  静态渲染只落在采样帧,色相会冻结）
+    const rareSpanAttrs = (rare === -12 || rare <= -13)
+      ? ` class="sw-tooltip-rare" data-rare="${rare}"`
+      : '';
+    let html = `<span${rareSpanAttrs} style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}${stackSuffix}</span>${variantSuffix}`;
     if (s.favorited) html += ` <span style="color:#ffb347">★</span>`;
     // ---- 统计行（MouseText_DrawItemTooltip_GetLinesInfo，Main.cs:20488-20920 1:1，
     //      构建器在 ui/itemTooltip.ts）：vi_ 全量——伤害[+类型后缀]/暴击/速度档/击退档/
@@ -2595,7 +2624,10 @@ export class UI {
       // ★SW-BJ22 词缀随行（Item.cs:596-597 value 缩放进卖价）；shopCell =
       //  商品格位买入价（context 15）；无 shopCell = 玩家物品卖出价语义
       shop: this.shopTooltipContext(def, vid, s.stack, { prefix: s.prefix, shopCell: override?.shopCell }),
-      expert: rare === -12,
+      // ★SW-清债④：Expert 行门 = item.expert 旗本体（:21214-21218,旗表——旧
+      //  rare===−12 判在全表零 −12 基值下永假=行整缺）;Master 行门 = item.rare
+      //  【字段值】−13（:21219-21223 原文——非难度档;此 rare 已含变体/词缀域位移）
+      expert: isExpert,
       master: rare === -13,
       anglerQuestItemId: g.anglerQuestItemId?.() ?? 0,
       // 社交槽语义（dye 槽 / armor 社交位——本仓 dye 槽 = 原版 social dye 位）
@@ -2720,6 +2752,17 @@ export class UI {
       last = now;
       // 文字层亮度 = mouseTextColor/255（:20256 语义——面板不参与）
       lines.style.filter = `brightness(${(this.tooltipPulseVal / 255).toFixed(3)})`;
+      // ★SW-清债④ 2026-09-17：−12 disco/−13 masterColor 活色档逐帧重染（原版
+      //  MouseText 每帧重绘 :20587-20629 → DiscoR/G/B 6 相/masterColor ping-pong
+      //  连续推进）。换算单源=mouseTextInnerColor（与 Renderer.drawMouseTextLayer
+      //  :15431 同函数同钟源 Game.lighting.clock；mt=255 → num3=1 = GetItemNameColor
+      //  原生无乘区语义）
+      const rareEl = lines.querySelector<HTMLElement>('.sw-tooltip-rare');
+      if (rareEl) {
+        const r = Number(rareEl.dataset.rare);
+        rareEl.style.color = mouseTextInnerColor(r <= -13 ? -13 : -12, 0, 255,
+          this.game?.lighting?.clock ?? null);
+      }
       this.tooltipPulseRaf = requestAnimationFrame(step);
     };
     this.tooltipPulseRaf = requestAnimationFrame(step);
@@ -3251,16 +3294,20 @@ export class UI {
     row.appendChild(costWrap);
     panel.appendChild(row);
     const doBtn = el('button', 'sw-btn', Lang.inter(19));
+    doBtn.addEventListener('mouseleave', () => { this.vinvReforgeCooldownUntil = 0; });   // 离钮清冷(:42279)
     doBtn.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       if (!this.reforgeItem) return;
+      if (performance.now() < this.vinvReforgeCooldownUntil) return;   // 最优档掷中后 60t 锁(:42370)
       const cost = this.game.reforgeCost(this.reforgeItem);
       if (this.game.coinsOwned() < cost) {
         this.toast(Lang.text('Mods.SandboxWorld.Reforge.TooExpensive', Lang.inter(46)));
         return;
       }
-      const np = this.game.doReforge(this.reforgeItem);
+      const out = { topTier: false };
+      const np = this.game.doReforge(this.reforgeItem, out);
       if (np < 0) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.Fail')); return; }
+      if (out.topTier) this.vinvReforgeCooldownUntil = performance.now() + 1000;   // 仅最优档(:42626)
       this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
       this.refreshReforge();
     });
@@ -3316,6 +3363,10 @@ export class UI {
     // 变体稀有度/名后缀（同 showTooltipFor）
     const rv = def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1;
     if (rv >= 0) rare = variantRareOfVid(rv) ?? rare;
+    // ★SW-清债④：专家件 rare→−12 覆写（Main.cs:20511-20515 同款,重铸槽 tooltip
+    //  是同一 MouseText_DrawItemTooltip 消费面——可重铸专家件 3090/3097/3245 等
+    //  经此槽悬停时名色同进 −12 disco 档,覆写末位同序）
+    if (rv >= 0 && ITEM_EXPERT[String(rv)] === 1) rare = -12;
     const rvKind = rv >= 0 ? activeVariantOfVid(rv) : null;
     const rvLabel = rvKind ? Lang.text(VARIANT_L10N_KEY[rvKind]) : '';
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
@@ -9348,6 +9399,9 @@ export class UI {
   private vinvReforgeTextEl: HTMLElement | null = null;
   private vinvReforgeHammerEl: HTMLButtonElement | null = null;
   private vinvSavingsEl: HTMLElement | null = null;
+  /** 重铸冷却截止(performance.now 域)≡ Main.reforgeCooldown(:1921,60t@60fps=1000ms):
+   *  仅最优档掷中置位(:42626),普通档零冷却=连点每击立即重铸;鼠标离锤即清(:42279)。
+   *  vinv 锤钮与 classic modal 两面共用(FX60 用户实报「不能快速连点」收口) */
   private vinvReforgeCooldownUntil = 0;
   private vinvReforgeHadItem = false;
 
@@ -9390,7 +9444,7 @@ export class UI {
       if (!this.vinvReforgeVisible()) return null;
       return { x: 100, y: 270 };
     } });
-    // 锤钮((120,310) 中心锚;UI_Reforge[0|1] hover 换图;cooldown 60t(:42338))
+    // 锤钮((120,310) 中心锚;UI_Reforge[0|1] hover 换图;cooldown 60t 仅最优档(:42626))
     const hammer = el('button', 'vinv-btn') as HTMLButtonElement;
     const hImg = document.createElement('img');
     hImg.draggable = false;
@@ -9398,19 +9452,11 @@ export class UI {
     hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png';
     hammer.appendChild(hImg);
     hammer.addEventListener('mouseenter', () => { hImg.src = 'sprites/vanilla-ui/UI_Reforge_1.png'; });
-    hammer.addEventListener('mouseleave', () => { hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png'; });
-    hammer.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      if (!this.reforgeItem) return;
-      if (performance.now() < this.vinvReforgeCooldownUntil) return;   // reforgeCooldown=60t(:42338)
-      const cost = this.game.reforgeCost(this.reforgeItem);
-      if (this.game.coinsOwned() < cost) return;   // 原版 BuyItem 失败=静默(:42346)
-      const np = this.game.doReforge(this.reforgeItem);
-      if (np < 0) return;
-      this.vinvReforgeCooldownUntil = performance.now() + 1000;
-      this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
-      this.refreshAll();
+    hammer.addEventListener('mouseleave', () => {
+      hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png';
+      this.vinvReforgeCooldownUntil = 0;   // 离锤即清冷却(mouseReforge=false 支 :42279)
     });
+    hammer.addEventListener('mousedown', (e) => { e.stopPropagation(); this.vinvReforgeHammerHit(); });
     root.appendChild(hammer);
     this.vinvReforgeHammerEl = hammer;
     this.vinvLayoutItems.push({ el: hammer, pos: () => {
@@ -9426,6 +9472,23 @@ export class UI {
       if (!this.vinvReforgeVisible() || !this.reforgeItem) return null;   // DrawSavings 在有件支(:42318)
       return { x: 180, y: 258 };
     } });
+  }
+
+  /** 锤钮点击(Main.cs:42370 mouseLeftRelease 边沿=每击一次,长按不连发)。
+   *  门序:有件 → reforgeCooldown<=0(:42370) → BuyItem 静默失败(:42346) → 重铸。
+   *  冷却只由最优档掷中置位(:42626 reforgeCooldown=60t=1000ms)——普通档零冷却,
+   *  连点每击立即重铸(FX60:旧码无条件 +1000ms=用户报「两次点击间要停顿」根因) */
+  private vinvReforgeHammerHit(): void {
+    if (!this.reforgeItem) return;
+    if (performance.now() < this.vinvReforgeCooldownUntil) return;   // reforgeCooldown<=0 门(:42370)
+    const cost = this.game.reforgeCost(this.reforgeItem);
+    if (this.game.coinsOwned() < cost) return;   // 原版 BuyItem 失败=静默(:42346)
+    const out = { topTier: false };
+    const np = this.game.doReforge(this.reforgeItem, out);
+    if (np < 0) return;
+    if (out.topTier) this.vinvReforgeCooldownUntil = performance.now() + 1000;   // 仅最优档(:42626)
+    this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
+    this.refreshAll();
   }
 
   /** 显示门(:42277-42285:InReforgeMenu ∧ 无箱 ∧ 无店 ∧ talkNPC!=-1——★刀19:会话
