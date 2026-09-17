@@ -195,7 +195,8 @@ describe('掉落物入微光（WorldItem.Shimmering + GetShimmered）', () => {
     const mats = drops.map((x) => vanillaIdOfItem(x.itemId)).sort((a, b) => a - b);
     expect(mats).toEqual([9, 12]);
     expect(drops.every((x) => x.shimmered)).toBe(true);   // 上浮漂浮
-    // 散射初速 |vx|≤2.2;通用摩擦每 tick ×0.95——驱动 200t 后 |vx| 必归零(<0.1)
+    // 散射初速 |vx|≤1（1457 SpawnShimmeredItem :631 整值 ±num7,首垛 0;曾 1456 旧式
+    // 1.05/−2.2）;通用摩擦每 tick ×0.95——驱动 200t 后 |vx| 必归零(<0.1)
     // (旧实现 shimmered 分支无摩擦 → 无限横漂 + 恒 >0.2 永不可拾)
     for (let i = 0; i < 200; i++) drops.forEach((x) => x.fixedUpdate(1, h));
     expect(drops.every((x) => Math.abs(x.vx) < 0.1)).toBe(true);

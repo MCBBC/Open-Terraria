@@ -39,7 +39,11 @@ export const TILE_ANIM_RATE: Record<number, number> = {
   31 : 8,   // >=8      / >=4
   77 : 6,   // >5       / >=12
   106: 5,   // >4       / >=2   ★锯木机 2 帧（此前审计误 5 → ≥2 帧越界回退(0,0)=整物平铺第一格病根）
-  129: 8,   // >=8      / >=6           （卧轴位 drawAdjust 专管 fx，Y 带独立）
+  129: 8,   // >=8      / >=6           ★水晶碎块：唯一动画=大簇 addFrX 横向步进（TileDrawing.cs:4682-4690
+            //             case 129 addFrY=0 强清零 verbatim）→ 横向钟由 crystalShardAddFrX 消费；
+            //             Y 向 pitch=0（TILE_ANIM_PITCH）——此前 Y 带独立=默认 38 造成源矩形逐相位
+            //             纵向下移 2/4/6 带（侧向簇/辉光带/越界回退(0,0)），用户实报「原版一长串、
+            //             本仓发散两个方块」根因（2026-09-18 定谳）
   133: 4,   // >=4      / >=6
   207: 5,   // >4       / >=6           喷泉 helper 专用（全局钟）
   215: 4,   // >=4      / >=8           篝火 helper 专用
@@ -138,7 +142,11 @@ export const TILE_ANIM_PITCH: Record<number, number> = {
   463: 72, 464: 72,
   565: 36, 593: 18, 594: 36,
   642: 54,          // case 219/220/642 三联组实文同 54
-  17: 38,   77: 38,   96: 36,   129: 38,   133: 38,   215: 36,   270: 38,   377: 38,   405: 38,   406: 56,   410: 38,   421: 90,   456: 38,   480: 38,   509: 38,   572: 38,   657: 38,   658: 38,   660: 38,   665: 36,   696: 36,   708: 90,   720: 38,   721: 38,   725: 38,
+  17: 38,   77: 38,   96: 36,   129: 0,    133: 38,   215: 36,   270: 38,   377: 38,   405: 38,   406: 56,   410: 38,   421: 90,   456: 38,   480: 38,   509: 38,   572: 38,   657: 38,   658: 38,   660: 38,   665: 36,   696: 36,   708: 90,   720: 38,   721: 38,   725: 38,
+  // ★129=0（2026-09-18 定谳）：TileDrawing.cs:4687 case 129 `addFrY = 0` verbatim——
+  //   纵向无动画带，动画只在横向 addFrX（crystalShardAddFrX）。旧默认 38 使源 sy 逐相位
+  //   +38 走进侧向簇带(38)/辉光带(76/114)/越界回退(0,0)。
+
   // ★272 齿轮块（2026-08-31 权威化，TileDrawing.cs:1137-1147 verbatim）：步距 90
   // （素材 234×180=两带各90 实证）——此前 PIN 锁的 38 为本波补键时序错值，
   // 表现为用户报「海盗船齿轮块动态漂移」；相位因子见 cogAddFrY。
@@ -300,6 +308,18 @@ export function cogAddFrY(x: number, y: number): number {
   const off = idx * 90;
   tileFrameCapture.yoff('cog272', `${x},${y}`, off);
   return off;
+}
+
+/** ★水晶碎块 129 卧轴位（TileDrawing.cs:4682-4690 case 129 verbatim）：仅大簇
+ *  （frameX>=324）有动画——addFrX = ((n + tileFrame[129]) % 6 − n) × 18（n=(fx−324)/18），
+ *  源矩形在 324..414 六格横带内轮转；小簇 addFrX=0 静止。纵向 addFrY=0 强清零
+ *  （:4687）→ 表 pitch=0 同源，禁走 animYOffset。相位钟 = tileFrame[129]（每 8tick
+ *  推进、>=6 回卷，Main.cs:19287-19290）= animFrameIdx(129) 同拍——此前 drawAdjust
+ *  用共享 animRot()（tick/6）相位率偏差 33%，本刀一并归正。 */
+export function crystalShardAddFrX(fx: number): number {
+  if (fx < 324) return 0;
+  const n = Math.floor((fx - 324) / 18);
+  return (((n + animFrameIdx(129, 144)) % 6) - n) * 18;
 }
 
 /** 全局动画时钟（Game 主循环每帧 +1；暂停时冻结） */

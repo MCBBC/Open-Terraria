@@ -121,7 +121,7 @@ describe('清债④ ③ 阴性对照（75 坠落星 rare=1）', () => {
     expect(html).not.toContain('sw-tooltip-rare');
     expect(html).not.toMatch(/专家|Expert/);
     expect(html).not.toMatch(/大师|Master/);
-    expect(html).toContain('color:#9696ff');            // rare=1 档静态色（原版 150,150,255）
+    expect(html).toContain('color:rgb(150,150,255)');   // rare=1 档静态色（:20761-20763;★BJ116-b 委托后 rgb 字面）
   });
 });
 
@@ -150,11 +150,16 @@ describe('清债④ ④ UI.rarityColor 两档活色（GetItemNameColor :20745-20
     expect(ui.rarityColor(-13)).toBe('rgb(255,100,0)');
   });
 
-  it('其余档维持旧表（−11/−1 灰、1 蓝——漂移档另账登记,不在本刀判据内）', () => {
+  it('★SW-BJ116-b（债刀-2）整表定值档对齐原版 GetItemNameColor（−11 曾误并 −1 灰档,9/10/≥11 自创/漂移=本刀摘）', () => {
     const ui = uiStub();
-    expect(ui.rarityColor(-11)).toBe('#828282');
-    expect(ui.rarityColor(-1)).toBe('#828282');
-    expect(ui.rarityColor(1)).toBe('#9696ff');
+    expect(ui.rarityColor(-11)).toBe('rgb(255,175,0)');   // :20753-20755（旧 '#828282'=−1 档值）
+    expect(ui.rarityColor(-1)).toBe('rgb(130,130,130)');  // :20757-20759（=旧 '#828282' 原主）
+    expect(ui.rarityColor(0)).toBe('rgb(255,255,255)');   // 缺省 White（result 初始化）
+    expect(ui.rarityColor(1)).toBe('rgb(150,150,255)');   // :20761-20763
+    expect(ui.rarityColor(9)).toBe('rgb(5,200,255)');     // :20793-20795（旧 '#0AFFFF' 自创）
+    expect(ui.rarityColor(10)).toBe('rgb(255,40,100)');   // :20797-20799（旧 '#FFAA66' 自创）
+    expect(ui.rarityColor(11)).toBe('rgb(180,40,255)');   // :20801-20803（旧 '#B42CFF' 漂移）
+    expect(ui.rarityColor(12)).toBe('rgb(180,40,255)');   // rare>=11 档界
   });
 });
 

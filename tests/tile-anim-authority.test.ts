@@ -24,6 +24,16 @@ function assertDomain(id: number): void {
   const pitch = manifest.pitch[String(id)] ?? 38;
   const frames = manifest.frames[String(id)];
   if (!frames || frames <= 1) return;
+  if (pitch === 0) {
+    // ★129 转正后新合法域：pitch 0 = 纵向无动画（TileDrawing.cs:4687 addFrY=0 verbatim）
+    //   ——任意 tick 下纵偏恒 0，非 0 即纵向走带复发（2026-09-18「发散两个方块」根因）
+    const span = Math.max(3, frames) * 17;
+    for (let t = 0; t < span; t++) {
+      tileAnim.tick = t;
+      expect(animYOffset(id, 144)).toBe(0);
+    }
+    return;
+  }
   const legalMax = (frames - 1) * pitch;
   const span = Math.max(3, frames) * 17;   // 覆盖整周期
   for (let t = 0; t < span; t++) {
@@ -62,9 +72,9 @@ describe('动画帧权威金标（TileAnim ↔ manifest ↔ 素材容量 三方�
 
   it('素材容量互证：frames×pitch ≤ 本地 PNG 高 + 半步距（素材换小也会暴露）', () => {
     // 纵向步距不适用该判据的特例家族（详见 tools/recon-tileanim.mjs 头注）：
-    //   129 卧轴（Y 带独立 + drawAdjust fx 横移族）、270/660 旋转旗（帧横排 18px，
-    //   垂直容量无关）
-    const CAP_EXEMPT = new Set([129, 270, 660]);
+    //   270/660 旋转旗（帧横排 18px，垂直容量无关）。129 已于 2026-09-18 转正
+    //   pitch=0（f×p=0 恒 ≤ pngH）→ 移出豁免、进通用判据。
+    const CAP_EXEMPT = new Set([270, 660]);
     const dir = path.join(__dirname, '..', 'public', 'sprites', 'vanilla');
     const bad: string[] = [];
     for (const [k, f] of Object.entries(manifest.frames)) {

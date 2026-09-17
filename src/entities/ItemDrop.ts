@@ -39,6 +39,12 @@ const LAVA_IMMUNE_ITEMS = new Set([
   318, 312, 173, 174, 175, 4422, 2701, 205, 206, 207, 1128, 2340, 2739, 2492, 1127, 85, 581, 582,
 ]);
 
+/** ★偏差1 阈值（2026-09-17 用户拍板明令分歧）：微光上浮顶板钉死超时 = 300t（5s）。
+ *  原版无任何超时/绕行——钉死恢复面只有下潜拾取（Player.cs:35187 钉死态速度≈0.05
+ *  可拾）或挖开顶板；本仓超时后置 tileCollide=false 穿块上浮（fixedUpdate shimmered
+ *  段），脱离微光柱即恢复。 */
+const SHIMMER_UNSTICK_T = 300;
+
 export class ItemDrop extends Entity {
   w = 12; h = 12;
   itemId: number;
@@ -94,6 +100,14 @@ export class ItemDrop extends Entity {
    *  ——与状态域 this.shimmerWet（整盒微光探针,转化判定定谳口径）分离：混合液池
    *  （水垫微光）首中水格时原版 Collision.shimmer 不置 → 溅花支走水档 */
   splashShimmerWet = false;
+  /** ★偏差1 穿块开关（Body.tileCollide 镜像,TileCollision.ts moveAndCollide :1077
+   *  false=位移直写通道）：缺省 undefined = 照常碰撞（原版同相）；上浮钉死
+   *  ≥SHIMMER_UNSTICK_T 拍置 false 穿顶板上浮，脱离微光柱（③支悬停）或被拉动
+   *  摘旗（shimmered=false）后恢复 undefined */
+  tileCollide?: boolean | undefined;
+  /** ★偏差1 钉死计数：连续「上浮中顶头碰撞」拍数（moveAxis 上顶支置 hitHead,
+   *  TileCollision.ts:465-466；受阻链任一拍断开即归零） */
+  shimmerStuckT = 0;
 
   constructor(x: number, y: number, itemId: number, stack = 1, vx = 0, vy = -2) {
     super();
@@ -356,17 +370,17 @@ export class ItemDrop extends Entity {
       // 整盒擦到任一 liquid>0 微光格即 true（坡面格另判上格液体）。★旧实现中心单格
       // >30——浅液面/盒缘擦液时 Shimmering 不跑 → 同一物品"有时能分解有时不能"根因
       this.shimmerWet = liquidCollision(st0, this.x, this.y, this.w, this.h, 4);
+      // 上浮意图（★偏差1 钉死检测消费位：moveAndCollide 后按 rising∧hitHead 连锁计数）
+      let rising = false;
       if (this.shimmered) {
         // 已微光化：无重力（:487 gravity=0）。上浮/悬停三分支（:515-536）：
         //  ① shimmerWet（身在微光中）→ vy-0.05/t 钳 -4 继续上浮；
         //  ② 干态但**下方 2 格内仍有微光**（还悬在微光柱上方）→ 同①继续上浮；
         //  ③ 干态且下方无微光 → vy×0.9 衰减悬停——速度降到 <0.2 才可被拾取
         //    （此前漏了②③：恒加速上浮 → 撞顶也不减速 → 永远 ≥0.2 永不可拾）
-        let rising: boolean;
         if (this.shimmerWet) {
           rising = true;
         } else {
-          rising = false;
           const bx = Math.floor(this.cx / TILE), by = Math.floor(this.cy / TILE);
           for (let j = by; j < by + 2; j++) {
             if (st0.inBounds(bx, j)) {
@@ -414,6 +428,25 @@ export class ItemDrop extends Entity {
       this.vx *= 0.95;
       if (Math.abs(this.vx) < 0.1) this.vx = 0;
       moveAndCollide(this, game.world, this.vx, this.vy);
+      // ★偏差1（2026-09-17 用户拍板明令分歧）：上浮顶板钉死超时穿块兜底。
+      //  原版：上浮走正常 TileCollision（WorldItem.cs:1059/:1072 ← Collision.cs:2446
+      //  上行钳制 velocity.Y=0），头顶实心顶板 = 垂直钉死在接触点下——无超时/无绕行/
+      //  无按龄消失（1.4.4+），恢复面只有下潜拾取（钉死态速度≈0.05<0.2 可拾,
+      //  Player.cs:35187）或挖开顶板。本仓：连续 ≥SHIMMER_UNSTICK_T 拍「上浮中顶头
+      //  碰撞」（moveAxis 上顶支置 hitHead,TileCollision.ts:465-466;受阻链任一拍
+      //  断开即归零）→ tileCollide=false 直写位移穿块上浮，直至 ③支悬停（脱离微光柱）
+      //  或被拉动摘旗（shimmered=false）恢复碰撞。通畅柱上浮/液面悬停正常路径
+      //  hitHead 恒假，逐位保持原版；穿块窗口内被拾取即随拾取销毁，无状态泄漏面。
+      if (this.shimmered && rising && this.hitHead) {
+        this.shimmerStuckT++;
+      } else {
+        this.shimmerStuckT = 0;
+      }
+      if (this.shimmerStuckT >= SHIMMER_UNSTICK_T) this.tileCollide = false;
+      if (this.tileCollide === false && (!this.shimmered || !rising)) {
+        this.tileCollide = undefined;   // 脱离微光柱/摘旗 → 恢复原版碰撞
+        this.shimmerStuckT = 0;
+      }
       // 岩浆死亡（WorldItem.Update :576-580：MoveInWorld 后 lavaWet → CheckLavaDeath）。
       // 仅非抓取帧（else 分支）——被抓取帧走 ApplyMovement 不检岩浆
       const lavaNow = liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 2);
@@ -650,19 +683,35 @@ export class ItemDrop extends Entity {
     //  缺省参（炼金 1/3 蒸发不可复现,NB-G 唯一硬阻塞）
     const outcome = decraftOutcome(vid, this.stack, crimsonWorld, decraftRand3(game.world));
     if (!outcome) return false;   // 空垛不回退：炼金全蒸发时原版照扣 stack（:1879-1933）
+    // ★偏差2（2026-09-17 用户拍板明令分歧）：产物出生列预扫（decraftSpawnX）——
+    //  原版恒在分解点出生（SpawnShimmeredItem WorldItem.cs:629-645 → RequestNewItem
+    //  `worldItem.Center = center`,Item.cs:49747），上浮被顶板钳死即永久钉住；本仓
+    //  在通畅列存在时改列出生，整湖有盖/超深回退原位 = 原版（详方法注）。
+    const sx = this.decraftSpawnX(game);
     outcome.piles.forEach((p, k) => {
       const key = VANILLA_ITEM_KEY_BY_ID[p.vid];
       if (!key) return;
-      // 散射序号按【材料】递增（原版 num7，:1900/1929-1936）而非按垛：超额拆垛
+      // 散射序号按【材料】递增（原版 num7，:1846/:1855）而非按垛：超额拆垛
       // 共享同一序号、炼金全蒸发的材料序号不空缺——曾 k+1 按垛计数，拆垛后
       // 续材料的散射速度整体错档
-      const n = outcome.slots[k];
-      let vx = this.vx * 0.1;
-      if (outcome.spread) vx = n * (1 + n * 0.05) * (n % 2 === 0 ? -1 : 1);
-      const d = game.spawnDrop(this.cx, this.cy, key, p.stack, vx, this.vy * 0.1);
+      // ★D1 对账修正（2026-09-17）：散射初速对齐 1457 SpawnShimmeredItem
+      //  （WorldItem.cs:629-645）——:631 `new Vector2(itemNumber * (itemNumber % 2 * 2
+      //  - 1), 0f)` = 整值 ±num7（0,+1,−2,+3…）、Y 恒 0，经 RequestNewItem
+      //  （Item.cs:49748 velocity.HasValue 全量覆盖出生速度）生效；1457 num7【0 基】
+      //  （:1846 `int num7 = 0` + :1855 后缀自增 `SpawnShimmeredItem(num7++,…)`），
+      //  本仓 slots 1 基（忠实 1456：WorldItem1456.cs decraft 材料循环头 num7++）
+      //  → n = slots[k]−1。曾用 1456 旧式（1456 :676-678 `n×(1+n·0.05)` 偶数×−1 +
+      //  requiredItem[1] spread 门 + 出生速度=random×0.1）——08-23 基线切换漏网，
+      //  recon-item 闸门只对账数据面不覆盖速度面故此前未爆。1457 无 spread 门：
+      //  单材料 num7=0 → 速度自然为零向量，不需分支。`||0` = n=0 时 0×(−1)=−0 归一。
+      const n = outcome.slots[k] - 1;
+      const vx = n * (n % 2 * 2 - 1) || 0;      // :631 逐字（0,+1,−2,+3,−4…）
+      const d = game.spawnDrop(sx, this.cy, key, p.stack, vx, 0);
       if (!d) return;
-      d.shimmered = true;   // :1924 上浮漂浮
-      d.shimmerTime = 1;    // :1923
+      d.shimmered = true;   // :635（1456 :1924 同位）上浮漂浮
+      d.shimmerTime = 1;    // :634（1456 :1923 同位）
+      // （1457 SpawnShimmeredItem :636-637 出生硬置 shimmerWet/wet=true——本仓次帧
+      //  全盒探针回算（fixedUpdate liquidCollision），盒擦液即真，净行为同相）
     });
     this.stack -= outcome.consumed;              // :1927 stack -= 次数×createStack
     if (this.stack <= 0) { this.stack = 0; this.dead = true; }
@@ -674,6 +723,47 @@ export class ItemDrop extends Entity {
     game.playSfxFile?.('Item_176', 0.9, this.cx, this.cy);
     game.achievements?.notifyProgressionEvent(27);
     return true;
+  }
+
+  /** ★偏差2（2026-09-17 用户拍板明令分歧）：decraft 产物出生列预扫。
+   *  原版：产物恒在分解点出生（SpawnShimmeredItem WorldItem.cs:629-645 →
+   *  RequestNewItem `worldItem.Center = center`,Item.cs:49747），上浮被 TileCollision
+   *  上行支（Collision.cs:2446）钳制 → 头顶实心顶板 = 垂直钉死（恢复面 = 下潜拾取/
+   *  挖顶板，无超时）。本仓：自原物中心列按 |offset| 递增（0,+1,−1…+6,−6，同距先右）
+   *  取最近「通畅列」= 出生格在微光液内 ∧ 自出生行向上至首个非微光液格（=浮出平衡面）
+   *  全程 st.isSolid 为假 ∧ 平衡面上一格无实心（悬停平衡中心横跨该边界）；命中 →
+   *  产物改在该列中心出生（offset=0 保持原版中心像素 = 常态零偏差）；整湖有盖/超深
+   *  → 回退原物中心 = 原版。谓词与 moveAxis 上顶支同源（st.isSolid）——坡/半砖按
+   *  实心保守计（原版部分坡格不拦上行，保守回退 = 宁可原版勿误移）。
+   *  仅选出生点，上浮物理逐位不动；与偏差1（超时穿块）分层：预扫失败才由兜底接手。
+   *  联机：纯世界读态 + 固定扫描序，各端确定性同结果。 */
+  private decraftSpawnX(game: GameHooks): number {
+    const st = game.world.store;
+    const col0 = Math.floor(this.cx / TILE);
+    const row0 = Math.floor(this.cy / TILE);
+    const open = (col: number): boolean => {
+      if (!st.inBounds(col, row0)) return false;
+      const i0 = st.idx(col, row0);
+      if (st.isSolid(col, row0)) return false;
+      if (!(st.liquid[i0] > 0 && st.liquidType[i0] === 4)) return false;
+      for (let r = row0 - 1; r >= row0 - 64; r--) {
+        if (!st.inBounds(col, r)) return false;
+        if (st.isSolid(col, r)) return false;
+        const li = st.idx(col, r);
+        if (!(st.liquid[li] > 0 && st.liquidType[li] === 4)) {
+          // 首个非微光液格 = 浮出平衡面（空气或覆盖水层,与 ③支终止语义同口径）；
+          // 平衡中心横跨其上格边界 → 上格也须无实心,否则产物钉在液面下
+          if (r - 1 < 0 || !st.inBounds(col, r - 1) || st.isSolid(col, r - 1)) return false;
+          return true;
+        }
+      }
+      return false;   // 64 格内未见平衡面（超深/异常柱）→ 保守回退原版
+    };
+    for (let off = 0; off <= 6; off++) {
+      if (open(col0 + off)) return off === 0 ? this.cx : (col0 + off + 0.5) * TILE;
+      if (off > 0 && open(col0 - off)) return (col0 - off + 0.5) * TILE;
+    }
+    return this.cx;
   }
 
   // ---- 出入液溅花 1:1（WorldItem.cs MoveInWorld :884-1050；2026-09-17 微光发声面

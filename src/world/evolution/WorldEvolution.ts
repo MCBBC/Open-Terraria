@@ -64,6 +64,8 @@ const SPREAD_UNDERGROUND = new Set([23, 661, 109, 199, 662, 60, 70, 633, 226]);
 const IS_VINE = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
 // TileID.Sets.CanGrowCrystalShards（:341）
 const CAN_GROW_SHARDS = new Set([117, 116, 164, 402, 403]);
+// TileID.Sets.Boulders（:195）——多向锚定物（129/149 水晶碎块/节日彩灯）无效锚族
+const MULTI_DIR_ANCHOR_INVALID = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 10]);
 // TileID.Sets.Spreads{Corruption,Crimson,Hallow}（:331/:349/:339）
 const SPREADS_CORRUPTION = new Set([23, 661, 25, 112, 398, 400, 163, 32, 636, 24]);
 const SPREADS_CRIMSON = new Set([199, 662, 203, 234, 399, 401, 200, 352, 205, 201]);
@@ -453,6 +455,9 @@ export class WorldEvolution {
       if (vid > 0) host.spawnKillDrop!(vid, x, y, stack);
     };
     switch (sheet) {
+      case 129:                                               // ★G-129（2026-09-18）水晶碎块
+        drop(fx >= 324 ? 4988 : 502);                         // cs:65496-65504：大簇→软体女王水晶
+        break;                                                // （Gelatin Crystal）/普通→碎魔晶 502
       case 5:
       case 596:
       case 616:
@@ -832,6 +837,25 @@ export class WorldEvolution {
     if (sh === 723 || sh === 724) {                          // ★② cs:87202 锚桩（纯重锚,永不杀）
       this.anchorCheckAt(x, y);
       return false;
+    }
+    if (sh === 129 || sh === 149) {                          // ★G-129（2026-09-18）水晶碎块/节日彩灯
+      return this.multiDirCheckAt(x, y);                     // TileFrameImportant case 129/149（cs:85727-85752）
+    }
+    return false;
+  }
+
+  /** TileFrameImportant case 129/149（cs:85727-85752）运行时臂：CheckAndAdjust
+   *  （cs:60805）无锚 → KillTile（默认参=带掉落,本仓 killFlat;掉落面=killDropFace
+   *  case 129 → 502/4988 按帧,cs:65496-65504）；有锚 → 帧向重落（原版无条件按优先向
+   *  写 frameY）。此前运行时缺此派发:锚块被挖/被转后碎块悬空不落。 */
+  private multiDirCheckAt(x: number, y: number): boolean {
+    const st = this.host.store;
+    const fy = this.multiDirFrameY(x, y);
+    if (fy < 0) return this.killFlat(x, y);
+    const i = st.idx(x, y);
+    if (st.frameY[i] !== fy) {
+      st.frameY[i] = fy;
+      this.host.afterSilentTileWrite?.(x, y, x, y);
     }
     return false;
   }
@@ -1678,13 +1702,39 @@ export class WorldEvolution {
   }
 
   /** 放置 1×1 装饰（帧 style×18,0；目标须为空——PlaceTile EmptyTile 门） */
-  private place1(x: number, y: number, sheet: number, style = 0, variants = 1): boolean {
+  private place1(x: number, y: number, sheet: number, style = 0, variants = 1, fy = 0): boolean {
     const st = this.host.store;
     if (!st.inBounds(x, y) || this.active(x, y)) return false;
     const t = S(sheet);
     if (!t) return false;
-    st.setTile(x, y, t, (style + (variants > 1 ? Math.floor(this.rng() * variants) : 0)) * 18, 0);
+    st.setTile(x, y, t, (style + (variants > 1 ? Math.floor(this.rng() * variants) : 0)) * 18, fy);
     return true;
+  }
+
+  /** CheckAndAdjustMultiDirectionalTile（cs:60805-60855）× TileFrameImportant case 129/149
+   *  （cs:85727-85752）帧向落定：锚=active 且非巨石/关门（TileID.Sets.Boulders :195 +
+   *  type 10）且按向 SolidTileAllow*Slope（ValidAnchorForMultiDirectionalTile cs:60788-
+   *  60803）且锚型 tileSolid && !tileSolidTop（cs:60838-60852）。优先级 下>左>右>上 →
+   *  frameY 0(站立)/54(左锚右伸)/36(右锚左伸)/18(垂挂)。无锚返回 -1（=原版 KillTile/
+   *  PlaceTile 拒绝语义,调用方决定杀或不落）。 */
+  private multiDirFrameY(x: number, y: number): number {
+    const st = this.host.store;
+    const anchor = (ax: number, ay: number, dir: number): boolean => {
+      if (!st.inBounds(ax, ay) || !this.active(ax, ay)) return false;
+      const sh = sheetOf(this.typeAt(ax, ay));
+      if (sh < 0 || MULTI_DIR_ANCHOR_INVALID.has(sh)) return false;
+      if (dir === 0 && !this.solidTileAllowTopSlope(ax, ay)) return false;
+      if (dir === 1 && !this.solidTileAllowBottomSlope(ax, ay)) return false;
+      if (dir === 2 && !this.solidTileAllowLeftSlope(ax, ay)) return false;
+      if (dir === 3 && !this.solidTileAllowRightSlope(ax, ay)) return false;
+      const d = TILE_DEFS[this.typeAt(ax, ay)];
+      return !!d && d.solid && !d.platform;
+    };
+    if (anchor(x, y + 1, 1)) return 0;    // 下方锚 → 站立（cs:60838 newFrameDirection=0）
+    if (anchor(x - 1, y, 2)) return 54;   // 左锚 → frameY 54
+    if (anchor(x + 1, y, 3)) return 36;   // 右锚 → frameY 36
+    if (anchor(x, y - 1, 0)) return 18;   // 上锚 → 垂挂
+    return -1;
   }
   /** 放置 w×h 整件（帧 dx*18, dy*18；区域全空才放）。styleX=样式基偏移（X 轴，
    *  如 2×2 横排样式族 style*36，TileObjectData StyleHorizontal=true） */
@@ -3166,7 +3216,12 @@ export class WorldEvolution {
           //  先 Next(50) 后 Next(18),流位差同掷数异序）。
           let style = Math.floor(this.rng() * 18);
           if (this.rng() < 1 / 50) style = 18 + Math.floor(this.rng() * 6);
-          this.place1(i + dx, j + dy, 129, style);
+          // ★G-129（2026-09-18）：PlaceTile case 129（cs:60171-60180）只写 frameX=style*18,
+          //  frameY 由 SquareTileFrame→TileFrameImportant case 129（cs:85727-85752）→
+          //  CheckAndAdjustMultiDirectionalTile（cs:60805-60855,锚向优先 下>左>右>上）落定
+          //  ——此前恒 frameY=0:侧生/垂生碎块渲染地面行精灵（贴错帧行=形态偏差同源）。
+          const fy = this.multiDirFrameY(i + dx, j + dy);
+          if (fy >= 0) this.place1(i + dx, j + dy, 129, style, 1, fy);
         }
       }
     }

@@ -28,7 +28,7 @@ import { Input, armBlockMouse } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction, seasonalHolidayFlags } from '../world/World';
 import { newCensusCounter } from '../world/EmotePick';
-import { anchorBeeBottom, breakHiveBlock, larvaSummonInRange } from '../world/hive';
+import { anchorBeeBottom, beeSpawnAuthority, breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { canCutTile } from '../world/CanCutTile';
 import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
@@ -7408,7 +7408,9 @@ export class Game implements GameHooks {
    *  proj 10 净化 → Convert case 11；11 → 腐化 1；463 → 猩红 4（均 tiles+walls）
    *  NPC 转化：10 命中 bound 税务官（原版地狱酷刑者 534 → Transform 441，:13651-13655）
    *  → 走 freeBoundNpc 转正。687 城镇史莱姆黄 → 683 链无对应实体（未实装，登记）；
-   *  11/463 的 AttemptToConvertNPCToEvil（兔/企鹅击杀等）未接（登记） */
+   *  11 邪恶粉/463 猩红粉命中 → AttemptToConvertNPCToEvil（1457 Projectile.cs:14828-14845,
+   *  crimson=type==463,盒=NPC position/width/height 原盒相交）→ attemptConvertNpcToEvil
+   *  单源（BJ114-c 登记债收口 2026-09-18；血月/粉末两消费面共用） */
   applyPowder(projId: number, x: number, y: number, w: number, h: number): void {
     const convType = projId === 10 ? 11 : projId === 11 ? 1 : projId === 463 ? 4 : -1;
     if (convType > 0) {
@@ -7425,6 +7427,12 @@ export class Game implements GameHooks {
           this.evolution.convert(i, j, convType);
         }
       }
+    }
+    // :14828-14845 邪恶粉 11/猩红粉 463 命中 NPC → AttemptToConvertNPCToEvil
+    //（逐拍,crimson=type==463,盒=本弹 hitbox 与 NPC 原盒逐只相交门——转化表与血月
+    //  同源,复用单源;BJ114-c 登记债收口 2026-09-18）
+    if (projId === 11 || projId === 463) {
+      this.attemptConvertNpcToEvil(projId === 463, { x, y, w, h });
     }
     if (projId !== 10) return;
     // :13677-13684 净化粉命中神秘青蛙 687 → Poof + Transform(683) 神秘史莱姆 +
@@ -7471,6 +7479,62 @@ export class Game implements GameHooks {
         this.playSfxFiles(['NPC_Killed_1'], 0.7);
         this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', Lang.npcName(441) ?? 'Tax Collector'), 50, 125, 255);
         break;
+      }
+    }
+  }
+
+  /** AttemptToConvertNPCToEvil 消费面单源（NPC.cs:93050-93085,1458 同行号同文;
+   *  表=BLOOD_MOON_EVIL [腐化,猩红];Transform 底层 :81909-81970——底边对齐/X/速度
+   *  不动/血量比例结转(:81931),敌怪支随 transformTo 单源、小动物支随 fromVanilla
+   *  重建+显式补齐）。消费面×2：血月 UpdateNPC_BloodMoonTransformations(:93033-93048,
+   *  crimson=WorldGen.crimson)+ 粉末 Damage_TryUsingPowders(Projectile.cs:14840,
+   *  crimson=type==463)。桶集合=原版 Main.npc 全量逐只;可转 vid 全为野生小动物/敌怪,
+   *  TownNPC 桶（城镇宠物 637/638/656/670-684=TOWN_PET_VIDS）与本表无交集 ⇒
+   *  enemies+critters 两桶即 1:1（血月面同集合）。box 形参=粉末面逐 NPC 相交门
+   *  （:14834-14839 projRectangle.Intersects(NPC position/width/height 原盒,边贴不
+   *  相交);血月面无盒=全表逐只(:93042)。钉零按 caller 面(:93037-93046 显式重钉)
+   *  保留——transformTo 本体未内置 :81931-81934 钉零（鱼链 230↔55 等其余 Transform
+   *  消费面的同款缺口=域外登记,未动）。 */
+  private attemptConvertNpcToEvil(crimson: boolean, box?: { x: number; y: number; w: number; h: number }): void {
+    const w = this.world;
+    // Rectangle.Intersects 语义（边贴=false）：x<o.x+o.w && x+w>o.x && y<o.y+o.h && y+h>o.y
+    const hit = (e: { x: number; y: number; w: number; h: number }): boolean =>
+      !box || (box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y);
+    for (const n of this.entities.enemies) {
+      const e = n as Enemy;
+      if (e.dead || !hit(e)) continue;
+      const id = e.vanillaId ?? -1;
+      const pair = BLOOD_MOON_EVIL.get(id);
+      if (pair) {
+        // ★value==0 钉零（:93037-93046:变身【前】value==0（:93038）→ 变身后强钉
+        //  0（:93043-93046）——小动物零掉钱面;腐化变体自带 value（47=500f,:9386）
+        //  不得入账）
+        const wasValueZero = (e.def.value ?? 0) === 0;
+        if (e.transformTo(crimson ? pair[1] : pair[0], w.store, false, this) && wasValueZero) {
+          e.def = { ...e.def, value: 0 };
+        }
+      }
+    }
+    for (const c of this.entities.critters) {
+      const cr = c as Enemy;
+      if (cr.dead || !hit(cr)) continue;
+      const pair = BLOOD_MOON_EVIL.get(this.critterVid(cr));
+      if (pair) {
+        const wasValueZero = (cr.def.value ?? 0) === 0;   // :93037-93046 同上
+        cr.dead = true;
+        const en = Enemy.fromVanilla(crimson ? pair[1] : pair[0], cr.cx, cr.cy);
+        if (en) {
+          // ★Transform 底保留语义（:81912-81918 position.Y+=旧高→SetDefaults→-=新高
+          //  ⇒底边对齐;X/velocity 全程不动;:81931 life 比例结转）——敌怪支走
+          //  transformTo 单源已同相;小动物支桶迁移须重建,旧实现把顶左 (cr.x,cr.y)
+          //  喂 fromVanilla 中心锚=左移 w/2 上移 h/2+速度清零（BJ113 域外登记④）
+          en.x = cr.x;
+          en.y = cr.y + cr.h - en.h;
+          en.vx = cr.vx; en.vy = cr.vy;
+          en.hp = Math.max(1, Math.trunc((cr.hp * en.maxHp) / cr.maxHp));   // :81931
+          if (wasValueZero) en.def = { ...en.def, value: 0 };
+          this.entities.add(en, 'enemies');
+        }
       }
     }
   }
@@ -9212,46 +9276,10 @@ export class Game implements GameHooks {
     }
     // ---- 血月小动物腐化（UpdateNPC_BloodMoonTransformations :93033-93048：血月中
     //      每 NPC 尝试 AttemptToConvertNPCToEvil :93050-93085——兔/企鹅/海鸥/金鱼/
-    //      松鼠族 → 腐化变体（猩红世界换猩红表）。敌怪走 transformTo，小动物实体
-    //      替换为敌怪（桶迁移须新对象,迁移后补 Transform 锚定）----
+    //      松鼠族 → 腐化变体（猩红世界换猩红表）。转化实体面走 attemptConvertNpcToEvil
+    //      单源（血月 :93042 与粉末 Projectile.cs:14840 两消费面共用,BJ114-c 收口）----
     if (w.clock.bloodMoon) {
-      for (const n of this.entities.enemies) {
-        const e = n as Enemy;
-        if (e.dead) continue;
-        const id = e.vanillaId ?? -1;
-        const pair = BLOOD_MOON_EVIL.get(id);
-        if (pair) {
-          // ★value==0 钉零（:93037-93046:变身【前】value==0（:93038）→ 变身后强钉
-          //  0（:93043-93046）——小动物零掉钱面;腐化变体自带 value（47=500f,:9386）
-          //  不得入账）
-          const wasValueZero = (e.def.value ?? 0) === 0;
-          if (e.transformTo(w.crimson ? pair[1] : pair[0], w.store, false, this) && wasValueZero) {
-            e.def = { ...e.def, value: 0 };
-          }
-        }
-      }
-      for (const c of this.entities.critters) {
-        const cr = c as Enemy;
-        if (cr.dead) continue;
-        const pair = BLOOD_MOON_EVIL.get(this.critterVid(cr));
-        if (pair) {
-          const wasValueZero = (cr.def.value ?? 0) === 0;   // :93037-93046 同上
-          cr.dead = true;
-          const en = Enemy.fromVanilla(w.crimson ? pair[1] : pair[0], cr.cx, cr.cy);
-          if (en) {
-            // ★Transform 底保留语义（:81912-81918 position.Y+=旧高→SetDefaults→-=新高
-            //  ⇒底边对齐;X/velocity 全程不动;:81931 life 比例结转）——敌怪支走
-            //  transformTo 单源已同相;小动物支桶迁移须重建,旧实现把顶左 (cr.x,cr.y)
-            //  喂 fromVanilla 中心锚=左移 w/2 上移 h/2+速度清零（BJ113 域外登记④）
-            en.x = cr.x;
-            en.y = cr.y + cr.h - en.h;
-            en.vx = cr.vx; en.vy = cr.vy;
-            en.hp = Math.max(1, Math.trunc((cr.hp * en.maxHp) / cr.maxHp));   // :81931
-            if (wasValueZero) en.def = { ...en.def, value: 0 };
-            this.entities.add(en, 'enemies');
-          }
-        }
-      }
+      this.attemptConvertNpcToEvil(w.crimson);
     }
     this.updateDoorHelperAuto();   // SW-AS1 2026-09-05:旧 updateTallGateAuto 退役,门自动开关全量入 DoorOpeningHelper
     if (player.dead) {
@@ -20557,11 +20585,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         gp.onBeehiveKill = (wet, bx, by, _ovx, _ovy) => {
           if (wet) {
             // :76626-76628 Item.NewItem(EntitySource_Loot, Center, 1124, Next(2,6))
-            // （Next(2,6)=2..5;1124=Hive 蜂巢块,ItemID.cs:3794）——原版 1124 可放置
-            // （createTile=225,Item.cs:13895）;仓内 vi_1124_Hive 自动 def 无 tile 字段
-            // =不可放置空壳,改投 place_v_225_hive_block（tile 面全功能,与 tile-break
-            // 臂 dropHiveItem 同键,BJ113 域外债定谳 2026-09-17）
-            this.spawnDrop(bx, by, 'place_v_225_hive_block', 2 + Math.floor(Math.random() * 4), 0, 0);
+            // （Next(2,6)=2..5;1124=Hive,ItemID.cs:3794）。★BJ114-b 定谳翻案（2026-09-18
+            // 亲读）：原版 1124【不可放置】——Item.cs case 1124（:13836-13845）无
+            // createTile;createTile=225 在 case 1129 蜂巢魔杖（:13889 tileWand=1124+
+            // :13895 createTile=225;vanilla.json 游戏数据导出 1124=null/1129=225 双源
+            // 同证）,tile 225 破坏掉落=1124（WorldGen.cs:65994）。旧注「1124 可放置
+            // Item.cs:13895」系 case 1129 误读,改投 place_v_225_hive_block=无中生有
+            // 放置面。两掉落臂归一 vi_1124_Hive（=原版物品 id;挥动发蜂武器面
+            // swingVid===1124 已接;放置走 1129 魔杖——魔杖 tileWand 弹药消耗面未接,
+            // 登记债）;vi_1124 补 tile 的任务原案按反编译证伪废弃）
+            this.spawnDrop(bx, by, VI(1124), 2 + Math.floor(Math.random() * 4), 0, 0);
             return;
           }
           let n = 2;
@@ -21516,6 +21549,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.breakXmasTree(x, y);
       return;
     }
+    // 猪龙彩罐（tile 454）：原版链 = 任一格 KillTile → 尾 SquareTileFrame →
+    // TileFrameImportant case 34/454（:86800-86801,1458 :86808-86809 同文）→
+    // CheckChand（:53254,1458 :53262 同文）整件 4×3 失配杀 + type==454 战利品掷
+    // （:53339-53414）。KillTile 454 ∈ GetItemDrops no-drop 组（:66454）→【无】
+    // 放置物品返还——通用 object 锚点支会掉 place_v_454（越权回收）,须特支承担。
+    // 须在 object 锚点分支前拦（判据=有真实放置物品,vanillaPlaceableTileKeys 命中）
+    if (type === TILE_BY_KEY['v_454_pigronata']) {
+      this.breakPigronata(x, y);
+      return;
+    }
     // 蜂巢块（原版 KillTile case 225, WorldGen.cs:65985-66009,1458 :65993 同文）：
     // 1/3 变满蜂蜜（打破流蜜），否则掉蜂巢物品 + 1/2 概率出 1-2 只蜜蜂。
     // ★case 225 全文在 KillTile_GetItemDrops（:64477）内=受掉落段 noItem 门
@@ -22187,8 +22230,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const rng = new RNG((Math.random() * 1e9) | 0);
     const hive = TILE_BY_KEY['v_225_hive_block']!;
     breakHiveBlock(st, x, y, rng, {
-      dropHiveItem: (px, py) => this.spawnDrop(px, py, 'place_v_225_hive_block', 1),
+      // 掉落=原版物品 1124（WorldGen.cs:65994 dropItem=1124）——键归一 vi_1124_Hive
+      //（★BJ114-b 定谳翻案 2026-09-18:1124 不可放置,place_v_225_hive_block 退役,
+      //  与 655 弹 wet 臂同键收敛;详见 applyPowder 侧 beehive 臂注）
+      dropHiveItem: (px, py) => this.spawnDrop(px, py, VI(1124), 1),
       spawnBee: (px, py, r) => {
+        // ★MP 管籍（原版 :64373 `Main.netMode != 1` 门,红蓝-C ②定谳 2026-09-18）：
+        // 非权威端（访客/serverAuth 客户端=原版 netMode==1 位）不本地掷蜂——
+        // NPC 可见性通道=权威端独占（msg23）,访客本地蜂=幻影实体永不可达对端。
+        // 掉落/流蜜臂不门（msg21 per-peer 与 module0 液体通道已跨端承载,原版
+        // 服务器半边在本仓由既有通道等效承载）。详 world/hive.ts beeSpawnAuthority
+        if (!beeSpawnAuthority(this.net)) return;
         // type=Next(210,212)（:66002）；锚=NewNPC(X,Y)→Bottom=(X,Y)（NPC.cs:81594,
         // BJ111 判例）——盒底=py（y*16+15=格底上方 1px）,曾中心锚低 h/2（210 h=12
         // 低 6px/211 h=8 低 4px,蜂半嵌下格）;初速=Next(-200,201)×0.002 离散 401 档
@@ -22444,6 +22496,85 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, '#218755', 10, 2);
     this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
+  }
+
+  /** 猪龙彩罐整件破碎（CheckChand :53254 的 454 支,1458 :53262 同文 diff=same）：
+   *  4×3 整件清（:53325-53333 kill 环——KillTile 454 在 GetItemDrops no-drop 组
+   *  :66454=逐格零掉落,放置物品不返还）+ type==454 战利品掷（:53339-53414）+
+   *  destroyObject 复位（:53417）+ (w+2)×(h+3) 邻域重帧（:53418-53426——本仓
+   *  setTile→onTileChanged→checkDecorSupport 'hangs' 同域,残件由 DECOR 扫裁决）。
+   *  战利品 Main.rand.Next(9) 五态：0/1 无（2/9）；2-4 银币 Next(10,31) 拆
+   *  Next(2,11)（3/9）；5-6 银币 Next(60,80) 拆 Next(3,16)+1358 派对瓶（2/9）；
+   *  7 银币 Next(10,31) 拆 Next(2,9)+73 金币（1/9）；8 银币 100 拆 Next(3,16)+
+   *  1349 派对弹 Next(30,91) 拆 Next(7,14)+派对瓶+金币（1/9）。弹盒：单件
+   *  (i*16,j*16,32,32)、碎拆 (i*16-10,j*16-10,52,52)——两盒同心 (i*16+16,j*16+16),
+   *  spawnDrop 收中心锚 → 同点 +16。掷源 Main.rand=Math.random（蜂巢 BJ113 判例,
+   *  6 种子统计守卫）。掉落格 = SW-BJ40 触发格（列优先窗扫首个同型活格——玩家挖
+   *  中段格=邻格派发 CheckChand;挖锚格/失撑级联=锚格,残件尾格回落本格,与 object
+   *  支同口径）。音：KillTile_PlaySounds(454) 落 default PlaySound(0)=Dig（:67086-
+   *  67089 尾段 else-if type!=138——tileCut chop 近似分支在 454 上越权,直放 dig）。
+   *  尘：KillTile_GetTileDustAmount default=10（:67127-67131）×mapColor 粒。 */
+  private breakPigronata(x: number, y: number) {
+    const st = this.world.store;
+    const pg = TILE_BY_KEY['v_454_pigronata']!;
+    const i0 = st.idx(x, y);
+    const ax = x - (Math.floor(st.frameX[i0] / 18) % 4);   // CheckChand num 解码同式(:53268-53277,模块化 %4≡原版逐带)
+    const ay = y - (Math.floor(st.frameY[i0] / 18) % 3);
+    // 掉落格：列优先窗扫首个同型活格（SW-BJ40 multiTileDropTriggerCell）；无合格格
+    // （残件尾格/整件仅剩本格）→ 本格（原版 CheckChand 的 i,j 即派发格）
+    const trig = multiTileDropTriggerCell(
+      (nx, ny) => (st.inBounds(nx, ny) ? st.type[st.idx(nx, ny)] : 0),
+      (nx, ny) => st.inBounds(nx, ny) && st.hasTile(nx, ny),
+      x, y, pg, ax, ay, 4, 3,
+    );
+    const dx0 = trig ? trig.x : x;
+    const dy0 = trig ? trig.y : y;
+    for (let dx = 0; dx < 4; dx++) {
+      for (let dy = 0; dy < 3; dy++) {
+        if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === pg) {
+          st.setTile(ax + dx, ay + dy, 0);
+        }
+      }
+    }
+    this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[pg]?.mapColor ?? '#ae10b0', 8, 1.8);
+    // 战利品掷（:53339-53414 逐式——Main.rand.Next(a,b)=a+⌊r×(b-a)⌋ 上开区间）
+    const r9 = Math.floor(Math.random() * 9);
+    const nextBI = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo));
+    const chunksOf = (total: number, lo: number, hi: number): number[] => {
+      const out: number[] = [];
+      let rest = total;
+      while (rest > 0) {
+        let c = nextBI(lo, hi);
+        if (c > rest) c = rest;
+        rest -= c;
+        out.push(c);
+      }
+      return out;
+    };
+    const coinKey = VANILLA_ITEM_KEY_BY_ID[72];
+    const goldKey = VANILLA_ITEM_KEY_BY_ID[73];
+    const flaskKey = VANILLA_ITEM_KEY_BY_ID[1358];
+    const bulletKey = VANILLA_ITEM_KEY_BY_ID[1349];
+    const dropChunks = (key: string | undefined, arr: number[]) => {
+      if (!key) return;
+      for (const n of arr) this.spawnDrop(dx0 * TILE + 16, dy0 * TILE + 16, key, n);
+    };
+    if (r9 >= 2 && r9 <= 4) {
+      dropChunks(coinKey, chunksOf(nextBI(10, 31), 2, 11));
+    } else if (r9 === 5 || r9 === 6) {
+      dropChunks(coinKey, chunksOf(nextBI(60, 80), 3, 16));
+      if (flaskKey) this.spawnDrop(dx0 * TILE + 16, dy0 * TILE + 16, flaskKey, 1);
+    } else if (r9 === 7) {
+      dropChunks(coinKey, chunksOf(nextBI(10, 31), 2, 9));
+      if (goldKey) this.spawnDrop(dx0 * TILE + 16, dy0 * TILE + 16, goldKey, 1);
+    } else if (r9 === 8) {
+      dropChunks(coinKey, chunksOf(100, 3, 16));
+      dropChunks(bulletKey, chunksOf(nextBI(30, 91), 7, 14));
+      if (flaskKey) this.spawnDrop(dx0 * TILE + 16, dy0 * TILE + 16, flaskKey, 1);
+      if (goldKey) this.spawnDrop(dx0 * TILE + 16, dy0 * TILE + 16, goldKey, 1);
+    }
+    // r9 ∈ {0,1}（2/9）：无战利品（:53339 switch 无 default 支）
   }
 
   /** bonusWood 掷骰用的手持斧力（KillTile_GetTreeDrops :66306-66307 读最近玩家
@@ -24678,6 +24809,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // stylePlumb（M-3b）：placeStyle 子样式液体档（火把外 27 族水下/岩浆可放性，
       // recon-tileobj liqStyles；缺省 0=基记录,行为不变）
       && !validateAnchors(st, tx, ty, anchorRec!, itemDef.placeStyle ?? 0)) return;   // 双保险(状态未变时恒真)
+    // ★猪龙彩罐重复放置门（PlaceThing_Tiles_BlockPlacementForRepeatedPigronatas,
+    //  Player.cs:41731-41745,1458 :41729-41743 同文）：454 ∈ tileCut（Main.cs:8460）
+    //  → CanPlace 占位门对旧彩罐格豁免（TileObject.cs:357 cuttable 放行）+ 清格相会
+    //  KillTile 吞件——原版 CanPlace 后本门补位：点击行 4 格（tileTargetX-2..+1 =
+    //  物件顶行 4 列,Origin(2,0) → tileTarget=(ax+2,ay)）任一 active 彩罐 → 拒放
+    //  （同排相邻彩罐不可重叠/吞件;竖向错行重叠原版不拦=本相）。本仓按【吸附后】
+    //  锚位顶行 4 列判（chooseAnchorFromClick 吸附域,保护意图同原版门——防吞旧件;
+    //  原版无吸附=严格点击行,吸附命中他位时判域差一格档,保守侧,备案）。位次=
+    //  CanPlace(validateAnchors) 之后、OverPlayers 门之前（Player.cs:40089-40090 同序）
+    if (anchorCovered && def.vanilla?.sheet === 454) {
+      const pgId = TILE_BY_KEY['v_454_pigronata'];
+      for (let dx = 0; dx < 4; dx++) {
+        if (st.inBounds(tx + dx, ty) && st.hasTile(tx + dx, ty) && st.get(tx + dx, ty) === pgId) return;
+      }
+    }
     // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
     //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
     if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
@@ -36236,6 +36382,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 实为 def.hp)→ 恒假,雷达对一切敌怪恒 0——孢子蝙蝠 634 实报即此总漏检面;
     // 且 dontCountMe 1456 旧 10 id 表缺 1457 新增 23 蠕虫段/Boss 部件 id)
     r.infoAccs.tick(p, this.entities.enemies as never, this.entities.critters as never,
+      this.entities.npcs as never,
       p.cx, p.cy,
       (e) => radarCountsEnemy(e as unknown as { vanillaId: number | null; def?: { friendly?: boolean; damage?: number; hp?: number } }),
       (vid) => npcRarityOf(vid as number | null),
@@ -42433,8 +42580,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  快照返回形状（contract）不变，只是先让脏数据出清再取快照——不去 saveClient/
     //  SaveData 层补钩是因其需要把 Game 实体侧上下文翻过层去，侵入更大。
     this.clearDuplicateHomes('save', true);
+    // ★BJ122 2026-09-18：被缚族不入档——原版 SaveNPCs（WorldFile.cs:1724）只写
+    //  `active && townNPC && type != 368`,SavesAndLoads（NPCID.cs:4807）=仅四塔
+    //  {422,507,517,493};被缚族（BOUND_TOWN_NPC_VANILLA=vanilla
+    //  NPCID.Sets.BoundTownNPCs{105,123,106,685,686,687,354,376,579,589}）均非
+    //  townNPC → 存档/读档=消失,重进世界由 spawner 重刷（重刷链 VanillaSpawner
+    //  :2362/:2366/:2370/:2100/:2122/:2661）。534 税务官是 vanilla townNPC
+    //  （不在该集）照常入档。旧档已入档的 bound 条目读档后自然消散+不再回写。
+    //  ★判别键：bound TownNPC 的 vanillaId 携【城镇】id（wizard=108/town_slime_old
+    //  =679…）,绑缚本体 id 须经 BOUND_TOWN_NPC_ID[npcKey] 反查（BJ122 二修）
     return this.entities.npcs
-      .filter((n): n is TownNPC => n instanceof TownNPC && !n.dead)
+      .filter((n): n is TownNPC => {
+        if (!(n instanceof TownNPC) || n.dead) return false;
+        if (!n.bound) return true;
+        const boundVid = Game.BOUND_TOWN_NPC_ID[n.npcKey];
+        return boundVid === undefined || !Game.BOUND_TOWN_NPC_VANILLA.has(boundVid);
+      })
       .map((n) => ({
         key: n.npcKey,
         x: Math.round(n.x), y: Math.round(n.y),
@@ -45925,7 +46086,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
         for (; ty2 < this.world.h; ty2++) {
           if (st0.type[st0.idx(tx2, ty2)] !== 0) break;
         }
-        this.net.sendSummonIntent(key, tx2 * TILE + 8, Math.max(4, ty2 - 12) * TILE);
+        // 自然路径档（onPlayerTy===undefined）——naturalPath=true 随线（msg202 flags
+        // bit0,2026-09-18）：服务器侧毁灭者 134 地下覆写仅此档（BJ114-c,与本地链
+        // summonBossAtTx 同门语义;物品路径 :46034 寻点原值不覆写）
+        this.net.sendSummonIntent(key, tx2 * TILE + 8, Math.max(4, ty2 - 12) * TILE, 0, 0, true);
         this.recLog('world', { ev: 'bossIntent', key });   // 行为录制：v8 房召唤意图受理
         return true; // 意图已受理——召唤物照常消耗；服务器拒绝时另有 serverNotice
       }

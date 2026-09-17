@@ -90,7 +90,9 @@ describe('BJ113：蜂巢块 tile-break 臂（KillTile case 225 → GetItemDrops 
         expect(r.beeCount).toBe(0);
       } else {
         expect(rec.drops.length).toBe(1);    // 非蜜臂恒掉 1124（stack 1）
-        expect(rec.drops[0].key).toBe('place_v_225_hive_block');
+        // ★BJ114-b 键归一（2026-09-18）：掉落=原版物品 1124 vi_1124_Hive（WorldGen.cs:65994），
+        //  旧 place_v_225_hive_block 放置键退役（1124 不可放置=反编译定谳,见 Game.ts 翻案注）
+        expect(rec.drops[0].key).toBe('vi_1124_Hive');
         expect(rec.drops[0].n).toBe(1);
         expect(r.beeCount).toBeLessThanOrEqual(2);   // 0-2 硬帽
         expect(r.beeCount).toBeGreaterThanOrEqual(0);

@@ -2503,6 +2503,31 @@ export function mapTileHoverName(sheet: number, frameX: number): string | null {
   return Lang.tileName(sheet);   // GetMapObjectName 图例名等价（Tiles.* 分节名）
 }
 
+/** 传送预选标记坐标文本（SW 自创调试面增强,2026-09-17 用户令：标记点旁显示坐标
+ *  便于定位）。tile 坐标域——选点时 Game 侧已按 Math.floor((mouse−地图原点)/zoom)
+ *  取整（Game:8515-8516,= Math.floor(世界px/16) 的 Terraria 通用定位域）,此处只作
+ *  文本化（与选点 toast Preselect (tx,ty) 同值同域）。纯函数供行为测直接驱动 */
+export function tpMarkCoordText(x: number, y: number): string {
+  return `(${Math.trunc(x)}, ${Math.trunc(y)})`;
+}
+
+/** 坐标文本排版：默认画在标记右侧（GAP=18px 起步,避开圆环 r=max(8,10·zoom) 与
+ *  十字线 ±14px 臂）；右缘放不下翻到标记左侧（textAlign='right'）；垂直按 12px 字
+ *  半高钳制在屏内（世界边缘标记文本不越屏——简单钳制）。返回 [x, y, textAlign]，
+ *  y 为 textBaseline='middle' 的中心线。纯函数供行为测直接驱动 */
+export function tpMarkCoordLayout(
+  mx: number, my: number, textW: number, viewW: number, viewH: number,
+): { x: number; y: number; align: 'left' | 'right' } {
+  const GAP = 18;
+  const PAD = 6;
+  const HALF = 8;   // 12px bold monospace 半高估（middle 基线）
+  const y = Math.min(Math.max(my, PAD + HALF), viewH - PAD - HALF);
+  if (mx + GAP + textW <= viewW - PAD) {
+    return { x: mx + GAP, y, align: 'left' };
+  }
+  return { x: mx - GAP, y, align: 'right' };
+}
+
 /** NPC 染色合成 ka（base 贡献/遮蔽系数）——**经验定标 0.55**（2026-08-21 用户
  *  肉眼 A/B：0.686(=alpha/255) 略过实、0.314(=(255−alpha)/255 反编译直译) 过透,
  *  0.55 最接近原版）。★与反编译推导值 0.314 的差异未解（原版截图 B 通道拟合
@@ -17731,23 +17756,9 @@ export class Renderer {
         this.remotePlayers, this.mapWormholeHead?.slot ?? null,
         { x: mouseX, y: mouseY });   // ★SW-BJ1：NPC 头像悬停名命中（:56724-56728）
     }
-    // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）
-    const tp = this.tpMark;
-    if (tp) {
-      const blink = 0.55 + 0.45 * Math.sin(performance.now() * 0.008);
-      ctx.globalAlpha = blink;
-      ctx.strokeStyle = '#FF5050';
-      ctx.lineWidth = 3;
-      const mx = cx0 + (tp.x + 0.5) * fm.zoom, my = cy0 + (tp.y + 0.5) * fm.zoom;
-      ctx.beginPath();
-      ctx.arc(mx, my, Math.max(8, 10 * fm.zoom), 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(mx - 14, my); ctx.lineTo(mx + 14, my);
-      ctx.moveTo(mx, my - 14); ctx.lineTo(mx, my + 14);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    }
+    // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）+ SW 调试面坐标文本
+    // （2026-09-17 用户令：标记点旁显示 tile 坐标；tpMark 每帧重画=重设/复位自动同步）
+    this.drawTpMark(ctx, fm, cx0, cy0, viewW, viewH);
     // 操作提示
     // 悬停格名（Main.cs:55227-55360 mapFullscreen 支）：mouse → tile（传送同式
     // (mouseX-cx0)/zoom）；界内 + 已探索（Map.Light>40 :55254 的迷雾二值等价）
@@ -18117,6 +18128,47 @@ export class Renderer {
   private _lastPlayer: Player | null = null;
   /** 传送预选标记（Game 写入） */
   tpMark: { x: number; y: number } | null = null;
+  /** SW-TPMARK 2026-09-17 用户令：传送预选标记绘制 + 坐标文本（地图点击传送
+   *  调试面,Shift+F10 旗开→首次点击落 tpMark；每帧重画=重设/复位自动同步）。
+   *  ①闪烁红圈+十字线（原样保留）；②坐标文本常显（不随闪烁——信息位非提示位）：
+   *  tile 坐标 (x,y)（tpMark 存的就是 Game:8515-8516 的 floor 换算值,与选点 toast
+   *  同域）；bold 12px monospace + 深色描边白字（飘字习语 Renderer:4508-4512,
+   *  亮暗底图都可读）；tpMarkCoordLayout 右缘翻左/垂直钳屏内；标记完全离屏不画
+   *  文本（防屏缘孤儿标签——圈/线照旧被画布自然裁掉） */
+  private drawTpMark(
+    ctx: CanvasRenderingContext2D, fm: { zoom: number },
+    cx0: number, cy0: number, viewW: number, viewH: number,
+  ) {
+    const tp = this.tpMark;
+    if (!tp) return;
+    const blink = 0.55 + 0.45 * Math.sin(performance.now() * 0.008);
+    ctx.globalAlpha = blink;
+    ctx.strokeStyle = '#FF5050';
+    ctx.lineWidth = 3;
+    const mx = cx0 + (tp.x + 0.5) * fm.zoom, my = cy0 + (tp.y + 0.5) * fm.zoom;
+    ctx.beginPath();
+    ctx.arc(mx, my, Math.max(8, 10 * fm.zoom), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(mx - 14, my); ctx.lineTo(mx + 14, my);
+    ctx.moveTo(mx, my - 14); ctx.lineTo(mx, my + 14);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // 坐标文本（SW 调试面增强）：常显白字黑描边；离屏门 ±20px（十字臂 14 + 余量）
+    if (mx < -20 || mx > viewW + 20 || my < -20 || my > viewH + 20) return;
+    const label = tpMarkCoordText(tp.x, tp.y);
+    ctx.save();
+    ctx.font = 'bold 12px monospace';
+    const lay = tpMarkCoordLayout(mx, my, ctx.measureText(label).width, viewW, viewH);
+    ctx.textAlign = lay.align;
+    ctx.textBaseline = 'middle';
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.lineWidth = 3;
+    ctx.strokeText(label, lay.x, lay.y);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(label, lay.x, lay.y);
+    ctx.restore();
+  }
   /** 地图 ping 存储（Main.Pings 语义；Game.mapPings 注入——drawMapPingLayer 消费） */
   mapPings: import('../net/syncModules').MapPingStore | null = null;
 

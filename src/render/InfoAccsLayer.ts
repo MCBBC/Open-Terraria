@@ -50,6 +50,7 @@ export class InfoAccsLayer {
     speedSlice: Float32Array; vx: number; vy: number;
   }, enemies: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vanillaId: number | null }>,
     critters: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; def?: { npc?: number } }>,
+    npcs: Array<{ cx: number; cy: number; dead: boolean; vanillaId: number | null; givenName?: string }>,
     pcx: number, pcy: number,
     countEnemy: (e: { vanillaId: number | null; cx: number; cy: number }) => boolean,
     rarityOf: (vanillaId: number | null) => number,
@@ -77,16 +78,22 @@ export class InfoAccsLayer {
       if (player.accCritterGuideCounter <= 0) {
         player.accCritterGuideCounter = 15;
         let best: { name: string; rarity: number; vid: number } | null = null;
-        const pool: Array<{ dead: boolean; cx: number; cy: number; vanillaId: number | null }> = [
+        const pool: Array<{ dead: boolean; cx: number; cy: number; vanillaId: number | null; given?: string }> = [
           ...enemies.map((e) => ({ dead: e.dead, cx: e.cx, cy: e.cy, vanillaId: e.vanillaId })),
           ...critters.map((c) => ({ dead: c.dead, cx: c.cx, cy: c.cy, vanillaId: c.def?.npc ?? null })),
+          // ★BJ122 2026-09-18：npcs 桶入池——原版扫 Main.npc 全表（:47776 活跃+
+          //  rarity 择优,无 townNPC/bound 排除门）;被缚族 105/106/123/354/589
+          //  rarity=1（:10283/:10297/:10534/:13544/:16694）、685 rarity=2（:17653）
+          //  → 原版分析仪可见（找被缚者本就靠它）,此前漏检=用户观测 3。
+          //  显示名 GivenOrTypeName（:47796）→ givenName 优先
+          ...npcs.map((n) => ({ dead: n.dead, cx: n.cx, cy: n.cy, vanillaId: n.vanillaId, given: n.givenName })),
         ];
         for (const c of pool) {
           if (c.dead) continue;
           const r = rarityOf(c.vanillaId);
           if (r <= 0) continue;
           if (Math.hypot(c.cx - pcx, c.cy - pcy) >= 1300) continue;
-          const nm = nameOf(c.vanillaId);
+          const nm = ('given' in c && c.given) || nameOf(c.vanillaId);
           if (!nm) continue;
           if (!best || r > best.rarity) best = { name: nm, rarity: r, vid: c.vanillaId ?? -1 };
         }

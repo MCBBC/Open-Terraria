@@ -33,7 +33,26 @@
 //      :10417 case 774）→ evalPrice 剥 `(value = X)` 壳。
 //   变体分支内字段引用不收（case 2623 影杖 WeakerVariant `value = dungeonPrice`
 //   :25670，基础变体已有顶层 sellPrice(0,5)，按既有"建模基础变体"口径忽略）。
-import { readFileSync, writeFileSync, writeSync } from 'node:fs';
+//
+// ★追加时代守卫（2026-09-18，清债 BJ114-e 同族普查）：本提取器缺省源版本仍是 1456
+//   （SW_ITEM_VER 未设 → SRC_VER='1456'），而现库 vanilla-itemrare/itemvalue 已是
+//   1457 终值态——裸跑重产=把 1457 新物品 6147-6195（49 件）连同 1293 rare 档
+//   （1457 Item.cs:15981 新增 rare=8，1456 案无此行）从现库洗成缺键 → 运行时
+//   rare=0/value=0 兜底，拾取飘名/重铸费用/商店定价/decraft 组代表全错。BJ92
+//   （3860-3862 错值非缺键）同案异构：本件=缺键型增量，与 extract-npcs 的字段型
+//   不同构。照 era guard 判例（atlas 四连 / recipes R25-B5② / npcs 债刀-3）落闸——
+//   守卫=重产输出 vs 现库【动态 diff】：现库有而重产盖不住的 id（missing）非空即拒
+//   exit 1+物证，不硬编码 id 清单（1293≤6146 同被动态探测捕获；实证 1456 重产
+//   missing=50/49）。正常更新流：SW_ITEM_VER=1457 重产（1457 输出盖住现库全部 id →
+//   零缺失放行；实证与现库逐键 byte-perfect 零漂移）。--dump 对账通道不受守卫限制
+//   （recon-item-1456-1457.mjs 双实例 1456/1457 都走 --dump，拦了=对账闸门自断）。
+//   活通道与 recon 闸分工：守卫只拦【缺键型】（一门一职责），错值型漂移归
+//   recon-item-1456-1457.mjs（--fix 一键重放 1457 终值 + DRIFT=0 双闸）。确需原地
+//   强推：双旗 --force-full --overwrite-append-era（单旗仍拒）；事后必须全绿 recon
+//   双闸门 + tests/item-stats-golden-1457。测试注入面：SW_ITEMRARE_JSON/
+//   SW_ITEMVALUE_JSON（守卫探测路径）/ SW_OUT（写盘目录，缺省 game/src/data），
+//   缺省行为不变。守卫测试：tests/extract-itemrare-era-guard.test.ts。
+import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 // 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
@@ -233,12 +252,44 @@ for (const [id, r] of Object.entries(HAND_RARE)) RARE[id] = r;
 const { RARE, VALUE } = extractRareValue(readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8'));
 export { RARE, VALUE };
 if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
-  // --dump:全量表出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用)
+  // --dump:全量表出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用;守卫不拦
+  //  dump——双实例 1456/1457 都走此通道,拦了=对账闸门自断)
   if (process.argv.includes('--dump')) {
     writeSync(1, JSON.stringify({ src: SRC_VER, RARE, VALUE }));
   } else {
-    writeFileSync(`${ROOT}/game/src/data/vanilla-itemrare.json`, JSON.stringify(RARE));
-    writeFileSync(`${ROOT}/game/src/data/vanilla-itemvalue.json`, JSON.stringify(VALUE));
+    // ---- ★追加时代守卫（头注见上）：重产 vs 现库动态 diff,缺键非空即拒 ----
+    const FORCE_FULL = process.argv.includes('--force-full');
+    const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+    const OUT_DIR = process.env.SW_OUT ?? `${ROOT}/game/src/data`;
+    const RARE_OUT = `${OUT_DIR}/vanilla-itemrare.json`;
+    const VALUE_OUT = `${OUT_DIR}/vanilla-itemvalue.json`;
+    const RARE_GUARD = process.env.SW_ITEMRARE_JSON ?? RARE_OUT;
+    const VALUE_GUARD = process.env.SW_ITEMVALUE_JSON ?? VALUE_OUT;
+    // 现库 id 集 − 重产输出集 = 重产盖不住的缺键（动态探测,不硬编码 id 清单;
+    // 现库不存在/坏损时不拦——同 npcs 判例,让正常流程自行报错）
+    const missingOf = (guardPath, fresh) => {
+      if (!existsSync(guardPath)) return [];
+      try {
+        const prev = JSON.parse(readFileSync(guardPath, 'utf8'));
+        if (prev == null || typeof prev !== 'object' || Array.isArray(prev)) return [];
+        return Object.keys(prev).filter((k) => fresh[k] === undefined);
+      } catch { return []; }
+    };
+    const missingRare = missingOf(RARE_GUARD, RARE).sort((a, b) => Number(a) - Number(b));
+    const missingValue = missingOf(VALUE_GUARD, VALUE).sort((a, b) => Number(a) - Number(b));
+    const appendEra = missingRare.length > 0 || missingValue.length > 0;
+    if (appendEra && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+      const sample = (ids) => `${ids.slice(0, 6).join(', ')}${ids.length > 6 ? '…' : ''}`;
+      console.error(`[extract-itemrare] 拒绝全量重写：现库含重产(SW_ITEM_VER=${SRC_VER})盖不住的 id（追加时代·缺键型增量）。`);
+      console.error(`  物证：vanilla-itemrare.json 缺 ${missingRare.length} 个 id（${sample(missingRare)}）；vanilla-itemvalue.json 缺 ${missingValue.length} 个 id（${sample(missingValue)}）。`);
+      console.error('  全量重写会把缺键 id 洗成 rare=0/value=0 兜底——拾取飘名/重铸费用/商店定价/decraft 组代表全错（缺键型,与 BJ92 错值型同案异构）。');
+      console.error('  正常更新流：SW_ITEM_VER=1457 node tools/extract-itemrare.mjs 重产（1457 输出盖住现库全部 id,零缺失即放行）。');
+      console.error('  错值型漂移走活通道：node tools/recon-item-1456-1457.mjs（--fix 一键重放 1457 终值 + DRIFT=0 双闸）。');
+      console.error('  确需原地强推：双旗 --force-full --overwrite-append-era（单旗仍拒）；事后必须全绿 recon-item 双闸门 + tests/item-stats-golden-1457。');
+      process.exit(1);
+    }
+    writeFileSync(RARE_OUT, JSON.stringify(RARE));
+    writeFileSync(VALUE_OUT, JSON.stringify(VALUE));
     console.error(`rare 条目: ${Object.keys(RARE).length} / value 条目: ${Object.keys(VALUE).length}（源 Terarria${SRC_VER}）`);
   }
 }

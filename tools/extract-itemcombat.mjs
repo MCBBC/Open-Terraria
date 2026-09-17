@@ -344,6 +344,35 @@ function fieldsFromLines(id, lines) {
     if (lines.some((l) => l === `${f} = true;`)) rec[f] = true;
     else if (lines.some((l) => l === `${f} = false;`)) rec[f] = false;
   }
+  // ★SetWeaponValues 形参解析（提取器盲区补,2026-09-18 旅商帽掉落实报红蓝批）：
+  //   `public void SetWeaponValues(int dmg, float knockback, int bonusCritChance = 0)`
+  //   （Item.cs:48418-48423,赋值全在形参——helper 扫描拿不到字面,NUM_FIELDS 直派
+  //   `damage = N;` 正则全空）。SetDefaults5 内 17 处调用 → 14 件整批漏
+  //   damage/knockBack：4058/4059 化石镐(8,5f)/(8,4f)/4060 超级星射手(60,5f)/
+  //   4061 风暴矛(14,6f)/4062 雷电zap(24,3f)/4317 血腥斧(30,7f)/4381 血雨弓(14,3f)/
+  //   4788-4790 马枪三件(60,12f)/(130,14f)/(90,13f)/5129 臭虫剑 Flymeal(15,5f)/
+  //   6155(150,10f,+10 crit)/6171(27,6f)/6173(180,4f)（6155/6171/6173=1457 新增档,
+  //   1456 无此三件）。实报面：5129 缺 damage → 近战 meleeDmg 落 fallback 1 伤
+  //   （原版 15−镇民防×0.5≈7/击）,wiki 推荐的商贩帽（2222,旅商 368 必掉）获取法
+  //   被城镇 NPC 回血(~+1/18t)抵消=事实杀不死。显式行优先序：NUM_FIELDS 直派先跑,
+  //   此处仅补空（防同 case 双写时逆序覆盖——C# 源序语义,17 处调用无同 case 双写）。
+  //   3 参调用才写 crit（2 参调用 C# 缺省 0 等价表缺省,不注入减 diff）。
+  //   ★重产警告（2026-09-18 定谳）：本脚本相对已提交 json 仍缺三个已丢失的解析面,
+  //   整表重产会在 4 处回退已提交值——1254/1553 `crit += N;`（+= 未解析）、
+  //   1226 `useTime = useAnimation;` 别名（1457 新形态,1456 基线无此件值）、
+  //   4703 `DefaultToRangedWeapon(14,Bullet,55,7f)` 形参位解析（Helper 扫描仅取
+  //   helper 体字面,不取调用点实参）。重产前先补这三面,或用
+  //   `diff` 对拍并手工回填这 4 id（tests/extract-audit.test.ts SetWeaponValues 锚
+  //   只保 14 件,不保这 4 处）。
+  const swv = lines.find((l) => /^SetWeaponValues\(/.test(l));
+  if (swv) {
+    const sm = swv.match(/^SetWeaponValues\(\s*(-?\d+)\s*,\s*(-?[\d.]+)f?\s*(?:,\s*(-?\d+)\s*)?\)/);
+    if (sm) {
+      if (rec.damage === undefined) rec.damage = Number(sm[1]);
+      if (rec.knockBack === undefined) rec.knockBack = parseFloat(sm[2]);
+      if (sm[3] !== undefined && rec.crit === undefined) rec.crit = Number(sm[3]);
+    }
+  }
   // 辅助函数族效果：显式行在场则显式胜（DefaultToPlaceableTile 后再 useTurn=false 之类）
   const eff = helperEffectsOf(lines);
   for (const [k, v] of Object.entries(eff)) {

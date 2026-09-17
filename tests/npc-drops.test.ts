@@ -349,3 +349,68 @@ describe('史莱姆体内物品（SlimeBodyItemDropRule）', () => {
   }, 30000);   // 惰性 import('entities/Enemy') 冷加载 ≈14s（items/bossAI/Renderer
                // 贴图懒加载在模块图内）——缺省 5s 超时误杀,非逻辑耗时
 });
+
+// ============ 城镇/特殊 NPC 死亡掉落族（2026-09-18 旅商商贩帽用户实报红蓝批） ============
+// 原版锚 = Terarria1457/Terraria.GameContent.ItemDropRules/ItemDropDatabase.cs
+// RegisterTownNPCDrops(:731-746) 全 12 注册 1:1 + 特殊 NPC 零掉落对照。实报链:
+// 杀旅商 368 不掉商贩帽 2222 ——定谳=掉落链 1:1（数据/求值/生成三段全通,探针
+// 直杀/岩浆/巨石/FlyMeal 四通道 recLog+掉落桶双证）;真缺口=FlyMeal 5129 缺
+// damage(见 tests/extract-audit.test.ts SetWeaponValues 锚)令 wiki 推荐获取法失效。
+// 368 → RegisterToNPC(368, ItemDropRule.Common(2222)) = 100% ×1（chanceDenominator=1,
+// 无 Expert/Master 加成臂;1458 同值 :745）。
+describe('城镇/特殊 NPC 死亡掉落族(RegisterTownNPCDrops 1:1)', () => {
+  it('① 旅商 368 → 商贩帽 2222 ×1 每杀必掉(20 杀全中,denom=1 与 RNG 无关)', () => {
+    for (let i = 0; i < 20; i++) {
+      const res = resolveDrops(mkCtx({ netId: 368, type: 368, friendly: true, value: 0 }));
+      expect(res.drops).toEqual([{ id: 2222, n: 1 }]);
+    }
+  });
+
+  it('② 帽子/纪念品族 1/8 概率件:48 试 ≥1 中且无超纲 vid(6× 统计,P(0)≈0.16%)', () => {
+    // (npc, item): 353 理发师→3352 / 441 税收官→3351 / 227 画家→3350 /
+    // 550 酒保→3821 / 207 染料商→3349 / 124 机械师→4818
+    const family: Array<[number, number]> = [
+      [353, 3352], [441, 3351], [227, 3350], [550, 3821], [207, 3349], [124, 4818],
+    ];
+    for (const [npc, item] of family) {
+      const { counts, perKill } = sample(npc, 48, { friendly: true, value: 0 });
+      expect(counts.get(item) ?? 0).toBeGreaterThanOrEqual(1);
+      for (const ids of perKill) {
+        for (const id of ids) expect(ids.filter((x) => x === id).length, `npc ${npc} 单杀超纲 ${id}`).toBe(1);
+      }
+    }
+  });
+
+  it('③ 派对女孩 208 → 3548 1/4 ×30-60(区间断言)', () => {
+    const { counts, perKill } = sample(208, 48, { friendly: true, value: 0 });
+    expect(counts.get(3548) ?? 0).toBeGreaterThanOrEqual(30);   // ≥1 次命中即 ≥30 件
+    for (const ids of perKill) for (const id of ids) expect(id).toBe(3548);
+    const perHitStacks: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      const res = resolveDrops(mkCtx({ rng: new RNG(i * 104729 + 7), netId: 208, type: 208, friendly: true, value: 0 }));
+      for (const d of res.drops) if (d.id === 3548) perHitStacks.push(d.n);
+    }
+    expect(perHitStacks.length).toBeGreaterThan(20);
+    for (const n of perHitStacks) expect(n).toBeGreaterThanOrEqual(30);
+    for (const n of perHitStacks) expect(n).toBeLessThanOrEqual(60);
+  });
+
+  it('④ 布商 54 → RedHat 260 100%(每杀必掉)', () => {
+    const { counts, perKill } = sample(54, 10, { friendly: true, value: 0 });
+    expect(counts.get(260)).toBe(10);
+    for (const ids of perKill) expect(ids).toEqual([260]);
+  });
+
+  it('⑤ 特殊 NPC 零掉落对照:453 骷髅商/369 渔夫/37 老人/17 商人/18 护士', () => {
+    // 原版 RegisterTownNPCDrops 无此五型注册；骷髅商 453/渔夫 369 属到访/解救型,
+    // 老人 37 守门型——vanilla-npcdrops.json 亦不得为其注册规则(提取器反哺防污染)
+    for (const npc of [453, 369, 37, 17, 18]) {
+      const { perKill } = sample(npc, 10, { friendly: true, value: 0 });
+      for (const ids of perKill) expect(ids, `npc ${npc} 应零掉落`).toEqual([]);
+    }
+    const entries = (dropData as { entries: Array<{ npcs?: number[] }> }).entries;
+    for (const npc of [453, 369, 37, 17, 18]) {
+      expect(entries.some((e) => (e.npcs ?? []).includes(npc)), `npc ${npc} 表内不应有注册`).toBe(false);
+    }
+  });
+});

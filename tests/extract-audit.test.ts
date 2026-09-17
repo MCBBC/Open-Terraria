@@ -44,6 +44,38 @@ describe('提取器自审计·常跑层(已提交 JSON,不依赖 C# 源)', () =>
     expect(Object.keys(projStatusJson).length).toBeGreaterThanOrEqual(85);
     expect(entries).toBeGreaterThanOrEqual(95);
   });
+
+  it('SetWeaponValues 14 件锚点(2026-09-18 盲区补:形参赋值不被直派正则收)', () => {
+    // 原版锚 = Terarria1457/Terraria/Item.cs 各 case 首行 `SetWeaponValues(dmg, kb[, crit])`
+    // （helper 定义 :48418-48423）。用户实报:5129 Flymeal 缺 damage → 近战 meleeDmg
+    // 落 fallback 1 伤(原版 15,×2 vs 镇民 + 100% 穿甲 ≈ 27-29/击),wiki 推荐的
+    // 商贩帽(2222,旅商 368 必掉)获取法被镇民回血抵消=事实杀不死。重生成器
+    // (extract-itemcombat.mjs fieldsFromLines SetWeaponValues 形参解析)回放同值。
+    // 6155/6171/6173 = 1457 新增档(1456 无),其余两版同值(recon-item CLASS A/B 背书)。
+    const pin: Array<[string, number, number, number | undefined]> = [
+      ['4058', 8, 5, undefined],
+      ['4059', 8, 4, undefined],   // Fossil Pickaxe
+      ['4060', 60, 5, undefined],  // Super Star Shooter
+      ['4061', 14, 6, undefined],  // Storm Spear
+      ['4062', 24, 3, undefined],  // Thunder Zapper
+      ['4317', 30, 7, undefined],  // Haemorrhaxe
+      ['4381', 14, 3, undefined],  // Blood Rain Bow
+      ['4788', 60, 12, undefined], // Jousting Lance
+      ['4789', 130, 14, undefined], // Shadow Jousting Lance
+      ['4790', 90, 13, undefined], // Hallowed Jousting Lance
+      ['5129', 15, 5, undefined],  // Flymeal——商贩帽获取链关键件
+      ['6155', 150, 10, 10],
+      ['6171', 27, 6, undefined],  // Bejeweled Staff
+      ['6173', 180, 4, undefined], // Arc Surge
+    ];
+    for (const [id, dmg, kb, crit] of pin) {
+      const r = TABLE[id];
+      expect(r, `id ${id} 在表`).toBeTruthy();
+      expect(r.damage, `id ${id} damage`).toBe(dmg);
+      expect(r.knockBack, `id ${id} knockBack`).toBe(kb);
+      if (crit !== undefined) expect(r.crit, `id ${id} crit`).toBe(crit);
+    }
+  });
 });
 
 // 审计层:C# 反编译源不存在(其他环境)时 warn 跳过,不阻塞

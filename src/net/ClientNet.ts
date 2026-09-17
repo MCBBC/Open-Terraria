@@ -1625,9 +1625,14 @@ export class ClientNet {
    *  Game 在服务器房把召唤物本地 NewNPC 分支改投此消息——对齐设计文档 P4
    *  "netMode==1 短路改发消息"。中继房不调用（仍走房主本地生成）。
    *  ★(x,y) = NewNPC Bottom 锚点（NPC.cs:81594;SummonIntent=202 线契约注）——
-   *  调用方传 tile 中心 X 与 Bottom 锚行 Y,SimHost.summon 底边落点 */
-  sendSummonIntent(itemKey: string, x: number, y: number, vx = 0, vy = 0) {
-    this.send(new NetWriter(Msg.SummonIntent).str(itemKey).f32(x).f32(y).f32(vx).f32(vy).finish());
+   *  调用方传 tile 中心 X 与 Bottom 锚行 Y,SimHost.summon 底边落点。
+   *  naturalPath = 自然路径意图（Game.summonBossAtTx onPlayerTy===undefined 档）——
+   *  msg202 u8 flags bit0（2026-09-18 增量通道）：毁灭者 134 地下 Y 覆写仅此档
+   *  （物品路径=SpawnOnPlayer 寻点原值不覆写,BJ114-c；旧客户端不发此段,
+   *  服务器缺段读 0=物品路径语义） */
+  sendSummonIntent(itemKey: string, x: number, y: number, vx = 0, vy = 0, naturalPath = false) {
+    this.send(new NetWriter(Msg.SummonIntent).str(itemKey).f32(x).f32(y).f32(vx).f32(vy)
+      .u8(naturalPath ? 1 : 0).finish());
   }
 
   // ================= 拴绳实体（msg82 module13，房主上行；见 net/leashedSync.ts） =================

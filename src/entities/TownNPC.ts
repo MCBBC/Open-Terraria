@@ -49,7 +49,7 @@ import { resolveDrops, npcValueOf, type NpcDropCtx } from '../drops/NpcDrops';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { RNG } from '../core/rng';
-import { visEffectFrames, mouseTextColorApprox, type Enemy } from './Enemy';
+import { visEffectFrames, mouseTextColorApprox, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, type Enemy } from './Enemy';
 import { spawnVanillaEnemy } from './bossAI';
 import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
@@ -1024,6 +1024,16 @@ export class TownNPC extends Entity {
    *  WebbedStylist354/GolferRescue589，本作以本标记近似；渲染按真帧走各捆绑姿态表——
    *  Renderer.BOUND_NPC_SHEET。原地不动，右键解救 → savedXxx 旗标置位成为正式城镇 NPC） */
   bound = false;
+  /** bound 族 CheckActive 计时（NPC.timeLeft；activeTime=750，NPC.cs:6188）——
+   *  被缚族非 townNPC、不在 DoesntDespawnToInactivity 名单 → 照走四步消散链
+   *  （BJ122 2026-09-18 定谳重写：此前 bound 永不消散=偏差，早期刷出者钉死老位置
+   *  令 !AnyNPCs 场上唯一门永久关闭 → 玩家永远遇不到新刷的【用户观测 2】） */
+  boundDespawnTimer = 750;
+  /** 685 被缚老史莱姆 AI_001 跳跃机 ai[0]/ai[2]/ai[3]（语义位与 Enemy.ai0/ai2/
+   *  jumpStartX 同源；BJ122 落刀——原版 685=aiStyle 1 会蹦，站桩系偏差） */
+  private boundHopAi0 = 0;
+  private boundHopAi2 = 0;
+  private boundHopAi3 = 0;
   // ---- NPC 开关门（原版 AI_007，NPC.cs:54478 开门 / 54243 过门关门）----
   private closeDoor = false;
   /** 贴墙/门前接触连续 tick 数（tryOpenDoorAhead 命中门时累加,错过清零）——
@@ -1678,6 +1688,123 @@ export class TownNPC extends Entity {
   }
   lightRGBAt: { x: number; y: number } | null = null;
 
+  /** bound 族 CheckActive 四步（NPC.cs:78698-78810 忠实重放;BJ122 2026-09-18）。
+   *  几何口径与 Enemy.CheckActive 同源（共享 CHECK_ACTIVE_HALF_* 常量）:
+   *  ①activeRange 盒（4032/2520 半幅 :6176-6178,+玩家半宽/半高=hitbox 相交等价
+   *  改写,MINOR-1 同款）相交任一活跃玩家 → flag2 存活门;②屏幕盒（960+w/600+h
+   *  :78691-78693）相交 → timeLeft=activeTime(750)+清 despawnEncouraged（bound
+   *  无 EncourageDespawn 写点,旗省略）;③timer 每 tick 无条件 −1;④≤0 → flag2
+   *  强制翻假（:78791-78794）→ 消散（noSpawnCycle=true :78797 + active=false
+   *  :78798——bound 无尘无声,无 boss/蠕虫/挂载链）。零活跃玩家（测试桩）取
+   *  Enemy 侧同款登记偏离:纯倒数归零,不当帧消散。 */
+  private boundCheckActive(game: GameHooks, localPlayer: Player | null): void {
+    const cands = (game.candidatePlayers?.() ?? (localPlayer ? [localPlayer] : []))
+      .filter((q) => !!q);
+    if (cands.length === 0) {
+      if (--this.boundDespawnTimer <= 0) this.dead = true;
+      return;
+    }
+    let flag2 = false;
+    for (const q of cands) {
+      if (Math.abs(q.cx - this.cx) < CHECK_ACTIVE_HALF_X + q.w / 2
+        && Math.abs(q.cy - this.cy) < CHECK_ACTIVE_HALF_Y + q.h / 2) {
+        flag2 = true;
+        break;
+      }
+    }
+    const screenHalfX = 960 + this.w, screenHalfY = 600 + this.h;
+    const onScreen = cands.some((q) =>
+      Math.abs(q.cx - this.cx) < screenHalfX + q.w / 2
+      && Math.abs(q.cy - this.cy) < screenHalfY + q.h / 2);
+    if (onScreen) this.boundDespawnTimer = 750;
+    this.boundDespawnTimer--;
+    if (this.boundDespawnTimer <= 0) flag2 = false;
+    if (!flag2) {
+      game.noSpawnCycleThisFrame = true;
+      this.dead = true;
+    }
+  }
+
+  /** 685 BoundTownSlimeOld 专属：AI_001_Slimes 跳跃机（1457 NPC.cs;BJ122 2026-09-18）。
+   *  原版本体即 aiStyle 1 敌怪型（:17641-17655 aiStyle=1/friendly/非 townNPC）——
+   *  本仓 685 生成=spawnBound(685)→bound TownNPC 承载,站桩系 BJ122 定谳偏差。
+   *  flag3（:61662-61667）=夜||损血||地下||史莱姆雨 → 索敌/追玩家;ai2 冷却只减到 1
+   *  （:61873-61876）;init ai2==0 → ai0=-100,ai2=1,TargetClosest（:62115-62119）;
+   *  wet 段（:62080-62116）碰底 vy=-2/浮起 vy 钳 -4/ai3 记下沉 X、上浮未移 → 反向+
+   *  冷却 + wet&&ai2==1&&flag3 重瞄;贴地（velocity.Y==0 :62133）摩擦 ×0.8、ai0 每
+   *  tick +1（flag3 再 +1 :61964-61968）;阶段表（num54=-1000 :62017-62040）:≥0 小跳
+   *  (vy=-6,vx+=2dir,ai0=-1120) / [-1000,-500] 小跳(ai0=-2120) / [-2000,-1500] 大跳
+   *  (vy=-8,vx+=3dir,ai0=-200);685 特支（:62287-62294）vy×0.5/vx×0.2+1/2 反向;
+   *  大跳记 ai3=position.X（:62262）;滞空转向（:62120-62137）±0.2 步进/×0.93。
+   *  贴地门=vy===0 原版字面（Enemy.slimeAI 同口径）;携物梯/弹射门/嵌固回退等
+   *  685 不可达支未移（Enemy.slimeAI 为全量锚）。 */
+  private boundSlimeHopUpdate(world: import('../world/World').World, bp: Player | null): void {
+    const flag3 = !world.clock.isDay || this.hp < this.maxHp
+      || this.y / TILE > world.groundLevel || !!world.weather.slimeRain;
+    const faceTarget = () => {
+      if (bp && !bp.dead) this.facing = bp.cx < this.cx ? -1 : 1;
+    };
+    if (this.boundHopAi2 > 1) this.boundHopAi2 -= 1;          // :61873-61876
+    if (this.wet) {                                            // :62080-62116
+      if (this.collideY) this.vy = -2;
+      if (this.vy < 0 && this.boundHopAi3 !== 0 && this.boundHopAi3 === this.cx) {
+        this.facing *= -1;
+        this.boundHopAi2 = 200;
+      }
+      if (this.vy > 0) this.boundHopAi3 = this.cx;
+      if (this.vy > 2) this.vy *= 0.9;
+      this.vy -= 0.5;
+      if (this.vy < -4) this.vy = -4;
+      if (this.boundHopAi2 === 1 && flag3) faceTarget();       // :62113-62116
+    }
+    if (this.boundHopAi2 === 0) {                              // :62115-62119 init
+      this.boundHopAi0 = -100;
+      this.boundHopAi2 = 1;
+      faceTarget();                                            // TargetClosest
+    }
+    if (this.vy === 0) {                                       // 贴地 :62133
+      // 落地卡墙（:62141-62146）ai3==cx 精确相等 → 反向+冷却;ai3=0
+      if (this.boundHopAi3 !== 0 && this.boundHopAi3 === this.cx) {
+        this.facing *= -1;
+        this.boundHopAi2 = 200;
+      }
+      this.boundHopAi3 = 0;
+      this.vx *= 0.8;                                          // :61948-61952
+      if (Math.abs(this.vx) < 0.1) this.vx = 0;
+      if (flag3) this.boundHopAi0 += 1;                        // :61964-61967
+      this.boundHopAi0 += 1;                                   // :61968（685 无加成表项）
+      const num54 = -1000;                                     // :62017-62025
+      let stage = 0;
+      if (this.boundHopAi0 >= 0) stage = 1;
+      else if (this.boundHopAi0 >= num54 && this.boundHopAi0 <= num54 * 0.5) stage = 2;
+      else if (this.boundHopAi0 >= num54 * 2 && this.boundHopAi0 <= num54 * 1.5) stage = 3;
+      if (stage > 0) {
+        if (flag3 && this.boundHopAi2 === 1) faceTarget();     // :62042-62045
+        if (stage === 3) {
+          this.vy = -8;                                        // :62055-62059
+          this.vx += 3 * this.facing;
+          this.boundHopAi0 = -200;
+        } else {
+          this.vy = -6;                                        // :62062-62070
+          this.vx += 2 * this.facing;
+          this.boundHopAi0 = stage === 1 ? -120 + num54 : -120 + num54 * 2;
+        }
+        this.vy *= 0.5;                                        // :62287-62294 弱跳
+        this.vx *= 0.2;
+        if (Math.floor(Math.random() * 2) === 0) this.facing *= -1;
+        if (stage === 3) this.boundHopAi3 = this.cx;           // :62262
+      }
+    } else if (bp && !bp.dead
+      && ((this.facing === 1 && this.vx < 3) || (this.facing === -1 && this.vx > -3))) {
+      // 滞空转向（:62120-62137）
+      if ((this.facing === -1 && this.vx < 0.01) || (this.facing === 1 && this.vx > -0.01)) {
+        this.vx += 0.2 * this.facing;                          // :62130-62133
+      } else {
+        this.vx *= 0.93;                                       // :62134-62137
+      }
+    }
+  }
+
   fixedUpdate(dt: number, game: GameHooks) {
     // ★SW-BJ55 圣诞老人季末自灭（★1457 NPC.cs:53708,1458 同行号零漂移）：
     //   type==142 && Main.netMode!=1 && !Main.xMas → StrikeNPCNoInteraction(9999,0,0)
@@ -1795,22 +1922,47 @@ export class TownNPC extends Entity {
       world.clock.moonPhase, world.clock.bloodMoon, world.clock.isDay,
     );
 
-    // 被绑待救援：原地不动（仅重力落定），解救在 Game.talkToNearbyNpc / 净化粉
-    // （原版 bound 类型同走 TargetClosest + spriteDirection，NPC.cs:19813-19816：
-    //  恒面向最近玩家——捆绑姿态转向救援者）。1457 AI() aiStyle==0 头段
-    //  （:19872-19875）每 tick `homeless = true`（NPCID.Sets.BoundTownNPCs =
-    //  {105,123,106,685,686,687,354,376,579,589}）——被缚者恒无家,本仓 home=null
-    //  等价（Game 入驻轮本就 skip bound,此处按 1457 字面每 tick 置空防残留）
+    // 被绑待救援（BJ122 2026-09-18 定谳重写）。原版被缚族=独立 friendly【非
+    // townNPC】型：105/106/123/354/589 aiStyle=0（NPC.cs:10271/:10285/:10521/
+    // :13530/:16680）——AI_000（:19871-19977）只做 TargetClosest+spriteDirection
+    // （:19813-19816）+ vx*=0.93 衰减（:19971-19975），【无走路面】；重力=
+    // UpdateNPC 全局段（:91578-91586 gravity 0.3/maxFall 10）照落。
+    // ★685 BoundTownSlimeOld 例外：aiStyle=1（:17641-17655）走 AI_001_Slimes
+    // 跳跃机——弱跳（:62287-62294 vy×0.5/vx×0.2）+每跳 1/2 概率反向，原版被缚
+    // 老史莱姆【会蹦】非站桩（此前统一站桩=偏差，用户质疑"原版会走动"对 685 成立）。
+    // 1457 AI() aiStyle==0 头段（:19872-19875）每 tick `homeless = true`
+    // （NPCID.Sets.BoundTownNPCs={105,123,106,685,686,687,354,376,579,589}）——
+    // 被缚者恒无家,本仓 home=null 等价（Game 入驻轮本就 skip bound,此处按 1457
+    // 字面每 tick 置空防残留）。解救在 Game.talkToNearbyNpc / 净化粉 / 触碰（登记债）
     if (this.bound) {
       this.home = null;
       const bp = (game as unknown as { player: Player }).player;
-      if (bp && !bp.dead) this.facing = bp.cx < this.cx ? -1 : 1;
-      this.vx = 0;
+      // ★本仓 bound TownNPC 的 vanillaId 携【城镇】id（wizard=108/town_slime_old=679）,
+      // 绑缚态本体 id（106/685…）走 Game.BOUND_TOWN_NPC_ID 反查——685 判别双键:
+      // 真 685 vanillaId（未来直生路径）∪ npcKey（现行承载,唯一被缚史莱姆键）
+      if (this.vanillaId === 685 || this.npcKey === 'town_slime_old') {
+        this.boundSlimeHopUpdate(world, bp);
+      } else {
+        if (bp && !bp.dead) this.facing = bp.cx < this.cx ? -1 : 1;
+        // :19971-19975 vx*=0.93+|vx|<0.1 清零（曾直置 0=击退速度立即钉死,非
+        // 原版衰减相——击退后滑停 ~30t）
+        this.vx *= 0.93;
+        if (Math.abs(this.vx) < 0.1) this.vx = 0;
+      }
       this.vy = Math.min(this.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(this, world, this.vx, this.vy);
-      // [MAJOR-F4]：bound 早退跳过下方液体段（:2209）——原版 UpdateCollision 对
-      // bound NPC 照跑（NPC.Update 不分家）；旧中心格探针在链块内,浸判未随早退
-      // 丢失,改 buff 载体后须在此补施,防被缚者微光渐隐回归
+      // 液体段（UpdateNpcLiquid :93712-93805）——原版 UpdateCollision 不分家,
+      // bound 照跑（[MAJOR-F4] 的完整承接:此前 bound 永远 wet=false,被缚者入水
+      // 无浮力/溅落/岩浆伤害;685 AI_001 wet 段 :62080 也读本位）
+      updateNpcLiquid(this, game, world.store);
+      // CheckActive 四步（:78698-78810,UpdateNPC :91629 调）——被缚族非 townNPC
+      // 且不在 DoesntDespawnToInactivity 名单（:78612-78678）→ 照走:出 activeRange
+      // 盒即消/屏内续 timeLeft=750;归零强翻假 → noSpawnCycle+active=false。
+      // savedXxx 旗只在 Transform 侧写（:53492-53510）,消散不触 → 重刷门复开
+      // （走远=消失+新位置重生,wiki 同款语义）
+      this.boundCheckActive(game, bp);
+      // [MAJOR-F4]：bound 早退跳过非 bound 路径的微光续期段——buff 载体补施,
+      // 防被缚者微光渐隐回归（updateNpcLiquid 只更新 wet 面,不续 buff）
       this.shimmerBuffTryAddRepeated(world);
       return;
     }

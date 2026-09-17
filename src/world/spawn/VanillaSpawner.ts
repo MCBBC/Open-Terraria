@@ -2339,8 +2339,10 @@ export class VanillaSpawner {
       if (N(400)) return D(592);
       return D(55);
     }
-    // ---- 绑缚三人组（NPC.cs:1994-2005：水池第三支之后、spawnFriendly 段之前的三支
-    //      else-if；友好轮同样可命中——原版无 spawnFriendly 门）----
+    // ---- 绑缚三人组（1456 NPC.cs:1994-2005 = 1457 :2087-2096，1458 同行同文：水池
+    //      第三支之后、spawnFriendly 段之前的三支 else-if；友好轮同样可命中——原版
+    //      无 spawnFriendly 门。★106 巫师前置旗=Main.hardMode（:2091），肉前恒不刷
+    //      ——与 105 downedGoblins/685 downedBoss3 各异，用户实报"巫师不刷"首选核此）----
     //  公共门：RollLuck(20)==0 && !waterTile && deeperThanRockLayer &&
     //  spawnTileY < maxTilesY-210 && 前置旗 && !savedXxx && 场上唯一（AnyNPCs）。
     //  ★&& 求值序与原版一致（前置旗在 RollLuck 之前短路）——RNG 消费流不变。
@@ -2352,7 +2354,8 @@ export class VanillaSpawner {
     //    （解救记账见 Game.freeBoundNpc；685 解救置 flags.unlockedSlimeOldSpawn）
     {
       const f = this.world.flags;
-      // ★原版三支均为 RollLuck(20)（运气缩放，:1996-2008）——曾平掷 N(20)，已 1:1
+      // ★原版三支均为 RollLuck(20)（运气缩放，1456 :1996-2008 = 1457 :2087/2091/2095）
+      //  ——曾平掷 N(20)，已 1:1
       const luck20 = () => rollLuck(this.playerLuck, 20, () => rng.next()) === 0;
       if (f['downedGoblins'] && luck20() && !this.waterTile && this.deeperThanRockLayer
         && this.spawnTileY < st.h - 210 && !f['savedGoblin'] && !any(105)) {

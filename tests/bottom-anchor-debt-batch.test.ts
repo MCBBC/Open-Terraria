@@ -289,7 +289,10 @@ describe('msg202 Bottom 契约双端结构锁（BJ113-③,SummonIntent=202 线�
   it('客户端 sender 废除旧中心锚 +8:物品路径发 Bottom 行（自然路径本无 +8 不动）', () => {
     expect(gameSrc).toMatch(/sendSummonIntent\(key, tx2 \* TILE \+ 8, Math\.max\(4, onPlayerTy\) \* TILE\)/);
     expect(gameSrc, '旧 ty*TILE+8 中心锚=红').not.toMatch(/Math\.max\(4, onPlayerTy\) \* TILE \+ 8/);
-    expect(gameSrc, '自然路径保持 ty2-12 行').toMatch(/sendSummonIntent\(key, tx2 \* TILE \+ 8, Math\.max\(4, ty2 - 12\) \* TILE\)/);
+    // BJ114-c（2026-09-18）：自然档随线 naturalPath=true（msg202 flags bit0——
+    // 毁灭者 134 地下覆写仅自然档,SimHost.summon 同门）
+    expect(gameSrc, '自然路径保持 ty2-12 行 + naturalPath=true').toMatch(
+      /sendSummonIntent\(key, tx2 \* TILE \+ 8, Math\.max\(4, ty2 - 12\) \* TILE, 0, 0, true\)/);
   });
 });
 

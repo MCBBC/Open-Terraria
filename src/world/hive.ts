@@ -56,3 +56,19 @@ export function anchorBeeBottom(
 export function larvaSummonInRange(playerX: number, playerY: number, tileX: number, tileY: number): boolean {
   return Math.abs(playerX - tileX * 16) + Math.abs(playerY - tileY * 16) < 4800;
 }
+
+/** 蜂生成 MP 管籍（原版 KillTile 掉落段 :64373 `Main.netMode != 1` 门的本仓等价）：
+ *  net=null/undefined=单机（原版 netMode==0）→ 生成；net 活跃且本端=权威端
+ *  （中继房主 ≙ 原版 netMode==2 服务器）→ 生成（随 msg23 快照全房可见）；
+ *  非权威端（访客/serverAuth 客户端 ≙ 原版 netMode==1）→ 不本地掷蜂。
+ *  判据（红蓝-C ②定谳 2026-09-18）：本仓 NPC 可见性通道=权威端独占（msg23:
+ *  中继房主 netNpcBroadcast / serverAuth SimHost.npcSweep），掉落 msg21 与液体
+ *  module0 是 per-peer 通道而 NPC 不是——访客本地蜂永不可达对端（幻影实体）。
+ *  原版权威半边（服务器跑 case 225 出蜂→NPC 同步）在本仓=权威端破坏链不复刻
+ *  （"访客破坏的 tile 落格不触发房主破坏链"既有架构），家族债登记：225 tile 臂/
+ *  655 弹臂/582 蚁狮幼虫/雕像产怪同族 */
+export function beeSpawnAuthority(
+  net: { active: boolean; policy: { isHost: boolean } } | null | undefined,
+): boolean {
+  return !net?.active || net.policy.isHost;
+}

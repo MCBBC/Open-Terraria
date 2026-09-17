@@ -302,7 +302,7 @@ export const enum Msg {
                       //   record = {hp, maxHp, x, y, inv, armor, dye, savedAt}（id=内部下标，
                       //   同版本 registry 一致）。客户端进房应用覆盖本地角色。
                       //   语义=存档型 SSC（原版 ServerSideCharacter 同款信任模型，非反作弊）
-  SummonIntent = 202, // C→S（v8 服务器房）{str itemKey, f32 x, y, vx, vy}——召唤类物品使用
+  SummonIntent = 202, // C→S（v8 服务器房）{str itemKey, f32 x, y, vx, vy, u8 flags}——召唤类物品使用
                       //   意图（Boss 召唤物/雕像刷怪等 NPC 生成族）。仅 serverAuth 房接受：
                       //   SimHost 反查物品表确认召唤类 + 规则门（forbidBossSummon）后按原版
                       //   语义生成（含 Boss 公告链）；非 serverAuth 房整包丢弃（中继房仍走
@@ -311,7 +311,11 @@ export const enum Msg {
                       //   X=num10*16+8/Y=num11*16 → NPC.cs:81594 Bottom=(X,Y)）——
                       //   2026-09-17 双端合流（旧中心锚 +8 约定废除,BJ113 域外登记③;
                       //   server 与 game 同仓发布不做向后兼容,PROTO_VER 注 v6 先例）。
-                      //   不升 PROTO_VER（增量通道纪律,同 SpectateFocus=150 先例）
+                      //   ★flags bit0=naturalPath（2026-09-18 增量通道,同 SpectateFocus=150
+                      //   先例不升 PROTO_VER）：自然路径意图（Game.summonBossAtTx
+                      //   onPlayerTy===undefined 档）——毁灭者 134 地下 Y 覆写仅此档生效
+                      //   （物品路径=SpawnOnPlayer 寻点原值不覆写,BJ114-c;旧客户端缺段,
+                      //   服务器防御式读 0=物品路径语义,缺省无害）。
   ServerPingProbe = 203, // S→C {f64 serverTs, u8 n, [u8 slot, u16 rttMs]×n}（玩家列表面板
                       //   RTT 数据源——服务器 10s 主动探测 + 全房 RTT 表捎带）；
                       //   C→S 回显 {f64 serverTs}（服务器 Date.now()-serverTs = 该端

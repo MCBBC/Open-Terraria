@@ -19,7 +19,7 @@ import { tintedVanillaRegion } from './TileTint';
 import { getTreeFoliageSettings, type LeafPaintSettings } from '../world/Paint';
 import { inAPlaceWithWindTiles } from '../entities/Mounts';
 import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
-import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, TILE_ANIM_RATE } from './TileAnim';
+import { animFrameIdx, animYOffset, chimneyAddFrY, fireplaceAddFrY, cogAddFrY, crystalShardAddFrX, TILE_ANIM_RATE } from './TileAnim';
 import { tileFrameCapture as cap } from '../debug/TileFrameCapture';
 
 /** 捕获用素材宽读取（vmeta.sheet → ensureVImage 缓存直取，无请求副作用路径已有） */
@@ -1998,12 +1998,13 @@ function drawAdjust(
       a.sy = fy + 90 * (animRot() % 4);
       break;
     case 617: a.sx = fx % 54; a.sy = fy % 144; break;    // :5351-5355
-    case 129:   // :4682-4690
-      if (fx >= 324) {
-        const n = Math.floor((fx - 324) / 18);
-        a.sx = fx + (((n + animRot()) % 6) - n) * 18;
-      }
+    case 129: { // :4682-4690 ★2026-09-18：钟归正 animRot()→crystalShardAddFrX（=tileFrame[129]
+      //   每 8tick 推进/6 帧回卷 verbatim,此前 tick/6 相位率差 33%）；纵向 addFrY=0
+      //   由 TILE_ANIM_PITCH[129]=0 承担（旧默认 38 纵向走带=用户报"发散两个方块"根因）
+      const addFx = crystalShardAddFrX(fx);
+      if (addFx !== 0) a.sx = fx + addFx;
       break;
+    }
     case 530:   // :4757-4776:addFrY += 36*biome(同 529 变体近似)
       a.sy = fy + 36 * biomeVariant529(st, x, y, w);
       break;

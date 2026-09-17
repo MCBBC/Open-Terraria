@@ -3,7 +3,24 @@
 // `if (type == N) {...} else if (type == M) {...}` 链（约 436 行起），
 // 不是 switch-case —— 之前按 switch 解析提取到 0 条就是这个原因。
 // 深度 1 赋值捕获；输出 src/data/vanilla-projectiles.json
-import { readFileSync, writeFileSync, writeSync } from 'node:fs';
+//
+// ★追加时代守卫（2026-09-18，清债 BJ114-e 同族普查）：vanilla-projectiles.json 已进入
+//   recon+手补双通道时代——现库含本 producer 输出面之外的增量字段（鞭/多弹族
+//   localNPCHitCooldown / idStaticNPCHitCooldown / 1117·1122 宽高元组等 33 键，
+//   恢复指引=src/data/vanillaProjectiles.ts 头注手补清单），本 producer=纯全量覆写
+//   （不读现有），任何跑都会把上述增量洗掉；SW_ITEM_VER=1456 跑更会把 1457 特有弹段
+//   1111-1135（ProjectileID.Count=1136 的 25 弹）整段洗掉——CLAUDE.md「vanilla-
+//   projectiles.json 曾被 1456 提取器重跑，须对照 1457 逐值校验」的制度化解法。照
+//   era guard 判例（atlas 四连 / recipes R25-B5② / npcs 债刀-3）落闸——守卫=重产输出
+//   vs 现库【动态 diff】：①缺 id（现库有而重产盖不住；1111-1135 段整缺=1456 源指纹，
+//   探测动态比对不硬编码 id 清单）+②值漂移（同 id 键值 deep-equal 不等，含「现库
+//   独有字段」与「字段值差」两形态），任一非空且未带双旗即拒 exit 1+物证。--dump
+//   对账通道不受守卫限制（recon-item-1456-1457.mjs 双实例依赖）。活通道=recon-item-
+//   1456-1457.mjs 三方对账（proj 键值逐值校验）；重产前增量须先反哺进本提取器输出面
+//   （判例 fx3「重产前必反哺」，否则手补被静默洗回）。确需原地强推：双旗 --force-full
+//   --overwrite-append-era（单旗仍拒）。测试注入面：SW_PROJ_JSON（守卫探测路径）/
+//   SW_OUT（写盘路径），缺省行为不变。守卫测试：tests/extract-projectiles-era-guard.test.ts。
+import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
@@ -295,12 +312,53 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // --dump:全量数据出 stdout 不落盘(recon 双版本对账用;vitest 模块运行器按路径
   //  缓存忽略 query-string,库模式双实例不可靠——子进程各带 env 最稳)。
   //  ★writeSync 直写 fd 1:process.exit/大载荷走管道时异步 write 会在 64KB 截断
+  //  （守卫不拦 dump——recon-item-1456-1457.mjs 双实例 1456/1457 都走此通道）
   if (process.argv.includes('--dump')) {
     const s = JSON.stringify({ src: SRC_VER, projectiles: data, count: Object.keys(data).length });
     writeSync(1, s);
     process.exit(0);
   }
-  writeFileSync(`${ROOT}/game/src/data/vanilla-projectiles.json`, JSON.stringify(data));
+  // ---- ★追加时代守卫（头注见上）：重产 vs 现库动态 diff,缺 id/值漂移任一非空即拒 ----
+  const FORCE_FULL = process.argv.includes('--force-full');
+  const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+  const OUT_JSON = process.env.SW_OUT ?? `${ROOT}/game/src/data/vanilla-projectiles.json`;
+  const GUARD_JSON = process.env.SW_PROJ_JSON ?? OUT_JSON;
+  // deep-equal（现库记录=扁平 {field: number|boolean},递归比较防键序噪声）
+  const jsonEq = (a, b) => {
+    if (a === b) return true;
+    if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false;
+    const ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length) return false;
+    return ka.every((k) => jsonEq(a[k], b[k]));
+  };
+  let prev = null;
+  if (existsSync(GUARD_JSON)) {
+    try {
+      prev = JSON.parse(readFileSync(GUARD_JSON, 'utf8'));
+      if (prev == null || typeof prev !== 'object' || Array.isArray(prev)) prev = null;
+    } catch { prev = null; }   // 现库坏损时不拦——同 npcs 判例,让正常流程自行报错
+  }
+  const missingIds = prev
+    ? Object.keys(prev).filter((k) => data[k] === undefined).sort((a, b) => Number(a) - Number(b))
+    : [];
+  const driftKeys = prev
+    ? Object.keys(prev).filter((k) => data[k] !== undefined && !jsonEq(prev[k], data[k])).sort((a, b) => Number(a) - Number(b))
+    : [];
+  const liveOnlyFields = new Set();
+  for (const k of driftKeys) {
+    for (const f of Object.keys(prev[k] ?? {})) if (data[k]?.[f] === undefined) liveOnlyFields.add(f);
+  }
+  const appendEra = missingIds.length > 0 || driftKeys.length > 0;
+  if (appendEra && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+    console.error(`[extract-projectiles] 拒绝全量覆写：现库与重产(SW_ITEM_VER=${SRC_VER})存在动态 diff（追加时代）。`);
+    if (missingIds.length) console.error(`  物证①缺 id：现库有而重产盖不住 ${missingIds.length} 个（${missingIds.slice(0, 8).join(', ')}${missingIds.length > 8 ? '…' : ''}）——1457 特有弹段 1111-1135 整缺=1456 源指纹。`);
+    if (driftKeys.length) console.error(`  物证②值漂移：${driftKeys.length} 键（${driftKeys.slice(0, 8).join(', ')}${driftKeys.length > 8 ? '…' : ''}）${liveOnlyFields.size ? `；现库独有字段 {${[...liveOnlyFields].join(', ')}}（重产即洗）` : ''}。`);
+    console.error('  全量覆写会把上述增量与 1457 特征值打回重产源版本态（vanilla-projectiles.json 曾被 1456 重跑事故的制度化拦截）。');
+    console.error('  对账/校验走活通道：node tools/recon-item-1456-1457.mjs（proj 键值逐值三方对账）；增量恢复指引=src/data/vanillaProjectiles.ts 头注手补清单；重产前先反哺进本提取器输出面（判例 fx3）。');
+    console.error('  确需原地强推：双旗 --force-full --overwrite-append-era（单旗仍拒）；事后必须全绿 recon-item 双闸门 + tests/item-stats-golden-1457 + proj 消费面测试。');
+    process.exit(1);
+  }
+  writeFileSync(OUT_JSON, JSON.stringify(data));
   console.error(`共 ${Object.keys(data).length} 投射物（源 Terarria${SRC_VER}）`);
   console.error('手里剑(3):', JSON.stringify(data['3']));
   console.error('回旋镖(6):', JSON.stringify(data['6']));

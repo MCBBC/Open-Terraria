@@ -150,7 +150,7 @@ import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, happinessPct, type NpcButtonId, type ShopEntry, type ShopCellHover, type HappinessInfo } from './NpcDialog';   // ★SW-FX32:happinessPct/ShopCellHover 内嵌货架共用
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
-import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot } from '../items/Inventory';
+import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot, ACC_ARMOR_START, VANITY_ARMOR_START, ARMOR_SLOTS } from '../items/Inventory';
 import { chestSettingsAllowsVault, lootAllFromContainer, quickStackIntoContainer } from '../stats/QuickStacking';   // ★SW-BJ46 quickStackIntoContainer=ChestUI.QuickStack 纯函数（bank MoveCoins 前置/两遍语义/匹配域在内）
 import {
   slotContext, planAlternateClick, chestCanTakeJustCheck, canTakeToPersonalInventory,
@@ -364,15 +364,16 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 /** 空槽类型幽灵帧表（ItemSlot.cs:2240-2310 context/slot → Extra[54] 帧号）：
  *  帧格 3 列 × 7 行（列=帧%3 行=帧/3,格 34px 取 32px）。
  *  context 对应：armor 0-2=8(头盔0/胸甲6/护腿12) 3-9=10(配饰11) 10-12=9(时装头盔3/
- *  胸甲9/护腿15) 13-17=11(时装配饰2);dye/miscDye=12/33(染料1);
+ *  胸甲9/护腿15) 13-19=11(时装配饰2——★case 11 无槽位上限,恶魔心 18/大师 19 同帧,
+ *  曾误帽 i≤17 ⇒ 9 行面板末行中格无底图 2026-09-17 用户实报);dye/miscDye=12/33(染料1);
  *  misc 0-4 = context 19/20/18/17/16(宠物10/光源17/矿车7/坐骑13/抓钩4)。
  *  背包(0)/钱币(1)/弹药(2)/垃圾桶 无映射 → -1 */
-function slotGhostFrame(where: SlotWhere, i: number): number {
+export function slotGhostFrame(where: SlotWhere, i: number): number {
   if (where === 'armor') {
     if (i <= 2) return [0, 6, 12][i];
     if (i <= 9) return 11;
     if (i <= 12) return [3, 9, 15][i - 10];
-    if (i <= 17) return 2;
+    if (i <= 19) return 2;   // 社交配饰段 13-19 同帧（ItemSlot.cs:2451 case 11 无 slot 条件）
     return -1;
   }
   if (where === 'dye' || where === 'miscDye') return 1;
@@ -1453,6 +1454,32 @@ export class UI {
             return;
           }
         }
+        // ★SW-BJ116-a（2026-09-18）逐 context 路由（ItemSlot.RightClick :1614-1693；
+        //  1458 同段对拍零差）。首块门（:1636）= 光标空或【不可叠】同款——光标持可叠
+        //  同款时原版跳过 switch 直落取件臂（:1685 CanStack+stack<maxStack）。
+        //  §switch（:1654-1676）：
+        //  · case 9/11（时装列 armor[10-19]）= SwapVanityEquip(:1845)同序互换+Sound 7
+        //    ——旧 canSwapEquip→swapEquipItem 走"时装重排本段"=对已装备位 no-op/自段
+        //    挪位,与本仓自创 no-op 面（任务①判例）整摘;
+        //  · case 0/3/4/32（背包/宝箱/银行/虚空）= stack==1&&(CanBeEquipped||dye>0)
+        //    →SwapEquip(:3287)——即下 canSwapEquip 支（src 曾误读 inv.dye[i]=容器向
+        //    右键装备空转/错装,本刀一并修正）;门未过 fall-through 取件臂——本仓背包/
+        //    容器向 fallback 维持 splitHalf 旧面（BJ116 债域=装备列,容器 fallback 另账）;
+        //  · case 8（盔甲）/10（配饰）/12（染料）/16-20（杂项）/33（杂项染料）= switch
+        //    【无 case】→ 落 PickupItemIntoMouse(:1695) 取 1 到光标+Sound 12(:1688)
+        //    ——即"脱下到光标"。旧换槽路由（配饰已装备位=找空位挪/段首交换）与
+        //    拆半均非原版语义,整摘。
+        const ctx = slotContext(where, i, true, where === 'chest' ? this.openChest?.x : undefined);
+        const heldStacks = !!this.heldStack && !!cur && canMergeStack(this.heldStack, cur);
+        if (ctx === 9 || ctx === 11) {
+          if (!heldStacks) { this.swapVanityEquip(i); return; }
+          this.pickupEquipIntoMouse(where, i);
+          return;
+        }
+        if (ctx === 8 || ctx === 10 || ctx === 12 || (ctx >= 16 && ctx <= 20) || ctx === 33) {
+          this.pickupEquipIntoMouse(where, i);
+          return;
+        }
         if (!this.heldStack && cur && cur.stack === 1 && this.canSwapEquip(cur.id)) {
           this.swapEquipItem(cur, where, i);
           this.refreshAll();
@@ -1564,13 +1591,18 @@ export class UI {
     return k === 'dye' || k === 'pet' || k === 'light' || k === 'cart' || k === 'mount' || k === 'hook';
   }
 
-  /** 一键装备（ItemSlot.SwapEquip/ArmorSwap :3022-3346 近似）：部位→armor[0-2]（时装→[10-12]），
-   *  配饰→armor[3-9] 第一个空槽/原槽交换；染料→dye 第一个空槽；杂项→对应 miscEquips 槽；
-   *  成功后取消收藏（原版 :3341） */
+  /** 一键装备（ItemSlot.SwapEquip :3287-3368/ArmorSwap :3578 近似）：部位→armor[0-2]
+   *  （时装→[10-12]），配饰→armor[3-9] 第一个空槽/原槽交换；染料→dye 第一个空槽；
+   *  杂项→对应 miscEquips 槽；成功后取消收藏（SwapClearFavorite :1237 双端清）。
+   *  ★SW-BJ116-a（2026-09-18）右键 case 0/3/4/32 专属（装备列 case 8/10/12/16-20/33
+   *  已改道 PickupItemIntoMouse/ SwapVanityEquip,见 RightClick 路由注）——src 改经
+   *  slotContent 单源（容器向 chest 曾误读 inv.dye[i]:右键箱中装备=空转或错装染料格
+   *  +miscDyes 错位回写;ItemSlot.RightClick :1654 case 0/3/4/32 的 inv[slot] 即容器格,
+   *  SwapEquip 直接交换该格 ↔ 装备位）。1457 行号锚（旧注 :3022-3346/:1537 为 1456 系） */
   private swapEquipItem(cur: { id: number; stack: number }, where: SlotWhere, i: number): void {
     const inv = this.game.player.inv;
     const d = ITEM_DEFS[cur.id];
-    const src = where === 'inv' ? inv.slots[i] : where === 'armor' ? inv.armor[i] : inv.dye[i];
+    const src = this.slotContent(where, i);
     if (!src) return;
     // ★原版右键装备门（ItemSlot.RightClick :1537）：`inv[slot].stack == 1` 才触发
     // SwapEquip——堆叠>1（1.4.4+ 装备可堆 9999）一律不装（落入下方取半逻辑）。
@@ -1614,14 +1646,97 @@ export class UI {
     const tmp = arr[target];
     if (tmp) tmp.favorited = false;   // ★SW-RB1 2026-09-06 SwapClearFavorite（ItemSlot.cs:1237-1242）双端清——被换下装备件回背包不得保留共享/收藏标记（ArmorSwap :3341 同调）
     arr[target] = src;
+    // 回写与 slotContent 取数逐臂镜像（★BJ116-a：chest 向曾误落 miscDyes 分支）
     if (where === 'inv') inv.slots[i] = tmp ?? null;
     else if (where === 'armor') inv.armor[i] = tmp ?? null;
     else if (where === 'dye') inv.dye[i] = tmp ?? null;
     else if (where === 'misc') inv.miscEquips[i] = tmp ?? null;
-    else inv.miscDyes[i] = tmp ?? null;
+    else if (where === 'miscDye') inv.miscDyes[i] = tmp ?? null;
+    else if (this.openChest) this.openChest.items[i] = tmp ?? null;
     this.game.sfx.play('menuTick', 1);
     // 成就：装备态检查（AchievementsHelper.HandleOnEquip）
     this.game.achNotifyEquipChanged();
+  }
+
+  /** ★SW-BJ116-a（2026-09-18）时装列右键=SwapVanityEquip（ItemSlot.cs:1845-1877）1:1：
+   *  时装槽 armor[i] ↔ 功能同序槽 armor[i-10]（10-12↔0-2 盔甲 / 13-19↔3-9 配饰）
+   *  整格互换——非"本段重排"。门序（:1847-1855）：商店开着早退（Main.npcShop>0）→
+   *  双空早退 → context 11（配饰段 i>=13）加 CanEquipAccessoryInSlot 双向唯一性门
+   *  （:1852——换入功能段/时装段各查目标段,冲突槽=目标槽放行 :3544）→
+   *  SwapClearFavorite(:1237-1242) 双端清收藏 → Sound 7（:1857='pickup'）→
+   *  HandleOnEquip（:1873,本仓 achNotifyEquipChanged 同义路径;原版门=换入时装槽件
+   *  stack>0,本仓重查式成就钩不挑事件源,恒查=状态收敛同相）。1458 对拍零差 */
+  private swapVanityEquip(i: number): void {
+    if (this.game.npcShopOpen) return;                       // Main.npcShop > 0（:1847）
+    const arr = this.game.player.inv.armor;
+    const cur = arr[i] ?? null;
+    const other = arr[i - 10] ?? null;
+    if (!cur && !other) return;                              // 双空早退（:1852 首支）
+    if (i >= 13) {                                           // context 11 双向门
+      if (cur && !this.accFitsInSegment(i - 10, cur.id, false)) return;
+      if (other && !this.accFitsInSegment(i, other.id, true)) return;
+    }
+    if (cur) cur.favorited = false;                          // SwapClearFavorite（:1237-1242）
+    if (other) other.favorited = false;
+    arr[i] = other;
+    arr[i - 10] = cur;
+    this.game.sfx.play('pickup', 1);                         // SoundEngine.PlaySound(7)（:1857）
+    this.game.achNotifyEquipChanged();
+    this.refreshAll();
+  }
+
+  /** CanEquipAccessoryInSlot（ItemSlot.cs:3540-3547,SwapVanityEquip context 11 门）：
+   *  只扫目标段（AccSlots=armor[3..9] / VanityAccSlots=armor[13..19],ArraySegment
+   *  段宽恒 7 :3502-3515——【不】设 accSlotMax 解锁门=原版段宽定值）段内同 type
+   *  （CanEquipBothAccessories :3462）/双翅（:3466-3473,建模面与 armorAccepts 同款
+   *  =statOfInternal().wing;AccessoryIncompatibilityType 集合面 armorAccepts 亦未
+   *  建模=既登记水平一致）互斥;空槽恒不冲突（air 收尾 true :3474-3480）;冲突槽=
+   *  目标槽自身放行（HasIncompatibleAccessory collisionSlot==slot :3544——被换出件
+   *  占目标槽天然放行）。对段【不】扫（此门无 :1313 跨段臂——armorAccepts 的跨段
+   *  同款臂属放置语境,SwapVanityEquip 无） */
+  private accFitsInSegment(target: number, id: number, vanitySide: boolean): boolean {
+    const arr = this.game.player.inv.armor;
+    const lo = vanitySide ? VANITY_ARMOR_START + ACC_ARMOR_START : ACC_ARMOR_START;
+    const hi = lo + (ARMOR_SLOTS - ACC_ARMOR_START);
+    const isWing = statOfInternal(id)?.wing != null;
+    for (let k = lo; k < hi; k++) {
+      if (k === target) continue;                            // 冲突槽=目标槽放行（:3544）
+      const t = arr[k];
+      if (!t) continue;                                      // 空槽不冲突
+      if (t.id === id) return false;                         // 段内同 type（:3462）
+      if (isWing && statOfInternal(t.id)?.wing != null) return false;   // 双翅（:3466）
+    }
+    return true;
+  }
+
+  /** ★SW-BJ116-a（2026-09-18）装备/染料/杂项列右键=取 1 到光标（ItemSlot.RightClick
+   *  :1677-1691 switch 落空 → PickupItemIntoMouse :1695-1750）：光标空→clone 单件
+   *  （源 favorited 且【整格】stack==1 时收藏随件 :1706-1709）;光标同款可叠→+1
+   *  （:1685 CanStack && mouseItem.stack<maxStack 门）;光标异款/满叠→无动作。
+   *  SoundEngine.PlaySound(12)（:1688）='menuTick'。原版 stackSplit/superFastStack
+   *  按住连取加速面=DOM mousedown 单发（每次右按一件,连发间隔本仓未建模=既有
+   *  右键链同约定）。源格 stack-- 归零清槽（:1719-1724）。装备位取下恒合法,
+   *  无 armorAccepts 回查（原版无门）。 */
+  private pickupEquipIntoMouse(where: SlotWhere, i: number): void {
+    const cur = this.slotContent(where, i);
+    if (!cur) return;                                        // inv[slot].IsAir return（:1678）
+    if (this.heldStack) {
+      if (!canMergeStack(this.heldStack, cur)) return;       // !Item.CanStack → 无动作
+      const max = ITEM_DEFS[this.heldStack.id]?.maxStack ?? 9999;
+      if (this.heldStack.stack >= max) return;               // mouseItem.stack < maxStack（:1685）
+      this.heldStack.stack++;
+    } else {
+      this.heldStack = {
+        id: cur.id, stack: 1, prefix: cur.prefix,
+        favorited: !!(cur.favorited && cur.stack === 1),     // :1706-1709
+        ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}),
+      };
+      this.heldFrom = where;
+    }
+    cur.stack--;                                             // :1719
+    if (cur.stack <= 0) this.equipArray(where)[i] = null;    // :1721-1724
+    this.game.sfx.play('menuTick', 1);                       // SoundEngine.PlaySound(12)（:1688）
+    this.refreshAll();
   }
 
   /** ★SW-AU2 2026-09-06 Alt+左键（FavoriteKey，Main.cs:67607 缺省 LeftAlt）语义：
@@ -2456,32 +2571,61 @@ export class UI {
     this.ghostEl.style.transform = `translate(${this.mouseX - 20}px, ${this.mouseY - 20}px)`;
   }
 
-  /** 稀有度着色（Main.cs GetItemNameColor :20742-20814 主干）。
-   *  ★SW-清债④ 2026-09-17 两档接活色（单源换算=Renderer.mouseTextInnerColor,
-   *  mt 传 255 → num3=1 = GetItemNameColor 无 mouseTextColor 乘区的原生语义；
-   *  钟=Game.lighting.clock,与 Renderer.drawMouseTextLayer :15431 同源注入）：
-   *  · −13 大师（:20745-20747）= (255,(byte)(masterColor×200f),0) 脉冲——旧
-   *    '#FF6400' 定值即中点 0.5 档（无钟回退同相,直测不破）；
-   *  · −12 专家（:20749-20751）= (byte)DiscoR/G/B 彩虹——旧绿脉冲近似撤除。
-   *  同源钟:FlickerClock.masterColor 0..1 步进 0.05 ping-pong（Main.cs:18408-18418）/
-   *  disco 6 相循环（SkyColor.tick :427-436）。其余档位表暂维持（−11/9/10/11 档
-   *  与原版表有漂移,登记债不属本刀）。 */
+  /** 稀有度着色（Main.cs MouseText_DrawItemTooltip_GetItemNameColor :20742-20814）。
+   *  ★SW-清债④ 2026-09-17 −13/−12 两档接活色 → ★SW-BJ116-b（2026-09-18,债刀-2）
+   *  整表单源委托 Renderer.mouseTextInnerColor（能单源委托则委托判例）——mt 传 255
+   *  → num3=1 = GetItemNameColor 无 mouseTextColor 乘区的原生语义；钟=Game.lighting
+   *  .clock（与 Renderer.drawMouseTextLayer :15431 同源注入；同源钟
+   *  FlickerClock.masterColor 0..1 步进 0.05 ping-pong :18408-18418 / disco 6 相循环）。
+   *  四漂移档定谳（GetItemNameColor 亲读逐档核;1458 同位同文对拍零差）：
+   *  · −11（:20753-20755）= (255,175,0)——旧 '#828282' 误并 −1 灰档（−1=:20757-20759
+   *    (130,130,130),委托后两档各归各档）;
+   *  · 9（:20793-20795）= (5,200,255)——旧 '#0AFFFF' 自创;
+   *  · 10（:20797-20799）= (255,40,100)——旧 '#FFAA66' 自创;
+   *  · ≥11（:20801-20803）= (180,40,255)——旧 '#B42CFF' 漂移。
+   *  −10 档=GetItemNameColor 无分支（缺省 White）,mouseTextInnerColor 有
+   *  (:20439-20441 (65,255,110))——1457 全源 `rare = -10` 计 0 处=死档,两读不可达,
+   *  委托无偏差。diff 档（:20805-20812 mc/hcColor）=MouseTextHackZoom 显式传参域
+   *  （地图钉/物品框等非 tooltip 面）,本仓未建模=缺省 diff 0 同相。 */
   private rarityColor(rare: number): string {
-    if (rare <= -13) return mouseTextInnerColor(-13, 0, 255, this.game?.lighting?.clock ?? null);
-    if (rare === -12) return mouseTextInnerColor(-12, 0, 255, this.game?.lighting?.clock ?? null);
-    if (rare === -11 || rare === -1) return '#828282';
-    if (rare === 0) return '#ffffff';
-    if (rare === 1) return '#9696ff';
-    if (rare === 2) return '#96ff96';
-    if (rare === 3) return '#ffc896';
-    if (rare === 4) return '#ff9696';
-    if (rare === 5) return '#ff96ff';
-    if (rare === 6) return '#d2a0ff';
-    if (rare === 7) return '#96ff0a';
-    if (rare === 8) return '#ffff0a';
-    if (rare === 9) return '#0affff';
-    if (rare === 10) return '#ffaa66';
-    return '#b42cff';
+    return mouseTextInnerColor(rare, 0, 255, this.game?.lighting?.clock ?? null);
+  }
+
+  /** ★SW-BJ116-b（2026-09-18,债刀-3）Tooltip 名色稀有度判定链单源。消费面 =
+   *  MouseText_DrawItemTooltip :20509-20515 `rare = hoverItem.rare`（直读字段——
+   *  字段值已含 SetDefaults 基表/变体与 Prefix() 档位移两域合成;1458 同位同文）。
+   *  链序（=showTooltipFor 旧内联序,showReforgeTooltip 曾缺③词缀档位移=本刀主债）：
+   *  ① 基表值：vi_ 物品查 vanilla-itemrare.json（tools/extract-itemrare.mjs 从
+   *    Item.cs case 块提取 1643 条）;缺条目 value 分档近似
+   *  ② 变体覆写（Item.cs SetDefaults Variant 分支：remix 世界 112→6/157→8/725→1
+   *    等 10 件;普通世界无覆写）
+   *  ③ 词缀档位移（Item.Prefix :588-614：num2≥1.2 →+2 / ≥1.05 →+1 / ≤0.8 →−2 /
+   *    ≤0.95 →−1,reforge 时已烘入 Item.rare;:604-614 rare>-11 段 clamp [−1,11]——
+   *    −11 quest 鱼不可词缀=钳段不可达,本仓 −1 下限/11 上限同相）
+   *  ④ expert 旗末位覆写 → −12（Main.cs:20512-20515;Item.cs SetDefaults 全表零处
+   *    `rare = -12`,专家件表值 1..10 如 3090 rare=2 :28598-28600;旗与稀有度正交
+   *    3332 主袋 rare=8 仍覆写;旗源=vanilla-expert.json,vanilla-itemrare 全表无 −12） */
+  private tooltipRareOf(def: { key: string; value?: number }, prefix?: number): number {
+    let rare = 0;
+    const isVi = def.key.startsWith('vi_');
+    const vid = isVi ? parseInt(def.key.slice(3), 10) : -1;
+    if (isVi) {
+      rare = ITEM_RARE[String(vid)] ?? 0;
+      if (rare === 0) {
+        const v = def.value ?? 0;
+        rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
+      }
+      rare = variantRareOfVid(vid) ?? rare;
+    }
+    if (prefix) {
+      const pv = prefixValueMul(prefix);
+      if (pv >= 1.2) rare = Math.min(11, rare + 2);
+      else if (pv >= 1.05) rare = Math.min(11, rare + 1);
+      else if (pv <= 0.8) rare = Math.max(-1, rare - 2);
+      else if (pv <= 0.95) rare = Math.max(-1, rare - 1);
+    }
+    if (isVi && ITEM_EXPERT[String(vid)] === 1) rare = -12;
+    return rare;
   }
 
   /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行/商店格位）——slot 传
@@ -2500,37 +2644,12 @@ export class UI {
     }
     if (!s) { this.tooltip.style.display = 'none'; return; }
     const def = ITEM_DEFS[s.id];
-    // 名称按稀有度着色（原版 GetItemNameColor 15 档）：vi_ 物品查 vanilla-itemrare.json
-    //（tools/extract-itemrare.mjs 从 Item.cs case 块提取 1643 条）；缺条目 fallback value 近似
-    let rare = 0;
-    if (def.key.startsWith('vi_')) {
-      const vid = parseInt(def.key.slice(3), 10);
-      rare = ITEM_RARE[String(vid)] ?? 0;
-      if (rare === 0) {
-        const v = def.value ?? 0;
-        rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
-      }
-      // 变体稀有度覆写（Item.cs SetDefaults Variant 分支：remix 世界 112→6/
-      //  157→8/725→1 等 10 件；普通世界无覆写）
-      rare = variantRareOfVid(vid) ?? rare;
-    }
-    // 词缀稀有度档位偏移（Item.Prefix :593-600：value≥1.05 档 +1、≥1.2 档 +2 等）
-    if (s.prefix) {
-      const pv = prefixValueMul(s.prefix);
-      if (pv >= 1.2) rare = Math.min(11, rare + 2);
-      else if (pv >= 1.05) rare = Math.min(11, rare + 1);
-      else if (pv <= 0.8) rare = Math.max(-1, rare - 2);
-      else if (pv <= 0.95) rare = Math.max(-1, rare - 1);
-    }
-    // ★SW-清债④ 2026-09-17 专家件 rare→−12 覆写（Main.cs:20511-20515：rare=
-    //  hoverItem.rare → if (hoverItem.expert) rare=-12——Item.cs SetDefaults 全表
-    //  零处 `rare = -12`（专家件表值 1..10,如 3090 rare=2+expert=true :28598-28600）,
-    //  名色全靠 tooltip 时末位覆写进 −12 disco 档。原版序=变体覆写（SetDefaults 域,
-    //  :2501 同相）在前、expert 覆写最后（词缀档位移之后）;旗与稀有度正交（3332
-    //  主袋 rare=8 仍覆写）,旗源=vanilla-expert.json（vanilla-itemrare 全表无 −12）
+    // ★SW-BJ116-b（2026-09-18,债刀-3）：稀有度判定链单源委托 tooltipRareOf
+    //  （基表→变体→词缀档位移→expert 覆写,逐域锚见方法头）——本面行为零变化
+    //  （旧内联链原序迁入）;isExpert 另取（Expert 行门 :21214 旗本体判,非 rare 档判）
+    const rare = this.tooltipRareOf(def, s.prefix);
     const isExpert = def.key.startsWith('vi_')
       && ITEM_EXPERT[String(parseInt(def.key.slice(3), 10))] === 1;
-    if (isExpert) rare = -12;
     const nameColor = this.rarityColor(rare);
     // 词缀名前缀（Lang.GetPrefixedItemName：Prefix.{ConstName} + 物品名）
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
@@ -3353,20 +3472,20 @@ export class UI {
     this.refreshAll();
   }
 
-  /** 重铸槽 tooltip（词缀前后对比行） */
+  /** 重铸槽 tooltip（词缀前后对比行）。★SW-BJ116-b（2026-09-18,债刀-3）：稀有度链
+   *  单源委托 tooltipRareOf——曾缺③词缀档位移（Item.Prefix :588-614,reforge 落词缀
+   *  时已烘入 Item.rare 字段;MouseText_DrawItemTooltip :20511 直读 hoverItem.rare=
+   *  位移后值,重铸槽悬停=同一消费面）：Legendary/Godly/Mythical(pv≥1.2) 名色档 +2、
+   *  Quick/Agile(+1)、Awful(≤0.8) −2、Lazy(−1)——旧基表值整缺=重铸台悬停名色与
+   *  背包悬停同名件不同色（例:75 坠落星 Legendary 档原版 rgb(255,200,150),旧渲染
+   *  1 档 rgb(150,150,255)）。序与 showTooltipFor 全同（基表→变体→位移→expert） */
   private showReforgeTooltip(): void {
     const s = this.reforgeItem;
     if (!s) return;
     const def = ITEM_DEFS[s.id];
-    let rare = 0;
-    if (def.key.startsWith('vi_')) rare = ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0;
-    // 变体稀有度/名后缀（同 showTooltipFor）
+    const rare = this.tooltipRareOf(def, s.prefix);
+    // 变体名后缀（同 showTooltipFor）
     const rv = def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1;
-    if (rv >= 0) rare = variantRareOfVid(rv) ?? rare;
-    // ★SW-清债④：专家件 rare→−12 覆写（Main.cs:20511-20515 同款,重铸槽 tooltip
-    //  是同一 MouseText_DrawItemTooltip 消费面——可重铸专家件 3090/3097/3245 等
-    //  经此槽悬停时名色同进 −12 disco 档,覆写末位同序）
-    if (rv >= 0 && ITEM_EXPERT[String(rv)] === 1) rare = -12;
     const rvKind = rv >= 0 ? activeVariantOfVid(rv) : null;
     const rvLabel = rvKind ? Lang.text(VARIANT_L10N_KEY[rvKind]) : '';
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
