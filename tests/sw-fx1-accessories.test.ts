@@ -523,6 +523,64 @@ describe('SW-FX1④b AI_105 孢子云（:40768-40905）+ AI_106 迸气（:34144-
     }
     expect(hurtCalls).toBe(1);             // 组表单门（per-instance 变异面=3）
   });
+
+  // =========================================================================
+  // ★拍板#1A（红蓝-J3 2026-09-18）云 567/568 免疫面三不写判别面：
+  //  Damage 免疫梯首支内层条件 `penetrate!=1 || appliesImmunityTimeOnSingleHits`
+  //  对云恒假（Projectile.cs:14031-14038）→ 组行恒不写=外环组门恒开（多云同拍
+  //  连击同敌=本相）+命中不写 immune[owner]（尾档 :14175-14183 不达）=不开全局窗。
+  //  曾自造 SPORE_CLOUD_IMMUNE 10t 组窗+Enemy.hurt 写 10t iframes 双重保守节流
+  //  已摘——复辟任一重 → 本块爆红（变异面≥2）。
+  // =========================================================================
+  it('多云同拍连击同敌（拍板#1A 判别面）:3 云同敌 3 次 hurt + 3 迸气,敌 iframes 恒 0', () => {
+    const foe = Enemy.fromVanilla(3, 995, 995)!;         // 僵尸 45hp——伤 1×3 不致死
+    foe.id = 4301;
+    let hurtCalls = 0;
+    const origHurt = foe.hurt.bind(foe) as (...a: unknown[]) => boolean;
+    (foe as unknown as { hurt: (...a: unknown[]) => boolean }).hurt = (...args: unknown[]) => {
+      hurtCalls++;
+      return origHurt(...args);
+    };
+    const game = unitGame([foe]);
+    const gasDmg: number[] = [];
+    const mk = (type: number) => new SporeSacCloud(990, 990, type, 1, 1.5, 1,
+      (_x: number, _y: number, _vx: number, _vy: number, dmg: number) => { gasDmg.push(dmg); });
+    const c1 = mk(SPORE_CLOUD_A);
+    const c2 = mk(SPORE_CLOUD_B);
+    const c3 = mk(SPORE_CLOUD_A);
+    c1.fixedUpdate(1 / 60, game);
+    c2.fixedUpdate(1 / 60, game);
+    c3.fixedUpdate(1 / 60, game);
+    expect(hurtCalls).toBe(3);             // 组窗复辟 → 1;hurt 写帧复辟 → 1（双变异面）
+    expect(c1.dead).toBe(true);            // 各云首命中即亡（penetrate 1）
+    expect(c2.dead).toBe(true);
+    expect(c3.dead).toBe(true);
+    expect(gasDmg).toEqual([1, 1, 1]);     // Kill :74317 迸气=每云一次,同伤透传
+    expect(foe.iframes).toBe(0);           // 云命中三不写=不开全局窗（:14035 不达）
+  });
+
+  it('云命中尊重他源免疫窗（内环 :12636 immune[owner]==0 门,pierce=-2 门照走）:iframes>0 → 零结算', () => {
+    const foe = Enemy.fromVanilla(3, 995, 995)!;
+    foe.id = 4302;
+    const game = unitGame([foe]);
+    foe.iframes = 5;                       // 他源开窗（原版 immune[owner]=5 同构档）
+    const c = new SporeSacCloud(990, 990, SPORE_CLOUD_A, 70, 1.5, 1);
+    c.fixedUpdate(1 / 60, game);
+    expect(foe.hp).toBe(foe.maxHp);        // 免疫门拒=零结算（pierce=1 旁路面不越权）
+  });
+
+  it('keepIterating 截断（:14186-14201 penetrate 1→0 → false=stopAfterFirstHit）:重叠双敌只伤桶序首个', () => {
+    const a = Enemy.fromVanilla(3, 995, 995)!;
+    a.id = 4303;
+    const b = Enemy.fromVanilla(3, 995, 995)!;
+    b.id = 4304;
+    const game = unitGame([a, b]);
+    const c = new SporeSacCloud(990, 990, SPORE_CLOUD_A, 1, 1.5, 1);
+    c.fixedUpdate(1 / 60, game);
+    expect(a.hp).toBe(a.maxHp - 1);        // 首个中伤（damage 1 → damageVarRoll 恒 1）
+    expect(b.hp).toBe(b.maxHp);            // 第二个本拍不结算——stopAfterFirstHit 摘除 → 双伤=红
+    expect(c.dead).toBe(true);
+  });
 });
 
 // ===========================================================================

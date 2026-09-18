@@ -870,12 +870,14 @@ export class ItemDrop extends Entity {
     }
   }
 
-  /** WorldItem.CheckLavaDeath（:731-804）1:1：
-   *  - vid 267 向导巫毒娃娃：TurnToAir → 场上每只向导（type 22）
-   *    StrikeNPCNoInteraction(9999, 10, -direction) 致死 + **每杀一只调一次**
-   *    NPC.SpawnWOF(物品位置)（:736-752；首次生成后 AnyNPCs(113) 门挡掉后续调用，
-   *    净效果 = 杀完全部向导再召）→ stack 余量随机处决城镇 NPC 直到扣完（:754-779）。
-   *  - 其余物品（:800-804）：rare 0/-1 且不在 IsLavaImmuneRegardlessOfRarity → 烧毁。
+  /** WorldItem.CheckLavaDeath（1456 :731-804 = 1457 :686-703;红蓝-D 2026-09-18
+   *  锚勘误——原 :731-804/:800-804 系 1456 域）1:1：
+   *  - vid 267 向导巫毒娃娃（1457 :692-696 委派 VoodooDollLavaDeath :705-777）：
+   *    TurnToAir(:713) → 场上每只向导（type 22）
+   *    StrikeNPCNoInteraction(9999, 10, -direction) 致死(:725) + **每杀一只调一次**
+   *    NPC.SpawnWOF(物品位置)（:728；首次生成后 AnyNPCs(113) 门挡掉后续调用，
+   *    净效果 = 杀完全部向导再召）→ stack 余量随机处决城镇 NPC 直到扣完（:736-758）。
+   *  - 其余物品（:697-702）：rare 门 :698——rare 0/-1 且不在 IsLavaImmuneRegardlessOfRarity → 烧毁。
    *  单人语义缺省：playerIndexTheItemIsReservedFor==myPlayer 恒真、netMode 门不适用。
    *  差异：原版 StrikeNPC 后 NPC 当 tick 仍 active（死亡在下一 Update 收口），余量
    *  随机池可能命中垂死向导；本仓 TownNPC.hurt 即时置 dead，池自然排除，净效果一致 */

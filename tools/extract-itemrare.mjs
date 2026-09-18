@@ -34,16 +34,17 @@
 //   变体分支内字段引用不收（case 2623 影杖 WeakerVariant `value = dungeonPrice`
 //   :25670，基础变体已有顶层 sellPrice(0,5)，按既有"建模基础变体"口径忽略）。
 //
-// ★追加时代守卫（2026-09-18，清债 BJ114-e 同族普查）：本提取器缺省源版本仍是 1456
-//   （SW_ITEM_VER 未设 → SRC_VER='1456'），而现库 vanilla-itemrare/itemvalue 已是
-//   1457 终值态——裸跑重产=把 1457 新物品 6147-6195（49 件）连同 1293 rare 档
+// ★追加时代守卫（2026-09-18，清债 BJ114-e 同族普查；★拍板#7A 同日缺省翻转 1457——
+//   原洗库险面「缺省 1456（SW_ITEM_VER 未设 → SRC_VER='1456'）而现库已是 1457
+//   终值态」就此闭合，守卫语义与流不变）：重产盖不住现库（如显式 SW_ITEM_VER=1456
+//   重放旧基线）=把 1457 新物品 6147-6195（49 件）连同 1293 rare 档
 //   （1457 Item.cs:15981 新增 rare=8，1456 案无此行）从现库洗成缺键 → 运行时
 //   rare=0/value=0 兜底，拾取飘名/重铸费用/商店定价/decraft 组代表全错。BJ92
 //   （3860-3862 错值非缺键）同案异构：本件=缺键型增量，与 extract-npcs 的字段型
 //   不同构。照 era guard 判例（atlas 四连 / recipes R25-B5② / npcs 债刀-3）落闸——
 //   守卫=重产输出 vs 现库【动态 diff】：现库有而重产盖不住的 id（missing）非空即拒
 //   exit 1+物证，不硬编码 id 清单（1293≤6146 同被动态探测捕获；实证 1456 重产
-//   missing=50/49）。正常更新流：SW_ITEM_VER=1457 重产（1457 输出盖住现库全部 id →
+//   missing=50/49）。正常更新流：裸跑重产（缺省 1457，输出盖住现库全部 id →
 //   零缺失放行；实证与现库逐键 byte-perfect 零漂移）。--dump 对账通道不受守卫限制
 //   （recon-item-1456-1457.mjs 双实例 1456/1457 都走 --dump，拦了=对账闸门自断）。
 //   活通道与 recon 闸分工：守卫只拦【缺键型】（一门一职责），错值型漂移归
@@ -60,8 +61,12 @@
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-// 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
-export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+// 源版本可选(★拍板#7A 2026-09-18 缺省翻转 1456→1457：现库 vanilla-itemrare/itemvalue
+//   已是 1457 终值态,裸跑重产恢复正常更新流;extract-projectiles.mjs 同族先例。
+//   1456 显式路径保留供 recon-item-1456-1457.mjs 双闸——其双实例均显式注入
+//   SW_ITEM_VER(:198-199 亲核,--dump 对账通道不受守卫限制,不破)。显式 1456
+//   重放旧基线会被下方追加时代守卫拦截(missing=50/49),防洗库)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 
 /** 提取库:Item.cs 全文 → { RARE, VALUE }（id → 档位/价值,铜币,原版 value 字段终值——
  *  sellPrice 系含 ×5 尾乘,2026-08-23 修正） */
@@ -299,7 +304,7 @@ if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFile
       console.error(`[extract-itemrare] 拒绝全量重写：现库含重产(SW_ITEM_VER=${SRC_VER})盖不住的 id（追加时代·缺键型增量）。`);
       console.error(`  物证：vanilla-itemrare.json 缺 ${missingRare.length} 个 id（${sample(missingRare)}）；vanilla-itemvalue.json 缺 ${missingValue.length} 个 id（${sample(missingValue)}）。`);
       console.error('  全量重写会把缺键 id 洗成 rare=0/value=0 兜底——拾取飘名/重铸费用/商店定价/decraft 组代表全错（缺键型,与 BJ92 错值型同案异构）。');
-      console.error('  正常更新流：SW_ITEM_VER=1457 node tools/extract-itemrare.mjs 重产（1457 输出盖住现库全部 id,零缺失即放行）。');
+      console.error('  正常更新流：node tools/extract-itemrare.mjs 重产（缺省 1457,输出盖住现库全部 id,零缺失即放行）。');
       console.error('  错值型漂移走活通道：node tools/recon-item-1456-1457.mjs（--fix 一键重放 1457 终值 + DRIFT=0 双闸）。');
       console.error('  确需原地强推：双旗 --force-full --overwrite-append-era（单旗仍拒）；事后必须全绿 recon-item 双闸门 + tests/item-stats-golden-1457。');
       process.exit(1);

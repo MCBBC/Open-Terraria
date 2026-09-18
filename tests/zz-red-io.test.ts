@@ -227,23 +227,29 @@ describe('红队:wld 对抗输入', () => {
     const tilesStart = dv.getInt32(26 + 4 * 1, true), tilesEnd = dv.getInt32(26 + 4 * 2, true);
     expect(() => parseWldToSave(bytes.slice(0, tilesStart + Math.floor((tilesEnd - tilesStart) / 2)))).toThrow(/越界/);
   });
-  it('尾段截断契约(显式,防双向漂移):creativePowers+footer 可缺;bestiary 缺失/截断必抛', () => {
-    // ★RB15c 实证修正(2026-09-13,探测脚本报存):段表 mark 序=[6]pressurePlates 尾/
-    //  [7]townManager 尾(=bestiary 起点)/[8]bestiary 尾(=creativePowers 起点)——
-    //  原稿 townStart/townEnd 命名与"三段可缺"注释各错一位。parseWldToSave 实证:
-    //  · slice(0,pointers[8])=保到 bestiary 尾,creativePowers+footer 缺 → 不抛(FX35
-    //    容忍语义真身;WldParser.ts:778/:806 try/catch 的"脏段容错"在游戏读侧,
-    //    footer 由 pointer 重定位);
-    //  · slice(0,pointers[7])=bestiary 整段缺 → 抛(bestiary count 读 EOF);
-    //  · slice(0,pointers[7]+2)=bestiary 头截 2B → 抛。与原版 LoadWorld_Version2
-    //    (WF:1844-1847)Position 对账不符=BadSectionPointer 整档拒载同向。
+  it('尾段截断契约(显式,防双向漂移):bestiary+creativePowers+footer 可缺;townManager 缺失/截断必抛', () => {
+    // ★拍板#11A 归正(2026-09-18,探针字节面+fx35 buildWldWithTail 回钉序+原版
+    //  LoadWorld_Version2 :1830-1846 三方复核;推翻本测 RB15c 旧注的段表归属):
+    //  段表 pointers[i]=第 i 段尾=[6]TE 尾/[7]压力板尾=townManager 起点/
+    //  [8]townManager 尾=bestiary 起点/[9]bestiary 尾=creativePowers 起点
+    //  （探针字节面:i32@p[7]=0=townManager 计数/i32@p[8]=1=bestiary Kills 计数）。
+    //  · slice(0,pointers[8])=bestiary+creativePowers+footer 缺 → 不抛(FX35 容忍
+    //    语义;bestiary/creativePowers 块 try/catch"脏段容错",WldParser.ts:778/:806);
+    //  · slice(0,pointers[7])=townManager 整段缺 → 抛——真身=townRooms 段读
+    //    (无 try/catch)读 EOF,【非】RB15c 旧注所称"bestiary count 读 EOF"
+    //    (bestiary 块容错吞 EOF,两读侧均不抛——parity 钉锁见
+    //    tests/bestiary-wld-read-parity.test.ts);
+    //  · slice(0,pointers[7]+2)=townManager 头截 2B → 抛。与原版 LoadTownManager
+    //    后 positions[8] 对账(WF:1832-1836)BadSectionPointer 整档拒载同向;
+    //    bestiary 缺失/损坏原版亦拒(LoadBestiary :3417 无容错+:1843-1846 对账),
+    //    本仓两读侧容错=FX35 刻意偏差,已登记并钉锁。
     const bytes = exportWld(mkWldSave());
     const dv = new DataView(bytes.buffer);
-    const bestiaryStart = dv.getInt32(26 + 4 * 7, true);   // pointers[7]=townManager 尾=bestiary 起点
-    const creativeStart = dv.getInt32(26 + 4 * 8, true);   // pointers[8]=bestiary 尾=creativePowers 起点
-    expect(() => parseWldToSave(bytes.slice(0, creativeStart))).not.toThrow();
-    expect(() => parseWldToSave(bytes.slice(0, bestiaryStart + 2))).toThrow(/越界/);
-    expect(() => parseWldToSave(bytes.slice(0, bestiaryStart))).toThrow(/越界/);   // ★RB15c 补腿:bestiary 整段缺=拒载
+    const townStart = dv.getInt32(26 + 4 * 7, true);        // pointers[7]=压力板尾=townManager 起点
+    const bestiaryStart = dv.getInt32(26 + 4 * 8, true);    // pointers[8]=townManager 尾=bestiary 起点
+    expect(() => parseWldToSave(bytes.slice(0, bestiaryStart))).not.toThrow();
+    expect(() => parseWldToSave(bytes.slice(0, townStart + 2))).toThrow(/越界/);
+    expect(() => parseWldToSave(bytes.slice(0, townStart))).toThrow(/越界/);   // ★#11A 归正:townManager 整段缺=拒载(townRooms 读 EOF)
   });
   it('全 0xFF 1KB → 明确拒绝', () => {
     expect(() => parseWldToSave(new Uint8Array(1024).fill(0xff))).toThrow();

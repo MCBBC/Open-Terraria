@@ -155,3 +155,62 @@ describe('BJ124-② 解救零音零尘（TransformVisuals NPC.cs:81788-81851 无
     expect(src).not.toContain('#9AE85A');
   }, 60000);
 });
+
+// ★拍板#2A/#3A（2026-09-18）：685 抖箱编排粒子【本地发射半边】补齐 + NPC.Rescued
+// 自创蓝字聊天行摘除。定谳锚：TransformElderSlime（NPC.cs:19172-19194）——
+// Transform(679):19185 → BroadcastParticleSpawn(TownSlimeTransform,
+// {PositionInWorld=nPC.Center,MovementVector=Zero,UniqueInfoPiece=2}):19186-19193;
+// 变体分派 ParticleOrchestrator.cs:2411-2421（0=Nerdy :2582/1=Copper :2591/2=Elder
+// :2564）——685 解救【恒 Elder,无变体判别面】。解救链四路均无聊天/浮字面
+// （talk=AI_000_TransformBoundNPC :45371-45381 / 685=仅粒子+Unlock 音 /
+// 534=Projectile.cs:14801 静默 / 686=气球爆裂）。
+describe('拍板#2A/#3A：685 本地发射半边 + NPC.Rescued 浮字摘除', () => {
+  it('685 解救本地发射：Elder 档 d43×30@实体中心 + gore 升腾层×8 + module8 上行 uniqueInfo=2', () => {
+    // 变异⑦：摘 townSlimeTransformFx 本地直生支 → dust/particles 断言红
+    // 变异⑧：kind 错换 0（Nerdy=d4×60）或 1（Copper=d43×40 无 gore 层）→ 30×d43+8 断言红
+    // 变异⑨：摘 broadcastParticleOrchestra 上行或 uniqueInfo≠2 → orch 断言红
+    const r = makeRig('town_slime_old', { hasKey: true });
+    const dust: unknown[][] = [];
+    (r.g as AnyGame).spawnDust = (...a: unknown[]) => { dust.push(a); return undefined; };
+    const parts0 = (r.g.spawnParticles as ReturnType<typeof vi.fn>).mock.calls.length;
+    const orch: unknown[][] = [];
+    (r.g as AnyGame).net = { mySlot: 0, sendParticleOrchestra: (...a: unknown[]) => { orch.push(a); } };
+    (r.g as AnyGame).talkToNearbyNpc(100 * TILE, 98 * TILE);
+    expect(r.npc.bound).toBe(false);
+    expect(dust.length).toBe(30);                         // Elder 档=30 发（orchestraFx townSlimeTransformFx kind2）
+    for (const a of dust) {
+      expect(a[4]).toBe(43);                              // d43（Nerdy=4×60/Copper=43×40 都不满足 30×43）
+      // 锚=nPC.Center±circ(rng,20) 盘散（orchestraFx Elder :2564 区 c=circ(rng,20)）
+      expect(Math.hypot((a[0] as number) - r.npc.cx, (a[1] as number) - r.npc.cy)).toBeLessThanOrEqual(20 + 1e-9);
+    }
+    expect((r.g.spawnParticles as ReturnType<typeof vi.fn>).mock.calls.length - parts0).toBe(8);
+    expect(orch.length).toBe(1);                          // 联机他端经 netApplyParticleOrchestra 复放
+    expect(orch[0][0]).toBe(26);                          // ParticleOrchestraType.TownSlimeTransform
+    expect(orch[0][1]).toMatchObject({
+      posX: r.npc.cx, posY: r.npc.cy, moveX: 0, moveY: 0, uniqueInfo: 2,   // MovementVector=Zero
+    });
+  }, 60000);
+
+  it('685 无钥不解救 → 零发射（consume 门先于发射,原版 TryFreeingElderSlime false 同相）', () => {
+    const r = makeRig('town_slime_old', { hasKey: false });
+    (r.g as AnyGame).spawnDust = vi.fn();
+    (r.g as AnyGame).talkToNearbyNpc(100 * TILE, 98 * TILE);
+    expect(r.npc.bound).toBe(true);
+    expect((r.g as AnyGame).spawnDust).not.toHaveBeenCalled();
+    expect(r.g.spawnParticles).not.toHaveBeenCalled();
+  }, 60000);
+
+  it('拍板#3A：解救面零聊天行——freeBoundNpc 零 newText + Game.ts 无 NPC.Rescued 消费', () => {
+    // 变异⑩：复辟 newText(Lang.text('Mods.SandboxWorld.NPC.Rescued'...)) → 本组红
+    //（原版解救链四路均无 CombatText/BroadcastChatMessage 面;反馈=唤醒语对话/
+    //  685 Unlock 音;安家公告=HasArrived WorldGen.cs:5123 已由安家链单独承接）
+    for (const key of ['goblin_tinkerer', 'town_slime_old']) {
+      const r = makeRig(key, { hasKey: true });
+      (r.g as AnyGame).talkToNearbyNpc(100 * TILE, 98 * TILE);
+      expect(r.npc.bound).toBe(false);
+      expect(r.g.newText).not.toHaveBeenCalled();
+    }
+    const src = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
+    expect(src).not.toContain("Lang.text('Mods.SandboxWorld.NPC.Rescued'");
+  }, 60000);
+});

@@ -13,9 +13,12 @@
 // ★FX35 2026-09-15:原「14px monospace
 // 替身」在 Windows DirectWrite 下四向偏移露出偏移拷贝=「叠了几层文字」观感
 // (用户实报,Mac 同症不显),像素字体后描边被实心字形吃净)。
-// ★FX57 2026-09-16 字形改「离屏 12px 烘焙+最近邻放大」(用户 Windows 实报:灰字
+// ★FX57 2026-09-16 字形改「离屏烘焙+主画布放大」(用户 Windows 实报:灰字
 //  在背景越亮处越模糊,Mac 较轻——像素字体非整数倍字号 fillText 必然抗锯齿,
 //  imageSmoothingEnabled 管不了 fillText,见 MouseTextBake.ts 头注根因/修法)。
+//  ★FX58 2026-09-18 档位化:pixel 档(dpr<1.5)=12px 二值烘焙+最近邻(FX57 原样);
+//  hidpi 档(dpr≥1.5,Mac Retina 实报「过于锐化」)=2× 超采样灰度烘焙+线性采样
+//  ÷2(原版 LinearClamp 采样语义),机制/探针证据见 MouseTextBake.ts FX58 头注。
 //  本层只换字形出处:测宽/墨盒仍目标字号 measureText(215 钳制/图标 iy/行距
 //  22/锚点/claim 序零漂移),grayed(100,100,100)行/悬停次行 α0.34 压暗行同
 //  管线(色=运行时染色,α=主画布 globalAlpha);bake 不可用回退下方旧直绘。
@@ -199,9 +202,10 @@ export class InfoAccsLayer {
           : ty - 3;
         this.drawIcon(ctx, t, X, iy, false, r.row === hoveredRow, iconTex(13));
         this.state.iconRects.push({ x: X, y: iy, w: t ? t.sw : 14, h: ih, row: r });
-        // ★FX57 2026-09-16:字形=离屏 12px 烘焙+主画布最近邻放大(MouseTextBake.ts
-        //  头注)。墨顶 = 旧 translate(X+20,ty)+scale(scaleX,scaleY)+'middle' 直绘
-        //  同位(bake 侧按同源 'middle' 墨盒反推);压暗 dim 走主画布 globalAlpha。
+        // ★FX57 2026-09-16:字形=离屏烘焙+主画布放大(FX58 档位采样:pixel=NN/
+        //  hidpi=线性采样,MouseTextBake.ts 头注)。墨顶 = 旧 translate(X+20,ty)+
+        //  scale(scaleX,scaleY)+'middle' 直绘同位(bake 侧按同源 'middle' 墨盒反推);
+        //  压暗 dim 走主画布 globalAlpha。
         if (!drawBakedMouseText(ctx, r.text, X + 20, ty, {
           anchor: 'middle',
           color: r.gold ? '#FFE745' : r.grayed ? '#646464' : '#e8e4f0',

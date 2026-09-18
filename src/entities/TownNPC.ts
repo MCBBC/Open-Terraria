@@ -3655,22 +3655,24 @@ export class TownNPC extends Entity {
    *    归零一击 StrikeNPCNoInteraction(2)(:96077-81,owner=255 链不查
    *    dontTakeDamage/immune → 微光中同样可致死,hurt 的 force 通道承接);
    *    离水 breath+3/t cap 200
-   *  ③ 敌怪互殴第一遍 GetHurtByOtherNPCs(AllNPCs)（:93599）：头部 dontTakeDamage
-   *    早退(:93559-63) → 微光上升态停算;攻击者准入门 = acceptable 集 + !friendly +
+   *  ③ 敌怪互殴第一遍 GetHurtByOtherNPCs(AllNPCs)（:91599）：头部 dontTakeDamage
+   *    早退(:93557-60) → 微光上升态停算;攻击者准入门 = acceptable 集 + !friendly +
    *    damage>0 + !CritterThatCanTurnOnPlayers（★F3① 十型表）;命中盒 =
    *    GetMeleeCollisionData 变形面（★F3② 加宽族表 meleeAttackRect;
    *    damageMultiplier 为死参不接）;接触命中 → StrikeNPC(DamageVar(attacker.damage),
-   *    6,方向),immune[255]=30;后置两枝：dryadWard 荆棘反伤(⌊实伤/3⌋,:93666-81)
-   *    + HurtingBees 蜂反蜇(:93682-96)
+   *    6,方向),immune[255]=30;后置两枝：dryadWard 荆棘反伤(⌊实伤/3⌋,1456 :93654-65
+   *    = 1457 :93604-11,反伤 :93609)+ HurtingBees 蜂反蜇(1456 :93666-77 = 1457
+   *    :93612-20)（红蓝-D 2026-09-18 锚勘误——原 :93599/:93559-63/:93666-81/:93682-96
+   *    均混版陈旧）
    *  ④ ★F1③ HurtingBees 第二遍（:91601-03）：门 = CanBeHurtByBees[type]（默认全
    *    类型真,翻转集 210/211/222）+ 场上存在蜂——【老人 37 也受理】伤害面放开;
-   *    同 tick 若首遍已建 immune[255]=30 则早退(:93564)
+   *    同 tick 若首遍已建 immune[255]=30 则早退(:93563-66)
    *  Enemy.def.damage 已含难度缩放(ScaleStats);首击掷骰走 stats/DamageVar 单源
    *  （★F2,this.rng 注入,luck=0 单掷）。 */
   /** 城镇 NPC 被动回血（CheckLifeRegen NPC.cs:93622-93641，★F10 移植）——
    *  受伤期每 tick 累加 friendlyRegen += 回血率[1 + dryadWard?10 + {22:+5|209:+9}]，
    *  >180 → 清零并 life+1；不设难度倍率、无 CombatText、无音效。困难态唯一不变式 =
-   *  与原版同为线性计数制。调用面与原版同块（:91595 CheckDrowning +
+   *  与原版同为线性计数制。调用面与原版同块（:91596-91599 CheckDrowning +
    *  CheckLifeRegen + GetHurtByOtherNPCs 三连），由 envHurtUpdate 承接，type 37
    *  整块豁免同门；★C1：微光上升帧无任何 ai 门照常累计（F10 面语义不变）。 */
   private lifeRegenUpdate(): void {
@@ -3717,12 +3719,13 @@ export class TownNPC extends Entity {
         this.breath = Math.min(200, this.breath + 3);
         this.breathCounter = 0;
       }
-      // ②' 城镇被动回血 CheckLifeRegen（:93598 与 CheckDrowning 同块依序,
+      // ②' 城镇被动回血 CheckLifeRegen（:91598 与 CheckDrowning 同块依序,
       //    位于互殴段之前）★F10/★C1(ai25 帧照常累计)
       this.lifeRegenUpdate();
-      // ③ 敌怪互殴第一遍 GetHurtByOtherNPCs(AllNPCs)（:93599）——beHurtByOtherNpc
-      //    全段（含 dryadWard 荆棘 + HurtingBees 蜂反蜇两后置枝,:93666-93696）。
-      //    ★C1：头部早退门 (:93559-63 `dontTakeDamage||immortal||…`)——微光上升态
+      // ③ 敌怪互殴第一遍 GetHurtByOtherNPCs(AllNPCs)（:91599）——beHurtByOtherNpc
+      //    全段（含 dryadWard 荆棘 + HurtingBees 蜂反蜇两后置枝,1456 :93654-93677 =
+      //    1457 :93604-93620;红蓝-D 2026-09-18 锚勘误）。
+      //    ★C1：头部早退门 (:93557-60 `dontTakeDamage||immortal||…`)——微光上升态
       //    (ai[0]==25 → this.hurt 的 dontTakeDamage 承接位)互殴停算。
       if (!this.shimmerRise && this.npcVsCd <= 0) this.enemyMeleeScan(game, null);
     }
@@ -3732,7 +3735,7 @@ export class TownNPC extends Entity {
     //   (210/211)(npcsFoundForCheckActive 探测,性能面)。→ 老人(37)不入三连但
     //   被蜂接触伤害面【照常放开】。
     //   两遍 immune 序：首遍命中即置 immune[255]=30(npcVsCd) → 此处同 tick 早退
-    //   (:93564)，蜂近场判定与原版 npcsFoundForCheckActive 同为性能短路。
+    //   (:93563-66)，蜂近场判定与原版 npcsFoundForCheckActive 同为性能短路。
     const beesNear = (game.enemies() as Array<{ dead?: boolean; vanillaId?: number }>)
       .some((e) => !e.dead && (e.vanillaId === 210 || e.vanillaId === 211));
     if (beesNear && !this.shimmerRise && this.npcVsCd <= 0) {

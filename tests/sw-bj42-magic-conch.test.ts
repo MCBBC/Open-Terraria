@@ -63,10 +63,9 @@ describe('SW-BJ42 魔法海螺获得链', () => {
     // 深度门公式（cs:36422；曾整缺=全箱恒浅/恒深）与 IsUndergroundDesert ±15 扫描门
     expect(vanillaSrc).toContain('gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7');
     expect(vanillaSrc).toContain('wl === 187 || wl === 216');   // cs:36152-36154 沙岩墙
-    // legacy 副本（CaveHouse 等旧链仍引用,同表防漂）
-    const legacySrc = readFileSync(join(ROOT, 'src/world/gen/BuriedChestsPass.ts'), 'utf8');
-    expect(legacySrc).toContain('[4061, 4062, 4276][rng.int(0, 2)]');
-    expect(legacySrc).toContain('[4056, 4055, 4262, 4263][rng.int(0, 3)]');
+    // ★拍板#5A（2026-09-18）：根 gen/ 死岛 10 副本退役（BJ136 流程,备份
+    //   /tmp/gen-debt-5A-backup/），原 legacy 副本防漂断言随之摘除——
+    //   活体唯一锚 = 上方 vanilla/BuriedChestsPass.ts 断言。
     // 钓匣表：vanillaFishingCrates.ts:247（4407/4408 共支八选一）
     const crateSrc = readFileSync(join(ROOT, 'src/data/vanillaFishingCrates.ts'), 'utf8');
     expect(crateSrc).toContain('[4056, 4442, 4055, 4061, 4062, 4276, 4262, 4263][rnd.next(8)]');

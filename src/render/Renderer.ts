@@ -15480,8 +15480,9 @@ export class Renderer {
     const h = 19;
     const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height,
       { heldOnCursor: c.uiHeld });   // F2c:持物锚 X+=34(:20390-20392,债 BJ7-R1 清偿)
-    // ★FX57 2026-09-16:字形=离屏 12px 烘焙+主画布最近邻放大(MouseTextBake.ts 头注
-    //  根因/修法;与信息行同管线)。锚(mouseTextAnchor)/claim 序/门拓扑零漂移;
+    // ★FX57 2026-09-16:字形=离屏烘焙+主画布放大(FX58 档位采样:pixel=NN/
+    //  hidpi=线性采样,MouseTextBake.ts 头注根因/修法;与信息行同管线)。
+    //  锚(mouseTextAnchor)/claim 序/门拓扑零漂移;
     //  墨顶 = 旧 textBaseline='top' 直绘同位(bake 侧按 'top' 墨盒反推)。
     //  mouseTextColor 脉动灰(190↔255)不进缓存键——白字形 mask 每帧染色
     //  (scratch source-in),缓存只按文本键控(InfoAccsLayer 同管线的 grayed/

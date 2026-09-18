@@ -6,7 +6,15 @@
 //     由 vanillaProjectiles DATA_PATCH 补）、aiStyle 105、friendly、penetrate 1、
 //     alpha 255、timeLeft 3600、tileCollide false、ignoreWater true、
 //     UseGroupStaticImmunity(567)（:6201 → :10678-10683 = IDStatic 10t 组键 567,
-//     双型共用一张组表——多云同拍不连击同敌）。
+//     双型共用一张组表。★红蓝-J3 勘误（2026-09-18）：Damage 免疫梯首支内层条件
+//     `penetrate != 1 || appliesImmunityTimeOnSingleHits`（:14032）对云恒假
+//     （penetrate=1 :6194 + appliesImmunityTimeOnSingleHits 缺省 false :719）→
+//     perIDStaticNPCImmunity[567,*] 全仓无写入点（:13822=546 掷 1134 专用,
+//     :14036 内层不可达）→ 外环组门 IsNPCIndexImmuneToProjectileType(:606-611)
+//     恒开=多云同拍连击同敌本相;内环 :12636 `immune[owner]==0`（flag3=false）照走,
+//     命中面三不写（组行/全局窗/尾档 :14175-14183 else 链不可达）=云不开全局窗,
+//     其它 pierce=0 兵器 10t 内不被云开窗挡。曾自造 10t 组窗+hurt 写帧双重节流
+//     =拍板#1A 摘除）。
 //   · AI_105（:40768-40905）逐拍：
 //       光 0.2/0.275/0.075 × num（num=(1−α/255)×scale,:40770-40772,本仓 lightRGB 位）
 //       localAI[0] ±90 振荡、≥0 拍 scale+0.003 否则 −0.003（:40774-40783）
@@ -27,8 +35,9 @@
 //     penetrate −1、alpha 255、timeLeft 3600、tileCollide false、ignoreWater true。
 //     AI_106（:34144-34168）: rotation += vx×0.02,vx<0 再 −|vy|×0.02 否则 +
 //     |vy|×0.02;v×0.98;ai[0]++ ≥60 → α+5 至 255 拍消亡;否则 α>80 → α−30 钳 80
-//     （稳态 (255−80)/255≈0.686 不透明度）。penetrate −1 = 全局免疫窗冷却
-//     （原版 npc.immune[owner]=10）→ HitCdImpl 冷却 10t。
+//     （稳态 (255−80)/255≈0.686 不透明度）。penetrate −1 = 免疫梯首支内层真
+//     （:14033-14037）→ 命中写 immune[owner]=0（清窗,非 10——旧注「immune[owner]=10」
+//     假命题勘误 2026-09-18）+ 组行 :14036 → HitCdImpl 冷却 10t。
 //   · 无 Kill 尘/音分支（Kill :74317 前后无 567/568 专属支）→ 静默消亡。
 // 联机面：玩家本地自持实体（远端代理不跑 fixedUpdate）,可见面偏差登记同 ChloroSporeCloud。
 import { Entity } from './Entity';
@@ -56,7 +65,12 @@ export type SporeGasSpawn = (x: number, y: number, vx: number, vy: number, dmg: 
  *  instance HitCdImpl（门位偏离原版组行语义——伤害总量当时被 Enemy.hurt iframes
  *  全局窗掩蔽未溢出,见 dealContacts 调用位注）;云表 static HitCdImpl 有账但窗口按
  *  在场实例数 N 倍速衰减（dealContacts 循环头逐调用 tick）。两账同构勘正=time 驱动
- *  组行,门位回归原版。 */
+ *  组行,门位回归原版。
+ *  ★红蓝-J3 勘误（2026-09-18,拍板#1A）：组行共享语义只对【写行】的弹型成立——
+ *  云 567/568 侧 Damage 梯首支内层条件恒假（:14032）→ 原版组行【从不写】=组门
+ *  恒开,本类实例化出的云组表（SPORE_CLOUD_IMMUNE）属自造节流窗已摘除（组表实体
+ *  仅气团 569-571 侧保留——气团 penetrate=−1 → 内层真,组行照写+immune[owner]=0
+ *  清窗 :14033-14037）。 */
 class SporeIdStaticGroup extends HitCdImpl {
   private sm = new Map<number, number>();
   private readonly cdMs = Math.round(10 * 1000 / 60);    // idStaticNPCHitCooldown 10t ≈167ms(60fps 基数)
@@ -71,9 +85,16 @@ class SporeIdStaticGroup extends HitCdImpl {
     return true;
   }
 }
-/** 云组表：immunityIdentity=567（567/568 双型共行,:6201） */
-const SPORE_CLOUD_IMMUNE = new SporeIdStaticGroup();
-/** 气团组表：immunityIdentity=569（569/570/571 三变体共行,:6219）——组键独立于云组 */
+/** 云组门恒真过路表（拍板#1A）：perIDStaticNPCImmunity[567,*] 原版无写入点（见
+ *  头注 J3 勘误）→ IsNPCIndexImmuneToProjectileType(:606-611) 恒 true=外环组门
+ *  恒开。占位达成 dealContacts cd 形参——ready 恒真不落账（曾 10t 组窗=自造节流,
+ *  复辟即被 tests/sw-fx1 多云同拍连击判别面爆红）。 */
+class PassThroughCD extends HitCdImpl {
+  override ready(_id: number, _cooldown: number): boolean { return true; }
+}
+const SPORE_CLOUD_PASS = new PassThroughCD();
+/** 气团组表：immunityIdentity=569（569/570/571 三变体共行,:6219）——penetrate=−1
+ *  → 内层条件真=组行照写（:14033-14037）,10t 组窗=原版本相（红蓝-J1 保留） */
 const SPORE_GAS_IMMUNE = new SporeIdStaticGroup();
 
 /** 孢子云 567/568（AI_105）——玩家装备 3336 周期掷定的驻场云,命中即消亡并迸气团 */
@@ -102,8 +123,6 @@ export class SporeSacCloud extends Entity {
   /** IndexForVisuals = key.Index（:554）——实体自增 id 近似出生序,漂移向 6 档取模 */
   private readonly visualIndex: number;
   private readonly spawnGasCb: SporeGasSpawn | null;
-  /** 组共享 IDStatic 免疫（UseGroupStaticImmunity(567) :6201——双型同组键 567 一行） */
-  private static readonly GROUP_CD = SPORE_CLOUD_IMMUNE;
 
   constructor(x: number, y: number, type: number, damage: number, knockback: number,
     visualIndex: number, spawnGas?: SporeGasSpawn) {
@@ -198,9 +217,18 @@ export class SporeSacCloud extends Entity {
       return;
     }
     // ---- Damage（penetrate 1 → 首命中即 Kill;寿终段 damage=0 不结算）----
+    //  免疫面三不写（Projectile.cs:14031-14038 首支内层条件假——★红蓝-J3,拍板#1A）：
+    //  · 外环组门（:12596 flag2）= SPORE_CLOUD_PASS 恒真过路（原版组行恒 0 恒开;
+    //    曾自造 10t 组窗=双重保守节流第一重,已摘——复辟=tests/sw-fx1 多云同拍连击红）;
+    //  · 内环 immune[owner]==0 门（:12636,flag3=false 因 usesIDStaticNPCImmunity）
+    //    = Enemy.hurt iframes 门承载（pierce=-2=IDStatic 单发档:门照走、命中不写帧）;
+    //  · 尾档 :14175-14183 else 链不可达=不写 immune[owner]=10（云不开全局窗,
+    //    其它 pierce=0 兵器 10t 内不被云开窗挡——第二重节流同步摘）。
+    //  keepIterating 截断（:14186-14201 penetrate 1→0 → false）= stopAfterFirstHit
+    //  （同拍重叠多怪只伤桶序首个——δA bug② 同款映射,叶弹 227 先例）。
     if (!this.dying) {
       let hit = false;
-      dealContacts(this, game, SporeSacCloud.GROUP_CD, 10, () => { hit = true; });
+      dealContacts(this, game, SPORE_CLOUD_PASS, 0, () => { hit = true; }, undefined, -2, true);
       if (hit) { this.burst(); return; }                            // Kill :74317（ai1==0 → 迸气）
     }
   }
@@ -279,13 +307,18 @@ export class SporeGasCloud extends Entity {
       this.dead = true;
       return;
     }
-    // penetrate −1 = 全局免疫窗冷却（原版 npc.immune[owner]=10）;淡出段 damage 未清
+    // penetrate −1 = 免疫梯首支内层真（:14033-14037）→ 命中写 immune[owner]=0（清窗）
+    // +组行 :14036;淡出段 damage 未清
     //（原版 AI_106 无 damage=0 支）→ 保持结算。节流=组表 SPORE_GAS_IMMUNE
     //（UseGroupStaticImmunity(569) :6219——三变体共行）。★红蓝-J1 审计（2026-09-18）
     // 勘正:曾 per-instance hitCd——伤害总量被 Enemy.hurt 内 iframes 全局窗掩蔽未溢出,
     // 但门位偏离原版（原版=immune[owner] 清零+组行 :14031-14037 独扛节流）;归组行
-    // 语义后与云组表同构,判别面=tests/sw-fx1-accessories「组共享 IDStatic」
+    // 语义后判别面=tests/sw-fx1-accessories「组共享 IDStatic」
     // （组表=1 次 hurt 调用,per-instance 变异面=15）。
+    // ★拍板#1A 备案债（2026-09-18）：本调用 hitPierce 缺省 0 → Enemy.hurt 写
+    // iframes=10;原版气团命中写 immune[owner]=0（清窗 :14035,组窗由组行独扛）——
+    // 仓内写 10=对其它 pierce=0 兵器多开 10t 全局窗（GC1 域近似偏差,勿扩行为面,
+    // 登记不修;最小对齐=hitPierce 传 −2 档并改写「清 0」语义,待专项）。
     dealContacts(this, game, SPORE_GAS_IMMUNE, 10);
   }
 

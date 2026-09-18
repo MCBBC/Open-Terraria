@@ -114,3 +114,21 @@ for (const [key, stable] of Object.entries(PRIV_ITEM_STABLE)) {
   const viId = viIdOfRetired(key);
   if (viId >= 0 && !ITEM_INTERNAL_OF_STABLE.has(stable)) ITEM_INTERNAL_OF_STABLE.set(stable, viId);
 }
+
+// ---- 拍板#6A（2026-09-18）：10140 place_v_225_hive_block 读档 remap 退役 ----
+// ★BJ114-b 定谳翻案（同源判词见 Game.ts breakHive/applyPowder 蜂巢臂注）：原版 1124
+// 蜂巢块物品【不可放置】——Item.cs case 1124（:13836-13845）无 createTile；
+// createTile=225 属 case 1129 蜂巢魔杖（:13889 tileWand=1124 + :13895 createTile=225；
+// vanilla.json 游戏数据导出 1124=null / 1129=225 双源同证）。place_v_225_hive_block
+// 是本仓 tile 自动注册面（items.ts 阶段 5）自造的放置面，其显式稳定 id 10140 在
+// RETIRED_VID_TABLE 豁免（place_v_* 不退役）→ 上方漏斗不覆盖，旧档持 10140 读档
+// 仍落到自动 def=可放置，与原版同物品行为分叉。此处覆写 10140 的【读档方向】为
+// vi_1124（物品身份归正；不可放置=原版同相）。存盘方向 ITEM_STABLE_OF_INTERNAL
+// 不动（place_v def 仍在库=内部 id 零平移，其内存物品存盘仍写 10140，下次读入
+// 即归一——单向迁移漏斗，与上方退役漏斗同一消费点 SaveFile.ts:253/:309/:461
+// ITEM_INTERNAL_OF_STABLE.get 及 PlrImport.ts netIdOf 导出向）。
+{
+  const hiveKey = VANILLA_ITEM_KEY_BY_ID[1124];   // vi_1124_Hive（驼峰权威，勿手拼 vi_ 键）
+  const hiveId = hiveKey !== undefined ? ITEM_BY_KEY[hiveKey] : undefined;
+  if (hiveId !== undefined) ITEM_INTERNAL_OF_STABLE.set(10140, hiveId);
+}

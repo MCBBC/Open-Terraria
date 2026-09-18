@@ -7375,9 +7375,9 @@ export class Game implements GameHooks {
     stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
     tavernkeep: 'savedBartender',   // 醉酒酒保 579 解救 → Transform 550（:19806）
     angler: 'savedAngler',   // NPC.savedAngler（睡渔夫 376 解救 → 渔夫 369 入镇）
-    // 老城镇史莱姆（绑缚 685 → TransformElderSlime :19077-19091 → 679 +
-    // unlockedSlimeOldSpawn=true，WF:1410 随存档）——走 flags 即自动持久化，
-    // SpawnAnNPC 三人组链的 !unlockedSlimeOldSpawn 门随之关闭
+    // 老城镇史莱姆（绑缚 685 → TransformElderSlime :19172-19194（1457 锚;Transform(679)
+    // :19185 + unlockedSlimeOldSpawn=true :19183，WF:1410 随存档））——走 flags 即自动
+    // 持久化，SpawnAnNPC 三人组链的 !unlockedSlimeOldSpawn 门随之关闭
     town_slime_old: 'unlockedSlimeOldSpawn',
     town_slime_clumsy: 'unlockedSlimePurpleSpawn',  // 686 气球绑缚解救（:1347 门旗）
   };
@@ -7390,11 +7390,17 @@ export class Game implements GameHooks {
    *  无任何 dust/gore/SoundEngine 支;自创 NPC_Hit_1 音+绿粒子已摘（对话音=
    *  openNpcDialog 的 chat=SoundID 24,原版 Main.cs:43812 同位,不在本函数）。
    *  唯一例外=685 抖箱支：Main.cs:43771 解救点击拍 PlaySound(22)=Unlock
-   *  （Sfx 'unlock' 已在库;TownSlimeTransform 编排粒子=★待定项确认 2026-09-18：
-   *  回放面已存在——module8 netApply Game :32921 TownSlimeTransform 支
-   *  →orchestraFx.townSlimeTransformFx（uniqueInfo 1=Nerdy/2=Elder,
-   *  原版发射锚 TransformElderSlime NPC.cs:19186-19193 UniqueInfoPiece=2）,
-   *  缺的是 freeBoundNpc 685 支的【本地发射】半边,登记债未变窄前保持不接） */
+   *  （Sfx 'unlock' 已在库）+ TownSlimeTransform 编排粒子发射（★拍板#2A 2026-09-18
+   *  补齐本地半边——发射锚 TransformElderSlime NPC.cs:19172-19194：Transform(679)
+   *  :19185 → BroadcastParticleSpawn(TownSlimeTransform,{PositionInWorld=nPC.Center,
+   *  MovementVector=Zero,UniqueInfoPiece=2}) :19186-19193。685 解救恒 Elder→679,
+   *  【无变体判别面】——UniqueInfoPiece 0/1/2 分派见 ParticleOrchestrator.cs:2411-2421
+   *  （0=NerdySlimeEffect :2582 / 1=CopperSlimeEffect :2591,后者发射锚=
+   *  TransformCopperSlime NPC.cs:19210-19217 → 684,不在解救链;2=ElderSlimeEffect
+   *  :2564）。发射/回放同构单源=orchestraFx.townSlimeTransformFx（module8
+   *  netApply Game netApplyParticleOrchestra TownSlimeTransform 支同款）,
+   *  本地直生+broadcast 上行两件套=meleeOrchestraStrike 同式;★拍板#3A：原
+   *  NPC.Rescued 自创蓝字聊天行已摘（原版解救链四路均无聊天/浮字面,见函数体注） */
   private freeBoundNpc(npc: TownNPC): void {
     // 685 抖箱保真门（Main.cs:42454 + TryFreeingElderSlime :42536-42553）：须消耗金钥匙 327
     if (npc.npcKey === 'town_slime_old') {
@@ -7402,13 +7408,25 @@ export class Game implements GameHooks {
         this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NeedItem', Lang.itemName(327) ?? 'Golden Key'));
         return;
       }
+      // 抖箱编排粒子发射（NPC.cs:19186-19193 原版序：Transform 后广播,先于 :43771
+      // PlaySound(22)）：PositionInWorld=nPC.Center——本仓实体恒 679 盒（bound 仅渲染
+      // 685 单帧,盒不换）,cx/cy 即原版换型后 Center 同锚;MovementVector=Zero,
+      // UniqueInfoPiece=2（685 解救恒 Elder,无变体判别）
+      townSlimeTransformFx(this, 2, npc.cx, npc.cy, 0, 0);
+      this.broadcastParticleOrchestra(ParticleOrchestraType.TownSlimeTransform, npc.cx, npc.cy, 0, 0, 2);
       this.playSfxFiles(['unlock'], 1);   // Main.cs:43771 PlaySound(22)=Unlock（685 抖箱特例原版音,无坐标=全量 1）
     }
     npc.bound = false;
     const flag = Game.SAVED_FLAG_BY_KEY[npc.npcKey];
     if (flag) this.world.flags[flag] = true;
-    const name = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
-    this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
+    // ★拍板#3A（2026-09-18）：自创 NPC.Rescued 蓝字聊天行已摘——原版解救链全部四路
+    // 均无 CombatText/BroadcastChatMessage 面：talk 支=AI_000_TransformBoundNPC
+    // （NPC.cs:45371-45381 Transform+UpdateSavedStates+SetTalkNPC,反馈即唤醒语对话）/
+    // 685=TransformElderSlime（:19172-19194,仅编排粒子+Main.cs:43771 Unlock 音）/
+    // 534=Damage_TryUsingPowders（Projectile.cs:14801 Transform(441) 静默）/
+    // 686=气球爆裂（CheckDead :82525 区 Transform(680),无公告）。安家公告=原版
+    // HasArrived/HomelessArrived_N（WorldGen.cs:5123,本仓安家链 Game :34073 区已接）,
+    // 不属解救拍。
     // ★BJ124-②：原 NPC_Hit_1 音 + 绿粒子（spawnParticles 绿色系,色值见变异锁
     // tests/bj124-talk-only-rescue.test.ts）已摘——TransformVisuals 对解救配对
     // 零音零尘（NPC.cs:81788-81851,见函数头定谳）
@@ -7517,9 +7535,9 @@ export class Game implements GameHooks {
         this.entities.add(tc, 'npcs');
         // ★BJ124-②（2026-09-18）：TransformVisuals（NPC.cs:81788-81851）配对表无
         // (534,441) 支——净化粉转正原版零音零尘,自创 NPC_Killed_1 音+尘雾已摘
-        // （旧注":81739 换型尘雾+音效"系误锚;开箱文案 newText 保留）。
+        // （旧注":81739 换型尘雾+音效"系误锚）。★拍板#3A：自创 NPC.Rescued
+        // 蓝字聊天行已摘——Projectile.cs:14801 Transform(441) 原版静默。
         // 净化粉链音=弹道 AI_006 自身尘/声域,与 Transform 无关
-        this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', Lang.npcName(441) ?? 'Tax Collector'), 50, 125, 255);
         break;
       }
     }
@@ -25111,6 +25129,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  早退+checkDecorSquareFrame 早退）;家具链"半件态不处理"自保护维持原样,
     //  其他监听（沙/藤/巨石/火把）一律不动。try/finally 保证旗必清。
     //  ★单格路径走同一循环（ow=oh=1）,旗窗一格 = 原版同款（放置中无级联）,行为不变
+    // ★拍板#4A：南瓜 254 变体掷——每次放置【一次】（CanPlace :792 单掷入
+    //  objectData.random :851,Place :867-880 单值贯穿整件四格;循环内逐格掷=
+    //  四格混带伪影已勘）。null=非南瓜件不掷。
+    const pumpkinBandRoll = def.vanilla?.sheet === 254
+      ? 36 * Math.floor(Math.random() * 6)
+      : null;
     this._decorPlaceBuilding = true;
     try {
       for (let dx2 = 0; dx2 < ow; dx2++) {
@@ -25130,6 +25154,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 书（50）放置帧随机 0-4（PlaceOnTable1x1 WorldGen.cs:45379
             // `frameX = 18*genRand.Next(5)`——style 参数被无条件覆盖，五书色随机）
             if (def.vanilla?.sheet === 50) fx2 = 18 * Math.floor(Math.random() * 5);
+            // ★拍板#4A（2026-09-18）南瓜 254 变体掷：TileObjectData 254
+            //  RandomStyleRange=6（TileObjectData.cs:3503,1458 :3503 同值）+ 玩家链
+            //  CanPlace :791-792 `num42 = Main.rand.Next(RandomStyleRange)` →
+            //  objectData.random（:851）→ Place 计算 !StyleHorizontal（254 承
+            //  Style2x2 基档=竖排,CopyFrom :1707 共享 style 模块,基档 false;
+            //  :867-880 num3=FullHeight(36)×num4）→ frameY=36×掷 ± 行 18——六视觉
+            //  变体（与 worldgen PlacePumpkin `frameY=genRand.Next(6)*36` :52903
+            //  同轴同布;Tiles_254 = 10 列×12 行=成长 5 段在 X/变体 6 档在 Y 实证）。
+            //  成长档恒在 frameX 带:新植 stage0 未熟（红蓝-I「随机 4/5 立即成熟」
+            //  被 StyleHorizontal=false+图幅+worldgen 交叉三证推翻,详见 tests/bj121
+            //  头注）——本支只掷 frameY 带,frameX 保持 dx*18。掷=每次放置【一次】
+            //  （CanPlace 单掷入 objectData.random,整件同带——原版 :851/:867 单值
+            //  贯穿四格;循环内逐格掷=四格混带伪影,已勘）。
+            if (pumpkinBandRoll !== null) fy2 = pumpkinBandRoll + dy2 * 18;
             st.setTile(px, py, tileId, fx2, fy2);
           } else {
             st.setTile(px, py, tileId, dx2, dy2);
@@ -34372,8 +34410,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.entities.add(npc, 'npcs');
     const flag = Game.SAVED_FLAG_BY_KEY[key];
     if (flag) this.world.flags[flag] = true;
-    const name = Lang.npcName(npc.vanillaId) ?? key;
-    this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
+    // ★拍板#3A（2026-09-18）：自创 NPC.Rescued 蓝字聊天行已摘——AI_000_TransformBoundNPC
+    // （NPC.cs:45371-45381）原版零聊天面,解救反馈=唤醒语对话（本函数尾 openNpcDialog）
     // ★BJ124-②（2026-09-18）：自创解救音尘摘除——376→369/579→550 同不在
     // TransformVisuals 配对表（NPC.cs:81788-81851）=解救面零音零尘;开话音=
     // openNpcDialog 的 chat（SoundID 24,Main.cs:43812 同位）原版本相保留

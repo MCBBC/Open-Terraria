@@ -18,7 +18,7 @@ describe('l10n 键完整性（vite build 同源检查）', () => {
   it('resolvePackKey 语义：嵌套段/扁平整段键/缺失（与 LanguageManager 同源）', async () => {
     const zh = (await import(join(ROOT, 'public/l10n/zh-Hans.json'), { with: { type: 'json' } })).default as Record<string, unknown>;
     expect(resolvePackKey(zh, 'UI.Play')).toBeTypeOf('string');
-    expect(resolvePackKey(zh, 'Mods.SandboxWorld.NPC.Rescued')).toBeTypeOf('string'); // 扁平整段键
+    expect(resolvePackKey(zh, 'Mods.SandboxWorld.Toast.NeedItem')).toBeTypeOf('string'); // 扁平整段键（★拍板#3A：NPC.Rescued 键随自创浮字摘除而退役）
     expect(resolvePackKey(zh, 'Mods.SandboxWorld.NPC.__nope__')).toBeUndefined();
   });
 });

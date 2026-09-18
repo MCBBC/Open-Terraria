@@ -30,6 +30,39 @@
 // 【降级】无 DOM(vitest node 环境跑渲染层桩测试)/字体未就绪(webfont 加载窗
 //   口,同 FX35「每帧重绘自愈」语义)→ 返回 false,调用侧回退旧直绘
 //   (fillText 家族逐字节同旧)。模块顶层零 DOM 访问(node import 安全)。
+//
+// ★FX58 2026-09-18 HiDPI 档(用户 Mac Retina 实报:FX57 后信息栏「过于锐化」——
+//   硬边感/描边锐利过度;Windows 同管线无恙)。机制定谳(scripts/_fx58-mac-sharpen.mjs
+//   探针 2026-09-18 实测,dpr=2 + 主画布后备=逻辑分辨率 Renderer.resize:3299 +
+//   index.html:47 canvas `image-rendering:pixelated`):FX57 文本要过【三连硬量化】
+//   ——12px binarize(0/255 二值)→ 主画布 NN 12→14(非整倍率,1/2px 不规则游程)
+//   → 元素 ×2 pixelated 硬拉伸;行带实测中间调像素=0(ramp=0)+硬边对=4345 ⇒
+//   全链零灰度,×2 拉伸后=「过度锐化」。Windows dpr=1 无第三站故同管线无恙。
+//   判别实测:A(NN) ramp=0/hard=4345/solid=3031;B(双线性 12→14)solid 塌至
+//   34%(1 艺术像素笔画被 1.17× 双线性洗薄=FX57 Windows「糊」根因复演,否决);
+//   C(旧直绘 fillText 14px AA,FX57 前参系)ramp=5985/solid=2384;
+//   D(2× 超采样 28px 灰度烘焙 → 线性采样 ÷2 盒滤波 → 14px 逻辑 1:1 直出)
+//   solid=2538(=A 的 84%,优于 C)/hard=492(=A 的 12%,软过渡落地)/ramp 有界。
+// 【FX58 修法=平台档位化(单机制,按真实元素拉伸分档)】
+//   · pixel 档(dpr<1.5,典型 Windows 100%/125%):FX57 管线逐字节不变——
+//     12px 二值烘焙+NN。文字设备尺寸=逻辑尺寸时 AA 策略差(DirectWrite/CoreText)
+//     才需要关在门外(二值化),此为 FX57 Windows 判定域,保持用户已拍板观感。
+//   · hidpi 档(dpr≥1.5,Mac Retina/HiDPI):改走【原版采样语义】——vanilla
+//     UI Begin null sampler=FNA 缺省 SamplerState.LinearClamp(Main.cs:41568
+//     接口批/2870 DefaultSamplerState),spritefont 纹理=字体系统灰度 AA 光栅化,
+//     线性采样绘制=平滑栅格。实现:2× 超采样(28px=TARGET×2)灰度烘焙(不
+//     binarize),drawImage 线性采样 ÷2(2:1 双线性=精确 2×2 盒滤波,采样点落在
+//     半纹素=亚像素 AA 噪声被盒平均滤净=比直绘 14px 更干净),14px 逻辑 1:1
+//     落主画布(无再采样);元素 ×2 拉伸后=平滑 2×2 灰阶块=原版 HiDPI 观感,
+//     不再是二值硬块。描边环=±2 逻辑 px(=旧直绘 ±2 字体像素/vanilla
+//     DrawBorderStringFourWay Utils.cs:2633 同环;FX57 pixel 档 ±1 艺术格
+//     配参不适用——那是原生格直出时代的环)。
+//   · 跨平台一致性论证:同一管线同一公式,唯一自由度=烘焙档位,由【真实元素
+//     拉伸率】(devicePixelRatio)驱动而非 OS 判定——同档位字节同源(pixel 档
+//     二值确定性保留;hidpi 档 28px AA 经盒滤波后平台差只剩亚像素残余,与原版
+//     spritefont 各平台各自光栅化同构)。字体族/字号档(14px 拍板)/布局/染色/
+//     缓存结构零漂移;dpr 运行时变化(拖窗跨屏/浏览器缩放)由缓存键含档位自然
+//     自愈(旧档条目 LRU 淘汰)。
 import { CANVAS_MOUSETEXT_FONT, PIXEL_FONT_FAMILY, PixelText } from './PixelText';
 
 /** 字体原生网格(px)——Fusion Pixel 12px 的设计栅格 */
@@ -39,36 +72,60 @@ const TARGET_PX = (() => {
   const v = parseFloat(CANVAS_MOUSETEXT_FONT);
   return Number.isFinite(v) && v > 0 ? v : 14;
 })();
-/** 主画布最近邻放大倍率 = 目标字号 / 原生网格 */
+/** 主画布最近邻放大倍率 = 目标字号 / 原生网格(pixel 档) */
 const UPSCALE = TARGET_PX / BASE_PX;
+/** ★FX58 HiDPI 档门限:devicePixelRatio ≥ 1.5 视为「元素将被非整倍硬拉伸」域
+ *  (Mac Retina=2/Windows 150%=1.5;Windows 100%/125% 保持 pixel 档拍板观感) */
+const HIDPI_MIN_DPR = 1.5;
+/** ★FX58 hidpi 档超采样倍率:烘焙字号 = TARGET_PX×SS,绘制时线性采样 ÷SS */
+const SS = 2;
+
+type BakeRegime = 'pixel' | 'hidpi';
+function currentRegime(): BakeRegime {
+  const dpr = typeof devicePixelRatio !== 'undefined' && Number.isFinite(devicePixelRatio)
+    ? devicePixelRatio : 1;
+  return dpr >= HIDPI_MIN_DPR ? 'hidpi' : 'pixel';
+}
 /** 描边偏移(bake 像素,整数——原生网格上烘必须整格,否则烘焙本体就糊):
- *  ★恒 1 艺术像素(=缩放后自动随档:14px 档 1.17px/19px 档 1.58px)。
+ *  ★pixel 档恒 1 艺术像素(=缩放后自动随档:14px 档 1.17px/19px 档 1.58px)。
  *  原版锚:Utils.DrawBorderStringFourWay(Utils.cs:2633)=四向 ±2 **字体像素**,
  *  而 FontAssets.MouseText scale 1 的笔画粗细 ≈2 字体像素(FX27:CJK 墨高 17-19)
  *  ⇒ 原版环:笔 = 1:1。本仓 12px 艺术格笔画=1 格 ⇒ 环=1 格同比。
  *  ★曾按旧直绘视觉粗细配 ±2 bake px(2×12/TARGET 四舍五入)——14px 档=2.33px 环
  *  压死 1.17px 笔画+1.17px 字距,邻字描边互吃(CJK 粘成墨团,_fx57 newblock 截图
- *  物证);像素管线须按艺术格配环,旧 ±2 是 AA 光栅时代的配参(FX35),偏离登记。 */
+ *  物证);像素管线须按艺术格配环,旧 ±2 是 AA 光栅时代的配参(FX35),偏离登记。
+ *  ★FX58 hidpi 档环回到 ±2 逻辑 px(×SS=±4 subpx)——该档语义=原版线性采样
+ *  (AA 光栅域),与 vanilla ±2 字体像素/旧直绘回退支(InfoAccsLayer/Renderer
+ *  fillText ±2@14px)同环,不再是原生格直出时代的 ±1 艺术格配参。 */
 const OUTLINE = 1;
-/** 烘焙字体串 = CANVAS_MOUSETEXT_FONT 的字号位换成原生 12px(家族表——含
- *  monospace 兜底尾——单源照抄,缺字回退行为与旧直绘一致) */
-const BAKE_FONT = CANVAS_MOUSETEXT_FONT.replace(/^\s*\d+(?:\.\d+)?px/, `${BASE_PX}px`);
+/** hidpi 档描边偏移(bake subpx)= 2 逻辑 px × SS */
+const OUTLINE_HIDPI = 2 * SS;
+/** 烘焙字体串 = CANVAS_MOUSETEXT_FONT 的字号位换成档位烘焙字号(pixel=原生
+ *  12px;hidpi=28px 超采样。家族表——含 monospace 兜底尾——单源照抄,缺字回退
+ *  行为与旧直绘一致) */
+const bakeFont = (px: number) => CANVAS_MOUSETEXT_FONT.replace(/^\s*\d+(?:\.\d+)?px/, `${px}px`);
+const BAKE_FONT = bakeFont(BASE_PX);
+const BAKE_FONT_HIDPI = bakeFont(TARGET_PX * SS);
 
 interface BakedLine {
   /** 黑剪影(四向描边+字形,全 #000)——描边无色相,免染色直出 */
   sil: HTMLCanvasElement;
   /** 白字形(无描边)——运行时染色源(source-in scratch) */
   mask: HTMLCanvasElement;
-  /** 画布尺寸(bake px) */
+  /** 画布尺寸(bake px;hidpi 档=28px subpx 格,绘制时 ÷SS 盒滤波到逻辑格) */
   w: number; h: number;
   /** 字形 pen 原点 x(bake px;四周留描边位) */
   padL: number;
   /** alphabetic 基线 y(bake px,整数——★非整数基线=烘焙本体半格 AA,前功尽弃) */
   baseY: number;
-  /** 12px 墨盒(alphabetic 相对,measureText 同源):墨顶 = baseY−ascA */
+  /** 烘焙字号档墨盒(alphabetic 相对,measureText 同源):墨顶 = baseY−ascA */
   ascA: number;
-  /** 12px 推进宽(kx 反推用) */
+  /** 烘焙字号档推进宽(kx 反推用) */
   w12: number;
+  /** 本位图烘焙字号(px)——ky = TARGET_PX/px ×scaleY(pixel=12→×1.167,hidpi=28→×0.5) */
+  px: number;
+  /** 烘焙档位——主画布 smoothing 旗由此定(pixel=false NN/hidpi=true 线性采样) */
+  regime: BakeRegime;
 }
 
 const cache = new Map<string, BakedLine>();
@@ -114,33 +171,41 @@ function binarize(cv: HTMLCanvasElement): void {
   c.putImageData(img, 0, 0);
 }
 
-/** 烘一行(text 键控);不可用(无 DOM/字体未就绪/零宽)→ null=调用侧回退直绘 */
+/** 烘一行(键=档位+text;不可用(无 DOM/字体未就绪/零宽)→ null=调用侧回退直绘) */
 function bake(text: string): BakedLine | null {
   if (!fontReady()) return null;
-  const hit = cache.get(text);
+  const regime = currentRegime();
+  const key = `${regime}:${text}`;
+  const hit = cache.get(key);
   if (hit) return hit;
+  // hidpi 档 = 2× 超采样:烘焙字号 28px、描边环 ±2 逻辑 px(=±4 subpx)、保灰度;
+  // pixel 档 = FX57 原生 12px、环 ±1 艺术格、binarize 二值(跨平台确定性)。
+  const hidpi = regime === 'hidpi';
+  const bakePx = hidpi ? TARGET_PX * SS : BASE_PX;
+  const outline = hidpi ? OUTLINE_HIDPI : OUTLINE;
+  const bakeFontStr = hidpi ? BAKE_FONT_HIDPI : BAKE_FONT;
   const c = sharedCtx();
   c.textAlign = 'left';
   c.textBaseline = 'alphabetic';   // 整数基线直烘(★middle/top 对齐点可能落半格)
-  c.font = BAKE_FONT;
+  c.font = bakeFontStr;
   const m = c.measureText(text);
   const w12 = m.width;
   if (!(w12 > 0) || !Number.isFinite(w12)) return null;
   const ascA = m.actualBoundingBoxAscent, descA = m.actualBoundingBoxDescent;
-  const ascI = Number.isFinite(ascA) && ascA > 0 ? Math.ceil(ascA) : Math.ceil(BASE_PX * 0.85);
-  const descI = Number.isFinite(descA) && descA > 0 ? Math.ceil(descA) : Math.ceil(BASE_PX * 0.25);
-  const padL = OUTLINE + 1;
-  const w = padL + Math.ceil(w12) + OUTLINE + 1;
-  const baseY = OUTLINE + 1 + ascI;
-  const h = baseY + descI + OUTLINE + 1;
+  const ascI = Number.isFinite(ascA) && ascA > 0 ? Math.ceil(ascA) : Math.ceil(bakePx * 0.85);
+  const descI = Number.isFinite(descA) && descA > 0 ? Math.ceil(descA) : Math.ceil(bakePx * 0.25);
+  const padL = outline + 1;
+  const w = padL + Math.ceil(w12) + outline + 1;
+  const baseY = outline + 1 + ascI;
+  const h = baseY + descI + outline + 1;
   const sil = mkCanvas(w, h);
   const sc = sil.getContext('2d');
   if (!sc) return null;
   sc.textAlign = 'left';
   sc.textBaseline = 'alphabetic';
-  sc.font = BAKE_FONT;
+  sc.font = bakeFontStr;
   sc.fillStyle = '#000';
-  for (const [ox, oy] of [[OUTLINE, 0], [-OUTLINE, 0], [0, OUTLINE], [0, -OUTLINE]]) {
+  for (const [ox, oy] of [[outline, 0], [-outline, 0], [0, outline], [0, -outline]]) {
     sc.fillText(text, padL + ox, baseY + oy);
   }
   sc.fillText(text, padL, baseY);   // 本体同入剪影(描边被实心字形吃净的原版观感)
@@ -149,14 +214,21 @@ function bake(text: string): BakedLine | null {
   if (!mc) return null;
   mc.textAlign = 'left';
   mc.textBaseline = 'alphabetic';
-  mc.font = BAKE_FONT;
+  mc.font = bakeFontStr;
   mc.fillStyle = '#fff';
   mc.fillText(text, padL, baseY);
-  binarize(sil);
-  binarize(mask);
+  if (hidpi) {
+    // ★FX58:保灰度(原版 spritefont=字体系统灰度 AA 光栅化,绘制线性采样)。
+    // 平台 AA 策略差(DirectWrite/CoreText)在 28px 超采样+绘制期 ÷2 盒滤波后
+    // 只剩亚像素残余——与原版 spritefont 各平台各自光栅化同构,不再是 1× 域的
+    // 可见策略差(pixel 档二值化的存在理由,见 FX57 头注)。
+  } else {
+    binarize(sil);
+    binarize(mask);
+  }
   if (cache.size >= CACHE_CAP) cache.clear();
-  const line: BakedLine = { sil, mask, w, h, padL, baseY, ascA, w12 };
-  cache.set(text, line);
+  const line: BakedLine = { sil, mask, w, h, padL, baseY, ascA, w12, px: bakePx, regime };
+  cache.set(key, line);
   return line;
 }
 
@@ -220,13 +292,17 @@ export function drawBakedMouseText(
   const alpha = opts.alpha ?? 1;
   // 横向:目标推进宽(钳制后)↔ bake 推进宽(测宽域微差吸收,总宽与旧直绘逐像素同)
   const kx = (wT * scaleX) / baked.w12;
-  const ky = UPSCALE * scaleY;                       // 纵向:整档字号 × 压扁系数
+  // 纵向:bake 字号档 → 目标字号(×压扁系数)——pixel 档 14/12=UPSCALE,hidpi 档
+  // 14/28=÷SS(2× 超采样位图线性采样盒滤波到逻辑格,FX58)
+  const ky = (TARGET_PX / baked.px) * scaleY;
   const inkTopMain = anchorY - inkUp * scaleY;       // 墨顶 = 旧 fillText 落点(头注【布局零漂移】)
   const dx = anchorX - baked.padL * kx;
   const dy = inkTopMain - (baked.baseY - baked.ascA) * ky;
   const dw = baked.w * kx, dh = baked.h * ky;
   ctx.save();
-  ctx.imageSmoothingEnabled = false;                 // ★最近邻——像素字体的干净缩放
+  // ★采样档:pixel=NN 二值放大(FX57);hidpi=线性采样(hidpi 位图 ÷SS 盒滤波
+  // 到逻辑格 + 1:1 落主画布,FX58)——档位随 baked.regime(位图所烘档)非实时 dpr
+  ctx.imageSmoothingEnabled = baked.regime === 'hidpi';
   if (alpha < 1) ctx.globalAlpha = alpha;
   ctx.drawImage(baked.sil, dx, dy, dw, dh);
   ctx.drawImage(tinted(baked.mask, opts.color), dx, dy, dw, dh);
@@ -234,7 +310,8 @@ export function drawBakedMouseText(
   return true;
 }
 
-/** 诊断面(探针 scripts/_fx57-text-bake.mjs 用):缓存行数+管线常量 */
-export function bakeStats(): { count: number; outline: number; targetPx: number; upscale: number } {
-  return { count: cache.size, outline: OUTLINE, targetPx: TARGET_PX, upscale: UPSCALE };
+/** 诊断面(探针 scripts/_fx57-text-bake.mjs、scripts/_fx58-mac-sharpen.mjs 用):
+ *  缓存行数+管线常量+当前档位 */
+export function bakeStats(): { count: number; outline: number; targetPx: number; upscale: number; regime: BakeRegime } {
+  return { count: cache.size, outline: OUTLINE, targetPx: TARGET_PX, upscale: UPSCALE, regime: currentRegime() };
 }

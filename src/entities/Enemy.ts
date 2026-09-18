@@ -13861,6 +13861,13 @@ export class Enemy extends Entity {
     //         致 8 发四管霰弹只吃 1 发,DPS≈1/8,2026-08-13 修）；
     //   >1  = 穿透弹 → 设 10t;同弹重复命中由弹侧 hitSet 拦（原版 per-owner 槽单人
     //         近似;弹型覆写 1-8 表 :13032 未接,登记）
+    //   -2  = IDStatic 单发型（孢子云 567/568：usesIDStaticNPCImmunity=true +
+    //         penetrate=1 + appliesImmunityTimeOnSingleHits=false,★拍板#1A
+    //         红蓝-J3 2026-09-18）→ 免疫门照走（原版 :12636 immune[owner]==0,
+    //         flag3=false）但命中【三不写】（:14031-14038 首支内层条件假:组行/
+    //         全局窗/尾档全不可达）=不开全局窗,多云同拍连击同敌本相。
+    //         （−1 已被日曜爆闪 608 反击面占用:penetrate=−1 非-IDStatic → 原版
+    //         尾档真=写 10t,Game.ts:39206 依赖该支,勿混用）
     // Critter 兼容：critters 桶的调用方按 Critter.hurt(game) 单参调用；
     // 原版小动物是 Enemy 进该桶，这里把 Game 对象重映射回 game 参、伤害取固定 5
     if (typeof dmg === 'object' && dmg !== null) {
@@ -14060,7 +14067,9 @@ export class Enemy extends Entity {
     if (this.vanillaId === 488) {
       this.dummyShake = Math.max(20, Math.min(120, dmg));
       this.dummyHitDir = Math.sign(kbx);   // cs:83506 localAI[1]=hitDirection 无条件写入（0=未定向）
-      this.iframes = 10;                   // 免疫帧与通用档一致（:13152 对全 NPC 含假人 10t；旧 8 偏差）
+      // 免疫帧与通用档一致（:13152 对全 NPC 含假人 10t；旧 8 偏差）;−2=IDStatic
+      // 单发型不写（云命中三不写,拍板#1A——假人上多云同拍连击=原版本相）
+      if (pierce !== -2) this.iframes = 10;
       this.hpBarT = 240;
       // ★蓝队二轮 F2①（2026-08-31）：immortal 只跳过 `life -= num` 扣血段
       // （StrikeNPC_Inner :82197-82215 的 if (!immortal) 支），num41 在 :82067 防后
@@ -14172,7 +14181,10 @@ export class Enemy extends Entity {
         if (probe) addEnemy(game, probe);
       }
     }
-    this.iframes = pierce === 1 ? 0 : 10; // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）
+    // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）;−2=IDStatic 单发型
+    //（云 567/568,:14031-14038 首支内层假=命中三不写,拍板#1A）——免疫门已保证
+    // 进此路径时 iframes==0,不写=原版字面（写 0 等价,取字面防未来门域变动）
+    if (pierce !== -2) this.iframes = pierce === 1 ? 0 : 10;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
     // 击退管线（NPC.cs:82144-82239 1:1）。武器路径（kby===0，kbx=方向×力度）：
     //   num3 = kb×resist（:82145 ★resist 先乘、五段软封顶作用在乘后值——旧实现

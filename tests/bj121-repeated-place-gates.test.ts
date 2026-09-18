@@ -19,6 +19,18 @@
 // 判别力：重复拒放+异位可放+成熟株换植+墙 350 臂+扫描域钉位,消费面判据=removeHeld
 //   调用计数（成功放置唯一消费点）;变异 ≥3（摘南瓜门/摘珊瑚门/摘巨石门/巨石扫描域
 //   改全足印→红）。
+//
+// ★拍板#4A（2026-09-18）南瓜变体掷 + 红蓝-I 勘误备案（④ 块新增）：
+//   原版玩家链放置 254 = CanPlace :791-792 `Main.rand.Next(RandomStyleRange=6)`
+//   （TileObjectData.cs:3503）→ objectData.random（:851）→ Place 竖排（254 承
+//   Style2x2 基档 StyleHorizontal=false,CopyFrom :1707 共享 style 模块）→
+//   frameY=36×掷（:867-880 num3=FullHeight×num4）=六视觉变体;与 worldgen
+//   PlacePumpkin（`frameY=genRand.Next(6)*36` :52903）同轴同布,Tiles_254 图幅
+//   10 列×12 行=成长 5 段在 X/变体 6 档在 Y 三方互证。红蓝-I「新植随机 0-5,
+//   4/5 立即成熟（CanCutTile 可换植+高掉落 quirk）」的【即植即熟】半已被推翻：
+//   掷落在 frameY（变体）带而非 frameX（成长）带,新植恒 stage0 未熟——
+//   「CanCutTile 可换植」quirk 实为【对已成熟株】换植收割（BJ121-① 既有测试钉位,
+//   与放置掷无关）。负判别=本块「恒 stage0」+既有「重复拒放」测试。
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
@@ -117,18 +129,20 @@ describe('BJ121-⓪ 数据面：豁免族归属（tileCut/BreakableWhenPlacing/I
 });
 
 describe('BJ121-① 南瓜 254：整幅足印 CanCutTile 门（Player.cs:41682-41698）', () => {
-  it('空地可放（异位可放基线）：2×2 四格 + 帧格（frameX=dx*18 stage0/.frameY=dy*18）', () => {
+  it('空地可放（异位可放基线）：2×2 四格 + 帧格（frameX=dx*18 stage0/.frameY=36×掷带+dy*18）', () => {
     const { g, w, consumed } = mkShell();
     const st = w.store;
     for (let dx = 0; dx < 6; dx++) st.setTileSilent(10 + dx, 13, GRASS, 0, 0);    // 草地面（254 草族锚特支）
     g.tryPlace(12, 12, placeItem('v_254_pumpkin_plant'));
     expect(consumed.n).toBe(1);                          // 成功=消耗 1
+    const band = st.frameY[st.idx(12, 11)];
+    expect(band % 36).toBe(0);                           // 变体带基=36×掷（拍板#4A,0..180）
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) {
         const i = st.idx(12 + dx, 11 + dy);
         expect(st.get(12 + dx, 11 + dy)).toBe(PUMPKIN);
-        expect(st.frameX[i]).toBe(dx * 18);              // stage0（<144=未成熟）
-        expect(st.frameY[i]).toBe(dy * 18);
+        expect(st.frameX[i]).toBe(dx * 18);              // stage0（<144=未成熟）——掷只落 frameY 带
+        expect(st.frameY[i]).toBe(band + dy * 18);       // 同件四格同带+行 18 步进
       }
     }
   });
@@ -195,6 +209,87 @@ describe('BJ121-① 南瓜 254：整幅足印 CanCutTile 门（Player.cs:41682-4
     st.setTileSilent(12, 13, STONE, 0, 0);
     expect(canCut(st, 12, 12)).toBe(true);
     expect(canCut(st, 12, st.h - 1)).toBe(false);        // 下方越界=原版 tile null → false
+  });
+});
+
+// ===========================================================================
+// ④ 拍板#4A：南瓜变体掷（RandomStyleRange=6 → frameY 带）+ 红蓝-I「即植即熟」
+//    推翻备案（证据链见文件头注）。判据：掷确定性 + 六带统计（6× 判例）+
+//    恒 stage0 负判别 + 行归一不变式（growPumpkin/breakPumpkin 锚推导）。
+// ===========================================================================
+describe('BJ121-④ 拍板#4A 南瓜 254 变体掷（CanPlace :791-92 → frameY=36×掷）', () => {
+  it('掷序确定性：rand=0.5 → 带 108（floor(0.5×6)=3）;frameX 恒 stage0、行 18 步进', () => {
+    const { g, w, consumed } = mkShell();
+    const st = w.store;
+    for (let dx = 0; dx < 6; dx++) st.setTileSilent(10 + dx, 13, GRASS, 0, 0);
+    const real = Math.random;
+    Math.random = () => 0.5;
+    try {
+      g.tryPlace(12, 12, placeItem('v_254_pumpkin_plant'));
+    } finally {
+      Math.random = real;
+    }
+    expect(consumed.n).toBe(1);
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        const i = st.idx(12 + dx, 11 + dy);
+        expect(st.frameY[i]).toBe(108 + dy * 18);        // 36×3 变体带
+        expect(st.frameX[i]).toBe(dx * 18);              // 成长档不受掷影响=恒新植 stage0
+      }
+    }
+  });
+
+  it('六变体统计（6× 判例）：600 次独立放置六带全命中', () => {
+    const { g, w } = mkShell();
+    const st = w.store;
+    for (let dx = 0; dx < 6; dx++) st.setTileSilent(10 + dx, 13, GRASS, 0, 0);    // 草地面（支撑锚）
+    const bands = new Set<number>();
+    for (let n = 0; n < 600; n++) {
+      for (let dx = 0; dx < 2; dx++) {
+        for (let dy = 0; dy < 2; dy++) st.setTileSilent(12 + dx, 11 + dy, 0, 0, 0);   // 清足印重试
+      }
+      (g.player as unknown as { useTime: number }).useTime = 0;
+      g.tryPlace(12, 12, placeItem('v_254_pumpkin_plant'));
+      bands.add(st.frameY[st.idx(12, 11)]);
+    }
+    expect(bands).toEqual(new Set([0, 36, 72, 108, 144, 180]));
+  });
+
+  it('负判别（红蓝-I「即植即熟」推翻）：任意掷值下 frameX<144=未熟——即植株重复放置门拒（换植收割仅对成熟株）', () => {
+    const { g, w, consumed } = mkShell();
+    const st = w.store;
+    for (let dx = 0; dx < 6; dx++) st.setTileSilent(10 + dx, 13, GRASS, 0, 0);
+    g.tryPlace(12, 12, placeItem('v_254_pumpkin_plant'));
+    expect(consumed.n).toBe(1);
+    expect(st.frameX[st.idx(12, 11)]).toBeLessThan(144);  // 新植恒 stage0（最大带 180 也只写 frameY）
+    (g.player as unknown as { useTime: number }).useTime = 0;
+    g.tryPlace(12, 12, placeItem('v_254_pumpkin_plant')); // 即植株上补位 → CanCutTile 假 → 拒
+    expect(consumed.n).toBe(1);                           // 零追加消耗=门拒
+  });
+
+  it('行归一不变式：floor(frameY/18)%2 行恢复（breakPumpkin/growPumpkin 锚推导）对六带全成立', () => {
+    const { g, w } = mkShell();
+    const st = w.store;
+    const real = Math.random;
+    try {
+      for (let band = 0; band < 6; band++) {
+        for (let dx = 0; dx < 6; dx++) st.setTileSilent(10 + dx, 13, GRASS, 0, 0);
+        for (let dx = 0; dx < 2; dx++) {
+          for (let dy = 0; dy < 2; dy++) st.setTileSilent(12 + dx, 11 + dy, 0, 0, 0);
+        }
+        Math.random = () => band / 6 + 0.01;              // floor(×6)=band
+        (g.player as unknown as { useTime: number }).useTime = 0;
+        g.tryPlace(12, 12, placeItem('v_254_pumpkin_plant'));
+        expect(st.frameY[st.idx(12, 11)]).toBe(36 * band);
+        // 任意格反推锚=左上（breakPumpkin ax/ay 同式;WorldEvolution.growPumpkin 同式）
+        const i1 = st.idx(13, 12);
+        const ax = 13 - (Math.floor(st.frameX[i1] / 18) % 2);
+        const ay = 12 - (Math.floor(st.frameY[i1] / 18) % 2);
+        expect([ax, ay]).toEqual([12, 11]);
+      }
+    } finally {
+      Math.random = real;
+    }
   });
 });
 

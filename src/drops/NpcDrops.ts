@@ -314,7 +314,7 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
       // Conditions.cs:957-981：info.npc.HasGivenName && GivenName ==
       // Language.GetTextValue(neededName)——【NPC 自身的随机具名】命中参数名才掉
       // （Andrew=Redigit：向导掉绿帽 867 / Whitney：蒸汽朋克掉 4372 / Jim：画家掉
-      // 5290，ItemDropDatabase.cs:732-734）。提取器把 "GuideNames.Andrew" 键剥成
+      // 5290，ItemDropDatabase.cs:733-735）。提取器把 "GuideNames.Andrew" 键剥成
       // "Andrew"（tools/extract-npcdrops.mjs condArg），此处按 NPC 类目拼回全键取
       // 本地化名比对（zh 名池亦本地化——直比英文恒不中）
       if (!ctx.npcGivenName) return false;

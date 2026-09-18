@@ -56,6 +56,33 @@ describe('退役迁移表健全性', () => {
   });
 });
 
+// ★拍板#6A（2026-09-18，BJ114-b 定谳翻案收尾）：10140 place_v_225_hive_block 读档
+// remap 退役。原版 1124 蜂巢【不可放置】（Item.cs case 1124 :13836-13845 无
+// createTile；createTile=225 属 case 1129 蜂巢魔杖 :13889-13895；vanilla.json 游戏数据
+// 1124=null/1129=225 双源同证）。place_v_225_hive_block = tile 自动注册面（items.ts
+// 阶段 5）自造放置面，稳定 id 10140 在 RETIRED_VID_TABLE 豁免（place_v_* 不退役）→
+// 旧漏斗不覆盖，旧档持 10140 读档仍落到自动 def=可放置（与原版分叉）。
+// remap 在 src/data/itemMigration.ts 尾部：10140 读档方向覆写 → vi_1124_Hive。
+describe('拍板#6A:10140 place_v_225_hive_block 读档 remap（BJ114-b 翻案）', () => {
+  it('旧档稳定 id 10140 读入归一 vi_1124_Hive（物品身份归正）', () => {
+    const hiveId = ITEM_INTERNAL_OF_STABLE.get(10140);
+    expect(hiveId, '10140 读档 remap 缺失——变异点：摘 itemMigration 尾部 10140 覆写块必红').toBeDefined();
+    const key = ITEM_DEFS[hiveId!].key;
+    expect(key).toMatch(/^vi_1124_/);      // =原版物品 id 1124（驼峰权威,勿手拼键）
+  });
+
+  it('迁移目标不可放置=原版同相（1124 无 createTile,只有 1129 魔杖可放 tile 225）', () => {
+    const hiveId = ITEM_INTERNAL_OF_STABLE.get(10140)!;
+    expect(ITEM_DEFS[hiveId].tile).toBeUndefined();   // def 无 tile=tryPlace 无落点
+  });
+
+  it('place_v_225_hive_block 自动 def 仍在库且存盘方向稳定 id 不变（零平移,单向漏斗）', () => {
+    const pv = ITEM_BY_KEY['place_v_225_hive_block'];
+    expect(pv, '自动注册面被删=内部 id 平移事故(见 items.ts 零下标平移注)').toBeDefined();
+    expect(ITEM_STABLE_OF_INTERNAL[pv]).toBe(10140);   // 存盘仍写 10140,读入时归一
+  });
+});
+
 describe('D1 稳定 id 闸门（2026-08-21）', () => {
   it('全 def 必有稳定 id：稳定表覆盖 ITEM_DEFS 全量（存盘写 0 = 读档丢物）', () => {
     // 表建在 items.ts 文件尾（全部注册之后）。若有人把注册段挪到表构建之后,

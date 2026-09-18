@@ -250,8 +250,18 @@ const newTotal = ab.perRow.reduce((s, r) => s + r.neu, 0);
 console.log(`[fx57] 逐行软边像素(旧→新): ${ab.perRow.map((r) => `#${r.i}${r.grayed ? '(灰)' : ''}${r.dim ? '(暗)' : ''} ${r.old}→${r.neu}${r.neu > 0 ? ' 样本' + JSON.stringify(r.sNeu) : ''}`).join(', ')}`);
 console.log(`[fx57] 软边像素合计: 旧直绘=${oldTotal} 新烘焙=${newTotal}`);
 console.log(`[fx57] 旧vs新像素 diff: 一致率=${ab.diff.samePct}% 差异像素均值|Δ|=${ab.diff.meanDiff} 最大|Δ|=${ab.diff.maxDiff}`);
-check('新烘焙软边 ≈ 0(原生网格 0/1 覆盖率+NN 二值)', newTotal <= 5, `new=${newTotal}`);
-check('旧直绘软边显著(AA 灰阶过渡实证)', oldTotal >= Math.max(20, newTotal * 3), `old=${oldTotal}`);
+// ★FX58 2026-09-18 勘误:烘焙管线已档位化(MouseTextBake.ts FX58 头注)——
+//   dpr<1.5(pixel 档,Windows)=FX57 二值 NN,软边 ≈0 断言仍成立;dpr≥1.5(hidpi 档,
+//   Mac Retina,用户实报 FX57「过于锐化」)=2× 超采样灰度烘焙+线性采样 ÷2,
+//   软边有界落地(原版 LinearClamp 采样语义),软边 ≠0 是该档的【设计结果】。
+const hidpi = (await page.evaluate(() => devicePixelRatio)) >= 1.5;
+if (hidpi) {
+  check('新烘焙软边有界落地(hidpi 档=原版线性采样语义,FX58)', newTotal > 0 && newTotal <= oldTotal,
+    `new=${newTotal} old=${oldTotal}`);
+} else {
+  check('新烘焙软边 ≈ 0(原生网格 0/1 覆盖率+NN 二值,pixel 档)', newTotal <= 5, `new=${newTotal}`);
+}
+check('旧直绘软边显著(AA 灰阶过渡实证)', oldTotal >= Math.max(20, newTotal), `old=${oldTotal}`);
 
 // ⑥ 截图:A/B 合成(上=旧直绘 下=新烘焙,文本列裁剪)+ 实机信息列
 await page.evaluate(() => {
