@@ -130,6 +130,8 @@ export class Bobber extends Entity {
   // 唯旧 BOBBER_BOX 常量代读改真盒,见 retract 段注）
   w = 14; h = 14;
   dead = false;
+  /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true） */
+  hoik = true;
   /** ★SW-BJ53（2026-09-10）平台四向全穿 = 原版弹幕通用运动缺省：
    *  fallThrough=fall2=flag6=true（Projectile.cs:17587,1458 :17588——aiStyle 61 不在
    *  :17590-17700 例外表）→ Collision.TileCollision 平台支永不落地（Collision.cs

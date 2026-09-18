@@ -28,7 +28,7 @@
 import { TileStore, LIQUID_TYPE } from '../../TileStore';   // ★IIIII194 lava(true) 用 LIQUID_TYPE（+1 编码禁裸写）
 import type { RNG } from '../../../core/rng';
 import { wgNpcBlocksEmptyTile, type GenState } from './GenState';   // ★IIIII194 EmptyTile 实体支
-import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { genSolidType, flipGenSolid, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { setBoulderSolidity } from './TrapsPass';
@@ -90,9 +90,12 @@ const IS_VINE = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
 const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 /** TileID.Sets.tileMossBrick */
 const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
-/** Main.tileCut（Main.cs 全量 41 项）——Vines 444 蜂巢凹龛净空判定 */
-const TILE_CUT = new Set([654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61,
-  62, 69, 655, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485, 454, 254, 236]);
+/** Main.tileCut（Main.cs 全量 41 项）——Vines 444 蜂巢凹龛净空判定。
+ *  ★BJ158③（2026-09-18）：本地 sheet 键副本（旧名 TILE_CUT,与 Game 导出的同名
+ *  internal 键表 TILE_CUT 构成同名校蔽=BJ154 影烛同族病）拆除——消费面四点
+ *  （:1588 凹龛顶/:1932/:1961 蜂巢净空/:2681 藤上格）全部吃 sheet 域（sh0/sb/
+ *  SHEET[type]）,收编 data/tiles.ts 单源 TILE_CUT_SHEETS（与旧副本逐值对拍 41≡41,
+ *  仅序异）;本文件此后不存在裸名 TILE_CUT,sheet 域消费一律 TILE_CUT_SHEETS。 */
 /** TileID.Sets.Boulders（:195）——InvalidTileForPilesOrSpeleothems */
 const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
 /** WallID.Sets.AllowsPlantsToGrow（WallID.cs:58）——PlaceTile(3) 的墙门（含 0=无墙） */
@@ -1585,7 +1588,7 @@ function tryGrowGlowTulip(st: TileStore, rng: RNG, i: number, j: number): boolea
     const k0 = st.idx(x, y);
     if (!placeTileHead(st, x, y, 656)) continue;                        // 倒木守卫/液体拒置（656 在拒置表）
     const sh0 = SHEET[st.type[k0]];
-    const cutOk = !st.flags[k0] || TILE_CUT.has(sh0) || BREAKABLE_WHEN_PLACING_SHEETS.has(sh0);
+    const cutOk = !st.flags[k0] || TILE_CUT_SHEETS.has(sh0) || BREAKABLE_WHEN_PLACING_SHEETS.has(sh0);
     if (cutOk) {
       st.setTileSilent(x, y, GLOW_TULIP, 0, 0);
       st.half[k0] = 0;
@@ -1929,7 +1932,7 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
               if (!st.inBounds(a, b)) { ok = false; break; }
               const kb = st.idx(a, b);
               const sb = SHEET[st.type[kb]];
-              if (st.flags[kb] && (!TILE_CUT.has(sb) || sb === 444)) ok = false;
+              if (st.flags[kb] && (!TILE_CUT_SHEETS.has(sb) || sb === 444)) ok = false;
               else if (st.liquid[kb] > 0 || WALL_HOUSE.has(st.wall[kb])) ok = false;
             }
           }
@@ -1958,7 +1961,7 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
               if (!st.inBounds(a, b)) { ok = false; break; }
               const kb = st.idx(a, b);
               const sb = SHEET[st.type[kb]];
-              if (st.flags[kb] && (!TILE_CUT.has(sb) || sb === 444)) ok = false;
+              if (st.flags[kb] && (!TILE_CUT_SHEETS.has(sb) || sb === 444)) ok = false;
               else if (st.liquid[kb] > 0 || WALL_HOUSE.has(st.wall[kb])) ok = false;
             }
           }
@@ -2678,7 +2681,7 @@ function growCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
   if (!st.flags[kn] || SHEET[st.type[kn]] !== 519) return;
   wpEv('GCT', x, n, `fx${st.frameX[kn]}`);
   const above = st.idx(x, n - 1);
-  if (st.frameX[kn] === 90 && st.flags[above] && TILE_CUT.has(SHEET[st.type[above]])) {
+  if (st.frameX[kn] === 90 && st.flags[above] && TILE_CUT_SHEETS.has(SHEET[st.type[above]])) {
     killTile(st, x, n - 1);
   }
   if (st.flags[above]) return;

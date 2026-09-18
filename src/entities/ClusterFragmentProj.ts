@@ -214,6 +214,7 @@ export class ClusterFragmentProj extends Entity {
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
       tileCollide: true, dropThrough: true,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
     };
     // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）：速度【场】不减只削
     // 位移——乘进 dx/dy 入参,碰撞响应式读 lastVx/lastVy 未阻尼场（勿在采纳处除回）

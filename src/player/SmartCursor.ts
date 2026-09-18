@@ -21,7 +21,7 @@
 // 我们的 tile id 与原版 tile id 通过 TILE_DEFS[t].vanilla.sheet 桥接（sheet = 原版 Tiles_N 表 id）；
 // 物品原版 id 通过 ITEM_DEFS[i].vid 或 key 前缀 vi_(\d+)_ 反解。
 import type { ItemDef } from '../data/items';
-import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
@@ -242,11 +242,11 @@ interface Pt { x: number; y: number }
 
 const tileSolidType = (t: number): boolean => !!TILE_DEFS[t]?.solid;            // Main.tileSolid
 const tileSolidTopType = (t: number): boolean => !!TILE_DEFS[t]?.platform;      // Main.tileSolidTop
-/** Main.tileAxe 全表（Main.cs:7347-7362 16 条赋值，与 SmartSelect.TILE_AXE_SHEETS 同源）。
+/** Main.tileAxe 全表——★BJ158②（2026-09-18）：本地副本 TILE_AXE_SHEETS_SC 拆除,
+ *  收编 data/tiles.ts 单源 TILE_AXE_SHEETS（与 SmartSelect 副本同源漂移风险已消除）。
  *  ★2026-09-03 对账翻案：曾以 def.axe>=0 代读——def.axe 是"斧力需求"画像，平台 19
  *  等显式 axe:0 的非斧族格被误判入斧族（ForceCursor 镐支/stepAxe 扫描面失真） */
-const TILE_AXE_SHEETS_SC = new Set([5, 72, 80, 488, 704, 323, 596, 616, 634, 589, 584, 588, 586, 587, 585, 583]);
-const tileAxeType = (t: number): boolean => TILE_AXE_SHEETS_SC.has(sheetOf(t)); // Main.tileAxe
+const tileAxeType = (t: number): boolean => TILE_AXE_SHEETS.has(sheetOf(t)); // Main.tileAxe
 /** WorldGen.CanKillTile 子集（SmartCursorHelper 用法：不查镐力，只看"不可破坏"） */
 const canKillTile = (t: number): boolean => (TILE_DEFS[t]?.pick ?? -1) >= 0;
 const tileFrameImportantType = (t: number): boolean => !!TILE_DEFS[t]?.framed;  // Main.tileFrameImportant
@@ -2029,11 +2029,11 @@ function isHoveringOverAnInteractableTile(st: TileStore, x: number, y: number, g
   return false;
 }
 
-/** Main.tileHammer 全表（Main.cs:7153-7156 共 4 条赋值，全仓再无他处写）：
- *  26 祭坛 / 31 音符块 / 695 / 696 */
-const HAMMER_TILES = new Set([26, 31, 695, 696]);
+/** Main.tileHammer 全表（Main.cs:7343-7346 共 4 条赋值）：
+ *  26 祭坛 / 31 音符块 / 695 / 696——★BJ158②（2026-09-18）：本地副本 HAMMER_TILES
+ *  拆除,收编 data/tiles.ts 单源 TILE_HAMMER_SHEETS（与 SmartSelect 副本同源漂移风险已消除） */
 function isHammerTile(sheet: number): boolean {
-  return HAMMER_TILES.has(sheet);
+  return TILE_HAMMER_SHEETS.has(sheet);
 }
 
 /** Step_Platforms 辅助：格上是平台族 sheet（IsPlatform :1455-1462，active() 口径——

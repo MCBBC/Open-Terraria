@@ -326,8 +326,11 @@ describe('斗篷星 alpha 渐减金标（2026-09-03）', () => {
 describe('出膛音面金标（2026-09-03:83→Item_33 / 576→Item_12 发射位）', () => {
   it('①雷眼/机械眼激光 83：bossAI.ts 发射位紧邻 shoot(…83) 播 Item_33', () => {
     const src = readFileSync(new URL('../src/entities/bossAI.ts', import.meta.url), 'utf8');
+    // ★BJ164 清偿锚更新（2026-09-18）：发射口已补显式寿命 `, 600`（Projectile.cs:1646
+    //  SetDefaults 承载,同 WOF 先例）——旧锚 `), 83);` 自补参日起失配(陈旧金标再生,
+    //  断言语义不变:发射位 shoot 后 240 字窗内播 Item_33)
     const m = src.match(
-      /getAttackDamageForProjectiles\(20, 19, e\.difficulty\), 83\);[\s\S]{0,240}?playSfxWav\?\.\('Item_33'/);
+      /getAttackDamageForProjectiles\(20, 19, e\.difficulty\), 83, 600\);[\s\S]{0,240}?playSfxWav\?\.\('Item_33'/);
     expect(m, 'bossAI.ts 弹 83 出膛位缺 Item_33 播放').toBeTruthy();
   });
 
@@ -363,8 +366,11 @@ describe('出膛音面金标·dormant 族（2026-09-03 任务一:9 型发射位�
   it('①毁灭者段/雷眼三阶激光 100：bossAI.ts 发射位播 Item_33（共 4 口,抽 2 口锚验）', () => {
     const src = readSrc('../src/entities/bossAI.ts');
     // 雷眼三阶悬浮激光口（NPC.cs:26991-27005）
+    // ★BJ164 清偿锚更新（2026-09-18）：该口已补显式寿命 `, 2700`（Projectile.cs:1884
+    //  SetDefaults 承载,BJ164 双子批）——旧锚 `), 100);` 失配(陈旧金标再生,断言
+    //  语义不变:发射位 shoot 后 240 字窗内播 Item_33)
     expect(src.match(
-      /getAttackDamageForProjectiles\(25, 23, e\.difficulty\), 100\);[\s\S]{0,240}?playSfxWav\?\.\('Item_33'/),
+      /getAttackDamageForProjectiles\(25, 23, e\.difficulty\), 100, 2700\);[\s\S]{0,240}?playSfxWav\?\.\('Item_33'/),
       'bossAI.ts 雷眼三阶弹 100 出膛位缺 Item_33').toBeTruthy();
     // 毁灭者段链激光口（NPC.cs:50204-50241）
     expect(src.match(

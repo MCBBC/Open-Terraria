@@ -29,7 +29,7 @@ import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { TILE } from '../src/core/constants';
 import { BuffType } from '../src/stats/Buffs';
-import { playerMountRotation } from '../src/render/Renderer';
+import { mountTextureAnchorY, playerMountRotation } from '../src/render/Renderer';
 
 // ---- 测试世界/玩家（breath.test.ts 同款 harness） ----
 const fakeHooks = (w: World, p?: Player) => ({
@@ -1306,6 +1306,34 @@ describe('渲染装饰：机身倾斜 fullRotation（Mount.cs Hover 尾段 :3468
     const r = playerMountRotation(m.type, m.fullRotation, box, m.heightBoost)!;
     expect(r.angle).toBeCloseTo(Math.PI / 4 * 0.95 / 2);
     expect(r.pivotY).toBeCloseTo(42 - 29);   // 42+16=58 → 盒心 y=42-29
+  });
+});
+
+describe('坐骑贴图行锚 Y（mountTextureAnchorY——Mount.Draw :5596-5599 净式，PlayerOffset 两处相消）', () => {
+  // 原版链：PlayerDrawSet.cs:429-430 先 `Position.Y -= mountOffSet`
+  // （mountOffSet = mount.PlayerOffset = playerYOffsets[帧]），Mount.Draw 再
+  // `Position.Y += height/2 + (YOffset + PlayerOffset)` → 两处 PlayerOffset 相消，
+  // 净锚 = mounted 盒中心 + YOffset，【与帧无关】（史莱姆挤压动画在贴图行内完成，
+  // 坐骑贴图不随帧浮动；随帧浮动的是玩家精灵 = 骑姿抬升 −mOff）。
+  // 本仓曾直抄 num2 字面 +PlayerOffset 而漏 PlayerDrawSet:430 预减 → 史莱姆坐骑
+  // 整贴图下坠 20-22px：史莱姆半埋地里、鞍位错到玩家脚踝（用户实报 2026-09-17）。
+  const feetY = 442;   // p.y=400 + p.h=42（本仓玩家盒恒 42，底锚换算）
+  it('史莱姆 3（hB=20,yOff=11）：锚 = feetY−31+11 = feetY−20，四帧恒定（贴图不随帧浮动）', () => {
+    expect(mountTextureAnchorY(feetY, 20, 11)).toBe(422);       // 442 − 31 + 11
+    // 帧无关签名（结构性）：入参只有 feetY/hB/yOff，锚【不存在】帧入参可吃；
+    // 消费端（Renderer.drawMountLayer）不得再混入 mnt.playerOffset——
+    // 史莱姆 playerYOffsets=[20,22,20,18] 全非零（实时数据核对），回归即 20px 级可见
+    const slime = MOUNT_DATA['3'];
+    expect(slime.playerYOffsets).toEqual([20, 22, 20, 18]);
+    expect(slime.playerYOffsets!.every((po) => po !== 0)).toBe(true);
+    expect(mountTextureAnchorY(feetY, slime.heightBoost, slime.yOffset)).toBe(422);
+  });
+  it('原版锚表抽查：兔 1 / UFO 7 / 钻头 8（vanilla-mounts.json hB/yOff 直读）', () => {
+    expect(mountTextureAnchorY(feetY, 20, 4)).toBe(415);   // 兔 1：442−31+4
+    expect(mountTextureAnchorY(feetY, 16, 4)).toBe(417);   // UFO 7 / 钻头 8：442−29+4
+  });
+  it('缺表回退：hB/yOff undefined → 0（feetY−21）', () => {
+    expect(mountTextureAnchorY(feetY, undefined, undefined)).toBe(421);
   });
 });
 

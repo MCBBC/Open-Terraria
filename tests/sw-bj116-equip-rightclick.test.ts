@@ -316,15 +316,15 @@ describe('BJ116 ① 容器右键装备 src 修复（旧码误读 inv.dye[i]）',
 describe('BJ116 ① 右键链逐 context 路由序（源码结构锁,fx52 C4 同法）', () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/ui/UI.ts'), 'utf8');
 
-  it('门序：关包门 → 开包 → 换型 → 时装互换 → 取件臂 → 装备 → 拆半', () => {
+  it('门序：关包门 → 开包 → 换型 → 时装互换 → 取件臂 → 装备 → 取件臂（★BJ157 拆半摘）', () => {
     const gate = src.indexOf("if (!this.invPanel || this.invPanel.style.display !== 'block') return;");
     const order = [
       'this.tryOpenContainer(cur, i);',
       'tryItemSwapVid(vanillaIdOfItemKey',
       'this.swapVanityEquip(i);',
-      'this.pickupEquipIntoMouse(where, i);',
+      "if (this.pickupEquipIntoMouse(where, i)) this.refreshStackSplitCooldown();",
       'this.swapEquipItem(cur, where, i);',
-      'this.splitHalf(i, where);',
+      'this.runPickupArm(where, i, cur);',
     ].map((t) => src.indexOf(t));
     for (const p of order) expect(p, '右键动作原语全部存在').toBeGreaterThan(0);
     expect(gate).toBeGreaterThan(0);

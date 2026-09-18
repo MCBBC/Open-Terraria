@@ -922,15 +922,18 @@ kvHas('sandboxworld.quicksave').then(async () => {
   // ★自动更新检查(2026-09-07):SW 文档 SWR 的陈旧窗口内页面常驻旧 bundle(用户
   //  此前「要多刷新一两次才是最新」)——探针定期比对部署指纹 build-id.txt,发现
   //  新版本出横幅;点击→静默存档兜底丢进度→reload 一次到位(SWR 已在后台更新缓存)
+  // ★BJ144(2026-09-18)：doSave 是异步链,此前同步 location.reload() 把在途保存整段
+  //  撕掉(=点更新横幅必丢自上次存档进度)。现先等保存全链落定再 reload;存档失败
+  //  也刷新(新版本优先,不因存储故障永久阻塞更新)
   {
-    const banner = mountUpdateBanner(root, () => {
-      try { flow?.doSave(true); } catch { /* 存档失败也刷新(新版本优先) */ }
-      location.reload();
-    });
-    startUpdateCheck((version) => banner.show(version, () => {
-      try { flow?.doSave(true); } catch { /* 同上 */ }
-      location.reload();
-    }));
+    const reloadAfterSave = () => {
+      void (async () => {
+        try { await flow?.doSave(true); } catch { /* 存档失败也刷新(新版本优先) */ }
+        location.reload();
+      })();
+    };
+    const banner = mountUpdateBanner(root, reloadAfterSave);
+    startUpdateCheck((version) => banner.show(version, reloadAfterSave));
   }
 
   // M0 验收入口：?vuidemo=1 只跑 VUI 框架演示

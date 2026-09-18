@@ -1,6 +1,8 @@
 // .wld 导出闭环回归(2026-09-06):exportWld(SaveData) → parseWldToSave 读回断言。
 // 自足版契约:本仓读侧(WldParser/WldImport)完全可读;原版可读性见 WldExport 头注。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { exportWld } from '../src/wld/WldExport';
 import { parseWldToSave } from '../src/wld/WldImport';
 import { rleTiles, rlePairs, bytesToB64, type SaveData } from '../src/save/SaveFile';
@@ -233,5 +235,37 @@ describe('SW-RB14c：wld 流位/纪元对抗回归', () => {
     const creation = dv.getBigUint64(p, true);
     const expected = 621355968000000000n + BigInt(1700000000000) * 10000n + 0x4000000000000000n;
     expect(creation).toBe(expected);            // .NET 纪元+Utc Kind 位（修复前=Unix 纪元裸值）
+  });
+});
+
+// ★红蓝-L2①（2026-09-18）：mark() 注释槽位结构锁——RB15c 段表错位误读的根因 trap
+// （行内注释 [N] 自 [3] chests 尾起整体偏一,BJ143 只修测试未拆雷）防再漂。
+// 机械解析 WldExport.ts 源码:每个 mark() 调用行的注释 [N] 必须 ≡ push 序槽位
+// （第 k 处调用 = pointers[k-1]）,且段名锚与原版 LoadWorld_Version2
+// positions[0..10] 逐槽对应（WorldFile.cs:1774-1855,p11=footer 尾不入表）。
+describe('红蓝-L2①：mark() 注释槽位结构锁(注释 [N] ≡ push 序)', () => {
+  it('12 处 mark() 注释槽位号与段名随 push 序对齐', () => {
+    // 槽位→段名锚（注释文本必须含该子串;取词尾" 尾"防段名互沾,如 p0 行
+    // 「FFH 尾=header 起点」含 header 但槽名锚是 FFH）
+    const SLOT_TAG = [
+      'FFH 尾', 'header 尾', 'tiles 尾', 'chests 尾', 'signs 尾', 'npcs 尾',
+      'TE 尾', 'pressurePlates 尾', 'townManager 尾', 'bestiary 尾',
+      'creativePowers 尾', 'footer 尾',
+    ];
+    const src = readFileSync(fileURLToPath(new URL('../src/wld/WldExport.ts', import.meta.url)), 'utf8');
+    const errs: string[] = [];
+    let pushes = 0;
+    for (const [idx, line] of src.split('\n').entries()) {
+      const code = line.split('//')[0];
+      if (!/\bmark\(\)/.test(code)) continue;   // 定义行(const mark = ...)不匹配;注释提及 mark() 不计
+      const slot = pushes++;
+      const comment = line.slice(line.indexOf('//') + 2);
+      const m = /\[(\d+)\]/.exec(comment);
+      if (!m) { errs.push(`L${idx + 1}: 第 ${slot} 处 mark() 缺 [N] 槽位注释`); continue; }
+      if (Number(m[1]) !== slot) errs.push(`L${idx + 1}: 注释标 [${m[1]}] 实为 push 序槽位 [${slot}]（注释偏一=RB15c trap 重演）`);
+      if (!comment.includes(SLOT_TAG[slot])) errs.push(`L${idx + 1}: 槽位 [${slot}] 段名锚缺失（应含「${SLOT_TAG[slot]}」）`);
+    }
+    if (pushes !== SLOT_TAG.length) errs.push(`mark() 调用数 ${pushes} ≠ 12（p0..p11;新增段必须同步扩 SLOT_TAG 与 :601 回写面）`);
+    expect(errs).toEqual([]);
   });
 });

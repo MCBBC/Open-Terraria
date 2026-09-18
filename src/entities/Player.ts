@@ -15,6 +15,8 @@ import { mountJumpStomps, tickSlimeWetState, consumeWetSlimeOnJumpControl,
   isConsideredASlimeMount, MOUNT_DASH6_TYPES, MOUNT_CAN_DASH_TYPES } from './MountCombat';
 import { playerHurtFloatColor } from '../fx/CombatTextColors';
 import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+// ★Forbidden 禁戒套引擎面（组C 终盘 2026-09-18）——656 弹实体 + 几何/预览尘助手
+import { ForbiddenSignProj, canSpawnSandstormFriendly, aimingLaserScan, spawnStormPreviewDust } from './ForbiddenSignProj';
 import { getGlobalHurtBuckets, ImmunityCooldownID } from '../player/HurtCooldownBuckets';
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
@@ -39,9 +41,8 @@ import { accDrawSlotsOf, BALLOON_TORSO_FRAMING, BACK_DRAW_IN_BACKPACK, BACK_DRAW
   FACE_HEAD_LAYER, FACE_MASK_LAYER, FACE_FLOWER_LAYER } from '../data/vanillaAccDrawslots';
 import { plotTileLine } from '../lighting/LightingEngine';
 import { dyeEntryOf } from '../data/vanillaDyes';
-import { ARMOR_SET_BONUSES, type ArmorSetBonus } from '../data/vanillaArmorSets';
-import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
-import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
+import { ARMOR_SET_BONUSES, DD2_PIECE_FX, matchArmorSetBonusVid, type ArmorSetBonus } from '../data/vanillaArmorSets';
+import { SUMMON_GEAR } from '../data/vanillaSummonStats';
 import { TagEffectStack } from './WhipTag';
 import { harpyCharmEffect } from './Arrow';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
@@ -572,7 +573,7 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     magicString: boolean;
     manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
     manaRegenBonus: number; manaRegenDelayBonus: number;
-    setBonus: ArmorSetBonus | null;   // ARMOR_SET_BONUSES 表值(activeArmorSetBonus 返回型)
+    setBonus: ArmorSetBonus | null;   // ARMOR_SET_BONUSES 表值(activeArmorSetMatch 非 summonSetOnly 投影)
     manaCostMul: number;
     // ---- 召唤师链（vanillaSummonStats：ApplyEquipFunctional type if-chain 1:1）----
     minionSlots: number;   // maxMinions += N（散件+套装合计）
@@ -628,12 +629,28 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     shieldItem?: boolean;   // 日曜套(:16224-16295)
     whipRange: number;     // whipRangeMultiplier += X
     whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
-    summonSet: SummonSetFx | null;
+    /** 召唤套装通道（BJ147 组D：SUMMON_SET 并入 vanillaArmorSets 单表——本通道 =
+     *  单表命中条目的召唤字段族投影,无召唤字段的套恒 null=既有正确面） */
+    summonSet: ArmorSetBonus | null;
     // ---- 呼吸族（GrantArmorBenefits/ApplyEquipFunctional 行为型）----
     divingHelm: boolean;   // accDivingHelm（Player.cs:12829/14652）：breathCDMax ×6
     merman: boolean;       // accMerman（:15019/14587/14855）：水中不耗气
     arcticDivingGear: boolean; // 1861（:14701）：专家雪原冷水 Chilled 免疫（:27692）
     jellyfishGlow: boolean;    // 1860（:14682-14688）：浸水发光
+    // ---- 组A/B 单件旗面（GrantArmorBenefits 甲件行为旗,2026-09-18 批）----
+    nightVision: boolean;   // 3109 夜视头盔/4008 超亮头盔（:13408-13411 nightVision=true）——
+                            // 消费端 Game.updateLightDecay（LightingEngine.cs:184/LegacyLighting
+                            // :949 衰减 ×1.03,与夜枭药水同源）
+    moonLordLegs: boolean;  // 5001 月亮领主腿（:13215-13219 moveSpeed+0.25 走 accfx;旗面
+                            // :19730-19734 jumpSpeedBoost+1.8/extraFall+10/jumpHeight++,
+                            // 消费端 jumpBaseSnapshot + 下方 extraFall 聚合）
+    slowFall: boolean;      // 3770 神灵诅咒（:13360-13362）——下落重力 /3（悬升 /10）+
+                            // 终速钳 maxFall/3（/10）+ fallStart 逐帧重置免摔（:27224/
+                            // :27571/:25576——与羽落 buff 8 同一 player.slowFall 字段并集,
+                            // 消费端 fall 段三处 `buffs.slowFall || equipStats.slowFall`）
+    pickSpeedOff: number;   // 挖矿速度折扣池【加算】（Mining 套 pickSpeed-0.1 :299-303 +
+                            // 单件 410/411/5589/5590 各 -0.1 :13944-13947;消费端
+                            // Game.pickSpeedMult,镜像 manaCostOff 加算池语义）
     // ---- 1457 新配饰行为旗（ApplyEquipFunctional case 6166-6189 :14596-14739）----
     accSentryBackpack: boolean;      // 6172/6175/6176/6177（:14613/:14671/:14679/:14683）
     accGolemSentryBackpack: boolean; // 6176 TemplarSling（:14680）——sentry/SentryShot 10% 强制暴击
@@ -1136,6 +1153,11 @@ export class Player extends Entity {
    *  误读为 vanilla 默认 false），单向墙两向全堵=用户实报。普通 Body/测试裸
    *  对象缺省仍关（NPC 侧 2026-09-01 登记债不动，仅玩家恢复原版半边）。 */
   hoik = true;
+  /** ★SW-FX34c 2026-09-18：跨格态无条件自由通行（原版 Collision.cs:2437-2456 跨格态
+   *  各支前提全假=无推离,与齿列无关）——fx34b 玩家语义原样钉住。弹幕域 hoik 开启
+   *  （同批）但【不置】本旗=跨格态仍受身后格坡邻配对门收窄（保 fx 时代穿门"止步"
+   *  容器,详 Body.hoikAcrossFree 注）。 */
+  hoikAcrossFree = true;
   stepUpHolds = false;         // holdsMatching（Player.cs:23258 第 8 参 = controlUp，fixedUpdate 灌入）
   stepUpNpc = false;
   /** StepDown 门 = vy===GRAVITY（Player.cs:23252 字面）；★SW-BJ59 滚轴鞋贴轨帧
@@ -1329,6 +1351,144 @@ export class Player extends Entity {
       this.minionTargetId = -1;
     }
   }
+
+  // ---- ★Forbidden 禁戒套指令面（组C 终盘 2026-09-18）----
+
+  /** UpdateForbiddenSetLock 1:1（Player.cs:57459-57471）：扫全场 656 弹（本玩家所有）
+   *  → 根数 >1 = 冷却闩（至多同时 2 根;第 2 根落位后闩死到其中一根消亡）。 */
+  updateForbiddenSetLock(game: GameHooks): void {
+    let count = 0;
+    const projs = (game as unknown as { entities?: { projectiles?: unknown[] } })
+      .entities?.projectiles;
+    if (!projs) { this.setForbiddenCooldownLocked = false; return; }
+    for (const p of projs) {
+      if ((p as { dead?: boolean }).dead) continue;
+      if (p instanceof ForbiddenSignProj) count++;
+    }
+    this.setForbiddenCooldownLocked = count > 1;
+  }
+
+  /** CommandForbiddenStorm 1:1（Player.cs:57476-57566）。门链：
+   *  CanSpawnSandstormFriendly(30,30) ∧ 柱根≤1 ∧ 瞄准视线通（AimingLaserScan
+   *  采样容差 10f）→ CheckMana(20,pay)+ApplyManaRegenerationDelay → 旧根前跳
+   *  死亡相位（ai[0]<780 → 780+ai[0]%60）→ NewProjectile(656) 于
+   *  MinionRestTargetPoint,damage=(int)(20×(1+magicDamage+minionDamage−2))。 */
+  commandForbiddenStorm(game: GameHooks): void {
+    const st = game.world.store;
+    const projs = (game as unknown as { entities?: { projectiles?: unknown[] } })
+      .entities?.projectiles;
+    const signs: ForbiddenSignProj[] = [];
+    if (projs) for (const p of projs) {
+      if (!(p as { dead?: boolean }).dead && p instanceof ForbiddenSignProj) signs.push(p);
+    }
+    const aimX = this.minionRestTargetX;
+    const aimY = this.minionRestTargetY;
+    const flag = canSpawnSandstormFriendly(st, aimX, aimY, 30, 30);          // :57484
+    const aimIsZero = !this.hasMinionRestTarget;                             // :57485
+    const center = { x: this.cx, y: this.cy };
+    const endPoint = aimIsZero ? center : { x: aimX, y: aimY };               // :57487-57489
+    // AimingLaserScan(center, endPoint, 60f, 10)（:57492-57493——Center 出射）
+    const { vectorTowardsTarget, samples } =
+      aimingLaserScan(st, center, endPoint, 60, 10);
+    const vtLen = Math.hypot(vectorTowardsTarget.x, vectorTowardsTarget.y);
+    let flag2 = false;                                                       // :57495-57504
+    for (const s of samples) {
+      if (Math.abs(s - vtLen) < 10) { flag2 = true; break; }
+    }
+    let num2 = 0;                                                            // :57506-57511
+    for (const s of samples) if (s > num2) num2 = s;
+    if (signs.length <= 1) {                                                 // :57513 预览尘
+      spawnStormPreviewDust(game, center, vectorTowardsTarget, num2);
+    }
+    let ok = flag && signs.length <= 1 && flag2;                             // :57524-57526
+    if (ok) ok = this.checkMana(20);                                         // :57528（pay:true;
+    //   本仓 ManaV2 面=恒真扣蓝（Player.checkMana 单源）;魔力花链在其内）
+    if (ok) this.applyManaRegenerationDelay();                               // :57529-57531
+    if (!ok) return;                                                         // :57535-57537
+    for (const s of signs) {                                                 // :57537-57545
+      if (s.ai0 < 780) s.ai0 = 780 + (s.ai0 % 60);                           // 旧根前跳死亡相位
+    }
+    const es = this.equipStats;
+    // :57546 (int)(20×(1+magicDamage+minionDamage−2))——原版 magicDamage/minionDamage
+    // 为 1.0 基线全乘区,本仓 dmgMagic/minionDmg 为 0 基线加算累加器 ⇒ X+Y−1 =
+    // (1+X')+(1+Y')−1 = 1+X'+Y'（零加成 = 20 基伤,组C 终盘换算勘误 2026-09-18）
+    const damage = Math.trunc(20 * (1 + es.dmgMagic + es.minionDmg));        // :57546
+    // C# float→int 截断同式（(int) 溢出 clamp 不建模——20×乘区量级无溢出面）
+    const ent = game as unknown as {
+      entities?: { add?: (e: unknown, bucket?: string) => void };
+    };
+    ent.entities?.add?.(new ForbiddenSignProj(aimX, aimY, damage), 'projectiles');  // :57564
+    game.playSfxWav?.('Item_82', 1, Math.trunc(center.x), Math.trunc(center.y));
+  }
+
+  /** MinionRestTargetAim 1:1（Player.cs:57599-57670）：光标格起,列扫描找最近
+   *  可站立地面（上 20t/下 20t 启发位 + SolidTileAllowBottomSlope 5 格行进走查），
+   *  距玩家 ≤1000px 才入账 MinionRestTargetPoint。 */
+  minionRestTargetAim(game: GameHooks): void {
+    const st = game.world.store;
+    const mx = Math.floor(this.inputAimWorldX / 16);
+    const my = Math.floor(this.inputAimWorldY / 16);
+    // 光标格地面支（:57604 tileSolid ∧ ¬tileSolidTop;本仓 groundAt 不排 half/slope
+    // ——与原版同式,后行进走查兜真地）
+    const groundAt = (x: number, y: number): boolean => {
+      if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+      const i = st.idx(x, y);
+      if ((st.flags[i] & 1) === 0) return false;
+      const d = TILE_DEFS[st.type[i]];
+      return !!d && d.solid && !d.platform;
+    };
+    // SolidTileAllowBottomSlope（WorldGen.cs:8458 定义面 :8466-8472）：active ∧
+    // (solid ∨ solidTop) ∧ ¬topSlope(平台顶帧门不建模,登记) ∧ ¬halfBrick ∧ ¬inActive;
+    // InWorld 外/空格 = true（try 缺省支）
+    const standableAt = (x: number, y: number): boolean => {
+      if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
+      const i = st.idx(x, y);
+      // 原版语义（WorldGen.cs:8466-8472）：InWorld 外/Tile null（=越界）→ true;
+      // 存在但 inactive → 落穿尾 return false（★首测红修正：inactive ≠ null）
+      if ((st.flags[i] & 1) === 0) return false;
+      if (st.wire[i] & 32) return false;                       // inActive（WIRE_ACTUATED）
+      const d = TILE_DEFS[st.type[i]];
+      if (!d || (!d.solid && !d.platform)) return false;
+      if (st.half[i]) return false;
+      const slope = st.slope[i];
+      if (slope === 1 || slope === 2) return d.platform;       // topSlope 拒(平台豁免近似)
+      return true;
+    };
+    let num3 = 0;                                              // :57606-57627 启发位
+    if (groundAt(mx, my)) {
+      let num4 = 0;
+      let num5 = 0;
+      while (num5 > -20 && my + num5 > 1) {                    // 上行最近实心行距
+        if (groundAt(mx, my + num5)) { num4 = num5; num5--; continue; }
+        num4 = num5;
+        break;
+      }
+      let num7 = 0;
+      for (let i = 0; i < 20 && my + i < st.h; i++) {          // 下行 20t 内最近实心行距
+        if (groundAt(mx, my + i)) { num7 = i; continue; }
+        num7 = i;
+        break;
+      }
+      num3 = num7 <= -num4 ? num7 + 3 : num4 - 2;              // :57626
+    }
+    let num9 = my + num3;                                      // :57629
+    let flag = false;                                          // :57630-57637 5 格行进查
+    for (let j = num9; j < num9 + 5; j++) {
+      if (standableAt(mx, j)) flag = true;
+    }
+    while (!flag) {                                            // :57638-57647 下行到地
+      num9++;
+      for (let k = num9; k < num9 + 5; k++) {
+        if (standableAt(mx, k)) flag = true;
+      }
+    }
+    const vx = mx * 16 + 8;                                    // :57648-57653
+    const vy = num9 * 16;
+    if (Math.hypot(vx - this.cx, vy - this.cy) <= 1000) {
+      this.minionRestTargetX = vx;
+      this.minionRestTargetY = vy;
+    }
+  }
   /** 星云三族等级（0-3，各自独立 480t；NebulaLevelup :56091-56121 逐级升/降）：
    *  0=伤害 179-181（四系 +15%/级）1=生命 173-175（lifeRegen +6/级）2=魔力 176-178 */
   nebula = [0, 0, 0];
@@ -1383,6 +1543,30 @@ export class Player extends Entity {
   downHoldT = 0;
   /** Player.controlDownHold（:25268） */
   controlDownHold = false;
+  // ---- ★Forbidden 禁戒套引擎面（组C 终盘 2026-09-18;Player.cs:2809/:2811/:2989）----
+  /** setForbidden（:2809,ResetEffects :18861 每拍清 → Benefits.Forbidden :61-65 重置位
+   *  = 本仓每拍 equipStats.setBonus.forbidden 投影,赋值位在 fixedUpdate 套装段） */
+  setForbidden = false;
+  /** setForbiddenCooldownLocked（:2811——在场的 656 弹 >1 根 = 指令冷却闩,
+   *  UpdateForbiddenSetLock :57459-57471 每拍重算） */
+  setForbiddenCooldownLocked = false;
+  /** MinionRestTargetPoint（:2989,Vector2.Zero 缺省;HasMinionRestTarget :4044）。
+   *  星尘守护者共用面（★BJ157⑧ 消费面已接：MinionProj guardianBody 状态 1/3 +
+   *  KeyHoldDown 星尘支 + rest 点尘环;原版 rest 环 {1,3} 单机休眠支 1:1 照抄） */
+  minionRestTargetX = 0;
+  minionRestTargetY = 0;
+  /** 双击↓检测私有相位（与星旋套 downTapT 分离——星旋检测只在其 else-if 分支内
+   *  推进 prevDown,跨分支共用会互相污染相位） */
+  private forbiddenPrevDown = false;
+  private forbiddenTapT = 0;
+  /** 光标世界坐标（Game.fixedUpdate 输入段注入;MinionRestTargetAim :57599 的
+   *  Main.MouseWorld 等价入参——Player 无相机,由 Game 侧 screenToWorld 单源供给） */
+  inputAimWorldX = 0;
+  inputAimWorldY = 0;
+  /** Player.HasMinionRestTarget（:4044 `MinionRestTargetPoint != Vector2.Zero`） */
+  get hasMinionRestTarget(): boolean {
+    return this.minionRestTargetX !== 0 || this.minionRestTargetY !== 0;
+  }
   /** BOC 受击脉冲（fixedUpdate 内消费：buff 321 + 困惑近敌） */
   bocPulse = 0;
   /** 幻影闪避重整冷却（Player.shadowDodgeTimer，:1167 声明 / :25656-25659 每 tick
@@ -1695,12 +1879,18 @@ export class Player extends Entity {
     // 【共享件给全部属性】;"防空槽白嫖"由 GetEffectiveArmor 只填空槽 + CanShareArmor
     // （槽型/配件互斥门）承担。本函数全部 armor[] 读点统一走 effArmor。
     const effArmor = (slot: number) => this.inv.getEffectiveArmor(slot);
-    /** 当前套装匹配（armor[0-2] 的 hs/bs/ls 槽序号 → ARMOR_SET_BONUSES；通配 `${hs}|${bs}|*` 兜底） */
-    function activeArmorSetBonus(self: Player) {
+    /** 当前套装匹配（armor[0-2] 的 hs/bs/ls 槽序号 → ARMOR_SET_BONUSES 单表；通配
+     *  `${hs}|${bs}|*` 兜底）。★BJ147 组D：返回【原始命中】（含 summonSetOnly 条目）——
+     *  sb（setBonus）通道与 summonSet（召唤）通道共用一次查找,各自投影：
+     *  ★组A 表批（2026-09-18）legs=0 空腿语义对齐（原版 TryCounting :189-199
+     *  needed=0 腿位不计）：腿槽无件时回退 `*` 键（原 `*` 需腿件在场=登记债清偿;
+     *  有件时仍先试具体键,与原 GetCompleteSet 单键首命中等价）。 */
+    function activeArmorSetMatch(self: Player) {
       const st0 = statOfInternal(self.inv.getEffectiveArmor(0)?.id ?? -1);
       const st1 = statOfInternal(self.inv.getEffectiveArmor(1)?.id ?? -1);
       const st2 = statOfInternal(self.inv.getEffectiveArmor(2)?.id ?? -1);
-      if (!st0?.hs || st1?.bs === undefined || st2?.ls === undefined) return null;
+      if (!st0?.hs || st1?.bs === undefined) return null;
+      if (st2?.ls === undefined) return ARMOR_SET_BONUSES[`${st0.hs}|${st1.bs}|*`] ?? null;
       return ARMOR_SET_BONUSES[`${st0.hs}|${st1.bs}|${st2.ls}`]
         ?? ARMOR_SET_BONUSES[`${st0.hs}|${st1.bs}|*`] ?? null;
     }
@@ -1777,10 +1967,14 @@ export class Player extends Entity {
     // 配饰审计 P0 批（2026-08-22）聚合位
     let fishingTackle = false, lavaFishing = false, royalGel = false, fishingLine = false;
     let manaCostOffAcc = 0, toolboxRange = 0, accDmgMinion = 0;
+    let pickSpeedOff = 0;   // 挖矿速度折扣池（Mining 套 sb + accfx 甲件 pickSpeed 面,组A/B 批）
     let mechShowWires = false, autoActuator = false, magiluminescence = false;
     let iceBarrierAcc = false, lavaRose = false;
     let cordage = false;   // 植物纤维绳索宝典 3068（:14461-14463,割藤掉藤绳 2996 效果端）
     let divingHelm = false, merman = false;
+    // ★组A/B 单件面批（2026-09-18）甲件行为旗聚合位（消费链见 PlayerEquipStats 字段注;
+    //  声明须先于 divingHelm/nightVision 三件扫描环——同环夜视位读 nightVisionArmor）
+    let moonLordLegsArmor = false, slowFallArmor = false, nightVisionArmor = false;
     let arcticDivingGear = false, jellyfishGlow = false;
     // ---- 1457 新配饰行为旗（ApplyEquipFunctional case 6166-6189 :14596-14739）----
     let accSentryBackpack = false, accGolemSentryBackpack = false;
@@ -1792,8 +1986,8 @@ export class Player extends Entity {
     let crimsonRegen = false;   // 老猩红甲套（ArmorSetBonuses.cs:433,检测在下方甲槽段）
     let ammoCyclerMode = 0;   // PlayerAmmoCyclingMode（PlayerAmmoCyclingMode.cs:None=0/AmmoSlots=1/FullInventory=2/Random=3）
     // ---- 召唤师链聚合位（vanillaSummonStats：ApplyEquipFunctional armor[0-9] 单遍语义 =
-    //      盔甲三件 + 配饰各扫一遍 SUMMON_GEAR；套装查 SUMMON_SET）——声明须在配饰
-    //      循环前：1457 侦察背包 6175（:14670-14677）在循环内直加 minionDmg ----
+    //      盔甲三件 + 配饰各扫一遍 SUMMON_GEAR；套装查 vanillaArmorSets 单表召唤通道）——
+    //      声明须在配饰循环前：1457 侦察背包 6175（:14670-14677）在循环内直加 minionDmg ----
     let minionSlots = 0, minionDmg = 0, minionKB = 0, sentrySlots = 0, whipRange = 0;
     // ---- 身上贴图绘制槽 + 仇恨轴（配饰审计系统性批 2026-08-22）----
     let aggroAcc = 0;
@@ -2290,47 +2484,60 @@ export class Player extends Entity {
     let seenDd2 = false;
     for (let i = 0; i < 3; i++) sumFx(effArmor(i));   // R4-19：GrantArmorBenefits k=0..9
     // GrantArmorBenefits 盔甲三件扫描（Player.cs:12826-12831）：armor 268 潜水头盔 → accDivingHelm
+    // ★组A 单件面批（2026-09-18）：3109/4008 夜视旗同行承载（:13408-13411 nightVision=true）
     for (let i = 0; i < 3; i++) {
       const s = effArmor(i);
-      if (s && accFxOfInternal(s.id)?.divingHelm) divingHelm = true;
+      if (!s) continue;
+      const afx = accFxOfInternal(s.id);
+      if (afx?.divingHelm) divingHelm = true;
+      if (afx?.nightVision) nightVisionArmor = true;
     }
     // 套装/头盔 type 检测（vid 直查）：蘑菇矿头 1546箭/1547弹/1548火箭（:13274-13288）
-    const aVid = (i: number): number => {
-      const d = ITEM_DEFS[effArmor(i)?.id ?? -1];
-      return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
-    };
+    // ——vidOfItemId（★IIIII250 查表族）单源复用（BJ147 组D）
+    const aVid = (i: number): number => vidOfItemId(effArmor(i)?.id ?? -1);
     const [hVid, bVid, lVid] = [aVid(0), aVid(1), aVid(2)];
     // SW-AC1 2026-09-04：死人毛衣 5007 胸甲件旗（GrantArmorBenefits case 5007
     //  Player.cs:13226-13229 `deadMansSweater = true`——装甲三件扫描位,社交槽
     //  3-9 门=item.accessory 不授 :12970-12989;消费=SelfHurtPlayers :15131-15134）
     let deadMansSweater = false;
     if (bVid === 5007) deadMansSweater = true;
+    // ★组A/B 单件面批（2026-09-18）甲件行为旗 vid 直查（同 deadMansSweater 件位形态;
+    //  声明位在配饰环上方本地块,旗消费链见 PlayerEquipStats 字段注）：
+    if (lVid === 5001) moonLordLegsArmor = true;     // 月亮领主腿（:13215-13219）
+    if (moonLordLegsArmor) extraFall += 10;          // :19732 extraFall += 10（jumpSpeed/jumpHeight 面
+                                                     // 走 jumpBaseSnapshot 消费 equipStats.moonLordLegs）
+    if (lVid === 3770) slowFallArmor = true;         // 神灵诅咒（:13360-13362）
     // ★IIIII224（GrantArmorBenefits case 238,Player.cs:13352-13359）：巫师帽
     //  （头槽 238）magicDamage +5%；十周年世界随从上限 +1（tenthAnniversaryWorld）
     if (hVid === 238) {
       dmgMagic += 0.05;
       if (this.worldSeedFlags?.tenthAnniversary) minionSlots += 1;
     }
-    // 老猩红甲套装 crimsonRegen（ArmorSetBonuses.cs:433
-    // `Add(Benefits.Crimson,"ArmorSetBonus.Crimson",792,793,794)`——头 792/headSlot57
-    // ·胸 793/bodySlot37·腿 794/legSlot35,vanillaArmorSets 表暂未收录此键,内联检测
-    // 与表键 57|37|35 等价）。再生三面：UpdateLifeRegen :19233 eRT+1 / :19362
-    // num5×1.5 / :19412 每回 1HP 十粒红尘（消费端在 regen 段）
-    if (hVid === 792 && bVid === 793 && lVid === 794) crimsonRegen = true;
+    // ---- BJ147 组D：套装 vid 三元组判定收编（原内联 vid 直比 7 处 →
+    //      vanillaArmorSets.ARMOR_SET_BONUSES_VID 单表,键 = h|b|l 物品 id——
+    //      原版 QueryContext 语义;消费旗经专用通道,equipStats 字段名不变）----
+    // 老猩红甲 crimsonRegen（Benefits.Crimson :433）：再生三面 = UpdateLifeRegen
+    //   :19233 eRT+1 / :19362 num5×1.5 / :19412 每回 1HP 十粒红尘（消费端在 regen 段）
+    // 陨石套 spaceGun（:436）——Space Gun/Zapinator/钉枪无限蓝（R27 消费面）
+    // 蘑菇矿/星旋/星云/甲虫双档（:394/:471/:472/:416-417）——各自引擎通道
+    const vidSet = matchArmorSetBonusVid(hVid, bVid, lVid);
+    if (vidSet?.crimsonRegen) crimsonRegen = true;
+    if (vidSet?.shroomiteSet) shroomiteSet = true;
+    if (vidSet?.vortexSet) vortexSet = true;
+    if (vidSet?.nebulaSet) nebulaSet = true;
+    if (vidSet?.spaceGun) spaceGun = true;
+    if (vidSet?.beetleOff) beetleOff = true;     // 进攻甲
+    if (vidSet?.beetleDef) beetleDef = true;     // 防御甲（壳：beetleEndurance 15%/球）
     // 甲件 aggro 轴（GrantArmorBenefits :13852-13874/:13983-13997——逐槽 +=：
     //   龟甲三件 +250、甲虫头/腿 +250 与壳胸 +400、日曜三件各 +300。
     //   ★终零波批（2026-09-01）实装——旧注"甲件轴暂未建模,登记"退役）
     const aggroPiece = (AGGRO_ARMOR_PIECE[hVid] ?? 0)
       + (AGGRO_ARMOR_PIECE[bVid] ?? 0) + (AGGRO_ARMOR_PIECE[lVid] ?? 0);
+    // 蘑菇矿头单件 type 面（GrantArmorBenefits case 1546-1548 :13274-13288——
+    //   箭/弹/火箭 ×1.12 + crit+5,shroomiteType 单源承载,套装层 vidSet 之上）
     if (hVid === 1546) shroomiteType = 'arrow';
     else if (hVid === 1547) shroomiteType = 'bullet';
     else if (hVid === 1548) shroomiteType = 'rocket';
-    shroomiteSet = (hVid >= 1546 && hVid <= 1548) && bVid === 1549 && lVid === 1550;
-    vortexSet = hVid === 2757 && bVid === 2758 && lVid === 2759;
-    nebulaSet = hVid === 2760 && bVid === 2761 && lVid === 2762;
-    spaceGun = hVid === 123 && bVid === 124 && lVid === 125;   // R27：Meteor 套（:436）
-    beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲
-    beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(effArmor(i));   // R4-19
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     // DD2 盔甲散件主属性（DD2_PIECE_FX——GrantArmorBenefits case 3798-3882 :13236-13342
@@ -2386,7 +2593,7 @@ export class Player extends Entity {
       if (!afx) continue;
       const sg = SUMMON_GEAR[v];
       const sgHas = (f: string): boolean => sg !== undefined && (sg as unknown as Record<string, number | undefined>)[f] !== undefined;
-      const face = (f: 'mana' | 'life' | 'move' | 'meleeSpd' | 'dmgMelee' | 'dmgRanged' | 'dmgMagic' | 'dmgAll' | 'critMelee' | 'critRanged' | 'critMagic' | 'manaCostOff'): number =>
+      const face = (f: 'mana' | 'life' | 'move' | 'meleeSpd' | 'dmgMelee' | 'dmgRanged' | 'dmgMagic' | 'dmgAll' | 'critMelee' | 'critRanged' | 'critMagic' | 'manaCostOff' | 'pickSpeed'): number =>
         sgHas(f) ? 0 : afx[f] ?? 0;
       mana += face('mana');                                  // statManaMax2（:13757 1003 等）
       life += face('life');                                  // lifeRegen（:13987 2763 等,N/2 HP/s）
@@ -2400,6 +2607,8 @@ export class Player extends Entity {
       critRanged += face('critRanged');
       critMagic += face('critMagic');
       manaCostOffAcc += face('manaCostOff');                 // manaCost -= X【加算】池（:13726 等）
+      pickSpeedOff += face('pickSpeed');                     // pickSpeed -= X【加算】池（410/411/
+                                                             // 5589/5590 矿工件 :13944-13947,组A 批）
     }
     // ---- 盔甲单件省弹门（Player.cs GrantArmorBenefits if-chain + :13226 switch 逐件
     //      1:1——提取器 accfx 表漏标 2758/1002 档位键，此处手读直表；行号 1457 重锚）：
@@ -2429,7 +2638,10 @@ export class Player extends Entity {
     for (const v of [hVid, bVid, lVid]) {
       if (v === 2367 || v === 2368 || v === 2369 || v === 5591 || v === 5592 || v === 5593) fish += 5;
     }
-    const sb = activeArmorSetBonus(this);
+    // 盔甲套装加成（vanillaArmorSets.ts 单表：槽序号三键匹配,一次查找双通道投影——
+    // sb = setBonus 通道（summonSetOnly 条目不亮,既有 85 键正确面）;summonSet = 召唤通道）
+    const setMatch = activeArmorSetMatch(this);
+    const sb = setMatch?.summonSetOnly ? null : setMatch;
     if (sb) {
       if (sb.def) def += sb.def;
       if (sb.mana) mana += sb.mana;
@@ -2452,8 +2664,9 @@ export class Player extends Entity {
       if (sb.onHitRegen) onHitRegen = true;         // 帕拉钯全套（ArmorSetBonuses.cs:217-220,终零波批）
       if (sb.onHitPetal) onHitPetal = true;         // 山铜全套花瓣弹 221（:222-226,终零波批）
       if (sb.onHitDodge) onHitDodge = true;         // 神圣套幻影闪避 buff59 链（:228-236,终零波批）
-      // （套装层 maxMinions 通道预留：当前召唤面槽位全走 vanillaSummonStats
-      //   SUMMON_SET/SUMMON_GEAR 两旧链——HallowedSummoner+2 已由其承载,勿双记）
+      // （套装层 maxMinions 通道预留：当前召唤面槽位全走 summonSet 召唤通道
+      //   （vanillaArmorSets 单表召唤字段族）+ SUMMON_GEAR 散件链——
+      //   HallowedSummoner+2 已由单表条目 slot 承载,勿双记）
       if (sb.ashWood) ashWood = true;               // ★Notes④ Ash Wood 全套
       if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
       if (sb.fireWalk) fireWalk = true;
@@ -2463,20 +2676,29 @@ export class Player extends Entity {
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.anglerSet) anglerSetSpawnReduction = true;   // 渔夫套生成环（NPC.cs:627-630）
       if (sb.ammoCost80) ammoSaveCost80 = true;
+      // ---- 组A/B 表批消费位（2026-09-18;Effects 通道逐行对应 vanillaArmorSets 注）----
+      if (sb.dmgMinion) minionDmg += sb.dmgMinion;        // CrystalNinja/Pumpkin minionDamage+=X
+                                                          // （minionDmg 与 DD2/summon 通道同池加算）
+      if (sb.manaCostOff) manaCostOffAcc += sb.manaCostOff; // 钴/秘银/精金法袍 manaCost−X【加算】池
+      if (sb.ammoCost75) ammoSaveCost75 = true;           // 精金远程省弹 1/4（:207-209）
+      if (sb.buffImmune) for (const b of sb.buffImmune) immuneBuffs.add(b);   // Snow 46/47
+                                                          // （immuneDirty 已由 size>0 覆盖翻转失效）
+      if (sb.pickSpeed) pickSpeedOff += sb.pickSpeed;     // Mining 套 pickSpeed−0.1（:299-303）
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     manaCostMul *= setManaCostMul;   // DD2 散件魔耗乘区并入(2026-08-13)
     }
     // 女猎手 T2/T3 套装旗标（setHuntressT2,Player.cs:16119/:16149——爆炸机关弹
     // 694-696 的 Oiled 门,StatusNPC :10786;由 MinionProj 经 ctx 传入 applyProjStatus）
     let huntressT2 = false;
-    // 召唤系套装（SUMMON_SET 槽序键；散件效果已在上扫，此处只叠套装层）
+    // 召唤系套装通道（BJ147 组D：SUMMON_SET 已并入 vanillaArmorSets 单表——本通道 =
+    // setMatch 命中条目的召唤字段族投影;无召唤字段的套（Molten 等纯数值套）恒 null
+    // = equipStats.summonSet 既有正确面。散件效果已在上扫,此处只叠套装层）
     const summonSet = (() => {
-      const st0 = statOfInternal(effArmor(0)?.id ?? -1);
-      const st1 = statOfInternal(effArmor(1)?.id ?? -1);
-      const st2 = statOfInternal(effArmor(2)?.id ?? -1);
-      if (!st0?.hs || st1?.bs === undefined || st2?.ls === undefined) return null;
-      const s = SUMMON_SET[`${st0.hs}|${st1.bs}|${st2.ls}`] ?? SUMMON_SET[`${st0.hs}|${st1.bs}|*`];
-      if (!s) return null;
+      const s = setMatch;
+      if (!s || (s.slot === undefined && s.sentry === undefined && s.dmg === undefined
+        && s.whipRange === undefined && s.whipSpd === undefined && !s.guardian
+        && !s.huntressT2 && !s.huntressT3 && !s.squireT2 && !s.apprenticeT2
+        && !s.monkT2 && !s.squireT3 && !s.apprenticeT3 && !s.monkT3)) return null;
       if (s.slot) minionSlots += s.slot;
       if (s.sentry) sentrySlots += s.sentry;
       if (s.dmg) minionDmg += s.dmg;
@@ -2593,6 +2815,8 @@ export class Player extends Entity {
       whipSpd: summonSet?.whipSpd ?? 1,
       summonSet,
       divingHelm, merman, arcticDivingGear, jellyfishGlow,
+      nightVision: nightVisionArmor, moonLordLegs: moonLordLegsArmor,
+      slowFall: slowFallArmor, pickSpeedOff,   // 组A/B 单件旗面（字段注见接口）
       accSentryBackpack, accGolemSentryBackpack,
       accHarpyCharm, accSeraphNecklace, hasPhoenixQuiver,
       accSnappingStone, accPyroclast, accArmletOfRuin,
@@ -2637,16 +2861,20 @@ export class Player extends Entity {
     return this.buffs.thornsAmount;
   }
   /** 海龟套装（1316-1318 h99|b65|l54,Player.cs:15930-15934 turtleThorns → 反伤 ×2） */
+  /** 海龟套装（vanillaArmorSets.ARMOR_SET_BONUSES_VID '1316|1317|1318'——Benefits.Turtle
+   *  :159-164/注册 :447 turtleThorns → 反伤 ×2 覆写（Game :39102 turtleSet?2:thorns）。
+   *  ★BJ147 组D 收编：原内联槽检（hs99/bs65/ls54）→ 单表 vid 键;等价性由闸门全三元组
+   *  碰撞普查证明。★通道注：读裸 armor[]（原实现同,与 R4-19 effArmor 聚合链的分叉
+   *  = loadout 共享边缘登记债,组B/C） */
   get turtleSet(): boolean {
     const a = this.inv.armor;
-    const s0 = statOfInternal(a[0]?.id ?? -1), s1 = statOfInternal(a[1]?.id ?? -1), s2 = statOfInternal(a[2]?.id ?? -1);
-    return s0?.hs === 99 && s1?.bs === 65 && s2?.ls === 54;
+    return matchArmorSetBonusVid(vidOfItemId(a[0]?.id ?? -1), vidOfItemId(a[1]?.id ?? -1), vidOfItemId(a[2]?.id ?? -1))?.turtleThorns === true;
   }
-  /** 仙人掌套装（894-896 h70|b46|l42,Player.cs:30948-30958 cactusThorns → 独立定值反伤） */
+  /** 仙人掌套装（vanillaArmorSets vid '894|895|896'——Benefits.Cactus :154-157/注册 :446
+   *  cactusThorns → 独立定值反伤 Player.cs:30948-30958;收编注同 turtleSet） */
   get cactusSet(): boolean {
     const a = this.inv.armor;
-    const s0 = statOfInternal(a[0]?.id ?? -1), s1 = statOfInternal(a[1]?.id ?? -1), s2 = statOfInternal(a[2]?.id ?? -1);
-    return s0?.hs === 70 && s1?.bs === 46 && s2?.ls === 42;
+    return matchArmorSetBonusVid(vidOfItemId(a[0]?.id ?? -1), vidOfItemId(a[1]?.id ?? -1), vidOfItemId(a[2]?.id ?? -1))?.cactusThorns === true;
   }
   /** player.head 语义（Player.cs:25336 = armor[0].headSlot；:35315-35322 时装头
    *  armor[10].headSlot ≥ 0 时覆盖）——displayArmor()[0] 即"时装优先"同式。
@@ -3499,6 +3727,37 @@ export class Player extends Entity {
     // 此处推进后装备扫描（applyEquipFunctional 链）同拍消费
     this.downHoldT = this.inputDown ? this.downHoldT + 1 : 0;
     this.controlDownHold = this.downHoldT >= 45;
+    // ---- ★Forbidden 指令输入面（组C 终盘;KeyDoubleTap :57434-57457 + KeyHoldDown
+    //      :57567-57583——双击↓窗口 15t（:25234-25249 doubleTapCardinalTimer 语义,
+    //      与星旋套 downTapT 同式但私有相位）。setForbidden 读上一拍值=原版序
+    //      （ResetEffects :18861 → 输入 :25214 → UpdateEquip 套装面 :26400+）----
+    {
+      const fDown = this.inputDown;
+      if (fDown && !this.forbiddenPrevDown) {
+        if (this.forbiddenTapT > 0) {
+          // KeyDoubleTap(0) 的 setForbidden 支（:57449-57456）：先 MinionRestTargetAim
+          // （闩外恒跑）→ 未闩才 CommandForbiddenStorm（20 魔力/空间/视线/根数门）
+          if (this.setForbidden) {
+            this.minionRestTargetAim(game);
+            if (!this.setForbiddenCooldownLocked) {
+              this.commandForbiddenStorm(game);
+            }
+          }
+        } else {
+          this.forbiddenTapT = 15;
+        }
+      }
+      if (this.forbiddenTapT > 0) this.forbiddenTapT--;
+      this.forbiddenPrevDown = fDown;
+      // KeyHoldDown(0, holdTime) 双套装支（:57574-57582）：星尘/禁戒按住 ≥60t 均
+      // 复位瞄准点（Vanilla 逐 tick 调用+幂等;MinionRestTargetPoint 两套装共用面——
+      // ★BJ157⑧ 星尘支原缺,守护者 rest 的取消半边）
+      if (this.downHoldT >= 60
+        && (this.setForbidden || this.equipStats.summonSet?.guardian === true)) {
+        this.minionRestTargetX = 0;
+        this.minionRestTargetY = 0;
+      }
+    }
     this.oldX = this.x; this.oldY = this.y;   // oldPosition（尘埃 customData 跟随差值）
     // ---- 派对染发剂彩纸（UpdateHairDyeDust Player.cs:23994-24023；2026-08-14 接通，
     //      原 HairDyeColor.ts §4 登记偏差销核）——抽为方法：MP 远端代理不走
@@ -3703,6 +3962,41 @@ export class Player extends Entity {
       game.updateChloroCrystalAnchor?.();
     } else {
       this.buffs.remove(BuffType.LeafCrystal);
+    }
+    // ---- ★Forbidden 禁戒套（组C 终盘 2026-09-18;Benefits.Forbidden
+    //      ArmorSetBonuses.cs:61-65 = setForbidden 置位 + UpdateForbiddenSetLock +
+    //      Lighting.AddLight(0.8,0.7,0.2)——每拍重置位面。卸套同拍清两旗
+    //      （原版 ResetEffects :18861/:18870 每拍清零、套装面在场重置位=等价对账）----
+    if (eqM.setBonus?.forbidden === true) {
+      this.setForbidden = true;
+      this.updateForbiddenSetLock(game);
+      game.addLightAt?.(this.cx, this.cy, 0.8, 0.7, 0.2);
+    } else {
+      this.setForbidden = false;
+      this.setForbiddenCooldownLocked = false;
+    }
+    // MinionRestTargetPoint 每 tick 失效复位（UpdateMinionTarget :57677-57681——
+    // 距玩家 >1000px 清零）
+    if (Math.hypot(this.minionRestTargetX - this.cx, this.minionRestTargetY - this.cy) > 1000) {
+      this.minionRestTargetX = 0;
+      this.minionRestTargetY = 0;
+    }
+    // ★BJ157⑧ rest 点尘环（UpdateMinionTarget :57683-57701）：stardustGuardian
+    // （:11018-11024 buff187 ∧ owned623>0;本仓守护者常驻段 Game.ts:9343 由同一
+    //  summonSet.guardian 旗驱动 623 存亡,同源等价）∧ HasMinionRestTarget →
+    //  3 粒 135 尘绕点公转（miscCounter/150·2π + i·2π/3,半径 4;α100 scale1.5,
+    //  velocity=0/position 直写同原版序,noGravity;noLight 置位,cPet shader 未建模）
+    if (this.equipStats.summonSet?.guardian === true && !this.dead && this.hasMinionRestTarget) {
+      for (let i = 0; i < 3; i++) {
+        const d = game.spawnDust?.(this.minionRestTargetX, this.minionRestTargetY, 0, 0, 135, 0, 0, 100, null, 1.5, true);
+        if (d) {
+          const ang = (this.miscCounter / 150) * Math.PI * 2 + i * (Math.PI * 2 / 3);
+          d.vx = 0; d.vy = 0;
+          d.x = this.minionRestTargetX + Math.cos(ang) * 4;
+          d.y = this.minionRestTargetY + Math.sin(ang) * 4;
+          d.noLight = true;
+        }
+      }
     }
     // 盾球轨道（:16258-16283）+ buff 对账（:10044-10066：层数变即清多余档,
     // setSolar 在场持续续期 5t；卸套清零）
@@ -5463,11 +5757,11 @@ export class Player extends Entity {
         //  = 登记债,仅终端收敛,逼近速率仍偏陡。
         if (!(this.ridingMount && this.mount.type === 5)) {
           if (this.gravDir === -1) {
-            if (this.buffs.slowFall && this.vy < -lMaxFall / 3 && !this.tryingToHoverDown) this.vy = -lMaxFall / 3;
-            if (this.buffs.slowFall && this.vy < -lMaxFall / 5 && this.tryingToHoverUp) this.vy = -lMaxFall / 10;
+            if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy < -lMaxFall / 3 && !this.tryingToHoverDown) this.vy = -lMaxFall / 3;
+            if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy < -lMaxFall / 5 && this.tryingToHoverUp) this.vy = -lMaxFall / 10;
           } else {
-            if (this.buffs.slowFall && this.vy > lMaxFall / 3 && !this.tryingToHoverDown) this.vy = lMaxFall / 3;
-            if (this.buffs.slowFall && this.vy > lMaxFall / 5 && this.tryingToHoverUp) this.vy = lMaxFall / 10;
+            if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy > lMaxFall / 3 && !this.tryingToHoverDown) this.vy = lMaxFall / 3;
+            if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy > lMaxFall / 5 && this.tryingToHoverUp) this.vy = lMaxFall / 10;
           }
         }
       }
@@ -5961,6 +6255,10 @@ export class Player extends Entity {
             this.vx = (eq.dash === 2 ? 14.5 : eq.dash === 3 ? 21.9 : 16.9) * dir;
             // :21588 dash1=16.9 / :21619 dash2=14.5 / :21643 dash3 日曜=21.9
             //（R5-F13：旧 dash3 落 16.9,冲撞初速低 23%）
+            // ★组B 批（2026-09-18）dash5 水晶刺客（套装 sb.dashType=5 → Math.max 链入位）
+            //   落 16.9 else 档（:21666 与 dash1 同速）;阻尼/冷却走基础档（:21503 无
+            //   num13-17 覆写,accOverridden 不含 5）;无冲撞伤害（仅 dash2/3/6 有伤害支）
+            //   ——水晶尘 68/69/70 视觉面未建模（dash1/2/3 尘同样未建模,登记同债）。
             // 头部将撞墙减半（:21132-21137）：身前半宽+2px 的头部点/身体中点格
             // SolidOrSlopedTile → velocity.X /= 2
             if (this.dashWallAhead(dir)) this.vx /= 2;
@@ -6125,7 +6423,7 @@ export class Player extends Entity {
             //  （:21963-21967 gravDir【在内】——外式再 ×gravDir 双乘相消=慢Fall 时
             //  vy≡−g/3 与重力向无关（原文 quirk）;旧无内乘 → 倒挂半边符号翻转）;
             //  gravity 字段=深度缩放值（num3=:21962 `float num3 = gravity`）
-            const num3 = this.buffs.slowFall
+            const num3 = (this.buffs.slowFall || this.equipStats.slowFall)
               ? (this.tryingToHoverUp ? gFieldWs / 10 : gFieldWs / 3) * gdSlide
               : gFieldWs;
             this.vy = (-num3 + 1e-5) * gdSlide;   // :21979-21997 `(−num3+1E-05f)*gravDir`
@@ -6158,7 +6456,7 @@ export class Player extends Entity {
       // （下悬停驻留中缓降整臂跳过=常规重力）+ TryingToHoverUp /10 档（:27226）；
       // flag20=isPerformingJump_DownDash（:26995,本仓 downDash 未建模 ≡ false）。
       // ★SW-FX14：旧式无条件 /3 缺两门,锁存接线后按原文补齐
-      let grav = this.buffs.slowFall && !this.tryingToHoverDown
+      let grav = (this.buffs.slowFall || this.equipStats.slowFall) && !this.tryingToHoverDown
         ? (this.tryingToHoverUp ? GRAVITY / 10 : GRAVITY / 3)
         : GRAVITY;
       if (gliding) {
@@ -6238,17 +6536,17 @@ export class Player extends Entity {
       //  干链尾（原版 :27563 属 !wet 大支,湿链钳制在液体段 lMaxFall 承载,不双钳）。
       if (!(this.ridingMount && this.mount.type === 5)) {
         if (gd === 1) {
-          if (this.buffs.slowFall && this.vy > PLAYER_MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = PLAYER_MAX_FALL_SPEED / 3;
-          if (this.buffs.slowFall && this.vy > PLAYER_MAX_FALL_SPEED / 5 && this.tryingToHoverUp) this.vy = PLAYER_MAX_FALL_SPEED / 10;
+          if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy > PLAYER_MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = PLAYER_MAX_FALL_SPEED / 3;
+          if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy > PLAYER_MAX_FALL_SPEED / 5 && this.tryingToHoverUp) this.vy = PLAYER_MAX_FALL_SPEED / 10;
         } else {
-          if (this.buffs.slowFall && this.vy < -PLAYER_MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = -PLAYER_MAX_FALL_SPEED / 3;
-          if (this.buffs.slowFall && this.vy < -PLAYER_MAX_FALL_SPEED / 5 && this.tryingToHoverUp) this.vy = -PLAYER_MAX_FALL_SPEED / 10;
+          if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy < -PLAYER_MAX_FALL_SPEED / 3 && !this.tryingToHoverDown) this.vy = -PLAYER_MAX_FALL_SPEED / 3;
+          if ((this.buffs.slowFall || this.equipStats.slowFall) && this.vy < -PLAYER_MAX_FALL_SPEED / 5 && this.tryingToHoverUp) this.vy = -PLAYER_MAX_FALL_SPEED / 10;
         }
       }
       // 老鼠坐骑爬墙速度钉（原版序：重力 :26200s 先行、WallClimb :26436 直写
       // velocity.Y 覆盖）——上 -2/下 4/松手 0.5 精确落碰撞
       if (this.ratClimbVy !== null) this.vy = this.ratClimbVy;
-      if (this.buffs.slowFall) this.fallStartY = null;
+      if ((this.buffs.slowFall || this.equipStats.slowFall)) this.fallStartY = null;
       // 倒置时天花板即地板（TileCollision.hitHead → onGround 近似）
       if (gd === -1) this.onGround = this.hitHead;
       // ★SW-FX40（h2·gd=-1 新增符号臂,gd=1 慢Fall 亦然）：慢Fall 字段签名改写
@@ -6256,7 +6554,7 @@ export class Player extends Entity {
       //  滑翔/火箭/翼飞/坐骑飞行各支整链让位=不改写;湿链不进此段）。in-place
       //  镜像原文:基于刚写好的 0.4×num6 字段再乘——StepDown/StepUp 倒挂/
       //  WalkDownSlope 三门在本段之后消费 gField（原版 :28265/:28271/:23610 同序）。
-      if (this.buffs.slowFall && !this.tryingToHoverDown && !gliding && !flying
+      if ((this.buffs.slowFall || this.equipStats.slowFall) && !this.tryingToHoverDown && !gliding && !flying
         && this.rocketDelay === 0 && !mountFlight) {
         this.gField = (this.tryingToHoverUp ? this.gField / 10 : this.gField / 3) * this.gravDir;
       }
@@ -9057,6 +9355,12 @@ export class Player extends Entity {
     if (eqJ.jumpBoost) {
       baseJumpTicks = Math.max(baseJumpTicks, 20);
       baseJumpSpd = Math.max(baseJumpSpd, 6.51);
+    }
+    // 月亮领主腿（组A 单件面批 2026-09-18;UpdateJumpHeight :19730-19734：
+    // jumpSpeedBoost += 1.8 / extraFall += 10（聚合位）/ jumpHeight++）
+    if (eqJ.moonLordLegs) {
+      baseJumpSpd += 1.8;
+      baseJumpTicks += 1;
     }
     if (this.buffs.has(BuffType.Werewolf)) baseJumpTicks += 2;   // :19738 jumpHeight += 2（速度 +0.2 已在 jumpSpd :19739）
     if (this.stoolInUse) baseJumpTicks += 5;                     // :19741-19744 折叠凳 +5

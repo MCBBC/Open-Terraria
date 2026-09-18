@@ -23,7 +23,9 @@
 //   4 档铜铁银金 7/6/9/8=WldImport 注记缺省)。
 import type { SaveData } from '../save/serialize';
 import { TILE_INTERNAL_OF_STABLE, TILE_DEFS } from '../data/tiles';
-import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
+// ★IDG-1（2026-09-18,BJ150 §6 处方 id 域守卫）：本文件=写向文件,禁引用加载向表
+//   ITEM_INTERNAL_OF_STABLE——SW-BO1 勘误后箱/TE 侧稳定 id 直写（:487 附近）,该表
+//   引用只剩本注释与 :433 勘误注;死 import 已摘（tools/id-domain-guard.mjs 锚定）。
 
 import { BinaryWriterLE } from '../save/PlrImport';
 import { HEADER_FLAGS, HEADER_PRE, fieldValue, type WldField, type WldVal } from './WldHeaderFields';
@@ -431,8 +433,13 @@ function writeTileEntities(w: BinaryWriterLE, save: SaveData): void {
 //  SaveData 载荷里的物品 id 已是【稳定 id】域（serializeSave 统一过 ITEM_STABLE_OF_INTERNAL），
 //  而 vi_* 物品的稳定 id = 其原版 netId（items.ts 稳定 id 表 `/^vi_(\d+)_/ → Number` 同源），
 //  故写回 .wld 直接落稳定 id 即可。旧实现经 ITEM_INTERNAL_OF_STABLE 反查成【内部 id】
-//  （如 vid 4 铁短剑内部=1327）——写出的 .wld 物品 id 全域错位（原版读档物品乱套/
-//  本仓 parseWld 二读 vid 越表丢失）,且方向恰为「加载方向」的反向误用。
+//  （如 vid 4 铁阔剑内部=1327;原注「铁短剑」名误——铁短剑=vid 6→内部 1329）——
+//  写出的 .wld 物品 id 全域错位（原版读档物品乱套/本仓 parseWld 二读 vid 越表丢失）,
+//  且方向恰为「加载方向」的反向误用。
+//  ★2026-09-18 时间线补注（L2② 同批,git 考古）：箱/TE 错映射随本文件 2026-09-06
+//  （2c8e0bcb）诞生即接,SW-BO1 次日（09-07）修复——箱侧自始无 vid 直写历史期,
+//  与 .plr 侧「真档=vid 域外部实证」（PlrImport.ts stableOf 注,Vinlic.plr 实测）
+//  不同源,勿套同一叙事。
 
 // ---- 主出口 ----
 /** SaveData → 自足 .wld 字节(325 格式;本仓 parseWld 可读,原版不保证——见文件头注) */
@@ -458,6 +465,10 @@ export function exportWld(save: SaveData): Uint8Array {
 
   // 指针 = 各 section 尾位置(=下一 section 起点;原版 SaveWorld_Version2 :1158-1170:
   // pointers[0]=FileFormatHeader 尾、[1]=header 尾、[2]=tiles 尾……[10]=creativePowers 尾)
+  // ★红蓝-L2①（2026-09-18 拆雷,RB15c 段表错位误读的根因 trap）：下方 mark() 逐段
+  //  推入 p0..p11——**推入序=槽位真值**,行内注释 [N] 必须随推入序对齐（曾自 [3]
+  //  chests 尾起整体偏一,BJ143 只修了测试未拆雷）。原版表恒 11 槽,p11（footer 尾）
+  //  不入表（:601 回写恒 i<11）;结构锁=tests/wld-export.test.ts「mark() 注释槽位结构锁」
   const pointers: number[] = [];
   const mark = (): void => { pointers.push(w.chunks.length); };
   mark();                                                 // [0] FFH 尾=header 起点
@@ -480,12 +491,12 @@ export function exportWld(save: SaveData): Uint8Array {
       w.i16(Math.max(1, it.stack ?? 1)).i32(netId).byte(0);   // chests 元素无 prefix 形;★P3:stack 钳 ≥1(红队半裁项)
     }
   }
-  mark();                                           // [2] chests 尾
+  mark();                                           // [3] chests 尾
   // signs(WF:1685):short count+逐条(text+x+y)
   const signs = save.signs ?? [];
   w.i16(signs.length);
   for (const s of signs) w.str(s.text ?? '').i32(s.x).i32(s.y);
-  mark();                                           // [3] signs 尾
+  mark();                                           // [4] signs 尾
   // npcs(WF:1710):shimmered 名单+镇 NPC 循环+false+SavesAndLoads 段(四塔)+false
   // ★SW-FX11（2026-09-10）：ShimmeredTownNPCs 写真值（WF:1712-1720 Save——i32 数量 ×
   //  i32 NPC type id;曾恒 i32(0),微光城镇化导出即丢）。type id 取镇 NPC 段同款反查
@@ -523,15 +534,15 @@ export function exportWld(save: SaveData): Uint8Array {
     w.bool(true).i32(pn.id).f32(pn.x).f32(pn.y);
   }
   w.bool(false);
-  mark();                                           // [4] npcs 尾
-  writeTileEntities(w, save); mark();               // [5] TE 尾
+  mark();                                           // [5] npcs 尾
+  writeTileEntities(w, save); mark();               // [6] TE 尾
   // ★SW-FX11（2026-09-10）：按压压力板段写真值（WF:3374-3386 Save——i32 数量 ×
   //  (i32 x, i32 y);曾恒 i32(0),存档点恰站压力板的机关重触发位丢失）
   {
     const plates = save.pressurePlates ?? [];
     w.i32(plates.length);
     for (const pp of plates) w.i32(pp.x).i32(pp.y);
-    mark();                                         // [6] pressurePlates 尾
+    mark();                                         // [7] pressurePlates 尾
   }
   // townManager（★SW-FX35：WF:3400-3404 SaveTownManager → TownRoomManager.Save,
   //  TownRoomManager.cs:94-106——i32 n + n×(i32 npcType,i32 roomX,i32 roomY)。
@@ -540,7 +551,7 @@ export function exportWld(save: SaveData): Uint8Array {
     const rooms = save.townRooms ?? [];
     w.i32(rooms.length);
     for (const r of rooms) w.i32(r.npc).i32(r.x).i32(r.y);
-    mark();                                         // [7] townManager 尾
+    mark();                                         // [8] townManager 尾
   }
   // bestiary（★SW-FX35：WF:3411-3416 SaveBestiary → BestiaryUnlocksTracker.Save,
   //  BestiaryUnlocksTracker.cs:14-19 序 Kills→Sights→Chats——
@@ -561,7 +572,7 @@ export function exportWld(save: SaveData): Uint8Array {
     for (const id of bs) w.str(id);
     w.i32(bc.length);
     for (const id of bc) w.str(id);
-    mark();                                         // [8] bestiary 尾
+    mark();                                         // [9] bestiary 尾
   }
   // creativePowers（★SW-FX35：WF:3427-3432 SaveCreativePowers → CreativePowerManager.
   //  SaveToWorld,CreativePowerManager.cs:125-137——每 IPersistentPerWorldContent 力
@@ -582,14 +593,14 @@ export function exportWld(save: SaveData): Uint8Array {
     w.bool(true).u16(12).f32(dSlider);
     w.bool(true).u16(13).bool(!!jp?.stopBiomeSpread);
     w.bool(false);
-    mark();                                         // [9] creativePowers 尾
+    mark();                                         // [10] creativePowers 尾
   }
   // footer(WF:1759):true+name+worldId——★SW-FX43（2026-09-12）：worldId 与 header
   //  同值（LoadFooter :3003-3015 读回比对 Main.ActiveWorldFileData.WorldId=header
   //  载入值,不符=BadFooter【整档拒载】;曾恒写 12345=潜拒载雷）。取值链=快照优先→
   //  header.worldId（自建=WorldGen.cs:11364 掷值/导入=原值）→ created-XOR 派生
   w.bool(true).str(save.header.name || 'World').i32(Number(fieldValue(save, WORLD_ID_FIELD)));
-  mark();                                           // [10] footer 尾
+  mark();                                           // [11] footer 尾(11 槽表外,仅流末标记不回写)
   // (2026-09-07 终版:幽灵格净化方案落地——存档在读档/生成边界已无幽灵,
   //  actDiff 恒空,无需任何私有附加段。历史:本日曾三易其稿(丢弃/转正/虚化/
   //  SBWGH 附加段),最终以「存读边界净化+inActive 位自然随档」对齐原版定稿)

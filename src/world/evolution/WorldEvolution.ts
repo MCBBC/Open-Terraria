@@ -2484,18 +2484,30 @@ export class WorldEvolution {
         case 633: toDirt = 57; plant = 637; plantChance = 2; break;
         case 226: plant = 61; plantChance = 10; toDirt = -1; break;
       }
+      // ★⑨（2026-09-18 生命果实报）：顶植物掷旗 flag=掷过即置（cs:74956-74971——
+      //    置位先于 PlaceTile,落位失败不影响;唯一短路=226 密度门 flag2）。case 60
+      //    门= `flag || genRand.Next(25) != 0 || liquid != 0`（cs:75013 字面,短路
+      //    位次同序:flag 真则 Next(25) 不掷）——上格有旧株(61/233 等)时 Next(25)
+      //    照掷,果/株经 PlaceJunglePlant 允许族覆写旧株。此前以「上格空」代旗 →
+      //    顶植物占位后该格整段停摆（长世界丛林地表 61 饱和=单向无 churn,原版靠
+      //    覆写持续刷新）→ 生命果/233 兜底双双永不落=用户实报机械后无果根因;
+      //    并修上格占用时的骰位差（原版掷 Next(25),本仓短路不掷）。
+      let topPlantFlag = false;
       if (plant !== -1 && !this.active(i, minJ) && this.rng() < 1 / plantChance) {
-        // 地下顶植物同受 PlaceTile→IsFit 锚门（原版 PlaceTile 唯一口,谱系/坡面一致拒绝）
-        if (!(sheet === 226 && this.tooManyJunglePlants(i, minJ)) && this.fitTopPlant(i, minJ, plant)) {
-          if (this.place1(i, minJ, plant, 0, plant === 61 ? 8 : 1)) {
-            // ★⑥ CopyPaintAndCoating(Main.tile[i,j])（cs:74971-74973 落位后漆继承）
-            this.copyPaintAndCoating(i, j, i, minJ);
+        if (!(sheet === 226 && this.tooManyJunglePlants(i, minJ))) {
+          topPlantFlag = true;
+          // 地下顶植物同受 PlaceTile→IsFit 锚门（原版 PlaceTile 唯一口,谱系/坡面一致拒绝）
+          if (this.fitTopPlant(i, minJ, plant)) {
+            if (this.place1(i, minJ, plant, 0, plant === 61 ? 8 : 1)) {
+              // ★⑥ CopyPaintAndCoating(Main.tile[i,j])（cs:74971-74973 落位后漆继承）
+              this.copyPaintAndCoating(i, j, i, minJ);
+            }
           }
         }
       }
-      // 丛林草花苞专段（cs:74480-74558 地下第二个 switch 的 case 60;两个【独立 if】
-      // ——238 检查无论成败继续 236 检查,非 else-if 串行）
-      if (sheet === 60 && !this.active(i, minJ) && this.rng() < 1 / 25
+      // 丛林草花苞专段（cs:74480-74558/1457 cs:75011-75094 地下第二个 switch 的
+      // case 60;两个【独立 if】——238 检查无论成败继续 236 检查,非 else-if 串行）
+      if (sheet === 60 && !topPlantFlag && this.rng() < 1 / 25
         && this.liquidAt(i, minJ) === 0) {
         // ★⑧（cs:75046-75094）：花苞/生命果/丛林植物全走 PlaceJunglePlant（本仓
         //    placeJunglePlant 1:1——2×2 允许族+底承 SolidTile+60+KillTile 覆写+

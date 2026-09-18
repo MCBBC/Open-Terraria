@@ -22,7 +22,7 @@
 //             IsPaintScraper                      ItemID.cs:254
 //             ExtractinatorMode                   ItemID.cs:1104
 //   - 方块集 Main.tileHammer（4 条）              Main.cs:7343-7346
-//             Main.tileAxe（16 条）               Main.cs:7157-7171
+//             Main.tileAxe（16 条）               Main.cs:7347-7362
 //   - 叶绿提取机兑换表                            ItemTrader.cs:82-108（TryGetTradeOption :66-80）
 //   - 玩家湿身 Collision.WetCollision             Collision.cs:1575-1656（Player.cs:27540 置位）
 //
@@ -31,6 +31,7 @@ import type { TileStore } from '../world/TileStore';
 import { sheetOf, vanillaItemIdOf } from './SmartCursor';
 import { CHLOROPHYTE_TRADES, EXTRACTINATOR_MODE } from '../world/Extractinator';
 import type { ItemDef } from '../data/items';
+import { TILE_HAMMER_SHEETS, TILE_AXE_SHEETS } from '../data/tiles';   // ★BJ158② 单源
 
 // ===================== 原版 ItemID.Sets 集合 =====================
 
@@ -60,15 +61,9 @@ const FLARE_GUN_USE_AMMO: Readonly<Record<number, number>> = { 930: AMMO_FLARE }
 const FLARE_AMMO_ITEMS: ReadonlySet<number> = new Set([931, 1614]);
 
 // ===================== 原版 Main.tileHammer / Main.tileAxe（以 sheet = 原版 tile id 表达） =====================
-
-/** Main.cs:7343-7346 tileHammer 全表（26 祭坛 / 695 / 31 暗影珠（猩红心=frameX≥36 同格样式）/ 696） */
-const TILE_HAMMER_SHEETS: ReadonlySet<number> = new Set([26, 31, 695, 696]);
-
-/** Main.cs:7157-7171 tileAxe 全表（树 5 / 蘑菇树 72 / 仙人掌 80 / 倒木 488 / 倒木回响 704 /
- *  棕榈树 323 / 樱花树 596 / 黄柳树 616 / 灰烬树 634 / 宝石树 583-589） */
-const TILE_AXE_SHEETS: ReadonlySet<number> = new Set([
-  5, 72, 80, 488, 704, 323, 596, 616, 634, 589, 584, 588, 586, 587, 585, 583,
-]);
+// ★BJ158②（2026-09-18）：两表本地副本拆除,收编 data/tiles.ts 单源 TILE_HAMMER_SHEETS /
+//  TILE_AXE_SHEETS（此前 SmartSelect×SmartCursor 两文件四本副本,注释行号亦互相漂移;
+//  消费面 :416 锤/:419 斧策略链改走单源——tests/tile-domain-sentinel §6 金标钉死）。
 
 /** 策略号语义（SmartSelect_GetToolStrategy 各分支的 toolStrategy 值） */
 export const STRATEGY = {

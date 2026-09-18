@@ -284,30 +284,34 @@ describe('②a placeAcornSapling 豁免半边（tileCut∪BWP 可置入）', () 
     expect(st.type[st.idx(8, 20)]).toBe(STONE);
   });
 
-  it('绳索支：下延落入可割草丛格 → 绳写入该格后止步（CheckRopeUsability :41856 retarget）', () => {
+  it('绳索支 retarget 落点=可割草丛格（:41856 cut retarget）→ flag2 KillTile 清格后续 1 格（★BJ157 单格面重写）', () => {
     const w = mkWorld();
     const st = w.store;
-    st.setTileSilent(8, 16, TALLGRASS, 0, 0);           // 下延路径上的可割株
+    for (let y = 12; y <= 15; y++) st.setTileSilent(8, y, ROPE);   // 既有绳列
+    st.setTileSilent(8, 16, TALLGRASS, 0, 0);           // 列底可割株（cut→retarget 落点）
     const drops: Drop[] = [];
     const { g } = shell(w, drops);
     (g as unknown as { tryPlace: (x: number, y: number, d: (typeof ITEM_DEFS)[number]) => void })
-      .tryPlace(8, 12, defOf(965));
-    expect(st.type[st.idx(8, 12)]).toBe(ROPE);
-    expect(st.type[st.idx(8, 16)]).toBe(ROPE);          // ★绳写入豁免格（旧版在此 break 漏放）
-    expect(st.type[st.idx(8, 17)]).toBe(0);             // 走查止于首个非绳格（不穿格续延）
+      .tryPlace(8, 13, defOf(965));                     // 点列中段（active 绳格）
+    expect(st.type[st.idx(8, 12)]).toBe(ROPE);          // 原列不动（走查不原地写）
+    expect(st.type[st.idx(8, 15)]).toBe(ROPE);
+    expect(st.type[st.idx(8, 16)]).toBe(ROPE);          // ★绳写入豁免格（retarget+KillTile 清株后续 1 格）
+    expect(st.type[st.idx(8, 17)]).toBe(0);             // 恒 1 格（不穿格续延=级联摘除）
   });
 
-  it('绳索支：下延落入实心格 → 止步不入（:41835 走查门）', () => {
+  it('绳索支 retarget 落点=实心格 → 不 retarget 不置（:41835 走查门+:41855 落点门）', () => {
     const w = mkWorld();
     const st = w.store;
+    for (let y = 12; y <= 15; y++) st.setTileSilent(8, y, ROPE);
     st.setTileSilent(8, 16, STONE);
     const drops: Drop[] = [];
     const { g } = shell(w, drops);
     (g as unknown as { tryPlace: (x: number, y: number, d: (typeof ITEM_DEFS)[number]) => void })
-      .tryPlace(8, 12, defOf(965));
-    expect(st.type[st.idx(8, 15)]).toBe(ROPE);          // 空域照铺
+      .tryPlace(8, 13, defOf(965));
+    expect(st.type[st.idx(8, 15)]).toBe(ROPE);          // 列原样（走查止于实心=非 cut→不 retarget）
     expect(st.type[st.idx(8, 16)]).toBe(STONE);         // 实心格原样
     expect(st.type[st.idx(8, 17)]).toBe(0);
+    expect(drops).toEqual([]);                          // 无破坏（点击格=active 绳→主门拒,零变更）
   });
 });
 

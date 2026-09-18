@@ -1184,6 +1184,7 @@ export class Boomerang extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: this.ai0 !== 1,
       dropThrough: true,
     };
@@ -1783,6 +1784,7 @@ export class SpearProj extends Entity {
       const body = {
         x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
         onGround: false, hitWall: false, hitHead: false, collideY: false,
+        hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       };
       moveAndCollide(body, game.world, this.vx * dragG, this.vy * dragG);
       this.x = body.x; this.y = body.y;
@@ -1938,6 +1940,8 @@ export class AnchoredProj extends Entity {
   /** 近战系（吃武器浸剂）——23 鱼叉原版 ranged=true 不吃近战浸剂 */
   meleeProj: boolean;
   tileCollide = true;
+  /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true） */
+  hoik = true;
   private prm: AnchoredParams;
   /** ai[0]:-1 未出生 / 0 出膛 / 1 返回 */
   a0 = -1;
@@ -2482,6 +2486,7 @@ export class MolotovProj extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: this.timeLeft > 3, dropThrough: true,
     };
     moveAndCollide(body, game.world, lvx * drag68, lvy * drag68);
@@ -2825,6 +2830,7 @@ export class CounterweightProj extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: true, dropThrough: !(this.ai0 === -2),
     };
     // ★水中位移阻尼（HandleMovement :17721-17764,环绕/脱离态 tileCollide=true 适用）
@@ -2993,6 +2999,8 @@ export class YoyoProj extends Entity {
   armorPen = 0;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
+  /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true） */
+  hoik = true;
   /** 持续按住判定（原版 channel：按住时悠悠球滞留追光标） */
   private channel: () => boolean;
   /** 光标世界坐标 getter */
@@ -4518,6 +4526,7 @@ export class FlailProj extends Entity {
         x: this.x, y: this.y, w: this.w, h: this.h,
         vx: this.vx, vy: this.vy,
         onGround: false, hitWall: false, hitHead: false, collideY: false,
+        hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
         tileCollide: true, dropThrough: true,
       };
       moveAndCollide(body, world, lvx * dragF, lvy * dragF);
@@ -4957,6 +4966,7 @@ export class FlaironSpike extends Entity {
         x: this.x, y: this.y, w: this.w, h: this.h,
         vx: lvx0, vy: lvy0,
         onGround: false, hitWall: false, hitHead: false, collideY: false,
+        hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
         tileCollide: true, dropThrough: true,
       };
       // ★水中位移阻尼（HandleMovement :17721-17764,tileCollide=true 适用）——速度场
@@ -5170,6 +5180,7 @@ export class FlaironHeadProj extends Entity {
       const body = {
         x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
         onGround: false, hitWall: false, hitHead: false, collideY: false,
+        hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
         tileCollide: true, dropThrough: true,
       };
       // ★水中位移阻尼（HandleMovement :17721-17764,出程 tileCollide=true 适用）
@@ -5956,6 +5967,7 @@ export class GrenadeProj extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: true, dropThrough: true,
     };
     moveAndCollide(body, game.world, this.vx * drag, this.vy * drag);
@@ -6521,6 +6533,7 @@ export class GrenadeProj extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       stepUp: false, dropThrough: false, stepDownGate: 'gravity' as const,
     };
     moveAndCollide(body, game.world, this.vx * drag, this.vy * drag);
@@ -6770,6 +6783,7 @@ export class GlowstickProj extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: true, dropThrough: true,
     };
     moveAndCollide(body, game.world, this.vx * dragGl, this.vy * dragGl);
@@ -7106,6 +7120,7 @@ export class TorchGodProj extends Entity {
         x: this.x, y: this.y, w: this.w, h: this.h,
         vx: this.vx, vy: this.vy,
         onGround: false, hitWall: false, hitHead: false, collideY: false,
+        hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
         tileCollide: !!this.tileCollide, dropThrough: true,
       };
       // 水中位移阻尼（HandleMovement :17721-17764 湿支只在 tileCollide 时进）——
@@ -7415,6 +7430,7 @@ export class DaybreakFlare extends Entity {
       x: this.x, y: this.y, w: this.w, h: this.h,
       vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: true, dropThrough: true,
     };
     // ★水中位移阻尼（HandleMovement :17721-17764,飞行相 tileCollide=true 适用）——
@@ -7879,6 +7895,7 @@ export class RainCloudProj extends Entity {
       this.projId, !!projectileData(this.projId)?.ignoreWater);
     const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: true, dropThrough: false };
     // 水中位移阻尼（HandleMovement :17721-17764 湿支,tileCollide=true 消费）——
     // 乘进 dx/dy 位移入参,body.vx/vy 碰撞调整字段原样回读（勿在采纳处除回）
@@ -8003,6 +8020,7 @@ export class RainCloudProj extends Entity {
       }
       const body = { x: this.x, y: this.y, w: this.w, h: this.h, vx: this.vx, vy: this.vy,
         onGround: false, hitWall: false, hitHead: false, collideY: false,
+        hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
         tileCollide: true, dropThrough: false };
       moveAndCollide(body, game.world, this.vx, this.vy);
       this.x = body.x; this.y = body.y;
@@ -8184,6 +8202,7 @@ export class CrystalSerpentProj extends Entity {
     //    dropThrough=true 穿平台;受阻 = 通用默认支 HitTiles+Kill(:18160-18166)
     const body = { x: this.x + 11, y: this.y + 11, w: 10, h: 10, vx: this.vx, vy: this.vy,
       onGround: false, hitWall: false, hitHead: false, collideY: false,
+      hoik: true,   // ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径）
       tileCollide: true, dropThrough: true,
       liqFactor: projWaterDragFactor(this) };
     moveAndCollide(body, game.world, this.vx, this.vy);

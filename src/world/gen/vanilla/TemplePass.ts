@@ -7,7 +7,7 @@
 import { TileStore } from '../../TileStore';
 import { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, FORBIDS_SLOPING_SHEETS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 // ★1457 对齐档 2：砖线（makeTemple_GenerateBricks）从 1457 语义存档即插接线
 import { makeTempleGenerateBricks } from './rollback1457/TempleBricks.1457';
@@ -49,8 +49,8 @@ const SOLID_TOP_TP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 2
 const PLATFORMS_TP = new Set([19, 427, 435, 436, 437, 438, 439]);
 /** TileID.Sets.Boulders（TileID.cs:195） */
 const BOULDERS_TP = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
-/** ForbidsSloping（cs:81437）：21/26/77/88/235/237/441/467/468/470/475/488/597 */
-const FORBIDS_SLOPING = new Set([21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597]);
+// ★BJ158①（2026-09-18）：ForbidsSloping（cs:81437）sheet 域本地副本拆除——收编
+//  data/tiles.ts 单源 FORBIDS_SLOPING_SHEETS（smoothSlopeTP 上格门 sheetOfTP 域消费）。
 /** CanPoundTile 直拒族（cs:81434 switch） */
 const CANT_POUND = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484]);
 /** IsATreeTrunk（TileID.cs:161）——CanKillTile 树干保护门（本语境可达子集） */
@@ -128,7 +128,7 @@ function slopeTileTP(st: TileStore, x: number, y: number): void {
   if (sh === 190 || sh === 30) return;                       // isGeneratingOrLoadingWorld 分支
   if (y >= 1) {
     const u = st.idx(x, y - 1);
-    if (st.flags[u] && FORBIDS_SLOPING.has(sheetOfTP(st.type[u]!))) return;
+    if (st.flags[u] && FORBIDS_SLOPING_SHEETS.has(sheetOfTP(st.type[u]!))) return;
   }
   if (!canKillTileTP(st, x, y)) return;
   st.half[i] = 0;

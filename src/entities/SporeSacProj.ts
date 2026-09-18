@@ -310,16 +310,18 @@ export class SporeGasCloud extends Entity {
     // penetrate −1 = 免疫梯首支内层真（:14033-14037）→ 命中写 immune[owner]=0（清窗）
     // +组行 :14036;淡出段 damage 未清
     //（原版 AI_106 无 damage=0 支）→ 保持结算。节流=组表 SPORE_GAS_IMMUNE
-    //（UseGroupStaticImmunity(569) :6219——三变体共行）。★红蓝-J1 审计（2026-09-18）
+    //（UseGroupStaticImmunity(569) :6219——三变体共行,idStaticNPCHitCooldown=10
+    // :10678-10683）。★红蓝-J1 审计（2026-09-18）
     // 勘正:曾 per-instance hitCd——伤害总量被 Enemy.hurt 内 iframes 全局窗掩蔽未溢出,
     // 但门位偏离原版（原版=immune[owner] 清零+组行 :14031-14037 独扛节流）;归组行
     // 语义后判别面=tests/sw-fx1-accessories「组共享 IDStatic」
     // （组表=1 次 hurt 调用,per-instance 变异面=15）。
-    // ★拍板#1A 备案债（2026-09-18）：本调用 hitPierce 缺省 0 → Enemy.hurt 写
-    // iframes=10;原版气团命中写 immune[owner]=0（清窗 :14035,组窗由组行独扛）——
-    // 仓内写 10=对其它 pierce=0 兵器多开 10t 全局窗（GC1 域近似偏差,勿扩行为面,
-    // 登记不修;最小对齐=hitPierce 传 −2 档并改写「清 0」语义,待专项）。
-    dealContacts(this, game, SPORE_GAS_IMMUNE, 10);
+    // ★红蓝-L1②（2026-09-18,拍板#1A 备案债清偿）：hitPierce=−2（BJ140 档）——免疫门
+    // 照走（:12636 内环,iframes>0 拒收）+命中【不写帧】（Enemy.hurt pierce!==−2 才写
+    // :14187 通用档）=净等价原版 immune[owner]=0 清窗（:14035——门已保证进此路径时
+    // iframes==0,不写≡写 0）。曾缺省 0 写 iframes=10=对其它 pierce=0 兵器多开 10t
+    // 全局窗（GC1 域近似偏差）——变异面=tests/sw-fx1-accessories「气团命中不开全局窗」。
+    dealContacts(this, game, SPORE_GAS_IMMUNE, 10, undefined, undefined, -2);
   }
 
   draw(r: Renderer, _cam: Camera): void {

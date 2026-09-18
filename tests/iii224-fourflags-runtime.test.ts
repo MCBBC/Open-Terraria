@@ -1,6 +1,6 @@
 // ★IIIII224 四旗运行时机制清扫——选曲链 remix 分支 + 群系计数 remix 表 + 锚定回归。
 // 对照 Main.cs:12814-13154（UpdateAudio_DecideOnNewMusic 1458 行号）与 SceneMetrics.cs:605-610。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { pickMusic, newMusicState, MUSIC, type MusicInput } from '../src/data/Music';
 
 function base(over: Partial<MusicInput>): MusicInput {
@@ -30,9 +30,32 @@ describe('IIIII224 remix 选曲分支（Main.cs:12818-13154）', () => {
     expect(night).toBe(MUSIC.SpaceNight);
   });
 
-  it('非 remix 地表森林不受影响（零扰动）', () => {
-    const inp = base({ isDay: true });
-    expect(pickMusic(inp)).toBe(MUSIC.OverworldDay);
+  it('非 remix 地表森林不受影响（零扰动;dayMusic 粘性槽 1/18 掷币双臂钉种——★BJ158④）', () => {
+    // Main.cs:13113-13133 白天 1/18 粘性随机（Music.ts:404 `Math.random()<0.5`）——
+    // 断言单臂化后 50/50 flake（探针 4 跑 1 红）。照 slime-water-pocket 判例,Math.random
+    // 家族须统计法或播种:此处 spy 钉种,双臂各验一次 + 粘性槽已掷不重掷,flake 消除。
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const inp = base({ isDay: true });
+      expect(pickMusic(inp)).toBe(MUSIC.OverworldDay);          // 掷 0 → 臂 1
+      rnd.mockReturnValue(0.99);
+      expect(pickMusic(inp)).toBe(MUSIC.OverworldDay);          // state.dayMusic 已掷=粘死,不重掷
+    } finally { rnd.mockRestore(); }
+    const rnd2 = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      expect(pickMusic(base({ isDay: true }))).toBe(MUSIC.OverworldDayAlt);  // 掷 1 → 臂 2（仍非 remix 曲族=零扰动语义）
+    } finally { rnd2.mockRestore(); }
+  });
+
+  it('非 remix 地下 4/31 粘性槽双臂钉种（Music.ts:371 ugMusic——★BJ158④ 姊妹槽同病预防）', () => {
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      expect(pickMusic(base({ isDay: true, centerY: 950 * 16 }))).toBe(MUSIC.Underground);
+    } finally { rnd.mockRestore(); }
+    const rnd2 = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
+      expect(pickMusic(base({ isDay: true, centerY: 950 * 16 }))).toBe(MUSIC.UndergroundAlt);
+    } finally { rnd2.mockRestore(); }
   });
 
   it('remix 血月岩层下非双邪恶 → 2（:12826）', () => {

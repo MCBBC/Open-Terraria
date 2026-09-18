@@ -12,11 +12,17 @@
 //     Loadouts(≥262)/voice/_pendingRefunds(≥300)/oneTimeDialogues(≥310)对本仓
 //     角色态无消费面(loadouts 是 1.4.5 三套装备方案,导入主装备即够),且
 //     CreativePowerManager.LoadToPlayer 是变长注册表流,不读=不必移植
-// 产物:Appearance + SaveData['player'](磁盘稳定 id 形——物品经
-//   ITEM_STABLE_OF_INTERNAL 原版 netId→稳定 id;buff [vanillaId, 秒],
-//   plr 的 buffTime 为 tick,/60 换算。形态契约见 CharacterStore.getState 注)
+// 产物:Appearance + SaveData['player'](磁盘稳定 id 形——物品经 stableOf 原版
+//   netId→稳定 id,vi_ 物品稳定 id≡原版 vid（域勘误见 stableOf 注）;buff
+//   [vanillaId, 秒],plr 的 buffTime 为 tick,/60 换算。形态契约见
+//   CharacterStore.getState 注)
 import { BinaryReaderLE } from '../wld/BinaryReaderLE';
-import { ITEM_STABLE_OF_INTERNAL, ITEM_INTERNAL_OF_STABLE } from '../data/items';
+import {
+  ITEM_STABLE_OF_INTERNAL,
+  ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID,
+} from '../data/items';
+// ★IDG-1（2026-09-18）：写向文件禁加载向表——ITEM_INTERNAL_OF_STABLE/ITEM_DEFS 已随
+//   netIdOf 等价改写摘除（见 netIdOf 头注）;stableOf 键链（vid→键→内部 id）不受影响。
 import type { Appearance } from '../player/Appearance';
 import type { SaveData } from './serialize';
 
@@ -141,10 +147,31 @@ export interface PlrImported {
 
 type SavedItem = SaveData['player']['inventory'][number];
 
-/** 原版 netId → 本仓稳定 id(未知 id=0 空物品——与原版 netDefaults(0) 同归宿) */
+/** 原版 netId → 本仓稳定 id(未注册 id=0 空物品——与原版 netDefaults(0) 同归宿)。
+ *  ★红蓝-L2②（2026-09-18 域勘误;★同日时间线改真——BJ146 旧叙事「历史导出=内部
+ *  注册序错位域」被用户实证推翻）：真档 .plr 物品 id=原版 type/netID(vid) 域
+ *  【直写正确】——外部实证=用户私有历史档 Vinlic.plr(2026-09-18 parsePlr 实测,
+ *  用户私有不入仓,结论记于 tests/plr-import.test.ts 头注):armor[10-12]=5802/
+ *  5803/5804 雪域家具套连续 vid(反编译 1457 ItemID.cs SnowCandle=5802 族同证)、
+ *  inv[43]=6037 尖刺沙发、inv[5]=1293 蜥蜴电池、×1834 千级堆叠——全落合法 vid
+ *  且成真实背包分布,非错位域。反编译真域证据不变（Player.cs Serialize
+ *  :55467-55500 写 `.type`、LoadPlayer :55998-56010 `netDefaults(num)`,
+ *  ≥ItemID.Count 归 0）,与 ITEM_DEFS 注册序【内部 id】完全无关
+ *  （vi_109_mana_crystal=0 号位;实测 6177 个注册 vid 与 ITEM_STABLE_OF_INTERNAL
+ *  裸下标重合率 0/6177）。错位面=【导出方向】netIdOf 的 ITEM_INTERNAL_OF_STABLE
+ *  .get 映射（2026-09-06 b369a150 随 exportPlr 引入,至本修复前的窗口内导出才会
+ *  错位;同型案=SW-BO1 WldExport 箱侧,见 WldExport.ts:430 勘误注「vid 4 铁阔剑
+ *  内部=1327」）。旧实现 `ITEM_STABLE_OF_INTERNAL[netId]` 把 netId(=vid)当内部
+ *  id 用=真档导入全量错件（netID 1 铁镐→稳定 1291 生命果）,自回环因
+ *  stableOf∘netIdOf 恒等掩盖（夹具与断言同表同错）。现走 WldImport 箱读同构两步链
+ *  （WldImport.ts:765-767）：vid→vi_ 键→内部 id→稳定 id;vi_ 物品=恒等回写,
+ *  与历史 vid 直写行为等价（零回滚）;未注册 vid 归 0=宁缺不错（同 SaveFile.ts:263
+ *  越界政策） */
 function stableOf(netId: number): number {
   if (netId <= 0) return 0;
-  return ITEM_STABLE_OF_INTERNAL[netId] ?? 0;
+  const key = VANILLA_ITEM_KEY_BY_ID[netId];
+  const internal = key !== undefined ? ITEM_BY_KEY[key] : undefined;
+  return internal !== undefined ? (ITEM_STABLE_OF_INTERNAL[internal] ?? 0) : 0;
 }
 
 /** 读一个 Item 形并按稳定 id 形落地。
@@ -475,9 +502,33 @@ export function aes128EcbEncrypt(input: Uint8Array): Uint8Array {
   return out;
 }
 
-/** 稳定 id → 原版 netId(未注册/派生件写 0=空气,与原版 netDefaults(0) 同归宿) */
+/** 稳定 id → 原版 netId(未注册/派生件写 0=空气,与原版 netDefaults(0) 同归宿)。
+ *  ★红蓝-L2②（2026-09-18 域勘误,与 stableOf 同案）：vi_ 物品稳定 id≡原版 vid
+ *  （items.ts 稳定表按 vi_<id>_ 前缀直取）,导出 .plr 须写回该 vid;SW 自创/派生件
+ *  （PRIV 10000+/place_v 20000+）无原版对应=0。旧实现
+ *  `ITEM_INTERNAL_OF_STABLE.get()` 返回【内部 id】直写文件——该错映射 2026-09-06
+ *  （b369a150）随 exportPlr 导出面出生即接（git 考古:同提交新增 netIdOf/
+ *  writeEquip/writeItem,SW 导出无 vid 直写历史期）,至本修复前窗口内导出的档
+ *  才有错位风险;真档域=vid 直写（用户私有历史档实证,详见 stableOf 头注）。
+ *  SW-BO1 已在 WldExport 箱侧定谳的同型反向误用（「加载方向」表用于写盘）,此处系
+ *  幸存孪生;自回环恒等掩盖（写内部 id→读回同表反演=原 stable,字节不漂）。
+ *  真值面:vid 50 写内部 18、vid 1291 写内部 1（原版读成铁镐）。判据=def 键
+ *  vi_<vid>_ 且 vid≡stable 才回写——修复后与 vid 直写等价（历史正确行为,零回滚）。
+ *  ★IDG-1（2026-09-18,BJ150 §6 处方 id 域守卫,tools/id-domain-guard.mjs）：本文件
+ *  是写向文件,代码禁引用加载向表 ITEM_INTERNAL_OF_STABLE——原「get(stable)→def→
+ *  vi_ 门」实现等价改写为「vid 注册表→键→def→写向表恒等门」：VANILLA_ITEM_KEY_BY_ID
+ *  是 vid→键权威（items.ts :1100),vi_ def 的 ITEM_STABLE_OF_INTERNAL[internal]≡vid
+ *  由稳定表构建式保证,故恒等门 `=== stableId` 与旧 `/^vi_(\d+)_/` 门逐值同判:
+ *  · vid 有 vi_ def → 旧 get 命中首 def 且门过 → vid;新链命中同一 vid 的键 → 门过
+ *    → vid（同 vid 多 def（snake 桥接+camel 权威双注册族）两实现均判 vid,输出同）;
+ *  · 未注册 vid/SW 私有 10000+/place_v 20000+ → 两实现均 0;
+ *  · 退役漏斗灌入项（itemMigration.ts 旧稳定号→vi_ 内部 id,如 10140 蜂巢块）→
+ *    旧 get 命中但门 vid≠旧号失败 → 0;新 VANILLA_ITEM_KEY_BY_ID[旧号] 缺 → 0。 */
 function netIdOf(stableId: number): number {
-  return stableId > 0 ? (ITEM_INTERNAL_OF_STABLE.get(stableId) ?? 0) : 0;
+  if (stableId <= 0) return 0;
+  const key = VANILLA_ITEM_KEY_BY_ID[stableId];
+  const internal = key !== undefined ? ITEM_BY_KEY[key] : undefined;
+  return internal !== undefined && ITEM_STABLE_OF_INTERNAL[internal] === stableId ? stableId : 0;
 }
 
 interface PlrItem { id: number; stack: number; favorited?: boolean; prefix?: number }

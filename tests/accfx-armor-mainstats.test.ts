@@ -32,6 +32,11 @@ const ARMOR_SLOT: Record<number, 0 | 1 | 2> = {
   2763: 0, 2764: 1, 2765: 2,
   4982: 0, 4983: 1, 4984: 2,
   1834: 2,
+  // ---- 组A 单件面批（2026-09-18）----
+  268: 0, 3109: 0, 4008: 0,   // 潜水头盔/夜视头盔/超亮头盔
+  410: 1, 411: 2, 5589: 1, 5590: 2,   // 挖矿衣/裤 + 勘探者上衣/裤装（pickSpeed）
+  5001: 2, 3770: 2,           // 月亮领主腿/神灵诅咒
+  1209: 2, 2277: 1,           // 钯金护腿（crit 面）/稽古衣
 };
 
 function bareStats() {
@@ -177,6 +182,42 @@ describe('★armorStat 甲件主属性环（equipStats 盔甲三件消费 vanill
     expect(s.hpPerSec).toBeCloseTo(base.hpPerSec);          // 1001 无 life 面
     expect(s.sentrySlots).toBe(base.sentrySlots);           // 无召唤面甲不触 sumFx sentry
   });
+
+  // ---- 组A 单件面批（2026-09-18）行为旗/折扣池面 ----
+  it('钯金护腿 1209：三系 crit+1（:13613-13615 crit++——此前缺,accfx 行补）', () => {
+    const s = withPiece(1209);
+    expect(s.critMelee).toBe(base.critMelee + 1);
+    expect(s.critRanged).toBe(base.critRanged + 1);
+    expect(s.critMagic).toBe(base.critMagic + 1);
+    expect(s.minionDmg).toBeCloseTo(base.minionDmg + 0.02);   // SUMMON_GEAR dmg 面
+  });
+
+  it('矿工件 pickSpeed 折扣池：410/411/5589/5590 各 -0.1（:13944-13947）→ equipStats.pickSpeedOff', () => {
+    expect(withPiece(410).pickSpeedOff).toBeCloseTo(base.pickSpeedOff + 0.1);
+    expect(withPiece(411).pickSpeedOff).toBeCloseTo(base.pickSpeedOff + 0.1);
+    expect(withPiece(5589).pickSpeedOff).toBeCloseTo(base.pickSpeedOff + 0.1);
+    expect(withPiece(5590).pickSpeedOff).toBeCloseTo(base.pickSpeedOff + 0.1);
+  });
+
+  it('夜视/超亮头盔甲面旗：3109/4008 nightVision=true（:13408-13411,BEHAVIOR_FX 通道）', () => {
+    expect(withPiece(3109).nightVision).toBe(true);
+    expect(withPiece(4008).nightVision).toBe(true);
+  });
+
+  it('月亮领主腿 5001：moonLordLegs 旗 + extraFall+10（:19730-19734;move+0.25 走件面）', () => {
+    const s = withPiece(5001);
+    expect(s.moonLordLegs).toBe(true);
+    expect(s.extraFall).toBe(base.extraFall + 10);
+    expect(s.moveMult).toBeCloseTo(base.moveMult + 0.25);
+  });
+
+  it('神灵诅咒 3770：slowFall 旗（:13360-13362,与羽落 buff 同字段并集）', () => {
+    expect(withPiece(3770).slowFall).toBe(true);
+  });
+
+  it('潜水头盔 268 甲面（GrantArmorBenefits 三件扫描环——本就经 BEHAVIOR_FX:122 接通,钉死防回归）', () => {
+    expect(withPiece(268).divingHelm).toBe(true);
+  });
 });
 
 describe('★数据面金标（json 行值 ≡ 1457 decompile;提取器漏标面已补）', () => {
@@ -195,7 +236,7 @@ describe('★数据面金标（json 行值 ≡ 1457 decompile;提取器漏标面
     expect(FX['2279'].manaCostOff).toBeCloseTo(0.1);    // :13406 吉普赛长袍 GypsyRobe
   });
 
-  it('SUMMON_GEAR 甲件 minionDamage 面十二件（1457 if-chain 实读,提取器不覆盖 minionDamage 模式）', () => {
+  it('SUMMON_GEAR 甲件 minionDamage 面十四件（1457 if-chain 实读,提取器不覆盖 minionDamage 模式）', () => {
     expect(SUMMON_GEAR[403]).toMatchObject({ dmg: 0.08 });    // :13567
     expect(SUMMON_GEAR[552]).toMatchObject({ dmg: 0.07 });    // :13713
     expect(SUMMON_GEAR[4901]).toMatchObject({ dmg: 0.07 });   // :13713
@@ -208,6 +249,8 @@ describe('★数据面金标（json 行值 ≡ 1457 decompile;提取器漏标面
     expect(SUMMON_GEAR[792]).toMatchObject({ dmg: 0.03 });    // :13470 三件共支
     expect(SUMMON_GEAR[375]).toMatchObject({ dmg: 0.03 });    // :13511
     expect(SUMMON_GEAR[379]).toMatchObject({ dmg: 0.07 });    // :13534
+    expect(SUMMON_GEAR[2277]).toMatchObject({ dmg: 0.05 });   // :13390 稽古衣（组A 批 2026-09-18 补）
+    expect(SUMMON_GEAR[4983]).toMatchObject({ dmg: 0.05 });   // :13728 水晶刺客上衣（同批补）
   });
 
   it('甲件环/单源互斥不变式：SUMMON_GEAR 已覆盖字段与 accfx 行【同值】（3776/3777/3778/1834;armorStat 环字段级优先记 0 免双计）', () => {
@@ -221,5 +264,21 @@ describe('★数据面金标（json 行值 ≡ 1457 decompile;提取器漏标面
         }
       }
     }
+  });
+
+  // ★BJ157⑤ 禁戒三件单件面全量值锁（组A lane 终核,2026-09-18）：
+  // 1457 Player.cs GrantArmorBenefits :13372-13388（1458 :13367-13379 同相,零变更）——
+  //   3776 magicDamage+0.15 ∧ minionDamage+0.15 / 3777 statManaMax2+40 ∧
+  //   minionDamage+0.1 ∧ maxMinions++ / 3778 statManaMax2+40 ∧ magicDamage+0.1 ∧
+  //   maxMinions++。本表 SUMMON_GEAR 承载全四字段（accfx 提取器不覆盖
+  //   minionDamage/maxMinions 模式——其行只含子集,消费环字段级互斥免双计）。
+  it('BJ157⑤ 禁戒三件单件面全量值锁（3776/3777/3778 → Player.cs:13372-13388）', () => {
+    expect(SUMMON_GEAR[3776]).toEqual({ dmg: 0.15, dmgMagic: 0.15 });
+    expect(SUMMON_GEAR[3777]).toEqual({ slot: 1, dmg: 0.10, mana: 40 });
+    expect(SUMMON_GEAR[3778]).toEqual({ slot: 1, mana: 40, dmgMagic: 0.10 });
+    // 死键子集面（accfx 行=提取器同源,重叠字段同值由上方不变式锁定）
+    expect(FX['3776']).toEqual({ dmgMagic: 0.15 });
+    expect(FX['3777']).toEqual({ mana: 40 });
+    expect(FX['3778']).toEqual({ mana: 40, dmgMagic: 0.1 });
   });
 });

@@ -462,6 +462,8 @@ export function treatedAsABossForRainbowBoulders(
 
 export class RollingBoulder extends Entity {
   w = 31; h = 31;
+  /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true） */
+  hoik = true;
   /** 原版弹 id（Atlas: vanilla/Projectile_{id}.png） */
   readonly projId: number;
   /** timeLeft 基线（vanilla 缺省 3600,P.cs:789;1458 :789 同）。★SW-BJ97/RB22a 债2

@@ -1093,6 +1093,42 @@ export function doorSmashable(internalId: number): boolean {
   return TILE_CUT_SHEETS.has(sh) || DOOR_SMASH_SHEETS.has(sh);
 }
 
+// ===================== WorldGen.ForbidsSloping 双域单源（★BJ158① 2026-09-18） =====================
+// 原版 WorldGen.ForbidsSloping（1457 WorldGen.cs:82022-82039 switch 全 13 型）——
+// CanPoundTile 上格禁坡表。此前全仓 6 处本地副本两名双域：sheet 裸值副本
+// （Game.canPoundTile 局部集/TrackPass.FORBIDS_SLOPING_SHEETS/FinalCleanupPass.
+// FORBIDS_SLOPING/TemplePass.FORBIDS_SLOPING）×内部 id 副本（HalfBrickPass.
+// idsByVanillaSheet 产物/Mounts.idsWithSheets 产物）——同一语义集合六本账，错域
+// 写入=BJ154-T 同款危险失效（752/761 撞号，见 tests/tile-domain-sentinel §1）。
+// 本处=唯一权威：SHEETS=sheet 域原版型集；IDS=内部 id 域镜像（TILE_DEFS 全表
+// 按 vanilla.sheet 平移派生，与旧 idsByVanillaSheet（TILE_BY_KEY 键）/idsWithSheets
+// （数组下标键）两习语逐值全等已探针定谳，13 id：16,67,160,175,188,199,220,242,
+// 256,288,375,380,397——tests/tile-domain-sentinel §6 永久钉死）。
+export const FORBIDS_SLOPING_SHEETS: ReadonlySet<number> = new Set([
+  21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597,
+]);
+/** ForbidsSloping 内部 id 域镜像（键=TILE_DEFS 注册序；禁以 sheet 裸值查询） */
+export const FORBIDS_SLOPING_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (FORBIDS_SLOPING_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+
+// ===================== Main.tileHammer / Main.tileAxe 单源（★BJ158② 2026-09-18） =====================
+// 智能光标/智能选择可锤/可采表。此前 Game.TILE_AXE_SHEETS/TILE_HAMMER_SHEETS(导出)、
+// SmartSelect.TILE_HAMMER_SHEETS/TILE_AXE_SHEETS 与 SmartCursor.HAMMER_TILES/
+// TILE_AXE_SHEETS_SC 三文件六本副本（注释行号亦已互相漂移：同一张 tileAxe 表一处写
+// :7157-7171、一处写 :7347-7362——后者为真）——收编本处唯一权威（Game 副本由 IDG-T2
+// 家清单收编时钓出），消费面均改走本表（tests/tile-domain-sentinel §6b 金标钉死）。
+/** Main.tileHammer 全表（Main.cs:7343-7346 全 4 条赋值）——sheet 域 */
+export const TILE_HAMMER_SHEETS: ReadonlySet<number> = new Set([26, 695, 31, 696]);
+/** Main.tileAxe 全表（Main.cs:7347-7362 全 16 条赋值）——sheet 域 */
+export const TILE_AXE_SHEETS: ReadonlySet<number> = new Set([
+  5, 72, 80, 488, 704, 323, 596, 616, 634, 589, 584, 588, 586, 587, 585, 583,
+]);
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });

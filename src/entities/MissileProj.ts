@@ -761,8 +761,12 @@ export class MagicMissileProj extends Entity {
       } else if (this.projId === 34 && this.mode === 1) {
         this.homingId = -1;
       }
-      // 幽灵套吸血（Projectile.cs:12883-12888：magic 弹 ghostHeal；numHits 含本次）
-      game.applyLifeSteal?.('ghost', Math.round(dmg), this.pierceInit - this.pierce + 1,
+      // 幽灵套吸血（Projectile.cs:13877-13879：magic 弹 ghostHeal）。★BJ157-②：numHits
+      //  = 此前受理命中数（:14263 numHits++ 在 proc 块【后】⇒ 首跳读 0 率 0.20;旧
+      //  「numHits 含本次」+1 系 off-by-one——首跳 0.15）。pierceInit−pierce = 已递减
+      //  次数（本跳递减在下方 :784,读点未减）=此前命中数;同敌 hitCd 12t 再命中每跳
+      //  递减亦计入（原版 numHits 同相;城镇 NPC 递减支亦计入=原版 Damage_PVE_Inner 同链）
+      game.applyLifeSteal?.('ghost', Math.round(dmg), this.pierceInit - this.pierce,
         this.x, this.y, true);
       // ★GB1（GC 契约，2026-08-31）：幽灵伤害头 ghostHurt（Projectile.cs:13881 →
       //  :12021 方法体）——触发位在 StrikeNPC(:13712)/ghostHeal(:13879) 之后、同一

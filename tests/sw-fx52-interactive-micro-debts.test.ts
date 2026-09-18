@@ -153,17 +153,18 @@ describe('SW-FX52 C：关包热栏右键不可达面（context 13）', () => {
     expect(CAN_LOADOUT_SHARE_AT).not.toContain(13);
   });
 
-  it('C4 结构锁：右键支内关包早退门先于全部四支动作原语（开包/换型/装备/拆半）', () => {
+  it('C4 结构锁：右键支内关包早退门先于全部四支动作原语（开包/换型/装备/取件臂）', () => {
     const b2 = UI_TS.indexOf('if (e.button === 2) {');
     const gate = UI_TS.indexOf("if (!this.invPanel || this.invPanel.style.display !== 'block') return;");
     expect(b2).toBeGreaterThanOrEqual(0);
     expect(gate).toBeGreaterThan(b2);
     // 四支原语调用点全部在门之后（变异：新原语插到门前 = 残面复发 → 红）
+    // ★BJ157：第四原语 splitHalf → runPickupArm（拆半面整摘）
     const prims = [
       UI_TS.indexOf('this.tryOpenContainer(cur, i);'),
       UI_TS.indexOf('tryItemSwapVid(vanillaIdOfItemKey'),
       UI_TS.indexOf('this.swapEquipItem(cur, where, i);'),
-      UI_TS.indexOf('this.splitHalf(i, where);'),
+      UI_TS.indexOf('this.runPickupArm(where, i, cur);'),
     ];
     for (const p of prims) expect(p, '动作原语必须都在关包门之后').toBeGreaterThan(gate);
   });

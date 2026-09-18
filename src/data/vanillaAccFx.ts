@@ -98,6 +98,11 @@ export interface AccFx {
   magiluminescence?: number; // 荧光体 5107：地面 acc×1.75/maxRun×1.15/accRun×1.15/slow×1.75（:26188-26194）
   iceBarrier?: number;      // 冰龟壳 1253/冰冻盾 3997：半血挂 buff 62 IceBarrier（:14348-14351）
   lavaRose?: number;        // 玫瑰族（1323/908/4003/4004/5000）：岩浆伤 80-45/OnFire 420-210（:27384-27387）
+  // ---- 组A/B 单件面批（2026-09-18）----
+  pickSpeed?: number;       // pickSpeed -= X（挖矿提速【加算】折扣池;矿工件 410/411/5589/
+                            // 5590 :13944-13947——甲件环 face('pickSpeed') → equipStats.pickSpeedOff）
+  nightVision?: number;     // nightVision 旗（夜视头盔 3109/超亮头盔 4008 :13408-13411;
+                            // BEHAVIOR_FX 通道——光照衰减 ×1.03,消费端 Game.updateLightDecay）
 }
 
 const FX = fxJson as Record<string, AccFx>;
@@ -120,6 +125,11 @@ const BEHAVIOR_FX: Record<string, AccFx> = {
   '3992': { autoReuseGlove: 1, meleeScaleGlove: 1 },
   '536': { meleeScaleGlove: 1 },   // 泰坦手套（:15029-15033：kbGlove 走 json 数值段）
   '268': { divingHelm: 1 },
+  // ★组A 单件面批（2026-09-18）：夜视旗（GrantArmorBenefits :13408-13411
+  //  3109/4008 nightVision=true——呼吸族同款甲件旗通道;消费端 Player.ts 三件
+  //  扫描环 → equipStats.nightVision → Game.updateLightDecay 衰减 ×1.03）
+  '3109': { nightVision: 1 },
+  '4008': { nightVision: 1 },
   '394': { divingHelm: 1 },
   '1860': { divingHelm: 1, jellyfishGlow: 1 },   // 浸水 AddLight(1.8,0.4,1.2)（:14682-14688）
   '1861': { divingHelm: 1, arcticDivingGear: 1, iceSkate: 1 }, // +arcticDivingGear（:14701）+iceSkate（:14703）

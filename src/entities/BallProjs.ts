@@ -78,6 +78,8 @@ abstract class BallBase extends Entity {
   declare x: number; declare y: number;
   abstract readonly projId: number;
   dead = false;
+  /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true） */
+  hoik = true;
 
   // ---- ★通用湿段旗（ProjWetFlags 同名承载面,projWetSection.ts 共享体消费;
   //      Projectile 同名字段——155/861 全员受段,无 ignoreWater 豁免）----

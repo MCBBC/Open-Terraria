@@ -8,8 +8,8 @@
 //   - PickTile 直调通道（钻头坐骑 Mount.cs:3115 / 挖地龟 petPickTile）无 tileHammer 门
 //     = 镐力可入（DCU 钻碎珠为原版铁则）→ toolMatchesTile 的 drillMount 豁免。
 import { describe, it, expect } from 'vitest';
-import { Game, TILE_HAMMER_SHEETS } from '../src/core/Game';
-import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
+import { Game } from '../src/core/Game';
+import { TILE_BY_KEY, TILE_DEFS, TILE_HAMMER_SHEETS } from '../src/data/tiles';   // ★BJ158② 单源迁移（旧从 Game 导出）
 
 /** Game.toolMatchesTile（private 但无 this 依赖——原型侧借调） */
 const toolMatchesTile = (type: number, toolType: 'pick' | 'axe' | 'hammer', drillMount = false): boolean =>

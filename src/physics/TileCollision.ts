@@ -101,8 +101,24 @@ export interface Body {
    *  缺省 true、Projectile.cs:17822 快速弹幕 hoik=true。★SW-FX34b 2026-09-15 起
    *  玩家侧恢复 true(Player.hoik 字段);Body 缺省仍 falsy=NPC 族 2026-09-01 登记
    *  债维持关(tent 悬臂案例:幽灵入场+hitWall 恒 false——其弹飞本体已由 unembed
-   *  收敛帽 fix,入场半边实为原版本体行为)。 */
+   *  收敛帽 fix,入场半边实为原版本体行为)。★SW-FX34c 2026-09-18（用户实报"玩家
+   *  能过单向墙、弹幕过不了"）弹幕域恢复 true:Projectile.HandleMovement(:17578)
+   *  全路径 hoik=true——高速子步进显式 bool hoik=true(:17822-23→:17852 传参),
+   *  慢速干路(:17960)/湿路三支(:17726/:17740/:17754)/aiStyle10 四支(:17705-18)
+   *  不传该参吃缺省 true;无 owner 豁免(friendly/hostile 同相)。1456/1457/1458
+   *  三树同相（1456 Projectile.cs:16376/:16405、1458 Projectile.cs:17823/:17852）。
+   *  先例:DirtBallProj SW-AL2 F-3(aiStyle10 族)/本字段注。 */
   hoik?: boolean;
+  /** ★SW-FX34c 2026-09-18：hoik 跨格态自由通行的【无条件】豁免旗（原版跨格态
+   *  =无任何推离,Collision.cs:2437-2456 各支前提以移前盒判定、跨格态全假,与齿列
+   *  无关）。玩家侧 fx34b 即此语义（本仓 Player 置 true=原样保留）;弹幕域 hoik
+   *  开启后【缺省不置位】=跨格态仍要求身后格坡邻配对（与入口门同判据）——
+   *  单向墙穿行期身后格恒为齿列→通行不受影响;而 fx 时代"止步"容器
+   *  （2026-09-01 穿门定罪两案:旋刃 38×38 盒心落玩家中心贴脸对门、斜下先入柱
+   *  再压门带——原版对跨格态同样无推离=原版本体相,本仓因盒心落玩家中心的
+   *  出膛几何刻意收窄）得以保留。置 true 仅限原版无条件跨格自由半边的
+   *  已定谳体（现=Player）。 */
+  hoikAcrossFree?: boolean;
   /** ★SW-BJ6 2026-09-07：vanilla 嵌固回退漂移活跃旗（AI_001 NPC.cs:62139/:62331
    *  `position.X -= velocity.X + direction` 本拍刚执行时由 AI 置位）。
    *  unembedPass 读到即整段让位并清位（consume-once）——原版无任何 unembed 等价
@@ -379,9 +395,20 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
           //  下/顶支亦不命中 → 原版对嵌格【无任何推离】,本子步位移照常生效。
           //  这是 hoik 穿越的后半程:坡邻豁免(:2412/:2432)放进入口后,靠本语义
           //  横穿实心柱、从对侧走出（wiki 水平单向墙"glitch into the attached
-          //  block"）。hoik=false 体(NPC 族 2026-09-01 登记债/普通弹幕)维持
-          //  本仓止步兜底不变。
-          if (b.hoik) continue;
+          //  block"）。
+          //  ★SW-FX34c 2026-09-18 收窄分档：弹幕域 hoik 开启后（Body.hoik 注,
+          //  原版 Projectile 全路径 hoik=true→单向墙可穿）若继续无条件跨格,
+          //  fx 时代"止步"容器（2026-09-01 穿门定罪案①②,本函数下文）被整条
+          //  架空=贴脸对门直穿复活。收窄=弹幕（未置 hoikAcrossFree）跨格态
+          //  仍要求【身后格坡邻配对】（与下方入口门同判据——单向墙穿行期
+          //  身后格恒为齿列,1 厚墙全程通行不受影响;穿门案身后格为空气→
+          //  止步照旧）。玩家 Player.hoikAcrossFree=true=fx34b 无条件原样。
+          if (b.hoik) {
+            if (b.hoikAcrossFree === true) continue;
+            const biA = tx - dir;
+            const bsA = biA >= 0 && biA < st.w ? st.slope[st.idx(biA, ty)] : 0;
+            if (dir > 0 ? (bsA === 2 || bsA === 4) : (bsA === 1 || bsA === 3)) continue;
+          }
           b.x -= dx;                                       // 整块跨格态:止步(移前位),零回拉
           b.vx = 0;
           hitX = true;
@@ -395,11 +422,16 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
         //   启用 → 天花板坡邻接实心格被豁免:玩家/NPC 幽灵穿入净空不足的悬臂禁区
         //  （2026-09-01 tent 案例:x591 墙被右邻 (592,328) slope3 放走 1px 入场 →
         //   头顶嵌实心 → unembed 弹飞——弹飞元凶已由 unembed 收敛帽另案 fix,
-        //   入场半边=原版本体行为）。NPC 族维持关(登记债),普通弹幕缺省关。
+        //   入场半边=原版本体行为）。NPC 族维持关(登记债)。★SW-FX34c 2026-09-18:
+        //   弹幕域经 Body.hoik=true 接入（原版 Projectile 全路径 hoik=true,用户
+        //   实报"玩家能过弹幕过不了"）——消费面本支+跨格收窄支（上方）双门。
+        //   ★身后格读改守卫式（界外=坡 0=不豁免,即原版 :2412 `i<1` 短路与右支
+        //   扫描域钳制的等价形;旧裸 idx 在 tx=0/tx=w-1 会撞邻行索引=错格读）。
         if (b.hoik) {
-          const bj = st.idx(tx - Math.sign(dir), ty);
-          if (dir > 0 && (st.slope[bj] === 2 || st.slope[bj] === 4)) continue;
-          if (dir < 0 && (st.slope[bj] === 1 || st.slope[bj] === 3)) continue;
+          const bj = tx - dir;
+          const bs = bj >= 0 && bj < st.w ? st.slope[st.idx(bj, ty)] : 0;
+          if (dir > 0 && (bs === 2 || bs === 4)) continue;
+          if (dir < 0 && (bs === 1 || bs === 3)) continue;
         }
         if (dir > 0) b.x = tx * TILE - b.w;
         else b.x = (tx + 1) * TILE;

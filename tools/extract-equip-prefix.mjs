@@ -289,6 +289,24 @@ for (const [id, seg] of CASE_SEGMENTS) {
 const HEAD_SLOT = scanSlotFields(itemSrc, 'headSlot');
 const BODY_SLOT = scanSlotFields(itemSrc, 'bodySlot');
 const LEGS_SLOT = scanSlotFields(itemSrc, 'legSlot');
+// ★BJ163 移交批（2026-09-18）：DefaultTo* 形参直读通道（字面通道的 fill-when-undefined
+//  补充;先例 = DefaultToVanitypet 形参直读 / DefaultToMinecart 捕获式）。三辅助
+//  DefaultToHeadgear/Body/Legs(w, h, slotID)（Item.cs:48594-48614）在【辅助方法体内】
+//  赋 headSlot/bodySlot/legSlot——case 段只有调用点,字面/算式扫描恒漏 → 5588-5590
+//  勘探者/5591-5593 渔夫二型/4008 超亮头盔七件无 s 槽位 → statOfInternal 面缺 →
+//  Inventory.armorAccepts 恒假（装备不了,BJ163 定谳）。已核全部 7 调用点实参纯字面量
+//  （无 type 算式,evalTypeExpr 通道留待出现）;第三参 (\d+) 贪婪回溯=末参直读。
+//  1458 对此 7 件零变更（BJ163 已核）。
+const SLOT_DEFAULT_TO = [
+  ['\\bDefaultToHeadgear\\s*\\([^)]*,\\s*(\\d+)\\)', HEAD_SLOT],
+  ['\\bDefaultToBody\\s*\\([^)]*,\\s*(\\d+)\\)', BODY_SLOT],
+  ['\\bDefaultToLegs\\s*\\([^)]*,\\s*(\\d+)\\)', LEGS_SLOT],
+];
+for (const [pat, target] of SLOT_DEFAULT_TO) {
+  for (const [vid, slot] of scanCaseFields(itemSrc, [pat])) {
+    if (!target.has(vid)) target.set(vid, slot);   // 字面/算式直赋优先,DefaultTo 兜底
+  }
+}
 const HEAD = new Set(HEAD_SLOT.keys());
 const BODY = new Set(BODY_SLOT.keys());
 const LEGS = new Set(LEGS_SLOT.keys());
@@ -649,7 +667,13 @@ for (const id of Object.keys(TIER)) {
 }
 
 // ---- 各武器类可掷池 + 物品集合（PrefixLegacy.cs 全量字面量） ----
-const legacySrc = read('Terarria1456/Terraria.GameContent.Prefixes/PrefixLegacy.cs');
+// ★2026-09-18 重铸域锚 1457（用户实报:6155 闪电之击不可重铸）：1456↔1457 的
+// PrefixLegacy.cs 漂移=恰好两行——Magic += 6152,6153,6154,6155,6171,6173；
+// Summon += 6148,6149,6161,6164（1458 与 1457 逐字节同文,无增量）。
+// 其余 faces（itemSrc/itemidSrc 等）仍锚 1456：1456==1457 已核（PrefixID.cs 全等、
+// CanGetPrefixes 行全等）；且盘上 itemstats/accfx/equip 含后续手补增量
+// （tests/sw-fx53-extractor-blindspots C3 例外集），全量换锚重跑=禁区（登记债）。
+const legacySrc = read('Terarria1457/Terraria.GameContent.Prefixes/PrefixLegacy.cs');
 const POOLS = {};
 for (const mm of legacySrc.matchAll(/public static int\[\] (\w+) = new int\[\d+\]\s*\{([\d,\s]+)\};/g)) {
   POOLS[mm[1]] = mm[2].split(',').map((x) => parseInt(x.trim(), 10)).filter((n) => !Number.isNaN(n));

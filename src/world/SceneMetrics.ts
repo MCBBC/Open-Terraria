@@ -50,6 +50,15 @@ const GRAVEYARD_TILES = ids([85]);
 /** HoneyBlockCount / PartyMonolithCount 计数源 tile（AggregateTileCounts cs:601/621） */
 const HONEY_BLOCK = SHEET_MAP.get(229) ?? -1;
 const PARTY_MONOLITH = SHEET_MAP.get(455) ?? -1;
+/** ShadowCandleCount 计数源 tile（SceneMetrics.cs:393-395 影烛 = tile 646 亮档扫描）。
+ *  ★tile 域双域实害（2026-09-18 BJ154 同族普查第三案）：counts 键=内部 id
+ *  （TILE_DEFS 注册序,`counts.set(st.type[i])`），旧实现以原版 sheet 646 裸查
+ *  ——646 恰是 v_619_truffle_worm_cage 的【内部 id】→ 真影烛(内部 665)永不
+ *  计数、虫笼幻影计数：骷髅商 453 出门被虫笼封死/真影烛压蠕虫+商人门失效
+ *  （VanillaSpawner.ts:1197/:3634 经 Game.ts:33399 消费）。修=经 SHEET_MAP
+ *  构建期平移到内部 id 域（CLOCK_TILE/HONEY_BLOCK 同习语）；计数走扫描环内
+ *  shadowCandleLit 累加（补帧门 frameX<18=cs:393-395 1:1,counts 无帧维） */
+const SHADOW_CANDLE = SHEET_MAP.get(646) ?? -1;
 
 /** 器件帧态 tile（内部 id → sheet）：139 八音盒 / 207 喷泉 / 410·509 天塔柱 / 480 血月柱
  *  / 657 回声腔（EchoMonolith，SceneMetrics.cs:545-549；涂层隐形位显示门） */
@@ -203,7 +212,8 @@ export interface SceneFlags {
   partyMonolithCount: number;
   /** ---- 金属探测器（SceneMetrics.cs:22/152 BestOreType/BestOrePosition；
    *      UpdateOreFinder cs:883-918,优先级表 Main.cs:6355-6391）----
-   *  bestOreSheet=-1 = 附近无珍宝;消费 DrawInfoAccs Treasure 行 */
+   *  bestOreSheet=-1 = 附近无珍宝;域=原版 sheet id(消费 DrawInfoAccs Treasure 行,
+   *  Game.ts 以 Lang.tileName(sheet) 出名——内部 id 勿外泄,2026-09-18 实报修复) */
   bestOreSheet: number;
   bestOreX: number;
   bestOreY: number;
@@ -237,20 +247,37 @@ export const EMPTY_SCENE: SceneFlags = {
   evilTileCount: 0, bloodTileCount: 0,
 };
 
-/** tileOreFinderPriority(Main.cs:6355-6391 全 34 条字面量) */
-const ORE_FINDER_PRIORITY: Record<number, number> = {
+/** tileOreFinderPriority(Main.cs:6355-6391 全 36 条字面量,键=原版 sheet id)。
+ *  ★金属探测器实报修复(2026-09-18,叶绿矿旁显示生命水晶)定谳:此表键是原版
+ *  sheet id,但扫描环曾用【内部 id】直查——本仓 TILE_DEFS 是注册序,内部 id≠
+ *  sheet(叶绿矿 sheet211=内部40,查 211 命中的是 v_219_extractinator → 恒 0,
+ *  永不可探测;而火把内部12 恰好命中表内 sheet12=生命水晶(550)→ 洞里每支
+ *  火把恒报「生命水晶」,盖过一切真矿)。修法=构建期经 SHEET_MAP 把 sheet 键
+ *  平移到内部 id 域(与上方 HOLY_TILES 等计数表同域单源),未注册 sheet 跳过。
+ *  独立导出=行为面可测（tests/tile-domain-sentinel 全表平移性质测试消费;勿在
+ *  本文件外按 sheet 域直查——sheet 键只许经下方构建期平移循环消费,IDG-T2 守卫） */
+export const ORE_FINDER_PRIORITY_SHEET: Readonly<Record<number, number>> = {
   28: 100, 407: 150, 404: 150, 7: 200, 166: 210, 6: 220, 167: 230, 9: 240,
   168: 250, 8: 260, 169: 270, 22: 300, 204: 310, 37: 400, 21: 500, 467: 500,
   441: 500, 468: 500, 12: 550, 665: 550, 639: 550, 107: 600, 221: 610, 108: 620,
   222: 630, 111: 640, 223: 650, 129: 675, 211: 700, 227: 750, 656: 760, 701: 760,
   751: 770, 752: 770, 236: 810, 702: 810,
 };
+/** 内部 id 域优先级表(扫描环唯一消费域) */
+const ORE_FINDER_PRIORITY: Record<number, number> = {};
+for (const [sheet, pr] of Object.entries(ORE_FINDER_PRIORITY_SHEET)) {
+  const internal = SHEET_MAP.get(Number(sheet));
+  if (internal !== undefined) ORE_FINDER_PRIORITY[internal] = pr;
+}
 
-/** isValidForOreFinder(SceneMetrics.cs:904-918):227(宝石)限 272≤fx≤374、
- *  129(宝石钻石族变体)限 fx≥324;其余恒真 */
-function isValidForOreFinder(sheet: number, fx: number): boolean {
-  if (sheet === 227) return fx >= 272 && fx <= 374;
-  if (sheet === 129) return fx >= 324;
+/** isValidForOreFinder(SceneMetrics.cs:904-918,原版键=sheet id):
+ *  227(染料植物/奇异植物)限 272≤fx≤374、129(水晶碎晶)限 fx≥324(大晶簇帧),
+ *  其余恒真——键同样经 SHEET_MAP 平移到内部 id 域 */
+const ORE_FINDER_SHEET227 = SHEET_MAP.get(227);
+const ORE_FINDER_SHEET129 = SHEET_MAP.get(129);
+function isValidForOreFinder(internalId: number, fx: number): boolean {
+  if (internalId === ORE_FINDER_SHEET227) return fx >= 272 && fx <= 374;
+  if (internalId === ORE_FINDER_SHEET129) return fx >= 324;
   return true;
 }
 
@@ -287,6 +314,9 @@ export function scanScene(
   const counts = new Map<number, number>();
   let sunflower = 0;
   let oceanSand = 0;
+  // 影烛计数（SceneMetrics.cs:393-395 `type==646 && frameX<18` 逐格累加，:819 每扫清零
+  // ——帧门=灭档 frameX≥18 不计；counts 表无帧维,故在环内独立累加）
+  let shadowCandleLit = 0;
   // 金属探测器累加器(BestOre 三元组 + 优先级/距离;SceneMetrics.cs:152)
   let bestOreP = 0, bestOreD = Infinity, bestOreS = -1, bestOrePx = 0, bestOrePy = 0;
   // 液量计数（ScanTiles cs:361-366）：只计 !active()（无实心 tile）格的液体，
@@ -305,18 +335,23 @@ export function scanScene(
       }
       const t = st.type[i];
       counts.set(t, (counts.get(t) ?? 0) + 1);
-      // 金属探测器(UpdateOreFinder cs:883-902:优先级 ≥ 当前 且 合法则取距离
-      // 平方小者——同优先级取近,高级别直接顶替;isValidForOreFinder cs:904-918)
+      // 金属探测器(UpdateOreFinder cs:883-902:优先级 ≥ 当前 且 合法——高级别直接
+      // 顶替;同级别取距离平方更小者;同级别同距离=原版首扫到者胜,即 X 外层升序/
+      // Y 内层升序的 (X,Y) 字典序首个(ScanTiles cs:355-361 双层序)。本仓行列序
+      // 相反(Y 外层),故补字典序终判对齐;isValidForOreFinder cs:904-918)
       {
         const pr = ORE_FINDER_PRIORITY[t] ?? 0;
         if (pr > 0 && isValidForOreFinder(t, st.frameX[i]) && pr >= bestOreP) {
           const d = (x - tileX) ** 2 + (y - tileY) ** 2;
-          if (pr > bestOreP || d < bestOreD) {
+          if (pr > bestOreP || d < bestOreD ||
+            (d === bestOreD && (x < bestOrePx || (x === bestOrePx && y < bestOrePy)))) {
             bestOreP = pr; bestOreD = d; bestOreS = t; bestOrePx = x; bestOrePy = y;
           }
         }
       }
       if (t === SUNFLOWER) sunflower++;
+      // 影烛逐格累加（cs:393-395：type==646【内部域=SHADOW_CANDLE】&& frameX<18 亮档）
+      if (t === SHADOW_CANDLE && st.frameX[i] < 18) shadowCandleLit++;
       // isDesertBiomeSand && oceanDepths（SceneMetrics L376-380）：只有普通沙族在
       // 海洋深度带内才计海洋沙；邪恶/神圣沙与沙岩砖族不是 isDesertBiomeSand
       if (DESERT_BIOME_SAND.has(t) && y <= oceanTopY && (x < beachDist || x > w - beachDist)) oceanSand++;
@@ -360,7 +395,15 @@ export function scanScene(
   const jungle = countSet(counts, remixCounts ? JUNGLE_TILES_REMIX : JUNGLE_TILES);
   const snow = countSet(counts, SNOW_TILES);
   const mushroom = countSet(counts, MUSHROOM_TILES);
-  const shadowCandleCount = counts.get(646) ?? 0;   // ShadowCandle tile 646
+  // ShadowCandleCount = 环内亮档累加（shadowCandleLit）。★tile 域双域实害定谳（2026-09-18
+  //  BJ154 同族普查第三案）：旧实现 `counts.get(646)` 以【原版 sheet 646】裸查内部域
+  //  counts（键=TILE_DEFS 注册序）——646 恰是 v_619_truffle_worm_cage 的【内部 id】
+  //  → 真影烛（sheet 646=内部 665）永不计数、虫笼幻影计数；消费面骷髅商 453 出门
+  //  被虫笼封死/真影烛压蠕虫+商人门失效（VanillaSpawner.ts:1197/:3634，经
+  //  Game.ts:33399 getSpawnRate 注入）。修=SHEET_MAP 平移（CLOCK_TILE/HONEY_BLOCK
+  //  同习语）+帧门补 1:1（cs:393-395 frameX<18 亮档，与 Game.ts 光环面 T_SHADOW
+  //  :9667 同门——光环面本就正确,唯本处错域）
+  const shadowCandleCount = shadowCandleLit;
   // HasClock（cs:465-467 `if (tile.type == 104) HasClock = true`——ScanTiles 窗内任一）
   const CLOCK_TILE = SHEET_MAP.get(104) ?? -1;
   const hasClock = CLOCK_TILE >= 0 && (counts.get(CLOCK_TILE) ?? 0) > 0;
@@ -457,7 +500,7 @@ export function scanScene(
     zoneGlowshroom: ddScan ? ddScan.ZoneGlowshroom : mushroom >= MUSHROOM_THRESHOLD,
     zoneMeteor: meteor >= METEOR_THRESHOLD,
     zoneGraveyard: graveyard >= GRAVEYARD_THRESHOLD,
-    zoneShadowCandle: shadowCandleCount > 0,   // tile 646
+    zoneShadowCandle: shadowCandleCount > 0,   // ShadowCandle = 原版 tile(sheet) 646
     hasClock,
     zoneDungeon: ddScan ? ddScan.ZoneDungeon : zoneDungeon,
     zoneTemple: ddScan ? ddScan.ZoneLihzhardTemple : centerWall === 87,
@@ -486,7 +529,11 @@ export function scanScene(
     zoneShimmer,
     honeyBlockCount,
     partyMonolithCount,
-    bestOreSheet: bestOreS, bestOreX: bestOrePx, bestOreY: bestOrePy,
+    // 输出面平移:bestOreSheet=原版 sheet 域(消费端 Game.ts:36523 Lang.tileName
+    // 按 sheet 键解析);bestOreS 是内部 id——TILE_DEFS[bestOreS].vanilla.sheet
+    // 直译回原版域,未注册身(-1 哨兵)原样透传
+    bestOreSheet: bestOreS >= 0 ? (TILE_DEFS[bestOreS]?.vanilla?.sheet ?? -1) : -1,
+    bestOreX: bestOrePx, bestOreY: bestOrePy,
     // ★IIIII230：互减+钳位后的终值（TOW 选曲链双邪恶分主判据;vanilla 同值域
     //  SceneMetrics.EvilTileCount/BloodTileCount）
     evilTileCount: evil, bloodTileCount: blood,

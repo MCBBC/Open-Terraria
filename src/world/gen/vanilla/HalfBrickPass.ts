@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -1236,7 +1236,9 @@ const _i93LegacyCheckPile = typeof process !== 'undefined' && process.env.SW_I93
 const _i99dNoDispatch = typeof process !== 'undefined' && process.env.SW_I99D_NODISP === '1';
 const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
 const POUND_GEN_SKIP = idsByVanillaSheet(190, 30);
-const FORBIDS_SLOPING = idsByVanillaSheet(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);
+// ★BJ158①（2026-09-18）：本地 idsByVanillaSheet 平移副本拆除——ForbidsSloping 收编
+//  data/tiles.ts 单源 FORBIDS_SLOPING_IDS（内部 id 域,与旧产物逐值全等已探针定谳）,
+//  消费面 canPoundTile ④ 上格门改走单源。
 
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）：树干族——CanKillTile 上格早退门 */
 const TREE_TRUNK = idsByVanillaSheet(5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634);
@@ -1257,7 +1259,7 @@ export function canPoundTile(st: TileStore, x: number, y: number): boolean {
   // ④ 上格 ForbidsSloping（cs:82004：上格 active 且禁坡物 → 不可砸）
   if (st.inBounds(x, y - 1)) {
     const up = st.idx(x, y - 1);
-    if (st.flags[up] && FORBIDS_SLOPING.has(st.type[up])) return false;
+    if (st.flags[up] && FORBIDS_SLOPING_IDS.has(st.type[up])) return false;
   }
   // ⑤ 尾 = return CanKillTile(x, y)（cs:82021）——★IIIII187 1:1 化（canKillTileGen），
   //    取代旧 `genSolidType && !platform && !framed` 近似：GFB 灰烬域带残坡的

@@ -760,6 +760,14 @@ export const PROJ_ALPHA0: Record<number, number> = {
   // 535 美杜莎之首（SetDefaults :6096-6108 无 alpha 行但本体常驻玩家头部,
   // GetAlpha 缺省路径不消费——本仓转换成专用类前的一帧兜底）
   294: 255, 295: 255, 296: 255, 535: 255,
+  // ★BJ164 登记债②（2026-09-18）：101 魔眼/斯帕兹喷火（SetDefaults :1887-1895
+  //  alpha=255 :1893,1458 同值;GetAlpha :80595-81530 无 101 支 → 缺省路径
+  //  num14=(255−α)/255=0 → 弹体贴图【恒隐】,视觉=d75 火流拖尾——aiStyle23 AI
+  //  :26213-26262 尘站已在 subStepAI 101 支（普查批②）+ 寿命帽 60 子步 :26201）。
+  //  静态键无 fade 配对=合法：原版 AI 全程不写 α,兜底 (255−255)/255=0 恒隐正是
+  //  原版本相（同 294-296 族"视觉=尘流"语义）;缺键=α≡0 → 兜底 ×1 全亮本体穿帮。
+  //  出生面=bossAI 魔眼 shoot 口（:1405,Spazmatism NPC.cs:27632 唯一发射者）
+  101: 255,
 
   // ★R29：631 幻象矢（SetDefaults :6783-6792 alpha=255 渐显,AI_122 −15/t 消费）/
   // 661 黑爆弹（:7110-7122 alpha=255,AI −55/t 渐显+scale1.3）/ 819 血箭（:7997-8006
@@ -1110,6 +1118,15 @@ export class Arrow extends Entity {
   vy: number;
   damage: number;
   knockback: number;
+  /** ★SW-FX34c 2026-09-18（用户实报"玩家能过单向墙、弹幕过不了"）：Collision.
+   *  TileCollision 第 10 参 hoik——原版 Projectile.HandleMovement(:17578) 全路径
+   *  为 true：高速子步进显式 bool hoik=true(:17822-23→:17852 传参),慢速干路
+   *  (:17960)/湿路三支(:17726/:17740/:17754)/aiStyle10 四支(:17705-18)不传参吃
+   *  缺省 true（Collision.cs:2299）。无 owner 豁免（friendly/hostile 同相）；
+   *  1456/1457/1458 三树同相。消费面=:2412/:2432 身后格坡邻配对 + 跨格态无推离
+   *  （:2437-2456）。本类单点中心碰撞模型的对应门=subStep 撞块杀链口（hoikAdmit
+   *  包裹层）；moveAndCollide 域弹幕由 Body.hoik 承载（WeaponProj 等同类字段）。 */
+  hoik = true;
   /** 原版投射物类型（1=木箭 2=燃烧箭，PickAmmo projToShoot = ammo.shoot） */
   projId: number;
   /** 绘制 scale（SetDefaults scale 字段；绘制尺寸 = 贴图原生 × scale，
@@ -1285,6 +1302,13 @@ export class Arrow extends Entity {
   reflected = false;
   /** 穿透投射物的同敌免疫表（敌人 id 集合） */
   private hitSet = new Set<number>();
+  /** ★BJ157-②③：PVE 受理命中计数（vanilla Projectile.numHits 1:1——每次受理命中尾
+   *  numHits++（Damage_PVE_Inner :14263,在吸血链/ghostHurt proc 块 :13877-83 之后）；
+   *  ghostHeal 率 = 0.2−numHits×0.05（:12080）读的是自增前值 ⇒ 首跳 0 档率 0.20。
+   *  与 hitSet（同敌永久免支,仅有限穿透入表）解耦：无限穿透弹每跳都计数（修复③：
+   *  hitSet 恒空曾致治疗率恒 0.20 不衰减）;502/idStatic 同敌冷却再命中亦每跳计入
+   *  （原版 numHits 同相）。PVP 面 netPvpProjFeedback 经 SpectreSoulProj.projPveNumHits 读 */
+  pveNumHits = 0;
   /** 1457 宝石法珠特性（null = 非宝石弹/未启用） */
   gem: GemStaffFlags | null = null;
   /** SwirlTwins 正弦摆相位计数（localAI[0]，:38615 每步 +1） */
@@ -7534,11 +7558,25 @@ export class Arrow extends Entity {
         }
       }
     }
+    // ---- aiStyle 23 寿命帽（魔眼二阶段喷火 101 / 腐化者诅焰 188,Projectile.cs
+    //      :26191-26203;1458 :26192-26203 零变更）——原版 AI 头每子步
+    //      `if (timeLeft > 60) timeLeft = 60;`(:26201-26203)：出生 3600 首子步即钳
+    //      60;timeLeft-- 在子步尾 numUpdates 循环【内】(Update :17307-17311)→ EU=3
+    //      每 tick 消 4 ⇒ 弹寿 60 子步 = 15 tick,射程 = 60 子步 × (6+0.5×自身速)px
+    //      ≈ 360-560px(约半屏内)。本仓直飞桶曾缺此帽 → shoot 缺省 life=300 撑
+    //      75t ≈ 1800px 屏幕外,即实报"Spazmatism 二阶段喷火过远"根因。位序 =
+    //      原版 AI 头(帽 :26201 先于尘站 :26205)。188 本仓尚无发射面,随族并接。
+    //      ★read：va 判定用 projId 键(101/188=json aiStyle23 全集),非通用 aiStyle
+    //      判定——Arrow 实例不落 json def 字段,逐型键即原版 aiStyle 分派终面。----
+    if (this.projId === 101 || this.projId === 188) {
+      if (this.life > 60) this.life = 60;                    // :26201-26203
+    }
     // ---- ★NPC 弹幕尘站普查批②（2026-09-16,docs/npc-proj-dust-census.md §4）：
     //      Arrow 载体敌弹（bossAI.shoot 直飞桶）的 AI 段尘站补齐。全部为 AI_001
     //      per-type 块（原版 AI 在 UpdatePosition 前 → 本位在通用位移行前=pre-move
     //      盒;EU 型每子步一跑与原版 numUpdates 循环同拍）----
-    //  · 101 石巨人火球（aiStyle23 :26213-26262,ai[0]>7 门——ai[0] 出生 0,每 update
+    //  · 101 魔眼诅焰（aiStyle23 :26213-26262——非石巨人火球, projectile id 101 =
+    //    Spazmatism 喷火 NPC.cs:27632;ai[0]>7 门——ai[0] 出生 0,每 update
     //    ++,>7 即第 9 update 起掷）：1/2 掷 ×1×d75（速=v×0.2,α100）;掷中后
     //    2/3+1/9 → noGravity+scale×3+vel×2;scale×1.5×num193（num193=ai[0]∈{8,9,10}
     //    时 0.25/0.5/0.75 起步爬升）;num194==75 尾段 vel+=弹速,!noGravity → vel×0.5
@@ -7867,6 +7905,28 @@ export class Arrow extends Entity {
       // 弹心都在 378 格内)子弹零命中穿体而过;草丛/树冠内的弹幕同样漏判。
       // 原版 HandleMovement 只在实心格 Kill(:16132),Damage 在其后独立运行(:15738)
       if (world.store.isSolid(tx, ty)) {
+        // ★SW-FX34c 2026-09-18 弹幕 hoik 单向墙放行（用户实报"玩家能过、弹幕被挡"）：
+        //  原版 Projectile.HandleMovement(:17578) 全路径 TileCollision 第 10 参 hoik=true
+        //  （本类 hoik 字段注——显式 :17822-23/:17852 与缺省 :2299 两半）。消费面
+        //  Collision.cs:2412(右行查身后格 (i-1,j) slope 2/4)/:2432(左行,(i+1,j)
+        //  slope 1/3)——「实心墙格+配套坡邻」不拦;跨格态(:2437-2456)各支前提以
+        //  移前盒判定全假=无推离 → 弹自由横穿 1 厚墙,velocity 不变 → flag 不置位
+        //  （:18008 `lastVelocity != velocity`）→ 通用杀口（:19969-19973
+        //  `else { position += velocity; Kill(); }`）不可达=原版弹幕能过单向墙。
+        //  本类单点中心碰撞模型：中心格=弹心所在格,身后格判据与 moveAndCollide
+        //  X 面(fx34b 玩家/fx34c 弹幕)/DirtBallProj(SW-AL2 F-3)同构;原版 hoik 豁免
+        //  仅存在于 X 支 → 只在 X 主轴臂放行（|vx|>=|vy|,与 294/532 反射臂同约定）,
+        //  Y 轴原版无 hoik 门照旧杀。放行=跳过整段撞块杀/反弹链（原版无碰撞事件,
+        //  type 特支反弹全不达）,命中管线照跑（Damage 独立运行 :17184）。反向进入
+        //  （身后格非齿）照杀=单向性保留;界外身后格=坡 0 不豁免（:2412 `i<1` 短路）。
+        let hoikAdmit = false;
+        if (this.hoik && this.vx !== 0 && Math.abs(this.vx) >= Math.abs(this.vy)) {
+          const dirH = this.vx > 0 ? 1 : -1;
+          const biH = tx - dirH;
+          const bsH = biH >= 0 && biH < world.store.w ? world.store.slope[world.store.idx(biH, ty)] : 0;
+          hoikAdmit = dirH > 0 ? (bsH === 2 || bsH === 4) : (bsH === 1 || bsH === 3);
+        }
+        if (!hoikAdmit) {
         // 钉 514 撞块（HandleMovement aiStyle 93 支 :18931-18941）：不消亡——
         // ai[1]=0/ai[0]=1 + tileCollide=false + position+=velocity + 速度 =
         // lastVelocity 归一×3 弹开（AI 侧 ×0.6/t 衰减、90t 消亡）
@@ -8164,6 +8224,7 @@ export class Arrow extends Entity {
         // 4×d7 通用碎屑近似与真值双撒,退役（音面仍由 OPD BULLET_KILL_SFX 播,不变）
         this.killNow(game);
         return;
+        } // ★SW-FX34c hoikAdmit 包裹层闭合——放行弹跳过整段撞块杀/反弹链,直落命中管线
       }
     }
     // 敌对弹命中玩家（原版 Projectile.Damage_EVP :13706-13830）：不消耗弹体，
@@ -8573,11 +8634,13 @@ export class Arrow extends Entity {
         // 吸血鬼飞刀 304 → vampireHeal（:12879-12882，!moonLeech 门）；
         // 魔法弹 + 幽灵套 ghostHeal → ghostHeal（:12883-12888，canGhostHeal 全 true
         // 近似——雕像产怪 flag 未实装）。ghostHurt（幽灵伤害头 156）未接，登记。
-        // numHits = 含本次的命中数（原版 StrikeNPC 先自增，hitSet.size 此时已含本敌）
+        // numHits = 此前已受理命中数（★BJ157-② 勘误：原版 numHits++（:14263）在 proc
+        //  块【之后】，旧注「原版 StrikeNPC 先自增」系误记——StrikeNPC(:13702)≠numHits++;
+        //  首跳读 0 ⇒ 率 0.20,旧 hitSet.size 含本敌 = 首跳 0.15 off-by-one）
         if (this.projId === 304) {
-          game.applyLifeSteal?.('vampire', Math.round(dmg), this.hitSet.size, this.x, this.y);
+          game.applyLifeSteal?.('vampire', Math.round(dmg), this.pveNumHits, this.x, this.y);
         } else if (projectileData(this.projId)?.magic) {
-          game.applyLifeSteal?.('ghost', Math.round(dmg), this.hitSet.size, this.x, this.y, true);
+          game.applyLifeSteal?.('ghost', Math.round(dmg), this.pveNumHits, this.x, this.y, true);
           // ★批⑥（2026-08-31）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点 /
           // :12021 方法体,SpectreSoulProj.ts 承载全套）：magic 弹命中且防后实扣
           // （Enemy.lastStrikeDealt≈StrikeNPC 返回值 num41）>1 → 预算池闸门后从
@@ -8596,6 +8659,9 @@ export class Arrow extends Entity {
                 dealt: v661.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
           }
         }
+        // ★BJ157-②③：numHits++（:14263——吸血链/ghostHurt on-hit 段之后的命中尾位,
+        //  与原版递增点同相;读点（上方吸血链）取自增前值）
+        this.pveNumHits++;
         // 710 空中祸害命中撒裂片（Damage() :13165-13168 → BetsySharpnel :51075-51091，
         // 在 penetrate-- 前）：本体（ai[1]≠-1）每跳撒 5 枚 710 裂片（abShard 标不再链）
         if (this.projId === 710 && !this.abShard) this.spawnBetsyShards(game);

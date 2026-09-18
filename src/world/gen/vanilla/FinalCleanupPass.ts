@@ -37,7 +37,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
@@ -268,8 +268,8 @@ const PILE_SNOW_ICE = new Set([147, 161, 162, 163, 164, 200, 224]);
 const PILE_SAND = new Set([53, 112, 116, 234, 396, 397, 398, 399, 400, 401, 402, 403]);
 /** Main.tileStone（Main.cs:7378/7902-7921）：平台连接判定的"石质"归一 id 集 */
 const TILE_STONE = new Set([63, 64, 65, 66, 67, 68, 130, 131, 566]);
-/** ForbidsSloping（cs:81484）：裸 type（ghost 含）查 */
-const FORBIDS_SLOPING = new Set([21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597]);
+// ★BJ158①（2026-09-18）：ForbidsSloping（cs:81484）sheet 域本地副本拆除——收编
+//  data/tiles.ts 单源 FORBIDS_SLOPING_SHEETS（framePlatformSweep 上格门 sh2 域消费）。
 /** sheet id → 生成期 Main.tileSolid（vanGenSolidType 的 sheet 直查版；无内部实装的
  *  sheet 用原版碰撞表语义兜底 true（连接 id 只来自实心邻格，罕见）） */
 const SOLID_BY_SHEET = new Map<number, boolean>();
@@ -314,7 +314,7 @@ export function framePlatformSweep(st: TileStore, ctx: SweepCtx, x: number, y: n
   if (num8 === -1 && TR.act && TR.sh2 === sh && TR.slope === 2) num8 = sh;
   if (num9 === sh && L.slope === 2 && num8 !== sh) num8 = -1;
   if (num8 === sh && R.slope === 1 && num9 !== sh) num9 = -1;
-  const forbids = FORBIDS_SLOPING.has(at(0, -1).sh2);           // ForbidsSloping(x, y-1) 裸 type
+  const forbids = FORBIDS_SLOPING_SHEETS.has(at(0, -1).sh2);    // ForbidsSloping(x, y-1) 裸 type
   const selfSlope = st.slope[i]!;
   let fx: number;
   if (selfSlope === 1) {

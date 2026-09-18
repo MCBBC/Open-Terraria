@@ -1118,6 +1118,10 @@ export function mechQueenAnchor(queen: Enemy, spaz: boolean): { x: number; y: nu
  *  (:27512-27537)。
  *  getGoodWorld(FTW)分支全量实装:悬浮/冲刺/弹幕计数抬档(:26599/26709/26745/
  *  26883/27020 雷眼,:27218/27313/27373/27539 魔眼)。
+ *  弹幕寿命(2026-09-18 射程批):诅焰球 96=3600(SetDefaults 无覆写 :789 缺省,
+ *  aiStyle8 对 96 无帽 :24607)、雷眼激光 83=600(:1646)+EU2、二阶段激光
+ *  100=2700(:1884)+EU2、喷火 101=aiStyle23 帽 60 子步(:26201,EU3→15t,
+ *  Arrow.ts AI 段承载)——全族曾吃 shoot 缺省 life=300(除 101 反向超程)。
  *  Mechdusa 联动(IsMechQueenUp,2026-08-14 全分支实装):锚位悬浮(:26571-26579/
  *  :27194-27202)、悬浮计时 600→1200(:26685/:27291)、雷眼激光门 60→90/120
  *  (:26675-26680,有 135 段在场=120)、变身段反弹弹幕(:26812/:27435)、
@@ -1211,8 +1215,11 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
           const fl = Math.hypot(fx, fy) || 1;
           fx = fx / fl * spdF + (Math.floor(Math.random() * 81) - 40) * 0.05;
           fy = fy / fl * spdF + (Math.floor(Math.random() * 81) - 40) * 0.05;
+          // 寿命：SetDefaults 无 timeLeft 覆写行 → 缺省 3600(Projectile.cs:789);
+          //   aiStyle 8 对 96 跳过 ai[1] 计数(:24607 type!=96)无寿命帽无重力坡道——
+          //   原 300 系 shoot 缺省值洗掉 SetDefaults 终值(半径过短 12×)
           shoot(game, e.cx + fx * 4, e.cy + fy * 4, fx, fy,
-            getAttackDamageForProjectiles(25, 22, e.difficulty), 96);
+            getAttackDamageForProjectiles(25, 22, e.difficulty), 96, 3600);
         }
       } else if (e.y + e.h < player.y && hoverDist < 400) {
         // :26690-26712 计数 +1/t;专家血 <90%/<80%/<70%/<60% 各 +0.3(:26693-26708);
@@ -1237,8 +1244,10 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
           const ll = Math.hypot(lx, ly) || 1;
           lx = lx / ll * spdL + (Math.floor(Math.random() * 81) - 40) * 0.08;
           ly = ly / ll * spdL + (Math.floor(Math.random() * 81) - 40) * 0.08;
+          // 寿命：SetDefaults timeLeft=600(Projectile.cs:1646)+EU=2 → 200t;
+          //   同 WOF 发射点 bossAI_wof.ts「83,600」先例(原缺省 300 半程即灭)
           shoot(game, e.cx + lx * 15, e.cy + ly * 15, lx, ly,
-            getAttackDamageForProjectiles(20, 19, e.difficulty), 83);
+            getAttackDamageForProjectiles(20, 19, e.difficulty), 83, 600);
           // 弹 83 出生音:Projectile.cs:56195-56199 ai[1]==0 首拍 SoundID.Item33——
           // 本仓 83 走 Arrow 直飞桶无 ai[1] 态,于发射点等价结算(同 462/259 先例)
           game.playSfxWav?.('Item_33', 1, e.cx + lx * 15, e.cy + ly * 15);
@@ -1375,6 +1384,8 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
           e.lai1 = 0;
           // :27623-27647 火焰 101:速 6,伤 Remap(30,27),±0.4 抖动 + 自身速度×0.5,
           // 出膛点 = 中心 − 速度×1(反向出膛);mech 态沿自身朝向喷(下方分支)
+          // 寿命 = aiStyle 23 帽 60 子步(15t,Projectile.cs:26201-26203)→ Arrow.ts
+          // AI 段帽承载(:26201 原位),非本口 life 参——原版出生 3600 首子步钳 60
           const num500 = 6;
           let fx = player.cx - e.cx, fy = player.cy - e.cy;
           const fl = Math.hypot(fx, fy) || 1;
@@ -1409,8 +1420,10 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
         const vx = dx / d * spdP, vy = dy / d * spdP;
+        // 寿命：SetDefaults timeLeft=2700(Projectile.cs:1884)+EU=2 → 900t
+        //   (原缺省 300 洗掉终值,射程 1/9)
         shoot(game, e.cx + vx * 15, e.cy + vy * 15, vx, vy,
-          getAttackDamageForProjectiles(25, 23, e.difficulty), 100);
+          getAttackDamageForProjectiles(25, 23, e.difficulty), 100, 2700);
         // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33——
         // 发射位等价结算（弹先出生后补播,同 :1236 弹 83=Item_33 先例）
         game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
@@ -1479,8 +1492,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
       const vx = dx / d * 9, vy = dy / d * 9;
+      // 寿命：SetDefaults timeLeft=2700(Projectile.cs:1884)+EU=2 → 900t(同上)
       shoot(game, e.cx + vx * 15, e.cy + vy * 15, vx, vy,
-        getAttackDamageForProjectiles(18, 17, e.difficulty), 100);
+        getAttackDamageForProjectiles(18, 17, e.difficulty), 100, 2700);
       // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
       game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
     }
@@ -1932,7 +1946,10 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
           const sx = (Math.floor(Math.random() * 81) - 40) * 0.05;
           const sy = (Math.floor(Math.random() * 81) - 40) * 0.05;
           const vx = dx / d * 8 + sx, vy = dy / d * 8 + sy;
-          shoot(game, e.cx + vx * 8, e.cy + vy * 8, vx, vy, 25, 100);
+          // 寿命：SetDefaults timeLeft=2700（Projectile.cs:1884,1458 同值）+EU=2 → 900t——
+          //  发射点 NewProjectile 无 timeLeft 参（NPC.cs:29088 亲读,1458 同址）,
+          //  BJ164 登记债①：缺显式 2700 时吃 shoot 缺省 300=射程 1/9（双子雷眼同款习语）
+          shoot(game, e.cx + vx * 8, e.cy + vy * 8, vx, vy, 25, 100, 2700);
           // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
           game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
         }
@@ -1958,7 +1975,9 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
         const sx = (Math.floor(Math.random() * 81) - 40) * 0.05;
         const sy = (Math.floor(Math.random() * 81) - 40) * 0.05;
         const vx = dx / d * 10 + sx, vy = dy / d * 10 + sy;
-        shoot(game, e.cx + vx * 8, e.cy + vy * 8, vx, vy, 25, 100);
+        // 寿命：同上（NPC.cs:29167 detached 支发射点无 timeLeft 参——SetDefaults
+        //  2700 承载,Projectile.cs:1884;BJ164 登记债① detached 口）
+        shoot(game, e.cx + vx * 8, e.cy + vy * 8, vx, vy, 25, 100, 2700);
         // 出膛音（Projectile.cs:56273-56277 ai[1]==0 首拍）:弹 100 → Item33（发射位等价）
         game.playSfxWav?.('Item_33', 1, e.cx, e.cy);
       }

@@ -8,7 +8,7 @@
 //   其 Main.cs:32420-32442 的 lerp 缩放/拖尾专属分支【不在此实现】——本类只做
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
-import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible } from './SpectreSoulProj';
 import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
@@ -191,23 +191,36 @@ export class MagicProj extends Entity {
         // （如 gem-staff bolts 121-126/597 usesLocal cd60）在此处自动落「写 0 清窗」
         // 档,调用点无需硬编码。
         noteVanillaProjImmune(game, this.projId, (e as unknown as { id?: number }).id ?? -1);
+        // ★BJ157-①（2026-09-18）幽灵治疗头 ghostHeal proc 补缺（Projectile.cs:13875-84：
+        //  canGhostHeal|flag9 块内 ghostHeal 在先(:13877-79)、ghostHurt 在后(:13881-83)，
+        //  本仓此前只接 ghostHurt）。调用点门 player.ghostHeal && !moonLeech 由
+        //  Game.applyLifeSteal 单源自证（298 治疗弹经 HealProj 飞向本地玩家）;victim 门
+        //  = spectreVictimEligible（canGhostHeal=false 族 384/387/388/523,NPC.cs:6270
+        //  缺省 true）。dmg = num41 等位（Enemy.lastStrikeDealt,防后实扣;≤0 门在
+        //  applyLifeSteal 内 floor 后拒）;numHits 实参 0 = 单发弹首跳（:14263 numHits++
+        //  在 proc 块后 ⇒ 首跳读 0,率 0.20）;出生点 = 受害者 Center（vanilla Vector2 实参）
         // ★批⑥（2026-08-31）幽灵伤害头 ghostHurt（Projectile.cs:13881 / :12021,
         // SpectreSoulProj.ts 承载）：magic 弹 + Spectre Mask 套装 → 受害者 Center
         // 放浮魂弹 356。dealt 读 Enemy.lastStrikeDealt（ StrikeNPC num41 等价位）
         {
           const v156 = ent as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
             maxHp?: number; def?: { lifeMax?: number } };
-          if (this.projId > 0 && projectileData(this.projId)?.magic
-            && playerHasGhostHurt(game.player)) {
-            ghostHurtOnHit(game,
-              { magic: true, projDamage: this.damage,
-                projX: this.x, projY: this.y, projW: this.w, projH: this.h,
-                ownerCx: game.player.cx, ownerCy: game.player.cy },
-              { x: e.x, y: e.y, w: e.w, h: e.h,
-                cx: e.x + e.w / 2, cy: e.y + e.h / 2,
-                vanillaId: v156.vanillaId,
-                lifeMax: v156.maxHp ?? v156.def?.lifeMax,
-                dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
+          if (this.projId > 0 && projectileData(this.projId)?.magic) {
+            if (spectreVictimEligible(v156.vanillaId)) {
+              game.applyLifeSteal?.('ghost', v156.lastStrikeDealt ?? 0, 0,
+                e.x + e.w / 2, e.y + e.h / 2, true);
+            }
+            if (playerHasGhostHurt(game.player)) {
+              ghostHurtOnHit(game,
+                { magic: true, projDamage: this.damage,
+                  projX: this.x, projY: this.y, projW: this.w, projH: this.h,
+                  ownerCx: game.player.cx, ownerCy: game.player.cy },
+                { x: e.x, y: e.y, w: e.w, h: e.h,
+                  cx: e.x + e.w / 2, cy: e.y + e.h / 2,
+                  vanillaId: v156.vanillaId,
+                  lifeMax: v156.maxHp ?? v156.def?.lifeMax,
+                  dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
+            }
           }
         }
         this.dead = true;

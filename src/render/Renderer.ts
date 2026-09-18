@@ -479,6 +479,30 @@ export function wormholeHeadHit(
   return -1;
 }
 
+/** DrawPlayer_05_ForbiddenSetRing 四向辉光珠层（PlayerDrawLayers.cs:287-297/311-315,
+ *  红蓝-M ③ 2026-09-18）：num3=珠径（miscCounter/75·2π 的 cos×4 摆动 :290）、
+ *  color2 α 因子=(num3/8+.5)×.8（:291）。闩态（setForbiddenCooldownLocked）只覆写
+ *  参数不摘珠——num3 钉 2/color2 钉 ×.3（:293-296）,4 珠循环照跑（:311-315,循环
+ *  不吃 locked 门）。蓝移 MultiplyRGB(0.5,0.5,1) 只染环体 color（:297）,珠 color2
+ *  独立钉值不吃蓝移 → 层头复位 filter。α0=加法面（XNA α=0 纯加法）。
+ *  ★曾闩态整层跳画（glow&&!locked 门）+死写 orbR/orbA=珠整缺,登记债已清。 */
+export function drawForbiddenGlowOrbs(ctx: CanvasRenderingContext2D,
+  glow: HTMLImageElement | ImageBitmap | HTMLCanvasElement,
+  miscCounter: number, locked: boolean): void {
+  ctx.filter = 'none';                            // 珠层不吃环体蓝移（color2 与 color 分轨）
+  const orbR = locked ? 2 : Math.cos((miscCounter / 75) * Math.PI * 2) * 4;   // num3（:290/:295）
+  const orbA = locked ? 0.3 : (orbR / 8 + 0.5) * 0.8;                          // color2 α 因子（:291/:296）
+  for (let q = 0; q < 4; q++) {
+    const ang = q * (Math.PI / 2);
+    ctx.globalAlpha = Math.max(0, Math.min(1, orbA));
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(glow, Math.cos(ang) * orbR - glow.width / 2,
+      Math.sin(ang) * orbR - glow.height / 2);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
+}
+
 export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | null {
   if (typeof Image === 'undefined') return null;
   const hit = extraSpriteCache.get(n);
@@ -860,6 +884,22 @@ function applyPlayerMountRotation(ctx: CanvasRenderingContext2D, r: PlayerMountR
   ctx.translate(r.pivotX, r.pivotY);
   ctx.rotate(r.angle);
   ctx.translate(-r.pivotX, -r.pivotY);
+}
+
+/** 坐骑贴图行锚 Y（Mount.Draw :5596-5599 净式；原版对拍锚表）：
+ *  原版链 = PlayerDrawSet.BoringSetup 先 `Position.Y -= mountOffSet`
+ *  （PlayerDrawSet.cs:429-430；mountOffSet = HeightOffsetVisual = mount.PlayerOffset
+ *  = playerYOffsets[帧]，Player.cs:3221-3225），Mount.Draw 再 `Position.Y +=
+ *  height/2 + (YOffset + PlayerOffset)`（:5596-5599 num2）——两处 PlayerOffset
+ *  【相消】，净锚 Y = mounted 盒中心 + YOffset，与帧无关（史莱姆挤压帧动画在
+ *  贴图行内自身完成，坐骑贴图不随帧上下浮动；随帧浮动的是玩家精灵 = 玩家层
+ *  translate 的 −mOff，Renderer 骑姿抬升段）。
+ *  本仓玩家盒恒 42、底锚换算：feetY − (42+heightBoost)/2 + yOffset。
+ *  曾把 Mount.Draw 的 num2 字面 +PlayerOffset 直抄而漏抄 PlayerDrawSet:430 的
+ *  预减项 → 史莱姆坐骑整贴图下坠 playerOffset(20-22px)、史莱姆半埋地里/鞍位
+ *  错到玩家脚踝（用户实报 2026-09-17）。 */
+export function mountTextureAnchorY(feetY: number, heightBoost: number | undefined, yOffset: number | undefined): number {
+  return feetY - (42 + (heightBoost ?? 0)) / 2 + (yOffset ?? 0);
 }
 
 // 僵尸族 case 3（L77026）：腾空/逆向→帧2；站定→帧0；行走 counter+=|vx| 按 8/16/24/32 → 0,1,2,1 往复
@@ -14048,6 +14088,55 @@ export class Renderer {
         ctx.restore();
       }
     }
+    // ---- 禁戒符号环（DrawPlayer_05_ForbiddenSetRing,PlayerDrawLayers.cs:280-326,
+    //      组C 终盘 2026-09-18）——setForbidden 在身（shadow==0=主绘制遍,本仓单遍）：
+    //      Extra_74 符号贴图（Lerp(colorArmorBody,White,.7)→仓白底 1α）+ Glow_217
+    //      四向辉光珠（cardinal 角 ×0/π/2/π/3π/2,半径 num3=miscCounter/75·2π 的
+    //      cos ×4 摆动;色 (80,70,40,0)×(num3/8+.5)×.8——α0=加法面）。
+    //      悬浮位 = 脚底−24 基面 + gravDir×(num2−20)（num2=miscCounter/300·2π 的
+    //      sin×6 上下浮动;冷却闩 setForbiddenCooldownLocked：bob 收 0/符号染色
+    //      ×(0.5,0.5,1) 偏蓝）。★闩态四珠照画（红蓝-M ③：原版 :311-315 循环不吃
+    //      locked 门——num3 钉 2/color2 钉 ×.3,蓝移只染环体 color 不染珠层;
+    //      曾 glow&&!locked 整层跳画+闩蓝移 CSS 近似=珠整缺,已修）。法师帽 238
+    //      偏移 +4（头槽读面）。shader=cBody（身体染料）走染料仿射支;
+    //      bodyRotation 单遍=0（登记）----
+    if (p.setForbidden && !p.dead) {
+      const tex = this.atlas?.ensureVImage('vanilla/Extra_74.png');
+      const glow = this.atlas?.ensureVImage('vanilla/Glow_217.png');
+      if (tex) {
+        const locked = p.setForbiddenCooldownLocked;
+        const bob = locked ? 0 : Math.round(Math.sin((p.miscCounter / 300) * Math.PI * 2) * 6);
+        // 珠径/珠色（含闩态钉值）单源进 drawForbiddenGlowOrbs——闩态珠照画
+        const headArmorId = accDollEquip?.head ?? 0;             // drawinfo.head==238（:309-312
+        const off = headArmorId === 238 ? 4 : 0;                 //   =Safeman 太阳帽档,+4）
+        const cxp = p.x + p.w / 2 + p.facing * -(10 + off);
+        const cyp = p.y + p.h - 24 + p.gravDir * (bob - (20 + off));
+        ctx.save();
+        ctx.imageSmoothingEnabled = false;
+        const bodyDye = p.inv.dye[1];
+        const dyeVid = bodyDye ? viIdFromKey(ITEM_DEFS[bodyDye.id]?.key ?? '') ?? -1 : -1;
+        const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
+        let src: HTMLImageElement | ImageBitmap | HTMLCanvasElement = tex;
+        if (emu) {
+          const sc = document.createElement('canvas');
+          sc.width = tex.width; sc.height = tex.height;
+          const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+          sctx.drawImage(tex, 0, 0);
+          const id = sctx.getImageData(0, 0, sc.width, sc.height);
+          emu.uniforms.uDirection = p.facing;
+          this.applyDyeToImageData(id.data, sc.width, sc.height, emu);
+          sctx.putImageData(id, 0, 0);
+          src = sc;
+        }
+        ctx.translate(cxp, cyp);
+        if (p.facing === -1) ctx.scale(-1, 1);                   // playerEffect（body 翻转族）
+        if (locked) ctx.filter = 'brightness(0.75) hue-rotate(20deg)';   // 蓝移近似(×(0.5,0.5,1))
+        ctx.drawImage(src as CanvasImageSource, -tex.width / 2, -tex.height / 2);
+        if (glow) drawForbiddenGlowOrbs(ctx, glow, p.miscCounter, locked);   // 闩态照画（红蓝-M ③）
+        ctx.filter = 'none';
+        ctx.restore();
+      }
+    }
     // ---- 手持物层（DrawPlayer_27_HeldItem）：weaponDrawOrder 默认 BehindFrontArm
     //      （PlayerDrawSet.cs:358）= 躯干/头/盾(26)【之上】、仅前臂 28_ArmOverItem 之下
     //      （LegacyPlayerRenderer.cs:233-235；4952 BehindBackArm/高尔夫收势
@@ -14301,7 +14390,10 @@ export class Renderer {
         }
         const xOff = (d.xOffset ?? 0) * (p.facing < 0 ? -1 : 1);
         const anchorX = p.x + p.w / 2 + xOff;
-        const anchorY = p.y + p.h - (42 + (d.heightBoost ?? 0)) / 2 + (d.yOffset ?? 0) + mnt.playerOffset;
+        // 锚 Y = mountedCenter + YOffset（PlayerOffset 两处相消——净式见
+        // mountTextureAnchorY 头注；勿再 +mnt.playerOffset：那是 Mount.Draw num2
+        // 的字面项，PlayerDrawSet.cs:430 已在 Position.Y 预减同值）
+        const anchorY = mountTextureAnchorY(p.y + p.h, d.heightBoost, d.yOffset);
         ctx.save();
         // ---- 机身倾斜（Mount.cs Hover 尾段 :3468-3521 写 player.fullRotation）：
         //      原版 mount 贴图与玩家本体同在 PlayerDrawSet 绘制缓存里，TransformDrawData

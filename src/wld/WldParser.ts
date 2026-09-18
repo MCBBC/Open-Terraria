@@ -1,7 +1,13 @@
 // .wld 地图解析器（Terraria 1.4+，version >= 210）
 // 格式参考 TEdit（Terraria-Map-Editor）的 World.FileV2.cs，此处为独立 TS 实现。
-// 只支持读取：section header / header flags / tiles（RLE）/ chests / town npcs。
-// bestiary 等尾部 section 通过 sectionPointers 跳过，不做 footer 校验。
+// 解码面（段界全吃 FFH sectionPointers[0..10] 重定位,与原版 LoadWorld_Version2
+// WorldFile.cs:1774-1855 逐段 Position!=positions[i] 同序）：header → tiles(RLE)
+// → chests → signs → npcs(shimmered/镇NPC/SavesAndLoads) → TileEntities[5]
+// → 压力板[6] → townManager[7] → bestiary[8..9] → creativePowers[9..10]。
+// footer 不消费（尾部段按指针 seek,无需原版式 BadSectionPointer/BadFooter 校验）。
+// ★红蓝-L2①（2026-09-18）勘误：旧头注「bestiary 等尾部 section 通过
+// sectionPointers 跳过」系 SW-FX35 前的陈账——该批起压力板/townManager/bestiary/
+// creativePowers/TE 已全量解码（各段注锚 pointers 槽位）,跳过说不成立。
 import { BinaryReaderLE } from './BinaryReaderLE';
 import type { SeedFlags } from '../world/gen/SeedEasterEggs';
 

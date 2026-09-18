@@ -138,59 +138,11 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   794:  { dmg: 0.03 },                  // 猩红护腿（:13470 同支）
   375:  { dmg: 0.03 },                  // 钴护腿 CobaltLeggings（:13511 case,minionDamage+0.03 @13516）
   379:  { dmg: 0.07 },                  // 秘银链甲 MythrilChainmail（:13534 case,minionDamage+0.07 @13539）
+  2277: { dmg: 0.05 },                  // 稽古衣 Gi（:13390 case,minionDamage+0.05——组A 单件面批 2026-09-18 补;非召唤面仍走 accfx 甲件环）
+  4983: { dmg: 0.05 },                  // 水晶刺客上衣 CrystalNinjaChestplate（:13728 case,minionDamage+0.05,同批补;huntressAmmoCost90 走 ARMOR_AMMO_SAVE_VID 单源）
 };
 
-/** 套装奖励中的召唤系条目（Player.cs:15905-16167；槽序键同 ARMOR_SET_BONUSES） */
-export interface SummonSetFx extends SummonFx {
-  /** 黑曜套装鞭攻速（whipUseTimeMultiplier *= 1/1.15 → 鞭 useTime ×1/1.15） */
-  whipSpd?: number;
-  /** 行为型：星尘守护者（套装在身 → buff 187 + 常驻 proj 623） */
-  guardian?: boolean;
-  /** 女猎手 T2/T3 套装旗标（Player.cs:16119-16122 / :16145-16149 setHuntressT2）：
-   *  爆炸机关弹 694-696 命中上 Oiled 门（StatusNPC :10786）+ 机关冷却 90→60/30
-   *  （GetExplosiveTrapCooldown :66109-66119,冷却档未接登记） */
-  huntressT2?: boolean;
-  /** ★批②（2026-08-31）：DD2 套装专精旗标直通位——原版写入链 =
-   *  ArmorSetBonuses.Benefits.SquireTier2(player) 等（Terraria.DataStructures/
-   *  ArmorSetBonuses.cs:68-125）置 Player.setSquireT2/…（Player.cs:2811-2831），
-   *  T3 方法【同时】置 T2 旗（:92-125）。消费点：MinionProj AI_130 学徒 T2
-   *  （range×1.5/angleRatioMax0.1/弹速×1.4 :69331-69335）、AI_134 侍从 T2 弩速
-   *  16→21（:69591-69593）、GetBallistraShotDelay T3 档（:69720-69736）。经
-   *  equipStats.summonSet 直挂透传（computeEquipStats 不改行） */
-  squireT2?: boolean;
-  apprenticeT2?: boolean;
-  monkT2?: boolean;
-  squireT3?: boolean;
-  apprenticeT3?: boolean;
-  monkT3?: boolean;
-  huntressT3?: boolean;
-}
-
-export const SUMMON_SET: Record<string, SummonSetFx> = {
-  '283|51|47': { slot: 2 },                              // 绿藻召唤头
-  // 神圣召唤头(Player.cs:16023-16028:head 254/258 +1 maxMinions×2)——旧键
-  // '24|229|*'(hs24=红帽/hs23=空槽)致真套装永不触发+红帽误触发,2026-08-13 修
-  '254|24|23': { slot: 2 }, '254|24|212': { slot: 2 },
-  '254|229|23': { slot: 2 }, '254|229|212': { slot: 2 },
-  '258|24|23': { slot: 2 }, '258|24|212': { slot: 2 },
-  '258|229|23': { slot: 2 }, '258|229|212': { slot: 2 },
-  '82|53|48': { slot: 1, whipRange: 0.2 },               // 提基
-  '134|95|79': { dmg: 0.25 },                            // 诡异 +25%
-  '160|168|103': { dmg: 0.10 },                          // 蜂 +10%
-  '162|170|105': { dmg: 0.12 },                          // 蜘蛛 +12%
-  '185|187|127': { dmg: 0.15, whipRange: 0.3, whipSpd: 1 / 1.15 }, // 黑曜（+15%伤/鞭程+30%/鞭速+15%）
-  // ---- DD2 八组套装（各 maxTurrets++;键=hs|bs|ls 即源码 head/body/legs 偏移段；
-  //      旗标写入链 = ArmorSetBonuses.cs:68-125 Benefits 方法,:475-482 注册表;
-  //      T3 方法同置 T2 旗(:92-125)——批②(2026-08-31)接通 MinionProj 消费位）----
-  '204|201|145': { sentry: 1, squireT2: true },            // Squire T2（:475;3800-3802）
-  '203|200|144': { sentry: 1, apprenticeT2: true },        // Apprentice T2（:476;3797-3799）
-  '205|202|146': { sentry: 1, huntressT2: true },          // Huntress T2（:477;3803-3805）
-  '205|202|147': { sentry: 1, huntressT2: true },          // Huntress T2 腿变体
-  '206|203|148': { sentry: 1, monkT2: true },              // Monk T2（:479;3806-3808）
-  '210|204|152': { sentry: 1, squireT3: true, squireT2: true },        // Squire T3（:481）
-  '211|205|153': { sentry: 1, apprenticeT3: true, apprenticeT2: true },// Apprentice T3（:482）
-  '212|206|154': { sentry: 1, huntressT3: true, huntressT2: true },    // Huntress T3
-  '212|206|155': { sentry: 1, huntressT3: true, huntressT2: true },    // Huntress T3 腿变体
-  '213|207|156': { sentry: 1, monkT3: true, monkT2: true },            // Monk T3
-  '189|190|130': { guardian: true },                     // 星尘（不加槽，守护者行为型）
-};
+/** ★BJ147 组D（2026-09-17）：SUMMON_SET / SummonSetFx 已并入 vanillaArmorSets.ts
+ *  单表（ARMOR_SET_BONUSES 召唤字段族条目 + summonSetOnly 通道标记）——套装判定
+ *  唯一事实源 = 单表;本文件只保留散件/配饰面 SUMMON_GEAR（含 SummonFx 基础字段）。
+ *  对账：node tools/recon-armorset-1457.mjs（键集/数值/特效旗对拍,DRIFT 必须=0）。 */

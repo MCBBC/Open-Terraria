@@ -76,6 +76,9 @@ function longDate(): string {
 
 export class Tombstone extends Entity {
   w = 14; h = 14;
+  /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true——墓碑
+   *  在原版即 Projectile,HandleMovement 面） */
+  hoik = true;
   angle = 0;             // 翻滚角（aiStyle17：rotation += vx*0.1，落地随摩擦冻结）
   /** 原版墓碑样式 0-10（Tiles_85 的 2×2 样式块起点列 = style*2） */
   style = 0;

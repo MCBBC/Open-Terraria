@@ -132,7 +132,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -366,7 +366,7 @@ import {
 } from '../net/journeySync';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { PlayerHurtFlags } from '../net/protocol';
-import { bindGhostBudgetHost } from '../entities/SpectreSoulProj';
+import { bindGhostBudgetHost, projPveNumHits } from '../entities/SpectreSoulProj';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { cround } from './csCompat';
@@ -940,21 +940,26 @@ function killTileBreakDustAmount(sheet: number, frameX: number): number {
     || sheet === 625 || sheet === 627) return 5;                    // 苔石族
   return KILL_TILE_DUST[sheet] ?? 10;
 }
-// tileAxe（Main.cs:7347-7364）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
-// ★583-589 七棵宝石树全在原版表内（:7165-7171），此前漏 588 钻石树（可斧性缺失）
-const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 704]);
-// tileHammer（Main.cs:7343-7346 全表仅四件，全树再无他处写）：恶魔祭坛 26/复刻祭坛
-// 695/暗影珠 31（猩红之心=同 tile 的 frameX≥36 样式，AddShadowOrb :32384）/复刻珠
-// 696——锤专属族：分派次序 tileHammer→tileAxe→pick（Player.cs:46052-46166），
-// 镐/斧入本族=无动作；PickTile 直调通道（钻头坐骑 Mount.cs:3115/挖地龟
-// Projectile.cs:39479）无此门=原版可钻碎
-export const TILE_HAMMER_SHEETS = new Set([26, 695, 31, 696]);
+// tileAxe/tileHammer（Main.cs:7347-7364/:7343-7346）——★BJ158②（2026-09-18）：本地
+// 副本拆除收编 data/tiles.ts 单源（本仓曾有 Game/SmartSelect/SmartCursor 三文件六本
+// 副本;tileAxe 消费 :19359/:19364/:20394 工具分派,tileHammer 消费 :12525/:19723/:19825）。
+// ★583-589 七棵宝石树全在原版表内（:7165-7171），此前漏 588 钻石树（可斧性缺失）——
+// 历史修复已并入单源。
+// tileHammer 语义备案：恶魔祭坛 26/复刻祭坛 695/暗影珠 31（猩红之心=同 tile 的
+// frameX≥36 样式，AddShadowOrb :32384）/复刻珠 696——锤专属族：分派次序
+// tileHammer→tileAxe→pick（Player.cs:46052-46166），镐/斧入本族=无动作；PickTile
+// 直调通道（钻头坐骑 Mount.cs:3115/挖地龟 Projectile.cs:39479）无此门=原版可钻碎。
 // Sets.Clouds（TileID.cs:197 Factory.CreateBoolSet）：云块族——镐伤 ×2 分档（GetPickaxeDamage:54552）
 export const TILE_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
 // tileRope（Main.cs:9452-9460 全表九件）：绳/链/彩带族——镐=100 一击（GetPickaxeDamage:54624）；
 // 504 神秘蛇绳在表内但 PickTile:54401 对其先早退（手持镐到不了 =100 支），
 // tileHitDamage 内有 dmg=0 特例承接该语义
 export const TILE_ROPE_SHEETS = new Set([213, 214, 353, 365, 366, 504, 449, 450, 451]);
+// 绳族 tileLavaDeath 真值（Main.cs:8292-8294：213=true/353=true/214=false;365/366/504
+// 全表未置=false）——PlaceThing IsBlockedByLava(:41809) → legacy LiquidPlace
+// （TileObjectData.cs:5045-5063 :5056 岩浆→tileLavaDeath 拒）的绳族半边。
+// 214 链（ItemID 85 Chain→createTile 214）岩浆可置=原版奇行照抄（勿"修"）。
+const ROPE_LAVA_DEATH_SHEETS = new Set<number>([213, 353]);
 // 土壤族二倍速（GetPickaxeDamage:54616 `num += pickPower`）：{0土,40泥,53沙,57灰,
 // 59淤泥,123淤,224雪泥,147雪,397硬沙}——铜镐挖土 2 击非 3 击
 export const SOFT_DIG_SHEETS = new Set([0, 40, 53, 57, 59, 123, 224, 147, 397]);
@@ -1444,7 +1449,11 @@ const TILE_BREAK_WHEN_PLACING = internalIdsOfVanSheets([
  *  :84-86 写入前 KillTile 清除）；特例 484 滚石仙人掌/654 TNT桶虽属 tileCut,
  *  CanPlace :357 显式排除仍阻挡。消费面三处共此一式——门双锚候选占用判定
  *  （tryPlace 门支）/火把占用门/通用放置清格相；validateAnchors
- *  （TileAnchorValidator.ts:169-176）sheet 域同式互证（该文件本批不触）。 */
+ *  （TileAnchorValidator.ts:169-176）sheet 域同式互证（该文件本批不触）。
+ *  ★域钉（2026-09-18 tile 双域普查）：混合域签名——typeId=TILE_DEFS【内部 id】
+ *  （查 TILE_CUT/TILE_BREAK_WHEN_PLACING 两张内部键集），sheet=【原版 TileID】
+ *  （484/654 排除位按 sheet 域字面量）。两参皆裸 number,调用点换位会静默
+ *  错域（tile 双域重叠率 752/761——错域几乎必命中错项而非落空），勿倒置。 */
 function placeObstructionClearable(typeId: number, sheet: number): boolean {
   return (TILE_CUT.has(typeId) && sheet !== 484 && sheet !== 654)
     || TILE_BREAK_WHEN_PLACING.has(typeId);
@@ -1502,7 +1511,11 @@ const BONUS_CUT_TILES = internalIdsOfVanSheets([233]);
 //  TileID.Sets.IsATreeTrunk[tile.type]（TileID.cs:161 {5,72,583-589,596,616,634}）
 //  ∪ tile.type==323（323=棕榈树干 PalmTree,单格整树——非仙人掌,仙人掌是 80 且不在
 //  此面）。树干/棕榈皆不在 Main.tileCut → 此面是弹域唯一可割它们的通道。
-const AXEARANG_EXTRA_CUT_SHEETS = internalIdsOfVanSheets([
+// ★改名（2026-09-18 tile 双域普查）：原名 AXEARANG_EXTRA_CUT_SHEETS 是域谎——
+//  本表经 internalIdsOfVanSheets 构建期平移,键=【内部 id】非 sheet（唯一消费点
+//  cutTile :387xx `has(t)` t=st.get 内部域）,行为本就正确;摘 _SHEETS 后缀防未来
+//  误按 sheet 域复制/消费（内部↔sheet 重叠率 752/761,错域=必命中错项）。
+const AXEARANG_EXTRA_CUT_IDS = internalIdsOfVanSheets([
   5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 323,
 ]);
 // ★BJ108 登记债②清偿（2026-09-17）：Projectile.trap=true 型录（Projectile.cs
@@ -2675,6 +2688,10 @@ export interface GameCallbacks {
   onBuffsChanged?: () => void;
   /** Buff 栏逐帧刷新（UI 侧 tickBuffLive——并行批次接线补声明） */
   onBuffsFrame?: () => void;
+  /** ★SW-BJ157 stackSplit 计时面逐拍驱动（UI 侧 tickStackSplitMain——Main.Update
+   *  :62728/:63422 面,60Hz 累加注入,【暂停期照走】=开包 autoPause 连取不冻结;
+   *  勿挂 fixedUpdate——该域 !paused 门内冻结） */
+  onStackSplitTick?: () => void;
   /** 读墓碑（Sign 阅读界面；tileSign 右键族已改走 onSignDialog 双态面板） */
   onReadSign?: (text: string) => void;
   /** 路牌对话框（OpenSign → tileSign：读=编辑/关闭双态,同锚再右键=关牌）。
@@ -4473,7 +4490,13 @@ export class Game implements GameHooks {
         //  此前恒 true = 箭/回旋镖/召唤弹等非魔法族全飘幽灵治疗虚入账。投影复用
         //  A3 类别通道单源 projClassOfProjId（projectileData 类旗三连序，禁再抄表）
         if (num2 > 0) {
-          this.applyLifeSteal('ghost', num2, 1, rp.cx, rp.cy,
+          // ★BJ157-④（2026-09-18）：numHits 实参对齐原版——Damage_PVP【不】自增
+          //  numHits（++ 仅 Damage_PVE_Inner :14263），ghostHeal(:14741-44) 读弹幕当前
+          //  计数（PVE 累计受理命中数;新弹 0 档 ⇒ 首跳率 0.20,旧硬编 1 = 0.15
+          //  off-by-one）。读取单源 = SpectreSoulProj.projPveNumHits（未跟踪类/脏值
+          //  按 0 档=原版 SetDefaults :706 numHits=0）。vampireHeal 原版不读 numHits
+          //  （固定 0.075,:12112-12123）——下方 vampire 实参无消费,不动
+          this.applyLifeSteal('ghost', num2, projPveNumHits(pr), rp.cx, rp.cy,
             projClassOfProjId(pr.projId) === 'magic');
         }
         if (pr.projId === 304) this.applyLifeSteal('vampire', num2, 1, rp.cx, rp.cy, false);
@@ -7742,6 +7765,8 @@ export class Game implements GameHooks {
   /** 渲染锁帧时间戳(帧率上限用;逻辑 tick 恒 60Hz 不受影响) */
   private _lastCapTs = 0;
   private _paintedFrames = 0;
+  /** ★SW-BJ157 stackSplit 计时面 60Hz 累加器（帧率无关;暂停期照走） */
+  private stackSplitAcc = 0;
   private _paintWaits: Array<{ frames: number; res: () => void }> = [];
   /** 世界首帧真实上屏等待(#三开压测批"就绪瞬间黑一下"):渲染帧完成 frames 次
    *  后 resolve——加载页/菜单幕布据此延后撤除,世界在幕布【底下】先渲染完整,
@@ -7820,6 +7845,17 @@ export class Game implements GameHooks {
       this._autoSaveAt = 0;
     }
     this.applyAutoPauseUI();   // autoPause"开界面暂停"逐帧重算（CanPauseGame 同构,②）
+    // ★SW-BJ157（2026-09-18）：stackSplit 计时面 60Hz 累加注入（Main.Update 面——
+    //  帧率无关、暂停期照走；!paused 域的 fixedUpdate 冻结=开包 autoPause 连取断拍,
+    //  故挂常走帧路径。elapsed 累加封顶 5 步=fixedUpdate 同款爆帧防雪崩）
+    this.stackSplitAcc += elapsed;
+    let ssSteps = 0;
+    while (this.stackSplitAcc >= FIXED_DT && ssSteps < 5) {
+      this.stackSplitAcc -= FIXED_DT;
+      this.cb.onStackSplitTick?.();
+      ssSteps++;
+    }
+    if (ssSteps === 5) this.stackSplitAcc = 0;
     // ★SW-BJ72 2026-09-14：光标跟随态逐帧清空（MouseOversClear Main.cs:17213——Update
     //  头部【无条件每帧】清 _mouseTextCache+cursorItemIcon 五字段+signHover/signBubble,
     //  先于 :17372 gamePaused 门;1458 :17213 同位零漂移）。本仓五字段重置曾只挂
@@ -8747,6 +8783,13 @@ export class Game implements GameHooks {
       //  if(controlLeft)/else if(controlRight) 同按左优先——inputX 合值丢双按信息）
       player.inputLeft = inp.downAction('Left');
       player.inputRight = inp.downAction('Right');
+      // ★Forbidden 指令面光标世界坐标（组C 终盘 2026-09-18）——Player.MinionRestTargetAim
+      // （Player.cs:57599 Main.MouseWorld）入参;Player 无相机,screenToWorld 单源供给
+      {
+        const [aimWx, aimWy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        player.inputAimWorldX = aimWx;
+        player.inputAimWorldY = aimWy;
+      }
     }
     // controlTorch（TriggersSet.cs:794）：火把键电平——与智能选取同源绑定
     // （updateSmartSelect 同式）；消费=AFK 计数门六键之一（Player.cs:25692）
@@ -10935,7 +10978,8 @@ export class Game implements GameHooks {
         : this.scene?.zoneTemple ? 'temple'
           : this.scene?.zoneDungeon ? 'dungeon' : undefined;
     }
-    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl),
+    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl)
+      || player.equipStats.nightVision,   // 夜视头盔 3109/超亮头盔 4008 甲面旗（:13408-11,组A 批）
       this.blackout || player.buffs.has(BuffType.Blackout),   // buff 80 双源（:190-194）
       player.buffs.has(BuffType.Darkness), {                  // buff 22 blind（:185-189 + GlobalBrightness 1.0）
         headcovered: player.buffs.obstructed,                 // buff 163（Player.cs:11421;LightingEngine.cs:199-203）
@@ -20750,10 +20794,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const NO_POUND = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484,
       138, 664, 665, 711, 712, 713, 714, 715, 716]);   // CanPoundTile 型集 ∪ Sets.Boulders
     if (NO_POUND.has(sheet)) return false;
-    const FORBIDS_SLOPING = new Set([21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597]);
+    // ★BJ158①（2026-09-18）：本地 sheet 裸值集拆除,收编 data/tiles.ts 单源
+    //  FORBIDS_SLOPING_SHEETS（原 WorldGen.cs:82022-82039 型集,六副本两名双域之一）
     const aboveSheet = y > 0 && st.get(x, y - 1) !== 0
       ? TILE_DEFS[st.get(x, y - 1)]?.vanilla?.sheet ?? -1 : -1;
-    if (FORBIDS_SLOPING.has(aboveSheet)) return false;
+    if (FORBIDS_SLOPING_SHEETS.has(aboveSheet)) return false;
     return this.canKillTile(x, y);   // SW-G1 2026-09-03：原版尾=CanKillTile(x,y)（:82001）全式
   }
 
@@ -23345,7 +23390,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *   Mining 药水 -0.25（:9818）/ambrosia -0.05（:12457）/食物档 -5/10/15%（:11534+）/
    *   糖分冲刺(192) -0.2（:9634-9637，2026-08-22 补）/风筝 buff -0.1（1457 :10004;
    *   旧 1456 钉 0.15 已反转）/chiselSpeed acc（古凿 4056/创造之手 5126）-0.25
-   *   （:12610-12612）；饥饿/极饿 +0.05/+0.15（:11571/:11595——变慢，正号）。
+   *   （:12610-12612）/挖矿甲面折扣池 equipStats.pickSpeedOff（Mining 套 :299-303 +
+   *   410/411/5589/5590 :13944-13947,组A 批 2026-09-18）；
+   *   饥饿/极饿 +0.05/+0.15（:11571/:11595——变慢，正号）。
    *  消费面：tryMine 挖掘冷却（:45954/:45163 itemTime=useTime*pickSpeed）+
    *  Block Swap 镐段冷却（:40201 ApplyItemTime(bestPickaxe, pickSpeed) fail 拍 /
    *  :40221 num4 成功拍）。
@@ -23359,6 +23406,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       - (buffs.has(BuffType.SugarRush) ? 0.2 : 0)
       - (buffs.has(BuffType.KiteBuff) ? 0.1 : 0)   // ★1457 :10004 pickSpeed -= 0.1（旧 1456 钉 0.15 已反转）
       - (this.player.equipStats.chiselSpeed ? 0.25 : 0)
+      - (this.player.equipStats.pickSpeedOff ?? 0)   // 挖矿甲面折扣池（Mining 套 + 410/411/5589/5590,组A 批；★BJ162 ??0 一线防御：桩面 equipStats 空对象/未落该字段时 undefined 参运算=NaN 污染整式——加括号,`-x ?? 0` 会被优先级解析为 `(-x) ?? 0` 且 NaN ?? 0 仍 NaN）
       - [0, 0.05, 0.10, 0.15][buffs.wellFedTier ?? 0]
       + (buffs.hungerPickSpeed ?? 0);   // 饥饿/极饿 pickSpeed += 0.05/0.15（:11571/:11595——变慢，正号）
   }
@@ -24740,59 +24788,112 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     const ow = def.w ?? 1, oh = def.h ?? 1;
-    // 绳索(RopeCoil 语义):从放置点向下延伸至实心/最多 10 格
-    // ★ropeLavaGate（2026-09-03 十四批）：下延逐格岩浆拒置（遇岩浆截断）。
-    //  定谳（1457 亲读）：tileLavaDeath[213]=true（Main.cs:8292）+ PlaceThing 头门
-    //  （Player.cs:40058 → IsBlockedByLava :41809-41824）——tile 213 全仓无 TileObjectData
-    //  （TileObjectData.cs 唯一 213 命中=Beam AnchorAlternateTiles :2481）→ 静态
-    //  LiquidPlace 回落（TileObjectData.cs:5045-5063,:5056 岩浆→tileLavaDeath 拒）=
-    //  点击格岩浆本就不可置（liqGateLegacy :19525 已拦）;本分支此前绕过的是【下延段】
-    //  ——干格点击向下伸进岩浆格照写。粒度=遇岩浆【break 截断,不写该格】：原版续放
-    //  retarget 门 CheckRopeUsability（Player.cs:41826-41858,:41835
-    //  `(flag || !Main.tile[num4, num3 + 1].lava())`,flag=createTile==214 蛛丝绳）
-    //  同样在岩浆前止步 → 绳列永不伸入岩浆（岩浆格绳若经绳圈弹 PlaceTile 链写入,
-    //  亦被液体面死亡检查清算——Liquid.cs:1199-1216 CheckLavaDeath→KillTile）。
-    //  水格放行：tileWaterDeath[213] 全表未置（Main.cs:8200-8206/:8448/:9643/:9647
-    //  仅 215/4/51/697/93/98/552/405/646/372）→ 绳水中共存=原版语义（PlaceTile 液体
-    //  门排除表 WorldGen.cs:59501-59506 无 213;写入不清液体,setTile 同口径）。
-    if (viIdFromKey(itemDef.key) === 965) {
-      const ropeTile = TILE_BY_KEY['v_213_rope']!;
-      let placed = 0;
-      for (let y = ty; y < ty + 10; y++) {
-        // ★G1 谓词形态批（2026-09-04）：下延止步门=裸 active()（PlaceThing_Tiles_
-        // CheckRopeUsability Player.cs:41835/:41859 `tile.active()` 两处——走查 while 与
-        // 落点 retarget 同位）→ hasTile（致动绳格=占用照止步,曾 isActive 会穿致动绳续延）
-        // ★豁免半边补全（2026-09-04 蓝队）：走查落点 retarget 门 :41856-41859
-        // `!tile.active() || (tileCut[tile.type] || BreakableWhenPlacing[tile.type])`
-        // ——首个非绳格若为 tileCut∪BWP 活性格仍 retarget 到该格 → 绳写入该格。
-        // PlaceThing_Tiles 门（Player.cs:40072 `!tile.active() || IsReplaceableBlock`
-        // :40079-40087：tileCut∪BWP∪drip{373-375,461,709} 放行,484/711 carve-out 拒）
-        // 与 legacy PlaceTile(213) 头门 `!tileSolid[213]`（:59857）恒过 → 直写覆写
-        // （case 213 无派发,:60766 default 支无 KillTile）。写入后止步=走查止于
-        // 首个非绳格（不走查穿 cut 格续延）。
-        let obstacle = false;
-        if (!st.inBounds(tx, y)) break;
-        if (st.hasTile(tx, y)) {
-          const wt = st.get(tx, y);
-          const ws = TILE_DEFS[wt]?.vanilla?.sheet ?? -1;
-          const clearable = (TILE_CUT.has(wt) && ws !== 484 && ws !== 711)
-            || TILE_BREAK_WHEN_PLACING.has(wt)
-            || ws === 373 || ws === 374 || ws === 375 || ws === 461 || ws === 709;   // IsADripTile（TileID.cs:157）
-          if (!clearable) break;
-          obstacle = true;
+    // ★绳放置面 1:1 重写（2026-09-18 用户实报"绳子一根放置下去好长"）：旧实现
+    //  =RopeCoil 弹语义误植——一次 use 级联下延至多 10 格仅耗 1 件。原版绳物品
+    //  （useStyle1/useTime 8/useAnimation 15/autoReuse/consumable,Item.cs:12511-12522）
+    //  一次 use 恒写【1 格】;按住连放=autoReuse+ItemTimeIsZero 节拍（mouseDown 电平
+    //  →tryPlace 逐拍→本臂 useTime 门=8 拍/格,每格耗 1 件）。谓词=tileRope
+    //  [createTile]（Player.cs:40040,tile 域全族）→ TILE_ROPE_SHEETS。
+    //  门序（PlaceThing_Tiles Player.cs:40032-40101）：
+    //  ① :40063 ItemTimeIsZero+itemAnimation>0+controlUseItem（本仓 useTime 门承载,
+    //     mouseDown 电平+useSwing 动画面与全放置族同约定）;
+    //  ② :40041 CheckRopeUsability retarget（:41826-41858,先于 TryReplacingTiles
+    //     :40043——本仓 vid 965 被 ROPE_ITEM_VIDS 拒于块换外无序差;place_v 面板件
+    //     经块换臂先行的次序差登记）;
+    //  ③ :40061-40063 主门 `(!active && !IsBlockedByLava) || IsReplaceableBlock`：
+    //     IsBlockedByLava(:41809)→legacy LiquidPlace(TileObjectData.cs:5045,
+    //     :5056 岩浆→tileLavaDeath 拒)——绳族真值 ROPE_LAVA_DEATH_SHEETS
+    //     {213,353};水 tileWaterDeath 绳族全未置=放行（写入不清液体,setTile 同口径）;
+    //  ④ 支撑门 = AssortedThings 尾支 catch-all（:41565-41581,绳无专属支落【else】）：
+    //     四邻 active&&(tileSolid||IsBeam||tileRope||轨314) 或 邻/自身 wall>0
+    //     （tileSolid=本仓 solid||platform 双旗——平台 Main.cs:8032 tileSolid 双 true）;
+    //  ⑤ flag2 清障（:41630-41660）：目标 cut∪BWP∪drip 活性格（484/711 已被③拒）
+    //     → KillTile（带掉落）;num9=下方非 78/380/579 例外拒置;
+    //  ⑥ PlaceTile 写 1 格（:59857 `!tileSolid[213]` 头门恒过,213 无 case 派发直写）
+    //     +消耗 1+ApplyItemTime（useTime×tileSpeed 与通用放置同式 :25116 区）。
+    //  retarget 走查定谳（:41829-41860）：点击格=活性绳 → 沿 绳/轨314/平台/种植箱380
+    //  向下（连续非绳"隙"≤5,num=5;裸 active()=hasTile 致动格照占用）;走查落点
+    //  !active || cut∪BWP（全表无 carve-out,与③ IsReplaceableBlock 的 484/711 排除
+    //  是两套门勿混）→ tileTargetY=落点。岩浆下邻止步 :41835
+    //  `(flag || !tile[num4,num3+1].lava())`,flag=createTile==214=【链】（ItemID 85
+    //  Chain→tile 214,旧注"蛛丝绳"系误记,勘正）。
+    if (TILE_ROPE_SHEETS.has(g0)) {
+      if (this.player.useTime > 0) return;                    // ①:40063 ItemTimeIsZero
+      const ropeTile = TILE_INTERNAL_BY_SHEET.get(g0);
+      if (ropeTile === undefined) return;
+      // ② retarget 走查（CheckRopeUsability :41828-41860）
+      const lavaPass = g0 === 214;                            // :41832 flag（链）
+      if (st.inBounds(tx, ty) && st.hasTile(tx, ty)
+        && TILE_ROPE_SHEETS.has(TILE_DEFS[st.get(tx, ty)]?.vanilla?.sheet ?? -1)) {
+        let gap = 0;
+        let wy = ty;
+        for (;;) {
+          if (!st.inBounds(tx, wy) || !st.hasTile(tx, wy)) break;            // active()（裸位,G1 口径）
+          const ws = TILE_DEFS[st.get(tx, wy)]?.vanilla?.sheet ?? -1;
+          if (!(TILE_ROPE_SHEETS.has(ws) || ws === 314
+            || PLATFORMS_SHEETS.has(ws) || ws === 380)) break;               // 续走类型集 :41835
+          if (!(wy < st.h - 5)) break;                                       // :41835 y<maxTilesY-5
+          if (!lavaPass && st.inBounds(tx, wy + 1) && st.liquid[st.idx(tx, wy + 1)] > 0
+            && st.liquidType[st.idx(tx, wy + 1)] === LIQUID_TYPE.LAVA) break;   // :41835 岩浆下邻
+          if (TILE_ROPE_SHEETS.has(ws)) gap = 0;                             // :41837-41843 隙计数
+          else { gap++; if (gap > 5) break; }
+          wy++;                                                              // :41845 num3++
         }
-        if (st.liquid[st.idx(tx, y)] > 0 && st.liquidType[st.idx(tx, y)] === LIQUID_TYPE.LAVA) break;   // ropeLavaGate
-        st.setTile(tx, y, ropeTile, 0, 0);
-        placed++;
-        if (obstacle) break;
+        // 落点 retarget（:41855-41860）：!active || cut∪BWP → 目标下移到落点
+        const fwActive = st.inBounds(tx, wy) && st.hasTile(tx, wy);
+        if (!fwActive) {
+          ty = wy;
+        } else {
+          const fw = st.get(tx, wy);
+          if (TILE_CUT.has(fw) || TILE_BREAK_WHEN_PLACING.has(fw)) ty = wy;
+        }
       }
-      if (placed > 0) {
-        this.player.inv.removeHeld(1);
-        this.player.useTime = 14;
-        this.sfx.play('place');
-        this.cb.onInventoryChanged();
-        this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[ropeTile]?.key ?? ropeTile, cause: 'rope', n: placed });   // 行为录制：绳索下延汇总
+      // ③ 主门（:40061-40063）
+      if (!st.inBounds(tx, ty)) return;
+      if (st.liquid[st.idx(tx, ty)] > 0 && st.liquidType[st.idx(tx, ty)] === LIQUID_TYPE.LAVA
+        && ROPE_LAVA_DEATH_SHEETS.has(g0)) return;          // IsBlockedByLava→LiquidPlace
+      if (st.hasTile(tx, ty)) {
+        const t0 = st.get(tx, ty);
+        const t0s = TILE_DEFS[t0]?.vanilla?.sheet ?? -1;
+        // IsReplaceableBlock（:40076-40087）：tileCut-{484,711}∪BWP∪drip{373-375,461,709}
+        const replaceable = (TILE_CUT.has(t0) && t0s !== 484 && t0s !== 711)
+          || TILE_BREAK_WHEN_PLACING.has(t0)
+          || t0s === 373 || t0s === 374 || t0s === 375 || t0s === 461 || t0s === 709;
+        if (!replaceable) return;
       }
+      // ④ 支撑门（AssortedThings 尾支 :41565-41581）
+      const wallAt = (x: number, y: number): boolean =>
+        st.inBounds(x, y) && st.wall[st.idx(x, y)] > 0;     // 邻 wall>0 不问 active（:41570）
+      const ropeAnchor = (x: number, y: number): boolean => {
+        if (wallAt(x, y)) return true;
+        if (!st.inBounds(x, y) || !st.hasTile(x, y)) return false;
+        const b = TILE_DEFS[st.get(x, y)];
+        const bs = b?.vanilla?.sheet ?? -1;
+        return !!b && (b.solid || b.platform                 // tileSolid（solidTop 双旗并,8032）
+          || IS_BEAM_SHEETS.has(bs) || TILE_ROPE_SHEETS.has(bs) || bs === 314);
+      };
+      if (!(ropeAnchor(tx - 1, ty) || ropeAnchor(tx + 1, ty)
+        || ropeAnchor(tx, ty - 1) || ropeAnchor(tx, ty + 1) || wallAt(tx, ty))) return;
+      // ⑤ flag2 清障（:41630-41660）：cut∪BWP∪drip 目标 KillTile（带掉落）;
+      //  num9 例外=下方 78 陶盆/380 种植箱/579 悬垂草 → canPlace=false 拒置
+      if (st.hasTile(tx, ty)) {
+        const belowS = st.inBounds(tx, ty + 1)
+          ? (TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1) : -1;
+        if (belowS === 78 || belowS === 380 || belowS === 579) return;
+        this.breakTile(tx, ty, false);                      // KillTile 默认参（放置族路径）
+      }
+      // ⑥ 写 1 格 + 消耗 1 + ApplyItemTime
+      st.setTile(tx, ty, ropeTile, 0, 0);
+      this.player.inv.removeHeld(1);
+      {
+        const ut = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
+        this.player.useTime = ut && ut > 0
+          ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
+          : 14;
+      }
+      this.sfx.play('place');
+      this.cb.onInventoryChanged();
+      this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[ropeTile]?.key ?? ropeTile, cause: 'rope', n: 1 });   // 行为录制：绳放置（1 格/次）
       return;
     }
     // 火把锚定（TileObjectData tile4 + TileObject.CanPlace 1:1）：
@@ -38769,7 +38870,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★债刀-4 ②：1052 加砍候选（vanilla flag = tileCut ∪ IsATreeTrunk ∪ 323 的并集
     //  追加臂——出程段才并,ai[0]==0 条件在载体侧）
     const axearangExtraCut = extraCutTreeCactus === true && vid === 1052
-      && AXEARANG_EXTRA_CUT_SHEETS.has(t);
+      && AXEARANG_EXTRA_CUT_IDS.has(t);
     // ★BJ108 债② tileCutIgnorance（CutTilesAt :15376 ignore[tile.type]→continue）：
     //  判据收窄到可割候选（瓦罐∪TILE_CUT∪1052 加砍候选——非候选原路径本就零操作,
     //  ignore 判前移对其无观察面）;13 例外表内的格恒免判（ignore=false 直通）。

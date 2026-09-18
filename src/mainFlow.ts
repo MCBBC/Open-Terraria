@@ -56,8 +56,10 @@ export interface FlowHandle {
   newWorld(seed: string, w: number, h: number): Promise<void>;
   quickLoad(): Promise<void>;
   importWld(buf: Uint8Array): Promise<void>;
-  quitToMenu(): void;
-  doSave(silent?: boolean): void;
+  /** ★BJ144（2026-09-18）：转 async——退出等保存全链落定（原版 SaveAndQuit 语义） */
+  quitToMenu(): Promise<void>;
+  /** ★BJ144：全链（序列化+quicksave+槽位双 IDB）落定才 resolve;true=数据面全成功 */
+  doSave(silent?: boolean): Promise<boolean>;
   /** 导出存档为文件(自有 JSON 格式,与 __swFlow.loadJson 闭环) */
   doExportSave(): void;
   openSettings(inGame: boolean): void;
@@ -406,6 +408,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       grantToCursor: (itemId, stack, prefix) => ui.grantCraftToCursor(itemId, stack, prefix),
       onBuffsChanged: () => ui.refreshBuffs(),
       onBuffsFrame: () => ui.tickBuffLive(),
+      // ★SW-BJ157 stackSplit 计时面（RightClick 取件臂按住连取的 60Hz 驱动）
+      onStackSplitTick: () => ui.tickStackSplitMain(),
       // 自动保存（Main.autoSave 墙钟到点 → DoUpdate_AutoSave :19589 saveAndPlay）
       // silent=原版自动保存全程静默（:19594 无任何 UI/音效）；手动/退出保存仍提示
       onAutoSave: () => doSave(true),
@@ -1440,26 +1444,46 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     legacyShim = div;
   }
 
-  function quitToMenu() {
-    // R4-8（WF57:6649 SaveAndQuit 语义）：原版 SaveAndQuit 必入队存档后才断线回菜单
-    // ——本仓退出曾不落盘,"退出即存档"预期落空。存档读 game 引用,须先于 destroy();
-    // 序列化入参在调用帧同步取值,异步尾流不依赖 game 存活。异常不阻断退出
-    try { doSave(); } catch (e) { console.error('quitToMenu save failed', e); }
-    mobile?.destroy();
-    mobile = null;
-    game?.destroy();
-    game = null;
-    // 外部持有者同步摘引用(2026-08-13 泄露 review):__swGame 不清=旧 Game(整个
-    // 世界 store 数十 MB typed array)被 window 挂到下次进游戏才释放;ui.game
-    // 由 closeAll→detachGame 摘
-    (window as unknown as { __swGame?: Game | null }).__swGame = null;
-    currentWorld = null;
-    ui.closeAll();
-    showTitle();
+  /** ★BJ144 重复退出闸：保存屏期间 Esc 重开暂停菜单/再点退出等二次触发防双拆台 */
+  let quitting = false;
+  async function quitToMenu() {
+    if (quitting) return;
+    quitting = true;
+    try {
+      // R4-8（WF57:6649 SaveAndQuit 语义）：原版 SaveAndQuit 必入队存档后才断线回菜单
+      // ——本仓退出曾不落盘,"退出即存档"预期落空。
+      // ★BJ144（2026-09-18 用户实报「保存并退出有时没保存到」）定谳=fire-and-forget：
+      //  原版 SaveAndQuit（WorldGen.cs:6649-6667）先入 menuMode=10 保存屏,回调
+      //  SaveAndQuitCallBack（:6612-6635）里 Player.SavePlayer+WorldFile.SaveWorld
+      //  全部落盘后才 menuMode=0 回标题——【退出等保存完成】。本仓曾同步拆台+后台
+      //  存档:标题即现,保存链(worker 序列化+quicksave IDB+槽位 IDB)在后台跑;用户
+      //  关标签/刷新/秒点重进世界 → 读到旧槽位甚至整段丢失(探针 _savequit-nrounds:
+      //  修前 B 组「退出后立刷」10/10 丢档)。现=保存屏遮罩+冻结世界,doSave 全链
+      //  落定再拆台;保存失败 toast 后仍退出(不阻断,同原版失败可离开)
+      if (game) {
+        game.paused = true;   // 保存期冻结世界（menuMode=10 停 Update 同相;防 await 窗口状态漂出快照）
+        showSavingVeil(root);
+        try { await doSave(); } catch (e) { console.error('quitToMenu save failed', e); }
+        hideSavingVeil();
+      }
+      mobile?.destroy();
+      mobile = null;
+      game?.destroy();
+      game = null;
+      // 外部持有者同步摘引用(2026-08-13 泄露 review):__swGame 不清=旧 Game(整个
+      // 世界 store 数十 MB typed array)被 window 挂到下次进游戏才释放;ui.game
+      // 由 closeAll→detachGame 摘
+      (window as unknown as { __swGame?: Game | null }).__swGame = null;
+      currentWorld = null;
+      ui.closeAll();
+      showTitle();
+    } finally {
+      quitting = false;
+    }
   }
 
-  function doSave(silent = false) {
-    if (!game) return;
+  function doSave(silent = false): Promise<boolean> {
+    if (!game) return Promise.resolve(false);
     game.finishWorldJobs();   // ★PR-async：job 半程存档=重读档永久丢转化——先 drain 完再序列化
     // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
@@ -1467,18 +1491,22 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // game/currentWorld(2026-08-13 泄露 review),而 worldStore 落盘发生在 worker
     // 序列化完成的异步 .then 里——届时再读全局已为 null,「保存并退出」整段
     // worldStore.save 被跳过,世界列表槽位停在最近一次自动保存,重进即回退
-    // (2026-08-30 用户报)。序列化输入(world/player 等)经实参同步取值不受影响
+    // (2026-08-30 用户报)。序列化输入(world/player 等)经实参同步取值不受影响。
+    // ★BJ144(2026-09-18):quitToMenu 已改等全链落定,快照语义仍保留(双重保险)
     const slotMeta = currentWorld;
     const hardModeNow = !!game.world.flags.hardMode;
     const playTimeMs = cumulativePlayMs();
     saveClient.ensure();
-    void saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave()).then((json) => {
+    // ★BJ144：返回值改为【全链落定】promise——quitToMenu/更新横幅 reload 等
+    //  「退出即持久化」消费方 await 到序列化+quicksave+槽位双 IDB 写全部 settle,
+    //  不再 fire-and-forget(原版 SaveAndQuit 保存屏语义,WorldGen.cs:6612-6635)
+    return saveClient.save(game.world, game.player, playTimeMs, game.townNpcsForSave(), game.eventsForSave(), game.pillarNpcsForSave(), game.pressurePlatesForSave()).then(async (json) => {
       // ★BJ90（2026-09-15）债④死路径移除（BJ71 登记②）：v6 二进制快路径退役——原
       //  kvSetCompat 曾先 kvSetBinary 写二进制副本再 kvSet 同 key 写 JSON,IDB 同 store
       //  串行 → JSON 恒后写覆盖二进制副本（快路径零活跃消费方,评估定谳）;且崩溃窗口
       //  二进制残留是元数据全丢的损毁态（packSaveBinary meta={} → loadSaveData
       //  data.header.width TypeError）。守卫=tests/save-binary-deadpath.test.ts
-      void kvSet(QUICK_SAVE_KEY, json).then((where) => {
+      const quickWrite = kvSet(QUICK_SAVE_KEY, json).then((where) => {
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
@@ -1492,9 +1520,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
       });
       // 多世界槽位（M3）：登记到 WorldStore（slotMeta=退出置空前的调用帧快照）
+      // ★BJ144：槽位写失败此前仅 console.error（无提示）——「世界已保存」toast 只由
+      //  quicksave 写驱动,槽位静默失败(配额/IDB 不可用)时用户被告知已保存而世界列表
+      //  停旧档=「感觉没保存到」第二面。现与 kvSet 同待遇 toast,并纳入全链 settle
+      let slotWrite: Promise<void> = Promise.resolve();
       if (slotMeta) {
         slotMeta.hardMode = hardModeNow;
-        void worldStore.save(slotMeta, json, playTimeMs).catch((e) => console.error('worldStore.save failed', e));
+        slotWrite = worldStore.save(slotMeta, json, playTimeMs).catch((e) => {
+          console.error('worldStore.save failed', e);
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+        });
       }
       // 角色随身态同步（原版 .plr 语义）：存档 JSON 的 player 段即磁盘稳定 id 形,
       // 原样入 CharacterStore——与读侧 playerFromDiskForm 对称。同步失败不阻断存档
@@ -1505,10 +1540,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           catch (e) { console.warn('charState sync failed', e); }
         }
       }
+      await Promise.all([quickWrite, slotWrite]);
+      return true;
     }).catch((e) => {
       // 回退同步 saveGame 也失败(异常世界状态)——如实报告,不留 unhandled rejection
       console.error('save failed', e);
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+      return false;
     });
   }
 
@@ -1602,6 +1640,24 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     get game() { return game; },
     get cumulativePlayMs() { return cumulativePlayMs(); },   // SW-BJ5 2026-09-07：存档/调试报告统一累计口径
   } as FlowHandle;
+}
+
+/** ★BJ144 保存屏（原版 SaveAndQuit menuMode=10 等价面,2026-09-18）：退出保存期间的
+ *  全屏遮罩,阻断交互并告知进行中——doSave 全链落定后由 hideSavingVeil 拆除。 */
+function showSavingVeil(root: HTMLElement): void {
+  hideSavingVeil();
+  const el = document.createElement('div');
+  el.id = '__swSavingVeil';
+  el.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.72);'
+    + 'display:flex;align-items:center;justify-content:center;color:#e8e8e8;'
+    + 'font-family:inherit;font-size:20px;letter-spacing:2px;user-select:none;'
+    + 'text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,2px 2px 0 #000;';
+  el.textContent = Lang.text('Mods.SandboxWorld.UI.Saving');
+  root.appendChild(el);
+}
+
+function hideSavingVeil(): void {
+  document.getElementById('__swSavingVeil')?.remove();
 }
 
 /** 退出告别幕布（浏览器侧 window.close() 被策略拒绝时的兜底,2026-08-29）：

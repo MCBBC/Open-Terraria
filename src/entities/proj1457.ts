@@ -340,6 +340,23 @@ export function dealContacts(
     const jellyDontTake = (e as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
     if (jellyDontTake && !zapJelly) continue;
     if (!playerCanHitEnemy(ent, game, self.projId)) continue;
+    if (hitPierce !== 1 && ((e as unknown as { iframes?: number }).iframes ?? 0) > 0) continue;
+    // ★红蓝-L1①（2026-09-18）内环免疫门（Projectile.cs:12635-12638 收编到结算点）：
+    //  `if (!((owner < 0 || targetNPC.immune[owner] == 0) | flag3)) return;`——immune[owner]
+    //  !=0（=仓内 e.iframes>0，Enemy.hurt 同字段承载）且非 flag3（hitPierce===1 单发豁免
+    //  档）→ 原版内门早退先于 StatusNPC(:13634)/TryDoingOnHitEffects(:13642)/StrikeNPC
+    //  (:13702)/免疫梯写行(:14033-14037,:14175-14183)/penetrate 递减+keepIterating
+    //  (:14190-14205)/Kill——被拒命中【全静默】=零掷流（DamageVar :12970/TryConsuming
+    //  TimerCrit :12928 亦在门后）+不写任何免疫行+弹存活续漂等窗清重试（孢子云 567/568
+    //  空迸气案：曾 hurt 返 false 仍计数→云亡+气团带同伤迸出）。门置于 cd.ready【前】
+    //  =被拒不落账（原版免疫梯全在 :13702 后,被拒不写行;无需 release 回滚支）。
+    //  判别位选型备案：不消费 Enemy.hurt 布尔返——其语义=【击杀】非「命中」（死亡管线
+    //  true :14857/存活受击 false :14866/已实扣转演出支亦 false：realLife 头死/月总
+    //  396-398 :14289/猪鲨泡 371 :14296/石巨人头 246/四塔转 ai2）,原版这些返返 num41>0
+    //  全数计击——布尔直读会把全体存活受击误判拒收（变异 M3 实证红:sw-fx1 4 测+
+    //  batch-c 桩件族）;已实扣判别
+    //  面由 Enemy.lastStrikeDealt（num41 等价 :1507/:14111）承载,见 tests/sw-fx1
+    //  「hurt 已实扣 false 返仍计击」守卫锚。
     if (gate) {
       // ★ownerHitCheck 整门（Damage_PVE_Inner :12657 `flag4 || (!targetNPC.noTileCollide
       //  && ownerHitCheck && !CanHitWithMeleeWeapon(targetNPC))`）——noTileCollide 目标
@@ -408,6 +425,8 @@ export function dealContacts(
     if (snapBonus1457 > 0) dmg += Math.trunc(snapBonus1457 * (crit ? 2 : 1));
     const kdir = Math.sign((e.x + e.w / 2) - self.cx) || 1;
     // srcProjId 尾参：on-hit 产出弹族经 TryDoingOnHitEffects 排除表断 OnHit 链
+    //（免疫门已在上收编——被拒敌到不了此处;★勿改为消费 hurt 布尔返作拒收判别:
+    //  其语义=击杀非命中,存活受击返 false 会把已结算面整段误杀,见上判别位选型备案）
     e.hurt(dmg, kdir * self.knockback, 0, game, self.armorPen, crit, hitPierce, true, 0, self.projId);   // 音/飘值=单点;fromPlayer=DPS 计(Projectile.cs:13709)
     // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t;同 Arrow.ts:3260 先例）
     applyProjStatus(self.projId, ent as unknown as Record<string, number>,

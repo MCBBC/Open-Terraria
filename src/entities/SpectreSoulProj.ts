@@ -54,6 +54,16 @@ export function spectreVictimEligible(victimVanillaId?: number | null): boolean 
     && SPECTRE_NO_GHOST_HEAL.has(victimVanillaId));
 }
 
+/** ★BJ157-④：PVE 受理命中计数读取（PVP ghostHeal 的 numHits 实参单源）。原版
+ *  Damage_PVP【不】自增 numHits（numHits++ 仅 Damage_PVE_Inner :14263）——
+ *  :14741-44 ghostHeal 读弹幕当前计数（=该弹 PVE 累计受理命中数,PVP 命中不入账），
+ *  新弹 0 档率 0.20（SetDefaults :706 numHits=0;旧硬编 1 = 首跳 0.15 off-by-one）。
+ *  未跟踪类/脏值（非有限正数）按 0 档 */
+export function projPveNumHits(pr: unknown): number {
+  const n = (pr as { pveNumHits?: number } | null)?.pveNumHits;
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
 // ---- 预算池（Player.ghostDmg,Player.cs:991/:24652-24660 1:1）----
 // ★GB2 平移（GC 契约，2026-08-31）：唯一真源 = 本地玩家实例字段 player.ghostDmg
 // （Player.fixedUpdate 每拍 −6.6666665，原版 Player.Update :24654 同位）。本模块

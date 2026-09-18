@@ -567,6 +567,76 @@ describe('SW-FX1④b AI_105 孢子云（:40768-40905）+ AI_106 迸气（:34144-
     const c = new SporeSacCloud(990, 990, SPORE_CLOUD_A, 70, 1.5, 1);
     c.fixedUpdate(1 / 60, game);
     expect(foe.hp).toBe(foe.maxHp);        // 免疫门拒=零结算（pierce=1 旁路面不越权）
+    expect(c.dead).toBe(false);            // ★红蓝-L1①盲点补：被拒不弹亡（曾=hit 无条件发→云亡）
+  });
+
+  // =========================================================================
+  // ★红蓝-L1①（2026-09-18）空爆案判别面：dealContacts 内环免疫门收编
+  //  （Projectile.cs:12635-12638,结算点 iframes 门,hitPierce===1 豁免）——被拒命中
+  //  全静默（StatusNPC(:13634)/TryDoingOnHitEffects(:13642)/StrikeNPC(:13702)/免疫梯
+  //  写行(:14033-14037,:14175-14183)/penetrate 递减(:14190-14205)/Kill 全不可达）,
+  //  云存活续漂等窗清重试。曾无视 hurt=false 无条件 onHit → 云亡+空迸气团（带同伤
+  //  参数）。变异：M1 摘门→空爆帧云亡+迸气红;M2 门移 cd.ready 后→气团组窗被拒白吃
+  //  10t 红;M3 消费 hurt 布尔返作拒收判别→存活受击（击杀语义 false 返）整段误杀红。
+  // =========================================================================
+  it('空爆判别:iframes 窗内触→云存活续漂零迸气;窗清后触→照常结算迸气（:12636 内门早退语义）', () => {
+    const foe = Enemy.fromVanilla(3, 995, 995)!;
+    foe.id = 4305;
+    const game = unitGame([foe]);
+    const gasDmg: number[] = [];
+    const c = new SporeSacCloud(990, 990, SPORE_CLOUD_A, 70, 1.5, 1,
+      (_x: number, _y: number, _vx: number, _vy: number, dmg: number) => { gasDmg.push(dmg); });
+    foe.iframes = 3;
+    for (let i = 0; i < 3; i++) {
+      c.fixedUpdate(1 / 60, game);
+      foe.iframes--;                       // 原版 npc.immune[owner] 逐 tick 递减同构
+    }
+    expect(foe.hp).toBe(foe.maxHp);        // 窗内零结算（hurt 拒收零伤）
+    expect(gasDmg).toEqual([]);            // 空爆零迸气（曾=气团带同伤参数迸出,M1 红）
+    expect(c.dead).toBe(false);            // 云存活续漂（曾=hit 无条件发→云亡,M1 红）
+    c.fixedUpdate(1 / 60, game);           // 窗清（iframes==0）→ 内门放行 → 照常结算
+    expect(c.dead).toBe(true);             // penetrate 1 耗尽 Kill（:74317 ai1==0 支）
+    expect(gasDmg).toEqual([70]);          // 迸气同伤透传（:74321）
+    expect(foe.iframes).toBe(0);           // 云命中三不写（拍板#1A——不开全局窗）
+  });
+
+  it('hurt 已实扣 false 返（371 泡泡血尽转引信,Enemy.ts:14296 特支 return false）仍计击——守卫锚:布尔返=击杀语义,勿改作拒收判别（M3 变异 → 红）', () => {
+    const foe = Enemy.fromVanilla(371, 995, 995)!;   // 猪鲨爆裂泡泡 lifeMax=1
+    foe.id = 4306;
+    foe.hp = 1;
+    const game = unitGame([foe]);
+    const gasDmg: number[] = [];
+    const c = new SporeSacCloud(990, 990, SPORE_CLOUD_A, 70, 1.5, 1,
+      (_x: number, _y: number, _vx: number, _vy: number, dmg: number) => { gasDmg.push(dmg); });
+    c.fixedUpdate(1 / 60, game);
+    // hurt 血尽转引信支（vanillaId 371 && ai0!==1 → return false）但实扣已发生
+    // （lastStrikeDealt=70 已写）——原版 StrikeNPC 返 num41>0,onHit/penetrate/Kill 照发
+    expect(c.dead).toBe(true);             // 若以 hurt 布尔返作拒收判别（M3）→ 误判拒收红
+    expect(gasDmg).toEqual([70]);
+  });
+
+  it('气团命中不开全局窗（红蓝-L1② hitPierce=−2:命中不写帧=净等价原版 immune[owner]=0 清窗 :14035）', () => {
+    const foe = Enemy.fromVanilla(3, 1000, 1000)!;
+    foe.id = 4307;
+    const game = unitGame([foe]);
+    const gas = new SporeGasCloud(1000, 1000, 0, 0, 569, 1);
+    gas.fixedUpdate(1 / 60, game);
+    expect(foe.hp).toBe(foe.maxHp - 1);    // 伤照结（组窗首过,伤=1 防死判别）
+    expect(foe.iframes).toBe(0);           // 不写帧（曾缺省 0 档写 10 → 其它 pierce=0 兵器被多开窗挡,②红）
+  });
+
+  it('气团被拒命中不落组账（内环门在 cd.ready 前=被拒不写行,原版组行写 :14036 在 StrikeNPC 后）——窗清后重试落地', () => {
+    const foe = Enemy.fromVanilla(3, 1000, 1000)!;
+    foe.id = 4308;
+    const game = unitGame([foe]);
+    const gas = new SporeGasCloud(1000, 1000, 0, 0, 569, 1);
+    foe.iframes = 2;
+    gas.fixedUpdate(1 / 60, game);         // 窗内:拒收（组窗未落账）
+    gas.fixedUpdate(1 / 60, game);         // 重试仍拒（iframes 未清）
+    foe.iframes = 0;
+    gas.fixedUpdate(1 / 60, game);         // 窗清 → 落地
+    expect(foe.hp).toBe(foe.maxHp - 1);    // M2（门移 cd.ready 后=被拒白吃组窗 10t ≈167ms）→ 三拍全拒红
+    expect(foe.iframes).toBe(0);           // 气团命中不开全局窗（②联动）
   });
 
   it('keepIterating 截断（:14186-14201 penetrate 1→0 → false=stopAfterFirstHit）:重叠双敌只伤桶序首个', () => {

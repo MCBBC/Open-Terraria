@@ -6,7 +6,6 @@ import { createCipheriv } from 'node:crypto';
 import { aes128EcbDecrypt, parsePlr, PLR_VERSION_1457 } from '../src/save/PlrImport';
 import type { Appearance } from '../src/player/Appearance';
 import type { SaveData } from '../src/save/serialize';
-import { ITEM_STABLE_OF_INTERNAL } from '../src/data/items';
 
 /** 原版 ENCRYPTION_KEY(Player.cs:779)='h3y_gUyZ' UTF-16LE */
 const KEY = Buffer.from('h3y_gUyZ', 'utf16le');
@@ -89,7 +88,20 @@ describe('AES-128-ECB 纯 JS 解密', () => {
   });
 });
 
-const STABLE = (netId: number) => ITEM_STABLE_OF_INTERNAL[netId] ?? 0;
+// ★红蓝-L2②（2026-09-18）域契约：vi_ 物品【稳定 id ≡ 原版 vid/netID】——本文件
+// 全部物品断言一律钉手工核对的字面量,严禁经 ITEM_STABLE_OF_INTERNAL 反查构造
+// 期望值（旧 STABLE() helper 与被测映射同表同错=闭环抓不到,已拆;物证:vi_109_
+// mana_crystal 注册序 0 号位,裸下标重合率 0/6177）。
+// ★同日时间线改真（BJ146 旧叙事「历史导出=错位域」被实证推翻）：真档 id 域=
+// vid 直写正确——外部实证=用户私有历史档 /Users/vinlic/Downloads/Vinlic.plr
+// （3456B,v325;用户私有不入仓,仅本注释记结论）,2026-09-18 经 parsePlr 实测:
+// armor[10-12]=5802/5803/5804 雪域家具套连续 vid（反编译 1457 ItemID.cs
+// SnowCandle=5802/SnowChair=5803/SnowChandelier=5804 同证;1.4.5 系列新品,
+// 1456 同值）、inv[43]=6037 尖刺沙发、inv[21]=4115 南瓜马桶、inv[5]=1293
+// 蜥蜴电池、inv[27]×1834 千级堆叠——全落合法 vid 且名/量级成真实背包分布,
+// 非「内部注册序错位域」。错位面仅=导出方向 ITEM_INTERNAL_OF_STABLE.get 映射
+// （2026-09-06 b369a150 随 exportPlr 引入→本修复前窗口）;修复后 vi_ 恒等回写
+// 与历史 vid 直写行为等价,零回滚。
 
 describe('parsePlr 字段流(生成器闭环)', () => {
   const seedColors = [10, 20, 30, 40, 50, 60, 70] as const;
@@ -123,8 +135,12 @@ describe('parsePlr 字段流(生成器闭环)', () => {
     // armor20+dye10(≥322 带 favorited;无 stack——equip 形)
     for (let i = 0; i < 20; i++) w.equip(i === 0 ? 4344 : i === 3 ? 975 : 0, i, i % 3 === 0);
     for (let i = 0; i < 10; i++) w.equip(0, 0, false);
-    // inventory58(≥114 favorited)
-    for (let i = 0; i < 58; i++) w.item(i === 0 ? 50 : i === 1 ? 999999 : 0, 999 - i, 0, i % 2 === 0);
+    // inventory58(≥114 favorited)——物品段=原版 netID 域（LoadPlayer :55998
+    // netDefaults(num)）。槽位样本钉域勘误（旧 ITEM_STABLE_OF_INTERNAL[vid] 裸下标
+    // 的错映值标注在侧）：50=魔镜(旧错映 5143)/1=铁镐(旧 1291)/109=魔力水晶(旧
+    // 2215)/1291=生命果(旧 204)/2777=未注册 vid→0/999999=越界→0
+    const INV_VIDS = [50, 999999, 1, 109, 1291, 2777];
+    for (let i = 0; i < 58; i++) w.item(INV_VIDS[i] ?? 0, 999 - i, 0, i % 2 === 0);
     // miscE/miscD:槽内交错(E[i],D[i] 同循环,PL:55476;读侧恒不读 favorited)
     for (let i = 0; i < 5; i++) {
       w.equip(i === 2 ? 975 : 0, 0);
@@ -180,17 +196,21 @@ describe('parsePlr 字段流(生成器闭环)', () => {
     expect(p.playerState.hp).toBe(380);
     expect(p.playerState.baseMaxMana).toBe(200);
     expect(p.playerState.mana).toBe(150);
-    // 物品走稳定 id 映射
-    expect(p.playerState.armor?.[0]?.id).toBe(STABLE(4344));
-    expect(p.playerState.armor?.[3]?.id).toBe(STABLE(975));
+    // 物品走稳定 id 映射（★域契约:夹具写 netID 域,parse 后逐一还原同值;
+    // 期望=字面量真值,不经任何映射表）
+    expect(p.playerState.armor?.[0]?.id).toBe(4344);
+    expect(p.playerState.armor?.[3]?.id).toBe(975);              // 975=Shoe Spikes
     expect(p.playerState.armor?.[0]?.favorited).toBe(true);
     expect(p.playerState.armor?.[1]?.favorited).toBeUndefined();
-    expect(p.playerState.inventory?.[0]?.id).toBe(STABLE(50));   // 铜币?按表自洽
+    expect(p.playerState.inventory?.[0]?.id).toBe(50);           // 50=魔镜 vi_50_MagicMirror
     expect(p.playerState.inventory?.[1]).toBeNull();             // 999999 越界=空
+    expect(p.playerState.inventory?.[2]?.id).toBe(1);            // 1=铁镐(旧实现错映 1291 生命果)
+    expect(p.playerState.inventory?.[3]?.id).toBe(109);          // 109=魔力水晶(旧错映 2215)
+    expect(p.playerState.inventory?.[4]?.id).toBe(1291);         // 1291=生命果(旧错映 204)
+    expect(p.playerState.inventory?.[5]).toBeNull();             // 2777 未注册 vid=空物品
     expect(p.playerState.inventory?.[0]?.stack).toBe(999);
-    expect(p.playerState.banks?.[1]?.[0]?.id).toBe(STABLE(166)); // TNT 在 bank2
-    expect(p.playerState.miscEquips?.[2]?.id).toBe(STABLE(975));
-    expect(p.playerState.miscEquips?.[2]?.id).toBe(STABLE(975));
+    expect(p.playerState.banks?.[1]?.[0]?.id).toBe(166);         // TNT 在 bank2
+    expect(p.playerState.miscEquips?.[2]?.id).toBe(975);
     expect(p.playerState.buffs).toEqual([[1, 60], [120, 120]]);  // tick/60
     expect(p.playerState.taxMoney).toBe(75);
     expect(p.playerState.deathsPve).toBe(3);
@@ -299,11 +319,13 @@ describe('exportPlr 导出往返', () => {
   });
   const mkState = (): SaveData['player'] => ({
     hp: 300, x: 0, y: 0,
-    inventory: [{ id: STABLE(50), stack: 42, prefix: 3, favorited: true }, null,
+    // 稳定 id 域输入(≡vi_ vid):槽 0=魔镜 50;槽 1=10140 place_v 派生件(蜂巢块,
+    // 无原版 netId→导出写 0=空气,readItem 归 null——派生件不出档契约)
+    inventory: [{ id: 50, stack: 42, prefix: 3, favorited: true }, { id: 10140, stack: 1 },
       ...Array.from({ length: 56 }, () => null)],
     selected: 0, baseMaxHp: 400, baseMaxMana: 120, mana: 88,
-    banks: [[{ id: STABLE(166), stack: 9 }], [], [], []],
-    armor: [null, null, null, { id: STABLE(975), stack: 1 }, ...Array.from({ length: 16 }, () => null)],
+    banks: [[{ id: 166, stack: 9 }], [], [], []],
+    armor: [null, null, null, { id: 975, stack: 1 }, ...Array.from({ length: 16 }, () => null)],
     dye: Array.from({ length: 10 }, () => null),
     miscEquips: [null, null, null, null, null],
     miscDyes: [null, null, null, null, null],
@@ -348,9 +370,10 @@ describe('exportPlr 导出往返', () => {
     expect(p.playerState.baseMaxMana).toBe(120);
     expect(p.playerState.mana).toBe(88);
     expect(p.playerState.hairDye).toBe(4);
-    expect(p.playerState.inventory?.[0]).toEqual({ id: STABLE(50), stack: 42, prefix: 3, favorited: true });
-    expect(p.playerState.armor?.[3]?.id).toBe(STABLE(975));
-    expect(p.playerState.banks?.[0]?.[0]?.id).toBe(STABLE(166));
+    expect(p.playerState.inventory?.[0]).toEqual({ id: 50, stack: 42, prefix: 3, favorited: true });
+    expect(p.playerState.inventory?.[1]).toBeNull();   // 10140 派生件导出写 0→读回空(不出档契约)
+    expect(p.playerState.armor?.[3]?.id).toBe(975);
+    expect(p.playerState.banks?.[0]?.[0]?.id).toBe(166);
     expect(p.playerState.banks?.[0]?.[0]?.stack).toBe(9);
     expect(p.playerState.buffs).toEqual([[5, 30], [120, 45]]);
     expect(p.playerState.taxMoney).toBe(12);

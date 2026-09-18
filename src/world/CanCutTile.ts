@@ -67,3 +67,4 @@ export function canCutTile(
   }
   return false;
 }
+

@@ -30,7 +30,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, FORBIDS_SLOPING_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
@@ -96,8 +96,6 @@ export function __setTrackDraws(fn: (() => number) | undefined): void {
 // ============================================================
 /** CanPoundTile 型门(cs:81445-81453):门/助推轨/巨石族等禁 pounded 坡面(vanilla 型号) */
 const POUND_BLOCK_SHEETS = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484]);
-/** ForbidsSloping(cs:81484-81504):上方挂靠这些型禁坡 */
-const FORBIDS_SLOPING_SHEETS = new Set([21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597]);
 /** TileID.Sets.Boulders(TileID.cs:195) */
 const BOULDER_SS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
 /** TileID.Sets.IsATreeTrunk(CanKillTile cs:62276 消费) */
@@ -894,7 +892,8 @@ export class TrackGenerator {
     return this.canKillTile(x, y);
   }
 
-  /** WorldGen.ForbidsSloping(cs:81484-81504)——按型(sheet)表 */
+  /** WorldGen.ForbidsSloping(cs:81484-81504)——按型(sheet)表
+   *  ★BJ158①：型集单源=data/tiles.ts FORBIDS_SLOPING_SHEETS（本地副本已拆除） */
   private forbidsSloping(x: number, y: number): boolean {
     const st = this.st;
     if (!st.inBounds(x, y)) return false;

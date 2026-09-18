@@ -20,7 +20,7 @@
 //             （Player.cs:9592-9608）→ 水下不降速不溺水物理，frameState==4 时
 //             RunSpeed→swimSpeed、跳跃 +5 高 /+2.5 速（Mount.JumpHeight/JumpSpeed）。
 import mountJson from '../data/vanilla-mounts.json';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, FORBIDS_SLOPING_IDS } from '../data/tiles';
 import { WALL_HOUSE } from '../world/Housing';
 import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
@@ -52,8 +52,9 @@ const TREE_TRUNK_IDS = idsWithSheets(5, 72, 583, 584, 585, 586, 587, 588, 589, 5
 const SUPPORT_ABOVE_IDS = idsWithSheets(21, 26, 72, 77, 88, 467, 488);
 const PALM_ABOVE_IDS = idsWithSheets(323);
 const DRESSER_ABOVE_IDS = idsWithSheets(80);
-/** WorldGen.ForbidsSloping（:81484-81505）——CanPoundTile 上格禁坡表 */
-const FORBIDS_SLOPING_IDS = idsWithSheets(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);
+// ★BJ158①（2026-09-18）：WorldGen.ForbidsSloping（:81484-81505）CanPoundTile 上格禁坡表
+//  本地 idsWithSheets 平移副本拆除——收编 data/tiles.ts 单源 FORBIDS_SLOPING_IDS
+//  （内部 id 域,与旧产物逐值全等已探针定谳）,消费面 canPoundTileAt 上格门改走单源。
 /** CanPoundTile 类型黑名单（:81448-81459） */
 const POUND_BLACKLIST_IDS = idsWithSheets(10, 48, 137, 232, 380, 387, 388, 476, 484);
 /** TileID.Sets.Boulders（TileID.cs:195） */

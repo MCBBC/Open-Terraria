@@ -248,6 +248,9 @@ export class TrapShot extends Entity {
   w = 8; h = 8;
   vx: number;
   vy: number;
+  /** ★FX34c 弹幕域 hoik=true（Body.hoik 注:原版 Projectile 全路径 true——陷阱镖
+   *  同 HandleMovement 面,原版可穿 Hoik 单向墙） */
+  hoik = true;
   damage: number;
   kind: TrapShotKind;
   /** 原版弹 id（kind(+form) → trapWetProjId 全映射,构造器填）。
