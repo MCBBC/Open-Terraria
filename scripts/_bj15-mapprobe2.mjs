@@ -1,5 +1,8 @@
-// 探针（SW-BJ15 2026-09-07）：小地图点击开图链回归（_mapprobe.mjs 的现代版——
-// 旧探针依赖已废弃的 select+button 启动 UI）。断言打开链/拖拽/误触传送语义。
+// 探针（SW-BJ15 2026-09-07；★SW-BJ120 2026-09-19 定谳重产）：地图打开链回归。
+// BJ120 定谳：小地图【点击开图】面已摘除（自创面——原版 minimap 支 Main.cs:56340-56381
+// 无点击处理、MinimapFrame 只在缩放钮上 mouseInterface=MinimapFrame.cs:148-166，
+// 点击穿透到世界；开图=专用键 M Player.cs:25163-25176 / 背包态地图钮 / 右键晶塔）。
+// 断言：小地图点击不开图+穿透、M 开图链（缓动/居中/不误触传送）/拖拽/传送语义。
 import puppeteer from 'puppeteer-core';
 
 const CHROME = process.env.HOME + '/.cache/puppeteer/chrome/mac_arm-150.0.7871.24/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
@@ -33,10 +36,10 @@ const mmCenter = () => page.evaluate(() => {
   return { x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2) };
 });
 
-// 1) 小地图点击开图：首开即主角居中（缓动收敛后 |off| < 2px）
+// 1a) ★SW-BJ120：小地图【点击】不开图（原版无此面）+ 点击穿透（本体裁不掉 minimapUiHover）
 const pos = await mmCenter();
-const clickOpen = async () => {
-  for (let i = 0; i < 3; i++) {   // 瞬时 DOM 覆盖（toast 等）可能吞掉一次点击——重试
+const clickNoOpen = async () => {
+  for (let i = 0; i < 2; i++) {   // 瞬时 DOM 覆盖（toast 等）可能吞掉一次点击——重试消歧
     const over = await page.evaluate(({ x, y }) => {
       const el = document.elementFromPoint(x, y);
       return el ? el.tagName + '.' + (el.className || '') : 'none';
@@ -48,11 +51,19 @@ const clickOpen = async () => {
     await sleep(100);
     await page.mouse.up();
     await sleep(300);
-    if (await page.evaluate(() => window.__swGame.renderer.fullMap.open)) return true;
   }
-  return false;
+  return page.evaluate(() => ({
+    open: window.__swGame.renderer.fullMap.open,
+    uiHover: window.__swGame.renderer.minimapUiHover,
+  }));
 };
-check('小地图点击打开全图', await clickOpen());
+const noOpen = await clickNoOpen();
+check('小地图点击不开图（BJ120 摘面）', noOpen.open === false);
+check('小地图本体不置 UI 悬停（原版穿透面）', noOpen.uiHover === false);
+// 1b) M 键开图（原版 Map Full Screen 专用键）：首开即主角居中（缓动收敛后 |off| < 2px）
+await page.keyboard.press('KeyM');
+await sleep(300);
+check('M 键打开全图', await page.evaluate(() => window.__swGame.renderer.fullMap.open));
 await sleep(2300);   // 缓动 0.5→2 收敛（~40 帧）
 const opened = await page.evaluate(() => {
   const g = window.__swGame, fm = g.renderer.fullMap;
@@ -65,7 +76,7 @@ const opened = await page.evaluate(() => {
     tpMark: g.renderer.tpMark ?? null,
   };
 });
-check('小地图点击打开全图', opened.open === true);
+check('M 开图态保持打开', opened.open === true);
 check('开图缩放缓动收敛到 2', Math.abs(opened.zoom - 2) < 0.01, `zoom=${opened.zoom}`);
 check('首开主角居中（|off|<2px）', Math.abs(opened.offX) < 2 && Math.abs(opened.offY) < 2, `off=(${opened.offX},${opened.offY})`);
 check('开图点击不误触传送预选', opened.tpMark === null);

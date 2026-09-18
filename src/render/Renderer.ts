@@ -3772,7 +3772,15 @@ export class Renderer {
       const shimA = this.monoFilters.shimmerAlpha;
       if (shimA < 1) {
         const k = 1 - shimA;
-        this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [k, k, k], 0, 'underground');
+        // ★dt 0→16.7（2026-09-19 用户实报"地狱背景远景动画停播"修复）：
+        //   underground 相位是 BiomeBackground 三只动画钟的唯一推进源——
+        //   hellFrameT（远景 Underworld 贴图 2×2 四帧 8fps，Main.cs:53471-53560
+        //   GlobalTimeWrappedHourly*8%4）、magmaFrameT（岩浆体/波纹条 3 帧，
+        //   Main.cs:63166-74 magmaBGFrameCounter 每 8 tick）、bgTick（GetBackgroundCounter，
+        //   地表 173 四帧轮换/anim 表帧也吃它）。08-20 地下背景搬世界层吃光时
+        //   误传 0 → 全部冻结（远景停播+岩浆带定格）。16.7 与 surface 相位调用
+        //   同口径；update() 的每帧单次推进由 BiomeBackground.draw 内 phase 门保证
+        this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [k, k, k], 16.7, 'underground');
       }
       mainCtx2.restore();
     }
@@ -17025,22 +17033,30 @@ export class Renderer {
     const fx = ox + 4 + skin.fo[0], fy = oy + 4 + skin.fo[1];
     if (tex.frame && tex.frame.width > 0) ctx.drawImage(tex.frame, fx, fy);
     // 按钮：悬停高亮 + 按住生效（MinimapFrame.Update/Click：mouseLeft 持续，×1.025/0.975 步进）
+    // ★SW-BJ120：全屏地图态按钮面整挂起——原版按钮输入（ActiveSelection.Update→
+    //   mouseInterface/Click）只经 MinimapFrameManager.DrawTo 被调（MinimapFrameManager.cs:52-57），
+    //   而其唯一调用点在 mapStyle==1【非全屏】支（Main.cs:56372）；全屏分支不跑。
+    //   本仓小地图先于全屏图绘制（Renderer:4687-4694）,无此门=全屏图下按住左键
+    //   会静默缩放被盖住的小地图。minimapUiHover 恒回 false（全屏图态 updateUse
+    //   本有 fullMap 早退;回 false 防关图后首拍让位门吃到陈旧 true）。
     this.minimapUiHover = false;
     const btns: Array<[ImageBitmap | HTMLImageElement | undefined, readonly [number, number], 'in' | 'out' | 'reset']> = [
       [tex.zoomIn, skin.zoomIn, 'in'],
       [tex.zoomOut, skin.zoomOut, 'out'],
       [tex.reset, skin.reset, 'reset'],
     ];
-    for (const [tex, [bx, by], kind] of btns) {
-      const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
-      const hovering = Math.abs(lmX(this._mouseX) - cx) < 11 && Math.abs(lmY(this._mouseY) - cy) < 11;
-      if (!hovering || !tex || !(tex.width > 0)) continue;
-      this.minimapUiHover = true;
-      ctx.drawImage(tex, fx + bx, fy + by);
-      if (this._mouseDown) {
-        if (kind === 'in') this.minimapZoom = Math.min(3, this.minimapZoom * 1.025);
-        else if (kind === 'out') this.minimapZoom = Math.max(0.2, this.minimapZoom * 0.975);
-        else this.minimapZoom = 1.05;
+    if (!this.fullMap.open) {
+      for (const [tex, [bx, by], kind] of btns) {
+        const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
+        const hovering = Math.abs(lmX(this._mouseX) - cx) < 11 && Math.abs(lmY(this._mouseY) - cy) < 11;
+        if (!hovering || !tex || !(tex.width > 0)) continue;
+        this.minimapUiHover = true;
+        ctx.drawImage(tex, fx + bx, fy + by);
+        if (this._mouseDown) {
+          if (kind === 'in') this.minimapZoom = Math.min(3, this.minimapZoom * 1.025);
+          else if (kind === 'out') this.minimapZoom = Math.max(0.2, this.minimapZoom * 0.975);
+          else this.minimapZoom = 1.05;
+        }
       }
     }
     // 记录小地图区域供点击检测（黑垫外沿）

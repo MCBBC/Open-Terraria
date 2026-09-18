@@ -242,8 +242,9 @@ describe('ItemCheck_Shoot 枪口/弹 ai0 gravDir 档接线（core/Game.ts）', (
     expect(src).toContain('arcAi0, 32, scaleT);');
     expect(src).toContain('this.player.facing * this.player.gravDir, (ps?.size ?? 1));');
     // SwingArc 的 ai0 消费侧语义（镜像面）在实体侧已备：ai0<0 → FlipVertically
+    // （2026-09-19 剑影染色引擎重构：翻转式下沉到共享 drawArcLayers 层表消费端）
     const arc = SRC('entities/SwingArc.ts');
-    expect(arc).toContain('if (this.ai0 < 0) ctx.scale(1, -1);');
+    expect(arc).toContain('if (ai0 < 0) ctx.scale(1, -1);');
   });
 });
 

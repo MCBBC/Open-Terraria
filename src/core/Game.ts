@@ -30,6 +30,7 @@ import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction, season
 import { newCensusCounter } from '../world/EmotePick';
 import { anchorBeeBottom, beeSpawnAuthority, breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { canCutTile } from '../world/CanCutTile';
+import { bigMimicSummonCheck, bigMimicSpawnSmoke } from '../world/BigMimicSummon';   // ★SW-BJ147 钥匙放箱召宝箱怪（NPC.cs:78318）
 import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
@@ -5909,7 +5910,8 @@ export class Game implements GameHooks {
       // Main.cs:16980-16992：held 触发器每帧 ±0.02,钳 [1,2]——非按键边沿跳变）。
       // MapZoom 键只管地图（小地图/覆盖式/全屏图,updateMapKeys 电平）,不对视野缩放
       // （原版 MapZoom 语义=地图,视野缩放=ViewZoom 独立键族）。
-      // MapFull（M）：切换全屏地图（原版 cMapFull；开图对焦主角复用小地图点击链）
+      // MapFull（M）：切换全屏地图（原版 cMapFull；SW-BJ120 后小地图点击面已摘——
+      // M 键=本仓全屏地图唯一键盘入口,与晶塔右键并存）
       if (isBound('MapFull', code) && this.player && !this.input.uiBlocking) {
         this.toggleFullMap();
       }
@@ -7882,6 +7884,7 @@ export class Game implements GameHooks {
       invGates.gateExpert = this.world.isExpert;
       invGates.gateMaster = this.world.isMaster;
       this.tickChestAutoClose();
+      this.chestChangeEvents();   // ★SW-BJ147 关箱拍宝箱怪召唤（Player.cs:25581 每 tick 同位）
       this.acc += elapsed;
       while (this.acc >= FIXED_DT && steps < 5) {
         this.fixedUpdate(FIXED_DT);
@@ -8601,36 +8604,18 @@ export class Game implements GameHooks {
 
     // ---- 玩家输入 ----
     const inp = this.input;
-    // 点击右上角小地图 → 开关全屏地图。★必须用按下边沿（mouseDown&&!_prevMouseDown）：
-    // 原版所有 UI 点击走 mouseLeft&&mouseLeftRelease（Main.cs:52706 帧末按电平回写，
-    // 按住第二帧起恒 false）——连发枪按住开火时准星扫进小地图矩形不得开图
-    // （mouseDown 在按住期间是持续电平；2026-08-25 用户实报）
-    if (inp.mouseDown && !this._prevMouseDown && !this._mapClickLatch) {
-      const r = this.renderer.minimapRect;
-      const fm = this.renderer.fullMap;
-      const inMap = inp.mouseX >= r.x && inp.mouseX <= r.x + r.w && inp.mouseY >= r.y && inp.mouseY <= r.y + r.h;
-      if (!fm.open && inMap && !inp.uiBlocking && !this.renderer.minimapUiHover) {
-        fm.open = true;
-        // 晶塔表刷新（图标层 TeleportPylonsMapLayer 恒绘制——小地图入口打开也可点塔）
-        this.refreshPylons();
-        // 打开即放大到主角：锚点 = 主角 tile 坐标 → 屏幕中心，
-        // zoom 从 0.5 缓动到 2，缓动期间 applyMapAnchor 每帧补偿 pan，主角始终居中
-        fm.zoom = 0.5;
-        fm.zoomTarget = 2;
-        fm.anchorU = player.cx / TILE;
-        fm.anchorV = player.cy / TILE;
-        fm.anchorMX = this.renderer.canvas.width / 2;
-        fm.anchorMY = this.renderer.canvas.height / 2;
-        // 预置 pan（此时 _fmWorldW 可能还是 0，不能等 easeFullMap 反解，首帧会跳）
-        fm.panX = (this.world.w * fm.zoom) / 2 - fm.anchorU * fm.zoom;
-        fm.panY = (this.world.h * fm.zoom) / 2 - fm.anchorV * fm.zoom;
-        this.renderer['_mapInit'] = false;
-        // 开图的这次按压排除出地图点击传送（:8342 消费）;拖拽不豁免（vanilla
-        // Main.cs:56153-56161 无"开图按压不拖拽"面,见 Renderer.drawFullMap 注）
-        this.renderer['_mapOpenClick'] = true;
-        this._mapClickLatch = true;
-      }
-    }
+    // ★SW-BJ120 2026-09-19 用户实报「原版点击地图不会打开地图，应正常接收使用武器
+    //  等事件」——小地图【点击开全图】面整面摘除（自创面，2026-08-25 只修过重复开图
+    //  边沿，面本身无原版锚）。原版定谳（1457；1458 同域零变更）：
+    //  · 小地图本体（mapStyle==1 非全屏支 Main.cs:56340-56381）无任何点击处理——
+    //    不开图、不置 mouseInterface，点击穿透到世界（武器/挖掘照常，MinimapFrame
+    //    只在三个缩放钮上 mouseInterface=true，MinimapFrame.cs:148-166）；
+    //  · 开全图的全部原版入口 = Map Full Screen 专用键（Player.cs:25163-25176
+    //    mapFullScreen 触发器→TryOpeningFullscreenMap）/背包态地图按钮（Main.cs:
+    //    41777-41820，playerInventory 门内）/右键晶塔（Player.cs:32426）；
+    //  · 本仓保留面：M 键 toggleFullMap（:11925）+ 晶塔右键 openFullMapAtPylon
+    //    （:27018 置 _mapOpenClick/_mapClickLatch）——latch 清除线保留（晶塔路径
+    //    :27056 置位仍需按 !mouseDown 回落）。
     if (!inp.mouseDown) this._mapClickLatch = false;
     // 地图联机旗标注入（每帧：小地图头像队伍色描边也消费 mapNetActive）：
     // mapWormholeMode = netMode==1 等价（联机访客——虫洞地图门）
@@ -11920,7 +11905,8 @@ export class Game implements GameHooks {
     this.cb.onLoadoutSwitched?.(k);
   }
 
-  /** MapFull（M）切换全屏地图：关→开对焦主角（小地图点击入口同款缓动链），
+  /** MapFull（M）切换全屏地图：关→开对焦主角（SW-BJ120 起为唯一点击类入口=晶塔右键
+   *  之外的键盘面；小地图点击开图面已摘除,原版无此面），
    *  开→关直落（原版 cMapFull ToggleShared / Main.mapFullScreen） */
   toggleFullMap(): void {
     const fm = this.renderer.fullMap;
@@ -12745,9 +12731,9 @@ export class Game implements GameHooks {
     // controlTorch（TriggersSet.cs:794）。Input.down 自带 uiBlocking 门 = 原版
     // 键盘 UI 模式/mouseInterface 让位（TriggersSet.cs:782-784）的等价；
     // 全屏地图打开时输入归地图（对应原版 MapFullscreen 输入模式无 SmartSelect 触发）
-    // ★红蓝对抗 A-F6 台账：`!fullMap.open` 为原版没有的额外让位门（TriggersSet.cs:792-794
-    //  唯一门 = mouseInterface；全屏地图是否置 mouseInterface 未考）。分歧方向 = 原版可能在
-    //  地图下仍换装（不可见无感），本仓吞掉——保留本门（防地图态误换），如需严格对齐再移除。
+    // ★红蓝对抗 A-F6 台账（SW-BJ120 2026-09-19 定谳回填）：`!fullMap.open` 与原版同判
+    //  ——全屏地图态原版双门封死：①Player.cs:24961-25010 mapFullscreen 支 controlTorch
+    //  同批清零；②Main.cs:56162 drawFullMap 支置 mouseInterface=true。本门=同相反码，保留。
     const controlTorch = inp.downAction('SmartSelect') && !this.renderer.fullMap.open;
     const [mx, my] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
     const canvas = this.renderer.canvas;
@@ -13033,8 +13019,8 @@ export class Game implements GameHooks {
       // TryOpeningFullscreenMap Player.cs:29340 / 小地图钮 Main.cs:41806 均置
       // playerInventory=false → DrawInterface_26_InterfaceLogic3 :46434-46440
       // !playerInventory 臂 SetMouseNPC(-1,-1) 静默清携带=开图后携带不存活；本仓
-      // 背包不随开图收，同相=开图即清。单点写在此处覆盖 M 键/小地图按压/晶塔右键/
-      // renderer 小地图块全部开图入口，keepPanel=true 仅摘选中面板保持）。
+      // 背包不随开图收，同相=开图即清。单点写在此处覆盖 M 键/晶塔右键全部开图入口
+      // （SW-BJ120：小地图按压开图面已摘除），keepPanel=true 仅摘选中面板保持）。
       if (this.renderer.fullMap.open) {
         this.housingMode = null;
         this.cb.onHousingCursor?.(null, true);
@@ -13162,9 +13148,16 @@ export class Game implements GameHooks {
     //    mouseRightRelease）由 UI 侧 installDragListeners 处理,且丢出吞边沿
     //    （:5141-5144 mouseRightRelease=false）= 不触发世界右键交互,等价拦截面
     const cursorHeld = !!this.uiHeldItemRef?.();
+    // ★SW-BJ120：minimapUiHover（小地图缩放钮悬停）并入本门——原版 MinimapFrame
+    //  只在三个缩放钮命中时置 mouseInterface=true（MinimapFrame.cs:148-166，
+    //  GetButtonUnderMouse :197-206）→ 钮上点击被 mouseInterface 拦在
+    //  controlUseItem/controlUseTile 之外（TriggersSet.cs:835-841）= 钮上挥剑/挖矿
+    //  /右键交互全不触发；小地图本体无此置位（穿透）。本仓此前缺此门 = 悬停缩放钮
+    //  的同一击既缩放小地图又打中钮下世界 tile（劫持面,与 BJ120 实报同域）。
     if (inp.uiBlocking || this.inpOverDomUi()
       || (cursorHeld && (!this.player.inv.cursorMirror || inp.rightDown))
-      || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover) {
+      || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover
+      || this.renderer.minimapUiHover) {
       this.mining = null;
       return;
     }
@@ -30327,6 +30320,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   openChest: ((c: ChestData) => void) | null = null;
   /** UI 侧当前打开的箱子（Wiring.cs:2571 Chest.UsingChest 判定用；UI.ts 赋值） */
   openChestRef: (() => ChestData | null) | null = null;
+  /** ★SW-BJ147：Player.lastChest 等价（每拍随 chestChangeEvents 同步；bank x<0 同原版
+   *  lastChest -2..-5 域， summons 门 x>=0 收世界箱） */
+  private lastChestOpen: ChestData | null = null;
   /** 收起宝箱/储物面板回调（UI 注入；Main.cs:38455-38458 chest=-1 与 Player.cs
    *  :31264/:31277 追踪失联关面板路径——Game 侧 Chester 容器链用） */
   /** UI 关箱面板回调（UI.ts 注入）。★SW-FX42 改访问器包装：关闭时若本端持有在用
@@ -30403,6 +30399,42 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if ((c.x === tx || c.x + 1 === tx) && (c.y === ty || c.y + 1 === ty)) return c;
     }
     return null;
+  }
+
+  /** ★SW-BJ147 2026-09-19（用户实报：光明/夜光钥匙放空宝箱不生成宝箱怪）：
+   *  Player.ChestChangeEvents（Player.cs:28983-29001；Update :25581 每 tick）1:1——
+   *  关箱拍（chest==-1 && lastChest>=0）→ NPC.BigMimicSummonCheck（NPC.cs:78318，
+   *  链身见 world/BigMimicSummon.ts）。
+   *  换箱臂（lastChest!=chest && chest>=0 → GasTrapCheck/forceClearGlowsOnChest,
+   *  :28994-28998）未移植=467 布线毒气箱域缺口（登记债,不在本刀域）。
+   *  netMode!=1 门（:28985）= 本仓非访客面；lastChestOpen 域含 bank(x<0)，
+   *  summon 门 x>=0 与原版 lastChest>=0 同相。 */
+  private chestChangeEvents(): void {
+    if (this.net?.active && !this.net.policy.isHost) return;   // Main.netMode == 1（:28985）
+    const cur = this.openChestRef?.() ?? null;
+    const last = this.lastChestOpen;
+    this.lastChestOpen = cur;                                   // lastChest = chest（:29000）
+    if (cur || !last || last.x < 0 || last.y === undefined) return;   // chest==-1 && lastChest>=0（:28988）
+    bigMimicSummonCheck({
+      store: this.world.store,
+      hardMode: !!this.world.flags.hardMode,
+      crimson: this.world.crimson,
+      findChest: (tx, ty) => this.findChest(tx, ty),
+      removeChest: (cc) => { this.world.chests = this.world.chests.filter((x) => x !== cc); },
+      spawnMimic: (npcId, bx, by) => {
+        // NewNPC Bottom 锚（NPC.cs:81598 Bottom=(X,Y)）→ fromVanilla 盒心锚：y 上移半盒
+        const e = spawnVanillaEnemy(this, npcId, bx, by);
+        if (e) e.y -= e.h / 2;
+        return e;
+      },
+      markDirtyArea: (x0, y0, x1, y1) => this.chunks?.markDirtyArea(x0, y0, x1, y1),
+      smoke: (box) => bigMimicSpawnSmoke(
+        (x, y, w, h, type, sx, sy, alpha, color, scale) =>
+          this.spawnDust(x, y, w, h, type, sx, sy, alpha, color, scale),
+        (type, x, y, vx, vy, scale) => GorePiece.newGore(type, x, y, vx, vy, scale),
+        box,
+      ),
+    }, last.x, last.y);
   }
 
   /** 开箱超距自动关（Player.cs:30614-30620）：世界宝箱面板开着时每 tick 校验——

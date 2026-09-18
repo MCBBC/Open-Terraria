@@ -86,8 +86,10 @@ await page.keyboard.press('KeyM');
 analyze('SECOND OPEN (M)', await collect());
 await closeMap();
 
-// ---- 试验 3：小地图点击开（Game.update 入口，同一首开家族）----
-const mmOpen = async () => {
+// ---- 试验 3（★SW-BJ120 2026-09-19 定谳重产）：小地图点击【不开图】——
+//      原版无此面（Main.cs:56340-56381 minimap 支无点击处理；开图=专用键/晶塔），
+//      点击开图入口已摘除 → 本试验只断言点击后图保持关闭。
+const mmClick = async () => {
   const pos = await page.evaluate(() => {
     const r = window.__swGame.renderer.minimapRect;
     return { x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2) };
@@ -100,9 +102,9 @@ const mmOpen = async () => {
   await new Promise((r) => setTimeout(r, 120));
 };
 await closeMap();
-await arm();
-await mmOpen();
-analyze('MINIMAP-CLICK OPEN (fresh session)', await collect());
+await mmClick();
+const noOpen = await page.evaluate(() => window.__swGame.renderer.fullMap.open);
+console.log(`MINIMAP-CLICK NO-OPEN (BJ120): ${noOpen ? 'FAIL (map opened)' : 'PASS (stays closed)'}`);
 await closeMap();
 
 console.log('\nprobe done');

@@ -27,7 +27,9 @@ async function newWorldPage(tag) {
 }
 const useN = (page) => page.evaluate(() => window.__useN);
 
-// ============ ①B:小地图【按住点击】开图 → 同一按压继续拖动 ============
+// ============ ①B（★SW-BJ120 2026-09-19 定谳重产）:小地图按住点击【不开图】 ============
+//  原面「点击开图+开启按压继续拖」随自创入口面一并退役（原版 minimap 支 Main.cs:56340-56381
+//  无点击处理;拖拽语义以 M 开图路径为准——_inp-firstclick-verify.mjs ①A）。
 {
   const page = await newWorldPage('m1');
   const mm = await page.evaluate(() => {
@@ -38,25 +40,9 @@ const useN = (page) => page.evaluate(() => window.__useN);
   await page.mouse.down();
   await sleep(120);                       // 人手按住时长
   const openAtPress = await page.evaluate(() => window.__swGame.renderer.fullMap.open);
-  await page.mouse.move(mm.x - 120, mm.y - 60, { steps: 8 });   // 同一按压继续拖
-  await sleep(120);
-  const panMid = await page.evaluate(() => { const f = window.__swGame.renderer.fullMap; return { x: f.panX, y: f.panY, zoom: f.zoom, zt: f.zoomTarget }; });
   await page.mouse.up();
   await sleep(100);
-  ok(openAtPress, '①B: 小地图按住点击当帧开图');
-  // 等缓动落定再拖一次(对照:开启后松开→再按住拖)
-  await page.waitForFunction(() => Math.abs(window.__swGame.renderer.fullMap.zoom - window.__swGame.renderer.fullMap.zoomTarget) < 0.02, { timeout: 8000, polling: 50 }).catch(() => {});
-  const pan0 = await page.evaluate(() => { const f = window.__swGame.renderer.fullMap; return { x: f.panX, y: f.panY }; });
-  await page.mouse.move(800, 500); await page.mouse.down();
-  await sleep(60);
-  await page.mouse.move(880, 560, { steps: 8 }); await sleep(160);
-  const pan1 = await page.evaluate(() => { const f = window.__swGame.renderer.fullMap; return { x: f.panX, y: f.panY }; });
-  await page.mouse.up();
-  ok(Math.abs(pan1.x - pan0.x) + Math.abs(pan1.y - pan0.y) > 0, '①B-对照: 松开后第二次按压拖动生效', `dx=${(pan1.x - pan0.x).toFixed(1)}`);
-  // 原版观感断言:开启的那次按压(继续按住拖)应已有位移——panMid 与开图预置 pan 的差
-  const preset = await page.evaluate(() => window.__swGame.renderer.fullMap);
-  console.log(`[m1] 开图按压拖动后 pan=(${panMid.x.toFixed(1)},${panMid.y.toFixed(1)}) zoom=${panMid.zoom.toFixed(2)};  第二次按压拖动 Δpan=${(pan1.x - pan0.x).toFixed(1)},${(pan1.y - pan0.y).toFixed(1)}`);
-  await page.keyboard.press('KeyM');
+  ok(!openAtPress, '①B: 小地图按住点击不开图（BJ120 摘面）');
   await page.close();
 }
 

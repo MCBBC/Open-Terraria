@@ -123,6 +123,9 @@ describe('FX60 ② 重铸锤连击执行计数(原版节奏=普通档每击立�
     (ui as { game: unknown }).game = {
       reforgeCost: () => 10,
       coinsOwned: () => 999999,
+      // ★BJ165:重铸反馈改走 PopupText 对齐链(Main.cs:42622 showPickupLabel 单源),
+      //   旧自创 toast 退役——桩在此仅为让锤击决策面可达
+      showPickupLabel: () => undefined,
       doReforge: (item: unknown, out?: { topTier: boolean }) => {
         calls.push({ item, out });
         if (out) out.topTier = opt.topTier;

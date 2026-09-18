@@ -424,7 +424,10 @@ export class BiomeBackground {
 
   constructor(menuMode = false) {
     this.menuMode = menuMode;
-    if (menuMode) this.alphaFront[Forest1] = 1;   // 开局昼槽全显（原 alphaF=[1,0] 初态）
+    // 开局昼槽全显（Main.cs:6744-6745 LoadContent：bgAlphaFrontLayer[0]=1f +
+    // bgAlphaFarBackLayer[0]=1f——森林槽初态全可见,背景不从天空淡入）
+    this.alphaFront[Forest1] = 1;
+    this.alphaFar[Forest1] = 1;
   }
   /** 贴图懒加载缓存（n → img；-1 = 加载失败） */
   private imgs = new Map<number, ImageBitmap | HTMLImageElement | null>();
@@ -488,15 +491,47 @@ export class BiomeBackground {
    *  CrimsonDesert(5/13/14)→该侵染列 c/h/r——纯样式（0..4）不驻留侵染列
    *  （setBG case 6 每 case 先 Clear 只填 Pure,:7448 起）→ 落 GoodEvilDesert
    *  兜底沙丘双条 26/27（Main.cs DrawSurfaceBG_GoodEvilDesert :61852-61892,
-   *  第三槽 -1=原版双条画）。drawSurface/预温共口。 */
+   *  第三槽 -1=原版双条画）。预温/渐变带消费口（按当前 bgStyle 槽）。
+   *  ★drawSurface 交叉淡化期改走 desertTripleForSlot（按【槽】解析）——
+   *  过渡期旧槽 alpha>0 时 bgStyle 已翻槽,侵染列选择必须锚槽位非当前样式。 */
   private activeDesertTriple(): [number, number, number] {
+    return this.desertTripleForSlot(this.bgStyle);
+  }
+
+  /** 沙漠三层组按【前景槽】解析（原版前景循环 :60497/:60507：槽 2 画
+   *  desertBackgroundSet.Pure、槽 5/13/14 画 GoodEvilDesert(l) 侵染列/兜底） */
+  private desertTripleForSlot(slot: number): [number, number, number] {
     const d = this.styleRow('desert', DESERT_STYLES, this.desertStyle);
-    if (this.bgStyle === Desert) return [...d.p] as [number, number, number];
-    const col = this.bgStyle === CorruptDesert ? d.c
-      : this.bgStyle === HallowDesert ? d.h
-      : this.bgStyle === CrimsonDesert ? d.r : undefined;
+    if (slot === Desert) return [...d.p] as [number, number, number];
+    const col = slot === CorruptDesert ? d.c
+      : slot === HallowDesert ? d.h
+      : slot === CrimsonDesert ? d.r : undefined;
     if (col) return [...col] as [number, number, number];
     return [GOODEVIL_DESERT_FALLBACK[0], GOODEVIL_DESERT_FALLBACK[1], -1];
+  }
+
+  /** UpdateBGVisibility_BackLayer（Main.cs:65123-65188）bgStyle→远山槽映射 1:1。
+   *  ★远山槽与 bgStyle 非同构——山体绘制侧（BackMountainsStep1/Step2）按本表槽号
+   *  取贴图：slot0=Forest1/Jungle/Mushroom 共用（treeMntBGSet1）、1=Desert（23/22）、
+   *  2=Corruption+侵染沙漠系+非档3神圣（24/25）、3=Ocean（Step2 专属 oceanBG）、
+   *  4=Snow（snowMntBG）、5=Crimson（24/42）、6=神圣档3（246/247）、10/11/12=
+   *  Forest2-4、15=jungleBG 档5（无 Step1/2 绘制=远山淡出）。同槽共管效应：
+   *  森林↔丛林↔蘑菇切换远山 alpha 不动（原版同相——山体不参与交叉淡化）。 */
+  private farSlotsForStyle(style: number): number[] {
+    switch (style) {
+      case Forest2: return [10];
+      case Forest3: return [11];
+      case Forest4: return [12];
+      case Desert: return [1];
+      case Corruption: case CorruptDesert: case HallowDesert: case CrimsonDesert: return [2];
+      case Hallow: return this.hallowStyle === 3 ? [6] : [2];
+      case Ocean: return [3];
+      case Snow: return [4];
+      case Crimson: return [5];
+      case Jungle: return this.jungleStyle === 5 ? [15] : [0];
+      case Mushroom: return [0, 6];
+      default: return [0];   // Forest1 + 越界兜底
+    }
   }
 
   /** IsBackgroundConsideredTheSame（WorldGen.cs:8010）的行空间翻译——重掷「必异」
@@ -708,7 +743,7 @@ export class BiomeBackground {
     this.alphaFront.fill(0);
     this.alphaFar.fill(0);
     this.alphaFront[style] = 1;
-    this.alphaFar[style] = 1;
+    for (const s of this.farSlotsForStyle(style)) this.alphaFar[s] = 1;   // 远山槽随 :65123 映射
     this.warmStyle(style);
   }
 
@@ -921,14 +956,17 @@ export class BiomeBackground {
         }
       }
     }
-    // 远山层 alpha（bgStyle→far 槽映射简化为同号；海洋 = Step2 专属 far 槽 3，
-    // UpdateBGVisibility_BackLayer case 4 :63636-63638，本仓按同号 Ocean 槽驱动。
-    // 丛林无山体双步（三树层即全部）→ 无 far 档；神圣 246/247 仅 hallowStyle===3
-    // 绘制,但 alpha 照常驱动（不绘即无害））
-    const farTarget = this.bgStyle === Jungle ? -1 : this.bgStyle;
+    // 远山层 alpha（UpdateBGVisibility_BackLayer :65123-65188 bgStyle→far 槽映射 1:1——
+    // ★非同号：Desert→1、Corruption 系（1/5/13/14）→2、Ocean→3、Snow→4、Crimson→5、
+    // Hallow→6（世界神圣档≠3 则 2）、Jungle→0（jungleBG 档 5 则 15）、Mushroom→{0,6}、
+    // 森林四段→同号。同槽共管效应：森林↔丛林↔蘑菇共用槽 0 = 远山不淡出（原版同相）；
+    // 丛林档 5 落槽 15（Step1/2 无该槽绘制）= 远山照常淡出）
+    const farSlots = this.farSlotsForStyle(this.bgStyle);
     for (let l = 0; l < 16; l++) {
-      const target = l === farTarget ? 1 : 0;
-      this.alphaFar[l] += target > this.alphaFar[l] ? Math.min(frames * 0.05, target - this.alphaFar[l]) : Math.max(-frames * 0.05, target - this.alphaFar[l]);
+      const target = farSlots.includes(l) ? 1 : 0;
+      // 坡速随 backgroundLayerTransitionSpeed（DrawBG_ModifyBGFarBackLayerAlpha
+      // :65236 value=speed——instant 帧 speed=1 远山同拍吸合）
+      this.alphaFar[l] += target > this.alphaFar[l] ? Math.min(speed * frames, target - this.alphaFar[l]) : Math.max(-speed * frames, target - this.alphaFar[l]);
     }
     // 地下风格（:52245-52249：变更时新旧并行，ugBackTransition -= 0.25/帧）
     const ugWant = this.pickUnderground(world, scene, geom);
@@ -1010,7 +1048,12 @@ export class BiomeBackground {
       topTileY: Math.floor(camTopY / 16),
       bottomTileY: Math.floor((camTopY + viewH / cam.zoom) / 16),
     };
-    this.update(world, scene, dtMs, geom);
+    // ★update 每帧只吃一次真实 dt：surface 相位调用已推进（Renderer 传 16.7），
+    //   underground 相位调用只为画带层+推进动画钟（magmaFrameT/hellFrameT/bgTick，
+    //   见 drawUnderground/drawHellLayers）——若这里再吃全量 dt = 风格过渡/flash/
+    //   alpha 坡道每帧双倍推进（0.05/帧坡道变 0.1/帧）。remix 世界 surface 相位被
+    //   跳过（IIIII224）→ update 仅剩 0 推进 = 修复前同相，登记债不属本刀
+    this.update(world, scene, phase === 'underground' ? 0 : dtMs, geom);
     // 深度门（DrawClouds_Closest :59073 系各层共门 screenPosition.Y < ws×16+16）
     if (phase !== 'underground' && camTopY < world.groundLevel * 16 + 16) {
       this.drawSurface(b, world, cam, camTopY, camLeftX, viewW, viewH, tint);
@@ -1143,100 +1186,117 @@ export class BiomeBackground {
         }
       }
     }
-    // ---- 群系层（序 = DrawSurfaceBG 绘制序：Step1 远山 → Step2 近山 → 前景群系函数）----
+    // ---- 群系层（序 = DrawSurfaceBG 原版序：Step1 远山 → Step2 近山 → 前景群系函数；
+    //     ★逐槽绘制：原版 for l=0..15 按 bgAlpha[slot]>0 把【所有】活跃槽画出来
+    //     （前景循环 :60460-60532、山体 Step1 :60768-60823 / Step2 :60836-60912）。
+    //     2026-09-19 用户实报"群系切换远景背景瞬切"根因 = 曾只绘当前 bgStyle 单槽：
+    //     flip 帧旧槽 alpha 仍在 1→0 衰减但不再被绘制 = 旧背景一帧消失（露天空）、
+    //     新背景从 0 淡入；原版 = 新旧双槽同绘（旧 1→0、新 0→1 各 0.05/帧）=
+    //     交叉淡化，与黑闪遮罩（DrawChangeOverlay）构成双保险）----
     // 山体双步几何：Step1（:60745）scale1 par0.15 topY=num3·1300+1090；
     // Step2（treeMntBGSet1[1] 块 :60430 = Step2 槽共用档）scale1.15 par0.2
     // topY=num3·1400+1260；两步都过 GetLayerYOffset + GetBackgroundRect（动画）。
     // ★曾只画一层远山——近山层（22/25/36/42/247/森林 m[1] 第二档）整层缺失。
-    const style = this.bgStyle;
-    const aFar = this.alphaFar[style] ?? 0;
-    const aFront = this.alphaFront[style] ?? 0;
-    if (style === Forest1 || style === Forest2 || style === Forest3 || style === Forest4) {
-      const seg = style === Forest1 ? 0 : style === Forest2 ? 1 : style === Forest3 ? 2 : 3;
-      const fs = this.pickStyle('forest', FOREST_STYLES, this.forestStyles[seg], world);
-      drawLayer(fs.m[0], 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });   // Step1 槽[0]
-      drawLayer(fs.m[1], 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true }); // [1] 块/Step2
-      // DrawSurfaceBG_Forest（:62217）三树层
-      drawLayer(fs.t[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });
-      drawLayer(fs.t[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true, flip: true });
-      // 槽[2] 几何：t[0]==91 时整槽走 1.3/0.42 特例（:62398-62407,该覆写挂在
-      // [0]==91 上与槽内容无关——样式 31 的 t[2]=11 也吃此档）;SURF_NUDGE[92]=150
-      // 由表按贴图号自动施加。曾误写成「再画一遍 92」= s3 行 92 双绘 +
-      // 扩表后的样式 31 行凭空多出 92 层（终清波修正）。
-      if (fs.t[0] === 91) {
-        drawLayer(fs.t[2], 1.3, 0.42, 2100, 2000, aFront, { anim: true });
-      } else {
-        drawLayer(fs.t[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });
+    const forestRow = (seg: number) =>
+      this.pickStyle('forest', FOREST_STYLES, this.forestStyles[seg], world);
+    const segOf = (s: number) => s === Forest1 ? 0 : s === Forest2 ? 1 : s === Forest3 ? 2 : 3;
+    const snowRow = () => this.pickStyle('snow', SNOW_STYLES, this.snowStyle, world);
+    // Step1 远山（BackMountainsStep1 :60768-60823 绘制序 0,10,11,12,1,2,4,5,6；
+    // 槽语义见 farSlotsForStyle——山体不随 bgStyle 同号：Desert=槽1 画 23、
+    // Corruption 系=槽2 画 24、Snow=槽4 画 snowMntBG[0]、Crimson=槽5 画 24、
+    // Hallow 档3=槽6 画 246。样式门：desertBG!=4 / crimsonBG!=5 / hallowBG==3）
+    const step1: Array<[number, number]> = [];
+    for (const s of [0, 10, 11, 12]) {
+      if (this.alphaFar[s] > 0.01) step1.push([s, forestRow(segOf(s)).m[0]]);
+    }
+    if (this.alphaFar[1] > 0.01 && this.desertStyle !== DESERT_STYLE4_ROW) step1.push([1, 23]);
+    if (this.alphaFar[2] > 0.01) step1.push([2, 24]);
+    if (this.alphaFar[4] > 0.01) step1.push([4, snowRow().m[0]]);
+    if (this.alphaFar[5] > 0.01 && this.crimsonStyle !== 5) step1.push([5, 24]);
+    if (this.alphaFar[6] > 0.01 && this.hallowStyle === 3) step1.push([6, 246]);
+    for (const [s, tex] of step1) {
+      drawLayer(tex, 1, 0.15, 1300, 1090, this.alphaFar[s], { yoff: true, anim: true });
+    }
+    // Step2 近山（BackMountainsStep2 :60836-60912 绘制序 0,1,2,3,4,5,6,10,11,12；
+    // 海洋 = Step2 专属 far 槽 3 → oceanBG；森林 m[1]>-1 门 :60840）
+    const step2: Array<[number, number]> = [];
+    for (const s of [0, 10, 11, 12]) {
+      const m1 = forestRow(segOf(s)).m[1];
+      if (this.alphaFar[s] > 0.01 && m1 > -1) step2.push([s, m1]);
+    }
+    if (this.alphaFar[1] > 0.01 && this.desertStyle !== DESERT_STYLE4_ROW) step2.push([1, 22]);
+    if (this.alphaFar[2] > 0.01) step2.push([2, 25]);
+    if (this.alphaFar[3] > 0.01) step2.push([3, this.oceanTexId()]);
+    if (this.alphaFar[4] > 0.01) step2.push([4, snowRow().m[1]]);
+    if (this.alphaFar[5] > 0.01 && this.crimsonStyle !== 5) step2.push([5, 42]);
+    if (this.alphaFar[6] > 0.01 && this.hallowStyle === 3) step2.push([6, 247]);
+    for (const [s, tex] of step2) {
+      drawLayer(tex, 1.15, 0.2, 1400, 1260, this.alphaFar[s], { yoff: true, anim: true });
+    }
+    // 前景群系函数（DrawSurfaceBG 主循环 :60460-60532：绘制序 = 槽号升序 0..15，
+    // 每槽前景组按【槽】解析——沙漠族 p/c/h/r 列、森林四段各取本段行。过渡期
+    // 旧槽 alpha 衰减期间照常绘制 = 交叉淡化底色。槽 4（Ocean）原版前景无层组）
+    for (let l = 0; l < 16; l++) {
+      const aF = this.alphaFront[l];
+      if (aF <= 0.01) continue;
+      if (l === Forest1 || l === Forest2 || l === Forest3 || l === Forest4) {
+        const fs = forestRow(segOf(l));
+        // DrawSurfaceBG_Forest（:62217）三树层
+        drawLayer(fs.t[0], 1.25, 0.4, 1800, 1500, aF, { anim: true });
+        drawLayer(fs.t[1], 1.31, 0.43, 1950, 1750, aF, { anim: true, flip: true });
+        // 槽[2] 几何：t[0]==91 时整槽走 1.3/0.42 特例（:62398-62407,该覆写挂在
+        // [0]==91 上与槽内容无关——样式 31 的 t[2]=11 也吃此档）;SURF_NUDGE[92]=150
+        // 由表按贴图号自动施加。曾误写成「再画一遍 92」= s3 行 92 双绘 +
+        // 扩表后的样式 31 行凭空多出 92 层（终清波修正）。
+        if (fs.t[0] === 91) {
+          drawLayer(fs.t[2], 1.3, 0.42, 2100, 2000, aF, { anim: true });
+        } else {
+          drawLayer(fs.t[2], 1.34, 0.49, 2100, 2000, aF, { anim: true });
+        }
+      } else if (l === Corruption) {
+        const cs = this.pickStyle('corrupt', CORRUPT_STYLES, this.corruptStyle, world);
+        // [0]==56 → 三层全 -100（:62086/:62124/:62156 各块共门）；[1] 整层水平翻转
+        const n56 = cs[0] === 56 ? -100 : 0;
+        drawLayer(cs[0], 1.25, 0.4, 1800, 1500, aF, { nudge: n56 });
+        drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aF, { flip: true, nudge: n56 });
+        drawLayer(cs[2], 1.34, 0.49, 2100, 2000, aF, { nudge: n56 });
+      } else if (l === Crimson) {
+        const cs = this.pickStyle('crimson', CRIMSON_STYLES, this.crimsonStyle, world);
+        drawLayer(cs[0], 1.25, 0.4, 1800, 1500, aF, { anim: true });   // 105:+50/174:-350 走 NUDGE
+        drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aF, { anim: true });
+        drawLayer(cs[2], 1.34, 0.49, 2100, 2000, aF, { anim: true });  // 175:-400 走 NUDGE
+      } else if (l === Jungle) {
+        const js = this.pickStyle('jungle', JUNGLE_STYLES, this.jungleStyle, world);
+        drawLayer(js[0], 1.25, 0.4, 1800, 1660, aF, { anim: true, yoff: true });  // 59:-200+YOff-550
+        drawLayer(js[1], 1.31, 0.43, 1950, 1840, aF, { anim: true, yoff: true });
+        drawLayer(js[2], 1.34, 0.49, 2100, 2060, aF, { anim: true, yoff: true });
+      } else if (l === Snow) {
+        // ★终清波：雪原树层随样式行切换——setBG case 3（WorldGen.cs:7305-7440）。
+        const ss = snowRow();
+        drawLayer(ss.t[0], 1.25, 0.4, 1800, 1500, aF, { yoff: true });   // DrawSurfaceBG_Snow 三层（:61252 起）
+        drawLayer(ss.t[1], 1.31, 0.43, 1950, 1750, aF, { yoff: true });
+        drawLayer(ss.t[2], 1.34, 0.49, 2100, 2000, aF, { yoff: true });
+      } else if (l === Hallow) {
+        const hs = this.pickStyle('hallow', HALLOW_STYLES, this.hallowStyle, world);
+        drawLayer(hs[0], 1.25, 0.4, 1800, 1500, aF, { anim: true });
+        drawLayer(hs[1], 1.31, 0.43, 1950, 1750, aF, { anim: true });
+        drawLayer(hs[2], 1.34, 0.49, 2100, 2000, aF, { anim: true });
+      } else if (l === Mushroom) {
+        const ms = this.pickStyle('mushroom', MUSHROOM_STYLES, this.mushroomStyle, world);
+        drawLayer(ms[0], 1.25, 0.4, 1800, 1400, aF, { anim: true });
+        drawLayer(ms[1], 1.32, 0.43, 1950, 1675, aF, { anim: true });
+        drawLayer(ms[2], 1.36, 0.49, 2100, 1950, aF, { anim: true });
+      } else if (l === Desert || l === CorruptDesert || l === CrimsonDesert || l === HallowDesert) {
+        // 三层组（DrawSurfaceBG_Desert :61969：槽[0]=1.25/0.37/1800/1750、槽[1]/[2]=
+        // 1.34/0.49/2100/2150 各经 SetBackgroundOffsets 特例覆写；槽 2=Pure 列、
+        // 槽 5/13/14=对应侵染列,空列落 GoodEvilDesert 兜底 26/27 双条 :61852 起）
+        const d = this.desertTripleForSlot(l);
+        drawLayer(d[0], 1.25, 0.37, 1800, 1750, aF);
+        drawLayer(d[1], 1.34, 0.49, 2100, 2150, aF);
+        drawLayer(d[2], 1.34, 0.49, 2100, 2150, aF);   // 仅样式 4 的 250 非空
       }
-    } else if (style === Corruption) {
-      drawLayer(24, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[2]
-      drawLayer(25, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[2]
-      const cs = this.pickStyle('corrupt', CORRUPT_STYLES, this.corruptStyle, world);
-      // [0]==56 → 三层全 -100（:62086/:62124/:62156 各块共门）；[1] 整层水平翻转
-      const n56 = cs[0] === 56 ? -100 : 0;
-      drawLayer(cs[0], 1.25, 0.4, 1800, 1500, aFront, { nudge: n56 });
-      drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aFront, { flip: true, nudge: n56 });
-      drawLayer(cs[2], 1.34, 0.49, 2100, 2000, aFront, { nudge: n56 });
-    } else if (style === Crimson) {
-      // Step1/Step2 槽[5] 山体门 crimsonBG!=5（Main.cs :60809/:60848）——样式 5
-      // 的 [255,256,257] 组自带完整远景,不再叠通用山（曾恒画 = 该档多一层穿帮）
-      if (this.crimsonStyle !== 5) {
-        drawLayer(24, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[5]
-        drawLayer(42, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[5]
-      }
-      const cs = this.pickStyle('crimson', CRIMSON_STYLES, this.crimsonStyle, world);
-      drawLayer(cs[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });   // 105:+50/174:-350 走 NUDGE
-      drawLayer(cs[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true });
-      drawLayer(cs[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });  // 175:-400 走 NUDGE
-    } else if (style === Jungle) {
-      const js = this.pickStyle('jungle', JUNGLE_STYLES, this.jungleStyle, world);
-      drawLayer(js[0], 1.25, 0.4, 1800, 1660, aFront, { anim: true, yoff: true });  // 59:-200+YOff-550
-      drawLayer(js[1], 1.31, 0.43, 1950, 1840, aFront, { anim: true, yoff: true });
-      drawLayer(js[2], 1.34, 0.49, 2100, 2060, aFront, { anim: true, yoff: true });
-    } else if (style === Snow) {
-      // ★终清波：雪原山体随样式行切换——setBG case 3（WorldGen.cs:7305-7440）每档
-      // 先预置 Main.snowMntBG=[35,36] 再按样式覆写 98/99、98/100、98/101 或清 -1；
-      // 曾硬编码恒画 35/36 = 样式 2/3/4 子族山体缺失。Step1 门=:60801 bgTexIndexes>=0
-      const ss = this.pickStyle('snow', SNOW_STYLES, this.snowStyle, world);
-      drawLayer(ss.m[0], 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // snowMntBG[0] Step1
-      drawLayer(ss.m[1], 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // snowMntBG[1] Step2（:60853）
-      drawLayer(ss.t[0], 1.25, 0.4, 1800, 1500, aFront, { yoff: true });                // DrawSurfaceBG_Snow 三层（:61252 起）
-      drawLayer(ss.t[1], 1.31, 0.43, 1950, 1750, aFront, { yoff: true });
-      drawLayer(ss.t[2], 1.34, 0.49, 2100, 2000, aFront, { yoff: true });
-    } else if (style === Hallow) {
-      // 246/247 山体仅 hallowBG==3 档（:60816/:60845 门；HALLOW_STYLES[3]=[243,244,245]）
-      if (this.hallowStyle === 3) {
-        drawLayer(246, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });
-        drawLayer(247, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });
-      }
-      const hs = this.pickStyle('hallow', HALLOW_STYLES, this.hallowStyle, world);
-      drawLayer(hs[0], 1.25, 0.4, 1800, 1500, aFront, { anim: true });
-      drawLayer(hs[1], 1.31, 0.43, 1950, 1750, aFront, { anim: true });
-      drawLayer(hs[2], 1.34, 0.49, 2100, 2000, aFront, { anim: true });
-    } else if (style === Mushroom) {
-      const ms = this.pickStyle('mushroom', MUSHROOM_STYLES, this.mushroomStyle, world);
-      drawLayer(ms[0], 1.25, 0.4, 1800, 1400, aFront, { anim: true });
-      drawLayer(ms[1], 1.32, 0.43, 1950, 1675, aFront, { anim: true });
-      drawLayer(ms[2], 1.36, 0.49, 2100, 1950, aFront, { anim: true });
-    } else if (style === Desert || style === CorruptDesert || style === CrimsonDesert || style === HallowDesert) {
-      // Step1/Step2 槽[1] 山体门 desertBG!=4（Main.cs :60806/:60844）——样式 4 的
-      // [248,249,250] 自带三层沙暴丘,不再叠通用 23/22 山;好恶沙漠槽(5/13/14)
-      // 原版山步无 case = 恒无山体（GoodEvilDesert 只画前景双条,:61852 起）
-      if (style === Desert && this.desertStyle !== DESERT_STYLE4_ROW) {
-        drawLayer(23, 1, 0.15, 1300, 1090, aFar, { yoff: true, anim: true });        // Step1 槽[1]
-        drawLayer(22, 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });      // Step2 槽[1]
-      }
-      // 三层组（DrawSurfaceBG_Desert :61969：槽[0]=1.25/0.37/1800/1750、槽[1]/[2]=
-      // 1.34/0.49/2100/2150 各经 SetBackgroundOffsets 特例覆写;好恶沙漠侵染列
-      // 为空时落 GoodEvilDesert 兜底 26/27 双条）
-      const d = this.activeDesertTriple();
-      drawLayer(d[0], 1.25, 0.37, 1800, 1750, aFront);
-      drawLayer(d[1], 1.34, 0.49, 2100, 2150, aFront);
-      drawLayer(d[2], 1.34, 0.49, 2100, 2150, aFront);   // 仅样式 4 的 250 非空
-    } else if (style === Ocean) {
-      // 海洋 = Step2 槽[3]（:60836 bgAlphaFarBackLayer[3] → oceanBG）+ YOff（283→-800 等）
-      drawLayer(this.oceanTexId(), 1.15, 0.2, 1400, 1260, aFar, { yoff: true, anim: true });
-      // 原版海洋无前景树层组——front 槽 4 只画变更换屏闪光 overlay（未实装=常态不画）
+      // l===Ocean：原版海洋无前景树层组（海洋单层 = Step2 远山槽 3；front 槽 4
+      // 只画变更换屏闪光 overlay——未实装=常态不画）
     }
   }
 

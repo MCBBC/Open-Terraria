@@ -4,7 +4,7 @@ import { getPass, runPassOnImageData, defaultUniforms } from '../fx/SM2Effect';
 import { options } from '../core/Options';
 import { bindsOf, keybindActionLabel, keybindCodeLabel, type KeybindAction } from '../core/Keybinds';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { isFunctionalTileItem } from '../world/evolution/PlantRules';
+// ★BJ154:isFunctionalTileItem/vanillaItemCreateTile 消费随池构建摘入 itemSearch.ts
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
@@ -130,7 +130,7 @@ function invBgDataUrl(w: number, h: number): string | null {
   x.drawImage(t, 10, 10, 10, 10, 10, 10, c.width - 20, c.height - 20);
   return c.toDataURL();
 }
-import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap, vanillaItemCreateTile } from '../assets/SpriteAtlas';
+import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
 import { bannerNpcOfItem } from '../world/Banners';
@@ -144,7 +144,7 @@ import { tryItemSwapVid } from '../render/CursorItemIcon';
 import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames } from '../stats/Buffs';
 import { mainDifficulty, GDL, mainMasterMode } from '../stats/ScaleStats'; // ★SW-FX21 +mainMasterMode（BossBag 右键上下文）
 import { Lang } from '../i18n/Lang';
-import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
+import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, happinessPct, type NpcButtonId, type ShopEntry, type ShopCellHover, type HappinessInfo } from './NpcDialog';   // ★SW-FX32:happinessPct/ShopCellHover 内嵌货架共用
@@ -181,7 +181,7 @@ import {
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
   itemSearchPanelRect,   // ★SW-BJ81 规格③:道具搜索浮窗几何(物品栏占位面之外,单源)
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
-import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源
+import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan, buildItemSearchPool } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源;★BJ154 池构建单源
 import {
   // ★SW-FX41(2026-09-12)UI 移债 modern 窗族 P2-1..P2-4:NewCraftingUI 纯逻辑单源
   MCRAFT_ALL_BUTTONS, MCRAFT_PANEL_BG, MCRAFT_SEARCH_BG,
@@ -2919,11 +2919,20 @@ export class UI {
     this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}<span style="display:none"></span>${linesHtml}</div>`;
     this.tooltip.style.display = 'block';
     this.startTooltipPulse();
-    this.applyTooltipBg();
     // 定位：锚槽右侧（原版跟鼠标+toolTipDistance；槽锚定确定性更好），屏幕钳制
     // （:20241-20250 num4=18 边距）
+    // ★SW-TT1（2026-09-19 实报定谳「气泡右侧多出一截」）：量测必须先清旧锚再定位，
+    //   烘底必须挪到定位之后——position:fixed shrink-to-fit 宽度受元素【当前
+    //   style.left】约束，上一次悬停残留的 left 会把本次 offsetWidth 挤窄（屏幕
+    //   钳制支最多差 18px、非钳制支可差到整个自然宽），随后写 left/top 触发回流
+    //   回弹变宽，而 applyTooltipBg 已按旧宽烘好固有尺寸底图（background-size:
+    //   auto）→ 盖不满的右缘条带被默认 repeat 从左上平铺补空 = 气泡右侧多出的
+    //   重复贴图凸块（原版即时模式每帧按当帧串宽画底 Utils.DrawInvBG :2718-2742，
+    //   无跨帧位置反馈 = 无此伪影，本仓 DOM 遗留态特有）。
     const slotEl = override?.anchor ?? this.slotEl(i, where);
     if (slotEl) {
+      this.tooltip.style.left = '0px';   // 清旧 left 约束（同帧多次写样式,无中间绘制）
+      this.tooltip.style.top = '0px';
       const r = slotEl.getBoundingClientRect();
       const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
       let left = r.right + 8, top = r.top;
@@ -2932,6 +2941,7 @@ export class UI {
       this.tooltip.style.left = `${left}px`;
       this.tooltip.style.top = `${top}px`;
     }
+    this.applyTooltipBg();   // ★终布局后量测烘底（原在定位前 = 旧约束宽）
   }
 
   /** 商店悬停上下文（MouseText_DrawItemTooltip_AddShopLines Main.cs:20632-20402，
@@ -3020,13 +3030,17 @@ export class UI {
     const w = Math.ceil(this.tooltip.offsetWidth), h = Math.ceil(this.tooltip.offsetHeight);
     const bgUrl = tooltipBgDataUrl(w, h);
     if (bgUrl) {
-      this.tooltip.style.background = `url(${bgUrl})`;
+      // ★no-repeat 硬闸（SW-TT1）：底图恒按终布局尺寸现烘（调用量点全在定位后），
+      //   万一未来出现量测漂移，宁可露 1px 缝也不许默认 repeat 把九宫贴图整面平铺
+      //   成多块气泡（2026-09-19 重铸格实报形态）
+      this.tooltip.style.background = `url(${bgUrl}) no-repeat`;
       this.tooltip.style.border = 'none';
       this.tooltip.style.borderRadius = '0';
     } else {
       this.tooltip.style.background = 'rgba(21,23,75,0.93)';   // 兜底色（≈原版 0.925）
       const img = invBgEnsure();
-      if (img instanceof HTMLImageElement && !(img.width > 0)) {
+      // ★SW-TT1：node 测试域无 DOM 构造器（mock tooltip 走到兜底支）——typeof 先行
+      if (typeof HTMLImageElement !== 'undefined' && img instanceof HTMLImageElement && !(img.width > 0)) {
         img.addEventListener('load', () => this.applyTooltipBg(), { once: true });
       }
     }
@@ -3234,6 +3248,9 @@ export class UI {
   private tooltipHome: HTMLElement | null = null;
   // ★SW-BJ81 2026-09-14 规格⑥:长按连取计时器（面板关/松开/滑出条目三面兜底停摆）
   private itemSearchGrabTimer: ReturnType<typeof setInterval> | null = null;
+  // ★SW-BJ154 2026-09-19:搜索列表虚拟滚动列宽自适应（ResizeObserver 观察列表容器,
+  //   关面板必须 disconnect——面板 DOM 随开随建,observer 残留=泄漏+对死节点布局）
+  private itemSearchResizeOb: ResizeObserver | null = null;
 
   /** 搜出项取件执行器（★SW-BJ81 规格②⑤:数量恒 1,上光标走合成抓取通道
    *  grantCraftToCursor → heldStack;光标满叠余量落地入包,光标被异型占据时整份
@@ -3347,103 +3364,137 @@ export class UI {
     input.style.cssText = 'width:100%; box-sizing:border-box; padding:6px 8px; background:#1a1a22; color:#eee; border:1px solid #555; border-radius:4px; font-size:14px;';
     panel.appendChild(input);
     const list = el('div');
-    // 浮窗内滚:面板 max-height 已钳,列表吃满余高自滚(flex:1+min-height:0)
-    list.style.cssText = 'overflow-y:auto; display:flex; flex-wrap:wrap; gap:4px; align-content:flex-start; flex:1 1 auto; min-height:0;';
+    // ★SW-BJ154:浮窗内滚改虚拟滚动(JourneyBrowser 同款 spacer+绝对定位可视窗)——
+    //   旧 flex-wrap 全量 DOM 渲染撑不住 6856 条(旧 80 条封顶=用户实报"道具不全"
+    //   真凶①:2430 池序 464 永远不在前 80),虚拟化后全量可滚可搜。
+    //   容器=滚动域;spacer 撑总高;cellsLayer 绝对定位挂可视行(±1 缓冲)。
+    list.style.cssText = 'overflow-y:auto; position:relative; flex:1 1 auto; min-height:0;';
+    const spacer = el('div');
+    spacer.style.cssText = 'position:relative; width:100%;';
+    const cellsLayer = el('div');
+    cellsLayer.style.cssText = 'position:absolute; top:0; left:0; width:100%;';
+    spacer.appendChild(cellsLayer);
+    list.appendChild(spacer);
+    // 计数行(全量可见的用户感知锚:空查询=池总数,过滤=命中/总数)
+    const countEl = el('div', 'sw-lbl');
+    countEl.style.cssText = 'font-size:11px; opacity:0.75;';
+    panel.appendChild(countEl);
     panel.appendChild(list);
     document.body.appendChild(panel);
     this.itemSearchEl = panel;
     // 长按中在浮窗外松开(行 mouseup 不达)的兜底停摆;{once}=自然消亡不堆积
     document.addEventListener('mouseup', () => this.stopItemSearchGrabRepeat(), { once: true });
 
-    // 全量条目缓存（一次性构建：id/显示名/小写匹配串）
-    // 匹配串含【英文原名】——zh 名只对部分家族含族词（翅膀族 zh 多为"XX之翼"，
-    // 搜"翅膀"只见开发者翅膀；搜 wing/翼 才全）——2026-08-13 报障
-    // ★同 vid 去重（首个 def 胜出,与 ITEM_INTERNAL_OF_STABLE 归一口径一致）：
-    //   桥接批 snake 键 + vanilla.json 循环 Pascal 键曾双注册 1246 组（雷管双行
-    //   根因,2026-08-21）——存量双条目不删（ITEM_DEFS id=下标不可平移）,显示层滤掉
-    // ★place_v 覆盖去重（2026-08-25 用户报"两个阿比盖尔的花/苔藓双行"）:place_v_*
-    //   族（可放置）与惰性 vi_ 注册（无 tile 字段=不可放置死条目)同 tile 并存——
-    //   vi_ 件的 createTile tile 已被 place_v 覆盖时不进搜索（保留可用 place_v 件）
-    const coveredSheets = new Set<number>();
-    for (const d of ITEM_DEFS) {
-      const mp = /^place_v_(\d+)_/.exec(d.key);
-      if (mp) coveredSheets.add(Number(mp[1]));
-    }
-    // ★功能件豁免（2026-09-02 神圣种子第三案真凶）：覆盖去重的本意=滤掉「唯一职能
-    //  就是铺那格 tile」的惰性 vi_ 死条目；但草种/法杖/苔藓族的 createTile 虽被
-    //  place_v 面板块覆盖,它们在 AssortedThings 里是【转化/消耗】功能件（圣种转
-    //  泥土、法杖凭空种草、苔藓点石转化——PlantRules assortedPlaceOk/mossPlaceOk）
-    //  ⇒ 曾被整族滤出搜索,用户搜「神圣种子」永远只剩面板块。豁免域=种子/法杖 vid
-    //  集 ∪ 苔藓转化面。
-    const seenVid = new Set<number>();
-    const entries = ITEM_DEFS.map((d, id) => {
-      const vid = d.key.startsWith('vi_') ? d.key.slice(3, d.key.indexOf('_', 3)) : '';
-      const name = Lang.itemNameByKey(d.key) || d.key;
-      const en = vid ? (ITEM_NAME_EN_BY_ID[+vid] ?? '') : '';
-      return { id, d, name, lc: (name + ' ' + d.key + ' ' + vid + ' ' + en).toLowerCase() };
-    }).filter((e) => {
-      const m = /^vi_(\d+)_/.exec(e.d.key);
-      if (!m) return true;
-      const vid = Number(m[1]);
-      if (seenVid.has(vid)) return false;
-      seenVid.add(vid);
-      const ct = vanillaItemCreateTile(vid);
-      if (ct !== undefined && coveredSheets.has(ct) && !isFunctionalTileItem(ct)) return false;   // 惰性 vi_ 死条目
-      return true;
+    // 全量池单源（buildItemSearchPool:itemSearch.ts 纯函数,判别力测试直锚）
+    // 匹配串含【英文原名】+【官方 tooltip 桥】(★BJ154 真凶②:官方 zh 名"粘鞍"
+    // 不含族词"史莱姆",tooltip"召唤可骑乘的史莱姆坐骑"是唯一官方语汇桥)
+    const pool = buildItemSearchPool({
+      nameOf: (k) => Lang.itemNameByKey(k),
+      tipOf: (vid) => {
+        const nameKey = ITEM_NAME_BY_ID[vid];
+        if (!nameKey) return '';
+        const path = `ItemTooltip.${nameKey}`;
+        return Lang.has(path) ? Lang.text(path) : '';
+      },
     });
     // 族词别名（zh 族词分裂：翅膀↔翼——搜"翅膀"也能命中"天使之翼"族；本地
     // 表软链不动 i18n；2026-08-13 报障）。匹配串已含英文原名（搜 wing 全族可见）
     const ALIAS: Record<string, string[]> = { 翅膀: ['翼'], 翼: ['翅膀'] };
+
+    // ---- 虚拟滚动（JourneyBrowser M8 浏览器同款:行高/列数算定,只渲染可视±1 行） ----
+    const ROW_H = 32;      // 24 图标 + padding 3×2 + border 1×2
+    const GAP = 4;
+    const MIN_W = 150;     // BJ81 规格③ 列宽下限(340 宽浮窗两列,窄窗单列)
+    let view: typeof pool = [];
+    let cols = 2;
+    let rafPending = false;
+    const layout = () => {
+      const w = list.clientWidth;
+      cols = Math.max(1, Math.floor((w + GAP) / (MIN_W + GAP)));
+      const cw = (w - (cols - 1) * GAP) / cols;
+      const rows = Math.ceil(view.length / cols);
+      spacer.style.height = `${rows * (ROW_H + GAP)}px`;
+      // 等比内距:CSS 变量挂 spacer,cell 布局读同算式(JS 内联,无 CSS 变量依赖)
+      (spacer as HTMLDivElement & { __cw?: number }).__cw = cw;
+      renderVisible();
+    };
+    const renderVisible = () => {
+      rafPending = false;
+      cellsLayer.textContent = '';
+      const cw = (spacer as HTMLDivElement & { __cw?: number }).__cw ?? MIN_W;
+      const step = ROW_H + GAP;
+      const st = list.scrollTop;
+      const first = Math.max(0, Math.floor(st / step) - 1);
+      const last = Math.min(Math.ceil(view.length / cols), Math.ceil((st + list.clientHeight) / step) + 1);
+      for (let row = first; row < last; row++) {
+        for (let col = 0; col < cols; col++) {
+          const idx = row * cols + col;
+          if (idx >= view.length) break;
+          const e = view[idx];
+          const item = el('div');
+          item.style.cssText = `position:absolute; display:flex; align-items:center; gap:4px; box-sizing:border-box;`
+            + `left:${col * (cw + GAP)}px; top:${row * step}px; width:${cw}px; height:${ROW_H}px;`
+            + 'padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd; user-select:none;';
+          item.title = `${e.name}  [${e.key}]`;
+          // 悬停 = 背包同款详情气泡（2026-08-27 用户要求）——合成槽语义（stack1 无
+          // 词缀/收藏）,锚=行元素;离开即收
+          item.addEventListener('mouseenter', () =>
+            this.showTooltipFor(e.id, 'inv', { slot: { id: e.id, stack: 1 }, anchor: item }));
+          item.addEventListener('mouseleave', () => {
+            this.tooltip.style.display = 'none';
+            cancelAnimationFrame(this.tooltipPulseRaf);
+          });
+          const img = el('img') as HTMLImageElement;
+          img.src = iconUrl(this.game!, e.id);
+          img.style.cssText = 'width:24px; height:24px; image-rendering:pixelated; flex:none;';
+          item.appendChild(img);
+          const lbl = el('span');
+          lbl.textContent = e.name;
+          // ★SW-BJ81 规格③:省略号须 min-width:0(否则名字撑开行宽,双列布局塌单列)
+          lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;';
+          item.appendChild(lbl);
+          // ★SW-BJ81 规格②⑤⑥:按下即取 1 件上光标（合成抓取同款,数量恒 1——
+          //   旧「可堆叠给一组≤99」废止）,按住持续 +1（ITEMSEARCH_GRAB_INTERVAL_MS
+          //   节奏,并入上限=maxStack,grantCraftToCursor 既有钳制）;落点由玩家放置
+          //   （点物品栏槽=放入/点世界=左键使用右键丢出）。stopPropagation=不落
+          //   document 光标持物监听（installDragListeners 已豁免 .sw-itemsearch 双保险）
+          item.addEventListener('mousedown', (ev) => {
+            if (ev.button !== 0) return;
+            ev.stopPropagation();
+            ev.preventDefault();
+            this.itemSearchGrab(e.id);
+            this.startItemSearchGrabRepeat(e.id);
+          });
+          item.addEventListener('mouseup', () => this.stopItemSearchGrabRepeat());
+          item.addEventListener('mouseleave', () => this.stopItemSearchGrabRepeat());
+          cellsLayer.appendChild(item);
+        }
+      }
+    };
+    const schedule = () => {
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(renderVisible);
+    };
+    list.addEventListener('scroll', schedule, { passive: true });
+    // 浮窗宽随视口(uiScale/窗口拖拽)——ResizeObserver 观察列表容器,关面板即断
+    this.itemSearchResizeOb?.disconnect();
+    this.itemSearchResizeOb = new ResizeObserver(() => layout());
+    this.itemSearchResizeOb.observe(list);
     const render = () => {
       const qRaw = input.value.trim().toLowerCase();
       const qs = [qRaw, ...(ALIAS[qRaw] ?? []).map((x) => x.toLowerCase())].filter(Boolean);
-      list.textContent = '';
-      let shown = 0;
-      for (const e of entries) {
-        if (qs.length && !qs.some((q) => e.lc.includes(q))) continue;
-        if (++shown > 80) {
-          list.appendChild(el('div', 'sw-lbl', `…更多结果请细化搜索`));
-          break;
-        }
-        const item = el('div');
-        item.title = `${e.name}  [${e.d.key}]`;
-        // ★SW-BJ81 规格③:行宽随浮窗自适应(flex-basis 150 → 340 宽浮窗两列,
-        //   窄窗退化单列;旧固定 170px 在缩窄后只剩单列)
-        item.style.cssText = 'display:flex; align-items:center; gap:4px; flex:1 1 150px; min-width:0; box-sizing:border-box; padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd; user-select:none;';
-        // 悬停 = 背包同款详情气泡（2026-08-27 用户要求）——合成槽语义（stack1 无
-        // 词缀/收藏）,锚=行元素;离开即收
-        item.addEventListener('mouseenter', () =>
-          this.showTooltipFor(e.id, 'inv', { slot: { id: e.id, stack: 1 }, anchor: item }));
-        item.addEventListener('mouseleave', () => {
-          this.tooltip.style.display = 'none';
-          cancelAnimationFrame(this.tooltipPulseRaf);
-        });
-        const img = el('img') as HTMLImageElement;
-        img.src = iconUrl(this.game!, e.id);
-        img.style.cssText = 'width:24px; height:24px; image-rendering:pixelated; flex:none;';
-        item.appendChild(img);
-        const lbl = el('span');
-        lbl.textContent = e.name;
-        // ★SW-BJ81 规格③:flex 子项省略号须 min-width:0(否则名字撑开行宽,双列布局塌单列)
-        lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;';
-        item.appendChild(lbl);
-        // ★SW-BJ81 规格②⑤⑥:按下即取 1 件上光标（合成抓取同款,数量恒 1——
-        //   旧「可堆叠给一组≤99」废止）,按住持续 +1（ITEMSEARCH_GRAB_INTERVAL_MS
-        //   节奏,并入上限=maxStack,grantCraftToCursor 既有钳制）;落点由玩家放置
-        //   （点物品栏槽=放入/点世界=左键使用右键丢出）。stopPropagation=不落
-        //   document 光标持物监听（installDragListeners 已豁免 .sw-itemsearch 双保险）
-        item.addEventListener('mousedown', (ev) => {
-          if (ev.button !== 0) return;
-          ev.stopPropagation();
-          ev.preventDefault();
-          this.itemSearchGrab(e.id);
-          this.startItemSearchGrabRepeat(e.id);
-        });
-        item.addEventListener('mouseup', () => this.stopItemSearchGrabRepeat());
-        item.addEventListener('mouseleave', () => this.stopItemSearchGrabRepeat());
-        list.appendChild(item);
+      view = qs.length ? pool.filter((e) => qs.some((q) => e.lc.includes(q))) : pool;
+      countEl.textContent = qs.length
+        ? `命中 ${view.length} / ${pool.length} 件`
+        : `共 ${pool.length} 件（滚动浏览全部）`;
+      if (!view.length) {
+        spacer.style.height = '0px';
+        cellsLayer.textContent = '';
+        cellsLayer.appendChild(el('div', 'sw-lbl', '无匹配'));
+        return;
       }
-      if (!shown) list.appendChild(el('div', 'sw-lbl', '无匹配'));
+      layout();
     };
     input.addEventListener('input', render);
     render();
@@ -3454,6 +3505,9 @@ export class UI {
     // ★SW-BJ81 规格⑥兜底:面板关=连取计时器必停(否则闭包内 itemSearchGrab
     //   持续向已卸载面板的取件规则投喂,光标物无声连涨)
     this.stopItemSearchGrabRepeat();
+    // ★SW-BJ154:虚拟滚动列宽 observer 必随面板关断开(面板 DOM 随开随建)
+    this.itemSearchResizeOb?.disconnect();
+    this.itemSearchResizeOb = null;
     if (this.itemSearchEl) {
       this.itemSearchEl.remove();
       this.itemSearchEl = null;
@@ -3544,7 +3598,11 @@ export class UI {
       const np = this.game.doReforge(this.reforgeItem, out);
       if (np < 0) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.Fail')); return; }
       if (out.topTier) this.vinvReforgeCooldownUntil = performance.now() + 1000;   // 仅最优档(:42626)
-      this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
+      // 重铸反馈 = PopupText.NewText(ItemReforge/_Best,…,noStack:true)（Main.cs:42622,
+      // AffixName 飘字单源 showPickupLabel）;旧「花费: N · 前缀」toast=自创面退役
+      // （费用原版恒走常驻币制分解行 :42288-42322,无重铸后费用提示）
+      const rdef = ITEM_DEFS[this.reforgeItem.id];
+      if (rdef) this.game.showPickupLabel(rdef.key, this.reforgeItem.stack, np);
       this.refreshReforge();
     });
     panel.appendChild(doBtn);
@@ -3613,11 +3671,24 @@ export class UI {
     }
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';
-    if (this.reforgeSlotEl) {
-      const r = this.reforgeSlotEl.getBoundingClientRect();
-      this.tooltip.style.left = `${r.right + 8}px`;
-      this.tooltip.style.top = `${r.top}px`;
+    // ★SW-TT1 同族②（2026-09-19 实报「重铸格 tooltip 背景平铺成多块气泡」）：本路径
+    //   此前从不烘底——元素一直带着上一次物品气泡的固有尺寸底图，重铸文本更宽时
+    //   默认 repeat 整面平铺 = 多块气泡贴图；旧 left 约束挤窄量测同族。统一走
+    //   清位 → 量自然宽 → 定位钳制 → 终布局后烘底（与 showTooltipFor 同序）
+    this.tooltip.style.left = '0px';
+    this.tooltip.style.top = '0px';
+    // 锚 = classic 槽 ?? vinv 槽（vinv 布局重铸槽此前无锚=气泡落在残留坐标）
+    const anchorEl = this.reforgeSlotEl ?? this.vinvReforgeSlotEl;
+    if (anchorEl) {
+      const r = anchorEl.getBoundingClientRect();
+      const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
+      let left = r.right + 8, top = r.top;
+      if (left + tw > window.innerWidth - 18) left = Math.max(0, window.innerWidth - tw - 18);
+      if (top + th > window.innerHeight - 18) top = Math.max(0, window.innerHeight - th - 18);
+      this.tooltip.style.left = `${left}px`;
+      this.tooltip.style.top = `${top}px`;
     }
+    this.applyTooltipBg();
   }
 
   closeReforge(): void {
@@ -4920,7 +4991,10 @@ export class UI {
     this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}</div>`;
     this.tooltip.style.display = 'block';
     this.startTooltipPulse();
-    this.applyTooltipBg();
+    // ★SW-TT1 同族③：与 showTooltipFor 同序——清旧 left/top 约束量自然宽 → 定位
+    //   钳制 → 终布局后烘底（旧序定位前烘底，定位回弹后 repeat 平铺出右缘凸块）
+    this.tooltip.style.left = '0px';
+    this.tooltip.style.top = '0px';
     const r = anchor.getBoundingClientRect();
     const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
     let left = r.right + 8, top = r.top;
@@ -4928,6 +5002,7 @@ export class UI {
     if (top + th > window.innerHeight - 18) top = Math.max(0, window.innerHeight - th - 18);
     this.tooltip.style.left = `${left}px`;
     this.tooltip.style.top = `${top}px`;
+    this.applyTooltipBg();
   }
 
   private hideBuffTooltip(): void {
@@ -8125,6 +8200,10 @@ export class UI {
         const t = mcraftWindowToggleXY(!!this.game?.world?.isJourney).toggle;
         return { x: t.x, y: t.y + CRAFT_BAR_TOP_OFF };
       }
+      // ★重铸态整隐(Main.cs:42418 else-if !InReforgeMenu——DrawGridToggle :275-277 指示条
+      //   在该支内;就近箱钮 :8038/切换钮 :8211 同门已有,旧码条缺门=重铸态配方面整隐后
+      //   32×20 金渐变指示条孤悬左下=用户报「黄渐变小方块」)
+      if (this.vinvReforgeVisible()) return null;
       // ★RB29(2026-09-15)回归2连带:向导态条随切换钮上移(Main.cs:42438
       //   num67=InGuideCraftMenu ? 300 : 450;条画在钮位 CraftingUI.cs:275-278
       //   Utils.DrawSelectedCraftingBarIndicator(spriteBatch,craftX,craftY)——旧码缺
@@ -9737,10 +9816,17 @@ export class UI {
     hImg.style.cssText = 'width:100%; height:100%; image-rendering:pixelated; pointer-events:none;';
     hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png';
     hammer.appendChild(hImg);
-    hammer.addEventListener('mouseenter', () => { hImg.src = 'sprites/vanilla-ui/UI_Reforge_1.png'; });
+    // 悬停面(:42371-42374:hoverItemName=inter[19] MouseText + !mouseReforge→PlaySound(12)
+    // +mouseReforge=true;:42383 离开锤盒 mouseReforge=false)——旧码只换贴图无悬停名/音
+    hammer.addEventListener('mouseenter', () => {
+      hImg.src = 'sprites/vanilla-ui/UI_Reforge_1.png';
+      this.game.sfx.play('menuTick', 1);
+      this.showBuffTooltip(hammer, Lang.inter(19), '');
+    });
     hammer.addEventListener('mouseleave', () => {
       hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png';
       this.vinvReforgeCooldownUntil = 0;   // 离锤即清冷却(mouseReforge=false 支 :42279)
+      this.hideBuffTooltip();
     });
     hammer.addEventListener('mousedown', (e) => { e.stopPropagation(); this.vinvReforgeHammerHit(); });
     root.appendChild(hammer);
@@ -9773,7 +9859,12 @@ export class UI {
     const np = this.game.doReforge(this.reforgeItem, out);
     if (np < 0) return;
     if (out.topTier) this.vinvReforgeCooldownUntil = performance.now() + 1000;   // 仅最优档(:42626)
-    this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
+    // 重铸反馈 = PopupText.NewText(ItemReforge/_Best,reforgeItem,player.Center,stack,
+    // noStack:true)（Main.cs:42622）——AffixName 飘字（新词缀+本名,玩家头顶,稀有度色）,
+    // 单源 showPickupLabel;旧「花费: N · 前缀」toast=自创面退役（费用原版恒走 (100,270)
+    // 币制分解常驻行 :42288-42322,无重铸后费用提示）
+    const rdef = ITEM_DEFS[this.reforgeItem.id];
+    if (rdef) this.game.showPickupLabel(rdef.key, this.reforgeItem.stack, np);
     this.refreshAll();
   }
 

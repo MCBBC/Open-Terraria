@@ -70,7 +70,9 @@ async function pressDragPan(page) {
   ok(d > 0, '①A: M 开图后首次按压拖动位移>0', `d=${d.toFixed(1)}`);
   await page.keyboard.press('KeyM'); await sleep(150);
 
-  // ①B:小地图【按住】点击开图 → 同一按压继续拖 = 开图按压即拖(vanilla)
+  // ①B（★SW-BJ120 2026-09-19 退役+改验）：小地图【按住】点击开图面已摘除（原版无此面
+  // ——Main.cs:56340-56381 minimap 支无点击处理）。改验两件事：a) 点击不开图（BJ120 主断言）；
+  // b) 旧面附带的「开图按压即拖」语义仍由 ①A（M 开图后首次按压拖动）覆盖。
   const mm = await page.evaluate(() => {
     const r = window.__swGame.renderer.minimapRect;
     return { x: r.x + r.w / 2, y: r.y + r.h / 2 };
@@ -78,18 +80,10 @@ async function pressDragPan(page) {
   await page.mouse.move(mm.x, mm.y);
   await page.mouse.down(); await sleep(130);
   const openAtPress = await page.evaluate(() => window.__swGame.renderer.fullMap.open);
-  await page.mouse.move(mm.x - 140, mm.y - 70, { steps: 10 });
-  await sleep(150);
-  const panMid = await page.evaluate(() => { const f = window.__swGame.renderer.fullMap; return { x: f.panX, y: f.panY, zoom: f.zoom }; });
   await page.mouse.up(); await sleep(80);
-  ok(openAtPress, '①B-pre: 小地图按住点击当帧开图');
-  // 开图缓动未落定时的拖拽锚点行为:记录 pan 与 zoom,与开图预置对照看是否动了
-  // (预置 pan 未知,这里断言「松开后第二次按压拖动生效」+「开图按压期间 zoom 在缓动」)
-  await waitMapSettled(page);
-  const d2 = await pressDragPan(page);
-  ok(d2 > 0, '①B-对照: 第二次按压拖动生效', `d=${d2.toFixed(1)}`);
-  console.log(`[A] 开图按压继续拖: pan=(${panMid.x.toFixed(1)},${panMid.y.toFixed(1)}) zoom=${panMid.zoom.toFixed(2)}(缓动中)`);
-  await page.keyboard.press('KeyM'); await sleep(120);
+  ok(!openAtPress, '①B: 小地图按住点击不开图（BJ120 摘面;点击穿透面=vitest 结构锚+updateUse 门）');
+  // （旧①B 的「开图按压继续拖」随入口面退役；拖拽语义由 ①A 覆盖。地图保持关——
+  //   下方 ①C 自带 KeyM 开图。）
 
   // ①C:开图按压静止按住 → 缓动仍钉主角(锚点不被点击处顶掉=旧 _mapOpenClick 防的回归)
   await page.keyboard.press('KeyM'); await sleep(150);
@@ -154,12 +148,16 @@ const matrix = [
     await page.keyboard.press('KeyM'); await sleep(200);
     return worldClickUse(page);
   }],
-  ['M6 小地图按住开图→关图→世界击', async (page) => {
-    const mm = await page.evaluate(() => { const r = window.__swGame.renderer.minimapRect; return { x: r.x + r.w / 2, y: r.y + r.h / 2 }; });
+  ['M6 小地图按住点击→不开图→同位世界击（BJ120 穿透）', async (page) => {
+    // ★SW-BJ120 2026-09-19 定谳重产：旧行钉「小地图按住开图→关图→世界击」——入口面已摘
+    // （原版 minimap 支 Main.cs:56340-56381 无点击处理）。新行=BJ120 行为主判别：
+    // 小地图本体的按住点击必须 ①不开图 ②作为世界使用事件收到（useN+1,武器穿透）。
+    const mm = await page.evaluate(() => { const r = window.__swGame.renderer.minimapRect; return { x: Math.round(r.x + r.w / 2), y: Math.round(r.y + r.h / 2) }; });
     await page.mouse.move(mm.x, mm.y); await page.mouse.down(); await sleep(120); await page.mouse.up();
     await sleep(300);
-    await page.keyboard.press('KeyM'); await sleep(200);
-    return worldClickUse(page);
+    const open = await page.evaluate(() => window.__swGame.renderer.fullMap.open);
+    if (open) return { u: -1, note: 'mapOpen=true(应 false)' };
+    return worldClickUse(page, mm.x, mm.y);
   }],
   ['M7 地图开着点槽→关图→世界击', async (page) => {
     await page.keyboard.press('KeyM'); await sleep(400);

@@ -148,7 +148,8 @@ describe('SW-BJ81 ④⑤⑥UI 接线结构锁', () => {
 
   it('规格⑤:条目按下即取+长按起拍;旧 click 整组授予废止', () => {
     expect(uiSrc).toMatch(
-      /item\.addEventListener\('mousedown', \(ev\) => \{[\s\S]{0,120}this\.itemSearchGrab\(e\.id\);[\s\S]{0,120}this\.startItemSearchGrabRepeat\(e\.id\);/,
+      // ★BJ154 虚拟滚动改造:处理器移入 renderVisible(缩进+2 级),窗口 120→160,语义同序不变
+      /item\.addEventListener\('mousedown', \(ev\) => \{[\s\S]{0,160}this\.itemSearchGrab\(e\.id\);[\s\S]{0,120}this\.startItemSearchGrabRepeat\(e\.id\);/,
     );
     // 旧「给一组(≤99)」授予表达式已摘(整组面废止,数量恒 1)
     expect(uiSrc).not.toMatch(/const n = e\.d\.maxStack > 1 \? Math\.min\(e\.d\.maxStack, 99\) : 1;/);

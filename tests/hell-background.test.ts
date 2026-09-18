@@ -163,3 +163,88 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
   });
 
 });
+
+// ---- 2026-09-19 用户实报"地狱背景远景动画停播"回归组 ----
+// 根因 = Renderer underground 相位调用 2026-08-20 地下背景搬世界层吃光时误传
+// dt=0 → hellFrameT(远景 4 帧)/magmaFrameT(岩浆 3 帧)/bgTick(GetBackgroundCounter)
+// 全冻结。修复 = Renderer 传 16.7 + BiomeBackground.draw 的 underground 相位
+// update 传 0(防 update 每帧双倍推进)。本组三测钉死链路两侧。
+import { readFileSync } from 'node:fs';
+import { EMPTY_SCENE } from '../src/world/SceneMetrics';
+
+describe('地狱远景动画帧推进(08-20 dt=0 停播回归)', () => {
+  /** 同 hell-background 既有 stub 口径:岩浆带 125-127/185-187 + 远景 Underworld 集内贴图 */
+  function hellStub(bg: BiomeBackground) {
+    stubImgs(bg);
+    const hellMap = (bg as unknown as { hellImgs: Map<number, unknown> }).hellImgs;
+    for (let n = 0; n <= 13; n++) hellMap.set(n, null);
+    hellMap.set(1, { tex: 201, complete: true, width: 2048, height: 1900, naturalWidth: 2048, naturalHeight: 1900 } as unknown as HTMLImageElement);
+    const ug = (bg as unknown as { ugAlpha: number; ugOld: number });
+    ug.ugAlpha = 1; ug.ugOld = bg.ugStyle;
+    return hellMap;
+  }
+
+  function tex1Draws(bg: BiomeBackground, world: World, camY: number, dt: number) {
+    const { ctx, calls } = recorder();
+    (bg as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
+      .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, dt);
+    return calls.filter(c => c.op === 'img' && c.tex === 201);
+  }
+
+  it('远景四帧随 tick 累进:125ms 步进 frame 1→2→3→0;dt=0 冻结(回归形态对照)', () => {
+    const bg = new BiomeBackground();
+    hellStub(bg);
+    const world = hellWorld();
+    const camY = (600 - 100) * 16;
+    // 帧源 = (int)(GlobalTime*8)%4;hellFrameT 累进(原版 GlobalTimeWrappedHourly 钟域)
+    const syOf = (arr: { args: number[] }[]) => (arr[0]!.args as number[])[1];
+    const sxOf = (arr: { args: number[] }[]) => (arr[0]!.args as number[])[0];
+    // tex1 布局:frame→sx=(f>>1)*1024, sy=(f%2)*950(f=1:[0,950] 2:[1024,0] 3:[1024,950])
+    expect(syOf(tex1Draws(bg, world, camY, 125))).toBe(950);    // frame=1
+    expect(sxOf(tex1Draws(bg, world, camY, 125))).toBe(1024);   // 250ms → frame=2
+    expect(syOf(tex1Draws(bg, world, camY, 125))).toBe(950);    // 375ms → frame=3
+    // dt=0 冻结对照(08-20 回归形态):停在 frame=3 不前进
+    expect(sxOf(tex1Draws(bg, world, camY, 0))).toBe(1024);
+    expect(sxOf(tex1Draws(bg, world, camY, 0))).toBe(1024);
+    expect(sxOf(tex1Draws(bg, world, camY, 125))).toBe(0);      // 500ms → frame=4%4=0 回 0
+    // dt=0 冻结(08-20 回归形态):帧钟不前进
+    expect(sxOf(tex1Draws(bg, world, camY, 0))).toBe(0);        // 仍 frame=0
+    expect(sxOf(tex1Draws(bg, world, camY, 0))).toBe(0);
+  });
+
+  it('underground 相位 draw:update 零推进(防双倍 tick)+动画钟吃全量 dt', () => {
+    const bg = new BiomeBackground();
+    hellStub(bg);
+    const world = hellWorld();
+    const camY = (600 - 100) * 16;
+    const blit = { img: () => {}, fill: () => {} } as never;
+    const cam = { x: 3200, y: camY, zoom: 1 };
+    // 首调 settle 风格(pickUnderground 落定,免 ugStyle 变更重置 ugAlpha)
+    bg.draw(blit, world, { ...EMPTY_SCENE }, cam, 1280, 800, [1, 1, 1], 16.7, 'underground');
+    const bgx = bg as unknown as { ugAlpha: number; magmaFrameT: number; hellFrameT: number; ugStyle: number };
+    const settled = bgx.ugStyle;
+    bgx.ugAlpha = 0.5;
+    bgx.magmaFrameT = 0; bgx.hellFrameT = 0;
+    bg.draw(blit, world, { ...EMPTY_SCENE }, cam, 1280, 800, [1, 1, 1], 16.7, 'underground');
+    // update 门:update 在 underground 相位必须吃 0(风格坡道 0.25/帧 ×2 = 双倍回归)
+    expect(bgx.ugAlpha).toBeCloseTo(0.5, 5);
+    expect(bgx.ugStyle).toBe(settled);
+    // 动画钟:dt 必须全量抵达 drawUnderground/drawHellLayers(清零后单次 16.7;
+    // 08-20 接线传 0 时此值恒 0 = 本测红)
+    expect(bgx.magmaFrameT).toBeCloseTo(16.7, 1);
+    expect(bgx.hellFrameT).toBeCloseTo(16.7, 1);
+  });
+
+  it('Renderer 接线 tripwire:underground 相位 draw 必须传 16.7,禁止 0(08-20 事故签名)', () => {
+    const src = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 'utf8');
+    const ugCalls = src.match(/biomeBg\.draw\([^)]*'underground'\)/g) ?? [];
+    expect(ugCalls.length).toBeGreaterThan(0);          // 接线存在
+    for (const c of ugCalls) expect(c).toContain('16.7');
+    // surface 相位同理(两相位共用本签名域,防未来再传入 0)
+    const sfCalls = src.match(/biomeBg\.draw\([^)]*'surface'\)/g) ?? [];
+    expect(sfCalls.length).toBeGreaterThan(0);
+    for (const c of sfCalls) expect(c).toContain('16.7');
+    expect(src.includes(", 0, 'underground'")).toBe(false);   // 事故字节签名禁入
+  });
+
+});

@@ -77,7 +77,9 @@ function mkUi(): { ui: AnyUI; sfx: string[]; achCalls(): number } {
   ui.heldFrom = null;
   ui.openChest = null;
   ui.refreshAll = () => {};
-  ui.tooltip = { style: {} as CSSStyleDeclaration, innerHTML: '' };
+  // ★SW-TT1：showReforgeTooltip 现走 applyTooltipBg 终局（清 nobox 类→display 门早退）
+  ui.tooltip = { style: {} as CSSStyleDeclaration, innerHTML: '',
+    classList: { add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false } } as never;
   ui.reforgeItem = null;
   ui.reforgeSlotEl = null;
   return { ui, sfx, achCalls: () => ach };
