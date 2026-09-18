@@ -38,7 +38,7 @@ const out = {};
     g.world.flags.hardMode = true;
     g.world.flags.downed_262 = true;
     const st = g.world.store;
-    const tx = Math.round(g.player.cx / 16) + 4, ty = Math.round(g.player.cy / 16);
+    const tx = Math.round(g.player.cx / 16) + 100, ty = Math.round(g.player.cy / 16) - 30;   // 出生清场半径外
     const chestTile = TILE_BY_KEY['chest'];
     const fx = 0;
     st.setTile(tx, ty, chestTile, fx, 0);
@@ -81,7 +81,7 @@ const out = {};
     g.world.flags.hardMode = true;
     g.world.crimson = false;   // 腐化世界 → 473
     const st = g.world.store;
-    const tx = Math.round(g.player.cx / 16) + 4, ty = Math.round(g.player.cy / 16);
+    const tx = Math.round(g.player.cx / 16) + 100, ty = Math.round(g.player.cy / 16) - 30;   // 出生清场半径外
     const chestTile = TILE_BY_KEY['chest'];
     st.setTile(tx, ty, chestTile, 0, 0);
     st.setTile(tx + 1, ty, chestTile, 18, 0);

@@ -387,6 +387,22 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
         shoot, shootSpeed: base.shootSpeed,
       };
     }
+    // ★真刃系挥弧剑族（melee+noMelee+shoot、弹体 aiStyle 190/191 = AI_190/191
+    //   SwordSwoosh 家族[972,973,982,983,984,985,997,1043,1126]）：原版语义 =
+    //   挥击动画武器、伤害/视觉全在伴生挥弧弹（Player.cs:48265-48317 六专属出生链——
+    //   273 永夜刃=972 锚弧+972 飞斩 / 675 真永夜刃=972 锚弧+973 伸长斩 / 368 圣剑=982 /
+    //   674 真断钢=983+982(0伤) / 757 泰拉刃=984 锚弧+985 光束 / 1826 无头骑士剑=997）。
+    //   曾落 'shot' 兜底 = Arrow 把全白弧贴图当子弹直出（用户实报 2026-09-19 永夜刃
+    //   "三道白月牙直出、未染色无渐隐"；368/674/675/757/1826 同病）。与天顶剑 4956/
+    //   1226 同先例归 melee,交 Game 挥击分支（:13721 case 表 + :13860 else-if terra 支）。
+    //   46 魔光剑(974)/190 草剑(976) 无 noMelee,由下方 melee 通用门直收,不经此支。
+    if (c.melee && c.noMelee && (ai === 190 || ai === 191)) {
+      return {
+        kind: 'melee', damage: base.damage, knockback: base.knockback, useTime: base.useTime,
+        useAnimation: c.useAnimation ?? base.useTime, autoReuse: !!c.autoReuse,
+        shoot, shootSpeed: base.shootSpeed,
+      };
+    }
     // ★ melee+shoot（附魔剑 989/波刃 190 等 46 件）：原版语义 = 挥砍为主 +
     // 挥击中射弹（Player.cs:42880：flag4 = itemAnimation>0 && ItemTimeIsZero →
     // ItemCheck_Shoot，useTime 节奏发弹）。此前落入 shot 兜底 = 变成"光束枪"

@@ -1,16 +1,23 @@
-// 真刃系旋斩弧家族 1:1（AI_190_NightsEdge Projectile.cs:39416-39557 + 各 Draw 方法）：
+// 真刃系旋斩弧家族 1:1（AI_190_NightsEdge Projectile.cs:42734-42999 [1457] + 各 Draw 方法）：
 //   972 永夜刃（273 锚弧 + 飞斩变体）/982 圣剑（368）/983 真断钢（674）/
 //   997 无头骑士剑（1826）/984 泰拉刃（757，原 TerraArc 并入本表）。
 //   AI：t++；num=t/ai1；rotation=π×ai0×num + vel角(0|π) + ai0×π；
 //   Center=MountedCenter−vel（vel=(dir,0)）；scale=(num6+num×num5)×ai2；
 //   t≥ai1 Kill。984 首帧 Item60×0.65；按型号尘块（278/107 火花近似粒子）。
-//   绘制（DrawProj_NightsEdge :27398 / Excalibur :27455 / TheHorsemansBlade :27494 /
-//   TrueExcalibur :27533 / TerraBlade2 :27630）：同骨架——Frame(1,4) 四帧、
-//   origin 中心、scale×1.1、ai0<0 → FlipVertically、num3=Remap(num,0,.6,0,1)×
-//   Remap(num,.6,1,1,0) 包络、光照因子 fromValue（取 1 近似）、深色底×张开角
-//   −π/4×ai0×(1−num) + 内芯 + 主色 + 帧3 白芯层组。972 无帧3 三层（单层 0.3）。
-//   刀尖星尘闪光 = DrawPrettyStarSparkle 原语（:27424/:27527-27530/:27568-27571/
-//   :27627/:27664-27667，经 Renderer.prettyStarSparkle——参数表见下方 SWING_SPARKLE）。
+//   绘制（DrawProj_NightsEdge Main.cs:27901 / Excalibur :27958 / TheHorsemansBlade
+//   :27997 / TrueExcalibur :28095 / TerraBlade2 :28192 [1457]；1458 同域零漂移
+//   2026-09-19 亲读对拍）：贴图 Projectile_972/973 系【全白】170×680 四帧弧——
+//   全部颜色/光照/渐隐都在绘制期染色：XNA 预乘 AlphaBlend 下 Color×float 四通道
+//   同乘 ⇒ 等价式 = tint RGB 乘贴图（scratch multiply+destination-in）+ color.A
+//   链乘为 globalAlpha。五层骨架：深色底×张开角 −π/4×ai0×(1−num) → 白衍生层
+//   ×0.15（A×(1−fromValue)：亮处隐没）→ 内芯 → 主亮色 → 帧3 白芯（972 单层
+//   0.3×n3×(1−fv×0.7)，其余三层组 0.6/0.5/0.4）。光照因子 fromValue = 光照色
+//   RMS/√3 → Remap(0.2,1,0,1)（984 变体 0.5+fv×0.5）。渐隐包络 n3 =
+//   Remap(num,0,.6,0,1)×Remap(num,.6,1,1,0)。★2026-09-19 用户实报「白月牙直出、
+//   未染色无光效」定谳 = 旧 layer()/tneLayer() rgb 形参死参从未消费——本批按
+//   反编译逐式重建层表引擎（arcLayerList/tneGhostLayers + drawArcLayers）。
+//   刀尖星尘闪光 = DrawPrettyStarSparkle 原语（:27925/:27951-27954/:28033-28036/
+//   :28130/:28224-28227，经 Renderer.prettyStarSparkle——参数表见下方 SWING_SPARKLE）。
 //   997 命中召南瓜弹 321 已实装（Projectile.cs:13728-13732 → Player.HorsemansBlade_
 //   SpawnPumpkin :42444-42462）——SwingArc 命中处生成，弹体见文件尾 HorsemansPumpkin。
 import { Entity } from './Entity';
@@ -30,29 +37,219 @@ import { ParticleOrchestraType } from '../net/syncModules';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
-/** 型号参数（AI_190 :39428-39441 switch）：num5=scale 增速 / num6=基数 */
+/** 型号参数（AI_190 :42747-42762 switch）：num5=scale 增速 / num6=基数 */
 interface SwingStyle {
   num5: number;
   num6: number;
-  /** 深色底（layer1） */
-  c1: [number, number, number];
-  /** 主亮色（color2） */
-  c2: [number, number, number];
-  /** 内芯亮色（color3） */
-  c3: [number, number, number];
-  /** 帧3 白芯三层（Excalibur 族有 / NightsEdge 无） */
-  frame3Trio: boolean;
+  /** AI_190 世界点光 Lighting.AddLight（原版唯 984：(15,84,125) :42974；
+   *  972/982/983/997 原文无——曾自造 c2×0.4 紫光,2026-09-19 清偿） */
+  addLight?: [number, number, number];
   /** AI_190 首帧音（唯 984） */
   snd?: string;
 }
 
 const SWING_STYLE: Record<number, SwingStyle> = {
-  972: { num5: 0.2, num6: 1, c1: [40, 20, 60], c2: [80, 40, 180], c3: [80, 30, 160], frame3Trio: false },
-  982: { num5: 0.6, num6: 1, c1: [180, 160, 60], c2: [255, 240, 150], c3: [255, 255, 80], frame3Trio: true },
-  983: { num5: 1.0, num6: 1.2, c1: [180, 50, 90], c2: [255, 240, 150], c3: [255, 255, 80], frame3Trio: true },
-  997: { num5: 0.6, num6: 1, c1: [193, 43, 43], c2: [247, 115, 0], c3: [255, 202, 130], frame3Trio: true },
-  984: { num5: 0.6, num6: 1, c1: [45, 124, 205], c2: [181, 230, 29], c3: [34, 177, 76], frame3Trio: true, snd: 'Item_60' },
+  972: { num5: 0.2, num6: 1 },
+  982: { num5: 0.6, num6: 1 },
+  983: { num5: 1.0, num6: 1.2 },
+  997: { num5: 0.6, num6: 1 },
+  984: { num5: 0.6, num6: 1, addLight: [15, 84, 125], snd: 'Item_60' },
 };
+
+// ====================================================================
+// 剑影绘制引擎（DrawProj_NightsEdge 族 [1457] 逐式，1458 同域零漂移）。
+// 贴图全白 ⇒ 颜色全在染色层；XNA 预乘 AlphaBlend（Color×float 四通道同乘）
+// 的 canvas2D 等价式 = tint RGB 乘贴图 + color.A/255 全链作 globalAlpha。
+// ====================================================================
+type RGB = [number, number, number];
+
+/** Utils.Remap(fromValue,fromMin,fromMax,toMin,toMax)（Utils.cs:345,clamped 缺省 true） */
+export function remapArc(v: number, a: number, b: number, c: number, d: number): number {
+  if (v <= a) return c;
+  if (v >= b) return d;
+  return c + ((d - c) * (v - a)) / (b - a);
+}
+
+const cLerp = (a: RGB, b: RGB, t: number): RGB =>
+  [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+
+/** 单层绘制指令（arcLayerList/tneGhostLayers 产出,drawArcLayers 消费） */
+export interface ArcLayerDraw {
+  frame: number;
+  /** ×ai0 旋转偏移（原版 proj.rotation + proj.ai[0]×off） */
+  rotAi: number;
+  /** 绝对旋转偏移（973 扇面 num10 等不乘 ai0 的项） */
+  rotAbs: number;
+  /** 缩放（×(proj.scale×1.1)） */
+  scale: number;
+  /** 染色 RGB（0-255 连续域,烘焙前 byte 截断同 XNA (byte) cast） */
+  rgb: RGB;
+  /** 预乘透明度 = 原版 color.A 链（含全部 ×系数）/255 */
+  alpha: number;
+}
+
+/** 逐式染色规格（DrawProj_NightsEdge :27901 / Excalibur :27958 / TheHorsemansBlade
+ *  :27997 / TrueExcalibur :28095 / TerraBlade2 :28192；lerpN3=983 专有 amount=n3） */
+interface ArcDrawSpec {
+  base: [RGB, RGB];
+  baseScale: number;
+  l3: [RGB, RGB];
+  l3Scale: number;
+  l4: [RGB, RGB];
+  l4Mul: number;
+  /** 白衍生层调制通道：true=R（972/973 原文 color4.R=×(0.25+fv·0.75)）/
+   *  false=B（982 族原文 color5.B=(int)color5.R×…——R 作被乘源的原版怪癖照录） */
+  l2ModR: boolean;
+  frame3: 'single' | 'trio';
+  /** 984 专有：K=Remap(0.5+fv×0.5,0.2,1,0,1)（:28200-28201） */
+  lightHalfMix?: boolean;
+  /** 983 专有：三色按 n3 Lerp */
+  lerpN3?: boolean;
+}
+
+const ARC_DRAW_SPEC: Record<number, ArcDrawSpec> = {
+  972: { base: [[40, 20, 60], [40, 20, 60]], baseScale: 0.975,
+    l3: [[80, 30, 160], [80, 30, 160]], l3Scale: 0.8,
+    l4: [[80, 40, 180], [80, 40, 180]], l4Mul: 0.7, l2ModR: true, frame3: 'single' },
+  982: { base: [[180, 160, 60], [180, 160, 60]], baseScale: 1,
+    l3: [[255, 255, 80], [255, 255, 80]], l3Scale: 1,
+    l4: [[255, 240, 150], [255, 240, 150]], l4Mul: 0.5, l2ModR: false, frame3: 'trio' },
+  983: { base: [[180, 50, 90], [180, 30, 60]], baseScale: 1,
+    l3: [[255, 255, 80], [255, 60, 190]], l3Scale: 1,
+    l4: [[255, 240, 150], [255, 60, 170]], l4Mul: 0.5, l2ModR: false, frame3: 'trio', lerpN3: true },
+  997: { base: [[193, 43, 43], [193, 43, 43]], baseScale: 1,
+    l3: [[255, 202, 130], [255, 202, 130]], l3Scale: 1,
+    l4: [[247, 115, 0], [247, 115, 0]], l4Mul: 0.5, l2ModR: false, frame3: 'trio' },
+  984: { base: [[45, 124, 205], [45, 124, 205]], baseScale: 0.95,
+    l3: [[34, 177, 76], [34, 177, 76]], l3Scale: 1,
+    l4: [[181, 230, 29], [181, 230, 29]], l4Mul: 0.5, l2ModR: false, frame3: 'trio', lightHalfMix: true },
+};
+
+/** DrawProj_NightsEdge 族五层骨架（:27902-27923 同构；num2=localAI0/ai1、
+ *  fv=光照因子、n3=渐隐包络）。层序 = 原版 Draw 调用序（画家序）。 */
+export function arcLayerList(projId: number, num2: number, fv: number, n3: number): ArcLayerDraw[] {
+  const spec = ARC_DRAW_SPEC[projId] ?? ARC_DRAW_SPEC[972];
+  const K = spec.lightHalfMix ? remapArc(0.5 + fv * 0.5, 0.2, 1, 0, 1) : fv;
+  const pick = (p: [RGB, RGB]): RGB => (spec.lerpN3 ? cLerp(p[0], p[1], n3) : p[0]);
+  const out: ArcLayerDraw[] = [];
+  // 层1 深色底×张开角（:27906 深色 ×fv×n3）
+  out.push({ frame: 0, rotAi: -Math.PI / 4 * (1 - num2), rotAbs: 0,
+    scale: spec.baseScale, rgb: pick(spec.base), alpha: K * n3 });
+  // 层2 白衍生层（:27909-27914 链：White×n3×0.5 → A×=(1−K) → ×K×0.5 →
+  //   G×=K → R|B 调制 → ×0.15）——亮处 A→0 隐没（暗处淡粉白泛光）
+  {
+    const w = 255 * n3 * 0.5;
+    out.push({ frame: 0, rotAi: 0.01, rotAbs: 0, scale: 1,
+      rgb: spec.l2ModR
+        ? [w * K * 0.5 * (0.25 + K * 0.75), w * K * K * 0.5, w * K * 0.5]
+        : [w * K * 0.5, w * K * K * 0.5, w * K * 0.5 * (0.25 + K * 0.75)],
+      alpha: (w * (1 - K) * K * 0.5 * 0.15) / 255 });
+  }
+  // 层3 内芯（972 ×0.8 缩,其余 ×1） / 层4 主亮色（×0.975）
+  out.push({ frame: 0, rotAi: 0, rotAbs: 0, scale: spec.l3Scale, rgb: pick(spec.l3), alpha: K * n3 * 0.3 });
+  out.push({ frame: 0, rotAi: 0, rotAbs: 0, scale: 0.975, rgb: pick(spec.l4), alpha: K * n3 * spec.l4Mul });
+  // 帧3 白芯：972 单层（:27922 (1−fv×0.7) 暗处愈亮）/ 其余三层组（无 fv 项）
+  if (spec.frame3 === 'single') {
+    out.push({ frame: 3, rotAi: 0.01, rotAbs: 0, scale: 1, rgb: [255, 255, 255], alpha: 0.3 * n3 * (1 - fv * 0.7) });
+  } else {
+    out.push({ frame: 3, rotAi: 0.01, rotAbs: 0, scale: 1, rgb: [255, 255, 255], alpha: 0.6 * n3 });
+    out.push({ frame: 3, rotAi: -0.05, rotAbs: 0, scale: 0.8, rgb: [255, 255, 255], alpha: 0.5 * n3 });
+    out.push({ frame: 3, rotAi: -0.1, rotAbs: 0, scale: 0.6, rgb: [255, 255, 255], alpha: 0.4 * n3 });
+  }
+  return out;
+}
+
+/** DrawProj_TrueNightsEdge（:28136-28224）单残影位 13 层链：
+ *  基层 Lerp((40,20,60,120),(80,160,50,120),amount)×n3×num8（A=120 底）
+ *  + 双扇面（num10=−4π/3|−2π/3,num11=Remap(num10,−2π,0,0,0.5)=1/6|1/3）各 4 层
+ *  + 平位 4 层。白衍生链与 972 同构但调制源 = n3（:28167-28171 R 调制支）。 */
+export function tneGhostLayers(amount: number, num8: number, fv: number, n3: number): ArcLayerDraw[] {
+  const out: ArcLayerDraw[] = [];
+  out.push({ frame: 0, rotAi: -Math.PI / 4, rotAbs: 0, scale: 0.975,
+    rgb: cLerp([40, 20, 60], [80, 160, 50], amount), alpha: (120 / 255) * n3 * num8 });
+  const color2 = cLerp([80, 40, 180], [155, 255, 100], amount);
+  const color3b = cLerp([80, 30, 160], [200, 255, 0], amount);
+  const w = 255 * num8 * 0.5;
+  const chainRgb: RGB = [w * n3 * 0.5 * (0.25 + n3 * 0.75), w * n3 * n3 * 0.5, w * n3 * 0.5];
+  const chainA = (w * (1 - n3) * n3 * 0.5 * 0.15) / 255;
+  for (const num10 of [-Math.PI * 4 / 3, -Math.PI * 2 / 3]) {
+    const num11 = remapArc(num10, -Math.PI * 2, 0, 0, 0.5);
+    out.push({ frame: 0, rotAi: 0.01, rotAbs: num10, scale: 1, rgb: chainRgb, alpha: chainA * num11 });
+    out.push({ frame: 0, rotAi: 0, rotAbs: num10, scale: 0.8, rgb: color3b, alpha: fv * num8 * num11 });
+    out.push({ frame: 0, rotAi: 0, rotAbs: num10, scale: 0.975, rgb: color2, alpha: fv * num8 * (0.05 + 0.35 * fv) * num11 });
+    out.push({ frame: 3, rotAi: 0, rotAbs: num10, scale: 1, rgb: [255, 255, 255], alpha: (0.05 + 0.45 * fv) * num8 * num11 });
+  }
+  out.push({ frame: 0, rotAi: 0.01, rotAbs: 0, scale: 1, rgb: chainRgb, alpha: chainA });
+  out.push({ frame: 0, rotAi: 0, rotAbs: 0, scale: 0.8, rgb: color3b, alpha: n3 * num8 });
+  out.push({ frame: 0, rotAi: 0, rotAbs: 0, scale: 0.975, rgb: color2, alpha: fv * num8 * (0.05 + 0.35 * n3) });
+  out.push({ frame: 3, rotAi: 0, rotAbs: 0, scale: 1, rgb: [255, 255, 255], alpha: (0.05 + 0.45 * n3) * num8 });
+  return out;
+}
+
+/** DrawProj_* 光照因子（:27908-27910：GetColor().ToVector3().Length()/√3 →
+ *  Remap(0.2,1,0,1)；lightAt 0-255 域 → /255 归一。lighting 缺席=全亮）。
+ *  导出面仅 tests/sword-trail-tint.test.ts 变异判别消费。 */
+export function lightingFromValue(r: unknown, wx: number, wy: number): number {
+  const lighting = (r as { lighting?: { lightAt(tx: number, ty: number): [number, number, number] } | null }).lighting;
+  if (!lighting) return 1;
+  const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / 16), Math.floor(wy / 16));
+  return remapArc(Math.sqrt(lr * lr + lg * lg + lb * lb) / (255 * Math.sqrt(3)), 0.2, 1, 0, 1);
+}
+
+/** 帧染色烘焙（tintIconRect 三步式 draw→multiply→destination-in——Renderer.ts tintedSprite
+ *  同配方；单共享 scratch 零缓存：剑影色随 n3/fv 逐拍连续漂移,进 TintAtlas 会以高频键
+ *  冲刷共享 LRU（FX24 tq churn 同族）,170×170 双 pass 成本可忽略）。返回 null = 无 DOM。 */
+let arcTintScratch: HTMLCanvasElement | null = null;
+
+function tintedFrame(
+  img: ImageBitmap | HTMLImageElement, fw: number, fh: number, frame: number, rgb: RGB,
+): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;    // node 域（无 DOM）降级直出
+  if (!arcTintScratch) arcTintScratch = document.createElement('canvas');
+  if (arcTintScratch.width !== fw || arcTintScratch.height !== fh) {
+    arcTintScratch.width = fw;
+    arcTintScratch.height = fh;
+  }
+  const c = arcTintScratch.getContext('2d');
+  if (!c) return null;
+  c.globalCompositeOperation = 'source-over';
+  c.clearRect(0, 0, fw, fh);
+  c.imageSmoothingEnabled = false;
+  c.drawImage(img, 0, frame * fh, fw, fh, 0, 0, fw, fh);
+  c.globalCompositeOperation = 'multiply';
+  c.fillStyle = `rgb(${rgb[0] | 0},${rgb[1] | 0},${rgb[2] | 0})`;
+  c.fillRect(0, 0, fw, fh);
+  c.globalCompositeOperation = 'destination-in';
+  c.drawImage(img, 0, frame * fh, fw, fh, 0, 0, fw, fh);
+  c.globalCompositeOperation = 'source-over';
+  return arcTintScratch;
+}
+
+/** 层表消费端（XNA 预乘 AlphaBlend 等价合成）：染色帧 source-over ×A 链。
+ *  ai0<0 → FlipVertically（rotate 后 scale(1,-1),沿袭本仓既有镜像式）。
+ *  导出面仅 tests/sword-trail-tint.test.ts blend 记账断言消费。 */
+export function drawArcLayers(
+  ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement,
+  cx: number, cy: number, rot: number, ai0: number,
+  scale11: number, layers: ArcLayerDraw[],
+): void {
+  const fw = img.width, fh = img.height / 4;
+  ctx.imageSmoothingEnabled = false;
+  for (const l of layers) {
+    if (l.alpha < 0.004) continue;                       // XNA byte α≤1 不可见域
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, l.alpha));
+    ctx.translate(cx, cy);
+    ctx.rotate(rot + l.rotAi * ai0 + l.rotAbs);
+    if (ai0 < 0) ctx.scale(1, -1);
+    const dw = fw * l.scale * scale11, dh = fh * l.scale * scale11;
+    const tinted = tintedFrame(img, fw, fh, l.frame, l.rgb);
+    if (tinted) ctx.drawImage(tinted, 0, 0, fw, fh, -dw / 2, -dh / 2, dw, dh);
+    else ctx.drawImage(img, 0, l.frame * fh, fw, fh, -dw / 2, -dh / 2, dw, dh);   // 无 DOM 降级（登记:渲染只在浏览器发生）
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
 
 /** 通用旋斩弧（原 TerraArc 泛化） */
 export class SwingArc extends Entity {
@@ -100,7 +297,10 @@ export class SwingArc extends Entity {
     this.y = this.owner.cy - this.h / 2;
     this.scaleCur = (this.style.num6 + num * this.style.num5) * this.ai2;
     this.op = Math.min(1, Math.max(0, num / 0.6)) * (num <= 0.6 ? 1 : Math.max(0, (1 - num) / 0.4));
-    this.lightRGB = [this.style.c2[0] / 255 * 0.4, this.style.c2[1] / 255 * 0.4, this.style.c2[2] / 255 * 0.4];
+    // AI_190 世界点光 1:1（唯 984 AddLight((15,84,125)) :42974；972/982/983/997 原文无
+    // ——曾自造 c2×0.4 紫光 = 全家发光偏离,2026-09-19 清偿）
+    const al = this.style.addLight;
+    this.lightRGB = al ? [al[0] / 255, al[1] / 255, al[2] / 255] : null;
     // CutTiles（Projectile.cs:11824 全弹幕旁路——972/982/983/997/984 均不在
     // CanCutTiles 排除表）→ 旋斩扫过的瓦罐/杂草同步砍断（cutTilesBox 弹盒+1 外沿）
     cutTilesBox(game, this.cx - 85 * this.scaleCur, this.cy - 60 * this.scaleCur,
@@ -108,9 +308,10 @@ export class SwingArc extends Entity {
     // 尘近似（AI_190 各型号 278/107/267 火花——按 num3 包络概率降采样）
     if (Math.random() < this.op * 0.5) {
       const a2 = this.rot + (Math.random() - 0.5) * Math.PI / 2;
+      const dc = (ARC_DRAW_SPEC[this.projId] ?? ARC_DRAW_SPEC[972]).l4[0];
       game.spawnParticles(this.cx + Math.cos(a2) * 84 * this.scaleCur,
         this.cy + Math.sin(a2) * 84 * this.scaleCur,
-        `rgb(${this.style.c2[0]},${this.style.c2[1]},${this.style.c2[2]})`, 1, 1.4, { life: 18 });
+        `rgb(${dc[0]},${dc[1]},${dc[2]})`, 1, 1.4, { life: 18 });
     }
     // 命中：穿透（型号表）+ 同敌单跳（usesLocalNPCImmunity 族）
     for (const ent of game.enemies()) {
@@ -158,37 +359,10 @@ export class SwingArc extends Entity {
     const img = projSprite(this.projId);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
-    const fw = img.width, fh = img.height / 4;
-    const num = this.num;
-    const sc = this.scaleCur * 1.1;                       // num = proj.scale×1.1
-    const st = this.style;
-    const layer = (frame: number, angOff: number, sy: number, rgb: [number, number, number], alpha: number) => {
-      if (alpha <= 0.02) return;
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      ctx.translate(this.cx, this.cy);
-      ctx.rotate(this.rot + angOff * this.ai0);
-      if (this.ai0 < 0) ctx.scale(1, -1);                // effects（ai0<0 → FlipVertically）
-      const dw = fw * sy * sc, dh = fh * sy * sc;
-      ctx.drawImage(img, 0, frame * fh, fw, fh, -dw / 2, -dh / 2, dw, dh);
-      ctx.restore();
-      ctx.globalAlpha = 1;
-    };
-    ctx.imageSmoothingEnabled = false;
-    const op = this.op;
-    // :27648 族骨架——深色底×张开角 + 内芯 0.15 + c3 0.3 + c2 主芯 + 帧3 白芯组
-    layer(0, -Math.PI / 4 * (1 - num), 1, st.c1, 0.95 * op);
-    layer(0, 0.01, 1, st.c3, 0.15 * op);
-    layer(0, 0, 1, st.c3, 0.3 * op);
-    layer(0, 0, 0.975, st.c2, 0.6 * op);
-    if (st.frame3Trio) {
-      layer(3, 0.01, 1, [255, 255, 255], 0.6 * op);
-      layer(3, -0.05, 0.8, [255, 255, 255], 0.5 * op);
-      layer(3, -0.1, 0.6, [255, 255, 255], 0.4 * op);
-    } else {
-      layer(3, 0.01, 1, [255, 255, 255], 0.3 * op);      // NightsEdge 单层（:27422）
-    }
-    this.drawSparkle(ctx, fw);
+    const fv = lightingFromValue(r, this.cx, this.cy);   // 光照因子（Main.cs:27908）
+    const layers = arcLayerList(this.projId, this.num, fv, this.op);
+    drawArcLayers(ctx, img, this.cx, this.cy, this.rot, this.ai0, this.scaleCur * 1.1, layers);
+    this.drawSparkle(ctx, img.width);
   }
 
   /** 刀尖星尘闪光（各 DrawProj_* 尾段的 DrawPrettyStarSparkle 组，1:1 参数）：
@@ -281,7 +455,8 @@ export const TerraArc = SwingArc;
  *  rotation += ai0×2π×(4+4×Opacity)/90 旋进；scale=Remap(t,ai1+2,ai1+65,1.12,1)×ai2；
  *  Opacity=Remap(t,0,ai1,0,1)×Remap(t,ai1+50,ai1+65,1,0)；寿命 ai1+65（出生 32→97t）；
  *  t≥ai1(=num5)+3=80 清伤；近墙 80px 锥探测失败 → 速度阻尼 ×0.8/×0.88（>8 时）。
- *  绘制：oldPos 3 档残影（旧位 −vel×0.5×i + 旧旋 −ai0×2π×0.1×i）× 三向扇形四层。 */
+ *  绘制：oldPos[2..0] 各走同一 13 层染色链（位锚当前 Center−vel×0.5×num5、
+ *  旋 = oldRot−ai0×2π×0.1×num5、num7=1−num5/2；层表见 tneGhostLayers）。 */
 export class TrueNightsEdgeSlash extends Entity {
   w = 30; h = 30;
   damage: number;
@@ -399,59 +574,37 @@ export class TrueNightsEdgeSlash extends Entity {
     const img = projSprite(973);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
-    const fw = img.width, fh = img.height / 4;
-    const sc = this.scaleCur * 1.1 * 0.975;
-    // oldPos 3 档残影（:27597-27611）
-    for (let i = this.hist.length - 2; i >= 0; i--) {
-      const h = this.hist[i];
-      const age = this.hist.length - 1 - i;
-      const px = h.x - (this.vx * 0.5 * age) / 1;
-      const py = h.y - (this.vy * 0.5 * age) / 1;
-      const prot = h.rot - this.ai0 * Math.PI * 2 * 0.1 * age;
-      const num7 = 1 - age / 3;
+    const fv = lightingFromValue(r, this.cx, this.cy);   // 光照因子（Main.cs:28141）
+    // n3（:28146）：min(0.15+fv×0.85, Remap(localAI0,30,96,1,0))——TNE 不走 num 包络
+    const n3 = Math.min(0.15 + fv * 0.85, remapArc(this.t, 30, 96, 1, 0));
+    const amount = this.opacity * this.opacity;
+    const sc = this.scaleCur * 1.1;
+    // oldPos[2..0] 残影环（:28147-28184 num5=2..0 各走同一 13 层链；位 =
+    // Center−vel×0.5×num5【锚当前中心】、旋 = oldRot[num5]−ai0×2π×0.1×num5、
+    // num7 = 1−num5/2（age1=0.25² 包络、age2=0 → 远影隐没）——曾用历史位锚定
+    // + ÷3 除数 = 三影齐亮、远影不灭,2026-09-19 逐式对拍修）
+    for (let age = 2; age >= 0; age--) {
+      const hi = this.hist.length - 2 - age;             // oldRot[age] = hist[len−2−age]
+      if (hi < 0) continue;
+      const num7 = 1 - age / 2;
       const num8 = Math.max(0, this.opacity * num7 * num7 * 0.85);
-      const amount = this.opacity * this.opacity;
-      this.tneLayer(ctx, img, fw, fh, px, py, prot + this.ai0 * Math.PI / 4 * -1, sc,
-        [40 + 40 * amount, 20 + 140 * amount, 60 + 90 * amount], num8 * 0.95);
-      // 三向扇形（:27624-27630：num10 ∈ (−2π,0) 三分）
-      for (let k = 1; k <= 2; k++) {
-        const num10 = -Math.PI * 2 + (Math.PI * 2 / 3) * k;
-        const num11 = (num10 + Math.PI * 2) / (Math.PI * 2) * 0.5;
-        this.tneLayer(ctx, img, fw, fh, px, py, prot + this.ai0 * 0.01 + num10, sc,
-          [80, 30 + 70 * amount, 160 + 40 * amount], num8 * num11 * 0.8);
-      }
+      const px = this.cx - this.vx * 0.5 * age;
+      const py = this.cy - this.vy * 0.5 * age;
+      const rot = this.hist[hi].rot - this.ai0 * Math.PI * 2 * 0.1 * age;
+      drawArcLayers(ctx, img, px, py, rot, this.ai0, sc, tneGhostLayers(amount, num8, fv, n3));
     }
-    // 本体（当前位四层主色组）
-    this.tneLayer(ctx, img, fw, fh, this.cx, this.cy, this.rot + this.ai0 * Math.PI / 4 * -1, sc,
-      [80, 40, 180], this.opacity * 0.95);
-    this.tneLayer(ctx, img, fw, fh, this.cx, this.cy, this.rot, sc,
-      [155, 255, 100], this.opacity * 0.7);
-    // 刀尖星芒（:27627）：num12=clamp(1−t/80,0.5,1)（伸长回缩半径）、num13=
-    // min(num3,1)（光照 fromValue 取 1 → num3=Remap(t,30,96,1,0)）；
-    // shine=(150,255,100)×num13、draw=White(A0)×Opacity×0.5×num13 → 双 dim；
-    // flare=Opacity、fade(0,1,1,2)、rot=π/4、scale=(2,2)、fatness=One
+    // 刀尖星芒（:28219-28222）：num12=clamp(1−t/80,0.5,1)（伸长回缩半径）、
+    // num13=min(n3, Lerp(1,fv,Remap(t,0,80,0,1)))；半径 (W/2−4)×(scale×1.1)×num12
+    // （无 0.975——曾误乘）；shine=(150,255,100)×num13、draw=White(A0)×Opacity×0.5×num13
     const num12 = Math.max(0.5, 1 - this.t / 80);
-    const num13 = Math.max(0, Math.min(1, (96 - this.t) / 66));
+    const num13 = Math.min(n3, 1 + (fv - 1) * remapArc(this.t, 0, 80, 0, 1));
     const spAng = this.rot + 0.47123894 * this.ai0;
-    const spR = (fw * 0.5 - 4) * sc * num12;
+    const spR = (img.width * 0.5 - 4) * sc * num12;
     prettyStarSparkle(ctx, this.opacity,
       this.cx + Math.cos(spAng) * spR, this.cy + Math.sin(spAng) * spR,
       [255, 255, 255], [150, 255, 100], this.opacity,
       0, 1, 1, 2, Math.PI / 4, [2, 2], [1, 1],
       this.opacity * num13, num13);
-  }
-
-  private tneLayer(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement, fw: number, fh: number,
-    px: number, py: number, ang: number, sc: number, rgb: [number, number, number], alpha: number): void {
-    if (alpha <= 0.02) return;
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    ctx.translate(px, py);
-    ctx.rotate(ang);
-    if (this.ai0 < 0) ctx.scale(1, -1);
-    ctx.drawImage(img, 0, 0, fw, fh, -fw * sc / 2, -fh * sc / 2, fw * sc, fh * sc);
-    ctx.restore();
-    ctx.globalAlpha = 1;
   }
 }
 
@@ -534,25 +687,12 @@ export class NightsEdgeFly extends Entity {
     const img = projSprite(972);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
-    const fw = img.width, fh = img.height / 4;
-    const sc = this.scaleCur * 1.1;
     const op = Math.min(1, Math.max(0, this.num / 0.6)) * (this.num <= 0.6 ? 1 : Math.max(0, (1 - this.num) / 0.4));
-    const layer = (px: number, py: number, ang: number, rgb: [number, number, number], a: number, sy = 1) => {
-      if (a <= 0.02) return;
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, a));
-      ctx.translate(px, py);
-      ctx.rotate(ang);
-      if (this.ai0 < 0) ctx.scale(1, -1);
-      ctx.drawImage(img, 0, 0, fw, fh, -fw * sy * sc / 2, -fh * sy * sc / 2, fw * sy * sc, fh * sy * sc);
-      ctx.restore();
-      ctx.globalAlpha = 1;
-    };
-    layer(this.cx, this.cy, this.rot + this.ai0 * 10 * Math.PI / 4 * -1 * (1 - this.num), [40, 20, 60], op * 0.95);
-    layer(this.cx, this.cy, this.rot + this.ai0 * 0.01, [80, 30, 160], op * 0.15);
-    layer(this.cx, this.cy, this.rot, [80, 30, 160], op * 0.3, 0.8);
-    layer(this.cx, this.cy, this.rot, [80, 40, 180], op * 0.7);
-    layer(this.cx, this.cy, this.rot + this.ai0 * 0.01, [255, 255, 255], op * 0.3);
+    const fv = lightingFromValue(r, this.cx, this.cy);
+    // 同弹 972 = 同一 DrawProj_NightsEdge（:27901）——基角偏移 = ai0×(π/4)×(−1)×(1−num2)
+    // 无 ×10（×10 只在 AI_190 旋进式 :42787,曾误抄进绘制 = 基角漂移 10 倍,2026-09-19 修）
+    drawArcLayers(ctx, img, this.cx, this.cy, this.rot, this.ai0, this.scaleCur * 1.1,
+      arcLayerList(972, this.num, fv, op));
   }
 }
 
