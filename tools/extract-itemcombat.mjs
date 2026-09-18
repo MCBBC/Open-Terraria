@@ -10,6 +10,37 @@
 //   · UseSound 侧道（不入 combat 记录）→ 重生成 src/data/vanilla-itemusesound.json
 //     （SetFoodDefaults 食物族 DefaultToFood Item2/3 + DefaultToStaff Item43 / DefaultToWhip Item152 等）
 //   · SetFoodDefaults 仅作三通道来源（食物条目不进 combat 表，useTurn/useSound 走侧道）
+//
+// ★★2026-09-18 反哺批（BJ121 留守三面收口）：三形态补齐，整表重产不再回退已提交值——
+//   ①crit += N 累加形态（SetDefaults2/4 六 case：1254 :15523 +25 / 1553 :18682 +10 /
+//     1782 :19756 +6 / 1784 :19787 +6 / 1835 :20322 +10 / 3291 :30171 +10；C# 字段
+//     缺省 0 起按序累加,块内字面 `crit = N;` 为赋值语义重置;纯字面块不进此支维持
+//     find() 首匹配语义零漂移）
+//   ②useTime = useAnimation 别名赋值（1226 :15125,useAnimation=32 字面前行 → 32；
+//     4241 :35613 的 useAnimation 在 DefaultToPlaceableTile helper 体（=15）——
+//     helper 体字段面未建不解析,登记）
+//   ③DefaultTo* 武器族形参位解析（此前 Helper 扫描仅取 helper 体字面三通道,调用点
+//     实参从未解析）——六 helper 语义逐行亲读 1457 Item.cs（:48425-48470）：
+//     RangedWeapon(baseProj,ammoID,singleShotTime,shotVelocity[,hasAutoReuse]) /
+//     Bow(t,v[,autoReuse])=RangedWeapon(1,Arrow=40,…)+width/height+Item5 /
+//     ThrownWeapon(p,t,v[,autoReuse]) / Spear(p,v,t)（体 :48458-48470,useAnim=useTime
+//     链式终值=animationTime,noUseGraphic/UseSound 走既有 helper 体扫描）/
+//     MagicWeapon(p,t,v[,autoReuse]) / Staff(p,v,t,mana)=MagicWeapon(…,autoReuse:true)
+//     +mana。hasAutoReuse 缺省 false ≙ 表缺省不注入（照 SetWeaponValues 2 参判例）。
+//     25 调用点全 census（4058/4060-4062/4343/4344/4347/4348/4381/4682/4702/4765/
+//     4766/4788-4790/5065/5285/5629/6152-6155/6171/6173）；fill-when-undefined
+//     （字面 pass 先跑,全部重叠字面均在调用之后:6152 useTime=4/6173 useTime=6/
+//     5629·4682·4702 ranged=false）。金标=vanillaItemCombat.ts EXTRACT_PATCH
+//     （4060/5629/4058/4381/4788-4790/6155/6171/6173）+本文件 THROWN_WEAPONS 手补表
+//     （4343 族）+obj['5065']——dry-run 对拍逐字段全等。
+//   ④登记不解析（形参位家族剩余面,须先建 helper 体字段面机制）：
+//     · DefaultToPlaceableTile/Wall/MusicBox/Bomb/Solution/Kite/Torch/CapturedCritter
+//       等 placeable 族（useTime=10/useAnimation=15/autoReuse/consumable 的 helper 体
+//       值——json 现缺,量级数百 id,独立刀）;
+//     · 4241 的 useTime 别名（依赖 PlaceableTile 体 useAnimation）。
+//   ⑤真值变登记（真值变=停下登记判例）：6152 json useTime=4 系旧提取 shotVelocity
+//     误读遗留——源码 case 有字面 `useTime = 4;`（:47414）在调用之后,C# 终值即 4,
+//     源序解析与之同值,非本批改动面。
 import { readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -287,6 +318,130 @@ export const AMMO_ID = {
 const BOOL_FIELDS = ['consumable', 'noMelee', 'autoReuse', 'melee', 'ranged', 'magic', 'summon',
   'useTurn', 'noUseGraphic'];
 
+// ---- ★反哺批（2026-09-18 BJ121 留守面③）：DefaultTo* 武器族形参位解析 ----
+// 括号感知顶层逗号分割（extract-itemfunc.mjs splitArgs 同构）
+function splitCallArgs(text) {
+  const out = [];
+  let d = 0, cur = '';
+  for (const ch of text) {
+    if (ch === '(') d++;
+    else if (ch === ')') d--;
+    if (ch === ',' && d === 0) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  if (cur.trim() !== '') out.push(cur);
+  return out.map((s) => s.trim());
+}
+/** 实参求值：剥 (ushort)/(short)/(sbyte)/(uint)/(int) 显式转换与 float 后缀 f；
+ *  `type` 线性算式按当前 id 求值（4766 `type - 4765 + 868`,Item.cs:39209）；
+ *  AmmoID 枚举/形参名/不可解 → undefined（拒值不猜,FX53 判例）。 */
+function evalCallArg(expr, id) {
+  if (expr === undefined) return undefined;
+  const s = expr.replace(/\(\s*(?:ushort|short|sbyte|uint|int)\s*\)/g, '').replace(/\s+/g, '');
+  if (/^[-+]?\d+$/.test(s)) return parseInt(s, 10);
+  if (/^[-+]?\d+(\.\d+)?f?$/.test(s)) return parseFloat(s);
+  if (!/\btype\b/.test(s)) return undefined;
+  if (!/^[\d()+-]+$/.test(s.replace(/\btype\b/g, ''))) return undefined;
+  try { return Function(`"use strict";return (${s.replace(/\btype\b/g, String(id))});`)(); } catch { return undefined; }
+}
+/** ammo 位实参：AmmoID.X 枚举 → AMMO_ID 权威表（缺项 -1 兜底同既有 ammo 直派支） */
+function evalCallAmmo(expr, id) {
+  if (expr === undefined) return undefined;
+  const em = /AmmoID\.(\w+)/.exec(expr);
+  if (em) return AMMO_ID[em[1]] ?? -1;
+  return evalCallArg(expr, id);
+}
+// 六 helper 基座（行号=1457 Item.cs,逐行亲读;具名实参 hasAutoReuse: true 与位置
+// true 双形态）。返回 {field: value};undefined 值位由调用侧 fill-when-undefined 跳过。
+const DEFAULT_TO_PARAMS = {
+  // :48445-48456 DefaultToRangedWeapon(int baseProjType, int ammoID, int singleShotTime,
+  //   float shotVelocity, bool hasAutoReuse = false)
+  DefaultToRangedWeapon: (pos, named, id) => ({
+    shoot: evalCallArg(pos[0], id),
+    useAmmo: evalCallAmmo(pos[1], id),
+    useTime: evalCallArg(pos[2], id),
+    useAnimation: evalCallArg(pos[2], id),
+    shootSpeed: evalCallArg(pos[3], id),
+    noMelee: true,
+    ranged: true,
+    ...((named.hasAutoReuse ?? pos[4]) === 'true' ? { autoReuse: true } : {}),
+  }),
+  // :48425-48432 DefaultToBow(int singleShotTime, float shotVelocity, bool hasAutoReuse=false)
+  //   = DefaultToRangedWeapon(1, AmmoID.Arrow=40, t, v, …) + width/height + UseSound Item5
+  //  （width/height 不在 combat 域;UseSound 走既有 helper 体扫描）
+  DefaultToBow: (pos, named, id) => ({
+    shoot: 1,
+    useAmmo: AMMO_ID.Arrow,
+    useTime: evalCallArg(pos[0], id),
+    useAnimation: evalCallArg(pos[0], id),
+    shootSpeed: evalCallArg(pos[1], id),
+    noMelee: true,
+    ranged: true,
+    ...((named.hasAutoReuse ?? pos[2]) === 'true' ? { autoReuse: true } : {}),
+  }),
+  // :48458-48470 DefaultToThrownWeapon(int baseProjType, int singleShotTime, float shotVelocity,
+  //   bool hasAutoReuse = false)
+  DefaultToThrownWeapon: (pos, named, id) => ({
+    shoot: evalCallArg(pos[0], id),
+    useTime: evalCallArg(pos[1], id),
+    useAnimation: evalCallArg(pos[1], id),
+    shootSpeed: evalCallArg(pos[2], id),
+    noMelee: true,
+    ranged: true,
+    consumable: true,
+    ...((named.hasAutoReuse ?? pos[3]) === 'true' ? { autoReuse: true } : {}),
+  }),
+  // DefaultToSpear(int projType, float pushForwardSpeed, int animationTime)（:48470 起段）
+  //   体: useAnim=useTime=31 后 `useAnimation = (useTime = animationTime);` 链式覆写 →
+  //   终值=animationTime;noUseGraphic/UseSound Item1 走既有 helper 体扫描。
+  DefaultToSpear: (pos, _named, id) => ({
+    shoot: evalCallArg(pos[0], id),
+    shootSpeed: evalCallArg(pos[1], id),
+    useTime: evalCallArg(pos[2], id),
+    useAnimation: evalCallArg(pos[2], id),
+    noMelee: true,
+    melee: true,
+  }),
+  // :48433-48442 DefaultToMagicWeapon(int projType, int singleShotTime, float shotVelocity,
+  //   bool hasAutoReuse = false)
+  DefaultToMagicWeapon: (pos, named, id) => ({
+    shoot: evalCallArg(pos[0], id),
+    useTime: evalCallArg(pos[1], id),
+    useAnimation: evalCallArg(pos[1], id),
+    shootSpeed: evalCallArg(pos[2], id),
+    noMelee: true,
+    magic: true,
+    ...((named.hasAutoReuse ?? pos[3]) === 'true' ? { autoReuse: true } : {}),
+  }),
+  // :48016-48023 DefaultToStaff(int projType, float pushForwardSpeed, int singleShotTime,
+  //   int manaPerShot) = DefaultToMagicWeapon(proj, t, v, hasAutoReuse: true) + mana
+  //   + width/height + UseSound Item43（委托实参位重排:v=pushForwardSpeed）
+  DefaultToStaff: (pos, _named, id) => ({
+    shoot: evalCallArg(pos[0], id),
+    useTime: evalCallArg(pos[2], id),
+    useAnimation: evalCallArg(pos[2], id),
+    shootSpeed: evalCallArg(pos[1], id),
+    mana: evalCallArg(pos[3], id),
+    noMelee: true,
+    magic: true,
+    autoReuse: true,
+  }),
+};
+/** 调用点 → 基座字段（fill-when-undefined 消费）。实参拆分:具名 `hasAutoReuse:`
+ *  摘出,其余按位;25 调用点全 census 具名只有 hasAutoReuse 一名。 */
+function callEffectOf(name, argText, id) {
+  const spec = DEFAULT_TO_PARAMS[name];
+  if (!spec) return null;
+  const pos = [];
+  const named = {};
+  for (const p of splitCallArgs(argText)) {
+    const nm = /^([a-z]\w*)\s*:\s*(.+)$/.exec(p);
+    if (nm) named[nm[1]] = nm[2].trim();
+    else pos.push(p);
+  }
+  return spec(pos, named, id);
+}
+
 /** 深度 0 行里的辅助函数调用效果（显式赋值优先——源序近似：case 体先 DefaultTo*
  *  后覆盖的常态成立；DefaultToFood 的 useGulpSound 具名参数改写音效） */
 function helperEffectsOf(lines) {
@@ -357,13 +512,36 @@ function fieldsFromLines(id, lines) {
   //   被城镇 NPC 回血(~+1/18t)抵消=事实杀不死。显式行优先序：NUM_FIELDS 直派先跑,
   //   此处仅补空（防同 case 双写时逆序覆盖——C# 源序语义,17 处调用无同 case 双写）。
   //   3 参调用才写 crit（2 参调用 C# 缺省 0 等价表缺省,不注入减 diff）。
-  //   ★重产警告（2026-09-18 定谳）：本脚本相对已提交 json 仍缺三个已丢失的解析面,
-  //   整表重产会在 4 处回退已提交值——1254/1553 `crit += N;`（+= 未解析）、
-  //   1226 `useTime = useAnimation;` 别名（1457 新形态,1456 基线无此件值）、
-  //   4703 `DefaultToRangedWeapon(14,Bullet,55,7f)` 形参位解析（Helper 扫描仅取
-  //   helper 体字面,不取调用点实参）。重产前先补这三面,或用
-  //   `diff` 对拍并手工回填这 4 id（tests/extract-audit.test.ts SetWeaponValues 锚
-  //   只保 14 件,不保这 4 处）。
+  //   ★重产警告已解除（2026-09-18 反哺批）：原登记三面（1254/1553 crit+=、1226
+  //   useTime 别名、4703 DefaultToRangedWeapon 形参位）均已反哺进本脚本解析面
+  //   （见文件头注①②③）——整表重产不再回退已提交值（dry-run 对拍零损失）。
+  // ★crit += N 累加形态（反哺批头注①）：C# crit 字段缺省 0 起按序累加,块内字面
+  //   `crit = N;` 为赋值语义（重置）。仅含 += 的块进入（纯字面块不进此支,维持
+  //   NUM_FIELDS find() 首匹配语义零漂移）——产出后 SetWeaponValues 补空让位
+  //  （现无同块双写形态,源序语义已核）。
+  {
+    let critVal = 0;
+    let sawPlus = false;
+    let sawAny = false;
+    for (const l of lines) {
+      let m = /^crit = (-?[\d.]+)f?;$/.exec(l);
+      if (m) { critVal = Number(m[1]); sawAny = true; continue; }
+      m = /^crit \+= (-?[\d.]+)f?;$/.exec(l);
+      if (m) { critVal += Number(m[1]); sawAny = true; sawPlus = true; }
+    }
+    if (sawPlus && sawAny && rec.crit === undefined) rec.crit = critVal;
+  }
+  // ★useTime = useAnimation 别名赋值（反哺批头注②,1457 形态）：取别名行【之前】
+  //  的 useAnimation 字面（C# 顺序语义;find() 首匹配与 NUM_FIELDS 同口径）。
+  //  1226（:15125,useAnimation=32 :15124）→ 32;4241（:35613）的 useAnimation 在
+  //  DefaultToPlaceableTile helper 体（=15）,helper 体字段面未建,不解析（头注④登记）。
+  if (rec.useTime === undefined) {
+    const aliasAt = lines.findIndex((l) => /^useTime = useAnimation;$/.test(l));
+    if (aliasAt >= 0) {
+      const ua = lines.slice(0, aliasAt + 1).find((l) => /^useAnimation = (-?[\d.]+)f?;$/.test(l));
+      if (ua) rec.useTime = parseFloat(ua.match(/-?[\d.]+/)[0]);
+    }
+  }
   const swv = lines.find((l) => /^SetWeaponValues\(/.test(l));
   if (swv) {
     const sm = swv.match(/^SetWeaponValues\(\s*(-?\d+)\s*,\s*(-?[\d.]+)f?\s*(?:,\s*(-?\d+)\s*)?\)/);
@@ -371,6 +549,22 @@ function fieldsFromLines(id, lines) {
       if (rec.damage === undefined) rec.damage = Number(sm[1]);
       if (rec.knockBack === undefined) rec.knockBack = parseFloat(sm[2]);
       if (sm[3] !== undefined && rec.crit === undefined) rec.crit = Number(sm[3]);
+    }
+  }
+  // ★DefaultTo* 武器族形参位解析（反哺批头注③）：调用点实参 → combat 字段,
+  //  fill-when-undefined（字面 pass/SetWeaponValues 先跑;25 调用点的重叠字面均在
+  //  调用之后——6152 `useTime = 4;`/6173 `useTime = 6;`/5629·4682·4702 `ranged =
+  //  false;` 显式覆写语义由先跑的字面保有,与 C# 源序终值一致）。金标对拍:
+  //  EXTRACT_PATCH（vanillaItemCombat.ts）/THROWN_WEAPONS（本文件 main 手补表）/
+  //  obj['5065']/json 4703 逐字段全等见 dry-run。
+  for (const l of lines) {
+    const cm = /^(DefaultTo(?:RangedWeapon|Bow|ThrownWeapon|Spear|Staff|MagicWeapon))\s*\((.*)\);\s*$/.exec(l);
+    if (!cm) continue;
+    const paramEff = callEffectOf(cm[1], cm[2], id);
+    if (paramEff) {
+      for (const [k, v] of Object.entries(paramEff)) {
+        if (v !== undefined && rec[k] === undefined) rec[k] = v;
+      }
     }
   }
   // 辅助函数族效果：显式行在场则显式胜（DefaultToPlaceableTile 后再 useTurn=false 之类）

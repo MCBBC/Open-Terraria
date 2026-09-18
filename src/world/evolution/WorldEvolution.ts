@@ -40,6 +40,7 @@
 import type { TileStore } from '../TileStore';
 import { getTreeTypeAndTreeBottom, TreeTypes } from '../TreeShake';   // ★⑤ 掉落族批：树底/树型单源
 import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../../data/tiles';
+import { holidayLightVid } from '../../data/vanillaStyleDrops';   // ★红蓝-G①（2026-09-18）节日彩灯掉落单源
 import { RNG } from '../../core/rng';
 import { rollLuck } from '../../stats/Luck';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
@@ -458,6 +459,9 @@ export class WorldEvolution {
       case 129:                                               // ★G-129（2026-09-18）水晶碎块
         drop(fx >= 324 ? 4988 : 502);                         // cs:65496-65504：大簇→软体女王水晶
         break;                                                // （Gelatin Crystal）/普通→碎魔晶 502
+      case 149:                                               // ★红蓝-G①（2026-09-18）节日彩灯
+        drop(holidayLightVid(fx));                            // cs:66036-66046：三色帧域 fx 0/54→596、
+        break;                                                // 18/72→597、36/90→598（域外 0=不掉）
       case 5:
       case 596:
       case 616:
@@ -839,14 +843,15 @@ export class WorldEvolution {
       return false;
     }
     if (sh === 129 || sh === 149) {                          // ★G-129（2026-09-18）水晶碎块/节日彩灯
-      return this.multiDirCheckAt(x, y);                     // TileFrameImportant case 129/149（cs:85727-85752）
+      return this.multiDirCheckAt(x, y);                     // TileFrameImportant case 129/149（cs:86339-86369）
     }
     return false;
   }
 
-  /** TileFrameImportant case 129/149（cs:85727-85752）运行时臂：CheckAndAdjust
+  /** TileFrameImportant case 129/149（cs:86339-86369）运行时臂：CheckAndAdjust
    *  （cs:60805）无锚 → KillTile（默认参=带掉落,本仓 killFlat;掉落面=killDropFace
-   *  case 129 → 502/4988 按帧,cs:65496-65504）；有锚 → 帧向重落（原版无条件按优先向
+   *  case 129 → 502/4988 按帧（cs:65496-65504）/case 149 → 596/597/598 三色帧域
+   *  （cs:66036-66046,holidayLightVid 单源））；有锚 → 帧向重落（原版无条件按优先向
    *  写 frameY）。此前运行时缺此派发:锚块被挖/被转后碎块悬空不落。 */
   private multiDirCheckAt(x: number, y: number): boolean {
     const st = this.host.store;
@@ -1712,7 +1717,7 @@ export class WorldEvolution {
   }
 
   /** CheckAndAdjustMultiDirectionalTile（cs:60805-60855）× TileFrameImportant case 129/149
-   *  （cs:85727-85752）帧向落定：锚=active 且非巨石/关门（TileID.Sets.Boulders :195 +
+   *  （cs:86339-86369）帧向落定：锚=active 且非巨石/关门（TileID.Sets.Boulders :195 +
    *  type 10）且按向 SolidTileAllow*Slope（ValidAnchorForMultiDirectionalTile cs:60788-
    *  60803）且锚型 tileSolid && !tileSolidTop（cs:60838-60852）。优先级 下>左>右>上 →
    *  frameY 0(站立)/54(左锚右伸)/36(右锚左伸)/18(垂挂)。无锚返回 -1（=原版 KillTile/
@@ -3217,7 +3222,7 @@ export class WorldEvolution {
           let style = Math.floor(this.rng() * 18);
           if (this.rng() < 1 / 50) style = 18 + Math.floor(this.rng() * 6);
           // ★G-129（2026-09-18）：PlaceTile case 129（cs:60171-60180）只写 frameX=style*18,
-          //  frameY 由 SquareTileFrame→TileFrameImportant case 129（cs:85727-85752）→
+          //  frameY 由 SquareTileFrame→TileFrameImportant case 129（cs:86339-86369）→
           //  CheckAndAdjustMultiDirectionalTile（cs:60805-60855,锚向优先 下>左>右>上）落定
           //  ——此前恒 frameY=0:侧生/垂生碎块渲染地面行精灵（贴错帧行=形态偏差同源）。
           const fy = this.multiDirFrameY(i + dx, j + dy);

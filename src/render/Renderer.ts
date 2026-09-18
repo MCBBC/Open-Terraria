@@ -2505,7 +2505,7 @@ export function mapTileHoverName(sheet: number, frameX: number): string | null {
 
 /** 传送预选标记坐标文本（SW 自创调试面增强,2026-09-17 用户令：标记点旁显示坐标
  *  便于定位）。tile 坐标域——选点时 Game 侧已按 Math.floor((mouse−地图原点)/zoom)
- *  取整（Game:8515-8516,= Math.floor(世界px/16) 的 Terraria 通用定位域）,此处只作
+ *  取整（Game:8621-8622,= Math.floor(世界px/16) 的 Terraria 通用定位域）,此处只作
  *  文本化（与选点 toast Preselect (tx,ty) 同值同域）。纯函数供行为测直接驱动 */
 export function tpMarkCoordText(x: number, y: number): string {
   return `(${Math.trunc(x)}, ${Math.trunc(y)})`;
@@ -18131,7 +18131,7 @@ export class Renderer {
   /** SW-TPMARK 2026-09-17 用户令：传送预选标记绘制 + 坐标文本（地图点击传送
    *  调试面,Shift+F10 旗开→首次点击落 tpMark；每帧重画=重设/复位自动同步）。
    *  ①闪烁红圈+十字线（原样保留）；②坐标文本常显（不随闪烁——信息位非提示位）：
-   *  tile 坐标 (x,y)（tpMark 存的就是 Game:8515-8516 的 floor 换算值,与选点 toast
+   *  tile 坐标 (x,y)（tpMark 存的就是 Game:8621-8622 的 floor 换算值,与选点 toast
    *  同域）；bold 12px monospace + 深色描边白字（飘字习语 Renderer:4508-4512,
    *  亮暗底图都可读）；tpMarkCoordLayout 右缘翻左/垂直钳屏内；标记完全离屏不画
    *  文本（防屏缘孤儿标签——圈/线照旧被画布自然裁掉） */

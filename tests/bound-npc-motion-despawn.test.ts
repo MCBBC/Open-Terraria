@@ -203,7 +203,7 @@ describe('BJ122 despawn 环：CheckActive 四步（用户观测 2 核心）', ()
 });
 
 describe('BJ122 存档面：被缚族不入档（WorldFile.cs:1724 只写 townNPC）', () => {
-  it('townNpcsForSave 滤除 bound 105/106/685 族,非 bound 与 534 税务官保留', () => {
+  it('townNpcsForSave 滤除一切 bound（含 534 痛苦亡魂态）,获救态保留（红蓝-H③回写闭合）', () => {
     const g = Object.create(Game.prototype) as unknown as {
       entities: { npcs: unknown[] };
       clearDuplicateHomes(s: string, w: boolean): void;
@@ -220,19 +220,48 @@ describe('BJ122 存档面：被缚族不入档（WorldFile.cs:1724 只写 townNP
       mk('goblin_tinkerer', true, 107),
       mk('wizard', true, 108),
       mk('town_slime_old', true, 679),
-      mk('tax_collector', true, 534),      // 原版 534=townNPC,照常入档
-      mk('merchant', true, 17),            // 非 bound 家族成员的 bound 近似不存在——
-                                           // merchant 不在 BOUND_TOWN_NPC_VANILLA,保留
+      // ★红蓝-H③ 勘误重锚：534=痛苦亡魂（SetDefaults :15841 aiStyle 3,无 townNPC/
+      //  friendly）——原版同不入档;旧断言「534 照常入档」与反编译相悖,系
+      //  自愈不闭合病灶（旧档 bound 条目永久回写）。获救态 441（townNPC :14732）保留。
+      mk('tax_collector', true, 534),
+      mk('tax_collector', false, 441),
+      mk('merchant', true, 17),            // 无 BOUND_TOWN_NPC_ID 映射键的 bound 同滤
+                                           // （vanilla 语义=被缚态恒非 townNPC 型,封同族洞）
     ] };
     g.clearDuplicateHomes = () => {};
     const out = g.townNpcsForSave();
     const keys = out.map((n) => n.key).sort();
-    expect(keys).toEqual(['guide', 'merchant', 'tax_collector']);
+    expect(keys).toEqual(['guide', 'tax_collector']);
+    // 获救态无 bound 标随档
+    expect(out.find((n) => n.key === 'tax_collector')?.bound).toBeUndefined();
   }, 60000);
 });
 
 describe('BJ122 观测 3：生命体分析仪覆盖被缚族（Main.cs:47776 全表扫描）', () => {
-  it('npcs 桶入池：bound 105（rarity1）/685（rarity2）可见,givenName 优先（GivenOrTypeName）', () => {
+  // ★红蓝-H② 重锚（2026-09-18）：旧测试手喂 vanillaId 105/685——「真值域幻影」,
+  //  运行时 bound TownNPC 实体携【城镇】id（TownNPC ctor TOWN_NPC_IDS[key].id）,
+  //  旧喂法不经运行时域=恒真空转。今喂真实体经 Game.boundAnalyzerVid 投影
+  //  （与 Game.tickInfoAccs 同一单源）——城镇 id 进、绑缚本体 id 出（rarity/名
+  //  同域 :10283/:10534/:15855/:17653…）。变异接缝：boundAnalyzerVid 摘反查
+  //  （直接回 vanillaId）→ 本组 vanillaId 断言+分析仪可见面双红。
+  it('boundAnalyzerVid 运行时域投影：城镇 id → 绑缚本体 id（105/106/123/354/376/534/579/589/685/686）', () => {
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'goblin_tinkerer', vanillaId: 107 })).toBe(105);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'wizard', vanillaId: 108 })).toBe(106);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'mechanic', vanillaId: 124 })).toBe(123);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'stylist', vanillaId: 353 })).toBe(354);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'angler', vanillaId: 369 })).toBe(376);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'tax_collector', vanillaId: 441 })).toBe(534);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'tavernkeep', vanillaId: 550 })).toBe(579);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'golfer', vanillaId: 588 })).toBe(589);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'town_slime_old', vanillaId: 679 })).toBe(685);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'town_slime_clumsy', vanillaId: 680 })).toBe(686);
+    // 非 bound/无映射键/空 id → 原样（城镇型 rarity=0=原版同相不显）
+    expect(Game.boundAnalyzerVid({ bound: false, npcKey: 'mechanic', vanillaId: 124 })).toBe(124);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'merchant', vanillaId: 17 })).toBe(17);
+    expect(Game.boundAnalyzerVid({ bound: true, npcKey: 'merchant', vanillaId: null })).toBeNull();
+  }, 60000);
+
+  it('npcs 桶入池（运行时域）：真 bound 实体投影后 123（rarity1）/685（rarity2）可见,名域随本体 id', () => {
     const layer = new InfoAccsLayer();
     const player = {
       accThirdEyeCounter: 0, accCritterGuideCounter: 0,
@@ -241,31 +270,61 @@ describe('BJ122 观测 3：生命体分析仪覆盖被缚族（Main.cs:47776 全
       speedSlice: new Float32Array(60), vx: 0, vy: 0,
     };
     const rarityOf = (vid: number | null) => npcRarityOf(vid);
-    const nameOf = (vid: number | null) => vid === 105 ? '受缚哥布林工匠' : vid === 685 ? '受缚老年史莱姆' : null;
-    const tickOnce = () => layer.tick(player, [], [], [
-      { dead: false, cx: 500, cy: 0, vanillaId: 105, givenName: '' },
-      { dead: false, cx: 900, cy: 0, vanillaId: 685, givenName: '' },
-    ], 0, 0, () => false, rarityOf, nameOf, (vx) => Math.abs(vx),
+    // 名域判别：桩只认【本体 id】（124/679 进来即 null→被 `!nm continue` 吞）
+    const nameOf = (vid: number | null) => vid === 123 ? '受缚机械师' : vid === 685 ? '老旧摇摇箱' : null;
+    // 运行时域装配：真 TownNPC（ctor 携城镇 id）× Game.tickInfoAccs 同款投影
+    const runtimePool = (...ns: TownNPC[]) => ns.map((n) => {
+      const bid = Game.boundAnalyzerVid(n);
+      return bid === n.vanillaId ? n : { dead: n.dead, cx: n.cx, cy: n.cy, vanillaId: bid };
+    });
+    const mech = placeBound('mechanic', 30);      // vanillaId=124（城镇 id）
+    const slime = placeBound('town_slime_old', 60); // vanillaId=679
+    mech.x = 500 - mech.w / 2; mech.y = -mech.h / 2;   // cx=500/cy=0（cx/cy 只读 getter）
+    slime.x = 900 - slime.w / 2; slime.y = -slime.h / 2; // cx=900/cy=0
+    layer.tick(player, [], [], runtimePool(mech, slime) as never, 0, 0, () => false,
+      rarityOf, nameOf, (vx) => Math.abs(vx),
       { accThirdEye: false, accCritterGuide: true, accStopwatch: false });
-    tickOnce();
-    // 685 rarity=2 > 105 rarity=1 → 择优 685（原版 num12/rarity 择优 :47780-47782）
-    expect(player.accCritterGuideText).toBe('受缚老年史莱姆');
-    // givenName 优先（GivenOrTypeName :47796）
+    // 685 rarity=2 > 123 rarity=1 → 择优 685（原版 num12/rarity 择优 :47780-47782）
+    expect(player.accCritterGuideText).toBe('老旧摇摇箱');
+    expect(player.accCritterGuideVid).toBe(685);
+    // 池契约直喂（投影后形状）：GivenOrTypeName（:47796）given 优先——direct 喂
+    //  vanillaId 123 非幻影（=投影产物域,映射本身由上一 it 锁死）
     const layer2 = new InfoAccsLayer();
     const player2 = { ...player, accCritterGuideCounter: 0, accCritterGuideText: null, accCritterGuideVid: null };
     layer2.tick(player2, [], [], [
-      { dead: false, cx: 100, cy: 0, vanillaId: 105, givenName: 'Nort' },
+      { dead: false, cx: 100, cy: 0, vanillaId: 123, givenName: 'Nort' },
     ], 0, 0, () => false, rarityOf, nameOf, (vx) => Math.abs(vx),
       { accThirdEye: false, accCritterGuide: true, accStopwatch: false });
     expect(player2.accCritterGuideText).toBe('Nort');
+    // 被缚态 givenName 压制：bound 实体 ctor 预派名不得胜出（原版被缚者无名）。
+    // 预派名钉死注入（ctor 的 newNpcName 依赖 l10n 运行时,测试环境随机池空——
+    // 真机上 mechanic 有 MechanicNames 池,实体名恒非空）
+    mech.givenName = 'Nort';
+    const layer3 = new InfoAccsLayer();
+    const player3 = { ...player, accCritterGuideCounter: 0, accCritterGuideText: null, accCritterGuideVid: null };
+    layer3.tick(player3, [], [], runtimePool(mech) as never, 0, 0, () => false,
+      rarityOf, nameOf, (vx) => Math.abs(vx),
+      { accThirdEye: false, accCritterGuide: true, accStopwatch: false });
+    expect(player3.accCritterGuideText).toBe('受缚机械师');   // 投影不带 given → 'Nort' 不得胜出
   }, 60000);
 
-  it('rarity 表锁：105/106/123/354/589=1、685=2（SetDefaults 直读值）', () => {
+  it('rarity 表锁：105/106/123/354/376/579/589=1、534/685/686/687=2（SetDefaults 直读值）', () => {
     expect(npcRarityOf(105)).toBe(1);
     expect(npcRarityOf(106)).toBe(1);
     expect(npcRarityOf(123)).toBe(1);
     expect(npcRarityOf(354)).toBe(1);
+    expect(npcRarityOf(376)).toBe(1);
+    expect(npcRarityOf(579)).toBe(1);
     expect(npcRarityOf(589)).toBe(1);
+    expect(npcRarityOf(534)).toBe(2);
     expect(npcRarityOf(685)).toBe(2);
+    expect(npcRarityOf(686)).toBe(2);
+    expect(npcRarityOf(687)).toBe(2);
+    // 城镇型真值域=0（旧表捏造 107/108/353/588=1 已清洗）
+    expect(npcRarityOf(107)).toBe(0);
+    expect(npcRarityOf(108)).toBe(0);
+    expect(npcRarityOf(353)).toBe(0);
+    expect(npcRarityOf(588)).toBe(0);
+    expect(npcRarityOf(441)).toBe(0);
   }, 60000);
 });

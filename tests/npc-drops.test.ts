@@ -352,7 +352,8 @@ describe('史莱姆体内物品（SlimeBodyItemDropRule）', () => {
 
 // ============ 城镇/特殊 NPC 死亡掉落族（2026-09-18 旅商商贩帽用户实报红蓝批） ============
 // 原版锚 = Terarria1457/Terraria.GameContent.ItemDropRules/ItemDropDatabase.cs
-// RegisterTownNPCDrops(:731-746) 全 12 注册 1:1 + 特殊 NPC 零掉落对照。实报链:
+// RegisterTownNPCDrops(:731-746,注册调用 :733-745) 全 13 注册（12 独立 NPC——画家 227
+// 双注册 5290+3350,红蓝-D 2026-09-18 计数勘误 12→13）1:1 + 特殊 NPC 零掉落对照。实报链:
 // 杀旅商 368 不掉商贩帽 2222 ——定谳=掉落链 1:1（数据/求值/生成三段全通,探针
 // 直杀/岩浆/巨石/FlyMeal 四通道 recLog+掉落桶双证）;真缺口=FlyMeal 5129 缺
 // damage(见 tests/extract-audit.test.ts SetWeaponValues 锚)令 wiki 推荐获取法失效。
@@ -412,5 +413,42 @@ describe('城镇/特殊 NPC 死亡掉落族(RegisterTownNPCDrops 1:1)', () => {
     for (const npc of [453, 369, 37, 17, 18]) {
       expect(entries.some((e) => (e.npcs ?? []).includes(npc)), `npc ${npc} 表内不应有注册`).toBe(false);
     }
+  });
+
+  it('⑥ RegisterTownNPCDrops 全 13 注册普查(丢任一注册→红;红蓝-D 计数定谳 12→13)', () => {
+    // 原版锚 ItemDropDatabase.cs :733-745 = 13 条 RegisterToNPC（1458 同值 :731-746）。
+    // 数据面普查：vanilla-npcdrops.json 提取表逐条在册——提取器再生成丢注册/丢条件
+    // 即红。运行时统计测 ①-④ 只覆盖 10 条,具名三件(Andrew/Whitney/Jim)与困难模式
+    // 布商 663→5065 无统计面,靠本普查锁数据。
+    const EXPECT: Array<{ npc: number; item: number; denom: number; cond?: string; arg?: string }> = [
+      { npc: 22, item: 867, denom: 1, cond: 'NamedNPC', arg: 'Andrew' },    // 向导绿帽(具名)
+      { npc: 178, item: 4372, denom: 1, cond: 'NamedNPC', arg: 'Whitney' }, // 蒸汽朋克(具名)
+      { npc: 227, item: 5290, denom: 1, cond: 'NamedNPC', arg: 'Jim' },     // 画家(具名)
+      { npc: 353, item: 3352, denom: 8 },
+      { npc: 441, item: 3351, denom: 8 },
+      { npc: 227, item: 3350, denom: 8 },
+      { npc: 550, item: 3821, denom: 8 },
+      { npc: 208, item: 3548, denom: 4 },                                   // 1/4 ×30-60
+      { npc: 207, item: 3349, denom: 8 },
+      { npc: 124, item: 4818, denom: 8 },
+      { npc: 663, item: 5065, denom: 8, cond: 'IsHardmode' },               // 困难模式布商
+      { npc: 54, item: 260, denom: 1 },
+      { npc: 368, item: 2222, denom: 1 },
+    ];
+    type Entry = { npcs?: number[]; rule: { item: number; denom?: number; cond?: { name: string; args?: string[] } } };
+    const all = (dropData as { entries: Entry[] }).entries;
+    for (const exp of EXPECT) {
+      const hit = all.find((e) => (e.npcs ?? []).includes(exp.npc) && e.rule.item === exp.item);
+      expect(hit, `城镇注册缺失: npc ${exp.npc} → item ${exp.item}`).toBeTruthy();
+      expect(hit!.rule.denom ?? 1, `npc ${exp.npc} → ${exp.item} denom 漂移`).toBe(exp.denom);
+      if (exp.cond) {
+        expect(hit!.rule.cond?.name, `npc ${exp.npc} → ${exp.item} 条件漂移`).toBe(exp.cond);
+        if (exp.arg) expect(hit!.rule.cond?.args?.[0]).toBe(exp.arg);
+      }
+    }
+    // 全量口径：12 个独立城镇 NPC 在提取表中的单 NPC 注册恰为上述 13 条(多/漏都红)
+    const TOWN = new Set([22, 178, 227, 353, 441, 550, 208, 207, 124, 663, 54, 368]);
+    const townCount = all.filter((e) => (e.npcs ?? []).length === 1 && TOWN.has(e.npcs![0])).length;
+    expect(townCount, '城镇注册总数漂移').toBe(13);
   });
 });

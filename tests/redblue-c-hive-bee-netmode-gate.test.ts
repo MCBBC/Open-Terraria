@@ -20,6 +20,12 @@
 //   无此实体,横幅/击杀记账/Bestiary 分叉）。
 // - 家族债（同门未落）：655 蜂巢弹蜂群（TreeShake/Projectile 臂）、582 蚁狮幼虫
 //   （breakAntlionLarva）、雕像产怪（deviceCtx.spawnNpc）——同缺 netMode 门。
+// - ★g6 补记（红蓝-F④,2026-09-18）：655 弹亡奏等效臂 Game.breakBeeHive 普查出
+//   两处 1:1 残留——①初速连续式 (r−0.5)×0.8（原版弹臂 Projectile.cs:76650-76651
+//   =离散 401 档 Next(-200,201)×0.002）+②中心锚未走 anchorBeeBottom（Bottom 契约,
+//   NPC.cs:81594,弹心=巢心等效）——同日顺手落刀合流（判据:缺门在前,门后此臂仅
+//   权威端触发,两处残留与门独立;回归 tests/redblue-f-g6-beehive-bomb-arm.test.ts）。
+//   netMode 门本身维持本家族债登记（同门未落面不变）。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

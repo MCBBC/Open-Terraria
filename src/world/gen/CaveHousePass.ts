@@ -17,7 +17,7 @@ import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass'
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType, vanGenSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { placeTight, checkStalactite } from './ShimmerPass';
-import { genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';
+import { genFrameNeighbors, genSquareTileFrame } from './vanilla/FinalCleanupPass';   // ★红蓝-G④ 死副本删除改指活体
 import { killTileChest } from './BuriedChestsPass';
 
 type Rect = { x: number; y: number; w: number; h: number };

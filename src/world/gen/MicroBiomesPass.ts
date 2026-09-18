@@ -51,7 +51,7 @@ import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
 import { vanGenSolidType } from './GenSolid';
 import { hfIs1457 } from './HellFortPass';
-import { genTileFrame, genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
+import { genTileFrame, genFrameNeighbors, genSquareTileFrame } from './vanilla/FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像;★红蓝-G④ 死副本删除改指活体
 
 /** Main.wallLargeFrames 非零墙（Main.cs:9653-9787；余皆 0）——Framing.WallFrame
  *  resetFrame=true 掷门用（UUUU：Mahogany PlaceWall(78) 的 SquareWallFrame×5 每格

@@ -15,7 +15,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType } from './GenSolid';
-import { genSquareTileFrame } from './FinalCleanupPass';
+import { genSquareTileFrame } from './vanilla/FinalCleanupPass';   // ★红蓝-G④ 死副本删除改指活体
 // ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省 1456（三掷位=753 首分支/
 //   Next(6) 六选+669 主物门/尾段无 753·669 门）服务七条 mile8 槽链认证线;
 //   SW_MB_1457=1 → 1457 对齐档 2 形（迁移战役线）。

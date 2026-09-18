@@ -1,4 +1,5 @@
-// 原版 1.4.5.6 NPC.Spawner 内嵌类 1:1 移植（Terarria1456/Terraria/NPC.cs:39-5952）。
+// 原版 NPC.Spawner 内嵌类 1:1 移植（Terarria1456/Terraria/NPC.cs:39-5934 =
+// Terarria1457 :144-6010;红蓝-D 2026-09-18 锚勘误——原 :39-5952 陈旧且缺 1457 锚）。
 // ★简化纪律:任何"未移植/近似/恒X"必须在 docs/spawn-parity-gaps.md 登记(含原版行号+
 // 可见影响+依赖),否则视为未完成。先例:spawnFriendly 曾标"恒放行"导致兔鼠刷浮空岛。
 // 结构：SetSpawnFlags(L276) → GetSpawnRate(L383-640) → FindSpawnTile(L879) →
@@ -2357,7 +2358,8 @@ export class VanillaSpawner {
     //    （解救记账见 Game.freeBoundNpc；685 解救置 flags.unlockedSlimeOldSpawn）
     {
       const f = this.world.flags;
-      // ★原版三支均为 RollLuck(20)（运气缩放，1456 :1996-2008 = 1457 :2087/2091/2095）
+      // ★原版三支均为 RollLuck(20)（运气缩放，1456 门 :1994/1998/2002 三行分写 =
+      //   1457 :2087/2091/2095;红蓝-D 2026-09-18 锚勘误——原「1456 :1996-2008」非连续块）
       //  ——曾平掷 N(20)，已 1:1
       const luck20 = () => rollLuck(this.playerLuck, 20, () => rng.next()) === 0;
       if (f['downedGoblins'] && luck20() && !this.waterTile && this.deeperThanRockLayer

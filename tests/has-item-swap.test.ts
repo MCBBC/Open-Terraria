@@ -17,9 +17,11 @@
 //   AfterItemSwap(:1992-2008) 音 22 Unlock/7 Grab+stackSplit=30；持有侧快换表
 //   Player.cs:31764-31877 已实装（tests/flairon-swap.test.ts）。
 // 仓内：CursorItemIcon.tryItemSwapVid（对表+音档）+ UI 右键语境支
-//   ('inv'/'chest'；装备栏 8/10 语境需过 equip 重算链=登记未接)。
+//   ('inv'/'chest'；★红蓝-E 债升级 2026-09-18：装备位 8/10 已接线——UI.makeSlotEl
+//   右键监听器槽语境 ctx 经 CAN_ITEM_SWAP_AT{0,3,4,8,10,32}（ItemSlot.cs:423-428
+//   canItemSwapAt 置位表）受理装备格,见下方 ④ 装备位 describe）。
 // 运行：cd game && npx vitest run tests/has-item-swap.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { languageManager } from '../src/i18n/LanguageManager';
 import { tryItemSwapVid } from '../src/render/CursorItemIcon';
@@ -158,5 +160,169 @@ describe('tooltip 装配：提示行随 staticTip 支入行族（tag static）',
     const lines = assembleTooltipLines(ITEM_DEFS[iid], { id: iid, stack: 1 }, null, staticTip);
     const joined = lines.filter((ln) => ln.tag === 'static').map((ln) => ln.text).join('\n');
     expect(joined).toContain('重新激活');
+  });
+});
+
+// ============================================================
+// ④ 装备位 8/10 接线（★红蓝-E 债升级 2026-09-18）
+// ============================================================
+// 原版：ItemSlot.RightClick(:1646-1653) 的 HasItemSwap 门在 switch 之先,门谓词
+// canItemSwapAt[context] 于 :423-428 置位 {0,4,32,3,10,8}——装备位 8（盔甲）/10
+// （配饰）受理原地换型（TryItemSwap→ChangeItemType :47841 直改 type,不回查
+// armorAccepts/成就）。可达性：5358-5361 Shellphone acc=1→armor[3-9]（ctx 10）;
+// 5059/5060 摩羯座时装腿 ls 225/226 拖入功能腿槽合法（CanEquipInArmorSlot :1399
+// 只查 legSlot≥0+同款唯一,不查 vanity 旗）→ctx 8;时装槽 9/11 不受理（case 9/11
+// =SwapVanityEquip）。双态物（ls/acc/createTile——Rubblemaker 5324-5330 为
+// DefaultToPlaceableTile(647) 态,仅背包/容器面）变体族槽型自洽,换型免重验。
+// 测试法：UI 原型桩（BJ116 同法）+ document.createElement 桩捕获 makeSlotEl 真实
+//   mousedown 监听器——整条右键路由（真实现）驱动,变异即红：
+//   M-a 摘 CAN_ITEM_SWAP_AT.has(ctx) 门 → ①②⑥红+结构锁红;
+//   M-b 集撤 8/10（回 inv/chest 旧域）→ ①②红+集内容锁红。
+import { UI } from '../src/ui/UI';
+import { Inventory } from '../src/items/Inventory';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { slotContext } from '../src/ui/SlotActions';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+type AnyUI = Record<string, any>;
+
+const idOfVid2 = (vid: number): number => {
+  const key = VANILLA_ITEM_KEY_BY_ID[vid];
+  expect(key, `vid ${vid} 应有本仓键`).toBeTruthy();
+  return ITEM_BY_KEY[key!];
+};
+const SHELLPHONE = idOfVid2(5358);          // vi_5358_shellphone acc=1
+const SHELLPHONE_OCEAN = idOfVid2(5360);    // 环 5358→5360 下一位
+const CAPRI_LEGS = idOfVid2(5059);          // 摩羯座护腿 ls=225 van=1
+const CAPRI_TAIL = idOfVid2(5060);          // 摩羯座尾 ls=226
+const BOOTS = idOfVid2(54);                 // Hermes Boots（非集内件阴性）
+
+/** UI 原型桩 + document.createElement 桩（捕获 makeSlotEl 挂的真 mousedown 监听器） */
+function mkSwapUi() {
+  type Listener = (e: unknown) => void;
+  const listeners: Array<[string, Listener]> = [];
+  const mkEl = () => ({
+    className: '', textContent: '',
+    style: { cssText: '', display: '' },
+    dataset: {} as Record<string, string>,
+    children: [] as unknown[],
+    appendChild(c: unknown) { this.children.push(c); },
+    addEventListener(t: string, fn: Listener) { listeners.push([t, fn]); },
+    removeEventListener() {},
+  });
+  vi.stubGlobal('document', { createElement: () => mkEl() });
+  const ui = Object.create(UI.prototype) as unknown as AnyUI;
+  const sfx: string[] = [];
+  ui.game = {
+    player: { inv: new Inventory() },
+    sfx: { play: (name: string) => { sfx.push(name); } },
+    achNotifyEquipChanged: () => {},
+    npcShopOpen: false,
+  };
+  ui.heldStack = null;
+  ui.heldFrom = null;
+  ui.openChest = null;
+  ui.refreshAll = () => {};
+  ui.invPanel = { style: { display: 'block' } };   // 开包态（关包门放行）
+  return { ui, sfx, listeners };
+}
+
+/** 经真 makeSlotEl+真监听器发右键（DOM mousedown = mouseRightRelease 边沿） */
+function rightClick(ui: AnyUI, listeners: Array<[string, (e: unknown) => void]>, where: string, i: number): void {
+  (ui as AnyUI).makeSlotEl(i, where);
+  const mdown = listeners.find(([t]) => t === 'mousedown');
+  expect(mdown, 'mousedown 监听器已挂').toBeTruthy();
+  mdown![1]({ button: 2, stopPropagation() {}, preventDefault() {} });
+}
+
+describe('④ 装备位 8/10 HasItemSwap 接线（RightClick :1646 门先于 switch;canItemSwapAt :423-428）', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('槽语境映射：armor 0-2=8 / 3-9=10（受理域）;10-12=9 / 13+=11（时装,不受理）', () => {
+    expect(slotContext('armor', 0, true)).toBe(8);
+    expect(slotContext('armor', 2, true)).toBe(8);
+    expect(slotContext('armor', 3, true)).toBe(10);
+    expect(slotContext('armor', 9, true)).toBe(10);
+    expect(slotContext('armor', 10, true)).toBe(9);
+    expect(slotContext('armor', 13, true)).toBe(11);
+  });
+
+  it('① 配饰位（ctx 10）Shellphone 右键=原地换型 5358→5360+音 22,不取下', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.armor[3] = { id: SHELLPHONE, stack: 1 };
+    rightClick(ui, listeners, 'armor', 3);
+    expect(inv.armor[3]!.id).toBe(SHELLPHONE_OCEAN);
+    expect(inv.armor[3]!.stack).toBe(1);              // 原地,stack 不动
+    expect(ui.heldStack).toBeNull();                  // 不落光标（旧面=取下到光标）
+    expect(sfx).toEqual(['unlock']);                  // AfterItemSwap(:1992) 5360∈音 22 族
+  });
+
+  it('② 功能腿槽（ctx 8）摩羯座护腿右键=原地换型 5059↔5060+音 7', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.armor[2] = { id: CAPRI_LEGS, stack: 1 };
+    rightClick(ui, listeners, 'armor', 2);
+    expect(inv.armor[2]!.id).toBe(CAPRI_TAIL);
+    expect(ui.heldStack).toBeNull();
+    expect(sfx).toEqual(['pickup']);                  // 5060 换入∉音 22 表 → Sound 7
+  });
+
+  it('③ 阴性：非集内装备位右键仍=取 1 到光标（BJ116 取件面零变化）', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.armor[3] = { id: BOOTS, stack: 1 };
+    rightClick(ui, listeners, 'armor', 3);
+    expect(inv.armor[3]).toBeNull();
+    expect(ui.heldStack).toMatchObject({ id: BOOTS, stack: 1 });
+    expect(sfx).toEqual(['menuTick']);                // PickupItemIntoMouse Sound 12
+  });
+
+  it('④ 阴性：时装腿槽（ctx 9）右键=SwapVanityEquip 镜像互换,不换型（canItemSwapAt[9]=false）', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.armor[12] = { id: CAPRI_LEGS, stack: 1 };
+    rightClick(ui, listeners, 'armor', 12);
+    expect(inv.armor[2]!.id).toBe(CAPRI_LEGS);        // 镜像到功能腿槽,id 不变
+    expect(inv.armor[12]).toBeNull();
+    expect(sfx).toEqual(['pickup']);                  // SwapVanityEquip(:1857) Sound 7
+  });
+
+  it('⑤ stack==1 门：装备位多叠 Shellphone 不换型,落取件臂（:1646 stack==1 前置）', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.armor[3] = { id: SHELLPHONE, stack: 3 };
+    rightClick(ui, listeners, 'armor', 3);
+    expect(inv.armor[3]!.id).toBe(SHELLPHONE);        // 不换型
+    expect(inv.armor[3]!.stack).toBe(2);              // 取 1
+    expect(ui.heldStack).toMatchObject({ id: SHELLPHONE, stack: 1 });
+    expect(sfx).toEqual(['menuTick']);
+  });
+
+  it('⑥ 背包语境（ctx 0）回归：Shellphone 背包右键仍原地换型（旧面零回退）', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.slots[10] = { id: SHELLPHONE, stack: 1 };
+    rightClick(ui, listeners, 'inv', 10);
+    expect(inv.slots[10]!.id).toBe(SHELLPHONE_OCEAN);
+    expect(sfx).toEqual(['unlock']);
+  });
+
+  it('⑦ 结构锁：CAN_ITEM_SWAP_AT 集={0,3,4,8,10,32};换型门在开包门后、时装互换臂前', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/ui/UI.ts'), 'utf8');
+    const m = src.match(/const CAN_ITEM_SWAP_AT = new Set\(\[([0-9, ]+)\]\)/);
+    expect(m, 'CAN_ITEM_SWAP_AT 声明存在').toBeTruthy();
+    const set = m![1].split(',').map((x) => parseInt(x.trim(), 10)).sort((a, b) => a - b);
+    expect(set).toEqual([0, 3, 4, 8, 10, 32]);        // ItemSlot.cs:423-428 置位表逐值
+    const gateUse = src.indexOf('CAN_ITEM_SWAP_AT.has(ctx)');
+    expect(gateUse).toBeGreaterThan(0);
+    expect(gateUse, '换型门在开包动作之后（:1636→:1646 同序）')
+      .toBeGreaterThan(src.indexOf('this.tryOpenContainer(cur, i);'));
+    expect(gateUse, '换型门在时装互换臂之前（:1646→:1654 switch 同序）')
+      .toBeLessThan(src.indexOf('this.swapVanityEquip(i);'));
+    const gate = src.slice(gateUse - 80, gateUse + 80);
+    expect(gate, '门谓词含 stack==1+光标空（heldStack null 门）').toContain('cur.stack === 1');
+    expect(gate).toContain('!this.heldStack');
   });
 });

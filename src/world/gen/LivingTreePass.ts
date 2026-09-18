@@ -37,7 +37,7 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { furnitureStyleBase } from '../FurnitureStyle';   // ★⑥（2026-09-02 缓修小账）：gen/ 下相对深度正确化（'../../' 指到 src/ 不存在,TS2307）
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
-import { genSquareTileFrame } from './FinalCleanupPass';
+import { genSquareTileFrame } from './vanilla/FinalCleanupPass';   // ★红蓝-G④ 死副本删除改指活体
 // ★YYYYYY（2026-08-23）：Check3x2 清除环 KillTile 头门（cs:63579）——HalfBrickPass 1:1 实现
 import { checkTileBreakability } from './HalfBrickPass';
 

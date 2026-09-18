@@ -126,7 +126,9 @@ const DATA_PATCH: Record<string, Partial<ProjectileData>> = {
   // （usesLocalNPCImmunity+localNPCHitCooldown 不入 NUM_FIELDS）：同敌 5t 局部免疫窗
   '532': { usesLocalNPCImmunity: true, localNPCHitCooldown: 5 },
   // ★SW-FX1 孢子云 567 盒径（:6189-6196 嵌套 if：567=14×14、568=16×16）——提取器
-  // 只读共享块漏嵌套支,json 恒 16×16;567 按 1457 原文补 14×14（568 与 json 同值不动）
+  // 曾只读共享块漏嵌套支,json 恒 16×16;567 按 1457 原文补 14×14（568 与 json 同值不动）
+  // ★BJ129③（2026-09-18）病根本修（extract-projectiles.mjs 头注⑧）+json 重产落表,
+  //   json 面现自带 14×14 与本补丁同值（保留=SW-FX1 先例存照,双载同值零行为差）
   '567': { width: 14, height: 14 },
 };
 for (const k of Object.keys(DATA_PATCH)) {

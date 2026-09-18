@@ -244,11 +244,23 @@ export async function recon() {
   for (const [id, w] of s57.whip) {
     for (const f of ['proj', 'dmg', 'kb', 'speed', 'anim']) surfaces.push({ file: 'whips', id: String(id), field: f, v57: w[f] });
   }
+  // ★J1 扩面（2026-09-18,红蓝-F g3 收口）：免疫四列全入断言面——usesLocalNPCImmunity/
+  //   usesIDStaticNPCImmunity/idStaticNPCHitCooldown 此前在 json 面已载（BJ127 反哺+
+  //   J1 UseGroupStaticImmunity 参数化展开重产）而 fieldsOf 未含=对账盲区;immunityIdentity
+  //   为 J1 刀新增组键列。双树变更面已核对全为 undefined→真值新增（无删除支,扩面安全）:
+  //   usesLocal +27（76-78/121-126/301/309/597/1112-1133 族）,usesIDStatic +14
+  //   （181/286/309/511-513/566/569-571/1122/1128/1134/1135——helper 族+286/309 直写),
+  //   均落 CLASS B 移植清单,不进 DRIFT。
   pushSurface('proj', p57, ['aiStyle', 'width', 'height', 'penetrate', 'timeLeft', 'damage', 'light', 'scale',
     'extraUpdates', 'armorPenetration', 'friendly', 'melee', 'ranged', 'magic', 'minion', 'hostile',
-    'tileCollide', 'ignoreWater', 'pierce', 'localNPCHitCooldown']);
+    'tileCollide', 'ignoreWater', 'pierce', 'localNPCHitCooldown', 'usesLocalNPCImmunity',
+    'usesIDStaticNPCImmunity', 'idStaticNPCHitCooldown', 'immunityIdentity']);
   // 非字面量赋值补丁(提取器只认 `field = N;` 字面,表达式赋值按源码求值手工钉值):
   //   1226 叶绿巨剑 `useTime = useAnimation;`(Item.cs:15125)= 32
+  //   ★2026-09-18 反哺批后本表全部转为冗余保险（提取器已解析所有下列形态——proj
+  //   免疫三元组/switch(2)常量支+num2 别名/ApplyGemStaffStats 展开/元组/MaxUpdates
+  //   算式;combat 1226 别名/形参位）——seenSurface 去重后不再进 surfaces。保留本表
+  //   =提取器解析面回退时的最后防线（若再触发,值仍被钉住对账）。
   const NON_LITERAL_57 = {
     combat: { '1226': { useTime: 32 } },
     // ApplyGemStaffStats()（Projectile.cs:10685-10691）展开（提取器不展开私有方法调用）:
@@ -312,6 +324,31 @@ export async function recon() {
     }
   }
 
+  // ★反哺滞后分类（2026-09-18 BJ127/BJ121 反哺批登记）：提取器输出面已反哺（proj
+  //   免疫四列/元组/算式/ApplyGemStaffStats/switch(2) 常量支 + combat 累加/别名/
+  //   武器族形参位——形态清单与行号锚见两提取器头注），json 维持冻结态未重产——
+  //   producer 新增覆盖在 json 缺字段=已知滞后，不算 DRIFT 不进 --fix（否则闸门
+  //   永久红=判别力归零）。判据收紧防吞真回滚：
+  //   · proj localNPCHitCooldown：33 键手补清单（vanillaProjectiles.ts 台账）内的
+  //     id 缺列仍=DRIFT（回滚保护）;清单外=滞后;
+  //   · proj timeLeft/width/height：仅算式/元组新增覆盖的 12 id（466/616/710/
+  //     715-718/729/976/977/1045 算式 + 1091 元组）——其余 id 缺列照旧 DRIFT;
+  //   · combat：仅 18 个反哺 id × 形参位/累加字段族（damage/knockBack 不在族内——
+  //     SetWeaponValues 面回退照旧 DRIFT）。
+  const PROJ_COOLDOWN_HANDPATCH = new Set(['76', '77', '78', '121', '122', '123', '124', '125', '126', '301', '309',
+    '597', '639', '932', '1112', '1115', '1116', '1118', '1119', '1120', '1121', '1122', '1125', '1126', '1127',
+    '1128', '1129', '1130', '1131', '1132', '1134', '1135']);
+  const PROJ_ENRICHED_OLD_FIELD = new Set(['466', '616', '710', '715', '716', '717', '718', '729', '976', '977', '1045', '1091']);
+  const COMBAT_ENRICHED = new Set(['1782', '1784', '1835', '3291', '4058', '4060', '4061', '4062', '4347', '4348',
+    '4381', '4788', '4789', '4790', '5629', '6152', '6153', '6154', '6155', '6171', '6173']);
+  const COMBAT_ENRICH_FIELDS = new Set(['shoot', 'useAmmo', 'useTime', 'useAnimation', 'shootSpeed', 'noMelee',
+    'ranged', 'consumable', 'autoReuse', 'melee', 'magic', 'mana', 'crit']);
+  const isBackfillLag = (file, id, field, vj) => vj === undefined && (
+    (file === 'proj' && field === 'localNPCHitCooldown' && !PROJ_COOLDOWN_HANDPATCH.has(id)) ||
+    (file === 'proj' && PROJ_ENRICHED_OLD_FIELD.has(id) && (field === 'timeLeft' || field === 'width' || field === 'height')) ||
+    (file === 'combat' && COMBAT_ENRICHED.has(id) && COMBAT_ENRICH_FIELDS.has(field))
+  );
+
   // 1456 侧同面记录(legacy 漂移检测:1456==1457 的字段上,json 不得偏离 1456)
   const v56of = (file, id, field) => {
     switch (file) {
@@ -345,6 +382,7 @@ export async function recon() {
 
   const classB = [];  // 1456→1457 变化(移植确认清单)
   const drift = [];   // json vs 1457(--fix 载荷)
+  const lag = [];     // 反哺滞后:提取器已反哺、json 冻结态未重产(登记面,不进 --fix)
   const deferredDrift = []; // 已知暂缓项(新弹依赖,见 FIX_SHOOT_KEEP)
   const handPatches = [];   // 弹幕既知手补面(json 故意偏离源码字面,保留不回写)
   const legacy = [];  // 1456==1457 字段上 json 对 1456 的漂移(基线保护)
@@ -368,6 +406,9 @@ export async function recon() {
       const handPatch = file === 'proj' && !changed56to57 && vj !== undefined && vj !== null;
       if (handPatch) {
         handPatches.push(`${file}[${id}].${field}: json=${JSON.stringify(vj ?? null)} ≠ 源码=${JSON.stringify(v57)}(两版同值,既知手补保留)`);
+      } else if (isBackfillLag(file, id, field, vj)) {
+        // 反哺滞后:提取器已反哺、json 冻结态未重产（登记面,见 isBackfillLag 注）
+        lag.push(`${file}[${id}].${field}: json=缺 → 1457=${JSON.stringify(v57)}(反哺新增覆盖,json 未重产)`);
       } else {
         (deferred ? deferredDrift : drift).push(`${file}[${id}].${field}: json=${JSON.stringify(vj ?? null)} → 1457=${JSON.stringify(v57)}${deferred ? '(新弹 1126/1127 未实装,暂保留 1456 弹 id)' : ''}`);
         if (!deferred) fixes.push([file, id, field, v57]);
@@ -393,7 +434,7 @@ export async function recon() {
       ? ['damage', 'knockBack', 'useTime', 'useAnimation', 'shoot', 'useAmmo', 'shootSpeed', 'ammo', 'crit', 'scale', 'mana', 'maxStack', 'consumable', 'noMelee', 'autoReuse', 'melee', 'ranged', 'magic', 'summon', 'useTurn', 'noUseGraphic']
       : file === 'stats' ? ['def', 'life'] : file === 'whips' ? ['proj', 'dmg', 'kb', 'speed', 'anim']
         : file === 'func' ? ['healMana']
-        : file === 'proj' ? ['aiStyle', 'width', 'height', 'penetrate', 'timeLeft', 'damage', 'light', 'scale', 'extraUpdates', 'armorPenetration', 'friendly', 'melee', 'ranged', 'magic', 'minion', 'hostile', 'tileCollide', 'ignoreWater', 'pierce', 'localNPCHitCooldown']
+        : file === 'proj' ? ['aiStyle', 'width', 'height', 'penetrate', 'timeLeft', 'damage', 'light', 'scale', 'extraUpdates', 'armorPenetration', 'friendly', 'melee', 'ranged', 'magic', 'minion', 'hostile', 'tileCollide', 'ignoreWater', 'pierce', 'localNPCHitCooldown', 'usesLocalNPCImmunity', 'usesIDStaticNPCImmunity', 'idStaticNPCHitCooldown', 'immunityIdentity']   // ★J1 扩面（红蓝-F g3 收口,见 pushSurface 注）
         : [file === 'rare' ? 'rare' : 'value'];
     for (const [id, rec] of Object.entries(tbl)) {
       if (!rec || typeof rec !== 'object') continue;
@@ -422,7 +463,7 @@ export async function recon() {
     proj1456: Object.keys(p56).length, proj1457: Object.keys(p57).length,
     expert1457: Object.keys(e57.EXPERT).length,
   };
-  return { classB, drift, deferredDrift, legacy, handPatches, fixes, coverage };
+  return { classB, drift, lag, deferredDrift, legacy, handPatches, fixes, coverage };
 }
 
 // ---- --fix:应用 1457 终值(写前备份;shoot 白名单见 FIX_SHOOT_KEEP) ----
@@ -433,11 +474,14 @@ export async function recon() {
 export const FIX_SHOOT_KEEP = new Set([]);
 
 async function main() {
-  const { classB, drift, deferredDrift, legacy, handPatches, fixes, coverage } = await recon();
+  const { classB, drift, lag, deferredDrift, legacy, handPatches, fixes, coverage } = await recon();
   console.log(`== 覆盖 == combat ${coverage.combat1456}→${coverage.combat1457} / rare ${coverage.rare1456}→${coverage.rare1457} / value ${coverage.value1457} / stats def ${coverage.statsDef57} life ${coverage.statsLife57} / whips ${coverage.whips57} / expert ${coverage.expert1457}`);
   console.log(`\n== CLASS B: 1456→1457 变化 ${classB.length} 条(移植确认清单)==`);
   for (const l of classB) console.log(l);
   console.log(`\n== DRIFT: json→1457 ${drift.length} 条(--fix 载荷)==`);
+  console.log(`\n== LAG: 反哺滞后(json 冻结态未重产,不进 --fix)${lag.length} 条 ==`);
+  for (const l of lag.slice(0, 40)) console.log(l);
+  if (lag.length > 40) console.log(`  …共 ${lag.length} 条`);
   for (const l of drift) console.log(l);
   console.log(`\n== DEFERRED: 已知暂缓 ${deferredDrift.length} 条(新弹依赖,不进 --fix)==`);
   for (const l of deferredDrift) console.log(l);

@@ -75,13 +75,13 @@ describe('496 暗影炎弓箭 aiStyle 91（Projectile.cs:33097-33148）', () => 
     expect(p.height).toBe(40);
     expect(p.magic).toBe(true);            // :5700
     expect(p.extraUpdates).toBe(2);        // MaxUpdates=3 ≡ extraUpdates+1（:5702 提取器并表）
-    // ★登记缺口（recon 双闸门外禁直改 json）：1457 终值 alpha=255/usesLocalNPCImmunity/
-    // localNPCHitCooldown=-1 三键在【json 提取面】仍缺（本哨兵锁 raw json 形态）——
-    // 2026-09-03 登记项①已由 vanillaProjectiles.ts DATA_PATCH['496'] 注入消费面
-    // （合并面断言见下方「登记项①」describe;免疫行为等价锁 = ⑥b）
+    // ★登记缺口演进（BJ127 反哺+BJ129③ 重产落表 2026-09-18）：usesLocalNPCImmunity/
+    // localNPCHitCooldown 两键已入【json 提取面】（producer 直出,与 DATA_PATCH['496']
+    // 同值双载=ignoreWater 同模式）;alpha=255 仍在提取面外（提取器⑥alpha 不入
+    // NUM_FIELDS,登记项①的 alpha 位恒走 DATA_PATCH 注入,本哨兵继续锁其缺席）
     expect(p.alpha).toBeUndefined();
-    expect(p.usesLocalNPCImmunity).toBeUndefined();
-    expect(p.localNPCHitCooldown).toBeUndefined();
+    expect(p.usesLocalNPCImmunity).toBe(true);
+    expect(p.localNPCHitCooldown).toBe(-1);
     expect(p.timeLeft).toBeUndefined();    // SetDefaults 无 timeLeft 行 → 缺省 3600（:526）
     const s = (statusJson as Record<string, Array<{ buff: number; chance: number; durMin: number; durMax: number }>>)['496'];
     expect(s).toHaveLength(1);
@@ -308,7 +308,7 @@ function makeDrawCtx496() {
 }
 
 describe('496 数据面 DATA_PATCH 三键 + α=255 贴图隐身（登记项①）', () => {
-  it('【合并面】projectileData(496) 三键=1457 终值；raw json 三列仍缺（哨兵面不变）', () => {
+  it('【合并面】projectileData(496) 三键=1457 终值；alpha 仍 json 外（DATA_PATCH 独载）', () => {
     const d = projectileData(496);
     expect(d).not.toBeNull();
     expect(d!.alpha).toBe(255);                       // :5695
@@ -316,9 +316,8 @@ describe('496 数据面 DATA_PATCH 三键 + α=255 贴图隐身（登记项①�
     expect(d!.localNPCHitCooldown).toBe(-1);          // :5704
     expect(d!.extraUpdates).toBe(2);                  // MaxUpdates=3 并表面不变
     expect(d!.penetrate).toBe(3);                     // :5701
+    // ★BJ129③ 落表演进：免疫两键 json 已自带（producer 直出）,alpha 仍 DATA_PATCH 独载
     expect((projJson as Record<string, Record<string, unknown>>)['496'].alpha).toBeUndefined();
-    expect((projJson as Record<string, Record<string, unknown>>)['496'].localNPCHitCooldown)
-      .toBeUndefined();
   });
 
   it('【α 运行时面】ctor alpha=255（PROJ_ALPHA0[496],GetAlpha 缺省路径读 α 的起点）', () => {

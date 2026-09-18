@@ -275,7 +275,7 @@ import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bes
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
 import { waterWaves, waveTexReady as waterWavesDiagReady } from '../render/WaterWaves';
-import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit, heldItemTipWorld, popupLabelMeasure } from '../render/Renderer';
+import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit, heldItemTipWorld, popupLabelMeasure, tpMarkCoordText } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS, type InvItem } from '../items/Inventory';
@@ -7368,8 +7368,8 @@ export class Game implements GameHooks {
   }
 
   /** 解救旗标表（AI_007_TownEntities_UpdateSavedStates NPC.cs:53336-53362 + 各
-   *  Transform 链的解锁旗）：freeBoundNpc（bound TownNPC 右键/触碰）与
-   *  wakeBoundEnemyNpc（敌怪桶 bound 形态右键 Transform）共用。 */
+   *  Transform 链的解锁旗）：freeBoundNpc（bound TownNPC talk 交互触发;★BJ124-①
+   *  触碰臂已摘）与 wakeBoundEnemyNpc（敌怪桶 bound 形态右键 Transform）共用。 */
   private static readonly SAVED_FLAG_BY_KEY: Record<string, string> = {
     goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
     stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
@@ -7382,7 +7382,19 @@ export class Game implements GameHooks {
     town_slime_clumsy: 'unlockedSlimePurpleSpawn',  // 686 气球绑缚解救（:1347 门旗）
   };
 
-  /** 右键解救 bound NPC（原版 bound 类型右键 → 转正 + AI_007_UpdateSavedStates 置 saved 旗标） */
+  /** 解救 bound NPC（触发源=talkToNearbyNpc bound 支,★BJ124-① 触碰臂已摘）：
+   *  转正 + AI_007_UpdateSavedStates 置 saved 旗标。★BJ124-②（2026-09-18 用户拍板）：
+   *  解救本身零音零尘——原版 AI_000_TransformBoundNPC→Transform→TransformVisuals
+   *  （NPC.cs:81788-81851）配对表仅 158/159、478/479、406/405、428/427、427/426,
+   *  对全部解救配对（105→107/106→108/123→124/354→353/376→369/579→550/589→588）
+   *  无任何 dust/gore/SoundEngine 支;自创 NPC_Hit_1 音+绿粒子已摘（对话音=
+   *  openNpcDialog 的 chat=SoundID 24,原版 Main.cs:43812 同位,不在本函数）。
+   *  唯一例外=685 抖箱支：Main.cs:43771 解救点击拍 PlaySound(22)=Unlock
+   *  （Sfx 'unlock' 已在库;TownSlimeTransform 编排粒子=★待定项确认 2026-09-18：
+   *  回放面已存在——module8 netApply Game :32921 TownSlimeTransform 支
+   *  →orchestraFx.townSlimeTransformFx（uniqueInfo 1=Nerdy/2=Elder,
+   *  原版发射锚 TransformElderSlime NPC.cs:19186-19193 UniqueInfoPiece=2）,
+   *  缺的是 freeBoundNpc 685 支的【本地发射】半边,登记债未变窄前保持不接） */
   private freeBoundNpc(npc: TownNPC): void {
     // 685 抖箱保真门（Main.cs:42454 + TryFreeingElderSlime :42536-42553）：须消耗金钥匙 327
     if (npc.npcKey === 'town_slime_old') {
@@ -7390,14 +7402,16 @@ export class Game implements GameHooks {
         this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NeedItem', Lang.itemName(327) ?? 'Golden Key'));
         return;
       }
+      this.playSfxFiles(['unlock'], 1);   // Main.cs:43771 PlaySound(22)=Unlock（685 抖箱特例原版音,无坐标=全量 1）
     }
     npc.bound = false;
     const flag = Game.SAVED_FLAG_BY_KEY[npc.npcKey];
     if (flag) this.world.flags[flag] = true;
     const name = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
-    this.spawnParticles(npc.cx, npc.cy, '#9AE85A', 14, 2);
-    this.playSfxFiles(['NPC_Hit_1'], 0.6);
+    // ★BJ124-②：原 NPC_Hit_1 音 + 绿粒子（spawnParticles 绿色系,色值见变异锁
+    // tests/bj124-talk-only-rescue.test.ts）已摘——TransformVisuals 对解救配对
+    // 零音零尘（NPC.cs:81788-81851,见函数头定谳）
     // 成就：Transform → townNPC（NPC.Transform 尾 NPC.cs:81964-81968 `homeless=true +
     // WorldGen.CheckAchievement_RealEstateAndTownSlimes()`——被缚解救转正即复查）
     this.checkAchievementRealEstateAndTownSlimes();
@@ -7501,9 +7515,10 @@ export class Game implements GameHooks {
         tc.x = en.cx - tc.w / 2;
         tc.y = en.y + en.h - tc.h;                       // withReposition 底边对齐
         this.entities.add(tc, 'npcs');
-        // TransformVisuals(534, 441)（:81739）：换型尘雾 + 音效
-        this.spawnParticles(en.cx, en.cy, '#B79A6B', 20, 2);
-        this.playSfxFiles(['NPC_Killed_1'], 0.7);
+        // ★BJ124-②（2026-09-18）：TransformVisuals（NPC.cs:81788-81851）配对表无
+        // (534,441) 支——净化粉转正原版零音零尘,自创 NPC_Killed_1 音+尘雾已摘
+        // （旧注":81739 换型尘雾+音效"系误锚;开箱文案 newText 保留）。
+        // 净化粉链音=弹道 AI_006 自身尘/声域,与 Transform 无关
         this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', Lang.npcName(441) ?? 'Tax Collector'), 50, 125, 255);
         break;
       }
@@ -8646,7 +8661,10 @@ export class Game implements GameHooks {
             } else {
               this._tpTarget = { x: tx, y: ty };
               this.renderer.tpMark = { x: tx, y: ty };
-              this.cb.onToast(Lang.text('Mods.SandboxWorld.Map.Preselect', `(${tx}, ${ty})`));
+              // ★红蓝-D 2026-09-18：坐标串走 tpMarkCoordText 单源（与标记旁注
+              // Renderer:18159 同源同格式）——曾传 `(${tx}, ${ty})` 自带括号,撞上
+              // zh 模板「已选择 {0}」的译文括号渲染成双括号（en 模板无括号,双源漂移）
+              this.cb.onToast(Lang.text('Mods.SandboxWorld.Map.Preselect', tpMarkCoordText(tx, ty)));
             }
           } else if (pingDouble) {
             // ★SW-BJ20 2026-09-07：原版双击 ping（默认态地图点击=标记行为）。
@@ -8681,7 +8699,9 @@ export class Game implements GameHooks {
         const existed = this.marks.some((m) => m.x === tx && m.y === ty);
         this.marks = this.marks.filter((m) => m.x !== tx || m.y !== ty); // 同格重复点 = 取消
         if (!existed) this.marks.push({ x: tx, y: ty });
-        this.cb.onToast(existed ? Lang.text('Mods.SandboxWorld.Map.Unmark', `(${tx}, ${ty})`) : Lang.text('Mods.SandboxWorld.Map.Mark', `(${tx}, ${ty})`));
+        // 同缺陷族（红蓝-D 顺带）：Mark/Unmark zh 模板「已在 ({0}) 标记」亦自带括号
+        // ——一并去参括号走单源（zh 曾渲染「已在 ((x, y)) 标记」）
+        this.cb.onToast(existed ? Lang.text('Mods.SandboxWorld.Map.Unmark', tpMarkCoordText(tx, ty)) : Lang.text('Mods.SandboxWorld.Map.Mark', tpMarkCoordText(tx, ty)));
         (window as unknown as { __swUI?: { updateAnnotateCount: (n: number) => void } }).__swUI?.updateAnnotateCount(this.marks.length);
       }
     }
@@ -9566,7 +9586,12 @@ export class Game implements GameHooks {
     const heldWC = !!held2 && viIdFromKey(ITEM_DEFS[held2.id]?.key ?? '') === 148;
     this.heldWaterCandle = heldWC;
     this.heldShadowCandle = !!held2 && viIdFromKey(ITEM_DEFS[held2.id]?.key ?? '') === 5322;
-    if (this.tickCount % 15 === 0) this.boundTouchCheck();   // 绑缚触碰解救（AI_007 接触语义）
+    // ---- 场景物件扫描（原版 SceneMetrics.Scan:Player.UpdateSceneMetrics 以
+    // ★BJ124-①（2026-09-18 用户拍板方案 A）：触碰解救臂（原 boundTouchCheck 每 15t
+    //   玩家 AABB 相交即 freeBoundNpc）整摘——原版解救唯一触发源=talk 交互
+    //   （Main.cs:43781 名单 + :43805-43812 SetTalkNPC → 下一拍 AI_000_TransformBoundNPC
+    //   NPC.cs:19874-19912），无"接触即转正"路径；talk 面在 talkToNearbyNpc bound 支
+    // （spawn-parity-gaps.md 触碰近似登记已同步销账）
     // ---- 场景物件扫描（原版 SceneMetrics.Scan:Player.UpdateSceneMetrics 以
     //      BiomeScanCenter=玩家心 → CenteredRectangle(ZoneScanSize) 【逐格】;
     //      ZoneScanSize=(1920/16+25×2−1, 1200/16+25×2−1)=169×124 格=±84/±62
@@ -22385,8 +22410,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 蜂巢结构破坏（CheckSuper flag3 :48639-48697 wipe + 655 弹 :48753-48755 +
    *  弹亡奏 :76611-76660）：2×2 整件清;干巢（!flag6）→ 巢心蜂群等效（655 弹实体
    *  未建——31px 弹跳相位 cosmetic,初速 0 落巢心,弹亡 2-5 只蜂 210/211 ±0.4 初速
-   *  + SoundID 4 挖掘音 + 147 蜂蜜尘）;湿巢（占位任一格液体>0）→ 原版不生成 655,
-   *  仅整件清除。随机口径同 breakHive */
+   *  + SoundID 4（legacy 4=NPCKilled,见下注）+ 147 蜂蜜尘）;湿巢（占位任一格液体>0）
+   *  → 原版不生成 655,仅整件清除。随机口径同 breakHive。
+   *  ★g6 红蓝-F④（2026-09-18）：本臂普查出两处 1:1 残留已顺手合流——①初速连续式
+   *  (r−0.5)×0.8 → 原版弹臂离散 401 档 Next(-200,201)×0.002（Projectile.cs:76650-76651,
+   *  与 tile 臂 WorldGen.cs:66004-66005 同式）;②中心锚 → anchorBeeBottom Bottom 契约
+   *  （NPC.cs:81594,弹心=巢心等效）——回归 tests/redblue-f-g6-beehive-bomb-arm.test.ts。
+   *  ★幻影家族债维持登记（红蓝-C ②）：本臂【无】beeSpawnAuthority 门（原版弹亡奏
+   *  整臂在 Main.netMode!=1 门内 :76637）——缺门在前,门后此臂仅权威端触发;两处
+   *  1:1 残留与门独立故先行落刀。登记处 tests/redblue-c-hive-bee-netmode-gate.test.ts */
   private breakBeeHive(x: number, y: number) {
     const st = this.world.store;
     const hive = TILE_BY_KEY['v_444_bee_hive']!;
@@ -22422,8 +22454,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let k = 0; k < bees; k++) {
         const bee = Enemy.fromVanilla(Math.random() < 0.5 ? 210 : 211, cx, cy);
         if (!bee) continue;
-        bee.vx = (Math.random() - 0.5) * 0.8;
-        bee.vy = (Math.random() - 0.5) * 0.8;
+        // ★g6 红蓝-F④（2026-09-18）：原版弹臂（:76648-76651）=NewNPC(弹心.X,弹心.Y)
+        //  → Bottom=(X,Y)（NPC.cs:81594）+初速 Next(-200,201)×0.002 离散 401 档
+        //  ——曾连续式 (r−0.5)×0.8+中心锚（与 tile 臂 breakHive 已修同款残留）
+        anchorBeeBottom(bee, cy, { next: Math.random });
         bee.id = this.entities.nextId++;
         this.entities.add(bee, 'enemies');
       }
@@ -23976,14 +24010,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** ★BJ121（2026-09-18）：WorldGen.CanCutTile（WorldGen.cs:88111-88125,1458 :88109 同文
-   *  diff=same）放置语境 1:1——南瓜 254 重复放置门（Player.cs:41682-41697）逐格谓词。
+  /** ★BJ121（2026-09-18）：WorldGen.CanCutTile（WorldGen.cs:88111-88125,1458 :88119 同文
+   *  diff=same）放置语境 1:1——南瓜 254 重复放置门（Player.cs:41682-41698）逐格谓词。
    *  context 参（TileCuttingContext）原版体内未读=两语境同判,不建模。
    *  语义：(x,y) 处植株可否收割——①下方格存在（原版 Main.tile[y+1]!=null=界内,
    *  越界→null→false）②自身格墙≠350 UnbreakableBlockWall（WallID.cs:769）
    *  ③下方格型∉{78 陶盆 TileID.cs:593/380 种植箱 :1197/579 石魔头 :1595}
    *  （裸 type 直读含非活格=原版 .type 同口径）④自身=254 时 frameX≥144（成熟档,
-   *  GrowPumpkin WorldGen.cs:52997 frameX+=36 逐级 {0,18}=新植 stage0→{144,162}=
+   *  GrowPumpkin WorldGen.cs:52950,frameX+=36 :53006 逐级 {0,18}=新植 stage0→{144,162}=
    *  stage4;原版本相=仅成熟株可被"换植"吞位,与 CanCutTile 收割判据共用同一帧域）。
    *  空格（type 0）恒过=原版同（air 不触 254 支）。 */
   private canCutTilePlacement(st: TileStore, x: number, y: number): boolean {
@@ -24871,6 +24905,53 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const pgId = TILE_BY_KEY['v_454_pigronata'];
       for (let dx = 0; dx < 4; dx++) {
         if (st.inBounds(tx + dx, ty) && st.hasTile(tx + dx, ty) && st.get(tx + dx, ty) === pgId) return;
+      }
+    }
+    // ★BJ121（2026-09-18）Repeated* 门三件族补位（调用点 Player.cs:40090-40093——
+    //  OverPlayers :40089 之后 Pigronata :40090→Pumpkins :40091→Coral :40092→
+    //  RainbowBoulders :40093,四门纯谓词序无关;1458 :40088-40091 同文。函数体
+    //  1457 :41682-41745,1458 :41680-41743 逐字同 diff=same）。三件扫描域×谓词
+    //  互不同构 → 逐件内联 1:1,不抽单源 helper（判据见各件注）。
+    //  ①南瓜种子 254（PlaceThing_Tiles_BlockPlacementForRepeatedPumpkins :41682-41698）：
+    //   tileCut[254]=true（Main.cs:10385）→ CanPlace 占位门对旧南瓜株豁免+清格相吞株。
+    //   门=点击格 2×2（i=-1..0,j=0..1）逐格 !CanCutTile → 拒。Origin(0,1)=Style2x2 基底
+    //   （TileObjectData.cs:3454,addBaseTile :3461）⇒ tileTarget=物件左下 → 扫描区=整幅足印
+    //   (tx..tx+1, ty..ty+1)。语义=未成熟株/陶盆种植箱石魔头域上不可整株换植;
+    //   成熟株（frameX≥144）可换植=收割态补位本相。
+    if (anchorCovered && def.vanilla?.sheet === 254) {
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          if (!this.canCutTilePlacement(st, tx + dx, ty + dy)) return;
+        }
+      }
+    }
+    // ②珊瑚 81/贝壳沙滩堆 324（PlaceThing_Tiles_BlockPlacementForRepeatedCoralAndBeachPiles
+    //  :41719-41729)：data.type∈{81,324} → 点击格（1×1 Origin(0,0)=目标格,不吸附
+    //  ——multiAnchor 门不触发,tx,ty=原版 tileTarget 同域）active 且 ∈ tileCut∪
+    //  BreakableWhenPlacing∪IsADripTile（TileID.cs:383 含 81/324;:157={373,374,375,
+    //  461,709}）→ 拒。两件均 BreakableWhenPlacing 族 → 裸 CanPlace 对旧珊瑚/贝堆
+    //  豁免=原地无限补位/吞植物,本门补位=目标格须空。谓词=裸 tileCut（无 CanPlace
+    //  :357 的 484/654 排除——那是占用门特例,非本门谓词）。
+    if (def.vanilla?.sheet === 81 || def.vanilla?.sheet === 324) {
+      if (st.hasTile(tx, ty)) {
+        const repId = st.get(tx, ty);
+        const repSheet = TILE_DEFS[repId]?.vanilla?.sheet ?? -1;
+        if (TILE_CUT.has(repId) || TILE_BREAK_WHEN_PLACING.has(repId) || ADRIP_TILE_SHEETS.has(repSheet)) return;
+      }
+    }
+    // ③彩虹巨石 711（PlaceThing_Tiles_BlockPlacementForRepeatedRainbowBoulders
+    //  :41700-41717）：tileCut[711]=true（Main.cs:7606）+ 色相=frameX 带（RandomStyleRange 6,
+    //  BJ64b 色相掷同源）→ 裸 CanPlace 对旧巨石豁免=原地重掷色相/清格吞件,本门补位。
+    //  门=点击格起 (i=0..1, j=0..1) → (tx..tx+1, ty+1..ty+2)=足印【底行】+底下锚行
+    //  （Origin(0,1) ⇒ tileTarget=左下;足印顶行不在扫描域=原版本相 quirk 照抄——
+    //  上提一格重叠不拦,重叠格走清格相 KillTile）。任一 active 711 → 拒。
+    if (anchorCovered && def.vanilla?.sheet === 711) {
+      const rbId = TILE_BY_KEY['v_711_rainbow_boulder'];
+      for (let dy = 1; dy <= 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          if (st.inBounds(tx + dx, ty + dy) && st.hasTile(tx + dx, ty + dy)
+            && st.get(tx + dx, ty + dy) === rbId) return;
+        }
       }
     }
     // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
@@ -34060,24 +34141,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return this.runQuickFindHome(n, oldHome.x, oldHome.y);
   }
 
-  /** 绑缚 NPC 触碰解救（★SW-BJ31 2026-09-08 注释勘误+近似登记：1457 原版解救唯一
-   *  路径 = 玩家 talkNPC（AI() aiStyle0 头 NPC.cs:19885-19909
-   *  AI_000_TransformBoundNPC :45371），【无】"玩家接触即转正"路径——旧注"原版
-   *  AI_007 玩家接触 bound → 转正"系误锚。触碰解救为本仓近似（UX 便捷,含 534
-   *  税务官净化粉例外 NPC.cs:13651-13655 同位），行为面差异已登记
-   *  spawn-parity-gaps.md；右键对话解救 talkToNearbyNpc 与原版 talkNPC 同义 */
-  private boundTouchCheck(): void {
-    const p = this.player;
-    if (p.dead) return;
-    for (const n of this.entities.npcs) {
-      const npc = n as TownNPC;
-      if (!(npc instanceof TownNPC) || npc.dead || !npc.bound) continue;
-      if (npc.npcKey === 'tax_collector') continue;   // 原版 534 只吃净化粉
-      if (p.x < npc.x + npc.w && p.x + p.w > npc.x && p.y < npc.y + npc.h && p.y + p.h > npc.y) {
-        this.freeBoundNpc(npc);
-      }
-    }
-  }
+  /** ★BJ124-①（2026-09-18 用户拍板方案 A）：绑缚触碰解救臂（boundTouchCheck）已整摘。
+   *  原版解救唯一路径 = 玩家 talkNPC（AI() aiStyle0 头 NPC.cs:19874-19912
+   *  AI_000_TransformBoundNPC :45371），无"玩家接触即转正"路径——本仓触碰近似
+   *  （spawn-parity-gaps.md 登记）随方案 A 拍板退役；解救触发源=talkToNearbyNpc
+   *  bound 支（Main.cs:43781 名单 + :43805-43812 SetTalkNPC 同义）。 */
 
   /** 敌怪桶 bound 形态 NPC → 对应城镇 NPC key（原版 AI_000 talkNPC 触发的
  *  Transform 表 NPC.cs:19874-19912（表体 :19885-19909）：589→588/105→107/106→108/
@@ -34270,8 +34338,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 右键解救 + 一体对话（★BJ117-②：原版 talk→AI_000_TransformBoundNPC
         // :19874-19912/:45371 同拍 SetTalkNPC,解救即开对话——旧仓"解救后需再右键
         // 才开对话"=BJ31 族债收口）。首台词=换型前 bound 型 GetChat（boundWakeChat
-        // 表）;685/534 原版无对话（抖箱支/净化粉链）→ null 仅解救。触碰解救
-        // （boundTouchCheck）保留 = 登记 UX 近似（spawn-parity-gaps.md）,不经对话
+        // 表）;685 抖箱支原版无 SetTalkNPC（Main.cs:43759-43772）→ null 仅解救。
+        // ★BJ124-①（2026-09-18 用户拍板方案 A）：解救唯一触发源=本 talk 交互
+        // （触碰臂 boundTouchCheck 已整摘）;534 税务官不在 :43781 交互名单——
+        // 唯净化粉链（Projectile.cs:14794-14810）,此处跳过保"唯一触发"不变量
+        if (npc.npcKey === 'tax_collector') continue;   // 原版 534 只吃净化粉（Projectile.cs:14797）
         this.freeBoundNpc(npc);
         const wake = this.boundWakeChat(npc.npcKey);
         if (wake) this.openNpcDialog(npc, wake);
@@ -34303,8 +34374,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (flag) this.world.flags[flag] = true;
     const name = Lang.npcName(npc.vanillaId) ?? key;
     this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
-    this.spawnParticles(npc.cx, npc.cy, '#9AE85A', 14, 2);
-    this.playSfxFiles(['NPC_Hit_1'], 0.6);
+    // ★BJ124-②（2026-09-18）：自创解救音尘摘除——376→369/579→550 同不在
+    // TransformVisuals 配对表（NPC.cs:81788-81851）=解救面零音零尘;开话音=
+    // openNpcDialog 的 chat（SoundID 24,Main.cs:43812 同位）原版本相保留
     // SetTalkNPC（:45229）：对话面板打开（bestiary registerChat/快乐度快照在
     // openNpcDialog 内，与 :45227 RegisterChatStartWith 同链）
     this.openNpcDialog(npc, wakeChat ?? undefined);
@@ -34877,8 +34949,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** bound TownNPC npcKey → 绑缚态原版 NPC id（本仓 bound 近似的反查表）：
    *  105 BoundGoblin（NPCID.cs:11275）/ 106 BoundWizard(:11277)/ 123 BoundMechanic /
-   *  354 WebbedStylist / 589 GolferRescue / 534 DemonTaxCollector（酷刑者）/
-   *  685 BoundTownSlimeOld(:12435)。trySpawnEnemy 把 bound TownNPC 登记进 activeIds，
+   *  354 WebbedStylist / 589 GolferRescue / 534 DemonTaxCollector（=痛苦亡魂
+   *  Tortured Soul,SetDefaults :15841 aiStyle 3 非 townNPC/非 friendly,rarity=2
+   *  :15855——原版不入档,唯净化粉链 Transform 441）/ 685 BoundTownSlimeOld(:12435)。
+   *  trySpawnEnemy 把 bound TownNPC 登记进 activeIds，
    *  使 SpawnAnNPC 各被缚支的 !AnyNPCs(id) 场上唯一门成立 */
   private static readonly BOUND_TOWN_NPC_ID: Record<string, number> = {
     goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354,
@@ -34887,6 +34961,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     angler: 376,       // 旧档兜底：睡渔夫已改放真 Enemy 376（placeSleepingAngler），
                        // 历史存档可能带 bound TownNPC 'angler'——登记使 any(376) 场上唯一门仍闭合
   };
+
+  /** 绑缚本体 id 投影（★红蓝-H② 2026-09-18）：bound TownNPC 的 vanillaId 携
+   *  【城镇】id（TownNPC ctor TOWN_NPC_IDS[key].id）,而原版被缚族=独立【非
+   *  townNPC】型（NPCID.Sets.BoundTownNPCs,全员 rarity>0——105/106/123/354/376/
+   *  579/589=1、534 痛苦亡魂/685/686/687=2,SetDefaults :10283/:10297/:10534/
+   *  :13543/:13837/:16595/:16692/:15855/:17653/:17667/:17680）,城镇型全员
+   *  rarity=0 → 分析仪 npc.rarity（Main.cs:47777 读实体型）必须以本体 id 判别。
+   *  非 bound / 无映射键 → 原样城镇 id（城镇型 rarity=0=原版同相不显）。
+   *  显示名同域：本体 id → Lang.npcName("受缚哥布林"/"痛苦亡魂"…,NPCName.* 齐);
+   *  givenName 由调用侧压制（被缚者原版无名,ctor 预派名=解救后名）。公开
+   *  static 单源——Game.tickInfoAccs 投影与测试共用,防测试喂幻影域（红蓝-H②）。 */
+  static boundAnalyzerVid(n: { bound?: boolean; npcKey: string; vanillaId: number | null }): number | null {
+    if (!n.bound || n.vanillaId == null) return n.vanillaId;
+    return Game.BOUND_TOWN_NPC_ID[n.npcKey] ?? n.vanillaId;
+  }
 
   /** NPCID.Sets.BoundTownNPCs（1457 NPC.cs 权威集 {105,123,106,685,686,687,354,376,579,589}）
    *  ——1457 砍价成就门（Player.cs:4376）消费 */
@@ -36440,8 +36529,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★SW-BJ73 2026-09-14 孢子蝙蝠定谳:旧谓词读 def.lifeMax(EnemyDef 无此字段,
     // 实为 def.hp)→ 恒假,雷达对一切敌怪恒 0——孢子蝙蝠 634 实报即此总漏检面;
     // 且 dontCountMe 1456 旧 10 id 表缺 1457 新增 23 蠕虫段/Boss 部件 id)
+    // ★红蓝-H② 2026-09-18：npcs 桶过 boundAnalyzerVid 投影——bound 实体携城镇
+    //  id,rarity/显示名须按绑缚本体 id 判别（详见 boundAnalyzerVid 头注）;
+    //  givenName 同步压制（被缚者原版无名——GivenOrTypeName :47796 落到本体型名,
+    //  ctor 预派名是解救后名,不属被缚态）。非 bound 原样透传（零改动路径）。
     r.infoAccs.tick(p, this.entities.enemies as never, this.entities.critters as never,
-      this.entities.npcs as never,
+      this.entities.npcs.map((n) => {
+        const e = n as TownNPC;
+        const bid = Game.boundAnalyzerVid(e);
+        return bid === e.vanillaId ? e
+          : { dead: e.dead, cx: e.cx, cy: e.cy, vanillaId: bid };
+      }) as never,
       p.cx, p.cy,
       (e) => radarCountsEnemy(e as unknown as { vanillaId: number | null; def?: { friendly?: boolean; damage?: number; hp?: number } }),
       (vid) => npcRarityOf(vid as number | null),
@@ -42644,16 +42742,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  {422,507,517,493};被缚族（BOUND_TOWN_NPC_VANILLA=vanilla
     //  NPCID.Sets.BoundTownNPCs{105,123,106,685,686,687,354,376,579,589}）均非
     //  townNPC → 存档/读档=消失,重进世界由 spawner 重刷（重刷链 VanillaSpawner
-    //  :2362/:2366/:2370/:2100/:2122/:2661）。534 税务官是 vanilla townNPC
-    //  （不在该集）照常入档。旧档已入档的 bound 条目读档后自然消散+不再回写。
-    //  ★判别键：bound TownNPC 的 vanillaId 携【城镇】id（wizard=108/town_slime_old
-    //  =679…）,绑缚本体 id 须经 BOUND_TOWN_NPC_ID[npcKey] 反查（BJ122 二修）
+    //  :2362/:2366/:2370/:2100/:2122/:2661）。
+    //  ★红蓝-H③ 2026-09-18 勘误+回写闭合：旧注「534 税务官是 vanilla townNPC
+    //  照常入档」与反编译相悖——534=痛苦亡魂（Tortured Soul）,SetDefaults :15841
+    //  aiStyle 3,无 townNPC/friendly（lavaImmune/netAlways 的地狱恶魔型）,原版
+    //  同不入档;获救态=Transform 441（:14732 townNPC=true）,那是另一型。旧实现
+    //  按「boundVid∈BoundTownNPCs 才滤」放行 534∉该集的 bound tax_collector
+    //  → 旧档已入档条目读档→在场→再入档,自愈不闭合。今改判据为最小全集：
+    //  **bound 一律不入档**（vanilla 语义=只写 townNPC;被缚态恒非 townNPC 型,
+    //  亦封无 BOUND_TOWN_NPC_ID 映射键的同族洞）,获救态（bound=false）照常。
+    //  判别键注：bound TownNPC 的 vanillaId 携【城镇】id（wizard=108/town_slime_old
+    //  =679…）,绑缚本体 id 走 Game.boundAnalyzerVid 反查（红蓝-H②刀）。
     return this.entities.npcs
       .filter((n): n is TownNPC => {
         if (!(n instanceof TownNPC) || n.dead) return false;
-        if (!n.bound) return true;
-        const boundVid = Game.BOUND_TOWN_NPC_ID[n.npcKey];
-        return boundVid === undefined || !Game.BOUND_TOWN_NPC_VANILLA.has(boundVid);
+        return !n.bound;
       })
       .map((n) => ({
         key: n.npcKey,
@@ -46088,7 +46191,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
       // 属 SpawnOnPlayer 内部逻辑，随寻点近似登记）；双子 126 仍随 125 落点
       // （原版 :43128-43133 是两次独立 SpawnOnPlayer(125)/(126)，本仓单寻点 +
       // 旁置 4 列近似，保留）；毁灭者 556 物品路径用寻点原值——无地下 Y 覆写
-      // （地下落位是自然生成路径 SpawnNPC 语义，onPlayerTy 传入时跳过）
+      // （地下 Y 覆写=本仓自然档 2026-08-18 的已登记刻意偏差,非原版语义——1457
+      //  自然生成路径=机械三王随机夜袭 Main.cs:66281-66304 置 spawnHardBoss →
+      //  :66080 SpawnOnPlayer(134) 近玩家寻点无地下落位;g4 红蓝-F②勘正
+      //  2026-09-18,与 tests/bj114c-destroyer-summon-natural-gate.test.ts 头注
+      //  一致;onPlayerTy 传入时跳过）
       const pt = this.findOffscreenSpawnPoint();
       if (!pt) return false;   // 500×50 穷尽未得落点 = 静默失败（:81451）——本仓契约=不消耗（登记,原版物品已耗）
       return this.summonBossAtTx(key, pt.tx, opts.roar ?? true, pt.ty);
@@ -46224,7 +46331,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
           }
         }
         if (vanillaId === 134 && onPlayerTy === undefined) {
-          // 毁灭者:地下落位(原版 SpawnNPC 自然生成走地下;80 段链由 destroyerAI 首帧补)。
+          // 毁灭者:地下落位（★g4 红蓝-F②勘正 2026-09-18:旧注「原版 SpawnNPC 自然生成
+          //  走地下」为 1457 假命题——自然路径=机械三王随机夜袭 Main.cs:66281-66304 置
+          //  spawnHardBoss → :66080 SpawnOnPlayer(134) 近玩家寻点,无地下落位;地下 Y
+          //  覆写=本仓自然档已登记刻意偏差,与 bj114c 头注一致。80 段链由 destroyerAI
+          //  首帧补）。
           // 物品路径（onPlayerTy 直传）不覆写——原版 556 → SpawnOnPlayer(134)（Player.cs
           // :43140-43152）用寻点原值，无地下特例（2026-08-18 迁移）
           head.y = Math.min(st.h - 10, Math.floor(this.world.rockLevel) + 30) * TILE;

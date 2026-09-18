@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, realpathSync, mkdirSync, copyFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -15,6 +15,12 @@ import { tmpdir } from 'node:os';
 // 实证 1456 重产 missing=50/49）+ --force-full --overwrite-append-era 双旗逃生 +
 // SW_ITEMRARE_JSON/SW_ITEMVALUE_JSON/SW_OUT 注入面。守卫测试习语 =
 // extract-npcs-era-guard.test.ts。
+//
+// ★g1 footgun 硬化测试（2026-09-18，红蓝-F①）：探测 env 设置而 SW_OUT 缺省 → 拒跑
+// exit 1（fail-closed——守卫探测将读夹具零缺失放行，写盘却落缺省 OUT_DIR=现库
+// game/src/data=绕守卫洗库）；同场景 + 显式 SW_OUT → 放行（写盘落 SW_OUT）；
+// 变异=摘硬化 → 探测夹具+缺 SW_OUT 下写盘落「缺省现库」路径（变异里把缺省
+// OUT_DIR 换成沙箱假现库=真现库副本种子）复现 6147-6195 被洗，真现库零接触。
 
 const SCRIPT = join(process.cwd(), 'tools', 'extract-itemrare.mjs');
 const LIVE_RARE = join(process.cwd(), 'src', 'data', 'vanilla-itemrare.json');
@@ -190,6 +196,102 @@ describe('extract-itemrare 追加时代守卫（缺键型增量拦截面）', ()
       const written = JSON.parse(readFileSync(join(dir, 'vanilla-itemrare.json'), 'utf8')) as Record<string, number>;
       expect(written['6147']).toBeUndefined();                  // 1457 新物品段被静默洗掉=事故重演
       expect(md5(LIVE_RARE)).toBe(beforeR);                     // 注入面隔离,现库零接触
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★g1 footgun 硬化（红蓝-F①,2026-09-18）：探测 env 设置而 SW_OUT 缺省 → fail-closed
+  //  拒跑 exit 1。定谳:守卫探测将读夹具（零缺失→放行）而写盘落缺省 OUT_DIR=现库
+  //  game/src/data——探测与写盘分离=守卫被绕过洗库。拒绝路径现库字节零改动。
+  it('行为面:探测 env 设置而 SW_OUT 缺省 → 拒跑 exit 1（footgun fail-closed）,现库字节零改动', () => {
+    const dir = mkdtempSync(join(TMP, 'itemrare-guard-'));
+    const rareF = join(dir, 'rare.json');
+    const valueF = join(dir, 'value.json');
+    writeFileSync(rareF, CLEAN_RARE);
+    writeFileSync(valueF, CLEAN_VALUE);
+    const beforeR = md5(LIVE_RARE);
+    const beforeV = md5(LIVE_VALUE);
+    try {
+      const env: Record<string, string | undefined> = {
+        ...process.env, SW_ITEMRARE_JSON: rareF, SW_ITEMVALUE_JSON: valueF,
+      };
+      delete env.SW_OUT;   // footgun 场景=写盘路径缺省（显式剥除防运行环境污染）
+      const r = spawnSync('node', [SCRIPT], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: env as NodeJS.ProcessEnv,
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('SW_OUT 缺省');
+      expect(r.stderr).toContain('fail-closed');
+      expect(r.stderr).toContain('探测注入面');
+      expect(r.stderr).toContain('--dump 对账通道不写盘不受此限');   // dump 通道豁免指引在位
+      expect(md5(LIVE_RARE)).toBe(beforeR);                      // 拒绝路径零写盘
+      expect(md5(LIVE_VALUE)).toBe(beforeV);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('行为面:同 footgun 场景 + 显式 SW_OUT → 放行（写盘落 SW_OUT）,现库零接触', () => {
+    const dir = mkdtempSync(join(TMP, 'itemrare-guard-'));
+    const rareF = join(dir, 'rare.json');
+    const valueF = join(dir, 'value.json');
+    writeFileSync(rareF, CLEAN_RARE);
+    writeFileSync(valueF, CLEAN_VALUE);
+    const beforeR = md5(LIVE_RARE);
+    const beforeV = md5(LIVE_VALUE);
+    try {
+      const r = spawnSync('node', [SCRIPT], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
+        env: { ...process.env, SW_ITEMRARE_JSON: rareF, SW_ITEMVALUE_JSON: valueF, SW_OUT: dir },
+      });
+      expect(r.status).toBe(0);                                  // 硬化只拦 SW_OUT 缺省
+      const written = JSON.parse(readFileSync(join(dir, 'vanilla-itemrare.json'), 'utf8')) as Record<string, number>;
+      expect(Object.keys(written).length).toBeGreaterThan(3000); // 全量重算产物落显式 SW_OUT
+      expect(md5(LIVE_RARE)).toBe(beforeR);
+      expect(md5(LIVE_VALUE)).toBe(beforeV);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // ★变异（判别力）:摘 footgun 硬化 → 探测夹具（零缺失）+缺 SW_OUT 下守卫被绕过,
+  //  写盘落缺省「现库」路径=footgun 复现。变异里把缺省 OUT_DIR 换成沙箱假现库
+  //  （种子=真现库副本,含 6147-6195 增量）——1456 重产洗掉 6147=洗库物证;真现库零接触。
+  it('变异:摘 footgun 硬化后探测夹具+缺 SW_OUT 写盘落缺省现库路径（6147 被洗=footgun 复现）', () => {
+    const dir = mkdtempSync(join(TMP, 'itemrare-guard-'));
+    const fakeLive = join(dir, 'live');
+    mkdirSync(fakeLive, { recursive: true });
+    copyFileSync(LIVE_RARE, join(fakeLive, 'vanilla-itemrare.json'));    // 假现库=真现库副本
+    copyFileSync(LIVE_VALUE, join(fakeLive, 'vanilla-itemvalue.json'));
+    const rareF = join(dir, 'rare.json');
+    const valueF = join(dir, 'value.json');
+    writeFileSync(rareF, CLEAN_RARE);
+    writeFileSync(valueF, CLEAN_VALUE);
+    const src = readFileSync(SCRIPT, 'utf8');
+    const TRIGGER = 'const PROBE_ENV_SET = process.env.SW_ITEMRARE_JSON !== undefined || process.env.SW_ITEMVALUE_JSON !== undefined;';
+    const OUT_LINE = 'const OUT_DIR = process.env.SW_OUT ?? `${ROOT}/game/src/data`;';
+    expect(src).toContain(TRIGGER);
+    expect(src).toContain(OUT_LINE);
+    const mutant = join(dir, 'extract-itemrare-mutant.mjs');
+    writeFileSync(mutant, src
+      .replace(TRIGGER, 'const PROBE_ENV_SET = false; // ★变异:footgun 硬化摘除')
+      .replace(OUT_LINE, 'const OUT_DIR = process.env.SW_MUTANT_FAKE_LIVE;'));
+    const beforeR = md5(LIVE_RARE);
+    const beforeV = md5(LIVE_VALUE);
+    try {
+      const env: Record<string, string | undefined> = {
+        ...process.env, SW_ITEMRARE_JSON: rareF, SW_ITEMVALUE_JSON: valueF, SW_MUTANT_FAKE_LIVE: fakeLive,
+      };
+      delete env.SW_OUT;
+      const r = spawnSync('node', [mutant], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: env as NodeJS.ProcessEnv,
+      });
+      expect(r.status).toBe(0);                                 // 硬化摘除 → footgun 放行
+      const washed = JSON.parse(readFileSync(join(fakeLive, 'vanilla-itemrare.json'), 'utf8')) as Record<string, number>;
+      expect(washed['6147']).toBeUndefined();                   // 假现库被 1456 重产洗掉增量=洗库复现
+      expect(md5(LIVE_RARE)).toBe(beforeR);                     // 真现库零接触（OUT_DIR 已换沙箱）
+      expect(md5(LIVE_VALUE)).toBe(beforeV);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

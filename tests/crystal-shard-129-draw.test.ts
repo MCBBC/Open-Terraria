@@ -9,7 +9,7 @@
 //     （row+2 侧向簇带 → row+4/6 辉光带（小簇=透明格整块消失/大簇=圆斑「方块」）→
 //     越界回退 (0,0) 平铺第一格）；横向钟 animRot()（tick/6）与原版 8tick 相位率差 33%。
 //   · 数据面：PlaceTile case 129（cs:60171-60180）只写 frameX，frameY 由 TileFrameImportant
-//     case 129（cs:85727-85752）→ CheckAndAdjustMultiDirectionalTile（cs:60805-60855，
+//     case 129（cs:86339-86369）→ CheckAndAdjustMultiDirectionalTile（cs:60805-60855，
 //     锚向优先 下>左>右>上 → frameY 0/54/36/18）落定；锚=ValidAnchorForMultiDirectionalTile
 //     （cs:60788-60803：非 Boulders(:195)/非关门 10，按向 SolidTileAllow*Slope）且锚型
 //     tileSolid && !tileSolidTop。掉落面：KillTile_GetItemDrops case 129（cs:65496-65504）
@@ -26,13 +26,14 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { WorldEvolution, type EvolutionHost } from '../src/world/evolution/WorldEvolution';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_DEFS } from '../src/data/tiles';
+import { holidayLightVid, styleDropVidOfFrames } from '../src/data/vanillaStyleDrops';
 import { RNG } from '../src/core/rng';
 import {
   animYOffset, crystalShardAddFrX, tileAnim,
   TILE_ANIM_PITCH, TILE_ANIM_RATE, TILE_ANIM_FRAMES, volcanoFrame59x,
 } from '../src/render/TileAnim';
 import {
-  SHARD_BASE_ALPHA, shardGlowTint, shardHslToRgb, drawAdjust,
+  SHARD_BASE_ALPHA, shardGlowTint, shardHslToRgb, drawAdjust, drawShardCell,
 } from '../src/render/VanillaTiler';
 import { genTileFrame } from '../src/world/gen/vanilla/FinalCleanupPass';
 
@@ -160,7 +161,7 @@ describe('★G-129 数据面：生长落向=CheckAndAdjust 优先向（下>左>�
 });
 
 // ============================================================ 运行时 TileFrame 面（M4/M5）
-describe('★G-129 运行时面：锚亡杀+掉落（TileFrameImportant case 129 cs:85727-85752）', () => {
+describe('★G-129 运行时面：锚亡杀+掉落（TileFrameImportant case 129 cs:86339-86369）', () => {
   it('M4/M5：锚块被挖 → 碎块级联清除并掉 502（普通簇）', () => {
     const st = new TileStore(40, 80);
     st.setTileSilent(6, 60, S(117), 0, 0);           // 锚（右侧）
@@ -186,7 +187,7 @@ describe('★G-129 运行时面：锚亡杀+掉落（TileFrameImportant case 129
     expect(drops.filter((d) => d.vid === 502)).toHaveLength(0);
   });
 
-  it('重锚支：锚仍在 → 按优先向重落 frameY（原版无条件写,cs:85739-85750）', () => {
+  it('重锚支：锚仍在 → 按优先向重落 frameY（原版无条件写,cs:86347-86362）', () => {
     const st = new TileStore(40, 80);
     st.setTileSilent(5, 60, S(117), 0, 0);           // 右锚
     st.setTileSilent(4, 61, S(117), 0, 0);           // 下锚（优先级更高）
@@ -395,5 +396,149 @@ describe('★BJ118③ FinalCleanup frame129Sweep 帧向重落（WorldGen.cs:8633
     st.setTileSilent(10, 30, S(129), 0, 0);
     sweepAt(st, 10, 30);
     expect(st.type[st.idx(10, 30)]).toBe(0);
+  });
+});
+
+// ============================================================ ★红蓝-G① 节日彩灯 149 掉落面（2026-09-18）
+// 定谳：vanilla KillTile case 149（WorldGen.cs:66036-46）frameX∈{0,54}→596（Blue Light）/
+// {18,72}→597（Green）/{36,90}→598（Red）;本仓 killDropFace 曾整缺该 case → 演化级联杀
+// （锚亡/失撑链 killFlat 路径）拆彩灯零掉落（G-129 已给 149 三处锚定臂但掉落面漏配）。
+// 玩家挖除面本就经 styleDropVidOfFrames→holidayLightVid（style-drop-restore.test 锁值）,
+// 本域现同源 holidayLightVid 单源接入。修复映射（KillTile 默认参=带掉落两路）：
+//   ML1 摘 killDropFace case 149            → T-149a/b/c 红（三色掉落整缺）
+//   ML2 killDropFace 内错档（fx=0→597）      → T-149a 红（域内错色;holidayLightVid
+//                                              单源未动,style-drop-restore 仍绿=判别面独立）
+//   ML3 通道2 摘 styleDropVidOfFrames 149 门 → T-149c 红（双通道对拍断言;★红蓝-J2
+//                                              补口 2026-09-18,通道1/2 同走单源）
+describe('★红蓝-G① 彩灯掉落面：killDropFace case 149 三色帧域（cs:66036-46）', () => {
+  const CASES: Array<[number, number]> = [
+    [0, 596], [54, 596],      // 蓝灯正/反向带
+    [18, 597], [72, 597],     // 绿灯正/反向带
+    [36, 598], [90, 598],     // 红灯正/反向带
+  ];
+
+  it('T-149a：直接拆除（kill 默认参）六帧域三色逐档 1:1', () => {
+    for (const [fx, vid] of CASES) {
+      const st = new TileStore(40, 80);
+      st.setTileSilent(8, 60, S(149), fx, 0);
+      const drops: DropRec[] = [];
+      const evo = mkEvo(st, 7, drops);
+      invoke(evo, 'kill', 8, 60);
+      expect(st.type[st.idx(8, 60)]).toBe(0);
+      const got = drops.filter((d) => d.vid > 0);
+      expect(got).toHaveLength(1);
+      expect(got[0]).toMatchObject({ vid, x: 8, y: 60, stack: 1 });
+    }
+  });
+
+  it('T-149b：锚亡级联（killFlat 路径）三色各掉本档', () => {
+    for (const [fx, vid] of CASES) {
+      const st = new TileStore(40, 80);
+      st.setTileSilent(6, 60, S(117), 0, 0);           // 锚（右侧,ValidAnchor 域）
+      st.setTileSilent(5, 60, S(149), fx, 36);         // 彩灯右锚左伸向
+      const drops: DropRec[] = [];
+      const evo = mkEvo(st, 7, drops);
+      invoke(evo, 'kill', 6, 60);                      // 挖锚 → 级联
+      expect(st.type[st.idx(5, 60)]).toBe(0);          // 彩灯随锚清除
+      expect(drops.filter((d) => d.vid === vid)).toHaveLength(1);
+      expect(drops.filter((d) => d.vid > 0 && d.vid !== vid)).toHaveLength(0);
+    }
+  });
+
+  it('T-149c：单源对拍+域外不掉——killDropFace ≡ styleDropVidOfFrames ≡ holidayLightVid（fx 0..108 全域扫）', () => {
+    for (let fx = 0; fx <= 108; fx++) {
+      const st = new TileStore(40, 80);
+      st.setTileSilent(8, 60, S(149), fx, 0);
+      const drops: DropRec[] = [];
+      const evo = mkEvo(st, 7, drops);
+      invoke(evo, 'kill', 8, 60);
+      const vids = drops.map((d) => d.vid).filter((v) => v > 0);
+      const want = holidayLightVid(fx);
+      if (want === 0) expect(vids).toEqual([]);        // 域外帧=原版 dropItem 0 不掉
+      else expect(vids).toEqual([want]);
+      // ★红蓝-J2 补口：双通道同走 holidayLightVid 单源对拍——通道1=本域 killDropFace
+      // （上面已扫）;通道2=玩家挖除面 styleDropVidOfFrames(149,…)（cs:66036-46 只读
+      // frameX,fy 四向 0/18/36/54 均无关）。任一通道私改分档/摘门即红。
+      for (const fy of [0, 18, 36, 54]) {
+        expect(styleDropVidOfFrames(149, fx, fy)).toBe(want);
+      }
+    }
+  });
+});
+
+// ============================================================ ★红蓝-G② 碎块辉光绘序（2026-09-18）
+// 定谳：TileDrawing.cs glow 段「先」tileBatch 4×(band+72) 色副本（:1290-1295）、「后」
+// α100 基底（:1313 color2=(255,255,255,100) → !flag3 尾画）——16×18 核心叠域 4 副本
+// 互叠+基底盖顶 source-over 不可交换（Δ=αB·w4·(基底−tint),w4=1-(1-αg)^4>0）。本仓曾
+// 反序（先基底后副本）→ 核心域微弱色差,已按原版序调正（drawShardCell 副本先行）。
+// 变异证红映射：
+//   MO1 回滚绘序（基底先画）              → T-序 红（基底 drawImage 先于辉光副本）
+//   MO2 副本调用 α 记录非 1/基底非 100/255 → T-序 红（逐调用 α 语义同锁）
+describe('★红蓝-G② 碎块绘序：辉光副本先于 α100 基底（TileDrawing.cs:1290→:1313）', () => {
+  /** 记录桩 ctx + Node 无 DOM 下 shardTintedCopy 的最小画布件 */
+  function shardDrawRecs(fx: number): Array<{ tex: unknown; alpha: number; ex: number; fy: number }> {
+    (globalThis as unknown as { document: unknown }).document = {
+      createElement(): unknown {
+        const cv: Record<string, unknown> = { width: 0, height: 0 };
+        cv.getContext = () => ({
+          drawImage: () => undefined,
+          getImageData: (_x: number, _y: number, w: number, h: number) => {
+            const data = new Uint8ClampedArray(w * h * 4);
+            for (let p = 0; p < data.length; p += 4) { data[p] = 200; data[p + 1] = 180; data[p + 2] = 160; data[p + 3] = 255; }
+            return { data, width: w, height: h };
+          },
+          putImageData: () => undefined,
+        });
+        return cv;
+      },
+    };
+    try {
+      const img = { width: 512, height: 512 };
+      const recs: Array<{ tex: unknown; alpha: number; ex: number; fy: number }> = [];
+      const ctx = {
+        globalAlpha: 1,
+        drawImage(tex: unknown, _a: number, _b: number, _c: number, _d: number, e: number, f: number) {
+          recs.push({ tex, alpha: ctx.globalAlpha, ex: e, fy: f });
+        },
+      };
+      drawShardCell(ctx as unknown as CanvasRenderingContext2D,
+        { img: img as unknown as HTMLCanvasElement, sx: 36, sy: 0, sw: 16, sh: 18 },
+        36, 0, 100, 200, 9, 7, fx);
+      return recs;
+    } finally {
+      delete (globalThis as unknown as { document?: unknown }).document;
+    }
+  }
+
+  it('T-序：大簇 fx>=324 → 4 辉光副本先入（α=1,±2 四向）、α100 基底尾画盖顶', () => {
+    const recs = shardDrawRecs(324);
+    expect(recs).toHaveLength(5);
+    for (const r of recs.slice(0, 4)) {
+      expect(r.tex).not.toBe(recs[4].tex);           // 前四=染色副本画布
+      expect(r.alpha).toBe(1);                       // 副本 α 由 tint 像素承载
+    }
+    expect([recs[0].ex - 100, recs[0].fy - 200]).toEqual([2, 0]);   // ToRotationVector2 四向
+    expect([recs[1].ex - 100, recs[1].fy - 200]).toEqual([0, 2]);
+    expect([recs[2].ex - 100, recs[2].fy - 200]).toEqual([-2, 0]);
+    expect([recs[3].ex - 100, recs[3].fy - 200]).toEqual([0, -2]);
+    expect(recs[4].alpha).toBeCloseTo(SHARD_BASE_ALPHA, 12);        // 基底 (255,255,255,100)
+  });
+
+  it('T-小簇：fx<324 → 仅基底单画（无辉光副本,早退语义保持）', () => {
+    const recs = shardDrawRecs(18 * 17);             // 306 < 324
+    expect(recs).toHaveLength(1);
+    expect(recs[0].alpha).toBeCloseTo(SHARD_BASE_ALPHA, 12);
+  });
+
+  it('T-差：核心叠域调序前后像素差 >0（source-over 不可交换的直证;金标 α/tint 值）', () => {
+    const ab = SHARD_BASE_ALPHA;                     // 100/255（T-α 金标锁定）
+    const ag = 38 / 255;                             // tint α=38（T-glow 金标锁定）
+    const B = [255, 255, 255];                       // 基底核域白（不透明纹素）
+    const C = [15, 0, 76];                           // shardGlowTint(0,0,0) 金标值
+    const w4 = 1 - Math.pow(1 - ag, 4);              // 4 副本累计覆盖权
+    const copyFirst = B.map((b, i) => ab * b + (1 - ab) * (w4 * C[i]));   // 原版序：副本先、基底后
+    const baseFirst = B.map((b, i) => w4 * C[i] + (1 - w4) * (ab * b));   // 旧反序：基底先、副本后
+    const d = Math.max(...copyFirst.map((v, i) => Math.abs(v - baseFirst[i])));
+    expect(d).toBeGreaterThan(0);                    // 理论值 ≈ ab·w4·max|B-C| ≈ 47.6
   });
 });

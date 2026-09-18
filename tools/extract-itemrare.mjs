@@ -52,6 +52,11 @@
 //   双闸门 + tests/item-stats-golden-1457。测试注入面：SW_ITEMRARE_JSON/
 //   SW_ITEMVALUE_JSON（守卫探测路径）/ SW_OUT（写盘目录，缺省 game/src/data），
 //   缺省行为不变。守卫测试：tests/extract-itemrare-era-guard.test.ts。
+// ★g1 footgun 硬化（2026-09-18，红蓝-F①）：探测 env（SW_ITEMRARE_JSON/
+//   SW_ITEMVALUE_JSON）设置而 SW_OUT 缺省 → 拒跑 exit 1（fail-closed）——定谳：
+//   守卫探测读注入夹具（零缺失→放行）而写盘落缺省 OUT_DIR=现库 game/src/data，
+//   探测与写盘分离=守卫被绕过洗库。处置：显式 SW_OUT（与探测同沙箱）或同时清
+//   探测 env 走真实现库守卫；--dump 对账通道不写盘不受此限。
 import { readFileSync, writeFileSync, writeSync, existsSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
@@ -257,6 +262,17 @@ if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFile
   if (process.argv.includes('--dump')) {
     writeSync(1, JSON.stringify({ src: SRC_VER, RARE, VALUE }));
   } else {
+    // ★g1 footgun 硬化（红蓝-F①,2026-09-18）：探测注入面设置而 SW_OUT 缺省 →
+    //  fail-closed 拒跑。定谳：守卫探测读 SW_ITEMRARE_JSON/SW_ITEMVALUE_JSON（夹具，
+    //  零缺失→放行）而 writeFileSync 落缺省 OUT_DIR=现库 game/src/data——探测与
+    //  写盘分离=守卫被绕过洗库。变异判别：tests/extract-itemrare-era-guard.test.ts。
+    const PROBE_ENV_SET = process.env.SW_ITEMRARE_JSON !== undefined || process.env.SW_ITEMVALUE_JSON !== undefined;
+    if (PROBE_ENV_SET && process.env.SW_OUT === undefined) {
+      console.error('[extract-itemrare] 拒绝运行：探测注入面（SW_ITEMRARE_JSON/SW_ITEMVALUE_JSON）已设置而 SW_OUT 缺省（fail-closed）。');
+      console.error('  守卫将探测注入夹具（零缺失→放行），写盘却落缺省现库路径 game/src/data——探测与写盘分离=守卫被绕过（footgun 洗库面）。');
+      console.error('  处置：显式设置 SW_OUT 指向与探测一致的沙箱目录，或同时清掉探测 env 走真实现库守卫；--dump 对账通道不写盘不受此限。');
+      process.exit(1);
+    }
     // ---- ★追加时代守卫（头注见上）：重产 vs 现库动态 diff,缺键非空即拒 ----
     const FORCE_FULL = process.argv.includes('--force-full');
     const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');

@@ -1,13 +1,14 @@
 // BJ118① 实机探针：水晶碎块（tile 129）质感层取证——半透明基底（α100）+ 大簇彩虹辉光。
-// 流程：boot 世界 → 洞穴层清出暗室 → 珍珠石地板上放置小簇（fx=0）+ 大簇（fx=324/342）
-//   碎块 → 玩家落位上方 → 双时刻（间隔 ~3.2s=半脉动周期）同机位截图 + 逐像素采样。
-// 判读（本脚本只出数据不断言）：
-//   · bodyMean：小簇本体亮度（α100×全亮 → 暗室中暗淡可见;α255 会显著更亮）
-//   · changedLarge / changedSmall：两时刻格内变化像素数——大簇辉光随 GlobalTimeWrappedHourly
-//     脉动应显著变化;小簇无辉光层应≈0（仅旋转钟不动小簇）
-//   · haloSat：大簇辉光带像素饱和度样本（彩虹=高分离通道差）
-// 截图落盘 /tmp/bj118-shard-t0.png / t1.png 供人工比对。
+// 流程：boot 世界 → 洞穴层清出暗室 → 珍珠石地板放小簇(fx=0/18) + 大簇(fx=324/342)碎块
+//   → 玩家落位上方 → 双时刻（间隔 3.2s ≈ 半脉动周期）同机位像素采样 + 截图落盘。
+// 判读（只出数据不断言）：
+//   · mean/max：各碎块格亮度（α100×全亮 → 暗室中暗淡可见;若回退不透明会显著变亮）
+//   · changed：双时刻格内变化像素数——大簇辉光随 GlobalTimeWrappedHourly 脉动应 >0;
+//     小簇（无辉光层、横移钟不动小簇）应 ≈0
+//   · chromaMean：通道分离度（彩虹辉光=高色度;灰背景≈0）
+// 截图 /tmp/bj118-shard-t0.png / t1.png 供人工比对。
 import puppeteer from 'puppeteer-core';
+import fs from 'node:fs';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({
@@ -26,6 +27,19 @@ await page.evaluate(() => {
   s.parentElement.querySelector('button').click();
 });
 await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.player, { timeout: 300000 });
+for (let i = 0; i < 40; i++) {                       // 欢迎弹窗轮询点掉（延迟弹出;真鼠标事件）
+  const box = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => /我已知晓/.test(x.textContent ?? ''));
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }).catch(() => null);
+  if (!box) { await new Promise((r) => setTimeout(r, 500)); continue; }
+  await page.mouse.click(box.x, box.y);
+  await new Promise((r) => setTimeout(r, 400));
+  const still = await page.evaluate(() => !!document.getElementById('sw-welcome-announce'));
+  if (!still) break;
+}
 await new Promise((r) => setTimeout(r, 2000));
 
 // ---- 暗室选址（洞穴层下、干燥）+ 布景 ----
@@ -47,7 +61,6 @@ const stage = await page.evaluate(async () => {
   outer:
   for (let y = ry + 40; y < Math.min(st.h - 220, ry + 300); y += 2) {
     for (let x = 300; x < st.w - 300; x += 3) {
-      // 找 5×4 全实心区（挖室）
       let ok = true;
       for (let dx = 0; dx < 6 && ok; dx++) for (let dy = 0; dy < 4 && ok; dy++) {
         if (!st.isSolid(x + dx, y + dy)) ok = false;
@@ -56,77 +69,83 @@ const stage = await page.evaluate(async () => {
     }
   }
   if (cx < 0) return { error: 'no spot' };
-  // 清室 11×7（空气）+ 底层珍珠石地板
   for (let dx = -5; dx <= 5; dx++) for (let dy = -3; dy <= 2; dy++) {
     st.setTileSilent(cx + dx, cy + dy, 0, 0, 0);
   }
   for (let dx = -5; dx <= 5; dx++) st.setTileSilent(cx + dx, cy + 3, pearlId, 0, 0);
-  // 小簇 ×2（style0/style1,floor 向 frameY=0）+ 大簇 ×2（fx=324/342）
-  st.setTileSilent(cx - 3, cy + 2, shardId, 0, 0);
-  st.setTileSilent(cx - 2, cy + 2, shardId, 18, 0);
-  st.setTileSilent(cx + 1, cy + 2, shardId, 324, 0);
-  st.setTileSilent(cx + 3, cy + 2, shardId, 342, 0);
-  // 玩家放室中央上方（摄像机跟随）
-  g.player.x = cx * 16 + 8;
-  g.player.y = (cy - 1) * 16;
+  st.setTileSilent(cx - 3, cy + 2, shardId, 0, 0);     // 小簇 style0（地板向）
+  st.setTileSilent(cx - 2, cy + 2, shardId, 18, 0);    // 小簇 style1
+  st.setTileSilent(cx + 1, cy + 2, shardId, 324, 0);   // 大簇（六格横带 n=0）
+  st.setTileSilent(cx + 3, cy + 2, shardId, 342, 0);   // 大簇 n=1
+  g.player.x = (cx - 0.5) * 16 + 8;                  // 立于地板（两组碎块之间,不遮格）
+  g.player.y = (cy + 3) * 16;                        // 脚底 = 地板顶
   g.player.vx = 0; g.player.vy = 0;
-  if (g.player.vy !== undefined) g.player.vy = 0;
-  return { cx, cy, shardId, pearlId, screen: { w: innerWidth, h: innerHeight } };
+  return { cx, cy, shardId, pearlId };
 });
 if (stage.error) { console.log('STAGE_FAIL', JSON.stringify(stage)); await browser.close(); process.exit(1); }
 console.log('STAGE', JSON.stringify(stage));
-await new Promise((r) => setTimeout(r, 1500));
+await new Promise((r) => setTimeout(r, 4000));      // 相机传送缓动+物理落定
+await sample('WARMUP');                             // 预热拍（相机可能仍在缓动,不计入判读）
 
-// ---- 采样函数：canvas 同源 drawImage → getImageData，碎块格逐像素指标 ----
+// ---- 采样：worldToScreen 定窗 → page.screenshot clip（GL 画布 drawImage 读回=黑,
+//      必须走合成后截图）→ data URL 回灌页内 2D canvas 逐像素 ----
+const TS = 16;
+const WINTILE = 8, HINTILE = 3;
+async function snapshotRect() {
+  return page.evaluate(({ cx, cy }) => {
+    const g = window.__swGame;
+    const [sx, sy] = g.camera.worldToScreen((cx - 4) * 16, (cy + 1) * 16);
+    const z = g.camera.zoom;
+    return { x: sx, y: sy, width: 8 * 16 * z, height: 3 * 16 * z };
+  }, { cx: stage.cx, cy: stage.cy });
+}
+
 async function sample(tag) {
-  const data = await page.evaluate(({ cx, cy }) => {
-    const cv = document.querySelector('canvas');
-    const ctx2 = document.createElement('canvas');
-    const S = 4;                       // 每格采样窗 4×4 tile
-    const TS = 16;
-    const px = cv.width / 2 - (S * TS) / 2;   // 相机居中≈玩家;玩家在碎块带上 1 格 → 上移 1 格
-    const py = cv.height / 2 - (S * TS) / 2 + TS;
-    ctx2.width = S * TS; ctx2.height = S * TS;
-    const c2 = ctx2.getContext('2d', { willReadFrequently: true });
-    c2.drawImage(cv, px, py, S * TS, S * TS, 0, 0, S * TS, S * TS);
-    const im = c2.getImageData(0, 0, S * TS, S * TS).data;
-    // 碎块行 = 窗内 y=3*TS 行（玩家上方 1 格 = 室底行 cy+2 → 屏幕 y = 窗顶 + 3 格）
-    // 小簇在窗 x 0..1 格（cx-3/cx-2 → 相对 cx: -3..→ 窗从 cx-2 起? 窗中心=cx → x0=cx-2*TS
-    // 大簇 cx+1/cx+3 → 相对窗 x = 3 格 / 5 格(越窗) — 放宽:直接逐 16×16 块统计
-    const blocks = [];
-    for (let bx = 0; bx < 4; bx++) {
-      let lit = 0, sum = 0, mx = 0, chroma = 0, n = 0;
-      for (let yy = 3 * TS; yy < 4 * TS; yy++) {
-        for (let xx = bx * TS; xx < (bx + 1) * TS; xx++) {
-          const p = (yy * S * TS + xx) * 4;
+  const rect = await snapshotRect();
+  const b64 = await page.screenshot({ clip: rect, encoding: 'base64' });
+  fs.writeFileSync(`/tmp/bj118-shard-window-${tag}.png`, Buffer.from(b64, 'base64'));
+  const data = await page.evaluate(async ({ b64, tag }) => {
+    const img = new Image();
+    img.src = 'data:image/png;base64,' + b64;
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+    const W = img.width, H = img.height;
+    const c2 = document.createElement('canvas');
+    c2.width = W; c2.height = H;
+    const cx2 = c2.getContext('2d', { willReadFrequently: true });
+    cx2.drawImage(img, 0, 0);
+    const im = cx2.getImageData(0, 0, W, H).data;
+    const tileW = W / 8, tileH = H / 3;
+    const prev = window.__bj118prev;               // 跨时刻共享（T1 与 T0 比）
+    const out = [];
+    for (const col of [1, 2, 5, 7]) {              // 小簇×2（窗列 1/2）/ 大簇×2（5/7）
+      let lit = 0, sum = 0, n = 0, chroma = 0, changed = 0;
+      for (let yy = Math.floor(1 * tileH); yy < Math.floor(2 * tileH); yy++) {
+        for (let xx = Math.floor(col * tileW); xx < Math.floor((col + 1) * tileW); xx++) {
+          const p = (yy * W + xx) * 4;
           const r = im[p], gg = im[p + 1], b = im[p + 2];
           const l = (r + gg + b) / 3;
           if (l > 12) lit++;
           sum += l; n++;
-          if (l > mx) mx = l;
           chroma += Math.max(r, gg, b) - Math.min(r, gg, b);
+          if (prev) {
+            if (Math.abs(r - prev[p]) + Math.abs(gg - prev[p + 1]) + Math.abs(b - prev[p + 2]) > 18) changed++;
+          }
         }
       }
-      blocks.push({ lit, mean: +(sum / n).toFixed(1), max: Math.round(mx), chromaMean: +(chroma / n).toFixed(1) });
+      out.push({ col, lit, mean: +(sum / n).toFixed(1), chromaMean: +(chroma / n).toFixed(1), changed });
     }
-    return { blocks };
-  }, { cx: stage.cx, cy: stage.cy });
+    window.__bj118prev = im;
+    return { blocks: out, W, H };
+  }, { b64, tag });
   console.log(tag, JSON.stringify(data));
   return data;
 }
 
-await page.screenshot({ path: '/tmp/bj118-shard-t0.png' });
 const s0 = await sample('T0');
+await page.screenshot({ path: '/tmp/bj118-shard-t0.png' });
 await new Promise((r) => setTimeout(r, 3200));
-await page.screenshot({ path: '/tmp/bj118-shard-t1.png' });
 const s1 = await sample('T1');
-
-// ---- 双时刻变化像素（大簇辉光脉动判别）----
-const diff = await page.evaluate(async ({ cx, cy }) => {
-  void cx; void cy;
-  return 'skipped-cross-frame-diff';
-});
-void diff;
+await page.screenshot({ path: '/tmp/bj118-shard-t1.png' });
 void s0; void s1;
 console.log('DONE');
 await browser.close();

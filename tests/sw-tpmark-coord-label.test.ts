@@ -1,10 +1,12 @@
 // SW-TPMARK 2026-09-17 用户令：F10（Shift+F10 地图点击传送调试旗）开启时，
 // 全屏地图传送预选标记（tpMark）旁常显 tile 坐标文本，便于定位具体位置。
 //
-// 定谳（现有实现）：
-//  · Game.ts:8547-8559  旗开启分支——首次点击 renderer.tpMark = {x: tx, y: ty}
-//    （tx/ty = Math.floor((mouseX−cx0)/fm.zoom) = tile 坐标,地图 1 tile = zoom px）；
-//  · Game.ts:46157-46161 传送成功 tpMark=null+关图；ping/虫洞/晶塔分支复位 :8531/8536/8546；
+// 定谳（现有实现；行号 2026-09-18 红蓝-D 勘误——Game.ts 前序漂移,原 :8547-8559/
+//  :46157-46161/:8531/:8536/:8546 均陈旧）：
+//  · Game.ts:8653-8665  旗开启分支——首次点击 renderer.tpMark = {x: tx, y: ty}
+//    （tx/ty = Math.floor((mouseX−cx0)/fm.zoom) = tile 坐标,地图 1 tile = zoom px,:8621-8622；
+//    选点 toast :8664）；
+//  · Game.ts:46486-46491 传送成功 tpMark=null+关图；ping/虫洞/晶塔分支复位 :8637/8642/8652；
 //  · Renderer.ts drawFullMap 原内联块（现提取为 drawTpMark）：每帧重画闪烁红圈+十字线。
 // 落刀：drawTpMark 内新增坐标文本（常显不随闪烁、深色描边白字、右缘翻左/垂直钳屏内、
 // 标记完全离屏不画文本）；tpMarkCoordText/tpMarkCoordLayout 纯函数单源（行为测直驱）。
@@ -14,6 +16,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { Renderer, tpMarkCoordText, tpMarkCoordLayout } from '../src/render/Renderer';
+import { languageManager } from '../src/i18n/LanguageManager';
+import { Lang } from '../src/i18n/Lang';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -190,5 +194,40 @@ describe('SW-TPMARK 结构锁（源文本锚,防静默回退）', () => {
     expect(rs.match(/this\.tpMark/g)).toHaveLength(1);          // 唯一读点
     expect(rs.match(/tpMark: \{ x: number; y: number \} \| null = null;/g)).toHaveLength(1);
     expect(rs.match(/this\.drawTpMark\(/g)).toHaveLength(1);    // 唯一调用点
+  });
+
+  it('选点 toast 单源锁：Preselect/Mark/Unmark 传参 = tpMarkCoordText（回退再包→红）', () => {
+    // 红蓝-D 2026-09-18：曾传 `(${tx}, ${ty})` 自带括号,撞 zh 模板「已选择 {0}」的
+    // 译文括号 → 「已选择 ((x, y))」双括号（en 模板无括号=双源格式漂移）。单源 =
+    // 传参与标记旁注（Renderer tpMarkCoordText）同串,Game 侧不再自拼括号。
+    const pre = gs.indexOf("Lang.text('Mods.SandboxWorld.Map.Preselect'");
+    expect(pre).toBeGreaterThan(0);
+    const preArgs = gs.slice(pre, pre + 140);
+    expect(preArgs).toContain('tpMarkCoordText(tx, ty)');
+    expect(preArgs).not.toContain('`(${tx}');                    // 回退再包（自拼括号）即红
+    const unmark = gs.indexOf("Lang.text('Mods.SandboxWorld.Map.Unmark'");
+    expect(unmark).toBeGreaterThan(0);
+    const annoTail = gs.slice(unmark, gs.indexOf('updateAnnotateCount', unmark));
+    expect(annoTail.match(/tpMarkCoordText\(tx, ty\)/g)).toHaveLength(2);  // Unmark+Mark 两支
+    expect(annoTail).not.toContain('`(${tx}');
+  });
+
+  it('选点 toast 双语核：zh/en 模板 × tpMarkCoordText 渲染恰一层括号（红蓝-D 双括号定谳）', () => {
+    // 防两向：zh 模板去括号后 {0}=(x, y) 恰一层;en 无括号模板收同串不产生缺括号。
+    // 断言 = 模板+传参整串精确相等（模板任何再包/去括号漂移即红）。
+    const arg = tpMarkCoordText(2097, 273);
+    expect(arg).toBe('(2097, 273)');
+    const zh = JSON.parse(readFileSync(join(ROOT, 'public/l10n/zh-Hans.json'), 'utf8'));
+    const en = JSON.parse(readFileSync(join(ROOT, 'public/l10n/en-US.json'), 'utf8'));
+    const render = (pack: unknown, key: string) => {
+      languageManager.resetForTest();
+      languageManager.loadPackJson(pack as Parameters<typeof languageManager.loadPackJson>[0]);
+      return Lang.text(key, arg);
+    };
+    expect(render(zh, 'Mods.SandboxWorld.Map.Preselect')).toBe('已选择 (2097, 273)——再次点击传送');
+    expect(render(en, 'Mods.SandboxWorld.Map.Preselect')).toBe('Teleport point (2097, 273) selected — click again to confirm');
+    expect(render(zh, 'Mods.SandboxWorld.Map.Mark')).toBe('已在 (2097, 273) 标记');
+    expect(render(zh, 'Mods.SandboxWorld.Map.Unmark')).toBe('已取消 (2097, 273) 的标记');
+    languageManager.resetForTest();
   });
 });

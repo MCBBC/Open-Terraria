@@ -11,7 +11,9 @@
 //   清空产物后的全量重建守卫天然不拦；原地强推须 --force-full --overwrite-append-era 双旗
 //   （--force-full 单旗仍拒，rm -rf 式双键防误触），事后必须全绿 recon-npc 双闸门 +
 //   tests/npc-stats-golden + tests/npc-frame-golden。测试注入面：SW_NPCS_JSON（守卫探测
-//   路径）/ SW_OUT（写盘路径），缺省行为不变。
+//   路径）/ SW_OUT（写盘路径），缺省行为不变。★g1 footgun 硬化（红蓝-J1②,2026-09-18）：
+//   探测 env 设置而 SW_OUT 缺省 → 拒跑 exit 1（fail-closed,守卫块前置）——探测与写盘
+//   分离=守卫被绕过洗库。守卫测试：tests/extract-npcs-era-guard.test.ts。
 // SetDefaults 反编译为 if/else-if 的 type 区间链（非 switch）：
 //   if (this.type == N) {...} else if (this.type >= A && this.type <= B) {...} ...
 // 每个 id 取链上首个命中的块（else-if 语义：命中后续块跳过）。
@@ -35,6 +37,19 @@ const FORCE_FULL = process.argv.includes('--force-full');
 const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
 const OUT_JSON = process.env.SW_OUT ?? `${ROOT}/game/public/sprites/vanilla-npcs.json`;
 const GUARD_JSON = process.env.SW_NPCS_JSON ?? OUT_JSON;
+// ★g1 footgun 硬化（红蓝-J1②,2026-09-18）：探测注入面（SW_NPCS_JSON）设置而 SW_OUT
+//   缺省 → 拒跑 exit 1（fail-closed）。定谳（红蓝-J1 动态实证,write-blocking hook
+//   exit 42 物证）：守卫探测读干净夹具（零增量→放行）而 writeFileSync 落缺省
+//   OUT_JSON=现库 game/public/sprites/vanilla-npcs.json——探测与写盘分离=守卫被绕过
+//   （全量覆写洗 587-696 新增 NPC+白名单外字段+1457 终值修正）。处置：显式 SW_OUT
+//   （与探测同沙箱）或同时清探测 env。
+const PROBE_ENV_SET = process.env.SW_NPCS_JSON !== undefined;
+if (PROBE_ENV_SET && process.env.SW_OUT === undefined) {
+  console.error('[extract-npcs] 拒绝运行：探测注入面（SW_NPCS_JSON）已设置而 SW_OUT 缺省（fail-closed）。');
+  console.error('  守卫将探测注入夹具（零增量→放行），写盘却落缺省现库路径 game/public/sprites/vanilla-npcs.json——探测与写盘分离=守卫被绕过（footgun 洗库面）。');
+  console.error('  处置：显式设置 SW_OUT 指向与探测一致的沙箱目录，或同时清掉探测 env 走真实现库守卫。');
+  process.exit(1);
+}
 if (existsSync(GUARD_JSON)) {
   try {
     const prev = JSON.parse(readFileSync(GUARD_JSON, 'utf8'));

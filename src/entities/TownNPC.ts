@@ -1282,14 +1282,19 @@ export class TownNPC extends Entity {
   // 表情气泡:字段/掷骰已退役——统一走 render/EmoteBubble 模块(spawnEmote,
   // 并行会话 1:1 版);空闲随机冒泡由 Game.tickNpcEmotes 窗口喂(双画修复 2026-08-13)
   // ---- 环境与互殴受击(NPC.cs :91538 族调用点的三件套)----
-  /** 岩浆专属冷却(原版 immune[255]=30,Collision_LavaCollision :94522；
+  /** 岩浆专属冷却(原版 immune[255]=30,Collision_LavaCollision 1456 :94516 = 1457
+   *  :94458,赋值 :94528/:94470；红蓝-D 2026-09-18 锚勘误——原 :94522 陈旧；
    *  npcLiquid.updateNpcLiquid 共写——NpcLiquidHost 公有字段) */
   lavaCd = 0;
-  /** NPC 互殴专属冷却(原版 immune[255]=30,GetHurtByOtherNPCs :93667;初始 0) */
+  /** NPC 互殴专属冷却(原版 immune[255]=num(30),BeHurtByOtherNPC 1456 :93638 =
+   *  1457 :93588,赋值 :93653/:93603；红蓝-D 2026-09-18 锚勘误——原「GetHurtByOtherNPCs
+   *  :93667」混版陈旧;初始 0) */
   private npcVsCd = 0;
   /** 树妖结界 buff 165 剩余 tick（原版 buffType/buffTime 单槽近似——树妖祝福
    *  光环每 10t 续 120（弹 586 AI_111 :38806-38812）；hurt 防御 +20/15/10
-   *  （:53401-53411）+ 荆棘反伤 num5/3（:93666-93681）两消费枝的载体） */
+   *  （1457 :53552/:53556/:53560）+ 荆棘反伤 num5/3（dryadWard 枝 1456 :93654-65 =
+   *  1457 :93604-11,⌊num5/3⌋ :93606;红蓝-D 2026-09-18 锚勘误——原 :53401-53411/
+   *  :93666-93681 均混版陈旧）两消费枝的载体） */
   dryadWardT = 0;
   /** 溺水呼吸(NPC.CheckDrowning :96118:初始 200,水内每 7t -1,离水 +3/t) */
   private breath = 200;
@@ -1297,7 +1302,7 @@ export class TownNPC extends Entity {
   /** friendlyRegen 计数（NPC.cs:6578 声明）。CheckLifeRegen 族 :93622-93641：受伤期
    *  （life<lifeMax）每 tick 累加回血率 = 基础 1 + dryadWard 10 + 型别表 {22 向导:+5,
    *  209 电子人:+9}，>180 清零并 life++（静默,无飘字/音效）；溺水伤害 tick 清零
-   *  (:96069)。老人 type==37 不入族（:91593-91601 门 `type != 37 && (friendly…)`）。
+   *  (:96069)。老人 type==37 不入族（:91592-91600 门 `type != 37 && (friendly…)`）。
    *  ★F10 蓝队移植；ward 第三消费枝即此 dryadWard 加速枝（前两枝 = hurt 防御
    *  +20/15/10 与荆棘反伤 ⌊实伤/3⌋）。 */
   private lifeRegenCounter = 0;
@@ -1625,13 +1630,15 @@ export class TownNPC extends Entity {
     }
   }
 
-  /** 本 tick 点光（NPC.cs 城镇 NPC 侧三处恒亮）：
-   *  - 160 松露（UpdateNPC_CastLights :93544-93566）：num3=Next(28,42)×0.005+
+  /** 本 tick 点光（NPC.cs 城镇 NPC 侧三处恒亮；CastLights 锚 1456 :93520 = 1457
+   *  :93470——红蓝-D 2026-09-18 行号勘误,原 935xx 系 1456 域）：
+   *  - 160 松露（1456 :93546-93564 = 1457 :93496-93514）：num3=Next(28,42)×0.005+
    *    (270−mouseTextColor)/500，基色 (0.1,0.3+num3/2,0.6+num3)×0.35；变体 1
-   *    （townNpcVariationIndex==1）R/B 互换——以 shimmered 承接（:93563-93567）
-   *  - 209 电子人（:93590-93599）：同式抖动 ×0.35、B 基 0.4；ai[0]==12（火箭射击
-   *    态，AttackType[209]=1 → ai0=12，NPC.cs:55902/:54936）追加 Top (0.3,0.1,0.1)
-   *    （:93594-93596）——单槽逐通道 max 合并（Enemy.mergeLightRGB 同款近似）
+   *    （townNpcVariationIndex==1）R/B 互换——以 shimmered 承接（1457 :93503-93508）
+   *  - 209 电子人（1456 :93582-93598 = 1457 :93532-93548）：同式抖动 ×0.35、B 基 0.4；
+   *    ai[0]==12（火箭射击态，AttackType[209]=1 → ai0=12，NPC.cs:55902/:54936）
+   *    追加 Top (0.3,0.1,0.1)（1456 :93594-93596 = 1457 :93544-93546）
+   *    ——单槽逐通道 max 合并（Enemy.mergeLightRGB 同款近似）
    *  - 681 彩虹城镇史莱姆（AI_007 尾段 :55963-55974）= TorchColor(23)×0.35
    *  - 683 黄城镇史莱姆（:55974-55979）= (0.25,0.25,0.1)×WrappedLerp(0.75,1,t%120/120)
    *  条件态：魔法光环 ai[0]==14（:55394，num69=1 恒满档，atkState===14 承接）

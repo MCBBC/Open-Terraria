@@ -137,8 +137,11 @@ describe('styleDropVid 逐族两档（⚠️2 15 族 + 同病 3 族 + 1×1 版�
     expect(styleDropVid(194, 0)).toBe(154);
     expect(holidayLightVid(0)).toBe(596);
     expect(holidayLightVid(18)).toBe(597);
+    expect(holidayLightVid(36)).toBe(598);   // ★红蓝-J2 补口（2026-09-18）红灯正向带
     expect(holidayLightVid(54)).toBe(596);   // 反向带同色（fx%54）
     expect(holidayLightVid(72)).toBe(597);
+    expect(holidayLightVid(90)).toBe(598);   // ★红灯反向带——六档直锁补齐
+    expect(holidayLightVid(9)).toBe(0);      // 域外帧不掉（KillTile case 149 cs:66036-46 dropItem 保 0）
   });
 
   it('门 10/11（GetDoorItem :69257）0→25 木 / 1→650 乌木 / 11 神庙锁门→0 不掉', () => {

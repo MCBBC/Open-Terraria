@@ -227,6 +227,11 @@ const iconCache = new Map<number, string>();
  *  newType ∈ 此表 → SoundID 22(Unlock),否则 7(Grab)。含 1457 新 6168/6169/6193/6194 */
 const AFTER_ITEM_SWAP = new Set([5325, 4131, 5060, 5059, 5324, 5329, 5330, 4346, 5391, 5323,
   5455, 4767, 5453, 5309, 5454, 6190, 6195, 5358, 5359, 5360, 5361, 5437, 6168, 6169, 6193, 6194, 2611, 5526]);
+/** canItemSwapAt（ItemSlot.cs:266 声明/:328 init/:423-428 置位,1458 同值）：
+ *  HasItemSwap 右键换型受理语境 = 背包 0/宝箱 3/银行 4/虚空 32 + 装备位 8（盔甲）
+ *  10（配饰）——时装 9/11、染料 12、杂项 16-20/33 不受理（时装位右键走
+ *  SwapVanityEquip case 9/11）。语境值经 slotContext('armor',i) 映射同数域 */
+const CAN_ITEM_SWAP_AT = new Set([0, 3, 4, 8, 10, 32]);
 // 防御盾 img dataURL 烘焙(2026-08-19 压 IOSurface 基数:盾图从独立 canvas 改 img;
 // 模块级 scratch 只此一张 52×48,产物按 (难度列,辉光) 缓存 ≤6 条)
 const DEF_SHIELD_SCRATCH = typeof document !== 'undefined' ? document.createElement('canvas') : null;
@@ -1439,13 +1444,25 @@ export class UI {
           this.tryOpenContainer(cur, i);
           return;
         }
+        // 槽语境（:1605-1622 slotContext；1458 同段对拍零差）——先于 HasItemSwap 门算出,
+        // 与下方逐 context 路由共用（原版 RightClick 门序：OpenableBag(ctx 0) →
+        // HasItemSwap(canItemSwapAt) → switch(9/11,0/3/4/32) → 取件臂）
+        const ctx = slotContext(where, i, true, where === 'chest' ? this.openChest?.x : undefined);
         // HasItemSwap 右键换型（:1646-1653 独立门,先于装备/拆半）：canItemSwapAt 语境
-        // {0 inv/3 chest;装备栏 8/10 需过 equip 重算链未接=登记}+stack==1+光标空 →
+        // {0 inv/3 chest/4 bank/32 虚空 + 8 盔甲/10 配饰（★红蓝-E 债升级 2026-09-18：
+        //   装备位接线——原版 :423-428 canItemSwapAt 含 8/10,门先于 switch 触达装备格;
+        //   5059/5060 摩羯座 ls 态时装腿可拖入功能腿槽（CanEquipInArmorSlot :1399 只查
+        //   legSlot≥0+同款唯一,不查 vanity 旗）+ 5358-5361 Shellphone acc=1 配饰——
+        //   双态物（ls/acc/createTile）均可达）}+stack==1+光标空 →
         // TryItemSwap(:1879 对表,CursorItemIcon.tryItemSwapVid)原地 ChangeItemType +音
         //（AfterItemSwap :1992-2008 换入 2611/5526 族=22 'unlock'/其余 7 'pickup'）;
+        // 原地换型不回查 armorAccepts/成就（原版 ChangeItemType :47841 直改 type,
+        // 变体族槽型自洽;HandleOnEquip 只在 SwapEquip/ArmorSwap 链）。
+        // 光标持不可叠物仍受理=原版 !CanStack 臂,本仓光标空门=与 inv/chest 面同款
+        // 收敛（登记）。
         // DOM mousedown 即边沿=mouseRightRelease 语义。悬停提示面 = ItemTooltip.{Name}
         // 的 {InputTrigger_ToggleOrOpen}(Lang.cs:160)走 staticTip 支;测试 tests/has-item-swap.test.ts
-        if (!this.heldStack && cur && cur.stack === 1 && (where === 'inv' || where === 'chest')) {
+        if (!this.heldStack && cur && cur.stack === 1 && CAN_ITEM_SWAP_AT.has(ctx)) {
           const sw = tryItemSwapVid(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''));
           if (sw && invIndexOfVanilla(sw.target) > 0) {
             cur.id = invIndexOfVanilla(sw.target);
@@ -1467,9 +1484,10 @@ export class UI {
         //    容器向 fallback 维持 splitHalf 旧面（BJ116 债域=装备列,容器 fallback 另账）;
         //  · case 8（盔甲）/10（配饰）/12（染料）/16-20（杂项）/33（杂项染料）= switch
         //    【无 case】→ 落 PickupItemIntoMouse(:1695) 取 1 到光标+Sound 12(:1688)
-        //    ——即"脱下到光标"。旧换槽路由（配饰已装备位=找空位挪/段首交换）与
-        //    拆半均非原版语义,整摘。
-        const ctx = slotContext(where, i, true, where === 'chest' ? this.openChest?.x : undefined);
+        //    ——即"脱下到光标"（★HasItemSwap 集内件已在上方 :1467 门被 TryItemSwap
+        //    拦截 return,永不落此臂;非集内件脱下面不变）。旧换槽路由（配饰已装备
+        //    位=找空位挪/段首交换）与拆半均非原版语义,整摘。
+        //    （ctx 已先于 HasItemSwap 门算出,见 :1448 区——★红蓝-E 债升级两处共用）
         const heldStacks = !!this.heldStack && !!cur && canMergeStack(this.heldStack, cur);
         if (ctx === 9 || ctx === 11) {
           if (!heldStacks) { this.swapVanityEquip(i); return; }

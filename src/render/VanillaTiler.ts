@@ -2236,21 +2236,28 @@ function shardTintedCopy(r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasEl
 
 /** 水晶碎块整格绘制（TileDrawing.cs:1101-1118 + 1276-1293 净效果 1:1）：
  *  基底 α100 全亮;大簇（fx>=324）另加 4 向 2px 辉光副本（源带 sy+72,色随
- *  GlobalTimeWrappedHourly + 世界坐标相位脉动）。 */
-function drawShardCell(ctx: CanvasRenderingContext2D,
+ *  GlobalTimeWrappedHourly + 世界坐标相位脉动）。
+ *  ★红蓝-G②（2026-09-18）绘序定谳：原版 glow 段先画 4×(band+72) 色副本
+ *  （:1290-1295 tileBatch 入队）、「后」画 α100 基底（:1313 color2=(255,255,255,100)
+ *  → !flag3 尾画）——16×18 核心叠域 4 副本互叠+基底盖顶 source-over 不可交换
+ *  （Δ≈(1-αB)⁴ 序差 ×(基底−tint) 色差,非 0）。本仓曾反序（先基底后副本）→ 微弱
+ *  色差,已按原版序调正。导出仅供绘序金标测试（记录 ctx 桩）。 */
+export function drawShardCell(ctx: CanvasRenderingContext2D,
   r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
   sx: number, sy: number, dx: number, dy: number, x: number, y: number, fx: number): void {
+  if (fx >= 324 && sy + 72 + r.sh <= r.img.height && sy + 72 >= 0) {   // 辉光带越界防御
+    const tint = shardGlowTint(shardGlowClock(), x, y);
+    const tex = shardTintedCopy({ img: r.img, sx, sy: sy + 72, sw: r.sw, sh: r.sh }, tint);
+    if (tex) {
+      ctx.globalAlpha = 1;
+      for (const [ox, oy] of [[2, 0], [0, 2], [-2, 0], [0, -2]] as const) {
+        ctx.drawImage(tex, 0, 0, r.sw, r.sh, dx + ox, dy + oy, r.sw, r.sh);
+      }
+    }
+  }
   ctx.globalAlpha = SHARD_BASE_ALPHA;
   ctx.drawImage(r.img, sx, sy, r.sw, r.sh, dx, dy, r.sw, r.sh);
   ctx.globalAlpha = 1;
-  if (fx < 324) return;
-  if (sy + 72 + r.sh > r.img.height || sy + 72 < 0) return;   // 辉光带越界防御
-  const tint = shardGlowTint(shardGlowClock(), x, y);
-  const tex = shardTintedCopy({ img: r.img, sx, sy: sy + 72, sw: r.sw, sh: r.sh }, tint);
-  if (!tex) return;
-  for (const [ox, oy] of [[2, 0], [0, 2], [-2, 0], [0, -2]] as const) {
-    ctx.drawImage(tex, 0, 0, r.sw, r.sh, dx + ox, dy + oy, r.sw, r.sh);
-  }
 }
 
 /** ★SW-BJ3（2026-09-06）：半砖格绘制 1:1（TileDrawing.cs:1016/:1022/:1653-1666）。

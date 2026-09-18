@@ -1,7 +1,7 @@
 // 重铸词缀系统运行时（tools/extract-equip-prefix.mjs 从 1456 源码提取）。
-// 语义 1:1 于 Item.Prefix（Item.cs:489-602）+ GetRollablePrefixes（:1083-1119）：
-//   词缀 = 属性乘区 switch（TryGetPrefixStatMultipliersForItem :691-1061）+ 配饰 value 档位
-//   （:1043-1060 四组 id 1.05/1.1/1.15/1.2）+ 各武器类可掷池（PrefixLegacy.Prefixes）
+// 语义 1:1 于 Item.Prefix（Item.cs:505-631,1458 同构）+ GetRollablePrefixes（:1102 起）：
+//   词缀 = 属性乘区 switch（TryGetPrefixStatMultipliersForItem :710-1076）+ 配饰 value 档位
+//   （:1043-1059 四组 id 1.05/1.1/1.15/1.2）+ 各武器类可掷池（PrefixLegacy.Prefixes）
 //   + 物品类集合（PrefixLegacy.ItemSets / ItemID.Sets.CanGetPrefixes）。
 import prefixJson from './vanilla-prefix.json';
 
@@ -35,11 +35,37 @@ export function prefixStat(prefix: number): PrefixStat {
   return s ? { ...DEFAULT_STAT, ...s, tier: s.tier ?? 1 } : { ...DEFAULT_STAT };
 }
 
-/** value 乘区（TryGetPrefixStatMultipliersForItem 尾部公式 :1041） */
+const f32 = Math.fround;
+
+/** value 乘区（TryGetPrefixStatMultipliersForItem 尾部公式 Item.cs:1041）。
+ *  ★BJ122（2026-09-18）f32 判例（BJ92 碎片环同族）：原版 out value 与 Prefix 的
+ *  num2 都是 C# float——:1041 主链全 float 运算（f32 操作数、逐 op 最近舍入）,
+ *  :1043-1059 档位各自 value *= 1.05f..1.2f 亦逐 op;num2 存 float 字段（:540）
+ *  后阈值 (double)num2 与 1.2/1.05/0.8/0.95【double 字面量】比较（:588-604）。
+ *  f64 直算会踩线翻错档（红蓝-E 全 97 件 fround 对拍实证六件）：
+ *  · 45 Nimble/62 Hard/69 Jagged/73 Brisk/77 Wild（配饰 1.05 档）：原版
+ *    num2=1.0499999523（1.05f 及 2f-0.95f 的 f32 舍入）< 1.05 → rare 不动;
+ *    f64 1.05 ≥ 1.05 → 错 +1（白→蓝名色）。
+ *  · 56 Weak：原版 num2=0.8000000119（0.8f 的 f32 舍入）> 0.8 → 落 0.95 档 rare
+ *    −1;f64 0.8 ≤ 0.8 → 错 −2（灰→白名色）。
+ *  故全链 Math.fround：先把 JSON 十进制字面量 fround 成原版 f32 操作数,再逐 op
+ *  fround（f64 中转对 f32 操作数精确,fround = IEEE 最近舍入）。fround 序 =
+ *  乘后即存（原版每步落 float 字段/中间量）;末位单次 fround 是错序（23 件值变、
+ *  48 Large rare 位移再翻,tests/prefix-f32-threshold.test.ts 守卫）。
+ *  对拍：仅上述六件 rare 位移翻转,其余 91 件值与位移零变化。 */
 export function prefixValueMul(prefix: number): number {
   const s = prefixStat(prefix);
-  return s.dmg * (2 - s.spd) * (2 - s.mcst) * s.size * s.kb * s.shtspd
-    * (1 + s.crt * 0.02) * (1 + s.arpen * 0.015) * (1 + s.tagdmg * 0.03) * s.tier;
+  let v = f32(s.dmg);                                                    // 1f * dmg
+  v = f32(v * f32(2 - f32(s.spd)));                                      // (2f - spd)
+  v = f32(v * f32(2 - f32(s.mcst)));                                     // (2f - mcst)
+  v = f32(v * f32(s.size));
+  v = f32(v * f32(s.kb));
+  v = f32(v * f32(s.shtspd));
+  v = f32(v * f32(1 + f32(f32(s.crt) * f32(0.02))));                     // (1f + crt*0.02f)
+  v = f32(v * f32(1 + f32(f32(s.arpen) * f32(0.015))));                  // (1f + arpen*0.015f)
+  v = f32(v * f32(1 + f32(f32(s.tagdmg) * f32(0.03))));                  // (1f + tagdmg*0.03f)
+  v = f32(v * f32(s.tier));                                              // :1043-1059 档位 *=（tier=1 恒等）
+  return v;
 }
 
 /** 该物品可掷词缀池（GetRollablePrefixes :1083-1119 顺序判定；null=不可重铸） */

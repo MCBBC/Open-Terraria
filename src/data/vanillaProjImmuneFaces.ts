@@ -111,6 +111,7 @@ export const PROJ_IMMUNE_FACES: Readonly<Record<number, ProjImmuneFace>> = {
     533: { usesLocal: true },  // branch :5999; writes :6012; cd=12
     566: { idStatic: true },  // branch :6174; writes :6185; idStaticCd=10
     567: { idStatic: true },  // branch :6189; writes :6206; idStaticCd=10
+    568: { idStatic: true },  // branch :6189; writes :6206; idStaticCd=10（★J1 审计 2026-09-18 补洞:568 与 567 同 else-if 块/同组键,原表整缺）
     569: { idStatic: true },  // branch :6208; writes :6206; idStaticCd=10
     570: { idStatic: true },  // branch :6208; writes :6206; idStaticCd=10
     571: { idStatic: true },  // branch :6208; writes :6206; idStaticCd=10

@@ -170,6 +170,19 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //   1782 糖果玉米步枪 crit+6（2026-08-23 备案遗留④；Item.cs:19755 `crit += 6`
   //     复合赋值提取器不解析 → json 缺 crit。GetWeaponCrit 消费 :25230-25232）----
   '1782': { crit: 6 },
+  //   1784 杰克南瓜发射器 / 1835 桩桩发射器 / 3291 瓦尔基里悠悠球 crit（BJ129④
+  //     2026-09-18，BJ121 14 件补丁缺漏三件清偿；`crit += N` 复合赋值提取器不解析 →
+  //     json 缺 crit。值=字段终值（Item.crit 缺省 0 起步,+= 语义;消费链 =
+  //     itemCombat(vid).crit → Game.useCombatWeapon critTotal（:17003,悠悠球 3291
+  //     case 'yoyo' 支 :17583 yoyo.critChance=critTotal）/ 远程主路径 critTotal
+  //     （:15651,1784/1835 弹 312/323 经 useAmmo 通用尾支））：
+  //     1784 `crit += 6`（Item.cs:19787,case 1782 邻位同族万圣枪）
+  //     1835 `crit += 10`（Item.cs:20322）
+  //     3291 `crit += 10`（Item.cs:30169,外层 case 3291/3292 共享块内 switch(type)
+  //       内层 case 3291——双层 case,提取器只解析外层直写面）
+  '1784': { crit: 6 },
+  '1835': { crit: 10 },
+  '3291': { crit: 10 },
   // ---- R29 移交注册项两弓（R30/R31 合并批 2026-08-25；Item.cs 1458 实测行号）：
   //   DefaultToBow(singleShotTime, shotVelocity, hasAutoReuse)（:48425-48432）=
   //   DefaultToRangedWeapon(1, AmmoID.Arrow=40, …)+width14/height30+UseSound Item5

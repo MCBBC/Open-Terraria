@@ -82,9 +82,14 @@ export class InfoAccsLayer {
           ...enemies.map((e) => ({ dead: e.dead, cx: e.cx, cy: e.cy, vanillaId: e.vanillaId })),
           ...critters.map((c) => ({ dead: c.dead, cx: c.cx, cy: c.cy, vanillaId: c.def?.npc ?? null })),
           // ★BJ122 2026-09-18：npcs 桶入池——原版扫 Main.npc 全表（:47776 活跃+
-          //  rarity 择优,无 townNPC/bound 排除门）;被缚族 105/106/123/354/589
-          //  rarity=1（:10283/:10297/:10534/:13544/:16694）、685 rarity=2（:17653）
+          //  rarity 择优,无 townNPC/bound 排除门）;被缚族 105/106/123/354/376/579/589
+          //  rarity=1（:10283/:10297/:10534/:13543/:13837/:16595/:16692）、
+          //  534 痛苦亡魂/685/686/687 rarity=2（:15855/:17653/:17667/:17680）
           //  → 原版分析仪可见（找被缚者本就靠它）,此前漏检=用户观测 3。
+          //  ★红蓝-H② 行号勘误（13544→13543/16694→16692）+域修正：被缚型 rarity
+          //  与名号都钉在【绑缚本体 id】,而本仓 bound TownNPC 实体携城镇 id——
+          //  Game.tickInfoAccs 已按 Game.boundAnalyzerVid 投影回本体 id 并压制
+          //  givenName（被缚者原版无名）;城镇型 rarity=0=原版同相不显。
           //  显示名 GivenOrTypeName（:47796）→ givenName 优先
           ...npcs.map((n) => ({ dead: n.dead, cx: n.cx, cy: n.cy, vanillaId: n.vanillaId, given: n.givenName })),
         ];

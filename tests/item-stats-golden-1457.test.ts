@@ -97,6 +97,35 @@ describe('Item 数值三方对账金标(json × 1456 × 1457)', () => {
       // （提取器 NUM_FIELDS 无该列→classB 以"1456=null→1457=N"形态出现,须在此锚定;
       //   ≥1111 新弹族由 NEW_ID_FLOOR.proj 豁免,无需逐条列出）
       'proj[639].localNPCHitCooldown', 'proj[932].localNPCHitCooldown',
+      // ★反哺批（2026-09-18 BJ127）提取器免疫列入面后新显影的真实 1456→1457 数值迁移：
+      //   1093（随从弹,1457 P.cs :10207）局部免疫冷却 8→9（1458 同 9 已核）——
+      //   ★BJ129③ 同日 json 重产落表（recon LAG 面清零,值 9 已在 json;与 MinionProj
+      //   CONTACT_CD_TABLE 行为面同值,tests/bj129-proj-nestedelse-crit 双面锁）
+      'proj[1093].localNPCHitCooldown',
+      // ★J1 扩面（2026-09-18,红蓝-J1①）：recon proj 面免疫四列入 fieldsOf/pushSurface
+      //   （红蓝-F g3 收口）后新显影的 CLASS B 迁移面。三组：
+      //   ①usesLocal 显影 12 条（76-78/121-126/301/309/597——json 面早已在列, recon 面此前不比）;
+      //   ②UseGroupStaticImmunity 参数化展开（extract-projectiles.mjs ⑨,J1 数据面收口）
+      //     ——10 id 组 usesIDStaticNPCImmunity/idStaticNPCHitCooldown=10/immunityIdentity
+      //     组键列（566→181/512·513→511/568→567/570·571→569）;567/568 的
+      //     usesIDStaticNPCImmunity 在 1456 已有裸写（:5926）→ 无 classB 不列;
+      //   ③286 直写族显影（1457 P.cs 免疫三旗 286=idStatic+applies cd 60）。
+      //   全部=1456=null→1457 真值新增（双树亲读,无删除支）。
+      'proj[76].usesLocalNPCImmunity', 'proj[77].usesLocalNPCImmunity', 'proj[78].usesLocalNPCImmunity',
+      'proj[121].usesLocalNPCImmunity', 'proj[122].usesLocalNPCImmunity', 'proj[123].usesLocalNPCImmunity',
+      'proj[124].usesLocalNPCImmunity', 'proj[125].usesLocalNPCImmunity', 'proj[126].usesLocalNPCImmunity',
+      'proj[301].usesLocalNPCImmunity', 'proj[309].usesLocalNPCImmunity', 'proj[597].usesLocalNPCImmunity',
+      'proj[181].usesIDStaticNPCImmunity', 'proj[181].idStaticNPCHitCooldown', 'proj[181].immunityIdentity',
+      'proj[286].usesIDStaticNPCImmunity', 'proj[286].idStaticNPCHitCooldown',
+      'proj[511].usesIDStaticNPCImmunity', 'proj[511].idStaticNPCHitCooldown', 'proj[511].immunityIdentity',
+      'proj[512].usesIDStaticNPCImmunity', 'proj[512].idStaticNPCHitCooldown', 'proj[512].immunityIdentity',
+      'proj[513].usesIDStaticNPCImmunity', 'proj[513].idStaticNPCHitCooldown', 'proj[513].immunityIdentity',
+      'proj[566].usesIDStaticNPCImmunity', 'proj[566].idStaticNPCHitCooldown', 'proj[566].immunityIdentity',
+      'proj[567].idStaticNPCHitCooldown', 'proj[567].immunityIdentity',
+      'proj[568].idStaticNPCHitCooldown', 'proj[568].immunityIdentity',
+      'proj[569].usesIDStaticNPCImmunity', 'proj[569].idStaticNPCHitCooldown', 'proj[569].immunityIdentity',
+      'proj[570].usesIDStaticNPCImmunity', 'proj[570].idStaticNPCHitCooldown', 'proj[570].immunityIdentity',
+      'proj[571].usesIDStaticNPCImmunity', 'proj[571].idStaticNPCHitCooldown', 'proj[571].immunityIdentity',
     ]);
     const unexpected: string[] = [];
     for (const line of r.classB) {

@@ -498,6 +498,31 @@ describe('SW-FX1④b AI_105 孢子云（:40768-40905）+ AI_106 迸气（:34144-
     for (let i = 0; i < 95 && !gas.dead; i++) gas.fixedUpdate(1 / 60, game);
     expect(gas.dead).toBe(true);                                          // ~60+35t 淡出消亡
   });
+
+  it('气团组共享 IDStatic 免疫（UseGroupStaticImmunity(569) :6219——组键 569 行共享）:三变体同敌只过一张组表门（红蓝-J1 运行时消费面审计;伤=1 防死判别,计 hurt 调用=门位判别）', () => {
+    const foe = Enemy.fromVanilla(3, 1000, 1000)!;
+    foe.id = 4299;
+    let hurtCalls = 0;
+    const origHurt = foe.hurt.bind(foe);
+    (foe as unknown as { hurt: (...a: unknown[]) => boolean }).hurt = (...args: unknown[]) => {
+      hurtCalls++;
+      return origHurt(...args);
+    };
+    const game = unitGame([foe]);
+    // 三变体 569/570/571 同帧同位重叠;伤=1（僵尸 45hp 不死=存活判别面）。
+    // 判别信号=hurt 调用数:组表共享 → 仅首个变体过 cd.ready 门（其余在 dealContacts
+    // 内被 continue 拦下,hurt 不被调用）;若表 per-instance（变异面）→ 三次全过门,
+    // hurt 被调 3 次（后两次由 Enemy.hurt 内 iframes 拒收）——门位差异即判别力。
+    const g1 = new SporeGasCloud(1000, 1000, 0, 0, 569, 1);
+    const g2 = new SporeGasCloud(1000, 1000, 0, 0, 570, 1);
+    const g3 = new SporeGasCloud(1000, 1000, 0, 0, 571, 1);
+    for (let i = 0; i < 5; i++) {          // 5 拍 ≈ 83ms < 10t=167ms 窗
+      g1.fixedUpdate(1 / 60, game);
+      g2.fixedUpdate(1 / 60, game);
+      g3.fixedUpdate(1 / 60, game);
+    }
+    expect(hurtCalls).toBe(1);             // 组表单门（per-instance 变异面=3）
+  });
 });
 
 // ===========================================================================

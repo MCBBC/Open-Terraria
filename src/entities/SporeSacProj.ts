@@ -48,6 +48,34 @@ export const SPORE_GAS_IDS = [569, 570, 571] as const;
 /** 云消亡迸气回调（Game 侧注入：NewProjectile(云心, 569+Next(3), 同伤) 出射口） */
 export type SporeGasSpawn = (x: number, y: number, vx: number, vy: number, dmg: number) => void;
 
+/** 组共享 IDStatic 免疫账（时间驱动衰减,WeaponProj.RainDropSharedImmunity 同构——
+ *  tick 空转免「N 实例 × dealContacts 循环头 = N 拍/帧」多例快放失真,窗口恒 10t）。
+ *  ★红蓝-J1 运行时消费面审计（2026-09-18）：原版 UseGroupStaticImmunity(:10678-10683)
+ *  = perIDStaticNPCImmunity[immunityIdentity] 行共享（组键 567=567/568 双云、组键
+ *  569=569/570/571 三气团——行号 :6201/:6219,1457/1458 两树全等）。曾:气团 per-
+ *  instance HitCdImpl（门位偏离原版组行语义——伤害总量当时被 Enemy.hurt iframes
+ *  全局窗掩蔽未溢出,见 dealContacts 调用位注）;云表 static HitCdImpl 有账但窗口按
+ *  在场实例数 N 倍速衰减（dealContacts 循环头逐调用 tick）。两账同构勘正=time 驱动
+ *  组行,门位回归原版。 */
+class SporeIdStaticGroup extends HitCdImpl {
+  private sm = new Map<number, number>();
+  private readonly cdMs = Math.round(10 * 1000 / 60);    // idStaticNPCHitCooldown 10t ≈167ms(60fps 基数)
+  override tick(): void { /* 时间驱动,无逐拍衰减（dealContacts 循环头调用位） */ }
+  override ready(id: number, _cooldown: number): boolean {
+    const now = Date.now();
+    if ((this.sm.get(id) ?? 0) > now) return false;
+    this.sm.set(id, now + this.cdMs);
+    if (this.sm.size > 512) {
+      for (const [k, v] of this.sm) if (v <= now) this.sm.delete(k);
+    }
+    return true;
+  }
+}
+/** 云组表：immunityIdentity=567（567/568 双型共行,:6201） */
+const SPORE_CLOUD_IMMUNE = new SporeIdStaticGroup();
+/** 气团组表：immunityIdentity=569（569/570/571 三变体共行,:6219）——组键独立于云组 */
+const SPORE_GAS_IMMUNE = new SporeIdStaticGroup();
+
 /** 孢子云 567/568（AI_105）——玩家装备 3336 周期掷定的驻场云,命中即消亡并迸气团 */
 export class SporeSacCloud extends Entity {
   damage: number;
@@ -74,8 +102,8 @@ export class SporeSacCloud extends Entity {
   /** IndexForVisuals = key.Index（:554）——实体自增 id 近似出生序,漂移向 6 档取模 */
   private readonly visualIndex: number;
   private readonly spawnGasCb: SporeGasSpawn | null;
-  /** 组共享 IDStatic 免疫（UseGroupStaticImmunity(567) :6201——双型同组键） */
-  private static readonly GROUP_CD = new HitCdImpl();
+  /** 组共享 IDStatic 免疫（UseGroupStaticImmunity(567) :6201——双型同组键 567 一行） */
+  private static readonly GROUP_CD = SPORE_CLOUD_IMMUNE;
 
   constructor(x: number, y: number, type: number, damage: number, knockback: number,
     visualIndex: number, spawnGas?: SporeGasSpawn) {
@@ -219,7 +247,6 @@ export class SporeGasCloud extends Entity {
   private rotation = 0;
   /** ai[0]（:34153 ≥60 转淡出） */
   private t = 0;
-  private readonly hitCd = new HitCdImpl();
 
   constructor(x: number, y: number, vx: number, vy: number, type: number, damage: number) {
     super();
@@ -253,8 +280,13 @@ export class SporeGasCloud extends Entity {
       return;
     }
     // penetrate −1 = 全局免疫窗冷却（原版 npc.immune[owner]=10）;淡出段 damage 未清
-    //（原版 AI_106 无 damage=0 支）→ 保持结算
-    dealContacts(this, game, this.hitCd, 10);
+    //（原版 AI_106 无 damage=0 支）→ 保持结算。节流=组表 SPORE_GAS_IMMUNE
+    //（UseGroupStaticImmunity(569) :6219——三变体共行）。★红蓝-J1 审计（2026-09-18）
+    // 勘正:曾 per-instance hitCd——伤害总量被 Enemy.hurt 内 iframes 全局窗掩蔽未溢出,
+    // 但门位偏离原版（原版=immune[owner] 清零+组行 :14031-14037 独扛节流）;归组行
+    // 语义后与云组表同构,判别面=tests/sw-fx1-accessories「组共享 IDStatic」
+    // （组表=1 次 hurt 调用,per-instance 变异面=15）。
+    dealContacts(this, game, SPORE_GAS_IMMUNE, 10);
   }
 
   draw(r: Renderer, _cam: Camera): void {
