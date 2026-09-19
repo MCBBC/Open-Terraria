@@ -655,21 +655,35 @@ const values = {};
   const bodyRest = npcCs.slice(start + 10);
   const methodEnd = bodyRest.search(/\n\t(public|private|protected|internal) [A-Za-z]/);
   const body = npcCs.slice(start, start + 10 + (methodEnd < 0 ? bodyRest.length : methodEnd));
-  const re = /\b(?:else )?if \(type == (\d+)\)/g;
+  // ★BJ174 反哺（2026-09-19）：联合条件块 `else if (type == 473 || type == 474 || ...)` 旧
+  //   正则要求 `\)` 紧跟首个 id → 整块被跳过,473-476（宝箱怪族 value=30000f,NPC.cs:14536-14546）
+  //   等 14 组联合块全部缺值（击杀零掉钱）。现捕获 `|| type == N` 尾链,组内每个 id 各取同值。
+  //   重产一致性:存量单 id 块匹配面不变（纯超集）;455-458/678-684 等 value=0 组本就缺省 0。
+  const re = /\b(?:else )?if \(type == (\d+)((?:\s*\|\|\s*type == \d+)*)\)/g;
   const marks = [];
   let m;
-  while ((m = re.exec(body))) marks.push({ id: Number(m[1]), at: m.index });
+  while ((m = re.exec(body))) {
+    const ids = [Number(m[1])];
+    for (const t of m[2].matchAll(/type == (\d+)/g)) ids.push(Number(t[1]));
+    marks.push({ ids, at: m.index });
+  }
   for (let i = 0; i < marks.length; i++) {
     const end = i + 1 < marks.length ? marks[i + 1].at : marks[i].at + 4000;
     const seg = body.slice(marks[i].at, end);
     const v = seg.match(/value = (\d+(?:\.\d+)?)f?;/);  // 25f / 5000f 浮点字面量
-    if (v) { values[marks[i].id] = Math.round(parseFloat(v[1])); continue; }
-    // buyPrice/SetShopValues 形态（boss value=Item.buyPrice,extract-npcvalue.mjs 同源;
-    // 旧只认裸字面量 → 世花/石巨人等 15 怪每次重跑丢失,2026-08-13 补齐防再犯）
-    let v2 = seg.match(/value = Item\.buyPrice\(([\d\s,]+)\)/) || seg.match(/SetShopValues\([^,]+, (?:Item\.)?(?:buyPrice|sellPrice)\(([\d\s,]+)\)\)/);
-    if (v2) {
+    const v2 = v ? null
+      : (seg.match(/value = Item\.buyPrice\(([\d\s,]+)\)/) || seg.match(/SetShopValues\([^,]+, (?:Item\.)?(?:buyPrice|sellPrice)\(([\d\s,]+)\)\)/));
+    if (!v && !v2) continue;
+    let val;
+    if (v) val = Math.round(parseFloat(v[1]));
+    else {
+      // buyPrice/SetShopValues 形态（boss value=Item.buyPrice,extract-npcvalue.mjs 同源;
+      // 旧只认裸字面量 → 世花/石巨人等 15 怪每次重跑丢失,2026-08-13 补齐防再犯）
       const args = (v2[1] || v2[2]).split(',').map((x) => Number(x.trim()));
-      values[marks[i].id] = args.reduce((acc, x) => acc * 100 + x, 0) * 100 ** (4 - args.length);
+      val = args.reduce((acc, x) => acc * 100 + x, 0) * 100 ** (4 - args.length);
+    }
+    for (const id of marks[i].ids) {
+      if (values[id] === undefined) values[id] = val;  // else-if 链组间不重复;防御首写胜
     }
   }
   // SetDefaultsFromNetId 负 id 变体（case -N: 块内的 value = Xf;——史莱姆变体专属值，

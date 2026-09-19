@@ -45,7 +45,7 @@ import { ARMOR_SET_BONUSES, DD2_PIECE_FX, matchArmorSetBonusVid, type ArmorSetBo
 import { SUMMON_GEAR } from '../data/vanillaSummonStats';
 import { TagEffectStack } from './WhipTag';
 import { harpyCharmEffect } from './Arrow';
-import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS } from '../data/tiles';
 import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 // ★SW-BJ59 滚轴鞋轨骑：TrackCollision/TrackRotation 单源复用（Minecart 实体同函数）
 import { trackCollision, trackRotation, magnetPosition, FLAG_ON_TRACK, FLAG_BOUNCY_BUMPER, FLAG_USED_RAMP, FLAG_HIT_SWITCH, FLAG_BOOST_LEFT, FLAG_BOOST_RIGHT } from '../world/MinecartTrack';
@@ -261,7 +261,8 @@ const KITE_ITEM_VIDS = new Set([4367, 4368, 4369, 4370, 4371, 4379, 4610, 4611,
 /** TileID.Sets.Platforms（TileID.cs:243，sheet id）——WorldGen.IsRope 的
  *  "绳穿平台/花盆箱/矿轨"支（WorldGen.cs:70140-70146：314 矿轨 / 380 花盆箱 /
  *  平台族格，上下 5 格内皆有绳时该格视作绳，可攀穿） */
-const VANILLA_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const VANILLA_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 /** Player.AFKTimeNeededForNoWormSpawns（Player.cs:971）——AFK 计数达此值 →
  *  NPC.cs:412 noGroundWorms=true（挂机玩家周围不出蠕虫族） */
 export const AFK_TIME_NEEDED_FOR_NO_WORM_SPAWNS = 300;
@@ -1198,9 +1199,9 @@ export class Player extends Entity {
   //      resolveWhipTagHit 统一经此查询（敌实体不再存 tag 态） ----
   tagEffectStack = new TagEffectStack(this);
   /** Player.maxTagEffects（:1187,默认 1;ResetEffects :18633 重置→equipStats 聚合） */
-  get maxTagEffects(): number { return this.equipStats.maxTagEffects; }
+  get maxTagEffects(): number { return this.equipStats.maxTagEffects ?? 1; }   // ★BJ175 桩面 ?? 防御（缺省 1=:1187/:2448）
   /** Player.tagEffectDuration（:1189,默认 1f）——tag/proc/自 buff 时长乘区 */
-  get tagEffectDuration(): number { return this.equipStats.tagEffectDuration; }
+  get tagEffectDuration(): number { return this.equipStats.tagEffectDuration ?? 1; }   // ★BJ175（缺省 1=:1189）
   /** Player.repeatWhipSwings（:1199,初始 -1）——蛇环补挥计数（真挥 +1 :49184,
    *  120t 无挥经 Update_SnakeBand :28623-28628 归 -1） */
   repeatWhipSwings = -1;
@@ -1412,7 +1413,7 @@ export class Player extends Entity {
     // :57546 (int)(20×(1+magicDamage+minionDamage−2))——原版 magicDamage/minionDamage
     // 为 1.0 基线全乘区,本仓 dmgMagic/minionDmg 为 0 基线加算累加器 ⇒ X+Y−1 =
     // (1+X')+(1+Y')−1 = 1+X'+Y'（零加成 = 20 基伤,组C 终盘换算勘误 2026-09-18）
-    const damage = Math.trunc(20 * (1 + es.dmgMagic + es.minionDmg));        // :57546
+    const damage = Math.trunc(20 * (1 + (es.dmgMagic ?? 0) + (es.minionDmg ?? 0)));        // :57546（★BJ175 桩面 ?? 防御,缺省 0）
     // C# float→int 截断同式（(int) 溢出 clamp 不建模——20×乘区量级无溢出面）
     const ent = game as unknown as {
       entities?: { add?: (e: unknown, bucket?: string) => void };
@@ -1690,7 +1691,7 @@ export class Player extends Entity {
   }
   /** 防御 = 基础(0) + 盔甲/配饰（含 vi_ 表防御+accfx def+词缀 62-65）+ 铁皮 Buff(+6)（时装不计） */
   get defense(): number {
-    let d = this.buffs.defenseBonus + this.equipStats.def + this.cartDefenseBonus;
+    let d = this.buffs.defenseBonus + (this.equipStats.def ?? 0) + this.cartDefenseBonus;   // ★BJ175 桩面 ?? 防御（缺省 0）
     if (this.usedAegisFruit) d += 4;   // UpdatePermanentBoosters :12447-12449
     for (const id of this.inv.equippedArmor()) {
       // ★armor.defense 死前腿已随 ItemDef.armor 死字段移除（2026-09-02,全仓零写入,
@@ -2832,7 +2833,7 @@ export class Player extends Entity {
     return this.baseMaxHp + this.buffs.healthBonus + lf;
   }
   get maxMana(): number {
-    return this.baseMaxMana + this.equipStats.mana + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481)
+    return this.baseMaxMana + (this.equipStats.mana ?? 0) + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481)（★BJ175 桩面 ?? 防御,缺省 0）
   }
   /** 随从/鞭伤害乘区（GetWeaponDamageMultiplier summon → minionDamage 链：独立第四链，
    *  不再复用 magic——MagicPower 等 magic-only 来源不吃召唤；四系通用来源照常） */
@@ -2843,14 +2844,14 @@ export class Player extends Entity {
   get maxMinions(): number {
     return 1 + (this.buffs.has(BuffType.Bewitched) ? 1 : 0)
       + (this.buffs.has(BuffType.Summoning) ? 1 : 0)
-      + this.equipStats.minionSlots;
+      + (this.equipStats.minionSlots ?? 0);   // ★BJ175 桩面 ?? 防御（缺省 0）
   }
   /** 哨兵上限（maxTurrets 链 :9863 War Table buff + 散件/套装——★终零波批注订正：
    *  旧注"War Table buff 未实装暂缺"系陈位,BuffType.WarTable(27,vanilla 348) 与
    *  buffs.has 消费位早已在轨） */
   get maxSentries(): number {
     // War Table buff 348（:9863-9866 maxTurrets++，:2714 默认 1）
-    return 1 + this.equipStats.sentrySlots + (this.buffs.has(BuffType.WarTable) ? 1 : 0);
+    return 1 + (this.equipStats.sentrySlots ?? 0) + (this.buffs.has(BuffType.WarTable) ? 1 : 0);   // ★BJ175 桩面 ?? 防御（缺省 0）
   }
   get thornsActive(): boolean {
     return this.thornsAmount > 0 || this.turtleSet;
@@ -2889,7 +2890,7 @@ export class Player extends Entity {
    *  原版猛爪手套 211 只给 meleeSpeed += 0.12 + autoReuseGlove（:14559-14562），
    *  0.12 已经 vanilla-accfx.json 走 equipStats.meleeSpeed，不应再翻倍。 */
   get attackSpeedMult(): number {
-    const raw = (1 + this.equipStats.meleeSpeed)
+    const raw = (1 + (this.equipStats.meleeSpeed ?? 0))   // ★BJ175 桩面 ?? 防御（缺省 0）
       * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
       * (this.buffs.has(BuffType.Werewolf) ? 1.051 : 1)      // 狼人 meleeSpeed += 5.1%（:11489）
       * (this.buffs.has(BuffType.Weak) ? 0.949 : 1)          // 虚弱 meleeSpeed -= 5.1%（:11507）
@@ -2913,7 +2914,7 @@ export class Player extends Entity {
     if (kind === 'summon') {
       // minionDamage 链（Player.cs GetWeaponDamageMultiplier summon 分支）：仅四系通用
       // 来源（怒气/食物）+ 召唤装备链；MagicPower/Archery 等 class 来源不吃
-      let m = 1 + st.minionDmg;
+      let m = 1 + (st.minionDmg ?? 0);   // ★BJ175 桩面 ?? 防御（缺省 0）
       if (this.buffs.has(BuffType.Rage)) m += 0.1;
       if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
@@ -2927,7 +2928,7 @@ export class Player extends Entity {
       if (this.ridingMount && this.mount.type >= 62 && this.mount.type <= 65) m += 0.1;
       return m;
     }
-    let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
+    let m = 1 + (kind === 'melee' ? (st.dmgMelee ?? 0) : kind === 'ranged' ? (st.dmgRanged ?? 0) : (st.dmgMagic ?? 0));   // ★BJ175 桩面 ?? 防御（缺省 0）
     if (kind === 'magic') {
       m += this.buffs.magicDmgBonus;            // MagicPower +20%（:9669）
       m *= this.buffs.manaSickMagicMult;        // 魔力眩晕最高 -25% 线性恢复（:10003/:25616）
@@ -2980,7 +2981,7 @@ export class Player extends Entity {
       //   ('ranged')（:1769）→ 先 /M 还原加算链、stack 加在后、再回乘 M,与原式逐项等价
       const arrowMult = this.buffs.arrowDmgMult * (st.shroomiteType === 'arrow' ? 1.12 : 1);
       const rangedMultDamage = this.buffs.has(BuffType.WitheredWeapon) ? 0.5 : 1;   // :26233
-      return ((base / rangedMultDamage) + st.arrowStack) * rangedMultDamage * arrowMult * stealthBonus;
+      return ((base / rangedMultDamage) + (st.arrowStack ?? 0)) * rangedMultDamage * arrowMult * stealthBonus;   // ★BJ175 桩面 ?? 防御（缺省 0）
     }
     if (kind === 'bullet') return base * (st.shroomiteType === 'bullet' ? 1.12 : 1) * stealthBonus;
     if (kind === 'rocket') return base * (st.shroomiteType === 'rocket' ? 1.12 : 1) * stealthBonus;
@@ -3010,7 +3011,7 @@ export class Player extends Entity {
     else if (eqA.shroomiteSet) a = -Math.round(750 * (1 - shroomiteStealthRemap(this.stealth)));  // :26016 Remap 轴
     else if (eqA.vortexSet) a = -Math.round(1200 * s1);  // :26045 平铺 (1−s),尾支
     else a = 0;
-    a += eqA.aggroAcc + eqA.aggroPiece;   // 配饰轴+甲件轴（多源 +=,终零波批）
+    a += (eqA.aggroAcc ?? 0) + (eqA.aggroPiece ?? 0);   // 配饰轴+甲件轴（多源 +=,终零波批;★BJ175 桩面 ?? 防御,缺省 0）
     // 隐身药水(10)：aggro 钳位（Player.cs:25437-25445）——未挥击钳 -750（索敌距离
     // +750 曼哈顿 = 敌怪"看不见"），挥击中只钳 -250；只降不升（潜行套 -1200 不被抬回）
     if (this.buffs.has(BuffType.Invisibility)) {
@@ -3216,7 +3217,7 @@ export class Player extends Entity {
   /** 装备暴击率（critX 段 + 词缀 67/68） */
   critChance(kind: 'melee' | 'ranged' | 'magic'): number {
     const st = this.equipStats;
-    let c = kind === 'melee' ? st.critMelee : kind === 'ranged' ? st.critRanged : st.critMagic;
+    let c = kind === 'melee' ? (st.critMelee ?? 0) : kind === 'ranged' ? (st.critRanged ?? 0) : (st.critMagic ?? 0);   // ★BJ175 桩面 ?? 防御（缺省 0,基础 4 在调用侧）
     // R1 药水：暴怒(115)全系暴击 +10（:9890）；醉酒(25)近战暴击 +2（:11515）
     if (this.buffs.has(BuffType.Wrath)) c += 10;
     if (this.buffs.has(BuffType.BrainOfConfusionBuff)) c += 10; // BOC（:9639）
@@ -4162,9 +4163,9 @@ export class Player extends Entity {
     // 修复半边;regen+10 保留）;手环族 982/6188/6189 的 delayBonus++ 同批删除
     // （1458 :15044）——1458 删除,数据面已同步清零（vanilla-accfx.json 三键已删,
     // equipStats.manaRegenDelayBonus 恒 0,惩罚期衰减恒 1/tick）
-    const mRegenBonus = eqM.manaRegenBonus
+    const mRegenBonus = (eqM.manaRegenBonus ?? 0)   // ★BJ175 桩面 ?? 防御（缺省 0）
       + (this.buffs.has(BuffType.StarInBottle) ? 10 : 0);
-    const mDelayBonus = eqM.manaRegenDelayBonus;
+    const mDelayBonus = eqM.manaRegenDelayBonus ?? 0;
     if (this.manaRegenDelay > 0) {
       // 惩罚期衰减（:19545-19557）：基础 1 + delayBonus；静止/抓钩/魔力再生再 −1
       //（R5-F8：原版静止判定 = IsConsideredStandingStill || grappling[0] >= 0,

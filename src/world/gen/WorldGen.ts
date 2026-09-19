@@ -88,7 +88,7 @@ export const SLOT_VANILLA_PASSES: Readonly<Record<string, readonly string[]>> = 
   '终清理': ['Final Cleanup'],
 };
 import type { TileStore } from '../TileStore';
-import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
+import { T, TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_SHEETS } from '../../data/tiles';
 import { World, worldSizeFor, type WorldSize } from '../World';
 import { Lang } from '../../i18n/Lang';   // ★IIIII214 墓园碑文 IndexedFromCategory（cs:25161 掷流面见 spawnGraveyardBiome）
 
@@ -2065,7 +2065,7 @@ function tileRunnerHell(st: World['store'], rng: RNG, gs: GenState, i: number, j
 // 5000 次尝试放 2×2 墓碑 + 写 Epitaph 碑文（cs:25161——RandomText.ts 数据的唯一消费端）。
 const GY_EXCLUDE_SHEETS = new Set([
   25, 203, 53, 191, 383, 226, 225, 367, 368, 57, 70, 189,   // cs:25124 字面 id
-  41, 43, 44, 677, 678, 679,                                 // tileDungeon[] 全表（1457 Main.cs:8131-8136）
+  ...TILE_DUNGEON_SHEETS,                                    // tileDungeon[] 全表（★BJ187 单源 data/tiles.ts）
   // ★IIIII214 勘误：曾写 {481,482,483}（与 Pots pass 的字面 type 判定混淆）——原版
   //   tileDungeon[] 实为 {41,43,44,677,678,679}（1457≡1458）。本 seed 482 全图 5706 格
   //   （y459..904 恰地下墓园带）——曾致 81×81 扫描误拒整处墓园（本轮 rig 对拳实证惰性：

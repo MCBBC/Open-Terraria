@@ -291,7 +291,7 @@ export class WhipProj extends Entity {
   /** owner.whipRangeMultiplier（:45642；提基/星尘/黑曜来源） */
   private get whipRangeMultiplier(): number {
     const o = this.ownerRef();
-    return o ? 1 + o.equipStats.whipRange : 1;
+    return o ? 1 + (o.equipStats.whipRange ?? 0) : 1;   // ★BJ175 桩面 ?? 防御（缺省 0=加算池）
   }
   /** 当前挥动进度 ai[0]/timeToFlyOut（:45625） */
   get progress(): number { return this.ai0 / this.timeToFlyOut; }
@@ -623,7 +623,7 @@ export class WhipProj extends Entity {
             (e as unknown as { vy?: number }).vy ?? 0));
         }
         const wpOwner = this.ownerRef();
-        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
+        e.hurt(applyBannerDamageDealt(game, e, whipDmg), Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? (wpOwner.equipStats.armorPen ?? 0) : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068; ★BJ184 桩面 ?? 防御族（缺省 0）
         // ★L5 长尾批：月主鞭 1035 命中编排（Projectile.Damage case1035 :13025-13029——
         // settings.MovementVector=velocity.RotatedBy(±τ×0.1)、clientOnly:false → 本地直生
         // + module8 上行。PositionInWorld=目标盒内随机点（本仓以敌盒随机点近似）。

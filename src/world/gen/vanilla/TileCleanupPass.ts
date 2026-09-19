@@ -35,7 +35,7 @@ import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType } from './GenSolid';
@@ -85,13 +85,13 @@ for (const [vidStr, key] of Object.entries(VANILLA_ITEM_KEY_BY_ID)) {
   const jsId = ITEM_BY_KEY[key];
   if (jsId !== undefined && !VAN_ID_OF_JS.has(jsId)) VAN_ID_OF_JS.set(jsId, Number(vidStr));
 }
-/** Main.tileSolidTop（⑦ 26 祭坛下方补型门） */
-const SOLID_TOP_99 = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileSolidTop（⑦ 26 祭坛下方补型门）——★BJ187 收编 data/tiles.ts:
+ *  SOLID_TOP_SHEETS 单源（84 项逐值全等;旧 79 项漏 Main.cs:10125-10131 循环臂
+ *  435-439 队伍平台,生成期不可达=行为零差） */
+const SOLID_TOP_99 = SOLID_TOP_SHEETS;
 /** TileID.Sets.Platforms（TileID.cs:243） */
-const PLATFORM_99 = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORM_99 = PLATFORMS_SHEETS;
 /** SaveSlopes[t] = tileSolid[t] ∪ NonSolidSaveSlopes（TileID.cs:425-429 静态构造）。
  *  ★IIII 批勘误（2026-08-18）：SaveSlopes 数组在 TileID 静态构造时**一次性**从
  *  Main.tileSolid 拷贝——之后生成期的一切 tileSolid 翻转（含本 pass 头的 379=false）
@@ -183,7 +183,8 @@ function dripFor(liquidType: number): number {
 }
 
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 的树干保护门 */
-const IS_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const IS_TREE_TRUNK = IS_A_TREE_TRUNK_SHEETS;
 /** WorldGen.CanKillTile(i,j)（cs:62260+,162 薄冰语境可达子集）：
  *  上邻树干族（IsATreeTrunk/323,带帧位例外）→ false;wall350 → false;
  *  Boulders+CheckBoulderChest / 门/祭坛等族在 162 语境不可达,略。 */

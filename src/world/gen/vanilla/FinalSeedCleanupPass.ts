@@ -24,7 +24,7 @@
 //  与 errorWorld 均为 1457 SecretSeed **哈希注册**（无公开文本种子），本仓 SeedEasterEggs
 //  仅登记旗标位（恒 false）——文本/哈希触发链归秘密种子批（批 F）。终扫的落砂静态化
 //  部分不依赖旗标，普通世界照跑。
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { TileStore } from '../../TileStore';
 import type { SeedFlags } from '../SeedEasterEggs';
@@ -52,7 +52,8 @@ const sheetOf = (t: number): number => (t >= 0 && t < SHEET_OF.length ? SHEET_OF
 const FALLING_SHEETS = new Set([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
 
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 上格早退门 */
-const IS_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const IS_TREE_TRUNK = IS_A_TREE_TRUNK_SHEETS;
 /** cs:62308-62316 上邻保护族（21 箱/26 祭坛/72/77/88 梳妆台/467/488 倒木）——
  *  TileCleanupPass 同表副本（同源惯例,不 import 防耦合） */
 const UP_PROTECT_FAMILY = new Set([21, 26, 72, 77, 88, 467, 488]);
@@ -327,8 +328,8 @@ function doPaintEverythingNegativeSingleTile(st: TileStore, x: number, y: number
     return;
   }
   const sh = sheetOf(st.type[i]!);
-  const DUNGEON_TILES = new Set([41, 43, 44, 677, 678, 679]);
-  const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+  const DUNGEON_TILES = TILE_DUNGEON_SHEETS;   // Main.tileDungeon（★BJ187 单源 data/tiles.ts）
+  const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;   // Main.wallDungeon（★BJ187 单源）
   const CRACKED = new Set([481, 482, 483]);
   const CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
   if (st.flags[i] && DUNGEON_TILES.has(sh)) st.paint[i] = 30;

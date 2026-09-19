@@ -113,6 +113,69 @@ const T_SHEET_TABLES = [
     'world/gen/vanilla/FinalCleanupPass.ts', 'world/gen/vanilla/TemplePass.ts']],
   ['TILE_AXE_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'player/SmartCursor.ts', 'player/SmartSelect.ts']],
   ['TILE_HAMMER_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'player/SmartCursor.ts', 'player/SmartSelect.ts']],
+  // ★BJ168-债2（2026-09-19）tileCut/BreakableWhenPlacing/TileID.Sets 三表单源收编家族:
+  //   data/tiles.ts=唯一定义家;副本(TILE_CUT_FC/PC_TILE_CUT/AV_TILE_CUT/PC_BREAK_PLACE/
+  //   AV_BREAK_PLACE 与 IsATreeTrunk×4/Boulders×7/Platforms×8 世界生成面)已拆除——
+  //   任何文件再出现这些名字的【定义】即 T2 红(结构锁=无副本可立;家清单内=已核读
+  //   sheet 域消费面)。BOULDERS_IDS 为内部域镜像,入清单同样只作防复活锁。
+  //   ★登记债:core/Game.ts:1554 同名本地副本 PLATFORMS_SHEETS 未收编(Game.ts 为并行
+  //   会话热文件,本批不落刀)——此处白名单仅豁免其既有存在,收编时从清单摘除。
+  ['TILE_CUT_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'world/TileAnchorValidator.ts',
+    'world/gen/vanilla/SurfaceDecorPasses.ts', 'world/evolution/WorldEvolution.ts',
+    'entities/RollingBoulder.ts', 'world/gen/vanilla/FinalCleanupPass.ts',
+    'world/gen/vanilla/BuriedChestsPass.ts', 'world/gen/vanilla/DesertPass.ts',
+    'world/gen/vanilla/DungeonPass.ts', 'world/liquid/LiquidSim.ts']],
+  ['BREAKABLE_WHEN_PLACING_SHEETS', ['data/tiles.ts', 'world/TileAnchorValidator.ts',
+    'world/gen/vanilla/SurfaceDecorPasses.ts', 'world/evolution/WorldEvolution.ts',
+    'entities/RollingBoulder.ts', 'player/SmartCursor.ts',
+    'world/gen/vanilla/BuriedChestsPass.ts', 'world/gen/vanilla/DesertPass.ts',
+    'world/gen/vanilla/DungeonPass.ts']],
+  // ★BJ182b（2026-09-19）收编批:Main.tileTable 单源扩面（76/80 项旧副本族全拆——
+  //   FinalCleanup/HalfBrick×2/Piles×2/Traps×2 曾缺 Main.cs:10125-31 循环臂 435-439;
+  //   BuriedChests PC_TILE_TABLE 曾缺 280=鸟笼笼族桌面路, BJ168-债2 附录登记本案定谳收编）
+  ['TILE_TABLE_SHEETS', ['data/tiles.ts', 'core/Game.ts', 'player/SmartCursor.ts',
+    'world/TileAnchorValidator.ts', 'world/gen/vanilla/DungeonPass.ts',
+    'world/gen/vanilla/SkyblockPass.ts', 'world/gen/vanilla/SurfaceDecorPasses.ts',
+    'world/gen/vanilla/FinalCleanupPass.ts', 'world/gen/vanilla/HalfBrickPass.ts',
+    'world/gen/vanilla/PilesPass.ts', 'world/gen/vanilla/TrapsPass.ts',
+    'world/gen/vanilla/BuriedChestsPass.ts']],
+  ['IS_A_TREE_TRUNK_SHEETS', ['data/tiles.ts', 'world/Torch.ts',
+    'world/gen/vanilla/SecretSeedDoEndsPass.ts', 'world/evolution/WorldEvolution.ts',
+    'world/gen/vanilla/FinalCleanupPass.ts', 'world/gen/vanilla/MicroBiomesPass.ts',
+    'render/RenderAudit.ts', 'core/Game.ts', 'data/grappleHooks.ts',
+    'player/SmartCursor.ts', 'world/TreeShake.ts',
+    'world/gen/vanilla/FinalSeedCleanupPass.ts', 'world/gen/vanilla/TemplePass.ts',
+    'world/gen/vanilla/TileCleanupPass.ts', 'world/gen/vanilla/TrackPass.ts',
+    'world/gen/vanilla/TrapsPass.ts']],
+  ['IS_A_TREE_TRUNK_IDS', ['data/tiles.ts', 'world/gen/vanilla/HalfBrickPass.ts',
+    'world/gen/vanilla/TeleporterPass.ts']],
+  ['BOULDERS_SHEETS', ['data/tiles.ts', 'world/gen/vanilla/FinalCleanupPass.ts',
+    'world/gen/vanilla/BuriedChestsPass.ts', 'world/gen/vanilla/NotTheBeesPass.ts',
+    'world/gen/vanilla/SurfaceDecorPasses.ts', 'core/Game.ts', 'player/SmartCursor.ts',
+    'world/DungeonDualZones.ts', 'world/spawn/ExtraSpawnsRoyale.ts',
+    'world/gen/vanilla/CaveHousePass.ts', 'world/gen/vanilla/DungeonPass.ts',
+    'world/gen/vanilla/FinishNoTrapsPass.ts', 'world/gen/vanilla/LivingTreePass.ts',
+    'world/gen/vanilla/PilesPass.ts', 'world/gen/vanilla/Spread.ts',
+    'world/gen/vanilla/StatuesPass.ts', 'world/gen/vanilla/TemplePass.ts',
+    'world/gen/vanilla/TrackPass.ts', 'world/gen/vanilla/TrapsPass.ts']],
+  ['BOULDERS_IDS', ['data/tiles.ts', 'world/gen/vanilla/FinalCleanupPass.ts',
+    'world/gen/vanilla/BuriedChestsPass.ts', 'world/gen/vanilla/DesertPass.ts',
+    'world/gen/vanilla/MicroBiomesPass.ts', 'world/gen/vanilla/CorruptionPass.ts',
+    'world/gen/vanilla/BrokenTrapCleanupPass.ts', 'world/gen/vanilla/HalfBrickPass.ts']],
+  ['PLATFORMS_SHEETS', ['data/tiles.ts', 'world/Torch.ts',
+    'world/gen/vanilla/FinalCleanupPass.ts', 'world/gen/vanilla/BuriedChestsPass.ts',
+    'world/evolution/WorldEvolution.ts', 'world/gen/vanilla/SurfaceDecorPasses.ts',
+    'core/Game.ts', 'entities/LeashedCritter.ts', 'entities/Player.ts',
+    'entities/RollingBoulder.ts', 'player/SmartCursor.ts', 'render/VanillaTiler.ts',
+    'ui/JourneyBrowser.ts', 'wld/WldImport.ts', 'world/spawn/SpawnPlacement.ts',
+    'world/gen/vanilla/DungeonDualLayout.ts', 'world/gen/vanilla/DungeonEarlyFeatures.ts',
+    'world/gen/vanilla/DungeonPass.ts', 'world/gen/vanilla/FinishNoTrapsPass.ts',
+    'world/gen/vanilla/HellforgesPass.ts', 'world/gen/vanilla/PilesPass.ts',
+    'world/gen/vanilla/StatuesPass.ts', 'world/gen/vanilla/TeleportSpotCheck.ts',
+    'world/gen/vanilla/TemplePass.ts', 'world/gen/vanilla/TileCleanupPass.ts',
+    'world/gen/vanilla/TrapsPass.ts']],
+  ['PLATFORMS_IDS', ['data/tiles.ts', 'world/gen/vanilla/CorruptionPass.ts',
+    'world/gen/vanilla/QuickCleanupPass.ts', 'world/gen/vanilla/HalfBrickPass.ts']],
 ];
 // ---- IDG-T3 命名域纪律匹配(internalIdsOfVanSheets 产物禁 _SHEETS 后缀) ----
 const T3_NAME_LIE = /const\s+([A-Za-z0-9_]*_SHEETS)\s*=\s*internalIdsOfVanSheets\s*[(<]/;

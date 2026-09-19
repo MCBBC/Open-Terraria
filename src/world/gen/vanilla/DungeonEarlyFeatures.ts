@@ -28,7 +28,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
-import { TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
+import { TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS } from '../../../data/tiles';
 import { genKillTile } from './FinalCleanupPass';
 import { placePlate } from './TrapsPass';
 
@@ -70,7 +70,8 @@ const fr = Math.fround;
 // TileID.Sets.BasicChest（箱子两族；DropTrap ±25 扫描盒拒门 cs:146-150）。
 const DE_BASIC_CHEST_SHEET = new Set([21, 467]);
 // TileID.Sets.Platforms（DropTrap 终界探深跳平台支 cs:370 !Platforms[tile.type]）。
-const DE_PLATFORM_SHEET = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const DE_PLATFORM_SHEET = PLATFORMS_SHEETS;
 
 const innerOfSheet = (sheetId: number): number => TILE_INTERNAL_BY_SHEET.get(sheetId) ?? -1;
 function sheetOf(st: TileStore, x: number, y: number): number {

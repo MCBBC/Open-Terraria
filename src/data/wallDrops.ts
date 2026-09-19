@@ -17,11 +17,15 @@
 //    185 Cave8Unsafe 187 Sandstone 188-190 Corruption Unsafe 216-223 HardenedSand/Sandstone 族
 //    244 LivingWoodUnsafe 272-273 Echo Unused 349 StoneUnsafe 350 UnbreakableBlockWall(另由
 //    CanPlayerSmashWall Player.cs:46305 恒拒+爆炸跳过)。
-//  - fail 门 KillWall_CheckFailure :60901-60912：wallDungeon(Main.cs:10507-10515 {7,8,9,94-99})
+//  - fail 门 KillWall_CheckFailure :60901-60912：wallDungeon(Main.cs:10734-10745 {7,8,9,94-99})
 //    需 downedBoss3(骷髅王)、87 蜥蜴墙需 downedGolemBoss——fail 时墙保持原状、不掉物（尘/音照放）。
 
-/** Main.wallDungeon（Main.cs:10507-10515）——KillWall_CheckFailure 消费 */
-export const WALL_DUNGEON_WALLS: ReadonlySet<number> = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+import { WALL_DUNGEON_SHEETS } from './tiles';
+
+/** Main.wallDungeon（Main.cs:10734-10745）——KillWall_CheckFailure 消费。
+ *  ★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等）——转出口
+ *  保持旧 API（Game.ts 拆墙 fail 门/掉落共用导入面不动） */
+export const WALL_DUNGEON_WALLS: ReadonlySet<number> = WALL_DUNGEON_SHEETS;
 
 /**
  * 墙 id → 掉落物品（原版 item id）。查不到 = 不掉（原版 GetItemDrops 返 0）。

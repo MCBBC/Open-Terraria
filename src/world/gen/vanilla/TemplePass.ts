@@ -7,7 +7,7 @@
 import { TileStore } from '../../TileStore';
 import { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, FORBIDS_SLOPING_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, FORBIDS_SLOPING_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 // ★1457 对齐档 2：砖线（makeTemple_GenerateBricks）从 1457 语义存档即插接线
 import { makeTempleGenerateBricks } from './rollback1457/TempleBricks.1457';
@@ -30,8 +30,9 @@ const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const MUD_TP = TILE_BY_KEY['mud']!;
 /** cs:15961 `type == 191`（活木块,LivingTrees 已写入的树干/枝干壳） */
 const LIVING_WOOD_TP = TILE_BY_KEY['v_191_living_wood_block']!;
-/** Main.tileDungeon（Main.cs:7941-7946，NotTheBeesPass 同表副本——防耦合） */
-const TILE_DUNGEON_SHEETS_TP = new Set([41, 43, 44, 677, 678, 679]);
+/** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
+ *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等;「防耦合」旧注随单源化退役） */
+const TILE_DUNGEON_SHEETS_TP = TILE_DUNGEON_SHEETS;
 
 // ---- mayanTrap（cs:8314-8644）实心谓词族（生成期 tileSolid = vanGenSolidType） ----
 const SHEET_OF_TP = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -40,25 +41,33 @@ for (let q = 0; q < TILE_DEFS.length; q++) {
   if (typeof s === 'number') SHEET_OF_TP[q] = s;
 }
 const sheetOfTP = (t: number): number => (t >= 0 && t < SHEET_OF_TP.length ? SHEET_OF_TP[t] : -1);
-/** Main.tileSolidTop（Main.cs:6764+ 全 86 项，TrapsPass 同表副本——不 import 防耦合） */
-const SOLID_TOP_TP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileSolidTop 全表——★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项）。
+ *  旧 79 项副本漏 Main.cs:10125-10131 循环臂 435-439（BJ186 登记的真值差#1;「Echo
+ *  平台」系台账笔误,435-439=队伍平台族 TeamBlockGreen/Blue/Yellow/Pink/WhitePlatform,
+ *  427=红队平台）——solidOrSlopedTP/solidTileTP 的 `!SOLID_TOP_TP.has(sheet)` 减法腿
+ *  对队伍平台曾误判实心（vanilla SolidOrSlopedTile cs:70046 tileSolidTop[435-439]=true
+ *  应排除）;队伍平台 worldgen 不可达=潜在真值差,本臂补齐后与 vanilla 对齐。
+ *  「不 import 防耦合」旧注随单源化退役。 */
+const SOLID_TOP_TP = SOLID_TOP_SHEETS;
 /** TileID.Sets.Platforms（TileID.cs:243） */
-const PLATFORMS_TP = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORMS_TP = PLATFORMS_SHEETS;
 /** TileID.Sets.Boulders（TileID.cs:195） */
-const BOULDERS_TP = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS_TP = BOULDERS_SHEETS;
 // ★BJ158①（2026-09-18）：ForbidsSloping（cs:81437）sheet 域本地副本拆除——收编
 //  data/tiles.ts 单源 FORBIDS_SLOPING_SHEETS（smoothSlopeTP 上格门 sheetOfTP 域消费）。
 /** CanPoundTile 直拒族（cs:81434 switch） */
 const CANT_POUND = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484]);
 /** IsATreeTrunk（TileID.cs:161）——CanKillTile 树干保护门（本语境可达子集） */
-const TREE_TRUNKS_TP = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TREE_TRUNKS_TP = IS_A_TREE_TRUNK_SHEETS;
 
 /** SolidOrSlopedTile（cs:70046）：active && tileSolid && !tileSolidTop && !inActive
- *  ——名字带 Sloped 但**不含坡条件**（实心且无论坡向） */
-function solidOrSlopedTP(st: TileStore, x: number, y: number): boolean {
+ *  ——名字带 Sloped 但**不含坡条件**（实心且无论坡向）。
+ *  导出仅供 tests/bj187-solidtop-dungeon-authority 真值差影响面探针（435-439 补臂
+ *  前后误实心对照）——消费面仍以本文件内部为准 */
+export function solidOrSlopedTP(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;

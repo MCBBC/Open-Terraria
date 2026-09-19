@@ -28,7 +28,7 @@ import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { vanGenSolidType } from './GenSolid';
 
@@ -41,12 +41,14 @@ for (const d of TILE_DEFS) {
 
 const TELEPORTER_SHEET = 235;
 const PLATE_SHEET = 135;
-/** Main.wallDungeon（WallID.cs：{7,8,9,94..99} 地牢砖墙族） */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.wallDungeon（Main.cs:10734-10745：{7,8,9,94..99} 地牢砖墙族）——★BJ187
+ *  收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 /** TileID.Sets.Clouds（★1457 TileID.cs:197：{189,196,460,717,718,719} 云族） */
 const CLOUD_TILES = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
-/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 上邻树干保护门 */
-const IS_TREE_TRUNK = idsByVanillaSheet(5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634);
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 上邻树干保护门
+ *  ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d) */
+const IS_TREE_TRUNK = IS_A_TREE_TRUNK_IDS;
 /** cs:62308-62316 上邻保护族（箱 21/祭坛 26/72/77/88/467/488） */
 const UP_PROTECT_FAMILY = idsByVanillaSheet(21, 26, 72, 77, 88, 467, 488);
 /** TileID.Sets.Boulders（TileID.cs:150 区）——CanKillTile 巨石-箱复核（本仓生成语境

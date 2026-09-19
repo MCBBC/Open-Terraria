@@ -9,7 +9,7 @@ import type { TileStore } from '../../TileStore';
 import { FastRandom } from '../../../core/rng';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, BOULDERS_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { placeTight } from './ShimmerPass';
 import { placeTilePrologueClear } from './WorldGenTileHelpers';
@@ -902,7 +902,9 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   const T751 = TILE_BY_KEY['v_751_sleeping_digtoise']!;
   const T484 = TILE_BY_KEY['v_484_rolling_cactus']!;
   const T187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
-  const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+  // TileID.Sets.Boulders——★BJ168-债2（2026-09-19）本地 idsByVanillaSheet 派生副本
+  // 拆除,收编 data/tiles.ts 单源 BOULDERS_IDS（内部 id 域,与旧习语逐值全等已探针定谳;
+  // 下方 InvalidTileForPiles 门消费面同名直改）
   const freeAt = (x: number, y: number) => inW(x, y) && st.flags[st.idx(x, y)] === 0;
   const dryAt = (x: number, y: number) => inW(x, y) && st.liquid[st.idx(x, y)] === 0;
   // ★实心查询走 genSolidType（cs:12537 起生成期 tileSolid[484]=false）：本遍已放置
@@ -947,7 +949,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     for (let k = -1; k <= 1; k++) {
       if (!freeAt(ax + k, ay - 1) || !freeAt(ax + k, ay)) return false;
       const bi = st.idx(ax + k, ay + 1);
-      if (st.flags[bi] && BOULDERS.has(st.type[bi]!)) return false;    // InvalidTileForPiles
+      if (st.flags[bi] && BOULDERS_IDS.has(st.type[bi]!)) return false;    // InvalidTileForPiles
       if (!solidGenAt(ax + k, ay + 1)) return false;
     }
     for (let k = 0; k < 3; k++) {
@@ -999,17 +1001,18 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   //     (:792 Main.rand.Next)在门禁求值后、函数尾才执行；旧版无条件先掷=多耗骰。
   //  ② 占用判定=active && !(tileCut∖{484,654} ∪ BreakableWhenPlacing)（cs:337-343
   //     的 flag5）——可切覆盖族（草/苗/蛛网等）不算阻挡。表与 BuriedChestsPass
-  //     的 PC_TILE_CUT∖{484,654}/PC_BREAK_PLACE 同源。
+  //     的 TILE_CUT_SHEETS∖{484,654}/BREAKABLE_WHEN_PLACING_SHEETS 同源。
+  //     ★BJ168-债2（2026-09-19）：本地副本 AV_TILE_CUT/AV_BREAK_PLACE 拆除,收编
+  //     data/tiles.ts 单源 TILE_CUT_SHEETS/BREAKABLE_WHEN_PLACING_SHEETS（逐值对拍
+  //     41≡41/11≡11,tests/tile-domain-sentinel §6c 金标+§6e 结构锁）。
   const AV_LIQ_LAVA = 2;   // 原版 liquidType 1(lava)→ 本仓库 +1 编码
   const AV_CUT_KEPT = new Set([484, 654]);
-  const AV_BREAK_PLACE = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
-  const AV_TILE_CUT = new Set([3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201, 205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637, 638, 654, 655, 711]);
   const avBlocksAt = (x: number, y: number): boolean => {
     if (!inW(x, y)) return false;
     const ti = st.idx(x, y);
     if (!st.flags[ti]) return false;
     const sh = TILE_DEFS[st.type[ti]]?.vanilla?.sheet ?? -1;
-    const overwritable = (AV_TILE_CUT.has(sh) && !AV_CUT_KEPT.has(sh)) || AV_BREAK_PLACE.has(sh);
+    const overwritable = (TILE_CUT_SHEETS.has(sh) && !AV_CUT_KEPT.has(sh)) || BREAKABLE_WHEN_PLACING_SHEETS.has(sh);
     return !overwritable;
   };
   /** TileObjectData.LiquidPlace（cs:1853-1899）485 视图：lava=NotAllowed。 */

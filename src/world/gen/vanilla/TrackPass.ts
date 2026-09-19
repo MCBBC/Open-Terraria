@@ -30,7 +30,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, FORBIDS_SLOPING_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, FORBIDS_SLOPING_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
@@ -97,9 +97,11 @@ export function __setTrackDraws(fn: (() => number) | undefined): void {
 /** CanPoundTile 型门(cs:81445-81453):门/助推轨/巨石族等禁 pounded 坡面(vanilla 型号) */
 const POUND_BLOCK_SHEETS = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484]);
 /** TileID.Sets.Boulders(TileID.cs:195) */
-const BOULDER_SS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDER_SS = BOULDERS_SHEETS;
 /** TileID.Sets.IsATreeTrunk(CanKillTile cs:62276 消费) */
-const TREE_TRUNK_SS = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TREE_TRUNK_SS = IS_A_TREE_TRUNK_SHEETS;
 /** TileID.Sets.PreventsTileRemovalIfOnTopOfIt(TileID.cs:169;HasReasonToReturnEarly) */
 const PREVENTS_REMOVAL_SS = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
 /** TileID.Sets.IsAContainer(TileID.cs:405) */

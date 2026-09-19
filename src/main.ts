@@ -346,6 +346,9 @@ function initCameraModeWiring(game: Game): boolean {
     u.hotbarEl?.classList.toggle('sw-camera-hide', active);
     u.hotbarNameEl?.classList.toggle('sw-camera-hide', active);
     u.buffBar?.classList.toggle('sw-camera-hide', active);
+    // ★信息栏 DOM 化(2026-09-19):DOM 信息列(?infodom=1 旗开才存在)同链隐藏——
+    //  相机模式激活帧 Renderer 在信息列步之前 return,DOM 元素不会自然收起
+    game.renderer.infoAccDom?.el.classList.toggle('sw-camera-hide', active);
   };
   return true;
 }

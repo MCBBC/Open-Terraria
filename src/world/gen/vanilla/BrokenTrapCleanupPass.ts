@@ -23,7 +23,7 @@
 //
 // 零掷骰 → 不收 rng。
 import { TileStore } from '../../TileStore';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, BOULDERS_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genKillTile } from './FinalCleanupPass';
 import type { RNG } from '../../../core/rng';
@@ -54,7 +54,8 @@ const IS_A_TRIGGER = idsByVanillaSheet(135, 136, 132, 144, 411, 423, 476, 440, 4
 /** TileID.Sets.Wiring.IgnoreWhenValidatingTraps(TileID.cs:134) */
 const IGNORE_WHEN_VALIDATING = idsByVanillaSheet(411, 10, 11, 387, 386, 388, 389, 4, 215, 21, 467, 219, 642, 314);
 /** TileID.Sets.Boulders(TileID.cs:195) */
-const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS = BOULDERS_IDS;
 
 const STATUE = sid(105);
 const TRACK = sid(314);

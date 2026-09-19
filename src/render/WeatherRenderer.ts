@@ -118,6 +118,23 @@ export function dustWaterFor(waterStyle: number): number {
   }
 }
 
+/** ★perf3（2026-09-19 trace 三批：drawRain 0.74s + bakeMemoized 0.58s）雨条 memo
+ *  数字键：24bit 光色（r[31:24] g[23:16] b[15:8]，各 8bit）+ 8bit type[7:0]。
+ *  · 单射域 rgb∈[0,255] ∧ type∈[0,255] → 键 < 2^32，Number 精确无哈希碰撞；
+ *    type = waterStyle×3+rand(3)，原版 waterStyle≤14 → type≤44 ≪ 255。
+ *  · rgb 越界钳 0..255 与 bakeTintFrame 内 tintByte 同式——越界输入烘出的图
+ *    = 钳位值烘出的图（fillStyle 同值，逐位同），合并同图键零视觉差。
+ *  · 旧串键 `rain-strip|${type}|${r},${g},${b}|k=${k}` 逐滴造串（750 滴×60fps
+ *    ≈ 4.5 万串/秒）= bakeMemoized 0.58s 主源；k 项冗余删除：gen 只吃
+ *    (type,cr,cg,cb)，同键不同 k 烘出逐位同图。掷序/算式零触碰（只改键编码）。 */
+export function rainStripMemoKey(cr: number, cg: number, cb: number, type: number): number {
+  const r = cr < 0 ? 0 : cr > 255 ? 255 : cr;
+  const g = cg < 0 ? 0 : cg > 255 ? 255 : cg;
+  const b = cb < 0 ? 0 : cb > 255 ? 255 : cb;
+  const t = type < 0 ? 0 : type > 255 ? 255 : type;
+  return r * 16777216 + g * 65536 + b * 256 + t;
+}
+
 /** WorldGen.SolidTile（WorldGen.cs:70487-70499）1:1：nactive + tileSolid + !tileSolidTop
  *  + **!halfBrick + slope==0**——与 SolidCollision 的半砖/斜坡语义【相反】（生成门：
  *  半砖/斜坡格不算实心，雨滴要生成在其上再立即撞死溅花）。★曾用 isSolid（仅类型位,
@@ -208,6 +225,10 @@ function getDustTex(): ImageBitmap | HTMLImageElement | null {
 const MAIN_MAX_RAIN = 750;
 
 export class WeatherRenderer {
+  /** ★perf3 逃生门（与云侧 ?cloudcache=0 同参同批）：0 = 雨条逐滴走旧路径
+   *  （save/translate/rotate/restore + 旧串键）——保留至用户验收。 */
+  static readonly rainPerf3 = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('cloudcache') !== '0' : true;
   private pool: RainDrop[] = [];
   private poolCap = 0;
   /** 雪粒池（Main.snowing() → dust 76；与雨滴独立——雪原永远飘雪，雨时成暴风雪） */
@@ -226,14 +247,16 @@ export class WeatherRenderer {
   //   · key 覆盖全部语义输入（rect/frame/全精度 RGB String() 往返/k 系数），命中
   //     与重烘产出逐位相同；键空间无界由 BAKE_MEMO_CAP 全清兜底（同 swayTintCache
   //     >512 清空惯例，清后首帧补烘代价微小）。
-  private bakeMemo = new Map<string, HTMLCanvasElement | null>();
+  private bakeMemo = new Map<string | number, HTMLCanvasElement | null>();
   private static readonly BAKE_MEMO_CAP = 4096;
   /** ★F1 热修（2026-09-01 二轮 review 自捕）：初始实现把 gen() 返回的【固定 key 共享
    *  scratch】直接存表——同一原始 key 的两次不同语义烘焙（不同 RGB）互相覆写像素，
    *  旧 memo 条目命中时画出的是后烘颜色=错色雨条。修正：miss 时对 scratch 立即做
    *  【自有克隆】再入表，条目对外不可变；原始 key 的后续烘焙永远伤不到缓存内容。
-   *  克隆本身按"写一次→反复采样"形态走默认 GPU 后备（见 memory canvas-readback-flag-policy）。 */
-  private bakeMemoized(key: string, gen: () => HTMLCanvasElement | null): HTMLCanvasElement | null {
+   *  克隆本身按"写一次→反复采样"形态走默认 GPU 后备（见 memory canvas-readback-flag-policy）。
+   *  ★perf3（2026-09-19 trace 三批）：key 放宽为 string | number——雨条走数字键
+   *  （rainStripMemoKey，0 分配），雪/沙尘仍串键。 */
+  private bakeMemoized(key: string | number, gen: () => HTMLCanvasElement | null): HTMLCanvasElement | null {
     const hit = this.bakeMemo.get(key);
     if (hit !== undefined) return hit;
     if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) { const k0 = this.bakeMemo.keys().next().value; if (k0 !== undefined) this.bakeMemo.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
@@ -621,16 +644,36 @@ export class WeatherRenderer {
     ctx.imageSmoothingEnabled = false;
     const tex = getRainTex();
     const texOk = tex && (tex.width > 0) && tex.width > 0;
+    // ★perf3（2026-09-19 trace 三批）：①基矩阵一帧一捕获（getTransform 回读值经
+    // DOMMatrix double 承载 = float32 位精确扩宽,6 数字参写回零损）,fast 路径每滴
+    // setTransform(基矩阵 6 参) 顶回基矩阵后 translate+rotate——浏览器侧与旧路径
+    // （save→translate→rotate）【同一拼接序、同一 f32 舍入】→ CTM 位精确同 →
+    // 光栅逐位同；省掉的是 per-drop save/restore 栈往返（×750 滴/帧）。
+    // ★★教训两则:（a）曾试「JS 侧折叠 base·T·R 一次 setTransform」——Skia 逐步
+    // f32 拼接 vs JS double 一次成形舍入不同,最近邻采样（imageSmoothing=false）下
+    // 雨条边缘像素整格翻转（探针实测 maxd 34-44）→ 按「≤1 LSB」纪律不落刀;
+    // （b）曾用 setTransform(DOMMatrix) 重载——字典转换绑定巨贵（探针实测快路径
+    // 反而 ×2.8 慢）→ 必须 6 数字参重载。②memo 数字键（rainStripMemoKey）见键注。
+    const bt = ctx.getTransform();
+    const bta = bt.a, btb = bt.b, btc = bt.c, btd = bt.d, bte = bt.e, btf = bt.f;
+    const memo = this.bakeMemo;
+    const fast = WeatherRenderer.rainPerf3;
     for (const d of this.pool) {
       if (!d.active) continue;
       const tx = Math.floor((d.x + 4) / TILE);
       const ty = Math.floor((d.y + 4) / TILE);
       const [lr, lg, lb] = hooks.lightAt(tx, ty);
-      ctx.save();
       // DrawRain（:38246-38256）1:1：position=左上角、origin=(0,0)（绕【顶点】旋转，
       // 雨条自 position 向速度方向垂落）——★曾中心锚（整体低 20px+旋转心错）
-      ctx.translate(d.x, d.y);
-      ctx.rotate(d.rotation);
+      if (fast) {
+        ctx.setTransform(bta, btb, btc, btd, bte, btf);
+        ctx.translate(d.x, d.y);
+        ctx.rotate(d.rotation);
+      } else {
+        ctx.save();
+        ctx.translate(d.x, d.y);
+        ctx.rotate(d.rotation);
+      }
       if (texOk) {
         // 光照着色（Main.cs:38248-38252）1:1：color = GetColor(light)×0.85f，shimmerAlpha>0
         // 再 ×(1−shimmerAlpha)——都是【逐通道连续值】乘法（XNA Color*float 只乘 RGB 不动 A）。
@@ -640,14 +683,29 @@ export class WeatherRenderer {
         // shimmerAlpha=0 时 (1−0)=1，乘法恒等，与原版分支逐位同值。
         const k = 0.85 * (1 - hooks.shimmerAlpha);
         const cr = Math.round(lr * k), cg = Math.round(lg * k), cb = Math.round(lb * k);
-        const tinted = this.bakeMemoized(
-          `rain-strip|${d.type}|${cr},${cg},${cb}|k=${k}`,
-          () => bakeTintFrame('rain-strip', tex!, d.type * 4, 0, 2, 40, cr, cg, cb));
+        let tinted: HTMLCanvasElement | null | undefined;
+        if (fast) {
+          // ★perf3：数字键（rainStripMemoKey）+命中快路径直查表——旧串键逐滴造串
+          // ≈4.5 万串/秒 = trace bakeMemoized 0.58s 主源；miss 才进 bakeMemoized
+          // （克隆/淘汰/入表全语义不变）。烘焙输入 (cr,cg,cb) 原值不动（键内钳位只
+          // 影响键编码，bakeTintFrame 内 tintByte 本就同式钳）→ 产出逐位不变。
+          const key = rainStripMemoKey(cr, cg, cb, d.type);
+          tinted = memo.get(key);
+          if (tinted === undefined) {
+            tinted = this.bakeMemoized(
+              key,
+              () => bakeTintFrame('rain-strip', tex!, d.type * 4, 0, 2, 40, cr, cg, cb));
+          }
+        } else {
+          tinted = this.bakeMemoized(
+            `rain-strip|${d.type}|${cr},${cg},${cb}|k=${k}`,
+            () => bakeTintFrame('rain-strip', tex!, d.type * 4, 0, 2, 40, cr, cg, cb));
+        }
         if (tinted) {
           ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);
         }
       }
-      ctx.restore();
+      if (!fast) ctx.restore();
     }
     ctx.restore();
     void world;

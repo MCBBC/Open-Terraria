@@ -2407,6 +2407,7 @@ export class SkyRenderer {
       const g = this.useGLClouds ? this.cloudGlLayer : null;
       shared = g && !g.unavailable ? g : null;
     }
+    if (shared && SkyRenderer.cloudRegionBlit) this.cloudBlitBoxReset();   // 'both' 批会话 bbox 跨两通道累积,会话头清零
     let batchBegun = false;
     /** 懒开启共享会话(首个非空通道触发;两通道全空则零工作=旧 early-return 语义) */
     const openBatch = (): GLSpriteLayer | null => {
@@ -2421,7 +2422,7 @@ export class SkyRenderer {
     const finishBatch = () => {
       if (shared && batchBegun) {
         shared.end();
-        ctx.drawImage(shared.canvas, 0, 0);   // 与单通道尾blit同 ctx 态(identity/α=1)
+        this.cloudBlitRect(ctx, shared);      // ★perf3:全幅→当帧 bbox 子矩形(?cloudcache=0 退全幅;空 bbox=零提交,跳过=旧全透明 blit 同效)
         ctx.globalAlpha = 1;
       }
     };
@@ -2491,7 +2492,9 @@ export class SkyRenderer {
     } else {
       const glRaw = this.useGLClouds ? this.cloudGlLayer : null;
       gl = glRaw && !glRaw.unavailable ? glRaw : null;
-      if (gl) { gl.resize(ctx.canvas.width, ctx.canvas.height); gl.begin(); }
+      // 独立会话(pass1 远景/菜单 'closer'/'closest'):bbox 会话头清零(批模式由
+      // drawCloudsNear 头清零后跨通道累积)
+      if (gl) { gl.resize(ctx.canvas.width, ctx.canvas.height); if (SkyRenderer.cloudRegionBlit) this.cloudBlitBoxReset(); gl.begin(); }
     }
     ctx.save();
     ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放(2D 兜底路径)
@@ -2518,6 +2521,7 @@ export class SkyRenderer {
       if (gl) {
         const gtex = gl.texFromImage(`cloud:${c.type}`, tex);
         if (gtex) {
+          if (SkyRenderer.cloudRegionBlit) this.cloudBlitBoxAdd(cx, cyPx, w, h, c.rot);
           if (cel && gl.cloudFxOK) {
             gl.cloudQuad(gtex, 0, 0, gtex.w, gtex.h, c.x, yOf(c), w, h, c.rot, !!c.flip, {
               drawPos: [cx, cyPx],
@@ -2559,7 +2563,7 @@ export class SkyRenderer {
     ctx.restore();
     ctx.globalAlpha = 1;
     // 批模式('both' 双通道共享会话)的 end+全屏 blit 由 drawCloudsNear 统一收口
-    if (gl && !batch) { gl.end(); ctx.drawImage(gl.canvas, 0, 0); }   // 合成进主画布(三 pass 间 clear 复用)
+    if (gl && !batch) { gl.end(); this.cloudBlitRect(ctx, gl); }   // 合成进主画布(三 pass 间 clear 复用;★perf3:全幅→bbox 子矩形)
   }
 
   // ---- 云 GL 共享层(#A 2026-08-19 合并:云与背景层共用 Renderer.glfx 一个
@@ -2572,6 +2576,53 @@ export class SkyRenderer {
   /** 'both' 双通道共享批总门(?cloudbatch=0 回退每通道独立会话——2026-08-26 前语义) */
   static readonly batchBoth = typeof location !== 'undefined'
     ? new URLSearchParams(location.search).get('cloudbatch') !== '0' : true;
+  /** ★perf3(2026-09-19 trace 三批:drawCloudsNear 3.3s,其中 finishBatch 全屏 blit
+   *  3.2s native blit;DPR=2 全屏层 blit 面积 4×):尾blit 区域收口——只合成当帧
+   *  已提交云 quad 的旋转 bbox 并集子矩形。逐位等价论证:GL 会话 begin() 每帧全幅
+   *  清 (0,0,0,0),本帧未提交像素恒 α=0;source-over 合成 α=0 → dst 恒等(8bit 精确,
+   *  out = src·0 + dst·(1−0) = dst),跳过该区域 = 与全幅 blit 逐位同;子矩形为
+   *  src=dst 同尺寸同位 1:1 拷贝,无缩放无滤波。只改「合成多大区域」,云形/色链/
+   *  随机流零触碰(?cloudcache=0 一键回退全幅旧路径,逃生门保留至用户验收)。 */
+  static readonly cloudRegionBlit = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('cloudcache') !== '0' : true;
+  /** 云 GL 会话当帧 quad 旋转 bbox 并集(设备 px;'both' 批会话跨 pass2/3 累积,
+   *  独立会话(pass1/菜单 closer/closest)在开会话处清零)。旋转 bbox 精确式:
+   *  halfW=(w·|cos|+h·|sin|)/2、halfH=(w·|sin|+h·|cos|)/2 ⊇ quad 光栅覆盖。 */
+  private cloudBlitBox = { x0: 0, y0: 0, x1: 0, y1: 0, any: false };
+  /** bbox 外扩(像素):四边各 pad——旋转 bbox 已是覆盖上界,pad 只兜亚像素栅格化边界 */
+  private static readonly CLOUD_BLIT_PAD = 2;
+  private cloudBlitBoxReset(): void {
+    this.cloudBlitBox.any = false;
+  }
+  private cloudBlitBoxAdd(cx: number, cy: number, w: number, h: number, rot: number): void {
+    const cs = Math.abs(Math.cos(rot)), sn = Math.abs(Math.sin(rot));
+    const hw = (w * cs + h * sn) / 2, hh = (w * sn + h * cs) / 2;
+    const b = this.cloudBlitBox;
+    if (!b.any) {
+      b.x0 = cx - hw; b.y0 = cy - hh; b.x1 = cx + hw; b.y1 = cy + hh; b.any = true;
+    } else {
+      if (cx - hw < b.x0) b.x0 = cx - hw;
+      if (cy - hh < b.y0) b.y0 = cy - hh;
+      if (cx + hw > b.x1) b.x1 = cx + hw;
+      if (cy + hh > b.y1) b.y1 = cy + hh;
+    }
+  }
+  /** 云层尾blit:全幅 → 当帧 bbox 子矩形(hatch off / 空 bbox 退旧语义:
+   *  空 bbox = 本帧零提交,旧路径 blit 全透明画布 = source-over 恒等,跳过同效)。 */
+  private cloudBlitRect(ctx: CanvasRenderingContext2D, layer: GLSpriteLayer): void {
+    if (!SkyRenderer.cloudRegionBlit) { ctx.drawImage(layer.canvas, 0, 0); return; }
+    const W = layer.canvas.width, H = layer.canvas.height;
+    const b = this.cloudBlitBox;
+    if (!b.any || W === 0 || H === 0) return;
+    const PAD = SkyRenderer.CLOUD_BLIT_PAD;
+    const sx = Math.max(0, Math.floor(b.x0) - PAD);
+    const sy = Math.max(0, Math.floor(b.y0) - PAD);
+    const ex = Math.min(W, Math.ceil(b.x1) + PAD);
+    const ey = Math.min(H, Math.ceil(b.y1) + PAD);
+    const sw = ex - sx, sh = ey - sy;
+    if (sw <= 0 || sh <= 0) return;
+    ctx.drawImage(layer.canvas, sx, sy, sw, sh, sx, sy, sw, sh);
+  }
   disposeCloudGL(): void {
     // 上下文本体归 Renderer.glfx 管;这里只摘引用(调用方:cpu 切换/销毁)
     this.cloudGlLayer = null;

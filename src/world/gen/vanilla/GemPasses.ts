@@ -11,7 +11,7 @@
 //   冰上/沙上下 1/5 → PlaceTight），同列随后宝石树段（RNG 序：树掷在钟乳石掷之前）
 import type { RNG } from '../../../core/rng';
 import { LIQUID_TYPE, TileStore } from '../../TileStore';   // ★IIIII210 TileStore.COAT_BLOCK_MASK（钟乳石涂层继承）
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { vanGenSolidType } from './GenSolid';
@@ -133,8 +133,9 @@ const GEM_WALL_BASE = 48;
 /** 宝石矿 tile 内部 id（序号同上） */
 const GEM_TILES = ['gem_amethyst', 'gem_topaz', 'gem_sapphire', 'gem_emerald', 'gem_ruby', 'gem_diamond']
   .map((k) => TILE_BY_KEY[k]!);
-/** 地牢墙（Main.wallDungeon）：7/8/9 + 94-99 */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** 地牢墙（Main.wallDungeon,Main.cs:10734-10745）——★BJ187 收编
+ *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 /** 内部 tile id → 原版 sheet id */
 const SHEET = new Int16Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -290,11 +291,10 @@ export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, styl
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============
-/** Main.tileSolidTop（Main.cs:6764+ 全 86 项，U/EEEE 批同表副本——不 import 防耦合） */
-const SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileSolidTop 全表——★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源
+ *  （84 项逐值全等;旧 79 项漏 Main.cs:10125-10131 循环臂 435-439 队伍平台,
+ *  生成期不可达=行为零差;「不 import 防耦合」旧注随单源化退役） */
+const SOLID_TOP = SOLID_TOP_SHEETS;
 /** WorldGen.SolidTile（cs:70155-70172）1:1：active && 生成期 tileSolid && !tileSolidTop &&
  *  !halfBrick && slope==0 && !inActive；越界走 catch → false。
  *  ★G8（2026-08-18 IIII 批）：实心源必须用生成期 Main.tileSolid（vanGenSolidType）——

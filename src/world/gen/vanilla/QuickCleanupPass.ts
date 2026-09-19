@@ -26,7 +26,7 @@ import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType } from './GenSolid';
 
@@ -54,7 +54,8 @@ const WALL_SANDSTONE = 187;     // WallID.Sandstone（地下沙漠天然沙岩�
 const WALL_HARDSAND = 216;      // WallID.HardenedSand（天然硬化沙墙）
 
 const NON_SOLID_SAVE_SLOPES = idsByVanillaSheet(131, 351, 336, 340, 341, 342, 343, 344);
-const PLATFORMS = idsByVanillaSheet(19, 427, 435, 436, 437, 438, 439);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORMS = PLATFORMS_IDS;
 
 const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let q = 0; q < TILE_DEFS.length; q++) {

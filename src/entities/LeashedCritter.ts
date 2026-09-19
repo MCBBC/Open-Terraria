@@ -33,7 +33,7 @@
 //     分支——与原版类层级（Walker→Crawler→Snail 等）一一对应
 // ============================================================================
 import type { TileStore } from '../world/TileStore';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc } from '../data/vanillaNpcs';
 import type { NetWriter, NetReader } from '../net/protocol';
@@ -162,8 +162,8 @@ export function solidTile2(st: TileStore, x: number, y: number): boolean {
 //   halfBrick/slope 编码与原版同构（topSlope=1|2、bottomSlope=3|4、half 独立位）。
 // ============================================================================
 
-const SETS_PLATFORMS_VANILLA_SHEETS: ReadonlySet<number> =
-  new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const SETS_PLATFORMS_VANILLA_SHEETS = PLATFORMS_SHEETS;
 
 /** 运行时 Main.tileSolid[type] 等价（静态初值——生成期翻转不适用实体域） */
 function vanTileSolid(t: number): boolean {

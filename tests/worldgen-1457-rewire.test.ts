@@ -104,7 +104,7 @@ describe('1457 对齐档 2：FinalCleanup PlantCheck/case103', () => {
     const s = read('FinalCleanupPass.ts');
     expect(s).toContain('function anchorValidTable(');
     expect(s).toContain('} else if (genSolidType(ti) && d && d.platform) return true;');   // tileSolid∩tileSolidTop
-    expect(s).toContain('!PLATFORMS.has(sh) && TILE_TABLE.has(sh)');                        // Table 支
+    expect(s).toContain('!PLATFORMS_SHEETS.has(sh) && TILE_TABLE.has(sh)');                 // Table 支（★BJ168-债2 单源收编改名,原 PLATFORMS 本地副本已拆除）
     expect(s).toContain('if ((!st.half[i] && n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26)) return true;');   // 平台正帧
   });
 });

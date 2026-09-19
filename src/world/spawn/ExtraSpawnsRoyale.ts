@@ -68,7 +68,7 @@
 import { UnifiedRandom } from '../../core/rng';
 import { TileStore } from '../TileStore';
 import type { World } from '../World';
-import { TILE_DEFS } from '../../data/tiles';
+import { TILE_DEFS, BOULDERS_SHEETS } from '../../data/tiles';
 import { spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } from './SpawnPlacement';
 
 /** PlayerTeamID.cs:17 Count=6（None+五色队） */
@@ -94,8 +94,12 @@ const SHEET_LUT: Int16Array = (() => {
 const sheetOf = (internalId: number): number => SHEET_LUT[internalId] ?? -1;
 
 /** TileID.cs:195 TileID.Sets.Boulders 表 */
-const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
-/** Main.tileDungeon 全表(Main.cs:7941)+1457 变体砖 481-483 */
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDER_SHEETS = BOULDERS_SHEETS;
+/** tileDungeon ∪ 变体（∪ 变体单列,★BJ187 备案）：主三砖 {41,43,44}+裂纹砖 481-483
+ *  （Main.cs:8131-8136 tileDungeon 全表含古砖 677-679 但【不含】481-483——本集语义=
+ *  落点避让「地牢砖族+裂纹砖」字面 ∪ 脸,与 SceneMetrics.cs:619 DungeonTileCount 同构,
+ *  勿并轨到 data/tiles.ts:TILE_DUNGEON_SHEETS） */
 const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 481, 482, 483]);
 
 // ── Utils.Remap（Utilities.cs 标准 remap，含输入钳制） ───────────────────────

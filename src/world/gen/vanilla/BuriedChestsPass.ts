@@ -11,9 +11,8 @@ import { LIQUID_TYPE } from '../../TileStore';
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import {TILE_BY_KEY, TILE_DEFS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
-import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
 // ★VVVVVV（2026-08-23）双态门（与 HellFortPass 同款）：缺省曾为 1456（三掷位=753 首分支/
@@ -38,25 +37,23 @@ const FROZEN_SLIME = TILE_BY_KEY['v_197_frozen_slime_block']!;
 const ALTAR = TILE_BY_KEY['v_26_altars']!;
 const TALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 const LARVA = TILE_BY_KEY['v_231_larva']!;
-/** TileID.Sets.Boulders（TileID.cs:195）：138/484/664/665/711-716 */
-const BOULDER_TILES = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
 // ---- PlaceChest → TileObject.CanPlace 全链（TileObject.cs:174-857；sheet 空间表。
-//      与 DungeonPass U 批同源（表副本，2026-08-17 箱族批移植——DungeonPass 为并行
-//      会话禁区，不 import 防耦合））。旧 placeBuriedChest 只查「2×2 全空 + 双腿实心」，
-//      漏：可切覆盖门（tileCut∖{484,654}∪BreakableWhenPlacing——vanilla 落箱可覆蛛网
-//      51/洞穴装饰 165 等，首例 (2759,567) 隔离重放+vanilla AB 探针实锤）/边界 5 垫/
-//      PlaceChest 双腿巨石门（读 type 不读 act）/锚腿平台-桌变体。 */
-const PC_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+//      与 DungeonPass U 批同源（表副本，2026-08-17 箱族批移植）。旧 placeBuriedChest
+//      只查「2×2 全空 + 双腿实心」，漏：可切覆盖门（tileCut∖{484,654}∪BreakableWhenPlacing
+//      ——vanilla 落箱可覆蛛网 51/洞穴装饰 165 等，首例 (2759,567) 隔离重放+vanilla AB
+//      探针实锤）/边界 5 垫/PlaceChest 双腿巨石门（读 type 不读 act）/锚腿平台-桌变体。
+//      ★BJ168-债2（2026-09-19）：本链五张本地表副本（BOULDER_TILES 内部域/PC_BOULDERS/
+//      PC_TILE_CUT/PC_BREAK_PLACE/PC_PLATFORMS）拆除,收编 data/tiles.ts 单源
+//      BOULDERS_IDS/BOULDERS_SHEETS/TILE_CUT_SHEETS/BREAKABLE_WHEN_PLACING_SHEETS/
+//      PLATFORMS_SHEETS（逐值对拍 10/10/41/11/7 ≡ 全等;消费面同名直改,tests/
+//      tile-domain-sentinel §6d/§6e 钉死）。 */
 /** Main.tileCut（Main.cs；TileObject.cs:337-375 可覆盖集 = tileCut∖{484,654}）∪
- *  TileID.Sets.BreakableWhenPlacing（TileObjectData.cs:1768） */
-const PC_TILE_CUT = new Set([3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201, 205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637, 638, 654, 655, 711]);
-const PC_BREAK_PLACE = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
-/** Main.tileSolidTop（sheet 空间，U 批 DG_SOLID_TOP 同表）——锚腿②类门。
- *  OOOOO 批起导出（JungleShrinePass CheckOrb 补件的 SolidTileAllowBottomSlope 同源消费） */
-export const PC_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+ *  TileID.Sets.BreakableWhenPlacing（TileObjectData.cs:1768）——单源见上注 */
+/** Main.tileSolidTop（sheet 空间）——锚腿②类门。
+ *  OOOOO 批起导出（JungleShrinePass CheckOrb 补件的 SolidTileAllowBottomSlope 同源消费）。
+ *  ★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项逐值全等;旧 79 项漏
+ *  Main.cs:10125-10131 循环臂 435-439 队伍平台,生成期不可达=行为零差） */
+export const PC_SOLID_TOP = SOLID_TOP_SHEETS;
 /** TileID.Sets.TileAnchorIfZero... noAttach 族（U 批 DG_NO_ATTACH 同表） */
 // ★IIIII184 勘误：507（Gold Starry Block）曾误入本表——vanilla Main.tileNoAttach
 //   全量静态+运行时赋值（Main.cs:7428-7482/10130 循环 435-439）均【无 507】
@@ -67,9 +64,15 @@ export const PC_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239,
 const PC_NO_ATTACH = new Set([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
 /** 锚定无效表（U 批 DG_CHEST_ANCH_INVALID 同表） */
 const PC_CHEST_ANCH_INVALID = new Set([127, 138, 664, 665, 484, 711, 712, 713, 714, 715, 716]);
-const PC_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
-/** 桌族（AnchorBottom 的 Table 类锚，U 批 DG_TILE_TABLE 同表） */
-const PC_TILE_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** 桌族（AnchorBottom 的 Table 类锚，U 批 DG_TILE_TABLE 同表）——★BJ182b（2026-09-19）
+ *  缺 280 真值差定谳+收编：vanilla Main.tileTable[280]=true（1457 Main.cs:7018 首条赋值,
+ *  280=鸟笼族 275-281 与 279/281 同批入表;主表 TILE_TABLE_SHEETS 81 项程序化对拍≡全表）。
+ *  实害面=chestLegOK Table 路（TileObject.cs:407 `!Platforms∧tileTable∧blockType==0`）:
+ *  平放 280 鸟笼 vanilla 收/本仓拒——世界生成重放定谳:纯 worldgen 无观测差（275-281 笼族
+ *  vanilla WorldGen 全树零布点,本仓 gen/ 同零;唯一可达面=运行时摆件,而运行时箱锚链
+ *  Game.ts:43826 直查主表本就含 280）→ 收编=语义对齐原版+纯 worldgen 流位零漂
+ *  （金标族回归全绿承证,tests/tile-domain-sentinel §6d 81 项金标+变异回退证红钉死）。 */
+const PC_TILE_TABLE = TILE_TABLE_SHEETS;
 
 /** 锚腿判定（TileObject.cs:376-442 AnchorBottom 链 = U 批 chestLegOK 同构）：
  *  ①SolidTile（tileSolid&&!solidTop&&!noAttach&&!anchorInvalid）②平台 ③solidTop
@@ -85,7 +88,7 @@ function chestLegOK(st: TileStore, lx: number, ly: number): boolean {
   const internal = st.type[i];
   const blockType0 = st.half[i] === 0 && st.slope[i] === 0;
   if (blockType0 && genSolidType(internal) && !PC_SOLID_TOP.has(sheet) && !PC_NO_ATTACH.has(sheet) && !PC_CHEST_ANCH_INVALID.has(sheet)) return true;
-  if (PC_PLATFORMS.has(sheet)) return !PC_CHEST_ANCH_INVALID.has(sheet) && st.half[i] === 0;  // !halfBrick（properTopFrame 帧位不建模，备案）
+  if (PLATFORMS_SHEETS.has(sheet)) return !PC_CHEST_ANCH_INVALID.has(sheet) && st.half[i] === 0;  // !halfBrick（properTopFrame 帧位不建模，备案）
   if (genSolidType(internal) && PC_SOLID_TOP.has(sheet)) return true;                          // solidTop 路（cs:402 无 blockType 门）
   if (PC_TILE_TABLE.has(sheet)) return blockType0;                   // Table 路（cs:407 blockType==0）
   return false;
@@ -112,9 +115,10 @@ export interface ChestFlags {
   lockedBiome?: boolean; // flag10 上锁生物群系箱（IsLockedDungeonBiomeChest,cs:36219）
 }
 
-/** Main.wallDungeon（Main.cs:10507-10513）：7/8/9 + 94-99（不含神庙墙 87——
- *  cs:17109 的 `wallDungeon[wall] || wall == 87` 是两道独立门） */
-const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.wallDungeon（Main.cs:10734-10745）：7/8/9 + 94-99（不含神庙墙 87——
+ *  cs:17109 的 `wallDungeon[wall] || wall == 87` 是两道独立门）——★BJ187 收编
+ *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 function isDungeonWall(wl: number): boolean {
   return DUNGEON_WALLS.has(wl);
 }
@@ -1148,7 +1152,7 @@ function placeBuriedChestInner(
         const kk = st.idx(xx, yy);
         if (!st.flags[kk]) continue;
         const tt = st.type[kk];
-        if (BOULDER_TILES.has(tt) || tt === ALTAR || tt === TALTAR) { __abGate?.('boulder', i, gy, st.type[kk]); return false; }
+        if (BOULDERS_IDS.has(tt) || tt === ALTAR || tt === TALTAR) { __abGate?.('boulder', i, gy, st.type[kk]); return false; }
       }
     }
     if (solidDrop(i, gy)) break;
@@ -1526,7 +1530,7 @@ function placeBuriedChestInner(
     const sheetOf = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
     const legL = sheetOf(st.type[st.idx(i - 1, gy)]);
     const legR = sheetOf(st.type[st.idx(i, gy)]);
-    let ok = !(PC_BOULDERS.has(legL) || PC_BOULDERS.has(legR));
+    let ok = !(BOULDERS_SHEETS.has(legL) || BOULDERS_SHEETS.has(legR));
     if (ok) ok = i - 1 >= 5 && i + 1 <= st.w - 5 && topY >= 5 && topY + 2 <= st.h - 5;
     for (let dx = -1; ok && dx <= 0; dx++) {
       for (let dy = 0; dy < 2; dy++) {
@@ -1539,7 +1543,7 @@ function placeBuriedChestInner(
         if (st.liquid[k] > 0 && st.liquidType[k] === 2) { ok = false; break; }
         if (!st.flags[k]) continue;                       // 空 → 可放
         const sh = sheetOf(st.type[k]);
-        if (!((PC_TILE_CUT.has(sh) && sh !== 484 && sh !== 654) || PC_BREAK_PLACE.has(sh))) { ok = false; break; }
+        if (!((TILE_CUT_SHEETS.has(sh) && sh !== 484 && sh !== 654) || BREAKABLE_WHEN_PLACING_SHEETS.has(sh))) { ok = false; break; }
       }
     }
     if (ok && !(chestLegOK(st, i - 1, gy) && chestLegOK(st, i, gy))) ok = false;
@@ -1549,7 +1553,7 @@ function placeBuriedChestInner(
         const sheetOf2 = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
         let why = '?';
         const legL2 = sheetOf2(st.type[st.idx(i - 1, gy)]), legR2 = sheetOf2(st.type[st.idx(i, gy)]);
-        if (PC_BOULDERS.has(legL2) || PC_BOULDERS.has(legR2)) why = `boulder ${legL2}/${legR2}`;
+        if (BOULDERS_SHEETS.has(legL2) || BOULDERS_SHEETS.has(legR2)) why = `boulder ${legL2}/${legR2}`;
         else if (!(i - 1 >= 5 && i + 1 <= st.w - 5 && topY >= 5 && topY + 2 <= st.h - 5)) why = 'bounds';
         else if (!chestLegOK(st, i - 1, gy)) why = `legL(${i - 1},${gy}) sheet${legL2} act${st.flags[st.idx(i - 1, gy)] ? 1 : 0} half${st.half[st.idx(i - 1, gy)]} slope${st.slope[st.idx(i - 1, gy)]}`;
         else if (!chestLegOK(st, i, gy)) why = `legR(${i},${gy}) sheet${legR2} act${st.flags[st.idx(i, gy)] ? 1 : 0} half${st.half[st.idx(i, gy)]} slope${st.slope[st.idx(i, gy)]}`;
@@ -1558,7 +1562,7 @@ function placeBuriedChestInner(
           if (st.liquid[k] > 0 && st.liquidType[k] === 2) { why = `lava(${i + dx},${topY + dy})`; }
           else if (st.flags[k]) {
             const sh = sheetOf2(st.type[k]);
-            if (!((PC_TILE_CUT.has(sh) && sh !== 484 && sh !== 654) || PC_BREAK_PLACE.has(sh))) why = `occ(${i + dx},${topY + dy}) t${st.type[k]} sheet${sh}`;
+            if (!((TILE_CUT_SHEETS.has(sh) && sh !== 484 && sh !== 654) || BREAKABLE_WHEN_PLACING_SHEETS.has(sh))) why = `occ(${i + dx},${topY + dy}) t${st.type[k]} sheet${sh}`;
           }
           if (why !== '?') break;
         }
@@ -1578,7 +1582,7 @@ function placeBuriedChestInner(
         const k = st.idx(bx, by);
         if (!st.flags[k]) continue;
         const sh = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
-        const clearable = (PC_TILE_CUT.has(sh) && sh !== 484 && sh !== 654) || PC_BREAK_PLACE.has(sh);
+        const clearable = (TILE_CUT_SHEETS.has(sh) && sh !== 484 && sh !== 654) || BREAKABLE_WHEN_PLACING_SHEETS.has(sh);
         if (!clearable || sh === 484) continue;
         killTileChest(st, rng, bx, by);
       }

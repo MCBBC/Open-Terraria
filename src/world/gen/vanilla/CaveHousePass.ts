@@ -10,7 +10,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { doorClosedFrame } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
@@ -339,11 +339,10 @@ function solid2(st: TileStore, x: number, y: number): boolean {
   return st.flags[i] !== 0 && vanGenSolidType(st.type[i]) && st.slope[i] === 0 && st.half[i] === 0;
 }
 
-/** Main.tileSolidTop（sheet 空间，与 BuriedChestsPass.PC_SOLID_TOP 同表） */
-const HOUSE_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileSolidTop（sheet 空间，与 BuriedChestsPass.PC_SOLID_TOP 同表）——★BJ187
+ *  收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项;旧 79 项漏 Main.cs:10125-10131
+ *  循环臂 435-439 队伍平台,生成期不可达=行为零差） */
+const HOUSE_SOLID_TOP = SOLID_TOP_SHEETS;
 const sheetOf = (st: TileStore, x: number, y: number): number => {
   const t = st.type[st.idx(x, y)];
   return TILE_DEFS[t]?.vanilla?.sheet ?? -1;
@@ -366,7 +365,8 @@ function placeWallArt(st: TileStore, x0: number, y0: number, w: number, h: numbe
 }
 
 /** 底承族公共体：每列下方 SolidTile2（186/187 族再拒 Boulders 垫）+ 全格 !active */
-const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS = BOULDERS_SHEETS;
 function placeFloorObject(st: TileStore, x0: number, y0: number, w: number, h: number, tile: number,
   fx: (dx: number) => number, fy: (dy: number) => number, rejectBoulderFloor = false): boolean {
   for (let dx = 0; dx < w; dx++) {

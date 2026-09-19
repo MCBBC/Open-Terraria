@@ -95,11 +95,11 @@ function place3x3AnchorUp(st: TileStore, x: number, y: number, internalId: numbe
   return true;
 }
 
-// Main.tileTable 唯一权威表（DungeonPass.DG_TILE_TABLE=Main.cs:9900 段+:10131 循环族全量）——
+// Main.tileTable 唯一权威表=TILE_TABLE_SHEETS（data/tiles.ts 单源,★BJ182b 收编;主表
+//  81 项≡1457 Main.cs:7018-7081/7897-7898/8171-8191/8446/10121/10125-31 循环臂逐值直读）——
 // ★IIIII44 复核批：本处曾手写 {14,19} 子集冒充整表＝「常量表有/装配漏」同族缺陷
-// （SkyblockRuntime anchorSets dungeonTile 漏键崩案的同型),改单源程序化消费。
-import { DG_TILE_TABLE } from './DungeonPass';
-const TILE_TABLE_SHEETS = DG_TILE_TABLE;
+// （SkyblockRuntime anchorSets dungeonTile 漏键崩案的同型),改单源程序化消费;
+// ★BJ182b:旧 DG_TILE_TABLE 中转别名退役,直引单源(280 含,worldgen 零差)。
 
 /** PlaceMB（cs:51729）：139 音乐盒 2×2，锚=cols X..X+1 × rows y-1..y，
  *  frameY=style*36（下行 +18：cs:51778/:51781 两底格）、左列 frameX=0 右列 18。
@@ -132,7 +132,7 @@ function placeMB(st: TileStore, X: number, y: number, internalId: number, style:
   return true;
 }
 
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_TABLE_SHEETS } from '../../../data/tiles';
 function sheetOfInternal(id: number): number {
   return TILE_DEFS[id]?.vanilla?.sheet ?? -1;
 }

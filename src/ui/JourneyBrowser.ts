@@ -18,6 +18,7 @@
 import catRaw from '../data/vanilla-journeycat.json';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { Lang } from '../i18n/Lang';
+import { PLATFORMS_SHEETS } from '../data/tiles';
 
 // ---------------------------------------------------------------------------
 // 数据表（vanilla-journeycat.json 形状）
@@ -86,7 +87,8 @@ const rareOf = (e: CatEntry): number => e.r ?? 0;
 
 // ---- TileID.Sets / Main tile 表（TileID.cs / Main.cs 字面量 + journeycat 三表）----
 const TILE_TORCHES = new Set<number>([4]);                        // TileID.Sets.Torches :401
-const TILE_PLATFORMS = new Set<number>([19, 427, 435, 436, 437, 438, 439]); // :243
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TILE_PLATFORMS = PLATFORMS_SHEETS;
 const TILE_GRASS = new Set<number>([2, 23, 199, 109, 477, 492]);  // Sets.Conversion.Grass :18
 const FRAME_IMPORTANT = new Set(CAT.tileFrameImportant);          // Main.cs 402 处
 

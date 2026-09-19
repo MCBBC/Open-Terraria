@@ -19,7 +19,7 @@ import { cutTilesBox } from './ProjCutTiles';   // ★SW-BJ93 债1：CutTiles �
 import { GorePiece } from './GorePiece';        // ★SW-BJ93 债2：1053 Kill gore 61..63（Game.explodeAt 同引擎,30:28419 先例）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, PLATFORMS_SHEETS } from '../data/tiles';
 import { LIQUID_TYPE } from '../world/TileStore';   // ★SW-BJ93 债②：液体编码（repo +1 域）
 import { canHit, solidTileAt } from '../physics/LineOfSight';   // ★SW-BJ93 债②：CanHit/SolidTile 1:1
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';   // ★SW-BJ93 债2：Kill 掉落 vid→键反查（Player.ts:6333 同款）
@@ -226,7 +226,8 @@ const RB_KILL_FAMILY: ReadonlySet<number> = new Set(
 // ---- ★SW-BJ93 债②（2026-09-16）地形面世界写入伴生表（sheet 域,勿用 def.platform
 //  超集替代——SW-AW1b 判例:Platform 门必须按 TileID.cs:243 表读）----
 /** TileID.Sets.Platforms（TileID.cs:243 全 7 元素直抄）——SpreadTile 邻坡拍平门 */
-const RB_PLATFORM_SHEETS: ReadonlySet<number> = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const RB_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 /** TileID.Sets.IsADripTile（TileID.cs:157 全 5 元素直抄）——TryKillingReplaceableTile
  *  可杀面第三支（:59809） */
 const RB_DRIP_SHEETS: ReadonlySet<number> = new Set([373, 374, 375, 461, 709]);

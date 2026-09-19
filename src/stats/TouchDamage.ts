@@ -8,6 +8,7 @@
 //   TouchDamageImmediate {32:10,69:17,80:6,352:10,655:100,48:60,232:80,484:25,750:70}
 // CanTileHurt 门禁:230 仅 ftw 种子 / 80(仙人掌) 仅饥荒种子 → 普通世界恒无效。
 import { TILE_DEFS } from '../data/tiles';
+import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';
 import type { TileStore } from '../world/TileStore';
 
 // sheet id → 本仓库 internal tile id（取首个 v_ 定义）
@@ -35,7 +36,25 @@ const setOf = (sheets: number[]) => new Set(sheets.map(tid).filter((v) => v >= 0
  * DrownCollision 豁免行（Collision.cs:1418）tileSolidTop 项消费——不可用
  * TileStore.isPlatform 代替：其带 nactive() 致动闸,致动平台原版恒吃 tileSolidTop。
  */
-export const TILE_SOLID_TOP_FAMILY = setOf([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+/**
+ * TileSolidTop ∩ TileSolid 可达族（平台行为族九件套,TileStore.isPlatform 注①）。
+ * Main.tileSolidTop 是【类型静态表】（致动不变）——对 tileSolid 族的可达成员
+ * 只有这九件（其余 solidTop 型均 tileSolid=false,被 tileSolid 项先行否决）。
+ * 1457 字面（Main.cs,赋值即 tileSolidTop+tileSolid 同批成对）：
+ *   19 平台 :8031-8032 / 239 矿锭 :9797-9798 / 380 花盆箱 :9799-9800 /
+ *   427 红团队平台 :10118-10119 / 435-439 绿蓝黄粉白团队平台五色 :10126-10136
+ *   （`for (num2 = 435; num2 <= 439; …)` 整批七旗,TileID.cs:1307-1315 五 const）。
+ * ★BJ187 批四（2026-09-19）收编 GenSolid.VAN_TILE_SOLID_EXTRA 单源（九件套权威,
+ *  逐副本对拍等价——九 sheet 全单 def,setOf 首定义平移≡全 def 平移）。
+ * ★潜伏雷说明（蓝队 F1,2026-09-01）：本仓 TILE_DEFS 口径下这九件当前【全
+ *   solid:false】（platform 语义档,数据面未随 1457 置 tileSolid）→ 消费位
+ *   `TILE_DEFS[t]?.solid &&` 先行否决,本表今日整体是死表;将来有人按原版把
+ *   任一件（最可能是团队平台五色）tileSolid 改真时,豁免行判定位立即复活——
+ *   本表已就位,九件一并豁免/solidTop 反豁免,不会漏件误放行。
+ * DrownCollision 豁免行（Collision.cs:1418）tileSolidTop 项消费——不可用
+ * TileStore.isPlatform 代替：其带 nactive() 致动闸,致动平台原版恒吃 tileSolidTop。
+ */
+export const TILE_SOLID_TOP_FAMILY = setOf([...VAN_TILE_SOLID_EXTRA]);
 
 /**
  * 触碰直接伤害【基准】值（TouchDamageImmediate;尖刺 48=60 木尖刺 232=80 荆棘 10/17 等）。

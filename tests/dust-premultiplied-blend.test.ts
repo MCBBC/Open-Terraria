@@ -379,9 +379,12 @@ describe('dust 43 闪光尘档（★F1:a=num、rgb=(num+9)/10;43+color 不走烘
     const src = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 'utf8');
     // A=0 直绘支最小判据（43 型恒走直绘,不经烘焙对——烘焙对 e<0.5 二值残段会
     // 把半透 worldLayer α 顶满=掏底/黑块族）
-    expect(src).toContain('if ((a <= 0.004 && !d.color) || d.type === 43) {');
-    // 43 自定义色 GetColor 加性 pass（本体后的第二 Draw,Main.cs:39696-39704）
-    expect(src).toContain('if (d.type === 43 && d.color) {');
+    // ★RB-彩虹魔杖批（2026-09-20）：判据扩员 66 RainbowTorch（Dust.cs:2767-2769
+    //  A=0 纯加算档,带 d.color 同样禁入烘焙对——见 dust66-rainbowtorch-additive-verdict）
+    expect(src).toContain('if ((a <= 0.004 && !d.color) || d.type === 43 || d.type === 66) {');
+    // 43 自定义色 GetColor 加性 pass（本体后的第二 Draw,Main.cs:39696-39704;
+    //  66 同程扩员——disco 色靠本程上画面,门槛=RGB 内容）
+    expect(src).toContain('if ((d.type === 43 || d.type === 66) && d.color) {');
     expect(src).toContain('VanillaDust.colorPass(d, rgb, a)');
   });
 });

@@ -111,6 +111,9 @@ export interface DungeonStyleData {
 
 const T = DualDungeonUnbreakableWallTiers;
 
+// ★BJ187：Main.tileDungeon/wallDungeon 基表收编 data/tiles.ts 单源（6/9 项逐值全等）
+import { TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+
 /** DungeonGenerationStyles.cs 静态注册表（1457 终态;字段逐项对表 :65-676）。
  *  家具 item 表仅录 PlatformItemTypes（tier/扩表机器的消费面）;其余备案。 */
 export const DungeonGenerationStyles: Record<string, DungeonStyleData> = {
@@ -627,7 +630,7 @@ export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number,
     dualDungeonStyles(0, crimson, themeStyle(d0Theme)),
     dualDungeonStyles(1, crimson, themeStyle(d1Theme)),
   ];
-  const base = boolArrayOf([41, 43, 44, 677, 678, 679]);
+  const base = boolArrayOf([...TILE_DUNGEON_SHEETS]);   // Main.tileDungeon（★BJ187 单源）
   const merge = (list: DungeonStyleData[]): boolean[] => {
     const t = base.slice();
     for (const s of list) {
@@ -644,7 +647,7 @@ export function setupDualDungeonTileProtection(d0Theme: number, d1Theme: number,
   // ★IIIII179：isDungeonWall 并集面（IsConsideredDungeonWall(w,allDungeons:true) 的
   //  ⋃_i dungeonGenVars[i].isDungeonWall——DungeonUtils.cs:1929-1950;含 base
   //  Main.wallDungeon 基表）。Cavinator dual 停走支（WorldGen.cs:81277-81283）消费。
-  const wallBase = boolArrayOf([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+  const wallBase = boolArrayOf([...WALL_DUNGEON_SHEETS]);   // Main.wallDungeon（★BJ187 单源）
   const mergeW = (list: DungeonStyleData[]): boolean[] => {
     const w = wallBase.slice();
     for (const s of list) {

@@ -289,6 +289,7 @@ import { drawEmotes } from './EmoteBubble';
 import { mechQueenUp, getMechQueenCenter } from '../entities/mechQueen';
 import { combatFontReady, drawCombatText } from './CombatTextFont';
 import { InfoAccsLayer } from './InfoAccsLayer';
+import { InfoAccsDOM, infoDomEnabled } from './InfoAccsDOM';   // ★信息栏 DOM 化 2026-09-19(?infodom=1 灰度旗,缺省关)
 import { buildInfoAccRows, type InfoAccCtx } from '../stats/InfoAccs';
 import { CANVAS_MOUSETEXT_FONT, PIXEL_FONT_FAMILY } from '../vui/draw/PixelText';
 import { drawBakedMouseText } from '../vui/draw/MouseTextBake';
@@ -2783,6 +2784,10 @@ export class Renderer {
   waterfalls = new WaterfallRenderer();
   /** 信息饰品显示列(DrawInfoAccs 移植;数据组装在 Game,绘制在此) */
   infoAccs = new InfoAccsLayer();
+  /** ★信息栏 DOM 化(2026-09-19)DOM 渲染层(?infodom=1 灰度旗开才实例化/挂载,
+   *  缺省 null=canvas 旧路径零涉及)。懒建于 drawInfoAccs 闭包(node 测试桩
+   *  document 下构造 Renderer 不会触 DOM);dispose 摘除 */
+  infoAccDom: InfoAccsDOM | null = null;
   /** Game 每帧注入的信息行数据(InfoAccCtx;null=未注入不画) */
   infoAccCtx: InfoAccCtx | null = null;
   /** 信息列悬停行(-1 无;交互在 Game) */
@@ -3247,6 +3252,14 @@ export class Renderer {
     this.minimap = null;
     if (this._mmHudCanvas) { this._mmHudCanvas.width = 0; this._mmHudCanvas.height = 0; this._mmHudCanvas = null; this._mmHudCtx = null; this._mmHudImg = null; }
     this._fm2dMap = null; this._fm2dFog = null;
+    // 交互图标上浮层(SW-BJ114)是 DOM 兄弟节点——不摘则退菜单后残影浮在主菜单上
+    this.clearIconOverlay();
+    if (this._iconOverlay) { this._iconOverlay.remove(); this._iconOverlay = null; }
+    this._iconOverlayCtx = null;
+    // ★信息栏 DOM 化(2026-09-19):DOM 信息列同为 DOM 兄弟节点,退世界同链摘除
+    this.infoAccDom?.dispose();
+    this.infoAccDom = null;
+    this.infoAccs.dom = null;
     // GL 纹理池同链清空(★曾漏:连续读档逐次叠满 LRU=GB 级显存打爆→contextlost
     // 风暴;背景纹理懒加载重传成本低,不值得跨世界持有)
     this.glfx?.dispose();
@@ -3346,6 +3359,65 @@ export class Renderer {
     parent.appendChild(this.canvas);
   }
 
+  // ==== 交互图标上浮层（步骤 12b 图标面专用;SW-BJ114 2026-09-19 用户实报"光标盖门/椅交互图标"） ====
+  // 原版层序（SetupDrawInterfaceLayers :45645-45670 亲读）:"Vanilla: Cursor"（36,
+  // DrawInterface_36_Cursor :46011 = ThickMouse 描边+阴影+本体）→ … →"Vanilla: Interact
+  // Item Icon"（40,DrawInterface_40_InteractItemIcon :45792,图标中心锚 mouse+(10+push)
+  // :45848-45850）——交互图标画在光标【之后】=压在光标上。本仓光标恒在独立 ui-canvas
+  // （VUI cursorOnly 态,z-index 300,VUI.ts cssText）,永远盖在游戏画布之上;12b 图标面
+  // 画在游戏画布 ⇒ 与原版反序。2026-09 中旬光标补上原版 ThickMouse 描边（VUI.drawThick
+  // Cursor:Cursors[11] 18×18×cursorScale×1.1 四向、MouseBorderColor 默认 (64,64,64,64)
+  // =预乘白 25%α 的"灰"描边,Main.cs:48865-48913 参数逐值 1:1 无偏差）后,光标足迹从
+  // 14px 本体+≈16.4px 阴影扩到 ≈19.8px,把 mouse+10 起步的交互图标（门 34×30/椅 24×22）
+  // 左上 ≈9px 核心区罩灰=用户实报指纹。病灶=绘制序反序而非描边参数 ⇒ 最小面落刀=
+  // 图标面（物品图标+油漆弹药子图标）改画本上浮层（z-index 301>300 ≙ 原版 36<40 序,
+  // 描边本体零改动）。住房头像(38)/NPC 名(39,实锚 mouse+20 本就净空 19.8 描边足,BJ7
+  // 不变式)同族不接=登记债。帧戳（animTick）守恒:12b 被跳过的帧（全屏地图 :4694 提前
+  // 返/拍照 _capturePass 重渲/uiBlocking 早退）次帧头自动清层,防残影浮在地图/菜单上。
+  // 逃生门 ?sw-iconoverlay=0 → 图标面回退游戏画布（旧层序,A/B 对拍与回滚口）。
+  private static readonly iconOverlayEnabled = (() => {
+    try { return typeof location === 'undefined' || new URLSearchParams(location.search).get('sw-iconoverlay') !== '0'; }
+    catch { return true; }
+  })();
+  private _iconOverlay: HTMLCanvasElement | null = null;
+  private _iconOverlayCtx: CanvasRenderingContext2D | null = null;
+  private _iconOverlayStamp = -1;
+  /** 懒建上浮层（与主画布同父 #game-root;84×84 容最大图标 42×1.1+弹药子图标
+   *  @+(22..28)×0.8 ≤64px,2px 边距;buffer=CSS 1:1 与主画布同刻度） */
+  private iconOverlayCtx(): CanvasRenderingContext2D | null {
+    if (this._iconOverlayCtx) return this._iconOverlayCtx;
+    if (!Renderer.iconOverlayEnabled) return null;
+    try {
+      const c = document.createElement('canvas');
+      c.id = 'sw-cursor-icon-overlay';
+      c.width = 84; c.height = 84;
+      c.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;z-index:301;display:none;';
+      const parent = this.canvas.parentElement;
+      if (!parent) return null;
+      parent.appendChild(c);
+      const ctx = c.getContext('2d');
+      if (!ctx) return null;
+      ctx.imageSmoothingEnabled = false;
+      this._iconOverlay = c;
+      this._iconOverlayCtx = ctx;
+      return ctx;
+    } catch { return null; }
+  }
+  /** 清层（head 帧守恒与 dispose 共用;仅清内容不翻 display——逐帧 display 翻转
+   *  会逐帧触发 layout,空层透明画布本身零绘制成本） */
+  private clearIconOverlay(): void {
+    const ctx = this._iconOverlayCtx, el = this._iconOverlay;
+    if (!ctx || !el) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, el.width, el.height);
+  }
+  /** render 头帧守恒（SW-BJ114,render 头 animTick++ 后调用）：章是上一帧 12b 盖的
+   *  ——本帧 12b 若被跳过（全屏地图提前返/拍照 _capturePass 重渲/头门早退）则清空
+   *  上帧图标,防残影浮在全屏地图/拍照帧/菜单上。12b 画图标面时重盖章。 */
+  private iconOverlayFrameGate(): void {
+    if (this._iconOverlay && this._iconOverlayStamp !== this.animTick) this.clearIconOverlay();
+  }
+
   private _mouseX = 0;
   /** 鼠标悬停告示牌的文本（render 内计算，tooltip 层消费） */
   private signHoverText = '';
@@ -3406,6 +3478,7 @@ export class Renderer {
     // 世界模拟照跑(fixedUpdate 独立),画面冻结——向已死上下文刷绘制只会喂大事件风暴
     if (this.gpuDegraded) return;
     this.animTick++;
+    this.iconOverlayFrameGate();   // 交互图标上浮层帧守恒（SW-BJ114,方法注）
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this.eyebrellaQueue.length = 0;   // 眼球伞云盖队列逐帧重建（A4 终版）
     this.bobberOwners.clear();   // 钓竿静持门快照逐帧重建（ItemCheck_HackHoldStyles 等价,见下）
@@ -4672,6 +4745,30 @@ export class Renderer {
     //  面板(小地图下 ±/⛅ 展开体)与信息列同域,原序信息列后画=压住面板）
     const quickPanelsOpen = this.timePanelOpen || this.weatherPanelOpen;
     const drawInfoAccs = () => {
+      // ★信息栏 DOM 化(2026-09-19;?infodom=1 灰度旗缺省关,与背包布局 flag 同款):
+      //  旗开且时间/天气面板未开且全屏地图未开 → DOM 层(InfoAccsDOM,逐帧字符串
+      //  diff);时间/天气面板开 = canvas 旧路径——面板叠信息之上的层序在 canvas
+      //  帧内(DOM 层恒在整幅画布之上,同开回退旧路径保序);全屏地图开 = canvas
+      //  画后被图覆盖,DOM 层必须收起(否则浮在图上)。旗关 = canvas 旧路径逐字节
+      //  保留(DOM 元素幂等收起,已藏零写)。
+      if (infoDomEnabled() && !quickPanelsOpen && !this.fullMap.open) {
+        if (this.infoAccCtx && this.infoAccs.canShow(
+          !!((player as unknown as { talking?: boolean }).talking),
+          !!((this as unknown as { chestOpen?: boolean }).chestOpen),
+          false,
+        )) {
+          this.infoAccDom ??= new InfoAccsDOM(this.infoAccs);
+          this.infoAccDom.mount();
+          this.infoAccs.dom = this.infoAccDom;
+          this.infoAccDom.update(viewW, viewH, this.infoAccCtx, player.hideInfo,
+            this.playerInventory, this.mapStyle === 1 && !!this.minimap,
+            this.infoAccHover, this._mouseX, this._mouseY);
+        } else {
+          this.infoAccDom?.hide();
+        }
+        return;
+      }
+      this.infoAccDom?.hide();   // 旗关回退/面板开/全图开:DOM 层收起(canvas 旧路径)
       if (this.infoAccCtx && this.infoAccs.canShow(
         !!((player as unknown as { talking?: boolean }).talking),
         !!((this as unknown as { chestOpen?: boolean }).chestOpen),
@@ -6046,10 +6143,13 @@ export class Renderer {
       // ★N 批:rgbv 三通道（183 (50,0,0)/255 纯红、258 (150,50,50)/255——GetAlpha
       // 字面彩色档);标量档 rgbv=undefined → 三通道全取标量,零回归
       const mR = rgbv ? rgbv[0] : rgb, mG = rgbv ? rgbv[1] : rgb, mB = rgbv ? rgbv[2] : rgb;
-      if ((a <= 0.004 && !d.color) || d.type === 43) {
+      if ((a <= 0.004 && !d.color) || d.type === 43 || d.type === 66) {
         // A=0 加性族（182/206/230/58/110-114/311-313：GetAlpha 恒 (255,255,255,0)
         // 型、不读尘 α）——XNA 预乘 AlphaBlend 纯加法（α=0 惯用法，非"纯光照尘
         // 不可见"）；canvas 等价 = RGB×rgb、α 通道保留贴图羽化、'lighter' 叠画
+        // ★66 彩虹火把尘（2026-09-20 RB-彩虹魔杖批）带 d.color（Disco）仍必须走本
+        //  直绘支：premul 烘焙对在 a=0 时 add.A=texA×0=0（预乘内表 rgb'=rgb×a/255=0）
+        //  → 'lighter' 加 0=本体隐形（premul 陷阱家族）；直绘支 α 保留贴图羽化。
         // ★F1（2026-09-08 红队清偿）：`|| d.type === 43` = 闪光尘恒走直绘支的最小
         //  判据。彩色闪尘（tileShine 心/宝石族经 Game.emitTileParticles 传 color,
         //  TileDrawing.cs:7657 α=254 → a≈1/255）在烘焙对里落 dustPremulBake 的
@@ -6080,7 +6180,10 @@ export class Renderer {
         //  彩色 glint（本体是白亮 sprite,无此 pass 彩色闪尘全成白闪）；White 色档 =
         //  本体同色再叠 = 原版双画亮度。门槛看 RGB 内容（cp.a 恒 ≈1/255,低于本体
         //  支 0.004 α 阈——原文本 pass 的 cA 只进 dst 因子,rgb 全额加法不乘 c.a）。
-        if (d.type === 43 && d.color) {
+        if ((d.type === 43 || d.type === 66) && d.color) {
+          // ★66 扩员（同 43 门槛语义）：GetColor 二程=Main.cs:39696-39704 color.PackedValue!=0
+          //  即跑——66 的 disco 色（弹 79 每拍喂 Main.Disco）靠本程上画面（A=0 纯加算,
+          //  base=(1,0)→cp=disco 全额）。门槛必须看 RGB 内容（cp.a 恒 0,α 门槛=漏画）。
           const cp43 = VanillaDust.colorPass(d, rgb, a);
           if (cp43 && Math.max(cp43.r, cp43.g, cp43.b) > 0.004) {
             c2.clearRect(0, 0, 8, 8);
@@ -14615,8 +14718,19 @@ export class Renderer {
         return;
       }
     }
-    // 色块近似：贴图缺表的坐骑（约 32/64）——胶囊体 + 朝向头部
+    // 色块近似：贴图缺表的坐骑——胶囊体 + 朝向头部。
+    // ★BJ167 逐层对齐：原版 Mount.Draw 逐层各画各的贴图（:5620-5622
+    //  `texture2D == null → return`），front/backExtra/frontExtra =
+    //  Asset<Texture2D>.Empty（Value=null）的层零绘制。近似胶囊只兜底
+    //  "整只坐骑无任何贴图可得"——背层真贴图已渲染（back-only 族 22 座：
+    //  史莱姆鞍 3 Mount.cs:910-913 四贴图仅 back 非空/兔 1/猪龙 2/龟 4/蜂 5/
+    //  独角兽 10/可爱猪鲨 12/蜥蜴 14/扫帚 23/史后皇后史莱姆 50/宠物 62-65）时
+    //  front 层严禁再画胶囊：曾对 front Empty 层照画（一大一小两颗
+    //  mountFallbackColor[3]=#4080FF 蓝椭圆叠在真贴图与玩家上 = 用户实报
+    //  "残留两椭圆"的根因）。背贴图未就绪（懒加载 pending/缺表）时胶囊照画
+    //  = 近似兜底语义保留
     if (layer === 'back') return;    // 近似体单层即可，避免双层叠深
+    if (tex.back && this.atlas && this.atlas.ensureVImage(tex.back)) return;
     const d = mnt.data!;
     const bodyH = 42 + (d.heightBoost ?? 0) - 20;
     const bodyW = Math.max(24, Math.min(56, bodyH * 1.3));
@@ -15395,21 +15509,36 @@ export class Renderer {
           const S = c.cursorScale;
           const dw = icon.sw * S;
           const dh = icon.sh * S;
-          ctx.save();
-          if (p.cursorItemIconReversed) { ctx.translate(this._mouseX + push + dw / 2, 0); ctx.scale(-1, 1); ctx.translate(-(this._mouseX + push + dw / 2), 0); }
-          ctx.globalAlpha = 1;
+          // ★SW-BJ114 2026-09-19：图标面上浮层（z-index 301 > VUI 光标层 300 ≙ 原版
+          // 36<40 绘制序,域注释见 iconOverlayCtx）——原画游戏画布=恒在光标描边之下,
+          // 18×18×1.1 灰描边足罩灰图标左上核心区(门/椅实报)。面几何逐值不动:坐标
+          // 仅平移 (kx,ky)（上浮层=元素 translate(ox-2,oy-2) 后的层内相对位,回退
+          // 通道 kx=ky=0=游戏画布绝对位）。住房头像/名文本/告示牌面不随迁(域注)。
+          const octx = this.iconOverlayCtx() ?? ctx;
+          const ox = this._mouseX + push, oy = this._mouseY + push;   // 图标顶左(绝对屏位)
+          const onOverlay = octx !== ctx;
+          const kx = onOverlay ? 2 - ox : 0, ky = onOverlay ? 2 - oy : 0;
+          if (onOverlay) {
+            const el = this._iconOverlay!;
+            el.style.transform = `translate(${Math.round(ox - 2)}px, ${Math.round(oy - 2)}px)`;
+            if (el.style.display !== 'block') el.style.display = 'block';
+            this._iconOverlayStamp = this.animTick;                    // 帧章（head 守恒消费）
+          }
+          octx.save();
+          if (p.cursorItemIconReversed) { octx.translate(ox + dw / 2 + kx, 0); octx.scale(-1, 1); octx.translate(-(ox + dw / 2 + kx), 0); }
+          octx.globalAlpha = 1;
           // 恒全亮:原版 GetItemLight(:44519)以 outInTheWorld=false 默认参调用,
           // 不采样世界光照(ItemSlot.cs:3458 只处理迪斯科/脉冲/精华特殊物品),
           // currentColor 恒 White → 图标不乘暗。曾误读为"乘光标格光照"并
           // source-atop 叠黑——该合成作用于整张画布,暗处变纯黑方块(2026-08-18 报)
-          ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
-            this._mouseX + push, this._mouseY + push, dw, dh);
+          octx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
+            ox + kx, oy + ky, dw, dh);
           // GetItemLight 特殊物品改色（ItemSlot.cs:3475-3507,2026-08-19 补齐）:
           // 迪斯科族 → Main.Disco 色循环;ItemIconPulse 族 → essScale 脉冲;
           // 精华 58/184/4143 → essScale×0.25+0.75。essScale∈0.7-1.0 恒≤1 →
           // 全部为"乘暗/乘色",三步离屏 tint(multiply+destination-in 恢复 alpha)
           const clk = this.lighting?.clock;
-          const iconDst = { x: this._mouseX + push, y: this._mouseY + push, w: dw, h: dh };
+          const iconDst = { x: ox + kx, y: oy + ky, w: dw, h: dh };
           if (clk) {
             let tint: readonly [number, number, number] | null = null;
             if (CURSOR_DISCO_ITEMS.has(t)) tint = [clk.discoR, clk.discoG, clk.discoB];
@@ -15419,17 +15548,17 @@ export class Renderer {
               tint = [b, b, b];
             }
             if (tint && (tint[0] < 254 || tint[1] < 254 || tint[2] < 254)) {
-              tintIconRect(ctx, icon, iconDst, tint);
+              tintIconRect(octx, icon, iconDst, tint);
             }
           }
-          ctx.restore();
-          // 油漆工具子图标（:44531-44538 + TryGetAmmo :44570-44576）
+          octx.restore();
+          // 油漆工具子图标（:44531-44538 + TryGetAmmo :44570-44576）——随图标面同层
           if (flag && c.paintAmmoVid > 0 && PAINT_TOOLS.has(num)) {
             const ammo = this.atlasIcon(this.itemInternalOfVid(c.paintAmmoVid));
             if (ammo) {
               const off = paintToolOffset(num);
-              ctx.drawImage(ammo.img, ammo.sx, ammo.sy, ammo.sw, ammo.sh,
-                this._mouseX + 10 + off.x, this._mouseY + 10 + off.y, ammo.sw * 0.8, ammo.sh * 0.8);
+              octx.drawImage(ammo.img, ammo.sx, ammo.sy, ammo.sw, ammo.sh,
+                this._mouseX + 10 + off.x + kx, this._mouseY + 10 + off.y + ky, ammo.sw * 0.8, ammo.sh * 0.8);
             }
           }
         }
@@ -17202,17 +17331,14 @@ export class Renderer {
         box2(px2 + pw2 - 60, py2 + 112, 52, 18, '+ 风', () => { wd.windSpeedTarget = Math.min(0.8, wd.windSpeedTarget + 0.2); });
       }
     }
-    // ★点击小地图地图区域 → 打开全图（用户实报缺失——原版 DrawMap 全模式共用
-    //  MapIconOverlay，小地图模式可点击展开全图；按钮/天气控件已消费的点击不触发）。
-    //  ★SW-BJ15：加 !fullMap.open 门（本块在 render 早段运行，全屏地图打开时小地图
-    //  只是视觉被盖住，逻辑仍活——旧版无门，开图状态点右上区域会把已开地图的视图
-    //  状态整个重置）；开图预置统一走主角锚定 openFullMapFocusedOnPlayer（旧版
-    //  anchorMX=floor(屏幕px/TILE) 错把屏幕坐标当世界 tile + anchorU/V 留旧值 =
-    //  会话首开视野钉到地图左缘，用户实报"首次打开偏到左边"）
-    if (clicked && !this.fullMap.open && !this._minimapBtnClicked
-      && mx >= ox && mx <= ox + size && my >= oy && my <= oy + size) {
-      this.openFullMapFocusedOnPlayer(player, world.w, world.h);
-    }
+    // ★SW-BJ120 2026-09-19：本渲染侧「点击小地图→开全图」面整面摘除（自创面——其
+    //  原版依据「DrawMap 全模式共用 MapIconOverlay,小地图模式可点击展开全图」经
+    //  反编译定谳为误读:小地图支 Main.cs:56340-56381 无点击处理,MapIconOverlay 是
+    //  图标绘制层非点击面;开图入口=专用键/晶塔,详见 Game.ts fixedUpdate BJ120 注）。
+    //  本面与 Game 侧同门面双生（SW-BD1/BJ15 时代）,Game 侧摘除后此处仍会吃到
+    //  「updateUse 让位(缩放钮悬停)未消费」的边沿 = 钮上点击照样开图——一并摘除。
+    //  开图预置函数 openFullMapFocusedOnPlayer 保留（幂等锚定预置,现由 M 键
+    //  toggleFullMap 同式内联,后续入口复用单源）。
     this._minimapBtnClicked = false;
     this._uiPrevMouseDown = this._mouseDown;
     // ★SW-BJ1 小地图城镇 NPC 头像悬停名（Main.cs:56988 DrawNPCMapIcons2

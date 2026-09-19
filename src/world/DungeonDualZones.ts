@@ -11,7 +11,7 @@
 // ✗ NPCSpawningFlagsForDualDungeons 区域扫描→出生表」+ §4 E 车道。
 // ★门纪律：所有入口都要求 world.seedFlags?.dualDungeons 为真；非双地牢世界调用即早退，
 //   零扫描零掷骰——普通世界与现有金标完全无感。
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, BOULDERS_SHEETS, WALL_DUNGEON_SHEETS as WALL_DUNGEON_SHEETS_AUTH } from '../data/tiles';
 import { TileStore } from './TileStore';
 
 /** Terraria/NPCSpawningFlagsForDualDungeons.cs:6-24（九 Zone 位逐字对照） */
@@ -53,12 +53,15 @@ const HARDENED_SAND_CONV_WALLS = new Set([216, 217, 219, 218, 304, 305, 307, 306
 /** wall 223：SceneMetrics.cs:736 ZoneUndergroundDesert 收尾第三项 */
 const EXTRA_UGDESERT_WALL = 223;
 
-/** Main.wallDungeon（Main.cs 全表提取）：{7,8,9} ∪ [94..99]（地牢砖墙组）。
- *  SceneMetrics.cs:722 ZoneDungeon 收尾并墙门 + Player.Spawn 门共用语义 */
-export const WALL_DUNGEON_SHEETS = new Set<number>([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.wallDungeon（Main.cs:10734-10745 全表）：{7,8,9} ∪ [94..99]（地牢砖墙组）。
+ *  SceneMetrics.cs:722 ZoneDungeon 收尾并墙门 + Player.Spawn 门共用语义。
+ *  ★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等）——
+ *  转出口保持旧 API（Game/CleanupPass 等既有导入面不动） */
+export const WALL_DUNGEON_SHEETS = WALL_DUNGEON_SHEETS_AUTH;
 
 /** TileID.cs:195 TileID.Sets.Boulders = CreateBoolSet(138,484,664,665,711..716) */
-const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDER_SHEETS = BOULDERS_SHEETS;
 
 /** 内部 tile id → vanilla sheet id（TILE_DEFS.vanilla.sheet；缺席 = -1） */
 const SHEET_LUT: Int16Array = (() => {

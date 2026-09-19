@@ -33,7 +33,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
@@ -135,8 +135,9 @@ const SMALL_PILE = TILE_BY_KEY['v_185_small_decos']!;
 const WALL_LIVING_WOOD = 244;
 /** TileID.Sets.Clouds（Terraria.ID/TileID.cs:197 Factory.CreateBoolSet）——eLT 云锚附近截断用 */
 const LT_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
-/** Main.wallDungeon（cs:10777 起）= 地牢墙族 */
-const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.wallDungeon（Main.cs:10734-10745）= 地牢墙族——★BJ187 收编
+ *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 /** TileID.Sets.Ore（TileID.cs:399）——GrowLivingTree 地面类型门禁用 */
 const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
 /** TileID.Sets.Clouds（TileID.cs:197）——canPlaceLeaves 排除 */
@@ -166,13 +167,10 @@ function solidAt(st: TileStore, x: number, y: number): boolean {
   return st.flags[i] !== 0 && genSolidType(st.type[i]);
 }
 
-// ★IIIII73：Main.tileSolidTop 全表（Main.cs:6764-7841，78 项 sheet 集）。与
-// DungeonPass.ts 的 DG_SOLID_TOP 同表拷贝（含桌14/工作台18/箱87/书架101/旗339 等
-// solidTop 族）——SolidTile 判定的第二道门；两处定义勿各自漂移。
-const LT_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+// ★IIIII73：Main.tileSolidTop 全表（与 DungeonPass 的 DG_SOLID_TOP 同表）——SolidTile
+// 判定的第二道门。★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项;旧 79 项
+// 副本漏 Main.cs:10125-10131 循环臂 435-439 队伍平台,生成期不可达=行为零差）。
+const LT_SOLID_TOP = SOLID_TOP_SHEETS;
 
 /** WorldGen.SolidTile(i,j)（Terarria1458 WorldGen.cs:70650-70666 **全项版**）：
  *  active ∧ tileSolid(genSolidType 生成期语义) ∧ !tileSolidTop ∧ !halfBrick() ∧
@@ -335,7 +333,8 @@ function placePlatform(st: TileStore, rng: RNG, x: number, y: number, style: num
   genSquareTileFrame(st, rng, x, y);
 }
 /** TileID.Sets.Boulders（TileID.cs:195）——InvalidTileForPilesOrSpeleothems 用 */
-const PILE_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PILE_BOULDERS = BOULDERS_SHEETS;
 /** WorldGen.InvalidTileForPilesOrSpeleothems（cs:39005）：InWorld(2) 内 active 且 Boulders 族 */
 function invalidForPiles(st: TileStore, x: number, y: number): boolean {
   if (!inWorld(st, x, y, 2)) return false;

@@ -8,7 +8,7 @@ import type { Player } from './Player';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
-import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS } from '../data/tiles';
+import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS, TILE_DUNGEON_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TOWN_NPC_IDS, VANILLA_NPCS, vanillaSoundFiles } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable, isNpcShimmerImmune, findShimmerFreeSpot } from '../stats/Shimmer';
@@ -372,7 +372,7 @@ export const TP_SAFE_Y = Math.trunc((TP_SCREEN_H / 16) * 0.52);   // 39
  *  古砖 {677,678,679}。回家传送触发的守卫老人备用臂——`type==37 && tileDungeon[
  *  脚格]` 时无视昼夜/天气旗直接参与「不在驻地→拽回」（NPC.cs:53973 OR 臂）。
  *  集合按本仓 tile 域物化：遍历 TILE_DEFS 以 vanilla.sheet 归一，免引 Housing.sheetOf */
-const VANILLA_DUNGEON_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
+const VANILLA_DUNGEON_SHEETS = TILE_DUNGEON_SHEETS;   // Main.tileDungeon（★BJ187 单源 data/tiles.ts）
 const VANILLA_DUNGEON_TILES = (() => {
   const s = new Set<number>();
   for (let t = 1; t < TILE_DEFS.length; t++) {

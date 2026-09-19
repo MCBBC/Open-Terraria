@@ -251,9 +251,13 @@ describe('SW-BJ15 结构锁（源文本锚，防静默回退）', () => {
     expect(iH).toBeLessThan(iEase);
   });
 
-  it('小地图点击入口走 openFullMapFocusedOnPlayer 且带 !fullMap.open 门', () => {
-    expect(rs).toContain('!this.fullMap.open && !this._minimapBtnClicked');
-    expect(rs).toContain('this.openFullMapFocusedOnPlayer(player, world.w, world.h);');
+  it('小地图点击入口已随 SW-BJ120 摘除（openFullMapFocusedOnPlayer 调用点清零）', () => {
+    // ★SW-BJ120 2026-09-19 定谳重产：原锁钉「点击小地图→开全图」自创面——反编译
+    //  定谳该面无原版依据（minimap 支 Main.cs:56340-56381 无点击处理;开图=专用键
+    //  Player.cs:25163/晶塔 Player.cs:32426）。Game 侧+Renderer 侧双生面均已摘除;
+    //  本锁反转方向:调用点回归即爆红。锚定预置三要素锁保留（函数体仍在,单源复用位）
+    expect(rs).not.toContain('this.openFullMapFocusedOnPlayer(player, world.w, world.h);');
+    expect(rs).not.toContain('!this.fullMap.open && !this._minimapBtnClicked');
     expect(rs).not.toContain('anchorMX = Math.floor(mx / TILE)');   // 旧垃圾锚点已删
   });
 

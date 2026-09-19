@@ -133,7 +133,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -965,7 +965,8 @@ const ROPE_LAVA_DEATH_SHEETS = new Set<number>([213, 353]);
 // 59淤泥,123淤,224雪泥,147雪,397硬沙}——铜镐挖土 2 击非 3 击
 export const SOFT_DIG_SHEETS = new Set([0, 40, 53, 57, 59, 123, 224, 147, 397]);
 // IsATreeTrunk（TileID.cs:161）：干族全表（普通树/蘑菇树/宝石树×7/观赏树×2/灰烬树）
-const TREE_TRUNK_SHEETS = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TREE_TRUNK_SHEETS = IS_A_TREE_TRUNK_SHEETS;
 // CanKillTile tile-above 保护清单（WorldGen.cs:62293-62297）：宝箱 21/梳妆台 26/
 // 蘑菇树 72/地狱熔炉 77/梳妆台2 88/箱2 467/倒木 488——这些多格件的支撑格不可破坏
 const PROTECTED_ABOVE_SHEETS = new Set([21, 26, 72, 77, 88, 467, 488]);
@@ -1383,7 +1384,9 @@ function exposed8ForPlant(st: TileStore, x: number, y: number): boolean {
 // 地牢砖族（Main.tileDungeon，Main.cs:7941-7946：41/43/44/677/678/679）：除数 /2 +
 // 门槛 100（地下）。★481-483 裂砖不在 tileDungeon（肉前地牢薄弱墙设计,无镐门槛无 ÷2,
 // 2026-08-23 审计勘误——曾误收）；677-679 古砖在表（曾漏收）
-const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
+// 地牢砖族（Main.tileDungeon,Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts 单源
+//（6 项逐值全等;镐力门槛消费面 :20409/:20445 语义不变）
+const TILE_DUNGEON_SHEETS = TILE_DUNGEON_SHEETS_V;
 // ★SW-RB9c（2026-09-09）：条件镐力门族（GetPickaxeDamage,Player.cs:54553-54604）——
 // 门槛随深度/帧档变化的零伤门族,已在 tileHitDamage 中段逐支 1:1（:18929-18958）。
 // 尾段通用 d.pick 门（:19032）对本族必须【跳过】：原版 GetPickaxeDamage 只有条件门、
@@ -1551,7 +1554,8 @@ const TRAP_PROJ_VIDS = new Set<number>([
 const BLOCK_SWAP_DOESNT_PLACE_SHEETS = new Set<number>([2, 60, 70, 109, 199, 23, 661, 662, 633]);
 const BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS = new Set<number>([58, 225, 171, 127, 481, 482, 483, 423]);
 const BLOCK_SWAP_FAMILY_TARGET_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439, 4, 215, 21, 467, 88]);
-const PLATFORMS_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+//  ——同名 shadow 副本拆除,消费面直用 import(data/tiles.ts TileID.cs:243 权威表)
 // ★SW-BJ18 2026-09-07：ReplaceTile_EliminateNaturalExtras 邻接清除表（消费位
 //  WorldGen.cs:63153-63166；表本体 TileID.cs:245/:247 Factory.CreateBoolSet 原表逐项，
 //  sheet 域）——单格原位重写【前】清上邻 BreakUp 36 件（苗/草/药草/小饰族，放块压苗
@@ -1912,7 +1916,8 @@ export function heldItemUseStyle(vid: number): number {
 }
 /** vanilla TileID.Sets.Platforms（WorldGen.SolidOrSlopedTile includePlatforms 臂消费；
  *  ★SW-BJ43 海螺落位面复刻——与 VanillaTiler VANILLA_PLATFORM_SHEETS 同表） */
-const CONCH_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const CONCH_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 /** 传送目的地分类（★SW-BJ48 2026-09-09：补 'random'=传送药水 2351 随机落点支——
  *  Player.TeleportationPotion（Player.cs:56922-56968）→ Utils.CheckForGoodTeleportationSpot
  *  （Utils.cs:518-647，1458 同域 diff=same）；此前 2351 误落 'spawn' 支=与回忆药水同路）
@@ -12170,7 +12175,7 @@ export class Game implements GameHooks {
         // GetManaCostToPay 消费面 :10870/:14005/:15075 同源）；扣魔同时
         // ApplyManaRegenerationDelay()（:5877）——回蓝 buff 期钳 20
         if (bother && (f.mana ?? 0) > 0) {
-          const cost = Math.trunc(f.mana! * (1 - p.equipStats.manaCostOff) * p.equipStats.manaCostMul);   // :5875/:5878
+          const cost = Math.trunc(f.mana! * (1 - (p.equipStats.manaCostOff ?? 0)) * (p.equipStats.manaCostMul ?? 1));   // :5875/:5878（★BJ175 桩面 ?? 防御族,缺省 0/1）
           if (p.mana >= cost) { p.mana -= cost; p.applyManaRegenerationDelay(); } else bother = false;
         }
         if (!bother) continue;
@@ -13353,12 +13358,12 @@ export class Game implements GameHooks {
           (sx, sy, svx, svy) => {
             const shot = new SkyDragonShot(sx, sy, svx, svy, swDmg);
             shot.critChance = swCrit;
-            shot.armorPen = eq.armorPen;
+            shot.armorPen = (eq.armorPen ?? 0);
             this.hookSkyDragonCircle(shot);
             this.entities.add(shot, 'projectiles');
           });
         swingP.critChance = swCrit;
-        swingP.armorPen = eq.armorPen;
+        swingP.armorPen = (eq.armorPen ?? 0);
         this.entities.add(swingP, 'projectiles');
         this.useSwing(heldDef, ang);
         if (this.swing) this.swing.noGraphic = true;    // noUseGraphic（:34091）
@@ -13398,7 +13403,7 @@ export class Game implements GameHooks {
           // 沉默门（Player.cs:51383-51385 同 case 'magic' 头）——静默不施放
         } else {
           const bsCost = Math.trunc(Math.round(bsMana * 2 * (bsPs?.mcst ?? 1))
-            * (1 - eq.manaCostOff) * eq.manaCostMul);   // GetManaCostToPay ×2(:53317-53321)
+            * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1）   // GetManaCostToPay ×2(:53317-53321)
           this.player.slowMagicUse = false;           // CheckMana 入口复位（:53216）
           this.player.checkMana(bsCost);              // ManaV2 空蓝照放语义单点端口
           const bsDmg = Math.max(1, Math.trunc((this.player.damageMult('magic')
@@ -13409,7 +13414,7 @@ export class Game implements GameHooks {
             this.player.facing * (bsData?.shootSpeed ?? 11), bsDmg,
             (bsData?.knockBack ?? 9) * (bsPs?.kb ?? 1));
           twister.critChance = 0.04 + this.player.critChance('magic') / 100;   // 概率域 0-1（同 critTotal 口径）
-          twister.armorPen = eq.armorPen + (bsPs?.arpen ?? 0);
+          twister.armorPen = (eq.armorPen ?? 0) + (bsPs?.arpen ?? 0);
           this.entities.add(twister, 'projectiles');
           this.useSwing(heldDef, undefined);
           this.player.useTime = bsData?.useAnimation ?? 25;  // 动画窗节流（alt 仅 ItemAnimationJustStarted :43826）
@@ -13684,7 +13689,7 @@ export class Game implements GameHooks {
         // GetWeaponDamage：物品伤害×词缀×近战全系乘区（NewProjectile Damage 实参）
         const zDmg = Math.max(1, Math.round(cwMelee!.damage * (ps?.dmg ?? 1) * this.player.damageMult('melee')));
         const zPayload = { useTime: reuseSpd, fired: 1, vid: heldVid, dmg: zDmg, crit: arcCritZ,
-          pen: eq.armorPen + this.player.meleeArmorPen };
+          pen: (eq.armorPen ?? 0) + this.player.meleeArmorPen };
         this.swing = {
           t: animSpd, dur: animSpd, item: held!.id,
           dmg: Math.max(1, Math.round(cwMelee!.damage * (ps?.dmg ?? 1))),
@@ -13740,7 +13745,7 @@ export class Game implements GameHooks {
           const mkArc = (projId: number, dmg: number) => {
             const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), arcAi0, scaleT);
             arc.critChance = arcCrit;
-            arc.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            arc.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             // 弹体击退（NewProjectile KnockBack 实参）——997 命中召 321 时透传
             // HorsemansBlade_SpawnPumpkin 的 kb 参（Player.cs:42444/:42462）
             arc.kb = this.swing?.kb ?? cwMelee?.knockback ?? 0;   // 闭包内窄化失效 → 可选链
@@ -13753,7 +13758,7 @@ export class Game implements GameHooks {
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 5), Math.sin(angT) * (cwMelee.shootSpeed ?? 5),
                 this.swing.dmg ?? cwMelee.damage, arcAi0, 30, scaleT);   // ai0=dir×gravDir×0.1（:49382）
               fly.critChance = arcCrit;
-              fly.armorPen = eq.armorPen + this.player.meleeArmorPen;
+              fly.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(fly, 'projectiles');
               break;
             }
@@ -13763,7 +13768,7 @@ export class Game implements GameHooks {
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 14), Math.sin(angT) * (cwMelee.shootSpeed ?? 14),
                 (this.swing.dmg ?? cwMelee.damage) / 2, arcAi0, 32, scaleT);   // ai0=dir×gravDir（:49435-49436）
               slash.critChance = arcCrit;
-              slash.armorPen = eq.armorPen + this.player.meleeArmorPen;
+              slash.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(slash, 'projectiles');
               break;
             }
@@ -13795,7 +13800,7 @@ export class Game implements GameHooks {
               if (Math.floor(Math.random() * 100) < this.player.critChance('melee') * 100 + 4) { ai0974 = 2; dmg974 *= 2; }
               const lb = new LightsBaneSlash(sx974, sy974, rdx, rdy, Math.round(dmg974), ai0974);
               lb.critChance = arcCrit;
-              lb.armorPen = eq.armorPen + this.player.meleeArmorPen;
+              lb.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(lb, 'projectiles');
               break;
             }
@@ -13847,7 +13852,7 @@ export class Game implements GameHooks {
               const gs = new GrassSlash(sx976, sy976, fvx, fvy,
                 Math.round((this.swing.dmg ?? cwMelee.damage) * 0.25), num180);
               gs.critChance = arcCrit;
-              gs.armorPen = eq.armorPen + this.player.meleeArmorPen;
+              gs.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
               this.entities.add(gs, 'projectiles');
               break;
             }
@@ -13884,7 +13889,7 @@ export class Game implements GameHooks {
               this.player.cx, this.player.cy - 4,
               cdir, cdvy, cDmg, cKb, animMax, ps?.size ?? 1);                // ai[2]=itemScale（:49422）
             blade.critChance = arcCrit;
-            blade.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            blade.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             // usesOwnerMeleeHitCD（Projectile.cs:10556→Damage_PVE :12596/:14343）：
             // 刃与玩家挥击弧共享同一套近战命中表——同一挥击内弧+刃对同敌不双跳字
             //（蓝队 R2-08；1129 同款偏差已在类注释自认登记）
@@ -14004,7 +14009,7 @@ export class Game implements GameHooks {
             const ff = new FirstFractalSlash(tx857 - ax857, ty857 - ay857, vx857, vy857,
               this.swing.dmg ?? cwMelee.damage, curv);
             ff.critChance = arcCrit;
-            ff.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            ff.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(ff, 'projectiles');
           }
           // 波涌之刃 2880 → 451（Player.cs:48616-48618：ai[0]=-1 初值；穿透取表）
@@ -14014,7 +14019,7 @@ export class Game implements GameHooks {
               this.swing.dmg ?? cwMelee.damage, cwMelee.knockback,
               Math.max(1, pd?.penetrate ?? 3));
             tide.critChance = arcCrit;
-            tide.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            tide.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(tide, 'projectiles');
           }
           // 日耀喷发 3473 → 611 链鞭（Player.cs:48059-48063）：初速=瞄准向（链
@@ -14024,7 +14029,7 @@ export class Game implements GameHooks {
               Math.cos(ang2) * cwMelee.shootSpeed, Math.sin(ang2) * cwMelee.shootSpeed,
               this.swing.dmg ?? cwMelee.damage);
             whip.critChance = arcCrit;
-            whip.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            whip.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(whip, 'projectiles');
           }
           // 985 泰拉刃光束（Player.cs:48316-48317 出生注入）：初速=瞄准向×shootSpeed×5
@@ -14061,7 +14066,7 @@ export class Game implements GameHooks {
               // ★SW-FX31：757 链 984 弧 ai[0] = direction×gravDir（Player.cs:49443）
               Math.round((this.swing.dmg ?? 1)), this.player.facing * this.player.gravDir, (ps?.size ?? 1));
             arc.critChance = arcCrit;
-            arc.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            arc.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(arc, 'projectiles');
             this.mining = null;
             return;
@@ -14097,7 +14102,7 @@ export class Game implements GameHooks {
               Math.trunc((this.swing.dmg ?? 1) * 1.5),   // :46624 Damage ×1.5
               Math.max(1, pd?.penetrate ?? 2), vy9);
             star9.critChance = arcCrit;
-            star9.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            star9.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(star9, 'projectiles');
             this.mining = null;   // 与 503 分支同语义（提前 return 防下方通用单发补射）
             return;  // 本击只出天降落星，不再走下方通用单发
@@ -14218,7 +14223,7 @@ export class Game implements GameHooks {
                 shootSpeed: cSaw?.shootSpeed,                             // 509=48 / 252=46 / 2798=36
                 laser: sawAi === 75 });
             saw.critChance = 0.04 + this.player.critChance('melee') / 100 + (psSaw?.crt ?? 0) / 100;
-            saw.armorPen = eq.armorPen + this.player.meleeArmorPen;
+            saw.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(saw, 'projectiles');
           }
         }
@@ -14719,7 +14724,7 @@ export class Game implements GameHooks {
           const stTune = itemCombat(4715);
           const psTune = this.heldPrefixStat();
           const tuneCost = Math.trunc(Math.round((stTune?.mana ?? 12) * (psTune?.mcst ?? 1))
-            * (1 - eq.manaCostOff) * eq.manaCostMul);
+            * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1）
           p.slowMagicUse = false;                       // CheckMana 入口复位（:53216）
           if (!(tuneCost > 0 && p.buffs.has(BuffType.Silenced))) {
             p.checkMana(tuneCost);                      // ManaV2 空蓝照放语义单点端口
@@ -14755,7 +14760,7 @@ export class Game implements GameHooks {
             // （同族近战链形制 `+ (ps?.crt ?? 0)` 对照 Game.arcCritZ 支）
             orb.critChance = stellarTuneCritChance(p.critChance('magic'), stTune?.crit, psTune?.crt);
             orb.knockback = (stTune?.knockBack ?? 0) * (psTune?.kb ?? 1);
-            orb.armorPen = eq.armorPen + (psTune?.arpen ?? 0);
+            orb.armorPen = (eq.armorPen ?? 0) + (psTune?.arpen ?? 0);
             this.entities.add(orb, 'projectiles');
           }
           // 数据面 useTime=6/useAnimation=12（Item.cs:38758-38759 /=2）,但和弦门 =
@@ -15341,10 +15346,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                     const rk = new Celeb2Rocket(pid2, variant, s.x, s.y, s.vx, s.vy,
                       dmg2, kb2, fo.bonusAi1,
                       (ex, ey, edmg, evx) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE),
-                        edmg, er2, er2 > 0, 11, eq.armorPen + (ps?.arpen ?? 0), pid2,
+                        edmg, er2, er2 > 0, 11, (eq.armorPen ?? 0) + (ps?.arpen ?? 0), pid2,
                         ex, ey, kb2, Game.explosionKbDir(evx)));   // SW-F1 2026-09-03 真像素爆心直穿（716/718=center 系,k=0）;SW-S1 2026-09-04 kb=发射 kb（715-718 不入 PrepareBombToBlow 表,Kill :75034-75049 直调 Damage() 不改 kb→原版击退=武器 kb）;SW-AC1 2026-09-04 kbDir=弹末 vx 符号（aiStyle147 不在自动面排除表,Update :17121-17132 同式;0 落 else 档+1）
                     rk.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0) + (mC?.crit ?? 0)) / 100;   // 阈值=小数(Celeb2Rocket roll 直用;曾传百分点=恒暴击)
-                    rk.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+                    rk.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
                     this.entities.add(rk, 'projectiles');
                   }
                 } else {
@@ -15352,7 +15357,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                   const pid2 = mC?.shoot && mC.shoot > 0 ? mC.shoot : 14;
                   const b1 = new Arrow(fx, fy, fvx, fvy, dmg2, kb2, pid2, {});
                   b1.critBonus = this.player.critChance('ranged') + (mC?.crit ?? 0);
-                  b1.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+                  b1.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
                   b1.frostEligible = true;
                   this.entities.add(b1, 'projectiles');
                   if (variant === 0) {                          // ⌊ai0/5⌋%7==0（:63989-63993）
@@ -15483,7 +15488,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               damage, knockback, 167 + Math.floor(Math.random() * 4),
               { grav: 0, life: 45, pierce: 1 });
             fw.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
-            fw.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            fw.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             fw.launcherFirework = 1;                    // ai[1]=1（AI_034 发射器档）
             this.entities.add(fw, 'projectiles');
           }
@@ -15530,7 +15535,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               // 专属处理,天然=1458 修后行为（备案防回改）
               if (projId === 1088) { this.acornSeedDeath(ex, ey, evx ?? 0, evy ?? 0); return; }
               this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er16, er16 > 0,
-                hurtBox16, eq.armorPen + (ps?.arpen ?? 0), projId,
+                hurtBox16, (eq.armorPen ?? 0) + (ps?.arpen ?? 0), projId,
                 ex, ey, PREPARE_BOMB_KB[projId], Game.explosionKbDir(evx));
               // SW-F1 2026-09-03 真像素爆心直穿（aiStyle16 弹心,半盒偏移按型内表）;
               // SW-S1 2026-09-04 kb=PrepareBombToBlow :47629-47720 各支 knockBack
@@ -15583,7 +15588,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 接触伤害参数（Damage_PVE 接触结算与爆炸同源——曾缺=火箭穿体 3t 后才爆）。
           // kb=武器值（原版火箭 SetDefaults 无 knockBack,发射时 NewProjectile 传武器 kb
           // ——火箭炮 5.5,Projectile.cs:1966 无 knockBack 行=默认 0 再被发射侧覆盖）
-          rocket.contactPen = eq.armorPen + (ps?.arpen ?? 0);
+          rocket.contactPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           rocket.contactKb = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
           rocket.critChance = (this.player.critChance('ranged') + (bowC?.crit ?? 0)) / 100;
           rocket.fired = true;
@@ -15714,7 +15719,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 67-68 配饰/buff) + 武器&弹药 item.crit + 词缀 crt（审计 §6/⑧）
         const critTotal = this.player.critChance('ranged')
           + (itemCombat(bowVid2)?.crit ?? 0) + (ammoC?.crit ?? 0) + (ps?.crt ?? 0);
-        const arpenTotal = eq.armorPen + (ps?.arpen ?? 0); // ⑥+⑧ 词缀 arpen
+        const arpenTotal = (eq.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧ 词缀 arpen
         const gravOpts = { grav: gs.grav, gravDelay: gs.delay, grav2: gs.grav2, grav2At: gs.grav2At };
         /** 特例扇生成共用（★SW-FX9 2026-09-10 勘误:旧"noDropItem=dropKey null 仅木箭回收"
          *  注随回收链摘除退役——原版弓系扇/齐射本就恒消耗,无任何回收语义） */
@@ -16282,7 +16287,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               placeAtShootSpawn(fire, fx, fy);
               fire.ignite = true; // 命中 OnFire rand(3,7)s（:10850——Arrow.ignite 5s 档）
               fire.critBonus = this.player.critChance('ranged') + (psT?.crt ?? 0);
-              fire.armorPen = eq.armorPen + (psT?.arpen ?? 0);
+              fire.armorPen = (eq.armorPen ?? 0) + (psT?.arpen ?? 0);
               this.entities.add(fire, 'projectiles');
             });
           // ★R9 批四（2026-09-03）：燃烧瓶 2590 无专支 → ItemCheck_Shoot 通用尾支
@@ -16333,7 +16338,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             tc.shoot, dmgT, (c?.knockBack ?? 3) * (psT?.kb ?? 1),
             (convType, ci, cj, size) => this.evolution.convertArea(ci, cj, convType, size));
           water.critChance = (this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0)) / 100;
-          water.armorPen = eq.armorPen + (psT?.arpen ?? 0);
+          water.armorPen = (eq.armorPen ?? 0) + (psT?.arpen ?? 0);
           // ★R9 批四（2026-09-03）：圣/邪/血水 422/423/3477 无专支 → 通用尾支 :49957
           //  盒心语义（:10878-10879）——69/70/621 盒 14×14(P.cs:1490-1512),ctor 收
           //  盒左上,曾直传 = 弹盒右下偏 (7,7)px
@@ -16356,7 +16361,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         placeAtShootSpawn(thrownArrow, px, py);
         thrownArrow.frostEligible = true; // 投掷并入 melee(:93712 门含 melee)
         thrownArrow.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6 + ⑧ crt；投掷=ranged 族（§5）
-        thrownArrow.armorPen = eq.armorPen + (psT?.arpen ?? 0); // ⑥+⑧
+        thrownArrow.armorPen = (eq.armorPen ?? 0) + (psT?.arpen ?? 0); // ⑥+⑧
         this.entities.add(thrownArrow, 'projectiles');
         }
       }
@@ -16615,7 +16620,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ⑪+⑧ 词缀 mcst（I:562 round——cw 链 5374 已接,此 mg 直射链 2026-08-13 补）
       const psM = this.heldPrefixStat();
       const mgCost = Math.trunc(Math.round(mg.manaCost * (psM?.mcst ?? 1))
-        * (1 - eq.manaCostOff) * eq.manaCostMul);
+        * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1）
       if (this.player.mana < mgCost) {
         if (!(eq.manaFlower && this.tryAutoManaPotion() && this.player.mana >= mgCost)) {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
@@ -17106,7 +17111,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.input.mouseDown = false;
         return;
       }
-      const flArpen = eq.armorPen + (ps?.arpen ?? 0);
+      const flArpen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
       const charge = new FlintChargeProj(flOwner, 0, 0, cw.damage, cw.knockback,
         () => this.input.mouseHeld && !this.input.uiBlocking
           && flOwner.inv.heldItem()?.id === flItemId && !flOwner.dead,
@@ -17209,7 +17214,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 半盒按型查 explosionCompareHalfBoxPx;1086/1087=Center 系 k=0）
             // SW-AC1 2026-09-04：kbDir=弹末 vx 符号（onExplode oldVx 直穿;AI_016 自动面
             //  sign(velocity.X) else 档 +1——粘性贴附/摇树弹 vx=0 → +1,原版同式）
-            this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, eq.armorPen + (ps?.arpen ?? 0), cw.shoot, ex, ey,
+            this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, (eq.armorPen ?? 0) + (ps?.arpen ?? 0), cw.shoot, ex, ey,
               PREPARE_BOMB_KB[cw.shoot], Game.explosionKbDir(evx));   // SW-S1 2026-09-04：kb=PrepareBombToBlow :47629-47720 各支（28 族 8/29 族 10/手雷族 8/1086 族 9/湿炸弹族 12…）
             if (payload) {
               const painted = Game.spreadBombPayload(this.world.store, payload,
@@ -17233,7 +17238,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 接触伤害参数（同发射支——投掷炸弹碰 NPC 也走 Damage_PVE 结算）
         // ★2026-08-23 esbuild 快检随修：cw 字段名/暴击源对齐上方重写后形态
         //  （knockback 已词缀乘区;crit 走 critTotal 中心化式,见 :10575 起）
-        thrownBomb.contactPen = eq.armorPen + (ps?.arpen ?? 0);
+        thrownBomb.contactPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
         thrownBomb.contactKb = cw.knockback;
         thrownBomb.critChance = critTotal;
         this.entities.add(thrownBomb, 'projectiles'); // ⑥+⑧
@@ -17280,7 +17285,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         placeAtShootSpawn(bom, this.player.cx, this.player.cy);
 
         bom.critChance = critTotal;
-        bom.armorPen = eq.armorPen; // ⑥
+        bom.armorPen = (eq.armorPen ?? 0); // ⑥
         // 301 Bouncing Shield 按 20t/100t 双门需 channel（其余族不用,空挂无害）
         if (cw.shoot === 301) bom.channel = () => this.input.mouseHeld && !this.input.uiBlocking;
         this.entities.add(bom, 'projectiles');
@@ -17294,7 +17299,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const spear = new SpearProj(Math.cos(ang), Math.sin(ang), cw.shootSpeed * (ps?.size ?? 1), cw.useTime, // P:46431 num13=shootSpeed×scale(词缀 size)
           cw.damage, cw.knockback, cw.shoot);
         spear.critChance = critTotal;
-        spear.armorPen = eq.armorPen + this.player.meleeArmorPen; // ⑥ 近战含磨刀
+        spear.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥ 近战含磨刀
         // AI_019 伴生弹接线（Projectile.cs:46726-46746,R30 §3.2 落点清单 #8）：
         // 130 蘑菇矛→131 孢子云七连（damage/3,kb0）/ 730 风暴矛→732 首拍气旋
         // （damage×1.6,kb×0.5,v×4）——NewProjectile X/Y=中心（:10878-10879），
@@ -17323,7 +17328,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           cw.damage, cw.knockback, cw.shoot);
         placeAtShootSpawn(anchored, this.player.cx, this.player.cy);   // 盒心=玩家中心(:47588/:10878)
         anchored.critChance = critTotal;
-        anchored.armorPen = eq.armorPen + (dmgKind === 'melee' ? this.player.meleeArmorPen : 0);
+        anchored.armorPen = (eq.armorPen ?? 0) + (dmgKind === 'melee' ? this.player.meleeArmorPen : 0);
         this.entities.add(anchored, 'projectiles');
         this.player.useTime = cw.useTime;
         // UseSound 数据驱动链（Item10/Item174/Item1——vanilla-itemusesound.json）
@@ -17358,7 +17363,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 封顶 3×——summonerWeaponSpeedBonus 来自鞭 buff 311/308/314，黑曜套给 wutm）
         const swb = (owner.whipBuffs[311] ? 0.35 : 0) + (owner.whipBuffs[308] ? 0.25 : 0)
           + (owner.whipBuffs[314] ? 0.12 : 0);
-        const whipAtk = Math.min(3, 1 + swb * eq.whipSpd);
+        const whipAtk = Math.min(3, 1 + swb * (eq.whipSpd ?? 1));   // ★BJ175 桩面 ?? 防御（缺省 1=:2815）
         this.player.useTime = Math.max(1, Math.round(whip.useTime / whipAtk));
         whipObj.bonusTagDmg = ps?.tagdmg ?? 0; // I:567 bonusTagDamage
         // 鞭 useStyle 1 挥动动画 + noUseGraphic=true（DefaultToWhip Item.cs:47473
@@ -17578,7 +17583,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           placeAtShootSpawn(bud, sx, sy);
           this.entities.add(bud, 'projectiles');
         };
-        flailP.armorPen = eq.armorPen + this.player.meleeArmorPen; // ⑥
+        flailP.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥
         this.entities.add(flailP, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw'); // UseSound=SoundID.Item1(Item.cs case 220)
@@ -17604,7 +17609,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           cw.damage, cw.knockback);
         placeAtShootSpawn(head, headSpawn.x, headSpawn.y);   // 盒心=偏移后 pointPosition（:47655+:10878-10879）
         head.critChance = critTotal;
-        head.armorPen = eq.armorPen + this.player.meleeArmorPen; // ⑥ 近战含磨刀
+        head.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥ 近战含磨刀
         head.pinUse = () => this.refreshChannelItem();   // SetDummyItemTime(10)（:30739→Player.cs:4417-4426）——单实例门唯一承载
         head.spawnProj = (sx, sy, svx, svy, sProj, sDmg, sKb) => {
           if (sProj !== 405) return;   // 404 只伴生泡泡
@@ -17646,7 +17651,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           meleeThrowSpeed(16, this.player.attackSpeedMult));
         placeAtShootSpawn(yoyo, this.player.cx, this.player.cy);   // 盒心=玩家中心（:47588/:10878-10879,见链锤支注）
         yoyo.critChance = critTotal;
-        yoyo.armorPen = eq.armorPen + this.player.meleeArmorPen; // ⑥
+        yoyo.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥
         // 悠悠球袋族回调接线（Player.Counterweight 命中链/手套二号球/魔法线克隆/寿命广播）
         this.wireYoyoCallbacks(yoyo, cw.shoot, itemId);
         this.entities.add(yoyo, 'projectiles');
@@ -17721,7 +17726,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const mzX = mzA.x;
         const mzY = mzA.y;
         const mzAng = Math.atan2(mzMouseY - mzY, mzMouseX - mzX);   // 出生点→光标 重瞄角
-        const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (1 - eq.manaCostOff) * eq.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
+        const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1） // ⑪+⑧ 词缀 mcst(I:562 round)
         // ★R27：陨石套 spaceGun 无限蓝（ItemCheck_PayMana_ShouldSkipManaUse
         // :53331-53335：spaceGun && type∈{127,4347,4348,514} → 整个耗魔段跳过——不扣蓝、
         // 不触发魔力花/空蓝 slowMagicUse;ItemCheck_ApplyManaRegenDelay :51198-51202 同门
@@ -17805,7 +17810,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 仓内形态 = projClass 显式字段（数据面表保持 SetDefaults 直写真值）
             bee.projClass = 'magic';     // 运行时旗覆写（Player.cs:48805 本站）
             bee.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            bee.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            bee.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(bee, 'projectiles');
           }
           this.playUseSound(critVid, 'tink');   // UseSound Item_11
@@ -17858,7 +17863,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 类别通道走数据面（vanilla-projectiles.json 189 magic=true = SetDefaults
             // 直写 → projClassOfProjId(189)='magic'，无需 1121 那样的 spawn 位覆写）
             wasp.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            wasp.armorPen = eq.armorPen + (ps?.arpen ?? 0) + hiveWasp.pen;
+            wasp.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0) + hiveWasp.pen;
             this.entities.add(wasp, 'projectiles');
           }
           this.playUseSound(critVid, 'tink');   // UseSound Item_11（vanilla-itemusesound 表值）
@@ -17938,7 +17943,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             sfArrow.frostEligible = false;                // magic=true 弹（Projectile.cs:5701）
             sfArrow.critBonus = this.player.critChance('magic')
               + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);      // GetWeaponCrit(:42531 族)
-            sfArrow.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            sfArrow.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             // ★R2 已接面（2026-09-03）：aiStyle91 弹体 AI 全量落地 Arrow.ts 496 支——
             //  摆动 v+=ai×1.5、ai×1.05/子步、帽 16（:33118-33124）;缩径 scale=1−localAI、
             //  盒 width=height=20×scale Center 锚定、≥0.95 Kill（:33101-33113,
@@ -18013,7 +18018,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  ——Arrow ctor 收盒左上,曾直传锚点 = 泡盒右下偏 (7,7)px（散布在速度不在出生点）
             placeAtShootSpawn(bub, mzX, mzY);
             bub.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            bub.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            bub.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             bub.frostEligible = false;                    // magic 弹不吃冰霜引擎
             this.entities.add(bub, 'projectiles');
           }
@@ -18060,7 +18065,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               { grav: 0, pierce: 1 });
             placeAtShootSpawn(shard, sx9, sy9);             // NewProjectile 盒心落点（:10878-10879）
             shard.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            shard.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            shard.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             shard.frostEligible = false;
             this.entities.add(shard, 'projectiles');
           };
@@ -18105,7 +18110,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  ——Arrow ctor 收盒左上,曾直传锚点 = 牌盒右下偏 (8,8)px
             placeAtShootSpawn(card, mzX, mzY);
             card.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            card.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            card.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             card.frostEligible = false;
             card.cardSpin = spin;                         // ai[2]=±0.4（NewProjectile 尾参）
             this.entities.add(card, 'projectiles');
@@ -18167,7 +18172,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const bloom = new Arrow(mzX + jx, mzY + jy, bvx, bvy, cw.damage, cw.knockback, 1114,
               { grav: 0, dragAlways: 0.985, life: 146, pierce: 1, bounce: true });
             bloom.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            bloom.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            bloom.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             bloom.frostEligible = false;   // magic 弹不吃冰霜引擎
             this.entities.add(bloom, 'projectiles');
             if (!midSwing6152) {
@@ -18227,7 +18232,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               chargeRate: () => this.player.getSlowMagicUseRate(),   // GetSlowMagicUseRate :47434-47442（常态 1.0/空蓝 0.4）
             });
           gf.critChance = critTotal;
-          gf.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          gf.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(gf, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(10);   // SetDummyItemTime(10)（:37609）
           this.player.onManaItemUsed();
@@ -18259,7 +18264,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               (ax + evx) * 2 + aimX6154, (ay + evy) * 2 + aimY6154,
               cw.damage, cw.knockback, phase);
             petal.critChance = critTotal;
-            petal.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            petal.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(petal, 'projectiles');
           }
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -18300,7 +18305,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.max(1, Math.round(cw.damage * 0.8)), cw.knockback);
           bolt6155.seed = (Math.random() * 0x80000000) | 0;   // ai2=rand(MaxFloatInt+1)（:49661）
           bolt6155.critChance = critTotal;
-          bolt6155.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          bolt6155.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           bolt6155.mouseWorld = () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; };
           this.entities.add(bolt6155, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
@@ -18331,7 +18336,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               const b = new StormLightning(1122, bx, by, cw.damage, cw.knockback);
               b.seed = (Math.random() * 0x80000000) | 0;   // ai2（:49678/:49692 每颗独立掷）
               b.critChance = critTotal;
-              b.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+              b.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
               this.entities.add(b, 'projectiles');
             };
             drop6173(sx6173, sy6173);
@@ -18398,7 +18403,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
             cw.damage, cw.knockback);
           bolt731.critChance = critTotal;
-          bolt731.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          bolt731.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(bolt731, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
@@ -18423,12 +18428,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             fire: (fx, fy, fvx, fvy) => {
               const beam = new LaserMachinegunLaser(fx, fy, fvx, fvy, mg.damage, mg.knockback);
               beam.critChance = critTotal;
-              beam.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+              beam.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
               this.entities.add(beam, 'projectiles');
             },
           });
           mg.critChance = critTotal;
-          mg.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          mg.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(mg, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 动画窗（channel 期 dummy item time 由实体侧续命近似）
           this.player.onManaItemUsed();
@@ -18459,7 +18464,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           const circle = new PrincessMagicCircle(sx950, sy950, cw.damage, cw.knockback);
           circle.critChance = critTotal;
-          circle.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          circle.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(circle, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
@@ -18473,7 +18478,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const bolt = new RainbowBolt(mzX, mzY,
             Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
             cw.damage, cw.knockback);
-          bolt.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          bolt.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           bolt.critChance = critTotal;
           this.entities.add(bolt, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
@@ -18502,7 +18507,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             mega ? Math.round(cw.damage * 3) : cw.damage, cw.knockback,
             mega ? 635 : 634);
           bolt.critChance = critTotal;
-          bolt.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          bolt.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(bolt, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
           this.player.onManaItemUsed();
@@ -18529,7 +18534,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const star = new LunarFlareStar(sx, sy, dx * spd, ady * spd,
               cw.damage, cw.knockback, lineY);
             star.critChance = critTotal;
-            star.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            star.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(star, 'projectiles');
           }
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
@@ -18571,7 +18576,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             placeAtShootSpawn(bolt, muzzleX, muzzleY);
             bolt.critBonus = this.player.critChance('magic')
               + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-            bolt.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            bolt.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             bolt.nebulaCb = () => {
               if (!eq.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
               this.player.nebulaCD = 30;
@@ -18618,7 +18623,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  Arrow ctor 收盒左上,曾直传中心 = 探针右下偏 (12,12)px(24×24 盒)
           placeAtShootSpawn(probe2, sx, sy);
           probe2.critChance = critTotal;
-          probe2.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          probe2.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(probe2, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
@@ -18639,7 +18644,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  杖尖中心 = 云体右下偏 (14,14)px
           placeAtShootSpawn(cloud, mzX, mzY);
           cloud.critChance = critTotal;
-          cloud.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          cloud.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(cloud, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
@@ -18661,7 +18666,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           b261.frostEligible = false;   // magic 弹
           b261.critBonus = this.player.critChance('magic')
             + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-          b261.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          b261.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           b261.nebulaCb = () => {
             if (!eq.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
             this.player.nebulaCD = 30;
@@ -18689,10 +18694,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               // CheckMana :53215 全语义走 Player.checkMana 单点端口（同棱镜 payMana——
               // 入口复位 slowMagicUse + 魔力花 + ManaV2 蓝不足放行,channel 期蓝尽不断）
               const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
-                * (1 - eq.manaCostOff) * eq.manaCostMul);
+                * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1）
               return this.player.checkMana(cost);
             });
-          bl.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          bl.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           bl.critChance = critTotal;
           this.entities.add(bl, 'projectiles');
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);   // 1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5
@@ -18719,7 +18724,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               // ManaV2 蓝不足也放行 statMana=0+slowMagicUse :53241-53256——蓝尽棱镜不断;
               // 曾内联重写丢复位=空蓝一次束永久淡化/免疫窗永久 12t）
               const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
-                * (1 - eq.manaCostOff) * eq.manaCostMul);
+                * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1）
               return this.player.checkMana(cost);
             },
             // 伤害每拍刷新（Projectile.cs:63630）：damage=(int)(手持物 damage×
@@ -18727,7 +18732,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 魔伤乘区走 player.damageMult('magic')（=原版 player.magicDamage 全链：
             // 装备+MagicPower/魔力眩晕/魔力过热/食物/星云），channel 期 buff 变动即时生效
             () => Math.trunc(Math.round(cwIn.damage * (ps?.dmg ?? 1)) * this.player.damageMult('magic')));
-          prism.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          prism.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           prism.critChance = critTotal;
           this.entities.add(prism, 'projectiles');
           // R26 GAP-07：3541 最后的棱镜 rd=5（case 3541 :31750-31752,channel 件松手后
@@ -18759,7 +18764,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               aimCb: () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
               payMana: () => {
                 const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
-                  * (1 - eq.manaCostOff) * eq.manaCostMul);
+                  * (1 - (eq.manaCostOff ?? 0)) * (eq.manaCostMul ?? 1));   // ★BJ175 桩面 ?? 防御族（缺省 0/1）
                 // ★1457 ManaV2（DebugOptions.ManaV2 默认 true,2026-08-22 审计 ❌ 修复）：
                 //  持按连发 = 循环重用每拍走 ItemCheck_TryStartUse（:52660-52690）→
                 //  ItemCheck_ActuallyPayMana（:53277-53290）→ CheckMana(pay:true)
@@ -18783,7 +18788,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  ctor 收盒左上,曾直传中心 = 弹盒右下偏 (16,16)px（16/34/79 盒 32×32;
             //  fireExtra 杖头锚为 2026-08-26 拍板备案不动,只回正盒）
             placeAtShootSpawn(m, mx, my);
-            m.armorPen = eq.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
+            m.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧
             m.critChance = critTotal;
             m.nebulaCb = () => {
               if (!eq.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1/3) return;
@@ -18953,7 +18958,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             placeAtShootSpawn(pg, this.player.cx, this.player.cy);
             pg.pShootSpeed = cw.shootSpeed;                        // 精确 shootSpeed（14）供补弹
             pg.critChance = critTotal;
-            pg.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            pg.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             pg.frostEligible = dmgKind !== 'magic';                // ranged 弹吃冰霜引擎
             this.entities.add(pg, 'projectiles');
           }
@@ -18979,7 +18984,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const stab = new ChloroSaberStab(Math.cos(rot), Math.sin(rot), len, ms,
             cw.damage, cw.knockback);
           stab.critChance = critTotal;
-          stab.armorPen = eq.armorPen + this.player.meleeArmorPen; // ⑥ 近战含磨刀
+          stab.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen; // ⑥ 近战含磨刀
           this.entities.add(stab, 'projectiles');
           this.player.useTime = cw.useTime;
           this.playUseSound(critVid, 'swing');                 // UseSound 缺省（Item.cs 无 UseSound 行）
@@ -19008,7 +19013,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  盒左上,曾直传 = 弹盒右下偏 (13,13)px
           placeAtShootSpawn(knife, this.player.cx, this.player.cy);
           knife.critChance = critTotal;
-          knife.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          knife.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(knife, 'projectiles');
           this.player.useTime = cw.useTime;
           this.playUseSound(critVid, 'bowShoot');   // 3030 UseSound=Item1（itemUseSound 表）
@@ -19028,7 +19033,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //（3543 的 pointPosition.Y=height/3 锚点偏移 :47635 属锚面登记,本批不动）
           placeAtShootSpawn(flare, this.player.cx, this.player.cy);
           flare.critChance = critTotal;
-          flare.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          flare.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(flare, 'projectiles');
           this.player.useTime = cw.useTime;
           this.playUseSound(critVid, 'bowShoot');   // 3543 UseSound=Item1（itemUseSound 表）
@@ -19056,7 +19061,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
             () => { if (this.player.useTime > 2) this.player.useTime = 2; });
           spin.critChance = critTotal;
-          spin.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          spin.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           this.entities.add(spin, 'projectiles');
           this.useSwing(def, ang);
           if (this.swing) { this.swing.noGraphic = true; this.swing.t = 52; this.swing.dur = 52; } // noUseGraphic(:34091)+持械姿势延展到旋完
@@ -19081,7 +19086,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
             () => { if (this.player.useTime > 10) this.player.useTime = 10; });   // reuseDelay=10（:70572）
           spin.critChance = critTotal;
-          spin.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          spin.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           spin.spawnSlam = (sx, sy, svx, svy, slamDmg) => {
             const slam = new MonkSlam(sx, sy, svx, svy, slamDmg);
             // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:70578 直传
@@ -19090,7 +19095,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //  (37.5,100)px,爆箱正面整段错位
             placeAtShootSpawn(slam, sx, sy);
             slam.critChance = critTotal + 0.25;                 // bonusCritChance=25（:70582）
-            slam.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            slam.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(slam, 'projectiles');
           };
           this.entities.add(spin, 'projectiles');
@@ -19113,14 +19118,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             () => this.swing?.t ?? 0, cw.useAnimation ?? 27,
             () => { if (this.player.useTime > 2) this.player.useTime = 2; });      // reuseDelay=2（:71052）
           glaive.critChance = critTotal;
-          glaive.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          glaive.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           glaive.spawnGhast = (gx, gy, gvx, gvy, gdmg) => {
             const ghast = new MonkGhast(gx, gy, gvx, gvy, gdmg);
             // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（Projectile.cs:15254-15257
             //  直传 targetCenter+(−num×120,0) + :10878-10879）——40×40 盒曾右下偏 (20,20)px
             placeAtShootSpawn(ghast, gx, gy);
             ghast.critChance = critTotal;
-            ghast.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+            ghast.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
             this.entities.add(ghast, 'projectiles');
           };
           this.entities.add(glaive, 'projectiles');
@@ -19143,7 +19148,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           zap.frostEligible = false;   // magic 弹不吃冰霜引擎
           zap.critBonus = this.player.critChance('magic')
             + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
-          zap.armorPen = eq.armorPen + (ps?.arpen ?? 0);
+          zap.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
           zap.lightRGB = [0.75, 0.75, 0.75];   // SetDefaults light=0.75
           this.entities.add(zap, 'projectiles');
           this.useSwing(def, ang, ps?.spd ?? 1);   // ★曾漏=持枪姿势滞留旧瞄准角
@@ -19241,7 +19246,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const bee = new Arrow(bx, by, bvx, bvy, beeDmg, beeKb, strongBee ? 566 : 181, { grav: 0 });
       bee.projClass = 'melee';                 // 运行时旗覆写（原版 spawn 位,Z-F1 槽）
       bee.critChance = Math.min(1, (4 + this.player.critChance('melee')) / 100);   // 近战池掷（:12916 melee 门,1124 蜂巢同式）
-      bee.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;  // GetArmorPenetration(melee)
+      bee.armorPen = (this.player.equipStats.armorPen ?? 0) + this.player.meleeArmorPen;  // GetArmorPenetration(melee)
       this.entities.add(bee, 'projectiles');
     };
   }
@@ -20664,7 +20669,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const radius = vid === 75 ? 0 : (Game.EXPLODE_RADIUS[28] ?? 0);
         const p = new GrenadeProj(px, py, vx, 0, dmg, 180, vid,
           (ex, ey, ed, evx) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), ed,
-            radius, radius > 0, 64, this.player.equipStats.armorPen, vid,
+            radius, radius > 0, 64, (this.player.equipStats.armorPen ?? 0), vid,
             ex, ey,
             vid === 75 ? 8 : PREPARE_BOMB_KB[vid], Game.explosionKbDir(evx)));
         // SW-F1 2026-09-03 真像素爆心直穿（摇树弹 28,k=11 半盒）;
@@ -26714,7 +26719,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         } });
       pg.pShootSpeed = pgSpd;
       pg.critChance = 0.04 + (cw.crit ?? 0) / 100 + this.player.critChance('ranged') / 100;
-      pg.armorPen = this.player.equipStats.armorPen;
+      pg.armorPen = (this.player.equipStats.armorPen ?? 0);
       pg.frostEligible = true;
       this.entities.add(pg, 'projectiles');
     }
@@ -27932,7 +27937,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.infernoCounter++;
       const hitTick = this.infernoCounter % 60 === 0;
       if (hitTick) this.spawnParticles(this.player.cx, this.player.cy, '#FF8C2A', 4, 1.8, { life: 24, grav: -0.08 });
-      const playerAP = this.player.equipStats.armorPen ?? 0;   // GetArmorPenetration(melee:false)（:20597 链内消费）
+      const playerAP = (this.player.equipStats.armorPen ?? 0);   // GetArmorPenetration(melee:false)（:20597 链内消费）
       const critterBucket = new Set<unknown>(this.entities.critters);
       for (const eent of [...this.entities.enemies, ...this.entities.critters]) {
         const en = eent as Enemy;
@@ -29440,7 +29445,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     const hardMode = !!this.world.flags.hardMode;
     const golemDown = !!this.world.flags['downed_245'];
-    const pen = this.player.equipStats.armorPen;
+    const pen = (this.player.equipStats.armorPen ?? 0);
     this.recLog('bomb', { x: Math.floor(exPx / TILE), y: Math.floor(exPy / TILE),
       r: 1, dmg: damage, destroyTiles: true, projId: 773 });
     // ——挖向 snap8（P.cs:71606-71619 逐式）：v = player.Center - Center→取反分量
@@ -31217,7 +31222,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       : undefined;
     const gsM = projGravSpec(cw.shoot);
     const life = projectileData(cw.shoot)?.timeLeft ?? 3600;
-    const arpen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
+    const arpen = (this.player.equipStats.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧
     const critBonus = this.player.critChance('magic')
       + (itemCombat(def.vid ?? viIdFromKey(def.key) ?? -1)?.crit ?? 0) + (ps?.crt ?? 0); // 审计 §6 + ⑧
     // 出手参数（:49796-49812，仅宝石弹）：FastThenSlow 出速 ×5、CanBounce ×1.25、
@@ -31788,7 +31793,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 上线——189 类别旗走数据面（SetDefaults magic=true 投影）无需覆写。
         bee.projClass = 'melee';                       // 运行时旗覆写（原版 spawn 位）
         bee.critChance = Math.min(1, (4 + p.critChance('melee')) / 100);  // 恢复近战池掷
-        bee.armorPen = eq.armorPen + p.meleeArmorPen;           // GetArmorPenetration(melee)
+        bee.armorPen = (eq.armorPen ?? 0) + p.meleeArmorPen;           // GetArmorPenetration(melee)
         this.entities.add(bee, 'projectiles');
       }
     }
@@ -32013,7 +32018,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.meleeOrchestraStrike(heldVidFly, tn.cx, tn.cy);
       tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this,
         isFlyMeal ? 1 : 0,
-        eq.armorPen + this.player.meleeArmorPen,
+        (eq.armorPen ?? 0) + this.player.meleeArmorPen,
         tnCrit);   // ★ζ-L1：暴击位进 StrikeNPC_Inner 防后 ×2（TownNPC.hurt F6 注）
       // :44779/:44784 —— 城镇 NPC 受理命中同写双冷却面
       this.meleeNpcCd.set(tn.id, Math.max(1, Math.trunc(this.swing?.t ?? 0)));
@@ -32278,7 +32283,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 1=无潜行 → ×1，仓内 Player.stealth 同语义）
       // ★F8 加法形保持单行结构锚（weapon-melee-leftover 结构断言依赖序：kbGlove→Titan→3106）
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (1 + (eq.kbGlove ? 1 : 0) + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)) * (swingVid === 3106 ? 1 + (1 - this.player.stealth) : 1);
-      const killed = e.hurt(dmg, kdir * kb, 0, this, eq.armorPen + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
+      const killed = e.hurt(dmg, kdir * kb, 0, this, (eq.armorPen ?? 0) + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165);音/飘值=StrikeNPC 单点
       // ================= ★R2-07(g) ApplyNPCOnHitEffects 五条 spawn 面 + 蓄能位
       // （Player.cs:44809-44906——受理命中【后】镜像区，依原文顺序排布；
       //   damage/knockBack/dmgRandomized 形参 = chainDmg / kb / dmgRandomized）=================
@@ -32301,7 +32306,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             gvx, gvy,
             Math.max(1, Math.trunc(chainDmg * 0.5)), kb * 0.7);
           glob.critChanceFn = (): number => Math.min(1, 0.04 + this.player.critChance('melee') / 100);
-          glob.armorPenInject = eq.armorPen + this.player.meleeArmorPen;
+          glob.armorPenInject = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
           this.entities.add(glob, 'projectiles');
         }
         // —— 甲虫攻套实扣加账（:44840-44 `beetleOffense & !immortal →
@@ -32411,7 +32416,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // GetArmorPenetration(melee)/parry·nano·confetti 门）。机制详见蜂巢站注。
             bee.projClass = 'melee';
             bee.critChance = Math.min(1, (4 + p.critChance('melee')) / 100);
-            bee.armorPen = eq.armorPen + p.meleeArmorPen;
+            bee.armorPen = (eq.armorPen ?? 0) + p.meleeArmorPen;
             this.entities.add(bee, 'projectiles');
           }
         }
@@ -32466,7 +32471,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               Math.max(1, Math.trunc(dmgRandomized * 0.5)), 0, num6);
             // ★α-H1：弹 155 SetDefaults（:2855-2862 netImportant/44×44/aiStyle32/
             // friendly）【无任何类别旗】→ 原版 Damage 不掷 crit，撤玩家近战阈值注入
-            cut.armorPenInject = eq.armorPen + this.player.meleeArmorPen;
+            cut.armorPenInject = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(cut, 'projectiles');
           }
         }
@@ -32492,7 +32497,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           Math.max(1, Math.trunc(chainDmg * 0.75)), kb, p.facing);
         blast.critChanceFn = (): number =>
           Math.min(1, 0.04 + this.player.critChance('melee') / 100);
-        blast.armorPen = eq.armorPen + this.player.meleeArmorPen;
+        blast.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
         this.entities.add(blast, 'projectiles');
         this.swing.volcanoWindow = false;
       }
@@ -32527,7 +32532,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { grav: 0.3, life: 1200, pierce: 1 });
         bone.critChance = 0.04 + this.player.critChance('melee') / 100
           + (itemCombat(heldVidBone)?.crit ?? 0) / 100;
-        bone.armorPen = eq.armorPen + this.player.meleeArmorPen;
+        bone.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
         this.entities.add(bone, 'projectiles');
       }
       if (this.player.buffs.has(BuffType.ImbueParty)) {
@@ -32668,7 +32673,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               * (1 + (eq.kbGlove ? 1 : 0) + (this.player.buffs.has(BuffType.Titan) ? 0.5 : 0)) // ★F8 num4 加法形
               * 0.7);
           glob.critChanceFn = (): number => Math.min(1, (4 + this.player.critChance('melee')) / 100);
-          glob.armorPenInject = eq.armorPen + this.player.meleeArmorPen;
+          glob.armorPenInject = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
           this.spawnFriendlyProj(glob, { netSync: true });   // 伴生弹照走即时上线通道
         }
         // ★F14 补②：蜂王 1123 PvP 蜂群（:44478-79 spawn 位 .melee=true 覆写站）：
@@ -32692,7 +32697,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 原版 spawn 位显式 melee=true（:44479）→ 类别/暴击面与 PvE 站一致
             bee.projClass = 'melee';
             bee.critChance = Math.min(1, (4 + p.critChance('melee')) / 100);
-            bee.armorPen = eq.armorPen + p.meleeArmorPen;
+            bee.armorPen = (eq.armorPen ?? 0) + p.meleeArmorPen;
             this.spawnFriendlyProj(bee, { netSync: true });
           }
         }
@@ -36607,8 +36612,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const scx = Math.floor(p.cx / TILE), scy = Math.floor((p.y + p.h - 2) / TILE);
       if (getSittingTargetInfo(w.store, scx, scy, p.facing)) bonus += 5;
     }
-    const base = baitPower + polePower + p.equipStats.fishingSkill
-      + (p.buffs.has(BuffType.Fishing) ? 15 : 0) + bonus;
+    const base = baitPower + polePower + (p.equipStats.fishingSkill ?? 0)
+      + (p.buffs.has(BuffType.Fishing) ? 15 : 0) + bonus;   // ★BJ175 桩面 ?? 防御（缺省 0）
     const level = Math.floor(base * fishingPowerMultiplier({
       raining: !!w.weather?.raining,
       cloudBGAlpha: w.weather?.cloudBGAlpha ?? 0,
@@ -39230,7 +39235,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const hurtReflector = (amount: number): void => {
           attacker.hurt(applyBannerDamageDealt(this, attacker, amount),
             -num3 * kbVel, canParry ? -2 : 0, this,
-            eq.armorPen ?? 0, false, 0, true);
+            (eq.armorPen ?? 0), false, 0, true);
         };
         const num2 = canParry ? 2 : (p.turtleSet ? 2 : p.thornsAmount);
         if (num2 > 0) {                                   // :31634 `num2 > 0f` 门
@@ -40021,7 +40026,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             Math.max(1, Math.trunc(dmg * 0.75)), Math.trunc((flags?.kb ?? 0) * 0.35),
             307, { grav: 0, life: 600, pierce: 1, extraUpdates: 3 });
           eater.critBonus = this.player.critChance('melee');
-          eater.armorPen = this.player.equipStats.armorPen;
+          eater.armorPen = (this.player.equipStats.armorPen ?? 0);
           this.entities.add(eater, 'projectiles');
         }
       }
@@ -41877,7 +41882,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 寿命/盒体走 SetDefaults 面值（timeLeft 180 / 14×22），不覆写
     beeGrenade.frostEligible = true;                     // ranged 弹（同通用投掷面）
     beeGrenade.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6+⑧
-    beeGrenade.armorPen = this.player.equipStats.armorPen + (psT?.arpen ?? 0); // ⑥+⑧
+    beeGrenade.armorPen = (this.player.equipStats.armorPen ?? 0) + (psT?.arpen ?? 0); // ⑥+⑧
     this.entities.add(beeGrenade, 'projectiles');
     this.useSwing(heldDef);                              // noUseGraphic → 不画持物
     this.player.inv.removeHeld(1);          // consumable
@@ -45228,7 +45233,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  StyleHanging：支撑判据=组顶行上方一行为实心天花板。hasSupport/
    *  checkFurnitureSupport 双侧消费，后续吊挂家具加入此表即可） */
   private static readonly HANGING_ANCHOR_SHEETS = new Set<number>([592]);
-private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
   private checkFurnitureSupport(x: number, y: number): void {
     const st = this.world.store;
     if (!st.inBounds(x, y)) return;
@@ -47313,7 +47319,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
     const shard = new TitaniumStormShard(x, y, dmg, 15);
     // ★α-H1：弹 908 SetDefaults（:8628-8640 aiStyle175/friendly/penetrate1/timeLeft）
     // 【无类别旗】→ 原版 Damage 不掷 crit，撤玩家近战阈值注入
-    shard.armorPen = this.player.equipStats.armorPen;
+    shard.armorPen = (this.player.equipStats.armorPen ?? 0);
     this.entities.add(shard, 'projectiles');
   }
 
@@ -47349,7 +47355,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = new Set([138, 484, 664, 665, 71
   spawnChloroLeafShot(px: number, py: number, vx: number, vy: number): void {
     const shot = new ChloroLeafShot(px + CHLORO_LEAF_SHOT_SIZE / 2,
       py + CHLORO_LEAF_SHOT_SIZE / 2, vx, vy);
-    shot.armorPen = this.player.equipStats.armorPen;
+    shot.armorPen = (this.player.equipStats.armorPen ?? 0);
     this.entities.add(shot, 'projectiles');
   }
 

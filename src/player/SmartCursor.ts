@@ -21,7 +21,7 @@
 // 我们的 tile id 与原版 tile id 通过 TILE_DEFS[t].vanilla.sheet 桥接（sheet = 原版 Tiles_N 表 id）；
 // 物品原版 id 通过 ITEM_DEFS[i].vid 或 key 前缀 vi_(\d+)_ 反解。
 import type { ItemDef } from '../data/items';
-import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
@@ -41,19 +41,22 @@ const PICKAXE_PRIORITY_OVERRIDE: Record<number, number> = { 12: 1, 639: 1, 665: 
 const IGNORE_SMART_AXE = new Set([488]);
 
 /** TileID.cs:161 IsATreeTrunk（多格树干族：橡树 5 / 棕榈 72 / 各宝石树 583-589 / 樱花 596 / 柳树 616 / 灰烬树 634） */
-const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const IS_A_TREE_TRUNK = IS_A_TREE_TRUNK_SHEETS;
 
 /** TileID.cs:173 CommonSapling（树苗族：普通 20 / 宝石 590 / 樱花 595 / 柳树 615） */
 const COMMON_SAPLING = new Set([20, 590, 595, 615]);
 
 /** TileID.cs:195 Boulders（巨石族） */
-const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS = BOULDERS_SHEETS;
 
 /** TileID.cs:239 IsBeam（梁族：火把侧锚允许） */
 const IS_BEAM = new Set([124, 561, 574, 575, 576, 577, 578]);
 
 /** TileID.cs:243 Platforms（平台族 = tileSolidTop） */
-const PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORMS = PLATFORMS_SHEETS;
 
 /** Main.tileTable 全表——★SW-RB11d（2026-09-10）单源化：本地 76 条副本（曾漏
  *  Main.cs:10124-10131 for 循环臂 435-439 五队伍平台）退役，改引 data/tiles.ts

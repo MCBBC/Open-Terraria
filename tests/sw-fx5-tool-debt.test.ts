@@ -43,7 +43,8 @@ import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { itemCombat } from '../src/data/vanillaItemCombat';
-import { SOFT_DIG_SHEETS, TILE_ROPE_SHEETS, TILE_HAMMER_SHEETS } from '../src/core/Game';
+import { SOFT_DIG_SHEETS, TILE_ROPE_SHEETS } from '../src/core/Game';
+import { TILE_HAMMER_SHEETS } from '../src/data/tiles';   // ★BJ187 修旧绑定:BJ158② 已把 tileHammer 单源收编 data/tiles,Game 不再导出（测试面 undefined 陈旧红）
 
 const gameSrc = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
 

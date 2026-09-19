@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import {
   generateWorld, requestWorldGenAbort, worldGenAbortRequested, WorldGenAbortedError,
 } from '../src/world/gen/WorldGen';
+import { VAN_TILE_SOLIDTOP_SHEET_SET } from '../src/world/gen/vanilla/GenSolid';
 import { parseSeed, parseSeedChain } from '../src/world/gen/SeedEasterEggs';
 import { UIWorldLoadState, genScreenFlagsOf } from '../src/vui/states/UIWorldLoadState';
 import { tipCategories } from '../src/vui/states/UIWorldLoadState';
@@ -178,9 +179,11 @@ describe('⑧/⑨ src 源文本锁', () => {
   it('⑧ GenSolid 单源表=sheet 域（桌14/书箱101/钢琴114/平台19/380 在;常规土石不在）', () => {
     const src = readFileSync(join(ROOT, '../src/world/gen/vanilla/GenSolid.ts'), 'utf8');
     void 0;
-    const m = src.match(/VAN_TILE_SOLIDTOP_SHEET_SET = new Set\(\[([\d, ]+)\]\)/);
+    // ★BJ187：表本体上收 data/tiles.ts:SOLID_TOP_SHEETS（84 项含 435-439 循环臂）,
+    //   GenSolid 侧=转出口别名——源码形态断言改锁别名,值断言走单源导入。
+    const m = src.match(/VAN_TILE_SOLIDTOP_SHEET_SET = SOLID_TOP_SHEETS/);
     expect(m).not.toBeNull();
-    const set = new Set(m![1]!.split(',').map((n) => Number(n.trim())));
+    const set = VAN_TILE_SOLIDTOP_SHEET_SET;
     for (const sh of [14, 16, 18, 19, 87, 88, 101, 114, 380, 427]) expect(set.has(sh)).toBe(true);
     for (const sh of [0, 1, 2, 53]) expect(set.has(sh)).toBe(false);
   });

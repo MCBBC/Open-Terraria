@@ -60,6 +60,47 @@ const clickNoOpen = async () => {
 const noOpen = await clickNoOpen();
 check('小地图点击不开图（BJ120 摘面）', noOpen.open === false);
 check('小地图本体不置 UI 悬停（原版穿透面）', noOpen.uiHover === false);
+
+// 1a2) ★BJ120 刀②行为面：缩放钮上点击 = mouseInterface 让位——小地图缩放生效、
+//      世界使用事件【被吞】（原版 MinimapFrame.cs:148-166 钮上 mouseInterface=true;
+//      TriggersSet.cs:835-841 !mouseInterface 门拦 controlUseItem）。
+//      仪器：包一层 g.useSwing 计数（同 _inp-firstclick-verify.mjs）。
+await page.evaluate(() => {
+  const g = window.__swGame;
+  window.__useN = 0;
+  const orig = g.useSwing.bind(g);
+  g.useSwing = function (...a) { window.__useN++; return orig(...a); };
+  window.__swGame.renderer.minimapZoom = 1.5;   // 任意钮都会改值（in/out/reset 三态）
+});
+const zoomBtn = await (async () => {
+  const r = await page.evaluate(() => window.__swGame.renderer.minimapRect);
+  // 框【底】条带扫到 minimapUiHover=true 的点（MINIMAP_SKINS by≈234-248=框底沿;
+  // 步距 6px 足够命中 22×22 命中盒）
+  for (let dy = Math.max(0, r.h - 60); dy <= r.h; dy += 6) {
+    for (let dx = 0; dx <= r.w; dx += 6) {
+      const x = r.x + dx, y = r.y + dy;
+      await page.mouse.move(x, y);
+      await sleep(30);   // 等一个渲染拍（drawMinimap 写 minimapUiHover）
+      if (await page.evaluate(() => window.__swGame.renderer.minimapUiHover)) return { x, y };
+    }
+  }
+  return null;
+})();
+if (zoomBtn) {
+  const z0 = await page.evaluate(() => window.__swGame.renderer.minimapZoom);
+  const n0 = await page.evaluate(() => window.__useN);
+  await page.mouse.move(zoomBtn.x, zoomBtn.y); await sleep(80);
+  await page.mouse.down(); await sleep(90); await page.mouse.up();
+  await sleep(250);
+  const z1 = await page.evaluate(() => window.__swGame.renderer.minimapZoom);
+  const useDelta = (await page.evaluate(() => window.__useN)) - n0;
+  const openAfter = await page.evaluate(() => window.__swGame.renderer.fullMap.open);
+  check('缩放钮点击仍缩放小地图（钮面保留）', Math.abs(z1 - z0) > 1e-6, `zoom ${z0.toFixed(3)}→${z1.toFixed(3)}`);
+  check('缩放钮上世界使用被让位（mouseInterface 等价）', useDelta === 0 && openAfter === false, `useN+${useDelta}`);
+} else {
+  check('未扫到缩放钮（布点变更?）', false, 'sweep 56px strip');
+}
+
 // 1b) M 键开图（原版 Map Full Screen 专用键）：首开即主角居中（缓动收敛后 |off| < 2px）
 await page.keyboard.press('KeyM');
 await sleep(300);

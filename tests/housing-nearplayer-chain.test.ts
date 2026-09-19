@@ -313,3 +313,67 @@ describe('(v) 松露人居所条件外扩域（E-11/C-F6）', () => {
     expect(acc2.home).not.toBeNull();
   });
 });
+
+// ★QFH 2026-09-20（用户实报「新 NPC 只入住世界生成点附近」根因锁）：WALL_HOUSE 缺
+// Gemspark 153-166 → 近链对宝石火花墙房采样失明（不迁入/不缓存 LastFoundHouse）→
+// 新 NPC 到达只剩流浪生成（锚=现有 NPC 的家）。修前 S2a 探针实测失明。
+describe('(vi) WALL_HOUSE 权威全集对拍（Main.cs wallHouse 全提取,★QFH）', () => {
+  /** Main.cs 全部 `wallHouse[n]=true` 显式赋值 + :10491-10493 循环 `for (num4=153;
+   *  num4<167; num4++)`——tools 提取脚本产出的 279 面权威清单硬编码。 */
+  const VANILLA_WALL_HOUSE = new Set<number>([
+    1, 4, 5, 6, 10, 11, 12, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30, 31, 32,
+    33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46, 47, 60, 66, 67, 68, 72, 73, 74, 75,
+    76, 77, 78, 82, 84, 85, 88, 89, 90, 91, 92, 93, 100, 101, 102, 103, 104, 105, 106, 107,
+    108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124,
+    125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141,
+    142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158,
+    159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 172, 173, 174, 175, 176, 177,
+    179, 181, 182, 183, 184, 186, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234,
+    235, 236, 237, 238, 239, 240, 241, 242, 243, 245, 246, 247, 248, 249, 250, 251, 252,
+    253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269,
+    270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286,
+    287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303,
+    304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320,
+    321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337,
+    338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 351, 352, 353, 354, 355, 356,
+    357, 358, 359, 360, 361, 362, 363, 364, 365, 366,
+  ]);
+  it('Housing.WALL_HOUSE 与 vanilla 279 面全集零差集（missing/extra 双向）', () => {
+    const missing = [...VANILLA_WALL_HOUSE].filter((x) => !WALL_HOUSE.has(x));
+    const extra = [...WALL_HOUSE].filter((x) => !VANILLA_WALL_HOUSE.has(x));
+    expect(missing).toEqual([]);                      // 修前 = [153..166]（Gemspark 14 面）
+    expect(extra).toEqual([]);
+    expect(WALL_HOUSE.size).toBe(279);
+  });
+
+  it('宝石火花墙房（wall=153）近链全绿：迁移迁入 + 无迁者缓存 LastFoundHouse（修前红）', () => {
+    const w = new World(4200, 1200, 58, 'open');
+    const st = w.store;
+    buildHouse(w, 2100, 300);
+    for (let y = 301; y <= 304; y++) for (let x = 2101; x <= 2109; x++) st.wall[st.idx(x, y)] = 153;
+    expect(WALL_HOUSE.has(153)).toBe(true);           // 153=AmberGemspark（WallID.cs）
+    expect(st.wall[st.idx(2102, 302)]).toBe(153);
+    const mover = { key: 'merchant', npcId: 17, bound: false, home: null as { x: number; y: number } | null, ref: { tag: 'gemspark' } };
+    const { players, rand } = cornerAt(2102, 302);
+    const hitR = checkHousesNearAPlayer(
+      st, players, 0, [mover] as NearChainNpcView<unknown>[], [], 17, rand,
+    );
+    expect(hitR.seedHit).toEqual([2102, 302]);        // 修前 = null（采样失明）
+    expect(hitR.relocated?.ref).toEqual({ tag: 'gemspark' });   // 修前 = null
+    expect(hitR.foundHouseNoSpawn).toBeNull();
+    // 无迁者形态：FoundHouseNoSpawn 缓存支照常（快路径新 NPC 入住通路）
+    const housed = { key: 'guide', npcId: 22, bound: false, home: { x: 1800, y: 500 }, ref: {} };
+    const hitR2 = checkHousesNearAPlayer(
+      st, cornerAt(2102, 302).players, 0, [housed], [{ x: 1800, y: 500, npcId: 22 }], 22, cornerAt(2102, 302).rand,
+    );
+    expect(hitR2.foundHouseNoSpawn).toEqual([2102, 302]);       // 修前 = null
+  });
+
+  it('抽查新补面逐面命中（153/160/166 入集;自然墙 9/245 外集边界不动）', () => {
+    for (const id of [153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166]) {
+      expect(WALL_HOUSE.has(id)).toBe(true);
+    }
+    expect(WALL_HOUSE.has(9)).toBe(false);            // 自然墙全部不在内（原语义保持）
+    expect(WALL_HOUSE.has(245)).toBe(true);           // 邻域面不受补刀扰动
+  });
+});

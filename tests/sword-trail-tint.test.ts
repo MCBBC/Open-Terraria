@@ -14,8 +14,116 @@
 import { describe, it, expect } from 'vitest';
 
 // ---- 层表纯函数（无 DOM 依赖,静态 import 安全） ----
-import { arcLayerList, tneGhostLayers, remapArc, lightingFromValue } from '../src/entities/SwingArc';
+import { arcLayerList, tneGhostLayers, remapArc, lightingFromValue, coneHitsRect, conePointFits, SwingArc } from '../src/entities/SwingArc';
 import { combatWeapon } from '../src/data/vanillaItemCombat';
+import { World } from '../src/world/World';
+import type { GameHooks } from '../src/entities/types';
+
+describe('挥弧命中判定（Colliding aiStyle 190 锥 / type 973 距离圆,Utils.cs:1692-1729）', () => {
+  const owner = { x: 50 * 16, y: 90 * 16, w: 20, h: 42, cx: 50 * 16 + 10, cy: 90 * 16 + 21, facing: 1, dead: false };
+  const mkGame = (list: unknown[]) => ({
+    world: new World(200, 200, 30, 'open'), player: null as unknown,
+    enemies: () => list,
+    entities: { nextId: 1, add: () => {} },
+    playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
+    spawnParticles: () => {}, spawnDust: () => null, addDamageNumber: () => {}, spawnDrop: () => null,
+    damagePlayer: (): number => 0, critters: () => [], notifyInventoryChanged: () => {},
+    onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
+  } as unknown as GameHooks);
+
+  it('conePointFits：锥内点真、锥后假、超角假、超距假（DoesFitInCone 逐式）', () => {
+    // 锥 apex(0,0) 朝 +x、长 94、半角 π/4
+    expect(conePointFits(50, 0, 0, 0, 94, 0, Math.PI / 4)).toBe(true);
+    expect(conePointFits(50, 30, 0, 0, 94, 0, Math.PI / 4)).toBe(true);   // 31° < 45°
+    expect(conePointFits(-50, 0, 0, 0, 94, 0, Math.PI / 4)).toBe(false);  // 锥后
+    expect(conePointFits(50, 70, 0, 0, 94, 0, Math.PI / 4)).toBe(false);  // 54.5° > 45°
+    expect(conePointFits(120, 0, 0, 0, 94, 0, Math.PI / 4)).toBe(false);  // 超距（< 严判）
+  });
+
+  it('coneHitsRect：五点采样语义——盒心在锥外但角入锥仍真；ClosestPointInRect(锥尖) 分支', () => {
+    // 盒 (80,-60)-(110,-30)：盒心 (95,-45) 角 25.3° 在锥内 → 角点必真
+    expect(coneHitsRect(80, -60, 30, 30, 0, 0, 94, 0, Math.PI / 4)).toBe(true);
+    // 盒远端 (200,200) 全点出锥
+    expect(coneHitsRect(200, 200, 30, 30, 0, 0, 94, 0, Math.PI / 4)).toBe(false);
+    // 锥尖延长点落盒内（锥尖深入盒体,ClosestPointInRect=锥尖本身 → 距离 0 入锥）
+    expect(coneHitsRect(80, -10, 30, 20, 0, 0, 94, 0, Math.PI / 4)).toBe(true);
+  });
+
+  it('挥弧接触命中（用户实报案）：锥内敌受击、锥后敌不受击——不依赖鼠标位置', () => {
+    const game0 = new World(200, 200, 30, 'open');
+    const arc = new SwingArc(owner, 972, 25, 40, 1, 1);
+    const game = mkGame([]);
+    // 推到 t=10（rot = π+π×0.4 ≈ 4.398 rad）,锥朝向 num14 = rot+2π/25
+    for (let t = 0; t < 10; t++) arc.fixedUpdate(1, game);
+    const ang = arc['rot'] + Math.PI * 2 / 25 * 1;
+    const hits: number[] = [];
+    const mkEnemy = (dx: number, dy: number, id: number, arr: number[]) => ({
+      id, x: owner.cx + dx - 15, y: owner.cy + dy - 15, w: 30, h: 30,
+      cx: owner.cx + dx, cy: owner.cy + dy, dead: false, hp: 500,
+      hurt: (d: number) => { arr.push(d); return true; }, def: { hitSound: ['NPC_Hit_1'] },
+    });
+    const inCone = mkEnemy(Math.cos(ang) * 60, Math.sin(ang) * 60, 1, hits);
+    // 锥后敌放 130px（>94 触距）——70px 处会被起手拖尾锥扫到（挥弧起手朝后上,
+    // vanilla 忠实行为）
+    const behind = mkEnemy(-130, 0, 2, hits);
+    const game2 = mkGame([inCone, behind]);
+    // 重置弧到 t=10 态（hitSet 空、t 连跑）
+    const arc2 = new SwingArc(owner, 972, 25, 40, 1, 1);
+    for (let t = 0; t < 10; t++) arc2.fixedUpdate(1, game2);
+    expect(hits.length).toBe(1);                       // 锥内敌恰好一击、锥后零击
+    expect(arc2['hitSet'].has(1)).toBe(true);
+    expect(arc2['hitSet'].has(2)).toBe(false);
+    void game0;
+  });
+
+  it('拖尾锥（num15 门）：t≤0.3ai1 时主锥界外 0.9 rad 的后向扇面点仍命中（仅拖尾锥覆盖）', () => {
+    const arc = new SwingArc(owner, 972, 25, 40, 1, 1);
+    const game = mkGame([]);
+    for (let t = 0; t < 4; t++) arc.fixedUpdate(1, game);
+    // t=4/25 → num15=1（clamp）：拖尾锥域 [num14−2.356, num14−0.785]。
+    // 敌位按【真实锥心 apex】沿角 2.0 rad 放 80px：主锥界外（角 2.0±0.26 < 3.11=主锥下界）、
+    // 拖尾锥内（1.54..3.11）——角位从 arc.cx/cy 起算（apex=owner 心 ±1px）
+    const num14 = arc['rot'] + Math.PI * 2 / 25;
+    const trailing = num14 - Math.PI / 4 - 0.9;
+    void trailing;
+    const ang2 = 2.0;
+    const hits: number[] = [];
+    const e = { id: 1, x: arc.cx + Math.cos(ang2) * 80 - 15, y: arc.cy + Math.sin(ang2) * 80 - 15,
+      w: 30, h: 30, cx: arc.cx + Math.cos(ang2) * 80, cy: arc.cy + Math.sin(ang2) * 80,
+      dead: false, hp: 500, hurt: (d: number) => { hits.push(d); return true; }, def: { hitSound: ['NPC_Hit_1'] } };
+    const game2 = mkGame([e]);
+    const arc2 = new SwingArc(owner, 972, 25, 40, 1, 1);
+    for (let t = 0; t < 4; t++) arc2.fixedUpdate(1, game2);
+    expect(hits.length).toBe(1);                       // 拖尾锥生效（主锥界外）
+  });
+
+  it('972 尘面 1:1（AI_190 :42783-42797）：尘14 α150 noLight / 尘27 α100 noGravity vel=player.vel×0.2+dir×3', () => {
+    const game = mkGame([]) as GameHooks & { spawnDust?: (...a: unknown[]) => unknown };
+    const dusts: Array<{ type: number; alpha: number; scale: number; noGravity: boolean; vx: number; vy: number }> = [];
+    game.spawnDust = (_x: number, _y: number, _w: number, _h: number, type: number,
+      sx: number, sy: number, alpha: number, _c: unknown, scale: number, noGravity: boolean) => {
+      const d = { type, alpha, scale, noGravity, vx: sx as number, vy: sy as number };
+      dusts.push(d);
+      return d;
+    };
+    const arc = new SwingArc(owner, 972, 25, 40, 1, 1);
+    for (let t = 0; t < 60; t++) {
+      if (arc.dead) break;
+      arc.fixedUpdate(1, game);
+    }
+    const d14 = dusts.filter((d) => d.type === 14);
+    const d27 = dusts.filter((d) => d.type === 27);
+    expect(d14.length).toBeGreaterThan(0);             // 两型尘都有产出（60 拍统计）
+    expect(d27.length).toBeGreaterThan(0);
+    for (const d of d14) { expect(d.alpha).toBe(150); expect(d.scale).toBe(1.4); }
+    for (const d of d27) {
+      expect(d.alpha).toBe(100);
+      expect(d.noGravity).toBe(true);
+      expect(d.vx).toBeCloseTo(3, 6);                  // player.vx=0 + dir(1)×3
+      expect(d.vy).toBe(0);
+    }
+  });
+});
 
 describe('真刃系挥弧剑族分类（combatWeapon aiStyle 190/191 门）', () => {
   it('273/675/368/674/757/1826 = melee（曾落 shot 兜底 = Arrow 白弧直出的根因）', () => {

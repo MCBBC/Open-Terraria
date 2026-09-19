@@ -1,4 +1,7 @@
-// 微光转化表提取（1.4.5.6 = Terarria1456）→ src/data/vanilla-shimmer.json。
+// 微光转化表提取（1.4.5.7 = Terarria1457；2026-09-20 基准随 08-23 切换跟进——
+//   曾留 1456 源：1457 新增冰系武器环 670→1319→6153→724→670 缺表（6153 GlacierFang
+//   为 1.4.5 新物）。1456 行号对照：ItemID.cs Sets :84/:86/:88/:90/:1098、NPCID.cs
+//   :4837-4843（1457 在 :88/:90/:92/:94/:1104 与 :4837-4845）。）→ src/data/vanilla-shimmer.json。
 //   - ItemID.cs Sets（Terraria.ID/ItemID.cs）：
 //       ShimmerTransformToItem   :84   CreateIntSet(-1, from,to,...) 物品→物品
 //       ShimmerCountsAsItem      :86   等价计数（幻影类 5358-5361 → 5437）
@@ -54,9 +57,9 @@ function boolSetList(src, name) {
   return args;
 }
 
-const itemid = read('Terarria1456/Terraria.ID/ItemID.cs');
-const npcid = read('Terarria1456/Terraria.ID/NPCID.cs');
-const itemcs = read('Terarria1456/Terraria/Item.cs');
+const itemid = read('Terarria1457/Terraria.ID/ItemID.cs');
+const npcid = read('Terarria1457/Terraria.ID/NPCID.cs');
+const itemcs = read('Terarria1457/Terraria/Item.cs');
 
 /** Item.cs SetDefaults 内 `case N:` → DefaultToCapturedCritter(X) 扫描。
  *  作用域规则（SetDefaults 反编译结构：case 标签深度 d，体语句深度 d+1，

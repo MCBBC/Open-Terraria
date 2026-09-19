@@ -26,6 +26,7 @@ import { CANVAS_MOUSETEXT_FONT } from '../vui/draw/PixelText';
 import { drawBakedMouseText } from '../vui/draw/MouseTextBake';
 import { UITextures } from '../vui/assets/UITextures';
 import { buildInfoAccRows, type InfoAccCtx, type InfoAccRow } from '../stats/InfoAccs';
+import type { InfoAccsDOM } from './InfoAccsDOM';
 
 export interface InfoAccDrawState {
   /** 本帧行(渲染层填;供交互层查 rect) */
@@ -37,6 +38,10 @@ export interface InfoAccDrawState {
 
 export class InfoAccsLayer {
   state: InfoAccDrawState = { rows: [], iconRects: [], inventoryOpen: false };
+  /** DOM 渲染层(★信息栏 DOM 化 2026-09-19;?infodom=1 灰度旗,Renderer 分派)。
+   *  仅挂载+旗开时 hitTest 委托其 DOM 悬停(命中域=图标盒同域);canvas 旧路径
+   *  (draw/hitTest 本体)零改动保留。type-only 导入,无运行时环 */
+  dom: InfoAccsDOM | null = null;
 
   /** CanShowInfoAccs(Main.cs:3099-3110):`!(npcChat 非空 && chest==-1) && sign<0`
    *  ——只压「对话中且未开箱」;开箱本身不隐藏(此时 playerInventory=true 走
@@ -255,32 +260,47 @@ export class InfoAccsLayer {
     }
   }
 
-  /** 隐藏态图标烘焙缓存:tex × rgba(80,80,80,70) 乘色(XNA Color*Color 同乘 RGBA) */
+  /** 隐藏态图标烘焙缓存:tex × rgba(80,80,80,70) 乘色(XNA Color*Color 同乘 RGBA)
+   *  ★2026-09-19 烘焙体抽为模块级 bakeHiddenIconCopy 单源(DOM 层同用),此处仅缓存 */
   private _hiddenIconCache = new Map<unknown, HTMLCanvasElement>();
   private hiddenIcon(tex: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }): HTMLCanvasElement {
     let cv = this._hiddenIconCache.get(tex.img);
-    if (cv) return cv;
-    cv = document.createElement('canvas');
-    cv.width = tex.sw;
-    cv.height = tex.sh;
-    const c = cv.getContext('2d', { willReadFrequently: true })!;
-    c.imageSmoothingEnabled = false;
-    c.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh, 0, 0, tex.sw, tex.sh);
-    c.globalCompositeOperation = 'multiply';
-    c.fillStyle = 'rgb(80,80,80)';
-    c.fillRect(0, 0, tex.sw, tex.sh);
-    c.globalCompositeOperation = 'destination-in';
-    c.globalAlpha = 70 / 255;
-    c.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh, 0, 0, tex.sw, tex.sh);
-    this._hiddenIconCache.set(tex.img, cv);
+    if (!cv) {
+      cv = bakeHiddenIconCopy(tex);
+      this._hiddenIconCache.set(tex.img, cv);
+    }
     return cv;
   }
 
-  /** 悬停行探测(屏幕坐标 → 行;无命中 -1) */
+  /** 悬停行探测(屏幕坐标 → 行;无命中 -1)。
+   *  ★信息栏 DOM 化(2026-09-19):DOM 层 active(?infodom=1 帧内)时委托其
+   *  mouseenter/leave 悬停(命中域=图标 14×14 盒,与 iconRects 命中同域)——
+   *  Game.tickInfoAccsHover 调用点零改动;旗关/未挂载走 iconRects 原路径
+   *  (DOM active 层 iconRects 恒空表,两支互斥不回读陈旧面) */
   hitTest(mx: number, my: number): number {
+    if (this.dom?.active) return this.dom.hoverRow();
     for (const r of this.state.iconRects) {
       if (mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h) return r.row.row;
     }
     return -1;
   }
+}
+
+/** 隐藏态图标烘焙(纯函数,单源):tex × rgba(80,80,80,70) 乘色(XNA Color*Color
+ *  同乘 RGBA)。★信息栏 DOM 化 2026-09-19 自 InfoAccsLayer.hiddenIcon 私有体
+ *  原样抽出(canvas 路径逻辑逐字节不变);DOM 层(InfoAccsDOM)烤 dataURL 复用 */
+export function bakeHiddenIconCopy(tex: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }): HTMLCanvasElement {
+  const cv = document.createElement('canvas');
+  cv.width = tex.sw;
+  cv.height = tex.sh;
+  const c = cv.getContext('2d', { willReadFrequently: true })!;
+  c.imageSmoothingEnabled = false;
+  c.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh, 0, 0, tex.sw, tex.sh);
+  c.globalCompositeOperation = 'multiply';
+  c.fillStyle = 'rgb(80,80,80)';
+  c.fillRect(0, 0, tex.sw, tex.sh);
+  c.globalCompositeOperation = 'destination-in';
+  c.globalAlpha = 70 / 255;
+  c.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh, 0, 0, tex.sw, tex.sh);
+  return cv;
 }

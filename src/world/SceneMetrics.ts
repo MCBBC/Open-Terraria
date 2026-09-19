@@ -2,7 +2,7 @@
 // 玩家中心 169×124 tile 采样计数（ZoneScanSize = 1920/16+49 × 120/16+49, SceneMetrics.cs:12-16）
 // → 阈值聚合（L24-64/L603-670）→ Zone 标志（CalculateZones L673-708）。
 // BGM 选择链(Music.ts)与群系背景(BiomeBackground)共用本份结果。
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, WALL_DUNGEON_SHEETS } from '../data/tiles';
 import type { World } from './World';
 import { WALL_HOUSE } from './Housing';
 import { sceneMetricDualOverride } from './DungeonDualZones';
@@ -90,11 +90,13 @@ const SHIMMER_TILE_THRESHOLD = 300;
  *  GetLerpValue(16,36,count)，消费端 Game.updateWeather 已按 16/36 字面实现） */
 const GRAVEYARD_TILE_MIN = 16;
 
-/** 地牢墙集合（Main.cs:10507-10514 wallDungeon 全表：主题墙 7/8/9 + 1.4 变体墙 94-99；
- *  41/43/44 是地牢"砖 tile"的 id,不是墙——此前误混入导致变体墙区域 zoneDungeon 永假） */
-const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-/** ★IIIII61：SkyblockRuntime 复用（WorldGen.Skyblock.Calculate 的 wallDungeon 面） */
-export const DUNGEON_WALL_IDS: number[] = [7, 8, 9, 94, 95, 96, 97, 98, 99];
+/** 地牢墙集合（Main.cs:10734-10745 wallDungeon 全表：主题墙 7/8/9 + 1.4 变体墙 94-99；
+ *  41/43/44 是地牢"砖 tile"的 id,不是墙——此前误混入导致变体墙区域 zoneDungeon 永假）
+ *  ——★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
+/** ★IIIII61：SkyblockRuntime 复用（WorldGen.Skyblock.Calculate 的 wallDungeon 面）——
+ *  ★BJ187 改由单源派生（Set 插入序=Main.cs 逐条赋值序,数组序保持不变） */
+export const DUNGEON_WALL_IDS: number[] = [...WALL_DUNGEON_SHEETS];
 /** 地下沙漠墙（SceneMetrics.cs:694 CalculateZones：WallID.Sets.Conversion.Sandstone
  *  {187,220,222,221,275,308,310,309} ∪ HardenedSand {216,217,219,218,304,305,307,306}
  *  ∪ DesertFossil 223，再排除 Main.wallHouse 玩家可放置墙——WallID.cs:21/23/509。

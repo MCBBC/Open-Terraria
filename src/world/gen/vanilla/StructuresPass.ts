@@ -6,7 +6,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree, seaOatWaterCheck, palmRangeFrame } from './TreePass';
@@ -1041,7 +1041,9 @@ const SANDSTONE_BRICK = TILE_BY_KEY['v_151_sandstone_brick']!;
 const POT = TILE_BY_KEY['pot']!;
 const SMALL185 = TILE_BY_KEY['v_185_small_decos']!;
 const SAND = TILE_BY_KEY['sand']!;
-const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.wallDungeon（Main.cs:10734-10745）——★BJ187 收编 data/tiles.ts:
+ *  WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 
 /** Pyramids pass（1456 cs:15426-15534）1:1：候选全部来自 DunesPass（GenVars.PyrX/PyrY）。
  *  校验链：x∈(300,w-300) → 地牢侧带回避（cs:15450-15452）→ 自 PyrY 下扫首个活性格

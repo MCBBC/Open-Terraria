@@ -1,6 +1,7 @@
 // 一次性探针:永夜刃(273)挥弧剑影渲染——修前(白弧直出) vs 修后(紫染色渐隐)像素对拍
 // 运行:SW_ORIGIN=http://localhost:5241 node tools/run-diag.mjs --timeout=500000 scripts/_nesword-trail.mjs
 import puppeteer from 'puppeteer-core';
+import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const tag = process.env.NE_TAG ?? 'probe';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
@@ -103,6 +104,45 @@ for (let i = 0; i < 40; i++) {
 }
 await new Promise((r) => setTimeout(r, arcState && arcState.t === 'arrow-shape' ? 250 : 0));
 console.log(tag, 'arcState:', JSON.stringify(arcState));
+
+// ②刃运动逐帧录制：第二刀挂 rAF 快照钩,弧 t≈4/8/12/16/20 各截画布帧+运动倾印
+await page.evaluate(() => {
+  const g = window.__swGame;
+  const cv = g.renderer.canvas ?? document.querySelector('canvas');
+  window.__neFrames = [];
+  const targets = [4, 8, 12, 16, 20];
+  const loop = () => {
+    const a0 = (g.entities.projectiles ?? []).find((e) => e && e.projId === 972 && typeof e.t === 'number');
+    if (a0 && targets.length && a0.t >= targets[0]) {
+      const tWanted = targets.shift();
+      const off = document.createElement('canvas');
+      off.width = cv.width; off.height = cv.height;
+      off.getContext('2d').drawImage(cv, 0, 0);
+      window.__neFrames.push({ want: tWanted, t: a0.t, rot: +a0.rot.toFixed(4), num: +a0.num.toFixed(4),
+        scale: +a0.scaleCur.toFixed(4), dx: +(a0.cx - g.player.cx).toFixed(1), dy: +(a0.cy - g.player.cy).toFixed(1),
+        op: +a0.op.toFixed(3), url: off.toDataURL('image/png') });
+    }
+    if (targets.length) requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+});
+await page.evaluate(() => { const g = window.__swGame; g.input.mouseDown = true; });
+await new Promise((r) => setTimeout(r, 60));
+await page.evaluate(() => { const g = window.__swGame; g.input.mouseDown = false; });
+for (let i = 0; i < 40; i++) {
+  await new Promise((r) => setTimeout(r, 100));
+  const n = await page.evaluate(() => window.__neFrames.length).catch(() => 0);
+  if (n >= 5) break;
+}
+const frames = await page.evaluate(() => window.__neFrames.map((f) => ({
+  want: f.want, t: f.t, rot: f.rot, num: f.num, scale: f.scale, dx: f.dx, dy: f.dy, op: f.op })));
+for (const f of frames) {
+  const b64 = await page.evaluate((t) => window.__neFrames.find((x) => x.want === t).url, f.want);
+  fs.writeFileSync(`/tmp/ne-frame-${tag}-t${String(f.want).padStart(2, '0')}.png`,
+    Buffer.from(b64.split(',')[1], 'base64'));
+}
+console.log(tag, 'frames:', JSON.stringify(frames));
+console.log(tag, 'rot-expected(t):', JSON.stringify(frames.map((f) => ({ t: f.t, expect: +(Math.PI * (1 + f.num)).toFixed(4) }))));
 
 const sample = await page.evaluate(() => {
   const g = window.__swGame;

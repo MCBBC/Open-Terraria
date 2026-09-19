@@ -26,7 +26,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { VI_ID } from '../../../data/itemKeys';
 import type { ChestSink } from './BuriedChestsPass';
 
@@ -51,16 +51,18 @@ const one = (s: number): number => ID_BY_SHEET.get(s) ?? -1;
 const ids = (...sheets: number[]): Set<number> =>
   new Set(sheets.map(one).filter((v): v is number => v >= 0));
 
-/** Main.tileDungeon（Main.cs:8131-8136）：41 蓝/43 绿/44 粉 + 古砖 677-679 */
-const DUNGEON_BRICKS = ids(41, 43, 44, 677, 678, 679);
+/** Main.tileDungeon（Main.cs:8131-8136）：41 蓝/43 绿/44 粉 + 古砖 677-679
+ *  ——★BJ187 收编 data/tiles.ts:TILE_DUNGEON_IDS 单源（旧 ids() 平移副本逐值全等） */
+const DUNGEON_BRICKS = TILE_DUNGEON_IDS;
 /** TileID.Sets.CrackedBricks（TileID.cs:183）＝481/482/483 */
 const CRACKED_BRICKS = ids(481, 482, 483);
 const BRICK_PINK = one(44), BRICK_GREEN = one(43), BRICK_BLUE = one(41);
 const JUNGLE_GRASS = one(60), MUSHROOM_GRASS = one(226), VINE_137 = one(137);
 const MUD_59 = one(59);
 
-/** Main.wallDungeon gen 侧可达子集（主砖墙 + 板/柱墙族），wall id 即原版 id */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.wallDungeon（Main.cs:10734-10745；主砖墙 + 板/柱墙族）wall id 即原版 id
+ *  ——★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 
 export function runFinishDrunkGenPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w, h } = st;

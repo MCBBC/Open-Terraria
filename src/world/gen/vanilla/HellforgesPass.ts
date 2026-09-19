@@ -3,7 +3,7 @@
 // 预算只计"有效墙位上放置失败"的尝试(上限 10000 次)。
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';   // ★IIIII110b：PlaceTile 尾 SQF
 import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII229 ⑪ 头清收编（原 setTileSilent 多清 inActive）
@@ -20,7 +20,8 @@ const HELLFORGE = TILE_BY_KEY['v_77_hellforge']!;
  *  曾用 cs:51851 AnchorValid 三连并集（含平台帧门）→ 平台桥中段帧（frameX 档外）
  *  被误拒：ntb #72 首差链实证——(2035,1109) 锚行 {19,76,76} vanilla 收 JS 拒 →
  *  该座成功后掷流错位 → JS 多出一座 (2090,1092) T0>77×6。 */
-const HF_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]); // TileID.Sets.Platforms
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const HF_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 function anchorValid(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);

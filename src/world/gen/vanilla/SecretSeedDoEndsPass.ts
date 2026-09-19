@@ -62,7 +62,7 @@
 //      Next(3) 掷+SquareTileFrame 双级联+失败 Clear 留痕），rainbow #105 满绿定谳。
 
 import { RNG } from '../../../core/rng';   // ★IIIII228 doNoSurface 双流需要【值】导入（new RNG(seed) 镜像 Main.rand）
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { World } from '../../World';
@@ -137,8 +137,9 @@ const WALL_CONV_NEW3 = new Set([190, 194, 202, 206, 214, 278, 282, 290, 294, 302
 const WALL_CONV_NEW4 = new Set([191, 195, 203, 207, 215, 279, 283, 291, 295, 303]);
 const WALL_GLOW_MUSHROOM = new Set([64, 67, 15, 247]);              // WallID.cs CanBeConvertedToGlowingMushroom
 
-/** TileID.Sets.IsATreeTrunk（TileID.cs:161） */
-const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——★BJ168-债2（2026-09-19）本地副本
+ *  拆除,收编 data/tiles.ts 单源 IS_A_TREE_TRUNK_SHEETS（sheet 域,逐值对拍 12≡12;
+ *  消费面同名直改） */
 
 /** GrowTreeSettings profile GroundTest 集（TreePass.ts 同值；自持防横向耦合） */
 const GEM_TREE_GROUND = new Set<number>([1, 25, 117, 203, ...TILE_MOSS]);
@@ -260,7 +261,7 @@ function isTileATreeBranchCore(st: TileStore, x: number, y: number): -1 | 0 | 1 
   const i = st.idx(x, y);
   if (!st.flags[i]) return 0;
   const sh = SHEET_OF_TYPE[st.type[i]];
-  if (sh === 323 || !IS_A_TREE_TRUNK.has(sh)) return 0;
+  if (sh === 323 || !IS_A_TREE_TRUNK_SHEETS.has(sh)) return 0;
   const fx = st.frameX[i], fy = st.frameY[i];
   // cs:55468-55477：fx44|fy198/220/242 与 fx66|fy0/22/44 → trunk 在右(+1)
   if ((fx === 44 && (fy === 198 || fy === 220 || fy === 242))
@@ -275,7 +276,7 @@ function isTileATreeRootCore(st: TileStore, x: number, y: number): -1 | 0 | 1 {
   const i = st.idx(x, y);
   if (!st.flags[i]) return 0;
   const sh = SHEET_OF_TYPE[st.type[i]];
-  if (sh === 323 || !IS_A_TREE_TRUNK.has(sh)) return 0;
+  if (sh === 323 || !IS_A_TREE_TRUNK_SHEETS.has(sh)) return 0;
   const fx = st.frameX[i], fy = st.frameY[i];
   if (fx === 44 && (fy === 132 || fy === 154 || fy === 176)) return 1;   // +1 右根
   if (fx === 22 && (fy === 132 || fy === 154 || fy === 176)) return -1;  // −1 左根
@@ -305,7 +306,7 @@ function convertTreeAndGround(
     if (!(x >= 5 && (y - 1 - num2) >= 5 && x < st.w - 5 && (y - 1 - num2) < st.h - 5)) break;
     const k = st.idx(x, y - 1 - num2);
     const sh = st.flags[k] ? SHEET_OF_TYPE[st.type[k]] : -1;
-    if (!st.flags[k] || (sh !== 323 && !IS_A_TREE_TRUNK.has(sh))) break;
+    if (!st.flags[k] || (sh !== 323 && !IS_A_TREE_TRUNK_SHEETS.has(sh))) break;
     if (isTileATreeBranchCore(st, x, y - 1) !== 0) break;               // cs:55411 字面（注意查的是 y-1）
     num2++;
   }
@@ -372,7 +373,7 @@ function tryConvertingOrKillingTreesAbove(st: TileStore, rng: RNG, gs: GenState,
   if (y - 1 < 1 || !st.flags[st.idx(x, y - 1)]) return;               // InWorld(...,2)
   const upIdx = st.idx(x, y - 1);
   const upSheet = SHEET_OF_TYPE[st.type[upIdx]];
-  if (!IS_A_TREE_TRUNK.has(upSheet) && upSheet !== 323) return;
+  if (!IS_A_TREE_TRUNK_SHEETS.has(upSheet) && upSheet !== 323) return;
   let flag = true;
   if (upSheet === 5) flag = convGrassFamily(newSheet);
   else if (upSheet === 323) flag = CONV_SAND.has(newSheet);
@@ -801,14 +802,13 @@ export function doSurfaceIsDesertFinish(st: TileStore, rng: RNG, gs: GenState): 
  *  ★IIIII165 勘误：曾写 {41,43,44,481,482,483}——481-483 是裂纹砖（tileDungeon=false,
  *  LC 时点 tileSolid 亦 false,双门同拒故被掩蔽）；真第四族=677-679 古代地牢砖
  *  （AncientBlue/Green/PinkBrick,TileID.cs:1791-1795）。 */
-const EW_TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
-/** Main.tileSolidTop 生成期可见族（Main.cs:6764+ 全 86 项；FinalCleanupPass.TILE_SOLID_TOP
- *  同源副本——同源副本禁互 import 惯例）。★IIIII165：原用 GenSolid.VAN_TILE_SOLID_EXTRA
- *  （tileSolid 碰撞差集 9 项）冒名 solidTop——语义错位,幸全部被 genSolid 拒采掩蔽。 */
-const EW_TILE_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+const EW_TILE_DUNGEON = TILE_DUNGEON_SHEETS;
+/** Main.tileSolidTop 生成期可见族——★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源
+ *  （84 项;旧 79 项漏 Main.cs:10125-10131 循环臂 435-439 队伍平台,生成期不可达=
+ *  行为零差;「同源副本禁互 import 惯例」旧注随单源化退役）。
+ *  ★IIIII165：原用 GenSolid.VAN_TILE_SOLID_EXTRA（tileSolid 碰撞差集 9 项）冒名
+ *  solidTop——语义错位,幸全部被 genSolid 拒采掩蔽。 */
+const EW_TILE_SOLID_TOP = SOLID_TOP_SHEETS;
 /** vanilla 原始 type 读语义（乱块海 raw 门专用,cs:1088/1106-1110/1233-1236）：
  *  vanilla Tile.type 缺省 0=Dirt（tileSolid[0]=true,Main.cs:7995;tileSolidTop/FI[0]=false）
  *  ——JS 内部 0=空气（TILE_DEFS[0] 无 sheet、solid=false）⇒ raw 读需特判 0=泥土。
@@ -1826,7 +1826,7 @@ function overGrownDungeonWithRainbowMoss(st: TileStore, rng: RNG, gs: GenState):
     }
   }
 }
-const TILE_DUNGEON_BRICK = new Set([41, 43, 44, 677, 678, 679]);        // Main.cs:8131-8136
+const TILE_DUNGEON_BRICK = TILE_DUNGEON_SHEETS;   // Main.cs:8131-8136（★BJ187 单源 data/tiles.ts）
 function isDungeonWallId(wall: number): boolean {
   return wall === 7 || wall === 8 || wall === 9 || (wall >= 94 && wall <= 99);
 }
@@ -2602,7 +2602,7 @@ const METEOR_VETO = new Set([26, 226, 470, 475, 488, 597]);
 /** TileID.Sets.BasicChest（TileID.cs:315 = 21,467）/ Main.tileDungeon（Main.cs:8131-8136
  *  = 41,43,44,677,678,679）—— meteor() 前置否决两辅助集 */
 const CHEST_SHEETS = new Set([21, 467]);
-const DUNGEON_TILE_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
+const DUNGEON_TILE_SHEETS = TILE_DUNGEON_SHEETS;   // Main.tileDungeon（★BJ187 单源 data/tiles.ts）
 
 /** DoNoSurface（cs:1038-1055） */
 export function doNoSurface(st: TileStore, rng: RNG, gs: GenState, world: World): void {

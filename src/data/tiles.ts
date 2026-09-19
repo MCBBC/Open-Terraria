@@ -1063,6 +1063,70 @@ export const TILE_TABLE_SHEETS = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276
   555, 556, 558, 559, 582,
   599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644,
   645, 710]);
+/** tileTable 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。未注册
+ *  sheet 自然落空。★BJ187 批四（2026-09-19）：MicroBiomesPass PLACE2X2_TABLE 与
+ *  DungeonPass TILE_TABLE_D 旧 76 项局部字面系逐条赋值提取漏 Main.cs:10125-10131
+ *  循环臂 tileTable[435-439]=true（与 BJ186 PC_TILE_TABLE 同病同修法,程序化对拍
+ *  差集恰={435,436,437,438,439}）——两副本经此镜像收编（81 工作表全单 def,镜像
+ *  ≡旧 idsByVanillaSheet/TILE_INTERNAL_BY_SHEET 两种平移习语,tests/bj187-batch4-*）。 */
+export const TILE_TABLE_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (TILE_TABLE_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+
+// ===================== Main.tileSolidTop / tileDungeon / wallDungeon 单源（★BJ187 2026-09-19 收编批） =====================
+// 三表此前在 16+24 处消费文件各持字面副本（BJ186 登记债第三批）。程序化对拍
+// （/tmp/bj187-extract.mjs：反编译 Main.cs 赋值行+循环臂双提取 × 全副本逐值 diff）
+// 定谳：sheet 域 solidTop 全表副本 14 处全部缺 Main.cs:10125-10131 循环臂
+// tileSolidTop[num2]=true（num2=435..439——**队伍平台族** TeamBlockGreen/Blue/
+// Yellow/Pink/WhitePlatform,TileID.cs:1307-1315；BJ186 台账「Echo 平台」系笔误,
+// 427=TeamBlockRedPlatform 同族）；HalfBrickPass TILE_SOLID_TOP_S 旧注「0 系本表
+// 多出」系陈旧笔误——盘上实表 84 项从不含 0（vanilla 全树无 tileSolidTop[0] 赋值、
+// 无 =false 写,提取零命中），本批对拍纠正。tileTable(81)⊂tileSolidTop(84),
+// 差集恰={16,134,239}（铁砧/迈锡尼铁砧/金属条——tileSolidTop 独有）。
+/** Main.tileSolidTop 全表=84 项（Main.cs:6954-7017/7896/8031/8142-8147/8192-8194/
+ *  8445/9798/9800/10118 逐条赋值 79 项 + Main.cs:10125-10131 for 循环臂
+ *  tileSolidTop[num2]=true(:10128,435..439) 5 项）。vanilla 无 tileSolidTop[0]。
+ *  tileSolid∩tileSolidTop={19,239,380,427,435-439}=平台九件套（GenSolid.
+ *  VAN_TILE_SOLID_EXTRA 同集）;生成期零翻转（WorldGen 全树无 =false 写）。 */
+export const SOLID_TOP_SHEETS: ReadonlySet<number> = new Set([
+  14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376,
+  380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532,
+  533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601,
+  602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643,
+  644, 645, 710,
+]);
+/** SolidTop 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。未注册
+ *  sheet 自然落空——与 VanillaSpawner 旧 .map(TILE_INTERNAL_BY_SHEET).filter(≥0)
+ *  习语逐值全等（tests/bj187-solidtop-dungeon-authority §B 钉死） */
+export const SOLID_TOP_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (SOLID_TOP_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** Main.tileDungeon 全表=6 项（Main.cs:8131-8136:41 青/43 蓝/44 绿地牢砖 +
+ *  677-679 古砖变体;1457≡1458）。481-483 裂纹砖 **不在** 本表
+ *  （TileID.Sets.CrackedBricks 独立面,SceneMetrics.cs:619/ExtraSpawns 等字面 ∪ 脸
+ *  勿并错——★IIIII165 勘误同款）。 */
+export const TILE_DUNGEON_SHEETS: ReadonlySet<number> = new Set([41, 43, 44, 677, 678, 679]);
+/** tileDungeon 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询） */
+export const TILE_DUNGEON_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (TILE_DUNGEON_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** Main.wallDungeon 全表=9 项（Main.cs:10734-10736 显式 false 全清循环 +
+ *  :10737-10745 逐条 true:主题墙 7 石/8 青/9 粉 + 1.4 变体墙 94-99）。墙 id 即
+ *  原版空间,无内部域镜像（本仓 wall 域单域直存）。 */
+export const WALL_DUNGEON_SHEETS: ReadonlySet<number> = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 
 // ===================== 开门砍切白名单（原版 OpenDoor cs:37698-37724 1:1） =====================
 // 侧列仅许 tileCut / 165 洞穴装饰 / IsADripTile，其余实心才拒绝开门；可砍格随后碎掉。
@@ -1128,6 +1192,63 @@ export const TILE_HAMMER_SHEETS: ReadonlySet<number> = new Set([26, 695, 31, 696
 export const TILE_AXE_SHEETS: ReadonlySet<number> = new Set([
   5, 72, 80, 488, 704, 323, 596, 616, 634, 589, 584, 588, 586, 587, 585, 583,
 ]);
+
+// ===================== TileID.Sets 家族单源（★BJ168-债2 2026-09-19 收编批） =====================
+// 原版 TileID.cs 三表（1457≡1458 逐值零变更）：IsATreeTrunk(:161)/Boulders(:195)/
+// Platforms(:243)。此前 sheet 域同语义副本族（与 TILE_CUT 三副本同批定谳对拍,逐值全等
+// 才收编,2026-09-19 对拍脚本三面印证）：IsATreeTrunk×4（Torch 导出/SecretSeedDoEnds/
+// WorldEvolution/SmartCursor——player 面并行禁区未收编=登记债）、Boulders×7
+// （FinalCleanup ids+sheets/BuriedChests ids+PC_/NotTheBees/DungeonDualZones/
+// Game.BOULDER_SUPPORT_SHEETS——后三处不在本批文件域=登记债）、Platforms×8
+// （Torch 导出/FinalCleanup/BuriedChests/WorldEvolution/JourneyBrowser/WldImport/
+// VanillaTiler/VanillaFraming S256——后四处=登记债）。并集/子集变体（INVALID_PILES、
+// PC_CHEST_ANCH_INVALID、GemPasses.ANCHOR_BANNED、LiquidSim.boulderFamilyIds、
+// Game.canPoundTile 并集）语义不同不收编。
+// ★BJ182b（2026-09-19）扩面收编批:上列登记债清偿——三家族 sheet 域副本 ~47 处
+//   （worldgen passes+render/wld/ui/entities/Game/Player/SmartCursor 全消费面）
+//   与内部域平移副本 8 处（Corruption/QuickCleanup/BrokenTrap/HalfBrick/Teleporter）
+//   全部拆除改走本文件单源;新增 PLATFORMS_IDS/IS_A_TREE_TRUNK_IDS 双镜像,
+//   金标+结构锁钉死见 tests/tile-domain-sentinel §6f/§6g、IDG-T2 家清单。
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——sheet 域（★不含棕榈 323,原表如此） */
+export const IS_A_TREE_TRUNK_SHEETS: ReadonlySet<number> = new Set([
+  5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634,
+]);
+/** TileID.Sets.Boulders（TileID.cs:195）——sheet 域 */
+export const BOULDERS_SHEETS: ReadonlySet<number> = new Set([
+  138, 484, 664, 665, 711, 712, 713, 714, 715, 716,
+]);
+/** Boulders 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。旧
+ *  idsByVanillaSheet（TILE_BY_KEY 键）习语逐值全等已探针定谳（762 defs 零重复 key,
+ *  10 id:146,158,295,299,300,301,302,303,682,727——tests/tile-domain-sentinel §6d 永久钉死） */
+export const BOULDERS_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (BOULDERS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.Platforms（TileID.cs:243）——sheet 域 */
+export const PLATFORMS_SHEETS: ReadonlySet<number> = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** Platforms 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。★BJ182b 收编批
+ *  新增:旧 idsByVanillaSheet(19,427,435-439) 平移副本（Corruption/QuickCleanup/HalfBrick）
+ *  逐值全等定谳后收编（7 id:11,529,535,536,537,538,539——tests/tile-domain-sentinel §6d 钉死） */
+export const PLATFORMS_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (PLATFORMS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** IsATreeTrunk 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。★BJ182b 收编批
+ *  新增:旧 idsByVanillaSheet(5,72,583-589,596,616,634) 平移副本（HalfBrick/Teleporter）
+ *  逐值全等定谳后收编（13 id=12 sheet,sheet5 双内部身——§6d 钉死） */
+export const IS_A_TREE_TRUNK_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (IS_A_TREE_TRUNK_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
 
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });

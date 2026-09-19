@@ -13,7 +13,7 @@
 //  1458 对照：Player.cs:37905-37919 三分支与扫位函数族逐字同 1457,本域零差分。
 
 import { TileStore } from '../TileStore';
-import { TILE_DEFS } from '../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../data/tiles';
 import { canTileHurt } from '../../stats/TouchDamage';
 
 // ── sheet id 表（内部 id 换算,与 ExtraSpawnsRoyale 同约定） ──────────────────
@@ -29,7 +29,8 @@ const sheetOf = (internalId: number): number => SHEET_LUT[internalId] ?? -1;
  *  Spawn_ValidSpawnFloor 的平台腿（:38189）。★不可用 TILE_DEFS.platform 代之：本仓
  *  platform 旗是「可站顶」并族（含桌/工作台等 tileSolid=false 家具）,原版地板腿只认
  *  Platforms 集合 + tileSolid∩!tileSolidTop + 380 花盆箱三支并集 */
-const VANILLA_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const VANILLA_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 
 /** WorldGen.InWorld(x, y, 5)（WorldGen.cs:9642-9649）fluff=5 档——IsAreaValidSpawn/
  *  Descend 内的越界格按原版 `continue`（视为不碍事）处理,非拒真 */
@@ -72,8 +73,8 @@ export function spawnValidSpawnFloor(st: TileStore, tX: number, tY: number): boo
  *  DungeonUtils.IsConsideredDungeonTile/Wall 的 allDungeons=true 第三腿
  *  （GenVars.dungeonGenVars[i].isDungeonTile 逐地牢砖表,DungeonCrawler.cs:133-172
  *  Main.tileDungeon 克隆+各 crawler 实际用砖）=dualDungeons 组合细化腿,登记组合债。 */
-const GEN_DUNGEON_TILE_SHEETS = new Set([41, 43, 44, 677, 678, 679]);
-const GEN_DUNGEON_WALL_SHEETS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+const GEN_DUNGEON_TILE_SHEETS = TILE_DUNGEON_SHEETS;   // Main.tileDungeon（★BJ187 单源 data/tiles.ts）
+const GEN_DUNGEON_WALL_SHEETS = WALL_DUNGEON_SHEETS;    // Main.wallDungeon（★BJ187 单源）
 
 /** Spawn_IsAreaValidSpawn（Player.cs:38222-38259）：落脚行上方 3×3 净空门。
  *  · InWorld(5)/tile null → continue（:38225-38228,越界格不碍事）

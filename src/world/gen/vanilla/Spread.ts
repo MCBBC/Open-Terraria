@@ -3,7 +3,7 @@
 // （后续列仍可再拉回 false）；CanBeClearedDuringGeneration=false 不转。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS } from '../../../data/tiles';
 import { NOT_CLEARABLE } from './TileRunner';
 import { vanGenSolidType } from './GenSolid';
 // ★IIII177（2026-09-02）：frameImportant 分派补 165 钟乳石支（TileFrameImportant case 165
@@ -41,7 +41,8 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof s === 'number' && !INTERNAL_OF_SHEET.has(s)) INTERNAL_OF_SHEET.set(s, i);
 }
 /** TileID.Sets.Boulders（TileID.cs:195）→ InvalidTileForPilesOrSpeleothems（cs:39005） */
-const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDER_SHEETS = BOULDERS_SHEETS;
 /** Check3x2 style 组支撑类型表（cs:49344-49376 type=187 / cs:49301-49321 type=186）。
  *  Mud={59}（TileID.cs:287）；Snow={147}/Ice={161,163,164,200}（cs:24/28）；
  *  Sand={53,112,116,234}/HardenedSand={397,398,402,399}/Sandstone={396,400,403,401}。 */

@@ -14,7 +14,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame, genKillTile, genRangeFrame } from './FinalCleanupPass';
 import { setBoulderSolidity } from './TrapsPass';
@@ -31,14 +31,17 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof s === 'number') SHEET[i] = s;
 }
 
-/** Main.wallDungeon（墙 7/8/9/94-99） */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-/** Main.tileDungeon（tile 41/43/44/677-679，按 sheet id 存放） */
-const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
+/** Main.wallDungeon（墙 7/8/9/94-99）——★BJ187 收编 data/tiles.ts:
+ *  WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
+/** Main.tileDungeon（tile 41/43/44/677-679，按 sheet id 存放）——★BJ187 收编
+ *  data/tiles.ts:TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
+const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
 /** Main.tileMoss（Main.cs:6956-6996，按 sheet id 存放） */
 const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 /** TileID.Sets.Boulders（TileID.cs:195）——PlaceSmallPile 的 InvalidTile 门 */
-const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS = BOULDERS_SHEETS;
 
 /** 原版 `Main.tile[x,y].type ==` 直读（不查 active——击杀/放置失败后的残值 type
  *  仍会命中上游 flag 判定，cs:18989/19103/19177/19254） */
@@ -58,7 +61,8 @@ const sheetAt = (st: TileStore, x: number, y: number): number => {
 /** Main.tileSolid 平台族补真表（平台 tileSolid=true 且 tileSolidTop=true——
  *  本仓 TILE_DEFS.platform 格 solid=false，须按 sheet 集补；RRRR 实证：
  *  P3(1930,1090) 锚行 1931 列为平台 19，vanilla 放置成功、JS 曾拒） */
-const PLATFORM_SOLID = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORM_SOLID = PLATFORMS_SHEETS;
 
 /** SolidTile2（cs:46862）：active && tileSolid && slope==0 && !halfBrick && !inActive。
  *  ★tileSolid 走 GenSolid：pass 头覆写（cs:18906-18916,runPilesPass 接线）把
@@ -225,7 +229,8 @@ function placePile3x2(st: TileStore, rng: RNG, x: number, y: number, type: numbe
  // ============================================================
 
 /** TileID.Sets.Boulders（本地副本，与上方 BOULDERS 同集——补臂独立可读性） */
-const SUP_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const SUP_BOULDERS = BOULDERS_SHEETS;
 /** 本臂受理族 = **SetBoulderSolidity 翻转列（138/484/664/711-716）∪ {654}**。
  *  失效面恰由翻转列失去 Main.tileSolid 而生；654 坐于其上走非巨石支。665 不在
  *  翻转列（cs:11036 无此 id）恒实心、失效面空；其余 case132 列/exotic 成员
@@ -236,15 +241,11 @@ const SUP_CHECK2X2_FAMILY = new Set([654, 138, 484, 664, 711, 712, 713, 714, 715
 /** Check2x2 上方箱族豁免（cs:48483-85） */
 const SUP_CHEST_2X2 = new Set([21, 467, 441, 468, 88, 470, 475]);
 /** Main.tileTable（cs:48463 通用支地面门 ∪ 集；FinalCleanupPass TILE_TABLE 同源副本） */
-const SUP_TILE_TABLE = new Set([
-  280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
-  608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
-  559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
-  298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87,
-  88, 405, 427,
-]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const SUP_TILE_TABLE = TILE_TABLE_SHEETS;
 /** 平台族（TileID.Sets.Platforms 引擎同款） */
-const SUP_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const SUP_PLATFORMS = PLATFORMS_SHEETS;
 
 /** SolidTileAllowBottomSlope（cs:70211-70235）副本——bs 步进已在调用侧处理。 */
 const supSolidAllowBottom = (st: TileStore, x: number, y: number): boolean => {
@@ -353,10 +354,8 @@ function pilesSupplementAfterSquareFrame(st: TileStore, rng: RNG, cx: number, cy
 
 /** WorldGen.Place2x2（cs:51780）Piles 语境副本（同源副本禁 import 惯例；与
  *  MicroBiomesPass.place2x2Direct / TrapsPass.place2x2Traps 同构）。 */
-const PILES_PLACE2X2_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299,
-  309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538,
-  542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610,
-  611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PILES_PLACE2X2_TABLE = TILE_TABLE_SHEETS;
 function place2x2Piles(st: TileStore, x: number, y: number, type: number): boolean {
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
   // ★PlaceTile 头（cs:59494+59500）：138/711 实心 → 头门=EmptyTile(锚)（生成期

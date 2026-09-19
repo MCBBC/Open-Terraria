@@ -22,6 +22,7 @@ import { BuffType } from '../src/stats/Buffs';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import shimmerJson from '../src/data/vanilla-shimmer.json';
 import type { GameHooks } from '../src/entities/types';
 
 describe('转化表提取（ItemID.cs / NPCID.cs Sets）', () => {
@@ -40,6 +41,29 @@ describe('转化表提取（ItemID.cs / NPCID.cs Sets）', () => {
     }
     expect(canShimmerItem(3461, false, 3)).toBe(true); // 有月相 → 可微光化(无参时 false)
     expect(getTransformToItem(4837)).toBe(999);      // 绿宝石 → 金皇冠（源在键侧）
+  });
+
+  it('1457 重锚（2026-09-20）：附魔日晷 3064→月晷 5381 + 冰系武器环 4 对全通', () => {
+    // 用户实报（日晷不变月晷）定谳：3064→5381 自 1456 提取起即在表,链三层探针全绿;
+    // 真缺口 = 提取器源未随 08-23 基准切换（Terarria1456→1457）,1457 新增冰环整缺。
+    // 1457 ItemID.cs:88 邻接证据：[3064,5381] / [670,670,1319,1319,6153] / [6153,6153,724]
+    expect(getTransformToItem(3064)).toBe(5381);     // 附魔日晷 → 附魔月晷（单向）
+    expect(getTransformToItem(5381)).toBe(0);        // 月晷不回变（原版同款单向）
+    expect(canShimmerItem(3064)).toBe(true);
+    expect(internalIdOfVanilla(5381)).toBeGreaterThanOrEqual(0); // 目标已注册（静默丢物家族闸）
+    // 冰系武器环（IceBoomerang↔SnowballCannon↔GlacierFang↔IceBlade；6153=1.4.5 新物）
+    expect(getTransformToItem(670)).toBe(1319);      // 冰霜回旋镖 → 雪球炮
+    expect(getTransformToItem(1319)).toBe(6153);     // 雪球炮 → 冰川之牙
+    expect(getTransformToItem(6153)).toBe(724);      // 冰川之牙 → 冰雪刃
+    expect(getTransformToItem(724)).toBe(670);       // 冰雪刃 → 冰霜回旋镖
+    for (const id of [670, 1319, 6153, 724]) {
+      expect(canShimmerItem(id, true)).toBe(true);
+      expect(internalIdOfVanilla(getTransformToItem(id))).toBeGreaterThanOrEqual(0);
+    }
+    // 表总量对齐 1457（1456 时代=312 对）
+    expect(Object.keys(shimmerJson.itemTransformTo).length).toBe(316);
+    // CountsAs 1457 新增：未激活跑酷书 6195 等价激活态 6190
+    expect(getShimmerEquivalentType(6195)).toBe(6190);
   });
 
   it('等价计数（Item.cs:49073-49086）：幻影系 5358-5360 → 5437，普通物品恒等', () => {
@@ -145,6 +169,30 @@ describe('掉落物入微光（WorldItem.Shimmering + GetShimmered）', () => {
     expect(d.stack).toBe(5);
     expect(vanillaIdOfItem(d.itemId)).toBe(5353);
     expect(internalIdOfVanilla(5353)).toBeGreaterThan(0);
+  });
+
+  it('附魔日晷 3064 入池 90t → 换成月晷 5381 上浮（用户实报回归锚）', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3064]], 1);
+    for (let i = 0; i < 300; i++) {
+      d.fixedUpdate(1, hooks(w, p));
+      if (d.shimmered) break;
+    }
+    expect(d.shimmered).toBe(true);
+    expect(vanillaIdOfItem(d.itemId)).toBe(5381);
+  });
+
+  it('冰系武器环 724 入池 → 670（1457 重锚补表端到端）', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[724]], 1);
+    for (let i = 0; i < 300; i++) {
+      d.fixedUpdate(1, hooks(w, p));
+      if (d.shimmered) break;
+    }
+    expect(d.shimmered).toBe(true);
+    expect(vanillaIdOfItem(d.itemId)).toBe(670);
   });
 
   it('不可转化物（坠落之星 75）入池不转化不消失', () => {

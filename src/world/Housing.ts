@@ -25,6 +25,12 @@ export const WALL_HOUSE = new Set([
   340, 341, 342, 343, 344, 345, 346, 60, 225, 226, 227, 231, 232, 233, 235, 234, 312, 313,
   237, 238, 239, 240, 173, 183, 179, 184, 181, 186, 168, 169, 142, 143, 144, 149, 151, 150,
   152, 145, 148, 175, 176, 182, 146, 147, 167, 133, 134, 135, 136, 137, 75, 76, 78, 82, 77,
+  // ★QFH 2026-09-20：补 Main.cs:10491-10493 循环 `for (num4=153; num4<167; num4++) wallHouse[num4]=true`
+  //  ——Gemspark 系 14 面（153-166）。曾缺 → 近链（CheckForHousesNearAPlayer）对宝石火花墙房
+  //  采样失明：既不 RelocatedHomeless 迁入也不缓存 LastFoundHouse → 新 NPC 到达只剩流浪
+  //  生成（锚=现有 NPC 的家）= 用户实报「新 NPC 只入住世界生成点附近」根因（探针
+  //  scripts/_qfh-distribution.mjs S2a 判）。
+  153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166,
   1, 4, 5, 6, 10, 11, 12, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30, 31, 32,
   33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46, 47, 66, 67, 68, 72, 73, 107, 106, 245,
   315, 316, 317, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123,
@@ -94,7 +100,11 @@ function doorFrameBoundary(sheet: number, fx: number, fy: number): boolean {
  *  本仓库 platform 旗两族混装 → 以 vanilla-tilecollision.json 的 solid&&solidTop
  *  集（提取自 Main.cs）区分 */
 import tileCollisionJson from '../data/vanilla-tilecollision.json';
-const ROOM_BLOCK_SOLIDTOP = new Set<number>(
+/** ★BJ187 批四（2026-09-19）转出 pin 面：本集=vanilla-tilecollision.json 提取的
+ *  tileSolid∩tileSolidTop 平台九件套实证（{19,239,380,427,435-439},与 GenSolid.
+ *  VAN_TILE_SOLID_EXTRA 九件套权威全等）——tests/bj187-batch4-* 单向钉死,JSON 面
+ *  或派生逻辑漂移即红。 */
+export const ROOM_BLOCK_SOLIDTOP = new Set<number>(
   ((tileCollisionJson as unknown as { tiles: Array<{ id: number; solid: boolean; solidTop: boolean }> }).tiles)
     .filter((t) => t.solid && t.solidTop).map((t) => t.id));
 export const tileSolidLike = (t: number): boolean => {

@@ -10,6 +10,7 @@
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS, VANILLA_TILE_ID } from '../data/tiles';
+import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { TileStore } from '../world/TileStore';
 import type { GameHooks } from './types';
@@ -28,7 +29,10 @@ const T_STALAC = VANILLA_TILE_ID.get(165);    // CaveDecos 钟乳石
 
 // Main.tileSolid ∩ Main.tileSolidTop 九件套（Main.cs:8031-8032/9797-9800/10118-10119/
 // 10126-10136——tileSolid 真值且 tileSolidTop 的全部成员;本仓 def.solid 对九件恒 false）
-const TILE_SOLID_TOP_SHEETS = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+// ★BJ187 批四（2026-09-19）收编 GenSolid.VAN_TILE_SOLID_EXTRA 单源（九件套权威,sheet
+// 域直别名;逐副本对拍与旧字面逐值全等,tests/bj187-batch4-*）——tileSolidOf 消费
+// （def.solid ∪ platform∧九件套 = vanilla Main.tileSolid 代理,BBMSF :87884 arm2）
+const TILE_SOLID_TOP_SHEETS = VAN_TILE_SOLID_EXTRA;
 /** Main.tileSolid 代理：def.solid（tileSolid∧!tileSolidTop 域）∪ 九件套（tileSolid∧
  *  tileSolidTop）。家具（tileSolid=false∧tileSolidTop=true,如桌 18）不在此列——
  *  与 "def.solid||def.platform" 朴素代理的分野（BBMSF :87884 arm2 判据点）。 */

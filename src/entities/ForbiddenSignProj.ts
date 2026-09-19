@@ -257,7 +257,7 @@ export class ForbiddenSignProj extends Entity {
   private runContactHits(game: GameHooks): void {
     if (this.damage <= 0) return;                                // damage=0 停伤（30 帽后）
     const es = game.player.equipStats;
-    const crit = Math.random() < es.critMagic / 100;
+    const crit = Math.random() < (es.critMagic ?? 0) / 100;   // ★BJ175 桩面 ?? 防御（缺省 0）
     for (const ent of game.enemies()) {
       const e = ent as unknown as {
         id: number; x: number; y: number; w: number; h: number; dead: boolean;

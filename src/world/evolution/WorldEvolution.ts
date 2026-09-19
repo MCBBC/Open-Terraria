@@ -39,7 +39,7 @@
 //     （Convert_ActuallyConvertTorch）已随各 case 全链接入
 import type { TileStore } from '../TileStore';
 import { getTreeTypeAndTreeBottom, TreeTypes } from '../TreeShake';   // ★⑤ 掉落族批：树底/树型单源
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS } from '../../data/tiles';
 import { holidayLightVid } from '../../data/vanillaStyleDrops';   // ★红蓝-G①（2026-09-18）节日彩灯掉落单源
 import { RNG } from '../../core/rng';
 import { rollLuck } from '../../stats/Luck';
@@ -142,9 +142,10 @@ const BURST_BLACKLIST = new Set<number>([
 // ★②（2026-09-05 派发补齐批）：TileID.Sets 三表（Terraria.ID/TileID.cs 实证）——
 //   Platforms（:243）= {19,427,435-439}（守望矮人地基 ∨ 门,SolidTileAllowBottomSlope
 //   之外的额外放行位）;IsATreeTrunk（:161）;GetsCheckedForLeaves（:167）——
-//   ConsideredSolidTileForAnchor（cs:54352）/IsTileALeafyTreeTop（cs:29960）消费
-const TILE_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
-const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+//   ConsideredSolidTileForAnchor（cs:54352）/IsTileALeafyTreeTop（cs:29960）消费。
+//   ★BJ168-债2（2026-09-19）：TILE_PLATFORMS/IS_A_TREE_TRUNK 两本地副本拆除,收编
+//   data/tiles.ts 单源 PLATFORMS_SHEETS/IS_A_TREE_TRUNK_SHEETS（逐值对拍 7≡7/12≡12;
+//   消费面同名直改）;GETS_CHECKED_FOR_LEAVES 不在收编批名单,暂留。
 const GETS_CHECKED_FOR_LEAVES = new Set([5, 323, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
 
 export interface EvolutionHost {
@@ -929,7 +930,7 @@ export class WorldEvolution {
     const d = TILE_DEFS[st.type[i]];
     const sheet = sheetOf(st.type[i]);
     if (!d || (!d.solid && sheet !== 380)) return false;
-    const plat = TILE_PLATFORMS.has(sheet);
+    const plat = PLATFORMS_SHEETS.has(sheet);
     const sl = st.slope[i];
     return (!plat && sl !== 3 && sl !== 4) || (plat && st.half[i] !== 0);
   }
@@ -942,7 +943,7 @@ export class WorldEvolution {
     const i = st.idx(x, y);
     if (!st.flags[i] || st.isActuated(x, y)) return false;
     const d = TILE_DEFS[st.type[i]];
-    if (!d || !d.solid || TILE_PLATFORMS.has(sheetOf(st.type[i]))) return false;
+    if (!d || !d.solid || PLATFORMS_SHEETS.has(sheetOf(st.type[i]))) return false;
     const sl = st.slope[i];
     return !st.half[i] && sl !== 1 && sl !== 3;
   }
@@ -955,7 +956,7 @@ export class WorldEvolution {
     const i = st.idx(x, y);
     if (!st.flags[i] || st.isActuated(x, y)) return false;
     const d = TILE_DEFS[st.type[i]];
-    if (!d || !d.solid || TILE_PLATFORMS.has(sheetOf(st.type[i]))) return false;
+    if (!d || !d.solid || PLATFORMS_SHEETS.has(sheetOf(st.type[i]))) return false;
     const sl = st.slope[i];
     return !st.half[i] && sl !== 2 && sl !== 4;
   }
@@ -980,7 +981,7 @@ export class WorldEvolution {
     if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) return false;
     const i = st.idx(x, y);
     const sheet = sheetOf(st.type[i]);
-    if (sheet === 323 || !IS_A_TREE_TRUNK.has(sheet)) return false;
+    if (sheet === 323 || !IS_A_TREE_TRUNK_SHEETS.has(sheet)) return false;
     const fx = st.frameX[i], fy = st.frameY[i];
     if ((fx === 44 && (fy === 198 || fy === 220 || fy === 242))
       || (fx === 66 && (fy === 0 || fy === 22 || fy === 44))) return true;
@@ -996,7 +997,7 @@ export class WorldEvolution {
     if (!st.inBounds(x, y)) return true;                     // 原版 !InWorld → true（cs:54355）
     if (!st.hasTile(x, y)) return false;
     const sheet = sheetOf(st.type[st.idx(x, y)]);
-    if (sheet === 323 || (IS_A_TREE_TRUNK.has(sheet) && !this.isTileALeafyTreeTop(x, y))) {
+    if (sheet === 323 || (IS_A_TREE_TRUNK_SHEETS.has(sheet) && !this.isTileALeafyTreeTop(x, y))) {
       if (!this.isTileATreeBranch(x, y)) return true;
     }
     return false;
@@ -1071,7 +1072,7 @@ export class WorldEvolution {
       flag = false;
     }
     const baseSheet = this.typeAt(x, num2 + 2);
-    if (!this.solidTileAllowBottomSlope(x, num2 + 2) && !TILE_PLATFORMS.has(sheetOf(baseSheet))) {
+    if (!this.solidTileAllowBottomSlope(x, num2 + 2) && !PLATFORMS_SHEETS.has(sheetOf(baseSheet))) {
       flag = true;
     }
     if (!flag) return;

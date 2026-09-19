@@ -1,4 +1,7 @@
-// 微光（Shimmer）实体转化系统 1:1（1.4.5.6 反编译 = Terarria1456）：
+// 微光（Shimmer）实体转化系统 1:1（1.4.5.7 反编译 = Terarria1457；2026-09-20 随
+//   08-23 基准切换重锚——表经 tools/extract-shimmer.mjs 重产（源 1456→1457），
+//   净 diff = +4 冰系武器环（670→1319→6153→724→670）+ CountsAs 6195→6190，
+//   旧 1456 行号对照保留）：
 //   - 物品转化 WorldItem.GetShimmered（WorldItem.cs:1781-1931）：
 //       入微光 → Shimmering()(:806-840) shimmerTime +0.01/t，>0.9 → GetShimmered
 //       ① 钱币（CommonCoin 71-74）→ 面额放大入 coinLuck（铜 1× / 银 ×100 /
@@ -25,8 +28,8 @@
 //       （无 90t 浸入进度）——已移植（entities/Critter.ts tryShimmer）
 //   - 转化表来源：tools/extract-shimmer.mjs 从 ItemID.cs/NPCID.cs Sets +
 //       Item.cs DefaultToCapturedCritter 提取 → src/data/vanilla-shimmer.json
-//       （312 物品对 + 114 NPC 对 + 15 NPC→物品 + 29 城镇变体 + 93 瓶中小动物 +
-//       CommonCoin/PostMoonlord）
+//       （316 物品对 + 114 NPC 对 + 15 NPC→物品 + 29 城镇变体 + 93 瓶中小动物 +
+//       CommonCoin/PostMoonlord；1456 时代=312 物品对，1457 增冰环 4 对）
 //   GAP 登记（已移植——原缺口逐项落地，保留条目作溯源）：
 //     - decraft 反 craft：已移植（vanillaRecipes 索引 + 本文件 decraft 段 + ItemDrop 分支；
 //       RecipeGroup 组代表并列错位已修：tools/extract-itemrare.mjs 工厂盲区

@@ -6,7 +6,7 @@ import { entityNet } from '../net/entitySyncHooks';
 // entityNet 同模式注入——entities 层不反向依赖聊天层,单机默认 null 零开销）
 import { bossDamageSink, consumePendingStrikeOwner, setPendingStrikeOwner } from '../chat/BossDamageTracker';
 import { playEnemyHitSound, ON_HIT_EXCLUDED_PROJS } from './projTargets';
-import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, WALL_DUNGEON_SHEETS } from '../data/tiles';
 import { paintColor } from '../world/Paint';
 import { inAPlaceWithWind } from './Mounts';
 import { anchorSpecOf, validateAnchors } from '../world/TileAnchorValidator';
@@ -62,7 +62,7 @@ export function npcTypeNoAggro(vanillaId: number | null | undefined, player: Pla
 }
 /** Main.wallDungeon（Main.cs:10507-10515：主题墙 7/8/9 + 1.4 变体 94-99）——地牢之魂
  *  双门的墙侧（SceneMetrics/WorldGen 各有一份同值表） */
-const DUNGEON_WALL_IDS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+const DUNGEON_WALL_IDS = WALL_DUNGEON_SHEETS;   // Main.wallDungeon（★BJ187 单源 data/tiles.ts）
 import { spawnStardustMarks } from './StardustMarkProj';
 import { moveAndCollide, moveNoSlopeBox } from '../physics/TileCollision';
 import { TileStore } from '../world/TileStore';

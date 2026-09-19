@@ -25,7 +25,7 @@
 // 1456 对齐修正（相对旧 1.4.0.5 移植）：banker's rounding（C# Math.Round），
 // 蜂蜜交互阈值 32→24（LiquidCheck 统一），AddWater/WaterCheck 的水死/岩浆死表
 // （Main.cs:7182+ 提取），panic 模式（Liquid.cs:1040-1070），岩浆 3×3 烧草精确 type 映射
-import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS } from '../../data/tiles';
 import { UnifiedRandom } from '../../core/rng';
 import type { World } from '../World';
 import type { RNG } from '../../core/rng';
@@ -74,7 +74,8 @@ const LAVA_BURN_TO_DIRT = new Set([60, 70, 661, 662]);
 const OBSIDIAN_KILL_EXTRA_SHEETS = new Set([546, 77, 78, 82, 83, 84, 85, 105, 129, 132, 133, 134, 135, 136, 139, 165, 178, 185, 186, 187, 231, 337, 349, 506, 314]);
 /** Main.tileCut 全表（Main.cs 逐条提取）：情形 B"下方裁切植物"在合并门之前先 KillTile 掉落
  *  （Liquid.cs:1289-1295）——掉落语义，不是单纯清格 */
-const CUT_SHEETS = new Set([654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485, 454, 254, 236]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_CUT_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const CUT_SHEETS = TILE_CUT_SHEETS;
 /** TileID.Sets.IsAContainer（TileID.cs:405）：情形 B 的"上方是容器而下方不是"放行标志 */
 const CONTAINER_SHEETS = new Set([21, 467, 88]);
 /** Main.tileAlch（Main.cs:7755-7757）：DelWater 尾 CheckAlch 的草药族 */

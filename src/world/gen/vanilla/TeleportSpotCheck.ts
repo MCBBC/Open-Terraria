@@ -23,17 +23,18 @@
 //   code：0=受理 1=strictRange 2=SolidCollision 3=墙/规避 4=strictRange 下坠越界
 //   5=下坠耗尽 6=着陆规避 7=着陆底格避液 8=mostlySolidFloor 9=着陆终拒
 //   10/11=X±16 探针 12=Y+16 探针 13=Y−16 探针）。
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import type { TileStore } from '../../TileStore';
 
 // ── sheet 空间静态表 ──────────────────────────────────────────────
-// Main.tileSolidTop（Main.cs:6954-7140+；同源 BuriedChestsPass.PC_SOLID_TOP/U 批 DG_SOLID_TOP）
-const SHEET_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+// Main.tileSolidTop——★BJ187 收编单源 data/tiles.ts:SOLID_TOP_SHEETS(84 项,旧 79 项
+// 副本漏 Main.cs:10125-10131 循环臂 435-439 队伍平台;落点实探消费面 SOLID_TOP_LUT:
+// 旧值下落点踩队伍平台会被「误实心」拒,补臂后与 vanilla 一致放行)
+const SHEET_SOLID_TOP = SOLID_TOP_SHEETS;
 /** TileID.Sets.Platforms（TileID.cs:1307-1315） */
-const SHEET_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const SHEET_PLATFORMS = PLATFORMS_SHEETS;
 /** CanTileHurt 门禁表（Collision.cs:3219-3236；TileID.cs:381-389） */
 const SHEET_SUFFOCATE = new Set([53, 112, 116, 123, 224, 234]);
 const SHEET_TOUCH_BLEEDING = new Set([48, 232, 750]);
@@ -46,7 +47,8 @@ for (let id = 1; id < TILE_DEFS.length; id++) {
   const s = TILE_DEFS[id]?.vanilla?.sheet;
   if (s !== undefined && !BY_SHEET.has(s)) BY_SHEET.set(s, id);
 }
-const lutFromSheets = (set: Set<number>): Uint8Array => {
+// ★BJ182b:入参放宽 ReadonlySet(收编单源表均 ReadonlySet;只读遍历,语义零差)
+const lutFromSheets = (set: ReadonlySet<number>): Uint8Array => {
   const lut = new Uint8Array(TILE_DEFS.length);
   for (const s of set) {
     const id = BY_SHEET.get(s);
@@ -71,13 +73,18 @@ const BLEEDING_LUT = lutFromSheets(SHEET_TOUCH_BLEEDING);
 const IMMEDIATE_LUT = lutFromSheets(SHEET_TOUCH_IMMEDIATE_GT0);
 const HOT_LUT = lutFromSheets(SHEET_TOUCH_HOT);
 
-/** Main.wallDungeon（Main.cs:10735-10745；wall id 已是原版空间） */
-export const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-/** Main.tileDungeon（Main.cs:8131-8136，sheet 空间）→ internal id 集 */
-export const DUNGEON_TILE_IDS = new Set([41, 43, 44, 677, 678, 679].map((s) => BY_SHEET.get(s)).filter((v): v is number => v !== undefined));
+/** Main.wallDungeon（Main.cs:10734-10745；wall id 已是原版空间）——★BJ187 收编
+ *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+export const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
+/** Main.tileDungeon（Main.cs:8131-8136）→ internal id 集——★BJ187 收编
+ *  data/tiles.ts:TILE_DUNGEON_IDS 单源（旧 BY_SHEET.map 习语逐值全等已对拍） */
+export const DUNGEON_TILE_IDS = TILE_DUNGEON_IDS;
 /** tileSolid∩tileSolidTop 九件套（TouchDamage.TILE_SOLID_TOP_FAMILY 同源）——TileCollision
- *  flag 门里该族 `flag=tileSolid` 恒真与 frameY 无关（TileStore.isPlatform 注①）。 */
-const PLATFORM_FAMILY_LUT = lutFromSheets(new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]));
+ *  flag 门里该族 `flag=tileSolid` 恒真与 frameY 无关（TileStore.isPlatform 注①）。
+ *  ★BJ187 批四（2026-09-19）收编 GenSolid.VAN_TILE_SOLID_EXTRA 单源（九件套权威;
+ *  逐副本对拍等价——九 sheet 全单 def,lutFromSheets 首定义平移≡全 def 平移）。
+ *  消费面=TileCollision flag 门(:285)与 vanTileSolid 导出(:615,SW-RB10a tile2 判定)。 */
+const PLATFORM_FAMILY_LUT = lutFromSheets(VAN_TILE_SOLID_EXTRA);
 
 const WIRE_ACTUATED = 32;                                  // TileStore.wire bit5 已致动(inActive)
 

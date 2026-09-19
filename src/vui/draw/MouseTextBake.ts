@@ -63,6 +63,37 @@
 //     spritefont 各平台各自光栅化同构)。字体族/字号档(14px 拍板)/布局/染色/
 //     缓存结构零漂移;dpr 运行时变化(拖窗跨屏/浏览器缩放)由缓存键含档位自然
 //     自愈(旧档条目 LRU 淘汰)。
+// ★perf-textbake 2026-09-19 染色结果缓存(trace 实测头号热点:信息栏文字每帧重染色,
+// drawBakedMouseText inclusive 8.37s/49.9s,其中 native blit 8.16s——贵在**每帧每行**:
+// ①sil blit + ②tinted() 共享 scratch 重写(clearRect+drawImage+source-in fillRect)
+// + ③tint blit,scratch 每帧被改写 ⇒ GPU 每帧每行重新上传纹理)。
+// 【处方证伪→换机制锚】(铁律「先定谳,再动刀」;scripts/_ptc-composite-exact.mjs
+//   2026-09-19 实机 Chrome 864 案例对拍矩阵):任务处方「sil+mask 预合成为单张最终图
+//   → 命中单次 drawImage」**未过像素金标,不落刀**——两案机制性不等:
+//   ① globalAlpha<1(压暗行 0.34)破缺 over 关联律:旧两 blit 对背景双重衰减
+//     (1−gαS)(1−gαT),单图单 blit 只能 (1−g·α(T∘S));α=0.34/白底实测 maxD=57
+//     (=255×(0.66−0.4356) 整),pixel 档二值域也破——任何单张预乘图都表达不出;
+//   ② hidpi 档 alpha=1 仍不等:线性采样与 over 合成不可交换(先合成后采样 vs
+//     先各自采样后合成,2×2 采样足迹内 mask/描边 α 协方差项),白底实测 maxD=64。
+// 【本修=染色结果缓存】(两 blit 结构逐 op 保留 ⇒ 逐像素相等 by construction):
+//   缓存「白 mask×color 染色结果」整张画布,键 = `regime|color|text`;命中 = 直接
+//   drawImage(缓存染色图)——主画布 op 序与旧路径完全同形([sil blit, tint blit]),
+//   仅 tint 源从「逐帧重写的共享 scratch」换成「稳定缓存画布」⇒ 消灭每帧重染色与
+//   每帧纹理重上传,blit 数不变(2/行)。scratch 改为「移交制」:miss 时合成进
+//   scratch,整张移交缓存(不拷贝);下轮 miss 从回收站(逐出画布再利用)或新分配
+//   取 scratch——命中态零分配零 scratch 写。色进键:InfoAccs 三色恒定(#FFE745/
+//   #646464/#e8e4f0)命中即定;悬停标签 mouseTextColor 脉动灰(190↔255 步进 1/帧,
+//   TileShine.ts:120)逐帧 miss → 与旧路径同价合成(无回归),单文本 66 档灰循环
+//   在 256 容量内收敛为全命中;LRU 逐出(逐帧重画的 InfoAccs 行恒 MRU 不逐)。
+//   α/scaleX/scaleY 不进键(主画布 globalAlpha/drawImage 参数施,与旧同)。
+// 【逃生门】?textbakecache=0 → tintSource 直通旧 tinted()(共享 scratch 逐帧重染,
+//   与本修前逐字节同形)——回退通道保留至用户验收;亦是 A/B 对拍/像素金标开关。
+// 【失效面】(全 grep 核对 2026-09-19):字形源 = "Fusion Pixel 12px"(UIFont.load
+//   一次性注入,无换字体机制);资源包字体仅注册 SWRP:* 族(ResourcePackManager.ts:18
+//   /:40-48),不覆盖本管线族名 ⇒ 换包不改字形;remaster(RemasterRuntime)换图集
+//   贴图,本管线零贴图消费。仍按保守纪律挂 sw:remaster-applied 一并清两缓存
+//   (BestiaryPanel.ts:64 同款先例;重烘/重染一帧内完成,无感)。字体就绪窗由
+//   bake() fontReady() 门兜住(未就绪不产条目,无陈旧回退字形)。
 import { CANVAS_MOUSETEXT_FONT, PIXEL_FONT_FAMILY, PixelText } from './PixelText';
 
 /** 字体原生网格(px)——Fusion Pixel 12px 的设计栅格 */
@@ -232,7 +263,8 @@ function bake(text: string): BakedLine | null {
   return line;
 }
 
-/** 运行时染色 scratch(白 mask → source-in 单色;脉动灰逐帧染,缓存零压力) */
+/** 运行时染色 scratch(白 mask → source-in 单色;逃生门 ?textbakecache=0 直通本路径
+ *  =本修前逐帧重染同形;缓存路径下 scratch 移交给缓存,见 tintSource) */
 let tintScratch: HTMLCanvasElement | null = null;
 function tinted(mask: HTMLCanvasElement, color: string): HTMLCanvasElement {
   if (!tintScratch) tintScratch = mkCanvas(mask.width, mask.height);
@@ -249,6 +281,82 @@ function tinted(mask: HTMLCanvasElement, color: string): HTMLCanvasElement {
   c.fillRect(0, 0, tintScratch.width, tintScratch.height);
   c.globalCompositeOperation = 'source-over';
   return tintScratch;
+}
+
+// ---------- ★perf-textbake 染色结果缓存(LRU 有界 + scratch 移交 + 回收站) ----------
+
+/** 键 = `regime|color|text`(color 为 fillStyle 串,恒不含 '|';text 尾位可含任意字符)。
+ *  mask 尺寸由 (regime,text) 唯一决定 ⇒ 键覆盖染色结果全部自由度 */
+const tintCache = new Map<string, HTMLCanvasElement>();
+/** 保守起步容量(协调纪律);信息行全亮+压暗行共享条目(α 走主画布不进键) */
+const TINT_CACHE_CAP = 256;
+/** 逐出画布回收站(防脉动灰悬停路径逐帧 alloc churn;同尺寸复用,异尺寸赋值重置) */
+const tintPool: HTMLCanvasElement[] = [];
+const TINT_POOL_CAP = 8;
+
+/** 逃生门(?textbakecache=0 → 旧路径逐帧重染;惰性读一次,会话内稳定) */
+let tintCacheOn: boolean | null = null;
+function tintCacheEnabled(): boolean {
+  if (tintCacheOn === null) {
+    try {
+      tintCacheOn = !(typeof location !== 'undefined'
+        && new URLSearchParams(location.search).get('textbakecache') === '0');
+    } catch {
+      tintCacheOn = true;
+    }
+  }
+  return tintCacheOn;
+}
+
+/** 取染色结果(★两 blit 结构保留:主画布 op 序与旧路径逐 op 同形 ⇒ 逐像素相等)。
+ *  命中 = 直接返回缓存画布(零合成零分配);miss = 合成进 scratch 并整张移交缓存。 */
+function tintSource(baked: BakedLine, text: string, color: string): HTMLCanvasElement {
+  if (!tintCacheEnabled()) return tinted(baked.mask, color);
+  const key = `${baked.regime}|${color}|${text}`;
+  const hit = tintCache.get(key);
+  if (hit && hit.width === baked.w && hit.height === baked.h) {
+    // LRU recency 刷新(delete+set 移到 Map 尾 = 最近使用)。尺寸守卫=防御性
+    // (同键 mask 尺寸由字体度量唯一决定,当前无变字体机制,见头注【失效面】)
+    tintCache.delete(key);
+    tintCache.set(key, hit);
+    return hit;
+  }
+  // miss:scratch(上轮移交后为空 → 回收站复用或新分配;尺寸不合则赋值重置=清屏)
+  const cv = tintScratch ?? tintPool.pop() ?? mkCanvas(baked.w, baked.h);
+  tintScratch = null;
+  if (cv.width !== baked.w || cv.height !== baked.h) {
+    cv.width = baked.w;
+    cv.height = baked.h;
+  }
+  const c = cv.getContext('2d')!;
+  // op 序与旧 tinted() 逐 op 同形(source-in 染色)——产物字节同源
+  c.globalCompositeOperation = 'source-over';
+  c.clearRect(0, 0, baked.w, baked.h);
+  c.drawImage(baked.mask, 0, 0);
+  c.globalCompositeOperation = 'source-in';
+  c.fillStyle = color;
+  c.fillRect(0, 0, baked.w, baked.h);
+  c.globalCompositeOperation = 'source-over';
+  // 容量满:单条 LRU 逐出(逐帧重画的 InfoAccs 行恒 recency 刷新,不被逐)
+  if (tintCache.size >= TINT_CACHE_CAP) {
+    const oldestKey = tintCache.keys().next().value as string;
+    const oldest = tintCache.get(oldestKey);
+    tintCache.delete(oldestKey);
+    if (oldest && tintPool.length < TINT_POOL_CAP) tintPool.push(oldest);
+  }
+  tintCache.set(key, cv);   // scratch 移交缓存
+  return cv;
+}
+
+/** 失效钩子:remaster/资源包应用面(RemasterRuntime 'sw:remaster-applied')清全部
+ *  文本烘焙缓存;测试同用。见头注【失效面】grep 核对。 */
+export function clearMouseTextCaches(): void {
+  cache.clear();
+  tintCache.clear();
+  tintPool.length = 0;
+}
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('sw:remaster-applied', clearMouseTextCaches);
 }
 
 export interface BakedTextDrawOpts {
@@ -305,13 +413,21 @@ export function drawBakedMouseText(
   ctx.imageSmoothingEnabled = baked.regime === 'hidpi';
   if (alpha < 1) ctx.globalAlpha = alpha;
   ctx.drawImage(baked.sil, dx, dy, dw, dh);
-  ctx.drawImage(tinted(baked.mask, opts.color), dx, dy, dw, dh);
+  // ★perf-textbake:tint 源 = 染色结果缓存(命中零重染;逃生门 ?textbakecache=0 →
+  //  旧共享 scratch 逐帧重染)。主画布 op 序 = [sil blit, tint blit] 与旧逐 op 同形。
+  ctx.drawImage(tintSource(baked, text, opts.color), dx, dy, dw, dh);
   ctx.restore();
   return true;
 }
 
 /** 诊断面(探针 scripts/_fx57-text-bake.mjs、scripts/_fx58-mac-sharpen.mjs 用):
- *  缓存行数+管线常量+当前档位 */
-export function bakeStats(): { count: number; outline: number; targetPx: number; upscale: number; regime: BakeRegime } {
-  return { count: cache.size, outline: OUTLINE, targetPx: TARGET_PX, upscale: UPSCALE, regime: currentRegime() };
+ *  缓存行数+管线常量+当前档位(★perf-textbake 增 tintCount/tintPool/逃生门态) */
+export function bakeStats(): {
+  count: number; outline: number; targetPx: number; upscale: number; regime: BakeRegime;
+  tintCount: number; tintPool: number; tintCacheOn: boolean;
+} {
+  return {
+    count: cache.size, outline: OUTLINE, targetPx: TARGET_PX, upscale: UPSCALE, regime: currentRegime(),
+    tintCount: tintCache.size, tintPool: tintPool.length, tintCacheOn: tintCacheEnabled(),
+  };
 }

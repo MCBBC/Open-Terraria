@@ -6,7 +6,7 @@ import { furnitureSlotCount, type FurnitureKind } from '../world/FurnitureItems'
 import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { CHEST_MAX_ITEMS } from '../world/World';
-import { TILE_BY_KEY, T, TILE_DEFS, TILE_STABLE_OF_INTERNAL } from '../data/tiles';
+import { TILE_BY_KEY, T, TILE_DEFS, TILE_STABLE_OF_INTERNAL, PLATFORMS_SHEETS } from '../data/tiles';
 import { ITEM_BY_KEY, ITEM_STABLE_OF_INTERNAL, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { translateSeed } from '../core/rng';
 // ★IIIIIII18 F-1：导入路径统一走与新创建世界相同的 seed 解析层——
@@ -432,7 +432,8 @@ const NON_SOLID_SAVE_SLOPES = new Set([131, 351, 336, 340, 342, 341, 343, 344]);
  *  平台坡度照存照载。★门禁不可用本仓 TILE_DEFS[].solid 近似：本仓碰撞域平台
  *  solid=false（tileSolidTop 语义）——曾致导入世界平台楼梯坡度全丢，残成
  *  「楼梯帧+slope=0」嵌合态（一档 576 格实证：渲染出孤立楼梯碎片、碰撞变平）。 */
-const VANILLA_SOLID_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const VANILLA_SOLID_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 
 // wld item id → 内部 item key:原 ITEM_MAP 覆盖表已整体移除——本地键段随本地物品退役,
 // vi_ 段与 VANILLA_ITEM_KEY_BY_ID 完全冗余;且旧表曾把 71-74 钱币全折 coin_copper(面额缩水 bug)。

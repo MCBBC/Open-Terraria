@@ -251,6 +251,33 @@ export function drawArcLayers(
   }
 }
 
+/** Utils.DoesFitInCone（Utils.cs:1722-1729 [1457]）逐式：v=point−center、
+ *  a=RotatedBy(−rot).ToRotation()（=wrapPi(atan2)−rot）、|a|≤maxAng 且 |v|<len。 */
+export function conePointFits(px: number, py: number, cx: number, cy: number,
+  len: number, rot: number, maxAng: number): boolean {
+  const vx = px - cx, vy = py - cy;
+  let a = Math.atan2(vy, vx) - rot;
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  if (a < -maxAng || a > maxAng) return false;
+  return vx * vx + vy * vy < len * len;
+}
+
+/** Utils.IntersectsConeSlowMoreAccurate（Utils.cs:1692-1717 [1457]）逐式：
+ *  五点采样 = ClosestPointInRect(锥尖延长点) + 目标盒四角，任一入锥即真。 */
+export function coneHitsRect(rx: number, ry: number, rw: number, rh: number,
+  cx: number, cy: number, len: number, rot: number, maxAng: number): boolean {
+  const tipX = cx + Math.cos(rot) * len, tipY = cy + Math.sin(rot) * len;
+  const clampX = Math.max(rx, Math.min(rx + rw, tipX));
+  const clampY = Math.max(ry, Math.min(ry + rh, tipY));
+  if (conePointFits(clampX, clampY, cx, cy, len, rot, maxAng)) return true;
+  if (conePointFits(rx, ry, cx, cy, len, rot, maxAng)) return true;
+  if (conePointFits(rx + rw, ry, cx, cy, len, rot, maxAng)) return true;
+  if (conePointFits(rx, ry + rh, cx, cy, len, rot, maxAng)) return true;
+  if (conePointFits(rx + rw, ry + rh, cx, cy, len, rot, maxAng)) return true;
+  return false;
+}
+
 /** 通用旋斩弧（原 TerraArc 泛化） */
 export class SwingArc extends Entity {
   w = 16; h = 16;
@@ -305,13 +332,29 @@ export class SwingArc extends Entity {
     // CanCutTiles 排除表）→ 旋斩扫过的瓦罐/杂草同步砍断（cutTilesBox 弹盒+1 外沿）
     cutTilesBox(game, this.cx - 85 * this.scaleCur, this.cy - 60 * this.scaleCur,
       170 * this.scaleCur, 120 * this.scaleCur);
-    // 尘近似（AI_190 各型号 278/107/267 火花——按 num3 包络概率降采样）
-    if (Math.random() < this.op * 0.5) {
-      const a2 = this.rot + (Math.random() - 0.5) * Math.PI / 2;
-      const dc = (ARC_DRAW_SPEC[this.projId] ?? ARC_DRAW_SPEC[972]).l4[0];
-      game.spawnParticles(this.cx + Math.cos(a2) * 84 * this.scaleCur,
-        this.cy + Math.sin(a2) * 84 * this.scaleCur,
-        `rgb(${dc[0]},${dc[1]},${dc[2]})`, 1, 1.4, { life: 18 });
+    // 尘 1:1（AI_190 type 972 支 Projectile.cs:42783-42797 [1457]；982/983/997/984
+    // 各有专属尘支,本支覆盖 972 面其余型号沿用原近似——锚弧/飞斩同走此处）：
+    // 1/2/拍 选弧带角点（rot + NextFloatDirection×(π/2×0.7) → 半径 84×scale——scale
+    // 取 ×ai2 前值 :42787 序）→ 1/5 尘14 黑烟雾（α150 scale1.4 noLight+noLightEmittance）
+    // + 1/2 尘27 暗影炎紫焰（vel = player.vel×0.2+(dir×3, player.vel.y×0.2)、α100
+    // scale1.4 noGravity）。曾用降采样紫方块 spawnParticles 近似 = 自由挥击近乎无粒
+    // （用户实报"光效和粒子呢"案 2026-09-19）。命中时紫尘编排另发（Damage_PVE_Inner
+    // case 972 → NightsEdge,仅命中触发——swordTrailOrchestra :344）。
+    if (this.projId === 972 && Math.random() < 0.5) {
+      const f = this.rot + (Math.random() * 2 - 1) * Math.PI * (Math.PI / 2) * 0.7;
+      const sc0 = this.ai2 ? this.scaleCur / this.ai2 : this.scaleCur;
+      const dx0 = this.cx + Math.cos(f) * 84 * sc0;
+      const dy0 = this.cy + Math.sin(f) * 84 * sc0;
+      const pv = this.owner as { vx?: number; vy?: number };
+      const dir = Math.sign(this.ai0) || 1;
+      if (Math.random() < 0.2) {
+        const d = game.spawnDust?.(dx0, dy0, 0, 0, 14, 0, 0, 150, null, 1.4, false, true);
+        if (d) { d.noLight = true; d.noLightEmittance = true; }
+      }
+      if (Math.random() < 0.5) {
+        game.spawnDust?.(dx0, dy0, 0, 0, 27,
+          (pv.vx ?? 0) * 0.2 + dir * 3, (pv.vy ?? 0) * 0.2, 100, null, 1.4, true, true);
+      }
     }
     // 命中：穿透（型号表）+ 同敌单跳（usesLocalNPCImmunity 族）
     for (const ent of game.enemies()) {
@@ -321,11 +364,17 @@ export class SwingArc extends Entity {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; id: number; dead: boolean; dontTakeDamage?: boolean; spawnedFromStatue?: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitSet.has(e.id)) continue;
-      const reach = 85 * this.scaleCur;
-      const ex = this.cx + Math.cos(this.rot) * reach * 0.5;
-      const ey = this.cy + Math.sin(this.rot) * reach * 0.5;
-      const bw = reach, bh = 60 * this.scaleCur;
-      if (!(ex - bw / 2 < e.x + e.w && ex + bw / 2 > e.x && ey - bh / 2 < e.y + e.h && ey + bh / 2 > e.y)) continue;
+      // Colliding aiStyle 190 逐式（Projectile.cs:15630-15650 [1457]）：主锥 94×scale
+      // @ rotation+2π/25×ai0 半角 π/4 + 拖尾锥（num15 = Remap(t,0.3ai1,0.5ai1,1,0)
+      // 内收 π/4×ai0×num15,t≤0.3 满幅/≥0.5 消失）——Utils.IntersectsConeSlowMoreAccurate
+      // 五点采样（Utils.cs:1692-1717）。曾用旋转方向盒近似(85×60@reach/2) = 扇缘漏判定
+      // （用户实报"剑影接触到就该命中"案 2026-09-19）
+      const reach = 94 * this.scaleCur;
+      const num14 = this.rot + Math.PI * 2 / 25 * this.ai0;
+      const num15 = remapArc(this.t, this.ai1 * 0.3, this.ai1 * 0.5, 1, 0);
+      if (!coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reach, num14, Math.PI / 4)
+        && !(num15 > 0 && coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reach,
+          num14 - Math.PI / 4 * this.ai0 * num15, Math.PI / 4))) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）①：锚弧（this.projId=972/982/983/997/984，数据面 melee）
@@ -540,16 +589,19 @@ export class TrueNightsEdgeSlash extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     if (this.damage > 0) {
-      const reach = 85 * this.scaleCur;
       for (const ent of game.enemies()) {
         // ★dontTakeDamage 目标排除（:12600 同款,终审补——同首环）
         if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
         if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
-        const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
-        const ex = this.cx + Math.cos(this.rot) * reach * 0.5;
-        const ey = this.cy + Math.sin(this.rot) * reach * 0.5;
-        if (!(ex - reach / 2 < e.x + e.w && ex + reach / 2 > e.x && ey - 30 * this.scaleCur < e.y + e.h && ey + 30 * this.scaleCur > e.y)) continue;
+        // Colliding type 973 逐式（Projectile.cs:15553-15566 [1457]）：ClosestPointInRect
+        // 距离圆 100×scale（v.Length() 判定,盒内点 SafeNormalize 回退长 1 仍真）+
+        // CanHit(Center→targetRect.Center) 视线门——曾用旋转方向盒近似(85×60)漏判定
+        const cpx = Math.max(e.x, Math.min(e.x + e.w, this.cx));
+        const cpy = Math.max(e.y, Math.min(e.y + e.h, this.cy));
+        if (!(Math.hypot(cpx - this.cx, cpy - this.cy) < 100 * this.scaleCur)) continue;
+        if (!canHitLine(game.world.store, this.cx, this.cy, 0, 0, e.cx, e.cy, 0, 0)) continue;
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
         // ★F3 接线（蓝队四轮）②：真永夜刃伸长斩 973（数据面 melee）——双支同序；
@@ -655,17 +707,34 @@ export class NightsEdgeFly extends Entity {
     this.x += this.vx; this.y += this.vy;
     this.hist.push({ x: this.cx, y: this.cy, rot: this.rot });
     if (this.hist.length > 4) this.hist.shift();
-    // 尘 14（1/5）+ 27（:39467-39478 近似）
-    if (Math.random() < 0.2) {
-      game.spawnParticles(this.cx + (Math.random() - 0.5) * 60, this.cy + (Math.random() - 0.5) * 60,
-        '#5028B4', 1, 1.2, { life: 16 });
+    // 尘 1:1（同弹 972 = 同 AI_190 尘支 Projectile.cs:42783-42797——飞斩与锚弧共用;
+    // 曾用散布紫方块近似 = 飞斩无粒子,2026-09-19 用户实报案）
+    if (Math.random() < 0.5) {
+      const f = this.rot + (Math.random() * 2 - 1) * Math.PI * (Math.PI / 2) * 0.7;
+      const sc0 = this.ai2 ? this.scaleCur / this.ai2 : this.scaleCur;
+      const dx0 = this.cx + Math.cos(f) * 84 * sc0;
+      const dy0 = this.cy + Math.sin(f) * 84 * sc0;
+      if (Math.random() < 0.2) {
+        const d = game.spawnDust?.(dx0, dy0, 0, 0, 14, 0, 0, 150, null, 1.4, false, true);
+        if (d) { d.noLight = true; d.noLightEmittance = true; }
+      }
+      if (Math.random() < 0.5) {
+        game.spawnDust?.(dx0, dy0, 0, 0, 27,
+          this.vx * 0.2 + Math.sign(this.dx) * 3, this.vy * 0.2, 100, null, 1.4, true, true);
+      }
     }
-    // 命中（穿透 2；同敌单跳）
+    // 命中（穿透 2；同敌单跳）——Colliding aiStyle 190 锥判定逐式（同 972 弹;
+    // 飞斩 num15 拖尾锥同式,ai1=30）——曾用 16×16 盒 = 刃影擦过不判定（用户实报案）
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
-      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      const reachF = 94 * this.scaleCur;
+      const num14F = this.rot + Math.PI * 2 / 25 * this.ai0;
+      const num15F = remapArc(this.t, this.ai1 * 0.3, this.ai1 * 0.5, 1, 0);
+      if (!coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reachF, num14F, Math.PI / 4)
+        && !(num15F > 0 && coneHitsRect(e.x, e.y, e.w, e.h, this.cx, this.cy, reachF,
+          num14F - Math.PI / 4 * this.ai0 * num15F, Math.PI / 4))) continue;
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       // ★F3 接线（蓝队四轮）③：永夜刃飞斩变体 972（数据面 melee）——双支同序

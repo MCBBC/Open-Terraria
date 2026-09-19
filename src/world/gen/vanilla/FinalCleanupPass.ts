@@ -37,7 +37,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
@@ -83,14 +83,16 @@ const SAND_FALL_BASE = new Map<number, number>([
   [sid(224), sid(147)],
   [sid(123), sid(1)],
 ]);
-/** TileID.Sets.Boulders(1456 TileID.cs:195) */
-const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+/** TileID.Sets.Boulders(1456 TileID.cs:195)——★BJ168-债2（2026-09-19）本地
+ *  idsByVanillaSheet 副本拆除,收编 data/tiles.ts 单源 BOULDERS_IDS（内部 id 域,
+ *  与旧习语逐值全等已探针定谳,tests/tile-domain-sentinel §6d 钉死） */
 /** TileID.Sets.Clouds(1456 TileID.cs:197) */
 const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
 /** TileID.Sets.Paintings(1456 TileID.cs:187) */
 const PAINTINGS = idsByVanillaSheet(245, 246, 240, 241, 242);
-/** Main.wallDungeon(Main.cs:10507-10515) */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.wallDungeon(Main.cs:10734-10745)——★BJ187 收编 data/tiles.ts:
+ *  WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 
 const ROLLING_CACTUS = sid(484);
 const TRACK = sid(314);
@@ -163,12 +165,10 @@ function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean
  *  谓词第二支（TTTTTTT 批：const/s22222 #105 T53>28/T53>397/T0>28 残差定罪——
  *  原版入口门与 while 均为 `(!active || tileCut[type])`,JS 曾只查 !active →
  *  生长撞上陶罐(28∈tileCut)/草花等可切格即提前停柱,并把末写格经重扫转成
- *  硬化沙(397),vanilla 则直接覆写可切格续柱）。同源副本惯例不 import。 */
-const TILE_CUT_FC = new Set([
-  3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201,
-  205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637,
-  638, 654, 655, 711,
-]);
+ *  硬化沙(397),vanilla 则直接覆写可切格续柱）。
+ *  ★BJ168-债2（2026-09-19）：本地副本 TILE_CUT_FC 拆除,收编 data/tiles.ts 单源
+ *  TILE_CUT_SHEETS（与旧副本逐值对拍 41≡41,tests/tile-domain-sentinel §6c 金标） */
+
 /** 生成期 tileCut 读数（活性才有效;非活性格走 !active 支短路,残型不参与）。
  *  ★双态门：1456 口径无 tileCut 支（恒 false）——冻结 g12345 线零扰动。 */
 function tileCutAt(st: TileStore, x: number, y: number): boolean {
@@ -177,7 +177,7 @@ function tileCutAt(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   const sh = SWEEP_SHEET[st.type[i]];
-  return sh >= 0 && TILE_CUT_FC.has(sh);
+  return sh >= 0 && TILE_CUT_SHEETS.has(sh);
 }
 
 // ============================================================
@@ -240,16 +240,11 @@ const MOSS_COLOR: Record<number, number> = {
 };
 /** TileID.Sets.IsVine（:237） */
 const IS_VINE = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
-/** TileID.Sets.Platforms */
-const PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** TileID.Sets.Platforms——★BJ168-债2（2026-09-19）本地副本拆除,收编 data/tiles.ts
+ *  单源 PLATFORMS_SHEETS（下方消费面 29 处同名直改;逐值对拍 7≡7） */
 /** Main.tileTable（Main.cs:6828-6903 全量 76 id） */
-const TILE_TABLE = new Set([
-  280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
-  608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
-  559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
-  298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87,
-  88, 405, 427,
-]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TILE_TABLE = TILE_TABLE_SHEETS;
 /** Main.tileNoAttach（Main.cs 全量 59 id）——AnchorValid(SolidTile) 用 */
 const NO_ATTACH = new Set([
   568, 569, 570, 580, 620, 572, 564, 565, 593, 594, 590, 595, 615, 110, 3, 4, 10, 50, 707,
@@ -302,8 +297,8 @@ export function framePlatformSweep(st: TileStore, ctx: SweepCtx, x: number, y: n
   };
   const L = at(-1, 0), R = at(1, 0), BL = at(-1, 1), BR = at(1, 1), TL = at(-1, -1), TR = at(1, -1);
   let num9 = -1, num8 = -1;                                     // 左/右连接 id
-  if (L.act) num9 = TILE_STONE.has(L.sh2) ? 1 : (!PLATFORMS.has(L.sh2) ? L.sh2 : sh);
-  if (R.act) num8 = TILE_STONE.has(R.sh2) ? 1 : (!PLATFORMS.has(R.sh2) ? R.sh2 : sh);
+  if (L.act) num9 = TILE_STONE.has(L.sh2) ? 1 : (!PLATFORMS_SHEETS.has(L.sh2) ? L.sh2 : sh);
+  if (R.act) num8 = TILE_STONE.has(R.sh2) ? 1 : (!PLATFORMS_SHEETS.has(R.sh2) ? R.sh2 : sh);
   if (num8 >= 0 && !genSolidSheet(num8)) num8 = -1;             // !Main.tileSolid
   if (num9 >= 0 && !genSolidSheet(num9)) num9 = -1;
   if (num9 === sh && L.half !== !!st.half[i]) num9 = -1;
@@ -318,20 +313,20 @@ export function framePlatformSweep(st: TileStore, ctx: SweepCtx, x: number, y: n
   const selfSlope = st.slope[i]!;
   let fx: number;
   if (selfSlope === 1) {
-    if (PLATFORMS.has(R.sh2) && R.slope === 0 && !R.half) fx = 468;
+    if (PLATFORMS_SHEETS.has(R.sh2) && R.slope === 0 && !R.half) fx = 468;
     else if (forbids) fx = 468;
-    else if (!BR.act && (!PLATFORMS.has(BR.sh2) || BR.slope === 2)) {
-      fx = (L.act || (PLATFORMS.has(TL.sh2) && TL.slope === 1)) ? 360 : 432;
+    else if (!BR.act && (!PLATFORMS_SHEETS.has(BR.sh2) || BR.slope === 2)) {
+      fx = (L.act || (PLATFORMS_SHEETS.has(TL.sh2) && TL.slope === 1)) ? 360 : 432;
     } else {
-      fx = (L.act || (PLATFORMS.has(TL.sh2) && TL.slope === 1)) ? 180 : 396;
+      fx = (L.act || (PLATFORMS_SHEETS.has(TL.sh2) && TL.slope === 1)) ? 180 : 396;
     }
   } else if (selfSlope === 2) {
-    if (PLATFORMS.has(L.sh2) && L.slope === 0 && !L.half) fx = 450;
+    if (PLATFORMS_SHEETS.has(L.sh2) && L.slope === 0 && !L.half) fx = 450;
     else if (forbids) fx = 450;
-    else if (!BL.act && (!PLATFORMS.has(BL.sh2) || BL.slope === 1)) {
-      fx = (R.act || (PLATFORMS.has(TR.sh2) && TR.slope === 2)) ? 342 : 414;
+    else if (!BL.act && (!PLATFORMS_SHEETS.has(BL.sh2) || BL.slope === 1)) {
+      fx = (R.act || (PLATFORMS_SHEETS.has(TR.sh2) && TR.slope === 2)) ? 342 : 414;
     } else {
-      fx = (R.act || (PLATFORMS.has(TR.sh2) && TR.slope === 2)) ? 144 : 378;
+      fx = (R.act || (PLATFORMS_SHEETS.has(TR.sh2) && TR.slope === 2)) ? 144 : 378;
     }
   } else if (num9 === sh && num8 === sh) {
     fx = L.slope === 2 && R.slope === 1 ? 252 : L.slope === 2 ? 216 : R.slope === 1 ? 234 : 0;
@@ -457,11 +452,11 @@ function anchorValidTable(st: TileStore, x: number, y: number): boolean {
   const ti = st.type[i];
   const sh = SWEEP_SHEET[ti];
   const d = TILE_DEFS[ti];
-  if (PLATFORMS.has(sh)) {
+  if (PLATFORMS_SHEETS.has(sh)) {
     const n = Math.floor(st.frameX[i]! / 18);
     if ((!st.half[i] && n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26)) return true;
   } else if (genSolidType(ti) && d && d.platform) return true;   // tileSolid ∩ tileSolidTop
-  if (!PLATFORMS.has(sh) && TILE_TABLE.has(sh) && !st.half[i]
+  if (!PLATFORMS_SHEETS.has(sh) && TILE_TABLE.has(sh) && !st.half[i]
     && slopeOf(st, x, y) !== 1 && slopeOf(st, x, y) !== 2) return true;   // blockType()==0
   return false;
 }
@@ -478,7 +473,7 @@ function solidAllowBottom(st: TileStore, x: number, y: number): boolean {
   const sl = st.slope[i];
   const sh = SWEEP_SHEET[st.type[i]];
   const topSlope = sl === 1 || sl === 2;
-  if (topSlope && !(PLATFORMS.has(sh) && platformProperTop(st.frameX[i]!))) return false;
+  if (topSlope && !(PLATFORMS_SHEETS.has(sh) && platformProperTop(st.frameX[i]!))) return false;
   return !st.half[i];
 }
 /** SolidTileAllowTopSlope（cs:70325） */
@@ -489,7 +484,7 @@ function solidAllowTop(st: TileStore, x: number, y: number): boolean {
   const d = TILE_DEFS[st.type[i]];
   if (!d || !(genSolidType(st.type[i]) || SWEEP_SHEET[st.type[i]] === 380)) return false;
   const sh = SWEEP_SHEET[st.type[i]];
-  const plat = PLATFORMS.has(sh);
+  const plat = PLATFORMS_SHEETS.has(sh);
   const bottomSlope = st.slope[i] === 3 || st.slope[i] === 4;
   return (!plat && !bottomSlope) || (plat && st.half[i] !== 0);
 }
@@ -504,7 +499,7 @@ function solidAllowSide(st: TileStore, x: number, y: number, side: 'L' | 'R'): b
   if (!st.flags[i] || (st.wire[i] & 32)) return false;
   const d = TILE_DEFS[st.type[i]];
   if (!d || !genSolidType(st.type[i]) || st.half[i]) return false;
-  if (PLATFORMS.has(SWEEP_SHEET[st.type[i]])) return false;
+  if (PLATFORMS_SHEETS.has(SWEEP_SHEET[st.type[i]])) return false;
   const sl = st.slope[i];
   return side === 'L' ? sl !== 1 && sl !== 3 : sl !== 2 && sl !== 4;
 }
@@ -517,13 +512,13 @@ function solid2(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   if (!st.flags[i] || (st.wire[i] & 32)) return false;
   const d = TILE_DEFS[st.type[i]];
-  const tileSolidV = genSolidType(st.type[i]) || PLATFORMS.has(SWEEP_SHEET[st.type[i]]);
+  const tileSolidV = genSolidType(st.type[i]) || PLATFORMS_SHEETS.has(SWEEP_SHEET[st.type[i]]);
   return !!d && tileSolidV && st.slope[i] === 0 && !st.half[i];
 }
-/** InvalidTileForPilesOrSpeleothems（cs:39005）＝Boulders 族 */
-const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** InvalidTileForPilesOrSpeleothems（cs:39005）＝Boulders 族——★BJ168-债2（2026-09-19）
+ *  本地副本拆除,收编 data/tiles.ts 单源 BOULDERS_SHEETS（sheet 域,逐值对拍 10≡10） */
 const invalidForPiles = (st: TileStore, x: number, y: number): boolean =>
-  activeAt2(st, x, y) && BOULDER_SHEETS.has(sheetAt2(st, x, y));
+  activeAt2(st, x, y) && BOULDERS_SHEETS.has(sheetAt2(st, x, y));
 /** AnchorValid(SolidTile)（cs:51866）：nactive && solid && !solidTop && !noAttach && 块型 0 */
 function anchorSolidTile(st: TileStore, x: number, y: number): boolean {
   if (!nactiveAt(st, x, y)) return false;
@@ -1118,7 +1113,7 @@ function topEdgeAttach(st: TileStore, x: number, y: number): boolean {
   const d = TILE_DEFS[st.type[i]];
   if (!d || !(genSolidType(st.type[i]) || d.platform)) return false;
   const sl = st.slope[i];
-  if ((sl === 1 || sl === 2) && !(PLATFORMS.has(SWEEP_SHEET[st.type[i]]) && platformProperTop(st.frameX[i]!))) return false;
+  if ((sl === 1 || sl === 2) && !(PLATFORMS_SHEETS.has(SWEEP_SHEET[st.type[i]]) && platformProperTop(st.frameX[i]!))) return false;
   if (st.half[i]) return false;
   if ((st.wire[i] & 32) !== 0) return false;                 // inActive
   return true;
@@ -1301,7 +1296,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
   }
   // ★AAAAAA：平台连接帧（TileFrameImportant 的 Platforms 早支，cs:86110-86230）——
   //   生成期 GetTileMergeCulling 恒全 false（invisibleBlock 位），按零 culling 镜像。
-  if (PLATFORMS.has(sheet)) {
+  if (PLATFORMS_SHEETS.has(sheet)) {
     framePlatformSweep(st, ctx, x, y);
     return true;
   }
@@ -1432,7 +1427,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   DeadMans 巨石 138 三块 + 矿爆起爆器 411 轨道巷杀级联）；其余成员维持未派发
     //   备案（零掷不可见族，见文件头清单）。
     // VVVVV 批补：+484 滚地仙人掌（m20260811 #77 金标实证 (3579,1241) 残块
-    //   Check2x2 完整性杀；BOULDER_SHEETS 成员走巨石支=尘掷 0）。
+    //   Check2x2 完整性杀；BOULDERS_SHEETS 成员走巨石支=尘掷 0）。
     // YYYYY 批补：+752 奇莱特蛋（TileFrameImportant case 752 cs:86433 break →
     //   goto case 132 → Check2x2；12345 #97 (3127,926) 蛋下半被岩浆死杀 → 级联
     //   Check2x2 孤儿上半杀——掷流 62,050=62,050 全等，纯零掷杀差实证。同组
@@ -1667,7 +1662,7 @@ function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
   let num5 = 0;
   while (num4 >= 36) { num4 -= 36; num5++; }                                // num3=36（type 172 除外）
   const num6 = y - Math.trunc(num4 / 18);
-  const isBoulder = BOULDER_SHEETS.has(sheet);                              // 138=true / 411=false
+  const isBoulder = BOULDERS_SHEETS.has(sheet);                              // 138=true / 411=false
   const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
   let flag = false;
   for (let k = num2; k < num2 + 2; k++) {
@@ -1805,7 +1800,7 @@ function check4x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
     if (!st.inBounds(k, top + 2)) { flag = true; continue; }
     if (!solidAllowBottom(st, k, top + 2)) {
       const gi = st.idx(k, top + 2);
-      if (!(st.flags[gi] && PLATFORMS.has(SWEEP_SHEET[st.type[gi]!] ?? -1))) flag = true;
+      if (!(st.flags[gi] && PLATFORMS_SHEETS.has(SWEEP_SHEET[st.type[gi]!] ?? -1))) flag = true;
     }
   }
   if (!flag) return;                                                        // cs:47922-25
@@ -2310,10 +2305,10 @@ function check2xXSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
       let flag2: boolean;
       const aboveSh = st.inBounds(num + l, num6 - 1) ? sheetAt2(st, num + l, num6 - 1) : -1;
       if (sheet !== 531 && aboveSh === 380) flag2 = true;
-      else if (sheet !== 531 && aboveSh >= 0 && PLATFORMS.has(aboveSh)) {
+      else if (sheet !== 531 && aboveSh >= 0 && PLATFORMS_SHEETS.has(aboveSh)) {
         // IsBelowANonHammeredPlatform(num+l, num6)（cs:38315）：上格平台平砖非半砖
         const up = st.inBounds(num + l, num6 - 1) ? st.idx(num + l, num6 - 1) : -1;
-        if (up >= 0 && st.flags[up] && PLATFORMS.has(SWEEP_SHEET[st.type[up]] ?? -1)
+        if (up >= 0 && st.flags[up] && PLATFORMS_SHEETS.has(SWEEP_SHEET[st.type[up]] ?? -1)
           && st.half[up] === 0 && st.slope[up] === 0) num8 = 8;
         flag2 = true;
       } else flag2 = solidAllowTop(st, num + l, num6 - 1);
@@ -2438,7 +2433,9 @@ function frame72Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void 
 /** case 136（cs:85738-85803）：下实心(平/底坡)→0 / 左实心(左坡/平/梁/树干簇)→18 /
  *  右→36 / 墙→54 / 杀 */
 const IS_BEAM = new Set([124, 561, 574, 575, 576, 577, 578]);          // TileID.Sets.IsBeam（:239）
-const IS_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);  // :161
+// TileID.Sets.IsATreeTrunk（:161）——★BJ168-债2（2026-09-19）本地副本拆除,收编
+// data/tiles.ts 单源 IS_A_TREE_TRUNK_SHEETS（sheet 域,逐值对拍 12≡12;下方 frame136/
+// checkTorch 两 sweep 的 typeOf 均返回 sheetAt2=sheet 域相配）
 function frame136Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   const i = st.idx(x, y);
   const typeOf = (xx: number, yy: number): number => {
@@ -2457,11 +2454,11 @@ function frame136Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void
   const leftOk = (leftT >= 0 && solidAt(leftT) && (slopeOf(st, x - 1, y) === 1 || slopeOf(st, x - 1, y) === 0)
     && !st.half[st.idx(x - 1, y)])
     || (leftT >= 0 && IS_BEAM.has(leftT))
-    || (IS_TREE_TRUNK.has(leftT) && IS_TREE_TRUNK.has(typeOf(x - 1, y - 1)) && IS_TREE_TRUNK.has(typeOf(x - 1, y + 1)));
+    || (IS_A_TREE_TRUNK_SHEETS.has(leftT) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x - 1, y - 1)) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x - 1, y + 1)));
   const rightOk = (rightT >= 0 && solidAt(rightT) && (slopeOf(st, x + 1, y) === 2 || slopeOf(st, x + 1, y) === 0)
     && !st.half[st.idx(x + 1, y)])
     || (rightT >= 0 && IS_BEAM.has(rightT))
-    || (IS_TREE_TRUNK.has(rightT) && IS_TREE_TRUNK.has(typeOf(x + 1, y - 1)) && IS_TREE_TRUNK.has(typeOf(x + 1, y + 1)));
+    || (IS_A_TREE_TRUNK_SHEETS.has(rightT) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x + 1, y - 1)) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x + 1, y + 1)));
   if (centerOk) st.frameX[i] = 0;
   else if (leftOk) st.frameX[i] = 18;
   else if (rightOk) st.frameX[i] = 36;
@@ -2483,7 +2480,7 @@ function checkTorchSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): vo
   let num2 = -1;
   if (nactiveAt(st, x, y + 1)) {
     const bs = sheetAt2(st, x, y + 1);
-    if ((PLATFORMS.has(bs) && solidAllowBottom(st, x, y + 1))
+    if ((PLATFORMS_SHEETS.has(bs) && solidAllowBottom(st, x, y + 1))
       || (!st.half[st.idx(x, y + 1)] && slopeOf(st, x, y + 1) !== 1 && slopeOf(st, x, y + 1) !== 2)) num2 = bs;
   }
   // num3 左 / num4 右取型（cs:86877/86881：slope==0 或 %2 不等于侧号）
@@ -2496,17 +2493,17 @@ function checkTorchSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): vo
     const sl = slopeOf(st, x + 1, y);
     if (sl === 0 || sl % 2 !== 0) num4 = sheetAt2(st, x + 1, y);
   }
-  if (num2 >= 0 && solidOf(num2) && (!NO_ATTACH.has(num2) || PLATFORMS.has(num2))) {
+  if (num2 >= 0 && solidOf(num2) && (!NO_ATTACH.has(num2) || PLATFORMS_SHEETS.has(num2))) {
     st.frameX[i] = num;
     return;
   }
   if ((num3 >= 0 && solidOf(num3) && !NO_ATTACH.has(num3)) || (num3 >= 0 && IS_BEAM.has(num3))
-    || (IS_TREE_TRUNK.has(num3) && IS_TREE_TRUNK.has(typeOf(x - 1, y - 1)) && IS_TREE_TRUNK.has(typeOf(x - 1, y + 1)))) {
+    || (IS_A_TREE_TRUNK_SHEETS.has(num3) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x - 1, y - 1)) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x - 1, y + 1)))) {
     st.frameX[i] = 22 + num;
     return;
   }
   if ((num4 >= 0 && solidOf(num4) && !NO_ATTACH.has(num4)) || (num4 >= 0 && IS_BEAM.has(num4))
-    || (IS_TREE_TRUNK.has(num4) && IS_TREE_TRUNK.has(typeOf(x + 1, y - 1)) && IS_TREE_TRUNK.has(typeOf(x + 1, y + 1)))) {
+    || (IS_A_TREE_TRUNK_SHEETS.has(num4) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x + 1, y - 1)) && IS_A_TREE_TRUNK_SHEETS.has(typeOf(x + 1, y + 1)))) {
     st.frameX[i] = 44 + num;
     return;
   }
@@ -2526,7 +2523,7 @@ function frame178Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, reset
     if (!st.inBounds(ax, ay)) return false;
     const k = st.idx(ax, ay);
     const sh = SWEEP_SHEET[st.type[k]!] ?? -1;
-    if (sh < 0 || BOULDER_SHEETS.has(sh) || sh === 10) return false;
+    if (sh < 0 || BOULDERS_SHEETS.has(sh) || sh === 10) return false;
     if (dir === 0) return solidAllowTop(st, ax, ay);
     if (dir === 1) return solidAllowBottom(st, ax, ay);
     if (dir === 2) return solidAllowSide(st, ax, ay, 'L');
@@ -2569,7 +2566,7 @@ function frame129Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void
     if (!st.inBounds(xx, yy)) return -1;
     const ki = st.idx(xx, yy);
     const sh = SWEEP_SHEET[st.type[ki]];
-    if (sh < 0 || BOULDER_SHEETS.has(sh) || sh === 10) return -1;
+    if (sh < 0 || BOULDERS_SHEETS.has(sh) || sh === 10) return -1;
     if (dir === 0 && !solidAllowTop(st, xx, yy)) return -1;
     if (dir === 1 && !solidAllowBottom(st, xx, yy)) return -1;
     if (dir === 2 && !solidAllowSide(st, xx, yy, 'L')) return -1;
@@ -2650,12 +2647,12 @@ function checkOnTableSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, s
   const sl = st.slope[i];
   const bsh = SWEEP_SHEET[st.type[i]];
   if (sl === 1 || sl === 2) {  // topSlope
-    if (PLATFORMS.has(bsh)) {
+    if (PLATFORMS_SHEETS.has(bsh)) {
       // blockType（Tile.cs:232）：half→1，slope1→2（左坡），slope2→3（右坡）
       // 存活门（cs:43555-43562）：(bt!=3 || 左邻平台平帧) && (bt!=2 || 右邻平台平帧)
       const flatPlatform = (xx: number): boolean => st.inBounds(xx, y + 1)
         && activeAt2(st, xx, y + 1) && slopeOf(st, xx, y + 1) === 0
-        && !halfOf(st, xx, y + 1) && PLATFORMS.has(sheetAt2(st, xx, y + 1));
+        && !halfOf(st, xx, y + 1) && PLATFORMS_SHEETS.has(sheetAt2(st, xx, y + 1));
       const bt = st.half[i] ? 1 : sl + 1;
       const cond1 = bt !== 3 || flatPlatform(x - 1);
       const cond2 = bt !== 2 || flatPlatform(x + 1);
@@ -2936,7 +2933,7 @@ function anchorValidSweep(st: TileStore, x: number, y: number, mask: number): bo
   const solidTop = TILE_SOLID_TOP.has(sh);
   const sl = st.slope[i]!;
   const bt = st.half[i] ? 1 : sl > 0 ? sl + 1 : 0;
-  const plat = PLATFORMS.has(sh);
+  const plat = PLATFORMS_SHEETS.has(sh);
   let flag = false;
   if ((mask & AN_SOLID_TILE) !== 0 && solid && !solidTop && !NO_ATTACH.has(sh) && bt === 0) flag = true;
   if ((mask & AN_SOLID_BOTTOM) !== 0) {
@@ -3103,11 +3100,10 @@ const rawSheetAt = (st: TileStore, x: number, y: number): number => {
   if (!st.inBounds(x, y)) return -1;
   return SWEEP_SHEET[st.type[st.idx(x, y)]];
 };
-/** Main.tileSolidTop（Main.cs:6764+ 全 86 项，U/GemPasses 同表副本——同源副本禁 import） */
-const TILE_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileSolidTop 全表——★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源
+ *  （84 项逐值全等;旧 79 项漏 Main.cs:10125-10131 循环臂 435-439 队伍平台,
+ *  生成期不可达=行为零差;「同源副本禁 import」旧注随单源化退役） */
+const TILE_SOLID_TOP = SOLID_TOP_SHEETS;
 /** WorldGen.SolidTile(Tile)（cs:70155）：active && tileSolid && !tileSolidTop && !half && slope==0 */
 function solidTileV(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
@@ -3179,14 +3175,14 @@ function checkDoorOpenSweep(st: TileStore, ctx: SweepCtx, x: number, y: number):
 function check1x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   {
     const bl = st.type[st.idx(x, y + 1)] ?? -1;
-    const bol = BOULDER_SHEETS.has(SWEEP_SHEET[bl] ?? -1) ? 1 : 0;
+    const bol = BOULDERS_SHEETS.has(SWEEP_SHEET[bl] ?? -1) ? 1 : 0;
     const sab = solidAllowBottom(st, x, y + 1) ? 1 : 0;
     __swFnt39('C1V', x, y, bol + '' + sab);
   }
   if (!st.inBounds(x, y + 1)) return;
   if (!solidAllowBottom(st, x, y + 1)) { killTileGen(st, ctx, x, y); return; }
   const below = rawSheetAt(st, x, y + 1);
-  if (below >= 0 && BOULDER_SHEETS.has(below)) killTileGen(st, ctx, x, y);
+  if (below >= 0 && BOULDERS_SHEETS.has(below)) killTileGen(st, ctx, x, y);
 }
 
 /** Check1x2（cs:43377-43545，椅 15/苗 20/216/338/390/493/497/590/595/615）——
@@ -3210,7 +3206,7 @@ function check1x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
     && st.frameY[st.idx(x, num + 1)] === 40 * num3 + 18
     && rawSheetAt(st, x, num) === sheet && rawSheetAt(st, x, num + 1) === sheet) bad = false;   // cs:43406
   const belowSheet = rawSheetAt(st, x, num + 2);
-  if (!solidAllowBottom(st, x, num + 2) && !PLATFORMS.has(belowSheet)) bad = true;              // cs:43409
+  if (!solidAllowBottom(st, x, num + 2) && !PLATFORMS_SHEETS.has(belowSheet)) bad = true;              // cs:43409
   if (sheet === 20) {                                                        // cs:43411-43463 苗变体（生成期死支，1:1 保留）
     const num5 = Math.trunc((st.frameX[st.idx(x, num)] ?? 0) / 54);
     let num6 = -1;
@@ -3301,7 +3297,7 @@ function check3x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
       const bi = st.idx(k, yEnd);
       const support = solidAllowBottom(st, k, yEnd)
         || (nactiveAt(st, k, yEnd) && TILE_DEFS[st.type[bi]]?.platform && st.frameY[bi] === 0)
-        || (st.flags[bi] !== 0 && PLATFORMS.has(SWEEP_SHEET[st.type[bi]]));
+        || (st.flags[bi] !== 0 && PLATFORMS_SHEETS.has(SWEEP_SHEET[st.type[bi]]));
       if (!support) bad = true;
     } else {
       switch (sheet) {
@@ -3325,7 +3321,7 @@ function check3x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
           {
             const _okB = solidAllowBottom(st, k, yEnd);
             const _bs = activeAt2(st, k, yEnd) ? sheetAt2(st, k, yEnd) : -1;
-            const _bad = !_okB || (_bs >= 0 && BOULDER_SHEETS.has(_bs));
+            const _bad = !_okB || (_bs >= 0 && BOULDERS_SHEETS.has(_bs));
             const _dbg = (globalThis as unknown as { __swAltarDbg?: (msg: string) => void }).__swAltarDbg;
             _dbg?.(`BAD=${_bad} col=${k} yEnd=${yEnd} okBottom=${_okB ? 1 : 0} underSheet=${_bs}`);
             if (_bad) bad = true;
@@ -3613,7 +3609,7 @@ function checkLilyPadSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): 
   //   二者入 defs 后并入 platform 位族）；tileSolid 走 genSolid 覆写表
   if (st.inBounds(x, y + 1)) {
     const bt = st.type[dn];
-    if (!PLATFORMS.has(SWEEP_SHEET[bt])
+    if (!PLATFORMS_SHEETS.has(SWEEP_SHEET[bt])
       && (!genSolidType(bt) || !!TILE_DEFS[bt]?.platform)) {
       killTileGen(st, ctx, x, y);
     }
@@ -3979,7 +3975,7 @@ export function runFinalCleanupPass(
       // ⑥ 巨石重帧+补支撑(cs:22400-22458)
       try { const gp2 = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
         if (gp2.__swShimTargets?.has(i + ',' + j)) gp2.__swSeg?.('BCHECK ' + i + ',' + j + ' fl=' + st.flags[t] + ' t=' + type); } catch { /* noop */ }
-      if (st.flags[t] && BOULDERS.has(type)) {
+      if (st.flags[t] && BOULDERS_IDS.has(type)) {
         const x0 = i - Math.floor(st.frameX[t] / 18);
         const y0 = j - Math.floor(st.frameY[t] / 18);
         try { const gp = globalThis as unknown as { __swShimTargets?: Set<string>; __swSeg?: (n: string, d?: unknown) => void };
@@ -4354,7 +4350,8 @@ export function runFinalCleanupPass(
 // （仅涂色色相分布差，无格子几何差；备案=SSS-CELEB 遗留#1）。
 
 const CRACKED_BRICKS = idsByVanillaSheet(481, 482, 483);   // ★IIIII101e 勘误：TileID.cs:183 CrackedBricks={481,482,483}，旧值(48,487)=Spikes+PicnicTable 转写错（paint 域）
-const TILE_DUNGEON_FC = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
+/** ★BJ187 收编 data/tiles.ts:TILE_DUNGEON_IDS 单源（旧 idsByVanillaSheet 平移副本逐值全等） */
+const TILE_DUNGEON_FC = TILE_DUNGEON_IDS;
 const RAINBOW_BASE = 13;                       // GetRainbowPaintIDForPosition 基色
 const rainbowPaintIdAt = (x: number, y: number): number => (x % 44 + y % 44) % 11 + RAINBOW_BASE;
 const rainbowPaintIdWiggly = (x: number, y: number): number => {
@@ -4763,13 +4760,18 @@ function shimmeratorTenth(
       st.liquidType[i] = LIQUID_TYPE.SHIMMER;
       st.liquid[i] = 255;
       const sh = SWEEP_SHEET[st.type[i]];
-      if (sh === 5 || sh === 56 || (TILE_CUT_FC.has(sh) && sh !== 28)) killTileGen(st, ctx, i % st.w, (i / st.w) | 0);
+      if (sh === 5 || sh === 56 || (TILE_CUT_SHEETS.has(sh) && sh !== 28)) killTileGen(st, ctx, i % st.w, (i / st.w) | 0);
     }
   }
 }
 
-/** PC_SOLID_TOP_F10：Main.tileSolidTop 集（桌族等,同 MicroBiomesPass DG_SOLID_TOP） */
-const PC_SOLID_TOP_F10 = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281]);
+/** PC_SOLID_TOP_F10：Main.tileSolidTop 全表（Shimmerator 的 WorldGen.SolidTile 入口
+ *  谓词 !tileSolidTop 腿消费,★IIIII67 1458 WorldGen.cs:35667-35716）——★BJ187 收编
+ *  data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项）。旧 17 项截断副本对 SolidTile 谓词
+ *  只有平台九件套（tileSolid∩tileSolidTop={19,239,380,427,435-439}）可见:旧值漏
+ *  380/427/435-439 六件——生成期不可达=行为零差,但真值差已并轨归位;其余 62 项
+ *  家具（非 tileSolid）被 genSolidType 前腿恒拦截,无谓词面。 */
+const PC_SOLID_TOP_F10 = SOLID_TOP_SHEETS;
 
 function isSolidTileFC(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true;
@@ -4783,7 +4785,7 @@ function isSolidTileFC(st: TileStore, x: number, y: number): boolean {
 // 掷流序＝①初始 Next(13,25) ②逐列地牢砖色选(仅首个含砖列,列内**全行扫完**) ③全图
 // Ash Next(15) ④箱循环 Next(10)×N——位次敏感，勿移动。
 const CLOUD_SHEETS_FGG = new Set([189, 196, 460, 717, 718, 719]);   // TileID.Sets.Clouds
-const DUNGEON_BRICKS_FGG = new Set([41, 43, 44, 677, 678, 679]);    // Main.tileDungeon
+const DUNGEON_BRICKS_FGG = TILE_DUNGEON_SHEETS;    // Main.tileDungeon（★BJ187 收编 data/tiles.ts 单源,6 项逐值全等）
 const CRACKED_FGG = new Set([481, 482, 483]);                       // ★IIIII101e 勘误：CrackedBricks={481,482,483}（TileID.cs:183），旧值(48,487)系转写错（paint 域）
 const KILL_ABOVE_FGG = new Set([3, 73, 27, 596, 616, 82, 83, 186, 187, 185, 227]);
 

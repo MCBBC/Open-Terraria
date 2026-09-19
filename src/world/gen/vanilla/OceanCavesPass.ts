@@ -6,7 +6,7 @@ import { LIQUID_TYPE } from '../../TileStore';
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { inAnyPotentialDungeonBounds } from './DungeonStyles1457';
@@ -16,9 +16,12 @@ const HARDSAND = TILE_BY_KEY['hardened_sand']!; // 397
 /** 原版腔体幽灵标记 tile 264(cs:76819:腔体写 type=264+active=false,
  *  壳层门 cs:76822 用 type!=264 区分腔体/壳层)。内部 id 经 sheet 264 反查 */
 const CAVITY = TILE_BY_KEY['v_264_sapphiregemspark']!;
-const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-/** tileDungeon 族(Main.cs:7941-7946),sheet id 比较(内部 id ≠ sheet id) */
-const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
+/** Main.wallDungeon(Main.cs:10734-10745)——★BJ187 收编 data/tiles.ts:
+ *  WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
+/** tileDungeon 族(Main.cs:8131-8136),sheet id 比较(内部 id ≠ sheet id)——★BJ187
+ *  收编 data/tiles.ts:TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
+const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
 
 const activeAt = (st: TileStore, x: number, y: number) =>
   st.inBounds(x, y) && !!st.flags[st.idx(x, y)];

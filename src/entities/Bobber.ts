@@ -240,7 +240,7 @@ export class Bobber extends Entity {
    *  跟踪，对应 +5 未接（登记）；Tipsy +5 已接（:41542-41545）。 */
   private fishingPower(p: Player, game?: GameHooks): number {
     let base = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0)
-      + p.equipStats.fishingSkill;
+      + (p.equipStats.fishingSkill ?? 0);   // ★BJ175 桩面 ?? 防御（缺省 0）
     // R14-E11：canFloatInWater（4404 水上漂/buff265 脚蹼药水）且 wet（水/蜜）才 +5
     // （:41546-41549）——曾用 waterWalk 族无 wet 门（陆地也加,且物品族错位）
     if (p.equipStats.canFloat && (p.inWater || p.inHoney)) base += 5;

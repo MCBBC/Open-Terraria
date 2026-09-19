@@ -72,36 +72,45 @@ export class LightMap {
     }
   }
 
-  /** BlurPass()(L93-115):列(上→下 / 下→上)后行(左→右 / 右→左) */
+  /** BlurPass()(L93-115):列(上→下 / 下→上)后行(左→右 / 右→左)。
+   *  2026-09-19 热路径重排:四向线统一成「起始索引+步长+格数」的 stride 循环
+   *  (消每格 y*w+x 乘法与端点双比较;线覆盖格集合与旧参逐式换算恒等:
+   *   行 fwd (0,y)-(w-1-pad,y) = 起行首,步 1,共 w-pad 格;列/逆向同理)。 */
   private blurPass(): void {
-    const { w, h, mask } = this;
+    const { w, h } = this;
     const pad = Math.min(this.nonVisiblePadding, Math.max(0, Math.min(w, h) >> 1));
-    // 列扫描(行主序:跨行跳 rw)
+    // 列扫描(行主序:stride=w)
     for (let x = 0; x < w; x++) {
-      this.blurLine(x, 0, x, h - 1 - pad, 1);
-      this.blurLine(x, h - 1, x, pad, -1);
+      this.blurLine(x, w, h - pad);                    // (x,0)→(x,h-1-pad) 上→下
+      this.blurLine((h - 1) * w + x, -w, h - pad);     // (x,h-1)→(x,pad)   下→上
     }
     // 行扫描(行主序:连续内存)
     for (let y = 0; y < h; y++) {
-      this.blurLine(0, y, w - 1 - pad, y, 1);
-      this.blurLine(w - 1, y, pad, y, -1);
+      const row = y * w;
+      this.blurLine(row, 1, w - pad);                  // (0,y)→(w-1-pad,y) 左→右
+      this.blurLine(row + w - 1, -1, w - pad);         // (w-1,y)→(pad,y)   右→左
     }
-    void mask;
   }
 
   /**
-   * BlurLine(L117-254):从 (x0,y0) 到 (x1,y1) 单调走格。
-   * dx/dy ∈ {(±1,0),(0,±1)};行主序索引 idx = y*w+x。
+   * BlurLine(L117-254)stride 形态:自 i0 起以 stride 步进走 count 格
+   * (stride ∈ {±1,±w},与旧 (x0,y0)→(x1,y1,dir) 四向一一对应,见 blurPass)。
+   * 每格运算序与旧实现逐条同源(L117-254);衰减常数与水 flicker 乘积提升为
+   * 每 pass 局部 const——单 pass 内模块值恒定,同值乘法=位级等值。
    */
-  private blurLine(x0: number, y0: number, x1: number, y1: number, dir: number): void {
-    const { w, r, g, b, mask } = this;
-    const dx = y0 === y1 ? dir : 0;
-    const dy = x0 === x1 ? dir : 0;
-    let x = x0, y = y0;
+  private blurLine(i0: number, stride: number, count: number): void {
+    const { r, g, b, mask } = this;
+    const lut = this.flickLut;
+    const air = DECAY_AIR, solid = DECAY_SOLID, cracked = DECAY_CRACKED;
+    const h0 = DECAY_HONEY[0], h1 = DECAY_HONEY[1], h2 = DECAY_HONEY[2];
+    // 水 flicker 乘积(原每格 DECAY_WATER[k]*flick 两次乘 → 每 pass 一次乘,值等)
+    const wA0 = DECAY_WATER[0] * WATER_FLICK[0], wA1 = DECAY_WATER[0] * WATER_FLICK[1];
+    const wG0 = DECAY_WATER[1] * WATER_FLICK[0], wG1 = DECAY_WATER[1] * WATER_FLICK[1];
+    const wB0 = DECAY_WATER[2] * WATER_FLICK[0], wB1 = DECAY_WATER[2] * WATER_FLICK[1];
+    let i = i0;
     let zr = 0, zg = 0, zb = 0;
     let dr = true, dg = true, dbb = true; // 死标记(true=已死)
-    for (;;) {
-      const i = y * w + x;
+    for (let n = count; n !== 0; n--) {
       const mr = r[i], mg = g[i], mb = b[i];
       // ① 源格判定 + 复活
       if (mr > zr) { zr = mr; dr = false; }
@@ -120,36 +129,40 @@ export class LightMap {
         if (zb < DEAD_THRESHOLD) dbb = true;
         else if (mb <= zb) b[i] = zb;
       }
-      // ③ 按当前格 mask 衰减(全通道死则跳过;L177-252)
+      // ③ 按当前格 mask 衰减(全通道死则跳过;L177-252;None 提首=最常见档)
       if (!dr || !dg || !dbb) {
         const m = mask[i];
-        if (m === Mask.Solid) {
-          if (!dr) zr *= DECAY_SOLID;
-          if (!dg) zg *= DECAY_SOLID;
-          if (!dbb) zb *= DECAY_SOLID;
-        } else if (m === Mask.CrackedBricks) {
-          if (!dr) zr *= DECAY_CRACKED;
-          if (!dg) zg *= DECAY_CRACKED;
-          if (!dbb) zb *= DECAY_CRACKED;
+        if (m === Mask.None) {
+          if (!dr) zr *= air;
+          if (!dg) zg *= air;
+          if (!dbb) zb *= air;
+        } else if (m === Mask.Solid) {
+          if (!dr) zr *= solid;
+          if (!dg) zg *= solid;
+          if (!dbb) zb *= solid;
         } else if (m === Mask.Water) {
-          // 逐格随机 [98,100)/100(L221-237)——★LUT 读回(2026-09-08:预计算一次,
-          //  位级等值,见 buildWaterFlick;旧每访问重播种 RNG=水格场景 blur 主成本)
-          const flick = WATER_FLICK[this.flickLut[i]];
-          if (!dr) zr *= DECAY_WATER[0] * flick;
-          if (!dg) zg *= DECAY_WATER[1] * flick;
-          if (!dbb) zb *= DECAY_WATER[2] * flick;
+          // 逐格随机 [98,100)/100(L221-237)——★LUT 读回(2026-09-08 预计算一次,
+          //  位级等值,见 buildWaterFlick);2026-09-19 乘积前移(见上 wA0..wB1)
+          if (lut[i] !== 0) {
+            if (!dr) zr *= wA1;
+            if (!dg) zg *= wG1;
+            if (!dbb) zb *= wB1;
+          } else {
+            if (!dr) zr *= wA0;
+            if (!dg) zg *= wG0;
+            if (!dbb) zb *= wB0;
+          }
         } else if (m === Mask.Honey) {
-          if (!dr) zr *= DECAY_HONEY[0];
-          if (!dg) zg *= DECAY_HONEY[1];
-          if (!dbb) zb *= DECAY_HONEY[2];
+          if (!dr) zr *= h0;
+          if (!dg) zg *= h1;
+          if (!dbb) zb *= h2;
         } else {
-          if (!dr) zr *= DECAY_AIR;
-          if (!dg) zg *= DECAY_AIR;
-          if (!dbb) zb *= DECAY_AIR;
+          if (!dr) zr *= cracked;
+          if (!dg) zg *= cracked;
+          if (!dbb) zb *= cracked;
         }
       }
-      if (x === x1 && y === y1) break;
-      x += dx; y += dy;
+      i += stride;
     }
   }
 }

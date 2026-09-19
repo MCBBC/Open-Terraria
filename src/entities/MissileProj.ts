@@ -36,7 +36,7 @@ import { projSprite, projFrameImg, projFrameCount } from './Arrow';
 import { applyProjStatus } from './projStatus';
 import { noteVanillaProjImmune, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
-import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible } from './SpectreSoulProj';
 // RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——79 命中/Kill 爆本地直生 +
 // broadcast 上行同用此函数）。★终零波裁决注：module8 已有 netApply 消费面
 // （Game.netApplyParticleOrchestra case RainbowRodHit → 同一 rainbowRodHitFx），
@@ -766,8 +766,22 @@ export class MagicMissileProj extends Entity {
       //  「numHits 含本次」+1 系 off-by-one——首跳 0.15）。pierceInit−pierce = 已递减
       //  次数（本跳递减在下方 :784,读点未减）=此前命中数;同敌 hitCd 12t 再命中每跳
       //  递减亦计入（原版 numHits 同相;城镇 NPC 递减支亦计入=原版 Damage_PVE_Inner 同链）
-      game.applyLifeSteal?.('ghost', Math.round(dmg), this.pierceInit - this.pierce,
-        this.x, this.y, true);
+      // ★BJ167-②③④（2026-09-19）spectre 域三小件对齐（MagicProj BJ157-① 同款习语）：
+      //  ②victim 门 spectreVictimEligible——原版 Projectile.cs:13875
+      //    `if (targetNPC.canGhostHeal | flag9)` 对 ghostHeal(:13877-79) 与
+      //    ghostHurt(:13881-83) 【同块】设门;false 族 384/387/388/523
+      //    （NPC.cs:13921/:13961/:13978/:15839 写点,字段缺省 true :6270）——
+      //    旧码命中该族仍治疗
+      //  ③dmg = num41 等位（:13712 `int num41 = targetNPC.StrikeNPC(...)` 返回值,
+      //    :13879 实参）=防后实扣（Enemy.lastStrikeDealt 单源;旧传
+      //    Math.round(dmg)=防前伤,治疗量按防御/旗乘差值虚高）
+      //  ④出生点 = 受害者 Center（:13879 `new Vector2(targetNPC.Center.X,.Y)`;旧传
+      //    弹体左上 this.x,y——治疗弹 298 起飞原点差几像素）
+      const v156 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number };
+      if (spectreVictimEligible(v156.vanillaId)) {
+        game.applyLifeSteal?.('ghost', v156.lastStrikeDealt ?? 0, this.pierceInit - this.pierce,
+          e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, true);
+      }
       // ★GB1（GC 契约，2026-08-31）：幽灵伤害头 ghostHurt（Projectile.cs:13881 →
       //  :12021 方法体）——触发位在 StrikeNPC(:13712)/ghostHeal(:13879) 之后、同一
       //  flag10 on-hit 段内。导弹族三型（16 魔法飞弹 /34 Flamelash /79 彩虹魔杖弹）
@@ -776,13 +790,12 @@ export class MagicMissileProj extends Entity {
       //  弹 356。dealt = Enemy.lastStrikeDealt（StrikeNPC num41 等价位）
       if (this.projId > 0 && projectileData(this.projId)?.magic === true
         && playerHasGhostHurt(game.player)) {
-        const v156 = e as unknown as { lastStrikeDealt?: number };
         ghostHurtOnHit(game,
           { magic: true, projDamage: this.damage,
             projX: this.x, projY: this.y, projW: this.w, projH: this.h,
             ownerCx: game.player.cx, ownerCy: game.player.cy },
           { x: e.x, y: e.y, w: e.w, h: e.h, cx: e.cx ?? e.x + e.w / 2, cy: e.cy ?? e.y + e.h / 2,
-            vanillaId: (e as unknown as { vanillaId?: number | null }).vanillaId,
+            vanillaId: v156.vanillaId,
             dealt: v156.lastStrikeDealt ?? 0 });   // 本拍结算面（蓝队 F2② 修订）
       }
       if (--this.pierce <= 0) { this.killNow(game); return; }

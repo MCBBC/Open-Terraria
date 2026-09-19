@@ -46,7 +46,7 @@ import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BOULDERS_IDS, IS_A_TREE_TRUNK_SHEETS, TILE_DUNGEON_IDS, TILE_TABLE_IDS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
 import { vanGenSolidType, flipGenSolid, snapshotGenSolid, restoreGenSolid } from './GenSolid';
@@ -147,14 +147,15 @@ const SHAFT_SKIP = idsByVanillaSheet(191, 192);
 const ICE_SRC = idsByVanillaSheet(147, 161, 224, 0, 1);
 /** ThinIceBiome.SkipTiles(21,467,226,237) */
 const ICE_SKIP = idsByVanillaSheet(21, 467, 226, 237);
-/** TileID.Sets.Boulders(TileID.cs:195) */
-const BOULDER_TILES = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+/** TileID.Sets.Boulders(TileID.cs:195)——★BJ168-债2（2026-09-19）本地
+ *  idsByVanillaSheet 副本拆除,收编 data/tiles.ts 单源 BOULDERS_IDS（内部 id 域,
+ *  与旧习语逐值全等已探针定谳,tests/tile-domain-sentinel §6d 钉死） */
 /** Main.tileDungeon(Main.cs:7941-7944) */
 // ★IIIII196（2026-09-03）REMIX #97 尾段定罪修复：本地表漏 678/679（Main.cs:8131-8136
 //  tileDungeon={41,43,44,677,678,679}；同文件族 FinalCleanupPass:3646/MossPass:35/
 //  MountCavesPass:193 皆六项）——placeLavaTrap 地牢砖拒门（cs:8699）漏拒蓝/粉石板
 //  → JS 多受理 → 岩浆陷阱段尝试数不足（掷流尾差 -9,279 实锤）。
-const DUNGEON_TILES = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
+const DUNGEON_TILES = TILE_DUNGEON_IDS;   // Main.tileDungeon（★BJ187 收编 data/tiles.ts 单源,旧平移副本逐值全等）
 /** DeadMansChestBiome 第三区禁置(12/665/639,DeadMansChestBiome.cs:275) */
 const BOULDER_FORBID = idsByVanillaSheet(12, 665, 639);
 
@@ -218,14 +219,13 @@ function solidTileStrict(st: TileStore, x: number, y: number): boolean {
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
 
-/** Main.tileTable（Main.cs:6828-6903 全量 76 id）——Place2x2 地面门右腿（cs:51396） */
-const PLACE2X2_TABLE = idsByVanillaSheet(
-  280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
-  608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
-  559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
-  298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87,
-  88, 405, 427,
-);
+/** Main.tileTable——Place2x2 地面门右腿（cs:51396）。★BJ187 批四（2026-09-19）收编
+ *  data/tiles.ts:TILE_TABLE_IDS 单源（内部 id 域,消费点 st.type 直查）——旧 76 项
+ *  idsByVanillaSheet 局部字面系逐条赋值提取漏 Main.cs:10125-10131 循环臂
+ *  tileTable[435-439]=true（与 BJ186 PC_TILE_TABLE 同病同修法;程序化对拍差集恰
+ *  ={435,436,437,438,439},向 vanilla 修正）。Place2x2 地面门对队伍平台地面由
+ *  「拒放」修正为与 vanilla 一致放行。 */
+const PLACE2X2_TABLE = TILE_TABLE_IDS;
 /** WorldGen.Place2x2（cs:51352-51445；PlaceTile num∈2×2 族消费——DeadMansChest 巨石
  *  138(cs:607)/矿爆起爆器 411(cs:59766-59769)）。**右下锚**：cs:51431 x--/y-- 后写
  *  (x-1..x)×(y-1..y)，帧 (k*18, m*18)；前置双门（cs:51371-51405）逐列 i∈{x-1,x}：
@@ -281,7 +281,8 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET_OF_MB[i] = s;
 }
-const TREE_TRUNK_MB = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// TileID.Sets.IsATreeTrunk——★BJ168-债2（2026-09-19）本地副本 TREE_TRUNK_MB 拆除,
+// 收编 data/tiles.ts 单源 IS_A_TREE_TRUNK_SHEETS（sheet 域,shUp=SHEET_OF_MB 域相配）
 const UP_PROTECT_MB = new Set([21, 26, 72, 77, 88, 467, 488]);
 
 /** ★III7：原版生成期 Main.tileSolid 的直查语义——Main.cs:7995 tileSolid[0]=true
@@ -313,7 +314,7 @@ function canKillTileMB(st: TileStore, x: number, y: number): boolean {
     const shUp = SHEET_OF_MB[tUp] ?? -1;
     const fxu = st.frameX[up]!, fyu = st.frameY[up]!;
     // IsATreeTrunk 族（cs:62757 单条件合并形——与 TileCleanup 子集的分型写法等价）
-    if (TREE_TRUNK_MB.has(shUp) && st.type[i] !== tUp
+    if (IS_A_TREE_TRUNK_SHEETS.has(shUp) && st.type[i] !== tUp
       && !(fxu === 66 && fyu >= 0 && fyu <= 44)
       && !(fxu === 88 && fyu >= 66 && fyu <= 110) && fyu < 198) return false;
     if (shUp === 323 && st.type[i] !== tUp && (fxu === 66 || fxu === 220)) return false;
@@ -323,7 +324,7 @@ function canKillTileMB(st: TileStore, x: number, y: number): boolean {
       if (num <= 1 || (num >= 4 && num <= 5)) return false;
     }
   }
-  if (BOULDER_TILES.has(st.type[i]!) && checkBoulderChestMB(st, x, y)) return false;
+  if (BOULDERS_IDS.has(st.type[i]!) && checkBoulderChestMB(st, x, y)) return false;
   if (sh === 10 && isLockedDoorMB(st, x, y)) return false;
   if (sh === 235) {                                      // 音乐盒 3×1 上邻扫(cs:62322-62335)
     const num2 = x - Math.trunc((st.frameX[i]! % 54) / 18);
@@ -952,7 +953,7 @@ function place3x2MB(st: TileStore, rng: RNG, x: number, y: number, typeJs: numbe
     }
     if (st.inBounds(i, y + 1)) {
       const g = st.idx(i, y + 1);
-      if (st.flags[g] && BOULDER_TILES.has(st.type[g]!)) ok = false; // InvalidTileForPiles（186/187，cs:52141）
+      if (st.flags[g] && BOULDERS_IDS.has(st.type[g]!)) ok = false; // InvalidTileForPiles（186/187，cs:52141）
       // ★III12：SolidTile2 直读 → mbTileSolidGen
       if (!(st.flags[g] !== 0 && mbTileSolidGen(st.type[g]!)
         && st.slope[g] === 0 && st.half[g] === 0)) ok = false;       // SolidTile2(i,y+1)（cs:52149）
@@ -1214,7 +1215,7 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
         //   solidTop 排除（平台 19 族 tileSolid 亦真曾多排），巨石排除来自 Place1x1
         //   IsAMechanism 支的 !Boulders[tile2.type]（WorldGen.cs:45610/TileID.cs:132）
         return mbTileSolidGen(gt) && st.slope[gi] === 0 && st.half[gi] === 0
-          && !BOULDER_TILES.has(gt);                                                   // 非巨石族地板
+          && !BOULDERS_IDS.has(gt);                                                   // 非巨石族地板
       })();
       if (gOK && !wasActive) {
         st.type[ai] = EXPLOSIVES; st.flags[ai] = 1;
@@ -2117,7 +2118,7 @@ export class DeadMansChestBiome {
       for (let l = cy - 3; l <= cy + 2; l++) {
         if (!st.inBounds(k, l)) continue;
         const idx = st.idx(k, l);
-        if (!BOULDER_TILES.has(st.type[idx]!)) {
+        if (!BOULDERS_IDS.has(st.type[idx]!)) {
           st.type[idx] = STONE;
           if (st.wire[idx]! & WIRE_RED) st.wire[idx] |= WIRE_ACTUATOR;
         }

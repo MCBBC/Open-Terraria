@@ -35,7 +35,16 @@
 //   M11 TILE_CUT_SHEETS 漏 444 → §6c 金标红;
 //   M12 iii224 零扰动旧单臂断言复刻 8 跑 4 红(50/50) → 钉种后 6 跑全绿(tests/
 //      iii224-fourflags-runtime.test.ts,Music.ts:404 dayMusic 掷币槽)。
+// ★BJ168-债2 批变异证红记录(2026-09-19,均在验证后还原):
+//   M13 BOULDERS_SHEETS 漏 484 → §6d 金标+镜像两红;
+//   M14 IS_A_TREE_TRUNK_SHEETS 漏 72 → §6d 金标红;
+//   M15 FinalCleanupPass 再立 const TILE_CUT_FC 副本 → §6e 结构锁红(无副本可立);
+//   M16 BOULDERS_IDS 错域回退(new Set(BOULDERS_SHEETS) 裸值顶替) → §6d 镜像+
+//      域判别两红(内部 138 幻影入表即红)。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { World } from '../src/world/World';
 import { scanScene, ORE_FINDER_PRIORITY_SHEET } from '../src/world/SceneMetrics';
 import {
@@ -43,6 +52,8 @@ import {
   TILE_STABLE_OF_INTERNAL, TILE_INTERNAL_OF_STABLE, TILE_CUT_SHEETS,
   TILE_TABLE_SHEETS, doorSmashable, T,
   FORBIDS_SLOPING_SHEETS, FORBIDS_SLOPING_IDS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS,
+  IS_A_TREE_TRUNK_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS,
+  PLATFORMS_IDS, IS_A_TREE_TRUNK_IDS,
 } from '../src/data/tiles';
 import { canPoundTile } from '../src/world/gen/vanilla/HalfBrickPass';
 import { TILE_CUT } from '../src/core/Game';
@@ -326,5 +337,276 @@ describe('§6c Main.tileCut 41 项金标（★BJ158③:SurfaceDecorPasses 本地
       62, 69, 655, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638,
       444, 485, 454, 254, 236];
     for (const s of pin) expect(TILE_CUT_SHEETS.has(s)).toBe(true);
+  });
+});
+
+describe('§6d TileID.Sets 家族单源金标（★BJ168-债2:IsATreeTrunk/Boulders/Platforms 收编 data/tiles.ts）', () => {
+  // 2026-09-19 定谳:原版三表（1457 TileID.cs:161/:195/:243,1458 零变更）此前 sheet 域
+  //   副本族跨 ~8 文件（世界生成面 7 处本批拆除:FinalCleanup×3/BuriedChests×3/
+  //   NotTheBees/SecretSeedDoEnds/WorldEvolution×2/MicroBiomes×2/Torch×2/
+  //   SurfaceDecorPasses;player 面 SmartCursor×3=并行禁区登记债;Game.ts 同名
+  //   PLATFORMS_SHEETS=并行热文件登记债）。全量普查另见 ~30 文件同值副本=扩面登记债
+  //   （DungeonPass/TemplePass/PilesPass/TrackPass/TrapsPass/HalfBrickPass 等）。
+  it('IS_A_TREE_TRUNK_SHEETS ≡ TileID.cs:161 全 12 条(逐值钉死;★不含棕榈 323,原表如此)', () => {
+    expect([...IS_A_TREE_TRUNK_SHEETS].sort((a, b) => a - b)).toEqual(
+      [5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+  });
+  it('BOULDERS_SHEETS ≡ TileID.cs:195 全 10 条(逐值钉死)', () => {
+    expect([...BOULDERS_SHEETS].sort((a, b) => a - b)).toEqual(
+      [138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+  });
+  it('PLATFORMS_SHEETS ≡ TileID.cs:243 全 7 条(逐值钉死)', () => {
+    expect([...PLATFORMS_SHEETS].sort((a, b) => a - b)).toEqual([19, 427, 435, 436, 437, 438, 439]);
+  });
+  it('BOULDERS_IDS 内部域镜像:双习语全等(旧 idsByVanillaSheet TILE_BY_KEY 键 vs 数组下标键)+读向还原', () => {
+    // 习语 A(旧 FinalCleanup/BuriedChests/MicroBiomes 产物)=TILE_BY_KEY[d.key] 键;
+    // 习语 B(单源采用)=数组下标键——762 defs 零重复 key(2026-09-19 探针定谳)故两习语
+    // 对任意集全等;此处以 Boulders 逐值钉死(10 id:146,158,295,299,300,301,302,303,682,727)。
+    const a = new Set<number>(), b = new Set<number>();
+    for (const d of TILE_DEFS) {
+      const vs = d.vanilla?.sheet;
+      if (vs !== undefined && BOULDERS_SHEETS.has(vs)) a.add(TILE_BY_KEY[d.key]!);
+    }
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      if (BOULDERS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) b.add(i);
+    }
+    expect(BOULDERS_IDS.size).toBe(10);
+    expect([...BOULDERS_IDS].sort((x, y) => x - y)).toEqual(
+      [146, 158, 295, 299, 300, 301, 302, 303, 682, 727]);
+    expect([...a].sort((x, y) => x - y)).toEqual([...b].sort((x, y) => x - y));
+    for (const id of BOULDERS_IDS) {
+      expect(BOULDERS_SHEETS.has(TILE_DEFS[id].vanilla!.sheet)).toBe(true);
+    }
+  });
+  it('域判别(错域回退即红):Boulders 掩蔽对——sheet 138 ∈ SHEETS 而 内部 138(sheet 379) ∉ IDS', () => {
+    // tile 域两域 752/761 撞号(§1):BOULDERS_SHEETS 被内部 id 顶替→138/484/711 幻影;
+    // BOULDERS_IDS 被 sheet 裸值顶替→真巨石(内部 146 等)全漏。掩蔽对字面量:
+    expect(TILE_DEFS[138]?.vanilla?.sheet).toBe(379);          // 内部 138 = 硬化沙族,非巨石
+    expect(BOULDERS_SHEETS.has(138)).toBe(true);               // sheet 138 = 巨石(原版型)
+    expect(BOULDERS_IDS.has(138)).toBe(false);                 // 内部 138 ∉ 镜像——错域顶替即红
+    expect(BOULDERS_IDS.has(295)).toBe(true);                  // 真巨石内部 id(295∈镜像)
+    expect(BOULDERS_SHEETS.has(295)).toBe(false);              // sheet 295 非巨石——反向错域即红
+    expect(TILE_BY_KEY['v_484_rolling_cactus']).toBe(146);     // 掩蔽对字面量钉死(滚刺球 sheet 484)
+  });
+});
+
+describe('§6e BJ168-债2 结构锁:收编副本禁复活（源码扫描=事故字节签名禁入）', () => {
+  // 收编后「无副本可立」:下列文件再出现本地定义即红。注释面豁免(取证注提及旧名
+  // 带『拆除』字样,不含 `名字 =` 赋值形);正锚=同文件必须仍消费单源名(防空洞)。
+  const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+  const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+  const FORBIDDEN: Array<[string, RegExp, string]> = [
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', /\bTILE_CUT_FC\s*=/, 'TILE_CUT_SHEETS'],
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', /\bconst BOULDERS\s*=/, 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', /\bconst BOULDER_SHEETS\s*=/, 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', /\bconst PLATFORMS\s*=/, 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', /\bconst IS_TREE_TRUNK\s*=/, 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', /\bPC_TILE_CUT\s*=/, 'TILE_CUT_SHEETS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', /\bPC_BREAK_PLACE\s*=/, 'BREAKABLE_WHEN_PLACING_SHEETS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', /\bPC_BOULDERS\s*=/, 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', /\bBOULDER_TILES\s*=/, 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', /\bPC_PLATFORMS\s*=/, 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/DesertPass.ts', /\bAV_TILE_CUT\s*=/, 'TILE_CUT_SHEETS'],
+    ['src/world/gen/vanilla/DesertPass.ts', /\bAV_BREAK_PLACE\s*=/, 'BREAKABLE_WHEN_PLACING_SHEETS'],
+    ['src/world/gen/vanilla/DesertPass.ts', /\bconst BOULDERS\s*=/, 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/NotTheBeesPass.ts', /\bconst BOULDERS\s*=/, 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', /\bconst IS_A_TREE_TRUNK\s*=/, 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/gen/vanilla/MicroBiomesPass.ts', /\bBOULDER_TILES\s*=/, 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/MicroBiomesPass.ts', /\bTREE_TRUNK_MB\s*=/, 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/evolution/WorldEvolution.ts', /\bconst TILE_PLATFORMS\s*=/, 'PLATFORMS_SHEETS'],
+    ['src/world/evolution/WorldEvolution.ts', /\bconst IS_A_TREE_TRUNK\s*=/, 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/Torch.ts', /\bIS_A_TREE_TRUNK_SHEETS\s*=\s*new/, 'data/tiles.ts 单源(转出口)'],
+    ['src/world/Torch.ts', /\bPLATFORM_SHEETS\s*=\s*new/, 'data/tiles.ts 单源(转出口别名)'],
+    ['src/world/gen/vanilla/SurfaceDecorPasses.ts', /\bconst PLATFORMS_SHEETS\s*=/, 'PLATFORMS_SHEETS 单源'],
+    ['src/world/gen/vanilla/SurfaceDecorPasses.ts', /\bconst BOULDERS\s*=/, 'BOULDERS_SHEETS'],
+  ];
+  const REQUIRED: Array<[string, string]> = [
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', 'TILE_CUT_SHEETS.has('],
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', 'BOULDERS_IDS.has('],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', 'TILE_CUT_SHEETS.has('],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', 'BOULDERS_SHEETS.has('],
+    ['src/world/gen/vanilla/DesertPass.ts', 'TILE_CUT_SHEETS.has('],
+    ['src/world/gen/vanilla/DesertPass.ts', 'BOULDERS_IDS.has('],
+    ['src/world/gen/vanilla/NotTheBeesPass.ts', 'BOULDERS_SHEETS.has('],
+    ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'IS_A_TREE_TRUNK_SHEETS.has('],
+    ['src/world/gen/vanilla/MicroBiomesPass.ts', 'BOULDERS_IDS.has('],
+    ['src/world/evolution/WorldEvolution.ts', 'IS_A_TREE_TRUNK_SHEETS.has('],
+    ['src/world/evolution/WorldEvolution.ts', 'PLATFORMS_SHEETS.has('],
+    ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'BOULDERS_SHEETS.has('],
+    ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'PLATFORMS_SHEETS.has('],
+    ['src/world/Torch.ts', 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/Torch.ts', 'PLATFORMS_SHEETS'],
+  ];
+  it('禁复活:22 个收编副本旧定义字节签名禁入(注释面提及不受影响)', () => {
+    for (const [file, sig] of FORBIDDEN) {
+      expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
+    }
+  });
+  it('防空洞正锚:每个收编文件必须仍消费 data/tiles.ts 单源名', () => {
+    for (const [file, anchor] of REQUIRED) {
+      expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
+    }
+  });
+});
+
+// ★BJ182b 批变异证红记录(2026-09-19,均在验证后还原):
+//   M17 TILE_TABLE_SHEETS 摘 280(回退 PC_TILE_TABLE 病灶) → §6f 金标红+
+//      tests/bj182b-cage-table-chest.test.ts(280 鸟笼箱锚行为面)红;
+//   M18 DungeonPass 再立 `const DG_PLATFORMS = new Set([19,427])` 错值副本 → §6g 结构锁红
+//      (IDG-T2 家清单只看单源名,别名复活由本结构锁单闸承责——§6e 同款分工);
+//   M19 PLATFORMS_IDS 错域回退(new Set(PLATFORMS_SHEETS) 裸 sheet 值顶替) → §6f 镜像+
+//      域判别两红(内部 11 幻影入表即红)。
+describe('§6f BJ182b 收编金标:tileTable 81 项(★280 定谳)+双域镜像扩员', () => {
+  // 2026-09-19 定谳:Main.tileTable 全表 81 项=1457 Main.cs:7018-7081(46 条直赋,首条
+  //   tileTable[280]=true)+:7897-7898(376/380)+:8171-8191(14/469/18/19/114/101/87/88)
+  //   +:8446(405)+:10121(427)+:10125-10131(435-439 循环臂)——程序化提取直读对拍,
+  //   主表 81≡81 逐值全等零差。旧 76 项副本族(FinalCleanup/HalfBrick×2/Piles×2/Traps×2)
+  //   系漏循环臂(缺 435-439);PC_TILE_TABLE 80 项系缺 280(BJ168-债2 附录登记本案)。
+  it('TILE_TABLE_SHEETS ≡ Main.tileTable 全 81 项(逐值钉死;含 280 与 435-439 循环臂)', () => {
+    expect(TILE_TABLE_SHEETS.size).toBe(81);
+    const pin = [14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281,
+      285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380,
+      391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532, 533, 538,
+      542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604,
+      605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710];
+    for (const s of pin) expect(TILE_TABLE_SHEETS.has(s)).toBe(true);
+    expect(TILE_TABLE_SHEETS.has(280)).toBe(true);              // ★鸟笼族桌面路(BJ182b 定谳锚)
+    for (const s of [435, 436, 437, 438, 439]) expect(TILE_TABLE_SHEETS.has(s)).toBe(true);
+    expect(TILE_TABLE_SHEETS.has(0)).toBe(false);
+  });
+  it('PLATFORMS_IDS 内部域镜像:7 id 逐值钉死+双习语全等+读向还原', () => {
+    expect(PLATFORMS_IDS.size).toBe(7);
+    expect([...PLATFORMS_IDS].sort((a, b) => a - b)).toEqual([11, 529, 535, 536, 537, 538, 539]);
+    const b = new Set<number>();
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      if (PLATFORMS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) b.add(i);
+    }
+    expect([...PLATFORMS_IDS].sort((x, y) => x - y)).toEqual([...b].sort((x, y) => x - y));
+    for (const id of PLATFORMS_IDS) expect(PLATFORMS_SHEETS.has(TILE_DEFS[id].vanilla!.sheet)).toBe(true);
+  });
+  it('IS_A_TREE_TRUNK_IDS 内部域镜像:13 id(12 sheet,sheet5 双内部身)逐值钉死', () => {
+    expect(IS_A_TREE_TRUNK_IDS.size).toBe(13);
+    expect([...IS_A_TREE_TRUNK_IDS].sort((a, b) => a - b)).toEqual(
+      [8, 159, 173, 174, 177, 180, 181, 182, 185, 192, 196, 317, 326]);
+    for (const id of IS_A_TREE_TRUNK_IDS) {
+      expect(IS_A_TREE_TRUNK_SHEETS.has(TILE_DEFS[id].vanilla!.sheet)).toBe(true);
+    }
+  });
+  it('域判别(错域回退即红):Platforms 掩蔽对——内部 19(sheet 3 草)∉IDS 幻影;内部 427(sheet 170)∉镜像而 sheet 427∈SHEETS', () => {
+    expect(TILE_DEFS[19]?.vanilla?.sheet).toBe(3);             // 内部 19=草(掩蔽对字面量)
+    expect(PLATFORMS_IDS.has(19)).toBe(false);                 // IDS 被 sheet 裸值顶替(19∈SHEETS)即红
+    expect(TILE_DEFS[427]?.vanilla?.sheet).toBe(170);          // 内部 427 非平台
+    expect(PLATFORMS_IDS.has(427)).toBe(false);                // 真镜像不含 427
+    expect(PLATFORMS_SHEETS.has(427)).toBe(true);              // SHEETS 被内部 id 顶替(427 幻影)即红
+    expect(PLATFORMS_IDS.has(11)).toBe(true);                  // 真平台内部 id(11=平台 sheet19)
+  });
+});
+
+describe('§6g BJ182b 结构锁扩:65 副本禁复活（收编面=Platforms×22/Boulders×16/IsATreeTrunk×9/tileTable×10/tileCut×2/BreakPlace×1/内部镜像×5）', () => {
+  const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+  const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+  // 签名=「名字 = new Set」或「名字 = idsByVanillaSheet」——单源别名(`= MASTER;`)不匹配=合法转出口
+  const F = (name: string) => new RegExp(`\\b${name}\\s*=\\s*(new\\s+Set|idsByVanillaSheet)`);
+  const FORBIDDEN: Array<[string, RegExp, string]> = [
+    // Platforms sheet 域(22)
+    ['src/core/Game.ts', F('PLATFORMS_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/core/Game.ts', F('CONCH_PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/entities/LeashedCritter.ts', F('SETS_PLATFORMS_VANILLA_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/entities/Player.ts', F('VANILLA_PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/entities/RollingBoulder.ts', F('RB_PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/player/SmartCursor.ts', F('PLATFORMS'), 'PLATFORMS_SHEETS'],
+    ['src/render/VanillaTiler.ts', F('VANILLA_PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/ui/JourneyBrowser.ts', F('TILE_PLATFORMS'), 'PLATFORMS_SHEETS'],
+    ['src/wld/WldImport.ts', F('VANILLA_SOLID_PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/world/spawn/SpawnPlacement.ts', F('VANILLA_PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/DungeonDualLayout.ts', F('PLATFORM_SHEET_SET'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/DungeonEarlyFeatures.ts', F('DE_PLATFORM_SHEET'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/DungeonPass.ts', F('DG_PLATFORMS'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/FinishNoTrapsPass.ts', F('PLATFORMS_FNT'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/HellforgesPass.ts', F('HF_PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/PilesPass.ts', F('PLATFORM_SOLID'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/PilesPass.ts', F('SUP_PLATFORMS'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/StatuesPass.ts', F('PLATFORMS_TOP'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/TeleportSpotCheck.ts', F('SHEET_PLATFORMS'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/TemplePass.ts', F('PLATFORMS_TP'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/TileCleanupPass.ts', F('PLATFORM_99'), 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/TrapsPass.ts', F('PLATFORM_SHEETS'), 'PLATFORMS_SHEETS'],
+    // Boulders sheet 域(16)
+    ['src/core/Game.ts', F('BOULDER_SUPPORT_SHEETS'), 'BOULDERS_SHEETS'],
+    ['src/player/SmartCursor.ts', F('BOULDERS'), 'BOULDERS_SHEETS'],
+    ['src/world/DungeonDualZones.ts', F('BOULDER_SHEETS'), 'BOULDERS_SHEETS'],
+    ['src/world/spawn/ExtraSpawnsRoyale.ts', F('BOULDER_SHEETS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/CaveHousePass.ts', F('BOULDERS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/DungeonPass.ts', F('DG_BOULDERS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/DungeonPass.ts', F('E137_BOULDERS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/FinishNoTrapsPass.ts', F('BOULDERS_SETS_FNT'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/LivingTreePass.ts', F('PILE_BOULDERS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/PilesPass.ts', F('SUP_BOULDERS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/Spread.ts', F('BOULDER_SHEETS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/StatuesPass.ts', F('BOULDERS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/TemplePass.ts', F('BOULDERS_TP'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/TrackPass.ts', F('BOULDER_SS'), 'BOULDERS_SHEETS'],
+    ['src/world/gen/vanilla/TrapsPass.ts', F('BOULDER_SHEETS'), 'BOULDERS_SHEETS'],
+    // IsATreeTrunk sheet 域(9)
+    ['src/core/Game.ts', F('TREE_TRUNK_SHEETS'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/data/grappleHooks.ts', F('TREE_TRUNK_SHEETS'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/player/SmartCursor.ts', F('IS_A_TREE_TRUNK'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/TreeShake.ts', F('TREE_TRUNK_SHEETS'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', F('IS_TREE_TRUNK'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/gen/vanilla/TemplePass.ts', F('TREE_TRUNKS_TP'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/gen/vanilla/TileCleanupPass.ts', F('IS_TREE_TRUNK'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/gen/vanilla/TrackPass.ts', F('TREE_TRUNK_SS'), 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/world/gen/vanilla/TrapsPass.ts', F('TREE_TRUNK_T'), 'IS_A_TREE_TRUNK_SHEETS'],
+    // tileTable(10:81 全本×3+76 项×7)
+    ['src/world/gen/vanilla/DungeonPass.ts', F('DG_TILE_TABLE'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/SkyblockPass.ts', /\bconst\s+TILE_TABLE_SHEETS\s*=/, 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('PLACE2X2_TABLE'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/FinalCleanupPass.ts', F('TILE_TABLE'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/HalfBrickPass.ts', F('TILE_TABLE_2X2KT'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/HalfBrickPass.ts', F('TILE_TABLE_S'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/PilesPass.ts', F('SUP_TILE_TABLE'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/PilesPass.ts', F('PILES_PLACE2X2_TABLE'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/TrapsPass.ts', F('TILE_TABLE'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/TrapsPass.ts', F('PLACE2X2_TABLE'), 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', F('PC_TILE_TABLE'), 'TILE_TABLE_SHEETS'],
+    // tileCut/BreakableWhenPlacing(3)
+    ['src/world/gen/vanilla/DungeonPass.ts', F('DG_TILE_CUT'), 'TILE_CUT_SHEETS'],
+    ['src/world/liquid/LiquidSim.ts', F('CUT_SHEETS'), 'TILE_CUT_SHEETS'],
+    ['src/world/gen/vanilla/DungeonPass.ts', F('DG_BREAK_PLACE'), 'BREAKABLE_WHEN_PLACING_SHEETS'],
+    // 内部域镜像(8)
+    ['src/world/gen/vanilla/CorruptionPass.ts', F('BOULDERS'), 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/BrokenTrapCleanupPass.ts', F('BOULDERS'), 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/HalfBrickPass.ts', F('BOULDERS'), 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/CorruptionPass.ts', F('PLATFORMS'), 'PLATFORMS_IDS'],
+    ['src/world/gen/vanilla/QuickCleanupPass.ts', F('PLATFORMS'), 'PLATFORMS_IDS'],
+    ['src/world/gen/vanilla/HalfBrickPass.ts', F('TREE_TRUNK'), 'IS_A_TREE_TRUNK_IDS'],
+    ['src/world/gen/vanilla/TeleporterPass.ts', F('IS_TREE_TRUNK'), 'IS_A_TREE_TRUNK_IDS'],
+  ];
+  const REQUIRED: Array<[string, string]> = [
+    ['src/core/Game.ts', 'PLATFORMS_SHEETS'],
+    ['src/core/Game.ts', 'BOULDERS_SHEETS'],
+    ['src/core/Game.ts', 'IS_A_TREE_TRUNK_SHEETS'],
+    ['src/player/SmartCursor.ts', 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/DungeonPass.ts', 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/DungeonPass.ts', 'PLATFORMS_SHEETS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/BuriedChestsPass.ts', 'PC_TILE_TABLE'],
+    ['src/world/liquid/LiquidSim.ts', 'TILE_CUT_SHEETS'],
+    ['src/world/gen/vanilla/SkyblockPass.ts', 'TILE_TABLE_SHEETS'],
+    ['src/world/gen/vanilla/CorruptionPass.ts', 'BOULDERS_IDS'],
+    ['src/world/gen/vanilla/QuickCleanupPass.ts', 'PLATFORMS_IDS'],
+    ['src/world/gen/vanilla/HalfBrickPass.ts', 'IS_A_TREE_TRUNK_IDS'],
+    ['src/world/gen/vanilla/TeleporterPass.ts', 'IS_A_TREE_TRUNK_IDS'],
+    ['src/data/grappleHooks.ts', 'IS_A_TREE_TRUNK_SHEETS'],
+  ];
+  it('禁复活:收编副本「=new Set/=idsByVanillaSheet」字节签名禁入(单源别名转出口不受影响)', () => {
+    for (const [file, sig] of FORBIDDEN) {
+      expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
+    }
+  });
+  it('防空洞正锚:每个收编文件必须仍引用 data/tiles.ts 单源名', () => {
+    for (const [file, anchor] of REQUIRED) {
+      expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
+    }
   });
 });

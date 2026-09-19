@@ -10,12 +10,14 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { killTile } from './HalfBrickPass';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 
-/** Main.tileDungeon（Main.cs:7941-7946）：41 青砖/43 蓝砖/44 绿砖/677-679 变体 */
-const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
-/** Main.wallDungeon（Main.cs:10507-10513）：7/8/9 + 94-99 */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.tileDungeon（Main.cs:8131-8136）：41 青砖/43 蓝砖/44 绿砖/677-679 变体
+ *  ——★BJ187 收编 data/tiles.ts:TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
+const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
+/** Main.wallDungeon（Main.cs:10734-10745）：7/8/9 + 94-99——★BJ187 收编
+ *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 /** cs:74081/74083 改写目标：161 冰→1 石、147 雪砖→0 土 */
 const T_STONE = TILE_BY_KEY['stone'] ?? 0;
 const T_DIRT = TILE_BY_KEY['dirt'] ?? 0;

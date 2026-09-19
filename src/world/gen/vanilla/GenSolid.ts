@@ -58,7 +58,7 @@
 //   cs:18538/18552-53（remixWorldGen）；SettleLiquidsPart2 cs:21057（getGoodWorldGen）。
 //   另 Liquid 沉降自带翻转族（Liquid.cs:70/110/140 经 SetBoulderSolidity）属运行时
 //   液体模块,不在生成 pass 范围。
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import type { TileStore } from '../../TileStore';
 
 /** 生成期实心覆写表：内部 tile id → 当前实心值（未登记 = 用 TILE_DEFS 初值）。 */
@@ -115,15 +115,20 @@ export function genSolidType(t: number): boolean {
  *  2026-08-17。 */
 export const VAN_TILE_SOLID_EXTRA = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
 
-/** 原版 Main.tileSolidTop 静态表（sheet 域;Main.cs Initialize_TileAndNPCData2
- *  :6954-8146 区段逐行提取——DungeonPass ltAllowBottomSlope 同源表上收单源）。
- *  生成期零翻转（WorldGen 全树无 =false 写）。消费面=「tileSolid∨tileSolidTop」
- *  第二析取支（SolidTileAllowBottomSlope cs:70706 族），SolidTile/SolidTile2/AllowTopSlope
- *  均不含 solidTop——勿共用到他处。
+/** 原版 Main.tileSolidTop 静态表（sheet 域）——DungeonPass ltAllowBottomSlope 同源
+ *  表上收单源。生成期零翻转（WorldGen 全树无 =false 写）。消费面=「tileSolid∨
+ *  tileSolidTop」第二析取支（SolidTileAllowBottomSlope cs:70706 族），SolidTile/
+ *  SolidTile2/AllowTopSlope 均不含 solidTop——勿共用到他处。
  *  ★IIIII229（⑧ 212 章 M2）：DungeonPass:8214 LT_SOLIDTOP_SET 与 DungeonDualLayout
  *  solidAllowBottomSlope 的 `def.vanilla.solidTop===true` 死字段（TILE_DEFS 无该字段,
- *  局部 `as unknown as` 放宽压掉 tsc ⇒ 恒 false）双双收编到此单源。 */
-export const VAN_TILE_SOLIDTOP_SHEET_SET = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+ *  局部 `as unknown as` 放宽压掉 tsc ⇒ 恒 false）双双收编到此单源。
+ *  ★BJ187（2026-09-19）：本表旧值 79 项=逐条赋值提取漏 Main.cs:10125-10131 循环臂
+ *  tileSolidTop[435-439]=true（BJ186 登记的真值差#1——「Echo 平台」系台账笔误,实为
+ *  队伍平台族 TeamBlockGreen/Blue/Yellow/Pink/WhitePlatform,427=红队平台同族）。
+ *  现收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项,程序化对拍全等）——DungeonDualLayout
+ *  solidAllowBottomSlope 对 435-439 由恒 false 修正为走平台 half 臂（与 vanilla
+ *  `tileSolid∨tileSolidTop` 对齐）。 */
+export const VAN_TILE_SOLIDTOP_SHEET_SET = SOLID_TOP_SHEETS;
 const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;

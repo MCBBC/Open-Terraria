@@ -21,7 +21,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { UnifiedRandom } from '../../../core/rng';
-import { TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
+import { TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import {
   buildDungeonGenVars,
   DungeonGenerationStyles,
@@ -605,7 +605,8 @@ interface TierCtx {
 
 function buildTierCtx(gv: DungeonGenVars1457, w: number, hgt: number): TierCtx {
   // Main.wallDungeon 基线集（DG_DUNGEON_WALLS 家族：7/8/9 主墙+94-99 变体族）
-  const vanillaWallDungeon = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+  // ——★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等）
+  const vanillaWallDungeon = WALL_DUNGEON_SHEETS;
   return {
     higherOrEqualWall(curW, newW, curStyleID, newStyleID): boolean {
       return isHigherOrEqualTieredDungeonWall(gv, curW, newW, curStyleID, newStyleID, true,
@@ -1797,7 +1798,8 @@ const TILE_DEFS_BY_INTERNAL: Array<TileDef | undefined> = [];
     if (typeof sh === 'number' && sh >= 0) TILE_INTERNAL_SHEET_REV.set(i, sh);
   }
 })();
-const PLATFORM_SHEET_SET = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORM_SHEET_SET = PLATFORMS_SHEETS;
 
 /** GenerateRockPlatform（DU:1408-1431）。 */
 function generateRockPlatform(ctx: DualLayoutCtx, ur: RngLike, x: number, y: number, width: number, tileType: number, paint: number): void {
@@ -2200,9 +2202,12 @@ function hallCanPlaceAt(hall: DHallBase, st: TileStore, x: number, y: number, br
   return hall.canPlaceHallTile(st, x, y, brick, cracked);
 }
 
-const VANILLA_TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
-/** Main.wallDungeon 基线集（Main.cs:10507-10513：7/8/9+94-99,不含神庙墙 87）。 */
-const VANILLA_WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
+ *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
+const VANILLA_TILE_DUNGEON = TILE_DUNGEON_SHEETS;
+/** Main.wallDungeon 基线集（Main.cs:10734-10745：7/8/9+94-99,不含神庙墙 87）
+ *  ——★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const VANILLA_WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 let _gvHolder: DungeonGenVars1457 | null = null;
 function setGvHolder(gv: DungeonGenVars1457, dual: boolean): void { _gvHolder = gv; void dual; }
 /** ★IIIII172：spider 厅 stamp 迹序号（s 环开闸清零;<0=关闸,零开销） */
@@ -4041,8 +4046,8 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
   const defaultStyle = buildDefaultStyleProject(defaultTheme);
   const styles = dualDungeonStyles(ddualK, !!ctx.gs.crimson, defaultStyle);
   const gv = buildDungeonGenVars(styles, true, {
-    tileDungeon: boolArrayOf([41, 43, 44, 677, 678, 679]),
-    wallDungeon: boolArrayOf([7, 8, 9, 94, 95, 96, 97, 98, 99]),
+    tileDungeon: boolArrayOf([...TILE_DUNGEON_SHEETS]),      // ★BJ187 单源
+    wallDungeon: boolArrayOf([...WALL_DUNGEON_SHEETS]),      // ★BJ187 单源
     crackedBricks: boolArrayOf([481, 482, 483]),
     glassWalls: boolArrayOf([21, 88, 89, 90, 91, 92, 93, 241, 242, 243]),
   });

@@ -119,11 +119,13 @@ function renderSlot(slot: number, privates: Record<string, unknown>, zoneScene: 
   };
   b.seededFor = 42;                                         // 固定种子面
   b.bgStyle = slot;
+  Object.assign(b, privates);                               // 各群系变体档注入
   b.alphaFront = new Array(16).fill(0);
   b.alphaFront[slot] = 1;
   b.alphaFar = new Array(16).fill(0);
-  b.alphaFar[slot] = 1;
-  Object.assign(b, privates);                               // 各群系变体档注入
+  // 远山槽随 UpdateBGVisibility_BackLayer（Main.cs:65123）bgStyle→far 槽映射
+  // （2026-09-19 交叉淡化刀：远山绘制改逐槽、槽号不再与 bgStyle 同构）
+  for (const s of b.farSlotsForStyle(slot) as number[]) b.alphaFar[s] = 1;
   const recs: DrawRec[] = [];
   const blit = {
     img: (im: ImageBitmap | HTMLImageElement, _sx: number, _sy: number, _sw: number, _sh: number,

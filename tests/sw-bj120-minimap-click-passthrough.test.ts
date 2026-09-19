@@ -99,4 +99,12 @@ describe('SW-BJ120 场景 X：全屏地图态=世界照跑/武器被消费/点�
     expect(loopAt).toBeGreaterThan(guardAt);
     expect(closeAt).toBeGreaterThan(guardAt);
   });
+
+  it('⑦刀：Renderer 侧孪生开图面同摘（drawMinimap 点击→openFullMapFocusedOnPlayer 调用点清零）', () => {
+    // 刀②让位后 updateUse 不再消费点击边沿——渲染侧残留的同一自创面会在缩放钮
+    // 点击时吃掉存活边沿照样开图（探针 _bj15-mapprobe2 1a2 实测）；两处必须同摘
+    expect(rendererSrc.includes('this.openFullMapFocusedOnPlayer(')).toBe(false);
+    // 预置函数本体保留（单源复用位）
+    expect(rendererSrc).toContain('openFullMapFocusedOnPlayer(player');
+  });
 });

@@ -14,7 +14,7 @@
 //   互不干扰——TileFrame 重算时先剥掉 66 再选锚（WorldGen.cs:87416 num = frameX>=66 ? 66 : 0）。
 // 帧选取优先序 = TileFrame :87440-87459：底(0) → 左(22) → 右(44) → 墙(0)。
 import type { TileStore } from './TileStore';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS } from '../data/tiles';
 import { VAN_TILE_SOLID_EXTRA } from './gen/vanilla/GenSolid';
 
 /** 未点燃火把的帧偏移（Wiring.ToggleTorch：frameX ±= 66；判定 frameX >= 66） */
@@ -36,8 +36,10 @@ export function toggleTorchFrame(frameX: number): number {
 }
 
 // ---- 原版旗表（火把放置/重锚定消费域；行号锚 1457） ----
-/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——侧锚三格连续树干支；★不含棕榈 323（1457 原表如此） */
-export const IS_A_TREE_TRUNK_SHEETS = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——侧锚三格连续树干支；★不含棕榈 323（1457 原表如此）。
+ *  ★BJ168-债2（2026-09-19）：本地定义拆除,收编 data/tiles.ts 单源（本文件转出口,
+ *  SW-BJ28 消费面 RenderAudit 的导入路径保持不变） */
+export { IS_A_TREE_TRUNK_SHEETS };
 /** TileID.Sets.IsBeam（TileID.cs:239）——侧锚梁木支（单格即可,无需三连） */
 export const IS_BEAM_SHEETS = new Set([124, 561, 574, 575, 576, 577, 578]);
 /** TileID.Sets.NotReallySolid（TileID.cs:359={387,388,10}）——PlaceTile 底/侧锚非平台实心支排除 */
@@ -52,8 +54,10 @@ export const NO_ATTACH_SHEETS = new Set([
   468, 27, 114, 86, 87, 88, 89, 90, 101, 102, 94, 95, 96, 97, 98, 99, 91, 92, 93,
   387, 388, 427, 435, 436, 437, 438, 439, 390,
 ]);
-/** TileID.Sets.Platforms（TileID.cs:243={19,427,435-439}）——底锚平台臂/,noAttach 豁免臂 */
-export const PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** TileID.Sets.Platforms（TileID.cs:243={19,427,435-439}）——底锚平台臂/,noAttach 豁免臂。
+ *  ★BJ168-债2（2026-09-19）：本地定义拆除,收编 data/tiles.ts 单源 PLATFORMS_SHEETS;
+ *  旧名 PLATFORM_SHEETS 保留为转出口别名（SW-BJ28 消费面 RenderAudit 导入路径不变） */
+export { PLATFORMS_SHEETS as PLATFORM_SHEETS };
 /** TileObjectData.PlatformFrameWidth()（TileObjectData.cs:5122-5126）= _data[19]
  *  .CoordinateFullWidth = 16+2 = 18 —— PlatformProperTopFrame 的连接档步长 */
 const PLATFORM_FRAME_WIDTH = 18;
@@ -95,7 +99,7 @@ export function topEdgeCanBeAttachedTo(st: TileStore, x: number, y: number): boo
   if (!(vanTileSolid(t) || vanTileSolidTop(t))) return false;
   const slope = st.slope[i];
   const isTopSlope = slope === 1 || slope === 2;      // Tile.topSlope()（bits 1|2）
-  if (isTopSlope && !(PLATFORM_SHEETS.has(sheetOf(t)) && platformProperTopFrame(st.frameX[i]))) return false;
+  if (isTopSlope && !(PLATFORMS_SHEETS.has(sheetOf(t)) && platformProperTopFrame(st.frameX[i]))) return false;
   if (st.half[i]) return false;
   if (st.isActuated(x, y)) return false;              // !tile.inActive()
   return true;
@@ -109,7 +113,7 @@ const bottomArmPlace = (st: TileStore, tx: number, ty: number): boolean => {
   if (!vanTileSolid(t)) return false;
   const sh = sheetOf(t);
   const i = st.idx(tx, ty + 1);
-  if (PLATFORM_SHEETS.has(sh)) return topEdgeCanBeAttachedTo(st, tx, ty + 1);
+  if (PLATFORMS_SHEETS.has(sh)) return topEdgeCanBeAttachedTo(st, tx, ty + 1);
   return (!vanTileSolidTop(t) || (sh === 380 && st.slope[i] === 0))
     && !NOT_REALLY_SOLID_SHEETS.has(sh)
     && !st.half[i] && st.slope[i] === 0;
@@ -160,7 +164,7 @@ const tileFrameBottomOk = (st: TileStore, tx: number, ty: number): boolean => {
   const i = st.idx(tx, ty + 1);
   const t = st.type[i];
   const sh = sheetOf(t);
-  const isPlat = PLATFORM_SHEETS.has(sh);
+  const isPlat = PLATFORMS_SHEETS.has(sh);
   // SW-RB8a 2026-09-08：num2 门（:87413）是【并集】——`(Platforms∧TopEdge) ∨
   // (!halfBrick ∧ !topSlope)`，第二支不查 active/inActive/Platforms。旧码平台
   // 只走 TopEdge 单支 → 已致动平台（TopEdge 的 !inActive 拒）下火把被误判失撑

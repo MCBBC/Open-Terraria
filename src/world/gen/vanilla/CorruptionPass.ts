@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_IDS, PLATFORMS_IDS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef, setTenthRef } from './MushroomPass';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
@@ -45,15 +45,13 @@ const ALTAR = TILE_BY_KEY['v_26_altars']!;
 /** shimmerSafetyDistance（WorldGen.cs:4104 = 150）：15825 祭坛 pass 的微光避让半径 */
 const SHIMMER_SAFETY = 150;
 /** TileID.Sets.Boulders（TileID.cs:195）——Place3x2 type=26 的底座巨石门 */
-const BOULDERS = new Set<number>([
-  'v_138_boulder', 'v_484_rolling_cactus', 'v_664_bouncy_boulder', 'v_665_life_crystal_boulder',
-  'v_711_rainbow_boulder', 'v_712_poo_boulder', 'v_713_lava_boulder', 'v_714_spider_boulder',
-  'v_715_ghoulder', 'v_716_friendly_boulder',
-].map((k) => TILE_BY_KEY[k]).filter((v): v is number => v !== undefined));
-/** CanEvilReplace(WorldGen.cs:76182-76197):地牢砖族(tileDungeon 41/43/44/677-679,Main.cs:7941-7946)
- *  /裂砖族(CrackedBricks 481-483)/地牢墙(wallDungeon 7-9/94-99,Main.cs:10507-10515)不可替换 */
-const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS = BOULDERS_IDS;
+/** CanEvilReplace(WorldGen.cs:76182-76197):地牢砖族(tileDungeon 41/43/44/677-679,Main.cs:8131-8136)
+ *  /裂砖族(CrackedBricks 481-483)/地牢墙(wallDungeon 7-9/94-99,Main.cs:10734-10745)不可替换
+ *  ——★BJ187 收编 data/tiles.ts:TILE_DUNGEON_SHEETS/WALL_DUNGEON_SHEETS 单源（逐值全等） */
+const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 function canEvilReplace(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   if (st.flags[i]) {
@@ -65,7 +63,8 @@ function canEvilReplace(st: TileStore, x: number, y: number): boolean {
 const ORB = TILE_BY_KEY['v_31_orb_heart']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!;
 /** TileID.Sets.Platforms（SolidTile2 cs:70500 的半砖/上坡特赦族） */
-const PLATFORMS = idsByVanillaSheet(19, 427, 435, 436, 437, 438, 439);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORMS = PLATFORMS_IDS;
 const HARDSAND = TILE_BY_KEY['hardened_sand']!;
 const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔矿脉 + 挖空保护 :76191）
 const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空保护 :76191）

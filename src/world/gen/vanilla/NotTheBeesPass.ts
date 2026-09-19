@@ -16,7 +16,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';   // ★IIIII229 ⑪ COAT_BLOCK_MASK（序言⑦补齐;与原 type-import 合并）
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genKillTile, genTileFrame, genSquareTileFrame } from './FinalCleanupPass';
 import { grassSpreadState } from './MushroomPass';
@@ -63,21 +63,22 @@ const CRACKED_BRICKS = new Set([481, 482, 483]);
 const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
 /** TileID.Sets.Clouds（TileID.cs:197；FinalCleanupPass 同源副本） */
 const CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
-/** TileID.Sets.Boulders（TileID.cs:195） */
-const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** TileID.Sets.Boulders（TileID.cs:195）——★BJ168-债2（2026-09-19）本地副本拆除,
+ *  收编 data/tiles.ts 单源 BOULDERS_SHEETS（sheet 域,逐值对拍 10≡10） */
 /** TileID.Sets.Conversion.Grass（TileID.cs:51） */
 const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);
-/** Main.tileDungeon（Main.cs:7941-7946） */
-const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
-/** Main.wallDungeon（Main.cs:10507-10515） */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
+ *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
+const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
+/** Main.wallDungeon（Main.cs:10734-10745）——★BJ187 收编 data/tiles.ts:
+ *  WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 /** 玻璃墙族（★1458 WallID.Sets.Glass,WallID.cs:46——NTB 蜂巢墙转化豁免集） */
 const GLASS_WALLS = new Set([21, 88, 89, 90, 91, 92, 241, 93, 243, 242]);
-/** Main.tileSolidTop 生成期表（SolidOrSlopedTile 用；FinishNoTrapsPass 同源副本） */
-const SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileSolidTop 生成期表（SolidOrSlopedTile 用；FinishNoTrapsPass 同源副本）
+ *  ——★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项;旧 79 项漏
+ *  Main.cs:10125-10131 循环臂 435-439 队伍平台,生成期不可达=行为零差） */
+const SOLID_TOP = SOLID_TOP_SHEETS;
 
 /** oceanDepths（cs:10978-10989）——FinalCleanupPass 同源副本 */
 function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean {
@@ -271,7 +272,7 @@ export function runNotTheBees(st: TileStore, rng: RNG, gs: GenState): void {
               || i >= w - bd + rng.int(0, 2)
               || (s !== 397 && s !== 396))
             && s !== 10 && s !== 203 && s !== 25 && s !== 137
-            && !BOULDERS.has(s) && s !== 141) {
+            && !BOULDERS_SHEETS.has(s) && s !== 141) {
             if (TILE_DUNGEON.has(s) || CRACKED_BRICKS.has(s)) {
               st.paint[idx] = DUNGEON_PAINT;                        // 地牢漆 14
             } else if (s !== 226 && s !== 202 && s !== 70 && s !== 48 && s !== 232) {

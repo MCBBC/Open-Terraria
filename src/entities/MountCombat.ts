@@ -641,7 +641,7 @@ export function chilletDashCharge(
 
 /** 玩家 GetArmorPenetration(melee:false) 的仓内唯一桶（equipStats.armorPen——
  *  vanilla 双字段 armorPenetration/meleeArmorPenetration 中 melee:false 只取前者） */
-function playerArmorPenOf(game: GameHooks): number {
+export function playerArmorPenOf(game: GameHooks): number {
   return ((game.player as unknown as { equipStats?: { armorPen?: number } } | null)
     ?.equipStats?.armorPen ?? 0);
 }

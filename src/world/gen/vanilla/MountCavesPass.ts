@@ -9,7 +9,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { ctrunc } from '../../../core/csCompat';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { canBeClearedDuringGenerationDual, dualDungeonState } from './DungeonStyles1457';
 
 /** 山丘区域避让的沙族（原版 box 检查 type 53/151/274：沙/沙岩砖/沙岩板） */
@@ -189,9 +189,11 @@ function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
 }
 
 /** Cavinator（L48733）：向下蜿蜒洞穴，递归 steps 次直至岩层（不挖沙 53） */
-/** 原版 tileDungeon（Main.cs:7941-7946）与 wallDungeon（Main.cs:10507-10515） */
-const TILE_DUNGEON = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+/** 原版 tileDungeon（Main.cs:8131-8136）与 wallDungeon（Main.cs:10734-10745）
+ *  ——★BJ187 收编 data/tiles.ts:TILE_DUNGEON_IDS/WALL_DUNGEON_SHEETS 单源
+ *  （旧 idsByVanillaSheet 平移副本逐值全等已对拍） */
+const TILE_DUNGEON = TILE_DUNGEON_IDS;
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 
 function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, steps: number): void {
   let num1 = rng.int(7, 14);              // Next(7,15)

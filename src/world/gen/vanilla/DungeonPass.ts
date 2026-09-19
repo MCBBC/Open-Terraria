@@ -10,7 +10,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
 import { wgSpawnNpc, type GenState } from './GenState';   // ★IIIII194 值引入（老头 wg 实体落地）
-import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_TABLE_IDS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
@@ -97,14 +97,14 @@ const BEWITCH = TILE_BY_KEY['v_354_bewitching_table']!;
 type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
 type SnapFn = (name: string) => void;
 
-// Main.tileSolidTop（Main.cs:6764-7841 全表 78 项）——SolidTile 判定的第二道门。
-// 与 TILE_DEFS[].platform 近似集不同：桌14/工作台18/箱87/书架101/旗339 等皆 solidTop。
-const DG_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
-const DG_DUNGEON_TILES = new Set([41, 43, 44, 677, 678, 679]);
-const DG_DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+// Main.tileSolidTop 全表——SolidTile 判定的第二道门。与 TILE_DEFS[].platform 近似集
+// 不同：桌14/工作台18/箱87/书架101/旗339 等皆 solidTop。
+// ★BJ187 收编 data/tiles.ts 单源：DG_SOLID_TOP=SOLID_TOP_SHEETS（84 项;旧 79 项漏
+// Main.cs:10125-10131 循环臂 435-439 队伍平台,生成期不可达=行为零差）、
+// DG_DUNGEON_TILES=TILE_DUNGEON_SHEETS、DG_DUNGEON_WALLS=WALL_DUNGEON_SHEETS。
+const DG_SOLID_TOP = SOLID_TOP_SHEETS;
+const DG_DUNGEON_TILES = TILE_DUNGEON_SHEETS;
+const DG_DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 // ★IIIII112：TileID.Sets.Clouds（TileID.cs:197）——DungeonDesertCleanup→FindLowestCloud
 //   的活性格判定面（vanilla sheet 域→内部 id）
 const DG_CLOUD_SHEETS = new Set(
@@ -127,20 +127,24 @@ export { DG_FRAMED_ALL };
 // tileCut（Main.cs:7312-10158 全 41 项）/ BreakableWhenPlacing（TileID.cs:379）/
 // 巨石族 / anchorInvalidTiles（TileObjectData.cs:2113）/ Platforms（TileID.cs:243）/
 // tileNoAttach（Main.cs:7725-9901 含 435-439）/ tileTable（Main.cs:9900 段）
-const DG_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
-const DG_TILE_CUT = new Set([3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201, 205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637, 638, 654, 655, 711]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const DG_BOULDERS = BOULDERS_SHEETS;
+// ★BJ182b 收编单源 data/tiles.ts:TILE_CUT_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const DG_TILE_CUT = TILE_CUT_SHEETS;
 /** WorldGen.beachDistance（WorldGen.cs:4102）——原单例壳内局部常量,IIIII93b 提升模块级
  *  （消费面=入口 precalc 海滩带 dgSetup + AddBuriedChest NTB 蜂蜜箱带两侧短路边界）。 */
 const BEACH = 380;
-const DG_BREAK_PLACE = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
+// ★BJ182b 收编单源 data/tiles.ts:BREAKABLE_WHEN_PLACING_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const DG_BREAK_PLACE = BREAKABLE_WHEN_PLACING_SHEETS;
 const DG_CHEST_ANCH_INVALID = new Set([127, 138, 664, 665, 484, 711, 712, 713, 714, 715, 716]);
-const DG_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const DG_PLATFORMS = PLATFORMS_SHEETS;
 const DG_NO_ATTACH = new Set([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 507, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
 /** ★IIIII44 复核导出：Main.tileTable（Main.cs:9900 段 + :10131 循环族）唯一权威表
  *  ——跨模块消费端（SkyblockPass placeMB 支撑臂等）一律 import 本表,禁止局部手抄子集
  *  （「常量表有/装配漏」家族教训:SkyblockRuntime anchorSets 手写装配漏键案 2026-08-29）。 */
-export const DG_TILE_TABLE: ReadonlySet<number> = new Set([14, 18, 19, 280, // ★IIIII44 审计补位：Main.cs:7018（diff 定罪,曾缺 1/81）
- 87, 88, 101, 114, 275, 276, 277, 278, 279, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+export const DG_TILE_TABLE = TILE_TABLE_SHEETS;   // ★BJ187 补 export（tools/_i46 G3 冒烟测试绑定,先前缺 export=测试面 undefined）
 // PrefixLegacy.Prefixes 前缀池（PrefixLegacy.cs:9-64）+ ReducedNaturalChance（PrefixID.cs:9）
 const DG_PRE: Record<string, number[]> = {
   swords: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 81],
@@ -7300,10 +7304,13 @@ const snap: SnapFn = (name) => {
 
   // —— ★Place* 家族（2026-08-17 终清批，与 oracle DgP* 同构；帧走 setTileSilent 由调用方
   //    追加——此处保成功判定+写集 footprint；tileTable/tileLighted = Main.cs 全表提取）——
-  const TILE_TABLE_D = new Set<number>([14,18,19,87,88,101,114,275,276,277,278,279,280,281,285,286,296,297,298,
-    299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,
-    544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,
-    629,632,640,643,644,645,710].map(dgTileOfSheet));
+  // ★BJ187 批四（2026-09-19）：旧 76 项局部字面系逐条赋值提取漏 Main.cs:10125-10131
+  //   循环臂 tileTable[435-439]=true（与 BJ186 PC_TILE_TABLE 同病同修法;程序化对拍
+  //   差集恰={435,436,437,438,439},向 vanilla 修正）——收编 data/tiles.ts:TILE_TABLE_IDS
+  //   单源（内部 id 域;81 工作表全单 def,镜像≡旧 .map(dgTileOfSheet) 平移习语）。
+  //   消费面=PlaceOnTable1x1 门(:7405)/骷髅支(:7373)/桌面沿置门(:7510)——.has(st.type)
+  //   直查内部 id,域不变。
+  const TILE_TABLE_D = TILE_TABLE_IDS;
   const TILE_LIGHTED_D = new Set<number>([4,17,19,20,22,26,27,31,33,34,35,37,42,49,58,61,70,71,72,76,77,83,
     84,92,93,95,96,98,100,109,125,126,129,133,140,149,160,171,173,174,184,190,204,209,215,237,238,270,271,
     286,302,316,317,318,327,336,340,341,342,343,344,346,347,348,349,350,354,356,370,372,381,390,391,405,
@@ -8981,7 +8988,8 @@ const snap: SnapFn = (name) => {
     }
     // TileID.Sets.Falling / CrackedBricks / Boulders（1458 TileID.cs :195/:183/:395）
     const E137_FALLING = new Set<number>([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
-    const E137_BOULDERS = new Set<number>([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+    // ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+    const E137_BOULDERS = BOULDERS_SHEETS;
     const crSet = new Set<number>([481, 482, 483]);                          // Sets.CrackedBricks 基表
     const addCrackOf = (st0: import('./DungeonStyles1457').DungeonStyleData): void => {
       crSet.add(st0.BrickCrackedTileType);

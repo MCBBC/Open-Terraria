@@ -1,3 +1,4 @@
+import { IS_A_TREE_TRUNK_SHEETS } from '../data/tiles';
 // 钩爪（Grappling Hooks）全量变体表——数值一律取 Terarria1457（1.4.5.7）最终态
 // （73/74 双钩回收 17→22、牵引 11→12.5 为 1457 唯一钩爪数值变化）。
 //
@@ -166,7 +167,8 @@ export const HOOK_RETRACT_KILL_DIST = 24;
 export const CRACKED_BRICK_SHEETS: ReadonlySet<number> = new Set([481, 482, 483]);
 
 /** 松鼠钩 865 可挂的树干族（TileID.Sets.IsATreeTrunk，TileID.cs:161） */
-export const TREE_TRUNK_SHEETS: ReadonlySet<number> = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)——转出口别名(GrappleProj 消费面零翻动)
+export const TREE_TRUNK_SHEETS: ReadonlySet<number> = IS_A_TREE_TRUNK_SHEETS;
 
 /** 轨道 tile（Minecart track，CanTileBeLatchedOnTo 显式放行 :49968 `theTile.type == 314`） */
 export const TRACK_SHEET = 314;

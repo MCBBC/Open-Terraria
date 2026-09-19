@@ -13,7 +13,7 @@ import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatu
 import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
-import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { wetCollision } from './npcLiquid';   // lavaCollision 随湿段收口迁 projWetSection 共享体（2026-09-08）
@@ -8632,22 +8632,35 @@ export class Arrow extends Entity {
         // 命中只消费 penetrate（5 NPC 上限）+ localNPCHitCooldown 同敌冷却
         // ---- 吸血链（Projectile.cs:12877-12892 on-hit 段）----
         // 吸血鬼飞刀 304 → vampireHeal（:12879-12882，!moonLeech 门）；
-        // 魔法弹 + 幽灵套 ghostHeal → ghostHeal（:12883-12888，canGhostHeal 全 true
-        // 近似——雕像产怪 flag 未实装）。ghostHurt（幽灵伤害头 156）未接，登记。
+        // 魔法弹 + 幽灵套 ghostHeal → ghostHeal（:13877-79）。
         // numHits = 此前已受理命中数（★BJ157-② 勘误：原版 numHits++（:14263）在 proc
         //  块【之后】，旧注「原版 StrikeNPC 先自增」系误记——StrikeNPC(:13702)≠numHits++;
         //  首跳读 0 ⇒ 率 0.20,旧 hitSet.size 含本敌 = 首跳 0.15 off-by-one）
         if (this.projId === 304) {
           game.applyLifeSteal?.('vampire', Math.round(dmg), this.pveNumHits, this.x, this.y);
         } else if (projectileData(this.projId)?.magic) {
-          game.applyLifeSteal?.('ghost', Math.round(dmg), this.pveNumHits, this.x, this.y, true);
+          // ★BJ167-②③④（2026-09-19）spectre 域三小件对齐（MagicProj BJ157-① 同款习语）：
+          //  ②victim 门 spectreVictimEligible——原版 Projectile.cs:13875
+          //    `if (targetNPC.canGhostHeal | flag9)` 对 ghostHeal(:13877-79) 与
+          //    ghostHurt(:13881-83) 【同块】设门（旧注「canGhostHeal 全 true 近似」
+          //    作废）;false 族 384/387/388/523（NPC.cs:13921/:13961/:13978/:15839
+          //    写点,字段缺省 true :6270）——旧码命中该族仍治疗
+          //  ③dmg = num41 等位（:13712 `int num41 = targetNPC.StrikeNPC(...)` 返回值,
+          //    :13879 实参）=防后实扣（Enemy.lastStrikeDealt 单源;旧传
+          //    Math.round(dmg)=防前伤,治疗量按防御/旗乘差值虚高）
+          //  ④出生点 = 受害者 Center（:13879 `new Vector2(targetNPC.Center.X,.Y)`;旧传
+          //    弹体左上 this.x,y——治疗弹 298 起飞原点差几像素）
+          const v661 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
+            maxHp?: number; def?: { lifeMax?: number } };
+          if (spectreVictimEligible(v661.vanillaId)) {
+            game.applyLifeSteal?.('ghost', v661.lastStrikeDealt ?? 0, this.pveNumHits,
+              e.x + e.w / 2, e.y + e.h / 2, true);
+          }
           // ★批⑥（2026-08-31）幽灵伤害头 ghostHurt（Projectile.cs:13881 调用点 /
           // :12021 方法体,SpectreSoulProj.ts 承载全套）：magic 弹命中且防后实扣
           // （Enemy.lastStrikeDealt≈StrikeNPC 返回值 num41）>1 → 预算池闸门后从
           // 受害者 Center 放追踪浮魂弹 356（伤=弹基伤）
           if (!this.hostile && playerHasGhostHurt(game.player)) {
-            const v661 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
-              maxHp?: number; def?: { lifeMax?: number } };
             ghostHurtOnHit(game,
               { magic: true, projDamage: this.damage,
                 projX: this.x, projY: this.y, projW: this.w, projH: this.h,

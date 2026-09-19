@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -135,13 +135,8 @@ const C2X2_MAIN_SHEETS = new Set([94, 95, 97, 98, 99, 100, 125, 126, 173, 282, 2
 const CHECK4X2_SHEETS = new Set([79, 90, 487]);
 /** Main.tileTable 副本（Check2x2 非巨石支地面门 tileTable 腿;PilesPass.SUP_TILE_TABLE
  *  /FinalCleanupPass.TILE_TABLE 同源;同源副本禁 import 惯例） */
-const TILE_TABLE_2X2KT = new Set([
-  280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
-  608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
-  559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
-  298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87,
-  88, 405, 427,
-]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TILE_TABLE_2X2KT = TILE_TABLE_SHEETS;
 /** TileID.Sets.Platforms（Check4x2 床支平台腿;HalfBrickPass 域无此表副本） */
 const PLATFORMS_4X2 = idsByVanillaSheet(19, 427, 435, 436, 437, 438, 439);
 /** WorldGen.destroyObject（Check2x2 再入闸,cs:48408/48564/48799）：
@@ -265,16 +260,13 @@ const CHECK3X2_SHEETS = new Set([
 ]);
 /** cs:49703 首组（宽底座族）：SolidTileAllowBottomSlope ∨ 下方 solidTop 整帧 ∨ 平台 */
 const CHECK3X2_WIDE_BASE = new Set([285, 286, 298, 299, 310, 339, 538, 361, 362, 363, 364, 532, 544, 533, 555, 556, 582, 619, 629]);
-/** 原版 Main.tileSolidTop 全表（Main.cs tileSolidTop[X]=true 全量+435-439 循环）——
- *  与 TILE_TABLE_S(tileTable)是两张表（差 101/16/134/239/435-439），勿互用 */
-const TILE_SOLID_TOP_S = new Set([
-  14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376,
-  380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532,
-  533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601,
-  602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643,
-  644, 645, 710,
-]);
+/** 原版 Main.tileSolidTop 全表——与 TILE_TABLE_S(tileTable=单源 TILE_TABLE_SHEETS
+ *  81 项) 是两张表（差恰={16,134,239} solidTop 独有:铁砧/迈锡尼铁砧/金属条;
+ *  tileTable−tileSolidTop 程序化对拍=∅,★BJ187 2026-09-19 定谳）。
+ *  ★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项逐值全等;旧注「0 系本表
+ *  多出」系陈旧笔误——盘上实表从不含 0,vanilla 全树无 tileSolidTop[0] 赋值,
+ *  BJ186 登记的「剔 0」=无操作,对拍即证）,勿互用 */
+const TILE_SOLID_TOP_S = SOLID_TOP_SHEETS;
 
 function check3x2KT(st: TileStore, rng: RNG, x: number, y: number, sheet: number): void {
   if (destroyObject) return;                                          // cs:49621
@@ -336,7 +328,8 @@ function check3x2KT(st: TileStore, rng: RNG, x: number, y: number, sheet: number
  * CONST 链定罪：Caverer 雕掉地牢书架/旗锚 → vanilla KillTile 尾级联经
  * TileFrameImportant case 50（书）/91（旗）链杀,JS 漏派发 → 7 格残存。 */
 /** Main.tileTable（Main.cs:6828-6869+7983-7987 全 77 项） */
-const TILE_TABLE_S = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TILE_TABLE_S = TILE_TABLE_SHEETS;
 /** TileFrameImportant case 13/33/49/50/78/174/372/646/707 组（cs:86348） */
 const ON_TABLE_1X1_S = new Set([13, 33, 49, 50, 78, 174, 372, 646, 707]);
 /** TileID.Sets.NotReallySolid（TileID.cs:355） */
@@ -1234,14 +1227,16 @@ const POUND_BLACKLIST = idsByVanillaSheet(10, 48, 137, 232, 380, 387, 388, 476, 
 const _i93LegacyCheckPile = typeof process !== 'undefined' && process.env.SW_I93_LEGACYP === '1';
 /** ★IIIII99d A/B 哨兵（tools/_iii116ab 对拍隔离本批消费者面贡献；缺省 false 派发） */
 const _i99dNoDispatch = typeof process !== 'undefined' && process.env.SW_I99D_NODISP === '1';
-const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS = BOULDERS_IDS;
 const POUND_GEN_SKIP = idsByVanillaSheet(190, 30);
 // ★BJ158①（2026-09-18）：本地 idsByVanillaSheet 平移副本拆除——ForbidsSloping 收编
 //  data/tiles.ts 单源 FORBIDS_SLOPING_IDS（内部 id 域,与旧产物逐值全等已探针定谳）,
 //  消费面 canPoundTile ④ 上格门改走单源。
 
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）：树干族——CanKillTile 上格早退门 */
-const TREE_TRUNK = idsByVanillaSheet(5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TREE_TRUNK = IS_A_TREE_TRUNK_IDS;
 
 export function canPoundTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;

@@ -8,7 +8,7 @@
 //   已定型，只做"石→苔藓"点状替换，不与 caves-checkpoint 覆盖链冲突
 import type { RNG } from '../../../core/rng';
 import type { TileStore } from '../../TileStore';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_IDS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { spreadGrass } from './Spread';
@@ -31,8 +31,10 @@ const NEON_FORBIDDEN = idsByVanillaSheet(70, 60, 367, 368, 161, 147, 396, 397);
 const NEON_FORBIDDEN_REMIX = idsByVanillaSheet(60, 161, 147, 25, 203);
 /** ★IIII184 霓虹禁区 (notTheBees&&dontStarve) 支（cs:17610-17615）：同默认但无 60 */
 const NEON_FORBIDDEN_NTB_DS = idsByVanillaSheet(70, 367, 368, 161, 147, 396, 397);
-/** Main.tileDungeon（Main.cs:7941-7946：41 青砖/43 蓝砖/44 绿砖/677-679 变体） */
-const DUNGEON_TILES = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
+/** Main.tileDungeon（Main.cs:8131-8136：41 青砖/43 蓝砖/44 绿砖/677-679 变体）
+ *  ——★BJ187 收编 data/tiles.ts:TILE_DUNGEON_IDS 单源（旧 idsByVanillaSheet 平移
+ *  副本逐值全等已对拍） */
+const DUNGEON_TILES = TILE_DUNGEON_IDS;
 /** Main.tileMoss（Main.cs:6956-6996，按 sheet id）——尾段 SpreadGrass 的苔藓块判定 */
 const MOSS_SHEETS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 const SHIMMER_SAFETY = 150;            // shimmerSafetyDistance（WorldGen.cs:4104）

@@ -28,7 +28,7 @@
 import { TileStore, LIQUID_TYPE } from '../../TileStore';   // ★IIIII194 lava(true) 用 LIQUID_TYPE（+1 编码禁裸写）
 import type { RNG } from '../../../core/rng';
 import { wgNpcBlocksEmptyTile, type GenState } from './GenState';   // ★IIIII194 EmptyTile 实体支
-import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { genSolidType, flipGenSolid, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { setBoulderSolidity } from './TrapsPass';
@@ -77,8 +77,9 @@ const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);
 const CONV_SAND = new Set([53, 112, 116, 234]);
 /** TileID.Sets.Clouds（:197） */
 const CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
-/** Main.tileDungeon（Main.cs:7941-7946） */
-const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
+/** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
+ *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
+const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
 /** TileID.Sets.Corrupt（:329）/ Crimson（:347）——倒木 50×50 回避扫描 */
 const SET_CORRUPT = new Set([23, 661, 25, 112, 163, 398, 400, 636]);
 const SET_CRIMSON = new Set([199, 662, 203, 234, 200, 399, 401, 205]);
@@ -97,7 +98,8 @@ const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 62
  *  SHEET[type]）,收编 data/tiles.ts 单源 TILE_CUT_SHEETS（与旧副本逐值对拍 41≡41,
  *  仅序异）;本文件此后不存在裸名 TILE_CUT,sheet 域消费一律 TILE_CUT_SHEETS。 */
 /** TileID.Sets.Boulders（:195）——InvalidTileForPilesOrSpeleothems */
-const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// TileID.Sets.Boulders——★BJ168-债2（2026-09-19）本地副本拆除,收编 data/tiles.ts
+// 单源 BOULDERS_SHEETS（sheet 域,逐值对拍 10≡10;消费面 417/535/826/1151 同名直改）
 /** WallID.Sets.AllowsPlantsToGrow（WallID.cs:58）——PlaceTile(3) 的墙门（含 0=无墙） */
 const WALL_ALLOWS_PLANTS = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317,
   63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80]);
@@ -193,7 +195,8 @@ const platformProperTopFrame198 = (fx: number): boolean => {
   return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
 };
 /** TileID.Sets.Platforms（TileID.cs:243）= {19,427,435-439}（sheet 域） */
-const PLATFORMS_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// TileID.Sets.Platforms——★BJ168-债2（2026-09-19）本地同名副本拆除,收编 data/tiles.ts
+// 单源 PLATFORMS_SHEETS（逐值对拍 7≡7;消费面 224/243 同名零改,键域 SHEET[t]=sheet 相配）
 /** WorldGen.SolidTile2(int,int)（cs:71023-71034）**生成期** 1:1——tileSolid 读生成期表
  *  （genSolidType）而非 TILE_DEFS.solid 静态初值。★IIIII198（2026-09-03）waterpark
  *  #84 定罪修复：泡沫块 379 静态表 Main.cs:9607 true、仅 DoUpdateInWorld_Inner
@@ -413,7 +416,7 @@ function check3x2PileSweep(st: TileStore, rng: RNG, x: number, y: number, sheet:
     if (!st.inBounds(k, num8)) continue;                              // 原版越界=支撑真（cs:70214）+null 底免材质门
     const bi = st.idx(k, num8);
     if (!solidAllowBottomSlope(st, k, num8)) { flag = true; continue; }          // cs:49325/49282
-    if (st.flags[bi] && BOULDERS.has(SHEET[st.type[bi]])) { flag = true; continue; }  // InvalidTileForPiles
+    if (st.flags[bi] && BOULDERS_SHEETS.has(SHEET[st.type[bi]])) { flag = true; continue; }  // InvalidTileForPiles
     if (!st.flags[bi]) continue;                                      // cs:49329/49290 非活性底免材质门
     const b = SHEET[st.type[bi]];
     if (sheet === 187) {                                              // cs:49331-49346 材质按样式列
@@ -531,7 +534,7 @@ function check2x1Sweep185(st: TileStore, rng: RNG, x: number, y: number, sheet: 
     for (let j = num; j <= num + 1; j++) {
       if (!st.inBounds(j, y + 1)) continue;
       const bj = st.idx(j, y + 1);
-      if (st.flags[bj] && BOULDERS.has(SHEET[st.type[bj]])) { flag = true; break; }
+      if (st.flags[bj] && BOULDERS_SHEETS.has(SHEET[st.type[bj]])) { flag = true; break; }
       if (!st.flags[bj]) continue;
       const bt = SHEET[st.type[bj]];
       if (num5 >= 25 && num5 <= 30) {
@@ -822,7 +825,7 @@ function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, 
 
 /** InvalidTileForPilesOrSpeleothems（cs:39005）：活性巨石族 */
 const invalidForPiles = (st: TileStore, x: number, y: number): boolean =>
-  inWorld(st, x, y, 2) && activeAt(st, x, y) && BOULDERS.has(sheetAt(st, x, y));
+  inWorld(st, x, y, 2) && activeAt(st, x, y) && BOULDERS_SHEETS.has(sheetAt(st, x, y));
 
 /** Place3x2（cs:52097）1:1：3×2 大堆/倒木，锚点 = 底行中间格 */
 function place3x2(st: TileStore, x: number, y: number, tileId: number, sheet: number, style: number): boolean {
@@ -1147,7 +1150,7 @@ export function runExtraLiquidAddBubbleBlocks(st: TileStore, rng: RNG, gs: GenSt
           if (solid) num16++;                                 // cs:1743-1746
           const sh = inB ? SHEET[st.type[i]] : -1;            // cs:1747-1750：active &&（非实心 ∪ 拒置表）
           if (inB && (st.flags[i] & 1) !== 0
-            && (!solid || BORDER_REJECT_189.has(sh) || BOULDERS.has(sh))) flag3 = true;
+            && (!solid || BORDER_REJECT_189.has(sh) || BOULDERS_SHEETS.has(sh))) flag3 = true;
         }
         if (solid) num15 = Math.fround(num15 + f334);         // cs:1752-1755 实心 +0.334f
         else if (inB && st.liquid[i] > 0) num15 = Math.fround(num15 + 1);  // 液体 +1f
@@ -1630,17 +1633,8 @@ const chilletGround = glowTulipGround;
  *  （19 平台 tileTable=true 非 solid！）可作蛋的地面。旧移植只查 SolidTile2
  *  ⇒ vanilla 在平台面放成的第 n 座蛋（ntb SEED=1372357239 锚(2945,775)、
  *  左列地面 (2944,776)=19 平台）JS 拒收继续掷 → 蛋错位族 T0>752×4/T752>0×4。 */
-const PLACE2X2_TABLE = new Set([
-  14, 18, 19, 87, 88, 101, 114,
-  275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339,
-  358, 359, 361, 362, 363, 364, 376, 380,
-  391, 392, 393, 394, 405, 413, 414, 427,
-  435, 436, 437, 438, 439, 469,
-  532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559,
-  582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612,
-  619, 629, 632, 640, 643, 644, 645, 710,
-]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLACE2X2_TABLE = TILE_TABLE_SHEETS;
 
 /** Place2x2 default 列地面门（cs:51513-51521）：nactive() && (SolidTile2 || tileTable)。
  *  inActive 生成期恒 0 不查；越界 GetTileSafely→空 tile→!nactive→false。

@@ -6,7 +6,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
 import { placeTilePrologueClear } from './WorldGenTileHelpers';   // ★IIIII179
@@ -60,13 +60,15 @@ const FR_IMPORTANT_NOCUT = new Set([
 
 /** Place1x1 机关门的 Boulders 底座排除（TileID.Sets.Boulders，TileID.cs:195；
  *  Place1x1 cs:45213：IsAMechanism[135] && Boulders[底.type] → 拒放陷阱） */
-const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS = BOULDERS_SHEETS;
 
 /** Check2x2 上方箱族豁免（cs:48483-85：BasicChest{21,467}+BasicChestFake{441,468}
  *  +88 梳妆台+470 人偶架+475 帽架；裸读 type 不查 active——ghost type 保真）。
  *  与 FinalCleanupPass/HalfBrickPass 同源表副本（"同源副本禁 import"惯例）。 */
 const CHEST_PROTECT_2X2 = new Set([21, 467, 441, 468, 88, 470, 475]);
-const PLATFORMS_TOP = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORMS_TOP = PLATFORMS_SHEETS;
 const platformProperTop = (fx: number): boolean => {
   const n = Math.floor(fx / 18);
   return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);

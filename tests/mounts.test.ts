@@ -11,7 +11,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import {
   MOUNT_DATA, MOUNT_NAMES, MOUNT_SETS, MOUNT_TEXTURE_OK,
-  mountOfItem, mountOfBuff, MountInstance, isCartMount,
+  mountOfItem, mountOfBuff, MountInstance, isCartMount, mountFallbackColor,
   FRAME_STANDING, FRAME_RUNNING, FRAME_IN_AIR, FRAME_FLYING, FRAME_SWIMMING, FRAME_DASHING,
   type MountedPlayerView,
   DRILL_PICK_POWER, DRILL_PICK_TIME, DRILL_MAX_LENGTH,
@@ -29,7 +29,7 @@ import { ITEM_BY_KEY } from '../src/data/items';
 import { vanillaItemKey } from '../src/data/vanillaRecipes';
 import { TILE } from '../src/core/constants';
 import { BuffType } from '../src/stats/Buffs';
-import { mountTextureAnchorY, playerMountRotation } from '../src/render/Renderer';
+import { mountTextureAnchorY, playerMountRotation, Renderer } from '../src/render/Renderer';
 
 // ---- 测试世界/玩家（breath.test.ts 同款 harness） ----
 const fakeHooks = (w: World, p?: Player) => ({
@@ -1654,5 +1654,118 @@ describe('X2① QuickMinecartSnap（Player.cs:6140-6176 oldStyleParkour 臂 + :6
     expect(spy.mock.calls.length).toBe(1);
     expect(spy.mock.calls[0][0]).toBe(28);                          // 首枚锁死（CanHitLine 全断无法替换）
     expect(spy.mock.calls[0][1]).toBe(56);
+  });
+});
+
+// ★BJ167 骑乘态逐层清单（原版零多余绘制）：Mount.Draw（:5560-5622）逐层各画
+//   各的贴图——`texture2D == null → return`（:5620-5622），Asset<Texture2D>.Empty
+//   （Value=null）层零绘制；调用点 PlayerDrawLayers.cs:225-226（背 0/背Extra 1，
+//   玩家前）、:3016/:3030（前 2/前Extra 3，玩家后）。史莱姆鞍 3 四贴图仅 back
+//   非空（Mount.cs:910-913）→ 原版骑乘视觉 = 背层 Mount_Slime 贴图 + 玩家本体，
+//   front 层零绘制。本仓 drawMountLayer 的近似胶囊（色块体+头两椭圆）只允许兜底
+//   "整只坐骑无任何贴图可得"；曾对 front Empty 层照画 → 一大一小两颗
+//   mountFallbackColor[3]=#4080FF 蓝椭圆叠在真贴图与玩家上（用户实报残留两椭圆）。
+describe('骑乘态逐层清单（drawMountLayer——BJ167 front Empty 层零绘制,胶囊只兜底无贴图坐骑）', () => {
+  type Op = { op: string; a: unknown[]; fillStyle?: string };
+  const recCtx = () => {
+    const ops: Op[] = [];
+    const ctx = {
+      save() { ops.push({ op: 'save', a: [] }); },
+      restore() { ops.push({ op: 'restore', a: [] }); },
+      translate(...a: unknown[]) { ops.push({ op: 'translate', a }); },
+      rotate(...a: unknown[]) { ops.push({ op: 'rotate', a }); },
+      scale(...a: unknown[]) { ops.push({ op: 'scale', a }); },
+      beginPath() { ops.push({ op: 'beginPath', a: [] }); },
+      fill() { ops.push({ op: 'fill', a: [], fillStyle: (ctx as { fillStyle?: string }).fillStyle }); },
+      ellipse(...a: unknown[]) { ops.push({ op: 'ellipse', a, fillStyle: (ctx as { fillStyle?: string }).fillStyle }); },
+      fillRect(...a: unknown[]) { ops.push({ op: 'fillRect', a, fillStyle: (ctx as { fillStyle?: string }).fillStyle }); },
+      drawImage(img: { tag?: string; width?: number }, ...a: unknown[]) {
+        ops.push({ op: 'drawImage', a: [img.tag ?? '', ...a] });
+      },
+      globalAlpha: 1,
+      fillStyle: '' as string | CanvasGradient | CanvasPattern,
+    };
+    return { ctx, ops };
+  };
+  // 背层贴图可控的假图集：loads=false 模拟"整只坐骑无任何贴图可得"（缺表/加载失败）
+  const SERVED = ['vanilla/Mount_Slime.png', 'vanilla/Mount_Turtle.png'];
+  const fakeAtlas = (loads: boolean) => ({
+    ensureVImage: (file: string) =>
+      loads && SERVED.includes(file) ? { width: 100, height: 288, tag: file } : null,
+  });
+  const fakePlayer = {
+    x: 100, y: 400, w: 20, h: 42, facing: 1,
+    petting: { isPetting: false, mount: false },
+  };
+  const fakeMount = (over: Record<string, unknown> = {}) => ({
+    type: 3, frame: 0, frameExtra: 0, playerOffset: 20, heightBoost: 20,
+    textures: { back: 'vanilla/Mount_Slime.png' },
+    data: MOUNT_DATA['3'],
+    ...over,
+  });
+  const drawLayer = (stub: unknown, ctx: CanvasRenderingContext2D, mnt: unknown, layer: 'back' | 'front') => {
+    (Renderer.prototype as unknown as {
+      drawMountLayer: (c: CanvasRenderingContext2D, p: unknown, m: unknown, l: 'back' | 'front', ws?: number) => void;
+    }).drawMountLayer.call(stub, ctx, fakePlayer, mnt, layer, 0);
+  };
+
+  it('原版逐层清单：史莱姆鞍 3 骑乘 = 背层贴图恰 1 绘 + front 层零绘制（零椭圆）', () => {
+    const stub = { atlas: fakeAtlas(true), lighting: null } as unknown as Renderer;
+    // 背层（玩家后）：Mount_Slime 帧行恰 1 次 drawImage，无任何椭圆
+    const back = recCtx();
+    drawLayer(stub, back.ctx as unknown as CanvasRenderingContext2D, fakeMount(), 'back');
+    expect(back.ops.filter((o) => o.op === 'drawImage')).toHaveLength(1);
+    expect(back.ops.some((o) => o.op === 'ellipse')).toBe(false);
+    // front 层（玩家前）：frontTexture=Asset.Empty → 零绘制（曾在此画胶囊两椭圆）
+    const front = recCtx();
+    drawLayer(stub, front.ctx as unknown as CanvasRenderingContext2D, fakeMount(), 'front');
+    expect(front.ops.some((o) => o.op === 'ellipse' || o.op === 'fill')).toBe(false);
+    expect(front.ops.filter((o) => o.op === 'drawImage')).toHaveLength(0);
+  });
+
+  it('兜底语义保留：整只坐骑无任何贴图可得（ensureVImage null）→ 近似胶囊两椭圆', () => {
+    const stub = { atlas: fakeAtlas(false), lighting: null } as unknown as Renderer;
+    const front = recCtx();
+    drawLayer(stub, front.ctx as unknown as CanvasRenderingContext2D, fakeMount(), 'front');
+    const ells = front.ops.filter((o) => o.op === 'ellipse');
+    expect(ells).toHaveLength(2);                                  // 大身体 + 小头
+    expect(ells.every((o) => o.fillStyle === mountFallbackColor(3))).toBe(true);
+    expect(mountFallbackColor(3)).toBe('#4080FF');                 // 用户实报"蓝色"
+    // 背层缺图也不画胶囊（近似体单层，front 层承担）
+    const back = recCtx();
+    drawLayer(stub, back.ctx as unknown as CanvasRenderingContext2D, fakeMount(), 'back');
+    expect(back.ops.some((o) => o.op === 'ellipse' || o.op === 'drawImage')).toBe(false);
+  });
+
+  it('同族回归（back-only 22 座）：龟 4 背贴图已得 → front 层同样零绘制', () => {
+    const stub = { atlas: fakeAtlas(true), lighting: null } as unknown as Renderer;
+    const turtle = fakeMount({
+      type: 4, textures: { back: 'vanilla/Mount_Turtle.png' }, data: MOUNT_DATA['4'],
+    });
+    const front = recCtx();
+    drawLayer(stub, front.ctx as unknown as CanvasRenderingContext2D, turtle, 'front');
+    expect(front.ops.some((o) => o.op === 'ellipse' || o.op === 'fill')).toBe(false);
+    expect(front.ops.filter((o) => o.op === 'drawImage')).toHaveLength(0);
+  });
+
+  it('front-only 族（矿车 6）不受门误伤：front 贴图可得 → 照常 1 绘；缺图 → 胶囊兜底', () => {
+    const cart = (tex: { back?: string; front?: string }) => fakeMount({
+      type: 6, textures: tex, data: MOUNT_DATA['6'],
+    });
+    // front 贴图加载成功：texture 路径 1 绘、无胶囊（门读的是 tex.back——矿车 back=undefined）
+    const stubOk = { atlas: fakeAtlas(true), lighting: null } as unknown as Renderer;
+    const okAtlas = stubOk['atlas'] as { ensureVImage: (f: string) => unknown };
+    const origEnsure = okAtlas.ensureVImage;
+    okAtlas.ensureVImage = (f: string) =>
+      f === 'vanilla/Mount_Minecart.png' ? { width: 200, height: 40, tag: 'Mount_Minecart' } : origEnsure(f);
+    const frontOk = recCtx();
+    drawLayer(stubOk, frontOk.ctx as unknown as CanvasRenderingContext2D, cart({ front: 'vanilla/Mount_Minecart.png' }), 'front');
+    expect(frontOk.ops.filter((o) => o.op === 'drawImage')).toHaveLength(1);
+    expect(frontOk.ops.some((o) => o.op === 'ellipse')).toBe(false);
+    // front 贴图缺表：back 也无 → 胶囊兜底两椭圆
+    const stubMiss = { atlas: fakeAtlas(false), lighting: null } as unknown as Renderer;
+    const frontMiss = recCtx();
+    drawLayer(stubMiss, frontMiss.ctx as unknown as CanvasRenderingContext2D, cart({ front: 'vanilla/Mount_Minecart.png' }), 'front');
+    expect(frontMiss.ops.filter((o) => o.op === 'ellipse')).toHaveLength(2);
   });
 });

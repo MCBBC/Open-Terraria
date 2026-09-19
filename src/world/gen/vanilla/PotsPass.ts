@@ -9,7 +9,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 
 export function runPotsPass(store: TileStore, rng: RNG, gs: GenState): void {
@@ -24,7 +24,7 @@ export function runPotsPass(store: TileStore, rng: RNG, gs: GenState): void {
   const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!;
   const JUNGLE = TILE_BY_KEY['v_60_jungle_grass_block']!;
   const LIHZARD = TILE_BY_KEY['v_226_lihzahrd_brick'] ?? -1;
-  const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+  const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;   // Main.wallDungeon（★BJ187 收编 data/tiles.ts 单源,9 项逐值全等）
   const MARBLE_WALLS = new Set([187, 216, 223]);
 
   for (let n = 0; n < count; n++) {

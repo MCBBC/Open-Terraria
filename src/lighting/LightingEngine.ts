@@ -152,10 +152,14 @@ export class LightingEngine {
     const ar = this.active.r, ag = this.active.g, ab = this.active.b;
     const scale = globalBrightness * 255;
     for (let i = 0; i < outR.length; i++) {
-      // 原版 ExportTo(LT57:231-233)是 `(int)(color*num)` 截断,非四舍五入
-      outR[i] = Math.min(255, Math.trunc(ar[i] * scale));
-      outG[i] = Math.min(255, Math.trunc(ag[i] * scale));
-      outB[i] = Math.min(255, Math.trunc(ab[i] * scale));
+      // 原版 ExportTo(LT57:231-233)是 `(int)(color*num)` 截断,非四舍五入。
+      // 2026-09-19:`>=255 ? 255 : |0` 与旧 `Math.min(255, Math.trunc(v))` 全域等值
+      // (v≥0 截断=|0;NaN:|0=0=ToUint8(NaN);Inf→255;-0.5:|0=0=ToUint8(-0);
+      //  负值两侧同为 ToUint8(trunc(v))——光照图无负值,纯防御),省 3 对内建调用
+      const vr = ar[i] * scale, vg = ag[i] * scale, vb = ab[i] * scale;
+      outR[i] = vr >= 255 ? 255 : vr | 0;
+      outG[i] = vg >= 255 ? 255 : vg | 0;
+      outB[i] = vb >= 255 ? 255 : vb | 0;
     }
   }
 

@@ -930,6 +930,15 @@ export class VanillaDust {
       case 185: return { rgb: 200 / 255, a: 125 / 255 };                        // :2635-2637(蓝通道 255 标量近似备案)
       case 182: case 206: return { rgb: 1, a: 0 };   // :2517/:2595 同句 (255,255,255,0)——A=0 预乘加法白光,恒亮不读尘 α
       case 267: return { rgb: 1, a: 0 };                                        // :2743-2746 Color(color.RGB,0)——色走 color pass
+      // ★RB-彩虹魔杖（2026-09-20，用户实报"白大圆内红衣人物像"定谳）：66 RainbowTorch
+      //  = GetAlpha :2767-2769 `return new Color(newColor.R, newColor.G, newColor.B, 0)`
+      //  ——A=0 纯加算习语（XNA α=0：dst 因子=1−texA×0=1 零擦除、tex.rgb×光色 纯加）。
+      //  光色 RGB 由管线交付（lit 尘画在合成前→lightmap 逐像素乘,同 R2 光色随环境口径）。
+      //  旧缺档落 default {rgb:num,a:num}（α=100→≈0.61）：擦 61% 背景后暗加=亮头团/
+      //  光盘上的"暗十字星簇"（Dust.png 66 号帧=白十字星,scale2.5）——用户把十字星簇
+      //  读成"人物像"。消费面=弹 79 彩虹魔杖弹每拍 1×d66（1458 Projectile.cs:44390-44406
+      //  NewDust α100/Disco 色/2.5f）+ orchestraFx RainbowRodHit 两掷。
+      case 66: return { rgb: 1, a: 0 };                                         // :2767-2769 Color(newColor.RGB,0)——本体光色加算,disco 色走 color pass
       case 278: return { rgb: 1, a: 25 / 255 };                                 // :2632-2637 newColor×color, A=25
       case 58: return { rgb: 1, a: 0 };                                         // :2721-2724 Color(255,255,255,0)
       case 230: return { rgb: 1, a: 0 };   // :2616-2619 Color(255,255,255,0)——钻头尘本体透明，纯光源

@@ -20,7 +20,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { setBoulderSolidity } from './TrapsPass';
@@ -41,11 +41,10 @@ const T488 = TILE_BY_KEY['v_488_fallen_log']!;
 const T_DIRT_FNT = TILE_BY_KEY['dirt']!;                 // 原版 sheet0（Clear(Tile) 的 type=0 落位）
 const PLATE_SHEET = 135;
 
-/** Main.tileSolidTop（TrapsPass 同表副本——同源副本禁 import 惯例） */
-const SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileSolidTop 全表——★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项;
+ *  旧 79 项漏 Main.cs:10125-10131 循环臂 435-439 队伍平台,生成期不可达=行为零差;
+ *  「同源副本禁 import 惯例」旧注随单源化退役） */
+const SOLID_TOP = SOLID_TOP_SHEETS;
 
 /** TileID.Sets.Ore（TileID.cs:399） */
 const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
@@ -112,9 +111,11 @@ function vid(id: number): number {
 }
 
 /** TileID.Sets.Platforms（TileID.cs:157 全 6 成员）——SolidTile2 平台支 */
-const PLATFORMS_FNT = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORMS_FNT = PLATFORMS_SHEETS;
 /** TileID.Sets.Boulders（TileID.cs:195，含 665）——Wiring.IsAMechanism 拒门 */
-const BOULDERS_SETS_FNT = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDERS_SETS_FNT = BOULDERS_SHEETS;
 
 /** SolidTile2（cs:71023）：active && tileSolid && (平台&&(half||topSlope) || slope==0)
  *  && !half && !inActive。★与本仓 GenSolid 覆写表联动（巨石窗语义关键）。 */

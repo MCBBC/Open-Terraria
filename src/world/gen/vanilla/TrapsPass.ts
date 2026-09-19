@@ -8,7 +8,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 // ★MMMMMMM：巨石支受理门双态门（1456/1457 分叉实证,见 placeTrap case1 注）
@@ -33,19 +33,22 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 const sheetOf = (t: number): number => (t >= 0 && t < SHEET_OF.length ? SHEET_OF[t] : -1);
 
 /** TileID.Sets.Boulders（TileID.cs:195）= {138,484,664,665,711-716}（sheet 空间） */
-const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+// ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const BOULDER_SHEETS = BOULDERS_SHEETS;
 const isBoulderType = (t: number): boolean => BOULDER_SHEETS.has(sheetOf(t));
-/** Main.tileDungeon（Main.cs:7941-7946）= {41,43,44,677,678,679}（sheet 空间） */
-const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
-/** Main.wallDungeon（Main.cs:10507-10515）= {7,8,9,94-99}（wall id 空间，免换算） */
-const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-/** Main.tileSolidTop（Main.cs:6764+ 全 86 项，U/DDDD 批同表副本——不 import 防耦合） */
-const SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
-  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
-  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
-  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
+ *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
+const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
+/** Main.wallDungeon（Main.cs:10734-10745）= {7,8,9,94-99}（wall id 空间，免换算）
+ *  ——★BJ187 收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
+const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
+/** Main.tileSolidTop 全表——★BJ187 收编 data/tiles.ts:SOLID_TOP_SHEETS 单源（84 项;
+ *  旧 79 项漏 Main.cs:10125-10131 循环臂 435-439 队伍平台,生成期不可达=行为零差;
+ *  「不 import 防耦合」旧注随单源化退役） */
+const SOLID_TOP = SOLID_TOP_SHEETS;
 /** TileID.Sets.Platforms（TileID.cs:243） */
-const PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+// ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLATFORM_SHEETS = PLATFORMS_SHEETS;
 /** TileID.Sets.Ore（TileID.cs:399） */
 const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
 /** PlaceSandTrap ±25 禁置族：BasicChest{21,467}+Paintings{240,241,242,245,246}+{10,19,15,219,314} */
@@ -459,7 +462,8 @@ const PREVENTS_REMOVAL = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 
  *  独立臂，1457 cs:62914-62921 与树干族帧形豁免表不同）。★IIIII169：本域
  *  checkBreakabilityT 的树干帧门用（与 HalfBrickPass.TREE_TRUNK/TrackPass.
  *  TREE_TRUNK_SS 同一全集，第三副本勿再散表）。 */
-const TREE_TRUNK_T = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TREE_TRUNK_T = IS_A_TREE_TRUNK_SHEETS;
 /** IsAContainer（cs:48831）：BasicDresser{88}+{470,475}+BasicChest{21,467}+Fake{441,468} */
 const CONTAINER_SHEETS = new Set([88, 470, 475, 21, 467, 441, 468]);
 
@@ -610,10 +614,8 @@ const SIGN_DISPATCH_SHEETS = new Set([55, 85, 395, 425, 510, 511, 573]);
 /** BasicChest{21,467}（TileID.cs:315）→ CheckChest（cs:81400+） */
 const CHEST_SHEETS = new Set([21, 467]);
 /** Main.tileTable（Main.cs:6828+ 全 75 项，= tileSolidTop ∖ {16,134,239}） */
-const TILE_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299,
-  309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538,
-  542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610,
-  611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const TILE_TABLE = TILE_TABLE_SHEETS;
 /** vanilla destroyObject（WorldGen 静态位）本 pass 语境镜像：Check2x2/CheckChest
  *  杀除期置真，期间再入两者头门早退（cs:48407/CheckChest 头），杀除毕复位 */
 let destroyObjectT = false;
@@ -2200,10 +2202,8 @@ export function placeTNTBarrel(st: TileStore, x: number, y: number, rng?: RNG): 
  *  → 头门 `!tileSolid[num]` 恒过（forced=false 路不拒锚占位），inactive 锚格
  *  Clear(Tile|TilePaint|Slope)（ghost type/帧/坡/半砖/块漆清零——Place2x2 后续
  *  拒绝也保留此清）。与 MicroBiomesPass.place2x2Direct 同源（副本禁 import）。 */
-const PLACE2X2_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299,
-  309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538,
-  542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610,
-  611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+// ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
+const PLACE2X2_TABLE = TILE_TABLE_SHEETS;
 function place2x2Traps(st: TileStore, x: number, y: number, type: number): boolean {
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) { tntProbe(`R bounds ${x},${y}`); return false; }   // cs:51786
   // ★PlaceTile 头（cs:59500）：inactive 锚 Clear(Tile|TilePaint|Slope)（654 非实心
