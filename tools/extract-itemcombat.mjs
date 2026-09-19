@@ -48,8 +48,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const AUDIT = process.argv.includes('--audit'); // 自审计模式:不写文件,stdout 出 JSON 摘要
 // 源版本可选(recon-item-1456-1457.mjs 以 query-string 双实例分别取 1456/1457;
-// 缺省 1456 = 既有产物基线,直接跑本文件行为不变)
-export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+// ★BJ183 2026-09-20 基准对齐:缺省 1456→1457(裸跑不再丢 1457 专属字段/条目——
+// 1782/1784/1835/3291 crit + 4058/4060/4061/4062/4347/4348/4381/4788-4790/5629
+// 战斗画像全字段 + 6152-6155/6171/6173 新武器;1456 档留 SW_ITEM_VER=1456 显式回拍)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 const src = readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8');
 
 // ---- 方法体切片（配平花括号） ----

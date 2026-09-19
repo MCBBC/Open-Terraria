@@ -19,8 +19,11 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..');
-// 源版本可选(recon-item-1456-1457.mjs 对账用;缺省 1456 = 既有产物基线)
-export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+// 源版本可选(recon-item-1456-1457.mjs 对账用;
+// ★BJ183 2026-09-20 缺省 1456→1457——盘上 vanilla-projstatus.json 已是 1457 终值
+// (1117/1122/1125/1127/114 + 182 durNext(2,5)/301 flat90 重放,BJ92/93 批),
+// 裸跑 1456 会把新档打回;1456 档留 SW_ITEM_VER=1456 显式回拍)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 const SRC = join(ROOT, '..', 'Terarria' + SRC_VER, 'Terraria', 'Projectile.cs');
 const OUT = join(ROOT, 'src', 'data', 'vanilla-projstatus.json');
 const AUDIT = process.argv.includes('--audit'); // 自审计:不写文件,stdout 出 {types,entries,skipped}

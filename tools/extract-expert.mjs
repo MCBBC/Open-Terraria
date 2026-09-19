@@ -24,13 +24,15 @@
 //   ⑤ 有状态正则：不用正则扫全文——按行深度栈解析（extract-itemrare.mjs 同法），
 //     只认 case 组体顶层(depth=组深+1)无条件赋值，变体 if 支内不收。
 // 输出 Record<vid, 1>（itemfunc 1/0 旗惯型；recon-item SCALAR 直写）。
-// 用法：SW_ITEM_VER=1457 node tools/extract-expert.mjs   （直跑落盘）
+// 用法：node tools/extract-expert.mjs   （直跑落盘,缺省 1457）
 //       node tools/extract-expert.mjs --dump             （stdout 全量表，recon 双实例用）
 import { readFileSync, writeFileSync, writeSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-// 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;缺省 1456 = 既有产物基线)
-export const SRC_VER = process.env.SW_ITEM_VER ?? '1456';
+// 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;
+// ★BJ183 2026-09-20 缺省 1456→1457——expert 位面 1456↔1457 对拍零漂移(43 条全等),
+// 裸跑不再锚旧版;1456 档留 SW_ITEM_VER=1456 显式回拍)
+export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
 
 /** 提取库：Item.cs 全文 → { EXPERT }（vid → 1；未列出 = expert=false（ResetStats 默认）） */
 export function extractExpert(src) {

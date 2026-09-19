@@ -6,8 +6,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 // 仓库根 = game/tools/ 上两级（game/ 的父目录）
 const ROOT = new URL('../../', import.meta.url).pathname;
-const main = readFileSync(`${ROOT}/Terarria1456/Terraria/Main.cs`, 'utf8');
-const tileId = readFileSync(`${ROOT}/Terarria1456/Terraria.ID/TileID.cs`, 'utf8');
+const main = readFileSync(`${ROOT}/Terarria1457/Terraria/Main.cs`, 'utf8');
+const tileId = readFileSync(`${ROOT}/Terarria1457/Terraria.ID/TileID.cs`, 'utf8');
 
 // ---- TileID 名字表 ----
 const names = {};
@@ -87,7 +87,7 @@ for (let id = 0; id <= maxId; id++) {
 }
 const dest = new URL('../src/data/vanilla-tilecollision.json', import.meta.url).pathname;
 writeFileSync(dest, JSON.stringify({
-  source: 'Terarria1456/Terraria/Main.cs + Terraria.ID/TileID.cs',
+  source: 'Terarria1457/Terraria/Main.cs + Terraria.ID/TileID.cs',
   note: 'solid=Main.tileSolid；solidTop=Main.tileSolidTop（frameY==0 顶行可站，Platforms 集合走 PlatformProperTopFrame(frameX)）；platform=TileID.Sets.Platforms',
   tiles: out,
 }, null, 0));

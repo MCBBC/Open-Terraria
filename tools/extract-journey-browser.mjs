@@ -1,5 +1,6 @@
 // 旅程物品浏览器数据提取器（M8）→ src/data/vanilla-journeycat.json
-// 标杆（Terarria1456）：
+// 标杆（Terarria1457；★BJ183 2026-09-20 基准对齐 1456→1457——
+// 1457 增 6147-6195 新物品档/逐物品 placeStyle/dmg 重平衡/753 GiantTiki tile）：
 //   Terraria.ID/ContentSamples.cs CreativeHelper.GetItemGroup（:117-675，分组+组内序）
 //     + SetCreativeMenuOrder（:699-733，仅存 {Group, OrderInGroup}——组内迭代序不影响
 //     排序：SortingSteps.ByCreativeSortingId.Compare 按 struct 两字段比较）
@@ -30,8 +31,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
-const itemSrc = read('Terarria1456/Terraria/Item.cs');
-const mainSrc = read('Terarria1456/Terraria/Main.cs');
+const itemSrc = read('Terarria1457/Terraria/Item.cs');
+const mainSrc = read('Terarria1457/Terraria/Main.cs');
 
 // ---- case 段解析（同 extract-equip-prefix.mjs；最近一层 switch(type) 归属）----
 function methodBodyOf(src, name) {
@@ -317,7 +318,7 @@ const cartSet = new Set(EQUIP.cart);
 const hookSet = new Set(EQUIP.hook);
 const hairDyeSet = new Set(Object.keys(HAIRDYES.hairDyes ?? {}).map(Number));
 
-const ITEM_COUNT = 6146;   // ItemID.Count（1.4.5.6；vanilla-research.json count=6147 含越界哨兵,见 extract-research）
+const ITEM_COUNT = 6196;   // ItemID.Count（★BJ183 2026-09-20 随 1457 基准:6146→6196（Terarria1457 ItemID.cs:13938）；旧 1456 档 6146 使 6147-6195 新物品整缺；vanilla-research.json count=6197 含越界哨兵,见 extract-research）
 const out = {};
 for (let vid = 1; vid < ITEM_COUNT; vid++) {
   const f = FUNC[String(vid)] ?? {};
@@ -393,7 +394,7 @@ for (const e of Object.values(COLL.tiles)) {
 }
 const doc = {
   meta: {
-    source: 'Terarria1456 Item.cs SetDefaults1-5 + ContentSamples.cs CreativeHelper 字段集',
+    source: 'Terarria1457 Item.cs SetDefaults1-5 + ContentSamples.cs CreativeHelper 字段集',
     itemCount: ITEM_COUNT - 1,
     damageDefault: -1,
     fishingPoleDefault: 1,

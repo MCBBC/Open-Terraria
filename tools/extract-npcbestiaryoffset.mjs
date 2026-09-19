@@ -1,4 +1,5 @@
-// 提取 NPCID.Sets.NPCBestiaryDrawOffset（1.4.5.6，NPCID.cs）全表 →
+// 提取 NPCID.Sets.NPCBestiaryDrawOffset（1.4.5.7，NPCID.cs；★BJ183 基准对齐——
+// GetGrox/Leinfors/Redigit 三段 1456↔1457 diff=0,对拍零漂移）全表 →
 // src/data/vanilla-npcbestiaryoffset.json。
 // 三段合并（NPCBestiaryDrawOffsetCreation :4955-4975）：GetGroxEntries → GetLeinforsEntries
 // → GetRedigitEntries 依次覆盖（后写胜）。字段见 struct NPCBestiaryDrawModifiers（:15-41）。
@@ -7,7 +8,7 @@
 // Rotation 旋转 + Velocity/Direction/SpriteDirection/IsWet 动画与朝向。
 import { readFileSync, writeFileSync } from 'node:fs';
 
-const SRC = new URL('../../Terarria1456/Terraria.ID/NPCID.cs', import.meta.url).pathname;
+const SRC = new URL('../../Terarria1457/Terraria.ID/NPCID.cs', import.meta.url).pathname;
 const OUT = new URL('../src/data/vanilla-npcbestiaryoffset.json', import.meta.url).pathname;
 
 const src = readFileSync(SRC, 'utf8');

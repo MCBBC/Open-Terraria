@@ -1,6 +1,6 @@
-// 从反编译源码全量提取 1456 钓鱼渔获规则表 → src/data/vanilla-fishing.json
+// 从反编译源码全量提取 1457 钓鱼渔获规则表 → src/data/vanilla-fishing.json
 //
-// 数据源（权威 = 1.4.5.6 反编译）：
+// 数据源（权威 = 1.4.5.7 反编译）：
 //   ① Terraria.GameContent.FishDropRules/GameContentFishDropPopulator.cs
 //      Populate() 注册序 + 各 XxxDrops() 方法体的 Add/AddWithHardmode/AddQuestFish/
 //      AddStopper 语句 → FishDropRule 列表（Main.cs:6525-6527 装配进 Main.FishDropsDB，
@@ -17,7 +17,9 @@
 //   不允许为了凑数注水——本脚本对源文件做结构断言，行数/条数漂移即抛错。
 import { readFileSync, writeFileSync } from 'fs';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456';
+// ★BJ183 2026-09-20 基准对齐 1456→1457（FishDropRules 两版源级 diff=0;Main.cs
+// anglerQuestItemNetIDs/AnglerQuestSwap 仅有行号平移,语义零漂移——对拍已证）
+const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457';
 const POP = `${ROOT}/Terraria.GameContent.FishDropRules/GameContentFishDropPopulator.cs`;
 const BASE = `${ROOT}/Terraria.GameContent.FishDropRules/AFishDropRulePopulator.cs`;
 const MAIN = `${ROOT}/Terraria/Main.cs`;

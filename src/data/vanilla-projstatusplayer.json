@@ -426,5 +426,23 @@
     "dur": "Main.rand.Next(300, 600"
    }
   ]
+ },
+ "1117": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 399,
+    "dur": "60 * Main.rand.Next(4, 8"
+   }
+  ]
+ },
+ "1122": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 400,
+    "dur": "60 * Main.rand.Next(4, 8"
+   }
+  ]
  }
 }

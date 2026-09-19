@@ -1,4 +1,5 @@
-// 敌对弹幕命中玩家 debuff（Projectile.StatusPlayer，Projectile.cs:11450-11722）：
+// 敌对弹幕命中玩家 debuff（Projectile.StatusPlayer，Projectile.cs:12123-12404；
+// ★BJ183 2026-09-20 基准 1456→1457:新增 1117→399/1122→400 两型,弹型 49→51）：
 //  表驱动结算回归。数据 = tools/extract-statusplayer.mjs 提取的
 //  src/data/vanilla-statusplayer.json（48 弹型/42 块/零跳过，提取带护栏）；
 //  运行时 = src/entities/projTargets.ts statusPlayer（AST 解释器）。
@@ -50,9 +51,9 @@ function collectBuffs(node: unknown, out: number[] = []): number[] {
 /** 剩余秒（tick→秒换算后 buffState 存秒；表内常量 d 为 tick） */
 const sec = (player: Player, bt: BuffType): number | undefined => player.buffs.active.get(bt);
 
-describe('StatusPlayer 表完整性（Projectile.cs:11450-11722）', () => {
-  it('49 弹型全量入表（1127=叶绿孢子云，r15 批新增）', () => {
-    expect(Object.keys(TABLE)).toHaveLength(49);
+describe('StatusPlayer 表完整性（Projectile.cs:12123-12404）', () => {
+  it('51 弹型全量入表（1127=叶绿孢子云 r15 批；1117/1122=1457 新召唤武器,BJ183 批）', () => {
+    expect(Object.keys(TABLE)).toHaveLength(51);
     // 三族抽样：区间族 399-402 / 双型族 55·719 / 双块族 285(!hostile 二次授予)
     for (const t of [1078, 285, 1048, 348, 349, 399, 400, 401, 402, 55, 719, 174, 177, 257]) {
       expect(TABLE[String(t)], `type ${t}`).toBeDefined();
@@ -61,7 +62,8 @@ describe('StatusPlayer 表完整性（Projectile.cs:11450-11722）', () => {
   it('表内全部 buff id 已映射 BuffType（防静默跳过）', () => {
     const ids = [...new Set(Object.values(TABLE).flatMap((v) => collectBuffs(v)))].sort((a, b) => a - b);
     // 397=叶绿孢子 DoT（Buffs.ts ChlorophyteSpore，r15 R15-19 接入）
-    expect(ids).toEqual([20, 22, 23, 24, 31, 32, 39, 44, 46, 47, 69, 70, 80, 120, 144, 149, 164, 196, 323, 324, 397]);
+    // 399/400=1457 新召唤武器命中 debuff（1117→399 / 1122→400,BJ183 对拍）
+    expect(ids).toEqual([20, 22, 23, 24, 31, 32, 39, 44, 46, 47, 69, 70, 80, 120, 144, 149, 164, 196, 323, 324, 397, 399, 400]);
     for (const id of ids) expect(buffTypeByVanilla(id), `vanilla buff ${id}`).toBeDefined();
   });
 });

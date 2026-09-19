@@ -1537,7 +1537,7 @@
   "14": {
    "spawnDust": 15,
    "buff": 193,
-   "heightBoost": 8,
+   "heightBoost": 6,
    "flightTimeMax": 0,
    "fallDamage": 0.2,
    "runSpeed": 8,
@@ -1547,7 +1547,7 @@
    "totalFrames": 8,
    "xOffset": 4,
    "bodyFrame": 3,
-   "yOffset": 9,
+   "yOffset": 8,
    "playerHeadOffset": 10,
    "standingFrameCount": 1,
    "standingFrameDelay": 12,

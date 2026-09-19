@@ -1,10 +1,12 @@
-// 坐骑全量提取器（1.4.5.6）：
-//   Terarria1456/Terraria.ID/MountID.cs  → 全部 id→内部名 + Sets 能力位
-//   Terarria1456/Terraria/Mount.cs       → Initialize() 每坐骑 MountData 数值/帧组/贴图引用
+// 坐骑全量提取器（1.4.5.7；★BJ183 2026-09-20 基准对齐 1456→1457）：
+//   Terarria1457/Terraria.ID/MountID.cs  → 全部 id→内部名 + Sets 能力位（1457 新增 64/65 TrustyChillet 系）
+//   Terarria1457/Terraria/Mount.cs       → Initialize() 每坐骑 MountData 数值/帧组/贴图引用
 //                                           + SetAsMinecart/Horse/RollerSkate/Chillet 助手展开
-//   Terarria1456/Terraria/Item.cs        → SetDefaults switch：case 块内 `mountType = N`
+//                                           （1457: SetAsChillet 增 hardmode 分支、Basilisk 14
+//                                             heightBoost 8→6 / yOffset 9→8）
+//   Terarria1457/Terraria/Item.cs        → SetDefaults switch：case 块内 `mountType = N`
 //                                           （含 40+(type-4785) / 44+type-4792 两条公式族）
-//   Terarria1456/Terraria.ID/BuffID.cs   → BuffID.Sets.MountType（buff → mount）
+//   Terarria1457/Terraria.ID/BuffID.cs   → BuffID.Sets.MountType（buff → mount）
 // 输出 src/data/vanilla-mounts.json：
 //   { mounts: { id: MountData }, itemMount: { itemId: mountId }, buffMount: { buffId: mountId },
 //     sets: { Cart: [...], ... }, names: { id: internalName }, textureOk: { id: bool } }
@@ -16,10 +18,10 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const MOUNT_ID = join(ROOT, 'Terarria1456', 'Terraria.ID', 'MountID.cs');
-const MOUNT = join(ROOT, 'Terarria1456', 'Terraria', 'Mount.cs');
-const ITEM = join(ROOT, 'Terarria1456', 'Terraria', 'Item.cs');
-const BUFF_ID = join(ROOT, 'Terarria1456', 'Terraria.ID', 'BuffID.cs');
+const MOUNT_ID = join(ROOT, 'Terarria1457', 'Terraria.ID', 'MountID.cs');
+const MOUNT = join(ROOT, 'Terarria1457', 'Terraria', 'Mount.cs');
+const ITEM = join(ROOT, 'Terarria1457', 'Terraria', 'Item.cs');
+const BUFF_ID = join(ROOT, 'Terarria1457', 'Terraria.ID', 'BuffID.cs');
 const IMG = join(ROOT, 'terraria-assets', 'Images');
 const OUT = join(ROOT, 'game', 'src', 'data', 'vanilla-mounts.json');
 

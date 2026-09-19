@@ -1,14 +1,15 @@
-// 从 Terarria1456 提取原版小动物（NPCID.Sets.CountsAsCritter 名单）：
+// 从 Terarria1457 提取原版小动物（NPCID.Sets.CountsAsCritter 名单；★BJ183 2026-09-20
+// 基准对齐 1456→1457——CountsAsCritter 表两版全等,合入 vanilla-npcs.json 对拍零漂移）：
 //  - NPCID.cs 的 CountsAsCritter Factory.CreateBoolSet(...) id 列表
 //  - NPC.cs SetDefaults if-else 区间链解析（同 extract-npcs.mjs v3 逻辑）补属性
-//  - Main.cs npcFrameCount 帧数（1.4.5.6 数组更大）
+//  - Main.cs npcFrameCount 帧数
 // 合并进 public/sprites/vanilla-npcs.json：已有 id 更新 friendly/critter 标志，缺的补条目
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const npcId = readFileSync(`${ROOT}/Terarria1456/Terraria.ID/NPCID.cs`, 'utf8');
-const npcCs = readFileSync(`${ROOT}/Terarria1456/Terraria/NPC.cs`, 'utf8');
-const mainCs = readFileSync(`${ROOT}/Terarria1456/Terraria/Main.cs`, 'utf8');
+const npcId = readFileSync(`${ROOT}/Terarria1457/Terraria.ID/NPCID.cs`, 'utf8');
+const npcCs = readFileSync(`${ROOT}/Terarria1457/Terraria/NPC.cs`, 'utf8');
+const mainCs = readFileSync(`${ROOT}/Terarria1457/Terraria/Main.cs`, 'utf8');
 
 // 1) CountsAsCritter 名单
 const setMatch = npcId.match(/CountsAsCritter = Factory\.CreateBoolSet\(([\d,\s]*)\)/);

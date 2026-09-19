@@ -2,7 +2,7 @@
 // 数据源:Terarria1456 Item.cs SetDefaults1-5(switch-case 块) + Chest.cs SetupShop + NPCInteractions.cs Shop() 映射
 import { readFileSync, writeFileSync } from 'fs';
 
-// SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；配 --out 落 /tmp（禁直接覆盖现库）
+// SW_TREE（★BJ183 2026-09-20 勘误:缺省已系 Terarria1457,旧注"缺省 1456"系笔误）;配 --out 落 /tmp（禁直接覆盖现库）
 const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
 const SRC = `/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria`;

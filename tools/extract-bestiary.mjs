@@ -1,4 +1,5 @@
-// 图鉴排序/稀有度静态表提取（1.4.5.6 = Terarria1456）→ src/data/vanilla-bestiary.json。
+// 图鉴排序/稀有度静态表提取（1.4.5.7 = Terarria1457；★BJ183 2026-09-20 基准对齐，
+// 1456↔1457 该域源级 diff=0——对拍零漂移）→ src/data/vanilla-bestiary.json。
 //   - NPCID.cs Sets 三张优先级表（GetSortedBestiaryEntriesList orderby 链的键，ContentSamples.cs:745-753）：
 //       TownNPCBestiaryPriority            :4427
 //       NormalGoldCritterBestiaryPriority  :4407
@@ -29,9 +30,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
 
-const npcid = read('Terarria1456/Terraria.ID/NPCID.cs');
-const npccs = read('Terarria1456/Terraria/NPC.cs');
-const samples = read('Terarria1456/Terraria.ID/ContentSamples.cs');
+const npcid = read('Terarria1457/Terraria.ID/NPCID.cs');
+const npccs = read('Terarria1457/Terraria/NPC.cs');
+const samples = read('Terarria1457/Terraria.ID/ContentSamples.cs');
 
 /** `public static List<int> NAME = new List<int> { ... };` 数字表 */
 function intList(src, name) {

@@ -1,7 +1,7 @@
 {
  "meta": {
-  "source": "Terarria1456/Terraria.Initializers/DyeInitializer.cs",
-  "itemSource": "Terarria1456/Terraria/Item.cs",
+  "source": "Terarria1457/Terraria.Initializers/DyeInitializer.cs",
+  "itemSource": "Terarria1457/Terraria/Item.cs",
   "bindCount": 12,
   "legacyCount": 11,
   "removerItem": 1990,

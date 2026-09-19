@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..');
-const SRC = join(ROOT, '..', 'Terarria1456', 'Terraria.Initializers', 'DyeInitializer.cs');
+const SRC = join(ROOT, '..', 'Terarria1457', 'Terraria.Initializers', 'DyeInitializer.cs');
 const OUT = join(ROOT, 'src', 'data', 'vanilla-dyes.json');
 
 const src = readFileSync(SRC, 'utf8');
@@ -109,7 +109,7 @@ for (const k of Object.keys(table).map(Number).sort((a, b) => a - b)) sorted[k] 
 
 const out = {
   meta: {
-    source: 'Terarria1456/Terraria.Initializers/DyeInitializer.cs',
+    source: 'Terarria1457/Terraria.Initializers/DyeInitializer.cs',
     directBindCount: directCount,
     basicFamilyCalls: basic.length,
     entries: Object.keys(sorted).length,

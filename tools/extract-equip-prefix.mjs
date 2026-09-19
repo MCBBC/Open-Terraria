@@ -1,4 +1,6 @@
-// 从 1456 反编译源码提取两套数据：
+// 从 1457 反编译源码提取两套数据（★BJ183 2026-09-20 基准对齐 1456→1457；
+//  legacySrc 早已 1457。重产禁令：pet/light 系 FX48 手补、itemstats/accfx 含后续
+//  审计手增条目——全量重产会回退，新增档须走对拍增量合并，见 BJ183 登记债）：
 //  1) src/data/vanilla-equip.json —— 物品装备分类（染料/宠物/光源/矿车/坐骑/钩爪）
 //     判定规则（ItemSlot.PickItemMovementAction :1197-1248 原版语义）：
 //       dye   = GameShaders.Armor.GetShaderIdFromItemId(id)>0（DyeInitializer BindShader 全表）
@@ -27,7 +29,7 @@ const writeOut = (p, data) => {
   if (DRY_DIR) { mkdirSync(DRY_DIR, { recursive: true }); writeFileSync(p.replace(/^.*\//, `${DRY_DIR}/`), data); return; }
   if (!AUDIT) writeFileSync(p, data);
 };
-const itemSrc = read('Terarria1456/Terraria/Item.cs');
+const itemSrc = read('Terarria1457/Terraria/Item.cs');
 
 // ---- Item.cs case 块逐 id 字段扫描（SetDefaults1-5 段）----
 // 按花括号深度过滤：仅取物品外层 switch 的 case 段（嵌套 switch(type) 的 case 标签
@@ -376,7 +378,7 @@ console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} b
 // ---- 翅膀飞行属性（WingStatsInitializer.cs：array[N] = new WingStats(flyTimeVar, flySpeedVar)）----
 // 本地变量别名（flyTime*=int 时长 tick、flySpeedOverride*=float 速度）先求值再代入。
 {
-  const wsSrc = read('Terarria1456/Terraria.Initializers/WingStatsInitializer.cs');
+  const wsSrc = read('Terarria1457/Terraria.Initializers/WingStatsInitializer.cs');
   const locals = {};
   for (const mm of wsSrc.matchAll(/int (flyTime\d*) = (\d+);/g)) locals[mm[1]] = +mm[2];
   for (const mm of wsSrc.matchAll(/float (flySpeedOverride\d*) = ([\d.]+)f;/g)) locals[mm[1]] = parseFloat(mm[2]);
@@ -469,7 +471,7 @@ const ACC_PATTERNS = [
 // 跳跃选项多值字段：一个物品可同时授予 Cloud+Sandstorm+Blizzard（三合一瓶 1164）
 const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;
 {
-  const playerSrc = read('Terarria1456/Terraria/Player.cs');
+  const playerSrc = read('Terarria1457/Terraria/Player.cs');
   const body = methodBodyOf(playerSrc, 'private void ApplyEquipFunctional(');
   const segs = (() => {
     // 复用 outerCaseSegments 的最近 switch(type) 归属（其采集 switch(type) 段）
@@ -479,7 +481,7 @@ const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;
     let depth = 0, m;
     while ((m = tokRe.exec(body))) {
       const t = m[0];
-      if (t.startsWith('switch')) stack.push({ isType: /switch\s*\(\s*(?:currentItem\.)?type\b/.test(t), opened: false, bodyDepth: -1, cur: null, segStart: 0 });
+      if (t.startsWith('switch')) stack.push({ isType: /switch\s*\(\s*(?:currentItem\.)?type\b/.test(t), opened: false, bodyDepth: -1, cur: null, segStart: 0, pending: [] });
       else if (t === '{') {
         depth++;
         const top = stack[stack.length - 1];
@@ -487,14 +489,28 @@ const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;
       } else if (t === '}') {
         const top = stack[stack.length - 1];
         if (top && top.opened && depth === top.bodyDepth) {
-          if (top.isType && top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+          if (top.isType && top.cur !== null) {
+            const segText = body.slice(top.segStart, m.index);
+            // ★BJ183 1457 反编译把同体 case 改写成贯穿组（case A: case B: { ... }）——
+            // 贯穿组共享体须归属【组内全部 id】,否则只落到末位标签(111/1595/2221
+            // mana 族/982-6188-6189 族整缺)。
+            for (const id of [...top.pending, top.cur]) out.set(id, segText);
+          }
           stack.pop();
         }
         depth--;
       } else {
         const top = stack[stack.length - 1];
         if (top && top.opened && top.isType) {
-          if (top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+          if (top.cur !== null) {
+            const segText = body.slice(top.segStart, m.index);
+            if (segText.trim() === '') {
+              top.pending.push(top.cur); // 纯贯穿标签:并入组,等待共享体
+            } else {
+              for (const id of [...top.pending, top.cur]) out.set(id, segText);
+              top.pending = [];
+            }
+          }
           top.cur = t === 'default:' ? null : +m[2];
           top.segStart = m.index + t.length;
         }
@@ -504,10 +520,20 @@ const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;
   })();
   const ACCFX = {};
   // 段 → 效果对象（白名单单值 + jumpOpts 多值）
+  // ★BJ183 1457 反编译在贯穿组体里引入局部量中转（`int num3 = 40; statManaMax2 += num3;`）
+  //   ——先归并段内 `int <name> = <lit>;` 常量,再把标识符回代字面量后二次匹配。
   const extractFx = (seg) => {
     const fx = {};
+    const consts = new Map();
+    // 字面量连 f 后缀一并捕获（float num4 = 0.06f → '0.06f'）——回代后与既有
+    // `+= ([\d.]+)f;` 形态模式无缝衔接（1457 :15222-15225 item 223 manaCost 即此形）。
+    for (const cm of seg.matchAll(/\b(?:int|float) (\w+) = (-?[\d.]+f?);/g)) consts.set(cm[1], cm[2]);
+    let resolved = seg;
+    if (consts.size) {
+      resolved = seg.replace(/\b(\w+)\b/g, (w) => (consts.has(w) ? consts.get(w) : w));
+    }
     for (const [field, re] of ACC_PATTERNS) {
-      const mm = seg.match(re);
+      const mm = seg.match(re) ?? resolved.match(re);
       // 布尔型模式（无捕获组）→ 1；数值型 → parseFloat
       if (mm) fx[field] = mm[1] === undefined ? 1 : parseFloat(mm[1]);
     }
@@ -547,10 +573,11 @@ const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;
   console.error(`accfx: ${Object.keys(ACCFX).length} 件配饰数值效果`);
 }
 
-// ---- vanityPet / lightPet 初始化表（Main.cs 9100-9290 静态初始化段） ----
-const mainSrc = read('Terarria1456/Terraria/Main.cs');
+// ---- vanityPet / lightPet 初始化表（Main.cs 静态初始化段；★BJ183 1457 行窗 9280-9580,
+//      表体实域 :9353-:9438；1456 旧窗 9050-9350 已漂移出表） ----
+const mainSrc = read('Terarria1457/Terraria/Main.cs');
 const mainLines = mainSrc.split('\n');
-const initSeg = mainLines.slice(9050, 9350).join('\n');
+const initSeg = mainLines.slice(9280, 9580).join('\n');
 const vanityPet = new Set();
 const lightPet = new Set();
 for (const mm of initSeg.matchAll(/vanityPet\[(\d+)\] = true;/g)) vanityPet.add(+mm[1]);
@@ -559,7 +586,7 @@ for (const mm of initSeg.matchAll(/lightPet\[(\d+)\] = true;/g)) lightPet.add(+m
 // ---- 染料：DyeInitializer BindShader(itemId, ...) 全表（多行调用） ----
 // 基础色染料经 LoadBasicColorDye(base) 辅助注册（每基色绑 4 件：base 黑=+12 亮=+31 银=+44，
 // DyeInitializer.cs:13-27）；4 参重载直接给 4 个 id（:29 如 2874-2877）。
-const dyeSrc = read('Terarria1456/Terraria.Initializers/DyeInitializer.cs');
+const dyeSrc = read('Terarria1457/Terraria.Initializers/DyeInitializer.cs');
 const dyeIds = new Set();
 for (const mm of dyeSrc.matchAll(/BindShader\(\s*(\d+)\s*,/g)) dyeIds.add(+mm[1]);
 for (const mm of dyeSrc.matchAll(/LoadBasicColorDye\((\d+),\s*([\d.]+)f/g)) {
@@ -602,7 +629,7 @@ console.error(`equip: dye ${equip.dye.length} pet ${equip.pet.length} light ${eq
   `mount ${equip.mount.length} cart ${equip.cart.length} hook ${equip.hook.length}`);
 
 // ================= 词缀 =================
-const prefixSrc = read('Terarria1456/Terraria.ID/PrefixID.cs');
+const prefixSrc = read('Terarria1457/Terraria.ID/PrefixID.cs');
 // 常量名（→ l10n 键 Prefix.<Name>，1-97）
 const PREFIX_NAMES = {};
 for (const mm of prefixSrc.matchAll(/public const int (\w+) = (\d+);/g)) PREFIX_NAMES[+mm[2]] = mm[1];
@@ -683,7 +710,7 @@ for (const mm of legacySrc.matchAll(/public static bool\[\] (\w+) = Factory\.Cre
   SETS[mm[1]] = mm[2].split(',').map((x) => parseInt(x.trim(), 10)).filter((n) => !Number.isNaN(n));
 }
 // ItemID.Sets.CanGetPrefixes = CreateBoolSet(true, <排除表>)（ItemID.cs:175）
-const itemidSrc = read('Terarria1456/Terraria.ID/ItemID.cs');
+const itemidSrc = read('Terarria1457/Terraria.ID/ItemID.cs');
 const cgp = itemidSrc.match(/CanGetPrefixes = Factory\.CreateBoolSet\(([^)]*)\)/)?.[1] ?? '';
 const cgpTrue = /^\s*true\b/.test(cgp);
 const cgpExcluded = cgp.split(',').map((x) => parseInt(x.trim(), 10)).filter((n) => !Number.isNaN(n));

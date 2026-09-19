@@ -3,8 +3,11 @@
 // 语义（GetItem 体内顺序执行、后命中覆盖前者）在运行期按原顺序复现。
 import { readFileSync, writeFileSync } from 'fs';
 
-// SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；配 --out 落 /tmp（禁直接覆盖现库）
-const TREE = process.env.SW_TREE || 'Terarria1456';
+// SW_TREE（★BJ183 2026-09-20 缺省 Terarria1456→1457；SetupTravelShop_GetItem/GetPainting
+// 两版源级 diff=0——但【盘上数据面领先于本提取器】（richer cond 词表 anyBossKill/
+// downed_4/downedMechBossAny + ids 多件组 2281-2283 + 66 条 vs 本器 65 条）,全量重产
+// 会回退——重产前先恢复提取器词表,见 BJ183 登记债）；配 --out 落 /tmp（禁直接覆盖现库）
+const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
 const chest = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria/Chest.cs`, 'utf8');
 

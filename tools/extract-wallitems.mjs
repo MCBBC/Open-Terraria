@@ -1,6 +1,6 @@
 // 提取墙面物品映射（itemId → createWall）→ src/data/vanilla-wallitems.json
 //
-// 数据权威 = Item.cs SetDefaults1-5 的全部 createWall 赋值（1456 反编译，行号锚见
+// 数据权威 = Item.cs SetDefaults1-5 的全部 createWall 赋值（1457 反编译，行号锚见
 // 各常量注释）。旧版提取器只认 `\t\tcase N:\n + createWall = 数字;` 一种写法，
 // 漏掉三类（先例见 items.ts CAGE_ITEM_SHEET 头注"三种写法"）：
 //   1. 直赋        ：createWall = N; / DefaultToPlaceableWall(N);      （Item.cs:48017 辅助）
@@ -17,8 +17,10 @@
 // 运行：node tools/extract-wallitems.mjs（game/ 目录下；非探针，直接 node）
 import { readFileSync, writeFileSync } from 'fs';
 
-const ITEM_CS = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria/Item.cs';
-const WALLID_CS = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria.ID/WallID.cs';
+// ★BJ183 2026-09-20 基准对齐 1456→1457（createWall 面 1456↔1457 diff=0——对拍零漂移;
+// 1457 的 SetDefaults1-5 由 public 改 private,切片须双可见性兼容）
+const ITEM_CS = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria/Item.cs';
+const WALLID_CS = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria.ID/WallID.cs';
 
 const lines = readFileSync(ITEM_CS, 'utf8').split('\n');
 const depth = (i) => { let d = 0; while (lines[i]?.[d] === '\t') d++; return d; };
@@ -28,7 +30,7 @@ const depth = (i) => { let d = 0; while (lines[i]?.[d] === '\t') d++; return d; 
 const methodDecl = /^\t(?:public|private|internal|protected)[\w<>\[\], .]* [\w]+\(/;
 const slices = [];
 for (const n of [1, 2, 3, 4, 5]) {
-  const s = lines.findIndex((l) => l.startsWith(`\tpublic void SetDefaults${n}(`));
+  const s = lines.findIndex((l) => l.startsWith(`\tpublic void SetDefaults${n}(`) || l.startsWith(`\tprivate void SetDefaults${n}(`));
   if (s < 0) throw new Error(`SetDefaults${n} not found`);
   let e = s + 1;
   while (e < lines.length && !methodDecl.test(lines[e])) e++;

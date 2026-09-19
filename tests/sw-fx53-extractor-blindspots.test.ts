@@ -243,7 +243,9 @@ describe('C. equip dry-run：pet/light 转解析直出 + 其余面零漂移', ()
     //  · accfx：23 件 = 蓝队批手工补齐面（tests/accfx-armor-mainstats 钉值）。
     const EXEMPT: Record<string, Set<number>> = {
       'vanilla-itemstats.json': new Set([2104, 2105, 2106, 2107, 2108, 2109, 2110, 2111, 2112, 2113, 6177, 6183, 6188, 6189]),
-      'vanilla-accfx.json': new Set([938, 953, 975, 1253, 1322, 1323, 1923, 2373, 2374, 2375, 3090, 3223, 3224, 3619, 3624, 3721, 3997, 3998, 4881, 5064, 5107, 6188, 6189]),
+      // ★BJ183 补登记 410/411/5589/5590:pickSpeed+0.1 手补面(提取器无 pickSpeed
+      //  模式面,Player.cs 无 `pickSpeed += 0.1f` 直字面量——C3 本就红,一并收口)
+      'vanilla-accfx.json': new Set([410, 411, 938, 953, 975, 1253, 1322, 1323, 1923, 2373, 2374, 2375, 3090, 3223, 3224, 3619, 3624, 3721, 3997, 3998, 4881, 5064, 5107, 5589, 5590, 6188, 6189]),
     };
     for (const f of ['vanilla-itemstats.json', 'vanilla-accfx.json']) {
       for (const id of diskIds(f)) {

@@ -1,13 +1,15 @@
 // 发色剂表提取器（DyeInitializer.cs LoadHairDyes/LoadLegacyHairdyes →
 // src/data/vanilla-hairdyes.json）。
+// ★BJ183 2026-09-20 基准对齐 1456→1457：DyeInitializer.cs 两版字节全等;Item.cs
+// hairDye 面 diff=0,仅行号平移（+26/+397）——锚点行号同步重钉,对拍零漂移。
 //
 // 数据 1:1：GameShaders.Hair.BindShader(itemId, shaderData) 按【执行序】分配
 // shaderId（HairShaderDataSet.BindShader:22 `++_shaderDataCount`，首条=1）。
 // 执行序 = LoadHairDyes(:143-148) 先调 LoadLegacyHairdyes(:146) 再绑 3259(:147)：
 //   legacy 11 条（1977-1986 + 2863）→ shaderId 1-11；3259 暮光 → 12。
-// 物品侧判定（Item.cs）：ResetStats 置 hairDye=-1(:48559) → SetDefaultsN 后
-//   `if (hairDye != 0) hairDye = Hair.GetShaderIdFromItemId(type)`(:48320-48322)
-//   → 未绑定物品得 -1、发色剂得 1-12；case 1990 显式 hairDye=0(:21275) 跳过查表
+// 物品侧判定（Item.cs）：ResetStats 置 hairDye=-1(:48964) → SetDefaultsN 后
+//   `if (hairDye != 0) hairDye = Hair.GetShaderIdFromItemId(type)`(:48717-48719)
+//   → 未绑定物品得 -1、发色剂得 1-12；case 1990 显式 hairDye=0(:21301) 跳过查表
 //   → 1990 去除剂 hairDye=0。使用链 Player.cs:42179-42186 `item.hairDye >= 0`
 //   即 1990 也在内（使用 → player.hairDye=0 = 清除）。
 // 存档：Player.cs:53805-53808 hair 后写 byte、:54214-54216 release≥82 读。
@@ -22,8 +24,8 @@ import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..');
-const DYE_CS = join(ROOT, '..', 'Terarria1456', 'Terraria.Initializers', 'DyeInitializer.cs');
-const ITEM_CS = join(ROOT, '..', 'Terarria1456', 'Terraria', 'Item.cs');
+const DYE_CS = join(ROOT, '..', 'Terarria1457', 'Terraria.Initializers', 'DyeInitializer.cs');
+const ITEM_CS = join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs');
 const OUT = join(ROOT, 'src', 'data', 'vanilla-hairdyes.json');
 
 const audit = process.argv.includes('--audit');
@@ -87,11 +89,11 @@ ordered.forEach((b, i) => {
 
 // ---- 物品侧锚点（Item.cs）逐字校验 ----
 const anchors = {
-  rangeGate: ['\t\tif (type >= 1977 && type <= 1986)', 21210],
-  removerCase: ['\t\tcase 1990:', 21267],
-  removerMarker: ['\t\t\thairDye = 0;', 21275],
-  tailHook: ['\t\t\thairDye = GameShaders.Hair.GetShaderIdFromItemId(type);', 48322],
-  reset: ['\t\thairDye = -1;', 48559],
+  rangeGate: ['\t\tif (type >= 1977 && type <= 1986)', 21236],
+  removerCase: ['\t\tcase 1990:', 21293],
+  removerMarker: ['\t\t\thairDye = 0;', 21301],
+  tailHook: ['\t\t\thairDye = GameShaders.Hair.GetShaderIdFromItemId(type);', 48719],
+  reset: ['\t\thairDye = -1;', 48964],
 };
 for (const [k, [needle, expect]] of Object.entries(anchors)) {
   const got = lineOf(item, needle);
@@ -126,8 +128,8 @@ for (const [id, want] of Object.entries(pinned)) {
 
 const out = {
   meta: {
-    source: 'Terarria1456/Terraria.Initializers/DyeInitializer.cs',
-    itemSource: 'Terarria1456/Terraria/Item.cs',
+    source: 'Terarria1457/Terraria.Initializers/DyeInitializer.cs',
+    itemSource: 'Terarria1457/Terraria/Item.cs',
     bindCount: ordered.length,
     legacyCount: legacyBinds.length,
     /** 发色剂去除剂（Item.cs:21275 hairDye=0 → Item.hairDye=0；使用即清 player.hairDye） */

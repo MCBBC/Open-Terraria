@@ -13,7 +13,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-// SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；`SW_TREE=Terarria1457` 换树
+// SW_TREE（★BJ183 2026-09-20 勘误:缺省已系 Terarria1457,旧注"缺省 1456"系笔误）;`SW_TREE=Terarria1456` 回拍
 // 只读对比。配 `--out <path>` 落 /tmp，禁止直接覆盖现库（现库含手工修复，全量重跑=回滚）。
 // R14-B5②：默认树切 1457（2026-08-23 基准）——曾缺省 1456,裸重跑即静默回退
 // （drops 提取器有 apply1457DropPatches 防回退,本文件以默认树对齐）

@@ -1,4 +1,5 @@
-// 图鉴"出没环境"提取（1.4.5.6 = Terarria1456）→ src/data/vanilla-bestiary-spawn.json。
+// 图鉴"出没环境"提取（1.4.5.7 = Terarria1457；★BJ183 2026-09-20 基准对齐，
+// BestiaryDatabaseNPCsPopulator.cs 1456↔1457 字节全等——对拍零漂移）→ src/data/vanilla-bestiary-spawn.json。
 //   - BestiaryDatabaseNPCsPopulator.cs：
 //       CommonTags.SpawnConditions.{Invasions,Events,Biomes,Times,Visuals} 静态声明
 //       （:14-302）四类元素：
@@ -29,7 +30,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const src = readFileSync(`${ROOT}/Terarria1456/Terraria.GameContent.Bestiary/BestiaryDatabaseNPCsPopulator.cs`, 'utf8');
+const src = readFileSync(`${ROOT}/Terarria1457/Terraria.GameContent.Bestiary/BestiaryDatabaseNPCsPopulator.cs`, 'utf8');
 const lines = src.split('\n');
 
 // ---- 嵌套类栈 → 字段全路径 ----

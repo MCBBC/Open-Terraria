@@ -752,8 +752,9 @@ export function tryReflectShimmerSlimeHit(
 
 /** 敌弹命中玩家的状态授予(原版 Projectile.StatusPlayer :11450-11722 **全量**,
  *  仅在 hitPlayer 返回 true 即 Hurt>0 且未死后调用——调用点 Game.ts 敌弹命中段)。
- *  数值表 = tools/extract-statusplayer.mjs 从 1456 源码提取的 AST
- *  (src/data/vanilla-statusplayer.json,48 弹型/42 块/零跳过,提取带护栏):
+ *  数值表 = tools/extract-statusplayer.mjs 从 1457 源码提取的 AST
+ *  (src/data/vanilla-statusplayer.json,51 弹型/44 块/零跳过+StatusPvP 1127 重放,提取带护栏;
+ *   ★BJ183 2026-09-20 基准 1456→1457):
  *   1078 陨石碎块 → OnFire(24) 300-599t（:11456-11458）
  *   285 纳米弹 → Confused(31) 1/3→180t 否则 60t,双块(!hostile 块 :11622-11631)
  *   1048 配重球 → Poisoned(20)+Stinky(120) 各 600t（:11471-11474）

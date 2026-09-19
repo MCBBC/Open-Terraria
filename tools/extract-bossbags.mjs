@@ -4,7 +4,11 @@
 //              / {t:'sw', k:switch 序号, branch:i}
 // 尾段 coinMap:袋子→boss npc id(开袋按 value 附赠钱币)
 import { readFileSync, writeFileSync } from 'fs';
-const src = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria/Player.cs', 'utf8');
+// ★BJ183 2026-09-20 源锚 1456→1457（OpenBossBag :6828→:7206;1457 delta=3329 增 6158@1/6
+// + 3330(旅商蝶袋 Next(6)→Next(7)) 增 3291@case5——两者已由 PC 批手并入盘上数据面。
+// 【重产禁令】盘上面还含 remix/noRemix、stackExpr/stackVar、dedup2 等本器不产的字段,
+// 全量重产会整批回退——重产前先恢复提取器编码面,见 BJ183 登记债）
+const src = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457/Terraria/Player.cs', 'utf8');
 const start = src.indexOf('public void OpenBossBag');
 const BAGS = new Set([3318,3319,3320,3321,3322,3323,3324,3325,3326,3327,3328,3329,3330,3331,3332,3860,4782,4957,5111]);
 

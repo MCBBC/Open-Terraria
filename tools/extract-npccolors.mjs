@@ -1,11 +1,12 @@
-// 从 Terarria1456 NPC.cs 提取每类型 SetDefaults 的 color/alpha，合入 vanilla-npcs.json；
+// 从 Terarria1457 NPC.cs 提取每类型 SetDefaults 的 color/alpha，合入 vanilla-npcs.json；
+// （★BJ183 2026-09-20 基准对齐 1456→1457——color/alpha/npcSlots 三轴对拍零漂移）
 // 另解析 SetDefaultsFromNetId 的负 netID 覆盖（color/alpha/scale）打印对照表。
 // 源码事实：color != default 时 Main.DrawNPC 用 NPC.GetColor 二次绘制同贴图（逐像素乘法，
 // 贴轮廓非方形）；gel（item 23）掉落时 type 1 且 netID∉{-1,-2,-5,-6} 继承 npc.color。
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const npcCs = readFileSync(`${ROOT}/Terarria1456/Terraria/NPC.cs`, 'utf8');
+const npcCs = readFileSync(`${ROOT}/Terarria1457/Terraria/NPC.cs`, 'utf8');
 
 // ---------- 1) SetDefaults else-if 链 ----------
 const sdStart = npcCs.indexOf('public void SetDefaults(int Type');

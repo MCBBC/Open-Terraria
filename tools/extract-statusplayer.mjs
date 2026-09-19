@@ -1,8 +1,10 @@
-// 从 Terarria1456 Projectile.StatusPlayer 提取"敌对弹幕命中 → 玩家 debuff"表。
-// 语义基准:Projectile.cs:11450-11722(StatusPlayer),两处调用点:
-//   Damage_EVP      :13798-13801(Hurt>0 且未死 → StatusPlayer;Damage_EVP 门禁
-//                     :13708 要求 hostile——此路径弹体恒 hostile)
-//   BombsHurtPlayers:13971-13974(爆炸/非 hostile 弹自伤路径,无 hostile 门)
+// 从 Terarria1457 Projectile.StatusPlayer 提取"敌对弹幕命中 → 玩家 debuff"表。
+// ★BJ183 2026-09-20 基准对齐 1456→1457(新增 1117→399 / 1122→400 两型)。
+// 语义基准:Projectile.cs:12123-12404(StatusPlayer),两处调用点:
+//   Damage_EVP      :14846-14945(Hurt>0 且未死 → StatusPlayer;Damage_EVP 门禁
+//                     :14852 要求 hostile——此路径弹体恒 hostile)
+//   SelfHurtPlayers :15104-15134(爆炸/非 hostile 弹自伤路径,无 hostile 门;
+//                     1456 旧名 BombsHurtPlayers:13944)
 // 每块形状:`if (type == N [&& 掷骰/!hostile]) { ApplyBuffTo(player, B, D) | 嵌套 if 链 }`。
 // 本方法与 StatusNPC 不同——无 ai[] 门,全部条件可编码,故提取目标 = 零跳过。
 //
@@ -26,13 +28,14 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..');
-const SRC = join(ROOT, '..', 'Terarria1456', 'Terraria', 'Projectile.cs');
+const SRC = join(ROOT, '..', 'Terarria1457', 'Terraria', 'Projectile.cs');
 const OUT = join(ROOT, 'src', 'data', 'vanilla-statusplayer.json');
 const AUDIT = process.argv.includes('--audit'); // 自审计:不写文件,stdout 出计数+跳过
 
-// ---- 提取完成的硬预期(源码漂移护栏):原版 1.4.5.6 恰好 48 型/42 块/零跳过 ----
-const EXPECT_TYPES = 48;
-const EXPECT_BLOCKS = 42;
+// ---- 提取完成的硬预期(源码漂移护栏):原版 1.4.5.7 恰好 50 型/44 块/零跳过 ----
+// (1.4.5.6 为 48/42;1457 新增 1117/1122 两型,BJ183 对拍定谳)
+const EXPECT_TYPES = 50;
+const EXPECT_BLOCKS = 44;
 
 const lines = readFileSync(SRC, 'utf8').split(/\r?\n/);
 
@@ -217,6 +220,11 @@ if (AUDIT) {
   // 单块型直接压平数组(AST 顶层本就是 {a:[...]})
   const flat = {};
   for (const [k, v] of Object.entries(table)) flat[k] = v.length === 1 ? v[0] : { a: v };
+  // ---- StatusPvP 重放补丁(BJ183 2026-09-20):本提取器语义域 = StatusPlayer,
+  //      但 1127 (月球领主炎弹) 的【PvP 命中】走 StatusPvP(1457 :11761,ApplyBuffTo
+  //      (player, 397, 300) @:12017)——PC57 案此前手并入表,重产即失。按 npcdrops
+  //      1457 补丁先例在此重放,重跑不丢(1456 StatusPvP 同值)。
+  flat['1127'] = { b: 397, d: 300 };
   writeFileSync(OUT, JSON.stringify(flat, null, 1) + '\n');
   console.log(`写入 ${OUT}`);
 }

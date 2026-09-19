@@ -1,4 +1,8 @@
 // 宠物投射物 AI 参数提取器：Terarria1456/Terraria/Projectile.cs →
+// ★BJ183 2026-09-20 定谳：本器暂留 1456 锚——1457 AI_026/AI_067 反编译局部号
+// 重排（num181→num182 等）令 anchorAssert 全数失配,而【数据面零欠账】已证
+// （vanilla-pets.json 1456↔1457 全等;变更面 1094/1112/1113/1118 属召唤随从非宠物）。
+// 重锚 1457 前须先重推各锚点局部号,见 BJ183 登记债。
 // game/src/data/vanilla-petai.json（PetFollower 按 aiStyle 家族分派的参数源）。
 //
 // 数据来源三段：

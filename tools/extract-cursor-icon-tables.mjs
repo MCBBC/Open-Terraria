@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const src = readFileSync(`${ROOT}/Terarria1456/Terraria/WorldGen.cs`, 'utf8');
+const src = readFileSync(`${ROOT}/Terarria1457/Terraria/WorldGen.cs`, 'utf8');
 
 /** 取方法体(花括号配平) */
 function methodBody(name) {
@@ -84,7 +84,7 @@ const firstSeg = chestsBody.slice(chestsBody.indexOf('else', chestsBody.indexOf(
 const chests2 = expand(parseSwitch(secondSeg, 'num'), 3884);
 const chests1 = expand(parseSwitch(firstSeg, 'num'), 48);
 // Chest.Initialize 覆写(Chest.cs:224-251)
-const chestSrc = readFileSync(`${ROOT}/Terarria1456/Terraria/Chest.cs`, 'utf8');
+const chestSrc = readFileSync(`${ROOT}/Terarria1457/Terraria/Chest.cs`, 'utf8');
 const init = chestSrc.slice(chestSrc.indexOf('public static void Initialize'), chestSrc.indexOf('public static bool IsPlayerInChest'));
 for (const m of init.matchAll(/array\[(\d+)\] = (\d+);/g)) chests1[+m[1]] = +m[2];
 for (const m of init.matchAll(/array2\[(\d+)\] = (\d+);/g)) chests2[+m[1]] = +m[2];
