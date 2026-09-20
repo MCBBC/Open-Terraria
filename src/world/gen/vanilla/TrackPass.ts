@@ -30,7 +30,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, FORBIDS_SLOPING_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, FORBIDS_SLOPING_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_A_CONTAINER_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
@@ -104,8 +104,8 @@ const BOULDER_SS = BOULDERS_SHEETS;
 const TREE_TRUNK_SS = IS_A_TREE_TRUNK_SHEETS;
 /** TileID.Sets.PreventsTileRemovalIfOnTopOfIt(TileID.cs:169;HasReasonToReturnEarly) */
 const PREVENTS_REMOVAL_SS = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
-/** TileID.Sets.IsAContainer(TileID.cs:405) */
-const CONTAINER_SS = new Set([21, 467, 88]);
+/** TileID.Sets.IsAContainer(TileID.cs:409)——★BJ203 收编单源 data/tiles.ts（§6h） */
+const CONTAINER_SS = IS_A_CONTAINER_SHEETS;
 /** Main.tileMoss(Main.cs:6956-6996)——KillTile fail 支苔藓→石转换族 */
 const TILE_MOSS_SS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
 /** TileID.Sets.tileMossBrick(TileID.cs:309)——fail 支 moss 砖→38(Stone Slab? cs:64246) */

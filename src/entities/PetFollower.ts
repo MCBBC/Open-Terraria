@@ -248,6 +248,13 @@ export function flyAccelOf(projId: number, d: number, fallback: number): number 
  *  集不可达=1:1。任务面曾以"原版 Main.npc 单数组全员可被打"为前提评估——该前提对
  *  宠物不适用（宠物非 NPC）,以本注为正解结案。 */
 export class PetFollower extends Entity {
+  /** ★BJ206 2026-09-20：hoik 单向墙承载（Body.hoik 注，TileCollision.ts:98-111）
+   *  ——原版宠物=弹幕（AI_026 由 :26766 分派），位移全走 HandleMovement(:17120)
+   *  →TileCollision 全路径 hoik=true（慢速干路 :17823 不传参吃 Collision.cs:2299
+   *  形参缺省）⇒ 宠物原版本体可穿 Hoik 单向墙。本仓地面族 moveAndCollide 承载
+   *  （:364 被抚摸支/:516 行走支）Body.hoik 缺省 falsy=整缺 → 补 true；
+   *  飞行族无 tileCollide 不涉碰撞面。 */
+  hoik = true;
   /** 原版宠物全体走 Collision.StepUp（AI_026 :59280 / AI_067 :47756） */
   stepUp = true;
   stepUpHolds = true; stepUpNpc = true;   // holdsMatching + IgnoredByNpcStepUp（NPC.cs:54382 flag22 恒 true）

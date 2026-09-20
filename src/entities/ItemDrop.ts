@@ -105,6 +105,12 @@ export class ItemDrop extends Entity {
    *  ≥SHIMMER_UNSTICK_T 拍置 false 穿顶板上浮，脱离微光柱（③支悬停）或被拉动
    *  摘旗（shimmered=false）后恢复 undefined */
   tileCollide?: boolean | undefined;
+  /** ★BJ206 2026-09-20：hoik 单向墙承载（Body.hoik 注，TileCollision.ts:98-111）
+   *  ——原版落地物走 WorldItem.MoveInWorld 的 Collision.TileCollision（:1059 湿支/
+   *  :1072 干支，均不传第 10 参吃形参缺省【true】=Collision.cs:2299）⇒ 掉落物
+   *  原版本体可穿 Hoik 单向墙（水平坡邻配对支）。本仓 moveAndCollide 承载
+   *  （fixedUpdate :430）Body.hoik 缺省 falsy=整缺 → 补 true。 */
+  hoik = true;
   /** ★偏差1 钉死计数：连续「上浮中顶头碰撞」拍数（moveAxis 上顶支置 hitHead,
    *  TileCollision.ts:465-466；受阻链任一拍断开即归零） */
   shimmerStuckT = 0;

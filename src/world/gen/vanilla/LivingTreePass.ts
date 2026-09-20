@@ -33,7 +33,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
@@ -138,8 +138,8 @@ const LT_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
 /** Main.wallDungeon（Main.cs:10734-10745）= 地牢墙族——★BJ187 收编
  *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
 const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
-/** TileID.Sets.Ore（TileID.cs:399）——GrowLivingTree 地面类型门禁用 */
-const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// TileID.Sets.Ore（TileID.cs:403）——GrowLivingTree 地面类型门禁用；★BJ203 收编单源
+// data/tiles.ts:ORE_SHEETS（同名 import,tests/tile-domain-sentinel §6h）
 /** TileID.Sets.Clouds（TileID.cs:197）——canPlaceLeaves 排除 */
 const CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
 /** LivingTrees 选址一票否决：地牢砖（cs:15627-15631） */

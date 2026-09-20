@@ -11,6 +11,14 @@
 //
 // 变异证红纪律：摘 tipOf 注入（池桥断）→「史莱姆命中 2430」红；池滤 2430/恢复
 // 80 封顶 → 计数与结构锁红（人工变异须爆红后还原）。
+//
+// ★BJ207 2026-09-20 ——「80 封顶」行为锁（红蓝-N3 MUT-B 判别力补强）：MUT-B 曾以
+// view.slice(0,80) 异拼回植封顶 9/9 全绿存活——旧字面锁（shown > 80 /
+// …更多结果请细化搜索）只认旧拼法。现 view 构建已单源化（itemSearch.buildItemSearchView,
+// BJ207）,封顶可落点收敛为三处,各有一道锁：①view 构建函数内截断 → ④段行为锁
+// （合成 >80 池,浏览/查询两模式全长断言）;②UI 赋值表达式异拼（.slice 后缀/中转
+// 再截）→ 单源裸调用+裸赋值锚红;③spacer 公式侧截行（Math.min(view.length,80) 族）→
+// spacer 公式锚红。三锁并检 ⇒「任何方式产生 ≤80 截断呈现」必红。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -18,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID, vanillaItemCreateTile } from '../src/data/items';
 import { isFunctionalTileItem } from '../src/world/evolution/PlantRules';
 import { ITEM_NAME_BY_ID } from '../src/i18n/idNames.generated';
-import { buildItemSearchPool } from '../src/ui/itemSearch';
+import { buildItemSearchPool, buildItemSearchView, type ItemSearchPoolEntry } from '../src/ui/itemSearch';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8');
@@ -120,5 +128,50 @@ describe('SW-BJ154 ③渲染面全量虚拟滚动（真凶①:80 封顶废止）
       /item\.addEventListener\('mousedown', \(ev\) => \{[\s\S]{0,160}this\.itemSearchGrab\(e\.id\);[\s\S]{0,120}this\.startItemSearchGrabRepeat\(e\.id\);/,
     );
     expect(uiSrc).toMatch(/openItemSearchPanel\(\) \{[\s\S]{0,700}this\.openInventory\(true\)/);
+  });
+});
+
+// ============================================================
+// ★BJ207 ④「80 封顶」行为锁（MUT-B 判别力补强:任何方式截断必红,头注见上）
+// ============================================================
+describe('SW-BJ207 ④「80 封顶」行为锁（view 全量无封顶,三落点并检）', () => {
+  const pool = buildItemSearchPool({ nameOf, tipOf });
+  /** 合成 >80 池（不依赖 l10n 内容面——注册面变化不虚红,封顶判定纯行为） */
+  const big: ItemSearchPoolEntry[] = Array.from({ length: 130 }, (_, i) => ({
+    id: i, key: `k${i}`, vid: null, name: `甲件${i}`, lc: `甲件${i} k${i}`,
+  }));
+
+  it('行为面①:浏览模式（query 空）=全池零截断（130 件池全长出 view）', () => {
+    const r = buildItemSearchView(big, '');
+    expect(r.searched).toBe(false);
+    expect(r.view.length).toBe(130);   // 任何 slice/min/分页封顶 → 红
+  });
+
+  it('行为面①:查询命中 >80 =全量命中零截断（MUT-B slice(0,80) 落点必红）', () => {
+    const r = buildItemSearchView(big, '甲件');
+    expect(r.searched).toBe(true);
+    expect(r.view.length).toBe(130);
+  });
+
+  it('行为面①:族词别名桥随 view 构建走（翅膀→翼 单源不回退;无桥不命中=桥判别力）', () => {
+    const wing: ItemSearchPoolEntry[] = [{ id: 0, key: 'w0', vid: null, name: '太阳翼', lc: '太阳翼 w0' }];
+    expect(buildItemSearchView(wing, '翅膀', { 翅膀: ['翼'] }).view.length).toBe(1);
+    expect(buildItemSearchView(wing, '翅膀').view.length).toBe(0);
+  });
+
+  it('行为面①:真实池浏览模式 view=全池 4816（与池计数快照同源,注册面变化须两处同锚）', () => {
+    expect(buildItemSearchView(pool, '').view.length).toBe(4816);
+  });
+
+  it('UI 锚②:view 构建=单源裸调用+裸赋值（.slice 后缀/中转再截等异拼全数破锚）', () => {
+    expect(uiSrc).toMatch(
+      /const \{ view: vv, searched \} = buildItemSearchView\(pool, input\.value, ALIAS\);\s*\n\s*view = vv;/,
+    );
+  });
+
+  it('UI 锚③:spacer 总高=ceil(view.length/cols)×行高（公式侧 Math.min 截行破锚）', () => {
+    expect(uiSrc).toMatch(
+      /const rows = Math\.ceil\(view\.length \/ cols\);\s*\n\s*spacer\.style\.height = `\$\{rows \* \(ROW_H \+ GAP\)\}px`;/,
+    );
   });
 });

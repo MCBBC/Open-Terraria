@@ -144,4 +144,37 @@ describe('BJ157⑧ AI_120 状态 1/3（MinionRestTarget 消费面）', () => {
     for (let t = 0; t < 90 && g.ai120State !== 2; t++) g.fixedUpdate(1, hooks);
     expect(g.ai120State).toBe(2);              // 500 内敌 → 冲刺（a-batch2 同款主链）
   });
+
+  // ★BJ207 2026-09-20 抵达阈值精确钉值（红蓝-N5 M1 判别力补强）：旧行为锁「30 拍循环
+  // 至收敛」容差吞阈值漂移——M1（<10px→<3px）9/9 全绿存活（Lerp 0.2 几何收敛,<10 与
+  // <3 在 30 拍内都会抵达）。补【单拍两侧行为断言】：状态 3 判定在 Lerp 0.2 位移之后
+  // （MinionProj :45748 → :45749,判定余距 = 预置距离 ×0.8）——预置 12.4 → 余距 9.92
+  // 恰触发;预置 12.6 → 余距 10.08 恰不触发。阈值被任何方式改小（M1 族 <3/<5/<9.9）
+  // → 触发侧红;改大（<11..<20 族）→ 不触发侧红。钉值窗 [9.92, 10.08]（f64 噪声 ~1e-12,
+  // 边距 0.08 高 10 个数量级）。
+  it('抵达阈值钉值:判定余距 9.92（预置 12.4×0.8）<10px 恰触发转 1（M1 <3 变异必红）', () => {
+    const { hooks, player } = makeHooks([]);
+    const g = mkGuardian(player);
+    setA0(g, 3);
+    g.vx = 0; g.vy = 0;                        // 钉死几何:仅 Lerp 0.2 位移参与判定
+    player.minionRestTargetX = player.cx;
+    player.minionRestTargetY = player.cy;
+    g.x = player.cx + 12.4 - g.w / 2;          // 中心距 rest 点 12.4（x 轴正向）
+    g.y = player.cy - g.h / 2;                 // 中心 y 与 rest 点齐（Δy=0）
+    g.fixedUpdate(1, hooks);
+    expect(g.ai120State).toBe(1);              // 9.92 < 10 → 抵达（<3 变异:9.92≥3 不触发=红）
+  });
+
+  it('抵达阈值钉值:判定余距 10.08（预置 12.6×0.8）≥10px 恰不触发驻 3（阈值改大变异必红）', () => {
+    const { hooks, player } = makeHooks([]);
+    const g = mkGuardian(player);
+    setA0(g, 3);
+    g.vx = 0; g.vy = 0;
+    player.minionRestTargetX = player.cx;
+    player.minionRestTargetY = player.cy;
+    g.x = player.cx + 12.6 - g.w / 2;
+    g.y = player.cy - g.h / 2;
+    g.fixedUpdate(1, hooks);
+    expect(g.ai120State).toBe(3);              // 10.08 ≥ 10 → 未抵达（阈值改大 <11 → 触发=红）
+  });
 });

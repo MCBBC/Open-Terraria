@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, SOLID_TOP_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, NOT_REALLY_SOLID_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -332,8 +332,8 @@ function check3x2KT(st: TileStore, rng: RNG, x: number, y: number, sheet: number
 const TILE_TABLE_S = TILE_TABLE_SHEETS;
 /** TileFrameImportant case 13/33/49/50/78/174/372/646/707 组（cs:86348） */
 const ON_TABLE_1X1_S = new Set([13, 33, 49, 50, 78, 174, 372, 646, 707]);
-/** TileID.Sets.NotReallySolid（TileID.cs:355） */
-const NOT_REALLY_SOLID_S = new Set([387, 388, 10]);
+/** TileID.Sets.NotReallySolid（TileID.cs:359）——★BJ203 收编单源 data/tiles.ts（§6h） */
+const NOT_REALLY_SOLID_S = NOT_REALLY_SOLID_SHEETS;
 
 function blockTypeAt(st: TileStore, i: number): number {
   if (st.half[i]) return 1;

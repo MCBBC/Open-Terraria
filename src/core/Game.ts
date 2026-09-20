@@ -133,7 +133,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -1583,7 +1583,7 @@ const NO_ATTACH_SHEETS = new Set<number>([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 
   387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469,
   486, 487, 488, 489, 490, 497, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
 // TileID.Sets.IsBeam（TileID.cs:239）——SW-BA1：442 支梁木臂（Player.cs:46625/:46631）
-const IS_BEAM_SHEETS = new Set<number>([124, 561, 574, 575, 576, 577, 578]);
+// ★BJ203 收编单源 data/tiles.ts:IS_BEAM_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h）
 // IsLivingFire（TileID.cs:241）——IsTilePoundable 的活火臂（Player.cs:45940），锤目标
 // 但 TryPoundingTile 无专属支=门内 no-op（与原版一致,勿再"补"动作）
 const LIVING_FIRE_SHEETS = new Set<number>([336, 340, 341, 342, 343, 344]);
@@ -1791,7 +1791,8 @@ export function isDirtRodTargetSheet(sheet: number): boolean {
  *  /沙滴/微光滴放置物）——滴管 consumable=true 放置即消耗，原版挖除装饰【不返还】
  *  （滴水砖无 tile-drop；WorldGen KillTile 无此五型掉落支），否则 40 金滴管放置→
  *  挖除无限白嫖（2026-09-07 用户实报"挖会滴水的方块掉落魔法水滴管"） */
-const ADRIP_TILE_SHEETS = new Set([373, 374, 375, 461, 709]);
+// ★BJ203 收编单源 data/tiles.ts:IS_A_DRIP_TILE_SHEETS（TileID.cs:157;逐值对拍全等,§6h）
+const ADRIP_TILE_SHEETS = IS_A_DRIP_TILE_SHEETS;
 // ★掉落对账批移交(2026-09-07):另四型"放置即消耗、原版破坏零返还"的同族——
 //  590 宝石树苗(gemcorn 放置,Check1x2 :86818 仅成长检)/595 樱花树苗(:86819)/
 //  615 黄柳树苗(:86820)/484 滚石仙人掌(Check2x2 仅弹 727 无物品)——金标
@@ -13720,7 +13721,8 @@ export class Game implements GameHooks {
         // 表缺（=原版 UseSound=null）同样静默；天顶剑 4956/5669 已在上方分支静默
         // （Item.cs:39978 无 UseSound 行，声源全在剑弹）
         if (itemUseSoundWav(heldVid)) this.playUseSound(heldVid, 'throw');
-        // ★ 真刃系旋斩弧五剑（Player.cs:48265-48317 各专属出生链——先于下方通用
+        // ★ 真刃系旋斩弧五剑（Player.cs:49353-49447 各专属出生链——★BJ206 2026-09-20
+        // 重锚,旧注 :48265-48317 系 1456 代际——先于下方通用
         // shoot 门：368/1826 无 shootSpeed 会被饿死；弧弹自带命中，不再走 Arrow）
         const arcVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');
         const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
@@ -13752,7 +13754,7 @@ export class Game implements GameHooks {
             this.entities.add(arc, 'projectiles');
           };
           switch (cwMelee.shoot) {
-            case 972: {   // 永夜刃 273（:48265-48274）：972 锚弧 + 972 飞斩（aim 向、ai1=30）
+            case 972: {   // 永夜刃 273（:49378-49385,★BJ206 重锚）：972 锚弧 + 972 飞斩（aim 向、ai1=30）
               mkArc(972, this.swing.dmg ?? cwMelee.damage);
               const fly = new NightsEdgeFly(this.player.cx, this.player.cy - 4,
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 5), Math.sin(angT) * (cwMelee.shootSpeed ?? 5),
@@ -13762,7 +13764,7 @@ export class Game implements GameHooks {
               this.entities.add(fly, 'projectiles');
               break;
             }
-            case 973: {   // 真永夜刃 675（:48294-48301）：972 锚弧 + 973 伸长斩（aim 向、半伤、ai1=32）
+            case 973: {   // 真永夜刃 675（:49424-49431,★BJ206 重锚）：972 锚弧 + 973 伸长斩（aim 向、半伤、ai1=32）
               mkArc(972, this.swing.dmg ?? cwMelee.damage);
               const slash = new TrueNightsEdgeSlash(this.player,
                 Math.cos(angT) * (cwMelee.shootSpeed ?? 14), Math.sin(angT) * (cwMelee.shootSpeed ?? 14),
@@ -13804,7 +13806,7 @@ export class Game implements GameHooks {
               this.entities.add(lb, 'projectiles');
               break;
             }
-            case 976: {   // 草剑 190（Player.cs:48318-48361）：弧线搜索飞叶
+            case 976: {   // 草剑 190（Player.cs:49448-49497,★BJ206 重锚）：弧线搜索飞叶
               // 目标 = MountedCenter+(70,−40)±20 散布或 150px 内敌人盒内随机点；
               // 起点沿方向弧线步行（步长 16、旋转 num178/60、上限 60 步）；
               // ai0=每 tick 旋转、伤害×0.25
@@ -14032,7 +14034,8 @@ export class Game implements GameHooks {
             whip.armorPen = (eq.armorPen ?? 0) + this.player.meleeArmorPen;
             this.entities.add(whip, 'projectiles');
           }
-          // 985 泰拉刃光束（Player.cs:48316-48317 出生注入）：初速=瞄准向×shootSpeed×5
+          // 985 泰拉刃光束（Player.cs:49443-49444 出生注入,★BJ206 重锚,旧注
+          // :48316-48317 系 1456 代际）：初速=瞄准向×shootSpeed×5
           // （=60；985 不吃 meleeSpeed 缩放）、ai[0]=朝向±1、ai[1]=18（寿命 43t）、
           // ai[2]=物品 scale（×词缀 size）；同时伴生 984 旋斩弧（见下 TerraArc）
           const terra = cwMelee.shoot === 985;
@@ -14042,7 +14045,7 @@ export class Game implements GameHooks {
             const tdl = Math.hypot(tdx, tdy) || 1;
             this.entities.add(new Arrow(
               this.player.cx, this.player.cy - 4,
-              // :48316 `new Vector2(num4, num5) * 5f`——num4/5 已含 shootSpeed
+              // :49444 `new Vector2(num4, num5) * 5f`（★BJ206 重锚）——num4/5 已含 shootSpeed
               // （ItemCheck_Shoot :46430-46434 speed = sItem.shootSpeed，985 ∈
               // NoMeleeSpeedVelocityScaling（ProjectileID.cs:337）不除 meleeSpeed）
               // → 实际初速 = 单位向×12×5 = 60（曾漏乘 shootSpeed 只 ×5）
@@ -24805,8 +24808,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  ④ 支撑门 = AssortedThings 尾支 catch-all（:41565-41581,绳无专属支落【else】）：
     //     四邻 active&&(tileSolid||IsBeam||tileRope||轨314) 或 邻/自身 wall>0
     //     （tileSolid=本仓 solid||platform 双旗——平台 Main.cs:8032 tileSolid 双 true）;
-    //  ⑤ flag2 清障（:41630-41660）：目标 cut∪BWP∪drip 活性格（484/711 已被③拒）
-    //     → KillTile（带掉落）;num9=下方非 78/380/579 例外拒置;
+    //  ⑤ flag2 清障（:41618-41651;★BJ208 先清障后验支撑——flag=staffOfRegrowthBonus
+    //     只认物品域 213 回春杖/5295 橡木斧 :41358,绳物品 965 族恒 false ⇒ flag2 恒真,
+    //     清障独立于支撑/canPlace）：目标 cut∪BWP∪drip 活性格（484/711 已被③拒）
+    //     → KillTile（带掉落）;num9=下方非 78/380/579 例外拒置;支撑失败只拒置不吞清障;
     //  ⑥ PlaceTile 写 1 格（:59857 `!tileSolid[213]` 头门恒过,213 无 case 派发直写）
     //     +消耗 1+ApplyItemTime（useTime×tileSpeed 与通用放置同式 :25116 区）。
     //  retarget 走查定谳（:41829-41860）：点击格=活性绳 → 沿 绳/轨314/平台/种植箱380
@@ -24859,7 +24864,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           || t0s === 373 || t0s === 374 || t0s === 375 || t0s === 461 || t0s === 709;
         if (!replaceable) return;
       }
-      // ④ 支撑门（AssortedThings 尾支 :41565-41581）
+      // ④ 支撑门（AssortedThings 尾支 catch-all :41567-41581）——★BJ208 计算【不早退】：
+      //  flag2 清障独立于 canPlace（见⑤）,支撑结果只门「放置+消耗」段。
       const wallAt = (x: number, y: number): boolean =>
         st.inBounds(x, y) && st.wall[st.idx(x, y)] > 0;     // 邻 wall>0 不问 active（:41570）
       const ropeAnchor = (x: number, y: number): boolean => {
@@ -24870,16 +24876,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return !!b && (b.solid || b.platform                 // tileSolid（solidTop 双旗并,8032）
           || IS_BEAM_SHEETS.has(bs) || TILE_ROPE_SHEETS.has(bs) || bs === 314);
       };
-      if (!(ropeAnchor(tx - 1, ty) || ropeAnchor(tx + 1, ty)
-        || ropeAnchor(tx, ty - 1) || ropeAnchor(tx, ty + 1) || wallAt(tx, ty))) return;
-      // ⑤ flag2 清障（:41630-41660）：cut∪BWP∪drip 目标 KillTile（带掉落）;
-      //  num9 例外=下方 78 陶盆/380 种植箱/579 悬垂草 → canPlace=false 拒置
+      const ropeSupported = ropeAnchor(tx - 1, ty) || ropeAnchor(tx + 1, ty)
+        || ropeAnchor(tx, ty - 1) || ropeAnchor(tx, ty + 1) || wallAt(tx, ty);
+      // ⑤ flag2 清障（:41618-41651）——★BJ208 定谳：flag=staffOfRegrowthBonus 只认
+      //  HeldItem 213 回春杖/5295 橡木斧（ItemID.cs:1972/:12136;绳物品域=965/2996/3077/
+      //  3078 ⇒ 绳支 flag 恒 false）→ :41619 `if (flag && !canPlace)` 不触发 ⇒ flag2
+      //  恒 true ⇒ 目标 cut∪BWP∪drip 活性格的 KillTile【独立于支撑/canPlace】——
+      //  支撑门失败也清障,不放置不消耗（旧序支撑门 early-return 在清障前="无支撑+
+      //  目标杂草/藤蔓角落不清"实报根因）。484/711 已被③拒;type==createTile（绳目标）
+      //  同被③拒（tileCut[213]=false 且非 BWP）。num9 例外=下方 78 陶盆/380 种植箱/
+      //  579 悬垂草 → canPlace=false 拒置（不清不置,原版同 return）。
       if (st.hasTile(tx, ty)) {
         const belowS = st.inBounds(tx, ty + 1)
           ? (TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1) : -1;
         if (belowS === 78 || belowS === 380 || belowS === 579) return;
-        this.breakTile(tx, ty, false);                      // KillTile 默认参（放置族路径）
+        this.breakTile(tx, ty, false);                      // :41636 KillTile 默认参（放置族路径）
       }
+      if (!ropeSupported) return;                           // :41573-41580 支撑门失败 → 拒置（清障已发生）
       // ⑥ 写 1 格 + 消耗 1 + ApplyItemTime
       st.setTile(tx, ty, ropeTile, 0, 0);
       this.player.inv.removeHeld(1);
@@ -43035,14 +43048,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （PrepareDisplayText :415-420，N>1 才带计数）。钱币（71-74）按面值合并成 "N 铜币 / 1 金币 50
    *  银币" 式文本 + 档位色/寿命（:222-247 ValueToName :543），stack 恒 1。
    *  不同名各自独立飘字（20 槽上限，满员替换 position.Y 最小者 = FindNextItem
-   *  TextSlot :770-784）。颜色 = 稀有度（PrepareEffects :370-380 GetPopupRarity
+   *  TextSlot :770-784）。颜色 = 稀有度（PrepareEffects :388-404 GetPopupRarity
    *  Color Item.cs:633-696；vi_ 物品查 vanilla-itemrare.json，同 UI.ts 惯例）。
+   *  ★SW-N4（2026-09-20,红蓝-N4 清偿②）rareOverride 覆写参 = 重铸飘字链——原版
+   *  GetEffectDetails.Rarity = newItem.rare 字段值（CraftingEffects.cs:64-69）,
+   *  reforge 落词缀时 Item.Prefix :588-614 已把档位移烘进字段,飘字色必须取位移后
+   *  值（基表读法=神级迷你鲨 2 档绿 #96FF96,原版 2+2→4 档 (255,150,150)=实报
+   *  伪影,BJ165 登记）;重铸两调用点（UI.ts classic doBtn/vinv 锤击）传
+   *  UI.tooltipRareOf(·,np,{forPopup}) 产物（BJ125 单源链;forPopup=跳过④
+   *  MouseText −12 覆写——专家旗在飘字链走 somePopup.expert 不改色）。缺省基表
+   *  读法=普通拾取同相（拾取链不携词缀域）。变异哨=tests/sw-n4-reforge-popup-rare
+   *  .test.ts（传基表→红）。
+   *  noStack 语义（BJ173 登记,2026-09-20 注释确认）：原版 noStack 只关合并
+   *  （PopupText.cs:212 `popupText.NoStack || noStack` continue 跳过合并扫描）
+   *  不关计数（PrepareDisplayText :406-420 stack>1 仍拼「 (N)」）——重铸调用
+   *  Main.cs:42622 noStack:true;本仓「名 (3)」计数同相,合并闸未建模（重铸飘字
+   *  可并入同 key 拾取飘字）=登记偏差维持。
    *  登记近似：②文本样式/运动阻尼沿用仓内 13px 描边白系（①抗重叠推离
    *  PopupText.Update :678-704 已在 dmgNumbers 飘字池消费段 1:1 入位——命中盒
    *  （Measure×scale、高×0.8）相交且自身在上（y 小/同 y 槽序在前）→ 双方
    *  lifeTime = activeTime(60) + 15×min(numActive,3) 重钉 + 上推速度链（!flag
    *  0.86 衰减、flag>−6 逐拍 −0.2）,tests/popup-antioverlap.test.ts 锁定）。 */
-  showPickupLabel(itemKey: string, picked = 1, prefix?: number) {
+  showPickupLabel(itemKey: string, picked = 1, prefix?: number, rareOverride?: number) {
     // Main.showItemText（IngameOptions.cs:705 → PopupText.NewText 族 PopupText.cs:120）：
     // 关 = 拾取名飘字整链不触发
     if (!options.data.showItemText) return;
@@ -43053,7 +43080,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const name = popupAffixName(prefix, Lang.itemNameByKey(def.key));
     const mergeKey = prefix ? `${itemKey}#${prefix}` : itemKey;
     const coinIdx = COIN_KEYS.indexOf(def.key as (typeof COIN_KEYS)[number]);   // :201 flag
-    const rare = def.key.startsWith('vi_') ? ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0 : 0;
+    // ★SW-N4：rareOverride ?? 基表（0=合法档位,?? 不误吞;覆写含词缀档位移终值）
+    const rare = rareOverride
+      ?? (def.key.startsWith('vi_') ? ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0 : 0);
     // ---- 合并扫描（:202-247）----
     for (const d of this.dmgNumbers) {
       if (!d.label) continue;

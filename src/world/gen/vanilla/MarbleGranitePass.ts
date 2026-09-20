@@ -6,7 +6,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, ORE_SHEETS } from '../../../data/tiles';
 import { FastRandom } from '../../../core/rng';
 import { intersectsAnyPotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII88 dual 钉角/拒带
 
@@ -123,7 +123,8 @@ function smoothSlopeSelf(st: TileStore, x: number, y: number): void {
 
 /** TileID.Sets.Ore（TileID.cs:399，19 个）——大理石/花岗岩 ResetToType 的矿石保留判定。
  *  曾抄成 20/203/70/21/116/234 的杂表 → 花岗岩体内矿石被吞（granite checkpoint 纯 type 差） */
-const VANILLA_ORE = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// ★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（TileID.cs:403;逐值对拍全等,§6h）
+const VANILLA_ORE = ORE_SHEETS;
 // ★IIIII14（GraniteBiome.cs:213-216/262-265、MarbleBiome.cs:116-119）：drunk 世界
 // 大理石/花岗岩「生成式互换」——大理石园放花岗岩块(368/墙180)、花岗岩园放大理石块
 // (367/墙178)。vanilla 是各 Place 内的常量替换；本仓经模块档位传递（两入口置位）。

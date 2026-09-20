@@ -37,7 +37,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
@@ -252,8 +252,6 @@ const NO_ATTACH = new Set([
   468, 27, 114, 86, 87, 88, 89, 90, 101, 102, 94, 95, 96, 97, 98, 99, 91, 92, 93, 387, 388,
   427, 390,
 ]);
-/** TileID.Sets.IsADripTile（:157） */
-const IS_DRIP = new Set([373, 374, 375, 461, 709]);
 /** InvalidTileForPilesOrSpeleothems（cs:36001：Boulders ∪ {26 祭坛, 237}）——
  *  AAAAAA：引擎 Check2x1 的 185 支补用 */
 const INVALID_PILES = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 26, 237]);
@@ -1532,7 +1530,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
 
 /** CheckBanner 上锚 NotReallySolid 族（TileID.Sets.NotReallySolid={387,388,10}，
  *  cs:46541 消费——LiquidSim 前置扫同源常量；本仓"同源副本禁 import"惯例） */
-const NOT_REALLY_SOLID_BANNER = new Set([387, 388, 10]);
+const NOT_REALLY_SOLID_BANNER = NOT_REALLY_SOLID_SHEETS;   // TileID.cs:359 ★BJ203 收编单源（§6h）
 
 /** CheckBanner（1457 cs:46493-46658，派发 cs:86979 case 91）——IIIIII3 批补引擎主臂。
  *  1×3 竖排旗帜：frameY/18 反解组顶（样式段=3 行/样式）+ 三格组 type/帧全等校验
@@ -2432,7 +2430,7 @@ function frame72Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void 
 
 /** case 136（cs:85738-85803）：下实心(平/底坡)→0 / 左实心(左坡/平/梁/树干簇)→18 /
  *  右→36 / 墙→54 / 杀 */
-const IS_BEAM = new Set([124, 561, 574, 575, 576, 577, 578]);          // TileID.Sets.IsBeam（:239）
+const IS_BEAM = IS_BEAM_SHEETS;   // TileID.Sets.IsBeam（:239）★BJ203 收编单源（§6h）
 // TileID.Sets.IsATreeTrunk（:161）——★BJ168-债2（2026-09-19）本地副本拆除,收编
 // data/tiles.ts 单源 IS_A_TREE_TRUNK_SHEETS（sheet 域,逐值对拍 12≡12;下方 frame136/
 // checkTorch 两 sweep 的 typeOf 均返回 sheetAt2=sheet 域相配）
@@ -2917,7 +2915,7 @@ function check3x3WallSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): 
 /** AnchorType 位（Terraria.Enums/AnchorType.cs）——CheckSuper 锚腿用 */
 const AN_SOLID_TILE = 1, AN_SOLID_WITH_TOP = 2, AN_SOLID_SIDE = 8, AN_SOLID_BOTTOM = 0x80;
 /** TileID.Sets.NotReallySolid（TileID.cs:355）——SolidBottom 腿排除 */
-const NOT_REALLY_SOLID = new Set([387, 388, 10]);
+const NOT_REALLY_SOLID = NOT_REALLY_SOLID_SHEETS;   // TileID.cs:359 ★BJ203 收编单源（§6h）
 /** WorldGen.AnchorValid(tile, anchor)（cs:51866-51913）：CheckSuper 443 双向锚/
  *  444 顶锚/485 底锚。腿序=原版（SolidTile→SolidBottom→SolidWithTop/Table→
  *  Table→SolidSide，!flag 短路）；tileSolid 走 genSolidType（生成期镜像 RRRR）、

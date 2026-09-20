@@ -34,6 +34,16 @@ let driftCount = 0;
 const fail = (msg) => { console.error(`  ✗ DRIFT ${msg}`); driftCount++; };
 const note = (msg) => console.log(`  · ${msg}`);
 const detail = (msg) => { if (VERBOSE) console.log(`      ${msg}`); };
+// ★BJ207 崩溃路径收口（2026-09-20,红蓝-N5）：结构解析失败（签名未找到/方法体未闭合/
+//   ENOENT 等 throw 族）旧版以裸 Error 栈直接崩——exit 1 能拦但无干净汇总,且 §3 曾因
+//   缺翻译行走 tr.lane 未捕获 TypeError 中断全量对账。uncaughtException 兜底=打印
+//   CRASH 物证（栈顶 3 行,不吞错）+ 闸门红汇总 + exit 1（fail-closed 不变）。
+process.on('uncaughtException', (e) => {
+  const s = e instanceof Error ? (e.stack ?? `${e.name}: ${e.message}`) : String(e);
+  console.error(`\n  ✗ CRASH ${s.split('\n').slice(0, 3).join('\n    ')}`);
+  console.error(`＝＝＝ recon-armorset-1457 ＝＝＝  CRASH 结构解析失败  DRIFT=${driftCount}  ✗ 闸门红`);
+  process.exit(1);
+});
 /** 特效值等价（数组面深等——Snow buffImmune:[46,47] 等;标量走 ===） */
 const fxEq = (a, b) => Array.isArray(a) || Array.isArray(b)
   ? JSON.stringify(a) === JSON.stringify(b) : a === b;
@@ -317,6 +327,8 @@ for (const set of SETS) {
   const name = set.name;
   if (UNPORTED.has(name)) { unportedReport.push(name); continue; }
   const tr = SET_EFFECTS[name];
+  if (!tr) continue;   // ★BJ207:缺翻译行已在 §1a 尾 fail 登记（「缺特效翻译行」）——旧版此处
+                       // tr.lane 裸 TypeError 中断全量对账;跳过让其余套照常对拍,末尾干净汇总
   const expSlot = new Map(), expVid = new Map();
   for (const trip of set.triplets) {
     const key = tr.lane === 'vid' ? trip.join('|') : slotKeyOf(trip);

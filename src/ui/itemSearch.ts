@@ -122,3 +122,33 @@ export function buildItemSearchPool(io: {
   });
   return out;
 }
+
+// ============================================================================
+// ★BJ207 2026-09-20 —— 搜索视图构建单源（自 UI.openItemSearchPanel render 摘出）。
+// view = 唯一呈现集：BJ154「80 封顶」已废止,任何方式截断（slice(0,80) 异拼/min 平台
+// 期/分页族）都会让浏览式打开丢件（BJ154 真凶①重演）。红蓝-N3 MUT-B 曾以
+// view.slice(0,80) 异拼回植封顶 9/9 全绿存活——旧字面锁（shown > 80 /
+// …更多结果请细化搜索）只认旧拼法;单源化后封顶可落点收敛为三处,各有行为锁看护
+// （tests/sw-bj154-itemsearch-pool ④段）：①本函数内截断→合成 >80 池全长断言红;
+//  ②UI 赋值表达式异拼→单源裸调用+裸赋值锚红;③spacer 公式侧截行→公式锚红。
+// ============================================================================
+
+/**
+ * 搜索视图构建（UI render 单源）。
+ * @param query 原始输入（trim+小写在本函数内做,UI 侧零本地过滤拼法）
+ * @param alias zh 族词软链（翅膀↔翼,UI 侧既有表注入;缺省不桥）
+ * @returns view 全量无封顶（query 空 = 浏览模式全池,同一数组直返）;
+ *          searched = 是否查询态（计数行「命中 N / M」vs「共 M 件」语义单源）
+ */
+export function buildItemSearchView(
+  pool: ItemSearchPoolEntry[],
+  query: string,
+  alias?: Record<string, string[]>,
+): { view: ItemSearchPoolEntry[]; searched: boolean } {
+  const qRaw = query.trim().toLowerCase();
+  const qs = [qRaw, ...(alias?.[qRaw] ?? []).map((x) => x.toLowerCase())].filter(Boolean);
+  return {
+    view: qs.length ? pool.filter((e) => qs.some((q) => e.lc.includes(q))) : pool,
+    searched: qs.length > 0,
+  };
+}

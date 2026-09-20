@@ -34,6 +34,7 @@ const PIGRONATA = TILE_BY_KEY['v_454_pigronata']!;
 const ECHO_1X2 = TILE_BY_KEY['v_694_stalactite_1x2_echo']!;
 const MUSHROOM = TILE_BY_KEY['mushroom']!;
 const TALLGRASS = TILE_BY_KEY['tallgrass']!;
+const CLAY_POT = TILE_BY_KEY['clay_pot']!;            // 原版 sheet 78（num9 例外族）
 
 interface Drop { key: string; n: number }
 
@@ -452,5 +453,59 @@ describe('②c Echo 凌柱完整性 frameY 半边（693/694）', () => {
       .checkFurnitureSupport(10, 10);
     expect(st.get(10, 10)).toBe(0);
     expect(st.get(10, 11)).toBe(0);
+  });
+});
+
+// ============================================================
+// ②a-BJ208 绳 flag2 清障与拒置解耦（Player.cs:41618-41651）
+//    定谳：flag=staffOfRegrowthBonus 只认物品域 213 回春杖/5295 橡木斧
+//    （ItemID.cs:1972/:12136——"绳 213"系 tile 域记法误植,绳物品域=965/2996/3077/
+//    3078）⇒ 绳支 :41619 `if (flag && !canPlace)` 不触发 ⇒ flag2 恒真 ⇒ 目标
+//    cut∪BWP∪drip 的 KillTile（:41636）独立于支撑门（:41567-41581）——无支撑也清障
+//    （不放置不消耗）。变异：M-1 支撑门 early-return 提前回旧序 → 测试1红;
+//    M-2 摘清障臂（breakTile）→ 测试1红+既有 retarget 清株续格面红。
+// ============================================================
+describe('②a-BJ208 绳 flag2 清障独立于支撑门（:41618-41651 flag2 恒真）', () => {
+  it('无支撑+目标可割株 → 清障照发生,不放置不消耗（:41636 KillTile 先于支撑验算）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(8, 16, TALLGRASS, 0, 0);           // 目标=可割株;四邻全空无墙
+    const drops: Drop[] = [];
+    const { g, consumed } = shell(w, drops);
+    (g as unknown as { tryPlace: (x: number, y: number, d: (typeof ITEM_DEFS)[number]) => void })
+      .tryPlace(8, 16, defOf(965));
+    expect(st.type[st.idx(8, 16)]).toBe(0);             // ★清障已发生（旧序支撑门早退=株残留）
+    expect(st.type[st.idx(8, 15)]).toBe(0);             // 未写绳（canPlace=false 拒置）
+    expect(st.type[st.idx(8, 17)]).toBe(0);
+    expect(consumed).toEqual([]);                       // 不消耗（清障不落 PlaceIt）
+  });
+
+  it('有支撑+目标可割株+下方陶盆（78）→ num9 拒置：不清不置不消耗（:41627/:41644）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(7, 16, ROPE);                      // 左邻绳=支撑成立（:41573 tileRope 臂）
+    st.setTileSilent(8, 16, TALLGRASS, 0, 0);
+    st.setTileSilent(8, 17, CLAY_POT);                  // 下方 78 → num9 反例
+    const drops: Drop[] = [];
+    const { g, consumed } = shell(w, drops);
+    (g as unknown as { tryPlace: (x: number, y: number, d: (typeof ITEM_DEFS)[number]) => void })
+      .tryPlace(8, 16, defOf(965));
+    expect(st.type[st.idx(8, 16)]).toBe(TALLGRASS);     // 株原样（num9 拒置先于清障）
+    expect(st.type[st.idx(8, 17)]).toBe(CLAY_POT);
+    expect(consumed).toEqual([]);
+    expect(drops).toEqual([]);
+  });
+
+  it('有支撑+目标可割株（直点株格,无 retarget）→ 清障+置绳+消耗（:41636→PlaceIt 回归锚）', () => {
+    const w = mkWorld();
+    const st = w.store;
+    st.setTileSilent(7, 16, ROPE);
+    st.setTileSilent(8, 16, TALLGRASS, 0, 0);
+    const drops: Drop[] = [];
+    const { g, consumed } = shell(w, drops);
+    (g as unknown as { tryPlace: (x: number, y: number, d: (typeof ITEM_DEFS)[number]) => void })
+      .tryPlace(8, 16, defOf(965));
+    expect(st.type[st.idx(8, 16)]).toBe(ROPE);          // 清障后续置 1 格
+    expect(consumed.length).toBe(1);
   });
 });

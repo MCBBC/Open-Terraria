@@ -252,7 +252,8 @@ import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
-  drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay } from './npcExtraParts';
+  drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay,
+  drawMimicAfterimages, drawNpcTrailGhosts } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
@@ -7586,6 +7587,16 @@ export class Renderer {
               [1, 1, 1]);
           }
         }
+        // 473-476 大宝箱怪拖影（TrailingMode=2 老位历史残影——记录面 UpdateNPC_UpdateTrails
+        // mode 2 :91918-91934 态门 4/4.1/5/6；绘制面通用拖尾块形状 :23628-23643,
+        // ★原版 Main.cs 无 473-476 特支,按系统语义+用户参考图补缺,详见 npcExtraParts 注）
+        if (e.vanillaId === 473 || e.vanillaId === 474 || e.vanillaId === 475 || e.vanillaId === 476) {
+          const frMimic = this.atlas.vnpc(e.vanillaId, vanillaFrameIdx(e, Math.max(1, e.vanilla?.frames ?? 1)));
+          if (frMimic) {
+            drawMimicAfterimages(ctx, e, this.atlas,
+              { sx: frMimic.sx, sy: frMimic.sy, sw: frMimic.sw, sh: frMimic.sh });
+          }
+        }
         // 399 火星探测器逃跑扫描束 + 418 Corite 拖尾（DrawNPC 附加层审计补缺）
         if (e.vanillaId === 399) drawMartianProbeBeams(ctx, e, this.atlas, 0);
         if (e.vanillaId === 418) drawCoriteTrail(ctx, e, this.atlas);
@@ -7956,29 +7967,11 @@ export class Renderer {
           drawDreadnautilusOverlay(ctx, e, this.atlas,
             { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh });
         }
-        // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
-        //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA
-        //      × 0.5×(10−i)/20（越旧越淡），同一帧/旋转，锚点同本体（居中锚）。
-        //      原版该分支在 DrawNPC 本体 Draw 之后求值 → 鬼影压在本体之上（越近越深）；
-        //      此前近似门 dashing && phase≥2 把普通 3 连冲也画了鬼影且画在本体之前。
-        //      仓内映射：ai0=ai[0]、state=ai[1]（见 Enemy.eocAI 头注）----
-        if (e.vanillaId === 4 && e.ai0 === 3 && e.state >= 4) {
-          for (let i = 1; i < 10; i++) {
-            const depth = e.historyDepth();
-            if (i >= depth) break;
-            const ga = (10 - i) / 40;   // 0.5 × (10-i)/20
-            if (ga <= 0.01) continue;
-            ctx.save();
-            ctx.translate(e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2);
-            ctx.rotate(e.visAngle);
-            ctx.scale(scale, scale);
-            if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1);
-            ctx.globalAlpha = ga * (1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255);
-            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2, r.sw, r.sh);
-            ctx.restore();
-          }
-          ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
-        }
+        // ---- EoC 冲刺残影（Main.cs:26359-26371）→ ★BJ209 迁至本体块 restore 后的
+        //      drawNpcTrailGhosts 统一挂点（绝对世界坐标）。原内联块在本体变换
+        //      （translate(cx,cy)+rotate+scale）内用绝对历史坐标 translate=双重偏移
+        //      （残影落点 ≈ 本体位+R·G_world，屏外不可见）+ visAngle 二次旋转——
+        //      门参数不变：ai0==3 && state>=4（专家预测连冲/悬下回冲），α=0.5×(10−i)/20。
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）。
@@ -8048,31 +8041,41 @@ export class Renderer {
         // 累积滚转 visAngle 不同源 → 共轭换角独立绘制（draw546GlowCore;
         // ?. = drawEnemy 测试假体可缺省此方法,生产类恒有）
         if (e.vanillaId === 546) this.draw546GlowCore?.(e, r, -r.sw / 2, bodyY, scale, e.facing < 0);
-        // Mech 族 oldPos 拖尾（Main.cs:24592-24605：125-131 全族 + 139 自由态（ai3==0）
-        //  + 140；oldPos 9→1 间隔 2 共 5 份，α=(10-i)/20，同帧同当前旋转——原版此块
-        // 在本体 Draw 之后求值 → 鬼影压在本体之上）
-        {
-          const mId = e.vanillaId ?? 0;
-          if ((mId >= 125 && mId <= 131) || (mId === 139 && e.ai3 === 0) || mId === 140) {
-            const depth = e.historyDepth();
-            const mOp = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
-            for (let i = 9; i >= 1; i -= 2) {
-              if (i >= depth) break;
-              ctx.save();
-              ctx.translate(e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2);
-              ctx.rotate(e.spin);
-              ctx.scale(scale, scale);
-              if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1);
-              ctx.globalAlpha = ((10 - i) / 20) * mOp;
-              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
-              ctx.restore();
-            }
-            ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
-          }
-        }
+        // Mech 族 oldPos 拖尾（Main.cs:25486-25498）→ ★BJ209 迁至 restore 后
+        // drawNpcTrailGhosts 统一挂点（原内联块在本体变换内用绝对历史坐标
+        // translate=双重偏移屏外不可见；α=(10−i)/20 等参数面 1:1 平移）。
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
+        // ---- ★BJ209 NPC 残影族统一挂点（本体 restore 之后=绝对世界坐标）：
+        // 通用大表族 426/427/521/542-546/558-560/574-575/581/620（ai0==2 门）+
+        // 特支族 4/94/120/137/138/417/419/439-440/471/477/479/516/519/551 +
+        // 迁入的 EoC 冲刺残影与 Mech 族拖尾。散参=本体块已知量（rot/mirror 取
+        // 本体旋转链同款判定，546 反翻族镜像取反）。z 序偏差与颜色合并惯例见
+        // npcExtraParts.drawNpcTrailGhosts 头注。 ----
+        {
+          const gid = e.vanillaId ?? -1;
+          const gRotDriven = rotationDriven;   // 复用本体旋转链判定（含 tiltOnly5 排除）
+          let gRot = 0;
+          let gMirror = false;
+          if (gid === 477 || gid === 479 || (gid >= 125 && gid <= 131)) gRot = e.spin;
+          else if (gid === 94) gRot = e.vx !== 0 ? Math.atan2(e.vy, e.vx) + (e.vx < 0 ? Math.PI : 0) : 0;
+          else if (gRotDriven) gRot = ROTATION_NPC.has(gid) ? e.spin : (e.visAngle || 0);
+          // 旋转链在本体变换内但 rotationDriven 未收的档（stR 39/44/103/108/110
+          // ——:7735/:7733/:7760/:7793），残影 rot 同本体=visAngle，镜像保留
+          else if (gid === 417 || gid === 551 || (gid >= 542 && gid <= 545)
+            || gid === 581 || (gid >= 558 && gid <= 560) || gid === 574 || gid === 575) {
+            gRot = e.visAngle || 0;
+          }
+          if (!gRotDriven) {
+            if (gid === 546) gMirror = e.facing < 0;           // 546 反翻族（:7841-7842 同款）
+            else gMirror = e.facing > 0;
+          }
+          drawNpcTrailGhosts(ctx, e, this.atlas, r, {
+            scale, addY: addY + footFlush, opacity: 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
+            rot: gRot, mirror: gMirror, frameIdx, frames,
+          });
+        }
         // 星璇塔护盾半球（在精灵之后叠画，对齐原版 DrawNPC 尾段顺序）
         if (isTowerId(e.vanillaId)) this.drawTowerShield(e, world);
         // Mechdusa 蛇发（Main.cs:25070-25112，queen 127 的 DrawNPC 尾段叠画）：
@@ -8919,26 +8922,9 @@ export class Renderer {
           ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
         }
       }
-      // 旋刃冲刺拖尾（:24610-24645，ai2<=-9）：oldPos 0..6 七份，帧行 (curRow-3-i)%3+5
-      // 循环、scale Lerp(0.75,1.2,(10-i)/10)、白度 (10-i)/20 渐隐。独立平移到历史
-      // 位置（世界坐标）——bx/by 恰为"底锚相对偏移"，直接复用
-      if (e.ai2 <= -9) {
-        const depth = Math.min(7, e.historyDepth());
-        for (let i = Math.min(6, depth - 1); i >= 0; i--) {
-          let trow = (row - 3 - i) % 3;
-          if (trow < 0) trow += 3;
-          trow += 5;
-          const tsy = Math.min(img.height - gh, trow * gh);
-          const ts = 0.75 + 0.45 * ((10 - i) / 10);   // Lerp(0.75,1.2,(10-i)/10)
-          ctx.save();
-          ctx.translate(e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h);
-          ctx.rotate(e.histRotAt(i));
-          ctx.scale(ts, ts);
-          ctx.globalAlpha = Math.max(0, Math.min(1, (10 - i) / 20)); // White×(10-i)/20, A=0
-          ctx.drawImage(img, 0, tsy, img.width, gh, bx, by, r.sw, r.sh);
-          ctx.restore();
-        }
-      }
+      // 旋刃冲刺拖尾（:25512-25534，ai2<=-9）→ ★BJ209 迁至 drawEnemy restore 后
+      // drawNpcTrailGhosts 统一挂点（drawSolenianGhosts）。原内联块在本体变换内用
+      // 绝对历史坐标 translate=双重偏移屏外不可见，且漏 'lighter' 加算（原版 A=0）。
     }
     ctx.restore();
   }

@@ -1244,7 +1244,8 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
           const ll = Math.hypot(lx, ly) || 1;
           lx = lx / ll * spdL + (Math.floor(Math.random() * 81) - 40) * 0.08;
           ly = ly / ll * spdL + (Math.floor(Math.random() * 81) - 40) * 0.08;
-          // 寿命：SetDefaults timeLeft=600(Projectile.cs:1646)+EU=2 → 200t;
+          // 寿命：SetDefaults timeLeft=600(Projectile.cs:1645,★BJ206 重锚——旧注
+          //   :1646 系 magic 行 off-by-one)+EU=2 → 200t;
           //   同 WOF 发射点 bossAI_wof.ts「83,600」先例(原缺省 300 半程即灭)
           shoot(game, e.cx + lx * 15, e.cy + ly * 15, lx, ly,
             getAttackDamageForProjectiles(20, 19, e.difficulty), 83, 600);

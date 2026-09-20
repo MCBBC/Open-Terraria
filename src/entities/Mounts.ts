@@ -19,6 +19,11 @@
 //   游泳族 —— 海龟 4/猪鲨崽 12/海盗船 44/熔岩鲨 49：buff 131/168/265 授予 ignoreWater
 //             （Player.cs:9592-9608）→ 水下不降速不溺水物理，frameState==4 时
 //             RunSpeed→swimSpeed、跳跃 +5 高 /+2.5 速（Mount.JumpHeight/JumpSpeed）。
+// ★BJ206 2026-09-20 hoik 单向墙销案：骑乘体无独立碰撞承载——陆行/飞行/游泳全族
+//   位移最终经玩家自身碰撞链（Player.hoik=true，SW-FX34b 已落），原版 Mount.cs 的
+//   三处 TileCollision 探针（:3507/:4574/:4607）亦全部作用于 mountedPlayer 位置且
+//   不传第 10 参吃 Collision.cs:2299 缺省 true——两半同相=骑乘态天然可穿单向墙，
+//   无需任何落刀。
 import mountJson from '../data/vanilla-mounts.json';
 import { TILE_DEFS, FORBIDS_SLOPING_IDS } from '../data/tiles';
 import { WALL_HOUSE } from '../world/Housing';

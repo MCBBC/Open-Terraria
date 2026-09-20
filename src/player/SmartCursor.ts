@@ -21,7 +21,7 @@
 // 我们的 tile id 与原版 tile id 通过 TILE_DEFS[t].vanilla.sheet 桥接（sheet = 原版 Tiles_N 表 id）；
 // 物品原版 id 通过 ITEM_DEFS[i].vid 或 key 前缀 vi_(\d+)_ 反解。
 import type { ItemDef } from '../data/items';
-import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
@@ -51,8 +51,9 @@ const COMMON_SAPLING = new Set([20, 590, 595, 615]);
 // ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const BOULDERS = BOULDERS_SHEETS;
 
-/** TileID.cs:239 IsBeam（梁族：火把侧锚允许） */
-const IS_BEAM = new Set([124, 561, 574, 575, 576, 577, 578]);
+/** TileID.cs:239 IsBeam（梁族：火把侧锚允许）
+ *  ★BJ203 收编单源 data/tiles.ts:IS_BEAM_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h） */
+const IS_BEAM = IS_BEAM_SHEETS;
 
 /** TileID.cs:243 Platforms（平台族 = tileSolidTop） */
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
@@ -82,8 +83,9 @@ export const TILE_NO_ATTACH_SHEETS: ReadonlySet<number> = new Set([
 /** TileID.Sets.BreakableWhenPlacing（TileID.cs:383）——放置时被自动顶掉的方块
  *  （唯一权威表 = data/tiles.ts 的 BREAKABLE_WHEN_PLACING_SHEETS，本处只做谓词封装） */
 
-/** TileID.cs:355 NotReallySolid（高门 387/388 与开着的门 10——"看着实心其实能穿"） */
-const NOT_REALLY_SOLID = new Set([387, 388, 10]);
+/** TileID.cs:359 NotReallySolid（高门 387/388 与开着的门 10——"看着实心其实能穿"）
+ *  ★BJ203 收编单源 data/tiles.ts:NOT_REALLY_SOLID_SHEETS（逐值对拍全等,§6h） */
+const NOT_REALLY_SOLID = NOT_REALLY_SOLID_SHEETS;
 
 /** ItemID.cs:80 GrassSeeds（草地种子：草 2/丛林 59/猩红 194? 详见策略内 switch） */
 const GRASS_SEED_ITEMS = new Set([62, 59, 2171, 369, 195, 194, 5214]);

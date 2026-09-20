@@ -566,7 +566,11 @@ export class ChloroClaymoreBlade extends Entity {
         this.cx + Math.cos(a1) * r60, this.cy + Math.sin(a1) * r60,
         r60);
     }
-    // ---- 绿光（:42948-42953）----
+    // ---- 绿光（:42944-42950）----
+    // ★BJ206 2026-09-20 备案（定谳登记,未落刀）：原版 :42944 `Color value5 = new
+    //  Color(0, 96, 0)`（=分量 0.376）且 :42945-42948 `localAI[2]==1` 时
+    //  Lerp(value5, (34,128,0), num) 有第二变体,本仓恒 (0,0.42,0) 常量——绿通道
+    //  偏亮 ~11.6% 且缺 localAI[2] 渐变支。观感面微偏差,故按批准则登记不落刀。
     game.addLightAt?.(this.cx, this.cy, 0, 0.42, 0);
     if (num >= 1) this.dead = true;                              // :42997-43000
   }

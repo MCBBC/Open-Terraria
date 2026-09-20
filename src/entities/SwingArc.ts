@@ -107,6 +107,10 @@ interface ArcDrawSpec {
   lerpN3?: boolean;
 }
 
+// ★BJ206 2026-09-20 数据形状备忘：p[1]（各 [RGB,RGB] 对的第二元）仅 lerpN3 规格
+//  （983）被消费（base[0]→base[1] 按 n3 Lerp）；其余四式（972/982/997/984）的
+//  p[1] 与 p[0] 全等 = 写全形死的冗余位——非 lerpN3 消费支只读 p[0]。改色时
+//  四式改 p[0] 即可；勿删 p[1]（保持 lerpN3 同构形状,编译器不报的死数据）。
 const ARC_DRAW_SPEC: Record<number, ArcDrawSpec> = {
   972: { base: [[40, 20, 60], [40, 20, 60]], baseScale: 0.975,
     l3: [[80, 30, 160], [80, 30, 160]], l3Scale: 0.8,

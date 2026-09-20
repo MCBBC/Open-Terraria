@@ -20,7 +20,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { setBoulderSolidity } from './TrapsPass';
@@ -46,8 +46,7 @@ const PLATE_SHEET = 135;
  *  「同源副本禁 import 惯例」旧注随单源化退役） */
 const SOLID_TOP = SOLID_TOP_SHEETS;
 
-/** TileID.Sets.Ore（TileID.cs:399） */
-const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// TileID.Sets.Ore（TileID.cs:403）——★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（同名 import,§6h）
 
 // ── ★IIIII40：Main.tileFrameImportant（1457/1458 Main.cs InitializeTiles 赋值全集
 //    403 项）——PlaceTile 入口臂②判定（cs:60137）。仅本 pass 消费的局部副本

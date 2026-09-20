@@ -16,7 +16,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';   // ★IIIII229 ⑪ COAT_BLOCK_MASK（序言⑦补齐;与原 type-import 合并）
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genKillTile, genTileFrame, genSquareTileFrame } from './FinalCleanupPass';
 import { grassSpreadState } from './MushroomPass';
@@ -59,8 +59,7 @@ const DUNGEON_PAINT = 14;      // PaintID 14 深层地牢漆
 // ---- TileID.Sets / Main 集合（1456 TileID.cs / Main.cs；同源副本惯例） ----
 /** TileID.Sets.CrackedBricks（TileID.cs:183） */
 const CRACKED_BRICKS = new Set([481, 482, 483]);
-/** TileID.Sets.Ore（TileID.cs:399；FinishNoTrapsPass 同源副本） */
-const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// TileID.Sets.Ore（TileID.cs:403）——★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（同名 import,§6h）
 /** TileID.Sets.Clouds（TileID.cs:197；FinalCleanupPass 同源副本） */
 const CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
 /** TileID.Sets.Boulders（TileID.cs:195）——★BJ168-债2（2026-09-19）本地副本拆除,

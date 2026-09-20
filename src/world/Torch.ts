@@ -14,7 +14,7 @@
 //   互不干扰——TileFrame 重算时先剥掉 66 再选锚（WorldGen.cs:87416 num = frameX>=66 ? 66 : 0）。
 // 帧选取优先序 = TileFrame :87440-87459：底(0) → 左(22) → 右(44) → 墙(0)。
 import type { TileStore } from './TileStore';
-import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS } from '../data/tiles';
+import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, PLATFORMS_SHEETS } from '../data/tiles';
 import { VAN_TILE_SOLID_EXTRA } from './gen/vanilla/GenSolid';
 
 /** 未点燃火把的帧偏移（Wiring.ToggleTorch：frameX ±= 66；判定 frameX >= 66） */
@@ -40,10 +40,11 @@ export function toggleTorchFrame(frameX: number): number {
  *  ★BJ168-债2（2026-09-19）：本地定义拆除,收编 data/tiles.ts 单源（本文件转出口,
  *  SW-BJ28 消费面 RenderAudit 的导入路径保持不变） */
 export { IS_A_TREE_TRUNK_SHEETS };
-/** TileID.Sets.IsBeam（TileID.cs:239）——侧锚梁木支（单格即可,无需三连） */
-export const IS_BEAM_SHEETS = new Set([124, 561, 574, 575, 576, 577, 578]);
-/** TileID.Sets.NotReallySolid（TileID.cs:359={387,388,10}）——PlaceTile 底/侧锚非平台实心支排除 */
-export const NOT_REALLY_SOLID_SHEETS = new Set([387, 388, 10]);
+/** TileID.Sets.IsBeam（TileID.cs:239）——侧锚梁木支（单格即可,无需三连）；
+ *  TileID.Sets.NotReallySolid（TileID.cs:359={387,388,10}）——PlaceTile 底/侧锚非平台实心支排除。
+ *  ★BJ203（2026-09-20）双双收编单源 data/tiles.ts（本文件转出口,SW-BJ28 消费面
+ *  RenderAudit 导入路径保持不变） */
+export { IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS };
 /** Main.tileNoAttach 全表（Main.cs 逐条赋值提取：:7260-8331 盆景/树苗/火把与开门/可割植物
  *  家具/高门/:9890-9900 平台族 427+435-439/:10258 岩浆石）。与 player/SmartCursor.TILE_NO_ATTACH
  *  _SHEETS 同源副本（该表模块私有,此处复制为火把域单源;tests/sw-bj28 结构锁两表恒等,漂移爆红） */

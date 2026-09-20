@@ -15,7 +15,9 @@
 //   · 淡出收口（:48467-48472）：timeLeft<90 起 alpha+=3/tick，alpha≥255 → Kill
 //   · tileCollide=true（SetDefaults 缺省 true）撞块按 lastVelocity 反身（X 全反、
 //     Y 反后升程遇顶 ×0.25,仅 lastVy<0 时）——本仓无 moveAndCollide 分轴旗，以逐轴
-//     实心探测近似（Arrow bounceOff 同法登记）
+//     实心探测近似（Arrow bounceOff 同法登记）。★BJ206：X 探针改实心门+hoik
+//     单向墙放行（详见 fixedUpdate 撞块段注）；Y 探针 isActive 旧近似维持（原版
+//     Y 无 hoik 门，升程遇平台反弹偏差=登记）
 // 登记偏差：环境天灯渲染层（SkyRenderer LanternSky）与弹体是两套系统——原版 855 仅
 //   为自发光弹体上升体,LanternSky 的灯笼海由 LanternNight.lanternsUp 驱动,【不存在】
 //   "放飞注册入天灯海"的通道（LanternSky.cs 无 855 引用实证）；本类不接入该表。
@@ -50,6 +52,12 @@ export class SkyLanternProj extends Entity {
   frame = 0;
   private frameTimer = 0;
   alpha = 0;
+  /** ★BJ206 2026-09-20：hoik 单向墙承载（BJ161/FX34c 同款类字段习语，Arrow.ts
+   *  hoik 字段注同源）——原版 Projectile.HandleMovement(:17578) 全路径 TileCollision
+   *  第 10 参 hoik=true（855 aiStyle166 无特支，慢速干路 :17823 不传参吃
+   *  Collision.cs:2299 形参缺省 true）⇒ 弹 855 原版本体可穿 Hoik 单向墙。
+   *  本类单盒探针承载的消费门=X 探针身后格坡邻配对（fixedUpdate 撞块段）。 */
+  hoik = true;
 
   constructor(x: number, y: number, vx: number, vy: number) {
     super();
@@ -88,11 +96,29 @@ export class SkyLanternProj extends Entity {
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.projId, !!projectileData(this.projId)?.ignoreWater);
     // ---- 撞块反身（HandleMovement :18459-18473；单盒双轴实心近似 TileCollision）----
+    // ★BJ206 2026-09-20（A1）：X 探针改实心门+hoik 单向墙放行——
+    //  · isSolid≈Main.tileSolid：TileCollision X 双支（Collision.cs:2412/:2432）前提
+    //    `!Main.tileSolidTop`（平台族）+旗判 Main.tileSolid——旧 isActive 连平台/
+    //    火把也反弹，超出可拦集合；Y 探针维持 isActive 旧近似（原版 Y 无 hoik 门，
+    //    平台升程反弹偏差另行登记）。
+    //  · hoik 放行=身后格坡邻配对（:2412 右行查 (i-1,j) slope 2/4；:2432 左行查
+    //    (i+1,j) slope 1/3；界外=坡 0 不豁免=原版 `i<1` 短路）——本类 X 探针轴专属，
+    //    无需 Arrow 单点中心模型的主轴臂门（|vx|>=|vy|）；放行=整段跳过弹离+反身
+    //    （原版无碰撞事件 velocity 不变，:18459 反身链不可达）。反向进入（身后格
+    //    非齿）照常反弹=单向性保留。判据与 moveAndCollide X 面（TileCollision.ts
+    //    :430-435）/Arrow hoikAdmit（:7922-7927）同构。
     {
       const nxT = Math.floor((this.cx + this.vx) / TILE), cyT = Math.floor(this.cy / TILE);
-      if (st.inBounds(nxT, cyT) && st.isActive(nxT, cyT)) {
-        this.x -= this.cx - nxT * TILE - TILE / 2;         // 弹离块面
-        this.vx = -this.vx;                                 // X 全速反号(:18462-18464)
+      if (st.inBounds(nxT, cyT) && st.isSolid(nxT, cyT)) {
+        const dirX = this.vx > 0 ? 1 : this.vx < 0 ? -1 : 0;
+        const bjX = nxT - dirX;
+        const bsX = bjX >= 0 && bjX < st.w ? st.slope[st.idx(bjX, cyT)] : 0;
+        const hoikAdmit = this.hoik && dirX !== 0
+          && (dirX > 0 ? (bsX === 2 || bsX === 4) : (bsX === 1 || bsX === 3));
+        if (!hoikAdmit) {
+          this.x -= this.cx - nxT * TILE - TILE / 2;       // 弹离块面
+          this.vx = -this.vx;                               // X 全速反号(:18462-18464)
+        }
       }
       const nyT = Math.floor((this.cy + this.vy) / TILE), cxT2 = Math.floor(this.cx / TILE);
       if (st.inBounds(cxT2, nyT) && st.isActive(cxT2, nyT)) {

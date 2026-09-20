@@ -1051,9 +1051,15 @@ export class BiomeBackground {
     // ★update 每帧只吃一次真实 dt：surface 相位调用已推进（Renderer 传 16.7），
     //   underground 相位调用只为画带层+推进动画钟（magmaFrameT/hellFrameT/bgTick，
     //   见 drawUnderground/drawHellLayers）——若这里再吃全量 dt = 风格过渡/flash/
-    //   alpha 坡道每帧双倍推进（0.05/帧坡道变 0.1/帧）。remix 世界 surface 相位被
-    //   跳过（IIIII224）→ update 仅剩 0 推进 = 修复前同相，登记债不属本刀
-    this.update(world, scene, phase === 'underground' ? 0 : dtMs, geom);
+    //   alpha 坡道每帧双倍推进（0.05/帧坡道变 0.1/帧）。
+    //   ★BJ204（2026-09-20，BJ175 债①清算）：remix 世界 surface 相位被 Renderer
+    //   整层跳过（IIIII224，锚 Main.cs:60573 ShouldDrawSurfaceBackground——原版门
+    //   只摘地表层绘制，地下风格推进 DrawBackground :53638-53650 每帧照跑无 remix
+    //   门）→ update 的每帧单次推进在 remix 下唯一承接着落 underground 相位：
+    //   传真实 dt（Renderer :3857 恒 16.7）；非 remix 恒 0 = 逐位不变。
+    //   remix 恒跳 surface ⇒ 不存在双推进组合（两处置同源 seedFlags.remix）。
+    this.update(world, scene,
+      phase === 'underground' ? (world.seedFlags?.remix ? dtMs : 0) : dtMs, geom);
     // 深度门（DrawClouds_Closest :59073 系各层共门 screenPosition.Y < ws×16+16）
     if (phase !== 'underground' && camTopY < world.groundLevel * 16 + 16) {
       this.drawSurface(b, world, cam, camTopY, camLeftX, viewW, viewH, tint);

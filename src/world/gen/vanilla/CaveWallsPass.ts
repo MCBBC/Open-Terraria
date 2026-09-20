@@ -16,7 +16,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { spreadWall2 } from './GrassWallPass';
-import { WALL_HOUSE } from './SurfaceDecorPasses';
+import { WALL_HOUSE } from '../../Housing';   // ★BJ204 单源（曾 './SurfaceDecorPasses' 中转）
 import { flipGenSolid, genSolidType } from './GenSolid';
 
 const STONE = TILE_BY_KEY['stone']!;

@@ -54,6 +54,8 @@ import {
   FORBIDS_SLOPING_SHEETS, FORBIDS_SLOPING_IDS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS,
   IS_A_TREE_TRUNK_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS,
   PLATFORMS_IDS, IS_A_TREE_TRUNK_IDS,
+  ORE_SHEETS, NOT_REALLY_SOLID_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS,
+  IS_A_CONTAINER_SHEETS,
 } from '../src/data/tiles';
 import { canPoundTile } from '../src/world/gen/vanilla/HalfBrickPass';
 import { TILE_CUT } from '../src/core/Game';
@@ -608,5 +610,135 @@ describe('§6g BJ182b 结构锁扩:65 副本禁复活（收编面=Platforms×22/
     for (const [file, anchor] of REQUIRED) {
       expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
     }
+  });
+});
+
+// ★BJ203 批变异证红记录(2026-09-20,均在验证后还原):
+//   M17 ORE_SHEETS 漏 211 → §6h 金标红;
+//   M18 IS_A_CONTAINER_SHEETS 错域回退(内部 16 顶替 sheet 21) → §6h 域判别红;
+//   M19 TrapsPass 再立 const NOT_REALLY_SOLID = new Set([387,388,10]) 副本 → §6h 结构锁红。
+describe('§6h BJ203 收编金标:TileID.cs 五表第二收编批(Ore/NotReallySolid/IsBeam/IsADripTile/IsAContainer)', () => {
+  // 2026-09-20 定谳:BJ203 面三全仓数值普查（tools/_bj203-census.mjs 字符串感知逐值
+  //   扫描）钓出 TileID.cs 五表字面副本 Ore×10/NotReallySolid×9/IsBeam×5/IsADripTile×5/
+  //   IsAContainer×3——全部逐值对拍全等后收编 data/tiles.ts 单源;1457≡1458 同行号同值。
+  //   消费面键域逐点亲读全 sheet 域（RollingBoulder sheet/TrapsPass sheetOf/SmartCursor
+  //   sheetOf/Game vanilla.sheet/WldImport TILE_DEFS[].sheet/LiquidSim bySheet 平移/
+  //   TeleportSpotCheck lutFromSheets 平移）。普查另登记 BJ204 债:Clouds ×13/CrackedBricks
+  //   ×9/Moss/MossBrick/Ice/Stone/Snow/Sand/Grass 等转化族/PreventsTileRemoval ×5/
+  //   FriendlyFairyCanLureTo ×2/CommonSapling ×2（注释锚已核出,收编法同本批）。
+  it('ORE_SHEETS ≡ TileID.cs:403 全 19 项(逐值钉死;1457≡1458 零增量)', () => {
+    expect(ORE_SHEETS.size).toBe(19);
+    expect([...ORE_SHEETS].sort((a, b) => a - b)).toEqual(
+      [6, 7, 8, 9, 22, 37, 58, 107, 108, 111, 166, 167, 168, 169, 204, 211, 221, 222, 223]);
+  });
+  it('NOT_REALLY_SOLID_SHEETS ≡ TileID.cs:359={387,388,10}(逐值钉死)', () => {
+    expect([...NOT_REALLY_SOLID_SHEETS].sort((a, b) => a - b)).toEqual([10, 387, 388]);
+  });
+  it('IS_BEAM_SHEETS ≡ TileID.cs:239 全 7 项(逐值钉死)', () => {
+    expect([...IS_BEAM_SHEETS].sort((a, b) => a - b)).toEqual([124, 561, 574, 575, 576, 577, 578]);
+  });
+  it('IS_A_DRIP_TILE_SHEETS ≡ TileID.cs:157 全 5 项(逐值钉死)', () => {
+    expect([...IS_A_DRIP_TILE_SHEETS].sort((a, b) => a - b)).toEqual([373, 374, 375, 461, 709]);
+  });
+  it('IS_A_CONTAINER_SHEETS ≡ TileID.cs:409={21,467,88}(逐值钉死;≠ 7 值箱锚保护族)', () => {
+    expect([...IS_A_CONTAINER_SHEETS].sort((a, b) => a - b)).toEqual([21, 88, 467]);
+  });
+  it('域判别(错域回退即红):ORE 掩蔽对 sheet8 金矿∈/内部8 树;内部4 铜∉ 而 sheet7 铜∈;Container 内部16 木箱∉', () => {
+    // ORE:若被内部 id 顶替——内部 4(铜矿 §1 掩蔽对 COPPER)必∈(铜是矿)而 sheet 7(铜)
+    // 与 sheet 8(金 §1 GOLD)双落空 → 本案双断言红;sheet 域真身:8∈/4∉。
+    expect(ORE_SHEETS.has(8)).toBe(true);                      // sheet 8=金矿(§1 GOLD)
+    expect(ORE_SHEETS.has(7)).toBe(true);                      // sheet 7=铜矿
+    expect(ORE_SHEETS.has(4)).toBe(false);                     // 内部 4=铜矿 sheet——错域顶替即红
+    expect(TILE_DEFS[4]?.vanilla?.sheet).toBe(7);              // 掩蔽对字面量:内部 4 的 sheet 恰=7
+    expect(ORE_SHEETS.has(22)).toBe(true);                     // sheet 22=魔矿(§1 DEMONITE)
+    // IS_A_CONTAINER:§6 同案——sheet 21∈/内部 16(T.CHEST)∉
+    expect(T.CHEST).toBe(16);
+    expect(IS_A_CONTAINER_SHEETS.has(21)).toBe(true);
+    expect(IS_A_CONTAINER_SHEETS.has(16)).toBe(false);         // 错域顶替即红
+  });
+  describe('§6h 结构锁:BJ203 收编副本禁复活（33 处字节签名禁入+防空洞正锚）', () => {
+    const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+    const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+    const F = (name: string) => new RegExp(`\\b${name}\\s*=\\s*new\\s+Set`);
+    const LUT = (name: string) => new RegExp(`\\b${name}\\s*=\\s*lutFromSheets\\(\\s*new\\s+Set`);
+    const FORBIDDEN: Array<[string, RegExp, string]> = [
+      // Ore(10)
+      ['src/entities/RollingBoulder.ts', F('RB_ORE_SHEETS'), 'ORE_SHEETS'],
+      ['src/world/gen/WorldGen.ts', F('ORE_SHEETS'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', F('ORE'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/FinishNoTrapsPass.ts', F('ORE_SHEETS'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/LivingTreePass.ts', F('ORE_SHEETS'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/MarbleGranitePass.ts', F('VANILLA_ORE'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/NotTheBeesPass.ts', F('ORE_SHEETS'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('ORE_SHEETS'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('SET_ORE'), 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('ORE_SHEETS'), 'ORE_SHEETS'],
+      // NotReallySolid(9)
+      ['src/player/SmartCursor.ts', F('NOT_REALLY_SOLID'), 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/render/VanillaTiler.ts', F('NOT_REALLY_SOLID'), 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/world/Torch.ts', F('NOT_REALLY_SOLID_SHEETS'), 'data/tiles.ts 转出口'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('NOT_REALLY_SOLID_BANNER'), 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('NOT_REALLY_SOLID'), 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', F('NOT_REALLY_SOLID_S'), 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', LUT('VAN_NOT_REALLY_SOLID'), 'lutFromSheets(NOT_REALLY_SOLID_SHEETS)'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('NOT_REALLY_SOLID'), 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', F('NOT_REALLY_SOLID_SHEETS'), 'NOT_REALLY_SOLID_SHEETS'],
+      // IsBeam(5)
+      ['src/core/Game.ts', F('IS_BEAM_SHEETS'), 'IS_BEAM_SHEETS'],
+      ['src/player/SmartCursor.ts', F('IS_BEAM'), 'IS_BEAM_SHEETS'],
+      ['src/world/Torch.ts', F('IS_BEAM_SHEETS'), 'data/tiles.ts 转出口'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('IS_BEAM'), 'IS_BEAM_SHEETS'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', LUT('VAN_IS_BEAM'), 'lutFromSheets(IS_BEAM_SHEETS)'],
+      // IsADripTile(5)
+      ['src/core/Game.ts', F('ADRIP_TILE_SHEETS'), 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/entities/RollingBoulder.ts', F('RB_DRIP_SHEETS'), 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/render/WindSway.ts', F('NO_DRAW_SHEETS'), 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/render/WindSway.ts', F('DRIP_TILES'), 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('IS_DRIP'), 'IS_A_DRIP_TILE_SHEETS(死码已删)'],
+      // IsAContainer(3)
+      ['src/wld/WldImport.ts', F('CONTAINER_SHEETS'), 'IS_A_CONTAINER_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('CONTAINER_SS'), 'IS_A_CONTAINER_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', F('CONTAINER_SHEETS'), 'IS_A_CONTAINER_SHEETS'],
+      // 结构锁漏网副本(BJ203 普查钓出):TeleportSpotCheck 树干 LUT 源字面量
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', LUT('VAN_IS_TREE_TRUNK'), 'lutFromSheets(IS_A_TREE_TRUNK_SHEETS)'],
+    ];
+    const REQUIRED: Array<[string, string]> = [
+      ['src/core/Game.ts', 'IS_BEAM_SHEETS.has('],
+      ['src/core/Game.ts', 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/world/Torch.ts', 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/player/SmartCursor.ts', 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/entities/RollingBoulder.ts', 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/entities/RollingBoulder.ts', 'RB_ORE_SHEETS.has('],
+      ['src/render/WindSway.ts', 'IS_A_DRIP_TILE_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'IS_BEAM'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'NOT_REALLY_SOLID'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'NOT_REALLY_SOLID_SHEETS'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', 'lutFromSheets(IS_A_TREE_TRUNK_SHEETS)'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', 'lutFromSheets(IS_BEAM_SHEETS)'],
+      ['src/world/gen/vanilla/TrapsPass.ts', 'ORE_SHEETS.has('],
+      ['src/world/gen/vanilla/TrapsPass.ts', 'NOT_REALLY_SOLID'],
+      ['src/world/gen/vanilla/TrackPass.ts', 'IS_A_CONTAINER_SHEETS'],
+      ['src/wld/WldImport.ts', 'IS_A_CONTAINER_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', 'IS_A_CONTAINER_SHEETS'],
+      ['src/world/gen/vanilla/FinishNoTrapsPass.ts', 'ORE_SHEETS.has('],
+      ['src/world/gen/vanilla/NotTheBeesPass.ts', 'ORE_SHEETS.has('],
+      ['src/world/gen/vanilla/LivingTreePass.ts', 'ORE_SHEETS.has('],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'ORE_SHEETS.has('],
+      ['src/world/gen/WorldGen.ts', 'ORE_SHEETS.has('],
+      ['src/world/gen/vanilla/MarbleGranitePass.ts', 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'ORE_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', 'ORE_SHEETS'],
+      ['src/render/VanillaTiler.ts', 'NOT_REALLY_SOLID_SHEETS'],
+    ];
+    it('禁复活:33 处收编副本「=new Set/=lutFromSheets(new Set」字节签名禁入(单源别名转出口不受影响)', () => {
+      for (const [file, sig] of FORBIDDEN) {
+        expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
+      }
+    });
+    it('防空洞正锚:每个收编文件必须仍消费 data/tiles.ts 单源名', () => {
+      for (const [file, anchor] of REQUIRED) {
+        expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
+      }
+    });
   });
 });

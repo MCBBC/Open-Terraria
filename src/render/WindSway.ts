@@ -13,7 +13,7 @@
 // 架构：摆动图块从 ChunkCache 烘焙中摘除（swayBakeSkip），由 Renderer 在 tile 层之后
 // 逐帧动态绘制（等价原版 AddSpecialPoint 特殊绘制路径）。光照合成在其后，自动受光。
 import { TILE } from '../core/constants';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, IS_A_DRIP_TILE_SHEETS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, scanTreeType, treeTrunkPaintStyle, palmTreePaintStyle,
   type TreeStyleData } from './VanillaTiler';
 import { animYOffset, tileAnim } from './TileAnim';
@@ -92,8 +92,10 @@ const SWAY_REC = new Map<number, SwayRec>();
   }
 }
 
-/** 滴水锚点 tile（路由 :694-698 `continue`——原版【永不绘制】，只作 EmitLiquidDrops 源） */
-export const NO_DRAW_SHEETS = new Set([373, 374, 375, 461, 709]);
+/** 滴水锚点 tile（路由 :694-698 `continue`——原版【永不绘制】，只作 EmitLiquidDrops 源）
+ *  ★BJ203 收编单源 data/tiles.ts:IS_A_DRIP_TILE_SHEETS（TileID.cs:157;逐值对拍全等,§6h;
+ *  本名=滴水锚点域的本地称呼,转出口别名） */
+export const NO_DRAW_SHEETS = IS_A_DRIP_TILE_SHEETS;
 
 /** ChunkCache 烘焙摘除判定：摆动图块不走静态烘焙。
  *  例外（原版路由语义）：530 的 fx≥270 段、705 的 fx%486≥270 段、227 排除帧 → 普通路径烘焙。 */
@@ -931,8 +933,9 @@ function drawTreeSway(
 }
 
 // ---- EmitLiquidDrops 滴水源（路由 :695-700）----
-/** 373 丛林叶/374 蜂巢叶/375 叶/461 垂叶/709 微光叶 */
-const DRIP_TILES = new Set([373, 374, 375, 461, 709]);
+/** 373 丛林叶/374 蜂巢叶/375 叶/461 垂叶/709 微光叶
+ *  ★BJ203 收编单源 data/tiles.ts:IS_A_DRIP_TILE_SHEETS（=NO_DRAW_SHEETS 同表异名,§6h） */
+const DRIP_TILES = IS_A_DRIP_TILE_SHEETS;
 
 /** EmitLiquidDrops（TileDrawing :7714-7790 1:1）：冷却 rand(num*2) + 区域查重 + 水型映射 */
 function emitLiquidDrops(st: TileStore, x: number, y: number, i: number, sheet: number): void {

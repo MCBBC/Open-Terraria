@@ -88,7 +88,7 @@ export const SLOT_VANILLA_PASSES: Readonly<Record<string, readonly string[]>> = 
   '终清理': ['Final Cleanup'],
 };
 import type { TileStore } from '../TileStore';
-import { T, TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_SHEETS } from '../../data/tiles';
+import { T, TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_SHEETS, ORE_SHEETS } from '../../data/tiles';
 import { World, worldSizeFor, type WorldSize } from '../World';
 import { Lang } from '../../i18n/Lang';   // ★IIIII214 墓园碑文 IndexedFromCategory（cs:25161 掷流面见 spawnGraveyardBiome）
 
@@ -661,8 +661,8 @@ import {
   runGrassPlantsPass, runGlowingMushroomPlantsPass,
   runSunflowersPart2Pass, runJunglePlantsPart2Pass,
   placeSunflower,   // ★IIII191：SpreadingGrass remix 臂④ PlaceTile(27) 复用
-  WALL_HOUSE,       // ★IIIII101d：Main.wallHouse 全表（SpawnOnPlayer 搜索支注册用）
 } from './vanilla/SurfaceDecorPasses';
+import { WALL_HOUSE } from '../Housing';   // ★IIIII101d：Main.wallHouse 全表（SpawnOnPlayer 搜索支注册用）★BJ204 单源（曾经 SurfaceDecorPasses 中转）
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
 import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runBeeLarvaPass } from './vanilla/HiveSpiderPass';
 import { runPilesPass } from './vanilla/PilesPass';
@@ -2504,8 +2504,8 @@ export function spreadingGrassPass(store: World['store'], gs: GenState, rng: RNG
   }
 }
 
-/** TileID.Sets.Ore（SurfaceDecorPasses 同表）——段① 的"矿"判定 */
-const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// TileID.Sets.Ore（TileID.cs:403）——段① 的"矿"判定；★BJ203 收编单源
+// data/tiles.ts:ORE_SHEETS（同名 import,tests/tile-domain-sentinel §6h）
 /** sheet id → 本仓内部 tile id（段① 转换目标用；仅 53/59/60/147/161/199/23 可能命中） */
 const SHEET_TO_TILE = new Map<number, number>();
 {

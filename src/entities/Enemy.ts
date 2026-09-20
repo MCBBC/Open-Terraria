@@ -596,6 +596,51 @@ export class Enemy extends Entity {
     this.histRot[this.histHead] = this.visAngle;
   }
 
+  /** ★BJ175b（2026-09-20 用户实报"宝箱怪跳高无拖影"）：UpdateNPC_UpdateTrails 按
+   *  NPCID.Sets.TrailingMode[type]（NPCID.cs:4769）分派（NPC.cs:91893-91992）——
+   *  大宝箱怪 473-476 = mode 2：仅当 `(int)ai[0]==4 || ai[0]==5f || ai[0]==6f`
+   *  （飞天 4/真俯冲 4.1【(int) 同值 :91918】/穿墙归位 5/三连扑 6——全部空中攻击态）
+   *  逐拍后移记录 oldPos/oldRot；**其余态全部槽位写当前位置**（:91935-91942 else 支
+   *  `for num5>=0: oldPos[num5]=position+netOffset, oldRot[num5]=rotation`——拖影清零）。
+   *  ★BJ209（2026-09-20 全表普查推广）：mode 1/3/4/5/6/7 = 逐拍后移（pushHistory
+   *  无条件推入即其等价实现）；**mode 0（439 拜月教邪教徒/440 僵尸教徒）= 隔拍记录**
+   *  （:91899-91907 localAI[3] 节拍闸：≤0 → 置 2+后移记录，再每拍 −1——即第 0/2/4…
+   *  拍记录，等效历史步长 2 拍），此前逐拍推入=拖影密度 ×2/跨度减半，已修。
+   *  mode 2 是唯一带态门+整环写当前位置的档。整环 fill 后 histHead/histCount 不动——
+   *  任意 histXAt(i) 都返回当前位置 = 原版清零同相（绘制端残影与本体重合不可见）。
+   *  全登记表普查：NPCID.cs:4769 = 439/440→0、370/372/373/396/400/401→1、473-476→2、
+   *  4/471/477/479→3、120/137/138→4、94→5、125-131/139/140/407/420/425/426/427/
+   *  581/516/542-545/657→6、402/417/418/419/574/575/519/521/522/546/558/559/560/551/
+   *  620/636/677/685→7；TrailCacheLength（:4809）覆写 402=36/519=20/522=20/620=20/
+   *  677=60（685=10 缺省）。本仓 hist 环容量 60 全族够用（消费端循环上限 ≤20）。 */
+  private recordTrailHistory(): void {
+    const vid = this.vanillaId;
+    if (vid === 473 || vid === 474 || vid === 475 || vid === 476) {
+      const a = this.ai0;
+      if (a === 4 || a === 4.1 || a === 5 || a === 6) {
+        this.pushHistory();
+      } else {
+        this.histX.fill(this.x);
+        this.histY.fill(this.y);
+        this.histRot.fill(this.visAngle);
+      }
+    } else if (vid === 439 || vid === 440) {
+      // mode 0（:91899-91907）：localAI[3] 节拍闸——≤0 时置 2 并后移记录，
+      // 之后每拍递减；偶数拍记录（等效步长 2）。本仓以 trailParity 独立计数
+      // （localAI[3] 槽位被 AI 语义占用，不共用）。
+      if (this.trailParity <= 0) {
+        this.trailParity = 2;
+        this.pushHistory();
+      }
+      this.trailParity--;
+    } else {
+      this.pushHistory();
+    }
+  }
+
+  /** mode 0 隔拍节拍闸（439/440 专用，:91899-91907 localAI[3] 语义等价） */
+  private trailParity = 0;
+
   /** i tick 前的历史条数（拖尾最大可用深度） */
   historyDepth(): number { return this.histCount; }
   /** i tick 前的左上角 X（i 超出已填深度时取最旧条目） */
@@ -2059,7 +2104,9 @@ export class Enemy extends Entity {
       this.onGround = Math.abs(this.vy) < 0.6;
       if (Math.abs(this.vx) > 0.05) this.walkCycleT += Math.abs(this.vx);
       if (this.iframes > 0) this.iframes--;
-      this.pushHistory();   // 傀儡无本地 AI 但拖尾渲染同样需要历史位置
+      this.recordTrailHistory();   // 傀儡无本地 AI 但拖尾渲染同样需要历史位置
+                                   // （同走 TrailingMode 分派;ai0 未同步的傀儡宝箱怪
+                                   //  落清零支=拖影不画,房主权威渲染,登记债）
       return;
     }
     this.aiT++;
@@ -2937,7 +2984,8 @@ export class Enemy extends Entity {
     }
     this.ambientSoundTick(game);   // 环境声三表（IdleSounds/闲话/Critter,2026-08-18 批）
     this.findFrameRotation();      // FindFrame 旋转写点层（AI 后同序，2026-08-20 旋转审计）
-    this.pushHistory();   // 原版 npc.oldPos/oldRot（DrawNPC 拖尾族 419/125-131 读）
+    this.recordTrailHistory();   // 原版 UpdateNPC_UpdateTrails（TrailingMode 分派——
+                                 // 473-476 mode 2 态门+清零,余族逐拍;拖尾族 419/125-131 读）
   }
 
   /** Collision_DecideFallThroughPlatforms（NPC.cs:94118-94252）1:1 全表：

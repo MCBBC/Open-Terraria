@@ -23,7 +23,7 @@
 //   code：0=受理 1=strictRange 2=SolidCollision 3=墙/规避 4=strictRange 下坠越界
 //   5=下坠耗尽 6=着陆规避 7=着陆底格避液 8=mostlySolidFloor 9=着陆终拒
 //   10/11=X±16 探针 12=Y+16 探针 13=Y−16 探针）。
-import { TILE_DEFS, PLATFORMS_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../../../data/tiles';
 import { VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import type { TileStore } from '../../TileStore';
 
@@ -607,12 +607,13 @@ export function getLeftMostDungeonTile(st: TileStore, bounds: DungeonBoundsLike)
 
 // ═══════════════ ★IIIII110b：PlaceTile(4) 火把分支（PlaceTorchesAroundSpawn 消费） ═══════════════
 
-/** TileID.Sets.NotReallySolid（TileID.cs:359） */
-export const VAN_NOT_REALLY_SOLID = lutFromSheets(new Set([10, 387, 388]));
-/** TileID.Sets.IsBeam（TileID.cs:239） */
-export const VAN_IS_BEAM = lutFromSheets(new Set([124, 561, 574, 575, 576, 577, 578]));
-/** TileID.Sets.IsATreeTrunk（TileID.cs:161，WorldGen.IsTreeType 消费） */
-export const VAN_IS_TREE_TRUNK = lutFromSheets(new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]));
+/** TileID.Sets.NotReallySolid（TileID.cs:359）——★BJ203 LUT 源收编单源 data/tiles.ts（§6h） */
+export const VAN_NOT_REALLY_SOLID = lutFromSheets(NOT_REALLY_SOLID_SHEETS);
+/** TileID.Sets.IsBeam（TileID.cs:239）——★BJ203 LUT 源收编单源（§6h） */
+export const VAN_IS_BEAM = lutFromSheets(IS_BEAM_SHEETS);
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161，WorldGen.IsTreeType 消费）——★BJ203 LUT 源
+ *  收编单源（本 LUT 源字面量曾与主表逐值全等=结构锁漏网副本,§6h 钉死） */
+export const VAN_IS_TREE_TRUNK = lutFromSheets(IS_A_TREE_TRUNK_SHEETS);
 /** vanilla Main.tileSolid（=JS TILE_DEFS.solid ∪ 平台九件套——本仓数据档平台 solid:false，
  *  而 vanilla tileSolid[19/239/380/427/435-439]=true，见 TileStore.isPlatform 注①） */
 export function vanTileSolid(t: number): boolean {

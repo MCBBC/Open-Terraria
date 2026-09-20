@@ -334,3 +334,400 @@ export function drawDukeAfterimages(
 export namespace drawDukeAfterimages {
   export let _cache: Map<string, HTMLCanvasElement> | undefined;
 }
+
+// ---- 大宝箱怪 473-476 拖影（NPCID.Sets.TrailingMode=2 老位历史残影）----
+// ★BJ175b（2026-09-20 用户实报"宝箱怪跳高无拖影,原版可见"）：
+//  · 记录面 = NPC.UpdateNPC_UpdateTrails mode 2（NPC.cs:91893-91992；NPCID.cs:4769
+//    `473,2,474,2,475,2,476,2`）——仅空中攻击态（(int)ai[0]==4 含 4.1 真俯冲/5/6）
+//    展开历史，其余态全槽=当前位置（清零）。记录端本仓 recordTrailHistory 承载。
+//  · 绘制面 = DrawNPC 通用拖尾块形状（Main.cs:23628-23643：oldPos[i]+size/2 定位、
+//    alpha×=(num52-i)/num55（num52=TrailCacheLength 10/num55=15 缺省除数）、scale 恒
+//    npc.scale、同帧 rCurrentNPC.frame）——★原版 Main.cs 无 473-476 特支（DrawNPCDirect
+//    :22691-26712 残影族全表逐块亲读不含,1458 对拍同,登记债），按 TrailingMode 系统
+//    语义 + 用户参考图补缺；i=1..9 步 1（mode 2 记录步长 1,非 Duke 家族步 2）。
+//  · 非空中态整环已清零,残影与本体重合——此处仍按记录门短路（零绘制开销,swperf 同族）。
+export function drawMimicAfterimages(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+): void {
+  const vid = e.vanillaId;
+  if (vid !== 473 && vid !== 474 && vid !== 475 && vid !== 476) return;
+  const ai0 = e.ai0;
+  if (ai0 !== 4 && ai0 !== 4.1 && ai0 !== 5 && ai0 !== 6) return;   // :91918 记录门=展开门
+  const tex = atlas.ensureVImage(`vanilla/NPC_${vid}.png`);
+  if (!tex) return;
+  const s = e.vanillaScale || 1;
+  const depth = e.historyDepth();
+  for (let i = 1; i < 10; i++) {
+    if (i >= depth) continue;
+    const alpha = (10 - i) / 15;                       // :23634 (num52-num73)/num55
+    const ox = e.histXAt(i) + e.w / 2 - frame.sw * s / 2;
+    const oy = e.histYAt(i) + e.h / 2 - frame.sh * s / 2;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.drawImage(tex, frame.sx, frame.sy, frame.sw, frame.sh,
+      ox, oy, frame.sw * s, frame.sh * s);
+    ctx.restore();
+  }
+}
+
+// ===================== ★BJ209 NPC 残影族全表推广（2026-09-20） =====================
+// 原版全表（1457=1458 对拍同，Terarria1458 DrawNPCDirect 逐字节等价+UpdateTrails 同体）：
+// NPCID.Sets.TrailingMode（NPCID.cs:4769）+ TrailCacheLength（:4809）+ 记录面
+// UpdateNPC_UpdateTrails（NPC.cs:91893-91992，Enemy.recordTrailHistory 承载）+ 绘制面
+// DrawNPCDirect oldPos 残影块（Main.cs:22723-26712 逐块亲读）。
+// 本组函数=绘制面统一【绝对世界坐标】实现（与 drawMimicAfterimages 同习语），由
+// Renderer.drawEnemy 本体绘制块 ctx.restore() 之后的单一挂点调用。
+// 锚模型：残影帧中心 = oldPos 中心 + 与本体【同一】局部锚偏移（原版关系=残影锚
+// ≡本体锚：通用大表 :23640 vs :23653、特支 +4 族 :25483 vs 本体尾段 Bottom+4 锚——
+// 本仓本体锚已收敛为 anchorY 统一式，残影复用同一 addY+footFlush 即保持该关系）。
+// z 序登记偏差：原版通用大表族残影画在本体之下（:23628 先于本体 Draw），特支族画在
+// 本体之上（:25400-26449 后于本体）、两者都在发光层之下——本仓统一画在本体+发光层
+// 之上（restore 后挂点）；残影在【旧位】与本体低重叠，视觉面登记偏差。
+// 颜色登记偏差：原版 GetAlpha(npcColor)=光照色×alpha/255 与 GetShimmerColor(94/120/
+// 137/138) 在残影层未逐像素移植——与 BJ175b/Mech 残影同惯例以 globalAlpha 承载衰减。
+
+/** 绘制面共享散参（Renderer.drawEnemy 本体块内已知量） */
+export interface NpcGhostOpts {
+  scale: number;        // 本体渲染 scale（vanilla.scale × vanillaScale × expertRenderScale）
+  addY: number;         // 本体锚偏移（addY+footFlush，纹理单位——ctx.scale 乘回世界 px）
+  opacity: number;      // 出生渐显 1−spawnAlpha/255（原版 GetAlpha 的 npc.alpha 乘区）
+  rot: number;          // 本体有效旋转（残影用当前旋转=原版 rCurrentNPC.rotation）
+  mirror: boolean;      // 本体朝向镜像（spriteEffects 翻转）
+  frameIdx: number;     // 当前帧序（FindFrame 值）
+  frames: number;       // 帧数
+}
+
+/** 通用大表族残影参数（Main.cs switch :23429-23589）：count=num52/stride=num53/div=num55，
+ *  循环 i 从 1 到 count 步 stride、α=(count−i)/div、同帧/当前旋转/恒 npc.scale。
+ *  表内其余 id（428/523/541/552-557/561-573/578/583-585/618/661）num52=0=无 oldPos
+ *  残影（仅圆周光晕，非 oldPos 域=登记债）。 */
+const GENERIC_TABLE_GHOSTS: Record<number, { count: number; stride: number; div: number }> = {
+  427: { count: 8, stride: 2, div: 24 },   // 蜂枪手 :23502-23506
+  426: { count: 6, stride: 2, div: 6 },    // 蜂后 :23508-23518（光晕另登记）
+  546: { count: 8, stride: 2, div: 24 },   // 怒滚草 :23519-23522
+  542: { count: 6, stride: 3, div: 12 },   // 沙鲨四族 :23523-23529
+  543: { count: 6, stride: 3, div: 12 },
+  544: { count: 6, stride: 3, div: 12 },
+  545: { count: 6, stride: 3, div: 12 },
+  581: { count: 6, stride: 2, div: 18 },   // 飞蚁狮 :23530-23534
+  521: { count: 10, stride: 2, div: 10 },  // 邪教徒巨鱿 :23535-23540
+  620: { count: 6, stride: 2, div: 18 },   // 鲨鱼兵 :23541-23567（金晕另登记）
+  558: { count: 6, stride: 2, div: 18 },   // DD2 飞龙/掷火怪 ai0==2（冲锋态）:23431-23441
+  559: { count: 6, stride: 2, div: 18 },
+  560: { count: 6, stride: 2, div: 18 },
+  574: { count: 6, stride: 2, div: 18 },
+  575: { count: 6, stride: 2, div: 18 },
+};
+
+/** 残影帧绘制原语：帧中心钉 (gx, gy)，rot/mirror 同本体，纹理单位 addY 随 ctx.scale 乘回 */
+function drawGhostSprite(
+  ctx: Ctx, tex: CanvasImageSource,
+  src: { sx: number; sy: number; sw: number; sh: number },
+  gx: number, gy: number, rot: number, mirror: boolean,
+  s: number, alpha: number, gs: number, addY: number,
+  lighter = false,
+): void {
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  if (lighter) ctx.globalCompositeOperation = 'lighter';
+  ctx.translate(gx, gy);
+  if (rot) ctx.rotate(rot);
+  ctx.scale((mirror ? -1 : 1) * s * gs, s * gs);
+  ctx.drawImage(tex, src.sx, src.sy, src.sw, src.sh,
+    -src.sw / 2, -src.sh / 2 + addY, src.sw, src.sh);
+  ctx.restore();
+}
+
+/** 通用大表族（:23400-23643）。521 的 scale=Lerp(npc.scale, 0.3f 字面, t)（:23487/:23541
+ *  value4=0.3f 不乘 scale——原版字面值），t=1−(count−i)/div。 */
+export function drawGenericTableGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  const vid = e.vanillaId ?? -1;
+  const p = GENERIC_TABLE_GHOSTS[vid];
+  if (!p) return;
+  if ((vid === 558 || vid === 559 || vid === 560 || vid === 574 || vid === 575) && e.ai0 !== 2) return;
+  const tex = atlas.ensureVImage(`vanilla/NPC_${vid}.png`);
+  if (!tex) return;
+  const depth = e.historyDepth();
+  for (let i = 1; i < p.count; i += p.stride) {
+    if (i >= depth) break;
+    const t = 1 - (p.count - i) / p.div;
+    const alpha = ((p.count - i) / p.div) * o.opacity;
+    if (alpha <= 0.004) continue;
+    const gs = vid === 521 ? o.scale + (0.3 - o.scale) * t : 1;
+    drawGhostSprite(ctx, tex, frame, e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2,
+      o.rot, o.mirror, o.scale, alpha, gs / o.scale, o.addY);
+  }
+}
+
+/** 拜月教邪教徒 439/440（mode 0 隔拍记录；Main.cs:24901-24935 case 439/440）：
+ *  Extra_30 双行符印（行=frameIdx>=4?1:0），门 ai0==-1 && ai1∈[320,960) → i=1,3,5
+ *  （num323=6）/ ai0==1 → i=1,3（num323=4）；α 衰减 (num323−i)/num323 只乘 RGB、
+ *  A=100 钉死（:24922-24926）——本仓以 α=(衰减)×(100/255) 合并承载（登记）。 */
+export function drawCultistGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  o: NpcGhostOpts,
+): void {
+  const vid = e.vanillaId;
+  if (vid !== 439 && vid !== 440) return;
+  let n = 0;
+  if (e.ai0 === -1 && e.ai1 >= 320 && e.ai1 < 960) n = 6;
+  else if (e.ai0 === 1) n = 4;
+  if (n <= 0) return;
+  const tex = atlas.ensureVImage('vanilla/Extra_30.png');
+  if (!tex) return;
+  const half = tex.height / 2;
+  const row = o.frameIdx >= 4 ? 1 : 0;
+  const depth = e.historyDepth();
+  for (let i = 1; i < n; i += 2) {
+    if (i >= depth) break;
+    const alpha = ((n - i) / n) * (100 / 255) * o.opacity;
+    drawGhostSprite(ctx, tex, { sx: 0, sy: row * half, sw: tex.width, sh: half },
+      e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2,
+      0, o.mirror, o.scale, alpha, 1, o.addY);
+  }
+}
+
+/** Betsy 551 残影（mode 7；Main.cs:23794-23861 else if type==551）：oldPos[9,6,3]、
+ *  每位三层（后翼 Extra_82→躯干→前翼 Extra_81），α=npcColor×(1−i/10)×0.35 再 A/2
+ *  （:23852-23854）→ 0.175×(1−i/10)；旋转=oldRot（:23851）；翼帧=lai0/4 的 2×5 帧；
+ *  翼偏移/origin：sp2=(79.5,-26)/o4=(16,176)、sp1=(20.5,-34)/o5=(215,170)、躯干
+ *  origin=(150.5,78)（:23810-23815 vector13/14/15 推导；翻转 X 侧由 ctx mirror 承载，
+ *  dx 按翻转档折算——翻转档 dx 恒等式已验算躯干层 F=0/1 同值）。层序=后翼→躯干→前翼。 */
+export function drawBetsyGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  if (e.vanillaId !== 551) return;
+  const back = atlas.ensureVImage('vanilla/Extra_82.png');
+  const front = atlas.ensureVImage('vanilla/Extra_81.png');
+  const body = atlas.ensureVImage('vanilla/NPC_551.png');
+  if (!back || !front || !body) return;
+  const fc = Math.floor((e.lai0 ?? 0) / 4);
+  const col = Math.floor(fc / 5), row = fc % 5;
+  const w82 = 336 / 2, h82 = 1810 / 5, w81 = 532 / 2, h81 = 1940 / 5;
+  const F = o.mirror;   // 原版 spriteEffects2（整支翻转惯例）=本仓本体镜像同相
+  const depth = e.historyDepth();
+  for (const i of [9, 6, 3]) {
+    if (i >= depth) break;
+    const alpha = 0.35 * (1 - i / 10) * 0.5 * o.opacity;
+    const gx = e.histXAt(i) + e.w / 2, gy = e.histYAt(i) + e.h / 2;
+    const rot = e.histRotAt(i);
+    const layer = (tex: CanvasImageSource, srcX: number, srcY: number, sw: number, sh: number,
+      ox: number, oy: number, px: number, py: number, W: number) => {
+      const dx = F ? (ox + px - W) : (px - ox);
+      const dy = py - oy;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.translate(gx, gy);
+      ctx.rotate(rot);
+      ctx.scale((F ? -1 : 1) * o.scale, o.scale);
+      ctx.drawImage(tex, srcX, srcY, sw, sh, dx, dy, sw, sh);
+      ctx.restore();
+    };
+    // 后翼 Extra_82（offset sp2, origin o4）
+    layer(back, col * w82, row * h82, w82, h82, 16, 176, 79.5, -26, w82);
+    // 躯干（offset 0, origin vector15；源=本体当前帧）
+    layer(body, frame.sx, frame.sy, frame.sw, frame.sh,
+      F ? frame.sw - 150.5 : 150.5, 78, 0, 0, frame.sw);
+    // 前翼 Extra_81（offset sp1, origin o5）
+    layer(front, col * w81, row * h81, w81, h81, 215, 170, 20.5, -34, w81);
+  }
+}
+
+/** 日耀黏液 519（mode 7 len=20；Main.cs:24637-24652 case 519）：全环 oldPos 19..0 逐位、
+ *  粉×(1−0.035i)（RGB 衰减）、A×(i/20)（:24645-24649）、scale=Lerp(0.3,1.1,(20−i)/20)
+ *  （越旧越大=尾迹展开）、rot=oldRot。粉色调 (255,192,203) 以 alpha 合并承载（登记）。
+ *  原版 Draw source=null=整贴图（519 frames=1 同相）。 */
+export function drawSolarGoopGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  o: NpcGhostOpts,
+): void {
+  if (e.vanillaId !== 519) return;
+  const tex = atlas.ensureVImage('vanilla/NPC_519.png');
+  if (!tex) return;
+  const LEN = 20;   // TrailCacheLength[519]=20（NPCID.cs:4809）
+  const depth = Math.min(LEN, e.historyDepth());
+  for (let i = depth - 1; i >= 0; i--) {
+    const num359 = (LEN - i) / LEN;
+    const rgb = 1 - (1 / LEN) * 0.7 * i;
+    const alpha = rgb * (i / LEN) * o.opacity;
+    if (alpha <= 0.004) continue;
+    const gs = 0.3 + (1.1 - 0.3) * num359;
+    drawGhostSprite(ctx, tex, { sx: 0, sy: 0, sw: tex.width, sh: tex.height },
+      e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2,
+      e.histRotAt(i), o.mirror, o.scale, alpha, gs, o.addY);
+  }
+}
+
+/** 特支后绘族（本体 Draw 之后求值，Main.cs:25400-26449 逐块）：
+ *  · 94 腐化者 :25472-25485：i=1,3,5，RGBA×(10−i)/15（Shimmer 色登记偏差）
+ *  · 120 混沌元素 :26015-26033：i=1..9，TextureAssets.Chaos 整图，色 (150,100,150,50)
+ *    ×(10−i)/15——A=50/255×衰减，RGB 衰减并入 alpha（登记）
+ *  · 137/138 荧光蝠/史莱姆 :26034-26051：同 120 色式，本体贴图
+ *  · 417 日耀疾滚兽 :25499-25511：ai0==6 门，i=5..0，RGBA×(10−i)/20，rot=oldRot，
+ *    scale=Lerp(0.5,1,(5−i)/6)
+ *  · 471 地精召唤师 :26383-26395：ai3<0 门，i=1..9，npcColor×0.5×(10−i)/20
+ *  · 477 飞蛾魔 :26396-26415：speed>9 门，帧倒退 (frameIdx−i) mod frames
+ *  · 479 飞蛾魔幼体 :26416-26441：speed>6.5 门，同 477
+ *  · 516 日耀耀斑 :25567-25586：i=6..0，白×(10−i)/20 再 Lerp→Transparent(i/6)，
+ *    帧倒退 (frameIdx−4−i) mod 4，scale=Lerp(0.35,1.2,(10−i)/10) */
+export function drawPostBodyTrailGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  const vid = e.vanillaId;
+  const depth = e.historyDepth();
+  const gx = (i: number) => e.histXAt(i) + e.w / 2;
+  const gy = (i: number) => e.histYAt(i) + e.h / 2;
+  const mod = (a: number, n: number) => ((a % n) + n) % n;
+  const texOf = () => atlas.ensureVImage(`vanilla/NPC_${vid}.png`);
+  if (vid === 94) {
+    const tex = texOf();
+    if (!tex) return;
+    for (let i = 1; i < 6; i += 2) {
+      if (i >= depth) break;
+      drawGhostSprite(ctx, tex, frame, gx(i), gy(i), o.rot, o.mirror, o.scale,
+        ((10 - i) / 15) * o.opacity, 1, o.addY);
+    }
+  } else if (vid === 120 || vid === 137 || vid === 138) {
+    const tex = vid === 120 ? atlas.ensureVImage('vanilla/Chaos.png') : texOf();
+    if (!tex) return;
+    const src = vid === 120
+      ? { sx: 0, sy: 0, sw: tex.width, sh: tex.height }
+      : frame;
+    for (let i = 1; i < 10; i++) {
+      if (i >= depth) break;
+      // 色 (150,100,150,50)×(10−i)/15：A=50/255×衰减；RGB 衰减并入 alpha（登记）
+      drawGhostSprite(ctx, tex, src, gx(i), gy(i), o.rot, o.mirror, o.scale,
+        ((50 / 255) * (10 - i) / 15) * o.opacity, 1, o.addY);
+    }
+  } else if (vid === 417) {
+    if (e.ai0 !== 6) return;
+    const tex = texOf();
+    if (!tex) return;
+    for (let i = 5; i >= 0; i--) {
+      if (i >= depth) continue;
+      drawGhostSprite(ctx, tex, frame, gx(i), gy(i), e.histRotAt(i), o.mirror, o.scale,
+        ((10 - i) / 20) * o.opacity, 0.5 + (1 - 0.5) * ((5 - i) / 6), o.addY);
+    }
+  } else if (vid === 471) {
+    if (e.ai3 >= 0) return;
+    const tex = texOf();
+    if (!tex) return;
+    for (let i = 1; i < 10; i++) {
+      if (i >= depth) break;
+      drawGhostSprite(ctx, tex, frame, gx(i), gy(i), o.rot, o.mirror, o.scale,
+        (0.5 * (10 - i) / 20) * o.opacity, 1, o.addY);
+    }
+  } else if (vid === 477 || vid === 479) {
+    const gate = vid === 477 ? 9 : 6.5;
+    if (Math.hypot(e.vx, e.vy) <= gate) return;
+    const tex = texOf();
+    if (!tex) return;
+    for (let i = 1; i < 10; i++) {
+      if (i >= depth) break;
+      const ghostIdx = mod(o.frameIdx - i, o.frames);   // frame.Y -= fh*i 回卷（:26403-26408）
+      drawGhostSprite(ctx, tex, { sx: frame.sx, sy: ghostIdx * frame.sh, sw: frame.sw, sh: frame.sh },
+        gx(i), gy(i), o.rot, o.mirror, o.scale,
+        (0.5 * (10 - i) / 20) * o.opacity, 1, o.addY);
+    }
+  } else if (vid === 516) {
+    const tex = texOf();
+    if (!tex) return;
+    for (let i = 6; i >= 0; i--) {
+      if (i >= depth) continue;
+      const ghostIdx = mod(o.frameIdx - 4 - i, 4);   // (row−4−i) mod 4（:25572-25580）
+      const a = ((10 - i) / 20) * (1 - i / 6) * o.opacity;
+      drawGhostSprite(ctx, tex, { sx: frame.sx, sy: ghostIdx * frame.sh, sw: frame.sw, sh: frame.sh },
+        gx(i), gy(i), o.rot, o.mirror, o.scale, a,
+        0.35 + (1.2 - 0.35) * ((10 - i) / 10), o.addY);
+    }
+  }
+}
+
+/** 日耀旋刃 419 拖尾（mode 7；Main.cs:25512-25534，ai2<=-9 门；原 drawNpcGlow 内联块
+ *  迁出——其 ctx 在本体变换内，绝对历史坐标被当作相对位移=双重偏移，BJ209 修正）：
+ *  Glow_154 网格（帧高=texH/17），行 (row−3−i) mod 3 + 5，白 A=0 纯加算（XNA α=0
+ *  惯例→'lighter'），rot=oldRot，scale=Lerp(0.75,1.2,(10−i)/10)。 */
+export function drawSolenianGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  o: NpcGhostOpts,
+): void {
+  if (e.vanillaId !== 419 || e.ai2 > -9) return;
+  const tex = atlas.ensureVImage('vanilla/Glow_154.png');
+  if (!tex) return;
+  const gh = tex.height / o.frames;
+  const depth = e.historyDepth();
+  const mod = (a: number, n: number) => ((a % n) + n) % n;
+  for (let i = 6; i >= 0; i--) {
+    if (i >= depth) continue;
+    const trow = mod(o.frameIdx - 3 - i, 3) + 5;
+    drawGhostSprite(ctx, tex, { sx: 0, sy: trow * gh, sw: tex.width, sh: gh },
+      e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2,
+      e.histRotAt(i), o.mirror, o.scale, ((10 - i) / 20) * o.opacity,
+      0.75 + (1.2 - 0.75) * ((10 - i) / 10), o.addY, true);
+  }
+}
+
+/** 克眼 4 冲刺残影（mode 3；Main.cs:26359-26371，ai0==3 && ai1>=4 门；原 drawEnemy
+ *  内联块迁出——同 419 双重偏移修正）。i=1..9，α=0.5×(10−i)/20，同帧同当前旋转。 */
+export function drawEocDashGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  if (e.vanillaId !== 4 || e.ai0 !== 3 || e.state < 4) return;
+  const tex = atlas.ensureVImage('vanilla/NPC_4.png');
+  if (!tex) return;
+  const depth = e.historyDepth();
+  for (let i = 1; i < 10; i++) {
+    if (i >= depth) break;
+    const a = (10 - i) / 40;
+    if (a <= 0.01) continue;
+    drawGhostSprite(ctx, tex, frame, e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2,
+      o.rot, o.mirror, o.scale, a * o.opacity, 1, o.addY);
+  }
+}
+
+/** 机械族旧位拖尾（mode 6；Main.cs:25486-25498；原 drawEnemy 内联块迁出——同上双重
+ *  偏移修正）：125-131 全族 + 139 自由态（ai3==0）+ 140；i=9,7,5,3,1，RGBA×(10−i)/20，
+ *  同帧同当前旋转（e.spin=ROTATION_NPC 旋转通道）。 */
+export function drawMechTrailGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  const vid = e.vanillaId ?? -1;
+  if (!((vid >= 125 && vid <= 131) || (vid === 139 && e.ai3 === 0) || vid === 140)) return;
+  const tex = atlas.ensureVImage(`vanilla/NPC_${vid}.png`);
+  if (!tex) return;
+  const depth = e.historyDepth();
+  for (let i = 9; i >= 1; i -= 2) {
+    if (i >= depth) break;
+    drawGhostSprite(ctx, tex, frame, e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2,
+      o.rot, o.mirror, o.scale, ((10 - i) / 20) * o.opacity, 1, o.addY);
+  }
+}
+
+/** BJ209 残影族统一分发（Renderer.drawEnemy 本体 restore 后单挂点调用） */
+export function drawNpcTrailGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  drawGenericTableGhosts(ctx, e, atlas, frame, o);
+  drawCultistGhosts(ctx, e, atlas, o);
+  drawBetsyGhosts(ctx, e, atlas, frame, o);
+  drawSolarGoopGhosts(ctx, e, atlas, o);
+  drawPostBodyTrailGhosts(ctx, e, atlas, frame, o);
+  drawSolenianGhosts(ctx, e, atlas, o);
+  drawEocDashGhosts(ctx, e, atlas, frame, o);
+  drawMechTrailGhosts(ctx, e, atlas, frame, o);
+}

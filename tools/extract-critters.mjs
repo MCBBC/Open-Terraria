@@ -1,5 +1,16 @@
 // 从 Terarria1457 提取原版小动物（NPCID.Sets.CountsAsCritter 名单；★BJ183 2026-09-20
 // 基准对齐 1456→1457——CountsAsCritter 表两版全等,合入 vanilla-npcs.json 对拍零漂移）：
+//
+// ★BJ207 写盘守卫（2026-09-20，era guard 家族/BJ191 处方——preflight 事故防再犯闸）：
+//   本工具读真实现库 game/public/sprites/vanilla-npcs.json 并【原地合入】——裸跑一次
+//   就是写库（preflight 对拍曾裸跑洗库一次,三方字节全等零漂移纯属侥幸,机械闸此前缺位）。
+//   处置 fail-closed：缺省=【干跑对拍】（零写盘,合入产物 vs 输入基线逐字节对拍——零漂移
+//   exit 0 / 漂移 exit 1+物证）。写盘两通道且都必须显式：SW_OUT=<dir>（沙箱,写
+//   <dir>/vanilla-npcs.json）或 --write-real（逃生门,写真实现库=正常合入流）。探测注入面
+//   SW_NPCS_JSON（输入基线重定向,守卫测试用,与 extract-npcs.mjs 同名同域）与 --write-real
+//   混用而 SW_OUT 缺省=读夹具写真库（探测与写盘分离,g1 footgun 洗库面）→ 拒 exit 1。
+//   SW_OUT 与 --write-real 同给：SW_OUT 优先（沙箱最安全,提示即走）。守卫测试：
+//   tests/extract-npcs-era-guard.test.ts（BJ207 段）。
 //  - NPCID.cs 的 CountsAsCritter Factory.CreateBoolSet(...) id 列表
 //  - NPC.cs SetDefaults if-else 区间链解析（同 extract-npcs.mjs v3 逻辑）补属性
 //  - Main.cs npcFrameCount 帧数
@@ -97,7 +108,10 @@ const names = {};
 for (const e of bestiary.npcData) if (typeof e.id === 'number' && e.id >= 1) names[e.id] = e.fullName ?? e.name;
 
 // 5) 合并进 vanilla-npcs.json
-const out = JSON.parse(readFileSync(`${ROOT}/game/public/sprites/vanilla-npcs.json`, 'utf8'));
+// ★BJ207：输入基线路径（SW_NPCS_JSON 注入重定向,守卫测试用;缺省=真实现库）
+const LIVE_OUT = `${ROOT}/game/public/sprites/vanilla-npcs.json`;
+const IN_PATH = process.env.SW_NPCS_JSON ?? LIVE_OUT;
+const out = JSON.parse(readFileSync(IN_PATH, 'utf8'));
 const KEYS = ['lifeMax', 'damage', 'defense', 'knockBackResist', 'aiStyle', 'width', 'height',
   'npcSlots', 'noGravity', 'noTileCollide', 'friendly', 'HitSound', 'DeathSound', 'scale', 'alpha'];
 let added = 0, updated = 0;
@@ -117,6 +131,33 @@ for (const id of critterIds) {
   if (out[String(id)]) updated++; else added++;
   out[String(id)] = e;
 }
-writeFileSync(`${ROOT}/game/public/sprites/vanilla-npcs.json`, JSON.stringify(out));
+// ---------- ★BJ207 写盘守卫（头注见上）:缺省干跑零写盘,写盘须显式 SW_OUT/--write-real ----------
+const WRITE_REAL = process.argv.includes('--write-real');
+const OUT_PATH = process.env.SW_OUT ? `${process.env.SW_OUT}/vanilla-npcs.json` : null;
+if (WRITE_REAL && process.env.SW_NPCS_JSON !== undefined && !OUT_PATH) {
+  console.error('[extract-critters] 拒绝运行：探测注入面（SW_NPCS_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  console.error('  合入基线读注入夹具、写盘却落真实现库 game/public/sprites/vanilla-npcs.json——探测与写盘分离=守卫被绕过（footgun 洗库面）。');
+  console.error('  处置：显式 SW_OUT 指向与探测一致的沙箱目录（写沙箱），或清掉 SW_NPCS_JSON 走真实现库合入。');
+  process.exit(1);
+}
+const freshNpcs = JSON.stringify(out);
+if (!OUT_PATH && !WRITE_REAL) {
+  const cur = readFileSync(IN_PATH, 'utf8');
+  if (cur === freshNpcs) {
+    console.error('[extract-critters] 干跑对拍：合入产物与现库逐字节零漂移（零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+  } else {
+    let prev = {};
+    try { prev = JSON.parse(cur); } catch { /* 坏损:键物证落空,整文件漂移成立 */ }
+    const changed = [...new Set([...Object.keys(prev), ...Object.keys(out)])]
+      .filter((k) => JSON.stringify(prev[k]) !== JSON.stringify(out[k]));
+    console.error(`[extract-critters] 干跑对拍：漂移 ${changed.length} 键（${changed.slice(0, 6).join(', ')}${changed.length > 6 ? '…' : ''}）——零写盘。`);
+    console.error('  合入落盘须显式通道：SW_OUT=<dir>（沙箱）或 --write-real（真实现库）。');
+    process.exit(1);
+  }
+} else {
+  if (OUT_PATH && WRITE_REAL) console.error('[extract-critters] SW_OUT 与 --write-real 同给：SW_OUT 优先（沙箱）。');
+  writeFileSync(OUT_PATH ?? LIVE_OUT, freshNpcs);
+  console.error(`[extract-critters] 已写盘 ${OUT_PATH ?? LIVE_OUT}（${OUT_PATH ? 'SW_OUT 沙箱' : '--write-real 真实现库'}）`);
+}
 console.log(`added=${added} updated=${updated}`);
 for (const id of [46, 74, 299, 300, 303, 357, 377]) console.log(id, JSON.stringify(out[String(id)]).slice(0, 180));

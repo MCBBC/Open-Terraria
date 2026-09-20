@@ -25,7 +25,7 @@
 // 1456 对齐修正（相对旧 1.4.0.5 移植）：banker's rounding（C# Math.Round），
 // 蜂蜜交互阈值 32→24（LiquidCheck 统一），AddWater/WaterCheck 的水死/岩浆死表
 // （Main.cs:7182+ 提取），panic 模式（Liquid.cs:1040-1070），岩浆 3×3 烧草精确 type 映射
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, IS_A_CONTAINER_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../../data/tiles';
 import { UnifiedRandom } from '../../core/rng';
 import type { World } from '../World';
 import type { RNG } from '../../core/rng';
@@ -76,8 +76,9 @@ const OBSIDIAN_KILL_EXTRA_SHEETS = new Set([546, 77, 78, 82, 83, 84, 85, 105, 12
  *  （Liquid.cs:1289-1295）——掉落语义，不是单纯清格 */
 // ★BJ182b 收编单源 data/tiles.ts:TILE_CUT_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const CUT_SHEETS = TILE_CUT_SHEETS;
-/** TileID.Sets.IsAContainer（TileID.cs:405）：情形 B 的"上方是容器而下方不是"放行标志 */
-const CONTAINER_SHEETS = new Set([21, 467, 88]);
+/** TileID.Sets.IsAContainer（TileID.cs:409）：情形 B 的"上方是容器而下方不是"放行标志
+ *  ★BJ203 收编单源 data/tiles.ts:IS_A_CONTAINER_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h） */
+const CONTAINER_SHEETS = IS_A_CONTAINER_SHEETS;
 /** Main.tileAlch（Main.cs:7755-7757）：DelWater 尾 CheckAlch 的草药族 */
 const ALCH_SHEETS = new Set([82, 83, 84]);
 /** CheckAlch 各生长阶段（frameX/18）可依附的下方泥土 sheet（WorldGen.cs:45994-46102 switch 表） */
@@ -158,7 +159,8 @@ function platformProperTopFrameL(fx: number): boolean {
 
 /** TileID.Sets.NotReallySolid（TileID.cs:355，sheet id）——CheckBanner 锚门的
  *  排除族（开门10/高门387/闸门388） */
-const NOT_REALLY_SOLID_SHEETS = new Set([387, 388, 10]);
+// ★BJ203 收编单源 data/tiles.ts:NOT_REALLY_SOLID_SHEETS（TileID.cs:359;逐值对拍全等,
+//  tests/tile-domain-sentinel §6h）——同名 import 直供（本处原字面副本已删）
 /** ★VVV 批：Check1x2Top 坐具族（cs:87107 派发 case 表——椅42/金椅270/银椅271/
  *  王座座族572/浴桶581/金马桶660；698=死亡展示罐走绳锚特支）。FCP 引擎缺该臂，
  *  按 CheckBanner/check1xXGen 前置扫惯例在 LiquidSim 就地实现。 */
@@ -646,8 +648,9 @@ export class LiquidSim {
     const st = world.store;
     this.checking = new Uint8Array(st.w * st.h);
     this.skip = new Uint8Array(st.w * st.h);
-    // sheet → 内部 id 反查（死亡表/烧除表用）
-    const bySheet = (sheets: Set<number>): Set<number> => new Set(
+    // sheet → 内部 id 反查（死亡表/烧除表用）——★BJ203 形参放宽 ReadonlySet
+    //  （CONTAINER_SHEETS 收编 data/tiles.ts 单源后为 ReadonlySet,只读遍历语义零差）
+    const bySheet = (sheets: ReadonlySet<number>): Set<number> => new Set(
       TILE_DEFS.reduce<number[]>((acc, d, id) => { if (d.vanilla && sheets.has(d.vanilla.sheet)) acc.push(id); return acc; }, []),
     );
     this.waterDeathIds = bySheet(WATER_DEATH_SHEETS);

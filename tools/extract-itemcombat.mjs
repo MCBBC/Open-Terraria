@@ -41,6 +41,21 @@
 //   ⑤真值变登记（真值变=停下登记判例）：6152 json useTime=4 系旧提取 shotVelocity
 //     误读遗留——源码 case 有字面 `useTime = 4;`（:47414）在调用之后,C# 终值即 4,
 //     源序解析与之同值,非本批改动面。
+//   ⑥BJ205 2026-09-20 LAG 残余盘点（dry-run --dump 1457 × vanillaItemCombat.ts
+//     EXTRACT_PATCH 逐字段对拍）：45 手补件中 29 件已被①②③反哺全字段原生复现
+//     （另 8 件部分字段:炸弹族 shoot 六件/5594-5595 noUseGraphic;1 件末值覆盖:1319）,
+//     仍 LAG 15 件 33 字段——手补面记录（vanillaItemCombat.ts EXTRACT_PATCH 为唯一
+//     数据源,重产前须先建下列机制,否则整批回退）：
+//     · helper 体字段面机制未建：DefaultToLawnMower(:48532-48541,4049)、
+//       DefaultToSolution(:47800-47808,5392-5394)、DefaultToBomb(:47771-47783,
+//       5594/5595)——体值 useTime/useAnimation/autoReuse/consumable/noMelee/ammo/shoot
+//       不入 HELPER_EFFECTS 三通道;
+//     · 算式族：4956/5669 `useTime = useAnimation / 3`（:40011/:44557）除法未解析;
+//     · useAmmo 双赋值末值语义：1319 源序 Bullet(:16335)→Snowball(:16343) 终值 949,
+//       首匹配取 97——TS 补丁 949 权威,反哺须改 find() 为末匹配或序感解析;
+//     · 【禁反哺】4423/4824-4827/4908/4909 的 noMelee 七件=本仓派发等价门
+//       （combatWeapon consumable&&noMelee 爆炸物门）,原版 SetDefaults 无此字面,
+//       提取器不产=正确。
 import { readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -197,6 +197,27 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //     本表只补"可用性"数值面）----
   '4058': { shoot: 1, useAmmo: 40, useTime: 17, useAnimation: 17, shootSpeed: 11, damage: 8, knockBack: 5, noMelee: true, ranged: true },
   '4381': { shoot: 1, useAmmo: 40, useTime: 19, useAnimation: 19, shootSpeed: 9, damage: 14, knockBack: 3, noMelee: true, ranged: true, autoReuse: true },
+  // ---- ★BJ205 2026-09-20 LAG 残余盘点定谳（dry-run 对拍 extract-itemcombat --dump 1457，
+  //   json 与提取器逐字节零差）：
+  //   · 本表 45 件中 29 件已被提取器反哺【全字段】原生复现（ crit+= 四件 1782/1784/
+  //     1835/3291、七金属短剑模板七件、SetWeaponValues 全 17 调用点 4058/4060-4062/
+  //     4317/4381/4788-4790/6155/6171/6173、DefaultTo* 形参位 4060-4062/4347/4348/5629）,
+  //     另 8 件部分字段复现（炸弹族 shoot 六件/5594-5595 noUseGraphic）、1 件末值覆盖
+  //     （1319）——条目保留作双保险（重产/提取器回摆时钉值不丢），逐字段对拍全等见
+  //     tests/extract-audit;4703/5065/5129 等非本表件亦已原生覆盖（json 直填/主流程
+  //     手补被原生复现,case 4703 :38653-38663 亲读）。
+  //   · 仍 LAG 15 件 33 字段（提取器盲区,本表为唯一数据源,测试钉值锁死）：
+  //       4049（DefaultToLawnMower 体 :48532-48541 useAnim30/useTime10/autoReuse 未建
+  //         helper 体字段面）、4956/5669（`useTime = useAnimation / 3` 算式 :40011/:44557,
+  //         1458 同行号）、5392-5394（DefaultToSolution 体 :47800-47808 shoot=projId-145/
+  //         ammo 780/consumable）、5594/5595（DefaultToBomb 体 :47771-47783+形参算式
+  //         :44027 shoot=1086+(type-5594)/speed6/40/40/consumable/noMelee）；
+  //   · 4423+4824-4827/4908/4909 的 noMelee 七件=【刻意偏差】非原版值——原版
+  //     SetDefaults 各 case 无 noMelee 字面（:37462-37474/:39505-39514/:39805-39816）,
+  //     本表补它只为 combatWeapon `consumable && noMelee` 爆炸物门派发,【禁反哺】;
+  //   · 1319 useAmmo=【末值语义】——源序 Bullet(:16335)→Snowball(:16343,1458:16343)
+  //     双赋值终值 949,提取器首匹配取 97,本表 949 权威（提取器盲区记录,供未来反哺
+  //     useAmmo 双赋值末值语义）。
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };

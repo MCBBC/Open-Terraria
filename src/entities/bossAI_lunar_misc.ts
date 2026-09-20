@@ -56,7 +56,7 @@ import { LightningBoltProj } from './LightningBoltProj';
 import { TtlSprite } from '../assets/ttlSprite';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { hostileProjectileDamage, mainDifficulty, getKnockbackMultiplierScaledByDifficulty } from '../stats/ScaleStats';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 
@@ -862,16 +862,19 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai0 = 0; e.ai1 = e.facing;
     }
   }
-  if (big) game.spawnParticles(e.cx, e.cy, '#5A2BA0', 1, 0.6, { life: 16 });   // :39511-39518
+  if (big) game.spawnParticles(e.cx, e.cy, '#5A2BA0', 1, 0.6, { life: 16 });   // :37832-37843（1457）
   fly(e);
 }
 
 // ---------------------------------------------------------------------------
-// AI_087 珍稀四宝箱怪 473-476(NPC.cs:39520-39875)
+// AI_087 珍稀四宝箱怪 473-476(NPC.cs:37845-38200——★BJ206 2026-09-20 行号重锚:
+//   旧注 :39520-39875 系 1456 代际,态锚全部 +Δ 后逐条随修复重锚)
 // 0 伪装箱(唤醒:有速度/受击/玩家 80px)→ 1 蓄力 36t → 2 贴地跳扑主循环;
-// 2 每 210t 随机 3 蓄能无敌 180t(expert 反弹投射物,不可达)/4 飞天俯冲/6 三连扑;
+// 2 每 210t 随机 3 蓄能无敌 180t(弹反 expert 门,态3 本体全难度可达=R23b-F3)/
+//   4 飞天俯冲/6 三连扑;
 // 跳扑参数按血量:等待 15+30×HP比、横速 3+4×(1-HP比)、跳力 4(+2 无视线),
-// 每 3 跳(ai[3])双倍跳力/半横速;7 玩家死→零伤满血渐隐;8 十周年炮连发不可达。
+// 每 3 跳(ai[3])双倍跳力/半横速;7 玩家死→零伤满血渐隐+defense=9999;
+// 8 十周年炮连发不可达。
 // ---------------------------------------------------------------------------
 export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai0 < 0 || e.ai0 > 8) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
@@ -890,14 +893,20 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   e.dontTakeDamage = false;
   e.noTileCollide = false;
   // noGravity 运行时位（1457 :37850 恒写 false；4/4.1 俯冲分支/5 空中态置 true——
-  // 4.1 仅"未过玩家 Y 且 ai[2]==0 的真俯冲段"(:39724-39730)，过顶回落段 false）。
+  // 4.1 仅"未过玩家 Y 且 ai[2]==0 的真俯冲段"(:38056-38061,★BJ206 重锚)，过顶回落段 false）。
   // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
   e.noGravity = false;
-  // knockBackResist 运行时位：4/4.1/5 三态恒 0（:39662/:39710/:39756），其余态回落数据档
-  e.kbResistOverride = (e.ai0 === 4 || e.ai0 === 4.1 || e.ai0 === 5) ? 0 : null;
+  // knockBackResist 运行时位（★BJ206 2026-09-20 [F-C]+[F-A]）：原版头段 :37847 每拍
+  //   写 knockBackResist = GetKnockbackMultiplier_ScaledByDifficulty(0.2f)（NPC.cs:7058
+  //   = 0.2×难度系数）——每拍覆写 SetDefaults 0.1f（:14547,ScaleStats :687 已按难度
+  //   缩放的 def 档）。旧实现非零态落 null→def(0.1×K) 恰为原版半额。4/4.1/5 三态
+  //   体（:37987/:38035+:38060/:38081）与态 6 体（:38101 ★[F-A] 补）头写后恒置 0；
+  //   态 2 空中支（:37925 ★[F-B] 补）同置 0（写点在下方态 2 分支内）。
+  e.kbResistOverride = (e.ai0 === 4 || e.ai0 === 4.1 || e.ai0 === 5 || e.ai0 === 6)
+    ? 0 : getKnockbackMultiplierScaledByDifficulty(0.2, e.difficulty);
   const p = player && !player.dead ? player : null;
   const los = !!p && losClear(game, e.cx, e.cy, p.cx, p.cy);
-  // ---- 玩家全灭 → 7 隐身僵坐(:39526-39534) ----
+  // ---- 玩家全灭 → 7 隐身僵坐(:37853-37861) ----
   if (e.ai0 !== 7 && !p) { e.ai0 = 7; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
   const grounded = () => {
     e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
@@ -905,18 +914,18 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   };
 
   if (e.ai0 === 0) {
-    // ---- 伪装(:39536-39547) ----
+    // ---- 伪装(:37864-37874) ----
     if (p) e.facing = e.seekDirX(p);
     const near = !!p && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 80;
     if (e.vx !== 0 || e.vy > 100 || e.justHit || near) { e.ai0 = 1; e.ai1 = 0; }
     grounded();
   } else if (e.ai0 === 1) {
-    // ---- 蓄力 36t(:39549-39557) ----
+    // ---- 蓄力 36t(:37875-37884) ----
     e.ai1 += 1;
     if (e.ai1 > 36) { e.ai0 = 2; e.ai1 = 0; }
     grounded();
   } else if (e.ai0 === 2) {
-    // ---- 贴地跳扑主循环(:39559-39621) ----
+    // ---- 贴地跳扑主循环(:37885-37965) ----
     if (p && Math.hypot(p.cx - e.cx, p.cy - e.cy) > 600) { e.ai0 = 5; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
     if (e.onGround && e.vy === 0) {
       if (p) e.facing = e.seekDirX(p);
@@ -928,17 +937,18 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
       let jumpPow = los ? 4 : 6;                           // num1411(+2 无视线)
       if (e.ai1 > wait) {
         e.ai3 += 1;
-        if (e.ai3 >= 3) { e.ai3 = 0; jumpPow *= 2; jumpV /= 2; }   // :39583-39588 每 3 跳大跳
+        if (e.ai3 >= 3) { e.ai3 = 0; jumpPow *= 2; jumpV /= 2; }   // :37908-37916 每 3 跳大跳
         e.ai1 = 0;
         e.vy -= jumpPow;
         e.vx = jumpV * e.facing;
       }
     } else {
-      e.vx *= 0.99;                                        // :39603-39610 空中保底 ±1
+      e.kbResistOverride = 0;                              // ★BJ206 [F-B] 空中支 knockBackResist=0f（:37925）
+      e.vx *= 0.99;                                        // :37926-37933 空中保底 ±1
       if (e.facing === -1 && e.vx > -1) e.vx = -1;
       else if (e.facing === 1 && e.vx < 1) e.vx = 1;
     }
-    e.ai2 += 1;                                            // :39612-39620 210t 随机换招
+    e.ai2 += 1;                                            // :37935-37956 210t 随机换招
     if (e.ai2 > 210 && e.onGround && e.vy === 0) {
       const pick = rnd(3);
       e.ai0 = pick === 0 ? 3 : pick === 1 ? 4 : 6;
@@ -969,13 +979,13 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
     grounded();
   } else if (e.ai0 === 4) {
-    // ---- 飞天(:39639-39677):悬玩家上方 350px → ai[2]=1 短瞄 6t → 4.1 俯冲 ----
-    e.noGravity = true;                                    // :39661 整态置位
+    // ---- 飞天(:37983-38032):悬玩家上方 350px → ai[2]=1 短瞄 6t → 4.1 俯冲 ----
+    e.noGravity = true;                                    // :37986 整态置位（noTileCollide :37985/kbResist :37987）
     if (p) e.facing = e.vx < 0 ? -1 : 1;
     const dx = p ? p.cx - e.cx : e.facing * 100;
     const dy = (p ? p.cy : e.cy) - 350 - e.cy;
     if (e.ai2 === 1) {
-      // :39676-39690 短瞄段【重算】目标 = 玩家中心（不带 -350 抬升——曾复用上方
+      // :38001-38014 短瞄段【重算】目标 = 玩家中心（不带 -350 抬升——曾复用上方
       // 偏移向量，短瞄/俯冲全打向玩家头顶 350px 处）
       e.ai1 += 1;
       const adx = p ? p.cx - e.cx : dx, ady = p ? p.cy - e.cy : dy;
@@ -992,7 +1002,7 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
     fly(e);
   } else if (e.ai0 === 4.1) {
-    // ---- 俯冲下坠(:39679-39709):过玩家 Y 或弹起 → 10t 后回 2(埋块则 5) ----
+    // ---- 俯冲下坠(:38033-38067):过玩家 Y 或弹起 → 10t 后回 2(埋块则 5) ----
     // ★R23b-F4 修:原版三处均 Collision.SolidCollision(包围盒与任一实心重叠=ANY),
     // 曾用 inSolidBody(全格实心=ALL)= 部分嵌墙时该走态5 穿墙归位却回态2 贴地跳扑可卡地形
     if (e.ai2 === 0 && p && losClear(game, e.cx, e.cy, p.cx, p.cy) && !touchesSolid(game, e)) e.ai2 = 1;
@@ -1003,19 +1013,19 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
         e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
       }
     } else if (e.ai2 === 0) {
-      e.noGravity = true;                                 // :39731-39735 真俯冲段（穿墙）
+      e.noGravity = true;                                 // :38056-38061 真俯冲段（穿墙;noTileCollide :38058/kbResist :38060）
     }
-    e.vy = Math.min(e.vy + 0.2, 16);                      // :39737-39741 重力在分支后恒施
+    e.vy = Math.min(e.vy + 0.2, 16);                      // :38062-38066 重力在分支后恒施
     // 位移：真俯冲段（noGravity）穿墙直积分；其余（含 ai2==1 下落段）走碰撞——
     // 曾漏 ai2==1 且未过玩家 Y 的分支积分，该态整帧冻结 = 空中僵死
     if (e.noGravity) fly(e);
     else moveAndCollide(e, game.world, e.vx, e.vy);
   } else if (e.ai0 === 5) {
-    // ---- 穿墙归位(:39711-39734):追玩家,近 200px 且不埋块 → 回 2 ----
-    e.noGravity = true;                                    // :39743 整态置位
+    // ---- 穿墙归位(:38068-38098):追玩家,近 200px 且不埋块 → 回 2 ----
+    e.noGravity = true;                                    // :38080 整态置位（noTileCollide :38079/kbResist :38081）
     if (p) e.facing = e.vx > 0 ? 1 : -1;
     let dx = p ? p.cx - e.cx : 0, dy = (p ? p.cy : e.cy) - 4 - e.cy;
-    if (p && Math.hypot(dx, dy) < 200 && !touchesSolid(game, e)) {   // SolidCollision(:38084)
+    if (p && Math.hypot(dx, dy) < 200 && !touchesSolid(game, e)) {   // SolidCollision(:38083)
       e.ai0 = 2; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     }
     const d = Math.hypot(dx, dy);
@@ -1023,7 +1033,7 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.vx = (e.vx * 4 + dx) / 5; e.vy = (e.vy * 4 + dy) / 5;
     fly(e);
   } else if (e.ai0 === 6) {
-    // ---- 三连扑(:39736-39795):每 5t 起跳(玩家越高/无视线 跳力越高),vx=12×dir ----
+    // ---- 三连扑(:38099-38164):每 5t 起跳(玩家越高/无视线 跳力越高),vx=12×dir ----
     if (e.onGround && e.vy === 0) {
       if (p) e.facing = e.seekDirX(p);
       e.vx *= 0.8;
@@ -1042,23 +1052,24 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
         e.ai2 += 1;
       }
     } else {
-      e.vx *= 0.98;                                       // :39780-39788 空中保底 ±8
+      e.vx *= 0.98;                                       // :38144-38153 空中保底 ±8
       if (e.facing === -1 && e.vx > -8) e.vx = -8;
       else if (e.facing === 1 && e.vx < 8) e.vx = 8;
     }
-    if (e.ai2 >= 3 && e.onGround && e.vy === 0) {         // :39791-39799
+    if (e.ai2 >= 3 && e.onGround && e.vy === 0) {         // :38156-38163
       e.ai0 = 2; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     }
     grounded();
   } else if (e.ai0 === 7) {
-    // ---- 玩家死隐身僵坐(:39801-39814):零伤/满血/渐隐,离屏由 despawn 清 ----
+    // ---- 玩家死隐身僵坐(:38165-38174):零伤/满血/防9999/渐隐,离屏由 despawn 清 ----
     e.def.damage = 0;
     e.hp = e.maxHp;
+    e.def.defense = 9999;   // ★BJ206 [F-D]：defense=9999（:38169,全玩家死亡才达态,微阶）
     e.spawnAlpha = Math.min(255, e.spawnAlpha + 7);
     e.vx *= 0.98;
     grounded();
   } else if (e.ai0 === 8) {
-    // ---- 十周年世界炮连发(:39816-39835,getGoodWorld 不可达) ----
+    // ---- 十周年世界炮连发(:38175-38196,getGoodWorld 不可达) ----
     e.vx *= 0.85;
     e.ai1 += 1;
     if (e.ai1 >= 180) { e.ai0 = 2; e.ai1 = 0; }

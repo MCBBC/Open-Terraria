@@ -62,7 +62,7 @@
 //      Next(3) 掷+SquareTileFrame 双级联+失败 Clear 留痕），rainbow #105 满绿定谳。
 
 import { RNG } from '../../../core/rng';   // ★IIIII228 doNoSurface 双流需要【值】导入（new RNG(seed) 镜像 Main.rand）
-import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { World } from '../../World';
@@ -661,8 +661,8 @@ export function doWorldIsInfected(st: TileStore, rng: RNG, gs: GenState): void {
 // ============================================================
 // ★IIIII106 sandy britches（surfaceIsDesert）族
 // ============================================================
-/** TileID.Sets.Ore（TileID.cs:1110-1130 终值；gronk 表同源） */
-const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// TileID.Sets.Ore（TileID.cs:403 终值；gronk 表同源）——★BJ203 收编单源
+// data/tiles.ts:ORE_SHEETS（同名 import,tests/tile-domain-sentinel §6h）
 /** WallID.Sets.Fences（WallID.cs:56） */
 const WALL_FENCES = new Set([150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
 /** Clouds 集（TileID.cs:197）——DoSurfaceIsDesertFinish 锚用 */

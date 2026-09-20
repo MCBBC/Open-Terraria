@@ -44,7 +44,7 @@ import { holidayLightVid } from '../../data/vanillaStyleDrops';   // ★红蓝-G
 import { RNG } from '../../core/rng';
 import { rollLuck } from '../../stats/Luck';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
-import { WALL_HOUSE } from '../gen/vanilla/SurfaceDecorPasses';   // Main.wallHouse 全表(含 :10506 153-166 循环段)
+import { WALL_HOUSE } from '../Housing';   // Main.wallHouse 全表(含 :10506 153-166 循环段)★BJ204 单源(曾经 SurfaceDecorPasses 中转)
 import { flowerGroundOk, plantBadMatch, plantNewType, PLANT_CHECK_SHEETS,
   PLANT_CONVERT_KEY } from './PlantRules';
 

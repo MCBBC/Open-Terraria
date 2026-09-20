@@ -1250,6 +1250,32 @@ export const IS_A_TREE_TRUNK_IDS: ReadonlySet<number> = (() => {
   return out;
 })();
 
+// ===================== TileID.Sets 家族第二收编批（★BJ203 2026-09-20） =====================
+// 前批（BJ158①②/BJ168-债2/BJ182b/BJ188）已收编 ForbidsSloping/tileAxe/tileHammer/
+// IsATreeTrunk/Boulders/Platforms/tileTable/tileCut/BreakableWhenPlacing；本批 =
+// BJ203 面三全仓数值普查（tools/_bj203-census.mjs 字符串感知逐值扫描）钓出的
+// TileID.cs 五表字面副本（Ore×10/NotReallySolid×9/IsBeam×5/IsADripTile×5/
+// IsAContainer×3），逐值全等后收编单源，消费面改指本处（tests/tile-domain-sentinel
+// §6h 金标+结构锁钉死；变异证红 M17..M19 见该文件头）。1457≡1458 逐值零增量
+// 已对拍（Terarria1458/Terraria.ID/TileID.cs 同行号同值）。
+// ★普查另见登记债（本批不越刀，留 BJ204）：TileID.cs:197 Clouds ×13、:183
+//   CrackedBricks ×9、Moss/MossBrick/Ice/Stone/Snow/Sand/Grass 等转化族 ×2..×13、
+//   :169 PreventsTileRemovalIfOnTopOfIt ×5、:413 FriendlyFairyCanLureTo ×2、
+//   CommonSapling ×2——注释锚已逐一核出，收编法同本批。
+/** TileID.Sets.Ore（TileID.cs:403 Factory.CreateBoolSet 全 19 元素）——sheet 域 */
+export const ORE_SHEETS: ReadonlySet<number> = new Set([
+  7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211,
+]);
+/** TileID.Sets.NotReallySolid（TileID.cs:359={387 高门,388 开门,10}——"看着实心其实能穿"） */
+export const NOT_REALLY_SOLID_SHEETS: ReadonlySet<number> = new Set([387, 388, 10]);
+/** TileID.Sets.IsBeam（TileID.cs:239 全 7 元素）——梁族（火把侧锚单格即可） */
+export const IS_BEAM_SHEETS: ReadonlySet<number> = new Set([124, 561, 574, 575, 576, 577, 578]);
+/** TileID.Sets.IsADripTile（TileID.cs:157 全 5 元素）——滴水锚点（原版路由 continue
+ *  永不绘制，只作 EmitLiquidDrops 源：373 丛林叶/374 蜂巢叶/375 叶/461 垂叶/709 微光叶） */
+export const IS_A_DRIP_TILE_SHEETS: ReadonlySet<number> = new Set([373, 374, 375, 461, 709]);
+/** TileID.Sets.IsAContainer（TileID.cs:409={21 木箱,467 死人箱,88 梳妆台}三族） */
+export const IS_A_CONTAINER_SHEETS: ReadonlySet<number> = new Set([21, 467, 88]);
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });

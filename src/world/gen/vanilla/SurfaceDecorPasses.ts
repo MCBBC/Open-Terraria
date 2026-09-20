@@ -28,12 +28,13 @@
 import { TileStore, LIQUID_TYPE } from '../../TileStore';   // ★IIIII194 lava(true) 用 LIQUID_TYPE（+1 编码禁裸写）
 import type { RNG } from '../../../core/rng';
 import { wgNpcBlocksEmptyTile, type GenState } from './GenState';   // ★IIIII194 EmptyTile 实体支
-import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, ORE_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { genSolidType, flipGenSolid, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { setBoulderSolidity } from './TrapsPass';
 import { dualDungeonState, inAnyPotentialDungeonBounds } from './DungeonStyles1457';
 import { LiquidSim } from '../../liquid/LiquidSim';
+import { WALL_HOUSE } from '../../Housing';   // ★BJ204 单源：Main.wallHouse 全表（本文件消费 1930/1959；CaveWallsPass 亦直引）
 import type { World } from '../../World';
 import { matureHerbPlants } from './StructuresPass';
 import { growTree } from './TreePass';
@@ -83,8 +84,9 @@ const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
 /** TileID.Sets.Corrupt（:329）/ Crimson（:347）——倒木 50×50 回避扫描 */
 const SET_CORRUPT = new Set([23, 661, 25, 112, 163, 398, 400, 636]);
 const SET_CRIMSON = new Set([199, 662, 203, 234, 200, 399, 401, 205]);
-/** TileID.Sets.Ore（:399）——Flowers pass 的矿石→草转换判定 */
-const SET_ORE = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+/** TileID.Sets.Ore（TileID.cs:403）——Flowers pass 的矿石→草转换判定；
+ *  ★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h） */
+const SET_ORE = ORE_SHEETS;
 /** TileID.Sets.IsVine（:237）——GrowMoreVines 密度计数（按 type 计，含幽灵） */
 const IS_VINE = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
 /** Main.tileMoss（Main.cs:6956-6996） */
@@ -104,23 +106,9 @@ const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 62
 const WALL_ALLOWS_PLANTS = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317,
   63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80]);
 /** Main.wallHouse（Main.cs 全量，含 153-166 循环段）——Vines 444 凹龛墙门 /
- *  CaveWallsInEnclosedSpaces 重试门（cs:17940,R8-2） */
-export const WALL_HOUSE = new Set([
-  224, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340,
-  341, 342, 343, 344, 345, 346, 60, 225, 226, 227, 231, 232, 233, 235, 234, 312, 313, 237, 238,
-  239, 240, 173, 183, 179, 184, 181, 186, 168, 169, 142, 143, 144, 149, 151, 150, 152, 145, 148,
-  175, 176, 182, 146, 147, 167, 133, 134, 135, 136, 137, 75, 76, 78, 82, 77, 1, 4, 5, 6, 10, 11,
-  12, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
-  41, 42, 43, 44, 45, 46, 47, 66, 67, 68, 72, 73, 107, 106, 245, 315, 316, 317, 109, 110, 111,
-  112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 108, 100, 101, 102, 103,
-  104, 105, 84, 74, 241, 85, 88, 89, 90, 91, 92, 93, 126, 127, 128, 129, 130, 131, 132, 138, 139,
-  140, 141, 177, 172, 242, 243, 174, 230, 228, 229, 236, 319, 318, 321, 322, 320, 347, 348, 351,
-  352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366, 246, 247, 248, 249,
-  250, 251, 252, 253, 254, 255, 314, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267,
-  268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286,
-  287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305,
-  306, 307, 308, 309, 310, 311, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166,
-]);
+ *  CaveWallsInEnclosedSpaces 重试门（cs:17940,R8-2）
+ *  ★BJ204（2026-09-20）副本拆除：表体单源 = world/Housing.ts（三副本逐值对拍全等后
+ *  收编，权威=Terarria1457/Terraria/Main.cs:9880-10716 直赋 265 面+:10506 循环 153-166） */
 /** plantDye 上格豁免族（cs:71310/71394）：上方是这些植物时仍可种 */
 const DYE_PLANT_ABOVE = new Set([3, 51, 61, 73, 74, 184]);
 /** PlaceDye 上/下格豁免族（cs:54013/54024，多 697/703） */

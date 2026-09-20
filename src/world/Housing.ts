@@ -19,7 +19,11 @@
 import { T, TILE_DEFS } from '../data/tiles';
 import type { TileStore } from './TileStore';
 
-/** Main.wallHouse 全表（Main.cs `wallHouse[n] = true` 逐条提取；自然墙全部不在内） */
+/** Main.wallHouse 全表（Main.cs `wallHouse[n] = true` 逐条提取；自然墙全部不在内）
+ *  ★BJ204（2026-09-20）本处 = 全仓唯一表体（三副本逐值对拍全等后单源化）：
+ *  住房判定本文件 + Game/Mounts/SmartCursor/SceneMetrics/VanillaSpawner（房内不刷怪）
+ *  + worldgen（SurfaceDecorPasses 凹龛/CaveWallsPass 重试/WorldGen 注册钩/WorldEvolution）。
+ *  权威=Terarria1457/Terraria/Main.cs:9880-10716 直赋 265 面 + :10506 循环 153-166 共 279。 */
 export const WALL_HOUSE = new Set([
   224, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339,
   340, 341, 342, 343, 344, 345, 346, 60, 225, 226, 227, 231, 232, 233, 235, 234, 312, 313,

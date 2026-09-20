@@ -8,7 +8,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 // ★MMMMMMM：巨石支受理门双态门（1456/1457 分叉实证,见 placeTrap case1 注）
@@ -49,8 +49,7 @@ const SOLID_TOP = SOLID_TOP_SHEETS;
 /** TileID.Sets.Platforms（TileID.cs:243） */
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const PLATFORM_SHEETS = PLATFORMS_SHEETS;
-/** TileID.Sets.Ore（TileID.cs:399） */
-const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+// TileID.Sets.Ore（TileID.cs:403）——★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（同名 import,§6h）
 /** PlaceSandTrap ±25 禁置族：BasicChest{21,467}+Paintings{240,241,242,245,246}+{10,19,15,219,314} */
 const SAND_FORBID = new Set([21, 467, 240, 241, 242, 245, 246, 10, 19, 15, 219, 314]);
 
@@ -634,8 +633,8 @@ export function __setTrapsChestAnchors(s: Set<number> | null): void { chestItemA
 // T91×9/T240×9/T34×9 被 J 多杀 → g3805 等站点九格受理门分叉 → 主循环断点漂移；
 // x86 klog K11756/242938 同点双杀 + dump076 该族存活交叉印证）。本节按 1457
 // 反编译逐行转录；毁除经 killTileWholeCore（画/旗尘掷 default=10 的隐藏掷流同构）。
-/** TileID.Sets.NotReallySolid（Terraria.ID/TileID.cs:359） */
-const NOT_REALLY_SOLID = new Set([387, 388, 10]);
+/** TileID.Sets.NotReallySolid（Terraria.ID/TileID.cs:359）——★BJ203 收编单源 data/tiles.ts（§6h） */
+const NOT_REALLY_SOLID = NOT_REALLY_SOLID_SHEETS;
 /** nactive()＝active 且非致动隐身位（Tile.cs:591-618，与 placeTrap 九格门同式） */
 function nactiveT(st: TileStore, i: number): boolean {
   return st.flags[i] !== 0 && ((st.wire[i] >>> 5) & 1) === 0;

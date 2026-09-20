@@ -5,7 +5,7 @@
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
-import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
 import { getUVForMasks } from './BlendFraming';
 import { frameMergesWith, halfNeighborConnects, normalizedVidOf, vanillaIdOf } from './TileMergeFamily';
 import { tileAnim } from './TileAnim';
@@ -1837,7 +1837,8 @@ const VANILLA_TS_DOUBLE_TRUE = new Set([19, 427, 435, 436, 437, 438, 439, 239, 3
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const VANILLA_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 const IGNORES_NEARBY_HALFBRICK = new Set([380, 476, 235, 138, 664, 137, 484, 421, 422, 711, 712, 713, 714, 715, 716]);
-const NOT_REALLY_SOLID = new Set([387, 388, 10]);
+// ★BJ203 收编单源 data/tiles.ts:NOT_REALLY_SOLID_SHEETS（TileID.cs:359;逐值对拍全等,§6h）
+const NOT_REALLY_SOLID = NOT_REALLY_SOLID_SHEETS;
 const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46, 176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692, 160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345, 328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311, 426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748]);
 
 /** X 镜像翻转(GetTileDrawData:x % 2 == 0 → FlipHorizontally,植物/藤蔓变体的原版来源) */

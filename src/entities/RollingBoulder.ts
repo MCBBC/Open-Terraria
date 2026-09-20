@@ -19,7 +19,7 @@ import { cutTilesBox } from './ProjCutTiles';   // ★SW-BJ93 债1：CutTiles �
 import { GorePiece } from './GorePiece';        // ★SW-BJ93 债2：1053 Kill gore 61..63（Game.explodeAt 同引擎,30:28419 先例）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, PLATFORMS_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, PLATFORMS_SHEETS, ORE_SHEETS, IS_A_DRIP_TILE_SHEETS } from '../data/tiles';
 import { LIQUID_TYPE } from '../world/TileStore';   // ★SW-BJ93 债②：液体编码（repo +1 域）
 import { canHit, solidTileAt } from '../physics/LineOfSight';   // ★SW-BJ93 债②：CanHit/SolidTile 1:1
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';   // ★SW-BJ93 债2：Kill 掉落 vid→键反查（Player.ts:6333 同款）
@@ -229,8 +229,9 @@ const RB_KILL_FAMILY: ReadonlySet<number> = new Set(
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const RB_PLATFORM_SHEETS = PLATFORMS_SHEETS;
 /** TileID.Sets.IsADripTile（TileID.cs:157 全 5 元素直抄）——TryKillingReplaceableTile
- *  可杀面第三支（:59809） */
-const RB_DRIP_SHEETS: ReadonlySet<number> = new Set([373, 374, 375, 461, 709]);
+ *  可杀面第三支（:59809）。
+ *  ★BJ203 收编单源 data/tiles.ts:IS_A_DRIP_TILE_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h） */
+const RB_DRIP_SHEETS: ReadonlySet<number> = IS_A_DRIP_TILE_SHEETS;
 /** SpreadTile 草族转化表（:554 白名单 {2,23,60,70,109,199,477,492} × KillTile(fail:true)
  *  转化支 :64228-64239——2/23/109/199/477/492→0 土、60/70→59 泥） */
 const RB_GRASS_TO_BARE: Record<number, 'dirt' | 'mud'> = {
@@ -362,8 +363,9 @@ function factorAcceleration1457(cvx: number, cvy: number, t: number, framesOfLen
   return [cvx - 0 * fy, cvy - fy];
 }
 
-/** TileID.Sets.Ore（TileID.cs:403 Factory.CreateBoolSet 全 19 元素直抄） */
-const RB_ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+/** TileID.Sets.Ore（TileID.cs:403 Factory.CreateBoolSet 全 19 元素直抄）
+ *  ★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h） */
+const RB_ORE_SHEETS = ORE_SHEETS;
 
 /** TileID.Sets.FriendlyFairyCanLureTo（TileID.cs:413 全 17 元素直抄） */
 const RB_FAIRY_LURE_SHEETS = new Set([8, 169, 21, 467, 107, 108, 111, 221, 222, 223, 211, 12, 665, 639, 236, 702, 227]);

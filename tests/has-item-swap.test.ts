@@ -13,7 +13,8 @@
 //   无渲染面，数据面键保留（登记）。原版无 cursorItemIconID/IconText/icon 分支
 //   （全库 grep 仅 ItemSlot.cs:1646/:4009 两消费点）。
 //   交互面＝ItemSlot.RightClick :1646-1653：canItemSwapAt 语境{0/3/4/8/10/32}+
-//   stack==1+光标空 → TryItemSwap(:1879-1990 对表)原地 ChangeItemType +
+//   stack==1+光标空或【不可叠】（:1636 外门 IsAir||!CanStack——★BJ208 2026-09-20
+//   收口,旧"光标空"自创门清偿）→ TryItemSwap(:1879-1990 对表)原地 ChangeItemType +
 //   AfterItemSwap(:1992-2008) 音 22 Unlock/7 Grab+stackSplit=30；持有侧快换表
 //   Player.cs:31764-31877 已实装（tests/flairon-swap.test.ts）。
 // 仓内：CursorItemIcon.tryItemSwapVid（对表+音档）+ UI 右键语境支
@@ -178,6 +179,11 @@ describe('tooltip 装配：提示行随 staticTip 支入行族（tag static）',
 //   mousedown 监听器——整条右键路由（真实现）驱动,变异即红：
 //   M-a 摘 CAN_ITEM_SWAP_AT.has(ctx) 门 → ①②⑥红+结构锁红;
 //   M-b 集撤 8/10（回 inv/chest 旧域）→ ①②红+集内容锁红。
+// ★BJ208（2026-09-20）⑤ 外门收口组（⑧-⑪）：:1636 外门=光标空或不可叠（id+prefix
+//   异=不可叠,Item.cs:49870-49877）——持异款右键换型/装备臂照常受理,两臂本体不触
+//   mouseItem（TryItemSwap :1879 原地/SwapEquip :3287-3368 只动槽与装备页）。变异：
+//   M-c 换型门回退 `!this.heldStack` 空门 → ⑧⑪红;
+//   M-d 装备门回退 `!this.heldStack` 空门 → ⑨红。
 import { UI } from '../src/ui/UI';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
@@ -324,5 +330,66 @@ describe('④ 装备位 8/10 HasItemSwap 接线（RightClick :1646 门先于 swi
     const gate = src.slice(gateUse - 80, gateUse + 80);
     expect(gate, '门谓词含 stack==1+光标空（heldStack null 门）').toContain('cur.stack === 1');
     expect(gate).toContain('!this.heldStack');
+  });
+});
+
+// ============================================================
+// ⑤ BJ208 外门收口（ItemSlot.RightClick :1636 `mouseItem.IsAir || !Item.CanStack`
+//   全谓词）——持异款/异词缀物右键时换型/装备臂照常受理（TryItemSwap :1879 原地
+//   ChangeItemType / SwapEquip :3287-3368 两臂本体均不触 mouseItem,光标持物原样
+//   保留=原版行为）;可叠同款（同 id 同词缀）照旧跳过两臂直落取件臂。
+// ============================================================
+describe('⑤ BJ208 外门收口：光标持不可叠物仍进换型/装备臂（:1636/:49870）', () => {
+  const TORCH = idOfVid2(8);                // 火把（非集内、非装备——纯异款持物）
+  const DIVING_HELM = idOfVid2(268);        // 潜水头盔（功能盔甲,可 SwapEquip）
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('⑧ 持异款火把+配饰位 Shellphone 右键=仍原地换型,光标原样（:1650 不触 mouseItem）', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.armor[3] = { id: SHELLPHONE, stack: 1 };
+    ui.heldStack = { id: TORCH, stack: 5 };            // 光标持异款（不可叠）物
+    rightClick(ui, listeners, 'armor', 3);
+    expect(inv.armor[3]!.id).toBe(SHELLPHONE_OCEAN);   // 换型照常
+    expect(ui.heldStack).toMatchObject({ id: TORCH, stack: 5 });   // 光标持物不动
+    expect(sfx).toEqual(['unlock']);                   // AfterItemSwap 5360∈音 22 族
+  });
+
+  it('⑨ 持异款火把+背包格盔甲右键=照常一键装备,光标原样（:1671 不触 mouseItem）', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.slots[10] = { id: DIVING_HELM, stack: 1 };
+    ui.heldStack = { id: TORCH, stack: 3 };
+    rightClick(ui, listeners, 'inv', 10);
+    expect(inv.armor[0]?.id).toBe(DIVING_HELM);        // 装备上身
+    expect(inv.slots[10]).toBeNull();                  // 旧装备位空 → 槽清空
+    expect(ui.heldStack).toMatchObject({ id: TORCH, stack: 3 });   // 光标持物不动
+    expect(sfx).toEqual(['menuTick']);                 // swapEquipItem 装备声
+  });
+
+  it('⑩ 可叠同款（同 id 同词缀）照旧跳过两臂直落取件臂（:1636 CanStack=true）', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.slots[10] = { id: DIVING_HELM, stack: 1 };
+    ui.heldStack = { id: DIVING_HELM, stack: 1 };      // 同款同词缀=可叠
+    ui.stackSplit = 0;                                 // 取件臂电平面桩（:1678/runPickupArm）
+    ui.superFastStack = 0;
+    rightClick(ui, listeners, 'inv', 10);
+    expect(inv.armor[0]).toBeNull();                   // 未触发 SwapEquip（可叠同款不进臂）
+    expect(ui.heldStack).toMatchObject({ id: DIVING_HELM, stack: 2 });  // 取件臂取 1
+    expect(inv.slots[10]).toBeNull();                  // 源格耗尽清槽
+    expect(sfx).toEqual(['menuTick']);
+  });
+
+  it('⑪ 异词缀=不可叠（!CanStack prefix 位 Item.cs:49874）→ 换型臂照常受理', () => {
+    const { ui, sfx, listeners } = mkSwapUi();
+    const inv = ui.game.player.inv as Inventory;
+    inv.armor[3] = { id: SHELLPHONE, stack: 1 };
+    ui.heldStack = { id: SHELLPHONE, stack: 1, prefix: 1 };  // 同 id 异词缀 → !CanStack
+    rightClick(ui, listeners, 'armor', 3);
+    expect(inv.armor[3]!.id).toBe(SHELLPHONE_OCEAN);
+    expect(ui.heldStack).toMatchObject({ id: SHELLPHONE, prefix: 1 });
+    expect(sfx).toEqual(['unlock']);
   });
 });

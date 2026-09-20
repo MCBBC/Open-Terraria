@@ -6,7 +6,7 @@ import { furnitureSlotCount, type FurnitureKind } from '../world/FurnitureItems'
 import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { CHEST_MAX_ITEMS } from '../world/World';
-import { TILE_BY_KEY, T, TILE_DEFS, TILE_STABLE_OF_INTERNAL, PLATFORMS_SHEETS } from '../data/tiles';
+import { TILE_BY_KEY, T, TILE_DEFS, TILE_STABLE_OF_INTERNAL, PLATFORMS_SHEETS, IS_A_CONTAINER_SHEETS } from '../data/tiles';
 import { ITEM_BY_KEY, ITEM_STABLE_OF_INTERNAL, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { translateSeed } from '../core/rng';
 // ★IIIIIII18 F-1：导入路径统一走与新创建世界相同的 seed 解析层——
@@ -742,7 +742,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   //  箱变体(467 群系箱族/88 梳妆台族——原版 Container 三族,帧带 144/486 各自成带)
   //  强改成木箱 21(33 格实测,外来帧值落 21 的 locked 带)。兜底只该补「真脱节」
   //  (锚格是空气/降级石),合法容器一律不动。
-  const CONTAINER_SHEETS = new Set([21, 467, 88]);
+  // ★BJ203 收编单源 data/tiles.ts:IS_A_CONTAINER_SHEETS（TileID.cs:409;逐值对拍全等,§6h）
+  const CONTAINER_SHEETS = IS_A_CONTAINER_SHEETS;
   const isContainerTile = (id: number): boolean => {
     const sh = TILE_DEFS[id]?.vanilla?.sheet;
     return sh !== undefined && CONTAINER_SHEETS.has(sh);

@@ -9,6 +9,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import itemCombatJson from '../src/data/vanilla-itemcombat.json';
 import projStatusJson from '../src/data/vanilla-projstatus.json';
+import { itemCombat } from '../src/data/vanillaItemCombat';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CS_PRESENT = existsSync(join(ROOT, '..', 'Terarria1457', 'Terraria', 'Item.cs'));
@@ -104,5 +105,83 @@ describe('提取器自审计·常跑层(已提交 JSON,不依赖 C# 源)', () =>
     const j = JSON.parse(line);
     expect(j.types).toBeGreaterThanOrEqual(85);
     expect(j.skipped).toBeLessThanOrEqual(25);
+  });
+});
+
+// ==================== BJ205 LAG 残余盘点定谳（2026-09-20） ====================
+// dry-run 对拍事实基座：extract-itemcombat.mjs --dump(SW_ITEM_VER=1457) 与盘上
+// vanilla-itemcombat.json 逐字节零差（4369=4369,值差 0）。EXTRACT_PATCH 45 件构成
+// =29 全字段反哺复现 + 8 部分复现（炸弹族 shoot 六件/5594-5595 noUseGraphic）+
+// 7 纯 LAG + 1 末值覆盖（1319）。本块四面钉值（机制锚=Terarria1457/Terraria/Item.cs,
+// 1458 已抽核 1319/天顶剑/useTime 除法同行号）：
+//  ① 仍 LAG 15 件 33 字段：提取器盲区（helper 体字段面未建/除法算式/末值语义）,
+//    EXTRACT_PATCH 为唯一数据源——误删补丁或重产洗面必翻;
+//  ② 1319 useAmmo 末值语义：源序 Bullet(:16335)→Snowball(:16343,1458:16343) 终值 949,
+//    提取器首匹配取 97——钉运行时 949 + json 97 在案（提取器反哺后须同步改本块）;
+//  ③ 反哺复现 canary：运行时值=提取器原生值 deep-equal——金标闸门管 json↔1457,
+//    本 canary 管补丁↔json 同相,提取器改值即强制重定谳;
+//  ④ 刻意偏差七件 noMelee 派发门：原版 SetDefaults 无此字面
+//    (:37462-37474/:39505-39514/:39805-39816),运行时补它只走 combatWeapon
+//    consumable&&noMelee 爆炸物门——禁反哺,重产时勿误判漂移。
+describe('BJ205 itemcombat LAG 残余定谳(EXTRACT_PATCH 手补面)', () => {
+  it('① helper 体族 4049/5392-5394/5594-5595 运行时钉值(LAG 唯一数据源)', () => {
+    // DefaultToLawnMower 体 :48532-48541（useAnimation 30/useTime 10/autoReuse true）
+    const mower = itemCombat(4049)!;
+    expect(mower.useTime).toBe(10);
+    expect(mower.useAnimation).toBe(30);
+    expect(mower.autoReuse).toBe(true);
+    // DefaultToSolution 体 :47800-47808（shoot=projectileId-145 → 870/871/872;
+    //   ammo=AmmoID.Solution 780;consumable true）+ 调用点 :42774/:42777/:42780
+    for (const [id, shoot] of [[5392, 870], [5393, 871], [5394, 872]] as const) {
+      const c = itemCombat(id)!;
+      expect(c.shoot, `solution ${id} shoot`).toBe(shoot);
+      expect(c.ammo, `solution ${id} ammo`).toBe(780);
+      expect(c.consumable, `solution ${id} consumable`).toBe(true);
+    }
+    // DefaultToBomb 体 :47771-47783 + 形参算式 :44027 shoot=1086+(type-5594),speed 6
+    for (const [id, shoot] of [[5594, 1086], [5595, 1087]] as const) {
+      const c = itemCombat(id)!;
+      expect(c.shoot, `powerbomb ${id} shoot`).toBe(shoot);
+      expect(c.shootSpeed, `powerbomb ${id} shootSpeed`).toBe(6);
+      expect(c.useTime, `powerbomb ${id} useTime`).toBe(40);
+      expect(c.useAnimation, `powerbomb ${id} useAnimation`).toBe(40);
+      expect(c.consumable, `powerbomb ${id} consumable`).toBe(true);
+      expect(c.noMelee, `powerbomb ${id} noMelee`).toBe(true);
+      // noUseGraphic 是提取器原生位(默认 40×28/UseSound Item1 不入 combat 域,不钉)
+      expect(c.noUseGraphic, `powerbomb ${id} noUseGraphic`).toBe(true);
+    }
+  });
+
+  it('① 天顶剑算式 4956/5669 useTime=useAnimation/3=10(:40011/:44557,1458 同)', () => {
+    for (const id of [4956, 5669]) {
+      const c = itemCombat(id)!;
+      expect(c.useAnimation, `zenith ${id} useAnimation(提取器原生)`).toBe(30);
+      expect(c.useTime, `zenith ${id} useTime(=30/3,EXTRACT_PATCH 唯一源)`).toBe(10);
+      expect(c.crit, `zenith ${id} crit(提取器原生)`).toBe(10);
+    }
+  });
+
+  it('② 1319 雪球炮 useAmmo 末值=Snowball 949(提取器首匹配 97 在案)', () => {
+    expect((itemCombatJson as unknown as Record<string, { useAmmo?: number }>)['1319']?.useAmmo).toBe(97);
+    expect(itemCombat(1319)!.useAmmo).toBe(949);
+  });
+
+  it('③ 反哺复现 canary:运行时值=提取器原生值(回摆即翻,强制重定谳)', () => {
+    // 抽核全家族:crit+ 四件/七短剑/SetWeaponValues/DefaultTo* 形参位/主流程手补被
+    // 原生复现件(5065/5129/4703)。全等=补丁与 json 同相;提取器改值时本块红=先定谳再动刀。
+    for (const id of [1782, 1784, 1835, 3291, 3507, 4058, 4059, 4060, 4061, 4062,
+      4317, 4347, 4348, 4381, 4703, 4788, 4789, 4790, 5065, 5129, 5629,
+      6152, 6153, 6154, 6155, 6171, 6173]) {
+      expect(itemCombat(id) as unknown, `id ${id} 补丁↔json 同相`).toEqual(
+        (itemCombatJson as unknown as Record<string, unknown>)[String(id)] ?? {});
+    }
+  });
+
+  it('④ 刻意偏差七件 noMelee 派发门:原版无此字面,禁反哺(重产勿误判漂移)', () => {
+    for (const id of [4423, 4824, 4825, 4826, 4827, 4908, 4909]) {
+      expect('noMelee' in (itemCombatJson as unknown as Record<string, Record<string, unknown>>)[String(id)],
+        `id ${id} 原版/提取器应无 noMelee 字面`).toBe(false);
+      expect(itemCombat(id)!.noMelee, `id ${id} 运行时派发门 noMelee`).toBe(true);
+    }
   });
 });

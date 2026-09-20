@@ -24,7 +24,7 @@
 //  与 errorWorld 均为 1457 SecretSeed **哈希注册**（无公开文本种子），本仓 SeedEasterEggs
 //  仅登记旗标位（恒 false）——文本/哈希触发链归秘密种子批（批 F）。终扫的落砂静态化
 //  部分不依赖旗标，普通世界照跑。
-import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { TileStore } from '../../TileStore';
 import type { SeedFlags } from '../SeedEasterEggs';
@@ -308,7 +308,7 @@ function doPaintEverythingGraySingleTile(st: TileStore, x: number, y: number, f:
   const b = f.grayUseWhite ? 26 : 27;
   const sh = sheetOf(st.type[i]!);
   if (f.grayJustTreasure) {
-    const ORE = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+    const ORE = ORE_SHEETS;   // TileID.Sets.Ore（:403）★BJ203 收编单源（§6h）
     const GEMS = new Set([178, 179, 180, 181, 182, 183]);
     if (ORE.has(sh) || GEMS.has(sh) || sh === 178) st.paint[i] = b;
   } else {

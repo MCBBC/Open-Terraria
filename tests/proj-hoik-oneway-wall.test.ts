@@ -262,3 +262,63 @@ describe('本仓 moveAndCollide 域弹幕（WeaponProj/MinionProj 等全部族�
     expect(b.vx).toBe(0);
   });
 });
+
+// ==================== ★BJ206 2026-09-20 非弹域承载收编 + 弹 855 探针面 ====================
+// A2：原版掉落物（WorldItem.cs:1059/:1072 TileCollision 不传第 10 参吃缺省 true）
+//  与宠物（弹幕 AI_026→HandleMovement :17120 全路径 hoik=true）本体能穿单向墙；
+//  本仓 ItemDrop/PetFollower 均 moveAndCollide 承载，BJ206 补类字段 hoik=true
+//  ——此处用真实实例驱 moveAndCollide（消费门本体已由上方 suite 金标），只测
+//  【接线】：字段在位 → 门放行。Mounts=玩家承载已含（fx34b），销案见 Mounts.ts 注。
+import { ItemDrop } from '../src/entities/ItemDrop';
+import { PetFollower } from '../src/entities/PetFollower';
+import { SkyLanternProj } from '../src/entities/SkyLanternProj';
+
+describe('BJ206 非弹域承载收编（ItemDrop/PetFollower 接线面）', () => {
+  // ★判别几何注（fx34c 同款）：两实例补 dropThrough=true = 本 suite 判别几何
+  //  （关平台楼梯骑乘/slope 辅助对平台列吸附,体以恒定行贴齿列到墙 → crossing
+  //  只由 hoik 门裁决）。实形（无 dropThrough）遇平台齿列的骑乘语义与 hoik 无关,
+  //  不作判别面（上方 fx34c 注同款方法论）。
+  it('掉落物右行穿 wiki 单向墙（ItemDrop.hoik=true 类字段→Body 门放行）', () => {
+    const W = makeWorld(); buildHorizRepo(W.store);
+    const item = new ItemDrop(34 * TILE, 30 * TILE + 2, 1);   // 泥土块,12×12
+    expect(item.hoik).toBe(true);
+    (item as { dropThrough?: boolean }).dropThrough = true;   // 判别几何,见上注
+    item.vx = 6; item.vy = 0;
+    for (let t = 0; t < 24; t++) moveAndCollide(item as never, W, item.vx, item.vy);
+    expect(item.cx).toBeGreaterThan(37 * TILE);
+    expect(item.vx).toBe(6);                          // 全程未截断=无碰撞事件
+  });
+  it('宠物右行穿 wiki 单向墙（PetFollower.hoik=true 类字段→Body 门放行）', () => {
+    const W = makeWorld(); buildHorizRepo(W.store);
+    const pet = new PetFollower(34 * TILE, 30 * TILE + 2, 112, () => null);
+    expect(pet.hoik).toBe(true);
+    (pet as { dropThrough?: boolean }).dropThrough = true;    // 判别几何,见上注
+    pet.vx = 6; pet.vy = 0;
+    for (let t = 0; t < 24; t++) moveAndCollide(pet as never, W, pet.vx, pet.vy);
+    expect(pet.cx).toBeGreaterThan(37 * TILE);
+    expect(pet.vx).toBe(6);
+  });
+});
+
+describe('BJ206 弹 855 天灯（SkyLanternProj 单盒探针承载：isSolid 门+身后格坡邻配对）', () => {
+  // ★速度前提：AI_166_Dove 风漂支 :48445-48453 出生每拍 vx±钳 ±2（原版同款）——
+  //  初速 6 首拍即被钳 2,驱 60t（120px+风漂）越墙;vy 升力节奏 ±1.5 钳内下行 ~10px,
+  //  始终落在齿/墙行带（rows 29-31）内。
+  it('855 右行穿 wiki 单向墙：存活、越过墙右缘、速度未反号（原版无碰撞事件）', () => {
+    const world = makeWorld(); buildHorizRepo(world.store);
+    const game = makeGame(world);
+    const l = new SkyLanternProj(34 * TILE + 8, 30 * TILE + 8, 6, 0);
+    for (let i = 0; i < 60 && !l.dead; i++) l.fixedUpdate(1 / 60, game);
+    expect(l.dead).toBe(false);
+    expect(l.cx).toBeGreaterThan(37 * TILE);
+    expect(l.vx).toBe(2);                            // 未反身（风漂钳顶=+2,反身会翻 −2）
+  });
+  it('855 左行（反侧,身后格非齿）：墙面反身弹回,单向性保留', () => {
+    const world = makeWorld(); buildHorizRepo(world.store);
+    const game = makeGame(world);
+    const l = new SkyLanternProj(38 * TILE + 8, 30 * TILE + 8, -6, 0);
+    for (let i = 0; i < 60 && !l.dead; i++) l.fixedUpdate(1 / 60, game);
+    expect(l.vx).toBeGreaterThan(0);                 // 反身翻号
+    expect(l.cx).toBeGreaterThan(37 * TILE);         // 终态在墙右缘外侧（从未穿到左侧）
+  });
+});

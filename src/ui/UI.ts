@@ -181,7 +181,7 @@ import {
   CRAFT_PANEL_X, CRAFT_PANEL_INNER_TOP, craftPanelRect, craftDetailLayout, CRAFT_PANEL_Y,
   itemSearchPanelRect,   // ★SW-BJ81 规格③:道具搜索浮窗几何(物品栏占位面之外,单源)
 } from './vanillaInvLayout';   // ★2026-09-07 刀1:原版背包布局纯几何(数值单源)
-import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan, buildItemSearchPool } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源;★BJ154 池构建单源
+import { ITEMSEARCH_GRAB_INTERVAL_MS, searchGrabPlan, buildItemSearchPool, buildItemSearchView } from './itemSearch';   // ★SW-BJ81 规格②⑤⑥:取件规则单源;★BJ154 池构建单源;★BJ207 view 构建单源
 import {
   // ★SW-FX41(2026-09-12)UI 移债 modern 窗族 P2-1..P2-4:NewCraftingUI 纯逻辑单源
   MCRAFT_ALL_BUTTONS, MCRAFT_PANEL_BG, MCRAFT_SEARCH_BG,
@@ -1485,11 +1485,18 @@ export class UI {
         //（AfterItemSwap :1992-2008 换入 2611/5526 族=22 'unlock'/其余 7 'pickup'）;
         // 原地换型不回查 armorAccepts/成就（原版 ChangeItemType :47841 直改 type,
         // 变体族槽型自洽;HandleOnEquip 只在 SwapEquip/ArmorSwap 链）。
-        // 光标持不可叠物仍受理=原版 !CanStack 臂,本仓光标空门=与 inv/chest 面同款
-        // 收敛（登记）。
+        // ★BJ208（2026-09-20）外门收口=原版 :1636 `mouseItem.IsAir || !Item.CanStack`
+        //  全谓词（CanStack=Item.cs:49870-49877 type+prefix 同,不查 stack/maxStack;
+        //  canMergeStack 多 placeStyle 位不用,与开包门 :1468 同款 id+prefix 谓词）——
+        //  光标持【异款/异词缀】物仍受理换型（TryItemSwap/SwapEquip 本体不触
+        //  mouseItem,:1879 原地 ChangeItemType/:3287-3368 只动 inv[slot] 与装备页,
+        //  光标持物原样保留=原版行为）。旧 `!heldStack` 空门=自创收敛,登记随本刀
+        //  清偿（tests has-item-swap ⑧⑨）。
         // DOM mousedown 即边沿=mouseRightRelease 语义。悬停提示面 = ItemTooltip.{Name}
         // 的 {InputTrigger_ToggleOrOpen}(Lang.cs:160)走 staticTip 支;测试 tests/has-item-swap.test.ts
-        if (!this.heldStack && cur && cur.stack === 1 && CAN_ITEM_SWAP_AT.has(ctx)) {
+        if (cur && cur.stack === 1 && CAN_ITEM_SWAP_AT.has(ctx)
+          && (!this.heldStack || this.heldStack.id !== cur.id
+            || (this.heldStack.prefix ?? 0) !== (cur.prefix ?? 0))) {
           const sw = tryItemSwapVid(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''));
           if (sw && invIndexOfVanilla(sw.target) > 0) {
             cur.id = invIndexOfVanilla(sw.target);
@@ -1532,7 +1539,12 @@ export class UI {
           if (this.pickupEquipIntoMouse(where, i)) this.refreshStackSplitCooldown();
           return;
         }
-        if (!this.heldStack && cur && cur.stack === 1 && this.canSwapEquip(cur.id)) {
+        // ★BJ208（2026-09-20）：case 0/3/4/32 装备臂外门同收口 :1636 全谓词（光标持
+        //  异款物右键装备格=原版受理,SwapEquip 不触 mouseItem）——旧空门同批清偿。
+        if (cur && cur.stack === 1
+          && (!this.heldStack || this.heldStack.id !== cur.id
+            || (this.heldStack.prefix ?? 0) !== (cur.prefix ?? 0))
+          && this.canSwapEquip(cur.id)) {
           this.swapEquipItem(cur, where, i);
           this.refreshAll();
           return;
@@ -1829,7 +1841,11 @@ export class UI {
    *  timesTriedToFastStack<10 期 superFastStack 归零=长按 10 窗后才一拍多件）。
    *  ② 松键归零+递减（Main.cs:63422-63430）：双键全松 → stackSplit=0;>0 逐拍--。
    *  ③ 取件臂电平重跑（RightClick :1614 由 Draw :566 悬停格逐帧调用——右键按住+
-   *  仍悬停原格才续取;面板关/元素离树即清）。 */
+   *  仍悬停原格才续取;面板关/元素离树即清）。
+   *  ④ quickCraftStackSplit 豁免支（Main.cs:63420 `(!quickCraftStackSplit||!Grapple)`
+   *  不建模=★BJ208 定谳死码：全反编译树 `quickCraftStackSplit = true` 零写点——仅
+   *  声明 :1772/读 :63420/复位 :63430 三站,"钩爪快造持握保 stackSplit"场景在原版
+   *  不可达,建模反成自创行为（登记备查）。 */
   tickStackSplitMain(): void {
     if (this.stackSplit === 0) {                             // :62728-62733
       this.timesTriedToFastStack = 0;
@@ -2721,8 +2737,11 @@ export class UI {
    *    −11 quest 鱼不可词缀=钳段不可达,本仓 −1 下限/11 上限同相）
    *  ④ expert 旗末位覆写 → −12（Main.cs:20512-20515;Item.cs SetDefaults 全表零处
    *    `rare = -12`,专家件表值 1..10 如 3090 rare=2 :28598-28600;旗与稀有度正交
-   *    3332 主袋 rare=8 仍覆写;旗源=vanilla-expert.json,vanilla-itemrare 全表无 −12） */
-  private tooltipRareOf(def: { key: string; value?: number }, prefix?: number): number {
+   *    3332 主袋 rare=8 仍覆写;旗源=vanilla-expert.json,vanilla-itemrare 全表无 −12;
+   *    ★SW-N4:opts.forPopup=PopupText 飘字链跳过本步——覆写是 MouseText 绘制期
+   *    行为,飘字链 PrepareEffects PopupText.cs:388-404 读 Item.rare 字段值,expert
+   *    走 somePopup.expert 旗不改色,见方法尾注） */
+  private tooltipRareOf(def: { key: string; value?: number }, prefix?: number, opts?: { forPopup?: boolean }): number {
     let rare = 0;
     const isVi = def.key.startsWith('vi_');
     const vid = isVi ? parseInt(def.key.slice(3), 10) : -1;
@@ -2741,7 +2760,11 @@ export class UI {
       else if (pv <= 0.8) rare = Math.max(-1, rare - 2);
       else if (pv <= 0.95) rare = Math.max(-1, rare - 1);
     }
-    if (isVi && ITEM_EXPERT[String(vid)] === 1) rare = -12;
+    // ④ expert 旗末位覆写 → −12——仅 MouseText tooltip 链（Main.cs:20512-20515
+    //    绘制期覆写）;PopupText 飘字链（PrepareEffects PopupText.cs:388-404）读
+    //    Item.rare 字段值,expert 走 somePopup.expert 旗不改色——专家配饰 3090/3097
+    //    等可重铸,飘字链须跳过④（否则 −12→白,原版=位移后表色）。★SW-N4
+    if (!opts?.forPopup && isVi && ITEM_EXPERT[String(vid)] === 1) rare = -12;
     return rare;
   }
 
@@ -3482,10 +3505,11 @@ export class UI {
     this.itemSearchResizeOb = new ResizeObserver(() => layout());
     this.itemSearchResizeOb.observe(list);
     const render = () => {
-      const qRaw = input.value.trim().toLowerCase();
-      const qs = [qRaw, ...(ALIAS[qRaw] ?? []).map((x) => x.toLowerCase())].filter(Boolean);
-      view = qs.length ? pool.filter((e) => qs.some((q) => e.lc.includes(q))) : pool;
-      countEl.textContent = qs.length
+      // ★BJ207:view 构建单源化（itemSearch.buildItemSearchView）——全量无封顶语义由
+      //  行为锁看护（tests/sw-bj154-itemsearch-pool ④段）,UI 侧零本地过滤拼法
+      const { view: vv, searched } = buildItemSearchView(pool, input.value, ALIAS);
+      view = vv;
+      countEl.textContent = searched
         ? `命中 ${view.length} / ${pool.length} 件`
         : `共 ${pool.length} 件（滚动浏览全部）`;
       if (!view.length) {
@@ -3590,6 +3614,9 @@ export class UI {
       if (!this.reforgeItem) return;
       if (performance.now() < this.vinvReforgeCooldownUntil) return;   // 最优档掷中后 60t 锁(:42370)
       const cost = this.game.reforgeCost(this.reforgeItem);
+      // ★BJ165③ 登记维持（2026-09-20 复锚）：钱不足=原版【静默】（Main.cs:42346
+      //  BuyItem 假→无文案/无音效;vinv 锤击面同相静默）——本 toast=classic modal
+      //  自创 fallback UI（modal 本身=登记自创面）,偏差维持不修
       if (this.game.coinsOwned() < cost) {
         this.toast(Lang.text('Mods.SandboxWorld.Reforge.TooExpensive', Lang.inter(46)));
         return;
@@ -3602,7 +3629,13 @@ export class UI {
       // AffixName 飘字单源 showPickupLabel）;旧「花费: N · 前缀」toast=自创面退役
       // （费用原版恒走常驻币制分解行 :42288-42322,无重铸后费用提示）
       const rdef = ITEM_DEFS[this.reforgeItem.id];
-      if (rdef) this.game.showPickupLabel(rdef.key, this.reforgeItem.stack, np);
+      // ★SW-N4（2026-09-20）：飘字色=词缀档位移后 rare（Main.cs:42622 → PrepareEffects
+      //  PopupText.cs:388-404 Rarity=newItem.rare 字段值,Item.Prefix :588-614 已烘入
+      //  位移）——BJ125 单源链 tooltipRareOf 产物（forPopup=跳过④ MouseText −12 覆写）;
+      //  基表读法=神级迷你鲨 2 档绿伪影（BJ165 登记债,本刀清偿;变异哨
+      //  tests/sw-n4-reforge-popup-rare.test.ts 传基表→红）
+      if (rdef) this.game.showPickupLabel(rdef.key, this.reforgeItem.stack, np,
+        this.tooltipRareOf(rdef, np, { forPopup: true }));
       this.refreshReforge();
     });
     panel.appendChild(doBtn);
@@ -9868,7 +9901,12 @@ export class UI {
     // 单源 showPickupLabel;旧「花费: N · 前缀」toast=自创面退役（费用原版恒走 (100,270)
     // 币制分解常驻行 :42288-42322,无重铸后费用提示）
     const rdef = ITEM_DEFS[this.reforgeItem.id];
-    if (rdef) this.game.showPickupLabel(rdef.key, this.reforgeItem.stack, np);
+    // ★SW-N4（2026-09-20）：飘字色=词缀档位移后 rare（Main.cs:42622 → PrepareEffects
+    //  PopupText.cs:388-404 Rarity=newItem.rare 字段值）——BJ125 单源链 tooltipRareOf
+    //  产物（forPopup=跳过④ MouseText −12 覆写）;基表读法=神级迷你鲨 2 档绿伪影
+    //  （BJ165 登记债,本刀清偿;变异哨 tests/sw-n4-reforge-popup-rare.test.ts 传基表→红）
+    if (rdef) this.game.showPickupLabel(rdef.key, this.reforgeItem.stack, np,
+      this.tooltipRareOf(rdef, np, { forPopup: true }));
     this.refreshAll();
   }
 
