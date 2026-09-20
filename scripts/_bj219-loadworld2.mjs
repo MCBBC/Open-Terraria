@@ -4,7 +4,15 @@ import puppeteer from 'puppeteer-core';
 const MAP = '/Users/vinlic/Downloads/map-Starter_World (12).json';
 const browser = await puppeteer.launch({ protocolTimeout: 900000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
-page.on('console', (m) => { const t = m.text(); if (!/deprecat|sourcemap|Download the React DevTools/i.test(t)) console.log('P:', t.slice(0, 150)); });
+page.on('console', async (m) => {
+  const t = m.text();
+  if (/deprecat|sourcemap|Download the React DevTools/i.test(t)) return;
+  if (t.includes('JSHandle')) {
+    for (const a of m.args()) { try { console.log('P!:', JSON.stringify(await a.jsonValue())?.slice(0, 400)); } catch { console.log('P!: <unserializable>'); } }
+    return;
+  }
+  console.log('P:', t.slice(0, 150));
+});
 page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 200)));
 await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5204') + '/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForSelector('[data-act=sp]', { timeout: 180000 });
