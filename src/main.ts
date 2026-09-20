@@ -186,6 +186,13 @@ audio.onEvent = (k, d) => flow?.game?.audioRec.bgm.log(k, d);   // sel/start/sto
 let inGame = false;
 let pausePanel: HTMLElement | null = null;
 
+// ★首屏静态读条摘除(见 index.html #sw-boot-static 注):bundle 就绪后由
+//   启动幕(#sw-boot-prime)接棒——幕挂载时摘(无缝交接);bypass 路径无幕,
+//   在 boot 回调入口即摘(防盖住 splash/快速通道)
+const removeStaticBoot = (): void => {
+  document.getElementById('sw-boot-static')?.remove();
+};
+
 // ---- 动画帧捕获系统（被动聚合恒开 + 长按 F5 录制窗全量）----
 // 快照/截图/异常像素小样都要主画布与相机；tick 用渲染端动画时钟。
 initTileFrameCapture({
@@ -838,6 +845,7 @@ kvHas('sandboxworld.quicksave').then(async () => {
   await Lang.init(options.data.lang);
   const bootParams0 = new URLSearchParams(location.search);
   const bypassBoot = bootParams0.has('play') || bootParams0.has('quickload') || bootParams0.has('vuidemo');
+  if (bypassBoot) removeStaticBoot();   // 旁路无启动幕,回调入口即摘(仅损失数 ms 黑帧差)
   // ★首访资产前置(2026-08-25 用户要求):音频门出现前先把暖缓存跑起来并等标题曲
   //   (Music_50/51,位于 p0 最前,到位即含过渡图族)入缓存——保证点击放行即有声、
   //   过渡时间线有画。dev/?nosw/http 立即跳过;慢网 30s 上限降级放行不卡死。
@@ -856,11 +864,11 @@ kvHas('sandboxworld.quicksave').then(async () => {
     veil.id = 'sw-boot-prime';
     veil.innerHTML = `<style>
       #sw-boot-prime { position: fixed; inset: 0; z-index: 10000; background: #000;
-        display: flex; align-items: center; justify-content: center;
-        flex-direction: column; gap: 16px; }
-    </style><canvas width="52" height="53"></canvas><canvas class="bootbar" width="96" height="14"></canvas>`;
+        display: flex; align-items: center; justify-content: center; }
+    </style><canvas width="52" height="53"></canvas>`;
     document.body.appendChild(veil);
     bootVeil = veil;
+    removeStaticBoot();   // 启动幕接管首屏反馈(静态读条使命完成,无缝交接)
     // ★资源指示器提前挂载(2026-08-27 用户要求):从向日葵幕阶段就显示
     //   "资源加载中 · N%"(badge z=10002 浮于本幕 10000 之上),不再等到过渡图
     //   出现才出现——进度覆盖 primeBootAssets 等待窗口。warm 已由
@@ -873,42 +881,12 @@ kvHas('sandboxworld.quicksave').then(async () => {
     sfImg.onload = () => { sfOk = true; };
     sfImg.src = 'sprites/vanilla-ui/UI_Sunflower_Loading.png';   // vanilla-ui 散件常驻,首访即可得
     const sfT0 = performance.now();
-    // ★首屏零素材像素读条(2026-09-20 用户要求):向日葵精灵图自身下载完成前
-    //   画布纯黑=「像卡住」窗口——加一条程序化斜纹读条(原版加载屏样式,青色
-    //   45° 斜纹 2px 步进,96×14 独立小画布),首帧即动零 fetch 依赖;向日葵
-    //   onload 后交棒:条停画清+display:none,幕回归纯向日葵形态。
-    const barCv = veil.querySelector('.bootbar') as HTMLCanvasElement;
-    const bctx = barCv.getContext('2d')!;
-    let barDone = false;
-    const drawBootBar = (now: number): void => {
-      const W = barCv.width, H = barCv.height;
-      bctx.clearRect(0, 0, W, H);
-      bctx.fillStyle = '#0a0e20';                       // 槽底
-      bctx.fillRect(0, 0, W, H);
-      bctx.fillStyle = '#7d92d6';                       // 1px 边框
-      bctx.fillRect(0, 0, W, 1); bctx.fillRect(0, H - 1, W, 1);
-      bctx.fillRect(0, 0, 1, H); bctx.fillRect(W - 1, 0, 1, H);
-      bctx.fillStyle = '#59c8ff';                       // 45° 斜纹(2px 宽,8px 周期)
-      const off = Math.floor(now / 60) % 8;
-      for (let y = 1; y < H - 1; y++) {
-        for (let x = 1; x < W - 1; x++) {
-          if (((x + y + off) >> 2) % 2 === 0) bctx.fillRect(x, y, 1, 1);
-        }
-      }
-    };
     const sfStep = () => {
       if (!veil.isConnected) return;   // 撤除即停
       if (sfOk && sfImg.width > 0) {
         const row = (Math.floor((performance.now() - sfT0) / 50) + 10) % 19;
         cctx.clearRect(0, 0, 52, 53);
         cctx.drawImage(sfImg, 0, row * 53, 52, 53, 0, 0, 52, 53);
-        if (!barDone) {                                // 交棒:条隐去,回归纯向日葵
-          barDone = true;
-          bctx.clearRect(0, 0, barCv.width, barCv.height);
-          barCv.style.display = 'none';
-        }
-      } else {
-        drawBootBar(performance.now());
       }
       requestAnimationFrame(sfStep);
     };
@@ -935,12 +913,12 @@ kvHas('sandboxworld.quicksave').then(async () => {
       const back = sp?.querySelector('.back') as HTMLElement | null;
       if ((sp && back && back.style.backgroundImage) || !sp) {
         clearInterval(handoff);
-        // ★延迟 1000ms 再撤(2026-08-25 用户要求:500ms 基础上再延 500):向日葵
-        //   与过渡页并存交接
+        // ★延迟 500ms 再撤(2026-09-20 用户要求:1000ms 缩半——2026-08-25 原
+        //   定 500ms 基础上再延 500 的并存交接,现收紧):向日葵与过渡页并存交接
         setTimeout(() => {
           bootVeil?.remove();
           bootVeil = null;
-        }, 1000);
+        }, 500);
       }
     }, 100);
   }

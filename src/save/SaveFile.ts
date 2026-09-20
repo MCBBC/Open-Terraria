@@ -444,6 +444,16 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     healed.savedBartender = true;
     world.flags = healed;
   }
+  // ★BJ214（2026-09-20）双子键一次性归正：2026-08-14（3da58b52）前击败记账按后死之眼
+  //  裸写 vanillaId——125 先死+126 收尾的旧档只有 downed_126 缺 downed_125 → mechAll
+  //  （世花球茎 238 门 WorldEvolution:mechAll / 三王全灭判定）永假,且双眼已死不可再
+  //  触发击败链=永久死态。原版语义（NPC.cs:80223-80229 case 125/126 同写
+  //  downedMechBoss2 单旗）下 downed_126=true 而 downed_125=false 是不可能态=旧 bug
+  //  残留 → 补写 downed_125。126 键保留（mechAny/.wld 导出 OR 口径不动）。★入参纯度
+  //  同 RB28-F2：归正只落 world 侧新对象,再存档即落盘。
+  if (world.flags['downed_126'] && !world.flags['downed_125']) {
+    world.flags = { ...world.flags, downed_125: true };
+  }
   // 星璇塔运行时态回填（WorldFile.cs:2220-2255 尾段：downedTower*/towerActive*/lunarApocalypseUp
   // 三类 bool 走 flags 落盘；盾值不存——TowerActive=true 读档重置满盾）
   applyLunarSave(world);

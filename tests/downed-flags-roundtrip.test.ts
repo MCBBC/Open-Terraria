@@ -270,3 +270,28 @@ describe('downed ⑥ RB28-F2 旧导入档 dd2DownedT1 脏键一次性归正(load
     expect(backB.world.flags['dd2DownedT1']).toBe(undefined);
   });
 });
+
+describe('downed ⑦ BJ214 双子键一次性归正(loadSaveData 读回侧:旧档 downed_126-only)', () => {
+  it('旧档脏态(downed_126=true ∧ downed_125 缺)→ 补写 downed_125(mechAll 复活)', () => {
+    // 债锚 Game.ts twinsPart(3da58b52,2026-08-14):此前击败记账按后死之眼裸写
+    // vanillaId——125 先死+126 收尾的旧档只有 downed_126 → 三王全灭门(世花球茎
+    // 238/mechAll)永假且双眼已死不可再触发。原版 NPC.cs:80223-80229 双 case 同写
+    // downedMechBoss2 单旗 → downed_126∧!downed_125 为不可能态,读档即补 125。
+    const { world, player } = mkWorldFlags({ hardMode: true, downed_134: true, downed_126: true, downed_127: true });
+    const back = loadSave(saveGame(world, player, 0));
+    expect(back.world.flags['downed_125'], 'mechAll 门键复活').toBe(true);
+    expect(back.world.flags['downed_126'], '126 键保留(mechAny/导出 OR 口径)').toBe(true);
+    expect(back.world.flags.hardMode).toBe(true);
+  });
+
+  it('新写档键序不动:downed_125 已真(现行击败链形态)不派生 126;全无键不误触发', () => {
+    const modern = mkWorldFlags({ downed_134: true, downed_125: true, downed_127: true, hardMode: true });
+    const backA = loadSave(saveGame(modern.world, modern.player, 0));
+    expect(backA.world.flags['downed_125']).toBe(true);
+    expect(backA.world.flags['downed_126'], '125 真时无 126 派生').toBe(undefined);
+    const fresh = mkWorldFlags({});
+    const backB = loadSave(saveGame(fresh.world, fresh.player, 0));
+    expect(backB.world.flags['downed_125'] ?? false).toBe(false);
+    expect(backB.world.flags['downed_126'] ?? false).toBe(false);
+  });
+});

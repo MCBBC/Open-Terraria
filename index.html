@@ -45,10 +45,25 @@
        双保险禁用——若把 Input 监听迁到 root,须同步在此恢复 none。 */
     #game-root { position: fixed; inset: 0; }
     canvas { display: block; image-rendering: pixelated; touch-action: none; }
+    /* ★首屏静态读条(2026-09-20 用户要求):零 JS 纯 CSS——bundle(主包 MB 级)下载
+       解析完成前 index.html 落地即显示,消灭「黑屏像卡住」窗口。动画=steps() 离散
+       跳变模拟像素步进;JS 侧启动幕(#sw-boot-prime)挂载/bypass 路径时摘除
+       (main.ts removeStaticBoot),摘除时机晚于本层=覆盖无缝交接。z=9998:
+       启动幕 10000 之下、音频门 10001 之下、页面其余一切之上。 */
+    #sw-boot-static { position: fixed; inset: 0; z-index: 9998; background: #000;
+      display: flex; align-items: center; justify-content: center; }
+    #sw-boot-static .sb-bar { width: 192px; height: 16px; border: 2px solid #7d92d6;
+      background-color: #0a0e20;
+      background-image: repeating-linear-gradient(45deg,
+        #59c8ff 0, #59c8ff 4px, transparent 4px, transparent 16px);
+      background-size: 22.6274px 100%;
+      animation: sb-march .48s steps(4) infinite; }
+    @keyframes sb-march { to { background-position: 22.6274px 0; } }
   </style>
 </head>
 <body>
   <div id="game-root"></div>
+  <div id="sw-boot-static"><div class="sb-bar"></div></div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
