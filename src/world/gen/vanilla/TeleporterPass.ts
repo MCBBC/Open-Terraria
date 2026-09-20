@@ -28,7 +28,7 @@ import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_IDS, WALL_DUNGEON_SHEETS, CLOUDS_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { vanGenSolidType } from './GenSolid';
 
@@ -45,7 +45,7 @@ const PLATE_SHEET = 135;
  *  收编 data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
 const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 /** TileID.Sets.Clouds（★1457 TileID.cs:197：{189,196,460,717,718,719} 云族） */
-const CLOUD_TILES = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
+const CLOUD_TILES = CLOUDS_IDS;   // ★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS（内部 id 域,§6i）
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 上邻树干保护门
  *  ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d) */
 const IS_TREE_TRUNK = IS_A_TREE_TRUNK_IDS;

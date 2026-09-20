@@ -14,7 +14,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, TILE_MOSS_SHEETS } from '../../../data/tiles';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame, genKillTile, genRangeFrame } from './FinalCleanupPass';
 import { setBoulderSolidity } from './TrapsPass';
@@ -37,8 +37,8 @@ const WALL_DUNGEON = WALL_DUNGEON_SHEETS;
 /** Main.tileDungeon（tile 41/43/44/677-679，按 sheet id 存放）——★BJ187 收编
  *  data/tiles.ts:TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
 const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
-/** Main.tileMoss（Main.cs:6956-6996，按 sheet id 存放） */
-const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
+/** Main.tileMoss（Main.cs:7146-7187,旧注 :6956-6996 系声明行,按 sheet id 存放）——★BJ210 收编单源（§6i） */
+const TILE_MOSS = TILE_MOSS_SHEETS;
 /** TileID.Sets.Boulders（TileID.cs:195）——PlaceSmallPile 的 InvalidTile 门 */
 // ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const BOULDERS = BOULDERS_SHEETS;

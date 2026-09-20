@@ -8,7 +8,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS } from '../../../data/tiles';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 // ★MMMMMMM：巨石支受理门双态门（1456/1457 分叉实证,见 placeTrap case1 注）
@@ -136,8 +136,8 @@ function normRng(r?: RNG | null): RNG | undefined {
 let genGetGoodT = false;
 let genRemixT = false;
 let genDrunkT = false;
-/** TileID.Sets.Ices（1457 Terraria.ID/TileID.cs Ice 族表）sheet 空间副本 */
-const ICE_SHEET_SET = new Set([161, 163, 164, 200]);
+/** TileID.Sets.Ices（1457 TileID.cs:293,≡Conversion.Ice :28 同值）sheet 空间副本——★BJ210 收编单源（§6i） */
+const ICE_SHEET_SET = CONV_ICE_SHEETS;
 
 /** 多格 framed 物体表（KillTile 整块语义：破坏任一格=整块移除，见
  *  MultitileFragmentSweep 注释；Traps 的井杀/镖锚杀会波及陶罐/雕像/滚地仙人掌
@@ -455,8 +455,8 @@ function cascade3x3T(st: TileStore, x: number, y: number, rng0?: RNG, multiFallb
 }
 
 // ---- vanilla TileFrame 分派族（SSSSS 批） ----
-/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169） */
-const PREVENTS_REMOVAL = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169）——★BJ210 收编单源（§6i） */
+const PREVENTS_REMOVAL = PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS;
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161，sheet 空间）——不含 323（棕榈干单列
  *  独立臂，1457 cs:62914-62921 与树干族帧形豁免表不同）。★IIIII169：本域
  *  checkBreakabilityT 的树干帧门用（与 HalfBrickPass.TREE_TRUNK/TrackPass.
@@ -466,9 +466,9 @@ const TREE_TRUNK_T = IS_A_TREE_TRUNK_SHEETS;
 /** IsAContainer（cs:48831）：BasicDresser{88}+{470,475}+BasicChest{21,467}+Fake{441,468} */
 const CONTAINER_SHEETS = new Set([88, 470, 475, 21, 467, 441, 468]);
 
-/** Main.tileMoss（Main.cs tileMoss[x]=true 全 11 项）与 TileID.Sets.tileMossBrick（:309） */
-const TILE_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
-const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+/** Main.tileMoss（Main.cs tileMoss[x]=true 全 11 项,:7146-7187）与 TileID.Sets.tileMossBrick（:309）——★BJ210 收编单源（§6i） */
+const TILE_MOSS = TILE_MOSS_SHEETS;
+const TILE_MOSS_BRICK = MOSS_BRICK_SHEETS;
 /** fossilBreak（WorldGen 静态位，cs:63528 再入闸） */
 let fossilBreakT = false;
 const isLockedDoorT = (st: TileStore, i: number): boolean =>

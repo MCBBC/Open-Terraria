@@ -8,7 +8,7 @@
 //   已定型，只做"石→苔藓"点状替换，不与 caves-checkpoint 覆盖链冲突
 import type { RNG } from '../../../core/rng';
 import type { TileStore } from '../../TileStore';
-import { TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_IDS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_DUNGEON_IDS, TILE_MOSS_SHEETS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { spreadGrass } from './Spread';
@@ -35,8 +35,8 @@ const NEON_FORBIDDEN_NTB_DS = idsByVanillaSheet(70, 367, 368, 161, 147, 396, 397
  *  ——★BJ187 收编 data/tiles.ts:TILE_DUNGEON_IDS 单源（旧 idsByVanillaSheet 平移
  *  副本逐值全等已对拍） */
 const DUNGEON_TILES = TILE_DUNGEON_IDS;
-/** Main.tileMoss（Main.cs:6956-6996，按 sheet id）——尾段 SpreadGrass 的苔藓块判定 */
-const MOSS_SHEETS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
+/** Main.tileMoss（Main.cs:7146-7187,旧注 :6956-6996 系声明行,按 sheet id）——尾段 SpreadGrass 的苔藓块判定——★BJ210 收编单源（§6i） */
+const MOSS_SHEETS = TILE_MOSS_SHEETS;
 const SHIMMER_SAFETY = 150;            // shimmerSafetyDistance（WorldGen.cs:4104）
 
 /** WorldGen.SolidTile（cs:70155-70172）1:1：active && tileSolid && !tileSolidTop &&

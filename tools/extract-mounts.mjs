@@ -13,17 +13,49 @@
 // 贴图可得性：terraria-assets/Images 下查 Mount_*.png / Rudolph_N.png / Extra_N.png；
 // 不可得（QueenSlime 走 RenderTarget / 部分新坐骑 Extra 缺表）登记 textureOk=false，
 // 运行侧回退色块近似渲染。
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const MOUNT_ID = join(ROOT, 'Terarria1457', 'Terraria.ID', 'MountID.cs');
-const MOUNT = join(ROOT, 'Terarria1457', 'Terraria', 'Mount.cs');
-const ITEM = join(ROOT, 'Terarria1457', 'Terraria', 'Item.cs');
-const BUFF_ID = join(ROOT, 'Terarria1457', 'Terraria.ID', 'BuffID.cs');
+// ================= ★BJ215 era guard（四要素习语见 docs/era-guard-family.md） =================
+// ① SW_ITEM_VER 缺省 1457（白名单单值 1457——1458 MountID sets 面有真差
+//   DoesNotOverrideWings（BJ215 实证）,语义收窄不放行;未来版本逐值定谳后扩白名单）;
+// ② 输出通道三分离：缺省=干跑对拍零写盘（重产 vs 现库逐字节对拍——零漂移 exit 0/
+//   漂移 exit 1+物证,B-form;BJ215 定谳 bare 重产=现库逐字节零漂移）/ SW_OUT=<dir> 沙箱 /
+//   --write-real 逃生门;双旗互斥;SW_ITEM_VER≠1457 禁写真库;
+// ③ 锚 fail-loud：fnBody 签名未找到即 throw（原实现静默返空体=「表与源码失配还全绿」
+//   反模式,本刀改硬炸;playerYOffsets 未解析语句原有登记面保留）;
+// ④ 判别力自证：tests/extract-mounts-expert-era-guard.test.ts（变异:摘干跑门=静默写库;
+//   毒化 Initialize 签名=fail-loud）。注：本器读侧无探测注入面,g1 不适用。
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457']);
+if (!VER_ALLOWED.has(VER) || !existsSync(join(ROOT, `Terarria${VER}`, 'Terraria.ID', 'MountID.cs'))) {
+  console.error(`[extract-mounts] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1458') console.error('  1458 MountID sets 面有真差（DoesNotOverrideWings,BJ215 实证）——未逐值定谳前不放行;现库 vanilla-mounts.json 锚 1457。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const SW_OUT = process.env.SW_OUT;
+if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+  console.error('[extract-mounts] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  console.error('  处置：沙箱对拍用 SW_OUT=<dir>；确认定谳后更新现库用 --write-real（且 SW_ITEM_VER=1457）。');
+  process.exit(1);
+}
+if (WRITE_REAL && VER !== '1457') {
+  console.error(`[extract-mounts] 拒绝写真库：SW_ITEM_VER=${VER}≠1457（旧基线重放禁写 game/src/data/vanilla-mounts.json）。`);
+  console.error('  处置：重放对拍请走 SW_OUT 沙箱；确要回写 1457 终值请去掉 SW_ITEM_VER 显式注入（缺省即 1457）。');
+  process.exit(1);
+}
+const MOUNT_ID = join(ROOT, `Terarria${VER}`, 'Terraria.ID', 'MountID.cs');
+const MOUNT = join(ROOT, `Terarria${VER}`, 'Terraria', 'Mount.cs');
+const ITEM = join(ROOT, `Terarria${VER}`, 'Terraria', 'Item.cs');
+const BUFF_ID = join(ROOT, `Terarria${VER}`, 'Terraria.ID', 'BuffID.cs');
 const IMG = join(ROOT, 'terraria-assets', 'Images');
-const OUT = join(ROOT, 'game', 'src', 'data', 'vanilla-mounts.json');
+const LIVE_JSON = join(ROOT, 'game', 'src', 'data', 'vanilla-mounts.json');
+// ★M1 变异锚:干跑臂 null(守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面)
+const OUT = WRITE_REAL ? LIVE_JSON
+  : (SW_OUT !== undefined && SW_OUT !== '' ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-mounts.json` : null);
 
 const mountIdSrc = readFileSync(MOUNT_ID, 'utf8');
 const mountSrc = readFileSync(MOUNT, 'utf8');
@@ -55,14 +87,14 @@ for (const m of mountIdSrc.matchAll(/^\t+public static (bool|int)\[\] (\w+) = Fa
 // ---- Mount.cs Initialize() / SetAs* 助手体切块 ----
 const fnBody = (src, sig) => {
   const start = src.indexOf(sig);
-  if (start < 0) return '';
+  if (start < 0) throw new Error(`[extract-mounts] 锚点失配: ${sig} 未找到（源码漂移,禁止静默空体）`);
   const open = src.indexOf('{', start);
   let depth = 0;
   for (let i = open; i < src.length; i++) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(open + 1, i); }
   }
-  return '';
+  throw new Error(`[extract-mounts] 锚点失配: ${sig} 花括号不配平（源码漂移）`);
 };
 const initBody = fnBody(mountSrc, 'public static void Initialize()');
 const helpers = {
@@ -372,7 +404,8 @@ const buffMount = {};
 }
 
 // ---- ★1457 Trusty 坐骑 64/65 overlay（2026-08-23 Palworld 坐骑批,重生成保留）----
-// 主源 = 1456（MountID.Count=64,无 Trusty 族）。1457 新增两坐骑：
+// 主源已锚 1457（BJ183 基准对齐/BJ215 落闸;MountID.cs 原生即含 Trusty 族）——
+// 下表保留=重产稳定性钉值（原生解析漂移时兜底,重生成保留）。原 1456 时代两坐骑：
 //   Terraria.ID/MountID.cs:162 `TrustyChillet = 64` / :164 `TrustyChilletIgnis = 65`、
 //   :166 Count = 66；Mount.cs:2567-2572 `SetAsChillet(mountData, 391, Extra[301], hardmode:true)`
 //   → mounts[64]、`SetAsChillet(mountData, 392, Extra[302], hardmode:true)` → mounts[65]。
@@ -460,7 +493,39 @@ for (const [id, d] of Object.entries(mounts)) {
 }
 
 const out = { count: mountCount, names, sets, mounts, itemMount, buffMount, textureOk };
-writeFileSync(OUT, JSON.stringify(out, null, 1) + '\n');
+// ================= ★BJ215 era guard：干跑对拍 / 沙箱 / --write-real（头注见上） =================
+const FRESH = JSON.stringify(out, null, 1) + '\n';
+if (!OUT) {
+  // 缺省干跑对拍（零写盘,B-form）
+  const liveRaw = existsSync(LIVE_JSON) ? readFileSync(LIVE_JSON, 'utf8') : null;
+  if (!liveRaw) {
+    console.error('[extract-mounts] 干跑（零写盘）：现库缺 vanilla-mounts.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+  } else if (liveRaw === FRESH) {
+    console.error('[extract-mounts] 干跑对拍：重产与现库逐字节零漂移（零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+  } else {
+    let live = null;
+    try { live = JSON.parse(liveRaw); } catch { /* 坏损:物证落空 */ }
+    console.error('[extract-mounts] 干跑对拍：漂移（零写盘 exit 1）。');
+    if (live) {
+      const driftSecs = ['count', 'names', 'sets', 'mounts', 'itemMount', 'buffMount', 'textureOk']
+        .filter((sec) => JSON.stringify(live[sec]) !== JSON.stringify(out[sec]));
+      console.error(`  漂移节: ${driftSecs.join(', ') || '(值域)'}`);
+      const liveOnlyMounts = live.mounts ? Object.keys(live.mounts).filter((k) => out.mounts[k] === undefined) : [];
+      if (liveOnlyMounts.length) console.error(`  mounts 现库 ${liveOnlyMounts.length} 键重产盖不住: ${liveOnlyMounts.slice(0, 10).join(', ')}`);
+      for (const sec of driftSecs.filter((s) => s !== 'count' && s !== 'mounts').slice(0, 3)) {
+        const keys = [...new Set([...Object.keys(live[sec] ?? {}), ...Object.keys(out[sec] ?? {})])]
+          .filter((k) => JSON.stringify((live[sec] ?? {})[k]) !== JSON.stringify((out[sec] ?? {})[k]));
+        console.error(`  ${sec} 差异键 ${keys.length}: ${keys.slice(0, 6).join(', ')}`);
+      }
+    }
+    console.error('  正常更新流：定谳漂移源后 --write-real 显式写盘（SW_ITEM_VER 缺省 1457）。');
+    process.exit(1);
+  }
+} else {
+  mkdirSync(OUT.slice(0, Math.max(OUT.lastIndexOf('/'), 0)) || '.', { recursive: true });
+  writeFileSync(OUT, FRESH);
+  console.error(`[extract-mounts] 已写 ${OUT}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}，SW_ITEM_VER=${VER}）`);
+}
 const okN = Object.values(textureOk).filter(Boolean).length;
 const total = Object.keys(mounts).length;
 console.log(`vanilla-mounts.json: ${total}/${mountCount} mounts, ${okN} 有主贴图, ` +

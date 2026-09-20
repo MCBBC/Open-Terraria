@@ -21,7 +21,7 @@
 // 我们的 tile id 与原版 tile id 通过 TILE_DEFS[t].vanilla.sheet 桥接（sheet = 原版 Tiles_N 表 id）；
 // 物品原版 id 通过 ITEM_DEFS[i].vid 或 key 前缀 vi_(\d+)_ 反解。
 import type { ItemDef } from '../data/items';
-import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, BREAKABLE_WHEN_PLACING_SHEETS, TILE_TABLE_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, COMMON_SAPLING_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TS } from '../world/TileStore';
 import { WALL_HOUSE } from '../world/Housing';
@@ -44,8 +44,8 @@ const IGNORE_SMART_AXE = new Set([488]);
 // ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const IS_A_TREE_TRUNK = IS_A_TREE_TRUNK_SHEETS;
 
-/** TileID.cs:173 CommonSapling（树苗族：普通 20 / 宝石 590 / 樱花 595 / 柳树 615） */
-const COMMON_SAPLING = new Set([20, 590, 595, 615]);
+/** TileID.cs:173 CommonSapling（树苗族：普通 20 / 宝石 590 / 樱花 595 / 柳树 615）——★BJ210 收编单源（§6i） */
+const COMMON_SAPLING = COMMON_SAPLING_SHEETS;
 
 /** TileID.cs:195 Boulders（巨石族） */
 // ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)

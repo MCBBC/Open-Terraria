@@ -35,7 +35,7 @@ import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS, CONV_SANDSTONE_IDS, CONV_HARDENED_SAND_IDS } from '../../../data/tiles';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType } from './GenSolid';
@@ -53,9 +53,10 @@ export function sheetId(sheet: number): number {
 
 const NON_SOLID_SAVE_SLOPES = idsByVanillaSheet(131, 351, 336, 340, 341, 342, 343, 344);
 const SLOWLY_DIES_IN_WATER = idsByVanillaSheet(3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 590, 595, 615, 637);
-/** TileID.Sets.Conversion.Sandstone/HardenedSand(TileID.cs:32-34) */
-const CONV_SANDSTONE = idsByVanillaSheet(396, 400, 403, 401);
-const CONV_HARDENED_SAND = idsByVanillaSheet(397, 398, 402, 399);
+/** TileID.Sets.Conversion.Sandstone/HardenedSand(TileID.cs:34/:32)——★BJ210 收编单源
+ *  data/tiles.ts:CONV_SANDSTONE_IDS/CONV_HARDENED_SAND_IDS（内部 id 域,§6i） */
+const CONV_SANDSTONE = CONV_SANDSTONE_IDS;
+const CONV_HARDENED_SAND = CONV_HARDENED_SAND_IDS;
 
 const BUBBLE = sheetId(379);            // ①/⑫ tileSolid[379] 翻转对象(气泡块,已并入 GenSolid)
 const DRIP_WATER = sheetId(373);

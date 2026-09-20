@@ -133,7 +133,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -951,7 +951,8 @@ function killTileBreakDustAmount(sheet: number, frameX: number): number {
 // tileHammer→tileAxe→pick（Player.cs:46052-46166），镐/斧入本族=无动作；PickTile
 // 直调通道（钻头坐骑 Mount.cs:3115/挖地龟 Projectile.cs:39479）无此门=原版可钻碎。
 // Sets.Clouds（TileID.cs:197 Factory.CreateBoolSet）：云块族——镐伤 ×2 分档（GetPickaxeDamage:54552）
-export const TILE_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
+// ★BJ210 收编单源 data/tiles.ts:CLOUDS_SHEETS（转出口别名,§6i）
+export const TILE_CLOUD_SHEETS: ReadonlySet<number> = CLOUDS_SHEETS;
 // tileRope（Main.cs:9452-9460 全表九件）：绳/链/彩带族——镐=100 一击（GetPickaxeDamage:54624）；
 // 504 神秘蛇绳在表内但 PickTile:54401 对其先早退（手持镐到不了 =100 支），
 // tileHitDamage 内有 dmg=0 特例承接该语义
@@ -1308,15 +1309,10 @@ const ALCH_GROUND_RUNTIME: Record<number, Set<number>> = {
 const ALCH_PLACE_SHEETS = new Set([82, 83, 84]);
 /** CheckSunflower 地基草族（:53797-53802 {2,477,492,109,60,633}） */
 const SUNFLOWER_GROUND_SHEETS = new Set([2, 477, 492, 109, 60, 633]);
-/** TileID.Sets.Conversion 族（TileID.cs:18-40,1457 终值）——decor 支撑链地基测试用 */
-const CONV_SAND_SHEETS = new Set([53, 112, 116, 234]);            // :30 Conversion.Sand
-const CONV_STONE_SHEETS = new Set([1, 25, 117, 203]);             // :26 Conversion.Stone
-const CONV_MOSS_SHEETS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);   // :38
-const CONV_MOSSBRICK_SHEETS = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]); // :40
-const CONV_HARDENED_SAND_SHEETS = new Set([397, 398, 402, 399]);  // :32
-const CONV_SANDSTONE_SHEETS = new Set([396, 400, 403, 401]);      // :34
-const CONV_SNOW_SHEETS = new Set([147]);                          // :24
-const CONV_ICE_SHEETS = new Set([161, 163, 164, 200]);            // :28
+/** TileID.Sets.Conversion 族（TileID.cs:14-40,1457 终值）——decor 支撑链地基测试用。
+ *  ★BJ210 收编单源 data/tiles.ts（同名 sheet 域表,§6i）;Moss/MossBrick 留语义别名。 */
+const CONV_MOSS_SHEETS = MOSS_SHEETS;                              // :38 Conversion.Moss
+const CONV_MOSSBRICK_SHEETS = MOSS_BRICK_SHEETS;                   // :40 Conversion.MossBrick
 /** GemTreeGroundTest（WorldGen.cs:30585）= Stone∪Moss 转换族 */
 const GEM_TREE_GROUND_SHEETS = new Set([...CONV_STONE_SHEETS, ...CONV_MOSS_SHEETS]);
 /** VanityTreeGroundTest（:30598）= Grass 转换族去 23/199（TileID.cs:18 Grass） */
@@ -1337,7 +1333,7 @@ const sheetAt = (st: { get(x: number, y: number): number }, x: number, y: number
  *  且异型时拒——树干族（IsATreeTrunk TileID.cs:161）侧枝帧放行
  *  （fx==66·fy 0-44 / fx==88·fy 66-110 / fy≥198），323 棕榈 fx 66/220 拒。
  *  液体合块侧原版本走失败回退（KillTile+PlaceTile forced），行为已等价，不接 */
-const PREVENTS_TILE_REPLACE_SHEETS = new Set([5, 323, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+const PREVENTS_TILE_REPLACE_SHEETS = PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS;   // ★BJ210 收编单源（面二三名同值案,§6i）
 function isTileReplaceable(st: Game['world']['store'], x: number, y: number): boolean {
   if (y < 1) return true;                       // :62828 原版 y>=1 才查上邻
   const i = st.idx(x, y);
@@ -1589,7 +1585,7 @@ const NO_ATTACH_SHEETS = new Set<number>([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 
 const LIVING_FIRE_SHEETS = new Set<number>([336, 340, 341, 342, 343, 344]);
 const BASIC_CHEST_SHEETS = new Set<number>([21, 467]);
 const ROPE_ITEM_VIDS = new Set<number>([85, 965, 2996, 3077, 3078]);
-const CONVERSION_GRASS_SHEETS = new Set<number>([2, 23, 199, 109, 477, 492]);
+const CONVERSION_GRASS_SHEETS = CONV_GRASS_SHEETS;   // :18 Conversion.Grass——★BJ210 收编单源（§6i）
 const IGNORES_REPLACEMENT_DROP_CHECK_SHEETS = new Set<number>([158, 30]);
 /** ReplaceTile_IsValidSolid（WorldGen.cs:63247-63256）：tileSolid && !tileSolidTop
  *  && (tileRope ? true : !tileFrameImportant)。本仓 TileDef.solid=参与碰撞域

@@ -24,7 +24,7 @@
 //  与 errorWorld 均为 1457 SecretSeed **哈希注册**（无公开文本种子），本仓 SeedEasterEggs
 //  仅登记旗标位（恒 false）——文本/哈希触发链归秘密种子批（批 F）。终扫的落砂静态化
 //  部分不依赖旗标，普通世界照跑。
-import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CRACKED_BRICKS_SHEETS, CLOUDS_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { TileStore } from '../../TileStore';
 import type { SeedFlags } from '../SeedEasterEggs';
@@ -58,8 +58,9 @@ const IS_TREE_TRUNK = IS_A_TREE_TRUNK_SHEETS;
  *  TileCleanupPass 同表副本（同源惯例,不 import 防耦合） */
 const UP_PROTECT_FAMILY = new Set([21, 26, 72, 77, 88, 467, 488]);
 
-/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（1457 TileID.cs:169）——CheckTileBreakability 消费 */
-const PREVENTS_REMOVAL_FSC = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（1457 TileID.cs:169）——CheckTileBreakability 消费
+ *  ★BJ210 收编单源 data/tiles.ts:PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS（sheet 域,逐值对拍 17≡17,§6i） */
+const PREVENTS_REMOVAL_FSC = PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS;
 /** WorldGen.IsAContainer（cs:49237）= BasicDresser{88} ∪ {470,475} ∪ BasicChest{21,467}
  *  ∪ BasicChestFake{441,468}（TileID.cs:315-319） */
 const IS_A_CONTAINER_FSC = new Set([21, 467, 88, 441, 468, 470, 475]);
@@ -330,8 +331,8 @@ function doPaintEverythingNegativeSingleTile(st: TileStore, x: number, y: number
   const sh = sheetOf(st.type[i]!);
   const DUNGEON_TILES = TILE_DUNGEON_SHEETS;   // Main.tileDungeon（★BJ187 单源 data/tiles.ts）
   const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;   // Main.wallDungeon（★BJ187 单源）
-  const CRACKED = new Set([481, 482, 483]);
-  const CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
+  const CRACKED = CRACKED_BRICKS_SHEETS;   // ★BJ210 收编单源（§6i）
+  const CLOUDS = CLOUDS_SHEETS;            // ★BJ210 收编单源（§6i）
   if (st.flags[i] && DUNGEON_TILES.has(sh)) st.paint[i] = 30;
   if (st.flags[i] && CRACKED.has(sh)) st.paint[i] = 30;
   if (DUNGEON_WALLS.has(st.wall[i])) {

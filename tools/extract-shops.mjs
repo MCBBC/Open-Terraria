@@ -1,8 +1,24 @@
 // 从反编译源码提取:①物品 value(铜币价) ②各 NPC 商店商品表(Chest.SetupShop case)
-// 数据源:Terarria1456 Item.cs SetDefaults1-5(switch-case 块) + Chest.cs SetupShop + NPCInteractions.cs Shop() 映射
-import { readFileSync, writeFileSync } from 'fs';
+// 数据源:Terarria1457 Item.cs SetDefaults1-5(switch-case 块) + Chest.cs SetupShop + NPCInteractions.cs Shop() 映射
+//
+// ★era guard（BJ215 落闸,四要素习语见 docs/era-guard-family.md;与 extract-travelshop
+// 同构守卫）：①SW_TREE 缺省 1457（白名单 1456/1457）;②输出通道三分离——缺省=干跑对拍
+// 零写盘（重产 vs 现库动态 diff:「现库有而重产无」的 values 键/商店条目非空=洗库预警
+// exit 1+差异清单）/--out <path>=显式写（沙箱）/--write-real=写真库;双旗互斥;--write-real
+// 非纯增量拒+差异清单,强推须 --force-full --overwrite-append-era 双旗;③缺省 OUT_PATH
+// 锚定脚本自身位置（import.meta.url 派生绝对路径,修 cwd footgun——旧实现相对路径
+// 'src/data/...' 从非 game/ 目录跑=写错位置）;④锚 fail-loud（SetupShop 签名/基数护栏）;
+// ⑤判别力自证 tests/extract-shops-era-guard.test.ts。BJ215 定谳：values 5334 与现库零
+// 漂移;shops 十余家现库领先（richer cond 词表 tenthNotBees/windyDay/notTheBees/has:N/
+// downed_4/downed_50/zoneGlowshroom/downedClown/getGoodWorld/anyNpc:N/golfer500/life400/
+// mana200/coins1pt/zoneBeach/downed_398/downed_657/moonPhase4 等,本器 parseGate 不识=
+// 整条丢弃）——裸跑重产=整批回退（BJ183 登记债「数据面领先差=另一形态」）。
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-// SW_TREE（★BJ183 2026-09-20 勘误:缺省已系 Terarria1457,旧注"缺省 1456"系笔误）;配 --out 落 /tmp（禁直接覆盖现库）
+const GAME_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// SW_TREE（★BJ183 2026-09-20 勘误:缺省已系 Terarria1457,旧注"缺省 1456"系笔误）
 const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
 const SRC = `/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria`;
@@ -379,6 +395,7 @@ function orOf(segs) {
 const shops = {};
 {
   const start = chestSrc.indexOf('public void SetupShop(int type)');
+  if (start < 0) throw new Error('[extract-shops] 锚点失配: SetupShop(int type) 签名未找到（Chest.cs 漂移,禁止静默空扫）');
   const body = chestSrc.slice(start);
   // 先按括号深度找出顶层 case(depth==2:方法体1 + switch体2)
   const lines = body.split('\n');
@@ -523,9 +540,75 @@ for (const [npcId, slot] of Object.entries(SHOP_SLOT)) {
     ...(s.currency !== undefined ? { currency: s.currency } : {}),
   }));
 }
-const outIdx = process.argv.indexOf('--out');
-const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : 'src/data/vanilla-shopstock.json';
-writeFileSync(OUT_PATH, JSON.stringify({ values, shops: out, src: TREE }));
+// ================= ★BJ215 era guard：干跑对拍 / --out 沙箱 / --write-real（头注见上） =================
 const total = Object.values(out).reduce((a, s) => a + s.length, 0);
+if (Object.keys(values).length < 5000 || total < 250) {
+  throw new Error(`[extract-shops] 锚点失配: 基数护栏 values=${Object.keys(values).length}(<5000?) stock=${total}(<250?)——解析面漂移,禁止静默半表`);
+}
+const FRESH = JSON.stringify({ values, shops: out, src: TREE });
+const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');
+const outIdx = process.argv.indexOf('--out');
+// ★M1 变异锚:干跑臂 null(守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面)
+const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : null;
+const WRITE_REAL = process.argv.includes('--write-real');
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+if (OUT_PATH && WRITE_REAL) {
+  console.error('[extract-shops] 拒绝运行：--out 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  console.error('  处置：沙箱对拍用 --out <path>；确认定谳后更新现库用 --write-real。');
+  process.exit(1);
+}
+/** 现库 vs 重产动态 diff：values 缺键/值漂移 + 每店条目多重集差（键=id,值=整条 JSON）。 */
+function washOf(liveRaw) {
+  let live;
+  try { live = JSON.parse(liveRaw); } catch { return null; } // 坏损:不拦
+  const wash = { valuesMissing: [], valuesDrift: [], shops: {} };
+  const lv = live.values ?? {};
+  for (const [k, v] of Object.entries(lv)) {
+    if (values[k] === undefined) wash.valuesMissing.push(k);
+    else if (values[k] !== v) wash.valuesDrift.push(`${k}:${v}→${values[k]}`);
+  }
+  const sig = (e) => JSON.stringify(e);
+  for (const [npc, stock] of Object.entries(live.shops ?? {})) {
+    const freshSet = new Set((out[npc] ?? []).map(sig));
+    const liveOnly = (stock ?? []).filter((e) => !freshSet.has(sig(e)));
+    if (liveOnly.length) wash.shops[npc] = { n: liveOnly.length, samples: liveOnly.slice(0, 2).map(sig) };
+  }
+  return wash;
+}
+const washEmpty = (w) => !w || (w.valuesMissing.length === 0 && w.valuesDrift.length === 0 && Object.keys(w.shops).length === 0);
+const washReport = (w) => {
+  console.error('  物证（现库领先面——重产整批回退面/差异清单）：');
+  if (w.valuesMissing.length) console.error(`    values 现库 ${w.valuesMissing.length} 键重产盖不住: ${w.valuesMissing.slice(0, 8).join(', ')}${w.valuesMissing.length > 8 ? '…' : ''}`);
+  if (w.valuesDrift.length) console.error(`    values 值漂移 ${w.valuesDrift.length} 键: ${w.valuesDrift.slice(0, 4).join(' | ')}`);
+  for (const [npc, s] of Object.entries(w.shops)) console.error(`    npc ${npc}: 现库 ${s.n} 条重产盖不住（如 ${s.samples.join(' | ')}）`);
+};
+const liveRaw = existsSync(LIVE_JSON) ? readFileSync(LIVE_JSON, 'utf8') : null;
+const wash = liveRaw === null ? null : washOf(liveRaw);
+if (OUT_PATH || WRITE_REAL) {
+  if (WRITE_REAL) {
+    if (wash && !washEmpty(wash) && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+      console.error('[extract-shops] 拒绝 --write-real：重产 diff 非纯增量（现库领先面非空）——禁止静默覆盖领先条目（BJ183 登记债:重产前先恢复 parseGate 词表）。');
+      washReport(wash);
+      console.error('  确需原地强推：--force-full --overwrite-append-era 双旗（单旗仍拒）。');
+      process.exit(1);
+    }
+    if (wash && !washEmpty(wash)) console.error('[extract-shops] 双旗强推：静默覆盖预警已确认——现库领先条目将被整批回退（责任在操作者定谳）。');
+  }
+  writeFileSync(WRITE_REAL ? LIVE_JSON : OUT_PATH, FRESH);
+  console.error(`[extract-shops] 已写 ${WRITE_REAL ? LIVE_JSON : OUT_PATH}（${WRITE_REAL ? '--write-real 真库' : '--out 显式路径'}）`);
+} else {
+  // 缺省干跑对拍（零写盘）
+  if (!liveRaw) {
+    console.error('[extract-shops] 干跑（零写盘）：现库缺 vanilla-shopstock.json,跳过对拍。写盘须显式 --out <path> 或 --write-real。');
+  } else if (wash && !washEmpty(wash)) {
+    console.error('[extract-shops] 干跑对拍：检测到「现库有而重产无」的条目=洗库预警（裸跑重产=整批回退）——零写盘。');
+    washReport(wash);
+    console.error('  活通道：重产前先恢复 parseGate 词表（BJ183 登记债）；沙箱试验用 --out <path>。');
+    process.exit(1);
+  } else {
+    console.error('[extract-shops] 干跑对拍：重产盖住现库（零写盘）。写盘须显式 --out <path> 或 --write-real。');
+  }
+}
 console.log('item values:', Object.keys(values).length, '| stock entries:', total);
 for (const [id, s] of Object.entries(out)) console.log(`  npc ${id}: ${s.length} items, priced: ${s.filter((x) => x.price != null).length}`);

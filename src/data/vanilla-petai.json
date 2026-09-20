@@ -1,6 +1,6 @@
 {
  "meta": {
-  "source": "Terarria1456/Terraria/Projectile.cs",
+  "source": "Terarria1457/Terraria/Projectile.cs",
   "generatedBy": "tools/extract-petai.mjs",
   "petProjCount": 79,
   "familyCounts": {
@@ -9,34 +9,6 @@
    "fly": 14
   },
   "fallback": "hover-legacy",
-  "methodLines": {
-   "AI_026": 55166,
-   "AI_067_FreakingPirates": 46471,
-   "AI_144_DD2Pet": 66728,
-   "aiStyle_11": 22684,
-   "aiStyle_90": 31320,
-   "aiStyle_124": 34023
-  },
-  "paramLines": {
-   "idleRange": 55178,
-   "accel": 59104,
-   "maxSpeed": 59105,
-   "speedGroup": 59141,
-   "catchUpRange": 57320,
-   "flyAccel": 57450,
-   "landRange": 57451,
-   "flySpeed": 57513,
-   "jumpLadder": [
-    59299,
-    59303,
-    59307,
-    59311,
-    59315
-   ],
-   "gravity": 59421,
-   "teleport": 57374,
-   "catchUpVert": 57379
-  },
   "swFx48Ext": {
    "note": "1.4.5 boss 宠 17 条目（1457 Projectile.cs 锚,Item.cs:39417-39440 4797-4817→proj 881-901）; AI_174_MultisegmentPet(:46177) 蠕虫多头三型 883/887/893 不入表→PetFollower legacy 回退（登记债）",
    "exemptAI174": [
@@ -44,6 +16,34 @@
     887,
     893
    ]
+  },
+  "methodLines": {
+   "AI_026": 59085,
+   "AI_067_FreakingPirates": 50014,
+   "AI_144_DD2Pet": 71132,
+   "aiStyle_11": 24650,
+   "aiStyle_90": 32968,
+   "aiStyle_124": 35618
+  },
+  "paramLines": {
+   "idleRange": 59097,
+   "accel": 63062,
+   "maxSpeed": 63063,
+   "speedGroup": 63099,
+   "catchUpRange": 61261,
+   "flyAccel": 61391,
+   "landRange": 61392,
+   "flySpeed": 61454,
+   "jumpLadder": [
+    63257,
+    63261,
+    63265,
+    63269,
+    63273
+   ],
+   "gravity": 63379,
+   "teleport": 61315,
+   "catchUpVert": 61320
   }
  },
  "defaults": {
@@ -81,9 +81,9 @@
    "farAccel": 0.2,
    "faceFrom": "move",
    "flipSign": -1,
-   "teleportLine": 56473,
-   "hoverXLine": 56498,
-   "hoverYLine": 56499
+   "teleportLine": 60414,
+   "hoverXLine": 60439,
+   "hoverYLine": 60440
   },
   "hover": {
    "snap": 4,
@@ -107,7 +107,7 @@
    "teleport": 800,
    "faceFrom": "none",
    "flipSign": 0,
-   "line": 22756,
+   "line": 24722,
    "frames": 1
   },
   "111": {
@@ -157,7 +157,7 @@
    "hoverY": 0,
    "speed": 7,
    "accel": 0.1,
-   "line": 56163,
+   "line": 60104,
    "farAccel": 0.2,
    "brakeMode": "clamp",
    "frames": 2
@@ -175,7 +175,7 @@
    "hoverY": 0,
    "speed": 3,
    "accel": 0.1,
-   "line": 56290,
+   "line": 60231,
    "farSpeed": 14,
    "farDist": 500,
    "farAccel": 0.2,
@@ -211,7 +211,7 @@
    "hoverY": -60,
    "speed": 4,
    "accel": 0.1,
-   "line": 57000,
+   "line": 60941,
    "farSpeed": 10,
    "farDist": 350,
    "farAccel": 0.2,
@@ -264,7 +264,7 @@
    "hoverY": -60,
    "speed": 5,
    "accel": 0.2,
-   "line": 56833,
+   "line": 60774,
    "brakeMode": "direct",
    "frames": 10
   },
@@ -385,7 +385,7 @@
    "teleport": 1000,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 31370,
+   "line": 33018,
    "frames": 8
   },
   "499": {
@@ -429,7 +429,7 @@
    "moveRate": 4,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 34098,
+   "line": 35693,
    "frames": 4
   },
   "653": {
@@ -465,7 +465,7 @@
    "moveRate": 4,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 66739,
+   "line": 71143,
    "frames": 3
   },
   "702": {
@@ -483,7 +483,7 @@
    "bobPeriod": 120,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 66748,
+   "line": 71152,
    "frames": 4
   },
   "703": {
@@ -501,7 +501,7 @@
    "bobPeriod": 60,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 66784,
+   "line": 71188,
    "frames": 8,
    "frameTo": 4
   },
@@ -518,7 +518,7 @@
    "moveRate": 4,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 66801,
+   "line": 71205,
    "frames": 1
   },
   "765": {
@@ -986,7 +986,7 @@
    "moveRate": 4,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 34137,
+   "line": 35732,
    "frames": 12
   },
   "958": {
@@ -1138,7 +1138,7 @@
    "frameTo": 2,
    "faceFrom": "player",
    "flipSign": -1,
-   "line": 66853,
+   "line": 71257,
    "frames": 16
   },
   "1056": {

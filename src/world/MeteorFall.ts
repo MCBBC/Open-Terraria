@@ -9,7 +9,7 @@
 //   上限（地表以上 37 块 > 400×图宽/4200 → 拒绝）。
 //   ★本文件为纯数据操作（setTileSilent 直写）——调用方负责 chunk markDirtyArea。
 import { TILE } from '../core/constants';
-import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, GETS_DESTROYED_FOR_METEORS_SHEETS } from '../data/tiles';
 // SW-FX12：COAT_BLOCK_MASK 为运行时常量（陨石清涂层位），不再是纯类型导入
 import { TileStore } from './TileStore';
 
@@ -36,8 +36,8 @@ const next = (h: MeteorHost, a: number, b: number) => h.int(a, b - 1);
 /** TileID.Sets.Clouds（TileID.cs:197）+ dropMeteor 特例 202（:6295-6296） */
 const CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719, 202]);
 /** GetsDestroyedForMeteors（TileID.cs:165）：树 5/荆棘 32,352/宝石树 583-589/
- *  596,616,634 树族——清理环内 KillTile（stopDrops=true 不掉落） */
-export const DESTROY_SHEETS = new Set([5, 32, 352, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+ *  596,616,634 树族——清理环内 KillTile（stopDrops=true 不掉落）——★BJ210 收编单源（§6i） */
+export const DESTROY_SHEETS = GETS_DESTROYED_FOR_METEORS_SHEETS;
 /** 保护块：BasicChest{21,467} + tileDungeon 砖{41,43,44} + meteor 开关表
  *  （:6357-6376：祭坛 26/226/模特 470/帽架 475/假人 488/597） */
 //  2026-08-13 补 677(Main.cs:7944 tileDungeon 第四成员——远古蓝砖,审计补缺)

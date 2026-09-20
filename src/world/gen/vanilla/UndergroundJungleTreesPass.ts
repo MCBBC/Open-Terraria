@@ -19,7 +19,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, COMMON_SAPLING_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid } from './GenSolid';
 import { genRangeFrame } from './FinalCleanupPass';
@@ -35,7 +35,7 @@ const sid = (sheet: number): number => SHEET_TO_INTERNAL.get(sheet) ?? 0;
 const TREE = sid(5);                                  // Tiles_5（树干）
 const JUNGLE_GRASS = idsByVanillaSheet(60);           // 基座唯一适配类型（cs:31009）
 /** EmptyTileCheck 植物白名单（cs:31665-31695：CommonSapling 例外 + switch 白名单） */
-const SAPLING_OK = idsByVanillaSheet(20, 590, 595, 615); // TileID.Sets.CommonSapling
+const SAPLING_OK = COMMON_SAPLING_IDS; // TileID.Sets.CommonSapling——★BJ210 收编单源（内部 id 域,§6i）
 const PLANT_OK = idsByVanillaSheet(
   3, 24, 32, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 184, 201, 233, 352, 485, 529, 530, 637, 655);
 /** 根部方向适配类型（cs:31279/31283：草 2/腐化草 23/丛林草 60/蘑菇草 109/发光蘑菇草 147） */

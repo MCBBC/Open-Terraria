@@ -9,7 +9,7 @@ import type { GenState } from './GenState';
 import { activeSecretSeedCountOf, errorWorldAdjustmentOf } from '../SeedEasterEggs';   // ★IIIII228 多秘 ewAdjust
 import { idsByVanillaSheet } from './TileRunner';
 import { genRangeFrame } from './FinalCleanupPass';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, CONV_SAND_IDS, COMMON_SAPLING_SHEETS, COMMON_SAPLING_IDS } from '../../../data/tiles';
 
 const TREE = TILE_BY_KEY['tree']!;              // tile 5
 const PALM = TILE_BY_KEY['v_323_palm_trees']!;  // tile 323
@@ -24,8 +24,8 @@ const FIT = idsByVanillaSheet(2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 
  *  WallID.Sets.AllowsPlantsToGrow（WallID.cs:58）27 项——1405 旧表只有 11 项
  *  （cs:14176 硬编码），缺 63-69 泥/石墙族等 16 项，曾致墙门误拒 */
 const TREE_WALLS = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80]);
-/** 棕榈基座沙族（1456 cs:27290：53/234/116/112） */
-const PALM_GROUND = idsByVanillaSheet(53, 234, 116, 112);
+/** 棕榈基座沙族（1456 cs:27290：53/234/116/112——序异同值集,语义锚=Main.tileSand）——★BJ210 收编单源（§6i） */
+const PALM_GROUND = CONV_SAND_IDS;
 const JUNGLE_GRASS = idsByVanillaSheet(60);
 const MUSHROOM_GRASS = idsByVanillaSheet(70);
 /** 树苗（vanilla tile 20 = acorn sapling）：GrowTree 头部越过找基座（原版 while type==20） */
@@ -50,8 +50,8 @@ const TRUNK: Record<number, Array<[number, number]>> = {
  *  ★id 空间注意：ignoreID 形参与本表都是**原版 id**（C# 同签名），格内 t 比较用
  *  内部 id 集（idsByVanillaSheet 产物）——曾把形参 20 直接丢进内部 id 集查询，
  *  saplingMode 恒 false → 盒检查变全容忍（树爆炸 8×，2026-08-17 实锤） */
-const COMMON_SAPLING_VAN = new Set([20, 590, 595, 615]);
-const COMMON_SAPLING = idsByVanillaSheet(20, 590, 595, 615);
+const COMMON_SAPLING_VAN = COMMON_SAPLING_SHEETS;   // ★BJ210 收编单源（vanilla id 域,§6i）
+const COMMON_SAPLING = COMMON_SAPLING_IDS;          // ★BJ210 收编单源（内部 id 域,§6i）
 const IGNORE_ID_VAN = idsByVanillaSheet(11, 71);
 /** EmptyTileCheck ignoreID∈CommonSapling 时的额外装饰容忍表（1456 cs:31653-31665）：
  *  3 杂草/24 邪恶草/32/61 丛林草丛/62 丛林藤/69/73/74/82/83/84/110 神圣草丛/113/184/201/
@@ -269,7 +269,7 @@ export function seaOatWaterCheck(st: TileStore, gs: GenState, x: number, y: numb
 }
 const SEAOAT_ID = TILE_BY_KEY['v_529_sea_oats']!;
 const OASIS_PLANT_ID = TILE_BY_KEY['v_530_oasis_plants']!;
-const SAND_CONV_IDS = idsByVanillaSheet(53, 112, 116, 234);
+const SAND_CONV_IDS = CONV_SAND_IDS;   // ★BJ210 收编单源 data/tiles.ts:CONV_SAND_IDS（§6i）
 
 /** 死格/燕麦/绿洲植物之外的 TileFrame 生成期子集：沙族/棕榈/空气的帧均无格效应 */
 function frameCellGen(st: TileStore, gs: GenState, x: number, y: number): void {

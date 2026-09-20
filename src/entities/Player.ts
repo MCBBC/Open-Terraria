@@ -45,7 +45,7 @@ import { ARMOR_SET_BONUSES, DD2_PIECE_FX, matchArmorSetBonusVid, type ArmorSetBo
 import { SUMMON_GEAR } from '../data/vanillaSummonStats';
 import { TagEffectStack } from './WhipTag';
 import { harpyCharmEffect } from './Arrow';
-import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS, CLOUDS_SHEETS } from '../data/tiles';
 import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 // ★SW-BJ59 滚轴鞋轨骑：TrackCollision/TrackRotation 单源复用（Minecart 实体同函数）
 import { trackCollision, trackRotation, magnetPosition, FLAG_ON_TRACK, FLAG_BOUNCY_BUMPER, FLAG_USED_RAMP, FLAG_HIT_SWITCH, FLAG_BOOST_LEFT, FLAG_BOOST_RIGHT } from '../world/MinecartTrack';
@@ -241,7 +241,7 @@ export const TILE_WAND_VIDS = new Set<number>([832, 932, 933, 1129, 3360, 3361])
  *  189 云/196 雨云/460 雪云/717 岩浆云/718 星云/719 彩虹云）——落地云床缓冲扫描
  *  （Player.cs:25538,本仓 2026-09-04 终审 B⑤ 补）消费面；本仓 sheet 域直比
  *  （消费者先经 TILE_DEFS[].vanilla?.sheet 归一,同 ICE_SLIP_IDS 教训） */
-const CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
+const CLOUD_SHEETS = CLOUDS_SHEETS;   // ★BJ210 收编单源 data/tiles.ts:CLOUDS_SHEETS（TileID.cs:197,§6i）
 
 /** ★SW-FX47（b）：Main.tileBouncy（Main.cs:1484 表 + :9626-9629 初始化）——
  *  371 粉色史莱姆块 / 446-448 派对气球三色（四件全 tileSolid：Main.cs:9623/
@@ -682,6 +682,16 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     boneGlove: boolean;
     sporeSac: boolean;
     volatileGelatin: boolean;
+    /** ★BJ216 翱翔徽章 4989（:14877-14881 empressBrooch=true;moveSpeed+0.075 走 accfx
+     *  '4989'.move→moveMult 已接）——消费端四面：①:19721-19724 jumpSpeedBoost+1.8
+     *  → jumpSpeed 字段同喂起跳/翼飞 JS/火箭脉冲三端（本仓=accfx '4989'.jumpSpd 手补
+     *  1.8→eqM.jumpSpd 聚合,jumpBaseSnapshot 与翼飞 JS 同源生效）;②:22419-22422
+     *  WingMovement 扇动消耗后 `wingTime != 0f` 即回满 wingTimeMax = 无限飞行
+     *  （含喷气 -2 档/hover ×0.5 档;原版无湿态/悬浮/坐骑豁免——湿链 WingMovement 同吃）；
+     *  ③:26698-26700 runAcceleration×1.75（无 vy/坐骑门,钩爪/舌头支外）；
+     *  ④:27063-27065 rocketTime 恒回满 7（无门,无靴态也置 7=原版同,
+     *  消费端全带 rocketBoots 门故惰性） */
+    empressBrooch: boolean;
     /** 老猩红甲套装（Crimson,ArmorSetBonuses.cs:433 items 792/793/794=槽 57|37|35）：
      *  再生三面（1458 :19233 eRT+1、:19362 num5×1.5、:19412 脉搏回血红粒十粒/HP）。 */
     crimsonRegen: boolean;
@@ -1984,6 +1994,7 @@ export class Player extends Entity {
     let accPoisonBarb = false, accHoneyedBarb = false, catalystBand = false;
     let accSharpBarb = false, mysticSashDodge = false, accTimerCrit = false;
     let shinyStone = false;   // 闪亮石 3337（:14874-14876——regen ×1.1 + 静止整段）
+    let empressBrooch = false;   // ★BJ216 翱翔徽章 4989（:14877-14881;四消费端见接口注）
     let crimsonRegen = false;   // 老猩红甲套（ArmorSetBonuses.cs:433,检测在下方甲槽段）
     let ammoCyclerMode = 0;   // PlayerAmmoCyclingMode（PlayerAmmoCyclingMode.cs:None=0/AmmoSlots=1/FullInventory=2/Random=3）
     // ---- 召唤师链聚合位（vanillaSummonStats：ApplyEquipFunctional armor[0-9] 单遍语义 =
@@ -2080,6 +2091,9 @@ export class Player extends Entity {
       if (accVid === 3245) boneGlove = true;                         // 骨头手套（:14660-14662 case 3245 boneGloveItem=currentItem）
       if (accVid === 3336) sporeSac = true;                          // 孢子囊（:14884-14886 SporeSac(currentItem)+sporeSac=true）
       if (accVid === 4987) volatileGelatin = true;                   // 挥发明胶（:14888-14890 VolatileGelatin(currentItem)+volatileGelatin=true）
+      // ★BJ216 翱翔徽章（:14877-14881 empressBrooch=true——原版此 case 同置
+      //  moveSpeed += 0.075f,数据面 vanilla-accfx.json '4989'.move→fx.move→moveMult 已消费）
+      if (accVid === 4989) empressBrooch = true;
       // 984 老虎攀爬档【赋值】quirk（:15176-15181 blackBelt/dashType=1 走 accfx,
       // spikedBoots = 2 原文是赋值非 +=——覆盖此前 953/975/976 累积）
       if (accVid === 984) spikedBoots = 2;
@@ -2823,6 +2837,7 @@ export class Player extends Entity {
       accSnappingStone, accPyroclast, accArmletOfRuin,
       accPoisonBarb, accHoneyedBarb, catalystBand,
       accSharpBarb, ammoCyclerMode, mysticSashDodge, accTimerCrit, shinyStone,
+      empressBrooch,   // ★BJ216 翱翔徽章 4989（四消费端见接口注）
       crimsonRegen,
       onHitRegen, onHitPetal, onHitDodge,   // 硬模式矿族 on-hit 三套（终零波批）
     };
@@ -5170,6 +5185,12 @@ export class Player extends Entity {
       // 翼飞行加速倍率（WingAirLogicTweaks :28852/:28856,乘区在 moveSpeed 链之后;
       // 坐骑支不乘——原版 WingAirLogicTweaks 门 mount.CanUseWings :26175,本仓坐骑恒禁翼）
       if (!mnt) runAcc *= wingAccMul;
+      // ★BJ216 翱翔徽章（:26698-26700）：runAcceleration ×1.75——原版位在
+      //  WingAirLogicTweaks(:26694) 之后、荧光体(:26703)/暗影套(:26711)/地面材质链
+      //  (:26722-26772) 之前,无 velocity/坐骑门（坐骑域在 :26835-26853 其后,加法族
+      //  乘叠加前基底 → 随 FX58b mulPreAdd 序;钩爪/舌头支门与荧光体等邻居共域,同 modeling 面）。
+      //  另 :14880 moveSpeed += 0.075 经 accfx '4989'.move 已进 moveMult 乘区
+      if (eqM.empressBrooch) runAcc = mulPreAdd(runAcc, 1.75, additiveAcc);
       // 荧光体 5107（★1457 :26703-26709,旧注 :26188-26194 系 1456 锚）：地面四参数
       // ——acc×1.75/maxRun×1.15/accRun×1.15/slowdown×1.75（velocity.Y==0 门 ≈
       // onGround;手持光走 emitMagiluminescenceLight——ApplyEquipFunctional case 5107
@@ -5627,7 +5648,7 @@ export class Player extends Entity {
       if ((this.gravDir === -1 ? this.vy < effJumpSpd : this.vy > -effJumpSpd) && this.vy !== 0) this.canRocket = true;
       flying = (wingsW > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
         || (FLAP_HOVER_SET.has(wingsLogicW) && this.inputJump && this.inputDown && this.wingTime > 0);
-      if (flying) this.wingMovement(wingsW, this.tryingToHoverDown, effJumpSpd);   // ★SW-FX14 :22410 TryingToHoverDown
+      if (flying) this.wingMovement(wingsW, this.tryingToHoverDown, effJumpSpd, eqWet.wing ? eqWet.wing.time : 0);   // ★SW-FX14 :22410 TryingToHoverDown + ★BJ216 wingMax 回满上限（湿链同吃徽章）
       if (wingsLogicW > 0) {
         const glideW = !flying && this.inputJump && this.vy > 0;   // :26718（downDash 未建模恒 false）
         this.wingFrameScratch.frame = this.wingFrame;
@@ -5978,7 +5999,7 @@ export class Player extends Entity {
           (wings > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
           || (FLAP_HOVER_SET.has(wingsLogic) && this.inputJump && hoverDown && this.wingTime > 0);
         if (flying) {
-          this.wingMovement(wings, hoverDown, JS);
+          this.wingMovement(wings, hoverDown, JS, eq.wing ? eq.wing.time : 0);   // ★BJ216 wingMax（:22419 徽章回满上限）
           // ★ WingFrame 帧状态机已移至 if/else 之后每 tick 执行（原版 :26498
           //   无条件调 WingFrame(flag19)——33/38 落地不归零等语义依赖此执行位）
         }
@@ -6614,6 +6635,11 @@ export class Player extends Entity {
     if (((this.onGround || this.wallCling) && !this.inputJump) || (autoJumpC && jumpStartedThisTick)) {
       this.wingTime = eqM.wing ? eqM.wing.time : 0;
     }
+    // ★BJ216 翱翔徽章（:27063-27065）：无门恒回满 rocketTimeMax=7——原版置在标准
+    //  回满(:27060)之后、火箭靴消耗(:27069)之前;无靴态也置 7（:26951 先清零再被本行
+    //  回满=原版同序）,消费端全带 rocketBoots 门故惰性;副作用 = 徽章佩戴者飞毯
+    //  空中门 rocketTime==0 被封（CarpetMovement :22025 读上一拍尾值,原版同相）
+    if (eqM.empressBrooch) this.rocketTime = 7;
     }
     // 松键上升衰减（原版语义 1:1，:22435-22446）：原版无"跳高截断"——松键仅在
     // 下一个 tick 使 vy += 0.01（几乎不衰减，小跳靠 platform 段耗尽前的松键时间差
@@ -8564,7 +8590,7 @@ export class Player extends Entity {
     this.prevTickUpHeld = this.inputUp;
   }
 
-  private wingMovement(wings: number, hoverDown: boolean, JS: number): void {
+  private wingMovement(wings: number, hoverDown: boolean, JS: number, wingMax: number): void {
     // ★SW-FX34：补 WingMovement 反重力半边（Player.cs:22207-22380 每段 `* gravDir`
     //  + else 镜像臂,1457 逐值）。gd=1 臂数值逐位恒等（0.2*1===0.2 等）。
     const gd = this.gravDir === -1 ? -1 : 1;
@@ -8628,6 +8654,13 @@ export class Player extends Entity {
         || wings === 37 || wings === 45) && hoverDown && this.inputX === 0;
       this.wingTime -= halfCost ? 0.5 : 1;
     }
+    // ★BJ216 翱翔徽章无限飞行（WingMovement :22419-22422）：扇动消耗后
+    //  `wingTime != 0f` 即回满 wingTimeMax——两支（喷气 -2 :22238 / hover ×0.5
+    //  :22412 / 常规 -1 :22416）后同位,原版无湿态/悬浮/坐骑豁免。
+    //  ★`!= 0f` 豁免quirk 1:1 保留：常规 -1 档从 0.5 半值下穿（→-0.5≠0）必回满,
+    //  仅 hover ×0.5 档可精确触 0（装备切换期 wingTime 恰 0.5 时）——
+    //  常驻飞行期每拍回满使下行走带不可达,护栏死支照抄。
+    if (this.equipStats.empressBrooch && this.wingTime !== 0) this.wingTime = wingMax;
     this.fallStartY = null;
   }
 
@@ -9357,6 +9390,11 @@ export class Player extends Entity {
       baseJumpTicks = Math.max(baseJumpTicks, 20);
       baseJumpSpd = Math.max(baseJumpSpd, 6.51);
     }
+    // ★BJ216 注：翱翔徽章 jumpSpeedBoost+1.8（:19721-19724）不走此处手码——原版
+    //  经 jumpSpeed 字段同样喂 WingMovement/火箭脉冲/起跳三消费端,本仓对应
+    //  eqM.jumpSpd 聚合位（vanilla-accfx.json '4989'.jumpSpd 手补钉值,见该文件注）,
+    //  在 jumpBaseSnapshot(:9368 baseJumpSpd+=eqJ.jumpSpd)与翼飞 JS(PLAYER_JUMP_SPEED
+    //  +eqM.jumpSpd)两处同源生效。moonLordLegs 的 +1.8 仅此快照单点=既有登记面,勿混。
     // 月亮领主腿（组A 单件面批 2026-09-18;UpdateJumpHeight :19730-19734：
     // jumpSpeedBoost += 1.8 / extraFall += 10（聚合位）/ jumpHeight++）
     if (eqJ.moonLordLegs) {

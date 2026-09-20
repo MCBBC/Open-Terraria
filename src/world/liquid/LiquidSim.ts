@@ -25,7 +25,7 @@
 // 1456 对齐修正（相对旧 1.4.0.5 移植）：banker's rounding（C# Math.Round），
 // 蜂蜜交互阈值 32→24（LiquidCheck 统一），AddWater/WaterCheck 的水死/岩浆死表
 // （Main.cs:7182+ 提取），panic 模式（Liquid.cs:1040-1070），岩浆 3×3 烧草精确 type 映射
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, IS_A_CONTAINER_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, IS_A_CONTAINER_SHEETS, NOT_REALLY_SOLID_SHEETS, CONV_GRASS_SHEETS } from '../../data/tiles';
 import { UnifiedRandom } from '../../core/rng';
 import type { World } from '../World';
 import type { RNG } from '../../core/rng';
@@ -65,8 +65,10 @@ for (const [k, rec] of Object.entries(TILE_OBJECT_DEATH)) {
 export const WATER_DEATH_SHEETS = new Set([215, 4, 51, 697, 93, 98, 552, 405, 646, 372]);
 /** Main.tileLavaDeath 表（Main.cs 同区段，vanilla tile id；导出缘由同上） */
 export const LAVA_DEATH_SHEETS = new Set([630, 631, 571, 579, 591, 538, 544, 629, 550, 551, 533, 553, 554, 555, 556, 558, 559, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 632, 640, 643, 644, 645, 710, 568, 569, 570, 580, 582, 619, 620, 572, 560, 564, 567, 565, 654, 529, 530, 705, 484, 3, 5, 10, 11, 12, 13, 14, 469, 486, 488, 704, 487, 489, 490, 15, 497, 16, 17, 18, 19, 24, 27, 28, 29, 32, 33, 34, 35, 36, 42, 49, 50, 707, 51, 697, 52, 55, 61, 703, 62, 69, 655, 71, 72, 73, 74, 79, 80, 81, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 100, 101, 102, 103, 104, 106, 110, 113, 115, 125, 126, 128, 149, 172, 173, 174, 184, 201, 205, 209, 210, 212, 213, 353, 215, 216, 217, 218, 219, 642, 220, 227, 228, 233, 236, 702, 238, 240, 241, 242, 243, 244, 245, 246, 247, 254, 269, 270, 271, 581, 698, 660, 275, 413, 276, 277, 278, 279, 280, 281, 282, 283, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 532, 316, 317, 318, 319, 354, 355, 699, 499, 323, 335, 338, 339, 528, 636, 352, 382, 425, 453, 456, 463, 464, 465, 485, 511, 510, 547, 548, 552, 573, 621, 622, 623, 624, 700, 656, 701, 493, 395, 520, 471, 405, 406, 452, 457, 454, 494, 387, 386, 388, 389, 646, 372, 639, 668, 324, 427, 390]);
-/** 岩浆 3×3 烧除（1456 DelWater L1557+）：草族 tile → 空气；蘑菇草族 → 泥土 */
-const LAVA_BURN_TO_AIR = new Set([2, 23, 109, 199, 477, 492]);
+/** 岩浆 3×3 烧除（1456 DelWater L1557+）：草族 tile → 空气；蘑菇草族 → 泥土。
+ *  值集 ≡ Conversion.Grass(:18)（亦≡MergesWithDirtInASpecialWay :12 同值）——★BJ210 收编
+ *  单源 data/tiles.ts:CONV_GRASS_SHEETS（§6i） */
+const LAVA_BURN_TO_AIR = CONV_GRASS_SHEETS;
 const LAVA_BURN_TO_DIRT = new Set([60, 70, 661, 662]);
 /** Main.tileObsidianKill（Main.cs:8214-8259）= tileLavaDeath 全表 ∪ 附加表 − {88}：
  *  交互落块时"可被黑曜石顶掉"的 tile（火把/植物/草药/幼虫/丛林蜥蜴祭坛石等）。

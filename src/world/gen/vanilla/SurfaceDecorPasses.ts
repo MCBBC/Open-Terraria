@@ -28,7 +28,7 @@
 import { TileStore, LIQUID_TYPE } from '../../TileStore';   // ★IIIII194 lava(true) 用 LIQUID_TYPE（+1 编码禁裸写）
 import type { RNG } from '../../../core/rng';
 import { wgNpcBlocksEmptyTile, type GenState } from './GenState';   // ★IIIII194 EmptyTile 实体支
-import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, ORE_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, ORE_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS, CONV_GRASS_SHEETS, CONV_SAND_SHEETS, CLOUDS_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CONV_ICE_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { genSolidType, flipGenSolid, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { setBoulderSolidity } from './TrapsPass';
@@ -72,12 +72,12 @@ const sheetAt = (st: TileStore, x: number, y: number): number => {
 };
 
 // ---------- 原版集合表（TileID.cs / Main.cs 实证，按 sheet id 存放） ----------
-/** TileID.Sets.Conversion.Grass（TileID.cs:51）——OrePatch/StonePatch 的草面门 */
-const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);
-/** TileID.Sets.Conversion.Sand（:55）——OrePatch 深层扫描排除 */
-const CONV_SAND = new Set([53, 112, 116, 234]);
-/** TileID.Sets.Clouds（:197） */
-const CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
+/** TileID.Sets.Conversion.Grass（TileID.cs:18——旧注 :51 系行号漂移）——OrePatch/StonePatch 的草面门——★BJ210 收编单源（§6i） */
+const CONV_GRASS = CONV_GRASS_SHEETS;
+/** TileID.Sets.Conversion.Sand（:30——旧注 :55 系行号漂移）——OrePatch 深层扫描排除——★BJ210 收编单源（§6i） */
+const CONV_SAND = CONV_SAND_SHEETS;
+/** TileID.Sets.Clouds（:197）——★BJ210 收编单源（§6i） */
+const CLOUDS = CLOUDS_SHEETS;
 /** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
  *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
 const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
@@ -89,10 +89,10 @@ const SET_CRIMSON = new Set([199, 662, 203, 234, 200, 399, 401, 205]);
 const SET_ORE = ORE_SHEETS;
 /** TileID.Sets.IsVine（:237）——GrowMoreVines 密度计数（按 type 计，含幽灵） */
 const IS_VINE = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
-/** Main.tileMoss（Main.cs:6956-6996） */
-const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
-/** TileID.Sets.tileMossBrick */
-const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+/** Main.tileMoss（Main.cs:7146-7187，旧注 :6956-6996 系声明行）——★BJ210 收编单源（§6i） */
+const TILE_MOSS = TILE_MOSS_SHEETS;
+/** TileID.Sets.tileMossBrick——★BJ210 收编单源（§6i） */
+const TILE_MOSS_BRICK = MOSS_BRICK_SHEETS;
 /** Main.tileCut（Main.cs 全量 41 项）——Vines 444 蜂巢凹龛净空判定。
  *  ★BJ158③（2026-09-18）：本地 sheet 键副本（旧名 TILE_CUT,与 Game 导出的同名
  *  internal 键表 TILE_CUT 构成同名校蔽=BJ154 影烛同族病）拆除——消费面四点
@@ -115,8 +115,8 @@ const DYE_PLANT_ABOVE = new Set([3, 51, 61, 73, 74, 184]);
 const DYE_PLANT_SIDE = new Set([3, 51, 697, 61, 703, 73, 74, 184]);
 /** Conversion.Sand∪HardenedSand∪Sandstone（TileID.cs:30-34）——Check3x2 187 底材质门 */
 const SAND_FAM_3X2 = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
-/** TileID.Sets.Conversion.Ice（TileID.cs:28）——Check3x2 186 底材质门 */
-const ICE_SET = new Set([161, 163, 164, 200]);
+/** TileID.Sets.Conversion.Ice（TileID.cs:28）——Check3x2 186 底材质门——★BJ210 收编单源（§6i） */
+const ICE_SET = CONV_ICE_SHEETS;
 // BreakableWhenPlacing 唯一权威表 = data/tiles.ts 的 BREAKABLE_WHEN_PLACING_SHEETS
 // （TileID.cs:383；本 pass 消费点见下方 PlaceTile(656) 放置分支可覆写族 cs:59519）
 /** GetTileMossColor（cs:81954）：苔藓 sheet → 色号（TileFrame 184 的 frameX=22*色号） */

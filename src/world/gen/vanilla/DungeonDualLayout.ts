@@ -21,7 +21,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { UnifiedRandom } from '../../../core/rng';
-import { TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CRACKED_BRICKS_SHEETS } from '../../../data/tiles';
 import {
   buildDungeonGenVars,
   DungeonGenerationStyles,
@@ -4048,7 +4048,7 @@ export function runDualDungeonLayout(ctx: DualLayoutCtx, opts: DualLayoutOpts): 
   const gv = buildDungeonGenVars(styles, true, {
     tileDungeon: boolArrayOf([...TILE_DUNGEON_SHEETS]),      // ★BJ187 单源
     wallDungeon: boolArrayOf([...WALL_DUNGEON_SHEETS]),      // ★BJ187 单源
-    crackedBricks: boolArrayOf([481, 482, 483]),
+    crackedBricks: boolArrayOf([...CRACKED_BRICKS_SHEETS]),   // ★BJ210 单源派生（§6i）
     glassWalls: boolArrayOf([21, 88, 89, 90, 91, 92, 93, 241, 242, 243]),
   });
   setGvHolder(gv, true);

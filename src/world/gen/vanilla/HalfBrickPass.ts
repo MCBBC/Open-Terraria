@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, NOT_REALLY_SOLID_SHEETS, SOLID_TOP_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, NOT_REALLY_SOLID_SHEETS, SOLID_TOP_SHEETS, CONV_SAND_IDS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -27,8 +27,8 @@ const T = { // 排除表用的原版 id 集
   /** 空位补角分支排除（16600/16602/16621）：151/274（不做补角材料）与 190/48/232（旁格排除） */
   NO_FILL: idsByVanillaSheet(151, 274),
   NO_FILL_SIDE: idsByVanillaSheet(190, 48, 232),
-  /** Conversion.Sand（TileID.cs:30）：沙族 → Loop B 走 Tile.SmoothSlope */
-  SAND: idsByVanillaSheet(53, 112, 116, 234),
+  /** Conversion.Sand（TileID.cs:30）：沙族 → Loop B 走 Tile.SmoothSlope——★BJ210 收编单源（§6i） */
+  SAND: CONV_SAND_IDS,
   /** 补角材料特判（cs:16605/16626）：侧邻 495 贝壳堆 → 用侧邻材料 */
   SHELL_495: idsByVanillaSheet(495),
   /** PlaceTile 草/苔安放门（cs:59400-59440）：目标格非活性时,这些类型一律拒放
@@ -163,7 +163,7 @@ export function registerTileFrame165(f: TileFrame165): void { tileFrame165 = f; 
  * 三方同源副本（禁互 import 惯例）;本副本杀链走本文件 killTile（全量级联：
  * 尘掷+化石碎裂+裂砖链+SquareTileFrame→165/186/187 重查）,复扫=本文件 tileFrame。 */
 const SAND_FAM_3X2 = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
-const ICE_SET_3X2 = new Set([161, 163, 164, 200]);
+const ICE_SET_3X2 = CONV_ICE_SHEETS;   // ★BJ210 收编单源 data/tiles.ts:CONV_ICE_SHEETS（sheet 域,§6i）
 /** 原版 sheet 186/187 的本仓 tile id（惰性解析,TILE_BY_KEY 键名稳定） */
 let _pile186 = -1;
 function pile186Id(): number {
@@ -915,8 +915,8 @@ function attemptFossilShattering(st: TileStore, rng: RNG, x: number, y: number):
 const BASIC_CHEST_S = new Set([21, 467]);
 const BASIC_DRESSER_S = new Set([88]);
 const BASIC_CHEST_FAKE_S = new Set([441, 468]);
-/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:305） */
-const PREVENTS_REMOVAL_ON_TOP = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169——旧注 :305 系行号漂移）——★BJ210 收编单源（§6i） */
+const PREVENTS_REMOVAL_ON_TOP = PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS;
 
 function sheetAtKT(st: TileStore, x: number, y: number): number {
   if (!st.inBounds(x, y)) return -1;

@@ -6,7 +6,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CONV_SAND_IDS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree, seaOatWaterCheck, palmRangeFrame } from './TreePass';
@@ -217,7 +217,7 @@ function waterStaysPut(st: TileStore, x: number, y: number): boolean {
 //   num14 = clamp(num13(本列盘顶), [y0int, y1int]); for l=0..num14 → Clouds 格 active=false
 // 即「本列从天空到新云盘顶的既有云全部熄灭」（残留 type 幽灵照留），errorWorld 不跑。
 // TileID.Sets.Clouds = {189,196,460,717,718,719}（TileID.cs:197）。
-const SGIS_CLOUD_IDS = new Set(idsByVanillaSheet(189, 196, 460, 717, 718, 719));
+const SGIS_CLOUD_IDS = CLOUDS_IDS;   // ★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS（内部 id 域,§6i）
 function sgisClearSkyAbove(st: TileStore, gs: GenState, x: number, topRow: number, y0Int: number, y1Int: number): void {
   if (!gs.seedFlags.surfaceIsInSpace || gs.seedFlags.errorWorld) return;
   let n14 = topRow;
@@ -1155,8 +1155,7 @@ export function runPyramidPass(
  *  （x86 侧 GenVars.lowestCloud 在 Dungeon 域 DesertCleanup 首调即缓存；云在本窗口
  *  间不变 ⇒ fresh 计算≡缓存值。） */
 function pyrFindLowestCloud(st: TileStore, gs: GenState): number {
-  const CLOUD = new Set([189, 196, 460, 717, 718, 719]
-    .map((sh) => TILE_INTERNAL_BY_SHEET.get(sh)).filter((v) => v !== undefined) as number[]);
+  const CLOUD = CLOUDS_IDS;   // ★BJ210 收编单源（内部 id 域,与旧 TILE_INTERNAL_BY_SHEET.map 逐值全等,§6i）
   let lowest = 0;
   for (let y = 20; y < gs.worldSurface; y++) {
     for (let x = 20; x < st.w - 20; x++) {
@@ -1631,8 +1630,8 @@ export function matureHerbPlants(st: TileStore, rng: RNG, gs: GenState): void {
 //   - 未命中列的 PlantSeaOat/GrowSeaOat/PlaceOasisPlant 段（cs:21302-21320）未实现；
 //   - SquareTileFrame 对仙人掌为 no-op：渲染端 cactusFrameAt（WorldGen.CactusFrame
 //     1:1，render/VanillaTiler.ts）按邻接实时求帧，生成期无需写帧。
-/** TileID.Sets.Conversion.Sand（TileID.cs:30）：53/112/116/234 */
-const SAND_CONV = idsByVanillaSheet(53, 112, 116, 234);
+/** TileID.Sets.Conversion.Sand（TileID.cs:30）：53/112/116/234——★BJ210 收编单源 data/tiles.ts:CONV_SAND_IDS（§6i） */
+const SAND_CONV = CONV_SAND_IDS;
 /** 列扫描门沙族（cs:21210：仅 53/112/234——珍珠沙 116 不在生成期地表） */
 const SAND_GATE = idsByVanillaSheet(53, 112, 234);
 const CORAL = TILE_BY_KEY['v_81_coral']!;
@@ -1938,12 +1937,13 @@ const OASIS_PLANT = TILE_BY_KEY['v_530_oasis_plants']!;
 /** GenVars.oasisHeight（GenVars.cs:268）= 20——与 OasisPass.OASIS_HEIGHT 同源常量
  *  （本文件不得改 OasisPass，无法 import 其私有常量，原样复制） */
 const OASIS_HEIGHT = 20;
-/** TileID.Sets.Conversion.Sand（TileID.cs:30）：53/112/116/234——燕麦/绿洲植物基座沙族门 */
-const SAND_FAMILY = idsByVanillaSheet(53, 112, 116, 234);
+/** TileID.Sets.Conversion.Sand（TileID.cs:30）：53/112/116/234——燕麦/绿洲植物基座沙族门——★BJ210 收编单源（§6i） */
+const SAND_FAMILY = CONV_SAND_IDS;
 /** 苗 tile 20：棕榈越过找基座（cs:27268 while type==20）——同 TreePass.PLANTS */
 const PALM_SAPLING = idsByVanillaSheet(20);
-/** 棕榈基座沙族（cs:27292：53/234/116/112）——同 TreePass.PALM_GROUND */
-const PALM_GROUND = idsByVanillaSheet(53, 234, 116, 112);
+/** 棕榈基座沙族（cs:27292：53/234/116/112——序异同值集,语义锚=Main.tileSand Main.cs:7367-7370）
+ *  ——同 TreePass.PALM_GROUND；★BJ210 收编单源（§6i） */
+const PALM_GROUND = CONV_SAND_IDS;
 
 /** EmptyTileCheck（L15685 简化：出界 false，任何活性格 false）——同 TreePass */
 function palmEmptyCheck(st: TileStore, x0: number, x1: number, y0: number, y1: number): boolean {

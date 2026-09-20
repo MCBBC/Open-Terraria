@@ -12,7 +12,7 @@ import type { TileStore } from '../world/TileStore';
 import programJson from '../data/generated/tileframe-program.json';
 import { makeFrame } from '../data/generated/tileframe-codegen.js';
 import type { FrameDRV, FrameTileH } from '../data/generated/tileframe-codegen.js';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, TILE_MOSS_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, MOSS_BRICK_SHEETS, MOSS_SHEETS, CONV_GRASS_SHEETS, ORE_SHEETS } from '../data/tiles';
 import { vanillaIdOf } from './TileMergeFamily';
 
 // ★ID 域契约(2026-08-28 重定):本链全部集合/比较在 vanilla tile id 域。
@@ -62,14 +62,14 @@ const TILE_BRICK = S256([
   734, 735, 736, 737, 738, 740, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750,
 ]);
 const TILE_STONE = S256([130, 131, 63, 64, 65, 66, 67, 68, 566]);
-const TILE_MOSS = S256([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+const TILE_MOSS = S256([...TILE_MOSS_SHEETS]);   // ★BJ210 单源派生 data/tiles.ts:TILE_MOSS_SHEETS（Main.tileMoss ≡ Conversion.Moss,§6i）
 const TILE_PILE = S256([330, 331, 332, 333]);
 const TILE_BLEND_ALL = S256([357]);
 const SETS_DIRT = S256([0, 668]);
 const SETS_MUD = S256([59]);
 const SETS_ASH = S256([57]);
-const SETS_SNOW = S256([147]);
-const SETS_ICES = S256([161, 200, 163, 164]);
+const SETS_SNOW = S256([...CONV_SNOW_SHEETS]);   // ★BJ210 单源派生（TileID.cs:24,§6i）
+const SETS_ICES = S256([...CONV_ICE_SHEETS]);    // TileID.Sets.Ices(:293)≡Conversion.Ice(:28) 同值——★BJ210 单源派生（§6i）
 const SETS_ICES_SNOW = S256([161, 200, 163, 164, 147]);
 const DONT_MERGE_WITH_SNOW = S256([161, 200, 163, 164, 224, 170, 738]);
 const ORE_MERGES_WITH_MUD = S256([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223]);
@@ -79,17 +79,17 @@ const FORCED_DIRT_MERGING = S256([
   260, 258, 259, 257, 256, 54, 357, 708, 385, 735, 736, 737, 738, 741, 742, 743, 745, 746, 747,
   748, 749,
 ]);
-const TILE_MOSS_BRICK = S256([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
-const MERGES_WITH_DIRT_SPECIAL = S256([2, 23, 109, 199, 477, 492]);
-const CONVERSION_MOSS = S256([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
-const CONVERSION_MOSS_BRICK = S256([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
-const CONVERSION_GRASS = S256([2, 23, 199, 109, 477, 492]);
+const TILE_MOSS_BRICK = S256([...MOSS_BRICK_SHEETS]);   // ★BJ210 单源派生（tileMossBrick :309 ≡ Conversion.MossBrick :40,§6i）
+const MERGES_WITH_DIRT_SPECIAL = S256([...CONV_GRASS_SHEETS]);   // ≡Conversion.Grass(:18) 同值——★BJ210 单源派生（§6i）
+const CONVERSION_MOSS = S256([...MOSS_SHEETS]);   // ★BJ210 单源派生（Conversion.Moss :38,§6i）
+const CONVERSION_MOSS_BRICK = S256([...MOSS_BRICK_SHEETS]);   // ★BJ210 单源派生（§6i）
+const CONVERSION_GRASS = S256([...CONV_GRASS_SHEETS]);   // ★BJ210 单源派生（Conversion.Grass :18,§6i）
 const MERGES_WITH_CLOUDS = S256([196, 460, 717, 718, 719]);
 const ALL_TILES = S256(range(0, 599));
 const GRASS_SPECIAL = S256([70, 60, 661, 662]);
 const JUNGLE_SPECIAL = S256([226, 225, 211]);
 const HELL_SPECIAL = S256([58, 76, 75]);
-const SETS_ORE = S256([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+const SETS_ORE = S256([...ORE_SHEETS]);   // TileID.Sets.Ore(:403)——★BJ210 补收 BJ203 漏网 S256 形（单源派生,§6h/§6i）
 const SETS_PLATFORMS = S256([19, 427, 435, 436, 437, 438, 439]);
 const HAS_SLOPE_FRAMES = S256([421, 422]);
 // tileMerge 矩阵(SetupTileMerge M:3714-3719 六对)

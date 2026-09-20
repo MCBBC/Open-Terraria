@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_IDS, PLATFORMS_IDS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_IDS, PLATFORMS_IDS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_IDS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef, setTenthRef } from './MushroomPass';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
@@ -74,7 +74,7 @@ const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空�
 // TileID.Sets.Clouds{189,196,460,717,718,719}（TileID.cs:197）格——取**最下面**一行
 // （外层循环不 break），无云则 0；GenVars.lowestCloud 单值缓存。noSurface 钉 150
 // （本旗标组合域未接，组合另案）。
-const CLOUD_IDS = new Set(idsByVanillaSheet(189, 196, 460, 717, 718, 719));
+const CLOUD_IDS = CLOUDS_IDS;   // ★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS（内部 id 域,§6i）
 /** 真·FindLowestCloud（带 worldSurface 上界；缓存语义=pass 内单调用，无需跨 pass） */
 function lowestCloudRow(st: TileStore, wsDouble: number): number {
   let num = 0;

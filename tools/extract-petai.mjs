@@ -1,8 +1,12 @@
-// 宠物投射物 AI 参数提取器：Terarria1456/Terraria/Projectile.cs →
-// ★BJ183 2026-09-20 定谳：本器暂留 1456 锚——1457 AI_026/AI_067 反编译局部号
-// 重排（num181→num182 等）令 anchorAssert 全数失配,而【数据面零欠账】已证
-// （vanilla-pets.json 1456↔1457 全等;变更面 1094/1112/1113/1118 属召唤随从非宠物）。
-// 重锚 1457 前须先重推各锚点局部号,见 BJ183 登记债。
+// 宠物投射物 AI 参数提取器：Terarria1457/Terraria/Projectile.cs →
+// ★BJ212 2026-09-20 重锚 1457（BJ183 登记债清偿）：1457 AI_026/AI_067 局部号重排
+// 全数重推（AI_026 飞行段 num41..53→num42..54；地面段 num181/182→num184/185、
+// num91→num92、num100/101→num101/102、num111→num112、num93/94→num94/95；
+// AI_067 num34→num50；ST11 num82/85/86→num83/86/87；ST90 num820/821/822→num790/791/792；
+// ST124 num964/967→num918/921、y11→y10、vector150→vector149），1458 交叉对拍三方法体
+// 逐字节全等零增量。数据面定谳：1456 锚产物与 1457 重推产物【逐值零差】（79 款共同
+// 条目），仅 meta.source/行号坐标换锚；703 line 66784（1456 旧坐标）→ 71188（1457 真
+// 坐标）系 fx48 层遗留的版本混锚，本刀顺手归一。
 // game/src/data/vanilla-petai.json（PetFollower 按 aiStyle 家族分派的参数源）。
 //
 // 数据来源三段：
@@ -19,13 +23,50 @@
 //   - 少数完全定制的分支体（Wisp 控制偏移、DD2 宠 bob、764 星透明度脉冲等）以
 //     常量表给出，但每个值都用 anchorAssert 校验源码对应行仍含锚文本——源码漂移
 //     即报错退出，防止"表与源码静默失配"。
+//
+// ★era guard（BJ212 落闸，四要素习语见 docs/era-guard-family.md）：
+//   ① SW_ITEM_VER 缺省 1457（显式值白名单 1456/1457/1458，盘上无对应反编译目录即拒）；
+//   ② 输出通道三分离：缺省=干跑零写盘 / SW_OUT=<dir>=沙箱输出 <dir>/vanilla-petai.json /
+//     --write-real=写真库 game/src/data/vanilla-petai.json；SW_OUT 与 --write-real 双旗
+//     互斥拒跑；SW_ITEM_VER≠1457 时 --write-real 拒跑（旧基线重放禁写真库——BJ191
+//     preflight 写真实 json / itemrare 1456 裸跑洗 6147-6195 同族 footgun）；
+//   ③ 锚断言 fail-loud：anchorAssert/firstIn/FLY_SPEED_ANCHOR 全数硬校验（本文件既有机制）；
+//   ④ 判别力自证：tests/extract-petai-era-guard.test.ts（干跑零写盘/双旗互斥/旧基线
+//     禁写真库/锚中毒 fail-loud 变异）。
 // 输出：src/data/vanilla-petai.json
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const projSrc = readFileSync(`${ROOT}/Terarria1456/Terraria/Projectile.cs`, 'utf8');
-const mainSrc = readFileSync(`${ROOT}/Terarria1456/Terraria/Main.cs`, 'utf8');
-const idSrc = readFileSync(`${ROOT}/Terarria1456/Terraria.ID/ProjectileID.cs`, 'utf8');
+
+// ================= era guard：源版本 fail-closed + 输出通道三分离 =================
+// 白名单 1457/1458：本器锚点是版本特化（1457 局部号重排后 1456 旧号正则全数失配,
+// 见 BJ183/BJ212）——1456 重放须整套旧锚集,已随重锚退役,不在白名单。1458 三方法体
+// 与 1457 逐字节全等（BJ212 实证）,保留作增量对拍面。
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457', '1458']);
+if (!VER_ALLOWED.has(VER) || !existsSync(`${ROOT}/Terarria${VER}/Terraria/Projectile.cs`)) {
+  console.error(`[extract-petai] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1456') console.error('  1456 锚集已随 BJ212 重锚退役（1457 局部号重排致旧正则全数失配）；1456 对拍用 /tmp 时代快照或读 BJ183 定谳（数据面零欠账已证）。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const SW_OUT = process.env.SW_OUT;
+if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+  console.error('[extract-petai] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  console.error('  处置：沙箱对拍用 SW_OUT=<dir>；确认定谳后更新现库用 --write-real（且 SW_ITEM_VER=1457）。');
+  process.exit(1);
+}
+if (WRITE_REAL && VER !== '1457') {
+  console.error(`[extract-petai] 拒绝写真库：SW_ITEM_VER=${VER}≠1457（旧基线重放禁写 game/src/data/vanilla-petai.json）。`);
+  console.error('  处置：1456/1458 重放对拍请走 SW_OUT 沙箱；确要回写 1457 终值请去掉 SW_ITEM_VER 显式注入（缺省即 1457）。');
+  process.exit(1);
+}
+const OUT_JSON = WRITE_REAL ? `${ROOT}/game/src/data/vanilla-petai.json`
+  : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-petai.json` : null);
+
+const projSrc = readFileSync(`${ROOT}/Terarria${VER}/Terraria/Projectile.cs`, 'utf8');
+const mainSrc = readFileSync(`${ROOT}/Terarria${VER}/Terraria/Main.cs`, 'utf8');
+const idSrc = readFileSync(`${ROOT}/Terarria${VER}/Terraria.ID/ProjectileID.cs`, 'utf8');
 const petsTable = JSON.parse(readFileSync(`${ROOT}/game/src/data/vanilla-pets.json`, 'utf8'));
 const projTable = JSON.parse(readFileSync(`${ROOT}/game/src/data/vanilla-projectiles.json`, 'utf8'));
 
@@ -159,6 +200,12 @@ const flying26 = new Set();
     }
     re.lastIndex = c.end;
   }
+  // ★fx48 定谳（sw-fx48-boss-pets.test.ts B1，2026-09-12）：885/889 虽有专属早退块
+  //   （1457 :61087-61245，tileCollide=false 悬停式逼近后 return）被本扫描判 fly，
+  //   但 fx48 按 ground 族建模入表（idleRange 95 = :59152-59168 case 组；速度/追赶
+  //   不吃组 = 缺省臂不落字段）——归 ground，勿回改。
+  flying26.delete(885);
+  flying26.delete(889);
 }
 
 // ================= AI_026 地面族参数（锚点解析） =================
@@ -183,74 +230,77 @@ const g = {};
     for (const id of [...value[1].matchAll(/case (\d+):/g)].map((x) => +x[1])) idleOv[id] = +value[2];
   }
   g.idleOverrides = idleOv;
-  // accel/maxSpeed 头（num181/num182 相邻两行）
-  const a0 = firstIn(AI026.text, AI026.loc, /float num181 = ([\d.]+)f;\n\s*float num182 = ([\d.]+)f;/, 'accel/maxSpeed 默认');
+  // accel/maxSpeed 头（num184/num185 相邻两行；1456 旧号 num181/num182）
+  const a0 = firstIn(AI026.text, AI026.loc, /float num184 = ([\d.]+)f;\n\s*float num185 = ([\d.]+)f;/, 'accel/maxSpeed 默认');
   g.accel = parseFloat(a0.value[1]); g.maxSpeed = parseFloat(a0.value[2]);
   L.accel = a0.line; L.maxSpeed = a0.line + 1;
   const spdOv = {};
-  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num182 = ([\d.]+)f;\s*num181 = ([\d.]+)f;/g)) {
+  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num185 = ([\d.]+)f;\s*num184 = ([\d.]+)f;/g)) {
     spdOv[+value[1]] = { maxSpeed: parseFloat(value[2]), accel: parseFloat(value[3]) };
   }
-  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num181 = ([\d.]+)f;\s*num182 = ([\d.]+)f;/g)) {
+  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num184 = ([\d.]+)f;\s*num185 = ([\d.]+)f;/g)) {
     spdOv[+value[1]] = { accel: parseFloat(value[2]), maxSpeed: parseFloat(value[3]) };
   }
-  // 步速大组（flag10 || type == 816 || ... || type == 1096）→ 6 / 0.2
+  // 步速大组（((flag10 || type == 266) | flag7) || type == 816 || ... || type == 1096）→ 6 / 0.2
   {
-    const m = /if \(flag10 \|\| type == 266[\s\S]{0,600}?type == 1096\)\s*\{\s*num182 = 6f;\s*num181 = 0\.2f;/.exec(AI026.text);
+    const m = /if \(\(\(flag10 \|\| type == 266\) \| flag7\) \|\| type == 816[\s\S]{0,700}?type == 1096\)\s*\{\s*num185 = 6f;\s*num184 = 0\.2f;/.exec(AI026.text);
     if (!m) throw new Error('AI_026 步速大组未找到');
     for (const id of [...m[0].matchAll(/type == (\d+)/g)].map((x) => +x[1])) spdOv[id] = { maxSpeed: 6, accel: 0.2 };
     L.speedGroup = AI026.loc(m.index);
   }
   // 875 VoltBunny 独立档
   {
-    const m = /if \(type == 875\)\s*\{\s*num182 = 7f;\s*num181 = 0\.25f;/.exec(AI026.text);
+    const m = /if \(type == 875\)\s*\{\s*num185 = 7f;\s*num184 = 0\.25f;/.exec(AI026.text);
     if (!m) throw new Error('AI_026 875 步速档未找到');
     spdOv[875] = { maxSpeed: 7, accel: 0.25 };
   }
   g.speedOverrides = spdOv;
-  // catchUpRange 头 + 逐款/switch 覆盖
-  const c0 = firstIn(AI026.text, AI026.loc, /int num91 = (\d+);/, 'catchUpRange 默认');
+  // catchUpRange 头 + 逐款/switch 覆盖（1456 旧号 num91）
+  const c0 = firstIn(AI026.text, AI026.loc, /int num92 = (\d+);/, 'catchUpRange 默认');
   g.catchUpRange = +c0.value[1]; L.catchUpRange = c0.line;
   const cuOv = {};
-  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num91 = (\d+);/g)) cuOv[+value[1]] = +value[2];
-  for (const { value } of allIn(AI026.text, AI026.loc, /((?:case \d+:\s*)+)num91 = (\d+);/g)) {
+  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num92 = (\d+);/g)) cuOv[+value[1]] = +value[2];
+  for (const { value } of allIn(AI026.text, AI026.loc, /((?:case \d+:\s*)+)num92 = (\d+);/g)) {
     for (const id of [...value[1].matchAll(/case (\d+):/g)].map((x) => +x[1])) cuOv[id] = +value[2];
   }
   g.catchUpOverrides = cuOv;
-  // 追赶飞行档（ai[0]!=0 分支）：num100 加速度 / num101 落地距 / num111 速度
-  const f0 = firstIn(AI026.text, AI026.loc, /float num100 = ([\d.]+)f;\n\s*int num101 = (\d+);/, 'flyAccel/landRange 默认');
+  // ★fx48 定谳（B1）：899 的 `case 821: case 899: num92 = 500;`（1457 :61263-61265）
+  //   = 缺省值 500 → 不落冗余字段（821 条目先于 fx48 存在,照旧保留 500）
+  delete cuOv[899];
+  // 追赶飞行档（ai[0]!=0 分支）：num101 加速度 / num102 落地距 / num112 速度（1456 旧号 num100/101/111）
+  const f0 = firstIn(AI026.text, AI026.loc, /float num101 = ([\d.]+)f;\n\s*int num102 = (\d+);/, 'flyAccel/landRange 默认');
   g.flyAccel = parseFloat(f0.value[1]); g.landRange = +f0.value[2];
   L.flyAccel = f0.line; L.landRange = f0.line + 1;
-  const s0 = firstIn(AI026.text, AI026.loc, /float num111 = ([\d.]+)f;/, 'flySpeed 默认');
+  const s0 = firstIn(AI026.text, AI026.loc, /float num112 = ([\d.]+)f;/, 'flySpeed 默认');
   g.flySpeed = parseFloat(s0.value[1]); L.flySpeed = s0.line;
   const flyOv = {};
-  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num111 = ([\d.]+)f;/g)) {
+  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num112 = ([\d.]+)f;/g)) {
     flyOv[+value[1]] = { ...(flyOv[+value[1]] || {}), flySpeed: parseFloat(value[2]) };
   }
-  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num100 = ([\d.]+)f;\s*num111 = ([\d.]+)f;/g)) {
+  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num101 = ([\d.]+)f;\s*num112 = ([\d.]+)f;/g)) {
     flyOv[+value[1]] = { ...(flyOv[+value[1]] || {}), flyAccel: parseFloat(value[2]), flySpeed: parseFloat(value[3]) };
   }
   {
-    const m = /if \(flag10 \|\| type == 816 [\s\S]{0,700}?type == 1096\)\s*\{\s*num100 = 0\.4f;\s*num111 = 12f;/.exec(AI026.text);
+    const m = /if \(flag10 \|\| type == 816 [\s\S]{0,700}?type == 1096\)\s*\{\s*num101 = 0\.4f;\s*num112 = 12f;/.exec(AI026.text);
     if (!m) throw new Error('AI_026 追赶飞行大组未找到');
     for (const id of [...m[0].matchAll(/type == (\d+)/g)].map((x) => +x[1])) {
       flyOv[id] = { ...(flyOv[id] || {}), flyAccel: 0.4, flySpeed: 12 };
     }
   }
   {
-    const m = /if \(flag10 \|\| type == 816 \|\| type == 821 \|\| type == 825 \|\| type == 854 \|\| type == 858 \|\| type == 859 \|\| type == 860\)\s*\{\s*num100 = 0\.5f;\s*num101 = 100;/.exec(AI026.text);
+    const m = /if \(flag10 \|\| type == 816 \|\| type == 821 \|\| type == 825 \|\| type == 854 \|\| type == 858 \|\| type == 859 \|\| type == 860\)\s*\{\s*num101 = 0\.5f;\s*num102 = 100;/.exec(AI026.text);
     if (!m) throw new Error('AI_026 追赶降落大组未找到');
     for (const id of [...m[0].matchAll(/type == (\d+)/g)].map((x) => +x[1])) {
       flyOv[id] = { ...(flyOv[id] || {}), landRange: 100 };
     }
   }
-  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num101 = (\d+);/g)) {
+  for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num102 = (\d+);/g)) {
     flyOv[+value[1]] = { ...(flyOv[+value[1]] || {}), landRange: +value[2] };
   }
-  // 875 VoltBunny：num100/num101 连写（:57461-57465 `num100 = 2f; num101 = 100`——
+  // 875 VoltBunny：num101/num102 连写（1456 :57461-57465 `num100 = 2f; num101 = 100`——
   // 曾因正则只认 num101 首句漏提，运行时回退默认 200）
   {
-    const m = /if \(type == (\d+)\)\s*\{\s*num100 = ([\d.]+)f;\s*num101 = (\d+);/.exec(AI026.text);
+    const m = /if \(type == (\d+)\)\s*\{\s*num101 = ([\d.]+)f;\s*num102 = (\d+);/.exec(AI026.text);
     if (!m) throw new Error('AI_026 landRange 连写组（875）未找到');
     flyOv[+m[1]] = { ...(flyOv[+m[1]] || {}), landRange: +m[3] };
   }
@@ -268,12 +318,12 @@ const g = {};
   if (gi < 0) throw new Error('AI_026 重力档未找到');
   L.gravity = AI026.loc(gi);
   g.gravity = 0.4; g.fallCap = 10;
-  // 瞬移阈值 + 纵向追赶门
-  const ti = AI026.text.indexOf('num94 > 2000f');
+  // 瞬移阈值 + 纵向追赶门（1456 旧号 num93/num94）
+  const ti = AI026.text.indexOf('num95 > 2000f');
   if (ti < 0) throw new Error('AI_026 瞬移阈值未找到');
   L.teleport = AI026.loc(ti);
   g.teleport = 2000;
-  const vi = AI026.text.indexOf('Math.Abs(num93) > 300f');
+  const vi = AI026.text.indexOf('Math.Abs(num94) > 300f');
   if (vi < 0) throw new Error('AI_026 纵向追赶门未找到');
   L.catchUpVert = AI026.loc(vi);
   g.catchUpVert = 300;
@@ -282,18 +332,24 @@ const g = {};
 // ================= AI_026 飞行环绕族（198 组共享体）参数 =================
 const fly26 = { teleport: 2000, jitter: 10, hoverX: -60, hoverY: -60, near: 100, brake: 50 };
 {
-  const idx = AI026.text.indexOf('float num46 = 2000f;');
+  // 共享分支头（fx48 见证锚 :60398；886/892/894/901 的 rec.line 指此）
+  const h = /if \(type == 198 \|\| type == 380 \|\| type == 774 \|\| type == 815 \|\| type == 817 \|\| type == 886 \|\| type == 892 \|\| type == 894 \|\| type == 901 \|\| type == 1046\)/.exec(AI026.text);
+  if (!h) throw new Error('AI_026 飞行共享分支头未找到');
+  fly26.headLine = AI026.loc(h.index);
+  const idx = AI026.text.indexOf('float num47 = 2000f;');
   if (idx < 0) throw new Error('AI_026 飞行瞬移阈值未找到');
   fly26.teleportLine = AI026.loc(idx);
-  const ox = AI026.text.indexOf('num47 += (float)(60 * -Main.player[owner].direction);');
+  const ox = AI026.text.indexOf('num48 += (float)(60 * -Main.player[owner].direction);');
   if (ox < 0) throw new Error('AI_026 飞行悬停 X 偏移未找到');
   fly26.hoverXLine = AI026.loc(ox);
-  const oy = AI026.text.indexOf('num48 -= 60f;');
+  const oy = AI026.text.indexOf('num49 -= 60f;');
   if (oy < 0) throw new Error('AI_026 飞行悬停 Y 偏移未找到');
   fly26.hoverYLine = AI026.loc(oy);
 }
-// 逐款速度/加速度（num41 加速度 / num53 速度）——锚点校验。
-// 815/817 用条件式速度档 `num53 = (!(num51 < num44) ? 10f : 6f)`（远/近双档，取远档）
+// 逐款速度/加速度（num42 加速度 / num54 速度；1456 旧号 num41/num53）——锚点校验。
+// 815/817 用条件式速度档 `num54 = (!(num52 < num45) ? 10f : 6f)`（远/近双档，取远档）
+// ★fx48 补提（sw-fx48-boss-pets.test.ts B2）：892/894/901 远/近双档
+//   `num54 = ((!(num52 < num45)) ? 12f : 9f)`（:60463-60466 远档 12/近档 9，farDist=num45=400）
 const flySpeedOv = {
   198: { speed: 14, accel: 0.4 },  // BabyHornet（组默认 14f）
   380: { speed: 6, accel: 0.3 },   // ZephyrFish
@@ -301,15 +357,26 @@ const flySpeedOv = {
   817: { speed: 10, accel: 0.4 },  // GlitteryButterfly（同上）
   774: { speed: 5, accel: 0.3 },   // SharkPup
   1046: { speed: 8, accel: 0.3 },  // Pufferfish（≥400 取 8）
+  892: { speed: 9, accel: 0.4, farSpeed: 12, farDist: 400 },  // DukeFishronPet
+  894: { speed: 9, accel: 0.4, farSpeed: 12, farDist: 400 },  // MoonLordPet
+  901: { speed: 9, accel: 0.4, farSpeed: 12, farDist: 400 },  // DD2BetsyPet
 };
 const FLY_SPEED_ANCHOR = {
-  198: /float num53 = 14f;/,
-  380: /if \(type == 380\)\s*\{\s*num53 = 6f;/,
-  815: /if \(type == 815 \|\| type == 817\)\s*\{\s*num53 = \(\(!\(num51 < num44\)\) \? 10f : 6f\);/,
-  817: /if \(type == 815 \|\| type == 817\)\s*\{\s*num53 = \(\(!\(num51 < num44\)\) \? 10f : 6f\);/,
-  774: /if \(type == 774\)\s*\{\s*num53 = 5f;/,
-  1046: /if \(type == 1046\)\s*\{\s*num53 = 5f;\s*if \(num51 >= num44\)\s*\{\s*num53 = 8f;/,
+  198: /float num54 = 14f;/,
+  380: /if \(type == 380\)\s*\{\s*num54 = 6f;/,
+  815: /if \(type == 815 \|\| type == 817\)\s*\{\s*num54 = \(\(!\(num52 < num45\)\) \? 10f : 6f\);/,
+  817: /if \(type == 815 \|\| type == 817\)\s*\{\s*num54 = \(\(!\(num52 < num45\)\) \? 10f : 6f\);/,
+  774: /if \(type == 774\)\s*\{\s*num54 = 5f;/,
+  1046: /if \(type == 1046\)\s*\{\s*num54 = 5f;\s*if \(num52 >= num45\)\s*\{\s*num54 = 8f;/,
+  892: /if \(type == 892 \|\| type == 894 \|\| type == 901\)\s*\{\s*if \(num52 < num46\)\s*\{\s*num54 = 6f;\s*\}\s*num54 = \(\(!\(num52 < num45\)\) \? 12f : 9f\);/,
+  894: /if \(type == 892 \|\| type == 894 \|\| type == 901\)\s*\{\s*if \(num52 < num46\)\s*\{\s*num54 = 6f;\s*\}\s*num54 = \(\(!\(num52 < num45\)\) \? 12f : 9f\);/,
+  901: /if \(type == 892 \|\| type == 894 \|\| type == 901\)\s*\{\s*if \(num52 < num46\)\s*\{\s*num54 = 6f;\s*\}\s*num54 = \(\(!\(num52 < num45\)\) \? 12f : 9f\);/,
 };
+// 892/894 跳过随机抖动（:60430-60432 `if (type != 892 && type != 894)` 守卫臂外仍
+// 加 60*-dir/-60f 悬停偏移）——fx48 定谳 jitter=0，901 不在守卫摘除面照常抖动
+if (!/if \(type != 892 && type != 894\)\s*\{\s*num49 \+= \(float\)Main\.rand\.Next\(-10, 21\);/.test(AI026.text)) {
+  throw new Error('AI_026 892/894 抖动守卫臂锚点未找到');
+}
 for (const [id] of Object.entries(flySpeedOv)) {
   if (!FLY_SPEED_ANCHOR[id].test(AI026.text)) {
     throw new Error(`AI_026 飞行成员 ${id} 速度档锚点未找到`);
@@ -338,36 +405,61 @@ for (const [id] of Object.entries(flySolo)) {
 }
 
 // ================= aiStyle 11（ShadowOrb 18 光宠）：环绕保持距 =================
+// 1457 局部号：num82→num83（速度）/num85→num86（瞬移）/num86→num87（保持距）/num84→num85（上下偏移）
 const st11 = { holdDist: 70, orbitSpeed: 3, teleport: 800, lines: {} };
 {
-  st11.lines.speed = firstIn(ST11.text, ST11.loc, /float num82 = 3f;/, 'aiStyle11 速度').line;
-  st11.lines.teleport = firstIn(ST11.text, ST11.loc, /int num85 = 800;/, 'aiStyle11 瞬移').line;
-  st11.lines.holdDist = firstIn(ST11.text, ST11.loc, /int num86 = 70;/, 'aiStyle11 保持距').line;
+  st11.lines.speed = firstIn(ST11.text, ST11.loc, /float num83 = 3f;/, 'aiStyle11 速度').line;
+  st11.lines.teleport = firstIn(ST11.text, ST11.loc, /int num86 = 800;/, 'aiStyle11 瞬移').line;
+  st11.lines.holdDist = firstIn(ST11.text, ST11.loc, /int num87 = 70;/, 'aiStyle11 保持距').line;
   // 上下键 ±40 偏移（ownerRef 无控制态，运行时未建模——登记 PetFollower 注释）
-  st11.lines.upDown = firstIn(ST11.text, ST11.loc, /num84 = Main\.player\[owner\]\.position\.Y - 40f/, 'aiStyle11 上下偏移').line;
+  st11.lines.upDown = firstIn(ST11.text, ST11.loc, /num85 = Main\.player\[owner\]\.position\.Y - 40f/, 'aiStyle11 上下偏移').line;
 }
 
 // ================= aiStyle 90（MagicLantern 492 光宠）：肩后锚点 + 速度斜坡 =================
+// 1457 局部号：num820→num790（瞬移）/num821→num791（速度插值）/num822→num792（基速）
 const st90 = { hoverX: 40, hoverY: -40, speedBase: 4, rampDist: 200, ramp: 0.1, speedLerp: 3, teleport: 1000, lines: {} };
 {
   st90.lines.hoverX = firstIn(ST90.text, ST90.loc, /vector96\.X \+= 40 \* direction;/, 'aiStyle90 悬停 X').line;
-  st90.lines.speedBase = firstIn(ST90.text, ST90.loc, /float num822 = 4f;/, 'aiStyle90 基速').line;
-  st90.lines.speedLerp = firstIn(ST90.text, ST90.loc, /float num821 = 3f;/, 'aiStyle90 速度插值').line;
-  st90.lines.teleport = firstIn(ST90.text, ST90.loc, /if \(num820 > 1000f\)/, 'aiStyle90 瞬移').line;
+  st90.lines.speedBase = firstIn(ST90.text, ST90.loc, /float num792 = 4f;/, 'aiStyle90 基速').line;
+  st90.lines.speedLerp = firstIn(ST90.text, ST90.loc, /float num791 = 3f;/, 'aiStyle90 速度插值').line;
+  st90.lines.teleport = firstIn(ST90.text, ST90.loc, /if \(num790 > 1000f\)/, 'aiStyle90 瞬移').line;
 }
 
 // ================= aiStyle 124（SuspiciousTentacle 650 / GlommerPet 957） =================
+// 1457 局部号：num964→num918（悬停 X）/y11→y10（悬停 Y）/num967→num921（吸附距）/
+// vector150→vector149（速度系数）
 const st124Base = { hoverX: 30, hoverY: -20, snap: 4, velLerp: 0.1, teleport: 1000, lines: {} };
 {
-  st124Base.lines.hoverX = firstIn(ST124.text, ST124.loc, /float num964 = 30f;/, 'aiStyle124 悬停 X').line;
-  st124Base.lines.snap = firstIn(ST124.text, ST124.loc, /float num967 = 4f;/, 'aiStyle124 吸附距').line;
-  st124Base.lines.velLerp = firstIn(ST124.text, ST124.loc, /velocity = vector150 \* 0\.1f;/, 'aiStyle124 速度系数').line;
+  st124Base.lines.hoverX = firstIn(ST124.text, ST124.loc, /float num918 = 30f;/, 'aiStyle124 悬停 X').line;
+  st124Base.lines.snap = firstIn(ST124.text, ST124.loc, /float num921 = 4f;/, 'aiStyle124 吸附距').line;
+  st124Base.lines.velLerp = firstIn(ST124.text, ST124.loc, /velocity = vector149 \* 0\.1f;/, 'aiStyle124 速度系数').line;
 }
-const st124Overrides = { 957: { hoverX: -40, hoverY: -40, line: 0 } };
+// ★fx48 补提（sw-fx48-boss-pets.test.ts B3，:35700/:35709/:35714/:35723 逐型锚）：
+//   888/895/896/898 悬停偏移逐型覆盖（1.4.5 boss 宠四款；条件臂 ownedProjectileCounts
+//   反向偏移不建模——建模基础分支，与 957 同口径）
+const st124Overrides = {
+  957: { hoverX: -40, hoverY: -40, line: 0 },
+  888: { hoverX: 30, hoverY: -50, line: 0 },
+  895: { hoverX: -36, hoverY: -50, line: 0 },
+  896: { hoverX: 30, hoverY: -60, line: 0 },
+  898: { hoverX: -30, hoverY: -50, line: 0 },
+};
 {
-  const m = /if \(type == 957\)\s*\{\s*num964 = -40f;\s*y11 = -40f;/.exec(ST124.text);
+  const m = /if \(type == 957\)\s*\{\s*num918 = -40f;\s*y10 = -40f;/.exec(ST124.text);
   if (!m) throw new Error('aiStyle124 957 悬停档未找到');
   st124Overrides[957].line = ST124.loc(m.index);
+  const m888 = /if \(type == 888\)\s*\{\s*num918 = 30f;\s*y10 = -50f;/.exec(ST124.text);
+  if (!m888) throw new Error('aiStyle124 888 悬停档未找到');
+  st124Overrides[888].line = ST124.loc(m888.index);
+  const m895 = /if \(type == 895\)\s*\{\s*num918 = -36f;\s*y10 = -50f;/.exec(ST124.text);
+  if (!m895) throw new Error('aiStyle124 895 悬停档未找到');
+  st124Overrides[895].line = ST124.loc(m895.index);
+  const m896 = /if \(type == 896\)\s*\{\s*num918 = 30f;\s*y10 = -60f;/.exec(ST124.text);
+  if (!m896) throw new Error('aiStyle124 896 悬停档未找到');
+  st124Overrides[896].line = ST124.loc(m896.index);
+  const m898 = /if \(type == 898\)\s*\{\s*num918 = -30f;\s*y10 = -50f;/.exec(ST124.text);
+  if (!m898) throw new Error('aiStyle124 898 悬停档未找到');
+  st124Overrides[898].line = ST124.loc(m898.index);
 }
 
 // ================= AI_144_DD2Pet（701/702/764/1050） =================
@@ -383,6 +475,10 @@ const ai144Overrides = {
   702: { snap: 6, idleRate: 10, bob: 2, bobPeriod: 120, line: 0 },              // DD2PetGhost
   764: { velLerp: 0.025, line: 0 },                                             // UpbeatStar（透明度脉冲未建模）
   1050: { hoverX: -30, snap: 3, idleRate: 5, moveRate: 3, frameTo: 2, line: 0 }, // AxeFairyPet（vector.X *= -1；砍树行为未建模）
+  // ★fx48 补提（sw-fx2-buff-gap 勘误钉值 + sw-fx48-boss-pets）：DD2PetGato
+  //   case 703（1457 :71188）：cos(PI/30) bob 2/周期 60 + idleRate 4/moveRate 2/snap 3；
+  //   frameTo=4（num4 帧钳）按 fx48 追加语义落 frames 之后（见 fx48 层）
+  703: { snap: 3, idleRate: 4, moveRate: 2, bob: 2, bobPeriod: 60, line: 0 },
 };
 {
   let m = /case 702:\s*\{[\s\S]{0,400}?num = 6f;/.exec(AI144.text);
@@ -394,19 +490,22 @@ const ai144Overrides = {
   m = /case 1050:[\s\S]{0,400}?vector\.X \*= -1f;/.exec(AI144.text);
   if (!m) throw new Error('AI_144 1050 档未找到');
   ai144Overrides[1050].line = AI144.loc(m.index);
+  m = /case 703:[\s\S]{0,300}?Math\.Cos\(localAI\[0\] \* \(MathF\.PI \/ 30f\)\) \* 2f;\s*num2 = 4;\s*num3 = 2;\s*num = 3f;\s*num4 = 4;/.exec(AI144.text);
+  if (!m) throw new Error('AI_144 703 档未找到');
+  ai144Overrides[703].line = AI144.loc(m.index);
 }
 
 // ================= AI_067（aiStyle 67 滚地族：500/653/1018/1056/1090） =================
 const ai67 = {
-  accel: 0.5, maxSpeed: 4,            // num34/num36（追击档仅 minion 用——宠物 flag12=false 无索敌）
+  accel: 0.5, maxSpeed: 4,            // num50/num52（1456 旧号 num34/num36；追击档仅 minion 用——宠物 flag12=false 无索敌）
   gravity: 0.4, fallCap: 10, teleport: 2000,
-  flyAccel: 0.2, flySpeed: 10,        // num18/num19 追赶飞行
+  flyAccel: 0.2, flySpeed: 10,        // num18/num19 追赶飞行（1457 未重排）
   catchUpRange: 500, catchUpVert: 300, landRange: 200,
   jumpLadder: [-5.1, -7.1, -11.1, -10.1, -9.1],
   lines: {},
 };
 {
-  ai67.lines.accel = firstIn(AI067.text, AI067.loc, /float num34 = ([\d.]+)f;/, 'AI_067 步加速度').line;
+  ai67.lines.accel = firstIn(AI067.text, AI067.loc, /float num50 = ([\d.]+)f;/, 'AI_067 步加速度').line;
   ai67.lines.flyAccel = firstIn(AI067.text, AI067.loc, /float num18 = ([\d.]+)f;/, 'AI_067 追赶加速度').line;
   ai67.lines.flySpeed = firstIn(AI067.text, AI067.loc, /float num19 = ([\d.]+)f;/, 'AI_067 追赶速度').line;
   // 逐款追赶触发距（num3）
@@ -484,13 +583,23 @@ const ai67 = {
 //   AI_026 飞行分支 spriteDirection = direction → flipSign=-1；199 恒 1 → 0；
 //   aiStyle 90/124/144 spriteDirection = player.direction → faceFrom='player'。
 const GROUND_FLIP_NEG = new Set([398, 956, 958, 959, 960, 994]);
+// ★fx48 boss 宠补层常量（sw-fx48-boss-pets.test.ts 钉值,2026-09-12 定谳,1457 锚）：
+const FX48_FLY_WITNESS = new Set([886, 892, 894, 901]); // line = 共享悬停分支头 :60398（B2）
+const FX48_FLY_JITTER = new Set([892, 894]);            // 跳过随机抖动（:60430 `type != 892 && type != 894` 守卫臂）
+const FX48_703_FRAMETO = 4;                             // AI_144 case 703 num4=4 帧钳（追加语义落 frames 后）
 const pets = {};
 const familyOf = (id, st) => {
   if (st === 26) return flying26.has(id) ? 'fly' : 'ground';
   if (st === 67) return 'ground';
   return 'hover'; // 11 / 90 / 124 / 144
 };
-for (const id of petProjIds) {
+// ★fx48 AI_174 豁免（sw-fx48-boss-pets.test.ts B5）：AI_174_MultisegmentPet(:46177)
+//   蠕虫多头三型（883 EaterOfWorlds/887 Destroyer/893 LunaticCultist）不入表 →
+//   PetFollower legacy 回退（单精灵引擎未建模,登记债）。豁免按 aiStyle==174 判定
+//   （后续新增 174 款自动跟随,无需改清单）。
+const ai174Exempt = petProjIds.filter((id) => aiStyleOf(id) === 174);
+const tableIds = petProjIds.filter((id) => !ai174Exempt.includes(id));
+for (const id of tableIds) {
   const st = aiStyleOf(id);
   if (st === undefined) throw new Error(`proj ${id} 无 aiStyle（vanilla-projectiles.json 缺条目）`);
   const fam = familyOf(id, st);
@@ -523,10 +632,16 @@ for (const id of petProjIds) {
       if (s.farAccel) rec.farAccel = s.farAccel;
       if (s.brakeMode) rec.brakeMode = s.brakeMode;
     } else {
-      rec.hoverX = fly26.hoverX; rec.hoverY = fly26.hoverY; rec.jitter = fly26.jitter;
+      rec.hoverX = fly26.hoverX; rec.hoverY = fly26.hoverY;
+      rec.jitter = FX48_FLY_JITTER.has(id) ? 0 : fly26.jitter;
       const ov = flySpeedOv[id];
       if (ov) { rec.speed = ov.speed; rec.accel = ov.accel; }
       else { rec.speed = 14; rec.accel = 0.4; }
+      // fx48 见证锚（key 序：speed/accel 之后、farSpeed/farDist 之前——与 fx48 手补
+      // 条目逐字节同构）：886/892/894/901 line = 共享悬停分支头
+      if (FX48_FLY_WITNESS.has(id)) rec.line = fly26.headLine;
+      if (ov && ov.farSpeed !== undefined) rec.farSpeed = ov.farSpeed;
+      if (ov && ov.farDist !== undefined) rec.farDist = ov.farDist;
       // 774/1046：-70x + 正弦浮游（±8）替代随机抖动（:56489-56495）
       if (id === 774 || id === 1046) { rec.hoverX = -70; rec.jitter = 0; rec.bob = 8; }
     }
@@ -564,21 +679,31 @@ for (const id of petProjIds) {
     rec.line = ov ? ov.line : ai144Base.lines.hover;
   }
   rec.frames = framesOf[id] ?? 1;
+  // fx48 703 追加语义：frameTo 落 frames 之后（key 序与 fx48 手补条目逐字节同构；
+  // 值 4 已由 AI_144 case 703 锚点 `num4 = 4;` 校验）
+  if (id === 703) rec.frameTo = FX48_703_FRAMETO;
   pets[id] = rec;
 }
 
 // ================= 家族默认（运行时回退参数） =================
-const familyCounts = { ground: 0, fly: 0, hover: 0 };
+// key 序照录 fx48 手补态（hover/ground/fly）——保 bare 重跑与现库逐字节同构
+// （pet-ai/sw-fx48 断言用 toEqual 键序不敏感）
+const familyCounts = { hover: 0, ground: 0, fly: 0 };
 for (const r of Object.values(pets)) familyCounts[r.family]++;
 
 const out = {
   meta: {
-    source: 'Terarria1456/Terraria/Projectile.cs',
+    source: `Terarria${VER}/Terraria/Projectile.cs`,
     generatedBy: 'tools/extract-petai.mjs',
-    petProjCount: petProjIds.length,
+    petProjCount: tableIds.length,
     familyCounts,
     /** 未覆盖 aiStyle → PetFollower 回退"肩后悬停近似"（旧统一 AI），见 PetFollower 注释 */
     fallback: 'hover-legacy',
+    /** ★fx48 boss 宠补层（sw-fx48-boss-pets.test.ts 钉值面） */
+    swFx48Ext: {
+      note: '1.4.5 boss 宠 17 条目（1457 Projectile.cs 锚,Item.cs:39417-39440 4797-4817→proj 881-901）; AI_174_MultisegmentPet(:46177) 蠕虫多头三型 883/887/893 不入表→PetFollower legacy 回退（登记债）',
+      exemptAI174: ai174Exempt,
+    },
     methodLines: {
       AI_026: AI026.sigLine,
       AI_067_FreakingPirates: AI067.sigLine,
@@ -608,9 +733,15 @@ const out = {
   pets,
 };
 
-writeFileSync(`${ROOT}/game/src/data/vanilla-petai.json`, `${JSON.stringify(out, null, 1)}\n`);
-const dist = petProjIds.reduce((a, id) => { const k = aiStyleOf(id); a[k] = (a[k] || 0) + 1; return a; }, {});
-console.error(`宠物 proj ${petProjIds.length} 款 → 家族分布`, JSON.stringify(familyCounts));
+const dist = tableIds.reduce((a, id) => { const k = aiStyleOf(id); a[k] = (a[k] || 0) + 1; return a; }, {});
+console.error(`宠物 proj ${tableIds.length} 款（AI_174 豁免 ${ai174Exempt.length} 款：${ai174Exempt.join(',')}）→ 家族分布`, JSON.stringify(familyCounts));
 console.error('aiStyle 分布:', JSON.stringify(dist));
 console.error('AI_026 飞行子型:', [...flying26].sort((a, b) => a - b).join(','));
+if (OUT_JSON) {
+  mkdirSync(OUT_JSON.slice(0, OUT_JSON.lastIndexOf('/')), { recursive: true });
+  writeFileSync(OUT_JSON, `${JSON.stringify(out, null, 1)}\n`);
+  console.error(`[extract-petai] 已写 ${OUT_JSON}（SW_ITEM_VER=${VER}${WRITE_REAL ? ' --write-real 真库' : ' SW_OUT 沙箱'}）`);
+} else {
+  console.error('[extract-petai] 干跑（零写盘）：SW_OUT=<dir> 沙箱输出 / --write-real 更新现库');
+}
 for (const id of [111, 127, 875, 702, 1050, 957, 18, 492, 1056]) console.error(id, JSON.stringify(pets[id]));

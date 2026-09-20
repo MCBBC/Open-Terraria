@@ -1,5 +1,6 @@
 // 光照常数与数据表(Terarria1456 Terraria.Graphics.Light/ 一比一提取)。
 // 行号注释指向原版源码;所有颜色为 0-1 浮点 RGB。
+import { CRACKED_BRICKS_SHEETS } from '../data/tiles';
 
 // ---- 传播衰减(LightMap.cs:47-58 默认值 / LightingEngine.cs:137-202 每帧覆盖) ----
 // let + setter:LightingEngine.UpdateLightDecay 每帧按 waterStyle/夜枭覆盖(ESM live binding,
@@ -111,8 +112,8 @@ export const AREA_PADDING = 28;
 export const NON_VISIBLE_PADDING = 18;
 
 // ---- 遮挡(LightMaskMode.cs / TileLightScanner.GetTileMask:68-87) ----
-/** 裂砖 → 0.80 衰减档(TileID.cs:183: CrackedBricks = {481,482,483}) */
-export const CRACKED_SHEETS = new Set([481, 482, 483]);
+/** 裂砖 → 0.80 衰减档(TileID.cs:183: CrackedBricks = {481,482,483})——★BJ210 收编单源（§6i） */
+export const CRACKED_SHEETS = CRACKED_BRICKS_SHEETS;
 
 /** ★挡光布尔表(Main.tileBlockLight,1457 Main.cs Initialize_TileAndNPCData2 全量机械提取,
  *  278 项;TileLightScanner.LightIsBlocked :154-165 读表判定,与 tileSolid/opacity 无关)。

@@ -33,7 +33,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_SHEETS } from '../../../data/tiles';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
@@ -133,15 +133,15 @@ const SMALL_PILE = TILE_BY_KEY['v_185_small_decos']!;
 
 /** 活木墙（w244_livingwoodunsafe；原版墙 id 直存） */
 const WALL_LIVING_WOOD = 244;
-/** TileID.Sets.Clouds（Terraria.ID/TileID.cs:197 Factory.CreateBoolSet）——eLT 云锚附近截断用 */
-const LT_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
+/** TileID.Sets.Clouds（Terraria.ID/TileID.cs:197 Factory.CreateBoolSet）——eLT 云锚附近截断用——★BJ210 收编单源 data/tiles.ts:CLOUDS_SHEETS（逐值对拍 6≡6,§6i） */
+const LT_CLOUD_SHEETS = CLOUDS_SHEETS;
 /** Main.wallDungeon（Main.cs:10734-10745）= 地牢墙族——★BJ187 收编
  *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
 const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 // TileID.Sets.Ore（TileID.cs:403）——GrowLivingTree 地面类型门禁用；★BJ203 收编单源
 // data/tiles.ts:ORE_SHEETS（同名 import,tests/tile-domain-sentinel §6h）
-/** TileID.Sets.Clouds（TileID.cs:197）——canPlaceLeaves 排除 */
-const CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
+/** TileID.Sets.Clouds（TileID.cs:197）——canPlaceLeaves 排除——★BJ210 收编单源（§6i） */
+const CLOUD_SHEETS = CLOUDS_SHEETS;
 /** LivingTrees 选址一票否决：地牢砖（cs:15627-15631） */
 const EXCLUDE_BRICK = new Set([41, 43, 44, 481, 482, 483]);
 

@@ -9,14 +9,14 @@ import type { TileStore } from '../../TileStore';
 import { FastRandom } from '../../../core/rng';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, BOULDERS_IDS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, BOULDERS_IDS, CLOUDS_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { placeTight } from './ShimmerPass';
 import { placeTilePrologueClear } from './WorldGenTileHelpers';
 import { flipGenSolid, genSolidType } from './GenSolid';
 import { smoothSlope } from './HalfBrickPass';
 
-const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
+const CLOUDS = CLOUDS_IDS;   // ★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS（内部 id 域,§6i）
 
 /** SurfaceMap.FromArea（Desert/SurfaceMap.cs 1:1）：全列首实心扫描（云族重置），
  *  Bottom 统计钳到 (int)worldSurface-10，Average=原始均值 */

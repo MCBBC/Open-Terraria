@@ -56,6 +56,15 @@ import {
   PLATFORMS_IDS, IS_A_TREE_TRUNK_IDS,
   ORE_SHEETS, NOT_REALLY_SOLID_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS,
   IS_A_CONTAINER_SHEETS,
+  CLOUDS_SHEETS, CLOUDS_IDS, CRACKED_BRICKS_SHEETS, CRACKED_BRICKS_IDS,
+  CONV_GRASS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS,
+  CONV_SNOW_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS,
+  CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS,
+  MOSS_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, TILE_MOSS_BRICK_SHEETS,
+  CONV_SAND_IDS, CONV_HARDENED_SAND_IDS, CONV_SANDSTONE_IDS,
+  PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS,
+  COMMON_SAPLING_SHEETS, COMMON_SAPLING_IDS, GETS_DESTROYED_FOR_METEORS_SHEETS,
+  IS_SHAKEABLE_SHEETS, GETS_CHECKED_FOR_LEAVES_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS,
 } from '../src/data/tiles';
 import { canPoundTile } from '../src/world/gen/vanilla/HalfBrickPass';
 import { TILE_CUT } from '../src/core/Game';
@@ -731,6 +740,301 @@ describe('§6h BJ203 收编金标:TileID.cs 五表第二收编批(Ore/NotReallyS
       ['src/render/VanillaTiler.ts', 'NOT_REALLY_SOLID_SHEETS'],
     ];
     it('禁复活:33 处收编副本「=new Set/=lutFromSheets(new Set」字节签名禁入(单源别名转出口不受影响)', () => {
+      for (const [file, sig] of FORBIDDEN) {
+        expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
+      }
+    });
+    it('防空洞正锚:每个收编文件必须仍消费 data/tiles.ts 单源名', () => {
+      for (const [file, anchor] of REQUIRED) {
+        expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
+      }
+    });
+  });
+});
+
+// ★BJ210 批变异证红记录(2026-09-20,均在验证后还原):
+//   M20 CLOUDS_SHEETS 漏 719 → §6i Clouds 金标红;
+//   M21 CONV_SAND_IDS 错域回退(new Set(CONV_SAND_SHEETS) 裸值顶替,内部 53 幻影入表)
+//      → §6i 镜像+域判别两红(沙块内部 53(sheet404 化石)不在 IDS);
+//   M22 TreeShake 再立 const TREE_SHAKEABLE = new Set([5,72,323,...]) 副本 → §6i 结构锁红。
+describe('§6i BJ210 收编金标:TileID.cs 第三收编批(Clouds/CrackedBricks/Conversion 全族+四杂表)', () => {
+  // 2026-09-20 定谳:BJ203 登记债清偿——tools/_bj210-census.mjs 字符串感知 lexer
+  //   （泛型 new Set<T> 与 ids/idsByVanillaSheet/S256/boolArrayOf 包装习语全扫描）
+  //   钓出 16 表 ~90 处字面副本，逐值对拍 1457 终值全等后收编 data/tiles.ts 单源;
+  //   消费面别名改指;1457≡1458 同行号同值零增量（Terarria1458 TileID.cs 抽核）。
+  it('CLOUDS_SHEETS ≡ TileID.cs:197 全 6 项(逐值钉死;1457≡1458 零增量)', () => {
+    expect(CLOUDS_SHEETS.size).toBe(6);
+    expect([...CLOUDS_SHEETS].sort((a, b) => a - b)).toEqual([189, 196, 460, 717, 718, 719]);
+  });
+  it('CLOUDS_IDS 内部域镜像:6 id 逐值钉死(91,105,552,728,729,730)+读向还原', () => {
+    expect([...CLOUDS_IDS].sort((a, b) => a - b)).toEqual([91, 105, 552, 728, 729, 730]);
+    for (const sh of [189, 196, 460, 717, 718, 719]) {
+      const internal = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === sh);
+      expect(CLOUDS_IDS.has(internal)).toBe(true);
+    }
+  });
+  it('CRACKED_BRICKS_SHEETS ≡ TileID.cs:183={481,482,483}(逐值钉死)+IDS 镜像 3 id', () => {
+    expect([...CRACKED_BRICKS_SHEETS].sort((a, b) => a - b)).toEqual([481, 482, 483]);
+    expect([...CRACKED_BRICKS_IDS].sort((a, b) => a - b)).toEqual([95, 292, 392]);
+  });
+  it('Conversion.Grass ≡ TileID.cs:18 全 6 项(≡MergesWithDirtInASpecialWay :12 同值)', () => {
+    expect([...CONV_GRASS_SHEETS].sort((a, b) => a - b)).toEqual([2, 23, 109, 199, 477, 492]);
+  });
+  it('Conversion.JungleGrass/GolfGrass(:14/:20)+Snow/Stone/Ice(:24/:26/:28) 逐值钉死', () => {
+    expect([...CONV_JUNGLE_GRASS_SHEETS].sort((a, b) => a - b)).toEqual([60, 661, 662]);
+    expect([...CONV_GOLF_GRASS_SHEETS].sort((a, b) => a - b)).toEqual([477, 492]);
+    expect([...CONV_SNOW_SHEETS].sort((a, b) => a - b)).toEqual([147]);
+    expect([...CONV_STONE_SHEETS].sort((a, b) => a - b)).toEqual([1, 25, 117, 203]);
+    expect([...CONV_ICE_SHEETS].sort((a, b) => a - b)).toEqual([161, 163, 164, 200]);
+  });
+  it('Conversion.Sand/HardenedSand/Sandstone/Thorn(:30/:32/:34/:36) 逐值钉死', () => {
+    expect([...CONV_SAND_SHEETS].sort((a, b) => a - b)).toEqual([53, 112, 116, 234]);
+    expect([...CONV_HARDENED_SAND_SHEETS].sort((a, b) => a - b)).toEqual([397, 398, 399, 402]);
+    expect([...CONV_SANDSTONE_SHEETS].sort((a, b) => a - b)).toEqual([396, 400, 401, 403]);
+    expect([...CONV_THORN_SHEETS].sort((a, b) => a - b)).toEqual([32, 69, 352, 655]);
+  });
+  it('Conversion.Moss(:38)/MossBrick(:40) 全 11 项+双语义名同值锁(≡Main.tileMoss/tileMossBrick)', () => {
+    expect([...MOSS_SHEETS].sort((a, b) => a - b)).toEqual(
+      [179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+    expect([...MOSS_BRICK_SHEETS].sort((a, b) => a - b)).toEqual(
+      [512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+    expect(MOSS_SHEETS).toBe(TILE_MOSS_SHEETS);               // Main.tileMoss(Main.cs:7146-7187) 语义名同源
+    expect(MOSS_BRICK_SHEETS).toBe(TILE_MOSS_BRICK_SHEETS);   // tileMossBrick(:309) 语义名同源
+  });
+  it('Conversion 内部域镜像三表:SAND/HARDENED_SAND/SANDSTONE 逐值钉死', () => {
+    expect([...CONV_SAND_IDS].sort((a, b) => a - b)).toEqual([22, 121, 278, 395]);
+    expect([...CONV_HARDENED_SAND_IDS].sort((a, b) => a - b)).toEqual([52, 137, 282, 516]);
+    expect([...CONV_SANDSTONE_IDS].sort((a, b) => a - b)).toEqual([51, 514, 515, 517]);
+  });
+  it('PreventsTileRemovalIfOnTopOfIt ≡ TileID.cs:169 全 17 项(逐值钉死)', () => {
+    expect(PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS.size).toBe(17);
+    expect([...PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS].sort((a, b) => a - b)).toEqual(
+      [5, 26, 72, 323, 470, 475, 488, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+  });
+  it('FriendlyFairyCanLureTo ≡ TileID.cs:413 全 17 项(逐值钉死)', () => {
+    expect(FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS.size).toBe(17);
+    expect([...FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS].sort((a, b) => a - b)).toEqual(
+      [8, 12, 21, 107, 108, 111, 169, 211, 221, 222, 223, 227, 236, 467, 639, 665, 702]);
+  });
+  it('CommonSapling ≡ TileID.cs:173 全 4 项+IDS 镜像(24,627,629,644)', () => {
+    expect([...COMMON_SAPLING_SHEETS].sort((a, b) => a - b)).toEqual([20, 590, 595, 615]);
+    expect([...COMMON_SAPLING_IDS].sort((a, b) => a - b)).toEqual([24, 627, 629, 644]);
+  });
+  it('GetsDestroyedForMeteors ≡ TileID.cs:165 全 13 项(逐值钉死)', () => {
+    expect(GETS_DESTROYED_FOR_METEORS_SHEETS.size).toBe(13);
+    expect([...GETS_DESTROYED_FOR_METEORS_SHEETS].sort((a, b) => a - b)).toEqual(
+      [5, 32, 352, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+  });
+  it('面二三名同值锁:IsShakeable(:163)=GetsCheckedForLeaves(:167)=PreventsTileReplace(:171) 同一值源 13 项', () => {
+    // 值同=零行为差:三名必须指向同一 Set 对象(单一值源);若原版未来分叉,此处先红。
+    expect(IS_SHAKEABLE_SHEETS).toBe(GETS_CHECKED_FOR_LEAVES_SHEETS);
+    expect(IS_SHAKEABLE_SHEETS).toBe(PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS);
+    expect(IS_SHAKEABLE_SHEETS.size).toBe(13);
+    expect([...IS_SHAKEABLE_SHEETS].sort((a, b) => a - b)).toEqual(
+      [5, 72, 323, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+    // 今日值=IsATreeTrunk(:161)∪{323 棕榈}(关系注记;两表在原版相互独立,此处仅证当前一致)
+    const asUnion = new Set([...IS_A_TREE_TRUNK_SHEETS, 323]);
+    expect(asUnion.size).toBe(IS_SHAKEABLE_SHEETS.size);
+    for (const v of asUnion) expect(IS_SHAKEABLE_SHEETS.has(v)).toBe(true);
+  });
+  it('域判别(错域回退即红):Clouds/CRACKED/SAND/SAPLING 四组掩蔽对', () => {
+    // Clouds:sheet 189∈SHEETS/内部 91(其真身)∈IDS;反向双落空——
+    //   内部 189(sheet 592 已折草)∉IDS,sheet 91∉SHEETS。
+    expect(CLOUDS_SHEETS.has(189)).toBe(true);
+    expect(CLOUDS_IDS.has(91)).toBe(true);
+    expect(CLOUDS_IDS.has(189)).toBe(false);      // 错域顶替即红
+    expect(CLOUDS_SHEETS.has(91)).toBe(false);    // 错域顶替即红
+    // CRACKED:内部 95(=sheet 481)∈IDS;内部 481(sheet 328)∉IDS。
+    expect(CRACKED_BRICKS_IDS.has(95)).toBe(true);
+    expect(CRACKED_BRICKS_IDS.has(481)).toBe(false);
+    // SAND:内部 22(=sheet 53)∈IDS;内部 53(sheet 404 化石)∉IDS;sheet 22(魔矿)∉SHEETS。
+    expect(CONV_SAND_IDS.has(22)).toBe(true);
+    expect(CONV_SAND_IDS.has(53)).toBe(false);
+    expect(CONV_SAND_SHEETS.has(22)).toBe(false);
+    // SAPLING:内部 24(=sheet 20 苗)∈IDS;内部 20(sheet 3 草)∉IDS。
+    expect(COMMON_SAPLING_IDS.has(24)).toBe(true);
+    expect(COMMON_SAPLING_IDS.has(20)).toBe(false);
+  });
+  describe('§6i 结构锁:BJ210 收编副本禁复活（字节签名禁入+防空洞正锚）', () => {
+    const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+    const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+    const F = (name: string) => new RegExp(`\\b${name}\\s*=\\s*new\\s+Set`);
+    const IDS = (name: string) => new RegExp(`\\b${name}\\s*=\\s*idsByVanillaSheet|\\b${name}\\s*=\\s*ids\\(`);
+    const S256LIT = (name: string) => new RegExp(`\\b${name}\\s*=\\s*S256\\(\\s*\\[\\s*\\d`);
+    const FORBIDDEN: Array<[string, RegExp, string]> = [
+      // Clouds(sheet 域)
+      ['src/entities/Player.ts', F('CLOUD_SHEETS'), 'CLOUDS_SHEETS'],
+      ['src/core/Game.ts', F('TILE_CLOUD_SHEETS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', F('CLOUDS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('CLOUD_SHEETS_FGG'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/FinishRemixWorldPass.ts', F('CLOUD_SHEETS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/LivingTreePass.ts', F('LT_CLOUD_SHEETS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/LivingTreePass.ts', F('CLOUD_SHEETS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/NotTheBeesPass.ts', F('CLOUDS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('DESERT_CLOUD_IDS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('CLOUDS'), 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/DungeonPass.ts', F('DG_CLOUDS'), 'CLOUDS_SHEETS'],
+      // Clouds(内部域)
+      ['src/world/gen/vanilla/CorruptionPass.ts', IDS('CLOUD_IDS'), 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/DesertPass.ts', IDS('CLOUDS'), 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/TeleporterPass.ts', IDS('CLOUD_TILES'), 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', IDS('SGIS_CLOUD_IDS'), 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', IDS('CLOUDS'), 'CLOUDS_IDS'],
+      // CrackedBricks(sheet 域)
+      ['src/data/grappleHooks.ts', F('CRACKED_BRICK_SHEETS'), 'CRACKED_BRICKS_SHEETS'],
+      ['src/lighting/lightTables.ts', F('CRACKED_SHEETS'), 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', F('CRACKED'), 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('CRACKED_FGG'), 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/FinishRemixWorldPass.ts', F('CRACKED_BRICKS'), 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/NotTheBeesPass.ts', F('CRACKED_BRICKS'), 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('EW_CRACKED'), 'CRACKED_BRICKS_SHEETS'],
+      // CrackedBricks(内部域/派生)
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', IDS('CRACKED_BRICKS'), 'CRACKED_BRICKS_IDS'],
+      ['src/world/gen/vanilla/FinishDrunkGenPass.ts', IDS('CRACKED_BRICKS'), 'CRACKED_BRICKS_IDS'],
+      ['src/world/gen/vanilla/DungeonDualLayout.ts', /crackedBricks:\s*boolArrayOf\(\s*\[\s*\d/, 'boolArrayOf([...CRACKED_BRICKS_SHEETS])'],
+      // Conversion 族+Moss/MossBrick(sheet 域;Game 同名 import 直用=无需别名)
+      ['src/core/Game.ts', F('CONV_MOSS_SHEETS'), 'MOSS_SHEETS'],
+      ['src/core/Game.ts', F('CONV_MOSSBRICK_SHEETS'), 'MOSS_BRICK_SHEETS'],
+      ['src/core/Game.ts', F('CONVERSION_GRASS_SHEETS'), 'CONV_GRASS_SHEETS'],
+      ['src/core/Game.ts', F('PREVENTS_TILE_REPLACE_SHEETS'), 'PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS'],
+      ['src/ui/JourneyBrowser.ts', F('TILE_GRASS'), 'CONV_GRASS_SHEETS'],
+      ['src/world/evolution/PlantRules.ts', F('MOSS_CONVERT_SHEETS'), 'MOSS_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_JUNGLE_GRASS'), 'CONV_JUNGLE_GRASS_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_GRASS'), 'CONV_GRASS_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_GOLF_GRASS'), 'CONV_GOLF_GRASS_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_STONE'), 'CONV_STONE_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_ICE'), 'CONV_ICE_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_SAND'), 'CONV_SAND_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_HARD_SAND'), 'CONV_HARDENED_SAND_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_SANDSTONE'), 'CONV_SANDSTONE_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_THORN'), 'CONV_THORN_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CONV_SNOW'), 'CONV_SNOW_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('TILE_MOSS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('TILE_MOSS_BRICK'), 'MOSS_BRICK_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('GETS_CHECKED_FOR_LEAVES'), 'GETS_CHECKED_FOR_LEAVES_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', F('LAVA_BURN_TO_AIR'), 'CONV_GRASS_SHEETS'],
+      ['src/render/TileMergeFamily.ts', F('SNOW'), 'CONV_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/GemPasses.ts', F('TILE_MOSS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/MossPass.ts', F('MOSS_SHEETS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/PilesPass.ts', F('TILE_MOSS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/HiveSpiderPass.ts', F('STAL_MOSS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/ShimmerPass.ts', F('MOSS_SHEETS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('EW_CONV_MOSS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('TILE_MOSS_BRICK'), 'MOSS_BRICK_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('TILE_MOSS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('TILE_MOSS_BRICK'), 'MOSS_BRICK_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('ICE_SET'), 'CONV_ICE_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', F('ICE_SET_3X2'), 'CONV_ICE_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('ICE_SHEET_SET'), 'CONV_ICE_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('PREVENTS_REMOVAL'), 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('TILE_MOSS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('TILE_MOSS_BRICK'), 'MOSS_BRICK_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('PREVENTS_REMOVAL_SS'), 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('TILE_MOSS_SS'), 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('TILE_MOSS_BRICK_SS'), 'MOSS_BRICK_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('SNOW_SS'), 'CONV_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('ICE_SS'), 'CONV_ICE_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('SAND_SS'), 'CONV_SAND_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('HARDSAND_SS'), 'CONV_HARDENED_SAND_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', F('SANDSTONE_SS'), 'CONV_SANDSTONE_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', F('PREVENTS_REMOVAL_FSC'), 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', F('PREVENTS_REMOVAL_ON_TOP'), 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/MicroBiomesPass.ts', F('PREVENTS_REMOVAL_MB'), 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('GETS_DESTROYED_FOR_METEORS'), 'GETS_DESTROYED_FOR_METEORS_SHEETS'],
+      ['src/player/SmartCursor.ts', F('COMMON_SAPLING'), 'COMMON_SAPLING_SHEETS'],
+      ['src/world/gen/vanilla/TreePass.ts', F('COMMON_SAPLING_VAN'), 'COMMON_SAPLING_SHEETS'],
+      ['src/world/gen/vanilla/TreePass.ts', IDS('COMMON_SAPLING'), 'COMMON_SAPLING_IDS'],
+      ['src/world/gen/vanilla/TreePass.ts', IDS('PALM_GROUND'), 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/TreePass.ts', IDS('SAND_CONV_IDS'), 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/UndergroundJungleTreesPass.ts', IDS('SAPLING_OK'), 'COMMON_SAPLING_IDS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', IDS('SAND_CONV'), 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', IDS('SAND_FAMILY'), 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', IDS('PALM_GROUND'), 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', IDS('CONV_SANDSTONE'), 'CONV_SANDSTONE_IDS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', IDS('CONV_HARDENED_SAND'), 'CONV_HARDENED_SAND_IDS'],
+      // VanillaFraming S256 字面派生面(单源名派生不受影响,禁裸字面数组复活)
+      ['src/render/VanillaFraming.ts', S256LIT('TILE_MOSS'), 'S256([...TILE_MOSS_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('TILE_MOSS_BRICK'), 'S256([...MOSS_BRICK_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('MERGES_WITH_DIRT_SPECIAL'), 'S256([...CONV_GRASS_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('CONVERSION_MOSS'), 'S256([...MOSS_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('CONVERSION_MOSS_BRICK'), 'S256([...MOSS_BRICK_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('CONVERSION_GRASS'), 'S256([...CONV_GRASS_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_SNOW'), 'S256([...CONV_SNOW_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_ICES'), 'S256([...CONV_ICE_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_ORE'), 'S256([...ORE_SHEETS])'],
+      // 面二三名同值案消费面
+      ['src/world/TreeShake.ts', F('TREE_SHAKEABLE_SHEETS'), 'IS_SHAKEABLE_SHEETS'],
+    ];
+    const REQUIRED: Array<[string, string]> = [
+      ['src/entities/Player.ts', 'CLOUDS_SHEETS'],
+      ['src/core/Game.ts', 'CLOUDS_SHEETS'],
+      ['src/core/Game.ts', 'MOSS_SHEETS'],
+      ['src/core/Game.ts', 'PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS'],
+      ['src/core/Game.ts', 'CONV_GRASS_SHEETS'],
+      ['src/entities/Enemy.ts', 'FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS'],
+      ['src/entities/RollingBoulder.ts', 'FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS'],
+      ['src/world/MeteorFall.ts', 'GETS_DESTROYED_FOR_METEORS_SHEETS'],
+      ['src/world/TreeShake.ts', 'IS_SHAKEABLE_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'CONV_THORN_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'GETS_CHECKED_FOR_LEAVES_SHEETS'],
+      ['src/world/evolution/PlantRules.ts', 'MOSS_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', 'CONV_GRASS_SHEETS'],
+      ['src/lighting/lightTables.ts', 'CRACKED_BRICKS_SHEETS'],
+      ['src/data/grappleHooks.ts', 'CRACKED_BRICKS_SHEETS'],
+      ['src/ui/JourneyBrowser.ts', 'CONV_GRASS_SHEETS'],
+      ['src/render/TileMergeFamily.ts', 'CONV_SNOW_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'TILE_MOSS_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'ORE_SHEETS'],
+      ['src/player/SmartCursor.ts', 'COMMON_SAPLING_SHEETS'],
+      ['src/world/gen/vanilla/CorruptionPass.ts', 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/DesertPass.ts', 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/TeleporterPass.ts', 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/DungeonPass.ts', 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/DungeonPass.ts', 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'CLOUDS_IDS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'CRACKED_BRICKS_IDS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'MOSS_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/FinishRemixWorldPass.ts', 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/FinishRemixWorldPass.ts', 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/LivingTreePass.ts', 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/NotTheBeesPass.ts', 'CONV_GRASS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'CONV_GRASS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'GETS_DESTROYED_FOR_METEORS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'MOSS_BRICK_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'CLOUDS_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'CONV_ICE_SHEETS'],
+      ['src/world/gen/vanilla/FinishDrunkGenPass.ts', 'CRACKED_BRICKS_IDS'],
+      ['src/world/gen/vanilla/DungeonDualLayout.ts', 'CRACKED_BRICKS_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'CONV_ICE_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', 'CONV_SANDSTONE_IDS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', 'CONV_HARDENED_SAND_IDS'],
+      ['src/world/gen/vanilla/TreePass.ts', 'CONV_SAND_IDS'],
+      ['src/world/gen/vanilla/TreePass.ts', 'COMMON_SAPLING_IDS'],
+      ['src/world/gen/vanilla/TreePass.ts', 'COMMON_SAPLING_SHEETS'],
+      ['src/world/gen/vanilla/UndergroundJungleTreesPass.ts', 'COMMON_SAPLING_IDS'],
+      ['src/world/gen/vanilla/TrackPass.ts', 'CONV_SAND_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/MicroBiomesPass.ts', 'PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS'],
+      ['src/world/gen/vanilla/GemPasses.ts', 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/MossPass.ts', 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/PilesPass.ts', 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/HiveSpiderPass.ts', 'TILE_MOSS_SHEETS'],
+      ['src/world/gen/vanilla/ShimmerPass.ts', 'TILE_MOSS_SHEETS'],
+    ];
+    it('禁复活:BJ210 收编副本字面定义签名禁入（单源别名/拷贝转出口不受影响）', () => {
       for (const [file, sig] of FORBIDDEN) {
         expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
       }

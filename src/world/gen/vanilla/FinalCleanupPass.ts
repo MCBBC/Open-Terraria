@@ -37,7 +37,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_IDS, CRACKED_BRICKS_SHEETS, MOSS_SHEETS, CONV_SAND_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
@@ -86,8 +86,9 @@ const SAND_FALL_BASE = new Map<number, number>([
 /** TileID.Sets.Boulders(1456 TileID.cs:195)——★BJ168-债2（2026-09-19）本地
  *  idsByVanillaSheet 副本拆除,收编 data/tiles.ts 单源 BOULDERS_IDS（内部 id 域,
  *  与旧习语逐值全等已探针定谳,tests/tile-domain-sentinel §6d 钉死） */
-/** TileID.Sets.Clouds(1456 TileID.cs:197) */
-const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
+/** TileID.Sets.Clouds(1456 TileID.cs:197)——★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS
+ *  （内部 id 域,与旧 idsByVanillaSheet 平移副本逐值全等,tests/tile-domain-sentinel §6i） */
+const CLOUDS = CLOUDS_IDS;
 /** TileID.Sets.Paintings(1456 TileID.cs:187) */
 const PAINTINGS = idsByVanillaSheet(245, 246, 240, 241, 242);
 /** Main.wallDungeon(Main.cs:10734-10745)——★BJ187 收编 data/tiles.ts:
@@ -231,8 +232,9 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   }
 }
 
-/** TileID.Sets.Conversion.Moss（TileID.cs:38，→ 石 1，ShimmerCleanUp 用） */
-const CONV_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
+/** TileID.Sets.Conversion.Moss（TileID.cs:38，→ 石 1，ShimmerCleanUp 用）——★BJ210 收编
+ *  单源 data/tiles.ts:MOSS_SHEETS（sheet 域,逐值对拍 11≡11,§6i） */
+const CONV_MOSS = MOSS_SHEETS;
 /** GetTileMossColor（cs:81954）：苔藓 sheet → 色号（case 184 的 frameX=22*色号） */
 const MOSS_COLOR: Record<number, number> = {
   179: 0, 512: 0, 180: 1, 513: 1, 181: 2, 514: 2, 182: 3, 515: 3, 183: 4, 516: 4,
@@ -2380,7 +2382,7 @@ function checkOasisPlantSweep(st: TileStore, ctx: SweepCtx, i: number, j: number
 }
 
 /** Conversion.Sand（TileID.Sets.Conversion.Sand={53,112,116,234}）——绿洲植物基座族 */
-const SAND_CONV_IDS_FC = idsByVanillaSheet(53, 112, 116, 234);
+const SAND_CONV_IDS_FC = CONV_SAND_IDS;   // ★BJ210 收编单源 data/tiles.ts:CONV_SAND_IDS（§6i）
 const OASIS_PLANT = sid(530);
 
 /** case 184（cs:85888-85952）：★num20 无条件掷 → 四向首个苔藓邻格定色定向 */
@@ -4347,7 +4349,7 @@ export function runFinalCleanupPass(
 // 未移植 → 其后的 PaintTrees/PaintMushrooms 颜色带掷骰位次相对 vanilla 有位移
 // （仅涂色色相分布差，无格子几何差；备案=SSS-CELEB 遗留#1）。
 
-const CRACKED_BRICKS = idsByVanillaSheet(481, 482, 483);   // ★IIIII101e 勘误：TileID.cs:183 CrackedBricks={481,482,483}，旧值(48,487)=Spikes+PicnicTable 转写错（paint 域）
+const CRACKED_BRICKS = CRACKED_BRICKS_IDS;   // ★IIIII101e 勘误：TileID.cs:183 CrackedBricks={481,482,483}，旧值(48,487)=Spikes+PicnicTable 转写错（paint 域）——★BJ210 收编单源 data/tiles.ts:CRACKED_BRICKS_IDS（§6i）
 /** ★BJ187 收编 data/tiles.ts:TILE_DUNGEON_IDS 单源（旧 idsByVanillaSheet 平移副本逐值全等） */
 const TILE_DUNGEON_FC = TILE_DUNGEON_IDS;
 const RAINBOW_BASE = 13;                       // GetRainbowPaintIDForPosition 基色
@@ -4782,9 +4784,9 @@ function isSolidTileFC(st: TileStore, x: number, y: number): boolean {
 // 地表 Dirt→23 系腐蚀转化(⑨)；其余为 paint 域(paint/paintWall 通道)与箱内 678 注入。
 // 掷流序＝①初始 Next(13,25) ②逐列地牢砖色选(仅首个含砖列,列内**全行扫完**) ③全图
 // Ash Next(15) ④箱循环 Next(10)×N——位次敏感，勿移动。
-const CLOUD_SHEETS_FGG = new Set([189, 196, 460, 717, 718, 719]);   // TileID.Sets.Clouds
+const CLOUD_SHEETS_FGG = CLOUDS_SHEETS;   // TileID.Sets.Clouds——★BJ210 收编单源（§6i）
 const DUNGEON_BRICKS_FGG = TILE_DUNGEON_SHEETS;    // Main.tileDungeon（★BJ187 收编 data/tiles.ts 单源,6 项逐值全等）
-const CRACKED_FGG = new Set([481, 482, 483]);                       // ★IIIII101e 勘误：CrackedBricks={481,482,483}（TileID.cs:183），旧值(48,487)系转写错（paint 域）
+const CRACKED_FGG = CRACKED_BRICKS_SHEETS;                          // ★IIIII101e 勘误：CrackedBricks={481,482,483}（TileID.cs:183），旧值(48,487)系转写错（paint 域）——★BJ210 收编单源（§6i）
 const KILL_ABOVE_FGG = new Set([3, 73, 27, 596, 616, 82, 83, 186, 187, 185, 227]);
 
 export function runFinishGetGoodWorld(

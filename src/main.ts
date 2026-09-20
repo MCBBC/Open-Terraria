@@ -856,8 +856,9 @@ kvHas('sandboxworld.quicksave').then(async () => {
     veil.id = 'sw-boot-prime';
     veil.innerHTML = `<style>
       #sw-boot-prime { position: fixed; inset: 0; z-index: 10000; background: #000;
-        display: flex; align-items: center; justify-content: center; }
-    </style><canvas width="52" height="53"></canvas>`;
+        display: flex; align-items: center; justify-content: center;
+        flex-direction: column; gap: 16px; }
+    </style><canvas width="52" height="53"></canvas><canvas class="bootbar" width="96" height="14"></canvas>`;
     document.body.appendChild(veil);
     bootVeil = veil;
     // ★资源指示器提前挂载(2026-08-27 用户要求):从向日葵幕阶段就显示
@@ -872,12 +873,42 @@ kvHas('sandboxworld.quicksave').then(async () => {
     sfImg.onload = () => { sfOk = true; };
     sfImg.src = 'sprites/vanilla-ui/UI_Sunflower_Loading.png';   // vanilla-ui 散件常驻,首访即可得
     const sfT0 = performance.now();
+    // ★首屏零素材像素读条(2026-09-20 用户要求):向日葵精灵图自身下载完成前
+    //   画布纯黑=「像卡住」窗口——加一条程序化斜纹读条(原版加载屏样式,青色
+    //   45° 斜纹 2px 步进,96×14 独立小画布),首帧即动零 fetch 依赖;向日葵
+    //   onload 后交棒:条停画清+display:none,幕回归纯向日葵形态。
+    const barCv = veil.querySelector('.bootbar') as HTMLCanvasElement;
+    const bctx = barCv.getContext('2d')!;
+    let barDone = false;
+    const drawBootBar = (now: number): void => {
+      const W = barCv.width, H = barCv.height;
+      bctx.clearRect(0, 0, W, H);
+      bctx.fillStyle = '#0a0e20';                       // 槽底
+      bctx.fillRect(0, 0, W, H);
+      bctx.fillStyle = '#7d92d6';                       // 1px 边框
+      bctx.fillRect(0, 0, W, 1); bctx.fillRect(0, H - 1, W, 1);
+      bctx.fillRect(0, 0, 1, H); bctx.fillRect(W - 1, 0, 1, H);
+      bctx.fillStyle = '#59c8ff';                       // 45° 斜纹(2px 宽,8px 周期)
+      const off = Math.floor(now / 60) % 8;
+      for (let y = 1; y < H - 1; y++) {
+        for (let x = 1; x < W - 1; x++) {
+          if (((x + y + off) >> 2) % 2 === 0) bctx.fillRect(x, y, 1, 1);
+        }
+      }
+    };
     const sfStep = () => {
       if (!veil.isConnected) return;   // 撤除即停
       if (sfOk && sfImg.width > 0) {
         const row = (Math.floor((performance.now() - sfT0) / 50) + 10) % 19;
         cctx.clearRect(0, 0, 52, 53);
         cctx.drawImage(sfImg, 0, row * 53, 52, 53, 0, 0, 52, 53);
+        if (!barDone) {                                // 交棒:条隐去,回归纯向日葵
+          barDone = true;
+          bctx.clearRect(0, 0, barCv.width, barCv.height);
+          barCv.style.display = 'none';
+        }
+      } else {
+        drawBootBar(performance.now());
       }
       requestAnimationFrame(sfStep);
     };

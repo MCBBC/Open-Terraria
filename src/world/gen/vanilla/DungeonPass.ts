@@ -10,7 +10,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
 import { wgSpawnNpc, type GenState } from './GenState';   // ★IIIII194 值引入（老头 wg 实体落地）
-import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_TABLE_IDS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_TABLE_IDS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_SHEETS } from '../../../data/tiles';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
@@ -106,10 +106,9 @@ const DG_SOLID_TOP = SOLID_TOP_SHEETS;
 const DG_DUNGEON_TILES = TILE_DUNGEON_SHEETS;
 const DG_DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 // ★IIIII112：TileID.Sets.Clouds（TileID.cs:197）——DungeonDesertCleanup→FindLowestCloud
-//   的活性格判定面（vanilla sheet 域→内部 id）
-const DG_CLOUD_SHEETS = new Set(
-  [189, 196, 460, 717, 718, 719].map((sh) => TILE_INTERNAL_BY_SHEET.get(sh)).filter((v) => v !== undefined),
-);
+//   的活性格判定面（vanilla sheet 域→内部 id）——★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS
+//   （与旧 TILE_INTERNAL_BY_SHEET.map 平移逐值全等,tests/tile-domain-sentinel §6i）
+const DG_CLOUD_SHEETS = CLOUDS_IDS;
 const DG_FRAMED_NOT_CUT = new Set<number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const d = TILE_DEFS[i];
@@ -614,7 +613,7 @@ const snap: SnapFn = (name) => {
     //   Legacy 种子（entBK!=0 且 entAK!=0）整段零掷零触碰（caves-checkpoint 金标不动）。
     //   ★本批迁移要点：环内的每座各自一套,且两座 Setup 环都在任何 y 锚掷之前
     //   （cs:14833-14837 整体先 Setup 再进两段 MakeDungeon 序）。
-    const DG_CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
+    const DG_CLOUDS = CLOUDS_SHEETS;   // TileID.Sets.Clouds——★BJ210 收编单源（sheet 域,§6i）
     const cloudsNear = (cx: number, cy: number, dist: number): boolean => {
       for (let x = cx - dist; x <= cx + dist; x++) {
         for (let y = cy - dist; y <= cy + dist; y++) {
@@ -3765,7 +3764,7 @@ const snap: SnapFn = (name) => {
   //   不入本集）。dgSpikes 入口按 gfStyles 重建；非 dual gfStyles=[] ⇒ 集=基表=旧径。
   let spkCracked211: Set<number> | null = null;
   const buildSpkCracked211 = (): void => {
-    const s = new Set<number>([481, 482, 483]);
+    const s = new Set<number>(CRACKED_BRICKS_SHEETS);   // Sets.CrackedBricks 基表——★BJ210 单源拷贝（§6i）
     const addOf = (st0: import('./DungeonStyles1457').DungeonStyleData): void => {
       s.add(st0.BrickCrackedTileType);
       for (const sb of st0.SubStyles ?? []) addOf(sb);
@@ -8990,7 +8989,7 @@ const snap: SnapFn = (name) => {
     const E137_FALLING = new Set<number>([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
     // ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
     const E137_BOULDERS = BOULDERS_SHEETS;
-    const crSet = new Set<number>([481, 482, 483]);                          // Sets.CrackedBricks 基表
+    const crSet = new Set<number>(CRACKED_BRICKS_SHEETS);                    // Sets.CrackedBricks 基表——★BJ210 单源拷贝（§6i）
     const addCrackOf = (st0: import('./DungeonStyles1457').DungeonStyleData): void => {
       crSet.add(st0.BrickCrackedTileType);
       crSet.add(st0.PitTrapTileType);

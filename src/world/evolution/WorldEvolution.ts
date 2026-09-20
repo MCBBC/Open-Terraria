@@ -39,7 +39,7 @@
 //     （Convert_ActuallyConvertTorch）已随各 case 全链接入
 import type { TileStore } from '../TileStore';
 import { getTreeTypeAndTreeBottom, TreeTypes } from '../TreeShake';   // ★⑤ 掉落族批：树底/树型单源
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS, CONV_SNOW_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, GETS_CHECKED_FOR_LEAVES_SHEETS } from '../../data/tiles';
 import { holidayLightVid } from '../../data/vanillaStyleDrops';   // ★红蓝-G①（2026-09-18）节日彩灯掉落单源
 import { RNG } from '../../core/rng';
 import { rollLuck } from '../../stats/Luck';
@@ -73,9 +73,9 @@ const SPREADS_CRIMSON = new Set([199, 662, 203, 234, 399, 401, 200, 352, 205, 20
 const SPREADS_HALLOW = new Set([109, 492, 117, 116, 402, 403, 164, 115, 110, 113]);
 // Main.tileAlch（Main.cs:7755）
 const TILE_ALCH = new Set([82, 83, 84]);
-// Main.tileMoss（= TileID.Sets.Conversion.Moss，TileID.cs:38）
-const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
-const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+// Main.tileMoss（= TileID.Sets.Conversion.Moss，TileID.cs:38）——★BJ210 收编单源（§6i）
+const TILE_MOSS = TILE_MOSS_SHEETS;
+const TILE_MOSS_BRICK = MOSS_BRICK_SHEETS;
 // WorldGen.GetTileMossColor（WorldGen.cs:82492-82523）：苔/苔砖 11 对 → 色序号
 // 0..10（184 苔藓植物 frameX = 22×序号,TileFrame case 184 cs:86449-86488）;域外 -1
 const MOSS_COLOR_OF = new Map<number, number>([
@@ -83,17 +83,17 @@ const MOSS_COLOR_OF = new Map<number, number>([
   [183, 4], [516, 4], [381, 5], [517, 5], [534, 6], [535, 6], [536, 7], [537, 7],
   [539, 8], [540, 8], [625, 9], [626, 9], [627, 10], [628, 10],
 ]);
-// TileID.Sets.Conversion.*（TileID.cs:14-36）
-const CONV_JUNGLE_GRASS = new Set([60, 661, 662]);
-const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);
-const CONV_GOLF_GRASS = new Set([477, 492]);
-const CONV_STONE = new Set([1, 25, 117, 203]);
-const CONV_ICE = new Set([161, 163, 164, 200]);
-const CONV_SAND = new Set([53, 112, 116, 234]);
-const CONV_HARD_SAND = new Set([397, 398, 402, 399]);
-const CONV_SANDSTONE = new Set([396, 400, 403, 401]);
-const CONV_THORN = new Set([32, 352, 69, 655]);
-const CONV_SNOW = new Set([147]);
+// TileID.Sets.Conversion.*（TileID.cs:14-36）——★BJ210 收编单源 data/tiles.ts（sheet 域,§6i）
+const CONV_JUNGLE_GRASS = CONV_JUNGLE_GRASS_SHEETS;
+const CONV_GRASS = CONV_GRASS_SHEETS;
+const CONV_GOLF_GRASS = CONV_GOLF_GRASS_SHEETS;
+const CONV_STONE = CONV_STONE_SHEETS;
+const CONV_ICE = CONV_ICE_SHEETS;
+const CONV_SAND = CONV_SAND_SHEETS;
+const CONV_HARD_SAND = CONV_HARDENED_SAND_SHEETS;
+const CONV_SANDSTONE = CONV_SANDSTONE_SHEETS;
+const CONV_THORN = CONV_THORN_SHEETS;
+const CONV_SNOW = CONV_SNOW_SHEETS;
 // TileID.Sets.Conversion.Dirt（TileID.cs:23）= CreateBoolSet(default(int)) → 仅泥土 0
 const CONV_DIRT = new Set([0]);
 // WallID.Sets.Conversion.*（WallID.cs:11-33）
@@ -145,8 +145,9 @@ const BURST_BLACKLIST = new Set<number>([
 //   ConsideredSolidTileForAnchor（cs:54352）/IsTileALeafyTreeTop（cs:29960）消费。
 //   ★BJ168-债2（2026-09-19）：TILE_PLATFORMS/IS_A_TREE_TRUNK 两本地副本拆除,收编
 //   data/tiles.ts 单源 PLATFORMS_SHEETS/IS_A_TREE_TRUNK_SHEETS（逐值对拍 7≡7/12≡12;
-//   消费面同名直改）;GETS_CHECKED_FOR_LEAVES 不在收编批名单,暂留。
-const GETS_CHECKED_FOR_LEAVES = new Set([5, 323, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+//   消费面同名直改）;GETS_CHECKED_FOR_LEAVES——★BJ210（2026-09-20）收编单源
+//   data/tiles.ts:GETS_CHECKED_FOR_LEAVES_SHEETS（面二三名同值案,§6i）。
+const GETS_CHECKED_FOR_LEAVES = GETS_CHECKED_FOR_LEAVES_SHEETS;
 
 export interface EvolutionHost {
   store: TileStore;
@@ -1800,10 +1801,18 @@ export class WorldEvolution {
     return false;
   }
 
-  /** AttemptToGeneratePlanteraBulbAt（cs:74250-74329）+ PlaceJunglePlant 238 支
-   *  （cs:48191-48256）。锚 (i,j)=花苞 2×2 右下角；底承两列须实心泥 60。
+  /** AttemptToGeneratePlanteraBulbAt（cs:74788-74869）+ PlaceJunglePlant 238 支
+   *  （cs:48191-48256）。锚 (i,j)=花苞 2×2 右下角。
+   *  ★BJ214 门结构修正（2026-09-20）：原版 force/非 force 两支门位不同——
+   *  · force 支（cs:74790-74851）【无】前置底承/允许族门：计分 → ClearTile 4×4+
+   *    边环转 60 → PlaceJunglePlant（其门在清场后天然满足：支撑行 j+1=n==1 全环
+   *    转草 60、2×2=净空）——力档专为泥芯丛林内部掏窝设计；
+   *  · 非力支（cs:74853-74867）经 PlaceJunglePlant 门（cs:48204-48230）+KillTile
+   *    noItem 覆写。
+   *  此前两门被提升到 force 之前 → 2×2 含泥即拒=力档在泥芯场景恒拒（bj214 探针
+   *  定谳:自然再生面/burst 非力档均正常,唯 force 档死门）。
    *  2×2 允许族（cs:48204-48212）：空 / 强势草61 / 藤62 / 丛林植物233 /
-   *  短草69 / 香蒲74 / 幌菊703 / 655 / 旗185(fy=0)——其余活动格即拒。
+   *  短草69 / 香蒲74 / 幌菊703 / 655 / 旗185(fy=0)——其余活动格即拒（仅非力档门）。
    *  非 force 先 KillTile(noItem) 覆写允许族再直写；force 档 4×4 计分
    *  （泥/草 +1,其余活动格 -1,黑名单 -1）≥12 才放,清 4×4+外环转草。
    *  ★写入走 setTileSilent：PlaceJunglePlant 是裸数组直写——非实体植物可与
@@ -1814,22 +1823,8 @@ export class WorldEvolution {
     const st = this.host.store;
     // PlaceJunglePlant 边距门（cs:48197-48199）：±5 内圈禁放
     if (i < 5 || i > st.w - 5 || j < 5 || j > st.h - 5) return false;
-    // 底承:两列 j+1 行须实心丛林草
-    if (!(st.inBounds(i - 1, j + 1) && st.inBounds(i, j + 1))) return false;
-    if (!(this.solidTile(i - 1, j + 1) && sheetOf(this.typeAt(i - 1, j + 1)) === 60)) return false;
-    if (!(this.solidTile(i, j + 1) && sheetOf(this.typeAt(i, j + 1)) === 60)) return false;
-    // 2×2 允许族校验（原版字面集合；185 旗须 frameY===0）
-    for (let dx = -1; dx <= 0; dx++) {
-      for (let dy = -1; dy <= 0; dy++) {
-        const ii = st.idx(i + dx, j + dy);
-        if (!st.flags[ii]) continue;
-        const sh = sheetOf(st.type[ii]!);
-        const allow = sh === 61 || sh === 62 || sh === 233 || sh === 69 || sh === 74
-          || sh === 703 || sh === 655 || (sh === 185 && (st.frameY[ii] ?? 0) === 0);
-        if (!allow) return false;
-      }
-    }
     if (forceBulb) {
+      // ★BJ214 修：力档无前置底承/允许族门（原版序=计分→清 4×4+边环→落位,见头注）
       // 计分（cs:74255-74296）：4×4 邻域泥/草 +1、其余活动 -1；黑名单即 -1
       let score = 0;
       outer:
@@ -1862,6 +1857,22 @@ export class WorldEvolution {
         }
       }
     } else {
+      // 非力档=直落 PlaceJunglePlant（cs:74853-74867）——门=cs:48204-48230：
+      // 底承:两列 j+1 行须实心丛林草
+      if (!(st.inBounds(i - 1, j + 1) && st.inBounds(i, j + 1))) return false;
+      if (!(this.solidTile(i - 1, j + 1) && sheetOf(this.typeAt(i - 1, j + 1)) === 60)) return false;
+      if (!(this.solidTile(i, j + 1) && sheetOf(this.typeAt(i, j + 1)) === 60)) return false;
+      // 2×2 允许族校验（原版字面集合；185 旗须 frameY===0）
+      for (let dx = -1; dx <= 0; dx++) {
+        for (let dy = -1; dy <= 0; dy++) {
+          const ii = st.idx(i + dx, j + dy);
+          if (!st.flags[ii]) continue;
+          const sh = sheetOf(st.type[ii]!);
+          const allow = sh === 61 || sh === 62 || sh === 233 || sh === 69 || sh === 74
+            || sh === 703 || sh === 655 || (sh === 185 && (st.frameY[ii] ?? 0) === 0);
+          if (!allow) return false;
+        }
+      }
       // 覆写允许族（cs:48238-48245 KillTile noItem）——非活动水格不动（原版同款共存）
       // ★②：noItem 位次（同上）,零掉落
       for (let dx = -1; dx <= 0; dx++) {

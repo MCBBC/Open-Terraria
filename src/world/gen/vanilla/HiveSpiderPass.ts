@@ -6,7 +6,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_MOSS_SHEETS, CONV_STONE_SHEETS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { tileRunner } from './TileRunner';
 import { genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';
@@ -1035,7 +1035,7 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
  *  恒单格）③地面支（钟乳石笋 fy90 单格/fy36+54 双格上长）整缺④尾部
  *  CheckStalactite 复核缺（支撑 fail→整对杀+style 重定型 1×Next(3) 掷）。
  *  写侧 ClearSlope（cs:38382 等）+CopyPaintAndCoating（锚格漆拷贝）。 */
-const STAL_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);   // Main.tileMoss
+const STAL_MOSS = TILE_MOSS_SHEETS;   // Main.tileMoss——★BJ210 收编单源（§6i）
 function placeUncheckedStalactiteGen(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
   const SHEETC = (tx: number, ty: number): number => {
     if (!st.inBounds(tx, ty)) return -1;
@@ -1053,9 +1053,9 @@ function placeUncheckedStalactiteGen(st: TileStore, x: number, y: number, prefer
     // —— 天花板支（cs:38373）：锚=上格 ——
     const up = SHEETC(x, y - 1);
     const fromPaint = st.paint[st.idx(x, y - 1)];
-    const fams: Array<[Set<number>, number]> = [
+    const fams: Array<[ReadonlySet<number>, number]> = [
       [new Set([147, 161, 163, 164, 200]), 0],                                   // 沙
-      [new Set([1, 117, 25, 203]), 54],                                          // 石（+moss 并集）
+      [new Set(CONV_STONE_SHEETS), 54],                                          // 石（+moss 并集；Conversion.Stone :26——★BJ210 单源拷贝,§6i）
       [new Set([396, 397]), 378], [new Set([368]), 432], [new Set([367]), 486],
     ];
     for (const [set, base] of fams) {

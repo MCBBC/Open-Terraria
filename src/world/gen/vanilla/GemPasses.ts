@@ -11,7 +11,7 @@
 //   冰上/沙上下 1/5 → PlaceTight），同列随后宝石树段（RNG 序：树掷在钟乳石掷之前）
 import type { RNG } from '../../../core/rng';
 import { LIQUID_TYPE, TileStore } from '../../TileStore';   // ★IIIII210 TileStore.COAT_BLOCK_MASK（钟乳石涂层继承）
-import { TILE_BY_KEY, TILE_DEFS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS, TILE_MOSS_SHEETS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { vanGenSolidType } from './GenSolid';
@@ -145,8 +145,8 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 /** 钟乳石清坡的"石族"（cs:22244-22265：1/147/161/25/203 + tileStone + tileMoss）。
  *  Main.tileStone（Main.cs:7378/7902-7922/…）只标 63-68/130/131/566 */
 const STONE_FAMILY = new Set([1, 147, 161, 25, 203, 63, 64, 65, 66, 67, 68, 130, 131, 566]);
-/** Main.tileMoss（按 sheet id） */
-const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
+/** Main.tileMoss（按 sheet id,Main.cs:7146-7187）——★BJ210 收编单源 data/tiles.ts:TILE_MOSS_SHEETS（§6i） */
+const TILE_MOSS = TILE_MOSS_SHEETS;
 
 /** 暴露晶簇 style（:20857-20859 的 Next(12) 映射：紫 3/黄 3/蓝 2/翠 2/红 1/钻 1） */
 function randGemStyle(rng: RNG): number {

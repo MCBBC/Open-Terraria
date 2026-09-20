@@ -13,6 +13,8 @@
 // 长出蘑菇/高草、腐化地上残留森林草——写入监听只查上方格，新放的植物自身永不被
 // 复检=粘滞（2026-08-26 用户实报，存档解码实证两案）。
 
+import { MOSS_SHEETS } from '../../data/tiles';
+
 /** 花族类型配对表（IsFitToPlaceFlowerIn :58726-58733） */
 export const FLOWER_GROUND_SHEETS: Record<number, Set<number>> = {
   3: new Set([2, 78, 380, 477, 579]),
@@ -140,7 +142,7 @@ export const GRASS_SEED_STAFF_VIDS: ReadonlySet<number> = new Set([62, 59, 2171,
  *  （terraria.wiki.gg/wiki/Moss）。调用方须把族内物品当【无论成败终止】处理
  *  （同草种族）；苔砖变体(512-517/535/537/540/626/628)是普通 legacy 块走通用链，
  *  其放置物品 vid(4710+ 族)不在本判域。 */
-export const MOSS_CONVERT_SHEETS: ReadonlySet<number> = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+export const MOSS_CONVERT_SHEETS: ReadonlySet<number> = MOSS_SHEETS;   // ★BJ210 收编单源 data/tiles.ts:MOSS_SHEETS（Conversion.Moss :38,§6i）
 
 /** moss→灰砖上的苔砖变体映射（WorldGen.PlaceTile 内 num 重写 cs:59902-59912：
  *  `if (tile.type == 38) num = num switch { 381=>517, 534=>535, 536=>537, 539=>540,

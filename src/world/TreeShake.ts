@@ -15,15 +15,16 @@
 //
 // 关键顺序（勿调换）：注册进 shake 表【先于】叶顶/实心门（WorldGen.cs:63190 先于
 //   :63199）——被封死/无叶顶的树同样消耗掉当日份额（原版行为）。
-import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS } from '../data/tiles';
+import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, IS_SHAKEABLE_SHEETS } from '../data/tiles';
 import { tileSolidLike } from './Housing';   // ★G1谓词批(2026-09-04)：Main.tileSolid 代理（棕榈寻底落门）
 import type { TileStore } from './TileStore';
 import type { RNG } from '../core/rng';
 import { getTreeLeaf } from '../render/NatureParticles';
 
 /** TileID.Sets.IsShakeable（TileID.cs:163）——注意与 tileAxe（Main.cs:7157-7172，
- *  含 80 仙人掌/488 倒木/704 假人）是两张表：仙人掌/倒木/假人可斧砍但【不摇】 */
-export const TREE_SHAKEABLE_SHEETS = new Set([5, 72, 323, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+ *  含 80 仙人掌/488 倒木/704 假人）是两张表：仙人掌/倒木/假人可斧砍但【不摇】
+ *  ——★BJ210 收编单源 data/tiles.ts:IS_SHAKEABLE_SHEETS（面二三名同值案,§6i） */
+export const TREE_SHAKEABLE_SHEETS = IS_SHAKEABLE_SHEETS;
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161，无 323 棕榈——棕榈单格整树） */
 // ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const TREE_TRUNK_SHEETS = IS_A_TREE_TRUNK_SHEETS;

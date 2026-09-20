@@ -16,7 +16,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';   // ★IIIII229 ⑪ COAT_BLOCK_MASK（序言⑦补齐;与原 type-import 合并）
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CRACKED_BRICKS_SHEETS, CLOUDS_SHEETS, CONV_GRASS_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genKillTile, genTileFrame, genSquareTileFrame } from './FinalCleanupPass';
 import { grassSpreadState } from './MushroomPass';
@@ -57,15 +57,15 @@ const HIVE_WALL = 86;          // WallID 86 蜂巢墙（直写数值，墙无 ke
 const DUNGEON_PAINT = 14;      // PaintID 14 深层地牢漆
 
 // ---- TileID.Sets / Main 集合（1456 TileID.cs / Main.cs；同源副本惯例） ----
-/** TileID.Sets.CrackedBricks（TileID.cs:183） */
-const CRACKED_BRICKS = new Set([481, 482, 483]);
+/** TileID.Sets.CrackedBricks（TileID.cs:183）——★BJ210 收编单源 data/tiles.ts（§6i） */
+const CRACKED_BRICKS = CRACKED_BRICKS_SHEETS;
 // TileID.Sets.Ore（TileID.cs:403）——★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（同名 import,§6h）
-/** TileID.Sets.Clouds（TileID.cs:197；FinalCleanupPass 同源副本） */
-const CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
+/** TileID.Sets.Clouds（TileID.cs:197；FinalCleanupPass 同源副本）——★BJ210 收编单源（§6i） */
+const CLOUDS = CLOUDS_SHEETS;
 /** TileID.Sets.Boulders（TileID.cs:195）——★BJ168-债2（2026-09-19）本地副本拆除,
  *  收编 data/tiles.ts 单源 BOULDERS_SHEETS（sheet 域,逐值对拍 10≡10） */
-/** TileID.Sets.Conversion.Grass（TileID.cs:51） */
-const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);
+/** TileID.Sets.Conversion.Grass（TileID.cs:18——旧注 :51 系行号漂移）——★BJ210 收编单源（§6i） */
+const CONV_GRASS = CONV_GRASS_SHEETS;
 /** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
  *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
 const TILE_DUNGEON = TILE_DUNGEON_SHEETS;

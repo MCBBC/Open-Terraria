@@ -46,7 +46,7 @@ import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, BOULDERS_IDS, IS_A_TREE_TRUNK_SHEETS, TILE_DUNGEON_IDS, TILE_TABLE_IDS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BOULDERS_IDS, IS_A_TREE_TRUNK_SHEETS, TILE_DUNGEON_IDS, TILE_TABLE_IDS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
 import { vanGenSolidType, flipGenSolid, snapshotGenSolid, restoreGenSolid } from './GenSolid';
@@ -357,8 +357,8 @@ function checkBoulderChestMB(st: TileStore, i: number, j: number): boolean {
   }
   return false;
 }
-/** TileID.Sets.PreventsTileRemovalIfOnTop（TrackPass 同表）+桌 19 */
-const PREVENTS_REMOVAL_MB = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** TileID.Sets.PreventsTileRemovalIfOnTop（TrackPass 同表）+桌 19——★BJ210 收编单源（§6i） */
+const PREVENTS_REMOVAL_MB = PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS;
 function isLockedDoorMB(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   if ((SHEET_OF_MB[st.type[i]!] ?? -1) !== 10) return false;

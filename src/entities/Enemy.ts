@@ -6,7 +6,7 @@ import { entityNet } from '../net/entitySyncHooks';
 // entityNet 同模式注入——entities 层不反向依赖聊天层,单机默认 null 零开销）
 import { bossDamageSink, consumePendingStrikeOwner, setPendingStrikeOwner } from '../chat/BossDamageTracker';
 import { playEnemyHitSound, ON_HIT_EXCLUDED_PROJS } from './projTargets';
-import { TILE_BY_KEY, TILE_DEFS, WALL_DUNGEON_SHEETS } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, WALL_DUNGEON_SHEETS, FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS } from '../data/tiles';
 import { paintColor } from '../world/Paint';
 import { inAPlaceWithWind } from './Mounts';
 import { anchorSpecOf, validateAnchors } from '../world/TileAnchorValidator';
@@ -14931,8 +14931,9 @@ bindEnemyCtor(Enemy);
 
 // ===================== 仙灵宝箱搜索（GetFairyTreasureCoords NPC.cs:48794-48852 1:1）=====================
 
-/** FriendlyFairyCanLureTo（TileID.cs:409）：仙灵可引导到的宝箱/家具 tile 表 */
-const FAIRY_LURE_SHEETS = new Set([8, 169, 21, 467, 107, 108, 111, 221, 222, 223, 211, 12, 665, 639, 236, 702, 227]);
+/** FriendlyFairyCanLureTo（TileID.cs:413——旧注 :409 系行号漂移）：仙灵可引导到的宝箱/家具 tile 表
+ *  ——★BJ210 收编单源 data/tiles.ts:FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS（逐值对拍 17≡17,§6i） */
+const FAIRY_LURE_SHEETS = FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS;
 
 /** tileOreFinderPriority（Main.cs:6356-6391）：引导优先级——同优先级取最近，
  *  矿石族 3×3 计数 ≥40 才有效（大矿脉才算"宝藏"） */

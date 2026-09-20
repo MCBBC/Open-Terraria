@@ -75,33 +75,72 @@ export function drawCoriteTrail(
   }
 }
 
-// ---- Extra_59: 血月潜舰 618 蓄力圆周闪（ai0==3 && ai[1]<180）----
+// ---- Extra_59: 血月潜舰 618 蓄力圆周【双】闪（ai0==3 && ai[1]<180，case 618 段
+//      Main.cs :23587-23623；★BJ211 重写 1:1——旧实现四处参数错：
+//      ①半径 10·s 恒定 → 原版 num59·num58=25·p 世界 px（:23607/:23618，不乘 scale，
+//        p=脉冲 0→1 环从盒心炸出）；②缺红环第一 loop（:23599-23611 white G=B=0 →
+//        (255,0,0) 纯加算）；③缺 ×1.8/×1.5 scale 系数（:23610/:23621 vector9×k）；
+//      ④rotation 误用 clamp(vx·0.1)（546 亮核式）→ 原版 rotation=轨道极角 num69
+//        （:23606/:23617，含本体 rotation；618 rotation 走 visAngle 通道）----
+const flashTintCache = new Map<string, HTMLCanvasElement>();
+function flashTinted(
+  tex: ImageBitmap | HTMLImageElement, tint: [number, number, number],
+): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;   // 非 DOM（vitest）走直绘
+  const key = `extra59|${tint.join('_')}`;
+  let c = flashTintCache.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = tex.width; c.height = tex.height;
+    const tc = c.getContext('2d');
+    if (!tc) return null;
+    tc.drawImage(tex, 0, 0);
+    tc.globalCompositeOperation = 'multiply';
+    tc.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+    tc.fillRect(0, 0, c.width, c.height);
+    tc.globalCompositeOperation = 'destination-in';
+    tc.drawImage(tex, 0, 0);
+    flashTintCache.set(key, c);
+  }
+  return c;
+}
+
 export function drawDreadnautilusFlash(
   ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
 ): void {
   if (e.ai0 !== 3 || e.ai1 >= 180) return;
   const tex = atlas.ensureVImage('vanilla/Extra_59.png');
   if (!tex) return;
-  const pulse = (e.ai1 % 180) / 180;
-  const n = 4;
-  const s = e.vanillaScale || 1;
-  const sy = 0.5 + pulse * 0.75;
-  const brightness = (pulse < 0.5 ? pulse / 0.5 : (1 - pulse) / 0.5) * 0.25;
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.globalAlpha = brightness;
-  for (let i = 0; i < n; i++) {
-    const ang = (i / n) * Math.PI * 2 + (e.visAngle || 0);
-    const dx = e.cx + Math.cos(ang) * 10 * s;
-    const dy = e.cy + Math.sin(ang) * 10 * s * sy;
+  const p = (e.ai1 % 180) / 180;                       // num68 :23590-23591
+  const n = 4;                                         // num57=4 :23592
+  const R = 25 * p;                                    // num59·num58 世界 px :23607
+  const s = (e.vanilla?.scale ?? 1) * (e.vanillaScale || 1);
+  const sy = 0.5 + p * 0.75;                           // vector9.Y :23595
+  const tri = p < 0.5 ? p / 0.5 : (1 - p) / 0.5;       // LerpValue(0,.5)·LerpValue(1,.5)
+  const bright = tri * 0.25;                           // :23602/:23615
+  const rot = e.visAngle || 0;                         // num69=极角+rotation :23606
+  // 两 loop：红(G=B=0,A=0 纯加算)×1.8 :23599-23611 → 白(A=0)×1.5 :23612-23622
+  const loops: Array<{ tint: [number, number, number] | null; k: number }> = [
+    { tint: [255, 0, 0], k: 1.8 },
+    { tint: null, k: 1.5 },
+  ];
+  for (const { tint, k } of loops) {
+    // 染色画布不可用（非 DOM/vitest）时回退直绘——生产 DOM 恒成功
+    const img = (tint ? flashTinted(tex, tint) : null) ?? tex;
     ctx.save();
-    ctx.translate(dx, dy);
-    ctx.rotate(Math.max(-Math.PI / 8, Math.min(Math.PI / 8, (e.vx || 0) * 0.1)));
-    ctx.scale(s, s * sy);
-    ctx.drawImage(tex, -tex.width / 2, -tex.height / 2, tex.width, tex.height);
+    ctx.globalCompositeOperation = 'lighter';          // A=0 纯加算习语
+    ctx.globalAlpha = Math.max(0, Math.min(1, bright));
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2 + rot;
+      ctx.save();
+      ctx.translate(e.cx + Math.cos(ang) * R, e.cy + Math.sin(ang) * R);
+      ctx.rotate(ang);                                 // :23610/:23621 rotation=num69
+      ctx.scale(s * k, s * sy * k);                    // vector9×k
+      ctx.drawImage(img, -tex.width / 2, -tex.height / 2, tex.width, tex.height);
+      ctx.restore();
+    }
     ctx.restore();
   }
-  ctx.restore();
 }
 
 // ---- Extra_129: 血月潜舰 618 触腕叠加层（type==618 门，全程）----
@@ -730,4 +769,236 @@ export function drawNpcTrailGhosts(
   drawSolenianGhosts(ctx, e, atlas, o);
   drawEocDashGhosts(ctx, e, atlas, frame, o);
   drawMechTrailGhosts(ctx, e, atlas, frame, o);
+}
+
+// ===================== ★BJ211 num57 圆周光晕环族（2026-09-20，BJ209 债②销账） =====================
+// 原版语义（Terarria1457 Main.cs DrawNPCDirect 通用大表段 :23400-23701 亲读；
+// Terarria1458 对拍：num57 全部锚 :23413/:23479/:23489/:23498/:23505/:23512/:23552/
+// :23564/:23583 与 1457 逐行同号=该段零变更）：
+//   · 通用大表 if(type∈{…})(:23400) 内 switch(:23419-23626) 给七个 id 置 num57（环
+//     份数）/num59（半径）/num58（包络）/num60（角偏移）/color10/amount/amount2，
+//     由 :23645-23656 num74 循环统一画【本体贴图当前帧】环拷贝（非 oldPos 域）：
+//       angle = i/num57·2π + rotation + num60；半径 = num59·num58（世界 px；唯 523
+//       的 num59=10·npc.scale 自带 scale :23553）；色 = Lerp(npcColor,color10,amount)
+//       →GetAlpha→Lerp(·,color10,amount2)→×(1−num58)；帧/origin/scale 与本体同源。
+//   · 参与 id（num57>0 全集）：426(:23511)/523(:23551)/541(:23497)/568/569(:23475)/
+//     618 两相(:23578/:23587)/620(:23561)/661(:23504)。大表其余 id num57 恒 0=无环
+//     （427/428/521/542-546/552-557/561-563/566/567/570-575/578/581/583-585——销案）。
+//   · 568/569 出生相（localAI[3]<60）num57=3 紫加算环 = drawWitherBirth 已承载
+//     （Renderer 本体块同位）；≥60 常态 num57=4 HotPink 环 = 本刀补。
+//   · 541/568/569/661 的 GlowMask 金/粉/彩虹轨道环（:23670-23715）= Renderer
+//     NPC_GLOW_ORBIT 已承载（等价）；本刀只补【本体帧】num74 环。
+//   · 挂点：本体变换内、本体 drawImage 之前（drawWitherBirth 同族先例位）——原版环
+//     画在本体【之下】(:23645 环 → :23660 本体)，环拷贝绕盒心 4-25px 与本体高重叠；
+//     若走 BJ209 残影 restore 后挂点（本体之上），包络谷底（f=1−num58→1）会把本体
+//     洗白（661 最烈）。本体 rotation/镜像由 ctx 变换承载（transformed 空间无需
+//     rot/mirror 散参——ctx.rotate 即角度式中的 rotation 项，镜像对均匀环拷贝
+//     【位置集合】恒等映射 i↔count−i，拷贝贴图翻转=spriteEffects 同相）。
+//   · 色链 npcColor=Lighting.GetColor：本仓无逐实体光染色管线（同 BJ209/Glow 表
+//     登记）→ 全亮 White 进链，两段 Lerp 塌缩为常量 tint（表内钉值）。
+//   · XNA 预乘（SrcBlend=One,InvSrcAlpha）：out = tex.rgb×tint×f + dst×(1−A·f/255)
+//     （f=1−num58 乘区）。A=255 → source-over 单程；A∈(0,255) → destination-out
+//     (A·f/255)+lighter(f) 两步；A=0 → 纯 lighter（α=0 纯加算习语）。
+
+/** num57 环参数表（case 钉值 :23419-23626；tint/outA=色链塌缩值） */
+export interface NpcAuraRingSpec {
+  count: number;                 // num57
+  radius: number;                // num59（世界 px @npc.scale=1）
+  scaleRadius?: boolean;         // 523：num59=10·npc.scale（:23553）
+  period: number;                // GTW 包络周期 s（0=非 GTW 相位）
+  env: 'half' | 'sixth';         // cos/2+0.5 | cos/6+0.75
+  phase?: 'ai1p30' | 'lai1';     // num58 相位源（618 ai0==1 相 / 523）
+  ai2Floor?: boolean;            // 661：num58=max(env,GetLerpValue(0,60,ai2)) :23508
+  spinPhase?: boolean;           // 523：num60=localAI[0]（AI_101 :40531 +=π/60/t）
+  tint: [number, number, number] | null;   // 色链塌缩 RGB（null=White/不染色）
+  outA: number;                  // 色链末端 A（255 常态；568/569=191；523≈141）
+  spawnGate?: boolean;           // 568/569：lai3>=60（出生相=drawWitherBirth 承载）
+}
+
+export const NPC_AURA_RINGS: Record<number, NpcAuraRingSpec> = {
+  // 426 外星蜂后（:23511-23519）：n4/r4/period1.2/Turquoise(64,224,208)：
+  //   lerp(White,T,0.5)=(159.5,239.5,231.5)→(160,240,232)、A=255
+  426: { count: 4, radius: 4, period: 1.2, env: 'half', tint: [160, 240, 232], outA: 255 },
+  // 523 远古末日（:23551-23560）：n3/r10·scale/HotPink(255,105,180) amount .5+amount2
+  //   .8、A→128 → 塌缩 rgb=(255,120,187.5)→(255,120,188)、A=lerp(lerp(255,128,.5),
+  //   128,.8)=140.7→141；num60=lai0（:40531 +=π/60/帧）、num58=lai1=0.25+cos(ai1·
+  //   2π/60)·0.25（:40532，UnitY.RotatedBy(θ).Y=cosθ）
+  523: { count: 3, radius: 10, scaleRadius: true, period: 0, env: 'half', phase: 'lai1', spinPhase: true, tint: [255, 120, 188], outA: 141 },
+  // 541 沙元素（:23497-23503）：n4/r6/period2.4/Gold(255,215,0) lerp .5 → (255,235,127.5)
+  541: { count: 4, radius: 6, period: 2.4, env: 'half', tint: [255, 235, 128], outA: 255 },
+  // 620 鲨鱼兵（:23561-23573）：n4/r6/period2.4/Gold——同 541；620 origin 覆写
+  //   （:23563 −4·sdir）对本体/环同加=环相对本体零移（Renderer :7680 本体净位移
+  //   同款 dx0 承载）；num47=-9 走 DRAW_NUM47_OVERRIDE（本体锚已含,环同锚）
+  620: { count: 4, radius: 6, period: 2.4, env: 'half', tint: [255, 235, 128], outA: 255 },
+  // 661 帝皇蝶（:23504-23510）：n6/r6/period2.4/color10=White（case 未覆写）→ 全亮
+  //   下不染色；num58 下限=GetLerpValue(0,60,ai2)（:23508）；AI_065 rotation=vx·0.3
+  //   （:73539,ctx 承载）；彩虹 HSL 轨道环另在 NPC_GLOW_ORBIT（已承载）
+  661: { count: 6, radius: 6, period: 2.4, env: 'half', ai2Floor: true, tint: null, outA: 255 },
+  // 568/569 枯萎兽常态（:23475-23485）：n4/r4/period1.5/sixth（cos/6+0.75）/HotPink
+  //   A→127 → lerp .5=(255,180,217.5)→(255,180,218)、A=lerp(255,127,.5)=191；
+  //   出生相 lai3<60 → num57=3 紫加算环=drawWitherBirth（:23486-23495）
+  568: { count: 4, radius: 4, period: 1.5, env: 'sixth', tint: [255, 180, 218], outA: 191, spawnGate: true },
+  569: { count: 4, radius: 4, period: 1.5, env: 'sixth', tint: [255, 180, 218], outA: 191, spawnGate: true },
+  // 618 血月潜舰（case 618 :23574-23625）：基表=ai0==1 相（:23578-23586 n6/r15/
+  //   num58=(ai1%30)/30·0.8+0.2）；ai0==3 相（:23587-23594 n4/r25/num58=(ai1%180)/180）
+  //   由 draw 函数分派覆写。color10=White/amount=0 → 不染色；Extra_59 白红双闪另在
+  //   drawDreadnautilusFlash（同 case 段,已 1:1 重写）
+  618: { count: 6, radius: 15, period: 0, env: 'half', phase: 'ai1p30', tint: null, outA: 255 },
+};
+
+/** 环参与 id 全集（Renderer 挂点快速门 + tests 结构锁） */
+export const NPC_AURA_RING_IDS: ReadonlySet<number> = new Set(
+  Object.keys(NPC_AURA_RINGS).map(Number),
+);
+
+/** 环绘制散参（本体变换内调用；rot 由 ctx 变换承载不进散参） */
+export interface NpcAuraOpts {
+  scale: number;     // 本体渲染 scale（ctx 变换值——世界 px 半径 /scale 折算纹素）
+  addY: number;      // 本体锚偏移（addY+footFlush，纹素——与本体 drawImage 同锚）
+  opacity: number;   // 出生渐显（GetAlpha 的 alpha 乘区，合并进 f——BJ209 同惯例）
+  /** 本体 ctx 是否处于 facing 镜像（Renderer :7841 同判）——仅 620 的 dx0 消费：
+   *  本体 :7680 的 origin 覆写平移在镜像【之前】入链（世界号不受镜像影响），
+   *  环 dx0 在镜像【之后】的纹素空间 → 需按镜像翻号落同一世界位移 */
+  mirror?: boolean;
+  lai3?: number;     // 568/569 localAI[3]（witherBeastLocal——出生门 <60 不画常态环）
+  tSec?: number;     // GlobalTimeWrappedHourly 注入（缺省 gtw()；tests 钉相位用）
+}
+
+/** 环拷贝染色缓存（tint/vid 恒定，vid+帧尺寸为键——drawDukeAfterimages 同习语） */
+const auraRingTintCache = new Map<string, HTMLCanvasElement>();
+function auraRingTinted(
+  key: string, tex: CanvasImageSource,
+  src: { sx: number; sy: number; sw: number; sh: number },
+  tint: [number, number, number],
+): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;   // 非 DOM（vitest）走直绘
+  let c = auraRingTintCache.get(key);
+  if (!c) {
+    c = document.createElement('canvas');
+    c.width = src.sw; c.height = src.sh;
+    const tc = c.getContext('2d');
+    if (!tc) return null;
+    tc.drawImage(tex, src.sx, src.sy, src.sw, src.sh, 0, 0, src.sw, src.sh);
+    tc.globalCompositeOperation = 'multiply';
+    tc.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+    tc.fillRect(0, 0, src.sw, src.sh);
+    tc.globalCompositeOperation = 'destination-in';
+    tc.drawImage(tex, src.sx, src.sy, src.sw, src.sh, 0, 0, src.sw, src.sh);
+    auraRingTintCache.set(key, c);
+  }
+  return c;
+}
+
+/** num58 包络（:23481/:23500/:23507/:23514/:23558/:23566/:23582 相位式） */
+function auraNum58(spec: NpcAuraRingSpec, ai1: number, tSec: number): number {
+  if (spec.phase === 'lai1') {
+    // :40532 localAI[1] = 0.25 + UnitY.RotatedBy(ai1·2π/60).Y·0.25（.Y=cosθ）
+    return 0.25 + Math.cos((ai1 * Math.PI * 2) / 60) * 0.25;
+  }
+  if (spec.phase === 'ai1p30') {
+    // :23580-23585 num65=(ai1%30)/30、num58=num65·0.8+0.2
+    return ((ai1 % 30) / 30) * 0.8 + 0.2;
+  }
+  const x = ((tSec % spec.period) / spec.period) * Math.PI * 2;
+  return spec.env === 'half' ? Math.cos(x) / 2 + 0.5 : Math.cos(x) / 6 + 0.75;
+}
+
+/** 环参数规划（纯函数，tests 锁面）：null=本帧无环（门/相不符） */
+export function npcAuraRingParams(
+  vid: number,
+  s: { ai0: number; ai1: number; ai2: number; animT: number; lai3: number; tSec: number; scale: number },
+): { count: number; radiusWorld: number; num58: number; num60: number; fade: number;
+    tint: [number, number, number] | null; outA: number } | null {
+  const spec = NPC_AURA_RINGS[vid];
+  if (!spec) return null;
+  if (spec.spawnGate && s.lai3 < 60) return null;
+  let count = spec.count;
+  let radius = spec.radius;
+  let num58: number;
+  if (vid === 618) {
+    if (s.ai0 === 1 && s.ai1 < 90) {
+      num58 = ((s.ai1 % 30) / 30) * 0.8 + 0.2;                    // :23580-23585
+    } else if (s.ai0 === 3 && s.ai1 < 180) {
+      count = 4; radius = 25;                                     // :23592-23593
+      num58 = (s.ai1 % 180) / 180;                                // :23591
+    } else return null;
+  } else {
+    num58 = auraNum58(spec, s.ai1, s.tSec);
+  }
+  if (spec.ai2Floor) {
+    // :23508 GetLerpValue(0,60,ai2,clamped)
+    num58 = Math.max(num58, Math.max(0, Math.min(1, s.ai2 / 60)));
+  }
+  const num60 = spec.spinPhase ? s.animT * (Math.PI / 60) : 0;    // :40531 π/60/帧
+  const npcScale = s.scale;                                        // vanilla.scale×vanillaScale
+  const radiusWorld = (spec.scaleRadius ? radius * npcScale : radius) * num58;
+  return { count, radiusWorld, num58, num60, fade: 1 - num58, tint: spec.tint, outA: spec.outA };
+}
+
+/** num57 本体帧环（Renderer.drawEnemy 本体变换内、本体 drawImage 之前调用——
+ *  原版环在本体之下 :23645→:23660，见组头注挂点论证） */
+export function drawNpcAuraRings(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcAuraOpts,
+): void {
+  const vid = e.vanillaId ?? -1;
+  const spec = NPC_AURA_RINGS[vid];
+  if (!spec) return;
+  if (spec.spawnGate && (o.lai3 ?? 0) < 60) return;
+  const tex = atlas.ensureVImage(`vanilla/NPC_${vid}.png`);
+  if (!tex) return;
+  const npcScale = (e.vanilla?.scale ?? 1) * (e.vanillaScale || 1);
+  const prm = npcAuraRingParams(vid, {
+    ai0: e.ai0, ai1: e.ai1, ai2: e.ai2, animT: e.animT,
+    lai3: o.lai3 ?? 0, tSec: o.tSec ?? gtw(), scale: npcScale,
+  });
+  if (!prm) return;
+  const f = prm.fade * o.opacity;                       // ×(1−num58)×GetAlpha 合并
+  if (f <= 0.004) return;
+  const tinted = spec.tint
+    ? auraRingTinted(`aura|${vid}|${frame.sw}x${frame.sh}|${spec.tint.join('_')}`, tex, frame, spec.tint)
+    : null;
+  const srcImg: CanvasImageSource = tinted ?? tex;
+  // 620 origin 覆写净位移：本体 :7680 平移在镜像链前=世界 +4·sdir·scale 恒定；
+  // 环 dx0 在镜像后纹素空间 → mirror 时翻号才落同一世界位移（620 rotation=0
+  // （AI_107 :65302）→ 无旋转项混入）。sdir 表达式与 :7680 同款
+  const dx0 = vid === 620
+    ? 4 * (e.facing >= 0 ? 1 : -1) * (o.mirror ? -1 : 1) * npcScale / o.scale
+    : 0;
+  const prevOp = ctx.globalCompositeOperation;
+  const prevA = ctx.globalAlpha;
+  // XNA 预乘混合三分支（组头注）：A=255 单程 source-over；A∈(0,255) 两步；
+  // A=0 纯 lighter（本表无 A=0 项——568/569 出生紫环在 drawWitherBirth）
+  if (spec.outA >= 255) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = Math.max(0, Math.min(1, f));
+  } else if (spec.outA > 0) {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.globalAlpha = Math.max(0, Math.min(1, (spec.outA / 255) * f));
+  } else {
+    ctx.globalCompositeOperation = 'lighter';   // A=0 纯加算习语（表内现无 A=0 项）
+    ctx.globalAlpha = Math.max(0, Math.min(1, f));
+  }
+  const cut = spec.outA < 255 && spec.outA > 0;
+  for (let i = 0; i < prm.count; i++) {
+    const ang = (i / prm.count) * Math.PI * 2 + prm.num60;   // :23652 角度式
+    const dx = dx0 + Math.cos(ang) * prm.radiusWorld / o.scale;   // 世界 px→纹素
+    const dy = Math.sin(ang) * prm.radiusWorld / o.scale;
+    if (cut) {
+      ctx.drawImage(srcImg, frame.sx, frame.sy, frame.sw, frame.sh,
+        -frame.sw / 2 + dx, -frame.sh / 2 + o.addY + dy, frame.sw, frame.sh);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, Math.min(1, f));
+    }
+    ctx.drawImage(srcImg, frame.sx, frame.sy, frame.sw, frame.sh,
+      -frame.sw / 2 + dx, -frame.sh / 2 + o.addY + dy, frame.sw, frame.sh);
+    if (cut) {
+      // 下一份拷贝重回削底相（XNA 逐 Draw 语义）
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.globalAlpha = Math.max(0, Math.min(1, (spec.outA / 255) * f));
+    }
+  }
+  ctx.globalCompositeOperation = prevOp;
+  ctx.globalAlpha = prevA;
 }

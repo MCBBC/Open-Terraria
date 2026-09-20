@@ -1276,6 +1276,141 @@ export const IS_A_DRIP_TILE_SHEETS: ReadonlySet<number> = new Set([373, 374, 375
 /** TileID.Sets.IsAContainer（TileID.cs:409={21 木箱,467 死人箱,88 梳妆台}三族） */
 export const IS_A_CONTAINER_SHEETS: ReadonlySet<number> = new Set([21, 467, 88]);
 
+// ===================== TileID.Sets 家族第三收编批（★BJ210 2026-09-20） =====================
+// BJ203 登记债清偿：Clouds(:197)/CrackedBricks(:183)/Conversion 全族（Grass/JungleGrass/
+// GolfGrass/Snow/Stone/Ice/Sand/HardenedSand/Sandstone/Thorn/Moss/MossBrick :14-40）+
+// PreventsTileRemovalIfOnTopOfIt(:169)/FriendlyFairyCanLureTo(:413)/CommonSapling(:173)/
+// GetsDestroyedForMeteors(:165) 共 16 表 ~90 处字面副本（tools/_bj210-census.mjs 字符串
+// 感知 lexer × /tmp/tileid1457-sets.json 148 表对拍;泛型 new Set<T> 与 ids/idsByVanillaSheet/
+// S256/boolArrayOf 包装习语全扫描）逐值全等后收编本处单源，消费面别名改指
+// （tests/tile-domain-sentinel §6i 金标+结构锁钉死）。1457≡1458 同行号同值零增量已抽核
+// （Terarria1458/Terraria.ID/TileID.cs :163-173/:413）。
+// ★同值等价组（收编同一值源,语义注记保留；真值锚=反编译直读）：
+//   Conversion.Grass(:18) ≡ Conversion.MergesWithDirtInASpecialWay(:12)；
+//   Conversion.Ice(:28) ≡ TileID.Sets.Ices(:293)；
+//   Conversion.Thorn(:36) ≡ TileID.Sets.TouchDamageDestroyTile(:385)；
+//   Conversion.Moss(:38) ≡ Main.tileMoss（Main.cs:7146-7187 逐条赋值全 11 项）；
+//   Conversion.MossBrick(:40) ≡ TileID.Sets.tileMossBrick(:309)；
+//   Conversion.Sand(:30) ≡ Main.tileSand（Main.cs:7367-7370）。
+// ★面二三名同值案：IsShakeable(:163)=GetsCheckedForLeaves(:167)=PreventsTileReplace
+//   IfOnTopOfIt(:171) 同 13 值（今日值=IsATreeTrunk(:161)∪{323 棕榈}）——单一值源+三语义
+//   名导出（值同=零行为差,§6i 钉「三名同值」锁）。超集/并集变体（MeteorFall.CLOUD=Clouds
+//   ∪{202}、IcesSnow(:297)=Ices∪Snow 族 8 处、Falling(:395)×3、IsVine(:237)×5、
+//   SwaysInWindBasic(:273)×2、BasicChest(:315)×8 等）语义不同不收编=登记债。
+/** TileID.Sets.Clouds（TileID.cs:197：189 云/196 雨云/460 雪云/717 岩浆云/718 星云/719 彩虹云）——sheet 域 */
+export const CLOUDS_SHEETS: ReadonlySet<number> = new Set([189, 196, 460, 717, 718, 719]);
+/** Clouds 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。旧
+ *  idsByVanillaSheet/TILE_INTERNAL_BY_SHEET.map 平移副本（Corruption/Desert/Teleporter/
+ *  Structures×2/DungeonPass/FinalCleanup）逐值全等定谳后收编（6 id——§6i 钉死） */
+export const CLOUDS_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (CLOUDS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.CrackedBricks（TileID.cs:183：481 蓝/482 绿/483 粉地牢裂砖）——sheet 域 */
+export const CRACKED_BRICKS_SHEETS: ReadonlySet<number> = new Set([481, 482, 483]);
+/** CrackedBricks 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。旧
+ *  idsByVanillaSheet/ids 平移副本（FinalCleanup:4350/FinishDrunkGen:58）收编（3 id——§6i） */
+export const CRACKED_BRICKS_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (CRACKED_BRICKS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.Conversion.Grass（TileID.cs:18；≡MergesWithDirtInASpecialWay :12 同值） */
+export const CONV_GRASS_SHEETS: ReadonlySet<number> = new Set([2, 23, 199, 109, 477, 492]);
+/** TileID.Sets.Conversion.JungleGrass（TileID.cs:14） */
+export const CONV_JUNGLE_GRASS_SHEETS: ReadonlySet<number> = new Set([60, 661, 662]);
+/** TileID.Sets.Conversion.GolfGrass（TileID.cs:20；⊂ Grass） */
+export const CONV_GOLF_GRASS_SHEETS: ReadonlySet<number> = new Set([477, 492]);
+/** TileID.Sets.Conversion.Snow（TileID.cs:24） */
+export const CONV_SNOW_SHEETS: ReadonlySet<number> = new Set([147]);
+/** TileID.Sets.Conversion.Stone（TileID.cs:26） */
+export const CONV_STONE_SHEETS: ReadonlySet<number> = new Set([1, 25, 117, 203]);
+/** TileID.Sets.Conversion.Ice（TileID.cs:28；≡TileID.Sets.Ices :293 同值） */
+export const CONV_ICE_SHEETS: ReadonlySet<number> = new Set([161, 163, 164, 200]);
+/** TileID.Sets.Conversion.Sand（TileID.cs:30；≡Main.tileSand Main.cs:7367-7370 同值） */
+export const CONV_SAND_SHEETS: ReadonlySet<number> = new Set([53, 112, 116, 234]);
+/** TileID.Sets.Conversion.HardenedSand（TileID.cs:32） */
+export const CONV_HARDENED_SAND_SHEETS: ReadonlySet<number> = new Set([397, 398, 402, 399]);
+/** TileID.Sets.Conversion.Sandstone（TileID.cs:34） */
+export const CONV_SANDSTONE_SHEETS: ReadonlySet<number> = new Set([396, 400, 403, 401]);
+/** TileID.Sets.Conversion.Thorn（TileID.cs:36；≡TouchDamageDestroyTile :385 同值） */
+export const CONV_THORN_SHEETS: ReadonlySet<number> = new Set([32, 352, 69, 655]);
+/** TileID.Sets.Conversion.Moss（TileID.cs:38；≡Main.tileMoss Main.cs:7146-7187 同值） */
+export const MOSS_SHEETS: ReadonlySet<number> = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
+/** Main.tileMoss 语义名（同值转出口；苔藓→石 KillTile fail 支/钟乳石锚等消费面） */
+export const TILE_MOSS_SHEETS: ReadonlySet<number> = MOSS_SHEETS;
+/** TileID.Sets.Conversion.MossBrick（TileID.cs:40；≡tileMossBrick :309 同值） */
+export const MOSS_BRICK_SHEETS: ReadonlySet<number> = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+/** TileID.Sets.tileMossBrick 语义名（同值转出口；PlaceTile 184 第二支邻型表等） */
+export const TILE_MOSS_BRICK_SHEETS: ReadonlySet<number> = MOSS_BRICK_SHEETS;
+/** Conversion.Sand 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。旧
+ *  idsByVanillaSheet 平移副本（HalfBrick T.SAND/FinalCleanup SAND_CONV_IDS_FC/
+ *  Structures SAND_CONV·SAND_FAMILY·PALM_GROUND/TreePass PALM_GROUND·SAND_CONV_IDS）
+ *  逐值全等定谳后收编（4 id——§6i;PALM_GROUND 语义锚=Main.tileSand 同值族） */
+export const CONV_SAND_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (CONV_SAND_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** Conversion.HardenedSand 内部 id 域镜像（TileCleanupPass 平移副本收编;§6i） */
+export const CONV_HARDENED_SAND_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (CONV_HARDENED_SAND_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** Conversion.Sandstone 内部 id 域镜像（TileCleanupPass 平移副本收编;§6i） */
+export const CONV_SANDSTONE_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (CONV_SANDSTONE_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169 全 17 项）——上邻格在表内
+ *  时禁拆本格（CheckTileBreakability/HasReasonToReturnEarly 消费） */
+export const PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS: ReadonlySet<number> = new Set([
+  5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634,
+]);
+/** TileID.Sets.FriendlyFairyCanLureTo（TileID.cs:413 全 17 项）——仙灵宝箱引导落点表 */
+export const FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS: ReadonlySet<number> = new Set([
+  8, 169, 21, 467, 107, 108, 111, 221, 222, 223, 211, 12, 665, 639, 236, 702, 227,
+]);
+/** TileID.Sets.CommonSapling（TileID.cs:173={20 普通苗,590 宝石苗,595 樱花苗,615 柳苗}） */
+export const COMMON_SAPLING_SHEETS: ReadonlySet<number> = new Set([20, 590, 595, 615]);
+/** CommonSapling 内部 id 域镜像（TreePass/UndergroundJungleTreesPass idsByVanillaSheet
+ *  平移副本收编;4 id——§6i） */
+export const COMMON_SAPLING_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (COMMON_SAPLING_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.GetsDestroyedForMeteors（TileID.cs:165 全 13 项）——陨石落地清理环
+ *  （stopDrops=true）杀树/荆棘/宝石树族 */
+export const GETS_DESTROYED_FOR_METEORS_SHEETS: ReadonlySet<number> = new Set([
+  5, 32, 352, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634,
+]);
+// ---- 面二三名同值案：单一值源 + 三语义名导出（★BJ210;§6i 钉三名同值锁） ----
+const TREE_TOP_13 = [5, 72, 323, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634];
+/** TileID.Sets.IsShakeable（TileID.cs:163）——摇树表（TreeShake 消费;含 323 棕榈） */
+export const IS_SHAKEABLE_SHEETS: ReadonlySet<number> = new Set(TREE_TOP_13);
+/** TileID.Sets.GetsCheckedForLeaves（TileID.cs:167）——落叶检查表（WorldEvolution 锚点
+ *  谓词消费）——与 IsShakeable 同值（零行为差;若原版未来分叉,金标即红） */
+export const GETS_CHECKED_FOR_LEAVES_SHEETS: ReadonlySet<number> = IS_SHAKEABLE_SHEETS;
+/** TileID.Sets.PreventsTileReplaceIfOnTopOfIt（TileID.cs:171）——上邻禁替换放置表
+ *  （Game.isTileReplaceable 消费）——与 IsShakeable 同值（零行为差;同上） */
+export const PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS: ReadonlySet<number> = IS_SHAKEABLE_SHEETS;
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });

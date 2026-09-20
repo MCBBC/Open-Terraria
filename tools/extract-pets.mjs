@@ -1,22 +1,66 @@
-// 宠物物品提取器：Terarria1456/Terraria/Item.cs SetDefaults →
+// 宠物物品提取器：Terarria1457/Terraria/Item.cs SetDefaults →
 // { itemId: { buff, proj, light } }（light = Main.lightPet[buff]）。
+// ★BJ215 2026-09-20 重锚 1457（BJ183 登记债清偿,petai 重锚习语）：本器为 case 结构扫描
+//   （无局部号锚）,BJ215 沙箱重产三方对拍定谳——1457 重锚产物与现库【逐字节零差】
+//   （83 件）,1458 同逐字节零差,零差只换锚。
 // 判定：case 块内同时出现 `buffType = N` 与 `shoot = N`，且无 `consumable = true`
 //（食物=consumable+buffType 无 shoot；武器=shoot 无 buffType）。
 // 输出 src/data/vanilla-pets.json；vanity/light 分类取 Main.cs 的
 // `vanityPet[N] = true` / `lightPet[N] = true` 赋值表。
-import { readFileSync, writeFileSync } from 'node:fs';
+//
+// ★era guard（BJ215 落闸,四要素习语见 docs/era-guard-family.md）：
+//   ① SW_ITEM_VER 缺省 1457（白名单 1457/1458——结构扫描两版语义同,1458=逐字节对拍面;
+//     1456 锚已退役:数据面与 1457 全等已定谳,显式 1456 拒并给指引）;
+//   ② 输出通道三分离：缺省=干跑对拍零写盘（重产 vs 现库逐字节对拍——零漂移 exit 0/
+//     漂移 exit 1+物证,B-form）/ SW_OUT=<dir>（canonical）或 PETS_OUT=<path>（FX53
+//     legacy 别名,向后兼容,可为完整文件路径或目录）写沙箱 / --write-real 逃生门;
+//     SW_OUT/PETS_OUT 与 --write-real 双旗互斥;SW_ITEM_VER≠1457 禁写真库;
+//   ③ 锚 fail-loud：DefaultToVanitypet 4797 公式块/vanityPet·lightPet 表基数/宠物总数
+//     基数/4797-4817 boss 宠 21 件/3855-3857 SW-FX53 钉值,失配 throw;
+//   ④ 判别力自证：tests/extract-pets-era-guard.test.ts（变异:摘干跑门=静默写库;毒化锚
+//     =fail-loud）。注：本器读侧无探测注入面,g1 不适用。
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SRC = join(ROOT, 'Terarria1456', 'Terraria', 'Item.cs');
-const MAIN = join(ROOT, 'Terarria1456', 'Terraria', 'Main.cs');
-// SW-FX53 2026-09-13: PETS_OUT/SW_FX53_OUT 试产重定向（禁真写纪律——重产 dry-run
-// 与盘上数据对拍用,同 extract-itemfunc ITEMFUNC_OUT / equip·journey SW_FX53_OUT 约定）
-const OUT = process.env.PETS_OUT ?? join(ROOT, 'game', 'src', 'data', 'vanilla-pets.json');
+// ================= era guard ①：源版本 fail-closed + 输出通道 =================
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457', '1458']);
+if (!VER_ALLOWED.has(VER) || !existsSync(join(ROOT, `Terarria${VER}`, 'Terraria', 'Item.cs'))) {
+  console.error(`[extract-pets] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1456') console.error('  1456 锚已随 BJ215 重锚退役：数据面与 1457 全等（BJ183 定谳 + BJ215 沙箱三方对拍逐字节零差），对拍用 SW_ITEM_VER=1458 或读定谳档案。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const SW_OUT = process.env.SW_OUT;
+const PETS_OUT = process.env.PETS_OUT; // SW-FX53 legacy 别名（SW_OUT canonical）
+const SANDBOX = SW_OUT !== undefined && SW_OUT !== '' ? SW_OUT : PETS_OUT;
+if (SANDBOX !== undefined && SANDBOX !== '' && WRITE_REAL) {
+  console.error('[extract-pets] 拒绝运行：SW_OUT/PETS_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  console.error('  处置：沙箱对拍用 SW_OUT=<dir>（或 PETS_OUT=<path>）；确认定谳后更新现库用 --write-real（且 SW_ITEM_VER=1457）。');
+  process.exit(1);
+}
+if (WRITE_REAL && VER !== '1457') {
+  console.error(`[extract-pets] 拒绝写真库：SW_ITEM_VER=${VER}≠1457（旧基线重放禁写 game/src/data/vanilla-pets.json）。`);
+  console.error('  处置：重放对拍请走 SW_OUT 沙箱；确要回写 1457 终值请去掉 SW_ITEM_VER 显式注入（缺省即 1457）。');
+  process.exit(1);
+}
+const SRC = join(ROOT, `Terarria${VER}`, 'Terraria', 'Item.cs');
+const MAIN = join(ROOT, `Terarria${VER}`, 'Terraria', 'Main.cs');
+const LIVE_JSON = join(ROOT, 'game', 'src', 'data', 'vanilla-pets.json');
+// ★M1 变异锚:干跑臂 null(守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面)
+const OUT = WRITE_REAL ? LIVE_JSON
+  : (SANDBOX !== undefined && SANDBOX !== ''
+    ? (SANDBOX.endsWith('.json') ? SANDBOX : join(SANDBOX.replace(/\/+$/, ''), 'vanilla-pets.json'))
+    : null);
 
 const itemSrc = readFileSync(SRC, 'utf8');
 const mainSrc = readFileSync(MAIN, 'utf8');
+// era guard ③：锚 fail-loud（源码漂移即报错退出,petai 原旨——禁止静默兜底）
+if (!/DefaultToVanitypet\(881 \+ type - 4797/.test(itemSrc)) {
+  throw new Error('[extract-pets] 锚点失配: DefaultToVanitypet(881 + type - 4797) boss 宠公式块未找到（Item.cs 漂移）');
+}
 
 // ---- Main.cs vanityPet/lightPet 布尔表 ----
 const grabBoolTable = (name) => {
@@ -30,6 +74,10 @@ const vanityPet = new Set();
 const lightPet = new Set();
 for (const m of mainSrc.matchAll(/vanityPet\[(\d+)\] = true;/g)) vanityPet.add(+m[1]);
 for (const m of mainSrc.matchAll(/lightPet\[(\d+)\] = true;/g)) lightPet.add(+m[1]);
+// era guard ③：Main.cs 表基数护栏（正则静默漏配=不变量校验假绿,禁止吃空表继续）
+if (vanityPet.size < 70 || lightPet.size < 10) {
+  throw new Error(`[extract-pets] 锚点失配: Main.vanityPet=${vanityPet.size}(<70?)/lightPet=${lightPet.size}(<10?) 表基数漂移（Main.cs 漂移或正则漏配）`);
+}
 
 // ---- Item.cs SetDefaults switch 逐 case 解析 ----
 // switch 起止：`switch (type)`（SetDefaults 内第一个）到文件尾的 case 区。
@@ -211,5 +259,51 @@ if (bad.length) {
 }
 console.log('不变量校验 ✓ 每条 buff ∈ vanityPet ∪ lightPet');
 
-writeFileSync(OUT, JSON.stringify(pets, null, 0));
-console.log(`写入 ${OUT}`);
+// ================= era guard ③：结果基数护栏 + SW-FX53 钉值（fail-loud） =================
+{
+  const petCount = Object.keys(pets).length;
+  if (petCount < 80) throw new Error(`[extract-pets] 锚点失配: 宠物基数 ${petCount} < 80（解析面漂移,禁止静默半表）`);
+  const bossPets = Object.keys(pets).filter((k) => +k >= 4797 && +k <= 4817);
+  if (bossPets.length !== 21) {
+    throw new Error(`[extract-pets] 锚点失配: boss 宠 4797-4817 应 21 件,实 ${bossPets.length}（DefaultToVanitypet 公式面漂移,FX48 补层回归）`);
+  }
+  // SW-FX53 ② 回归钉（Item.cs:33997-34015 嵌套 switch(type) per-id 归属——
+  // 旧实现曾把嵌套 case 覆写污染到全组,3855 被打成 201/702）
+  const PIN_3855_7 = { 3855: [200, 703], 3856: [201, 702], 3857: [202, 701] };
+  for (const [id, [buff, proj]] of Object.entries(PIN_3855_7)) {
+    const r = pets[id];
+    if (!r || r.buff !== buff || r.proj !== proj) {
+      throw new Error(`[extract-pets] 锚点失配: ${id} 钉值 buff=${buff}/proj=${proj}（SW-FX53 ② 嵌套 switch 归属回归）,实 ${JSON.stringify(r ?? null)}`);
+    }
+  }
+}
+
+// ================= era guard ②：干跑对拍 / 沙箱 / --write-real（头注见上） =================
+const FRESH = JSON.stringify(pets, null, 0);
+if (!OUT) {
+  // 缺省干跑对拍（零写盘,B-form）
+  const liveRaw = existsSync(LIVE_JSON) ? readFileSync(LIVE_JSON, 'utf8') : null;
+  if (!liveRaw) {
+    console.error('[extract-pets] 干跑（零写盘）：现库缺 vanilla-pets.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+  } else if (liveRaw === FRESH) {
+    console.error('[extract-pets] 干跑对拍：重产与现库逐字节零漂移（零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+  } else {
+    let live = null;
+    try { live = JSON.parse(liveRaw); } catch { /* 坏损:物证落空 */ }
+    console.error('[extract-pets] 干跑对拍：漂移（零写盘 exit 1）。');
+    if (live) {
+      const liveOnly = Object.keys(live).filter((k) => pets[k] === undefined);
+      const freshOnly = Object.keys(pets).filter((k) => live[k] === undefined);
+      const drift = Object.keys(live).filter((k) => pets[k] !== undefined && JSON.stringify(pets[k]) !== JSON.stringify(live[k]));
+      if (liveOnly.length) console.error(`  现库 ${liveOnly.length} 键重产盖不住: ${liveOnly.slice(0, 10).join(', ')}`);
+      if (freshOnly.length) console.error(`  重产新增 ${freshOnly.length} 键: ${freshOnly.slice(0, 10).join(', ')}`);
+      if (drift.length) console.error(`  值漂移 ${drift.length} 键: ${drift.slice(0, 2).map((k) => `${k}:${JSON.stringify(live[k])}→${JSON.stringify(pets[k])}`).join(' | ')}${drift.length > 2 ? '…' : ''}`);
+    }
+    console.error('  正常更新流：定谳漂移源后 --write-real 显式写盘（SW_ITEM_VER 缺省 1457）。');
+    process.exit(1);
+  }
+} else {
+  mkdirSync(OUT.slice(0, Math.max(OUT.lastIndexOf('/'), 0)) || '.', { recursive: true });
+  writeFileSync(OUT, FRESH);
+  console.error(`[extract-pets] 已写 ${OUT}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT/PETS_OUT 沙箱'}，SW_ITEM_VER=${VER}）`);
+}

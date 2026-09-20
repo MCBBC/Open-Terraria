@@ -62,7 +62,7 @@
 //      Next(3) 掷+SquareTileFrame 双级联+失败 Clear 留痕），rainbow #105 满绿定谳。
 
 import { RNG } from '../../../core/rng';   // ★IIIII228 doNoSurface 双流需要【值】导入（new RNG(seed) 镜像 Main.rand）
-import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, CONV_GRASS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS, CONV_SNOW_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CRACKED_BRICKS_SHEETS, GETS_DESTROYED_FOR_METEORS_SHEETS, CLOUDS_SHEETS } from '../../../data/tiles';
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { World } from '../../World';
@@ -114,18 +114,20 @@ const VID_TABLE: Record<number, number> = (() => {
 })();
 
 // ---------- TileID.Sets.Conversion / WallID.Sets.Conversion / Main.tileMoss（1457 终值） ----------
-const CONV_GRASS = new Set([2, 23, 199, 109, 477, 492]);            // TileID.cs:38
-const CONV_JUNGLE_GRASS = new Set([60, 661, 662]);
-const CONV_MUSHROOM_GRASS = new Set([70]);
-const CONV_GOLF_GRASS = new Set([477, 492]);
-const CONV_SNOW = new Set([147]);
-const CONV_STONE = new Set([1, 25, 117, 203]);
-const CONV_ICE = new Set([161, 163, 164, 200]);
-const CONV_SAND = new Set([53, 112, 116, 234]);
-const CONV_HARDENED_SAND = new Set([397, 398, 402, 399]);
-const CONV_SANDSTONE = new Set([396, 400, 403, 401]);
-const CONV_THORN = new Set([32, 352, 69, 655]);
-const TILE_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]); // Main.cs:7146-7187
+// ★BJ210（2026-09-20）Conversion 全族+tileMoss 收编 data/tiles.ts 单源（sheet 域,逐值
+//   对拍全等,tests/tile-domain-sentinel §6i）;本文件仅留别名与 WallID.Sets.Conversion 域。
+const CONV_GRASS = CONV_GRASS_SHEETS;                              // TileID.cs:18
+const CONV_JUNGLE_GRASS = CONV_JUNGLE_GRASS_SHEETS;
+const CONV_MUSHROOM_GRASS = new Set([70]);                          // Conversion.MushroomGrass :16（单副本,登记债）
+const CONV_GOLF_GRASS = CONV_GOLF_GRASS_SHEETS;
+const CONV_SNOW = CONV_SNOW_SHEETS;
+const CONV_STONE = CONV_STONE_SHEETS;
+const CONV_ICE = CONV_ICE_SHEETS;
+const CONV_SAND = CONV_SAND_SHEETS;
+const CONV_HARDENED_SAND = CONV_HARDENED_SAND_SHEETS;
+const CONV_SANDSTONE = CONV_SANDSTONE_SHEETS;
+const CONV_THORN = CONV_THORN_SHEETS;
+const TILE_MOSS = TILE_MOSS_SHEETS;                                 // Main.cs:7146-7187 ≡ Conversion.Moss 同值
 
 const WALL_CONV_GRASS = new Set([63, 64, 65, 66, 67, 68, 69, 70, 81, 264, 265, 268]);
 const WALL_CONV_STONE = new Set([1, 61, 185, 3, 28, 83, 262, 274, 246, 248, 269, 349]);
@@ -665,8 +667,9 @@ export function doWorldIsInfected(st: TileStore, rng: RNG, gs: GenState): void {
 // data/tiles.ts:ORE_SHEETS（同名 import,tests/tile-domain-sentinel §6h）
 /** WallID.Sets.Fences（WallID.cs:56） */
 const WALL_FENCES = new Set([150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
-/** Clouds 集（TileID.cs:197）——DoSurfaceIsDesertFinish 锚用 */
-const DESERT_CLOUD_IDS = new Set([189, 196, 460, 717, 718, 719]);
+/** Clouds 集（TileID.cs:197）——DoSurfaceIsDesertFinish 锚用（★名带 IDS 实为 sheet 域比较
+ *  :676/:1612 经 shOf；★BJ210 收编单源 data/tiles.ts:CLOUDS_SHEETS,§6i） */
+const DESERT_CLOUD_IDS = CLOUDS_SHEETS;
 function findLowestCloudSheet(st: TileStore, wsDouble: number): number {
   let num = 0;
   for (let y = 20; y < wsDouble; y++) {
@@ -1025,9 +1028,9 @@ export function doErrorWorldShuffleBlocks(st: TileStore, rng: RNG, gs: GenState)
 // ============================================================
 /** ItemID.Sets.ErrorWorldChestSwapImmunity（ItemID.cs:1120）＝ 空槽(type0)+特典 5 物 */
 const ERROR_CHEST_SWAP_IMMUNITY = new Set([0, 1156, 1571, 1569, 1260, 1572, 4607]);
-/** CrackedBricks / Conversion.Moss（TileID.cs） */
-const EW_CRACKED = new Set([481, 482, 483]);
-const EW_CONV_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+/** CrackedBricks / Conversion.Moss（TileID.cs）——★BJ210 收编单源（§6i） */
+const EW_CRACKED = CRACKED_BRICKS_SHEETS;
+const EW_CONV_MOSS = TILE_MOSS_SHEETS;
 /** tileFrameImportant 表（vanilla 权威 412 项＝tests/golden/frameImportant.json,
  *  反编译 Main.cs tileFrameImportant 全表金标）。
  *  ★IIIII165 定罪：旧「def.framed × vanilla.sheet 推导」被 JS 侧杂类污染——
@@ -1833,8 +1836,8 @@ function isDungeonWallId(wall: number): boolean {
 function tileFilledAny(st: TileStore, x: number, y: number): boolean {
   return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
 }
-/** TileID.Sets.tileMossBrick（TileID.cs:309）——PlaceTile 184 第二支邻型表 */
-const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+/** TileID.Sets.tileMossBrick（TileID.cs:309）——PlaceTile 184 第二支邻型表——★BJ210 收编单源（§6i） */
+const TILE_MOSS_BRICK = MOSS_BRICK_SHEETS;
 /** WorldGen.PlaceTile(i,j,184,mute:true,forced:false,plr:-1,style:10) 生成期域 1:1
  *  （1458 cs:59841 头门 + cs:60202-60223 双支 + cs:60749-60755 无条件尾帧）。
  *  - 预门 `forced||EmptyTile||!tileSolid[num]||…`：tileSolid[184]=false ⇒ 恒过；
@@ -1855,7 +1858,7 @@ function placeTile184Gen(st: TileStore, rng: RNG, x: number, y: number, style = 
   st.paint[i] = 0; st.coat[i] &= ~TileStore.COAT_BLOCK_MASK;           //   |TilePaint
   st.slope[i] = 0; st.half[i] = 0;                                     //   |Slope
   const dirs: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-  const nbrOk = (set: Set<number>): boolean =>
+  const nbrOk = (set: ReadonlySet<number>): boolean =>
     dirs.some(([dx, dy]) => {
       const x2 = x + dx, y2 = y + dy;
       if (!st.inBounds(x2, y2)) return false;
@@ -2595,8 +2598,8 @@ export function doAdditionalChangesAroundSpawnCore(st: TileStore, rng: RNG, _gs:
 /** TileID.Sets.Clouds（TileID.cs:197 = 189,196,460,717,718,719）+ RainCloud 202 —— meteor
  *  候选盒计数惩罚项（命中一次 -100 直接否决） */
 const METEOR_CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719, 202]);
-/** TileID.Sets.GetsDestroyedForMeteors（TileID.cs:165 = 5,32,352,583-589,596,616,634） */
-const GETS_DESTROYED_FOR_METEORS = new Set([5, 32, 352, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+/** TileID.Sets.GetsDestroyedForMeteors（TileID.cs:165 = 5,32,352,583-589,596,616,634）——★BJ210 收编单源（§6i） */
+const GETS_DESTROYED_FOR_METEORS = GETS_DESTROYED_FOR_METEORS_SHEETS;
 /** meteor() 前置否决集：BasicChest/tileDungeon/26/226/470/475/488/597（cs:6269-6287） */
 const METEOR_VETO = new Set([26, 226, 470, 475, 488, 597]);
 /** TileID.Sets.BasicChest（TileID.cs:315 = 21,467）/ Main.tileDungeon（Main.cs:8131-8136

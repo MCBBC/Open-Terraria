@@ -253,7 +253,8 @@ import { GLSpriteLayer } from './GLSpriteLayer';
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay,
-  drawMimicAfterimages, drawNpcTrailGhosts } from './npcExtraParts';
+  drawMimicAfterimages, drawNpcTrailGhosts, drawNpcAuraRings,
+  NPC_AURA_RING_IDS } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
@@ -7960,6 +7961,27 @@ export class Renderer {
         // 568/569 出生态紫雾（本体绘制层，先于本体画——Main.cs:26060-26076 拷贝循环
         // 在 vector72 本体 draw 之前）
         if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherBirth(ctx, e, r, scale);
+        // ★BJ211 num57 本体帧环（BJ209 债②「圆周光晕」销账）：通用大表 426/523/541/
+        // 568/569/618/620/661 的 num74 环拷贝（Main.cs:23645-23656，1458 对拍同号）。
+        // 挂点=本体变换内、本体 drawImage 之前（drawWitherBirth 同族先例位）——原版环
+        // 画在本体【之下】(:23645 环 → :23660 本体)，环拷贝绕盒心 4-25px 高重叠，若走
+        // BJ209 残影 restore 后挂点（本体之上）会在包络谷底洗白本体（661 f→1 最烈）。
+        // 本体 rotation/镜像由 ctx 变换承载（角度式即含 rotation 项）；620 的 origin
+        // 覆写净位移与 num47=-9 由 dx0/addY 同式承接（环≡本体锚）。541/568/569/661 的
+        // GlowMask 轨道环在 NPC_GLOW_ORBIT（已承载，另域）；618 Extra_59 双闪在
+        // drawDreadnautilusFlash（pre-transform 位）。语义/参数详见
+        // npcExtraParts.NPC_AURA_RINGS 组头注。
+        if (NPC_AURA_RING_IDS.has(e.vanillaId ?? -1)) {
+          drawNpcAuraRings(ctx, e, this.atlas,
+            { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh },
+            {
+              scale, addY: addY + footFlush,
+              opacity: 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
+              mirror: e.facing > 0,   // 本体 :7841 通用镜像同判（620 dx0 翻号消费）
+              lai3: (e.vanillaId === 568 || e.vanillaId === 569)
+                ? witherBeastLocal(e)[1] : e.lai3,
+            });
+        }
         // debuff 染色在身时基础层由下方 tintedSprite(multiply) 版本承担（双画=叠亮）
         if (!xnaColor && !dbTint) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
         // 618 血月潜舰触腕叠加层（DrawNPC Extra_129 段：通用帧后追加同帧叠画）

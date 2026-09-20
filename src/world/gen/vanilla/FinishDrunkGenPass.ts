@@ -26,7 +26,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, CRACKED_BRICKS_IDS } from '../../../data/tiles';
 import { VI_ID } from '../../../data/itemKeys';
 import type { ChestSink } from './BuriedChestsPass';
 
@@ -54,8 +54,9 @@ const ids = (...sheets: number[]): Set<number> =>
 /** Main.tileDungeon（Main.cs:8131-8136）：41 蓝/43 绿/44 粉 + 古砖 677-679
  *  ——★BJ187 收编 data/tiles.ts:TILE_DUNGEON_IDS 单源（旧 ids() 平移副本逐值全等） */
 const DUNGEON_BRICKS = TILE_DUNGEON_IDS;
-/** TileID.Sets.CrackedBricks（TileID.cs:183）＝481/482/483 */
-const CRACKED_BRICKS = ids(481, 482, 483);
+/** TileID.Sets.CrackedBricks（TileID.cs:183）＝481/482/483——★BJ210 收编单源
+ *  data/tiles.ts:CRACKED_BRICKS_IDS（内部 id 域,与旧 ids() 平移副本逐值全等,§6i） */
+const CRACKED_BRICKS = CRACKED_BRICKS_IDS;
 const BRICK_PINK = one(44), BRICK_GREEN = one(43), BRICK_BLUE = one(41);
 const JUNGLE_GRASS = one(60), MUSHROOM_GRASS = one(226), VINE_137 = one(137);
 const MUD_59 = one(59);

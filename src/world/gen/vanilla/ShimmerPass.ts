@@ -19,7 +19,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { addProtectedStructure } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_MOSS_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { solidTile, registerTileFrame165 } from './HalfBrickPass';
@@ -37,8 +37,10 @@ const d59 = (o: Record<string, unknown>): void => {
   if (f) f(o);
 };
 
-/** Main.tileMoss（TileID.cs）：苔藓族 sheet 集（石族钟乳石帧判定用） */
-const MOSS_SHEETS = new Set<number>(Array.from(idsByVanillaSheet(182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627)).map((id) => TILE_DEFS[id]?.vanilla?.sheet ?? -1));
+/** Main.tileMoss（TileID.cs:38 Conversion.Moss ≡ Main.cs:7146-7187 同值）：苔藓族 sheet 集
+ *  （石族钟乳石帧判定用）——★BJ210 收编单源 data/tiles.ts:TILE_MOSS_SHEETS（§6i;旧
+ *  idsByVanillaSheet→map 回 sheet 双重平移形态拆除） */
+const MOSS_SHEETS = TILE_MOSS_SHEETS;
 
 /** JS type → 原版 sheet（ShimmerMakeBiomeOpening 的 SolidTile tileSolidTop 族门用） */
 const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);

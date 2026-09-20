@@ -52,7 +52,7 @@ import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import type { World } from '../../World';
-import { T, TILE_DEFS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import { T, TILE_DEFS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_SHEETS, CRACKED_BRICKS_SHEETS } from '../../../data/tiles';
 import { LiquidSim, LAVA_DEATH_SHEETS } from '../../liquid/LiquidSim';
 import { flipGenSolid, genSolidType, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { setBoulderSolidity } from './TrapsPass';
@@ -73,13 +73,13 @@ for (let t = 0; t < TILE_DEFS.length; t++) {
 const sheetOf = (t: number): number => SHEET_OF[t] ?? -1;
 const one = (s: number): number => ID_BY_SHEET.get(s) ?? -1;
 
-/** TileID.Sets.Clouds（TileID.cs:197）+ 本函数显式 `type==202` 支 */
-const CLOUD_SHEETS = new Set([189, 196, 460, 717, 718, 719]);
+/** TileID.Sets.Clouds（TileID.cs:197）+ 本函数显式 `type==202` 支——★BJ210 收编单源（§6i） */
+const CLOUD_SHEETS = CLOUDS_SHEETS;
 /** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
  *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
 const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
-/** TileID.Sets.CrackedBricks（TileID.cs:183 终值 481-483） */
-const CRACKED_BRICKS = new Set([481, 482, 483]);
+/** TileID.Sets.CrackedBricks（TileID.cs:183 终值 481-483）——★BJ210 收编单源（§6i） */
+const CRACKED_BRICKS = CRACKED_BRICKS_SHEETS;
 /** Main.wallDungeon（Main.cs:10734-10745）——wall id 即原版 id——★BJ187 收编
  *  data/tiles.ts:WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
 const WALL_DUNGEON = WALL_DUNGEON_SHEETS;

@@ -1,4 +1,6 @@
-// 从 Terarria1456 Item.cs 提取物品战斗数据（SetDefaults 主 switch + SetDefaults1/2/3 分段 switch）。
+// 从 Terarria1457 Item.cs 提取物品战斗数据（SetDefaults 主 switch + SetDefaults1/2/3 分段 switch）。
+// ★BJ215 头注勘误：本行原写「Terarria1456」系陈旧注释——SRC_VER 早已缺省 1457
+//   （BJ183 2026-09-20 基准对齐,见下方 SRC_VER 注）；1456/1458 显式回拍走 SW_ITEM_VER。
 // case 块内深度 1 赋值；SetDefaultsN(M) 委托块继承 M 记录后覆盖。输出 src/data/vanilla-itemcombat.json
 //
 // 2026-08-17 三通道扩展（本文件同时是提取库，供 extract-itemfunc.mjs 叠加 useTurn）：
@@ -56,10 +58,21 @@
 //     · 【禁反哺】4423/4824-4827/4908/4909 的 noMelee 七件=本仓派发等价门
 //       （combatWeapon consumable&&noMelee 爆炸物门）,原版 SetDefaults 无此字面,
 //       提取器不产=正确。
-import { readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+// ★era guard（BJ215 落闸,四要素习语见 docs/era-guard-family.md）：
+//   ① SW_ITEM_VER 缺省 1457（白名单 1456/1457/1458+反编译目录存在性 fail-closed;
+//     1456 保留=recon-item-1456-1457.mjs 双实例 --dump 对账通道,拦了=对账闸门自断）;
+//   ② 输出通道三分离：缺省=干跑对拍零写盘（重产 vs 现库动态 diff——缺键型洗库面非空
+//     或值漂移即 exit 1+物证,B-form:零漂移放行/漂移+物证）/ SW_OUT=<dir> 沙箱 /
+//     --write-real 逃生门;双旗互斥;SW_ITEM_VER≠1457 禁写真库;--dump/--audit 不落盘
+//     通道不受守卫限制;
+//   ③ 锚 fail-loud：methodBody 签名未找到即 throw（禁止「找不到就吃空体」静默兜底）;
+//   ④ 判别力自证：tests/extract-itemcombat-era-guard.test.ts（变异:摘干跑门=静默写库;
+//     毒化方法签名=fail-loud）。BJ215 定谳：1457 重产 vs 现库逐值零漂移（4369 items +
+//     978 useSound）,bare 重跑幂等态成立,B-form 对拍闸在位。
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const AUDIT = process.argv.includes('--audit'); // 自审计模式:不写文件,stdout 出 JSON 摘要
 // 源版本可选(recon-item-1456-1457.mjs 以 query-string 双实例分别取 1456/1457;
@@ -67,19 +80,28 @@ const AUDIT = process.argv.includes('--audit'); // 自审计模式:不写文件,
 // 1782/1784/1835/3291 crit + 4058/4060/4061/4062/4347/4348/4381/4788-4790/5629
 // 战斗画像全字段 + 6152-6155/6171/6173 新武器;1456 档留 SW_ITEM_VER=1456 显式回拍)
 export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
+// ★era guard ①:版本白名单 fail-closed（1456 保留=recon 双实例 --dump 对账;目录不存在即拒,
+//   禁止让 readFileSync 炸一堆 ENOENT 或静默错锚）
+const VER_ALLOWED = new Set(['1456', '1457', '1458']);
+if (!VER_ALLOWED.has(SRC_VER) || !existsSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`)) {
+  console.error(`[extract-itemcombat] 拒绝运行：SW_ITEM_VER="${SRC_VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${SRC_VER}/ 反编译目录）。`);
+  process.exit(1);
+}
 const src = readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8');
 
 // ---- 方法体切片（配平花括号） ----
+// ★era guard ③:签名未找到即 throw（原实现返回 ''——静默空体=表与源码失配还全绿的
+//   静默兜底反模式,extract-petai「源码漂移即报错退出」原旨）
 function methodBody(name) {
   const idx = src.indexOf(name);
-  if (idx < 0) return '';
+  if (idx < 0) throw new Error(`[extract-itemcombat] 锚点失配: 方法 ${name} 未找到（Item.cs 漂移,禁止静默空体）`);
   const start = src.indexOf('{', idx);
   let depth = 0;
   for (let i = start; i < src.length; i++) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}') { depth--; if (depth === 0) return src.slice(start + 1, i); }
   }
-  return '';
+  throw new Error(`[extract-itemcombat] 锚点失配: 方法 ${name} 花括号不配平（Item.cs 漂移）`);
 }
 const bodies = [
   // 签名前缀不带可见性修饰符(1456=public / 1457=private,substring 匹配两者兼容)
@@ -867,9 +889,22 @@ function main() {
     process.stdout.write(JSON.stringify(summary));
     process.exit(audit.length ? 1 : 0);
   }
-  // ★1457 段合并保留（2026-08-22 防整表重跑丢失）：SRC_VER=1456（默认档）写盘时，
+  // ================= ★BJ215 era guard：输出通道三分离（头注见上） =================
+  const WRITE_REAL = process.argv.includes('--write-real');
+  const SW_OUT = process.env.SW_OUT;
+  if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+    console.error('[extract-itemcombat] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+    console.error('  处置：沙箱对拍用 SW_OUT=<dir>；确认定谳后更新现库用 --write-real（且 SW_ITEM_VER=1457）。');
+    process.exit(1);
+  }
+  if (WRITE_REAL && SRC_VER !== '1457') {
+    console.error(`[extract-itemcombat] 拒绝写真库：SW_ITEM_VER=${SRC_VER}≠1457（旧基线重放禁写 game/src/data/vanilla-itemcombat.json）。`);
+    console.error('  处置：1456/1458 重放对拍请走 SW_OUT 沙箱；确要回写 1457 终值请去掉 SW_ITEM_VER 显式注入（缺省即 1457）。');
+    process.exit(1);
+  }
+  // ★1457 段合并保留（2026-08-22 防整表重跑丢失）：SRC_VER=1456 时，
   //   1457 专属 id（≥6100,Palworld/1457 配饰族等,1456 Item.cs 无 case）从现表原样
-  //   并回——否则裸跑默认档会把 50 条 1457 条目整段抹掉。1457 档（SW_ITEM_VER=1457）
+  //   并回——否则 1456 档重产会把 50 条 1457 条目整段抹掉。1457 档（SW_ITEM_VER=1457）
   //   天然全量产出,不进此分支。recon --fix 是字段级合并不受影响。
   if (SRC_VER === '1456') {
     let prev = null;
@@ -879,18 +914,62 @@ function main() {
       for (const [k, v] of Object.entries(prev)) {
         if (Number(k) >= 6100 && obj[k] === undefined) { obj[k] = v; merged++; }
       }
-      if (merged > 0) console.error(`[extract-itemcombat] 1456 档写盘:合并保留 1457 段 ${merged} 条`);
+      if (merged > 0) console.error(`[extract-itemcombat] 1456 档重产:合并保留 1457 段 ${merged} 条`);
     }
   }
-  writeFileSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`, JSON.stringify(obj));
-  // UseSound 全量表（Item_N / 命名轨；null 显式静音剔除）
-  {
-    const out = {};
-    for (const [id, v] of SOUND) {
-      if (v === null || v === undefined) continue;
-      out[id] = v;
+  const soundOut = {};
+  for (const [id, v] of SOUND) {
+    if (v === null || v === undefined) continue;
+    soundOut[id] = v;
+  }
+  const COMBAT_FRESH = JSON.stringify(obj);
+  const SOUND_FRESH = JSON.stringify(soundOut);
+  // ★M1 变异锚:干跑臂 null(守卫测试把 null 换成沙箱假现库目录,证明缺省零写盘是唯一拦截面)
+  const OUT_DIR = WRITE_REAL ? `${ROOT}/game/src/data`
+    : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}` : null);
+  if (!OUT_DIR) {
+    // 缺省干跑对拍（零写盘,B-form）：重产 vs 现库动态 diff——缺键型洗库面非空或值漂移
+    // 即 exit 1+物证（BJ215 定谳:bare 1457 重产=现库逐值零漂移,零漂移即放行）
+    const liveCombat = existsSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`)
+      ? readFileSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`, 'utf8') : null;
+    const liveSound = existsSync(`${ROOT}/game/src/data/vanilla-itemusesound.json`)
+      ? readFileSync(`${ROOT}/game/src/data/vanilla-itemusesound.json`, 'utf8') : null;
+    if (!liveCombat || !liveSound) {
+      console.error('[extract-itemcombat] 干跑（零写盘）：现库缺 vanilla-itemcombat/vanilla-itemusesound,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+    } else {
+      let prev = null;
+      let prevSound = null;
+      try { prev = JSON.parse(liveCombat); prevSound = JSON.parse(liveSound); } catch { /* 坏损:对拍跳过 */ }
+      if (prev && prevSound) {
+        const missing = Object.keys(prev).filter((k) => obj[k] === undefined);
+        const soundMissing = Object.keys(prevSound).filter((k) => soundOut[k] === undefined);
+        const drift = [];
+        const soundDrift = [];
+        for (const [k, v] of Object.entries(prev)) {
+          if (obj[k] !== undefined && JSON.stringify(obj[k]) !== JSON.stringify(v)) drift.push(k);
+        }
+        for (const [k, v] of Object.entries(prevSound)) {
+          if (soundOut[k] !== undefined && soundOut[k] !== v) soundDrift.push(k);
+        }
+        if (missing.length || soundMissing.length || drift.length || soundDrift.length) {
+          console.error('[extract-itemcombat] 干跑对拍：漂移（零写盘 exit 1）。');
+          if (missing.length) console.error(`  vanilla-itemcombat.json 现库 ${missing.length} 键重产盖不住（缺键型洗库面）: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`);
+          if (drift.length) console.error(`  combat 值漂移 ${drift.length} 键: ${drift.slice(0, 10).join(', ')}${drift.length > 10 ? '…' : ''}`);
+          if (soundMissing.length) console.error(`  vanilla-itemusesound.json 现库 ${soundMissing.length} 键重产盖不住: ${soundMissing.slice(0, 10).join(', ')}`);
+          if (soundDrift.length) console.error(`  useSound 值漂移 ${soundDrift.length} 键: ${soundDrift.slice(0, 10).join(', ')}`);
+          console.error('  正常更新流：定谳漂移源（新版本段→定谳后 --write-real;错值型→node tools/recon-item-1456-1457.mjs 对账）后再显式写盘。');
+          process.exit(1);
+        }
+        console.error('[extract-itemcombat] 干跑对拍：重产与现库逐值零漂移（零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+      } else {
+        console.error('[extract-itemcombat] 干跑（零写盘）：现库坏损,对拍跳过。');
+      }
     }
-    writeFileSync(`${ROOT}/game/src/data/vanilla-itemusesound.json`, JSON.stringify(out));
+  } else {
+    mkdirSync(OUT_DIR, { recursive: true });
+    writeFileSync(`${OUT_DIR}/vanilla-itemcombat.json`, COMBAT_FRESH);
+    writeFileSync(`${OUT_DIR}/vanilla-itemusesound.json`, SOUND_FRESH);
+    console.error(`[extract-itemcombat] 已写 ${OUT_DIR}/vanilla-{itemcombat,itemusesound}.json（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}）`);
   }
   const bows = [...data.values()].filter((v) => v.useAmmo === 40);
   const arrows = [...data.values()].filter((v) => v.ammo === 40);

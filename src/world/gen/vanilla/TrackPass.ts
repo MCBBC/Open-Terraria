@@ -30,7 +30,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, FORBIDS_SLOPING_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_A_CONTAINER_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, FORBIDS_SLOPING_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_A_CONTAINER_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
@@ -102,26 +102,26 @@ const BOULDER_SS = BOULDERS_SHEETS;
 /** TileID.Sets.IsATreeTrunk(CanKillTile cs:62276 消费) */
 // ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const TREE_TRUNK_SS = IS_A_TREE_TRUNK_SHEETS;
-/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt(TileID.cs:169;HasReasonToReturnEarly) */
-const PREVENTS_REMOVAL_SS = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt(TileID.cs:169;HasReasonToReturnEarly)——★BJ210 收编单源（§6i） */
+const PREVENTS_REMOVAL_SS = PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS;
 /** TileID.Sets.IsAContainer(TileID.cs:409)——★BJ203 收编单源 data/tiles.ts（§6h） */
 const CONTAINER_SS = IS_A_CONTAINER_SHEETS;
-/** Main.tileMoss(Main.cs:6956-6996)——KillTile fail 支苔藓→石转换族 */
-const TILE_MOSS_SS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
-/** TileID.Sets.tileMossBrick(TileID.cs:309)——fail 支 moss 砖→38(Stone Slab? cs:64246) */
-const TILE_MOSS_BRICK_SS = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+/** Main.tileMoss(Main.cs:7146-7187,旧注 :6956-6996 系声明行)——KillTile fail 支苔藓→石转换族——★BJ210 收编单源（§6i） */
+const TILE_MOSS_SS = TILE_MOSS_SHEETS;
+/** TileID.Sets.tileMossBrick(TileID.cs:309)——fail 支 moss 砖→38(Stone Slab? cs:64246)——★BJ210 收编单源（§6i） */
+const TILE_MOSS_BRICK_SS = MOSS_BRICK_SHEETS;
 /** sheet → 内部 id(单射假设下取首个;fail 支类型回退写用) */
 const ID_OF_SHEET = new Map<number, number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number' && !ID_OF_SHEET.has(s)) ID_OF_SHEET.set(s, i);
 }
-/** CheckPile 地基族带(TileID.cs:24-34):Snow/Ice/Sand/HardenedSand/Sandstone */
-const SNOW_SS = new Set([147]);
-const ICE_SS = new Set([161, 163, 164, 200]);
-const SAND_SS = new Set([53, 112, 116, 234]);
-const HARDSAND_SS = new Set([397, 398, 402, 399]);
-const SANDSTONE_SS = new Set([396, 400, 403, 401]);
+/** CheckPile 地基族带(TileID.cs:24-34):Snow/Ice/Sand/HardenedSand/Sandstone——★BJ210 收编单源（§6i） */
+const SNOW_SS = CONV_SNOW_SHEETS;
+const ICE_SS = CONV_ICE_SHEETS;
+const SAND_SS = CONV_SAND_SHEETS;
+const HARDSAND_SS = CONV_HARDENED_SAND_SHEETS;
+const SANDSTONE_SS = CONV_SANDSTONE_SHEETS;
 /** 单型号门用 vanilla 型号值(经 SHEET_OF 比较) */
 const S_DOOR = 10, S_MUSICBOX = 235, S_CHEST = 21, S_CHEST2 = 467, S_CHEST3 = 88;
 const S_PALM = 72, S_MUSH = 26, S_TABLE = 77, S_DRESSER = 88, S_SAPLING = 467, S_PINE = 488;

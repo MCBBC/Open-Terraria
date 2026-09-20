@@ -26,13 +26,20 @@
 // 输出 Record<vid, 1>（itemfunc 1/0 旗惯型；recon-item SCALAR 直写）。
 // 用法：node tools/extract-expert.mjs   （直跑落盘,缺省 1457）
 //       node tools/extract-expert.mjs --dump             （stdout 全量表，recon 双实例用）
-import { readFileSync, writeFileSync, writeSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync, existsSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 // 源版本可选(recon-item-1456-1457.mjs 双实例分别取 1456/1457;
 // ★BJ183 2026-09-20 缺省 1456→1457——expert 位面 1456↔1457 对拍零漂移(43 条全等),
 // 裸跑不再锚旧版;1456 档留 SW_ITEM_VER=1456 显式回拍)
 export const SRC_VER = process.env.SW_ITEM_VER ?? '1457';
+// ★era guard ①（BJ215 落闸,四要素习语见 docs/era-guard-family.md）:版本白名单
+//   fail-closed（1456 保留=recon 双实例 --dump 对账;目录不存在即拒）
+const VER_ALLOWED = new Set(['1456', '1457', '1458']);
+if (!VER_ALLOWED.has(SRC_VER) || !existsSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`)) {
+  console.error(`[extract-expert] 拒绝运行：SW_ITEM_VER="${SRC_VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${SRC_VER}/ 反编译目录）。`);
+  process.exit(1);
+}
 
 /** 提取库：Item.cs 全文 → { EXPERT }（vid → 1；未列出 = expert=false（ResetStats 默认）） */
 export function extractExpert(src) {
@@ -123,11 +130,59 @@ export function extractExpert(src) {
 const { EXPERT } = extractExpert(readFileSync(`${ROOT}/Terarria${SRC_VER}/Terraria/Item.cs`, 'utf8'));
 export { EXPERT };
 if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
-  // --dump:全量表出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用)
+  // --dump:全量表出 stdout 不落盘(recon-item-1456-1457.mjs 双版本对账用;守卫不拦
+  //  dump——双实例 1456/1457 都走此通道,拦了=对账闸门自断)
   if (process.argv.includes('--dump')) {
     writeSync(1, JSON.stringify({ src: SRC_VER, EXPERT }));
   } else {
-    writeFileSync(`${ROOT}/game/src/data/vanilla-expert.json`, JSON.stringify(EXPERT));
+    // ================= ★BJ215 era guard：输出通道三分离 =================
+    // ②缺省=干跑对拍零写盘（重产 vs 现库逐字节对拍——零漂移 exit 0/漂移 exit 1+物证,
+    //   B-form;BJ215 定谳 bare 1457 重产=现库逐字节零漂移 43 条）/ SW_OUT=<dir> 沙箱 /
+    //   --write-real 逃生门;双旗互斥;SW_ITEM_VER≠1457 禁写真库;④判别力自证
+    //   tests/extract-mounts-expert-era-guard.test.ts。读侧无探测注入面,g1 不适用。
+    const WRITE_REAL = process.argv.includes('--write-real');
+    const SW_OUT = process.env.SW_OUT;
+    if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+      console.error('[extract-expert] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+      console.error('  处置：沙箱对拍用 SW_OUT=<dir>；确认定谳后更新现库用 --write-real（且 SW_ITEM_VER=1457）。');
+      process.exit(1);
+    }
+    if (WRITE_REAL && SRC_VER !== '1457') {
+      console.error(`[extract-expert] 拒绝写真库：SW_ITEM_VER=${SRC_VER}≠1457（旧基线重放禁写 game/src/data/vanilla-expert.json）。`);
+      console.error('  处置：1456/1458 重放对拍请走 SW_OUT 沙箱；确要回写 1457 终值请去掉 SW_ITEM_VER 显式注入（缺省即 1457）。');
+      process.exit(1);
+    }
+    const LIVE_JSON = `${ROOT}/game/src/data/vanilla-expert.json`;
+    const FRESH = JSON.stringify(EXPERT);
+    // ★M1 变异锚:干跑臂 null(守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面)
+    const OUT_JSON = WRITE_REAL ? LIVE_JSON
+      : (SW_OUT !== undefined && SW_OUT !== '' ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-expert.json` : null);
+    if (!OUT_JSON) {
+      const liveRaw = existsSync(LIVE_JSON) ? readFileSync(LIVE_JSON, 'utf8') : null;
+      if (!liveRaw) {
+        console.error('[extract-expert] 干跑（零写盘）：现库缺 vanilla-expert.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+      } else if (liveRaw === FRESH) {
+        console.error('[extract-expert] 干跑对拍：重产与现库逐字节零漂移（零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+      } else {
+        let live = null;
+        try { live = JSON.parse(liveRaw); } catch { /* 坏损:物证落空 */ }
+        console.error('[extract-expert] 干跑对拍：漂移（零写盘 exit 1）。');
+        if (live) {
+          const liveOnly = Object.keys(live).filter((k) => EXPERT[k] === undefined);
+          const freshOnly = Object.keys(EXPERT).filter((k) => live[k] === undefined);
+          const drift = Object.keys(live).filter((k) => EXPERT[k] !== undefined && EXPERT[k] !== live[k]);
+          if (liveOnly.length) console.error(`  现库 ${liveOnly.length} 键重产盖不住: ${liveOnly.slice(0, 12).join(', ')}`);
+          if (freshOnly.length) console.error(`  重产新增 ${freshOnly.length} 键: ${freshOnly.slice(0, 12).join(', ')}`);
+          if (drift.length) console.error(`  值漂移 ${drift.length} 键: ${drift.slice(0, 8).join(', ')}`);
+        }
+        console.error('  正常更新流：定谳漂移源后 --write-real 显式写盘（SW_ITEM_VER 缺省 1457）。');
+        process.exit(1);
+      }
+    } else {
+      mkdirSync(OUT_JSON.slice(0, Math.max(OUT_JSON.lastIndexOf('/'), 0)) || '.', { recursive: true });
+      writeFileSync(OUT_JSON, FRESH);
+      console.error(`[extract-expert] 已写 ${OUT_JSON}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}）`);
+    }
     console.error(`expert 条目: ${Object.keys(EXPERT).length}（源 Terarria${SRC_VER}）`);
   }
 }

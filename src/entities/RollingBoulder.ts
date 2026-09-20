@@ -19,7 +19,7 @@ import { cutTilesBox } from './ProjCutTiles';   // ★SW-BJ93 债1：CutTiles �
 import { GorePiece } from './GorePiece';        // ★SW-BJ93 债2：1053 Kill gore 61..63（Game.explodeAt 同引擎,30:28419 先例）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, PLATFORMS_SHEETS, ORE_SHEETS, IS_A_DRIP_TILE_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, PLATFORMS_SHEETS, ORE_SHEETS, IS_A_DRIP_TILE_SHEETS, FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS } from '../data/tiles';
 import { LIQUID_TYPE } from '../world/TileStore';   // ★SW-BJ93 债②：液体编码（repo +1 域）
 import { canHit, solidTileAt } from '../physics/LineOfSight';   // ★SW-BJ93 债②：CanHit/SolidTile 1:1
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';   // ★SW-BJ93 债2：Kill 掉落 vid→键反查（Player.ts:6333 同款）
@@ -367,8 +367,9 @@ function factorAcceleration1457(cvx: number, cvy: number, t: number, framesOfLen
  *  ★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h） */
 const RB_ORE_SHEETS = ORE_SHEETS;
 
-/** TileID.Sets.FriendlyFairyCanLureTo（TileID.cs:413 全 17 元素直抄） */
-const RB_FAIRY_LURE_SHEETS = new Set([8, 169, 21, 467, 107, 108, 111, 221, 222, 223, 211, 12, 665, 639, 236, 702, 227]);
+/** TileID.Sets.FriendlyFairyCanLureTo（TileID.cs:413 全 17 元素）——★BJ210 收编单源
+ *  data/tiles.ts:FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS（逐值对拍 17≡17,tests/tile-domain-sentinel §6i） */
+const RB_FAIRY_LURE_SHEETS = FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS;
 
 /** Main.tileOreFinderPriority（Main.cs:6355-6391）∩ FriendlyFairyCanLureTo——
  *  扫描候选集先被 :20394 帧门收窄到上表 17 sheet,本表覆盖即全量；逐值与
