@@ -1,6 +1,10 @@
 // 月系批 AI 家族 1:1 移植(Terarria1456, 1.4.5.6)：
-//   aiStyle 81  月总游离眼 400            NPC.cs:38224-38667（攻击表 MoonLordAttacksArray2
-//                                              :6966-6985 十槽循环:悬停/幻影矢 462/幻影球 454
+//   ★BJ220 2026-09-20 本文件 aiStyle 8X 族注释行号全量重锚 1457(与 1458 三方一致;
+//   1456→1457 本区恒 -1675 行,已逐块 diff 归零验证 1:1;81/84 缩为 4 行 stub 委托
+//   命名方法)——只动注释零物码。9X 星璇塔族/AI_003 弓手段未在本刀范围。
+//   aiStyle 81  月总游离眼 400            NPC.cs:36982-36985→AI_081_TrueEyeOfCthulhu
+//                                              :42900-43373（攻击表 MoonLordAttacksArray2
+//                                              :6992-7035 十槽循环:悬停/幻影矢 462/幻影球 454
 //                                              六角螺旋/幻影眼 452 洒射/死亡之光 455;锚核心 398
 //                                              ai[3],核心亡→静默消散;SetDefaults dontTakeDamage
 //                                              =true → 恒无敌）
@@ -9,28 +13,28 @@
 //                                              1000 点治疗按 头396→核心398→手397(ai2=0)
 //                                              →手(ai2=1) 亏血序回灌）——台账批:插值起点
 //                                              由出生点近似改接真源弹(bInit 配对认领)
-//   aiStyle 83  神秘石碑 437/忠实信徒 438  NPC.cs:38793-38962（石碑 CheckFloor 落地校验后召
+//   aiStyle 83  神秘石碑 437/忠实信徒 438  NPC.cs:37118-37287（石碑 CheckFloor 落地校验后召
 //                                              4 教徒(379×2 外侧/438×2 内侧,ai[3]=-(碑id+1));
 //                                              信徒受击→石碑 localAI[0]=1→弓手激活;四教徒全灭
 //                                              →侧面落点召 439 邪教徒 + 300t 仪式倒计时消散）
-//   aiStyle 86  暗焰幻影 472/远古幻影 521  NPC.cs:39261-39519（穿墙横掠→越过 660/500px 掉头
+//   aiStyle 86  暗焰幻影 472/远古幻影 521  NPC.cs:37586-37844（穿墙横掠→越过 660/500px 掉头
 //                                              →回摆循环;521 全参数强化(0.7/14/500/6/3)+
 //                                              228 号紫雾拖尾;出生 120t 显形爆发音 Item8）
-//   aiStyle 87  珍稀四宝箱怪 473-476       NPC.cs:39520-39875（ai[0] 0 伪装箱→1 蓄力 36t→
+//   aiStyle 87  珍稀四宝箱怪 473-476       NPC.cs:37845-38200（ai[0] 0 伪装箱→1 蓄力 36t→
 //                                              2 贴地跳扑(每 210t 随机 3 蓄能无敌 180t/
 //                                              4 飞天俯冲/6 三连扑,每第 3 跳双倍高度);
 //                                              7 玩家死→零伤满血渐隐;8 十周年世界炮连发不可达）
-//   aiStyle 88  飞蛾魔 477                NPC.cs:39876-40406（日食限定;-1 无日食爬升无敌/
+//   aiStyle 88  飞蛾魔 477                NPC.cs:38201-38731（日食限定;-1 无日食爬升无敌/
 //                                              0 悬顶伺服 180t 轮换 2 追击(×0.5 伤)/3 侧掠
 //                                              冲刺(3.2 ×1.3 伤)/4 扫地产卵 478(上限 7 只)）
-//   aiStyle 89  蛾卵 478                  NPC.cs:40407-40449（900t(专家 600)→Transform 479;
+//   aiStyle 89  蛾卵 478                  NPC.cs:38732-38774（900t(专家 600)→Transform 479;
 //                                              受击 -10..20×2 孵化加速;末期 75% 抽搐跳）
-//   aiStyle 90  幼蛾 479                  NPC.cs:40450-40685（日食限定;-1 爬升/0 悬停 90t→
+//   aiStyle 90  幼蛾 479                  NPC.cs:38775-39010（日食限定;-1 爬升/0 悬停 90t→
 //                                              2 贴脸 10t 瞄准→2.1 冲刺;无日食→上浮消散）
-//   aiStyle 91  花岗岩元素 483            NPC.cs:40686-40870（AI 自置 noGravity=true;穿墙追击/
+//   aiStyle 91  花岗岩元素 483            NPC.cs:39011-39195（AI 自置 noGravity=true;穿墙追击/
 //                                              侧移锚点/漂移弹壁,与 AI_085 同构五态寻路）
 // 去重核实(任务卡勘误):aiStyle 84 ≠ 月总死光——84 = 拜月教邪教徒 439/克隆体 440
-//   (NPC.cs:38963-38966 → AI_084_LunaticCultist :64921,Enemy.ts case 84 已落位);
+//   (NPC.cs:37288-37291 → AI_084_LunaticCultist :65124,Enemy.ts case 84 已落位);
 //   "月总死光"是投射物 455 PhantasmalDeathray(本批 aiStyle 81 状态 4 发射,复用
 //   bossAI_duke_moonlord 导出的 MLDeathray 类 'core' 档)。星璇塔四组专属怪
 //   aiStyle 85/95/96/97/99（405/421/406/407(/408)/420/519）已在本文件 1:1 落位
@@ -87,7 +91,7 @@ const angleTowards = (a: number, b: number, maxStep: number): number => {
   return Math.abs(d) <= maxStep ? b : a + Math.sign(d) * maxStep;
 };
 /** expert 门（Main.expertMode → world.isExpert 真难度；曾硬编码 false 恒关——
- *  飞蛾族三处专家档 :40110/:40367/:40420 在专家世界应生效） */
+ *  飞蛾族三处专家档 :38435/:38692/:38745(★BJ220 重锚,原 :40110/:40367/:40420 系 1456)在专家世界应生效） */
 const expertMode = (game: GameHooks): boolean => game.world.isExpert;
 /** 直积分(原版 noTileCollide 族;NPC.cs UpdateNPC :91400 段共享位移的穿墙分支) */
 const fly = (e: Enemy): void => { e.x += e.vx; e.y += e.vy; };
@@ -598,7 +602,7 @@ export function moonLeechAI(e: Enemy, game: GameHooks, _player: Player | null) {
 }
 
 // ---------------------------------------------------------------------------
-// AI_083a 神秘石碑 437(NPC.cs:38795-38920 + CultistRitual.cs CheckFloor)
+// AI_083a 神秘石碑 437(NPC.cs:37120-37250 + CultistRitual.cs CheckFloor)
 // 落地校验(CheckFloor:±6/±10 格四点 3 格净空)→ 召 4 教徒;信徒受击→弓手激活;
 // 四教徒全灭 → 侧面召 439 + 300t 仪式倒计时(120t 起每 10t 仪式粒子)消散。
 // 槽位:弓手 id+1 存 ai[0..1](原版同),信徒 id+1 存 localAI[1..2];ai[0]=-1 标记
@@ -630,9 +634,9 @@ export function ritualCheckFloor(game: GameHooks, cx: number, cy: number): Array
 export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | null) {
   const x = lunarLocalAI(e);
   e.iframes = 2;                       // SetDefaults dontTakeDamage=true(:14115 段)
-  e.lightRGB = [0.8, 0.75, 0.55];      // :38957 Lighting.AddLight
+  e.lightRGB = [0.8, 0.75, 0.55];      // :37285 Lighting.AddLight
   if (!e.bInit) {
-    // ---- 落地校验 + 召四教徒(:38798-38824) ----
+    // ---- 落地校验 + 召四教徒(:37123-37149) ----
     e.bInit = true;
     e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     const pts = ritualCheckFloor(game, e.cx, e.cy);
@@ -653,18 +657,18 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
     if (arcN < 2 || devN < 2) { e.dead = true; return; }   // 生成不足 → 消散
     return;
   }
-  // ---- 信徒受击 → 弓手激活(:38826-38839 localAI[0]==1) ----
+  // ---- 信徒受击 → 弓手激活(:37151-37164 localAI[0]==1) ----
   if (x[0] === 1) {
     x[0] = 2;
     for (let k = 0; k < 2; k++) {
       const dev = enemies(game).find((n) => n.id === x[k + 1] - 1 && n.vanillaId === 438);
-      if (dev) dev.ai1 = 1;   // :38831 信徒 ai[1]=1(1.4.5.6 无消费方,存档语义保留)
+      if (dev) dev.ai1 = 1;   // :37156 信徒 ai[1]=1(1.4.5.6 无消费方,存档语义保留)
       const arcId = k === 0 ? e.ai0 : e.ai1;
       const arc = enemies(game).find((n) => n.id === Math.floor(arcId) - 1 && n.vanillaId === 379);
-      if (arc) arc.ai3 = 0;   // :38834 弓手解除待机(零伤恢复见 cultistArcherWake)
+      if (arc) arc.ai3 = 0;   // :37159 弓手解除待机(零伤恢复见 cultistArcherWake)
     }
   }
-  // ---- 四教徒全灭 → 召 439(:38841-38879) ----
+  // ---- 四教徒全灭 → 召 439(:37166-37204) ----
   if (e.ai0 !== -1) {
     const gone = [0, 1].every((k) => {
       const dev = enemies(game).find((n) => n.id === x[k + 1] - 1);
@@ -673,7 +677,7 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
         && (!arc || arc.dead || arc.vanillaId !== 379);
     });
     if (gone) {
-      // :38853-38868 侧面 11 格找落地列(±随机向),自碑心向下扫首个实心面
+      // :37178-37193 侧面 11 格找落地列(±随机向),自碑心向下扫首个实心面
       const side = Math.random() < 0.5 ? 1 : -1;
       const tx = Math.floor(e.cx / TILE) + 11 * side;
       let ty = Math.floor(e.cy / TILE);
@@ -691,10 +695,10 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
         cultist.facing = Math.sign(e.cx - (tx * TILE + 10)) || 1;
         // ★自然石碑链 439 占 boss 槽(F6/召唤链同款)——曾缺:杀教徒后 downed_439/
         // 击败公告/TriggerLunarApocalypse 四塔/月总整链不发=主进度断链(终审 P0 修)。
-        // bInit 留 false:localAI[0]==0 出生 420t 渐显+无敌窗+Zombie_89(:65091-65131,
+        // bInit 留 false:localAI[0]==0 出生 420t 渐显+无敌窗+Zombie_89(:65296-65337,
         // 曾 bInit=true 跳过=无入场演出,终审修)
         (game as unknown as { boss?: unknown }).boss = cultist;
-        e.ai2 = cultist.id;                             // :38875 ai[2]=邪教徒 id
+        e.ai2 = cultist.id;                             // :37200 ai[2]=邪教徒 id
       }
       e.ai0 = -1; e.ai1 = 0; e.ai3 = 0;
       // CultistRitual.TabletDestroyed()(复活延迟账)——事件延迟系统未引入,略
@@ -738,7 +742,7 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
 }
 
 // ---------------------------------------------------------------------------
-// AI_083b 拜月忠实信徒 438(NPC.cs:38926-38954)
+// AI_083b 拜月忠实信徒 438(NPC.cs:37251-37279)
 // 站立面碑:横向摩擦 ±0.1 清零、朝碑翻转清 vx;受击 → 碑 localAI[0]=1(弓手激活链);
 // ai[0] 300t 循环(站立摆动帧驱动)。重力/落地走共享块(NPC.cs UpdateNPC :91400 段)。
 // ---------------------------------------------------------------------------
@@ -746,16 +750,16 @@ export function lunaticDevoteeAI(e: Enemy, game: GameHooks, _player: Player | nu
   e.vx *= 0.93;
   if (e.vx > -0.1 && e.vx < 0.1) e.vx = 0;
   const owner = enemies(game).find((n) => n.id === -e.ai3 - 1 && n.vanillaId === 437);
-  if (!owner || owner.dead) { e.dead = true; return; }   // :38934-38938 碑亡→消散
+  if (!owner || owner.dead) { e.dead = true; return; }   // :37259-37263 碑亡→消散
   const dir = Math.sign(owner.cx - e.cx);
-  if (dir !== 0 && dir !== e.facing) { e.vx = 0; e.facing = dir; }   // :38940-38947
-  if (e.justHit) {                                       // :38949-38952 → 碑 localAI[0]=1
+  if (dir !== 0 && dir !== e.facing) { e.vx = 0; e.facing = dir; }   // :37265-37272
+  if (e.justHit) {                                       // :37274-37277 → 碑 localAI[0]=1
     const ox = lunarLocalAI(owner);
     if (ox[0] === 0) ox[0] = 1;
   }
   if (e.ai0 < 0 || e.ai0 >= 300) e.ai0 = 0;              // 原版 ai[0] 出生 0
   e.ai0 += 1;
-  if (e.ai0 >= 300) e.ai0 = 0;                           // :38953-38956
+  if (e.ai0 >= 300) e.ai0 = 0;                           // :37278-37281
   e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);
 }
@@ -792,15 +796,15 @@ export function cultistArcherWake(e: Enemy) {
 }
 
 // ---------------------------------------------------------------------------
-// AI_086 暗焰幻影 472 / 远古幻影 521(NPC.cs:39261-39519)
+// AI_086 暗焰幻影 472 / 远古幻影 521(NPC.cs:37586-37844)
 // 穿墙飞行族:0 定向 → 1 横掠(越玩家 660/500px 掉头)→ 2 竖摆 → 3 回掠 循环;
 // 521 参数强化(0.7/14/500/6/3)+ 228 号紫雾拖尾;出生 120t 显形(Item8 音+尘爆)。
 // ---------------------------------------------------------------------------
 export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
   const x = lunarLocalAI(e);
   const big = e.vanillaId === 521;
-  if (e.spawnAlpha > 0) e.spawnAlpha = Math.max(0, e.spawnAlpha - 30);   // :39265-39271
-  // ---- 同族 50px 排斥(:39277-39299) ----
+  if (e.spawnAlpha > 0) e.spawnAlpha = Math.max(0, e.spawnAlpha - 30);   // :37590-37596
+  // ---- 同族 50px 排斥(:37602-37624) ----
   for (const n of enemies(game)) {
     if (n === e || n.dead || n.vanillaId !== e.vanillaId) continue;
     let dx = n.cx - e.cx, dy = n.cy - e.cy;
@@ -810,10 +814,10 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.vx -= dx * 0.4; e.vy -= dy * 0.4;
     n.vx += dx * 0.4; n.vy += dy * 0.4;
   }
-  // ---- 出生显形(:39302-39335 472 / :39337-39360 521) ----
+  // ---- 出生显形(:37627-37660 472 / :37662-37685 521) ----
   if (x[3] < 120) {
     if (x[3] === 0) {
-      game.playSfxFiles?.(['Item_8'], 0.5, e.cx, e.cy); // :39307 SoundID.Item8（原 roar 为错键）
+      game.playSfxFiles?.(['Item_8'], 0.5, e.cx, e.cy); // :37632 SoundID.Item8（原 roar 为错键）
       if (player) e.facing = e.seekDirX(player);
       e.vx += e.facing * 2;
       if (!big) game.spawnParticles(e.cx, e.cy - 18, '#7A4BD0', 20, 4, { life: 30 });
@@ -821,7 +825,7 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
     x[3] += 1;
     if (big) game.spawnParticles(e.cx, e.cy, '#5A2BA0', 2, 1.5, { life: 20 });
   }
-  // ---- 状态机(:39362-39509);原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一 ----
+  // ---- 状态机(:37687-37834);原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一 ----
   if (e.ai0 < 0 || e.ai0 > 3) e.ai0 = 0;
   if (e.ai0 === 0) {
     if (player) e.facing = e.seekDirX(player);
@@ -839,7 +843,7 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
     const dpx = player ? player.cx - e.cx : 0;
     if ((e.ai1 > 0 && dpx < -range) || (e.ai1 < 0 && dpx > range)) {
       e.ai0 = 2;
-      e.ai1 = player && e.cy + 20 > player.cy ? -1 : 1;  // :39400-39404
+      e.ai1 = player && e.cy + 20 > player.cy ? -1 : 1;  // :37725-37729
     }
   } else if (e.ai0 === 2) {
     // 竖摆:vy += ai[1]*0.4/0.3,超速 5/7 ×0.95/0.9;|vx|<1 → 3
@@ -1078,7 +1082,7 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
 }
 
 // ---------------------------------------------------------------------------
-// AI_088 飞蛾魔 477(NPC.cs:39876-40406)——日食限定
+// AI_088 飞蛾魔 477(NPC.cs:38201-38731)——日食限定
 // -1 无日食/玩家失效爬升无敌 / 0 悬顶 200px 伺服(180t 轮换,受击加速) /
 // 1 穿墙追击 / 2 近距缠斗(×0.5 伤,LOS 断→0) / 3+3.1+3.2 侧掠冲刺(×1.3 伤) /
 // 4+4.1+4.2 扫地产卵 478(478+479<7 时;专家孵化 70→52t,不可达)
@@ -1086,24 +1090,24 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
 export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   const p = player && !player.dead ? player : null;
   const baseDmg = e.vanilla?.damage ?? e.def.damage;
-  e.def.damage = baseDmg;                                 // :39881 damage=defDamage
+  e.def.damage = baseDmg;                                 // :38206 damage=defDamage
   const eggCap = 7;                                       // num1412
 
   // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一
   if (e.ai0 < -1 || e.ai0 > 4.2) e.ai0 = 0;
-  // ---- 日食/目标门(:39882-39915) ----
+  // ---- 日食/目标门(:38207-38240) ----
   if (!game.world.clock.eclipse) {
     if (e.ai0 !== -1) e.ai0 = -1;
   } else if (!p) {
-    e.ai0 = -1;                                           // :39895 目标死亡 → 爬升脱战
+    e.ai0 = -1;                                           // :38220 目标死亡 → 爬升脱战
   } else if (Math.hypot(p.cx - e.cx, p.cy - e.cy) > 3000) {
-    e.ai0 = -1;                                           // :39895 vector247.Length() > 3000 → 爬升脱战
+    e.ai0 = -1;                                           // :38220 vector247.Length() > 3000 → 爬升脱战
   } else if (e.ai0 > 1 && Math.hypot(p.cx - e.cx, p.cy - e.cy) > 1000) {
-    e.ai0 = 1;                                            // :39906-39913 远距穿墙贴近
+    e.ai0 = 1;                                            // :38231-38238 远距穿墙贴近
   }
 
   if (e.ai0 === -1) {
-    // ---- 爬升离场(:39917-39921) ----
+    // ---- 爬升离场(:38242-38246) ----
     e.vx = (e.vx * 9) / 10; e.vy = (e.vy * 9 - 8) / 10;
     e.iframes = 2;
     fly(e);
@@ -1112,7 +1116,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!p) { fly(e); return; }
 
   if (e.ai0 === 0) {
-    // ---- 悬顶伺服(:39923-39988):目标=玩家上方 200px;>800px→1,>80px 追,近距微调 ----
+    // ---- 悬顶伺服(:38248-38313):目标=玩家上方 200px;>800px→1,>80px 追,近距微调 ----
     e.facing = e.cx < p.cx - 2 ? 1 : e.cx > p.cx + 2 ? -1 : e.facing;
     e.spin = (e.spin * 9 + e.vx * 0.1) / 10;
     const preVx = e.vx, preVy = e.vy;
@@ -1148,7 +1152,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     return;
   }
   if (e.ai0 === 1) {
-    // ---- 穿墙追击(:39994-40028):7+距/100 速,近 300px 且不埋块 → 0 ----
+    // ---- 穿墙追击(:38319-38353):7+距/100 速,近 300px 且不埋块 → 0 ----
     let dx = p.cx - e.cx, dy = p.cy - e.cy;
     const d = Math.hypot(dx, dy);
     if (d < 300 && !touchesSolid(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
@@ -1161,7 +1165,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     return;
   }
   if (e.ai0 === 2) {
-    // ---- 近距缠斗(:40030-40091):×0.5 伤;4+ai[2]+距/120 速递增;240t 或断视线 → 0 ----
+    // ---- 近距缠斗(:38355-38416):×0.5 伤;4+ai[2]+距/120 速递增;240t 或断视线 → 0 ----
     e.def.damage = Math.round(baseDmg * 0.5);
     if (p.cx - 10 < e.cx) e.facing = -1;
     else if (p.cx + 10 > e.cx) e.facing = 1;
@@ -1171,7 +1175,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     bounceAxis(e, preVx, preVy);
     const dx = p.cx - e.cx, dy = p.cy - 20 - e.cy;
     e.ai2 += 1 / 45;
-    if (expertMode(game)) e.ai2 += 1 / 60;   // :40110-40113
+    if (expertMode(game)) e.ai2 += 1 / 60;   // :38435-38438
     const d = Math.hypot(dx, dy);
     const spd = 4 + e.ai2 + d / 120;
     e.vx = (e.vx * 19 + (dx / (d || 1)) * spd) / 20;
@@ -1183,7 +1187,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     return;
   }
   if (e.ai0 === 3 || e.ai0 === 3.1 || e.ai0 === 3.2) {
-    // ---- 侧掠冲刺(:40093-40216) ----
+    // ---- 侧掠冲刺(:38418-38541) ----
     if (e.ai0 === 3) {
       // 拉开 400px 侧位(8+ai[1] 速),横距>350 且纵差<20 → 3.1
       let dx = p.cx - e.cx, dy = p.cy - 12 - e.cy;
@@ -1221,7 +1225,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     fly(e);
     return;
   }
-  // ---- 扫地产卵(:40218-40404) ----
+  // ---- 扫地产卵(:38543-38729) ----
   if (e.ai0 === 4) {
     // 玩家周身 ±30/±20 格随机落点(越扫越宽),下潜 50 格找实心面,600px 内 → 4.1
     e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
@@ -1268,14 +1272,14 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     fly(e);
     return;
   }
-  // 4.2 悬停产卵(:40357-40404):70t(专家 52)产 478,140t 收工(2/3 概率续扫)
+  // 4.2 悬停产卵(:38682-38729):70t(专家 52)产 478,140t 收工(2/3 概率续扫)
   e.spin = (e.spin * 9 + e.vx * 0.1) / 10;
   const gx = e.ai1 * TILE + 8, gy = e.ai2 * TILE - 20;
   let dx = gx - e.cx, dy = gy - e.cy;
   const d = Math.hypot(dx, dy);
   if (d < 4) {
     // (int) 截断 =52(R23b-F6:Math.round 曾得 53)
-    const hatchT = expertMode(game) ? Math.trunc(70 * 0.75) : 70;   // :40367-40370 ×0.75
+    const hatchT = expertMode(game) ? Math.trunc(70 * 0.75) : 70;   // :38692-38695 ×0.75
     e.ai3 += 1;
     if (e.ai3 === hatchT) {
       const egg = spawnPart(game, e, 478);
@@ -1295,12 +1299,12 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
 }
 
 // ---------------------------------------------------------------------------
-// AI_089 蛾卵 478(NPC.cs:40407-40449)
+// AI_089 蛾卵 478(NPC.cs:38732-38774)
 // 900t(专家 600)孵化 → Transform 479;受击 -10..20(普通双扣);末期 75% 起抽搐跳。
 // ---------------------------------------------------------------------------
 export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) {
-  const hatchT = expertMode(game) ? 600 : 900;             // num1440（:40420）
-  // 仅归一哨兵 -1120（原版 ai[0] 出生 0）——受击扣减（:40426-40429，普通双扣
+  const hatchT = expertMode(game) ? 600 : 900;             // num1330（:38745）
+  // 仅归一哨兵 -1120（原版 ai[0] 出生 0）——受击扣减（:38751-38754，普通双扣
   // 10..20×2）可把进度推入负值推迟孵化，负值必须跨帧保留；
   // 曾用 `ai0<0 → 0` 把负进度每帧清零 = 受击扣减永不生效
   if (e.ai0 === -1120) e.ai0 = 0;
@@ -1311,17 +1315,17 @@ export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) 
     e.vx *= 0.99;
     e.spin += e.vx * 0.04;
   }
-  if (e.justHit) {                                        // :40419-40425
+  if (e.justHit) {                                        // :38744-38750
     e.ai0 -= rndRange(10, 21);
-    if (!expertMode(game)) e.ai0 -= rndRange(10, 21);      // :40427
+    if (!expertMode(game)) e.ai0 -= rndRange(10, 21);      // :38752
   }
   e.ai0 += 1;
   if (e.ai0 >= hatchT) {
-    e.transformTo(479, game.world.store, false, game);   // :40428 Transform(479)
+    e.transformTo(479, game.world.store, false, game);   // :38753 Transform(479)
     return;
   }
   if (e.vy === 0 && Math.abs(e.vx) < 0.2 && e.ai0 >= hatchT * 0.75) {
-    // :40431-40445 末期抽搐:越接近孵化越频繁的随机跳
+    // :38756-38770 末期抽搐:越接近孵化越频繁的随机跳
     const k = (e.ai0 - hatchT * 0.75) / (hatchT * 0.25);
     if (rndRange(-10, 120) < k * 100) {
       e.vy -= rndRange(20, 40) * 0.025;
@@ -1334,22 +1338,22 @@ export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) 
 }
 
 // ---------------------------------------------------------------------------
-// AI_090 幼蛾 479(NPC.cs:40450-40685)——日食限定
+// AI_090 幼蛾 479(NPC.cs:38775-39010)——日食限定
 // 无日食 → EncourageDespawn(5)+上浮;-1 爬升无敌 / 0 悬停(90t→2,同族排斥)/
 // 1 穿墙追击(近 300px → 0)/ 2+2.1 贴脸冲撞(9 速,45t 后埋块判 0/1)
 // ---------------------------------------------------------------------------
 export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   const p = player && !player.dead ? player : null;
-  e.spin = (e.spin * 9 + e.vx * 0.1) / 10;                // :40456
+  e.spin = (e.spin * 9 + e.vx * 0.1) / 10;                // :38781
   // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一
   if (e.ai0 < -1 || e.ai0 > 2.1) e.ai0 = 0;
-  if (!game.world.clock.eclipse) {                              // :40458-40467
+  if (!game.world.clock.eclipse) {                              // :38783-38792
     e.encourageDespawn(5);
     e.vy = Math.max(e.vy - 0.2, -8);
     fly(e);
     return;
   }
-  // ---- 同族排斥(状态 0/1,:40469-40491) ----
+  // ---- 同族排斥(状态 0/1,:38794-38816) ----
   if (e.ai0 === 0 || e.ai0 === 1) {
     for (const n of enemies(game)) {
       if (n === e || n.dead || n.vanillaId !== e.vanillaId) continue;
@@ -1361,13 +1365,13 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
       n.vx -= dx; n.vy -= dy;
     }
   }
-  // ---- 目标门(:40485-40501) ----
-  if (!p) e.ai0 = -1;                                     // :40489 目标死亡 → 爬升
-  else if (Math.hypot(p.cx - e.cx, p.cy - e.cy) > 3000) e.ai0 = -1;   // :40489 >3000px → 爬升脱战
+  // ---- 目标门(:38810-38826) ----
+  if (!p) e.ai0 = -1;                                     // :38814 目标死亡 → 爬升
+  else if (Math.hypot(p.cx - e.cx, p.cy - e.cy) > 3000) e.ai0 = -1;   // :38814 >3000px → 爬升脱战
   else if (e.ai0 > 1 && Math.hypot(p.cx - e.cx, p.cy - e.cy) > 1000) e.ai0 = 1;
 
   if (e.ai0 === -1) {
-    // ---- 爬升(:40511-40515) ----
+    // ---- 爬升(:38836-38840) ----
     e.vx = (e.vx * 9) / 10; e.vy = (e.vy * 9 - 8) / 10;
     e.iframes = 2;
     fly(e);
@@ -1376,7 +1380,7 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (!p) { fly(e); return; }
 
   if (e.ai0 === 0) {
-    // ---- 悬停(:40517-40577):>800px→1 / >200px 追(5.5+距/100+ai[1]/15)/ 近距微调;90t→2 ----
+    // ---- 悬停(:38842-38902):>800px→1 / >200px 追(5.5+距/100+ai[1]/15)/ 近距微调;90t→2 ----
     const preVx = e.vx, preVy = e.vy;
     moveAndCollide(e, game.world, e.vx, e.vy);
     bounceAxis(e, preVx, preVy);
@@ -1394,7 +1398,7 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
     return;
   }
   if (e.ai0 === 1) {
-    // ---- 穿墙追击(:40579-40613):5.5+ai[2]+距/150 速;近 300px 且不埋块 → 0 ----
+    // ---- 穿墙追击(:38904-38938):5.5+ai[2]+距/150 速;近 300px 且不埋块 → 0 ----
     const dx = p.cx - e.cx, dy = p.cy - e.cy;
     const d = Math.hypot(dx, dy);
     if (d < 300 && !touchesSolid(game, e)) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
@@ -1408,7 +1412,7 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
     return;
   }
   if (e.ai0 === 2) {
-    // ---- 贴脸瞄准 10t(9 速,:40615-40652) → 2.1 定向冲 ----
+    // ---- 贴脸瞄准 10t(9 速,:38940-38977) → 2.1 定向冲 ----
     const dx = p.cx - e.cx, dy = p.cy - 8 - e.cy;
     const d = Math.hypot(dx, dy);
     e.facing = e.vx < 0 ? -1 : 1;
@@ -1423,7 +1427,7 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
     fly(e);
     return;
   }
-  // ---- 2.1 冲刺(:40654-40682):×1.01/t 增速;45t 后不埋块→0,埋块且 90t→1 ----
+  // ---- 2.1 冲刺(:38979-39007):×1.01/t 增速;45t 后不埋块→0,埋块且 90t→1 ----
   e.facing = e.vx < 0 ? -1 : 1;
   e.vx *= 1.01; e.vy *= 1.01;
   e.ai1 += 1;
@@ -1434,15 +1438,15 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
   fly(e);
 }
 
-/** 撞轴 ×(-旧速·0.5) 封顶 ±4(NPC.cs Mothron 族 collide 语义,:39933-39939) */
+/** 撞轴 ×(-旧速·0.5) 封顶 ±4(NPC.cs Mothron 族 collide 语义,:38258-38264) */
 function bounceAxis(e: Enemy, preVx: number, preVy: number) {
   if (e.hitWall) { e.vx *= -preVx * 0.5; e.vx = clamp(e.vx, -4, 4); }
   if (e.hitHead || (e.onGround && preVy > 0)) { e.vy *= -preVy * 0.5; e.vy = clamp(e.vy, -4, 4); }
 }
 
 // ---------------------------------------------------------------------------
-// AI_091 花岗岩元素 483(NPC.cs:40686-40870)
-// AI 自置 noGravity=true(:40688)——全程无重力,碰撞按态开合:
+// AI_091 花岗岩元素 483(NPC.cs:39011-39195)
+// AI 自置 noGravity=true(:39013)——全程无重力,碰撞按态开合:
 // -1 受击石化 120t(专家限定,不可达)/ 0 视线判别→1 直追(2+距/200 速)/
 // 2 穿墙冲刺(近 600px 且不埋块→0)/ 3 锚点侧移(1 速,撞轴/到点/通视线→0)/
 // 4 漂移弹壁(1.5 速,180t 或通视线→0;每 5t 重试锚点)。
@@ -1453,14 +1457,14 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
   const x = lunarLocalAI(e);
   // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一(-1 石化态合法保留)
   if (e.ai0 !== -1 && (e.ai0 < 0 || e.ai0 > 4)) e.ai0 = 0;
-  // noGravity 运行时位（:40688 起始 true / -1 石化态 :40699 置 false）——
+  // noGravity 运行时位（:39013 起始 true / -1 石化态 :39024 置 false）——
   // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
-  // ---- 专家受击石化(:40692-40697) ----
+  // ---- 专家受击石化(:39017-39022) ----
   if (e.justHit && expertMode(game) && rnd(6) === 0) { e.ai0 = -1; e.ai1 = 0; }
   e.noGravity = e.ai0 !== -1;   // 转移 tick 即置 false（原版 -1 分支同 tick 生效）
 
   if (e.ai0 === -1) {
-    // ---- 石化(:40699-40708) ----
+    // ---- 石化(:39024-39033) ----
     e.iframes = 2;
     e.vx *= 0.98;
     e.ai1 += 1;
@@ -1472,12 +1476,12 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
   const los = losClear(game, e.cx, e.cy, p.cx, p.cy);
 
   if (e.ai0 === 0) {
-    // ---- 视线判别(:40710-40752):通视线→1;否则找中转锚(玩家正上/正下列)→3;无→4 ----
+    // ---- 视线判别(:39035-39077):通视线→1;否则找中转锚(玩家正上/正下列)→3;无→4 ----
     if (los) { e.ai0 = 1; return; }
-    // 锚 1:玩家正上/正下列 (px, selfY)(:40722-40732)
+    // 锚 1:玩家正上/正下列 (px, selfY)(:39047-39057)
     if (Math.abs(p.cx - e.cx) > 8 && losClear(game, e.cx, e.cy, p.cx, e.cy)) {
       e.ai0 = 3; e.ai1 = p.cx; e.ai2 = e.cy;
-      // 命中再升级为 (selfX, playerY) 双段锚(:40734-40742)。★门用 vector264.Length()
+      // 命中再升级为 (selfX, playerY) 双段锚(:39059-39067)。★门用 vector264.Length()
       // 即列锚距 |ΔX|（原版字面复检 vector264 而非 center48−Center=|ΔY|——"行锚
       // 距离门拿列锚距"的层级笔误 1:1 保留，先例：石巨人砸火把 Y 上界用 width；
       // G11 定谳 2026-08-19：1405 无 aiStyle91（1.4.4+ 新增）无对读，按 1456 字面）
@@ -1486,10 +1490,10 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
         e.ai1 = e.cx; e.ai2 = p.cy;
       }
     } else if (Math.abs(p.cy - e.cy) > 8 && losClear(game, e.cx, e.cy, e.cx, p.cy)) {
-      e.ai0 = 3; e.ai1 = e.cx; e.ai2 = p.cy;              // :40744-40750 行锚
+      e.ai0 = 3; e.ai1 = e.cx; e.ai2 = p.cy;              // :39069-39075 行锚
     }
     if (e.ai0 === 0) {
-      // 无锚:直朝玩家轻推 0.5 → 4 漂移(:40744-40752)
+      // 无锚:直朝玩家轻推 0.5 → 4 漂移(:39069-39077)
       x[0] = 0;
       const dx = p.cx - e.cx, dy = p.cy - p.h / 4 - e.cy;
       const d = Math.hypot(dx, dy) || 1;
@@ -1497,7 +1501,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
       e.ai0 = 4; e.ai1 = 0;
     }
   } else if (e.ai0 === 1) {
-    // ---- 直追(:40754-40768):2+距/200 速(50 步进);断视线 → 0 ----
+    // ---- 直追(:39079-39093):2+距/200 速(50 步进);断视线 → 0 ----
     const dx = p.cx - e.cx, dy = p.cy - e.cy;
     const d = Math.hypot(dx, dy);
     const spd = 2 + d / 200;
@@ -1507,7 +1511,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
     if (!los) { e.ai0 = 0; e.ai1 = 0; }
     return;
   } else if (e.ai0 === 2) {
-    // ---- 穿墙冲刺(:40770-40783):2 速;近 600px 且不埋块 → 0 ----
+    // ---- 穿墙冲刺(:39095-39108):2 速;近 600px 且不埋块 → 0 ----
     const dx = p.cx - e.cx, dy = p.cy - e.cy;
     const d = Math.hypot(dx, dy);
     e.vx = (e.vx * 3 + (dx / (d || 1)) * 2) / 4;
@@ -1516,7 +1520,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
     if (d < 600 && !touchesSolid(game, e)) e.ai0 = 0;
     return;
   } else if (e.ai0 === 3) {
-    // ---- 锚点侧移(:40785-40801):1 速(3 步进);撞轴→4;到点/超 800px/通视线→0 ----
+    // ---- 锚点侧移(:39110-39126):1 速(3 步进);撞轴→4;到点/超 800px/通视线→0 ----
     const dx = e.ai1 - e.cx, dy = e.ai2 - e.cy;
     const d = Math.hypot(dx, dy);
     e.vx = (e.vx * 2 + (dx / (d || 1)) * 1) / 3;
@@ -1527,7 +1531,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
     if (d < 1 || d > 800 || los) { e.ai0 = 0; }
     return;
   } else if (e.ai0 === 4) {
-    // ---- 漂移弹壁(:40803-40854):1.5 速(20 步进);180t 或通视线 → 0 ----
+    // ---- 漂移弹壁(:39128-39179):1.5 速(20 步进);180t 或通视线 → 0 ----
     if (e.hitWall) e.vx *= -0.8;
     if (e.hitHead || e.onGround) e.vy *= -0.8;
     if (e.vx === 0 && e.vy === 0) {
@@ -1541,7 +1545,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
     e.ai1 += 1;
     if (e.ai1 > 180 || los) { e.ai0 = 0; e.ai1 = 0; }
     moveAndCollide(e, game.world, e.vx, e.vy);
-    // ---- 每 5t 重试中转锚(:40858-40870) ----
+    // ---- 每 5t 重试中转锚(:39183-39195) ----
     x[0] += 1;
     if (x[0] >= 5 && !touchesSolid(game, e)) {
       x[0] = 0;
@@ -1558,7 +1562,7 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
 // ---------------------------------------------------------------------------
 // 星璇塔四组专属怪批(aiStyle 85/95/96/97/99)——替换 Enemy.ts 一期近似档
 // (swarmerAI/casterAI)。锚点:
-//   aiStyle 85  星细胞 405 / 星云头蟹 421   NPC.cs:38967-39220(六态寻路+421 头顶吸附)
+//   aiStyle 85  星细胞 405 / 星云头蟹 421   NPC.cs:37292-37585(六态寻路+421 头顶吸附)
 //   aiStyle 95  小星细胞 406                NPC.cs:41445-41492(300t 长大 → Transform 405)
 //   aiStyle 96  水流入侵者 407(/408)        NPC.cs:41493-41535(悬顶伺服 + 投射物 539)
 //   aiStyle 97  星云悬浮脑 420              NPC.cs:41536-41750(瞬移 + 环绕球 574 → 弹 576)
@@ -1577,7 +1581,7 @@ function touchesSolid(game: GameHooks, e: Enemy, inflate = 0): boolean {
     Math.floor((e.y - inflate) / TILE), Math.floor((e.y + e.h - 0.01 + inflate) / TILE));
 }
 
-/** 星细胞族尾段:405 旋转清零 / 421 旋转=vx×0.1(:39104-39119) + 同族排斥(:39106-39131) */
+/** 星细胞族尾段:405 旋转清零 / 421 旋转=vx×0.1(:37429-37444) + 同族排斥(:37431-37456) */
 function starCellTail(e: Enemy, game: GameHooks, is405: boolean): void {
   if (is405) e.visAngle = 0;
   else e.visAngle = e.vx * 0.1;
@@ -1590,7 +1594,7 @@ function starCellTail(e: Enemy, game: GameHooks, is405: boolean): void {
   }
 }
 
-/** AI_085 星细胞 405 / 星云头蟹 421(NPC.cs:38967-39220)六态:
+/** AI_085 星细胞 405 / 星云头蟹 421(NPC.cs:37292-37585)六态:
  *  0 视线判别(通→1;远 800→2;找中转锚→3;无→轻推入 4)/ 1 直追(5.5|8+距/100,50 步进)/
  *  2 穿墙(3|6 速,noTileCollide;近 600 且离实心→0)/ 3 锚点侧移(2|3 速,撞→4)/
  *  4 漂移弹壁(2|3 速,180t;每 5t 重试锚)/ 5(仅 421)钉玩家头顶 Obstructed。 */
@@ -1600,14 +1604,14 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
   const lai = lunarLocalAI(e);
   if (e.ai0 < 0 || e.ai0 > 5) e.ai0 = 0;            // Enemy 哨兵 -1120 归一,原版出生 0
   if (e.ai0 === 5) {
-    // ---- 421 头顶吸附(:39183-39202):Center=player.Top+(direction*4,0);失活→脱落 ----
+    // ---- 421 头顶吸附(:37508-37527):Center=player.Top+(direction*4,0);失活→脱落 ----
     if (!p) { e.ai0 = 0; e.ai1 = 0; }
     else {
       const dir = p.facing ?? 1;
       e.x = p.cx + dir * 4 - e.w / 2;
       e.y = p.y - e.h / 2;
       e.vx = 0; e.vy = 0;
-      // AddBuff(163 Obstructed,59) 每 tick 续期(:39197-39201)——BuffState.apply 取
+      // AddBuff(163 Obstructed,59) 每 tick 续期(:37522-37526)——BuffState.apply 取
       // max 合并,吸附期间恒 ≤1s 存量,脱落后自然消退。遮屏视觉在 Renderer
       // drawScreenObstruction（ScreenObstruction.cs 1:1）。
       // （原版另以 hide=ai[0]==5 隐藏本体——保持可见为已登记偏差,否则吸附期完全不可见）
@@ -1621,14 +1625,14 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
   let flyPhase = false;
 
   if (e.ai0 === 0) {
-    // ---- 视线判别(:38974-39030)；态尾自旋 rotation += direction×0.3（:39030）----
+    // ---- 视线判别(:37299-37355)；态尾自旋 rotation += direction×0.3（:37355）----
     e.visAngle += e.facing * 0.3;
     if (los) { e.ai0 = 1; }
     else {
       const dx = p.cx - e.cx, dy = p.cy - p.h / 4 - e.cy;
       if (Math.hypot(dx, dy) > 800) { e.ai0 = 2; }
       else {
-        // 列锚 (px, selfY)(:38987-38997);命中升级双段锚 (selfX, py)(:38999-39008,
+        // 列锚 (px, selfY)(:37312-37322);命中升级双段锚 (selfX, py)(:37324-37333,
         // 原文复用列距 >8 判据——按原文照抄)
         if (Math.abs(p.cx - e.cx) > 8 && losClear(game, e.cx, e.cy, p.cx, e.cy)) {
           e.ai0 = 3; e.ai1 = p.cx; e.ai2 = e.cy;
@@ -1637,10 +1641,10 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
             e.ai0 = 3; e.ai1 = e.cx; e.ai2 = p.cy;
           }
         } else if (Math.abs(p.cy - e.cy) > 8 && losClear(game, e.cx, e.cy, e.cx, p.cy)) {
-          e.ai0 = 3; e.ai1 = e.cx; e.ai2 = p.cy;      // 行锚(:39015-39022)
+          e.ai0 = 3; e.ai1 = e.cx; e.ai2 = p.cy;      // 行锚(:37340-37347)
         }
         if (e.ai0 === 0) {
-          // 无锚:朝玩家(Y 抬高 h/4)轻推 0.5 → 4 漂移(:39023-39030)
+          // 无锚:朝玩家(Y 抬高 h/4)轻推 0.5 → 4 漂移(:37348-37355)
           lai[0] = 0;
           const d = Math.hypot(dx, dy) || 1;
           e.vx += (dx / d) * 0.5; e.vy += (dy / d) * 0.5;
@@ -1649,8 +1653,8 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
     }
   } else if (e.ai0 === 1) {
-    // ---- 直追(:39031-39069):(5.5|8)+距/100 速,50 步进;断视线→0 ----
-    // 421 瞄 player.Top（:39032-39035 if type==421 → vector = player.Top - center）；
+    // ---- 直追(:37356-37394):(5.5|8)+距/100 速,50 步进;断视线→0 ----
+    // 421 瞄 player.Top（:37357-37360 if type==421 → vector = player.Top - center）；
     // 405/467 瞄 player.Center
     const is421 = e.vanillaId === 421;
     const tx = p.cx - e.cx, ty = (is421 ? p.y : p.cy) - e.cy;
@@ -1660,7 +1664,7 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.vx = (e.vx * 49 + (tx / n) * spd) / 50;
     e.vy = (e.vy * 49 + (ty / n) * spd) / 50;
     if (!los) { e.ai0 = 0; e.ai1 = 0; }
-    // 421 专属吸附门（:39052-39068 if type==421 && num<40）：近 40px 且场上无同族
+    // 421 专属吸附门（:37377-37393 if type==421 && num<40）：近 40px 且场上无同族
     // 吸附中才钉上。467 致命球（日食怪，同 aiStyle 85）**不**吸附——此前误写成
     // !is405 导致致命球钉头 + 每 tick 灌 Obstructed(163)
     if (is421 && d < 40
@@ -1670,8 +1674,8 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai0 = 5; e.ai1 = 0;
     }
   } else if (e.ai0 === 2) {
-    e.visAngle = e.vx * 0.1;   // rotation（:39076）
-    // ---- 穿墙(:39071-39094):noTileCollide=true;3|6 速 3 步进;近 600 且离实心→0 ----
+    e.visAngle = e.vx * 0.1;   // rotation（:37401）
+    // ---- 穿墙(:37396-37419):noTileCollide=true;3|6 速 3 步进;近 600 且离实心→0 ----
     flyPhase = true;
     const tx = p.cx - e.cx, ty = p.cy - e.cy;
     const d = Math.hypot(tx, ty) || 1;
@@ -1680,8 +1684,8 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.vy = (e.vy * 2 + (ty / d) * spd) / 3;
     if (d < 600 && !touchesSolid(game, e)) e.ai0 = 0;
   } else if (e.ai0 === 3) {
-    e.visAngle = e.vx * 0.1;   // rotation（:39096）
-    // ---- 锚点侧移(:39096-39115):2|3 速 3 步进;撞轴→4;到点/超 800/通视线→0 ----
+    e.visAngle = e.vx * 0.1;   // rotation（:37421）
+    // ---- 锚点侧移(:37421-37440):2|3 速 3 步进;撞轴→4;到点/超 800/通视线→0 ----
     const tx = e.ai1 - e.cx, ty = e.ai2 - e.cy;
     const d = Math.hypot(tx, ty) || 1;
     const spd = is405 ? 3 : 2;
@@ -1690,8 +1694,8 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
     if (e.hitWall || e.hitHead || e.onGround) { e.ai0 = 4; e.ai1 = 0; }
     if (d < spd || d > 800 || los) e.ai0 = 0;
   } else if (e.ai0 === 4) {
-    e.visAngle = e.vx * 0.1;   // rotation（:39121）
-    // ---- 漂移弹壁(:39117-39175):弹壁 ×-0.8;2|3 速 20 步进;180t 或通视线→0 ----
+    e.visAngle = e.vx * 0.1;   // rotation（:37446）
+    // ---- 漂移弹壁(:37442-37500):弹壁 ×-0.8;2|3 速 20 步进;180t 或通视线→0 ----
     if (e.hitWall) e.vx *= -0.8;
     if (e.hitHead || e.onGround) e.vy *= -0.8;
     if (e.vx === 0 && e.vy === 0) {
@@ -1706,7 +1710,7 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.ai1 += 1;
     if (e.ai1 > 180) { e.ai0 = 0; e.ai1 = 0; }
     if (los) e.ai0 = 0;
-    // 每 5t 重试中转锚(:39160-39175):列锚需三方视线(原文 CanHit 重复两次照抄)
+    // 每 5t 重试中转锚(:37485-37500):列锚需三方视线(原文 CanHit 重复两次照抄)
     lai[0] += 1;
     if (lai[0] >= 5 && !touchesSolid(game, e, 10)) {
       lai[0] = 0;

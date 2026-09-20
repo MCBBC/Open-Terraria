@@ -8,7 +8,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, BASIC_CHEST_SHEETS, RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS } from '../../../data/tiles';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 // ★MMMMMMM：巨石支受理门双态门（1456/1457 分叉实证,见 placeTrap case1 注）
@@ -610,8 +610,8 @@ const CHECK2X2_SHEETS = new Set([132, 138, 142, 143, 288, 289, 290, 291, 292, 29
 const TREE_DISPATCH_SHEETS = new Set([5, 323, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
 /** ★IIIII221：Sign 家族（TileFrameImportant case 55/85/395/425/510/511/573 → CheckSign） */
 const SIGN_DISPATCH_SHEETS = new Set([55, 85, 395, 425, 510, 511, 573]);
-/** BasicChest{21,467}（TileID.cs:315）→ CheckChest（cs:81400+） */
-const CHEST_SHEETS = new Set([21, 467]);
+/** BasicChest{21,467}（TileID.cs:315）→ CheckChest（cs:81400+）——★BJ218 收编单源（§6j） */
+const CHEST_SHEETS = BASIC_CHEST_SHEETS;
 /** Main.tileTable（Main.cs:6828+ 全 75 项，= tileSolidTop ∖ {16,134,239}） */
 // ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const TILE_TABLE = TILE_TABLE_SHEETS;
@@ -1792,8 +1792,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
  *  触点=TrapsPass 内 vanilla 经 WorldGen.PlaceTile 放置的每个非实心写位：
  *  plate(135)/dart(137)/explosive(141)/geyser(443)/barrel(654)。石头(type1)
  *  直填走 EmptyTile 门恒 ghost ⇒ 不触此支，勿挂。 */
-const RESETS_HALF_EXEMPT_SHEETS = new Set([2, 23, 661, 60, 70, 199, 662, 109, 477, 492, 179, 512,
-  180, 513, 181, 514, 182, 515, 183, 516, 381, 517, 534, 535, 536, 537, 539, 540, 625, 626, 627, 628, 633]);
+const RESETS_HALF_EXEMPT_SHEETS = RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS;   // ★BJ218 收编单源（TileID.cs:181 全 33 型,§6j）
 function placeHeadMirrorT(st: TileStore, x: number, y: number, tag?: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);

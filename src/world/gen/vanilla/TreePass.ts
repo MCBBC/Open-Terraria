@@ -9,7 +9,7 @@ import type { GenState } from './GenState';
 import { activeSecretSeedCountOf, errorWorldAdjustmentOf } from '../SeedEasterEggs';   // ★IIIII228 多秘 ewAdjust
 import { idsByVanillaSheet } from './TileRunner';
 import { genRangeFrame } from './FinalCleanupPass';
-import { T, TILE_BY_KEY, TILE_DEFS, CONV_SAND_IDS, COMMON_SAPLING_SHEETS, COMMON_SAPLING_IDS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, CONV_SAND_IDS, COMMON_SAPLING_SHEETS, COMMON_SAPLING_IDS, MUSHROOM_GRASS_IDS, ASH_GROUND_IDS } from '../../../data/tiles';
 
 const TREE = TILE_BY_KEY['tree']!;              // tile 5
 const PALM = TILE_BY_KEY['v_323_palm_trees']!;  // tile 323
@@ -27,7 +27,7 @@ const TREE_WALLS = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245,
 /** 棕榈基座沙族（1456 cs:27290：53/234/116/112——序异同值集,语义锚=Main.tileSand）——★BJ210 收编单源（§6i） */
 const PALM_GROUND = CONV_SAND_IDS;
 const JUNGLE_GRASS = idsByVanillaSheet(60);
-const MUSHROOM_GRASS = idsByVanillaSheet(70);
+const MUSHROOM_GRASS = MUSHROOM_GRASS_IDS;   // Conversion.MushroomGrass（TileID.cs:16={70}）——★BJ218 收编单源（§6j）
 /** 树苗（vanilla tile 20 = acorn sapling）：GrowTree 头部越过找基座（原版 while type==20） */
 const PLANTS = idsByVanillaSheet(20);
 
@@ -485,7 +485,7 @@ function rc77(): number {
 export interface TreeProfile {
   treeTile: number;
   sapling: number;
-  ground: Set<number>;   // GroundTest 谓词集
+  ground: ReadonlySet<number>;   // GroundTest 谓词集（★BJ218 收编后单源 ReadonlySet,§6j）
   walls: Set<number>;    // WallTest 谓词集
   heightMin: number;
   heightMax: number;     // 含端（Next(min, max+1)）
@@ -525,8 +525,8 @@ const WILLOW_PROFILE: TreeProfile = {
   ground: VANITY_GROUND, walls: DEFAULT_TREE_WALLS,
   heightMin: 7, heightMax: 12, topPadding: 4,
 };
-/** AshTreeGroundTest（cs:30487-30501）：仅灰烬草 633 */
-const ASH_GROUND = idsByVanillaSheet(633);
+/** AshTreeGroundTest（cs:30487-30501）：仅灰烬草 633——★BJ218 收编单源（§6j） */
+const ASH_GROUND = ASH_GROUND_IDS;
 const ASH_PROFILE: TreeProfile = {
   treeTile: TILE_BY_KEY['v_634_ash_tree']!,
   // Tree_Ash.SaplingTileType=20（cs:3901）——growTreeWithSettings 头部苗越格走查

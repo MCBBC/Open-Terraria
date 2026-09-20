@@ -23,7 +23,7 @@
 //   code：0=受理 1=strictRange 2=SolidCollision 3=墙/规避 4=strictRange 下坠越界
 //   5=下坠耗尽 6=着陆规避 7=着陆底格避液 8=mostlySolidFloor 9=着陆终拒
 //   10/11=X±16 探针 12=Y+16 探针 13=Y−16 探针）。
-import { TILE_DEFS, PLATFORMS_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, PLATFORMS_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, SUFFOCATE_SHEETS, TOUCH_HOT_SHEETS, TOUCH_BLEEDING_SHEETS } from '../../../data/tiles';
 import { VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import type { TileStore } from '../../TileStore';
 
@@ -36,10 +36,10 @@ const SHEET_SOLID_TOP = SOLID_TOP_SHEETS;
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const SHEET_PLATFORMS = PLATFORMS_SHEETS;
 /** CanTileHurt 门禁表（Collision.cs:3219-3236；TileID.cs:381-389） */
-const SHEET_SUFFOCATE = new Set([53, 112, 116, 123, 224, 234]);
-const SHEET_TOUCH_BLEEDING = new Set([48, 232, 750]);
-const SHEET_TOUCH_IMMEDIATE_GT0 = new Set([32, 69, 80, 352, 655, 48, 232, 484, 750]);
-const SHEET_TOUCH_HOT = new Set([37, 58, 76, 684, 230]);
+const SHEET_SUFFOCATE = SUFFOCATE_SHEETS;              // TileID.Sets.Suffocate（TileID.cs:387）——★BJ218 收编单源（§6j）
+const SHEET_TOUCH_BLEEDING = TOUCH_BLEEDING_SHEETS;    // TileID.Sets.TouchDamageBleeding（:391）——★BJ218 收编单源（§6j）
+const SHEET_TOUCH_IMMEDIATE_GT0 = new Set([32, 69, 80, 352, 655, 48, 232, 484, 750]);   // TouchDamageImmediate(:393 IntSet) 键域面=独立语义,未收编照登
+const SHEET_TOUCH_HOT = TOUCH_HOT_SHEETS;              // TileID.Sets.TouchDamageHot（:389）——★BJ218 收编单源（§6j）
 
 // sheet → internal id（首个 v_ 定义；stats/TouchDamage.ts 同法）
 const BY_SHEET = new Map<number, number>();

@@ -13,15 +13,15 @@
 // 长出蘑菇/高草、腐化地上残留森林草——写入监听只查上方格，新放的植物自身永不被
 // 复检=粘滞（2026-08-26 用户实报，存档解码实证两案）。
 
-import { MOSS_SHEETS } from '../../data/tiles';
+import { MOSS_SHEETS, ASH_GROUND_SHEETS } from '../../data/tiles';
 
-/** 花族类型配对表（IsFitToPlaceFlowerIn :58726-58733） */
+/** 花族类型配对表（IsFitToPlaceFlowerIn :58726-58733）；637 灰烬草基座——★BJ218 单源 ASH_GROUND_SHEETS（§6j） */
 export const FLOWER_GROUND_SHEETS: Record<number, Set<number>> = {
   3: new Set([2, 78, 380, 477, 579]),
   24: new Set([23, 661]),
   110: new Set([109, 492]),
   201: new Set([199, 662]),
-  637: new Set([633]),
+  637: new Set(ASH_GROUND_SHEETS),
 };
 
 /** 花族 placing sheets（PlantCheck 派发 case 表去掉 703 倒挂钟乳石——其地基允许坡面） */

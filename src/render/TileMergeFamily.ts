@@ -23,7 +23,7 @@
 //   - WorldGen.cs:82250-82255 num==668→0 / num==697→51
 //   - WorldGen.cs:82259     TileMergeAttempt(0, TileID.Sets.Dirt)
 //   - WorldGen.cs:82260-82295 switch(num)：雪/冰/沙岩特例 + tileBrick/tilePile 家族
-import { TILE_DEFS, CONV_SNOW_SHEETS } from '../data/tiles';
+import { TILE_DEFS, CONV_SNOW_SHEETS, ICES_SNOW_SHEETS } from '../data/tiles';
 
 /** Main.tileStone（分帧归一族；≠ TEdit isStone 的转化族）：按 1=石参与分帧 */
 const TILE_STONE = new Set([63, 64, 65, 66, 67, 68, 130, 131, 566]);
@@ -53,7 +53,7 @@ const DIRT = new Set([0, 668]);
 const MUD = new Set([59]);
 const ASH = new Set([57]);
 const SNOW = CONV_SNOW_SHEETS;   // ★BJ210 收编单源 data/tiles.ts:CONV_SNOW_SHEETS（TileID.cs:24,§6i）
-const ICES_SNOW = new Set([161, 200, 163, 164, 147]);
+const ICES_SNOW = ICES_SNOW_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:ICES_SNOW_SHEETS（TileID.cs:297,§6j;cs:82806 TileMergeAttempt 排除表）
 const DONT_MERGE_SNOW = new Set([161, 200, 163, 164, 224, 170, 738]);
 
 /** 内部 tile id → 原版 tile id（vanilla.sheet；非原版类型 = -1）。

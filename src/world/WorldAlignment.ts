@@ -8,12 +8,14 @@
 // 百分比 = round(count/solid*100) 钳 byte，>0 且取整为 0 时进位 1（:71168-71181）。
 // ★ 与原版逐列 RLE 管线的差异：此处为对话打开时的一次性全图直扫（等价求值，
 // 非增量 per-column 维护——tGood 系列原版运行时也不持久化，读取时机一致）。
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, CORRUPT_COUNT_COLLECTION_SHEETS, HALLOW_COUNT_COLLECTION_SHEETS, CRIMSON_COUNT_COLLECTION_SHEETS } from '../data/tiles';
 import { Lang } from '../i18n/Lang';
 
-const CORRUPT = new Set([23, 661, 25, 112, 163, 398, 400, 636, 24, 32]);
-const HALLOW = new Set([109, 492, 117, 116, 164, 402, 403, 115, 110, 113]);
-const CRIMSON = new Set([199, 662, 203, 234, 200, 399, 401, 205, 201, 352]);
+// ★BJ218 收编单源（§6j）：CountCollection（TileID.cs:329/:337/:347）≡SpreadsCorruption/
+// Crimson/Hallow 同值——单一值源+CountCollection 语义名转出口（data/tiles.ts）
+const CORRUPT = CORRUPT_COUNT_COLLECTION_SHEETS;
+const HALLOW = HALLOW_COUNT_COLLECTION_SHEETS;
+const CRIMSON = CRIMSON_COUNT_COLLECTION_SHEETS;
 const SOLID_BASE = new Set([2, 477, 1, 60, 53, 161]);
 
 export interface AlignmentPcts { tGood: number; tEvil: number; tBlood: number }

@@ -1,5 +1,5 @@
-// 首屏静态读条探针:CDP 节流网络,验证①HTML 落地即有读条(bundle 未完成时)
-// ②启动幕挂载后静态层被摘除(无缝交接)。
+// 首屏静态加载屏探针:CDP 节流网络,验证①HTML 落地即有原版向日葵加载屏
+// (bundle 未完成时,data-URI 零外部请求)②启动幕挂载后静态层被摘除(无缝交接)。
 // 用法:SW_ORIGIN=http://localhost:5281 node tools/run-diag.mjs scripts/_bootstatic-probe.mjs
 import puppeteer from 'puppeteer-core';
 
@@ -28,18 +28,20 @@ await new Promise((r) => setTimeout(r, 2500));
 const s1 = await page.evaluate(() => {
   const el = document.getElementById('sw-boot-static');
   if (!el) return { present: false };
-  const cs = getComputedStyle(el.querySelector('.sb-bar'));
+  const cs = getComputedStyle(el.querySelector('.sb-flower'));
   return {
     present: true,
     anim: cs.animationName,
-    gradient: cs.backgroundImage.includes('repeating-linear-gradient'),
+    inlineDataUri: cs.backgroundImage.includes('data:image/png;base64,'),
+    bgSize: cs.backgroundSize,
+    pixelated: cs.imageRendering === 'pixelated',
     veilMounted: !!document.getElementById('sw-boot-prime'),
   };
 });
 console.log('throttled-early:', JSON.stringify(s1));
-await page.screenshot({ path: '/tmp/bootstatic-early.png' });
-if (!s1.present || s1.anim !== 'sb-march' || !s1.gradient) {
-  console.log('FAIL: bundle 下载窗内静态读条不在位'); await browser.close(); process.exit(1);
+await page.screenshot({ path: '/tmp/bootstatic-vanilla.png' });
+if (!s1.present || s1.anim !== 'sb-flower' || !s1.inlineDataUri || !s1.pixelated) {
+  console.log('FAIL: bundle 下载窗内静态加载屏不在位'); await browser.close(); process.exit(1);
 }
 if (s1.veilMounted) { console.log('NOTE: 节流下启动幕已先挂载(bundle 或已缓存)——继续验证摘除'); }
 

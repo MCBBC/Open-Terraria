@@ -133,7 +133,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -864,9 +864,7 @@ const TILE_NO_FAIL_SHEETS = new Set([
 /** WindyGrass 域 = TileID.Sets.SwaysInWindBasic 白名单（TileID.cs:273 逐字,23 型）。
  *  唯一受设置开关回落主路径的四域成员（ShouldSwayInWind :7836-7840）;227 五帧豁免
  *  :7845-7848（frameX∈{204,238,408,442,476} 同回落——本仓无 227 粒子规则,备案）。 */
-const GRASS_WINDY_SHEETS: ReadonlySet<number> = new Set([
-  3, 20, 24, 61, 703, 71, 73, 74, 83, 84, 110, 113, 201, 227, 529, 590, 595, 615, 624, 700, 656, 701, 637,
-]);
+const GRASS_WINDY_SHEETS: ReadonlySet<number> = SWAYS_IN_WIND_BASIC_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:SWAYS_IN_WIND_BASIC_SHEETS（TileID.cs:273 逐字 23 型,§6j）
 /** AnyDirectionalGrass 域（:718-719,184 LongMoss 帧无关） */
 const GRASS_DIRECTIONAL_SHEETS: ReadonlySet<number> = new Set([184]);
 /** MultiTileGrass 域（顶左注册 :605-691,21 型） */
@@ -1547,7 +1545,7 @@ const TRAP_PROJ_VIDS = new Set<number>([
 // :18 Conversion.Grass={2,23,199,109,477,492}; TileID.cs:217 IgnoresTileReplacement
 // DropCheckWhenBeingPlaced={158,30}; Main.tileMoss（Main.cs:7146-7186 全 11 件）
 // =PlantRules.MOSS_CONVERT_SHEETS 同集。
-const BLOCK_SWAP_DOESNT_PLACE_SHEETS = new Set<number>([2, 60, 70, 109, 199, 23, 661, 662, 633]);
+const BLOCK_SWAP_DOESNT_PLACE_SHEETS = DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS;   // ★BJ218 收编单源（TileID.cs:233,§6j）
 const BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS = new Set<number>([58, 225, 171, 127, 481, 482, 483, 423]);
 const BLOCK_SWAP_FAMILY_TARGET_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439, 4, 215, 21, 467, 88]);
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
@@ -1583,7 +1581,7 @@ const NO_ATTACH_SHEETS = new Set<number>([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 
 // IsLivingFire（TileID.cs:241）——IsTilePoundable 的活火臂（Player.cs:45940），锤目标
 // 但 TryPoundingTile 无专属支=门内 no-op（与原版一致,勿再"补"动作）
 const LIVING_FIRE_SHEETS = new Set<number>([336, 340, 341, 342, 343, 344]);
-const BASIC_CHEST_SHEETS = new Set<number>([21, 467]);
+// BASIC_CHEST_SHEETS（TileID.cs:315={21,467}）——★BJ218 收编单源 data/tiles.ts 同名 import（§6j）
 const ROPE_ITEM_VIDS = new Set<number>([85, 965, 2996, 3077, 3078]);
 const CONVERSION_GRASS_SHEETS = CONV_GRASS_SHEETS;   // :18 Conversion.Grass——★BJ210 收编单源（§6i）
 const IGNORES_REPLACEMENT_DROP_CHECK_SHEETS = new Set<number>([158, 30]);
@@ -1836,8 +1834,8 @@ export function multiTileDropTriggerCell(
   return null;
 }
 /** IsVine（TileID.cs:237）：八种垂藤（CheckVines 全族同构，见 Game.checkVineAt）；
- *  sheet → 内部 id 映射（变型用，首个命中者） */
-const VINE_SHEETS = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
+ *  sheet → 内部 id 映射（变型用，首个命中者）——★BJ218 收编单源（§6j） */
+const VINE_SHEETS = IS_VINE_SHEETS;
 const VINE_INTERNAL_BY_SHEET = new Map<number, number>();
 TILE_DEFS.forEach((d, id) => {
   const vs = d?.vanilla?.sheet;

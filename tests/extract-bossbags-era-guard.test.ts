@@ -33,10 +33,14 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
   it('行为面:缺省干跑零写盘;现库领先面非空=洗库预警 exit 1+差异清单', () => {
     const before = md5(LIVE);
     const r = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
-    expect(r.status).toBe(1);                      // 现库语义领先（noMaster/remix/noRemix 等）→ 预警
+    // ★BJ217 编码面恢复后重定谳：BJ215 领先字段面（noMaster/remix/noRemix/lo/hi/
+    //   stackExpr 分列/default 臂）已全部被重产盖住——干跑残差仅剩 3329 chance pair
+    //   值（现库 [1,3,2]=BJ183 手补 max+1 编号 vs 源码位序 [1,2,3],配对链键语义
+    //   零差,工具头注 ★BJ217 段）。守卫仍 loud（不降判别力）,证据=袋 3329 spawn 级差。
+    expect(r.status).toBe(1);
     expect(r.stderr).toContain('字段型洗库预警');
-    expect(r.stderr).toContain('领先字段');
-    expect(r.stderr).toContain('cond.noMaster');   // 差异清单物证（BJ215 定谳领先字段）
+    expect(r.stderr).toContain('袋 3329');
+    expect(r.stderr).toContain('"pair":3');        // 差异清单物证（现库 pair 值）
     expect(md5(LIVE)).toBe(before);                // 零写盘 canary
   });
 
@@ -121,16 +125,18 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
       });
       expect(r2.status).toBe(0);
       expect(r2.stderr).toContain('重产盖住现库');
-      // 毒化假现库:注入重产不产的领先字段 → 动态 diff 必须抓住（不硬编码键清单）
+      // 毒化假现库:注入重产不产的领先字段 → 动态 diff 必须抓住（不硬编码键清单）。
+      // ★BJ217：BJ215 毒料 cond.noMaster 已被重产覆盖（编码面恢复）,毒料改用合成
+      //   领先字段 token（模拟未来版本新增条件类型,判别力=字段普查轴动态捕获）。
       const poisoned = JSON.parse(fresh);
-      poisoned.bags['3320'].spawns[0].conds.push({ t: 'noMaster', depth: 2 });
+      poisoned.bags['3320'].spawns[0].conds.push({ t: 'futureCond', depth: 2 });
       writeFileSync(fixture, JSON.stringify(poisoned, null, 1));
       const r3 = spawnSync('node', [SCRIPT], {
         cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
         env: { ...process.env, SW_BOSSBAGS_JSON: fixture },
       });
       expect(r3.status).toBe(1);
-      expect(r3.stderr).toContain('cond.noMaster');
+      expect(r3.stderr).toContain('cond.futureCond');
       expect(md5(LIVE)).toBe(before);
     } finally {
       rmSync(dir, { recursive: true, force: true });

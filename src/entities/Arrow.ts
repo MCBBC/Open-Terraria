@@ -25,6 +25,10 @@ import { f32 } from '../stats/ScaleStats';
 import { TILE } from '../core/constants';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { PROJ_ALPHA_MOD, type ProjAlphaMod } from '../data/vanillaProjAlpha';
+// ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹）——
+// 记录面 ProjGhostRing（Projectile.cs:17197-17300 逐式）+ 绘制面 drawProjGhosts
+// （参数/色/帧锚全表在 projGhostTrail.ts 头注;排除面=本仓已有独立实现的 id 集）
+import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -1853,6 +1857,26 @@ export class Arrow extends Entity {
   /** 1097 oldPos 环（TrailingMode 0 每 tick 后移 :17202-17206,10 槽=20 数）——
    *  :57558 d55 尾迹读 oldPos[9]（=10 tick 前出生位）,环未满（前 9 tick）不撒 */
   private foxTrail: number[] = [];
+  /** ★BJ219 通用 oldPos 残影环（ProjectileID.Sets.TrailingMode 表驱动——
+   *  Projectile.cs:17197-17300 记录面;Main.cs:30609-31360 绘制面）。undefined=未
+   *  初始化,null=该 id 无记录式或缺省排除面（projGhostTrail.ts 头注排除集——本仓
+   *  已有独立记录/绘制实现的 id 不双画）。 */
+  private ghostRing?: ProjGhostRing | null;
+  /** 本子步是否 tick 首（mode 4 玩家位移补偿只在 numUpdates==0 施加 :17283） */
+  private subIsHead = false;
+  /** ★BJ219 记录排除集：本仓已有独立 oldPos 记录/绘制实现,通用环不双记不双画
+   *  （普查定谳见 projGhostTrail.ts 头注「排除面」）。1020/1024/79 记录面在原版
+   *  有消费面（DrawTrail/:33234 辉光门）但本仓未实装对应绘制——登记债前不白记。 */
+  private static GHOST_RECORD_EXCLUDE = new Set<number>([
+    660, 94, 1114, 502,                    // Arrow 内联残影（starTrail/meowTrail）
+    121, 122, 123, 124, 125, 126, 597, 1120, 34, 16, 79, 106,   // 弦带 shader 族
+    933, 1100, 973,                        // SwingArc 斩弧剑族（mode4 环已落）
+    1047, 1090,                            // RollingBoulder trailX 环
+    466, 580,                              // LightningBoltProj 闪电链
+    715, 716, 717, 718,                    // Celeb2 烟花链（绘制面登记债,先不白记）
+    1020, 1024,                            // DrawTrail 绿带（绘制面登记债,先不白记）
+    946,                                   // MinionProj 自带 mode2 环（SW-BJ56）
+  ]);
   /** 712 书杖弹帧（frame/frameCounter :56664-56678——draw fIdx 链消费;
    *  两带各 4 帧:出生 α==255 拍 frame=rand(2)*4 选带,每 4 子步 +1,带内回绕） */
   private f712Frame = 0;
@@ -2739,6 +2763,26 @@ export class Arrow extends Entity {
     if (this.starY !== null && this.projId === 503) {
       const img = projSprite(503);
       if (!img || !(img.width > 0) || img.width === 0) return;
+      // ★BJ219：503 星怒残影（通用表 1,9,3,0.5 档+originY=70——Main.cs:30787-30790/
+      //   :30643-30645;ghostRing 在 GHOST_RECORD_EXCLUDE 之外,503 有记录式 mode 0）
+      if (this.ghostRing !== undefined && this.ghostRing !== null) {
+        drawProjGhosts(ctx, {
+          ring: this.ghostRing,
+          id: 503,
+          tex: img,
+          frames: projFrameCount(503),
+          frame: 0,
+          bodyW: this.w, bodyH: this.h,
+          bodyRot: Math.atan2(this.vy, this.vx) - Math.PI / 2,
+          bodyScale: 1,
+          bodyAlpha: Math.max(0, Math.min(1, 1 - this.starAlpha / 255)),
+          ai0: this.ai0 ?? 0, ai1: this.ai1 ?? 0,
+          timeLeft: this.life,
+          opacity: Math.max(0, Math.min(1, 1 - this.starAlpha / 255)),
+          vxLen: Math.hypot(this.vx, this.vy),
+          spriteDirection: this.vx < 0 ? -1 : 1,
+        });
+      }
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.starAlpha / 255));
       ctx.translate(this.cx, this.cy);
@@ -2919,6 +2963,29 @@ export class Arrow extends Entity {
         }
         ctx.restore();
       }
+    }
+    // ---- ★BJ219 通用 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹
+    //      409/437/385/388）——原版残影块先于本体绘制段,挂本体 save 之前。排除集
+    //      内 id（660/94/1114/502/弦带族/剑族…）走各自内联实现,ghostRing=null 短路;
+    //      503 星怒在上方独占支内补挂（rot=vel−π/2 本体角语义）。 ----
+    if (this.ghostRing !== undefined && this.ghostRing !== null) {
+      const ghostA = this.drawGlobalAlpha() ?? Math.max(0, Math.min(1, (255 - this.alpha) / 255));
+      drawProjGhosts(ctx, {
+        ring: this.ghostRing,
+        id: this.projId,
+        tex: (img && img.width > 0) ? img : null,
+        frames: projFrameCount(this.projId),
+        frame: 0,                     // 通用表帧锚基准行（repo 无通用逐帧字段,登记②）
+        bodyW: this.w, bodyH: this.h,
+        bodyRot: ang,
+        bodyScale: 1,                 // proj.scale 缺省 1（SetDefaults 表内 id 无显式 scale 行;660=1.1 已排除集）
+        bodyAlpha: ghostA,
+        ai0: this.ai0 ?? 0, ai1: this.ai1 ?? 0,
+        timeLeft: this.life,
+        opacity: Math.max(0, Math.min(1, 1 - this.alpha / 255)),
+        vxLen: Math.hypot(this.vx, this.vy),
+        spriteDirection: this.vx < 0 ? -1 : 1,
+      });
     }
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
@@ -4457,10 +4524,26 @@ export class Arrow extends Entity {
       // timeLeft 递减/渐显全跳。EU=3(:6900 MaxUpdates=3) → 每 tick 消 4 计数;计数源=
       // 639 Kill num391（killNow 生成面注）。Kill 消亡面批 2 2026-09-02 实装）
       if (this.ai1Delay > 0) { this.ai1Delay--; continue; }
+      this.subIsHead = u === 0;
       this.subStep(game);
       if (this.dead) return;
     }
 
+  }
+
+  /** ★BJ219 通用 oldPos 记录（Projectile.cs:17197-17300——UpdateTrails 在 Update
+   *  子步循环【内】:17198,每【子步】位移后一段=extraUpdates 弹逐子步后移）。
+   *  调用位=subStep 尾（位移/尘段后、寿命杀位前——原版 Damage 之后 :17198 同序;
+   *  撞块杀位 dead 早退不记录=:17132 `!active` return 同相）。rot=速度角（原版
+   *  rotation 的速度向语义子集,登记①）;dir=sign(vx)（spriteDirection 语义子集）。 */
+  private recordGhostTrail(): void {
+    if (this.ghostRing === undefined) {
+      this.ghostRing = !Arrow.GHOST_RECORD_EXCLUDE.has(this.projId) && projTrailingMode(this.projId) >= 0
+        ? new ProjGhostRing(this.projId)
+        : null;
+    }
+    this.ghostRing?.record(this.x, this.y, Math.atan2(this.vy, this.vx),
+      this.vx < 0 ? -1 : 1, this.subIsHead);
   }
 
   /** ★⑥杀拍口径（2026-09-06）：原版 Update 对湿段【无 active 门】——AI(:16880
@@ -4622,6 +4705,9 @@ export class Arrow extends Entity {
         if (d) { d.vx *= 0.3; d.vy *= 0.3; }
       }
     }
+    // ★BJ219 通用 oldPos 记录（原版 UpdateTrails :17198 位序=Damage 之后/寿命杀前,
+    //   每子步一段——撞块杀位已在上方 dead 早退=原版 :17132 !active return 同相）
+    this.recordGhostTrail();
     if (--this.life <= 0) this.killNow(game);
   }
 

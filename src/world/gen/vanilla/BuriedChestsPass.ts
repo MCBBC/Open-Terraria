@@ -11,7 +11,7 @@ import { LIQUID_TYPE } from '../../TileStore';
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import {TILE_BY_KEY, TILE_DEFS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
+import {TILE_BY_KEY, TILE_DEFS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS, BASIC_CHEST_SHEETS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { genSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
@@ -1018,7 +1018,7 @@ function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
  *  rc=84 JC#3 回退 3×3 击杀 (4737,742)/(4737,743) t=21 chestIdx=50 hasItem=1
  *  只打印 KPRE/KCHEST 无 KILL-OK ⇒ 原版存活。锚集由 __setJCItemChestAnchors 注入
  *  （pass 头按世界箱列表重建，有物判定=id>0&&stack>0，与 TrapsPass 锚同式）。 */
-const KILL_SURVIVE_CHEST_SHEETS = new Set([21, 467]);   // TileID.Sets.BasicChest
+const KILL_SURVIVE_CHEST_SHEETS = BASIC_CHEST_SHEETS;   // TileID.Sets.BasicChest——★BJ218 收编单源（§6j）
 let killSurviveAnchors: Set<number> | null = null;
 export function __setJCItemChestAnchors(s: Set<number> | null): void { killSurviveAnchors = s; }
 export function jcItemChestAnchorSet(st: TileStore, chests: ChestSink): Set<number> {

@@ -11,7 +11,7 @@
 // ✗ NPCSpawningFlagsForDualDungeons 区域扫描→出生表」+ §4 E 车道。
 // ★门纪律：所有入口都要求 world.seedFlags?.dualDungeons 为真；非双地牢世界调用即早退，
 //   零扫描零掷骰——普通世界与现有金标完全无感。
-import { TILE_DEFS, BOULDERS_SHEETS, WALL_DUNGEON_SHEETS as WALL_DUNGEON_SHEETS_AUTH } from '../data/tiles';
+import { TILE_DEFS, BOULDERS_SHEETS, WALL_DUNGEON_SHEETS as WALL_DUNGEON_SHEETS_AUTH, DUNGEON_UNION_CRACKED_SHEETS } from '../data/tiles';
 import { TileStore } from './TileStore';
 
 /** Terraria/NPCSpawningFlagsForDualDungeons.cs:6-24（九 Zone 位逐字对照） */
@@ -165,8 +165,8 @@ export function scanZonesForDualDungeon(
   else if ([195, 199, 201, 203, 234, 352, 399, 401, 662].includes(type)) {
     out.ZoneCrimson = true; result = true;
   }
-  // 地牢主砖族 :134-145（岩石层以下才置 ZoneDungeon）
-  else if ([41, 43, 44, 481, 482, 483].includes(type)) {
+  // 地牢主砖族 :134-145（岩石层以下才置 ZoneDungeon）——★BJ218 并集单源（§6j）
+  else if (DUNGEON_UNION_CRACKED_SHEETS.has(type)) {
     if (groundY > rockLayer) out.ZoneDungeon = true;
     result = true;
   }

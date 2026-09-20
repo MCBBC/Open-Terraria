@@ -13,7 +13,7 @@
 // 架构：摆动图块从 ChunkCache 烘焙中摘除（swayBakeSkip），由 Renderer 在 tile 层之后
 // 逐帧动态绘制（等价原版 AddSpecialPoint 特殊绘制路径）。光照合成在其后，自动受光。
 import { TILE } from '../core/constants';
-import { TILE_DEFS, IS_A_DRIP_TILE_SHEETS } from '../data/tiles';
+import { TILE_DEFS, IS_A_DRIP_TILE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, VINE_THREADS_SHEETS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, scanTreeType, treeTrunkPaintStyle, palmTreePaintStyle,
   type TreeStyleData } from './VanillaTiler';
 import { animYOffset, tileAnim } from './TileAnim';
@@ -46,16 +46,16 @@ export interface SwayEnv {
 }
 
 // ---- TileID.Sets（TileID.cs :263-275 / WallID.cs :54） ----
-/** SwaysInWindBasic：走 DrawBasicGrass 逐格摆动（:273） */
-const SWAYS_IN_WIND_BASIC = new Set([3, 20, 24, 61, 703, 71, 73, 74, 83, 84, 110, 113, 201, 227, 529, 590, 595, 615, 624, 700, 656, 701, 637]);
+/** SwaysInWindBasic：走 DrawBasicGrass 逐格摆动（:273）——★BJ218 收编单源（§6j） */
+const SWAYS_IN_WIND_BASIC = SWAYS_IN_WIND_BASIC_SHEETS;
 /** tile 227 特定 frameX 不摆（ShouldSwayInWind :7834，掉落原版走普通绘制路径） */
 const SWAY_227_EXCLUDE_FX = new Set([204, 238, 408, 442, 476]);
 /** 184（蘑菇植物族）：DrawAnyDirectionalGrass 四向摆动 */
 const DIRECTIONAL_GRASS = new Set([184]);
 /** MultiTileGrass（DrawMultiTileGrass 尺寸表 :8922-8970） */
 const MULTI_GRASS = new Set([27, 233, 236, 238, 485, 489, 490, 493, 519, 521, 522, 523, 524, 525, 526, 527, 530, 651, 652, 705, 702]);
-/** VineThreads（TileID.cs :263）：DrawVineStrip 链式下垂 */
-const VINE_THREADS = new Set([52, 62, 115, 205, 382, 528, 636, 638]);
+/** VineThreads（TileID.cs :263）：DrawVineStrip 链式下垂——★BJ218 收编单源（≡IsVine :237 同值,§6j） */
+const VINE_THREADS = VINE_THREADS_SHEETS;
 /** ReverseVineThreads（:265）：549 向上生长链 */
 const REVERSE_VINE = new Set([549]);
 /** MultiTileVine（路由 :543-602 + 尺寸表 :9012-9044） */
@@ -1037,7 +1037,7 @@ export function drawWindSwayTiles(
           if (rec.sheet === 530 && st.frameX[i] >= 270) continue;
           if (rec.sheet === 705 && st.frameX[i] % 486 >= 270) continue;
           if (rec.sheet === 227 && SWAY_227_EXCLUDE_FX.has(st.frameX[i])) continue;
-          const isAnchorVine = (set: Set<number>, dy: number) => {
+          const isAnchorVine = (set: ReadonlySet<number>, dy: number) => {
             const ny = y + dy;
             return !(st.inBounds(x, ny) && st.flags[st.idx(x, ny)]
               && set.has(TILE_DEFS[st.type[st.idx(x, ny)]]?.vanilla?.sheet ?? -1));

@@ -29,7 +29,7 @@
 // 是会话随机态、逐位不可复现。本实现统一用 new RNG(world.seed) 新流（同种子世界 V 带
 // 位置自洽，与原版逐位不同，结构性等价——RNG 面近似登记在先，勿误记为对拍债）。
 import { RNG } from '../../../core/rng';
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, CONV_CORRUPT_SHEETS, CONV_CRIMSON_SHEETS, CONV_HALLOW_SHEETS } from '../../../data/tiles';
 import type { World } from '../../World';
 import type { TileStore } from '../../TileStore';
 import { vanSolidOrSloped } from './GenSolid';
@@ -64,10 +64,11 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (typeof sh === 'number') SHEET_LUT[i] = sh;
 }
 
-/** TileID.Sets（TileID.cs:329-347）：回填门与转化表用 */
-const SET_CORRUPT = new Set([23, 661, 25, 112, 163, 398, 400, 636]);
-const SET_HALLOW = new Set([109, 492, 117, 116, 164, 402, 403, 115]);
-const SET_CRIMSON = new Set([199, 662, 203, 234, 200, 399, 401, 205]);
+/** TileID.Sets（TileID.cs:329-347）：回填门与转化表用——★BJ218 收编单源（Conversion.Corrupt :333/
+ *  Hallow :341/Crimson :351,§6j） */
+const SET_CORRUPT = CONV_CORRUPT_SHEETS;
+const SET_HALLOW = CONV_HALLOW_SHEETS;
+const SET_CRIMSON = CONV_CRIMSON_SHEETS;
 const sheetOf = (st: TileStore, x: number, y: number): number =>
   SHEET_LUT[st.type[st.idx(x, y)]];
 

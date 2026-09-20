@@ -13,10 +13,19 @@
 //     'src/data/...' 是 cwd footgun（从非 game/ 目录跑=写错位置）;
 //   ④ 锚 fail-loud：方法签名未找到/条目基数护栏,失配 throw;
 //   ⑤ 判别力自证：tests/extract-shops-era-guard.test.ts（变异:摘干跑门=静默写库;毒化
-//     方法签名=fail-loud）。BJ215 定谳：盘上数据面领先于本器（4 items+9 paintings 带更
-//     rich cond 词表 anyBossKill/hardModeUp/downed_4/downedMechBossAny/downed_398/
-//     downedMartians + 多件组 2281-2283,66 条 vs 本器 65）——裸跑重产=整批回退,BJ183
-//     登记债（重产前先恢复提取器词表）。
+//     方法签名=fail-loud）。
+//
+// ★BJ217 词表恢复（BJ183/BJ215 登记债清偿,沙箱重产 vs 现库 66+31 逐值全等·多重集）：
+//   ①cond 词表含式映射改整串精匹配表（TRAVEL_CONDS,锚=Chest.cs 逐行+Game.ts
+//     condOk :38260 词汇）——anyBossKill/hardModeUp:4348（:1168-1175 嵌套 if 捕获）/
+//     downed_4（:1176 downedBoss1,condOk 无 downedBoss1 位）/downedMechBossAny（:1180）/
+//     hardMode&&downed_398（:837/:873）/hardMode&&downedMartians（:841-849）+
+//     DST 双臂 !dontStarveWorld→null / dontStarveWorld→skip（:817-832/:891-903）;
+//   ②单掷组条目 `it = 2281 + Main.rand.Next(3)`（:1232-1234）→ ids:[2281,2282,2283]
+//     （★登记残差：组条目源码位序=57（2266 与 2258 之间）,现库手补在末位 65——
+//     池序=RNG 消费序（每条目逐次 RollLuck）,源码位序为准;现库序=手并追加工件,
+//     数据面对齐留待后续数据刀,守卫多重集对拍不受影响）;
+//   ③基数护栏抬到 1457 终值 66/31（BJ215 定谳现库值,重产实证追平）。
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -30,6 +39,31 @@ const TREE = process.env.SW_TREE || 'Terarria1457';
 if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
 const chest = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria/Chest.cs`, 'utf8');
 
+// ★BJ217 词表恢复（BJ183/BJ215 登记债清偿）：条件原文（空白归一）→ 运行期 condOk
+//   token（Game.ts buildTravelStock condOk :38260-38290 词汇=盘上手补权威编码）。
+//   键=整串精匹配—— Contains 式映射曾把 hardMode&&downedMoonlord 塌缩成 hardMode
+//   （3596/5243 复合门丢失）。未知条件 → 'skip'+loud 告警（原静默丢弃面收口）。
+const TRAVEL_CONDS = new Map([
+  // GetPainting（:815-947）DST 双臂：tier3=普通世界恒真(null)/tier1=DST 世界限定(skip)
+  ['!Main.dontStarveWorld', null],            // :817/:821/:825/:829 5121-5124 tier3
+  ['Main.dontStarveWorld', 'skip'],           // :891-903 5121-5124 tier1
+  ['Main.hardMode && NPC.downedMoonlord', 'hardMode&&downed_398'],      // :837/:873 3596/5243
+  ['Main.hardMode && NPC.downedMartians', 'hardMode&&downedMartians'],  // :841-849 2865-2867
+  ['NPC.downedFrost', 'downedFrost'],                                   // :853-869 3055-3059
+  // GetItem（:978-1266）
+  ['Main.hardMode && NPC.downedMechBoss1 && NPC.downedMechBoss2 && NPC.downedMechBoss3', 'hardModeMech'], // :1016 2223
+  ['NPC.downedBoss3', 'downedBoss3'],                                   // :1048 2296
+  ['Main.hardMode', 'hardMode'],                                        // :996/:1000/:1056…
+  ['WorldGen.shadowOrbSmashed', 'shadowOrbSmashed'],                    // :1092 2269
+  ['NPC.downedDeerclops || NPC.downedSlimeKing || NPC.downedBoss1 || NPC.downedBoss2 || NPC.downedBoss3 || NPC.downedQueenBee || Main.hardMode', 'anyBossKill'], // :1168 4347
+  ['NPC.downedBoss1', 'downed_4'],            // :1176 3262（EoC=4;condOk 无 downedBoss1 位）
+  ['NPC.downedMechBossAny', 'downedMechBossAny'],                       // :1180 3284
+  // 1457 两池不出现,保留=跨版本鲁棒（condOk default=false 族）
+  ['NPC.downedPirates', 'downedPirates'],
+  ['NPC.downedGoblins', 'downedGoblins'],
+  ['NPC.downedPlantBoss', 'downedPlantBoss'],
+]);
+
 function extractPool(fnName) {
   const start = chest.indexOf(`public static void ${fnName}`);
   if (start < 0) throw new Error(`[extract-travelshop] 锚点失配: ${fnName} 未找到（Chest.cs 漂移,禁止静默空扫）`);
@@ -37,33 +71,48 @@ function extractPool(fnName) {
   const body = chest.slice(start, end);
   const entries = [];
   // if (RollLuck(rarity[N]) == 0 [&& cond]) { it = X; }
-  const re = /RollLuck\(rarity\[(\d)\]\) == 0(.*?)\)\s*\n\t*\{\s*\n\s*it = (\d+);/g;
+  //   X 两形态：纯数字 / `2281 + Main.rand.Next(3)`（:1232-1234 单掷组）
+  const re = /RollLuck\(rarity\[(\d)\]\) == 0(.*?)\)\s*\n\t*\{\s*\n\s*it = ([^;]+);/g;
   let m;
   while ((m = re.exec(body))) {
     let condText = m[2] ?? '';
     if (condText.startsWith(' &&')) condText = condText.slice(3).trim();
-    // 条件文本 → 本作旗标 token；未知条件 → skip
+    const norm = condText.replace(/\s+/g, ' ').trim();
+    // :1168 4347 门带分组括号（`&& (NPC.downedDeerclops || …)`——捕获面含首尾括号）
+    //   ——外层括号对剥离后入表
+    const normBare = norm.replace(/^\((.*)\)$/, '$1').trim();
     let cond = null;
-    if (condText.includes('hardMode') && condText.includes('downedMechBoss')) cond = 'hardModeMech';
-    else if (condText.includes('hardMode')) cond = 'hardMode';
-    else if (condText.includes('downedBoss3')) cond = 'downedBoss3';
-    else if (condText.includes('shadowOrbSmashed')) cond = 'shadowOrbSmashed';
-    else if (condText.includes('downedMoonlord')) cond = 'downedMoonlord';
-    else if (condText.includes('downedMartians')) cond = 'downedMartians';
-    else if (condText.includes('downedFrost')) cond = 'downedFrost';
-    else if (condText.includes('downedPirates')) cond = 'downedPirates';
-    else if (condText.includes('downedGoblins')) cond = 'downedGoblins';
-    else if (condText.includes('downedPlantBoss')) cond = 'downedPlantBoss';
-    else if (condText.includes('dontStarveWorld')) cond = 'skip'; // 饥荒种子
-    else if (condText) cond = 'skip';
-    entries.push({ id: Number(m[3]), tier: Number(m[1]), cond });
+    if (norm) {
+      if (TRAVEL_CONDS.has(norm)) cond = TRAVEL_CONDS.get(norm);
+      else if (TRAVEL_CONDS.has(normBare)) cond = TRAVEL_CONDS.get(normBare);
+      else {
+        cond = 'skip';
+        console.error(`[extract-travelshop] 未映射条件(按 skip 丢弃,扩词表): ${norm.slice(0, 90)}`);
+      }
+    }
+    const assign = m[3].trim();
+    const gm = assign.match(/^(\d+) \+ Main\.rand\.Next\((\d+)\)$/);
+    let entry;
+    if (gm) {
+      // 单掷组条目（:1232-1234 `it = 2281 + Main.rand.Next(3)`）——一掷后组内均选
+      // （运行时 pick() e.ids 均选,Game.ts:38299）；盘上手补权威=ids 数组形态
+      entry = { ids: Array.from({ length: +gm[2] }, (_, i) => +gm[1] + i), tier: Number(m[1]), cond };
+    } else {
+      entry = { id: Number(assign), tier: Number(m[1]), cond };
+      // hardModeUp：紧随嵌套 `if (Main.hardMode) { it = N; }`（:1168-1175 4347→4348,
+      //   运行时 pick() hardMode 覆写 Game.ts:38300）
+      const hm = body.slice(re.lastIndex).match(/^\s*if \(Main\.hardMode\)\s*\n\s*\{\s*\n\s*it = (\d+);\s*\n\s*\}/);
+      if (hm) entry.hardModeUp = Number(hm[1]);
+    }
+    entries.push(entry);
   }
-  // 锚 fail-loud：基数护栏（正则静默漏配=半表;现库 items 66/paintings 31,BJ215 定谳）
-  if (fnName === 'SetupTravelShop_GetItem' && entries.length < 40) {
-    throw new Error(`[extract-travelshop] 锚点失配: GetItem 条目基数 ${entries.length} < 40（RollLuck 正则漏配,Chest.cs 漂移）`);
+  // 锚 fail-loud：基数护栏（正则静默漏配=半表;1457 终值 items 66/paintings 31——
+  //   BJ215 定谳现库值,BJ217 重产实证追平,地板抬到终值防半表回归）
+  if (fnName === 'SetupTravelShop_GetItem' && entries.length < 66) {
+    throw new Error(`[extract-travelshop] 锚点失配: GetItem 条目基数 ${entries.length} < 66（RollLuck 正则漏配,Chest.cs 漂移）`);
   }
-  if (fnName === 'SetupTravelShop_GetPainting' && entries.length < 20) {
-    throw new Error(`[extract-travelshop] 锚点失配: GetPainting 条目基数 ${entries.length} < 20（RollLuck 正则漏配,Chest.cs 漂移）`);
+  if (fnName === 'SetupTravelShop_GetPainting' && entries.length < 31) {
+    throw new Error(`[extract-travelshop] 锚点失配: GetPainting 条目基数 ${entries.length} < 31（RollLuck 正则漏配,Chest.cs 漂移）`);
   }
   return entries;
 }

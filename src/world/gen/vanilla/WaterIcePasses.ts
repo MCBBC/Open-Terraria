@@ -8,7 +8,7 @@
 import { TileStore } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { RNG } from '../../../core/rng';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, ICES_SNOW_SHEETS } from '../../../data/tiles';
 import { flipGenSolid } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
 import { doWorldIsFrozenSweep } from './SecretSeedDoEndsPass';   // ★IIIII110 冻结重放
@@ -24,8 +24,9 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET[i] = s;
 }
-/** TileID.Sets.Snow（TileID.cs:291）= {147}；Sets.Ices（:293）= {161,200,163,164} */
-const SNOW_OR_ICE = new Set([147, 161, 200, 163, 164]);
+/** TileID.Sets.Snow（TileID.cs:291）= {147}；Sets.Ices（:293）= {161,200,163,164}
+ *  ——★BJ218 收编单源 data/tiles.ts:ICES_SNOW_SHEETS（TileID.cs:297=两表并值,§6j;cs:80759） */
+const SNOW_OR_ICE = ICES_SNOW_SHEETS;
 
 /** RemoveSurfaceWaterAboveSand（cs:16295-16326）：
  *  x∈[400,w-400]，自 y=100 下扫到首个 active 格即停（break 在任何分支后），

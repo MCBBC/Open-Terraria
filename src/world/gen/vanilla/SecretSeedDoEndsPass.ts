@@ -62,7 +62,7 @@
 //      Next(3) 掷+SquareTileFrame 双级联+失败 Clear 留痕），rainbow #105 满绿定谳。
 
 import { RNG } from '../../../core/rng';   // ★IIIII228 doNoSurface 双流需要【值】导入（new RNG(seed) 镜像 Main.rand）
-import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, CONV_GRASS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS, CONV_SNOW_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CRACKED_BRICKS_SHEETS, GETS_DESTROYED_FOR_METEORS_SHEETS, CLOUDS_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, CONV_GRASS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS, CONV_SNOW_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CRACKED_BRICKS_SHEETS, GETS_DESTROYED_FOR_METEORS_SHEETS, CLOUDS_SHEETS, MUSHROOM_GRASS_SHEETS, ASH_GROUND_SHEETS, BASIC_CHEST_SHEETS } from '../../../data/tiles';
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';
 import type { World } from '../../World';
@@ -118,7 +118,7 @@ const VID_TABLE: Record<number, number> = (() => {
 //   对拍全等,tests/tile-domain-sentinel §6i）;本文件仅留别名与 WallID.Sets.Conversion 域。
 const CONV_GRASS = CONV_GRASS_SHEETS;                              // TileID.cs:18
 const CONV_JUNGLE_GRASS = CONV_JUNGLE_GRASS_SHEETS;
-const CONV_MUSHROOM_GRASS = new Set([70]);                          // Conversion.MushroomGrass :16（单副本,登记债）
+const CONV_MUSHROOM_GRASS = MUSHROOM_GRASS_SHEETS;                  // Conversion.MushroomGrass :16——★BJ218 收编单源（§6j）
 const CONV_GOLF_GRASS = CONV_GOLF_GRASS_SHEETS;
 const CONV_SNOW = CONV_SNOW_SHEETS;
 const CONV_STONE = CONV_STONE_SHEETS;
@@ -146,7 +146,7 @@ const WALL_GLOW_MUSHROOM = new Set([64, 67, 15, 247]);              // WallID.cs
 /** GrowTreeSettings profile GroundTest 集（TreePass.ts 同值；自持防横向耦合） */
 const GEM_TREE_GROUND = new Set<number>([1, 25, 117, 203, ...TILE_MOSS]);
 const VANITY_TREE_GROUND = new Set([2, 109, 477, 492]);
-const ASH_TREE_GROUND = new Set([633]);
+const ASH_TREE_GROUND = ASH_GROUND_SHEETS;   // AshTreeGroundTest {633}——★BJ218 收编单源（§6j）
 function treeGroundTest(trunkSheet: number, floorSheet: number): boolean | null {
   switch (trunkSheet) {
     case 583: case 584: case 585: case 586: case 587: case 588: case 589:
@@ -2604,7 +2604,7 @@ const GETS_DESTROYED_FOR_METEORS = GETS_DESTROYED_FOR_METEORS_SHEETS;
 const METEOR_VETO = new Set([26, 226, 470, 475, 488, 597]);
 /** TileID.Sets.BasicChest（TileID.cs:315 = 21,467）/ Main.tileDungeon（Main.cs:8131-8136
  *  = 41,43,44,677,678,679）—— meteor() 前置否决两辅助集 */
-const CHEST_SHEETS = new Set([21, 467]);
+const CHEST_SHEETS = BASIC_CHEST_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:BASIC_CHEST_SHEETS（TileID.cs:315,§6j）
 const DUNGEON_TILE_SHEETS = TILE_DUNGEON_SHEETS;   // Main.tileDungeon（★BJ187 单源 data/tiles.ts）
 
 /** DoNoSurface（cs:1038-1055） */

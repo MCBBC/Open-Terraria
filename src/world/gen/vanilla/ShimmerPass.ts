@@ -19,7 +19,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { addProtectedStructure } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, TILE_MOSS_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_MOSS_SHEETS, ICES_SNOW_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { solidTile, registerTileFrame165 } from './HalfBrickPass';
@@ -643,7 +643,7 @@ export function placeUncheckedStalactite(st: TileStore, x: number, y: number, pr
   // 地面形族（cs:38540-38700 else 分支）：石/苔/117/25/203 + 396/397 + 368 + 367 +
   // 225（仅单格）——**无冰雪族**（147/161/163/164/200 只在垂挂分支 :38385-38467）。
   // 曾 groundable 与 hangable 同表 → 冰面上长出地面冰锥（原版该处不落格）。
-  const ICE_FAM = new Set([147, 161, 163, 164, 200]);
+  const ICE_FAM = ICES_SNOW_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:ICES_SNOW_SHEETS（TileID.cs:297=Ices∪Snow,§6j;雪冰族垂挂支 :38385-38467 独有）
   const groundable = (a: number): boolean => BASE(a) >= 0 && a !== 225 && !ICE_FAM.has(a);
   if (solidTile(st, x, y - 1) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {
     // 垂挂钟乳石（石质锚挂藤墙 62 → 108 列，:38791-38796）

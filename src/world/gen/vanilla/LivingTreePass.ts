@@ -33,7 +33,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_SHEETS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, BOULDERS_SHEETS, ORE_SHEETS, SOLID_TOP_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_SHEETS, DUNGEON_UNION_CRACKED_SHEETS } from '../../../data/tiles';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
@@ -142,8 +142,9 @@ const DUNGEON_WALLS = WALL_DUNGEON_SHEETS;
 // data/tiles.ts:ORE_SHEETS（同名 import,tests/tile-domain-sentinel §6h）
 /** TileID.Sets.Clouds（TileID.cs:197）——canPlaceLeaves 排除——★BJ210 收编单源（§6i） */
 const CLOUD_SHEETS = CLOUDS_SHEETS;
-/** LivingTrees 选址一票否决：地牢砖（cs:15627-15631） */
-const EXCLUDE_BRICK = new Set([41, 43, 44, 481, 482, 483]);
+/** LivingTrees 选址一票否决：地牢砖（cs:15627-15631）——★BJ218 收编单源
+ *  data/tiles.ts:DUNGEON_UNION_CRACKED_SHEETS（tileDungeon 主三砖∪裂纹砖,§6j） */
+const EXCLUDE_BRICK = DUNGEON_UNION_CRACKED_SHEETS;
 
 // ---------- 读取辅助（生成期 wire 全 0，active = flags bit0） ----------
 function sheetAt(st: TileStore, x: number, y: number): number {

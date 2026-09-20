@@ -643,8 +643,10 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
                             // 消费端 Game.updateLightDecay（LightingEngine.cs:184/LegacyLighting
                             // :949 衰减 ×1.03,与夜枭药水同源）
     moonLordLegs: boolean;  // 5001 月亮领主腿（:13215-13219 moveSpeed+0.25 走 accfx;旗面
-                            // :19730-19734 jumpSpeedBoost+1.8/extraFall+10/jumpHeight++,
-                            // 消费端 jumpBaseSnapshot + 下方 extraFall 聚合）
+                            // :19731-19734 jumpSpeedBoost+1.8/extraFall+10/jumpHeight++——
+                            // ★BJ220 jumpSpeed+1.8 走甲件主属性环 accfx '5001'.jumpSpd→
+                            // jumpSpd 聚合位（起跳/翼飞 JS/火箭脉冲同源）;extraFall+10 走
+                            // 下方 extraFall 聚合;jumpHeight++ 走 jumpBaseSnapshot ticks）
     slowFall: boolean;      // 3770 神灵诅咒（:13360-13362）——下落重力 /3（悬升 /10）+
                             // 终速钳 maxFall/3（/10）+ fallStart 逐帧重置免摔（:27224/
                             // :27571/:25576——与羽落 buff 8 同一 player.slowFall 字段并集,
@@ -2519,8 +2521,10 @@ export class Player extends Entity {
     // ★组A/B 单件面批（2026-09-18）甲件行为旗 vid 直查（同 deadMansSweater 件位形态;
     //  声明位在配饰环上方本地块,旗消费链见 PlayerEquipStats 字段注）：
     if (lVid === 5001) moonLordLegsArmor = true;     // 月亮领主腿（:13215-13219）
-    if (moonLordLegsArmor) extraFall += 10;          // :19732 extraFall += 10（jumpSpeed/jumpHeight 面
-                                                     // 走 jumpBaseSnapshot 消费 equipStats.moonLordLegs）
+    if (moonLordLegsArmor) extraFall += 10;          // :19732 extraFall += 10（jumpSpeed +1.8 面
+                                                     // ★BJ220 走甲件主属性环 accfx '5001'.jumpSpd;
+                                                     // jumpHeight++ 走 jumpBaseSnapshot 消费
+                                                     // equipStats.moonLordLegs）
     if (lVid === 3770) slowFallArmor = true;         // 神灵诅咒（:13360-13362）
     // ★IIIII224（GrantArmorBenefits case 238,Player.cs:13352-13359）：巫师帽
     //  （头槽 238）magicDamage +5%；十周年世界随从上限 +1（tenthAnniversaryWorld）
@@ -2608,11 +2612,16 @@ export class Player extends Entity {
       if (!afx) continue;
       const sg = SUMMON_GEAR[v];
       const sgHas = (f: string): boolean => sg !== undefined && (sg as unknown as Record<string, number | undefined>)[f] !== undefined;
-      const face = (f: 'mana' | 'life' | 'move' | 'meleeSpd' | 'dmgMelee' | 'dmgRanged' | 'dmgMagic' | 'dmgAll' | 'critMelee' | 'critRanged' | 'critMagic' | 'manaCostOff' | 'pickSpeed'): number =>
+      const face = (f: 'mana' | 'life' | 'move' | 'meleeSpd' | 'dmgMelee' | 'dmgRanged' | 'dmgMagic' | 'dmgAll' | 'critMelee' | 'critRanged' | 'critMagic' | 'manaCostOff' | 'pickSpeed' | 'jumpSpd'): number =>
         sgHas(f) ? 0 : afx[f] ?? 0;
       mana += face('mana');                                  // statManaMax2（:13757 1003 等）
       life += face('life');                                  // lifeRegen（:13987 2763 等,N/2 HP/s）
       move += face('move');                                  // moveSpeed
+      jumpSpd += face('jumpSpd');                            // jumpSpeedBoost（'5001' 月领腿 +1.8 :19732——
+                                                             //   ★BJ220 手补钉值自快照手码迁此聚合位,与
+                                                             //   翼飞 JS/火箭脉冲(PLAYER_JUMP_SPEED+eqM.jumpSpd)
+                                                             //   及 jumpBaseSnapshot(baseJumpSpd+=eqJ.jumpSpd)
+                                                             //   同源;SUMMON_GEAR 无 jumpSpd 键,face 直读）
       meleeSpeed += face('meleeSpd');                        // meleeSpeed
       dmgMelee += face('dmgMelee');
       dmgRanged += face('dmgRanged');
@@ -9394,13 +9403,12 @@ export class Player extends Entity {
     //  经 jumpSpeed 字段同样喂 WingMovement/火箭脉冲/起跳三消费端,本仓对应
     //  eqM.jumpSpd 聚合位（vanilla-accfx.json '4989'.jumpSpd 手补钉值,见该文件注）,
     //  在 jumpBaseSnapshot(:9368 baseJumpSpd+=eqJ.jumpSpd)与翼飞 JS(PLAYER_JUMP_SPEED
-    //  +eqM.jumpSpd)两处同源生效。moonLordLegs 的 +1.8 仅此快照单点=既有登记面,勿混。
-    // 月亮领主腿（组A 单件面批 2026-09-18;UpdateJumpHeight :19730-19734：
-    // jumpSpeedBoost += 1.8 / extraFall += 10（聚合位）/ jumpHeight++）
-    if (eqJ.moonLordLegs) {
-      baseJumpSpd += 1.8;
-      baseJumpTicks += 1;
-    }
+    //  +eqM.jumpSpd)两处同源生效。moonLordLegs 的 +1.8 曾仅此快照单点（BJ216 登记
+    //  的同族缺口）,★BJ220 已同式迁 accfx '5001'.jumpSpd→甲件主属性环→eqM.jumpSpd。
+    // 月亮领主腿（UpdateJumpHeight :19731-19734）：jumpSpeedBoost += 1.8 走聚合位
+    // （上方 baseJumpSpd+=eqJ.jumpSpd 接）;extraFall += 10 走甲件旗位(:2522);
+    // jumpHeight++ = 下方 baseJumpTicks+1。
+    if (eqJ.moonLordLegs) baseJumpTicks += 1;
     if (this.buffs.has(BuffType.Werewolf)) baseJumpTicks += 2;   // :19738 jumpHeight += 2（速度 +0.2 已在 jumpSpd :19739）
     if (this.stoolInUse) baseJumpTicks += 5;                     // :19741-19744 折叠凳 +5
     baseJumpSpd += eqJ.jumpSpd;

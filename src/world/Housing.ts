@@ -16,7 +16,7 @@
 //     基础箱每只 −30 / 正上列每格 −15（均floor到 1）；
 //   ⑤ 落位校验：地板格与上方 1-3 格都在房内（Housing_CheckIfInRoom）；
 //   ⑥ 取严格大于的最高分（同分先扫者胜：j 从房顶向下、i 从左向右）。
-import { T, TILE_DEFS } from '../data/tiles';
+import { T, TILE_DEFS, BASIC_CHEST_SHEETS } from '../data/tiles';
 import type { TileStore } from './TileStore';
 
 /** Main.wallHouse 全表（Main.cs `wallHouse[n] = true` 逐条提取；自然墙全部不在内）
@@ -282,8 +282,8 @@ const EVIL_HALLOW = new Set([109, 110, 113, 117, 116, 164, 403, 402]);
 const SUNFLOWER_SHEET = 27;
 /** TileID.Sets.IgnoredInHouseScore（TileID.cs:411）：头顶扫描忽略项 */
 const IGNORED_IN_HOUSE_SCORE = new Set([4, 3, 73, 82, 83, 84, 386]);
-/** TileID.Sets.BasicChest（TileID.cs:315） */
-const BASIC_CHEST = new Set([21, 467]);
+/** TileID.Sets.BasicChest（TileID.cs:315）——★BJ218 收编单源（§6j） */
+const BASIC_CHEST = BASIC_CHEST_SHEETS;
 /** ScoreRoom_CanBeHomeSpot（WorldGen.cs:5967-5978）：boulder 379 不可作家 */
 const BOULDER_SHEET = 379;
 /** 主链共享 extraSolid（★★对抗修复批②2026-09-01 C-F4）：boulder/泡沫块 379。

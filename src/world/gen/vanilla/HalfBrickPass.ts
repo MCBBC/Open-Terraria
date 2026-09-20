@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, NOT_REALLY_SOLID_SHEETS, SOLID_TOP_SHEETS, CONV_SAND_IDS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, NOT_REALLY_SOLID_SHEETS, SOLID_TOP_SHEETS, CONV_SAND_IDS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, ICES_SNOW_SHEETS, BASIC_CHEST_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -912,7 +912,7 @@ function attemptFossilShattering(st: TileStore, rng: RNG, x: number, y: number):
  * 雕进地牢带埋箱（21）→ vanilla 箱本体 ShouldTileSurvive 存活 + 箱下砖格
  * CheckTileBreakability=2 拒毁（上邻箱=容器→scanForContainer 命中）,JS 曾照毁
  * →12 格纯状态差（流位零差：箱/砖尘段均零掷）。 */
-const BASIC_CHEST_S = new Set([21, 467]);
+const BASIC_CHEST_S = BASIC_CHEST_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:BASIC_CHEST_SHEETS（TileID.cs:315,§6j）
 const BASIC_DRESSER_S = new Set([88]);
 const BASIC_CHEST_FAKE_S = new Set([441, 468]);
 /** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169——旧注 :305 系行号漂移）——★BJ210 收编单源（§6i） */
@@ -1457,7 +1457,7 @@ export function loadI66ReplayStore(st: TileStore): void {
  *   a) frameY==18 ∨ type==649 → Check2x1 双联校验（伴帧失配=整组杀,含掉落掷）；
  *   b) 底支非 SolidTileAllowBottomSlope → 单杀（cs:47328）；
  *   c) 堆型样式段核下方材质（雪族 36..47 / 沙族 54..59∪73..76）。 */
-const PILE_SNOW_OK = new Set([147, 161, 163, 164, 200]);           // Sets.Snow{147}∪Conversion.Ice
+const PILE_SNOW_OK = ICES_SNOW_SHEETS;                             // Sets.Snow{147}∪Conversion.Ice——★BJ218 收编单源 data/tiles.ts:ICES_SNOW_SHEETS（TileID.cs:297,§6j;cs:47335/:47485 Snow∪Ice 字面,162/224 调用点特支）
 const PILE_SAND_OK = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
 let _cacheSmallPiles = -1;
 function smallPilesId(): number {

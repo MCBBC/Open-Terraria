@@ -37,7 +37,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_IDS, CRACKED_BRICKS_SHEETS, MOSS_SHEETS, CONV_SAND_IDS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_IDS, CRACKED_BRICKS_SHEETS, MOSS_SHEETS, CONV_SAND_IDS, IS_VINE_SHEETS, ASH_GROUND_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
@@ -240,8 +240,8 @@ const MOSS_COLOR: Record<number, number> = {
   179: 0, 512: 0, 180: 1, 513: 1, 181: 2, 514: 2, 182: 3, 515: 3, 183: 4, 516: 4,
   381: 5, 517: 5, 534: 6, 535: 6, 536: 7, 537: 7, 539: 8, 540: 8, 625: 9, 626: 9, 627: 10, 628: 10,
 };
-/** TileID.Sets.IsVine（:237） */
-const IS_VINE = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
+/** TileID.Sets.IsVine（:237）——★BJ218 收编单源 data/tiles.ts:IS_VINE_SHEETS（§6j） */
+const IS_VINE = IS_VINE_SHEETS;
 /** TileID.Sets.Platforms——★BJ168-债2（2026-09-19）本地副本拆除,收编 data/tiles.ts
  *  单源 PLATFORMS_SHEETS（下方消费面 29 处同名直改;逐值对拍 7≡7） */
 /** Main.tileTable（Main.cs:6828-6903 全量 76 id） */
@@ -1884,7 +1884,7 @@ const VANITY_GROUND = new Set([2, 109, 477, 492]);
  *  （583-589 宝石树=GemTreeGroundTest cs:30455 Stone∪Moss 换算表；634 灰烬树=
  *  AshTreeGroundTest cs:30480 {633}）。 */
 const GEM_TREE_GROUND = new Set([1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
-const ASH_TREE_GROUND = new Set([633]);
+const ASH_TREE_GROUND = ASH_GROUND_SHEETS;   // AshTreeGroundTest {633}——★BJ218 收编单源（§6j）
 /** ★IIII71b：CheckPalmTree（cs:54829-54879）1:1 —— 掷面：re-root 分支 Next(7,10)。 */
 function checkPalmTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
   const idxOf = (xx: number, yy: number): number => st.idx(xx, yy);
@@ -1917,7 +1917,7 @@ function checkPalmTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number):
 }
 
 function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, vanity = false,
-  groundSet?: Set<number>): void {
+  groundSet?: ReadonlySet<number>): void {
   const k = st.idx(x, y);
   const frameX0 = st.frameX[k]!, frameY0 = st.frameY[k]!;
   const self = SWEEP_SHEET[st.type[k]];

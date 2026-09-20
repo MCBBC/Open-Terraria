@@ -12,7 +12,7 @@ import type { TileStore } from '../world/TileStore';
 import programJson from '../data/generated/tileframe-program.json';
 import { makeFrame } from '../data/generated/tileframe-codegen.js';
 import type { FrameDRV, FrameTileH } from '../data/generated/tileframe-codegen.js';
-import { TILE_DEFS, TILE_MOSS_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, MOSS_BRICK_SHEETS, MOSS_SHEETS, CONV_GRASS_SHEETS, ORE_SHEETS } from '../data/tiles';
+import { TILE_DEFS, TILE_MOSS_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, MOSS_BRICK_SHEETS, MOSS_SHEETS, CONV_GRASS_SHEETS, ORE_SHEETS, ICES_SNOW_SHEETS, ORE_MERGES_WITH_MUD_SHEETS } from '../data/tiles';
 import { vanillaIdOf } from './TileMergeFamily';
 
 // ★ID 域契约(2026-08-28 重定):本链全部集合/比较在 vanilla tile id 域。
@@ -70,9 +70,9 @@ const SETS_MUD = S256([59]);
 const SETS_ASH = S256([57]);
 const SETS_SNOW = S256([...CONV_SNOW_SHEETS]);   // ★BJ210 单源派生（TileID.cs:24,§6i）
 const SETS_ICES = S256([...CONV_ICE_SHEETS]);    // TileID.Sets.Ices(:293)≡Conversion.Ice(:28) 同值——★BJ210 单源派生（§6i）
-const SETS_ICES_SNOW = S256([161, 200, 163, 164, 147]);
+const SETS_ICES_SNOW = S256([...ICES_SNOW_SHEETS]);   // TileID.Sets.IcesSnow(:297)——★BJ218 收编单源（§6j）
 const DONT_MERGE_WITH_SNOW = S256([161, 200, 163, 164, 224, 170, 738]);
-const ORE_MERGES_WITH_MUD = S256([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223]);
+const ORE_MERGES_WITH_MUD = S256([...ORE_MERGES_WITH_MUD_SHEETS]);   // TileID.Sets.OreMergesWithMud(:399)——★BJ218 收编单源（§6j）
 const FORCED_DIRT_MERGING = S256([
   75, 76, 508, 507, 226, 409, 669, 670, 671, 672, 673, 674, 675, 676, 683, 684, 273, 274, 459, 458,
   326, 327, 345, 328, 329, 192, 384, 284, 325, 272, 268, 262, 267, 265, 266, 264, 263, 261, 255,

@@ -28,7 +28,7 @@
 import { TileStore, LIQUID_TYPE } from '../../TileStore';   // ★IIIII194 lava(true) 用 LIQUID_TYPE（+1 编码禁裸写）
 import type { RNG } from '../../../core/rng';
 import { wgNpcBlocksEmptyTile, type GenState } from './GenState';   // ★IIIII194 EmptyTile 实体支
-import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, ORE_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS, CONV_GRASS_SHEETS, CONV_SAND_SHEETS, CLOUDS_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CONV_ICE_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, BREAKABLE_WHEN_PLACING_SHEETS, TILE_CUT_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, ORE_SHEETS, TILE_TABLE_SHEETS, TILE_DUNGEON_SHEETS, CONV_GRASS_SHEETS, CONV_SAND_SHEETS, CLOUDS_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CONV_ICE_SHEETS, CONV_CORRUPT_SHEETS, CONV_CRIMSON_SHEETS, IS_VINE_SHEETS, ASH_GROUND_SHEETS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { genSolidType, flipGenSolid, snapshotGenSolid, VAN_TILE_SOLID_EXTRA } from './GenSolid';
 import { setBoulderSolidity } from './TrapsPass';
@@ -81,14 +81,14 @@ const CLOUDS = CLOUDS_SHEETS;
 /** Main.tileDungeon（Main.cs:8131-8136）——★BJ187 收编 data/tiles.ts:
  *  TILE_DUNGEON_SHEETS 单源（6 项逐值全等） */
 const TILE_DUNGEON = TILE_DUNGEON_SHEETS;
-/** TileID.Sets.Corrupt（:329）/ Crimson（:347）——倒木 50×50 回避扫描 */
-const SET_CORRUPT = new Set([23, 661, 25, 112, 163, 398, 400, 636]);
-const SET_CRIMSON = new Set([199, 662, 203, 234, 200, 399, 401, 205]);
+/** TileID.Sets.Corrupt（:333）/ Crimson（:351）——倒木 50×50 回避扫描——★BJ218 收编单源（§6j） */
+const SET_CORRUPT = CONV_CORRUPT_SHEETS;
+const SET_CRIMSON = CONV_CRIMSON_SHEETS;
 /** TileID.Sets.Ore（TileID.cs:403）——Flowers pass 的矿石→草转换判定；
  *  ★BJ203 收编单源 data/tiles.ts:ORE_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h） */
 const SET_ORE = ORE_SHEETS;
-/** TileID.Sets.IsVine（:237）——GrowMoreVines 密度计数（按 type 计，含幽灵） */
-const IS_VINE = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
+/** TileID.Sets.IsVine（:237）——GrowMoreVines 密度计数（按 type 计，含幽灵）——★BJ218 收编单源（§6j） */
+const IS_VINE = IS_VINE_SHEETS;
 /** Main.tileMoss（Main.cs:7146-7187，旧注 :6956-6996 系声明行）——★BJ210 收编单源（§6i） */
 const TILE_MOSS = TILE_MOSS_SHEETS;
 /** TileID.Sets.tileMossBrick——★BJ210 收编单源（§6i） */
@@ -2903,12 +2903,12 @@ const FLOWER_FX_LIST_201 = [6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 
 /** num==637 的花窗帧表（cs:59578） */
 const FLOWER_FX_LIST_637 = [6, 7, 8, 9, 10];
 
-/** IsFitToPlaceFlowerIn 的下方草族表（cs:58247）：num → 允许的下方 sheet 集 */
+/** IsFitToPlaceFlowerIn 的下方草族表（cs:58247）：num → 允许的下方 sheet 集（637 灰烬草基座——★BJ218 单源 ASH_GROUND_SHEETS,§6j） */
 const PLANT_FIT: Record<number, Set<number>> = {
   3: new Set([2, 78, 380, 477, 579]),
   24: new Set([23, 661]),
   201: new Set([199, 662]),
-  637: new Set([633]),
+  637: new Set(ASH_GROUND_SHEETS),
 };
 const CORRUPT_PLANTS = TILE_BY_KEY['v_24_corruption_short_plants']!;
 const CRIMSON_PLANTS = TILE_BY_KEY['v_201_crimson_short_plants']!;

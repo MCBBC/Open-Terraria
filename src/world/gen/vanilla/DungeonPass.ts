@@ -10,7 +10,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
 import { wgSpawnNpc, type GenState } from './GenState';   // ★IIIII194 值引入（老头 wg 实体落地）
-import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_TABLE_IDS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, BOULDERS_SHEETS, TILE_TABLE_SHEETS, TILE_TABLE_IDS, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_SHEETS, FALLING_SHEETS } from '../../../data/tiles';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
@@ -8986,7 +8986,7 @@ const snap: SnapFn = (name) => {
       }
     }
     // TileID.Sets.Falling / CrackedBricks / Boulders（1458 TileID.cs :195/:183/:395）
-    const E137_FALLING = new Set<number>([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
+    const E137_FALLING = FALLING_SHEETS;   // TileID.Sets.Falling（TileID.cs:395）——★BJ218 收编单源（§6j）
     // ★BJ182b 收编单源 data/tiles.ts:BOULDERS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
     const E137_BOULDERS = BOULDERS_SHEETS;
     const crSet = new Set<number>(CRACKED_BRICKS_SHEETS);                    // Sets.CrackedBricks 基表——★BJ210 单源拷贝（§6i）

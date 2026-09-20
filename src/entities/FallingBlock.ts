@@ -9,7 +9,7 @@
 // 落到实心格上变回原 tile。见 Game.checkFallingSand(触发侧)。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
-import { TILE_BY_KEY, TILE_DEFS, VANILLA_TILE_ID } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, VANILLA_TILE_ID, FALLING_SHEETS } from '../data/tiles';
 import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { TileStore } from '../world/TileStore';
@@ -82,7 +82,7 @@ const SANDFALL_SHEET_PROJ = new Map<number, number>([
 /** TileID.Sets.Falling（TileID.cs:395 = 53/234/112/116/224/123/330-333/495）原版 sheet 集
  *  ——弹 411-414 专配第二重碰撞的判集（Projectile.cs:17707-17712）。与 Game.FALLING_TILES
  *  （本仓 id 域触发集）同源异域：彼按 tile id 入队,此按 sheet 判碰撞。 */
-const FALLING_SHEET_SET = new Set([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
+const FALLING_SHEET_SET = FALLING_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:FALLING_SHEETS（TileID.cs:395,§6j）
 
 // ============================================================
 // ★死分支移植（2026-09-05 用户指令）：Collision.AnyCollisionWithSpecificTiles

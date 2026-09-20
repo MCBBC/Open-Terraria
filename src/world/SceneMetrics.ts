@@ -2,7 +2,7 @@
 // 玩家中心 169×124 tile 采样计数（ZoneScanSize = 1920/16+49 × 120/16+49, SceneMetrics.cs:12-16）
 // → 阈值聚合（L24-64/L603-670）→ Zone 标志（CalculateZones L673-708）。
 // BGM 选择链(Music.ts)与群系背景(BiomeBackground)共用本份结果。
-import { TILE_DEFS, WALL_DUNGEON_SHEETS } from '../data/tiles';
+import { TILE_DEFS, WALL_DUNGEON_SHEETS, DUNGEON_UNION_CRACKED_IDS } from '../data/tiles';
 import type { World } from './World';
 import { WALL_HOUSE } from './Housing';
 import { sceneMetricDualOverride } from './DungeonDualZones';
@@ -30,7 +30,7 @@ const EVIL_TILES_REMIX = ids([23, 661, 24, 25, 32, 112, 163, 400, 398, 474]);
 const BLOOD_TILES_REMIX = ids([199, 662, 201, 203, 200, 401, 399, 234, 352, 195]);
 const MUSHROOM_TILES = ids([70, 71, 72, 528]);
 const METEOR_TILES = ids([37]);
-const DUNGEON_TILES = ids([41, 43, 44, 481, 482, 483]);
+const DUNGEON_TILES = DUNGEON_UNION_CRACKED_IDS;   // tileDungeon 主三砖∪裂纹砖——★BJ218 收编单源（§6j;旧 ids 六值平移镜像拆除）
 const SAND_TILES = ids([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
 /** 沙尘暴四色权重（Sandstorm.EmitDust :171-178 GetTileCount 逐格计数）：
  *  普通沙 (200,160,20)=[53,396,397] / 黑檀沙 (103,98,122)=[112,400,398] /
@@ -283,7 +283,7 @@ function isValidForOreFinder(internalId: number, fx: number): boolean {
   return true;
 }
 
-const countSet = (counts: Map<number, number>, set: Set<number>): number => {
+const countSet = (counts: Map<number, number>, set: ReadonlySet<number>): number => {
   let n = 0;
   for (const t of set) n += counts.get(t) ?? 0;
   return n;

@@ -55,6 +55,8 @@ export const HIGHLIGHT_ANIM_EXCLUDED: ReadonlySet<number> = new Set([
   308, 354, 355, 463,
 ]);
 
+import { BASIC_CHEST_SHEETS } from '../data/tiles';
+
 /** ★SW-RB11a：条件动画型（GetTileDrawData :6044-6056——fy<54 静息 top=2 无动画位、
  *  fy≥54 点亮态 addFrY=Main.tileFrame*54）。静息态照画（top=2 修正）,点亮态渲染门
  *  排除（同排除集债,补 TileAnim 接线后可改画动画位）。 */
@@ -62,7 +64,7 @@ export const HIGHLIGHT_ANIM_WHEN_LIT: ReadonlySet<number> = new Set([480, 509, 6
 
 /** TileID.Sets.BasicChest（TileID.cs:315 = CreateBoolSet(21, 467)）——
  *  CacheSpecialDraws_Part2（TileDrawing.cs:4319）开盖姿态带面 */
-const BASIC_CHEST: ReadonlySet<number> = new Set([21, 467]);
+const BASIC_CHEST: ReadonlySet<number> = BASIC_CHEST_SHEETS;   // ★BJ218 收编单源（TileID.cs:315,§6j）
 
 /** Colors.GetSelectionGlowColor（Colors.cs:127-130）1:1。
  *  未选中 = 灰白 (avg/2,avg/2,avg/2,α=avg)；选中 = 黄调 (avg,avg,avg/3,α=avg)。

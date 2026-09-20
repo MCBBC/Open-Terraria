@@ -6,7 +6,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CONV_SAND_IDS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CONV_SAND_IDS, ICES_SNOW_SHEETS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree, seaOatWaterCheck, palmRangeFrame } from './TreePass';
@@ -1507,7 +1507,7 @@ const ALCH_GROUND: Array<Set<number>> = [
   idsByVanillaSheet(661, 662, 203, 199, 23, 25, 78, 380),// 3 邪恶
   idsByVanillaSheet(53, 78, 380, 116),                   // 4 沙/珍珠沙
   idsByVanillaSheet(57, 633, 78, 380),                   // 5 灰烬/灰烬草
-  idsByVanillaSheet(78, 380, 147, 161, 163, 164, 200),   // 6 冰雪族
+  idsByVanillaSheet(78, 380, ...ICES_SNOW_SHEETS),       // 6 冰雪族（78,380+雪冰族——★BJ218 雪冰段收编 data/tiles.ts:ICES_SNOW_SHEETS,TileID.cs:297,§6j;PlaceAlch style6 cs:45854）
 ];
 /** PlaceSuitableHerbHere（cs:45948-45976）：基座类型 → style 分派（顺序覆盖式） */
 const HERB_STYLE_GROUND: Array<[Set<number>, number]> = [
@@ -1517,7 +1517,7 @@ const HERB_STYLE_GROUND: Array<[Set<number>, number]> = [
   [idsByVanillaSheet(23, 661, 25, 203, 199, 662), 3],
   [idsByVanillaSheet(53, 116), 4],
   [idsByVanillaSheet(57, 633), 5],
-  [idsByVanillaSheet(147, 163, 164, 161, 200), 6],
+  [idsByVanillaSheet(...ICES_SNOW_SHEETS), 6],           // ★BJ218 雪冰族单源（§6j;PlaceSuitableHerbHere style6）
 ];
 
 /** PlaceAlch（cs:45386）1:1：目标格净空 + 基座 nactive/整砖 + style 白名单/液体门。

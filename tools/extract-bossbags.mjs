@@ -5,11 +5,16 @@
 // 尾段 coinMap:袋子→boss npc id(开袋按 value 附赠钱币)
 // ★BJ183 2026-09-20 源锚 1456→1457（OpenBossBag :6828→:7206;1457 delta=3329 增 6158@1/6
 // + 3330(旅商蝶袋 Next(6)→Next(7)) 增 3291@case5——两者已由 PC 批手并入盘上数据面。
-// 【重产禁令→★BJ215 已代码化】盘上面领先于本器（BJ215 干跑 diff 定谳）：cond.noMaster
-// （masterMode else 支语义建模）+ cond.remix/noRemix（remixWorld 分支）三字段本器不产,
-// 且 stackVar 条目的 lo/hi 栈域、stackExpr 分列形态、sw branch/chance pair 编号系与
-// 盘上不同构——裸跑全量重产=字段型洗库（保留键被静默丢弃,npcs/vanilla-atlas 四连
-// 同族判例形态）。重产前先恢复提取器编码面（BJ183 登记债）。
+// 【重产禁令→★BJ215 已代码化→★BJ217 编码面恢复】盘上面领先字段（BJ215 干跑 diff
+// 定谳清单）已全部追赶：cond.noMaster（masterMode else 支,pendingIf 取反建模）+
+// cond.remix/noRemix（remixWorld 分支）+ stackVar 条目 lo/hi 栈域 + stackExpr 分列
+// （crim 暂存到 QuickSpawnItem(item,numX) 点挂载即清）+ sw default 臂=Next(N)-1 +
+// 去重对单条 dedup2 形态——SW_OUT 沙箱重产 vs 现库 19 袋 18 袋逐值全等。
+// ★BJ217 唯一登记残差（3329 chance pair 值）：现库 pair=[1,3,2]（6158=3/1294=2）系
+//   BJ183 手补并入时的 max+1 编号（1456 基线 2110=1/1294=2）;源码位序（:7516-7523
+//   Next(6) 先于 Next(3)）给 [1,2,3]。语义零差——pair 系 chance/chanceElse 配对链
+//   键（vanillaBossBags.ts:98-108）,3329 无 else 支,pair 值纯唯二标签;守卫干跑仍
+//   以此残差报 loud（不降判别力）,数据面 2 值对齐留待后续数据刀。
 //
 // ★era guard（BJ215 落闸,四要素习语见 docs/era-guard-family.md）：
 //   ① SW_ITEM_VER 缺省 1457（白名单 1457/1458——1458 OpenBossBag 方法体与 1457 逐字节
@@ -90,14 +95,38 @@ for (const [idStr, raw] of Object.entries(segs)) {
       spawns.push({ maskIds: switchVarIds, maskRoll, conds: [...conds] });
       switchVarIds = [];
     } else if (lastRange) {
-      spawns.push({ idFrom: lastRange, conds: [...conds] });
-      if (dedupSeen) spawns.push({ idFrom: lastRange, dedup2: true, conds: [...conds] });
-      dedupSeen = false;
+      if (dedupSeen) {
+        // ★BJ217 去重对形态（3318 :7227-7234 num3/num4 for-去重、4957 :7683-7690
+        // num/num2 while-去重）＝「从域内掷两个互异值」→ 单条 dedup2 产出（运行时
+        // vanillaBossBags.ts:152-160 idFrom+dedup2 双 give）;第二次 QuickSpawnItem(num4)
+        // 不再产出（清 lastRange）。旧实现产两条（裸 idFrom+dedup2 副本）＝字段型漂移。
+        spawns.push({ idFrom: lastRange, dedup2: true, conds: [...conds] });
+        dedupSeen = false;
+        lastRange = null;
+      } else {
+        spawns.push({ idFrom: lastRange, conds: [...conds] });
+      }
     } else if (v > 0) spawns.push({ id: v, conds: [...conds] });
   };
   let dedupSeen = false;
   let stackExpr = null;
   let braceDepth = 0, pairSeq = 0;
+  // ★BJ217 if/else 配对面：pendingIf 记最近一个 if 压入的 cond,else 臂按其生成取反
+  //   cond（chance→chanceElse 同 pair / master→noMaster / remix→noRemix）——3320/3321
+  //   masterMode else 支(:7281-7300)与 3330 case6 remixWorld if/else(:7581-7591)亲读。
+  let pendingIf = null;
+  // ★BJ217 crim 暂存：`short item = (short)(WorldGen.crimson ? E : G)` 先记账,到
+  //   `QuickSpawnItem(itemSource_OpenItem, item, numX)` 落地产出（stackExpr 同点挂载,
+  //   3319 :7254-7265:stackExpr 累计链在 QuickSpawnItem 消费后清零,逐条独立）。
+  let pendingCrim = null;
+  // ★BJ217 switch 掷面数表：swNext[k] = `switch (Main.rand.Next(N))` 的 N——
+  //   `default:` 臂 = N-1（3323 :7385-7395 default=branch2、3329 :7539 default=branch6、
+  //   3860 :7612 default=branch3,运行时 swFaces=branch 最大值+1 vanillaBossBags.ts:83-88）。
+  const swNext = [];
+  // ★BJ217 sw cond 生命周期=其 switch 自身块：弹出阈值=switch 语句行 braceDepth,
+  //   内层 if/else 块闭合不波及（3330 case6 remix if/else 内 2623 须保留 sw branch6
+  //   :7581-7591）,switch 自身块闭合才弹（3329 switch 后 2218 无 sw :7558）
+  const swPopAt = [];
   for (const line of lines) {
     let mm;
     if (!line) continue;
@@ -105,7 +134,14 @@ for (const [idStr, raw] of Object.entries(segs)) {
     if (line === '{') { braceDepth++; continue; }
     if (line === '}') {
       braceDepth--;
-      while (conds.length && conds[conds.length - 1].depth > braceDepth) conds.pop();
+      // sw cond 不走深度弹栈（其生命周期由下方 swPopAt 专属管）——3330 case6 内层
+      // remix if/else 块闭合(:7586/:7589)不得波及 sw branch6
+      while (conds.length && conds[conds.length - 1].depth > braceDepth && conds[conds.length - 1].t !== 'sw') conds.pop();
+      if (swIdx >= 0 && braceDepth <= (swPopAt[swIdx] ?? -1)) {
+        const si = conds.map((c) => c.t === 'sw').lastIndexOf(true);
+        if (si >= 0) conds.splice(si, 1);
+        swPopAt[swIdx] = -1;
+      }
       continue;
     }
     if ((mm = line.match(/^case (\d+):$/)) && conds.some((c) => c.t === 'sw')) {
@@ -116,22 +152,51 @@ for (const [idStr, raw] of Object.entries(segs)) {
     }
     if (line.startsWith('case ')) continue;
     if (line.includes('TryGettingDevArmor')) { devArmor = true; continue; }
-    if (line === 'default:') continue;
-    if ((mm = line.match(/^if \(Main\.rand\.Next\((\d+)\) == 0\)$/))) { pairSeq++; conds.push({ t: 'chance', n: +mm[1], pair: pairSeq, depth: braceDepth + 1 }); continue; }
-    if (line.startsWith('else')) { while (conds.length && conds[conds.length-1].t === 'chance') conds.pop(); conds.push({ t: 'chanceElse', pair: pairSeq, depth: braceDepth + 1 }); continue; }
-    if (line.startsWith('if (masterMode)') || line.startsWith('if (Main.masterMode)')) { conds.push({ t: 'master', depth: braceDepth + 1 }); continue; }
-    if (line === 'if (!extraAccessory)') { conds.push({ t: 'noExtra', depth: braceDepth + 1 }); continue; }
-    if ((mm = line.match(/^if \(!HasItem\((\d+)\)\)$/))) { conds.push({ t: 'noItem', id: +mm[1], depth: braceDepth + 1 }); continue; }
-    if (line.startsWith('if (Main.remixWorld)')) continue;
-    if ((mm = line.match(/^switch \(Main\.rand\.Next\((\d+)\)\)$/))) { swIdx++; conds.push({ t: 'sw', k: swIdx, branch: -1, depth: braceDepth + 1 }); continue; }
+    if (line === 'default:') {
+      // ★BJ217 default 臂 = swNext[swIdx]-1（见 swNext 注;旧实现跳过 default=
+      //   前支 cond 泄漏到 default 臂——3323/3329/3860 三袋 branch 编号漂移根因）
+      if (swIdx >= 0 && conds.some((c) => c.t === 'sw')) {
+        const si = conds.map((c) => c.t === 'sw').lastIndexOf(true);
+        conds.splice(si, 1);
+        conds.push({ t: 'sw', k: swIdx, branch: (swNext[swIdx] ?? 0) - 1, depth: braceDepth + 1 });
+      }
+      continue;
+    }
+    if ((mm = line.match(/^if \(Main\.rand\.Next\((\d+)\) == 0\)$/))) { pairSeq++; const c = { t: 'chance', n: +mm[1], pair: pairSeq, depth: braceDepth + 1 }; conds.push(c); pendingIf = c; continue; }
+    if (line.startsWith('else')) {
+      // ★BJ217 else 臂取反：按 pendingIf 类型生成 noMaster/noRemix/chanceElse(同 pair)
+      const p = pendingIf;
+      pendingIf = null;
+      if (p && p.t === 'chance') {
+        while (conds.length && conds[conds.length - 1].t === 'chance') conds.pop();
+        conds.push({ t: 'chanceElse', pair: p.pair, depth: braceDepth + 1 });
+      } else if (p && p.t === 'master') {
+        if (conds.length && conds[conds.length - 1].t === 'master') conds.pop();
+        conds.push({ t: 'noMaster', depth: braceDepth + 1 });
+      } else if (p && p.t === 'remix') {
+        if (conds.length && conds[conds.length - 1].t === 'remix') conds.pop();
+        conds.push({ t: 'noRemix', depth: braceDepth + 1 });
+      } else {
+        while (conds.length && conds[conds.length - 1].t === 'chance') conds.pop();
+        conds.push({ t: 'chanceElse', pair: pairSeq, depth: braceDepth + 1 });
+      }
+      continue;
+    }
+    if (line.startsWith('if (masterMode)') || line.startsWith('if (Main.masterMode)')) { const c = { t: 'master', depth: braceDepth + 1 }; conds.push(c); pendingIf = c; continue; }
+    if (line === 'if (!extraAccessory)') { const c = { t: 'noExtra', depth: braceDepth + 1 }; conds.push(c); pendingIf = c; continue; }
+    if ((mm = line.match(/^if \(!HasItem\((\d+)\)\)$/))) { const c = { t: 'noItem', id: +mm[1], depth: braceDepth + 1 }; conds.push(c); pendingIf = c; continue; }
+    if (line.startsWith('if (Main.remixWorld)')) { const c = { t: 'remix', depth: braceDepth + 1 }; conds.push(c); pendingIf = c; continue; }
+    if ((mm = line.match(/^switch \(Main\.rand\.Next\((\d+)\)\)$/))) { swIdx++; swNext[swIdx] = +mm[1]; swPopAt[swIdx] = braceDepth; conds.push({ t: 'sw', k: swIdx, branch: -1, depth: braceDepth + 1 }); continue; }
     if ((mm = line.match(/^int num\d* = Main\.rand\.Next\((\d+), (\d+)\);$/))) { lastRange = [+mm[1], +mm[2]]; v = -1; continue; }
     if ((mm = line.match(/^int num\d* = Main\.rand\.Next\((\d+)\);$/))) { maskRoll = +mm[1]; continue; }
     if ((mm = line.match(/^int num\d+ = Main\.rand\.Next\((\d+)\) \+ (\d+);$/))) { stackExpr = [[+mm[1], +mm[2]]]; continue; }
     if ((mm = line.match(/^num\d+ \+= Main\.rand\.Next\((\d+)\) \+ (\d+);$/))) { (stackExpr ??= []).push([+mm[1], +mm[2]]); continue; }
-    if (/^int num9;$/.test(line)) continue;
+    if (/^int num\d+;$/.test(line)) continue;   // 声明行（3318 `int num4;` :7229）
     if (/^for \(/.test(line) || /^while \(num/.test(line)) { dedupSeen = true; continue; }
-    if ((mm = line.match(/^short item = \(short\)\(WorldGen\.crimson \? (\d+) : (\d+)\);$/))) { crimItem = null; spawns.push({ crim: true, evil: +mm[1], good: +mm[2], conds: [...conds] }); continue; }
-    if ((mm = line.match(/^item = \(short\)\(WorldGen\.crimson \? (\d+) : (\d+)\);$/))) { spawns.push({ crim: true, evil: +mm[1], good: +mm[2], conds: [...conds], stackVar: true }); continue; }
+    // ★BJ217 crim 暂存（3319 :7254-7265）：产出推迟到 QuickSpawnItem(item, numX) 点,
+    //   stackExpr 同点挂载并消费清零（旧实现 item 行即产出→stackExpr 未挂/跨条污染）
+    if ((mm = line.match(/^short item = \(short\)\(WorldGen\.crimson \? (\d+) : (\d+)\);$/))) { pendingCrim = { evil: +mm[1], good: +mm[2] }; continue; }
+    if ((mm = line.match(/^item = \(short\)\(WorldGen\.crimson \? (\d+) : (\d+)\);$/))) { pendingCrim = { evil: +mm[1], good: +mm[2] }; continue; }
     if ((mm = line.match(/^switch \(num\d+\)$/))) { switchVarIds = []; continue; }
     if ((mm = line.match(/^num\d+ = (\d+);$/))) { switchVarIds.push(+mm[1]); continue; }
     if (/^num\d+ = \(\(num\d+ != 3\) \? \(489 \+ num\d+\) : 2998\);$/.test(line)) { spawns.push({ maskIds: [489, 490, 491, 2998], maskRoll: 4, conds: [...conds] }); continue; }
@@ -144,15 +209,46 @@ for (const [idStr, raw] of Object.entries(segs)) {
     if ((mm = line.match(/^QuickSpawnItem\(itemSource_OpenItem, (\d+), (\d+)\);$/))) { spawns.push({ id: +mm[1], stack: +mm[2], conds: [...conds] }); continue; }
     if ((mm = line.match(/^QuickSpawnItem\(itemSource_OpenItem, Main\.rand\.Next\((\d+), (\d+)\)\);$/))) { spawns.push({ idFrom: [+mm[1], +mm[2]], conds: [...conds] }); continue; }
     if ((mm = line.match(/^QuickSpawnItem\(itemSource_OpenItem, (\d+)\);$/))) { spawns.push({ id: +mm[1], conds: [...conds] }); continue; }
-    if (/^QuickSpawnItem\(itemSource_OpenItem, (num\d*|item)\);/.test(line) || /^QuickSpawnItem\(itemSource_OpenItem, item, num\d+\);/.test(line)) { flushVarSpawn(); continue; }
+    if (/^QuickSpawnItem\(itemSource_OpenItem, (num\d*|item)\);/.test(line)) { flushVarSpawn(); continue; }
+    if (/^QuickSpawnItem\(itemSource_OpenItem, item, num\d+\);/.test(line)) {
+      // ★BJ217 crim 产出点（3319 :7260/:7264）:stackVar 恒真+stackExpr 挂载即清
+      //   （运行时 stackOf() 逐条独立掷,vanillaBossBags.ts:142-147）
+      if (pendingCrim) {
+        const sp = { crim: true, evil: pendingCrim.evil, good: pendingCrim.good, conds: [...conds], stackVar: true };
+        if (stackExpr) sp.stackExpr = stackExpr;
+        spawns.push(sp);
+        pendingCrim = null;
+        stackExpr = null;
+      } else {
+        flushVarSpawn();
+      }
+      continue;
+    }
     if (line === 'int num10 = -1;') break;   // 共享尾段
     if (line === 'switch (type)') break;
     if (/^(int index = |int item2 = |list\.RemoveAt)/.test(line)) continue;
     if (/^QuickSpawnItem\(itemSource_OpenItem, item2\);/.test(line)) continue;
     if ((mm = line.match(/^num\d* = Main\.rand\.Next\((\d+), (\d+)\);$/))) { lastRange = [+mm[1], +mm[2]]; v = -1; continue; }
     if ((mm = line.match(/^num\d* = Main\.rand\.Next\((\d+)\) \+ (\d+);$/))) { (stackExpr ??= []).push([+mm[1], +mm[2]]); continue; }
-    if ((mm = line.match(/^QuickSpawnItem\(itemSource_OpenItem, (\d+), num\d+\);$/))) { const sp = { id: +mm[1], stackVar: true, conds: [...conds] }; if (stackExpr) sp.stackExpr = stackExpr; spawns.push(sp); stackExpr = null; continue; }
+    // ★BJ217 栈域三分支（键序=盘上手补权威）:stackExpr 挂尾部（3319 47 条目）;lo/hi
+    //   栈域挂 stackVar 后 conds 前（3320/3321 masterMode 分支 :7281-7300 num5/num6
+    //   局部栈变量形态）;皆无 → 裸 stackVar
+    if ((mm = line.match(/^QuickSpawnItem\(itemSource_OpenItem, (\d+), num\d+\);$/))) {
+      let sp;
+      if (stackExpr) {
+        sp = { id: +mm[1], stackVar: true, conds: [...conds], stackExpr };
+      } else if (lastRange) {
+        sp = { id: +mm[1], stackVar: true, lo: lastRange[0], hi: lastRange[1], conds: [...conds] };
+        lastRange = null;
+      } else {
+        sp = { id: +mm[1], stackVar: true, conds: [...conds] };
+      }
+      spawns.push(sp);
+      stackExpr = null;
+      continue;
+    }
     if (/^if \(type == \d+\)|^num10 = \d+;|^if \(num10 <= 0\)/.test(line)) continue;
+    if (/^if \(/.test(line)) pendingIf = null;   // 未识别 if：作废 else 配对面（防陈旧取反）
     console.log(`  ?? ${idStr}: ${line.slice(0, 90)}`);
   }
   out[idStr] = { devArmor, spawns };

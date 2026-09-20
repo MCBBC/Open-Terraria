@@ -7,7 +7,7 @@
 //   TouchDamageBleeding {48,232,750}            —— 尖刺族,流血(停自然恢复)
 //   TouchDamageImmediate {32:10,69:17,80:6,352:10,655:100,48:60,232:80,484:25,750:70}
 // CanTileHurt 门禁:230 仅 ftw 种子 / 80(仙人掌) 仅饥荒种子 → 普通世界恒无效。
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, SUFFOCATE_SHEETS, TOUCH_HOT_SHEETS, TOUCH_BLEEDING_SHEETS, TOUCH_DESTROY_SHEETS } from '../data/tiles';
 import { VAN_TILE_SOLID_EXTRA } from '../world/gen/vanilla/GenSolid';
 import type { TileStore } from '../world/TileStore';
 
@@ -68,14 +68,14 @@ export const TOUCH_IMMEDIATE = new Map<number, number>(
     .map(([s, d]) => [tid(s), d] as [number, number])
     .filter(([t]) => t >= 0),
 );
-/** 流血族（尖刺/木尖刺/锋利尖刺块）→ Bleeding 10-20s */
-export const TOUCH_BLEEDING = setOf([48, 232, 750]);
-/** 灼烧族（陨石/狱石/狱石砖/远古狱石砖）→ Burning 20t（0.33s,持续接触刷新） */
-export const TOUCH_HOT = setOf([37, 58, 76, 684, 230]);
-/** 窒息族（沙/沙岩/黑檀沙/珍珠沙/泥沙/猩红沙）→ 埋入 20 HP/s */
-export const SUFFOCATE = setOf([53, 112, 116, 123, 224, 234]);
-/** 触碰即毁族（腐化刺/丛林刺/猩红刺/世纪之花刺） */
-export const TOUCH_DESTROY = setOf([32, 69, 352, 655]);
+/** 流血族（尖刺/木尖刺/锋利尖刺块）→ Bleeding 10-20s ——★BJ218 收编单源（§6j） */
+export const TOUCH_BLEEDING = setOf([...TOUCH_BLEEDING_SHEETS]);
+/** 灼烧族（陨石/狱石/狱石砖/远古狱石砖）→ Burning 20t（0.33s,持续接触刷新）——★BJ218 收编单源（§6j） */
+export const TOUCH_HOT = setOf([...TOUCH_HOT_SHEETS]);
+/** 窒息族（沙/沙岩/黑檀沙/珍珠沙/泥沙/猩红沙）→ 埋入 20 HP/s ——★BJ218 收编单源（§6j） */
+export const SUFFOCATE = setOf([...SUFFOCATE_SHEETS]);
+/** 触碰即毁族（腐化刺/丛林刺/猩红刺/世纪之花刺）——★BJ218 单源 CONV_THORN_SHEETS 转出口（≡TouchDamageDestroyTile :385,§6j） */
+export const TOUCH_DESTROY = setOf([...TOUCH_DESTROY_SHEETS]);
 
 /**
  * CanTileHurt（Collision.cs:3209）。fireWalk = 黑曜石骷髅族（本作装备位），

@@ -28,7 +28,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
-import { TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_INTERNAL_BY_SHEET, PLATFORMS_SHEETS, BASIC_CHEST_SHEETS } from '../../../data/tiles';
 import { genKillTile } from './FinalCleanupPass';
 import { placePlate } from './TrapsPass';
 
@@ -68,7 +68,7 @@ const fr = Math.fround;
 
 // —— 原版集合投影 ——
 // TileID.Sets.BasicChest（箱子两族；DropTrap ±25 扫描盒拒门 cs:146-150）。
-const DE_BASIC_CHEST_SHEET = new Set([21, 467]);
+const DE_BASIC_CHEST_SHEET = BASIC_CHEST_SHEETS;   // ★BJ218 收编单源（TileID.cs:315,§6j）
 // TileID.Sets.Platforms（DropTrap 终界探深跳平台支 cs:370 !Platforms[tile.type]）。
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const DE_PLATFORM_SHEET = PLATFORMS_SHEETS;

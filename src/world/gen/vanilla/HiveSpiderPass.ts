@@ -6,7 +6,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS, TILE_MOSS_SHEETS, CONV_STONE_SHEETS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_MOSS_SHEETS, CONV_STONE_SHEETS, ICES_SNOW_SHEETS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { tileRunner } from './TileRunner';
 import { genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';
@@ -1054,7 +1054,7 @@ function placeUncheckedStalactiteGen(st: TileStore, x: number, y: number, prefer
     const up = SHEETC(x, y - 1);
     const fromPaint = st.paint[st.idx(x, y - 1)];
     const fams: Array<[ReadonlySet<number>, number]> = [
-      [new Set([147, 161, 163, 164, 200]), 0],                                   // 沙
+      [new Set(ICES_SNOW_SHEETS), 0],                                            // 沙（雪冰族={147}∪Ices——★BJ218 单源 data/tiles.ts:ICES_SNOW_SHEETS,TileID.cs:297,§6j）
       [new Set(CONV_STONE_SHEETS), 54],                                          // 石（+moss 并集；Conversion.Stone :26——★BJ210 单源拷贝,§6i）
       [new Set([396, 397]), 378], [new Set([368]), 432], [new Set([367]), 486],
     ];

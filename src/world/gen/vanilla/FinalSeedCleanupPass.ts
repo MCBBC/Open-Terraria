@@ -24,7 +24,7 @@
 //  与 errorWorld 均为 1457 SecretSeed **哈希注册**（无公开文本种子），本仓 SeedEasterEggs
 //  仅登记旗标位（恒 false）——文本/哈希触发链归秘密种子批（批 F）。终扫的落砂静态化
 //  部分不依赖旗标，普通世界照跑。
-import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CRACKED_BRICKS_SHEETS, CLOUDS_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, IS_A_TREE_TRUNK_SHEETS, ORE_SHEETS, TILE_DUNGEON_SHEETS, WALL_DUNGEON_SHEETS, CRACKED_BRICKS_SHEETS, CLOUDS_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, FALLING_SHEETS, ASH_GROUND_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { TileStore } from '../../TileStore';
 import type { SeedFlags } from '../SeedEasterEggs';
@@ -48,8 +48,8 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 }
 const sheetOf = (t: number): number => (t >= 0 && t < SHEET_OF.length ? SHEET_OF[t] : -1);
 
-/** TileID.Sets.Falling（1457 TileID.cs:395）= {53,234,112,116,224,123,330,331,332,333,495} */
-const FALLING_SHEETS = new Set([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
+/** TileID.Sets.Falling（1457 TileID.cs:395）= {53,234,112,116,224,123,330,331,332,333,495}
+ *  ——★BJ218 收编单源 data/tiles.ts:FALLING_SHEETS 同名 import（§6j） */
 
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 上格早退门 */
 // ★BJ182b 收编单源 data/tiles.ts:IS_A_TREE_TRUNK_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)

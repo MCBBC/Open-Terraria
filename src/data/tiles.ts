@@ -1411,6 +1411,139 @@ export const GETS_CHECKED_FOR_LEAVES_SHEETS: ReadonlySet<number> = IS_SHAKEABLE_
  *  （Game.isTileReplaceable 消费）——与 IsShakeable 同值（零行为差;同上） */
 export const PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS: ReadonlySet<number> = IS_SHAKEABLE_SHEETS;
 
+// ===================== TileID.Sets 第四收编批（★BJ218 2026-09-20） =====================
+// BJ210 登记债第二清偿：面一 IcesSnow 族 ×8 / 面二纯值族（IsVine/SwaysInWindBasic/
+// Falling/BasicChest/Corrupt·Crimson·Hallow/Spreads·BiomeSight·CountCollection 同值组/
+// AshGround/DoesntPlaceWithTileReplacement/ResetsHalfBrick/MushroomGrass/
+// OreMergesWithMud）/ 面三 tileDungeon∪Cracked 并集族 + TouchDamage 三表。
+// tools/_bj218-census.mjs 全仓字面副本扫描 × Terarria1457/Terraria.ID/TileID.cs 亲读
+// 对拍；1458 抽核（TileID.cs :16/:181/:233/:237/:273/:297/:315/:331-353/:369/:385-393/
+// :395/:399）同行号同值零增量。逐值全等后收编本处单源，消费面别名改指
+// （tests/tile-domain-sentinel §6j 金标+结构锁钉死）。值同语义异案按 BJ210 判例=
+// 单一值源+语义名导出、注记保留（VineThreads≡IsVine、Spreads*≡*BiomeSight≡
+// *CountCollection、AshGround≡NeedsGrassFraming 单值巧合）。
+/** TileID.Sets.IcesSnow（TileID.cs:297）=Ices(:293)∪Snow(:291) 并值 {161,200,163,164,147}。
+ *  ★面一 8 处逐点定谳（全为 Ices∪Snow 纯同值,无 224/162 混入——224 只在
+ *  IcesSlush(:295)/雪族灌水臂(cs:64416) 等异表,勿并）：
+ *  TileMergeFamily 162 排除臂(cs:82806 TileMergeAttempt IcesSnow)/VanillaFraming
+ *  草式摆动排除/WorldEvolution SNOW_FAMILY 草药 style6 地面(cs:45854 字面雪冰段)/
+ *  HalfBrick PILE_SNOW_OK(cs:47335·cs:47485 Snow∪Conversion.Ice,162/224 调用点特支)/
+ *  HiveSpider 钟乳雪族基座/Shimmer ICE_FAM 地面形排除/StructuresPass PlaceAlch
+ *  style6(cs:45854 字面 78,380+雪冰,并集支)/WaterIcePasses SNOW_OR_ICE(cs:80759
+ *  Snow∪Ices)。 */
+export const ICES_SNOW_SHEETS: ReadonlySet<number> = new Set([161, 200, 163, 164, 147]);
+/** IcesSnow 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询） */
+export const ICES_SNOW_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (ICES_SNOW_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.IsVine（TileID.cs:237）八垂藤 {52,382,62,115,205,528,636,638} */
+export const IS_VINE_SHEETS: ReadonlySet<number> = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
+/** TileID.Sets.VineThreads（TileID.cs:263）——≡IsVine(:237) 同值（绘制链式下垂 vs
+ *  TileFrame 支撑检查两语义）;单一值源双语义名（BJ210 三名同值判例;分叉即金标红） */
+export const VINE_THREADS_SHEETS: ReadonlySet<number> = IS_VINE_SHEETS;
+/** TileID.Sets.SwaysInWindBasic（TileID.cs:273 全 23 型）——WindyGrass 域白名单 */
+export const SWAYS_IN_WIND_BASIC_SHEETS: ReadonlySet<number> = new Set([
+  3, 20, 24, 61, 703, 71, 73, 74, 83, 84, 110, 113, 201, 227, 529, 590, 595, 615, 624, 700, 656, 701, 637,
+]);
+/** TileID.Sets.Falling（TileID.cs:395 全 11 型）——落沙/沙堆族（Projectile 专配碰撞/
+ *  E137 落坑判定/种子清理共用） */
+export const FALLING_SHEETS: ReadonlySet<number> = new Set([53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495]);
+/** TileID.Sets.BasicChest（TileID.cs:315={21 木箱,467 死人箱}）——箱族判定共用
+ *  （放置替换族/箱盖姿态带/房屋计分/破坏存活门/meteor 否决/陷阱杀箱锚） */
+export const BASIC_CHEST_SHEETS: ReadonlySet<number> = new Set([21, 467]);
+/** TileID.Sets.Conversion.Corrupt（TileID.cs:333 全 8 型） */
+export const CONV_CORRUPT_SHEETS: ReadonlySet<number> = new Set([23, 661, 25, 112, 163, 398, 400, 636]);
+/** TileID.Sets.Conversion.Crimson（TileID.cs:351 全 8 型） */
+export const CONV_CRIMSON_SHEETS: ReadonlySet<number> = new Set([199, 662, 203, 234, 200, 399, 401, 205]);
+/** TileID.Sets.Conversion.Hallow（TileID.cs:341 全 8 型） */
+export const CONV_HALLOW_SHEETS: ReadonlySet<number> = new Set([109, 492, 117, 116, 164, 402, 403, 115]);
+/** TileID.Sets.SpreadsCorruption（TileID.cs:335 全 10 型）=Conversion.Corrupt∪{24 腐草,32 腐刺} */
+export const SPREADS_CORRUPTION_SHEETS: ReadonlySet<number> = new Set([23, 661, 25, 112, 398, 400, 163, 32, 636, 24]);
+/** TileID.Sets.CorruptBiomeSight（TileID.cs:331）——≡SpreadsCorruption 同值（值源分离备案） */
+export const CORRUPT_BIOME_SIGHT_SHEETS: ReadonlySet<number> = SPREADS_CORRUPTION_SHEETS;
+/** CorruptCountCollection（TileID.cs:329 List<int>）——≡SpreadsCorruption 同值（树妖阵营计数） */
+export const CORRUPT_COUNT_COLLECTION_SHEETS: ReadonlySet<number> = SPREADS_CORRUPTION_SHEETS;
+/** TileID.Sets.SpreadsCrimson（TileID.cs:353 全 10 型）=Conversion.Crimson∪{201 猩草,352 猩刺} */
+export const SPREADS_CRIMSON_SHEETS: ReadonlySet<number> = new Set([199, 662, 203, 234, 399, 401, 200, 352, 205, 201]);
+/** TileID.Sets.CrimsonBiomeSight（TileID.cs:349）——≡SpreadsCrimson 同值 */
+export const CRIMSON_BIOME_SIGHT_SHEETS: ReadonlySet<number> = SPREADS_CRIMSON_SHEETS;
+/** CrimsonCountCollection（TileID.cs:347 List<int>）——≡SpreadsCrimson 同值 */
+export const CRIMSON_COUNT_COLLECTION_SHEETS: ReadonlySet<number> = SPREADS_CRIMSON_SHEETS;
+/** TileID.Sets.SpreadsHallow（TileID.cs:343 全 10 型）=Conversion.Hallow∪{110 圣草,113 圣高草} */
+export const SPREADS_HALLOW_SHEETS: ReadonlySet<number> = new Set([109, 492, 117, 116, 402, 403, 164, 115, 110, 113]);
+/** TileID.Sets.HallowBiomeSight（TileID.cs:339）——≡SpreadsHallow 同值 */
+export const HALLOW_BIOME_SIGHT_SHEETS: ReadonlySet<number> = SPREADS_HALLOW_SHEETS;
+/** HallowCountCollection（TileID.cs:337 List<int>）——≡SpreadsHallow 同值 */
+export const HALLOW_COUNT_COLLECTION_SHEETS: ReadonlySet<number> = SPREADS_HALLOW_SHEETS;
+/** 灰烬草基座表 {633}（消费语义命名）：AshTreeGroundTest（cs:30480-30501 GrowTreeSettings
+ *  GroundTest）/IsFitToPlaceFlowerIn（cs:58247·cs:58726-58733 花 637 基座）。
+ *  ★值同语义异备案（BJ218）：≡TileID.Sets.NeedsGrassFraming（TileID.cs:369={633},
+ *  TileFrame 草式取帧门）——单值表巧合同值, vanilla 两表语义独立;收编同一值源,
+ *  本名按本仓消费语义（灰烬草种植基座）,若原版任一表扩值金标即红强制重审。 */
+export const ASH_GROUND_SHEETS: ReadonlySet<number> = new Set([633]);
+/** AshGround 内部 id 域镜像（TreePass idsByVanillaSheet(633) 平移副本收编;1 id） */
+export const ASH_GROUND_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (ASH_GROUND_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.DoesntPlaceWithTileReplacement（TileID.cs:233 全 9 型=草族+633）——
+ *  tile replacement 放置黑名单（Game 块交换 wouldTileReplacementWork 消费）。
+ *  ★值同语义异备案：PlantRules.GRASS_CONVERT_SHEETS（本仓自造放置路由域）同值
+ *  不同表,未收编照登（语义源=Player.cs:41372+ 各受理面,非原版本表）。 */
+export const DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS: ReadonlySet<number> = new Set([2, 60, 70, 109, 199, 23, 661, 662, 633]);
+/** TileID.Sets.ResetsHalfBrickPlacementAttempt（TileID.cs:181 全 33 型）——半砖锚重置
+ *  豁免族（PlaceTile 尾 cs:82039 家族;TrapsPass 放置镜像支消费） */
+export const RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS: ReadonlySet<number> = new Set([
+  2, 23, 661, 60, 70, 199, 662, 109, 477, 492, 179, 512, 180, 513, 181, 514, 182, 515,
+  183, 516, 381, 517, 534, 535, 536, 537, 539, 540, 625, 626, 627, 628, 633,
+]);
+/** TileID.Sets.Conversion.MushroomGrass（TileID.cs:16={70}） */
+export const MUSHROOM_GRASS_SHEETS: ReadonlySet<number> = new Set([70]);
+/** MushroomGrass 内部 id 域镜像（TreePass idsByVanillaSheet(70) 平移副本收编;1 id） */
+export const MUSHROOM_GRASS_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (MUSHROOM_GRASS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.OreMergesWithMud（TileID.cs:399 全 18 型=Ore(:403)∖{211 叶绿矿}）——泥并矿合并门 */
+export const ORE_MERGES_WITH_MUD_SHEETS: ReadonlySet<number> = new Set([
+  7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223,
+]);
+// ---- TouchDamage 三表（TileID.cs:385-391;stats/TouchDamage+TeleportSpotCheck 收编） ----
+/** TileID.Sets.Suffocate（TileID.cs:387 全 6 型）——埋入窒息（hurtTiles num6 缩盒 2px） */
+export const SUFFOCATE_SHEETS: ReadonlySet<number> = new Set([53, 112, 116, 123, 224, 234]);
+/** TileID.Sets.TouchDamageHot（TileID.cs:389 全 5 型）——站上灼烧（230 蜂蜜块仅 ftw） */
+export const TOUCH_HOT_SHEETS: ReadonlySet<number> = new Set([37, 58, 76, 684, 230]);
+/** TileID.Sets.TouchDamageBleeding（TileID.cs:391 全 3 型）——尖刺流血 */
+export const TOUCH_BLEEDING_SHEETS: ReadonlySet<number> = new Set([48, 232, 750]);
+/** TileID.Sets.TouchDamageDestroyTile（TileID.cs:385）语义名转出口——≡CONV_THORN_SHEETS
+ *  （Conversion.Thorn :36;BJ210 已钉同值,触碰即毁族消费面走本名） */
+export const TOUCH_DESTROY_SHEETS: ReadonlySet<number> = CONV_THORN_SHEETS;
+/** 地牢砖并集表 {41,43,44,481,482,483}=Main.tileDungeon 主三砖(Main.cs:8131-8136 前三)
+ *  ∪TileID.Sets.CrackedBricks(:183 裂纹砖)。★超集语义分名收编（BJ210 判例：值源分离
+ *  备案）——**≠** TILE_DUNGEON_SHEETS（6 项含古砖 677-679,不含 481-483）,亦≠裂纹砖
+ *  独立面;四消费面（LivingTree EXCLUDE_BRICK cs:15627-15631/DungeonDualZones
+ *  NPCSpawningFlagsForDualDungeons.cs:134-145/SceneMetrics.cs:619 计数/ExtraSpawnsRoyale
+ *  BJ187 备案 ∪ 语义）共用本表,勿与 tileDungeon 全表并轨。 */
+export const DUNGEON_UNION_CRACKED_SHEETS: ReadonlySet<number> = new Set([41, 43, 44, 481, 482, 483]);
+/** 地牢砖并集 内部 id 域镜像（SceneMetrics ids([41,43,44,481,482,483]) 平移副本收编;6 id） */
+export const DUNGEON_UNION_CRACKED_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (DUNGEON_UNION_CRACKED_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });

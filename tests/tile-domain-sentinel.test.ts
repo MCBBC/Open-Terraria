@@ -65,6 +65,17 @@ import {
   PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS,
   COMMON_SAPLING_SHEETS, COMMON_SAPLING_IDS, GETS_DESTROYED_FOR_METEORS_SHEETS,
   IS_SHAKEABLE_SHEETS, GETS_CHECKED_FOR_LEAVES_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS,
+  ICES_SNOW_SHEETS, ICES_SNOW_IDS, IS_VINE_SHEETS, VINE_THREADS_SHEETS,
+  SWAYS_IN_WIND_BASIC_SHEETS, FALLING_SHEETS, BASIC_CHEST_SHEETS,
+  CONV_CORRUPT_SHEETS, CONV_CRIMSON_SHEETS, CONV_HALLOW_SHEETS,
+  SPREADS_CORRUPTION_SHEETS, SPREADS_CRIMSON_SHEETS, SPREADS_HALLOW_SHEETS,
+  CORRUPT_BIOME_SIGHT_SHEETS, CRIMSON_BIOME_SIGHT_SHEETS, HALLOW_BIOME_SIGHT_SHEETS,
+  CORRUPT_COUNT_COLLECTION_SHEETS, CRIMSON_COUNT_COLLECTION_SHEETS, HALLOW_COUNT_COLLECTION_SHEETS,
+  ASH_GROUND_SHEETS, ASH_GROUND_IDS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS,
+  RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS, MUSHROOM_GRASS_SHEETS, MUSHROOM_GRASS_IDS,
+  ORE_MERGES_WITH_MUD_SHEETS, SUFFOCATE_SHEETS, TOUCH_HOT_SHEETS, TOUCH_BLEEDING_SHEETS,
+  TOUCH_DESTROY_SHEETS, DUNGEON_UNION_CRACKED_SHEETS, DUNGEON_UNION_CRACKED_IDS,
+  TILE_DUNGEON_SHEETS,
 } from '../src/data/tiles';
 import { canPoundTile } from '../src/world/gen/vanilla/HalfBrickPass';
 import { TILE_CUT } from '../src/core/Game';
@@ -1035,6 +1046,287 @@ describe('§6i BJ210 收编金标:TileID.cs 第三收编批(Clouds/CrackedBricks
       ['src/world/gen/vanilla/ShimmerPass.ts', 'TILE_MOSS_SHEETS'],
     ];
     it('禁复活:BJ210 收编副本字面定义签名禁入（单源别名/拷贝转出口不受影响）', () => {
+      for (const [file, sig] of FORBIDDEN) {
+        expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
+      }
+    });
+    it('防空洞正锚:每个收编文件必须仍消费 data/tiles.ts 单源名', () => {
+      for (const [file, anchor] of REQUIRED) {
+        expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
+      }
+    });
+  });
+});
+
+// ★BJ218 批变异证红记录(2026-09-20,均在验证后还原):
+//   M23 ICES_SNOW_SHEETS 漏 147(回退 Ices∪{161,163,164,200} 病灶) → §6j IcesSnow 金标红;
+//   M24 DUNGEON_UNION_CRACKED_IDS 错域回退(new Set(DUNGEON_UNION_CRACKED_SHEETS) 裸值顶替,
+//       内部 95/306/327/328/392 幻影入表) → §6j 镜像+域判别两红;
+//   M25 TrapsPass 再立 const RESETS_HALF_EXEMPT_SHEETS=new Set([2,23,…633]) 33 值副本
+//       → §6j 结构锁红(无副本可立)。
+describe('§6j BJ218 收编金标:TileID.cs 第四收编批(IcesSnow 族/纯值族/并集族/TouchDamage 三表)', () => {
+  // 2026-09-20 定谳:BJ210 登记债第二清偿——tools/_bj218-census.mjs 全仓字面副本扫描
+  //   × Terarria1457/Terraria.ID/TileID.cs 亲读对拍（1458 同行号同值零增量抽核）,
+  //   面一 IcesSnow 族 8 处/面二纯值族 ~26 处/面三并集族 4 处+TouchDamage 三表 7 处,
+  //   逐值全等后收编 data/tiles.ts 单源,消费面别名改指。值同语义异案（VineThreads≡
+  //   IsVine、Spreads*≡*BiomeSight≡*CountCollection、AshGround≡NeedsGrassFraming 单值
+  //   巧合）单一值源+语义名导出（§6i 三名同值判例）。
+  it('ICES_SNOW_SHEETS ≡ TileID.cs:297 = Ices(:293)∪Snow(:291) 全 5 项(逐值钉死;1457≡1458)', () => {
+    expect(ICES_SNOW_SHEETS.size).toBe(5);
+    expect([...ICES_SNOW_SHEETS].sort((a, b) => a - b)).toEqual([147, 161, 163, 164, 200]);
+    expect(ICES_SNOW_SHEETS.has(224)).toBe(false);   // 224=IcesSlush(:295)/雪族灌水臂(cs:64416) 异表,勿并
+    expect(ICES_SNOW_SHEETS.has(162)).toBe(false);   // 162=薄冰独立 id(TID:761),勿并
+  });
+  it('ICES_SNOW_IDS 内部域镜像 5 id 逐值钉死+读向还原', () => {
+    expect([...ICES_SNOW_IDS].sort((a, b) => a - b)).toEqual([23, 47, 393, 394, 426]);
+    for (const sh of [147, 161, 163, 164, 200]) {
+      expect(ICES_SNOW_IDS.has(TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === sh))).toBe(true);
+    }
+    for (const id of ICES_SNOW_IDS) expect(ICES_SNOW_SHEETS.has(TILE_DEFS[id].vanilla!.sheet)).toBe(true);
+  });
+  it('IS_VINE_SHEETS(:237) 全 8 项+VineThreads(:263) 同值锁(两名一值源)', () => {
+    expect(IS_VINE_SHEETS.size).toBe(8);
+    expect([...IS_VINE_SHEETS].sort((a, b) => a - b)).toEqual([52, 62, 115, 205, 382, 528, 636, 638]);
+    expect(IS_VINE_SHEETS).toBe(VINE_THREADS_SHEETS);   // TileID.cs 两表今日同值;分叉即红
+  });
+  it('SWAYS_IN_WIND_BASIC_SHEETS ≡ TileID.cs:273 全 23 项(逐值钉死)', () => {
+    expect(SWAYS_IN_WIND_BASIC_SHEETS.size).toBe(23);
+    expect([...SWAYS_IN_WIND_BASIC_SHEETS].sort((a, b) => a - b)).toEqual(
+      [3, 20, 24, 61, 71, 73, 74, 83, 84, 110, 113, 201, 227, 529, 590, 595, 615, 624, 637, 656, 700, 701, 703]);
+  });
+  it('FALLING_SHEETS ≡ TileID.cs:395 全 11 项;BASIC_CHEST_SHEETS ≡ :315={21,467}', () => {
+    expect(FALLING_SHEETS.size).toBe(11);
+    expect([...FALLING_SHEETS].sort((a, b) => a - b)).toEqual([53, 112, 116, 123, 224, 234, 330, 331, 332, 333, 495]);
+    expect(BASIC_CHEST_SHEETS.size).toBe(2);
+    expect([...BASIC_CHEST_SHEETS].sort((a, b) => a - b)).toEqual([21, 467]);
+    expect(BASIC_CHEST_SHEETS.has(88)).toBe(false);     // 梳妆台=BasicDresser(:317) 异表
+    expect(BASIC_CHEST_SHEETS.has(441)).toBe(false);    // 假箱=BasicChestFake(:317 下一行) 异表
+  });
+  it('Conversion.Corrupt(:333)/Crimson(:351)/Hallow(:341) 各全 8 项逐值钉死', () => {
+    expect(CONV_CORRUPT_SHEETS.size).toBe(8);
+    expect([...CONV_CORRUPT_SHEETS].sort((a, b) => a - b)).toEqual([23, 25, 112, 163, 398, 400, 636, 661]);
+    expect(CONV_CRIMSON_SHEETS.size).toBe(8);
+    expect([...CONV_CRIMSON_SHEETS].sort((a, b) => a - b)).toEqual([199, 200, 203, 205, 234, 399, 401, 662]);
+    expect(CONV_HALLOW_SHEETS.size).toBe(8);
+    expect([...CONV_HALLOW_SHEETS].sort((a, b) => a - b)).toEqual([109, 115, 116, 117, 164, 402, 403, 492]);
+    // 8 项基集 ⊂ 10 项 Spreads 面
+    for (const v of CONV_CORRUPT_SHEETS) expect(SPREADS_CORRUPTION_SHEETS.has(v)).toBe(true);
+    for (const v of CONV_CRIMSON_SHEETS) expect(SPREADS_CRIMSON_SHEETS.has(v)).toBe(true);
+    for (const v of CONV_HALLOW_SHEETS) expect(SPREADS_HALLOW_SHEETS.has(v)).toBe(true);
+  });
+  it('Spreads×BiomeSight×CountCollection 三名同值锁(:335/:331/:329 三族 ×10 项)', () => {
+    expect(SPREADS_CORRUPTION_SHEETS.size).toBe(10);
+    expect([...SPREADS_CORRUPTION_SHEETS].sort((a, b) => a - b)).toEqual([23, 24, 25, 32, 112, 163, 398, 400, 636, 661]);
+    expect(SPREADS_CRIMSON_SHEETS.size).toBe(10);
+    expect([...SPREADS_CRIMSON_SHEETS].sort((a, b) => a - b)).toEqual([199, 200, 201, 203, 205, 234, 352, 399, 401, 662]);
+    expect(SPREADS_HALLOW_SHEETS.size).toBe(10);
+    expect([...SPREADS_HALLOW_SHEETS].sort((a, b) => a - b)).toEqual([109, 110, 113, 115, 116, 117, 164, 402, 403, 492]);
+    expect(SPREADS_CORRUPTION_SHEETS).toBe(CORRUPT_BIOME_SIGHT_SHEETS);       // CorruptBiomeSight :331
+    expect(SPREADS_CORRUPTION_SHEETS).toBe(CORRUPT_COUNT_COLLECTION_SHEETS);  // CorruptCountCollection :329
+    expect(SPREADS_CRIMSON_SHEETS).toBe(CRIMSON_BIOME_SIGHT_SHEETS);          // CrimsonBiomeSight :349
+    expect(SPREADS_CRIMSON_SHEETS).toBe(CRIMSON_COUNT_COLLECTION_SHEETS);     // CrimsonCountCollection :347
+    expect(SPREADS_HALLOW_SHEETS).toBe(HALLOW_BIOME_SIGHT_SHEETS);            // HallowBiomeSight :339
+    expect(SPREADS_HALLOW_SHEETS).toBe(HALLOW_COUNT_COLLECTION_SHEETS);       // HallowCountCollection :337
+  });
+  it('ASH_GROUND_SHEETS={633}(值同语义异 NeedsGrassFraming 备案)+IDS 镜像 [89];MUSHROOM_GRASS={70}+IDS [310]', () => {
+    expect(ASH_GROUND_SHEETS.size).toBe(1);
+    expect([...ASH_GROUND_SHEETS]).toEqual([633]);
+    expect([...ASH_GROUND_IDS].sort((a, b) => a - b)).toEqual([89]);
+    expect(MUSHROOM_GRASS_SHEETS.size).toBe(1);
+    expect([...MUSHROOM_GRASS_SHEETS]).toEqual([70]);
+    expect([...MUSHROOM_GRASS_IDS].sort((a, b) => a - b)).toEqual([310]);
+  });
+  it('DOESNT_PLACE_WITH_TILE_REPLACEMENT(:233) 全 9 项;RESETS_HALF_BRICK(:181) 全 33 项', () => {
+    expect(DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS.size).toBe(9);
+    expect([...DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS].sort((a, b) => a - b)).toEqual(
+      [2, 23, 60, 70, 109, 199, 633, 661, 662]);
+    expect(RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS.size).toBe(33);
+    expect([...RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS].sort((a, b) => a - b)).toEqual(
+      [2, 23, 60, 70, 109, 179, 180, 181, 182, 183, 199, 381, 477, 492, 512, 513, 514, 515, 516, 517,
+        534, 535, 536, 537, 539, 540, 625, 626, 627, 628, 633, 661, 662]);
+  });
+  it('ORE_MERGES_WITH_MUD_SHEETS ≡ TileID.cs:399 全 18 项(=ORE_SHEETS ∖ {211 叶绿})', () => {
+    expect(ORE_MERGES_WITH_MUD_SHEETS.size).toBe(18);
+    expect([...ORE_MERGES_WITH_MUD_SHEETS].sort((a, b) => a - b)).toEqual(
+      [6, 7, 8, 9, 22, 37, 58, 107, 108, 111, 166, 167, 168, 169, 204, 221, 222, 223]);
+    expect(ORE_MERGES_WITH_MUD_SHEETS.has(211)).toBe(false);
+    for (const v of ORE_MERGES_WITH_MUD_SHEETS) expect(ORE_SHEETS.has(v)).toBe(true);
+  });
+  it('TouchDamage 三表(:387/:389/:391) 逐值钉死+DestroyTile(:385≡CONV_THORN) 转出口锁', () => {
+    expect(SUFFOCATE_SHEETS.size).toBe(6);
+    expect([...SUFFOCATE_SHEETS].sort((a, b) => a - b)).toEqual([53, 112, 116, 123, 224, 234]);
+    expect(TOUCH_HOT_SHEETS.size).toBe(5);
+    expect([...TOUCH_HOT_SHEETS].sort((a, b) => a - b)).toEqual([37, 58, 76, 230, 684]);
+    expect(TOUCH_BLEEDING_SHEETS.size).toBe(3);
+    expect([...TOUCH_BLEEDING_SHEETS].sort((a, b) => a - b)).toEqual([48, 232, 750]);
+    expect(TOUCH_DESTROY_SHEETS).toBe(CONV_THORN_SHEETS);   // Conversion.Thorn(:36)≡TouchDamageDestroyTile(:385) 同值(BJ210 钉)
+    expect(TOUCH_DESTROY_SHEETS.has(230)).toBe(false);      // HOT 灼烧面不混 TOUCH_DESTROY
+  });
+  it('DUNGEON_UNION_CRACKED 并集 6 项+IDS 镜像 6 id+与 tileDungeon 全表/CrackedBricks 关系锁(勿并轨)', () => {
+    expect(DUNGEON_UNION_CRACKED_SHEETS.size).toBe(6);
+    expect([...DUNGEON_UNION_CRACKED_SHEETS].sort((a, b) => a - b)).toEqual([41, 43, 44, 481, 482, 483]);
+    expect([...DUNGEON_UNION_CRACKED_IDS].sort((a, b) => a - b)).toEqual([95, 292, 306, 327, 328, 392]);
+    expect(DUNGEON_UNION_CRACKED_SHEETS.has(677)).toBe(false);   // 古砖 677-679 只在 tileDungeon 全表,不在并集
+    for (const v of CRACKED_BRICKS_SHEETS) expect(DUNGEON_UNION_CRACKED_SHEETS.has(v)).toBe(true);
+    for (const v of [41, 43, 44]) {
+      expect(TILE_DUNGEON_SHEETS.has(v)).toBe(true);
+      expect(DUNGEON_UNION_CRACKED_SHEETS.has(v)).toBe(true);
+    }
+    expect(DUNGEON_UNION_CRACKED_SHEETS).not.toBe(TILE_DUNGEON_SHEETS);   // 两表独立(超集语义分名,BJ187 备案)
+    for (const v of [677, 678, 679]) expect(DUNGEON_UNION_CRACKED_SHEETS.has(v)).toBe(false);
+  });
+  it('域判别(错域回退即红):IcesSnow/并集/灰烬草/蘑菇草/BasicChest 五组掩蔽对', () => {
+    // IcesSnow: 内部 23(=sheet 147 雪)∈IDS;sheet 23(腐草)∉SHEETS;内部 161(=sheet 23)∉IDS
+    expect(ICES_SNOW_IDS.has(23)).toBe(true);
+    expect(ICES_SNOW_SHEETS.has(23)).toBe(false);
+    expect(ICES_SNOW_IDS.has(161)).toBe(false);
+    // DUNGEON_UNION: 内部 95(=sheet 481 裂砖)∈IDS;内部 481(sheet 328 彩带)∉;sheet 95∉
+    expect(DUNGEON_UNION_CRACKED_IDS.has(95)).toBe(true);
+    expect(DUNGEON_UNION_CRACKED_IDS.has(481)).toBe(false);
+    expect(DUNGEON_UNION_CRACKED_SHEETS.has(95)).toBe(false);
+    expect(DUNGEON_UNION_CRACKED_SHEETS.has(41)).toBe(true);
+    // ASH_GROUND: 内部 89(=sheet 633 灰烬草)∈IDS;sheet 89∉
+    expect(ASH_GROUND_IDS.has(89)).toBe(true);
+    expect(ASH_GROUND_SHEETS.has(89)).toBe(false);
+    // MUSHROOM_GRASS: 内部 310(=sheet 70 蘑菇草)∈IDS;内部 70(sheet 3 草)∉
+    expect(MUSHROOM_GRASS_IDS.has(310)).toBe(true);
+    expect(MUSHROOM_GRASS_IDS.has(70)).toBe(false);
+    expect(MUSHROOM_GRASS_SHEETS.has(310)).toBe(false);
+    // BASIC_CHEST: sheet 21∈;内部 16(§6 同案 T.CHEST)∉
+    expect(BASIC_CHEST_SHEETS.has(21)).toBe(true);
+    expect(BASIC_CHEST_SHEETS.has(16)).toBe(false);
+  });
+  it('双域平移性质:被收编镜像对全 defs 对拍(键域契约无漏无多)', () => {
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      const sh = TILE_DEFS[i]?.vanilla?.sheet ?? -1;
+      expect(ICES_SNOW_IDS.has(i)).toBe(ICES_SNOW_SHEETS.has(sh));
+      expect(DUNGEON_UNION_CRACKED_IDS.has(i)).toBe(DUNGEON_UNION_CRACKED_SHEETS.has(sh));
+      expect(ASH_GROUND_IDS.has(i)).toBe(ASH_GROUND_SHEETS.has(sh));
+      expect(MUSHROOM_GRASS_IDS.has(i)).toBe(MUSHROOM_GRASS_SHEETS.has(sh));
+    }
+  });
+  describe('§6j 结构锁:BJ218 收编副本禁复活（字节签名禁入+防空洞正锚）', () => {
+    const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+    const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+    const F = (name: string) => new RegExp(`\\b${name}\\s*=\\s*new\\s+Set`);
+    const S256LIT = (name: string) => new RegExp(`\\b${name}\\s*=\\s*S256\\(\\s*\\[\\s*\\d`);
+    const IDSV = (name: string) => new RegExp(`\\b${name}\\s*=\\s*idsByVanillaSheet\\(`);
+    const FORBIDDEN: Array<[string, RegExp, string]> = [
+      // 面一 IcesSnow(8)
+      ['src/render/TileMergeFamily.ts', F('ICES_SNOW'), 'ICES_SNOW_SHEETS'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_ICES_SNOW'), 'S256([...ICES_SNOW_SHEETS])'],
+      ['src/world/evolution/WorldEvolution.ts', F('SNOW_FAMILY'), 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', F('PILE_SNOW_OK'), 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/HiveSpiderPass.ts', /new Set\(\s*\[\s*147,\s*161/, 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/ShimmerPass.ts', F('ICE_FAM'), 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', /idsByVanillaSheet\(\s*78,\s*380,\s*147/, 'idsByVanillaSheet(78,380,...ICES_SNOW_SHEETS)'],
+      ['src/world/gen/vanilla/StructuresPass.ts', /idsByVanillaSheet\(\s*147,\s*163/, 'idsByVanillaSheet(...ICES_SNOW_SHEETS)'],
+      ['src/world/gen/vanilla/WaterIcePasses.ts', F('SNOW_OR_ICE'), 'ICES_SNOW_SHEETS'],
+      // 面二 IsVine/SwaysInWindBasic/Falling/BasicChest(16)
+      ['src/core/Game.ts', F('VINE_SHEETS'), 'IS_VINE_SHEETS'],
+      ['src/core/Game.ts', F('GRASS_WINDY_SHEETS'), 'SWAYS_IN_WIND_BASIC_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('IS_VINE'), 'IS_VINE_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('IS_VINE'), 'IS_VINE_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('IS_VINE'), 'IS_VINE_SHEETS'],
+      ['src/render/WindSway.ts', F('SWAYS_IN_WIND_BASIC'), 'SWAYS_IN_WIND_BASIC_SHEETS'],
+      ['src/render/WindSway.ts', F('VINE_THREADS'), 'VINE_THREADS_SHEETS'],
+      ['src/entities/FallingBlock.ts', F('FALLING_SHEET_SET'), 'FALLING_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', F('FALLING_SHEETS'), 'FALLING_SHEETS import'],
+      ['src/world/gen/vanilla/DungeonPass.ts', F('E137_FALLING'), 'FALLING_SHEETS'],
+      ['src/render/TileHighlight.ts', F('BASIC_CHEST'), 'BASIC_CHEST_SHEETS'],
+      ['src/world/Housing.ts', F('BASIC_CHEST'), 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/BuriedChestsPass.ts', F('KILL_SURVIVE_CHEST_SHEETS'), 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/DungeonEarlyFeatures.ts', F('DE_BASIC_CHEST_SHEET'), 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', F('BASIC_CHEST_S'), 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('CHEST_SHEETS'), 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('CHEST_SHEETS'), 'BASIC_CHEST_SHEETS'],
+      // 面二 Corrupt/Crimson/Hallow/Spreads/CountCollection(6)
+      ['src/world/gen/vanilla/HardmodePass.ts', F('SET_CORRUPT'), 'CONV_CORRUPT_SHEETS'],
+      ['src/world/gen/vanilla/HardmodePass.ts', F('SET_HALLOW'), 'CONV_HALLOW_SHEETS'],
+      ['src/world/gen/vanilla/HardmodePass.ts', F('SET_CRIMSON'), 'CONV_CRIMSON_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('SET_CORRUPT'), 'CONV_CORRUPT_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', F('SET_CRIMSON'), 'CONV_CRIMSON_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('SPREADS_CORRUPTION'), 'SPREADS_CORRUPTION_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('SPREADS_CRIMSON'), 'SPREADS_CRIMSON_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('SPREADS_HALLOW'), 'SPREADS_HALLOW_SHEETS'],
+      ['src/world/WorldAlignment.ts', F('CORRUPT'), 'CORRUPT_COUNT_COLLECTION_SHEETS'],
+      ['src/world/WorldAlignment.ts', F('HALLOW'), 'HALLOW_COUNT_COLLECTION_SHEETS'],
+      ['src/world/WorldAlignment.ts', F('CRIMSON'), 'CRIMSON_COUNT_COLLECTION_SHEETS'],
+      // 面二 AshGround/MushroomGrass/OreMergesWithMud/DoesntPlace/Resets(10)
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', F('ASH_TREE_GROUND'), 'ASH_GROUND_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('ASH_TREE_GROUND'), 'ASH_GROUND_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', F('CONV_MUSHROOM_GRASS'), 'MUSHROOM_GRASS_SHEETS'],
+      ['src/world/gen/vanilla/TreePass.ts', IDSV('MUSHROOM_GRASS'), 'MUSHROOM_GRASS_IDS'],
+      ['src/world/gen/vanilla/TreePass.ts', IDSV('ASH_GROUND'), 'ASH_GROUND_IDS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', /637:\s*new Set\(\s*\[\s*633/, 'ASH_GROUND_SHEETS'],
+      ['src/world/evolution/PlantRules.ts', /637:\s*new Set\(\s*\[\s*633/, 'ASH_GROUND_SHEETS'],
+      ['src/render/VanillaFraming.ts', S256LIT('ORE_MERGES_WITH_MUD'), 'S256([...ORE_MERGES_WITH_MUD_SHEETS])'],
+      ['src/core/Game.ts', F('BLOCK_SWAP_DOESNT_PLACE_SHEETS'), 'DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', F('RESETS_HALF_EXEMPT_SHEETS'), 'RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS'],
+      // 面三 tileDungeon∪Cracked 并集(4)+TouchDamage 三表(7)
+      ['src/world/gen/vanilla/LivingTreePass.ts', F('EXCLUDE_BRICK'), 'DUNGEON_UNION_CRACKED_SHEETS'],
+      ['src/world/DungeonDualZones.ts', /\[\s*41,\s*43,\s*44,\s*481,\s*482,\s*483\s*\]\.includes/, 'DUNGEON_UNION_CRACKED_SHEETS.has'],
+      ['src/world/SceneMetrics.ts', /\bDUNGEON_TILES\s*=\s*ids\(/, 'DUNGEON_UNION_CRACKED_IDS'],
+      ['src/world/spawn/ExtraSpawnsRoyale.ts', F('TILE_DUNGEON_SHEETS'), 'DUNGEON_UNION_CRACKED_SHEETS 别名'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', F('SHEET_SUFFOCATE'), 'SUFFOCATE_SHEETS'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', F('SHEET_TOUCH_BLEEDING'), 'TOUCH_BLEEDING_SHEETS'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', F('SHEET_TOUCH_HOT'), 'TOUCH_HOT_SHEETS'],
+      ['src/stats/TouchDamage.ts', /setOf\(\s*\[\s*48,\s*232/, 'setOf([...TOUCH_BLEEDING_SHEETS])'],
+      ['src/stats/TouchDamage.ts', /setOf\(\s*\[\s*37,\s*58/, 'setOf([...TOUCH_HOT_SHEETS])'],
+      ['src/stats/TouchDamage.ts', /setOf\(\s*\[\s*53,\s*112,\s*116,\s*123/, 'setOf([...SUFFOCATE_SHEETS])'],
+      ['src/stats/TouchDamage.ts', /setOf\(\s*\[\s*32,\s*69,\s*352/, 'setOf([...TOUCH_DESTROY_SHEETS])'],
+    ];
+    const REQUIRED: Array<[string, string]> = [
+      ['src/render/TileMergeFamily.ts', 'ICES_SNOW_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'ICES_SNOW_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'ORE_MERGES_WITH_MUD_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'ICES_SNOW_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'IS_VINE_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'SPREADS_CORRUPTION_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/HiveSpiderPass.ts', 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/ShimmerPass.ts', 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/StructuresPass.ts', 'ICES_SNOW_SHEETS'],
+      ['src/world/gen/vanilla/WaterIcePasses.ts', 'ICES_SNOW_SHEETS'],
+      ['src/core/Game.ts', 'SWAYS_IN_WIND_BASIC_SHEETS'],
+      ['src/core/Game.ts', 'IS_VINE_SHEETS'],
+      ['src/core/Game.ts', 'DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS'],
+      ['src/core/Game.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/render/WindSway.ts', 'SWAYS_IN_WIND_BASIC_SHEETS'],
+      ['src/render/WindSway.ts', 'VINE_THREADS_SHEETS'],
+      ['src/entities/FallingBlock.ts', 'FALLING_SHEETS'],
+      ['src/world/gen/vanilla/FinalSeedCleanupPass.ts', 'ASH_GROUND_SHEETS'],
+      ['src/world/gen/vanilla/DungeonPass.ts', 'FALLING_SHEETS'],
+      ['src/render/TileHighlight.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/world/Housing.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/BuriedChestsPass.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/DungeonEarlyFeatures.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'MUSHROOM_GRASS_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'ASH_GROUND_SHEETS'],
+      ['src/world/gen/vanilla/SecretSeedDoEndsPass.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', 'BASIC_CHEST_SHEETS'],
+      ['src/world/gen/vanilla/TrapsPass.ts', 'RESETS_HALF_BRICK_PLACEMENT_ATTEMPT_SHEETS'],
+      ['src/world/gen/vanilla/HardmodePass.ts', 'CONV_CORRUPT_SHEETS'],
+      ['src/world/gen/vanilla/HardmodePass.ts', 'CONV_HALLOW_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'CONV_CORRUPT_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'IS_VINE_SHEETS'],
+      ['src/world/gen/vanilla/SurfaceDecorPasses.ts', 'ASH_GROUND_SHEETS'],
+      ['src/world/evolution/PlantRules.ts', 'ASH_GROUND_SHEETS'],
+      ['src/world/gen/vanilla/TreePass.ts', 'MUSHROOM_GRASS_IDS'],
+      ['src/world/gen/vanilla/TreePass.ts', 'ASH_GROUND_IDS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'IS_VINE_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'ASH_GROUND_SHEETS'],
+      ['src/world/gen/vanilla/LivingTreePass.ts', 'DUNGEON_UNION_CRACKED_SHEETS'],
+      ['src/world/DungeonDualZones.ts', 'DUNGEON_UNION_CRACKED_SHEETS'],
+      ['src/world/SceneMetrics.ts', 'DUNGEON_UNION_CRACKED_IDS'],
+      ['src/world/spawn/ExtraSpawnsRoyale.ts', 'DUNGEON_UNION_CRACKED_SHEETS'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', 'SUFFOCATE_SHEETS'],
+      ['src/world/gen/vanilla/TeleportSpotCheck.ts', 'TOUCH_HOT_SHEETS'],
+      ['src/stats/TouchDamage.ts', 'TOUCH_BLEEDING_SHEETS'],
+      ['src/world/WorldAlignment.ts', 'COUNT_COLLECTION_SHEETS'],
+    ];
+    it('禁复活:BJ218 收编副本字面定义签名禁入（单源别名/拷贝转出口不受影响）', () => {
       for (const [file, sig] of FORBIDDEN) {
         expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
       }
