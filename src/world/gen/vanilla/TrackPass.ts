@@ -30,7 +30,7 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, FORBIDS_SLOPING_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_A_CONTAINER_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, FORBIDS_SLOPING_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_A_CONTAINER_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, GENERAL_PLACEMENT_TILES_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
@@ -265,10 +265,10 @@ const INVALID_TILES_1456 = idsByVanillaSheet(
   383, 384, 15, 304, 30, 321, 245, 246, 240, 241, 242, 16, 34, 158, 377, 94, 10, 19, 86, 219,
   484, 190, 664, 665, 41, 43, 44, 226, 237, 711, 712, 713, 714, 715, 716, 379, 314);
 const INVALID_TILES_1457_EXTRA = idsByVanillaSheet(141, 411, 21, 467, 88);
-/** TileID.Sets.GeneralPlacementTiles = false 全集(TileID.cs:311,default true) */
-const PLACEMENT_BLOCKED = idsByVanillaSheet(
-  225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70, 151, 21, 31, 696, 467, 12, 665, 639,
-  138, 664, 711, 712, 713, 714, 715, 716);
+/** TileID.Sets.GeneralPlacementTiles = false 全集(TileID.cs:311,default true)
+ *  ——★BJ221 收编单源 data/tiles.ts:GENERAL_PLACEMENT_TILES_IDS（内部 id 域,
+ *  与旧 idsByVanillaSheet 平移副本逐值全等,§6k） */
+const PLACEMENT_BLOCKED = GENERAL_PLACEMENT_TILES_IDS;
 /** KillTile 豁免格(cs:111 `type != 379`)与压板探测(cs:107 `type == 135`) */
 const BUBBLE = idsByVanillaSheet(379);
 const PLATE = idsByVanillaSheet(135);

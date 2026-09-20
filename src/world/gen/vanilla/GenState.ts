@@ -2,7 +2,7 @@
 // 105 个 pass 按序读写,顺序不可调换。
 import type { SeedFlags } from '../SeedEasterEggs';
 import type { TileStore } from '../../TileStore';
-import { TILE_DEFS } from '../../../data/tiles';
+import { TILE_DEFS, GENERAL_PLACEMENT_TILES_SHEETS } from '../../../data/tiles';
 
 export interface GenState {
   // 世界常量（Reset / Terrain pass 输出）
@@ -255,8 +255,7 @@ export function wgNpcBlocksEmptyTile(gs: GenState, x: number, y: number): boolea
  *  重载（cs:21）默认用它做内容扫描。此处为**内部 id 换算集**（vanilla.sheet → 数组
  *  下标,同 sheet 多内部键全收；陷阱先例 ignoreID 双空间——黑名单是原版 id,拿内部
  *  type 直接比对必错）。 */
-const GENERAL_PLACEMENT_SHEETS = new Set([225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70,
-  151, 21, 31, 696, 467, 12, 665, 639, 138, 664, 711, 712, 713, 714, 715, 716]);
+const GENERAL_PLACEMENT_SHEETS = GENERAL_PLACEMENT_TILES_SHEETS;   // TileID.cs:311——★BJ221 收编单源 data/tiles.ts（§6k）
 export const GENERAL_PLACEMENT_FORBID = new Set<number>();
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;

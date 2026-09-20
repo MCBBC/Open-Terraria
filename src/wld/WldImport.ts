@@ -6,7 +6,7 @@ import { furnitureSlotCount, type FurnitureKind } from '../world/FurnitureItems'
 import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { CHEST_MAX_ITEMS } from '../world/World';
-import { TILE_BY_KEY, T, TILE_DEFS, TILE_STABLE_OF_INTERNAL, PLATFORMS_SHEETS, IS_A_CONTAINER_SHEETS } from '../data/tiles';
+import { TILE_BY_KEY, T, TILE_DEFS, TILE_STABLE_OF_INTERNAL, PLATFORMS_SHEETS, IS_A_CONTAINER_SHEETS, NON_SOLID_SAVE_SLOPES_SHEETS } from '../data/tiles';
 import { ITEM_BY_KEY, ITEM_STABLE_OF_INTERNAL, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { translateSeed } from '../core/rng';
 // ★IIIIIII18 F-1：导入路径统一走与新创建世界相同的 seed 解析层——
@@ -423,8 +423,9 @@ const TILE_MAP: Record<number, MapEntry> = {
 /** TileID.Sets.SaveSlopes 门禁的非 solid 例外（TileID.cs:179/425-428：
  *  SaveSlopes = tileSolid ∪ {131,351,336,340,342,341,343,344}）。
  *  WorldFile.cs:2623 加载端只对 SaveSlopes 内的类型应用 half/slope——
- *  其余类型的 bits 4-6 直接丢弃（防止家具/装饰类杂波帧被切条/裁剪） */
-const NON_SOLID_SAVE_SLOPES = new Set([131, 351, 336, 340, 342, 341, 343, 344]);
+ *  其余类型的 bits 4-6 直接丢弃（防止家具/装饰类杂波帧被切条/裁剪）
+ *  ★BJ221 收编单源 data/tiles.ts:NON_SOLID_SAVE_SLOPES_SHEETS（sheet 域,§6k） */
+const NON_SOLID_SAVE_SLOPES = NON_SOLID_SAVE_SLOPES_SHEETS;
 
 /** 原版 Main.tileSolid 为 true 的平台族（Main.cs:8032 / 10117-10120 / 10123-10127：
  *  19 平台 + 427 竞技场平台 + 435-439 五色队伍平台）——vanilla SaveSlopes

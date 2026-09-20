@@ -16,7 +16,7 @@
 //     基础箱每只 −30 / 正上列每格 −15（均floor到 1）；
 //   ⑤ 落位校验：地板格与上方 1-3 格都在房内（Housing_CheckIfInRoom）；
 //   ⑥ 取严格大于的最高分（同分先扫者胜：j 从房顶向下、i 从左向右）。
-import { T, TILE_DEFS, BASIC_CHEST_SHEETS } from '../data/tiles';
+import { T, TILE_DEFS, BASIC_CHEST_SHEETS, HOUSING_WALLS_SHEETS, IGNORED_IN_HOUSE_SCORE_SHEETS } from '../data/tiles';
 import type { TileStore } from './TileStore';
 
 /** Main.wallHouse 全表（Main.cs `wallHouse[n] = true` 逐条提取；自然墙全部不在内）
@@ -258,8 +258,9 @@ export function dedupeHomes<C extends HomeClaim>(
 const MAX_TILES = 750;
 const MAX_ROOM_SPAN = 100;
 const MIN_TILES = 60;
-/** TileID.Sets.HousingWalls（TileID.cs:377）：栅栏 11 / 高门 386 / 389 */
-const HOUSING_WALL_TILES = new Set([11, 386, 389]);
+/** TileID.Sets.HousingWalls（TileID.cs:381，旧注 :377 系行号漂移）：栅栏 11 / 高门 386 / 389
+ *  ——★BJ221 收编单源 data/tiles.ts:HOUSING_WALLS_SHEETS（§6k） */
+const HOUSING_WALL_TILES = HOUSING_WALLS_SHEETS;
 
 // ================= 臭虫否决件（★★对抗修复批④2026-09-01 C-F5） =================
 /** CheckRoom 命中置位面（WorldGen.cs:6128-6137）：630 臭虫封锁块 / 631 幽灵臭虫
@@ -280,8 +281,9 @@ const EVIL_CORRUPT = new Set([23, 24, 25, 32, 112, 163, 400, 398]);
 const EVIL_CRIMSON = new Set([199, 203, 200, 401, 399, 234, 352]);
 const EVIL_HALLOW = new Set([109, 110, 113, 117, 116, 164, 403, 402]);
 const SUNFLOWER_SHEET = 27;
-/** TileID.Sets.IgnoredInHouseScore（TileID.cs:411）：头顶扫描忽略项 */
-const IGNORED_IN_HOUSE_SCORE = new Set([4, 3, 73, 82, 83, 84, 386]);
+/** TileID.Sets.IgnoredInHouseScore（TileID.cs:415，旧注 :411 系行号漂移）：头顶扫描忽略项
+ *  ——★BJ221 收编单源 data/tiles.ts:IGNORED_IN_HOUSE_SCORE_SHEETS（§6k） */
+const IGNORED_IN_HOUSE_SCORE = IGNORED_IN_HOUSE_SCORE_SHEETS;
 /** TileID.Sets.BasicChest（TileID.cs:315）——★BJ218 收编单源（§6j） */
 const BASIC_CHEST = BASIC_CHEST_SHEETS;
 /** ScoreRoom_CanBeHomeSpot（WorldGen.cs:5967-5978）：boulder 379 不可作家 */

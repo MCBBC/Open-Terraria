@@ -10,7 +10,9 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { blockBelowMakesSandFall } from './FallingBlock';   // ★④ BBMSF 单源（掉落/沙族批 2026-09-04）
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, VANILLA_TILE_ID } from '../data/tiles';
-import { prefetchProjectiles, BULLET_KILL_SFX } from './Arrow';
+import { prefetchProjectiles, BULLET_KILL_SFX, projFrameCount } from './Arrow';
+// ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360）——Dart 载体弹接入（573/811/814）
+import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -1105,6 +1107,20 @@ export class Dart extends Entity {
    *  位锁）/ 424 预言者→573 蓄能弹（:32087 蓄能期宿主死→立即对最近玩家齐射 +
    *  目标继承）。0 = 无绑定（默认，其余发射点原版就不传） */
   ownerNpcId = 0;
+  /** ★BJ219 通用 oldPos 残影环（TrailingMode 表驱动;undefined=未初始化/null=无记录式）。
+   *  Dart 载体活动集=573 星云弹/811 血弹/814 血鹦鹉螺弹（TrailingMode 全 0,cap 10）。
+   *  ai 依赖档（811 ai0 白染预混）以 0 档承载=与 DART_STYLE 811 注 Remap 恒下端同相。 */
+  ghostRing?: ProjGhostRing | null;
+  private subIsHead = false;
+  /** 记录位=dartStep/oracleOrbStep 尾（位移后;原版 UpdateTrails :17198=Damage 后同序。
+   *  命中杀拍 dartStep 内 dead=true 时仍记一段=原版 Damage 杀弹仍记录同相,撞块杀弹
+   *  原版不记——本仓两种杀共用 dead 位,1 子步粒度偏差登记） */
+  recordGhostTrail(): void {
+    if (this.ghostRing === undefined) {
+      this.ghostRing = projTrailingMode(this.projId) >= 0 ? new ProjGhostRing(this.projId) : null;
+    }
+    this.ghostRing?.record(this.x, this.y, this.rot, this.dir || 1, this.subIsHead);
+  }
   /** 537 激光束长 Lerp 值（原版 localAI[1]，LaserScan→0.5/t Lerp） */
   private beamLen = 0;
   /** 299 暗影焰 localAI[0] 镜像（子步计数:第 6 子步爆发、>6 起尾尘,P.cs:57611-57637） */
@@ -1170,6 +1186,23 @@ export class Dart extends Entity {
     }
     // 299 暗影焰:贴图 1×1 官方空桩,纯尘埃视觉(AI_001 :53759 尘 181 尾)——不画本体
     if (st.noTex) return;
+    // ★BJ219 残影（原版残影块先于本体绘制段）——573/811/814（ghostRing 无记录式=短路）
+    if (this.ghostRing) {
+      const gimg = projSprite(this.projId);
+      if (gimg && gimg.width > 0) {
+        drawProjGhosts(ctx, {
+          ring: this.ghostRing, id: this.projId, tex: gimg,
+          frames: projFrameCount(this.projId), frame: this.frame,
+          bodyW: this.w, bodyH: this.h, bodyRot: this.rot, bodyScale: this.scale,
+          bodyAlpha: this.netPuppet ? 1 : Math.max(0, 1 - this.alpha / 255),
+          ai0: 0, ai1: 0,
+          timeLeft: this.life,
+          opacity: Math.max(0, Math.min(1, 1 - this.alpha / 255)),
+          vxLen: Math.hypot(this.vx, this.vy),
+          spriteDirection: this.dir || 1,
+        });
+      }
+    }
     // DrawProjDirect 轨迹支绘前白化（Main.cs:30068 projectileColor=Lighting.GetColor
     //  格光色 → :30841-30856 Lerp(projectileColor,White,k)）：811 k≡1.0（Remap(ai[0])
     //  恒下端,见 DART_STYLE 811 注）/ 814 k=0.35 常数。per-type filter 在此处一次算好;
@@ -1279,7 +1312,7 @@ export class Dart extends Entity {
     // G3 宿主绑定弹：537 观星者激光（aiStyle84）/ 573 预言者蓄能弹（aiStyle102）
     // ——专用步进（AI/寿命/命中面全独立：束线段判定 / 蓄能-齐射态机），不走通用 dartStep
     if (this.projId === 537) { this.stargazerBeamStep(game); return; }
-    if (this.projId === 573) { this.oracleOrbStep(game); return; }
+    if (this.projId === 573) { this.oracleOrbStep(game); if (!this.dead) this.recordGhostTrail(); return; }
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     if (--this.life <= 0) {
       if (st?.rocket) this.rocketKill(game);
@@ -1308,7 +1341,11 @@ export class Dart extends Entity {
     if (this.age === 0 && st.sfx) game.playSfxFiles(st.sfx, 0.8, this.cx, this.cy);
     // extraUpdates:原版每 tick 跑 1+extraUpdates 次完整 AI+位移(302 狙击 ×8 = 弹速 4→32px/t 的来源)
     const sub = 1 + (st.updates ?? 0);
-    for (let i = 0; i < sub && !this.dead; i++) this.dartStep(game, st);
+    for (let i = 0; i < sub && !this.dead; i++) {
+      this.subIsHead = i === 0;
+      this.dartStep(game, st);
+      this.recordGhostTrail();
+    }
   }
 
   /** 单次原版更新（AI 重力/旋转/alpha/拖尾 + 位移 + 命中） */

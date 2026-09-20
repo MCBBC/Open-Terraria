@@ -15,9 +15,11 @@
 import { TILE } from '../core/constants';
 import type { TileStore } from '../world/TileStore';
 import { sheetOf } from './SmartCursor';
+import { CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS } from '../data/tiles';
 
-/** 可坐 tile sheet 全集（CanBeSatOnForPlayers：15/497/89/102/487） */
-export const SITTABLE_SHEETS = new Set([15, 497, 89, 102, 487]);
+/** 可坐 tile sheet 全集（TileID.Sets.CanBeSatOnForPlayers TileID.cs:213：15/497/89/102/487）
+ *  ★BJ221 收编单源 data/tiles.ts:CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS（转出口别名,§6k） */
+export const SITTABLE_SHEETS = CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS;
 
 /** ExtraSeatInfo.IsAToilet（Helper case 15/497：马桶帧档） */
 export interface SittingTarget {

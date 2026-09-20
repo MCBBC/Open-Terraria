@@ -1,6 +1,6 @@
 // 分轴扫描 tile AABB 碰撞
 import { TILE, GRAVITY } from '../core/constants';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, IGNORED_BY_NPC_STEP_UP_SHEETS } from '../data/tiles';
 import type { World } from '../world/World';
 
 // ★BJ94 D2（2026-09-16 渲染性能域分配普查）：applyStepUp 每调重建的【内容恒定】Set
@@ -10,8 +10,9 @@ import type { World } from '../world/World';
 // ★不挂 ?swperf 闸的判据：本提升属字面量外提级零语义（无任何行为面可回退），
 //   而挂闸需 physics→render 的 perfFlags 交叉 import（本文件现有依赖仅
 //   core/data/world）——为不新开层间边而保持无闸；与 Game.ts 挂闸三表判据分列。
-/** IgnoredByNpcStepUp（TileID.cs:209：14 篝火桌?/469 Tables2/18 工作台/16 铁砧/134 秘银砧——NPC 不踏） */
-export const NPC_STEPUP_IGNORE = new Set([14, 469, 18, 16, 134]);
+/** IgnoredByNpcStepUp（TileID.cs:209：14 篝火桌?/469 Tables2/18 工作台/16 铁砧/134 秘银砧——NPC 不踏）
+ *  ★BJ221 收编单源 data/tiles.ts:IGNORED_BY_NPC_STEP_UP_SHEETS（sheet 域转出口别名,§6k） */
+export const NPC_STEPUP_IGNORE = IGNORED_BY_NPC_STEP_UP_SHEETS;
 
 export interface Body {
   x: number; y: number;       // 左上角（px）

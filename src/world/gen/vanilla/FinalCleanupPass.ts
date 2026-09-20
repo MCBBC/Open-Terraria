@@ -37,7 +37,7 @@
 import { LIQUID_TYPE, TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_IDS, CRACKED_BRICKS_SHEETS, MOSS_SHEETS, CONV_SAND_IDS, IS_VINE_SHEETS, ASH_GROUND_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_SHEETS, TILE_CUT_SHEETS, BOULDERS_SHEETS, BOULDERS_IDS, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, NOT_REALLY_SOLID_SHEETS, TILE_TABLE_SHEETS, SOLID_TOP_SHEETS, TILE_DUNGEON_SHEETS, TILE_DUNGEON_IDS, WALL_DUNGEON_SHEETS, CLOUDS_IDS, CLOUDS_SHEETS, CRACKED_BRICKS_IDS, CRACKED_BRICKS_SHEETS, MOSS_SHEETS, CONV_SAND_IDS, IS_VINE_SHEETS, ASH_GROUND_SHEETS, PAINTINGS_IDS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
@@ -89,8 +89,9 @@ const SAND_FALL_BASE = new Map<number, number>([
 /** TileID.Sets.Clouds(1456 TileID.cs:197)——★BJ210 收编单源 data/tiles.ts:CLOUDS_IDS
  *  （内部 id 域,与旧 idsByVanillaSheet 平移副本逐值全等,tests/tile-domain-sentinel §6i） */
 const CLOUDS = CLOUDS_IDS;
-/** TileID.Sets.Paintings(1456 TileID.cs:187) */
-const PAINTINGS = idsByVanillaSheet(245, 246, 240, 241, 242);
+/** TileID.Sets.Paintings(1456 TileID.cs:187)——★BJ221 收编单源 data/tiles.ts:
+ *  PAINTINGS_IDS（内部 id 域,与旧 idsByVanillaSheet 平移副本逐值全等,§6k） */
+const PAINTINGS = PAINTINGS_IDS;
 /** Main.wallDungeon(Main.cs:10734-10745)——★BJ187 收编 data/tiles.ts:
  *  WALL_DUNGEON_SHEETS 单源（9 项逐值全等） */
 const WALL_DUNGEON = WALL_DUNGEON_SHEETS;

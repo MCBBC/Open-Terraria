@@ -125,9 +125,11 @@ describe('★BJ94 D2 Set 分配消减', () => {
     expect(g).toContain('const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 23, 780]);');
     expect(g).toContain('const WATER_TORCH_ITEMS = swPerf ? BJ94_WATER_TORCH_ITEMS : new Set([523, 1333, 4384]);');
     const tc = src('../src/physics/TileCollision.ts');
-    // 模块级唯一构造点；函数体内旧构造已移除（applyStepUp 每调 new 不复存在）
-    expect(tc.split('new Set([14, 469, 18, 16, 134])').length - 1).toBe(1);
-    expect(tc).toContain('export const NPC_STEPUP_IGNORE = new Set([14, 469, 18, 16, 134]);');
+    // 模块级唯一构造点；函数体内旧构造已移除（applyStepUp 每调 new 不复存在）。
+    // ★BJ221（2026-09-20）升级为 data/tiles.ts 单源转出口别名：模块级单例意图不变,
+    //   字面 new 从本文件消失（值面由 tile-domain-sentinel §6k IGNORED_BY_NPC_STEP_UP 金标钉死）
+    expect(tc.split('new Set([14, 469, 18, 16, 134])').length - 1).toBe(0);
+    expect(tc).toContain('export const NPC_STEPUP_IGNORE = IGNORED_BY_NPC_STEP_UP_SHEETS;');
   });
 
   it('TileShine planShineWork：flag 关=每次 1 次 Set 构造（现行行为）;flag 开热路径零构造;输出 off/on 逐位一致', () => {

@@ -39,7 +39,7 @@
 //     （Convert_ActuallyConvertTorch）已随各 case 全链接入
 import type { TileStore } from '../TileStore';
 import { getTreeTypeAndTreeBottom, TreeTypes } from '../TreeShake';   // ★⑤ 掉落族批：树底/树型单源
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS, CONV_SNOW_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, GETS_CHECKED_FOR_LEAVES_SHEETS, IS_VINE_SHEETS, SPREADS_CORRUPTION_SHEETS, SPREADS_CRIMSON_SHEETS, SPREADS_HALLOW_SHEETS, ICES_SNOW_SHEETS } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, IS_A_TREE_TRUNK_SHEETS, PLATFORMS_SHEETS, CONV_JUNGLE_GRASS_SHEETS, CONV_GRASS_SHEETS, CONV_GOLF_GRASS_SHEETS, CONV_STONE_SHEETS, CONV_ICE_SHEETS, CONV_SAND_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_THORN_SHEETS, CONV_SNOW_SHEETS, TILE_MOSS_SHEETS, MOSS_BRICK_SHEETS, GETS_CHECKED_FOR_LEAVES_SHEETS, IS_VINE_SHEETS, SPREADS_CORRUPTION_SHEETS, SPREADS_CRIMSON_SHEETS, SPREADS_HALLOW_SHEETS, ICES_SNOW_SHEETS, SPREAD_OVERGROUND_SHEETS, SPREAD_UNDERGROUND_SHEETS, CAN_GROW_CRYSTAL_SHARDS_SHEETS, SLOWLY_DIES_IN_WATER_SHEETS } from '../../data/tiles';
 import { holidayLightVid } from '../../data/vanillaStyleDrops';   // ★红蓝-G①（2026-09-18）节日彩灯掉落单源
 import { RNG } from '../../core/rng';
 import { rollLuck } from '../../stats/Luck';
@@ -57,14 +57,13 @@ for (let id = 0; id < TILE_DEFS.length; id++) {
 const S = (sheet: number): number => SID.get(sheet) ?? 0;
 
 // ---- 原版集合表（TileID.cs / WallID.cs / Main.cs 实证）----
-// TileID.Sets.SpreadOverground（TileID.cs:413）
-const SPREAD_OVERGROUND = new Set([2, 23, 661, 32, 60, 70, 109, 199, 662, 352, 477, 492, 633, 226]);
-// TileID.Sets.SpreadUnderground（:415）
-const SPREAD_UNDERGROUND = new Set([23, 661, 109, 199, 662, 60, 70, 633, 226]);
+// TileID.Sets.SpreadOverground（:417）/SpreadUnderground（:419）/CanGrowCrystalShards（:345）
+// ——★BJ221 收编单源 data/tiles.ts（§6k;旧注 :413/:415/:341 系行号漂移）
+const SPREAD_OVERGROUND = SPREAD_OVERGROUND_SHEETS;
+const SPREAD_UNDERGROUND = SPREAD_UNDERGROUND_SHEETS;
 // TileID.Sets.IsVine（:237）——★BJ218 收编单源 data/tiles.ts:IS_VINE_SHEETS（§6j）
 const IS_VINE = IS_VINE_SHEETS;
-// TileID.Sets.CanGrowCrystalShards（:341）
-const CAN_GROW_SHARDS = new Set([117, 116, 164, 402, 403]);
+const CAN_GROW_SHARDS = CAN_GROW_CRYSTAL_SHARDS_SHEETS;
 // TileID.Sets.Boulders（:195）——多向锚定物（129/149 水晶碎块/节日彩灯）无效锚族
 const MULTI_DIR_ANCHOR_INVALID = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 10]);
 // TileID.Sets.Spreads{Corruption,Crimson,Hallow}（:335/:353/:343）——★BJ218 收编单源（§6j）
@@ -118,8 +117,8 @@ const WALL_SPREADS_HALLOW = new Set([70, 219, 222, 28]);
 // 雪族（UndergroundTile/OvergroundTile 的钟乳石再生分支）
 const SNOW_FAMILY = ICES_SNOW_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:ICES_SNOW_SHEETS（TileID.cs:297=Ices∪Snow;§6j;cs:45854 雪冰段同值）
 // TileID.Sets.SlowlyDiesInWater（TileID.cs:249）——OvergroundTile liquid>32 支水淹杀
-// （cs:72761-72768：活性格命中即 KillTile，无掷骰）
-const SLOWLY_DIES_IN_WATER = new Set([3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 590, 595, 615, 637]);
+// （cs:72761-72768：活性格命中即 KillTile，无掷骰）——★BJ221 收编单源（§6k）
+const SLOWLY_DIES_IN_WATER = SLOWLY_DIES_IN_WATER_SHEETS;
 // 上面所有 sheet 集合 → 内部 id 集合（运行时比较用）
 const sheetOf = (id: number): number => TILE_DEFS[id]?.vanilla?.sheet ?? -1;
 /** TileID.Sets.Conversion.Torch（TileID.cs:42-74）：该 conversionType 下火把可否被转。

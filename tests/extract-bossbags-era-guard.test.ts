@@ -30,18 +30,39 @@ const TMP = realpathSync(tmpdir());
 const sandbox = (dir: string) => ({ ...process.env, SW_OUT: dir });
 
 describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三分离）', () => {
-  it('行为面:缺省干跑零写盘;现库领先面非空=洗库预警 exit 1+差异清单', () => {
+  it('行为面:缺省干跑零写盘;★BJ222 数据面修正后真现库零漂移 exit 0;pair 轴判别力转合成毒化保持', () => {
     const before = md5(LIVE);
     const r = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
-    // ★BJ217 编码面恢复后重定谳：BJ215 领先字段面（noMaster/remix/noRemix/lo/hi/
-    //   stackExpr 分列/default 臂）已全部被重产盖住——干跑残差仅剩 3329 chance pair
-    //   值（现库 [1,3,2]=BJ183 手补 max+1 编号 vs 源码位序 [1,2,3],配对链键语义
-    //   零差,工具头注 ★BJ217 段）。守卫仍 loud（不降判别力）,证据=袋 3329 spawn 级差。
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('字段型洗库预警');
-    expect(r.stderr).toContain('袋 3329');
-    expect(r.stderr).toContain('"pair":3');        // 差异清单物证（现库 pair 值）
+    // ★BJ222（2026-09-20）数据刀收口：BJ217 登记的最后残差 3329 chance pair 值
+    //   （现库 [1,3,2] vs 源码位序 [1,2,3]）已修——真现库与重产【逐字节全等】
+    //   （BJ222 实证：SW_OUT 沙箱重产 md5 同真库）。干跑转静默 exit 0。
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('重产盖住现库');
     expect(md5(LIVE)).toBe(before);                // 零写盘 canary
+
+    // pair 轴判别力不降（原 loud 断言保留,天然残差→合成毒化,BJ217 --write-real 守卫
+    // 同款习语）：假现库=真库字节副本+6158 pair 2→3 → 动态 diff 必须抓住。
+    const dir = mkdtempSync(join(TMP, 'bossbags-guard-'));
+    try {
+      const fixture = join(dir, 'fake-live.json');
+      const poisoned = JSON.parse(readFileSync(LIVE, 'utf8')) as {
+        bags: Record<string, { spawns: Array<{ id: number; conds?: Array<Record<string, unknown>> }> }>;
+      };
+      const s6158 = poisoned.bags['3329'].spawns.find((s) => s.id === 6158)!;
+      s6158.conds![0]['pair'] = 3;
+      writeFileSync(fixture, JSON.stringify(poisoned, null, 1));
+      const r2 = spawnSync('node', [SCRIPT], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
+        env: { ...process.env, SW_BOSSBAGS_JSON: fixture },
+      });
+      expect(r2.status).toBe(1);
+      expect(r2.stderr).toContain('字段型洗库预警');
+      expect(r2.stderr).toContain('袋 3329');
+      expect(r2.stderr).toContain('"pair":3');     // 差异清单物证（假现库 pair 值）
+      expect(md5(LIVE)).toBe(before);              // 真库零接触
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('行为面:SW_OUT 沙箱放行写盘（现库零接触）', () => {
@@ -146,7 +167,14 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
   it('行为面:--write-real 非纯增量拒+差异清单（假现库重定向 mutant,真库零接触）', () => {
     const dir = mkdtempSync(join(TMP, 'bossbags-guard-'));
     const fakeLive = join(dir, 'vanilla-bossbags.json');
-    copyFileSync(LIVE, fakeLive);                 // 假现库=真库字节副本（含领先面）
+    copyFileSync(LIVE, fakeLive);                 // 假现库=真库字节副本
+    // ★BJ222：数据刀修正后真现库与重产逐字节全等,非纯增量拒失去天然触发面——
+    //   假现库显式毒化（注入重产不产的领先 spawn 条目）供闸判定（BJ217 同款习语）。
+    const seeded = JSON.parse(readFileSync(fakeLive, 'utf8')) as {
+      bags: Record<string, { spawns: Array<Record<string, unknown>> }>;
+    };
+    seeded.bags['3320'].spawns.push({ id: 9999, conds: [] });
+    writeFileSync(fakeLive, JSON.stringify(seeded, null, 1));
     const before = md5(LIVE);
     const beforeFake = md5(fakeLive);
     try {

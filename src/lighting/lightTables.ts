@@ -152,10 +152,10 @@ export const TILE_NO_SUN_LIGHT_SHEETS: ReadonlySet<number> = new Set([
   633, 661, 662, 664, 687, 688, 689, 690, 691, 692, 711, 712, 713, 714, 715, 716
 ]);
 
-/** 水中也透天光的方块(TileID.Sets.AllowLightInWater,TileID.cs:363) */
-export const ALLOW_LIGHT_IN_WATER_SHEETS = new Set([54, 541, 328, 459, 748, 750]);
 /** 透光墙(Main.cs:10487-10503 wallLight 全表)——天空光可穿过的墙(0=无墙含在内由调用方处理) */
 export const WALL_LIGHT = new Set([21, 318, 106, 317, 107, 138, 140, 141, 139, 145, 150, 152, 245, 315, 168, 73, 227]); // +73 云墙/227 降雪墙特例
+// ★BJ221：ALLOW_LIGHT_IN_WATER_SHEETS 本地副本拆除——唯一消费面 TileLightScanner
+//  已改指 data/tiles.ts 单源（TileID.Sets.AllowLightInWater :363,§6k）
 
 // ---- 火把色(TorchID.cs:134-161 _lights 全表;0-1 RGB) ----
 export const TORCH_COLORS: ReadonlyArray<readonly [number, number, number]> = [

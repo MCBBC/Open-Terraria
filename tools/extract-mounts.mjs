@@ -19,8 +19,17 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 // ================= ★BJ215 era guard（四要素习语见 docs/era-guard-family.md） =================
-// ① SW_ITEM_VER 缺省 1457（白名单单值 1457——1458 MountID sets 面有真差
-//   DoesNotOverrideWings（BJ215 实证）,语义收窄不放行;未来版本逐值定谳后扩白名单）;
+// ① SW_ITEM_VER 缺省 1457（白名单单值 1457——★BJ217 已对 1458 MountID sets 真差
+//   逐值定谳:1458 唯一增量 = MountID.cs:19 新表 `DoesNotOverrideWings =
+//   CreateBoolSet(57,58,59,60)`（57-60 滚轴鞋族;1457↔1458 Mount.cs 逐字节全等,其余
+//   sets 零差）。语义 = Player.cs:15710 隐藏翼显形门 `vy≠0 && (!mount.Active ||
+//   Sets.DoesNotOverrideWings[type])` 的 1458 扩支（滚轴鞋腾空翼显形）。本仓消费面
+//   零涉及:Renderer.ts:13875-13881 以 MOUNT_DATA.CanUseWings（1457 MountData 字段,
+//   SetAsRollerSkate 仅 57-60 置 true,与 DoesNotOverrideWings 同集）已实现同语义
+//   （renderer ★1458 注=MOUNT_SETS.DoesNotOverrideWings 无消费位,加表=死数据且破坏
+//   与现库 1457 锚字节对拍）。定谳:不影响数据面 → 白名单维持单值 1457;若未来运行时
+//   改读 MOUNT_SETS.DoesNotOverrideWings,须同步扩白名单 {1457,1458}+现库加表+渲染侧
+//   换读位（条件债,三件一体）。）;
 // ② 输出通道三分离：缺省=干跑对拍零写盘（重产 vs 现库逐字节对拍——零漂移 exit 0/
 //   漂移 exit 1+物证,B-form;BJ215 定谳 bare 重产=现库逐字节零漂移）/ SW_OUT=<dir> 沙箱 /
 //   --write-real 逃生门;双旗互斥;SW_ITEM_VER≠1457 禁写真库;
@@ -32,7 +41,7 @@ const VER = process.env.SW_ITEM_VER ?? '1457';
 const VER_ALLOWED = new Set(['1457']);
 if (!VER_ALLOWED.has(VER) || !existsSync(join(ROOT, `Terarria${VER}`, 'Terraria.ID', 'MountID.cs'))) {
   console.error(`[extract-mounts] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
-  if (VER === '1458') console.error('  1458 MountID sets 面有真差（DoesNotOverrideWings,BJ215 实证）——未逐值定谳前不放行;现库 vanilla-mounts.json 锚 1457。');
+  if (VER === '1458') console.error('  1458 MountID sets 真差已定谳（BJ217:唯一增量=DoesNotOverrideWings {57-60} 滚轴鞋翼显形表,本仓渲染侧以 CanUseWings 同集实现,数据面零影响）——现库 vanilla-mounts.json 锚 1457,扩白名单须连动现库加表+渲染侧换读位（工具头注 ①）。');
   process.exit(1);
 }
 const WRITE_REAL = process.argv.includes('--write-real');

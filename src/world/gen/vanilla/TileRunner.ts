@@ -5,7 +5,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, NON_SOLID_SAVE_SLOPES_SHEETS } from '../../../data/tiles';
 import { canBeClearedDuringGenerationDual } from './DungeonStyles1457';
 
 const MUD = TILE_BY_KEY['mud']!;
@@ -58,7 +58,7 @@ const SAVE_SLOPES = new Uint8Array(TILE_DEFS.length);
       || (s !== undefined && s >= 435 && s <= 439)
       || s === 192 || s === 481 || s === 482 || s === 483;
     SAVE_SLOPES[i] = (pristineSolid
-      || (s !== undefined && [131, 351, 336, 340, 341, 342, 343, 344].includes(s))) ? 1 : 0;
+      || (s !== undefined && NON_SOLID_SAVE_SLOPES_SHEETS.has(s))) ? 1 : 0;   // NonSolidSaveSlopes(:179)——★BJ221 收编单源（§6k）
   }
 }
 // TileID.Sets.Ore:铺设 396/397 时矿石可覆盖

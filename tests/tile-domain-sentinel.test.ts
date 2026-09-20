@@ -76,10 +76,31 @@ import {
   ORE_MERGES_WITH_MUD_SHEETS, SUFFOCATE_SHEETS, TOUCH_HOT_SHEETS, TOUCH_BLEEDING_SHEETS,
   TOUCH_DESTROY_SHEETS, DUNGEON_UNION_CRACKED_SHEETS, DUNGEON_UNION_CRACKED_IDS,
   TILE_DUNGEON_SHEETS,
+  CHECKS_FOR_MERGE_SHEETS, FORCED_DIRT_MERGING_SHEETS, MERGES_WITH_CLOUDS_SHEETS,
+  DONT_MERGE_WITH_SNOW_SHEETS, SETS_DIRT_SHEETS, SETS_MUD_SHEETS, SETS_ASH_SHEETS,
+  GRASS_SPECIAL_SHEETS, LAVA_BURN_TO_DIRT_SHEETS, JUNGLE_SPECIAL_SHEETS, HELL_SPECIAL_SHEETS,
+  HAS_SLOPE_FRAMES_SHEETS, BLOCKS_STAIRS_SHEETS, DONT_DRAW_TILE_SLOPES_SHEETS,
+  IGNORES_NEARBY_HALFBRICKS_SHEETS, ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS,
+  NON_SOLID_SAVE_SLOPES_SHEETS, NON_SOLID_SAVE_SLOPES_IDS,
+  SLOWLY_DIES_IN_WATER_SHEETS, SLOWLY_DIES_IN_WATER_IDS, SPAWNS_NATURE_FLIES_SHEETS,
+  GENERAL_PLACEMENT_TILES_SHEETS, GENERAL_PLACEMENT_TILES_IDS,
+  SPREAD_OVERGROUND_SHEETS, SPREAD_UNDERGROUND_SHEETS, CAN_GROW_CRYSTAL_SHARDS_SHEETS,
+  PAINTINGS_SHEETS, PAINTINGS_IDS, PREVENTS_SLOPES_DURING_GENERATION_SHEETS,
+  PREVENTS_SLOPES_DURING_GENERATION_IDS, AVOIDED_BY_NPCS_SHEETS, INTERACTABLE_BY_NPCS_SHEETS,
+  IGNORED_BY_NPC_STEP_UP_SHEETS, CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS, HOUSING_WALLS_SHEETS,
+  IGNORED_IN_HOUSE_SCORE_SHEETS, IS_A_MECHANISM_SHEETS, IS_A_MECHANISM_IDS,
+  IS_A_TRIGGER_SHEETS, IS_A_TRIGGER_IDS, IGNORE_WHEN_VALIDATING_TRAPS_SHEETS,
+  IGNORE_WHEN_VALIDATING_TRAPS_IDS, ALLOW_LIGHT_IN_WATER_SHEETS, BASIC_CHEST_FAKE_SHEETS,
+  BASIC_DRESSER_SHEETS, CAMPFIRES_SHEETS, COUNTS_AS_WATER_FOR_CRAFTING_SHEETS,
+  DISABLE_SMART_INTERACT_SHEETS, HAS_OUTLINES_SHEETS, TORCHES_SHEETS,
 } from '../src/data/tiles';
 import { canPoundTile } from '../src/world/gen/vanilla/HalfBrickPass';
 import { TILE_CUT } from '../src/core/Game';
 import { grassParticleFold, GRASS_COUNTER_SHEETS } from '../src/core/Game';
+import { SITTABLE_SHEETS } from '../src/player/PlayerSitting';
+import { NPC_STEPUP_IGNORE } from '../src/physics/TileCollision';
+import { TILE_HAS_OUTLINES } from '../src/render/TileHighlight';
+import { CAMPFIRE_TILES, COUNTS_AS_WATER_FOR_CRAFTING, DISABLE_SMART_INTERACT } from '../src/core/SmartInteractTiles';
 
 // ---- 掩蔽对字面量(键注册表推导+钉死;与两域数值重叠普查同源) ----
 const TORCH = TILE_BY_KEY['torch']!;                          // 内部 12(sheet 4)
@@ -1327,6 +1348,328 @@ describe('§6j BJ218 收编金标:TileID.cs 第四收编批(IcesSnow 族/纯值�
       ['src/world/WorldAlignment.ts', 'COUNT_COLLECTION_SHEETS'],
     ];
     it('禁复活:BJ218 收编副本字面定义签名禁入（单源别名/拷贝转出口不受影响）', () => {
+      for (const [file, sig] of FORBIDDEN) {
+        expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
+      }
+    });
+    it('防空洞正锚:每个收编文件必须仍消费 data/tiles.ts 单源名', () => {
+      for (const [file, anchor] of REQUIRED) {
+        expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
+      }
+    });
+  });
+});
+
+// ★BJ221 批变异证红记录(2026-09-20,均在验证后还原):
+//   M26 CHECKS_FOR_MERGE_SHEETS 摘 407(字面缺值) → §6k 金标红;
+//   M27 GENERAL_PLACEMENT_TILES_IDS 错域回退(new Set(GENERAL_PLACEMENT_TILES_SHEETS) 裸值顶替,
+//       内部 225(sheet305 蛛丝)/41(sheet63 宝石) 幻影入表) → §6k 镜像+域判别两红;
+//   M28 VanillaTiler 再立 const HAS_SLOPE_FRAMES = new Set([421,422]) 副本 → §6k 结构锁红;
+//   M29 LiquidSim 再立 bySheet(new Set([88])) 内联字面副本 → §6k 结构锁红。
+describe('§6k BJ221 收编金标:TileID.cs 第五收编批(分帧/坡面/世界生成/NPC/房屋/接线/照明/交互 ~40 表)', () => {
+  // 2026-09-20 定谳:BJ218 普查残留副本族第三清偿——逐值对拍 Terarria1457 TileID.cs 亲读
+  //   终值全等（校验脚本 51 处逐族 SAME;1458 同行号同值零增量全 44 行抽核）,收编
+  //   data/tiles.ts 单源,消费面别名改指。无漂移案(全纯同值);值同语义异=LAVA_BURN_TO_DIRT
+  //   ≡GrassSpecial（Liquid.cs:1561 字面 switch,原版彼处不读表）;半砖 PLATFORMS_4X2 改指
+  //   既有 PLATFORMS_IDS（:243 同值三名案）。照登维持:TeleportSpotCheck
+  //   .SHEET_TOUCH_IMMEDIATE_GT0(int 表 0 哨兵键域)/PlantRules.GRASS_CONVERT_SHEETS。
+  const A = (x: ReadonlySet<number>) => [...x].sort((a, b) => a - b);
+  it('分帧域四表:ChecksForMerge(:373) 51 项/ForcedDirtMerging(:185) 60 项/MergesWithClouds(:191) 5 项/DontMergeWithSnow(:193) 7 项', () => {
+    expect(A(CHECKS_FOR_MERGE_SHEETS)).toEqual(
+      [0, 2, 57, 58, 59, 60, 70, 75, 76, 109, 112, 147, 161, 162, 163, 164, 170, 189, 191, 196, 199, 200, 211, 224, 225, 226, 234, 383, 396, 397, 398, 399, 400, 401, 402, 403, 404, 407, 460, 477, 492, 633, 661, 662, 668, 684, 717, 718, 719, 738, 747]);
+    expect(A(FORCED_DIRT_MERGING_SHEETS)).toEqual(
+      [54, 75, 76, 192, 226, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 272, 273, 274, 284, 325, 326, 327, 328, 329, 345, 357, 384, 385, 409, 458, 459, 507, 508, 669, 670, 671, 672, 673, 674, 675, 676, 683, 684, 708, 735, 736, 737, 738, 741, 742, 743, 745, 746, 747, 748, 749]);
+    expect(A(MERGES_WITH_CLOUDS_SHEETS)).toEqual([196, 460, 717, 718, 719]);
+    expect(MERGES_WITH_CLOUDS_SHEETS.has(189)).toBe(false);   // ≠Clouds(:197) 全 6 型,缺云本体
+    expect(A(DONT_MERGE_WITH_SNOW_SHEETS)).toEqual([161, 163, 164, 170, 200, 224, 738]);
+  });
+  it('Dirt/Mud/Ash(:285-289)+GrassSpecial(:299,≡LAVA_BURN_TO_DIRT 值同语义异备案)+Jungle/HellSpecial(:301/:303)', () => {
+    expect(A(SETS_DIRT_SHEETS)).toEqual([0, 668]);            // ★≠Conversion.Dirt(:22={0})
+    expect(A(SETS_MUD_SHEETS)).toEqual([59]);
+    expect(A(SETS_ASH_SHEETS)).toEqual([57]);
+    expect(A(GRASS_SPECIAL_SHEETS)).toEqual([60, 70, 661, 662]);
+    expect(LAVA_BURN_TO_DIRT_SHEETS).toBe(GRASS_SPECIAL_SHEETS);  // Liquid.cs:1561 字面 switch 同值单源(分叉即红)
+    expect(A(JUNGLE_SPECIAL_SHEETS)).toEqual([211, 225, 226]);
+    expect(A(HELL_SPECIAL_SHEETS)).toEqual([58, 75, 76]);
+  });
+  it('坡面渲染域:HasSlopeFrames(:267)/BlocksStairs(:357)/DontDrawTileSlopes(:153,≠Sliced 缺 160)/IgnoresNearbyHalfbricks(:271)/SmoothBorders(:175) 109 项', () => {
+    expect(A(HAS_SLOPE_FRAMES_SHEETS)).toEqual([421, 422]);
+    expect(A(BLOCKS_STAIRS_SHEETS)).toEqual([54, 328, 386, 387, 459, 541]);
+    expect(A(DONT_DRAW_TILE_SLOPES_SHEETS)).toEqual(
+      [137, 138, 235, 388, 476, 630, 631, 664, 665, 711, 712, 713, 714, 715, 716, 723, 726]);
+    expect(DONT_DRAW_TILE_SLOPES_SHEETS.has(160)).toBe(false);   // 160 只在 DontDrawTileSliced(:151),勿并
+    expect(A(IGNORES_NEARBY_HALFBRICKS_SHEETS)).toEqual(
+      [137, 138, 235, 380, 421, 422, 476, 484, 664, 711, 712, 713, 714, 715, 716]);
+    expect(A(ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS)).toEqual(
+      [38, 39, 45, 46, 54, 56, 80, 118, 119, 121, 122, 127, 140, 145, 146, 148, 150, 151, 152, 153, 154, 155, 156, 157, 159, 160, 175, 176, 190, 198, 202, 206, 208, 226, 229, 250, 251, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 272, 273, 274, 284, 311, 321, 325, 326, 327, 328, 329, 345, 346, 347, 348, 350, 357, 369, 370, 385, 426, 430, 431, 432, 433, 434, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 680, 681, 682, 685, 686, 687, 688, 689, 690, 691, 692, 708, 722, 727, 728, 729, 730, 731, 732, 735, 748]);
+  });
+  it('存档/生成域:NonSolidSaveSlopes(:179) 8 项+IDS 镜像 8 id;SlowlyDiesInWater(:249) 14 项+IDS 镜像 17 id(sheet3 四内部身);SpawnsNatureFlies(:251)=Slowly∖{590}', () => {
+    expect(A(NON_SOLID_SAVE_SLOPES_SHEETS)).toEqual([131, 336, 340, 341, 342, 343, 344, 351]);
+    expect(A(NON_SOLID_SAVE_SLOPES_IDS)).toEqual([285, 334, 486, 489, 490, 491, 492, 497]);
+    expect(A(SLOWLY_DIES_IN_WATER_SHEETS)).toEqual([3, 20, 24, 27, 73, 80, 110, 201, 529, 530, 590, 595, 615, 637]);
+    expect(A(SLOWLY_DIES_IN_WATER_IDS)).toEqual(
+      [19, 20, 21, 24, 154, 184, 206, 243, 314, 316, 318, 319, 321, 330, 627, 629, 644]);
+    expect(SLOWLY_DIES_IN_WATER_IDS.size).toBe(17);            // sheet 3(草)有 19/20/21/319 四内部身
+    const nf = [...SPAWNS_NATURE_FLIES_SHEETS].sort((a, b) => a - b);
+    const sd = [...SLOWLY_DIES_IN_WATER_SHEETS].filter((v) => v !== 590).sort((a, b) => a - b);
+    expect(nf).toEqual(sd);                                     // 关系锁:SpawnsNatureFlies=SlowlyDies∖{590 宝石苗}
+  });
+  it('GeneralPlacementTiles(:311) 28 项+IDS 镜像 28 id;SpreadOverground(:417)/Underground(:419) 关系锁;CanGrowCrystalShards(:345) ⊂ Conversion.Hallow', () => {
+    expect(A(GENERAL_PLACEMENT_TILES_SHEETS)).toEqual(
+      [12, 21, 25, 31, 41, 43, 44, 70, 112, 138, 151, 203, 225, 226, 467, 481, 482, 483, 639, 664, 665, 696, 711, 712, 713, 714, 715, 716]);
+    expect(A(GENERAL_PLACEMENT_TILES_IDS)).toEqual(
+      [16, 74, 87, 94, 95, 121, 158, 175, 277, 292, 295, 299, 300, 301, 302, 303, 305, 306, 310, 311, 327, 328, 329, 392, 659, 682, 712, 727]);
+    expect(A(SPREAD_OVERGROUND_SHEETS)).toEqual([2, 23, 32, 60, 70, 109, 199, 226, 352, 477, 492, 633, 661, 662]);
+    expect(A(SPREAD_UNDERGROUND_SHEETS)).toEqual([23, 60, 70, 109, 199, 226, 633, 661, 662]);
+    const over = new Set(SPREAD_OVERGROUND_SHEETS);
+    const under = new Set(SPREAD_UNDERGROUND_SHEETS);
+    for (const v of under) expect(over.has(v)).toBe(true);      // Underground ⊂ Overground
+    for (const v of [2, 32, 352, 477, 492]) {                    // 差集恰=普通草/荆棘/高尔夫草(地表专属)
+      expect(over.has(v)).toBe(true);
+      expect(under.has(v)).toBe(false);
+    }
+    expect(A(CAN_GROW_CRYSTAL_SHARDS_SHEETS)).toEqual([116, 117, 164, 402, 403]);
+    for (const v of CAN_GROW_CRYSTAL_SHARDS_SHEETS) expect(CONV_HALLOW_SHEETS.has(v)).toBe(true);
+  });
+  it('Paintings(:187) 5 项+IDS 镜像;PreventsSlopesDuringGeneration(:323) 9 项+IDS 镜像', () => {
+    expect(A(PAINTINGS_SHEETS)).toEqual([240, 241, 242, 245, 246]);
+    expect(A(PAINTINGS_IDS)).toEqual([156, 165, 171, 172, 195]);
+    expect(A(PREVENTS_SLOPES_DURING_GENERATION_SHEETS)).toEqual([48, 135, 137, 151, 191, 232, 274, 428, 442]);
+    expect(A(PREVENTS_SLOPES_DURING_GENERATION_IDS)).toEqual([102, 104, 119, 122, 123, 163, 277, 372, 376]);
+  });
+  it('NPC/房屋/坐席域:AvoidedByNPCs(:377) 25 项/InteractableByNPCs(:379) 90 项/IgnoredByNpcStepUp(:209)/CanBeSatOnForPlayers(:213)/HousingWalls(:381)/IgnoredInHouseScore(:415)', () => {
+    expect(A(AVOIDED_BY_NPCS_SHEETS)).toEqual(
+      [21, 29, 55, 85, 88, 97, 99, 209, 334, 356, 395, 425, 440, 441, 463, 467, 468, 471, 491, 510, 511, 520, 573, 663, 698]);
+    expect(INTERACTABLE_BY_NPCS_SHEETS.size).toBe(90);
+    expect(A(INTERACTABLE_BY_NPCS_SHEETS)).toEqual(
+      [12, 17, 21, 26, 29, 33, 35, 36, 49, 50, 55, 77, 78, 79, 88, 94, 96, 97, 99, 100, 101, 103, 106, 114, 125, 128, 133, 171, 172, 173, 174, 207, 209, 215, 219, 220, 228, 237, 244, 247, 269, 282, 287, 302, 354, 355, 372, 377, 378, 390, 395, 405, 406, 411, 425, 441, 452, 454, 455, 457, 462, 463, 464, 467, 468, 470, 471, 475, 491, 494, 499, 505, 510, 511, 520, 543, 565, 573, 597, 598, 617, 621, 639, 642, 646, 665, 695, 698, 699, 707]);
+    expect(A(IGNORED_BY_NPC_STEP_UP_SHEETS)).toEqual([14, 16, 18, 134, 469]);
+    expect(A(CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS)).toEqual([15, 89, 102, 487, 497]);
+    expect(CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS.has(497)).toBe(true);
+    expect(A(HOUSING_WALLS_SHEETS)).toEqual([11, 386, 389]);
+    expect(A(IGNORED_IN_HOUSE_SCORE_SHEETS)).toEqual([3, 4, 73, 82, 83, 84, 386]);
+  });
+  it('接线域 Wiring 三表:IsAMechanism(:132) 86 项+IDS 87 id(sheet389 双内部身)/IsATrigger(:134) 10 项+IDS/IgnoreWhenValidatingTraps(:136) 14 项+IDS 15 id', () => {
+    expect(IS_A_MECHANISM_SHEETS.size).toBe(86);
+    expect(A(IS_A_MECHANISM_SHEETS)).toEqual(
+      [4, 10, 11, 21, 33, 34, 35, 42, 92, 93, 95, 100, 105, 126, 130, 131, 137, 139, 141, 142, 143, 149, 207, 209, 210, 212, 215, 216, 219, 235, 244, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 314, 335, 338, 349, 356, 386, 387, 388, 389, 405, 406, 411, 419, 420, 421, 422, 425, 429, 443, 452, 455, 467, 480, 497, 506, 509, 531, 546, 557, 564, 565, 593, 594, 642, 657, 658, 663, 720, 721, 725, 733]);
+    expect(IS_A_MECHANISM_IDS.size).toBe(87);                  // sheet 389(开门别名域)双内部身 213/364
+    expect(A(IS_A_TRIGGER_SHEETS)).toEqual([132, 135, 136, 144, 411, 423, 440, 441, 468, 476]);
+    expect(A(IS_A_TRIGGER_IDS)).toEqual([163, 178, 202, 287, 290, 369, 374, 375, 380, 381]);
+    expect(A(IGNORE_WHEN_VALIDATING_TRAPS_SHEETS)).toEqual([4, 10, 11, 21, 215, 219, 314, 386, 387, 388, 389, 411, 467, 642]);
+    expect(IGNORE_WHEN_VALIDATING_TRAPS_IDS.size).toBe(15);
+    // ⊂/⊃关系:IgnoreWhenValidatingTraps ⊂ IsAMechanism(原版谓词 !Mechanism&&Ignore 恒 false 才成立——
+    // 实际 IsItATrap=actuator||(Mechanism&&!Ignore),Ignore 单独存在无消费意义,锁定包含关系防漂)
+    for (const v of IGNORE_WHEN_VALIDATING_TRAPS_SHEETS) expect(IS_A_MECHANISM_SHEETS.has(v)).toBe(true);
+  });
+  it('照明/交互/高亮/杂项:AllowLightInWater(:363)/BasicChestFake(:317)/BasicDresser(:319)/Campfires(:407)/CountsAsWaterForCrafting(:281)/DisableSmartInteract(:207)/HasOutlines(:277) 95 项/Torches(:405)', () => {
+    expect(A(ALLOW_LIGHT_IN_WATER_SHEETS)).toEqual([54, 328, 459, 541, 748, 750]);
+    expect(A(BASIC_CHEST_FAKE_SHEETS)).toEqual([441, 468]);
+    expect(BASIC_CHEST_FAKE_SHEETS.has(21)).toBe(false);        // ≠BasicChest(:315) 真箱
+    expect(A(BASIC_DRESSER_SHEETS)).toEqual([88]);
+    expect(A(CAMPFIRES_SHEETS)).toEqual([215]);
+    expect(A(COUNTS_AS_WATER_FOR_CRAFTING_SHEETS)).toEqual([172, 207]);
+    expect(A(DISABLE_SMART_INTERACT_SHEETS)).toEqual(
+      [4, 33, 334, 395, 410, 455, 471, 480, 509, 520, 657, 658, 698, 720, 721, 725, 733]);
+    expect(HAS_OUTLINES_SHEETS.size).toBe(95);
+    expect(A(HAS_OUTLINES_SHEETS)).toEqual(
+      [10, 11, 15, 16, 17, 18, 21, 26, 29, 55, 77, 79, 85, 86, 88, 89, 94, 96, 97, 101, 102, 104, 106, 114, 125, 132, 133, 134, 136, 139, 144, 172, 207, 209, 212, 215, 216, 217, 218, 220, 228, 237, 243, 247, 283, 287, 300, 301, 302, 303, 304, 305, 306, 307, 308, 335, 338, 354, 355, 356, 377, 386, 387, 388, 389, 410, 411, 412, 425, 441, 455, 463, 464, 467, 468, 470, 475, 480, 487, 494, 497, 499, 509, 510, 511, 621, 622, 657, 658, 663, 699, 720, 721, 725, 733]);
+    expect(A(TORCHES_SHEETS)).toEqual([4]);
+  });
+  it('内部域镜像八表:全 defs 双域平移性质(键域契约无漏无多)', () => {
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      const sh = TILE_DEFS[i]?.vanilla?.sheet ?? -1;
+      expect(NON_SOLID_SAVE_SLOPES_IDS.has(i)).toBe(NON_SOLID_SAVE_SLOPES_SHEETS.has(sh));
+      expect(SLOWLY_DIES_IN_WATER_IDS.has(i)).toBe(SLOWLY_DIES_IN_WATER_SHEETS.has(sh));
+      expect(GENERAL_PLACEMENT_TILES_IDS.has(i)).toBe(GENERAL_PLACEMENT_TILES_SHEETS.has(sh));
+      expect(PAINTINGS_IDS.has(i)).toBe(PAINTINGS_SHEETS.has(sh));
+      expect(PREVENTS_SLOPES_DURING_GENERATION_IDS.has(i)).toBe(PREVENTS_SLOPES_DURING_GENERATION_SHEETS.has(sh));
+      expect(IS_A_MECHANISM_IDS.has(i)).toBe(IS_A_MECHANISM_SHEETS.has(sh));
+      expect(IS_A_TRIGGER_IDS.has(i)).toBe(IS_A_TRIGGER_SHEETS.has(sh));
+      expect(IGNORE_WHEN_VALIDATING_TRAPS_IDS.has(i)).toBe(IGNORE_WHEN_VALIDATING_TRAPS_SHEETS.has(sh));
+    }
+  });
+  it('域判别(错域回退即红):NonSolid/SLOWLY/GenPlace/Paintings/PrevSlopes/Mech/Trig/IgnoreValid 八组掩蔽对', () => {
+    // NonSolid: 内部 131(sheet 477 高尔夫草)∉IDS;sheet 131(魔灯)∈SHEETS;真身内部 334 ∈ IDS
+    expect(TILE_DEFS[131]?.vanilla?.sheet).toBe(477);
+    expect(NON_SOLID_SAVE_SLOPES_SHEETS.has(131)).toBe(true);
+    expect(NON_SOLID_SAVE_SLOPES_IDS.has(131)).toBe(false);     // 错域顶替即红
+    expect(NON_SOLID_SAVE_SLOPES_IDS.has(334)).toBe(true);
+    // SLOWLY: 内部 529(sheet 427 竞技平台)∉IDS;sheet 529 ∈ SHEETS;真身内部 206 ∈ IDS
+    expect(TILE_DEFS[529]?.vanilla?.sheet).toBe(427);
+    expect(SLOWLY_DIES_IN_WATER_SHEETS.has(529)).toBe(true);
+    expect(SLOWLY_DIES_IN_WATER_IDS.has(529)).toBe(false);
+    expect(SLOWLY_DIES_IN_WATER_IDS.has(206)).toBe(true);
+    // GenPlace: 内部 225(sheet 305)∉IDS;sheet 225(丛林蜥蜴砖)∈SHEETS;真身内部 94 ∈ IDS
+    expect(TILE_DEFS[225]?.vanilla?.sheet).toBe(305);
+    expect(GENERAL_PLACEMENT_TILES_SHEETS.has(225)).toBe(true);
+    expect(GENERAL_PLACEMENT_TILES_IDS.has(225)).toBe(false);
+    expect(GENERAL_PLACEMENT_TILES_IDS.has(94)).toBe(true);
+    // Paintings: 内部 245(sheet 387 高门)∉IDS;sheet 245 ∈ SHEETS;真身内部 172 ∈ IDS
+    expect(TILE_DEFS[245]?.vanilla?.sheet).toBe(387);
+    expect(PAINTINGS_SHEETS.has(245)).toBe(true);
+    expect(PAINTINGS_IDS.has(245)).toBe(false);
+    expect(PAINTINGS_IDS.has(172)).toBe(true);
+    // PrevSlopes: 内部 48(sheet 162 薄冰)∉IDS;sheet 48(尖刺)∈SHEETS;真身内部 102 ∈ IDS
+    expect(TILE_DEFS[48]?.vanilla?.sheet).toBe(162);
+    expect(PREVENTS_SLOPES_DURING_GENERATION_SHEETS.has(48)).toBe(true);
+    expect(PREVENTS_SLOPES_DURING_GENERATION_IDS.has(48)).toBe(false);
+    expect(PREVENTS_SLOPES_DURING_GENERATION_IDS.has(102)).toBe(true);
+    // Mechanism: 内部 137(sheet 398 腐化沙岩)∉IDS;sheet 137(雕像)∈SHEETS;真身内部 119 ∈ IDS;
+    //   内部 4(sheet 7 铜矿)∉IDS 而 sheet 4(火把)∈SHEETS——§1 COPPER/TORCH 双掩蔽
+    expect(TILE_DEFS[137]?.vanilla?.sheet).toBe(398);
+    expect(IS_A_MECHANISM_SHEETS.has(137)).toBe(true);
+    expect(IS_A_MECHANISM_IDS.has(137)).toBe(false);
+    expect(IS_A_MECHANISM_IDS.has(119)).toBe(true);
+    expect(TILE_DEFS[4]?.vanilla?.sheet).toBe(7);
+    expect(IS_A_MECHANISM_SHEETS.has(4)).toBe(true);
+    expect(IS_A_MECHANISM_IDS.has(4)).toBe(false);
+    expect(IS_A_MECHANISM_IDS.has(12)).toBe(true);
+    // Trig: 内部 135(sheet 371)∉IDS;sheet 135(压力板)∈SHEETS;真身内部 163 ∈ IDS;
+    //   内部 441(sheet 238)∉IDS;sheet 441(假箱)∈SHEETS;真身内部 375 ∈ IDS
+    expect(TILE_DEFS[135]?.vanilla?.sheet).toBe(371);
+    expect(IS_A_TRIGGER_SHEETS.has(135)).toBe(true);
+    expect(IS_A_TRIGGER_IDS.has(135)).toBe(false);
+    expect(IS_A_TRIGGER_IDS.has(163)).toBe(true);
+    expect(TILE_DEFS[441]?.vanilla?.sheet).toBe(238);
+    expect(IS_A_TRIGGER_SHEETS.has(441)).toBe(true);
+    expect(IS_A_TRIGGER_IDS.has(441)).toBe(false);
+    expect(IS_A_TRIGGER_IDS.has(375)).toBe(true);
+    // IgnoreValid: 内部 4(sheet 7)∉IDS;sheet 4 ∈ SHEETS;真身内部 12 ∈ IDS
+    expect(IGNORE_WHEN_VALIDATING_TRAPS_SHEETS.has(4)).toBe(true);
+    expect(IGNORE_WHEN_VALIDATING_TRAPS_IDS.has(4)).toBe(false);
+    expect(IGNORE_WHEN_VALIDATING_TRAPS_IDS.has(12)).toBe(true);
+  });
+  it('转出口别名同源锁:SITTABLE/NPC_STEPUP/TILE_HAS_OUTLINES/CAMPFIRE/COUNTS_WATER/DISABLE_SI 六名一值源', () => {
+    // 消费面导出名仍从原文件出口(PlayerSitting/TileCollision/TileHighlight/SmartInteractTiles)
+    // ——此处钉 data/tiles.ts 单源与消费面别名同对象,防转出口再立字面副本。
+    expect(SITTABLE_SHEETS).toBe(CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS);
+    expect(NPC_STEPUP_IGNORE).toBe(IGNORED_BY_NPC_STEP_UP_SHEETS);
+    expect(TILE_HAS_OUTLINES).toBe(HAS_OUTLINES_SHEETS);
+    expect(CAMPFIRE_TILES).toBe(CAMPFIRES_SHEETS);
+    expect(COUNTS_AS_WATER_FOR_CRAFTING).toBe(COUNTS_AS_WATER_FOR_CRAFTING_SHEETS);
+    expect(DISABLE_SMART_INTERACT).toBe(DISABLE_SMART_INTERACT_SHEETS);
+    expect(TORCHES_SHEETS.has(4)).toBe(true);
+    expect(AVOIDED_BY_NPCS_SHEETS.size).toBe(25);
+  });
+  describe('§6k 结构锁:BJ221 收编副本禁复活（字节签名禁入+防空洞正锚）', () => {
+    const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+    const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+    const F = (name: string) => new RegExp(`\\b${name}\\s*=\\s*new\\s+Set`);
+    const S256LIT = (name: string) => new RegExp(`\\b${name}\\s*=\\s*S256\\(\\s*\\[\\s*\\d`);
+    const IDSV = (name: string) => new RegExp(`\\b${name}\\s*=\\s*idsByVanillaSheet\\(`);
+    const OBJ = (name: string) => new RegExp(`\\b${name}\\s*:\\s*idsByVanillaSheet\\(`);
+    const FORBIDDEN: Array<[string, RegExp, string]> = [
+      // 分帧域(4+12 S256)
+      ['src/render/TileMergeFamily.ts', F('DIRT'), 'SETS_DIRT_SHEETS'],
+      ['src/render/TileMergeFamily.ts', F('MUD'), 'SETS_MUD_SHEETS'],
+      ['src/render/TileMergeFamily.ts', F('ASH'), 'SETS_ASH_SHEETS'],
+      ['src/render/TileMergeFamily.ts', F('DONT_MERGE_SNOW'), 'DONT_MERGE_WITH_SNOW_SHEETS'],
+      ['src/render/VanillaFraming.ts', S256LIT('CHECKS_FOR_MERGE'), 'S256([...CHECKS_FOR_MERGE_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('FORCED_DIRT_MERGING'), 'S256([...FORCED_DIRT_MERGING_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('MERGES_WITH_CLOUDS'), 'S256([...MERGES_WITH_CLOUDS_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('DONT_MERGE_WITH_SNOW'), 'S256([...DONT_MERGE_WITH_SNOW_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_DIRT'), 'S256([...SETS_DIRT_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_MUD'), 'S256([...SETS_MUD_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_ASH'), 'S256([...SETS_ASH_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('GRASS_SPECIAL'), 'S256([...GRASS_SPECIAL_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('JUNGLE_SPECIAL'), 'S256([...JUNGLE_SPECIAL_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('HELL_SPECIAL'), 'S256([...HELL_SPECIAL_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('HAS_SLOPE_FRAMES'), 'S256([...HAS_SLOPE_FRAMES_SHEETS])'],
+      ['src/render/VanillaFraming.ts', S256LIT('SETS_PLATFORMS'), 'S256([...PLATFORMS_SHEETS])'],
+      // 坡面渲染域(4+1 内联)
+      ['src/render/VanillaTiler.ts', F('DONT_DRAW_SLOPES'), 'DONT_DRAW_TILE_SLOPES_SHEETS'],
+      ['src/render/VanillaTiler.ts', F('HAS_SLOPE_FRAMES'), 'HAS_SLOPE_FRAMES_SHEETS'],
+      ['src/render/VanillaTiler.ts', F('IGNORES_NEARBY_HALFBRICK'), 'IGNORES_NEARBY_HALFBRICKS_SHEETS'],
+      ['src/render/VanillaTiler.ts', F('SMOOTH_BORDER'), 'ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS'],
+      ['src/render/VanillaTiler.ts', F('BLOCKS_STAIRS_SHEETS'), 'BLOCKS_STAIRS_SHEETS import'],
+      // 存档/生成域
+      ['src/world/gen/vanilla/TileRunner.ts', /\[\s*131,\s*351,\s*336/, 'NON_SOLID_SAVE_SLOPES_SHEETS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', IDSV('NON_SOLID_SAVE_SLOPES'), 'NON_SOLID_SAVE_SLOPES_IDS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', IDSV('SLOWLY_DIES_IN_WATER'), 'SLOWLY_DIES_IN_WATER_IDS'],
+      ['src/world/gen/vanilla/QuickCleanupPass.ts', IDSV('NON_SOLID_SAVE_SLOPES'), 'NON_SOLID_SAVE_SLOPES_IDS'],
+      ['src/wld/WldImport.ts', F('NON_SOLID_SAVE_SLOPES'), 'NON_SOLID_SAVE_SLOPES_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('SPREAD_OVERGROUND'), 'SPREAD_OVERGROUND_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('SPREAD_UNDERGROUND'), 'SPREAD_UNDERGROUND_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('CAN_GROW_SHARDS'), 'CAN_GROW_CRYSTAL_SHARDS_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', F('SLOWLY_DIES_IN_WATER'), 'SLOWLY_DIES_IN_WATER_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', IDSV('PAINTINGS'), 'PAINTINGS_IDS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', OBJ('PREVENTS_SLOPES'), 'PREVENTS_SLOPES_DURING_GENERATION_IDS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', IDSV('PLATFORMS_4X2'), 'PLATFORMS_IDS'],
+      ['src/world/gen/vanilla/TrackPass.ts', IDSV('PLACEMENT_BLOCKED'), 'GENERAL_PLACEMENT_TILES_IDS'],
+      ['src/world/gen/vanilla/GenState.ts', F('GENERAL_PLACEMENT_SHEETS'), 'GENERAL_PLACEMENT_TILES_SHEETS'],
+      // NPC/房屋/坐席/接线
+      ['src/entities/TownNPC.ts', F('AVOIDED_BY_NPC_SHEETS'), 'AVOIDED_BY_NPCS_SHEETS'],
+      ['src/entities/TownNPC.ts', F('INTERACTABLE_BY_NPC_SHEETS'), 'INTERACTABLE_BY_NPCS_SHEETS'],
+      ['src/world/Housing.ts', F('HOUSING_WALL_TILES'), 'HOUSING_WALLS_SHEETS'],
+      ['src/world/Housing.ts', F('IGNORED_IN_HOUSE_SCORE'), 'IGNORED_IN_HOUSE_SCORE_SHEETS'],
+      ['src/ui/itemTooltip.ts', F('WIRE_MECHANISM_TILES'), 'IS_A_MECHANISM_SHEETS'],
+      ['src/ui/itemTooltip.ts', F('WIRE_TRIGGER_TILES'), 'IS_A_TRIGGER_SHEETS'],
+      ['src/world/gen/vanilla/BrokenTrapCleanupPass.ts', IDSV('IS_A_MECHANISM'), 'IS_A_MECHANISM_IDS'],
+      ['src/world/gen/vanilla/BrokenTrapCleanupPass.ts', IDSV('IS_A_TRIGGER'), 'IS_A_TRIGGER_IDS'],
+      ['src/world/gen/vanilla/BrokenTrapCleanupPass.ts', IDSV('IGNORE_WHEN_VALIDATING'), 'IGNORE_WHEN_VALIDATING_TRAPS_IDS'],
+      // 照明/交互/高亮/杂项
+      ['src/lighting/lightTables.ts', F('ALLOW_LIGHT_IN_WATER_SHEETS'), 'data/tiles.ts 单源(TileLightScanner 直引)'],
+      ['src/physics/TileCollision.ts', F('NPC_STEPUP_IGNORE'), 'IGNORED_BY_NPC_STEP_UP_SHEETS'],
+      ['src/player/PlayerSitting.ts', F('SITTABLE_SHEETS'), 'CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS'],
+      ['src/core/SmartInteractTiles.ts', F('CAMPFIRE_TILES'), 'CAMPFIRES_SHEETS'],
+      ['src/core/SmartInteractTiles.ts', F('COUNTS_AS_WATER_FOR_CRAFTING'), 'COUNTS_AS_WATER_FOR_CRAFTING_SHEETS'],
+      ['src/core/SmartInteractTiles.ts', F('DISABLE_SMART_INTERACT'), 'DISABLE_SMART_INTERACT_SHEETS'],
+      ['src/render/TileHighlight.ts', F('TILE_HAS_OUTLINES'), 'HAS_OUTLINES_SHEETS'],
+      ['src/player/SmartCursor.ts', F('TORCH_TILES'), 'TORCHES_SHEETS'],
+      ['src/core/Game.ts', F('NATURE_FLIES'), 'SPAWNS_NATURE_FLIES_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', F('LAVA_BURN_TO_DIRT'), 'LAVA_BURN_TO_DIRT_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', /new Set\(\s*\[\s*88\s*\]\)/, 'BASIC_DRESSER_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', F('BASIC_DRESSER_S'), 'BASIC_DRESSER_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', F('BASIC_CHEST_FAKE_S'), 'BASIC_CHEST_FAKE_SHEETS'],
+    ];
+    const REQUIRED: Array<[string, string]> = [
+      ['src/render/TileMergeFamily.ts', 'SETS_DIRT_SHEETS'],
+      ['src/render/TileMergeFamily.ts', 'DONT_MERGE_WITH_SNOW_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'CHECKS_FOR_MERGE_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'GRASS_SPECIAL_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'HAS_SLOPE_FRAMES_SHEETS'],
+      ['src/render/VanillaFraming.ts', 'PLATFORMS_SHEETS'],
+      ['src/render/VanillaTiler.ts', 'BLOCKS_STAIRS_SHEETS'],
+      ['src/render/VanillaTiler.ts', 'ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS'],
+      ['src/render/VanillaTiler.ts', 'DONT_DRAW_TILE_SLOPES_SHEETS'],
+      ['src/world/gen/vanilla/TileRunner.ts', 'NON_SOLID_SAVE_SLOPES_SHEETS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', 'NON_SOLID_SAVE_SLOPES_IDS'],
+      ['src/world/gen/vanilla/TileCleanupPass.ts', 'SLOWLY_DIES_IN_WATER_IDS'],
+      ['src/world/gen/vanilla/QuickCleanupPass.ts', 'NON_SOLID_SAVE_SLOPES_IDS'],
+      ['src/wld/WldImport.ts', 'NON_SOLID_SAVE_SLOPES_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'SPREAD_OVERGROUND_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'SLOWLY_DIES_IN_WATER_SHEETS'],
+      ['src/world/evolution/WorldEvolution.ts', 'CAN_GROW_CRYSTAL_SHARDS_SHEETS'],
+      ['src/world/gen/vanilla/FinalCleanupPass.ts', 'PAINTINGS_IDS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'PREVENTS_SLOPES_DURING_GENERATION_IDS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'PLATFORMS_IDS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'BASIC_DRESSER_SHEETS'],
+      ['src/world/gen/vanilla/HalfBrickPass.ts', 'BASIC_CHEST_FAKE_SHEETS'],
+      ['src/world/gen/vanilla/TrackPass.ts', 'GENERAL_PLACEMENT_TILES_IDS'],
+      ['src/world/gen/vanilla/GenState.ts', 'GENERAL_PLACEMENT_TILES_SHEETS'],
+      ['src/entities/TownNPC.ts', 'AVOIDED_BY_NPCS_SHEETS'],
+      ['src/entities/TownNPC.ts', 'INTERACTABLE_BY_NPCS_SHEETS'],
+      ['src/world/Housing.ts', 'HOUSING_WALLS_SHEETS'],
+      ['src/world/Housing.ts', 'IGNORED_IN_HOUSE_SCORE_SHEETS'],
+      ['src/ui/itemTooltip.ts', 'IS_A_MECHANISM_SHEETS'],
+      ['src/ui/itemTooltip.ts', 'IS_A_TRIGGER_SHEETS'],
+      ['src/world/gen/vanilla/BrokenTrapCleanupPass.ts', 'IS_A_MECHANISM_IDS'],
+      ['src/world/gen/vanilla/BrokenTrapCleanupPass.ts', 'IS_A_TRIGGER_IDS'],
+      ['src/world/gen/vanilla/BrokenTrapCleanupPass.ts', 'IGNORE_WHEN_VALIDATING_TRAPS_IDS'],
+      ['src/lighting/TileLightScanner.ts', 'ALLOW_LIGHT_IN_WATER_SHEETS'],
+      ['src/physics/TileCollision.ts', 'IGNORED_BY_NPC_STEP_UP_SHEETS'],
+      ['src/player/PlayerSitting.ts', 'CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS'],
+      ['src/core/SmartInteractTiles.ts', 'CAMPFIRES_SHEETS'],
+      ['src/core/SmartInteractTiles.ts', 'COUNTS_AS_WATER_FOR_CRAFTING_SHEETS'],
+      ['src/core/SmartInteractTiles.ts', 'DISABLE_SMART_INTERACT_SHEETS'],
+      ['src/render/TileHighlight.ts', 'HAS_OUTLINES_SHEETS'],
+      ['src/player/SmartCursor.ts', 'TORCHES_SHEETS'],
+      ['src/core/Game.ts', 'SPAWNS_NATURE_FLIES_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', 'LAVA_BURN_TO_DIRT_SHEETS'],
+      ['src/world/liquid/LiquidSim.ts', 'BASIC_DRESSER_SHEETS'],
+    ];
+    it('禁复活:BJ221 收编副本字面定义签名禁入（单源别名/拷贝转出口不受影响）', () => {
       for (const [file, sig] of FORBIDDEN) {
         expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
       }

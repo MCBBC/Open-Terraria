@@ -9,6 +9,7 @@
 //   研究行。
 import type { ITEM_DEFS } from '../data/items';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { IS_A_MECHANISM_SHEETS, IS_A_TRIGGER_SHEETS } from '../data/tiles';   // ★BJ221 Wiring 二表单源（§6k）
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { statOfInternal } from '../data/vanillaItemStats';
@@ -125,15 +126,12 @@ const TILE_WAND_CONSUME: Record<number, number> = {
 };
 
 /** 击退档（:20602-20632） */
-/** 接线集（TileID.cs:132-134 Wiring.IsAMechanism/IsATrigger + ItemID.cs:1422
- *  IsWireableStatue，Factory.CreateBoolSet 列表成员 = true）：
- *  createTile ∈ 机制/触发器 且（createTile≠105 或物品 ∈ 可接线雕像集）→ tip Wireable */
-const WIRE_MECHANISM_TILES = new Set([420, 419, 411, 4, 33, 100, 93, 42, 34, 215, 405, 92, 35, 126, 95,
-  149, 593, 594, 564, 10, 11, 387, 386, 388, 389, 137, 443, 141, 130, 131, 546, 557, 421, 422, 209,
-  212, 216, 338, 335, 497, 406, 244, 452, 565, 139, 506, 105, 349, 531, 429, 142, 143, 235, 210,
-  425, 21, 467, 219, 642, 356, 663, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266,
-  267, 268, 207, 480, 455, 509, 657, 658, 720, 721, 725, 733, 314]);
-const WIRE_TRIGGER_TILES = new Set([135, 136, 132, 144, 411, 423, 476, 440, 441, 468]);
+/** 接线集（TileID.cs:132-134 Wiring.IsAMechanism/IsATrigger（旧注 :132-134 同）+
+ *  ItemID.cs:1422 IsWireableStatue，Factory.CreateBoolSet 列表成员 = true）：
+ *  createTile ∈ 机制/触发器 且（createTile≠105 或物品 ∈ 可接线雕像集）→ tip Wireable
+ *  ★BJ221 收编单源 data/tiles.ts:IS_A_MECHANISM_SHEETS/IS_A_TRIGGER_SHEETS（§6k） */
+const WIRE_MECHANISM_TILES = IS_A_MECHANISM_SHEETS;
+const WIRE_TRIGGER_TILES = IS_A_TRIGGER_SHEETS;
 const WIREABLE_STATUE_ITEMS = new Set([441, 449, 466, 471, 3651, 3652, 3653, 3654, 3655, 3656, 3657,
   3658, 3659, 3660, 3661, 3662, 3708, 3709, 3710, 3711, 3712, 3713, 3714, 3715, 3716, 3717, 3718,
   3719, 3720, 4397, 4360, 4342, 4466, 5317, 5318, 5319, 440, 443, 444, 445, 446, 452, 454, 459,

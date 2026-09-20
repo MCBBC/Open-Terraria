@@ -7,10 +7,11 @@ import { lightIsOn } from '../world/wiring/devices';
 import { TileStore } from '../world/TileStore';
 import { FastRandom } from './FastRandom';
 import {
-  ALLOW_LIGHT_IN_WATER_SHEETS, CRACKED_SHEETS, FLICKER_SHEETS, MUSHROOM_GLOW_SHEETS,
+  CRACKED_SHEETS, FLICKER_SHEETS, MUSHROOM_GLOW_SHEETS,
   TILE_BLOCK_LIGHT_SHEETS, TILE_NO_SUN_LIGHT_SHEETS, TORCH_COLORS,
   WALL_EMISSIVE, WALL_EMISSIVE_GATED, WALL_LIGHT, shimmerDarken, shimmerWaterAlpha,
 } from './lightTables';
+import { ALLOW_LIGHT_IN_WATER_SHEETS } from '../data/tiles';   // TileID.Sets.AllowLightInWater(:363)——★BJ221 收编单源（§6k）
 import { paintColor } from '../world/Paint';
 import { FlickerClock, skySeed } from './SkyColor';
 import { LightMap, Mask } from './LightMap';

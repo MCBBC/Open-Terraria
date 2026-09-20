@@ -23,8 +23,7 @@
 //
 // 零掷骰 → 不收 rng。
 import { TileStore } from '../../TileStore';
-import { TILE_DEFS, TILE_BY_KEY, BOULDERS_IDS } from '../../../data/tiles';
-import { idsByVanillaSheet } from './TileRunner';
+import { TILE_DEFS, TILE_BY_KEY, BOULDERS_IDS, IS_A_MECHANISM_IDS, IS_A_TRIGGER_IDS, IGNORE_WHEN_VALIDATING_TRAPS_IDS } from '../../../data/tiles';
 import { genKillTile } from './FinalCleanupPass';
 import type { RNG } from '../../../core/rng';
 import { RNG as RNGCtor } from '../../../core/rng';
@@ -41,18 +40,11 @@ for (const d of TILE_DEFS) {
 }
 const sid = (sheet: number): number => SHEET_TO_INTERNAL.get(sheet) ?? 0;
 
-/** TileID.Sets.Wiring.IsAMechanism(TileID.cs:130) */
-const IS_A_MECHANISM = idsByVanillaSheet(
-  420, 419, 411, 4, 33, 100, 93, 42, 34, 215, 405, 92, 35, 126, 95, 149, 593, 594, 564,
-  10, 11, 387, 386, 388, 389, 137, 443, 141, 130, 131, 546, 557, 421, 422, 209, 212, 216,
-  338, 335, 497, 406, 244, 452, 565, 139, 506, 105, 349, 531, 429, 142, 143, 235, 210, 425,
-  21, 467, 219, 642, 356, 663, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266,
-  267, 268, 207, 480, 455, 509, 657, 658, 720, 721, 725, 733, 314,
-);
-/** TileID.Sets.Wiring.IsATrigger(TileID.cs:132) */
-const IS_A_TRIGGER = idsByVanillaSheet(135, 136, 132, 144, 411, 423, 476, 440, 441, 468);
-/** TileID.Sets.Wiring.IgnoreWhenValidatingTraps(TileID.cs:134) */
-const IGNORE_WHEN_VALIDATING = idsByVanillaSheet(411, 10, 11, 387, 386, 388, 389, 4, 215, 21, 467, 219, 642, 314);
+/** TileID.Sets.Wiring 三表（TileID.cs:132/:134/:136,旧注 :130/:132/:134 系行号漂移）
+ *  ——★BJ221 收编单源 data/tiles.ts 内部域镜像（与旧 idsByVanillaSheet 平移副本逐值全等,§6k） */
+const IS_A_MECHANISM = IS_A_MECHANISM_IDS;
+const IS_A_TRIGGER = IS_A_TRIGGER_IDS;
+const IGNORE_WHEN_VALIDATING = IGNORE_WHEN_VALIDATING_TRAPS_IDS;
 /** TileID.Sets.Boulders(TileID.cs:195) */
 // ★BJ182b 收编单源 data/tiles.ts:BOULDERS_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const BOULDERS = BOULDERS_IDS;

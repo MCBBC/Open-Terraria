@@ -26,8 +26,8 @@ import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_IDS } from '../../../data/tiles';
-import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
+import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_IDS, NON_SOLID_SAVE_SLOPES_IDS } from '../../../data/tiles';
+import { NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType } from './GenSolid';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0（空格）安全退化 */
@@ -53,7 +53,7 @@ const TRAP = sid(137);          // (e) 邻格机关陷阱 → 清除（cs:18084/
 const WALL_SANDSTONE = 187;     // WallID.Sandstone（地下沙漠天然沙岩墙）
 const WALL_HARDSAND = 216;      // WallID.HardenedSand（天然硬化沙墙）
 
-const NON_SOLID_SAVE_SLOPES = idsByVanillaSheet(131, 351, 336, 340, 341, 342, 343, 344);
+const NON_SOLID_SAVE_SLOPES = NON_SOLID_SAVE_SLOPES_IDS;   // TileID.Sets.NonSolidSaveSlopes(:179)——★BJ221 收编单源 data/tiles.ts 内部域镜像（§6k）
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_IDS(内部 id 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const PLATFORMS = PLATFORMS_IDS;
 

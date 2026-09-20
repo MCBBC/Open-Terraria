@@ -32,13 +32,15 @@ const md5 = (p: string) => createHash('md5').update(readFileSync(p)).digest('hex
 const TMP = realpathSync(tmpdir());
 
 describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸）', () => {
-  it('行为面:缺省干跑零写盘;现库领先面非空=洗库预警 exit 1+差异清单', () => {
+  it('行为面:缺省干跑零写盘;★BJ217 词表恢复后重产盖住现库（多重集逐值全等）exit 0', () => {
     const before = md5(TS_LIVE);
     const r = spawnSync('node', [TS_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('洗库预警');
-    expect(r.stderr).toContain('anyBossKill');      // BJ215 定谳领先面物证（richer cond 词表）
-    expect(r.stderr).toContain('ids');
+    // BJ215 时点:现库领先（anyBossKill/ids 组等 4+9 条）→ exit 1;BJ217 词表恢复
+    // （TRAVEL_CONDS 精匹配表+ids 组+hardModeUp 捕获）→ 重产盖住现库 → exit 0。
+    // 现库与重产的唯一偏差=2281-2283 组条目位序（源码位序 vs 手补末位追加,
+    // 工具头注 ★BJ217 段）,多重集对拍不受影响。
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('重产盖住现库');
     expect(md5(TS_LIVE)).toBe(before);
   });
 
@@ -57,7 +59,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     }
   });
 
-  it('行为面:--out 与 --write-real 双旗互斥;--write-real 非纯增量拒+差异清单', () => {
+  it('行为面:--out 与 --write-real 双旗互斥;--write-real 非纯增量拒+差异清单（假现库重定向,真库零接触）', () => {
     const before = md5(TS_LIVE);
     const r = spawnSync('node', [TS_SCRIPT, '--out', '/tmp/bj215-mutual.json', '--write-real'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
@@ -65,11 +67,31 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('双旗互斥');
 
-    const r2 = spawnSync('node', [TS_SCRIPT, '--write-real'], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
-    expect(r2.status).toBe(1);
-    expect(r2.stderr).toContain('拒绝 --write-real');
-    expect(r2.stderr).toContain('非纯增量');
-    expect(md5(TS_LIVE)).toBe(before);               // 闸在写前拒
+    // ★BJ217 重设计：词表恢复后真现库对拍可为零漂移——--write-real 若直跑真库路径
+    // 会真实写入（BJ215 时代靠「非纯增量拒」兜底已不成立）。守卫改走 mutant 重定向
+    // 假现库：毒化假现库（注入重产缺条）→ 拒+差异清单;假现库/真库均零写入。
+    const dir = mkdtempSync(join(TMP, 'travelshop-guard-'));
+    try {
+      const src = readFileSync(TS_SCRIPT, 'utf8');
+      const TRIGGER = "const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');";
+      expect(src).toContain(TRIGGER);
+      const fakeLive = join(dir, 'vanilla-travelshop.json');
+      copyFileSync(TS_LIVE, fakeLive);
+      const poisoned = JSON.parse(readFileSync(fakeLive, 'utf8')) as { items: Array<Record<string, unknown>> };
+      poisoned.items.unshift({ id: 9999, tier: 0, cond: 'anyBossKill' });   // 注入领先条目
+      writeFileSync(fakeLive, JSON.stringify(poisoned));
+      const beforeFake = md5(fakeLive);
+      const mutant = join(dir, 'extract-travelshop-mutant-live.mjs');
+      writeFileSync(mutant, src.replace(TRIGGER, `const LIVE_JSON = ${JSON.stringify(fakeLive)};`));
+      const r2 = spawnSync('node', [mutant, '--write-real'], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
+      expect(r2.status).toBe(1);
+      expect(r2.stderr).toContain('拒绝 --write-real');
+      expect(r2.stderr).toContain('非纯增量');
+      expect(md5(fakeLive)).toBe(beforeFake);        // 假现库零写入（闸在写前拒）
+      expect(md5(TS_LIVE)).toBe(before);             // 真库零接触
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('回归面:cwd footgun 修复——从仓库根裸跑仍走锚定路径（守卫判定,而非写错位置）', () => {
@@ -78,8 +100,8 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     const before = md5(TS_LIVE);
     // 旧实现会写 repoRoot/src/data/vanilla-travelshop.json（相对 cwd）;新实现=干跑+锚定读真库
     const r = spawnSync('node', [TS_SCRIPT], { cwd: repoRoot, encoding: 'utf8', timeout: 300_000 });
-    expect(r.status).toBe(1);                        // 守卫判定（现库领先面）而非 ENOENT 崩
-    expect(r.stderr).toContain('洗库预警');
+    expect(r.status).toBe(0);                        // ★BJ217:干跑对拍零漂移（守卫判定,非 ENOENT 崩）
+    expect(r.stderr).toContain('重产盖住现库');
     expect(existsSync(stray)).toBe(false);           // 错位文件未被创建
     expect(md5(TS_LIVE)).toBe(before);
   });
@@ -151,14 +173,39 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
 });
 
 describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）', () => {
-  it('行为面:缺省干跑零写盘;现库领先面非空=洗库预警 exit 1+差异清单', () => {
+  it('行为面:缺省干跑零写盘;★BJ222 数据面修正后重产盖住现库 exit 0;干跑 loud 支转合成毒化保持', () => {
     const before = md5(SS_LIVE);
     const r = spawnSync('node', [SS_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('洗库预警');
-    expect(r.stderr).toContain('npc 17');            // BJ215 定谳:多家商店条目领先
-    expect(r.stderr).toContain('tenthNotBees');      // richer cond 词表物证
+    // BJ215 时点:十余家现库领先 132 条 → exit 1;BJ217 词表恢复后 live-only 残差仅
+    // 353 的 2863/3259 → 仍 exit 1;★BJ222 数据刀补火星门（cond='hardMode&&downedMartians',
+    // Chest.cs:2771）→ live-only 清零 → 重产盖住现库 exit 0（fresh-only 4 店 58 条
+    // 维持不写入,工具干跑语义）。
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('重产盖住现库');
     expect(md5(SS_LIVE)).toBe(before);
+
+    // 干跑 loud 支判别力不降（原天然残差触发面消失 → mutant 重定向毒化假现库,
+    // BJ217 --write-real 守卫同款习语）：假现库注入重产缺条 → 裸跑必 exit 1+差异清单。
+    const dir = mkdtempSync(join(TMP, 'shops-guard-'));
+    try {
+      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const TRIGGER = "const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
+      expect(src).toContain(TRIGGER);
+      const fakeLive = join(dir, 'vanilla-shopstock.json');
+      copyFileSync(SS_LIVE, fakeLive);
+      const poisoned = JSON.parse(readFileSync(fakeLive, 'utf8')) as { shops: Record<string, Array<Record<string, unknown>>> };
+      poisoned.shops['17'].unshift({ id: 9999, price: 1, cond: null });   // 注入领先条目
+      writeFileSync(fakeLive, JSON.stringify(poisoned));
+      const mutant = join(dir, 'extract-shops-mutant-live.mjs');
+      writeFileSync(mutant, src.replace(TRIGGER, `const LIVE_JSON = ${JSON.stringify(fakeLive)};`));
+      const r2 = spawnSync('node', [mutant], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
+      expect(r2.status).toBe(1);
+      expect(r2.stderr).toContain('洗库预警');
+      expect(r2.stderr).toContain('npc 17');           // 差异清单物证（毒化店）
+      expect(md5(SS_LIVE)).toBe(before);               // 真库零接触
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('行为面:--out 沙箱显式写（values+shops 双段,现库零接触）', () => {
@@ -177,7 +224,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     }
   });
 
-  it('行为面:--out 与 --write-real 双旗互斥;--write-real 非纯增量拒+差异清单', () => {
+  it('行为面:--out 与 --write-real 双旗互斥;--write-real 非纯增量拒+差异清单（假现库重定向）', () => {
     const before = md5(SS_LIVE);
     const r = spawnSync('node', [SS_SCRIPT, '--out', '/tmp/bj215-mutual2.json', '--write-real'], {
       cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
@@ -185,10 +232,29 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('双旗互斥');
 
-    const r2 = spawnSync('node', [SS_SCRIPT, '--write-real'], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
-    expect(r2.status).toBe(1);
-    expect(r2.stderr).toContain('拒绝 --write-real');
-    expect(md5(SS_LIVE)).toBe(before);
+    // ★BJ217 重设计：--write-real 不再直跑真库路径（真现库残差仅 2 条,守卫拒依赖
+    // 残差存在——一旦数据刀修正即失效）。mutant 重定向毒化假现库 → 拒+清单。
+    const dir = mkdtempSync(join(TMP, 'shops-guard-'));
+    try {
+      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const TRIGGER = "const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
+      expect(src).toContain(TRIGGER);
+      const fakeLive = join(dir, 'vanilla-shopstock.json');
+      copyFileSync(SS_LIVE, fakeLive);
+      const poisoned = JSON.parse(readFileSync(fakeLive, 'utf8')) as { shops: Record<string, Array<Record<string, unknown>>> };
+      poisoned.shops['17'].unshift({ id: 9999, price: 1, cond: null });   // 注入领先条目
+      writeFileSync(fakeLive, JSON.stringify(poisoned));
+      const beforeFake = md5(fakeLive);
+      const mutant = join(dir, 'extract-shops-mutant-live.mjs');
+      writeFileSync(mutant, src.replace(TRIGGER, `const LIVE_JSON = ${JSON.stringify(fakeLive)};`));
+      const r2 = spawnSync('node', [mutant, '--write-real'], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
+      expect(r2.status).toBe(1);
+      expect(r2.stderr).toContain('拒绝 --write-real');
+      expect(md5(fakeLive)).toBe(beforeFake);        // 假现库零写入（闸在写前拒）
+      expect(md5(SS_LIVE)).toBe(before);             // 真库零接触
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('回归面:cwd footgun 修复——从仓库根裸跑仍走锚定路径', () => {
@@ -196,8 +262,10 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     const stray = join(repoRoot, 'src', 'data', 'vanilla-shopstock.json');
     const before = md5(SS_LIVE);
     const r = spawnSync('node', [SS_SCRIPT], { cwd: repoRoot, encoding: 'utf8', timeout: 300_000 });
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain('洗库预警');
+    // ★BJ222:干跑对拍零漂移（守卫判定,非洗库预警）——从仓库根跑仍走 import.meta.url
+    //   锚定路径读真库,错位文件不创建（travelshop 姊妹测试同钉值）。
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('重产盖住现库');
     expect(existsSync(stray)).toBe(false);
     expect(md5(SS_LIVE)).toBe(before);
   });

@@ -8,7 +8,7 @@ import type { Player } from './Player';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
-import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS, TILE_DUNGEON_SHEETS } from '../data/tiles';
+import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS, TILE_DUNGEON_SHEETS, AVOIDED_BY_NPCS_SHEETS, INTERACTABLE_BY_NPCS_SHEETS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TOWN_NPC_IDS, VANILLA_NPCS, vanillaSoundFiles } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable, isNpcShimmerImmune, findShimmerFreeSpot } from '../stats/Shimmer';
@@ -381,20 +381,12 @@ const VANILLA_DUNGEON_TILES = (() => {
   return s;
 })();
 
-/** TileID.Sets.AvoidedByNPCs（TileID.cs:373）：SearchAvoidedByNPCs 谓词底表 */
-export const AVOIDED_BY_NPC_SHEETS = new Set([
-  21, 467, 55, 85, 395, 88, 463, 334, 29, 97, 99, 356, 663, 425, 440, 209,
-  441, 468, 471, 491, 510, 511, 520, 573, 698,
-]);
-/** TileID.Sets.InteractableByNPCs（TileID.cs:375）：驻足看家具（ai[0]==9）格门 */
-export const INTERACTABLE_BY_NPC_SHEETS = new Set([
-  17, 77, 133, 12, 665, 639, 26, 695, 35, 36, 55, 395, 471, 698, 21, 467, 29,
-  97, 88, 99, 463, 491, 33, 372, 174, 49, 646, 100, 173, 78, 79, 94, 96, 101,
-  50, 707, 103, 282, 106, 114, 125, 171, 172, 207, 215, 220, 219, 244, 228,
-  237, 247, 128, 269, 354, 355, 377, 287, 378, 390, 302, 405, 406, 411, 425,
-  209, 441, 468, 452, 454, 455, 457, 462, 470, 475, 494, 499, 505, 511, 510,
-  520, 543, 565, 573, 597, 598, 617, 621, 464, 642, 699,
-]);
+/** TileID.Sets.AvoidedByNPCs（TileID.cs:377，旧注 :373 系行号漂移）：SearchAvoidedByNPCs
+ *  谓词底表——★BJ221 收编单源 data/tiles.ts:AVOIDED_BY_NPCS_SHEETS（转出口别名,§6k） */
+export const AVOIDED_BY_NPC_SHEETS = AVOIDED_BY_NPCS_SHEETS;
+/** TileID.Sets.InteractableByNPCs（TileID.cs:379，旧注 :375 系行号漂移）：驻足看家具
+ *  （ai[0]==9）格门——★BJ221 收编单源（转出口别名,§6k） */
+export const INTERACTABLE_BY_NPC_SHEETS = INTERACTABLE_BY_NPCS_SHEETS;
 
 /** TileID.Sets.AvoidedByNPCs / InteractableByNPCs 的本仓 tile id 空间版
  *  （vanilla.sheet 反查，LiquidSim bySheet 同款） */

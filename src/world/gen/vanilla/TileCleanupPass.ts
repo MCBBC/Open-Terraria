@@ -35,9 +35,8 @@ import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS, CONV_SANDSTONE_IDS, CONV_HARDENED_SAND_IDS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, PLATFORMS_SHEETS, IS_A_TREE_TRUNK_SHEETS, SOLID_TOP_SHEETS, CONV_SANDSTONE_IDS, CONV_HARDENED_SAND_IDS, NON_SOLID_SAVE_SLOPES_IDS, SLOWLY_DIES_IN_WATER_IDS } from '../../../data/tiles';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../../../data/items';
-import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';   // SSSS：④ KillTile 尾部级联
 
@@ -51,8 +50,10 @@ export function sheetId(sheet: number): number {
   return SHEET_TO_INTERNAL.get(sheet) ?? 0;
 }
 
-const NON_SOLID_SAVE_SLOPES = idsByVanillaSheet(131, 351, 336, 340, 341, 342, 343, 344);
-const SLOWLY_DIES_IN_WATER = idsByVanillaSheet(3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 590, 595, 615, 637);
+// TileID.Sets.NonSolidSaveSlopes(:179)/SlowlyDiesInWater(:249)——★BJ221 收编单源
+// data/tiles.ts 内部域镜像（与旧 idsByVanillaSheet 平移副本逐值全等,§6k）
+const NON_SOLID_SAVE_SLOPES = NON_SOLID_SAVE_SLOPES_IDS;
+const SLOWLY_DIES_IN_WATER = SLOWLY_DIES_IN_WATER_IDS;
 /** TileID.Sets.Conversion.Sandstone/HardenedSand(TileID.cs:34/:32)——★BJ210 收编单源
  *  data/tiles.ts:CONV_SANDSTONE_IDS/CONV_HARDENED_SAND_IDS（内部 id 域,§6i） */
 const CONV_SANDSTONE = CONV_SANDSTONE_IDS;

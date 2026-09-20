@@ -1544,6 +1544,267 @@ export const DUNGEON_UNION_CRACKED_IDS: ReadonlySet<number> = (() => {
   return out;
 })();
 
+// ===================== TileID.Sets 家族第五收编批（★BJ221 2026-09-20） =====================
+// BJ218 普查残留副本族第三清偿：分帧/世界生成/NPC 寻路/房屋/接线/照明/坐席/
+// 智能交互/高亮九域 ~40 表 51 处字面副本（含 4 处匿名 inline）。逐值对拍
+// Terarria1457/Terraria.ID/TileID.cs 亲读终值全等（tools 校验脚本 /tmp/bj221-verify.mjs
+// 逐族 SAME ×51；1458 抽核同行号同值零增量——:12-:419 全 44 行一致）。收编法同
+// 前四批：纯同值收编单源+消费面改指；值同语义异案（LiquidSim.LAVA_BURN_TO_DIRT
+// ≡GrassSpecial）按 BJ218 AshGround 判例=单一值源+消费语义名导出。半砖
+// PLATFORMS_4X2 ≡ Platforms(:243) 同值——按三名同值判例直接改指既有
+// PLATFORMS_IDS 单源（勿重定义）。测试=tests/tile-domain-sentinel §6k。
+// ★照登项维持（BJ218 登记，本批不收）：TeleportSpotCheck.SHEET_TOUCH_IMMEDIATE_GT0
+//   （TouchDamageImmediate :393 是 int 表=伤害值+0 哨兵键域，非纯集合）/
+//   PlantRules.GRASS_CONVERT_SHEETS（本仓自造放置路由域，语义源非原版本表）。
+// ---- 分帧域（VanillaFraming S256/VanillaTileMergeFamily Set 消费;sheet 域） ----
+/** TileID.Sets.ChecksForMerge（TileID.cs:373 全 51 型）——TileFrame 合并检查门
+ *  （分帧邻接归一参与面;VanillaFraming S.checksForMerge 消费） */
+export const CHECKS_FOR_MERGE_SHEETS: ReadonlySet<number> = new Set([
+  0, 668, 2, 661, 60, 70, 199, 662, 109, 477, 492, 633, 747, 57, 58, 75, 76, 684, 147, 161, 164,
+  163, 200, 162, 189, 196, 460, 717, 718, 719, 170, 738, 224, 191, 383, 211, 225, 59, 226, 396,
+  397, 398, 399, 402, 400, 401, 403, 404, 234, 112, 407,
+]);
+/** TileID.Sets.ForcedDirtMerging（TileID.cs:185 全 60 型）——强制按泥土参与合并
+ *  （TileMergeAttemptWeird 前置;VanillaFraming 消费） */
+export const FORCED_DIRT_MERGING_SHEETS: ReadonlySet<number> = new Set([
+  75, 76, 508, 507, 226, 409, 669, 670, 671, 672, 673, 674, 675, 676, 683, 684, 273, 274, 459, 458,
+  326, 327, 345, 328, 329, 192, 384, 284, 325, 272, 268, 262, 267, 265, 266, 264, 263, 261, 255,
+  260, 258, 259, 257, 256, 54, 357, 708, 385, 735, 736, 737, 738, 741, 742, 743, 745, 746, 747,
+  748, 749,
+]);
+/** TileID.Sets.MergesWithClouds（TileID.cs:191 全 5 型=雨云/雪云/三月云族）——
+ *  云块合并门（≠Clouds(:197) 全 6 型,缺 189 云本体） */
+export const MERGES_WITH_CLOUDS_SHEETS: ReadonlySet<number> = new Set([196, 460, 717, 718, 719]);
+/** TileID.Sets.DontMergeWithSnow（TileID.cs:193 全 7 型=冰族五+170 雪泥砖+738 雪 brick）——
+ *  雪块合并排除表（TileMergeAttempt 三参重载 cs:81882 第二参=排除表;TileMergeFamily
+ *  frameMergesWith num147 支消费） */
+export const DONT_MERGE_WITH_SNOW_SHEETS: ReadonlySet<number> = new Set([161, 200, 163, 164, 224, 170, 738]);
+/** TileID.Sets.Dirt（TileID.cs:285={0,668}）——泥土族归一门（TileFrameCosmetic
+ *  :82259 邻居改写;668=DirtiestBlock 同域）。★≠Conversion.Dirt(:22={0}) */
+export const SETS_DIRT_SHEETS: ReadonlySet<number> = new Set([0, 668]);
+/** TileID.Sets.Mud（TileID.cs:287={59}） */
+export const SETS_MUD_SHEETS: ReadonlySet<number> = new Set([59]);
+/** TileID.Sets.Ash（TileID.cs:289={57}） */
+export const SETS_ASH_SHEETS: ReadonlySet<number> = new Set([57]);
+/** TileID.Sets.GrassSpecial（TileID.cs:299 全 4 型=丛林草70/草60/腐草661/猩草662）——
+ *  TileMergeAttempt(:83264) 草族特判。
+ *  ★值同语义异备案（BJ221）：LiquidSim.LAVA_BURN_TO_DIRT（Liquid.cs:1561 字面 switch
+ *  `type==60||==70||==661||==662`→改写 59 泥;原版彼处**不读** GrassSpecial 表）——
+ *  单值巧合同值,收编同一值源+本语义名转出口;原版任一面扩值金标即红强制重审。 */
+export const GRASS_SPECIAL_SHEETS: ReadonlySet<number> = new Set([70, 60, 661, 662]);
+/** Liquid.cs:1561 岩浆烧草→泥土语义名（同值转出口;见 GRASS_SPECIAL_SHEETS 注） */
+export const LAVA_BURN_TO_DIRT_SHEETS: ReadonlySet<number> = GRASS_SPECIAL_SHEETS;
+/** TileID.Sets.JungleSpecial（TileID.cs:301 全 3 型=226 丛林蜥蜴砖/225 蜂巢/211 叶绿矿） */
+export const JUNGLE_SPECIAL_SHEETS: ReadonlySet<number> = new Set([226, 225, 211]);
+/** TileID.Sets.HellSpecial（TileID.cs:303 全 3 型=58 狱石/76 黑曜石/75 狱石砖） */
+export const HELL_SPECIAL_SHEETS: ReadonlySet<number> = new Set([58, 76, 75]);
+/** TileID.Sets.HasSlopeFrames（TileID.cs:267={421,422}传送带）——专属坡帧表
+ *  （TileDrawing 坡面整帧支;VanillaTiler/VanillaFraming 双消费） */
+export const HAS_SLOPE_FRAMES_SHEETS: ReadonlySet<number> = new Set([421, 422]);
+// ---- 渲染坡面域（VanillaTiler sheet 域消费） ----
+/** TileID.Sets.BlocksStairs（TileID.cs:357 全 6 型）——平台坡面连接补片抑制族
+ *  （TileDrawing.cs:1551/:1565 正下方整块/坡4 门） */
+export const BLOCKS_STAIRS_SHEETS: ReadonlySet<number> = new Set([386, 387, 54, 328, 459, 541]);
+/** TileID.Sets.DontDrawTileSlopes（TileID.cs:153 全 17 型）——坡面切条禁用族
+ *  （整帧直画;★≠DontDrawTileSliced(:151) 多 160） */
+export const DONT_DRAW_TILE_SLOPES_SHEETS: ReadonlySet<number> = new Set([
+  137, 235, 388, 476, 138, 664, 665, 630, 631, 711, 712, 713, 714, 715, 716, 723, 726,
+]);
+/** TileID.Sets.IgnoresNearbyHalfbricksWhenDrawn（TileID.cs:271 全 15 型）——
+ *  邻接半砖衔接帧豁免（半砖 D1 衔接门排除） */
+export const IGNORES_NEARBY_HALFBRICKS_SHEETS: ReadonlySet<number> = new Set([
+  380, 476, 235, 138, 664, 137, 484, 421, 422, 711, 712, 713, 714, 715, 716,
+]);
+/** TileID.Sets.AllBlocksWithSmoothBordersToResolveHalfBlockIssue（TileID.cs:175
+ *  全 109 型）——半砖衔接缝 2px 边条宽门（TileDrawing.cs:1650 num=2:4 分派） */
+export const ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS: ReadonlySet<number> = new Set([
+  321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46,
+  176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692,
+  160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345,
+  328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311,
+  426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473,
+  477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748,
+]);
+// ---- 世界生成/存档域 ----
+/** TileID.Sets.NonSolidSaveSlopes（TileID.cs:179 全 8 型=活火六族+351 水蜡烛+131 魔灯）——
+ *  SaveSlopes(:425-432 PostSetupContent=tileSolid∪本表) 的非固体例外;wld 加载端
+ *  half/slope 落地门（WorldFile.cs:2623）与生成期 isSaveSlope 三支共用 */
+export const NON_SOLID_SAVE_SLOPES_SHEETS: ReadonlySet<number> = new Set([131, 351, 336, 340, 342, 341, 343, 344]);
+/** NonSolidSaveSlopes 内部 id 域镜像（键=TILE_DEFS 注册序;禁以 sheet 裸值查询）。
+ *  TileCleanupPass/QuickCleanupPass idsByVanillaSheet 平移副本收编（8 id——§6k） */
+export const NON_SOLID_SAVE_SLOPES_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (NON_SOLID_SAVE_SLOPES_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.SlowlyDiesInWater（TileID.cs:249 全 14 型）——水淹慢性死（OvergroundTile
+ *  liquid>32 支 cs:72761 KillTile 无掷骰;TileCleanup 清除族同源） */
+export const SLOWLY_DIES_IN_WATER_SHEETS: ReadonlySet<number> = new Set([3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 590, 595, 615, 637]);
+/** SlowlyDiesInWater 内部 id 域镜像（TileCleanupPass idsByVanillaSheet 平移副本收编;§6k） */
+export const SLOWLY_DIES_IN_WATER_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (SLOWLY_DIES_IN_WATER_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.SpawnsNatureFlies（TileID.cs:251 全 13 型=SlowlyDiesInWater ∖ {590 宝石苗}）——
+ *  自然飞虫环境粒子白名单（EmitTileOrchestraAmbient NatureFly 支消费） */
+export const SPAWNS_NATURE_FLIES_SHEETS: ReadonlySet<number> = new Set([3, 20, 24, 27, 73, 201, 80, 110, 529, 530, 595, 615, 637]);
+/** TileID.Sets.GeneralPlacementTiles（TileID.cs:311 CreateBoolSet(true,…列举 28 型=false)）——
+ *  结构放置内容扫描黑名单（StructureMap.CanPlace cs:21/40-53;TrackGenerator 425 支）。
+ *  ★语义=列举者拒放,其余全 true——消费面用 has()=黑名单命中 */
+export const GENERAL_PLACEMENT_TILES_SHEETS: ReadonlySet<number> = new Set([
+  225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70, 151, 21, 31, 696, 467, 12, 665, 639,
+  138, 664, 711, 712, 713, 714, 715, 716,
+]);
+/** GeneralPlacementTiles 内部 id 域镜像（TrackPass idsByVanillaSheet 平移副本收编;§6k;
+ *  GenState.GENERAL_PLACEMENT_FORBID 派生同源） */
+export const GENERAL_PLACEMENT_TILES_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (GENERAL_PLACEMENT_TILES_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.SpreadOverground（TileID.cs:417 全 14 型）——地表蔓延域（草/荆棘/
+ *  苔/灰烬草+226 丛林砖;WorldEvolution OvergroundTile 消费） */
+export const SPREAD_OVERGROUND_SHEETS: ReadonlySet<number> = new Set([2, 23, 661, 32, 60, 70, 109, 199, 662, 352, 477, 492, 633, 226]);
+/** TileID.Sets.SpreadUnderground（TileID.cs:419 全 9 型）——地下蔓延域（同上减
+ *  荆棘 32/352 与普通草 2/477/492） */
+export const SPREAD_UNDERGROUND_SHEETS: ReadonlySet<number> = new Set([23, 661, 109, 199, 662, 60, 70, 633, 226]);
+/** TileID.Sets.CanGrowCrystalShards（TileID.cs:345 全 5 型=珍珠石/珍珠沙/圣沙岩三族）——
+ *  水晶碎块生长基座（WorldEvolution 1/5 掷） */
+export const CAN_GROW_CRYSTAL_SHARDS_SHEETS: ReadonlySet<number> = new Set([117, 116, 164, 402, 403]);
+/** TileID.Sets.Paintings（TileID.cs:187 全 5 型）——背景画族（FinalCleanup 清墙画
+ *  killTile 无墙清除面 cs:4063 消费） */
+export const PAINTINGS_SHEETS: ReadonlySet<number> = new Set([240, 241, 242, 245, 246]);
+/** Paintings 内部 id 域镜像（FinalCleanupPass idsByVanillaSheet 平移副本收编;5 id——§6k） */
+export const PAINTINGS_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (PAINTINGS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.PreventsSlopesDuringGeneration（TileID.cs:323 全 9 型=尖刺/陷阱/
+ *  活木/沙岩砖/地牢砖/压板族）——生成期坡面压制（HalfBrickPass 坡面分支门） */
+export const PREVENTS_SLOPES_DURING_GENERATION_SHEETS: ReadonlySet<number> = new Set([48, 137, 232, 191, 151, 274, 135, 442, 428]);
+/** PreventsSlopesDuringGeneration 内部 id 域镜像（HalfBrickPass T.PREVENTS_SLOPES
+ *  平移副本收编;9 id——§6k） */
+export const PREVENTS_SLOPES_DURING_GENERATION_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (PREVENTS_SLOPES_DURING_GENERATION_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+// ---- NPC 寻路/房屋/坐席域（TownNPC/Housing/TileCollision/PlayerSitting sheet 域） ----
+/** TileID.Sets.AvoidedByNPCs（TileID.cs:377 全 25 型）——NPC 寻路回避（SearchAvoided
+ *  谓词底表;TownNPC 消费） */
+export const AVOIDED_BY_NPCS_SHEETS: ReadonlySet<number> = new Set([
+  21, 467, 55, 85, 395, 88, 463, 334, 29, 97, 99, 356, 663, 425, 440, 209,
+  441, 468, 471, 491, 510, 511, 520, 573, 698,
+]);
+/** TileID.Sets.InteractableByNPCs（TileID.cs:379 全 90 型）——NPC 驻足看家具
+ *  （ai[0]==9 格门;TownNPC 消费） */
+export const INTERACTABLE_BY_NPCS_SHEETS: ReadonlySet<number> = new Set([
+  17, 77, 133, 12, 665, 639, 26, 695, 35, 36, 55, 395, 471, 698, 21, 467, 29,
+  97, 88, 99, 463, 491, 33, 372, 174, 49, 646, 100, 173, 78, 79, 94, 96, 101,
+  50, 707, 103, 282, 106, 114, 125, 171, 172, 207, 215, 220, 219, 244, 228,
+  237, 247, 128, 269, 354, 355, 377, 287, 378, 390, 302, 405, 406, 411, 425,
+  209, 441, 468, 452, 454, 455, 457, 462, 470, 475, 494, 499, 505, 511, 510,
+  520, 543, 565, 573, 597, 598, 617, 621, 464, 642, 699,
+]);
+/** TileID.Sets.IgnoredByNpcStepUp（TileID.cs:209 全 5 型=桌/工作台/砧族）——
+ *  NPC 自动上台阶忽略表（Collision.StepUp holdsMatching;TileCollision 消费） */
+export const IGNORED_BY_NPC_STEP_UP_SHEETS: ReadonlySet<number> = new Set([14, 469, 18, 16, 134]);
+/** TileID.Sets.CanBeSatOnForPlayers（TileID.cs:213 全 5 型=15 椅/497 王座/89 长凳/
+ *  102 梳妆台/487 摇篮）——玩家坐席表（PlayerSittingHelper 1:1） */
+export const CAN_BE_SAT_ON_FOR_PLAYERS_SHEETS: ReadonlySet<number> = new Set([15, 497, 89, 102, 487]);
+/** TileID.Sets.HousingWalls（TileID.cs:381 全 3 型=11 栅栏/386 高门/389 电梯?）——
+ *  房屋围合计墙（CheckSpawn/CheckRoom 泛洪;Housing 消费） */
+export const HOUSING_WALLS_SHEETS: ReadonlySet<number> = new Set([11, 386, 389]);
+/** TileID.Sets.IgnoredInHouseScore（TileID.cs:415 全 7 型=火把/草/花/门）——
+ *  ScoreRoom 头顶扫描忽略（Housing 消费） */
+export const IGNORED_IN_HOUSE_SCORE_SHEETS: ReadonlySet<number> = new Set([4, 3, 73, 82, 83, 84, 386]);
+// ---- 接线域（TileID.Sets.Wiring 三表 :132-136;itemTooltip/BrokenTrapCleanup 消费） ----
+/** TileID.Sets.Wiring.IsAMechanism（TileID.cs:132 全 86 型）——电线网络机制件
+ *  （BrokenTrapCleanup IsItATrap 底表/物品提示 Wireable 消费） */
+export const IS_A_MECHANISM_SHEETS: ReadonlySet<number> = new Set([
+  420, 419, 411, 4, 33, 100, 93, 42, 34, 215, 405, 92, 35, 126, 95, 149, 593, 594, 564,
+  10, 11, 387, 386, 388, 389, 137, 443, 141, 130, 131, 546, 557, 421, 422, 209, 212, 216,
+  338, 335, 497, 406, 244, 452, 565, 139, 506, 105, 349, 531, 429, 142, 143, 235, 210, 425,
+  21, 467, 219, 642, 356, 663, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266,
+  267, 268, 207, 480, 455, 509, 657, 658, 720, 721, 725, 733, 314,
+]);
+/** IsAMechanism 内部 id 域镜像（BrokenTrapCleanupPass idsByVanillaSheet 平移副本收编;§6k） */
+export const IS_A_MECHANISM_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (IS_A_MECHANISM_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.Wiring.IsATrigger（TileID.cs:134 全 10 型）——触发器件
+ *  （BrokenTrapCleanup IsItATrigger/物品提示消费） */
+export const IS_A_TRIGGER_SHEETS: ReadonlySet<number> = new Set([135, 136, 132, 144, 411, 423, 476, 440, 441, 468]);
+/** IsATrigger 内部 id 域镜像（BrokenTrapCleanupPass 平移副本收编;10 id——§6k） */
+export const IS_A_TRIGGER_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (IS_A_TRIGGER_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+/** TileID.Sets.Wiring.IgnoreWhenValidatingTraps（TileID.cs:136 全 14 型）——
+ *  孤儿陷阱验证豁免（BrokenTrapCleanup IsItATrap !ignore 门） */
+export const IGNORE_WHEN_VALIDATING_TRAPS_SHEETS: ReadonlySet<number> = new Set([411, 10, 11, 387, 386, 388, 389, 4, 215, 21, 467, 219, 642, 314]);
+/** IgnoreWhenValidatingTraps 内部 id 域镜像（BrokenTrapCleanupPass 平移副本收编;§6k） */
+export const IGNORE_WHEN_VALIDATING_TRAPS_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (IGNORE_WHEN_VALIDATING_TRAPS_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+// ---- 照明/交互/高亮/杂项域（lightTables/SmartInteractTiles/TileHighlight/SmartCursor） ----
+/** TileID.Sets.AllowLightInWater（TileID.cs:363 全 6 型=烛台/蜡烛/灯族）——
+ *  水中透光（TileLightScanner allowWaterById 消费） */
+export const ALLOW_LIGHT_IN_WATER_SHEETS: ReadonlySet<number> = new Set([54, 541, 328, 459, 748, 750]);
+/** TileID.Sets.BasicChestFake（TileID.cs:317={441 假箱,468 假箱2}）——陷阱箱判定
+ *  （IsAContainer cs:48831 支;≠BasicChest(:315)） */
+export const BASIC_CHEST_FAKE_SHEETS: ReadonlySet<number> = new Set([441, 468]);
+/** TileID.Sets.BasicDresser（TileID.cs:319={88}）——梳妆台单值表（IsAContainer 支/
+ *  tileObsidianKill −{88} 豁免语义巧合面） */
+export const BASIC_DRESSER_SHEETS: ReadonlySet<number> = new Set([88]);
+/** TileID.Sets.Campfires（TileID.cs:407={215}）——篝火单值表（智能交互候选/
+ *  点燃档消费） */
+export const CAMPFIRES_SHEETS: ReadonlySet<number> = new Set([215]);
+/** TileID.Sets.CountsAsWaterForCrafting（TileID.cs:281={172 水槽,207 水桶?}）——
+ *  合成水域面（ craftingGrid/SmartInteractTiles 消费） */
+export const COUNTS_AS_WATER_FOR_CRAFTING_SHEETS: ReadonlySet<number> = new Set([172, 207]);
+/** TileID.Sets.DisableSmartInteract（TileID.cs:207 全 17 型）——智能交互禁用族
+ *  （SmartInteractTiles 谓词消费） */
+export const DISABLE_SMART_INTERACT_SHEETS: ReadonlySet<number> = new Set([
+  4, 410, 480, 509, 657, 658, 720, 721, 725, 733, 395, 698, 334, 33, 455, 471, 520,
+]);
+/** TileID.Sets.HasOutlines（TileID.cs:277 全 95 型）——智能交互描边高亮白名单
+ *  （TileDrawing.cs:902-904 GetTileOutlineInfo 门;TileHighlight 消费） */
+export const HAS_OUTLINES_SHEETS: ReadonlySet<number> = new Set([
+  10, 11, 15, 21, 29, 55, 79, 85, 88, 89, 97, 102, 104, 125, 132, 136, 139, 144,
+  207, 209, 212, 215, 216, 237, 287, 335, 338, 354, 356, 377, 386, 387, 388, 389,
+  410, 411, 425, 441, 455, 463, 467, 468, 470, 475, 487, 480, 494, 497, 509, 510,
+  511, 621, 464, 657, 658, 663, 699, 720, 721, 725, 733,
+  16, 17, 18, 26, 77, 86, 94, 96, 101, 106, 114, 133, 134, 217, 218, 220, 228,
+  243, 247, 283, 300, 301, 302, 303, 304, 305, 306, 307, 308, 412, 499, 622, 355, 172,
+]);
+/** TileID.Sets.Torches（TileID.cs:405={4}）——火把 tile 单值表（SmartCursor 物品
+ *  火把判定 tile 级支;ItemID 级另表） */
+export const TORCHES_SHEETS: ReadonlySet<number> = new Set([4]);
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });

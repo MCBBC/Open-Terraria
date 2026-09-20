@@ -5,7 +5,7 @@
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
-import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, NOT_REALLY_SOLID_SHEETS } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, NOT_REALLY_SOLID_SHEETS, DONT_DRAW_TILE_SLOPES_SHEETS, HAS_SLOPE_FRAMES_SHEETS, BLOCKS_STAIRS_SHEETS, IGNORES_NEARBY_HALFBRICKS_SHEETS, ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS } from '../data/tiles';
 import { getUVForMasks } from './BlendFraming';
 import { frameMergesWith, halfNeighborConnects, normalizedVidOf, vanillaIdOf } from './TileMergeFamily';
 import { tileAnim } from './TileAnim';
@@ -1819,12 +1819,12 @@ function drawPixelBlock(
   if (emptyAt(0, 1)) ctx.fillRect(px, py + TILE - 1, TILE, 1);
 }
 
-/** 坡面/邻接特判 Set(TileID.cs 原文) */
-const DONT_DRAW_SLOPES = new Set([137, 235, 388, 476, 138, 664, 665, 630, 631, 711, 712, 713, 714, 715, 716, 723, 726]);
-const HAS_SLOPE_FRAMES = new Set([421, 422]);
+/** 坡面/邻接特判 Set(TileID.cs 原文)——★BJ221 收编单源 data/tiles.ts（§6k） */
+const DONT_DRAW_SLOPES = DONT_DRAW_TILE_SLOPES_SHEETS;   // TileID.Sets.DontDrawTileSlopes（:153）
+const HAS_SLOPE_FRAMES = HAS_SLOPE_FRAMES_SHEETS;        // TileID.Sets.HasSlopeFrames（:267={421,422}）
 /** TileID.Sets.BlocksStairs（TileID.cs:357）——平台坡面连接补片的抑制族
- *  （TileDrawing.cs:1551/:1565：正下方为该族整块(blockType 0)/坡4(5) 时不补） */
-const BLOCKS_STAIRS_SHEETS = new Set([386, 387, 54, 328, 459, 541]);
+ *  （TileDrawing.cs:1551/:1565：正下方为该族整块(blockType 0)/坡4(5) 时不补）
+ *  ★BJ221 收编单源 data/tiles.ts:BLOCKS_STAIRS_SHEETS（同名 import 直用,§6k） */
 // ★SW-BJ3 2026-09-06：原版 tileSolid+tileSolidTop【双 true】sheet 全集（Main.cs:8031-8032
 //  tile 19 / :9797-9800 tile 239 / :9799-9800 tile 380 / :10118-10119 tile 427 /
 //  :10125-10130 循环 435-439——SW-RB2 B-3 定谳同表）。半砖 D2 支撑谓词原版读
@@ -1836,10 +1836,10 @@ const VANILLA_TS_DOUBLE_TRUE = new Set([19, 427, 435, 436, 437, 438, 439, 239, 3
 // （本仓 def.platform 旗是含 239/380 的单向门超集,239/380 半砖原版吃暗条支）
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const VANILLA_PLATFORM_SHEETS = PLATFORMS_SHEETS;
-const IGNORES_NEARBY_HALFBRICK = new Set([380, 476, 235, 138, 664, 137, 484, 421, 422, 711, 712, 713, 714, 715, 716]);
+const IGNORES_NEARBY_HALFBRICK = IGNORES_NEARBY_HALFBRICKS_SHEETS;   // ★BJ221 收编单源 data/tiles.ts（TileID.cs:271,§6k）
 // ★BJ203 收编单源 data/tiles.ts:NOT_REALLY_SOLID_SHEETS（TileID.cs:359;逐值对拍全等,§6h）
 const NOT_REALLY_SOLID = NOT_REALLY_SOLID_SHEETS;
-const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46, 176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692, 160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345, 328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311, 426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748]);
+const SMOOTH_BORDER = ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS;   // ★BJ221 收编单源（TileID.cs:175 全 109 型,§6k）
 
 /** X 镜像翻转(GetTileDrawData:x % 2 == 0 → FlipHorizontally,植物/藤蔓变体的原版来源) */
 const FLIP_X_EVEN = new Set([3, 20, 24, 52, 61, 62, 71, 73, 74, 81, 82, 83, 84, 110, 113, 115, 201, 205, 227, 270, 271, 324, 382, 519, 528, 529, 567, 571, 572, 581, 590, 595, 615, 624, 636, 638, 656, 660, 700, 701, 703]); // +567(:5207-5209 x%2 镜像,2026-08-28 对账补)

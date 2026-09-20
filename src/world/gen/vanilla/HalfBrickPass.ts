@@ -14,7 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, NOT_REALLY_SOLID_SHEETS, SOLID_TOP_SHEETS, CONV_SAND_IDS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, ICES_SNOW_SHEETS, BASIC_CHEST_SHEETS } from '../../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, FORBIDS_SLOPING_IDS, TILE_TABLE_SHEETS, BOULDERS_IDS, IS_A_TREE_TRUNK_IDS, NOT_REALLY_SOLID_SHEETS, SOLID_TOP_SHEETS, CONV_SAND_IDS, CONV_ICE_SHEETS, PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS, ICES_SNOW_SHEETS, BASIC_CHEST_SHEETS, PREVENTS_SLOPES_DURING_GENERATION_IDS, PLATFORMS_IDS, BASIC_DRESSER_SHEETS, BASIC_CHEST_FAKE_SHEETS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -37,8 +37,9 @@ const T = { // 排除表用的原版 id 集
   PLACE_REFUSE: idsByVanillaSheet(
     2, 23, 60, 70, 109, 199, 633, 661, 662,          // 草族（活性泥土基座要求）
     179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627),  // Main.tileMoss（Main.cs:6956-）
-  /** TileID.Sets.PreventsSlopesDuringGeneration（1456 TileID.cs:323）：48/137/232/191/151/274/135/442/428 */
-  PREVENTS_SLOPES: idsByVanillaSheet(48, 137, 232, 191, 151, 274, 135, 442, 428),
+  /** TileID.Sets.PreventsSlopesDuringGeneration（:323）：48/137/232/191/151/274/135/442/428
+   *  ——★BJ221 收编单源 data/tiles.ts 内部域镜像（§6k） */
+  PREVENTS_SLOPES: PREVENTS_SLOPES_DURING_GENERATION_IDS,
 };
 
 /** blockType()==0 判定（悬顶分支旁格检查用）：非活性格或整砖格（half/slope 均为 0） */
@@ -137,8 +138,9 @@ const CHECK4X2_SHEETS = new Set([79, 90, 487]);
  *  /FinalCleanupPass.TILE_TABLE 同源;同源副本禁 import 惯例） */
 // ★BJ182b 收编单源 data/tiles.ts:TILE_TABLE_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 const TILE_TABLE_2X2KT = TILE_TABLE_SHEETS;
-/** TileID.Sets.Platforms（Check4x2 床支平台腿;HalfBrickPass 域无此表副本） */
-const PLATFORMS_4X2 = idsByVanillaSheet(19, 427, 435, 436, 437, 438, 439);
+/** TileID.Sets.Platforms（Check4x2 床支平台腿）——★BJ221 改指既有单源
+ *  data/tiles.ts:PLATFORMS_IDS（:243≡PLATFORMS_4X2 同值三名案,勿重定义,§6k） */
+const PLATFORMS_4X2 = PLATFORMS_IDS;
 /** WorldGen.destroyObject（Check2x2 再入闸,cs:48408/48564/48799）：
  *  级联击杀期间嵌套 TileFrame 不再发起新 Check2x2（非活性清残基不受闸限）。 */
 let destroyObject = false;
@@ -913,8 +915,8 @@ function attemptFossilShattering(st: TileStore, rng: RNG, x: number, y: number):
  * CheckTileBreakability=2 拒毁（上邻箱=容器→scanForContainer 命中）,JS 曾照毁
  * →12 格纯状态差（流位零差：箱/砖尘段均零掷）。 */
 const BASIC_CHEST_S = BASIC_CHEST_SHEETS;   // ★BJ218 收编单源 data/tiles.ts:BASIC_CHEST_SHEETS（TileID.cs:315,§6j）
-const BASIC_DRESSER_S = new Set([88]);
-const BASIC_CHEST_FAKE_S = new Set([441, 468]);
+const BASIC_DRESSER_S = BASIC_DRESSER_SHEETS;       // TileID.Sets.BasicDresser(:319)——★BJ221 收编单源（§6k）
+const BASIC_CHEST_FAKE_S = BASIC_CHEST_FAKE_SHEETS; // TileID.Sets.BasicChestFake(:317)——★BJ221 收编单源（§6k）
 /** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169——旧注 :305 系行号漂移）——★BJ210 收编单源（§6i） */
 const PREVENTS_REMOVAL_ON_TOP = PREVENTS_TILE_REMOVAL_IF_ON_TOP_SHEETS;
 

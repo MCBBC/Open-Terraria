@@ -45,7 +45,7 @@
 
 import { TileStore } from '../world/TileStore';
 import { VANILLA_RECIPES, TILE_COUNTS_AS } from '../data/vanillaRecipes';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, CAMPFIRES_SHEETS, COUNTS_AS_WATER_FOR_CRAFTING_SHEETS, DISABLE_SMART_INTERACT_SHEETS } from '../data/tiles';
 
 /**
  * ★SW-BJ61（2026-09-11）id 域归一：本文件全部谓词表（FILL_TARGET_TYPES/
@@ -62,17 +62,18 @@ function sheetOfStoreType(type: number): number {
   return TILE_DEFS[type]?.vanilla?.sheet ?? -1;
 }
 
-/** TileID.Sets.Campfires（TileID.cs:407）= CreateBoolSet(215) */
-export const CAMPFIRE_TILES: ReadonlySet<number> = new Set([215]);
+/** TileID.Sets.Campfires（TileID.cs:407）= CreateBoolSet(215)
+ *  ★BJ221 收编单源 data/tiles.ts:CAMPFIRES_SHEETS（转出口别名,§6k） */
+export const CAMPFIRE_TILES: ReadonlySet<number> = CAMPFIRES_SHEETS;
 
-/** TileID.Sets.CountsAsWaterForCrafting（TileID.cs:281）= CreateBoolSet(172, 207) */
-export const COUNTS_AS_WATER_FOR_CRAFTING: ReadonlySet<number> = new Set([172, 207]);
+/** TileID.Sets.CountsAsWaterForCrafting（TileID.cs:281）= CreateBoolSet(172, 207)
+ *  ★BJ221 收编单源（转出口别名,§6k） */
+export const COUNTS_AS_WATER_FOR_CRAFTING: ReadonlySet<number> = COUNTS_AS_WATER_FOR_CRAFTING_SHEETS;
 
 /** TileID.Sets.DisableSmartInteract（TileID.cs:207）
- *  = CreateBoolSet(4, 410, 480, 509, 657, 658, 720, 721, 725, 733, 395, 698, 334, 33, 455, 471, 520) */
-export const DISABLE_SMART_INTERACT: ReadonlySet<number> = new Set([
-  4, 410, 480, 509, 657, 658, 720, 721, 725, 733, 395, 698, 334, 33, 455, 471, 520,
-]);
+ *  = CreateBoolSet(4, 410, 480, 509, 657, 658, 720, 721, 725, 733, 395, 698, 334, 33, 455, 471, 520)
+ *  ★BJ221 收编单源（转出口别名,§6k） */
+export const DISABLE_SMART_INTERACT: ReadonlySet<number> = DISABLE_SMART_INTERACT_SHEETS;
 
 /**
  * provider 硬编码多格尺寸表（TileSmartInteractCandidateProvider.cs:140-330）。

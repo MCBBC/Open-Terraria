@@ -36,15 +36,8 @@
 //       ANIM_WHEN_LIT 保留静息态高亮。补法债同前（接 TileAnim.animFrameIdx 后可摘除）。
 
 /** TileID.Sets.HasOutlines（TileID.cs:277，Factory.CreateBoolSet 缺省 false，
- *  表内 95 型 true）—— 原文数列照录 */
-export const TILE_HAS_OUTLINES: ReadonlySet<number> = new Set([
-  10, 11, 15, 21, 29, 55, 79, 85, 88, 89, 97, 102, 104, 125, 132, 136, 139, 144,
-  207, 209, 212, 215, 216, 237, 287, 335, 338, 354, 356, 377, 386, 387, 388, 389,
-  410, 411, 425, 441, 455, 463, 467, 468, 470, 475, 487, 480, 494, 497, 509, 510,
-  511, 621, 464, 657, 658, 663, 699, 720, 721, 725, 733,
-  16, 17, 18, 26, 77, 86, 94, 96, 101, 106, 114, 133, 134, 217, 218, 220, 228,
-  243, 247, 283, 300, 301, 302, 303, 304, 305, 306, 307, 308, 412, 499, 622, 355, 172,
-]);
+ *  表内 95 型 true）——★BJ221 收编单源 data/tiles.ts:HAS_OUTLINES_SHEETS（转出口别名,§6k） */
+export const TILE_HAS_OUTLINES: ReadonlySet<number> = HAS_OUTLINES_SHEETS;
 
 /** 本刀排除：GetTileDrawData 动画 addFr/临时帧重写型（详见头注债）。
  *  ★SW-RB11a 补员 19 型：96/215/217/218/220/228/243/300-308/354/355/463（Main.tileFrame
@@ -55,7 +48,7 @@ export const HIGHLIGHT_ANIM_EXCLUDED: ReadonlySet<number> = new Set([
   308, 354, 355, 463,
 ]);
 
-import { BASIC_CHEST_SHEETS } from '../data/tiles';
+import { BASIC_CHEST_SHEETS, HAS_OUTLINES_SHEETS } from '../data/tiles';
 
 /** ★SW-RB11a：条件动画型（GetTileDrawData :6044-6056——fy<54 静息 top=2 无动画位、
  *  fy≥54 点亮态 addFrY=Main.tileFrame*54）。静息态照画（top=2 修正）,点亮态渲染门

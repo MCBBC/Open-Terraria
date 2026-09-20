@@ -25,7 +25,7 @@
 // 1456 对齐修正（相对旧 1.4.0.5 移植）：banker's rounding（C# Math.Round），
 // 蜂蜜交互阈值 32→24（LiquidCheck 统一），AddWater/WaterCheck 的水死/岩浆死表
 // （Main.cs:7182+ 提取），panic 模式（Liquid.cs:1040-1070），岩浆 3×3 烧草精确 type 映射
-import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, IS_A_CONTAINER_SHEETS, NOT_REALLY_SOLID_SHEETS, CONV_GRASS_SHEETS } from '../../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, IS_A_CONTAINER_SHEETS, NOT_REALLY_SOLID_SHEETS, CONV_GRASS_SHEETS, LAVA_BURN_TO_DIRT_SHEETS, BASIC_DRESSER_SHEETS } from '../../data/tiles';
 import { UnifiedRandom } from '../../core/rng';
 import type { World } from '../World';
 import type { RNG } from '../../core/rng';
@@ -69,7 +69,9 @@ export const LAVA_DEATH_SHEETS = new Set([630, 631, 571, 579, 591, 538, 544, 629
  *  值集 ≡ Conversion.Grass(:18)（亦≡MergesWithDirtInASpecialWay :12 同值）——★BJ210 收编
  *  单源 data/tiles.ts:CONV_GRASS_SHEETS（§6i） */
 const LAVA_BURN_TO_AIR = CONV_GRASS_SHEETS;
-const LAVA_BURN_TO_DIRT = new Set([60, 70, 661, 662]);
+/** Liquid.cs:1561 字面 switch（60/70/661/662→改写 59 泥）——★BJ221 值同语义异收编
+ *  data/tiles.ts:LAVA_BURN_TO_DIRT_SHEETS（≡GrassSpecial :299 单值巧合,原版彼处不读表,§6k） */
+const LAVA_BURN_TO_DIRT = LAVA_BURN_TO_DIRT_SHEETS;
 /** Main.tileObsidianKill（Main.cs:8214-8259）= tileLavaDeath 全表 ∪ 附加表 − {88}：
  *  交互落块时"可被黑曜石顶掉"的 tile（火把/植物/草药/幼虫/丛林蜥蜴祭坛石等）。
  *  旧实现按 decor 近似——decor 不含 lavaDeath 全表（门/宝箱顶的实心格反而该拒绝） */
@@ -675,7 +677,7 @@ export class LiquidSim {
     // tileObsidianKill = lavaDeath ∪ 附加 − {88}（Main.cs:8214-8220，88=梳妆台显式豁免）
     const okKill = bySheet(OBSIDIAN_KILL_EXTRA_SHEETS);
     for (const id of this.lavaDeathIds) okKill.add(id);
-    for (const id of bySheet(new Set([88]))) okKill.delete(id);
+    for (const id of bySheet(BASIC_DRESSER_SHEETS)) okKill.delete(id);   // −{88} 梳妆台豁免（TileID.cs:319,★BJ221 单源§6k）
     this.obsidianKillIds = okKill;
     this.cutIds = bySheet(CUT_SHEETS);
     this.containerIds = bySheet(CONTAINER_SHEETS);

@@ -819,7 +819,7 @@
       {
        "t": "chance",
        "n": 6,
-       "pair": 3,
+       "pair": 2,
        "depth": 1
       }
      ]
@@ -830,7 +830,7 @@
       {
        "t": "chance",
        "n": 3,
-       "pair": 2,
+       "pair": 3,
        "depth": 1
       }
      ]

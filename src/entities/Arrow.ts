@@ -2776,7 +2776,7 @@ export class Arrow extends Entity {
           bodyRot: Math.atan2(this.vy, this.vx) - Math.PI / 2,
           bodyScale: 1,
           bodyAlpha: Math.max(0, Math.min(1, 1 - this.starAlpha / 255)),
-          ai0: this.ai0 ?? 0, ai1: this.ai1 ?? 0,
+          ai0: 0, ai1: 0,
           timeLeft: this.life,
           opacity: Math.max(0, Math.min(1, 1 - this.starAlpha / 255)),
           vxLen: Math.hypot(this.vx, this.vy),
@@ -2980,7 +2980,7 @@ export class Arrow extends Entity {
         bodyRot: ang,
         bodyScale: 1,                 // proj.scale 缺省 1（SetDefaults 表内 id 无显式 scale 行;660=1.1 已排除集）
         bodyAlpha: ghostA,
-        ai0: this.ai0 ?? 0, ai1: this.ai1 ?? 0,
+        ai0: 0, ai1: 0,               // 本仓 Arrow 无通用 ai 槽（ai 依赖档=533 三态/872·873·931·1039 色相/1097 ai1==1）→ 0 档,登记④
         timeLeft: this.life,
         opacity: Math.max(0, Math.min(1, 1 - this.alpha / 255)),
         vxLen: Math.hypot(this.vx, this.vy),

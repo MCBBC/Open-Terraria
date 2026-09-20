@@ -194,6 +194,7 @@ export const GHOST_PARAMS: Readonly<Record<number, GhostParams>> = {
   436: P(1, 8, 2, 0.5),                            // :30985-30988（仅 step/scale 覆写,end 留 8）
   438: P(1, 10, 2, 1),                             // :30997-31000
   452: P(1, 10, 3, 0.5),                           // :31001-31004
+  459: P(1, 8, 2, 0.3),                            // 充能爆裂炮弹（end/step 动态 :31017-31024）
   454: P(1, 5, 1, 0.2),                            // :31005-31008
   462: P(1, 7, 1, 0.2),                            // :31009-31012
   503: P(1, 9, 3, 0.5),                            // 星怒 :30787-30790
@@ -257,7 +258,7 @@ export const GHOST_PARAMS: Readonly<Record<number, GhostParams>> = {
 export interface GhostFrameSpec {
   frameRow: 'cur' | 'zero' | 'next' | 'curHalfW' | 's976' | 'g873' | 'g916' | 'n408';
   originY?: number;      // 覆写 origin.Y（负值=自底 h+originY,如 686/711/1097 h−70）
-  originX?: number;      // 'dirEdge'=W−20/20 按 spriteDirection（700/964/965）;负值=flip 条件偏移
+  originX?: number | 'dirEdge';   // 'dirEdge'=W−20/20 按 spriteDirection（700/964/965）;负值=flip 条件偏移
   zeroHalfH?: boolean;   // 833-835 zero.Y+=h/2（:30703-30716）
   cellW?: number; cellH?: number;   // s976 32×18 单元
 }
@@ -328,10 +329,10 @@ export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
   1037: (c) => ({ rgb: [255, 127.5 / c.i, 127.5 / c.i], aMul: 1 / c.i }),  // :31148+:31323-31327
   639: () => ({ rgb: WHITE, aMul: 0.5 }),                                     // A=127 :31151-31153
   640: (c) => ({ rgb: [255 / c.i, 255, 255], aMul: 0.5 }),                    // R/=i + A=127 :31207-31210/:31154
-  671: (c) => ({ rgb: lerpC(WHITE, [160, 32, 240], c.i / c.end), aMul: 1 }),  // 紫 grad :31155-31157
-  811: (c) => ({ rgb: lerpC(WHITE, [110, 10, 30], c.i / c.end), aMul: 1 }),   // 绯×0.5 grad :31158-31160
-  814: (c) => ({ rgb: lerpC(WHITE, [127.5, 127.5, 127.5], c.i / c.end), aMul: 1 }),  // 自暗 grad :31161-31163
-  261: (c) => ({ rgb: lerpC(WHITE, [60, 60, 60], c.i / c.end), aMul: 1 }),    // 灰 grad :31164-31166
+  671: (c) => ({ rgb: lerpC(WHITE, [160, 32, 240], clamp01(c.i / c.end)), aMul: 1 }),  // 紫 grad :31155-31157
+  811: (c) => ({ rgb: lerpC(WHITE, [110, 10, 30], clamp01(c.i / c.end)), aMul: 1 }),   // 绯×0.5 grad :31158-31160
+  814: (c) => ({ rgb: lerpC(WHITE, [127.5, 127.5, 127.5], clamp01(c.i / c.end)), aMul: 1 }),  // 自暗 grad :31161-31163
+  261: (c) => ({ rgb: lerpC(WHITE, [60, 60, 60], clamp01(c.i / c.end)), aMul: 1 }),    // 灰 grad :31164-31166
   438: (c) => ({ rgb: [255, 255 / c.i, 255 / c.i], aMul: 1 }),                // G,B/=i :31205-31208
   755: () => ({ rgb: [220, 20, 60], aMul: 1 }),                               // AI_156_GetColor=Crimson（P.cs type755 支）
   873: (c) => {                                                              // AI_171_GetColor :31212-31217
@@ -410,6 +411,39 @@ export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
 
 // ===================== 绘制面 =====================
 
+/** 循环参数解析（静态表+动态档展开;纯函数——单测/绘制共用）。
+ *  返回 null = 该 id 不在通用表（或 step==0 死条目 → 循环体不执行）。 */
+export function resolveGhostLoop(
+  id: number, ai0: number, frame: number, bodyScale: number,
+): { start: number; end: number; step: number; gScale: number; denom: number; rotMul: number } | null {
+  const p = GHOST_PARAMS[id];
+  if (!p) return null;
+  let { start, end, step, gScale, denom, rotMul } = p;
+  if (id === 459) {                                    // :31017-31024（scale×8 档）
+    end = Math.trunc(bodyScale * 8);
+    step = Math.trunc(end / 4);
+    if (step < 1) step = 1;
+    gScale = 0.3;
+  } else if (id === 533) {                             // :31084-31098（ai0 三态）
+    if (ai0 >= 6 && ai0 <= 8) {
+      end = ai0 === 6 ? 8 : 4;
+      step = 1;
+      rotMul = ai0 !== 7 ? 0.2 : 0;
+    } else {
+      end = 0; step = 0;
+    }
+  } else if (id === 1055) {                            // :30728-30735（frame 系）
+    end = frame;
+    if (frame === 8) end--;
+    if (frame === 9) end -= 2;
+  } else if (id === 388) {                             // :34903-34911（ai0==2 长档）
+    end = ai0 === 2 ? 9 : 2;
+    step = 1;
+  }
+  if (step === 0) return null;
+  return { start, end, step, gScale, denom, rotMul };
+}
+
 export interface DrawGhostOpts {
   ring: ProjGhostRing;
   id: number;
@@ -430,34 +464,11 @@ export interface DrawGhostOpts {
 /** 通用残影绘制（Main.cs:31134-31349 循环 1:1）。在【本体之前】调用（原版残影块
  *  先于本体绘制段）。Zero 哨兵=未填槽跳过;超环长跳过（:31134）;661 死条目天然空循环。 */
 export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
-  const p = GHOST_PARAMS[o.id];
-  if (!p || !o.tex) return;
+  const loop = resolveGhostLoop(o.id, o.ai0, o.frame, o.bodyScale);
+  if (!loop || !o.tex) return;
   const { ring } = o;
   if (ring.mode < 0) return;
-  // ---- 动态参数档 ----
-  let { start, end, step, gScale, denom, rotMul } = p;
-  if (o.id === 459) {                                    // :31017-31024（scale×8 档）
-    end = Math.trunc(o.bodyScale * 8);
-    step = Math.trunc(end / 4);
-    if (step < 1) step = 1;
-    gScale = 0.3;
-  } else if (o.id === 533) {                             // :31084-31098（ai0 三态）
-    if (o.ai0 >= 6 && o.ai0 <= 8) {
-      end = o.ai0 === 6 ? 8 : 4;
-      step = 1;
-      rotMul = o.ai0 !== 7 ? 0.2 : 0;
-    } else {
-      end = 0; step = 0;
-    }
-  } else if (o.id === 1055) {                            // :30728-30735（frame 系）
-    end = o.frame;
-    if (o.frame === 8) end--;
-    if (o.frame === 9) end -= 2;
-  } else if (o.id === 388) {                             // :34903-34911（ai0==2 长档）
-    if (o.ai0 === 2) { end = 9; } else { end = 2; }
-    step = 1;
-  }
-  if (step === 0) return;
+  const { start, end, step, gScale, denom, rotMul } = loop;
   const spec = GHOST_FRAME[o.id];
   const frames = Math.max(1, o.frames);
   const img = o.tex;
