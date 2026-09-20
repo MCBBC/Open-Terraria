@@ -268,8 +268,8 @@ describe('BJ103-D 失焦暂停旁支:滚轮消费面 focusPaused 早退（autoPa
 
     gotoTo = [];
     ui.game = { focusPaused: false, paused: true };          // autoPause 态仍活
-    (ui.vinvCraftWheel as (e: WheelEvent) => void).call(ui, evt(-120));
-    expect(gotoTo).toEqual([1]);                             // 上滚 +1 档（XNA 上滚为正）
+    (ui.vinvCraftWheel as (e: WheelEvent) => void).call(ui, evt(120));
+    expect(gotoTo).toEqual([1]);                             // 下滚 +1 档（★BJ189 用户明令分歧 2026-09-20:浏览器方向;原版同相=上滚 +1 已反相,回滚口=UI.ts focusV−num）
   });
 
   it('功能面:vinvModernScrollBy 失焦死/失焦外活（modern 窗元素宿主 :8513/:8769 同律）', () => {

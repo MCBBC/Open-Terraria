@@ -380,7 +380,7 @@ describe('SW-RB13b 修复锚定（FX28×FX30 互踩面 + 滚轮域）', () => {
   it('列表滚轮 = ScrollCraftingList 整批直加（★SW-FX38 重锚:Main.cs:17593 Delta/120 截断档,CraftingUI.cs:574 focusRecipe += mouseWheel——旧 max(1,steps)+round 虚生档已废）', () => {
     expect(uiSrc).toMatch(/private vinvCraftWheel\(e: WheelEvent\): void \{/);
     expect(uiSrc).toMatch(/vanillaWheelNotches\(e\.deltaY, e\.deltaMode\)/);   // ★SW-RB14d：补传 deltaMode（Firefox 行模式归一）
-    expect(uiSrc).toMatch(/this\.vinvCraftFocusV \+ num/);
+    expect(uiSrc).toMatch(/this\.vinvCraftFocusV - num/);   // ★BJ189 用户明令分歧(2026-09-20):focusV−num=浏览器方向(原版同相 +num 退役=回滚哨兵,见 sw-fx38 ⑥)
     // 旧虚生档面残留 = 回归哨兵
     expect(uiSrc).not.toMatch(/Math\.max\(1, steps\)/);
     expect(uiSrc).not.toMatch(/Math\.round\(e\.deltaY \/ 120\)/);

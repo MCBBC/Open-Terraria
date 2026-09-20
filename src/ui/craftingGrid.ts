@@ -22,6 +22,12 @@
 // - Terraria/ID/TileID.cs:279(DoesNotOpenCraftingMenuOnInteract = CreateBoolSet(215, 207))
 // - Terraria/Main.cs:886(OurFavoriteColor = (255,231,69))
 // 坐标系 = .sw-vinv 原版 UI 逻辑空间(vanillaInvLayout 同源;sw/sh = 视口/K)。
+// ★★BJ189 用户明令分歧(2026-09-20 拍板;登记债 craft-wheel-direction-vanilla-carousel-second-report 销账):
+//   craftWheel 经典配方列表滚轮方向=【浏览器方向】(下滚=焦点+1)——落刀在 UI.ts vinvCraftWheel
+//   应用位 focusV【−】num(唯一回滚口,复原=删该负号);本模块 vanillaWheelNotches 号面保持
+//   1457 逐字(XNA 上滚为正)不动——消费面普查(2026-09-20):本函数另饲 Pips 网格分页
+//   (UI.ts vinvGridWheelTick)与 modern 窗滚轮(vinvModernScrollBy)两原版同相面,在函数内
+//   取负会连带反转两面+破 rb14d/fx41 号面金标,故 BJ189 两案中采 focusV±num 案。
 import { TILE_COUNTS_AS, expandStationTiles, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { COUNTS_AS_WATER_FOR_CRAFTING, tileUsedInRecipes } from '../core/SmartInteractTiles';
 
@@ -162,6 +168,10 @@ export function craftingFilterForTile(sheet: number): CraftingTileFilter | null 
  *    Xna.Framework.Input.MouseState.html)⇒ 浏览器 deltaY>0=下滚=原版负档,取负对齐
  *    (同手势同号;仓内经验锚:ChestUI.cs:306-312 Scroll(mouseWheel>0)→行--,原版玩家
  *    体感"下滚=箱子下翻"即 wheel-down 为负档)。 */
+// ★★用户明令分歧(BJ189 销账,2026-09-20 拍板):上记原版号面【保持逐字不动】;craftWheel
+//   列表面的浏览器向对齐改在 UI.ts 消费位 focusV【−】num 完成(唯一回滚口=删该负号)——
+//   本函数另饲 Pips 网格分页(vinvGridWheelTick)/modern 窗滚轮(vinvModernScrollBy)两面,
+//   在此取负=连带反转(非用户明令面),故 BJ189 两案(取负 或 focusV±num)采后者。
 // ★SW-FX51 2026-09-12：wheelEventPx 迁 core/input/wheel.ts 单源（世界域 Input.wheelDelta
 //  入账同用此算式;core 层禁反向 import ui/）——原位 import+re-export 保 vanillaWheelNotches
 //  消费、UI.ts/tests import 面与 fx38 源锁（定义体原位不动）。

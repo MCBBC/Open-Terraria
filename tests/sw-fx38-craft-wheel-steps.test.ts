@@ -10,9 +10,20 @@
 //     376-404)每拍 0.97 衰减+6.5px 滑行(65px 行距 ≈9-10 拍),tick 每越 65px 行界一响
 //     (:388-393)——旧实现瞬时重排(登记偏差,本刀清偿)。
 // 变异证红:vanillaWheelNotches 取消负号→方向组红;trunc→round→子档组红;
-//   craftSnapEase 去 0.97/去 6.5→轨迹组红;craftSnapCrossedRow 改 floor→负域行界组红。
+//   craftSnapEase 去 0.97/去 6.5→轨迹组红;craftSnapCrossedRow 改 floor→负域行界组红;
+//   ★BJ189 分歧变异:UI.ts focusV−num 复原 +num→⑥分歧哨兵/fx30:383/bj103 功能面红(2026-09-20 实录;
+//     ⑤为纯模型对拍面不读源码,不随此变异红——判别力锚在⑥源锁)。
 // 正本:1457 反编译(Terarria1457/);1458 同域零变更(CraftingUI.cs/UIList.cs/
 //   DoScrollingInInventory 逐字节 diff 全等,本轮实证)。
+// ★★BJ189 用户明令分歧销账(2026-09-20 拍板;债=craft-wheel-direction-vanilla-carousel-second-report):
+//   用户系统滚轮反向设置下,原版 focus 轮播(上滚=焦点下移/内容上滑)体感颠倒 → 用户明令
+//   配方列表改【浏览器方向】(下滚=焦点+1/内容上滑)。落刀=UI.ts vinvCraftWheel 应用位
+//   focusV【−】num——BJ189 原文两案「改 vanillaWheelNotches 取负 或 focusV±num」之后者:
+//   消费面普查(2026-09-20)vanillaWheelNotches 另饲 Pips 网格分页(vinvGridWheelTick)与
+//   modern 窗滚轮(vinvModernScrollBy)两原版同相面,函数内取负会连带反转+破 rb14d/fx41
+//   号面金标,故采 focusV±num=唯一单点回滚口(删 UI.ts 该 − 号复原原版)。
+//   quantizer 号面(①②③④组)保持 1457 逐字不动;⑤列表序列/⑥接线按分歧语义反相;
+//   FX32b 探针 12 判别线同步反相;Pips 分页面维持原版(上滚=+cols)登记待用户再批。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -45,9 +56,10 @@ describe('SW-FX38 滚轮档数 vanillaWheelNotches（Main.cs:17593）', () => {
     expect(vanillaWheelNotches(360)).toBe(-3);
     expect(vanillaWheelNotches(-360)).toBe(3);
   });
-  it('方向=XNA 上滚为正 ⇒ 浏览器 deltaY<0(上滚)=+1 档(取负对齐)', () => {
-    // 原版语义:ScrollCraftingList(+1)=focusRecipe+1=焦点行【下移】(后面配方居中);
-    // 浏览器同手势(上滚)deltaY<0 → 必须 +1
+  it('量化号面=XNA 上滚为正 ⇒ 浏览器 deltaY<0(上滚)=+1 档(1457 逐字,保持)', () => {
+    // 原版语义:ScrollCraftingList(+1)=focusRecipe+1=焦点行【下移】(后面配方居中)。
+    // ★BJ189 分歧(2026-09-20):此号面不动,浏览器向对齐在应用位 focusV−num(见⑤⑥)——
+    // 本组锁 quantizer 1457 转录本相,号面歧议时以本组为准。
     expect(vanillaWheelNotches(-120)).toBe(1);
     expect(vanillaWheelNotches(120)).toBe(-1);
   });
@@ -140,27 +152,30 @@ describe('SW-FX38 滑行轨迹模型(CraftingUI.cs:376-404 递推)', () => {
 // ============================================================
 // ⑤ 滚距步进序列对拍(focus = clamp(focus+notches);网格 recStart 逐档钳制)
 // ============================================================
-describe('SW-FX38 滚距步进序列(Main.cs:17593+CraftingUI.cs:572-583 直算对拍)', () => {
+describe('SW-FX38 滚距步进序列(Main.cs:17593+CraftingUI.cs:572-583 直算对拍;★BJ189 分歧只及列表应用位,网格 Pips 面维持原版同相)', () => {
   const stepFocus = (focus: number, n: number, len: number): number =>
-    Math.min(len - 1, Math.max(0, focus + n));   // CraftingUI.cs:574-582 逐字
-  it('列表:逐 notch ±1、整批 +3、双端钳制 no-op', () => {
+    Math.min(len - 1, Math.max(0, focus + n));   // CraftingUI.cs:574-582 逐字(n=应用档)
+  it('列表(★BJ189 分歧=浏览器方向):下滚逐 notch +1、整批 +2、双端钳制 no-op', () => {
+    // 应用档镜像 UI.ts vinvCraftWheel:focusV【−】num ⇒ applied(dY)=−vanillaWheelNotches(dY)
+    const applied = (dY: number): number => -vanillaWheelNotches(dY);
     let f = 0;
     const len = 60;
-    for (let i = 0; i < 3; i++) { f = stepFocus(f, vanillaWheelNotches(-120), len); }   // 上滚×3
+    for (let i = 0; i < 3; i++) { f = stepFocus(f, applied(120), len); }   // 下滚×3(焦点下移)
     expect(f).toBe(3);
-    f = stepFocus(f, vanillaWheelNotches(-240), len);   // 一拍两档整批
+    f = stepFocus(f, applied(240), len);   // 一拍两档整批
     expect(f).toBe(5);
-    f = stepFocus(f, vanillaWheelNotches(120), len);    // 下滚一档
+    f = stepFocus(f, applied(-120), len);  // 上滚一档
     expect(f).toBe(4);
-    f = stepFocus(f, vanillaWheelNotches(120), len);
+    f = stepFocus(f, applied(-120), len);
     expect(f).toBe(3);
-    expect(stepFocus(0, vanillaWheelNotches(120), len)).toBe(0);        // 顶端下滚钳 0(无音)
-    expect(stepFocus(len - 1, vanillaWheelNotches(-120), len)).toBe(len - 1);   // 尾端上滚钳 n-1
+    expect(stepFocus(0, applied(-120), len)).toBe(0);        // 顶端上滚钳 0(无音)
+    expect(stepFocus(len - 1, applied(120), len)).toBe(len - 1);   // 尾端下滚钳 n-1
   });
   it('列表:子档拍零位移(deltaY=±40/±100 序列全程 focus 不动)', () => {
+    const applied = (dY: number): number => -vanillaWheelNotches(dY);   // ★BJ189 分歧应用档镜像
     let f = 10;
     for (const d of [40, -40, 100, -100, 60, -119]) {
-      const n = vanillaWheelNotches(d);
+      const n = applied(d);
       if (n !== 0) f = stepFocus(f, n, 60);   // vinvCraftWheel :num===0 早退同相
     }
     expect(f).toBe(10);
@@ -207,11 +222,13 @@ describe('SW-FX38 接线锚定', () => {
     expect(uiSrc).not.toMatch(/Math\.round\(e\.deltaY \/ 120\)/);
     expect(uiSrc).not.toMatch(/Math\.abs\(Math\.round\(e\.deltaY \/ 120\)\)/);
   });
-  it('UI.ts:列表滚轮=vanillaWheelNotches+单次整批钳制+子档早退(CraftingUI.cs:574-582)', () => {
+  it('UI.ts:列表滚轮=vanillaWheelNotches+单次整批钳制+子档早退(CraftingUI.cs:574-582;★BJ189 应用位反相)', () => {
     expect(uiSrc).toMatch(/this\.vinvCraftWheelPendPx \+= wheelEventPx\(e\.deltaY, e\.deltaMode\);/);   // ★SW-RB14d F2：跨事件累计
     expect(uiSrc).toMatch(/const num = vanillaWheelNotches\(this\.vinvCraftWheelPendPx\);[^\n]*\n\s*if \(num === 0\) return;/);   // 帧差分量化同构
     expect(uiSrc).toMatch(/this\.vinvCraftWheelPendPx \+= num \* 120;/);   // 整档消费余数留置
-    expect(uiSrc).toMatch(/Math\.min\(rows\.length - 1, Math\.max\(0, this\.vinvCraftFocusV \+ num\)\)/);
+    // ★BJ189 用户明令分歧(2026-09-20):应用位 focusV−num=浏览器方向=唯一回滚口(复原 +num 即红)
+    expect(uiSrc).toMatch(/Math\.min\(rows\.length - 1, Math\.max\(0, this\.vinvCraftFocusV - num\)\)/);
+    expect(uiSrc).not.toMatch(/this\.vinvCraftFocusV \+ num/);   // 原版同相应用退役=分歧回滚哨兵
     expect(uiSrc).not.toMatch(/Math\.max\(1, steps\)/);   // 旧虚生档=回归哨兵
     expect(uiSrc).not.toMatch(/vinvCraftWheel\(e, steps\)/);
   });

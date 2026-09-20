@@ -875,11 +875,21 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
 // ---------------------------------------------------------------------------
 export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai0 < 0 || e.ai0 > 8) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
-  // reflectsProjectiles 每 tick 复位（1458 :37851——aiStyle87 头段恒写 false,
+  // reflectsProjectiles 每 tick 复位（1457 :37851——aiStyle87 头段恒写 false,
   // 态3 专家支再置真；旧注"原版闩锁不清=离态后仍置位"系对 1456 行段的误读,
   // 台账批按 1458 真值改为逐拍复位+全弹扫描,见下方态3 段）
   e.reflectsProjectiles = false;
-  // noGravity 运行时位（:39525 起始 false；4/4.1 俯冲分支/5 空中态置 true——
+  // ★BJ175（2026-09-20 用户实报"宝箱怪武器无伤,子弹穿透而过"）：头段缺两行
+  //   复位——vanilla aiStyle87 头 :37848 `dontTakeDamage = false;` / :37849
+  //   `noTileCollide = false;` 每 tick 重写（旗标只在态3 体 :37967 置真,出态即
+  //   被头段清掉）。曾缺 → 首次蓄能态（ai0==3,210t 后 1/3 掷入）置真后永挂：
+  //   dealContacts/Arrow 主命中环 dontTakeDamage 排除门 + Enemy.hurt 早退三面
+  //   全拒 = 真实弹幕穿透、无飘值、不唤醒（探针 _mimic-hitchring-probe S3 实证：
+  //   出态后木箭 hpDelta=0 且 hurt 直驱返 false）。noTileCollide 本仓 AI 不置真,
+  //   纯头段对齐零行为差,一并补。
+  e.dontTakeDamage = false;
+  e.noTileCollide = false;
+  // noGravity 运行时位（1457 :37850 恒写 false；4/4.1 俯冲分支/5 空中态置 true——
   // 4.1 仅"未过玩家 Y 且 ai[2]==0 的真俯冲段"(:39724-39730)，过顶回落段 false）。
   // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
   e.noGravity = false;
@@ -937,9 +947,11 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
     grounded();
   } else if (e.ai0 === 3) {
-    // ---- 蓄能无敌 180t（1458 :37966-37982）。★R23b-F3 修：态 3 由 roll pick==0
+    // ---- 蓄能无敌 180t（1457 :37966-37982）。★R23b-F3 修：态 3 由 roll pick==0
     //      全难度进入（:37941），「expert 弹反不可达」注释系误读——只有弹反是 expert 门；
-    //      且 dontTakeDamage 改真旗标（iframes 近似被 pierce===1 单发弹绕过）。
+    //      且 dontTakeDamage 改真旗标（iframes 近似被 pierce===1 单发弹绕过）——
+    //      ★BJ175：旗标仅态3 体内有效,出态由函数头 :37848 复位（曾缺=离态永挂无敌,
+    //      真实弹幕整面穿透,见头段 BJ175 注）。
     // ★台账批：反射管线两路接全——①每 tick ReflectProjectiles(Hitbox) 全弹扫描
     //   （:37979 NPC.ReflectProjectiles :67156-67165 → ReflectProjectile :67189-67212
     //   反向归属：reflected/hostile=true、速度=随机向×原速+朝主×20 归一×原速、

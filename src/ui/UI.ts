@@ -9398,6 +9398,10 @@ export class UI {
    *  矩形 (310,340,cols·42,rows·42) 内 → 每档 ScrollCraftingGrid(CraftingUI.cs:585-602,
    *  mouseWheel<0(下滚)→recStart−=cols 无音;mouseWheel≥0(上滚)→recStart+=cols+音12
    *  ——★FX32b 勘误:旧注「下滚+=cols」写反,与原版/上滚为正档定谳相反,已正);
+   *  ★★BJ189 分歧界(2026-09-20 用户拍板):同拍走的列表焦点面已反相为浏览器方向
+   *  (vinvCraftWheel focusV−num)——本 Pips 网格分页面【维持原版同相】(上滚=+cols+音12,
+   *  vanillaWheelNotches 号面不动)=非分歧面,分歧后同拍两面反向为刻意;若用户要 Pips
+   *  同改须再批(登记 craft-wheel-direction-vanilla-carousel-second-report));
    *  ★网格支不清 flag(:17600-17608 无 flag=false)
    *  → :17629-17632 ScrollCraftingList 同拍仍走 = 网格分页与列表焦点同滚(逐字)。
    *  窗口级监听:网格容器 pointer-events:none(空档不拦世界点击,原版空档不置
@@ -9964,8 +9968,14 @@ export class UI {
    *  ★SW-FX38 滚距定谳:Main.cs:17633-17640 flag 支 ScrollCraftingList(num) →
    *  CraftingUI.cs:572-583 `focusRecipe += mouseWheel`【单次整批】+钳 [0,n−1];
    *  档数=vanillaWheelNotches(Delta/120 C# 向零截断——子档拍=0 无位移无音,±240=±2
-   *  档一拍全走);符号=原版滚轮【上滚】为正档(XNA ScrollWheelValue 上滚递增)⇒
-   *  deltaY<0(上滚)→ +1。★音效不在本面(:572-583 全程无 PlaySound)——吸附步进
+   *  档一拍全走);量化号面=原版(XNA ScrollWheelValue 上滚为正,函数保持 1457 逐字)。
+   *  ★★用户明令分歧(BJ189 销账,2026-09-20 拍板):用户系统滚轮反向设置下原版 focus
+   *  轮播(上滚=焦点下移)体感颠倒 → 明令本面改【浏览器方向】:应用档反相 focusV【−】num
+   *  (下滚=焦点下移一行/内容上滑;原版本相=上滚→focusRecipe+1)——回滚口=仅此一处
+   *  (删下方 − 号即复原原版;登记 craft-wheel-direction-vanilla-carousel-second-report)。
+   *  Pips 网格分页(vinvGridWheelTick)/modern 窗滚轮(vinvModernScrollBy)非分歧面,
+   *  共享 quantizer 号面不动、仍锚原版同相(2026-09-20 消费面普查三面定谳)。
+   *  ★音效不在本面(:572-583 全程无 PlaySound)——吸附步进
    *  每越 65px 行界一响(:388-393,vinvCraftSnapStep)。 */
   private vinvCraftWheel(e: WheelEvent): void {
     // ★BJ103 失焦旁支：元素级宿主（:10328/:10420 绑定）与窗口宿主(vinvGridWheelTick)
@@ -9982,10 +9992,10 @@ export class UI {
     //  余数累计器=同构语义:累计像素、整档消费、余数留置(量化相位在事件界而非帧界,
     //  <1 拍差,净档数逐值同)。
     this.vinvCraftWheelPendPx += wheelEventPx(e.deltaY, e.deltaMode);   // ★SW-RB14d：并补传 deltaMode
-    const num = vanillaWheelNotches(this.vinvCraftWheelPendPx);         // Main.cs:17594(取负=浏览器同手势)
+    const num = vanillaWheelNotches(this.vinvCraftWheelPendPx);         // Main.cs:17594(量化号=原版 XNA 上滚为正;浏览器向对齐在下方应用位)
     if (num === 0) return;                                // 子档拍:ScrollCraftingList(0) 零位移零音（余数留置）
     this.vinvCraftWheelPendPx += num * 120;               // 消费整档,余数留累计器
-    const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV + num));   // :574-582
+    const next = Math.min(rows.length - 1, Math.max(0, this.vinvCraftFocusV - num));   // :574-582 ★用户明令分歧(2026-09-20):focusV−num=浏览器方向,唯一回滚口(复原=改回 +num);原版同相=+num(上滚→+1)
     this.vinvCraftFocusGoto(next);
     // ★SW-RB14d 债 FX38-F4：此同步步 + rAF 配额步（dt/16.67 档）在事件落在两帧
     //  之间时首窗得 2 步（原版 Update 消费滚轮→Draw 恰 1 步）,滑行提前 ~1 步、
