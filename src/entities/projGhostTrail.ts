@@ -480,7 +480,7 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
     switch (spec.frameRow) {
       case 'zero': sy = 0; break;
       case 'n408': sy = sh; break;
-      case 'next': sy = sh * 2 >= ih ? 0 : sh * 2; break;          // Y+=Height（一次;环内第二行）
+      case 'next': sy = sh * (o.frame + 1); break;                 // value16.Y+=Height（一次,自当前帧行 :30892）
       case 'cur': sy = sh * o.frame; break;
       case 'curHalfW': sw = Math.floor(iw / 2); ox = sw / 2; sx = iw - sw; sy = sh * o.frame; break;
       case 's976': sw = 32; sh = 18; sy = 18 * o.frame; ox = 16; oy = 9; break;
