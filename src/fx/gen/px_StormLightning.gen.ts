@@ -17,7 +17,7 @@ R[1] = tmp2_1;
 let tmp3_0 = T[0];
 R[0] = tmp3_0;
 /* inst#4 op:0x42 */
-SAM[0](R[0], R[1], sm2Scr);
+SAM[0]!(R[0], R[1], sm2Scr);
 R[0] = sm2Scr[0];
 R[1] = sm2Scr[1];
 R[2] = sm2Scr[2];

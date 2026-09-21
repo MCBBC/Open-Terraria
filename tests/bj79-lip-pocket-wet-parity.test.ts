@@ -293,17 +293,22 @@ describe('★用户明令分歧 2026-09-14「唇入必响」（超越原版）�
     expect(rippleSpy.calls.length).toBe(2);
   });
 
-  it('边缘 case① 水行悬停态=0 掠水（main-dry 门）：水行药水落深池 → vanilla 入水恰 1 次、悬停湿态不再响', () => {
+  it('边缘 case①（★BJ227 翻新=vanilla 干态钉位）：水行药水落深池 → 液面钉位干态站立（不入水不湿、0 溅花 0 掠水）', () => {
+    // ★BJ227 定谳翻新：旧断言 inWater=true 系把旧实现「湿支悬停钉」的自造悬停湿态
+    // 当基准。vanilla 水行=干态液面钉位（Player.cs:23738/:23774 → Collision.WaterCollision
+    // :2793-2820）——盒底恰在面顶时湿探针（居中盒,底=面顶−h/4）恒干 → 从不入水,
+    // 入水溅花触发面（num86）永不翻转：0 Splash、0 掠水、inWater 恒假（守卫网主表
+    // = tests/bj227-waterwalk-surface-pin.test.ts）。
     const w = deepPoolWorld();
     const { p, hooks, sfx } = makeDriver(w, 40 * TILE, 55 * TILE);
     p.buffs.apply(BuffType.WaterWalking, 60);
     for (let t = 0; t < 240; t++) p.fixedUpdate(1 / 60, hooks);
-    expect(p.inWater).toBe(true);               // 悬停湿态（湿探针盒底 = 脚−10 在液面下）
-    expect(splashCount(sfx)).toBe(1);           // 仅 vanilla 入水 1 次（descent 期 onGround 门拦掠水）
+    expect(p.inWater).toBe(false);              // 干态钉位站立（探针干）
+    expect(splashCount(sfx)).toBe(0);           // 从未入水 → 入水溅花恒 0
     expect(rippleSpy.calls.length).toBe(0);     // 掠水支 0
     const n = sfx.length;
     for (let t = 0; t < 120; t++) p.fixedUpdate(1 / 60, hooks);
-    expect(sfx.length).toBe(n);                 // 悬停/水面行走不步步溅水（原版同）
+    expect(sfx.length).toBe(n);                 // 水面站立/行走不步步溅水（原版同）
   });
 
   it('边缘 case② 宽水域无双发：落水 descent（onGround=false）+ 入水后主探针湿（main-dry）双门 → 恰 1 响 0 掠水', () => {

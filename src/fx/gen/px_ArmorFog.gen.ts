@@ -8,7 +8,7 @@ import { sat } from '../sm2Runtime';
 export function px_ArmorFog(C: Float64Array, R: Float64Array, T: Float64Array, V: Float64Array, O: Float64Array, SAM: Array<((u: number, v: number, out: Float64Array) => void) | undefined>, OUT: Float64Array, sm2Scr: Float64Array): boolean | null {
   R.fill(0); O.fill(0);
 /* inst#8 op:0x42 */
-SAM[0](T[0], T[1], sm2Scr);
+SAM[0]!(T[0], T[1], sm2Scr);
 R[0] = sm2Scr[0];
 R[1] = sm2Scr[1];
 R[2] = sm2Scr[2];
@@ -76,7 +76,7 @@ R[15] = tmp26_3;
 let tmp27_0 = R[4] * R[15] + C[12];
 R[8] = tmp27_0;
 /* inst#28 op:0x42 */
-SAM[1](R[8], R[9], sm2Scr);
+SAM[1]!(R[8], R[9], sm2Scr);
 R[8] = sm2Scr[0];
 R[9] = sm2Scr[1];
 R[10] = sm2Scr[2];

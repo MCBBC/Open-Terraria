@@ -538,6 +538,12 @@ const PROJ_SPIN: Record<number, (a: Arrow) => number> = {
  *  （PickAmmo :52666-52678 换弹产物；物理档 AI_010 :54890-55160，见 subStep
  *  sandBall 支；Kill 落地放块走 Game.onProjectileDeath 42/65/68/354 分支） */
 const SAND_BALL_PROJ = new Set([42, 65, 68, 354]);
+/** ★BJ229 aiStyle 8 撞块反射族（HandleMovement aiStyle8 支 Projectile.cs:19688
+ *  `aiStyle == 8 && type != 96`——96 诅咒焰(敌)被显式排除=撞块消亡;502 喵刀有更早
+ *  专支(:16794-16812,本仓 :8101 meowBounceOff)先命中不走本表）。SetDefaults 全表:
+ *  15 火球(item 112 火花之杖)/27 水矢(165)/95 诅咒焰(519)/253 冰球(1264 霜花之杖)
+ *  /258 火焰弹(敌 Imp 火球,NPC 发射)。 */
+const AI8_BOUNCE_PROJS = new Set([15, 27, 95, 253, 258]);
 /** AI_010 途经破坏表（:55114-55120）：草族/装饰/雕像/宝石——KillTile 全语义 */
 const SAND_BALL_CUT_SHEETS = new Set([185, 186, 187, 165, 12, 665, 639, 105, 178]);
 
@@ -677,6 +683,10 @@ const ADDITIVE_GLOW_PROJS = new Set([15, 93, 94, 95, 96, 1114, 253, 258, 102,
   //  （用户报「激光好细看不清」定罪：贴图本体 Projectile_88.png 仅 2×60，
   //  scale 0.65 起步 ≈1.3px 细线 + 缺加算发光层双重不可见）
   83, 88, 89, 90, 100, 104, 279, 283, 284, 285, 286, 287, 1134,
+  // ★BJ228 普查批（2026-09-21）：20 绿激光（:81390 常量加算白,SetDefaults α≡0）
+  //  /76/77/78 琴音弹（:81020 恒加算白不读 α）——GA case 20/76-78 return 1 配对,
+  //  出生面=太空枪 127/魔法竖琴 494。
+  20, 76, 77, 78,
   // ★R5 终验批：723-726/1133 斗篷星族(:80992-80995 (255,255,255,0)×Opacity——
   // 加算白×透明度;ga=1−starAlpha/255 渐变由 drawGlobalAlpha case 承载,此处只
   // 切 lighter。728/9 走 StarfuryStar 专载体不在 Arrow draw 路径)
@@ -1324,6 +1334,9 @@ export class Arrow extends Entity {
   gemPhase = 0;
   /** 114 邪恶三叉戟减速计时（ai[0]，:26781 每步 +1） */
   private gem114T = 0;
+  /** 114 localAI[1] 出生渐显梯（aiStyle27 族级 :26840-26844 每 AI 步 ++ 钳 15）——
+   *  GetAlpha :81445-81458 梯门消费（<5 Transparent / 5..15 灰梯 / ≥15 全亮） */
+  private gem114Ramp = 0;
   // ---- 特殊箭特效批（2026-08-22，weapon-audit-2026-08-22 类别六）----
   /** 225 叶绿箭撞块弹反计数（ai[1]，:17130：首跳伤 ×0.66 / 第 4 撞 Kill） */
   private arrow225Ai1 = 0;
@@ -1671,6 +1684,11 @@ export class Arrow extends Entity {
   /** ai[0]：弹跳+命中共享计数（0..5，≥5 消亡）——弹跳 :18169 递增/命中 :16794
    *  递增同槽（先到 5 者杀弹，喵叫音高 style=5+ai0 随之爬升） */
   meowCount = 0;
+  /** ★BJ229 aiStyle 8 反射族弹跳计数（vanilla ai[0]，HandleMovement :19692
+   *  `ai[0]++`——与 NPC 穿透 penetrate 独立,达帽（15=6/253=8/余 5:19699-19703;
+   *  27 熔岩态 ai[1]==1→7 :19696-19698,熔岩支未接线 P2 登记恒走 5）即
+   *  position+=velocity+Kill。仅 AI8_BOUNCE_PROJS 五型消费。 */
+  ai8Bounces = 0;
   /** localNPCHitCooldown 同敌再命中冷却（SetDefaults :5466-5468 = 10t） */
   private meowHitCd = new Map<number, number>();
   /** 1457: 通用局部 NPC 无敌帧（usesLocalNPCImmunity + localNPCHitCooldown=N，
@@ -2426,7 +2444,21 @@ export class Arrow extends Entity {
       case 207: return (255 - this.alpha) / 255;
       case 837: return this.alpha === 0 ? 200 / 255 : 0;
       case 442: return (255 - this.alpha) / 255;   // 电圈导弹渐显（缺省 GetAlpha 路径同式 :76837-76850）
-      case 114: return (255 - this.alpha) / 255;   // 邪恶三叉戟（缺省路径同式;AI 侧速度 Remap 改写）
+      // ★BJ228 翻案（2026-09-21 用户实报）：邪恶三叉戟——旧档 (255−α)/255 系 R7-6
+      //  按【缺省 GetAlpha 路径】误判（α=255 高速段 ga=0=隐形、减速 ga→1 显形,
+      //  方向整体反了）。原版 114 有专属支 :81445-81458（114||115 首中即返,先于
+      //  缺省尾 :81507）:localAI[1]<5→Transparent / 5..15→灰梯 (l−5)/10×255 /
+      //  ≥15→(255,255,255,alpha)——RGB 恒白不读光照,A=α 场直通。绘制段
+      //  Main.cs:33187-33189 再乘 (1−Opacity)=α/255 → 合成乘子 = ramp×α/255。
+      //  AI α=Remap(速度,2,0,1,0)×255（:26794）→ 高速 α=255=不透明实体、减速线性
+      //  淡出、消亡前 ~半亮（R7-6"隐身加速段+减速显形"就此推翻）。
+      //  登记残差：≥15 段 A 侧=α²/255²（遮蔽比 rgb 侧浅）——本仓单乘子 ga 折 rgb 侧,
+      //  减速半透期背景保留略少,单 pass 不可分,不展开。
+      case 114: {
+        const ramp114 = this.gem114Ramp < 5 ? 0
+          : this.gem114Ramp < 15 ? (this.gem114Ramp - 5) / 10 : 1;
+        return ramp114 * (this.alpha / 255);
+      }
       case 604: return (255 - this.alpha) / 255;   // 孢子云（aiStyle 115 alpha+10/t 淡出 :35062-35068）
       case 131: case 732: return (255 - this.alpha) / 255;   // 蘑菇孢子/风暴气旋渐隐（AI_030 :27154/AI_044 :28307 alpha 累加,GetAlpha 缺省路径同式）
       case 163: case 310: case 1008: case 1009: case 1010: case 1011:
@@ -2511,6 +2543,16 @@ export class Arrow extends Entity {
       case 283: case 284: case 285: case 286: case 287: case 1134:
         return this.alpha >= 200 ? 0 : (255 - this.alpha) / 255;
       case 88: return 1;
+      // ★BJ228 普查批（2026-09-21）：A=0 加算白常量支接线——
+      //  20 绿激光（:81390-81394 α≤150→(255,255,255,0)/α>150 真零；SetDefaults
+      //   :1020-1031 无 alpha 行≡0 恒走前支=恒满强加算白；AI 共享 fade 组
+      //   :56569-56592 只减不增→α 恒 0；出生面=太空枪 127 :19142 专支）/
+      //  76/77/78 琴音弹（:81020-81023 恒 (255,255,255,0) 不读 α——SetDefaults
+      //   :1558-1580 alpha=100 系死值,常量支先于缺省尾；出生面=魔法竖琴 494）
+      //  ——均配 ADDITIVE_GLOW_PROJS 'lighter'（MOD 表 20/76/77/78 off 档就此接线,
+      //  GA 先于表消费）。
+      case 20: return 1;
+      case 76: case 77: case 78: return 1;
       // ★F2（红队 A 仲裁定罪,2026-09-02）：恶魔镰刀族 44/45——GetAlpha :81465-81468
       //  `type==34||35||15||19||44||45 → Color.White` 恒满亮且【不读 alpha】（15 在
       //  更早的 :81007 (200,200,200,25) 支截走、34 在更早的 :80753 White*Opacity
@@ -3116,6 +3158,9 @@ export class Arrow extends Entity {
     }
     // 469 蜂箭（:54789-54798）：vx>0 → spriteDirection=-1（贴图朝左，源翻转语义）
     if (this.projId === 469 && this.vx > 0) ctx.scale(-1, 1);
+    // 114 邪恶三叉戟绘制原点 = (width−12,12)=(4,12)（Main.cs:33187-33189）非盒心,
+    // scale 1.5 → 旋转系内自中心原点平移 ((8−4)×1.5, (8−12)×1.5)=(6,−6)
+    if (this.projId === 114) ctx.translate(6, -6);
     // 316 蝙蝠杖蝠（:27704-27710）：vx>0 → spriteDirection=-1（蝠贴图朝左）——
     // 其余蜂族 spriteDirection=sign(vx) 与贴图原生朝向一致不翻转（:27699-27715）
     if (this.projId === 316 && this.vx > 0) ctx.scale(-1, 1);
@@ -7067,6 +7112,9 @@ export class Arrow extends Entity {
     // alpha = Remap(localAI[0],2,0,1,0)×255（速度衰减即淡出）
     if (this.projId === 114) {
       if (this.drawScale !== 1.5) this.drawScale = 1.5;
+      // localAI[1] 出生梯（:26840-26844 族级支每 AI 步 ++ 钳 15；≥15 后原版转
+      // 114/115 专属小尘 d27@0.6——尘面归 Kill §12 大迸散族,小尘登记续批）
+      if (this.gem114Ramp < 15) this.gem114Ramp++;
       this.gem114T++;
       if (this.gem114T >= 20) {
         this.vx *= 0.98;
@@ -8062,6 +8110,61 @@ export class Arrow extends Entity {
         // 喵刀弹 502（AI_008 弹跳档 :18165-18206）：tink 音 + ai[0] 计数 ≥5 消亡；
         // 全速翻面（无 ×0.9 衰减——type 15 才有 ×0.8），同 hitSet 语义无
         if (this.projId === 502 && this.meowBounceOff(game)) return;
+        // ---- ★BJ229 aiStyle 24 水晶风暴 94 撞块反射（HandleMovement type 段
+        //      Projectile.cs:18811-18819）：无限次逐轴全速反 lastVelocity（vanilla
+        //      `velocity.X != lastVelocity.X → −lastVelocity.X` 两轴独立,角撞双反),
+        //      无音/无尘/无计数,penetrate 不因撞块消耗（反弹面与 NPC 穿透独立）。
+        //      同 aiStyle 24 的 90/1134 无此支（落通用消亡口=原版同款;1114 走上方
+        //      AI 专支湿杀,反射面同样无=原版同款）。
+        if (this.projId === 94) {
+          const st94 = game.world.store;
+          const free94 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st94.inBounds(t0, t1) && !st94.isSolid(t0, t1);
+          };
+          let hit94 = false;
+          if (free94(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+            this.x -= this.vx; this.vx = -this.vx; hit94 = true;      // X 撞臂(:18812-18815)
+          }
+          if (free94(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+            this.y -= this.vy; this.vy = -this.vy; hit94 = true;      // Y 撞臂(:18816-18819)
+          }
+          if (hit94) return;
+          // 双轴回退皆失败=嵌入过深 → 交还通用消亡口（532 档同契约）
+        }
+        // ---- ★BJ229 aiStyle 8 魔法弹撞块反射族（HandleMovement aiStyle8 支
+        //      Projectile.cs:19688-19725,1458:19689-19726 同值）：AI8_BOUNCE_PROJS
+        //      五型,每撞 Item_10 音(:19689 无音量参=1.0)+ai[0]++ 计数;达帽 →
+        //      position += velocity + Kill(:19704-19708);未达 → 逐轴全速反
+        //      lastVelocity(:19716-19724,分轴独立角撞双反)。帽 num73:15=6/253=8/
+        //      余 5(:19699-19703);27 熔岩态 ai[1]==1→7(:19696-19698)——熔岩支未接线
+        //      （P2 债,水矢拖尾支同注）恒走 5。15 的 Y×0.8 衰减臂(:19710-19715)以
+        //      截后残余 vy>4 为门,单点碰撞模型截后恒 0 → 不可达,登记同 496 Kill 臂。
+        //      vanilla 按 velocity!=lastVelocity 分轴反射;本仓单点碰撞无轴信息 →
+        //      逐轴回退探针反射（meowBounceOff 同法）;双轴皆嵌=嵌入过深 → 交还
+        //      通用消亡口（532 档同契约,音/计不耗）----
+        if (AI8_BOUNCE_PROJS.has(this.projId)) {
+          const st8 = game.world.store;
+          const free8 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st8.inBounds(t0, t1) && !st8.isSolid(t0, t1);
+          };
+          const freeX8 = free8(this.x + this.w / 2 - this.vx, this.y + this.h / 2);
+          const freeY8 = free8(this.x + this.w / 2, this.y + this.h / 2 - this.vy);
+          if (freeX8 || freeY8) {
+            this.ai8Bounces++;                                        // ai[0]++(:19692)
+            game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);      // (:19689 缺省音量 1.0)
+            const cap8 = this.projId === 15 ? 6 : this.projId === 253 ? 8 : 5;   // (:19699-19703)
+            if (this.ai8Bounces >= cap8) {
+              this.x += this.vx; this.y += this.vy;                   // position += velocity(:19706)
+              this.killNow(game);
+              return;
+            }
+            if (freeX8) { this.x -= this.vx; this.vx = -this.vx; }
+            if (freeY8) { this.y -= this.vy; this.vy = -this.vy; }
+            return;
+          }
+        }
         // 荆棘球 277 专属档（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
         // 仅入撞 |vy|>3 竖弹 ×0.9（贴地滚动）
         if (this.thornBounce && this.thornBounceOff(game)) return;

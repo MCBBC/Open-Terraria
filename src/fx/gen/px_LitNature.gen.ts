@@ -42,37 +42,37 @@ let tmp12_1 = C[52];
 R[16] = tmp12_0;
 R[17] = tmp12_1;
 /* inst#13 op:0x42 */
-SAM[0](R[0], R[1], sm2Scr);
+SAM[0]!(R[0], R[1], sm2Scr);
 R[0] = sm2Scr[0];
 R[1] = sm2Scr[1];
 R[2] = sm2Scr[2];
 R[3] = sm2Scr[3];
 /* inst#14 op:0x42 */
-SAM[0](R[4], R[5], sm2Scr);
+SAM[0]!(R[4], R[5], sm2Scr);
 R[4] = sm2Scr[0];
 R[5] = sm2Scr[1];
 R[6] = sm2Scr[2];
 R[7] = sm2Scr[3];
 /* inst#15 op:0x42 */
-SAM[0](R[8], R[9], sm2Scr);
+SAM[0]!(R[8], R[9], sm2Scr);
 R[8] = sm2Scr[0];
 R[9] = sm2Scr[1];
 R[10] = sm2Scr[2];
 R[11] = sm2Scr[3];
 /* inst#16 op:0x42 */
-SAM[0](R[12], R[13], sm2Scr);
+SAM[0]!(R[12], R[13], sm2Scr);
 R[12] = sm2Scr[0];
 R[13] = sm2Scr[1];
 R[14] = sm2Scr[2];
 R[15] = sm2Scr[3];
 /* inst#17 op:0x42 */
-SAM[1](R[16], R[17], sm2Scr);
+SAM[1]!(R[16], R[17], sm2Scr);
 R[16] = sm2Scr[0];
 R[17] = sm2Scr[1];
 R[18] = sm2Scr[2];
 R[19] = sm2Scr[3];
 /* inst#18 op:0x42 */
-SAM[0](T[0], T[1], sm2Scr);
+SAM[0]!(T[0], T[1], sm2Scr);
 R[20] = sm2Scr[0];
 R[21] = sm2Scr[1];
 R[22] = sm2Scr[2];

@@ -97,7 +97,7 @@ let tmp34_1 = R[5] * R[3] + (-C[20]);
 R[4] = tmp34_0;
 R[5] = tmp34_1;
 /* inst#35 op:0x42 */
-SAM[0](R[4], R[5], sm2Scr);
+SAM[0]!(R[4], R[5], sm2Scr);
 R[4] = sm2Scr[0];
 R[5] = sm2Scr[1];
 R[6] = sm2Scr[2];

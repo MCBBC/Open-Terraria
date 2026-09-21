@@ -21699,9 +21699,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 世花球茎/生命果植物（KillTile 尾段，WorldGen.cs:48013-48036）：
     // 238 破坏 = 2×2 整件清除 + 50 格内有玩家 → SpawnOnPlayer(262) 召唤世花；
     // 236 破坏 = 掉生命果(1291)。须在 object 锚点分支前拦（drop:null 会吞掉掉落）
+    // ★BJ226（2026-09-21）：锚=帧商 mod2（CheckJunglePlant :48367-48381
+    //  `while (num>1){num-=2;num2++}` 等价——列%2=object 列、商=style 基）。生命果
+    //  styleX∈{0,1,2}（PlaceJunglePlant :48241 num2=36*styleX;生长链 Next(3) :75073）
+    //  → frameX∈{0,18,36,54,72,90},旧式 x-floor(fx/18) 对 styleX≥1 锚左漂 2~5 格 →
+    //  清格循环 type 守卫全不中=本体残留+掉落位左漂 → 无限复掉（用户实报 BJ226
+    //  症状②）。238 花苞生成恒 styleX=0（:74840/:74855/:75041）修前后同值,同式归一。
     if (type === TILE_BY_KEY['v_238_plantera_s_bulb'] || type === TILE_BY_KEY['v_236_life_fruit_plant']) {
       const i0 = st.idx(x, y);
-      const ax = x - Math.floor(st.frameX[i0] / 18), ay = y - Math.floor(st.frameY[i0] / 18);
+      const ax = x - (Math.floor(st.frameX[i0] / 18) % 2), ay = y - (Math.floor(st.frameY[i0] / 18) % 2);
       for (let dx = 0; dx < 2; dx++) {
         for (let dy = 0; dy < 2; dy++) {
           if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === type) st.setTile(ax + dx, ay + dy, 0);

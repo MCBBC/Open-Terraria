@@ -377,6 +377,109 @@ export function matchArmorSetBonusVid(hVid: number, bVid: number, lVid: number):
   return ARMOR_SET_BONUSES_VID[`${hVid}|${bVid}|${lVid}`] ?? null;
 }
 
+// ---- BJ224 套装奖励 tooltip lane（2026-09-21 实报定谳「凡可装备全贴当前生效套装
+//      奖励」——旧 tooltip 面全局贴 player.setBonus,穿神圣套时贝壳发夹(2417,非任何
+//      套成员)等一切可装备件全带神圣套奖励行）----
+// 原版锚 = Main.cs:21473-21517（1456:21097-21141 / 1458:21473-21517 三基线同相）：
+// 行门 = ArmorSetBonuses.SetsContaining[item.type] 非空（BuildLookup :486-510 按
+// Head/Body/Legs vid 分组,组内序=注册序;SetsContaining[0] 显式清零 :509）——非
+// 「玩家当前生效套装」。本 lane = Initialize（ArmorSetBonuses.cs :392-484）全量
+// 64 套 170 三元组重放:vid 域 + 注册序 + PartType 主件位（GetTooltipForSinglePiece
+// /GetTooltipForWornArmor 的 DecidedBy* 文案判据,ArmorSetBonus.cs :201-227）。
+// 仅 tooltip 显示消费（行为面仍在上方两条键 lane;recon-armorset-1457 闸门不覆盖本
+// lane——金标 = tests/bj224-setbonus-tooltip.test.ts 反编译直读逐套对拍）。
+export interface ArmorSetTooltipSet { name: string; primary: 0 | 1 | 2; triples: [number, number, number][] }
+export const ARMOR_SET_TOOLTIP_SETS: ArmorSetTooltipSet[] = [
+  { name: 'Shroomite', primary: 0, triples: [[1548, 1549, 1550], [1546, 1549, 1550], [1547, 1549, 1550]], },
+  { name: 'Wood', primary: 0, triples: [[727, 728, 729], [733, 734, 735], [730, 731, 732], [736, 737, 738], [924, 925, 926], [2509, 2510, 2511], [2512, 2513, 2514]], },
+  { name: 'AshWood', primary: 0, triples: [[5279, 5280, 5281]], },
+  { name: 'MetalTier1', primary: 0, triples: [[89, 80, 76], [687, 688, 689], [90, 81, 77], [954, 81, 77]], },
+  { name: 'MetalTier2', primary: 0, triples: [[91, 82, 78], [92, 83, 79], [955, 83, 79], [690, 691, 692], [693, 694, 695]], },
+  { name: 'Platinum', primary: 0, triples: [[696, 697, 698]], },
+  { name: 'Pumpkin', primary: 0, triples: [[1731, 1732, 1733]], },
+  { name: 'Gladiator', primary: 0, triples: [[3187, 3188, 3189]], },
+  { name: 'Ninja', primary: 0, triples: [[256, 257, 258]], },
+  { name: 'Fossil', primary: 0, triples: [[3374, 3375, 3376]], },
+  { name: 'Bone', primary: 0, triples: [[151, 152, 153], [959, 152, 153]], },
+  { name: 'BeetleDamage', primary: 2, triples: [[2199, 2200, 2202]], },
+  { name: 'BeetleDefense', primary: 2, triples: [[2199, 2201, 2202]], },
+  { name: 'Wizard', primary: 1, triples: [[238, 1282, 0], [238, 1283, 0], [238, 1284, 0], [238, 1285, 0], [238, 1286, 0], [238, 1287, 0], [238, 2279, 0], [238, 4256, 0]], },
+  { name: 'MagicHat', primary: 1, triples: [[2275, 1282, 0], [2275, 1283, 0], [2275, 1284, 0], [2275, 1285, 0], [2275, 1286, 0], [2275, 1287, 0], [2275, 2279, 0], [2275, 4256, 0]], },
+  { name: 'ShadowScale', primary: 0, triples: [[102, 101, 100], [102, 101, 958], [102, 957, 100], [102, 957, 958], [956, 101, 100], [956, 101, 958], [956, 957, 100], [956, 957, 958]], },
+  { name: 'Crimson', primary: 0, triples: [[792, 793, 794]], },
+  { name: 'SpectreHealing', primary: 1, triples: [[1503, 1504, 1505]], },
+  { name: 'SpectreDamage', primary: 1, triples: [[2189, 1504, 1505]], },
+  { name: 'Meteor', primary: 0, triples: [[123, 124, 125]], },
+  { name: 'Frost', primary: 0, triples: [[684, 685, 686]], },
+  { name: 'Jungle', primary: 0, triples: [[228, 229, 230], [228, 229, 962], [228, 961, 230], [228, 961, 962], [960, 229, 230], [960, 229, 962], [960, 961, 230], [960, 961, 962]], },
+  { name: 'Molten', primary: 0, triples: [[231, 232, 233]], },
+  { name: 'Snow', primary: 0, triples: [[803, 804, 805], [803, 804, 980], [803, 979, 805], [803, 979, 980], [978, 804, 805], [978, 804, 980], [978, 979, 805], [978, 979, 980]], },
+  { name: 'Mining', primary: 0, triples: [[88, 410, 411], [88, 410, 5590], [88, 5589, 411], [88, 5589, 5590], [5588, 410, 411], [5588, 410, 5590], [5588, 5589, 411], [5588, 5589, 5590], [4008, 410, 411], [4008, 410, 5590], [4008, 5589, 411], [4008, 5589, 5590]], },
+  { name: 'ChlorophyteMelee', primary: 1, triples: [[1001, 1004, 1005]], },
+  { name: 'ChlorophyteSummon', primary: 1, triples: [[5524, 1004, 1005]], },
+  { name: 'Chlorophyte', primary: 1, triples: [[1003, 1004, 1005], [1002, 1004, 1005]], },
+  { name: 'Angler', primary: 0, triples: [[2367, 2368, 2369], [2367, 2368, 5593], [2367, 5592, 2369], [2367, 5592, 5593], [5591, 2368, 2369], [5591, 2368, 5593], [5591, 5592, 2369], [5591, 5592, 5593]], },
+  { name: 'Cactus', primary: 0, triples: [[894, 895, 896]], },
+  { name: 'Turtle', primary: 0, triples: [[1316, 1317, 1318]], },
+  { name: 'CobaltCaster', primary: 1, triples: [[371, 374, 375]], },
+  { name: 'CobaltMelee', primary: 1, triples: [[372, 374, 375]], },
+  { name: 'CobaltRanged', primary: 1, triples: [[373, 374, 375]], },
+  { name: 'MythrilCaster', primary: 1, triples: [[376, 379, 380]], },
+  { name: 'MythrilMelee', primary: 1, triples: [[377, 379, 380]], },
+  { name: 'MythrilRanged', primary: 1, triples: [[378, 379, 380]], },
+  { name: 'AdamantiteCaster', primary: 1, triples: [[400, 403, 404]], },
+  { name: 'AdamantiteMelee', primary: 1, triples: [[401, 403, 404]], },
+  { name: 'AdamantiteRanged', primary: 1, triples: [[402, 403, 404]], },
+  { name: 'Palladium', primary: 0, triples: [[1205, 1208, 1209], [1206, 1208, 1209], [1207, 1208, 1209]], },
+  { name: 'Orichalcum', primary: 0, triples: [[1210, 1213, 1214], [1211, 1213, 1214], [1212, 1213, 1214]], },
+  { name: 'Titanium', primary: 0, triples: [[1215, 1218, 1219], [1216, 1218, 1219], [1217, 1218, 1219]], },
+  { name: 'HallowedSummoner', primary: 1, triples: [[4873, 551, 552], [4873, 551, 4901], [4873, 4900, 552], [4873, 4900, 4901], [4899, 551, 552], [4899, 551, 4901], [4899, 4900, 552], [4899, 4900, 4901]], },
+  { name: 'Hallowed', primary: 1, triples: [[558, 551, 552], [558, 551, 4901], [558, 4900, 552], [558, 4900, 4901], [553, 551, 552], [553, 551, 4901], [553, 4900, 552], [553, 4900, 4901], [559, 551, 552], [559, 551, 4901], [559, 4900, 552], [559, 4900, 4901], [4898, 551, 552], [4898, 551, 4901], [4898, 4900, 552], [4898, 4900, 4901], [4897, 551, 552], [4897, 551, 4901], [4897, 4900, 552], [4897, 4900, 4901], [4896, 551, 552], [4896, 551, 4901], [4896, 4900, 552], [4896, 4900, 4901]], },
+  { name: 'CrystalNinja', primary: 0, triples: [[4982, 4983, 4984]], },
+  { name: 'Tiki', primary: 0, triples: [[1159, 1160, 1161]], },
+  { name: 'Spooky', primary: 0, triples: [[1832, 1833, 1834]], },
+  { name: 'Bee', primary: 0, triples: [[2361, 2362, 2363]], },
+  { name: 'Spider', primary: 0, triples: [[2370, 2371, 2372]], },
+  { name: 'Solar', primary: 0, triples: [[2763, 2764, 2765]], },
+  { name: 'Vortex', primary: 0, triples: [[2757, 2758, 2759]], },
+  { name: 'Nebula', primary: 0, triples: [[2760, 2761, 2762]], },
+  { name: 'Stardust', primary: 0, triples: [[3381, 3382, 3383]], },
+  { name: 'Forbidden', primary: 0, triples: [[3776, 3777, 3778]], },
+  { name: 'SquireTier2', primary: 0, triples: [[3800, 3801, 3802]], },
+  { name: 'ApprenticeTier2', primary: 0, triples: [[3797, 3798, 3799]], },
+  { name: 'HuntressTier2', primary: 0, triples: [[3803, 3804, 3805]], },
+  { name: 'MonkTier2', primary: 0, triples: [[3806, 3807, 3808]], },
+  { name: 'SquireTier3', primary: 0, triples: [[3871, 3872, 3873]], },
+  { name: 'ApprenticeTier3', primary: 0, triples: [[3874, 3875, 3876]], },
+  { name: 'HuntressTier3', primary: 0, triples: [[3877, 3878, 3879]], },
+  { name: 'MonkTier3', primary: 0, triples: [[3880, 3881, 3882]], },
+  { name: 'ObsidianOutlaw', primary: 0, triples: [[3266, 3267, 3268]], },
+];
+
+/** 注册套实例（展开三元组后的单条） */
+export interface ArmorSetTooltipMember { name: string; primary: 0 | 1 | 2; h: number; b: number; l: number }
+let TOOLTIP_SETS_BY_VID: Map<number, ArmorSetTooltipMember[]> | null = null;
+/** 含 vid 的注册套实例（注册序）——SetsContaining[vid] 等价（三元组 0 位 =「该位
+ *  不计」占位（TryCounting :189-199 needed=0 不计数）,不产生成员关系,同 BuildLookup
+ *  :509 SetsContaining[0] 显式清零）;非成员/vid≤0 返回空表） */
+export function armorSetTooltipContaining(vid: number): readonly ArmorSetTooltipMember[] {
+  if (!TOOLTIP_SETS_BY_VID) {
+    const m = new Map<number, ArmorSetTooltipMember[]>();
+    for (const set of ARMOR_SET_TOOLTIP_SETS) {
+      for (const [h, b, l] of set.triples) {
+        for (const part of [h, b, l]) {
+          if (part === 0) continue;
+          let arr = m.get(part);
+          if (!arr) { arr = []; m.set(part, arr); }
+          arr.push({ name: set.name, primary: set.primary, h, b, l });
+        }
+      }
+    }
+    TOOLTIP_SETS_BY_VID = m;
+  }
+  return TOOLTIP_SETS_BY_VID.get(vid) ?? [];
+}
+
 // ---- DD2 盔甲散件主属性（GrantArmorBenefits case 3798-3882 :13236-13342 逐件实读,
 //      2026-08-13 建表;2026-09-03 对账批——①补齐 3801 近战伤+0.15/:13250、3804 远程伤
 //      +0.2/:13276、3807 近战伤+0.2/:13263、3872 lifeRegen+8/:13291、3878 远程伤+0.25/

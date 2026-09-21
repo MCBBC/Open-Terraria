@@ -85,6 +85,12 @@ export interface Body {
    *  ★曾用 vy>=0 宽门：低空飞行小动物（萤火虫/蝴蝶平飞 vy≥0）脚下 7~17px 有落面
    *  即被瞬移按压 → "怪力按地+闪现"周期循环（飞行 AI 抬升后再次触发） */
   stepDownGate?: 'grounded' | 'gravity' | 'never';
+  /** ★BJ227：Collision.StepDown 第 8 参 waterWalk（Player.cs:23717/:28267 两处调用均传
+   *  `waterWalk || waterWalk2`——水上行走族走下台阶时把【液面】也当 7~17px 吸附窗内
+   *  落面（Collision.cs:3603-3610 液面臂，liquid>0 且上格无液）。玩家 fixedUpdate 每
+   *  tick 写（waterWalk∪waterWalk2∪水上行走药水 buff15，gravDir==-1 时原版
+   *  :27866-27869 整旗清零故写 false）；NPC/其他体不写 = 缺省 false 逐位不变。 */
+  stepDownWaterWalk?: boolean;
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946：水/岩浆 .5、蜂蜜 .25、
    *  微光 .375；dry=1）。Entity 基类缺省 1，Enemy 侧由 npcLiquid.updateNpcLiquid 写入 */
   liqFactor?: number;
@@ -322,6 +328,19 @@ function applyStepDown(b: Body, world: World): void {
     for (let j = rowA; j <= rowA + 1; j++) {
       if (!st.inBounds(i, j)) continue;
       const ji = st.idx(i, j);
+      // ★BJ227 液面落面臂（Collision.cs:3603-3610，waterWalk 形参门）：水行族走下台阶
+      // 时把液面（liquid>0 且上格无液）也算吸附落面——num7=液面像素高、num8=液面 Y。
+      // 原版无液体种别排除（岩浆同样吸附——waterWalk 形参=waterWalk||waterWalk2 照抄）；
+      // 相交盒用原 position（非探针 x,:3607 Rectangle(position.X,...)），与实心臂同一
+      // FloatIntersect 形状（i*16, j*16-17, 16, 16）。
+      if (b.stepDownWaterWalk && st.liquid[ji] > 0 && (j === 0 || st.liquid[st.idx(i, j - 1)] === 0)) {
+        const num7 = Math.floor(st.liquid[ji] / 32) * 2 + 2;
+        const num8 = j * TILE + TILE - num7;
+        if (i * TILE < b.x + b.w && i * TILE + TILE > b.x
+          && j * TILE - 17 < b.y + b.h && j * TILE - 17 + TILE > b.y && num8 < best) {
+          best = num8;
+        }
+      }
       if (!(st.isSolid(i, j) || st.isPlatform(i, j))) continue; // tileSolid||tileSolidTop（:3614）
       let top = j * TILE;
       if (st.half[ji]) top += 8;                    // 半砖顶 +8（:3618-3621）
@@ -1256,6 +1275,51 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   //   还原本体坐标/盒高（语义见入口注）——碰撞管线全程只见【下部 cHeight 缩盒】,
   //   本体 y/h 与盒外消费面（AI 探针/LOS/绘制）保持原 SetDefaults 全盒
   if (inset > 0) { b.h += inset; b.y -= inset; }
+}
+
+/** ★BJ227：Collision.WaterCollision（Collision.cs:2793-2820）1:1——液面下坠跨越钉位。
+ *  原版消费面 = Player.DryCollision 两处（Player.cs:23738 有限元步进支/:23774 单步支,
+ *  `if (waterWalk || waterWalk2)` 门）——【干态】运动路径专属；湿态路径
+ *  Player.WetCollision（:23622-23640）只走 TileCollision+位移因子,无任何液面钉位。
+ *  语义：实体下坠时新盒底跨越液面（旧盒底 ≤ 面顶 < 新盒底）→ velocity.Y 被【替换】
+ *  为 `面顶 − 旧盒底`（= 把位移钳到面顶,position += 后盒底恰停在液面上）。
+ *  逐格判定五条件（:2806-2812）：新盒 X 相交格列 ∧ 新盒底 > 面顶 ∧ 新盒顶 < 面顶+液高
+ *  ∧ 旧盒底 ≤ 面顶 ∧ !fallThrough（fallThrough 由调用侧门——按 ↓ 主动下潜让位）。
+ *  液面高 num2 = liquid/32*2+2（C# 整除；255→16/128→10/1→2）、面顶 = j*16+16−num2。
+ *  上格无液（tile[i,j−1].liquid==0）= 液面判据；`(!lava() || lavaWalk)` = 岩浆面仅在
+ *  lavaWalk（= 纯 waterWalk：熔岩护足 908/泰拉靴 5000/水上行走药水 buff15——水上漂靴
+ *  863/黑曜石水上漂靴 907 是 waterWalk2,岩浆面【不】钉位照常下沉）时成立。
+ *  扫描窗 = 旧盒膨胀 1 格（:2799-2804,X/Y 均旧盒基）;i/j 循环上界【排他】;
+ *  末中者胜（result 逐格覆写,i 升序 j 升序 = 同列最深面）。
+ *  返回 = 钉位后的面顶 Y（px）；null = 本拍无跨越（velocity 原样）。 */
+export function waterSurfacePinCrossed(
+  st: World['store'], oldX: number, oldY: number, w: number, h: number,
+  newX: number, newY: number, lavaWalk: boolean,
+): number | null {
+  const i0 = Math.max(0, Math.min(Math.floor(oldX / TILE) - 1, st.w - 1));
+  const i1 = Math.max(0, Math.min(Math.floor((oldX + w) / TILE) + 2, st.w - 1));
+  const j0 = Math.max(0, Math.min(Math.floor(oldY / TILE) - 1, st.h - 40));
+  const j1 = Math.max(0, Math.min(Math.floor((oldY + h) / TILE) + 2, st.h - 40));
+  const oldBottom = oldY + h;
+  const newBottom = newY + h;
+  let result: number | null = null;
+  for (let i = i0; i < i1; i++) {
+    for (let j = j0; j < j1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const idx = st.idx(i, j);
+      if (st.liquid[idx] <= 0) continue;                               // :2806 liquid > 0
+      if (j > 0 && st.liquid[st.idx(i, j - 1)] !== 0) continue;        // :2806 上格无液（液面判据）
+      if (!lavaWalk && st.liquidType[idx] === 2) continue;             // :2806 (!lava() || lavaWalk)——LIQUID_TYPE.LAVA=2
+      const num2 = Math.floor(st.liquid[idx] / 32) * 2 + 2;            // :2807 液面像素高（C# 整除）
+      const surfY = j * TILE + TILE - num2;                            // :2809 面顶
+      if (newX + w > i * TILE && newX < i * TILE + TILE                // :2810 新盒 X 相交
+        && newBottom > surfY && newY < surfY + num2                    // :2811-2812 跨越（新底过面 ∧ 新顶未穿格底）
+        && oldBottom <= surfY) {                                       // :2812 旧底 ≤ 面顶
+        result = surfY;                                                // result.Y = 面 − 旧底（此处回面顶,由调用侧换算）
+      }
+    }
+  }
+  return result;
 }
 
 const EMBED_DELAY_TICKS = 15;

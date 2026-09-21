@@ -134,7 +134,9 @@ function emitInst(lines, inst, idx, passName) {
     case 0x42: {
       const sampIdx = inst.srcs[1].reg ?? 0;
       const pxv = Sref(inst, 0, 0), pyv = Sref(inst, 0, 1);
-      lines.push(`SAM[${sampIdx}](${pxv}, ${pyv}, sm2Scr);`);
+      // ★BJ239: SAM 槽由 SM2Effect.execPixel 归一化兜底(缺槽=noopFill,补齐到4),契约保证非
+      // undefined——`!` 断言而非 `?.`(?. 在意外 undefined 时静默跳采样=偏离 VM write(0,0,0,1) 语义)。
+      lines.push(`SAM[${sampIdx}]!(${pxv}, ${pyv}, sm2Scr);`);
       for (const lane of targets) store(lane, `sm2Scr[${lane}]`);
       return;
     }

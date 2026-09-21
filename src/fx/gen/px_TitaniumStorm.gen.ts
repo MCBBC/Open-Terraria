@@ -8,7 +8,7 @@ import { sat } from '../sm2Runtime';
 export function px_TitaniumStorm(C: Float64Array, R: Float64Array, T: Float64Array, V: Float64Array, O: Float64Array, SAM: Array<((u: number, v: number, out: Float64Array) => void) | undefined>, OUT: Float64Array, sm2Scr: Float64Array): boolean | null {
   R.fill(0); O.fill(0);
 /* inst#1 op:0x42 */
-SAM[0](T[0], T[1], sm2Scr);
+SAM[0]!(T[0], T[1], sm2Scr);
 R[0] = sm2Scr[0];
 R[1] = sm2Scr[1];
 R[2] = sm2Scr[2];
@@ -35,7 +35,7 @@ R[4] = tmp7_0;
 let tmp8_1 = C[16];
 R[5] = tmp8_1;
 /* inst#9 op:0x42 */
-SAM[1](R[4], R[5], sm2Scr);
+SAM[1]!(R[4], R[5], sm2Scr);
 R[4] = sm2Scr[0];
 R[5] = sm2Scr[1];
 R[6] = sm2Scr[2];

@@ -6,7 +6,7 @@ import {
   PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS,
   PLAYER_IFRAME_TICKS, TILE, RUN_ACCELERATION, RUN_SLOWDOWN,
 } from '../core/constants';
-import { moveAndCollide, isClearSpotTest, findCollisionTileVertical } from '../physics/TileCollision';
+import { moveAndCollide, isClearSpotTest, findCollisionTileVertical, waterSurfacePinCrossed } from '../physics/TileCollision';
 import { dustWaterFor } from '../render/WeatherRenderer';   // Dust.dustWater()（Dust.cs:405-421,waterStyle 映射）
 import { queueRippleSized, RippleShape } from '../render/WaterWaves';   // ★用户明令分歧 2026-09-14 唇入必响：掠水涟漪走既有公共口（QueueRipple 玩家重载）
 import { wetCollision, getWaterLine } from './npcLiquid';
@@ -464,6 +464,14 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     anglerSetSpawnReduction: boolean;   // 渔夫套：生成环 ×1.3/×0.7（NPC.cs:627-630）
     iceSkate: boolean;   // 冰刀族 950/1861/1862/5000：冰面不滑+加速（:26237-26255）
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
+    /** ★BJ227：纯 waterWalk 源（Player.cs:15282-15288 熔岩护足 908/泰拉靴 5000 置
+     *  waterWalk、buff15 :10102 亦 waterWalk）∪——区别于 waterWalk2 源（水上漂靴 863
+     *  :15269-15272/黑曜石水上漂靴 907 :15273-15277 只置 waterWalk2）。消费面二：
+     *  ①Collision.WaterCollision 第 7 参 lavaWalk（:23738/:23774 只传 waterWalk 非
+     *  waterWalk2——waterWalk2 族岩浆面不钉位照常下沉）；②LavaCollision 探针缩高
+     *  6px（:27873-27881 `if (waterWalk) num82 -= 6`——水上漂靴族无此臂,贴浆面即灼）。
+     *  液面钉位/StepDown 液面臂等其余消费面两源同权（waterWalk||waterWalk2）。 */
+    waterWalkLava: boolean;
     jumpOpts: string[];
     wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean; hidden: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
@@ -1176,6 +1184,9 @@ export class Player extends Entity {
   /** StepDown 门 = vy===GRAVITY（Player.cs:23252 字面）；★SW-BJ59 滚轴鞋贴轨帧
    *  fixedUpdate 灌 'never'（:28265/:28276 `!IsRidingTracks` 否决腿） */
   stepDownGate: 'grounded' | 'gravity' | 'never' = 'gravity';
+  /** ★BJ227：StepDown waterWalk 形参（Body 通道,fixedUpdate 每 tick 写——
+   *  液面落面臂 Collision.cs:3603-3610,消费面 applyStepDown） */
+  stepDownWaterWalk = false;
   /** ★SW-FX34：倒挂 StepUp 每 tick 门（Player.cs:28273-28275，fixedUpdate 灌入；
    *  moveAndCollide 仅 gravDir=-1 时消费—— gravDir=1 半边照旧走 vy>=0 通用门） */
   stepUpInvGate = false;
@@ -1925,7 +1936,7 @@ export class Player extends Entity {
     let frostBurn = false; // 冰霜盔甲 46 套装引擎
     let anglerSetSpawnReduction = false;   // Player.anglerSetSpawnReduction（:2672）
     const immuneBuffs = new Set<number>(); // Player.buffImmune（十字章族装备扫描累积）
-    let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
+    let desertBoots = false, waterWalk = false, waterWalkLava = false, jumpBoost = false, panic = false, starCloak = false;
     const jumpSet = new Set<string>();
     let wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean; hidden: boolean } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
@@ -2281,7 +2292,11 @@ export class Player extends Entity {
         if (fx.noKnockback) noKnockback = true;
         if (fx.noFallDmg) noFallDmg = true;
         if (fx.desertBoots) desertBoots = true;
-        if (fx.waterWalk || fx.waterWalk2) waterWalk = true;
+        // ★BJ227：waterWalk2 源（863/907）并入 waterWalk（液面钉位/StepDown 液面臂
+        // 两源同权,原版消费面 `waterWalk || waterWalk2`）——纯 waterWalk 源单独记
+        // waterWalkLava（岩浆面钉位 + Lava 探针缩高 6px 仅熔岩护足/泰拉靴/药水族）
+        if (fx.waterWalk) { waterWalk = true; waterWalkLava = true; }
+        if (fx.waterWalk2) waterWalk = true;
         if (fx.jumpBoost) jumpBoost = true;
         if (fx.panic) panic = true;
         if (fx.starCloak) starCloak = true;
@@ -2521,8 +2536,10 @@ export class Player extends Entity {
     // ★组A/B 单件面批（2026-09-18）甲件行为旗 vid 直查（同 deadMansSweater 件位形态;
     //  声明位在配饰环上方本地块,旗消费链见 PlayerEquipStats 字段注）：
     if (lVid === 5001) moonLordLegsArmor = true;     // 月亮领主腿（:13215-13219）
-    if (moonLordLegsArmor) extraFall += 10;          // :19732 extraFall += 10（jumpSpeed +1.8 面
-                                                     // ★BJ220 走甲件主属性环 accfx '5001'.jumpSpd;
+    if (moonLordLegsArmor) extraFall += 10;          // :19733 extraFall += 10（BJ234 摔伤面:
+                                                     // 摔伤安全距 25→35,消费 fixedUpdate 摔伤结算
+                                                     // safeT=25+eqM.extraFall ≙ :25497-25498;
+                                                     // jumpSpeed+1.8 走 accfx '5001'.jumpSpd;
                                                      // jumpHeight++ 走 jumpBaseSnapshot 消费
                                                      // equipStats.moonLordLegs）
     if (lVid === 3770) slowFallArmor = true;         // 神灵诅咒（:13360-13362）
@@ -2784,7 +2801,7 @@ export class Player extends Entity {
       frostBurn,
       huntressT2,                // 女猎手 T2/T3（setHuntressT2 :16119/:16149）
       anglerSetSpawnReduction,   // 渔夫套生成环（NPC.cs:627-630）
-      waterWalk, jumpBoost, panic, starCloak,
+      waterWalk, waterWalkLava, jumpBoost, panic, starCloak,
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
       strongBees,   // 蜂巢背包 3333（beeType 566 档/强蜂伤/kb——Game 1121 蜂枪分支消费）
@@ -4326,7 +4343,11 @@ export class Player extends Entity {
     // （:27866-27869 `gravDir==-1 → waterWalk/waterWalk2=false`，先于 Wet/Lava 碰撞）
     const canWaterWalk = (eqM.waterWalk || this.buffs.canWaterWalk)
       && this.gravDir !== -1;
-    const lavaProbeH = canWaterWalk ? this.h - 6 : this.h;
+    // ★BJ227 勘误：缩高 6px 臂原版只认【纯 waterWalk】（:27873-27881 `if (waterWalk)
+    // num82 -= 6`——waterWalk2 水上漂靴族无此臂,贴浆面即灼烧）。曾用并集 canWaterWalk
+    // = 863/907 超授岩浆面行走。buff15 药水原版置 waterWalk（:10102）→ 归纯源。
+    const lavaWalkPure = (eqM.waterWalkLava || this.buffs.canWaterWalk) && this.gravDir !== -1;
+    const lavaProbeH = lavaWalkPure ? this.h - 6 : this.h;
     this.inLava = liquidCollision(world.store, this.x, this.y, this.w, lavaProbeH, 2); // LavaCollision 盒判定
     const flag25 = !wasShimmering && this.inLava;   // :27878-27882（!shimmering 门 + 本拍 LavaCollision）
     this.splashLavaWet = flag25;                    // :27883 lavaWet = flag25
@@ -5592,21 +5613,24 @@ export class Player extends Entity {
       } else { lJSpd = 6.01; lJT = 30; }
       effJumpSpd = lJSpd;
       this.jumpSpeedField = lJSpd;      // ★SW-FX40（e）：湿档覆写（:24624 6.01 族）
-      // ---- 水面行走（WaterWalkingBoots/LavaWaders 族 + 水行药水；按 ↓ 下潜）----
-      // vy 清零 → 下方起跳门 vy==0 自然通过（原版同——水面站立即 velocity.Y==0）
-      if (canWaterWalk && !this.headUnderwater && this.vy >= 0 && !this.inputDown) {
-        this.onWaterSurface = true;
-        this.vy = 0;
-        this.fallStartY = null;
-        // 站在液面等价落地：重置多段跳/飞行/飞毯
+      // ---- ★BJ227 定谳重定位（2026-09-21 用户实报「水上/液面站一会慢慢沉」）----
+      // 旧「水面悬停钉」（canWaterWalk ∧ !headUnderwater ∧ vy≥0 ∧ !↓ → vy=0）退役。
+      // 原版湿态运动路径 Player.WetCollision（:23622-23640）【无任何液面钉位】——钉位
+      // 只存在于干态 DryCollision→Collision.WaterCollision（:23738/:23774,本文件下方
+      // moveAndCollide 后 waterSurfacePinCrossed 承接）。旧钉只清 vy 不钉位置:每拍钉后
+      // 湿重力链又 +lGrav → liqFactor 位移净沉 0.1px/t（6px/s,水档）——首湿点（探针湿
+      // ≈沉 10.5px）到头部没水 ~5s 后 headUnderwater 门失能、钉整段摘除 → 加速直沉,
+      // 即用户实报「站一会→慢慢沉→没顶」。原版水面站立 = 干态（湿探针 dry,永不入本
+      // 湿支——盒底恰在面顶时居中探针底=面顶−h/4 < 面顶）。
+      this.onWaterSurface = false;   // 湿态=游泳/下潜,非水面站立（干态钉位回写）
+      // 湿态 vy==0 回满（vanilla :26247 `velocity.Y == 0f || sliding → RefreshDoubleJumps`
+      // + :26304-26310 `canCarpet = true`——湿态踩底通用,非 boots 限定;旧块同套四件）。
+      // 水面站立侧的回满在干态钉位块（vy 钉 0 同门自然通过）。
+      if (this.vy === 0) {
         this.extraJumps = [...eqM.jumpOpts];
-        const eqW = eqM;
-        this.wingTime = eqW.wing ? eqW.wing.time : 0;
+        this.wingTime = eqM.wing ? eqM.wing.time : 0;
         this.rocketTime = 7; this.rocketRelease = true; this.rocketDelay = 0;
-        this.canCarpet = true;
-        this.carpetTime = 300;
-      } else {
-        this.onWaterSurface = false;
+        this.canCarpet = true; this.carpetTime = 300;
       }
       // ---- 水中起跳门（JumpMovement :20405-20496 原版语义，2026-08-16 对齐）：
       //   vy==0（踩底 / 水行站立）或 脚蹼族湿态任意时刻（flag2&&flag3 :20407）；
@@ -5822,7 +5846,12 @@ export class Player extends Entity {
       // wallCling 抑制 autoJump 支等效（releaseJump=jumpEdge 边沿支不受影响）。
       const slidingAutoSupp = this.wallCling;
       if (this.inputJump && (jumpEdge || ((this.ridingMount ? this.mount.autoJump : eqJ.autoJump) && !slidingAutoSupp))
-        && (this.onGround || (this.onTrack && this.vy === 0) || (this.gravDir === -1 && this.hitHead) || hoverGrounded || this.wallCling)) {
+        && (this.onGround || (this.onTrack && this.vy === 0) || (this.gravDir === -1 && this.hitHead) || hoverGrounded || this.wallCling
+          || (this.onWaterSurface && this.vy === 0))) {
+        // ★BJ227 水面站立起跳腿：原版起跳外门 `(sliding||velocity.Y==0f)|flag`（JumpMovement
+        // :20845）无 onGround 要求——水面钉位态 velocity.Y==0（WaterCollision :23774 替换值
+        // 稳定拍=0）→ 原版水面可直接起跳。onWaterSurface=上一拍干态钉位回写（本门先于本拍
+        // 钉位,寄存器语义同 wallCling 惯例）;vy==0 门排掉被湿路由摘钉的帧（下潜中不给跳）。
         // ★SW-BJ59：onTrack 臂——原版起跳门 `velocity.Y == 0f`（JumpMovement :20845），
         // 贴轨滑行帧 vy==0 但无实心接触（本仓 onGround 近似漏轨面）→ 滚轴鞋贴轨
         // 可跳离轨道；坡面轨 vy≠0 帧同原文不跳。
@@ -6789,6 +6818,10 @@ export class Player extends Entity {
     //  ★SW-FX40（h1）：补矿车腿 + flag28/flag29 腿（:28265 `velocity.Y == gravity &&
     //  !IsRidingTracks && !flag29 && !flag28`）。
     this.stepDownGate = (this.onTrack || this.ridingCart || flag28Fx || flag29Fx) ? 'never' : 'gravity';
+    // ★BJ227：StepDown 第 8 参 waterWalk（:23717/:28267 两处调用均传 `waterWalk ||
+    // waterWalk2`——含 buff15 药水;canWaterWalk 已含 gravDir==-1 清旗门 :27866-27869）。
+    // 消费面 = applyStepDown 液面落面臂（TileCollision.ts,Collision.cs:3603-3610）。
+    this.stepDownWaterWalk = canWaterWalk;
     // ★SW-FX34：倒挂 StepUp 每 tick 门（:28273-28275 `if (gravDir == -1f) {
     //  if ((carpetFrame != -1 || velocity.Y <= gravity) && !controlUp) StepUp(…,(int)gravDir,controlUp) }`）。
     //  carpetFrame!=-1 ≙ 飞毯本 tick 在展开（仓承载=carpetTime>0 且按住跳,同 CarpetMovement
@@ -6944,6 +6977,39 @@ export class Player extends Entity {
       const fallingFx = this.vy > (this.gField ?? GRAVITY) || this.vy < -(this.gField ?? GRAVITY);
       moveAndCollide(this, world, this.vx, this.vy);
       this.h = hKeep;
+      // ---- ★BJ227 液面钉位（vanilla DryCollision :23736-23740 有限元支/:23771-23777 单步支
+      //      → Collision.WaterCollision :2793-2820,waterSurfacePinCrossed 1:1 移植）----
+      //  干态运动路径专属：下坠跨越液面 → 位置回钉面顶（盒底=面顶）+ velocity.Y 替换为
+      //  面跨越位移（原版 `velocity = WaterCollision(position, velocity, …)` :23774——稳定
+      //  站立拍=0 → 起跳门 vy==0 自然通过;落面拍=剩余位移,次拍归零,原版同两拍收敛）;
+      //  fallStart 重置（:23775-23778 `if (vector6 != velocity) fallStart = position.Y/16`）。
+      //  ★先定谳（本刀锚定）：钉位在原版只挂 DryCollision——湿态 WetCollision（:23622）
+      //  无钉位;按 ↓（fallThrough=controlDown :28296,本仓 dropThrough 通道）主动下潜让位;
+      //  湿路由（:28395-28404 shimmerWet ∨ honeyWet∧!ignoreWater ∨ wet∧!merman∧!ignoreWater
+      //  ∧!trident → WetCollision）让位——本仓湿支三豁免（merman/ignoreWater/三叉戟 277）
+      //  原版走干路由照钉。lavaWalk=纯 waterWalk（waterWalk2 水上漂靴 863/黑曜石 907 岩浆
+      //  面不钉,照常下沉）;buff15 药水原版置 waterWalk → 含岩浆面。原版序 = TileCollision
+      //  → WaterCollision → position+=,本仓 moveAndCollide 内已积分 → 等价位次 = 积分后
+      //  位置修正（新旧盒跨面判定,UpdateTouchingTiles/TryBouncingBlocks 前同原文）。
+      {
+        const ignoreWaterPin = this.ridingMountSwimFree
+          || this.buffs.has(BuffType.FlipperPotion)
+          || eqM.wing?.slot === 26;
+        const heldItPin = this.inv.heldItem();
+        const heldVidPin = heldItPin ? (ITEM_DEFS[heldItPin.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldItPin.id].key)) : -1;
+        const wetRoutePin = (this.wetSticky || this.inHoney || this.splashShimmerWet)
+          && !this.merman && !ignoreWaterPin && heldVidPin !== 277;
+        if (canWaterWalk && !wetRoutePin && !this.dropThrough && !this.ridingCart && this.vy > 0) {
+          const surf = waterSurfacePinCrossed(world.store, this.x, preY, this.w, this.h,
+            this.x, this.y, eqM.waterWalkLava || this.buffs.canWaterWalk);
+          if (surf !== null) {
+            this.y = surf - this.h;
+            this.vy = surf - (preY + this.h);
+            this.fallStartY = null;
+            this.onWaterSurface = true;
+          }
+        }
+      }
       // ★SW-FX40（g）：UpdateTouchingTiles（:28432——SlopingCollision/传送带后、
       //  顶头臂前，原版同序；GetHurtTile 兜底面/弹跳块 TryBouncingBlocks 消费）
       this.updateTouchingTiles(world);

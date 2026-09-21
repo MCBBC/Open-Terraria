@@ -38,19 +38,19 @@ R[5] = tmp11_1;
 let tmp12_0 = T[0];
 R[8] = tmp12_0;
 /* inst#13 op:0x42 */
-SAM[0](R[0], R[1], sm2Scr);
+SAM[0]!(R[0], R[1], sm2Scr);
 R[12] = sm2Scr[0];
 R[13] = sm2Scr[1];
 R[14] = sm2Scr[2];
 R[15] = sm2Scr[3];
 /* inst#14 op:0x42 */
-SAM[0](R[4], R[5], sm2Scr);
+SAM[0]!(R[4], R[5], sm2Scr);
 R[4] = sm2Scr[0];
 R[5] = sm2Scr[1];
 R[6] = sm2Scr[2];
 R[7] = sm2Scr[3];
 /* inst#15 op:0x42 */
-SAM[1](R[8], R[9], sm2Scr);
+SAM[1]!(R[8], R[9], sm2Scr);
 R[16] = sm2Scr[0];
 R[17] = sm2Scr[1];
 R[18] = sm2Scr[2];

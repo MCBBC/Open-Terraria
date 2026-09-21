@@ -2823,28 +2823,18 @@ export class UI {
       player?: {
         damageMult(k: 'melee' | 'ranged' | 'magic' | 'summon'): number;
         critChance(k: 'melee' | 'ranged' | 'magic'): number;
-        equipStats?: { manaCostMul?: number; kbGlove?: boolean; setBonus?: { name?: string } | null };
+        equipStats?: { manaCostMul?: number; kbGlove?: boolean };
         buffs?: { has?: (b: number) => boolean };
       };
       anglerQuestItemId?: () => number;
     };
     const gp = g.player;
-    // 套装奖励文本（player.setBonus ← ArmorSetBonus.name → l10n ArmorSetBonus.*）
-    let setBonusText: string | null = null;
-    {
-      const sbName = gp?.equipStats?.setBonus?.name;
-      if (sbName) {
-        const path = `ArmorSetBonus.${sbName}`;
-        if (Lang.has(path)) setBonusText = Lang.text(path) || null;
-      }
-    }
     const tps = gp ? {
       dmgMult: { melee: gp.damageMult('melee'), ranged: gp.damageMult('ranged'), magic: gp.damageMult('magic'), summon: gp.damageMult('summon') },
       crit: { melee: gp.critChance('melee'), ranged: gp.critChance('ranged'), magic: gp.critChance('magic') },
       manaCostMul: gp.equipStats?.manaCostMul ?? 1,
       kbGlove: !!gp.equipStats?.kbGlove,
       kbBuff: !!gp.buffs?.has?.(BuffType.Titan),      // 泰坦 108 → kbBuff（:20812 近战击退×1.5）
-      setBonusText,
     } : null;
 
     // 物品自带说明（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*）。
@@ -2889,8 +2879,31 @@ export class UI {
       expert: isExpert,
       master: rare === -13,
       anglerQuestItemId: g.anglerQuestItemId?.() ?? 0,
-      // 社交槽语义（dye 槽 / armor 社交位——本仓 dye 槽 = 原版 social dye 位）
-      socialSlot: where === 'dye' || where === 'miscDye',
+      // ★BJ230 社交槽语义（ItemSlot.cs:3187-3197 case 9/11 → HoverItem.social=true：
+      //  时装甲 10-12=context 9（Main.cs:42193）、时装配饰 13-19=context 11（:42196）；
+      //  染料槽 context 12（:42233）不在置位 switch 内。旧 dye/miscDye 臂=BJ224 登记
+      //  债的伪锚定（tip0/tip1 三版反编译零消费=死键）,定谳后摘除）
+      socialSlot: where === 'armor' && i >= 10,
+      // ★BJ224 套装奖励行门数据（Main.cs:21473-21517）：worn = 悬停位 ∈ 功能甲槽
+      //  armor[0-2]（ItemSlot.MouseHover context 8 → HoverItem.wornArmor=true,
+      //  ItemSlot.cs:3190-3193;时装甲 10-12 = context 9 social、背包/箱/时装槽=无旗）
+      //  wornH/B/L = GetEffectiveArmor(0/1/2) 的 vid（ArmorSetBonus.QueryContext
+      //  :18-41——含 LoadoutShare 收藏共享件,与 Player.computeEquipStats 同源）。
+      //  player 未挂（测试桩/无世界态）→ worn vids 全 0（=零穿戴,与原版空 armor 同相）
+      setBonusHover: (() => {
+        const wornVid = (it: { id: number } | null | undefined): number => {
+          const d = it ? ITEM_DEFS[it.id] : undefined;
+          if (!d) return 0;
+          return d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+        };
+        const inv = this.game?.player?.inv;
+        return {
+          worn: where === 'armor' && i < 3,
+          wornH: inv ? wornVid(inv.getEffectiveArmor(0)) : 0,
+          wornB: inv ? wornVid(inv.getEffectiveArmor(1)) : 0,
+          wornL: inv ? wornVid(inv.getEffectiveArmor(2)) : 0,
+        };
+      })(),
     };
     let linesHtml = '';
     // ---- LoadoutShare 行族（R4-15,M57:20824-20833 共享两行 + :21517-21519 首用提示）：

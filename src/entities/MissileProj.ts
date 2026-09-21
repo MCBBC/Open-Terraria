@@ -992,7 +992,8 @@ export class MagicMissileProj extends Entity {
     const speed = Math.hypot(this.vx, this.vy);
     // ---- 79 彩虹拖尾（RainbowRodDrawer.cs:12-37 的 canvas 近似：沿 oldPos 逐段绘
     //      hue=(p*1.6−GlobalTime)%1 色、宽 lerp(0,64,1−(1−lerp(0,0.2,p))²)、尾淡出；
-    //      本体贴图恒 alpha0（Main.cs:33231-33236 color87.A=0）不画 ----
+    //      ★BJ228 勘误：本体非"恒不画"——Main.cs:33231-33236 覆写 color87=
+    //      (255,255,255,0) 纯加算白,scale 随 oldPos[12] 距离衰减,拖尾后补画 ----
     // ★裁定 a（2026-09-02 J′）：①p 方向倒置修正——原版 progressOnStrip=0 在弹头
     //   （VertexStrip.cs:97-100 逐 oldPos 正序入带,oldPos[0]=最新;RainbowRodDrawer
     //   顶点序即此序）,旧码把 0 给了带尾（trail 旧→新存数,p=i/(N-1) 头在 1）→ 色/宽/
@@ -1026,6 +1027,26 @@ export class MagicMissileProj extends Entity {
           ctx.stroke();
         }
         ctx.restore();
+      }
+      // ★BJ228 补本体（2026-09-21 用户实报）：Main.cs:33231-33236 绘制段把 GetAlpha
+      //  的 default(Color) 覆写为 color87=(255,255,255,0)=纯加算白本体（rotation=0、
+      //  无翻转）,scale = GetLerpValue(32,0,dist(position,oldPos[12]))——静止/慢速
+      //  (悬停操控段)满亮白团,快速飞行收缩为 0（彩虹拖尾接管）。strip[12]≡oldPos[12]
+      //  （79 EU=0 每 tick 记录+0.65 收缩同块,stripRecord）；不足 12 记录（出生首拍
+      //  oldPos 全列=position）回退最新记录=dist 0=满亮。'lighter' ga=1=A=0 预乘直译。
+      const ref79 = this.strip.length > 12 ? this.strip[12] : this.strip[this.strip.length - 1];
+      const img79 = projSprite(79);
+      if (ref79 && img79 && img79.width > 0) {
+        const d79 = Math.hypot(this.cx - ref79.x, this.cy - ref79.y);
+        const s79 = Math.max(0, Math.min(1, 1 - d79 / 32));
+        if (s79 > 0.01) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.imageSmoothingEnabled = false;
+          const w79 = img79.width * s79, h79 = img79.height * s79;
+          ctx.drawImage(img79, this.cx - w79 / 2, this.cy - h79 / 2, w79, h79);
+          ctx.restore();
+        }
       }
       return;
     }

@@ -8,7 +8,7 @@ import { sat } from '../sm2Runtime';
 export function px_ArmorGel(C: Float64Array, R: Float64Array, T: Float64Array, V: Float64Array, O: Float64Array, SAM: Array<((u: number, v: number, out: Float64Array) => void) | undefined>, OUT: Float64Array, sm2Scr: Float64Array): boolean | null {
   R.fill(0); O.fill(0);
 /* inst#5 op:0x42 */
-SAM[0](T[0], T[1], sm2Scr);
+SAM[0]!(T[0], T[1], sm2Scr);
 R[0] = sm2Scr[0];
 R[1] = sm2Scr[1];
 R[2] = sm2Scr[2];
@@ -140,31 +140,31 @@ let tmp35_1 = R[6] + R[9];
 R[8] = tmp35_0;
 R[9] = tmp35_1;
 /* inst#36 op:0x42 */
-SAM[0](R[4], R[5], sm2Scr);
+SAM[0]!(R[4], R[5], sm2Scr);
 R[4] = sm2Scr[0];
 R[5] = sm2Scr[1];
 R[6] = sm2Scr[2];
 R[7] = sm2Scr[3];
 /* inst#37 op:0x42 */
-SAM[0](R[12], R[13], sm2Scr);
+SAM[0]!(R[12], R[13], sm2Scr);
 R[12] = sm2Scr[0];
 R[13] = sm2Scr[1];
 R[14] = sm2Scr[2];
 R[15] = sm2Scr[3];
 /* inst#38 op:0x42 */
-SAM[0](R[16], R[17], sm2Scr);
+SAM[0]!(R[16], R[17], sm2Scr);
 R[16] = sm2Scr[0];
 R[17] = sm2Scr[1];
 R[18] = sm2Scr[2];
 R[19] = sm2Scr[3];
 /* inst#39 op:0x42 */
-SAM[0](R[20], R[21], sm2Scr);
+SAM[0]!(R[20], R[21], sm2Scr);
 R[20] = sm2Scr[0];
 R[21] = sm2Scr[1];
 R[22] = sm2Scr[2];
 R[23] = sm2Scr[3];
 /* inst#40 op:0x42 */
-SAM[1](R[8], R[9], sm2Scr);
+SAM[1]!(R[8], R[9], sm2Scr);
 R[24] = sm2Scr[0];
 R[25] = sm2Scr[1];
 R[26] = sm2Scr[2];

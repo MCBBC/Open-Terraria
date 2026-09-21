@@ -6685,6 +6685,20 @@ export class GlowstickProj extends Entity {
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
+    // ★BJ228 普查批（2026-09-21）：GetAlpha 加算白接线——
+    //  50/53/515/870：GetAlpha :81020-81022 恒 (255,255,255,0)=A=0 预乘纯加算白
+    //  （荧光棒原版观感=发光体,暗轮廓像素加算贡献 0）——'lighter' 直译;
+    //  1089 彩虹荧光棒：:81024-81026 (DiscoR,DiscoG,DiscoB,70)——ga=70/255×'lighter'
+    //  + hue-rotate 色相循环近似 Disco 三通道（Disco 基色相位未 1:1,登记残差）;
+    //  473 不动：:81168-81170 Color.White=常规合成满亮（与缺省 α≡0 同值,零差）。
+    if (this.projId === 50 || this.projId === 53 || this.projId === 515 || this.projId === 870) {
+      ctx.globalCompositeOperation = 'lighter';
+    } else if (this.projId === 1089) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 70 / 255;
+      const hueDeg = ((performance.now() / 1000) * (360 / 2.5)) % 360;   // Main.Disco 周期≈150 tick=2.5s（discoCounter×0.0418）
+      ctx.filter = `hue-rotate(${hueDeg.toFixed(1)}deg) saturate(1.4)`;
+    }
     if (img && (img.width > 0) && img.width > 0) {
       if (this.projId === 870) {
         const fr = Math.floor(this.fairyT / 5) % 6;

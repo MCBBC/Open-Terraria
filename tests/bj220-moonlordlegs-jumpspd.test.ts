@@ -23,6 +23,7 @@ import { TILE, PLAYER_JUMP_SPEED } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
 
 const LEGS = vanillaItemKey(5001)!;        // vi_5001_MoonLordLegs
+const WEBBING = vanillaItemKey(2423)!;     // 蛙蹼 2423（accfx extraFall:10,:14897）
 const WINGS = 'vi_493_天使之翼';           // wingsLogic 2,FlyTime 100
 const BOOTS = 'vi_128_RocketBoots';        // rocketBoots 档 1
 const JS0 = PLAYER_JUMP_SPEED;             // 裸装 jumpSpeed 基值
@@ -130,5 +131,54 @@ describe('BJ220 月领腿：火箭脉冲端（推力脉冲硬钳 -JS×1.5）', (
     expect(vyBare).toBeCloseTo(-JS0 * 1.5, 3);
     expect(vyLegs).toBeCloseTo(-(JS0 + 1.8) * 1.5, 3);             // ★JS 含 +1.8
     expect(vyBare - vyLegs).toBeCloseTo(2.7, 3);
+  });
+});
+
+// ---- BJ234（清债刀）：月领腿 extraFall+10 摔伤安全距离。原版 :19730-19734
+//  `if (moonLordLegs) { jumpSpeedBoost+=1.8f; extraFall+=10; jumpHeight++; }`——
+//  聚合位 Player.ts computeEquipStats 甲件旗环（lVid===5001 → extraFall+=10）,
+//  消费位 fixedUpdate 落地摔伤结算 safeT=25+eqM.extraFall（≙ :25497-25498
+//  num10=25+extraFall）⇒ 伤害=(格距−安全距)×10（:25560 截断后×10）,安全距 25→35。
+//  探针=预置 fallStartY 整格落差单拍结算（player-hurt-domain 摔落站同式,全确定性）。 ----
+function fallHarness(legs: boolean): { p: Player; hooks: GameHooks; fallDmg: number[] } {
+  const { p, hooks } = makePlayer(legs ? [{ key: LEGS, slot: 2 }] : []);
+  const fallDmg: number[] = [];
+  (hooks as unknown as { damagePlayer: (dmg: number, ...rest: unknown[]) => number })
+    .damagePlayer = (dmg: number): number => { fallDmg.push(dmg); return 40; };
+  return { p, hooks, fallDmg };
+}
+
+describe('BJ234 月领腿：extraFall+10 摔伤安全距离（:19733 → :25497-25498 num10=25+extraFall）', () => {
+  it('聚合位：腿装 equipStats.extraFall 恰 10（裸装 0）; boots 族同键 10 并存累加（:14509 :14548 环）', () => {
+    expect(makePlayer([{ key: LEGS, slot: 2 }]).p.equipStats.extraFall).toBe(10);
+    expect(makePlayer([]).p.equipStats.extraFall).toBe(0);
+    expect(makePlayer([{ key: LEGS, slot: 2 }, { key: WEBBING, slot: 3 }])
+      .p.equipStats.extraFall).toBe(20);   // 2423 蛙蹼 accfx extraFall:10（:14897）+ 腿 10
+  });
+
+  it('40 格落差：裸装 (40−25)×10=150,腿装 (40−35)×10=50（差恰 100=10 格×10）', () => {
+    const bare = fallHarness(false);
+    for (let i = 0; i < 45; i++) bare.p.fixedUpdate(1 / 60, bare.hooks);
+    bare.p.fallStartY = Math.trunc(bare.p.y / 16) * 16 - 40 * 16;   // 落差 40 整格（:25503 截断）
+    bare.p.fixedUpdate(1 / 60, bare.hooks);
+    expect(bare.fallDmg).toEqual([150]);
+    const legs = fallHarness(true);
+    for (let i = 0; i < 45; i++) legs.p.fixedUpdate(1 / 60, legs.hooks);
+    legs.p.fallStartY = Math.trunc(legs.p.y / 16) * 16 - 40 * 16;
+    legs.p.fixedUpdate(1 / 60, legs.hooks);
+    expect(legs.fallDmg).toEqual([50]);
+  });
+
+  it('门槛精确翻转：腿装 36 格 ⇒ 10（越 35 门 1 格）;35 格 ⇒ 免（安全距恰 25→35）', () => {
+    const a = fallHarness(true);
+    for (let i = 0; i < 45; i++) a.p.fixedUpdate(1 / 60, a.hooks);
+    a.p.fallStartY = (Math.trunc(a.p.y / 16) - 36) * 16;
+    a.p.fixedUpdate(1 / 60, a.hooks);
+    expect(a.fallDmg).toEqual([10]);
+    const b = fallHarness(true);
+    for (let i = 0; i < 45; i++) b.p.fixedUpdate(1 / 60, b.hooks);
+    b.p.fallStartY = (Math.trunc(b.p.y / 16) - 35) * 16;
+    b.p.fixedUpdate(1 / 60, b.hooks);
+    expect(b.fallDmg).toEqual([]);                   // 不入门槛:零 capture
   });
 });

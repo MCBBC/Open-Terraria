@@ -136,32 +136,77 @@ const out = {};
   });
   try { await page.screenshot({ path: '/tmp/mimic-probe-C-473.png' }); } catch { /* 同上 */ }
 
-  // ================= 场景 D：真实挥击命中伪装态 473 =================
+  // ================= 场景 D：真实挥击命中伪装态 473（BJ233 重制） =================
+  //  旧判据欠功效（BJ174 报告自注 harness 限界）：等 g.playerSwingHitEnemies()
+  //  （不存在的 API → hitApi absent = 空转,零实证）。
+  //  新判据：真实输入链驱动（_autoreuse-probe 习语）——持真剑 vi_7 银阔剑 →
+  //  input.mouseDown+fixedUpdate 循环 → updateUse 起手建 swing → updateSwingHits
+  //  （Game.ts:31387 近战盒 × 敌怪盒逐拍结算）→ 断言伤害面 hpDelta≥1（原版 min 1
+  //  保底）+ 命中面 justHitT/击退面 vx 命中瞬采样（justHitT=2 逐拍衰减,须当场记）。
   out.D = await page.evaluate(async () => {
     const g = window.__swGame;
     const { spawnVanillaEnemy } = await import('/src/entities/bossAI.ts');
-    const e = spawnVanillaEnemy(g, 473, g.player.cx + 24, g.player.cy);
+    // 清场:除目标外全部 vanilla 敌怪摘除（C 臂/B 段遗留怪不串味采样）
+    const e = spawnVanillaEnemy(g, 473, g.player.cx + 40, g.player.cy);
     if (!e) return { error: 'spawn null' };
     e.y -= e.h / 2;
-    e.ai0 = 0; e.ai1 = 0;   // 强制伪装态（玩家贴近也会唤醒,先打再唤醒序）
+    for (const en of g.entities.enemies) if (en !== e && !en.dead && en.vanillaId != null) en.dead = true;
+    // 底锚落稳 20 拍（自然落地到真实地面,再贴脸——防空挥盒错位）
+    for (let i = 0; i < 20; i++) g.fixedUpdate(1 / 60);
+    e.ai0 = 0; e.ai1 = 0; e.vx = 0; e.vy = 0;   // 强制伪装态（先打再唤醒序）
     const hp0 = e.hp;
-    // 玩家瞬时移位到贴脸 + 朝向敌怪挥击（真实命中面：近战挥盒 × 敌怪盒）
+    // 持真剑（vi_7 银阔剑 melee damage>0——近战整体门 Player.cs:42964 要求 damage>0）
+    const van = await (await fetch('sprites/vanilla.json')).json();
+    let key = null;
+    for (const [idStr, m] of Object.entries(van.items ?? {})) {
+      if (Number(idStr) === 7) { key = 'vi_7_' + String(m.key).replace(/[^A-Za-z0-9]/g, ''); break; }
+    }
+    const id = key != null ? window.__swItems?.[key] : undefined;
+    if (id === undefined) return { error: 'no-item-id', key };
     const p = g.player;
+    const saved = p.inv.slots[p.inv.selected];
+    p.inv.slots[p.inv.selected] = { id, stack: 1 };
+    g.cb?.onInventoryChanged?.();
+    // 贴脸站位（玩家右缘距怪左缘 ~10px,挥盒必达）+ 鼠标指向怪盒心（起手 ChangeDir 到光标侧）
     p.x = e.x - 30; p.y = e.y + e.h - p.h;
     p.direction = 1;
-    const hit = typeof g.playerSwingHitEnemies === 'function'
-      ? g.playerSwingHitEnemies()
-      : null;
-    await new Promise((r) => setTimeout(r, 200));
-    return {
-      ai0After: e.ai0,
-      justHit: e.justHitT > 0,
-      hpDelta: hp0 - e.hp,
-      hitApi: hit !== null ? 'present' : 'absent(挥击走 fixedUpdate 输入链)',
+    const [sx, sy] = g.camera.worldToScreen(e.x + e.w / 2, e.y + e.h / 2);
+    g.input.mouseX = sx; g.input.mouseY = sy;
+    g.input.mouseDown = true;
+    let swings = 0, last = null, hitTick = -1, justHitAtHit = false, vxAtHit = 0, ai0AtHit = -1;
+    for (let i = 0; i < 90; i++) {
+      g.fixedUpdate(1 / 60);
+      if (g.swing && g.swing !== last) { swings++; last = g.swing; }
+      if (!g.swing) last = null;
+      if (hitTick < 0 && e.hp < hp0) {   // 命中瞬采样（justHitT/kb 逐拍衰减,当场记）
+        hitTick = i;
+        justHitAtHit = e.justHitT > 0;
+        vxAtHit = Math.abs(e.vx);
+        ai0AtHit = e.ai0;
+        break;
+      }
+    }
+    g.input.mouseDown = false;
+    const hpDelta = hp0 - e.hp;
+    const res = {
+      swingChain: 'real-input(mouseDown+fixedUpdate→updateSwingHits)',
+      swings, hitTick,
+      hpDelta,                       // 伤害面（主断言 ≥1）
+      justHitAtHit,                  // 命中面
+      vxAtHit,                       // 击退面（命中瞬残余速度,信息面）
+      ai0AtHit, ai0After: e.ai0,     // 唤醒序（信息面:贴近 80px 唤醒=原版本相）
+      hitLanded: hitTick >= 0 && hpDelta >= 1,
     };
+    p.inv.slots[p.inv.selected] = saved;   // 还原持物
+    g.cb?.onInventoryChanged?.();
+    return res;
   });
   await page.close();
 }
 
 await browser.close();
 console.log(JSON.stringify(out, null, 1));
+// BJ233 判据:D 臂=真实挥击命中伪装态宝箱怪的有效断言（伤害面 ≥1 为门,命中/击退面同证）
+const dOk = !!(out.D && out.D.hitLanded);
+console.log(dOk ? '[mimic-probe] D-ARM PASS' : '[mimic-probe] D-ARM FAIL');
+process.exit(dOk ? 0 : 1);

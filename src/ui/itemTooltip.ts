@@ -13,6 +13,7 @@ import { IS_A_MECHANISM_SHEETS, IS_A_TRIGGER_SHEETS } from '../data/tiles';   //
 import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { statOfInternal } from '../data/vanillaItemStats';
+import { armorSetTooltipContaining } from '../data/vanillaArmorSets';
 import { equipKindOfInternal } from '../data/vanillaEquip';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { prefixStat, prefixLines, type PrefixStat } from '../data/vanillaPrefixes';
@@ -21,6 +22,12 @@ import whipsJson from '../data/vanilla-whips.json';
 
 /** 鞭物品表（combat json 缺鞭族 damage——数据在 vanilla-whips.json） */
 const WHIP_ITEMS: Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }> = whipsJson as never;
+
+/** hasVanityEffects 置位点全表（Item.cs:7165/7308/11469/21271 四处 SetDefaults
+ *  字面量——月符 485/海神贝壳 497/月光贝壳 861/天使光环 1987）：社交槽佩戴仍出
+ *  变身/光环特效 → 悬停不警示（Main.cs:20854 social && !vanity && !hasVanityEffects
+ *  第三门；vid 域=ItemID.cs 同名常量。代码层并表,不写数据 json） */
+const SOCIAL_VANITY_EFFECTS_VIDS: ReadonlySet<number> = new Set([485, 497, 861, 1987]);
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 
@@ -44,9 +51,6 @@ export interface TooltipPlayerStats {
    *  击退档读的是含玩家加成后的 kb） */
   kbGlove: boolean;
   kbBuff: boolean;
-  /** 当前生效套装奖励文本（player.setBonus，:21138-21143——悬停护甲时追加
-   *  "套装奖励: X" 行；null 无套装） */
-  setBonusText: string | null;
 }
 /** 悬停上下文（低频行族的门数据——UI 侧现取注入，缺省全关） */
 export interface TooltipContext {
@@ -61,8 +65,16 @@ export interface TooltipContext {
   master?: boolean;
   /** 今日任务鱼 id（Game.anglerQuestItemId——任务品行 Lang.inter[65]，:20663-20666） */
   anglerQuestItemId?: number;
-  /** 社交槽（dye/armor vanity 位，:20508-20513——item.social 语义 → tip0+tip1 双行） */
+  /** 社交槽（armor 社交位 10-19：时装甲 10-12=context 9、时装配饰 13-19=context 11
+   *  → HoverItem.social=true，ItemSlot.cs:3197——染料槽（dye 数组,context 12/25/27/33）
+   *  不在置位 switch 内=原版无此行；→ tip[61] 单行,门见行块注 BJ230） */
   socialSlot?: boolean;
+  /** ★BJ224 套装奖励行（Main.cs:21473-21517）悬停位门数据：worn = 悬停位 ∈ 功能
+   *  甲槽 armor[0-2]（ItemSlot.MouseHover context 8 → HoverItem.wornArmor=true,
+   *  ItemSlot.cs:3190-3193——时装甲 10-12=context 9 social、背包/箱/时装槽=无旗）；
+   *  wornH/B/L = 玩家 GetEffectiveArmor(0/1/2) 的 vid（ArmorSetBonus.QueryContext
+   *  :18-41 语义,空槽=0）。缺省（道具搜索行等无槽位上下文）= 非佩戴悬停 */
+  setBonusHover?: { worn: boolean; wornH: number; wornB: number; wornL: number };
 }
 export type TooltipSlot = { id: number; stack: number; prefix?: number; favorited?: boolean };
 
@@ -187,8 +199,10 @@ export interface TooltipBody {
   durationLine: TooltipLine | null;
   prefixDiff: TooltipLine[];
   yoyoLogoLine: TooltipLine | null;
-  /** 套装奖励行（:21463-21511——原版行序在 prefix 差分之后） */
-  setBonusLine: TooltipLine | null;
+  /** 套装奖励行族（Main.cs:21473-21517——原版行序在 prefix 差分之后；佩戴悬停的
+   *  UI.ItemSetBonusEquipped 文案内含 \n（"套装奖励(N/D)\n{Description}"）→ DOM
+   *  侧拆成同色多行,故为数组） */
+  setBonusLines: TooltipLine[];
   /** 专家/大师物品行（:21254-21262——1458 原版行序在 prefix 差分【之前】：
    *  buffTime → yoyoLogo → expert → master → prefix 链。R24 勘误：头注曾引
    *  旧基线行号断言"在 prefix 之后"） */
@@ -219,7 +233,7 @@ export function buildTooltipBody(
     const d0 = st0?.def;
     if (d0) lines.push({ text: d0 + T('LegacyTooltip.25'), tag: 'defense' });
     if (def.heal) lines.push({ text: T('CommonItemTooltip.RestoresLife', def.heal), tag: 'heallife' });
-    return { lines, durationLine: null, yoyoLogoLine: null, setBonusLine: null, expertMasterLines: [], researchLine: null, prefixDiff: ps ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' })) : [] };
+    return { lines, durationLine: null, yoyoLogoLine: null, setBonusLines: [], expertMasterLines: [], researchLine: null, prefixDiff: ps ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' })) : [] };
   }
 
   const f = itemFuncOfVid(vid);
@@ -227,11 +241,17 @@ export function buildTooltipBody(
   const st = statOfInternal(slot.id);
   const equipKind = equipKindOfInternal(slot.id);
 
-  // ── 社交栏双行（:20508-20513：social && !vanity && !hasVanityEffects——
-  //    社交槽里带功能属性的物品提示"不会获得任何属性"）
-  if (ctx?.socialSlot) {
-    lines.push({ text: T('LegacyTooltip.0'), tag: 'social' });
-    lines.push({ text: T('LegacyTooltip.1'), tag: 'social' });
+  // ── 社交栏提示行（ItemSlot.cs:3187-3197 case 9/11 → HoverItem.social=true；
+  //    Main.cs:20854-20858（1456 同相 :20508-20512）：social && !vanity &&
+  //    !hasVanityEffects → Lang.tip[61]「在社交栏中不起作用」单行,位置在伤害行族前。
+  //    ★BJ230 定谳推翻 BJ224 登记债：tip[0]「装备在社交栏」/tip[1]「不会获得任何
+  //    属性」在 1456/1457/1458 三版反编译零消费（Lang.cs:500 全量装载,无任何
+  //    tip[0]/tip[1] 读点）=死键;染料槽（dye 数组,context 12,Main.cs:42233）不在
+  //    social 置位 switch（ItemSlot.cs:3190-3196）内=原版染料槽悬停无此行,旧 dye 臂
+  //    系 BJ224 登记债的伪锚定,已摘（UI.ts 门同步收窄）。van 门=st.van（vanillaItemStats
+  //    提取 432 件,tip[24] 行同源）;hasVanityEffects 门=SOCIAL_VANITY_EFFECTS_VIDS）──
+  if (ctx?.socialSlot && !st?.van && !SOCIAL_VANITY_EFFECTS_VIDS.has(vid)) {
+    lines.push({ text: T('LegacyTooltip.61'), tag: 'social' });
   }
 
   // ── 伤害族四行（damage>0 门，:20511-20632；鞭族 damage 在 vanilla-whips 表，
@@ -414,17 +434,70 @@ export function buildTooltipBody(
     if (fixed && vid >= 0) prefixDiff.push({ text: fixed[0] + T(`LegacyTooltip.${fixed[1]}`), color: 'rgb(120,190,120)', tag: 'prefix' });
   }
 
-  // ── 套装奖励行（:21463-21511：悬停护甲 + 套装奖励 → ArmorSetBonus 块；
-  //    原版行序在 prefix 差分之后）──
-  const setBonusLine: TooltipLine | null = (isArmor && player?.setBonusText)
-    ? { text: `${T('LegacyTooltip.48')} ${player.setBonusText}`, tag: 'setbonus' } : null;
+  // ── 套装奖励行（Main.cs:21473-21517，1457 ArmorSetBonus 新制——1456:21097-21141
+  //    /1458:21473-21517 三基线同相；原版行序在 prefix 差分之后）：
+  //    行门 = 悬停 vid ∈ 任一注册套装（SetsContaining[vid] 非空,Membership 由
+  //    vanillaArmorSets tooltip lane 承载）——★BJ224 病灶修复：旧实现全局贴
+  //    「玩家当前生效套装」文本（isArmor && equipStats.setBonus）→ 穿神圣套时贝壳
+  //    发夹(2417)等一切可装备件 tooltip 全带神圣套奖励行,原版无此行（发夹非成员）。
+  //    分二态（item.wornArmor 仅 ItemSlot.MouseHover context 8 功能甲槽为真,
+  //    ItemSlot.cs:3190-3193）：
+  //    · 非佩戴悬停（背包/箱/时装槽）→ array[0]（注册序首个含此 vid 的套实例）
+  //      单件文本 UI.ItemSetBonusGeneral「套装奖励：{Description}」；PrimaryPart
+  //      ≠None 且悬停件非主件 vid → UI.ItemSetBonusDecidedBy*「随X装备改变」
+  //      （ArmorSetBonus.cs:201-212）；色 (130,130,130,190)
+  //    · 佩戴悬停 → 含 vid 诸套逐个 QueryCount(:180-187) vs GetEffectiveArmor(0/1/2)
+  //      vid（needed 大者胜→found 大者→注册先,Main.cs:21485-21500）→
+  //      UI.ItemSetBonusEquipped「套装奖励({N}/{D})\n{Description}」（{Description}
+  //      同 DecidedBy 判,判据=佩戴主件 vid vs 套主件 vid :217-220）；Complete →
+  //      LimeGreen(50,205,50) 否则 (130,130,130)。
+  //    l10n 占位为具名 {Token}（Language.getTextValue 仅 {0} 位置参）→ 手工命名替换 */
+  const setBonusLines: TooltipLine[] = (() => {
+    const containing = armorSetTooltipContaining(vid);
+    if (!containing.length) return [];
+    const fmt = (key: string, subs: Record<string, string | number>): string =>
+      Object.entries(subs).reduce((s, [k, v]) => s.split(`{${k}}`).join(String(v)), T(key));
+    const DECIDED_BY = ['', 'Head', 'Body', 'Legs'] as const;
+    const worn = ctx?.setBonusHover;
+    if (!worn?.worn) {
+      const first = containing[0]!;
+      const partVid = first.primary === 1 ? first.h : first.primary === 2 ? first.b : first.l;
+      const desc = first.primary !== 0 && partVid !== vid
+        ? T(`UI.ItemSetBonusDecidedBy${DECIDED_BY[first.primary]}`)
+        : T(`ArmorSetBonus.${first.name}`);
+      const text = fmt('UI.ItemSetBonusGeneral', { Description: desc });
+      // Description 自带 \n（如 HallowedSummoner 双行文案）→ 同色拆行（原版 MouseText
+      // 多行绘制语义;DOM 侧 white-space 不保留 \n）
+      return text.split('\n').map((t) => ({ text: t, color: 'rgba(130,130,130,0.75)', tag: 'setbonus' }));
+    }
+    const wornAt = (p: 0 | 1 | 2) => (p === 1 ? worn.wornH : p === 2 ? worn.wornB : worn.wornL);
+    let best = containing[0]!, bestFound = 0, bestNeeded = 0;
+    for (const set of containing) {
+      let needed = 0, found = 0;
+      // TryCounting(:189-199) 逐位直比：neededItem≠0 才计数,worn vid === 套件 vid 计 found
+      for (const [part, wornVid] of [[set.h, worn.wornH], [set.b, worn.wornB], [set.l, worn.wornL]] as const) {
+        if (part !== 0) { needed++; if (wornVid === part) found++; }
+      }
+      if (needed > bestNeeded || (needed === bestNeeded && found > bestFound)) {
+        best = set; bestFound = found; bestNeeded = needed;
+      }
+    }
+    const partVid = best.primary === 1 ? best.h : best.primary === 2 ? best.b : best.l;
+    const desc = best.primary !== 0 && partVid !== wornAt(best.primary)
+      ? T(`UI.ItemSetBonusDecidedBy${DECIDED_BY[best.primary]}`)
+      : T(`ArmorSetBonus.${best.name}`);
+    const text = fmt('UI.ItemSetBonusEquipped', {
+      Numerator: bestFound, Denominator: bestNeeded, Description: desc });
+    const color = bestFound === bestNeeded ? 'rgb(50,205,50)' : 'rgb(130,130,130)';
+    return text.split('\n').map((t) => ({ text: t, color, tag: 'setbonus' }));
+  })();
 
   // ── 专家/大师物品行（:21254-21262——1458 行序在 prefix 差分【之前】）──
   const expertMasterLines: TooltipLine[] = [];
   if (ctx?.expert) expertMasterLines.push({ text: T('GameUI.Expert'), tag: 'expert' });
   if (ctx?.master) expertMasterLines.push({ text: T('GameUI.Master'), tag: 'master' });
 
-  return { lines, durationLine, prefixDiff, yoyoLogoLine, setBonusLine, expertMasterLines, researchLine };
+  return { lines, durationLine, prefixDiff, yoyoLogoLine, setBonusLines, expertMasterLines, researchLine };
 }
 
 /** 完整装配（静态说明 + 持续行按原版序并入 + 研究行/悠悠球位 + 商店价格行 +
@@ -444,7 +517,7 @@ export function assembleTooltipLines(
   if (body.yoyoLogoLine) out.push(body.yoyoLogoLine);
   out.push(...body.expertMasterLines);
   out.push(...body.prefixDiff);
-  if (body.setBonusLine) out.push(body.setBonusLine);
+  out.push(...body.setBonusLines);
   if (body.researchLine) out.push(body.researchLine);
   // 商店价格行（:20309-20402）：买入 tip[50]/卖出 tip[49]，币种四档着色
   // （:20380-20397 铂 220,220,198 / 金 224,201,92 / 银 181,192,193 / 铜 246,138,96；

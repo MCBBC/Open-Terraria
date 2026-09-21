@@ -95,11 +95,13 @@ describe('悬停气泡统计行（vi_ 全量）', () => {
     const boosted = buildTooltipBody(def, { id, stack: 1 }, {
       dmgMult: { melee: 2, ranged: 1, magic: 1, summon: 1 },
       crit: { melee: 10, ranged: 0, magic: 0 }, manaCostMul: 1,
+      kbGlove: false, kbBuff: false,
     }).lines.find((l) => l.tag === 'damage')!;
     const baseCrit = buildTooltipBody(def, { id, stack: 1 }, null).lines.find((l) => l.tag === 'crit')!;
     const boostCrit = buildTooltipBody(def, { id, stack: 1 }, {
       dmgMult: { melee: 2, ranged: 1, magic: 1, summon: 1 },
       crit: { melee: 10, ranged: 0, magic: 0 }, manaCostMul: 1,
+      kbGlove: false, kbBuff: false,
     }).lines.find((l) => l.tag === 'crit')!;
     expect(parseInt(boosted.text, 10)).toBe(parseInt(base.text, 10) * 2);
     expect(parseInt(boostCrit.text, 10)).toBe(parseInt(baseCrit.text, 10) + 10);
@@ -170,23 +172,31 @@ describe('终清零三批（tileBoost/任务鱼/套装/社交/tip54）', () => {
     expect(body.lines.some((l) => l.tag === 'quest')).toBe(true);
   });
 
-  it('悬停护甲 + 套装生效：套装奖励行（tip48）在词缀差分后', () => {
-    const helm = defOfVid(37);   // 帽子 s=h
+  it('套装奖励行（BJ224 重构）：悬停套装成员在词缀差分后显本套行', () => {
+    const helm = defOfVid(558);   // 神圣头盔（Hallowed 头主件）
     if (!helm) return;
-    const lines = assembleTooltipLines(helm, { id: ITEM_BY_KEY[helm.key], stack: 1 }, {
+    const lines = assembleTooltipLines(helm, { id: ITEM_BY_KEY[helm.key], stack: 1, prefix: 74 }, {
       dmgMult: { melee: 1, ranged: 1, magic: 1, summon: 1 },
       crit: { melee: 0, ranged: 0, magic: 0 }, manaCostMul: 1,
-      kbGlove: false, kbBuff: false, setBonusText: '测试套装',
-    }, null);
+      kbGlove: false, kbBuff: false,
+    }, null, { setBonusHover: { worn: false, wornH: 0, wornB: 0, wornL: 0 } });
     const sbIdx = lines.findIndex((l) => l.tag === 'setbonus');
     expect(sbIdx).toBeGreaterThan(-1);
-    expect(lines[sbIdx].text).toContain('LegacyTooltip.48');
+    const preIdx = lines.findIndex((l) => l.tag === 'prefix');
+    expect(preIdx).toBeGreaterThan(-1);
+    expect(sbIdx).toBeGreaterThan(preIdx);   // 行序：prefix 差分之后（:21473）
   });
 
-  it('社交槽（ctx.socialSlot）：tip0+tip1 双行在最前', () => {
+  it('社交槽（ctx.socialSlot）：功能件（铜短剑 4）→ tip[61] 单行（BJ230 定谳:tip0/tip1=死键）', () => {
     const def = defOfVid(4)!;
     const lines = assembleTooltipLines(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null, null, { socialSlot: true });
-    expect(lines[0].tag).toBe('social');
-    expect(lines[1].tag).toBe('social');
+    const soc = lines.filter((l) => l.tag === 'social');
+    expect(soc).toHaveLength(1);
+    expect(soc[0]!.text).toContain('LegacyTooltip.61');   // 文案回退键名（本文件未载 l10n）
+  });
+  it('社交槽：socialSlot=false（功能甲槽/染料槽/背包）→ 零 social 行', () => {
+    const def = defOfVid(4)!;
+    const lines = assembleTooltipLines(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null, null, {});
+    expect(lines.filter((l) => l.tag === 'social')).toHaveLength(0);
   });
 });

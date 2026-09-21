@@ -148,7 +148,15 @@ export class EntityManager {
           const m = e as { vanillaId?: number; projId?: number; minion?: boolean; npcProj?: boolean;
             cutExtraTreeCactus?: boolean };
           const vid = m.vanillaId ?? m.projId ?? 0;
-          if (!m.minion && m.npcProj !== true && !CUT_EXCLUDE_VIDS.has(vid)) {
+          // ★BJ232（2026-09-21）死弹 1-tick 过割窗：原版 Update 在 HandleMovement
+          //   （AI/Kill 可达）后、Damage/CutTiles 前有 `if (!active) return` 门
+          //   （P.cs:17132-135;1458 同构 :17121/:17132/:17185——Kill :71752 置
+          //   active=false :72086）——被杀弹当拍即不再 Damage/CutTiles（割面在
+          //   Damage 内 :12517）。本仓 fixedUpdate 后收口原无 dead 门 → 被杀弹
+          //   当拍多割一拍（症状向=多割非漏割,弹 Kill 与收口同拍窗口）。
+          //   dead=compact 唯一移除通道,与 active 一一对应;门位语义同构
+          //   （AI 后、割前）——当拍跳过,无一拍延迟。
+          if (!e.dead && !m.minion && m.npcProj !== true && !CUT_EXCLUDE_VIDS.has(vid)) {
             // ★SW-BJ67（2026-09-14）：vid 随盒穿线——CutTiles 逐型豁免面
             //   （P.cs:15391-15393 1047 滚过幼虫 231 不割,详 ProjCutTiles.ts 注）
             // ★债刀-4 ②（2026-09-17）：出程旗随盒穿线——CutTilesAt :15384-86

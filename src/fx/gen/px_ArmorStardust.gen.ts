@@ -52,13 +52,13 @@ let tmp12_1 = R[1] * C[28];
 R[0] = tmp12_0;
 R[1] = tmp12_1;
 /* inst#13 op:0x42 */
-SAM[1](R[0], R[1], sm2Scr);
+SAM[1]!(R[0], R[1], sm2Scr);
 R[4] = sm2Scr[0];
 R[5] = sm2Scr[1];
 R[6] = sm2Scr[2];
 R[7] = sm2Scr[3];
 /* inst#14 op:0x42 */
-SAM[0](T[0], T[1], sm2Scr);
+SAM[0]!(T[0], T[1], sm2Scr);
 R[8] = sm2Scr[0];
 R[9] = sm2Scr[1];
 R[10] = sm2Scr[2];

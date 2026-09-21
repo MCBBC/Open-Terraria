@@ -139,13 +139,13 @@ let tmp42_1 = R[5] * C[40];
 R[0] = tmp42_0;
 R[1] = tmp42_1;
 /* inst#43 op:0x42 */
-SAM[1](R[0], R[1], sm2Scr);
+SAM[1]!(R[0], R[1], sm2Scr);
 R[0] = sm2Scr[0];
 R[1] = sm2Scr[1];
 R[2] = sm2Scr[2];
 R[3] = sm2Scr[3];
 /* inst#44 op:0x42 */
-SAM[0](T[0], T[1], sm2Scr);
+SAM[0]!(T[0], T[1], sm2Scr);
 R[8] = sm2Scr[0];
 R[9] = sm2Scr[1];
 R[10] = sm2Scr[2];

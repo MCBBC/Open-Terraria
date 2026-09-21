@@ -8,7 +8,7 @@ import { sat } from '../sm2Runtime';
 export function px_ArmorShiftingSands(C: Float64Array, R: Float64Array, T: Float64Array, V: Float64Array, O: Float64Array, SAM: Array<((u: number, v: number, out: Float64Array) => void) | undefined>, OUT: Float64Array, sm2Scr: Float64Array): boolean | null {
   R.fill(0); O.fill(0);
 /* inst#7 op:0x42 */
-SAM[0](T[0], T[1], sm2Scr);
+SAM[0]!(T[0], T[1], sm2Scr);
 R[0] = sm2Scr[0];
 R[1] = sm2Scr[1];
 R[2] = sm2Scr[2];
@@ -76,7 +76,7 @@ R[5] = tmp25_1;
 let tmp26_1 = R[2] * R[5] + C[12];
 R[1] = tmp26_1;
 /* inst#27 op:0x42 */
-SAM[1](R[0], R[1], sm2Scr);
+SAM[1]!(R[0], R[1], sm2Scr);
 R[8] = sm2Scr[0];
 R[9] = sm2Scr[1];
 R[10] = sm2Scr[2];

@@ -78,16 +78,16 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   15: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },   // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
   16: { kind: 'invisible', off: 1 },   // :76535 | (255,255,255,0) A=0 隐形；SKIP: MissileProj 专属类消费
   18: { kind: 'fixed', rgba: [255,255,255,130] },   // :76813 | (255,255,255,130) 恒
-  20: { kind: 'invisible', off: 1 },   // α≤150→(255,255,255,0) A=0 加算白 / α>150→(0,0,0,0) 真零——前支非隐形;SKIP→正确承接=GA (255−α)/255(<150 门)+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  20: { kind: 'invisible', off: 1 },   // α≤150→(255,255,255,0) A=0 加算白 / α>150→(0,0,0,0) 真零——前支非隐形;★BJ228 已接线（2026-09-21）:GA case 20 return 1+'lighter'（SetDefaults α≡0 恒走前支=恒满强）,本 off 档转存档;勿再按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）
   34: { kind: 'fixedfade', rgba: [255,255,255,255], off: 1 },   // :76082 | White*Opacity；SKIP: MissileProj 专属类消费
   47: { kind: 'fade', off: 1 },   // :75950 | gate Main.player[owner].wet→Color.White 未建模（湿身白化登记忽略）；非湿落缺省 fade；SKIP: 门控条件未建模（登记忽略）
   50: { kind: 'invisible', off: 1 },   // :76312 | (255,255,255,0) A=0 隐形；SKIP: WeaponProj 专属类消费
   53: { kind: 'invisible', off: 1 },   // :76312 | (255,255,255,0) A=0 隐形；SKIP: WeaponProj 专属类消费
   72: { kind: 'fade' },   // :76823 | (255,255,255,newColor.A−α) 白色 A=255−α
   75: { kind: 'lerp', k: 0.66 },   // :76017 | Lerp(White,0.66)*Opacity
-  76: { kind: 'invisible', off: 1 },   // (255,255,255,0) A=0 纯加算白（XNA 预乘 dst+=tex.rgb 满强）;SKIP→正确承接=GA 恒 1+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
-  77: { kind: 'invisible', off: 1 },   // (255,255,255,0) A=0 纯加算白（XNA 预乘 dst+=tex.rgb 满强）;SKIP→正确承接=GA 恒 1+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
-  78: { kind: 'invisible', off: 1 },   // (255,255,255,0) A=0 纯加算白（XNA 预乘 dst+=tex.rgb 满强）;SKIP→正确承接=GA 恒 1+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
+  76: { kind: 'invisible', off: 1 },   // (255,255,255,0) A=0 纯加算白（XNA 预乘 dst+=tex.rgb 满强）;SKIP→正确承接=GA 恒 1+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;★BJ228 已接线（2026-09-21）:GA case 76/77/78 return 1+'lighter'（常量支不读 α,SetDefaults α=100 死值）,本 off 档转存档
+  77: { kind: 'invisible', off: 1 },   // (255,255,255,0) A=0 纯加算白（XNA 预乘 dst+=tex.rgb 满强）;SKIP→正确承接=GA 恒 1+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;★BJ228 已接线（2026-09-21）:GA case 76/77/78 return 1+'lighter'（常量支不读 α,SetDefaults α=100 死值）,本 off 档转存档
+  78: { kind: 'invisible', off: 1 },   // (255,255,255,0) A=0 纯加算白（XNA 预乘 dst+=tex.rgb 满强）;SKIP→正确承接=GA 恒 1+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;★BJ228 已接线（2026-09-21）:GA case 76/77/78 return 1+'lighter'（常量支不读 α,SetDefaults α=100 死值）,本 off 档转存档
   79: { kind: 'invisible', off: 1 },   // :76798 | r/g/b=Disco 后 return default(Color)=(0,0,0,0) 隐形；SKIP: MissileProj 专属类消费
   83: { kind: 'invisible', off: 1 },   // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
   86: { kind: 'fade' },   // :76823 | (255,255,255,newColor.A−α) 白色 A=255−α
@@ -104,8 +104,8 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   100: { kind: 'invisible', off: 1 },  // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
   102: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },  // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
   104: { kind: 'invisible', off: 1 },  // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
-  114: { kind: 'fade', off: 1 },  // :76773 | gate localAI[1] ramp（同 116 族）——114 现有档保留/115 登记忽略；SKIP: drawGlobalAlpha 缺省路径档
-  115: { kind: 'fade', off: 1 },  // :76773 | gate localAI[1] ramp（同 116 族）——114 现有档保留/115 登记忽略；SKIP: 门控条件未建模（登记忽略）
+  114: { kind: 'fade', off: 1 },  // :76773 | gate localAI[1] ramp（同 116 族）——★BJ228 已接线（2026-09-21）:GA case 114 重写为 :81445 专属支模型（localAI[1] 梯×α/255,翻案 R7-6 反向曲线）,本 off 档转存档（★BJ228 事故补回：截断恢复快照缺本项,按会话首读快照重放）
+  115: { kind: 'fade', off: 1 },  // :76773 | gate localAI[1] ramp（同 116 族）——115 登记忽略；SKIP: 门控条件未建模（登记忽略）
   116: { kind: 'fade', off: 1 },  // :76593 | gate localAI[1]：<5→Transparent /5..15 线性 ramp /≥15→(255,255,255,α)——本仓未跟踪登记忽略；SKIP: 门控条件未建模（登记忽略）
   130: { kind: 'fixed', rgba: [255,255,255,175] },  // :76714 | (255,255,255,175) 恒
   131: { kind: 'invisible', off: 1 },  // (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;已接线（★2026-09-01 审计批）:GA case 131 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter'（真值起步 α≡0=恒满强）;'5 小丑箭'先例已反转,勿按隐形登记
