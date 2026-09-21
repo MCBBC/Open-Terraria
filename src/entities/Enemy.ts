@@ -65,7 +65,7 @@ export function npcTypeNoAggro(vanillaId: number | null | undefined, player: Pla
 const DUNGEON_WALL_IDS = WALL_DUNGEON_SHEETS;   // Main.wallDungeon（★BJ187 单源 data/tiles.ts）
 import { spawnStardustMarks } from './StardustMarkProj';
 import { moveAndCollide, moveNoSlopeBox } from '../physics/TileCollision';
-import { TileStore } from '../world/TileStore';
+import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { Dart } from './Dart';
 import { PoopProj } from './PoopProj';
 import { BookProj } from './BookProj';
@@ -14923,9 +14923,8 @@ export class Enemy extends Entity {
       // 对照补）：59/60/151 = 40 簇 尘 6（Torch）SpeedX=2×hitDirection/SpeedY=-1/
       // α=npc.alpha/scale1.5/Next(8)!=0 → noGravity。原版该段后经 :86602 门 return
       // （59 恒 return；60/151 单机非 remix 亦 return）=本族死亡无 HitEffect gore
-      // （vanilla-gore.json 本就无表项）。★登记债（行为面另刀,非粒子面）：专家模式
-      // 59 死亡泼岩浆（:86561-86601 中心格 liquid=Next(50,150)+lava/Skyblock 全盒
-      // 255）与 60/151 remix+getGood/lowTiles 泼岩浆（:86602-86645）本仓未接。
+      // （vanilla-gore.json 本就无表项）。★登记债（行为面）已由 BJ246 于下方接线
+      // 清偿（死亡泼岩浆 :86561-86645,2026-09-21）。
       const lavaExactDust = lavaVid === 59 || lavaVid === 60 || lavaVid === 151;
       if (lavaExactDust) {
         const hdLavaD = Math.sign(kbx) || 1;
@@ -14933,6 +14932,40 @@ export class Enemy extends Entity {
           const dLd = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
             hdLavaD * 2, -1, this.spawnAlpha, null, 1.5);
           if (dLd && Math.floor(Math.random() * 8) !== 0) dLd.noGravity = true;
+        }
+      }
+      // ★BJ246（2026-09-21,BJ243 登记债清偿）岩浆族死亡泼岩浆（HitEffect life<=0 支
+      // 尾段,NPC.cs:86561-86645;1458 同行号逐字全等 2026-09-21 对拍零变更）：
+      //  门1（:86561）59 熔岩史莱姆——(Main.expertMode || WorldGen.Skyblock.lowTiles)
+      //    && Main.netMode != 1 && !Main.remixWorld;内分 Skyblock.lowTiles 全盒支
+      //    （:86565-86584,Left.X..Right.X × Top.Y..Bottom.Y 四至含端,逐格非实心∧
+      //    liquid==0 → liquid=255+lava+honey(false)+SquareTileFrame）/否则中心格支
+      //    （:86587-86595,(int)(Center.X/16f) 截断除,非实心∧无液 → liquid=
+      //    (byte)Main.rand.Next(50,150)+lava+honey(false)+SquareTileFrame）;
+      //  门2（:86602-86645,原文 || 短路早退取反）60 地狱蝙蝠/151 熔岩蝙蝠——
+      //    Main.netMode != 1 && Main.remixWorld && (Main.getGoodWorld ||
+      //    WorldGen.Skyblock.lowTiles),几何/写位同门1。
+      //  两门 type 互斥（59 vs 60/151）恒至多落一支。写位=裸 tile 写+SquareTileFrame
+      //  （:86594/:86637）——运行时等价=setLiquid 监听链（LiquidSim 唤醒/光照脏/
+      //  联机 reportLiquidChange,RollingBoulder.rbPlaceLiquidLava 同判例）;
+      //  honey(false) 并入 liquidType 直写。SolidTile 门=WorldGen.SolidTile(:70642,
+      //  active∧tileSolid∧!tileSolidTop∧!halfBrick∧slope==0∧!inActive)→ 模块尾
+      //  npcSolidTile1457 同式（不引 VanillaSpawner.worldSolidTile——其 import Enemy
+      //  成环,WeatherRenderer.solidTileExact 同式先例）;越界格=原版 tile==null →
+      //  SolidTile true → 拒泼（try/catch 域等价）。netMode!=1 → 权威端（!netPuppet;
+      //  傀儡端不写液,液态经房主通道下发）。普通世界零泼面=两门皆不满足=原版本相
+      //  （经典非 Skyblock/专家非 remix 的 60/151 均不泼,测试钉死）。
+      if (lavaExactDust) {
+        const sbLow = !!game.world.skyblockLowTiles;        // WorldGen.Skyblock.lowTiles
+        const remix = !!game.world.seedFlags?.remix;        // Main.remixWorld
+        const ftw = !!game.world.seedFlags?.getGoodWorld;   // Main.getGoodWorld
+        if ((mainExpertMode(game.world) || sbLow) && lavaVid === 59
+          && !this.netPuppet && !remix) {                   // :86561 门1
+          this.deathLavaSplash1457(game, sbLow);
+        }
+        if ((lavaVid === 151 || lavaVid === 60) && !this.netPuppet
+          && remix && (ftw || sbLow)) {                     // :86602 门2（取反式）
+          this.deathLavaSplash1457(game, sbLow);
         }
       }
       if (!birdExactDust && !wofExactDust && !dukeExactDust && !paladinDeathDust
@@ -14962,6 +14995,43 @@ export class Enemy extends Entity {
     this.hp = 0;
     this.iframes = 0;
     this.hurt(this.maxHp + 9999, 0, 0, game);
+  }
+
+  /** ★BJ246 岩浆族死亡泼岩浆写位面（NPC.cs:86563-86600/:86606-86644 try 域 1:1,
+   *  两门共用）：Skyblock.lowTiles 全盒支（:86565-86584 Left.X..Right.X ×
+   *  Top.Y..Bottom.Y 四至含端,(int)(px/16f) 截断除,逐格非实心∧liquid==0 →
+   *  liquid=255+lava+honey(false)+SquareTileFrame）/否则中心格支（:86587-86595
+   *  (int)(Center.X/16f),非实心∧无液 → liquid=(byte)Next(50,150)+lava 同后处理）。
+   *  setLiquid 触发监听链=LiquidSim 唤醒/光照脏/联机上报（SquareTileFrame 运行时
+   *  等价,RollingBoulder.rbPlaceLiquidLava 同判例）;honey(false) 并入 liquidType。 */
+  private deathLavaSplash1457(game: GameHooks, sbLow: boolean): void {
+    const st = game.world.store;
+    if (sbLow) {
+      // :86567-86570 四至（Left/Top=position,Right/Bottom=position+size,f32 链同
+      // RollingBoulder.rbCenterTileTruncX 判例）;越界=tile null → SolidTile true → 拒
+      const x0 = Math.trunc(Math.fround(Math.fround(this.x) / 16));
+      const x1 = Math.trunc(Math.fround(Math.fround(Math.fround(this.x) + Math.fround(this.w)) / 16));
+      const y0 = Math.trunc(Math.fround(Math.fround(this.y) / 16));
+      const y1 = Math.trunc(Math.fround(Math.fround(Math.fround(this.y) + Math.fround(this.h)) / 16));
+      for (let x = x0; x <= x1; x++) {
+        for (let y = y0; y <= y1; y++) {
+          if (!st.inBounds(x, y)) continue;
+          const i = st.idx(x, y);
+          if (npcSolidTile1457(st, x, y) || st.liquid[i] !== 0) continue;  // :86575
+          st.setLiquid(x, y, 255, LIQUID_TYPE.LAVA);                       // :86577-86579
+        }
+      }
+      return;
+    }
+    // :86587-86595 中心格支——Center=position+size/2（Entity.cs:50-55 float 链）
+    const cX = Math.fround(Math.fround(this.x) + Math.fround(this.w / 2));
+    const cY = Math.fround(Math.fround(this.y) + Math.fround(this.h / 2));
+    const tx = Math.trunc(Math.fround(cX / 16));
+    const ty = Math.trunc(Math.fround(cY / 16));
+    if (!st.inBounds(tx, ty)) return;                     // tile null → SolidTile true → 拒
+    const ti = st.idx(tx, ty);
+    if (npcSolidTile1457(st, tx, ty) || st.liquid[ti] !== 0) return;        // :86589
+    st.setLiquid(tx, ty, 50 + Math.floor(Math.random() * 100), LIQUID_TYPE.LAVA);  // :86591-86593
   }
 
   draw() { /* Renderer 统一绘制 */ }
@@ -15029,4 +15099,18 @@ export function fairyTreasureValidAt(
   const idx = st.idx(x, y);
   const sheet = st.flags[idx] ? (TILE_DEFS[st.type[idx]]?.vanilla?.sheet ?? 0) : 0;
   return !!sheet && FAIRY_LURE_SHEETS.has(sheet) && fairyOreFinderValid(sheet, st.frameX[idx]);
+}
+
+/** WorldGen.SolidTile(i,j) 1:1（WorldGen.cs:70642-70663；BJ246 岩浆族死亡泼岩浆门
+ *  谓词）——active∧tileSolid∧!tileSolidTop∧!halfBrick∧slope==0∧!inActive。SOLID_LUT
+ *  域=tileSolid∩!tileSolidTop（平台九件套 19/239/380/427/435-439 原版双 true 被
+ *  !tileSolidTop 排除,本仓 solid:false 已排除同构）。越界=原版 tile==null → true
+ *  （:70646-70649,泼岩浆面=拒写;WeatherRenderer.solidTileExact 同式——entities 层
+ *  不引 render/,亦不引 VanillaSpawner.worldSolidTile（其 import Enemy 成环）,局部
+ *  同式+引注为既定先例）。 */
+function npcSolidTile1457(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (st.flags[i] === 0 || (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0) return false;
+  return TileStore.SOLID_LUT[st.type[i]] === 1 && st.half[i] === 0 && st.slope[i] === 0;
 }
