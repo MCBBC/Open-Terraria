@@ -130,6 +130,7 @@ import {
 import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { spawnNpcDeathGore, GorePiece } from './GorePiece';
+import { spawnNpcHitDust, spawnNpcDeathDust } from './NpcHitDust';   // ★BJ254 HitEffect 尘查表
 import { hslToRgb } from '../player/Appearance';
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
@@ -14165,52 +14166,27 @@ export class Enemy extends Entity {
     //  `lastStrikeDealt ?? dmg` 读到陈值虚增预算——现入口清零 + 本写点 + 488 分支
     //  写足额三件套收口,消费点兜底已撤（??dmg → ??0）。）
     this.lastStrikeDealt = dmg;
-    // NPC.HitEffect 鸟族块（NPC.cs:87518-87556：61 秃鹫/252 鹦鹉/301 渡鸦同式）：
-    // 存活受击 → ceil(防后伤/lifeMax×100) 簇 5 号血尘（DustID.Blood=5；
-    // SpeedX=hitDirection/SpeedY=-1 + NewDust 通用抖动）。原版 hitDirection=
-    // StrikeNPC 入参（调用侧恒 ±1）→ 本仓 kbx 符号,0 兜 1（同死亡 gore 调用约定）。
-    // ★原版 HitEffect 无通用尾支（最终 else=`if(type!=156) return`）——未列型
-    // 受击/死亡原版不出尘；击杀分支走下方死亡管线的 50 簇段。
-    if ((this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301) && this.hp > 0) {
-      const hd = Math.sign(kbx) || 1;
-      const n = Math.ceil((dmg / this.maxHp) * 100);
-      for (let k = 0; k < n; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hd, -1);
-    }
-    // 猪鲨族受击尘（HitEffect life>0 段,与鸟族块同公式）：370/372/373 =
-    // ceil(防后伤/lifeMax×100) 簇 5 号尘 SpeedX=hitDirection/SpeedY=-1
-    // （1457 NPC.cs:85164-85169/85178 前段;1456 :85077 起）。2026-09-03 登记账 R1-F2
-    if ((this.vanillaId === 370 || this.vanillaId === 372 || this.vanillaId === 373) && this.hp > 0) {
-      const hdD = Math.sign(kbx) || 1;
-      const nD = Math.ceil((dmg / this.maxHp) * 100);
-      for (let k = 0; k < nD; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdD, -1);
-    }
-    // WoF 家族受击尘（HitEffect life>0 段，与鸟族块同构）：血肉墙
-    // WallOfFlesh 113 / WallOfFleshEye 114 = 20 簇 5 号血尘 SpeedX=hitDirection /
-    // SpeedY=-1（1457 NPC.cs:88353-88355；1456 :88281-88283）；TheHungry 115 /
-    // TheHungryII 116 = 5 簇同参数（1457 :88405-88408；1456 :88333-88335）。
-    // hit/kill 共用本段：击杀拍时本块在 hp-=dmg 之后、hp>0 门已挡（=原版
-    // life<=0 不进此支），死亡侧走下方 death 管线的对应段。
+    // ★BJ254（2026-09-21）受击尘单源化：vanilla-npcdust.json 查表（tools/extract-npcdust.mjs
+    // 从 HitEffect :82492-:90939 机械提取,首批 78 门组/299 型）。原鸟族 61/252/301、
+    // 猪鲨族 370/372/373、岩浆族 59/60/151 精确块转查表（值不变=金标保形,R1-F2/FX45/
+    // BJ243 锚行随表迁移）。hd = hitDirection 蒸馏（kbx 符号,0 兜 1,同旧手块约定）。
+    // ★hp>0 门=原版 HitEffect 相位门：击杀拍 life<=0 只走死亡支（下方死亡管线),
+    // 受击支不重入——两相互斥,缺门曾致致死拍 hitK 簇+死亡簇双发（BJ243 ⑤/FX45 ③ 实红）。
+    if (this.hp > 0) spawnNpcHitDust(this, game, Math.sign(kbx) || 1, dmg);
+    // WoF 家族受击尘（HitEffect life>0 段）：血肉墙 113/114 = 20 簇 5 号血尘、
+    // 115/116 = 5 簇（1457 :88353-88355/:88405-88408）。★本族死亡面有 netMode 权威
+    // 门+StrikeNPC 扇出派发（:82313-82328）与 gore 跳过纠缠,首批不入尘表——手块保留,
+    // 待后续批次 gates 支持后转表（extract-npcdust _meta.pending 有登记）。
     const wofVid = this.vanillaId;
     if ((wofVid === 113 || wofVid === 114 || wofVid === 115 || wofVid === 116) && this.hp > 0) {
       const hdWof = Math.sign(kbx) || 1;
       const nWof = wofVid === 113 || wofVid === 114 ? 20 : 5;
       for (let k = 0; k < nWof; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdWof, -1);
     }
-    // 岩浆族受击尘（HitEffect life>0 支,NPC.cs:86539-86551,BJ243 2026-09-21 同族对照补）：
-    // 59 熔岩史莱姆/60 地狱蝙蝠/151 熔岩蝙蝠 = ceil(防后伤/lifeMax×80) 簇 尘 6
-    // （Torch）SpeedX=2×hitDirection/SpeedY=-1/α=npc.alpha（59→50,60/151 无 SetDefaults
-    // alpha=0）/scale1.5 + Next(8)!=0 → noGravity（7/8 免重力）。59 熔岩史莱姆每拍
-    // 环境尘另有独立面（AI_001 :62072,slimeAI 内）——两块互不替代。
+    // 岩浆族受击尘已转查表（BJ254,见上方 spawnNpcHitDust——86539-86551 支）。
+    // 59 熔岩史莱姆每拍环境尘另有独立面（AI_001 :62072,slimeAI 内）——两块互不替代。
+    // lavaVid 保留：下方死亡管线的 BJ246 泼岩浆 carve-out 消费。
     const lavaVid = this.vanillaId;
-    if ((lavaVid === 59 || lavaVid === 60 || lavaVid === 151) && this.hp > 0) {
-      const hdLava = Math.sign(kbx) || 1;
-      const nLava = Math.ceil((dmg / this.maxHp) * 80);
-      for (let k = 0; k < nLava; k++) {
-        const dL = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
-          hdLava * 2, -1, this.spawnAlpha, null, 1.5);
-        if (dL && Math.floor(Math.random() * 8) !== 0) dL.noGravity = true;
-      }
-    }
     // DPS 计累计(Projectile.cs:12817-12818/Player.cs:20165-20168 两调用点均
     // accDreamCatcher 门禁+fromPlayer 标记;全仓伤害漏斗单点收口)
     if (fromPlayer) {
@@ -14807,13 +14783,12 @@ export class Enemy extends Entity {
         // 空 = 显式无声(原版 DeathSound=null,246 头:血尽本应转 249,标准死零死音)——
         // 旧 'killed' 合成 fallback 无可达场景(fromVanilla 恒非空除 null 路径),撤
       }
-      // 鸟族死亡尘（HitEffect life<=0 段：50 簇 5 号血尘 SpeedX=2×hitDirection/
-      // SpeedY=-2,先尘后 gore 与原版同序）。gore 438/439 由上方查表
-      // （vanilla-gore.json 301→438/439、61→86/87/88）
-      if (this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301) {
-        const hd = Math.sign(kbx) || 1;
-        for (let k = 0; k < 50; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, 2 * hd, -2);
-      }
+      // ★BJ254（2026-09-21）死亡尘单源化：vanilla-npcdust.json 查表（hit/death 两相
+      // 单源,语义见 NpcHitDust.ts 头注）。原鸟族 61/252/301 死亡 50 簇块、猪鲨
+      // 370/372/373、圣骑士 290、唾液 112/666、岩浆族 59/60/151 死亡尘全部转查表
+      // （值不变=金标保形;spawnNpcDeathGore 表承担 gore,先尘后 gore 与原版同序）。
+      // hd = hitDirection 蒸馏（kbx 符号,0 兜 1,同旧手块约定）。
+      spawnNpcDeathDust(this, game, Math.sign(kbx) || 1);
       // WoF 家族死亡尘（HitEffect life<=0 段）：血肉墙 113 / 大眼 114 = 50 簇
       // 5 号血尘 SpeedX=2×hitDirection / SpeedY=-1（1457 NPC.cs:88359-88361；
       // 1456 :88287-88289）。饥饿者 115 权威侧（SP/房主——与本管线前段
@@ -14872,68 +14847,12 @@ export class Enemy extends Entity {
       if (!wofHungryAuthority) {
         spawnNpcDeathGore(this, game, Math.sign(kbx) || 1, this.facing);
       }
-      // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
-      // （兼作原版 HitEffect 的血尘近似，与 gore 碎块叠加）——鸟族 61/252/301
-      // 已换原版精确血尘（上方 50 簇），不再叠通用近似（原版本族无彩色粒子段）；
-      // WoF 家族 113-116 同理已换精确尘（113/114=50、权威侧 115=10、傀儡
-      // 115/116=20），死亡尘不再走本近似
-      const [c1, c2, c3] = this.def.gore;
-      const big = this.killBossFlag || this.w > 40;
-      const birdExactDust = this.vanillaId === 61 || this.vanillaId === 252 || this.vanillaId === 301;
-      const wofExactDust = wofDeadVid === 113 || wofDeadVid === 114
-        || wofDeadVid === 115 || wofDeadVid === 116;
-      // 猪鲨族死亡尘（HitEffect life<=0 段,1457 NPC.cs:85170-85184）：370=150 簇
-      // d5 全盒 2·dir/−2；372/373=75 簇 d5 中心±25 盒(50×50) 2·dir/−2 后 vel/=2
-      // （预折 half 速度）。2026-09-03 登记账 R1-F2
-      const dukeExactDust = this.vanillaId === 370 || this.vanillaId === 372 || this.vanillaId === 373;
-      if (dukeExactDust) {
-        const hdDk = Math.sign(kbx) || 1;
-        if (this.vanillaId === 370) {
-          for (let k = 0; k < 150; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, 2 * hdDk, -2);
-        } else {
-          for (let k = 0; k < 75; k++) game.dust?.spawn(this.cx - 25, this.cy - 25, 50, 50, 5, hdDk, -1);
-        }
-      }
-      // 圣骑士 290 死亡尘（HitEffect life<=0 支,NPC.cs:1458 :89910-89916,IIIII235
-      // 2026-09-10 补）：10× 尘 16（Smoke）scale 1.5、velocity×2、noGravity——
-      // 原版全盒随机位（NewDust 标准链,speed 0/0+±2 抖动后 ×2）、无 hitDirection 项、
-      // 无生命>0 支（受击零尘,血溅由 hurt 通用层承担）。gore 11-13 三锚点块已由
-      // vanilla-gore.json 290 表项承担（spawnNpcDeathGore）
-      const paladinDeathDust = this.vanillaId === 290;
-      if (paladinDeathDust) {
-        for (let k = 0; k < 10; k++) {
-          const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 16, 0, 0, 0, null, 1.5, true);
-          if (d) { d.vx *= 2; d.vy *= 2; }
-        }
-      }
-      // 腐化者唾液 112/666 死亡尘（HitEffect 顶层支——无 life 门,本仓 death 管线
-      // 等价可锚,FX45 2026-09-16 补,NPC.cs:86360-86374）：20× 尘 18 CorruptGibs、
-      // 盒 (pos.X, pos.Y+2, w, h)、sp0/0、α100、scale2、Next(2)==0 → scale×0.6,
-      // 否则尘速 ×1.4 + noGravity——此前落通用彩色粒子近似（def.gore 三簇）
-      const vileSpitDeathDust = this.vanillaId === 112 || this.vanillaId === 666;
-      if (vileSpitDeathDust) {
-        for (let k = 0; k < 20; k++) {
-          const d = game.spawnDust?.(this.x, this.y + 2, this.w, this.h, 18, 0, 0, 100, null, 2);
-          if (!d) continue;
-          if (Math.random() < 0.5) d.scale *= 0.6;
-          else { d.vx *= 1.4; d.vy *= 1.4; d.noGravity = true; }
-        }
-      }
-      // 岩浆族死亡尘（HitEffect life<=0 支,NPC.cs:86553-86560,BJ243 2026-09-21 同族
-      // 对照补）：59/60/151 = 40 簇 尘 6（Torch）SpeedX=2×hitDirection/SpeedY=-1/
-      // α=npc.alpha/scale1.5/Next(8)!=0 → noGravity。原版该段后经 :86602 门 return
-      // （59 恒 return；60/151 单机非 remix 亦 return）=本族死亡无 HitEffect gore
-      // （vanilla-gore.json 本就无表项）。★登记债（行为面）已由 BJ246 于下方接线
-      // 清偿（死亡泼岩浆 :86561-86645,2026-09-21）。
+      // 死亡尘各精确块（鸟族/猪鲨/圣骑士/唾液/岩浆族）已全部转查表（BJ254,上方
+      // spawnNpcDeathDust 单源）；★通用彩色粒子近似（def.gore 三簇 spawnParticles）
+      // 就此退役——原版 HitEffect 无通用尘尾,表外型死亡不出尘=原版本相（本批唯一
+      // 故意行为变化,tests/bj254-npcdust.test.ts 结构锁）。
+      // 岩浆族死亡泼岩浆 carve-out（BJ246）保留：lavaExactDust 仅作其门用。
       const lavaExactDust = lavaVid === 59 || lavaVid === 60 || lavaVid === 151;
-      if (lavaExactDust) {
-        const hdLavaD = Math.sign(kbx) || 1;
-        for (let k = 0; k < 40; k++) {
-          const dLd = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
-            hdLavaD * 2, -1, this.spawnAlpha, null, 1.5);
-          if (dLd && Math.floor(Math.random() * 8) !== 0) dLd.noGravity = true;
-        }
-      }
       // ★BJ246（2026-09-21,BJ243 登记债清偿）岩浆族死亡泼岩浆（HitEffect life<=0 支
       // 尾段,NPC.cs:86561-86645;1458 同行号逐字全等 2026-09-21 对拍零变更）：
       //  门1（:86561）59 熔岩史莱姆——(Main.expertMode || WorldGen.Skyblock.lowTiles)
@@ -14968,23 +14887,11 @@ export class Enemy extends Entity {
           this.deathLavaSplash1457(game, sbLow);
         }
       }
-      if (!birdExactDust && !wofExactDust && !dukeExactDust && !paladinDeathDust
-        && !vileSpitDeathDust && !lavaExactDust) {
-        game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
-        game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
-        game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });
-      }
+      // ★BJ254：死亡通用彩色粒子近似退役（上方注释）——表外型死亡零粒子=原版相。
       return true;
     }
-    // 受击：少量碎屑零散溅落（不大面积）——鸟族 61/252/301 已有原版精确血尘
-    // （hurt 首段 HitEffect 块），不再叠通用近似；WoF 家族 113-116 同理；
-    // 岩浆族 59/60/151 同理（BJ243：精确火尘 86539-86551 已接）
-    if (this.vanillaId !== 61 && this.vanillaId !== 252 && this.vanillaId !== 301
-      && wofVid !== 113 && wofVid !== 114 && wofVid !== 115 && wofVid !== 116
-      && this.vanillaId !== 370 && this.vanillaId !== 372 && this.vanillaId !== 373
-      && lavaVid !== 59 && lavaVid !== 60 && lavaVid !== 151) {
-      game.spawnParticles(this.cx, this.cy, this.def.gore[0], 5, 1.4, { life: 60 });
-    }
+    // ★BJ254：受击通用彩色粒子近似（def.gore[0] 5 粒 spawnParticles）退役——
+    // 受击尘全归 spawnNpcHitDust 查表（表外型受击零尘=原版相,唯一故意行为变化）。
     return false;
   }
 

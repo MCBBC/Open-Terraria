@@ -1,0 +1,10673 @@
+{
+ "1": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85707
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85714
+   }
+  ]
+ },
+ "2": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "3": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "4": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88265
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 150,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 88271
+   }
+  ]
+ },
+ "5": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88338
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 20,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 88344
+   }
+  ]
+ },
+ "6": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88499
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88505
+   }
+  ]
+ },
+ "7": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88553
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88559
+   }
+  ]
+ },
+ "8": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88553
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88559
+   }
+  ]
+ },
+ "9": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88553
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88559
+   }
+  ]
+ },
+ "10": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88587
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88593
+   }
+  ]
+ },
+ "11": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88587
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88593
+   }
+  ]
+ },
+ "12": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88587
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88593
+   }
+  ]
+ },
+ "13": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88619
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88625
+   }
+  ]
+ },
+ "14": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88619
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88625
+   }
+  ]
+ },
+ "15": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88619
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88625
+   }
+  ]
+ },
+ "16": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85707
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85714
+   }
+  ]
+ },
+ "17": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88649
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88655
+   }
+  ]
+ },
+ "18": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89281
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89287
+   }
+  ]
+ },
+ "19": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89304
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89310
+   }
+  ]
+ },
+ "20": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89347
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89353
+   }
+  ]
+ },
+ "21": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "22": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88919
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88925
+   }
+  ]
+ },
+ "26": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90659
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90665
+   }
+  ]
+ },
+ "27": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90659
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90665
+   }
+  ]
+ },
+ "28": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90659
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90665
+   }
+  ]
+ },
+ "29": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90659
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90665
+   }
+  ]
+ },
+ "31": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "32": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "35": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90227
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 150,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90233
+   }
+  ]
+ },
+ "36": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90227
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 150,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90233
+   }
+  ]
+ },
+ "37": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89221
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89227
+   }
+  ]
+ },
+ "39": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90153
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90159
+   }
+  ]
+ },
+ "40": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90153
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90159
+   }
+  ]
+ },
+ "41": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90153
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90159
+   }
+  ]
+ },
+ "42": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "44": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "45": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "46": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "47": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87357
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87363
+   }
+  ]
+ },
+ "49": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86781
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86787
+   }
+  ]
+ },
+ "50": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 300,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": 175,
+    "color": {
+     "r": 0,
+     "g": 80,
+     "b": 255,
+     "a": 100
+    },
+    "line": 86653
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 200,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": 175,
+    "color": {
+     "r": 0,
+     "g": 80,
+     "b": 255,
+     "a": 100
+    },
+    "line": 86659
+   }
+  ]
+ },
+ "51": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86781
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86787
+   }
+  ]
+ },
+ "52": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "53": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "54": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89241
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89247
+   }
+  ]
+ },
+ "55": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "57": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87357
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87363
+   }
+  ]
+ },
+ "58": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87357
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87363
+   }
+  ]
+ },
+ "59": {
+  "hit": [
+   {
+    "dust": 6,
+    "hitK": 80,
+    "sx": "2hd",
+    "sy": -1,
+    "alpha": "npc",
+    "scale": 1.5,
+    "alt": {
+     "k": 8,
+     "op": "!=",
+     "v": 0,
+     "ifOps": [
+      [
+       "ng",
+       true
+      ]
+     ],
+     "elseOps": null
+    },
+    "line": 86545
+   }
+  ],
+  "death": [
+   {
+    "dust": 6,
+    "n": 40,
+    "sx": "2hd",
+    "sy": -1,
+    "alpha": "npc",
+    "scale": 1.5,
+    "alt": {
+     "k": 8,
+     "op": "!=",
+     "v": 0,
+     "ifOps": [
+      [
+       "ng",
+       true
+      ]
+     ],
+     "elseOps": null
+    },
+    "line": 86555
+   }
+  ]
+ },
+ "60": {
+  "hit": [
+   {
+    "dust": 6,
+    "hitK": 80,
+    "sx": "2hd",
+    "sy": -1,
+    "alpha": "npc",
+    "scale": 1.5,
+    "alt": {
+     "k": 8,
+     "op": "!=",
+     "v": 0,
+     "ifOps": [
+      [
+       "ng",
+       true
+      ]
+     ],
+     "elseOps": null
+    },
+    "line": 86545
+   }
+  ],
+  "death": [
+   {
+    "dust": 6,
+    "n": 40,
+    "sx": "2hd",
+    "sy": -1,
+    "alpha": "npc",
+    "scale": 1.5,
+    "alt": {
+     "k": 8,
+     "op": "!=",
+     "v": 0,
+     "ifOps": [
+      [
+       "ng",
+       true
+      ]
+     ],
+     "elseOps": null
+    },
+    "line": 86555
+   }
+  ]
+ },
+ "61": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87593
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87599
+   }
+  ]
+ },
+ "63": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "color": {
+     "r": 50,
+     "g": 120,
+     "b": 255,
+     "a": 100
+    },
+    "line": 86526
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 25,
+    "sx": "2hd",
+    "sy": -2,
+    "color": {
+     "r": 50,
+     "g": 120,
+     "b": 255,
+     "a": 100
+    },
+    "line": 86533
+   }
+  ]
+ },
+ "64": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "color": {
+     "r": 225,
+     "g": 70,
+     "b": 140,
+     "a": 100
+    },
+    "line": 86526
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 25,
+    "sx": "2hd",
+    "sy": -2,
+    "color": {
+     "r": 225,
+     "g": 70,
+     "b": 140,
+     "a": 100
+    },
+    "line": 86533
+   }
+  ]
+ },
+ "65": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87716
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87722
+   }
+  ]
+ },
+ "67": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "68": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90227
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 150,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90233
+   }
+  ]
+ },
+ "71": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85707
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85714
+   }
+  ]
+ },
+ "73": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90659
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90665
+   }
+  ]
+ },
+ "74": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "77": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "78": {
+  "hit": [
+   {
+    "dust": 31,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89961
+   }
+  ],
+  "death": [
+   {
+    "dust": 31,
+    "n": 20,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89970
+   }
+  ]
+ },
+ "79": {
+  "hit": [
+   {
+    "dust": 31,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89961
+   }
+  ],
+  "death": [
+   {
+    "dust": 31,
+    "n": 20,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89970
+   }
+  ]
+ },
+ "80": {
+  "hit": [
+   {
+    "dust": 31,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89961
+   }
+  ],
+  "death": [
+   {
+    "dust": 31,
+    "n": 20,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89970
+   }
+  ]
+ },
+ "82": {
+  "hit": [
+   {
+    "dust": 54,
+    "hitK": 50,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89991
+   }
+  ],
+  "death": [
+   {
+    "dust": 54,
+    "n": 20,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 90000
+   }
+  ]
+ },
+ "83": {
+  "hit": [
+   {
+    "dust": 31,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 88127
+   }
+  ],
+  "death": [
+   {
+    "dust": 31,
+    "n": 20,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 88134
+   }
+  ]
+ },
+ "84": {
+  "hit": [
+   {
+    "dust": 31,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 88127
+   }
+  ],
+  "death": [
+   {
+    "dust": 31,
+    "n": 20,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 88134
+   }
+  ]
+ },
+ "87": {
+  "hit": [
+   {
+    "dust": 16,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.5
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89933
+   }
+  ],
+  "death": [
+   {
+    "dust": 16,
+    "n": 10,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89942
+   }
+  ]
+ },
+ "88": {
+  "hit": [
+   {
+    "dust": 16,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.5
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89933
+   }
+  ],
+  "death": [
+   {
+    "dust": 16,
+    "n": 10,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89942
+   }
+  ]
+ },
+ "89": {
+  "hit": [
+   {
+    "dust": 16,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.5
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89933
+   }
+  ],
+  "death": [
+   {
+    "dust": 16,
+    "n": 10,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89942
+   }
+  ]
+ },
+ "90": {
+  "hit": [
+   {
+    "dust": 16,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.5
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89933
+   }
+  ],
+  "death": [
+   {
+    "dust": 16,
+    "n": 10,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89942
+   }
+  ]
+ },
+ "91": {
+  "hit": [
+   {
+    "dust": 16,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.5
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89933
+   }
+  ],
+  "death": [
+   {
+    "dust": 16,
+    "n": 10,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89942
+   }
+  ]
+ },
+ "92": {
+  "hit": [
+   {
+    "dust": 16,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.5
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89933
+   }
+  ],
+  "death": [
+   {
+    "dust": 16,
+    "n": 10,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89942
+   }
+  ]
+ },
+ "93": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86781
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86787
+   }
+  ]
+ },
+ "94": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88499
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88505
+   }
+  ]
+ },
+ "95": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88603
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88609
+   }
+  ]
+ },
+ "96": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88603
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88609
+   }
+  ]
+ },
+ "97": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88603
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88609
+   }
+  ]
+ },
+ "98": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88570
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88576
+   }
+  ]
+ },
+ "99": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88570
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88576
+   }
+  ]
+ },
+ "100": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88570
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88576
+   }
+  ]
+ },
+ "101": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88534
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88540
+   }
+  ]
+ },
+ "102": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "103": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "color": {
+     "r": 70,
+     "g": 225,
+     "b": 140,
+     "a": 100
+    },
+    "line": 86526
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 25,
+    "sx": "2hd",
+    "sy": -2,
+    "color": {
+     "r": 70,
+     "g": 225,
+     "b": 140,
+     "a": 100
+    },
+    "line": 86533
+   }
+  ]
+ },
+ "104": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "105": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88867
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88873
+   }
+  ]
+ },
+ "106": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88867
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88873
+   }
+  ]
+ },
+ "107": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88867
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88873
+   }
+  ]
+ },
+ "108": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88867
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88873
+   }
+  ]
+ },
+ "109": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "110": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "111": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90659
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 90665
+   }
+  ]
+ },
+ "112": {
+  "hit": [
+   {
+    "dust": 18,
+    "n": 20,
+    "dy": 2,
+    "alpha": 100,
+    "scale": 2,
+    "alt": {
+     "k": 2,
+     "op": "==",
+     "v": 0,
+     "ifOps": [
+      [
+       "scaleMul",
+       0.6
+      ]
+     ],
+     "elseOps": [
+      [
+       "velMul",
+       1.4
+      ],
+      [
+       "ng",
+       true
+      ]
+     ]
+    },
+    "line": 86364
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 20,
+    "dy": 2,
+    "alpha": 100,
+    "scale": 2,
+    "alt": {
+     "k": 2,
+     "op": "==",
+     "v": 0,
+     "ifOps": [
+      [
+       "scaleMul",
+       0.6
+      ]
+     ],
+     "elseOps": [
+      [
+       "velMul",
+       1.4
+      ],
+      [
+       "ng",
+       true
+      ]
+     ]
+    },
+    "line": 86364
+   }
+  ]
+ },
+ "117": {
+  "hit": [
+   {
+    "dust": 5,
+    "n": 5,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88433
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88439
+   }
+  ]
+ },
+ "118": {
+  "hit": [
+   {
+    "dust": 5,
+    "n": 5,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88433
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88439
+   }
+  ]
+ },
+ "119": {
+  "hit": [
+   {
+    "dust": 5,
+    "n": 5,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88433
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88439
+   }
+  ]
+ },
+ "123": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88899
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88905
+   }
+  ]
+ },
+ "124": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88899
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88905
+   }
+  ]
+ },
+ "125": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88265
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 150,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 88271
+   },
+   {
+    "dust": 31,
+    "n": 10,
+    "alpha": 100,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.4
+     ]
+    ],
+    "line": 88296
+   },
+   {
+    "dust": 6,
+    "n": 5,
+    "alpha": 100,
+    "scale": 2.5,
+    "posts": [
+     [
+      "ng",
+      true
+     ],
+     [
+      "velMul",
+      5
+     ]
+    ],
+    "line": 88302
+   },
+   {
+    "dust": 6,
+    "n": 5,
+    "alpha": 100,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      3
+     ]
+    ],
+    "line": 88306
+   }
+  ]
+ },
+ "126": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88265
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 150,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 88271
+   },
+   {
+    "dust": 31,
+    "n": 10,
+    "alpha": 100,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      1.4
+     ]
+    ],
+    "line": 88296
+   },
+   {
+    "dust": 6,
+    "n": 5,
+    "alpha": 100,
+    "scale": 2.5,
+    "posts": [
+     [
+      "ng",
+      true
+     ],
+     [
+      "velMul",
+      5
+     ]
+    ],
+    "line": 88302
+   },
+   {
+    "dust": 6,
+    "n": 5,
+    "alpha": 100,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      3
+     ]
+    ],
+    "line": 88306
+   }
+  ]
+ },
+ "132": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "148": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87076
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87082
+   }
+  ]
+ },
+ "149": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87076
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87082
+   }
+  ]
+ },
+ "150": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86781
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86787
+   }
+  ]
+ },
+ "151": {
+  "hit": [
+   {
+    "dust": 6,
+    "hitK": 80,
+    "sx": "2hd",
+    "sy": -1,
+    "alpha": "npc",
+    "scale": 1.5,
+    "alt": {
+     "k": 8,
+     "op": "!=",
+     "v": 0,
+     "ifOps": [
+      [
+       "ng",
+       true
+      ]
+     ],
+     "elseOps": null
+    },
+    "line": 86545
+   }
+  ],
+  "death": [
+   {
+    "dust": 6,
+    "n": 40,
+    "sx": "2hd",
+    "sy": -1,
+    "alpha": "npc",
+    "scale": 1.5,
+    "alt": {
+     "k": 8,
+     "op": "!=",
+     "v": 0,
+     "ifOps": [
+      [
+       "ng",
+       true
+      ]
+     ],
+     "elseOps": null
+    },
+    "line": 86555
+   }
+  ]
+ },
+ "152": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86781
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86787
+   }
+  ]
+ },
+ "155": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88714
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88720
+   }
+  ]
+ },
+ "156": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 90926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 90932
+   }
+  ]
+ },
+ "158": {
+  "hit": [
+   {
+    "dust": 54,
+    "hitK": 50,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89991
+   }
+  ],
+  "death": [
+   {
+    "dust": 54,
+    "n": 20,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 90000
+   }
+  ]
+ },
+ "159": {
+  "hit": [
+   {
+    "dust": 54,
+    "hitK": 50,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89991
+   }
+  ],
+  "death": [
+   {
+    "dust": 54,
+    "n": 20,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 90000
+   }
+  ]
+ },
+ "161": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "162": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "163": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88750
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88756
+   }
+  ]
+ },
+ "164": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88770
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88776
+   }
+  ]
+ },
+ "165": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88770
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88776
+   }
+  ]
+ },
+ "166": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88499
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88505
+   }
+  ]
+ },
+ "167": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "168": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87076
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87082
+   }
+  ]
+ },
+ "173": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "line": 87395
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "line": 87401
+   }
+  ]
+ },
+ "174": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "line": 87395
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "line": 87401
+   }
+  ]
+ },
+ "176": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "179": {
+  "hit": [
+   {
+    "dust": 31,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 88127
+   }
+  ],
+  "death": [
+   {
+    "dust": 31,
+    "n": 20,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 88134
+   }
+  ]
+ },
+ "181": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "line": 87395
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "line": 87401
+   }
+  ]
+ },
+ "182": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "line": 87395
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "line": 87401
+   }
+  ]
+ },
+ "186": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "187": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   },
+   {
+    "dust": 4,
+    "hitK": 200,
+    "h": 24,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": 125,
+    "color": {
+     "r": 0,
+     "g": 80,
+     "b": 255,
+     "a": 100
+    },
+    "line": 87937
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   },
+   {
+    "dust": 4,
+    "n": 25,
+    "h": 24,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": 125,
+    "color": {
+     "r": 0,
+     "g": 80,
+     "b": 255,
+     "a": 100
+    },
+    "line": 87957
+   }
+  ]
+ },
+ "188": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "189": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "190": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "191": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "192": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "193": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "194": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "195": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87773
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87779
+   }
+  ]
+ },
+ "196": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87773
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87779
+   }
+  ]
+ },
+ "197": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "198": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87793
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87799
+   }
+  ]
+ },
+ "199": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87793
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87799
+   }
+  ]
+ },
+ "200": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "201": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "202": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "203": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "204": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": 100,
+    "color": {
+     "r": 149,
+     "g": 208,
+     "b": 104,
+     "a": 255
+    },
+    "line": 85977
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": 100,
+    "color": {
+     "r": 149,
+     "g": 208,
+     "b": 104,
+     "a": 255
+    },
+    "line": 85984
+   }
+  ]
+ },
+ "205": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "206": {
+  "hit": [
+   {
+    "dust": 137,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87814
+   }
+  ],
+  "death": [
+   {
+    "dust": 137,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87820
+   }
+  ]
+ },
+ "217": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88449
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88455
+   }
+  ]
+ },
+ "218": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88449
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88455
+   }
+  ]
+ },
+ "219": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88449
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88455
+   }
+  ]
+ },
+ "220": {
+  "hit": [
+   {
+    "dust": 151,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 0.7,
+    "line": 89502
+   }
+  ],
+  "death": [
+   {
+    "dust": 151,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "scale": 0.7,
+    "line": 89508
+   }
+  ]
+ },
+ "221": {
+  "hit": [
+   {
+    "dust": 151,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 0.7,
+    "line": 89502
+   }
+  ],
+  "death": [
+   {
+    "dust": 151,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "scale": 0.7,
+    "line": 89508
+   }
+  ]
+ },
+ "222": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88478
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 88484
+   }
+  ]
+ },
+ "223": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "224": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "225": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": 100,
+    "color": {
+     "r": 0,
+     "g": 80,
+     "b": 255,
+     "a": 100
+    },
+    "line": 85994
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": 100,
+    "color": {
+     "r": 0,
+     "g": 80,
+     "b": 255,
+     "a": 100
+    },
+    "line": 86001
+   }
+  ]
+ },
+ "226": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86781
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86787
+   }
+  ]
+ },
+ "230": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "231": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "232": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "233": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "234": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "235": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90813
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "scale": "npc",
+    "line": 90819
+   }
+  ]
+ },
+ "236": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88810
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88816
+   }
+  ]
+ },
+ "237": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88810
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88816
+   }
+  ]
+ },
+ "238": {
+  "hit": [
+   {
+    "dust": 18,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88750
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88756
+   }
+  ]
+ },
+ "239": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88790
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88796
+   }
+  ]
+ },
+ "240": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88790
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88796
+   }
+  ]
+ },
+ "241": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88830
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88836
+   }
+  ]
+ },
+ "242": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88847
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88853
+   }
+  ]
+ },
+ "243": {
+  "hit": [
+   {
+    "dust": 161,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86012
+   }
+  ],
+  "death": [
+   {
+    "dust": 161,
+    "n": 200,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86019
+   }
+  ]
+ },
+ "244": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85707
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85714
+   }
+  ]
+ },
+ "245": {
+  "hit": [
+   {
+    "dust": 148,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85910
+   },
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ],
+  "death": [
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ]
+ },
+ "246": {
+  "hit": [
+   {
+    "dust": 148,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85910
+   },
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ],
+  "death": [
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ]
+ },
+ "247": {
+  "hit": [
+   {
+    "dust": 148,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85910
+   },
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ],
+  "death": [
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ]
+ },
+ "248": {
+  "hit": [
+   {
+    "dust": 148,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85910
+   },
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ],
+  "death": [
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ]
+ },
+ "249": {
+  "hit": [
+   {
+    "dust": 148,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85910
+   },
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ],
+  "death": [
+   {
+    "dust": 148,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85924
+   }
+  ]
+ },
+ "250": {
+  "hit": [
+   {
+    "dust": 54,
+    "hitK": 50,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89991
+   }
+  ],
+  "death": [
+   {
+    "dust": 54,
+    "n": 20,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 90000
+   }
+  ]
+ },
+ "251": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "252": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87628
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87634
+   }
+  ]
+ },
+ "253": {
+  "hit": [
+   {
+    "dust": 54,
+    "hitK": 50,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89991
+   }
+  ],
+  "death": [
+   {
+    "dust": 54,
+    "n": 20,
+    "alpha": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 90000
+   }
+  ]
+ },
+ "268": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "line": 87395
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "line": 87401
+   }
+  ]
+ },
+ "269": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "270": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "271": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "272": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "273": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "274": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "275": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "276": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "277": {
+  "hit": [
+   {
+    "dust": 174,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "posts": [
+     [
+      "scaleSet",
+      1.1
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89726
+   }
+  ],
+  "death": [
+   {
+    "dust": 174,
+    "n": 75,
+    "sx": "1.5hd",
+    "sy": -0.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "scaleSet",
+      1.4
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89734
+   }
+  ]
+ },
+ "278": {
+  "hit": [
+   {
+    "dust": 174,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "posts": [
+     [
+      "scaleSet",
+      1.1
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89726
+   }
+  ],
+  "death": [
+   {
+    "dust": 174,
+    "n": 75,
+    "sx": "1.5hd",
+    "sy": -0.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "scaleSet",
+      1.4
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89734
+   }
+  ]
+ },
+ "279": {
+  "hit": [
+   {
+    "dust": 174,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "posts": [
+     [
+      "scaleSet",
+      1.1
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89726
+   }
+  ],
+  "death": [
+   {
+    "dust": 174,
+    "n": 75,
+    "sx": "1.5hd",
+    "sy": -0.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "scaleSet",
+      1.4
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89734
+   }
+  ]
+ },
+ "280": {
+  "hit": [
+   {
+    "dust": 174,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "posts": [
+     [
+      "scaleSet",
+      1.1
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89726
+   }
+  ],
+  "death": [
+   {
+    "dust": 174,
+    "n": 75,
+    "sx": "1.5hd",
+    "sy": -0.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "scaleSet",
+      1.4
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89734
+   }
+  ]
+ },
+ "281": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "282": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "283": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "284": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "285": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "286": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89686
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89692
+   }
+  ]
+ },
+ "287": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "290": {
+  "hit": [],
+  "death": [
+   {
+    "dust": 16,
+    "n": 10,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89911
+   }
+  ]
+ },
+ "291": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "292": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "293": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "294": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "295": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "296": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "297": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "298": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "299": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "300": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "301": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87611
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87617
+   }
+  ]
+ },
+ "302": {
+  "hit": [
+   {
+    "dust": 192,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": 100,
+    "color": {
+     "r": 100,
+     "g": 100,
+     "b": 100,
+     "a": 100
+    },
+    "line": 85892
+   }
+  ],
+  "death": [
+   {
+    "dust": 192,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": 100,
+    "color": {
+     "r": 100,
+     "g": 100,
+     "b": 100,
+     "a": 100
+    },
+    "line": 85899
+   }
+  ]
+ },
+ "304": {
+  "hit": [
+   {
+    "dust": 189,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.3,
+    "line": 85875
+   }
+  ],
+  "death": [
+   {
+    "dust": 189,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.3,
+    "line": 85882
+   }
+  ]
+ },
+ "305": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "306": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "307": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "308": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "309": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "310": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "311": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "312": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "313": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "314": {
+  "hit": [
+   {
+    "dust": 194,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85761
+   }
+  ],
+  "death": [
+   {
+    "dust": 194,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85768
+   }
+  ]
+ },
+ "317": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "318": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87435
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87441
+   }
+  ]
+ },
+ "319": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "320": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "321": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "322": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "323": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "324": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "325": {
+  "hit": [
+   {
+    "dust": 191,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85804
+   }
+  ],
+  "death": [
+   {
+    "dust": 191,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85811
+   }
+  ]
+ },
+ "326": {
+  "hit": [
+   {
+    "dust": 191,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85858
+   }
+  ],
+  "death": [
+   {
+    "dust": 191,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85865
+   }
+  ]
+ },
+ "327": {
+  "hit": [
+   {
+    "dust": 189,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "scale": 1.1,
+    "line": 85783
+   }
+  ],
+  "death": [
+   {
+    "dust": 189,
+    "n": 60,
+    "sx": "2hd",
+    "sy": -2,
+    "scale": 1.1,
+    "line": 85790
+   }
+  ]
+ },
+ "331": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "332": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "337": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "370": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85220
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 150,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 85227
+   }
+  ]
+ },
+ "372": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85168
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "anchor": "center",
+    "dx": -25,
+    "dy": -25,
+    "w": 50,
+    "h": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "posts": [
+     [
+      "velDiv",
+      2
+     ]
+    ],
+    "line": 85175
+   }
+  ]
+ },
+ "373": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 85168
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "anchor": "center",
+    "dx": -25,
+    "dy": -25,
+    "w": 50,
+    "h": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "posts": [
+     [
+      "velDiv",
+      2
+     ]
+    ],
+    "line": 85175
+   }
+  ]
+ },
+ "430": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "431": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "432": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "433": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   },
+   {
+    "dust": 4,
+    "n": 25,
+    "h": 24,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": 125,
+    "color": {
+     "r": 0,
+     "g": 80,
+     "b": 255,
+     "a": 100
+    },
+    "line": 87957
+   }
+  ]
+ },
+ "434": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "435": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "436": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "441": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 88672
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 88678
+   }
+  ]
+ },
+ "449": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "450": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "451": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "452": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "464": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87357
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87363
+   }
+  ]
+ },
+ "465": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87357
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87363
+   }
+  ]
+ },
+ "470": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87076
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87082
+   }
+  ]
+ },
+ "481": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "494": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86727
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86733
+   }
+  ]
+ },
+ "495": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86727
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86733
+   }
+  ]
+ },
+ "496": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86745
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86751
+   }
+  ]
+ },
+ "497": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86745
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86751
+   }
+  ]
+ },
+ "498": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "499": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "500": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "501": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "502": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "503": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "504": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "505": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "506": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86762
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86768
+   }
+  ]
+ },
+ "535": {
+  "hit": [
+   {
+    "dust": 4,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85707
+   }
+  ],
+  "death": [
+   {
+    "dust": 4,
+    "n": 50,
+    "sx": "2hd",
+    "sy": -2,
+    "alpha": "npc",
+    "color": "npc",
+    "line": 85714
+   }
+  ]
+ },
+ "538": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "540": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "542": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87716
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87722
+   }
+  ]
+ },
+ "543": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87716
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87722
+   }
+  ]
+ },
+ "544": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87716
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87722
+   }
+  ]
+ },
+ "545": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87716
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87722
+   }
+  ]
+ },
+ "590": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "591": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "610": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "611": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86826
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86832
+   }
+  ]
+ },
+ "614": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "615": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "616": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "617": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "624": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86844
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86850
+   }
+  ]
+ },
+ "625": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "626": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "627": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "628": {
+  "hit": [
+   {
+    "dust": 3,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86863
+   }
+  ],
+  "death": [
+   {
+    "dust": 3,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86869
+   }
+  ]
+ },
+ "630": {
+  "hit": [
+   {
+    "dust": 31,
+    "hitK": 50,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89961
+   }
+  ],
+  "death": [
+   {
+    "dust": 31,
+    "n": 20,
+    "scale": 1.5,
+    "posts": [
+     [
+      "velMul",
+      2
+     ],
+     [
+      "ng",
+      true
+     ]
+    ],
+    "line": 89970
+   }
+  ]
+ },
+ "632": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 100,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87923
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 50,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 87951
+   }
+  ]
+ },
+ "666": {
+  "hit": [
+   {
+    "dust": 18,
+    "n": 20,
+    "dy": 2,
+    "alpha": 100,
+    "scale": 2,
+    "alt": {
+     "k": 2,
+     "op": "==",
+     "v": 0,
+     "ifOps": [
+      [
+       "scaleMul",
+       0.6
+      ]
+     ],
+     "elseOps": [
+      [
+       "velMul",
+       1.4
+      ],
+      [
+       "ng",
+       true
+      ]
+     ]
+    },
+    "line": 86364
+   }
+  ],
+  "death": [
+   {
+    "dust": 18,
+    "n": 20,
+    "dy": 2,
+    "alpha": 100,
+    "scale": 2,
+    "alt": {
+     "k": 2,
+     "op": "==",
+     "v": 0,
+     "ifOps": [
+      [
+       "scaleMul",
+       0.6
+      ]
+     ],
+     "elseOps": [
+      [
+       "velMul",
+       1.4
+      ],
+      [
+       "ng",
+       true
+      ]
+     ]
+    },
+    "line": 86364
+   }
+  ]
+ },
+ "671": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "672": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "673": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "674": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "675": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86926
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 10,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86932
+   }
+  ]
+ },
+ "689": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 30,
+    "sx": "hd",
+    "sy": -1,
+    "line": 86826
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 15,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 86832
+   }
+  ]
+ },
+ "692": {
+  "hit": [
+   {
+    "dust": 5,
+    "hitK": 150,
+    "sx": "hd",
+    "sy": -1,
+    "line": 87716
+   }
+  ],
+  "death": [
+   {
+    "dust": 5,
+    "n": 75,
+    "sx": "2hd",
+    "sy": -2,
+    "line": 87722
+   }
+  ]
+ },
+ "693": {
+  "hit": [
+   {
+    "dust": 26,
+    "hitK": 50,
+    "sx": "hd",
+    "sy": -1,
+    "line": 89526
+   }
+  ],
+  "death": [
+   {
+    "dust": 26,
+    "n": 20,
+    "sx": "2.5hd",
+    "sy": -2.5,
+    "line": 89532
+   }
+  ]
+ },
+ "_meta": {
+  "source": "Terarria1457/Terraria/NPC.cs NPC.HitEffect (:82492-:90939)",
+  "crossVer": "1458 同区 (:82492-:90941) 与 1457 逐字节全等（2026-09-21 diff 实证）——SW_ITEM_VER=1458 重产同值",
+  "generatedBy": "tools/extract-npcdust.mjs",
+  "callTotal": 629,
+  "entryCount": 629,
+  "stdStmts": 1133,
+  "unsupStmts": 122,
+  "npcIds": 569,
+  "entryNpcIds": 569,
+  "schema": "per-npcId: {hit:[stmt],death:[stmt]}; stmt={dust,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,posts?,alt?,line}; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; sx token: hd|2hd|2.5hd|1.5hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv; alt={k,op,v,ifOps,elseOps}=Main.rand.Next(k) op v 掷骰分支",
+  "noGenericTail": "★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）",
+  "carveOuts": [
+   "泼岩浆/亡体 NewNPC/分裂生成等世界改写与生成族不入尘表（BJ246 已接泼岩浆+分裂链;其余另刀）",
+   "gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）",
+   "音效（SoundID.NPCHit/NPCDeath）/DBT/公告/探针生成（135 探针等）非尘面"
+  ],
+  "pending": [
+   {
+    "types": null,
+    "line": 82577,
+    "phase": "death",
+    "reason": "gate:daybreak;pos:hitbox.TopLeft();id:num2;gate:daybreak;postUnknown:dz.alpha = 200;",
+    "count": 1
+   },
+   {
+    "types": [
+     661
+    ],
+    "line": 82676,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(5) == 0;color:newColor;gate:Main.rand.Next(5) == 0;postUnsupported:dz.position = base.Center + Main.rand.NextVector2Circular(wi",
+    "count": 1
+   },
+   {
+    "types": [
+     661
+    ],
+    "line": 82702,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(5) == 0;gate:Main.rand.Next(5) == 0;postUnsupported:dz.position = base.Center + Main.rand.NextVector2Circular(wi",
+    "count": 1
+   },
+   {
+    "types": [
+     668
+    ],
+    "line": 82759,
+    "phase": "death",
+    "reason": "pos:vector7;postUnknown:dz.velocity = Main.rand.NextVector2Circular(4f, 4f);",
+    "count": 1
+   },
+   {
+    "types": [
+     636
+    ],
+    "line": 82780,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     636
+    ],
+    "line": 82784,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     636
+    ],
+    "line": 82794,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     636
+    ],
+    "line": 82798,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     657
+    ],
+    "line": 82825,
+    "phase": "death",
+    "reason": "pos:position - new Vector2(num21, num21);sx:8f * Main.rand.NextFloatDirection();sy:-2f + 6f * Main.rand.NextFloatDirection();scale:1f + Main.rand.NextFloat() * 0.5f",
+    "count": 1
+   },
+   {
+    "types": [
+     657
+    ],
+    "line": 82844,
+    "phase": "hit",
+    "reason": "colorLocal:newColor4@657",
+    "count": 1
+   },
+   {
+    "types": [
+     658,
+     659,
+     660
+    ],
+    "line": 82885,
+    "phase": "both",
+    "reason": "id:num28;scale:num27;count=num26",
+    "count": 1
+   },
+   {
+    "types": [
+     667
+    ],
+    "line": 82918,
+    "phase": "both",
+    "reason": "scale:num32;count=num31",
+    "count": 1
+   },
+   {
+    "types": [
+     676
+    ],
+    "line": 82937,
+    "phase": "both",
+    "reason": "id:num42;scale:num41;count=num40;aliasMiss:dust6.noGravity = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     541
+    ],
+    "line": 83446,
+    "phase": "hit",
+    "reason": "postUnsupported:dust13.color = color;",
+    "count": 1
+   },
+   {
+    "types": [
+     541
+    ],
+    "line": 83453,
+    "phase": "hit",
+    "reason": "postUnsupported:dust13.color = color;",
+    "count": 1
+   },
+   {
+    "types": [
+     541
+    ],
+    "line": 83466,
+    "phase": "death",
+    "reason": "postUnsupported:dust14.color = color;",
+    "count": 1
+   },
+   {
+    "types": [
+     541
+    ],
+    "line": 83473,
+    "phase": "death",
+    "reason": "postUnsupported:dust14.color = color;",
+    "count": 1
+   },
+   {
+    "types": [
+     546
+    ],
+    "line": 83494,
+    "phase": "hit",
+    "reason": "postUnsupported:dust15.color = color2;",
+    "count": 1
+   },
+   {
+    "types": [
+     546
+    ],
+    "line": 83501,
+    "phase": "hit",
+    "reason": "postUnsupported:dust15.color = color2;",
+    "count": 1
+   },
+   {
+    "types": [
+     546
+    ],
+    "line": 83514,
+    "phase": "death",
+    "reason": "postUnsupported:dust16.color = color2;",
+    "count": 1
+   },
+   {
+    "types": [
+     546
+    ],
+    "line": 83521,
+    "phase": "death",
+    "reason": "postUnsupported:dust16.color = color2;",
+    "count": 1
+   },
+   {
+    "types": [
+     583,
+     584,
+     585
+    ],
+    "line": 83601,
+    "phase": "hit",
+    "reason": "pos:base.Center - new Vector2(num99) * 0.5f;color:Color.Lerp(value, value2, Main.rand.NextFloat())",
+    "count": 1
+   },
+   {
+    "types": [
+     583,
+     584,
+     585
+    ],
+    "line": 83609,
+    "phase": "death",
+    "reason": "pos:base.Center - new Vector2(num99) * 0.5f;color:Color.Lerp(value, value2, Main.rand.NextFloat())",
+    "count": 1
+   },
+   {
+    "types": [
+     416,
+     518
+    ],
+    "line": 83682,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust19.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     416,
+     518
+    ],
+    "line": 83698,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0;gate:Main.rand.Next(3) == 0;postUnsupported:dust20.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     419
+    ],
+    "line": 83722,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust21.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     419
+    ],
+    "line": 83738,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0;gate:Main.rand.Next(3) == 0;postUnsupported:dust22.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     415
+    ],
+    "line": 83785,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust23.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     415
+    ],
+    "line": 83799,
+    "phase": "death",
+    "reason": "postUnsupported:dust24.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     417
+    ],
+    "line": 83821,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust25.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     417
+    ],
+    "line": 83837,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0;postUnsupported:dust26.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     418
+    ],
+    "line": 83864,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0;postUnsupported:dust27.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     418
+    ],
+    "line": 83878,
+    "phase": "death",
+    "reason": "postUnsupported:dust28.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     516
+    ],
+    "line": 83903,
+    "phase": "both",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     519
+    ],
+    "line": 83918,
+    "phase": "both",
+    "reason": "pos:hitbox2.TopLeft();id:num128;postUnknown:dz.alpha = 200;",
+    "count": 1
+   },
+   {
+    "types": [
+     522
+    ],
+    "line": 83934,
+    "phase": "both",
+    "reason": "postUnsupported:dz.position = base.Center;",
+    "count": 1
+   },
+   {
+    "types": [
+     426
+    ],
+    "line": 83952,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust29.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     426
+    ],
+    "line": 83970,
+    "phase": "death",
+    "reason": "id:num136;postUnsupported:dust30.scale = 1.25f + Main.rand.NextFloat();",
+    "count": 1
+   },
+   {
+    "types": [
+     427
+    ],
+    "line": 84006,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0;postUnsupported:dust31.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     427
+    ],
+    "line": 84024,
+    "phase": "death",
+    "reason": "id:num144;postUnsupported:dust32.scale = 1.25f + Main.rand.NextFloat();",
+    "count": 1
+   },
+   {
+    "types": [
+     429
+    ],
+    "line": 84047,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust33.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     429
+    ],
+    "line": 84063,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0;gate:Main.rand.Next(3) == 0;postUnsupported:dust34.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     425
+    ],
+    "line": 84131,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust35.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     425
+    ],
+    "line": 84147,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0;gate:Main.rand.Next(3) == 0;postUnsupported:dust36.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     428
+    ],
+    "line": 84180,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     428
+    ],
+    "line": 84184,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     424
+    ],
+    "line": 84200,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust37.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     424
+    ],
+    "line": 84216,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0;gate:Main.rand.Next(3) == 0;postUnsupported:dust38.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     423
+    ],
+    "line": 84240,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0;postUnsupported:dust39.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     423
+    ],
+    "line": 84254,
+    "phase": "death",
+    "reason": "postUnsupported:dust40.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     421
+    ],
+    "line": 84275,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0;postUnsupported:dust41.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     421
+    ],
+    "line": 84289,
+    "phase": "death",
+    "reason": "postUnsupported:dust42.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     420
+    ],
+    "line": 84310,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0;postUnsupported:dust43.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     420
+    ],
+    "line": 84324,
+    "phase": "death",
+    "reason": "postUnsupported:dust44.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     405,
+     406
+    ],
+    "line": 84344,
+    "phase": "hit",
+    "reason": "pos:base.Center - Vector2.One * num167;forCond",
+    "count": 1
+   },
+   {
+    "types": [
+     405,
+     406
+    ],
+    "line": 84366,
+    "phase": "death",
+    "reason": "pos:base.Center - Vector2.One * num170",
+    "count": 1
+   },
+   {
+    "types": [
+     409
+    ],
+    "line": 84415,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     410
+    ],
+    "line": 84444,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     407
+    ],
+    "line": 84470,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     407
+    ],
+    "line": 84481,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) != 0;gate:Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84504,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(3) == 0;gate:Main.rand.Next(3) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84508,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84521,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0 && Main.rand.Next(3) == 0;pos:oldPos[num183];count=oldPos.Length;gate:Main.rand.Next(4) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84525,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0 && Main.rand.Next(2) == 0;pos:oldPos[num183];count=oldPos.Length;gate:Main.rand.Next(4) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84538,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0;gate:Main.rand.Next(3) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84559,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0;pos:oldPos[num185];gate:Main.rand.Next(3) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84561,
+    "phase": "death",
+    "reason": "pos:oldPos[num185]",
+    "count": 1
+   },
+   {
+    "types": [
+     411
+    ],
+    "line": 84578,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0;gate:Main.rand.Next(4) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     411
+    ],
+    "line": 84590,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     524,
+     525,
+     526,
+     527
+    ],
+    "line": 84710,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(4) == 0 && num205 > 0;id:num205;gate:Main.rand.Next(4) == 0 && num205 > 0;postUnsupported:dust59.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     524,
+     525,
+     526,
+     527
+    ],
+    "line": 84726,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) == 0 && num205 > 0;id:num205;gate:Main.rand.Next(3) == 0 && num205 > 0;postUnsupported:dust60.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     533
+    ],
+    "line": 84828,
+    "phase": "death",
+    "reason": "postUnsupported:dz.fadeIn = 1f;",
+    "count": 1
+   },
+   {
+    "types": [
+     478
+    ],
+    "line": 84914,
+    "phase": "death",
+    "reason": "id:237 + Main.rand.Next(2)",
+    "count": 1
+   },
+   {
+    "types": [
+     371
+    ],
+    "line": 85195,
+    "phase": "death",
+    "reason": "pos:base.Center - Vector2.One * num269",
+    "count": 1
+   },
+   {
+    "types": [
+     384
+    ],
+    "line": 85304,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.position = Vector2.Lerp(Main.dust[num280].position, base.",
+    "count": 1
+   },
+   {
+    "types": [
+     384
+    ],
+    "line": 85313,
+    "phase": "death",
+    "reason": "sx:-2.5f * (float)hitDirection",
+    "count": 1
+   },
+   {
+    "types": [
+     387
+    ],
+    "line": 85364,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.position = Vector2.Lerp(Main.dust[num288].position, base.",
+    "count": 1
+   },
+   {
+    "types": [
+     520
+    ],
+    "line": 85387,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.position = Vector2.Lerp(Main.dust[num292].position, base.",
+    "count": 1
+   },
+   {
+    "types": [
+     388
+    ],
+    "line": 85432,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.position = Vector2.Lerp(Main.dust[num298].position, base.",
+    "count": 1
+   },
+   {
+    "types": [
+     388
+    ],
+    "line": 85441,
+    "phase": "death",
+    "reason": "sx:-2.5f * (float)hitDirection",
+    "count": 1
+   },
+   {
+    "types": [
+     399
+    ],
+    "line": 85464,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.position = Vector2.Lerp(Main.dust[num302].position, base.",
+    "count": 1
+   },
+   {
+    "types": [
+     399
+    ],
+    "line": 85473,
+    "phase": "death",
+    "reason": "sx:-2.5f * (float)hitDirection",
+    "count": 1
+   },
+   {
+    "types": [
+     392,
+     393,
+     394,
+     395
+    ],
+    "line": 85516,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.position = Vector2.Lerp(Main.dust[num308].position, base.",
+    "count": 1
+   },
+   {
+    "types": null,
+    "line": 85599,
+    "phase": "hit",
+    "reason": "gate:type >= 0 && NPCID.Sets.IsGoldCritter[type];id:Main.rand.Next(232, 234);gate:type >= 0 && NPCID.Sets.IsGoldCritter[type]",
+    "count": 1
+   },
+   {
+    "types": null,
+    "line": 85606,
+    "phase": "death",
+    "reason": "gate:type >= 0 && NPCID.Sets.IsGoldCritter[type];id:Main.rand.Next(232, 234);gate:type >= 0 && NPCID.Sets.IsGoldCritter[type]",
+    "count": 1
+   },
+   {
+    "types": [
+     1
+    ],
+    "line": 85689,
+    "phase": "both",
+    "reason": "gate:ai[1] == 1345f;id:num325;postUnsupported:dust.scale *= 1f + (float)Main.rand.Next(-30, 31) * 0.01f;",
+    "count": 1
+   },
+   {
+    "types": [
+     210
+    ],
+    "line": 86028,
+    "phase": "both",
+    "reason": "gate:type == 211) && life <= 0",
+    "count": 1
+   },
+   {
+    "types": [
+     355,
+     358
+    ],
+    "line": 86044,
+    "phase": "both",
+    "reason": "gate:type == 654) && life <= 0",
+    "count": 1
+   },
+   {
+    "types": null,
+    "line": 86145,
+    "phase": "death",
+    "reason": "gate:type >= 484 && type <= 487;id:248 + type - 484;gate:type >= 484 && type <= 487",
+    "count": 1
+   },
+   {
+    "types": [
+     646,
+     647,
+     648,
+     649,
+     650,
+     651,
+     652
+    ],
+    "line": 86887,
+    "phase": "hit",
+    "reason": "id:num480",
+    "count": 1
+   },
+   {
+    "types": [
+     646,
+     647,
+     648,
+     649,
+     650,
+     651,
+     652
+    ],
+    "line": 86893,
+    "phase": "death",
+    "reason": "id:num480",
+    "count": 1
+   },
+   {
+    "types": [
+     639,
+     640,
+     641,
+     642,
+     643,
+     644,
+     645
+    ],
+    "line": 86910,
+    "phase": "hit",
+    "reason": "id:num484",
+    "count": 1
+   },
+   {
+    "types": [
+     639,
+     640,
+     641,
+     642,
+     643,
+     644,
+     645
+    ],
+    "line": 86916,
+    "phase": "death",
+    "reason": "id:num484",
+    "count": 1
+   },
+   {
+    "types": [
+     69,
+     508,
+     509,
+     580,
+     581,
+     582
+    ],
+    "line": 87538,
+    "phase": "hit",
+    "reason": "forCond",
+    "count": 1
+   },
+   {
+    "types": [
+     69,
+     508,
+     509,
+     580,
+     581,
+     582
+    ],
+    "line": 87544,
+    "phase": "death",
+    "reason": "forCond",
+    "count": 1
+   },
+   {
+    "types": [
+     590
+    ],
+    "line": 87944,
+    "phase": "hit",
+    "reason": "gate:type == 591) && !wet",
+    "count": 1
+   },
+   {
+    "types": [
+     262
+    ],
+    "line": 88157,
+    "phase": "hit",
+    "reason": "gate:life > lifeMax / 2 && Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [],
+    "line": 88161,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [
+     262,
+     263,
+     264
+    ],
+    "line": 88165,
+    "phase": "hit",
+    "reason": "gate:Main.rand.Next(3) != 0;gate:Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [],
+    "line": 88174,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [
+     262,
+     263,
+     264
+    ],
+    "line": 88178,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(3) != 0;gate:Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [
+     265
+    ],
+    "line": 88214,
+    "phase": "both",
+    "reason": "gate:Main.rand.Next(3) != 0;gate:Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [
+     265
+    ],
+    "line": 88218,
+    "phase": "both",
+    "reason": "gate:Main.rand.Next(3) != 0;gate:Main.rand.Next(3) != 0",
+    "count": 1
+   },
+   {
+    "types": [
+     113,
+     114
+    ],
+    "line": 88394,
+    "phase": "death",
+    "reason": "pos:new Vector2(num593, num594);sx:(float)Main.rand.Next(-60, 61) * 0.1f;sy:(float)Main.rand.Next(-60, 61) * 0.1f",
+    "count": 1
+   },
+   {
+    "types": [
+     115
+    ],
+    "line": 88416,
+    "phase": "death",
+    "reason": "gate:Main.netMode != 1",
+    "count": 1
+   },
+   {
+    "types": [
+     369,
+     376,
+     663,
+     695,
+     696
+    ],
+    "line": 89043,
+    "phase": "death",
+    "reason": "gate:NPCID.Sets.IsTownPet[type];postUnsupported:dz.noLight = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     229
+    ],
+    "line": 89125,
+    "phase": "death",
+    "reason": "gate:IsShimmerVariant;gate:IsShimmerVariant",
+    "count": 1
+   },
+   {
+    "types": [
+     85,
+     629
+    ],
+    "line": 89781,
+    "phase": "hit",
+    "reason": "id:num722",
+    "count": 1
+   },
+   {
+    "types": [
+     85,
+     629
+    ],
+    "line": 89787,
+    "phase": "death",
+    "reason": "id:num722",
+    "count": 1
+   },
+   {
+    "types": [
+     34
+    ],
+    "line": 90169,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.noLight = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     34
+    ],
+    "line": 90174,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.noLight = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     34
+    ],
+    "line": 90184,
+    "phase": "death",
+    "reason": "postUnsupported:dz.noLight = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     34
+    ],
+    "line": 90189,
+    "phase": "death",
+    "reason": "postUnsupported:dz.noLight = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     289
+    ],
+    "line": 90202,
+    "phase": "hit",
+    "reason": "postUnsupported:dz.noLight = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     289
+    ],
+    "line": 90213,
+    "phase": "death",
+    "reason": "postUnsupported:dz.noLight = true;",
+    "count": 1
+   },
+   {
+    "types": [
+     134,
+     135,
+     136
+    ],
+    "line": 90359,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     134,
+     135,
+     136
+    ],
+    "line": 90365,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     134,
+     135,
+     136
+    ],
+    "line": 90369,
+    "phase": "death",
+    "reason": "gate:Main.rand.Next(2) == 0;gate:Main.rand.Next(2) == 0",
+    "count": 1
+   },
+   {
+    "types": [
+     23
+    ],
+    "line": 90578,
+    "phase": "hit",
+    "reason": "id:num836",
+    "count": 1
+   },
+   {
+    "types": [
+     23
+    ],
+    "line": 90591,
+    "phase": "death",
+    "reason": "id:num839",
+    "count": 1
+   },
+   {
+    "types": [
+     472
+    ],
+    "line": 90736,
+    "phase": "hit",
+    "reason": "postUnknown:dz.alpha = 100;",
+    "count": 1
+   },
+   {
+    "types": [
+     472
+    ],
+    "line": 90747,
+    "phase": "death",
+    "reason": "postUnknown:dz.alpha = 100;",
+    "count": 1
+   },
+   {
+    "types": [
+     23
+    ],
+    "line": 90579,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     24
+    ],
+    "line": 90607,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     25
+    ],
+    "line": 90630,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     30
+    ],
+    "line": 90798,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     33
+    ],
+    "line": 90644,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     38
+    ],
+    "line": 89324,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     43
+    ],
+    "line": 90853,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     48
+    ],
+    "line": 90887,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     56
+    ],
+    "line": 90853,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     62
+    ],
+    "line": 90904,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     66
+    ],
+    "line": 90904,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     75
+    ],
+    "line": 86498,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     81
+    ],
+    "line": 86403,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     86
+    ],
+    "line": 88692,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     113
+    ],
+    "line": 88355,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     114
+    ],
+    "line": 88355,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     115
+    ],
+    "line": 88407,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     116
+    ],
+    "line": 88407,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     120
+    ],
+    "line": 86456,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     121
+    ],
+    "line": 86403,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     122
+    ],
+    "line": 86477,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     127
+    ],
+    "line": 90487,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     128
+    ],
+    "line": 90531,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     129
+    ],
+    "line": 90531,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     130
+    ],
+    "line": 90531,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     131
+    ],
+    "line": 90531,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     133
+    ],
+    "line": 87507,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     137
+    ],
+    "line": 86456,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     138
+    ],
+    "line": 86456,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     139
+    ],
+    "line": 90270,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     140
+    ],
+    "line": 90131,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     141
+    ],
+    "line": 86349,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     142
+    ],
+    "line": 89152,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     143
+    ],
+    "line": 86328,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     144
+    ],
+    "line": 86328,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     145
+    ],
+    "line": 86328,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     147
+    ],
+    "line": 86307,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     153
+    ],
+    "line": 86689,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     154
+    ],
+    "line": 86283,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     157
+    ],
+    "line": 87490,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     160
+    ],
+    "line": 89261,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     169
+    ],
+    "line": 89830,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     170
+    ],
+    "line": 89852,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     171
+    ],
+    "line": 89879,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     175
+    ],
+    "line": 90870,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     177
+    ],
+    "line": 86708,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     178
+    ],
+    "line": 89175,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     180
+    ],
+    "line": 89852,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     183
+    ],
+    "line": 86384,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     184
+    ],
+    "line": 86307,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     185
+    ],
+    "line": 90783,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     207
+    ],
+    "line": 89367,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     208
+    ],
+    "line": 89390,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     209
+    ],
+    "line": 89427,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     212
+    ],
+    "line": 89447,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     213
+    ],
+    "line": 89447,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     214
+    ],
+    "line": 89447,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     215
+    ],
+    "line": 89447,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     216
+    ],
+    "line": 89447,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     227
+    ],
+    "line": 89074,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     228
+    ],
+    "line": 89097,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     229
+    ],
+    "line": 89117,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     254
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     255
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     256
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     257
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     258
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     259
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     260
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     261
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     266
+    ],
+    "line": 88228,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     267
+    ],
+    "line": 88249,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     288
+    ],
+    "line": 85964,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     303
+    ],
+    "line": 86926,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     315
+    ],
+    "line": 90065,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     316
+    ],
+    "line": 90021,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     329
+    ],
+    "line": 88732,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     330
+    ],
+    "line": 90021,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     333
+    ],
+    "line": 85649,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     334
+    ],
+    "line": 85649,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     335
+    ],
+    "line": 85649,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     336
+    ],
+    "line": 85649,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     338
+    ],
+    "line": 87854,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     339
+    ],
+    "line": 87854,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     340
+    ],
+    "line": 87854,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     341
+    ],
+    "line": 89748,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     342
+    ],
+    "line": 87834,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     343
+    ],
+    "line": 87884,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     344
+    ],
+    "line": 85833,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     346
+    ],
+    "line": 90443,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     347
+    ],
+    "line": 90405,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     348
+    ],
+    "line": 87298,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     349
+    ],
+    "line": 87298,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     350
+    ],
+    "line": 87338,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     351
+    ],
+    "line": 87318,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     352
+    ],
+    "line": 85742,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     353
+    ],
+    "line": 89197,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     354
+    ],
+    "line": 89197,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     356
+    ],
+    "line": 86129,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     357
+    ],
+    "line": 86161,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     359
+    ],
+    "line": 86221,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     360
+    ],
+    "line": 86242,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     361
+    ],
+    "line": 87112,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     362
+    ],
+    "line": 87230,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     363
+    ],
+    "line": 87230,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     364
+    ],
+    "line": 87230,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     365
+    ],
+    "line": 87230,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     366
+    ],
+    "line": 87203,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     367
+    ],
+    "line": 87203,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     368
+    ],
+    "line": 89020,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     374
+    ],
+    "line": 86209,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     375
+    ],
+    "line": 86209,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     377
+    ],
+    "line": 86193,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     378
+    ],
+    "line": 83547,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     379
+    ],
+    "line": 85060,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     381
+    ],
+    "line": 85243,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     382
+    ],
+    "line": 85264,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     383
+    ],
+    "line": 85284,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     385
+    ],
+    "line": 85324,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     386
+    ],
+    "line": 85344,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     387
+    ],
+    "line": 85373,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     389
+    ],
+    "line": 85412,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     390
+    ],
+    "line": 85264,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     391
+    ],
+    "line": 85496,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     392
+    ],
+    "line": 85525,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     393
+    ],
+    "line": 85525,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     394
+    ],
+    "line": 85525,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     395
+    ],
+    "line": 85525,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     402
+    ],
+    "line": 84540,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     407
+    ],
+    "line": 84467,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     409
+    ],
+    "line": 84412,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     410
+    ],
+    "line": 84441,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     411
+    ],
+    "line": 84575,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     412
+    ],
+    "line": 83760,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     413
+    ],
+    "line": 83760,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     414
+    ],
+    "line": 83760,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     415
+    ],
+    "line": 83782,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     416
+    ],
+    "line": 83679,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     417
+    ],
+    "line": 83818,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     418
+    ],
+    "line": 83861,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     419
+    ],
+    "line": 83719,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     420
+    ],
+    "line": 84307,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     421
+    ],
+    "line": 84272,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     423
+    ],
+    "line": 84237,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     424
+    ],
+    "line": 84197,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     425
+    ],
+    "line": 84128,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     426
+    ],
+    "line": 83949,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     427
+    ],
+    "line": 84003,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     428
+    ],
+    "line": 84170,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     429
+    ],
+    "line": 84044,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     438
+    ],
+    "line": 85060,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     439
+    ],
+    "line": 85080,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     440
+    ],
+    "line": 85118,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     453
+    ],
+    "line": 89663,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     454
+    ],
+    "line": 85138,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     455
+    ],
+    "line": 85138,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     456
+    ],
+    "line": 85138,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     457
+    ],
+    "line": 85138,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     458
+    ],
+    "line": 85138,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     459
+    ],
+    "line": 85138,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     460
+    ],
+    "line": 84842,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     461
+    ],
+    "line": 85016,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     462
+    ],
+    "line": 85038,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     463
+    ],
+    "line": 84994,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     466
+    ],
+    "line": 84928,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     467
+    ],
+    "line": 90312,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     468
+    ],
+    "line": 84950,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     469
+    ],
+    "line": 84972,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     471
+    ],
+    "line": 90716,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     473
+    ],
+    "line": 89806,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     474
+    ],
+    "line": 89806,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     475
+    ],
+    "line": 89806,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     476
+    ],
+    "line": 89806,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     477
+    ],
+    "line": 84864,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     478
+    ],
+    "line": 84906,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     479
+    ],
+    "line": 84886,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     480
+    ],
+    "line": 90763,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     482
+    ],
+    "line": 85554,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     483
+    ],
+    "line": 85554,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     489
+    ],
+    "line": 87645,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     490
+    ],
+    "line": 87696,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     491
+    ],
+    "line": 84644,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     492
+    ],
+    "line": 84670,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     510
+    ],
+    "line": 83641,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     511
+    ],
+    "line": 83641,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     512
+    ],
+    "line": 83641,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     513
+    ],
+    "line": 83622,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     514
+    ],
+    "line": 83622,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     515
+    ],
+    "line": 83622,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     516
+    ],
+    "line": 83896,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     518
+    ],
+    "line": 83679,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     520
+    ],
+    "line": 85396,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     521
+    ],
+    "line": 82727,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     524
+    ],
+    "line": 84707,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     525
+    ],
+    "line": 84707,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     526
+    ],
+    "line": 84707,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     527
+    ],
+    "line": 84707,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     528
+    ],
+    "line": 84754,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     529
+    ],
+    "line": 84754,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     530
+    ],
+    "line": 84775,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     531
+    ],
+    "line": 84775,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     532
+    ],
+    "line": 84797,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     533
+    ],
+    "line": 84818,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     534
+    ],
+    "line": 87676,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     536
+    ],
+    "line": 87923,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     537
+    ],
+    "line": 85666,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     546
+    ],
+    "line": 83531,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     550
+    ],
+    "line": 88939,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     551
+    ],
+    "line": 83053,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     552
+    ],
+    "line": 82954,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     553
+    ],
+    "line": 82954,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     554
+    ],
+    "line": 82954,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     555
+    ],
+    "line": 83018,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     556
+    ],
+    "line": 83018,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     557
+    ],
+    "line": 83018,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     558
+    ],
+    "line": 83191,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     559
+    ],
+    "line": 83191,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     560
+    ],
+    "line": 83191,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     561
+    ],
+    "line": 82985,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     562
+    ],
+    "line": 82985,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     563
+    ],
+    "line": 82985,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     564
+    ],
+    "line": 83303,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     565
+    ],
+    "line": 83303,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     566
+    ],
+    "line": 83224,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     567
+    ],
+    "line": 83224,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     568
+    ],
+    "line": 83169,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     569
+    ],
+    "line": 83169,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     570
+    ],
+    "line": 83146,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     571
+    ],
+    "line": 83146,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     572
+    ],
+    "line": 83096,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     573
+    ],
+    "line": 83096,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     574
+    ],
+    "line": 83121,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     575
+    ],
+    "line": 83121,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     576
+    ],
+    "line": 83266,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     577
+    ],
+    "line": 83266,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     578
+    ],
+    "line": 83332,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     586
+    ],
+    "line": 87645,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     587
+    ],
+    "line": 86926,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     588
+    ],
+    "line": 88959,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     589
+    ],
+    "line": 88959,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     602
+    ],
+    "line": 87257,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     603
+    ],
+    "line": 87257,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     604
+    ],
+    "line": 86081,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     606
+    ],
+    "line": 86177,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     607
+    ],
+    "line": 87159,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     608
+    ],
+    "line": 87277,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     609
+    ],
+    "line": 87277,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     618
+    ],
+    "line": 83409,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     619
+    ],
+    "line": 83381,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     620
+    ],
+    "line": 83353,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     621
+    ],
+    "line": 83660,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     622
+    ],
+    "line": 83660,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     623
+    ],
+    "line": 83660,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     631
+    ],
+    "line": 85578,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     633
+    ],
+    "line": 88982,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     634
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     635
+    ],
+    "line": 90098,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     653
+    ],
+    "line": 85614,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     655
+    ],
+    "line": 86263,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     662
+    ],
+    "line": 90040,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     663
+    ],
+    "line": 89410,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     665
+    ],
+    "line": 90798,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     668
+    ],
+    "line": 82750,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     669
+    ],
+    "line": 86105,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     677
+    ],
+    "line": 86065,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     685
+    ],
+    "line": 87144,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     687
+    ],
+    "line": 87129,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     688
+    ],
+    "line": 87176,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     690
+    ],
+    "line": 82634,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     691
+    ],
+    "line": 87903,
+    "phase": "both",
+    "reason": "batch2+:std-expressible（未接组滚动清单）",
+    "count": 1
+   }
+  ],
+  "unreachableAfterReturn": []
+ }
+}

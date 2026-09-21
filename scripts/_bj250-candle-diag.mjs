@@ -28,6 +28,18 @@ await page.evaluate(() => {
     return ob(x, y, a, b, c);
   };
 });
+await page.evaluate(() => {
+  // 插桩：谁把蜡烛格清零/破坏（setTile 0 面 + breakTile 面 + st.flags 写面）
+  const g = window.__swGame, st = g.world.store;
+  const ost = st.setTile.bind(st);
+  st.setTile = (x, y, t, fx, fy) => {
+    const { tx, ty } = window.__c;
+    if (x === tx && y === ty && (t === 0 || t !== st.get(tx, ty))) {
+      window.__log.push(['setTile', x, y, t, new Error().stack.split('\n').slice(2, 7).map((s) => s.trim().replace(/^at /, '').replace(/:\d+:\d+$/, '')).join(' <- ')]);
+    }
+    return ost(x, y, t, fx, fy);
+  };
+});
 // 放置
 await page.evaluate(() => {
   const g = window.__swGame, st = g.world.store;
@@ -64,6 +76,6 @@ for (let i = 0; i < 5; i++) {
   console.log(`post-click+${i * 150}ms candle=${s}`);
   await sleep(150);
 }
-console.log('log', JSON.stringify(await page.evaluate(() => window.__log)));
+console.log('log', JSON.stringify(await page.evaluate(() => window.__log), null, 1).slice(0, 3000));
 console.log('errs', errs);
 await browser.close();

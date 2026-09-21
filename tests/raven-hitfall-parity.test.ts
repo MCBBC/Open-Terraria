@@ -51,6 +51,12 @@ function makeHooks(w: World, playerAt?: { x: number; y: number } | null) {
         return null;
       },
     },
+    // ★BJ254：受击/死亡尘改走 spawnDust 查表通道（NpcHitDust 单源）——同一记账桶
+    spawnDust: (x: number, y: number, dw: number, dh: number, type: number, sx = 0, sy = 0) => {
+      const rec2 = { x, y, w: dw, h: dh, type, sx, sy, noGravity: false, scale: 1 };
+      rec.dusts.push(rec2);
+      return rec2;
+    },
     entities: em,
   } as unknown as GameHooks & { entities: typeof em };
   return { hooks: hooks as GameHooks, rec, player, em };
@@ -112,15 +118,34 @@ describe('鸟族 HitEffect 血尘（61 秃鹫/252 鹦鹉/301 渡鸦,:87518-87556
     expect(h.rec.particles.length).toBe(0);
   });
 
-  it('未列型无 HitEffect 块 → 受击/死亡不出血尘（原版结构:无通用尾支）', () => {
+  it('★BJ254 表外型受击/死亡零尘（原版结构:无通用尾支）；表内型（僵尸 3）=查表精确', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 42, y: FLOOR - 4 });
-    const e = spawn(h, 3, 40, FLOOR - 2);          // 僵尸（无 5 号尘块）
-    e.hurt(5, 1, 0, h.hooks);
+    // 419（占有铠甲）= 表外型（HitEffect 支带 Main.rand 概率门,首批未接）→ 零尘
+    const e419 = spawn(h, 419, 40, FLOOR - 2);
+    e419.hurt(5, 1, 0, h.hooks);
+    e419.hurt(e419.hp + 9999, 1, 0, h.hooks);
     expect(h.rec.dusts.filter((d) => d.type === 5).length).toBe(0);
-    const e2 = spawn(h, 3, 50, FLOOR - 2);
-    e2.hurt(9999, 1, 0, h.hooks);
-    expect(h.rec.dusts.filter((d) => d.type === 5).length).toBe(0);
+    expect(h.rec.dusts.length).toBe(0);
+    // 僵尸 3 = 表内型（vanilla :87923/:87951 确有 5 号尘块——旧断言"僵尸无块"系
+    // 仓内覆盖面误当原版真值,本测试更正为查表精确钉值）
+    const e3 = spawn(h, 3, 50, FLOOR - 2);
+    const hp0 = e3.hp;
+    e3.hurt(5, 1, 0, h.hooks);
+    expect(e3.hp).toBeGreaterThan(0);
+    const dealt = hp0 - e3.hp;
+    const hitBlood = h.rec.dusts.filter((d) => d.type === 5);
+    expect(hitBlood.length).toBe(Math.ceil((dealt / e3.maxHp) * 100));
+    expect(hitBlood[0].sx).toBe(1);               // hd（kbx=1）
+    expect(hitBlood[0].sy).toBe(-1);
+    // 死亡 50 簇 2.5hd/-2.5（:87951）
+    const e3b = spawn(h, 3, 60, FLOOR - 2);
+    h.rec.dusts.length = 0;
+    e3b.hurt(e3b.hp + 9999, 1, 0, h.hooks);
+    const death = h.rec.dusts.filter((d) => d.type === 5);
+    expect(death.length).toBe(50);
+    expect(death[0].sx).toBe(2.5);                // 2.5hd（:87951）
+    expect(death[0].sy).toBe(-2.5);
   });
 });
 
