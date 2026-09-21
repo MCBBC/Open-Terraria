@@ -661,25 +661,16 @@ export class MagicMissileProj extends Entity {
       }
       this.lightRGB = [0.8, 0.8, 0.8];     // 无覆盖档（:14815-14817 白 × light）
     } else if (this.projId === 79) {
-      // ★1458 变更面（AI_009_MagicMissiles 新增 type==79 块 :44390-44406；红队 R27 §12，
-      // R26 归属质疑已复核维持原判——块体逐行确认在 AI_009 方法体内、`if (type != 34)
-      // return`(:44196) 之后）：soundDelay==0 且 |vx|+|vy|>2 → PlaySound(Item9)+
-      // soundDelay=10（十拍循环啸声——Update 头递减/AI 判==0 的原版节拍）;
-      // 每拍 1×d66 Disco 色(scale2.5,alpha100,noGravity,初速×0.1 后 +=弹速×0.2,
-      // 位置=中心+4±rand(-2..2))——飞行期彩虹尘迹
-      if (this.soundDelay > 0) this.soundDelay--;
-      if (this.soundDelay === 0 && Math.abs(this.vx) + Math.abs(this.vy) > 2) {
-        this.soundDelay = 10;
-        game.playSfxFiles(['Item_9'], 0.5, this.cx, this.cy);
-      }
-      const dd79 = game.spawnDust?.(this.x, this.y, this.w, this.h, 66, 0, 0, 100,
-        { r: this.discoR, g: this.discoG, b: this.discoB, a: 255 }, 2.5, true);
-      if (dd79) {
-        dd79.vx = dd79.vx * 0.1 + this.vx * 0.2;
-        dd79.vy = dd79.vy * 0.1 + this.vy * 0.2;
-        dd79.x = this.x + this.w / 2 + 4 + Math.floor(Math.random() * 5) - 2;
-        dd79.y = this.y + this.h / 2 + Math.floor(Math.random() * 5) - 2;
-      }
+      // ★BJ255 定谳（2026-09-21，推翻 R27 §12 归属）：1.4.5.7/1458 的 type==79 disco
+      //  尘块（1457 :44389-44407 / 1458 :44390-44408，Dust 66+Main.Disco 色）位于
+      //  【AI_009_MagicMissiles_Old】方法体内（1457 起始 :44231 / 1458 :44232），
+      //  而 Old 全文件唯一调用点 = AI_009 头 `if (type == 491)` 分支（:44000）——
+      //  79 走 aiStyle 9 新 AI（:24644 → AI_009_MagicMissiles，43996-44230），新 AI
+      //  内无任何 79 块 → 原版 79 【飞行期无尘、无 Item9 循环音】（尘/音块=旧频道式
+      //  AI 死码遗产）。旧刀把 :44390 误读为"在 `type != 34 return`(:44196) 之后的
+      //  同方法体"=跨函数误归属，d66 尘+Item9 音整面退役。保留项（均原版在位）：
+      //  · ProjLight :16600-16605 type==79 light = Disco 色（下方 disco 状态机+lightRGB）
+      //  · Kill :72426-72465 彩虹迸散（killNow 链,不在本函数）
       const n = 7;                          // Main.cs:19441 六段 ±7/帧
       switch (this.discoStyle) {
         case 0: this.discoG = Math.min(255, this.discoG + n); if (this.discoG >= 255) this.discoStyle++; break;
@@ -692,13 +683,16 @@ export class MagicMissileProj extends Entity {
       this.lightRGB = [this.discoR / 255 * 0.8, this.discoG / 255 * 0.8, this.discoB / 255 * 0.8]; // :15157-15160
     }
     // 急转尘爆（:40686 flag3——oldVel·vel 归一 < 0.2 时 2-5 尘，:40703-40715/:40737-40749）
+    // ★BJ255：原版 flag3 尘块分别整体位于 `if (type == 16)`/:44112 与 type==34 段内
+    // （16 dust15 :44122-44135、34 dust6 :44210-44224）——79 无此面（新 AI 无 79 块），
+    // 79 摘除（旧 '#FFD0FF' 分支=同 R27 误归属家族）。
     const speed = Math.hypot(this.vx, this.vy);
     const pSpeed = Math.hypot(this.pvx, this.pvy);
-    if (speed > 0.1 && pSpeed > 0.1) {
+    if (this.projId !== 79 && speed > 0.1 && pSpeed > 0.1) {
       const dot = (this.pvx * this.vx + this.pvy * this.vy) / (pSpeed * speed);
       if (dot < 0.2) {
         game.spawnParticles(this.cx, this.cy,
-          this.projId === 34 ? '#FF7030' : this.projId === 79 ? '#FFD0FF' : '#9CD8FF',
+          this.projId === 34 ? '#FF7030' : '#9CD8FF',
           2, 0.8, { life: 14 });
       }
     }

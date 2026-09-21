@@ -741,6 +741,150 @@ void main(){
   }
   private trailWrapSampler: WebGLSampler | null = null;
 
+  // ---- obj55 "MagicMissile" pass 条带（BJ255 2026-09-21：SM2 族 34/16/79 拖尾 GL 化）----
+  // 像素语义=SM2 codegen px_MagicMissile 逐指令直译（src/fx/SM2Effect.ts 生成体同源）：
+  //   wEnv  = p×C[8] + C[9]                （def 常量 1.5/−0.5，实测钉值 2026-09-21）
+  //   u     = p + C[4]                     （C[4]=preshader uSaturation×uTime，f64 CPU 侧算好入 uniform）
+  //   across= T.y/T.z                      （B 侧 0、A 侧 1——同 obj58 vTC 语义）
+  //   gate  = tex(s2, (u, across)).x       （s2=UseImage2=imgs[2]）
+  //   mult  = tex(s1, (u, across)).x       （s1=UseImage1=imgs[1]）
+  //   blade = tex(s0, (p, across))         （s0=UseImage0=imgs[0]，RGBA）
+  //   edge  = sat(2×(gate − wEnv))
+  //   oC    = sat(blade × (mult×edge) × vColor × uOpacity)
+  // ★vColor=原始顶点色（uOpacity 独立通道，不折入顶点——与 CPU 路径 sm2f 分支同构，
+  //   差于 obj58 tech 路径的 op 折叠）；(ONE,ONE) 直加语义同 obj58 注（alpha 恒写 1）。
+  // ★索引=6/quad（不含背面）：MM 族原版 PrepareStripWithProceduralPadding 缺省
+  //   includeBacksides=false（MagicMissileDrawer.cs:18/FlameLashDrawer.cs:19/
+  //   LightDiscDrawer.cs:18/RainbowRodDrawer.cs:18——FinalFractalHelper.cs:188 才传
+  //   true），XNA 侧 CullCounterClockwise 下每 quad 至多栅格化一次；WebGL 无剔除，
+  //   6 索引=每 quad 恰一次=同栅格覆盖（12 索引不剔除=加算×2，禁用）。
+  private trailMMProg: WebGLProgram | null = null;
+  private trailMMUni: Record<string, WebGLUniformLocation | null> = {};
+
+  private static readonly TRAIL_MM_FS = `#version 300 es
+precision highp float;
+in vec4 vColor;
+in vec3 vTC;
+uniform sampler2D uS0;   // UseImage0（Extra_195 等，blade RGBA）
+uniform sampler2D uS1;   // UseImage1（Extra_197 等，mult）
+uniform sampler2D uS2;   // UseImage2（Extra_196 等，gate）
+uniform vec4 uMM;        // (uOpacity, 滚动相位, 1.5, -0.5)
+out vec4 oC;
+void main(){
+  float p = vTC.x;
+  float across = vTC.z != 0.0 ? vTC.y / vTC.z : 0.0;
+  float wEnv = p * uMM.z + uMM.w;
+  vec2 uvS = vec2(p + uMM.y, across);
+  float gate = texture(uS2, uvS).x;
+  float mult = texture(uS1, uvS).x;
+  vec4 blade = texture(uS0, vec2(p, across));
+  float edge = clamp(2.0 * (gate - wEnv), 0.0, 1.0);
+  vec4 oc = blade * (mult * edge) * vColor * uMM.x;
+  oC = vec4(oc.rgb, 1.0);
+}`;
+
+  /** 惰性编译 obj55 程序（失败→null 永久走 CPU 兜底） */
+  private ensureTrailMM(): boolean {
+    if (this.unavailable || !this.gl) return false;
+    if (this.trailMMProg) return true;
+    const gl = this.gl;
+    const mk = (type: number, src: string): WebGLShader | null => {
+      const sh = gl.createShader(type)!;
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.warn('[GLSpriteLayer] trail MM shader 编译失败:', gl.getShaderInfoLog(sh));
+        gl.deleteShader(sh);
+        return null;
+      }
+      return sh;
+    };
+    const vs = mk(gl.VERTEX_SHADER, GLSpriteLayer.TRAIL_VS);
+    const fs = mk(gl.FRAGMENT_SHADER, GLSpriteLayer.TRAIL_MM_FS);
+    if (!vs || !fs) return false;
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.warn('[GLSpriteLayer] trail MM 程序链接失败:', gl.getProgramInfoLog(prog));
+      return false;
+    }
+    this.trailMMProg = prog;
+    for (const n of ['uCam', 'uHalf', 'uS0', 'uS1', 'uS2', 'uMM']) this.trailMMUni[n] = gl.getUniformLocation(prog, n);
+    return true;
+  }
+
+  /**
+   * obj55 族帧首（清屏/相机 uniform 同 obj58 trailFrameBegin；VAO/VBO/IBO 布局同构
+   * 9 floats/顶点，复用同一组缓冲）。uOpacity/scroll=SM2 setupConstants 的 C[0]/C[4]
+   * （preshader 在 CPU 侧 f64 求值，位精度优于 FS 内重算）。
+   */
+  trailFrameBeginMM(viewW: number, viewH: number, camX: number, camY: number, zoom = 1,
+    uOpacity = 1, uScroll = 0): void {
+    if (!this.ensureTrailMM() || !this.ensureTrail() || !this.gl) return;
+    const gl = this.gl;
+    this.resize(viewW, viewH);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    if (!this.trailDirty) {
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this.trailDirty = true;
+    }
+    gl.useProgram(this.trailMMProg);
+    gl.uniform2f(this.trailMMUni.uCam, camX, camY);
+    gl.uniform2f(this.trailMMUni.uHalf, viewW / (2 * zoom), viewH / (2 * zoom));
+    gl.uniform1i(this.trailMMUni.uS0, 0);
+    gl.uniform1i(this.trailMMUni.uS1, 1);
+    gl.uniform1i(this.trailMMUni.uS2, 2);
+    gl.uniform4f(this.trailMMUni.uMM, uOpacity, uScroll, 1.5, -0.5);
+    gl.bindVertexArray(this.trailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailVbo);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.trailIbo);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 36, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 36, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 36, 24);
+  }
+
+  /**
+   * obj55 单条条带（一次 drawElements，6 索引/quad——见类注）。
+   * verts 布局同 trailStrip：n×2 顶点 [x,y, r,g,b,a, progress, distAcross, dist]，
+   * ★顶点色=原始色（uOpacity 走 uniform，不折入）。
+   */
+  trailStripMM(texS0: TexEntry, texS1: TexEntry, texS2: TexEntry,
+    verts: Float32Array, idx: Uint16Array): void {
+    if (!this.ensureTrailMM() || !this.gl || !this.trailDirty) return;
+    const gl = this.gl;
+    gl.useProgram(this.trailMMProg);
+    gl.bindVertexArray(this.trailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.trailVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.trailIbo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STREAM_DRAW);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texS0.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texS1.tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, texS2.tex);
+    if (!this.trailWrapSampler) {
+      const s = gl.createSampler()!;
+      gl.samplerParameteri(s, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      this.trailWrapSampler = s;
+    }
+    gl.bindSampler(0, this.trailWrapSampler);
+    gl.bindSampler(1, this.trailWrapSampler);
+    gl.bindSampler(2, this.trailWrapSampler);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.drawElements(gl.TRIANGLES, idx.length, gl.UNSIGNED_SHORT, 0);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    glStatDraw(this.statName, idx.length / 3);
+    gl.bindSampler(0, null); gl.bindSampler(1, null); gl.bindSampler(2, null);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
   /** 全量释放(切世界/读档——★曾漏挂此链:连续读档逐次叠满 LRU=GB 级显存
    *  打爆 → contextlost 风暴 26 万次,tab 3.4GB 用户实报 2026-08-18) */
   dispose(): void {
@@ -753,12 +897,13 @@ void main(){
     }
     if (!this.gl.isContextLost() && !this.objectsStale) {
       if (this.trailProg) this.gl.deleteProgram(this.trailProg);
+      if (this.trailMMProg) this.gl.deleteProgram(this.trailMMProg);
       if (this.trailVAO) this.gl.deleteVertexArray(this.trailVAO);
       if (this.trailVbo) this.gl.deleteBuffer(this.trailVbo);
       if (this.trailIbo) this.gl.deleteBuffer(this.trailIbo);
       if (this.trailWrapSampler) this.gl.deleteSampler(this.trailWrapSampler);
     }
-    this.trailProg = null; this.trailVAO = null; this.trailVbo = null;
+    this.trailProg = null; this.trailMMProg = null; this.trailVAO = null; this.trailVbo = null;
     this.trailIbo = null; this.trailWrapSampler = null;
     this.trailDirty = false;
     this.texs.clear();

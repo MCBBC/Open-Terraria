@@ -112,13 +112,13 @@ await new Promise((r) => setTimeout(r, 2500));
 const mid = await page.evaluate(() => {
   const g = window.__swGame;
   const p = g.entities.projectiles.find((e) => e.projId === 518);
-  const goldIds = new Set();
-  for (const [k, id] of Object.entries(window.__swITEMS ?? {})) if (/^vi_73_/.test(k)) goldIds.add(id);
+  // __swITEMS = ITEM_DEFS(数组,id→def);vid 73 判别 = def.key 前缀 vi_73_
+  const isGold = (id) => /^vi_73_/.test(window.__swITEMS?.[id]?.key ?? '');
   return {
     alive: !!p,
     ai0: p ? p['ai0'] : -1,
     scale: p ? p['scale'] : -1,
-    dropsGold: g.entities.drops.filter((d) => goldIds.has(d.itemId)).length,
+    dropsGold: g.entities.drops.filter((d) => isGold(d.itemId)).length,
     dropsAllIds: [...new Set(g.entities.drops.map((d) => d.itemId))].slice(0, 8),
     dropsN: g.entities.drops.length,
   };
@@ -141,29 +141,26 @@ await new Promise((r) => setTimeout(r, 5500));
 const final = await page.evaluate(() => {
   const g = window.__swGame;
   const portalGone = !g.entities.projectiles.some((e) => e.projId === 518);
-  // __swITEMS: key→内部 id;反向:遍历键找 vid 73 的内部 id 集
-  const goldIds = new Set();
-  for (const [k, id] of Object.entries(window.__swITEMS ?? {})) {
-    if (/^vi_73_/.test(k)) goldIds.add(id);
-  }
-  const dropsGold = g.entities.drops.filter((d) => goldIds.has(d.itemId));
+  const isGold = (id) => /^vi_73_/.test(window.__swITEMS?.[id]?.key ?? '');
+  const dropsGold = g.entities.drops.filter((d) => isGold(d.itemId));
   let invGold = 0;
   const inv = g.player?.inv;
   if (inv?.slots) {
     for (const s of inv.slots) {
-      if (s && goldIds.has(s.id)) invGold += s.stack;
+      if (s && isGold(s.id)) invGold += s.stack;
     }
   }
   return {
     portalGone,
     dropsGold: dropsGold.length,
     invGold,
-    goldTotal: dropsGold.reduce((a, d) => a + d.n, 0) + invGold,
-    sample: dropsGold.slice(0, 3).map((d) => ({ vid: 73, n: d.n })),
+    goldTotal: dropsGold.reduce((a, d) => a + (d.stack ?? d.n ?? 1), 0) + invGold,
+    sample: dropsGold.slice(0, 3).map((d) => ({ vid: 73, n: d.stack })),
   };
 });
 console.log('[probe] final', JSON.stringify(final));
-const pass = final.portalGone && final.goldTotal >= 5 && final.goldTotal <= 15 && errs.length === 0;
+// 在场掉落 5..15（ai1 三档 5/10/15;invGold 含玩家既有钱币不进断言,仅记录）
+const pass = final.portalGone && final.dropsGold >= 5 && final.dropsGold <= 15 && errs.length === 0;
 console.log('[probe] pageerrors', errs.length ? errs.slice(0, 3) : 'none');
 console.log(pass ? '[probe] PASS' : '[probe] FAIL');
 await browser.close().catch(() => {});

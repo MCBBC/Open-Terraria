@@ -3233,12 +3233,20 @@ export class DD2GoblinBomb extends Entity {
     };
     if (solidAtP(nx + this.w / 2, this.y + this.h / 2)
       || solidAtP(nx + this.w / 2, this.y + this.h - 1)) {
-      this.vx *= -0.4; nx = this.x;        // 撞墙反弹（:18344-18350）
+      // ★BJ252 撞块引信钳（HandleMovement :18625-18628 `type == 681 → timeLeft=4`
+      //  型别支——先于 aiStyle 16 通用反弹（:19872 区）截走,1456:17102/1458:18626
+      //  同文；曾误走 ×−0.4 反弹档=锚到 aiStyle16 支的 1456 行号,681 从不可达）：
+      //  轴停（TileCollision 截断面,弹反支不可达=无反弹）+ timeLeft=4 → 尾 dec
+      //  (:17307)→3 → 下拍 AI 头 Kill 门（:48033 `timeLeft <= 3`,owner=myPlayer）
+      //  ——本仓 fuse 语义（dec 后 ≤2 爆,接触钳 3 同式）→ fuse=3 ≙ 下拍爆。
+      this.vx = 0; nx = this.x;
+      if (this.fuse > 3) this.fuse = 3;
     }
     if (solidAtP(nx + this.w / 2, ny + this.h - 1)) {
-      if (this.vy > 0.7) this.vy *= -0.4;  // 落地反弹（:18351-18357）
-      else this.vy = 0;                    // 落地驻停（摩擦已迁重力门支——SW-Q1,防双乘）
+      // 落地同支（:18625 同一撞块事件,竖撞臂——轴停 + 引信钳,无反弹）
+      this.vy = 0;
       ny = this.y;
+      if (this.fuse > 3) this.fuse = 3;
     }
     this.x = nx; this.y = ny;
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) this.dead = true;

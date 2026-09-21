@@ -5451,6 +5451,13 @@ const FUSE_SOUND_PROJ = new Set([28, 37, 516, 29, 470, 637, 903, 904, 905, 906, 
  *  303/681 现役不经本类（303=Enemy Dart 通道/681=bossAI_dd2）,死码成员照抄防缺面。 */
 const GRENADE_SHIMMER_HOSTILE = new Set([75, 303, 681, 655]);
 
+/** ★BJ252 弹力族表（HandleMovement :18591 型别支成员全 4 型——(515..517)||637,
+ *  先于 aiStyle 14（:19741）/16（:19862）通用反弹截走 ×−0.9）：活载体 =
+ *  3112 弹力荧光棒→515（GlowstickProj）/3115 弹力炸弹→516、3116 弹力炸药→
+ *  517、3547 弹力粘珠→637（GrenadeProj;itemcombat shoot 列已核）。vanilla
+ *  恒 tileCollide 缺省 true、penetrate=-1、无引信杀口 → 弹反面无计数无消亡。 */
+export const BOUNCY_PROJS: ReadonlySet<number> = new Set([515, 516, 517, 637]);
+
 export class GrenadeProj extends Entity {
   // 碰撞盒 1:1（Projectile.SetDefaults :846-869/:938/:4508/:5173/:5584/:5592/:6571）：
   // 28/37/516=22×22 / 29/470/637=10×10 / 30/397/517=14×14——此前统一 14×14
@@ -6008,14 +6015,22 @@ export class GrenadeProj extends Entity {
       return;
     }
     if (hitX) {
-      if (GrenadeProj.FIRED_STICK.has(this.projId)) {
+      // ★BJ252 弹力族（516 弹力炸弹/517 弹力炸药/637 弹力粘珠——HandleMovement
+      //  :18591-18600 型别支先于 aiStyle 16 通用反弹（:19872-19887 ×−0.4）截走,
+      //  曾误走 ×−0.4 档=弹性错档）：|last|>1 → ×−0.9;门内不写=保持管线采纳
+      //  钳后值（GrenadeProj 采纳面 :5997-5998 已回读 body 速度=原版截断语义）。
+      if (BOUNCY_PROJS.has(this.projId)) {
+        if (Math.abs(lastVx) > 1) this.vx = lastVx * -0.9;                // :18593-18595
+      } else if (GrenadeProj.FIRED_STICK.has(this.projId)) {
         this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
       } else {
         this.vx = lastVx * -0.4;                                          // 榴弹/雷反弹 ×−0.4（:18349-18356 系）
       }
     }
     if (hitY) {
-      if (GrenadeProj.FIRED_STICK.has(this.projId)) {
+      if (BOUNCY_PROJS.has(this.projId)) {
+        if (Math.abs(lastVy) > 1) this.vy = lastVy * -0.9;                // :18597-18600
+      } else if (GrenadeProj.FIRED_STICK.has(this.projId)) {
         this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
       } else if (lastVy > 0.7) {
         this.vy = lastVy * -0.4;
@@ -6587,8 +6602,15 @@ export class GrenadeProj extends Entity {
     //   :18351-18356 同),470/637 无此档（旧 DYN_PROJ 整族 ×0.8=近似）。470
     //   tileCollide=false（:5448-5456）不进本支;637 tileCollide=true 原版不衰减
     if (body.hitWall) {
-      this.vx = lastVx * -0.4;
-      if (this.projId === 29) this.vx *= 0.8;
+      // ★BJ252 弹力族（516/517/637——:18591-18600 型别支先于 aiStyle 16 ×−0.4
+      //  截走;投掷路=3115/3116/3547 消耗品唯一通路）：|lastX|>1 → ×−0.9。
+      if (BOUNCY_PROJS.has(this.projId)) {
+        if (Math.abs(lastVx) > 1) this.vx = lastVx * -0.9;            // :18593-18595
+        else this.vx = body.vx;   // 门内不写=保持管线钳后值（截停轴零速）
+      } else {
+        this.vx = lastVx * -0.4;
+        if (this.projId === 29) this.vx *= 0.8;
+      }
     } else {
       this.vx = body.vx;   // 碰撞调整字段原样回读（阻尼只进位移入参,湿段批位注）
     }
@@ -6618,7 +6640,12 @@ export class GrenadeProj extends Entity {
       //   缺失直到下次落地（破坏相位,非 1 拍瞬态）。位置差 ≤0.01px 无消费面。
       this.vy = body.y - bodyY0;
     } else if (body.onGround) {
-      if (lastVy > 0.7 && this.projId !== 102) {
+      // ★BJ252 弹力族 Y 臂（:18597-18600,|lastY|>1 → ×−0.9 先于 aiStyle 16 ×−0.4）；
+      //  门内不写=落地软档保持管线钳后残差（与下方 lastVy≤0.7 残差回写同语义）
+      if (BOUNCY_PROJS.has(this.projId)) {
+        if (Math.abs(lastVy) > 1) this.vy = lastVy * -0.9;
+        else this.vy = body.y - bodyY0;
+      } else if (lastVy > 0.7 && this.projId !== 102) {
         this.vy = lastVy * -0.4;
         if (this.projId === 29) this.vy *= 0.8;
       } else {
@@ -6933,8 +6960,16 @@ export class GlowstickProj extends Entity {
           this.vy = (lastVy > 0 && lastVy < 1) ? -1
             : Math.abs(lastVy) < 1 ? (nvy < 0 ? -1 : 1) : nvy;
         }
+      } else if (BOUNCY_PROJS.has(this.projId)) {
+        // ★BJ252 515 弹力荧光棒（HandleMovement :18591-18600 型别支——先于 aiStyle 14
+        //  通用反弹（:19851-19858 ×−0.5）截走,曾误走默认档=×−0.5 弹性错档）：
+        //  X 撞 |lastX|>1 → ×−0.9;Y 撞 |lastY|>1 → ×−0.9;门内不写=截停轴保持
+        //  钳后零速（原版 velocity 已被 TileCollision 截断,支内不再写——本类无
+        //  采纳面 → 显式置 0 同语义）。无计数/无消亡（寿命=5×timeLeft 承载）。
+        if (hitX) this.vx = Math.abs(lastVx) > 1 ? lastVx * -0.9 : 0;
+        if (hitY) this.vy = Math.abs(lastVy) > 1 ? lastVy * -0.9 : 0;
       } else {
-        // 473 矿工 / 515 弹力（默认档，cs:18314-18327）
+        // 473 矿工（默认档，1457 :19851-19858）
         if (hitX) this.vx = lastVx * -0.5;
         if (hitY) this.vy = lastVy > 1 ? lastVy * -0.5 : 0;
       }

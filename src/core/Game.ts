@@ -26692,7 +26692,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 导线 case 386/387 共用（shiftTrapdoorFlip：帧近似 + 关门实体占位门）。原版
       // 按玩家相对高度选折翼方向且失败反向重试（:32539-32543）——原位近似下两向
       // 等价,单次调用=两向尝试并集（详 devices.shiftTrapdoorFlip 注）
-      if (this.wiring) shiftTrapdoorFlip(this.wiring, tx, ty, this.areaEmptyAt);
+      if (this.wiring) shiftTrapdoorFlip(this.wiring, tx, ty, (x, y, w2, h2) => this.areaEmptyAt(x, y, w2, h2));
       this.input.rightDown = false;
     } else if (sh === 440) {
       // 宝石锁右键（Player.cs:32747-32808 → WorldGen.ToggleGemLock :46872-46927）：
@@ -27188,6 +27188,48 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     void type;
     this.wiring?.hitSwitch(x, y);   // 音效由 hitSwitchSound 钩统一播（vanilla HitSwitch 内播）
     this.input.rightDown = false;
+  }
+
+  /** Collision.EmptyTile(x,y,ignoreTiles) 等价——格区矩形内无任何实体（★BJ250 抽出：
+   *  devices ctx.areaEmpty 与活板门右键臂 shiftTrapdoorFlip 关门占位门单源共用） */
+  private areaEmptyAt(x: number, y: number, w2: number, h2: number): boolean {
+    const rx = x * TILE, ry = y * TILE, rw = w2 * TILE, rh = h2 * TILE;
+    const hit = (e: { x: number; y: number; w: number; h: number }) =>
+      e.x < rx + rw && e.x + e.w > rx && e.y < ry + rh && e.y + e.h > ry;
+    if (hit(this.player)) return false;
+    for (const b of [this.entities.enemies, this.entities.npcs, this.entities.critters, this.entities.projectiles]) {
+      for (const e of b) { if (hit(e as unknown as { x: number; y: number; w: number; h: number })) return false; }
+    }
+    return true;
+  }
+
+  /** 宝石锁开/关（WorldGen.ToggleGemLock :46872-46927 1:1，★BJ250）：
+   *  守门 :46876（关已关 no-op）→ 3×3 全格 frameY 翻至 (on?54:0)+row*18（:46898-46902）
+   *  → 关锁时掉出对应宝石（Item.NewItem 32×32 :46908-46910，wasOn=frameY>=54 :46882）
+   *  → 尾流 Wiring.HitSwitch(锚点)（:46924）触发导线网络（本仓 hitSwitch 440 支 =
+   *  Sound 28 + TripWire 3×3）。开锁侧的宝石消耗在右键臂（原版 Player.cs:32786） */
+  private toggleGemLock(tx: number, ty: number, on: boolean): void {
+    const st = this.world.store;
+    const i = st.idx(tx, ty);
+    if (st.get(tx, ty) !== TILE_BY_KEY['v_440_gemlocks']) return;
+    const fx = st.frameX[i], fy = st.frameY[i];
+    if (fy < 54 && !on) return;
+    const wasOn = fy >= 54;
+    const gem = GEM_LOCK_GEM_IDS[Math.floor(fx / 54)] ?? -1;
+    const ax = tx - Math.floor(fx % 54 / 18);
+    const ay = ty - Math.floor(fy % 54 / 18);
+    for (let ix = ax; ix < ax + 3; ix++) {
+      for (let iy = ay; iy < ay + 3; iy++) {
+        if (!st.inBounds(ix, iy)) continue;
+        const ii = st.idx(ix, iy);
+        st.setTile(ix, iy, st.type[ii], st.frameX[ii], (on ? 54 : 0) + (iy - ay) * 18);
+      }
+    }
+    if (gem !== -1 && wasOn) {
+      const key = VANILLA_ITEM_KEY_BY_ID[gem];
+      if (key && ITEM_BY_KEY[key] !== undefined) this.spawnDrop(tx * TILE, ty * TILE, key, 1);
+    }
+    this.wiring?.hitSwitch(ax, ay);
   }
 
   // ================= 蜥蜴祭坛 237 / 永恒水晶座 466 / 传送晶塔 597 =================

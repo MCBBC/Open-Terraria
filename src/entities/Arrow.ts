@@ -1703,6 +1703,10 @@ export class Arrow extends Entity {
    *  27 熔岩态 ai[1]==1→7 :19696-19698,熔岩支未接线 P2 登记恒走 5）即
    *  position+=velocity+Kill。仅 AI8_BOUNCE_PROJS 五型消费。 */
   ai8Bounces = 0;
+  /** ★BJ252 116 光束剑波撞块计数（vanilla ai[2]，HandleMovement :19920 `ai[2]++`
+   *  ——<4 弹反（Item_10+30×d64+双轴全速反）/≥4 Kill。116 AI_027 不用 ai[2]
+   *  （AI_027 只消费 ai[0]/ai[1]/localAI[0..1],:26768-26916）=专位空闲。 */
+  beam116Bounces = 0;
   /** localNPCHitCooldown 同敌再命中冷却（SetDefaults :5466-5468 = 10t） */
   private meowHitCd = new Map<number, number>();
   /** 1457: 通用局部 NPC 无敌帧（usesLocalNPCImmunity + localNPCHitCooldown=N，
@@ -4639,6 +4643,29 @@ export class Arrow extends Entity {
     }
     this.ghostRing?.record(this.x, this.y, Math.atan2(this.vy, this.vx),
       this.vx < 0 ? -1 : 1, this.subIsHead);
+  }
+
+  /** ★BJ252 872 永恒彩虹 oldPos 命中面（Projectile.cs:15761-15775 Colliding 特支）：
+   *  命中判定 = 以 oldPos[l]（l∈[0,50) 步 2 = 25 槽）为锚的【本盒平移】,任一与
+   *  目标盒相交即命中;Zero 槽跳过（:15769）=本仓 NaN 未填槽跳过。槽 0=上子步末
+   *  位（UpdateTrails :17198 在 Damage 后一拍）——本仓环槽 0 同位序（首拍环空→
+   *  全跳过=原版首拍 oldPos 全 Zero 同相,首拍不可命中）。872 无 extraUpdates →
+   *  1 子步/t = 环槽 i ≙ i tick 前;cap=TrailCacheLength[872]=120 ≥ 50 上限。
+   *  消费面 = hitPlayer/hitTownNpcs 的 Colliding 自定义判定通道（919/923 同习语,
+   *  projTargets.ts :551/:52）——hostile 弹只吃玩家/镇民两面,敌怪面不可达。 */
+  private empress872TrailCollide():
+    (r: { x: number; y: number; w: number; h: number }) => boolean {
+    return (r) => {
+      const ring = this.ghostRing;
+      if (!ring) return false;
+      for (let l = 0; l < 50 && l < ring.cap; l += 2) {
+        const px = ring.px[l], py = ring.py[l];
+        if (Number.isNaN(px) || Number.isNaN(py)) continue;       // Zero 哨兵跳过(:15769)
+        if (px < r.x + r.w && px + this.w > r.x
+          && py < r.y + r.h && py + this.h > r.y) return true;
+      }
+      return false;
+    };
   }
 
   /** ★⑥杀拍口径（2026-09-06）：原版 Update 对湿段【无 active 门】——AI(:16880
@@ -8341,6 +8368,147 @@ export class Arrow extends Entity {
             return;
           }
         }
+        // ---- ★BJ252 HandleMovement 碰撞反应面清债批（全方法 :17578-19980 亲读
+        //      普查,1458 同段逐字节全等=零增量）——四支同形反射刀。逐轴回退探针
+        //      反射（94 档同法：单点碰撞模型无被撞轴信息,探针步退格空=该轴被撞;
+        //      双轴皆嵌=嵌入过深 → 交还通用消亡口,94/532 档同契约登记）----
+        // ① 604 泰拉悠悠球孢子云（:18554-18564;603 命中侧衍生=活载体 WeaponProj
+        //    yoyo 603 孢子支）：被撞轴全速反 lastVelocity,两轴独立;无计数/音尘/
+        //    penetrate 消耗（原版无限弹反）。
+        if (this.projId === 604) {
+          const st604 = game.world.store;
+          const free604 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st604.inBounds(t0, t1) && !st604.isSolid(t0, t1);
+          };
+          let hit604 = false;
+          if (free604(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+            this.x -= this.vx; this.vx = -this.vx; hit604 = true;      // X 撞臂(:18556-18559)
+          }
+          if (free604(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+            this.y -= this.vy; this.vy = -this.vy; hit604 = true;      // Y 撞臂(:18560-18563)
+          }
+          if (hit604) return;
+        }
+        // ② 926 史莱姆皇后凝胶弹（:18602-18613 的 921||926||937 共支;926=皇后史
+        //    莱姆 AI shoot() 活载体,921 载体 NPC 659 未移植=dormant）：X 撞
+        //    |lastX|>1 → ×−0.4;Y 撞 |lastY|>1 → ×−0.95。★vanilla 支尾 penetrate--
+        //    对 926 不可观测（恒 hostile,penetrate 仅被弹反消费=写不读,死亡面=
+        //    timeLeft）→ 本仓不耗 pierce 不消亡（弹反无限）——与 937 友方支的
+        //    pierce 共享计数语义异构,勿合并。
+        if (this.projId === 926) {
+          const st926 = game.world.store;
+          const free926 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st926.inBounds(t0, t1) && !st926.isSolid(t0, t1);
+          };
+          let hit926 = false;
+          if (free926(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+            this.x -= this.vx;
+            if (Math.abs(this.vx) > 1) this.vx = -this.vx * 0.4;       // :18604-18606 门内写
+            else this.vx = 0;                                          // 门内不写=截停轴零速
+            hit926 = true;
+          }
+          if (free926(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+            this.y -= this.vy;
+            if (Math.abs(this.vy) > 1) this.vy = -this.vy * 0.95;      // :18607-18610 门内写
+            else this.vy = 0;
+            hit926 = true;
+          }
+          if (hit926) return;
+        }
+        // ③ 969 天气之痛弹（:18614-18624;WeatherPain 5118 通用魔法兜底=活载体）：
+        //    被撞轴 |last|>1 → ×−0.75（全速档 0.75）;门内不写=截停轴保持钳后
+        //    零速（本类无截断回写 → 显式置 0 同语义）;无计数/无消亡。
+        if (this.projId === 969) {
+          const st969 = game.world.store;
+          const free969 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st969.inBounds(t0, t1) && !st969.isSolid(t0, t1);
+          };
+          let hit969 = false;
+          if (free969(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+            this.x -= this.vx;
+            this.vx = Math.abs(this.vx) > 1 ? -this.vx * 0.75 : 0;     // :18616-18619
+            hit969 = true;
+          }
+          if (free969(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+            this.y -= this.vy;
+            this.vy = Math.abs(this.vy) > 1 ? -this.vy * 0.75 : 0;     // :18620-18623
+            hit969 = true;
+          }
+          if (hit969) return;
+        }
+        // ③b 617 星璇秘术弹（:18378-18388;星璇秘术 3476 通用魔法兜底=活载体）：
+        //    被撞轴 ×−0.35（无条件,双轴独立）,无计数/无消亡。
+        if (this.projId === 617) {
+          const st617 = game.world.store;
+          const free617 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st617.inBounds(t0, t1) && !st617.isSolid(t0, t1);
+          };
+          let hit617 = false;
+          if (free617(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+            this.x -= this.vx; this.vx = -this.vx * 0.35; hit617 = true;   // :18380-18383
+          }
+          if (free617(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+            this.y -= this.vy; this.vy = -this.vy * 0.35; hit617 = true;   // :18384-18387
+          }
+          if (hit617) return;
+        }
+        // ④ 931/1039 光女魔弹/星座弹（:18704-18714;931=夜光 4952 通用魔法兜底=
+        //    活载体,1039 由 931 命中 proc 衍生（P.cs:15033）=衍生面未移植 dormant
+        //    同支免费承接）：被撞轴全速反,两轴独立,无计数/无消亡。
+        if (this.projId === 931 || this.projId === 1039) {
+          const st931 = game.world.store;
+          const free931 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st931.inBounds(t0, t1) && !st931.isSolid(t0, t1);
+          };
+          let hit931 = false;
+          if (free931(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+            this.x -= this.vx; this.vx = -this.vx; hit931 = true;      // :18706-18709
+          }
+          if (free931(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+            this.y -= this.vy; this.vy = -this.vy; hit931 = true;      // :18710-18713
+          }
+          if (hit931) return;
+        }
+        // ⑤ 116 光束剑波（真圣剑 723 shoot=116 itemcombat 已核;:19918-19943）：
+        //    ai[2]++ 计数;<4 → Item_10 音（缺省音量）+ 30×d64（Color.White/α100/
+        //    scale1.8/noGravity/velocity×=rand(1,7)=1..6——×rand 乘在 NewDust 内在
+        //    扰动上,本仓 spawnDust 已含 64 号 :207-213 特例族）+ 被撞轴全速反;
+        //    ≥4 → 不 return 落通用消亡口（Kill 面 Item_10+迹尘由
+        //    Game.onProjectileDeath 116 支 :78804-78815 承载,勿双补）。
+        if (this.projId === 116) {
+          this.beam116Bounces++;
+          if (this.beam116Bounces < 4) {
+            game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);       // :19923
+            for (let i = 0; i < 30; i++) {
+              const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 64, 0, 0, 100,
+                { r: 255, g: 255, b: 255, a: 255 }, 1.8);
+              if (!d) break;
+              d.noGravity = true;                                      // :19927
+              const m116 = 1 + Math.floor(Math.random() * 6);          // Next(1,7)=1..6
+              d.vx *= m116; d.vy *= m116;                              // :19928
+            }
+            const st116 = game.world.store;
+            const free116 = (px: number, py: number) => {
+              const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+              return st116.inBounds(t0, t1) && !st116.isSolid(t0, t1);
+            };
+            let hit116 = false;
+            if (free116(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+              this.x -= this.vx; this.vx = -this.vx; hit116 = true;    // :19930-19933
+            }
+            if (free116(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+              this.y -= this.vy; this.vy = -this.vy; hit116 = true;    // :19934-19937
+            }
+            if (hit116) return;
+            // 双轴皆嵌=嵌入过深 → 交还通用消亡口（94 档同契约,登记）
+          }
+          // ai[2]>=4（第 4 撞）→ Kill(:19939-19942),不 return=落下方通用口
+        }
         // ---- 496 暗影炎箭撞块（HandleMovement type 段 :18822-18843）——★R2-01 翻案
         //      （2026-09-03 蓝队）：原版以 `velocity != lastVelocity` 检被撞轴
         //      （lastVelocity=HandleMovement 入口速度 :17696,即 AI 后/截断前），
@@ -8497,10 +8665,14 @@ export class Arrow extends Entity {
     // Player.damage 自带 iframes 去重（= 原版 player.immune 门禁）；
     // 实际造成伤害才走 StatusPlayer 的 debuff 授予（:13798-13800；
     // 276 毒种子的中毒授予在 statusPlayer case 276）
-    if (this.hostile && hitPlayer(this, game, this.damage)) statusPlayer(game, this.projId);
+    // ★BJ252 872 永恒彩虹：Colliding 特支（:15761-15775）以 oldPos 步 2 的 25 槽
+    //   锚定盒替换默认盒判定——player/镇民两面同源（原版 Colliding 为一切受领面
+    //   的统一受理门）
+    const trailCollide872 = this.projId === 872 ? this.empress872TrailCollide() : undefined;
+    if (this.hostile && hitPlayer(this, game, this.damage, false, false, trailCollide872)) statusPlayer(game, this.projId);
     // 敌对弹命中城镇 NPC(原版 flag2 分支:hostile && victim.friendly,Projectile.cs:11975-11976);
     // 不消耗弹体(原版该分支不动 keepIterating)
-    if (this.hostile) hitTownNpcs(this, game, this.damage, 0, 'hostile');
+    if (this.hostile) hitTownNpcs(this, game, this.damage, 0, 'hostile', 0, trailCollide872);
     // ★红队 A-2 收口①：damage<=0 的友方弹不入城镇 NPC 窄门——原版 Damage_PVE 头
     //   `if (damage <= 0) return`（P.cs:12576）先于【一切】NPC 命中面,窄门也在段内
     else if (!this.reflected && this.damage > 0
