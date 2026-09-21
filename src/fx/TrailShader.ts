@@ -224,7 +224,7 @@ export function __resetTrailShaderForTest(): void {
  *  的位等价差分（tests/bj255-rainbowrod-perf-dust.test.ts） */
 export function __wrapSampleForTest(im: { data: Uint8ClampedArray; w: number; h: number },
   u: number, v: number, out: Float64Array): void {
-  wrapSampler(im, u, v, out);
+  wrapSampler(im)(u, v, out);
 }
 
 /** atlas 图 → 像素域缓存（懒加载，只缓存正像）。

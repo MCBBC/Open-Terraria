@@ -238,19 +238,30 @@ const placeSticky = async (page, placeFn, verifyFn) => {
       }
     }
   });
+  await page.evaluate(() => {
+    // 分派观测：interactAt 到达次数 + 到达时 rightDown 电平（判别'没分派'vs'分派没翻'）
+    const g = window.__swGame;
+    window.__camps = [];
+    const oia = g.interactAt.bind(g);
+    g.interactAt = (tx, ty) => {
+      const { ax, ay } = window.__bj250f;
+      if (tx >= ax - 1 && tx <= ax + 3 && ty >= ay - 1 && ty <= ay + 3) window.__camps.push([tx, ty, g.input.rightDown]);
+      return oia(tx, ty);
+    };
+  });
   await ensureCampfire();
   await rightClickWorld(page, (setup.ax + 1) * 16 + 8, (setup.ay + 1) * 16 + 8, 200);
   const r1 = await page.evaluate(() => {
     const { ax, ay } = window.__bj250f;
     const st = window.__swGame.world.store;
-    return { fyTop: st.frameY[st.idx(ax, ay)], fyBot: st.frameY[st.idx(ax, ay + 1)] };
+    return { fyTop: st.frameY[st.idx(ax, ay)], fyBot: st.frameY[st.idx(ax, ay + 1)], camps: window.__camps.splice(0) };
   });
   await ensureCampfire();
   await rightClickWorld(page, (setup.ax + 1) * 16 + 8, (setup.ay + 1) * 16 + 8, 200);
   const r2 = await page.evaluate(() => {
     const { ax, ay } = window.__bj250f;
     const st = window.__swGame.world.store;
-    return { fyTop: st.frameY[st.idx(ax, ay)], fyBot: st.frameY[st.idx(ax, ay + 1)] };
+    return { fyTop: st.frameY[st.idx(ax, ay)], fyBot: st.frameY[st.idx(ax, ay + 1)], camps: window.__camps.splice(0) };
   });
   console.log('[P215] click1', JSON.stringify(r1), 'click2', JSON.stringify(r2));
   ok(r1.fyTop === 36 && r1.fyBot === 54, `P215-1 亮→灭整块 +36(${r1.fyTop}/${r1.fyBot})`);
