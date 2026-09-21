@@ -165,19 +165,40 @@ ctx.onmessage = async (e) => {
     }
     const __wkLog: string[] = [];
     if (req.type === 'saveParse') {
-      // 三源：key=worker 内直读 IDB（主路径，免大字符串 clone）；json=小档/调试；save=.wld 导入
+      // 三源：key=worker 内直读 IDB（主路径，免大字符串 clone）；json=小档/调试；
+      // save=.wld 导入（主线程已解析 SaveData 直传）。★BJ223（2026-09-20）恢复
+      // json/save 两源——BJ90 债④「零消费方」定谳勘误：grep 漏计 mainFlow.loadFromJson
+      // （client.loadSave({json})，探针 __swLoadJson/世界导入/主线程 fallback 的镜像
+      // 消费方）→ 两源被连坐删除后该路径必抛「存档数据缺失」（catch 的 alert 同步
+      // 阻塞主线程=探针 protocolTimeout 挂死）。BJ90 退役面仅 v6 二进制分支，
+      // json/save 语义按 protocol 三源形状恢复（守卫：tests/bj223-saveparse-three-sources.test.ts）
       const __t0 = performance.now();
       let data: import('../save/SaveFile').SaveData | null;
+      let dataSrc = '';
       {
         // ★BJ90（2026-09-15）债④死路径移除（BJ71 登记②）：v6 二进制分支退役——
         //  kvSetCompat 写的二进制副本恒被同 key JSON 后写覆盖（IDB 同 store 串行,
         //  评估定谳=快路径零活跃消费方）;崩溃窗口的二进制残留是 meta={} 元数据全丢
         //  损毁态（unpack 后 loadSaveData 读 data.header.width 即抛,无法救）。存档
-        //  权威格式=JSON 字符串（kvGetIdb 直读）
-        data = JSON.parse((await kvGetIdb(req.key ?? '')) ?? 'null') as import('../save/SaveFile').SaveData | null;
+        //  权威格式=JSON 字符串（kvGetIdb 直读）。★BJ223 勘误：退役范围仅此二进制
+        //  分支，json/save 两源非死路径（mainFlow.loadFromJson/importWld 活跃消费）
+        if (req.key) {
+          dataSrc = 'idb';
+          data = JSON.parse((await kvGetIdb(req.key)) ?? 'null') as import('../save/SaveFile').SaveData | null;
+        } else if ('json' in req && typeof req.json === 'string') {
+          // 小档/调试/探针/导入镜像路径（mainFlow.loadFromJson）：JSON 文本 worker 内解析
+          dataSrc = 'json';
+          data = JSON.parse(req.json) as import('../save/SaveFile').SaveData;
+        } else if ('save' in req && req.save) {
+          // .wld 导入面：主线程已解析的 SaveData 对象直传（免二次 JSON.parse）
+          dataSrc = 'save';
+          data = req.save;
+        } else {
+          data = null;
+        }
       }
       if (!data) throw new Error('存档数据缺失');
-      __wkLog.push(`idb+parse ${Math.round(performance.now() - __t0)}ms`);
+      __wkLog.push(`parse(${dataSrc}) ${Math.round(performance.now() - __t0)}ms`);
       // ★大世界内存峰值削减(2026-09-06)：SaveData 对象在 loadSaveData 后不再需要,
       //   立即提取尾部需要的字段并释放引用——6400×1800 世界 SaveData+TypedArrays
       //   同时存活 ~500MB→峰值过剩。req.json 大字符串同步释放。

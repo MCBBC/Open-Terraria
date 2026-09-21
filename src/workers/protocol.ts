@@ -135,7 +135,7 @@ export type WorldWorkerEvent =
   | { id: number; type: 'preview'; passIndex: number; passName: string; width: number; height: number; rgba: ArrayBuffer }
   | { id: number; type: 'aborted'; }
   | { id: number; type: 'result'; world: WorldPacket; player?: SaveData['player']; save?: SaveData;
-     /** 读档分段检查点（idb+parse/loadSaveData/settle+pack ms）——F5 报告 load 段消费 */
+     /** 读档分段检查点（parse(idb|json|save)/loadSaveData/settle+pack ms）——F5 报告 load 段消费；BJ223 恢复三源后带源标签 */
      wkLog?: string[] }
   /** 程序化图标图集(#三开压测批 worker 化):genIcons 请求回传,rgba transfer。
    *  独立事件类型——与 result(必须带 world)共用 type 值会让联合收窄歧义 */
