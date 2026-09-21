@@ -2865,6 +2865,10 @@ export class UI {
       research?: { tryGetSacrificeNumbers(id: number): { have: number; need: number } | null };
       world?: { isJourney?: boolean };
     });
+    // ★BJ249 F2：LoadoutShare 共享来源判定提前（行族与 ctx.loadoutShareHint 两消费点
+    //  单源;门=flag2,Main.cs:20823-20838——canLoadoutShareAt 域内无共享来源且未收藏）
+    const loadoutSharedFrom = (where === 'armor' || where === 'dye')
+      ? this.game.player.inv.effectiveSharedFrom(i, where === 'dye') : null;
     const ctx: import('./itemTooltip').TooltipContext = {
       research: research.research && (g as unknown as { world: { difficulty: number } }).world?.difficulty === 3
         ? research.research.tryGetSacrificeNumbers(vid) : undefined,
@@ -2904,24 +2908,35 @@ export class UI {
           wornL: inv ? wornVid(inv.getEffectiveArmor(2)) : 0,
         };
       })(),
+      // ★BJ249 F2 首用提示行门（=flag2 ∧ ShowLoadoutShareHint,行序归位在
+      //  assembleTooltipLines——套装行后/研究行前,原版 Main.cs:21519-21522）
+      loadoutShareHint: (where === 'armor' || where === 'dye') && loadoutSharedFrom === null
+        && !s.favorited && !!options.data.showLoadoutShareHint,
+      // ★BJ249 F1 金币枪门数据：Player.HasItem(905)（Player.cs:56551-56561）=背包
+      //  58 格逐槽（hotbar 0-9+背包 10-49+钱币 50-53+弹药 54-57）,stack>0
+      hasCoinGun: (() => {
+        const inv = this.game?.player?.inv;
+        if (!inv) return false;
+        for (let k = 0; k < 58; k++) {
+          const it = inv.slots[k];
+          if (it && it.stack > 0 && vanillaIdOfItemKey(ITEM_DEFS[it.id]?.key ?? '') === 905) return true;
+        }
+        return false;
+      })(),
     };
     let linesHtml = '';
-    // ---- LoadoutShare 行族（R4-15,M57:20824-20833 共享两行 + :21517-21519 首用提示）：
-    // 装备/染料格（canLoadoutShareAt[8-12],IS57:367-371）悬停时,紧随名称行（GetLinesInfo
-    // 里在全部统计行之前）：共享来源行 > 共享标记行 > （未收藏且未用过共享时）提示行。
-    // 提示色 = OurFavoriteColor(255,231,69) α190（Main.cs:886/:21520）;共享两行走默认
-    // 文字色（GetLinesInfo 未赋 lineColors）。★misc 族无此行族（canLoadoutShareAt 不含,
-    // R4-15③ 清偿——此前 favorited misc 误显"已共享"）。ShowLoadoutShareHint 走
-    // options 持久化（R4-14 清偿,M57:4303/:4645 config.json 同位）
+    // ---- LoadoutShare 行族（R4-15,M57:20824-20833 共享两行;★BJ249 F2 首用提示行
+    // 已挪出——原版 :21519-21522 行序在套装行后/研究行前,经 ctx.loadoutShareHint →
+    // assembleTooltipLines 插入,不再置行族头部）：装备/染料格（canLoadoutShareAt
+    // [8-12],IS57:367-371）悬停时,紧随名称行（GetLinesInfo 里在全部统计行之前）：
+    // 共享来源行 > 共享标记行。共享两行走默认文字色（GetLinesInfo 未赋 lineColors）。
+    // ★misc 族无此行族（canLoadoutShareAt 不含,R4-15③ 清偿——此前 favorited misc
+    // 误显"已共享"）。ShowLoadoutShareHint 走 options 持久化（R4-14 清偿）
     if (where === 'armor' || where === 'dye') {
-      const inv = this.game.player.inv;
-      const from = inv.effectiveSharedFrom(i, where === 'dye');
-      if (from !== null) {
-        linesHtml += `<br>${Lang.text('UI.ItemLoadoutSharedFrom', from + 1)}`;
+      if (loadoutSharedFrom !== null) {
+        linesHtml += `<br>${Lang.text('UI.ItemLoadoutSharedFrom', loadoutSharedFrom + 1)}`;
       } else if (s.favorited) {
         linesHtml += `<br>${Lang.text('UI.ItemLoadoutShared')}`;
-      } else if (options.data.showLoadoutShareHint) {   // ShowLoadoutShareHint（options 持久化,R4-14 清偿;Main.cs:21517 同门）
-        linesHtml += `<br><span style="color:rgba(255,231,69,0.75)">${Lang.text('UI.ItemLoadoutShareHint')}</span>`;
       }
     }
     // ★SW-AU2 2026-09-06 收藏两行（Main.cs:20841-20845 `else if (item.favorited)`：

@@ -645,21 +645,37 @@ export function martianDroneAI(e: Enemy, game: GameHooks, player: Player | null)
     }
   }
 
+  // 朝向（:35454-35469）——原版 spriteDirection 于拖尾①(:35605)之前按【本拍】速度
+  //  求值（:35463-35469）;★BJ251 上移到拖尾①前（原置其后,拖尾镜像面会吃到上一拍
+  //  朝向;函数内无其他 facing 读点,终值不变）
+  if (sign(e.vx) !== 0) e.facing = corite ? sign(e.vx) : -sign(e.vx);
+
   // ★BJ244（2026-09-21）388 无人机蓝尘拖尾双面 1:1：
-  //  ① :35603-35608 —— ai[0]!=3 每 tick 1× 尘 226（蓝火花）：本体盒、α100、
-  //     scale0.5、noGravity，velocity 整体覆写为 velocity/5（NewDust 盒抖动位保留）；
-  //  ② :35716-35723 —— Next(4)==0 再 1× 尘 226：noGravity，velocity×2 后覆写为
+  //  ① :35605-35619 —— ai[0]!=3 每 tick 1× 尘 226（蓝火花）：本体盒、α100、
+  //     scale0.5、noGravity，velocity 整体覆写为 velocity/5；位【非】盒内抖动——
+  //     spinningpoint2=(-10,10)（模长≈14px 环绕偏移）、spriteDirection==1 翻 X
+  //     （:35611-35615）、RotatedBy(rotation)（:35616）、position=Center+spin2
+  //     （:35617;★BJ251 补位覆写面——旧注"盒抖动位保留"对原版建模错误）;
+  //     rotation = 速度角钳 [-π/2,π/2]（:35456-35462,拖尾前已赋值）。
+  //  ② :35715-35724 —— Next(4)==0 再 1× 尘 226：noGravity，velocity×2 后覆写为
   //     velocity/2 + normalize(尘位−本体中心)（= 抖速 + 向外漂移向量，三段赋值
-  //     等价合并）。两面均在态机前后原序执行（①在态机前、②在态机后）。
+  //     等价合并;②位仍是盒内抖动,原版不覆写）。两面均在态机前后原序执行
+  //     （①在态机前、②在蓄力支尾）。
   //  （BJ244 普查定谳：此前 388 拖尾双面整缺——仅 418 拖尾已接。）
   if (!corite && e.ai0 !== 3) {
     const d = game.spawnDust?.(e.x, e.y, e.w, e.h, 226,
       0, 0, 100, null, 0.5, true);
-    if (d) { d.vx = e.vx / 5; d.vy = e.vy / 5; }
+    if (d) {
+      d.vx = e.vx / 5; d.vy = e.vy / 5;
+      // 位覆写（:35611-35617）：(-10,10) → spriteDirection==1 翻 X → RotatedBy(rotation)
+      let rot = Math.atan2(e.vy, e.vx);              // velocity.ToRotation()（:35456）
+      if (rot < -Math.PI / 2) rot += Math.PI;        // :35457-35462 钳 [-π/2,π/2]
+      if (rot > Math.PI / 2) rot -= Math.PI;
+      const sxp = e.facing === 1 ? 10 : -10;         // spin2.X（spriteDirection==1 → ×-1）
+      d.x = e.cx + sxp * Math.cos(rot) - 10 * Math.sin(rot);   // RotatedBy 同习语(bossAI.ts mechQueenAnchor)
+      d.y = e.cy + sxp * Math.sin(rot) + 10 * Math.cos(rot);
+    }
   }
-
-  // 朝向（:35454-35469）
-  if (sign(e.vx) !== 0) e.facing = corite ? sign(e.vx) : -sign(e.vx);
 
   if (e.ai0 === 0 && player && !player.dead) {
     // ---- 悬浮瞄准（:35540-35610）----

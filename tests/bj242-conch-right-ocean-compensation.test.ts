@@ -95,8 +95,17 @@ function fire(g: ReturnType<typeof stubGame>, px: number): { x: number; y: numbe
   return g.player as { x: number; y: number; vy: number };
 }
 
+// ★BJ249 F5 缺省值采样（R4 变异 M4 揭缺：beforeEach 赋 true 会掩盖静态初始化被删
+//  ——闸变 undefined=falsy=永 OFF 且现有四测全绿伪象;顶层采样先于本文件一切
+//  beforeEach,直接锁静态初始化面 `= true`）
+const CONCH_DEFAULT_AT_IMPORT = Game.CONCH_RIGHT_OCEAN_COMPENSATION;
+
 describe('BJ242 右洋补偿式内移重试（用户明令分歧,回滚口 Game.CONCH_RIGHT_OCEAN_COMPENSATION）', () => {
   beforeEach(() => { Game.CONCH_RIGHT_OCEAN_COMPENSATION = true; });   // 缺省=分歧开启
+
+  it('⑤缺省闸=开（R4-M4 锁:静态初始化 Game.CONCH_RIGHT_OCEAN_COMPENSATION=true）', () => {
+    expect(CONCH_DEFAULT_AT_IMPORT).toBe(true);
+  });
 
   it('①物证特征世界（缺省 ON）：右洋重试命中——落右洋甲板 (w-41,163),fire 面从左半场直达右洋', () => {
     const w = evidenceSignatureWorld();

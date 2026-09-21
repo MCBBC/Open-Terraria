@@ -100,7 +100,7 @@ function canKillTileAt(w: Wiring, x: number, y: number): boolean {
  *  （36/54/18）——状态位渗进列偏移：灯笼 fx=18 灭档被当列 1 → 锚点挪到空气列
  *  （开关点灯无反应，2026-08-17 用户报告）；2×2 灯/造雾机/大火山/巴斯特雕像
  *  亮档 fx≥36 锚点整体偏移 → 翻错块。块宽一律由 tilesW/tilesH 推导，参数删除 */
-function flipBlock(
+export function flipBlock(
   w: Wiring, x: number, y: number,
   tilesW: number, tilesH: number,
   axis: 'x' | 'y', threshold: number, delta: number,
@@ -140,13 +140,43 @@ function flipBlock(
 }
 
 /** 单格帧翻转(火把/蜡烛等) */
-function flipCell(w: Wiring, x: number, y: number, delta: number): void {
+export function flipCell(w: Wiring, x: number, y: number, delta: number): void {
   const st = w.st;
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   let d = delta;
   if (st.frameX[i] >= delta) d = -delta;
   st.setTile(x, y, st.type[i], st.frameX[i] + d, st.frameY[i]);
+}
+
+/** 活板门开/关互换（ShiftTrapdoor 帧近似；HitWireSingle case 386/387 与右键交互臂
+ *  ★BJ250 Player.cs:32535-32548 共用）。★R20-I8:关门(→387)前查目标格实体占位
+ *  (Collision.EmptyTile ignoreTiles,WorldGen.cs:51931-51956——实体在格拒换,曾可把
+ *  实体关进实心格)。★BJ250 偏差备案：原版右键按玩家相对高度选折翼方向
+ *  (`ShiftTrapdoor(myX,myY, myY*16 > Center.Y)` 失败再反向重试 :32539-32543),
+ *  本近似为原位翻转两向等价 → 单次调用=两向尝试的并集,方向参数不消费。
+ *  SkipWire 面保留在导线路径（right-click 无 Wiring.running 语境,原版右键
+ *  ShiftTrapdoor 内 `netMode!=1 && Wiring.running` 门同样不触发）。 */
+export function shiftTrapdoorFlip(
+  w: Wiring, x: number, y: number,
+  areaEmpty?: (x: number, y: number, w2: number, h2: number) => boolean,
+): void {
+  const st = w.st;
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  const sheet = w.sheetOf(x, y);
+  const openK = 'v_386_trapdooropen', closedK = 'v_387_trap_door_closed';
+  const toOpen = sheet === 387;
+  const target = TILE_BY_KEY[toOpen ? openK : closedK] ?? 0;
+  if (!target) return;
+  const ox = x - Math.floor(st.frameX[i] % 36 / 18);
+  if (!toOpen && areaEmpty && !areaEmpty(ox, y, 2, 1)) return;
+  for (let ix = ox; ix < ox + 2; ix++) {
+    if (!st.inBounds(ix, y)) continue;
+    const ii = st.idx(ix, y);
+    w.skipCell(ix, y);
+    st.setTile(ix, y, target, (ix - ox) * 18, st.frameY[ii]);
+  }
 }
 
 // ============ 器件态机族：八音盒 / 喷泉 / 天塔柱（原版"帧带 = 开关态"系统） ============
@@ -926,23 +956,10 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
         Math.floor(Math.random() * 4), [num70, num69]);
       return true;
     }
-    case 386: case 387: { // 活板门开/关互换(ShiftTrapdoor;帧近似)
-      // ★R20-I8:关门(→387)前查目标格实体占位(Collision.EmptyTile ignoreTiles,
-      //  WorldGen.cs:51931-51956——实体在格拒换,曾可把实体关进实心格)
-      const openK = 'v_386_trapdooropen', closedK = 'v_387_trap_door_closed';
-      const toOpen = sheet === 387;
-      const target = TILE_BY_KEY[toOpen ? openK : closedK] ?? 0;
-      if (!target) return true;
-      const ox = x - Math.floor(st.frameX[i] % 36 / 18);
-      if (!toOpen && ctx.areaEmpty && !ctx.areaEmpty(ox, y, 2, 1)) return true;
-      for (let ix = ox; ix < ox + 2; ix++) {
-        if (!st.inBounds(ix, y)) continue;
-        const ii = st.idx(ix, y);
-        w.skipCell(ix, y);
-        st.setTile(ix, y, target, (ix - ox) * 18, st.frameY[ii]);
-      }
+    case 386: case 387: // 活板门开/关互换(ShiftTrapdoor;帧近似)——主体抽为导出函数,
+      //  导线触发与右键交互臂(★BJ250 Player.cs:32535-32548)共用同一翻转实现
+      shiftTrapdoorFlip(w, x, y, ctx.areaEmpty);
       return true;
-    }
     case 388: case 389: { // 高门关/开互换(ShiftTallGate;帧近似)
       const openK = 'v_389_tall_gate_open', closedK = 'v_388_tall_gate_closed';   // ⚠️5 并 def:v_389_tallgateopen 已退役
       const toOpen = sheet === 388;

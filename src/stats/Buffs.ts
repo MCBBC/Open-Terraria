@@ -493,6 +493,11 @@ export enum BuffType {
   MartianPet = 378,          // 异星滑板小子(302,←4815)：vanityPet[302]（Main.cs:9407）
   DD2OgrePet = 379,          // 食人魔宝宝(303,←4816)：vanityPet[303]（Main.cs:9408）
   DD2BetsyPet = 380,         // 小双足翼龙(304,←4817)：vanityPet[304]（Main.cs:9409）
+  // ★BJ250（2026-09-21）：Dead Cells 药水站 tile 699 右键授予（Player.cs:32857-32862
+  //  AddBuff(366, 108000) + Item179）。原版纯标记 buff（全仓零消费——唯一相关机制
+  //  deadCellsPotionStation 场景倍率 :5422-5423 ×1.2 走独立字段,不读此 buff）。
+  //  枚举值避开原版 366（已被 DestroyerPet 占）按序续编；图标 Buff_366.png 在库。
+  DeadCellsPotionStation = 381,
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -566,6 +571,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.WarTable]: { vanillaBuff: 348, descKey: 'Mods.SandboxWorld.Buff.WarTable.Desc', fallbackName: '战争桌' },
   [BuffType.SoulDrain]: { vanillaBuff: 151, descKey: 'Mods.SandboxWorld.Buff.SoulDrain.Desc', fallbackName: '吸魂' },
   [BuffType.SugarRush]: { vanillaBuff: 192, descKey: 'Mods.SandboxWorld.Buff.SugarRush.Desc', fallbackName: '糖分冲刺' },
+  // ★BJ250：药水站 buff（vanillaBuff 366，图标 Buff_366.png 在库；原版 l10n 语料
+  //  缺 BuffName.366 → 走 fallbackName「炼金药瓶」= tile 699 官方名 Alchemy Flask 直译；
+  //  原版无机械效果，desc 标记纯增益来源）
+  [BuffType.DeadCellsPotionStation]: { vanillaBuff: 366, descKey: 'Mods.SandboxWorld.Buff.DeadCellsPotionStation.Desc', fallbackName: '炼金药瓶' },
   [BuffType.Battle]: { vanillaBuff: 13, descKey: 'Mods.SandboxWorld.Buff.Battle.Desc', fallbackName: '战斗' },
   [BuffType.Calming]: { vanillaBuff: 106, descKey: 'Mods.SandboxWorld.Buff.Calming.Desc', fallbackName: '镇静' },
   [BuffType.Mining]: { vanillaBuff: 104, descKey: 'Mods.SandboxWorld.Buff.Mining.Desc', fallbackName: '挖矿' },
@@ -1062,8 +1071,11 @@ export class BuffState {
    *  装备扫描（十字章族 885-904/1612/1613/1921/3781/5354）与 buff 驱动
    *  （黑曜石皮 1 → 免 24）每帧刷新；apply 门 = AddBuff :5052/:5068 */
   immuneVanilla = new Set<number>();
-  /** DeadCellsPotionStation 在场(:5206 buff 时长×1.2) */
-  deadCells = false;
+  /** DeadCellsPotionStation 在场(:5206 buff 时长×1.2)。★BJ250 收口为 buff 驱动：
+   *  原版唯一置位源 = buff 366 在栏（UpdateBuffs :10273-10276 else-if 读 buffType[j]，
+   *  :18478 每帧先清）——此前由 699 tile 邻域扫描代供，右键 buff 落地后改读 buff 栏
+   *  （getter,无可写面；tile 扫描写点已随本刀摘除） */
+  get deadCells(): boolean { return this.active.has(BuffType.DeadCellsPotionStation); }
   // ---- The Constant 饥饿链上下文（Player.fixedUpdate 每帧写入；BuffID 332/333/334）----
   /** Main.dontStarveWorld（"the constant" 种子）——饥饿链总开关（UpdateBuffs :9559 */
   dontStarveWorld = false;

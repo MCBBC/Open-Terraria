@@ -1840,6 +1840,16 @@ export interface GlacierFangCtl {
   chargeRate: () => number;
 }
 
+/** ★BJ248 蓝光系数单源（Projectile.cs:37696 verbatim;BJ245 whiteK811 同款单源式）：
+ *  AddLight 在蓄力/释放 if-else 之后的公共尾段【逐拍】跑：
+ *  (0.2,0.5,0.8) × Remap(ai0,0,60,0.5,1)——蓄力期 0.5→1.0 爬升（ai0=0 端恰=旧钉死
+ *  (0.1,0.25,0.4),即旧实现只画对了第 0 拍）；释放后 ai0 冻结在松手值（满蓄=1.0、
+ *  半蓄=0.75,旧实现恒满亮=端点二值化双错）。Remap clamp 语义同 :1902 习语。 */
+export function glacierFangLightK(charge: number): number {
+  const c = Math.min(1, Math.max(0, charge / 60));
+  return 0.5 + (1 - 0.5) * c;
+}
+
 export class GlacierFangShot extends Entity {
   w = 10; h = 10;
   damage: number;
@@ -1911,7 +1921,9 @@ export class GlacierFangShot extends Entity {
         this.ctl.payMana();                                    // CheckMana(pay:true)（:37613）
       }
       this.charge += this.ctl.chargeRate();                    // ai[0] += GetSlowMagicUseRate()（:37626）
-      game.addLightAt?.(this.cx, this.cy, 0.1, 0.25, 0.4);
+      // ★BJ248 :37696 公共尾段光=动态 Remap（蓄力 0.5→1.0 爬升）,glacierFangLightK 单源
+      const lk = glacierFangLightK(this.charge);
+      game.addLightAt?.(this.cx, this.cy, 0.2 * lk, 0.5 * lk, 0.8 * lk);
       if (Math.random() < 0.34) {
         game.spawnParticles(this.cx, this.cy, '#BFE8FF', 1, 1, { life: 16, grav: 0, damp: 0.92 });
       }
@@ -1937,7 +1949,9 @@ export class GlacierFangShot extends Entity {
       this.dead = true;
       return;
     }
-    game.addLightAt?.(this.cx, this.cy, 0.2, 0.5, 0.8);
+    // ★BJ248 :37696 同一公共尾段光——释放态 ai0 冻结在松手值（非恒满亮）
+    const lk = glacierFangLightK(this.charge);
+    game.addLightAt?.(this.cx, this.cy, 0.2 * lk, 0.5 * lk, 0.8 * lk);
     // ★R34-③：释放穿透档 penetrate=(int)Remap(num5,0,1,1,3)（:37651）——命中总数帽
     dealContacts(this, game, this.hitCd, -1, () => {
       this.hits++;

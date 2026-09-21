@@ -14,8 +14,10 @@
 //      尘 226（scale0.5/α100/noGravity/vel0/position=Center+spinningpoint×num1087
 //      +vector125;spinningpoint=(0,-30)旋 num1085×1.5×2π 后 ×(1,0.4),每档用后
 //      ×-1 且取反跨档持续）;旧实现 ai1%6 掷 1 粒≈密度差 48 倍——升 1:1。
-//   ② 388 火星无人机蓝尘拖尾双面（:35603-35608 每 tick 1 粒 vel=velocity/5;
-//      :35716-35723 蓄力支 Next(4)==0 再 1 粒 vel=抖速+向外单位向量）——整缺补入。
+//   ② 388 火星无人机蓝尘拖尾双面（:35605-35619 每 tick 1 粒 vel=velocity/5、位=
+//      Center+spin2（:35611-35617,14px 环绕偏移——★BJ251 补位覆写面+断言,旧注
+//      "盒抖位保留"建模错误已纠）;:35715-35724 蓄力支 Next(4)==0 再 1 粒
+//      vel=抖速+向外单位向量）——整缺补入。
 //   ③ 412 日耀爬尾虫头火尘（:52201-52213）：spawnParticles 近似升级为原版尘通道
 //      （尘 6/scale1+NextFloat×3/α100/noGravity+noLight/fadeIn=1/vel=0/位−4）。
 // 断言：飞龙零粒子判谳锁（AI 面+shared 渐显尾）+①②③逐参数+对照弹（418 零 226、
@@ -89,6 +91,33 @@ function spawn(vid: number, tx = 100, ty = FLOOR - 4): Enemy {
   const e = Enemy.fromVanilla(vid, tx * TILE, ty * TILE);
   expect(e).not.toBeNull();
   return e!;
+}
+
+/** ★BJ251 引擎 NewDust 链补全包装（scale 面）：捕获桩原样记录 spawnDust 的 Scale
+ *  形参；原版引擎在 NewDust 内还有 比例抖 ±20%（Dust.cs:192,1+Next(-20,21)×0.01）
+ *  与烟雾族特例 scale×0.7（Dust.cs:216-220,type 6 命中;1456/1457/1458 同句;本仓
+ *  引擎 VanillaDust.spawn :275/:306-312 同式保真）→ 入池终值分布 = [1,4)×[0.8,1.2]×0.7
+ *  = [0.56,3.36)。本包装按引擎同式补全链,使 ③ 的记录面 = 入池终值（断言带才能锁真
+ *  分布——旧桩记形参原值,带 [0.8,4.8) 结构性恒绿=锁不住）。掷流口径：每粒 +1 掷
+ *  （比例抖,引擎 :192 同掷型）;烟雾 ×0.7 非掷。仅本文件 ③ 使用（①② 锁形参原值,
+ *  不套用）。 */
+function wrapDustChain(g: GameHooks): GameHooks {
+  const raw = g.spawnDust!.bind(g);
+  return Object.assign({}, g, {
+    spawnDust: (
+      x: number, y: number, w: number, h: number, type: number,
+      sx = 0, sy = 0, alpha = 0, color: { r: number; g: number; b: number; a: number } | null = null, scale = 1,
+      noGravity = false, perfect = false,
+    ) => {
+      const d = raw(x, y, w, h, type, sx, sy, alpha, color, scale, noGravity, perfect) as
+        unknown as DustCall | null;
+      if (d) {
+        d.scale = (1 + ((Math.random() * 41 | 0) - 20) * 0.01) * scale;   // Dust.cs:192 比例抖
+        if (type === 6) d.scale *= 0.7;                                    // :220 烟雾特例（本测面只触 type 6）
+      }
+      return d;
+    },
+  }) as GameHooks;
 }
 
 describe('BJ244 飞龙判谳锁（原版零粒子——禁凭观感补）', () => {
@@ -169,7 +198,7 @@ describe('BJ244 ① 387 特斯拉炮塔部署环绕尘 1:1（:35416-35496）', (
   });
 });
 
-describe('BJ244 ② 388 火星无人机蓝尘拖尾双面（:35603-35608 / :35716-35723）', () => {
+describe('BJ244 ② 388 火星无人机蓝尘拖尾双面（:35605-35619 / :35715-35724）', () => {
   it('悬浮态（ai0=0）每 tick 恰 1 粒拖尾①：type226/α100/scale0.5/noGravity/vel=v/5', () => {
     const w = makeWorld();
     const dust: DustCall[] = [], parts: number[] = [];
@@ -179,16 +208,27 @@ describe('BJ244 ② 388 火星无人机蓝尘拖尾双面（:35603-35608 / :3571
     e.vx = 3; e.vy = -1;                                     // 定向锚
     for (let t = 0; t < 20; t++) {
       if (e.ai0 !== 3) { /* 悬浮/锁定演进,断言仅看 226 */ }
-      const vxNow = e.vx, vyNow = e.vy;
+      const vxNow = e.vx, vyNow = e.vy, fNow = e.facing;
+      const cxNow = e.cx, cyNow = e.cy;
       martianDroneAI(e, g, g.player);
       const d = dust.filter((x) => x.type === 226).pop();
       if (e.ai0 !== 3 && d) {
         expect(d.alpha).toBe(100);
         expect(d.scale).toBe(0.5);
         expect(d.noGravity).toBe(true);
-        // velocity 覆写 = 拍前 velocity/5（盒抖位保留）
+        // velocity 覆写 = 拍前 velocity/5
         expect(d.vx).toBeCloseTo(vxNow / 5, 5);
         expect(d.vy).toBeCloseTo(vyNow / 5, 5);
+        // ★BJ251 位覆写断言（:35611-35617）：位 = Center + spin2 —— (-10,10) 经
+        //  spriteDirection==1 翻 X 后 RotatedBy(rotation 速度角钳 [-π/2,π/2])，
+        //  ≈14px 环绕偏移面，【非】盒内抖动（旧注"盒抖位保留"建模错误已纠）
+        const sd = Math.sign(vxNow) !== 0 ? -Math.sign(vxNow) : fNow;   // :35463-35465 本拍求值
+        let rot = Math.atan2(vyNow, vxNow);                             // :35456
+        if (rot < -Math.PI / 2) rot += Math.PI;                         // :35457-35462
+        if (rot > Math.PI / 2) rot -= Math.PI;
+        const sxp = sd === 1 ? 10 : -10;                                // spin2.X（==1 → 翻 X）
+        expect(d.x).toBeCloseTo(cxNow + sxp * Math.cos(rot) - 10 * Math.sin(rot), 6);
+        expect(d.y).toBeCloseTo(cyNow + sxp * Math.sin(rot) + 10 * Math.cos(rot), 6);
       }
     }
     // 非自爆态下 20 tick 至少 19 粒（每 tick 1 粒,允许至多 1 tick 进自爆）
@@ -251,10 +291,16 @@ describe('BJ244 ② 388 火星无人机蓝尘拖尾双面（:35603-35608 / :3571
 });
 
 describe('BJ244 ③ 412 日耀爬尾虫头火尘升原版尘通道（:52201-52213）', () => {
-  it('每 tick 恰 2 粒尘 6：α100/noGravity/noLight/fadeIn=1/vel=0/scale∈[0.8,4.8)/锚点−4', () => {
+  it('每 tick 恰 2 粒尘 6：α100/noGravity/noLight/fadeIn=1/vel=0/scale∈[0.56,3.36)/锚点−4', () => {
     const w = makeWorld();
     const dust: DustCall[] = [], parts: number[] = [];
-    const g = makeHooks(w, dust, parts, { x: 110, y: FLOOR - 30 });
+    // ★BJ251 scale 带建模修正：旧带 [0.8,4.8) 漏乘烟雾特例 ×0.7（Dust.cs:216-220,
+    //  type 6;1456/1457/1458 同句;仓引擎 VanillaDust.spawn :306-312 同式保真）——
+    //  原版入池终值 = Scale形参[1,4)（:52204,1+NextFloat×3）× 比例抖[0.8,1.2]
+    //  （Dust.cs:192）× 0.7 → 真分布 [0.56,3.36)。旧带下界 0.8 > 真下界 0.56 =
+    //  换种子伪红源;旧桩又只记形参原值（无抖）使旧带结构性恒绿=锁不住真分布。
+    //  改 = wrapDustChain 补全引擎链 + 真分布带。
+    const g = wrapDustChain(makeHooks(w, dust, parts, { x: 110, y: FLOOR - 30 }));
     const e = spawn(412, 100, FLOOR - 20);
     e.vx = 2; e.vy = 1;
     for (let t = 0; t < 12; t++) {
@@ -268,8 +314,8 @@ describe('BJ244 ③ 412 日耀爬尾虫头火尘升原版尘通道（:52201-5221
       expect(d.noLight).toBe(true);                           // obj.noLight = true
       expect(d.fadeIn).toBe(1);                               // obj.fadeIn = 1f
       expect(d.vx).toBe(0); expect(d.vy).toBe(0);             // obj.velocity = Zero
-      expect(d.scale).toBeGreaterThanOrEqual(0.8);            // 1+NextFloat×3（含 NewDust ±20% 抖）
-      expect(d.scale).toBeLessThan(4.8);
+      expect(d.scale).toBeGreaterThanOrEqual(0.56);           // [1,4)×[0.8,1.2]×0.7（Dust.cs:192/:220）
+      expect(d.scale).toBeLessThan(3.36);
     }
   });
 });

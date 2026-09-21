@@ -1957,6 +1957,13 @@ export function drawAdjust(
       if (fit(sx, sy, 16, 16)) { a.sx = sx; a.sy = sy; }
       break;
     }
+    // ★BJ248 tile 491 虚空宝库（TileDrawing.cs:5405-5407 verbatim）：无条件
+    //   `addFrX = 54`（平赋值、非 +=、无 %54 取模——与 733 条件型半 sheet 不同:
+    //   本库恒画右半。Tiles_491 原版 108×54=左右半各 3 列,右半才有内容,半间差
+    //   3872 字节）。曾整缺 +54 消费位=恒画左半错半（R2 实测）。tileTop=2 已在
+    //   DRAW_Y_OFFSET 静态表（491:2）；RATE 表 removed 锁「491 纯静态+addFrX 常量」
+    //   （TileAnim.ts 头注）与本刀同向——491 恒禁入三表,纯静态烘焙即可。
+    case 491: a.sx = fx + 54; break;
     // ★2026-08-30 移除 case 405/406 残案（TileDrawing.cs:5443-5529 原样语义已由
     //   VanillaTiler 顶层的 fireplaceAddFrY/chimneyAddFrY 专属 helper 承担——本处旧式
     //   `animRot()%8` 走针钟与原版 rate 钟不同相、且给烟囱算出 ≥6 的相位落进纹理
@@ -2064,10 +2071,25 @@ export function drawAdjust(
     case 530:   // :4757-4776:addFrY += 36*biome(同 529 变体近似)
       a.sy = fy + 36 * biomeVariant529(st, x, y, w);
       break;
-    // ⚠已删除 case 28/105/470/719:那是 Player.cs 手持【物品】贴图的 14 相位
-    // 动画(物品 id 空间),不是 tile sheet!错抄于此致 sheet 28(陶罐)被劫持——
-    // sy+270×(t%4) 与 sx+288×(t/4) 随时间/位置变化 → 陶罐错位且开关门重建后
-    // 错位形态改变(用户标注)。物品手持动画归 PlayerDrawLayers 体系,不归此处。
+    // ⚠case 28/105/470 仍删：那是 Player.cs 手持【物品】贴图的 14 相位动画
+    // (物品 id 空间),不是 tile sheet!错抄于此曾劫持 sheet 28(陶罐)——sy+270×(t%4)
+    // 与 sx+288×(t/4) 随时间/位置变化 → 陶罐错位且开关门重建后错位形态改变
+    // (用户标注)。物品手持动画归 PlayerDrawLayers 体系,不归此处。
+    // ★BJ248 勘误注（R2 复核）：原注把 tile 719 一并划入「手持物品同号案」系误伤——
+    //   TileDrawing.cs:4608-4616（1458 交叉同号）确有 case 719 tile 侧 14 相时-位钟
+    //   （TileDrawing 全文件唯一一处 GTW×15 块;28/105/470 无此案）。恢复如下,钟=：
+    //   num34=(x+y+(int)(GTW×15))%14 → addFrX+=288×(num34/4)、addFrY+=270×(num34%4)。
+    //   (x+y) 逐格相位=原版刻意的对角彩虹渐变（邻格差 1 相=斜向滚动,非错位）。
+    //   GTW=真实时间秒%3600（Main.cs:17014）→ 15 相/秒=60fps 固定步每 4 tick 一相
+    //   （tileAnim.tick/4 采样;暂停冻结=原版 GTW 实时钟的已知采样偏差,490 习语同款
+    //   备案）。719 不入 RATE/FRAMES/PITCH 三表（AnimateTiles 无 719 写位,golden
+    //   「无多」锁;须走动态层→ isDynamicAnimSheet 719 特判,314 同款）。
+    case 719: {
+      const n = (x + y + Math.floor(tileAnim.tick / 4)) % 14;   // :4610
+      a.sx = fx + 288 * Math.floor(n / 4);                      // :4613
+      a.sy = fy + 270 * (n % 4);                                // :4614
+      break;
+    }
     case 227:   // :5121-5152:fx==204 时按下方仙人掌群系加变体列(原版原文如此)
       if (fx === 204) {
         const v = biomeVariant529(st, x, y, w);

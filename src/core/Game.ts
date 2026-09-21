@@ -116,6 +116,7 @@ import {
   attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith,
   musicBoxRecordItem, musicBoxDropItemOf, fountainDropItemOf, announcementBoxMessage,
   MUSIC_BOX_EMPTY_VID,
+  flipBlock, flipCell, shiftTrapdoorFlip,
 } from '../world/wiring/devices';
 import { LOGIC_SENSOR_MODE, logicSensorMode, playerAboveSensorState, liquidSensorState, dayNightSensorState } from '../world/wiring/logicSensor';
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, partyNaturalAttempt, type PartyState } from '../world/wiring/party';
@@ -2507,6 +2508,11 @@ const BANK_TILES: ReadonlyArray<readonly [string, number]> = [
   ['v_29_piggy_bank', 0], ['v_97_safe', 1], ['v_463_defenders_forge', 2], ['v_491_void_vault', 3],
 ];
 
+/** 宝石锁 frameX/54 带 → 钥匙宝石 item id（Player.cs:32755-32778 与 ToggleGemLock
+ *  WorldGen.cs:46886-46906 双处同表；★带 6 = 3643）。★BJ250 右键臂消费——
+ *  右键臂与 toggleGemLock 双消费点同源防漂移 */
+const GEM_LOCK_GEM_IDS: readonly number[] = [1526, 1524, 1525, 1523, 1522, 1527, 3643];
+
 /** 就地剔除 life<=0 的粒子/飘字(保序零分配,2026-08 审计 G9) */
 function compactByLife<T extends { life: number }>(list: T[]): void {
   let w = 0;
@@ -3052,6 +3058,12 @@ export class Game implements GameHooks {
   /** 上一 tick 的夜内时间（0-32400t；鹿角怪 16200t 午夜跨越检测，Main.cs:64602-64603） */
   private _lastNightTicks = 0;
   private _prevRightDown = false;
+  /** Player.tileInteractionHappened（:3238 本拍标志）代理：格交互命中置位，右键
+   *  后续消费面（交谈臂 :43807 / 快换臂 :31766 `!tileInteractionHappened`）同拍让位。
+   *  ★BJ250：右键臂普遍以 rightDown=false 消费兼作让位；唯雪球发射器 212 原版
+   *  不吞按键（按住连喷,冷却 7t 门）→ 需要独立让位面。rightClickTileNpcDispatch
+   *  入口每拍重置（原版 tileInteractionHappened 每拍重置同相）。 */
+  private tileInteractHappened = false;
   /** 死亡界面跳跃键上一 tick 电平（1457 Main.cs:46124 JustBecameTrue(Jump) 边沿检测） */
   private _prevRespawnSkipJump = false;
   /** 食人鱼枪 channel 态（1457 :43878 删 num>0 门后 0 条也补射——本仓 0 条场景
@@ -13288,6 +13300,7 @@ export class Game implements GameHooks {
       // + 右键边沿 + useTime===0（itemTime/itemAnimation 归零）。成功吞边沿
       // （:31844 Main.mouseRightRelease=false）防 tile 互动二次消费
       if (inp.rightDown && !this._prevRightDown && !inp.mouseHeld && this.player.useTime === 0
+        && !this.tileInteractHappened
         && heldDef && (viIdFromKey(heldDef.key) === 6190 || viIdFromKey(heldDef.key) === 6195)
         && this.swapParkourBookVisual(viIdFromKey(heldDef.key))) {
         this.input.rightDown = false;
@@ -13301,6 +13314,7 @@ export class Game implements GameHooks {
       //  2611 球在场 pinUse 钉持 :30739、5526 自旋期 channel 钉持,互换均不可达）。
       // 成功吞边沿（:31874 Main.mouseRightRelease=false）防 tile 互动二次消费
       if (inp.rightDown && !this._prevRightDown && !inp.mouseHeld && this.player.useTime === 0
+        && !this.tileInteractHappened
         && heldDef && (viIdFromKey(heldDef.key) === 2611 || viIdFromKey(heldDef.key) === 5526)
         && this.swapFlaironForm(viIdFromKey(heldDef.key))) {
         this.input.rightDown = false;
@@ -21714,13 +21728,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
       if (type === TILE_BY_KEY['v_238_plantera_s_bulb']) {
-        if (Math.abs(this.player.cx - (ax * 16 + 16)) + Math.abs(this.player.cy - (ay * 16 + 16)) < 50 * 16) {
+        // ★BJ249 几何归位（WorldGen.cs:48409-48425,1458 同位 :48442）：距离基准=
+        //  被击格左上(i*16,j*16) vs 玩家【盒左上】(position)——旧用 2×2 锚格中心
+        //  vs 玩家盒心,域差最大 32px（50 格门仅边界带可见;盒左上域=BJ111 判例同族）
+        if (Math.abs(this.player.x - x * TILE) + Math.abs(this.player.y - y * TILE) < 50 * TILE) {
           // SpawnOnPlayer（WorldGen.cs:48030 → NPC.cs:81273）：玩家屏幕外落点，
           // 非 summonBoss 的地表±55 列顶部扫描（2026-08-13 对齐）
           this.spawnBossOnPlayer(262);
         }
       } else {
-        this.spawnDrop(ax * TILE + 8, ay * TILE, 'vi_1291_life_fruit', 1);
+        // ★BJ249 掉落位=被击格（WorldGen.cs:48441,1458 同位 :48449
+        //  Item.NewItem(i*16,j*16,32,32)→盒中心 (i*16+16,j*16+16);spawnDrop 收
+        //  中心锚,Game.ts:22715 约定）——旧用锚格半补偿,2×2 内右/下格被击时左/上漂
+        this.spawnDrop(x * TILE + 16, y * TILE + 16, 'vi_1291_life_fruit', 1);
       }
       this.spawnParticles(x * TILE + 8, y * TILE + 8, '#E180CE', 8, 1.8);
       return;
@@ -26091,6 +26111,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  抽方法目的 = 分派序可被 tests/sw-bj25-interact-priority.test.ts 直驱。 */
   private rightClickTileNpcDispatch(tx: number, ty: number, heldDef: ItemDef | null): boolean {
     const inp = this.input;
+    this.tileInteractHappened = false;   // 原版 tileInteractionHappened 每拍重置同相
     const type = this.world.store.get(tx, ty);
     // ★FX23 原版交谈闩全臂化（Player.cs:32188-32197：光标悬停城镇 NPC 交谈气泡
     //  currentNPCShowingChatBubble>-1 ∧（talkNPC==-1 ∨ !npcChatRelease）→
@@ -26185,7 +26206,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.interactAt(tx, ty);
     }
     // ---- NPC 交谈（★SW-BJ25 2026-09-07 移位：格交互先行，旗/边沿门见方法头注）----
-    if (this.input.rightDown && !this._prevRightDown
+    // ★BJ250：`!this.tileInteractHappened` = 原版交谈臂 `!tileInteractionHappened`
+    //  面（Main.cs:43807）——雪球发射器 212 不吞 rightDown,由该旗同拍压制交谈
+    if (this.input.rightDown && !this._prevRightDown && !this.tileInteractHappened
       && this.talkToNearbyNpc(...this.camera.screenToWorld(inp.mouseX, inp.mouseY))) {
       // ★SW-BH1 2026-09-06：传精确世界像素光标（Main.DrawMouseOver Main.cs:43597-43599
       // MouseScreen+screenPosition 1×1 矩形）——旧 tile 中心量化（+0.5)*TILE 有 ±8px 粒度
@@ -26225,6 +26248,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       || FURNITURE_TILE_KIND.has(type) // 挂物族右键会改存放物（世界状态）
       || sh === 35 || sh === 139 || sh === 207 || sh === 410 || sh === 480 || sh === 509 || sh === 455
       || sh === 425
+      // ★BJ250 右键长尾批新臂（改方块/发弹/拆取面,与上方同辖）：
+      || sh === 4 // 火把右键即拾取（KillTile）
+      || (sh === 50 && st.frameX[st.idx(tx, ty)] === 90) // 水球魔法书（Books frameX 90 右键拆取）
+      || sh === 33 || sh === 49 || sh === 372 || sh === 174 || sh === 646 // 蜡烛族明暗翻面
+      || sh === 209 || sh === 212 // 大炮瞄准+传送门炮开火 / 雪球发射器手动发射
+      || sh === 215 // 篝火点燃/熄灭
+      || sh === 216 || sh === 335 || sh === 338 // 烟花火箭/烟花盒/烟花喷泉手动触发
+      || sh === 386 || sh === 387 // 活板门翻面
+      || sh === 440 || sh === 441 || sh === 468 // 宝石锁 / 陷阱箱·陷阱梳妆台（HitSwitch 面）
+      || sh === 510 || sh === 511 // 箭头告示牌翻面
     );
     if (editDenied) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     // ---- 拴绳锚桩 724 / 风筝桩 723 右键取回存物（本仓扩展交互：原版锚桩无
@@ -26471,24 +26504,269 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const projId = this.preferredGolfBallProjId();
       this.spawnGolfBall(tx * 16 + 8.5, ty * 16 + 6, projId, true, 0, 0);  // :31881
       this.input.rightDown = false;
+    } else if (sh === 212) {
+      // ---- ★BJ250 右键长尾批（TileInteractionsUse 普查 2026-09-21）----
+      // 雪球发射器右键（Player.cs:32370-32413——TileInteractionsUse 首臂,在 `if (flag)`
+      // 门【外】=按住右键逐拍尝试,冷却 7t 门 :32370/:32373,不吞 rightDown=连喷语义）。
+      // 与导线路径（Wiring.cs:1345-1418 → devices case 212）三差异：①无 CheckMech
+      // ②冷却 7t 记在玩家身上（Player.Update :24752 递减,Player.snowballLauncherInteraction
+      // Cooldown）非 Wiring 静态 15t ③出膛位/散布微差（Y-4 :32394、X 左 -16/右 +14
+      // :32395-32404 vs 导线 ±12）。命中置 tileInteractHappened（flag2 :32372→:33551）
+      if (this.player.snowballLauncherInteractionCooldown <= 0) {
+        this.player.snowballLauncherInteractionCooldown = 7;   // :32373
+        this.tileInteractHappened = true;
+        // SoundID.Item11 挂玩家 position（:32374 ——原版第二参=玩家坐标,非 tile）
+        this.playSfxFile('Item_11', 1, this.player.cx, this.player.cy);
+        const i212 = st.idx(tx, ty);
+        const band = Math.floor(st.frameX[i212] / 54);            // num2 朝向带 0左/1右 :32375-32381
+        const col = Math.floor(st.frameX[i212] / 18) % 3;
+        const ax = tx - col;                                      // :32382
+        const row = Math.floor(st.frameY[i212] / 18) % 3;         // :32384-32387
+        const ay = ty - row;
+        const speed = 12 + Math.floor(Math.random() * 450) * 0.01;  // num4 :32388
+        let dx = 85 + Math.floor(Math.random() * 20);               // num5 :32389
+        const dy = -35 + Math.floor(Math.random() * 46);            // num6 :32390
+        let px = (ax + 2) * 16 - 8;
+        const py = (ay + 2) * 16 - 12;                              // :32394（-8-4）
+        if (band === 0) { dx *= -1; px -= 16; } else { px += 14; }  // :32395-32404（-14-2 合并）
+        const len = Math.hypot(dx, dy);
+        // 弹 166 伤 35 击退 3.5（:32391-32393）；ai0=-rand(0,16) 重力延迟随机化本仓
+        // TrapShot 恒 gravDelay 20（导线路径同略,登记不建模）；originatedFromActivable
+        // Tile 弹源归因标志本仓弹体无此面
+        this.entities.add(new TrapShot(px, py, (dx * speed) / len, (dy * speed) / len,
+          35, 'snowball'), 'projectiles');
+      }
+    } else if (sh === 209) {
+      // 大炮右键（Player.cs:33197-33269）：普通炮带 0/1/2 = 仰角瞄准（点击列定 ±54
+      // 步进、0..8 档钳位 :33212-33228）；传送门炮带 3/4 = 顶/中行点击换向（frameX
+      // ±72 :33241-33252）、底行点击开火（:33257-33268 → ShootFromCannon 弹 601
+      // 速度 3 伤 0,WorldGen.cs:51033——原版右键路径【无冷却/无 CheckMech】,导线
+      // 路径的 120/480 冷却在 Wiring.cs:1334-1339 器件面）
+      const i209 = st.idx(tx, ty);
+      const col = Math.floor(st.frameX[i209] % 72 / 18);        // num54 :33201
+      const row = Math.floor(st.frameY[i209] % 54 / 18);        // num55 :33202
+      const ax = tx - col, ay = ty - row;                       // num56/57 :33203-33204
+      const elev = Math.floor(st.frameY[i209] / 54);            // num58 仰角档 0..8 :33205
+      const band = Math.floor(st.frameX[i209] / 72);            // num59 炮种带 0..4 :33206
+      const num60 = (col === 1 || col === 2) ? row : -1;        // :33208-33211
+      let dY = 0;
+      if (col === 3 || (col === 2 && band !== 3 && band !== 4)) dY = -54;
+      if (col === 0 || (col === 1 && band !== 3 && band !== 4)) dY = 54;
+      if (elev >= 8 && dY > 0) dY = 0;                          // :33221-33228 钳位
+      if (elev === 0 && dY < 0) dY = 0;
+      if (dY !== 0) {
+        for (let ix = ax; ix < ax + 4; ix++) {
+          for (let iy = ay; iy < ay + 3; iy++) {
+            if (!st.inBounds(ix, iy)) continue;
+            const ii = st.idx(ix, iy);
+            st.setTile(ix, iy, st.type[ii], st.frameX[ii], st.frameY[ii] + dY);
+          }
+        }
+      }
+      if (band === 3 || band === 4) {
+        if (num60 === 1 || num60 === 0) {
+          const dX = band === 3 ? 72 : -72;                     // :33243 换向
+          for (let ix = ax; ix < ax + 4; ix++) {
+            for (let iy = ay; iy < ay + 3; iy++) {
+              if (!st.inBounds(ix, iy)) continue;
+              const ii = st.idx(ix, iy);
+              st.setTile(ix, iy, st.type[ii], st.frameX[ii] + dX, st.frameY[ii]);
+            }
+          }
+        }
+        if (num60 === 2) {
+          // ShootFromCannon(x,y,angle=elev,ammo=band+1)（:50606+）：弹 601 出膛
+          // ((ax+2)*16,(ay+2)*16)+垂直档 Y+5/正上档 X+5（:50685-50696）；速度表
+          // :50640-50683；ai0=ammo5?1:0（:50632-50636 band4=蓝门/band3=橙门）
+          const speed = 3;                                      // :50623-50628 num=3f
+          const ANGLE_V: Array<readonly [number, number]> = [
+            [10, 0], [7.5, -2.5], [5, -5], [2.75, -6], [0, -10],
+            [-2.75, -6], [-5, -5], [-7.5, -2.5], [-10, 0],
+          ];
+          const [bx, by] = ANGLE_V[elev] ?? [0, -10];
+          const len = Math.hypot(bx, by);
+          let px = (ax + 2) * 16;
+          if (elev === 4) px += 5;
+          const py = (ay + 2) * 16 + 5;
+          this.entities.add(new TrapShot(px, py, (bx * speed) / len, (by * speed) / len,
+            0, 'portalbolt', band === 4 ? 1 : 0), 'projectiles');
+        }
+      }
+      this.input.rightDown = false;
+    } else if (sh === 215) {
+      // 篝火右键（Player.cs:32479-32509）：Sound 28（校验前即播 :32482）→ 整块 3×2
+      // 同型校验（ValidateTileSquareIsActiveAndOfType :32489）→ frameY ±36 点燃/熄灭。
+      // ★右键路径无 SkipWire（原版 SkipWire 仅导线语境）——勿复用 devices.flipBlock
+      //（其内含 skipCell,离线调用会留陈旧跳过项污染后续导线触发）
+      this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
+      const i215 = st.idx(tx, ty);
+      const col = Math.floor(st.frameX[i215] % 54 / 18);        // :32485
+      const row = Math.floor(st.frameY[i215] % 36 / 18);        // :32486
+      const ax = tx - col, ay = ty - row;
+      const t215 = st.type[i215];
+      let uniform = st.inBounds(ax, ay) && st.get(ax, ay) === t215;
+      for (let ix = ax; ix < ax + 3 && uniform; ix++) {
+        for (let iy = ay; iy < ay + 2; iy++) {
+          if (!st.inBounds(ix, iy) || !st.hasTile(ix, iy) || st.get(ix, iy) !== t215) { uniform = false; break; }
+        }
+      }
+      if (uniform) {
+        const dY = st.frameY[st.idx(ax, ay)] >= 36 ? -36 : 36;  // :32491-32495
+        for (let ix = ax; ix < ax + 3; ix++) {
+          for (let iy = ay; iy < ay + 2; iy++) {
+            if (!st.inBounds(ix, iy)) continue;
+            const ii = st.idx(ix, iy);
+            if (st.get(ix, iy) === t215) st.setTile(ix, iy, t215, st.frameX[ii], st.frameY[ii] + dY);
+          }
+        }
+      }
+      this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_125_crystal_ball'] || type === TILE_BY_KEY['v_354_bewitching_table']
       || type === TILE_BY_KEY['v_377_sharpening_station'] || type === TILE_BY_KEY['v_287_ammo_box']
-      || type === TILE_BY_KEY['v_464_war_table'] || type === TILE_BY_KEY['v_621_slice_of_cake']) {
+      || type === TILE_BY_KEY['v_464_war_table'] || type === TILE_BY_KEY['v_621_slice_of_cake']
+      || type === TILE_BY_KEY['v_699_alchemy_flask']) {
       // 工位 buff（Player.cs:32126-32162 右键授予）：水晶球 29(1800s)/附魔台 150/磨刀石 159/
       // 弹药箱 93/战争桌 348 均 108000t=1800s；蛋糕 192=7200t=120s
+      // ★BJ250 补 699 药水站（:32857-32862 AddBuff(366,108000)）——纯标记 buff
+      //（UpdateBuffs :10273-10276 置 deadCellsPotionStation → AddBuff 判定时长 ×1.2）
       const dur = type === TILE_BY_KEY['v_621_slice_of_cake'] ? 120 : 1800;
       const bt = type === TILE_BY_KEY['v_125_crystal_ball'] ? BuffType.Clairvoyance
         : type === TILE_BY_KEY['v_354_bewitching_table'] ? BuffType.Bewitched
           : type === TILE_BY_KEY['v_377_sharpening_station'] ? BuffType.Sharpened
             : type === TILE_BY_KEY['v_287_ammo_box'] ? BuffType.AmmoBox
-              : type === TILE_BY_KEY['v_464_war_table'] ? BuffType.WarTable : BuffType.SugarRush;
+              : type === TILE_BY_KEY['v_464_war_table'] ? BuffType.WarTable
+                : type === TILE_BY_KEY['v_699_alchemy_flask'] ? BuffType.DeadCellsPotionStation
+                  : BuffType.SugarRush;
       this.player.buffs.apply(bt, dur);
       // 工位音分流（Player.cs:32861-32866/:32873-32878）：磨刀石 377→Item37、
-      // 弹药箱 287→Item149；其余工位（水晶球/附魔台/战争桌/蛋糕）原版仍 Item4
+      // 弹药箱 287→Item149、药水站 699→Item179（:32861）；其余工位原版仍 Item4
       if (type === TILE_BY_KEY['v_377_sharpening_station']) this.playSfxFile('Item_37', 1, tx * TILE, ty * TILE);
       else if (type === TILE_BY_KEY['v_287_ammo_box']) this.playSfxFile('Item_149', 1, tx * TILE, ty * TILE);
+      else if (type === TILE_BY_KEY['v_699_alchemy_flask']) this.playSfxFile('Item_179', 1, tx * TILE, ty * TILE);
       else this.sfx.play('drink'); // 原版 SoundID.Item4（药水/授予类 UseSound 占位）
       this.cb.onInventoryChanged();
+      this.input.rightDown = false;
+    } else if (sh === 216) {
+      // 烟花火箭右键（Player.cs:32530-32534 → WorldGen.LaunchRocket(fromWiring:false)
+      // :62651-62669）：frameY/40 选色 167-170；下半格点击回锚（frameY%40==18 → y-1
+      // :62657-62661）；弹 (0,-8) 伤 150 击退 7（:62196-62199）；发射即移除 1×2
+      //（:62203-62204）。原版右键无 CheckMech/冷却（导线路径在 devices case 216,
+      // 其 SkipWire 仅导线语境）。originatedFromActivableTile 本仓无此面
+      let ly = ty;
+      if (st.frameY[st.idx(tx, ty)] % 40 === 18) ly--;
+      this.entities.add(new TrapShot(tx * 16 + 8, ly * 16 + 6, 0, -8, 150,
+        'fireworkRocket', Math.floor(st.frameY[st.idx(tx, ty)] / 40)), 'projectiles');
+      st.setTile(tx, ly, 0);
+      st.setTile(tx, ly + 1, 0);
+      this.input.rightDown = false;
+    } else if (sh === 335) {
+      // 烟花盒右键（Player.cs:32576-32580 → WorldGen.LaunchRocketSmall(fromWiring:false)
+      // :62675-62689）：frameX/frameY==18 回锚（:62677-62682）→ 弹 415+rand(4)（伤 0、
+      // (0,-8)、:62684-62688）。原版右键无 CheckMech（导线路径 devices case 335 加
+      // CheckMech 30+SkipWire）
+      let ax335 = tx, ay335 = ty;
+      if (st.frameX[st.idx(tx, ty)] === 18) ax335--;
+      if (st.frameY[st.idx(tx, ty)] === 18) ay335--;
+      this.entities.add(new TrapShot(ax335 * 16 + 16, ay335 * 16 + 2, 0, -8, 0,
+        'fireworksBoxRocket', Math.floor(Math.random() * 4)), 'projectiles');
+      this.input.rightDown = false;
+    } else if (sh === 338) {
+      // 烟花喷泉右键（Player.cs:32600-32622）：同锚点已有喷泉弹（aiStyle73 且
+      // ai[0]/ai[1] 同锚 :32609-32616）则不重复；否则弹 419+rand(4) 静态发射器
+      //（ai[0]/ai[1]=锚 :32619）。原版右键无 CheckMech/冷却（导线路径 devices
+      // case 338 加 CheckMech 30+SkipWire）。tile 338 为 1×2 → 点列即锚列
+      const fyi = st.frameY[st.idx(tx, ty)];
+      const ay = fyi === 18 ? ty - 1 : ty;                      // :32603-32607（frameY==18 → y-1）
+      let exists = false;
+      for (const e of this.entities.projectiles) {
+        if (e instanceof TrapShot && e.kind === 'fireworkFountain' && !e.dead
+          && e.ax === tx && e.ay === ay) { exists = true; break; }
+      }
+      if (!exists) {
+        this.entities.add(new TrapShot(tx * 16 + 8, ay * 16 + 2, 0, 0, 0,
+          'fireworkFountain', Math.floor(Math.random() * 4), [tx, ay]), 'projectiles');
+      }
+      this.input.rightDown = false;
+    } else if (sh === 386 || sh === 387) {
+      // 活板门右键（Player.cs:32535-32548 → WorldGen.ShiftTrapdoor）：翻转实现与
+      // 导线 case 386/387 共用（shiftTrapdoorFlip：帧近似 + 关门实体占位门）。原版
+      // 按玩家相对高度选折翼方向且失败反向重试（:32539-32543）——原位近似下两向
+      // 等价,单次调用=两向尝试并集（详 devices.shiftTrapdoorFlip 注）
+      if (this.wiring) shiftTrapdoorFlip(this.wiring, tx, ty, this.areaEmptyAt);
+      this.input.rightDown = false;
+    } else if (sh === 440) {
+      // 宝石锁右键（Player.cs:32747-32808 → WorldGen.ToggleGemLock :46872-46927）：
+      // frameX/54 选宝石（0→1526 1→1524 2→1525 3→1523 4→1522 5→1527 6→3643）；
+      // 上排（frameY/54==0 :32781）持对应宝石 → 消耗 1+开锁；下排（:32795）→ 关锁。
+      // 开/关尾流 = Wiring.HitSwitch(锚点)（ToggleGemLock :46924）。原版门含
+      // `selectedItem != 58`（垃圾槽选中禁用——本仓无垃圾槽选中态,N/A）
+      const i440 = st.idx(tx, ty);
+      const band = Math.floor(st.frameX[i440] / 54);
+      const row = Math.floor(st.frameY[i440] / 54);
+      const gem = GEM_LOCK_GEM_IDS[band] ?? -1;
+      if (gem !== -1) {
+        if (row === 0 && this.countVanillaItem(gem) > 0) {
+          this.consumeVanillaItem(gem);                 // :32786（MP 面 = msg 105,N/A）
+          this.toggleGemLock(tx, ty, true);             // :32787
+        } else if (row === 1) {
+          this.toggleGemLock(tx, ty, false);            // :32800
+        }
+      }
+      this.input.rightDown = false;
+    } else if (sh === 441 || sh === 468) {
+      // 陷阱箱/陷阱梳妆台右键（Player.cs:32459-32472）：Wiring.HitSwitch（HitSwitch
+      // :312-325 = Sound 28 + 锚点 2×2 TripWire——假箱本体即导线触发器,仓内
+      // hitSwitch 已含 441/468 支）。原版另有 Animation.NewTemporaryAnimation(2,…)
+      // 开盖动画（:32468+SendTemporaryAnimation）——本仓无临时动画系统,登记不建模
+      this.wiring?.hitSwitch(tx, ty);
+      this.input.rightDown = false;
+    } else if (sh === 510 || sh === 511) {
+      // 箭头告示牌右键（Player.cs:33270-33313）：2×2 帧块 frameY ±36 = 箭头朝向在
+      // 8 档（0..7）间步进,左列 −/右列 +（:33281-33288）;越界回绕 ±252（:33289-33296）
+      const i51 = st.idx(tx, ty);
+      const col = Math.floor(st.frameX[i51] % 36 / 18);
+      const row = Math.floor(st.frameY[i51] % 36 / 18);
+      const ax = tx - col, ay = ty - row;
+      const state = Math.floor(st.frameY[i51] / 36);
+      let dY = col === 0 ? -36 : 36;
+      if (state >= 7 && dY > 0) dY = -252;
+      if (state === 0 && dY < 0) dY = 252;
+      for (let ix = ax; ix < ax + 2; ix++) {
+        for (let iy = ay; iy < ay + 2; iy++) {
+          if (!st.inBounds(ix, iy)) continue;
+          const ii = st.idx(ix, iy);
+          st.setTile(ix, iy, st.type[ii], st.frameX[ii], st.frameY[ii] + dY);
+        }
+      }
+      this.input.rightDown = false;
+    } else if (sh === 33 || sh === 49 || sh === 372 || sh === 174 || sh === 646) {
+      // 蜡烛族右键（Player.cs:32623-32635）：frameX ±18 点燃/熄灭（被点格自身翻面,
+      // 与导线 ToggleCandle Wiring.cs:2933 同式,devices case 33 族共用 flipCell）。
+      // ★原版此臂【无声】；SendTileSquare(3) 走 setTile 网格同步
+      this.wiring && flipCell(this.wiring, tx, ty, 18);
+      this.input.rightDown = false;
+    } else if (type === TILE_BY_KEY['grandfather_clock']) {
+      // 落地大钟右键（Player.cs:32979-33015）：聊天框报时（ServerMessage 色
+      // =(255,240,20) :33014）。钟面换算恒等：原版 num44=Main.time(/86400×24)
+      // [夜段+54000] − 19.5 [<0 +24] ≡ 绝对时 h（昼 4.5+ 段/夜 19.5+ 段拼回线性
+      // 24h钟）= 本仓 timeOfDay×24 → 12 进制 + 上午/下午档 + 分补零
+      const h = this.world.clock.timeOfDay * 24;
+      const hh = Math.floor(h);
+      let mm = String(Math.floor((h - hh) * 60));
+      if (mm.length < 2) mm = '0' + mm;
+      const suffix = h >= 12 ? Lang.text('GameUI.TimePastMorning') : Lang.text('GameUI.TimeAtMorning');
+      let h12 = hh;
+      if (h12 > 12) h12 -= 12;
+      if (h12 === 0) h12 = 12;
+      this.newText(Lang.text('Game.Time', `${h12}:${mm} ${suffix}`), 255, 240, 20);
+      this.input.rightDown = false;
+    } else if (sh === 4 || (sh === 50 && st.frameX[st.idx(tx, ty)] === 90)) {
+      // 火把右键拾取（Player.cs:32636-32645）：TileID.Sets.Torches（=CreateBoolSet(4),
+      // TileID.cs:405）∪（Books tile 50 frameX 90 = 水球魔法书,悬停 icon 165
+      // :34492-34500）→ KillTile（默认参=非玩家挖掘档 :32638）——掉落走既有破坏面
+      //（火把 drop 8;水球魔法书掉落面若缺为破坏域既有账,不属本刀）。MP 面 msg 17
+      //（:32639-32641）走 setTile 网格同步
+      this.breakTile(tx, ty);
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
       || type === TILE_BY_KEY['v_411_detonator']) {
@@ -28320,16 +28598,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★R20-G4:兔子雕像派对变体（Wiring.cs:2306-2317 BirthdayParty.PartyIsUp）
       partyIsUp: () => partyIsUp(this.partyState),
       // ★R20-I8:Collision.EmptyTile(x,y,ignoreTiles) 等价——格区内无任何实体
-      areaEmpty: (x: number, y: number, w2: number, h2: number) => {
-        const rx = x * TILE, ry = y * TILE, rw = w2 * TILE, rh = h2 * TILE;
-        const hit = (e: { x: number; y: number; w: number; h: number }) =>
-          e.x < rx + rw && e.x + e.w > rx && e.y < ry + rh && e.y + e.h > ry;
-        if (hit(this.player)) return false;
-        for (const b of [this.entities.enemies, this.entities.npcs, this.entities.critters, this.entities.projectiles]) {
-          for (const e of b) { if (hit(e as unknown as { x: number; y: number; w: number; h: number })) return false; }
-        }
-        return true;
-      },
+      //（★BJ250 抽 this.areaEmptyAt 单源:活板门右键臂同门消费）
+      areaEmpty: (x: number, y: number, w2: number, h2: number) => this.areaEmptyAt(x, y, w2, h2),
       // SW-R3 2026-09-03（F-5 同径）：hook 增加 hurtBox 位（108=130/164=64,
       // SetDefaults 盒半宽;缺省 undefined → explodeAt 内 R*TILE 旧行为）
       explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, hurtBox?: number, projId?: number) =>
@@ -45685,11 +45955,10 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     // Player.cs:35218 AdjTiles() 每帧先清 alchemyTable=false 再扫描——否则靠近过
     // 一次后永久享受 1/3 材料折扣（旧"只置位不清零"粘滞 bug,2026-08-13 修）
     this._alchemyTable = false;
-    this.player.buffs.deadCells = false;   // DeadCellsPotionStation(:5206)
     const st = this.world.store;
     const out = new Set<number>();
-    const ALCHEMY = new Set<number>(); // 炼金台 sheet 355/699
-    for (const k of ['v_355_alchemy_table', 'v_699_deadcellspotionstation']) {
+    const ALCHEMY = new Set<number>(); // 炼金台 sheet 355/699（SetAdjTile :35924-35927）
+    for (const k of ['v_355_alchemy_table', 'v_699_alchemy_flask']) {
       const t = TILE_BY_KEY[k];
       if (t !== undefined) ALCHEMY.add(t);
     }
@@ -45718,7 +45987,8 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           // 与 207 两档；本仓 vanilla.sheet 即原版 tile id，sheet∈{172,207} 与该 Set 等值，
           // 非近似。消费点 Player.cs AdjTiles :35230-35232 → adjWaterSource）
           const sheet = TILE_DEFS[t]?.vanilla?.sheet;
-          if (sheet === 699) this.player.buffs.deadCells = true;   // DeadCellsPotionStation(:5206 buff ×1.2)
+          // ★BJ250：deadCells 改由 buff 366 驱动（原版无 tile 邻域路径,唯
+          //  UpdateBuffs :10273-10276 读 buff 栏）——旧 tile 扫描写点随 buff 落地摘除
           if (sheet === 172 || sheet === 207) this._nearLiquid.water = true;
         }
         if (st.liquid[ii] > 200) {

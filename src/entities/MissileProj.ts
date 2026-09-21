@@ -134,6 +134,40 @@ function whiteHot34(frame: number): HTMLCanvasElement | null {
   return c;
 }
 
+/** 79 光环六团染色纹理（Main.cs:33505 `hslToRgb(i/6,1,.5)×0.3`＝tex×color 调制;
+ *  canvas 无逐 draw 染色通道 → JS 像素域一次烘焙 tex.rgb×tint（straight 域逐通道
+ *  乘,α 原样——与本体 'lighter' drawImage 的既定预乘直译同口径）,按 img×色相缓存）。
+ *  node 测试环境（无 DOM/canvas）→ null（调用侧跳光环,本体白团不受影响）。 */
+const TINT79_CACHE = new WeakMap<object, Map<string, HTMLCanvasElement | null>>();
+function tinted79(img: HTMLImageElement | ImageBitmap, tint: readonly [number, number, number]): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  let perImg = TINT79_CACHE.get(img);
+  if (!perImg) { perImg = new Map(); TINT79_CACHE.set(img, perImg); }
+  const key = `${tint[0]},${tint[1]},${tint[2]}`;
+  const hit = perImg.get(key);
+  if (hit !== undefined) return hit;
+  let out: HTMLCanvasElement | null = null;
+  try {
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const cc = c.getContext('2d', { willReadFrequently: true });
+    if (cc) {
+      cc.drawImage(img, 0, 0);
+      const d = cc.getImageData(0, 0, c.width, c.height);
+      const px = d.data;
+      for (let i = 0; i < px.length; i += 4) {
+        px[i] = (px[i] * tint[0]) / 255;
+        px[i + 1] = (px[i + 1] * tint[1]) / 255;
+        px[i + 2] = (px[i + 2] * tint[2]) / 255;
+      }
+      cc.putImageData(d, 0, 0);
+      out = c;
+    }
+  } catch { out = null; }
+  perImg.set(key, out);
+  return out;
+}
+
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** float.AngleTowards（Utils.cs:2142-2159）：最短路径钳 maxChange/tick */
@@ -990,64 +1024,16 @@ export class MagicMissileProj extends Entity {
     const ctx = r.ctx;
     if (!ctx) return;
     const speed = Math.hypot(this.vx, this.vy);
-    // ---- 79 彩虹拖尾（RainbowRodDrawer.cs:12-37 的 canvas 近似：沿 oldPos 逐段绘
-    //      hue=(p*1.6−GlobalTime)%1 色、宽 lerp(0,64,1−(1−lerp(0,0.2,p))²)、尾淡出；
-    //      ★BJ228 勘误：本体非"恒不画"——Main.cs:33231-33236 覆写 color87=
-    //      (255,255,255,0) 纯加算白,scale 随 oldPos[12] 距离衰减,拖尾后补画 ----
-    // ★裁定 a（2026-09-02 J′）：①p 方向倒置修正——原版 progressOnStrip=0 在弹头
-    //   （VertexStrip.cs:97-100 逐 oldPos 正序入带,oldPos[0]=最新;RainbowRodDrawer
-    //   顶点序即此序）,旧码把 0 给了带尾（trail 旧→新存数,p=i/(N-1) 头在 1）→ 色/宽/
-    //   淡出全线倒置。现 p = 段新端 strip[i-1] 的原版进度 = (i-1)/(N-1)（等价旧数组
-    //   语义 (N-1-i)/(N-1)）。②StripWidth 返回【半宽】（VertexStrip.AddVertexPair
-    //   pos±(rot−π/2)·half）→ ×2 全宽 64。③消费带 = strip 60 槽 mode-3 收缩记录
-    //   （旧 12 点 push 带退役,与 34/16 同构——stripRecord）。
+    // ---- 79 彩虹魔杖（BJ247 2026-09-21 用户实报"粗椭圆团串"定谳+1:1 落刀）----
+    //  原版渲染栈（Main.cs 绘制序）：① RainbowRodDrawer.Draw（:28673-28676,
+    //  VertexStrip 顶点带 × GameShaders.Misc["RainbowRod"]=obj55 "MagicMissile"
+    //  pass,DyeInitializer.cs:471-474）＝细彩虹光线；② 大列表段本体（:33231-33236
+    //  覆写 color87=(255,255,255,0) 纯加算白 + :33498-33512 六团彩虹光环）＝头部亮白。
+    //  旧实现=stroke 粗线带（StripWidth 半宽误当全宽 ×2=64px 逐段圆头线帽+逐段离散
+    //  色相+无 Catmull-Rom 补间+无着色器侵蚀）＝用户截图 2 的"彩色椭圆团串",退役。
     if (this.projId === 79) {
-      const N = this.strip.length;
-      if (N >= 3) {
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.lineCap = 'round';
-        for (let i = 1; i < N; i++) {
-          const p = (i - 1) / (N - 1);                 // progressOnStrip（0 头 → 1 尾）
-          const [rr, gg, bb] = hueToRgb(p * 1.6 - this.globalT);
-          const wGrow = lerpValue(0, 0.2, p);
-          const width = 64 * (1 - (1 - wGrow) * (1 - wGrow));   // StripWidth :31-37（半宽×2）
-          const white = lerpValue(-0.2, 0.5, p);
-          const fade = 1 - lerpValue(0, 0.98, p);               // StripColors :26
-          const a = Math.max(0, Math.min(1, fade * 0.8));
-          if (a <= 0.02 || width < 0.5) continue;
-          const cr = Math.round(lerp(255, rr, white));
-          const cg = Math.round(lerp(255, gg, white));
-          const cb = Math.round(lerp(255, bb, white));
-          ctx.strokeStyle = `rgba(${cr},${cg},${cb},${a.toFixed(3)})`;
-          ctx.lineWidth = width;
-          ctx.beginPath();
-          ctx.moveTo(this.strip[i - 1].x, this.strip[i - 1].y);
-          ctx.lineTo(this.strip[i].x, this.strip[i].y);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-      // ★BJ228 补本体（2026-09-21 用户实报）：Main.cs:33231-33236 绘制段把 GetAlpha
-      //  的 default(Color) 覆写为 color87=(255,255,255,0)=纯加算白本体（rotation=0、
-      //  无翻转）,scale = GetLerpValue(32,0,dist(position,oldPos[12]))——静止/慢速
-      //  (悬停操控段)满亮白团,快速飞行收缩为 0（彩虹拖尾接管）。strip[12]≡oldPos[12]
-      //  （79 EU=0 每 tick 记录+0.65 收缩同块,stripRecord）；不足 12 记录（出生首拍
-      //  oldPos 全列=position）回退最新记录=dist 0=满亮。'lighter' ga=1=A=0 预乘直译。
-      const ref79 = this.strip.length > 12 ? this.strip[12] : this.strip[this.strip.length - 1];
-      const img79 = projSprite(79);
-      if (ref79 && img79 && img79.width > 0) {
-        const d79 = Math.hypot(this.cx - ref79.x, this.cy - ref79.y);
-        const s79 = Math.max(0, Math.min(1, 1 - d79 / 32));
-        if (s79 > 0.01) {
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.imageSmoothingEnabled = false;
-          const w79 = img79.width * s79, h79 = img79.height * s79;
-          ctx.drawImage(img79, this.cx - w79 / 2, this.cy - h79 / 2, w79, h79);
-          ctx.restore();
-        }
-      }
+      this.drawRainbowRodTrail(ctx, r as unknown as Renderer);
+      this.draw79Head(ctx);
       return;
     }
     // ---- 34/16 着色器火带（★MINOR-1：本体【之前】绘——原版 DrawProj 在
@@ -1192,6 +1178,148 @@ export class MagicMissileProj extends Entity {
     const q = (renderer as unknown as { queueTrailShade?: (s: TrailSpec) => void }).queueTrailShade;
     if (typeof q === 'function') q.call(renderer, spec);
     else drawStripTrail(ctx, renderer, spec);
+  }
+
+  /** 79 彩虹拖尾——RainbowRodDrawer.cs:12-37 + VertexStrip.cs:69-120 逐行 1:1
+   *  （BJ247；旧 stroke 粗线带退役,见 draw() 内注释。netPuppet 不跑 stripRecord →
+   *  无带早退,同 34/16 既有限制）。
+   *  ①顶点带=strip（TrailingMode 3,60 槽,[0]=最新；VertexStrip :73 逐 oldPos 正序
+   *    入带 ⇒ progressOnStrip 0=头（弹侧）1=尾；紧凑带 ≡ 原版零槽停机——SetDefaults
+   *    P.cs:725-735 把 oldPos 全槽清零、Drawer :73 遇零停）。
+   *  ②oldRot 复刻（P.cs:17261-17265 mode-3 逐拍重算）：rot[0]=AI rotation（
+   *    :44156-44163 同款 this.rot）；rot[i≥1]=(oldPos[i−1]−oldPos[i]).SafeNormalize
+   *    (default).ToRotation()——零距=default 向量→ToRotation=0。
+   *  ③PrepareStripWithProceduralPadding（:69-120）：逐对 |WrapAngle(Δrot)|≥15° →
+   *    num3=⌊|Δ|/(π/12)⌋ → num3+1 个 Catmull-Rom 内插点（控制点=两端沿各自 rot
+   *    外伸 segLen :91-92；内插点 rot=指向 target(前一点)方向,零距=NaN→上点 rot
+   *    :99-103——Utils.DirectionTo=裸 Normalize :2076-2078,零向量→NaN）。
+   *  ④StripColors（:23-29）：value=hslToRgb((p*1.6−GlobalTime)%1,1,.5)→
+   *    Lerp(White,value,GetLerpValue(−0.2,0.5,p,clamp))×(1−GetLerpValue(0,0.98,p)
+   *    【缺省无 clamp,p>0.98 负值→trn 归零,同 34/16 截断语义】)；A=0——XNA α=0
+   *    纯加算习语：obj55 inst#15 顶点 α 只进 out.a、加算 (One,·) 面 rgb 无消费;
+   *    TrailShader 的 ca 门（TrailShader.ts:340）为 34/16 淡出面设 → 顶点 a 传 1
+   *    过门（登记注）。色相取值域：原版 %1f 保号可负（−1,0）——Main.hslToRgb 的
+   *    hue2rgb 单次 c++ 包绕+byte 回绕恰≈模 1 包绕（两补数截断 mod 256 ≡ mod 1,
+   *    差 ≤1 byte）,hueToRgb 全包绕等价。
+   *  ⑤StripWidth（:31-37）=【半宽】Lerp(0,32,1−(1−lerp(0,0.2,p))²)（AddVertexPair
+   *    pos±(rot−π/2)·hw,VertexStrip.cs:153-159；旧实现误当全宽 ×2=64px=粗团根因）。
+   *  ⑥uOpacity=4（:16 UseOpacity(4f)）、uTime=globalT（GlobalTimeWrappedHourly）、
+   *    UseSaturation(−2.8f)=EXTRA_SETS.RainbowRod.sm2 既有钉值。 */
+  private drawRainbowRodTrail(ctx: CanvasRenderingContext2D, renderer: Renderer): void {
+    const raw = this.strip;
+    const N = raw.length;
+    if (N < 2) return;                            // DrawTrail :206（<2 顶点对=退化带）
+    const rots: number[] = new Array(N);          // oldRot 复刻（见注②）
+    rots[0] = this.rot;
+    for (let i = 1; i < N; i++) {
+      const dx = raw[i - 1].x - raw[i].x, dy = raw[i - 1].y - raw[i].y;
+      rots[i] = dx === 0 && dy === 0 ? 0 : Math.atan2(dy, dx);
+    }
+    // PrepareStripWithProceduralPadding（见注③）
+    const px: number[] = [], py: number[] = [], pr: number[] = [];
+    for (let i = 0; i < N; i++) {
+      px.push(raw[i].x); py.push(raw[i].y);
+      const rot = wrapAngle(rots[i]);
+      pr.push(rot);
+      if (i + 1 >= N) break;                      // :79-82（紧凑带零停等价）
+      const rot2 = wrapAngle(rots[i + 1]);
+      const num3 = Math.floor(Math.abs(wrapAngle(rot2 - rot)) / (Math.PI / 12));   // :85
+      if (num3 === 0) continue;                   // :86-89
+      const segLen = Math.hypot(raw[i + 1].x - raw[i].x, raw[i + 1].y - raw[i].y); // :90
+      const c1x = raw[i].x + Math.cos(rot) * segLen, c1y = raw[i].y + Math.sin(rot) * segLen;          // :91
+      const c2x = raw[i + 1].x - Math.cos(rot2) * segLen, c2y = raw[i + 1].y - Math.sin(rot2) * segLen; // :92
+      const num5 = num3 + 2, step = 1 / num5;                                      // :93-94
+      let tx = raw[i].x, ty = raw[i].y;                                            // :95
+      for (let k = 1; k < num5; k++) {                                             // :96
+        const t = k * step;
+        // MonoGame Vector2.CatmullRom(p1,p2,p3,p4,t)：0.5×(2p2+(−p1+p3)t+(2p1−5p2+4p3−p4)t²+(−p1+3p2−3p3+p4)t³)
+        const t2 = t * t, t3 = t2 * t;
+        const x0 = raw[i].x, y0 = raw[i].y, x1 = raw[i + 1].x, y1 = raw[i + 1].y;
+        const qx = 0.5 * (2 * x0 + (x1 - c1x) * t + (2 * c1x - 5 * x0 + 4 * x1 - c2x) * t2 + (3 * x0 - c1x - 3 * x1 + c2x) * t3);
+        const qy = 0.5 * (2 * y0 + (y1 - c1y) * t + (2 * c1y - 5 * y0 + 4 * y1 - c2y) * t2 + (3 * y0 - c1y - 3 * y1 + c2y) * t3);
+        const ddx = tx - qx, ddy = ty - qy;       // :99 DirectionTo(target)
+        const rotN = (ddx === 0 && ddy === 0) ? pr[pr.length - 1]                    // Normalize(0)=NaN→Last
+          : wrapAngle(Math.atan2(ddy, ddx));
+        px.push(qx); py.push(qy); pr.push(rotN);
+        tx = qx; ty = qy;                         // :106 target=vector3
+      }
+    }
+    // 顶点对：StripColors/StripWidth 逐值；progressOnStrip=j/(count−1)（:116）
+    const count = px.length;
+    if (count < 2) return;
+    const trn = (v: number): number => Math.max(0, Math.min(255, Math.trunc(v)));  // op_Multiply 截断
+    const pts: TrailPt[] = [];
+    for (let j = 0; j < count; j++) {
+      const p = j / (count - 1);
+      const g = lerpValue(0, 0.2, p);                             // :34 clamped
+      const hw = 32 * (1 - (1 - g) * (1 - g));                    // :35-36 半宽
+      const [hr, hg, hb] = hueToRgb(p * 1.6 - this.globalT);      // :25（%1 包绕在 hueToRgb 内）
+      const lv = lerpValue(-0.2, 0.5, p);                         // :26 clamped
+      const fade = 1 - p / 0.98;                                  // :26 缺省无 clamp
+      pts.push({
+        x: px[j], y: py[j], hw,
+        r: trn(Math.round(lerp(255, hr, lv)) * fade) / 255,       // Lerp→Round、×fade→截断
+        g: trn(Math.round(lerp(255, hg, lv)) * fade) / 255,
+        b: trn(Math.round(lerp(255, hb, lv)) * fade) / 255,
+        a: 1,                                                     // XNA A=0 过门面（见注④）
+      });
+    }
+    const spec: TrailSpec = { set: 'RainbowRod', pts, opacity: 4, time: this.globalT };
+    const q = (renderer as unknown as { queueTrailShade?: (s: TrailSpec) => void }).queueTrailShade;
+    if (typeof q === 'function') q.call(renderer, spec);
+    else drawStripTrail(ctx, renderer, spec);
+  }
+
+  /** 79 头部（Main.cs 大列表段 :33143（79 在列）→ :33231-33236 覆写 → :33498-33512
+   *  光环支 → :33558-33562 公共本体绘制段）。绘制序=光环 6 团 → 本体白团。
+   *  ★BJ247 两处修正（BJ228 域,源码定谳）：
+   *  · 本体【双绘】1:1——光环支尾 :33511 与公共绘制段 :33558-33562 同参
+   *    (value95, vector81=中心, null, color87, num340=0, origin=中心, vector82,
+   *    dir=None) 各绘一次,加算 ≡ 2×亮;旧实现只画一次。
+   *  · spawn 回退退役——P.cs:725-735 SetDefaults 把 oldPos 全槽【清零】,全文件
+   *    oldPos 写点仅六处 mode 记录段 oldPos[0]=position（:17203/17213/17242/17254/
+   *    17287/17299）,无任何 position 预填 → 出生 12 拍内 oldPos[12]=Vector2.Zero,
+   *    :33234 dist(position,(0,0))=|position|≫32 → GetLerpValue=0 → scale=0
+   *    【本体不可见】。旧回退"strip<12 → 取最新记录=dist 0 满亮"偏离原版,退役
+   *    （紧凑 strip[12] 存在 ⇔ oldPos[12] 非零,与 Drawer 零停判据同构）。
+   *  vector82 = proj.scale(79=1)×GetLerpValue(32,0,dist(position,oldPos[12]))
+   *  （:33233-33235,BJ228 s79 等价式）；num340=0；color87=(255,255,255,0) 纯加算白
+   *  → 'lighter' ga=1（A=0 预乘直译,BJ228 既定口径）。
+   *  光环（:33499-33511）：scale13=vector82×1.4;自转轴径=2×scale13.X+cos(2πT)×0.4
+   *  （RotatedBy(num340+2πT)）,6 团各再转 i/6·2π;色=hslToRgb(i/6,1,.5)×0.3
+   *  【op_Multiply 截断入 byte,折进染色纹理】、A=0 加算;rotation=num340=0、
+   *  origin=中心。 */
+  private draw79Head(ctx: CanvasRenderingContext2D): void {
+    if (this.strip.length < 13) return;           // oldPos[12]=零槽 → scale 0（见注）
+    const img = projSprite(79);
+    if (!img || img.width <= 0) return;
+    const ref = this.strip[12];
+    const s79 = Math.max(0, Math.min(1, 1 - Math.hypot(this.cx - ref.x, this.cy - ref.y) / 32));
+    if (s79 <= 0.01) return;                      // GetLerpValue(32,0,·)≈0（快速飞行段）
+    const twoPi = Math.PI * 2;
+    const T = this.globalT;
+    const spinR = 2 * (1.4 * s79) + Math.cos(T * twoPi) * 0.4;     // :33500 轴径
+    const iw = img.width, ih = img.height;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = false;
+    for (let i = 0; i < 6; i++) {                 // :33501-33509 六团彩虹光环
+      const h79 = hueToRgb(i / 6, 0.5);
+      const tinted = tinted79(img, [
+        Math.max(0, Math.min(255, Math.trunc(h79[0] * 0.3))),      // ×0.3 截断（:33505）
+        Math.max(0, Math.min(255, Math.trunc(h79[1] * 0.3))),
+        Math.max(0, Math.min(255, Math.trunc(h79[2] * 0.3))),
+      ]);
+      if (!tinted) continue;
+      const ang = T * twoPi + (i / 6) * twoPi;   // :33500/:33502 两次 RotatedBy 合成
+      const w = iw * 1.4 * s79, h = ih * 1.4 * s79;
+      ctx.drawImage(tinted, this.cx + Math.cos(ang) * spinR - w / 2,
+        this.cy + Math.sin(ang) * spinR - h / 2, w, h);
+    }
+    const w = iw * s79, h = ih * s79;             // :33511 + :33558-33562 双绘
+    ctx.drawImage(img, this.cx - w / 2, this.cy - h / 2, w, h);
+    ctx.drawImage(img, this.cx - w / 2, this.cy - h / 2, w, h);
+    ctx.restore();
   }
 }
 

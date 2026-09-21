@@ -379,11 +379,16 @@ export namespace drawDukeAfterimages {
 //  · 记录面 = NPC.UpdateNPC_UpdateTrails mode 2（NPC.cs:91893-91992；NPCID.cs:4769
 //    `473,2,474,2,475,2,476,2`）——仅空中攻击态（(int)ai[0]==4 含 4.1 真俯冲/5/6）
 //    展开历史，其余态全槽=当前位置（清零）。记录端本仓 recordTrailHistory 承载。
-//  · 绘制面 = DrawNPC 通用拖尾块形状（Main.cs:23628-23643：oldPos[i]+size/2 定位、
-//    alpha×=(num52-i)/num55（num52=TrailCacheLength 10/num55=15 缺省除数）、scale 恒
-//    npc.scale、同帧 rCurrentNPC.frame）——★原版 Main.cs 无 473-476 特支（DrawNPCDirect
-//    :22691-26712 残影族全表逐块亲读不含,1458 对拍同,登记债），按 TrailingMode 系统
-//    语义 + 用户参考图补缺；i=1..9 步 1（mode 2 记录步长 1,非 Duke 家族步 2）。
+//  · 绘制面 = ★BJ248 勘误（2026-09-21 R2 复核翻案 BJ175b「原版无特支」判据）：
+//    原版【有】473-476 专支——Main.cs:26436-26451（1458 同号逐字节同）aiStyle 87
+//    后绘 extras 区残影支：`else if (aiStyle==87)` 内 `ai[0]==4||5||6` 态门、i=1..9、
+//    α 四通道 = 0.5×ch×(10−i)/20（:26444-26447）+ GetShimmerColor 染色（:26448，本仓
+//    无逐实体微光染色管线→恒等备案，同 BJ209/94/120/137/138 惯例）、同帧
+//    rCurrentNPC.frame、oldPos[i]+size/2 定位（:26449）。BJ175b 旧注引用的
+//    :23628-23643 通用块 α=(10−i)/15 系张冠李戴，已废。
+//    ★z 序同步翻案：:26436 在本体链（:25645+）之后的后绘 extras 区=【本体之上】
+//    （BJ237 drawNpcTrailGhostsOverBody 组，477/479 :26396 块之后）——BJ175b 旧
+//    「本体之下」挂点+旧 α 均纠偏（Renderer 挂点已迁）。
 //  · 非空中态整环已清零,残影与本体重合——此处仍按记录门短路（零绘制开销,swperf 同族）。
 export function drawMimicAfterimages(
   ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
@@ -399,7 +404,7 @@ export function drawMimicAfterimages(
   const depth = e.historyDepth();
   for (let i = 1; i < 10; i++) {
     if (i >= depth) continue;
-    const alpha = (10 - i) / 15;                       // :23634 (num52-num73)/num55
+    const alpha = (0.5 * (10 - i)) / 20;               // :26444-26447 0.5×ch×(10−i)/20 四通道均值
     const ox = e.histXAt(i) + e.w / 2 - frame.sw * s / 2;
     const oy = e.histYAt(i) + e.h / 2 - frame.sh * s / 2;
     ctx.save();
@@ -430,7 +435,8 @@ export function drawMimicAfterimages(
 //   内段位即本体；默认路径前绘组 94 :25472 / 125-131,139,140 :25486 / 417 :25499 /
 //   419 :25517 / 516 :25573（418 :25535 同组，本仓 drawCoriteTrail 前绘位已同相）。
 //   【本体之上】后绘 extras 区（本体链之后）：120 :26015 / 137,138 :26030、
-//   克眼冲刺 4 :26361、471 :26383、477,479 :26396。
+//   克眼冲刺 4 :26361、471 :26383、477,479 :26396、473-476 aiStyle 87 :26436（★BJ248
+//   归位：BJ175b 旧判「本体之下+无特支」被 R2 复核翻案,挂点/α 同刀纠偏）。
 //   BJ209 曾统一 restore 后挂点=全部本体之上（前绘族盖住本体；426 首影 α≈0.667
 //   静止时洗白本体）——登记债，本刀清偿。426/620 等环族另见 BJ211 环位（残影先于环）。
 // 颜色登记偏差：原版 GetAlpha(npcColor)=光照色×alpha/255 与 GetShimmerColor(94/120/

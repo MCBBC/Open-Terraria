@@ -7589,16 +7589,10 @@ export class Renderer {
               [1, 1, 1]);
           }
         }
-        // 473-476 大宝箱怪拖影（TrailingMode=2 老位历史残影——记录面 UpdateNPC_UpdateTrails
-        // mode 2 :91918-91934 态门 4/4.1/5/6；绘制面通用拖尾块形状 :23628-23643,
-        // ★原版 Main.cs 无 473-476 特支,按系统语义+用户参考图补缺,详见 npcExtraParts 注）
-        if (e.vanillaId === 473 || e.vanillaId === 474 || e.vanillaId === 475 || e.vanillaId === 476) {
-          const frMimic = this.atlas.vnpc(e.vanillaId, vanillaFrameIdx(e, Math.max(1, e.vanilla?.frames ?? 1)));
-          if (frMimic) {
-            drawMimicAfterimages(ctx, e, this.atlas,
-              { sx: frMimic.sx, sy: frMimic.sy, sw: frMimic.sw, sh: frMimic.sh });
-          }
-        }
+        // 473-476 大宝箱怪拖影：★BJ248 迁至【本体之上】挂点（本体 restore 后,
+        // drawNpcTrailGhostsOverBody 下方）——原版 Main.cs:26436-26451 aiStyle 87
+        // 在后绘 extras 区=本体链之后（477/479 :26396 块之后紧邻）；曾误挂本
+        // pre-transform 位（BJ175b「原版无特支/本体之下」判据被 R2 复核翻案）。
         // 399 火星探测器逃跑扫描束 + 418 Corite 拖尾（DrawNPC 附加层审计补缺）
         if (e.vanillaId === 399) drawMartianProbeBeams(ctx, e, this.atlas, 0);
         if (e.vanillaId === 418) drawCoriteTrail(ctx, e, this.atlas);
@@ -8128,6 +8122,13 @@ export class Renderer {
             scale, addY: addY + footFlush, opacity: 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
             rot: gRot, mirror: gMirror, frameIdx, frames,
           });
+        }
+        // 473-476 大宝箱怪拖影（★BJ248 归位：Main.cs:26436-26451 aiStyle 87 后绘
+        // extras 区残影支=本体链之后,477/479 :26396 块之后紧邻——同帧 rCurrentNPC
+        // .frame 直接复用本体帧 r；α=0.5×(10−i)/20+GetShimmerColor 染色,本仓无逐实体
+        // 微光染色管线→恒等备案同 BJ209 惯例。记录面 mode 2 态门 4/4.1/5/6 不变）
+        if (e.vanillaId === 473 || e.vanillaId === 474 || e.vanillaId === 475 || e.vanillaId === 476) {
+          drawMimicAfterimages(ctx, e, this.atlas, { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh });
         }
         // 星璇塔护盾半球（在精灵之后叠画，对齐原版 DrawNPC 尾段顺序）
         if (isTowerId(e.vanillaId)) this.drawTowerShield(e, world);

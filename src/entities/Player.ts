@@ -1244,6 +1244,11 @@ export class Player extends Entity {
    *  （:54211-54212）；Update_AmmoCycler :28632-28638 走完归 0 拍把 offset 复位
    *  = 停火 useAnimation+120t 后轮换回第一组弹药 */
   ammoCyclingCooldown = 0;
+  /** Player.snowBallLauncherInteractionCooldown（:1069）：雪球发射器 tile 212 右键
+   *  手动发射冷却（TileInteractionsUse :32370 门 `<=0` → 命中置 7 :32373）。
+   *  与导线路径的 Wiring.snowballCannonCoolDown（15t+CheckMech）是两套独立冷却——
+   *  本字段在 Player.Update 递减（:24752-24756 myPlayer 门） */
+  snowballLauncherInteractionCooldown = 0;
   /** Player.ammoCyclingOffset（:1231）：每发 ++（:54213）、Random 模式直写
    *  Main.rand.Next()（:54214-54217）；选弹 = offset % 兼容弹药组数（:54346） */
   ammoCyclingOffset = 0;
@@ -3151,6 +3156,9 @@ export class Player extends Entity {
   }
 
   private update1457AccBodies(game: GameHooks): void {
+    // Player.Update 主体的雪球发射器右键冷却递减（:24752-24756，myPlayer 门；
+    // 原版位置紧邻 Update_SnappingStone/HarpyCharm/AmmoCycler 之前）
+    if (this.snowballLauncherInteractionCooldown > 0) this.snowballLauncherInteractionCooldown--;
     // Update_AmmoCycler（:28632-28638）：冷却走完归 0 拍把轮换偏移复位
     if (this.ammoCyclingCooldown > 0 && --this.ammoCyclingCooldown === 0) {
       this.ammoCyclingOffset = 0;
@@ -4846,11 +4854,18 @@ export class Player extends Entity {
 
     // 水平（敏捷 Buff 提速 + 装备移速（赫尔墨斯靴族 runSpeed/词缀 73-76）；蜂蜜比水更黏滞）
     const eqEarly = eqM;
-    // ---- 折叠凳（UpdatePortableStoolUsage :28727-28739 1:1；原版每 tick
-    //      ResetEffects 清 IsInUse+ResizeHitbox 回 42 后按条件重长）----
+    // ---- 折叠凳（UpdatePortableStoolUsage :29425-29438（1456 :28727-28739）1:1；
+    //      原版每 tick ResetEffects 清 IsInUse+ResizeHitbox 回 42 后按条件重长）----
     if (this.stoolInUse) { this.y += Player.STOOL_BOOST; this.h -= Player.STOOL_BOOST; this.stoolInUse = false; }
-    if (eqEarly.stepStool && this.inputUp && !this.ridingMount
-      && this.vx === 0 && this.vy === 0
+    // ★BJ249 补门（:29427 flag=HasAStool && controlUp && !gravControl && !mount.Active
+    //  && v==0 && !pulley && grappling[0]==-1）：①!gravControl=重力药水（buff 18
+    //  Gravitation）态禁凳——重力地球仪 1131 走 gravControl2 不在门内=不禁凳；
+    //  ②!pulley=绳上悬挂态禁凳。时序同相：原版抓绳门（:26320）晚于本门（:25844）
+    //  →读上一 tick pulley;本仓 findPulley（fixedUpdate :5047）同样晚于本块
+    if (eqEarly.stepStool && this.inputUp
+      && !this.buffs.has(BuffType.Gravitation)
+      && !this.ridingMount
+      && this.vx === 0 && this.vy === 0 && !this.pulley
       && !this.grappleProjs.some((g) => g.latched)
       && this.canFitSpaceUp(Player.STOOL_BOOST, world.store)) {
       this.y -= Player.STOOL_BOOST;

@@ -322,7 +322,10 @@ export function fireplaceAddFrY(frameX: number): number {
  *  裁剪，顺带消灭动画家具跨 chunk 的陈旧溢出行隐患。范围=TILE_ANIM_RATE 全表
  *  ∪ 笼族 ∪ 矿车轨道 314。 */
 export function isDynamicAnimSheet(sheet: number): boolean {
-  return TILE_ANIM_RATE[sheet] !== undefined || sheet === 314 || !!cageFamilyOf(sheet);
+  // ★BJ248：719 彩虹云（TileDrawing.cs:4608-4616 14 相时-位钟,GTW×15 真实时钟驱动,
+  //   AnimateTiles 无 719 tileFrame 写位=禁入 RATE/FRAMES/PITCH 三表〔golden「无多」
+  //   锁〕）——314 同款特判进动态层；否则 chunk 烘焙相位定格（507/508 同族病）。
+  return TILE_ANIM_RATE[sheet] !== undefined || sheet === 314 || sheet === 719 || !!cageFamilyOf(sheet);
 }
 
 /** 齿轮块 272（TileDrawing.cs:1137-1147 case 272 verbatim）：addFrY =

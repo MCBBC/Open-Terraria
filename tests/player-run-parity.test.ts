@@ -278,6 +278,63 @@ describe('折叠凳（Step Stool 4341:站定+按上 → 命中盒 +26/jump +5/�
     expect(p.vy).toBeLessThan(-4);   // -5.01 起跳+当拍重力 0.4 → ≈-4.61
   });
 
+  // ★BJ249 F3 补门面（原版 :29427 flag=…&& !gravControl && … && !pulley && …）：
+  //  重力药水（buff 18/BuffType.Gravitation=61）禁凳;地球仪 1131 走 gravControl2
+  //  不在门内=不禁凳;绳上悬挂（pulley）禁凳。
+  it('BJ249 重力药水态禁凳（!gravControl 门）;重力地球仪态不禁凳', async () => {
+    const w = new World(200, 80, 30, 'stool-grav');
+    for (let x = 0; x < 200; x++) { w.store.setTileSilent(x, 70, 1, 0, 0); w.store.setTileSilent(x, 71, 1, 0, 0); }
+    const game = makeGame(w);
+    const inv = new (await import('../src/items/Inventory')).Inventory();
+    const { ITEM_BY_KEY } = await import('../src/data/items');
+    const { vanillaItemKey } = await import('../src/data/vanillaRecipes');
+    const { BuffType } = await import('../src/stats/Buffs');
+    const { playerAccessoryVidEquipped } = await import('../src/stats/builderAcc');
+    // 药水态：加 buff → 按上不生长
+    const p1 = new Player(60 * TILE, 66 * TILE, inv);
+    p1.inv.armor[3] = { id: ITEM_BY_KEY[vanillaItemKey(4341)!], stack: 1 };
+    for (let i = 0; i < 30; i++) step(p1, game);
+    p1.buffs.apply(BuffType.Gravitation, 5);
+    expect(p1.buffs.has(BuffType.Gravitation)).toBe(true);
+    p1.inputUp = true;
+    step(p1, game);                       // 当帧（站立 vy==0）:!gravControl 门面拦截
+    expect(p1.stoolInUse).toBe(false);
+    expect(p1.h).toBe(42);
+    for (let t = 0; t < 19; t++) step(p1, game);   // 翻转重力倒挂面照旧（vy 门自然面）
+    expect(p1.stoolInUse).toBe(false);
+    // 地球仪态：装备 1131（gravControl2 载体,不在门内=不禁凳）。Up 按下沿同时是
+    //  重力翻转沿（updateGravityControls,原版同相复合面）——凳门面不拦:按下沿当帧
+    //  凳照长（药水态当帧即被 !gravControl 拦=两面判别）;随后倒挂 vy≠0 由 vy 门
+    //  自然缩回（物理面,非门面）
+    const p2 = new Player(60 * TILE, 66 * TILE, inv);
+    p2.inv.armor[3] = { id: ITEM_BY_KEY[vanillaItemKey(4341)!], stack: 1 };
+    p2.inv.armor[4] = { id: ITEM_BY_KEY[vanillaItemKey(1131)!], stack: 1 };
+    expect(playerAccessoryVidEquipped(p2.inv.armor, p2.inv.accSlotMax, 1131)).toBe(true);
+    for (let i = 0; i < 30; i++) step(p2, game);
+    p2.inputUp = true;
+    step(p2, game);                       // upEdge 帧:凳门无 gravControl2 → 当帧长凳
+    expect(p2.stoolInUse).toBe(true);
+    expect(p2.h).toBe(68);
+    for (let t = 0; t < 10; t++) step(p2, game);   // 倒挂离地 → vy≠0 自然缩回
+    expect(p2.stoolInUse).toBe(false);
+  });
+
+  it('BJ249 绳上悬挂态禁凳（!pulley 门）', async () => {
+    const w = new World(200, 80, 30, 'stool-pulley');
+    for (let x = 0; x < 200; x++) { w.store.setTileSilent(x, 70, 1, 0, 0); w.store.setTileSilent(x, 71, 1, 0, 0); }
+    const game = makeGame(w);
+    const inv = new (await import('../src/items/Inventory')).Inventory();
+    const { ITEM_BY_KEY } = await import('../src/data/items');
+    const { vanillaItemKey } = await import('../src/data/vanillaRecipes');
+    const p = new Player(60 * TILE, 66 * TILE, inv);
+    p.inv.armor[3] = { id: ITEM_BY_KEY[vanillaItemKey(4341)!], stack: 1 };
+    for (let i = 0; i < 30; i++) step(p, game);
+    p.inputUp = true;
+    for (let t = 0; t < 20; t++) { p.pulley = true; step(p, game); }   // 悬挂态逐帧保持（findPulley 在本块后刷新,同原版 :26320 晚于 :25844 时序）
+    expect(p.stoolInUse).toBe(false);
+    expect(p.h).toBe(42);
+  });
+
   it('头顶有顶棚时 CanFitSpace 拦截(不生长)', async () => {
     const w = new World(200, 80, 30, 'stool-roof');
     for (let x = 0; x < 200; x++) { w.store.setTileSilent(x, 70, 1, 0, 0); w.store.setTileSilent(x, 71, 1, 0, 0); }

@@ -75,6 +75,16 @@ export interface TooltipContext {
    *  wornH/B/L = 玩家 GetEffectiveArmor(0/1/2) 的 vid（ArmorSetBonus.QueryContext
    *  :18-41 语义,空槽=0）。缺省（道具搜索行等无槽位上下文）= 非佩戴悬停 */
   setBonusHover?: { worn: boolean; wornH: number; wornB: number; wornL: number };
+  /** ★BJ249 F1 金币枪门（Main.cs:20861，1458 同式 :20859）：vid∈[71,74]（金币
+   *  25/50/100/200 伤害面）需玩家背包 58 格持有金币枪 905（Player.HasItem(int type)
+   *  = inventory[0..57] 逐槽,Player.cs:56551-56561）才出伤害/暴击/速度/击退四行。
+   *  UI 侧注入（BJ224 setBonusHover 注入式）;缺省 false=无金币枪 */
+  hasCoinGun?: boolean;
+  /** ★BJ249 F2 首用提示行（Main.cs:21519-21522 flag2 && ShowLoadoutShareHint——
+   *  flag2=canLoadoutShareAt 内无共享来源且未收藏,:20823-20838）：原版行序在套装行
+   *  （:21473-21517）后、研究行（:21521）前;旧实现置行族头部与原版不符。门由 UI 侧
+   *  算好传入（装备/染料域 + 无共享来源 + 未收藏 + ShowLoadoutShareHint 持久化） */
+  loadoutShareHint?: boolean;
 }
 export type TooltipSlot = { id: number; stack: number; prefix?: number; favorited?: boolean };
 
@@ -265,7 +275,15 @@ export function buildTooltipBody(
     summon: true, useStyle: 5,
   } as NonNullable<typeof c> : c;
   const f2 = f ?? (whipData ? { summon: 1, useStyle: 5, shoot: whipData.proj } as NonNullable<typeof f> : null);
-  if ((cd?.damage ?? 0) > 0) {
+  // ★BJ249 F1 三段门补全（Main.cs:20861，1458 同式 :20859）：damage>0 &&
+  //  (!notAmmo||useStyle!=0) && (vid<71||vid>74||背包持金币枪 905)。金币 71-74
+  //  SetDefaults 带战斗面（damage 25/50/100/200/ranged/shoot 158-161,Item.cs:2219-
+  //  2282）但门第三段管住——无 905 时伤害/暴击/速度/击退四行整缺;第一段本仓
+  //  数据面全表 notAmmo 10 件均 useStyle≠0（恒真面,仍按原式补防数据回填）。
+  //  notAmmo 读 f（itemFunc 提取域,Item.notAmmo）,useStyle 读 f2（whip 合成恒 5）
+  if ((cd?.damage ?? 0) > 0
+    && (!(f?.notAmmo ?? false) || (f2?.useStyle ?? f?.useStyle ?? 0) !== 0)
+    && (vid < 71 || vid > 74 || (ctx?.hasCoinGun ?? false))) {
     const kind = f2?.melee ? 'melee' : f2?.ranged ? 'ranged' : f2?.magic ? 'magic' : f2?.summon ? 'summon' : null;
     // :20516-20523：×ToolTipDamageMultiplier（回响族 ×2 显示）→ ×玩家乘区（+5e-6 舍入偏置）
     const mult = (player ? player.dmgMult[kind ?? 'melee'] : 1);
@@ -518,6 +536,11 @@ export function assembleTooltipLines(
   out.push(...body.expertMasterLines);
   out.push(...body.prefixDiff);
   out.push(...body.setBonusLines);
+  // ★BJ249 F2 首用提示行（Main.cs:21519-21522,1458 同位 :21519）：行序=套装行后、
+  //  研究行前。色 OurFavoriteColor(255,231,69) α190≈0.75（:21520,UI.ts 旧串同值）
+  if (ctx.loadoutShareHint) {
+    out.push({ text: T('UI.ItemLoadoutShareHint'), color: 'rgba(255,231,69,0.75)', tag: 'loadouthint' });
+  }
   if (body.researchLine) out.push(body.researchLine);
   // 商店价格行（:20309-20402）：买入 tip[50]/卖出 tip[49]，币种四档着色
   // （:20380-20397 铂 220,220,198 / 金 224,201,92 / 银 181,192,193 / 铜 246,138,96；

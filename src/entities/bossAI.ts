@@ -463,17 +463,19 @@ export function skeletronHandAI(e: Enemy, game: GameHooks, player: Player | null
   e.x += e.vx; e.y += e.vy;
 }
 
-/** AI_015 史莱姆王(NPC.cs:43436-43735 全核 1:1,2026-08-19 台账 E 重写):
+/** AI_015 史莱姆王(NPC.cs:43576-43875 全核 1:1,2026-08-19 台账 E 重写;
+ *  ★BJ251 重锚——旧注 43436-43735 及本段全部 :43xxxx 系 1456 代际,1457 真锚
+ *  统一 +140(1456:43611 ai[0]+=2f ↔ 1457:43751,全域逐锚对拍内容全等,1458 同):
  *  落地充能起跳循环(ai0 从负回充,+2/t+血量分档;跳序 -8/-8/-6/-13、vx+4/4/4.5/3.5×dir)
  *  + 周期传送(ai2 无视线/高差>160 累计 300 → 缩身 60t → 落位淡入 30t;
  *  antiCheese(localAI[0]≥360 或距>2000)直落玩家脚底) + 掉血 5% 出 1-3 只
- *  小史莱姆(经典 1 号/专家 1/4 出 535,:43708-43734)。 */
-/** 史莱姆王传送目的地（Bottom 锚像素，= vanilla localAI[1]/[2]；despawn 支=世界角 :43485） */
+ *  小史莱姆(经典 1 号/专家 1/4 出 535,:43848-43874)。 */
+/** 史莱姆王传送目的地（Bottom 锚像素，= vanilla localAI[1]/[2]；despawn 支=世界角 :43625） */
 const kingTpDest = new WeakMap<Enemy, { x: number; y: number }>();
-/** localAI[0] anti-cheese 计数（:43504-43510 ≥360 或距玩家 >2000px → 落玩家脚底） */
+/** localAI[0] anti-cheese 计数（:43644-43650 ≥360 或距玩家 >2000px → 落玩家脚底） */
 const kingAntiCheese = new WeakMap<Enemy, number>();
 
-/** AI_015_KingSlime_FindTeleportSpot（:43402-43434 收敛）：外环 ±10/内环 ±7 收
+/** AI_015_KingSlime_FindTeleportSpot（:43542-43574 收敛）：外环 ±10/内环 ±7 收
  *  "上格净空的实心格、非岩浆、对玩家有视线"的落点随机取一；失败退 (±6,±2)；
  *  再失败落玩家脚底。返回 Bottom 锚像素。 */
 function kingFindTeleportSpot(e: Enemy, game: GameHooks, player: Player): { x: number; y: number } {
@@ -500,30 +502,30 @@ function kingFindTeleportSpot(e: Enemy, game: GameHooks, player: Player): { x: n
 }
 
 export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
-  // AI_015_KingSlime(NPC.cs:43436-43735)1:1 状态机:
+  // AI_015_KingSlime(NPC.cs:43576-43875)1:1 状态机:
   //  ai0 = 落地充能计数(负值回充,≥0 起跳;5/6 态复用为缩放计时)
   //  ai1 = 跳序 0→1→2→3→0(三小跳 + 一大跳)/5 缩身传送/6 淡入回归
   //  ai2 = 周期传送计数(无视线||高差>160 时累计)
   //  ai3 = 小史莱姆掉血水位(初值 lifeMax)
-  if (!e.bInit) { e.bInit = true; e.ai0 = -100; e.ai1 = 0; e.ai2 = 0; }  // :43454-43464
-  if (e.ai3 === 0 && e.hp > 0) e.ai3 = e.maxHp;                          // :43450-43453
+  if (!e.bInit) { e.bInit = true; e.ai0 = -100; e.ai1 = 0; e.ai2 = 0; }  // :43594-43604
+  if (e.ai3 === 0 && e.hp > 0) e.ai3 = e.maxHp;                          // :43590-43593
   let num = 1;          // 体型倍率(5/6 态缩放 1↔0.5)
-  let num2 = 1;         // :43442-43448 FTW 体型倍率:num3 = 2-(1-lifeRatio) = 1+lifeRatio
+  let num2 = 1;         // :43582-43588 FTW 体型倍率:num3 = 2-(1-lifeRatio) = 1+lifeRatio
   if (game.world.seedFlags?.getGoodWorld) num2 *= 2 - (1 - e.hp / e.maxHp);
   let flag2 = false;    // 传送态(5/6)=落地不充能
   let flag3 = false;    // 完全缩没(60t 起,dontTakeDamage)
-  // 玩家死/远距 3000px(:43466-43490):TargetClosest 二次判定后仍失败 →
+  // 玩家死/远距 3000px(:43606-43630):TargetClosest 二次判定后仍失败 →
   // EncourageDespawn(10) + 背对 + ai[2]=0/ai[0]=0/ai[1]=5 缩身传送世界角
   const ksd = player ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : Infinity;
   if (!player || player.dead || ksd > 3000) {
     e.encourageDespawn(10);
-    if (player) e.facing = player.cx < e.cx ? 1 : -1;   // :43472-43479 转身背对
+    if (player) e.facing = player.cx < e.cx ? 1 : -1;   // :43612-43619 转身背对
     if (e.ai1 !== 5 && e.ai1 !== 6) {
       e.ai2 = 0; e.ai0 = 0; e.ai1 = 5;
-      kingTpDest.set(e, { x: game.world.w * TILE, y: game.world.h * TILE });  // :43486-43487
+      kingTpDest.set(e, { x: game.world.w * TILE, y: game.world.h * TILE });  // :43626-43627
     }
   }
-  // ---- 常规周期传送(:43491-43513):玩家活/timeLeft>10/计数≥300/非传送态/落地 →
+  // ---- 常规周期传送(:43631-43653):玩家活/timeLeft>10/计数≥300/非传送态/落地 →
   //  计数清零进 5;antiCheese(localAI[0]≥360 或距>2000px)直落玩家脚底,否则 FindTeleportSpot
   if (player && !player.dead && e.despawnTimer > 10 && e.ai2 >= 300 && e.ai1 < 5 && e.onGround) {
     e.ai2 = 0; e.ai0 = 0; e.ai1 = 5;
@@ -531,14 +533,14 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
     const vec = Math.hypot(player.cx - e.cx, player.cy - e.cy);
     let antiCheese = false;
     if (ac >= 360 || vec > 2000) {
-      if (ac >= 360) { ac = 360; kingAntiCheese.set(e, ac); }   // :43505-43508 钳 360
+      if (ac >= 360) { ac = 360; kingAntiCheese.set(e, ac); }   // :43645-43648 钳 360
       antiCheese = true;
     }
     kingTpDest.set(e, antiCheese
-      ? { x: player.cx, y: player.y + player.h }   // :43404-43409 FindTeleportSpot(antiCheese)
+      ? { x: player.cx, y: player.y + player.h }   // :43544-43549 FindTeleportSpot(antiCheese)
       : kingFindTeleportSpot(e, game, player));
   }
-  // ---- 反挂机计数(:43514-43529,每 tick 无地面门):无视线||高差>160 →
+  // ---- 反挂机计数(:43654-43669,每 tick 无地面门):无视线||高差>160 →
   //  ai[2]+1 且 localAI[0]+1;否则 localAI[0]−1 钳 0(曾写成恒 +1=语义反,2026-08-19)。
   //  视线 = Center↔Center 连线(CanHitLine 0×0);高差 = Top.Y↔player.Bottom.Y ----
   if (player) {
@@ -552,39 +554,39 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   }
   if (e.ai1 === 5) {
-    // 缩身传送态(:43537-43573):num = clamp((60-ai0)/60)×0.5+0.5;60t 起 flag3
+    // 缩身传送态(:43677-43713):num = clamp((60-ai0)/60)×0.5+0.5;60t 起 flag3
     // (隐没无敌);==60 Gore734 王冠;≥60 Bottom 锚落位 → 6 号;未隐没时每帧 10 蓝尘
     flag2 = true;
     e.ai0 += 1;
     num = Math.max(0, Math.min(1, (60 - e.ai0) / 60)) * 0.5 + 0.5;
     if (e.ai0 >= 60) flag3 = true;
     if (e.ai0 === 60) {
-      game.spawnParticles(e.cx, e.cy - e.h / 2, '#FFD060', 6, 2, { life: 40 }); // Gore 734 王冠(:43550)
+      game.spawnParticles(e.cx, e.cy - e.h / 2, '#FFD060', 6, 2, { life: 40 }); // Gore 734 王冠(:43690)
     }
     if (e.ai0 >= 60) {
       const dest = kingTpDest.get(e) ?? { x: game.world.w * TILE, y: game.world.h * TILE };
       e.x = dest.x - e.w / 2;
-      e.y = dest.y - e.h;                          // base.Bottom = (localAI[1], localAI[2])(:43554)
+      e.y = dest.y - e.h;                          // base.Bottom = (localAI[1], localAI[2])(:43694)
       e.ai1 = 6; e.ai0 = 0;
     }
-    if (!flag3) game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 1.2, { life: 30 });  // :43564-43571
+    if (!flag3) game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 1.2, { life: 30 });  // :43704-43711
   } else if (e.ai1 === 6) {
-    // 淡入回归态(:43574-43600):num = clamp(ai0/30)×0.5+0.5;30t 回战斗;到达尘 ×2 速
+    // 淡入回归态(:43714-43740):num = clamp(ai0/30)×0.5+0.5;30t 回战斗;到达尘 ×2 速
     flag2 = true;
     e.ai0 += 1;
     num = Math.max(0, Math.min(1, e.ai0 / 30)) * 0.5 + 0.5;
     if (e.ai0 >= 30) { e.ai1 = 0; e.ai0 = 0; }
-    game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 2.4, { life: 30 });  // :43594-43599
+    game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 2.4, { life: 30 });  // :43734-43739
   }
-  e.dontTakeDamage = flag3;      // :43601 dontTakeDamage = (hide = flag3)
+  e.dontTakeDamage = flag3;      // :43741 dontTakeDamage = (hide = flag3)
   // (旧 e.squash=(1-num)*1.2 体型近似已退役:只喂 legacy slime* 程序化兜底渲染,
   //  v_50 走原版贴图路径读 vanillaScale——曾致传送缩身无视觉。真 scale 见下段)
   if (e.onGround) {
-    // 落地(:43602-43663):vx 阻尼 0.8(<0.1 归零);非传送态充能起跳
+    // 落地(:43742-43803):vx 阻尼 0.8(<0.1 归零);非传送态充能起跳
     e.vx *= 0.8;
     if (e.vx > -0.1 && e.vx < 0.1) e.vx = 0;
     if (!flag2) {
-      // :43611-43631 充能 +2/t + 血量分档(<80 +1/<60 +1/<40 +2/<20 +3/<10 +4 = +2..+13)
+      // :43751-43771 充能 +2/t + 血量分档(<80 +1/<60 +1/<40 +2/<20 +3/<10 +4 = +2..+13)
       e.ai0 += 2;
       if (e.hp < e.maxHp * 0.8) e.ai0 += 1;
       if (e.hp < e.maxHp * 0.6) e.ai0 += 1;
@@ -592,7 +594,7 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (e.hp < e.maxHp * 0.2) e.ai0 += 3;
       if (e.hp < e.maxHp * 0.1) e.ai0 += 4;
       if (e.ai0 >= 0) {
-        // 跳序(:43632-43656):ai1==3 → vy-13/vx+3.5dir/回充-200/回 0;
+        // 跳序(:43772-43796):ai1==3 → vy-13/vx+3.5dir/回充-200/回 0;
         // ai1==2 → vy-6/vx+4.5dir/回充-120/ai1+1;其余 → vy-8/vx+4dir/回充-120/ai1+1
         // (方向 = TargetClosest 的 direction,即玩家侧)
         const dir = player ? (player.cx > e.cx ? 1 : -1) : (e.facing || 1);
@@ -601,10 +603,10 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
         else if (e.ai1 === 2) { e.vy = -6; e.vx += 4.5 * dir; e.ai0 = -120; e.ai1 += 1; }
         else { e.vy = -8; e.vx += 4 * dir; e.ai0 = -120; e.ai1 += 1; }
       }
-      // :43658-43661 ai0 ≥ -30 = 起跳前蹲伏动画段(aiAction=1,squash 视觉)
+      // :43798-43801 ai0 ≥ -30 = 起跳前蹲伏动画段(aiAction=1,squash 视觉)
     }
   } else if (player) {
-    // 空中(:43664-43682):朝 direction 0.2/t 加速,限 |vx|<3(FTW 6);已反向时先 0.93 阻尼
+    // 空中(:43804-43822):朝 direction 0.2/t 加速,限 |vx|<3(FTW 6);已反向时先 0.93 阻尼
     const num7 = game.world.seedFlags?.getGoodWorld ? 6 : 3;
     const dir = e.facing || 1;
     if ((dir === 1 && e.vx < num7) || (dir === -1 && e.vx > -num7)) {
@@ -612,19 +614,19 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
       else e.vx *= 0.93;
     }
   }
-  // ---- 动态体型(:43687-43700):num9 = (life/max×0.5+0.75) × num(5/6 态传送
+  // ---- 动态体型(:43827-43840):num9 = (life/max×0.5+0.75) × num(5/6 态传送
   //  缩身 1↔0.5) × num2(FTW = 1+lifeRatio,满血 2×/濒死 1×)——每 tick 重算并
-  //  **重算碰撞盒** width=(int)(98f×scale)/height=(int)(92f×scale)(:43699-43700,
+  //  **重算碰撞盒** width=(int)(98f×scale)/height=(int)(92f×scale)(:43839-43840,
   //  (int) 截断;基值 98×92 = SetDefaults 数据),bottom-center 锚定
-  //  (:43695-43698 旧盒半宽/高进出对消)。受伤/传送即时生效;存档载入按 hp
+  //  (:43835-43838 旧盒半宽/高进出对消)。受伤/传送即时生效;存档载入按 hp
   //  重算自愈。渲染乘区 = vanilla.scale(json 1.25)×vanillaScale → 令乘积 = num9
-  //  (= 原版 npc.scale 直写 :43694),vanillaScale = num9/1.25(Enemy.ts:848 同式)。
+  //  (= 原版 npc.scale 直写 :43834),vanillaScale = num9/1.25(Enemy.ts:848 同式)。
   //  放在共享移动段之前 = 本 tick 碰撞即用新盒(原版 AI 内缩放先于 UpdateNPC) ----
   let num9 = e.hp / e.maxHp;
   num9 = num9 * 0.5 + 0.75;
   num9 *= num;
   num9 *= num2;
-  const oldHalfW = Math.trunc(e.w / 2), oldH = e.h;   // :43695-43696 旧盒进出对消
+  const oldHalfW = Math.trunc(e.w / 2), oldH = e.h;   // :43835-43836 旧盒进出对消
   e.w = Math.trunc(98 * num9);
   e.h = Math.trunc(92 * num9);
   e.x += oldHalfW - Math.trunc(e.w / 2);
@@ -634,8 +636,8 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
   e.applyGravity(game);
   moveAndCollide(e, game.world, e.vx, e.vy);
   if (e.hp <= 0) return;
-  // ---- 掉血 5% 出小史莱姆(:43708-43734):水位 ai3 每越线补记;1-3 只;
-  //  经典 1 号蓝史莱姆,专家 1/4 概率换 535(:43720-43723);体内随机点出、
+  // ---- 掉血 5% 出小史莱姆(:43848-43874):水位 ai3 每越线补记;1-3 只;
+  //  经典 1 号蓝史莱姆,专家 1/4 概率换 535(:43860-43863);体内随机点出、
   //  初速 Next(-15,16)*0.1 / Next(-30,1)*0.1、ai[0]=-1000*Next(3) ----
   const num10 = e.maxHp * 0.05;
   if (e.hp + num10 < e.ai3) {
@@ -961,7 +963,7 @@ export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
 
 // ================= 机械三王(NPC.cs AI_030-037,1.4.5.6 行号见各核注释) =================
 // 经典模式参数 1:1;getGoodWorld(FTW)分支已全量实装(克脑/双子/毁灭者/爬行者);
-// 专家/大师分支仅注释保留。史莱姆王 AI_015 的 FTW 分支(:43440/:43662)依赖的
+// 专家/大师分支仅注释保留。史莱姆王 AI_015 的 FTW 分支(:43580/:43802,★BJ251 重锚)依赖的
 // 基线行为(空中横移 num7=3、跳跃 num2 缩放)本仓未建模,无可挂载点,登记跳过。
 
 /** 原版速度逼近(L26539-26670 雏形):朝目标速度单轴步进,符号翻转时双倍步进 */

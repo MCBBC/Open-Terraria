@@ -55,6 +55,7 @@ function shell(w: World, drops: Drop[]): Game & Record<string, unknown> {
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} } as never;
   g.spawnBossOnPlayer = vi.fn();
   g.player = {
+    x: 5 * 16, y: 5 * 16,                  // 盒左上（BJ249 几何域:238 召王距离基准=玩家 position）
     cx: 5 * 16 + 8, cy: 5 * 16 + 8,        // 缺省远距（50 格召王门外）
     equipStats: {},
     inv: { accSlotMax: 0, armor: [], heldItem: () => null },
@@ -161,8 +162,10 @@ describe('BJ226 生命果 236 破面（镐/武器/复挖 + 花苞 238 对照）'
     placeJunglePlant2x2(st2, BULB, 20, 18, 0);
     const drops2: Drop[] = [];
     const g2 = shell(w2, drops2);
-    (g2.player as unknown as { cx: number; cy: number }).cx = 55 * 16 + 8;
-    (g2.player as unknown as { cx: number; cy: number }).cy = 200 * 16 + 8;
+    const pp2 = g2.player as unknown as { x: number; y: number; cx: number; cy: number };
+    pp2.x = 55 * 16; pp2.y = 200 * 16;       // ★BJ249:盒左上域同步
+    pp2.cx = 55 * 16 + 8;
+    pp2.cy = 200 * 16 + 8;
     g2.breakTile(20, 18, true, false, true);
     expect(drops2).toEqual([]);                     // 238 破坏不掉放置物（drop:null 同相）
     expect(tilesLeft(st2, 20, 18, BULB)).toBe(0);
@@ -177,8 +180,10 @@ describe('BJ226 生命果 236 破面（镐/武器/复挖 + 花苞 238 对照）'
     const drops: Drop[] = [];
     const g = shell(w, drops);
     // 锚格中心（20.5,18.5 格 = px 328/296）±50 格内置玩家
-    (g.player as unknown as { cx: number; cy: number }).cx = 20 * 16 + 8;
-    (g.player as unknown as { cx: number; cy: number }).cy = 18 * 16 + 8;
+    const pp = g.player as unknown as { x: number; y: number; cx: number; cy: number };
+    pp.x = 20 * 16; pp.y = 18 * 16;          // ★BJ249:盒左上域同步（新基准=被击格左上 vs 盒左上）
+    pp.cx = 20 * 16 + 8;
+    pp.cy = 18 * 16 + 8;
     g.breakTile(21, 19, true, false, true);
     expect(tilesLeft(st, 20, 18, BULB)).toBe(0);
     expect(g.spawnBossOnPlayer).toHaveBeenCalledTimes(1);
