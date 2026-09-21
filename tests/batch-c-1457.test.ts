@@ -290,7 +290,7 @@ describe('StormLightning(AI_203_StormLightning)', () => {
     const near = new StormLightning(1117, 800, 1440, 120, 10);
     const g2 = makeHooks([e2]);
     for (let i = 0; i < 5; i++) near.fixedUpdate(1 / 60, g2);
-    expect(Math.abs(near.cx - e2.cx)).toBeLessThanOrEqual(32);
+    expect(Math.abs(near.cx - (e2.cx as number))).toBeLessThanOrEqual(32);
   });
   it('1117 30t Kill→bolt 视觉余命 16f / ★R34-② 勘误:1122 timeLeft=1 出生首拍即落雷(SetDefaults :10447 + Update :17308 Kill 先于 AI)', () => {
     // 2026-08-24 r15 命中模型重写：ai[1]>=num → Kill 帧 doKill(bolt+伤害),

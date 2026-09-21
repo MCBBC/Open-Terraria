@@ -1,6 +1,5 @@
 // 箭矢图块碰撞回归:阻挡只看实心(Main.tileSolid 语义)——
 // 树干 solid:false 不挡箭(曾 tileType!==0 一刀切,箭被树挡住),实心块照常挡。
-import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
@@ -29,7 +28,9 @@ describe('箭矢穿过非实心图块', () => {
     expect(TILE_DEFS[TREE].solid).toBe(false);
     // 树干格在 (32, 16),箭水平飞入
     world.store.setTile(32, 16, TREE, 0, 0);
-    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1, VANILLA_ITEM_KEY_BY_ID[40]);
+    // ★BJ239:第 8 参旧=itemId 串,现 ctor 为 opts?: ArrowOpts——串入 opts 被可选链
+    //   全线忽略(运行等价 undefined),直接摘除死参。
+    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1);
     for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     // 穿过后应存活且已越过树格
     expect(arrow.dead).toBe(false);
@@ -41,7 +42,7 @@ describe('箭矢穿过非实心图块', () => {
     const DIRT = TILE_BY_KEY['dirt']!;
     expect(TILE_DEFS[DIRT].solid).toBe(true);
     world.store.setTile(32, 16, DIRT, 0, 0);
-    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1, VANILLA_ITEM_KEY_BY_ID[40]);
+    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1);   // ★BJ239:摘死参(同上)
     for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     expect(arrow.dead).toBe(true);
   });

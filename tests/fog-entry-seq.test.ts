@@ -21,7 +21,7 @@ beforeAll(async () => {   // 机器高载时模块图 transform 慢——放宽�
     get: (t, k) => (k === Symbol.toPrimitive ? () => 0 : anyStub()),
     set: () => true,
     apply: () => anyStub(),
-    construct: () => anyStub(),
+    construct: () => anyStub() as object,
   });
   (globalThis as Record<string, unknown>).document = { createElement: () => anyStub() };
   (globalThis as unknown as { addEventListener: unknown }).addEventListener = () => {};

@@ -85,7 +85,7 @@ describe('HorizonClouds 字节码锚（逐像素 shade 公式）', () => {
     texSumA, texR, frag[0], frag[1], draw[0], draw[1], cel[0], cel[1], uv[0], uv[1], intensity);
 
   it('锚1:实心云/远天体(d=80.16) → inner<0 被 #57 _sat 钳 0,shade=0,输出=贴图×v0', () => {
-    const v0 = [0.6, 0.62, 0.68, 0.9];
+    const v0: [number, number, number, number] = [0.6, 0.62, 0.68, 0.9];
     const out = runHC(solid, v0, [100, 50], [200, 60, 0.8], [0.4, 0.4], [120, 55])!;
     // shade=sat(inner·0.8)·D³:solid→A=0、inner=0.983·0.283−0.3=−0.0219<0 → shade=0
     // (2026-08-24 r15 _sat 修复:旧镜像无钳得 −0.0346 负 shade——字节码恒 ≥0)
@@ -223,7 +223,8 @@ describe('WaterDistortionObject 字节码锚（洗掠形状 washShapeValue）', 
   const runWash = (vColor: [number, number, number], t0: [number, number]) => {
     const pass = getPass('WaterDistortionObject')!;
     const u = defaultUniforms();
-    return execPixel(pass, u, [], t0, vColor);
+    // vColor 是 RGB 三元组;execPixel v0 形参为 RGBA 四元组——v0[3] 仍为 undefined（NaN 通道）,与改动前逐位同相
+    return execPixel(pass, u, [], t0, vColor as unknown as [number, number, number, number]);
   };
   it('内圈 r<2π:max(r,2π) 钳 → φ≈−0.0032 恒小负角,cosφ>0 → 恒零', () => {
     // vColor=(0,0.5,1):flowSigned=(−0.5,0);t0=(0.6,0.5):uvc=(0.1,0),r=2.512<6.28

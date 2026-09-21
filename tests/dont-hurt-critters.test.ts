@@ -77,7 +77,7 @@ describe('playerProjectileCanHitNpcGate（统一出口真值表）', () => {
     // 出生未黑化：静态提档 aiStyle=7（NPC.cs:12892-96；def.aiStyle 无值=静态判据
     // 恒假的直接证据）+ 谓词 false
     expect(sq.vanilla?.aiStyle).toBe(7);
-    expect(sq.def?.aiStyle ?? undefined).toBeUndefined();
+    expect((sq.def as { aiStyle?: number } | undefined)?.aiStyle ?? undefined).toBeUndefined();
     expect(isCritterThatIsHostileToPlayers(sq)).toBe(false);
     expect((sq as unknown as { blackenedCritter?: boolean }).blackenedCritter ?? false).toBe(false);
 

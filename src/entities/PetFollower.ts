@@ -1282,6 +1282,13 @@ export class PetFollower extends Entity {
     } else if (this.params.e.roll) ctx.rotate(this.rollRot);
     else if (flip) ctx.scale(-1, 1);
     if (this.projId === 764) ctx.globalAlpha *= this.starOpacity;
+    // ★BJ236（2026-09-21）：Wisp 211 GetAlpha（Projectile.cs:81329-81332,1457 实锚）
+    //  恒 (255,255,255,0) A=0 纯加算白（XNA 预乘
+    //  dst+=tex.rgb 满强,不读 α/光照）——'lighter' 直译=发光白精灵,source-over
+    //  直译=暗色实体（原版光宠观感=亮团）。同族 5/92/91/50 承接式（Arrow
+    //  ADDITIVE_GLOW_PROJS 惯例）。save/restore 块内设置,restore 自动还原。
+    //  SetDefaults（:2994-3004）无 alpha 行 ≡0、AI_026 211 支不写 α=恒满强。
+    if (this.projId === 211) ctx.globalCompositeOperation = 'lighter';
     // 帧按原像素尺寸 1:1 绘制（原版投射物 scale=1，判定盒小于贴图帧）
     ctx.drawImage(img, sx, sy, sw, sh, -sw / 2, -sh / 2, sw, sh);
     ctx.restore();

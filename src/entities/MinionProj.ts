@@ -24,6 +24,7 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
+import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';   // ★BJ235 随从残影（533/755/833-835）
 import { setTemporaryBubble, clearTemporaryBubble } from '../render/EmoteBubble';
 import { hitCritters, applyBannerDamageDealt } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -911,6 +912,22 @@ export class MinionProj extends Entity {
   /** 虎扑链状态（AI_067）：ai[0] 4=链发后等待 / ai[1]=剩余等待 tick（:46702-46718） */
   private tigerA0 = 0;
   private tigerA1 = 0;
+  /** ★BJ235 通用 oldPos 残影环（Projectile.cs:17197-17300 UpdateTrails 表驱动;
+   *  Main.cs:30609 通用表+逐型色/帧锚特支）。undefined=未初始化/null=该 id 无
+   *  记录式（随从活动集内 533/755/833/834/835 有 TrailingMode,余 id 缺省 -1 → null）。
+   *  533 ai0 态机=dA0（0-2 待机/3-5 蓄力/6-8 冲刺/9-11 归位——幽灵档 :31084-31098
+   *  只吃 6/7/8 冲刺三态）;833-835 色特支吃速度染（GHOST_TINT vxLen 面）+帧门锚。 */
+  private ghostRing?: ProjGhostRing | null;
+
+  /** ★BJ235 每拍记录（UpdateTrails :17198=Damage 后同序——随从无 extraUpdates,
+   *  1 子步/拍;调用位=fixedUpdate 尾 contact 后=原版 Damage→UpdateTrails 同位）。
+   *  533 冲刺态 dA0∈[6,8] 才展开环（:31084-31098 幽灵档 resolveGhostLoop 门）。 */
+  private recordGhostTrail(): void {
+    if (this.ghostRing === undefined) {
+      this.ghostRing = projTrailingMode(this.projId) >= 0 ? new ProjGhostRing(this.projId) : null;
+    }
+    this.ghostRing?.record(this.x, this.y, this.rot, this.facing >= 0 ? 1 : -1, true);
+  }
   /** 守护者 AI_120 状态（ai[0]/ai[1]/frameCounter/retarget 计数） */
   private gA0 = 0;
   private gA1 = -1;
@@ -5780,6 +5797,8 @@ export class MinionProj extends Entity {
     // 乌鸦外通用飞行族等）= 原版缺省 -2 → 吃玩家全局免工件窗
     // （Projectile.cs:466 缺省 + Damage_PVE_Inner immune[owner] 门 :12636）
     this.contact(game, dmg0);
+    // ★BJ235 残影记录（UpdateTrails :17198——Damage 后同序;无记录式 id 环=null 短路）
+    this.recordGhostTrail();
     // 玩家死亡/过远不消失（原版随从持续到上限驱逐或卸装）——仅跟随
     void TILE;
   }
@@ -6018,6 +6037,32 @@ export class MinionProj extends Entity {
       frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
     }
     const img = projFrameImg(this.projId, frame);
+    // ---- ★BJ235 随从通用残影（Main.cs:30609-31400 通用表;原版残影块先于本体绘制）——
+    //      533 致命球（ai0 三态冲刺档 :31084-31098,dA0 直喂）/ 755 血蝙蝠（Crimson 特支
+    //      :31190-31192）/ 833-835 沙漠虎（速度染+底心锚帧门 :30706-30721/:31307-31314）。
+    //      ghostRing 非空才有记录式——其余随从 id mode=-1 短路零开销。 ----
+    if (this.ghostRing) {
+      const gimg = projSprite(this.projId);
+      if (gimg && gimg.width > 0) {
+        drawProjGhosts(ctx, {
+          ring: this.ghostRing,
+          id: this.projId,
+          tex: gimg,
+          frames: projFrameCount(this.projId),
+          frame,
+          bodyW: this.w, bodyH: this.h,
+          bodyRot: this.rot,
+          bodyScale: 1,
+          bodyAlpha: this.alphaFade > 0 ? Math.max(0, (255 - this.alphaFade) / 255) : 1,
+          ai0: this.projId === 533 ? this.dA0 : 0,
+          ai1: 0,
+          timeLeft: 3600,
+          opacity: 1,
+          vxLen: Math.hypot(this.vx, this.vy),
+          spriteDirection: this.facing >= 0 ? 1 : -1,
+        });
+      }
+    }
     // ---- ★三轮蓝队 F5①：爆炸烈焰塔 663/665/667 半帧专绘（Main.cs:34075-34086）----
     // 原版帧内是【左右两半镜像塔身】（rectangle23.Width/=2 后按 ai[2] 选半——ai[2]==1
     // 哨兵背包携行态取右半,已接,见下方 sx）；锚 = Bottom 系：

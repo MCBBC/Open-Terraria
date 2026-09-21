@@ -150,7 +150,7 @@ describe('SW-FX38b 营火群系自动转换：解锁后放普通营火按当期�
   });
 
   it('★优先序与火把表差异：glowshroom>temple>dungeon（火把序 dungeon→temple→glowshroom）', () => {
-    const seq: ZoneFlags[] = [
+    const seq: Array<ZoneFlags & { deep?: boolean }> = [   // deep=zoneUnderworldHeight 深带支（shell 内 scene 快照运行时已携带）
       { zoneGlowshroom: true, zoneDungeon: true },     // 营火 glowshroom 先 → 14;火把同景 dungeon 先
       { zoneTemple: true, zoneDungeon: true },         // 营火 temple 先 → 13;火把同景 dungeon 先
       { zoneDungeon: true, zoneUnderworldHeight: true }, // 两表同序 dungeon → 7

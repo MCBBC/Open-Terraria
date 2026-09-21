@@ -178,7 +178,7 @@ describe('收口3 v3 裸下标段:mapLegacySlot 顺序无关(快照键链)', () 
     const player = new Player(100, 100, new Inventory());
     const data = JSON.parse(saveGame(world, player, 0)) as SaveData;
     data.version = 3;                                          // 强制 v3 面(armor 走 mapLegacySlot)
-    delete (data as Record<string, unknown>).idScheme;
+    delete (data as unknown as Record<string, unknown>).idScheme;
     data.player.armor = [{ id: j, stack: 1 }];
     const { player: p3 } = loadSaveData(data);
     expect(p3.armor?.[0]?.id).toBe(cur);                       // 快照键→key→当前内部 id
@@ -471,7 +471,7 @@ describe('收口7 .plr 导出向:netIdOf vid 恒等回写(vi_ 门/SW 件归 0)',
     shirtColor: { r: 0, g: 0, b: 0 }, undershirtColor: { r: 0, g: 0, b: 0 },
     pantsColor: { r: 0, g: 0, b: 0 }, shoeColor: { r: 0, g: 0, b: 0 },
     voiceVariant: 0, voicePitchOffset: 0,
-  } as Parameters<typeof exportPlr>[0];
+  } as unknown as Parameters<typeof exportPlr>[0];
   it('导出 vid 域字面量(1291/4/1),非内部下标(1/1327/…)——BJ146 掩蔽对两向钉死', () => {
     const bytes = exportPlr(appearance, mkState());
     const p = parsePlr(bytes);

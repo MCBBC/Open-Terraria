@@ -250,12 +250,31 @@ describe('BJ228 ④荧光棒族加算接线（GlowstickProj.draw,GetAlpha :81020
     }
   });
 
-  it('1089 彩虹荧光棒:lighter + ga=70/255 + hue-rotate（Disco 档）', () => {
+  it('1089 彩虹荧光棒（无钟回退档）:lighter + ga=70/255（hue-rotate 旧近似退役）', () => {
     const recs = drawGlowstick(1089);
-    const pass = recs.find((r) => r.op === 'lighter' && r.imgs >= 1);
+    const pass = recs.find((r) => r.imgs >= 1);
     expect(pass).toBeDefined();
     expect(pass!.alpha).toBeCloseTo(70 / 255, 3);
-    expect(pass!.filter).toContain('hue-rotate');
+    // 无 lighting.clock（node 直测）回退=BJ228 旧 'lighter' 合成档（登记等价面）
+    expect(pass!.op).toBe('lighter');
+  });
+
+  it('1089 基色相位 1:1（★BJ236）:discoColor 直读 → 乘面 source-over×70/255', () => {
+    const seen: Array<readonly [number, number, number]> = [];
+    GlowstickProj.discoTintOverride = (img, rgb) => { seen.push(rgb); return img; };
+    try {
+      const g = new GlowstickProj(80 * TILE, 100 * TILE, 1, 0, 1089);
+      const fakeClock = { discoColor: (): [number, number, number] => [1, 0.5, 0] };
+      const { ctx, recs } = mkCtx();
+      g.draw({ ctx, lighting: { clock: fakeClock } } as never, {} as never);
+      const pass = recs.find((r) => r.imgs >= 1);
+      expect(pass).toBeDefined();
+      expect(pass!.op).toBe('source-over');       // AlphaBlend 直译（1089=A70 非 A0 族）
+      expect(pass!.alpha).toBeCloseTo(70 / 255, 3);
+      expect(seen[0]).toEqual([1, 0.5, 0]);       // 基色=FlickerClock.discoColor() 直读
+    } finally {
+      GlowstickProj.discoTintOverride = null;
+    }
   });
 
   it('473 探矿荧光棒维持常规合成（GetAlpha :81168 White ≡ 缺省白光,零差）', () => {

@@ -17,7 +17,7 @@ function makeGame(): GameHooks {
   } as unknown as GameHooks;
 }
 const drive = (e: Enemy, fn: string) =>
-  (e as unknown as Record<string, (g: GameHooks, p: unknown) => void>)[fn];
+  (e as unknown as Record<string, (g: GameHooks, p?: unknown) => void>)[fn];
 
 describe('AI 全量审计严重项回归(2026-08-19)', () => {
   it('仙灵 583:状态1 背向玩家逃逸(非追随)', () => {

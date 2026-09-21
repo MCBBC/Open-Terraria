@@ -7,11 +7,9 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import {
-  isFrameworkFunc, shortUrl, summarizeProfile, parseTrace, fpsStats,
-  aggregateSegments, buildSelfCheck, compareWithBaseline, renderReportMd, LONG_TASK_US,
-  classifyGpuRenderer,
-} from '../tools/probe/lib/perf-analyze.mjs';
+// @ts-expect-error - untyped .mjs harness module
+import { isFrameworkFunc, shortUrl, summarizeProfile, parseTrace, fpsStats, aggregateSegments, buildSelfCheck, compareWithBaseline, renderReportMd, LONG_TASK_US, classifyGpuRenderer } from '../tools/probe/lib/perf-analyze.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { BIOME_STOPS, STRESS_FACTORS } from '../tools/probe/lib/perf-scenarios.mjs';
 
 const GAME = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -232,7 +230,7 @@ describe('IIIII239 compareWithBaseline(基线回归检测)', () => {
 describe('IIIII239 场景数据面守卫(BIOME_STOPS 签名键/因子表)', () => {
   const tiles = readFileSync(join(GAME, 'src/data/tiles.ts'), 'utf8');
   it('BIOME_STOPS 覆盖任务面 14 群落', () => {
-    expect(BIOME_STOPS.map((s) => s.key)).toEqual([
+    expect(BIOME_STOPS.map((s: { key: string }) => s.key)).toEqual([
       'forest', 'corrupt', 'crimson', 'jungle', 'hallow', 'snow', 'desert', 'ocean',
       'underground', 'hell', 'space', 'temple', 'dungeon', 'mushroom',
     ]);
@@ -247,8 +245,8 @@ describe('IIIII239 场景数据面守卫(BIOME_STOPS 签名键/因子表)', () =
     expect(missing).toEqual([]);
   });
   it('space/underground 无签名键也合法(band 特例)', () => {
-    expect(BIOME_STOPS.find((s) => s.key === 'space')!.band).toBe('space');
-    expect(BIOME_STOPS.find((s) => s.key === 'underground')!.band).toBe('underground');
+    expect(BIOME_STOPS.find((s: { key: string }) => s.key === 'space')!.band).toBe('space');
+    expect(BIOME_STOPS.find((s: { key: string }) => s.key === 'underground')!.band).toBe('underground');
   });
   it('STRESS_FACTORS 六因子齐(暴雨/沙尘暴/血月/弹幕/水岩/粒子)', () => {
     expect(Object.keys(STRESS_FACTORS).sort()).toEqual(['blood', 'dust', 'liquid', 'proj', 'rain', 'sand']);

@@ -6,6 +6,7 @@ import { Game } from '../src/core/Game';
 import { TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../src/data/tiles';
 import { FallingBlock, anyCollisionWithSpecificTiles } from '../src/entities/FallingBlock';
 import type { GameHooks } from '../src/entities/types';
+import type { TileStore } from '../src/world/TileStore';
 
 function makeGame(): { game: GameHooks; world: World; dmg: number[]; drops: Array<[string, number, number]> } {
   const world = new World(64, 32, 42, '测试');

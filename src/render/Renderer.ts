@@ -253,8 +253,8 @@ import { GLSpriteLayer } from './GLSpriteLayer';
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay,
-  drawMimicAfterimages, drawNpcTrailGhosts, drawNpcAuraRings,
-  NPC_AURA_RING_IDS } from './npcExtraParts';
+  drawMimicAfterimages, drawNpcTrailGhosts, drawNpcTrailGhostsOverBody,
+  drawNpcAuraRings, NPC_AURA_RING_IDS, NPC_TRAIL_GHOST_IDS } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
@@ -7622,6 +7622,14 @@ export class Renderer {
           if (fr522) draw522Overlay(ctx, e, this.atlas,
             { sx: fr522.sx, sy: fr522.sy, sw: fr522.sw, sh: fr522.sh });
         }
+        // ★BJ237 残影族本体前槽准备（BJ209 登记债清偿）：save 前捕父变换
+        // （SkyRenderer.drawStar 同习语）——槽内 setTransform 回父空间绘制，残影
+        // 保持绝对世界坐标语义（BJ209 参数面零漂移），z 序=本体之下（原版通用大表
+        // :23627 与默认路径前绘组 :25472-25586 均先于本体）。门=残影族 id 全集
+        // （不含 ai 门；非族 NPC 零开销）。
+        const ghostParentT = NPC_TRAIL_GHOST_IDS.has(e.vanillaId ?? -1)
+          ? ctx.getTransform()
+          : null;
         ctx.save();
         // 锚点（Main.cs:23658-23660 通用尾段 1:1）：position = Center −
         // frameSize×scale/2 + halfSize×scale + (0, num46+num47+gfxOffY)，origin =
@@ -7941,6 +7949,25 @@ export class Renderer {
         const bodyY = anchorY + (e.vanillaId === 393 ? 8 : 0);
         // 回填实际贴图底边（世界 y），供 drawHealthBar 定位兜底（见 Enemy.spriteBottomWorld 注释）
         e.spriteBottomWorld = e.cy + (bodyY + r.sh) * scale;
+        // ★BJ237 残影 rot/mirror 判定（原 BJ209 restore 后钩内联块上提单源——前绘/
+        // 后绘两槽共用；语义零变：spin/visAngle/atan2 分流+546 反翻族镜像取反）。
+        const gid = e.vanillaId ?? -1;
+        const gRotDriven = rotationDriven;   // 复用本体旋转链判定（含 tiltOnly5 排除）
+        let gRot = 0;
+        let gMirror = false;
+        if (gid === 477 || gid === 479 || (gid >= 125 && gid <= 131)) gRot = e.spin;
+        else if (gid === 94) gRot = e.vx !== 0 ? Math.atan2(e.vy, e.vx) + (e.vx < 0 ? Math.PI : 0) : 0;
+        else if (gRotDriven) gRot = ROTATION_NPC.has(gid) ? e.spin : (e.visAngle || 0);
+        // 旋转链在本体变换内但 rotationDriven 未收的档（stR 39/44/103/108/110
+        // ——:7735/:7733/:7760/:7793），残影 rot 同本体=visAngle，镜像保留
+        else if (gid === 417 || gid === 551 || (gid >= 542 && gid <= 545)
+          || gid === 581 || (gid >= 558 && gid <= 560) || gid === 574 || gid === 575) {
+          gRot = e.visAngle || 0;
+        }
+        if (!gRotDriven) {
+          if (gid === 546) gMirror = e.facing < 0;           // 546 反翻族（:7841-7842 同款）
+          else gMirror = e.facing > 0;
+        }
         if (e.vanillaId === 50) {
           // 史莱姆王体内忍者（Main.cs:22798-22817）：★画在本体【之前】=忍者
           //  在史莱姆下层——原版忍者绘制 :22817 先于通用本体绘制 :22852，
@@ -7957,6 +7984,24 @@ export class Renderer {
             ctx.restore();
           }
         }
+        // ---- ★BJ237 NPC 残影族【本体之下】槽（BJ209 登记债清偿，2026-09-21）----
+        // 挂点=本体变换内、本体 drawImage 之前、BJ211 环位之前（原版残影 :23627
+        // 先于环 :23645 先于本体 :23660；drawWitherBirth 同族先例位）。z 序逐块
+        // 定谳见 npcExtraParts 组头注。
+        // ★残影与环的 ctx 承载差异：环=盒心放射位集合（旋转/镜像对位置【集合】恒等
+        // 映射）可全由 ctx 承载；残影=oldPos 绝对世界位（不得随本体 rotation/mirror
+        // 旋位/翻位）——绝对坐标直接进本体变换=BJ209 曾修的双重偏移屏外不可见 bug
+        // 复活，故槽内 setTransform(ghostParentT) 回父空间绘制：挂点形态=BJ211 同位，
+        // 绘制数学=BJ209 已归队面零漂移（绝对坐标+自带 rot/mirror/scale/α）。
+        if (ghostParentT) {
+          ctx.save();
+          ctx.setTransform(ghostParentT);
+          drawNpcTrailGhosts(ctx, e, this.atlas, r, {
+            scale, addY: addY + footFlush, opacity: 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
+            rot: gRot, mirror: gMirror, frameIdx, frames,
+          });
+          ctx.restore();
+        }
 
         // 568/569 出生态紫雾（本体绘制层，先于本体画——Main.cs:26060-26076 拷贝循环
         // 在 vector72 本体 draw 之前）
@@ -7965,7 +8010,8 @@ export class Renderer {
         // 568/569/618/620/661 的 num74 环拷贝（Main.cs:23645-23656，1458 对拍同号）。
         // 挂点=本体变换内、本体 drawImage 之前（drawWitherBirth 同族先例位）——原版环
         // 画在本体【之下】(:23645 环 → :23660 本体)，环拷贝绕盒心 4-25px 高重叠，若走
-        // BJ209 残影 restore 后挂点（本体之上）会在包络谷底洗白本体（661 f→1 最烈）。
+        // BJ209 旧残影挂点（本体之上）会在包络谷底洗白本体（661 f→1 最烈；残影挂点
+        // 已由 BJ237 归位本体之前=本环位之前，与原版 :23627 残影→:23645 环同序）。
         // 本体 rotation/镜像由 ctx 变换承载（角度式即含 rotation 项）；620 的 origin
         // 覆写净位移与 num47=-9 由 dx0/addY 同式承接（环≡本体锚）。541/568/569/661 的
         // GlowMask 轨道环在 NPC_GLOW_ORBIT（已承载，另域）；618 Extra_59 双闪在
@@ -7989,10 +8035,11 @@ export class Renderer {
           drawDreadnautilusOverlay(ctx, e, this.atlas,
             { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh });
         }
-        // ---- EoC 冲刺残影（Main.cs:26359-26371）→ ★BJ209 迁至本体块 restore 后的
-        //      drawNpcTrailGhosts 统一挂点（绝对世界坐标）。原内联块在本体变换
-        //      （translate(cx,cy)+rotate+scale）内用绝对历史坐标 translate=双重偏移
-        //      （残影落点 ≈ 本体位+R·G_world，屏外不可见）+ visAngle 二次旋转——
+        // ---- EoC 冲刺残影（Main.cs:26361-26371）→ ★BJ209 迁出内联块（原块在本体
+        //      变换内用绝对历史坐标 translate=双重偏移屏外不可见）→ ★BJ237 归入
+        //      drawNpcTrailGhostsOverBody（restore 后挂点）。★z 序定谳：原版该块在
+        //      本体链【之后】的后绘 extras 区（else if type==4 :26361）=本体之上，
+        //      与前绘组 :25472-25586 反向——曾一刀切随统一挂点误判。
         //      门参数不变：ai0==3 && state>=4（专家预测连冲/悬下回冲），α=0.5×(10−i)/20。
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
@@ -8063,37 +8110,20 @@ export class Renderer {
         // 累积滚转 visAngle 不同源 → 共轭换角独立绘制（draw546GlowCore;
         // ?. = drawEnemy 测试假体可缺省此方法,生产类恒有）
         if (e.vanillaId === 546) this.draw546GlowCore?.(e, r, -r.sw / 2, bodyY, scale, e.facing < 0);
-        // Mech 族 oldPos 拖尾（Main.cs:25486-25498）→ ★BJ209 迁至 restore 后
-        // drawNpcTrailGhosts 统一挂点（原内联块在本体变换内用绝对历史坐标
-        // translate=双重偏移屏外不可见；α=(10−i)/20 等参数面 1:1 平移）。
+        // Mech 族 oldPos 拖尾（Main.cs:25486-25498）→ ★BJ237 迁至本体前槽
+        // drawNpcTrailGhosts（原版 :25486 在本体链之前=本体之下；原内联块在本体
+        // 变换内用绝对历史坐标 translate=双重偏移屏外不可见，BJ209 迁出、BJ237
+        // 归位。α=(10−i)/20 等参数面 1:1 平移）。
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
-        // ---- ★BJ209 NPC 残影族统一挂点（本体 restore 之后=绝对世界坐标）：
-        // 通用大表族 426/427/521/542-546/558-560/574-575/581/620（ai0==2 门）+
-        // 特支族 4/94/120/137/138/417/419/439-440/471/477/479/516/519/551 +
-        // 迁入的 EoC 冲刺残影与 Mech 族拖尾。散参=本体块已知量（rot/mirror 取
-        // 本体旋转链同款判定，546 反翻族镜像取反）。z 序偏差与颜色合并惯例见
-        // npcExtraParts.drawNpcTrailGhosts 头注。 ----
-        {
-          const gid = e.vanillaId ?? -1;
-          const gRotDriven = rotationDriven;   // 复用本体旋转链判定（含 tiltOnly5 排除）
-          let gRot = 0;
-          let gMirror = false;
-          if (gid === 477 || gid === 479 || (gid >= 125 && gid <= 131)) gRot = e.spin;
-          else if (gid === 94) gRot = e.vx !== 0 ? Math.atan2(e.vy, e.vx) + (e.vx < 0 ? Math.PI : 0) : 0;
-          else if (gRotDriven) gRot = ROTATION_NPC.has(gid) ? e.spin : (e.visAngle || 0);
-          // 旋转链在本体变换内但 rotationDriven 未收的档（stR 39/44/103/108/110
-          // ——:7735/:7733/:7760/:7793），残影 rot 同本体=visAngle，镜像保留
-          else if (gid === 417 || gid === 551 || (gid >= 542 && gid <= 545)
-            || gid === 581 || (gid >= 558 && gid <= 560) || gid === 574 || gid === 575) {
-            gRot = e.visAngle || 0;
-          }
-          if (!gRotDriven) {
-            if (gid === 546) gMirror = e.facing < 0;           // 546 反翻族（:7841-7842 同款）
-            else gMirror = e.facing > 0;
-          }
-          drawNpcTrailGhosts(ctx, e, this.atlas, r, {
+        // ---- ★BJ237 NPC 残影族【本体之上】挂点（本体 restore 之后=绝对世界坐标）：
+        // 仅特支后绘组 120/137/138/471/477/479 + 克眼冲刺残影（原版 :26015/:26030/
+        // :26361/:26383/:26396 在本体链之后的后绘 extras 区=本体之上同相）。
+        // 前绘族已迁本体前槽（见 drawNpcTrailGhosts 槽）。rot/mirror 判定单源在本体
+        // 块内（gRot/gMirror）。z 序逐块定谳与颜色合并惯例见 npcExtraParts 组头注。 ----
+        if (NPC_TRAIL_GHOST_IDS.has(e.vanillaId ?? -1)) {
+          drawNpcTrailGhostsOverBody(ctx, e, this.atlas, r, {
             scale, addY: addY + footFlush, opacity: 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255,
             rot: gRot, mirror: gMirror, frameIdx, frames,
           });

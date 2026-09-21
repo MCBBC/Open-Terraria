@@ -48,6 +48,7 @@ function mkEnv(over: Partial<LeashedEnv> = {}): LeashedEnv {
   return {
     timeForVisualEffects: 0,
     dayTime: true,
+    remix: false,                                   // LeashedEnv 2026-08-31 批新增必填位(false≡缺省)
     worldSurface: 100,
     windForVisuals: 0.5,
     cloudAlpha: 0,
@@ -1135,6 +1136,7 @@ function recallDustCapture(e: import('../src/entities/LeashedCritter').LeashedCr
   e.recallDust({
     timeForVisualEffects: 0,
     dayTime: true,
+    remix: false,                                   // LeashedEnv 必填位(recallDust 不读,值无观测面)
     worldSurface: 100,
     windForVisuals: 0,
     cloudAlpha: 0,

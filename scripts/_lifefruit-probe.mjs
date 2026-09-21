@@ -47,6 +47,11 @@ const out = await page.evaluate(async () => {
     const y = baseY + f * 6;
     floors.push(y);
     for (let x = px - 250; x <= px + 250; x++) {
+      // ★BJ233:setTile 只在 type=0 时清 slope/half/致动位（TileStore.setTile）——
+      //   直接覆写天然地形会把坡面/半砖残留带进草地行 → solidTile(底承)=false →
+      //   placeJunglePlant 底承门静默拒落（236/233 两支同拒,种子相关单列偶发）。
+      //   先挖除再铺=底承行全实心无坡,夹具确定性。
+      for (let dy = 0; dy <= 2; dy++) st.setTile(x, y + dy, 0);
       st.setTile(x, y, S(60));
       st.setTile(x, y + 1, S(59));
       st.setTile(x, y + 2, S(59));

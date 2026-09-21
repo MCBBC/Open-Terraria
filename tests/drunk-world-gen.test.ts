@@ -110,7 +110,7 @@ describe('IIIII14 DRUNK(05162020) 世界效应', () => {
       const vid678 = itemIds.VI_ID(678);
       let has1571 = 0, has1569 = 0, redPotion = 0, moonLegs = 0;
       for (const c of wWorld.chests) {
-        const ids2 = c.items.filter(Boolean).map((it) => it.id);
+        const ids2 = c.items.filter(Boolean).map((it) => it!.id);
         if (ids2.includes(vid1571)) has1571++;
         if (ids2.includes(vid1569)) has1569++;
         if (ids2.includes(vid5001)) redPotion++;

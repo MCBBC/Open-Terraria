@@ -59,7 +59,7 @@ describe('鸭族飞形 ai1 计时链（AI_068 :34994/:34996）', () => {
     // wet → 变形为 363 + ai 归零
     expect(duck.vanillaId).toBe(363);
     expect(duck.ai0).toBe(0);
-    expect(duck.ai1).toBe(0, '飞形 ai1 必须归零（继承走形站计时 = 起飞即降落段）');
+    expect(duck.ai1, '飞形 ai1 必须归零（继承走形站计时 = 起飞即降落段）').toBe(0);
   });
 
   it('飞形落地（入水）：ai0=0 且 ai1=0（非 200+rand(200)）', () => {
@@ -92,7 +92,7 @@ describe('鸭族飞形 ai1 计时链（AI_068 :34994/:34996）', () => {
     duck.ai0 = 0; duck.ai1 = 0; duck.wet = true;
     player.x = duck.cx - 50; player.y = duck.cy;
     drive(duck, 'duckFlyAI').call(duck, hooks, player);
-    expect(duck.ai0).toBe(1, '惊飞进入飞行态');
+    expect(duck.ai0, '惊飞进入飞行态').toBe(1);
     // 修后 ai1 从 0 起步 → 跑 299 tick 不应落地（ai1 < 300）
     for (let i = 0; i < 299; i++) drive(duck, 'duckFlyAI').call(duck, hooks, player);
     expect(duck.ai0, '飞行满 299t 仍在飞（旧 bug 会 ai1≥300 秒落）').toBe(1);

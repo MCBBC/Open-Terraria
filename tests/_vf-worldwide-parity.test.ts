@@ -38,7 +38,7 @@ describe('vf codegen worldwide parity', () => {
       st.flags[k] = 1;
       st.type[k] = v2i.get(wld.type[k]) ?? 0;
       st.slope[k] = wld.slope[k];
-      st.half[k] = !!wld.half[k];
+      st.half[k] = wld.half[k] ? 1 : 0;   // ★BJ239:half 现为 Uint8Array——布尔直赋隐式成 1/0,显式化同值
     }
 
     let n = 0, bad = 0;

@@ -503,7 +503,7 @@ describe('SW-FX1④b AI_105 孢子云（:40768-40905）+ AI_106 迸气（:34144-
     const foe = Enemy.fromVanilla(3, 1000, 1000)!;
     foe.id = 4299;
     let hurtCalls = 0;
-    const origHurt = foe.hurt.bind(foe);
+    const origHurt = foe.hurt.bind(foe) as (...a: unknown[]) => boolean;   // rest 化以透传全部实参
     (foe as unknown as { hurt: (...a: unknown[]) => boolean }).hurt = (...args: unknown[]) => {
       hurtCalls++;
       return origHurt(...args);

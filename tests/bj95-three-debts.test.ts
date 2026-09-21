@@ -19,7 +19,9 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+// @ts-expect-error - tools/probe/lib/boot.mjs 无 .d.mts 类型声明（TS7016;本测试只消费其运行时导出）
 import { bootstrap, carryQuery } from '../tools/probe/lib/boot.mjs';
+// @ts-expect-error - tools/probe/lib/record.mjs 无 .d.mts 类型声明（TS7016;同上）
 import { audioTail } from '../tools/probe/lib/record.mjs';
 
 const src = (p: string): string =>

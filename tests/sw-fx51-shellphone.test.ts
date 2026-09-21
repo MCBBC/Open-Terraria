@@ -92,8 +92,9 @@ function fireStub(world: World, playerPos = { x: 130 * TILE, y: 140 * TILE },
   return { g, sfxLog, removed };
 }
 
-const fire = (g: any, c: { vid: number; kind: string; triggerAt: number; consume: boolean }): void =>
-  (g as unknown as { fireRecallTeleport(c: typeof c): void }).fireRecallTeleport(c);
+type RecallCall = { vid: number; kind: string; triggerAt: number; consume: boolean };
+const fire = (g: any, c: RecallCall): void =>
+  (g as unknown as { fireRecallTeleport(c: RecallCall): void }).fireRecallTeleport(c);
 
 beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(0x5358)); });
 afterEach(() => { vi.restoreAllMocks(); });

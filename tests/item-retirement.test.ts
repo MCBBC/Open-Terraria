@@ -113,7 +113,7 @@ describe('D1 稳定 id 闸门（2026-08-21）', () => {
       expect(s, `${key} 无稳定 id`).toBeTruthy();
       const back = ITEM_INTERNAL_OF_STABLE.get(s);
       expect(back, `${key} 稳定 id ${s} 反查失败`).toBeDefined();
-      expect(ITEM_DEFS[back].key).toMatch(/^vi_/);
+      expect(ITEM_DEFS[back!].key).toMatch(/^vi_/);   // 上一行已断言 defined(反查失败即红)
     };
     roundtrip('vi_1615_banner_b1');     // 敌旗族首件
     roundtrip('vi_2916_banner_b107');

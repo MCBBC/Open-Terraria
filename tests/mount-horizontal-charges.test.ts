@@ -94,7 +94,7 @@ describe('D1 五循环阈值/伤害/击退/免疫档表（Player.cs:20238-20320 
       expect(mountHorizontalCharges(s.p as never, s.game)).toBe(0);
       s.p.vx = 21.001;
       expect(mountHorizontalCharges(s.p as never, s.game)).toBe(1);
-      expect((s.game as { enemies?: never }).enemies !== undefined).toBe(true);
+      expect((s.game as unknown as { enemies?: unknown }).enemies !== undefined).toBe(true);
       const e = (s.game as unknown as { enemies: () => ChargeSpy[] }).enemies()[0];
       expect(e.hurts[0]).toMatchObject({ dmg: 60 });          // 60×minionDamage 截断
       expect(Math.abs(e.hurts[0].kbx)).toBeCloseTo(10, 6);

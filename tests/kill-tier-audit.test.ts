@@ -346,7 +346,8 @@ describe('Kill 消亡面清偿批 2 金标（2026-09-02）', () => {
     const drops: Array<[number, number, string, number]> = [];
     const near = mkDeathGame({ world: w });
     (near.g as unknown as Record<string, unknown>).chunks = { markDirtyArea: () => {} };
-    near.g.player = { dead: false, cx: 404, cy: 3012, x: 394, y: 2991, w: 20, h: 42 };
+    (near.g as unknown as Record<string, unknown>).player =
+      { dead: false, cx: 404, cy: 3012, x: 394, y: 2991, w: 20, h: 42 };
     near.g.onProjectileDeath(109, 25 * TILE, 189 * TILE, 10, 10, 0, 4, 20, {});
     expect(w.store.get(25, 189)).toBe(snow);                 // 近距 ≤1440 → 放雪块（:79209-79211）
     const far = mkDeathGame({ world: w });

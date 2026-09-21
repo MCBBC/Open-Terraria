@@ -177,7 +177,7 @@ describe('Game.updateSwingHits 判定盒 gravDir 档（Player.cs:45519/:45533/:4
     const enemies = [Enemy.fromVanilla(1, player.cx + 8, player.y + enemyTopDy)!];
     const e = enemies[0];
     const hits: number[] = [];
-    e.hurt = ((d: number, ...rest: unknown[]) => { hits.push(d); return 0; }) as typeof e.hurt;
+    e.hurt = ((d: number, ...rest: unknown[]) => { hits.push(d); return 0; }) as unknown as typeof e.hurt;
     g.swing = { t: 15, dur: 30, dmg: 10, kb: 3, item: iid(heldVid), useStyle: 1 };
     g.swingHitSet = new Set<number>();
     g.swingTileCutSet = new Set<number>();

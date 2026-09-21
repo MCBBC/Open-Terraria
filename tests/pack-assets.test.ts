@@ -1,9 +1,8 @@
 // pack-assets 纯函数回归（打包管线：分片确定性/roundtrip/分级压缩/manifest 形状/复用键语义）
 import { describe, it, expect } from 'vitest';
 import { unzipSync } from 'fflate';
-import {
-  INPUT_DIRS, STORE_EXT, fileExt, planParts, buildZip, makeManifest, ALGO_VERSION,
-} from '../scripts/pack-assets.mjs';
+// @ts-expect-error - untyped .mjs harness module
+import { INPUT_DIRS, STORE_EXT, fileExt, planParts, buildZip, makeManifest, ALGO_VERSION } from '../scripts/pack-assets.mjs';
 
 describe('pack-assets 纯函数', () => {
   it('INPUT_DIRS 超集 = 五目录（l10n/json 排除——SW 可变语义与 bundle 内嵌）', () => {
@@ -22,21 +21,21 @@ describe('pack-assets 纯函数', () => {
     const sizes = Object.fromEntries(files.map((f) => [f, 10]));
     // 输出硬帽优先：maxZipBytes=25 → 每片 2-3 文件（bytes 按不可压缩全额计价）
     const a = planParts(files, sizes, { maxZipBytes: 25, maxFilesPerPart: 99 });
-    expect(a.every((p) => p.bytes <= 25 || p.entries.length === 1)).toBe(true);
-    expect(a.reduce((s, p) => s + p.entries.length, 0)).toBe(10);
+    expect(a.every((p: { bytes: number; entries: string[] }) => p.bytes <= 25 || p.entries.length === 1)).toBe(true);
+    expect(a.reduce((s: number, p: { entries: string[] }) => s + p.entries.length, 0)).toBe(10);
     // 条目数上限：maxFiles=4 → 每片 ≤4
     const b = planParts(files, sizes, { maxZipBytes: 1 << 30, maxFilesPerPart: 4 });
-    expect(b.every((p) => p.entries.length <= 4)).toBe(true);
+    expect(b.every((p: { entries: string[] }) => p.entries.length <= 4)).toBe(true);
     // 顺序保持（字典序输入不重排）
-    expect(b.flatMap((p) => p.entries)).toEqual(files);
+    expect(b.flatMap((p: { entries: string[] }) => p.entries)).toEqual(files);
     // 确定性：同输入两次结果深相等
     expect(planParts(files, sizes, { maxZipBytes: 25 })).toEqual(planParts(files, sizes, { maxZipBytes: 25 }));
     // 单文件超帽：独占成片且条目零丢失（Pages 上限闸门由 CLI 端实测兜底）
     const big = ['a.png', 'huge.png', 'b.png'];
     const bigSizes = { 'a.png': 30, 'huge.png': 100, 'b.png': 30 };
     const c = planParts(big, bigSizes, { maxZipBytes: 50 });
-    expect(c.reduce((s, p) => s + p.entries.length, 0)).toBe(3);
-    expect(c.find((p) => p.entries[0] === 'huge.png')!.entries).toEqual(['huge.png']);
+    expect(c.reduce((s: number, p: { entries: string[] }) => s + p.entries.length, 0)).toBe(3);
+    expect(c.find((p: { entries: string[] }) => p.entries[0] === 'huge.png')!.entries).toEqual(['huge.png']);
   });
 
   it('buildZip：roundtrip 字节相等 + mtime 钉死跨调用字节确定（fflate 默认内嵌当前时间）', () => {

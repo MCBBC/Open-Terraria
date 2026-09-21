@@ -213,11 +213,11 @@ describe('Living Trees 世界生成', () => {
     // 同原版 id 的规范驼峰键（items.ts 自动注册循环）——曾与显式键双份入箱
     const wandCamel = ITEM_BY_KEY['vi_832_LivingWoodWand']!;
     const finchCamel = ITEM_BY_KEY['vi_4281_BabyBirdStaff']!;
-    const hasMain = chests.some((c) => c.items.some((it) => it && (it.id === wand || it.id === finch)));
+    const hasMain = chests.some((c) => c!.items.some((it) => it && (it.id === wand || it.id === finch)));
     expect(hasMain).toBe(true);
     // 主件恰一份：显式键与驼峰键不得同时出现（rollChestLoot 尾段主件去重）
     for (const c of chests) {
-      const mains = c.items.filter((it) => it
+      const mains = c!.items.filter((it) => it
         && (it.id === wand || it.id === finch || it.id === wandCamel || it.id === finchCamel));
       expect(mains.length).toBeLessThanOrEqual(1);
     }

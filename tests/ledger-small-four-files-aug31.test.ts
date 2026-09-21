@@ -244,9 +244,10 @@ describe('⑦ 刃线命中 CheckAABBvLineCollision 原式（Collision.cs:275-371
     (z as unknown as { counter: number }).counter = 1;
     (z as unknown as { trail: number[] }).trail = [];
     // 敌怪中心距采样位 >150px——刃本体 ±40 打不到，过靶闸亦拦
-    expect(z.bladeHits(280, -10, 20, 20)).toBe(false);
+    const zb = z as unknown as { bladeHits: (ex: number, ey: number, ew: number, eh: number) => boolean };
+    expect(zb.bladeHits(280, -10, 20, 20)).toBe(false);
     // 盒内近距：rot=0 → 刃向竖直（rot+π/2），贯穿中心竖线命中
-    expect(z.bladeHits(-10, -10, 20, 20)).toBe(true);
+    expect(zb.bladeHits(-10, -10, 20, 20)).toBe(true);
   });
 });
 

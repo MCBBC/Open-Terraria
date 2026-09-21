@@ -43,8 +43,8 @@ const noopCtx = () => {
   // (draw 段的 ctx 调用会炸)→ 本测试只跑到 P1-P7:用最小桩 ctx 记录调用并
   // 吞掉绘制调用。drawVanillaLiquids 需要的 ctx 方法全部桩化。
   const calls: string[] = [];
-  const stub: Record<string, unknown> = {};
-  const handler: ProxyHandler<Record<string, unknown>> = {
+  const stub: Record<PropertyKey, unknown> = {};
+  const handler: ProxyHandler<Record<PropertyKey, unknown>> = {
     get(t, prop) {
       if (prop in t) return t[prop];
       return (...args: unknown[]) => {

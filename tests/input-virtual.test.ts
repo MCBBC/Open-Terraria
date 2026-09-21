@@ -57,7 +57,7 @@ describe('Input 虚拟通道', () => {
   beforeEach(() => {
     winReg.clear(); elReg.clear();
     inp = freshInput();
-    options.data.keybinds = undefined;
+    (options.data as { keybinds?: Record<string, string[]> }).keybinds = undefined;
     // 世界触摸合成的操作模式门(resolveTouchMode)在 node 无触摸硬件=keyboard,
     // 会吞掉全部 touch 合成用例——本组测试钉触屏档
     options.data.touchOpMode = 'touch';

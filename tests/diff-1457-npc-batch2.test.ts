@@ -146,7 +146,7 @@ describe('C 组 AI 数值/条件', () => {
     const h = makeHooks();
     const e = makeEnemy(h, 463, { hp: 100000 });
     const fired: Array<{ dmg: number; proj: number }> = [];
-    (e as unknown as { spawnHostileProj: (...a: unknown[]) => void }).spawnHostileProj =
+    (e as unknown as { spawnHostileProj: (g: unknown, x: number, y: number, vx: number, vy: number, dmg: number, proj: number) => void }).spawnHostileProj =
       (_g: unknown, _x: number, _y: number, _vx: number, _vy: number, dmg: number, proj: number) => {
         fired.push({ dmg, proj });
       };
@@ -161,7 +161,7 @@ describe('C 组 AI 数值/条件', () => {
     const h2 = makeHooks();
     const e2 = makeEnemy(h2, 463, { hp: 100000 });
     const fired2: number[] = [];
-    (e2 as unknown as { spawnHostileProj: (...a: unknown[]) => void }).spawnHostileProj =
+    (e2 as unknown as { spawnHostileProj: (g: unknown, x: number, y: number, vx: number, vy: number, dmg: number) => void }).spawnHostileProj =
       (_g: unknown, _x: number, _y: number, _vx: number, _vy: number, dmg: number) => { fired2.push(dmg); };
     e2.difficulty = 2;  // GDL.EXPERT
     e2.justHitT = 2; e2.lai3 = 0;

@@ -351,7 +351,7 @@ function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RN
   sim.generatingWorld = true;
   sim.shimmerCenter = gs.shimmerX > 0 ? { x: gs.shimmerX, y: gs.shimmerY } : null;
   sim.genWaterLine = gs.waterLine;
-  if (gs.dungeonSide !== 0) {
+  if ((gs.dungeonSide as number) !== 0) {   // ★BJ239:类型面 1|-1 无 0,防御闸照抄 WorldGen.ts:753 同款 cast
     const edge = Math.floor(world.w * 0.05);
     const mid = Math.floor(world.w * 0.55);
     const x0 = gs.dungeonSide < 0 ? edge : mid;

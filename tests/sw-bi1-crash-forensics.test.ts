@@ -136,7 +136,7 @@ describe('SW-BI1 TrapShot hostile 命中循环', () => {
     expect(critter.hurtCalls[0]![0]).toBe(game);                    // Critter.hurt(game) 单参
     expect((town.hurtCalls as unknown[][]).length).toBe(1);         // 镇民照常
     expect(town.hurtCalls[0]![0]).toBe(25);                         // damage
-    expect(pet.hurtCalls).toBeUndefined();                          // 宠物无 hurt —— 不炸不调
+    expect((pet as { hurtCalls?: unknown }).hurtCalls).toBeUndefined();   // 宠物无 hurt —— 不炸不调
     expect(shot.dead).toBe(false);                                  // penetrate -1 存续
   });
 

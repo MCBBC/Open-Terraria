@@ -13,10 +13,11 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { moveAndCollide } from '../physics/TileCollision';
 import { BOULDER_CONVERT_TABLE } from '../world/BoulderMech';
-import { projSprite, Arrow } from './Arrow';
+import { projSprite, projFrameCount, Arrow } from './Arrow';
 import { beeWallPushDir } from './WeaponProj';   // SW-AF1 2026-09-04（F-3）：1047 滚石踢墙门单源化（与 655/99 同摄取器）
 import { cutTilesBox } from './ProjCutTiles';   // ★SW-BJ93 债1：CutTiles 面（:12517/:15276 共享体;vid 穿线 1047 幼虫豁免）
 import { GorePiece } from './GorePiece';        // ★SW-BJ93 债2：1053 Kill gore 61..63（Game.explodeAt 同引擎,30:28419 先例）
+import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';   // ★BJ235 1055 残影
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE_DEFS, TILE_BY_KEY, TILE_CUT_SHEETS, BREAKABLE_WHEN_PLACING_SHEETS, PLATFORMS_SHEETS, ORE_SHEETS, IS_A_DRIP_TILE_SHEETS, FRIENDLY_FAIRY_CAN_LURE_TO_SHEETS } from '../data/tiles';
@@ -485,6 +486,12 @@ export class RollingBoulder extends Entity {
   /** 出生表伤害 */
   readonly dmg: number;
   rotation = 0;
+  /** ★BJ235 1055 通用 oldPos 残影环（TrailingMode[1055]=0/cap 10 表驱动;undefined=未
+   *  初始化/null=无记录式——家族余型 mode=-1 → null 短路）。ghost 绘制 end=frame
+   *  （:30728-30735 动态档 resolveGhostLoop）——原版 frame 写面只在 ai[1]==1 追踪态
+   *  （:26504-26536,本仓 1055 无 ai[1] 面=帧恒 0 → 环展开恒空,与原版 frame=0 同相;
+   *  接线先行,追踪态补课日自动点亮）。 */
+  private ghostRing?: ProjGhostRing | null;
   /** 每目标命中免疫：目标 id → 剩余 tick（localNPCHitCooldown=10 镜像） */
   private immunities = new Map<number, number>();
 
@@ -797,6 +804,12 @@ export class RollingBoulder extends Entity {
       this.trailY[0] = this.y;
       if (this.trailN < 10) this.trailN++;
     }
+    // ★BJ235 1055 残影记录（UpdateTrails :17199-17203 mode0 每拍 shift+头插同相——
+    //  1047 用自管 trailX 环不双记;1055 走通用环。1055 撞墙不碎无杀拍,恒记录）
+    if (this.ghostRing === undefined) {
+      this.ghostRing = projTrailingMode(this.projId) >= 0 ? new ProjGhostRing(this.projId) : null;
+    }
+    this.ghostRing?.record(this.x, this.y, this.rotation, this.vx < 0 ? -1 : 1, true);
     // ---- ★SW-BJ67 D1（2026-09-14）：1047 专支 = RainbowBoulder_CheckBounce
     //  （P.cs:19192-19194 `else if (type == 1047) RainbowBoulder_CheckBounce(ref
     //  lastVelocity)`;1458 :19193 同）——巨石族 ①高速落地/②撞墙碎裂两支对 1047
@@ -975,6 +988,27 @@ export class RollingBoulder extends Entity {
     ctx.save();
     ctx.globalAlpha = 1;
     ctx.imageSmoothingEnabled = false;
+    // ---- ★BJ235 1055 通用残影（Main.cs:30609 通用表+:30728-30735 frame 系 end 动态
+    //      档;原版残影块先于本体绘制段）。ghostRing 仅 1055 非空（余型 mode=-1 null）;
+    //      原版 frame 写面=追踪态专属（本仓未接）→ 展开恒空=与原版 frame 0 同相。 ----
+    if (this.projId === 1055 && this.ghostRing) {
+      drawProjGhosts(ctx, {
+        ring: this.ghostRing,
+        id: 1055,
+        tex: img,
+        frames: projFrameCount(1055),
+        frame: 0,                     // 1055 frame 写面=追踪态专属（未接）→ 0=原版缺省同相
+        bodyW: this.w, bodyH: this.h,
+        bodyRot: this.rotation,
+        bodyScale: 1,
+        bodyAlpha: 1,
+        ai0: 0, ai1: 0,
+        timeLeft: this.life,
+        opacity: 1,
+        vxLen: Math.hypot(this.vx, this.vy),
+        spriteDirection: this.vx < 0 ? -1 : 1,
+      });
+    }
     if (this.projId === 1047) {
       // ★SW-BJ64b 1047 彩虹壳三叠画。原版序：拖尾块（Main.cs:33351-33385）先画=垫底，
       //  本体（:33571）后画=压顶。帧账 = Frame(5,20, frame/20, frame%20)（:33209）——

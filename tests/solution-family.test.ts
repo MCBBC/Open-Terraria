@@ -444,7 +444,7 @@ describe('WaterSplashProj 三瓶水', () => {
   });
   it('命中敌 → 伤害 + Kill 转换（penetrate 1）', () => {
     const { st, hooks, conv } = projWorld();
-    const hurt = vi.fn((dmg: number) => true);
+    const hurt = vi.fn((dmg: number, _kb: number) => true);   // 原版 hurt(dmg,kb) 双参——mock.calls 元组含 kb
     (hooks.enemies as unknown as () => unknown[]) = () => [{
       x: 30 * TILE, y: 30 * TILE, w: 16, h: 16, dead: false, cx: 30 * TILE + 8, cy: 30 * TILE + 8,
       hurt,

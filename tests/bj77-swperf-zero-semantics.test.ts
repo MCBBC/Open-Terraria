@@ -49,8 +49,8 @@ function makeStore(): TileStore {
 // ---------- 桩 ctx:记录一切方法调用(drawImage 附带当时 globalAlpha) ----------
 function recordingCtx() {
   const seq: string[] = [];
-  const target: Record<string, unknown> = {};
-  const handler: ProxyHandler<Record<string, unknown>> = {
+  const target: Record<PropertyKey, unknown> = {};
+  const handler: ProxyHandler<Record<PropertyKey, unknown>> = {
     get(t, prop) {
       if (prop in t) return t[prop];
       const name = String(prop);

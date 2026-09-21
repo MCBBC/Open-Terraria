@@ -9,7 +9,7 @@ describe('平台阶梯交替处不坠落（2026-09-01 用户存档 3222-3223/275
   it('dump 3166/275 附近地形', () => {
     const { world } = loadSave(readFileSync('/Users/vinlic/Downloads/map-Starter_World (26).json', 'utf8'));
     const st = world.store;
-    const ch = (x, y) => {
+    const ch = (x: number, y: number) => {
       if (!st.inBounds(x, y)) return '?';
       const i = st.idx(x, y);
       if (!st.flags[i] || st.type[i] === 0) return '.';

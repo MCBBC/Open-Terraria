@@ -257,8 +257,8 @@ describe('【A4】出膛锚点半宽尺寸源（vanilla-projectiles.json 载体�
     expect(shot).toBeDefined();
     expect(shot!.w).toBe(104);
     // 采样窗以【发射刻】敌盒为准（cs:55367 position+Size×rand(0..1) 直读池快照）
-    const px = shot!.x + shot.w / 2;                 // 新口径（半宽 52 反推中心）
-    const py = shot!.y + shot.h / 2;
+    const px = shot!.x + shot!.w / 2;                // 新口径（半宽 52 反推中心）
+    const py = shot!.y + shot!.h / 2;
     expect(px).toBeGreaterThanOrEqual(lastEx);       // [x, x+w]
     expect(px).toBeLessThanOrEqual(lastEx + ew);
     expect(py).toBeGreaterThanOrEqual(lastEy);

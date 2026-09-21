@@ -330,7 +330,9 @@ export class TrackGenerator {
   /** IsLocationInvalid 的 InvalidTiles 表(SSSSSSS 双态):1457 追加五型 */
   private readonly invalidTiles: Set<number>;
 
-  constructor(st: TileStore, gs: GenState, chests?: ReadonlyArray<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>) {
+  // ★BJ239:chests 元型补 `| null` 洞(IIII102c 稀疏 sink 化后 341 行已有跳洞守卫,
+  //   注解未随行)——MicroBiomesPass:643 传 ChestSink | undefined 即稀疏洞数组,纯注解修正。
+  constructor(st: TileStore, gs: GenState, chests?: ReadonlyArray<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> } | null>) {
     this.st = st;
     this.gs = gs;
     this.invalidTiles = hfIs1457()

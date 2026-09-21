@@ -11,14 +11,21 @@
 //   · 绘制面 = Main.cs DrawNPCDirect（:22723-26712）oldPos 残影块全表：
 //     通用大表（:23400-23643）+ 特支段（:23794/23892/24605/24637/24666/24734/
 //     24835/24901/25472/25486/25499/25512/25535/25567/25803/26015/26034/26359/
-//     26383/26396/26416）。本仓统一绝对世界坐标实现（npcExtraParts.drawNpcTrailGhosts）。
-import { describe, it, expect } from 'vitest';
+//     26383/26396/26416）。本仓统一绝对世界坐标实现（npcExtraParts）。
+//   ★BJ237（2026-09-21）z 序归位：原版残影分两层——前绘组（通用大表/551/439-440/
+//     519/94/125-131,139,140/417/419/516）画在【本体之下】、后绘组（120,137,138/
+//     4/471/477,479）画在【本体之上】；BJ209「特支族=本体之上」为一刀切误判（把
+//     默认路径前绘组 :25472-25586 归入后绘）。双挂点拆分+绘制序锁见文件尾 BJ237 块。
+import { describe, it, expect, vi } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import type { Enemy as EnemyT } from '../src/entities/Enemy';
+import { Renderer } from '../src/render/Renderer';
 import {
-  drawNpcTrailGhosts, drawGenericTableGhosts, drawCultistGhosts,
-  drawBetsyGhosts, drawSolarGoopGhosts, drawPostBodyTrailGhosts,
+  drawNpcTrailGhosts, drawNpcTrailGhostsOverBody, drawGenericTableGhosts,
+  drawCultistGhosts, drawBetsyGhosts, drawSolarGoopGhosts,
+  drawPostBodyTrailGhosts, drawPreBodySpecialGhosts,
   drawSolenianGhosts, drawEocDashGhosts, drawMechTrailGhosts,
+  NPC_TRAIL_GHOST_IDS,
 } from '../src/render/npcExtraParts';
 import type { NpcGhostOpts } from '../src/render/npcExtraParts';
 
@@ -193,12 +200,12 @@ describe('BJ209-C 绘制面：通用大表族（Main.cs:23400-23643）', () => {
   });
 });
 
-describe('BJ209-C 绘制面：特支族（Main.cs:25400-26449）', () => {
+describe('BJ209-C 绘制面：特支族（前绘组 Main.cs:25472-25586 / 后绘组 :26015-26441）', () => {
   it('94 腐化者 3 份 α=(10−i)/15；120 混沌元素 9 份（Chaos 贴图 A=50/255 档）', () => {
     const e94 = Enemy.fromVanilla(94, 100, 100) as EnemyT;
     tickN(e94, 10, 5, 0);
     const r94 = recorder();
-    drawPostBodyTrailGhosts(r94.ctx, e94, atlasStub, FRAME, OPT);
+    drawPreBodySpecialGhosts(r94.ctx, e94, atlasStub, FRAME, OPT);
     const d94 = draws(r94.ops);
     expect(d94.length).toBe(3);
     expect(d94[0].alpha).toBeCloseTo(9 / 15, 5);
@@ -217,11 +224,11 @@ describe('BJ209-C 绘制面：特支族（Main.cs:25400-26449）', () => {
     tickN(e417, 10, 5, 0);
     e417.ai0 = 3;
     const rOff = recorder();
-    drawPostBodyTrailGhosts(rOff.ctx, e417, atlasStub, FRAME, OPT);
+    drawPreBodySpecialGhosts(rOff.ctx, e417, atlasStub, FRAME, OPT);
     expect(draws(rOff.ops).length).toBe(0);
     e417.ai0 = 6;
     const rOn = recorder();
-    drawPostBodyTrailGhosts(rOn.ctx, e417, atlasStub, FRAME, OPT);
+    drawPreBodySpecialGhosts(rOn.ctx, e417, atlasStub, FRAME, OPT);
     const dOn = draws(rOn.ops);
     expect(dOn.length).toBe(6);
     const rots = rOn.ops.filter((o) => o.op === 'rotate').map((o) => o.r as number);
@@ -266,7 +273,7 @@ describe('BJ209-C 绘制面：特支族（Main.cs:25400-26449）', () => {
     const e = Enemy.fromVanilla(516, 100, 100) as EnemyT;
     tickN(e, 10, 3, 0);
     const { ctx, ops } = recorder();
-    drawPostBodyTrailGhosts(ctx, e, atlasStub, FRAME, OPT);
+    drawPreBodySpecialGhosts(ctx, e, atlasStub, FRAME, OPT);
     const d = draws(ops);
     expect(d.length).toBe(7);
     expect(d[0].sy).toBe(((2 - 4 - 6) % 4 + 4) % 4 * FRAME.sh);   // i=6
@@ -369,5 +376,162 @@ describe('BJ209-C 绘制面：迁入修正族（EoC 冲刺/Mech 拖尾，绝对�
     expect(trs.length).toBe(4);
     expect(trs[0].x).toBe(e.histXAt(1) + e.w / 2);           // 恰=旧位中心（无本体位叠加）
     expect(trs[0].x).toBeLessThan(5100);                     // 双重偏移会是 ~10000+
+  });
+});
+
+// ===================== ★BJ237 z 序归位锁（2026-09-21，BJ209 登记债清偿） =====================
+// 定谳（Terarria1457 DrawNPCDirect 逐块亲读；1458 对拍逐锚同号=零变更）——原版残影
+// 分两层，BJ209「特支族=本体之上」为一刀切误判：
+//   【本体之下】通用大表 :23627 残影→:23645 环→:23660 本体；551 :23845→本体 :23859；
+//   439/440 case :24901→本体 :24933；默认路径前绘组 94 :25472 / 125-131,139,140
+//   :25486 / 417 :25499 / 419 :25517 / 516 :25573 全在本体链 :25645+ 之前。
+//   【本体之上】后绘 extras 区（本体链之后）：120,137,138 :26015/:26030、克眼冲刺
+//   4 :26361、471 :26383、477,479 :26396。
+// 落刀=双挂点：前绘族走本体变换内本体 drawImage 之前的槽（BJ211 环同位形态，槽内
+// setTransform 回父空间=绝对坐标零漂移，残影先于环）；后绘族保持 restore 后挂点。
+
+describe('BJ237-A 分发器结构锁（前绘=本体之下族 / 后绘=本体之上族）', () => {
+  it('前绘分发器收前绘组：94/417/516 画；后绘组 120/4 不画', () => {
+    for (const id of [94, 417, 516]) {
+      const e = Enemy.fromVanilla(id, 100, 100) as EnemyT;
+      tickN(e, 10, 4, 0);
+      if (id === 417) e.ai0 = 6;
+      const { ctx, ops } = recorder();
+      drawNpcTrailGhosts(ctx, e, atlasStub, FRAME, OPT);
+      expect(draws(ops).length, `id=${id} 应走前绘分发器`).toBeGreaterThan(0);
+    }
+    for (const id of [120, 4]) {
+      const e = Enemy.fromVanilla(id, 100, 100) as EnemyT;
+      tickN(e, 10, 4, 0);
+      if (id === 4) { e.ai0 = 3; e.state = 4; }
+      const { ctx, ops } = recorder();
+      drawNpcTrailGhosts(ctx, e, atlasStub, FRAME, OPT);
+      expect(draws(ops).length, `id=${id} 不得走前绘分发器（原版本体之上）`).toBe(0);
+    }
+  });
+
+  it('后绘分发器收后绘组：120/4 画；前绘组 94/125 不画', () => {
+    for (const id of [120, 4]) {
+      const e = Enemy.fromVanilla(id, 100, 100) as EnemyT;
+      tickN(e, 10, 4, 0);
+      if (id === 4) { e.ai0 = 3; e.state = 4; }
+      const { ctx, ops } = recorder();
+      drawNpcTrailGhostsOverBody(ctx, e, atlasStub, FRAME, OPT);
+      expect(draws(ops).length, `id=${id} 应走后绘分发器`).toBeGreaterThan(0);
+    }
+    for (const id of [94, 125]) {
+      const e = Enemy.fromVanilla(id, 100, 100) as EnemyT;
+      tickN(e, 10, 4, 0);
+      const { ctx, ops } = recorder();
+      drawNpcTrailGhostsOverBody(ctx, e, atlasStub, FRAME, OPT);
+      expect(draws(ops).length, `id=${id} 不得走后绘分发器（原版本体之下）`).toBe(0);
+    }
+  });
+
+  it('残影族 id 门 = 分发器并集（独立通道 id 418/473/402/657 不在门表）', () => {
+    for (const id of [426, 427, 521, 546, 620, 439, 551, 519, 94, 125, 419, 4,
+      120, 471, 477, 516]) {
+      expect(NPC_TRAIL_GHOST_IDS.has(id), `id=${id}`).toBe(true);
+    }
+    for (const id of [418, 473, 402, 657, 685]) {
+      expect(NPC_TRAIL_GHOST_IDS.has(id), `id=${id}`).toBe(false);
+    }
+  });
+});
+
+describe('BJ237-B drawEnemy 绘制序锁（记录型 ctx 直调——antlion-tilt 同款假体）', () => {
+  const BODY = { width: 8, height: 8 };    // vnpc（本体）身份
+  const GHOST = { width: 64, height: 128 }; // ensureVImage（残影/环）身份
+  function driveDrawEnemy(e: EnemyT): Array<{ m: string; a: unknown[] }> {
+    const calls: Array<{ m: string; a: unknown[] }> = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k) => (k === 'canvas' ? undefined
+        : k === 'getTransform'
+          ? (...a: unknown[]) => { calls.push({ m: 'getTransform', a }); return { __parentT: true }; }
+          : (...a: unknown[]) => { calls.push({ m: String(k), a }); }),
+    });
+    const fake = {
+      ctx,
+      assets: { enemySprites: new Map() },
+      atlas: {
+        vnpc: () => ({ img: BODY, sx: 0, sy: 0, sw: 8, sh: 8 }),
+        ensureVImage: () => GHOST,
+        vmisc: () => null,
+      },
+      drawNpcGlow: () => {},
+      drawTwinsChain: () => {},   // 125 直调路径（mechQueenUp()=false 分支）
+    };
+    (Renderer.prototype as unknown as {
+      drawEnemy: (this: unknown, e: EnemyT, w: unknown, ents?: unknown[]) => void;
+    }).drawEnemy.call(fake, e,
+      { store: { idx: () => 0, liquid: [0] } }, []);   // 水下滤镜查液面(:7464)——空世界
+    return calls;
+  }
+
+  /** 残影槽区间=[setTransform, 同层 restore)；drawGhostSprite 内部 save/restore 按深度折叠 */
+  function ghostSlot(calls: Array<{ m: string; a: unknown[] }>): [number, number] {
+    const st = calls.findIndex((c) => c.m === 'setTransform');
+    expect(st, '本体前槽 setTransform 缺失（BJ237 槽未生效）').toBeGreaterThanOrEqual(0);
+    let depth = 0;
+    for (let i = st + 1; i < calls.length; i++) {
+      if (calls[i].m === 'save') depth++;
+      else if (calls[i].m === 'restore') {
+        if (depth === 0) return [st, i];
+        depth--;
+      }
+    }
+    return [st, calls.length];
+  }
+
+  it('620（残影+环双成员）：残影槽 < 环拷贝 < 本体，本体=最后一次 draw', () => {
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1200);
+    try {
+      // tSec=1.2 → 620 环包络谷底（num58=0、fade=1）→ 环拷贝必画
+      const e = Enemy.fromVanilla(620, 100, 100) as EnemyT;
+      e.spawnAlpha = 0;                       // 出生渐显关（Opacity=1）——否则残影/环全被 α 门吞
+      tickN(e, 2, 4, 0);                      // depth=2 → 1 份残影（i=1）
+      const calls = driveDrawEnemy(e);
+      const drawsAll = calls.map((c, i) => ({ c, i })).filter(({ c }) => c.m === 'drawImage');
+      const bodyIdx = drawsAll.filter(({ c }) => c.a[0] === BODY).map(({ i }) => i);
+      expect(bodyIdx.length).toBe(1);
+      const [gs, ge] = ghostSlot(calls);
+      const ghostIdx = drawsAll.filter(({ i }) => i > gs && i < ge).map(({ i }) => i);
+      expect(ghostIdx.length, '残影份数').toBe(1);
+      const ringIdx = drawsAll.filter(({ c, i }) => c.a[0] === GHOST && i > ge).map(({ i }) => i);
+      expect(ringIdx.length, 'num57=4 环拷贝').toBe(4);
+      expect(Math.max(...ghostIdx)).toBeLessThan(Math.min(...ringIdx));   // 残影先于环（:23627→:23645）
+      expect(Math.max(...ringIdx)).toBeLessThan(bodyIdx[0]);              // 环先于本体（:23645→:23660）
+      expect(bodyIdx[0]).toBe(drawsAll[drawsAll.length - 1].i);           // 本体压轴=残影被遮
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('125（机械族前绘组）：残影在槽内且先于本体；本体=最后一次 draw', () => {
+    const e = Enemy.fromVanilla(125, 100, 100) as EnemyT;
+    e.spawnAlpha = 0;                       // 出生渐显关（Opacity=1）
+    tickN(e, 10, 4, 0);
+    const calls = driveDrawEnemy(e);
+    const drawsAll = calls.map((c, i) => ({ c, i })).filter(({ c }) => c.m === 'drawImage');
+    const bodyIdx = drawsAll.filter(({ c }) => c.a[0] === BODY).map(({ i }) => i);
+    expect(bodyIdx.length).toBe(1);
+    const [gs, ge] = ghostSlot(calls);
+    const ghostIdx = drawsAll.filter(({ i }) => i > gs && i < ge).map(({ i }) => i);
+    expect(ghostIdx.length, 'i=9,7,5,3,1 五份').toBe(5);
+    expect(Math.max(...ghostIdx)).toBeLessThan(bodyIdx[0]);
+    expect(bodyIdx[0]).toBe(drawsAll[drawsAll.length - 1].i);
+  });
+
+  it('120（后绘组）：残影在本体【之后】（原版 :26015 后绘 extras 区同相）', () => {
+    const e = Enemy.fromVanilla(120, 100, 100) as EnemyT;
+    e.spawnAlpha = 0;                       // 出生渐显关（Opacity=1）
+    tickN(e, 10, 4, 0);
+    const calls = driveDrawEnemy(e);
+    const drawsAll = calls.map((c, i) => ({ c, i })).filter(({ c }) => c.m === 'drawImage');
+    const bodyIdx = drawsAll.filter(({ c }) => c.a[0] === BODY).map(({ i }) => i);
+    expect(bodyIdx.length).toBe(1);
+    const ghosts = drawsAll.filter(({ c }) => c.a[0] === GHOST);
+    expect(ghosts.length).toBe(9);
+    expect(Math.min(...ghosts.map(({ i }) => i))).toBeGreaterThan(bodyIdx[0]);
   });
 });

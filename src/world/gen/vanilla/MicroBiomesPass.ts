@@ -1716,7 +1716,9 @@ export class DeadMansChestBiome {
       if (!ch) continue;                       // 洞：Main.chest[j]==null → cs:429 continue
       const { x, y } = ch;
       // IIII67：x86 DmLog 'CHEST slot=' 同格式（全箱枚举,非金箱也打行）
-      if (this.__swLogChest !== false) segProbe(`CHEST slot=${candSlot} ${x},${y} t=${mbSheetOf(st.type[st.idx(x, y)])} fx=${st.frameX[st.idx(x, y)]} fy=${st.frameY[st.idx(x, y)]} act=${(st.flags[st.idx(x, y)] & 1)}`);
+      // ★BJ239:__swLogChest 库内零写入点=探针运行期动态注入门(缺省 undefined!==false
+      //   恒打点,注入 false 静默)——cast 读取保留该动态语义,零运行差。
+      if ((this as unknown as { __swLogChest?: boolean }).__swLogChest !== false) segProbe(`CHEST slot=${candSlot} ${x},${y} t=${mbSheetOf(st.type[st.idx(x, y)])} fx=${st.frameX[st.idx(x, y)]} fy=${st.frameY[st.idx(x, y)]} act=${(st.flags[st.idx(x, y)] & 1)}`);
       if (!st.inBounds(x, y)) { segProbe(`CAND ${x},${y} good=False`); continue; }
       const i = st.idx(x, y);
       // 金箱锚点:type 21 + style 1 + 2×2 左上角(frameX%36==0 且 /36==1 且 frameY==0)

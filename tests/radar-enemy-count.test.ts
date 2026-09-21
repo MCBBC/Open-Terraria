@@ -47,7 +47,7 @@ describe('NPC_DONT_COUNT_ME_1457 表 = 反编译直读（1457 与 1458 双版本
   });
   it('表内 id 均在 vanilla-npcs.json 有条目（防手滑写错 id）', () => {
     for (const id of NPC_DONT_COUNT_ME_1457) {
-      expect(vanillaNpcsJson[String(id)], `dontCountMe id ${id} 缺 json 条目`).toBeTruthy();
+      expect((vanillaNpcsJson as Record<string, unknown>)[String(id)], `dontCountMe id ${id} 缺 json 条目`).toBeTruthy();
     }
   });
 });
@@ -65,7 +65,7 @@ describe('radarCountsEnemy ≡ 原版雷达条件（Main.cs:47813）over vanilla
   it('原版应计集合（!friendly && damage>0 && lifeMax>5 && !dontCountMe）谓词全量一致', () => {
     let shouldCount = 0;
     for (const [k, raw] of Object.entries(vanillaNpcsJson)) {
-      const v = raw as { id: number; friendly?: boolean; critter?: boolean; damage?: number; lifeMax?: number };
+      const v = raw as { id: number; name?: string; friendly?: boolean; critter?: boolean; damage?: number; lifeMax?: number };
       const vanilla =
         v.friendly !== true && (v.damage ?? 0) > 0 && (v.lifeMax ?? 0) > 5
         && !NPC_DONT_COUNT_ME_1457.has(v.id);

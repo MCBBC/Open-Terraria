@@ -159,6 +159,9 @@ function toPoint(p: V2): { x: number; y: number } {
 
 class DungeonControlLine {
   Index = 0;
+  /** ★BJ239:探针仪标注(DitherSnakePass:743 写,242 DR|SNKPN 读)——可选字段补声明,
+   *   非反编译字段,不参与任何行为分支。 */
+  _prK?: string;
   prev: DungeonControlLine | null = null;
   next: DungeonControlLine | null = null;
   Start: V2;

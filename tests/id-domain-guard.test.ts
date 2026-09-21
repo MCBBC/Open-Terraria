@@ -12,6 +12,7 @@
 //     本测 IDG-1 红 + sentinel choke5/6 红;同一变异下历史件 tests/wld-export.test.ts
 //     仍全绿(夹具 stableOf 与错映射同表=自回环恒等掩盖的活体复现)。
 import { describe, it, expect } from 'vitest';
+// @ts-expect-error - tools/id-domain-guard.mjs 无声明文件(工具域 .mjs,本测仅 vitest 运行时消费)
 import { auditIdDomains } from '../tools/id-domain-guard.mjs';
 
 describe('IDG id 域纪律守卫（grep 臂）', () => {

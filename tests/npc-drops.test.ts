@@ -303,7 +303,7 @@ describe('史莱姆体内物品（SlimeBodyItemDropRule）', () => {
     expect(sample(1, 60, { ai1: 0 }).perKill.every((k) => !k.includes(8))).toBe(true);
     expect(sample(1, 60, { ai1: -1 }).perKill.every((k) => !k.includes(8))).toBe(true);
     // 全档位表逐物品核：必出 + 堆叠闭区间 [min,max]（GetDropInfo :36-112）
-    const table = (dropData as { slimeBody: Record<string, [number, number]> }).slimeBody;
+    const table = (dropData as unknown as { slimeBody: Record<string, [number, number]> }).slimeBody;
     for (const [id, [mn, mx]] of Object.entries(table)) {
       const n = Number(id);
       for (let i = 0; i < 40; i++) {

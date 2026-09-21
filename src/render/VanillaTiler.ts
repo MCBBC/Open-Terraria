@@ -1389,6 +1389,16 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       ofy -= 2016 * pageNum;
       ofx += 72 * pageNum;
     }
+    // ★BJ241 tile 733 收音机开关折半（TileDrawing.cs:6081-6088 case 733 1:1）：
+    //   世界态 frameY 仅开关标记（右键/电路 SwitchMonolith ±54），Tiles_733 原版即
+    //   108×54 仅 3 行（terraria-assets 源 PNG 亲证）——绘制端 %54 折回 0..36 行带、
+    //   fy<54（关）addFrX+=54 取右半暗屏 / fy≥54（开）左半亮屏。与 93/139 同理
+    //   ★必须在零帧重建门之后折：不折则 vframeAt(ofy=54) 落空回退 (0,0)=整物
+    //   第一格平铺（用户实报右键后贴图错），且关态恒画左半=亮屏相。
+    if (sheet === 733) {
+      if (ofy < 54) ofx += 54;
+      ofy %= 54;
+    }
     // 旧版素材表【分带布局】兼容：wld 帧按新游戏单行布局存储（样式全部横排一行），
     // 而素材包里的表较窄、样式分多带排列（一行放不下就换到下一带）。
     // 样式索引超出一带容量 → 换带重算（如 Tiles_187：带宽 35 样式×54px，
@@ -1934,6 +1944,19 @@ export function drawAdjust(
     }
     case 751: if (fit(fx, fy, 56, 46)) { a.sw = 56; a.sh = 46; } break;  // :4582-4589
     case 752: if (fit(fx, fy, 36, 38)) { a.sw = 36; a.sh = 38; } break;  // :4577-4581
+    // ★BJ241 tile 733 收音机（TileDrawing.cs:6081-6088 verbatim）：开/关=左右半 sheet
+    //   切换而非上下行——Tiles_733 原版即 108×54 仅 3 行（terraria-assets 源 PNG 亲证），
+    //   世界态 frameY 只作开关标记（0/18/36=关、54/72/90=开，右键 SwitchMonolith ±54），
+    //   绘制时 %54 折回 0..36 行带；fy<54（关）→ addFrX+=54 取右半（暗屏）、fy≥54（开）
+    //   → 左半（亮屏）；tileTop=2 已在 DRAW_Y_OFFSET 静态表。曾整缺：世界态 fy=54 直接
+    //   采样 54 高 sheet → vframeAt OOB → 链回退 (0,0) 整物第一格平铺（用户实报右键后
+    //   贴图错）；且关态恒画左半=亮屏相（双态皆错的静默半错）。
+    case 733: {
+      const sx = (fx % 54) + (fy < 54 ? 54 : 0);
+      const sy = fy % 54;
+      if (fit(sx, sy, 16, 16)) { a.sx = sx; a.sy = sy; }
+      break;
+    }
     // ★2026-08-30 移除 case 405/406 残案（TileDrawing.cs:5443-5529 原样语义已由
     //   VanillaTiler 顶层的 fireplaceAddFrY/chimneyAddFrY 专属 helper 承担——本处旧式
     //   `animRot()%8` 走针钟与原版 rate 钟不同相、且给烟囱算出 ≥6 的相位落进纹理

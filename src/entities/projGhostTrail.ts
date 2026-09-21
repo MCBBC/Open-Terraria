@@ -45,13 +45,31 @@
 // 登记近似（参数面外,逐条注释锚定）：
 //   ① ring dir = 记录拍 sign(vx)（原版 spriteDirection 语义的速度向子集;本仓弹域无
 //      通用 spriteDirection 字段——镜像特异 id 未在活动集,偏差面登记）;
-//   ② 873/976 槽色 ×格光（Main.cs:31362-31364/:31358-31361 Lighting.GetColor）未乘
-//      （本仓弹域无逐槽位光采样——暗处残影偏亮的恒定偏差,登记债）;
+//   ② ★BJ235 勘误翻案：BJ219 原判「873/976 槽色×格光未乘=暗处残影偏亮」系误捆绑——
+//      反编译亲读 :31364-31368,通用环内逐槽 Lighting.GetColor 乘【仅 976】一块
+//      （873 的行号引用实际也落在 976 块内,873 染色=AI_171_GetColor×0.5×timeLeft 门,
+//      无光项）;且本仓光照面 = compositeLight 全屏 multiply（Renderer.ts:7216 判例:
+//      「不再逐条取 lightAt,否则与全屏 pass 双重相乘会过暗」）——每个残影像素本就按
+//      其屏幕位吃格光,逐槽再乘=双乘过暗。563 的逐槽 GetColor（:35291）同理由全屏乘
+//      承载（563 轨面BJ235 落地,见 drawHslMidpointTrail 注）。
 //   ③ 864 辉光色相 whoAmI%6 项以 0 档近似（环内同色;原版随弹序异色）;
 //   ④ 931 FQW 色玩家名彩蛋支（Cenx 等四人名,GetFairyQueenWeaponsColorFull switch）
 //      未移植（常名不可达,色式主干 1:1）;
 //   ⑤ 388 专用块 origin=(w/2,h/2)（proj 尺寸系 :34921）以帧矩形中心承载（同帧同尺寸
 //      时逐值等价）。
+// ★BJ235（2026-09-21）接线续批（BJ219 登记债清偿）：
+//   · GHOST_TINT[833-835] 补 ×lerpValue2 速度染因子（:31307-31314 逐值,BJ219 漏乘）;
+//   · GHOST_FRAME 帧门 gateFrame（:30706/:30716——833 frame==8/834-835 frame==10
+//     时锚特支整支跳过,BJ219 无门）;
+//   · 四特支链/带绘制面落地：drawGreenBandTrail（1020/1024/1026,:28309-28328/
+//     :28508-28561）/ drawCeleb2Chain（715-718,:33997-34083）/ drawRainbowChain
+//     （1089,:33270-33306）/ drawHslMidpointTrail（563,:35283-35299）;
+//   · 811 ai0 白染预混（:30846 Remap(ai0,0,15,1,0.3)）判镰=光照域项,本仓由
+//     SELF_LUMINOUS_PROJS[811] whiten=true 光地板承载（Renderer.ts:10943,全亮端
+//     Lerp(W,W,k)=W 恒等）——染侧不重复实现,无需 ai0 喂入。
+//   · 接线位：MinionProj（533/755/833-835 本体环）/ RollingBoulder（1055,frame 系
+//     end,BJ219 表已在）/ Celeb2（715-718 链+环）/ WeaponProj GlowstickProj（1089）
+//     / YoyoProj（563）/ Arrow dispatch（ai1=empressHue 喂入+1026 绿带呼出）。
 
 import { tintedTex } from '../render/StringLine';
 import { hslToRgb255 } from '../render/AuroraSky';
@@ -261,6 +279,10 @@ export interface GhostFrameSpec {
   originX?: number | 'dirEdge';   // 'dirEdge'=W−20/20 按 spriteDirection（700/964/965）;负值=flip 条件偏移
   zeroHalfH?: boolean;   // 833-835 zero.Y+=h/2（:30703-30716）
   cellW?: number; cellH?: number;   // s976 32×18 单元
+  /** ★BJ235 帧门（:30706/:30716）：833 frame==8 / 834-835 frame==10 时【整支跳过】
+   *  ——rectangle4/origin8/zero 全回缺省档（帧矩形=cur 行、origin=帧心、zero 不偏移）。
+   *  原文 `if (proj.type == 833 && proj.frame != 8) {…}`——门内才改锚。 */
+  gateFrame?: number;
 }
 export const GHOST_FRAME: Readonly<Record<number, GhostFrameSpec>> = {
   503: { frameRow: 'cur', originY: 70 },             // :30643-30645
@@ -279,9 +301,9 @@ export const GHOST_FRAME: Readonly<Record<number, GhostFrameSpec>> = {
   964: { frameRow: 'cur', originX: 'dirEdge' },      // :30674-30676
   965: { frameRow: 'cur', originX: 'dirEdge' },
   872: { frameRow: 'curHalfW' },                     // 半宽+右列 :30677-30679 + :30943 X+=Width
-  833: { frameRow: 'cur', zeroHalfH: true, originY: -4, originX: -7 },  // :30703-30709
-  834: { frameRow: 'cur', zeroHalfH: true, originY: -4, originX: -2 },  // :30710-30716
-  835: { frameRow: 'cur', zeroHalfH: true, originY: -4, originX: -2 },
+  833: { frameRow: 'cur', zeroHalfH: true, originY: -4, originX: -7, gateFrame: 8 },   // :30706-30713（frame==8 整支跳）
+  834: { frameRow: 'cur', zeroHalfH: true, originY: -4, originX: -2, gateFrame: 10 },  // :30714-30721（frame==10 整支跳）
+  835: { frameRow: 'cur', zeroHalfH: true, originY: -4, originX: -2, gateFrame: 10 },
   864: { frameRow: 'next' },                         // value16.Y+=Height（一次,:30892）
   916: { frameRow: 'g916' },                         // 逐槽行进 H,回绕 H×frames（:31346-31349）
   873: { frameRow: 'g873' },                         // 逐槽行进 H+2,回绕 (H+2)×7（:31358-31362）
@@ -400,9 +422,14 @@ export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
       aMul: 1,
     };
   },
-  833: (c) => ({ rgb: WHITE, aMul: 0, gScaleMul: undefined }),               // A=0+白染×速 :31307-31314
-  834: () => ({ rgb: WHITE, aMul: 0 }),
-  835: () => ({ rgb: WHITE, aMul: 0 }),
+  // ★BJ235 补速染因子（:31307-31314 逐值）——lerpValue2 = GetLerpValue(0,6,|velocity|)
+  //  （≤0 → 0,≥6 → 1）;原式 color38 = Lerp(color38,White,l×0.5) 后 A=0、color38*=l。
+  //  白染预混项的 base=projectileColor（光照域）→ 本仓光照走 compositeLight 全屏乘,
+  //  染侧只承载 ×l 因子（全亮格处 1:1;暗格差=格光项,登记②同账）。A=0 → 纯加法
+  //  单 'lighter' 笔,aMul=0（globalAlpha=fade 承载 :31329 的 ×fade）。
+  833: (c) => { const l = clamp01(c.vxLen / 6); return { rgb: [255 * l, 255 * l, 255 * l] as [number, number, number], aMul: 0 }; },
+  834: (c) => { const l = clamp01(c.vxLen / 6); return { rgb: [255 * l, 255 * l, 255 * l] as [number, number, number], aMul: 0 }; },
+  835: (c) => { const l = clamp01(c.vxLen / 6); return { rgb: [255 * l, 255 * l, 255 * l] as [number, number, number], aMul: 0 }; },
   592: (c) => ({ rgb: [255 / c.i, 255 / c.i, 255], aMul: 1 }),               // R,G/=i :31315-31317
   964: (c) => ({ rgb: [0, 0, 0], aMul: 1 }),                                 // Black×Opacity（opacity 走 bodyAlpha 面）:31328-31330
   965: (c) => ({ rgb: [0, 0, 0], aMul: 1 }),
@@ -469,7 +496,10 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
   const { ring } = o;
   if (ring.mode < 0) return;
   const { start, end, step, gScale, denom, rotMul } = loop;
-  const spec = GHOST_FRAME[o.id];
+  let spec = GHOST_FRAME[o.id];
+  if (spec && spec.gateFrame !== undefined && o.frame === spec.gateFrame) {
+    spec = { frameRow: 'cur' };   // ★BJ235 帧门（:30706/:30716）——门命中整支回缺省档
+  }
   const frames = Math.max(1, o.frames);
   const img = o.tex;
   const iw = img.width, ih = img.height;
@@ -579,5 +609,188 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
       if (cutTex && cutGa > 0) drawOnce(cutTex, cutGa, 'source-over');   // A 衰减面（黑×aMul×fade）
       drawOnce(addTex, addGa, 'lighter');                                // rgb 贡献面
     }
+  }
+}
+
+// ===================== ★BJ235 接线续批：四特支链/带绘制面 =====================
+// 以下四式在原版都是 DrawProjDirect 内【自管 oldPos 环】的专用块（不进 :30609
+// 通用表），记录面共用 ProjGhostRing（TrailingMode 表驱动）。调用位约定：
+//   绿带 1020/1024/1026 = DrawProjDirect 头（:28508-28561,先于一切）;
+//   Celeb2 715-18 链 = 第二本体支锚链内（:33997-34083,先于本体）;
+//   1089 彩虹荧光棒链 = 本体后（:33270-33306）;563 Gradient 轨 = 本体后（:35283-35299）。
+// 光照：四式原版【不乘 projectileColor】（自着色）——本仓实体层统一被 compositeLight
+// 全屏乘（repo 习语,Renderer.ts:7216 判例），563 原版逐槽 Lighting.GetColor 与
+// 976 的逐槽亮度（:31368）在 repo 侧由同一全屏乘按像素粒度承载 = 双方 1:1，
+// 不再逐槽 lightAt（避免双乘过暗,同 WoF 判例）。
+
+/** DrawTrail（Main.cs:28309-28328）——绿带 1020/1024/1026 共享体。
+ *  MagicPixel 1×1 白像素 ×(4, segLen) 条带,origin=(0.5,1)（底心）、rot=段向+π/2；
+ *  逐段 α 因子 = Remap(i,0,cap,1,0) = 1−i/cap。
+ *  baseColor×A：1020 两遍 (±10,2) 偏移 (177,255,32) A=127（:28301-28307,偏移随
+ *  oldRot 旋——mode 2 环已记）；1024/1026 单遍零偏移 (140,234,180) A=255（:28556/:28559）。
+ *  原 1×1 白像素条带在 canvas 直译 = fillRect(0,−2,len,4)（段向旋转系内 4px 宽带）。 */
+export function drawGreenBandTrail(
+  ctx: Ctx, ring: ProjGhostRing, id: number,
+  sizeW: number, sizeH: number, bodyAlpha = 1,
+): void {
+  const cap = ring.cap;
+  const pass = (offX: number, offY: number, rgb: [number, number, number], aBase: number): void => {
+    for (let i = cap - 1; i > 0; i--) {
+      const s0 = ring.at(i), s1 = ring.at(i - 1);
+      if (!s0) continue;                                   // oldPos[i]==Zero 哨兵（:28320）
+      if (!s1) continue;                                   // 本仓哨兵语义同域（未填槽跳）
+      // 偏移随各槽 oldRot 旋（:28321/:28322——1026 mode0 oldRot≡0×零偏移=死码同相）
+      const a0 = s0.rot, a1 = s1.rot;
+      const x1 = s0.x + sizeW / 2 + (offX * Math.cos(a0) - offY * Math.sin(a0));
+      const y1 = s0.y + sizeH / 2 + (offX * Math.sin(a0) + offY * Math.cos(a0));
+      const x0 = s1.x + sizeW / 2 + (offX * Math.cos(a1) - offY * Math.sin(a1));
+      const y0 = s1.y + sizeH / 2 + (offX * Math.sin(a1) + offY * Math.cos(a1));
+      const len = Math.hypot(x0 - x1, y0 - y1);
+      if (!(len > 0)) continue;
+      const k = Math.max(0, Math.min(1, 1 - i / cap));     // num4（:28325 Remap 1→0）
+      const ga = Math.max(0, Math.min(1, aBase * k * bodyAlpha));
+      if (ga <= 0) continue;
+      ctx.save();
+      ctx.globalAlpha = ga;
+      ctx.fillStyle = `rgb(${Math.round(rgb[0])},${Math.round(rgb[1])},${Math.round(rgb[2])})`;
+      ctx.translate(x1, y1);
+      ctx.rotate(Math.atan2(y0 - y1, x0 - x1));
+      ctx.fillRect(0, -2, len, 4);                          // MagicPixel ×(4,len)
+      ctx.restore();
+    }
+  };
+  if (id === 1020) {
+    pass(10, 2, [177, 255, 32], 127 / 255);                // :28303（cPet==0 档,染笼白档未建模=登记）
+    pass(-10, 2, [177, 255, 32], 127 / 255);               // :28304
+  } else if (id === 1024 || id === 1026) {
+    pass(0, 0, [140, 234, 180], 1);                        // :28556-28561
+  }
+}
+
+/** Celeb2 烟花链（Main.cs:33997-34083）——715-718 三帧横条【第 2 帧】沿段链。
+ *  逐段：锚 = oldPos[i]+size/2、rot=oldRot[i]、origin=(帧宽/2,0)、
+ *  scale=(段长/帧宽, 1)、color = GetCeleb2Color()×0.8（A=127→0.8×127/255）
+ *  ×(1−i/20)；变体 2（Gold）＝i+timeLeft mod 20 摆动表 ±(1..3)×4px 沿段向 + scale×0.6
+ *  （:34020-34062）；变体 5（紫）scale×0.5（:34064-34066）。 */
+export function drawCeleb2Chain(
+  ctx: Ctx, ring: ProjGhostRing, tex: Tex | null,
+  baseColor: [number, number, number], variant: number,
+  timeLeft: number, sizeW: number, sizeH: number, frameW: number, frameH: number,
+): void {
+  if (!tex) return;
+  const cap = ring.cap;
+  const fx = frameW * 2;                                    // value112.X += W×2（:34006 第 2 帧）
+  const aBase = (127 / 255) * 0.8;                          // celeb2Color.A=127 ×0.8（:34003-34004）
+  const WOB: Record<number, number> = { 1: 1, 2: 2, 3: 3, 4: 2, 5: 1, 7: -1, 8: -2, 9: -3, 10: -2, 11: -1 };
+  for (let i = cap - 1; i > 0; i--) {
+    const s0 = ring.at(i), s1 = ring.at(i - 1);
+    if (!s0) continue;                                      // vector102==vector101 哨兵（:34009）
+    if (!s1) continue;
+    const x1 = s0.x + sizeW / 2, y1 = s0.y + sizeH / 2;
+    const x0 = s1.x + sizeW / 2, y0 = s1.y + sizeH / 2;
+    const len = Math.hypot(x0 - x1, y0 - y1);
+    const rot = s0.rot;                                     // num412 = oldRot[i]（mode 2）
+    let sxMul = len / frameW;                               // scale17.X（:34012）
+    let syMul = 1;
+    let wx = 0, wy = 0;
+    if (variant === 2) {                                    // :34015-34062
+      let ph = (i + Math.trunc(timeLeft)) % 20;
+      if (ph < 0) ph += 20;
+      const w = WOB[ph] ?? 0;
+      wx = Math.cos(rot) * w * 4;                           // vector103=oldRot 单位向 ×w×4
+      wy = Math.sin(rot) * w * 4;
+      sxMul *= 0.6; syMul *= 0.6;
+    } else if (variant === 5) {                             // :34064-34066
+      sxMul *= 0.5; syMul *= 0.5;
+    }
+    const k = 1 - i / cap;                                  // color110（:34013）
+    const ga = Math.max(0, Math.min(1, aBase * k));
+    if (ga <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = ga;
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(x1 + wx, y1 + wy);
+    ctx.rotate(rot);
+    ctx.drawImage(tex as CanvasImageSource, fx, 0, frameW, frameH,
+      -frameW / 2 * sxMul, 0, frameW * sxMul, frameH * syMul);   // origin=(W/2,0)（:34005）
+    ctx.restore();
+  }
+}
+
+/** 彩虹荧光棒链（Main.cs:33270-33306）——1089 专用 MagicPixel 段带。
+ *  色 = (DiscoR,DiscoG,DiscoB) A=127；带宽 2.2×2=4.4、长=段长（1×1 像素直译 fillRect）；
+ *  双端渐隐：num342=1 起【新端】i≤10 逐槽 −0.1（先取值后减,:33288-33294）——
+ *  槽 i≤10 依次 ×1,0.9,…,0.1；num344=0 起【最老非零槽】起 13 槽内逐槽 +1/13（≤1）——
+ *  老端渐显爬坡（:33295-33302）。alpha = 127/255 × num342 × num344。 */
+export function drawRainbowChain(
+  ctx: Ctx, ring: ProjGhostRing, disco: [number, number, number],
+  sizeW: number, sizeH: number,
+): void {
+  const cap = ring.cap;
+  let newestFade = 1;                                       // num342（:33283）
+  let oldestRamp = 0;                                       // num344（:33284）
+  let oldestSeen = -1;                                      // num347（首个非零槽,只记一次 :33286-33289）
+  const ramp = 1 / 13;                                      // num346 = 1/13（:33282）
+  for (let i = cap - 1; i > 0; i--) {
+    const s0 = ring.at(i), s1 = ring.at(i - 1);
+    if (!s0) continue;                                      // vector84==vector83 哨兵（:33285）
+    if (!s1) continue;
+    if (oldestSeen === -1) oldestSeen = i;
+    const x1 = s0.x + sizeW / 2, y1 = s0.y + sizeH / 2;
+    const x0 = s1.x + sizeW / 2, y0 = s1.y + sizeH / 2;
+    const len = Math.hypot(x0 - x1, y0 - y1);
+    const rot = Math.atan2(y0 - y1, x0 - x1);               // rotation28=段向（−π/2 由 origin 系承担）
+    const ga0 = newestFade * oldestRamp;                    // color89 因子序（先取值后更新）
+    const ga = Math.max(0, Math.min(1, (127 / 255) * ga0));
+    if (i <= 10) newestFade = Math.max(0, newestFade - 0.1);        // :33289-33294
+    if (oldestSeen !== -1 && i >= oldestSeen - 13) oldestRamp = Math.min(1, oldestRamp + ramp);  // :33295-33302
+    if (ga <= 0) continue;
+    ctx.save();
+    ctx.globalAlpha = ga;
+    ctx.fillStyle = `rgb(${Math.round(disco[0])},${Math.round(disco[1])},${Math.round(disco[2])})`;
+    ctx.translate(x1, y1);
+    ctx.rotate(rot);
+    ctx.fillRect(0, -2.2, len, 4.4);                        // MagicPixel ×(4.4,len)（顶心锚=段起,canvas 简化:长轴 +X）
+    ctx.restore();
+  }
+}
+
+/** 563 Gradient 悠悠球轨（Main.cs:35283-35299）——10 槽 hsl 双笔（槽位+中点）。
+ *  逐槽：hue = ((1−i/10)²/5) mod 1（:35289）、A=127、×(1−i/10)²、×0.65；
+ *  rot = 本体当前 rotation（num514 块外 proj.rotation 直读,:35293）、
+ *  scale = proj.scale（563 SetDefaults 1.05,调用方传）；双笔位 = 槽位心 与
+ *  Lerp(槽[i],槽[i−1],0.5) 中点（:35293-35296）。原版逐槽 Lighting.GetColor 乘
+ *  由 repo compositeLight 全屏乘按像素粒度承载（本文件头 BJ235 光照注）。 */
+export function drawHslMidpointTrail(
+  ctx: Ctx, ring: ProjGhostRing, tex: Tex | null,
+  bodyRot: number, bodyScale: number, frames: number, frame: number,
+  frameW: number, frameH: number,
+): void {
+  if (!tex) return;
+  const cap = 10;                                           // num517 = 10（:35286）
+  const sh = frameH;
+  const sx = Math.round(frame * sh);
+  for (let i = cap - 1; i >= 1; i--) {
+    const s0 = ring.at(i), s1 = ring.at(i - 1);
+    if (!s0) continue;                                      // 未填槽跳（原版 Zero 槽画向原点=老 dead 槽,活动窗内不可达）
+    const t = i / cap;                                      // num519（:35288）
+    const hue = (((1 - t) * (1 - t)) / 5) % 1;              // :35289
+    const [r, g, b] = hslToRgb255(hue, 1, 0.5);
+    const ga = Math.max(0, Math.min(1, (127 / 255) * (1 - t) * (1 - t) * 0.65));  // A=127×(1−t)²×0.65
+    if (ga <= 0) continue;
+    const addTex = tintedTex(tex, [Math.round(r), Math.round(g), Math.round(b)], true);
+    if (!addTex) continue;
+    const drawAt = (x: number, y: number): void => {
+      ctx.save();
+      ctx.globalAlpha = ga;
+      ctx.imageSmoothingEnabled = false;
+      ctx.translate(x, y);
+      ctx.rotate(bodyRot);
+      ctx.drawImage(addTex as CanvasImageSource, 0, sx, frameW, sh,
+        -frameW / 2 * bodyScale, -sh / 2 * bodyScale, frameW * bodyScale, sh * bodyScale);
+      ctx.restore();
+    };
+    drawAt(s0.x + 8, s0.y + 8);                             // +size/2（num153=texW/2=8,num152=0 :35293）
+    if (s1) drawAt((s0.x + s1.x) / 2 + 8, (s0.y + s1.y) / 2 + 8);   // 中点笔（:35294-35296）
   }
 }

@@ -183,7 +183,8 @@ describe('IIIII232 CreditsRollComposer（FillSegments 1:1 金标）', () => {
     fillSegments(out, twoLines, true);
     let lastPeak = -Infinity;
     for (const s of out) {
-      expect(s.t ?? s.peak).toBeGreaterThanOrEqual(0);
+      const sv = s as { t?: number; peak?: number };   // text 段有 peak 无 t,其余段有 t 无 peak
+      expect(sv.t ?? sv.peak).toBeGreaterThanOrEqual(0);
       if (s.k === 'text') {
         expect(s.peak).toBeGreaterThanOrEqual(lastPeak);
         lastPeak = s.peak;

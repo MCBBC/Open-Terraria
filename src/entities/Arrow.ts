@@ -687,6 +687,10 @@ const ADDITIVE_GLOW_PROJS = new Set([15, 93, 94, 95, 96, 1114, 253, 258, 102,
   //  /76/77/78 琴音弹（:81020 恒加算白不读 α）——GA case 20/76-78 return 1 配对,
   //  出生面=太空枪 127/魔法竖琴 494。
   20, 76, 77, 78,
+  // ★BJ236（2026-09-21）：254 磁球（GetAlpha :81278-81287 (255−α,…,0) A=0 加算白,
+  //  强度 min(1,life/30) 由 GA case 254 承载）——出生面=磁球 1266 magic shoot
+  //  （kind 'magic' 通用 Arrow,Game magic 支）。
+  254,
   // ★R5 终验批：723-726/1133 斗篷星族(:80992-80995 (255,255,255,0)×Opacity——
   // 加算白×透明度;ga=1−starAlpha/255 渐变由 drawGlobalAlpha case 承载,此处只
   // 切 lighter。728/9 走 StarfuryStar 专载体不在 Arrow draw 路径)
@@ -794,6 +798,11 @@ export const PROJ_ALPHA0: Record<number, number> = {
   469: 255,
 
   114: 255,                                                          // 邪恶三叉戟（:2031；AI 侧按速度 Remap 改写 :26794）
+  // ★BJ236 剑气族（2026-09-21）：SetDefaults alpha=255 直读——116 :2040/:2045 区、
+  //  132 :2219-2222、156 :2455-2457、157 :2448-2451(scale1.2)、173 :2597-2600。
+  //  AI aiStyle27 脉动（:26846-26858）以此 255 为起点 ±30/步 0↔255 折返（GA ≥15 段
+  //  (255,255,255,α) 的 A 通道=本值,梯期不读）
+  116: 255, 132: 255, 156: 255, 157: 255, 173: 255,
   163: 255, 310: 255, 1008: 255, 1009: 255, 1010: 255, 1011: 255,   // 信号枪族（163 :2523 等）
   514: 255,                                                          // 钉（aiStyle 93 −25/t 渐显 :33427-33434）
   246: 255,                                                          // 刺炮弹（−20/t 渐显 :58106-58110）
@@ -1334,9 +1343,14 @@ export class Arrow extends Entity {
   gemPhase = 0;
   /** 114 邪恶三叉戟减速计时（ai[0]，:26781 每步 +1） */
   private gem114T = 0;
-  /** 114 localAI[1] 出生渐显梯（aiStyle27 族级 :26840-26844 每 AI 步 ++ 钳 15）——
-   *  GetAlpha :81445-81458 梯门消费（<5 Transparent / 5..15 灰梯 / ≥15 全亮） */
+  /** 114/剑气族 116/132/156/157/173 localAI[1] 出生渐显梯（aiStyle27 族级
+   *  :26840-26844 每 AI 步 ++ 钳 15）——GetAlpha :81445-81458/:81373-81385 梯门消费
+   *  （<5 Transparent / 5..15 灰梯 / ≥15 全亮）。★BJ236 起族级复用（同梯同配方） */
   private gem114Ramp = 0;
+  /** 剑气族 116/132/156/157/173 脉动方向闩（原版 localAI[0]，:26846-26858——
+   *  0=升臂 α+=30 钳 255 翻 1 / 1=降臂 α−=30 钳 0 翻 0；114 的 localAI[0] 是初速
+   *  快照语义不同,分字段承载）。伴随 scale ±0.02/步呼吸（drawScale 消费） */
+  private beam27PulseDir = 0;
   // ---- 特殊箭特效批（2026-08-22，weapon-audit-2026-08-22 类别六）----
   /** 225 叶绿箭撞块弹反计数（ai[1]，:17130：首跳伤 ×0.66 / 第 4 撞 Kill） */
   private arrow225Ai1 = 0;
@@ -2459,6 +2473,29 @@ export class Arrow extends Entity {
           : this.gem114Ramp < 15 ? (this.gem114Ramp - 5) / 10 : 1;
         return ramp114 * (this.alpha / 255);
       }
+      // ★BJ236 剑气族（2026-09-21）：GetAlpha :81264-81277（1457 实锚;1458 同文）
+      //  （116||132||156||157||173 与 114/115 :81445 同构梯）——<5 Transparent /
+      //  5..15 灰梯 (l−5)/10 / ≥15 (255,255,255,alpha)。★与 114 的两处差异：
+      //  ① 绘制段无 114 专支 ×(1−Opacity) 乘区（157/378 :35141 专支与 aiStyle27
+      //    通支 :35152-35157 都直接 GetAlpha(projectileColor) 出画）→ ≥15 段合成
+      //    乘子 = α/255（脉动值直通 A 通道）,梯段 = 灰梯值,不再乘 alpha 场;
+      //  ② α 场语义不同：剑气 α=SetDefaults 255 起的 ±30/步脉动（AI 侧写,
+      //    subStepAI 剑气支）,非 114 的速度 Remap。灰梯段 rgb×k²/A×k 的
+      //    单乘子残差与 114 梯段同案登记。
+      //  157 无发射面（1.4.5 已无武器射出,PROJ_ROT_DIAG 注登记）=防御性档,
+      //  普查承载面;116=光束剑 723/173=附魔剑 989 通用近战 shoot 出膛（Game
+      //  melee 支 :14138 通用 Arrow）,132/156 同表 dormant。
+      case 116: case 132: case 156: case 157: case 173:
+        return this.gem114Ramp < 5 ? 0
+          : this.gem114Ramp < 15 ? (this.gem114Ramp - 5) / 10
+            : this.alpha / 255;
+      // ★BJ236 磁球 254（2026-09-21）：GetAlpha :81278-81287（1457 实锚;1458 同文）
+      //  ——timeLeft<30 门内 α=255−255·(tL/30) 后返 (255−α,255−α,255−α,0)；
+      //  A=0 → 纯加算白（配 ADDITIVE_GLOW_PROJS 'lighter'），强度 (255−α)/255
+      //  代数化简 = min(1, tL/30)：满强白恒亮至寿命尾 30t 线性淡出（SetDefaults
+      //  α 无行 ≡0 恒,aiStyle47 AI 不写 α——原版 α 写面仅在 GetAlpha 门内）
+      case 254:
+        return Math.min(1, this.life / 30);
       case 604: return (255 - this.alpha) / 255;   // 孢子云（aiStyle 115 alpha+10/t 淡出 :35062-35068）
       case 131: case 732: return (255 - this.alpha) / 255;   // 蘑菇孢子/风暴气旋渐隐（AI_030 :27154/AI_044 :28307 alpha 累加,GetAlpha 缺省路径同式）
       case 163: case 310: case 1008: case 1009: case 1010: case 1011:
@@ -7138,6 +7175,30 @@ export class Arrow extends Entity {
           this.cy + 4 + (Math.random() * 2 - 1) * 16 - this.vy * 2.5,
           8, 8, 27, this.vx * 0.5, this.vy * 0.5, 100, null, 1 + Math.random() * 0.6);
         void d114;
+      }
+    }
+    // ★BJ236 剑气族 116/132/156/157/173（aiStyle27 本体 :26767-26911,1458 同段）：
+    //  ① localAI[1] 出生梯（:26840-26842 族级支,每 AI 步 ++ 钳 15,与 114 同梯）；
+    //  ② 梯满后脉动（:26846-26858 `if (type != 114)` 支,梯完首拍即跑）：
+    //    localAI[0]==0 → scale−0.02、α+=30（≥250 → α=255、localAI[0]=1）/
+    //    localAI[0]==1 → scale+0.02、α−=30（≤0 → α=0、localAI[0]=0）——
+    //    α 0↔255 周期 18 步、scale ±0.18 呼吸,GA ≥15 段 (255,255,255,α) 直读本值。
+    //  载体：116/173=光束剑 723/附魔剑 989 通用近战 shoot（Item.cs:9836/:12763）、
+    //  132/156/157 无发射面=dormant 档。**登记残差**：aiStyle27 活体迹尘未建模
+    //  ——173 :26830-26838 localAI[1]>7 单枚 d15/57/58（scale1.25 ×0.1 noGravity）、
+    //  132 :26838-26848 双枚 d107（×−0.25）、116 :26863-26869 梯满期 d64
+    //  （×−0.25 noGravity）,Kill 迹尘面已在 Game.ts:40484 区（116/173）承载。
+    if (this.projId === 116 || this.projId === 132 || this.projId === 156
+      || this.projId === 157 || this.projId === 173) {
+      if (this.gem114Ramp < 15) this.gem114Ramp++;          // :26840-26842
+      else if (this.beam27PulseDir === 0) {                 // :26849-26854
+        this.drawScale -= 0.02;
+        this.alpha += 30;
+        if (this.alpha >= 250) { this.alpha = 255; this.beam27PulseDir = 1; }
+      } else {                                              // :26855-26858（else-if 档）
+        this.drawScale += 0.02;
+        this.alpha -= 30;
+        if (this.alpha <= 0) { this.alpha = 0; this.beam27PulseDir = 0; }
       }
     }
     // 1457 宝石法珠行为（AI_029_GemStaffs :38561-38640 + HandleMovement :18106-18160）：

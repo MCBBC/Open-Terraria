@@ -190,7 +190,7 @@ describe('SW-BJ54 胜出与门（SmartInteractSystem.cs:20-62）', () => {
     placeBox(store, 34, 34, 21, 2, 2);
     const scan = scanSmartInteractTiles(store, LX, LY, HX, HY, 34 * 16 + 8, 34 * 16 + 8, 0);
     expect(scan.winDist).toBe(0);
-    expect(scan.winDist < 0).toBe(false);                     // 等距先序保位：NPC 胜
+    expect(scan.winDist! < 0).toBe(false);                     // 等距先序保位：NPC 胜
   });
 
   it('tile 距离严格小于 NPC 距离才胜出（:56-61 严格大于更新）', () => {
@@ -198,7 +198,7 @@ describe('SW-BJ54 胜出与门（SmartInteractSystem.cs:20-62）', () => {
     placeBox(store, 34, 34, 21, 2, 2);
     const scan = scanSmartInteractTiles(store, LX, LY, HX, HY, 34 * 16 + 8, 34 * 16 + 8, 5);
     expect(scan.winDist).toBe(0);
-    expect(scan.winDist < 5).toBe(true);
+    expect(scan.winDist! < 5).toBe(true);
   });
 
   it('block 门：光标格=DisableSmartInteract 型（如 33 灰烬块族/520）→ 整链空', () => {

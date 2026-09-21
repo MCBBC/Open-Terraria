@@ -197,8 +197,8 @@ describe('地狱远景动画帧推进(08-20 dt=0 停播回归)', () => {
     const world = hellWorld();
     const camY = (600 - 100) * 16;
     // 帧源 = (int)(GlobalTime*8)%4;hellFrameT 累进(原版 GlobalTimeWrappedHourly 钟域)
-    const syOf = (arr: { args: number[] }[]) => (arr[0]!.args as number[])[1];
-    const sxOf = (arr: { args: number[] }[]) => (arr[0]!.args as number[])[0];
+    const syOf = (arr: Record<string, unknown>[]) => (arr[0]!.args as number[])[1];
+    const sxOf = (arr: Record<string, unknown>[]) => (arr[0]!.args as number[])[0];
     // tex1 布局:frame→sx=(f>>1)*1024, sy=(f%2)*950(f=1:[0,950] 2:[1024,0] 3:[1024,950])
     expect(syOf(tex1Draws(bg, world, camY, 125))).toBe(950);    // frame=1
     expect(sxOf(tex1Draws(bg, world, camY, 125))).toBe(1024);   // 250ms → frame=2

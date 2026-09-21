@@ -8,26 +8,41 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 
+// @ts-expect-error - untyped .mjs harness module
 import { parseArgs, resolveSeed, sizeDims, sizeCode, pickFreePort, portBusy, SIZE_PRESETS } from '../tools/probe/lib/env.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { lsofListeners, killTree } from '../tools/probe/lib/vite.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { descendantsOf, killDescendants, runWithTimeout, psTable } from '../tools/probe/lib/proc.mjs';   // IIII245 J 域
+// @ts-expect-error - untyped .mjs harness module
 import { allRuns, compareAB, DEFAULT_RUNS } from '../tools/probe/lib/stats.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { withTimeout, stepWatchdog } from '../tools/probe/lib/watchdog.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { Ledger } from '../tools/probe/lib/ledger.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { CHEATSHEET, cheatsheetText, CHEATSHEET_GROUPS } from '../tools/probe/lib/cheatsheet.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { __clockFreezeInPage, __clockUnfreezeInPage, __clockSetInPage, __clockInfoInPage } from '../tools/probe/lib/clock.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { __callGameInPage, callGame } from '../tools/probe/lib/game.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { __dismissWelcomeInPage } from '../tools/probe/lib/boot.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { TOD, resolveTod, __stageInPage, __torchInjectInPage, __relightInPage } from '../tools/probe/lib/staging.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { fingerprintOf, resolveShotPath } from '../tools/probe/lib/shot.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { nextFrame, __nextFrameInPage } from '../tools/probe/lib/pump.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { fnv1a32, STORE_FNV_CHANNELS, fingerprintStoreChannels, __fnvStoreInPage, fnvStore } from '../tools/probe/lib/world.mjs';
+// @ts-expect-error - untyped .mjs harness module
 import { __tileIdBySheetInPage, __spawnEnemyInPage, __spawnTownNPCInPage, __clearEnemiesInPage, __giveItemsInPage } from '../tools/probe/lib/entities.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));   // game/tests
 const GAME = dirname(ROOT);
 
-function listenOn(port): Promise<net.Server> {
+function listenOn(port: number): Promise<net.Server> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer(() => { /* 有人连就算忙 */ });
     srv.once('error', reject);
@@ -115,8 +130,8 @@ describe('IIIII245 J5/J6 进程树收尾域(proc.mjs)', () => {
 
   it('descendantsOf 纯表递归正确(直链/分叉/多级/无关节点;不含根自身)', () => {
     const t = new Map<number, number>([[10, 1], [20, 10], [30, 20], [50, 10], [40, 99]]);
-    expect(descendantsOf(1, t).sort((a, b) => a - b)).toEqual([10, 20, 30, 50]);
-    expect(descendantsOf(10, t).sort((a, b) => a - b)).toEqual([20, 30, 50]);
+    expect(descendantsOf(1, t).sort((a: number, b: number) => a - b)).toEqual([10, 20, 30, 50]);
+    expect(descendantsOf(10, t).sort((a: number, b: number) => a - b)).toEqual([20, 30, 50]);
     expect(descendantsOf(30, t)).toEqual([]);   // 叶子=无后代
     expect(descendantsOf(40, t)).toEqual([]);   // 挂在无关父下,不被 1 的树收进来
     expect(descendantsOf(999, t)).toEqual([]);
@@ -194,12 +209,12 @@ describe('统计面(6× 重复纪律)', () => {
     expect(DEFAULT_RUNS).toBe(6);
   });
   it('allRuns/compareAB 全一致判定', () => {
-    expect(allRuns([1, 1, 1], (v) => v === 1).all).toBe(true);
-    const bad = allRuns([1, 0, 1], (v) => v === 1);
+    expect(allRuns([1, 1, 1], (v: number) => v === 1).all).toBe(true);
+    const bad = allRuns([1, 0, 1], (v: number) => v === 1);
     expect(bad.all).toBe(false);
     expect(bad.passes).toBe(2);
-    expect(compareAB([1, 1], [0, 0], (v) => v === 1, (v) => v === 0).verdict).toBe(true);
-    expect(compareAB([1, 0], [0, 0], (v) => v === 1, (v) => v === 0).verdict).toBe(false);
+    expect(compareAB([1, 1], [0, 0], (v: number) => v === 1, (v: number) => v === 0).verdict).toBe(true);
+    expect(compareAB([1, 0], [0, 0], (v: number) => v === 1, (v: number) => v === 0).verdict).toBe(false);
   });
 });
 
@@ -212,7 +227,7 @@ describe('看门狗与台账', () => {
     const sw = stepWatchdog({ budgetMs: 5000, defaultStepMs: 1000 });
     await sw.step('快步', async () => 1);
     await expect(sw.step('慢步', () => new Promise(() => {}))).rejects.toThrow(/慢步/);
-    expect(sw.log.filter((l) => !l.ok).length).toBe(1);
+    expect(sw.log.filter((l: { ok: boolean }) => !l.ok).length).toBe(1);
     expect(sw.elapsed()).toBeGreaterThan(0);
   });
   it('Ledger chk 聚合+退出码 0/2', () => {
@@ -292,10 +307,13 @@ describe('框架不触 src 生产面', () => {
 
 // ═══════════════ IIII238 收编批(237 实战摩擦四条) ═══════════════
 
+/** CHEATSHEET 桶条目形状(untyped .mjs 导入的 unknown 收窄,仅测试内类型面) */
+type CheatsheetEntry = { name: string; file: string; token: string; note: string };
+
 describe('IIIII238 ① 速查表源同步守卫(CHEATSHEET 每条锚定 src 真定义)', () => {
   it('每条 {file,token} 的 token 都字面存在于声明的 src 文件(防臆造/防漂移)', () => {
     let n = 0;
-    for (const [group, entries] of Object.entries(CHEATSHEET)) {
+    for (const [group, entries] of Object.entries(CHEATSHEET) as [string, CheatsheetEntry[]][]) {
       expect(entries.length, `组 ${group} 非空`).toBeGreaterThan(0);
       for (const e of entries) {
         n++;
@@ -307,7 +325,7 @@ describe('IIIII238 ① 速查表源同步守卫(CHEATSHEET 每条锚定 src 真�
     expect(n).toBeGreaterThanOrEqual(40);   // 速查面不缩水(47 条起)
   });
   it('237 三处猜错点在表内有钉(stack 非 count/__swTiles/ash 素名)', () => {
-    const all = Object.values(CHEATSHEET).flat();
+    const all = Object.values(CHEATSHEET).flat() as CheatsheetEntry[];
     expect(all.some((e) => e.name === 'ItemDrop.stack' && e.note.includes('count'))).toBe(true);
     expect(all.some((e) => e.name === '__swTiles' && e.note.includes('TILE_BY_KEY'))).toBe(true);
     expect(all.some((e) => e.token === "key: 'ash',")).toBe(true);
@@ -462,7 +480,7 @@ describe('IIIII238 ③ 分步计时(Ledger.step+CLI 总耗时)', () => {
       expect(v).toBe(42);
       expect(logs.some((l) => l.startsWith('▶ caseA (t+'))).toBe(true);
       expect(logs.some((l) => /^◀ caseA \d+\.\ds \(t\+/.test(l))).toBe(true);
-      expect(L.lines.some((l) => l.startsWith('STEP: caseA '))).toBe(true);
+      expect(L.lines.some((l: string) => l.startsWith('STEP: caseA '))).toBe(true);
       expect(L.ok).toBe(true);
     } finally {
       console.log = orig;
@@ -475,7 +493,7 @@ describe('IIIII238 ③ 分步计时(Ledger.step+CLI 总耗时)', () => {
     try {
       const L = new Ledger({ quiet: true });
       await expect(L.step('caseB', async () => { throw new Error('x'); })).rejects.toThrow('x');
-      expect(L.lines.some((l) => l.startsWith('STEP: caseB '))).toBe(true);
+      expect(L.lines.some((l: string) => l.startsWith('STEP: caseB '))).toBe(true);
     } finally {
       console.log = orig;
     }
@@ -920,7 +938,7 @@ describe('IIIII242 G4 实体/物品/反查组(假 window 直跑,零浏览器)', 
   });
   it('clearEnemies:先验后清+计数回吐;臆造桶名不产生半清场;缺省不动 npcs', () => {
     const mk = (n: number) => Array.from({ length: n }, (_, i) => ({ i }));
-    const entities = { enemies: mk(3), drops: mk(2), projectiles: mk(5), npcs: mk(1) };
+    const entities = { enemies: mk(3), drops: mk(2), projectiles: mk(5), npcs: mk(1) } as Record<string, unknown[]>;
     win.__swGame = { entities };
     expect(__clearEnemiesInPage({})).toEqual({ ok: true, cleared: { enemies: 3, drops: 2, projectiles: 5 } });
     expect(entities.enemies).toEqual([]);

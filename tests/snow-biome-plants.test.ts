@@ -36,7 +36,7 @@ it('群系体检直方图断言:沙/冰面同样禁草花菇;邪恶草上必生�
   };
   const SNOW = TILE_BY_KEY['snow']!, SAND = TILE_BY_KEY['sand']!;
   const ICE = bySheet(161)!;
-  const BANNED = new Set([T.TALLGRASS, T.FLOWER, T.MUSHROOM]);
+  const BANNED = new Set<number>([T.TALLGRASS, T.FLOWER, T.MUSHROOM]);
   const w0 = await mk(-1);
   {
     const st = w0.store;

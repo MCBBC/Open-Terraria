@@ -146,7 +146,12 @@ const out = {};
   out.D = await page.evaluate(async () => {
     const g = window.__swGame;
     const { spawnVanillaEnemy } = await import('/src/entities/bossAI.ts');
-    // 清场:除目标外全部 vanilla 敌怪摘除（C 臂/B 段遗留怪不串味采样）
+    // ★BJ233 开段清场:C/B 段遗留怪在 C→D 两段 evaluate 间的实时窗口（screenshot/
+    //   promise 间隙实时循环在跑）会把玩家打死（473 跳扑 90+ 伤 vs 100 血）→ 死玩家
+    //   updateUse 不起挥=swings 0 空转。先摘全部 vanilla 怪+复活玩家再布夹具。
+    for (const en of g.entities.enemies) if (!en.dead && en.vanillaId != null) en.dead = true;
+    const p0 = g.player;
+    p0.hp = p0.maxHp; p0.dead = false; p0.respawnTimer = 0;
     const e = spawnVanillaEnemy(g, 473, g.player.cx + 40, g.player.cy);
     if (!e) return { error: 'spawn null' };
     e.y -= e.h / 2;
@@ -154,6 +159,7 @@ const out = {};
     // 底锚落稳 20 拍（自然落地到真实地面,再贴脸——防空挥盒错位）
     for (let i = 0; i < 20; i++) g.fixedUpdate(1 / 60);
     e.ai0 = 0; e.ai1 = 0; e.vx = 0; e.vy = 0;   // 强制伪装态（先打再唤醒序）
+    g.player.hp = g.player.maxHp; g.player.dead = false;   // 再钉一次（落稳拍内被蹭到则回满）
     const hp0 = e.hp;
     // 持真剑（vi_7 银阔剑 melee damage>0——近战整体门 Player.cs:42964 要求 damage>0）
     const van = await (await fetch('sprites/vanilla.json')).json();
@@ -195,6 +201,7 @@ const out = {};
       justHitAtHit,                  // 命中面
       vxAtHit,                       // 击退面（命中瞬残余速度,信息面）
       ai0AtHit, ai0After: e.ai0,     // 唤醒序（信息面:贴近 80px 唤醒=原版本相）
+      player: { hp: p.hp, dead: p.dead },   // 诊断:死玩家=swings 0 的判别面
       hitLanded: hitTick >= 0 && hpDelta >= 1,
     };
     p.inv.slots[p.inv.selected] = saved;   // 还原持物

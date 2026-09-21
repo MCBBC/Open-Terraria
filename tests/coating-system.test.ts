@@ -481,17 +481,17 @@ describe('drawCoatGlowGrid 合成侧叠回（Renderer.ts:11499；RV1 登记补�
   function runGrid(chunks: Map<string, { glow?: HTMLCanvasElement }>, fullbright = false) {
     const draws: Array<{ img: unknown; dx: number; dy: number; dw: number; dh: number }> = [];
     const calls: string[] = [];
+    let arguments0: unknown[] = [];   // Proxy get 无法捕获实参——恒空桩（真实记录走 ctx2/draws2）
     const ctx = new Proxy({} as Record<string, unknown>, {
       get: (_t, k) => {
         calls.push(String(k));
         if (k === 'drawImage') {
           // drawCoatGlowGrid 用 9 参形式 (img,0,0,S,S,dx,dy,dw,dh)
-          draws.push({ img: arguments0[0], dx: arguments0[5], dy: arguments0[6], dw: arguments0[7], dh: arguments0[8] });
+          draws.push({ img: arguments0[0], dx: arguments0[5] as number, dy: arguments0[6] as number, dw: arguments0[7] as number, dh: arguments0[8] as number });
         }
         return () => undefined;
-        let arguments0: unknown[] = [];
       },
-    }) as CanvasRenderingContext2D;
+    }) as unknown as CanvasRenderingContext2D;
     // Proxy get 无法捕获实参——改用显式桩
     const draws2: Array<{ img: unknown; dx: number; dy: number; dw: number; dh: number }> = [];
     const ctx2 = {
@@ -502,7 +502,7 @@ describe('drawCoatGlowGrid 合成侧叠回（Renderer.ts:11499；RV1 登记补�
         draws2.push({ img, dx, dy, dw, dh });
       },
     } as unknown as CanvasRenderingContext2D;
-    const cam = new Camera();
+    const cam = new Camera(40 * 16, 40 * 16);   // drawCoatGlowGrid 只读 x/y/zoom——worldW/H 不消费
     cam.x = 8 * 16 * 16; cam.y = 8 * 16 * 16; cam.zoom = 1;   // 视口中心≈chunk(8,8)
     const world = { w: 40 * 16, h: 40 * 16 };   // 方法内 cx*CHUNK(像素域)对比——桩须同域
     // 桩 get：命中返回 Map 值、未命中返回 {}（模拟 ChunkCache 惰性烘焙恒有返回——

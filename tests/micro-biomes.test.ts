@@ -11,6 +11,7 @@ import {
   placeLavaTrap,
 } from '../src/world/gen/vanilla/MicroBiomesPass';
 import { TrackGenerator } from '../src/world/gen/vanilla/TrackPass';
+import type { ChestEntryLike } from '../src/world/gen/ChestRegistry';
 import { TRACK_TILE, TRACK_FRAMES } from '../src/world/MinecartTrack';
 
 const THIN_ICE = TILE_BY_KEY['thin_ice']!;
@@ -127,7 +128,7 @@ describe('DeadMansChestBiome(DeadMansChestBiome.cs)', () => {
     const gs = newGenState(140, 120);
     gs.beachDistance = 10;   // 测试世界窄,缩海滩回避带
     const rng = new RNG(424242);
-    const biome = new DeadMansChestBiome(st, rng, gs, [{ x: 50, y: 57 }]);   // 候选序 = chest sink(2026-08-17 起非栅格扫描)
+    const biome = new DeadMansChestBiome(st, rng, gs, [{ x: 50, y: 57 } as ChestEntryLike]);   // 候选序 = chest sink(2026-08-17 起非栅格扫描);仅类型收窄,运行时对象不变
     expect(biome.getPossibleChests()).toEqual([{ x: 50, y: 57 }]);
     expect(biome.place(50, 57)).toBe(true);
     // TurnGoldChestIntoDeadMansChest(cs:479-492):467 + 帧 144+i*18 / j*18

@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 const rendererSrc = readFileSync('src/render/Renderer.ts', 'utf8');
 const bossAISrc = readFileSync('src/entities/bossAI.ts', 'utf8');
 const enemySrc = readFileSync('src/entities/Enemy.ts', 'utf8');
+const npcExtraPartsSrc = readFileSync('src/render/npcExtraParts.ts', 'utf8');
 
 describe('Mech 族缺口补齐', () => {
   it('① 135 受击出探针：hurt 内 1/25（mech 1/50）+ ai2 门 + 139 段底生成', () => {
@@ -31,8 +32,13 @@ describe('Mech 族缺口补齐', () => {
     expect(rendererSrc).toContain("if (g.cond && !g.cond(e)) return;");
   });
   it('③ 拖尾：125-131 + 139(ai3==0) + 140，oldPos 9→1 间隔 2，α=(10-i)/20', () => {
-    expect(rendererSrc).toContain('(mId >= 125 && mId <= 131) || (mId === 139 && e.ai3 === 0) || mId === 140');
-    expect(rendererSrc).toContain('((10 - i) / 20) * mOp');
+    // ★重锚（BJ209 迁 npcExtraParts 单源、BJ237 归位本体之下槽——旧 mId/mOp 内联
+    // 文本随 BJ209 迁出已不存在，此断言自 BJ209 起陈旧失锚=先存红，本刀改锚现面）：
+    // 门+α 在 drawMechTrailGhosts（npcExtraParts），Renderer 侧走残影族 id 门+前绘分发器
+    expect(npcExtraPartsSrc).toContain('if (!((vid >= 125 && vid <= 131) || (vid === 139 && e.ai3 === 0) || vid === 140)) return;');
+    expect(npcExtraPartsSrc).toContain('((10 - i) / 20) * o.opacity');
+    expect(rendererSrc).toContain('NPC_TRAIL_GHOST_IDS');
+    expect(rendererSrc).toContain('drawNpcTrailGhosts(ctx, e, this.atlas, r, {');
   });
   it('④ 蛇发链光照：compositeLight 全屏合成覆盖（架构级，无逐段 GetColor 必要）', () => {
     expect(rendererSrc).toContain('this.compositeLight(cam');

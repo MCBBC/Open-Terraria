@@ -197,7 +197,9 @@ describe('红队 A:极端值/畸形通道', () => {
     const n = W * H;
     const ta = new Uint8Array(n);
     ta[3] = 7;   // 超界差分值
-    const save = seal(b.save, b, ta as never);
+    // ★BJ239:旧 3 参调用被 JS 静默弃参(ta 从未进入 save=检查空转)——按 seal 契约
+    //   经 ch.tileActive 灌入,恢复"畸形 tileActive 不炸导出"的实检语义。
+    const save = seal(b.save, { ...b, tileActive: ta });
     expect(() => exportWld(save)).not.toThrow();
   });
 
@@ -222,7 +224,8 @@ describe('红队 A:极端值/畸形通道', () => {
     ta[12 * W + 5] = 1;
     // 幻影活性: type=0 且 v=1 → flags bit0=1
     ta[12 * W + 6] = 1;
-    const save = seal(b.save, b, ta);
+    // ★BJ239:同 200 行——ta 经 ch.tileActive 灌入(本测试只报告 expect(true),灌入后 log 才有实值)
+    const save = seal(b.save, { ...b, tileActive: ta });
     const bytes = exportWld(save);
     const wld = parseWld(bytes);
     // eslint-disable-next-line no-console

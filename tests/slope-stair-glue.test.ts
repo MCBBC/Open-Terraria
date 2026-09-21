@@ -195,7 +195,7 @@ describe('斜坡/台阶下行平滑性（双相贴合+下行速率帽 收官口�
       if (down > maxDownStep) maxDownStep = down;
       sdx += Math.abs(b2.x) + 16 * t * 0 - Math.abs(b2.x); void sdx;
       sdy += down;
-      if (!b2.inBounds === undefined) void 0;
+      if (!(b2 as unknown as { inBounds?: unknown }).inBounds === undefined) void 0;   // Body 无 inBounds 字段——死哨兵行,仅类型收窄
       if ((b2.y + b2.h) <= (389.5 - oy) * TILE && b2.x <= (3197 - ox) * TILE) climbOk = true;
     }
     // 物理层口径：①无单帧下行脉冲(反向拖拽哨兵) ②不发生 ≥10px 坠落帧

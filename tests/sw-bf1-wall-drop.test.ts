@@ -111,6 +111,7 @@ interface HG {
   hardnessCache: number;
   hammerPoundRelease: boolean;
   player: Record<string, unknown>;
+  smartCursor: Record<string, unknown>;   // BJ10 smartCursor 门 stub（tryPlaceWall 不读,兜面）
   inTileRange: (...a: unknown[]) => boolean;
   spawnParticles: (...a: unknown[]) => void;
   sfx: { play: (...a: unknown[]) => void };

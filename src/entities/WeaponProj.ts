@@ -23,6 +23,7 @@ import { canBeChasedBy, hitCritters, hitTownNpcs, playerCanHitEnemy, tryReflectP
   applyBannerDamageDealt } from './projTargets';
 import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { GorePiece } from './GorePiece';   // AI_189 壳 gore 61-63 生成通道（GorePiece 引擎池）
+import { ProjGhostRing, projTrailingMode, drawRainbowChain, drawHslMidpointTrail } from './projGhostTrail';   // ★BJ235 1089/563 残影
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 // Spawn_PaladinsHammerShockwave 编排本体（收编池;L5 批 2026-08-31——301 撞墙本地
@@ -3040,6 +3041,10 @@ export class YoyoProj extends Entity {
   private pierceLeft = -1;
   /** -3 幽灵隐身（alpha=255，:65117-65119）——绘制侧消费 */
   ghost = false;
+  /** ★BJ235 563 Gradient 残影环（TrailingMode[563]=2/cap 60 表驱动）——余型 mode -1
+   *  → null 短路。mode2 记 oldRot 但 563 轨读【本体当前角】（:35293 proj.rotation），
+   *  oldRot 环槽仅作记录面完整性。绘制面=drawHslMidpointTrail（本体后）。 */
+  private ghostRing?: ProjGhostRing | null;
   /** 存活 tick 上限:有限寿命型号 7200 防泄漏;无限寿命（YOYO_LIFE 缺省 -1）无上限——
    *  原版 timeLeft=6 每帧刷新（:64942）,无限寿命悠悠球可永久滞留直至松手回收。
    *  脱离态（-2）寿命无限（:64850-64852 num2=-1）——撞墙/穿透尽才亡 */
@@ -3140,6 +3145,17 @@ export class YoyoProj extends Entity {
     // 603 Terrarian=1.15,其余缺省 1（R30 §6.1 P3——贴图 5-15% 差,随手修）
     drawProj(r, cam, this, this.projId, this.rot, '#E04040', this.ghost ? 0 : 1,
       0, false, false, YOYO_DRAW_SCALE[this.projId] ?? 1);
+    // ---- ★BJ235 563 Gradient 残影轨（Main.cs:35283-35299;原版本体段【后】画）——
+    //      10 槽 hsl((1−i/10)²/5) 双笔（槽位+中点）、A=127×(1−i/10)²×0.65、rot=本体角、
+    //      scale=1.05;逐槽格光乘由 repo compositeLight 全屏承载（projGhostTrail 头注②）。
+    //      ghostRing 仅 563 非空（余型 mode -1 → null 短路）。 ----
+    if (this.projId === 563 && this.ghostRing && this.ghostRing.filled > 1 && r.ctx) {
+      const tex563 = projSprite(563);
+      if (tex563 && tex563.width > 0) {
+        drawHslMidpointTrail(r.ctx, this.ghostRing, tex563, this.rot,
+          YOYO_DRAW_SCALE[563] ?? 1.05, 1, 0, tex563.width, tex563.height);
+      }
+    }
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -3416,6 +3432,12 @@ export class YoyoProj extends Entity {
         if (this.projId === 546 && p.yoyoHitCounter % 3 === 0) return 2;
         return 1;
       }, true);
+    // ★BJ235 残影记录（UpdateTrails :17198=Damage 后同序;563 之外 mode -1 → null 短路。
+    //  -2 脱离撞块杀在上方早退=原版 :17132 同相不记录）
+    if (this.ghostRing === undefined) {
+      this.ghostRing = projTrailingMode(this.projId) >= 0 ? new ProjGhostRing(this.projId) : null;
+    }
+    this.ghostRing?.record(this.x, this.y, this.rot, this.dir, true);
   }
 
   /** 命中链（Projectile.cs:12467-12508 aiStyle 99 段）:-2 只被弹开（不触发
@@ -6627,6 +6649,10 @@ export class GrenadeProj extends Entity {
  *    ≥1089   彩虹：X→-0.99×（|Δ|<1 → ±1）；Y→-0.99×（0<lastV<1 → -1）——近似永动
  *    其余    473/515：X→-0.5×；Y（lastV>1）→-0.5×
  *  寿命：timeLeft×5（=9000，cs:1075）；矿工 473 ×2（=3600）。到期消失无掉落 */
+/** ★BJ236：1089 Disco 乘色离屏缓存（键=rgb 8bit 三元组;行为契约见
+ *  GlowstickProj.discoTint 方法注） */
+const discoTintCache = new Map<string, CanvasImageSource | null>();
+
 export class GlowstickProj extends Entity {
   w: number; h: number;
   vx: number;
@@ -6663,6 +6689,10 @@ export class GlowstickProj extends Entity {
   wetCount = 0;
   /** 出生预置已做（一次;NewProjectile :10886-10892 等价——首拍 AI 写位前同位测值） */
   presetDone = false;   // ProjWetFlags.presetDone（共享湿段旗持有者）
+  /** ★BJ235 1089 彩虹荧光棒 oldPos 环（TrailingMode[1089]=0/cap 25 表驱动）——
+   *  家族余型（50/53/515/870/473）mode=-1 → null 短路。绘制面=Main.cs:33270-33306
+   *  MagicPixel 段带链（drawRainbowChain,本体后）。 */
+  private ghostRing?: ProjGhostRing | null;
 
   constructor(x: number, y: number, vx: number, vy: number, projId: number) {
     super();
@@ -6672,6 +6702,48 @@ export class GlowstickProj extends Entity {
     this.w = projId === 473 ? 8 : 6;
     this.h = this.w;
     this.timeLeft = projId === 473 ? 3600 : 9000;
+  }
+
+  /** ★BJ236：1089 灰阶贴图 × Disco 基色乘色缓存（multiply 上色 + destination-in
+   *  回贴 α 蒙版,键=基色 rgb 8bit 三元组）——Disco 一循环 222 态,缓存峰值
+   *  222 张 22×6 帧可忽略,超 512 全清防 exotic 基色源膨胀。null=创建失败缓存
+   *  （无 DOM 环境恒 null → draw 走 'lighter' 回退档）。测试可经 discoTintOverride
+   *  注入假乘面（node 环境无 document,默认实现不可直测）。 */
+  static discoTintOverride:
+    | ((img: CanvasImageSource, rgb: readonly [number, number, number]) => CanvasImageSource | null)
+    | null = null;
+
+  private static discoTint(
+    img: CanvasImageSource, rgb: readonly [number, number, number],
+  ): CanvasImageSource | null {
+    if (GlowstickProj.discoTintOverride) return GlowstickProj.discoTintOverride(img, rgb);
+    const r8 = Math.round(rgb[0] * 255), g8 = Math.round(rgb[1] * 255), b8 = Math.round(rgb[2] * 255);
+    const key = `${r8},${g8},${b8}`;
+    if (discoTintCache.has(key)) return discoTintCache.get(key) ?? null;
+    let out: CanvasImageSource | null = null;
+    try {
+      if (typeof document === 'undefined') return null;
+      const srcW = (img as { width: number }).width;
+      const srcH = (img as { height: number }).height;
+      if (!(srcW > 0 && srcH > 0)) return null;
+      const c = document.createElement('canvas');
+      c.width = srcW;
+      c.height = srcH;
+      const cc = c.getContext('2d');
+      if (!cc) return null;
+      cc.drawImage(img, 0, 0);
+      cc.globalCompositeOperation = 'multiply';
+      cc.fillStyle = `rgb(${r8},${g8},${b8})`;
+      cc.fillRect(0, 0, srcW, srcH);
+      cc.globalCompositeOperation = 'destination-in';
+      cc.drawImage(img, 0, 0);
+      out = c;
+    } catch {
+      out = null;
+    }
+    if (discoTintCache.size > 512) discoTintCache.clear();
+    discoTintCache.set(key, out);
+    return out;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -6688,29 +6760,59 @@ export class GlowstickProj extends Entity {
     // ★BJ228 普查批（2026-09-21）：GetAlpha 加算白接线——
     //  50/53/515/870：GetAlpha :81020-81022 恒 (255,255,255,0)=A=0 预乘纯加算白
     //  （荧光棒原版观感=发光体,暗轮廓像素加算贡献 0）——'lighter' 直译;
-    //  1089 彩虹荧光棒：:81024-81026 (DiscoR,DiscoG,DiscoB,70)——ga=70/255×'lighter'
-    //  + hue-rotate 色相循环近似 Disco 三通道（Disco 基色相位未 1:1,登记残差）;
     //  473 不动：:81168-81170 Color.White=常规合成满亮（与缺省 α≡0 同值,零差）。
+    //  ★BJ236（2026-09-21）1089 基色相位 1:1 化：GetAlpha :80987-80989
+    //  (DiscoR,DiscoG,DiscoB,70)——基色=Main.Disco（DoUpdate_AnimateDiscoRGB
+    //  :19774-19822,6 相 ×步 7/update 起步 R255/B0/G0）。本仓同源钟 =
+    //  FlickerClock.discoColor()（lighting/SkyColor.ts 6 相 switch 逐值 1:1,
+    //  torch disco/拾取名 −12 档同钟消费）,经 r.lighting.clock 直读——
+    //  替换 BJ228 旧 hue-rotate 周期近似（灰阶贴图上 hue-rotate/saturate 恒恒等
+    //  =旧近似实际零观感,色相循环从未上屏）。乘色 = 离屏 multiply+destination-in
+    //  （贴图 Projectile_1089.png 全灰阶 82/97/214/255 → 逐通道×Disco 即原版
+    //  GetAlpha 调制;destination-in 回贴 α 蒙版）,按基色 rgb 缓存（Disco 一循环
+    //  222 态）。合成 = AlphaBlend source-over ×(70/255)=BlendState.AlphaBlend
+    //  （Main.cs DrawProjectiles 批头）直译,替换旧 'lighter'（1089 是 A=70 非
+    //  A=0 族,加算是偏离）;无钟/无 DOM 环境回退旧 'lighter' 档（登记等价面）。
+    let drawSrc: CanvasImageSource | null = img;
     if (this.projId === 50 || this.projId === 53 || this.projId === 515 || this.projId === 870) {
       ctx.globalCompositeOperation = 'lighter';
     } else if (this.projId === 1089) {
-      ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = 70 / 255;
-      const hueDeg = ((performance.now() / 1000) * (360 / 2.5)) % 360;   // Main.Disco 周期≈150 tick=2.5s（discoCounter×0.0418）
-      ctx.filter = `hue-rotate(${hueDeg.toFixed(1)}deg) saturate(1.4)`;
+      const d = r.lighting?.clock?.discoColor();
+      const tinted = d && img && img.width > 0 ? GlowstickProj.discoTint(img, d) : null;
+      if (tinted) {
+        drawSrc = tinted;
+      } else {
+        ctx.globalCompositeOperation = 'lighter';   // 回退=BJ228 旧档（无基色乘面）
+      }
     }
     if (img && (img.width > 0) && img.width > 0) {
       if (this.projId === 870) {
         const fr = Math.floor(this.fairyT / 5) % 6;
         ctx.drawImage(img, 0, fr * 16, 18, 16, -9, -8, 18, 16);
-      } else {
-        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      } else if (drawSrc) {
+        ctx.drawImage(drawSrc, -img.width / 2, -img.height / 2);
       }
     } else {
-      ctx.fillStyle = '#7FE8A8';
+      // 无贴图兜底矩形（1089 有钟时随基色——原版无贴图不存在,纯容错面）
+      const d1089 = this.projId === 1089 ? r.lighting?.clock?.discoColor() : null;
+      ctx.fillStyle = d1089
+        ? `rgb(${Math.round(d1089[0] * 255)},${Math.round(d1089[1] * 255)},${Math.round(d1089[2] * 255)})`
+        : '#7FE8A8';
       ctx.fillRect(-3, -3, 6, 6);
     }
     ctx.restore();
+    // ---- ★BJ235 1089 彩虹荧光棒链（Main.cs:33270-33306;原版本体段【后】画=压顶）——
+    //      MagicPixel 段带 ×4.4 宽、色=(DiscoR,DiscoG,DiscoB) A=127、新端 i≤10 逐槽
+    //      −0.1 + 老端 13 槽 1/13 爬坡。Disco 基色与 BJ236 本体乘色同钟（discoColor
+    //      0-1 → ×255 转 8bit 域）;无钟回退黑=原版 Disco 未动档。 ----
+    if (this.projId === 1089 && this.ghostRing && this.ghostRing.filled > 1) {
+      const d = r.lighting?.clock?.discoColor();
+      const rgb: [number, number, number] = d
+        ? [Math.round(d[0] * 255), Math.round(d[1] * 255), Math.round(d[2] * 255)]
+        : [0, 0, 0];
+      drawRainbowChain(ctx, this.ghostRing, rgb, this.w, this.h);
+    }
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -6839,6 +6941,12 @@ export class GlowstickProj extends Entity {
     }
     if (this.vy > 16) this.vy = 16;   // 原版落端钳制（P.cs:25623-25626 终速 16f）
     this.x = nx; this.y = ny;
+    // ★BJ235 残影记录（UpdateTrails :17198 位移/Damage 后同序;无记录式 id 环=null 短路——
+    //  妖精/53 粘性早退支不入=该两 id mode -1 本就短路,1089 恒走主路径到尾）
+    if (this.ghostRing === undefined) {
+      this.ghostRing = projTrailingMode(this.projId) >= 0 ? new ProjGhostRing(this.projId) : null;
+    }
+    this.ghostRing?.record(this.x, this.y, this.rot, this.vx < 0 ? -1 : 1, true);
   }
 }
 

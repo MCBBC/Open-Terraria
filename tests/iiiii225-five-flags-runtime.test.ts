@@ -70,7 +70,8 @@ describe('IIIII225 ②：StatusFromNPC 携物史莱姆支（Player.cs:22559-2264
     (e as unknown as { slimeCarryContactStatus: (g: GameHooks, p: Player) => void })
       .slimeCarryContactStatus(g, p);
     expect(p.buffs.has(BuffType.WellFed)).toBe(true);
-    const dur = p.buffs.remainingOf?.(BuffType.WellFed);
+    const dur = (p.buffs as { remainingOf?: (t: BuffType) => number })
+      .remainingOf?.(BuffType.WellFed);
     if (dur !== undefined) expect(dur).toBeGreaterThanOrEqual(3);
   });
   it('非 FTW 火把史莱姆接触：零授（cs 门 ai[1]==8 && getGoodWorld）', () => {

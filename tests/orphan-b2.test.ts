@@ -283,7 +283,7 @@ describe('数据面：甲虫炸弹 4423（EXTRACT_PATCH noMelee → grenade 族�
     const hooksFused: string[] = [];
     const bomb = new GrenadeProj(10, 10, 0, 0, 100, 3, 773, () => {});
     const hk = makeHooks(new TileStore(40, 40));
-    (hk as Record<string, unknown>).startTrackedLoop = (name: string) => { hooksFused.push(name); return { stop() {}, setPos() {} }; };
+    (hk as unknown as Record<string, unknown>).startTrackedLoop = (name: string) => { hooksFused.push(name); return { stop() {}, setPos() {} }; };
     for (let t = 0; t < 3; t++) bomb.fixedUpdate(1 / 60, hk);
     expect(bomb.dead).toBe(true);
     expect(hooksFused.filter((n) => n === 'bombFuse')).toHaveLength(1);  // IsABombWithFuse 表 773 在册
@@ -360,8 +360,8 @@ describe('行为面③：甲虫炸弹引信嘶声一次 + 隧道掘进 + 对玩�
     let hits = playerRecords.filter((r) => r.kind === 'damage');
     expect(hits).toHaveLength(1);
     // SW-S1 ①：SelfHurtPlayers :15118 DamageVar(value, -luck) ±15% 方差（原版自伤非定值）
-    expect(hits[0]!.v.d).toBeGreaterThanOrEqual(85);
-    expect(hits[0]!.v.d).toBeLessThanOrEqual(115);
+    expect((hits[0]!.v as { d: number }).d).toBeGreaterThanOrEqual(85);
+    expect((hits[0]!.v as { d: number }).d).toBeLessThanOrEqual(115);
     expect(st.get(50, 153)).toBe(0);                     // 隧道掘进照常发生
     // ——盒外（纵向 |dy|=61 > 48+42/2=69？否——拉到 130px 明确出盒）
     playerRecords.length = 0;

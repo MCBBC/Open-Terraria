@@ -416,13 +416,23 @@ export function drawMimicAfterimages(
 // UpdateNPC_UpdateTrails（NPC.cs:91893-91992，Enemy.recordTrailHistory 承载）+ 绘制面
 // DrawNPCDirect oldPos 残影块（Main.cs:22723-26712 逐块亲读）。
 // 本组函数=绘制面统一【绝对世界坐标】实现（与 drawMimicAfterimages 同习语），由
-// Renderer.drawEnemy 本体绘制块 ctx.restore() 之后的单一挂点调用。
+// Renderer.drawEnemy 双挂点调用（★BJ237 拆分）：【本体之下】前绘族走本体变换内
+// 本体 drawImage 之前的槽（槽内 setTransform 回父空间，SkyRenderer.drawStar 同
+// 习语）；【本体之上】后绘族保持 ctx.restore() 之后的挂点。
 // 锚模型：残影帧中心 = oldPos 中心 + 与本体【同一】局部锚偏移（原版关系=残影锚
 // ≡本体锚：通用大表 :23640 vs :23653、特支 +4 族 :25483 vs 本体尾段 Bottom+4 锚——
 // 本仓本体锚已收敛为 anchorY 统一式，残影复用同一 addY+footFlush 即保持该关系）。
-// z 序登记偏差：原版通用大表族残影画在本体之下（:23628 先于本体 Draw），特支族画在
-// 本体之上（:25400-26449 后于本体）、两者都在发光层之下——本仓统一画在本体+发光层
-// 之上（restore 后挂点）；残影在【旧位】与本体低重叠，视觉面登记偏差。
+// z 序（★BJ237 归位定谳 2026-09-21，1457 DrawNPCDirect 逐块亲读、1458 对拍逐锚同号
+// =零变更；修正 BJ209「特支族=本体之上」一刀切误判——默认路径残影组 :25472-25586
+// 实际全在本体链 :25645+ 之前）：
+//   【本体之下】通用大表 :23627 残影→:23645 环→:23660 本体；551 :23845-23858→
+//   本体 :23859；439/440 case :24901-24914→环 :24923→本体 :24933；519 全绘 case
+//   内段位即本体；默认路径前绘组 94 :25472 / 125-131,139,140 :25486 / 417 :25499 /
+//   419 :25517 / 516 :25573（418 :25535 同组，本仓 drawCoriteTrail 前绘位已同相）。
+//   【本体之上】后绘 extras 区（本体链之后）：120 :26015 / 137,138 :26030、
+//   克眼冲刺 4 :26361、471 :26383、477,479 :26396。
+//   BJ209 曾统一 restore 后挂点=全部本体之上（前绘族盖住本体；426 首影 α≈0.667
+//   静止时洗白本体）——登记债，本刀清偿。426/620 等环族另见 BJ211 环位（残影先于环）。
 // 颜色登记偏差：原版 GetAlpha(npcColor)=光照色×alpha/255 与 GetShimmerColor(94/120/
 // 137/138) 在残影层未逐像素移植——与 BJ175b/Mech 残影同惯例以 globalAlpha 承载衰减。
 
@@ -604,19 +614,14 @@ export function drawSolarGoopGhosts(
   }
 }
 
-/** 特支后绘族（本体 Draw 之后求值，Main.cs:25400-26449 逐块）：
+/** 特支前绘族（原版画在【本体之下】——默认路径残影组 :25472-25586，先于本体链
+ *  :25645+；★BJ237 定谳修正 BJ209「特支族=本体之上」一刀切误判）：
  *  · 94 腐化者 :25472-25485：i=1,3,5，RGBA×(10−i)/15（Shimmer 色登记偏差）
- *  · 120 混沌元素 :26015-26033：i=1..9，TextureAssets.Chaos 整图，色 (150,100,150,50)
- *    ×(10−i)/15——A=50/255×衰减，RGB 衰减并入 alpha（登记）
- *  · 137/138 荧光蝠/史莱姆 :26034-26051：同 120 色式，本体贴图
  *  · 417 日耀疾滚兽 :25499-25511：ai0==6 门，i=5..0，RGBA×(10−i)/20，rot=oldRot，
  *    scale=Lerp(0.5,1,(5−i)/6)
- *  · 471 地精召唤师 :26383-26395：ai3<0 门，i=1..9，npcColor×0.5×(10−i)/20
- *  · 477 飞蛾魔 :26396-26415：speed>9 门，帧倒退 (frameIdx−i) mod frames
- *  · 479 飞蛾魔幼体 :26416-26441：speed>6.5 门，同 477
  *  · 516 日耀耀斑 :25567-25586：i=6..0，白×(10−i)/20 再 Lerp→Transparent(i/6)，
  *    帧倒退 (frameIdx−4−i) mod 4，scale=Lerp(0.35,1.2,(10−i)/10) */
-export function drawPostBodyTrailGhosts(
+export function drawPreBodySpecialGhosts(
   ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
   frame: { sx: number; sy: number; sw: number; sh: number },
   o: NpcGhostOpts,
@@ -635,7 +640,49 @@ export function drawPostBodyTrailGhosts(
       drawGhostSprite(ctx, tex, frame, gx(i), gy(i), o.rot, o.mirror, o.scale,
         ((10 - i) / 15) * o.opacity, 1, o.addY);
     }
-  } else if (vid === 120 || vid === 137 || vid === 138) {
+  } else if (vid === 417) {
+    if (e.ai0 !== 6) return;
+    const tex = texOf();
+    if (!tex) return;
+    for (let i = 5; i >= 0; i--) {
+      if (i >= depth) continue;
+      drawGhostSprite(ctx, tex, frame, gx(i), gy(i), e.histRotAt(i), o.mirror, o.scale,
+        ((10 - i) / 20) * o.opacity, 0.5 + (1 - 0.5) * ((5 - i) / 6), o.addY);
+    }
+  } else if (vid === 516) {
+    const tex = texOf();
+    if (!tex) return;
+    for (let i = 6; i >= 0; i--) {
+      if (i >= depth) continue;
+      const ghostIdx = mod(o.frameIdx - 4 - i, 4);   // (row−4−i) mod 4（:25572-25580）
+      const a = ((10 - i) / 20) * (1 - i / 6) * o.opacity;
+      drawGhostSprite(ctx, tex, { sx: frame.sx, sy: ghostIdx * frame.sh, sw: frame.sw, sh: frame.sh },
+        gx(i), gy(i), o.rot, o.mirror, o.scale, a,
+        0.35 + (1.2 - 0.35) * ((10 - i) / 10), o.addY);
+    }
+  }
+}
+
+/** 特支后绘族（原版画在【本体之上】——本体链之后的后绘 extras 区，★BJ237 定谳；
+ *  BJ209 的 restore 后挂点对本组本就同相，保持后绘位不动）：
+ *  · 120 混沌元素 :26015-26033：i=1..9，TextureAssets.Chaos 整图，色 (150,100,150,50)
+ *    ×(10−i)/15——A=50/255×衰减，RGB 衰减并入 alpha（登记）
+ *  · 137/138 荧光蝠/史莱姆 :26034-26051：同 120 色式，本体贴图
+ *  · 471 地精召唤师 :26383-26395：ai3<0 门，i=1..9，npcColor×0.5×(10−i)/20
+ *  · 477 飞蛾魔 :26396-26415：speed>9 门，帧倒退 (frameIdx−i) mod frames
+ *  · 479 飞蛾魔幼体 :26416-26441：speed>6.5 门，同 477 */
+export function drawPostBodyTrailGhosts(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  const vid = e.vanillaId;
+  const depth = e.historyDepth();
+  const gx = (i: number) => e.histXAt(i) + e.w / 2;
+  const gy = (i: number) => e.histYAt(i) + e.h / 2;
+  const mod = (a: number, n: number) => ((a % n) + n) % n;
+  const texOf = () => atlas.ensureVImage(`vanilla/NPC_${vid}.png`);
+  if (vid === 120 || vid === 137 || vid === 138) {
     const tex = vid === 120 ? atlas.ensureVImage('vanilla/Chaos.png') : texOf();
     if (!tex) return;
     const src = vid === 120
@@ -646,15 +693,6 @@ export function drawPostBodyTrailGhosts(
       // 色 (150,100,150,50)×(10−i)/15：A=50/255×衰减；RGB 衰减并入 alpha（登记）
       drawGhostSprite(ctx, tex, src, gx(i), gy(i), o.rot, o.mirror, o.scale,
         ((50 / 255) * (10 - i) / 15) * o.opacity, 1, o.addY);
-    }
-  } else if (vid === 417) {
-    if (e.ai0 !== 6) return;
-    const tex = texOf();
-    if (!tex) return;
-    for (let i = 5; i >= 0; i--) {
-      if (i >= depth) continue;
-      drawGhostSprite(ctx, tex, frame, gx(i), gy(i), e.histRotAt(i), o.mirror, o.scale,
-        ((10 - i) / 20) * o.opacity, 0.5 + (1 - 0.5) * ((5 - i) / 6), o.addY);
     }
   } else if (vid === 471) {
     if (e.ai3 >= 0) return;
@@ -676,17 +714,6 @@ export function drawPostBodyTrailGhosts(
       drawGhostSprite(ctx, tex, { sx: frame.sx, sy: ghostIdx * frame.sh, sw: frame.sw, sh: frame.sh },
         gx(i), gy(i), o.rot, o.mirror, o.scale,
         (0.5 * (10 - i) / 20) * o.opacity, 1, o.addY);
-    }
-  } else if (vid === 516) {
-    const tex = texOf();
-    if (!tex) return;
-    for (let i = 6; i >= 0; i--) {
-      if (i >= depth) continue;
-      const ghostIdx = mod(o.frameIdx - 4 - i, 4);   // (row−4−i) mod 4（:25572-25580）
-      const a = ((10 - i) / 20) * (1 - i / 6) * o.opacity;
-      drawGhostSprite(ctx, tex, { sx: frame.sx, sy: ghostIdx * frame.sh, sw: frame.sw, sh: frame.sh },
-        gx(i), gy(i), o.rot, o.mirror, o.scale, a,
-        0.35 + (1.2 - 0.35) * ((10 - i) / 10), o.addY);
     }
   }
 }
@@ -755,7 +782,9 @@ export function drawMechTrailGhosts(
   }
 }
 
-/** BJ209 残影族统一分发（Renderer.drawEnemy 本体 restore 后单挂点调用） */
+/** ★BJ237 残影族【本体之下】分发（Renderer.drawEnemy 本体变换内、本体 drawImage
+ *  之前、BJ211 环位之前的槽调用——原版残影 :23627 先于环 :23645；槽内
+ *  setTransform 回父空间=绝对世界坐标，BJ209 参数面零漂移）。z 序逐块定谳见组头注。 */
 export function drawNpcTrailGhosts(
   ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
   frame: { sx: number; sy: number; sw: number; sh: number },
@@ -765,11 +794,37 @@ export function drawNpcTrailGhosts(
   drawCultistGhosts(ctx, e, atlas, o);
   drawBetsyGhosts(ctx, e, atlas, frame, o);
   drawSolarGoopGhosts(ctx, e, atlas, o);
-  drawPostBodyTrailGhosts(ctx, e, atlas, frame, o);
+  drawPreBodySpecialGhosts(ctx, e, atlas, frame, o);
   drawSolenianGhosts(ctx, e, atlas, o);
-  drawEocDashGhosts(ctx, e, atlas, frame, o);
   drawMechTrailGhosts(ctx, e, atlas, frame, o);
 }
+
+/** ★BJ237 残影族【本体之上】分发（特支后绘组 120/137/138/471/477/479 + 克眼冲刺 4
+ *  ——原版本体链之后的后绘 extras 区；Renderer.drawEnemy 本体 restore 后挂点调用
+ *  =本体之上同相） */
+export function drawNpcTrailGhostsOverBody(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  o: NpcGhostOpts,
+): void {
+  drawPostBodyTrailGhosts(ctx, e, atlas, frame, o);
+  drawEocDashGhosts(ctx, e, atlas, frame, o);
+}
+
+/** 残影族 id 全集（Renderer 双挂点快速门——不含 ai 门，ai 门在各 draw 函数内；
+ *  418 走 drawCoriteTrail 前绘位不在本表） */
+export const NPC_TRAIL_GHOST_IDS: ReadonlySet<number> = new Set([
+  ...Object.keys(GENERIC_TABLE_GHOSTS).map(Number),   // 426/427/521/542-546/558-560/574/575/581/620
+  439, 440,        // 邪教徒符印（:24901 本体之下）
+  551,             // Betsy（:23845 本体之下）
+  519,             // 日耀黏液（全绘 case 段位即本体）
+  94, 417, 516,    // 特支前绘组（:25472/:25499/:25567 本体之下）
+  419,             // 日耀旋刃（:25517 本体之下）
+  125, 126, 127, 128, 129, 130, 131, 139, 140,   // 机械族（:25486 本体之下）
+  4,               // 克眼冲刺（:26361 本体之上）
+  120, 137, 138,   // 混沌/荧光蝠（:26015/:26030 本体之上）
+  471, 477, 479,   // 召唤师/飞蛾魔（:26383/:26396 本体之上）
+]);
 
 // ===================== ★BJ211 num57 圆周光晕环族（2026-09-20，BJ209 债②销账） =====================
 // 原版语义（Terarria1457 Main.cs DrawNPCDirect 通用大表段 :23400-23701 亲读；

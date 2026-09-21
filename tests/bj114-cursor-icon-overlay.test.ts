@@ -115,7 +115,7 @@ describe('SW-BJ114 ①行为面:图标面只进上浮层', () => {
     const ov = overlayOf()!;
     // 原版 :45848-45850 等价顶左=mouse+(10+push) → 元素=顶左-2px 边距
     expect(ov.style.transform).toBe('translate(208px, 138px)');
-    const [, , , , , dx, dy, dw, dh] = overlayCalls().filter((c) => c.fn === 'drawImage').at(-1)!.args;
+    const [, , , , , dx, dy, dw, dh] = overlayCalls().filter((c) => c.fn === 'drawImage').slice(-1)[0]!.args;
     expect([dx, dy]).toEqual([2, 2]);
     expect(dw).toBeCloseTo(34 * 1.1, 6);
     expect(dh).toBeCloseTo(30 * 1.1, 6);

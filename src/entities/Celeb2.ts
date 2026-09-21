@@ -38,6 +38,7 @@ import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './proj
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { ProjGhostRing, drawCeleb2Chain } from './projGhostTrail';   // ★BJ235 烟花链残影
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -196,6 +197,11 @@ export class Celeb2Rocket extends Entity {
   /** case1 scale 长大 */
   private drawScale = 1;
   private rot = 0;
+  /** ★BJ235 烟花链 oldPos 环（TrailingMode[715-718]=2/cap 20 表驱动,Projectile.cs:
+   *  17197-17300 每子步后移;extraUpdates=2 → 3 子步/拍）。绘制面=Main.cs:33997-34083
+   *  三帧横条第 2 帧沿段链（drawCeleb2Chain,本体前）;715-718 在 Arrow.GHOST_RECORD_
+   *  EXCLUDE 仍保留（本类自管环,防未来同载体双记）。ctor 体初始化（projId 后）。 */
+  private ghostRing: ProjGhostRing | null = null;
   private onExplode: (x: number, y: number, damage: number, oldVx?: number) => void;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-04 溅花缺口批
@@ -222,6 +228,7 @@ export class Celeb2Rocket extends Entity {
     super();
     this.projId = projId;
     this.variant = variant;
+    this.ghostRing = new ProjGhostRing(projId);   // ★BJ235（TrailingMode 2/cap 20）
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.damage = damage;
@@ -327,6 +334,9 @@ export class Celeb2Rocket extends Entity {
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (!st.inBounds(tx, ty)) { this.dead = true; return; }
     if (st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.explode(game); return; }
+    // ★BJ235 残影记录（UpdateTrails :17198=Damage 前同位序——原版撞块杀 :17132 早退
+    //  不记录,命中杀 Damage 后仍记录一子步:置于命中环前=两门同相）
+    this.ghostRing?.record(this.x, this.y, this.rot, this.vx < 0 ? -1 : 1, true);
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;
@@ -382,6 +392,14 @@ export class Celeb2Rocket extends Entity {
     const img = projSprite(this.projId);
     const ctx = r.ctx;
     if (!img || !(img.width > 0) || !ctx) return;
+    // ---- ★BJ235 烟花链（Main.cs:33997-34083 1:1;锚链内先画=垫底,本体后画压顶）——
+    //      三帧横条第 2 帧沿段链:色=GetCeleb2Color×0.8 A=127×0.8×(1−i/20)、rot=oldRot、
+    //      scale=(段长/帧宽,1);变体2 摆动表 ±w×4px+scale×0.6、变体5 scale×0.5。 ----
+    if (this.ghostRing && this.ghostRing.filled > 1) {
+      const c0 = CELEB2_COLORS[Math.min(6, Math.max(0, this.variant))];
+      drawCeleb2Chain(ctx, this.ghostRing, img, [c0[0], c0[1], c0[2]], this.variant,
+        1080 - this.t, this.w, this.h, img.width / 3, img.height);
+    }
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);

@@ -288,7 +288,7 @@ describe('IIIII228 ⑥ StatusFromNPC 全表 type 臂（Player.cs:22513-22771）'
   it('Rabies(148) 蝙蝠族臂 + BUFF_DEFS 表目（:22650 expert）', () => {
     expect(BUFF_DEFS[BuffType.Rabies]?.vanillaBuff).toBe(148);
     const w = new World(400, 600, 42, 'i228e');
-    w.flags.difficulty = 1;
+    (w.flags as unknown as { difficulty: number }).difficulty = 1;
     const e = Enemy.fromVanilla(93, 0, 0)!;
     const buffs = new BuffState();
     const game = { world: { difficulty: 1, seedFlags: {}, flags: {} } };

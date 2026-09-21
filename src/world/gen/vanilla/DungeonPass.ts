@@ -6027,7 +6027,10 @@ const snap: SnapFn = (name) => {
       for (const hh of gfPdHalls) {
         if (!hh.gen || (!allCand && (hh.st !== 10 || hh.gL === undefined)) || (allCand && hh.gL === undefined)) continue;
         hallN++;
-        if (mayanTryV(nir(hh.gL, hh.gR!), nir(hh.gT!, hh.gB!))) { num9--; if (num9 <= 0) break; }
+        // ★BJ239:门(6028)两支合取已保证 gL 非 undefined(allCand 支直查 gL===undefined;
+        //   非 allCand 支 st!==10||gL===undefined 为假 ⇒ st===10 且 gL 有值),TS 推不过
+        //   复合析取否定——`!` 断言纯类型面,零运行差。
+        if (mayanTryV(nir(hh.gL!, hh.gR!), nir(hh.gT!, hh.gB!))) { num9--; if (num9 <= 0) break; }
       }
       for (const hl of halls) { hall10++; if (allCand && hl.generated) { hallN++; if (mayanTryV(nir(hl.bounds.L, hl.bounds.R), nir(hl.bounds.T, hl.bounds.B))) { num9--; if (num9 <= 0) break; } } }      // climb 厅计数（style 字段 JS 缺,备案）
       if (num9 > 0) {

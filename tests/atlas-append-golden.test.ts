@@ -30,7 +30,7 @@ const ATLAS2 = 'vanilla/Item_Atlas_2.png';   // 追加通道页;全量重排后�
 interface ItemEntry {
   icon: string; ix: number; iy: number; iw: number; ih: number;
 }
-const items = (vanillaJson as { items: Record<string, ItemEntry> }).items;
+const items = (vanillaJson as unknown as { items: Record<string, ItemEntry> }).items;   // ★BJ239:双跳 cast(顶层兼有 tiles 键,单跳被 TS 判欠重叠)
 const tiles = (vanillaJson as { tiles: Record<string, unknown> }).tiles;
 
 /** ②冻结锚定快照(2026-08-21 自当版 vanilla.json 抓取,等价当时 HEAD):

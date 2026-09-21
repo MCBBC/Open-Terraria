@@ -142,7 +142,7 @@ describe('批1复审 D3: runAcceleration 乘 moveSpeed 乘区（:26206）', () =
   const step = (p: Player): void => p.fixedUpdate(1 / 60, game);
 
   it('Slow 下首帧加速 0.08×0.5=0.04/t;Swiftness 0.08×1.25=0.1/t;裸装 0.08/t', () => {
-    game.world = flatWorld();
+    (game as unknown as { world: World }).world = flatWorld();
     const probe = (buff: BuffType | null): number => {
       const p = new Player(60 * TILE, 66 * TILE, new Inventory());
       for (let i = 0; i < 30; i++) step(p);              // 落地沉降

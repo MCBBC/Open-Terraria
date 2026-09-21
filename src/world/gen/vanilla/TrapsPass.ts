@@ -2021,7 +2021,9 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
  *  y∈[50,H-50)（remix y≤H-210）且 `(y>worldSurface || wall>0)` 收（无 oceanDepths 重掷）；
  *  ③TNT 桶 W*3 次（tenth W/3；remix y∈[ws,(H-350+rock)/2] 否则 [rock,H-200]）；
  *  ④沙陷阱 ×5；⑤pass 尾 SetBoulderSolidity(true)。 */
-export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Array<{ x: number; y: number; items: unknown[] }>): void {
+// ★BJ239:chests 形参注解收窄到 SparseChestSink(IIII102c 稀疏 sink 模型)——旧注解
+//   items: unknown[] 与 chestList 赋值点/洞写(1058 置 null)脱节,纯注解修正零运行差。
+export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: SparseChestSink): void {
   // ★BBBBBBB（2026-08-24）NTB #76 定罪修复（SSSSS ⑤.3 备案清偿）：pass 头门
   //   （1457 cs:18789）`!denySome && !actuallyNoTraps && (!ntb || noTraps || remix)`
   //   ——**纯 NTB（ntb&&!noTraps&&!remix）整段跳过**：头尾 tileSolid[379] 翻转、
