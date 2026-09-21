@@ -136,7 +136,7 @@ describe('R1-08 真眼幻影矢瞳孔末 19t 冻结', () => {
     expect(eye.ai0).toBe(1);
     const frozenAngle = eye.lai0, frozenOpen = eye.lai1;
     // 玩家瞬移到右侧:冻结窗内瞳角不得跟随
-    h.player.x = 140 * TILE; h.player.cx = 140 * TILE + 10;
+    h.player.x = 140 * TILE; (h.player as { cx: number }).cx = 140 * TILE + 10;
     tick(h, 5, [eye]);
     expect(eye.lai0).toBe(frozenAngle);
     expect(eye.lai1).toBe(frozenOpen);
@@ -163,7 +163,7 @@ describe('R1-04 鹿角怪尖刺态尖叫时机', () => {
     expect(h.sfxFiles.length).toBe(1);
     expect(e.facing).toBe(-1);
     // 玩家穿到背后 → 下一 tick 朝向翻转（原版每 tick TargetClosest）
-    h.player.x = 112 * TILE; h.player.cx = 112 * TILE + 10;
+    h.player.x = 112 * TILE; (h.player as { cx: number }).cx = 112 * TILE + 10;
     tick(h, 1, [e]);
     expect(e.facing).toBe(1);
   });

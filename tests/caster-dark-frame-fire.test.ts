@@ -20,6 +20,8 @@ interface Hooks {
   dust: number;
   playSfxFiles(files: string[]): void;
   spawnParticles(_x: number, _y: number, _c: string, count: number): void;
+  /** 入池尘桩（Enemy AI 调用面按 GameHooks.spawnDust 位置传参） */
+  spawnDust(): { x: number; y: number; vx: number; vy: number; scale: number };
   /** 对齐 GameHooks.damagePlayer 终态签名（清零批·受击域）：实扣 HP，桩恒 0 */
   damagePlayer(_dmg?: number, _sx?: number, _sy?: number, _attacker?: unknown,
     _contactOnly?: boolean, _pvp?: boolean, _knockback?: boolean, _opts?: unknown): number;

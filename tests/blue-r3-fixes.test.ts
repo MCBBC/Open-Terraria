@@ -87,7 +87,7 @@ describe('R3-1/R3-6/R3-7 城镇流浪门/墓碑幽灵/祭坛旅程门(源码守�
   });
   it('R3-6 墓碑幽灵:CountNPCS(316)<2 门 + 难度掷 8/4/2 + 旅程滑杆 remap', () => {
     // 2026-08-31 锚随源码形更新：过滤式现为类型窄化 lambda（e as import(...)Enemy).vanillaId === 316）
-    expect(gameSrc).toContain('.vanillaId === 316).length < 2').length > 0;
+    (expect(gameSrc).toContain('.vanillaId === 316).length < 2') as unknown as { length: number }).length > 0;
     expect(gameSrc).toContain('Enemy.fromVanilla(316');
     expect(gameSrc).toContain('spawnRateMultiplier(jp.spawnRateSlider)');
   });

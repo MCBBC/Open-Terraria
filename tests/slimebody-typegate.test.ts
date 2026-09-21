@@ -21,7 +21,7 @@ const baseCtx = {
   hp: 100, hpMax: 100, mana: 20, manaMax: 20,
   hardMode: false, value: 25,
   downed: () => false,
-} as never;
+};
 
 describe('slimeBody 类型门（SlimeCanContainItems[type]）', () => {
   it('兔子(46) ai1=412（行走计时被误读为物品 id）→ 不掉', () => {

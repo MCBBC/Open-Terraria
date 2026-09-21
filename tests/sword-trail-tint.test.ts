@@ -100,7 +100,7 @@ describe('挥弧命中判定（Colliding aiStyle 190 锥 / type 973 距离圆,Ut
   it('972 尘面 1:1（AI_190 :42783-42797）：尘14 α150 noLight / 尘27 α100 noGravity vel=player.vel×0.2+dir×3', () => {
     const game = mkGame([]) as GameHooks & { spawnDust?: (...a: unknown[]) => unknown };
     const dusts: Array<{ type: number; alpha: number; scale: number; noGravity: boolean; vx: number; vy: number }> = [];
-    game.spawnDust = (_x: number, _y: number, _w: number, _h: number, type: number,
+    (game as { spawnDust?: unknown }).spawnDust = (_x: number, _y: number, _w: number, _h: number, type: number,
       sx: number, sy: number, alpha: number, _c: unknown, scale: number, noGravity: boolean) => {
       const d = { type, alpha, scale, noGravity, vx: sx as number, vy: sy as number };
       dusts.push(d);

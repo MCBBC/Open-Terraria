@@ -80,7 +80,7 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
     const hp0 = p.hp;
     const log = { dmg: [] as number[] };
     const game = makeGame(p, log);
-    const arrow = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 9, 1, 1, VANILLA_ITEM_KEY_BY_ID[40]);
+    const arrow = new Arrow(30 * 16 - 40, 10 * 16 + 8, 8, 0, 9, 1, 1);
     for (let i = 0; i < 8; i++) arrow.fixedUpdate(1 / 60, game);
     expect(log.dmg.length).toBe(0);
     expect(p.hp).toBe(hp0);

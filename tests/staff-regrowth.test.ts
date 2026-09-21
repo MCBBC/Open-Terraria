@@ -23,6 +23,8 @@ interface Shell {
   critterVid: () => number;
   spawnNpcByVanilla: () => null;
   entities: { critters: unknown[] };
+  achievements: { notifyTileDestroyed: () => void; handleMining: () => void };
+  smartCursor: { lockedContinuity: unknown; showing: boolean; x: number; y: number };
   tryPlace(tx: number, ty: number, def: (typeof ITEM_DEFS)[number]): void;
   interactAt(tx: number, ty: number): void;
   cutTile(x: number, y: number): void;

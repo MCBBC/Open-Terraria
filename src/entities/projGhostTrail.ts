@@ -67,6 +67,9 @@
 //   · 811 ai0 白染预混（:30846 Remap(ai0,0,15,1,0.3)）判镰=光照域项,本仓由
 //     SELF_LUMINOUS_PROJS[811] whiten=true 光地板承载（Renderer.ts:10943,全亮端
 //     Lerp(W,W,k)=W 恒等）——染侧不重复实现,无需 ai0 喂入。
+//     ★BJ245（2026-09-21）勘误补注：ai0 写入方已证（AI_001 flag3 缺省 ai[0]++,
+//     P.cs:57019-57021）→ 光地板 k=whiteK811(age) 15 拍 1.0→0.3 衰减,染侧
+//     「不重复实现」裁决不变（环槽白→绯渐变基色随地板同步衰减,ai0 槽仍 0）。
 //   · 接线位：MinionProj（533/755/833-835 本体环）/ RollingBoulder（1055,frame 系
 //     end,BJ219 表已在）/ Celeb2（715-718 链+环）/ WeaponProj GlowstickProj（1089）
 //     / YoyoProj（563）/ Arrow dispatch（ai1=empressHue 喂入+1026 绿带呼出）。
@@ -639,8 +642,10 @@ export function drawGreenBandTrail(
       const s0 = ring.at(i), s1 = ring.at(i - 1);
       if (!s0) continue;                                   // oldPos[i]==Zero 哨兵（:28320）
       if (!s1) continue;                                   // 本仓哨兵语义同域（未填槽跳）
-      // 偏移随各槽 oldRot 旋（:28321/:28322——1026 mode0 oldRot≡0×零偏移=死码同相）
-      const a0 = s0.rot, a1 = s1.rot;
+      // 偏移随各槽 oldRot 旋（:28321/:28322）——mode0 环 oldRot 缺省 0（本仓 NaN 哨兵
+      // → 归零,vanilla float 数组零值同相;1026 mode0 ×零偏移=死码同相）
+      const a0 = Number.isFinite(s0.rot) ? s0.rot : 0;
+      const a1 = Number.isFinite(s1.rot) ? s1.rot : 0;
       const x1 = s0.x + sizeW / 2 + (offX * Math.cos(a0) - offY * Math.sin(a0));
       const y1 = s0.y + sizeH / 2 + (offX * Math.sin(a0) + offY * Math.cos(a0));
       const x0 = s1.x + sizeW / 2 + (offX * Math.cos(a1) - offY * Math.sin(a1));
@@ -689,7 +694,7 @@ export function drawCeleb2Chain(
     const x1 = s0.x + sizeW / 2, y1 = s0.y + sizeH / 2;
     const x0 = s1.x + sizeW / 2, y0 = s1.y + sizeH / 2;
     const len = Math.hypot(x0 - x1, y0 - y1);
-    const rot = s0.rot;                                     // num412 = oldRot[i]（mode 2）
+    const rot = Number.isFinite(s0.rot) ? s0.rot : 0;       // num412 = oldRot[i]（mode 2;mode0 归零）
     let sxMul = len / frameW;                               // scale17.X（:34012）
     let syMul = 1;
     let wx = 0, wy = 0;

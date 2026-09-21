@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Game, PREPARE_BOMB_KB } from '../src/core/Game';
+import type { Entity } from '../src/entities/Entity';
 
 // SW-AC1 2026-09-04 回归：①kbDir 弹体朝向穿透（Projectile.cs:13652 `int num40 =
 // direction`,Update :17121-17132 `velocity.X < 0 → -1 else 1`——全 victim 同向,非径向,
@@ -16,11 +17,11 @@ const mkGame = (world: World, sweater = false) => {
   g.sfxAt = () => {};
   g.damagePlayer = (dmg: number) => { g.selfDmg = dmg; return 0; };
   g.recLog = () => {};
-  return g as unknown as Game;
+  return g as unknown as Game & { selfDmg?: number };
 };
 const spyEnemy = (cx: number, cy: number) => {
   const calls: Array<[number, number]> = [];
-  return { calls, e: { cx, cy, w: 40, h: 40, hurt: (d: number, kx: number, ky: number) => { calls.push([kx, ky]); } } };
+  return { calls, e: { cx, cy, w: 40, h: 40, hurt: (d: number, kx: number, ky: number) => { calls.push([kx, ky]); } } as unknown as Entity };
 };
 const B = 24 * 16 + 8;   // 爆心像素（格 24,24 中心）
 
@@ -64,12 +65,12 @@ describe('SW-AC1 爆炸击退方向=弹体朝向（kbDir）+ sweater 自伤 cap'
   });
   it('explodeAt 玩家段：108+sweater 自伤恰 300;28（非 trap）与无 sweater 仅 DV ±15% 区间', () => {
     const g = mkGame(new World(48, 48, 7, 'ac1e'), true);
-    g.player.cx = B; g.player.cy = B;
+    (g.player as { cx: number }).cx = B; (g.player as { cy: number }).cy = B;
     g.explodeAt(24, 24, 800, 0, false, 130, 0, 108, undefined, undefined, 0, 1);
     expect(g.selfDmg).toBe(300);   // DV 680-920 → ×0.5=340-460 → 全被 cap 收口
     for (const [id, sw, kb] of [[28, true, PREPARE_BOMB_KB[28]], [108, false, 0]] as const) {
       const gi = mkGame(new World(48, 48, 7, `ac1f${id}${sw}`), sw);
-      gi.player.cx = B; gi.player.cy = B;
+      (gi.player as { cx: number }).cx = B; (gi.player as { cy: number }).cy = B;
       gi.explodeAt(24, 24, 800, 0, false, 130, 0, id, undefined, undefined, kb, -1);
       expect(gi.selfDmg).toBeGreaterThanOrEqual(680);
       expect(gi.selfDmg).toBeLessThanOrEqual(920);

@@ -237,7 +237,7 @@ describe('R25-⑦ HarpyCharm 音效段', () => {
     Array<{ name: string; vol: number; x: number; y: number }> {
     const played: Array<{ name: string; vol: number; x: number; y: number }> = [];
     const arrow = new Arrow(900, 500, 3, 0, 10, 1, 1);   // 距玩家 cx=400 → d≈500 ∈[400,1200]
-    arrow.nearestEnemyWithLos = (() => ({ cx: 1000, cy: 500 })) as typeof arrow.nearestEnemyWithLos;
+    arrow.nearestEnemyWithLos = (() => ({ cx: 1000, cy: 500 })) as unknown as typeof arrow.nearestEnemyWithLos;
     const game = {
       entities: { projectiles: [arrow] },
       playSfxWav: (name: string, vol: number, x: number, y: number) => { played.push({ name, vol, x, y }); },

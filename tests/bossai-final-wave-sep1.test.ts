@@ -26,9 +26,9 @@ interface DustCall {
   sx: number; sy: number; alpha: number;
   color: unknown;
   scale: number; noGravity: boolean; perfect: boolean;
-  /** 入池尘引用(调用侧逐字段修型写入) */
+  /** 入池尘引用(调用侧逐字段修型写入;color 由 AI 侧后置写入,如 dd2 星爆 A=0) */
   d: { alpha: number; vx: number; vy: number; fadeIn: number; scale: number;
-    noGravity: boolean; noLight: boolean };
+    noGravity: boolean; noLight: boolean; color?: unknown };
 }
 
 function makeHooks(difficulty = 1): {

@@ -292,7 +292,8 @@ describe('波涌之刃 451（aiStyle 81 三阶段）', () => {
       hurt: (d: number) => { dmgTaken += d; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
     const game = makeGame(w, list);
     const tide = new TideSlash(16, 0, 100, 4.5, 3);
-    game.entities && ((game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(tide, 'projectiles'));
+    (game as unknown as { entities?: { add: (e: unknown, b: string) => void } }).entities
+      && ((game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(tide, 'projectiles'));
     tide.x = 50 * TILE; tide.y = 90 * TILE;
     tide.fixedUpdate(1, game);
     expect(tide['ai0']).toBe(-1);                     // 掷出阶段

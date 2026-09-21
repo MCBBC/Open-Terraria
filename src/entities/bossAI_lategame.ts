@@ -1799,7 +1799,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           const [ux, uy] = rot(0, 1, Math.PI / 2 + Math.PI * 2 * t + base);
           const [ox, oy] = rot(ux, uy, -Math.PI / 2);
           shoot(game, e.cx + 55 + ox * 30, e.cy - 30 + oy * 30, ux * 8, uy * 8,
-            num9, 872);   // num9 :46334（Remap 见上）
+            num9, 872, 300, { empressHue: t });   // num9 :46334;ai[1]=num65=t（:46982——AI_173_GetColor hue=(ai1+0)%1,★BJ235 残影染色同源通道）
         }
       }
       e.ai1 += 1;

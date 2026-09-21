@@ -12,6 +12,10 @@
 //       自然世界（起点列=水,对照 bj43-b 档案）两洋皆可达 =「有的地图正常」。
 // 锁面：本文件断言 = 原版语义。若有人「友好化」InWorld 边界 / 摘 includePlatforms 平台臂
 //       / 改起点列,本文件爆红（变异 M1 边界放宽、M2 平台臂死码均翻红,已验）。
+// ★BJ242（2026-09-21）：用户明令分歧已注册——Game.CONCH_RIGHT_OCEAN_COMPENSATION（缺省 ON=
+//       补偿式内移重试 x=w-41,见 Game.ts 29814 登记注）。本文件=原版本相锁面 ⇒ 语义锁统一
+//       转为「回滚口关闭态」断言（OFF=与原版逐字全等）;分歧开启态行为锁面在
+//       tests/bj242-conch-right-ocean-compensation.test.ts。
 import { describe, it, expect } from 'vitest';
 import { Game } from '../src/core/Game';
 import { Camera } from '../src/render/Camera';
@@ -107,33 +111,45 @@ function stubGame(world: World, px: number, py: number) {
 }
 
 describe('BJ240 海螺右洋 InWorld40 边界（物证地图特征=原版忠实,零修刀锁面）', () => {
-  it('物证特征世界：右洋尝试必败（起点列 w-40 落干燥甲板→零爬行→InWorld40）、左洋零爬行落位合法（x=40）', () => {
+  it('物证特征世界：右洋尝试必败（起点列 w-40 落干燥甲板→零爬行→InWorld40）、左洋零爬行落位合法（x=40）〔回滚口关闭态=原版逐字〕', () => {
     const w = evidenceSignatureWorld();
     const g = stubGame(w, 0, 0).g;
-    // 右洋：落点 (560,163) → px=560 ≥ w-40=560 → WorldGen.InWorld 假 → null（原版同败）
-    expect(g.requestMagicConchTeleportPosition(true)).toBeNull();
-    // 左洋：落点 (40,111) 站浸水甲板 (40,112) → InWorld(40≥40) 真 → 原版同胜
-    const dest = g.requestMagicConchTeleportPosition(false);
-    expect(dest).not.toBeNull();
-    expect(dest!.x).toBe(40 * TILE + 8 - 10);          // ToWorldCoordinates(8,16)−(w/2,h)
-    expect(dest!.y).toBe(111 * TILE + 16 - 42);
+    const prev = Game.CONCH_RIGHT_OCEAN_COMPENSATION;
+    Game.CONCH_RIGHT_OCEAN_COMPENSATION = false;   // ★BJ242：原版本相锁=回滚口关闭态
+    try {
+      // 右洋：落点 (560,163) → px=560 ≥ w-40=560 → WorldGen.InWorld 假 → null（原版同败）
+      expect(g.requestMagicConchTeleportPosition(true)).toBeNull();
+      // 左洋：落点 (40,111) 站浸水甲板 (40,112) → InWorld(40≥40) 真 → 原版同胜
+      const dest = g.requestMagicConchTeleportPosition(false);
+      expect(dest).not.toBeNull();
+      expect(dest!.x).toBe(40 * TILE + 8 - 10);          // ToWorldCoordinates(8,16)−(w/2,h)
+      expect(dest!.y).toBe(111 * TILE + 16 - 42);
+    } finally {
+      Game.CONCH_RIGHT_OCEAN_COMPENSATION = prev;
+    }
   });
 
-  it('MagicConch 双尝试序（Player.cs:56785-56830）：物证特征世界两半场都只能落到左洋=用户实报原版本相', () => {
+  it('MagicConch 双尝试序（Player.cs:56785-56830）：物证特征世界两半场都只能落到左洋=用户实报原版本相〔回滚口关闭态〕', () => {
     const w = evidenceSignatureWorld();
-    // 玩家在左洋甲板上（左半场）→ 首选右洋败 → 回退左洋
-    const s1 = stubGame(w, 40 * TILE, 110 * TILE);
-    (s1.g as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4263, kind: 'ocean', triggerAt: 45, consume: false });
-    const p1 = s1.g.player as { x: number; y: number; vy: number };
-    expect(p1.x).toBe(40 * TILE + 8 - 10);
-    expect(p1.y).toBe(111 * TILE + 16 - 42);
-    expect(p1.vy, '命中臂 velocity=Zero（Player.cs:56820）').toBe(0);
-    // 玩家在右半场 → 首选即左洋（rightOcean=!leftHalf=false）→ 命中 → 也落左洋
-    const s2 = stubGame(w, 570 * TILE, 100 * TILE);
-    (s2.g as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4263, kind: 'ocean', triggerAt: 45, consume: false });
-    const p2 = s2.g.player as { x: number; y: number };
-    expect(p2.x).toBe(40 * TILE + 8 - 10);
-    expect(p2.y).toBe(111 * TILE + 16 - 42);
+    const prev = Game.CONCH_RIGHT_OCEAN_COMPENSATION;
+    Game.CONCH_RIGHT_OCEAN_COMPENSATION = false;   // ★BJ242：原版本相锁=回滚口关闭态
+    try {
+      // 玩家在左洋甲板上（左半场）→ 首选右洋败 → 回退左洋
+      const s1 = stubGame(w, 40 * TILE, 110 * TILE);
+      (s1.g as unknown as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4263, kind: 'ocean', triggerAt: 45, consume: false });
+      const p1 = s1.g.player as { x: number; y: number; vy: number };
+      expect(p1.x).toBe(40 * TILE + 8 - 10);
+      expect(p1.y).toBe(111 * TILE + 16 - 42);
+      expect(p1.vy, '命中臂 velocity=Zero（Player.cs:56820）').toBe(0);
+      // 玩家在右半场 → 首选即左洋（rightOcean=!leftHalf=false）→ 命中 → 也落左洋
+      const s2 = stubGame(w, 570 * TILE, 100 * TILE);
+      (s2.g as unknown as { fireRecallTeleport(c: unknown): void }).fireRecallTeleport({ vid: 4263, kind: 'ocean', triggerAt: 45, consume: false });
+      const p2 = s2.g.player as { x: number; y: number };
+      expect(p2.x).toBe(40 * TILE + 8 - 10);
+      expect(p2.y).toBe(111 * TILE + 16 - 42);
+    } finally {
+      Game.CONCH_RIGHT_OCEAN_COMPENSATION = prev;
+    }
   });
 
   it('自然世界对照（「有的地图正常」）：右缘起点列=水 → 液面爬行 11 步落干泥架 → 右洋可达', () => {

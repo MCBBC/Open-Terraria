@@ -137,7 +137,7 @@ const PTS = (n: number): Array<{ x: number; y: number; hw: number; r: number; g:
     x: 10 + i * 8, y: 32, hw: 8, r: 0.75, g: 0.5, b: 0.25, a: 0.5,
   }));
 
-function runTrail(set: 'FlameLash' | 'MagicMissile' | 'RainbowRod', opacity: number,
+function runTrail(set: 'FlameLash' | 'MagicMissile' | 'RainbowRod' | 'LightDisc', opacity: number,
   time: number, atlas: never, n = 10): FakeBuf | null {
   const dom = globalThis as unknown as { document: { createElement(t: string): FakeCanvas } };
   const target = dom.document.createElement('canvas');

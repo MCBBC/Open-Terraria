@@ -2159,17 +2159,27 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
   }
   // ---- 头火尘双粒（:52050-52067：Center + (rotation−π/2)±8 ± rotation 向量×16，
   //      位居舵机/rotation 赋值之前 → 读上一 tick 的 rotation，与本处取值一致）----
+  // ★BJ244（2026-09-21）升级为原版尘通道 1:1（:52201-52213 实为双粒锚点源码段）：
+  //   尘 6（火）、scale=1+NextFloat×3、α100、Color.Transparent（=null）、
+  //   noGravity+noLight、fadeIn=1、velocity=Vector2.Zero（覆写）、position−=(4,4)。
+  //   旧实现 spawnParticles '#FF9A3C' 近似（固 scale/无 fadeIn/noLight 面）→ 换
+  //   spawnDust 逐字段对齐；锚点算式原样保留。
   {
     const fw = e.visAngle - Math.PI * 0.5;                            // (rotation − π/2).ToRotationVector2()
     const mv = e.visAngle;                                            // rotation.ToRotationVector2()
-    game.spawnParticles(
-      e.cx + Math.cos(fw) * 8 + Math.cos(mv) * 16,
-      e.cy + Math.sin(fw) * 8 + Math.sin(mv) * 16,
-      '#FF9A3C', 1, 0.4, { life: 26, damp: 0.94 });
-    game.spawnParticles(
-      e.cx + Math.cos(fw) * 8 - Math.cos(mv) * 16,
-      e.cy + Math.sin(fw) * 8 - Math.sin(mv) * 16,
-      '#FF9A3C', 1, 0.4, { life: 26, damp: 0.94 });
+    for (const sgn of [1, -1]) {
+      // 原文 NewDust(0 盒) 后 position -= (4,4)——本仓 spawn +4 钳位抖动，先 −4 入参
+      //  → 落点 = 锚点 −4（vanilla 为锚点 −4 − [0,4) 抖，亚 4px 差,备案）
+      const d = game.spawnDust?.(
+        e.cx + Math.cos(fw) * 8 + Math.cos(mv) * 16 * sgn - 4,
+        e.cy + Math.sin(fw) * 8 + Math.sin(mv) * 16 * sgn - 4,
+        0, 0, 6, e.vx, e.vy, 100, null, 1 + Math.random() * 3, true, true);
+      if (d) {
+        d.noLight = true;
+        d.fadeIn = 1;
+        d.vx = 0; d.vy = 0;                       // obj.velocity = Vector2.Zero（覆写）
+      }
+    }
   }
   // ---- 412 目标覆写（:52176-52254）----
   let num46 = 10, num47 = 0.3;                                        // :52178-52179 基础速/加速

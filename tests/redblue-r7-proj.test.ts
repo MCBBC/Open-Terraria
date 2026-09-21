@@ -22,8 +22,8 @@ interface StubEnemy {
   hurt: (...a: unknown[]) => boolean;
 }
 function mkEnemy(id: number, x: number, y: number, w = 16, h = 16): StubEnemy {
-  const e: StubEnemy = { id, x, y, w, h, dead: false, hurtLog: [] } as StubEnemy;
-  e.hurt = (...a: unknown[]) => { e.hurtLog.push(a as HurtArgs); return false; };
+  const e = { id, x, y, w, h, dead: false, hurtLog: [] } as unknown as StubEnemy;
+  e.hurt = (...a: unknown[]) => { e.hurtLog.push(a as unknown as HurtArgs); return false; };
   return e;
 }
 
@@ -190,7 +190,7 @@ describe('R7-38 鞭 CutTiles', () => {
     const player = {
       x: 32 * 16, y: 40 * 16, w: 20, h: 42, cx: 32 * 16 + 10, cy: 40 * 16 + 21,
       facing: 1, equipStats: {}, whipBuffs: {}, summonDamageMult: 1, dead: false,
-    } as never;
+    };
     const whip = new WhipProj(player.cx, player.cy, 0, 847, 4901, 30, 2, 30, 10,
       () => player as never);
     whip.fixedUpdate(1 / 60, g.hooks);

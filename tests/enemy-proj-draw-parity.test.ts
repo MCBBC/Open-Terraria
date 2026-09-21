@@ -401,7 +401,7 @@ describe('DeerclopsRubbleProj 962(Frame(3,4) Main.cs:32828-32834;:54039 出世�
 
 describe('InsanityShadowProj 965(原生 80×84;origin Main.cs:29934-29937;镜像 AI_187 :39850)', () => {
   it('朝右:80×84 原生(origin X=W-20=60),不再 40×40', () => {
-    const p = new InsanityShadowProj({ cx: 0, cy: 0, vx: 0 }, 10, 0);
+    const p = new InsanityShadowProj({ cx: 0, cy: 0, vx: 0 }, 10);
     (p as unknown as { vx: number }).vx = 4;            // 朝右
     const { calls, r } = makeAtlasR(fakeImg(80, 84));
     p.draw(r as never, undefined as never);
@@ -412,7 +412,7 @@ describe('InsanityShadowProj 965(原生 80×84;origin Main.cs:29934-29937;镜像
     expect(d.a[4]).toBeCloseTo(84, 5);
   });
   it('朝左:水平镜像 + origin X=20(spriteDirection=-1)', () => {
-    const p = new InsanityShadowProj({ cx: 0, cy: 0, vx: 0 }, 10, 0);
+    const p = new InsanityShadowProj({ cx: 0, cy: 0, vx: 0 }, 10);
     (p as unknown as { vx: number }).vx = -4;
     const { calls, r } = makeAtlasR(fakeImg(80, 84));
     p.draw(r as never, undefined as never);

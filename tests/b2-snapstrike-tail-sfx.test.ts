@@ -23,7 +23,7 @@ const iid = (vid: number): number => {
 
 interface MockEnemy {
   id: number; x: number; y: number; w: number; h: number;
-  cx: number; cy: number; dead: boolean; onFire3T?: number;
+  cx?: number; cy?: number; dead: boolean; onFire3T?: number;
   hurt: () => boolean;
 }
 const mkEnemy = (id: number, cx: number, cy: number): MockEnemy => ({

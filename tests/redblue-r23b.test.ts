@@ -31,7 +31,7 @@ function stubGame(worldOverrides: Record<string, unknown> = {}): unknown {
     isExpert: false,
     ...worldOverrides,
   };
-  const target: Record<string, unknown> = {
+  const target: Record<PropertyKey, unknown> = {
     player: null,
     world,
     enemies: () => [],

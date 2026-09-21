@@ -637,12 +637,25 @@ export function martianDroneAI(e: Enemy, game: GameHooks, player: Player | null)
   if (corite) {
     const rolls = e.ai0 === 2 ? 2 : 1;
     const box = e.ai0 === 2 ? 30 : 20;
-    for (let k = 0; k < 2; k++) {
+    for (let k = 0; k < 4; k++) {
       if (Math.random() * 3 >= rolls) continue;
       const d = game.spawnDust?.(e.cx - box, e.cy - box, box * 2, box * 2, 6,
         e.vx * 0.5, e.vy * 0.5, 90, null, 1.5, true);
       if (d) { d.vx *= 0.2; d.vy *= 0.2; d.fadeIn = 1; }
     }
+  }
+
+  // ★BJ244（2026-09-21）388 无人机蓝尘拖尾双面 1:1：
+  //  ① :35603-35608 —— ai[0]!=3 每 tick 1× 尘 226（蓝火花）：本体盒、α100、
+  //     scale0.5、noGravity，velocity 整体覆写为 velocity/5（NewDust 盒抖动位保留）；
+  //  ② :35716-35723 —— Next(4)==0 再 1× 尘 226：noGravity，velocity×2 后覆写为
+  //     velocity/2 + normalize(尘位−本体中心)（= 抖速 + 向外漂移向量，三段赋值
+  //     等价合并）。两面均在态机前后原序执行（①在态机前、②在态机后）。
+  //  （BJ244 普查定谳：此前 388 拖尾双面整缺——仅 418 拖尾已接。）
+  if (!corite && e.ai0 !== 3) {
+    const d = game.spawnDust?.(e.x, e.y, e.w, e.h, 226,
+      0, 0, 100, null, 0.5, true);
+    if (d) { d.vx = e.vx / 5; d.vy = e.vy / 5; }
   }
 
   // 朝向（:35454-35469）
@@ -696,6 +709,19 @@ export function martianDroneAI(e: Enemy, game: GameHooks, player: Player | null)
       const d = Math.hypot(dx, dy);
       dx = (dx / (d || 1)) * dashSpd; dy = (dy / (d || 1)) * dashSpd;
       e.vx = dx; e.vy = dy;
+    }
+    // BJ244 388 拖尾②（:35716-35723，原版位于 ai[0]==1 蓄力支尾、风闸后仍本拍执行）：
+    //   Next(4)==0 → 1× 尘 226（本体盒、α100、scale0.5、noGravity）；velocity ×2 后
+    //   覆写为 /2 + normalize(尘位−中心) —— NewDust 抖速 + 向外漂移单位向量。
+    if (!corite && Math.floor(Math.random() * 4) === 0) {
+      const d = game.spawnDust?.(e.x, e.y, e.w, e.h, 226, 0, 0, 100, null, 0.5, true);
+      if (d) {
+        d.vx *= 2; d.vy *= 2;
+        const ox = d.x - e.cx, oy = d.y - e.cy;
+        const od = Math.hypot(ox, oy) || 1;
+        d.vx = d.vx / 2 + ox / od;
+        d.vy = d.vy / 2 + oy / od;
+      }
     }
   } else if (e.ai0 === 2) {
     // ---- 扑咬（:35618-35659）----
@@ -780,8 +806,32 @@ export function teslaTurretAI(e: Enemy, game: GameHooks, player: Player | null) 
     e.ai1 += 1;
     e.spawnAlpha = e.ai1 > 60 ? Math.round((1 - (e.ai1 - 60) / 60) * 255) : 255;
     e.iframes = 2;                       // dontTakeDamage = true
-    if (e.ai1 % 6 === 0) {
-      game.spawnParticles(e.cx, e.cy, '#6FD7FF', 1, 0.6, { life: 20 });
+    // ★BJ244（2026-09-21）部署环绕尘 1:1（:35416-35496）：num1085=ai[1]/60，
+    //  spinningpoint=(0,-30) 旋 num1085×1.5×2π 后 ×(1,0.4)；k=0..3 四档
+    //  vector125=UnitY×(-15/-5/5/20)、num1087=0.15/0.3/0.6/0.45——每档两粒
+    //  （spinningpoint 先用后 ×-1 镜像）= 8 粒/tick；尘 226 scale0.5 α100、
+    //  noGravity、velocity=0、position=Center+spinningpoint×num1087+vector125
+    //  （旧实现 ai1%6 掷 1 粒近似=密度差 48 倍,用户普查刀 BJ244 升 1:1）。
+    //  完美通道（perfect）取 position/velocity 精确覆写语义——原文本也是
+    //  NewDust 后整字段赋值 position/velocity,盒抖动被覆写消解。
+    {
+      const n1085 = e.ai1 / 60;
+      const a = n1085 * 1.5 * Math.PI * 2;
+      // rot((0,-30),a)=(30sin a,-30cos a)，×(1,0.4)=(30sin a,-12cos a)；
+      // spinningpoint 不随 k 复位——每档第一粒用当值、随后 ×-1 且取反跨档持续
+      // （四档八粒的自旋序列 = [+,-,-,+,+,-,-,+]）
+      let spX = 30 * Math.sin(a), spY = -12 * Math.cos(a);
+      const V125Y = [-15, -5, 5, 20];
+      const N1087 = [0.15, 0.3, 0.6, 0.45];
+      for (let k = 0; k < 4; k++) {
+        const d = game.spawnDust?.(e.cx + spX * N1087[k], e.cy + spY * N1087[k] + V125Y[k],
+          0, 0, 226, 0, 0, 100, null, 0.5, true, true);
+        void d;
+        spX = -spX; spY = -spY;          // spinningpoint *= -1f（用后镜像）
+        const d2 = game.spawnDust?.(e.cx + spX * N1087[k], e.cy + spY * N1087[k] + V125Y[k],
+          0, 0, 226, 0, 0, 100, null, 0.5, true, true);
+        void d2;
+      }
     }
     e.lightRGB = [0.1 * (e.ai1 / 60), 0.5 * (e.ai1 / 60), 0.7 * (e.ai1 / 60)];
     e.lightRGBAt = { x: e.cx, y: e.cy - 10 };   // :35404 光源 = Center.Y−10

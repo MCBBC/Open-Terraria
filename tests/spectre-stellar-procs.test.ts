@@ -57,7 +57,8 @@ function mkEnemy(id: number, x: number, y: number, w = 18, h = 40): HurtSpy & {
 }
 function makeHooks(enemies: unknown[], store = makeStore(),
   player?: Player): { hooks: GameHooks; added: unknown[]; store: TileStore;
-    cutCalls: Array<{ ix: number; iy: number }>; advanceTick: (n: number) => void } {
+    cutCalls: Array<{ ix: number; iy: number }>; advanceTick: (n: number) => void;
+    winPeek: (id: number) => number | undefined } {
   const pl = player ?? new Player(30 * 16, 100 * 16, new Inventory());
   const added: unknown[] = [];
   // ★F3/F6 测试面：cutTile 记录 + immune[owner] 窗（与 Game.noteNpcPlayerImmune/

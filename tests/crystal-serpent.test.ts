@@ -154,7 +154,7 @@ describe('水晶蛇 3210→523（aiStyle 95 独占族）', () => {
     const vyAtCap = p.vy;
     for (let t = 0; t < 20; t++) p.fixedUpdate(1 / 60, hooks);
     expect(p.vy).toBe(vyAtCap);                         // ★软帽语义:vy>-8 才减,越帽后恒停(:33586)
-    expect(p.rot).toBeCloseTo(p.vx * 0.1, 12);
+    expect((p as unknown as { rot: number }).rot).toBeCloseTo(p.vx * 0.1, 12);
   });
 
   it('⑧alpha 淡入:255→(3 拍延迟)−20/拍→钳 100;drawAlpha=(255−alpha)/255', () => {

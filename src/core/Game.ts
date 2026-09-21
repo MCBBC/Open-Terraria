@@ -29811,7 +29811,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  终点盒恒=锚盒,Collision.cs:2299）→ boxBlocked 锚盒 9 格逐格判=精确非近似
    *  （旧刀外扩 px−2 列/py−3 行=假性失败根因,见 boxBlocked 注）。CanTileHurt 走
    *  TouchDamage.canTileHurt。失败 = 原版 canSpawn=false（原地不传送、不消耗）。 */
-  private requestMagicConchTeleportPosition(rightOcean: boolean): { x: number; y: number } | null {
+  /** ★★BJ242 用户明令分歧闸（2026-09-21 拍板;先例 Player.SURFACE_SKIM_SPLASH 同型）:
+   *  右海洋传送友好化=补偿式内移重试——右洋尝试在 InWorld(…,40) 右边界被拒（px≥w-40,
+   *  爬向恒内卷⇒必零爬行落位）时,内移起点 x=w-41（进合法域）重试右洋一次。
+   *  原版本相=右缘起点 x=w-40 零爬行落位必败（右缘需 ≥1 爬行步、左缘 x=40 零爬行
+   *  即合法,InWorld x≥w-40 恒假=原版左右不对称根）;用户物证地图右缘平台甲板恰盖
+   *  起点列 → 右洋恒败回退左洋（BJ240 定谳）。三路实锤（wiki 行为级记载/反编译
+   *  调用链全图/独立 rig 三方同判）= /tmp/bj242-evidence/。自然地图（右洋原版
+   *  成功）零分支;左洋永不补偿。回滚=置 false（或摘补偿分支）⇒ 与原版逐字全等
+   *  （bj240 语义锁 OFF 态全绿;tests/bj242-conch-right-ocean-compensation.test.ts）。 */
+  static CONCH_RIGHT_OCEAN_COMPENSATION = true;
+
+  private requestMagicConchTeleportPosition(rightOcean: boolean, inwardRetry = false): { x: number; y: number } | null {
     const st = this.world.store;
     const p = this.player;
     const downedPlant = !!this.world.flags['downed_262'];
@@ -29872,7 +29883,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return false;
     };
     const num = 40;
-    const x0 = rightOcean ? st.w - num : num;
+    const x0 = rightOcean ? (inwardRetry ? st.w - num - 1 : st.w - num) : num;   // ★BJ242 内移起点 w-41 进 InWorld 合法域
     const y0 = 50;
     const num3 = Math.floor(this.world.groundLevel);   // (int)Main.worldSurface - num2(num2=0)
     const crawlOffsetX = rightOcean ? -1 : 1;
@@ -29920,7 +29931,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       break;
     }
     if (num7 === num8 || num10 >= num11) return null;
-    if (px < 40 || py < 40 || px >= st.w - 40 || py >= st.h - 40) return null;   // InWorld(_,_,40)
+    if (px < 40 || py < 40 || px >= st.w - 40 || py >= st.h - 40) {   // InWorld(_,_,40)
+      // ★BJ242 用户明令分歧（2026-09-21 拍板）：右洋尝试 InWorld 右边界拒绝（px≥w-40⇒
+      //  必零爬行落位,爬向恒内卷）=原版 quirk 面 → 内移起点 x=w-41 重试右洋一次
+      //  （!inwardRetry 防再入）。py 面拒绝/左洋不补偿;自然地图零变化。回滚口=
+      //  Game.CONCH_RIGHT_OCEAN_COMPENSATION=false ⇒ 与原版逐字全等（BJ240/242 证据链）。
+      if (Game.CONCH_RIGHT_OCEAN_COMPENSATION && rightOcean && !inwardRetry && px >= st.w - 40) {
+        return this.requestMagicConchTeleportPosition(true, true);
+      }
+      return null;
+    }
     const num13 = low ? 10 : 20;
     let flag7 = solidOrSloped(px, py) || st.liquid[st.idx(px, py)] > 0;
     if (!flag7) {

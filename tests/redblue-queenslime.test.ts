@@ -223,7 +223,7 @@ describe('AI_121 史莱姆皇后状态机(NPC.cs:45695-46177)', () => {
 });
 
 describe('掉落表(NPCLoot 657 段,vanilla-npcdrops.json 已提取全量)', () => {
-  const rulesOf = (id: number): Array<never> | never[] =>
+  const rulesOf = (id: number): unknown[] =>
     ((dropsJson as { entries: Array<{ npcs?: number[]; rule: unknown }> }).entries)
       .filter((e) => e.npcs?.includes(id)).map((e) => e.rule);
 

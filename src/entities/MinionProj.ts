@@ -891,8 +891,14 @@ export class MinionProj extends Entity {
    *  28551，无态机取橙档）；653 同伴方块白光 0.5（:46598 档位近似）。
    *  ★SW-RB11e 2026-09-10：641 月门补 (0.3,0.9,0.7)（AI_123 flag 支 :37744
    *  `Lighting.AddLight(Center, (0.3,0.9,0.7)*Opacity)`,Opacity 增幅未建模=常数档,
-   *  同 613/623 口径；643 彩虹水晶原版无 AddLight 不进表）。387/388/
-   *  373/375/407/423/266/蜘蛛/虎/阿比盖尔/龙链原版零自发光。 */
+   *  同 613/623 口径；643 彩虹水晶原版无 AddLight 不进表）。
+   *  ★BJ245（2026-09-21）：833-835 沙漠虎白光补课（BJ235 登记债清偿;旧注把
+   *  虎列入「零自发光」系矛盾,反编译亲读推翻）——AI_067 flag3 支 ai[0]!=4 门内
+   *  逐型 Lighting.AddLight(Center,…)（1457 Projectile.cs:50164 门/:50174-50185
+   *  三型;1458 :50175-50186 同文零变更）：833=One×0.5 / 834=One×0.8 /
+   *  835=Lerp(OurFavoriteColor(255,231,69),White,0.8).ToVector3()×1 =
+   *  (255,250.2,217.8)/255（暖白黄）。ai[0]==4=链发后等待态不发光（tigerA0）。
+   *  387/388/373/375/407/423/266/蜘蛛/阿比盖尔/龙链原版零自发光（虎已出列）。 */
   get lightRGB(): [number, number, number] | null {
     switch (this.projId) {
       case 755: return [220 / 255, 20 / 255, 60 / 255];
@@ -902,6 +908,10 @@ export class MinionProj extends Entity {
       case 533: return [0.8, 0.3, 0.1];
       case 653: return [0.5, 0.5, 0.5];
       case 641: return [0.3, 0.9, 0.7];   // ★SW-RB11e：AI_123 :37744（月门青绿光）
+      // ★BJ245：沙漠虎三档白光（AI_067 :50174-50185;ai[0]!=4 门=tigerA0 镜像）
+      case 833: return this.tigerA0 !== 4 ? [0.5, 0.5, 0.5] : null;
+      case 834: return this.tigerA0 !== 4 ? [0.8, 0.8, 0.8] : null;
+      case 835: return this.tigerA0 !== 4 ? [1, 250.2 / 255, 217.8 / 255] : null;
       default: return null;
     }
   }
@@ -1503,7 +1513,8 @@ export class MinionProj extends Entity {
    *  · 接触冷却 SetDefaults localNPCHitCooldown=10（:8095-8096）✔既有显式一致
    *  · ai[0]=5 追离态（终零波清偿）：唯一触发源 = 目标脚下 15 格虚空扫描
    *    （:51142-51156）；共享核 ai067StateFive（orbit 接近→入扑/180t 超时回 0）
-   *  · 未折算登记：flag3 静置尘 269/AddLight 0.5（渲染层,C 类）、追离中兔跳与
+   *  · 未折算登记：flag3 静置尘 269（渲染层,C 类;AddLight 白光三型已由 lightRGB
+   *    补课=BJ245 2026-09-21,见 getter 注）、追离中兔跳与
    *    蓄力跳重叠窗未建模——索敌"单距简化"登记于终清波批销账 */
   private tigerBody(game: GameHooks, p: Player, dmg0: number): void {
     const gems = Math.max(1, this.peerCount(game, 831));

@@ -535,3 +535,150 @@ describe('BJ237-B drawEnemy 绘制序锁（记录型 ctx 直调——antlion-til
     expect(Math.min(...ghosts.map(({ i }) => i))).toBeGreaterThan(bodyIdx[0]);
   });
 });
+
+// ===================== ★BJ245 邪教徒仪式召唤环（2026-09-21，BJ237 立案清偿） =====================
+// 原版锚（case 439/440 环段 Main.cs:24907-24931 亲读；1458 :24858-24940 对拍逐字节
+// 等价=零变更；BJ211 NPC_AURA_RINGS 只收通用大表 num57,本 case 在表外）：
+//   门 ai0==5 && ai1∈[0,30) → 4 份 Extra_30 拷贝;num328=(1−cos(ai1/30·π))/2、
+//   半径=70×num328 世界 px（裸值不乘 scale）、角=(i/4)·2π+rotation、α=(1−num328)
+//   ×GetAlpha（环窗 amount10=0 不染白）;源矩形=残影同款半高帧 row=frameIdx>=4。
+//   z 序=残影(:24879)→环(:24922)→本体(:24933)——环窗 ai0==5 残影份数恒 0
+//   （else 支 num323=0）,两窗口互斥=原版本相,序锁由「环在前绘槽内+先于本体」承载。
+import { drawCultistRitualRing } from '../src/render/npcExtraParts';
+
+describe('BJ245-A 仪式环几何钉值（Main.cs:24907-24931）', () => {
+  it('ai0==5 && ai1=15：4 份,α=(1−0.5)=0.5,半径=35,角度 0/π/2/π/3π/2（rot=0）', () => {
+    const e = Enemy.fromVanilla(439, 100, 100) as EnemyT;
+    e.ai0 = 5; e.ai1 = 15;
+    const { ctx, ops } = recorder();
+    drawCultistRitualRing(ctx, e, atlasStub, OPT);
+    const d = draws(ops);
+    expect(d.length, 'num327=4 环拷贝').toBe(4);
+    for (const op of d) {
+      expect(op.alpha).toBeCloseTo(0.5, 6);              // ×(1−num328)
+      expect(op.sw).toBe(64); expect(op.sh).toBe(64);    // Extra_30 半高帧（stub 64×128,row0）
+    }
+    const cx = e.cx, cy = e.cy;                           // fromVanilla 以盒心落位
+    const tr = ops.filter((o) => o.op === 'translate');
+    expect(tr.length).toBe(4);
+    const expectR = 35;                                   // 70×(1−cos(π/2))/2
+    const got = tr.map((o) => ({ x: o.x as number, y: o.y as number }));
+    expect(got[0].x).toBeCloseTo(cx + expectR, 4); expect(got[0].y).toBeCloseTo(cy, 4);
+    expect(got[1].x).toBeCloseTo(cx, 4); expect(got[1].y).toBeCloseTo(cy + expectR, 4);
+    expect(got[2].x).toBeCloseTo(cx - expectR, 4); expect(got[2].y).toBeCloseTo(cy, 4);
+    expect(got[3].x).toBeCloseTo(cx, 4); expect(got[3].y).toBeCloseTo(cy - expectR, 4);
+  });
+  it('ai1=0：包络零点（半径 0 全在盒心,α=1 满档）', () => {
+    const e = Enemy.fromVanilla(440, 100, 100) as EnemyT;
+    e.ai0 = 5; e.ai1 = 0;
+    const { ctx, ops } = recorder();
+    drawCultistRitualRing(ctx, e, atlasStub, OPT);
+    const d = draws(ops);
+    expect(d.length).toBe(4);
+    expect(d[0].alpha).toBeCloseTo(1.0, 6);
+    const cx = e.cx, cy = e.cy;                           // fromVanilla 以盒心落位
+    for (const t of ops.filter((o) => o.op === 'translate')) {
+      expect(t.x).toBeCloseTo(cx, 4); expect(t.y).toBeCloseTo(cy, 4);
+    }
+  });
+  it('ai1=28：包络近满（num328=(1+cos(2π/30))/2≈0.989）α≈0.011 仍画', () => {
+    const e = Enemy.fromVanilla(439, 100, 100) as EnemyT;
+    e.ai0 = 5; e.ai1 = 28;
+    const { ctx, ops } = recorder();
+    drawCultistRitualRing(ctx, e, atlasStub, OPT);
+    const d = draws(ops);
+    const num328 = (1 + Math.cos((2 * Math.PI) / 30)) / 2;
+    expect(d.length).toBe(4);
+    expect(d[0].alpha).toBeCloseTo(1 - num328, 6);
+  });
+  it('门面：ai1=30 出窗 / ai0≠5 / opacity=0 全不画', () => {
+    const mk = () => Enemy.fromVanilla(439, 100, 100) as EnemyT;
+    const e1 = mk(); e1.ai0 = 5; e1.ai1 = 30;
+    const r1 = recorder(); drawCultistRitualRing(r1.ctx, e1, atlasStub, OPT);
+    expect(draws(r1.ops).length).toBe(0);
+    const e2 = mk(); e2.ai0 = 4; e2.ai1 = 15;
+    const r2 = recorder(); drawCultistRitualRing(r2.ctx, e2, atlasStub, OPT);
+    expect(draws(r2.ops).length).toBe(0);
+    const e3 = mk(); e3.ai0 = 5; e3.ai1 = 15;
+    const r3 = recorder();
+    drawCultistRitualRing(r3.ctx, e3, atlasStub, { ...OPT, opacity: 0 });
+    expect(draws(r3.ops).length).toBe(0);
+  });
+  it('源矩形随帧行：frameIdx>=4 → Extra_30 底半（sy=half）;镜像/旋转透传', () => {
+    const e = Enemy.fromVanilla(439, 100, 100) as EnemyT;
+    e.ai0 = 5; e.ai1 = 10;
+    const r = recorder();
+    drawCultistRitualRing(r.ctx, e, atlasStub, { ...OPT, frameIdx: 4 });
+    const d = draws(r.ops);
+    expect(d.length).toBe(4);
+    expect(d[0].sy).toBe(64);                              // 底半行
+  });
+});
+
+describe('BJ245-B 仪式环接线结构锁（残影:24879→环:24922→本体:24933）', () => {
+  const BODY = { width: 8, height: 8 };
+  const GHOST = { width: 64, height: 128 };
+  function driveDrawEnemy(e: EnemyT): Array<{ m: string; a: unknown[] }> {
+    const calls: Array<{ m: string; a: unknown[] }> = [];
+    const ctx = new Proxy({} as Record<string, unknown>, {
+      get: (_t, k) => (k === 'canvas' ? undefined
+        : k === 'getTransform'
+          ? (...a: unknown[]) => { calls.push({ m: 'getTransform', a }); return { __parentT: true }; }
+          : (...a: unknown[]) => { calls.push({ m: String(k), a }); }),
+    });
+    const fake = {
+      ctx,
+      assets: { enemySprites: new Map() },
+      atlas: {
+        vnpc: () => ({ img: BODY, sx: 0, sy: 0, sw: 8, sh: 8 }),
+        ensureVImage: () => GHOST,
+        vmisc: () => null,
+      },
+      drawNpcGlow: () => {},
+      drawTwinsChain: () => {},
+    };
+    (Renderer.prototype as unknown as {
+      drawEnemy: (this: unknown, e: EnemyT, w: unknown, ents?: unknown[]) => void;
+    }).drawEnemy.call(fake, e,
+      { store: { idx: () => 0, liquid: [0] } }, []);
+    return calls;
+  }
+  /** 残影槽区间=[setTransform, 同层 restore)（BJ237-B 同款折叠） */
+  function ghostSlot(calls: Array<{ m: string; a: unknown[] }>): [number, number] {
+    const st = calls.findIndex((c) => c.m === 'setTransform');
+    expect(st, '本体前槽 setTransform 缺失（BJ237 槽未生效）').toBeGreaterThanOrEqual(0);
+    let depth = 0;
+    for (let i = st + 1; i < calls.length; i++) {
+      if (calls[i].m === 'save') depth++;
+      else if (calls[i].m === 'restore') {
+        if (depth === 0) return [st, i];
+        depth--;
+      }
+    }
+    return [st, calls.length];
+  }
+  it('439 仪式窗（ai0=5,ai1=15）：环 4 份全在前绘槽内且先于本体;本体=最后 draw', () => {
+    const e = Enemy.fromVanilla(439, 100, 100) as EnemyT;
+    e.spawnAlpha = 0;                       // 仪式窗 spawnAlpha 由 AI 驱动,直绘路径置 0=Opacity 1
+    e.ai0 = 5; e.ai1 = 15;
+    const calls = driveDrawEnemy(e);
+    const drawsAll = calls.map((c, i) => ({ c, i })).filter(({ c }) => c.m === 'drawImage');
+    const bodyIdx = drawsAll.filter(({ c }) => c.a[0] === BODY).map(({ i }) => i);
+    expect(bodyIdx.length).toBe(1);
+    const [gs, ge] = ghostSlot(calls);
+    const ringIdx = drawsAll.filter(({ c, i }) => c.a[0] === GHOST && i > gs && i < ge).map(({ i }) => i);
+    expect(ringIdx.length, '环 4 份在槽内（残影→环→本体 case 段）').toBe(4);
+    expect(Math.max(...ringIdx)).toBeLessThan(bodyIdx[0]);
+    expect(bodyIdx[0]).toBe(drawsAll[drawsAll.length - 1].i);
+  });
+  it('440 同门：仪式窗环 4 份（case 439/440 共块）', () => {
+    const e = Enemy.fromVanilla(440, 100, 100) as EnemyT;
+    e.spawnAlpha = 0;
+    e.ai0 = 5; e.ai1 = 8;
+    const calls = driveDrawEnemy(e);
+    const [gs, ge] = ghostSlot(calls);
+    const ringIdx = calls.map((c, i) => ({ c, i })).filter(({ c, i }) =>
+      c.m === 'drawImage' && c.a[0] === GHOST && i > gs && i < ge);
+    expect(ringIdx.length).toBe(4);
+  });
+});

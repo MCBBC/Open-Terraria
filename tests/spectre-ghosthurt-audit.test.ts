@@ -67,7 +67,7 @@ describe('ghostHurt 浮魂弹「吸取归谁」三面（AI_059 :29368-29431 无�
     const { hooks, added, lifeStealCalls } = makeHooks([enemy], p);
     const lifeBefore = p.hp;
     const orb = new SpectreSoulProj(enemy.x + 4, enemy.y + 4, 0, 0, 33, enemy);
-    orb.ai1 = 60;                                     // 预热已满（friendly 转正面）
+    (orb as unknown as { ai1: number }).ai1 = 60;     // 预热已满（friendly 转正面）
     for (let t = 0; t < 3 && !orb.dead; t++) orb.fixedUpdate(1 / 60, hooks);
     expect(enemy.hits).toEqual([33]);                 // 伤害落敌侧 = 构造基伤
     expect(lifeStealCalls.length).toBe(0);            // 零吸血链入账
@@ -88,7 +88,7 @@ describe('ghostHurt 浮魂弹「吸取归谁」三面（AI_059 :29368-29431 无�
     const enemy = mkEnemy(1, 41 * 16, 58 * 16);
     const { hooks, added } = makeHooks([enemy], p);
     const orb = new SpectreSoulProj(enemy.x + 4, enemy.y + 4, 0, 0, 30, enemy);
-    orb.ai1 = 60;
+    (orb as unknown as { ai1: number }).ai1 = 60;
     orb.fixedUpdate(1 / 60, hooks);
     expect(enemy.hits.length).toBe(1);                // 命中结算
     expect(orb.dead).toBe(true);                      // 触敌即亡（penetrate=1）
@@ -99,7 +99,7 @@ describe('ghostHurt 浮魂弹「吸取归谁」三面（AI_059 :29368-29431 无�
     const enemy = mkEnemy(1, 41 * 16, 58 * 16);
     const { hooks } = makeHooks([enemy], p);
     const orb = new SpectreSoulProj(enemy.x + 4, enemy.y + 4, 0, 0, 57, enemy);
-    orb.ai1 = 60;
+    (orb as unknown as { ai1: number }).ai1 = 60;
     orb.fixedUpdate(1 / 60, hooks);
     expect(enemy.hits).toEqual([57]);
   });

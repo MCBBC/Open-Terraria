@@ -541,6 +541,46 @@ export function drawCultistGhosts(
   }
 }
 
+/** ★BJ245（2026-09-21）邪教徒仪式召唤环（case 439/440 环段 Main.cs:24907-24931;
+ *  1458 :24858-24940 对拍逐字节等价=零变更；BJ211 环族只收通用大表 num57,本 case
+ *  在表外——BJ237 亲读立案,本刀清偿）——ai0==5（仪式瞬移态）&& ai1∈[0,30) 窗内
+ *  4 份 Extra_30 环拷贝：
+ *   · num328=(1−cos(ai1/30·π))/2（:24918-24919;0 起单调升至 1）、半径=70×num328
+ *     世界 px（:24920 num329=70 裸值【不乘 scale】,仅贴图 draw 乘 scale）;
+ *   · 角=(i/4)·2π+rotation（:24928）;色=Lerp(npcColor,White,amount10)→GetAlpha
+ *     →×(1−num328)（:24923-24925）——环窗落 else 支 amount10=0（:24877-24878）
+ *     不染白,光照色由 compositeLight 全屏乘承载（BJ209/残影同惯例）;A=(255−alpha)
+ *     ×(1−num328) → globalAlpha=(1−num328)×opacity 合并;
+ *   · 源矩形=残影同款 rectangle14（Extra_30 半高帧,row=frameIdx>=4 底行
+ *     :24861-24866）;锚=Center+radial+本体锚偏移（:24928-24930 −NPC帧半×scale
+ *     +halfSize×scale+origin=halfSize 恒等相消 → 贴图中心=Center+radial,
+ *     (0,num46+num47+gfxOffY)≡addY+footFlush 同残影锚模型）;
+ *   · z 序=残影（:24879-24894）→环（:24922-24931）→本体（:24933）——分发器内
+ *     drawCultistGhosts 之后调用=本体之下前绘槽同相（BJ237 槽）。 */
+export function drawCultistRitualRing(
+  ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
+  o: NpcGhostOpts,
+): void {
+  const vid = e.vanillaId;
+  if (vid !== 439 && vid !== 440) return;
+  if (e.ai0 !== 5 || e.ai1 < 0 || e.ai1 >= 30) return;
+  const tex = atlas.ensureVImage('vanilla/Extra_30.png');
+  if (!tex) return;
+  const num328 = (1 - Math.cos((e.ai1 / 30) * Math.PI)) / 2;   // :24918-24919
+  const radius = 70 * num328;                                  // :24920 裸 70（不乘 scale）
+  const alpha = (1 - num328) * o.opacity;                      // ×(1−num328)（GetAlpha 合并 opacity）
+  if (alpha <= 0.004) return;
+  const half = tex.height / 2;
+  const row = o.frameIdx >= 4 ? 1 : 0;
+  const src = { sx: 0, sy: row * half, sw: tex.width, sh: half };
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2 + o.rot;                 // :24928 (num330/num327)·2π+rotation
+    const gx = e.cx + Math.cos(ang) * radius;
+    const gy = e.cy + Math.sin(ang) * radius;
+    drawGhostSprite(ctx, tex, src, gx, gy, o.rot, o.mirror, o.scale, alpha, 1, o.addY);
+  }
+}
+
 /** Betsy 551 残影（mode 7；Main.cs:23794-23861 else if type==551）：oldPos[9,6,3]、
  *  每位三层（后翼 Extra_82→躯干→前翼 Extra_81），α=npcColor×(1−i/10)×0.35 再 A/2
  *  （:23852-23854）→ 0.175×(1−i/10)；旋转=oldRot（:23851）；翼帧=lai0/4 的 2×5 帧；
@@ -792,6 +832,7 @@ export function drawNpcTrailGhosts(
 ): void {
   drawGenericTableGhosts(ctx, e, atlas, frame, o);
   drawCultistGhosts(ctx, e, atlas, o);
+  drawCultistRitualRing(ctx, e, atlas, o);   // ★BJ245：仪式环（残影→环→本体 :24901→:24923→:24933）
   drawBetsyGhosts(ctx, e, atlas, frame, o);
   drawSolarGoopGhosts(ctx, e, atlas, o);
   drawPreBodySpecialGhosts(ctx, e, atlas, frame, o);
@@ -815,7 +856,7 @@ export function drawNpcTrailGhostsOverBody(
  *  418 走 drawCoriteTrail 前绘位不在本表） */
 export const NPC_TRAIL_GHOST_IDS: ReadonlySet<number> = new Set([
   ...Object.keys(GENERIC_TABLE_GHOSTS).map(Number),   // 426/427/521/542-546/558-560/574/575/581/620
-  439, 440,        // 邪教徒符印（:24901 本体之下）
+  439, 440,        // 邪教徒符印+仪式环（:24901/:24923 本体之下,BJ245 补环）
   551,             // Betsy（:23845 本体之下）
   519,             // 日耀黏液（全绘 case 段位即本体）
   94, 417, 516,    // 特支前绘组（:25472/:25499/:25567 本体之下）

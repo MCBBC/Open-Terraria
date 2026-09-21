@@ -442,7 +442,9 @@ describe('R5-F21/F22 DamageVar', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     settle(p, w);
-    const e = new Enemy(20 * 16, 28 * 16, 'zombie', w);
+    // Enemy ctor 现签名 (key, x, y)——旧 4 参 (x,y,key,world) 调用序随 src API 漂移订正,
+    // 断言/期望值不变（同 'zombie'@(20,28) 格像素位）
+    const e = new Enemy('zombie', 20 * 16, 28 * 16);
     (e as unknown as { def: { damage: number } }).def = { damage: 100 };
     let got = -1;
     const hooks = { ...fakeHooks(w, p), damagePlayer: (d: number): number => { got = d; return 0; } };
@@ -641,7 +643,7 @@ describe('R5-F16 日曜冲撞', () => {
     const hooks = { ...fakeHooks(w, p), enemies: () => [e1, e2] };
     // 直接置冲撞态（绕过双击/坐骑链）
     p.solarDashing = true;
-    p.solarDashConsumed = false;
+    (p as unknown as { solarDashConsumed: boolean }).solarDashConsumed = false;
     p.dashDelay = -1;
     p.vx = 21.9;
     p.fixedUpdate(1 / 60, hooks as never);

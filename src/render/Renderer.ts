@@ -674,6 +674,7 @@ import { Enemy } from '../entities/Enemy';
 import { drawForceFieldBubble } from '../fx/ForceFieldBubble';
 import { visEffectFrames } from '../entities/Enemy';
 import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
+import { whiteK811 } from '../entities/Dart';   // ★BJ245：811 光地板 k 单源（Dart 白化同式）
 import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
 import { Bobber, hackHoldStyleActive } from '../entities/Bobber';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, TOWER_ZONE_RADIUS, isTowerId, shieldMax } from '../world/LunarEvent';
@@ -8974,9 +8975,10 @@ export class Renderer {
           ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
         }
       }
-      // 旋刃冲刺拖尾（:25512-25534，ai2<=-9）→ ★BJ209 迁至 drawEnemy restore 后
-      // drawNpcTrailGhosts 统一挂点（drawSolenianGhosts）。原内联块在本体变换内用
-      // 绝对历史坐标 translate=双重偏移屏外不可见，且漏 'lighter' 加算（原版 A=0）。
+      // 旋刃冲刺拖尾（:25512-25534，ai2<=-9）→ ★BJ209 迁出内联块（drawSolenianGhosts）
+      // → ★BJ237 归位本体之下槽（原版 :25517 在本体链 :25645+ 之前=本体之下；
+      // 原内联块在本体变换内用绝对历史坐标 translate=双重偏移屏外不可见，
+      // 且漏 'lighter' 加算（原版 A=0））。
     }
     ctx.restore();
   }
@@ -10935,7 +10937,10 @@ export class Renderer {
    *      globalAlpha 重放、不进地板（★F1 定罪:旧固定 0.5 档系误把 A=128/255 当
    *      自发光档）；
    *    · 811：Main.cs:30841-30848 轨迹支 `Lerp(projectileColor,White,Remap(ai0,
-   *      0,15,1,0.3))` 恒亮端 k=1.0（本仓 Dart 侧 whiteLerp 同源已画）；
+   *      0,15,1,0.3))`——★BJ245（2026-09-21）勘误接线：ai0 写入方=AI_001 flag3
+   *      缺省支 ai[0]++（P.cs:57019-57021,排除表无 811;旧注「ai[0] 全域无写入
+   *      方→恒亮端 k=1.0」作废）→ k=whiteK811(age) 15 拍 1.0→0.3 衰减
+   *      （ai0≡Dart.age,1 基逐拍;净 Puppen age 冻结 0=恒 1.0,登记残余）；
    *    · 814：Main.cs:30849-30856 轨迹支 `Lerp(projectileColor,White,0.35)` → k=0.35。
    *      811/814 轨迹 Lerp 发生在 GetAlpha 缺省段（P.cs:81503-81510 RGB×(255−α)/255）
    *      【之前】→ 白度终值 = k×(255−α)/255（811 AI α−20/t 出场 13 拍渐显,
@@ -10968,9 +10973,12 @@ export class Renderer {
     // 596: RGB(255−α) 白化（GetAlpha 专支不读格光色）;effAlpha 已含 timeLeft<30 渐隐窗
     //  → 顶点色恒白（Projectile.cs:80903）→ whiten=true（★I″ 消色差）
     [596, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
-    // 811: whiteLerp k=1.0（Remap(ai0,0,15,1,0.3) 恒下端,ai[0] 全域无写入方）× (255−α)/255
+    // 811: whiteLerp k=whiteK811(age)=Remap(ai0,0,15,1,0.3)（★BJ245：ai0 写入方=
+    //  AI_001 flag3 缺省 ai[0]++ P.cs:57019-57021,旧注「恒 1.0」勘误;ai0≡Dart age,
+    //  netPuppet age 冻结 0→k=1.0）× (255−α)/255
     //  → 顶点色恒白（Main.cs:30846 Lerp 恒白端）→ whiten=true（★I″ 消色差）
-    [811, (proj) => ({ floor: (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
+    [811, (proj) => ({ floor: whiteK811((proj as { age?: number }).age ?? 0)
+      * (255 - Renderer.selfLumEffAlpha(proj)) / 255, whiten: true })],
     // 814: whiteLerp k=0.35 × (255−α)/255 —— 顶点色=Lerp(格光,White,0.35)【读格光】
     //  （Main.cs:30068+:30855）→ whiten=false:逐通道 max 旧形（保留 65% 光色相）
     // ★BJ109-B/J（2026-09-16）：月族弹「暗处弹不发亮」残余面 5 件补齐——

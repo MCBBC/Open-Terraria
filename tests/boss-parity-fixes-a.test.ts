@@ -205,7 +205,7 @@ describe('骷髅王专家分支 + 旋冲直设速度(2026-08-19 台账 E)', () =
     expect(shots.length).toBe(1);             // ai2=0 → 0%80==0 首发
     expect(shots[0].damage).toBe(17);
     const sp = Math.hypot(shots[0].vx, shots[0].vy);
-    expect(sp).toBeGreaterThan(2).toBeLessThan(6);   // num176=5(无手 +2)
+    (expect(sp).toBeGreaterThan(2) as unknown as { toBeLessThan(n: number): void }).toBeLessThan(6);   // num176=5(无手 +2)
   });
 
   it('旋冲速度每 tick 直设 dir×num200(专家 3.5×1.05×1.1^9×1.1,:22166-22242)', () => {

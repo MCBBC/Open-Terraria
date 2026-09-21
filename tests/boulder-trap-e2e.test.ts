@@ -36,7 +36,7 @@ function trapWorld(): { w: World; wr: Wiring; boulderCells: () => number[] } {
   st.setTileSilent(X + 1, Y, BOULDER, 18, 0);
   st.setTileSilent(X, Y + 1, BOULDER, 0, 18);
   st.setTileSilent(X + 1, Y + 1, BOULDER, 18, 18);
-  const wr = new Wiring(st, 40);
+  const wr = new Wiring(st);
   const boulderCells = () => [st.idx(X, Y), st.idx(X + 1, Y), st.idx(X, Y + 1), st.idx(X + 1, Y + 1)];
   return { w, wr, boulderCells };
 }

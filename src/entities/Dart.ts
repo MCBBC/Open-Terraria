@@ -1109,7 +1109,8 @@ export class Dart extends Entity {
   ownerNpcId = 0;
   /** ★BJ219 通用 oldPos 残影环（TrailingMode 表驱动;undefined=未初始化/null=无记录式）。
    *  Dart 载体活动集=573 星云弹/811 血弹/814 血鹦鹉螺弹（TrailingMode 全 0,cap 10）。
-   *  ai 依赖档（811 ai0 白染预混）以 0 档承载=与 DART_STYLE 811 注 Remap 恒下端同相。 */
+   *  ai 依赖档（811 ai0 白染预混）以 0 档承载=染侧裁决（★BJ245 勘误：ai0 写入方已证
+   *  P.cs:57019-57021,k 衰减由白化 filter+光地板承载,染侧 0 档不变）。 */
   ghostRing?: ProjGhostRing | null;
   private subIsHead = false;
   /** 记录位=dartStep/oracleOrbStep 尾（位移后;原版 UpdateTrails :17198=Damage 后同序。
@@ -1204,10 +1205,12 @@ export class Dart extends Entity {
       }
     }
     // DrawProjDirect 轨迹支绘前白化（Main.cs:30068 projectileColor=Lighting.GetColor
-    //  格光色 → :30841-30856 Lerp(projectileColor,White,k)）：811 k≡1.0（Remap(ai[0])
-    //  恒下端,见 DART_STYLE 811 注）/ 814 k=0.35 常数。per-type filter 在此处一次算好;
-    //  filter 是 ctx 级状态——置位须在本行 save/restore 界内,出界显式复位
-    //  （与下方 globalAlpha=1 同款双保险）,不影响同帧其它弹与贴图未就绪短线兜底
+    //  格光色 → :30841-30856 Lerp(projectileColor,White,k)）：811 k=whiteK811(age)
+    //  动态（★BJ245：Remap(ai0,0,15,1,0.3),ai0 写入方=AI_001 flag3 缺省支
+    //  P.cs:57019-57021,见 DART_STYLE 811 注）/ 814 k=0.35 常数。per-type filter
+    //  在此处一次算好;filter 是 ctx 级状态——置位须在本行 save/restore 界内,
+    //  出界显式复位（与下方 globalAlpha=1 同款双保险）,不影响同帧其它弹与
+    //  贴图未就绪短线兜底
     // ★批六 M3-b/c（596 沙漠幽焰 GetAlpha 对齐,P.cs:80903-80910）：
     //  A 通道 = 128−α/2（50% 不透明帽,α=0 → 128）+ 渐显；timeLeft<30 渐隐窗内
     //  α = 255−255·timeLeft/30（GetAlpha 内覆写——AI 侧 α 递减只在 timeLeft>30 跑,
@@ -1216,7 +1219,8 @@ export class Dart extends Entity {
     //  仅登记不修——需 post-light 通道,与 whiteLerp 残差同账。
     const is596 = this.projId === 596;
     const effAlpha = is596 && this.life < 30 ? 255 - 255 * (this.life / 30) : this.alpha;
-    const whiteFilter = st.whiteLerp != null ? lerpWhiteFilter(st.whiteLerp)
+    const whiteFilter = this.projId === 811 ? lerpWhiteFilter(whiteK811(this.age))
+      : st.whiteLerp != null ? lerpWhiteFilter(st.whiteLerp)
       : is596 ? lerpWhiteFilter((255 - effAlpha) / 255) : null;
     ctx.save();
     ctx.translate(this.cx, this.cy);
@@ -2972,6 +2976,19 @@ function lerpWhiteFilter(k: number): string {
     : `brightness(${(1 - k + (k * 255) / 128).toFixed(2)}) saturate(${Math.max(0, 1 - k * 0.8).toFixed(2)})`;
 }
 
+/** ★BJ245（2026-09-21）：811 判镰白化系数 k=Utils.Remap(ai0,0,15,1,0.3)
+ *  （Main.cs:30847;Utils.cs:345=Lerp(toMin,toMax,GetLerpValue(0,15,v,clamped))）
+ *  = 1 − 0.7·clamp01(ai0/15)——ai0=0 → 1.0、15 起 → 0.3（钳尾）。
+ *  ai0 写入方 = AI_001 flag3 缺省支 ai[0]++（Projectile.cs:57019-57021,排除表
+ *  :56931-57018 无 811——旧注「ai[0] 全域无写入方→恒 1.0」系矛盾,勘误）；
+ *  本仓 ai0 ≡ Dart.age（1 基,首拍 dartStep 头 ++;811 无 extraUpdates=1 子步/拍,
+ *  与原版 ai0 逐拍 +1 精确同相）。消费双点:本文件 draw 白化 filter +
+ *  Renderer.SELF_LUMINOUS_PROJS[811] 光地板（import 本函数单源防漂移）。 */
+export function whiteK811(age: number): number {
+  const t = age <= 0 ? 0 : age >= 15 ? 1 : age / 15;
+  return 1 - 0.7 * t;
+}
+
 /** ★批六 M4 起 export：联机傀儡命中面（Game.netPuppetProjContact）按弹型查
  *  noPlayerHit（原版 Damage_EVP 头门 damage<=0 早退,P.cs:14846-14850 的表投影） */
 export const DART_STYLE: Record<number, DartStyle> = {
@@ -3006,13 +3023,15 @@ export const DART_STYLE: Record<number, DartStyle> = {
   //  （Enemy.ts 619 :7249 / 620 :7902）改走 spawnHostileProj,批五尘/AI/Kill 面自此可达；
   // 尘面见 dartStep 811/814 AI 段+双 Kill 口（:57340-57367/:74019-74027）；
   // 绘前白化（DrawProjDirect :30841-30848）：projectileColor =
-  //   Lerp(projectileColor, White, Remap(ai[0], 0, 15, 1, 0.3)) —— ai[0] 全域无写入方
-  //   （AI_001 811 支 :57340-57367 只动 localAI[0]/alpha/dust;发射点 NPC.cs:51435
-  //   不传 ai 参）→ ai[0]≡0 → Remap 恒取下端 = 因子恒 1.0 纯白剪影。
-  //   ★留 Remap 动态结构记载勿钉死常数（未来 ai[0] 若被赋值,按
-  //   Remap(ai0,0,15,1.0,0.3) 逐帧算 k 接 whiteLerp）;1.0 为现终值。
+  //   Lerp(projectileColor, White, Remap(ai[0], 0, 15, 1, 0.3))。
+  //   ★BJ245 勘误（2026-09-21,反编译亲读）：AI_001 flag3 缺省支对 811 照跑
+  //   ai[0]++（Projectile.cs:57019-57021,排除表 :56931-57018 无 811）——旧注
+  //   「ai[0] 全域无写入方→Remap 恒取下端 k≡1.0 纯白剪影」作废。ai0=发射后
+  //   update 数（本仓 Dart.age,1 基逐拍）→ k=whiteK811(age),15 拍 1.0→0.3
+  //   衰减（暗处拖尾渐暗=原版相;恒 1.0=暗处偏亮偏差）。whiteLerp 由此【动态】
+  //   接线（draw 消费位 whiteFilter 支）,表值不再钉 1.0（814 恒 0.35 不涉）。
   // fallback 近似血红目测（PNG 主色未取,811 撞墙即消极少见兜底态,登记）
-  811: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, life: 3600, whiteLerp: 1.0,
+  811: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, life: 3600,
     sfx: ['Item_17'], fallback: '#8A3038' },
   // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾 = AI_001 :56456-56460
   //  （★FX53:泛色 trail 退役,真尘站见 dartStep 55 支——每 update 1×d18 scale0.9）

@@ -34,6 +34,7 @@ function slimeGunGame(mouseAt: [number, number]) {
     projectiles: unknown[];
     particleCount: number;
     swings: number;
+    player: Player;
   };
   const player = new Player(50 * TILE, 90 * TILE, new Inventory());
   g.player = player;
@@ -52,7 +53,7 @@ function slimeGunGame(mouseAt: [number, number]) {
   g.sfx = { play: (_n: string) => { g.synthFallbacks.push(_n); } };
   g.spawnParticles = () => { g.particleCount++; };
   g.useSwing = () => { g.swings++; };
-  g.playUseSound.call(g as never, 2610, 'throw');
+  (g.playUseSound as (vid: number, fallback: string) => void).call(g as never, 2610, 'throw');
   return g;
 }
 

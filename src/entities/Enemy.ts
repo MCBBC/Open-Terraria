@@ -3914,7 +3914,15 @@ export class Enemy extends Entity {
       const num = Math.min(1, Math.max(0, 0.9 + (270 - mouseTextColorApprox()) / 900));
       this.lightRGB = [num * 0.9, 0.55, num * 1.2];
     } else if (this.vanillaId === 59) {
-      this.lightRGB = [1, 0.3, 0.1];                                    // :61866-61870 岩浆史莱姆
+      // ★BJ243（2026-09-21，NPC.cs:62068-62075；用户实报"熔岩史莱姆无粒子"定谳：
+      //  原版 AI_001 每 tick 无条件 1× 尘 6 Torch——曾只接光半块=尘面整缺）：
+      //  光 :62071 (1,0.3,0.1)（旧注 :61866-61870 系行号漂移,该段为 658 仆从弹幕）
+      //  + 尘 :62072 Speed=velocity×0.2、α100、scale1.7 + :62073 noGravity=true。
+      //  netOffset 加减（:62070/:62074）为 MP 位置噪声补偿,本仓单源坐标无此项；
+      //  携地狱石变体（ai1=174 :61619-61628）另发己档两尘,两块原版本就叠加。
+      this.lightRGB = [1, 0.3, 0.1];                                    // :62071 岩浆史莱姆
+      game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+        this.vx * 0.2, this.vy * 0.2, 100, null, 1.7, true);
     }
     const st = game.world.store;
     const underground = this.cy / TILE > game.world.groundLevel;
@@ -14188,6 +14196,21 @@ export class Enemy extends Entity {
       const nWof = wofVid === 113 || wofVid === 114 ? 20 : 5;
       for (let k = 0; k < nWof; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdWof, -1);
     }
+    // 岩浆族受击尘（HitEffect life>0 支,NPC.cs:86539-86551,BJ243 2026-09-21 同族对照补）：
+    // 59 熔岩史莱姆/60 地狱蝙蝠/151 熔岩蝙蝠 = ceil(防后伤/lifeMax×80) 簇 尘 6
+    // （Torch）SpeedX=2×hitDirection/SpeedY=-1/α=npc.alpha（59→50,60/151 无 SetDefaults
+    // alpha=0）/scale1.5 + Next(8)!=0 → noGravity（7/8 免重力）。59 熔岩史莱姆每拍
+    // 环境尘另有独立面（AI_001 :62072,slimeAI 内）——两块互不替代。
+    const lavaVid = this.vanillaId;
+    if ((lavaVid === 59 || lavaVid === 60 || lavaVid === 151) && this.hp > 0) {
+      const hdLava = Math.sign(kbx) || 1;
+      const nLava = Math.ceil((dmg / this.maxHp) * 80);
+      for (let k = 0; k < nLava; k++) {
+        const dL = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+          hdLava * 2, -1, this.spawnAlpha, null, 1.5);
+        if (dL && Math.floor(Math.random() * 8) !== 0) dL.noGravity = true;
+      }
+    }
     // DPS 计累计(Projectile.cs:12817-12818/Player.cs:20165-20168 两调用点均
     // accDreamCatcher 门禁+fromPlayer 标记;全仓伤害漏斗单点收口)
     if (fromPlayer) {
@@ -14896,8 +14919,24 @@ export class Enemy extends Entity {
           else { d.vx *= 1.4; d.vy *= 1.4; d.noGravity = true; }
         }
       }
+      // 岩浆族死亡尘（HitEffect life<=0 支,NPC.cs:86553-86560,BJ243 2026-09-21 同族
+      // 对照补）：59/60/151 = 40 簇 尘 6（Torch）SpeedX=2×hitDirection/SpeedY=-1/
+      // α=npc.alpha/scale1.5/Next(8)!=0 → noGravity。原版该段后经 :86602 门 return
+      // （59 恒 return；60/151 单机非 remix 亦 return）=本族死亡无 HitEffect gore
+      // （vanilla-gore.json 本就无表项）。★登记债（行为面另刀,非粒子面）：专家模式
+      // 59 死亡泼岩浆（:86561-86601 中心格 liquid=Next(50,150)+lava/Skyblock 全盒
+      // 255）与 60/151 remix+getGood/lowTiles 泼岩浆（:86602-86645）本仓未接。
+      const lavaExactDust = lavaVid === 59 || lavaVid === 60 || lavaVid === 151;
+      if (lavaExactDust) {
+        const hdLavaD = Math.sign(kbx) || 1;
+        for (let k = 0; k < 40; k++) {
+          const dLd = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+            hdLavaD * 2, -1, this.spawnAlpha, null, 1.5);
+          if (dLd && Math.floor(Math.random() * 8) !== 0) dLd.noGravity = true;
+        }
+      }
       if (!birdExactDust && !wofExactDust && !dukeExactDust && !paladinDeathDust
-        && !vileSpitDeathDust) {
+        && !vileSpitDeathDust && !lavaExactDust) {
         game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
         game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });
@@ -14905,10 +14944,12 @@ export class Enemy extends Entity {
       return true;
     }
     // 受击：少量碎屑零散溅落（不大面积）——鸟族 61/252/301 已有原版精确血尘
-    // （hurt 首段 HitEffect 块），不再叠通用近似；WoF 家族 113-116 同理
+    // （hurt 首段 HitEffect 块），不再叠通用近似；WoF 家族 113-116 同理；
+    // 岩浆族 59/60/151 同理（BJ243：精确火尘 86539-86551 已接）
     if (this.vanillaId !== 61 && this.vanillaId !== 252 && this.vanillaId !== 301
       && wofVid !== 113 && wofVid !== 114 && wofVid !== 115 && wofVid !== 116
-      && this.vanillaId !== 370 && this.vanillaId !== 372 && this.vanillaId !== 373) {
+      && this.vanillaId !== 370 && this.vanillaId !== 372 && this.vanillaId !== 373
+      && lavaVid !== 59 && lavaVid !== 60 && lavaVid !== 151) {
       game.spawnParticles(this.cx, this.cy, this.def.gore[0], 5, 1.4, { life: 60 });
     }
     return false;

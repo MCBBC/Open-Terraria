@@ -28,7 +28,7 @@ import { PROJ_ALPHA_MOD, type ProjAlphaMod } from '../data/vanillaProjAlpha';
 // ★BJ219 弹幕域 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹）——
 // 记录面 ProjGhostRing（Projectile.cs:17197-17300 逐式）+ 绘制面 drawProjGhosts
 // （参数/色/帧锚全表在 projGhostTrail.ts 头注;排除面=本仓已有独立实现的 id 集）
-import { ProjGhostRing, drawProjGhosts, projTrailingMode } from './projGhostTrail';
+import { ProjGhostRing, drawProjGhosts, drawGreenBandTrail, projTrailingMode } from './projGhostTrail';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -1897,16 +1897,16 @@ export class Arrow extends Entity {
   /** 本子步是否 tick 首（mode 4 玩家位移补偿只在 numUpdates==0 施加 :17283） */
   private subIsHead = false;
   /** ★BJ219 记录排除集：本仓已有独立 oldPos 记录/绘制实现,通用环不双记不双画
-   *  （普查定谳见 projGhostTrail.ts 头注「排除面」）。1020/1024/79 记录面在原版
-   *  有消费面（DrawTrail/:33234 辉光门）但本仓未实装对应绘制——登记债前不白记。 */
+   *  （普查定谳见 projGhostTrail.ts 头注「排除面」）。★BJ235：1020/1024 出排
+   *  （绿带绘制面 drawGreenBandTrail 已落地,记录面走通用环;1026 本就不在排）——
+   *  79 记录面在原版有消费面（:33234 辉光门）但本仓未实装对应绘制,维持不白记。 */
   private static GHOST_RECORD_EXCLUDE = new Set<number>([
     660, 94, 1114, 502,                    // Arrow 内联残影（starTrail/meowTrail）
     121, 122, 123, 124, 125, 126, 597, 1120, 34, 16, 79, 106,   // 弦带 shader 族
     933, 1100, 973,                        // SwingArc 斩弧剑族（mode4 环已落）
     1047, 1090,                            // RollingBoulder trailX 环
     466, 580,                              // LightningBoltProj 闪电链
-    715, 716, 717, 718,                    // Celeb2 烟花链（绘制面登记债,先不白记）
-    1020, 1024,                            // DrawTrail 绿带（绘制面登记债,先不白记）
+    715, 716, 717, 718,                    // Celeb2 烟花链（Celeb2.ts 自管环+链面,BJ235 落地）
     946,                                   // MinionProj 自带 mode2 环（SW-BJ56）
   ]);
   /** 712 书杖弹帧（frame/frameCounter :56664-56678——draw fIdx 链消费;
@@ -3046,7 +3046,14 @@ export class Arrow extends Entity {
     // ---- ★BJ219 通用 oldPos 残影族（Main.cs:30609-31360 通用表+专用帧残影四弹
     //      409/437/385/388）——原版残影块先于本体绘制段,挂本体 save 之前。排除集
     //      内 id（660/94/1114/502/弦带族/剑族…）走各自内联实现,ghostRing=null 短路;
-    //      503 星怒在上方独占支内补挂（rot=vel−π/2 本体角语义）。 ----
+    //      503 星怒在上方独占支内补挂（rot=vel−π/2 本体角语义）。
+    //      ★BJ235：绿带 1020/1024/1026 = DrawProjDirect 头 DrawTrail 面（:28508-28561
+    //      原版在最前,先于一切——此处挂通用残影前同序）,与通用表 1026 条目并存
+    //      （原版 1026 两面都画）;1020/1024 无通用表条目（仅绿带）。 ----
+    if (this.ghostRing !== undefined && this.ghostRing !== null
+      && (this.projId === 1020 || this.projId === 1024 || this.projId === 1026)) {
+      drawGreenBandTrail(ctx, this.ghostRing, this.projId, this.w, this.h);
+    }
     if (this.ghostRing !== undefined && this.ghostRing !== null) {
       const ghostA = this.drawGlobalAlpha() ?? Math.max(0, Math.min(1, (255 - this.alpha) / 255));
       drawProjGhosts(ctx, {
@@ -3059,7 +3066,13 @@ export class Arrow extends Entity {
         bodyRot: ang,
         bodyScale: 1,                 // proj.scale 缺省 1（SetDefaults 表内 id 无显式 scale 行;660=1.1 已排除集）
         bodyAlpha: ghostA,
-        ai0: 0, ai1: 0,               // 本仓 Arrow 无通用 ai 槽（ai 依赖档=533 三态/872·873·931·1039 色相/1097 ai1==1）→ 0 档,登记④
+        // ★BJ235 ai1 喂入（登记④清偿——AI_171/172/173 族 hue=(ai[1]+0.5)%1 不随时间
+        //  cycle,值=发射点注入静态档）：873 已有 empressHue 通道（bossAI_lategame
+        //  :1747 NPC.ai[1]/60）;872 同注（:46982 num65=k/13）;931/1039 未实现载体
+        //  （FQW 弹/星座弹）——通道就绪,注入日自动点亮。1097 ai1==1 分支仅 1113
+        //  宿主弹（:62744 num159）,本仓 1097 生成面 ai[1]≡0（fox 注）=恒 0 档 1:1。
+        ai0: 0,
+        ai1: this.empressHue ?? 0,
         timeLeft: this.life,
         opacity: Math.max(0, Math.min(1, 1 - this.alpha / 255)),
         vxLen: Math.hypot(this.vx, this.vy),

@@ -13,7 +13,6 @@ function makeGame(w: World): GameHooks {
     world: w,
     player: { x: 0, y: 0, w: 20, h: 42, cx: 10, cy: 21, dead: true, iframes: 0 },
     enemies: () => [],
-    entities: { add: () => {} },
     playSfx: () => {}, playSfxFiles: () => {},
     spawnParticles: () => {}, addDamageNumber: () => {},
     spawnDrop: () => null, cutTile: () => {}, damagePlayer: (): number => 0,

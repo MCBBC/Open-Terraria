@@ -58,11 +58,11 @@ const lumOf = (pid: number): ((proj: object) => { floor: number; whiten: boolean
   return (proj: object) => f!(proj as never);
 };
 
-/** 假弹（Dart 字段面：projId/alpha/life/x/y/w/h/netPuppet） */
+/** 假弹（Dart 字段面：projId/alpha/life/x/y/w/h/netPuppet/age） */
 type FakeDart = {
   projId: number; alpha: number; life: number;
   x: number; y: number; w: number; h: number;
-  dead?: boolean; netPuppet?: boolean;
+  dead?: boolean; netPuppet?: boolean; age?: number;
 };
 const dart = (projId: number, tx: number, ty: number, over: Partial<FakeDart> = {}): FakeDart => ({
   projId,
@@ -98,10 +98,25 @@ describe('F1: SELF_LUMINOUS_PROJS 地板动态化（RGB 顶点色乘数口径 + 
     expect(v.floor).toBeCloseTo(1.0, 6);
     expect(v.whiten, '顶点色恒白（Projectile.cs:80903 GetAlpha 专支不读格光）→ ★I″ 消色差').toBe(true);
   });
-  it('811 恒亮端 k=1.0（Remap(ai0,0,15,1,0.3) 恒下端）+ whiten=true', () => {
-    const v = lumOf(811)(dart(811, 1, 2));
+  it('811 age=0 恒亮端 k=1.0（Remap(ai0,0,15,1,0.3) 上端）+ whiten=true', () => {
+    const v = lumOf(811)(dart(811, 1, 2, { age: 0 }));
     expect(v.floor).toBeCloseTo(1.0, 6);
     expect(v.whiten, '顶点色恒白（Main.cs:30846 Lerp 恒白端不读格光）→ ★I″ 消色差').toBe(true);
+  });
+  it('★BJ245 811 k 衰减序列（ai0 写入方=AI_001 flag3 缺省 ai[0]++ P.cs:57019-57021;ai0≡Dart.age）', () => {
+    // k=1−0.7·clamp01(ai0/15)：age=1→1−0.7/15；age=15→0.3；>15 钳尾 0.3
+    const kOf = (age: number | undefined) => lumOf(811)(dart(811, 1, 2, { age })).floor;
+    expect(kOf(undefined)).toBeCloseTo(1.0, 6);            // 无 age 字段（旧夹具）=出生档
+    expect(kOf(0)).toBeCloseTo(1.0, 6);
+    expect(kOf(1)).toBeCloseTo(1 - 0.7 / 15, 6);
+    expect(kOf(7)).toBeCloseTo(1 - 0.7 * (7 / 15), 6);
+    expect(kOf(14)).toBeCloseTo(1 - 0.7 * (14 / 15), 6);
+    expect(kOf(15)).toBeCloseTo(0.3, 6);
+    expect(kOf(30)).toBeCloseTo(0.3, 6);
+    expect(kOf(600)).toBeCloseTo(0.3, 6);
+    // ×(255−α)/255 出场窗复合：age=15、α=115（第 7 拍渐显）→ 0.3×(140/255)
+    const v = lumOf(811)(dart(811, 1, 2, { age: 15, alpha: 115 }));
+    expect(v.floor).toBeCloseTo(0.3 * (140 / 255), 6);
   });
   it('814 = floor 0.35（轨迹支 Lerp(·,White,0.35) 常数）+ whiten=false（★M′-MAJOR-2 顶点色读格光）', () => {
     const v = lumOf(814)(dart(814, 1, 2));
