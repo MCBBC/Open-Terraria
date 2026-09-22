@@ -108,7 +108,9 @@ describe('③ Game.ts 探针接线结构锚（BJ269 五锚,摘任一环即红）
     expect(src).toContain('probeCraftListRefresh(): void');
     const body = src.slice(src.indexOf('private probeCraftListRefresh'));
     expect(body).toContain('if (!this.world) return;');
-    expect(body).toContain('__swUI?.inventoryOpen');
+    // ★BJ285-C3（2026-09-22）：裸 `__swUI?.inventoryOpen` 直读改经 node-safe 统一口
+    //   swUIFlag（BJ259 连坐根治普查——门语义不变,位=window.__swUI.inventoryOpen）
+    expect(body).toContain("swUIFlag('inventoryOpen')");
   });
 
   it('关包清签名（防陈旧跨开包残留）', () => {

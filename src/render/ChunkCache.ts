@@ -21,6 +21,9 @@ import type { AutoTiler } from './AutoTiler';
 import { TileStore } from '../world/TileStore';
 import type { World } from '../world/World';
 
+/** ★C3：世界外 chunk 的共享空格集（animCellsOf 缓存值;只读消费） */
+const EMPTY_ANIM_CELLS = new Int32Array(0);
+
 // 我们的 tile → Maples RuleTile 规则名（有规则的走素材自动贴合，无规则回退程序化）
 // Grass 走人工标注（'@grass'）：Tiles_2.png 是多 tile 混排图集，自动分类不可靠；
 // 用 public/annotator.html 标注后写入 sprites/annotations.json。无标注时回退程序化。
@@ -334,6 +337,7 @@ export class ChunkCache {
 
   markDirty(cx: number, cy: number) {
     const k = ChunkCache.key(cx, cy);
+    this._animIdx.delete(k);   // ★C3：动画格索引与烘焙图同域失效（先于惰性创建早退）
     if (!this.chunks.has(k)) return; // 未生成的 chunk 惰性创建
     // ★槽位粘滞：不再 releasePair——cell 保留在 stickyCell 中（页占用计数不回退），
     //   原位重烘覆写。这里补登记是防御性的（正常路径 renderChunk→acquireCell 已登
@@ -350,6 +354,48 @@ export class ChunkCache {
     if (this.dirtySet.has(k)) return;
     this.dirtySet.add(k);
     this.dirtyQueue.push(k);
+  }
+
+  // ---- ★C3 动画格脏索引（2026-09-22）----
+  // 动画格（isDynamicAnimSheet）原先每帧视口全格谓词扫（Renderer.drawAnimatedTileLayer,
+  // ~1900 格/帧）。按 chunk 缓存格集：markDirty/invalidateAll 失效,绘制时惰性重建——
+  // 重建读【实时】store 态,与烘焙态解耦（烘焙滞后 flushDirty ≤4 块/帧;bake 期登记会
+  // 有数帧新鲜度分歧,故选惰性重建而非 bake 时登记）。失效域与烘焙图同域：不触发
+  // 标脏的 store 变更（silent 路径契约违例）本就使烘焙图陈旧=既有破损窗,索引与其
+  // 同相不引入新分歧（绘制侧仍逐格复检谓词,假阳过滤）。
+  // ★墙动态层（drawAnimatedWallLayer）不索化：wallAnimRate 谓词还叠 wt.hasTexture
+  // （懒到纹理随时翻转真,无 markDirty 域）——索引会永久漏晚到动画墙,须独立定谳另立。
+  private _animIdx = new Map<number, Int32Array>();
+
+  /** chunk 动画格集（行主序,元素=格内线性索引 li=ly*CHUNK+lx）。
+   *  谓词与 drawAnimatedTileLayer 全扫逐字同式：flags && TILE_DEFS.vanilla &&
+   *  isDynamicAnimSheet(van.sheet)。世界外 chunk=缓存空集。 */
+  animCellsOf(cx: number, cy: number): Int32Array {
+    const k = ChunkCache.key(cx, cy);
+    const hit = this._animIdx.get(k);
+    if (hit) return hit;
+    const st = this.world.store;
+    const bx = cx * CHUNK, by = cy * CHUNK;
+    const lxMax = Math.min(CHUNK, this.world.w - bx);
+    const lyMax = Math.min(CHUNK, this.world.h - by);
+    let cells: Int32Array;
+    if (lxMax <= 0 || lyMax <= 0) {
+      cells = EMPTY_ANIM_CELLS;
+    } else {
+      const list: number[] = [];
+      for (let ly = 0; ly < lyMax; ly++) {
+        for (let lx = 0; lx < lxMax; lx++) {
+          const i = st.idx(bx + lx, by + ly);
+          if (!st.flags[i]) continue;
+          const van = TILE_DEFS[st.type[i]]?.vanilla;
+          if (!van || !isDynamicAnimSheet(van.sheet)) continue;
+          list.push(ly * CHUNK + lx);
+        }
+      }
+      cells = Int32Array.from(list);
+    }
+    this._animIdx.set(k, cells);
+    return cells;
   }
 
   /** 区域标脏（tile 范围）：供树冠等大范围精灵清理使用 */
@@ -379,6 +425,7 @@ export class ChunkCache {
   /** 全量标脏(atlas 懒加载晚到的新表 → 已烘焙的 chunk 里可能烤了 fallback)。
    *  4/帧 的 flushDirty 会逐步重烘焙,dirtySet 去重防重复入队 */
   invalidateAll(): void {
+    this._animIdx.clear();   // ★C3：全量标脏同域清索引
     for (const k of this.chunks.keys()) {
       if (this.chunks.get(k) === undefined) continue; // 已是待重建哨兵
       // ★槽位粘滞：同 markDirty——补登记后不还池，原位重烘

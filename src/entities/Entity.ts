@@ -184,7 +184,23 @@ export class EntityManager {
     this.critters.length = 0;
   }
 
+  /** ★C1 帧零分配（2026-09-22）：all() 复用持久缓冲（原每次 6-spread 新数组——
+   *  渲染帧热路径 Game.ts:47797 每帧一分配）。返回值=【同帧只读 scratch】：
+   *  消费方禁止跨帧保留引用、禁止原地排序/改写（Renderer 排序前自拷贝到
+   *  自己的持久 scratch）；其余消费点（Game.ts:6401/:6432）只读 length。
+   *  拷贝序 = 原 spread 序（enemies,drops,npcs,projectiles,props,critters）
+   *  逐位同；稳态同实体数时零分配零长度变更。 */
+  private _allBuf: Entity[] = [];
   all(): Entity[] {
-    return [...this.enemies, ...this.drops, ...this.npcs, ...this.projectiles, ...this.props, ...this.critters];
+    const buf = this._allBuf;
+    let i = 0;
+    const a1 = this.enemies; for (let j = 0; j < a1.length; j++) buf[i++] = a1[j];
+    const a2 = this.drops; for (let j = 0; j < a2.length; j++) buf[i++] = a2[j];
+    const a3 = this.npcs; for (let j = 0; j < a3.length; j++) buf[i++] = a3[j];
+    const a4 = this.projectiles; for (let j = 0; j < a4.length; j++) buf[i++] = a4[j];
+    const a5 = this.props; for (let j = 0; j < a5.length; j++) buf[i++] = a5[j];
+    const a6 = this.critters; for (let j = 0; j < a6.length; j++) buf[i++] = a6[j];
+    if (buf.length > i) buf.length = i;
+    return buf;
   }
 }

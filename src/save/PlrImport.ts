@@ -404,6 +404,10 @@ export function parsePlr(raw: Uint8Array): PlrImported {
     //  前——曾读后即弃=导出恒写 false 登记债）。本仓在-session 权威落 world.flags
     //  （monotonic 解锁,mainFlow.applyPlayer 回灌）,此字段=角色随身态跨世界面
     unlockedBiomeTorches,
+    // ★BJ285-②（S6,2026-09-22）：匠师面包吃旗（Player.ateArtisanBread,PL:55433 写/
+    //  :55899 读 .plr≥256 单字节 bool,位置在 unlockedBiomeTorches 后——曾读后即弃=
+    //  导出恒写 false 登记债随本刀清偿）。权威面/回灌同 unlockedBiomeTorches 惯例
+    ateArtisanBread,
   };
   return { appearance, playerState, version };
 }
@@ -590,7 +594,7 @@ export function exportPlr(a: Appearance, playerState: SaveData['player']): Uint8
   //  原版写的是计算属性值（Player.cs:3934-3941）,但其读侧 setter 反写
   //  builderAccStatus[11] 后,:56306 的 builderAccStatus 数组读紧随覆写 [11] →
   //  该字节对载入结果是死数据,恒 false 无损
-  w.bool(false);                              // ateArtisanBread
+  w.bool(!!st.ateArtisanBread);               // ★BJ285-②:ateArtisanBread 写真值(PL:55433)——旧恒 false 债清偿
   w.bool(false);                              // ≥324 未命名旗
   w.bool(!!up.usedAegisCrystal).bool(!!up.usedAegisFruit).bool(!!up.usedArcaneCrystal);
   w.bool(!!up.usedGalaxyPearl).bool(!!up.usedGummyWorm).bool(!!up.usedAmbrosia);

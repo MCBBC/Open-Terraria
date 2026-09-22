@@ -650,6 +650,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     //  与原版「解锁是一次性永久态」同语义（Game.ts:14425 Torch God 事件置位同门）。
     //  存档侧回填见 SaveFile.buildSave playerData.unlockedBiomeTorches。
     if (player.unlockedBiomeTorches) g.world.flags.unlockedBiomeTorches = true;
+    // ★BJ285-②：匠师面包吃旗回灌（Player.ateArtisanBread PL:55899 .plr 读/:55433 写;
+    //  原版角色字段随身跨世界,本仓消费面=Game 5326 用途支/旅商股票挂 world.flags）。
+    //  单调置位（true 才写,不回退）——存档侧回填见 SaveFile.buildSave
+    //  playerData.ateArtisanBread。
+    if (player.ateArtisanBread) g.world.flags.ateArtisanBread = true;
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示
     g.cb.onInventoryChanged();

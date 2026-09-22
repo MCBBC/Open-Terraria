@@ -104,6 +104,7 @@ function npcFootBiasExempt(id: number): boolean {
 }
 import type { Camera } from './Camera';
 import { swPerf, searchHasParam } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)+★BJ94 D1 渲染循环 has 缓存读取面
+import { GLShimCensus } from './glshim/GLShimCensus';   // ★B0 census 仪具(?b0shadow=1 激活,缺省零触碰)
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -2703,21 +2704,21 @@ function _waveCtxPush(s: WaveEntitySample): void {
 }
 function _waveCtxPushPlayer(p: Player): void {
   if (p.dead) return;
-  _waveCtxPush({
-    kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
-    // ★BJ94 D3（湿位对齐，2026-09-16）：注入章基面由 inWater（去岩浆窄化位,
-    //   Player.ts:4012 `r.wet && !inLava`）改为 wetSticky ∪ inWater——原版玩家注入章
-    //   WaterShaderData.cs:251 `if (player.wet)`【粘滞位】（NPC 同构 :215 `if (nPC.wet)`,
-    //   涟漪反相 :256-259 `if (!player.wet) num4 = -20f` 也读 wet）——wetSticky ≙ 原版
-    //   wet（BJ89 定谳）。岩浆中湿位旧值假 → 原版恒画的注入章整缺+涟漪方向反。
-    //   OR 臂仅服务联机代理：远端代理不走 fixedUpdate 液体链（Game.stepRemoteProxy
-    //   只喂 inWater 足部粗判,wetSticky 恒假）→ OR 臂保持其现行为逐位不变。
-    //   全链玩家数学恒等 wetSticky：inWater = wetNow∧!inLava 而 wetSticky ≡ wetNow
-    //   （:28060 置真/:28073 置假同拍），故 inWater=true ⟹ wetSticky=true,OR 臂
-    //   对全链玩家是恒等 no-op（非四桶并集复辟）。代理 wetSticky 维护（Game 一行）
-    //   登记 BJ94 移交债（stepRemoteProxy 属 Player 湿区,与 BJ93 区避让）。
-    wet: p.wetSticky || p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
-  });
+  const s = _waveSamplePlayer;                       // ★C1 槽复用（见槽注 NPC 禁槽例外）
+  s.kind = 'player'; s.x = p.x; s.y = p.y; s.w = p.w; s.h = p.h; s.vx = p.vx; s.vy = p.vy;
+  // ★BJ94 D3（湿位对齐，2026-09-16）：注入章基面由 inWater（去岩浆窄化位,
+  //   Player.ts:4012 `r.wet && !inLava`）改为 wetSticky ∪ inWater——原版玩家注入章
+  //   WaterShaderData.cs:251 `if (player.wet)`【粘滞位】（NPC 同构 :215 `if (nPC.wet)`,
+  //   涟漪反相 :256-259 `if (!player.wet) num4 = -20f` 也读 wet）——wetSticky ≙ 原版
+  //   wet（BJ89 定谳）。岩浆中湿位旧值假 → 原版恒画的注入章整缺+涟漪方向反。
+  //   OR 臂仅服务联机代理：远端代理不走 fixedUpdate 液体链（Game.stepRemoteProxy
+  //   只喂 inWater 足部粗判,wetSticky 恒假）→ OR 臂保持其现行为逐位不变。
+  //   全链玩家数学恒等 wetSticky：inWater = wetNow∧!inLava 而 wetSticky ≡ wetNow
+  //   （:28060 置真/:28073 置假同拍），故 inWater=true ⟹ wetSticky=true,OR 臂
+  //   对全链玩家是恒等 no-op（非四桶并集复辟）。代理 wetSticky 维护（Game 一行）
+  //   登记 BJ94 移交债（stepRemoteProxy 属 Player 湿区,与 BJ93 区避让）。
+  s.wet = p.wetSticky || p.inWater; s.wetCount = p.wetCount; s.honeyWet = p.inHoney; s.lavaWet = p.inLava;
+  _waveCtxPush(s);
 }
 /** WaveFrameInput 复用槽（WaterWaves.frame 同步读字段、不保留入参引用；
  *  全工程唯一调用面 = Renderer.updateWaterWaves） */
@@ -2725,6 +2726,20 @@ const _waveFrameInp: WaveFrameInput = {
   camX: 0, camY: 0, zoom: 1, viewW: 0, viewH: 0,
   tileX: 0, tileY: 0, maxTilesX: 0, maxTilesY: 0,
   worldSurface: 0, rockLayer: 0, windAbs: 0, rain: 0, dt: 0,
+};
+/** ★C1 样本槽（2026-09-22,swPerf 专用；采集链同步消费不保留引用,BJ78 同纪律）。
+ *  仅 player/projectile 可槽——**NPC/TownNPC 禁槽**：injectEntity 以样本对象
+ *  本身作 _oldVel WeakMap 键（WaterWaves.ts:886 `const key = e as unknown as object`）,
+ *  现行为=每帧新字面量 → WeakMap 恒 miss（npcWashParams 的 ov 恒 undefined）；
+ *  槽化后键恒命中 → 旧速度项激活 → 洗掠参数改变=视觉分歧，须独立定谳另立
+ *  （BJ78 槽纪律例外登记）。 */
+const _waveSamplePlayer: WaveEntitySample = {
+  kind: 'player', x: 0, y: 0, w: 0, h: 0, vx: 0, vy: 0,
+  wet: false, wetCount: 0, honeyWet: false, lavaWet: false,
+};
+const _waveSampleProj: WaveEntitySample = {
+  kind: 'projectile', x: 0, y: 0, w: 0, h: 0, vx: 0, vy: 0,
+  wet: true, wetCount: 0, honeyWet: false, lavaWet: false, projDistort: true,
 };
 
 export class Renderer {
@@ -2743,6 +2758,40 @@ export class Renderer {
   isCpuRender(): boolean {
     return options.data.renderMode === 'cpu' || this.cpuRender;
   }
+  // ---- ★C1 帧零分配（2026-09-22）：实体绘制排序持久资产（原 render() 每帧
+  //   new Map + sortY 闭包 + [...entities] spread 三分配，见 render() 内注）----
+  private _sortMemo = new Map<Entity, number>();
+  private _sortBuf: Entity[] = [];
+  private _sortKeys: number[] = [];
+  private _sortIdx: number[] = [];
+  private _sortIdxCmp = (a: number, b: number): number => this._sortKeys[a] - this._sortKeys[b];
+  /** 原 render() 内 sortY 逐字搬移（keyMemo→_sortMemo，memo 恒存【裸】链值——
+   *  层级 1e6 在键装配处外加，绝不入 memo，否则递归锚读到污染值） */
+  private _sortY(e: Entity): number {
+    const hit = this._sortMemo.get(e);
+    if (hit !== undefined) return hit;
+    this._sortMemo.set(e, NaN);                            // 环保护(自引用链)
+    const en = e as Enemy;
+    let k: number;
+    if (en.drawBehindMaster) k = en.y;
+    else {
+      const m = en.master ?? en.wormFollow;
+      k = m && !m.dead ? this._sortY(m) + 0.01 : en.y;
+    }
+    this._sortMemo.set(e, k);
+    return k;
+  }
+  /** 原比较器内四 instanceof 逐字保留（worldLayer 族保持原 y；其余+1e6 投后） */
+  private _drawKeyWorldLayer(e: Entity): boolean {
+    return e instanceof Enemy || e instanceof ItemDrop || e instanceof TownNPC || e instanceof Tombstone;
+  }
+  // ---- ★C3 动画格脏索引消费面（2026-09-22）：帧内收集 scratch（数值键排序,零分配）。
+  //   键=ty·16384+tx（世界 ≤8400²,14 位余量充足;位运算 <2³¹ 安全）----
+  private _animDrawKeys: number[] = [];
+  private _animKeyCmp = (a: number, b: number): number => a - b;
+  // ---- ★B0 census 仪具面（?b0shadow=1;缺省 null=渲染路径零触碰）----
+  private _b0shim: GLShimCensus | null = null;
+  private _b0Wrap: CanvasRenderingContext2D | null = null;
   /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
   waterWarpMode(): 'auto' | '2d' | 'off' { return this.waterWarp.mode; }
   waterWarpActive(): boolean { return this.waterWarp.active(); }
@@ -3485,12 +3534,27 @@ export class Renderer {
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this.eyebrellaQueue.length = 0;   // 眼球伞云盖队列逐帧重建（A4 终版）
     this.bobberOwners.clear();   // 钓竿静持门快照逐帧重建（ItemCheck_HackHoldStyles 等价,见下）
-    for (const e of entities) {
+    // ★C2 单遍合并（2026-09-22）：bobber 扫描 + 绘制键预计算（原排序块内循环）
+    //   并为一遍全实体扫（原两遍）。逐位同值论证：同枚举序、两侧均只读扫描、
+    //   渲染帧同步执行无实体变更窗（fixedUpdate 不在帧内交叠）——bobberOwners
+    //   集内容/序与 sortY 键值同两遍版（键=sortY 链式锚+层级 1e6,见排序块注）。
+    //   ★设计稿的「四队列扫描」定谳不存在：wingGlow/eyebrella/whip/prism 由
+    //   drawPlayer/drawProj 途中收集,本就无独立遍;波注入循环依赖 updateWaterWaves
+    //   前置装配（贴图/档位/相机）不并,登记 C2 余债。
+    this._sortMemo.clear();
+    const nSort = entities.length;
+    const sKeys = this._sortKeys, sIdx = this._sortIdx;
+    for (let i = 0; i < nSort; i++) {
+      const e = entities[i];
       if (e instanceof Bobber && !e.dead) {
         const o = (e as unknown as { ownerRef?: () => unknown }).ownerRef?.();
         if (o) this.bobberOwners.add(o);
       }
+      sKeys[i] = this._sortY(e) + (this._drawKeyWorldLayer(e) ? 0 : 1e6);
+      sIdx[i] = i;
     }
+    if (sKeys.length > nSort) sKeys.length = nSort;
+    if (sIdx.length > nSort) sIdx.length = nSort;
     this.whipFullbrightQueue.length = 0;   // 1034 星辰鞭线体全亮队列逐帧重建（WhipProj 收集）
     this.prismCrystalQueue.length = 0;   // 终极棱镜晶体队列逐帧重建（PrismProj 收集,drawPlayer 后冲刷）
     this._mouseX = mouseX;
@@ -3939,32 +4003,23 @@ export class Renderer {
     // 都沿链 +0.01 —— 蠕虫段序=生成序(原版槽序)而非物理 y 序(起伏段否则会乱序);
     // 骑手族(390/416 drawBehindMaster)例外:坐骑由骑手生成=原版槽序画骑手前,
     // 回落自然 y(骑手 y<坐骑 → 先画在后)
-    const keyMemo = new Map<Entity, number>();
-    const sortY = (e: Entity): number => {
-      const hit = keyMemo.get(e);
-      if (hit !== undefined) return hit;
-      keyMemo.set(e, NaN);                            // 环保护(自引用链)
-      const en = e as Enemy;
-      let k: number;
-      if (en.drawBehindMaster) k = en.y;
-      else {
-        const m = en.master ?? en.wormFollow;
-        k = m && !m.dead ? sortY(m) + 0.01 : en.y;
-      }
-      keyMemo.set(e, k);
-      return k;
-    };
+    // ★C1 帧零分配（2026-09-22）：原此处每帧 new Map+sortY 闭包+[...entities]
+    //   spread 三分配——改为持久资产（字段声明见 isCpuRender 后）。键值逐字同式：
+    //   sortY 链式锚(递归+帧内 memo,NaN 环保护)+层级 1e6(四 instanceof 同序,见下注)。
+    //   ★C2（2026-09-22）：键预计算已上移帧头与 bobber 扫描合并单遍（语义注在那里）；
+    //   此处仅剩稳定排序+置换。同键序 ⟺ 原惰性求值稳定排序（索引初序=枚举序）。
     // ★投射物恒后于 NPC(2026-08-21 用户报"石巨人眼激光从脸背后出现"):
     //   原版 DrawNPCs()(Main.cs:56474)先于 DrawProjectiles()(:56481)——普通弹
     //   (含石巨人眼激光 259/火焰弹 258)恒画在全部 NPC 之上,与弹的 y 无关。
     //   我方曾单键 y 排序:弹向上飞(y<NPC y)时先画被头贴图盖住=激光"从脸背后出现"。
     //   等价实现:排序键加层级偏移——投射物(自带 draw 的非 NPC 实体)+1e6,
     //   NPC/掉落/墓碑保持原 y。玩家仍在其后(drawPlayer 在实体循环外)。
-    const sorted = [...entities].sort((a, b) => {
-      const ka = sortY(a) + (a instanceof Enemy || a instanceof ItemDrop || a instanceof TownNPC || a instanceof Tombstone ? 0 : 1e6);
-      const kb = sortY(b) + (b instanceof Enemy || b instanceof ItemDrop || b instanceof TownNPC || b instanceof Tombstone ? 0 : 1e6);
-      return ka - kb;
-    });
+    const nS = entities.length;
+    const sBuf = this._sortBuf;
+    this._sortIdx.sort(this._sortIdxCmp);
+    for (let i = 0; i < nS; i++) sBuf[i] = entities[this._sortIdx[i]];
+    if (sBuf.length > nS) sBuf.length = nS;
+    const sorted = sBuf;
     for (const e of sorted) {
       if (e instanceof Enemy && this.isBehindTilesEnemy(e)) this.drawEnemy(e, world, entities);
     }
@@ -3984,7 +4039,7 @@ export class Renderer {
 
     // 2c''. 动画格统一动态层（根治：动画格永不进烘焙，见 drawAnimatedTileLayer 注）
     //   dev 参数 = 设备空间取整（与 drawChunkGrid 同 zz/ox/oy/camRX 同源,发丝缝）
-    this.drawAnimatedTileLayer(ctx, world, cam, viewW, viewH, z,
+    this.drawAnimatedTileLayer(ctx, world, cam, viewW, viewH, z, chunks,
       { zz: z * wK, ox: Math.round(lw / 2), oy: Math.round(lh / 2), camRX, camRY });
 
     // 2c'''.5 tileShine 顶点色通道·乘法 delta（TileDrawing.cs:4429-4441 GetFinalLight →
@@ -5073,6 +5128,13 @@ export class Renderer {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).get('opaque') !== '0';
     } catch { return false; }
   })();
+  /** ?b0shadow=1：B0 世界层 API 谱普查（glshim/GLShimCensus,渲染改造方案 §三 B0
+   *  一段仪具;快照面=renderer.b0ShimSnapshot()/_b0shadow-audit.mjs 探针） */
+  static readonly b0Shadow = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).has('b0shadow');
+    } catch { return false; }
+  })();
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -5186,11 +5248,18 @@ export class Renderer {
         if (typeof pid === 'number'
           && !NO_WATER_DISTORT.has(pid) && !NO_LIQUID_DISTORT.has(pid)
           && inLiquidAt(e.x + e.w / 2, e.y + e.h / 2)) {
-          push({
-            kind: 'projectile', x: e.x, y: e.y, w: e.w, h: e.h, vx: e.vx, vy: e.vy,
-            wet: true, wetCount: 0, honeyWet: false, lavaWet: false,
-            projDistort: true,
-          });
+          if (swPerf) {
+            // ★C1 槽复用（swPerf 支;flag 关 = 下支原字面量逐位不变）
+            const s = _waveSampleProj;
+            s.x = e.x; s.y = e.y; s.w = e.w; s.h = e.h; s.vx = e.vx; s.vy = e.vy;
+            push(s);
+          } else {
+            push({
+              kind: 'projectile', x: e.x, y: e.y, w: e.w, h: e.h, vx: e.vx, vy: e.vy,
+              wet: true, wetCount: 0, honeyWet: false, lavaWet: false,
+              projDistort: true,
+            });
+          }
         }
       }
     }
@@ -5378,7 +5447,7 @@ export class Renderer {
    *  （405/406/272/瀑布族 animYOffset…）。整屏世界坐标系绘制 = 无 chunk 边界
    *  裁剪，动画家具跨 chunk 的 2px 溢出行不再有陈旧副本。 */
   private drawAnimatedTileLayer(ctx: CanvasRenderingContext2D, world: World,
-    cam: Camera, viewW: number, viewH: number, z: number,
+    cam: Camera, viewW: number, viewH: number, z: number, chunks: ChunkCache,
     dev?: { zz: number; ox: number; oy: number; camRX: number; camRY: number }) {
     if (!this.atlas) return;
     const st = world.store;
@@ -5404,13 +5473,43 @@ export class Renderer {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.imageSmoothingEnabled = false;
     }
-    for (let ty = ty0; ty <= ty1; ty++) {
-      for (let tx = tx0; tx <= tx1; tx++) {
+    // ★C3 动画格脏索引（2026-09-22）：视口全格谓词扫（~1900 格/帧）→ 视口
+    //   chunk×格集（ChunkCache.animCellsOf,markDirty/invalidateAll 同域失效）。
+    //   收集序=chunk 行主序×格集行主序 ≠ 原全视口行主序（同 chunk 行内先扫完
+    //   (0,0) 全部 16 行再到 (1,0) 第 0 行）——按 ty·16384+tx 打包稳定排序恢复
+    //   原遍历序（同键保序=原 stable 双循环序;动画格稀疏,排序成本可忽略）。
+    //   绘制侧谓词逐格复检=实时态假阳过滤；假阴仅在不触发标脏的 silent 违例窗
+    //   （该窗内烘焙图同窗陈旧=既有破损域,见 ChunkCache._animIdx 注）。
+    const acx0 = tx0 / CHUNK | 0, acx1 = tx1 / CHUNK | 0;
+    const acy0 = ty0 / CHUNK | 0, acy1 = ty1 / CHUNK | 0;
+    const aKeys = this._animDrawKeys;
+    let nAnim = 0;
+    for (let acy = acy0; acy <= acy1; acy++) {
+      for (let acx = acx0; acx <= acx1; acx++) {
+        const cells = chunks.animCellsOf(acx, acy);
+        for (let n = 0; n < cells.length; n++) {
+          const li = cells[n];
+          const atx = acx * CHUNK + (li & 15);
+          const aty = acy * CHUNK + (li >> 4);
+          if (atx < tx0 || atx > tx1 || aty < ty0 || aty > ty1) continue;   // 视口±1 裁剪
+          const ai = st.idx(atx, aty);
+          if (!st.flags[ai]) continue;
+          const avan = TILE_DEFS[st.type[ai]]?.vanilla;
+          if (!avan || !isDynamicAnimSheet(avan.sheet)) continue;
+          aKeys[nAnim++] = aty * 16384 + atx;
+        }
+      }
+    }
+    if (aKeys.length > nAnim) aKeys.length = nAnim;
+    if (nAnim > 1) aKeys.sort(this._animKeyCmp);
+    for (let n = 0; n < nAnim; n++) {
+      const aKey = aKeys[n];
+      const tx = aKey & 16383;
+      const ty = aKey >>> 14;
+      {
         const i = st.idx(tx, ty);
-        if (!st.flags[i]) continue;
         const type = st.type[i];
-        const van = TILE_DEFS[type]?.vanilla;
-        if (!van || !isDynamicAnimSheet(van.sheet)) continue;
+        const van = TILE_DEFS[type]!.vanilla!;
         const sheet = van.sheet;
         // 相位预加族（原烘焙侧 1:1 迁入）：215 篝火帧行归位 / 207 喷泉逐 x 错相
         let fy = st.frameY[i];
@@ -6037,14 +6136,15 @@ export class Renderer {
   /** 8×8 像素重着色暂存（GetAlpha 常色精确化：261/6/264 等非 255 通道） */
   private dustScratch: HTMLCanvasElement | null = null;
   private dustScratch2: HTMLCanvasElement | null = null;
-  /** 尘染料帧缓存（ArmorColored 静态族；key=dyeVid|fx|fy，256 上限） */
-  private dustDyeCache: Map<string, HTMLCanvasElement> | null = null;
+  /** 尘染料帧缓存（ArmorColored 静态族；key=dyeVid|fx|fy，256 上限。
+   *  ★C1：数值键 dyeVid·2²¹+fx·2¹¹+fy（单射性同 dustPremulPair 注,fx<2¹¹ 裕量内） */
+  private dustDyeCache: Map<number, HTMLCanvasElement> | null = null;
   /** 预乘 AlphaBlend 烘焙对缓存（Main.DrawDust spriteBatch=BlendState.AlphaBlend 预乘混合）。
    *  key=fx,fy + 乘数字节化(mR,mG,mB,mA)——alphaOf/colorPass 乘数与 XNA shader 输出同为
    *  8bit 精度;每 帧×档 一次性烘焙,稳态运行零 getImageData。上限 2048,溢出走分代 LRU
    *  （dustPmCacheTouch/Evict：命中重插入+逐出最旧 1/4——2026-09-02 红队 finding 清偿,
    *  旧整体 clear 会让多色键周期打穿时每键重烘 1×getImageData=帧尖峰）。 */
-  private dustPmCache: Map<string, { add: HTMLCanvasElement; erase: HTMLCanvasElement }> | null = null;
+  private dustPmCache: Map<number, { add: HTMLCanvasElement; erase: HTMLCanvasElement }> | null = null;
   private dustPmBake: HTMLCanvasElement | null = null;
 
   /** 取/烘一帧的预乘对。mr/mg/mb/ma ∈0-1 = XNA Draw 的 Color 入参逐通道
@@ -6056,7 +6156,11 @@ export class Renderer {
     const mG = Math.round(Math.max(0, Math.min(1, mg)) * 255);
     const mB = Math.round(Math.max(0, Math.min(1, mb)) * 255);
     const mA = Math.round(Math.max(0, Math.min(1, ma)) * 255);
-    const key = `${fx},${fy},${mR},${mG},${mB},${mA}`;
+    // ★C1 帧零分配：数值键替换模板串（原每尘每帧一次串分配+串哈希）。
+    //   单射性：fx∈[0,990]（dustFrameOf:10*type 后逐百 −1000,构造保证）、
+    //   fy<2048（10*r+30*(type/100),type<6700 裕量）、m*∈[0,255]（clamp+round
+    //   构造）——key=fx·2⁴³+fy·2³²+mR·2²⁴+mG·2¹⁶+mB·2⁸+mA，fx=990 时 ≈8.7e15<2⁵³。
+    const key = ((((fx * 2048 + fy) * 256 + mR) * 256 + mG) * 256 + mB) * 256 + mA;
     this.dustPmCache ??= new Map();
     const hit = this.dustPmCache.get(key);
     if (hit) { dustPmCacheTouch(this.dustPmCache, key); return hit; }   // LRU 访问序
@@ -6273,7 +6377,7 @@ export class Renderer {
         const dyeEmu = dyeApplyOf(d.dyeVid);
         if (dyeEmu) {
           const isStatic = dyeEmu.tech === 'ArmorColored' || dyeEmu.tech === 'ArmorColoredDefault';
-          const key = `${d.dyeVid}|${d.fx}|${d.fy}`;
+          const key = d.dyeVid * 2097152 + d.fx * 2048 + d.fy;   // ★C1 数值键（单射性见缓存字段注）
           let canvas: HTMLCanvasElement | null | undefined = isStatic ? this.dustDyeCache!.get(key) : undefined;
           if (canvas === undefined) {
             dyeEmu.uniforms.uTime = (performance.now() / 1000) % 3600;
@@ -16363,8 +16467,15 @@ export class Renderer {
       w.clearRect(0, 0, lw, lh);
     }
     this.worldLayerActive = true;
-    this.ctx = this.worldCtxLayer;
-    return this.worldCtxLayer;
+    // ★B0 census（?b0shadow=1）：世界层 ctx 包装为 API 谱普查器（B1+B2 翻面定谳
+    //   数据面）。仪具面=Proxy 逐调用计数,仅旗标激活时创建;缺省零触碰零开销。
+    if (Renderer.b0Shadow && !this._b0shim && this.worldCtxLayer) {
+      this._b0shim = new GLShimCensus(this.worldCtxLayer);
+      this._b0Wrap = this._b0shim.wrap();
+    }
+    const out = (this._b0Wrap ?? this.worldCtxLayer) as CanvasRenderingContext2D;
+    this.ctx = out;
+    return out;
   }
 
   /** render() 世界段收口：恢复 this.ctx → 主画布（光照合成在 compositeLight 内完成）。
@@ -16372,7 +16483,13 @@ export class Renderer {
    *  下一帧 beginWorldLayer 会重置（逃生门路径在 begin 里置 false） */
   private endWorldLayer(mainCtx: CanvasRenderingContext2D): void {
     if (!this.worldLayerActive) return;
+    this._b0shim?.endFrame();   // ★B0：世界层 span=一个 census 帧（B 战役目标面口径）
     this.ctx = mainCtx;
+  }
+
+  /** ★B0 census 快照（scripts/_b0-shadow-audit.mjs 探针消费;?b0shadow=1 才非 null） */
+  b0ShimSnapshot(): { frames: unknown[]; rareSamples: string[] } | null {
+    return this._b0shim ? this._b0shim.snapshot() : null;
   }
 
   /** 晶塔悬浮水晶（TileDrawing.DrawTeleportationPylons TileDrawing.cs:8806-8888 1:1）：

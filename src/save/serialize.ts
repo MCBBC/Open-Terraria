@@ -227,6 +227,12 @@ export interface SaveData {
      *  mainFlow.applyPlayer 读档单调回灌 world.flags——只置 true 不回退）。旧档
      *  缺省 undefined=false（原版新角缺省同形） */
     unlockedBiomeTorches?: boolean;
+    /** 匠师面包吃旗（★BJ285-②;Player.ateArtisanBread,PL:55433 写/:55899 读 .plr≥256
+     *  单字节 bool）。原版角色字段随身跨世界;本仓在-session 权威落
+     *  world.flags.ateArtisanBread（buildSave 快照回填,mainFlow.applyPlayer 单调回灌）。
+     *  消费面 = Game 用途支（旗置位后再用整支惰性）+ 旅商股票门（Chest.cs:2953）。
+     *  旧档缺省 undefined=false */
+    ateArtisanBread?: boolean;
     /** 永久升级族(Player.cs:44575-44802;旧档缺省全 false) */
     permanentUpgrades?: {
       extraAccessory?: boolean;

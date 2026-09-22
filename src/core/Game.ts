@@ -1943,6 +1943,7 @@ export const FUN_USE_VIDS = new Set([
   508, 4673, 856, 1450, 507, 425, 1124, 5328, 5343, 1345,
   4057, 4372, 4715,   // 吉他三件（ItemID.cs:9660/10290/10976 DefaultToGuitar :48628）
   1305,               // The Axe（ItemID.cs:4156;镐锤工具+和弦音双语义,见 case 注备案）
+  5326,               // ★BJ285-②：匠师面包旗标面（ItemCheck_UseArtisanLoaf Player.cs:45601-45609,见 case 注）
 ]);
 /** 孤儿武器 A 波五件（2026-08-30 工单2/3/4/5）——combatWeapon/thrownCombat 双门
  *  全不接管的消耗型/玩具件，走 Game 专支（行号锚在各 fire 与 throw 方法注内）：
@@ -3026,6 +3027,24 @@ export const ROCKETS_SKIP_DAMAGE_FOR_PLAYERS: ReadonlySet<number> = new Set(
  *  →v3.1 facing 补偿(近垂直 cos 退化横跳)→v4 正交模型→v4.1 tip-reach 半宽/
  *  全长公式(仍是近似)→**v5 同源直算**(终)。贴墙逐 4px 回退钳制在
  *  Game.resolveShotAnchor;三通道共用(弹药/魔法杖头/蜂枪) */
+
+// ---- ★BJ285-C3 window 直读守卫普查（BJ259 连坐根治,2026-09-22）----
+// node(vitest) 环境无 window,直读 = ReferenceError（BJ259 事故：Game.ts 旧 :13036
+// `window.__swUI` 炸 node 测试 9 红）。全仓 Game.ts 站位账（28 站）：
+//  · 已守卫（typeof window 门）:8122←本刀/:8277/:8794/:8803←本刀/:8894/:13038(BJ259)/
+//    :13084/:35234←本刀/:38318←本刀/:46372←本刀/:47741←本刀/:41848
+//  · try/catch 天然 node-safe（ReferenceError 被吞）:35685/:35690 localStorage
+//  · node-only（浏览器专属生命周期——构造器/loadWorld/destroy/帧循环;node 侧仅
+//    Object.create(Game.prototype) 摇柄调单方法,构造器绝不执行,且这些站位的
+//    前行代码 new Input(canvas)/document.addEventListener 在 node 先炸=守卫无义）:
+//    5791/5792(构造器监听)/5866/5876/5878(构造器探针桥)/5893(构造器 keydown 闭包)/
+//    7353/7365(loadWorld 尾)/7804/7805(destroy)/7936(帧循环)
+//  · 注释/文档位（零代码）:6387/6410
+// 本 helper = __swUI 布尔旗统一 node-safe 读口；新直读一律走此口或 typeof 门。
+function swUIFlag(key: 'inventoryOpen' | 'housingUiActive'): boolean {
+  if (typeof window === 'undefined') return false;
+  return ((window as unknown as { __swUI?: Record<string, boolean | undefined> }).__swUI?.[key]) ?? false;
+}
 
 export class Game implements GameHooks {
   /** FlexibleWandCycleOffset（Player.cs:3028 静态；持碎块魔杖族按 ↑/↓ 循环样式，
@@ -8118,7 +8137,7 @@ export class Game implements GameHooks {
   releaseAutoPauseOwnership(): void { this._uiPausedByAutoPause = false; }
   private applyAutoPauseUI(): void {
     const gate = options.data.autoPause && !!this.world && !this.net?.active
-      && ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false);
+      && swUIFlag('inventoryOpen');   // ★BJ285-C3 node-safe 守卫（旧=裸 window 直读）
     if (gate && !this.paused) {
       this.paused = true;
       this._uiPausedByAutoPause = true;
@@ -8790,7 +8809,10 @@ export class Game implements GameHooks {
       if (this.fixTexMode) {
         // 贴图纠错子模式：点击弹出该图块的完整原版贴图表
         if (this.world.store.inBounds(tx, ty)) {
-          (window as unknown as { __swUI?: { openTexPicker?: (x: number, y: number) => void } }).__swUI?.openTexPicker?.(tx, ty);
+          // ★BJ285-C3 node-safe 守卫（旧=裸 window 直读）
+          if (typeof window !== 'undefined') {
+            (window as unknown as { __swUI?: { openTexPicker?: (x: number, y: number) => void } }).__swUI?.openTexPicker?.(tx, ty);
+          }
         }
       } else if (this.world.store.inBounds(tx, ty)) {
         const existed = this.marks.some((m) => m.x === tx && m.y === ty);
@@ -8799,7 +8821,10 @@ export class Game implements GameHooks {
         // 同缺陷族（红蓝-D 顺带）：Mark/Unmark zh 模板「已在 ({0}) 标记」亦自带括号
         // ——一并去参括号走单源（zh 曾渲染「已在 ((x, y)) 标记」）
         this.cb.onToast(existed ? Lang.text('Mods.SandboxWorld.Map.Unmark', tpMarkCoordText(tx, ty)) : Lang.text('Mods.SandboxWorld.Map.Mark', tpMarkCoordText(tx, ty)));
-        (window as unknown as { __swUI?: { updateAnnotateCount: (n: number) => void } }).__swUI?.updateAnnotateCount(this.marks.length);
+        // ★BJ285-C3 node-safe 守卫（旧=裸 window 直读）
+        if (typeof window !== 'undefined') {
+          (window as unknown as { __swUI?: { updateAnnotateCount: (n: number) => void } }).__swUI?.updateAnnotateCount(this.marks.length);
+        }
       }
     }
     if (!inp.mouseDown) this._annoLatch = false;
@@ -14863,6 +14888,27 @@ export class Game implements GameHooks {
           this.sfx.playWavFile('Item_47', 1, p.cx, p.cy, instrumentNotePitch(mouseWorldDist, axis));
           this.achievements.notifyProgressionEvent(37);   // :46970
           p.useTime = 7;                // useTime=7（Item.cs:16130-16143;占位防按住复读,与工具链不冲突前提=转发侧自行裁决）
+          break;
+        }
+        case 5326: { // 匠师面包（ItemCheck_UseArtisanLoaf Player.cs:45601-45609）：
+          // 门 = !ateArtisanBread（:45603）——旗置位后整支惰性（ApplyItemTime 不跑 →
+          // itemTime=0 → 通用消耗门 :43612 永不触发=不动画不消耗,5043 同款）。
+          // 支内 = ApplyItemTime(:45604) + ateArtisanBread=true(:45605) + SendData(4)。
+          // 消费者：①旅商股票（Chest.cs:2953 `!ateArtisanBread && 相 3-5`,stock 面同批接）
+          // ②AdjTiles 扫描域 +4（Player.cs:35952 GetTileRegion(this, flag?4:0)——本仓
+          // AdjTiles 等价面未建,登记债 BJ285-R）。
+          // 旗权威 = world.flags.ateArtisanBread（unlockedBiomeTorches SW-FX38b 同款:
+          // monotonic 置位;.plr v≥256 读/:55430 写;applyPlayer 回灌;PlrImport 导出
+          // :593 旧恒 false 登记债随批清偿）。
+          if (!this.world.flags.ateArtisanBread) {
+            this.useSwing(heldDef);
+            this.world.flags.ateArtisanBread = true;
+            p.inv.removeHeld(1);
+            this.cb.onInventoryChanged();
+            this.foodUseSound(5326);          // UseSound Item2（DefaultToFood 非 gulp=咀嚼,Item.cs:48549-48556）
+            p.useTime = 17;                   // DefaultToFood useTime=useAnimation=17（Item.cs:48562）
+          }
+          this.input.mouseDown = false;       // 非 autoReuse（DefaultToFood 无 autoReuse）——1345 同款
           break;
         }
         case 425: { // 仙灵铃左键直用（Player.cs:52252-52272 ItemCheck_ApplyPetBuffs
@@ -21865,16 +21911,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.breakShrineSword(x, y, type);
       return;
     }
-    // 世花球茎/生命果植物（KillTile 尾段，WorldGen.cs:48013-48036）：
+    // 世花球茎/生命果植物/生命果复刻（KillTile 尾段，WorldGen.cs:48013-48036）：
     // 238 破坏 = 2×2 整件清除 + 50 格内有玩家 → SpawnOnPlayer(262) 召唤世花；
-    // 236 破坏 = 掉生命果(1291)。须在 object 锚点分支前拦（drop:null 会吞掉掉落）
+    // 236 破坏 = 掉生命果(1291)（:48439-48442）;702 复刻破坏 = 掉生命果(1291)
+    // （:48443-48450——与 236 同式 NewItem(i*16,j*16,32,32,1291),无世花支）。
+    // ★BJ285-④（S7,2026-09-22）v_702 归队：CheckJunglePlant 锚/支撑面已建
+    //  （:1157 702:'jungleplant'+:45138 支 SolidTileAllowBottomSlope 特判）,唯
+    //  breakTile 家族漏收=导入/编辑图含 702 时无掉落+锚残留（上方 :1161 注曾
+    //  预言「236·702 掉 1291 走 breakTile 特支」而代码漏接）。放置面定谳=原版
+    //  无（Item 702=铂矿→tile 169;PlaceTile case 702 :60496 无调用方;worldgen/
+    //  生长链只播 236/238——:75053 生命果生长=tile 236）→ 本仓不补放置,备案。
+    // 须在 object 锚点分支前拦（drop:null 会吞掉掉落）
     // ★BJ226（2026-09-21）：锚=帧商 mod2（CheckJunglePlant :48367-48381
     //  `while (num>1){num-=2;num2++}` 等价——列%2=object 列、商=style 基）。生命果
     //  styleX∈{0,1,2}（PlaceJunglePlant :48241 num2=36*styleX;生长链 Next(3) :75073）
     //  → frameX∈{0,18,36,54,72,90},旧式 x-floor(fx/18) 对 styleX≥1 锚左漂 2~5 格 →
     //  清格循环 type 守卫全不中=本体残留+掉落位左漂 → 无限复掉（用户实报 BJ226
     //  症状②）。238 花苞生成恒 styleX=0（:74840/:74855/:75041）修前后同值,同式归一。
-    if (type === TILE_BY_KEY['v_238_plantera_s_bulb'] || type === TILE_BY_KEY['v_236_life_fruit_plant']) {
+    if (type === TILE_BY_KEY['v_238_plantera_s_bulb'] || type === TILE_BY_KEY['v_236_life_fruit_plant']
+      || type === TILE_BY_KEY['v_702_life_fruit_replica']) {
       const i0 = st.idx(x, y);
       const ax = x - (Math.floor(st.frameX[i0] / 18) % 2), ay = y - (Math.floor(st.frameY[i0] / 18) % 2);
       for (let dx = 0; dx < 2; dx++) {
@@ -26324,15 +26379,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.interactAt(tx, ty);
       this.input.rightDown = false;
     } else if (heldDef && (heldDef.vid ?? -1) === 5289) {
-      // 矿车升级套件（Item 5289 MinecartPowerup → Player.unlockedSuperCart = true）：
-      // 永久解锁 SuperCart 档（runSpeed 20/accel 0.1/jump 5.15，Mount.cs:371-379），
-      // 持久化于世界 flags；已解锁时不再消耗
+      // 矿车升级套件（ItemCheck_UseMinecartPowerUp Player.cs:45581-45590）：
+      // ApplyItemTime + [未解锁 → unlockedSuperCart=true + SendData(4)] + 【每次使用】
+      // QuickSpawnItem(3353 机械矿车)——consumable=true（Item.cs:41990）通用消耗门
+      // 每用扣 1。即每次使用 = −1 套件 +1 机械矿车（已解锁再用=矿车兑换机,原版同态:
+      // 套件商店可复购 → 2 金币=1 矿车的原版隐性兑换）。★BJ285-②（S6）：本仓曾
+      // 「仅解锁时消耗+无返还」自造守恒 → 1:1 对齐（消耗+返还面）。
+      // SuperCart 档（runSpeed 20/accel 0.1/jump 5.15,Mount.cs:371-379）持久化于
+      // 世界 flags——解锁支与返还面解耦（原版顺序同）。
       if (!this.superCartUnlocked()) {
         (this.world.flags as Record<string, boolean>).superCart = true;
-        this.player.inv.removeHeld(1);
-        this.cb.onInventoryChanged();
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
       }
+      this.player.inv.removeHeld(1);
+      const cartKey = VI(3353);
+      if (cartKey && ITEM_BY_KEY[cartKey] !== undefined) {
+        const left = this.player.inv.add(ITEM_BY_KEY[cartKey], 1);
+        if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, cartKey, left);   // QuickSpawnItem 满包落地
+      }
+      this.cb.onInventoryChanged();
       this.input.rightDown = false;
     } else if (heldDef && (heldDef.vid ?? -1) === 43) {
       if (!this.world.clock.isDay) {
@@ -35199,7 +35264,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   各走 openShopFromButton/onReforgeOpen/onGuideCraftOpen，不经本门。
     //   closeInventory = UI 注入实例字段（ui.closeInventory：收面板+heldStack 归包
     //   +closeChest/npcShopClose——CloseAll 的 chest 臂 :50-57 同域），无音效=quiet 同相
-    if ((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen) {
+    if (swUIFlag('inventoryOpen')) {   // ★BJ285-C3 node-safe 守卫（旧=裸 window 直读）
       this.closeInventory?.();
     }
     this.dialogNpc = npc;
@@ -37576,8 +37641,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           else if (phase === 3 || phase === 5) add([5641]);
           else if (phase === 6 || phase === 7) add([5642]);
           if (phase === 0 && !day) add([3043]); // 满月夜魔法灯笼（:2930-2934）
-          // :2952-2955 !ateArtisanBread && 相 3-5 → 5326（本仓未跟踪吃面包旗,恒未吃）
-          if (phase >= 3 && phase <= 5) add([5326]);
+          // Chest.cs:2953 !ateArtisanBread && 相 3-5 → 5326（★BJ285-② 旗标面接线:
+          //  本仓此前未跟踪吃面包旗恒上货——旗权威=world.flags.ateArtisanBread）
+          if (phase >= 3 && phase <= 5 && !this.world.flags.ateArtisanBread) add([5326]);
           break;
         }
         case 19: { // 军火商银弹/钨弹（Chest.cs:1487-1494 bloodMoon||hardMode →
@@ -38282,7 +38348,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   insertChatItemTag(vid: number): void {
     this.chatInput ??= new ChatInput({
       onSend: (text, world) => {
-        const g = (window as unknown as { __swGame?: Game }).__swGame;
+        // ★BJ285-C3 node-safe 守卫（旧=裸 window 直读——构造点 :5893 同式为
+        //   构造器闭包=node-only,此处系公开方法可达面须守卫）
+        const g = typeof window !== 'undefined'
+          ? (window as unknown as { __swGame?: Game }).__swGame
+          : undefined;
         g?.sendChat(text, world);
       },
     });
@@ -46336,7 +46406,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
   private _craftProbeLastAt = 0;
   private probeCraftListRefresh(): void {
     if (!this.world) return;
-    if (!((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false)) {
+    if (!swUIFlag('inventoryOpen')) {   // ★BJ285-C3 node-safe 守卫（旧=裸 window 直读）
       this._craftProbeSig = null;
       return;
     }
@@ -47705,7 +47775,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     this.renderer.annotateMarks = this.marks.length ? this.marks : null;
     // 背包开合（Main.playerInventory 语义）→ 呼吸计锚点分支（Main.cs:42838/42845）
     this.renderer.playerInventory =
-      (window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false;
+      swUIFlag('inventoryOpen');   // ★BJ285-C3 node-safe 守卫（旧=裸 window 直读）
     // 导线可见性:手持电路工具(mech)/机械透镜 3619 装备(RefreshMechanicalAccsFromItemType
     // :12400-12402 InfoAccMechShowWires——装备即显,builderAccStatus[1] 开关 UI 未实装)
     // 或 F7 强制(Main.cs:43548 DrawWires 开关语义)

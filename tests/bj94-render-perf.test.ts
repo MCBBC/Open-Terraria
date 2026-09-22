@@ -222,8 +222,11 @@ describe('★BJ94 D3 玩家波注入湿位 = vanilla player.wet（WaterShaderDat
 
   it('结构锁：Renderer 两处 pushPlayer 注入基面均为 p.wetSticky || p.inWater;旧窄化位绝迹', () => {
     const r = src('../src/render/Renderer.ts');
-    expect(r.split('wet: p.wetSticky || p.inWater,').length - 1).toBe(2);   // _waveCtxPushPlayer + 关臂闭包
+    // ★C1（2026-09-22）形态更新：_waveCtxPushPlayer 槽化为 s.wet 赋值（表达式同式），
+    //   关臂闭包保持字面量——锁意不变：两个注入位点各持 wetSticky∪inWater 基面一次
+    expect(r.split('p.wetSticky || p.inWater').length - 1).toBe(2);   // _waveCtxPushPlayer(s.wet=) + 关臂闭包(wet:)
     expect(r).not.toContain('wet: p.inWater,');     // 旧窄化基面零残留
+    expect(r).not.toContain('s.wet = p.inWater;');  // 槽位形态旧窄化基面零残留
     expect(r).toContain('WaterShaderData.cs:251');  // 原版注入章锚在位
   });
 });

@@ -179,6 +179,10 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     //  回填,CharacterStore 同步（doSave→setState JSON.parse(json).player）与 .plr
     //  导出（exportPlr）同吃该字段。旧档缺省 undefined=false
     unlockedBiomeTorches: !!world.flags.unlockedBiomeTorches,
+    // ★BJ285-②：匠师面包吃旗（Player.ateArtisanBread,PL:55433 写/:55899 读）——
+    //  在-session 权威=world.flags（Game 用途支+旅商股票消费面）,快照在此回填,
+    //  applyPlayer 读档单调回灌;.plr 导出 exportPlr 同吃该字段（旧恒 false 债清偿）
+    ateArtisanBread: !!world.flags.ateArtisanBread,
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events, pillarNpcs, pressurePlates);
 }
