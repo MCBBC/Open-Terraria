@@ -152,16 +152,27 @@ describe('BJ240 海螺右洋 InWorld40 边界（物证地图特征=原版忠实,
     }
   });
 
-  it('自然世界对照（「有的地图正常」）：右缘起点列=水 → 液面爬行 11 步落干泥架 → 右洋可达', () => {
+  it('自然世界对照（「有的地图正常」）：右缘起点列=水 → 液面爬行 11 步落干泥架 → 右洋可达〔回滚口关闭态〕', () => {
+    // ★BJ281（2026-09-22）：本测原在缺省 ON 态跑（自然图两断言彼时与旗无关）。BJ281 把
+    //   分歧开启态的左洋承位判据改为 includePlatforms=false（用户拍板「两洋均不落平台」）
+    //   → 左洋浸水甲板落位仅存于原版相。本文件=原版本相锁面（BJ242 语义锁统一先例）⇒
+    //   整测转 OFF 态钉原版逐字;分歧开启态的左洋新相锁面在
+    //   tests/bj281-conch-no-platform-landing.test.ts。
     const w = naturalSignatureWorld();
     const g = stubGame(w, 0, 0).g;
-    const dest = g.requestMagicConchTeleportPosition(true);
-    expect(dest, '自然右洋应成功（对照 bj43-b 档案同相）').not.toBeNull();
-    expect(dest!.x).toBe((w.store.w - 51) * TILE + 8 - 10);   // 落 (W-51,163) 站泥架 @164
-    expect(dest!.y).toBe(163 * TILE + 16 - 42);
-    // 左洋不回归：浸水甲板落位不变
-    const left = g.requestMagicConchTeleportPosition(false);
-    expect(left).not.toBeNull();
-    expect(left!.x).toBe(40 * TILE + 8 - 10);
+    const prev = Game.CONCH_RIGHT_OCEAN_COMPENSATION;
+    Game.CONCH_RIGHT_OCEAN_COMPENSATION = false;
+    try {
+      const dest = g.requestMagicConchTeleportPosition(true);
+      expect(dest, '自然右洋应成功（对照 bj43-b 档案同相）').not.toBeNull();
+      expect(dest!.x).toBe((w.store.w - 51) * TILE + 8 - 10);   // 落 (W-51,163) 站泥架 @164
+      expect(dest!.y).toBe(163 * TILE + 16 - 42);
+      // 左洋原版相：浸水甲板=承位,零爬行落位（BJ281 分歧开启态不落平台,见 bj281 文件）
+      const left = g.requestMagicConchTeleportPosition(false);
+      expect(left).not.toBeNull();
+      expect(left!.x).toBe(40 * TILE + 8 - 10);
+    } finally {
+      Game.CONCH_RIGHT_OCEAN_COMPENSATION = prev;
+    }
   });
 });

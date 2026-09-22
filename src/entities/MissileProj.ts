@@ -68,8 +68,8 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
  * GetWorldPlayArea(:18-24)——世界四边各留 640px 缓冲）裁剪后的盒；盒外点沿中心射线
  * 等比回拉到盒面（X/Y 各取更紧的半宽比例，方向不变、距离归界）。
  * 消费位：AI_009_MagicMissiles_Old :44247-44249（491 飞刀）与 AI_009_MagicMissiles
- * :44045-44046（16/34/79 新导弹族）都在算距离前先钳。★本批按台账只接飞刀（A6），
- * 新导弹族接线登记为遗漏判定（各自 fixture 相对几何依赖大世界,见台账同日注）。
+ * :44045-44046（16/34/79 新导弹族）都在算距离前先钳。★BJ279 移交②（BJ277 批并刀,
+ * 2026-09-22）：新导弹族接线已补（steer 引导支）——「接线遗漏判定」销账。
  */
 export function limitPointToPlayerReachableArea(
   px: number, py: number, pcx: number, pcy: number, worldWPx: number, worldHPx: number,
@@ -570,7 +570,14 @@ export class MagicMissileProj extends Entity {
         // ItemCheck_ApplyManaRegenDelay → delay 钉 4 = 全程 5% 滴流回蓝；2026-08-22
         // 审计 ❌ 修复——channel 弹寿命>useTime,不续期则 10t 后回满速回蓝白嫖魔力）
         game.player.onChannelManaHold?.();
-        aim = this.aimCb();   // ai[0]/ai[1] = 光标（:40566-40573）
+        // ai[0]/ai[1] = 光标（:40566-40573）。★BJ279 移交②（BJ277 批并刀）：
+        // Main.MouseWorld 先经 LimitPointToPlayerReachableArea（:44044-44046;
+        // Player.cs:45830-45858）钳进玩家可达区——旧直传裸光标=超射程引导目标域偏差
+        // （limitPointToPlayerReachableArea 头注登记的「新导弹族接线遗漏」就此销账）。
+        const raw = this.aimCb();
+        const [clx, cly] = limitPointToPlayerReachableArea(raw.x, raw.y,
+          game.player.cx, game.player.cy, game.world.store.w * TILE, game.world.store.h * TILE);
+        aim = { x: clx, y: cly };
         // 持按连发（Player.cs:42143-42147 循环重用）：每 useTime 一发新弹，由最新
         // 存活弹独占驱动（尾部）；扣魔走 Game 侧 payMana 回调（1457 ManaV2 恒放行,
         // 空蓝照发+slowMagicUse 标记——CheckMana :53216-53253 同语义）
@@ -1125,7 +1132,7 @@ export class MagicMissileProj extends Entity {
     //  色相+无 Catmull-Rom 补间+无着色器侵蚀）＝用户截图 2 的"彩色椭圆团串",退役。
     if (this.projId === 79) {
       this.drawRainbowRodTrail(ctx, r as unknown as Renderer);
-      this.draw79Head(ctx);
+      this.draw79Head(ctx, r as unknown as Renderer);
       return;
     }
     // ---- 34/16 着色器火带（★MINOR-1：本体【之前】绘——原版 DrawProj 在
@@ -1381,7 +1388,7 @@ export class MagicMissileProj extends Entity {
    *  （RotatedBy(num340+2πT)）,6 团各再转 i/6·2π;色=hslToRgb(i/6,1,.5)×0.3
    *  【op_Multiply 截断入 byte,折进染色纹理】、A=0 加算;rotation=num340=0、
    *  origin=中心。 */
-  private draw79Head(ctx: CanvasRenderingContext2D): void {
+  private draw79Head(ctx: CanvasRenderingContext2D, renderer?: Renderer): void {
     if (this.strip.length < 13) return;           // oldPos[12]=零槽 → scale 0（见注）
     const img = projSprite(79);
     if (!img || img.width <= 0) return;
@@ -1392,26 +1399,44 @@ export class MagicMissileProj extends Entity {
     const T = this.globalT;
     const spinR = 2 * (1.4 * s79) + Math.cos(T * twoPi) * 0.4;     // :33500 轴径
     const iw = img.width, ih = img.height;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.imageSmoothingEnabled = false;
-    for (let i = 0; i < 6; i++) {                 // :33501-33509 六团彩虹光环
-      const h79 = hueToRgb(i / 6, 0.5);
-      const tinted = tinted79(img, [
-        Math.max(0, Math.min(255, Math.trunc(h79[0] * 0.3))),      // ×0.3 截断（:33505）
-        Math.max(0, Math.min(255, Math.trunc(h79[1] * 0.3))),
-        Math.max(0, Math.min(255, Math.trunc(h79[2] * 0.3))),
-      ]);
-      if (!tinted) continue;
-      const ang = T * twoPi + (i / 6) * twoPi;   // :33500/:33502 两次 RotatedBy 合成
-      const w = iw * 1.4 * s79, h = ih * 1.4 * s79;
-      ctx.drawImage(tinted, this.cx + Math.cos(ang) * spinR - w / 2,
-        this.cy + Math.sin(ang) * spinR - h / 2, w, h);
-    }
-    const w = iw * s79, h = ih * s79;             // :33511 + :33558-33562 双绘
-    ctx.drawImage(img, this.cx - w / 2, this.cy - h / 2, w, h);
-    ctx.drawImage(img, this.cx - w / 2, this.cy - h / 2, w, h);
-    ctx.restore();
+    const cx = this.cx, cy = this.cy;
+    // ---- BJ278 全亮队列（2026-09-22 用户实报"引导期光芒有黑影"）----
+    //  原版 :33235 对 79 无条件覆写 color87=(255,255,255,0)（:33165 常规
+    //  GetAlpha(projectileColor) 光乘被覆）=【不吃光照乘】;A=0 ⇒ XNA 预乘
+    //  AlphaBlend dst 因子=1 ⇒ 纯加算 raw rgb、永不遮挡。旧直绘 worldCanvas
+    //  双重偏差：①'tighter'连 α 一起加 → worldCanvas 经 compositeLight 保 α +
+    //  source-over 回主画布 ⇒ 光环 texel α 遮挡亮背景+×0.3 染色低 rgb 替换
+    //  =星体四周暗块（亮背景可见,夜/不透明墙域不可见——探针分账定谳）;
+    //  ②被 compositeLight 光乘（原版全亮）。挪 compositeLight 后主画布
+    //  'lighter' 加算（opaque 底 α 无意义）=与拖尾 trailShadeQueue 同族同门
+    //  （2026-09-03 黑椭圆先例）。几何当帧冻结入闭包;mock（无队列方法）回退
+    //  直绘保持既有验证链。
+    const drawHead = (c: CanvasRenderingContext2D): void => {
+      c.save();
+      c.globalCompositeOperation = 'lighter';
+      c.imageSmoothingEnabled = false;
+      for (let i = 0; i < 6; i++) {               // :33501-33509 六团彩虹光环
+        const h79 = hueToRgb(i / 6, 0.5);
+        const tinted = tinted79(img, [
+          Math.max(0, Math.min(255, Math.trunc(h79[0] * 0.3))),    // ×0.3 截断（:33505）
+          Math.max(0, Math.min(255, Math.trunc(h79[1] * 0.3))),
+          Math.max(0, Math.min(255, Math.trunc(h79[2] * 0.3))),
+        ]);
+        if (!tinted) continue;
+        const ang = T * twoPi + (i / 6) * twoPi; // :33500/:33502 两次 RotatedBy 合成
+        const w = iw * 1.4 * s79, h = ih * 1.4 * s79;
+        c.drawImage(tinted, cx + Math.cos(ang) * spinR - w / 2,
+          cy + Math.sin(ang) * spinR - h / 2, w, h);
+      }
+      const w = iw * s79, h = ih * s79;           // :33511 + :33558-33562 双绘
+      c.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+      c.drawImage(img, cx - w / 2, cy - h / 2, w, h);
+      c.restore();
+    };
+    const q = (renderer as unknown as { queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void } | undefined)
+      ?.queueProjFullbright;
+    if (typeof q === 'function') q.call(renderer, drawHead);
+    else drawHead(ctx);
   }
 }
 

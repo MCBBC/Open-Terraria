@@ -40,10 +40,15 @@ function evidenceSignatureWorld(): World {
   paintRect(st, 36, 46, 112, 112, plat);
   paintWater(st, 30, 60, 112, 143);
   st.setLiquid(40, 112, 127, LIQUID_TYPE.WATER);
+  // ★BJ281 语义锁同步（2026-09-22 用户二次拍板「两洋均不落平台」）：左洋补自然岸线
+  //   [61..70]@112-196（顶=水面行 112,对齐用户图左缘 (171,312) 岸线 AT 水面行的形态）
+  //   ——分歧开启态左洋不再落平台,需有自然岸承位可落（对齐 BJ275 右洋岸线补种先例）。
+  paintRect(st, 61, 70, 112, 196, dirt);
   expect(st.flags[st.idx(W - 40, 164)]).toBe(1);
   expect(st.liquid[st.idx(W - 40, 164)]).toBe(0);
   expect(st.liquid[st.idx(W - 40, 165)]).toBe(200);   // ★BJ275: 栈桥正下方有水（海面行=165）
   expect(st.flags[st.idx(W - 61, 165)]).toBe(1);      // ★BJ275: 水线岸承位在位（甲板以左）
+  expect(st.flags[st.idx(61, 112)]).toBe(1);          // ★BJ281: 左洋水线岸承位在位（甲板内端）
   return w;
 }
 function naturalSignatureWorld(): World {
@@ -147,17 +152,22 @@ describe('BJ242 右洋补偿式内移重试（用户明令分歧,回滚口 Game.
     expect(calls, '单次右洋尝试直达,重试臂未触发').toEqual([[true, false]]);
   });
 
-  it('③左洋零变化（缺省 ON）：左洋请求不补偿;右半场首选即左洋（无右洋尝试）', () => {
+  it('③左洋（缺省 ON,★BJ281 语义同步）：不落平台→落水线自然岸 (61,111);右半场首选即左洋命中（无右洋尝试）', () => {
+    // ★BJ281（2026-09-22 用户二次拍板「两洋均不落平台」）：分歧开启态左洋承位判据
+    //   includePlatforms=false → 浸水甲板不作承位,液面爬行照原版爬到自然岸
+    //   （夹具 BJ281 同步补种 [61..70]@112 岸线）=「离海最近自然物块」。
+    //   左洋原版相（落甲板 (40,111)）锁面在 bj240 ③（OFF 态）。
     const w = evidenceSignatureWorld();
     const g = stubGame(w, 0, 0);
     const dest = g.requestMagicConchTeleportPosition(false);
-    expect(dest!.x).toBe(40 * TILE + 8 - 10);
+    expect(dest, 'ON:左洋不落平台→落水线自然岸').not.toBeNull();
+    expect(dest!.x).toBe(61 * TILE + 8 - 10);
     expect(dest!.y).toBe(111 * TILE + 16 - 42);
     // 右半场玩家：首试=左洋（对侧）命中即止——calls 只有 [false,_]
     const g2 = stubGame(w, 570 * TILE, 100 * TILE);
     const calls = spyRequest(g2);
     const p = fire(g2, 570 * TILE);
-    expect(p.x).toBe(40 * TILE + 8 - 10);
+    expect(p.x).toBe(61 * TILE + 8 - 10);
     expect(p.y).toBe(111 * TILE + 16 - 42);
     expect(calls, '右半场首试左洋命中,无补偿支').toEqual([[false, false]]);
   });

@@ -147,7 +147,8 @@ describe('R9 批一接线源锁（src/core/Game.ts 七处配对）', () => {
     ['③ 1296→261（b261）',
       /new Arrow\(mzX, mzY,[\s\S]{0,300}?cw\.knockback, 261,\s*\{[\s\S]{0,400}?placeAtShootSpawn\(b261, mzX, mzY\);/],
     ['④ 魔法导弹族（m）',
-      /new MagicMissileProj\(mx, my, mvx, mvy, \{[\s\S]{0,2200}?placeAtShootSpawn\(m, mx, my\);/],
+      // ★BJ279(2026-09-22)：fireExtra 锚回正玩家盒中心,注释加长 → 窗 2200→2600
+      /new MagicMissileProj\(mx, my, mvx, mvy, \{[\s\S]{0,2600}?placeAtShootSpawn\(m, mx, my\);/],
     ['⑤ 伴生 928（bub，w/h=34 之后）',
       /bub\.w = 34; bub\.h = 34;[\s\S]{0,300}?placeAtShootSpawn\(bub, sx, sy\);/],
     ['⑥ MonkSlam（slam）',
@@ -283,7 +284,7 @@ describe('R9 批一端到端：updateUse 真接线出生盒心 = 原版 NewProje
     }
   });
 
-  it('④ 113 魔法飞弹 → 16 出生盒心 = pointPosition;channel 续发(fireExtra 杖头锚)盒心同步回正', () => {
+  it('④ 113 魔法飞弹 → 16 出生盒心 = pointPosition;channel 续发(fireExtra)盒心同锚 = 玩家中心（BJ279）', () => {
     const { player, added, updateUse } = r9Game(113);
     updateUse();
     const missiles = added.filter((e) => e instanceof MagicMissileProj) as MagicMissileProj[];
@@ -291,15 +292,16 @@ describe('R9 批一端到端：updateUse 真接线出生盒心 = 原版 NewProje
     expect(missiles[0].projId).toBe(16);
     expect(missiles[0].cx).toBe(player.cx);
     expect(missiles[0].cy).toBe(player.cy);
-    // 续发闭包（Game.ts fireExtra——锚点=杖头+18 拍板备案不动,盒心回正随 spawnMissile 单点）
+    // 续发闭包（Game.ts fireExtra——★BJ279 2026-09-22：原 2026-08-26 杖头 +aim×18
+    //  枢轴锚退役,同 v8 终案回正玩家盒中心（通用尾支 :49957）;贴墙续发弹 +aim×18
+    //  落墙内 + 引导档免死(:19442)复合 = 隔墙生成射出（用户实报定谳））
     const fireExtra = (missiles[0] as unknown as { fireExtra?: () => void }).fireExtra;
     expect(fireExtra).toBeDefined();
     fireExtra!();
     expect(added.length).toBe(2);
     const extra = added[1] as MagicMissileProj;
-    const aRaw = Math.atan2(MWY - player.cy, MWX - player.cx);
-    expect(extra.cx).toBeCloseTo(player.cx + Math.cos(aRaw) * 18, 6);
-    expect(extra.cy).toBeCloseTo(player.cy + Math.sin(aRaw) * 18, 6);
+    expect(extra.cx).toBe(player.cx);
+    expect(extra.cy).toBe(player.cy);
   });
 
   it('⑤ 4272 Drippler Crippler（弹 757）→ spawnProj(928) 出生盒心 = 链球 Center（base.Center,:44723）', () => {

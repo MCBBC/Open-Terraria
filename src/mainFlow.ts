@@ -17,6 +17,7 @@ import { keybindHintLabel, isBound, keybindCodeLabel } from './core/Keybinds';  
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas, kvSet } from './save/KvStore';
+import { makeBeforeUnloadHandler, hiddenBackstopShouldSave } from './save/UnloadGuard';   // ★BJ280 页面卸载拦截纯核
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from './data/items';
 import { VI_KEY } from './data/itemKeys';
 import { parseWldToSave } from './wld/WldImport';
@@ -62,6 +63,9 @@ export interface FlowHandle {
   doSave(silent?: boolean): Promise<boolean>;
   /** 导出存档为文件(自有 JSON 格式,与 __swFlow.loadJson 闭环) */
   doExportSave(): void;
+  /** ★BJ280：更新横幅「保存后刷新」通道——静默存档全链落定→清卸载拦截态→reload
+   *  （存档失败也刷新,BJ144 取舍;拦截态无条件解除=用户明示动作不二次弹窗） */
+  saveAndReload(): void;
   openSettings(inGame: boolean): void;
   openBestiary(): void;
   /** 住房面板（背包房屋按钮 B 方案,2026-08-15） */
@@ -305,6 +309,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       try { game.destroy(); } catch (e) { console.warn('[mainFlow] 旧实例清理异常(忽略):', e); }
     }
     game = g;
+    // ★BJ280（2026-09-22）：进世界即 dirty——onWorldReady 唯一收口（创建/槽位读档/
+    //  快速读档/导入/联机加入五路全覆盖）。无逐帧变更追踪（成本高,登记债）,保守
+    //  语义=「进世界后未走保存链即 dirty」,宁多拦不漏拦。
+    worldDirty = true;
     // Game Zoom 基线（Main.GameZoomTarget 持久化键 "Zoom" Main.cs:4284/4575；
     // 相机在 loadWorld 内已建，onWorldReady 后此处生效——ViewZoomIn/Out 键与
     // 滚轮仍直调 setZoom 动态改，设置页读态优先相机实时值）
@@ -1371,6 +1379,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   function showTitle(bgPaused = false) {
+    // ★BJ280：回标题清拦截态（标题界面永不 dirty;覆盖 quitToMenu 保存失败仍退出
+    // 的路径——原版失败可离开语义,拦截面随之解除）
+    worldDirty = false;
     audio.play('title', titleStyleMusicId());   // IIII225 种子覆写 + IIIII228 TitleMusicStyle 细分
     ui.closeAll();
     // SW 资产预载(仅生产构建):进菜单即按优先级全量后台下载 + 挂右下角进度徽标
@@ -1446,6 +1457,30 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** ★BJ144 重复退出闸：保存屏期间 Esc 重开暂停菜单/再点退出等二次触发防双拆台 */
   let quitting = false;
+  /** ★BJ280（2026-09-22）会话 dirty：enterGame（onWorldReady 唯一收口）置位;仅
+   *  用户确认的保存链（手动保存 Ctrl+S/暂停菜单、保存并退出落定——doSave 非静默档
+   *  成功）或回标题清除。自动保存/隐藏兜底走静默档不清位（非用户确认存档点,
+   *  宁多拦不漏拦）。 */
+  let worldDirty = false;
+  /** ★BJ280 doSave 在途标志：visibilitychange 隐藏兜底与在途保存链互斥（防重叠
+   *  双链;SaveClient 序列化本串行,但 kvSet/槽位两路 IDB 写会交错）。 */
+  let saveInFlight = false;
+
+  // ★BJ280 页面刷新/关闭拦截：dirty 会话 beforeunload 弹【原生】确认（浏览器不
+  //  允许自定义文案,不自造弹层——原生框是唯一可靠拦截面）。注册一次;标题态
+  //  worldDirty 恒 false 永不拦;SaveAndQuit 保存屏（quitting）不拦（保存链自带
+  //  确认,任务处方）。处理器工厂/判定纯核=src/save/UnloadGuard.ts（单测直驱）。
+  window.addEventListener('beforeunload',
+    makeBeforeUnloadHandler(() => ({ dirty: worldDirty, quitting })));
+  // ★BJ280 隐藏兜底（pagehide/visibilitychange 评估结论：pagehide 对异步 IDB 写
+  //  过晚不可靠,取 visibilitychange hidden——页面仍存活,worker 序列化+IDB 落盘可
+  //  继续完成）：切后台即静默自动保存一次,补 beforeunload 不可靠面（移动端/OS 级
+  //  杀页）。静默档不清 dirty;退出链/在途链互斥（hiddenBackstopShouldSave）。
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') return;
+    if (!hiddenBackstopShouldSave({ dirty: worldDirty, quitting, hasGame: !!game, saveInFlight })) return;
+    void doSave(true);
+  });
   async function quitToMenu() {
     if (quitting) return;
     quitting = true;
@@ -1484,6 +1519,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   function doSave(silent = false): Promise<boolean> {
     if (!game) return Promise.resolve(false);
+    saveInFlight = true;   // ★BJ280：隐藏兜底互斥（finally 解除）
     game.finishWorldJobs();   // ★PR-async：job 半程存档=重读档永久丢转化——先 drain 完再序列化
     // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
@@ -1541,13 +1577,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         }
       }
       await Promise.all([quickWrite, slotWrite]);
+      // ★BJ280：用户确认存档点（手动保存/保存并退出——非静默链）全链落定 → 解除
+      // 拦截态。静默档（自动保存/隐藏兜底/横幅刷新）不清位。
+      if (!silent) worldDirty = false;
       return true;
     }).catch((e) => {
       // 回退同步 saveGame 也失败(异常世界状态)——如实报告,不留 unhandled rejection
       console.error('save failed', e);
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
       return false;
-    });
+    }).finally(() => { saveInFlight = false; });   // ★BJ280：在途标志解除（成败皆清）
   }
 
   /** 导出存档:同一序列化链(saveClient),产物落盘为 .sbw.json 下载——
@@ -1574,6 +1613,18 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     });
   }
 
+  /** ★BJ280（2026-09-22）：更新横幅「保存后刷新」专用通道（main.ts reloadAfterSave
+   *  迁入）。BJ144 面保持：先静默存档全链落定再 location.reload();本刀追加=落定后
+   *  无条件清 worldDirty 再刷新——横幅刷新是用户明示动作,防本刀 beforeunload 拦截
+   *  把它二次弹窗打断。存档失败也刷新（BJ144 取舍:新版本优先,不因存储故障阻塞）。 */
+  function saveAndReload(): void {
+    void (async () => {
+      try { await doSave(true); } catch { /* 存档失败也刷新(BJ144) */ }
+      worldDirty = false;
+      location.reload();
+    })();
+  }
+
   // 快速存档存在性预查
   void kvHas(QUICK_SAVE_KEY).then((v) => { quickSaveExists = v; });
 
@@ -1585,6 +1636,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     quitToMenu,
     doSave,
     doExportSave,
+    saveAndReload,   // ★BJ280：更新横幅通道（main.ts reloadAfterSave 迁入）
+    /** ★BJ280 探针/单测桥：卸载拦截 dirty 只读（enterGame 置位/保存链·回标题清除） */
+    unloadGuardDirty: () => worldDirty,
     backToTitle: showTitle,
     showCharSelect: () => showCharacterSelect(),   // 探针桥:直达角色选择页
     devMode: () => devMode,
@@ -1634,6 +1688,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     quitToMenu,
     doSave,
     doExportSave,
+    saveAndReload,   // ★BJ280
     openSettings,
     openBestiary,
     openHousing,

@@ -31,9 +31,11 @@ function wallWorld(thick: 1 | 2): World {
 }
 
 function makeGame(w: World): GameHooks {
+  // 玩家锚（93*16,100*16）：★BJ279 移交②接线后,引导 aim 经 LimitPointToPlayerReachableArea
+  // 以玩家盒心为心钳进可达区（±960/±600 ∩ 世界−640 缓冲）——mock 玩家须在场,可达盒才有意义
   return {
     world: w,
-    player: { dead: true, iframes: 0, cx: -9999, cy: -9999, x: -9999, y: -9999, w: 10, h: 20 },
+    player: { dead: true, iframes: 0, cx: 93 * TILE, cy: 100 * TILE, x: 93 * TILE - 10, y: 100 * TILE - 21, w: 20, h: 42 },
     enemies: () => [], critters: () => [],
     entities: { nextId: 1, add: (_e: unknown) => {}, projectiles: [] as unknown[] },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
@@ -110,6 +112,21 @@ describe('BJ277 ③非 79 对照：16 引导档碰墙照 Kill（79 豁免是 aiS
     m.fixedUpdate(1 / 60, game);
     expect(m.dead).toBe(true);                           // 引导档无豁免 → 照常 Kill
     expect(m.cx).toBeLessThan(WALL_FACE + TILE);         // 贴面死,未深入墙内
+  });
+});
+
+describe('BJ277 ⑤引导光标钳射程（:44044-44046 LimitPointToPlayerReachableArea;BJ279 移交②）', () => {
+  it('超射程光标：引导目标=可达盒边缘（±960 钳),星悬停钳点而非直奔裸光标', () => {
+    const w = new World(200, 200, 30, 'open');   // 空场（无墙）——纯钳射程面
+    const game = makeGame(w);
+    const ch = { on: true };
+    // 玩家 (1488,1600) → 可达盒 x∈[640,2448]（世界 3200px−640 缓冲右缘 2560 取 min）
+    // 裸光标 5000 → vx=3456>hw=904 → 钳至 (2448,1600)
+    const m = mk(game, 79, 95 * TILE, 100 * TILE, 32, ch, { x: 5000, y: 100 * TILE });
+    for (let t = 0; t < 90; t++) m.fixedUpdate(1 / 60, game);
+    expect(m.dead).toBe(false);
+    expect(m.cx).toBeGreaterThan(2380);          // 已飞到钳点邻域
+    expect(m.cx).toBeLessThan(2520);             // 悬停于 2448,不越往裸光标 5000
   });
 });
 

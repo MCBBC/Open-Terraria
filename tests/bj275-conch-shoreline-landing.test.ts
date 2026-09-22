@@ -121,7 +121,7 @@ describe('BJ275 海螺补偿重试=平台不作承位,落水线岸承位（用�
     expect(p.vy, '命中臂 velocity=Zero').toBe(0);
   });
 
-  it('④Face B 备案锁：栈桥不盖起点列→原版爬行从水侧爬停栈桥右端 (w-41,163),ON/OFF 同相（纯原版相,友好化另案）', () => {
+  it('④Face B 备案锁（★BJ281 语义同步）：栈桥不盖起点列→OFF=原版爬停栈桥右端 (w-41,163);ON=BJ281 两洋不落平台→首试穿/越甲板爬停西岸 (w-61,163)', () => {
     const w = oceanWorld();
     const st = w.store;
     const W = st.w;
@@ -132,13 +132,16 @@ describe('BJ275 海螺补偿重试=平台不作承位,落水线岸承位（用�
     Game.CONCH_RIGHT_OCEAN_COMPENSATION = false;
     let off: ReturnType<ConchFn>;
     try { off = gOff.requestMagicConchTeleportPosition(true); } finally { Game.CONCH_RIGHT_OCEAN_COMPENSATION = prev; }
-    expect(off, 'OFF:爬行 1 步即停桥右端=原版相').not.toBeNull();
+    expect(off, 'OFF:爬行 1 步即停桥右端=原版相（原版语义保留于关闭态）').not.toBeNull();
     expect(off!.x).toBe((W - 41) * TILE + 8 - 10);
     expect(off!.y).toBe(163 * TILE + 16 - 42);
     const gOn = stubGame(w, 0, 0);
     const on = gOn.requestMagicConchTeleportPosition(true);
-    expect(on, 'ON:首试已合法,补偿臂不触发,同相').not.toBeNull();
-    expect(on!.x).toBe((W - 41) * TILE + 8 - 10);
+    // ★BJ281（2026-09-22 用户二次拍板「两洋均不落平台」）：分歧开启态首试面已统一
+    //   includePlatforms=false → 平台弹升臂不触发,液面爬行越过栈桥下水面直达西岸
+    //   （旧「ON/OFF 同相落桥右端」=BJ275 时代 Face B 备案,已被总旗扩展取代）。
+    expect(on, 'ON:BJ281 不落平台→落西岸承位').not.toBeNull();
+    expect(on!.x).toBe((W - 61) * TILE + 8 - 10);
     expect(on!.y).toBe(163 * TILE + 16 - 42);
   });
 });

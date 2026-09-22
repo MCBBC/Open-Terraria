@@ -12353,6 +12353,23 @@ export class Renderer {
    *  实体段推）、消费=flushTrailShade（7e' 星辰鞭后）。 */
   private trailShadeQueue: TrailSpec[] = [];
 
+  /** ★BJ278 弹体全亮绘制队列（2026-09-22 用户实报"彩虹魔杖引导期光芒有黑影"）：
+   *  79 头部（白团+六团彩虹光环）原在实体段直绘 worldCanvas——'lighter' 连 α 一起加,
+   *  worldCanvas 经 compositeLight 保 α + source-over 回主画布 ⇒ 光环 texel 的 α
+   *  **遮挡**亮背景 + ×0.3 染色低 rgb **替换**背景 = 星体四周暗块（黑影）。原版
+   *  Main.cs:33235 对 79 无条件覆写 color87=(255,255,255,0)（:33165 常规 GetAlpha
+   *  光乘被覆）=不吃光照乘;A=0 ⇒ XNA 预乘 AlphaBlend dst 因子=1-0=1=纯加算永不
+   *  遮挡。故头部与拖尾（上方 trailShadeQueue 同族先例）同理挪 compositeLight 后
+   *  直绘主画布：opaque 底 'lighter' 加算=α 无意义。收集=queueProjFullbright
+   *  （MissileProj.draw79Head 推,闭包冻结当帧几何）、消费=flushTrailShade
+   *  （GL 条带上屏后=原版 Drawer 先带后头序）。 */
+  projFullbrightQueue: Array<(ctx: CanvasRenderingContext2D) => void> = [];
+
+  /** 弹体全亮绘制收集（MissileProj.draw79Head 实体段调用,flushTrailShade 消费） */
+  queueProjFullbright(fn: (ctx: CanvasRenderingContext2D) => void): void {
+    this.projFullbrightQueue.push(fn);
+  }
+
   /** 终极棱镜晶体(633)延迟绘制队列:drawLayer=7 弹体在原版走【玩家绘制层组】
    *  (PlayerDrawLayers.cs:3154 DrawPlayer_27_HeldItem 记 projectileDrawPosition →
    *  :4318 RenderAllLayers 在持物层位置插入 DrawHeldProj)= 画在玩家身体【前】。
@@ -12416,7 +12433,8 @@ export class Renderer {
     const hasQ = this.trailShadeQueue.length > 0;
     const gxC = this.glfx;
     const hasGL = !!(gxC && gxC.trailDirty && !gxC.unavailable);
-    if (!hasQ && !hasGL) return;
+    const hasFB = this.projFullbrightQueue.length > 0;
+    if (!hasQ && !hasGL && !hasFB) return;
     const queue = this.trailShadeQueue;
     this.trailShadeQueue = [];
     const ctx = this.ctx;
@@ -12441,6 +12459,20 @@ export class Renderer {
       ctx.drawImage(gx.canvas, 0, 0);
       ctx.restore();
       gx.trailDirty = false;
+    }
+    // BJ278 弹体全亮冲刷（GL 上屏后=原版 Drawer 先带后头序;相机系同上段公式）。
+    // opaque 主画布 'lighter' 加算——头部闭包自代 save/'lighter'/restore。
+    const fb = this.projFullbrightQueue;
+    if (fb.length > 0) {
+      this.projFullbrightQueue = [];
+      ctx.save();
+      ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+      ctx.scale(z, z);
+      ctx.translate(-camRX, -camRY);
+      for (const fn of fb) {
+        try { fn(ctx); } catch { /* 单条失败不拖垮帧 */ }
+      }
+      ctx.restore();
     }
   }
 

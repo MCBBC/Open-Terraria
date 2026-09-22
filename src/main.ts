@@ -938,12 +938,9 @@ kvHas('sandboxworld.quicksave').then(async () => {
   //  撕掉(=点更新横幅必丢自上次存档进度)。现先等保存全链落定再 reload;存档失败
   //  也刷新(新版本优先,不因存储故障永久阻塞更新)
   {
-    const reloadAfterSave = () => {
-      void (async () => {
-        try { await flow?.doSave(true); } catch { /* 存档失败也刷新(新版本优先) */ }
-        location.reload();
-      })();
-    };
+    // ★BJ280(2026-09-22)：迁入 flow.saveAndReload()——存档落定后清 beforeunload
+    // 拦截态再 reload（否则横幅刷新会被 BJ280 原生确认弹窗二次打断,破坏 BJ144 面）
+    const reloadAfterSave = () => (flow ? flow.saveAndReload() : location.reload());
     const banner = mountUpdateBanner(root, reloadAfterSave);
     startUpdateCheck((version) => banner.show(version, reloadAfterSave));
   }

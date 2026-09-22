@@ -33,7 +33,8 @@ function emptyWorld(): World {
 function makeGame(w: World): GameHooks {
   return {
     world: w,
-    player: { dead: true, iframes: 0, cx: -9999, cy: -9999, x: -9999, y: -9999, w: 10, h: 20 },
+  // ★BJ279 移交②接线后：引导 aim 以玩家盒心为心钳可达区——mock 玩家锚在星位（悬停 face 不被钳飞）
+    player: { dead: true, iframes: 0, cx: 81 * TILE, cy: 100 * TILE, x: 81 * TILE - 10, y: 100 * TILE - 21, w: 20, h: 42 },
     enemies: () => [], critters: () => [],
     entities: { nextId: 1, add: (_e: unknown) => {}, projectiles: [] as unknown[] },
     playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},

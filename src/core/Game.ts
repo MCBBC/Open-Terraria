@@ -18827,20 +18827,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 return this.player.checkMana(cost);
               },
               fireExtra: () => {
-                // 兄弟弹：杖头 → 当前光标 × shootSpeed（Player.cs:46642-46673 num4/num5 同构）
-                // ★2026-08-26 二次追加：出生点=杖头（MountedCenter+瞄准×18）,速度自出生点重瞄
+                // 兄弟弹（循环重用续发,Player.cs:42143-42147 → 重入 ItemCheck_Shoot）。
+                // ★BJ279（2026-09-22）：出生=玩家盒中心（通用尾支 :49957 直传
+                //  pointPosition=:4209-4235 恒等中心）,速度=(MouseWorld−pointPosition)
+                //  归一×shootSpeed（:47687-47717;零向量支 :47701-47706=(direction,0)）。
+                //  旧 2026-08-26「杖头+aim×18」枢轴锚未随 08-31 v8 终案（resolveShotAnchor
+                //  已=盒中心）退役——贴墙续发落墙内+引导档免死(:19442)=隔墙射出(实报)。
                 const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-                const aRaw = Math.atan2(mwy - this.player.cy, mwx - this.player.cx);
-                const sx = this.player.cx + Math.cos(aRaw) * 18;
-                const sy = this.player.cy + Math.sin(aRaw) * 18;
-                const dl = Math.hypot(mwx - sx, mwy - sy) || 1;
-                spawnMissile(sx, sy, (mwx - sx) / dl * cw.shootSpeed, (mwy - sy) / dl * cw.shootSpeed);
+                let dvx = mwx - this.player.cx, dvy = mwy - this.player.cy;
+                if (dvx === 0 && dvy === 0) {
+                  dvx = this.player.facing;
+                  dvy = 0;
+                  spawnMissile(this.player.cx, this.player.cy, dvx * cw.shootSpeed, dvy * cw.shootSpeed);
+                } else {
+                  const dl = Math.hypot(dvx, dvy);
+                  spawnMissile(this.player.cx, this.player.cy,
+                    dvx / dl * cw.shootSpeed, dvy / dl * cw.shootSpeed);
+                }
               },
             });
             // ★R9 批一（2026-09-03）：NewProjectile 传位=盒心（113/218/495 无专支 →
             //  通用尾支 :49957 直传 pointPosition + :10878-10879）——MagicMissileProj
             //  ctor 收盒左上,曾直传中心 = 弹盒右下偏 (16,16)px（16/34/79 盒 32×32;
-            //  fireExtra 杖头锚为 2026-08-26 拍板备案不动,只回正盒）
+            //  fireExtra 杖头锚已随 BJ279 回正=玩家盒中心,首发/续发同锚）
             placeAtShootSpawn(m, mx, my);
             m.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧
             m.critChance = critTotal;
@@ -30171,7 +30180,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （旧刀外扩 px−2 列/py−3 行=假性失败根因,见 boxBlocked 注）。CanTileHurt 走
    *  TouchDamage.canTileHurt。失败 = 原版 canSpawn=false（原地不传送、不消耗）。
    *  ★BJ275：inwardRetry（BJ242 补偿重试）面 solidOrSloped 以 includePlatforms=false
-   *  运行=平台不作承位（穿过用户海面栈桥,液面爬行落水线岸承位）;其余面逐字。 */
+   *  运行=平台不作承位（穿过用户海面栈桥,液面爬行落水线岸承位）。
+   *  ★BJ281（2026-09-22 用户二次拍板「两洋均不落平台」）：分歧开启态下**两洋全部面**
+   *  （左洋主路径+右洋首试+竖降/爬行/落点终扫）统一 includePlatforms=false——平台
+   *  一律不作承位,自然实心+水面（liquid>0）保留承位;浸水平台格走原版液面臂爬行
+   *  穿过（liquid>0∧!SolidOrSloped→爬行臂）。OFF 态逐字如旧（inclPlat=!inwardRetry,
+   *  且 OFF 时 inwardRetry 不可达=恒 true=原版）。 */
   /** ★★BJ242 用户明令分歧闸（2026-09-21 拍板;先例 Player.SURFACE_SKIM_SPLASH 同型）:
    *  右海洋传送友好化=补偿式内移重试——右洋尝试在 InWorld(…,40) 右边界被拒（px≥w-40,
    *  爬向恒内卷⇒必零爬行落位）时,内移起点 x=w-41（进合法域）重试右洋一次。
@@ -30183,8 +30197,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （bj240 语义锁 OFF 态全绿;tests/bj242-conch-right-ocean-compensation.test.ts）。
    *  ★★BJ275（2026-09-22 用户实报「落到海上最远平台」;用户地图=物证图字节全等
    *  md5 e304e13a）:重试落点选择面补刀——重试时平台不作承位（includePlatforms=
-   *  false,穿海面栈桥落水线岸承位）;用户预期「离海最近的物块」=水线岸。闸继续
-   *  总揽两刀;OFF 态仍=原版逐字。 */
+   *  false,穿海面栈桥落水线岸承位）;用户预期「离海最近的物块」=水线岸。
+   *  ★★BJ281 语义升级=「海螺不落平台」总旗（2026-09-22 用户二次实报左洋甲板落位,
+   *  连续两次实报同一预期,拍板扩展;behavior-log-天真的钴最高点-2026-09-22T08-33-28:
+   *  t=3119 fire conch@右洋岸(6127,412) → t=3165 落 (650,4971)=左洋浸水甲板
+   *  (40,311),LIVE 刀前 left=(40,311) 同判;tools/_bj281-wld-evidence.test.ts 金标
+   *  inclPlat=false 左洋落 (171,311)=甲板内端自然沙岸承位=「离海最近自然物块」）:
+   *  分歧开启态下两洋承位判据统一 includePlatforms=false（左洋主路径+右洋首试+补偿
+   *  重试+竖降/爬行/落点终扫全调用点）,右洋补偿臂不再必要依赖（首试已可达水线岸,
+   *  补偿臂保留=防御位）。旗名沿 BJ242 历史标识符=回滚口不变;语义=海螺永不把玩家
+   *  自建平台当承位。OFF 态仍=原版逐字（含左洋平台承位;bj240 语义锁全绿）。
+   *  tests/bj281-conch-no-platform-landing.test.ts。 */
   static CONCH_RIGHT_OCEAN_COMPENSATION = true;
 
   /** ★★BJ258 用户明令分歧闸（2026-09-22 拍板 B;先例 CONCH_RIGHT_OCEAN_COMPENSATION 同型）:
@@ -30222,7 +30245,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  副作用）：补偿重试面 includePlatforms=false —— 原版 includePlatforms:false
       //  语义（WorldGen.cs:70520-70523 tileSolidTop 即 false）＝平台不作承位：竖降
       //  穿过海面栈桥（用户地图甲板 T11@414 铺满海面）→ 液面爬行照原版爬到水线
-      //  岸承位（用户预期「离海最近的物块」）。原版尝试面不受影响（缺省 true）。
+      //  岸承位（用户预期「离海最近的物块」）。
+      //  ★BJ281（2026-09-22 用户二次拍板「两洋均不落平台」）：分歧开启态=两洋全部面
+      //  传 includePlatforms=false（左洋主路径+右洋首试同豁免）;OFF 态全面 true=原版。
+      //  浸水平台格（liquid>0）不在此拒——由调用侧液面臂（liquid>0∧!SolidOrSloped→
+      //  爬行）穿过,与原版 includePlatforms:false 语义同相。
       if (isPlat && !includePlatforms) return false;
       if (!d.solid && !isPlat) return false;                    // Main.tileSolid[type]
       if (TILE_SOLID_TOP_FAMILY.has(st.type[i]) && !isPlat) return false;  // tileSolidTop 非平台=false
@@ -30265,9 +30292,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
     const num = 40;
     const x0 = rightOcean ? (inwardRetry ? st.w - num - 1 : st.w - num) : num;   // ★BJ242 内移起点 w-41 进 InWorld 合法域
-    // ★BJ275：补偿重试（inwardRetry）=平台不作承位面（穿过海面栈桥,落水线岸承位）;
-    //   原版尝试/左洋=includePlatforms:true 逐字。语义锚见 solidOrSloped 处 BJ275 注。
-    const inclPlat = !inwardRetry;
+    // ★BJ275：补偿重试（inwardRetry）=平台不作承位面（穿过海面栈桥,落水线岸承位）。
+    // ★BJ281（2026-09-22 用户二次拍板「两洋均不落平台」,总旗语义升级见闸注）：分歧
+    //   开启态=两洋全部调用点（左洋主路径+右洋首试+补偿重试+竖降/爬行/落点终扫）
+    //   includePlatforms=false——平台不作承位,落「离海最近的自然物块」（自然实心∨
+    //   水面）;OFF 态=原版逐字（!inwardRetry 恒 true,inwardRetry 支在 OFF 不可达）。
+    //   语义锚见 solidOrSloped 处 BJ275/BJ281 注。
+    const inclPlat = Game.CONCH_RIGHT_OCEAN_COMPENSATION ? false : !inwardRetry;
     const y0 = 50;
     const num3 = Math.floor(this.world.groundLevel);   // (int)Main.worldSurface - num2(num2=0)
     const crawlOffsetX = rightOcean ? -1 : 1;
@@ -30326,6 +30357,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  甲板拦截非实现差。重试穿栈桥至水面按原版液面臂爬到水线岸承位=「离海最近的
       //  物块」。实心障碍（沙墙）不受影响;栈桥不盖起点列的变体图=原版爬停甲板右端
       //  （Face B,纯原版相,另案备案）。
+      //  ★BJ281（2026-09-22 用户二次拍板「两洋均不落平台」）：首试面已统一
+      //  inclPlat=false（见本函数头 inclPlat 注）→ 首试穿平台直达水线岸,InWorld 拒绝
+      //  仅剩非平台实心零爬行 quirk 面;补偿臂保留=防御位（语义与首试同相,幂等）。
+      //  Face B 变体在开启态下同步改相：原版爬停甲板右端 → 爬行穿/越甲板落自然岸线。
       if (Game.CONCH_RIGHT_OCEAN_COMPENSATION && rightOcean && !inwardRetry && px >= st.w - 40) {
         return this.requestMagicConchTeleportPosition(true, true);
       }

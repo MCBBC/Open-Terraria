@@ -74,6 +74,7 @@ const prep = await page.evaluate(() => {
   g.entities.enemies.length = 0;
   g.entities.critters.length = 0;
   g.entities.projectiles.length = 0;
+  g.world.clock.timeOfDay = 0.5;   // 正午（亮场景,压暗才可见）
   g.paused = false;
   for (let k = 0; k < 30; k++) g.fixedUpdate(1 / 60);
   g.paused = true;
@@ -206,6 +207,66 @@ console.log('hooks', JSON.stringify(await page.evaluate(() => ({
   stripCalls: window.__bj278.stripCalls, readbacks: window.__bj278.readbacks,
   traildbg: window.__swGame?.renderer?.__trailDbg ?? null,
 }))));
+
+// ---------- orbit 绕圈相（彩虹带全展,同基线相机） ----------
+const orbit = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const { MagicMissileProj } = await import('/src/entities/MissileProj.ts');
+  const cx0 = g.player.cx + 60, cy0 = g.player.cy - 110;
+  let t = 0;
+  const m = new MagicMissileProj(cx0, cy0, 0.01, 0, {
+    projId: 79, damage: 50, knockback: 5, useTime: 20,
+    channelCb: () => true,
+    aimCb: () => ({ x: cx0 + Math.cos(t * 0.09) * 120, y: cy0 + Math.sin(t * 0.09) * 70 }),
+    payMana: () => true,
+  });
+  m.x = m.x - m.w / 2; m.y = m.y - m.h / 2;
+  g.entities.add(m, 'projectiles');
+  g.paused = false;
+  for (t = 0; t < 90; t++) g.fixedUpdate(1 / 60);
+  g.paused = true;
+  await new Promise((r) => setTimeout(r, 700));
+  g.paused = false;
+  for (let k = 0; k < 2; k++) g.fixedUpdate(1 / 60);
+  g.paused = true;
+  return { x: Math.round(m.cx), y: Math.round(m.cy), dead: m.dead, strip: m.strip.length };
+});
+console.log('orbit', JSON.stringify(orbit));
+await new Promise((r) => setTimeout(r, 400));
+await page.screenshot({ path: `/tmp/bj278-${TAG}-orbit.png` });
+const orbitDiff = await page.evaluate(() => {
+  const cvs = [...document.querySelectorAll('#game-root canvas')].filter((c) => c.width >= 1280 && c.height >= 800);
+  const out = [];
+  cvs.forEach((cv, ci) => {
+    const base = window.__bj278Base?.[`c${ci}`];
+    if (!base) return;
+    const sc = document.createElement('canvas');
+    sc.width = cv.width; sc.height = cv.height;
+    const c2 = sc.getContext('2d', { willReadFrequently: true });
+    c2.drawImage(cv, 0, 0);
+    const now = c2.getImageData(0, 0, sc.width, sc.height).data;
+    let negW = 0, negBigW = 0, wMinX = 1e9, wMinY = 1e9, wMaxX = -1, wMaxY = -1, worstW = 0, worstPxW = null;
+    for (let y = 0; y < sc.height; y++) {
+      for (let x = 0; x < sc.width; x++) {
+        if (x > 980 && y < 340) continue;
+        const i = (y * sc.width + x) * 4;
+        const dr = Math.max(base[i] - now[i], base[i + 1] - now[i + 1], base[i + 2] - now[i + 2]);
+        if (dr > 2) {
+          negW++;
+          if (dr > 30) {
+            negBigW++;
+            if (x < wMinX) wMinX = x; if (y < wMinY) wMinY = y;
+            if (x > wMaxX) wMaxX = x; if (y > wMaxY) wMaxY = y;
+            if (dr > worstW) { worstW = dr; worstPxW = { x, y, base: [base[i], base[i + 1], base[i + 2]], now: [now[i], now[i + 1], now[i + 2]] }; }
+          }
+        }
+      }
+    }
+    out.push({ canvas: `c${ci}`, negWorld: negW, negBigWorld: negBigW, worldBBox: negBigW ? [wMinX, wMinY, wMaxX, wMaxY] : null, worstWorld: worstW, worstPxWorld: worstPxW });
+  });
+  return out;
+});
+console.log('orbit-diff', JSON.stringify(orbitDiff));
 
 // ---------- cruise 巡航相（带全展,水平直飞） ----------
 const cruise = await page.evaluate(async () => {

@@ -281,7 +281,11 @@ describe('SW-BJ43 魔法海螺落点（TeleportHelpers.cs:49-241 金标）', () 
     expect(old.why).toContain('cap');
   });
 
-  it('合成几何·平台落位面：SolidOrSlopedTile(includePlatforms) 复活（OLD=平台臂死码对照）', () => {
+  it('合成几何·平台落位面：SolidOrSlopedTile(includePlatforms) 复活（OLD=平台臂死码对照）〔回滚口关闭态=原版相〕', () => {
+    // ★BJ281（2026-09-22）：分歧开启态下两洋承位判据 includePlatforms=false（用户拍板
+    //   「两洋均不落平台」）→ 平台承位面仅存于原版相（OFF 态）。本测意图=锁平台臂
+    //   在仓库存活（非死码）+原版脚底位 → 转回滚口关闭态钉原版逐字;分歧开启态的
+    //   不落平台相锁面在 tests/bj281-conch-no-platform-landing.test.ts。
     const w = new World(300, 240, 7, 'bj43-syn2');
     w.groundLevel = 128;
     const st = w.store;
@@ -294,7 +298,15 @@ describe('SW-BJ43 魔法海螺落点（TeleportHelpers.cs:49-241 金标）', () 
     const gold = crawl(ctx, false, { solid: (x, y) => solidVanilla(ctx, x, y), blocked: (x, y) => blockedGold(ctx, x, y) });
     expect(gold.ok, `金标应落平台（${gold.why}）`).toBe(true);
     expect([gold.x, gold.y]).toEqual([40, 119]);   // 头(119) 脚底钉 120 格底=站平台
-    const live = stubGame(w).requestMagicConchTeleportPosition(false);
+    const prev = Game.CONCH_RIGHT_OCEAN_COMPENSATION;
+    Game.CONCH_RIGHT_OCEAN_COMPENSATION = false;
+    let live: { x: number; y: number } | null = null;
+    try {
+      const g = stubGame(w) as unknown as { requestMagicConchTeleportPosition: (r: boolean) => { x: number; y: number } | null };
+      live = g.requestMagicConchTeleportPosition(false);
+    } finally {
+      Game.CONCH_RIGHT_OCEAN_COMPENSATION = prev;
+    }
     expect(live).not.toBeNull();
     expect(live!.y).toBe(119 * TILE + 16 - 42);    // 脚底=平台顶面（原版脚底位）
     // 判别力：OLD 平台臂死码 → 落穿平台坠入水体 → 沿液面游出带外 → noFloor20 失败
