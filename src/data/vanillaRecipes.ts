@@ -456,6 +456,15 @@ export function availableRecipes(
   return out;
 }
 
+/** ★BJ269（2026-09-22）：可用配方列表输出签名（行集+每行可合成轮数）。
+ *  Game.probeCraftListRefresh 逐帧重算后比对用——同输入恒同串（防伪刷新）,
+ *  行集变化（站点邻接跨阈）与轮数变化（近箱材料源跨阈）都会改变签名。 */
+export function craftListSignature(avail: ReadonlyArray<{ r: VanillaRecipe; count: number }>): string {
+  let sig = '';
+  for (let i = 0; i < avail.length; i++) sig += `${avail[i].r.create}:${avail[i].count},`;
+  return sig;
+}
+
 /** Recipe.GetAvailableItemCount（Recipe.cs:313-320）等价：某材料槽在材料源聚合
  *  持有量表（collectOwnedItems 产物,含附近箱/bank）中的可用数——组槽返回组假 id
  *  聚合值（itemMatches 同义）。UI 行内材料统计与 availableRecipes 必须同源取表

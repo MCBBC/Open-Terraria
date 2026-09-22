@@ -704,6 +704,10 @@ export class Sfx {
     // ==null 才 PlayTrackedSound——进世界批量补授多成就同帧解锁时原版只响一声,
     // 2026-08-26 review 补,否则 achOnWorldEnter 一帧 N 连播叠音墙）
     'achievement_complete',
+    // ★BJ273：case 3 style 57 在播跳过（LegacySoundPlayer.cs:654-657 State==Playing
+    // → return null）——同 case 其余 style 是停旧播新（:666-674,SINGLE_SLOT_STOP）,
+    // 57 单独走 skip 语义,勿并入 stop 集
+    'NPC_Hit_57',
   ]);
   /** ★R26 GAP-05:Item 音库(case 2 LegacySoundPlayer.cs:519-643)三组实例槽语义——
    *  原版每个 style 一条 SoundInstanceItem[num] 槽,快速连发时:
@@ -729,10 +733,38 @@ export class Sfx {
     //   (:592-597)= stop 档。三连矢(dur-14/-7/dur 每 7t 一发)掷到同文件时原版即
     //   截断上一发尾音,本仓照抄。
   ]);
+  /** ★BJ273（2026-09-22 用户报「长按右键连取取物音越来越响」定谳落刀）：原版单实例
+   *  槽【停旧播新】族——LegacySoundPlayer.PlaySound 各 case 对命名槽/逐变体槽先
+   *  .Stop() 旧实例再 CreateInstance 新实例（同槽互斥截断,快速连发永不叠响）。
+   *  本仓此前对 Menu_Tick 等落 'none'（自由叠响）：右键连取加速梯节拍
+   *  （stackDelay 7→2 拍=117→33ms;superFastStack 期同帧多件）短于 Menu_Tick
+   *  解码时长 71.4ms,同时在响实例数单调上升=主观渐强,探针实测 33ms×14 连发
+   *  零互斥+并发爬升。逐案锚（Terarria1457/Terraria.Audio/LegacySoundPlayer.cs）：
+   *  case 0 Dig 逐变体槽（:443-449）/ case 1 PlayerHit 逐变体槽（:506-517）/
+   *  case 3 NPCHit 逐 style 槽（:666-674;style 57=skip 见 SINGLE_INSTANCE 注）/
+   *  case 5 PlayerKilled（:699-707）/ case 6 Grass（:709-719）/ case 7 Grab
+   *  （:720-730）/ case 8/9 Door（:731-752）/ case 10/11/12 Menu Open/Close/Tick
+   *  （:753-785）/ case 13 Shatter（:786-795）。
+   *  逐变体槽=逐文件槽（singlePlaying 键=文件名:同变体才互斥截断,跨变体照常叠响,
+   *  与原版 SoundInstanceDig[num13]/SoundInstancePlayerHit[num15] 按下标分槽同构）。
+   *  对照不收入=原版语义本就叠响/另档：case 4 NPCKilled 仅覆槽引用不 Stop（:693）、
+   *  case 2 Item 三组槽（R26 ITEM_* 表）、case 15 Roar 在播跳过（SINGLE_INSTANCE）。
+   *  未逐案核案号（16/18/19/21-24/26/29-33/36/44-46/65-69 等）维持 'none' =登记债。 */
+  private static readonly SINGLE_SLOT_STOP = new Set([
+    'Menu_Tick', 'Menu_Open', 'Menu_Close',
+    'Grab', 'Door_Opened', 'Door_Closed', 'Shatter', 'Grass',
+    'Player_Killed', 'Player_Hit_0', 'Player_Hit_1', 'Player_Hit_2',
+    'Dig_0', 'Dig_1', 'Dig_2',
+    ...Array.from({ length: 56 }, (_, k) => `NPC_Hit_${k + 1}`),   // style 1..56
+    'NPC_Hit_58',   // 57=skip 档（SINGLE_INSTANCE）,58 回归 stop
+  ]);
+
   /** 单实例槽分类('skip'=在播跳过 / 'stop'=先停后播 / 'none'=不管理可自由叠响):
-   *  Item_N 全体入槽管理(槽引用照记,default 组停旧、例外组只换绑),Roar 族维持 skip */
+   *  Item_N 全体入槽管理(槽引用照记,default 组停旧、例外组只换绑),Roar 族维持 skip,
+   *  ★BJ273 单槽停旧播新族见 SINGLE_SLOT_STOP 注 */
   private static slotAction(file: string): 'skip' | 'stop' | 'none' {
     if (Sfx.SINGLE_INSTANCE.has(file)) return 'skip';
+    if (Sfx.SINGLE_SLOT_STOP.has(file)) return 'stop';
     if (/^Item_\d+$/.test(file)) {
       if (Sfx.ITEM_SKIP_IF_PLAYING.has(file)) return 'skip';
       if (Sfx.ITEM_OVERLAP_OK.has(file)) return 'none';

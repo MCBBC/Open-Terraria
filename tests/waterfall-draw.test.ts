@@ -80,10 +80,13 @@ describe('waterfall draw 1484,587 场景对拍', () => {
     const splash = calls.find((c) => c.sy === 24 && c.sw === 32 && c.sh === 8 && c.py === 603 * 16);
     expect(splash).toBeTruthy();
   });
-  it('撞地后沿地面向右水平铺展条 (16+slot,0,16,16) @ y+8', () => {
-    const sheet = calls.filter((c) => c.sy === 0 && c.sw === 16 && c.sh === 16 && c.py === 603 * 16 + 8);
-    expect(sheet.length).toBeGreaterThanOrEqual(3);
-    expect(sheet[0].px).toBe(1486 * 16);
+  it('撞地后沿地面向右水平铺展条 @ y+8（★BJ274：原版层序瀑布在实心块之下——越过 y604 花岗岩的下半幅被遮挡,仅气格内 8px 可见;走出地面(x>1500)恢复 16px）', () => {
+    const clipped = calls.filter((c) => c.sy === 0 && c.sw === 16 && c.sh === 8 && c.py === 603 * 16 + 8);
+    expect(clipped.length).toBeGreaterThanOrEqual(2);
+    expect(clipped[0].px).toBe(1486 * 16);
+    const full = calls.filter((c) => c.sy === 0 && c.sw === 16 && c.sh === 16 && c.py === 603 * 16 + 8);
+    expect(full.length).toBeGreaterThanOrEqual(1);
+    expect(full.every((c) => c.px >= 1500 * 16)).toBe(true);
   });
   it('池面格 x1483 无任何瀑布绘制', () => {
     const bad = calls.filter((c) => c.px < 1484 * 16 && c.py < 588 * 16);

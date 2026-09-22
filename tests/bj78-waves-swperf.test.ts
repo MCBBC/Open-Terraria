@@ -377,9 +377,11 @@ describe('★BJ78 结构锁(源文本锚)', () => {
 
   it('W3：快路径门+核公式逐字同序+原路径逐字保留', () => {
     expect(waveSrc).toContain('if (swPerf && dx === 0 && dy === 0) {');
-    // 核公式（快/原两支逐字同串）
-    expect(waveSrc.match(/const newH = \(signedC \+ 2 \* \(S \* 0\.25 - signedC\) \+ wv \* Math\.abs\(wv\)\) \* WATER_DAMP;/g)?.length).toBe(2);
-    expect(waveSrc.match(/let rq = Math\.round\(\(q < 0 \? 0 : q > 512 \? 1 : q \/ 512\) \* 256\);/g)?.length).toBe(2);
+    // 核公式（各支逐字同串）——★BJ270 2026-09-22 起 4 处：W3 + BJ270 内域 +
+    // BJ270 边缘闭包(edgePx) + 原路径(豁免臂);四支互为逐字同序拷贝,
+    // 行为面由 tests/bj270-waves-interior.test.ts 双支对拍守卫
+    expect(waveSrc.match(/const newH = \(signedC \+ 2 \* \(S \* 0\.25 - signedC\) \+ wv \* Math\.abs\(wv\)\) \* WATER_DAMP;/g)?.length).toBe(4);
+    expect(waveSrc.match(/let rq = Math\.round\(\(q < 0 \? 0 : q > 512 \? 1 : q \/ 512\) \* 256\);/g)?.length).toBe(4);
     // 原路径逐像素钳制/索引逐字保留
     expect(waveSrc).toContain('const sx0 = x - dx;');
     expect(waveSrc).toContain('const xL = Math.min(w - 1, Math.max(0, sx0 - 1));');

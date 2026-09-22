@@ -15792,7 +15792,9 @@ export class Renderer {
     const anchor = mouseTextAnchor(this._mouseX, this._mouseY, w, h, this.canvas.width, this.canvas.height,
       { heldOnCursor: c.uiHeld });   // F2c:持物锚 X+=34(:20390-20392,债 BJ7-R1 清偿)
     // ★FX57 2026-09-16:字形=离屏烘焙+主画布放大(FX58 档位采样:pixel=NN/
-    //  hidpi=线性采样,MouseTextBake.ts 头注根因/修法;与信息行同管线)。
+    //  hidpi=线性采样,MouseTextBake.ts 头注根因/修法)。★BJ276 2026-09-22:
+    //  信息行动态读数面已退役烘焙改直绘(方案 B),本层=烘焙管线现役消费面
+    //  (悬停标签键在悬停目标间稳定=真静态,色脉动走染色缓存收敛全命中)。
     //  锚(mouseTextAnchor)/claim 序/门拓扑零漂移;
     //  墨顶 = 旧 textBaseline='top' 直绘同位(bake 侧按 'top' 墨盒反推)。
     //  mouseTextColor 脉动灰(190↔255)不进缓存键——白字形 mask 每帧染色

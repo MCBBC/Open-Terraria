@@ -29,6 +29,10 @@
 //   持按连发：原版 item.channel 武器每 useAnimation 循环重用一次（pendingItemReuse
 //   Player.cs:42143-42147 → ItemCheck_TryStartUse :51182-51196 每拍扣 mana）——
 //   每循环【一发】新弹，由最新存活弹独占驱动（否则 N 弹会指数增殖）。
+//   碰撞面（★BJ277 2026-09-22）：HandleMovement TileCollision 4×4 盒扫掠（Center−2 盒,
+//   GetCollisionParams :19982/:20127-20131）+ aiStyle 9 反应支（:19439-19462,1458 同）——
+//   79 引导档碰块免死（命中轴 ×0.1 贴面跟随,用户实报面）;16/34 全相与 79 松手档碰块
+//   Kill。旧「中心格实心即灭」杀位退役（原版 HandleMovement 内无 tile 杀位）。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -487,13 +491,34 @@ export class MagicMissileProj extends Entity {
     }
     if (this.dead) { this.wetSectionStep(game); return; }   // ★杀拍补跑（防双跑见 wetSectionRan 注）
     this.wetSectionStep(game);   // ★活拍：AI 后/位移前 = 原版 Update 同序
-    // 水中位移阻尼（HandleMovement :17721-17764 + UpdatePosition :20551 `if (wet)
-    // position += wetVelocity`）——直积分宿主：速度场不减只削当拍位移（干态档=1 恒等;
-    // 16/79 豁免弹 wet 恒 false → 档恒 1 数值不变）
-    const drag = projWaterDragFactor(this);
-    this.x += this.vx * drag;
-    this.y += this.vy * drag;
-    if (this.dead) return;   // 段内水death（34）——:17157 !active 早退,不入带不结算
+    // ---- ★BJ277 碰撞扫掠+反应链（HandleMovement :17578 TileCollision + :18004 flag 旗
+    //  + :19439-19462 aiStyle 9 反应支 + UpdatePosition :20549-20569;1458 同面）----
+    //  ★用户实报修复核心：79 引导档（ai[0]>=0 ↔ mode 0）碰实心块【不 Kill】——
+    //  TileCollision 夹速至贴面 + 命中轴 ×0.1（:19448-19455 字面）→ 下一拍 steer
+    //  amount=1 重瞄 → 星体贴墙滑行持续跟随光标。旧 hitStep 中心格实心杀位不分相位,
+    //  引导星一触墙即 BJ255 迸散 = 原版无此死面。wetVelocity 反应链【前】捕获
+    //  （:17721-17764 湿支:夹后×系数,命中轴覆盖夹后全值;79/16 ignoreWater 恒干,34
+    //  死支无 damp → 捕获序无观感差）。Kill 后位移照走+带记录/Damage 跳过 = 原版
+    //  UpdatePosition 在反应链后恒跑、:17153 !active 门在其后同构。
+    const sweep = this.tileSweep(game);          // 扫掠输入恒 velocity（:17726-17754 非湿速）
+    const drag = projWaterDragFactor(this);      // 湿档系数（干态=1 恒等;速度场不减只削位移）
+    const wvx = sweep.hitX ? sweep.rx : sweep.rx * drag;   // wetVelocity :17755-17763
+    const wvy = sweep.hitY ? sweep.ry : sweep.ry * drag;
+    this.vx = sweep.rx; this.vy = sweep.ry;      // velocity 字段=夹后值（:17959 写回;Kill 爆读此值）
+    if (sweep.hitX || sweep.hitY) {              // lastVelocity != velocity → flag（:18004-18006）
+      if (this.projId === 79 && this.mode === 0) {
+        // type 79 特支（:19442-19456,1458 :19444-19458 同）：引导档免死,命中轴 ×0.1。
+        if (sweep.hitX) this.vx *= 0.1;
+        if (sweep.hitY) this.vy *= 0.1;
+      } else {
+        // 16/34 全相 + 79 松手档（:19458-19461 flag22=owner==myPlayer 支;79 松手=
+        // BJ255 迸散面）
+        this.killNow(game);
+      }
+    }
+    this.x += this.wet ? wvx : this.vx;          // UpdatePosition :20563-20569 `if (wet)`
+    this.y += this.wet ? wvy : this.vy;
+    if (this.dead) return;   // 反应链/湿段杀位——:17153 !active 早退,不入带不结算
     if (this.stripCap > 0) this.stripRecord();   // P.cs:17197（位移后;TrailingMode[16/34/79]=3）
     this.hitStep(game);
   }
@@ -505,8 +530,10 @@ export class MagicMissileProj extends Entity {
    *  draw79Trail 与 killNow 迸散环同消费此带），不维护 rot 镜像。容量 =stripCap
    *  （TrailCacheLength[16]=[34]=30、[79]=60,ProjectileID.cs:387）。
    *  ★时序注（记录 vs 致死）：原版记录段在 Damage()(:17182) 之后、位移致死在
-   *  HandleMovement 内 :17129 `if(!active) return` 早退不入带——本仓记录先于 hitStep,
-   *  故撞块致死拍的死亡点也入带（=原版 Damage 致死拍同款、碰撞致死拍多一柱,登记残差） */
+   *  HandleMovement 内 :17129 `if(!active) return` 早退不入带——★BJ277 后本仓同构：
+   *  反应链 Kill（fixedUpdate 扫掠面）在 stripRecord 前 → dead 早退跳过记录;hitStep
+   *  穿透耗尽杀位仍在记录后 = Damage 致死拍同款。旧「碰撞致死拍多一柱」残差随杀位
+   *  上移自动消解 */
   private stripRecord(): void {
     this.strip.unshift({ x: this.cx, y: this.cy });
     if (this.strip.length > this.stripCap) this.strip.length = this.stripCap;
@@ -724,16 +751,87 @@ export class MagicMissileProj extends Entity {
     return null;
   }
 
-  /** 位移后的碰撞/命中段（同 Arrow 约定：中心格实心即灭） */
+  /** ★BJ277 TileCollision 核心扫掠（Collision.cs:2299-2459 单遍 1:1,aiStyle 9 专参）。
+   *  · 盒 = GetCollisionParams（:19982 resizeAnchor 缺省 (0.5,0.5) + :20127-20131
+   *    aiStyle 9 → colWidth=colHeight=4）→ 盒左上 = Center−(2,2)（:17698）。
+   *  · 单遍【目标位盒】重叠判定（:2355 vector2=Position+Velocity）——32px/拍对单格墙
+   *    可隧穿 = 原版同款快弹 quirk（wiki「Wall-piercing weapons」类,刻意不补步进）。
+   *  · 四向夹速残量=贴面距（从上 :2388/从左 :2406/从右 :2426/从下 :2446）+ 原版
+   *    num 簿记 1:1：X 命中格(num,num2)/Y 命中格(num3,num4),夹速为【逐格覆写】
+   *    （i/j 升序末格胜出——从左支对多列跨压取最远列面 = 原版字面,wiki 穿墙 quirk
+   *    的成因）,非 min/max 累计;从上支带 num6 最顶面门（:2391/:2402）;跨轴复原
+   *    num3==num → result.Y=vector.Y（:2420/:2440）、num4==num2 → result.X=vector.X
+   *    （:2452）;halfBrick 顶 8px（:2349-2354）+ 从上行号 num4++（:2395-2398）;
+   *    hoik 邻格坡门（:2412 左邻坡 2/4、:2432 右邻坡 1/3 → 跳过,hoik 缺省 true,
+   *    FX34b 判例）;up 支 gravDir=1 → +0.01px（:2451 字面）。嵌入盒（四向分支全不中）
+   *    无夹速自由穿出 = 原版同款（出生嵌墙逃逸）。
+   *  · 平台全穿透：TileCollision 实参 fallThrough=fall2=flag6=true（:17587 aiStyle 9
+   *    无特支 → :2391 前置取反不计数;侧/底支 !tileSolidTop 门）。
+   *  · 坡面格按实心 bbox 档（:2361-2384 坡候选 flag2/flag3 与 SlopeCollision
+   *    :17961-17987 残差面未移植,登记残差——仍严格严于旧「中心格实心即灭」档）。
+   *  · 返回 rx/ry=夹后位移,hitX/hitY=轴命中（≡ velocity 轴被改,:18004 旗;
+   *    跨轴复原后净变=false 同 vanilla lastVelocity 逐轴比较）。 */
+  private tileSweep(game: GameHooks): { rx: number; ry: number; hitX: boolean; hitY: boolean } {
+    const st = game.world.store;
+    const bw = 4, bh = 4;                       // colWidth/colHeight（GetCollisionParams aiStyle 9）
+    const bx = this.cx - 2, by = this.cy - 2;   // resizeAnchor 0.5 → 盒左上 = Center−半盒
+    const dx = this.vx, dy = this.vy;
+    let rx = dx, ry = dy;
+    const tx0 = Math.max(0, Math.floor(bx / TILE) - 1), tx1 = Math.min(st.w - 1, Math.floor((bx + bw) / TILE) + 2);
+    const ty0 = Math.max(0, Math.floor(by / TILE) - 1), ty1 = Math.min(st.h - 1, Math.floor((by + bh) / TILE) + 2);
+    let num6 = (ty1 + 3) * TILE;                // :2319 num6（从上支最顶面门,初值=扫描带底外）
+    let num = -1, num2 = -1, num3 = -1, num4 = -1;   // :2311-2314 X 命中格(num,num2)/Y 命中格(num3,num4)
+    const slopeAt = (i: number, j: number): number =>
+      i >= 0 && i < st.w && j >= 0 && j < st.h ? st.slope[st.idx(i, j)] : 0;   // null 格=坡 0（:2408-2411/:2428-2431）
+    for (let i = tx0; i <= tx1; i++) {
+      for (let j = ty0; j <= ty1; j++) {
+        if (!st.inBounds(i, j) || !st.isActive(i, j) || !st.isSolid(i, j)) continue;
+        let vy4 = j * TILE, h7 = TILE;
+        if (st.half[st.idx(i, j)]) { vy4 += 8; h7 -= 8; }            // halfBrick :2349-2354
+        const vx4 = i * TILE;
+        // 目标位盒不重叠 → 跳过（:2355 vector2 = Position+Velocity）
+        if (bx + dx + bw <= vx4 || bx + dx >= vx4 + TILE || by + dy + bh <= vy4 || by + dy >= vy4 + h7) continue;
+        if (by + bh <= vy4) {                              // 从上（:2388 down 支）
+          if (num6 > vy4) {                                // :2391 num6 门（最顶面胜出）
+            num3 = i; num4 = j;
+            if (h7 < TILE) num4++;                         // :2395-2398 半砖行号 +1
+            if (num3 !== num) {                            // :2399（flag2 坡候选恒 false,见头注）
+              ry = vy4 - (by + bh);                        // :2401（gravDir=1 无 ε）
+              num6 = vy4;
+            }
+          }
+        } else if (bx + bw <= vx4) {                       // 从左（:2406）
+          if (i < 1 || (slopeAt(i - 1, j) !== 2 && slopeAt(i - 1, j) !== 4)) {   // :2412 hoik 左邻坡门
+            num = i; num2 = j;
+            if (num2 !== num4) rx = vx4 - (bx + bw);       // :2416-2418（覆写,末格胜出）
+            if (num3 === num) ry = dy;                     // :2420-2422 result.Y = vector.Y
+          }
+        } else if (bx >= vx4 + TILE) {                     // 从右（:2426）
+          if (slopeAt(i + 1, j) !== 1 && slopeAt(i + 1, j) !== 3) {              // :2432 hoik 右邻坡门
+            num = i; num2 = j;
+            if (num2 !== num4) rx = vx4 + TILE - bx;       // :2436-2438（覆写,末格胜出）
+            if (num3 === num) ry = dy;                     // :2440-2442 result.Y = vector.Y
+          }
+        } else if (by >= vy4 + h7) {                       // 从下（:2446 up 支）
+          num3 = i; num4 = j;
+          ry = vy4 + h7 - by + 0.01;                       // :2451（gravDir=1 → +0.01 字面）
+          if (num4 === num2) rx = dx;                      // :2452-2454 result.X = vector.X
+        }
+      }
+    }
+    return { rx, ry, hitX: rx !== dx, hitY: ry !== dy };
+  }
+
+  /** 位移后的命中段（Damage 管线;:17153 !active 已过）。★BJ277：中心格实心杀位退役——
+   *  tile 碰撞面已上移 HandleMovement 扫掠+反应链（fixedUpdate;原版 HandleMovement 内
+   *  无 tile 杀位,弹体死亡面全在反应链 Kill/湿段水death/timeLeft/穿透耗尽）。inBounds
+   *  杀位与割草面维持原位（cutTile 消费面不变）。 */
   private hitStep(game: GameHooks): void {
     const world = game.world;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (!world.store.inBounds(tx, ty)) { this.killNow(game); return; }
-    if (world.store.get(tx, ty) !== 0) {
-      game.cutTile(tx, ty);
-      if (world.store.isSolid(tx, ty)) { this.killNow(game); return; }
-    }
+    if (world.store.get(tx, ty) !== 0) game.cutTile(tx, ty);   // ★BJ277:杀位移交扫掠反应链,割草面原位
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }

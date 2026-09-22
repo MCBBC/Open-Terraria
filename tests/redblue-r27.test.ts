@@ -284,8 +284,8 @@ describe('⑤ 荆棘链段系统（aiStyle 4 :23943-24080）', () => {
   });
 });
 
-// ============ ⑥ Rainbow Rod 79（1458 变更面） ============
-describe('⑥ Rainbow Rod 1458 飞行尘+循环音+Kill AoE（AI_009 :44390-44406 / Kill :72426）', () => {
+// ============ ⑥ Rainbow Rod 79（1458 变更面;飞行尘/循环音面经 BJ255 翻案退役） ============
+describe('⑥ Rainbow Rod 1458 Kill AoE（Kill :72426;飞行尘/循环音=旧 AI 死码,BJ255 定谳）', () => {
   function mkMissile(game: GameHooks): MagicMissileProj {
     return new MagicMissileProj(80 * TILE, 100 * TILE, 20, 0, {
       projId: 79, damage: 50, knockback: 4, useTime: 20,
@@ -295,17 +295,20 @@ describe('⑥ Rainbow Rod 1458 飞行尘+循环音+Kill AoE（AI_009 :44390-4440
     }) as MagicMissileProj;
   }
 
-  it('十拍循环啸声：|v|>2 时每 10 update 播 Item_9；每 update 1×d66 disco 尘', () => {
+  it('★BJ255 翻案重产：79 飞行期无尘无循环音（:44390 块=旧频道式 AI 死码,新 AI 无 79 块）', () => {
+    // 旧断言（21×d66 飞行尘 + 3×Item9 循环啸声）系 R27 把 :44389-44407 误归属
+    // AI_009_MagicMissiles（新 AI）——该块实际在 AI_009_MagicMissiles_Old
+    // （1457 :44231 起,全文件唯一调用点 = type 491 分支 :44000）。79 走新 AI
+    // （:24644 → :43996-44230）内无任何 79 块 → 飞行期零尘零循环音（BJ255
+    // 2026-09-21 定谳;保留项仅 ProjLight :16600-16605 disco 点光 + Kill :72426 迸散）。
+    // 本测试为陈旧金标重产（fx13/14/15 台账陈旧族同案）。
     const w = emptyWorld();
     const game = makeGame(w);
     const m = mkMissile(game);
     const r0 = rec(game).dusts.length;
     for (let t = 0; t < 21; t++) m.fixedUpdate(1 / 60, game);
-    const item9 = rec(game).sfx.filter((s) => s.includes('Item_9'));
-    expect(item9.length).toBe(3);                                   // t=0/10/20 三拍
-    const d66 = rec(game).dusts.slice(r0).filter((d) => d.type === 66);
-    expect(d66.length).toBe(21);                                    // 每拍 1 枚
-    expect(d66[0].noGravity).toBe(true);
+    expect(rec(game).sfx.filter((s) => s.includes('Item_9')).length).toBe(0);   // 无循环音
+    expect(rec(game).dusts.slice(r0).filter((d) => d.type === 66).length).toBe(0);   // 无飞行尘
   });
 
   it('Kill：128px 盒 AoE 二次结算 + Item10 + 沿尾迹 d267 迸散 + 14×d66', () => {

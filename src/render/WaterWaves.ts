@@ -678,6 +678,84 @@ class WaterWaveSystem {
       this._R = R2; this._G = G2; this._R2 = R; this._G2 = G;
       return;
     }
+    if (swPerf) {
+      // ★BJ270 内域快路径(2026-09-22,Windows 丛林卡顿 trace:_step 全 trace self
+      //  2.27s/6.8%,走动帧走下方原路径=每像素 3 次 x 钳制 min/max+分支)。判据:
+      //   内域像素满足 sx0=x-dx∈[1,w-2] 且 sy0=y-dy∈[1,h-2] ⇒ xL/xM/xR 与
+      //   yU/yM/yD 的钳制全部不缚(xL=sx0-1/xM=sx0/xR=sx0+1、yU=sy0-1/yM=sy0/
+      //   yD=sy0+1 逐值同)+中性出界支不可达 ⇒ 免钳制免分支,核公式段与原路径
+      //   【逐字同序】(位恒等 by construction,tests/bj270-waves-interior.test.ts
+      //   随机场/走动/大跳 dx,dy 双支对拍+min/max 计数锁)。内域=行走帧的
+      //   ~全格(dx,dy∈{-1,0,1} 时内域≈(w-2)×(h-2));W3(dx=dy=0)仍走上方专路。
+      //   原路径整段保留于下方= ?swperf=0 豁免臂逐字不动。
+      const xLo = Math.max(0, dx + 1), xHi = Math.max(xLo, Math.min(w, dx + w - 1));
+      const yLo = Math.max(0, dy + 1), yHi = Math.max(yLo, Math.min(h, dy + h - 1));
+      // 边缘像素(内域外的 L 形带:出界中性/0、w-1 与 h-1 缚边钳制)——与原路径
+      // 逐值同式;闭包每 _step 一次,边缘像素占比 O(边缘带) 极薄
+      const edgePx = (x: number, y: number, sy0: number, yIn: boolean,
+        rowU: number, rowM: number, rowD: number): void => {
+        const sx0 = x - dx;
+        const i = y * w + x;
+        if (!yIn || sx0 < 0 || sx0 >= w) {
+          R2[i] = 0.5; G2[i] = 0.5;        // ① 未覆盖区中性(非 clamp 条带)
+          return;
+        }
+        const xL = Math.min(w - 1, Math.max(0, sx0 - 1));
+        const xM = Math.min(w - 1, Math.max(0, sx0));
+        const xR = Math.min(w - 1, Math.max(0, sx0 + 1));
+        const c = R[rowM + xM], cg = G[rowM + xM];
+        const signedC = 2 * c - 1;
+        const S = (2 * R[rowM + xL] - 1) + (2 * R[rowM + xR] - 1)
+          + (2 * R[rowU + xM] - 1) + (2 * R[rowD + xM] - 1);
+        const wv = (cg - 0.5) * (10 / 3);
+        const newH = (signedC + 2 * (S * 0.25 - signedC) + wv * Math.abs(wv)) * WATER_DAMP;
+        const q = Math.round(512 * (newH * 0.5 + 0.5));
+        let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
+        if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
+        R2[i] = rq / 256;
+        const dv = newH - signedC;
+        let gq = Math.round((0.5 + 0.3 * Math.sign(dv) * Math.sqrt(Math.abs(dv))) * 256);
+        if (gq < 0) gq = 0; else if (gq > 256) gq = 256;
+        G2[i] = gq / 256;
+      };
+      for (let y = 0; y < h; y++) {
+        const sy0 = y - dy;
+        const yIn = sy0 >= 0 && sy0 < h;
+        if (yIn && y >= yLo && y < yHi) {
+          // 内域行:三邻行自动在界(yU=sy0-1/yM=sy0/yD=sy0+1 无钳制)
+          const rowM = sy0 * w, rowU = (sy0 - 1) * w, rowD = (sy0 + 1) * w;
+          for (let x = 0; x < xLo; x++) edgePx(x, y, sy0, true, rowU, rowM, rowD);
+          for (let x = xLo; x < xHi; x++) {
+            const sx0 = x - dx;             // ∈[1,w-2](xLo/xHi 构造保证)
+            const xL = sx0 - 1, xM = sx0, xR = sx0 + 1;
+            const i = y * w + x;
+            const c = R[rowM + xM], cg = G[rowM + xM];
+            const signedC = 2 * c - 1;
+            const S = (2 * R[rowM + xL] - 1) + (2 * R[rowM + xR] - 1)
+              + (2 * R[rowU + xM] - 1) + (2 * R[rowD + xM] - 1);
+            const wv = (cg - 0.5) * (10 / 3);
+            const newH = (signedC + 2 * (S * 0.25 - signedC) + wv * Math.abs(wv)) * WATER_DAMP;
+            const q = Math.round(512 * (newH * 0.5 + 0.5));
+            let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
+            if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
+            R2[i] = rq / 256;
+            const dv = newH - signedC;
+            let gq = Math.round((0.5 + 0.3 * Math.sign(dv) * Math.sqrt(Math.abs(dv))) * 256);
+            if (gq < 0) gq = 0; else if (gq > 256) gq = 256;
+            G2[i] = gq / 256;
+          }
+          for (let x = xHi; x < w; x++) edgePx(x, y, sy0, true, rowU, rowM, rowD);
+        } else {
+          const yU = Math.min(h - 1, Math.max(0, sy0 - 1));   // 上邻(uv y 向下)
+          const yM = Math.min(h - 1, Math.max(0, sy0));
+          const yD = Math.min(h - 1, Math.max(0, sy0 + 1));
+          const rowM = yM * w, rowU = yU * w, rowD = yD * w;
+          for (let x = 0; x < w; x++) edgePx(x, y, sy0, yIn, rowU, rowM, rowD);
+        }
+      }
+      this._R = R2; this._G = G2; this._R2 = R; this._G2 = G;
+      return;
+    }
     for (let y = 0; y < h; y++) {
       const sy0 = y - dy;
       const yU = Math.min(h - 1, Math.max(0, sy0 - 1));   // 上邻（uv y 向下）

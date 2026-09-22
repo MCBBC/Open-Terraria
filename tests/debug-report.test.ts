@@ -268,7 +268,12 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     // player：invNonEmpty = [slot, id, stack, prefix, vid]
     const p = r.player as Record<string, unknown>;
     expect(p.maxHp).toBeGreaterThan(0);
-    expect(p.invNonEmpty).toEqual([[0, 1, 30, 0, -1]]);
+    // ★BJ267 阶段 6 定谳重钉：-1 → 1。夹具是裸 stack {id:1}；vid 由 DebugReport.ts:620
+    //   `ITEM_DEFS[s.id]?.vid ?? -1` 直读。旧序域下标 1=vi_1291_life_fruit 注册位（无
+    //   vid 字段）→ −1；方案 A 阶段 1 reorder 尾段+阶段 4 BJ265 块⑥ vid 回填后
+    //   internal≡vid（1 号位=原版 vid 1）→ 1=统一域设计值，非回归。BJ264 阶段 2 终态
+    //   回归时回填尚未落地故此字面量当时仍绿（基线 14 红外首例漏网）。
+    expect(p.invNonEmpty).toEqual([[0, 1, 30, 0, 1]]);
 
     // systems
     const sys = r.systems as Record<string, Record<string, unknown>>;

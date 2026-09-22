@@ -29,14 +29,21 @@ function evidenceSignatureWorld(): World {
   const st = w.store;
   const W = st.w;
   const plat = TILE_BY_KEY['platform'];
+  const dirt = TILE_BY_KEY['dirt'];
   expect(TILE_DEFS_SHEET(plat)).toBe(19);
   paintRect(st, W - 46, W - 35, 164, 164, plat);
-  paintWater(st, W - 34, W - 1, 165, 195);
+  // ★BJ275 语义锁同步（2026-09-22）：水体扩到栈桥下方 [W-60..W-1]@165-195 + 栈桥以左
+  //   补自然岸线 [W-70..W-61]@165-196（顶=水面行 165）——对齐用户真实地图形态
+  //   （海面栈桥 T11@414 铺 ≤6100..6364、水下海床、栈桥左端下方海床升出水面的岸线）。
+  paintWater(st, W - 60, W - 1, 165, 195);
+  paintRect(st, W - 70, W - 61, 165, 196, dirt);
   paintRect(st, 36, 46, 112, 112, plat);
   paintWater(st, 30, 60, 112, 143);
   st.setLiquid(40, 112, 127, LIQUID_TYPE.WATER);
   expect(st.flags[st.idx(W - 40, 164)]).toBe(1);
   expect(st.liquid[st.idx(W - 40, 164)]).toBe(0);
+  expect(st.liquid[st.idx(W - 40, 165)]).toBe(200);   // ★BJ275: 栈桥正下方有水（海面行=165）
+  expect(st.flags[st.idx(W - 61, 165)]).toBe(1);      // ★BJ275: 水线岸承位在位（甲板以左）
   return w;
 }
 function naturalSignatureWorld(): World {
@@ -107,21 +114,25 @@ describe('BJ242 右洋补偿式内移重试（用户明令分歧,回滚口 Game.
     expect(CONCH_DEFAULT_AT_IMPORT).toBe(true);
   });
 
-  it('①物证特征世界（缺省 ON）：右洋重试命中——落右洋甲板 (w-41,163),fire 面从左半场直达右洋', () => {
+  it('①物证特征世界（缺省 ON）：右洋重试穿栈桥落水线岸承位 (w-61,164),fire 面从左半场直达右洋', () => {
+    // ★BJ275 语义锁同步（2026-09-22 用户实报「落到海上最远的平台」）：重试面平台不作
+    //   承位（includePlatforms=false）——原「落甲板 (w-41,163)」=用户实报的病灶;现竖降
+    //   穿过栈桥→液面爬行照原版爬到水线岸（w-61,164 站岸顶 165）。OFF/自然/左洋锁面
+    //   不变（②③④）。
     const w = evidenceSignatureWorld();
     const W = w.store.w;
-    // 函数面：右洋边界拒 → 内移起点 559 落甲板 (559,163)（站 deck@164 顶面）
+    // 函数面：右洋边界拒 → 内移起点 559 穿栈桥（平台不作承位）→ 爬行 20 步落岸 (539,164)
     const g = stubGame(w, 0, 0);
     const dest = g.requestMagicConchTeleportPosition(true);
     expect(dest, '补偿重试后右洋可达').not.toBeNull();
-    expect(dest!.x).toBe((W - 41) * TILE + 8 - 10);
-    expect(dest!.y).toBe(163 * TILE + 16 - 42);
+    expect(dest!.x).toBe((W - 61) * TILE + 8 - 10);
+    expect(dest!.y).toBe(164 * TILE + 16 - 42);
     expect(dest!.x).toBeGreaterThan(W * TILE / 2);   // 落点在世界右半=右洋域
-    // fire 面：左半场玩家 → 首选右洋（原版败）→ 补偿重试命中 → velocity=Zero 命中臂
+    // fire 面：左半场玩家 → 首选右洋（原版败）→ 补偿重试命中岸线 → velocity=Zero 命中臂
     const g2 = stubGame(w, 40 * TILE, 110 * TILE);
     const p = fire(g2, 40 * TILE);
-    expect(p.x).toBe((W - 41) * TILE + 8 - 10);
-    expect(p.y).toBe(163 * TILE + 16 - 42);
+    expect(p.x).toBe((W - 61) * TILE + 8 - 10);
+    expect(p.y).toBe(164 * TILE + 16 - 42);
     expect(p.vy, '命中臂 velocity=Zero（Player.cs:56820）').toBe(0);
   });
 

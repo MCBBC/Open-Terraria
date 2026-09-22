@@ -4,7 +4,7 @@
 //   ③ ai75 激光钻分支（Item132/23t :67285 + 相位灯串 :67300-67320，无火花尘）
 //   ④ 命中 DamageVar（Damage_PVE :14719）——方差在基伤掷、暴击翻倍在后
 //   ⑤ 批次 A：496 冰雪法杖 kb 终值 2 / 纸飞机 / 新奇品 / PrincessWeapon 数据面
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { ChainsawProj } from '../src/entities/ChainsawProj';
@@ -196,6 +196,11 @@ describe('激光钻 ai75 分支（2798→445，r33-③）', () => {
 // ============================================================
 describe('命中伤害方差（r33-④）', () => {
   it('非暴击伤 ∈ damage±15%（luck=0 单掷域）', () => {
+    // ★BJ266 定谳：暴击掷 Math.random()<0.04（ChainsawProj :250）≈4% 假红率——
+    //   钉 RNG=0.99（非暴击档；DamageVar 方差同源取 +15 档=137，仍在本测 ±15% 窗内）。
+    //   try/finally 恢复，防污染同文件真随机消费面（③ 40t 尘概率测试等）。
+    const rand = vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    try {
     const { hooks, player } = makeHooks();
     const saw = new ChainsawProj(player, 120, 8, () => true,
       () => ({ x: player.cx + 40, y: player.cy }), { projId: 509, shootSpeed: 48 });
@@ -207,6 +212,7 @@ describe('命中伤害方差（r33-④）', () => {
     const got = (foe as { got?: number }).got ?? -1;
     expect(got).toBeGreaterThanOrEqual(Math.floor(120 * 0.85));
     expect(got).toBeLessThanOrEqual(Math.ceil(120 * 1.15));
+    } finally { rand.mockRestore(); }
   });
 });
 

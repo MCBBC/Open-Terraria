@@ -274,17 +274,60 @@ export class WaterfallRenderer {
         return s === 3 || s === 4;
       };
       // 水平镜像绘制（SpriteEffects.FlipHorizontally 的 canvas 等价）
+      // ★BJ274（2026-09-22 用户实报"丛林草地上一排错误渲染的半砖方块/脚下悬空"定谳）：
+      //  原版瀑布画在 DoDraw_Tiles_NonSolid 之后、DoDraw_Tiles_Solid 之前
+      //  （Main.cs DoDraw_WallsTilesNPCs 末尾 :64242 → DoDraw :64256 DoDraw_Tiles_Solid）
+      //  ——水面横流带 y0+8 落在后画实心块上的下半幅被遮挡，实观只剩气格内 8px 细线。
+      //  本仓瀑布画在整幅 tile 层之后（Renderer 2c 段 drawChunkGrid('tile') →
+      //  drawWaterfalls），16px 全幅盖在草地上=实报观感。修 = 逐 draw 对覆盖到的
+      //  【全实心格】子域做减法裁剪（solidT 单源=本行走断流谓词，WaterfallManager.cs:551
+      //  blockType()==0 同域），像素等价于原版层级；非实心格（植物/半砖/坡面）上的
+      //  瀑布仍全幅可见（原版瀑布画于非实心块之后=同效）。无实心覆盖走原单调用快径
+      //  （调用序列与既有对拍逐位一致）。
       const drawFlipped = (
         flip: boolean, sx: number, sy: number, sw: number, sh: number,
         px: number, py: number, dw: number, dh: number,
       ) => {
         if (sh <= 0 || dh <= 0) return;
-        if (!flip) { ctx.drawImage(texImg, sx, sy, sw, sh, px, py, dw, dh); return; }
-        ctx.save();
-        ctx.translate(px + dw, py);
-        ctx.scale(-1, 1);
-        ctx.drawImage(texImg, sx, sy, sw, sh, 0, 0, dw, dh);
-        ctx.restore();
+        const c0 = Math.floor(px / 16), c1 = Math.ceil((px + dw) / 16) - 1;
+        const r0 = Math.floor(py / 16), r1 = Math.ceil((py + dh) / 16) - 1;
+        let occluded = false;
+        if (c1 > c0 || r1 > r0) {
+          for (let rr = r0; rr <= r1 && !occluded; rr++) {
+            for (let cc = c0; cc <= c1; cc++) {
+              if (solidT(cc, rr)) { occluded = true; break; }
+            }
+          }
+        }
+        if (!occluded) {
+          if (!flip) { ctx.drawImage(texImg, sx, sy, sw, sh, px, py, dw, dh); return; }
+          ctx.save();
+          ctx.translate(px + dw, py);
+          ctx.scale(-1, 1);
+          ctx.drawImage(texImg, sx, sy, sw, sh, 0, 0, dw, dh);
+          ctx.restore();
+          return;
+        }
+        // 被实心格覆盖：逐覆盖格子域绘制（实心子域跳过），源矩形按子域比例换算；
+        // flip 时源 X 反向映射（镜像下 dest [ix0,ix1] ↔ source sx+(px+dw-ix1)·sw/dw）
+        for (let rr = r0; rr <= r1; rr++) {
+          for (let cc = c0; cc <= c1; cc++) {
+            const ix0 = Math.max(px, cc * 16), ix1 = Math.min(px + dw, cc * 16 + 16);
+            const iy0 = Math.max(py, rr * 16), iy1 = Math.min(py + dh, rr * 16 + 16);
+            if (ix1 <= ix0 || iy1 <= iy0) continue;
+            if (solidT(cc, rr)) continue;
+            const w2 = ix1 - ix0, h2 = iy1 - iy0;
+            const sX = flip ? sx + (px + dw - ix1) * (sw / dw) : sx + (ix0 - px) * (sw / dw);
+            const sY = sy + (iy0 - py) * (sh / dh);
+            const sW = w2 * (sw / dw), sH = h2 * (sh / dh);
+            if (!flip) { ctx.drawImage(texImg, sX, sY, sW, sH, ix0, iy0, w2, h2); continue; }
+            ctx.save();
+            ctx.translate(ix0 + w2, iy0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(texImg, sX, sY, sW, sH, 0, 0, w2, h2);
+            ctx.restore();
+          }
+        }
       };
       for (let step = 0, WD2 = WATERFALL_DIST(); step < WD2; step++) {
         if (turns >= 2) break;                          // 循环头 :533-536

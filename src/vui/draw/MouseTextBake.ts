@@ -94,6 +94,13 @@
 //   贴图,本管线零贴图消费。仍按保守纪律挂 sw:remaster-applied 一并清两缓存
 //   (BestiaryPanel.ts:64 同款先例;重烘/重染一帧内完成,无感)。字体就绪窗由
 //   bake() fontReady() 门兜住(未就绪不产条目,无陈旧回退字形)。
+// ★BJ276 2026-09-22 方案 B(用户拍板:信息栏文本=动态读数直绘,接受平滑质感换
+//   取烘焙 churn 归零):InfoAccsLayer 信息行退役烘焙缓存——动态读数键每帧变→
+//   逐帧 miss→逐帧烘焙+canvas 出生(实测行走态 ~88/s,LRU/willReadFrequently 只能
+//   摊销不能根治),改走下方 drawDirectMouseText(fillText+四向描边直绘,原版逐帧
+//   直绘 glyph 同思路)。本模块烘焙管线现役消费面=悬停标签(Renderer.drawMouseText
+//   Layer:物品名/NPC 名/箱名/行标签——键在悬停目标间稳定=真静态面)保留全链;
+//   直绘面与缓存零交互(零 canvas 出生/零缓存键/零 binarize)。
 import { CANVAS_MOUSETEXT_FONT, PIXEL_FONT_FAMILY, PixelText } from './PixelText';
 
 /** 字体原生网格(px)——Fusion Pixel 12px 的设计栅格 */
@@ -162,6 +169,27 @@ interface BakedLine {
 const cache = new Map<string, BakedLine>();
 const CACHE_CAP = 512;
 
+// ★BJ270 2026-09-22(Windows 丛林卡顿 trace 定谳;Trace-20260922T124932.json):
+//   getImageData 全 trace self-time 头号热点 5.39s/16.1%,链 = Pse(binarize)←Pst(bake)
+//   ←jge(drawBakedMouseText)←InfoAccsLayer.draw——信息栏/悬停行的**文本 churn**
+//   (秒表 mph 整数读数/雷达敌怪计数随帧变)逐帧造新键 → 逐帧 miss → 每次烘焙
+//   2 次 binarize=getImageData+putImageData。sil/mask 是 GPU 后备画布时
+//   getImageData 强制 GPU→CPU 同步回读(实测单次 1-5ms 级)=风暴主体;
+//   且满容量 `cache.clear()` 全清 = 静态行条目陪葬 → 下一帧全部行级联重烘
+//   (150-400ms 级帧爆发物证,trace 前 9s rAF 间隙 >100ms×33 次)。
+// 【刀1】pixel 档(hidpi 恒不走 binarize,不动)烘焙画布挂 willReadFrequently:
+//   后备_store 转软件位图,getImageData=本域 memcpy,零 GPU 同步;fillText 光栅化
+//   不经后备_store 类型改变(同 Skia 光栅器)⇒ binarize 输出逐位同=烘焙位图字节
+//   同源。烘焙产物 bake 后内容不变,Chrome 按 canvas 内容版本缓存已上传 GPU 纹理
+//   ⇒ 每帧 sil blit 不重传。先例:UI.ts:61烘焙画布 willReadFrequently。
+// 【刀2】满容量从「全清」改「单条 LRU 逐出」+命中刷 recency(delete+set)——
+//   静态行每帧命中恒 MRU 不被逐;churn 一次性键(读数值)落 LRU 头部被逐,
+//   静态行不再级联重烘。tintCache 同款先例(本文件下方)。
+/** ★刀1:烘焙位图 2D context 属性(pixel 档才走 binarize 读回;hidpi 档不传,
+ *  字节面零变化)。显式注解 CanvasRenderingContext2DSettings——as const 字面量
+ *  会使 getContext 的 '2d' 重载失配而落 string 回退重载(返回联合类型,TS2339) */
+const BAKE_READBACK_ATTRS: CanvasRenderingContext2DSettings = { willReadFrequently: true };
+
 let sharedCtxCache: CanvasRenderingContext2D | null = null;
 function sharedCtx(): CanvasRenderingContext2D {
   if (!sharedCtxCache) {
@@ -208,7 +236,13 @@ function bake(text: string): BakedLine | null {
   const regime = currentRegime();
   const key = `${regime}:${text}`;
   const hit = cache.get(key);
-  if (hit) return hit;
+  if (hit) {
+    // ★BJ270 刀2:命中刷 recency(信息栏静态行每帧重画,恒 MRU;churn 一次性键
+    //  落头部被逐,见 LRU 逐出注)——Map.get 不改迭代序,须 delete+set
+    cache.delete(key);
+    cache.set(key, hit);
+    return hit;
+  }
   // hidpi 档 = 2× 超采样:烘焙字号 28px、描边环 ±2 逻辑 px(=±4 subpx)、保灰度;
   // pixel 档 = FX57 原生 12px、环 ±1 艺术格、binarize 二值(跨平台确定性)。
   const hidpi = regime === 'hidpi';
@@ -230,7 +264,9 @@ function bake(text: string): BakedLine | null {
   const baseY = outline + 1 + ascI;
   const h = baseY + descI + outline + 1;
   const sil = mkCanvas(w, h);
-  const sc = sil.getContext('2d');
+  // ★BJ270 刀1:pixel 档挂 willReadFrequently(binarize 读回走软件后备_store,
+  //  消灭逐烘焙 GPU→CPU 同步回读;hidpi 档零读回,不传保持字节面零变化)
+  const sc = sil.getContext('2d', hidpi ? undefined : BAKE_READBACK_ATTRS);
   if (!sc) return null;
   sc.textAlign = 'left';
   sc.textBaseline = 'alphabetic';
@@ -241,7 +277,7 @@ function bake(text: string): BakedLine | null {
   }
   sc.fillText(text, padL, baseY);   // 本体同入剪影(描边被实心字形吃净的原版观感)
   const mask = mkCanvas(w, h);
-  const mc = mask.getContext('2d');
+  const mc = mask.getContext('2d', hidpi ? undefined : BAKE_READBACK_ATTRS);
   if (!mc) return null;
   mc.textAlign = 'left';
   mc.textBaseline = 'alphabetic';
@@ -257,7 +293,12 @@ function bake(text: string): BakedLine | null {
     binarize(sil);
     binarize(mask);
   }
-  if (cache.size >= CACHE_CAP) cache.clear();
+  // ★BJ270 刀2:满容量单条 LRU 逐出(原 `cache.clear()` 全清=静态行陪葬级联重烘,
+  //  trace 前 9s 帧爆发物证;churn 键为一次性读数串,恒居 Map 头部=最旧位)
+  if (cache.size >= CACHE_CAP) {
+    const oldestKey = cache.keys().next().value as string;
+    cache.delete(oldestKey);
+  }
   const line: BakedLine = { sil, mask, w, h, padL, baseY, ascA, w12, px: bakePx, regime };
   cache.set(key, line);
   return line;
@@ -418,6 +459,56 @@ export function drawBakedMouseText(
   ctx.drawImage(tintSource(baked, text, opts.color), dx, dy, dw, dh);
   ctx.restore();
   return true;
+}
+
+// ---------- ★BJ276 2026-09-22 方案 B:动态读数直绘 ----------
+
+export interface DirectTextDrawOpts {
+  /** 锚语义与 BakedTextDrawOpts 同表:'middle'=行盒中点(InfoAccs 行 ty)/
+   *  'top'=em 顶(drawMouseTextLayer 锚)——textBaseline 直绘同位 */
+  anchor: 'middle' | 'top';
+  /** 正文色(fillStyle 串;描边恒黑) */
+  color: string;
+  /** 压暗行 α(globalAlpha,描边+正文一起暗;缺省 1) */
+  alpha?: number;
+  /** 行宽钳制缩放(InfoAccs 215px 钳制;缺省 1) */
+  scaleX?: number;
+  scaleY?: number;
+}
+
+/**
+ * 画一行【直绘】MouseText——方案 B 动态读数路径(信息栏读数行等逐帧变键的面)。
+ * 与烘焙路径的分工见头注 ★BJ276:直绘与缓存零交互(零 canvas 出生/零缓存键),
+ * 每帧 5 次 fillText(四向 ±2 黑描边 + 本体)= 原版 Utils.DrawBorderStringFourWay
+ * (Utils.cs:2633 四向 ±2 字体像素)+ 逐帧直绘 glyph 同思路;观感 = 目标字号
+ * fillText 的字体系统灰度 AA(平滑,用户已拍板接受——FX57 二值锐利仅在静态烘焙面
+ * 保持)。op 序与 FX57 前/烘焙不可用回退支逐字节同形(InfoAccsLayer/Renderer
+ * 两处旧直绘:translate+scale+globalAlpha → 4×'#000'±2 → 本体色)。
+ * 不触碰主画布变换外状态;save/restore 包裹(font/textAlign/textBaseline/
+ * globalAlpha 全部自钉,不依赖调用侧预置——旧回退支依赖外层 font/baseline,本
+ * 函数显式设同值,净状态相同)。
+ */
+export function drawDirectMouseText(
+  ctx: CanvasRenderingContext2D,
+  text: string, anchorX: number, anchorY: number,
+  opts: DirectTextDrawOpts,
+): void {
+  const scaleX = opts.scaleX ?? 1, scaleY = opts.scaleY ?? 1;
+  const alpha = opts.alpha ?? 1;
+  ctx.save();
+  ctx.font = CANVAS_MOUSETEXT_FONT;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = opts.anchor;
+  ctx.translate(anchorX, anchorY);
+  if (scaleX !== 1 || scaleY !== 1) ctx.scale(scaleX, scaleY);
+  if (alpha < 1) ctx.globalAlpha = alpha;
+  for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+    ctx.fillStyle = '#000';
+    ctx.fillText(text, ox, oy);
+  }
+  ctx.fillStyle = opts.color;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
 }
 
 /** 诊断面(探针 scripts/_fx57-text-bake.mjs、scripts/_fx58-mac-sharpen.mjs 用):

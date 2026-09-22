@@ -177,7 +177,7 @@ for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBu
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, isNearFairyWindow, spawnTileSolid, solidTilesCell, worldSolidTile, vanillaTileSolidPure, VANILLA_TILE_SOLID_TOP, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
-import { availableRecipes, collectOwnedItems, collectedEnoughForCraft, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, CRAFT_CHEST_RANGE_PX, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla } from '../data/vanillaRecipes';
+import { availableRecipes, collectOwnedItems, collectedEnoughForCraft, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, CRAFT_CHEST_RANGE_PX, type CraftItemSource, type VanillaRecipeLike, invIndexOfVanilla, craftListSignature } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerToNpcOf, bannerItemId, bannerStyleOf, scanBannerNpcs, scanBannerReps, bannerReceivedMult } from '../world/Banners';
 import { CHESTER_CONTAINER, MONEY_TROUGH_USE, VOID_LENS_CONTAINER } from '../data/vanillaOpenBags';
 import { FlyingPiggyBank } from '../entities/FlyingPiggyBank';
@@ -7984,6 +7984,8 @@ export class Game implements GameHooks {
       this.tickHoverDropName();
     }
     if (this.world) this.tickInfoAccsHover();   // 绘制相族:暂停拍照跑（DrawInfoAccs 同相）
+    // ★BJ269:配方列表逐帧探针（绘制相;SuppressDraw 抑制帧不进=原版同相,详见探针注）
+    if (this.world) this.probeCraftListRefresh();
     const r0 = performance.now();
     this.render();
     gfxQuality.drawsThisSecond++;
@@ -30159,11 +30161,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  ① num8=400×(worldSurface-10)（循环上限与深度挂钩）②下沉到 worldSurface-40
    *  即回卷 Y=50、X 进 crawlOffsetX（③末支 `!lowTiles && !SolidOrSlopedTile(below)`
    *  的继续爬行臂被去门）④落点深度扫描 num13=20→10+左右邻列两支。
+   *  「最近承位」原版精确语义（BJ275 亲读定谳）=**起点列竖降优先,首个合法承位即停**
+   *  （竖降只在液面/危险/邻列遮挡时转横向爬行;爬行遇首个下方承位格即 break,不找更优）;
+   *  承位判据=SolidOrSlopedTile(includePlatforms:true)∨liquid>0——平台与水面均算承位
+   *  （TeleportHelpers.cs:65/77-78/160/182/192,WorldGen.cs:70515-70540）。
    *  物理探针（★SW-BJ43 收敛为精确面）：IsInSolidTilesExtended 定谳 = Lava∨Hurting∨
    *  SolidCollision @ 锚盒 20×42（TileCollision 四探针 start=P∓16px、velocity=±16px →
    *  终点盒恒=锚盒,Collision.cs:2299）→ boxBlocked 锚盒 9 格逐格判=精确非近似
    *  （旧刀外扩 px−2 列/py−3 行=假性失败根因,见 boxBlocked 注）。CanTileHurt 走
-   *  TouchDamage.canTileHurt。失败 = 原版 canSpawn=false（原地不传送、不消耗）。 */
+   *  TouchDamage.canTileHurt。失败 = 原版 canSpawn=false（原地不传送、不消耗）。
+   *  ★BJ275：inwardRetry（BJ242 补偿重试）面 solidOrSloped 以 includePlatforms=false
+   *  运行=平台不作承位（穿过用户海面栈桥,液面爬行落水线岸承位）;其余面逐字。 */
   /** ★★BJ242 用户明令分歧闸（2026-09-21 拍板;先例 Player.SURFACE_SKIM_SPLASH 同型）:
    *  右海洋传送友好化=补偿式内移重试——右洋尝试在 InWorld(…,40) 右边界被拒（px≥w-40,
    *  爬向恒内卷⇒必零爬行落位）时,内移起点 x=w-41（进合法域）重试右洋一次。
@@ -30172,7 +30180,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  起点列 → 右洋恒败回退左洋（BJ240 定谳）。三路实锤（wiki 行为级记载/反编译
    *  调用链全图/独立 rig 三方同判）= /tmp/bj242-evidence/。自然地图（右洋原版
    *  成功）零分支;左洋永不补偿。回滚=置 false（或摘补偿分支）⇒ 与原版逐字全等
-   *  （bj240 语义锁 OFF 态全绿;tests/bj242-conch-right-ocean-compensation.test.ts）。 */
+   *  （bj240 语义锁 OFF 态全绿;tests/bj242-conch-right-ocean-compensation.test.ts）。
+   *  ★★BJ275（2026-09-22 用户实报「落到海上最远平台」;用户地图=物证图字节全等
+   *  md5 e304e13a）:重试落点选择面补刀——重试时平台不作承位（includePlatforms=
+   *  false,穿海面栈桥落水线岸承位）;用户预期「离海最近的物块」=水线岸。闸继续
+   *  总揽两刀;OFF 态仍=原版逐字。 */
   static CONCH_RIGHT_OCEAN_COMPENSATION = true;
 
   /** ★★BJ258 用户明令分歧闸（2026-09-22 拍板 B;先例 CONCH_RIGHT_OCEAN_COMPENSATION 同型）:
@@ -30192,7 +30204,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const downedBoss3 = !!(this.world.flags.downedSkeletron || this.world.flags['downed_35']);
     const sf = this.world.seedFlags;
     const low = !!this.world.skyblockLowTiles;
-    const solidOrSloped = (x: number, y: number): boolean => {
+    const solidOrSloped = (x: number, y: number, includePlatforms = true): boolean => {
       if (!st.inBounds(x, y)) return false;
       const i = st.idx(x, y);
       if (!st.flags[i]) return false;
@@ -30206,6 +30218,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // （VanillaTiler VANILLA_PLATFORM_SHEETS 同表）。★SW-BJ43：旧刀 `!d.solid 先行
       // 返回` 使平台臂死码 → includePlatforms 语义整缺（平台不作合法落位面）。
       const isPlat = !!d.platform && CONCH_PLATFORM_SHEETS.has(d.vanilla?.sheet ?? -1);
+      // ★BJ275（2026-09-22 用户实报「海螺落海上最远平台」定谳=BJ242 补偿臂落点选择
+      //  副作用）：补偿重试面 includePlatforms=false —— 原版 includePlatforms:false
+      //  语义（WorldGen.cs:70520-70523 tileSolidTop 即 false）＝平台不作承位：竖降
+      //  穿过海面栈桥（用户地图甲板 T11@414 铺满海面）→ 液面爬行照原版爬到水线
+      //  岸承位（用户预期「离海最近的物块」）。原版尝试面不受影响（缺省 true）。
+      if (isPlat && !includePlatforms) return false;
       if (!d.solid && !isPlat) return false;                    // Main.tileSolid[type]
       if (TILE_SOLID_TOP_FAMILY.has(st.type[i]) && !isPlat) return false;  // tileSolidTop 非平台=false
       return true;
@@ -30247,6 +30265,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
     const num = 40;
     const x0 = rightOcean ? (inwardRetry ? st.w - num - 1 : st.w - num) : num;   // ★BJ242 内移起点 w-41 进 InWorld 合法域
+    // ★BJ275：补偿重试（inwardRetry）=平台不作承位面（穿过海面栈桥,落水线岸承位）;
+    //   原版尝试/左洋=includePlatforms:true 逐字。语义锚见 solidOrSloped 处 BJ275 注。
+    const inclPlat = !inwardRetry;
     const y0 = 50;
     const num3 = Math.floor(this.world.groundLevel);   // (int)Main.worldSurface - num2(num2=0)
     const crawlOffsetX = rightOcean ? -1 : 1;
@@ -30254,15 +30275,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const num8 = low ? 400 * (Math.floor(this.world.groundLevel) - 10) : 5000;
     const num11 = 400;
     let num10 = 0;
-    let flag = solidOrSloped(px, py);
+    let flag = solidOrSloped(px, py, inclPlat);
     let num7 = 0;
     while (num7 < num8 && num10 < num11) {
       num7++;
-      const flag2 = solidOrSloped(px, py) || st.liquid[st.idx(px, py)] > 0;
-      const flag3 = solidOrSloped(px, py + 1) || st.liquid[st.idx(px, py + 1)] > 0;
+      const flag2 = solidOrSloped(px, py, inclPlat) || st.liquid[st.idx(px, py)] > 0;
+      const flag3 = solidOrSloped(px, py + 1, inclPlat) || st.liquid[st.idx(px, py + 1)] > 0;
       if (!flag2 && !flag3) {
-        if (!solidOrSloped(px - 1, py) && !solidOrSloped(px + 1, py)
-          && !solidOrSloped(px - 1, py + 1) && !solidOrSloped(px + 1, py + 1)
+        if (!solidOrSloped(px - 1, py, inclPlat) && !solidOrSloped(px + 1, py, inclPlat)
+          && !solidOrSloped(px - 1, py + 1, inclPlat) && !solidOrSloped(px + 1, py + 1, inclPlat)
           && st.liquid[st.idx(px - 1, py)] <= 0 && st.liquid[st.idx(px + 1, py)] <= 0
           && st.liquid[st.idx(px - 1, py + 1)] <= 0 && st.liquid[st.idx(px + 1, py + 1)] <= 0) {
           py++;
@@ -30284,13 +30305,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (low && py >= num3) { py = y0; px += crawlOffsetX; num10++; }
         continue;
       }
-      if (st.liquid[st.idx(px, py + 1)] > 0 && !solidOrSloped(px, py + 1)) {
+      if (st.liquid[st.idx(px, py + 1)] > 0 && !solidOrSloped(px, py + 1, inclPlat)) {
         px += crawlOffsetX; num10++; continue;
       }
       if (dangerous(px - crawlOffsetX, py) || dangerous(px, py)) { px += crawlOffsetX; num10++; continue; }
       if (dangerous(px - crawlOffsetX, py + 1) || dangerous(px, py + 1)) { px += crawlOffsetX; num10++; continue; }
       if (py < 40) { py++; continue; }
-      if (!low && !solidOrSloped(px, py + 1)) { px += crawlOffsetX; num10++; }
+      if (!low && !solidOrSloped(px, py + 1, inclPlat)) { px += crawlOffsetX; num10++; }
       break;
     }
     if (num7 === num8 || num10 >= num11) return null;
@@ -30299,16 +30320,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  必零爬行落位,爬向恒内卷）=原版 quirk 面 → 内移起点 x=w-41 重试右洋一次
       //  （!inwardRetry 防再入）。py 面拒绝/左洋不补偿;自然地图零变化。回滚口=
       //  Game.CONCH_RIGHT_OCEAN_COMPENSATION=false ⇒ 与原版逐字全等（BJ240/242 证据链）。
+      //  ★BJ275（2026-09-22 用户实报）：重试面再加平台不作承位（inclPlat=false）——
+      //  用户地图海面栈桥 T11@414 铺 ≤6100..6364 盖死 w-41,固定内移一列仍落栈桥远端
+      //  （=实报「海上最远的平台」);原版爬行语义本身=起点列竖降优先+平台合法承位,
+      //  甲板拦截非实现差。重试穿栈桥至水面按原版液面臂爬到水线岸承位=「离海最近的
+      //  物块」。实心障碍（沙墙）不受影响;栈桥不盖起点列的变体图=原版爬停甲板右端
+      //  （Face B,纯原版相,另案备案）。
       if (Game.CONCH_RIGHT_OCEAN_COMPENSATION && rightOcean && !inwardRetry && px >= st.w - 40) {
         return this.requestMagicConchTeleportPosition(true, true);
       }
       return null;
     }
     const num13 = low ? 10 : 20;
-    let flag7 = solidOrSloped(px, py) || st.liquid[st.idx(px, py)] > 0;
+    let flag7 = solidOrSloped(px, py, inclPlat) || st.liquid[st.idx(px, py)] > 0;
     if (!flag7) {
       for (let i = 0; i < num13; i++) {
-        if (solidOrSloped(px, py + i) || st.liquid[st.idx(px, py + i)] > 0) {
+        if (solidOrSloped(px, py + i, inclPlat) || st.liquid[st.idx(px, py + i)] > 0) {
           flag7 = true;
           py += Math.max(0, i - 1);
           break;
@@ -30318,14 +30345,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (low) {
       if (!flag7) {
         for (let j = 0; j < num13; j++) {
-          if (solidOrSloped(px - 1, py + j) || st.liquid[st.idx(px - 1, py + j)] > 0) {
+          if (solidOrSloped(px - 1, py + j, inclPlat) || st.liquid[st.idx(px - 1, py + j)] > 0) {
             flag7 = true; px--; py += Math.max(0, j - 1); break;
           }
         }
       }
       if (!flag7) {
         for (let k = 0; k < num13; k++) {
-          if (solidOrSloped(px + 1, py + k) || st.liquid[st.idx(px + 1, py + k)] > 0) {
+          if (solidOrSloped(px + 1, py + k, inclPlat) || st.liquid[st.idx(px + 1, py + k)] > 0) {
             flag7 = true; px++; py += Math.max(0, k - 1); break;
           }
         }
@@ -46142,6 +46169,49 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
 
   /** 可用原版配方列表（Recipe.UpdateRecipeList 主干；供 UI 列表渲染） */
   private _alchemyTable = false;
+  /** ★BJ269（2026-09-22 用户实报）配方列表逐帧驱动探针（Recipe.UpdateRecipeList
+   *  每绘制拍重算语义的接线面）。原版两条腿全帧驱动：
+   *  ①列表重算挂【绘制相每帧】——legacy 支 DrawInventory 直调（Main.cs:42424），
+   *    modern 窗 NewCraftingUI.Draw→UpdateContents→UpdateRecipeList（NewCraftingUI.cs
+   *    :405/:591），无任何缓存/节流；
+   *  ②站点面挂【update 相每拍】——UpdateNearbyCraftingTiles（Player.cs:25485
+   *    Update(int i) 内 + Main.cs:17589 DoUpdate_WhilePaused 尾=autoPause 暂停期
+   *    照跑）→ `if (Main.playerInventory) AdjTiles()`（Player.cs:28729-28734，
+   *    TileReachCheckSettings.Simple 玩家盒 ±5/±3 逐格重扫，TRS57:16-20/53-62）。
+   *  本仓列表重算全为事件驱动（refreshAll 族只挂拾取/开关面板/槽位点击等事件，
+   *  UI.ts 60+ 调用点无一每帧），移动改站点邻接不产生任何事件 → 双向失效：
+   *  离站列表滞留（应消失的行还在）+ 进站列表不动（应出现的行不来）。
+   *  本探针 = 绘制相每帧全量重算（vanillaNearbyStations 逐调即扫无缓存）+输出
+   *  签名比对，变化才发 onInventoryChanged（rAF 合并 refreshAll → legacy
+   *  refreshVanillaCrafting / vanilla 布局 vinvRefreshCraft / FX41 modern
+   *  vinvUpdateModernCraft 三布局同拍刷新）。重算产出在输入不变时恒同
+   *  （TryRefocusingRecipe/VisuallyRepositionRecipes 只在表变时有观测面）⇒
+   *  「每帧重算+变化才刷新」与原版「每帧重算+每帧重画」输出等价。
+   *  门 = world 存在 ∧ __swUI.inventoryOpen（Main.playerInventory 等价读法，
+   *  :8056/:8851 同款）；挂 frame() 绘制相 SuppressDraw 早退【之后】=抑制帧不跑
+   *  （原版抑制帧不进 DrawInventory 同相）；autoPause 暂停期照跑（原版绘制相
+   *  不受 gamePaused 门）。关包清签名防陈旧跨开包残留。
+   *  60Hz 钳制：原版锁 60fps ⇒ UpdateRecipeList 恒 60Hz；本仓 frameCap 可调高
+   *  （缺省 60）,钳制防高刷屏下 0.7ms 级全表扫描（SUI-P1 hitch 普查实测）成本
+   *  随渲染帧率线性放大；行为零差（1 帧内陈旧=原版自身重算节拍同量级）。 */
+  private _craftProbeSig: string | null = null;
+  private _craftProbeLastAt = 0;
+  private probeCraftListRefresh(): void {
+    if (!this.world) return;
+    if (!((window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false)) {
+      this._craftProbeSig = null;
+      return;
+    }
+    const now = performance.now();
+    if (now - this._craftProbeLastAt < 15) return;   // 60Hz 钳（原版 UpdateRecipeList 节拍）
+    this._craftProbeLastAt = now;
+    const avail = this.vanillaAvailableRecipes();
+    const sig = craftListSignature(avail);
+    if (sig !== this._craftProbeSig) {
+      this._craftProbeSig = sig;
+      this.cb.onInventoryChanged?.();
+    }
+  }
   /** 附近合成材料源（Recipe._recipeChests，craftSourcesFor 1:1：开箱→虚空袋→附近 bank→600px 箱） */
   private _craftCache: { tick: number; src: CraftItemSource[] } | null = null;
   /** 每 tick 缓存（箱/bank 内容为活引用，扣料直写可见；列表位置只随移动/开箱变） */

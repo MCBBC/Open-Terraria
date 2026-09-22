@@ -22,8 +22,13 @@
 //  本层只换字形出处:测宽/墨盒仍目标字号 measureText(215 钳制/图标 iy/行距
 //  22/锚点/claim 序零漂移),grayed(100,100,100)行/悬停次行 α0.34 压暗行同
 //  管线(色=运行时染色,α=主画布 globalAlpha);bake 不可用回退下方旧直绘。
+//  ★BJ276 2026-09-22 方案 B(用户拍板)退役本层烘焙:信息行=动态读数键(秒表
+//  mph/罗盘/深度计逐帧变→烘焙逐帧 miss+canvas 出生 ~88/s,perf 账见
+//  MouseTextBake.ts 头注 BJ276 段)→ drawDirectMouseText 直绘(fillText+四向
+//  ±2 描边,原版逐帧直绘 glyph 同思路;观感=平滑 AA,拍板接受)。FX57/58 的
+//  烘焙管线对【静态键面】(悬停标签等)继续现役,见 MouseTextBake.ts。
 import { CANVAS_MOUSETEXT_FONT } from '../vui/draw/PixelText';
-import { drawBakedMouseText } from '../vui/draw/MouseTextBake';
+import { drawDirectMouseText } from '../vui/draw/MouseTextBake';
 import { UITextures } from '../vui/assets/UITextures';
 import { buildInfoAccRows, type InfoAccCtx, type InfoAccRow } from '../stats/InfoAccs';
 import type { InfoAccsDOM } from './InfoAccsDOM';
@@ -207,28 +212,18 @@ export class InfoAccsLayer {
           : ty - 3;
         this.drawIcon(ctx, t, X, iy, false, r.row === hoveredRow, iconTex(13));
         this.state.iconRects.push({ x: X, y: iy, w: t ? t.sw : 14, h: ih, row: r });
-        // ★FX57 2026-09-16:字形=离屏烘焙+主画布放大(FX58 档位采样:pixel=NN/
-        //  hidpi=线性采样,MouseTextBake.ts 头注)。墨顶 = 旧 translate(X+20,ty)+
-        //  scale(scaleX,scaleY)+'middle' 直绘同位(bake 侧按同源 'middle' 墨盒反推);
-        //  压暗 dim 走主画布 globalAlpha。
-        if (!drawBakedMouseText(ctx, r.text, X + 20, ty, {
+        // ★BJ276 2026-09-22 方案 B(用户拍板):本层行文本=动态读数(mph/罗盘/
+        //  深度/雷达计数等逐帧变键),退役 FX57/58 烘焙缓存(逐帧 miss→逐帧烘焙
+        //  +canvas 出生 ~88/s,LRU/willReadFrequently 只能摊销;机制账见
+        //  MouseTextBake.ts 头注 BJ276 段),改 drawDirectMouseText 直绘——
+        //  与缓存零交互(零 canvas 出生),观感=14px fillText 灰度 AA(平滑,
+        //  用户已拍板接受)。op 序=FX57 前旧直绘回退支逐字节同形(translate
+        //  (X+20,ty)+scale+'middle'+四向 ±2 黑描边+本体;压暗 dim 走 globalAlpha)。
+        drawDirectMouseText(ctx, r.text, X + 20, ty, {
           anchor: 'middle',
           color: r.gold ? '#FFE745' : r.grayed ? '#646464' : '#e8e4f0',
           alpha: dim, scaleX, scaleY,
-        })) {
-          // 回退:旧直绘(无 DOM/字体未就绪窗口;与 FX57 前逐字节同形)
-          ctx.save();
-          ctx.translate(X + 20, ty);
-          ctx.scale(scaleX, scaleY);
-          ctx.globalAlpha = dim;
-          for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
-            ctx.fillStyle = '#000';
-            ctx.fillText(r.text, ox, oy);
-          }
-          ctx.fillStyle = r.gold ? '#FFE745' : r.grayed ? '#646464' : '#e8e4f0';
-          ctx.fillText(r.text, 0, 0);
-          ctx.restore();
-        }
+        });
         // 悬停 tooltip 上报(渲染层只报,DOM tooltip 由 UI 消费)
         if (r.row === hoveredRow && onRowLabel) onRowLabel(r.label);
       }
