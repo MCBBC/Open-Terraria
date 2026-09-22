@@ -233,7 +233,8 @@ export function buildTooltipBody(
   ctx: TooltipContext = {},
 ): TooltipBody {
   const lines: TooltipLine[] = [];
-  const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+  // ★BJ283：键前缀 parseInt 兜底退役（BJ268 登记,方案 A ⑥回填后恒短路=items.ts:2414 等价定谳）
+  const vid = def.vid ?? -1;
   const ps: PrefixStat | null = slot.prefix ? prefixStat(slot.prefix) : null;
   const pm = (k: keyof PrefixStat) => (ps ? (ps[k] as number) : 1);
 

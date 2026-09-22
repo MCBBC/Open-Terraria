@@ -530,6 +530,15 @@ describe('行为面④：B2-F3/F4/S1/S2 成树门面贯通回归', () => {
   }
 
   it('B2-F3①：ignoreWalls=true 全族贯通——非适植墙(47)上默认/棕榈/灰烬/宝石/樱/柳照样成树', () => {
+    // ★BJ283 钉种（BJ267 登记成树掷未播种随机红）：growFertilizedSapling 的成树 RNG
+    //   种子源=Math.random（Game.ts:43451 new RNG((Math.random()*1e9)|0)）——树冠形状
+    //   掷随种子抖动,countRect>=5 下界对坏种子低概率敏感。BJ283 实测 20 次 GREEN=20
+    //   RED=0（假红未复现=罕见尾）→ 本钉种=防御性稳定化,非掩盖真红：成树门判定
+    //   （ignoreWalls/墙 47/基座/style 地下门）与 RNG 无关,门真红=growTree false→
+    //   tile 不变→断言仍红。mock 恒 0.5 → 种子恒 5e8 → 六族树冠形状确定。
+    //   习语=本文件「拍定 Math.random 序列」同款;try/finally 恢复防污染真随机消费面。
+    const rand = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    try {
     // —— 默认树 tile20 style0（grass 基座，地表带——默认档地下被拒另见 B2-S1③）：
     //    growTree(true 门)修复前已通，此为锚点
     {
@@ -580,6 +589,7 @@ describe('行为面④：B2-F3/F4/S1/S2 成树门面贯通回归', () => {
       expect(st.get(50, 119)).toBe(vanityTree);
       expect(countRect(st, 49, 94, 51, 118, vanityTree)).toBeGreaterThanOrEqual(5);
     }
+    } finally { rand.mockRestore(); }
   });
 
   it('B2-F3②零差负对照：缺省形参（不传 ignoreWalls）各族墙门照拒——既有调用点掷流零差', () => {

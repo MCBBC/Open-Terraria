@@ -2,10 +2,47 @@
 // (WorldGen.Get{ItemDrop_Beds,ItemDrop_Candles,ItemDrop_Chests,ItemDrop_Dressers})
 // + Chest.Initialize 覆写 → src/data/vanilla-hovericons.json。
 // 解析 = switch-case 机械转录(含穿透 fallthrough 区间与嵌套 default)。
-import { readFileSync, writeFileSync } from 'node:fs';
+//
+// ★BJ284 2026-09-22 era guard 落闸（四要素习语 docs/era-guard-family.md）：
+//   ① SW_ITEM_VER 缺省 1457（白名单 {1457,1458}——BJ284 定谳 1458 交叉重放 fresh 与现库
+//     逐字节零差；1456 显式拒+指引）;② 输出通道三分离：缺省=干跑对拍零写盘（双向路径级
+//     diff,live-only=洗库预警/fresh-only=现库退化缺键型,任一非空 exit 1+物证）/ SW_OUT=沙箱 /
+//     --write-real=逃生门（diff 非纯增量拒,强推双旗 --force-full --overwrite-append-era）；
+//     双旗互斥+非 1457 禁写+探测注入面 SW_HOVERICONS_JSON 与 --write-real 混用拒（g1）;
+//   ③ 锚 fail-loud：六方法体签名（methodBody 原有 throw）+基数护栏
+//     （beds 55/candles 60/dressers 61/chests 52+37/chairs 68/pylons 11）;
+//   ④ 判别力自证：tests/extract-tables-era-guard.test.ts。
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const src = readFileSync(`${ROOT}/Terarria1457/Terraria/WorldGen.cs`, 'utf8');
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457', '1458']);
+if (!VER_ALLOWED.has(VER) || !existsSync(`${ROOT}/Terarria${VER}/Terraria/WorldGen.cs`)) {
+  console.error(`[extract-cursor-icon-tables] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1456') console.error('  1456 锚集已退役（1457 基准 BJ284 落闸）；1456 对拍读时代快照。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+const SW_OUT = process.env.SW_OUT;
+if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+  console.error('[extract-cursor-icon-tables] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  process.exit(1);
+}
+if (WRITE_REAL && VER !== '1457') {
+  console.error(`[extract-cursor-icon-tables] 拒绝写真库：SW_ITEM_VER=${VER}≠1457（旧基线重放禁写 vanilla-hovericons.json）。`);
+  process.exit(1);
+}
+if (WRITE_REAL && process.env.SW_HOVERICONS_JSON !== undefined) {
+  console.error('[extract-cursor-icon-tables] 拒绝运行：探测注入面（SW_HOVERICONS_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  process.exit(1);
+}
+// ★M1 变异锚:干跑臂 null（守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面）
+const LIVE_JSON = process.env.SW_HOVERICONS_JSON ?? `${ROOT}/game/src/data/vanilla-hovericons.json`;
+const OUT_JSON = WRITE_REAL ? LIVE_JSON : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-hovericons.json` : null);
+
+const src = readFileSync(`${ROOT}/Terarria${VER}/Terraria/WorldGen.cs`, 'utf8');
 
 /** 取方法体(花括号配平) */
 function methodBody(name) {
@@ -128,7 +165,78 @@ const data = {
   // TETeleportationPylon.GetPylonItemTypeFromTileStyle(:116-129)
   pylons: { 0: 4876, 1: 4875, 2: 4916, 3: 4917, 4: 4918, 5: 4919, 6: 4920, 7: 4921, 8: 4951, 9: 5652, 10: 5653 },
 };
-writeFileSync(`${ROOT}/game/src/data/vanilla-hovericons.json`, JSON.stringify(data));
+
+// ---- ③ 基数护栏（1457 实测——地板防静默半表） ----
+{
+  const floors = [
+    ['beds', Object.keys(beds).length, 50],
+    ['candles', Object.keys(candles).length, 55],
+    ['dressers', Object.keys(dressers).length, 55],
+    ['chests', Object.keys(chests1).length, 48],
+    ['chests2', Object.keys(chests2).length, 33],
+    ['chairs', Object.keys(data.chairs).length, 60],
+    ['pylons', Object.keys(data.pylons).length, 11],
+  ];
+  const bad = floors.filter(([, n, f]) => n < f).map(([k, n, f]) => `${k} ${n} < ${f}`);
+  if (bad.length) throw new Error(`[extract-cursor-icon-tables] 锚点失配: 基数护栏 ${bad.join('; ')}（解析面漂移,禁止静默半表）`);
+}
+
+// ================= ★BJ284 era guard：干跑对拍 / 沙箱 / 逃生门（头注见上） =================
+const FRESH = JSON.stringify(data);
+/** 现库 vs 重产双向路径级 diff（对象键集+叶值;数组按位）。live-only=洗库预警面 /
+ *  fresh-only=现库退化缺键型面（★G-1/S3 处方）/ drift=同路径值漂移。 */
+function deepWash(live, fresh, prefix = '') {
+  const out = { liveOnly: [], freshOnly: [], drift: [] };
+  const base = prefix || '<root>';
+  if (live === null || fresh === null || typeof live !== 'object' || typeof fresh !== 'object') {
+    if (JSON.stringify(live) !== JSON.stringify(fresh)) out.drift.push(`${base}: ${JSON.stringify(live)}→${JSON.stringify(fresh)}`);
+    return out;
+  }
+  if (Array.isArray(live) !== Array.isArray(fresh)) {
+    out.drift.push(`${base}: 类型漂移 ${Array.isArray(live) ? 'arr' : 'obj'}↔${Array.isArray(fresh) ? 'arr' : 'obj'}`);
+    return out;
+  }
+  const lk = new Set(Object.keys(live));
+  const fk = new Set(Object.keys(fresh));
+  for (const k of Object.keys(live)) {
+    const p = `${prefix}.${k}`;
+    if (!fk.has(k)) { out.liveOnly.push(p); continue; }
+    const w = deepWash(live[k], fresh[k], p);
+    out.liveOnly.push(...w.liveOnly); out.freshOnly.push(...w.freshOnly); out.drift.push(...w.drift);
+  }
+  for (const k of Object.keys(fresh)) if (!lk.has(k)) out.freshOnly.push(`${prefix}.${k}`);
+  return out;
+}
+const washEmpty = (w) => !w.liveOnly.length && !w.freshOnly.length && !w.drift.length;
+function washReport(w) {
+  console.error('  物证：');
+  if (w.liveOnly.length) console.error(`    [live-only] 现库独有 ${w.liveOnly.length} 处（重产缺=提取器退化/洗库面）: ${w.liveOnly.slice(0, 6).join(', ')}`);
+  if (w.freshOnly.length) console.error(`    [fresh-only] 重产独有 ${w.freshOnly.length} 处（现库缺=源侧新增/现库退化）: ${w.freshOnly.slice(0, 6).join(', ')}`);
+  if (w.drift.length) console.error(`    [drift] 值漂移 ${w.drift.length}: ${w.drift.slice(0, 6).join(' | ')}`);
+}
+let live = null;
+if (existsSync(LIVE_JSON)) { try { live = JSON.parse(readFileSync(LIVE_JSON, 'utf8')); } catch { /* 坏损:不拦（npcdrops 同款） */ } }
+const wash = live === null ? null : deepWash(live, JSON.parse(FRESH));
+if (OUT_JSON) {
+  if (WRITE_REAL && wash && !washEmpty(wash) && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+    console.error('[extract-cursor-icon-tables] 拒绝 --write-real：重产 diff 非纯增量（双向差异非空）——先逐值定谳（反编译为准）再回写。');
+    washReport(wash);
+    console.error('  确需原地强推：--force-full --overwrite-append-era 双旗（单旗仍拒）。');
+    process.exit(1);
+  }
+  mkdirSync(OUT_JSON.slice(0, OUT_JSON.lastIndexOf('/')), { recursive: true });
+  writeFileSync(OUT_JSON, FRESH);
+  console.error(`[extract-cursor-icon-tables] 已写 ${OUT_JSON}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}）`);
+} else if (wash === null) {
+  console.error('[extract-cursor-icon-tables] 干跑（零写盘）：现库缺 vanilla-hovericons.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+} else if (!washEmpty(wash)) {
+  console.error('[extract-cursor-icon-tables] 干跑对拍：双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
+  washReport(wash);
+  console.error('  处置：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 SW_OUT=<dir>。');
+  process.exit(1);
+} else {
+  console.error('[extract-cursor-icon-tables] 干跑对拍：重产盖住现库（双向零差,零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+}
 const n = (o) => Object.keys(o).length;
 console.log(`beds ${n(beds)} / candles ${n(candles)} / dressers ${n(dressers)} / chests ${n(chests1)}+${n(chests2)}`);
 console.log('beds[1..3]:', beds[1], beds[2], beds[3], '(应 644/645/646)');

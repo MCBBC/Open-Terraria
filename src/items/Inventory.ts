@@ -386,7 +386,7 @@ export class Inventory {
       const ok = armorSlotIndexOfInternal(id) === part;
       if (!ok) return false;
       // 功能↔时装同款互斥（HasSameItemInSlot 对段扫描;DualEquipArmor 例外 :1251/:1260）
-      const vid = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const vid = d.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       if (!Inventory.DUAL_EQUIP_ARMOR_VIDS.has(vid)) {
         const other = i < VANITY_ARMOR_START ? i + VANITY_ARMOR_START : i - VANITY_ARMOR_START;
         if (this.armor[other]?.id === id) return false;

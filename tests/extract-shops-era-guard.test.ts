@@ -37,8 +37,8 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     const r = spawnSync('node', [TS_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
     // BJ215 时点:现库领先（anyBossKill/ids 组等 4+9 条）→ exit 1;BJ217 词表恢复
     // （TRAVEL_CONDS 精匹配表+ids 组+hardModeUp 捕获）→ 重产盖住现库 → exit 0。
-    // 现库与重产的唯一偏差=2281-2283 组条目位序（源码位序 vs 手补末位追加,
-    // 工具头注 ★BJ217 段）,多重集对拍不受影响。
+    // ★BJ222 已归一:2281-2283 组条目位序残差（源码位序 57 vs 手补末位 65）已回位,
+    // 现库与重产全序逐条目全等（工具头注 ★BJ217 段同步更新）。
     expect(r.status).toBe(0);
     expect(r.stderr).toContain('重产盖住现库');
     expect(md5(TS_LIVE)).toBe(before);
@@ -107,7 +107,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
   });
 
   // ★变异 M1:摘掉「缺省干跑」门（OUT_PATH 干跑臂 null 换成假现库路径）→ 裸跑静默写。
-  //   注：断言对照 --out 重产 fresh（现库领先于重产+缺 src 元字段,字节面本不相等）。
+  //   注：断言对照 --out 重产 fresh（★BJ283 补 src 溯源字段后现库与重产字节面全等）。
   it('变异 M1:摘干跑门后裸跑静默写「现库」（哨兵被覆写=写发生）', () => {
     const dir = mkdtempSync(join(TMP, 'travelshop-guard-'));
     const fakeLive = join(dir, 'vanilla-travelshop.json');

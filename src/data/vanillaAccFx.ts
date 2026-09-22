@@ -152,7 +152,8 @@ const FX_BY_IID = (() => {
   for (let i = 0; i < ITEM_DEFS.length; i++) {
     const d = ITEM_DEFS[i];
     if (!d) continue;
-    const vid = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    // ★BJ283：键前缀 parseInt 兜底退役（BJ268 登记,方案 A ⑥回填后恒短路=items.ts:2414 等价定谳）
+    const vid = d.vid ?? -1;
     if (vid < 0) continue;
     const json = FX[String(vid)];
     const extra = BEHAVIOR_FX[String(vid)];

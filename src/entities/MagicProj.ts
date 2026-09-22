@@ -14,6 +14,7 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -162,6 +163,12 @@ export class MagicProj extends Entity {
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (game.world.store.isSolid(tx, ty)) { this.dead = true; return; }
     // 小动物:一击致死并消耗弹体(近战挥砍同语义)
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——本类命中即亡（:226 penetrate 缺省 1 语义）死亡拍【照割】;中央割
+    //  !e.dead 门=死亡拍整缺 → BJ260 前置习语。现役活构造点仅联机 kind4 重建
+    //  （Game.ts:4176,projId 缺省 0=傀儡不结算）——本刀为未来接线预置,vid 缺省 0
+    //  在 Game.cutTile 收口内按格型筛,零行为风险。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     if (hitCritters(this, game)) { this.dead = true; return; }
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）

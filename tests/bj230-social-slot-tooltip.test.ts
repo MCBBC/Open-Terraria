@@ -25,7 +25,7 @@ import { languageManager } from '../src/i18n/LanguageManager';
 languageManager.loadPackJson(JSON.parse(fs.readFileSync('public/l10n/zh-Hans.json', 'utf8')));
 
 function defOfVid(vid: number) {
-  const key = ITEM_DEFS.find((d) => d && (d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1)) === vid)?.key;   // ★方案 A:d&& 守洞
+  const key = ITEM_DEFS.find((d) => d && (d.vid ?? -1) === vid)?.key;   // ★方案 A:d&& 守洞;★BJ283 parseInt 兜底退役(⑥等价定谳)
   return key ? ITEM_DEFS[ITEM_BY_KEY[key]] : undefined;
 }
 

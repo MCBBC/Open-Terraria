@@ -31,6 +31,7 @@ import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
 import { paladinsHammerShockwaveFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { noteVanillaProjImmune } from './projTargets';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
@@ -946,6 +947,11 @@ export class Boomerang extends Entity {
       boomExt = { x: this.cx - half, y: this.cy - half, w: this.boomBox, h: this.boomBox };
       this.boomBox = -1;
     }
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——有限穿透回旋镖（如 866 penetrate=5,:13124-13182 自减面）计数耗尽
+    //  即亡拍【照割】;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。vid+1052 出程旗
+    //  随盒穿线（CutTilesAt :15384-86 树面逐拍适用,与中央收口同参）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h, this.projId, this.cutExtraTreeCactus === true);
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || this.dir, this.armorPen,
       () => this.onHitEnemy(), undefined, false, boomExt);
   }
@@ -3419,6 +3425,11 @@ export class YoyoProj extends Entity {
     // 命中免疫 = 玩家级共享 10t（DefaultToYoyo 无 usesLocalNPCImmunity/
     // localNPCHitCooldown,Projectile.cs:10155-10161 → Damage_PVE 走 npc.immune[owner]
     // 全局档 :11905/:13152——同玩家所有悠悠球/配重球共享,不再逐弹私账）
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——回收态命中照结算（onYoyoHit 弹开段）;aiStyle 99/悠悠球族均过两道门
+    //  （CanCutTiles :15407 两表均无;CanDealDamage :12461 无）。死亡拍（脱离态
+    //  penetrate 3-6 耗尽 :13290 段）照割,中央割 !e.dead 门=死亡拍整缺。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
       (e) => this.onYoyoHit(e, game),
       (_e) => {

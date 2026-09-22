@@ -34,7 +34,7 @@ const iid = (vid: number): number => {
   expect(k).toBeDefined();
   return ITEM_BY_KEY[k!];
 };
-const defOfVid = (vid: number) => ITEM_DEFS.find((d) => d && (d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1)) === vid);
+const defOfVid = (vid: number) => ITEM_DEFS.find((d) => d && (d.vid ?? -1) === vid);   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
 
 /** MountInstance 单元测试用玩家视图桩（mounts.test.ts 同款） */
 const view = (over: Partial<MountedPlayerView> = {}): MountedPlayerView => ({

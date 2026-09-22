@@ -7,6 +7,7 @@ import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileWetSection } from './projWetSection';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 import { damageVarRoll } from '../stats/DamageVar';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -279,6 +280,12 @@ export class MuramasaSlashProj extends Entity {
       if (--this.lifeLeft <= 0) { this.dead = true; return; }
     }
 
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）在 Damage() 内
+    //  先于 Damage_PVE（:12523）——命中即亡弹（977 penetrate=1,SetDefaults :9210-9225）
+    //  死亡拍【照割】;本仓中央割（Entity.ts,fixedUpdate 后收口）带 !e.dead 门=死亡拍
+    //  整缺 → BJ260 叶弹 227 同款前置习语。977 过两道门（CanCutTiles :15407 排除表与
+    //  aiStyle 45/137/92/105/106 表均无;Damage_CanDealDamage :12461 排除表无）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     const px = Math.trunc(this.x), py = Math.trunc(this.y);
     for (const raw of game.enemies()) {
       const e = raw as EnemyLike;
@@ -457,6 +464,10 @@ export class BladetongueGlobProj extends Entity {
 
       // ---- 命中面（Damage_PVE_Inner 闸门 + IDStatic 共享冷却 10t + penetrate=5，
       //      原版 Damage() 本就在子步体内 Projectile.cs:17186 → 每子步结算）----
+      // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（:12517）先于 Damage_PVE
+      //  （:12523）→ 第 5 击即亡拍照割（中央割 !e.dead 门=死亡拍整缺,BJ260 前置习语）。
+      //  524 过两道门（CanCutTiles :15407 两表均无此型;Damage_CanDealDamage :12461 无）。
+      cutTilesBox(game, this.x, this.y, this.w, this.h);
       const px = Math.trunc(this.x), py = Math.trunc(this.y);
       for (const raw of game.enemies()) {
         const e = raw as EnemyLike;

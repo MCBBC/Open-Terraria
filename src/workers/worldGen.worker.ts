@@ -186,7 +186,11 @@ ctx.onmessage = async (e) => {
         //  评估定谳=快路径零活跃消费方）;崩溃窗口的二进制残留是 meta={} 元数据全丢
         //  损毁态（unpack 后 loadSaveData 读 data.header.width 即抛,无法救）。存档
         //  权威格式=JSON 字符串（kvGetIdb 直读）。★BJ223 勘误：退役范围仅此二进制
-        //  分支，json/save 两源非死路径（mainFlow.loadFromJson/importWld 活跃消费）
+        //  分支，json 源非死路径（mainFlow.loadFromJson 的 client.loadSave({json}) 活跃
+        //  消费）。★BJ283 注勘误（S3 定谳）：save 源零生产消费方——importWld 实走主线程
+        //  parseWldToSave→loadSaveData 直调（mainFlow.ts:926-932，不经 worker saveParse）；
+        //  client.loadSave({save}) 唯一消费=tests/bj223-saveparse-three-sources.test.ts
+        //  round-trip 守卫（协议三源形状保留，分支留作契约面）。
         if (req.key) {
           dataSrc = 'idb';
           data = JSON.parse((await kvGetIdb(req.key)) ?? 'null') as import('../save/SaveFile').SaveData | null;
@@ -195,7 +199,8 @@ ctx.onmessage = async (e) => {
           dataSrc = 'json';
           data = JSON.parse(req.json) as import('../save/SaveFile').SaveData;
         } else if ('save' in req && req.save) {
-          // .wld 导入面：主线程已解析的 SaveData 对象直传（免二次 JSON.parse）
+          // ★BJ283 注勘误：save 源零生产消费方——.wld 导入实走主线程 loadSaveData 直调
+          //  （mainFlow.ts:926-932），不经此源；仅 BJ223 守卫 round-trip 消费（契约面保留）
           dataSrc = 'save';
           data = req.save;
         } else {

@@ -2013,7 +2013,7 @@ export const REUSE_DELAY_TICKS: Record<number, number> = {
   434: 14,   // Vilethorn 邪恶荆棘（Item.cs case 434 :6471-6476——原版怪癖:ranged+useAmmo=Bullet 无 mana）
   3787: 18,  // Sky Fracture 天界碎裂（case 3787 :33536 reuseDelay=useAnimation+6=18——非字面式,R26 提取器漏,R35 清单④补）
   3269: 10,  // Medusa Head 美杜莎之首（case 3269 :30314-30316,channel 件）
-  3870: 10,  // Dragon's Fury 双足翼龙之怒（case 3870 :34217-34219）
+  3870: 10,  // Betsy's Wrath 贝希之怒（case 3870 :34217-34219;★BJ282 勘误——3858 才是 Sky Dragon's Fury 天龙之怒）
   3541: 5,   // Last Prism 最后的棱镜（case 3541 :31750-31752,channel 件）
   1157: 2, 1309: 2, 1802: 2,                                   // 史莱姆杖/黄蜂杖前早期杖三件
   2364: 2, 2365: 2, 2535: 2, 2551: 2, 2584: 2, 2621: 2,        // 召唤杖族 rd=2(:23823 起)
@@ -3118,7 +3118,7 @@ export class Game implements GameHooks {
       const s = this.player.inv.armor[i];
       if (!s) continue;
       const d = ITEM_DEFS[s.id];
-      const vid = d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       if (vid === 1858 || vid === 4005) return true;
     }
     return false;
@@ -4476,7 +4476,7 @@ export class Game implements GameHooks {
       const s = pl.inv.armor[i];
       if (!s) continue;
       const d = ITEM_DEFS[s.id];
-      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       if (vid === 938 || vid === 3997 || vid === 3998) return true;
     }
     return false;
@@ -4572,7 +4572,7 @@ export class Game implements GameHooks {
       const s = proxy.inv.armor[i];
       if (!s) continue;
       const d = ITEM_DEFS[s.id];
-      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       // 岩浆石 1322 / 火焰护手 1343（Player.cs:14787-14790/:14758-14766——曾误查 903）
       if (vid === 1322 || vid === 1343) { magmaStone = true; break; }
     }
@@ -18673,7 +18673,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
-        // 双足翼龙之怒 3870 → 711×3（Player.cs:49265-49284,1458 行号）：出膛前探
+        // 贝希之怒 3870 → 711×3（Player.cs:49265-49284,1458 行号;★BJ282 勘误 3870=Betsy's Wrath）：出膛前探
         // 40×item.scale px 带 CanHit 门（断则原地出生）+ 三连扇 v_k =
         // (v*0.8 + aim单位*k).RotatedBy(k*(-π/180*direction))——★2026-08-26 对齐：
         // 出生锚点=玩家中心(:47603);垂直分量系【瞄准向单位】k(旧实现误用切向 perp,
@@ -18714,7 +18714,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             };
             this.entities.add(bolt, 'projectiles');
           }
-          // R26 GAP-07：3870 双足翼龙之怒 rd=10（case 3870 :34217-34219）——收招后摇收口
+          // R26 GAP-07：3870 贝希之怒 rd=10（case 3870 :34217-34219;★BJ282 勘误）——收招后摇收口
           // （1457 slowMagic:SetItemAnimation(useAnimation,2.5)(:4463-4468)→ 窗 ×2.5）
           this.player.useTime = this.player.getSlowMagicUseTime(this.cycleCooldown(critVid, cw.useTime));
           this.player.onManaItemUsed();
@@ -46363,7 +46363,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const p = this.player;
     const heldVids = new Set(p.inv.slots.filter(Boolean).map((s) => {
       const d = ITEM_DEFS[(s as { id: number }).id];
-      return d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      return d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     }));
     const open = this.openChestRef?.() ?? null;
     // ★SW-AZ1 2026-09-06（item5）弹体容器支（NearbyChests.GetBanksInRangeOf 弹体段
@@ -46600,7 +46600,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
   reforgeCost(item: { id: number; stack: number }): number {
     const def = ITEM_DEFS[item.id];
     if (!def) return 0;
-    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    const vid = def.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     const value = (vid >= 0 ? ITEM_VALUE[String(vid)] : undefined) ?? def.value ?? 0;
     const cost = Math.max(1, Math.floor((value * item.stack) / 3));
     return this.player.equipStats.discount ? Math.max(1, Math.floor(cost * 0.8)) : cost;
@@ -46610,7 +46610,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
   canReforge(item: { id: number }): boolean {
     const def = ITEM_DEFS[item.id];
     if (!def) return false;
-    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    const vid = def.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     if (vid < 0) return false;
     return rollablePrefixes(vid, !!def.accessory) !== null;
   }
@@ -46623,7 +46623,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
   doReforge(item: { id: number; stack: number; prefix?: number }, out?: { topTier: boolean }): number {
     const def = ITEM_DEFS[item.id];
     if (!def) return -1;
-    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    const vid = def.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     const pool = vid >= 0 ? rollablePrefixes(vid, !!def.accessory) : null;
     if (!pool || !pool.length) return -1;
     const cost = this.reforgeCost(item);

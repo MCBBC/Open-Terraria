@@ -27,6 +27,7 @@ import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -275,6 +276,11 @@ export class NebulaBlazeBolt extends Entity {
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (!st.inBounds(tx, ty) || st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.burst(game); return; }
     // ---- 命中（40×40 盒 penetrate 1 → Kill 爆）----
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——634/635 penetrate 缺省 1 首中即亡拍【照割】（SetDefaults :6818-6841,
+    //  aiStyle 1/friendly/magic）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
+    //  两型均过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;

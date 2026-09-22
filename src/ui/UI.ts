@@ -2902,7 +2902,7 @@ export class UI {
         const wornVid = (it: { id: number } | null | undefined): number => {
           const d = it ? ITEM_DEFS[it.id] : undefined;
           if (!d) return 0;
-          return d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+          return d.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
         };
         const inv = this.game?.player?.inv;
         return {

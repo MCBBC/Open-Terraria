@@ -42,7 +42,7 @@ async function findReforgable() {
   const { ITEM_BY_KEY, ITEM_DEFS } = await import('../src/data/items');
   const derVid = (k: string, idx: number): number => {
     const d = (ITEM_DEFS as unknown as Record<number, { vid?: number; key?: string } | undefined>)[idx];
-    return d?.vid ?? (d?.key && d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    return d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
   };
   for (const [key, idRaw] of Object.entries(ITEM_BY_KEY)) {
     const id = Number(idRaw);

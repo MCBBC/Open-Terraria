@@ -65,9 +65,10 @@ function internalIdOfVid(vid: number): number {
       }
     }
   }
-  // ★2026-09-02 哨兵 -1（见 leashedSync.internalIdOfVid 注）——ITEM_DEFS[0]
-  //  是合法位,旧 ??0 让魔力水晶(vid 109→def0)在浏览器 mousedown 的 !internalId
-  //  门被当「无此物」静默退场
+  // ★2026-09-02 哨兵 -1：反查不中返回 -1（非 0）。历史注（方案 A 前）:ITEM_DEFS[0]
+  //  曾是合法 def 位,旧 ??0 让魔力水晶(vid 109→def0)在浏览器 mousedown 的 !internalId
+  //  门被当「无此物」静默退场。★方案 A（BJ264）重排后 0=空洞位（vi_ 键 def vid 回填
+  //  ⑥ 恒在,反查不中=真无此物）,-1 语义不变仍为唯一正确哨兵
   return vidReverse.get(vid) ?? -1;
 }
 

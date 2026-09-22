@@ -18,6 +18,7 @@ import { applyBannerDamageDealt } from './projTargets';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 
 /** Utils.Remap */
 const remap = (v: number, a: number, b: number, c: number, d: number): number =>
@@ -167,6 +168,11 @@ export class InsanityShadowFriendly extends Entity {
     // friendly 命中（StrikeNPC：dmg 18 / kb 0 / armorPenetration 20 / 无暴击掷）——
     // localNPCHitCooldown -1：同一敌人仅首击；penetrate 3 次总命中后消亡
     if (this.alpha >= 250) return;   // 淡入完成前不可见亦不判定（近原版 alpha 门近似）
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——964 骸骨头盔幻影 penetrate=3 耗尽即亡拍【照割】（SetDefaults
+    //  :9129-9143,aiStyle 187/friendly 非 minion）;中央割 !e.dead 门=死亡拍整缺 →
+    //  BJ260 前置习语。964 过两道门（CanCutTiles :15407 两表均无;CanDealDamage :12461 无）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     for (const e of game.enemies() as unknown as EnemyLike[]) {
       if (e.dead || this.hitEnemies.has(e.id)) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x

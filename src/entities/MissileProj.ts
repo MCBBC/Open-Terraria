@@ -58,6 +58,7 @@ import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 
 // ===================== 数学原语（逐字对源码） =====================
 
@@ -842,6 +843,12 @@ export class MagicMissileProj extends Entity {
     for (const [k, v] of this.hitCd) {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）在 Damage() 内
+    //  先于 Damage_PVE（:12523）——16/34/79 penetrate 1/2/3 计数耗尽即亡拍【照割】
+    //  （SetDefaults :976-984/:1164-1180/:1596-1610,aiStyle 9/friendly）;中央割
+    //  !e.dead 门=死亡拍整缺 → BJ260 前置习语。三型均过两道门（CanCutTiles :15407
+    //  两表均无;CanDealDamage :12461 无——唯一关联排除 1092 与本族无关）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     if (hitCritters(this, game)) { this.killNow(game); return; }
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
@@ -1804,6 +1811,11 @@ export class StarfuryStar extends Entity {
       game.cutTile(tx, ty);
       if (world.store.isSolid(tx, ty)) { this.killNow(game); return; }
     }
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——星体 9 penetrate=2 耗尽即亡拍【照割】（SetDefaults :888-897,aiStyle 5/
+    //  friendly/tileCollide=false）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
+    //  9 过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     if (hitCritters(this, game)) { this.killNow(game); return; }
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）

@@ -53,6 +53,7 @@ import { hitCritters, playerCanHitEnemy, applyBannerDamageDealt } from './projTa
 import { damageVarRoll } from '../stats/DamageVar';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 import type { GameHooks } from './types';
 import { playerCanHitEntity } from '../physics/LineOfSight';
 
@@ -228,6 +229,11 @@ export class VolcanoBlastProj extends Entity {
     this.y += this.vy;
     if (--this.lifeLeft <= 0) { this.dead = true; return; }
     // —— Projectile.Damage 敌怪面：截断盒相交（Rectangle((int)x,(int)y,w,h).Intersects）
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）在 Damage() 内
+    //  先于 Damage_PVE（:12523）——978 penetrate=3 计数耗尽即亡拍【照割】（SetDefaults
+    //  :9255-9271,aiStyle 189/friendly）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置
+    //  习语。978 过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     const px = Math.trunc(this.x), py = Math.trunc(this.y);
     const pEnt = game.player as unknown as {
       x: number; y: number; w: number; h: number; cx: number; cy: number; facing?: number;

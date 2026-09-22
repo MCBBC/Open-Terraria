@@ -67,7 +67,7 @@ describe('BJ260-① SOCIAL_VANITY_EFFECTS_VIDS 提取器化（S7 漏修#1）', (
   const defsCache = new Map<number, ReturnType<typeof getDef>>();
   function getDef(vid: number) {
     return ITEM_DEFS.find((d: { vid?: number; key: string } | undefined) =>
-      d && (d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1)) === vid)!;   // ★方案 A:守洞
+      d && (d.vid ?? -1) === vid)!;   // ★方案 A:守洞;★BJ283 parseInt 兜底退役
   }
   function ITEM_DEFS_OF(vid: number) {
     if (!defsCache.has(vid)) {

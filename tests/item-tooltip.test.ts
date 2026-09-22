@@ -7,7 +7,7 @@ import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
 const NOPLAYER = null;
 
 function defOfVid(vid: number) {
-  const key = ITEM_DEFS.find((d) => d && (d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1)) === vid)?.key;   // ★方案 A:d&& 守洞
+  const key = ITEM_DEFS.find((d) => d && (d.vid ?? -1) === vid)?.key;   // ★方案 A:d&& 守洞;★BJ283 parseInt 兜底退役
   return key ? ITEM_DEFS[ITEM_BY_KEY[key]] : undefined;
 }
 

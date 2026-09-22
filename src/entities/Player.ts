@@ -321,7 +321,7 @@ const INV_EFFECTIVE_VIDS = new Set<number>([
 ]);
 
 /** ★IIIII250：vid 解析查表。equipStatsKey 旧逐槽内联
- *  `d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3),10) : -1)`——
+ *  `d.vid ?? -1`（★BJ283:键前缀 parseInt 兜底已退役,方案 A ⑥回填恒短路）——
  *  58 槽×2 遍×每次键重建，parseInt/startsWith/切片是键重建热点（用户雨天
  *  trace：equipStatsKey self 381ms）。vid 是 ItemDef 纯函数且 ITEM_DEFS 在
  *  items.ts 模块顶层一次性注册（物品入槽前必已注册），按 id 惰性缓存安全 */
@@ -330,7 +330,7 @@ function vidOfItemId(id: number): number {
   let v = VID_BY_ITEM_ID[id];
   if (v === undefined) {
     const d = ITEM_DEFS[id];
-    v = d ? (d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1)) : -1;
+    v = d ? (d.vid ?? -1) : -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     VID_BY_ITEM_ID[id] = v;
   }
   return v;
@@ -1869,7 +1869,7 @@ export class Player extends Entity {
       let vid = VID_BY_ITEM_ID[s.id];
       if (vid === undefined) {
         const d = ITEM_DEFS[s.id];
-        vid = d ? (d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1)) : -1;
+        vid = d ? (d.vid ?? -1) : -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
         VID_BY_ITEM_ID[s.id] = vid;
       }
       if (vid > 0 && INV_EFFECTIVE_VIDS.has(vid)) { mix(i); mix(vid); }
@@ -2037,7 +2037,7 @@ export class Player extends Entity {
      *  head 四层——本仓单层合并,head 层并入 face（同锚同帧,登记偏差）） */
     const accDrawApply = (s: { id: number }, slotIdx: number): void => {
       const d = ITEM_DEFS[s.id];
-      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       const ds = accDrawSlotsOf(vid);
       if (!ds) return;
       const dyeItem = this.inv.getEffectiveDye(slotIdx % 10);   // UpdateItemDye :9696 走 GetEffectiveDye
@@ -2409,7 +2409,7 @@ export class Player extends Entity {
       const s = effArmor(i);   // ApplyEquipVanity :13108-13112 同走 GetEffectiveArmor
       if (!s) continue;
       const v = ITEM_DEFS[s.id];
-      const vid = v?.vid ?? (v?.key?.startsWith('vi_') ? parseInt(v.key.slice(3), 10) : -1);
+      const vid = v?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       if (vid === 5540 || vid === 5541) stringColor = 29;
       const sc = statOfInternal(s.id)?.str;
       if ((sc ?? 0) > 0) stringColor = sc!;
@@ -2436,7 +2436,7 @@ export class Player extends Entity {
       const s = this.inv.slots[j];
       if (!s) continue;
       const d = ITEM_DEFS[s.id];
-      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       if (vid <= 0) continue;
       if (vid === 4131) hasVoidLens = true;
       refreshInfoAccsFromItemType(infoAccs, vid);
@@ -2454,7 +2454,7 @@ export class Player extends Entity {
       for (const bs of this.banks[3]) {
         if (!bs) continue;
         const bd = ITEM_DEFS[bs.id];
-        const bvid = bd?.vid ?? (bd?.key.startsWith('vi_') ? parseInt(bd.key.slice(3), 10) : -1);
+        const bvid = bd?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
         if (bvid > 0 && WORKS_IN_VOID_BAG_FALSE.has(bvid)) continue;   // WorksInVoidBag=false 两例外
         if (bvid <= 0) continue;
         refreshInfoAccsFromItemType(infoAccs, bvid);
@@ -2487,7 +2487,7 @@ export class Player extends Entity {
     const sumFx = (s: { id: number } | null): void => {
       if (!s) return;
       const d = ITEM_DEFS[s.id];
-      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
       const fx = vid >= 0 ? SUMMON_GEAR[vid] : undefined;
       if (!fx) return;
       if (fx.dd2) {
@@ -3036,7 +3036,7 @@ export class Player extends Entity {
   /** 手持变态刀 3106（潜行判定用） */
   get heldPsychoKnife(): boolean {
     const d = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
-    const vid = d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     return vid === 3106;
   }
   /** 潜行 aggro（:25976 psycho / :26016 蘑菇矿 Remap 轴 / :26045 星璇：三源【互斥】
@@ -4735,7 +4735,7 @@ export class Player extends Entity {
     // 鱼缸头盔（armor[0]∈{250,4275}，:22917）：恒淹（戴着鱼缸无法呼吸）
     const headVid = (() => {
       const d = ITEM_DEFS[this.inv.armor[0]?.id ?? -1];
-      return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      return d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     })();
     if (headVid === 250 || headVid === 4275) drown = true;
     // 芦苇管出水口（:22920-22945）：非挥舞中时采样头顶 44px 前偏 6px 格，
@@ -7234,7 +7234,7 @@ export class Player extends Entity {
     // 静止衰减同蘑菇矿；效果在 damageMult/critChance 消费）
     const heldVid = (() => {
       const d = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
-      return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      return d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     })();
     if (heldVid === 3106) {
       if (this.useTime > 0) { this.stealthTimer = 15; if (this.stealth > 0) this.stealth = Math.min(1, this.stealth + 0.1); }
@@ -8095,7 +8095,7 @@ export class Player extends Entity {
     const held = this.inv.heldItem();
     if (!held) return false;
     const d = ITEM_DEFS[held.id];
-    const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    const vid = d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     if (vid !== 186) return false;
     if (this.ridingMount) {
       return !(MOUNT_SETS.DontHoldItems?.[this.mount.type] ?? false);
@@ -10072,7 +10072,7 @@ export class Player extends Entity {
     // tileInteractionHappened 等输入闸=输入层差异登记）。格挡中受击=反伤。
     const heldShieldVid = (() => {
       const d = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
-      return d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      return d?.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     })();
     const shouldGuard = this.inputUseTile && !this.mount.active
       && !!eq.shieldItem && (heldShieldVid === 3823 || heldShieldVid === 4760);

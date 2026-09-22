@@ -39,6 +39,7 @@ import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { ProjGhostRing, drawCeleb2Chain } from './projGhostTrail';   // ★BJ235 烟花链残影
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -337,6 +338,13 @@ export class Celeb2Rocket extends Entity {
     // ★BJ235 残影记录（UpdateTrails :17198=Damage 前同位序——原版撞块杀 :17132 早退
     //  不记录,命中杀 Damage 后仍记录一子步:置于命中环前=两门同相）
     this.ghostRing?.record(this.x, this.y, this.rot, this.vx < 0 ? -1 : 1, true);
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——715-718 penetrate=1 首中即亡拍【照割】（SetDefaults :7586-7611,
+    //  aiStyle 147/friendly/ranged）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
+    //  四型均过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
+    //  （登记债：原版 Kill 链 :75034-75049 Resize 128/240 后再 Damage()——死亡拍
+    //  爆炸盒 128/240px 的割面本仓整缺,本刀只补弹盒位,爆炸盒位另案。）
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;

@@ -973,7 +973,9 @@ function main() {
   }
   const bows = [...data.values()].filter((v) => v.useAmmo === 40);
   const arrows = [...data.values()].filter((v) => v.ammo === 40);
-  console.error(`共 ${data.size} 物品 / 弓类 ${bows.length} / 箭类 ${arrows.length}`);
+  // ★BJ283 口径勘误：原「共 ${data.size}」=委托合并面（4357,手补回填前）——现库终表
+  //  4369 含手补回填键（544/556/557/2350/月主 15/THROWN_WEAPONS 等）,打印改终表口径。
+  console.error(`共 ${Object.keys(obj).length} 物品（终表,含手补回填）/ 弓类 ${bows.length} / 箭类 ${arrows.length}（bows/arrows 系委托合并面统计）`);
   console.error(`useTurn=true ${useTurnTrue} 件 / noUseGraphic=true ${noUseGraphicTrue} 件 / UseSound ${soundEntries.length} 件`);
   console.error('木弓(99):', JSON.stringify(obj['99']));
   console.error('木箭(40):', JSON.stringify(obj['40']));

@@ -48,13 +48,48 @@
 // 火苗 16-17/气泡 411-430 等【非 HitEffect 出点】——缺面曾落 32px 回退盒、停靠点偏高）。
 //
 // 用法：node tools/extract-gore.mjs [--audit]   （--audit = 只输出诊断 JSON，不落盘）
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+//
+// ★BJ284 2026-09-22 era guard 落闸（四要素习语 docs/era-guard-family.md）：
+//   ① SW_ITEM_VER 白名单单值 {1456}——★本器 1456 锚系「刻意保留」（非漏迁移）：产物
+//     line 域=1456 行号（金标 gore.test.ts 钉 :84540/:84554/:83038 等,553 条 line 平移
+//     ~+71=独立刀量级）;1457 语义 delta 由 MANUAL_1457_DELTAS 承载（1457↔1458 HitEffect
+//     区 :82492-:90939 逐字节全等,md5 ae487fa5,BJ284 复证）。显式 1457/1458 → 拒+指引
+//     （重锚=数据刀+金标重冻,须按 BJ261 件 1 流程另立刀）;② 输出通道三分离：缺省=干跑
+//     对拍零写盘（双向路径级 diff,live-only=洗库预警/fresh-only=现库退化缺键型,任一非空
+//     exit 1+物证）/ SW_OUT=沙箱 / --write-real=写真库（diff 非纯增量拒,强推双旗
+//     --force-full --overwrite-append-era）；双旗互斥+探测注入面 SW_GORE_JSON 与
+//     --write-real 混用拒（g1）——非 1457 禁写规则不适用本器（白名单本就单值 1456）;
+//   ③ 锚 fail-loud：HitEffect 签名行+EXTRA_TEX_FAMILIES 基数+entries 基数护栏 550;
+//   ④ 判别力自证：tests/extract-gore-era-guard.test.ts（mutant ROOT_TRIGGER 前置重锚）。
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const NPC_CS = join(ROOT, '..', 'Terarria1456', 'Terraria', 'NPC.cs');
-const OUT = join(ROOT, 'src', 'data', 'vanilla-gore.json');
+const VER = process.env.SW_ITEM_VER ?? '1456';
+const VER_ALLOWED = new Set(['1456']);
+if (!VER_ALLOWED.has(VER) || !existsSync(join(ROOT, '..', `Terarria${VER}`, 'Terraria', 'NPC.cs'))) {
+  console.error(`[extract-gore] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1457' || VER === '1458') console.error('  1456 锚系「刻意保留」（line 域=1456 行号,金标钉死;1457 语义 delta=MANUAL_1457_DELTAS;1457↔1458 HitEffect 逐字节全等）。重锚 1457=553 条 line 平移+金标重冻=独立数据刀（BJ261 件 1 流程）,禁止裸跑洗表。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+const SW_OUT = process.env.SW_OUT;
+if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+  console.error('[extract-gore] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  process.exit(1);
+}
+if (WRITE_REAL && process.env.SW_GORE_JSON !== undefined) {
+  console.error('[extract-gore] 拒绝运行：探测注入面（SW_GORE_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  process.exit(1);
+}
+const LIVE_JSON = process.env.SW_GORE_JSON ?? join(ROOT, 'src', 'data', 'vanilla-gore.json');
+// ★M1 变异锚:干跑臂 null（守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面）
+const OUT_JSON = WRITE_REAL ? LIVE_JSON : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-gore.json` : null);
+const NPC_CS = join(ROOT, '..', `Terarria${VER}`, 'Terraria', 'NPC.cs');
+const OUT = OUT_JSON;
 const SPRITE_DIR = join(ROOT, 'public', 'sprites', 'vanilla');
 
 // ============ PNG 尺寸（IHDR 直读：8B 签名 + 4B len + 4B 'IHDR' + 4B w + 4B h） ============
@@ -1835,6 +1870,46 @@ const out = {
 };
 for (const [k, v] of [...entries.entries()].sort((a, b) => (+a[0]) - (+b[0]))) out[k] = v;
 
+// ---- ③ 基数护栏（1456 锚实测:npcIds 554——地板防静默半表;HitEffect 签名锚已在 :342） ----
+if (entries.size < 550) throw new Error(`[extract-gore] 锚点失配: entries 基数 ${entries.size} < 550（解析面漂移,禁止静默半表）`);
+
+// ================= ★BJ284 era guard：干跑对拍 / 沙箱 / 逃生门（头注见上） =================
+const FRESH = JSON.stringify(out, null, 1) + '\n';
+/** 现库 vs 重产双向路径级 diff（npcId 键集+逐 id 条目数组按位+字段叶值）。live-only=洗库
+ *  预警面 / fresh-only=现库退化缺键型面（★G-1/S3 处方）/ drift=同路径值漂移。 */
+function deepWash(live, fresh, prefix = '') {
+  const wash = { liveOnly: [], freshOnly: [], drift: [] };
+  const base = prefix || '<root>';
+  if (live === null || fresh === null || typeof live !== 'object' || typeof fresh !== 'object') {
+    if (JSON.stringify(live) !== JSON.stringify(fresh)) wash.drift.push(`${base}: ${JSON.stringify(live)}→${JSON.stringify(fresh)}`);
+    return wash;
+  }
+  if (Array.isArray(live) !== Array.isArray(fresh)) {
+    wash.drift.push(`${base}: 类型漂移 ${Array.isArray(live) ? 'arr' : 'obj'}↔${Array.isArray(fresh) ? 'arr' : 'obj'}`);
+    return wash;
+  }
+  const lk = new Set(Object.keys(live));
+  const fk = new Set(Object.keys(fresh));
+  for (const k of Object.keys(live)) {
+    const p = `${prefix}.${k}`;
+    if (!fk.has(k)) { wash.liveOnly.push(p); continue; }
+    const w = deepWash(live[k], fresh[k], p);
+    wash.liveOnly.push(...w.liveOnly); wash.freshOnly.push(...w.freshOnly); wash.drift.push(...w.drift);
+  }
+  for (const k of Object.keys(fresh)) if (!lk.has(k)) wash.freshOnly.push(`${prefix}.${k}`);
+  return wash;
+}
+const washEmpty = (w) => !w.liveOnly.length && !w.freshOnly.length && !w.drift.length;
+function washReport(w) {
+  console.error('  物证：');
+  if (w.liveOnly.length) console.error(`    [live-only] 现库独有 ${w.liveOnly.length} 处（重产缺=提取器退化/洗库面）: ${w.liveOnly.slice(0, 6).join(', ')}`);
+  if (w.freshOnly.length) console.error(`    [fresh-only] 重产独有 ${w.freshOnly.length} 处（现库缺=源侧新增/现库退化）: ${w.freshOnly.slice(0, 6).join(', ')}`);
+  if (w.drift.length) console.error(`    [drift] 值漂移 ${w.drift.length}: ${w.drift.slice(0, 6).join(' | ')}`);
+}
+let live = null;
+if (existsSync(LIVE_JSON)) { try { live = JSON.parse(readFileSync(LIVE_JSON, 'utf8')); } catch { /* 坏损:不拦（npcdrops 同款） */ } }
+const wash = live === null ? null : deepWash(live, JSON.parse(FRESH));
+
 if (process.argv.includes('--audit')) {
   console.log(JSON.stringify({
     npcIds: entries.size, entryCount, callsTotal, callsHitSkipped, callsPartySkipped,
@@ -1846,8 +1921,31 @@ if (process.argv.includes('--audit')) {
     texExtra: texExtraCount,
     sample: { 1: out[1], 3: out[3], 491: out[491]?.slice(0, 3), 50: out[50] },
   }));
+} else if (OUT_JSON) {
+  if (WRITE_REAL && wash && !washEmpty(wash) && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+    console.error('[extract-gore] 拒绝 --write-real：重产 diff 非纯增量（双向差异非空）——先逐值定谳（反编译为准）再回写。');
+    washReport(wash);
+    console.error('  确需原地强推：--force-full --overwrite-append-era 双旗（单旗仍拒）。');
+    process.exit(1);
+  }
+  mkdirSync(OUT_JSON.slice(0, OUT_JSON.lastIndexOf('/')), { recursive: true });
+  writeFileSync(OUT_JSON, FRESH);
+  console.error(`[extract-gore] 已写 ${OUT_JSON}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}）`);
+  console.log(`vanilla-gore.json: ${entries.size} npcIds, ${entryCount} entries, `
+    + `${unresolved.length} unresolved, ${unresolvedGates.length} unresolvedGates, `
+    + `${unresolvablePost.length} unresolvablePost, `
+    + `posExpr ${countField((e) => !!e.posExpr)}, velExpr ${countField((e) => !!e.velExpr)}, `
+    + `gated ${countField((e) => (e.gates?.length ?? 0) > 0)}, post ${countField((e) => (e.post?.length ?? 0) > 0)}, `
+    + `tex ${Object.keys(tex).length}/${idsSeen.size} (直调面补 ${texExtraCount}, 缺图 ${texMissing})`);
+} else if (wash === null) {
+  console.error('[extract-gore] 干跑（零写盘）：现库缺 vanilla-gore.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+} else if (!washEmpty(wash)) {
+  console.error('[extract-gore] 干跑对拍：双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
+  washReport(wash);
+  console.error('  处置：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 SW_OUT=<dir>。');
+  process.exit(1);
 } else {
-  writeFileSync(OUT, JSON.stringify(out, null, 1) + '\n');
+  console.error('[extract-gore] 干跑对拍：重产盖住现库（双向零差,零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
   console.log(`vanilla-gore.json: ${entries.size} npcIds, ${entryCount} entries, `
     + `${unresolved.length} unresolved, ${unresolvedGates.length} unresolvedGates, `
     + `${unresolvablePost.length} unresolvablePost, `

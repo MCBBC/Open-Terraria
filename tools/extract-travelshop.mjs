@@ -22,9 +22,9 @@
 //     hardMode&&downed_398（:837/:873）/hardMode&&downedMartians（:841-849）+
 //     DST 双臂 !dontStarveWorld→null / dontStarveWorld→skip（:817-832/:891-903）;
 //   ②单掷组条目 `it = 2281 + Main.rand.Next(3)`（:1232-1234）→ ids:[2281,2282,2283]
-//     （★登记残差：组条目源码位序=57（2266 与 2258 之间）,现库手补在末位 65——
-//     池序=RNG 消费序（每条目逐次 RollLuck）,源码位序为准;现库序=手并追加工件,
-//     数据面对齐留待后续数据刀,守卫多重集对拍不受影响）;
+//     （★BJ222 已归一：组条目现库位序=源码位序 57（2266 与 2258 之间）,手补末位追加
+//     工件已回位——BJ217 时的「位序残差 57 vs 65」登记债清偿,池序=RNG 消费序
+//     （每条目逐次 RollLuck）,现库与重产全序逐条目全等）;
 //   ③基数护栏抬到 1457 终值 66/31（BJ215 定谳现库值,重产实证追平）。
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';

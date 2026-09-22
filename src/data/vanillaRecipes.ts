@@ -297,11 +297,14 @@ export function collectOwnedItems(
   };
   void inc;
   // slots 0-57（背包+钱币+弹药）
+  // ★BJ283：键前缀 parseInt 兜底退役（BJ268 登记；方案 A ⑥回填后 `d.vid ?? -1` 与旧
+  //   混合兜底全域逐件等价——items.ts:2414 实测定谳 vi_ vid≠键解析=0 件;place_v/PRIV
+  //   键 vid 保持 undefined=「无原版 vid」,双式同 -1）。本文件 4 站位同批退役。
   for (const s of inv.slots) {
     if (!s) continue;
     const def = ITEM_DEFS[s.id];
     if (!def) continue;
-    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    const vid = def.vid ?? -1;
     if (vid >= 0) add(vid, s.stack);
   }
   // 箱/bank 槽（CollectItems(recipeChest.item, recipeChest.maxItems)——stack>0 才计）
@@ -311,7 +314,7 @@ export function collectOwnedItems(
         if (!it || it.stack <= 0) continue;
         const def = ITEM_DEFS[it.id];
         if (!def) continue;
-        const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+        const vid = def.vid ?? -1;
         if (vid >= 0) add(vid, it.stack);
       }
     }
@@ -417,7 +420,7 @@ const VID_TO_KEY = (() => {
   // ★方案 A（BJ264）：ITEM_DEFS 重排后稀疏——for..of 对洞产出 undefined，须 !def 跳过
   for (const def of ITEM_DEFS) {
     if (!def) continue;
-    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    const vid = def.vid ?? -1;
     if (vid >= 0 && !m.has(vid)) m.set(vid, def.key);
   }
   return m;
@@ -655,7 +658,7 @@ export function invIndexOfVanilla(vid: number): number {
   for (let i = 0; i < ITEM_DEFS.length; i++) {
     const d = ITEM_DEFS[i];
     if (!d) continue;
-    const v = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    const v = d.vid ?? -1;
     if (v === vid) { hit = i; break; }
   }
   hit ??= -1;
