@@ -3394,6 +3394,9 @@ export class YoyoProj extends Entity {
       //  （post-lerp,原版同构））
       if (this.wet) { this.x += preVx; this.y += preVy; }
       else { this.x += this.vx; this.y += this.vy; }
+      // ★BJ285（BJ232 死亡段割面族,2026-09-22）：回收态命中照结算 → CutTiles（:12517）
+      //  先于 Damage_PVE（:12523）前置习语（活跃态同款见下方主结算位）。
+      cutTilesBox(game, this.x, this.y, this.w, this.h);
       hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
         (e) => this.onYoyoHit(e, game), undefined, true);
       return;
@@ -5021,6 +5024,11 @@ export class FlaironSpike extends Entity {
     // ★MAJOR-2（2026-09-02 红队 J′）：penetrate=1 命中敌 → Damage() 内 :14189
     // penetrate-- → 0（keepIterating=false）→ Update :17312 `if (penetrate == 0) Kill()`
     // 同拍消亡——旧码命中后继续飞 = 无限穿透。onHit 回调记账后走既有爆尘出口
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——405 penetrate=1 首中即亡拍【照割】（SetDefaults :4859-4868,aiStyle 70/
+    //  friendly/melee）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。405 过两道门
+    //  （CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     let hitAny = false;
     // ④ pen = armorPen（:12852 num6 命中段合并玩家近战项——旧码硬 0 = 泡泡不掉防）
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen, () => { hitAny = true; });
@@ -8378,6 +8386,11 @@ export class CrystalSerpentProj extends Entity {
     if (body.hitWall || body.collideY || body.hitHead) { this.killFx(game); return; }
     // ⑧ 命中敌(Damage_GetHitbox :15037 = 全 32×32 盒,523 无特例;penetrate=1 首中耗尽 →
     //    Damage() 尾 Kill;Poisoned 600..1740t 由 hitEnemies 尾 applyProjStatus(523) 表驱动)
+    // ★BJ285（BJ232 死亡段割面族,2026-09-22）：CutTiles（P.cs:12517）先于 Damage_PVE
+    //  （:12523）——523 水晶蛇弹 penetrate=1 首中即亡拍【照割】（SetDefaults :5931-5940,
+    //  aiStyle 95/friendly/ranged）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
+    //  523 过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     hitEnemies(this, game, this.hitCd, 9999, 0, this.armorPen, (ent) => {
       if (this.frostEligible) {
         // 冰霜盔甲引擎(melee||ranged 门 :11512-11515,ranged 弹在门内)
