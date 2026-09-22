@@ -18,9 +18,10 @@ const out = { origin: ORIGIN, scenes: {} };
 async function censusScene(name, setup) {
   const page = await openPage(browser, {});
   try {
-    // 预导航带旗（bootstrap carryQuery 透传,★BJ95:flags 读 location.search,洗掉=失明）
+    // 旗标进 origin 本体（gotoApp 自身导航结构携带;★openPage 首跳若落无旗 URL,
+    //   模块求值期 b0Shadow 静态旗恒假——land 场景实测踩坑）
     await page.goto(`${ORIGIN}/?b0shadow=1`, { waitUntil: 'domcontentloaded' });
-    await bootstrap(page, ORIGIN);
+    await bootstrap(page, `${ORIGIN}/?b0shadow=1`);
     await createGame(page);
     if (setup) await setup(page);
     await pump(page, 240);   // census 窗
