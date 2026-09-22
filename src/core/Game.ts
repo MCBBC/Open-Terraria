@@ -2407,6 +2407,47 @@ export function waspGunHiveBonus(strongBees: boolean): { dmg: number; pen: numbe
   return strongBees ? { dmg: 5, pen: 5 } : { dmg: 0, pen: 0 };
 }
 
+/** ★BJ282 step 散布律（2188 毒液/1308 剧毒/1569 吸血鬼飞刀三支同式,1801/1930/1931
+ *  走实体侧自校正不经此）：逐发 f = factor×发序 i（首发展的原样）→ v +=
+ *  Next(-35,36)×f 双轴 → 再【归一】回 speed（模长恒等 speed,Player.cs:48569-48572/
+ *  :48593-48596/:48653-48656 同式）。纯函数导出供金标直测 */
+export function stepSpreadVelocity(
+  baseX: number, baseY: number, speed: number, factor: number, i: number, rnd: () => number,
+): { vx: number; vy: number } {
+  const f = factor * i;
+  let vx = baseX + (Math.floor(rnd() * 71) - 35) * f;
+  let vy = baseY + (Math.floor(rnd() * 71) - 35) * f;
+  const len = Math.hypot(vx, vy) || 1;
+  const sc = speed / len;
+  return { vx: vx * sc, vy: vy * sc };
+}
+
+/** ★BJ282 毒液法杖 2188 掷数（Player.cs:48547-48561）：n=4+(Next(3)==0)+
+ *  (Next(4)==0)+(Next(5)==0) = 4..7 发/击。纯函数导出供金标直测 */
+export function venomStaffVolleyRoll(rnd: () => number): number {
+  let n = 4;
+  if (Math.floor(rnd() * 3) === 0) n++;
+  if (Math.floor(rnd() * 4) === 0) n++;
+  if (Math.floor(rnd() * 5) === 0) n++;
+  return n;
+}
+
+/** ★BJ282 剧毒法杖 1308 掷数（Player.cs:48581-48585）：n=3+(Next(3)==0) = 3..4 发/击 */
+export function toxicStaffVolleyRoll(rnd: () => number): number {
+  return 3 + (Math.floor(rnd() * 3) === 0 ? 1 : 0);
+}
+
+/** ★BJ282 吸血鬼飞刀 1569 掷数（Player.cs:48629-48645）：n=4+(Next(2)==0)+
+ *  (Next(4)==0)+(Next(8)==0)+(Next(16)==0) = 4..8 把/击 */
+export function vampireKnifeVolleyRoll(rnd: () => number): number {
+  let n = 4;
+  if (Math.floor(rnd() * 2) === 0) n++;
+  if (Math.floor(rnd() * 4) === 0) n++;
+  if (Math.floor(rnd() * 8) === 0) n++;
+  if (Math.floor(rnd() * 16) === 0) n++;
+  return n;
+}
+
 /** 蜂巢族受击反击掷骰（Player.cs:37871-37907）：数量 num19 =
  *  1 + (Next(3)==0) + (Next(3)==0) + (strongBees(HivePack 3333) && Next(3)==0)；
  *  基伤 num20 = strongBees ? 18 : 13（专家 ×1.5/大师 ×2 由调用侧难度档处理） */
@@ -17933,6 +17974,41 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
+        // ---- ★BJ282 点名两件（ItemCheck_Shoot 逐型专支；此前全落通用尾支=每击
+        //      1 发 = 用户实报"毒液法杖只有 1 颗/剧毒法杖同病"）。1801/1930/1931 同族
+        //      已由实体侧出生自校正承载（Arrow.bat316/rp30/blz337 Pending）勿在此重发。
+        //      掷序纪律：数量增量掷【先于】循环（原版 num84/num89 先掷完再进 for），
+        //      逐发散布在循环内重掷 ----
+        // 2188 毒液法杖（Player.cs:48547-48578）：n=4+(1/3)+(1/4)+(1/5) 各+1 = 4..7 发
+        // 1308 剧毒法杖（Player.cs:48579-48602）：n=3+(1/3) = 3..4 发
+        //   共用 step 散布律：逐发 f=0.05×发序 i（首发展的原样）、v += Next(-35,36)×f
+        //   双轴、再【归一】回 shootSpeed（速度模长恒等 speed——与 1155"散布后不归一"
+        //   不同款，勿混）。弹 355/265 穿透(5/3)与寿命(58/37)全自 vanilla-projectiles
+        //   数据面（Arrow pierce/life 缺省链），projectileData(cw.shoot) 直读。
+        if (critVid === 2188 || critVid === 1308) {
+          const nVs = critVid === 2188 ? venomStaffVolleyRoll(Math.random) : toxicStaffVolleyRoll(Math.random);
+          const gVs = projGravSpec(cw.shoot);
+          for (let iv = 0; iv < nVs; iv++) {
+            const { vx, vy } = stepSpreadVelocity(                 // 0.05f*num85 step 律（:48566-48572/:48590-48596）
+              Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
+              cw.shootSpeed, 0.05, iv, Math.random);
+            const fang = new Arrow(mzX, mzY, vx, vy, cw.damage, cw.knockback, cw.shoot,
+              { grav: gVs.grav, gravDelay: gVs.delay, grav2: gVs.grav2, grav2At: gVs.grav2At,
+                dragAlways: gVs.drag });
+            placeAtShootSpawn(fang, mzX, mzY);                     // NewProjectile 盒心落点（:48573/:10878-10879）
+            fang.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            fang.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
+            fang.frostEligible = false;                            // magic=true 弹不吃冰霜引擎
+            this.entities.add(fang, 'projectiles');
+          }
+          this.playUseSound(critVid, 'tink');                      // UseSound=Item_43（表值 2188/1308 同）
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.useSwing(def, ang, ps?.spd ?? 1);
+          this.regrowSlowMagicSwing(critVid);                      // ★F-7：useSwing 重播重置付款点拉伸 → 补拉
+          this.input.mouseDown = false;
+          break;
+        }
         if (critVid === 3053) {
           const swSf = this.swing;
           // 相位基准 A = itemAnimationMax−1（:4443-4447 itemAnimationMax=useAnimation
@@ -19218,6 +19294,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'zap');   // UseSound Item157/Item12（itemUseSound 表）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 1569 吸血鬼飞刀（★BJ282 多弹面；Player.cs:48627-48662 ItemCheck_Shoot 专支）：
+        // 每击 n=4+(1/2)+(1/4)+(1/8)+(1/16)=4..8 把；逐发 f=0.05×i step 律+归一（2188/1308
+        // 同款）；speed = shootSpeed/meleeSpeed（:47470 melee 减速链,attackSpeedMult=倒数）；
+        // 全部同点出生 = pointPosition 玩家中心（:48658）。此前落 'shot' 兜底=每击 1 把
+        //（弹 304 aiStyle2 投掷 → combatWeapon 归 'shot',melee 挥击支不可达）。
+        if (cw.shoot === 304) {
+          const spdVK = cw.shootSpeed / this.player.attackSpeedMult;
+          const nVK = vampireKnifeVolleyRoll(Math.random);
+          const gVK = projGravSpec(304);
+          for (let ivk = 0; ivk < nVK; ivk++) {
+            const { vx: vxVK, vy: vyVK } = stepSpreadVelocity(
+              Math.cos(ang) * spdVK, Math.sin(ang) * spdVK, spdVK, 0.05, ivk, Math.random);
+            const knife = new Arrow(this.player.cx, this.player.cy, vxVK, vyVK,
+              cw.damage, cw.knockback, 304,
+              { grav: gVK.grav, gravDelay: gVK.delay, grav2: gVK.grav2, grav2At: gVK.grav2At,
+                dragAlways: gVK.drag });
+            placeAtShootSpawn(knife, this.player.cx, this.player.cy);   // :10878-10879 盒心落点
+            knife.critChance = critTotal;
+            knife.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0) + this.player.meleeArmorPen;
+            this.entities.add(knife, 'projectiles');
+          }
+          this.useSwing(def, ang, ps?.spd ?? 1);
+          this.player.useTime = cw.useTime;
+          this.playUseSound(critVid, 'bowShoot');   // UseSound=Item_39（表值）
           this.input.mouseDown = false;
           break;
         }
