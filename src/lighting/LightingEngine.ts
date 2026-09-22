@@ -169,6 +169,21 @@ export class LightingEngine {
     const i = (ty - this.ry) * this.rw + (tx - this.rx);
     return [this.r[i], this.g[i], this.b[i]];
   }
+
+  /** ★C6 雨雪（2026-09-23）：lightAt 的零分配变体——结果写进调用方缓冲
+   *  out[0..2],返回 out。逐位同值（同界外 0 语义/同索引式/同 0-255 域）；
+   *  消费面=drawRain 逐滴采样（750 滴/帧 × 每次新建数组 = 雨天 ~90MB/s 级
+   *  GC 流量,用户实机 trace 侧证 GC 面来自渲染热路径分配）。out.length<3
+   *  时调用方契约违例（不兜底,尽早暴露）。 */
+  lightAtTo(tx: number, ty: number, out: number[]): number[] {
+    if (tx < this.rx || ty < this.ry || tx >= this.rx + this.rw || ty >= this.ry + this.rh) {
+      out[0] = 0; out[1] = 0; out[2] = 0;
+      return out;
+    }
+    const i = (ty - this.ry) * this.rw + (tx - this.rx);
+    out[0] = this.r[i]; out[1] = this.g[i]; out[2] = this.b[i];
+    return out;
+  }
 }
 
 // ---- Utils.PlotLine / PlotTileLine 一比一(Utils.cs:2359-2415/:2460-2487;2026-09-03

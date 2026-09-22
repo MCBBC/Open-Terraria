@@ -6677,6 +6677,11 @@ export class Game implements GameHooks {
     this.renderer.sky.moonType = this.world.moonType;   // 原版 header moonType（WF:1252）
     this.weatherHooks = {
       lightAt: (tx, ty) => this.lighting ? this.lighting.lightAt(tx, ty) : [255, 255, 255],
+      lightAtTo: (tx, ty, out) => {
+        // ★C6：零分配采样面（lighting 缺省=全亮,与 lightAt 缺省臂同值）
+        if (!this.lighting) { out[0] = 255; out[1] = 255; out[2] = 255; return out; }
+        return this.lighting.lightAtTo(tx, ty, out);
+      },
       atmo: 1,
       // ★SW-BJ26 2026-09-07：雨/雪生成总闸（Rain.cs:32 ZoneRain / Main.cs:13209
       // SurfaceAtmospherics）——初值 false（未扫描期不发雨/雪），每帧 updateWeather 刷新

@@ -71,7 +71,7 @@ describe('B0 census 分类语义', () => {
   it('drawImage 异常参数形态=兜底档', () => {
     const c = new GLShimCensus(stubCtx());
     const w = c.wrap();
-    (w as unknown as (img: unknown, dx: number) => void)(1, 2);   // 2 参异常形态（绕 TS 签名）
+    (w.drawImage as unknown as (a: unknown, b: number) => void)(1, 2);   // 2 参异常形态（绕 TS 签名）
     c.endFrame();
     expect(c.snapshot().frames[0].fallback['drawImage:2arg']).toBe(1);
   });

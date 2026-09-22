@@ -49,9 +49,14 @@ interface SandGrain {
 /** EmitDust 四色统一 alpha（Sandstorm.cs:179-182 四个 Color 字面量同值） */
 const SAND_COLOR_ALPHA = 180;
 
+/** ★C6 雨雪：光照采样复用槽（drawRain/drawPrecip 逐滴采样;同步消费不保留引用） */
+const _lt3 = [0, 0, 0];
+
 export interface WeatherFxHooks {
   /** 光照采样（0-255 RGB；雨滴着色 ×0.85） */
   lightAt(tx: number, ty: number): [number, number, number];
+  /** ★C6：零分配变体（结果写进调用方 out[0..2] 并返回;逐位同值,见 LightingEngine.lightAtTo） */
+  lightAtTo(tx: number, ty: number, out: number[]): number[];
   /** 地表开阔度 0-1（原版 atmo——深度梯度 0→1 后钳 1，Main.cs:64148-64159；
    *  地下恒 1≠「无雨」——真正的地下停雨闸是 zoneRain） */
   atmo: number;
@@ -662,7 +667,7 @@ export class WeatherRenderer {
       if (!d.active) continue;
       const tx = Math.floor((d.x + 4) / TILE);
       const ty = Math.floor((d.y + 4) / TILE);
-      const [lr, lg, lb] = hooks.lightAt(tx, ty);
+      const [lr, lg, lb] = hooks.lightAtTo(tx, ty, _lt3);   // ★C6：零分配（原 lightAt 每滴新数组）
       // DrawRain（:38246-38256）1:1：position=左上角、origin=(0,0)（绕【顶点】旋转，
       // 雨条自 position 向速度方向垂落）——★曾中心锚（整体低 20px+旋转心错）
       if (fast) {
@@ -731,7 +736,7 @@ export class WeatherRenderer {
         if (!f.active) continue;
         const tx = Math.floor((f.x + 5) / TILE);
         const ty = Math.floor((f.y + 5) / TILE);
-        const [lr, lg, lb] = hooks.lightAt(tx, ty);
+        const [lr, lg, lb] = hooks.lightAtTo(tx, ty, _lt3);   // ★C6：零分配
         if (lr === 0 && lg === 0 && lb === 0) { f.active = false; continue; } // :39730
         // 单画（GetAlpha 路径，dust 76 无 color 不叠）——雪花本体白格阵，RGB 直接乘全精度光
         // PR#2：memo（键含全精度 String() 往返,命中逐位相同）
@@ -745,7 +750,7 @@ export class WeatherRenderer {
         if (!g.active) continue;
         const tx = Math.floor((g.x + 4) / TILE);
         const ty = Math.floor((g.y + 4) / TILE);
-        const [lr, lg, lb] = hooks.lightAt(tx, ty);
+        const [lr, lg, lb] = hooks.lightAtTo(tx, ty, _lt3);   // ★C6：零分配
         if (lr === 0 && lg === 0 && lb === 0) { g.active = false; continue; } // :39730
         const base = this.bakeMemoized(
           `dust268-base|${g.frame}|${lr},${lg},${lb}`,
