@@ -80,7 +80,7 @@ describe('4060 战斗列（1458 Item.cs:35672-35683 终值）', () => {
 
 describe('4060 弹药链（useAmmo=AmmoID.FallenStar 75）', () => {
   it('rangedAmmoWeapon → 75（发射链 ranged 分支接管门）', () => {
-    expect(rangedAmmoWeapon({ key: 'vi_4060_SuperStarCannon' })).toBe(75);
+    expect(rangedAmmoWeapon({ key: 'vi_4060_SuperStarCannon', vid: 4060 })).toBe(75);
   });
 
   it('弹药坠落星 75 已注册且 combat.ammo=75（pickAmmoSlot 反查可装填）', () => {

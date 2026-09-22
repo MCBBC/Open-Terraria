@@ -73,7 +73,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
     const dir = mkdtempSync(join(TMP, 'travelshop-guard-'));
     try {
       const src = readFileSync(TS_SCRIPT, 'utf8');
-      const TRIGGER = "const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');";
+      const TRIGGER = "const LIVE_JSON = process.env.SW_TRAVELSHOP_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');";
       expect(src).toContain(TRIGGER);
       const fakeLive = join(dir, 'vanilla-travelshop.json');
       copyFileSync(TS_LIVE, fakeLive);
@@ -149,7 +149,7 @@ describe('extract-travelshop era guard（cwd footgun 修 + 动态 diff 干跑闸
       const out = join(dir, 'ts-fresh.json');
       const r1 = spawnSync('node', [TS_SCRIPT, '--out', out], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000 });
       expect(r1.status).toBe(0);
-      const TRIGGER2 = "const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');";
+      const TRIGGER2 = "const LIVE_JSON = process.env.SW_TRAVELSHOP_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');";
       expect(src).toContain(TRIGGER2);
       const fakeLive = join(dir, 'fake-live.json');
       const mutant2 = join(dir, 'extract-travelshop-mutant-live.mjs');
@@ -189,7 +189,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     const dir = mkdtempSync(join(TMP, 'shops-guard-'));
     try {
       const src = readFileSync(SS_SCRIPT, 'utf8');
-      const TRIGGER = "const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
+      const TRIGGER = "const LIVE_JSON = process.env.SW_SHOPSTOCK_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
       expect(src).toContain(TRIGGER);
       const fakeLive = join(dir, 'vanilla-shopstock.json');
       copyFileSync(SS_LIVE, fakeLive);
@@ -237,7 +237,7 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
     const dir = mkdtempSync(join(TMP, 'shops-guard-'));
     try {
       const src = readFileSync(SS_SCRIPT, 'utf8');
-      const TRIGGER = "const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
+      const TRIGGER = "const LIVE_JSON = process.env.SW_SHOPSTOCK_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');";
       expect(src).toContain(TRIGGER);
       const fakeLive = join(dir, 'vanilla-shopstock.json');
       copyFileSync(SS_LIVE, fakeLive);
@@ -304,6 +304,97 @@ describe('extract-shops era guard（cwd footgun 修 + 动态 diff 干跑闸）',
       expect(r.stderr).toContain('锚点失配');
       expect(r.stderr).toContain('SetupShop');
       expect(md5(SS_LIVE)).toBe(beforeLive);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ================= ★G-1（BJ261 2026-09-22）fresh-only 轴（S3 普查案） =================
+// 现状 washOf 只算 live-only——变异实证现库删条恒绿（现库退化不可见）。★G-1/S3 处方：
+// travelshop=拒（B 形态重产面应盖住现库,缺键型=itemrare 同族）;shops=选报（60 条刻意
+// 剥离面=运行时直管恒非空,拒跑语义不成立,但轴向必须 loud 供人工判别）。
+describe('travelshop/shops G-1 fresh-only 轴（BJ261）', () => {
+  it('travelshop 行为面:现库删条 → fresh-only 命名物证 exit 1（恒绿盲区收口）', () => {
+    const dir = mkdtempSync(join(TMP, 'g1-freshonly-'));
+    try {
+      const live = JSON.parse(readFileSync(TS_LIVE, 'utf8'));
+      const dropped = live.items.shift();   // 现库退化:删首条
+      const fixture = join(dir, 'degraded.json');
+      writeFileSync(fixture, JSON.stringify(live));
+      const r = spawnSync('node', [TS_SCRIPT], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
+        env: { ...process.env, SW_TRAVELSHOP_JSON: fixture },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('fresh-only');
+      expect(r.stderr).toContain(JSON.stringify(dropped));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('travelshop 变异:摘 fresh-only 轴后对退化现库恒绿复现（证明该轴是唯一拦截面）', () => {
+    const dir = mkdtempSync(join(TMP, 'g1-freshonly-'));
+    try {
+      const live = JSON.parse(readFileSync(TS_LIVE, 'utf8'));
+      live.items.shift();
+      const fixture = join(dir, 'degraded.json');
+      writeFileSync(fixture, JSON.stringify(live));
+      const probeEnv = { ...process.env, SW_TRAVELSHOP_JSON: fixture };
+      const src = readFileSync(TS_SCRIPT, 'utf8');
+      const TRIGGER = 'wash.itemsFresh = freshOnlyOf(live.items ?? [], items);';
+      expect(src).toContain(TRIGGER);
+      const mutant = join(dir, 'extract-travelshop-mutant-freshonly.mjs');
+      writeFileSync(mutant, src.replace(TRIGGER, 'wash.itemsFresh = []; // ★变异:fresh-only 轴摘除'));
+      const real = spawnSync('node', [TS_SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: probeEnv });
+      expect(real.status).toBe(1);      // 真工具:轴在位 → 拒
+      const r = spawnSync('node', [mutant], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: probeEnv });
+      expect(r.status).toBe(0);         // 变异体:轴摘除 → 恒绿复现
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('shops 行为面:现库删条 → fresh-only 选报命名物证（选报语义,exit 0;★现库退化人工判别）', () => {
+    const dir = mkdtempSync(join(TMP, 'g1-freshonly-'));
+    try {
+      const live = JSON.parse(readFileSync(SS_LIVE, 'utf8'));
+      const npc = '588';
+      const dropped = live.shops[npc][0];
+      live.shops[npc] = live.shops[npc].slice(1);
+      const fixture = join(dir, 'degraded.json');
+      writeFileSync(fixture, JSON.stringify(live));
+      const r = spawnSync('node', [SS_SCRIPT], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
+        env: { ...process.env, SW_SHOPSTOCK_JSON: fixture },
+      });
+      // 选报语义:exit 0（刻意剥离面恒非空,拒跑不成立）,但 fresh-only 报告必须点名退化店
+      expect(r.status).toBe(0);
+      expect(r.stderr).toContain('[fresh-only 选报]');
+      expect(r.stderr).toContain(`npc ${npc}`);
+      expect(r.stderr).toContain(JSON.stringify(dropped).slice(0, 40));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('shops 变异:摘 fresh-only 轴后选报静默（证明该轴是唯一报告面）', () => {
+    const dir = mkdtempSync(join(TMP, 'g1-freshonly-'));
+    try {
+      const live = JSON.parse(readFileSync(SS_LIVE, 'utf8'));
+      live.shops['588'] = live.shops['588'].slice(1);
+      const fixture = join(dir, 'degraded.json');
+      writeFileSync(fixture, JSON.stringify(live));
+      const probeEnv = { ...process.env, SW_SHOPSTOCK_JSON: fixture };
+      const src = readFileSync(SS_SCRIPT, 'utf8');
+      const TRIGGER = 'if (freshOnly.length) wash.shopsFresh[npc] = { n: freshOnly.length, samples: freshOnly.slice(0, 2).map(sig) };';
+      expect(src).toContain(TRIGGER);
+      const mutant = join(dir, 'extract-shops-mutant-freshonly.mjs');
+      writeFileSync(mutant, src.replace(TRIGGER, 'if (false) wash.shopsFresh[npc] = { n: freshOnly.length, samples: freshOnly.slice(0, 2).map(sig) }; // ★变异:fresh-only 轴摘除'));
+      const r = spawnSync('node', [mutant], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: probeEnv });
+      expect(r.status).toBe(0);
+      expect(r.stderr).not.toContain(`npc 588: 重产`);   // 选报面静默=轴被摘
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

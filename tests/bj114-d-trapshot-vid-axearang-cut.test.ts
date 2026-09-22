@@ -23,6 +23,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { TILE_BY_KEY } from '../src/data/tiles';
+import { ITEM_BY_KEY } from '../src/data/items';   // ★方案 A:装备 id 一律运行时反查（旧硬编码 6015=重排前内部号,已失效）
 import { Game } from '../src/core/Game';
 import { TrapShot, type TrapShotKind } from '../src/entities/Dart';
 import { Boomerang } from '../src/entities/WeaponProj';
@@ -51,7 +52,9 @@ const PALM = TILE_BY_KEY['v_323_palm_trees']!;  // sheet 323=棕榈（:15386 直
 const WEED = TILE_BY_KEY['tallgrass']!;         // sheet 3∈TILE_CUT（13 例外表外）
 
 /** Game 原型台（bj108 cutHarness 同构）：cutTile 真法 + breakTile/smashPot 桩。
- *  acc5309 → 配饰槽 3 挂 vi_5309_DontHurtNatureBook（内部 id 6015）。 */
+ *  acc5309 → 配饰槽 3 挂 vi_5309_DontHurtNatureBook（★方案 A 恒等域 iid=5309;运行时反查防漂移）。 */
+const BOOK_IID = ITEM_BY_KEY['vi_5309_DontHurtNatureBook']
+  ?? ITEM_BY_KEY['vi_5309_DontHurtNature'] ?? -1;
 function cutGame(tiles: Map<number, number>, acc5309: boolean) {
   const game = Object.create(Game.prototype) as unknown as {
     world: { store: unknown };
@@ -76,7 +79,7 @@ function cutGame(tiles: Map<number, number>, acc5309: boolean) {
   };
   game.player = {
     inv: {
-      armor: acc5309 ? { 3: { id: 6015 } } : {},
+      armor: acc5309 ? { 3: { id: BOOK_IID } } : {},   // ★方案 A:运行时反查,
       accSlotMax: 8,
       heldItem: () => null,
     },
@@ -123,7 +126,7 @@ function emGame(tiles: Map<number, number>, acc5309: boolean) {
   game.player = {
     x: -500, y: -500, w: 20, h: 42, cx: -490, cy: -479, dead: true, iframes: 0,
     inv: {
-      armor: acc5309 ? { 3: { id: 6015 } } : {},
+      armor: acc5309 ? { 3: { id: BOOK_IID } } : {},   // ★方案 A:运行时反查,
       accSlotMax: 8,
       heldItem: () => null,
     },

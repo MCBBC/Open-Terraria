@@ -80,7 +80,7 @@ describe('发色剂·提取表对账', () => {
     expect(hairDyeItemOfShader(0)).toBeNull();
   });
 
-  it('全族物品已注册（Game.ts 使用链 viIdFromKey 可解析）', () => {
+  it('全族物品已注册（Game.ts 使用链 vid 直读可解析）', () => {
     for (const vid of HAIR_DYE_ITEM_IDS) {
       expect(VI(vid), `物品 ${vid} 未注册`).toMatch(/^vi_/);
       expect(VI_ID(vid), `物品 ${vid} 内部 id 缺失`).toBeGreaterThan(0);

@@ -8,7 +8,9 @@
 // doBtn / vinv 锤击）传 tooltipRareOf(·,np,{forPopup}) 产物（BJ125 单源链;
 // forPopup=跳过④ MouseText −12 覆写——覆写是 MouseText 绘制期行为 Main.cs:20512-
 // 20515,飘字链 PrepareEffects 读 Item.rare 字段值且 expert 走 somePopup.expert 旗
-// 不改色;专家配饰 3090 Royal Gel 可重铸,漏 forPopup → −12 白=新伪影,本网锁死）。
+// 不改色;★S5 勘误（BJ263 2026-09-22）:原版 expert 飘字色=Disco 动色（PopupText.cs:
+// 670-674 Main.DiscoR/G/B）,本仓静态稀有度画线=登记偏差,「expert=表色」判语作废;
+// 专家配饰 3090 Royal Gel 可重铸,漏 forPopup → −12 白=新伪影,本网锁死）。
 // 三层锚（FX60/sw-bj165 同构）：①Game 颜色面（Object.create(Game.prototype)）
 // ②vinv 调用点全链（真 UI 代码 Object.create）③classic 调用点源码锚。
 // 变异（传基表→红）：②捕获第 4 参,基表 2 ≠ 位移后 4 → 红;漏 forPopup → −12 → 红。

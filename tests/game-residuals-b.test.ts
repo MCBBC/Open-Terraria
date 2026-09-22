@@ -5,7 +5,7 @@ import { dropInventoryOnDeath, bulkBuyAmount } from '../src/core/Game';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
 import { VI_KEY } from '../src/data/itemKeys';
-import { viIdFromKey } from '../src/data/vanillaItemCombat';
+
 
 /** Game.ts A 级残差批（2026-08-15）：弹药 AmmoID 假数据 / 起始三件不掉落 */
 
@@ -50,7 +50,7 @@ describe('dropInventoryOnDeath 起始三件 TurnToAir 不掉落（Player.cs:5341
     expect(dropped.some(([k]) => k === torchKey)).toBe(true);   // 普通物品照掉
     for (const [key] of dropped) {                              // 掉落物不含 3507/3506/3509
       const id = ITEM_BY_KEY[key];
-      const vid = id != null ? ITEM_DEFS[id]?.vid : viIdFromKey(key);
+      const vid = id != null ? ITEM_DEFS[id]?.vid : (ITEM_DEFS[ITEM_BY_KEY[key] ?? -1]?.vid);   // ★方案 A(BJ265):键→def vid 直读
       expect([3507, 3506, 3509]).not.toContain(vid ?? -1);
     }
     // 掉后发还：slots[0..2] = 新起始三件

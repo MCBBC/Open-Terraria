@@ -20,11 +20,11 @@ import { ForbiddenSignProj, canSpawnSandstormFriendly, aimingLaserScan, spawnSto
 import { getGlobalHurtBuckets, ImmunityCooldownID } from '../player/HurtCooldownBuckets';
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
-import { vanillaIdOfItem } from '../stats/Shimmer';
+
 import { BUFF_DEFS, BuffState, BuffType } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { viIdFromKey, itemCombat } from '../data/vanillaItemCombat';
+import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import type { TileStore } from '../world/TileStore';
 import { TileStore as TileStoreRT } from '../world/TileStore';   // 运行时 SOLID_LUT（type-only import 会被剥）
@@ -1748,7 +1748,7 @@ export class Player extends Entity {
     if (slot < 0) return -1;
     const dye = this.inv.getEffectiveDye(slot);   // LoadoutShare（GetEffectiveDye :5736）
     if (!dye) return -1;
-    return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
+    return (ITEM_DEFS[dye.id]?.vid ?? -1);
   }
 
   /** 盔甲套染料 vid（Player.cs:9456 ArmorSetDye：Next(3) → 0=cHead/1=cBody/2=cLegs,
@@ -1758,7 +1758,7 @@ export class Player extends Entity {
     const dye = this.inv.getEffectiveDye(pick === 0 ? 0 : pick === 1 ? 1 : 2)
       ?? this.inv.getEffectiveDye(1);   // LoadoutShare（GetEffectiveDye :5736）
     if (!dye) return -1;
-    return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
+    return (ITEM_DEFS[dye.id]?.vid ?? -1);
   }
 
 
@@ -2041,7 +2041,7 @@ export class Player extends Entity {
       const ds = accDrawSlotsOf(vid);
       if (!ds) return;
       const dyeItem = this.inv.getEffectiveDye(slotIdx % 10);   // UpdateItemDye :9696 走 GetEffectiveDye
-      const dyeVid = dyeItem ? (ITEM_DEFS[dyeItem.id]?.vid ?? viIdFromKey(ITEM_DEFS[dyeItem.id]?.key ?? '') ?? -1) : -1;
+      const dyeVid = dyeItem ? (ITEM_DEFS[dyeItem.id]?.vid ?? -1) : -1;
       if (ds.handOn) { accDraw.handOn = ds.handOn; accDraw.dyeHandOn = dyeVid; }
       if (ds.handOff) { accDraw.handOff = ds.handOff; accDraw.dyeHandOff = dyeVid; }
       if (ds.back) {
@@ -2087,7 +2087,7 @@ export class Player extends Entity {
       const fx = accFxOfInternal(s.id);
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
-      const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const accVid = (ITEM_DEFS[s.id]?.vid ?? -1);
       // 语音饰品（ApplyEquipFunctional :14485-14491：currentItem.voiceSlot!=0 →
       // voiceOverride=voiceSlot,!hideVisibleAccessory[itemSlot] 门内——隐藏的语音
       // 饰品不生效;逐槽直赋=后写覆盖前写）
@@ -2270,7 +2270,7 @@ export class Player extends Entity {
           // 跑靴奔跑尘型（SpawnFastRunParticles :36285-36320 switch——按装备 vid 授予；
           // 后装覆盖先装，原版 CancelAllBootRunVisualEffects 语义）
           const vidDef = ITEM_DEFS[s.id];
-          const vid = vidDef ? (vidDef.vid ?? viIdFromKey(vidDef.key)) : -1;
+          const vid = vidDef ? (vidDef.vid ?? -1) : -1;
           bootFx = vid === 4874 ? 'hellfire'
             : vid === 3200 || vid === 3990 ? 'sail'
             : vid === 1579 ? 'cold'
@@ -2278,7 +2278,7 @@ export class Player extends Entity {
             : vid === 3993 ? 'fairy' : null;
           // 跑靴染料（cShoe :9355-9369：shoeSlot 装备所在槽的 dye → GetSecondaryShader）
           const dyeS = this.inv.dye[i % 10];
-          bootDyeVid = dyeS ? (ITEM_DEFS[dyeS.id]?.vid ?? viIdFromKey(ITEM_DEFS[dyeS.id]?.key ?? '')) : -1;
+          bootDyeVid = dyeS ? (ITEM_DEFS[dyeS.id]?.vid ?? -1) : -1;
         }
         if (fx.dmgMelee) dmgMelee += fx.dmgMelee;
         if (fx.dmgRanged) dmgRanged += fx.dmgRanged;
@@ -4201,7 +4201,7 @@ export class Player extends Entity {
       // 1457 把钳挪到置值时点 → 回蓝 buff 期间施法/快捷 buff 的惩罚期变短）
       this.manaAnimTicks--;
       const heldDef = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
-      const heldVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key) ?? -1) : -1;
+      const heldVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if (!(eqM.spaceGun && (heldVid === 127 || heldVid === 4347 || heldVid === 4348 || heldVid === 514))) {
         this.applyManaRegenerationDelay(smm);
       }
@@ -5038,7 +5038,7 @@ export class Player extends Entity {
         // 等价）同 tick 点。playerInteraction 门无——Mount 侧直发
         if (this.mount.type === 10 && this.itemAnimTicks > 0) {
           const held = this.inv.heldItem();
-          const hv = held ? (ITEM_DEFS[held.id]?.vid ?? viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') ?? -1) : -1;
+          const hv = held ? (ITEM_DEFS[held.id]?.vid ?? -1) : -1;
           if (hv === 1260) {
             game.achievements?.handleSpecialEvent(5,
               { statLifeMax: this.maxHp, statManaMax: this.maxMana });
@@ -5321,7 +5321,7 @@ export class Player extends Entity {
         // 可放置物（查无），钳 1 等价不可达。
         const heldIt = this.inv.heldItem();
         const heldDef = heldIt ? ITEM_DEFS[heldIt.id] : undefined;
-        const heldVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+        const heldVid = heldDef ? (heldDef.vid ?? -1) : -1;
         let num3 = 10;
         if (heldDef && (heldDef.tile !== undefined || TILE_WAND_VIDS.has(heldVid))) {
           num3 = itemCombat(heldVid)?.useTime ?? 10;   // HeldItem.useTime（vanilla-itemcombat 数据面）
@@ -5544,7 +5544,7 @@ export class Player extends Entity {
       let jumpStartedThisTick = false;
       // 手持三叉戟 277（UpdateEquips :12487-12490：手持即 trident，非装备槽）
       const heldIt = this.inv.heldItem();
-      const heldVid = heldIt ? (ITEM_DEFS[heldIt.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldIt.id].key)) : -1;
+      const heldVid = heldIt ? (ITEM_DEFS[heldIt.id]?.vid ?? (ITEM_DEFS[heldIt.id].vid ?? -1)) : -1;
       const trident = heldVid === 277;
       // 跳键沿（releaseJump 等价，JumpMovement :20845 消费门 `(releaseJump ||
       // (autoJump && (velocity.Y == 0 || sliding)))`——原版按住跳键落地【不会】自动
@@ -5623,9 +5623,19 @@ export class Player extends Entity {
       if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3.01; }
       else if (this.merman) { lGrav = GRAVITY * 0.75; lMaxFall = 7.01; }   // :24602 原文读 merman 变身态（非装备位）
       else if (trident && !this.inLava) {
-        lGrav = GRAVITY * 0.625; lMaxFall = 6.01; lJSpd = 5.51; lJT = 25;
+        lGrav = GRAVITY * 0.625; lMaxFall = 6.01;
+        // ★BJ260-F1 湿链残项（S6）：覆写后补 UpdateJumpHeight 尾段——原版序=液体档
+        //  覆写（jumpSpeed=5.51 :24611-24612）先于 UpdateJumpHeight（Update(i) 内
+        //  :26211→:19714），后者 jumpBoost 钳（max 6.51 :19717-19720）+ jumpSpeed
+        //  += jumpSpeedBoost（:19745；eqM.jumpSpd 聚合位=装备 1.6 族+徽章 1.8+蛙腿
+        //  2.4+月领腿 1.8+狼人 0.2）。旧写覆写平值 → 湿态蛙腿/徽章加成整丢。
+        lJSpd = Math.max(5.51, eqM.jumpBoost ? 6.51 : 0) + eqM.jumpSpd; lJT = 25;
         if (this.inputUp) { lGrav = GRAVITY * 0.25; lMaxFall = 2.01; }
-      } else { lJSpd = 6.01; lJT = 30; }
+      } else {
+        // ★BJ260-F1：水档覆写 6.01（:24622-24624）后同补尾段（蜜/人鱼支不覆写=
+        //  lJSpd=mJumpSpd 已含加成,勿动）。
+        lJSpd = Math.max(6.01, eqM.jumpBoost ? 6.51 : 0) + eqM.jumpSpd; lJT = 30;
+      }
       effJumpSpd = lJSpd;
       this.jumpSpeedField = lJSpd;      // ★SW-FX40（e）：湿档覆写（:24624 6.01 族）
       // ---- ★BJ227 定谳重定位（2026-09-21 用户实报「水上/液面站一会慢慢沉」）----
@@ -6878,7 +6888,7 @@ export class Player extends Entity {
         || this.buffs.has(BuffType.FlipperPotion)
         || eqM.wing?.slot === 26;
       const heldIt2 = this.inv.heldItem();
-      const heldVid2 = heldIt2 ? (ITEM_DEFS[heldIt2.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldIt2.id].key)) : -1;
+      const heldVid2 = heldIt2 ? (ITEM_DEFS[heldIt2.id]?.vid ?? (ITEM_DEFS[heldIt2.id].vid ?? -1)) : -1;
       this.liqFactor = this.inShimmer ? 0.375
         : this.inHoney && !ignoreWater ? 0.25
         : (this.inWater || this.inLava) && !this.merman && !ignoreWater && heldVid2 !== 277 ? 0.5
@@ -7011,7 +7021,7 @@ export class Player extends Entity {
           || this.buffs.has(BuffType.FlipperPotion)
           || eqM.wing?.slot === 26;
         const heldItPin = this.inv.heldItem();
-        const heldVidPin = heldItPin ? (ITEM_DEFS[heldItPin.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldItPin.id].key)) : -1;
+        const heldVidPin = heldItPin ? (ITEM_DEFS[heldItPin.id]?.vid ?? (ITEM_DEFS[heldItPin.id].vid ?? -1)) : -1;
         const wetRoutePin = (this.wetSticky || this.inHoney || this.splashShimmerWet)
           && !this.merman && !ignoreWaterPin && heldVidPin !== 277;
         if (canWaterWalk && !wetRoutePin && !this.dropThrough && !this.ridingCart && this.vy > 0) {
@@ -7085,7 +7095,7 @@ export class Player extends Entity {
     //  shimmering/tongued（:28390-28394 积分顶层分支）与原版同走旁路不吃浮液。----
     const heldFloat = this.inv.heldItem();
     const tridentHeld = heldFloat
-      ? (ITEM_DEFS[heldFloat.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldFloat.id].key)) === 277 : false;
+      ? (ITEM_DEFS[heldFloat.id]?.vid ?? (ITEM_DEFS[heldFloat.id].vid ?? -1)) === 277 : false;
     const ignoreWaterF = this.ridingMountSwimFree
       || this.buffs.has(BuffType.FlipperPotion)
       || eqM.wing?.slot === 26;
@@ -7459,7 +7469,7 @@ export class Player extends Entity {
     //      步进核心抽 stepAfkCounter 纯函数（tests/finalzero-game-domain 直测） ----
     {
       const heldAfk = this.inv.heldItem();
-      const heldVidAfk = heldAfk ? (ITEM_DEFS[heldAfk.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldAfk.id].key)) : -1;
+      const heldVidAfk = heldAfk ? (ITEM_DEFS[heldAfk.id]?.vid ?? (ITEM_DEFS[heldAfk.id].vid ?? -1)) : -1;
       this.afkCounter = stepAfkCounter({
         vx: this.vx, vy: this.vy, itemAnimTicks: this.itemAnimTicks,
         inputX: this.inputX, inputUp: this.inputUp, inputDown: this.inputDown,
@@ -8189,7 +8199,7 @@ export class Player extends Entity {
     const vanity668 = this.inv.armor.slice(10).some((it) => {
       if (!it) return false;
       const d = ITEM_DEFS[it.id];
-      return d ? (d.vid ?? viIdFromKey(d.key)) === 668 : false;
+      return d ? (d.vid ?? -1) === 668 : false;
     });
     if (eq0.wing?.logic === 3 || vanity668) {
       const wingDye = this.wingDyeVid();
@@ -9082,7 +9092,7 @@ export class Player extends Entity {
     const held = this.inv.heldItem();
     if (!held) return -1;
     const def = ITEM_DEFS[held.id];
-    return def ? (def.vid ?? viIdFromKey(def.key)) : -1;
+    return def ? (def.vid ?? -1) : -1;
   }
 
   /** 手持物 useStyle：itemfunc.useStyle + 提取缺口补（悠悠球族 Item.cs:30018-30033
@@ -9862,7 +9872,7 @@ export class Player extends Entity {
     let horseshoe = false;
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax && !horseshoe; i++) {
       const s = this.inv.armor[i];
-      if (s && Player.LUCK_HORSESHOE_VIDS.has(vanillaIdOfItem(s.id))) horseshoe = true;
+      if (s && Player.LUCK_HORSESHOE_VIDS.has(ITEM_DEFS[s.id]?.vid ?? -1)) horseshoe = true;
     }
     if (horseshoe) b += 0.05;                          // :12628-12631
     // 四叶草三旗：背包 0-57 + 装备槽 armor[0-9]（UpdateEquips :12494-12530 双扫描）
@@ -9874,21 +9884,21 @@ export class Player extends Entity {
     };
     for (let i = 0; i < this.inv.slots.length; i++) {
       const s = this.inv.slots[i];
-      if (s) see(vanillaIdOfItem(s.id));
+      if (s) see(ITEM_DEFS[s.id]?.vid ?? -1);
     }
     for (let i = 0; i < 10; i++) {
       const s = this.inv.armor[i];
-      if (s) see(vanillaIdOfItem(s.id));
+      if (s) see(ITEM_DEFS[s.id]?.vid ?? -1);
     }
     // 虚空透镜扫描（RefreshInfoAccs :12707-12728）：背包持有 4131 虚空透镜(VoidLens)时 bank4 逐槽
     // WorksInVoidBag(默认全真,SetFactory.cs:97-107 仅两只海螺除外)→ 袋内四叶草
     // 同样置旗——复审 R1 P2(曾漏,袋内 5574 少 +0.03)
     // ★B3 修(2026-08-30)：原写 banks[4] 恒 undefined → 循环静默零跑（本仓 bank4
     // =banks[3],Player.ts:467 注);修正后袋内四叶草才真正计幸运
-    const hasVoidLens = this.inv.slots.some((s) => s && vanillaIdOfItem(s.id) === 4131);
+    const hasVoidLens = this.inv.slots.some((s) => s && (ITEM_DEFS[s.id]?.vid ?? -1) === 4131);
     if (hasVoidLens && this.banks[3]) {
       for (const s of this.banks[3]) {
-        if (s) see(vanillaIdOfItem(s.id));
+        if (s) see(ITEM_DEFS[s.id]?.vid ?? -1);
       }
     }
     if (clover) b += 0.03;                             // :12628 hasLuck_LuckyClover
@@ -10508,7 +10518,7 @@ export class Player extends Entity {
     let hasBoneHelm = false;
     for (let i = 0; i <= 9; i++) {
       const it = this.inv.armor[i];
-      if (it && vanillaIdOfItem(it.id) === 5100) { hasBoneHelm = true; break; }
+      if (it && (ITEM_DEFS[it.id]?.vid ?? -1) === 5100) { hasBoneHelm = true; break; }
     }
     if (!hasBoneHelm) return;
     // 候选敌怪（:13641-13649：CanBeChasedBy + Distance ≤ 500 + CanHitLine）
@@ -10531,7 +10541,7 @@ export class Player extends Entity {
   private updateDontStarveCosmetics(game: GameHooks, world: import('../world/World').World): void {
     const headVid = (slot: number) => {
       const it = this.inv.armor[slot];
-      return it ? vanillaIdOfItem(it.id) : 0;
+      return it ? (ITEM_DEFS[it.id]?.vid ?? -1) : 0;
     };
     // ---- 眼球伞：armor[0]（头盔）或 armor[10]（时装头）任一 = 5101（:12660-12664）----
     const eyebrella = headVid(0) === 5101 || headVid(10) === 5101;
@@ -10561,12 +10571,12 @@ export class Player extends Entity {
     let slipper = false;
     for (let i = 13; i <= 19; i++) {
       const it = this.inv.armor[i];
-      if (it && vanillaIdOfItem(it.id) === 5077) { slipper = true; break; }
+      if (it && (ITEM_DEFS[it.id]?.vid ?? -1) === 5077) { slipper = true; break; }
     }
     if (slipper) {
       const D = game.vanillaDust;
       const shoeDye = this.inv.dye[2];
-      const dyeVid = shoeDye ? vanillaIdOfItem(shoeDye.id) : -1;
+      const dyeVid = shoeDye ? (ITEM_DEFS[shoeDye.id]?.vid ?? -1) : -1;
       if (D && Math.random() * 60 < 1) {
         // 尘 204：CenteredRectangle(Center+(0,16×grav),20×8)、alpha 150、scale 0.3、
         // fadeIn 1、velocity×0.1、noLight、shader=cShoe（:13868-13877）
@@ -10605,7 +10615,7 @@ export class Player extends Entity {
   useVoidBag(): boolean {
     for (let i = 0; i < 58; i++) {
       const s = this.inv.slots[i];
-      if (s && s.stack > 0 && vanillaIdOfItem(s.id) === 4131) return true;
+      if (s && s.stack > 0 && (ITEM_DEFS[s.id]?.vid ?? -1) === 4131) return true;
     }
     return false;
   }
@@ -10634,7 +10644,7 @@ export class Player extends Entity {
     if (!this.useVoidBag() || stack <= 0) return stack;
     // ★F4 门序对齐原文：CanVoidVaultAccept 在 GetItem 收尾汇流门（Player.cs:39703）
     // 判一次,GetItem_VoidVault 函数体内再判一次（:39711-39714）——本仓单点等价
-    if (!canVoidVaultAccept(vanillaIdOfItem(itemId))) return stack;
+    if (!canVoidVaultAccept(ITEM_DEFS[itemId]?.vid ?? -1)) return stack;
     const vault = this.banks[3];
     let left = stack;
     const pfx = prefix ?? 0;   // Item.prefix 缺省=无;比对式对齐 QuickStacking.canStack 先例
@@ -10644,7 +10654,7 @@ export class Player extends Entity {
     // 异词缀互融=词缀堆污染(原版同词缀门,QuickStacking.canStack 同款判定先例)
     for (let i = 0; i < vault.length && left > 0; i++) {
       const s = vault[i];
-      if (!s || s.stack <= 0 || vanillaIdOfItem(s.id) !== vanillaIdOfItem(itemId)) continue;
+      if (!s || s.stack <= 0 || (ITEM_DEFS[s.id]?.vid ?? -1) !== (ITEM_DEFS[itemId]?.vid ?? -1)) continue;
       if ((s.prefix ?? 0) !== pfx) continue;
       const max = ITEM_DEFS[s.id]?.maxStack ?? 999;
       const put = Math.min(max - s.stack, left);
@@ -10672,13 +10682,13 @@ export class Player extends Entity {
   hasUnityPotion(): boolean {
     for (let i = 0; i < 58; i++) {
       const s = this.inv.slots[i];
-      if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) return true;
+      if (s && (ITEM_DEFS[s.id]?.vid ?? -1) === 2997 && s.stack > 0) return true;
     }
     if (this.useVoidBag()) {
       const b = this.banks[3];
       for (let j = 0; j < b.length; j++) {
         const s = b[j];
-        if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) return true;
+        if (s && (ITEM_DEFS[s.id]?.vid ?? -1) === 2997 && s.stack > 0) return true;
       }
     }
     return false;
@@ -10688,7 +10698,7 @@ export class Player extends Entity {
   takeUnityPotion(): void {
     for (let i = 0; i < 58; i++) {
       const s = this.inv.slots[i];
-      if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) {
+      if (s && (ITEM_DEFS[s.id]?.vid ?? -1) === 2997 && s.stack > 0) {
         s.stack--;
         if (s.stack <= 0) this.inv.slots[i] = null;   // SetDefaults(0) = 清空
         return;
@@ -10698,7 +10708,7 @@ export class Player extends Entity {
     const b = this.banks[3];
     for (let j = 0; j < b.length; j++) {
       const s = b[j];
-      if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) {
+      if (s && (ITEM_DEFS[s.id]?.vid ?? -1) === 2997 && s.stack > 0) {
         s.stack--;
         if (s.stack <= 0) b[j] = null;
         return;

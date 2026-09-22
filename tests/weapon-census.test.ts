@@ -7,6 +7,7 @@ it('武器归族普查', () => {
   const buckets: Record<string, number> = {};
   const shotByAi: Record<number, string[]> = {};
   for (const def of ITEM_DEFS) {
+    if (!def) continue;   // ★方案 A:守洞
     const cw = combatWeapon(def);
     if (!cw) continue;
     buckets[cw.kind] = (buckets[cw.kind] ?? 0) + 1;

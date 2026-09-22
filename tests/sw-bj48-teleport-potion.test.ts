@@ -257,9 +257,9 @@ describe('SW-BJ48 传送药水 2351 随机落点（Player.cs:56922/Utils.cs:518 
     //   [selectedItem] 触发拍现值。中途换栏后 item.type≠2351 → 该拍不响不消耗。
     const w = new World(300, 240, 7, 'bj48-syn4');
     w.groundLevel = 128;
-    const potionId = ITEM_DEFS.findIndex((d: { key?: string }) => !!d.key?.startsWith('vi_2351_'));
+    const potionId = ITEM_DEFS.findIndex((d: { key?: string } | undefined) => !!d && !!d.key?.startsWith('vi_2351_'));   // ★方案 A:守洞
     expect(potionId, 'vi_2351 注册在案').toBeGreaterThan(0);
-    const otherId = ITEM_DEFS.findIndex((d: { key?: string }) => !!d.key && !d.key.startsWith('vi_2351_') && !!d.key.startsWith('vi_'));
+    const otherId = ITEM_DEFS.findIndex((d: { key?: string } | undefined) => !!d && !!d.key && !d.key.startsWith('vi_2351_') && !!d.key.startsWith('vi_'));   // ★方案 A:守洞
     // ①触发拍 + 持物=2351 → fire
     const a = stubGame(w);
     const firedA: unknown[] = [];

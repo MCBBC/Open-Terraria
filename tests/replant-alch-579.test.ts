@@ -15,7 +15,7 @@ import { Game } from '../src/core/Game';
 import { ITEM_DEFS } from '../src/data/items';
 import { TILE_BY_KEY } from '../src/data/tiles';
 
-const staffIdx = ITEM_DEFS.findIndex((d) => /^vi_213_/.test(d.key));   // 再生法杖 213
+const staffIdx = ITEM_DEFS.findIndex((d) => d && /^vi_213_/.test(d.key));   // 再生法杖 213（★方案 A:守洞）
 const HERB = TILE_BY_KEY['v_83_herbs_mature'];
 const BLOOM = TILE_BY_KEY['v_84_herbs_bloom'];
 const SPROUT = TILE_BY_KEY['v_82_herbs_sprout'];

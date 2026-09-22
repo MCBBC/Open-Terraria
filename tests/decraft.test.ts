@@ -216,19 +216,22 @@ describe('掉落物端到端（分支顺序 ：1790 钱币 → :1812 转化 → 
 describe('RecipeGroup.DecraftItemId 并列组代表（value 表修复回归）', () => {
   // tools/extract-itemrare.mjs 曾缺 buyPrice/SetShopValues/标签列求值：1250-1252 读 0
   // 抢占气球三组代表（原版 OrderBy(value).First() 取注册序首个 399/1163/983）
+  // ★BJ261：gid 已按源码注册序重编（SetupRecipeGroups 枚举序=原版字典序,Turtles@9 补位
+  //   修正 1456 时代错位）——CloudBalloons/Blizzard/Sandstorm=12/13/14,Seashells=17,
+  //   GemCritter=23,Jellyfish=33（组代表值本身不变）
   it('气球三组（509/510/511）同价并列 → 注册序首位代表 399/1163/983', () => {
-    expect(groupDecraftItemId(11)).toBe(399);
-    expect(groupDecraftItemId(12)).toBe(1163);
-    expect(groupDecraftItemId(13)).toBe(983);
+    expect(groupDecraftItemId(12)).toBe(399);
+    expect(groupDecraftItemId(13)).toBe(1163);
+    expect(groupDecraftItemId(14)).toBe(983);
   });
 
-  it('贝壳组 16：2625=500 < 2626=1000 → 组代表 2625（DefaultToSeaShell 工厂值）', () => {
-    expect(groupDecraftItemId(16)).toBe(2625);
+  it('贝壳组 17：2625=500 < 2626=1000 → 组代表 2625（DefaultToSeaShell 工厂值）', () => {
+    expect(groupDecraftItemId(17)).toBe(2625);
   });
 
-  it('宝石小动物组 22 / 水母组 30：全员同价 → 注册序首位 4838 / 2436', () => {
-    expect(groupDecraftItemId(22)).toBe(4838);
-    expect(groupDecraftItemId(30)).toBe(2436);
+  it('宝石小动物组 23 / 水母组 33：全员同价 → 注册序首位 4838 / 2436', () => {
+    expect(groupDecraftItemId(23)).toBe(4838);
+    expect(groupDecraftItemId(33)).toBe(2436);
   });
 
   it('buyPrice 求值回归：1250/1251/1252 = 150000（旧表缺 → 0）', () => {

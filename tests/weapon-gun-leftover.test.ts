@@ -79,7 +79,7 @@ describe('备案遗留④ 五枪注册（items.ts + vanilla-itemcombat 1457 终�
     expect(ITEM_BY_KEY['vi_3108_钉']).toBeDefined();
     expect(itemCombat(3108)?.ammo).toBe(3108);       // PickAmmo 反查匹配
     expect(itemCombat(3108)?.shoot).toBe(514);
-    expect(rangedAmmoWeapon({ key: 'vi_3107_钉枪' })).toBe(3108);
+    expect(rangedAmmoWeapon({ key: 'vi_3107_钉枪', vid: 3107 })).toBe(3108);
   });
 
   it('1782 糖果玉米步枪：crit+6（:19755）/useAmmo 1783/1-3 省弹（:54248-54250）', () => {
@@ -100,7 +100,7 @@ describe('备案遗留④ 五枪注册（items.ts + vanilla-itemcombat 1457 终�
     });
     expect(ITEM_BY_KEY['vi_1261_刺炮弹']).toBeDefined();
     expect(itemCombat(1261)?.shoot).toBe(246);
-    expect(rangedAmmoWeapon({ key: 'vi_1258_刺炮发射器' })).toBe(1261);
+    expect(rangedAmmoWeapon({ key: 'vi_1258_刺炮发射器', vid: 1258 })).toBe(1261);
   });
 
   it('弹体数据面：20/88 穿透 3 + 514 钉 aiStyle93 + 311 糖果玉米 + 246 刺炮弹', () => {

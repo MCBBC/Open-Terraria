@@ -428,38 +428,38 @@ describe('1119 ForbiddenMinion(AI_206)', () => {
 
 describe('1457 批 C 武器分流(combatWeapon)', () => {
   it('6152 DaybloomStaff → magic/shoot 1114/useAnim 40+useTime 4(一挥多发)', () => {
-    const cw = combatWeapon({ key: 'vi_6152_DaybloomStaff' });
+    const cw = combatWeapon({ key: 'vi_6152_DaybloomStaff', vid: 6152 });
     expect(cw).toMatchObject({ kind: 'magic', shoot: 1114, useTime: 4, mana: 5 });
   });
   it('6153 GlacierFang → magic/shoot 1115(蓄力冰矛)/crit 11', () => {
-    const cw = combatWeapon({ key: 'vi_6153_GlacierFang' });
+    const cw = combatWeapon({ key: 'vi_6153_GlacierFang', vid: 6153 });
     expect(cw).toMatchObject({ kind: 'magic', shoot: 1115 });
-    const c = combatWeapon({ key: 'vi_6153_GlacierFang' }) as { shootSpeed?: number };
+    const c = combatWeapon({ key: 'vi_6153_GlacierFang', vid: 6153 }) as { shootSpeed?: number };
     expect(c.shootSpeed).toBe(4);
   });
   it('6154 Petalstorm → magic/shoot 1116/useAnim 42', () => {
-    const cw = combatWeapon({ key: 'vi_6154_Petalstorm' });
+    const cw = combatWeapon({ key: 'vi_6154_Petalstorm', vid: 6154 });
     expect(cw).toMatchObject({ kind: 'magic', shoot: 1116, useTime: 42 });
   });
   it('6155 LightningStrike → magic/shoot 1117/damage 150/kb 10/crit 10(SetWeaponValues)', () => {
-    const cw = combatWeapon({ key: 'vi_6155_LightningStrike' });
+    const cw = combatWeapon({ key: 'vi_6155_LightningStrike', vid: 6155 });
     expect(cw).toMatchObject({ kind: 'magic', shoot: 1117, damage: 150, knockback: 10 });
   });
   it('6173 ArcSurge → magic/shoot 1122/useTime 6/damage 180', () => {
-    const cw = combatWeapon({ key: 'vi_6173_ArcSurge' });
+    const cw = combatWeapon({ key: 'vi_6173_ArcSurge', vid: 6173 });
     expect(cw).toMatchObject({ kind: 'magic', shoot: 1122, useTime: 6, damage: 180 });
   });
   it('1227 叶绿军刃 → shot(1127 专支,不落通用 SpearProj)/shootSpeed 2.4', () => {
-    const cw = combatWeapon({ key: 'vi_1227_ChlorophyteSaber' });
+    const cw = combatWeapon({ key: 'vi_1227_ChlorophyteSaber', vid: 1227 });
     expect(cw).toMatchObject({ kind: 'shot', shoot: 1127, shootSpeed: 2.4, damage: 80 });
   });
   it('1226 叶绿巨剑 → melee(shoot 1126 专支)/useAnim=useTime=32', () => {
-    const cw = combatWeapon({ key: 'vi_1226_ChlorophyteClaymore' });
+    const cw = combatWeapon({ key: 'vi_1226_ChlorophyteClaymore', vid: 1226 });
     expect(cw).toMatchObject({ kind: 'melee', shoot: 1126, useTime: 32, useAnimation: 32 });
   });
   it('6161/6164 召唤杖 → summon(1118/1119 非哨兵 aiStyle 集)', () => {
-    expect(combatWeapon({ key: 'vi_6161_ClayPotMinion' })).toMatchObject({ kind: 'summon', shoot: 1118, sentry: false });
-    expect(combatWeapon({ key: 'vi_6164_ForbiddenMinion' })).toMatchObject({ kind: 'summon', shoot: 1119, sentry: false });
+    expect(combatWeapon({ key: 'vi_6161_ClayPotMinion', vid: 6161 })).toMatchObject({ kind: 'summon', shoot: 1118, sentry: false });
+    expect(combatWeapon({ key: 'vi_6164_ForbiddenMinion', vid: 6164 })).toMatchObject({ kind: 'summon', shoot: 1119, sentry: false });
   });
 });
 
@@ -467,11 +467,11 @@ describe('1457 批 C 武器分流(combatWeapon)', () => {
 
 describe('6152 DaybloomStaff 停发窗/autoReuse（用户实报"挥动没效果"双根因）', () => {
   it('分类器 magic 分支随行 autoReuse/useAnimation（门 (cw.autoReuse||fresh) 消费）', () => {
-    const cw = combatWeapon({ key: 'vi_6152_DaybloomStaff' }) as Record<string, unknown>;
+    const cw = combatWeapon({ key: 'vi_6152_DaybloomStaff', vid: 6152 }) as Record<string, unknown>;
     expect(cw.autoReuse).toBe(true);      // 曾丢=恒 undefined=按住不连发
     expect(cw.useAnimation).toBe(40);
     // 非 autoReuse 魔法件语义不变（false 显式,门走 fresh-edge）
-    const cw2 = combatWeapon({ key: 'vi_4062_thunder_zapper' }) as Record<string, unknown>;
+    const cw2 = combatWeapon({ key: 'vi_4062_thunder_zapper', vid: 4062 }) as Record<string, unknown>;
     expect(typeof cw2.autoReuse).toBe('boolean');
   });
 

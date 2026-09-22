@@ -42,7 +42,7 @@ describe('数据面：共享 case 段算式 shoot 回填（Item.cs:39461/:39787�
 
   it('consumable+noMelee 门 → combatWeapon 归入 grenade 族（aiStyle 16）', () => {
     for (const vid of [4824, 4825, 4826, 4827, 4908, 4909]) {
-      const cw = combatWeapon({ key: `vi_${vid}_x` });
+      const cw = combatWeapon({ key: `vi_${vid}_x`, vid });
       expect(cw?.kind).toBe('grenade');
       if (cw?.kind === 'grenade') expect(cw.shoot).toBe(vid <= 4827 ? 903 + (vid - 4824) : 910 + (vid - 4908));
     }

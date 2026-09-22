@@ -30,6 +30,7 @@
 //   取负会连带反转两面+破 rb14d/fx41 号面金标,故 BJ189 两案中采 focusV±num 案。
 import { TILE_COUNTS_AS, expandStationTiles, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { COUNTS_AS_WATER_FOR_CRAFTING, tileUsedInRecipes } from '../core/SmartInteractTiles';
+import { DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS } from '../data/tiles';   // ★BJ263 收编单源（§6l）
 
 // ---- 网格几何(DrawRecipesGrid CraftingUI.cs:447-452) ----
 //   num=42 格距;inventoryScale=0.75(槽 52×0.75=39 视觉);num2=340 顶;num3=310 左;
@@ -139,7 +140,7 @@ export const CRAFT_BAR_TOP_OFF = 17;
 // ---- 站点/水源 focus 钩(刀⑦ classic 支) ----
 // GetCraftingFilterForTile(Player.cs:33567-33587):DoesNotOpenCraftingMenuOnInteract → null;
 // TileUsedInRecipes → station;CountsAsWaterForCrafting → water;else null。
-export const DOES_NOT_OPEN_CRAFTING_MENU: ReadonlySet<number> = new Set([215, 207]);   // TileID.cs:279
+export const DOES_NOT_OPEN_CRAFTING_MENU: ReadonlySet<number> = DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS;   // ★BJ263 收编单源 data/tiles.ts（TileID.cs:279,§6l）
 
 export type CraftingTileFilter =
   | { kind: 'station'; tile: number }

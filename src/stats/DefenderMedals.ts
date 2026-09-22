@@ -29,8 +29,9 @@
 // （CustomCurrencyManager.cs:79——4 弹药格+58 光标镜像槽；本仓 trash 独立字段、
 // 弹药=slots[54-57] ⇒ 等价面 = 段内 i≥54 跳过）。储蓄显示面（DrawSavings :28-63）
 // 仍【只】合计四仓（不含背包）——两域分立两函数。
+import { ITEM_DEFS } from '../data/items';
 import type { InvItem } from '../items/Inventory';
-import { vanillaIdOfItem } from './Shimmer';
+
 
 /** 勋章物品 id（ItemID.DefenderMedal，ItemID.cs:11712） */
 export const DEFENDER_MEDAL_ITEM_ID = 3817;
@@ -43,7 +44,7 @@ export function countDefenderMedals(slots: ReadonlyArray<InvItem | null>): numbe
   let n = 0;
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
-    if (s && vanillaIdOfItem(s.id) === DEFENDER_MEDAL_ITEM_ID) n += s.stack;
+    if (s && (ITEM_DEFS[s.id]?.vid ?? -1) === DEFENDER_MEDAL_ITEM_ID) n += s.stack;
     if (n >= DEFENDER_MEDAL_CAP) return DEFENDER_MEDAL_CAP;
   }
   return n;
@@ -59,7 +60,7 @@ export function spendDefenderMedals(
   const touched: Array<[number, InvItem | null]> = [];   // ItemCacheCreate/Restore 等价
   for (let i = 0; i < slots.length && remain > 0; i++) {
     const s = slots[i];
-    if (!s || vanillaIdOfItem(s.id) !== DEFENDER_MEDAL_ITEM_ID) continue;
+    if (!s || (ITEM_DEFS[s.id]?.vid ?? -1) !== DEFENDER_MEDAL_ITEM_ID) continue;
     touched.push([i, { ...s }]);
     const take = Math.min(s.stack, remain);
     s.stack -= take;
@@ -103,7 +104,7 @@ function countSegment(slots: ReadonlyArray<InvItem | null>, skipFrom: number): n
   for (let i = 0; i < slots.length; i++) {
     if (i >= skipFrom) break;
     const s = slots[i];
-    if (s && vanillaIdOfItem(s.id) === DEFENDER_MEDAL_ITEM_ID) n += s.stack;
+    if (s && (ITEM_DEFS[s.id]?.vid ?? -1) === DEFENDER_MEDAL_ITEM_ID) n += s.stack;
     if (n >= DEFENDER_MEDAL_CAP) return DEFENDER_MEDAL_CAP;
   }
   return n;
@@ -137,7 +138,7 @@ export function spendDefenderMedalsAcross(
   for (const { slots, from } of order) {
     for (let i = 0; i < slots.length && i < from && remain > 0; i++) {
       const s = slots[i];
-      if (!s || vanillaIdOfItem(s.id) !== DEFENDER_MEDAL_ITEM_ID) continue;
+      if (!s || (ITEM_DEFS[s.id]?.vid ?? -1) !== DEFENDER_MEDAL_ITEM_ID) continue;
       touched.push([slots, i, { ...s }]);
       const take = Math.min(s.stack, remain);
       s.stack -= take;

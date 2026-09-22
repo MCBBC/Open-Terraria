@@ -16,7 +16,7 @@
 // pose 枚举（DisplayDollPoseID,同 FurnitureItems.ts 头注）:0 Standing / 1 Sitting /
 // 2 Jumping / 3 Walking / 4-8 Use1-5。
 import { type Appearance, DEFAULT_COLORS, MALE_VARIANTS } from '../player/Appearance';
-import { viIdFromKey } from '../data/vanillaItemCombat';
+
 import { vanillaStatOfVid } from '../data/vanillaItemStats';
 import { ITEM_DEFS } from '../data/items';
 import { DOLL_SUPPORTED_USE_STYLE_POSES, vanillaUseStyle } from '../world/FurnitureItems';
@@ -49,7 +49,7 @@ export function dollEquipFromSlots(
     if (!s) return null;
     const def = ITEM_DEFS[s.id];
     if (!def) return null;
-    const stat = vanillaStatOfVid(viIdFromKey(def.key));
+    const stat = vanillaStatOfVid(def.vid ?? -1);
     if (!stat || stat.s !== part) return null;
     return (part === 'h' ? stat.hs : part === 'b' ? stat.bs : stat.ls) ?? null;
   };
@@ -102,7 +102,7 @@ export function dollHeldUseStyle(slots: Array<{ id: number } | null>): number {
   if (!s) return 0;
   const def = ITEM_DEFS[s.id];
   if (!def) return 0;
-  return vanillaUseStyle(viIdFromKey(def.key));
+  return vanillaUseStyle(def.vid ?? -1);
 }
 
 /** 绘制锚（TEDisplayDoll.cs:471 position 公式,盒 20×42）:

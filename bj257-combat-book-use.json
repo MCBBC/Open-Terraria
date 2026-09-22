@@ -1,0 +1,157 @@
+{
+  "out": {
+    "stages": [
+      {
+        "name": "baseline",
+        "stack": 1,
+        "useTime": 0,
+        "swing": false,
+        "v1": false,
+        "v2": false,
+        "textsN": 0,
+        "sfxNew": [],
+        "npcs": [
+          {
+            "vid": 208,
+            "maxHp": 250
+          },
+          {
+            "vid": 37,
+            "maxHp": 250
+          }
+        ]
+      },
+      {
+        "name": "A_granted",
+        "stack": 1,
+        "useTime": 0,
+        "swing": false,
+        "v1": false,
+        "v2": false,
+        "textsN": 0,
+        "sfxNew": [],
+        "npcs": [
+          {
+            "vid": 208,
+            "maxHp": 250
+          },
+          {
+            "vid": 37,
+            "maxHp": 250
+          }
+        ]
+      },
+      {
+        "name": "A_after_settle",
+        "stack": 0,
+        "useTime": 0,
+        "swing": false,
+        "v1": false,
+        "v2": true,
+        "textsN": 1,
+        "sfxNew": [
+          "Item_92"
+        ],
+        "npcs": [
+          {
+            "vid": 208,
+            "maxHp": 500
+          },
+          {
+            "vid": 37,
+            "maxHp": 500
+          }
+        ]
+      }
+    ],
+    "A": {
+      "stack": 0,
+      "useTime": 45,
+      "swing": true,
+      "v1": false,
+      "v2": true,
+      "textsN": 1,
+      "sfxNew": [
+        "Item_92"
+      ],
+      "npcs": [
+        {
+          "vid": 208,
+          "maxHp": 500
+        },
+        {
+          "vid": 37,
+          "maxHp": 500
+        }
+      ]
+    },
+    "B": {
+      "stack": 1,
+      "useTime": 0,
+      "swing": true,
+      "v1": false,
+      "v2": true,
+      "textsN": 1,
+      "sfxNew": [
+        "Item_92"
+      ],
+      "npcs": [
+        {
+          "vid": 208,
+          "maxHp": 500
+        },
+        {
+          "vid": 37,
+          "maxHp": 500
+        }
+      ]
+    },
+    "C": {
+      "stack": 0,
+      "useTime": 45,
+      "swing": true,
+      "v1": true,
+      "v2": true,
+      "textsN": 2,
+      "sfxNew": [
+        "Item_92"
+      ],
+      "npcs": [
+        {
+          "vid": 208,
+          "maxHp": 750
+        },
+        {
+          "vid": 37,
+          "maxHp": 750
+        }
+      ]
+    },
+    "D": {
+      "stack": 2,
+      "useTime": 0,
+      "swing": true,
+      "v1": true,
+      "v2": true,
+      "textsN": 2,
+      "sfxNew": [
+        "Item_92"
+      ],
+      "npcs": [
+        {
+          "vid": 208,
+          "maxHp": 750
+        },
+        {
+          "vid": 37,
+          "maxHp": 750
+        }
+      ]
+    },
+    "texts": [
+      "书中的知识赋予了城镇居民力量！",
+      "书中的知识赋予了城镇居民力量！"
+    ]
+  },
+  "errors": []
+}

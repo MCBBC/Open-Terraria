@@ -127,7 +127,7 @@ describe('挥弧命中判定（Colliding aiStyle 190 锥 / type 973 距离圆,Ut
 
 describe('真刃系挥弧剑族分类（combatWeapon aiStyle 190/191 门）', () => {
   it('273/675/368/674/757/1826 = melee（曾落 shot 兜底 = Arrow 白弧直出的根因）', () => {
-    const mk = (vid: number) => combatWeapon({ key: `vi_${vid}_x` });
+    const mk = (vid: number) => combatWeapon({ key: `vi_${vid}_x`, vid });
     expect(mk(273)).toMatchObject({ kind: 'melee', shoot: 972, autoReuse: true });   // 永夜刃
     expect(mk(675)).toMatchObject({ kind: 'melee', shoot: 973 });                    // 真永夜刃
     expect(mk(368)).toMatchObject({ kind: 'melee', shoot: 982 });                    // 圣剑

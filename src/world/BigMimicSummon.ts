@@ -24,10 +24,15 @@
 //     netReporter 联机 tile 面、enemies 走房主权威快照；chest 槽位广播缺口登记债
 //   - NewNPC(x*16+16, y*16+32)（:78392）= Bottom 锚（NPC.cs:81598 Bottom=(X,Y)）
 //     → 本仓 fromVanilla 盒心锚：调用方 spawnMimic 内 y 上移半盒
+//
+// ★BJ258 2026-09-22 用户明令分歧（拍板 B）：非困难模式放光明/夜光钥匙 = 原版静默拒绝
+//   （NPC.cs:78320 `netMode==1||!hardMode` 整链短路，BJ213 定谳）→ 用户拍板加提示
+//   toast。回滚口 Game.KEY_HARDMODE_TOAST（false = 拒绝回调不接，与原版逐字全等）；
+//   触发面与序等价说明见 bigMimicSummonCheck 头注。测试 tests/bj258-key-hardmode-toast.test.ts。
 import type { ChestData } from './World';
 import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
-import { viIdFromKey } from '../data/vanillaItemCombat';
+
 
 export interface BigMimicBox {
   x: number;
@@ -49,16 +54,26 @@ export interface BigMimicSummonEnv {
   spawnMimic(npcId: number, bottomX: number, bottomY: number): BigMimicBox | null;
   markDirtyArea(x0: number, y0: number, x1: number, y1: number): void;
   smoke(box: BigMimicBox): void;
+  /** ★BJ258 用户明令分歧（2026-09-22 拍板 B；回滚口 Game.KEY_HARDMODE_TOAST）：
+   *  召唤配方全匹配（空箱+恰 1 堆叠钥匙）且仅被 hardMode 拦时的拒绝提示——原版此点
+   *  静默（NPC.cs:78320 整链短路，BJ213 定谳）。可选=不接即原版静默（回滚形态）；
+   *  Game 层仅权威端（单机/房主）接线，访客被 chestChangeEvents 入口 netMode 门拦。 */
+  onKeyHardModeReject?: () => void;
 }
 
 /** TileID.Sets.BasicChest = Factory.CreateBoolSet(21, 467)（TileID.cs:315） */
 const isBasicChestSheet = (sheet: number): boolean => sheet === 21 || sheet === 467;
 
 /** NPC.BigMimicSummonCheck（NPC.cs:78318-78400）1:1。
- *  返回 true = 已生成（测试判别面；原版恒返回 false，bool 返回值无消费方）。 */
+ *  返回 true = 已生成（测试判别面；原版恒返回 false，bool 返回值无消费方）。
+ *
+ *  ★BJ258 序等价说明：!Main.hardMode 判定（:78320）自链首后移至配方统计后——原版
+ *  门与本函数配方统计之间仅隔 FindChest/tile 读/堆叠统计【纯读】，非困难路径同样
+ *  零副作用零消耗（不 FindChest 消费、不毁箱不掉物），故序等价；换来的是能区分
+ *  「配方全匹配、仅被 hardMode 拦」→ 分歧拒绝 toast（见 env.onKeyHardModeReject）。
+ *  netMode==1 臂仍留 Game 壳（chestChangeEvents 入口），访客永不进本函数。 */
 export function bigMimicSummonCheck(env: BigMimicSummonEnv, x: number, y: number): boolean {
   const st = env.store;
-  if (!env.hardMode) return false; // !Main.hardMode（:78320；netMode==1 门在 Game 壳）
   const c = env.findChest(x, y);
   if (!c) return false; // Chest.FindChest（:78323）
 
@@ -84,6 +99,14 @@ export function bigMimicSummonCheck(env: BigMimicSummonEnv, x: number, y: number
     }
   }
   if (other !== 0 || light + night !== 1) return false; // （:78351）空箱 + 恰好 1 堆叠钥匙
+
+  // !Main.hardMode（:78320；netMode==1 门在 Game 壳）——★BJ258 判定后移至配方统计后
+  //（纯读序等价，见头注）：此点=原版静默拒绝处；配方全匹配而仅被 hardMode 拦 →
+  // 分歧 toast（回调不接/回滚口 Game.KEY_HARDMODE_TOAST=false = 原版静默）。
+  if (!env.hardMode) {
+    env.onKeyHardModeReject?.();
+    return false;
+  }
 
   // 校正箱左上（:78352-78356）
   if (st.inBounds(x, y)) {
@@ -147,7 +170,7 @@ export function bigMimicSpawnSmoke(
   }
 }
 
-/** 箱内物品 → 原版 vid（Game.slotVanillaId 同源：ITEM_DEFS key → viIdFromKey） */
+/** 箱内物品 → 原版 vid（Game.slotVanillaId 同源：★方案 A vid 直读,internal≡vid 恒等域） */
 function vidOfItem(it: { id: number; stack: number }): number {
-  return viIdFromKey(ITEM_DEFS[it.id]?.key ?? '');
+  return (ITEM_DEFS[it.id]?.vid ?? -1);
 }

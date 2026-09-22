@@ -606,7 +606,7 @@ describe('BJ69 行为面：门静默集左键一帧零副作用 / 门数据>0 �
 describe('BJ69 结构锁', () => {
   it('updateUse「其它物品」臂门表达式在位且消费 heldItemUseStyle（>0 相位）', () => {
     const gameSrc = readFileSync(join(dirname(__dirname), 'src', 'core', 'Game.ts'), 'utf8');
-    expect(gameSrc).toMatch(/heldItemUseStyle\(viIdFromKey\(heldDef\.key\) \?\? -1\) > 0/);
+    expect(gameSrc).toMatch(/heldItemUseStyle\(heldDef\.vid \?\? -1\) > 0/);   // ★方案 A 重锚(BJ265)
     // 袋豁免集已退役（推广为数据门,防两表漂移的旧结构锁随之退役）
     expect(gameSrc).not.toContain('BOSS_BAG_NO_USE_VIDS');
     // 左键开包入口回潮禁令延续（§五/RB15a 锁面）
@@ -702,7 +702,7 @@ describe('RB17b note① 顶层区间支哨兵（提取器覆盖域封口）', ()
       expect(reachesGenericArm(vid), `vid ${vid} 应被漆臂接管（不入通用臂断言域）`).toBe(false);
     }
     const paintArm = GAME_SRC.indexOf('heldDef?.paintTool && inp.mouseDown');
-    const gateArm = GAME_SRC.indexOf('heldItemUseStyle(viIdFromKey(heldDef.key) ?? -1) > 0');
+    const gateArm = GAME_SRC.indexOf('heldItemUseStyle(heldDef.vid ?? -1) > 0');   // ★方案 A 重锚(BJ265)
     expect(paintArm, '漆臂在位（Game.ts updateUse）').toBeGreaterThan(0);
     expect(gateArm, '通用门臂在位').toBeGreaterThan(0);
     expect(paintArm, '漆臂必须先于通用门臂（后撤/删除即红——届时漆具门值变为行为活值）').toBeLessThan(gateArm);

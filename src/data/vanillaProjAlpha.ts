@@ -1,4 +1,6 @@
-/** 原版 Projectile.GetAlpha（Terarria1456/Terraria/Projectile.cs:75940-76850）全量 id 调制表。
+/** 原版 Projectile.GetAlpha（Terarria1457/Terraria/Projectile.cs:80595-81522;★S5 基准注
+ *  勘误 BJ263 2026-09-22——旧注 1456 :75940-76850 系退役基准,1457 段移后行号漂移;
+ *  表数据面已由 BJ228/BJ236 注记覆盖）全量 id 调制表。
  *
  *  语义基准：GetAlpha 返回色 = 绘制乘色（pixel = tex × color/255），A 通道 = 贴图 α 系数。
  *  本仓弹幕无逐格光色（projectileColor 恒白）且无弹幕 glowmask 层（Renderer.ts:5410），

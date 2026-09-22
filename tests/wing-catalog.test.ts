@@ -5,7 +5,7 @@
 //   目录层：51 只 vi_ 全注册（此前仅 5 只开发者翅膀）；图标 vi_ key 自动解析
 import { describe, it, expect } from 'vitest';
 import { ITEM_DEFS } from '../src/data/items';
-import { viIdFromKey } from '../src/data/vanillaItemCombat';
+
 import { vanillaStatOfVid } from '../src/data/vanillaItemStats';
 import { wingStatOf } from '../src/data/vanillaWingStats';
 import vanillaStatsJson from '../src/data/vanilla-itemstats.json';
@@ -15,8 +15,7 @@ const WING_VIDS = Object.entries(STATS).filter(([, v]) => v.wing).map(([k]) => +
 
 describe('原版翅膀全量', () => {
   it('51 只翅膀全部注册入目录（vi_ key 可搜索/可装备）', () => {
-    const keys = new Set(ITEM_DEFS.map((d) => d.key));
-    const missing = WING_VIDS.filter((v) => ![...keys].some((k) => viIdFromKey(k) === v));
+    const missing = WING_VIDS.filter((v) => !ITEM_DEFS.some((d) => d?.vid === v));   // ★方案 A(BJ265):vid 直读域普查（回填后≡键反解域）
     expect(missing).toEqual([]);
     expect(WING_VIDS.length).toBe(51);
   });

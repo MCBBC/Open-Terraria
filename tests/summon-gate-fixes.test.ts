@@ -178,7 +178,7 @@ describe('1133 蜜蜂分泌物丛林可用门', () => {
 // ---------------------------------------------------------------------------
 describe('useTime 五件落点（Game.ts）', () => {
   it('克眼 43:白天/同型拦下不挥动不置冷却,成功支 useTime=itemCombat(43)??45', () => {
-    const blk = blockFrom('if (viIdFromKey(heldDef.key) === 43) {');
+    const blk = blockFrom('if ((heldDef.vid ?? -1) === 43) {');   // ★方案 A 重锚(BJ265)
     // 门拦下（白天/场上已有 NPC 4）→ 整支不可用:挥动移入成功分支
     expect(blk).toContain('!this.world.clock.isDay && this.useSuspiciousEye()');
     const gate = blk.indexOf('this.useSuspiciousEye()');
@@ -212,7 +212,7 @@ describe('useTime 五件落点（Game.ts）', () => {
     const blk = blockFrom('if (placed) {');   // useWireTool 放置支（全仓唯一）
     expect(blk).toContain('inv.remove(VI_ID(530), needWire)');
     expect(blk).toContain('inv.remove(VI_ID(849), needActuator)');
-    expect(blk).toContain('itemCombat(viIdFromKey(itemDef.key))?.useTime ?? 5');
+    expect(blk).toContain('itemCombat(itemDef.vid ?? -1)?.useTime ?? 5');   // ★方案 A 重锚(BJ265)
     expect(blk).not.toMatch(/useTime = 5;/);
   });
 

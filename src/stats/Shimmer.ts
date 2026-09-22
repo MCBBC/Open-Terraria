@@ -44,7 +44,6 @@ import shimmerJson from '../data/vanilla-shimmer.json';
 import { getDecraftingRecipeIndex, recipeAt, RECIPE_GROUP_ITEMS } from '../data/vanillaRecipes';
 import itemValueJson from '../data/vanilla-itemvalue.json';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { viIdFromKey } from '../data/vanillaItemCombat';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { RNG } from '../core/rng';
@@ -70,12 +69,13 @@ const ITEM_MAKE_NPC = (shimmerJson as Json).itemMakeNPC as Record<string, number
 
 // 原生 key→原版 id 表(钱币/凝胶等本地键)已随本地物品退役移除:vi_ 键前缀解析全覆盖
 
-/** 内部 item id → 原版 item id（无映射 -1） */
+/** 内部 item id → 原版 item id（无映射 -1）。
+ *  ★方案 A 阶段 4（BJ265）退役简化：原两段式 `def.vid ?? 键前缀正则反解`——items.ts
+ *  reorder 块 ⑥ vid 回填后（internal≡stable≡vid 恒等域）塌缩为一步直读,零正则。
+ *  生产消费面已全量改 `ITEM_DEFS[id]?.vid ?? -1` 直读;本函数仅存量测试面兼容保留
+ *  （禁新代码再引用——新消费面一律直读）。 */
 export function vanillaIdOfItem(itemId: number): number {
-  const def = ITEM_DEFS[itemId];
-  if (!def) return -1;
-  if (def.vid !== undefined) return def.vid;
-  return viIdFromKey(def.key);
+  return ITEM_DEFS[itemId]?.vid ?? -1;
 }
 
 /** 原版 item id → 内部 item id（未注册 -1；全量物品经 VANILLA_ITEM_KEY_BY_ID 占位注册） */

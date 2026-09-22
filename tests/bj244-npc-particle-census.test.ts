@@ -3,7 +3,10 @@
 //   Terarria1457/Terraria/NPC.cs 全文件 932 处 Dust 调用普查（AI()主核 19858-41560、
 //   AI_006_Worms 51506-52820、HitEffect 82492-90939、FindFrame、Transform、
 //   ParticleOrchestraType 全枚举、AmbientSky.WyvernSkyEntity 全部读过）——
-//   type 87-92（NPCID.cs:11245-11255 WyvernHead..WyvernTail）在任何面均零尘零粒子；
+//   type 87-92（NPCID.cs:11245-11255 WyvernHead..WyvernTail）在 AI 移动面零尘零粒子
+//   （★S4-B 勘误 BJ263 2026-09-22:「任何面均零尘」系过度声明——HitEffect 面有尘:
+//   87-92 @NPC.cs:89933 hit=dust16 hitK50 scale1.5 velMul1.5 ng / death=n10,已由
+//   BJ254 表（vanilla-npcdust.json）+spawnNpcDeathDust/spawnNpcHitDust 承载）；
 //   1456/1458 交叉对拍同判（925/927 处均无 87 系）。terraria.wiki.gg Wyvern 页
 //   无任何粒子/尾迹变更记载（最新可见性条目 1.3.5 贴图）。用户所见应为 1.4.5 新增
 //   背景 ambience 飞龙（AmbientSky WyvernSkyEntity :1026,贴图 5 帧无粒子）或贴图

@@ -275,7 +275,9 @@ export class World {
   /** 读档/wld 导入携带的城镇 NPC（afterWorldLoad 原位生成后清空；原版 WorldFile town NPC 段） */
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean;
     /** ★SW-BO1 2026-09-07：流浪清场标（NPC.homelessDespawn,WorldFile.cs:1741/:2932） */
-    homelessDespawn?: boolean }>;
+    homelessDespawn?: boolean;
+    /** ★BJ259：踢出标（repo 侧标,① 轮再安置臂豁免面跨档;原版无对应字段） */
+    kickedOut?: boolean }>;
   /** ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 四塔位（WF:1744-1755/:2937-2955；
    *  NPCID.cs:4807 CreateBoolSet(422,507,517,493)）——afterWorldLoad 原位生成后清空。
    *  缺省=无（towerActive 旗在场走兜底重生成） */

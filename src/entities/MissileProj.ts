@@ -1330,7 +1330,7 @@ export class MagicMissileProj extends Entity {
  *   · 松手（:40832-40863）：491 不重瞄鼠标，ai[0]=1 直接回收；
  *   · 回收（:40869-40880）：localAI[0]>15 后穿墙，速度朝玩家 5:1 收敛到 25px/t，
  *     距玩家 <20px 消失；
- *   · 撞块（:17053-17066）：双轴反弹（lastVelocity 取反），操控态自锁 ai[0]=−10；
+ *   · 撞块（:18576-18587 type 491 支;★S1 行号漂移勘误 BJ263——旧引 :17053-17066 系湿段尘区,非反弹支）：双轴反弹（lastVelocity 取反），操控态自锁 ai[0]=−10；
  *   · 距玩家 >2000px 消失（:40894-40897）；穿透 −1（同敌 10t 冷却后可再中）。
  */
 export interface FlyingKnifeCtor {
@@ -1404,7 +1404,7 @@ export class FlyingKnifeProj extends Entity {
     this.steer(game);                      // :40753-40909（操控/回收/姿态/2000px 门）
     this.wetSectionStep(game);             // ★活拍湿段(原版序 AI:16880→湿段:16903→HandleMovement:17120)
     if (this.dead) return;
-    this.moveStep(game);                   // 撞块反弹 :17053-17066 / 回收穿墙 :40871
+    this.moveStep(game);                   // 撞块反弹 :18576-18587（★BJ263 勘误旧引 :17053-17066）/ 回收穿墙 :40871
     if (this.dead) return;
     this.hitStep(game);                    // 穿透 −1：10t 冷却后同敌可再中
   }
@@ -1475,7 +1475,7 @@ export class FlyingKnifeProj extends Entity {
     }
   }
 
-  /** 移动 + 撞块反弹（:17053-17066 双轴 lastVelocity 取反 + 操控态自锁 −10） */
+  /** 移动 + 撞块反弹（:18576-18587 type 491 支——双轴 lastVelocity 取反 + 操控态自锁 −10;★S1 行号漂移勘误 BJ263,旧引 :17053-17066） */
   private moveStep(game: GameHooks): void {
     if (this.passTiles) {
       // 回收态 tileCollide=false(:40871)→湿位移消费 AI 前快照(无阻尼滞后 quirk;干态=当拍速)

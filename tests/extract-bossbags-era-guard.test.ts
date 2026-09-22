@@ -56,7 +56,7 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
         env: { ...process.env, SW_BOSSBAGS_JSON: fixture },
       });
       expect(r2.status).toBe(1);
-      expect(r2.stderr).toContain('字段型洗库预警');
+      expect(r2.stderr).toContain('洗库预警');   // ★BJ261 措辞:双向 diff(live-only=洗库预警/fresh-only=现库退化)
       expect(r2.stderr).toContain('袋 3329');
       expect(r2.stderr).toContain('"pair":3');     // 差异清单物证（假现库 pair 值）
       expect(md5(LIVE)).toBe(before);              // 真库零接触
@@ -242,6 +242,59 @@ describe('extract-bossbags era guard（重产禁令代码化 + 输出通道三�
       expect(r.stderr).toContain('锚点失配');
       expect(r.stderr).toContain('OpenBossBag');
       expect(md5(LIVE)).toBe(beforeLive);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ================= ★G-1（BJ261 2026-09-22）fresh-only 轴（S3 普查案） =================
+// 现状 washOf 只算 live-only——变异实证 bossbags 现库删 spawn 恒绿（现库退化不可见）。
+// 补 fresh-only 轴（bags/spawns/fields/coinMap 逆向四轴,缺键型=itemrare 同族,非空拒）。
+describe('extract-bossbags G-1 fresh-only 轴（BJ261）', () => {
+  it('行为面:现库删 spawn → fresh-only 命名物证 exit 1（恒绿盲区收口）', () => {
+    const dir = mkdtempSync(join(TMP, 'bossbags-g1-'));
+    try {
+      const live = JSON.parse(readFileSync(LIVE, 'utf8'));
+      const before3318 = live.bags['3318'].spawns.length;
+      live.bags['3318'].spawns = live.bags['3318'].spawns.slice(1);   // 现库退化:删首条 spawn
+      const fixture = join(dir, 'degraded.json');
+      writeFileSync(fixture, JSON.stringify(live, null, 1));
+      const r = spawnSync('node', [SCRIPT], {
+        cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
+        env: { ...process.env, SW_BOSSBAGS_JSON: fixture },
+      });
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('fresh-only');
+      expect(r.stderr).toContain('袋 3318');
+      expect(r.stderr).toContain(`重产 ${before3318 - live.bags['3318'].spawns.length} 条现库缺`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('变异:摘 fresh-only 轴后对退化现库恒绿复现（证明该轴是唯一拦截面）', () => {
+    const dir = mkdtempSync(join(TMP, 'bossbags-g1-'));
+    try {
+      const live = JSON.parse(readFileSync(LIVE, 'utf8'));
+      live.bags['3318'].spawns = live.bags['3318'].spawns.slice(1);
+      const fixture = join(dir, 'degraded.json');
+      writeFileSync(fixture, JSON.stringify(live, null, 1));
+      const probeEnv = { ...process.env, SW_BOSSBAGS_JSON: fixture };
+      const src = readFileSync(SCRIPT, 'utf8');
+      const TRIGGER = "for (const id of Object.keys(out)) {\n    if (!live.bags?.[id]) { wash.bagsFresh.push(id); continue; }";
+      expect(src).toContain(TRIGGER);
+      const mutant = join(dir, 'extract-bossbags-mutant-freshonly.mjs');
+      // 摘轴:spawnsFresh 恒空（bagsFresh 臂保留,以 spawns 轴为判别对象）
+      const mutantSrc = src.replace(
+        'const freshOnly = (out[id].spawns ?? []).filter((s) => !liveSet.has(sig(s)));',
+        'const freshOnly = []; // ★变异:fresh-only 轴摘除',
+      );
+      writeFileSync(mutant, mutantSrc);
+      const real = spawnSync('node', [SCRIPT], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: probeEnv });
+      expect(real.status).toBe(1);      // 真工具:轴在位 → 拒
+      const r = spawnSync('node', [mutant], { cwd: process.cwd(), encoding: 'utf8', timeout: 300_000, env: probeEnv });
+      expect(r.status).toBe(0);         // 变异体:轴摘除 → 恒绿复现
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

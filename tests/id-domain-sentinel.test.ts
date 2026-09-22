@@ -18,9 +18,12 @@
 //   (BJ146 真值面「vid 1291 写内部 1 原版读成铁镐」)。裸下标误用值:
 //   ITEM_STABLE_OF_INTERNAL[4]=282(≠4)、[1]=1291(vid 1 铁镐误映生命果)——
 //   两域互为错位排列(注册 vid×裸下标重合率 0/6177),方向一翻立即红。
-// ★方案 A 移交注记:物品 id 重排(方案 A)成本数据在 BJ150 报告,待用户独立拍板;
-//   本哨兵网=未来方案 A 落地后的验收网(重排后 8 收口+掩蔽对+全域普查须原样全绿,
-//   仅 internal 字面量 1327/1 按新注册序有意识重钉)。
+// ★方案 A 重排落刀注记（BJ264 2026-09-22,已执行）：重排后 internal≡stable 恒等,
+//   旧错位掩蔽对(1327/1/282)随两域统一而消亡——本件已按新注册序有意识重钉:
+//   ①字面量恒等钉（I4=4/I1291=1291）;②负空间改钉「仅存非恒等映射」=蜂巢 10140
+//   读档单向漏斗+disk-0 洞锚（0 号位=空洞,SaveFile MANA_CRYSTAL_IID 迁移臂目标位）;
+//   ③「物品 id 永不落盘为 0」空槽哨兵替换旧裸下标负空间。域再漂移（若未来引入
+//   新 id 域）须重建同型掩蔽对。
 // ★变异证红记录(2026-09-18,均在验证后还原):
 //   M1 serialize.mapItem 换向 .get → choke1 红+IDG-1 红;
 //   M2 SaveFile.mapItem 换向裸下标 → choke2 红+IDG-2 红;
@@ -47,41 +50,54 @@ import {
 import { TILE_BY_KEY, TILE_DEFS, TILE_STABLE_OF_INTERNAL, TILE_INTERNAL_OF_STABLE } from '../src/data/tiles';
 
 // ---- 掩蔽对字面量(键注册表推导+钉死;键 vid 契约=vi_<vid>_ 稳定≡vid,与两表无关) ----
+// ★方案 A 重排后重钉（BJ264 2026-09-22）：internal ≡ stable 恒等域——旧掩蔽对
+//   (1327/1/282)的「两域错位」前提已随方案 A 消亡（域统一=方案 A 目标本身）。
+//   负空间重钉=「仅存非恒等映射」：蜂巢 10140 读档单向漏斗（恒等裸读=place_v 面,
+//   真值=vi_1124）+ disk-0 洞锚（0 号位=空洞,SaveFile 读档迁移臂目标位）。
 const VID_SWORD = 4, VID_FRUIT = 1291, VID_PICK = 1;
-const I4 = ITEM_BY_KEY['vi_4_IronBroadsword']!;                    // =1327(钉,SW-BO1 勘误锚)
-const I1291 = ITEM_BY_KEY['vi_1291_LifeFruit']!;                   // =1(钉,BJ146 真值锚)
-const WRONG_BARE_4 = ITEM_STABLE_OF_INTERNAL[VID_SWORD];           // =282(裸下标误用值)
+const I4 = ITEM_BY_KEY['vi_4_IronBroadsword']!;                    // =4（恒等;旧序 1327 退役）
+const I1291 = ITEM_BY_KEY['vi_1291_LifeFruit']!;                   // =1291（恒等;旧序 1 退役）
+const IMANA = ITEM_BY_KEY['vi_109_mana_crystal']!;                 // =109（disk-0 迁移锚）
+const WRONG_HIVE_IDENTITY = 10140;   // 恒等裸读值≠真值:读档漏斗把 10140 归 vi_1124 内部 id
 
-describe('掩蔽对与全域普查(反自回环根基)', () => {
-  it('掩蔽对字面量钉死(注册序漂移须有意识重钉,见头注方案 A 注记)', () => {
-    expect(I4).toBe(1327);                                   // vid 4 铁阔剑内部 1327
-    expect(I1291).toBe(1);                                   // vid 1291 生命果内部 1
+describe('掩蔽对与全域普查(反自回环根基·方案 A 恒等域重钉)', () => {
+  it('掩蔽对字面量钉死(方案 A 恒等域;重排须有意识重钉,见头注)', () => {
+    expect(I4).toBe(4);                                      // vid 4 铁阔剑=internal 4（恒等）
+    expect(I1291).toBe(1291);                                // vid 1291 生命果=internal 1291（恒等）
     expect(/^vi_4_/.test(ITEM_DEFS[I4].key)).toBe(true);
     expect(/^vi_1291_/.test(ITEM_DEFS[I1291].key)).toBe(true);
-    // 写向表契约:internal→stable ≡ 键 vid
+    // 写向表契约:internal→stable ≡ 恒等
     expect(ITEM_STABLE_OF_INTERNAL[I4]).toBe(VID_SWORD);
     expect(ITEM_STABLE_OF_INTERNAL[I1291]).toBe(VID_FRUIT);
-    // 读向表契约:stable→internal 首胜归一
+    // 读向表契约:stable→internal 恒等
     expect(ITEM_INTERNAL_OF_STABLE.get(VID_SWORD)).toBe(I4);
     expect(ITEM_INTERNAL_OF_STABLE.get(VID_FRUIT)).toBe(I1291);
+    // disk-0 洞锚:0 号位=原版 netID 0 语义（空洞）;魔力水晶=恒等 109
+    expect(ITEM_DEFS[0]).toBeUndefined();
+    expect(IMANA).toBe(109);
+    expect(ITEM_DEFS[IMANA]?.key).toBe('vi_109_mana_crystal');
+    // 负空间=仅存非恒等映射:蜂巢 10140 读档单向漏斗（itemMigration 尾部覆写）
+    expect(ITEM_INTERNAL_OF_STABLE.get(10140)).not.toBe(WRONG_HIVE_IDENTITY);
+    expect(ITEM_DEFS[ITEM_INTERNAL_OF_STABLE.get(10140)!].key).toMatch(/^vi_1124_/);
   });
-  it('全域普查:vi_ def 稳定≡vid;加载表首胜归一;裸下标重合率 0(PlrImport.ts:158 实测锚)', () => {
-    const expectedFirst = new Map<number, number>();          // stable→首个内部 id
-    let viCount = 0, bareCoincide = 0;
+  it('全域普查(方案 A 恒等域):vi_ def internal≡vid;双桥恒等;稀疏洞存在', () => {
+    let viCount = 0, occupied = 0, holes = 0;
     for (let i = 0; i < ITEM_DEFS.length; i++) {
-      const m = /^vi_(\d+)_/.exec(ITEM_DEFS[i].key);
+      const d = ITEM_DEFS[i];
+      if (!d) { holes++; continue; }
+      occupied++;
+      expect(ITEM_STABLE_OF_INTERNAL[i]).toBe(i);             // 写向恒等（洞位=i 良定义）
+      const m = /^vi_(\d+)_/.exec(d.key);
       if (!m) continue;
       viCount++;
-      const vid = Number(m[1]);
-      expect(ITEM_STABLE_OF_INTERNAL[i]).toBe(vid);           // 写向=键 vid(构建式契约)
-      if (!expectedFirst.has(vid)) expectedFirst.set(vid, i);
-      if (vid < ITEM_STABLE_OF_INTERNAL.length && ITEM_STABLE_OF_INTERNAL[vid] === vid) bareCoincide++;
+      expect(i).toBe(Number(m[1]));                           // ★主不变量:internal≡vid
+      expect(ITEM_INTERNAL_OF_STABLE.get(i)).toBe(i);         // 读向恒等
     }
     expect(viCount).toBeGreaterThan(6000);                    // 普查非空洞
-    expect(bareCoincide).toBe(0);                             // 裸下标重合率 0/6177
-    for (const [vid, iid] of expectedFirst) {
-      expect(ITEM_INTERNAL_OF_STABLE.get(vid)).toBe(iid);     // 读向=首胜归一(内容等价)
-    }
+    expect(ITEM_DEFS[0]).toBeUndefined();                     // 0 号位=空洞（netID 0 语义）
+    expect(occupied).toBe(6856);                              // BJ150 普查实件数（注册面变更须有意识重钉）
+    expect(holes).toBeGreaterThan(13000);                     // 稀疏洞真实存在（~13898）
+    expect(ITEM_DEFS.length).toBe(20754);                     // maxStable+1（BJ150 实测 max=20753）
   });
 });
 
@@ -92,8 +108,8 @@ describe('收口1 存档 JSON 写:internal→stable 方向(serialize mapItem :47
   const mk = () => {
     const world = new World(80, 40, 42, '哨兵');
     const player = new Player(100, 100, new Inventory());
-    player.inv.add(I4, 9);          // 铁阔剑(internal 1327)
-    player.inv.add(I1291, 3);       // 生命果(internal 1)
+    player.inv.add(I4, 9);          // 铁阔剑（internal≡vid=4，方案 A 恒等域）
+    player.inv.add(I1291, 3);       // 生命果（internal≡vid=1291）
     world.chests.push({
       x: 5, y: 5,
       items: [{ id: I4, stack: 9 }, { id: I1291, stack: 3 },
@@ -107,16 +123,17 @@ describe('收口1 存档 JSON 写:internal→stable 方向(serialize mapItem :47
     ];
     return { world, player };
   };
-  it('箱/背包/挂物落盘 id=原版 vid 字面量(4/1291),非内部下标(1327/1)非裸下标误用(282)', () => {
+  it('箱/背包/挂物落盘 id=原版 vid 字面量(4/1291,恒等域下≡internal);永不落 0(空槽哨兵)', () => {
     const { world, player } = mk();
     const data = JSON.parse(saveGame(world, player, 0)) as SaveData;
-    // 背包:internal 1327→4;internal 1→1291(若换向 .get:get(1327)=stable1327 的内部 id
-    //   ≠4、get(1)=铁镐内部 id≠1291——立即红)
+    // 背包:恒等域下落盘 id=vid=internal(4/1291)。掩蔽对语义=写读两向独立单源表——
+    //   若任一侧换向错表(如读向 .get 反查写向值),立即红（历史 M1-M5 变异记录见头注）
     expect(data.player.inventory[0]?.id).toBe(VID_SWORD);
     expect(data.player.inventory[1]?.id).toBe(VID_FRUIT);
-    expect(data.player.inventory[0]?.id).not.toBe(I4);
-    expect(data.player.inventory[1]?.id).not.toBe(I1291);
-    expect(data.player.inventory[0]?.id).not.toBe(WRONG_BARE_4);
+    // ★方案 A 恒等域：id≡internal,「非内部下标」负空间已消亡;改钉空槽哨兵 0
+    //   （物品永不落盘为 0=空槽/空洞哨兵）
+    expect(data.player.inventory[0]?.id).not.toBe(0);
+    expect(data.player.inventory[1]?.id).not.toBe(0);
     // 箱(chests 走同一 mapItem)
     expect(data.chests[0].items[0]?.id).toBe(VID_SWORD);
     expect(data.chests[0].items[1]?.id).toBe(VID_FRUIT);
@@ -144,7 +161,7 @@ describe('收口2 存档 JSON 读:stable→internal 方向(SaveFile .get :253/:3
     ];
     return data;
   };
-  it('读档还原 internal 1327/1(若换向裸下标:STABLE[4]=282≠1327、STABLE[1291]≠1——立即红)', () => {
+  it('读档还原 internal≡vid(4/1291 恒等域;若换向裸下标旧域即红)', () => {
     const { world, player } = loadSaveData(mkData());
     expect(player.inventory[0]?.id).toBe(I4);
     expect(player.inventory[1]?.id).toBe(I1291);
@@ -152,8 +169,8 @@ describe('收口2 存档 JSON 读:stable→internal 方向(SaveFile .get :253/:3
     expect(world.chests[0].items[1]?.id).toBe(I1291);
     expect(world.furnitureItems[0].slots[0]?.id).toBe(I4);
     expect(world.furnitureItems[1].slots[0]?.id).toBe(I1291);
-    // 掩蔽值负空间:裸下标误用值 282 不得冒充铁阔剑
-    expect(player.inventory[0]?.id).not.toBe(WRONG_BARE_4);
+    // ★方案 A 恒等域负空间重钉:物品 id 永不为 0（空槽/空洞哨兵）
+    expect(player.inventory[0]?.id).not.toBe(0);
   });
 });
 
@@ -276,7 +293,7 @@ describe('收口5 .wld 导入三源:箱/rack334 帧/TE→键链→stItem 统一 
     expect(save.chests?.[0]?.items?.[0]?.id).toBe(VID_SWORD);
     expect(save.chests?.[0]?.items?.[0]?.stack).toBe(9);
     expect(save.chests?.[0]?.items?.[1]?.id).toBe(VID_FRUIT);
-    expect(save.chests?.[0]?.items?.[0]?.id).not.toBe(WRONG_BARE_4);
+    expect(save.chests?.[0]?.items?.[0]?.id).not.toBe(0);
   });
   it('TE 模特源:equip0/dye0 vid→键→内部→stable 恒等(4/1291)+姿态随档', () => {
     const { save } = run();
@@ -442,7 +459,7 @@ describe('收口7 .plr 读取向:netId(vid)域→stableOf 键链字面量', () =
     expect(p.playerState.inventory?.[1]?.id).toBe(VID_FRUIT);  // =1291
     expect(p.playerState.inventory?.[2]?.id).toBe(VID_SWORD);  // =4;≠282
     expect(p.playerState.inventory?.[0]?.id).not.toBe(VID_FRUIT);
-    expect(p.playerState.inventory?.[2]?.id).not.toBe(WRONG_BARE_4);
+    expect(p.playerState.inventory?.[2]?.id).not.toBe(0);
     expect(p.playerState.inventory?.[3]).toBeNull();           // 未注册 vid 归 0=宁缺不错
     expect(p.version).toBe(PLR_VERSION_1457);
   });
@@ -475,11 +492,9 @@ describe('收口7 .plr 导出向:netIdOf vid 恒等回写(vi_ 门/SW 件归 0)',
   it('导出 vid 域字面量(1291/4/1),非内部下标(1/1327/…)——BJ146 掩蔽对两向钉死', () => {
     const bytes = exportPlr(appearance, mkState());
     const p = parsePlr(bytes);
-    // BJ146 真值面:旧错映射把 stable 1291 写成内部 1(原版读成铁镐)
+    // BJ146 真值面（方案 A 恒等域下 vid 直写≡恒等;旧「内部下标直写」错位面已消亡）
     expect(p.playerState.inventory?.[0]?.id).toBe(VID_FRUIT);
-    expect(p.playerState.inventory?.[0]?.id).not.toBe(I1291);  // ≠1(内部下标直写面)
-    expect(p.playerState.inventory?.[1]?.id).toBe(VID_SWORD);  // ≠1327
-    expect(p.playerState.inventory?.[1]?.id).not.toBe(I4);
+    expect(p.playerState.inventory?.[1]?.id).toBe(VID_SWORD);
     expect(p.playerState.inventory?.[2]?.id).toBe(VID_PICK);
     expect(p.playerState.armor?.[0]?.id).toBe(VID_SWORD);
     expect(p.playerState.banks?.[0]?.[0]?.id).toBe(VID_FRUIT);

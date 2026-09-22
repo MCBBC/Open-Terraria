@@ -108,10 +108,13 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
   //  上方 defsByStable `if (!s) return` 静默跳过 = 「stable 0 多 def」三锁全盲
   //  （构建期日志测试零红）。断言：任何 def 稳定 id 必须非 0（vi_/place_v_/PRIV 三
   //  派生支之一命中）——新键漏表即在此过闸。
-  it('终态：stable id 全域可解析 = 0 缺失（SW-RB8b 补第三锁 stable-0 盲窗）', () => {
+  it('终态：stable id 全域可解析 = 0 缺失（SW-RB8b 补第三锁 stable-0 盲窗;★方案 A 恒等域重钉=只查实件,洞位豁免）', () => {
     const missing: string[] = [];
     ITEM_STABLE_OF_INTERNAL.forEach((s, i) => {
-      if (!s) missing.push(`#${i} ${ITEM_DEFS[i]?.key ?? '?'}`);
+      // ★方案 A（BJ264）：恒等域下 STABLE[i]=i,仅 0 号位（空洞,无 def）为 0——
+      //   「缺稳定 id 的 def」判据收紧为实件（!ITEM_DEFS[i] 跳洞）;新注册漏表
+      //   在 items.ts reorder pass 双射 fail-fast 即炸,本锁保留为读数面终闸。
+      if (!s && ITEM_DEFS[i]) missing.push(`#${i} ${ITEM_DEFS[i]?.key ?? '?'}`);
     });
     expect(missing, `缺稳定 id def ${missing.length} 件:\n${missing.join('\n')}`).toEqual([]);
   });
@@ -120,8 +123,12 @@ describe('dual-key 归一终态锁（SW-BN1 2026-09-07 落地；SW-BN4 2026-09-0
   //  2026-09-14 6856、byKey 8109→8111 键零丢失、VANILLA_ITEM_KEY_BY_ID 6175→6177
   //  vid——3861/3862 宝藏袋按数据管线注册=atlas-append ①c+自动注册循环,+2 def/+2
   //  键/+2 vid legit 扩容有意识改本钉）；隐式漂移（误注册/批量重放踩踏）在此显形。
-  it('台账一致性：ITEM_DEFS 6856 / byKey 8111 / 权威反查 6177（BN1 终态三账,BJ69 扩面）', () => {
-    expect(ITEM_DEFS.length, 'ITEM_DEFS 基数漂移（BN1 台账 6856）').toBe(6856);
+  //  ★方案 A（BJ264 2026-09-22）：ITEM_DEFS 重排为 internal≡stable 稀疏域——数组
+  //  length=maxStable+1=20754（实件 6856 不变,由 item-retirement D1 闸门钉住）,
+  //  三账的第一账改按稀疏长度钉;键账/vid 账不动。
+  it('台账一致性：ITEM_DEFS 稀疏长 20754（实件 6856）/ byKey 8111 / 权威反查 6177（BN1 终态三账+方案 A 重钉）', () => {
+    expect(ITEM_DEFS.length, 'ITEM_DEFS 稀疏长度漂移（方案 A 台账 20754=maxStable+1）').toBe(20754);
+    expect(ITEM_DEFS.filter(Boolean).length, 'ITEM_DEFS 实件数漂移（BN1 台账 6856）').toBe(6856);
     expect(Object.keys(ITEM_BY_KEY).length, 'byKey 键数漂移（BN1 台账 8111）').toBe(8111);
     expect(Object.keys(VANILLA_ITEM_KEY_BY_ID).length, '权威 vid 反查键数漂移（BN1 台账 6177）').toBe(6177);
   });

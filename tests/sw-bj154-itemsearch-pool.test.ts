@@ -65,6 +65,7 @@ describe('SW-BJ154 ①搜索池全量对齐（遍历源=全集域,零缺席）',
     // place_v 件承载=可搜域不缺）。missing 内混入任何非死条目 vid = 真漏件（红）。
     const coveredSheets = new Set<number>();
     for (const d of ITEM_DEFS) {
+      if (!d) continue;   // ★方案 A:守洞
       const mp = /^place_v_(\d+)_/.exec(d.key);
       if (mp) coveredSheets.add(Number(mp[1]));
     }
@@ -83,10 +84,10 @@ describe('SW-BJ154 ①搜索池全量对齐（遍历源=全集域,零缺席）',
     expect(extra).toEqual([4143]);
   });
 
-  it('池条目数快照（6856 def − 死条目;注册面变化须有意重锚）', () => {
+  it('池条目数快照（6856 def − 死条目;注册面变化须有意重锚;★方案 A 稀疏长重钉）', () => {
     // 2026-09-19 定值:6856 def 全量 − 2040 个被 place_v 覆盖的死 vid = 4816
     expect(pool.length).toBe(4816);
-    expect(ITEM_DEFS.length).toBe(6856);   // BJ146 全量口径锚
+    expect(ITEM_DEFS.length).toBe(20754);   // ★方案 A:稀疏域数组长=maxStable+1（实件 6856 由 D1 闸门钉）
   });
 });
 

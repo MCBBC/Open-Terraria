@@ -11,8 +11,9 @@
 //  - "使用"大钮实时显示当前手持物品 sprite(iconUrl 同源 dataURL),空手回退准星;
 //    智能光标开关在底部动作排,点亮态即智能光标开启(官方手游同形)。
 import type { Game } from '../core/Game';
+import { ITEM_DEFS } from '../data/items';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
-import { vanillaIdOfItem } from '../stats/Shimmer';
+
 import { Lang } from '../i18n/Lang';
 import { options } from '../core/Options';
 import { bindsOf } from '../core/Keybinds';
@@ -744,7 +745,7 @@ export class MobileControls {
     let hasHeal = false;
     for (const s of g.player.inv.slots) {
       if (!s) continue;
-      const ff = itemFuncOfVid(vanillaIdOfItem(s.id));
+      const ff = itemFuncOfVid(ITEM_DEFS[s.id]?.vid ?? -1);
       if (ff?.consumable && ff.healLife && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer) {
         hasHeal = true;
         break;

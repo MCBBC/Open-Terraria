@@ -1,5 +1,5 @@
-// 1.4.5.6 ItemDropDatabase 结构化规则提取器（tools/extract-npcdrops.mjs）
-// 输入 Terarria1456/Terraria.GameContent.ItemDropRules/ItemDropDatabase.cs（616 条注册）
+// ItemDropDatabase 结构化规则提取器（tools/extract-npcdrops.mjs）
+// 输入 Terarria${VER}/Terraria.GameContent.ItemDropRules/ItemDropDatabase.cs
 // 输出 src/data/vanilla-npcdrops.json：按注册顺序的条目列表（RuleNode 类型树）
 // + src/data/vanilla-npcvalue.json：NPC.value（铜币，击杀掉钱管线用）
 //
@@ -14,10 +14,82 @@
 //   dropOneByOne {item,params}                slimeBody        mechSpawn
 //   statueMimic (未知内容记 unknown)
 // chain: [{on:'failedRoll'|'success'|'failedConditions', rule}]
-import { readFileSync, writeFileSync } from 'fs';
+//
+// ★BJ261 2026-09-22 重锚 1457 + era guard 落闸（四要素习语见 docs/era-guard-family.md）：
+//   本提取器原为 1456 硬锚 + apply1457DropPatches 补丁重放 1457 差异（12 处）；BJ261
+//   直接解析 Terarria1457 源码（ItemDropDatabase.cs 与 1458 逐字节全等，md5 cdc9c108；
+//   NPC.cs SetDefaults/SetDefaultsFromNetId 两读域 1457↔1458 逐字节全等；SlimeBodyItemDropRule.cs
+//   三版全等），补丁整体退役，改由「12 处 1457 注册锚 fail-loud + 基数护栏 + 干跑对拍」承载
+//   同等判别力。1456→1457 ItemDropDatabase.cs 全量 diff=12 处（diff 实测 41 行，与旧补丁
+//   ①-⑫ 一一对应）：629 硬模双池+6172(:236-237)/冰模仿怪池 8 选(:246-247)/245 石巨人 6158
+//   1/6(:653)/370 猪鲨双池+3291(:669-670)/删 YoyosKraken 3291 全局(:795)/395 火星飞碟 6173
+//   1/50(:925)/483·482 6167 1/80(:932)/475 池+6168(:989)/528·529 6157 1/40(:1032)/18 群
+//   1/200→1/100(:1033)/393 群 1/100→1/50(:1036)/179·83 6159 1/25(:1058)。
+//   ★同刀勘误①：callRule 'ScalingWithOnlyBadLuck'（:179 4271，53/536 蓝史莱姆明胶）原坍缩成
+//     普通 common（noLuck:false）——正运玩家白吃加成；现补 onlyBadLuck:1 标记（消费面
+//     NpcDrops.ts:432 R14-A1 语义已在），newRule 'CommonDropScalingWithOnlyBadLuck' 同修
+//     （原误标 noLuck:true=整条不吃运；1457 无直接调用点，纯前瞻归一）。
+//   ★同刀勘误②（活库对账逐值定谳，反编译为准）：vanilla-npcvalue.json 系 BJ174 前旧
+//     正则产物——589(高尔夫球手营救) 的 value=60 系旧「定窗分段」把相邻 590/591 块的
+//     value=60f 渗漏进来（1456/1457 的 type==589 块均无 value 赋值=缺省 0）；590/591
+//     (TorchZombie/ArmedTorchZombie) 真值 60 反而整缺（旧 mark 正则漏 || 组）；455-458
+//     同族漏组（真值 0f，缺失≡0 纯形状差）。--write-real 定谳后四组已对齐。
+//
+// ★era guard 四要素：
+//   ① SW_ITEM_VER 缺省 1457（白名单 {1457,1458}，1456 锚集退役显式拒+指引；对应反编译
+//     目录不存在也拒）;
+//   ② 输出通道三分离：缺省=干跑对拍零写盘（重产 vs 现库双向动态 diff——live-only=洗库
+//     预警/fresh-only=现库退化缺键型，任一非空 exit 1+物证清单）/ SW_OUT=<dir>=沙箱（两
+//     产物落 <dir>/）/ --write-real=写真库（且 diff 非纯增量时拒，强推须 --force-full
+//     --overwrite-append-era 双旗）；SW_OUT 与 --write-real 双旗互斥；SW_ITEM_VER≠1457
+//     禁写真库；探测注入面 SW_NPCDROPS_JSON/SW_NPCVALUE_JSON（读侧现库重定向）与
+//     --write-real 混用拒（g1 footgun）;
+//   ③ 锚 fail-loud：12 处 1457 注册锚源码文本硬校验/POOL_METHODS 池字面量回读校验/
+//     SetDefaults·SetDefaultsFromNetId·SlimeBody switch 签名/entries·values·slimeBody
+//     基数护栏，失配 throw 报错退出（禁止静默空扫吃缺省）;
+//   ④ 判别力自证：tests/extract-npcdrops-era-guard.test.ts（变异：摘干跑门=静默写库；
+//     毒化锚=exit 1；摘 fresh-only 轴=删源注册恒绿复现）。
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 
-const DB = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria.GameContent.ItemDropRules/ItemDropDatabase.cs', 'utf8');
-const npcCs = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria/NPC.cs', 'utf8');
+const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457', '1458']);
+if (!VER_ALLOWED.has(VER) || !existsSync(`${ROOT}/Terarria${VER}/Terraria/NPC.cs`)) {
+  console.error(`[extract-npcdrops] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1456') console.error('  1456 锚集已随 BJ261 重锚退役（apply1457DropPatches 补丁面整体移除）；1456 对拍读 BJ261 定谳或 /tmp 时代快照。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+const SW_OUT = process.env.SW_OUT;
+if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+  console.error('[extract-npcdrops] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  console.error('  处置：沙箱对拍用 SW_OUT=<dir>；确认定谳后更新现库用 --write-real（且 SW_ITEM_VER=1457）。');
+  process.exit(1);
+}
+if (WRITE_REAL && VER !== '1457') {
+  console.error(`[extract-npcdrops] 拒绝写真库：SW_ITEM_VER=${VER}≠1457（旧基线重放禁写 game/src/data/vanilla-npcdrops.json / vanilla-npcvalue.json）。`);
+  console.error('  处置：重放对拍请走 SW_OUT 沙箱；确要回写 1457 终值请去掉 SW_ITEM_VER 显式注入（缺省即 1457）。');
+  process.exit(1);
+}
+// ★g1 footgun（bossbags 同款）：探测注入面（SW_NPCDROPS_JSON/SW_NPCVALUE_JSON，读侧现库
+//   重定向）与 --write-real 混用 = 读夹具对拍、写真实现库——探测与写盘分离=守卫被绕过洗库面。
+if (WRITE_REAL && (process.env.SW_NPCDROPS_JSON !== undefined || process.env.SW_NPCVALUE_JSON !== undefined)) {
+  console.error('[extract-npcdrops] 拒绝运行：探测注入面（SW_NPCDROPS_JSON/SW_NPCVALUE_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  console.error('  处置：对拍用探测 env（零写盘干跑）或 SW_OUT 沙箱；更新现库须清掉探测 env 再 --write-real。');
+  process.exit(1);
+}
+const LIVE_DROPS_JSON = process.env.SW_NPCDROPS_JSON ?? `${ROOT}/game/src/data/vanilla-npcdrops.json`;
+const LIVE_VALUE_JSON = process.env.SW_NPCVALUE_JSON ?? `${ROOT}/game/src/data/vanilla-npcvalue.json`;
+// ★M1 变异锚:干跑臂 null（守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面）
+const OUT_DROPS_JSON = WRITE_REAL ? LIVE_DROPS_JSON
+  : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-npcdrops.json` : null);
+const OUT_VALUE_JSON = WRITE_REAL ? LIVE_VALUE_JSON
+  : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-npcvalue.json` : null);
+
+const DB = readFileSync(`${ROOT}/Terarria${VER}/Terraria.GameContent.ItemDropRules/ItemDropDatabase.cs`, 'utf8');
+const npcCs = readFileSync(`${ROOT}/Terarria${VER}/Terraria/NPC.cs`, 'utf8');
 
 // ============ 表达式解析（嵌套调用/对象初始化器/new/数字/标识符/链式调用） ============
 function parseExpr(src, pos = 0) {
@@ -287,7 +359,13 @@ function callRule(n) {
     case 'Common': { const [d, mn, mx] = commonArgs(a.slice(1)); return { k: 'common', item: lit(a[0]), denom: d, min: mn, max: mx }; }
     case 'NotScalingWithLuck': case 'ScalingWithOnlyBadLuck': {
       const [d, mn, mx] = commonArgs(a.slice(1));
-      return { k: 'common', item: lit(a[0]), denom: d, min: mn, max: mx, noLuck: fn === 'NotScalingWithLuck' };
+      // ★BJ261：ScalingWithOnlyBadLuck（CommonDropScalingWithOnlyBadLuck.cs:21-35 →
+      //   Luck.RollOnlyBadLuck）≠普通 common——正运无加成/负运才进内掷。原坍缩成
+      //   noLuck:false（=走 Luck.RollLuck，正运白吃加成）；补 onlyBadLuck:1 标记
+      //   （消费面 NpcDrops.ts:432 R14-A1 语义）。noLuck:false 保留=现库形状逐键对齐。
+      const out = { k: 'common', item: lit(a[0]), denom: d, min: mn, max: mx, noLuck: fn === 'NotScalingWithLuck' };
+      if (fn === 'ScalingWithOnlyBadLuck') out.onlyBadLuck = 1;
+      return out;
     }
     case 'WithRerolls': { // (item, rerolls, denom=1, min=1, max=1)
       const [d, mn, mx] = commonArgs(a.slice(2));
@@ -352,6 +430,12 @@ function newRule(n) {
     }
     case 'CommonDropNotScalingWithLuck': case 'CommonDropScalingWithOnlyBadLuck': {
       const [d, mn, mx] = commonArgs(a.slice(1));
+      // ★BJ261：OnlyBadLuck 变体原误标 noLuck:true（整条不吃运≠仅负运缩分母）；
+      //   1457 DB 无直接调用点（0 处），纯前瞻归一——禁止把 onlyBadLuck 挂在 noLuck:true
+      //   之后（消费面 noLuck 先短路会吞掉 OnlyBadLuck 语义）
+      if (n.cls === 'CommonDropScalingWithOnlyBadLuck') {
+        return { k: 'common', item: lit(a[0]), denom: d, min: mn, max: mx, onlyBadLuck: 1 };
+      }
       return { k: 'common', item: lit(a[0]), denom: d, min: mn, max: mx, noLuck: true };
     }
     case 'CommonDropWithRerolls': { // (item, denom, min, max, rerolls)
@@ -703,9 +787,11 @@ const values = {};
 // ============ SlimeBody 数量表 ============
 const slimeBody = {};
 {
-  const src = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria.GameContent.ItemDropRules/SlimeBodyItemDropRule.cs', 'utf8');
+  const src = readFileSync(`${ROOT}/Terarria${VER}/Terraria.GameContent.ItemDropRules/SlimeBodyItemDropRule.cs`, 'utf8');
   // switch 在 CanDrop 之后（本文件方法序）：从 switch 起切到文件尾
-  const body = src.slice(src.indexOf('switch (itemId)'));
+  const swIdx = src.indexOf('switch (itemId)');
+  if (swIdx < 0) throw new Error('[extract-npcdrops] 锚点失配: SlimeBodyItemDropRule switch (itemId) 未找到（源码漂移,禁止静默空扫）');
+  const body = src.slice(swIdx);
   // ★ 多 case 堆叠分组（case 11:/case 12:/.../case 3347: → 同一 min/max）：
   //   逐 case 切段会把组员丢了（只留组内最后一个 case）——改为前向合并：
   //   连续 case 标签归组，组内首个赋值段归属全部组员
@@ -729,106 +815,137 @@ const slimeBody = {};
   }
 }
 
-// ============ 1457 差异补丁（本提取器基准树是 Terarria1456；1457 对齐差异在此重放） ============
-// 1456→1457 ItemDropDatabase.cs 全量 diff 共 11 处（2026-08-23 蓝队 R2 复核逐处核对，
-// 与 /tmp/recon 批 B"11 条差异"同一清单）——重跑本脚本不会丢（曾因裸重跑回退过一次）：
-function apply1457DropPatches(entries) {
-  const find = (npc, pred) => entries.find((e) => !e.global && e.npcs && e.npcs.includes(npc) && (!pred || pred(e)));
-  const oneOfIn = (e) => {
-    // 取 entry 内第一个 oneOf 节点（629/370 的 gate→gate→oneOf 嵌套）
-    let r = e?.rule;
-    while (r) {
-      if (r.k === 'oneOf') return r;
-      r = r.chain?.find?.((c) => c.on === 'success')?.rule ?? r.chain?.[0]?.rule;
-    }
-    return null;
-  };
-  // ①② 629 冰模仿怪：硬模两支池 +6172（1457 :236-237；软模 8 选池已由 POOL_METHODS 承载）
-  //  629 的四支 gate 都嵌在 common(1312) 的 failedRoll 链内——按 cond 名全树找 oneOf
-  {
-    const e629 = entries.find((x) => !x.global && x.npcs?.length === 1 && x.npcs[0] === 629);
-    const stack = [e629?.rule];
-    while (stack.length) {
-      const r = stack.pop();
-      if (!r || typeof r !== 'object') continue;
-      if (r.k === 'gate' && (r.cond?.name === 'NotRemixSeedHardmode' || r.cond?.name === 'RemixSeedHardmode')) {
-        const o = oneOfIn({ rule: r });
-        if (o && !o.ids.includes(6172)) o.ids.push(6172);
-      }
-      for (const c of r.chain ?? []) stack.push(c.rule);
-    }
+// ============ 1457 源码锚 fail-loud（BJ261：补丁面退役，改锚 1457 注册真值） ============
+// 12 处 1456→1457 diff 锚（行号=Terarria1457 实测，md5 cdc9c1080ac171c9c98f69ead06fd837，
+// 1458 同文件逐字节全等）——源文本硬校验，失配 throw（防树回滚/提取器静默退化）：
+{
+  const mustHave = [
+    ['① 629 硬模池+6172', 'ItemDropRule.OneFromOptions(1, 676, 725, 1264, 6172)'],
+    ['① 629 硬模 remix 池+6172', 'ItemDropRule.OneFromOptions(1, 676, 1319, 1264, 6172)'],
+    ['② 冰模仿怪池 8 选+6153/6172', 'new int[8] { 670, 724, 950, 6153, 0, 987, 1579, 6172 }'],
+    ['③ 245 石巨人 6158 1/6', 'ItemDropRule.ByCondition(condition, 6158, 6)'],
+    ['④ 370 猪鲨池+3291', 'ItemDropRule.OneFromOptions(1, 5526, 2624, 2622, 2621, 5478, 3291, 2623)'],
+    ['⑥ 395 火星飞碟 6173 1/50', 'RegisterToNPC(395, ItemDropRule.Common(6173, 50))'],
+    ['⑦ 483/482 6167 1/80', 'RegisterToMultipleNPCs(ItemDropRule.Common(6167, 80), 483, 482)'],
+    ['⑧ 475 池+6168', 'RegisterToNPC(475, ItemDropRule.OneFromOptions(1, 3029, 3030, 3051, 6168, 3022))'],
+    ['⑨ 528/529 6157 1/40', 'RegisterToMultipleNPCs(ItemDropRule.Common(6157, 40), 528, 529)'],
+    ['⑩ 18 群 1/100', 'RegisterToMultipleNPCs(ItemDropRule.Common(18, 100), 49, 51, 150, 93, 634)'],
+    ['⑪ 393 群 1/50', 'RegisterToMultipleNPCs(ItemDropRule.Common(393, 50), 16, 185, 167, 197)'],
+    ['⑫ 179/83 6159 1/25', 'RegisterToMultipleNPCs(ItemDropRule.Common(6159, 25), 179, 83)'],
+  ];
+  const missing = mustHave.filter(([, t]) => !DB.includes(t)).map(([n]) => n);
+  if (missing.length) throw new Error(`[extract-npcdrops] 锚点失配: 1457 注册锚缺失: ${missing.join('; ')}（源树漂移/回滚,禁止静默半表）`);
+  // ⑤ 1457 已删 1456 全局 YoyosKraken 3291 1/400 注册——若复现即树回滚
+  if (DB.includes('RegisterToGlobal(new ItemDropWithConditionRule(3291, 400, 1, 1, new Conditions.YoyosKraken()))')) {
+    throw new Error('[extract-npcdrops] 锚点失配: 1457 已删的 YoyosKraken 3291 全局注册复现（源树回滚）');
   }
-  // ③ 245 石巨人直杀：NotExpert 6158 1/6（1457 :653 新增，插在 1294 1/4 之后）
-  {
-    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 1 && e.npcs[0] === 245
-      && e.rule?.k === 'cond' && e.rule.item === 1294);
-    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(245) && e.rule?.item === 6158)) {
-      entries.splice(at + 1, 0, { npcs: [245], rule: { k: 'cond', cond: { name: 'NotExpert', args: [] }, item: 6158, denom: 6, min: 1, max: 1, num: 1 } });
-    }
-  }
-  // ④ 370 猪鲨直杀两支池插入 3291（1457 :669-670：…,5478,3291,2623 / …,5478,3291,157）
-  for (const cond of ['NotRemixSeedHardmode', 'RemixSeed']) {
-    const e = entries.find((x) => !x.global && x.npcs?.length === 1 && x.npcs[0] === 370
-      && x.rule?.k === 'gate' && x.rule.cond?.name === cond);
-    const o = oneOfIn(e);
-    if (o && !o.ids.includes(3291)) o.ids.splice(o.ids.indexOf(5478) + 1, 0, 3291);
-  }
-  // ⑤ 删 1456 全局 YoyosKraken 3291 1/400（1457 :795 删注册）
-  {
-    const at = entries.findIndex((e) => e.global && e.rule?.item === 3291 && e.rule?.cond?.name === 'YoyosKraken');
-    if (at >= 0) entries.splice(at, 1);
-  }
-  // ⑥ 395 火星飞碟：6173 1/50（1457 :925 新增，插在 masterAll 4815 之后）
-  {
-    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 1 && e.npcs[0] === 395 && e.rule?.k === 'masterAll');
-    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(395) && e.rule?.item === 6173)) {
-      entries.splice(at + 1, 0, { npcs: [395], rule: { k: 'common', item: 6173, denom: 50, min: 1, max: 1 } });
-    }
-  }
-  // ⑦ 483/482：6167 1/80（1457 :932 新增，插在 3086 之后）
-  {
-    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 2 && e.npcs.includes(483) && e.npcs.includes(482)
-      && e.rule?.item === 3086);
-    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(483) && e.npcs?.includes(482) && e.rule?.item === 6167)) {
-      entries.splice(at + 1, 0, { npcs: [483, 482], rule: { k: 'common', item: 6167, denom: 80, min: 1, max: 1 } });
-    }
-  }
-  // ⑧ 475 池插 6168（1457 :989：3029,3030,3051,6168,3022）
-  {
-    const e = entries.find((x) => !x.global && x.npcs?.length === 1 && x.npcs[0] === 475 && x.rule?.k === 'oneOf');
-    if (e && !e.rule.ids.includes(6168)) e.rule.ids.splice(3, 0, 6168);
-  }
-  // ⑨ 528/529：6157 1/40（1457 :1032 新增，插在 OneFromOptions(40,3786…) 之后）
-  {
-    const at = entries.findIndex((e) => !e.global && e.npcs?.length === 2 && e.npcs.includes(528) && e.npcs.includes(529)
-      && e.rule?.k === 'oneOf');
-    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(528) && e.npcs?.includes(529) && e.rule?.item === 6157)) {
-      entries.splice(at + 1, 0, { npcs: [528, 529], rule: { k: 'common', item: 6157, denom: 40, min: 1, max: 1 } });
-    }
-  }
-  // ⑩ 49/51/150/93/634 的 18：1/200 → 1/100（1457 :1034）
-  {
-    const e = entries.find((x) => !x.global && x.npcs?.length === 5 && x.npcs.includes(49) && x.rule?.item === 18);
-    if (e && e.rule.denom === 200) e.rule.denom = 100;
-  }
-  // ⑪ 16/185/167/197 的 393：1/100 → 1/50（1457 :1036）
-  {
-    const e = entries.find((x) => !x.global && x.npcs?.length === 4 && x.npcs.includes(16) && x.rule?.item === 393);
-    if (e && e.rule.denom === 100) e.rule.denom = 50;
-  }
-  // ⑫ 179/83：6159 1/25（1457 :1058 新增，插在 996 1/200（9-npc 组）之后）
-  {
-    const at = entries.findIndex((e) => !e.global && e.npcs?.includes(179) && e.npcs?.includes(83)
-      && e.rule?.item === 996);
-    if (at >= 0 && !entries.some((e) => !e.global && e.npcs?.includes(179) && e.npcs?.includes(83) && e.rule?.item === 6159)) {
-      entries.splice(at + 1, 0, { npcs: [179, 83], rule: { k: 'common', item: 6159, denom: 25, min: 1, max: 1 } });
+  // POOL_METHODS 硬编码池必须与源码字面量逐值全等（8 选 + obj[4] isRemix 三元）
+  const poolLit = DB.match(/int\[\] obj = new int\[\d+\] \{([\d,\s]+)\};\s*\n\s*obj\[\d+\] = \(isRemix \? (\d+) : (\d+)\);/);
+  if (!poolLit) throw new Error('[extract-npcdrops] 锚点失配: RegisterIceMimic_GetEasyModeItemPool 池字面量未找到（形变,禁止静默吃硬编码）');
+  const poolSrc = poolLit[1].split(',').map((x) => parseInt(x.trim(), 10));
+  const [remixId, plainId] = [Number(poolLit[2]), Number(poolLit[3])];
+  for (const isRemix of [true, false]) {
+    const expect = poolSrc.map((v, i) => (v === 0 ? (isRemix ? remixId : plainId) : v));
+    const got = POOL_METHODS.RegisterIceMimic_GetEasyModeItemPool([{ t: 'id', name: isRemix ? 'true' : 'false' }]);
+    if (JSON.stringify(expect) !== JSON.stringify(got)) {
+      throw new Error(`[extract-npcdrops] 锚点失配: POOL_METHODS 冰模仿怪池与源码不等（isRemix=${isRemix}）: 源 ${expect} vs 硬编码 ${got}`);
     }
   }
 }
-apply1457DropPatches(entries);
+// NPC.cs 读域签名锚（SetDefaults 链 + SetDefaultsFromNetId 负 id 变体表）
+if (!npcCs.includes('public void SetDefaults(int Type')) {
+  throw new Error('[extract-npcdrops] 锚点失配: NPC.cs SetDefaults 签名未找到（源码漂移,禁止静默空扫）');
+}
+if (!/case -\d+:/m.test(npcCs)) {
+  throw new Error('[extract-npcdrops] 锚点失配: NPC.cs SetDefaultsFromNetId 负 id case 表未找到（源码漂移,禁止静默空扫）');
+}
+// 基数护栏（1457 实测:entries 630/values 428/slimeBody 44——地板防静默半表）
+if (entries.length < 600) throw new Error(`[extract-npcdrops] 锚点失配: entries 基数 ${entries.length} < 600（解析面漂移）`);
+if (Object.keys(values).length < 400) throw new Error(`[extract-npcdrops] 锚点失配: npc values 基数 ${Object.keys(values).length} < 400（SetDefaults 链漏扫）`);
+if (Object.keys(slimeBody).length < 40) throw new Error(`[extract-npcdrops] 锚点失配: slimeBody 基数 ${Object.keys(slimeBody).length} < 40（switch 漏配）`);
+const unknownBase = ['new:List'];  // 已知良性 unknown 形态（List 变量声明,规则流不经过）
+const unknownNew = stats.unknown.filter((u) => !unknownBase.includes(u));
+if (unknownNew.length) console.error(`[extract-npcdrops] ⚠ unknown 新形态 ${unknownNew.length} 条（超出基线,人工核对是否静默漏条）:`, unknownNew.slice(0, 8));
 
-writeFileSync('src/data/vanilla-npcdrops.json', JSON.stringify({ entries, slimeBody }));
-writeFileSync('src/data/vanilla-npcvalue.json', JSON.stringify(values));
+// ================= ★BJ261 era guard：干跑对拍 / 沙箱 / 逃生门（头注见上） =================
+const FRESH_DROPS = JSON.stringify({ entries, slimeBody });
+const FRESH_VALUE = JSON.stringify(values);
+/** 现库 vs 重产双向动态 diff。live-only=「现库有而重产无」洗库预警面（vanilla-atlas 追加
+ *  时代同族）；fresh-only=「重产有而现库无」现库退化缺键型面（itemrare 缺键型同族——
+ *  ★G-1/S3 处方：只算 live-only 的对拍闸对源侧删除恒绿,双向才算「重产盖住现库」）。 */
+function washOf(dropsRaw, valueRaw) {
+  const wash = { entriesLive: [], entriesFresh: [], slimeLive: [], slimeFresh: [], valueMissing: [], valueDrift: [], valueFresh: [] };
+  let liveD = null, liveV = null;
+  try { liveD = JSON.parse(dropsRaw); } catch { /* 坏损:不拦（让写盘流程自行报错） */ }
+  try { liveV = JSON.parse(valueRaw); } catch { /* 坏损:不拦 */ }
+  if (liveD) {
+    const sig = (e) => JSON.stringify(e);
+    const cnt = (arr) => { const m = new Map(); for (const e of arr) { const s = sig(e); m.set(s, (m.get(s) ?? 0) + 1); } return m; };
+    const fresh = cnt(entries);
+    const live = cnt(liveD.entries ?? []);
+    for (const [s, n] of live) { if (n > (fresh.get(s) ?? 0)) wash.entriesLive.push(JSON.parse(s)); }
+    for (const [s, n] of fresh) { if (n > (live.get(s) ?? 0)) wash.entriesFresh.push(JSON.parse(s)); }
+    const liveSlime = liveD.slimeBody ?? {};
+    for (const [k, v] of Object.entries(liveSlime)) {
+      if (JSON.stringify(slimeBody[k] ?? null) !== JSON.stringify(v)) wash.slimeLive.push(`${k}:${JSON.stringify(v)}→${JSON.stringify(slimeBody[k] ?? '缺')}`);
+    }
+    for (const k of Object.keys(slimeBody)) {
+      if (liveSlime[k] === undefined) wash.slimeFresh.push(`${k}:${JSON.stringify(slimeBody[k])}`);
+    }
+  }
+  if (liveV) {
+    for (const [k, v] of Object.entries(liveV)) {
+      if (values[k] === undefined) wash.valueMissing.push(`${k}:${v}`);
+      else if (values[k] !== v) wash.valueDrift.push(`${k}:${v}→${values[k]}`);
+    }
+    for (const [k, v] of Object.entries(values)) {
+      if (liveV[k] === undefined) wash.valueFresh.push(`${k}:${v}`);
+    }
+  }
+  return wash;
+}
+const washEmpty = (w) => w.entriesLive.length === 0 && w.entriesFresh.length === 0 && w.slimeLive.length === 0
+  && w.slimeFresh.length === 0 && w.valueMissing.length === 0 && w.valueDrift.length === 0 && w.valueFresh.length === 0;
+function washReport(w) {
+  console.error('  物证：');
+  if (w.entriesLive.length) console.error(`    [live-only] 现库独有条目（重产缺=提取器退化/洗库面）${w.entriesLive.length} 条: ${w.entriesLive.slice(0, 3).map((e) => JSON.stringify(e)).join(' | ')}`);
+  if (w.entriesFresh.length) console.error(`    [fresh-only] 重产独有条目（现库缺=源侧新增/现库退化）${w.entriesFresh.length} 条: ${w.entriesFresh.slice(0, 3).map((e) => JSON.stringify(e)).join(' | ')}`);
+  if (w.slimeLive.length) console.error(`    [live-only] slimeBody 现库独有: ${w.slimeLive.slice(0, 6).join(', ')}`);
+  if (w.slimeFresh.length) console.error(`    [fresh-only] slimeBody 重产独有: ${w.slimeFresh.slice(0, 6).join(', ')}`);
+  if (w.valueMissing.length) console.error(`    [live-only] value 现库独有键 ${w.valueMissing.length}: ${w.valueMissing.slice(0, 6).join(', ')}`);
+  if (w.valueDrift.length) console.error(`    [drift] value 值漂移 ${w.valueDrift.length}: ${w.valueDrift.slice(0, 6).join(', ')}`);
+  if (w.valueFresh.length) console.error(`    [fresh-only] value 重产独有键 ${w.valueFresh.length}: ${w.valueFresh.slice(0, 6).join(', ')}`);
+}
+const dropsRaw = existsSync(LIVE_DROPS_JSON) ? readFileSync(LIVE_DROPS_JSON, 'utf8') : null;
+const valueRaw = existsSync(LIVE_VALUE_JSON) ? readFileSync(LIVE_VALUE_JSON, 'utf8') : null;
+const wash = dropsRaw === null && valueRaw === null ? null : washOf(dropsRaw ?? '{}', valueRaw ?? '{}');
+if (OUT_DROPS_JSON) {
+  if (WRITE_REAL) {
+    if (wash && !washEmpty(wash) && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+      console.error('[extract-npcdrops] 拒绝 --write-real：重产 diff 非纯增量（双向差异非空）——先逐值定谳（反编译为准）再回写。');
+      washReport(wash);
+      console.error('  确需原地强推：--force-full --overwrite-append-era 双旗（单旗仍拒）；事后必须全绿消费面测试（tests/npc-drops.test.ts 等）。');
+      process.exit(1);
+    }
+    if (wash && !washEmpty(wash)) console.error('[extract-npcdrops] 双旗强推：静默覆盖预警已确认（责任在操作者定谳）。');
+  }
+  mkdirSync(OUT_DROPS_JSON.slice(0, OUT_DROPS_JSON.lastIndexOf('/')), { recursive: true });
+  writeFileSync(OUT_DROPS_JSON, FRESH_DROPS);
+  writeFileSync(OUT_VALUE_JSON, FRESH_VALUE);
+  console.error(`[extract-npcdrops] 已写 ${OUT_DROPS_JSON} + ${OUT_VALUE_JSON}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}）`);
+} else {
+  // 缺省干跑对拍（零写盘）
+  if (wash === null) {
+    console.error('[extract-npcdrops] 干跑（零写盘）：现库缺 vanilla-npcdrops.json/vanilla-npcvalue.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+  } else if (!washEmpty(wash)) {
+    console.error('[extract-npcdrops] 干跑对拍：双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
+    washReport(wash);
+    console.error('  处置：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 SW_OUT=<dir>。');
+    process.exit(1);
+  } else {
+    console.error('[extract-npcdrops] 干跑对拍：重产盖住现库（双向零差,零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+  }
+}
 
 const npcCount = new Set(entries.filter(e => !e.global).flatMap(e => e.npcs)).size;
 console.log('entries:', entries.length, '| global:', entries.filter(e => e.global).length,

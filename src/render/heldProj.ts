@@ -36,7 +36,7 @@
  * 登记,同帧 drawPlayer 消费)+ 持物 swing 覆写。不改实体行为、不碰 Game.ts。
  */
 import { ITEM_DEFS } from '../data/items';
-import { itemCombat, viIdFromKey } from '../data/vanillaItemCombat';
+import { itemCombat } from '../data/vanillaItemCombat';
 
 /** 账本条目:投射物中心(世界坐标)+ 原版 alpha 语义(255=隐形,0=不透明) */
 export interface HeldProjSample {
@@ -170,7 +170,7 @@ export function applyHeldProjPointing<P extends HeldProjPlayer>(
   if (!held) return swing;
   const def = ITEM_DEFS[held.id];
   if (!def) return swing;
-  const vid = def.vid ?? viIdFromKey(def.key);
+  const vid = def.vid ?? -1;
   if (vid === undefined || vid < 0) return swing;
   const shoot = itemCombat(vid)?.shoot ?? 0;
   if (!HELD_PROJ_TYPES.has(shoot)) return swing;

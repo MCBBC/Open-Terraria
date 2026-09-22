@@ -23,17 +23,18 @@ import { TileStore } from '../src/world/TileStore';
 import { ITEM_DEFS } from '../src/data/items';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
-import { viIdFromKey } from '../src/data/vanillaItemCombat';
+
 import type { ItemDef } from '../src/data/items';
 
 const TILE = 16;
 const PLAT = TILE_BY_KEY['platform']!;
 const DIRT = TILE_BY_KEY['dirt']!;
 const STONE = TILE_BY_KEY['stone']!;
-const PLAT_ITEM = ITEM_DEFS.find((d) => d.key === 'vi_94_wood_platform') as ItemDef;
-const DIRT_ITEM = ITEM_DEFS.find((d) => d.tile === 'dirt') as ItemDef;
+const PLAT_ITEM = ITEM_DEFS.find((d) => d && d.key === 'vi_94_wood_platform') as ItemDef;   // ★方案 A:守洞
+const DIRT_ITEM = ITEM_DEFS.find((d) => d && d.tile === 'dirt') as ItemDef;   // ★方案 A:守洞
 const PICK_ITEM = ITEM_DEFS.find((d) => {
-  const v = viIdFromKey(d.key);
+  if (!d) return false;   // ★方案 A:守洞
+  const v = d.vid ?? -1;   // ★方案 A:vid 直读(BJ265)
   const f = v != null && v > 0 ? itemFuncOfVid(v) : null;
   return !!f?.pick && f.pick > 0;
 }) as ItemDef;

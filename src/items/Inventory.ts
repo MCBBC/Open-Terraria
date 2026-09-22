@@ -13,7 +13,7 @@ import { canMergeStack, onlyNeedOneInInventory } from '../ui/SlotActions';   // 
 import { VI_KEY } from '../data/itemKeys';
 import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
-import { itemCombat, viIdFromKey } from '../data/vanillaItemCombat';
+import { itemCombat } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 
 export const INV_COLS = 10;
@@ -103,7 +103,7 @@ const NO_AUTO_FILL_AMMO = new Set([353, 849, 169, 75, 23, 408, 370, 1246]);
 export function canFillEmptyAmmoSlot(id: number): boolean {
   const d = ITEM_DEFS[id];
   if (!d) return false;
-  const vid = d.vid ?? viIdFromKey(d.key);
+  const vid = d.vid ?? -1;
   if (vid < 0) return false;
   if (NO_AUTO_FILL_AMMO.has(vid)) return false;
   const f = itemFuncOfVid(vid);
@@ -115,7 +115,7 @@ export function canFillEmptyAmmoSlot(id: number): boolean {
 export function ammoSlotAccepts(id: number): boolean {
   const d = ITEM_DEFS[id];
   if (!d) return false;
-  const vid = d.vid ?? viIdFromKey(d.key);
+  const vid = d.vid ?? -1;
   if (vid < 0) return d.ammoId !== undefined && d.ammoId > 0; // legacy 注册表自带 ammoId
   if (vid === 353) return true;
   const f = itemFuncOfVid(vid);
@@ -581,7 +581,7 @@ export class Inventory {
   private itemUseStyleOf(id: number): number {
     const def = ITEM_DEFS[id];
     if (!def) return 0;
-    const vid = def.vid ?? viIdFromKey(def.key);
+    const vid = def.vid ?? -1;
     if (!(vid > 0)) return 0;
     return itemFuncOfVid(vid)?.useStyle ?? 0;
   }

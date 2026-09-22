@@ -122,11 +122,9 @@ export function stationSatisfierTiles(tile: number): ReadonlySet<number> {
   return out;
 }
 
-/** vi_<id> key → 原版 item id 反解 */
-export function vanillaIdOfItemKey(key: string): number {
-  const m = key.match(/^vi_(\d+)_/);
-  return m ? Number(m[1]) : -1;
-}
+/** vi_<id> key → 原版 item id 反解。〔方案 A 阶段 5（BJ266）退役〕items.ts reorder 块 ⑥
+ *  vid 回填后 internal≡vid≡键解析恒等,唯一调用位（UI throwHeldToWorld 露西门）已改
+ *  `ITEM_DEFS[id].vid` 直读——新消费面禁再引入键前缀反解（见 items.ts 头注铁律）。 */
 
 // ================= 附近箱子合成联动（CraftFromNearbyChests，1.4.5.6 默认开） =================
 // Player.Settings.CraftFromNearbyChests（Player.cs:359 默认 true）→ Recipe.CollectItemsFromChests
@@ -416,7 +414,9 @@ export function envOk(r: VanillaRecipe, ctx: VanillaCraftCtx): boolean {
 /** 成品 → 本仓库 item key（vi_<id>_* 反查） */
 const VID_TO_KEY = (() => {
   const m = new Map<number, string>();
+  // ★方案 A（BJ264）：ITEM_DEFS 重排后稀疏——for..of 对洞产出 undefined，须 !def 跳过
   for (const def of ITEM_DEFS) {
+    if (!def) continue;
     const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
     if (vid >= 0 && !m.has(vid)) m.set(vid, def.key);
   }
@@ -641,8 +641,11 @@ export function invIndexOfVanilla(vid: number): number {
   if (hit !== undefined) return hit;
   const key = VID_TO_KEY.get(vid);
   // ITEM_DEFS 下标即内部 id——线性扫一次后缓存
+  // ★方案 A（BJ264）：重排后 ITEM_DEFS 稀疏（洞=undefined）——无 !d 守卫时冷缓存
+  //   首格（stable 0=空洞）即 TypeError
   for (let i = 0; i < ITEM_DEFS.length; i++) {
     const d = ITEM_DEFS[i];
+    if (!d) continue;
     const v = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
     if (v === vid) { hit = i; break; }
   }

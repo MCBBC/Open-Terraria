@@ -11,7 +11,7 @@ import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
 import { ITEM_DEFS } from '../src/data/items';
-import { viIdFromKey } from '../src/data/vanillaItemCombat';
+
 import { Inventory } from '../src/items/Inventory';
 import { Player } from '../src/entities/Player';
 import type { GameHooks } from '../src/entities/types';
@@ -707,7 +707,7 @@ describe('鼠马车挖掘（Digging Molecart）', () => {
   }
 
   /** 轨道物品 2340 的仓库 id（vi_2340_* 反查） */
-  const TRACK_ITEM_REPO_ID = ITEM_DEFS.findIndex((d) => viIdFromKey(d.key) === TRACK_ITEM_VID);
+  const TRACK_ITEM_REPO_ID = ITEM_DEFS.findIndex((d) => d && d.vid === TRACK_ITEM_VID);   // ★方案 A:守洞+vid 直读(BJ265)
 
   it('在轨按方向键：挖穿前方 5 格 + 消耗 1 轨道 + 延轨 + 限速 ±1（Helper.cs:41-54）', () => {
     expect(TRACK_ITEM_REPO_ID).toBeGreaterThanOrEqual(0);   // 2340 已在 vi_ 空间

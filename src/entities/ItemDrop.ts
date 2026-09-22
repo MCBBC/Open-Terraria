@@ -11,7 +11,7 @@ import { getDropScanCtx, grabRangeBonusFor } from './dropScanCtx';
 import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
   decraftOutcome, decraftRand3, isItemDecraftableAndUnlocked,
-  internalIdOfVanilla, vanillaIdOfItem,
+  internalIdOfVanilla,
   makeNpcOfItem, npcShimmerTransformTo,
 } from '../stats/Shimmer';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -126,7 +126,7 @@ export class ItemDrop extends Entity {
     // 原版 Item.color 静态表（Item.cs SetDefaults，凝胶 23 染蓝等）——SetDefaults
     // 语义随实例走：掉落物一落地就带着色，渲染端 tintedSprite 消费（此前无人赋值
     // = 死代码，凝胶掉地上也是灰的）。存档/重建走构造自愈，无需序列化。
-    const vid = vanillaIdOfItem(itemId);
+    const vid = (ITEM_DEFS[itemId]?.vid ?? -1);
     const ic = vid > 0 ? VANILLA_ITEM_COLOR[vid] : undefined;
     if (ic && ic[3] > 0) this.color = [...ic];
     // ★SW-FX49 Item.alpha 静态表注入（GetAlpha 默认支 pass1 维,与 color 域无
@@ -138,7 +138,7 @@ export class ItemDrop extends Entity {
   fixedUpdate(dt: number, game: GameHooks) {
     this.age++;
     this.grabbed = false;   // beingGrabbed 每 tick 复位（WorldItem.cs:437,拉取路径再置位）
-    const vid = vanillaIdOfItem(this.itemId);   // 全函数消费（岩浆/微光/吸附等段）
+    const vid = (ITEM_DEFS[this.itemId]?.vid ?? -1);   // 全函数消费（岩浆/微光/吸附等段）
 
     // R14-A3：专家模式怪捡钱币（WorldItem.GetPickedUpByMonsters_Money :1127-1219,
     // Update 入口 :412-416 `if (Main.expertMode && IsACoin)`）——命中合格怪吸收
@@ -146,7 +146,7 @@ export class ItemDrop extends Entity {
     // （NPC.cs:80497 num += extraValue）;CantTakeLunchMoney 39 型豁免(NPCID.cs:4468)。
     // 此前整链缺失=专家"怪偷钱→杀怪夺回"经济循环缺位
     if ((this.age & 3) === 0) {
-      const mVid = vanillaIdOfItem(this.itemId);
+      const mVid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
       if (mVid >= 71 && mVid <= 74) {
         const w = game.world as unknown as { isExpert?: boolean; flags?: Record<string, boolean> };
         if (w?.isExpert) {
@@ -184,7 +184,7 @@ export class ItemDrop extends Entity {
     // TransformCopperSlime（侍从史莱姆 684 + unlockedSlimeCopperSpawn，NPC.cs:19099-19121）
     // 并消耗 1 个（:1186-1190）
     if ((this.age & 3) === 0) {
-      const cVid = vanillaIdOfItem(this.itemId);
+      const cVid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
       if ((cVid === 89 || cVid === 3507)) {
         const flags = (game.world as unknown as { flags: Record<string, boolean> }).flags ?? {};
         if (!flags['unlockedSlimeCopperSpawn']) {
@@ -225,7 +225,7 @@ export class ItemDrop extends Entity {
       //   等价；快照缺席（单测/探针直调本 fixedUpdate 不经 Entities.update）回退
       //   player.getItemGrabRangeBonus(vid) 直读。
       const scan = getDropScanCtx(player);
-      const vidThis = vanillaIdOfItem(this.itemId);
+      const vidThis = (ITEM_DEFS[this.itemId]?.vid ?? -1);
       let GRAB_RANGE: number;
       let canAccept: boolean;
       if (scan) {
@@ -285,7 +285,7 @@ export class ItemDrop extends Entity {
         // 成就：拾取通知（AchievementsHelper.NotifyItemPickup——仅入包部分；
         //  WorldItem 拾取路径，合成/初始装备不经此）
         if (left < before) {
-          const vid = vanillaIdOfItem(this.itemId);
+          const vid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
           if (vid > 0) game.achievements?.notifyItemPickup(vid);
         }
         // ---- 虚空袋溢流兜底（孤儿武器 B3 波 工单1；Player.GetItem_VoidVault
@@ -297,7 +297,7 @@ export class ItemDrop extends Entity {
           // ★F2 手头件词缀随行（Player.cs:39845 inv[i]=returnItem 含 prefix / :39749 同词缀合并门）
           const dep = player.depositIntoVoidVault(this.itemId, left, this.prefix);
           if (dep < preVoid) {
-            const vidV = vanillaIdOfItem(this.itemId);
+            const vidV = (ITEM_DEFS[this.itemId]?.vid ?? -1);
             if (vidV > 0) game.achievements?.notifyItemPickup(vidV);   // :39768 NotifyItemPickup
             game.notifyInventoryChanged();
             game.recLog?.('pickup', { key: ITEM_DEFS[this.itemId]?.key ?? this.itemId, vid: vidV, n: preVoid - dep, void: true });
@@ -312,7 +312,7 @@ export class ItemDrop extends Entity {
           // （清扫无法区分"被拾取"与"TTL 超时"，曾把超时误报成拾取反杀真身）
           if (this.netPuppet && this.netId) game.puppetDropTaken?.(this);
           this.dead = true;
-          game.recLog?.('pickup', { key: ITEM_DEFS[this.itemId]?.key ?? this.itemId, n: before, vid: vanillaIdOfItem(this.itemId) });   // 行为录制：整堆拾取
+          game.recLog?.('pickup', { key: ITEM_DEFS[this.itemId]?.key ?? this.itemId, n: before, vid: (ITEM_DEFS[this.itemId]?.vid ?? -1) });   // 行为录制：整堆拾取
           game.notifyInventoryChanged();
           // 钱币拾取用专属音效，其余走通用拾取（vi_71-74 单轨）
           // 音量略低（0.75）：拾取与挖掘声同时触发时两者都可闻，不被 Grab 盖住
@@ -482,7 +482,7 @@ export class ItemDrop extends Entity {
     // 消失——仅四类特例+出界+堆叠归零,无 age 上限;曾自创 600s 全体消失=掉落配额
     // （Item.MechSpawn）饱和后的自愈节奏与原版不符（2026-08-27 用户定案完全对齐）。
     {
-      const dvid = vanillaIdOfItem(this.itemId);
+      const dvid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
       const wd = (game.world ?? {}) as unknown as {
         w?: number; h?: number; spawnX?: number; spawnY?: number;
         clock?: { isDay?: boolean }; seedFlags?: { remix?: boolean };
@@ -545,7 +545,7 @@ export class ItemDrop extends Entity {
     const tx = Math.floor(this.cx / TILE);
     // :810-812 采样 (Center.X/16, position.Y/16 - 1)——物品顶上一格
     const ty = Math.floor(this.y / TILE) - 1;
-    const vid = vanillaIdOfItem(this.itemId);
+    const vid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
     const inShimmer = st.inBounds(tx, ty)
       && st.liquid[st.idx(tx, ty)] > 0 && st.liquidType[st.idx(tx, ty)] === 4;
     const flags = (game.world as unknown as { flags: Record<string, boolean> }).flags ?? {};
@@ -579,7 +579,7 @@ export class ItemDrop extends Entity {
    *  (:1838) → makeNPC 放生(:1855) → decraft(:1878)。**decraft 必须排在钱币/转化
    *  之后**：钱币 71-74 与火炬 8 等都有 IsCrafted 配方，放前面会抢走转化/coinLuck 分支 */
   private getShimmered(game: GameHooks): void {
-    const vid = vanillaIdOfItem(this.itemId);
+    const vid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
     // 微光转化完成音 = SoundID.Item176（WorldItem.cs:1689-1696 ShimmerEffect——
     // GetShimmered 全部分支【共尾】单点调用 :1875,钱币支不 return 也走）。
     // 音量 ×0.9 = LegacySoundPlayer.cs:520-521（case 2 num==176 支）。
@@ -888,7 +888,7 @@ export class ItemDrop extends Entity {
    *  差异：原版 StrikeNPC 后 NPC 当 tick 仍 active（死亡在下一 Update 收口），余量
    *  随机池可能命中垂死向导；本仓 TownNPC.hurt 即时置 dead，池自然排除，净效果一致 */
   private checkLavaDeath(game: GameHooks): void {
-    const vid = vanillaIdOfItem(this.itemId);
+    const vid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
     if (vid === 267) {
       let num = this.stack;
       this.dead = true;                       // TurnToAir

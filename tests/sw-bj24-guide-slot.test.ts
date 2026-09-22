@@ -78,10 +78,11 @@ describe('SW-BJ24 ① materialVids ≡ 原版 UpdateWhichItemsAreMaterials 双�
 // ---------------------------------------------------------------------------
 // ② 双域分池：vid 池纯 vid / iid 池纯 iid（跨域碰撞回归钉）
 // ---------------------------------------------------------------------------
-describe('SW-BJ24 ② 双域分池（钉鞋 975→iid 24 × 木剑 vid 24 碰撞面）', () => {
-  it('夹具自证：钉鞋 vid 975 的内部 iid 恰 = 24（碰撞几何,items 表移位即爆）', () => {
-    expect(ITEM_BY_KEY['vi_975_shoe_spikes']).toBe(24);
-    expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[975] as string]).toBe(24);
+describe('SW-BJ24 ② 双域分池（★方案 A 恒等域重钉 BJ264：跨域数值碰撞面已随域统一消亡——'
+  + '旧钉鞋 iid 24 × 木剑 vid 24 撞号是内部注册序的人为产物;两池分域语义不变,同一物品改用新 iid 表达）', () => {
+  it('夹具自证：钉鞋 vid 975 的内部 iid = 975（恒等域;iid 域≡vid 域,旧 24 号位退役）', () => {
+    expect(ITEM_BY_KEY['vi_975_shoe_spikes']).toBe(975);
+    expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[975] as string]).toBe(975);
   });
 
   it('vid 域池不吞 iid 域值：has(24)=false（木剑非材料）∧ has(975)=true（钉鞋是原料）', () => {
@@ -89,8 +90,9 @@ describe('SW-BJ24 ② 双域分池（钉鞋 975→iid 24 × 木剑 vid 24 碰撞
     expect(materialVids().has(975)).toBe(true);
   });
 
-  it('iid 域池合法条目：has(24)=true（钉鞋 tooltip Material 行数据面）', () => {
-    expect(materialIids().has(24)).toBe(true);
+  it('iid 域池合法条目：has(975)=true（钉鞋 tooltip Material 行数据面;恒等域下 iid≡vid）', () => {
+    expect(materialIids().has(975)).toBe(true);
+    expect(materialIids().has(24)).toBe(false);   // 木剑 iid 24=vid 24,仍非材料（域不分池语义不变）
   });
 
   it('iid 域池 ≡ vid 域池经 VANILLA_ITEM_KEY_BY_ID→ITEM_BY_KEY 桥的全量映射', () => {
@@ -113,12 +115,12 @@ describe('SW-BJ24 ③ tooltip Material 行双域正确', () => {
   const lineOf = (iid: number, tag: string): boolean =>
     buildTooltipBody(ITEM_DEFS[iid], { id: iid, stack: 1 }, null).lines.some((l) => l.tag === tag);
 
-  it('钉鞋（iid 24,vid 975 是原料）→ Material 行在', () => {
-    expect(lineOf(24, 'material')).toBe(true);
+  it('钉鞋（★方案 A 恒等域:iid 975≡vid 975,是原料）→ Material 行在', () => {
+    expect(lineOf(975, 'material')).toBe(true);
   });
 
-  it('小治疗药水（iid 3,vid 188 非材料）→ 无 Material 行（旧并集池误挂面）', () => {
-    expect(lineOf(3, 'material')).toBe(false);
+  it('小治疗药水（vid 188 非材料;恒等域 iid=188——旧序 iid 3 表达已随重排退役）→ 无 Material 行（旧并集池误挂面）', () => {
+    expect(lineOf(188, 'material')).toBe(false);
   });
 });
 
@@ -141,9 +143,9 @@ describe('SW-BJ24 ④ 结构锁（源文本锚）', () => {
     expect(code.includes('vidOfItem(vid) >= 0')).toBe(false);
   });
 
-  it('Shift 特化支（SlotActions itemMaterial）用 vid 域池（vanillaIdOfItemKey 反解）', () => {
+  it('Shift 特化支（SlotActions itemMaterial）用 vid 域池（ITEM_DEFS[].vid 直读——BJ266 键前缀反解退役重锚）', () => {
     expect(UI_SRC).toContain('materialVids().has(curVid)');
-    expect(UI_SRC).toContain("vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '')");
+    expect(UI_SRC).toContain('const curVid = cur ? (ITEM_DEFS[cur.id]?.vid ?? -1) : -1');   // ★方案 A 重锚(BJ265):vid 直读
   });
 
   it('tooltip Material 行消费 materialIids（iid 域）——非 vid 池混用', () => {

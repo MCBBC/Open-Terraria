@@ -95,8 +95,8 @@ describe('数据面：肥料二件（Item.cs case 5438/:42954 case 5518/:43433�
     expect(cA.noMelee).toBe(true);
     expect(cB.useTime).toBe(15);
     for (const vid of [5438, 5518]) {
-      expect(combatWeapon({ key: `vi_${vid}_x` })).toBeNull();
-      expect(thrownCombat({ key: `vi_${vid}_x` })).toBeNull();   // 显式退出,不再射成 ai2 抛物 Arrow
+      expect(combatWeapon({ key: `vi_${vid}_x`, vid })).toBeNull();
+      expect(thrownCombat({ key: `vi_${vid}_x`, vid })).toBeNull();   // 显式退出,不再射成 ai2 抛物 Arrow
     }
   });
 
@@ -264,7 +264,7 @@ describe('数据面：甲虫炸弹 4423（EXTRACT_PATCH noMelee → grenade 族�
   });
 
   it('combatWeapon 归 grenade 族（aiStyle16），射速 5', () => {
-    const cw = combatWeapon({ key: 'vi_4423_scarab_bomb' });
+    const cw = combatWeapon({ key: 'vi_4423_scarab_bomb', vid: 4423 });
     expect(cw?.kind).toBe('grenade');
     if (cw?.kind === 'grenade') {
       expect(cw.shoot).toBe(773);

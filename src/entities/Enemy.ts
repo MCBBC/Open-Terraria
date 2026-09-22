@@ -114,18 +114,18 @@ import {
   alienLarvaMaturationStep,
 } from './fighterFamilies';
 import { canHit, canHitLine } from '../physics/LineOfSight';
-import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
 import {
   resolveDrops, rollCoins, rollHeartsAndStars, rollTypeHearts, rollBossPotionsAndHearts,
   dropVelocity, npcValueOf, type NpcDropCtx,
 } from '../drops/NpcDrops';
-import { isNpcShimmerImmune, npcShimmerTransformTo, npcShimmerTransformToItem, vanillaIdOfItem } from '../stats/Shimmer';
+import { isNpcShimmerImmune, npcShimmerTransformTo, npcShimmerTransformToItem } from '../stats/Shimmer';
 import {
   scaleStats, getAttackDamageForProjectiles, type ScalingStats,
   GDL, remap, mainDifficulty, mainExpertMode, getAttackDamageCappedAtMaster,
   getKnockbackMultiplierScaledByDifficulty,
-  scaleStatsWorld, applySeedAdjustments, applyRemixSetDefaults, seedTailBox, type SeedAdjustStats, f32, damageVar,
+  scaleStatsWorld, applySeedAdjustments, applyRemixSetDefaults, seedTailBox, type SeedAdjustStats, f32, damageVar, netIdSpawnScale,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
@@ -14450,6 +14450,95 @@ export class Enemy extends Entity {
           add?.add(b, 'enemies');
         }
       }
+      // ★BJ263 站1 飞尸 121 死 → 小腐化史莱姆（1457 :86418-86431 HitEffect 死亡支：type==121 →
+      // NewNPC(GetSpawnSource_NPCHurt(),(int)(position.X+width/2),(int)(position.Y+height),81)
+      // + SetDefaults(-2)）。★netID -2 定谳（FromNetId(NPCID.cs:12478-12484)→NetIdMap[1]=81
+      // =腐化史莱姆基底×scale0.9,非蓝史莱姆系）：dmg45/def20/life90/kbResist×1.2/value100f
+      // （覆写后不再 ScaleStats——与母史莱姆 -5 判例同相,raw 值直写）。落点=父底【底中】锚
+      // （:86419 NewNPC→:81594 Bottom）；速度=父 vx/vy 原值继承（:86421-86422）。
+      // Gore 94@scale 走 gore 表（carveOut）;联机傀儡跳过（分裂权威在房主,同 -5 门）。
+      // ★登记（-5 同族潜伏差）：kbResist ×1.2 本站已接（base 81 缺省 1f×1.2）,-5 旧站
+      // ×0.95 未接=既有潜伏差,本批不动旧站留台账。
+      if (this.vanillaId === 121 && !this.netPuppet) {
+        const s = Enemy.fromVanilla(81, this.cx, this.y + this.h);
+        if (s) {
+          // 盒链=VanillaSpawner 批次B 同款 netIdSpawnScale（override 0.9【替换】基 scale 1.1
+          // 非——SetDefaults sizeScaleOverride 尾 :17824-17839 重定尺寸底中不动）：
+          // 盒=(int)(40×0.9f)×(int)(30×0.9f)（f32 截断=35×26）、渲染 vanillaScale=
+          // 0.9/(v.scale??1)（v.scale×vanillaScale=npc.scale,批次B 口径）。
+          const v81 = s.vanilla!;
+          const box = netIdSpawnScale(81, 0.9, v81.width, v81.height, scaleStatsWorld());
+          s.w = s.def.width = box.width;
+          s.h = s.def.height = box.height;
+          s.vanillaScale = box.scale / (v81.scale ?? 1);
+          s.x = this.cx - s.w / 2;              // 盒定后 Bottom 锚重定（:86419+:81594）
+          s.y = this.y + this.h - s.h;
+          s.vanillaNetId = -2;
+          s.hp = s.maxHp = 90;
+          s.def.damage = 45;
+          s.def.defense = 20;
+          s.def.knockbackResist = 1.2;
+          s.vx = this.vx;
+          s.vy = this.vy;
+          addEnemy(game, s);
+        }
+      }
+      // ★BJ263 站2 腐化史莱姆 81（scale≥1）死 → 2-3 只小腐化史莱姆（1457 :86434-86452：同支
+      // else if (scale >= 1f) → Next(2)+2 掷数量;NewNPC(…,1)+SetDefaults(-1)——★netID -1
+      // 定谳（FromNetId→NetIdMap[0]=81）=腐化史莱姆基底×scale0.6（NewNPC 的 type 1 被
+      // SetDefaults(-1) 重写为 81,dmg45/def10/life90/value100f）。速度=父 vx×3f+
+      // Next(−10,10)×0.1+k×direction×0.3 / 父 vy−Next(0,10)×0.1−k（:86443-86446）;
+      // ai[1]=k=分裂序号【原版本相】——ai1==0 的首只由 slimeAI 首帧掷体内物
+      // （:60951 门 value>0f=-1 变体 100f 过门）,ai1>0 的后两只走携物梯 1/2 档
+      // （:61290 消费）——勿"修"成 -1（王驴 minis 的 -1 是 :86676 专属,两支语义不同）。
+      // 门=npc.scale 终态≥1f：本仓镜像=(v.scale??1)×vanillaScale（批次B 渲染口径逆读;
+      // 天然 81=1.1×1=1.1 过门,-2 小骑乘=0.9/-1 幼体=0.6 恒拒——分裂产物不再裂）。
+      // 联机傀儡跳过。
+      if (this.vanillaId === 81
+        && (this.vanilla?.scale ?? 1) * this.vanillaScale >= 1   // 原版门=npc.scale≥1f（终态）
+        && !this.netPuppet) {
+        const n81 = 2 + Math.floor(Math.random() * 2);
+        for (let k = 0; k < n81; k++) {
+          const c = Enemy.fromVanilla(81, this.cx, this.y + this.h);
+          if (!c) continue;
+          const v81c = c.vanilla!;
+          const box = netIdSpawnScale(81, 0.6, v81c.width, v81c.height, scaleStatsWorld());
+          c.w = c.def.width = box.width;        // (int)(40×0.6f)×(int)(30×0.6f)=24×18
+          c.h = c.def.height = box.height;
+          c.vanillaScale = box.scale / (v81c.scale ?? 1);
+          c.x = this.cx - c.w / 2;              // 盒定后 Bottom 锚重定（:86434+:81594）
+          c.y = this.y + this.h - c.h;
+          c.vanillaNetId = -1;
+          c.hp = c.maxHp = 90;
+          c.def.damage = 45;
+          c.def.defense = 10;
+          c.def.knockbackResist = 1.2;
+          c.vx = this.vx * 3 + (Math.floor(Math.random() * 21) - 10) * 0.1 + k * this.facing * 0.3;
+          c.vy = this.vy - Math.floor(Math.random() * 10) * 0.1 - k;
+          c.ai1 = k;                            // :86449 ai[1]=num419
+          addEnemy(game, c);
+        }
+      }
+      // ★BJ263 站3 蛆虫僵尸 632 死 → 2-3× 蛆虫 606（1457 :87982-87993 HitEffect 死亡支 gore 段
+      // 内：Next(2)+2 掷数量;NewNPC(GetSpawnSource_NPCHurt(),(int)(position.X+width/2),
+      // (int)position.Y+Next(height/2)+10,606)——★落点 Y=父顶+Next(h/2)+10 逐只独掷,
+      // Bottom 锚落在父体下半带内（与 Slimer 的父底锚不同源,勿并轨）;速度=
+      // (Next(−10,10)×0.2, −3.5−Next(5,10)×0.3−k×0.5)（:87987/:87991 vector28 逐只重掷）;
+      // netUpdate=true=原版联机同步位（房主权威已由 netPuppet 门承载）。gore 1214-1216
+      // +受击面 gore 1217(:87928 Next(5)==0)走 gore 表。
+      if (this.vanillaId === 632 && !this.netPuppet) {
+        const n632 = 2 + Math.floor(Math.random() * 2);
+        for (let k = 0; k < n632; k++) {
+          const spawnBottomY = this.y + Math.floor(Math.random() * (this.h / 2)) + 10;
+          const m = Enemy.fromVanilla(606, this.cx, spawnBottomY);
+          if (!m) continue;
+          m.x = this.cx - m.w / 2;
+          m.y = spawnBottomY - m.h;             // Bottom 锚（:87989+:81594）
+          m.vx = (Math.floor(Math.random() * 21) - 10) * 0.2;
+          m.vy = -3.5 - (Math.floor(Math.random() * 5) + 5) * 0.3 - k * 0.5;
+          addEnemy(game, m);
+        }
+      }
       // ---- 四柱小怪死亡分裂链（HitEffect 死亡段 life≤0 支，权威端）----
       // 426 外星蜂后死 → 3× 外星幼虫 428（NPC.cs:83981-83996）：场上 428+427+426×3
       //  <20 才分裂（★CountNPCS 含垂死本体——原版 active=false 在 NPCLoot 之后才置，
@@ -14646,11 +14735,11 @@ export class Enemy extends Entity {
             // 已过时,banks[3] 自 F3 批起有真实物格）
             try {
               for (const s of p.inv.slots) {
-                if (s && s.stack > 0 && vanillaIdOfItem(s.id) === 1786) return true;
+                if (s && s.stack > 0 && (ITEM_DEFS[s.id]?.vid ?? -1) === 1786) return true;
               }
               if (p.useVoidBag?.() && Array.isArray(p.banks?.[3])) {
                 for (const s of p.banks[3]) {
-                  if (s && s.stack > 0 && vanillaIdOfItem(s.id) === 1786) return true;
+                  if (s && s.stack > 0 && (ITEM_DEFS[s.id]?.vid ?? -1) === 1786) return true;
                 }
               }
               return false;

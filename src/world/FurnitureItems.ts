@@ -33,7 +33,7 @@
 
 import { TILE_BY_KEY } from '../data/tiles';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
-import { itemCombat, viIdFromKey } from '../data/vanillaItemCombat';
+import { itemCombat } from '../data/vanillaItemCombat';
 import { vanillaStatOfVid } from '../data/vanillaItemStats';
 import { equipKindOfVid } from '../data/vanillaEquip';
 import { ITEM_DEFS } from '../data/items';
@@ -324,10 +324,9 @@ export function dollTargetSlot(rec: FurnitureItemRecord, vid: number): number {
   return -1;
 }
 
-/** 槽内存量 id（内部 id）→ 原版 vid（vi_<id>_ 键反查；未收录 = -1） */
+/** 槽内存量 id（内部 id）→ 原版 vid（★方案 A：vid 直读,internal≡vid 恒等域;未收录 = -1） */
 function slotVid(id: number): number {
-  const k = ITEM_DEFS[id]?.key;
-  return k ? viIdFromKey(k) : -1;
+  return ITEM_DEFS[id]?.vid ?? -1;
 }
 
 /** ItemID.Sets.AccessoryIncompatibilityType（★1457 ItemID.cs:58，缺省 -1）——

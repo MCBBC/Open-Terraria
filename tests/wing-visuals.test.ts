@@ -721,10 +721,10 @@ describe('Player.wingDyeVid 染料槽派生', () => {
     const key = Object.keys((globalThis as { __swItems?: Record<string, number> }).__swItems ?? {});
     void key;
     const { ITEM_DEFS } = await import('../src/data/items');
-    const { viIdFromKey } = await import('../src/data/vanillaItemCombat');
+
     const find = (vid: number) => {
       for (const [id, d] of Object.entries(ITEM_DEFS)) {
-        if (d && viIdFromKey(d.key) === vid) return +id;
+        if (d && d.vid === vid) return +id;   // ★方案 A:vid 直读(BJ265)
       }
       return -1;
     };

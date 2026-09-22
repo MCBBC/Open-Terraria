@@ -1805,6 +1805,65 @@ export const HAS_OUTLINES_SHEETS: ReadonlySet<number> = new Set([
  *  火把判定 tile 级支;ItemID 级另表） */
 export const TORCHES_SHEETS: ReadonlySet<number> = new Set([4]);
 
+// ===================== TileID.Sets 家族第七收编批（★BJ263 2026-09-22） =====================
+// 红蓝 S2 第 7 批 8 面收编清偿（95/95 EXACT 程序化对拍 /tmp/s2-census.mjs + 1457 亲读
+// 逐值终值全等；1458 Terraria.ID/TileID.cs 同 8 行号同值零增量抽核全一致）。全部
+// sheet 域消费面（Game blockSwap/eliminateNaturalExtras/isHammerTarget、craftingGrid
+// craftingFilterForTile、Wiring致动+devices case 130、worldgen MushroomPass spreadGrass
+// ：85）：故仅 NOT_CLEARABLE 一表带 IDS 镜像（TileRunner idsByVanillaSheet 内部域
+// 六消费面既有副本收编改指;TILE_BY_KEY≡注册序已核无重键,两构式全等）;其余七表
+// 无内部域消费面不设镜像（§6k 惯例）。测试=tests/tile-domain-sentinel §6l。
+/** TileID.Sets.DoesntGetReplacedWithTileReplacement（TileID.cs:235 全 8 型）——
+ *  块交换目标黑名单（Player.cs:40257 DoesntGetReplaced[tile.type]→false;
+ *  Game BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS 收编改指,§6l） */
+export const DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS: ReadonlySet<number> = new Set([58, 225, 171, 127, 481, 482, 483, 423]);
+/** TileID.Sets.ReplaceTileBreakUp（TileID.cs:245 全 36 型）——ReplaceTile 单格原位
+ *  重写【前】清上邻表（苗/草/药草/小饰族,放块压苗即杀;WorldGen.cs:63157;另 165@frameY
+ *  {36,54,90} 直列特支不入表）。Game.eliminateNaturalExtras 消费,§6l */
+export const REPLACE_TILE_BREAK_UP_SHEETS: ReadonlySet<number> = new Set([
+  27, 20, 227, 24, 201, 110, 113, 61, 703, 74, 71, 3, 73, 186, 187, 185, 233,
+  530, 705, 236, 702, 238, 254, 484, 485, 84, 82, 83, 529, 549, 590, 595, 615, 624, 700, 637,
+]);
+/** TileID.Sets.ReplaceTileBreakDown（TileID.cs:247 全 9 型）——同上清【下】邻表
+ *  （藤蔓/垂饰族;WorldGen.cs:63161;165@frameY{0,18,72} 特支不入表）。§6l */
+export const REPLACE_TILE_BREAK_DOWN_SHEETS: ReadonlySet<number> = new Set([205, 115, 62, 52, 382, 444, 528, 638, 636]);
+/** TileID.Sets.IsLivingFire（TileID.cs:241 全 6 型=永恒火族）——锤目标域活火臂
+ *  （Player.cs:45940 IsAHammerTarget;TryPoundingTile 无专属支=门内 no-op,原版同相）。
+ *  Game LIVING_FIRE_SHEETS 收编改指,§6l */
+export const LIVING_FIRE_SHEETS: ReadonlySet<number> = new Set([336, 340, 341, 342, 343, 344]);
+/** TileID.Sets.IgnoresTileReplacementDropCheckWhenBeingPlaced（TileID.cs:217 全 2 型
+ *  ={158 磁球,30 云糖块}）——块交换掉落比对豁免（Player.cs:40348;WorldGen.cs:63281
+ *  WouldTileReplacementWork 尾同表）。Game IGNORES_REPLACEMENT_DROP_CHECK_SHEETS 改指,§6l */
+export const IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS: ReadonlySet<number> = new Set([158, 30]);
+/** TileID.Sets.DoesNotOpenCraftingMenuOnInteract（TileID.cs:279 全 2 型={215 篝火,
+ *  207 火盆}）——右键不开合成菜单（Player.cs:33567-33587 GetCraftingFilterForTile
+ *  首门→null）。craftingGrid DOES_NOT_OPEN_CRAFTING_MENU 收编改指,§6l */
+export const DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS: ReadonlySet<number> = new Set([215, 207]);
+/** TileID.Sets.PreventsActuationUnder（TileID.cs:313 全 11 型）——下方不可被致动器
+ *  缩入的承载物（Wiring.cs:3241 门;Wiring 消费+devices case 130 同表,R20-I6）。
+ *  ★恰为 CHEST_PROTECT_2X2 系（Check2x2 cs:48483-85 箱族豁免 {21,467,441,468,88,
+ *  470,475}）的真超集——彼 7 值集系独立锚独立表（FinalCleanup/Piles/Statues/Traps
+ *  四同源副本）,勿并轨（S2 PART 对拍备案）。Wiring PREVENTS_ACTUATION_UNDER 改指,§6l */
+export const PREVENTS_ACTUATION_UNDER_SHEETS: ReadonlySet<number> = new Set([21, 467, 26, 77, 88, 470, 475, 237, 597, 441, 468]);
+/** TileID.Sets.CanBeClearedDuringGeneration（TileID.cs:321 CreateBoolSet(**true**,…)
+ *  ——【反集】:全表默认 true,下列 17 型=false=生成期不可清（沙岩族396-404/大理石
+ *  花岗岩367,368/地牢砖41,43,44/裂砖481-483/蜥蜴砖226/陨石237;WorldGen.cs:81445
+ *  静态集尾段）。MushroomPass 本地 sheet 域副本收编改指（旧注「项目侧近似」系
+ *  陈旧——静态 17 值例外清单与原版逐值全等,近似面仅在 dual 动态拒支,由
+ *  canBeClearedDuringGenerationDual 独立承载）,§6l */
+export const NOT_CLEARABLE_SHEETS: ReadonlySet<number> = new Set([
+  396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237,
+]);
+/** NOT_CLEARABLE 内部 id 域镜像（TileRunner idsByVanillaSheet(…) 平移副本收编;
+ *  Spread/MicroBiomes/QuickCleanup/MountCaves/HalfBrick/NotTheBees 六 pass 消费） */
+export const NOT_CLEARABLE_IDS: ReadonlySet<number> = (() => {
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (NOT_CLEARABLE_SHEETS.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);
+  }
+  return out;
+})();
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });

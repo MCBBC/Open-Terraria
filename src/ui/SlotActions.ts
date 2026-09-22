@@ -35,7 +35,7 @@
  */
 import { ITEM_DEFS, ITEM_IS_A_PICKUP, ITEM_ONLY_NEED_ONE_OVERRIDE } from '../data/items';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
-import { viIdFromKey } from '../data/vanillaItemCombat';
+
 import { armorSlotIndexOfInternal, statOfInternal, isAnyAccessory } from '../data/vanillaItemStats';
 import { equipKindOfInternal } from '../data/vanillaEquip';
 
@@ -271,7 +271,7 @@ export function canMergeStack(
 export function onlyNeedOneInInventory(id: number): boolean {
   const d = ITEM_DEFS[id];
   if (!d) return false;
-  const vid = d.vid ?? viIdFromKey(d.key);
+  const vid = d.vid ?? -1;
   if (!(vid > 0)) return false;
   const ov = ITEM_ONLY_NEED_ONE_OVERRIDE[vid];
   if (ov !== undefined) return ov;
@@ -324,7 +324,7 @@ export function chestCanTakeJustCheck(
 function internalVidOf(id: number): number {
   const d = ITEM_DEFS[id];
   if (!d) return -1;
-  const vid = d.vid ?? viIdFromKey(d.key);
+  const vid = d.vid ?? -1;
   return vid > 0 ? vid : -1;
 }
 

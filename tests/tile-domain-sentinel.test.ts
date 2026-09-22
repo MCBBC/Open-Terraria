@@ -93,7 +93,15 @@ import {
   IGNORE_WHEN_VALIDATING_TRAPS_IDS, ALLOW_LIGHT_IN_WATER_SHEETS, BASIC_CHEST_FAKE_SHEETS,
   BASIC_DRESSER_SHEETS, CAMPFIRES_SHEETS, COUNTS_AS_WATER_FOR_CRAFTING_SHEETS,
   DISABLE_SMART_INTERACT_SHEETS, HAS_OUTLINES_SHEETS, TORCHES_SHEETS,
+  DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS,
+  REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS,
+  IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS,
+  DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS, PREVENTS_ACTUATION_UNDER_SHEETS,
+  NOT_CLEARABLE_SHEETS, NOT_CLEARABLE_IDS,
 } from '../src/data/tiles';
+import { NOT_CLEARABLE } from '../src/world/gen/vanilla/TileRunner';
+import { DOES_NOT_OPEN_CRAFTING_MENU } from '../src/ui/craftingGrid';
+import { PREVENTS_ACTUATION_UNDER } from '../src/world/Wiring';
 import { canPoundTile } from '../src/world/gen/vanilla/HalfBrickPass';
 import { TILE_CUT } from '../src/core/Game';
 import { grassParticleFold, GRASS_COUNTER_SHEETS } from '../src/core/Game';
@@ -1670,6 +1678,106 @@ describe('§6k BJ221 收编金标:TileID.cs 第五收编批(分帧/坡面/世界
       ['src/world/liquid/LiquidSim.ts', 'BASIC_DRESSER_SHEETS'],
     ];
     it('禁复活:BJ221 收编副本字面定义签名禁入（单源别名/拷贝转出口不受影响）', () => {
+      for (const [file, sig] of FORBIDDEN) {
+        expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
+      }
+    });
+    it('防空洞正锚:每个收编文件必须仍消费 data/tiles.ts 单源名', () => {
+      for (const [file, anchor] of REQUIRED) {
+        expect({ file, has: srcOf(file).includes(anchor) }).toEqual({ file, has: true });
+      }
+    });
+  });
+});
+
+// ★BJ263 批变异证红记录(2026-09-22,均在验证后还原):
+//   M30 NOT_CLEARABLE_SHEETS 摘 237(字面缺值) → §6l 金标红;
+//   M31 NOT_CLEARABLE_IDS 错域回退(new Set(NOT_CLEARABLE_SHEETS) 裸值顶替,
+//       内部 41(sheet63 宝石)幻影入表) → §6l 镜像+域判别两红+TileRunner 别名红;
+//   M32 Wiring 再立 const PREVENTS_ACTUATION_UNDER = new Set([...]) 字面副本 → §6l 结构锁红。
+describe('§6l BJ263 收编金标:TileID.cs 第七收编批(块交换/替换破碎/活火/豁免/站点/致动/不可清 8 表)', () => {
+  // 2026-09-22 定谳:红蓝 S2 第 7 批 8 面——逐值对拍 Terarria1457/Terraria.ID/TileID.cs
+  //   亲读终值全等(1458 同 8 行号同值零增量抽核)。全部 sheet 域消费面:Game
+  //   blockSwap(:1550-1588 五表)/craftingGrid:142/Wiring:36+devices:130/MushroomPass:104。
+  //   仅 NOT_CLEARABLE 带 IDS 镜像(TileRunner idsByVanillaSheet 内部域六 pass 副本收编
+  //   改指,TILE_BY_KEY≡注册序已核无重键);其余七表无内部域消费面不设镜像(§6k 惯例)。
+  //   ★S2 锚勘误:MushroomPass NOT_CLEARABLE 原记 TileID.cs「:279」系与
+  //   DoesNotOpenCraftingMenuOnInteract 撞号——真锚=:321 CreateBoolSet(true,…) 反集
+  //   例外清单 17 值(默认 true 全可清,例外=false)。旧注「项目侧近似」同步勘误。
+  const A = (x: ReadonlySet<number>) => [...x].sort((a, b) => a - b);
+  it('块交换域:DoesntGetReplaced(:235) 8 值+IgnoresReplacementDropCheck(:217) 2 值', () => {
+    expect(A(DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS)).toEqual(
+      [58, 127, 171, 225, 423, 481, 482, 483]);
+    expect(A(IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS)).toEqual([30, 158]);
+  });
+  it('ReplaceTile 邻清域:BreakUp(:245) 36 值+BreakDown(:247) 9 值', () => {
+    expect(REPLACE_TILE_BREAK_UP_SHEETS.size).toBe(36);
+    expect(A(REPLACE_TILE_BREAK_UP_SHEETS)).toEqual(
+      [3, 20, 24, 27, 61, 71, 73, 74, 82, 83, 84, 110, 113, 185, 186, 187, 201, 227,
+        233, 236, 238, 254, 484, 485, 529, 530, 549, 590, 595, 615, 624, 637, 700, 702, 703, 705]);
+    expect(A(REPLACE_TILE_BREAK_DOWN_SHEETS)).toEqual([52, 62, 115, 205, 382, 444, 528, 636, 638]);
+  });
+  it('活火/站点/致动:IsLivingFire(:241) 6 值+DoesNotOpenCraftingMenu(:279) 2 值+PreventsActuationUnder(:313) 11 值', () => {
+    expect(A(LIVING_FIRE_SHEETS)).toEqual([336, 340, 341, 342, 343, 344]);
+    expect(A(DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS)).toEqual([207, 215]);
+    expect(A(PREVENTS_ACTUATION_UNDER_SHEETS)).toEqual(
+      [21, 26, 77, 88, 237, 441, 467, 468, 470, 475, 597]);
+  });
+  it('NOT_CLEARABLE(:321 反集例外清单) 17 值+IDS 镜像 17 id(sheet 41→内部 51 全表平移)', () => {
+    expect(A(NOT_CLEARABLE_SHEETS)).toEqual(
+      [41, 43, 44, 226, 237, 367, 368, 396, 397, 398, 399, 400, 401, 404, 481, 482, 483]);
+    expect(NOT_CLEARABLE_IDS.size).toBe(17);
+    expect(A(NOT_CLEARABLE_IDS)).toEqual(
+      [51, 52, 53, 86, 87, 88, 95, 137, 242, 282, 292, 306, 327, 328, 392, 514, 515]);
+    expect(NOT_CLEARABLE).toBe(NOT_CLEARABLE_IDS);   // TileRunner 别名同源锁(六 pass 消费面)
+  });
+  it('内部域镜像:全 defs 双域平移性质(键域契约无漏无多)', () => {
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      const sh = TILE_DEFS[i]?.vanilla?.sheet ?? -1;
+      expect(NOT_CLEARABLE_IDS.has(i)).toBe(NOT_CLEARABLE_SHEETS.has(sh));
+    }
+  });
+  it('域判别(错域回退即红):NOT_CLEARABLE sheet 41(地牢砖)↔内部 41(宝石 sheet63)掩蔽对', () => {
+    expect(TILE_DEFS[41]?.vanilla?.sheet).toBe(63);   // 内部 41=红玉宝石,非地牢砖
+    expect(NOT_CLEARABLE_SHEETS.has(41)).toBe(true);  // sheet 41=地牢砖 ∈ SHEETS
+    expect(NOT_CLEARABLE_IDS.has(41)).toBe(false);    // 错域顶替即红
+    expect(NOT_CLEARABLE_IDS.has(51)).toBe(true);     // 真身内部 51
+    // 反向掩蔽:内部 237(sheet405 太阳花板)∉IDS;sheet 237(陨石)∈SHEETS
+    expect(TILE_DEFS[237]?.vanilla?.sheet).toBe(405);
+    expect(NOT_CLEARABLE_SHEETS.has(237)).toBe(true);
+    expect(NOT_CLEARABLE_IDS.has(237)).toBe(false);
+  });
+  it('转出口别名同源锁:craftingGrid DOES_NOT_OPEN_CRAFTING_MENU/Wiring PREVENTS_ACTUATION_UNDER', () => {
+    expect(DOES_NOT_OPEN_CRAFTING_MENU).toBe(DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS);
+    expect(PREVENTS_ACTUATION_UNDER).toBe(PREVENTS_ACTUATION_UNDER_SHEETS);
+  });
+  describe('§6l 结构锁:BJ263 收编副本禁复活（字节签名禁入+防空洞正锚）', () => {
+    const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+    const srcOf = (rel: string) => readFileSync(join(ROOT, rel), 'utf8');
+    const F = (name: string) => new RegExp(`\\b${name}\\s*=\\s*new\\s+Set`);
+    const FORBIDDEN: Array<[string, RegExp, string]> = [
+      ['src/core/Game.ts', F('BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS'), 'DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS'],
+      ['src/core/Game.ts', F('REPLACE_TILE_BREAK_UP_SHEETS'), 'REPLACE_TILE_BREAK_UP_SHEETS import'],
+      ['src/core/Game.ts', F('REPLACE_TILE_BREAK_DOWN_SHEETS'), 'REPLACE_TILE_BREAK_DOWN_SHEETS import'],
+      ['src/core/Game.ts', F('LIVING_FIRE_SHEETS'), 'LIVING_FIRE_SHEETS import'],
+      ['src/core/Game.ts', F('IGNORES_REPLACEMENT_DROP_CHECK_SHEETS'), 'IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS'],
+      ['src/ui/craftingGrid.ts', F('DOES_NOT_OPEN_CRAFTING_MENU'), 'DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS'],
+      ['src/world/Wiring.ts', F('PREVENTS_ACTUATION_UNDER'), 'PREVENTS_ACTUATION_UNDER_SHEETS'],
+      ['src/world/gen/vanilla/MushroomPass.ts', F('NOT_CLEARABLE'), 'NOT_CLEARABLE_SHEETS'],
+      ['src/world/gen/vanilla/TileRunner.ts', /NOT_CLEARABLE\s*=\s*idsByVanillaSheet\(/, 'NOT_CLEARABLE_IDS'],
+    ];
+    const REQUIRED: Array<[string, string]> = [
+      ['src/core/Game.ts', 'DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS'],
+      ['src/core/Game.ts', 'REPLACE_TILE_BREAK_UP_SHEETS'],
+      ['src/core/Game.ts', 'REPLACE_TILE_BREAK_DOWN_SHEETS'],
+      ['src/core/Game.ts', 'LIVING_FIRE_SHEETS'],
+      ['src/core/Game.ts', 'IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS'],
+      ['src/ui/craftingGrid.ts', 'DOES_NOT_OPEN_CRAFTING_MENU_ON_INTERACT_SHEETS'],
+      ['src/world/Wiring.ts', 'PREVENTS_ACTUATION_UNDER_SHEETS'],
+      ['src/world/gen/vanilla/MushroomPass.ts', 'NOT_CLEARABLE_SHEETS'],
+      ['src/world/gen/vanilla/TileRunner.ts', 'NOT_CLEARABLE_IDS'],
+    ];
+    it('禁复活:BJ263 收编副本字面定义签名禁入（单源别名/拷贝转出口不受影响）', () => {
       for (const [file, sig] of FORBIDDEN) {
         expect({ file, hit: sig.test(srcOf(file)) }).toEqual({ file, hit: false });
       }

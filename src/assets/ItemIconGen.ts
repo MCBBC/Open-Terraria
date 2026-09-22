@@ -249,7 +249,9 @@ export function genItemIconCanvas(key: string): HTMLCanvasElement {
 
 export function generateAllItemIcons(): Map<number, HTMLCanvasElement> {
   const map = new Map<number, HTMLCanvasElement>();
+  // ★方案 A（BJ264）：ITEM_DEFS 重排后稀疏（洞=undefined）——!def 跳过
   for (const def of ITEM_DEFS) {
+    if (!def) continue;
     map.set(ITEM_BY_KEY[def.key], genItemIconCanvas(def.key));
   }
   return map;

@@ -43,18 +43,18 @@ function makeHooks(enemies: Array<Record<string, unknown>> = []) {
   return { hooks, store, player, added };
 }
 
-const iid = (key: string) => {
-  // 直接构造满足 CombatWeaponItemLike 的形状（vi_ key 反解）
-  return { key };
+const iid = (key: string, vid: number) => {
+  // 直接构造满足 CombatWeaponItemLike 的形状（★方案 A 阶段 5/BJ266:键-only 兜底退役,夹具显式带 vid）
+  return { key, vid };
 };
 
 describe('combatWeapon summon 分流', () => {
   it('小鬼法杖 2365 → kind=summon 非哨兵；寒霜九头蛇 1572 → 哨兵（ai 53）', () => {
-    const imp = combatWeapon(iid('vi_2365_ImpStaff'));
+    const imp = combatWeapon(iid('vi_2365_ImpStaff', 2365));
     expect(imp?.kind).toBe('summon');
     expect((imp as { sentry?: boolean }).sentry).toBe(false);
     expect(imp?.damage).toBe(17);
-    const hydra = combatWeapon(iid('vi_1572_FrostHydraStaff'));
+    const hydra = combatWeapon(iid('vi_1572_FrostHydraStaff', 1572));
     expect(hydra?.kind).toBe('summon');
     expect((hydra as { sentry?: boolean }).sentry).toBe(true);
   });
@@ -64,7 +64,7 @@ describe('combatWeapon summon 分流', () => {
       5114, 5119, 5456, 5463, 5663, 5664];
     let ok = 0;
     for (const id of ids) {
-      const w = combatWeapon({ key: `vi_${id}_x` });
+      const w = combatWeapon({ key: `vi_${id}_x`, vid: id });
       if (w?.kind === 'summon') ok++;
     }
     expect(ok).toBe(ids.length);

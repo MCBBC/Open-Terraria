@@ -1,7 +1,7 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
 import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, onStarveTransition, starvedEver, starvedLock } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
-import { findBannerAnchorY } from '../world/Housing';
+import { findBannerAnchorY, houseBannerVisible } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
 import { rulerLineAlpha, rulerGridFade, rulerReadoutText } from '../stats/builderAcc';   // ★SW-FX36:标尺族绘制纯公式单源
 import { TintAtlas, type TintRect } from './TintAtlas';
@@ -284,7 +284,7 @@ class GLBgBlit implements BGBlit {
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { TOWN_HOLDOUT, ITEM_POS_NUM, TOWN_ATTACK_TYPE, TOWN_ATTACK_TIME, TOWN_SWING, TOWN_MAGIC_AURA_COLOR, townSwingStats } from '../data/vanillaTownAttack';
-import { viIdFromKey, itemCombat } from '../data/vanillaItemCombat';
+import { itemCombat } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
@@ -4205,7 +4205,7 @@ export class Renderer {
     //     :3271 SetTypeInfo 第三参 → FlameParticle.Draw :62 drawData.shader）
     {
       const mDye = player.inv.miscDyes[3];
-      const flameDye = mDye ? dyeApplyOf(viIdFromKey(ITEM_DEFS[mDye.id]?.key ?? '')) : null;
+      const flameDye = mDye ? dyeApplyOf(ITEM_DEFS[mDye.id]?.vid ?? -1) : null;
       if (flameDye) {
         flameDye.uniforms.uDirection = player.facing;   // ArmorShaderData.Apply 尾段 entity.direction
         if (flameDye.tech === 'ArmorReflective' || flameDye.tech === 'ArmorReflectiveColor') {
@@ -11596,26 +11596,18 @@ export class Renderer {
     const cloth = this.atlas.vmisc('vanilla/House_Banner_1.png');
     if (!cloth) return;
     const ctx = this.ctx;
-    const st = world.store;
+    // 准入面 = Housing.houseBannerVisible 单源（Main.cs:41422-41424 过滤;BJ259
+    // 右键踢出命中与此同源,另见 houseBannerNpcAt）
     const banners: TownNPC[] = [];
     for (const e of entities) {
-      if (e instanceof TownNPC && !e.dead && !e.bound && e.home && e.npcKey !== 'old_man') banners.push(e);
+      if (e instanceof TownNPC && houseBannerVisible(e)) banners.push(e);
     }
-    // 同房重复偏移（原版 num4：同 home 的排序在后计数 ×26）
     for (const n of banners) {
-      const dup = banners.filter((o) => o !== n && o.home!.x === n.home!.x && o.home!.y === n.home!.y
-        && banners.indexOf(o) > banners.indexOf(n)).length;
-      // 从 home.y-1 向上找第一格“房界”(tileSolidLike——平台算天花板候选;
-      // ★isSolid 会穿层:loft 下层的旗曾挂进上层同一行,2026-08-30 主因A修复)
-      const cy = findBannerAnchorY(st, n.home!.x, n.home!.y);
-      if (cy === null) continue;
+      const g = this.houseBannerGeom(n, this.houseBannerDup(banners, n), world);
+      if (!g) continue;
+      const { bx, by, cy, w: rectW, h: rectH } = g;
       // 整面旗帜绘制（House_Banner_1 = 吊杆+垂布的完整旗，32×40 ≈ 2×2.5 格；
       // 用户对照官方原版实测旗帜约 4 格方形——此前按 Frame(2,2) 切 16×20 画小了）
-      const bx = n.home!.x * 16 + 8;                    // 原版 num8=8 偏移
-      // num9=18；实心格是平台（tile 19）时 -8（Main.cs:40212-40214）——
-      // 平台只有半格厚，旗帜上移贴平台上表面
-      const onPlatform = TILE_DEFS[st.type[st.idx(n.home!.x, cy)]]?.vanilla?.sheet === 19;
-      const by = (cy + 1) * 16 + (onPlatform ? 10 : 18) + dup * 26;
       ctx.drawImage(cloth.img, cloth.sx, cloth.sy, cloth.sw, cloth.sh,
         bx - cloth.sw / 2, by - cloth.sh / 2, cloth.sw, cloth.sh);
       // 头像叠画（原版 TownNPCProfiles/TypeToDefaultHeadIndex NPC.cs:7489——head 索引≠NPC id）
@@ -11633,7 +11625,6 @@ export class Renderer {
       //  "Multiple readback operations" 警告源 + 每次回读强制管线停顿；
       //  且 vanilla 语义本就是【格光照】而非屏幕合成图，纯数据查表反而更忠实。
       //  越界/未就绪 → lightAt 回 [0,0,0] = 跳过染色（首帧全黑跳过语义同旧）。
-      const rectW = cloth.sw, rectH = cloth.sh + 4;
       const lt = this.lighting?.lightAt(n.home!.x, cy) ?? [0, 0, 0];
       if (lt[0] + lt[1] + lt[2] > 0 && (lt[0] < 252 || lt[1] < 252 || lt[2] < 252)) {
         ctx.save();
@@ -11661,6 +11652,51 @@ export class Renderer {
         }
       }
     }
+  }
+
+  /** ★BJ259：单旗几何（drawHouseBanners 与右键踢出命中共用单源）——null=不挂旗。
+   *  bx/by=旗中心世界 px；w/h=命中矩形（rectW=cloth.sw、rectH=cloth.sh+4,
+   *  与悬停名条矩形同面=Main.cs:41518-41526 旗布矩形语义） */
+  private houseBannerGeom(n: TownNPC, dup: number, world: World): {
+    bx: number; by: number; w: number; h: number; cy: number;
+  } | null {
+    if (!this.atlas) return null;
+    const cloth = this.atlas.vmisc('vanilla/House_Banner_1.png');
+    if (!cloth) return null;
+    const st = world.store;
+    // 从 home.y-1 向上找第一格“房界”(tileSolidLike——平台算天花板候选;
+    // ★isSolid 会穿层:loft 下层的旗曾挂进上层同一行,2026-08-30 主因A修复)
+    const cy = findBannerAnchorY(st, n.home!.x, n.home!.y);
+    if (cy === null) return null;
+    const bx = n.home!.x * 16 + 8;                    // 原版 num8=8 偏移
+    // num9=18；实心格是平台（tile 19）时 -8（Main.cs:40212-40214）——
+    // 平台只有半格厚，旗帜上移贴平台上表面
+    const onPlatform = TILE_DEFS[st.type[st.idx(n.home!.x, cy)]]?.vanilla?.sheet === 19;
+    const by = (cy + 1) * 16 + (onPlatform ? 10 : 18) + dup * 26;
+    return { bx, by, w: cloth.sw, h: cloth.sh + 4, cy };
+  }
+
+  /** 同房重复偏移（原版 num4：同 home 的排序在后计数 ×26）——画/命中共享 */
+  private houseBannerDup(banners: TownNPC[], n: TownNPC): number {
+    return banners.filter((o) => o !== n && o.home!.x === n.home!.x && o.home!.y === n.home!.y
+      && banners.indexOf(o) > banners.indexOf(n)).length;
+  }
+
+  /** ★BJ259：住房页右键踢出命中（DrawNPCHousesInWorld Main.cs:41518-41535——
+   *  悬停名条与右键踢出共用旗布矩形;本仓 PC 无 gamepad 住房光标支,鼠标矩形同源）。
+   *  worldX/worldY=世界像素;命中返回该驻家 TownNPC（调用方走 Game.kickOutNPC）。 */
+  houseBannerNpcAt(worldX: number, worldY: number, entities: unknown[], world: World): TownNPC | null {
+    const banners: TownNPC[] = [];
+    for (const e of entities) {
+      if (e instanceof TownNPC && houseBannerVisible(e)) banners.push(e);
+    }
+    for (const n of banners) {
+      const g = this.houseBannerGeom(n, this.houseBannerDup(banners, n), world);
+      if (!g) continue;
+      if (worldX >= g.bx - g.w / 2 && worldX <= g.bx + g.w / 2
+        && worldY >= g.by - g.h / 2 && worldY <= g.by + g.h / 2) return n;
+    }
+    return null;
   }
 
   /** bound 姿态专属贴图表（原版 1:1：捆绑待救 NPC 是【独立 NPC 类型】而非 ai[0] 态——
@@ -12764,8 +12800,7 @@ export class Renderer {
         let shoeDye = ad.dyeShoe;
         if (skateMountShoe > 0) {
           const mDye = p.inv.miscDyes[3];                       // cMount（:9300）
-          shoeDye = mDye ? (ITEM_DEFS[mDye.id]?.vid
-            ?? viIdFromKey(ITEM_DEFS[mDye.id]?.key ?? '') ?? -1) : -1;
+          shoeDye = mDye ? (ITEM_DEFS[mDye.id]?.vid ?? -1) : -1;
         }
         if (p.sitting) {
           // 表序 = 原版循环序（num10=num3→0：身段先、顶带后叠）；分支按 legs vid
@@ -13416,7 +13451,7 @@ export class Renderer {
     for (let i = 0; i < 54 && i < p.inv.slots.length; i++) {
       const s = p.inv.slots[i];
       if (!s) continue;
-      const vid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const vid = (ITEM_DEFS[s.id]?.vid ?? -1);
       const v = vid === 71 ? 1 : vid === 72 ? 100 : vid === 73 ? 10000 : vid === 74 ? 1000000 : 0;
       if (v) {
         coins += s.stack * v;
@@ -13692,8 +13727,8 @@ export class Renderer {
       // 水下门 = 逐件 noWet（Player.cs:36026 `(!wet || !noWet)`）——火把/蜡烛族
       // 水下隐（熄灭语义），芦苇呼吸管 186 等其余手持物水下照常渲染（2026-08-17
       // 修：曾全局 !p.inWater 把呼吸管在水下隐身）
-      if (held && def && (!p.inWater || !NO_WET_ITEMS.has(viIdFromKey(def.key)))) {
-        const vid = viIdFromKey(def.key); // vi_8_Torch 自动解析 8(本地特判已退役)
+      if (held && def && (!p.inWater || !NO_WET_ITEMS.has(def.vid ?? -1))) {
+        const vid = (def.vid ?? -1); // vi_8_Torch 自动解析 8(本地特判已退役)
         // IsFood 门在最前：原版公共尾段无条件覆盖（即使 itemfunc 已录也以 1 为准）
         let hs = vid >= 0 && VANILLA_IS_FOOD.has(vid) ? 1
           : vid >= 0 ? itemFuncOfVid(vid)?.holdStyle ?? (HOLD_STYLE_ITEMS.has(vid) ? 1 : 0) : 0;
@@ -13771,7 +13806,7 @@ export class Renderer {
               //（:50684-50690）,静持同样命中（IsFood us2 静持 54 上应 (3,2)/52 上 (14,-4)）;
               // 曾传 null 直接落 holdStyle 档差 2px（2026-08-18 审查）
               const heldDef = held ? ITEM_DEFS[held.id] : undefined;
-              const heldVid = heldDef ? viIdFromKey(heldDef.key) : -1;
+              const heldVid = heldDef ? (heldDef.vid ?? -1) : -1;
               const heldUs = heldVid >= 0 ? itemFuncOfVid(heldVid)?.useStyle ?? null : null;
               const m = this.mountHeldAnchor(p.mount.type, typeof heldUs === 'number' ? heldUs : null, hs, false,
                 vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 2421 || vid === 2422 || vid === 4325 || vid === 4442,
@@ -14223,7 +14258,7 @@ export class Renderer {
         if (p.facing === -1) rot += Math.PI;
         rot += Math.PI / 50 * p.facing;
         const bodyDye = p.inv.dye[1];
-        const dyeVid = bodyDye ? viIdFromKey(ITEM_DEFS[bodyDye.id]?.key ?? '') ?? -1 : -1;
+        const dyeVid = bodyDye ? (ITEM_DEFS[bodyDye.id]?.vid ?? -1) : -1;
         const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
         let src: HTMLImageElement | ImageBitmap | HTMLCanvasElement = tex;
         if (emu) {
@@ -14272,7 +14307,7 @@ export class Renderer {
         ctx.save();
         ctx.imageSmoothingEnabled = false;
         const bodyDye = p.inv.dye[1];
-        const dyeVid = bodyDye ? viIdFromKey(ITEM_DEFS[bodyDye.id]?.key ?? '') ?? -1 : -1;
+        const dyeVid = bodyDye ? (ITEM_DEFS[bodyDye.id]?.vid ?? -1) : -1;
         const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
         let src: HTMLImageElement | ImageBitmap | HTMLCanvasElement = tex;
         if (emu) {
@@ -14374,7 +14409,7 @@ export class Renderer {
         const q = (v: number) => Math.round((Math.min(cap, v ?? 255) / 255) * 15) / 15;
         const lq: [number, number, number] = [q(lc[0]), q(lc[1]), q(lc[2])];
         const headDye = p.inv.dye[0];
-        const dyeVid = headDye ? viIdFromKey(ITEM_DEFS[headDye.id]?.key ?? '') ?? -1 : -1;
+        const dyeVid = headDye ? (ITEM_DEFS[headDye.id]?.vid ?? -1) : -1;
         const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
         const litDye = emu !== null && isV0MidTech(emu.tech);   // 合成后站点,v0 化合法
         const key = `e:${dyeVid}:${frameY}:${lq.map((v) => Math.round(v * 255)).join('.')}`;
@@ -14824,7 +14859,7 @@ export class Renderer {
         // :35989-35992：吹箭筒 281/吹箭枪 986 使用中恒行2（itemRotation 档不适用——
         // 吹管持械为平举吹奏姿，此前恒走 itemRotation 档 = 行2/3/4 随瞄准角跳变）
         const bpVid = swing.item != null
-          ? viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '') : -1;
+          ? (ITEM_DEFS[swing.item]?.vid ?? -1) : -1;
         if (bpVid === 281 || bpVid === 986) return 2;
         // :35986-36011：默认行3；itemRotation*dir < -0.75 → 行2、> 0.6 → 行4。
         // itemRotation = Atan2(aimY*dir, aimX*dir)（:46730）——朝左时与裸 aim 相差 ±π，
@@ -14963,7 +14998,7 @@ export class Renderer {
     // 取帧——atlasIcon 已按帧 0 切片，故从 vicon 原条重切第 2 行）；968 棉花糖串
     // 非 IsFood 无动画 → 32×10 整图直画（atlasIcon 原样，勿再切片）。此前整条/
     // 帧 0 近似 → 食物手持三帧叠画/取错行
-    const heldVid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+    const heldVid = (ITEM_DEFS[swing.item]?.vid ?? -1);
     const ar = heldVid >= 0 && arRaw && VANILLA_IS_FOOD.has(heldVid) && this.atlas
       ? Renderer.foodHeldFrame(this.atlas.vicon(heldVid), arRaw)
       : arRaw;
@@ -15045,14 +15080,14 @@ export class Renderer {
         offY = 24;
         // 946/4707 特判（Player.cs:50302-50305 itemLocation.X-=6*dir +
         // PlayerDrawLayers.cs:3314-3318 绘制位 Y-=22*gravDir、绘制角=-1.57*-direction）
-        const vid3 = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        const vid3 = (ITEM_DEFS[swing.item]?.vid ?? -1);
         if (vid3 === 946 || vid3 === 4707) { offX -= 6; offY -= 22; rot = 1.57; }
         break;
       }
       case 4: {
         // 举过头（:50313-50338）：rot=0；offX = fw/2-13（3601/5114/5120 再 -10）
         // offY = fh/2+4（5114 再 -2）——使用中身体行 2（双手举过头顶）
-        const vid4 = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        const vid4 = (ITEM_DEFS[swing.item]?.vid ?? -1);
         offX = fw * 0.5 - 13 - (vid4 === 3601 || vid4 === 5114 || vid4 === 5120 ? 10 : 0);
         offY = fh * 0.5 + 4 + (vid4 === 5114 ? -2 : 0);
         break;
@@ -15060,7 +15095,7 @@ export class Renderer {
       case 5: {
         // 朝鼠标静持（:50339-50422 + :46708 itemRotation=瞄准角）：
         // 法杖族钉 MountedCenter+瞄准向量×6；默认 X=中心-2*dir、Y=中心-fh/2
-        const vid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        const vid = (ITEM_DEFS[swing.item]?.vid ?? -1);
         if (vid === 3779) { offX = 6; offY = p.h * 0.5 + 6; rot = 0; }      // :50343（itemRotation=0）
         else if (vid === 4262) { offX = -6; offY = p.h * 0.5 - 6; rot = 0; } // :50349
         else if (vid >= 0 && STAFF_ITEMS.has(vid)) {
@@ -15150,7 +15185,7 @@ export class Renderer {
         offY = p.h * 0.5 + hy * armStretch;
         // ★轴心（PlayerDrawLayers.cs:3263-3275 useStyle 9）：origin = Size*(0.5,0.4)
         // （5009/5042/5645 为 (0.26,0.5)；朝左时原版取 X=1-X——镜像空间恒用 dir=1 值）
-        const vid9 = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        const vid9 = (ITEM_DEFS[swing.item]?.vid ?? -1);
         if (vid9 === 5009 || vid9 === 5042 || vid9 === 5645) { drawOX = -fw * 0.26; drawOY = -fh * 0.5; }
         else { drawOX = -fw * 0.5; drawOY = -fh * 0.4; }
         break;
@@ -15198,7 +15233,7 @@ export class Renderer {
     // 变身坐骑手持锚（AdjustmentsForWolfMount :1807-1840 / ApplyItemPositionOffset
     // _FromMount :50671-——挥舞期 itemAnimation>0 恒真）
     if (p.ridingMount && MOUNT_SETS.PlayerIsHidden?.[p.mount.type]) {
-      const vid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+      const vid = (ITEM_DEFS[swing.item]?.vid ?? -1);
       // num = 身体行（:50646）：挥舞期取 useStyle 行（useStyle 5 的 2/3/4 恰为
       // 悠悠球/3542 分档；-1 族（us14/15 等）该两档不消费 num，钳 0）
       const rowRaw = this.useStyleBodyRow(swing, p);
@@ -15260,7 +15295,7 @@ export class Renderer {
     // 之上叠 ItemFlame_{id}（与本体同变换，dest = drawOX/drawOYEff 本体矩形——
     // SW-FX31：倒挂时随 origin 翻转同步）
     if (ar && this.atlas) {
-      const fvid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+      const fvid = (ITEM_DEFS[swing.item]?.vid ?? -1);
       if (fvid >= 0 && FLAME_ITEMS.has(fvid)) {
         drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOYEff, w: ar.sw, h: ar.sh }, flicker);
       }

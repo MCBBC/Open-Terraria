@@ -133,8 +133,10 @@ export class EntityManager {
       }
       for (const e of list) {
         e.fixedUpdate(dt, game);
-        // ★中央 CutTiles 收口（2026-09-01 清零审计）：原版 Projectile.cs:11824 对
+        // ★中央 CutTiles 收口（2026-09-01 清零审计）：原版 Projectile.cs:12516-12517 对
         //   全部 friendly 弹每 tick 弹盒(+1 外沿)砍 Main.tileCut 物（瓦罐/杂草/盆栽）。
+        //   （★S6 勘误 BJ263 2026-09-22：旧注 :11824 系行号漂移——该行=383 药水支;
+        //   CutTiles 调用真锚=:12517,门 friendly&&owner==myPlayer&&!npcProj&&!minion&&type!=1054）
         //   此前按弹型分散接入（Arrow 撞格路径/cutTilesBox 手动）漏网一批——天顶剑、
         //   真刃弧族等（2026-08-31 审计）。收口到此单点：projectiles 桶统一弹盒上报。
         //   · 幂等：已自砍弹型（Arrow 等）重复上报在 Game.cutTile 内零操作

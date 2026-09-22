@@ -45,7 +45,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { Inventory } from '../items/Inventory';
 import type { ChestData } from '../world/World';
 import { TILE_INTERNAL_BY_SHEET } from '../data/tiles';
-import { vanillaIdOfItem } from './Shimmer';
+
 import { sortingLayerIndex } from '../data/vanillaItemSorting';
 
 /** NearbyChests.GetChestsInRangeOf（NearbyChests.cs:10-31）：锚=右缘中点，
@@ -137,7 +137,7 @@ function packQuickStackable(
     for (let i = 0; i < count; i++) {
       const s = arr[base + i] as SrcItem;
       if (!s || s.stack <= 0 || s.favorited) continue;
-      const vid = vanillaIdOfItem(s.id);
+      const vid = (ITEM_DEFS[s.id]?.vid ?? -1);
       if (vid >= 71 && vid <= 74) continue;   // IsACoin（71-74）
       slots.push({ arr, index: base + i });
       items.push(s);
@@ -154,16 +154,16 @@ function packQuickStackable(
 /** ★SW-BJ46 匹配键唯一化（实报「快速堆叠吞物/无同物箱被收」根因刀）：
  *  原版比对域 = Item.type（QuickStacking.cs:490 `item2.type != item.type`、
  *  :500 CanStack 门;Item.cs:49870 CanStack=同 type+同 prefix）。仓库
- *  vanillaIdOfItem 对 678 个 place_v_* def（items.ts:984 起逐 v_ 图块自动注册,
- *  键数字=tile sheet id 非物品 vid,键不带 vi_ 前缀 → viIdFromKey 正则不中）
+ *  vid 直读对 678 个 place_v_* def（items.ts:984 起逐 v_ 图块自动注册,
+ *  键数字=tile sheet id 非物品 vid,vid 字段不回填）
  *  返回 -1 哨兵 → 直接比 vid 会把任意两个不同 place_v 物品判成同物：
  *  FillStack 跨物并叠（物品身份湮灭=吞物）+ 登记/B 阶段跨物直送（「附近宝箱
  *  没有同样的东西也被收进去了」）。修法 = vid≥0 取 vid（原版域真值,跨代同物
  *  归一）;vid<0 以负域编码内部 id（每 def 唯一,与 vid 空间永不相交）。
- *  消费端定域修法与向导槽 vid/iid 双域碰撞先例同构（不改 vanillaIdOfItem
+ *  消费端定域修法与向导槽 vid/iid 双域碰撞先例同构（不改 vid 直读
  *  全局 -1 哨兵语义,免伤其余消费面）。 */
 export const itemMatchKey = (id: number): number => {
-  const vid = vanillaIdOfItem(id);
+  const vid = (ITEM_DEFS[id]?.vid ?? -1);
   return vid >= 0 ? vid : -1 - id;
 };
 
@@ -231,7 +231,7 @@ export function quickStackToChests(
   }
   const insertIntoFreeSlot = (srcIdx: number, d: DestHelper) => {
     // InsertIntoFreeSlot（:562-568 / 1456 :550-556）：先 Visualize 后 Swap
-    if (src.items[srcIdx]) d.transferVids.push(vanillaIdOfItem(src.items[srcIdx]!.id));
+    if (src.items[srcIdx]) d.transferVids.push(ITEM_DEFS[src.items[srcIdx]!.id]?.vid ?? -1);
     const slot = d.freeSlots[d.freeStart];
     d.freeStart++;
     d.items[slot] = src.items[srcIdx];                // Utils.Swap（源格清空在写回）
@@ -258,7 +258,7 @@ export function quickStackToChests(
     for (let j = 0; j < src.items.length; j++) {
       const it = src.items[j];
       if (!it || src.blocked[j]) continue;
-      const cat = sortingLayerIndex(vanillaIdOfItem(it.id));
+      const cat = sortingLayerIndex(ITEM_DEFS[it.id]?.vid ?? -1);
       let best: DestHelper | null = null, bestScore = -1;
       for (const d of dests) {
         if (d.freeStart >= d.freeSlots.length) continue;
@@ -303,7 +303,7 @@ function buildDestinationMetrics(
   for (let i = 0; i < d.items.length; i++) {
     const cs = d.items[i];
     if (!cs || cs.stack <= 0) { d.freeSlots.push(i); continue; }   // AddFreeSlot
-    const cat = sortingLayerIndex(vanillaIdOfItem(cs.id));
+    const cat = sortingLayerIndex(ITEM_DEFS[cs.id]?.vid ?? -1);
     d.categoryScores.set(cat, (d.categoryScores.get(cat) ?? 0) + 1);
     for (let j = 0; j < src.items.length; j++) {
       const s = src.items[j];
@@ -314,7 +314,7 @@ function buildDestinationMetrics(
       if (canStack(s, cs) && cs.stack < max) {
         const n = Math.min(max - cs.stack, s.stack);
         if (n > 0) {
-          d.transferVids.push(vanillaIdOfItem(cs.id));   // FillStack 先 Visualize（Chest.cs:533）
+          d.transferVids.push(ITEM_DEFS[cs.id]?.vid ?? -1);   // FillStack 先 Visualize（Chest.cs:533）
           cs.stack += n;
           s.stack -= n;
           if (s.stack <= 0) src.items[j] = null;
@@ -384,7 +384,7 @@ export function quickStackIntoContainer(
   const movedChest = new Map<number, number>();
   const sameStack = (a: NonNullable<SlotArray[number]>, b: NonNullable<SlotArray[number]>): boolean =>
     itemMatchKey(a.id) === itemMatchKey(b.id) && (a.prefix ?? 0) === (b.prefix ?? 0);
-  const isCoin = (id: number): boolean => { const v = vanillaIdOfItem(id); return v >= 71 && v <= 74; };
+  const isCoin = (id: number): boolean => { const v = (ITEM_DEFS[id]?.vid ?? -1); return v >= 71 && v <= 74; };
   // ① bank 先合币（:660-669）——containerItems 即 banks[bi] 本尊（Game :24300 直通）
   if (isBank) moveCoinsIntoBank(inv, containerItems, out);
   // ② 建账（:699-709）
@@ -473,7 +473,7 @@ export function moveCoinsIntoBank(
 ): number {
   const coinVid = (it: { id: number } | null | undefined): number => {
     if (!it) return 0;
-    const v = vanillaIdOfItem(it.id);
+    const v = (ITEM_DEFS[it.id]?.vid ?? -1);
     return v >= 71 && v <= 74 ? v : 0;
   };
   const coinInternalId = [71, 72, 73, 74].map((v) => {
@@ -580,7 +580,7 @@ function countCoins(items: SrcItem[]): number {
   let n = 0;
   for (const it of items) {
     if (!it) continue;
-    const v = vanillaIdOfItem(it.id);
+    const v = (ITEM_DEFS[it.id]?.vid ?? -1);
     if (v >= 71 && v <= 74) n += it.stack * Math.pow(100, v - 71);
   }
   return n;

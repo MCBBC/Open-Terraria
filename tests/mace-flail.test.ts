@@ -9,8 +9,8 @@ import { projectileData } from '../src/data/vanillaProjectiles';
 it('链锤/烈焰链锤归入 flail 而非 shot', () => {
   expect(projectileData(947)?.aiStyle).toBe(15);
   expect(projectileData(948)?.aiStyle).toBe(15);
-  const mace = combatWeapon({ key: 'vi_5011_mace' });
-  const flaming = combatWeapon({ key: 'vi_5012_flaming_mace' });
+  const mace = combatWeapon({ key: 'vi_5011_mace', vid: 5011 });
+  const flaming = combatWeapon({ key: 'vi_5012_flaming_mace', vid: 5012 });
   expect(mace?.kind).toBe('flail');
   expect(flaming?.kind).toBe('flail');
   expect(mace?.shoot).toBe(947);

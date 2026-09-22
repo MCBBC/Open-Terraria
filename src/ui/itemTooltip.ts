@@ -19,15 +19,22 @@ import { petInfoOfVid } from '../data/vanillaPets';
 import { prefixStat, prefixLines, type PrefixStat } from '../data/vanillaPrefixes';
 import { RECIPE_GROUP_ITEMS, VANILLA_RECIPES } from '../data/vanillaRecipes';
 import whipsJson from '../data/vanilla-whips.json';
+import vanityEffectsJson from '../data/vanilla-vanity-effects.json';
 
 /** 鞭物品表（combat json 缺鞭族 damage——数据在 vanilla-whips.json） */
 const WHIP_ITEMS: Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }> = whipsJson as never;
 
-/** hasVanityEffects 置位点全表（Item.cs:7165/7308/11469/21271 四处 SetDefaults
- *  字面量——月符 485/海神贝壳 497/月光贝壳 861/天使光环 1987）：社交槽佩戴仍出
- *  变身/光环特效 → 悬停不警示（Main.cs:20854 social && !vanity && !hasVanityEffects
- *  第三门；vid 域=ItemID.cs 同名常量。代码层并表,不写数据 json） */
-const SOCIAL_VANITY_EFFECTS_VIDS: ReadonlySet<number> = new Set([485, 497, 861, 1987]);
+/** hasVanityEffects 置位面（★BJ260 S7 漏修#1 根治：手抄 4 件退役,改提取产物承载。
+ *  旧表只收 Item.cs 字面 4 处（月符 485/海神贝壳 497/月光贝壳 861/天使光环 1987）,
+ *  实际置位面=三 helper 通路全量：字面 18 站 33 vid（含悠悠球弦 3293-3308 十六件）
+ *  +DefaultToInfoAccessory 22 站（钟表 15-18/罗盘/GPS/手机族…）+DefaultToGolfBall
+ *  15 站（4242-4255+3989）+DefaultToMusicBox 85 站 101 vid——tools/extract-vanity-
+ *  effects.mjs 机械提取（1456/1457/1458 三版交叉全等+era guard 四要素）→
+ *  vanilla-vanity-effects.json。social=原版全集扣除 itemstats 带 van 键的 van 臂
+ *  实压位 7 件（3581/3929/4563/4762/5075/5076/1987——音乐盒族 itemstats acc=1 无
+ *  van 键,van 臂不压,留集=原版 Main.cs:20854 social && !vanity && !hasVanityEffects
+ *  对音乐盒无警示行 1:1;勿照 S7 旧简报按 vanilla vanity 字面扣除）。 */
+const SOCIAL_VANITY_EFFECTS_VIDS: ReadonlySet<number> = new Set(vanityEffectsJson.social as number[]);
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 

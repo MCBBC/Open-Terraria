@@ -14,11 +14,13 @@ describe('放置回填(createTile → def.tile)', () => {
   it('全部 createTile≠-1 的 vi_ 物品都落上 tile(0 缺失)', () => {
     const missing: number[] = [];
     for (let i = 0; i < ITEM_DEFS.length; i++) {
-      const m = /^vi_(\d+)_/.exec(ITEM_DEFS[i].key);
+      const def = ITEM_DEFS[i];
+      if (!def) continue;   // ★方案 A:守洞（稀疏域）
+      const m = /^vi_(\d+)_/.exec(def.key);
       if (!m) continue;
       const f = itemFuncOfVid(Number(m[1]));
       if (!f || f.createTile === undefined || f.createTile === -1) continue;
-      if (ITEM_DEFS[i].tile === undefined) missing.push(Number(m[1]));
+      if (def.tile === undefined) missing.push(Number(m[1]));
     }
     expect(missing, `未落 tile 的 vid: ${missing.slice(0, 10)}`).toEqual([]);
   });

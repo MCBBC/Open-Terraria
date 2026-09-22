@@ -42,7 +42,7 @@ function defByVid(vid: number): (typeof ITEM_DEFS)[number] {
 }
 /** 手持放置物 def：vi_ 真物品或 place_ 面板，按 tile 键查（sw-bj18 同款） */
 function defForTile(tileKey: string): (typeof ITEM_DEFS)[number] {
-  const d = ITEM_DEFS.find((x) => x.tile === tileKey
+  const d = ITEM_DEFS.find((x) => x && x.tile === tileKey   // ★方案 A:守洞
     && (x.key.startsWith('vi_') || x.key.startsWith('place_')));
   if (!d) throw new Error(`missing held item def for tile ${tileKey}`);
   return d;
@@ -502,7 +502,7 @@ describe('★SW-BN5 D6 绳目标互换（外门绳支 :40328-40334 + 内门绳�
     const w = mkWorld();
     const st = w.store;
     st.setTileSilent(10, 20, ROPE_T);
-    const stoneDef = ITEM_DEFS.find((d) => d.tile === 'stone');
+    const stoneDef = ITEM_DEFS.find((d) => d && d.tile === 'stone');   // ★方案 A:守洞
     expect(stoneDef).toBeTruthy();
     const g = shell(w, stoneDef!);
     g.tryPlace(10, 20, stoneDef!);

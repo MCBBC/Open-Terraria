@@ -40,7 +40,7 @@ import {
   TOWN_MELEE, TOWN_BOW, TOWN_MAGIC, TOWN_SWING, TOWN_PRETTY_SAFE,
   type TownShotParams,
 } from '../data/vanillaTownAttack';
-import { TownShot, PrincessAuraShot } from './TownShot';   // SW-BJ33 2026-09-08：663 魔法阵专类
+import { TownShot, PrincessAuraShot, DryadWardRingShot } from './TownShot';   // SW-BJ33 2026-09-08：663 魔法阵专类；★BJ256 2026-09-21：20 净化脉冲专类
 // ★对抗修复批⑤ A4：出膛锚点半宽/半高按弹真实 SetDefaults 尺寸换算
 import { projectileData } from '../data/vanillaProjectiles';
 // ★通用湿段（2026-09-08 F2）：NurseSyringeShot 584 override 自接（基类位被替代）
@@ -1009,6 +1009,19 @@ export class TownNPC extends Entity {
    *  UnspawnHomelessNPC 非 homeless 复核（:5144）。原版 v315+ 随城镇 NPC 段持久化
    *  （WorldFile.cs:1741/:2932），本仓同走存档面（serialize npcs.homelessDespawn） */
   homelessDespawn = false;
+  /** ★BJ259（2026-09-22）：NPC.lookForHomeTimeout（NPC.cs:6554）——踢出冷却位。
+   *  置位面 = WorldGen.kickOut（:4797 KickOutLookForHomeTimeout=3600,NPC.cs:6556）;
+   *  递减面 = NPC.UpdateNPC（:91434-91437 每 tick）;消费面 = 迁入资格门
+   *  （WorldGen.cs:5543）+ 优先型锁扫描（:72176）。原版不随存档持久化（运行时位）
+   *  ——本仓同（serialize 不落盘）。 */
+  lookForHomeTimeout = 0;
+  /** ★BJ259 本仓侧标：曾被玩家踢出（housingUiActive 右键旗 → Game.kickOutNPC）。
+   *  vanilla 无此面——本仓 ①「无家者每轮再安置」臂（updateTownNpcArrival,原版
+   *  【无】对应面,本仓长持 affordance）若不豁免被踢者,下一入驻轮即以旧 homeTile
+   *  锚把 NPC 塞回原房 = 踢出被自动回填。消费面 = ① 臂排除;清位面 = 任一再安家
+   *  成功（runQuickFindHome 成功支/housingAssign/近链 RelocatedHomeless）。随存档
+   *  持久化（serialize npcs.kickedOut,repo 侧标原版无对应字段——边界登记）。 */
+  kickedOut = false;
   /** 定点站岗（守卫老人）：门口地带是山坡+塔心竖井,白天的自由游走会坠入地牢；
    *  原版观感也是整日守在门口走廊 */
   stationary = false;
@@ -1192,6 +1205,10 @@ export class TownNPC extends Entity {
   get attackTimer(): number { return this.atkTimer; }
   /** localAI[3] 态内 tick 只读（AttackType2 光环 4 帧动画相位消费） */
   get attackTick(): number { return this.atkTick; }
+  /** ai[0]==14 施法态进行中（★BJ256 2026-09-21：AI_111 弹体 owner 存活门
+   *  Projectile.cs:41873 `type != 20 || ai[0] != 14f` 的本仓承接——DryadWardRingShot
+   *  每 tick 直读,树妖离开施法态=光环弹即刻熄灭,与原版 Kill 同相） */
+  get wardCasting(): boolean { return this.atkState === 14; }
   /** ai[2]：入态种子（弓族 cs:56052-59 = vector8.Y）+ 弓族连发推进档 flag28
    *  带内回写（cs:55382-91,±0.5 带外保留旧值——★对抗修复批⑤ A6）;其余态恒 0,
    *  态尽 exitAttackCommon 归零 */
@@ -1842,6 +1859,9 @@ export class TownNPC extends Entity {
     } else {
       this.tipsyNow = false;   // :93333 整段重置
     }
+    // ★BJ259：踢出冷却递减（NPC.UpdateNPC :91434-91437 `if (lookForHomeTimeout > 0)
+    //  lookForHomeTimeout--;` 每 tick 字面）
+    if (this.lookForHomeTimeout > 0) this.lookForHomeTimeout--;
     this.teleportedHome = false;
     const world = game.world;
     // 战斗书增益一次性套用（后入驻的 NPC 在首 tick 补；使用书时对在场者即时叠）
@@ -4521,7 +4541,8 @@ export class TownNPC extends Entity {
    *    Lerp 至 1200（钳 600/1200 上限）
    *  - 玩家授予（:38797-38802）：弹龄 >=30 且 FindBuffIndex(165)==-1 →
    *    AddBuff(165,120)；本仓 buffs.apply 的 max 合并等价续期（120t=2s）
-   *  - 尘（:38754-38777）：1/4 掷光环环尘（163，2/3 尘加环向速度）
+   *  - 尘（:38754-38777,★BJ256 2026-09-21 1:1）：微光正弦混金尘 70 → 1/4 环缘向心
+   *    尘 + 1/2 近心 30px 尘,向心速度 3..8（1/8 ×3+scale+0.5）
    *  - 熄灭（:38732 Kill 门 + :38814 >=570 Kill）：本 NPC 离开施法态或弹龄 570
    *  敌怪 186 DryadBane 同链 else-if 臂（Projectile.cs:41967-41970，2026-08-31 台账
    *  批补：!friendly && lifeMax>5 && !dontTakeDamage && (无186|≤20t 重授) &&
@@ -4595,11 +4616,58 @@ export class TownNPC extends Entity {
         }
       }
     }
-    if (this.rng() < 0.25 && a >= 5) {           // :38754 rand(4)==0
-      const ang = this.rng() * Math.PI * 2;
-      const rr = radius * (0.5 + this.rng() * 0.5);
-      game.spawnDust?.(this.cx + Math.cos(ang) * rr - 5, this.cy + Math.sin(ang) * rr - 5,
-        10, 10, 163, 0, 0, 100, null, 1.5, true);
+    // ---- 尘面（AI_111 :41901-41946,★BJ256 2026-09-21 1:1——旧 rr=radius×(0.5+rng×0.5)
+    //      随机半径+零速近似退役；两支=环缘向心尘 + 30px 近心尘）----
+    // 尘型（:41901-41909）：163 绿叶;微光变体（ai2==1 ⟺ shimmered,townNpcVariationIndex
+    // 映射同 :4825 注）正弦概率混金尘 70——p = sin(age%120×τ/120)×0.5+0.5
+    let dustType = 163;
+    if (this.shimmered) {
+      const p = Math.sin((a % 120) * (Math.PI * 2) / 120) * 0.5 + 0.5;
+      if (this.rng() < p) dustType = 70;
+    }
+    // 支1（:41910-41928）：Next(4)==0 → 盒=弹体盒 → position=Center+单位向×radius（环缘）,
+    // 速度=向心（-单位向×3..8;1/8 掷 ×3 且 scale+0.5）,noGravity,alpha100
+    if (this.rng() < 0.25) {
+      const jx = Math.floor(this.rng() * 21) - 10;         // Next(-10,11)
+      const jy = Math.floor(this.rng() * 21) - 10;
+      const len = Math.hypot(jx, jy);
+      if (len > 0) {                                       // Normalize() 零向量跳过（原版会 NaN 化,防御面）
+        const ux = jx / len, uy = jy / len;
+        const sp = 3 + Math.floor(this.rng() * 6);         // Next(3,9)=3..8
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, dustType, 0, 0, 100, null, undefined, true);
+        if (d) {
+          d.x = this.cx + ux * radius;
+          d.y = this.cy + uy * radius;
+          if (this.rng() < 0.125) {                        // Next(8)==0
+            d.vx = -ux * sp * 3; d.vy = -uy * sp * 3;
+            d.scale += 0.5;
+          } else {
+            d.vx = -ux * sp; d.vy = -uy * sp;
+          }
+        }
+      }
+    }
+    // 支2（:41929-41946）：Next(2)==0 → 同盒 scale1.5 → position=Center+单位向×30（近心）,
+    // 速度同支1 模式
+    if (this.rng() < 0.5) {
+      const jx = Math.floor(this.rng() * 21) - 10;
+      const jy = Math.floor(this.rng() * 21) - 10;
+      const len = Math.hypot(jx, jy);
+      if (len > 0) {
+        const ux = jx / len, uy = jy / len;
+        const sp = 3 + Math.floor(this.rng() * 6);
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, dustType, 0, 0, 100, null, 1.5, true);
+        if (d) {
+          d.x = this.cx + ux * 30;
+          d.y = this.cy + uy * 30;
+          if (this.rng() < 0.125) {
+            d.vx = -ux * sp * 3; d.vy = -uy * sp * 3;
+            d.scale += 0.5;
+          } else {
+            d.vx = -ux * sp; d.vy = -uy * sp;
+          }
+        }
+      }
     }
   }
 
@@ -4758,6 +4826,15 @@ export class TownNPC extends Entity {
     const shotHH = (shotDef?.height ?? 10) / 2;
     const sx = this.cx + this.facing * 16 - shotHW;
     const sy = this.cy - 2 - shotHH;
+    // ★BJ256 2026-09-21：20 树妖净化脉冲专类承载（AI_111 域内,详注见 DryadWardRingShot
+    // 头注）——原版出膛（:55531-55536）= Center+(spriteDirection×16,−2) 原地固定
+    // velocity 0（num63=0f）、ai1=whoAmI/ai2=variationIndex；旧实现无此守卫,有靶时
+    // 坠入下方 160/663 落点弹支（弹体出生在目标身上）+通用「命中即亡」=全程零帧可见
+    if (this.vanillaId === 20 && proj === 586) {
+      game.spawnTownShot?.(new DryadWardRingShot(this.cx + this.facing * 16, this.cy - 2,
+        this.shimmered ? 1 : 0, this));
+      return;
+    }
     // 落点弹(160/663):目标区域随机点生成 velocity=0;实心重掷(160≤10/:55351、
     // 663≤5/:55369),重掷耗尽仍实心则按末次落点照常生成(原版 while 语义)
     // ★对抗修复批③ B-F10c：出膛附 ai2=townNpcVariationIndex（:55490-95/:55503-08/
@@ -4820,8 +4897,9 @@ export class TownNPC extends Entity {
     //     消费 hslToRgb(ai[1],1,.5) 上色；本仓 TownShot 无油漆系统 → 仅传参+登记；
     //   · 142 圣诞 ai1 = Next(5) 列变体（:55067 三元末支第 11 参）→ TownShot case
     //     589 列索引消费位；
-    //   · 树妖 20 原版同样附 ai1=whoAmI/ai2=variationIndex（:55533），但光环弹 586
-    //     走 updateDryadWardAura 直驱、无 TownShot 出膛点 → 不适用（登记）。
+    //   · 树妖 20 原版同样附 ai1=whoAmI/ai2=variationIndex（:55533）——★BJ256
+    //     2026-09-21 起光环弹 586 由 DryadWardRingShot 专类承载（上方专类出膛支
+    //     先行 return,不再坠入本通用支;buff/bane 施加面仍在 updateDryadWardAura）。
     const varIdx = this.shimmered ? 1 : 0;           // townNpcVariationIndex
     let shotOpts: { ai1?: number; ai2?: number; life?: number; noGravity?: boolean } | undefined;
     // 582 侦察弹无重力直飞（Projectile.cs AI_109 :34651-34689 仅速度保持/Lerp 归位,

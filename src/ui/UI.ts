@@ -8,7 +8,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
-import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, availableItemCountFor, collectOwnedItems, expandStationTiles, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, availableItemCountFor, collectOwnedItems, expandStationTiles, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import {
   craftGridGeometry, craftGridCellXY, craftGridPageBtnXY,
   clampCraftGridRecStart, craftGridRecStartAfterUp, craftGridRecStartAfterDown,
@@ -261,11 +261,11 @@ function prefixedDamage(def: (typeof ITEM_DEFS)[number], prefix?: number): numbe
   if (!def.tool?.damage || !prefix) return def.tool?.damage ?? 0;
   return Math.max(1, Math.round(def.tool.damage * prefixStat(prefix).dmg));
 }
-/** 内部 item id → 原版 item id（UI 层等价 Shimmer.vanillaIdOfItem：vid 直取 +
+/** 内部 item id → 原版 item id（UI 层 vid 直读同 Shimmer 反解旧函数：vid 直取 +
  *  vi_ 前缀反解——避免 UI 模块图再挂 Shimmer 全链） */
 function vidOf(itemId: number): number {
   const def = ITEM_DEFS[itemId];
-  return def ? (def.vid ?? vanillaIdOfItemKey(def.key)) : -1;
+  return def ? (def.vid ?? -1) : -1;
 }
 
 /** 原版 item id → 内部 item id（vid→key→ITEM_BY_KEY；未注册 -1）。
@@ -1467,7 +1467,7 @@ export class UI {
         if (cur && where === 'inv'
           && (!this.heldStack || this.heldStack.id !== cur.id
             || (this.heldStack.prefix ?? 0) !== (cur.prefix ?? 0))
-          && OPENABLE_BAG_VIDS.has(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''))) {
+          && OPENABLE_BAG_VIDS.has(ITEM_DEFS[cur.id]?.vid ?? -1)) {
           this.tryOpenContainer(cur, i);
           return;
         }
@@ -1497,7 +1497,7 @@ export class UI {
         if (cur && cur.stack === 1 && CAN_ITEM_SWAP_AT.has(ctx)
           && (!this.heldStack || this.heldStack.id !== cur.id
             || (this.heldStack.prefix ?? 0) !== (cur.prefix ?? 0))) {
-          const sw = tryItemSwapVid(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''));
+          const sw = tryItemSwapVid(ITEM_DEFS[cur.id]?.vid ?? -1);
           if (sw && invIndexOfVanilla(sw.target) > 0) {
             cur.id = invIndexOfVanilla(sw.target);
             this.game.sfx.play(sw.sound, 1);
@@ -1686,7 +1686,7 @@ export class UI {
     // ★d.armor 死分支已移除（2026-09-02:字段全仓零写入,恒走 itemstats 部位表）
     if (armorSlotIndexOfInternal(cur.id) >= 0) {
       target = armorSlotIndexOfInternal(cur.id) + (van ? 10 : 0); // vi_ 盔甲（vanilla-itemstats 部位）
-    } else if (d.accessory || statOfInternal(cur.id)?.acc !== undefined) {
+    } else if (d?.accessory || statOfInternal(cur.id)?.acc !== undefined) {   // ★方案 A：`?.` 洞守卫（BJ265）
       // vi_ 配饰走 itemstats acc 判定(legacy accessory 字段已随退役消失——曾只认
       // legacy 字段导致 vi_ 配饰右键一键装备静默失效)
       const accBase = van ? 13 : 3;   // 社交配饰段 13+（ArmorSwap :3315 3+num）
@@ -1958,7 +1958,7 @@ export class UI {
     const chest = this.openChest;
     const maxStack = cur ? (ITEM_DEFS[cur.id]?.maxStack ?? 1) : 1;
     // ★SW-AY1 #10：Quick Trash 三态设置进路由（缺省 Left Control = QUICK_TRASH_DEFAULTS）
-    const curVid = cur ? vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '') : -1;
+    const curVid = cur ? (ITEM_DEFS[cur.id]?.vid ?? -1) : -1;
     const plan = planAlternateClick({
       context: slotContext(where, i, panelOpen, where === 'chest' ? chest?.x : undefined),
       itemAir: !cur,
@@ -2083,7 +2083,7 @@ export class UI {
    *  @param onlyIfFinish onlySacrificeIfItWouldFinishResearch（:304-307——只在本件
    *  覆盖剩余研究缺口整段时才献）。返回是否献祭成立（:735 `!(A|B)` 音面判据） */
   private tryResearchIntoTrash(it: { id: number; stack: number }, onlyIfFinish: boolean): boolean {
-    const vid = vanillaIdOfItemKey(ITEM_DEFS[it.id]?.key ?? '');
+    const vid = (ITEM_DEFS[it.id]?.vid ?? -1);
     if (!(vid > 0)) return false;
     const n = this.game.research.tryGetSacrificeNumbers(vid);
     if (!n) return false;                                  // :293-295 无条目 CannotSacrifice
@@ -2107,7 +2107,7 @@ export class UI {
    *  ResearchUI），SwapItem 的回吐面=净无操作；献后溢出留原格（原版经
    *  GetItem(ReturnItemFromSlot) 回包/落地，净语义同为「留在身上」） */
   private shiftResearchSacrifice(i: number, cur: { id: number; stack: number }): void {
-    const vid = vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '');
+    const vid = (ITEM_DEFS[cur.id]?.vid ?? -1);
     const n = vid > 0 ? this.game.research.tryGetSacrificeNumbers(vid) : null;
     const remaining = n ? n.need - n.have : 0;
     if (!n || remaining <= 0) return;                      // 不可研究=原版 Swap 后原样回桌
@@ -2396,7 +2396,7 @@ export class UI {
   private tryOpenContainer(cur: { id: number; stack: number }, i: number): void {
     const game = this.game;
     const inv = game.player.inv;
-    const vid = vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '');
+    const vid = (ITEM_DEFS[cur.id]?.vid ?? -1);
     const px = game.player.cx, py = game.player.cy;
     // 虚空袋可达门（Player.useVoidBag :22892-22901 = 背包含 4131）
     const voidLensIid = invIndexOfVanilla(4131);
@@ -2464,7 +2464,7 @@ export class UI {
     if (!this.heldStack) return;
     // 露西斧存取台词（ItemSlot_OnItemTransferred :75-99：CountsAsStorage(箱柜)
     // 状态翻转才说话——存入 Storage / 取回 PickedUp，420t 冷却）
-    if (vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '') === 5095
+    if ((ITEM_DEFS[this.heldStack.id]?.vid ?? -1) === 5095
       && (this.heldFrom === 'chest') !== (where === 'chest')) {
       if (where === 'chest') this.game.lucyTransferToStorage();
       else this.game.lucyTransferFromStorage();
@@ -2499,7 +2499,7 @@ export class UI {
         this.heldStack = { ...cur, favorited: false };   // ★SW-AU2：MouseItemSwap 双端清（:1230-1234）——装备面取出到光标同清
         // R4-39（AfterItemSwap,IS57:1975-1985）：装备/杂项槽交换后播音——新入槽件
         // ∈换型表（含 1457 新 6168/6169/6193/6194）→ SoundID 22(Unlock),否则 7(Grab)
-        const nv = vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '');
+        const nv = (ITEM_DEFS[this.heldStack.id]?.vid ?? -1);
         this.game.sfx.play(nv > 0 && AFTER_ITEM_SWAP.has(nv) ? 'unlock' : 'pickup', 1);
       } else {
         return; // 同型叠入 / 光标多叠对占用槽：原版无动作
@@ -2549,7 +2549,7 @@ export class UI {
       //  收藏虚空袋(4131/5325)→虚空保险库 拒发移动动作（result=-1 无操作）。
       //  世界箱（context 3）无此门（case 3 直通 :1480-1482）——按容器身份判
       if (this.heldStack.favorited) {
-        const hv = vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '');
+        const hv = (ITEM_DEFS[this.heldStack.id]?.vid ?? -1);
         // ★SW-BJ1：判别式抽 blockedFromTransferIntoChest 单源（拖放臂/tooltip 行共用）
         if (blockedFromTransferIntoChest(chest.x, hv)) return;
       }
@@ -2623,9 +2623,11 @@ export class UI {
   private throwHeldToWorld() {
     if (!this.heldStack || !this.game) return;
     const p = this.game.player;
-    const key = ITEM_DEFS[this.heldStack.id].key;
-    // 丢弃露西 → ThrownAway 台词（Player.cs:4984-4986）
-    if (vanillaIdOfItemKey(key) === 5095) this.game.lucyThrownAway();
+    const heldDef = ITEM_DEFS[this.heldStack.id];
+    const key = heldDef.key;
+    // 丢弃露西 → ThrownAway 台词（Player.cs:4984-4986）——vid 直读
+    //（★方案 A 阶段 5/BJ266:vanillaIdOfItemKey 键前缀反解退役,internal≡vid 恒等域）
+    if ((heldDef.vid ?? -1) === 5095) this.game.lucyThrownAway();
     const drop = this.game.spawnDrop(p.cx + p.facing * 18, p.y + 6, key, this.heldStack.stack,
       p.facing * 4 + p.vx, -2);
     if (drop) drop.noGrabDelay = 100;
@@ -2763,7 +2765,9 @@ export class UI {
     // ④ expert 旗末位覆写 → −12——仅 MouseText tooltip 链（Main.cs:20512-20515
     //    绘制期覆写）;PopupText 飘字链（PrepareEffects PopupText.cs:388-404）读
     //    Item.rare 字段值,expert 走 somePopup.expert 旗不改色——专家配饰 3090/3097
-    //    等可重铸,飘字链须跳过④（否则 −12→白,原版=位移后表色）。★SW-N4
+    //    等可重铸,飘字链须跳过④（否则 −12→白。★S5 勘误 BJ263 2026-09-22:原版 expert
+    //    飘字色=Disco 动色（PopupText.cs:670-674 Main.DiscoR/G/B）,非「位移后表色」
+    //    ——本仓静态稀有度画线=登记偏差,维持）。★SW-N4
     if (!opts?.forPopup && isVi && ITEM_EXPERT[String(vid)] === 1) rare = -12;
     return rare;
   }
@@ -2788,7 +2792,7 @@ export class UI {
     //  （基表→变体→词缀档位移→expert 覆写,逐域锚见方法头）——本面行为零变化
     //  （旧内联链原序迁入）;isExpert 另取（Expert 行门 :21214 旗本体判,非 rare 档判）
     const rare = this.tooltipRareOf(def, s.prefix);
-    const isExpert = def.key.startsWith('vi_')
+    const isExpert = !!def && def.key.startsWith('vi_')   // ★方案 A：洞守卫（BJ265）
       && ITEM_EXPERT[String(parseInt(def.key.slice(3), 10))] === 1;
     const nameColor = this.rarityColor(rare);
     // 词缀名前缀（Lang.GetPrefixedItemName：Prefix.{ConstName} + 物品名）
@@ -2919,7 +2923,7 @@ export class UI {
         if (!inv) return false;
         for (let k = 0; k < 58; k++) {
           const it = inv.slots[k];
-          if (it && it.stack > 0 && vanillaIdOfItemKey(ITEM_DEFS[it.id]?.key ?? '') === 905) return true;
+          if (it && it.stack > 0 && (ITEM_DEFS[it.id]?.vid ?? -1) === 905) return true;
         }
         return false;
       })(),
@@ -2954,7 +2958,7 @@ export class UI {
       // 已挡移动）——旧注「容器族不产生收藏标记」系误判,本行为差为真
       if (this.openChest
         && blockedFromTransferIntoChest(this.openChest.x,
-          vanillaIdOfItemKey(ITEM_DEFS[s.id]?.key ?? ''))) {
+          (ITEM_DEFS[s.id]?.vid ?? -1))) {
         linesHtml += `<br>${Lang.text('UI.ItemCannotBePlacedInsideItself')}`;
       }
     }
@@ -3103,6 +3107,14 @@ export class UI {
    *  Game.render 经 window.__swUI 读取；与 UI.ts:802 同款活取） */
   get inventoryOpen(): boolean {
     return !!this.invPanel && this.invPanel.style.display === 'block';
+  }
+
+  /** ★BJ259：住房 UI 开态（原版 EquipPage==1 桌面支,Main.cs:46986
+   *  DrawInterface_7_TownNPCHouseBanners 门——驻家旗与右键踢出仅住房页开时激活）。
+   *  本仓两形态：经典 HousingPanel（housingOpen）∪ vanilla 布局背包住房页
+   *  （vinvPageCurrent===1 且背包开）。Game.updateUse 踢出臂经 __swUI 活取。 */
+  get housingUiActive(): boolean {
+    return this.housingOpen || (this.inventoryOpen && this.vinvPageCurrent === 1);
   }
 
   /** 住房面板开合回写（mainFlow.openHousing / HousingPanel.onClosed）——
@@ -5520,7 +5532,7 @@ export class UI {
     const items = chest.items;
     const denom = (id: number) => coinIndexOf(id);            // 0 铜..3 铂（=原版 71+num-1 档）
     const coinId = (d: number) => ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[71 + d]];
-    const coinMax = (d: number) => ITEM_DEFS[coinId(d)].maxStack ?? 100;
+    const coinMax = (d: number) => ITEM_DEFS[coinId(d)]?.maxStack ?? 100;   // ★方案 A：`?.` 洞守卫（BJ265）
     let anythingMoved = false;                                // 有实际搬移 → 收尾播 Grab
     // ---- ① MoveCoins（:998-1203）----
     const tally = [0, 0, 0, 0];                               // array[0铜..3铂]
@@ -5614,9 +5626,9 @@ export class UI {
       if (!cur || cur.favorited) continue;
       for (let i = 0; i < items.length; i++) {                // 合并遍（IntoLocal/WorldChest 共义）
         const cs = items[i];
-        if (!cs || cs.stack >= (ITEM_DEFS[cs.id].maxStack ?? 1)) continue;
+        if (!cs || cs.stack >= (ITEM_DEFS[cs.id]?.maxStack ?? 1)) continue;   // ★方案 A：`?.` 洞守卫（BJ265）
         if (cs.id !== cur.id || (cs.prefix ?? 0) !== (cur.prefix ?? 0)) continue;   // CanStack :49870
-        const put = Math.min((ITEM_DEFS[cs.id].maxStack ?? 1) - cs.stack, cur.stack);
+        const put = Math.min((ITEM_DEFS[cs.id]?.maxStack ?? 1) - cs.stack, cur.stack);
         cs.stack += put;
         cur.stack -= put;
         anythingMoved = true;

@@ -122,7 +122,9 @@ const paintings = extractPool('SetupTravelShop_GetPainting');
 
 // ================= ★BJ215 era guard：干跑对拍 / --out 沙箱 / --write-real =================
 const FRESH = JSON.stringify({ items, paintings, src: TREE });
-const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');
+// ★BJ261：探测注入面（SW_TRAVELSHOP_JSON,读侧现库重定向,守卫测试夹具专用）——
+//   与 --write-real 混用拒（g1 footgun,探测与写盘分离=守卫被绕过洗库面）
+const LIVE_JSON = process.env.SW_TRAVELSHOP_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-travelshop.json');
 const outIdx = process.argv.indexOf('--out');
 // ★M1 变异锚:干跑臂 null(守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面)
 const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : null;
@@ -134,12 +136,19 @@ if (OUT_PATH && WRITE_REAL) {
   console.error('  处置：沙箱对拍用 --out <path>；确认定谳后更新现库用 --write-real。');
   process.exit(1);
 }
-/** 现库 vs 重产动态 diff：「现库有而重产无」的条目（键=id/ids 组+tier,值=整条 JSON 等价）。
+if (WRITE_REAL && process.env.SW_TRAVELSHOP_JSON !== undefined) {
+  console.error('[extract-travelshop] 拒绝运行：探测注入面（SW_TRAVELSHOP_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  console.error('  处置：对拍用探测 env（零写盘干跑）或 --out 沙箱；更新现库须清掉探测 env 再 --write-real。');
+  process.exit(1);
+}
+/** 现库 vs 重产动态 diff：live-only=「现库有而重产无」的条目（键=id/ids 组+tier,值=整条
+ *  JSON 等价）+ fresh-only=「重产有而现库无」现库退化面（★G-1/S3 处方:只算 live-only 的
+ *  对拍闸对现库删条恒绿,双向才算「重产盖住现库」——缺键型=itemrare 同族,任一轴非空拒）。
  *  ★键含 tier：画作 5121-5124 在两池各有双 tier 档（BJ215 定谳）,单 id 键会塌缩互撞。 */
 function washOf(liveRaw) {
   let live;
   try { live = JSON.parse(liveRaw); } catch { return null; } // 坏损:不拦
-  const wash = { items: [], paintings: [] };
+  const wash = { items: [], paintings: [], itemsFresh: [], paintingsFresh: [] };
   const keyOf = (e) => `${Array.isArray(e.ids) ? `g${e.ids.join(',')}` : `i${e.id}`}#${e.tier}`;
   const diffPool = (livePool, freshPool) => {
     const freshByKey = new Map(freshPool.map((e) => [keyOf(e), JSON.stringify(e)]));
@@ -151,18 +160,27 @@ function washOf(liveRaw) {
     }
     return out;
   };
+  const freshOnlyOf = (livePool, freshPool) => {
+    const liveKeys = new Set(livePool.map(keyOf));
+    return freshPool.filter((e) => !liveKeys.has(keyOf(e)));
+  };
   wash.items = diffPool(live.items ?? [], items);
   wash.paintings = diffPool(live.paintings ?? [], paintings);
+  wash.itemsFresh = freshOnlyOf(live.items ?? [], items);
+  wash.paintingsFresh = freshOnlyOf(live.paintings ?? [], paintings);
   return wash;
 }
-const washEmpty = (w) => !w || (w.items.length === 0 && w.paintings.length === 0);
+const washEmpty = (w) => !w || (w.items.length === 0 && w.paintings.length === 0 && w.itemsFresh.length === 0 && w.paintingsFresh.length === 0);
 const washReport = (w) => {
-  console.error('  物证（现库领先面——重产整批回退面/差异清单）：');
+  console.error('  物证（live-only=现库领先面/重产整批回退面;fresh-only=现库退化缺键型面）：');
   for (const [label, pool] of [['items', w.items], ['paintings', w.paintings]]) {
     for (const { e, fresh } of pool.slice(0, 4)) {
       console.error(`    ${label} 现库 ${JSON.stringify(e)}${fresh === null ? '（重产缺此条）' : ` vs 重产 ${JSON.stringify(fresh)}`}`);
     }
     if (pool.length > 4) console.error(`    ${label} …共 ${pool.length} 条`);
+  }
+  for (const [label, pool] of [['items', w.itemsFresh], ['paintings', w.paintingsFresh]]) {
+    if (pool.length) console.error(`    [fresh-only] ${label} 现库缺 ${pool.length} 条（如 ${pool.slice(0, 3).map((e) => JSON.stringify(e)).join(' | ')}）`);
   }
 };
 const liveRaw = existsSync(LIVE_JSON) ? readFileSync(LIVE_JSON, 'utf8') : null;
@@ -184,12 +202,12 @@ if (OUT_PATH || WRITE_REAL) {
   if (!liveRaw) {
     console.error('[extract-travelshop] 干跑（零写盘）：现库缺 vanilla-travelshop.json,跳过对拍。写盘须显式 --out <path> 或 --write-real。');
   } else if (wash && !washEmpty(wash)) {
-    console.error('[extract-travelshop] 干跑对拍：检测到「现库有而重产无」的条目=洗库预警（裸跑重产=整批回退）——零写盘。');
+    console.error('[extract-travelshop] 干跑对拍：双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
     washReport(wash);
-    console.error('  活通道：重产前先恢复提取器词表（BJ183 登记债）；沙箱试验用 --out <path>。');
+    console.error('  活通道：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 --out <path>。');
     process.exit(1);
   } else {
-    console.error('[extract-travelshop] 干跑对拍：重产盖住现库（零写盘）。写盘须显式 --out <path> 或 --write-real。');
+    console.error('[extract-travelshop] 干跑对拍：重产盖住现库（双向零差,零写盘）。写盘须显式 --out <path> 或 --write-real。');
   }
 }
 console.log('items:', items.length, 'paintings:', paintings.length,

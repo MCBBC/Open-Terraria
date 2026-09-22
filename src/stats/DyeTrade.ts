@@ -9,7 +9,7 @@
 //   && Main.hardMode（未入 hardMode 无按钮——肉前奇异植物无处消耗是原版设计）。
 //   台词 = Lang.DyeTraderQuestChat（Lang.cs:296-300）：DyeTraderSpecialText.
 //   HasPlant/NoPlant 前缀随机各 3 条。
-import { vanillaIdOfItem } from './Shimmer';
+
 
 /** 换染料档位门（GetDyeTraderReward :55748-55775 逐档） */
 export interface DyeTraderRewardGates {
@@ -49,11 +49,13 @@ export function rollDyeTraderReward(g: DyeTraderRewardGates, rand: () => number 
 /** ItemID.Sets.ExoticPlantsForDyeTrade（ItemID.cs:1108）：奇异植物四色 */
 export const EXOTIC_PLANT_ITEMS = [3385, 3386, 3387, 3388] as const;
 
+import { ITEM_DEFS } from '../data/items';
+
 /** Player.FindItem(types)（Player.cs:55029-55039）：0-57 首个 stack>0 命中槽；无 -1 */
 export function findExoticPlantSlot(slots: ReadonlyArray<{ id: number; stack: number } | null>): number {
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
-    if (s && s.stack > 0 && (EXOTIC_PLANT_ITEMS as readonly number[]).includes(vanillaIdOfItem(s.id))) return i;
+    if (s && s.stack > 0 && (EXOTIC_PLANT_ITEMS as readonly number[]).includes(ITEM_DEFS[s.id]?.vid ?? -1)) return i;
   }
   return -1;
 }

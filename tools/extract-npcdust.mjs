@@ -157,20 +157,33 @@ function splitArgs(s) {
   if (cur.trim()) out.push(cur.trim());
   return out;
 }
-function parseCond(raw) {
-  const cond = { typeIds: new Set(), ranges: [], excludes: new Set(), gates: [], life: null, others: false };
-  if (!raw) { cond.others = true; return cond; }
-  const text = raw.trim();
-  const orParts = splitTop(text, '|').filter(Boolean);
-  for (const p0 of orParts) {
-    const p = p0.trim().replace(/^\(/, '').replace(/\)$/, '').trim();
-    let mr;
-    if ((mr = p.match(/^type >= (\d+) && type <= (\d+)$/))) { cond.ranges.push([Number(mr[1]), Number(mr[2])]); continue; }
-    for (const a0 of splitTop(p, '&').filter(Boolean)) {
-      const a = a0.trim().replace(/^\(/, '').replace(/\)$/, '').trim();
-      if (a.includes(' || ')) {
-        // AND 项内嵌 OR（(type==210||type==211) && life<=0）——递归取并集语义
-        const sub = parseCond(a.replace(/^\(/, '').replace(/\)$/, ''));
+  // ★BJ263（2026-09-22）：配对括号剥离（旧 .replace(/^\(/,'').replace(/\)$/,'') 无条件
+  //   剥一侧——(A||B)&&C 形态首括被剥而尾无括号 → 后续 splitTop('&') 因游离 ')' 深度
+  //   -1 拒切 → OR 尾臂 `type == 591) && !wet` 整段坠 gates（590/591 案:types 只剩 590、
+  //   reason 出残臂）。仅在首括与末字确为同一配对时才剥。
+  function stripMatchedParens(s) {
+    if (!s.startsWith('(') || !s.endsWith(')')) return s;
+    let d = 0;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === '(') d++;
+      else if (s[i] === ')') { d--; if (d === 0 && i < s.length - 1) return s; }
+    }
+    return d === 0 ? s.slice(1, -1).trim() : s;
+  }
+  function parseCond(raw) {
+    const cond = { typeIds: new Set(), ranges: [], excludes: new Set(), gates: [], life: null, others: false };
+    if (!raw) { cond.others = true; return cond; }
+    const text = raw.trim();
+    const orParts = splitTop(text, '|').filter(Boolean);
+    for (const p0 of orParts) {
+      const p = stripMatchedParens(p0.trim());
+      let mr;
+      if ((mr = p.match(/^type >= (\d+) && type <= (\d+)$/))) { cond.ranges.push([Number(mr[1]), Number(mr[2])]); continue; }
+      for (const a0 of splitTop(p, '&').filter(Boolean)) {
+        const a = stripMatchedParens(a0.trim());
+        if (a.includes(' || ')) {
+          // AND 项内嵌 OR（(type==210||type==211) && life<=0）——递归取并集语义
+          const sub = parseCond(stripMatchedParens(a));
         for (const id of sub.typeIds) cond.typeIds.add(id);
         for (const r of sub.ranges) cond.ranges.push(r);
         for (const ex of sub.excludes) cond.excludes.add(ex);
@@ -769,7 +782,7 @@ data._meta = {
   schema: 'per-npcId: {hit:[stmt],death:[stmt]}; stmt={dust,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,posts?,alt?,line}; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; sx token: hd|2hd|2.5hd|1.5hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv; alt={k,op,v,ifOps,elseOps}=Main.rand.Next(k) op v 掷骰分支',
   noGenericTail: '★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）',
   carveOuts: [
-    '泼岩浆/亡体 NewNPC/分裂生成等世界改写与生成族不入尘表（BJ246 已接泼岩浆+分裂链;其余另刀）',
+    '泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)',
     'gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）',
     '音效（SoundID.NPCHit/NPCDeath）/DBT/公告/探针生成（135 探针等）非尘面',
   ],

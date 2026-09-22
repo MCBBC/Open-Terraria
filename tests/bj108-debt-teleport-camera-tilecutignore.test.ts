@@ -27,6 +27,7 @@ import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TILE_BY_KEY } from '../src/data/tiles';
+import { ITEM_BY_KEY } from '../src/data/items';   // ★方案 A:装备 id 一律运行时反查（旧硬编码 6015=重排前内部号,已失效）
 import { TILE } from '../src/core/constants';
 import { GrappleProj, GRAPPLE_LATCH } from '../src/entities/GrappleProj';
 import { Game } from '../src/core/Game';
@@ -154,7 +155,9 @@ describe('BJ108 债① 皇后钩挂墙瞬移接相机过渡（Teleport(vector,10
 // 债② cutTile tileCutIgnorance（CutTilesAt :15376 / GetTileCutIgnorance :45003）
 // ============================================================
 /** Game 原型台（bj103 harness 同构）：world.store/player/breakTile/smashPot 桩注入。
- *  acc5309=true → 配饰槽 3 挂 vi_5309_DontHurtNatureBook（内部 id 6015）。 */
+ *  acc5309=true → 配饰槽 3 挂 vi_5309_DontHurtNatureBook（★方案 A 恒等域 iid=5309;运行时反查防漂移）。 */
+const BOOK_IID = ITEM_BY_KEY['vi_5309_DontHurtNatureBook']
+  ?? ITEM_BY_KEY['vi_5309_DontHurtNature'] ?? -1;
 function cutHarness(tiles: Map<number, number>, acc5309: boolean) {
   const game = Object.create(Game.prototype) as unknown as {
     world: { store: unknown };
@@ -183,7 +186,7 @@ function cutHarness(tiles: Map<number, number>, acc5309: boolean) {
     map.get(x * 100000 + y) ?? 0;
   game.player = {
     inv: {
-      armor: acc5309 ? { 3: { id: 6015 } } : {},   // armor[3]=配饰首槽（ACC_ARMOR_START）
+      armor: acc5309 ? { 3: { id: BOOK_IID } } : {},   // armor[3]=配饰首槽（ACC_ARMOR_START;★方案 A:运行时反查）
       accSlotMax: 8,
       heldItem: () => null,
     },

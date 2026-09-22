@@ -48,13 +48,18 @@ ctx.onmessage = async (e) => {
       const rows = Math.ceil(n / COLS);
       const rgba = new Uint8ClampedArray(COLS * 16 * rows * 16 * 4);
       for (let i = 0; i < n; i++) {
-        const px = genItemIconPixels(ITEM_DEFS[i].key);
+        // ★方案 A（BJ264）：重排后 ITEM_DEFS 稀疏（洞=undefined）——洞格留透明像素、
+        //   ids 压 -1（不可撞内部 id 域）保持格位对齐（AssetGen.prepareIconAtlas
+        //   按 ids[i]=内部 id 建 slotById 槽位映射）
+        const d = ITEM_DEFS[i];
         const cx = (i % COLS) * 16, cy = Math.floor(i / COLS) * 16;
+        if (!d) { ids.push(-1); continue; }
+        const px = genItemIconPixels(d.key);
         for (let y = 0; y < 16; y++) {
           const src = y * 64, dst = ((cy + y) * COLS * 16 + cx) * 4;
           rgba.set(px.data.subarray(src, src + 64), dst);
         }
-        ids.push(ITEM_BY_KEY[ITEM_DEFS[i].key]);
+        ids.push(ITEM_BY_KEY[d.key]);
       }
       const buf = rgba.buffer as ArrayBuffer;
       ctx.postMessage({ id: req.id, type: 'icons',

@@ -74,7 +74,7 @@ export interface WorldPacket {
    *  ★BJ71:worker 读档包缝随包;旧包缺省=空表） */
   bannerKills?: Record<number, number>;
   /** 城镇 NPC 段（读档路径回传,Game.loadWorld 消费;旧包缺省=空→新世界出生分支） */
-  pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
+  pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean; kickedOut?: boolean }>;
   /** ★SW-FX11（2026-09-10）：NPC 段尾 SavesAndLoads 四塔位（读档路径回传,afterWorldLoad 恢复;旧包缺省=无） */
   pendingPillarNpcs?: Array<{ id: number; x: number; y: number }>;
   /** ★SW-FX11（2026-09-10）：按压压力板位（读档路径回传,afterWorldLoad 一次性重触发;旧包缺省=无） */

@@ -253,12 +253,12 @@ describe('④亲缘桃 6191/6192', () => {
   });
   it('配方链七条（Recipe.cs:10510-10533）：两桃合成 + 五条 Trusty 升级', () => {
     const byCreate = (vid: number) => VANILLA_RECIPES.filter((r) => r.create === vid);
-    // 6191 小桃 = 桃 4293 ×1 + 光魂 520 ×12 + 暗魂 521 ×12 + 果组(17) + 书架 125（:10510-10516）
+    // 6191 小桃 = 桃 4293 ×1 + 光魂 520 ×12 + 暗魂 521 ×12 + 果组(★BJ261 重编后 gid 18) + 书架 125（:10510-10516）
     const r6191 = byCreate(6191)[0];
     expect(r6191).toBeDefined();
     expect(r6191.tile).toBe(125);
     expect(r6191.items).toEqual([{ id: 4293, stack: 1 }, { id: 520, stack: 12 }, { id: 521, stack: 12 }]);
-    expect(r6191.groups).toEqual([17]);
+    expect(r6191.groups).toEqual([18]);   // ★BJ261 gid 按源码注册序重编:Fruit 17→18（Turtles@9 补位）
     // 6192 大桃 = 生命果 1291 ×1 + 双魂 ×12 + 书架 125（:10517-10520）
     const r6192 = byCreate(6192)[0];
     expect(r6192.items).toEqual([{ id: 1291, stack: 1 }, { id: 520, stack: 12 }, { id: 521, stack: 12 }]);
@@ -274,8 +274,8 @@ describe('④亲缘桃 6191/6192', () => {
     expect(up(5664, 6192, 6149)).toBe(true);   // 火绒狐 → 可靠的火绒狐
     expect(up(5663, 6192, 6148)).toBe(true);   // 捣蛋猫 → 可靠的捣蛋猫
   });
-  it('果组 17 含桃 4293（RecipeGroups.Fruit 成员表）+ 全材料物品注册在盘', () => {
-    expect(RECIPE_GROUP_ITEMS['17']).toContain(4293);
+  it('果组 18 含桃 4293（RecipeGroups.Fruit 成员表,★BJ261 重编后 gid）+ 全材料物品注册在盘', () => {
+    expect(RECIPE_GROUP_ITEMS['18']).toContain(4293);
     for (const v of [4293, 520, 521, 1291]) expect(VANILLA_ITEM_KEY_BY_ID[v], `vid ${v}`).toBeDefined();
   });
 });
@@ -292,7 +292,7 @@ describe('⑤宝石法杖 6171', () => {
     expect(VANILLA_ITEM_KEY_BY_ID[6171]).toBe('vi_6171_BejeweledStaff');
   });
   it('combatWeapon 分流 magic + PackGemStaffFeatures：126 BiggerHitbox ∪ 6171 AllGems 全特性位（Player.cs:49994-50002）', () => {
-    const cw = combatWeapon({ key: VANILLA_ITEM_KEY_BY_ID[6171] });
+    const cw = combatWeapon({ key: VANILLA_ITEM_KEY_BY_ID[6171], vid: 6171 });
     expect(cw?.kind).toBe('magic');
     expect((cw as unknown as { shoot: number }).shoot).toBe(126);
     expect((cw as unknown as { mana: number }).mana).toBe(15);

@@ -193,14 +193,17 @@ describe('R25-④ extract-recipes.mjs 强制门', () => {
     expect(r.status).toBe(0);
   }, 70000);
 
-  it('缺省裸跑写现库 → stored-only>0 中止 exit≠0 且现库不动', () => {
+  it('缺省裸跑=干跑对拍零写盘（★BJ261 era guard 取代 R25 强制门:双向对拍零漂移 exit 0+现库不动）', () => {
     const libPath = join(GAME, 'src/data/vanilla-recipes.json');
     const before = readFileSync(libPath, 'utf8');
     const r = spawnSync(process.execPath, ['tools/extract-recipes.mjs'],
       { cwd: GAME, encoding: 'utf8', timeout: 60000 });
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain('强制门中止');
-    expect(r.stderr).toMatch(/存量独有配方/);
+    // ★BJ261:缺省臂改干跑对拍（零写盘）——R25 时代「stored-only>0 中止 exit≠0」前门
+    //   由 tests/extract-recipes-era-guard.test.ts 的双向对拍+双旗逃生取代且更强
+    //   （fresh-only 现库退化轴为本刀新增,旧门不计不报）。
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('干跑对拍');
+    expect(r.stderr).toContain('双向零差');
     expect(readFileSync(libPath, 'utf8')).toBe(before);
   }, 70000);
 });

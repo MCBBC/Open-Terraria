@@ -87,7 +87,9 @@ export function buildItemSearchPool(io: {
   tipOf?: (vid: number) => string;
 }): ItemSearchPoolEntry[] {
   const coveredSheets = new Set<number>();
+  // ★方案 A（BJ264）：ITEM_DEFS 重排后稀疏——for..of 对洞产出 undefined，须 !d 跳过
   for (const d of ITEM_DEFS) {
+    if (!d) continue;
     const mp = /^place_v_(\d+)_/.exec(d.key);
     if (mp) coveredSheets.add(Number(mp[1]));
   }

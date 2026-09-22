@@ -87,7 +87,7 @@ describe('A. R30/R31 武器注册完整性（id↔键双向+combatWeapon 分流�
       expect(key, `vid ${vid} 应有键映射`).toBeTruthy();
       const iid = ITEM_BY_ID_OF(key);
       expect(iid, `key ${key} 应有 def`).toBeGreaterThanOrEqual(0);
-      const cw = combatWeapon({ key });
+      const cw = combatWeapon({ key, vid });
       expect(cw?.kind, `vid ${vid} kind`).toBe(kind);
     }
   });
@@ -97,7 +97,7 @@ describe('A. R30/R31 武器注册完整性（id↔键双向+combatWeapon 分流�
     for (const vid of R30_YOYOS) {
       const key = VANILLA_ITEM_KEY_BY_ID[vid];
       expect(key, `yoyo ${vid}`).toBeTruthy();
-      const cw = combatWeapon({ key });
+      const cw = combatWeapon({ key, vid });
       expect(cw?.kind).toBe('yoyo');
       const proj = (cw as { shoot: number }).shoot;
       expect(YOYO_RANGE[proj], `yoyo ${vid}→proj ${proj} 射程档`).toBeGreaterThan(0);
@@ -108,7 +108,7 @@ describe('A. R30/R31 武器注册完整性（id↔键双向+combatWeapon 分流�
     for (const vid of [...R31_SENTRY, ...R31_MINION]) {
       const key = VANILLA_ITEM_KEY_BY_ID[vid];
       expect(key, `staff ${vid}`).toBeTruthy();
-      const cw = combatWeapon({ key });
+      const cw = combatWeapon({ key, vid });
       expect(cw?.kind, `staff ${vid} kind`).toBe('summon');
       expect((cw as { sentry?: boolean }).sentry, `staff ${vid} sentry`).toBe(R31_SENTRY.includes(vid));
     }
@@ -370,7 +370,7 @@ describe('C 哨兵视觉与放置模型（R31 §C）', () => {
 
 // ---- 工具：ITEM_BY_KEY 反查（避免拉入整个 items.ts 的 ITEM_BY_KEY 循环依赖面） ----
 function ITEM_BY_ID_OF(key: string): number {
-  for (let i = 0; i < ITEM_DEFS.length; i++) if (ITEM_DEFS[i].key === key) return i;
+  for (let i = 0; i < ITEM_DEFS.length; i++) if (ITEM_DEFS[i] && ITEM_DEFS[i].key === key) return i;   // ★方案 A:守洞
   return -1;
 }
 /** 链枷出生盒心校正（Game.ts placeAtShootSpawn 同式） */
@@ -415,7 +415,7 @@ describe('批次5 集成收编（落点清单 ①-⑧）', () => {
       expect(SENTRY_WAND_VIDS.has(vid), `vid ${vid}`).toBe(true);
       const key = VANILLA_ITEM_KEY_BY_ID[vid];
       expect(key, `vid ${vid} 键映射`).toBeTruthy();
-      expect(combatWeapon({ key })?.kind).toBe('summon');
+      expect(combatWeapon({ key, vid })?.kind).toBe('summon');
     }
     const src = gameSrcOf();
     expect(src).toMatch(/pickSentryLandingSpot\(this\.world\.store, mwx, mwy, critVid,/);

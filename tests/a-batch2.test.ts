@@ -454,7 +454,7 @@ describe('localNPCImmunity（:15330/:11878/:13153）', () => {
 // ============ 乌鸦 317（aiStyle 54 是随从非哨兵） ============
 describe('乌鸦 317（:3825-3836 minion / AI :27383-27590）', () => {
   it('分类：乌鸦杖 1802 → summon 且非哨兵（sentry 字段无、minion=true）', () => {
-    const w = combatWeapon({ key: 'vi_1802_RavenStaff' });
+    const w = combatWeapon({ key: 'vi_1802_RavenStaff', vid: 1802 });
     expect(w?.kind).toBe('summon');
     expect((w as { sentry?: boolean }).sentry).toBe(false);
   });

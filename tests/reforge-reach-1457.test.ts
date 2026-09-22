@@ -44,6 +44,7 @@ const { ITEM_DEFS } = await import('../src/data/items');
 /** vid → { id, vid }（canReforge 内部 vid 解析同构:def.vid ?? vi_ 键段） */
 function defOfVid(vid: number): { id: number; key: string } | undefined {
   const idx = ITEM_DEFS.findIndex((d) => {
+    if (!d) return false;   // ★方案 A:守洞（findIndex 对洞以 undefined 调用）
     const v = (d as { vid?: number }).vid
       ?? ((d as { key: string }).key.startsWith('vi_')
         ? parseInt((d as { key: string }).key.slice(3), 10) : -1);

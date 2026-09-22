@@ -2332,7 +2332,10 @@ export const ITEM_ONLY_NEED_ONE_OVERRIDE: Record<number, boolean> = {
 // Player.cs:35357 拾取 +50 魔力+ManaHeat;WorldItem.cs:664 生成 300t 消失。2026-08-27 补注册）
 item({ key: 'vi_4143_manacloakstar', name: '' });
 
-export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
+// ★方案 A（BJ264 2026-09-22）：const→let——文件尾 reorder pass 重排后按新域重建
+//   （长度=maxStable+1 恒等表）。消费方一律经 live binding 运行时取用（模块级捕获
+//   全仓普查仅 proj1457.ts:259 一处 ITEM_BY_KEY 值捕获,在本模块完成后求值=安全）。
+export let ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
 /** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */
 export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();
 for (let i = 0; i < ITEM_DEFS.length; i++) {
@@ -2345,4 +2348,77 @@ for (let i = 0; i < ITEM_DEFS.length; i++) {
   if (s === undefined) { console.error(`[stable-id] item 缺稳定 id: ${k}`); continue; }
   ITEM_STABLE_OF_INTERNAL[i] = s;
   if (!ITEM_INTERNAL_OF_STABLE.has(s)) ITEM_INTERNAL_OF_STABLE.set(s, i);
+}
+
+// ===================== 方案 A 阶段 1：注册尾规范化 pass（BJ264 2026-09-22）=====================
+// ★★本段必须是本文件绝对尾（在一切 item() 注册与字段回填之后）★★
+// 重排 ITEM_DEFS：内部 id（数组下标）≡ 稳定 id（stable≡原版 vid + PRIV 10000+ +
+// place_v 20000+）——internal 序域就此退役。收益=灭零哨兵碰撞家族（旧 0 号位=
+// 魔力水晶 vs 0=空槽双语义）+后继刀删 374 处 vid 键前缀反解税（已于本尾段⑥退役）
+// +internal≡原版 netID 概念统一（docs/item-id-reunify-plan-A.md §2 阶段 1）。
+// 铁律（长期认知税）：
+//   ① 新注册段/字段回填一律写在本段【之前】——本段之后追加 item() = 下标落在
+//     稀疏洞/表外（byKey 指向洞、ITEM_STABLE_OF_INTERNAL 恒等表越界读 undefined）；
+//   ② 稀疏洞：重排后 ITEM_DEFS 长度=maxStable+1（实测 20754）、实件 6856、洞 ~13898
+//     （0 号位=原版 netID 0 语义=空洞,vi_0 不存在）。任何 ITEM_DEFS.length 循环/
+//     下标必须带 !d 守卫（新循环点忘守卫=洞 TypeError）；
+//   ③ 双桥保留作守卫（恒等）：ITEM_STABLE_OF_INTERNAL[i]===i（Uint16Array 上限
+//     65535,place_v 派生段 20000+sheet 余量充足）;ITEM_INTERNAL_OF_STABLE 仅对实件
+//     set(s,s)——洞 stable .get()=undefined → 消费端 ?? 0 兜底（未注册稳定 id 语义
+//     不变）。同 stable 双注册在此 fail-fast throw（BJ150 双射实测成立;D1 时代的
+//     静默首胜归一不再容忍——重复注册=注册面 bug,炸 loud）。
+// 求值序安全（BJ150 普查+本刀复核）：下游缓存 STAT_BY_IID/VID_BY_IID(vanillaItemStats)/
+//   FX_BY_IID(vanillaAccFx)/KIND_BY_IID(vanillaEquip) 均在各文件模块体构建（import 后
+//   求值=恒等域扫描,且已带 !d 守卫）;items.ts 文件内中段无下标捕获（VID_SEEN_IDX 仅
+//   注册期消费;byKey 别名键经置换映射重指,键插入序不变）;itemMigration.ts 退役漏斗/
+//   蜂巢 10140 覆写全走键反查且在本模块完成后执行=落到恒等表上语义不变。
+// 存档兼容：v3+ 稳定 id 槽位磁盘值=stable 域（重排零波及）;★disk 0 迁移（旧 internal
+//   0=魔力水晶的写出面）在本刀阶段 2 于 SaveFile.ts 读档边界显式处理。
+{
+  const n = ITEM_DEFS.length;
+  // ① 逐件求 stable（与上方 D1 段同式;缺稳定 id=注册面 bug,fail-fast 勿静默）
+  const stableOf = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    const k = ITEM_DEFS[i].key;
+    const vm = /^vi_(\d+)_/.exec(k);
+    const pm = !vm ? /^place_v_(\d+)_/.exec(k) : null;
+    const s = vm ? Number(vm[1]) : PRIV_ITEM_STABLE[k] ?? (pm ? 20000 + Number(pm[1]) : undefined);
+    if (s === undefined) throw new Error(`[plan-A] item 缺稳定 id: ${k}`);
+    stableOf[i] = s;
+  }
+  // ② 双射 fail-fast（重复 stable = 重排不可良定义）
+  const seenStable = new Map<number, number>();
+  for (let i = 0; i < n; i++) {
+    const prev = seenStable.get(stableOf[i]);
+    if (prev !== undefined) {
+      throw new Error(`[plan-A] 重复稳定 id ${stableOf[i]}: ${ITEM_DEFS[prev].key} vs ${ITEM_DEFS[i].key}`);
+    }
+    seenStable.set(stableOf[i], i);
+  }
+  // ③ 重排到 stable 位（稀疏化;保数组身份——全仓无模块级数组引用捕获,保险起见仍原位写回）
+  let maxS = 0;
+  for (let i = 0; i < n; i++) if (stableOf[i] > maxS) maxS = stableOf[i];
+  const placed: ItemDef[] = new Array(maxS + 1);
+  for (let i = 0; i < n; i++) placed[stableOf[i]] = ITEM_DEFS[i];
+  ITEM_DEFS.length = 0;
+  for (let s = 0; s <= maxS; s++) if (placed[s] !== undefined) ITEM_DEFS[s] = placed[s];
+  ITEM_DEFS.length = maxS + 1;
+  // ④ ITEM_BY_KEY 全量重指（别名键同走 stable 映射;键插入序不变——Object.keys 顺序
+  //   仅 items.ts:1077 注册期消费,后续无序依赖消费者）
+  for (const key of Object.keys(byKey)) byKey[key] = stableOf[byKey[key]];
+  // ⑤ 双桥重建恒等（写向全等含洞位;读向仅实件——未注册 stable 查 undefined=既有 ?? 0 面）
+  ITEM_STABLE_OF_INTERNAL = new Uint16Array(maxS + 1);
+  for (let s = 0; s <= maxS; s++) ITEM_STABLE_OF_INTERNAL[s] = s;
+  ITEM_INTERNAL_OF_STABLE.clear();
+  for (let i = 0; i < n; i++) ITEM_INTERNAL_OF_STABLE.set(stableOf[i], stableOf[i]);
+  // ⑥ vid 回填（★方案 A 阶段 4，BJ265）：vi_ 键 defs 的 vid 字段补齐=自身下标。
+  //   internal≡stable≡键前缀 vid 恒等域（vi_ 键 stable 恒=键解析值,见 ①）——回填后
+  //   `d.vid ?? -1` 与旧键前缀正则反解全域逐件等价（place_v/PRIV 键不回填,
+  //   vid 保持 undefined=「无原版 vid」,消费端 ?? -1 同相;实测定谳:6178 vi_+678
+  //   place_v 之外零其他键、place_v 带 vid=0 件、vi_ vid≠键解析=0 件）。
+  //   267+107 处键前缀正则反解税自此整段退役（定义处退役注:vanillaItemCombat/Shimmer）。
+  for (let s = 0; s <= maxS; s++) {
+    const d = placed[s];
+    if (d !== undefined && d.vid === undefined && d.key.startsWith('vi_')) d.vid = s;
+  }
 }

@@ -156,7 +156,7 @@ describe('舀取回吸（Game.bucketScoopDrain，:45762-45809）', () => {
 });
 
 describe('六件物品登记（docs/implementation-gap-list-2026-08-13.md §1）', () => {
-  it('vi_ 键齐全且 viIdFromKey 反解回原版 id', () => {
+  it('vi_ 键齐全且 vid 直读回原版 id', () => {
     const ids: Record<string, number> = {
       vi_4820_bottomless_lava_bucket: 4820,
       vi_4872_lava_absorbant_sponge: 4872,

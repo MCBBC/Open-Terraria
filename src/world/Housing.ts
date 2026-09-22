@@ -1166,6 +1166,9 @@ export interface NearChainNpcView<K = unknown> {
   npcId: number;               // 原版 NPC id
   bound?: boolean;             // 被绑态不迁（AI_007 bound 原地语义）
   home?: { x: number; y: number } | null;
+  /** ★BJ259：NPC.lookForHomeTimeout（NPC.cs:6554）——kickOut 置 3600 后冷却迁入。
+   *  缺省按 0（NPC 字段缺省=0 同形） */
+  lookForHomeTimeout?: number;
   ref: K;
 }
 
@@ -1175,8 +1178,8 @@ export interface NearChainNpcView<K = unknown> {
  * type == prioritizedTownNPCType && lookForHomeTimeout == 0 &&
  * CheckSpecialTownNPCSpawningConditions(type)`，mover 必须【同优先型】（锁由
  * Game 层 UpdatePrioritizedTownNPC 每 tick 刷新后传入;此前"任一 homeless 者"
- * 是锁未移植期的泛化,已按原文收回）。lookForHomeTimeout 本仓无 kickOut 链
- * （唯一置位面 WorldGen.kickOut :4797 未建模）恒 0,免检登记。
+ * 是锁未移植期的泛化,已按原文收回）。lookForHomeTimeout 冷却门已随 BJ259 接通
+ * （kickOut 置 3600,NPC.UpdateNPC :91434 每 tick 递减——被踢者 60s 内不迁入）。
  * 160 松露人维持排除：vanilla 对它走 CheckSpecialTownNPCSpawningConditions(160)
  * = 对【采样房】的蘑菇居所复核——本函数无房间上下文,泛化迁入会把松露塞进无蘑菇房;
  * 37 老人（地牢驻点恒有 home 非 homeless）/453 骷髅商（vanilla 非 townNPC）/
@@ -1188,6 +1191,7 @@ export function pickHomelessMover<K>(
   for (const v of npcs) {
     if (!v.home && !v.bound && v.key !== 'old_man'
       && v.npcId !== 37 && v.npcId !== 453 && v.npcId !== 368 && v.npcId !== 160
+      && (v.lookForHomeTimeout ?? 0) === 0
       && v.npcId === priorityType) return v;
   }
   return null;
@@ -1202,6 +1206,8 @@ export interface PrioritizedLockNpcView {
   homeless: boolean;
   /** 被缚待救态（vanilla 无此型=非 townNPC;等价排除） */
   bound: boolean;
+  /** ★BJ259：NPC.lookForHomeTimeout（NPC.cs:6554,:72176 门）——缺省按 0 同形 */
+  lookForHomeTimeout?: number;
   dead: boolean;
 }
 
@@ -1213,16 +1219,37 @@ export interface PrioritizedLockNpcView {
  * 轮首清零是独立面）。本仓排除面：368/160 逐字 + 453（vanilla 非 townNPC,本仓
  * 以 TownNPC 建模须显式排）+ bound（vanilla 被缚型非 townNPC）。453 者注：37 老人
  * 本仓恒有 home（地牢口锚）不入 homeless 面,vanilla 同（NPC.cs:53899 homeless:false）。
+ * ★BJ259：lookForHomeTimeout 冷却门接通（:72176 字面）——被 kickOut 者置 3600,
+ * NPC.UpdateNPC :91434 每 tick 递减,冷却期内不持锁。
  */
 export function pickPrioritizedTownNPCType(
   npcs: readonly PrioritizedLockNpcView[],
 ): number {
   for (const v of npcs) {
     if (v.dead || v.homeless !== true || v.bound) continue;
+    if ((v.lookForHomeTimeout ?? 0) !== 0) continue;
     if (v.npcId === 368 || v.npcId === 160 || v.npcId === 453) continue;
     return v.npcId;
   }
   return -1;
+}
+
+// ================= 住房旗可见面（DrawNPCHousesInWorld Main.cs:41422-41424,BJ259） =================
+
+/**
+ * 驻家旗挂载过滤 1:1（Main.cs:41422-41424 `_npcsWithBannersToDraw` 准入 +
+ * :41431 重核）：`active && townNPC && !homeless && homeTileX>0 && homeTileY>0
+ * && type != 37`。本仓投影：dead→!active、bound（vanilla 被缚型独立非 townNPC,
+ * 结构性不可达）防御保留、home!=null→!homeless、old_man→type 37（守卫老人
+ * 无住房旗=不可踢,Main.cs:41424 字面）。drawHouseBanners 与右键踢出命中共用
+ * 单源（Renderer）。
+ */
+export function houseBannerVisible(v: {
+  dead?: boolean; bound?: boolean;
+  home?: { x: number; y: number } | null;
+  npcKey?: string;
+}): boolean {
+  return !v.dead && !v.bound && !!v.home && v.npcKey !== 'old_man';
 }
 
 // ================= 夜扫清场（UnspawnHomelessNPC WorldGen.cs:5127-5155,SW-BO1） =================

@@ -34,7 +34,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { cattivaHitFx, stardustPunchFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）+ 星尘拳（:14331）
 import { playerCanHitEnemy, canBeChasedBy, rollGolemSentryCrit } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
-import { viIdFromKey } from '../data/vanillaItemCombat';
+
 import { MushroomBoiExplosionProj, requestMushroomBoiExplosion } from './DeadCellsMushroom';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
@@ -2501,7 +2501,7 @@ export class MinionProj extends Entity {
     if (flag || flag5 || flag6) {
       const heldSlot = p.inv.heldItem();
       const heldVid = heldSlot
-        ? (ITEM_DEFS[heldSlot.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldSlot.id]?.key ?? ''))
+        ? (ITEM_DEFS[heldSlot.id]?.vid ?? -1)
         : -1;
       const want = trusty ? 6174 : 5667;
       if (heldVid !== want) { this.dead = true; return; }

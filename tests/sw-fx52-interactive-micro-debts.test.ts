@@ -162,7 +162,7 @@ describe('SW-FX52 C：关包热栏右键不可达面（context 13）', () => {
     // ★BJ157：第四原语 splitHalf → runPickupArm（拆半面整摘）
     const prims = [
       UI_TS.indexOf('this.tryOpenContainer(cur, i);'),
-      UI_TS.indexOf('tryItemSwapVid(vanillaIdOfItemKey'),
+      UI_TS.indexOf('tryItemSwapVid(ITEM_DEFS[cur.id]?.vid ?? -1)'),   // ★方案 A 重锚(BJ265)
       UI_TS.indexOf('this.swapEquipItem(cur, where, i);'),
       UI_TS.indexOf('this.runPickupArm(where, i, cur);'),
     ];

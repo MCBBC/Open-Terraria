@@ -8509,6 +8509,29 @@ export class Arrow extends Entity {
           }
           // ai[2]>=4（第 4 撞）→ Kill(:19939-19942),不 return=落下方通用口
         }
+        // ⑥ 409 剃刀台风（★BJ260 S1 漏修#1；HandleMovement type 段 :18629-18638,
+        //    1458 同段逐字节全等）：被撞轴全速反 lastVelocity——无 |last|>1 门、
+        //    无计数、无消亡、不耗穿透（SetDefaults :4905-4917 penetrate=−1/
+        //    tileCollide=true/aiStyle71/extraUpdates=2,活载体=剃刀台风 2622,
+        //    猪鲨 370 掉落链）。原版写 `velocity.X = lastVelocity.X * -1f`——
+        //    反的是 HandleMovement 入口速度,本仓无截断回写 → −this.vx 同值
+        //    （94/931 档同式）;两轴独立,角撞双反。曾缺=首撞即落通用消亡口。
+        if (this.projId === 409) {
+          const st409 = game.world.store;
+          const free409 = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st409.inBounds(t0, t1) && !st409.isSolid(t0, t1);
+          };
+          let hit409 = false;
+          if (free409(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+            this.x -= this.vx; this.vx = -this.vx; hit409 = true;    // :18631-18634
+          }
+          if (free409(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+            this.y -= this.vy; this.vy = -this.vy; hit409 = true;    // :18635-18638
+          }
+          if (hit409) return;
+          // 双轴皆嵌=嵌入过深 → 交还通用消亡口（94 档同契约,登记）
+        }
         // ---- 496 暗影炎箭撞块（HandleMovement type 段 :18822-18843）——★R2-01 翻案
         //      （2026-09-03 蓝队）：原版以 `velocity != lastVelocity` 检被撞轴
         //      （lastVelocity=HandleMovement 入口速度 :17696,即 AI 后/截断前），

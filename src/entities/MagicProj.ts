@@ -68,7 +68,7 @@ export class MagicProj extends Entity {
 
   /** 第 8 参 projId 为可选尾参（缺省 0=圆点）：既有调用点
    *  Game.ts:1024（联机 kind 4 重建）/ :5992（旧 heldDef.magic 直射）零改动兼容。
-   *  主会话接线时在 :5992 尾部补 `itemCombat(viIdFromKey(heldDef.key))?.shoot ?? 0`。 */
+   *  主会话接线时在 :5992 尾部补 `itemCombat(heldDef.vid ?? -1)?.shoot ?? 0`。 */
   constructor(x: number, y: number, vx: number, vy: number, damage: number, life: number, color: string, projId = 0) {
     super();
     this.x = x; this.y = y;

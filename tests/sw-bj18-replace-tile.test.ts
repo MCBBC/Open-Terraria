@@ -36,7 +36,7 @@ function defByVid(vid: number): (typeof ITEM_DEFS)[number] {
 }
 /** 手持放置物 def：vi_ 真物品或 place_ 面板，按 tile 键查 */
 function defForTile(tileKey: string): (typeof ITEM_DEFS)[number] {
-  const d = ITEM_DEFS.find((x) => x.tile === tileKey
+  const d = ITEM_DEFS.find((x) => x && x.tile === tileKey   // ★方案 A:守洞
     && (x.key.startsWith('vi_') || x.key.startsWith('place_')));
   if (!d) throw new Error(`missing held item def for tile ${tileKey}`);
   return d;

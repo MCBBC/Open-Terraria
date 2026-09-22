@@ -20,7 +20,7 @@ const TILE = 16;
 const PLAT = TILE_BY_KEY['platform']!;
 const STONE = TILE_BY_KEY['stone']!;
 const CHEST = TILE_BY_KEY['chest']!;
-const PLAT_ITEM = ITEM_DEFS.find((d) => d.tile === 'platform');
+const PLAT_ITEM = ITEM_DEFS.find((d) => d && d.tile === 'platform');   // ★方案 A:守洞
 const PLAT_VID = PLAT_ITEM ? ITEM_DEFS.indexOf(PLAT_ITEM) : -1;
 
 type PlatItem = typeof ITEM_DEFS[number];

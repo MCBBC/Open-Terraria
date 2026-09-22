@@ -130,6 +130,7 @@ const VANILLA_PLATFORM_ITEMS: ReadonlyArray<readonly [number, number, number, st
 const DEF_BY_VID = (() => {
   const m = new Map<number, ItemDef>();
   for (const d of ITEM_DEFS) {
+    if (!d) continue;   // ★方案 A:守洞
     const mm = /^vi_(\d+)_/.exec(d.key);
     if (mm && !m.has(Number(mm[1]))) m.set(Number(mm[1]), d);
   }

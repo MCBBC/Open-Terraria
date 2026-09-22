@@ -264,12 +264,14 @@ if (Object.keys(coinMap).length < 15) {
 
 // ================= ★BJ215 era guard：干跑对拍 / 沙箱 / 逃生门（头注见上） =================
 const FRESH = JSON.stringify({ bags: out, coinMap }, null, 1);
-/** 现库 vs 重产动态 diff：「现库有而重产无」的洗库面（袋/spawn/字段/coinMap 四轴,
- *  不硬编码键清单——vanilla-atlas 追加时代/npcs 债刀-3 同族动态探测）。 */
+/** 现库 vs 重产动态 diff：live-only=「现库有而重产无」洗库面（袋/spawn/字段/coinMap 四轴,
+ *  不硬编码键清单——vanilla-atlas 追加时代/npcs 债刀-3 同族动态探测）；
+ *  fresh-only=「重产有而现库无」现库退化/源侧新增面（★BJ261 G-1/S3 处方:只算 live-only 的
+ *  对拍闸对现库删条恒绿,双向才算「重产盖住现库」——缺键型=itemrare 同族,任一轴非空拒）。 */
 function washOf(liveRaw) {
   let live;
   try { live = JSON.parse(liveRaw); } catch { return null; } // 坏损:不拦（让正常流程自行报错）
-  const wash = { bags: [], spawns: {}, fields: [], coin: [] };
+  const wash = { bags: [], spawns: {}, fields: [], coin: [], bagsFresh: [], spawnsFresh: {}, fieldsFresh: [], coinFresh: [] };
   const census = (t) => {
     const c = {};
     for (const b of Object.values(t.bags ?? {})) {
@@ -284,25 +286,40 @@ function washOf(liveRaw) {
   const lc = census(live);
   const fc = census({ bags: out });
   for (const k of Object.keys(lc)) if ((fc[k] ?? 0) === 0) wash.fields.push(`${k}×${lc[k]}`);
+  for (const k of Object.keys(fc)) if ((lc[k] ?? 0) === 0) wash.fieldsFresh.push(`${k}×${fc[k]}`);
+  const sig = (s) => JSON.stringify(s);
   for (const id of Object.keys(live.bags ?? {})) {
     if (!out[id]) { wash.bags.push(id); continue; }
-    const sig = (s) => JSON.stringify(s);
     const freshSet = new Set((out[id].spawns ?? []).map(sig));
     const liveOnly = (live.bags[id].spawns ?? []).filter((s) => !freshSet.has(sig(s)));
     if (liveOnly.length) wash.spawns[id] = { n: liveOnly.length, samples: liveOnly.slice(0, 3).map(sig) };
   }
+  for (const id of Object.keys(out)) {
+    if (!live.bags?.[id]) { wash.bagsFresh.push(id); continue; }
+    const liveSet = new Set((live.bags[id].spawns ?? []).map(sig));
+    const freshOnly = (out[id].spawns ?? []).filter((s) => !liveSet.has(sig(s)));
+    if (freshOnly.length) wash.spawnsFresh[id] = { n: freshOnly.length, samples: freshOnly.slice(0, 3).map(sig) };
+  }
   for (const [k, v] of Object.entries(live.coinMap ?? {})) {
     if (coinMap[Number(k)] !== v) wash.coin.push(`${k}:${v}→${coinMap[Number(k)] ?? '缺'}`);
   }
+  for (const [k, v] of Object.entries(coinMap)) {
+    if ((live.coinMap ?? {})[k] === undefined) wash.coinFresh.push(`${k}:缺→${v}`);
+  }
   return wash;
 }
-const washEmpty = (w) => !w || (w.bags.length === 0 && Object.keys(w.spawns).length === 0 && w.fields.length === 0 && w.coin.length === 0);
+const washEmpty = (w) => !w || (w.bags.length === 0 && Object.keys(w.spawns).length === 0 && w.fields.length === 0 && w.coin.length === 0
+  && w.bagsFresh.length === 0 && Object.keys(w.spawnsFresh).length === 0 && w.fieldsFresh.length === 0 && w.coinFresh.length === 0);
 const washReport = (w) => {
-  console.error('  物证（现库领先面——重产整批回退面/差异清单）：');
+  console.error('  物证（live-only=现库领先面/重产整批回退面;fresh-only=现库退化缺键型面）：');
   if (w.bags.length) console.error(`    袋缺产: ${w.bags.join(', ')}`);
   for (const [id, s] of Object.entries(w.spawns)) console.error(`    袋 ${id}: 现库 ${s.n} 条 spawn 重产盖不住（如 ${s.samples.join(' | ')}）`);
   if (w.fields.length) console.error(`    领先字段: ${w.fields.join(', ')}`);
   if (w.coin.length) console.error(`    coinMap: ${w.coin.slice(0, 6).join(', ')}${w.coin.length > 6 ? '…' : ''}`);
+  if (w.bagsFresh.length) console.error(`    [fresh-only] 袋现库缺: ${w.bagsFresh.join(', ')}`);
+  for (const [id, s] of Object.entries(w.spawnsFresh)) console.error(`    [fresh-only] 袋 ${id}: 重产 ${s.n} 条现库缺（如 ${s.samples.join(' | ')}）`);
+  if (w.fieldsFresh.length) console.error(`    [fresh-only] 重产独有字段: ${w.fieldsFresh.join(', ')}`);
+  if (w.coinFresh.length) console.error(`    [fresh-only] coinMap 重产独有: ${w.coinFresh.slice(0, 6).join(', ')}`);
 };
 const liveRaw = existsSync(LIVE_JSON) ? readFileSync(LIVE_JSON, 'utf8') : null;
 const wash = liveRaw === null ? null : washOf(liveRaw);
@@ -324,12 +341,12 @@ if (OUT_JSON) {
   if (!liveRaw) {
     console.error('[extract-bossbags] 干跑（零写盘）：现库缺 vanilla-bossbags.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
   } else if (wash && !washEmpty(wash)) {
-    console.error('[extract-bossbags] 干跑对拍：检测到「现库有而重产无」的键=字段型洗库预警（裸跑重产=整批回退）——零写盘。');
+    console.error('[extract-bossbags] 干跑对拍：双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
     washReport(wash);
-    console.error('  活通道：重产前先恢复提取器编码面（BJ183 登记债）；沙箱试验用 SW_OUT=<dir>。');
+    console.error('  活通道：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 SW_OUT=<dir>。');
     process.exit(1);
   } else {
-    console.error('[extract-bossbags] 干跑对拍：重产盖住现库（零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+    console.error('[extract-bossbags] 干跑对拍：重产盖住现库（双向零差,零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
   }
 }
 console.log('bags:', Object.keys(out).length, 'coinMap:', Object.keys(coinMap).length);

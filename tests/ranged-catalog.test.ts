@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { Arrow } from '../src/entities/Arrow';
 import { ITEM_DEFS } from '../src/data/items';
-import { viIdFromKey } from '../src/data/vanillaItemCombat';
+
 import type { GameHooks } from '../src/entities/types';
 
 const dummy = {} as unknown as GameHooks;
@@ -33,8 +33,7 @@ describe('弹体尺寸按弹型（SetDefaults 数据驱动）', () => {
 });
 
 describe('远程武器/弹药目录全量', () => {
-  const keys = new Set(ITEM_DEFS.map((d) => d.key));
-  const regVids = new Set([...keys].map((k) => viIdFromKey(k)).filter((v) => v > 0));
+  const regVids = new Set(ITEM_DEFS.filter(Boolean).map((d) => d.vid ?? -1).filter((v) => v > 0));   // ★方案 A(BJ265):vid 直读域普查（回填后≡键反解域）
 
   it('useAmmo 武器全注册（枪 24/弓弩 39/发射器 7/吹箭 4）', () => {
     const combat = ITEM_DEFS; // 占位（下方直接对 itemcombat json 语义由注册数断言）

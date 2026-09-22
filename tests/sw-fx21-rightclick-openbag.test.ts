@@ -153,7 +153,7 @@ describe('SW-FX21 右键开袋面（TryOpenContainer_GrantItems :1784 首支补�
     //  数据驱动门 heldItemUseStyle>0（useStyle==0=非使用物,Player.cs:43064 同语义;
     //  袋 21 件=数据面子集）。门数据≡Item.cs 真值的逐 id 守卫=tests/bj69-nouse-gate。
     expect(gameSrc).not.toContain('BOSS_BAG_NO_USE_VIDS');
-    expect(gameSrc).toMatch(/heldItemUseStyle\(viIdFromKey\(heldDef\.key\) \?\? -1\) > 0/);
+    expect(gameSrc).toMatch(/heldItemUseStyle\(heldDef\.vid \?\? -1\) > 0/);   // ★方案 A 重锚(BJ265)
     // 袋 21 件门数据全 0（原 heldItemUseStyle 消费面=vanilla-itemfunc.useStyle+回填表,
     //  袋族两源皆 0——此断言由 import heldItemUseStyle 的 bj69 守卫逐 id 承接,此处锁
     //  「豁免集不回潮」+「门表达式在位」两面）

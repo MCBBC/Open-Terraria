@@ -28,8 +28,8 @@ describe('枪械数值表（vanilla-itemcombat）', () => {
 
   it('四管霰弹枪 4703 已注册（vi_ 键 + useAmmo 接管）', () => {
     expect(ITEM_BY_KEY['vi_4703_四管霰弹枪']).toBeDefined();
-    expect(ITEM_DEFS[ITEM_BY_KEY['vi_4703_四管霰弹枪']].vid).toBeUndefined(); // 键反解 4703
-    expect(rangedAmmoWeapon({ key: 'vi_4703_四管霰弹枪' })).toBe(97);
+    expect(ITEM_DEFS[ITEM_BY_KEY['vi_4703_四管霰弹枪']].vid).toBe(4703);   // ★方案 A 重钉(BJ265):vid 回填后恒等,旧『缺省』前提消亡 // 键反解 4703
+    expect(rangedAmmoWeapon({ key: 'vi_4703_四管霰弹枪', vid: 4703 })).toBe(97);
   });
 });
 

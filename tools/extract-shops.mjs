@@ -737,7 +737,9 @@ if (Object.keys(values).length < 5000 || total < 250) {
   throw new Error(`[extract-shops] 锚点失配: 基数护栏 values=${Object.keys(values).length}(<5000?) stock=${total}(<250?)——解析面漂移,禁止静默半表`);
 }
 const FRESH = JSON.stringify({ values, shops: out, src: TREE });
-const LIVE_JSON = join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');
+// ★BJ261：探测注入面（SW_SHOPSTOCK_JSON,读侧现库重定向,守卫测试夹具专用）——
+//   与 --write-real 混用拒（g1 footgun,探测与写盘分离=守卫被绕过洗库面）
+const LIVE_JSON = process.env.SW_SHOPSTOCK_JSON ?? join(GAME_ROOT, 'src', 'data', 'vanilla-shopstock.json');
 const outIdx = process.argv.indexOf('--out');
 // ★M1 变异锚:干跑臂 null(守卫测试把 null 换成假现库路径,证明缺省零写盘是唯一拦截面)
 const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : null;
@@ -749,11 +751,20 @@ if (OUT_PATH && WRITE_REAL) {
   console.error('  处置：沙箱对拍用 --out <path>；确认定谳后更新现库用 --write-real。');
   process.exit(1);
 }
-/** 现库 vs 重产动态 diff：values 缺键/值漂移 + 每店条目多重集差（键=id,值=整条 JSON）。 */
+if (WRITE_REAL && process.env.SW_SHOPSTOCK_JSON !== undefined) {
+  console.error('[extract-shops] 拒绝运行：探测注入面（SW_SHOPSTOCK_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  console.error('  处置：对拍用探测 env（零写盘干跑）或 --out 沙箱；更新现库须清掉探测 env 再 --write-real。');
+  process.exit(1);
+}
+/** 现库 vs 重产动态 diff：values 缺键/值漂移 + 每店条目多重集差（键=id,值=整条 JSON）。
+ *  ★G-1/S3 补 fresh-only 轴（valuesFresh/shopsFresh=重产有而现库无）：本器【选报不拒】——
+ *  现库含 60 条刻意剥离面（453 相位表/633 动物学家/227 基础色等,运行时动态表直管,
+ *  重产不写入,BJ217 定谳）,fresh-only 对该面恒非空,拒跑语义不成立;但轴向必须 loud
+ *  （现库真删条=退化,人工读报告判别）。 */
 function washOf(liveRaw) {
   let live;
   try { live = JSON.parse(liveRaw); } catch { return null; } // 坏损:不拦
-  const wash = { valuesMissing: [], valuesDrift: [], shops: {} };
+  const wash = { valuesMissing: [], valuesDrift: [], shops: {}, valuesFresh: [], shopsFresh: {} };
   const lv = live.values ?? {};
   for (const [k, v] of Object.entries(lv)) {
     if (values[k] === undefined) wash.valuesMissing.push(k);
@@ -765,14 +776,30 @@ function washOf(liveRaw) {
     const liveOnly = (stock ?? []).filter((e) => !freshSet.has(sig(e)));
     if (liveOnly.length) wash.shops[npc] = { n: liveOnly.length, samples: liveOnly.slice(0, 2).map(sig) };
   }
+  for (const [k, v] of Object.entries(values)) {
+    if (lv[k] === undefined) wash.valuesFresh.push(`${k}:${v}`);
+  }
+  for (const [npc, stock] of Object.entries(out)) {
+    const liveSet = new Set(((live.shops ?? {})[npc] ?? []).map(sig));
+    const freshOnly = stock.filter((e) => !liveSet.has(sig(e)));
+    if (freshOnly.length) wash.shopsFresh[npc] = { n: freshOnly.length, samples: freshOnly.slice(0, 2).map(sig) };
+  }
   return wash;
 }
+// ★选报语义：fresh-only 轴不计入拒跑判据（见上,刻意剥离面恒非空）
 const washEmpty = (w) => !w || (w.valuesMissing.length === 0 && w.valuesDrift.length === 0 && Object.keys(w.shops).length === 0);
+const freshOnlyNonEmpty = (w) => !!w && (w.valuesFresh.length > 0 || Object.keys(w.shopsFresh).length > 0);
 const washReport = (w) => {
-  console.error('  物证（现库领先面——重产整批回退面/差异清单）：');
+  console.error('  物证（live-only=现库领先面——重产整批回退面/差异清单）：');
   if (w.valuesMissing.length) console.error(`    values 现库 ${w.valuesMissing.length} 键重产盖不住: ${w.valuesMissing.slice(0, 8).join(', ')}${w.valuesMissing.length > 8 ? '…' : ''}`);
   if (w.valuesDrift.length) console.error(`    values 值漂移 ${w.valuesDrift.length} 键: ${w.valuesDrift.slice(0, 4).join(' | ')}`);
   for (const [npc, s] of Object.entries(w.shops)) console.error(`    npc ${npc}: 现库 ${s.n} 条重产盖不住（如 ${s.samples.join(' | ')}）`);
+};
+const freshOnlyReport = (w) => {
+  if (!freshOnlyNonEmpty(w)) return;
+  console.error('  [fresh-only 选报] 重产有而现库无（刻意剥离面=运行时直管恒非空;真删条=退化,人工判别）：');
+  if (w.valuesFresh.length) console.error(`    values 现库缺 ${w.valuesFresh.length} 键: ${w.valuesFresh.slice(0, 6).join(', ')}${w.valuesFresh.length > 6 ? '…' : ''}`);
+  for (const [npc, s] of Object.entries(w.shopsFresh)) console.error(`    npc ${npc}: 重产 ${s.n} 条现库缺（如 ${s.samples.join(' | ')}）`);
 };
 const liveRaw = existsSync(LIVE_JSON) ? readFileSync(LIVE_JSON, 'utf8') : null;
 const wash = liveRaw === null ? null : washOf(liveRaw);
@@ -795,10 +822,12 @@ if (OUT_PATH || WRITE_REAL) {
   } else if (wash && !washEmpty(wash)) {
     console.error('[extract-shops] 干跑对拍：检测到「现库有而重产无」的条目=洗库预警（裸跑重产=整批回退）——零写盘。');
     washReport(wash);
+    freshOnlyReport(wash);
     console.error('  活通道：重产前先恢复 parseGate 词表（BJ183 登记债）；沙箱试验用 --out <path>。');
     process.exit(1);
   } else {
-    console.error('[extract-shops] 干跑对拍：重产盖住现库（零写盘）。写盘须显式 --out <path> 或 --write-real。');
+    freshOnlyReport(wash);
+    console.error('[extract-shops] 干跑对拍：重产盖住现库（live-only 零差,零写盘）。写盘须显式 --out <path> 或 --write-real。');
   }
 }
 console.log('item values:', Object.keys(values).length, '| stock entries:', total);

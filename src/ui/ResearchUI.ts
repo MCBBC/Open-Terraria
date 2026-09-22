@@ -9,7 +9,7 @@ import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
 
-/** 内部 item id → 原版 id（UI 侧轻量版 = Shimmer.vanillaIdOfItem 的 vid/键前缀链） */
+/** 内部 item id → 原版 id（UI 侧轻量版 = vid 直读;★方案 A 键前缀反解链退役） */
 function vidOf(id: number): number {
   const d = ITEM_DEFS[id];
   if (!d) return -1;

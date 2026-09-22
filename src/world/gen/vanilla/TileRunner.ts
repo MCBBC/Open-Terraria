@@ -5,7 +5,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY, TILE_DEFS, NON_SOLID_SAVE_SLOPES_SHEETS } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS, NON_SOLID_SAVE_SLOPES_SHEETS, NOT_CLEARABLE_IDS } from '../../../data/tiles';
 import { canBeClearedDuringGenerationDual } from './DungeonStyles1457';
 
 const MUD = TILE_BY_KEY['mud']!;
@@ -28,14 +28,11 @@ export function idsByVanillaSheet(...sheets: number[]): Set<number> {
 // 原版 Main.tileStone(Main.cs:6120-6139):宝石 63-68 + 活/失活石 130/131 + 琥珀石 566。
 // 只有这些"放置类型"触发 flag3(仅替换石头)
 const STONE_PLACED = idsByVanillaSheet(63, 64, 65, 66, 67, 68, 130, 131, 566);
-// TileID.Sets.CanBeClearedDuringGeneration = false 全集（1456 TileID.cs:321，
-// 2026-08-11 种子等价对齐——曾自加电路器件 135-137/141/443 保护，原版生成期可覆盖）
-export const NOT_CLEARABLE = idsByVanillaSheet(
-  396, 400, 401, 397, 398, 399, 404,   // 沙岩家族
-  368, 367,                            // 花岗岩/大理石
-  41, 43, 44,                          // 地牢砖
-  481, 482, 483,                       // 1.4.5 新增不可清块
-  226, 237);                           // 蜥蜴砖/陨石
+// TileID.Sets.CanBeClearedDuringGeneration = false 全集（TileID.cs:321 CreateBoolSet(true,…)反集
+// 例外清单 17 值；1456/1457/1458 同行号同值——2026-08-11 种子等价对齐,曾自加电路器件
+// 135-137/141/443 保护,原版生成期可覆盖）。★BJ263 收编单源 data/tiles.ts:NOT_CLEARABLE_IDS
+// （内部域镜像;idsByVanillaSheet 构式与 TILE_DEFS 序镜像全等已核,字面副本拆除,§6l）
+export const NOT_CLEARABLE = NOT_CLEARABLE_IDS;
 // 原版 switch case 45/147/189/190/196/460/717/718/719:无条件 flag3(金砖/雪/云/荧光菇/雨云/雪云+1.4.5新增)
 const FLAG3_ALWAYS = idsByVanillaSheet(45, 147, 189, 190, 196, 460, 717, 718, 719);
 // ★TileID.Sets.SaveSlopes（TileID.cs:425-429，静态初始化=启动期默认 tileSolid 表快照，

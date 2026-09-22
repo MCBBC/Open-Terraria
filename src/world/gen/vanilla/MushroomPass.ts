@@ -6,7 +6,7 @@ import { doSurfaceIsDesertCore } from './SecretSeedDoEndsPass';
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, NOT_CLEARABLE_SHEETS } from '../../../data/tiles';
 import { intersectsAnyPotentialDungeonBounds } from './DungeonStyles1457'; // ★IIIII88 dual 拒带
 import { tileRunner } from './TileRunner';
 import { genSolidType } from './GenSolid';
@@ -80,9 +80,10 @@ export function spreadGrassOnce(
   if ((grass === CORRUPT_GRASS_ID || grass === CORRUPT_JG_ID || grass === CRIMSON_GRASS_ID
     || grass === CRIMSON_JG_ID || grass === HALLOW_GRASS_ID)
     && j - 1 >= 0 && st.type[st.idx(i, j - 1)] === SUNFLOWER) return;
-  // CanBeClearedDuringGeneration：与 TileRunner NOT_CLEAR 同源（dirt 族可清）
+  // CanBeClearedDuringGeneration：静态例外清单=data/tiles.ts NOT_CLEARABLE_SHEETS
+  //  （★BJ263 收编单源;与 TileRunner NOT_CLEARABLE 同值异域,此处 sheet 域）
   const d = TILE_DEFS[st.type[ti]];
-  if (d?.vanilla?.sheet != null && NOT_CLEARABLE.has(d.vanilla.sheet)) return;
+  if (d?.vanilla?.sheet != null && NOT_CLEARABLE_SHEETS.has(d.vanilla.sheet)) return;
   st.type[ti] = grass;
   // 递归洪水（cs:75309-75320）：3×3 邻格同 dirt，grassSpread < 1000
   if (!repeat) return;
@@ -99,11 +100,11 @@ export function spreadGrassOnce(
   }
 }
 
-/** 生成期不可清表（WorldGen.CanBeClearedDuringGeneration 的项目侧近似；
- *  396-399/404 沙族+化石、367/368 大理石花岗岩、41/43/44 地牢砖、481-483 等） */
-const NOT_CLEARABLE = new Set<number>([
-  396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237,
-]);
+/** 生成期不可清表——★BJ263 收编单源 data/tiles.ts:NOT_CLEARABLE_SHEETS（sheet 域;
+ *  TileID.cs:321 CanBeClearedDuringGeneration 反集例外清单 17 值逐值全等,§6l）。
+ *  旧注「WorldGen.CanBeClearedDuringGeneration 的项目侧近似」系陈旧判语：静态
+ *  例外清单与原版逐值全等;近似面仅在 dynamic 拒支（dual 地牢带等）,由
+ *  canBeClearedDuringGenerationDual 独立承载,与本表无关。 */
 /** ★IIIII58：PlaceTile(…,59) generic-solid 支镜像（WorldGen.cs:59841 default 分支）。
  *  原版 !active 目标先 tile.Clear(Tile|TilePaint|Slope)（cs:59501 → Tile.cs:746-774
  *  ⇒ type=0/帧0/斜坡0/halfBrick(false)），再 active(true)+type=59（cs:60730-60733

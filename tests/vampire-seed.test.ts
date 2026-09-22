@@ -12,7 +12,7 @@ import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_DEFS } from '../src/data/items';
-import { viIdFromKey } from '../src/data/vanillaItemCombat';
+
 import { BuffType } from '../src/stats/Buffs';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GameHooks } from '../src/entities/types';
@@ -22,7 +22,7 @@ function iidOfVid(vid: number): number {
   for (let i = 0; i < ITEM_DEFS.length; i++) {
     const d = ITEM_DEFS[i];
     if (!d) continue;
-    const v = d.vid ?? viIdFromKey(d.key);
+    const v = d.vid ?? -1;   // ★方案 A:vid 直读(BJ265)（回填后恒等）
     if (v === vid) return i;
   }
   return -1;

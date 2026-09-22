@@ -15,11 +15,11 @@ const ctx = (over: Partial<VanillaCraftCtx> = {}): VanillaCraftCtx => ({
 });
 
 describe('原版配方提取', () => {
-  it('3342 条（1457:批B +33 新配方 6147-6195 段/Format:C/火把神药水;去重终态）+组 33(1457 +SilverBar/GoldBar)+继承 9', () => {
+  it('3431 条（★BJ261 1457 编码面重建:+单参 SetIngredients 276+族/+num·stack 局部变量 53 处/+num2-5 变量块 14+反向 14/+平台反转 27(TileID.cs:243 死扫描勘误)）+组 34(Turtles 源码序补位)+继承 9', () => {
     // 3173（线性+生成器+模板22件套+小动物雕像+反向平台/墙）+ 137（for 循环段，tests/loop-recipes.test.ts
-    // 对账）- 1（5547@114[3306x1] 循环残影，--append-loops 剔除）
-    expect(VANILLA_RECIPES.length).toBe(3376);   // 1457 批B 3342 + 并行会话追加 34(增量推进)
-    expect(Object.keys(RECIPE_GROUPS).length).toBe(34);   // 1457 批B:+SilverBar/GoldBar;并行会话再 +1
+    // 对账）+ BJ261 增量 55（高尔夫墙族 14+反向 14+平台反转 27）-1（5547@114[3306x1] 循环残影，--append-loops 剔除）
+    expect(VANILLA_RECIPES.length).toBe(3431);   // BJ261 1457 编码面重建终值（干跑对拍双向零差）
+    expect(Object.keys(RECIPE_GROUPS).length).toBe(34);   // 源码注册序 0..33（Turtles 补位,gid 已按原版序重编）
     expect(Object.keys(RECIPE_GROUP_ITEMS).length).toBe(34);
   });
 

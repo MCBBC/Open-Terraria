@@ -14,7 +14,7 @@
 //   massWireOperation :2407-2558(宏伟蓝图 L 形铺线)
 // 单机移植:NetMessage/SendData 一律跳过(原版联机同步,无操作)。
 import { TileStore } from './TileStore';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, PREVENTS_ACTUATION_UNDER_SHEETS } from '../data/tiles';
 import { canKillTileAt, type KillTileCtx } from '../entities/Mounts';
 
 /** 器件分发表(P3 devices.ts 提供):返回 true 表示已处理该 case */
@@ -32,8 +32,9 @@ const MAX_MECH = 1000; // Wiring.cs:41(MaxMech=1000,注册上限 999)
 
 /** TileID.Sets.PreventsActuationUnder（TileID.cs:313）：下方不可被致动器缩入的承载物。
  *  旧表只列宝箱族/祭坛（21/88/467/237），漏音乐盒 26/花盆 77/垃圾桶 470/475/
- *  茶壶 597/饼干 441/望远镜 468。★R20-I6:devices.ts case 130 同表消费（导出） */
-export const PREVENTS_ACTUATION_UNDER = new Set([21, 467, 26, 77, 88, 470, 475, 237, 597, 441, 468]);
+ *  茶壶 597/饼干 441/望远镜 468。★R20-I6:devices.ts case 130 同表消费（导出）
+ *  ★BJ263 收编单源 data/tiles.ts:PREVENTS_ACTUATION_UNDER_SHEETS（逐值对拍全等,§6l） */
+export const PREVENTS_ACTUATION_UNDER: ReadonlySet<number> = PREVENTS_ACTUATION_UNDER_SHEETS;
 
 export class Wiring {
   readonly st: TileStore;

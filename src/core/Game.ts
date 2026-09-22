@@ -12,7 +12,6 @@ import { petInfoOfVid } from '../data/vanillaPets';
 import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { variantRareOfVid } from '../data/vanillaItemVariants';   // ★SW-BJ105 掉落物名 rare 覆写
-import { vanillaIdOfItem } from '../stats/Shimmer';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
 import { countDefenderMedalsAcross, spendDefenderMedalsAcross, defenderMedalSavingsOf } from '../stats/DefenderMedals';
@@ -134,7 +133,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_CUT_SHEETS, TILE_TABLE_SHEETS, WALL_DEFS, FORBIDS_SLOPING_SHEETS, TILE_AXE_SHEETS, TILE_HAMMER_SHEETS, PLATFORMS_SHEETS, BOULDERS_SHEETS, IS_A_TREE_TRUNK_SHEETS, IS_BEAM_SHEETS, IS_A_DRIP_TILE_SHEETS, TILE_DUNGEON_SHEETS as TILE_DUNGEON_SHEETS_V, CLOUDS_SHEETS, CONV_SAND_SHEETS, CONV_STONE_SHEETS, CONV_SNOW_SHEETS, CONV_ICE_SHEETS, CONV_HARDENED_SAND_SHEETS, CONV_SANDSTONE_SHEETS, CONV_GRASS_SHEETS, MOSS_SHEETS, MOSS_BRICK_SHEETS, PREVENTS_TILE_REPLACE_IF_ON_TOP_SHEETS, IS_VINE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, BASIC_CHEST_SHEETS, DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS, SPAWNS_NATURE_FLIES_SHEETS, DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS, REPLACE_TILE_BREAK_UP_SHEETS, REPLACE_TILE_BREAK_DOWN_SHEETS, LIVING_FIRE_SHEETS, IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import { styleDropVidOfFrames, coinBandVid, echoResourceDropVid, ECHO_RESOURCE_SHEETS, openStateDoorDropVid, pileDecoDropVid, torchDropVid, gemLockKeyVid } from '../data/vanillaStyleDrops';
@@ -153,7 +152,7 @@ import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { WALL_DUNGEON_WALLS, killWallCheckFailure, wallDropItemVid } from '../data/wallDrops';   // SW-BF1 2026-09-06
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles, npcRarityOf } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
-import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, resolveSandGunSwap, rangedAmmoWeapon, forceGunProjId, gunAmmoSaveHit, ammoDamageKind, resolveBowProjOverride, tsunamiFanShots, eventideShotSpec, type CombatWeapon } from '../data/vanillaItemCombat';
+import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, projGravity, projGravSpec, resolveAmmoProjId, resolveSandGunSwap, rangedAmmoWeapon, forceGunProjId, gunAmmoSaveHit, ammoDamageKind, resolveBowProjOverride, tsunamiFanShots, eventideShotSpec, type CombatWeapon } from '../data/vanillaItemCombat';
 import { setItemVariantWorld, bossSummonDisabledVid, activeVariantStatsOfVid } from '../data/vanillaItemVariants';
 import { FOOD_PARTICLE_COLORS, DRINK_PARTICLE_COLORS } from '../data/vanillaFoodColors';
 import {
@@ -645,7 +644,7 @@ export function ownerMeleeCritBits(
   // ——直加,无倍率）。vi_ 表缺失返回 0（无伤大雅：基值并入全表数据链）
   let heldBonus = 0;
   if (heldItem) {
-    heldBonus = (itemCombat(heldItem.vid ?? viIdFromKey(heldItem.key ?? ''))?.crit ?? 0)
+    heldBonus = (itemCombat(heldItem.vid ?? -1)?.crit ?? 0)
       + (heldItem.prefix ? prefixStat(heldItem.prefix).crt : 0);
   }
   return (Math.max(0, Math.min(100,
@@ -1547,7 +1546,7 @@ const TRAP_PROJ_VIDS = new Set<number>([
 // DropCheckWhenBeingPlaced={158,30}; Main.tileMoss（Main.cs:7146-7186 全 11 件）
 // =PlantRules.MOSS_CONVERT_SHEETS 同集。
 const BLOCK_SWAP_DOESNT_PLACE_SHEETS = DOESNT_PLACE_WITH_TILE_REPLACEMENT_SHEETS;   // ★BJ218 收编单源（TileID.cs:233,§6j）
-const BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS = new Set<number>([58, 225, 171, 127, 481, 482, 483, 423]);
+const BLOCK_SWAP_DOESNT_GET_REPLACED_SHEETS = DOESNT_GET_REPLACED_WITH_TILE_REPLACEMENT_SHEETS;   // ★BJ263 收编单源（TileID.cs:235,tests/tile-domain-sentinel §6l）
 const BLOCK_SWAP_FAMILY_TARGET_SHEETS = new Set<number>([19, 427, 435, 436, 437, 438, 439, 4, 215, 21, 467, 88]);
 // ★BJ182b 收编单源 data/tiles.ts:PLATFORMS_SHEETS(sheet 域;逐值对拍全等,tests/tile-domain-sentinel §6d)
 //  ——同名 shadow 副本拆除,消费面直用 import(data/tiles.ts TileID.cs:243 权威表)
@@ -1556,11 +1555,8 @@ const BLOCK_SWAP_FAMILY_TARGET_SHEETS = new Set<number>([19, 427, 435, 436, 437,
 //  sheet 域）——单格原位重写【前】清上邻 BreakUp 36 件（苗/草/药草/小饰族，放块压苗
 //  即杀）或 165@frameY{36,54,90}、下邻 BreakDown 9 件（藤蔓/垂饰族）或
 //  165@frameY{0,18,72}；KillTile 全语义（带掉落）由本仓 breakTile 承载。
-const REPLACE_TILE_BREAK_UP_SHEETS = new Set<number>([
-  27, 20, 227, 24, 201, 110, 113, 61, 703, 74, 71, 3, 73, 186, 187, 185, 233,
-  530, 705, 236, 702, 238, 254, 484, 485, 84, 82, 83, 529, 549, 590, 595, 615, 624, 700, 637,
-]);
-const REPLACE_TILE_BREAK_DOWN_SHEETS = new Set<number>([205, 115, 62, 52, 382, 444, 528, 638, 636]);
+// REPLACE_TILE_BREAK_UP/DOWN_SHEETS——★BJ263 收编单源 data/tiles.ts 同名 import
+//  （TileID.cs:245/:247;逐值对拍全等,tests/tile-domain-sentinel §6l;字面副本拆除）
 // SW-BA1 2026-09-06：原版 tileSolid+tileSolidTop【双 true】全集（RB2 B-3 定谳；锤目标域用）
 // = Platforms（TileID.cs:243）∪ {239 MetalBars,380 PlanterBox}（Main.cs:8031-8032、
 // 9797-9800、427 :10119-10120、435-439 循环 :10125-10130）。本仓数据面把 239/380 拆在
@@ -1581,11 +1577,11 @@ const NO_ATTACH_SHEETS = new Set<number>([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 
 // ★BJ203 收编单源 data/tiles.ts:IS_BEAM_SHEETS（逐值对拍全等,tests/tile-domain-sentinel §6h）
 // IsLivingFire（TileID.cs:241）——IsTilePoundable 的活火臂（Player.cs:45940），锤目标
 // 但 TryPoundingTile 无专属支=门内 no-op（与原版一致,勿再"补"动作）
-const LIVING_FIRE_SHEETS = new Set<number>([336, 340, 341, 342, 343, 344]);
+// LIVING_FIRE_SHEETS——★BJ263 收编单源 data/tiles.ts 同名 import（TileID.cs:241,§6l）
 // BASIC_CHEST_SHEETS（TileID.cs:315={21,467}）——★BJ218 收编单源 data/tiles.ts 同名 import（§6j）
 const ROPE_ITEM_VIDS = new Set<number>([85, 965, 2996, 3077, 3078]);
 const CONVERSION_GRASS_SHEETS = CONV_GRASS_SHEETS;   // :18 Conversion.Grass——★BJ210 收编单源（§6i）
-const IGNORES_REPLACEMENT_DROP_CHECK_SHEETS = new Set<number>([158, 30]);
+const IGNORES_REPLACEMENT_DROP_CHECK_SHEETS = IGNORES_TILE_REPLACEMENT_DROP_CHECK_WHEN_BEING_PLACED_SHEETS;   // ★BJ263 收编单源（TileID.cs:217,§6l）
 /** ReplaceTile_IsValidSolid（WorldGen.cs:63247-63256）：tileSolid && !tileSolidTop
  *  && (tileRope ? true : !tileFrameImportant)。本仓 TileDef.solid=参与碰撞域
  *  （≈tileSolid&&!solidTop）、.platform 排平台、.rope=Main.tileRope 代理；
@@ -2358,7 +2354,7 @@ function dropVanillaId(d: ItemDrop): number {
 
 /** 内部 item id → 原版 item id（vi_<id>_ 键解析;非 vi_ 键恒 -1） */
 function slotVanillaId(itemId: number): number {
-  return viIdFromKey(ITEM_DEFS[itemId]?.key ?? '');
+  return (ITEM_DEFS[itemId]?.vid ?? -1);
 }
 
 /** 配饰槽（armor[3..9]，原版 ApplyEquipFunctional :12543-12550）→ 原版 item id 列表 */
@@ -2550,7 +2546,9 @@ export function dropInventoryOnDeath(
       // 起始三件套 TurnToAir 不掉落（:53414-53418）——★门只在 inventory 主循环；
       // armor/dye/misc/loadouts 逐组无条件 TryDroppingSingleItem（:53421-53441），勿外扩
       if (starterGate) {
-        const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(key);
+        // ★方案 A（BJ265）：vid 直读;def 缺位（未注册 vid 域遗留键）回落 vid 表占位
+        //   语义=旧键前缀反解同相（internal≡vid 恒等域,双表查询同源）
+        const vid = ITEM_DEFS[s.id]?.vid ?? (VANILLA_ITEM_KEY_BY_ID[s.id] !== undefined ? s.id : -1);
         if (vid === 3507 || vid === 3506 || vid === 3509) { s.stack = 0; continue; }
       }
       spawn(key, s.stack);
@@ -4711,7 +4709,7 @@ export class Game implements GameHooks {
     const ok = this.spectateNextPlayer(step, this.player.dead);
     if (!this.player.dead) {
       const held = this.player.inv.heldItem();
-      if (held && viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 5644) {
+      if (held && (ITEM_DEFS[held.id]?.vid ?? -1) === 5644) {
         this.playSfxFile(ok ? 'Item_197' : 'Item_198');
       }
     }
@@ -4927,7 +4925,9 @@ export class Game implements GameHooks {
     const st = this.world.store;
     // ---- 1) 全道具入包 ----
     const overflow: Array<[string, number]> = [];
+    // ★方案 A（BJ264）：ITEM_DEFS 重排后稀疏——for..of 对洞产出 undefined，须 !def 跳过
     for (const def of ITEM_DEFS) {
+      if (!def) continue;
       const n = def.maxStack === 1 ? 1 : Math.min(def.maxStack, 99);
       const left = p.inv.add(ITEM_BY_KEY[def.key], n);
       if (left > 0) overflow.push([def.key, left]);
@@ -4946,8 +4946,9 @@ export class Game implements GameHooks {
     // 收集可放置 tile（有物品指向，去重）
     const placeable: number[] = [];
     const seen = new Set<number>();
+    // ★方案 A（BJ264）：ITEM_DEFS 重排后稀疏——for..of 对洞产出 undefined，须 !def 跳过
     for (const def of ITEM_DEFS) {
-      if (!def.tile) continue;
+      if (!def || !def.tile) continue;
       const tid = TILE_BY_KEY[def.tile];
       if (tid === undefined || tid === 0 || seen.has(tid)) continue;
       seen.add(tid);
@@ -5074,7 +5075,7 @@ export class Game implements GameHooks {
   /** 物品 → 矿车坐骑型（MountID.Sets.Cart 族召唤物 DefaultToMinecart(n)；
    *  非矿车族物品返回 -1） */
   private cartMountOfItem(internalId: number): number {
-    const vid = viIdFromKey(ITEM_DEFS[internalId]?.key ?? '');
+    const vid = (ITEM_DEFS[internalId]?.vid ?? -1);
     if (vid < 0) return -1;
     const m = mountOfItem(vid);
     return m >= 0 && isCartMount(m) ? m : -1;
@@ -5149,12 +5150,12 @@ export class Game implements GameHooks {
     if (p.gravDir === -1 || p.dead) return false;
     const eq = p.inv.miscEquips[3];
     if (eq) {
-      const vid = vanillaIdOfItem(eq.id);
+      const vid = (ITEM_DEFS[eq.id]?.vid ?? -1);
       if (mountOfItem(vid) >= 0 && !isCartMount(mountOfItem(vid))) return this.useMountItem(vid);
     }
     for (const s2 of p.inv.slots) {
       if (!s2) continue;
-      const vid = vanillaIdOfItem(s2.id);
+      const vid = (ITEM_DEFS[s2.id]?.vid ?? -1);
       const mid = mountOfItem(vid);
       if (mid >= 0 && !isCartMount(mid)) return this.useMountItem(vid);
     }
@@ -5410,7 +5411,7 @@ export class Game implements GameHooks {
   private tickRecallChannel(): void {
     if (!this.recallChannel) return;
     const c = this.recallChannel;
-    const heldVid = viIdFromKey(ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.key ?? '') ?? -1;
+    const heldVid = (ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.vid ?? -1) ?? -1;
     if (this.player.useTime === c.triggerAt && heldVid === c.vid) {
       this.recallChannel = null;
       this.fireRecallTeleport(c);
@@ -5436,7 +5437,7 @@ export class Game implements GameHooks {
    *     色 {绿×2/4,黄,白}、velocity×2、scale0.8+rand×0.6、noGravity。 */
   private tickRecallFamilyDust(): void {
     if (this.player.itemAnimTicks <= 0) return;
-    const vid = viIdFromKey(ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.key ?? '') ?? -1;
+    const vid = (ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.vid ?? -1) ?? -1;
     const p = this.player;
     if (vid === 50 || vid === 3124 || vid === 3199 || vid === 5358) {
       if (Math.random() * 2 < 1) {                    // Main.rand.Next(2) == 0
@@ -5634,7 +5635,7 @@ export class Game implements GameHooks {
           onFire2: p.buffs.has(BuffType.CursedInferno),
           poisoned: p.buffs.has(BuffType.Poisoned),
           statLife: p.hp, statLifeMax2: p.maxHp,
-          heldVanillaItemId: heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key ?? '')) : 0,
+          heldVanillaItemId: heldDef ? (heldDef.vid ?? -1) : 0,
         },
       };
     };
@@ -5985,7 +5986,7 @@ export class Game implements GameHooks {
       // R(QuickMount 键):五彩扳手/宏伟蓝图模式循环(红蓝绿黄→剪线→致动器→剪致动器)
       if (isBound('QuickMount', code)) {
         const held = this.player?.inv.heldItem();
-        if (held && ITEM_DEFS[held.id]?.wireTool && (viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 3625 || viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 3611)) {
+        if (held && ITEM_DEFS[held.id]?.wireTool && ((ITEM_DEFS[held.id]?.vid ?? -1) === 3625 || (ITEM_DEFS[held.id]?.vid ?? -1) === 3611)) {
           const modes = [
             [TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW],
             [TOOL_CUTTER, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW],
@@ -6215,7 +6216,7 @@ export class Game implements GameHooks {
       if (!it) return;
       const def = ITEM_DEFS[it.id];
       if (!def) return;
-      const vid = def.vid ?? viIdFromKey(def.key);
+      const vid = def.vid ?? -1;
       if (!Number.isFinite(vid)) return;
       const shoot = itemCombat(vid)?.shoot;
       if (shoot && shoot > 0) {
@@ -6569,7 +6570,7 @@ export class Game implements GameHooks {
     this.leashed.attach(w);
     this.leashed.respawnAll(
       w.furnitureItems,
-      (id) => viIdFromKey(ITEM_DEFS[id]?.key ?? ''),
+      (id) => (ITEM_DEFS[id]?.vid ?? -1),
       this.leashedEnv(),
     );
     // 常用声效小集合预热（按需加载体系下的目标预热，异步不阻塞：
@@ -7036,6 +7037,8 @@ export class Game implements GameHooks {
         // ★SW-BO1 2026-09-07：流浪清场标恢复（WorldFile.cs:2932 v315+ 读——原版同面,
         //  夜扫跨存档;缺省 undefined=false）
         t.homelessDespawn = !!n.homelessDespawn;
+        // ★BJ259：踢出标恢复（repo 侧标——读档后被踢者继续被 ① 轮臂豁免=踢出态跨档）
+        t.kickedOut = !!n.kickedOut;
         if (n.home) {
           // ★ghost home 过滤(2026-08-30 housing 副因B):legacy 存档的 home 可能是
           //   站位穿层时代写出的房间外坐标——不在任何真实房间 tiles 内即丢弃
@@ -8603,7 +8606,7 @@ export class Game implements GameHooks {
         const slot = player.inv.armor[acc];
         if (!slot) continue;
         const heldDef = ITEM_DEFS[slot.id];
-        if (!heldDef || viIdFromKey(heldDef.key) !== MUSIC_BOX_EMPTY_VID) continue;
+        if (!heldDef || (heldDef.vid ?? -1) !== MUSIC_BOX_EMPTY_VID) continue;
         if (Math.floor(Math.random() * 540) !== 0) continue;
         this.sfx.play('record');   // SoundID.Item166（录音完成音）
         const recKey = VANILLA_ITEM_KEY_BY_ID[musicBoxRecordItem(this.lastMusic)];
@@ -8813,7 +8816,7 @@ export class Game implements GameHooks {
     // 原版同为 controlUp/controlDown 双边沿，重力药水会与其共享 Up 键系原版实况）
     {
       const held = player.inv.heldItem();
-      const heldWand = held ? flexibleWandOf(viIdFromKey(ITEM_DEFS[held.id]?.key ?? '')) : null;
+      const heldWand = held ? flexibleWandOf(ITEM_DEFS[held.id]?.vid ?? -1) : null;
       if (heldWand) {
         if (player.inputUp && !this.flexLatchUp) this.flexWandCycle--;
         if (player.inputDown && !this.flexLatchDown) this.flexWandCycle++;
@@ -8869,7 +8872,7 @@ export class Game implements GameHooks {
     player.soulDrain = 0;
     {
       const heldId = player.inv.heldItem()?.id;
-      const hVid0 = heldId != null ? (ITEM_DEFS[heldId]?.vid ?? viIdFromKey(ITEM_DEFS[heldId]?.key ?? '') ?? -1) : -1;
+      const hVid0 = heldId != null ? (ITEM_DEFS[heldId]?.vid ?? -1) : -1;
       if (hVid0 === 3006 && player.itemAnimTicks > 0 && !player.dead) {
         for (const ent of this.entities.enemies) {
           const en = ent as Enemy & { soulDrainActive?: boolean };
@@ -8894,7 +8897,7 @@ export class Game implements GameHooks {
     {
       const turnHeld = player.inv.heldItem();
       const turnDef = turnHeld ? ITEM_DEFS[turnHeld.id] : undefined;
-      const turnVid = turnDef ? (turnDef.vid ?? viIdFromKey(turnDef.key)) : -1;
+      const turnVid = turnDef ? (turnDef.vid ?? -1) : -1;
       const tf = turnVid >= 0 ? itemFuncOfVid(turnVid) : null;
       player.itemUseTurn = !!tf && ((tf.useStyle === 2 || tf.useStyle === 9)
         || !!(tf.createTile || tf.createWall)
@@ -9150,7 +9153,7 @@ export class Game implements GameHooks {
       if (this.player.itemAnimTicks > 0 || this.player.useTime > 0) {
         const held = this.player.inv.heldItem();
         const hd = held ? ITEM_DEFS[held.id] : undefined;
-        const vid = hd ? hd.vid ?? viIdFromKey(hd.key) : -1;
+        const vid = hd ? hd.vid ?? -1 : -1;
         if (vid >= 0) {
           // ★damage/noMelee 在 itemfunc 表（stats 只有装备/配饰属性——曾查错表恒 false）
           const fc = itemFuncOfVid(vid);
@@ -9206,7 +9209,7 @@ export class Game implements GameHooks {
     {
       const heldF = this.player.inv.heldItem();
       const fDef = heldF ? ITEM_DEFS[heldF.id] : null;
-      const fVid = fDef ? (fDef.vid ?? viIdFromKey(fDef.key)) : -1;
+      const fVid = fDef ? (fDef.vid ?? -1) : -1;
       const channeling = (fVid === 5664 || fVid === 6149) && inp.mouseDown && !inp.uiBlocking && !this.player.dead
         && !inp.delayUseItem;   // ★R4-22 电平化：channel 臂同吃 :853-859 压制（controlUseItem 等价面）
       for (const e of this.entities.projectiles) {
@@ -9641,9 +9644,9 @@ export class Game implements GameHooks {
     // 暗影蜡烛手持强制门（SceneMetrics.AddPlayerEffects :765-768 item==5322 →
     // ZoneShadowCandle=true,对照水蜡烛 :757-760 item==148）
     const held2 = this.player.inv.heldItem();
-    const heldWC = !!held2 && viIdFromKey(ITEM_DEFS[held2.id]?.key ?? '') === 148;
+    const heldWC = !!held2 && (ITEM_DEFS[held2.id]?.vid ?? -1) === 148;
     this.heldWaterCandle = heldWC;
-    this.heldShadowCandle = !!held2 && viIdFromKey(ITEM_DEFS[held2.id]?.key ?? '') === 5322;
+    this.heldShadowCandle = !!held2 && (ITEM_DEFS[held2.id]?.vid ?? -1) === 5322;
     // ---- 场景物件扫描（原版 SceneMetrics.Scan:Player.UpdateSceneMetrics 以
     // ★BJ124-①（2026-09-18 用户拍板方案 A）：触碰解救臂（原 boundTouchCheck 每 15t
     //   玩家 AABB 相交即 freeBoundNpc）整摘——原版解救唯一触发源=talk 交互
@@ -10111,8 +10114,8 @@ export class Game implements GameHooks {
     if (this.homelessSpawnTimeout > 0) this.homelessSpawnTimeout--;
     // ★SW-BO1 2026-09-07（BJ2 债①）：UpdatePrioritizedTownNPC 每 tick（WorldGen.cs:72088
     //      → :72168-72183）——入口门 `lock==37 则不动` + 数组序首个 homeless 城镇体
-    //      （lookForHomeTimeout==0 本仓无 kickOut 链恒 0,免检）改写锁;无人合格不写。
-    //      消费面 = 下方近链迁入配型 + 晨间流浪生成门/生成类型。
+    //      （lookForHomeTimeout==0 门已接通,BJ259——kickOut 置 3600 者冷却期不持锁）
+    //      改写锁;无人合格不写。消费面 = 下方近链迁入配型 + 晨间流浪生成门/生成类型。
     if (this.prioritizedTownNPCType !== 37) {
       const picked = pickPrioritizedTownNPCType(this.entities.npcs
         .filter((m): m is TownNPC => m instanceof TownNPC)
@@ -10120,6 +10123,7 @@ export class Game implements GameHooks {
           npcId: n.vanillaId,
           homeless: !n.home,
           bound: n.bound,
+          lookForHomeTimeout: n.lookForHomeTimeout,
           dead: n.dead,
         })));
       if (picked !== -1) this.prioritizedTownNPCType = picked;
@@ -10855,14 +10859,14 @@ export class Game implements GameHooks {
     let targetPanX = 0, targetPanY = 0;   // targetPan（UpdateCameraPan 局部 :63643/1458 :63649,零向量起始）
     if (!this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {
       const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
-      const hVid = hDef ? (hDef.vid ?? viIdFromKey(hDef.key)) : -1;
+      const hVid = hDef ? (hDef.vid ?? -1) : -1;
       // scope 配饰佩戴判定（Player.cs:15002-15007：饰品在身 + 手持武器 useAmmo
       // ∈ {97 子弹,1783 糖玉米,1836 木桩,23 凝胶,780 溶液}，1458:15001-15006）
       // ★BJ94 D2（swPerf 快路径）：每帧 2 次构造 → 模块级单例（见 BJ94_SCOPE_ACC 注）
       const SCOPE_ACC = swPerf ? BJ94_SCOPE_ACC : new Set([1300, 1858, 4005]);
       const AMMO_SCOPE = swPerf ? BJ94_AMMO_SCOPE : new Set([97, 1783, 1836, 23, 780]);
       const hasScopeAcc = player.inv.armor.some((s, i) =>
-        i >= 3 && s && SCOPE_ACC.has(ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]!.key) ?? -1));
+        i >= 3 && s && SCOPE_ACC.has(ITEM_DEFS[s.id]?.vid ?? (ITEM_DEFS[s.id]!.vid ?? -1)));
       const heldAmmo = itemCombat(hVid)?.useAmmo ?? -1;
       const scoped = hasScopeAcc && AMMO_SCOPE.has(heldAmmo);
       let panNum = -1, needRightClick = true;
@@ -11004,7 +11008,7 @@ export class Game implements GameHooks {
     // 286=(0.7,0.8,1) / 3112=(1,0.6,0.85) / 3002=(1.05,0.95,0.55) / 4776=(0.9,0.35,1)
     // （附 4.5 格泛光近似省略）；5643 彩虹 = Disco 轮转
     if (heldDef) {
-      const gvid = viIdFromKey(heldDef.key);
+      const gvid = (heldDef.vid ?? -1);
       const GLOWSTICK_LIGHT: Record<number, [number, number, number]> = {
         282: [0.7, 1, 0.8], 286: [0.7, 0.8, 1], 3112: [1, 0.6, 0.85],
         3002: [1.05, 0.95, 0.55], 4776: [0.9, 0.35, 1],
@@ -11021,7 +11025,7 @@ export class Game implements GameHooks {
     // EmitHeldItemLight 的 (Torches && !wet) || WaterTorches——水炬水下也亮
     // ★BJ94 D2（swPerf 快路径）：每帧 1 次构造 → 模块级单例（见 BJ94_WATER_TORCH_ITEMS 注）
     const WATER_TORCH_ITEMS = swPerf ? BJ94_WATER_TORCH_ITEMS : new Set([523, 1333, 4384]);
-    const heldVid0 = heldDef ? viIdFromKey(heldDef.key) : -1;
+    const heldVid0 = heldDef ? (heldDef.vid ?? -1) : -1;
     if (!heldRGB && heldDef && WATER_TORCH_ITEMS.has(heldVid0)) {
       const BIOME_TORCH_ITEM2: Record<number, number> = {
         523: 8, 974: 9, 1245: 10, 1333: 11, 2274: 12, 3004: 13, 3045: 14, 3114: 15,
@@ -11037,7 +11041,7 @@ export class Game implements GameHooks {
     //   4952 (1,0.7,0.8)×1.3（:49430-49435，!pulley && !petting——无 wet 门）
     //   （pulley=滑轨乘坐本仓未跟踪，petting 同；dust 172/萤火纯装饰从略）
     if (!heldRGB && heldDef) {
-      const hv = viIdFromKey(heldDef.key);
+      const hv = (heldDef.vid ?? -1);
       if (hv === 148) heldRGB = [0, 0.5, 1];
       else if (hv === 5322 && !player.inWater) heldRGB = [0.2, 0.3, 0.32];
       else if (hv === 4952) heldRGB = [1.3, 0.91, 1.04];
@@ -11045,7 +11049,7 @@ export class Game implements GameHooks {
     // 普通火把族水下熄（:48997 `Torches && !wet` 半边）——水炬三件已在上方
     // WATER_TORCH_ITEMS 段先置 heldRGB，此处自然跳过
     if (!heldRGB && heldDef && !player.inWater) {
-      const vid = viIdFromKey(heldDef.key);
+      const vid = (heldDef.vid ?? -1);
       if (Number.isFinite(vid)) {
         // 蜡烛（ItemCheck 尾段 type 105/713）：同火把基色
         if (vid === 105 || vid === 713) heldRGB = [1, 0.95, 0.8];
@@ -11088,7 +11092,7 @@ export class Game implements GameHooks {
     //  光位 = itemLocation + (X: 火把族 ±12 对称 :49093/:49127；非火把族 −16/+6
     //  :49153/:49175 等，右向 +6 勿与火把的 +12 混) + (Y: −14)。
     //  RotatedRelativePoint（站立恒等）/mount 偏移/+velocity 三项从略。
-    const heldVidLight = heldDef ? viIdFromKey(heldDef.key) : -1;
+    const heldVidLight = heldDef ? (heldDef.vid ?? -1) : -1;
     let htx = -1, hty = -1;
     if (heldRGB) {
       const dir = player.facing < 0 ? -1 : 1;
@@ -11240,7 +11244,7 @@ export class Game implements GameHooks {
       const dst = this.world.store;
       if (!dst.inBounds(tx, ty)) continue;
       const wet = dst.liquid[dst.idx(tx, ty)] > 100;
-      const vid = viIdFromKey(def.key);
+      const vid = (def.vid ?? -1);
       // jitter = Main.rand.Next(a,b) × 0.01（:1288 Next(90,111) 系 / :1294 Next(95,106) 陨石）
       const jit = (a: number, b: number) => (Math.floor(Math.random() * (b - a)) + a) * 0.01;
       const lit = (r: number, g: number, b: number) => this.lighting.addLight(tx, ty, r, g, b);
@@ -11687,7 +11691,7 @@ export class Game implements GameHooks {
    *  其余 legacy 缺数据 → 1（挥砍）。返回值供 Renderer 姿势/身体行路由 */
   private heldUseStyle(def: (typeof ITEM_DEFS)[number] | null): number {
     if (!def) return 1;
-    const vid = def.vid ?? viIdFromKey(def.key);
+    const vid = def.vid ?? -1;
     if (vid >= 0) {
       const us = itemFuncOfVid(vid)?.useStyle;
       if (us) return us;
@@ -11721,7 +11725,7 @@ export class Game implements GameHooks {
   private heldUseAnimation(def: (typeof ITEM_DEFS)[number] | null): number {
     if (!def) return 30;
     if (def.tool?.speed) return def.tool.speed;   // 1457：base=useAnimation 原值（:4448-4480），下限 1 在 useSwing 侧
-    const vid = def.vid ?? viIdFromKey(def.key);
+    const vid = def.vid ?? -1;
     if (vid >= 0) {
       const ua = itemCombat(vid)?.useAnimation;
       if (ua && ua > 0) return Math.max(1, ua);
@@ -11735,7 +11739,7 @@ export class Game implements GameHooks {
   private useSwing(def: (typeof ITEM_DEFS)[number] | null, aim?: number, mult = 1): void {
     if (!def) return;
     const us = this.heldUseStyle(def);
-    const vid = def.vid ?? viIdFromKey(def.key);
+    const vid = def.vid ?? -1;
     // ApplyItemAnimation +1 帧（Player.cs:4258-4261/:4280；1458 权威行号 :4451-4455）：
     // useStyle5 && autoReuse **&& reuseDelay==0** && useTime<=useAnimation && shoot>0
     // → 动画 +1（非 melee/summon/放置档的 else 分支——那些走 mult 乘区不吃 +1）。
@@ -11946,7 +11950,7 @@ export class Game implements GameHooks {
       const s = p.inv.slots[i];
       if (!s || s.stack <= 0) continue;
       const d = ITEM_DEFS[s.id];
-      if ((d?.vid ?? viIdFromKey(d?.key ?? '')) === 4131) return true;
+      if ((d?.vid ?? -1) === 4131) return true;
     }
     return false;
   }
@@ -11971,7 +11975,7 @@ export class Game implements GameHooks {
     const consider = (arr: SlotArr, i: number): void => {
       const s = arr[i];
       if (!s || s.stack <= 0) return;
-      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const vid = ITEM_DEFS[s.id]?.vid ?? -1;
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
       if (!f?.potion || !(f.healLife! > 0)) return;                       // :5562
       let num = f.healLife! - lifeDiff;
@@ -12008,7 +12012,7 @@ export class Game implements GameHooks {
       for (let i = 0; i < arr.length; i++) {
         const s = arr[i];
         if (!s || s.stack <= 0) continue;
-        const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+        const vid = ITEM_DEFS[s.id]?.vid ?? -1;
         const f = vid >= 0 ? itemFuncOfVid(vid) : null;
         if (!f || !(f.healMana! > 0)) continue;
         if (p.buffs.healBlocked && f.potion) continue;                    // :5625/:5634
@@ -12131,7 +12135,7 @@ export class Game implements GameHooks {
     const considerFood = (arr: Array<{ id: number; stack: number } | null>, i: number): void => {
       const s = arr[i];
       if (!s || s.stack <= 0) return;
-      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const vid = ITEM_DEFS[s.id]?.vid ?? -1;
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
       const prio = f?.buffType ? Game.QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;
       if (prio > 0) {   // 档 0 = 非食物：受理门 num3 > 0（:5933/:5948）恒拒，不入流
@@ -12151,7 +12155,7 @@ export class Game implements GameHooks {
       for (let i = 0; i < arr.length; i++) {
         const s = arr[i];
         if (!s || s.stack <= 0) continue;
-        const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+        const vid = ITEM_DEFS[s.id]?.vid ?? -1;
         const f = vid >= 0 ? itemFuncOfVid(vid) : null;
         if (!f || !(f.buffType! > 0) || f.summon) continue;               // :5862-5866
         let btype = f.buffType!;
@@ -12215,7 +12219,7 @@ export class Game implements GameHooks {
     const p = this.player;
     const s = slots[slot];
     const def = s ? ITEM_DEFS[s.id] : null;
-    const vid = def ? (def.vid ?? viIdFromKey(def.key)) : -1;
+    const vid = def ? (def.vid ?? -1) : -1;
     const f = vid >= 0 ? itemFuncOfVid(vid) : null;
     if (!s || !f) return -1;
     if (f.buffType! > 0) {
@@ -12294,7 +12298,7 @@ export class Game implements GameHooks {
     let ammoDefP: (typeof ITEM_DEFS)[number] | null = null;
     {
       const ammoOfP = (d: (typeof ITEM_DEFS)[number]): number =>
-        d.ammoId ?? (d.vid != null || viIdFromKey(d.key) >= 0 ? itemCombat(d.vid ?? viIdFromKey(d.key))?.ammo ?? 0 : 0);
+        d.ammoId ?? (d.vid != null || (d.vid ?? -1) >= 0 ? itemCombat(d.vid ?? -1)?.ammo ?? 0 : 0);
       ammoSlotP = this.player.pickAmmoSlot((id: number): boolean => {
         const d = ITEM_DEFS[id];
         return !!d && ammoOfP(d) === useAmmo;
@@ -12303,7 +12307,7 @@ export class Game implements GameHooks {
       ammoDefP = slP ? ITEM_DEFS[slP.id] ?? null : null;
     }
     if (!ammoDefP || ammoSlotP < 0) return null;
-    const ammoVidP = viIdFromKey(ammoDefP.key);
+    const ammoVidP = (ammoDefP.vid ?? -1);
     const ammoCP = itemCombat(ammoVidP);
     const psP = this.heldPrefixStat();
     const isArrowP = useAmmo === AMMO_ARROW || useAmmo === 1836;
@@ -12835,7 +12839,7 @@ export class Game implements GameHooks {
       // GetAvailableToolRanges（Player.cs:17797-17831）射程 TB = inventory[i].tileBoost
       // （红蓝对抗 A-F1：曾恒 0——铜镐 3509/铜斧 3506/铜锤 3505/木锤 196 = -1、
       // The Axe 1305/+1、激光钻头 2798/+11 六类在池，±(5+tb)/±(3+tb) 盒随首件伸缩）
-      this._smartSelectSlots[i].tileBoost = tileBoostOfVid(viIdFromKey(def?.key ?? '') ?? 0);
+      this._smartSelectSlots[i].tileBoost = tileBoostOfVid((def?.vid ?? -1) ?? 0);
     }
     return this._smartSelectSlots;
   }
@@ -12861,7 +12865,7 @@ export class Game implements GameHooks {
     if (!(inp.mouseDown || inp.mouseHeld) || inp.rightDown) return;
     const def = this.player.inv.heldDef();
     if (!def) return;
-    const vid = def.vid ?? viIdFromKey(def.key);
+    const vid = def.vid ?? -1;
     const c = vid >= 0 ? itemCombat(vid) : null;
     // 相关面：武器/工具/放置/漆线族 —— 药水与杂项静持不转身
     const relevant = !!def.tool || !!def.paintTool || !!def.wireTool
@@ -13022,6 +13026,29 @@ export class Game implements GameHooks {
     //   :45918-45927 不清携带（连查多间,原版同款）；右键 → :45941-45945
     //   mouseRight&&mouseRightRelease ⇒ Sound 12+SetMouseNPC(-1,-1)（全屏任意处,
     //   不限于条上——此前右键取消只接在 UI 槽位上）；关包 → :46429（UI 侧 closeInventory）
+    // ★BJ259（2026-09-22 用户实报「不能把 NPC 踢出房间」）踢出臂（DrawNPCHousesInWorld
+    //   Main.cs:41530-41535 旗布右键 → WorldGen.kickOut WorldGen.cs:4791-4799）：
+    //   住房 UI 开（原版 EquipPage==1 桌面支,本仓=UI.housingUiActive 活取）时右键
+    //   驻家旗 → 踢成无家可归。旗臂先于携带取消臂（接口链序 DrawInterface_7 <
+    //   DrawInterface_38——旗上右键=踢出不取消,旗外右键=取消携带,原版同序消费
+    //   mouseRightRelease）;开图期界面链整停（:63384）=fullMap 门同相。原版触发沿
+    //   =mouseRightRelease 释放沿,本仓右键族现行为按压沿（下方取消臂同款,
+    //   _prevRightDown 于 updateUse 后记录 :9478）——差异登记。旗布矩形无射程门
+    //   （原版 UI 面非世界交互）;inpOverDomUi=mouseInterface 等价（住房条/背包
+    //   DOM 之下不误触）。
+    if (!this.renderer.fullMap.open
+      && (typeof window !== 'undefined'
+        && ((window as unknown as { __swUI?: { housingUiActive?: boolean } }).__swUI?.housingUiActive ?? false))
+      && inp.rightDown && !this._prevRightDown && !this.inpOverDomUi()) {
+      const [kwx, kwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+      const victim = this.renderer.houseBannerNpcAt(kwx, kwy, this.entities.npcs, this.world);
+      if (victim) {
+        this.kickOutNPC(victim);
+        this.sfx.play('menuTick', 1);   // SoundID 12（Main.cs:41534 SoundEngine.PlaySound(12)）
+        this.input.mouseDown = false;   // 吞本拍使用点击（住房支 return 同款）
+        return;
+      }
+    }
     if (this.housingMode) {
       // ★RB30a MED-1/MINOR-3（2026-09-16）全屏地图门：mapFullscreen 期整条界面链
       // 不跑（Main.cs:63384 `if(!mapFullscreen) DrawInterface`——DrawInterface_38_
@@ -13301,8 +13328,8 @@ export class Game implements GameHooks {
       // （:31844 Main.mouseRightRelease=false）防 tile 互动二次消费
       if (inp.rightDown && !this._prevRightDown && !inp.mouseHeld && this.player.useTime === 0
         && !this.tileInteractHappened
-        && heldDef && (viIdFromKey(heldDef.key) === 6190 || viIdFromKey(heldDef.key) === 6195)
-        && this.swapParkourBookVisual(viIdFromKey(heldDef.key))) {
+        && heldDef && ((heldDef.vid ?? -1) === 6190 || (heldDef.vid ?? -1) === 6195)
+        && this.swapParkourBookVisual(heldDef.vid ?? -1)) {
         this.input.rightDown = false;
       }
       // 猪龙鱼之翼 2611↔5526 右键互换（R4 伴随项 2026-09-03；Player.cs:31864-31868
@@ -13315,8 +13342,8 @@ export class Game implements GameHooks {
       // 成功吞边沿（:31874 Main.mouseRightRelease=false）防 tile 互动二次消费
       if (inp.rightDown && !this._prevRightDown && !inp.mouseHeld && this.player.useTime === 0
         && !this.tileInteractHappened
-        && heldDef && (viIdFromKey(heldDef.key) === 2611 || viIdFromKey(heldDef.key) === 5526)
-        && this.swapFlaironForm(viIdFromKey(heldDef.key))) {
+        && heldDef && ((heldDef.vid ?? -1) === 2611 || (heldDef.vid ?? -1) === 5526)
+        && this.swapFlaironForm(heldDef.vid ?? -1)) {
         this.input.rightDown = false;
       }
       // 贝壳电话 5437 转正 + 目的地循环（★FX51 2026-09-16；Player.cs:31840-31855
@@ -13329,14 +13356,14 @@ export class Game implements GameHooks {
       // （itemTime/itemAnimation 归零 :31772,引导期不可换型）。成功吞边沿防 tile
       // 互动二次消费。音=PlaySound(22)=Unlock（SoundID.cs:49,本仓 'unlock' kind）。
       if (inp.rightDown && !this._prevRightDown && !inp.mouseHeld && this.player.useTime === 0
-        && heldDef && [5358, 5359, 5360, 5361, 5437].includes(viIdFromKey(heldDef.key) ?? -1)
-        && this.swapShellphoneDestination(viIdFromKey(heldDef.key) ?? -1)) {
+        && heldDef && [5358, 5359, 5360, 5361, 5437].includes(heldDef.vid ?? -1)
+        && this.swapShellphoneDestination(heldDef.vid ?? -1)) {
         this.input.rightDown = false;
       }
       // 传送门枪右键（form 1 蓝门；Player.cs:48053-48057 altFunctionUse==2 → ai1=1）。
       // 挂在 tile 交互分派之后 = 原版 :31070 !tileInteractionHappened 语义——
       // 右键悬门/箱/祭坛时优先交互不射门（前面分支消费过 rightDown 则跳过）
-      if (inp.rightDown && heldDef && viIdFromKey(heldDef.key) === 3384 && this.player.useTime === 0) {
+      if (inp.rightDown && heldDef && (heldDef.vid ?? -1) === 3384 && this.player.useTime === 0) {
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
           inp.mouseX - this.renderer.canvas.width / 2);
         this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
@@ -13349,7 +13376,7 @@ export class Game implements GameHooks {
       // 出生：Damage×0.5 / kb+4 / 速 ×1.5 / ai0=(0.3+0.7r)×24×1.75×dir → 弹 708
       // AI_142 椭圆弧挥舞，anim 2/6/10 各出一发 709；709 亡爆生 1110 滞留圈
       // （同位消费旧圈）。useTime 门 = 原版 alt 复用冷却（useAnimation 30）
-      if (inp.rightDown && heldDef && viIdFromKey(heldDef.key) === 3858 && this.player.useTime === 0) {
+      if (inp.rightDown && heldDef && (heldDef.vid ?? -1) === 3858 && this.player.useTime === 0) {
         const [swx, swy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         const ang = Math.atan2(swy - this.player.cy, swx - this.player.cx);
         this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
@@ -13387,7 +13414,7 @@ export class Game implements GameHooks {
       // (:48705-48727)误读进右键支——右键语义是回收不是指挥。挂在 tile 交互分派之后
       // = 原版 !tileInteractionHappened 语义（同 3384/3858 两支）。使用节奏 = useTime 15
       if (inp.rightDown && heldDef && this.player.useTime === 0
-        && (() => { const v = heldDef.vid ?? viIdFromKey(heldDef.key); return v === 5667 || v === 6174; })()
+        && (() => { const v = heldDef.vid ?? -1; return v === 5667 || v === 6174; })()
         && this.entities.projectiles.some((m) => m instanceof MinionProj && !m.dead
           && m.ownerPlayer === this.player && (m.projId === 1098 || m.projId === 1123))) {
         for (const m of this.entities.projectiles) {
@@ -13404,7 +13431,7 @@ export class Game implements GameHooks {
       //  连发门 :31902 flag2&&alt==0&&itemAnimation==0 → 自动升 alt——按住 RMB 每动画窗
       //  一发（本支不消费 rightDown,以 useTime===0 节流）;:43826 单窗单发同门覆盖。
       //  挂 tile 交互分派之后 = !tileInteractionHappened 语义（同 3384/3858 先例）
-      if (inp.rightDown && heldDef && viIdFromKey(heldDef.key) === 3852 && this.player.useTime === 0) {
+      if (inp.rightDown && heldDef && (heldDef.vid ?? -1) === 3852 && this.player.useTime === 0) {
         const bsPs = this.heldPrefixStat();
         const bsData = itemCombat(3852);
         const bsMana = (bsData?.mana ?? 20);
@@ -13442,7 +13469,7 @@ export class Game implements GameHooks {
     // SW-K1 2026-09-03：割草机 4049 瞄准割草（Player.cs:47373 ItemCheck_UseLawnMower,
     // :43909 OwnerOnlyCode 逐 tick 调用——挂 OwnerOnlyCode 面,不受下方 mouseDown
     // 边沿早退门影响：按住期 mouseHeld 电平驱动）。4049 无其他消费面,处理后返回
-    if (heldDef && viIdFromKey(heldDef.key) === 4049 && !inp.rightDown && !this.annotateMode) {
+    if (heldDef && (heldDef.vid ?? -1) === 4049 && !inp.rightDown && !this.annotateMode) {
       this.updateLawnMowerUse(heldDef, tx, ty);
       return;
     }
@@ -13461,7 +13488,7 @@ export class Game implements GameHooks {
     // 见 autoReuseAllChain 注）——本早退门是 updateUse 全分派的重入总闸,全武器连发
     // 开启时 damage>0 非 autoReuse 物品同样放行持按重入（各分支门仍自守 useTime/channel）
     const holdOk = !!(((cwEarly as { autoReuse?: boolean } | null)?.autoReuse
-      || (cwEarly && this.autoReuseAllChain(heldDef!.vid ?? viIdFromKey(heldDef!.key))))
+      || (cwEarly && this.autoReuseAllChain(heldDef!.vid ?? -1)))
       && inp.mouseHeld && !this.annotateMode);
     // ★R4-22 电平化（TriggersSet.cs:853-859 逐字）：delayUseItem 存续期 = 原版
     // controlUseItem 强制 false——使用/挖掘/放置/挥击整链压制（旧版在 Input.mousedown
@@ -13488,7 +13515,7 @@ export class Game implements GameHooks {
     // ★R35 勘误:旧注"右键才指挥"系把 flag5 后非 flag5 段误读进右键支——右键=全体
     // 回收(:8394 支),指挥在左键在场拍。使用节奏 = useTime 15（Item.cs:47569-47571）
     {
-      const dgVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      const dgVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if (this.player.useTime === 0 && (dgVid === 5667 || dgVid === 6174)) {
         const out = this.entities.projectiles.filter((m): m is MinionProj =>
           m instanceof MinionProj && !m.dead && m.ownerPlayer === this.player
@@ -13510,7 +13537,7 @@ export class Game implements GameHooks {
     // 先 Kill 场内所有同型同主弹,再生成一只（单实例替换语义）——combatWeapon 已显式
     // 退出 'shot' 兜底（R35 清单⑤）;ai195/205 本体行为另批登记,现以惯性 Arrow 承载
     {
-      const pmVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      const pmVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if (pmVid === 5451 || pmVid === 5738) {
         if (this.player.useTime === 0) {
           const pc5 = itemCombat(pmVid);
@@ -13544,7 +13571,7 @@ export class Game implements GameHooks {
     // "装备/卸下宠物槽"——召唤/收回的用户可见行为与原版 TogglePet 一致；
     // 表驱动泛化到其余 60 只 vanilla 宠物另批登记）
     {
-      const ptVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      const ptVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if ((ptVid === 669 || ptVid === 753) && this.player.useTime === 0) {
         const held = this.player.inv.heldItem();
         const eq = this.player.inv.miscEquips;
@@ -13565,7 +13592,7 @@ export class Game implements GameHooks {
     // 放飞鸽子 4682（ItemCheck_Shoot :48865-48873）+ 秘蛇 4262（:48276-48300）：
     // 两件 consumable/decor 新奇品此前 dispatch 链 return null=使用零效果（R35 清单⑦⑧）
     {
-      const nvVid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      const nvVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if (nvVid === 4682 && this.player.useTime === 0) {
         // 3 鸽：v=基准 ±rand(-20,21)×0.1=±2px 抖动,proj 851（ai166 4×4 小鸽）
         const [nvx, nvy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
@@ -13633,10 +13660,10 @@ export class Game implements GameHooks {
     const heldFam = heldDef
       ? (heldDef.tile
         ? (TILE_DEFS[TILE_BY_KEY[heldDef.tile]]?.vanilla?.sheet ?? -1)
-        : vanillaItemCreateTile(viIdFromKey(heldDef.key)))
+        : vanillaItemCreateTile(heldDef.vid ?? -1))
       : -1;
     if (heldDef && GRASS_CONVERT_SHEETS.has(heldFam) && (cwMelee || tool)
-      && !PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
+      && !PLACE_TILE_ON_ALT_USE.has(heldDef.vid ?? -1)) {
       this.tryGrassConvert(tx, ty, heldDef, heldFam, { noCooldown: true });
     }
     if (tool?.type === 'sword' || (cwMelee && !tool)) {
@@ -13657,7 +13684,7 @@ export class Game implements GameHooks {
         : Math.max(1, Math.round(cwMelee!.useTime));
       // TryAllowingItemReuse（Player.cs:52036-52053）：autoReuseGlove（力量手套族配饰）给
       // 近战武器补自动连挥——唯 type 3030 除外；原生 legacy sword 保持持按连挥
-      const heldVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');   // vi_ 物品 vid 从 key 反解
+      const heldVid = heldDef?.vid ?? -1;   // vi_ 物品 vid 从 key 反解
       const gloveReuse = eq.autoReuseGlove && heldVid !== 3030;
       // Main.SettingsEnabled_AutoReuseAllItems（IngameOptions.cs:689；Player.cs:24182
       // autoReuseAllWeapons = 该开关——全局持按连挥档，与物品原生/手套链 OR）
@@ -13732,7 +13759,7 @@ export class Game implements GameHooks {
         // ★ 真刃系旋斩弧五剑（Player.cs:49353-49447 各专属出生链——★BJ206 2026-09-20
         // 重锚,旧注 :48265-48317 系 1456 代际——先于下方通用
         // shoot 门：368/1826 无 shootSpeed 会被饿死；弧弹自带命中，不再走 Arrow）
-        const arcVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');
+        const arcVid = heldDef?.vid ?? -1;
         const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
           + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
         if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 974, 976].includes(cwMelee.shoot)) {
@@ -14184,11 +14211,11 @@ export class Game implements GameHooks {
         // ApplyItemAnimation :50935-50950 每次 (re)start 动画即播——对空挥也响，
         // 无"对准目标"门）。旧自创 chop/tink/dig 按材质分档已废：材质分档属
         // 破坏完成音（KillTile_PlaySounds 四档，见 killTileBreakSound/tryMine 尾）
-        this.playUseSound(heldDef!.vid ?? viIdFromKey(heldDef!.key), 'throw');
+        this.playUseSound(heldDef!.vid ?? -1, 'throw');
         // The Axe 1305 和弦音双语义转发（Player.cs:46945-46970：镐锤挥动+点击和弦
         // 并行）——工具分支 return 先于 FUN_USE_VIDS 链,此处直播同款(与下方乐器层
         // case 1305 同式;useTime 已由工具链裁决,不在此改)
-        if ((heldDef!.vid ?? viIdFromKey(heldDef!.key)) === 1305) {
+        if ((heldDef!.vid ?? -1) === 1305) {
           const [cwx, cwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
           const cAxis = Math.min(this.renderer.canvas.width, this.renderer.canvas.height);
           this.sfx.playWavFile('Item_47', 1, this.player.cx, this.player.cy,
@@ -14203,7 +14230,7 @@ export class Game implements GameHooks {
         // 同型弹在场不重发（原版弹体 SetDummyItemTime(2) :23920 冻结 itemTime →
         // ItemCheck_Shoot 的 flag4 门 :42855 不重触，松链亡后下次使用再发）。
         // useStyle5+noUseGraphic → 持械姿势朝鼠标、不画手持贴图（投射物即本体）
-        const sawVid = heldDef ? heldDef.vid ?? viIdFromKey(heldDef.key) : -1;
+        const sawVid = heldDef ? heldDef.vid ?? -1 : -1;
         const sawShoot = heldDef?.shoot
           ?? (sawVid >= 0 ? itemCombat(sawVid)?.shoot : undefined);
         // r33-③：ai75 激光钻变体（2798→445）同门放行——AI_075 挂手/命中面与 AI_020
@@ -14286,8 +14313,8 @@ export class Game implements GameHooks {
       this.faceCursor(tx, ty); // 起手转向光标侧（ChangeDir 家族,判据同 :47614 Dot 门）
       // 电路工具余辉（1457 Player.cs:47152-47166:TB = sItem.tileBoost + blockRange；
       // 族内件 tileBoost 恒 20 = Item.cs SetDefaults,统一从 TILE_BOOST_BY_VID 出）
-      if (this.inTileRange(tx, ty, tileBoostOfVid(viIdFromKey(heldDef.key) ?? -1) + this.blockRange()))
-        this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
+      if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
+        this.itemIconCacheUpdate((heldDef.vid ?? -1) ?? 0);
       this.useWireTool(tx, ty, heldDef);
       return;
     }
@@ -14299,8 +14326,8 @@ export class Game implements GameHooks {
       // 放置路径余辉（1457 Player.cs:39908-39919 PlaceThing_Walls:TB = item.tileBoost
       //  + blockRange——★原版此支只置 cursorItemIconEnabled 不调 ItemIconCacheUpdate，
       //  本调用为我方扩展余辉,登记于 ToolCursorIcon.ts 注）
-      if (this.inTileRange(tx, ty, tileBoostOfVid(viIdFromKey(heldDef.key) ?? -1) + this.blockRange()))
-        this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
+      if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
+        this.itemIconCacheUpdate((heldDef.vid ?? -1) ?? 0);
       // ItemCheck_StartActualUse→ApplyItemAnimation（:4255/:4273-4275 createWall→
       // useAnimation×wallSpeed）：useStyle 1 挥动动画，周期独立于 itemTime/useTime
       // 复用节流（持键按 useAnimation 节拍循环重启；此前缺动画=放置无动作）
@@ -14312,12 +14339,12 @@ export class Game implements GameHooks {
     // 不放置——放置只在右键（下方 rightDown 段），左键保留各自使用语义（放生/放飞，
     // Player.cs:42842-42847 altFunctionUse==2 才 doPlacementAction）
     if (heldDef?.tile && !inp.rightDown
-      && !PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
+      && !PLACE_TILE_ON_ALT_USE.has(heldDef.vid ?? -1)) {
       this.faceCursor(tx, ty); // 起手转向光标侧（ChangeDir 家族,判据同 :47614 Dot 门）
       // 放置路径余辉（1457 Player.cs:40033-40040 PlaceThing_Tiles:TB = item.tileBoost
       //  + blockRange——★原版此支只置 enabled 不进缓存,本调用同上为我方扩展登记）
-      if (this.inTileRange(tx, ty, tileBoostOfVid(viIdFromKey(heldDef.key) ?? -1) + this.blockRange()))
-        this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
+      if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
+        this.itemIconCacheUpdate((heldDef.vid ?? -1) ?? 0);
       // 同上 createTile 档（:4270-4272 useAnimation×tileSpeed）
       if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
       this.tryPlace(tx, ty, heldDef);
@@ -14329,7 +14356,7 @@ export class Game implements GameHooks {
     // 方向 = 鼠标世界位 - 玩家中心（QuickGrapple :6094-6113）；冷却 = useTime（20/骷髅手 25）。
     // 上限门/双钩交替/月亮轮换见 fireGrapple（num7/num8/73↔74/646-649 1:1）
     {
-      const hookVid = heldDef ? viIdFromKey(heldDef.key) : -1;
+      const hookVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if (hookVid >= 0 && hookItemOf(hookVid) && inp.mouseDown && !inp.rightDown
         && this.player.useTime === 0) {
         // 方向 = 鼠标世界位 - 玩家中心（QuickGrapple :6094-6105）；零向量回退
@@ -14367,7 +14394,7 @@ export class Game implements GameHooks {
     //  item.useStyle!=0 同语义;袋 21 件为数据面的子集,旧豁免集已退役（标识符
     //  不回潮,sw-fx21 结构锁）——全量对拍与守卫见 NO_USE_STYLE_BACKFILL_1457 注）。
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
-      && heldItemUseStyle(viIdFromKey(heldDef.key) ?? -1) > 0
+      && heldItemUseStyle(heldDef.vid ?? -1) > 0
       && cw?.kind !== 'summon' && cw?.kind !== 'yoyo'
       && cw?.kind !== 'flail' && cw?.kind !== 'boomerang' && cw?.kind !== 'anchored'
       && cw?.kind !== 'flairon'   // 2611 掷球形态同族投射物即本体（R4,避免 :11292 useStyle5 姿势支抢注册）
@@ -14377,7 +14404,7 @@ export class Game implements GameHooks {
       //  :80900-80964）：鼠标世界格非实心 → 原地放出真 NPC（Enemy 进 critters 桶，
       //  ReleaseNPC default 分支 NewNPC(x,y,Type) 中心锚）+ 消耗 1（consumable）
       {
-        const relItemId = viIdFromKey(heldDef.key) ?? -1;
+        const relItemId = (heldDef.vid ?? -1);
         const relNpc = CRITTER_RELEASE_BY_ITEM[relItemId];
         if (relNpc) {
           const mtx = Math.floor((this.camera.x + (inp.mouseX - vw2 / 2)) / TILE);
@@ -14405,12 +14432,12 @@ export class Game implements GameHooks {
       }
       // 坐骑召唤物（Item.cs `mountType = N` 37 件：驯鹿铃铛 1914/绒毛胡萝卜 2428/
       // 带鳞松果 2429/粘鞍 2430/硬鞍 2491/花蜜 2502…）：左键使用即上/下坐（Player.cs:42095）
-      if (mountOfItem(viIdFromKey(heldDef.key) ?? -1) >= 0) {
-        this.useMountItem(viIdFromKey(heldDef.key)!);
+      if (mountOfItem(heldDef.vid ?? -1) >= 0) {
+        this.useMountItem((heldDef.vid ?? -1)!);
         return;
       }
       // 召唤道具（原版左键使用）
-      if (viIdFromKey(heldDef.key) === 43) {
+      if ((heldDef.vid ?? -1) === 43) {
         // 可疑的眼球（Item.cs:1867-1875 useTime=useAnimation=45）：白天/同型在场
         // （Player.cs:51408-51410 CanUse=false + SummonItemCheck :41520 43↔4）拦下时
         // 整支不可用——无挥动/无冷却/不消耗（此前拦下路径仍挥动+置 30t 冷却，
@@ -14430,8 +14457,8 @@ export class Game implements GameHooks {
     // 发色剂族（Player.cs:42179-42186 `item.hairDye >= 0`：使用即 player.hairDye =
     //  item.hairDye；1990 去除剂 hairDye=0 = 清除。原版无装备槽位，颜色随 .plr 存档）
     if (heldDef && inp.mouseDown && this.player.useTime === 0
-      && hairDyeShaderOfItem(viIdFromKey(heldDef.key)) >= 0) {
-      const dyeVid = viIdFromKey(heldDef.key);
+      && hairDyeShaderOfItem(heldDef.vid ?? -1) >= 0) {
+      const dyeVid = (heldDef.vid ?? -1);
       const p = this.player;
       p.hairDye = hairDyeShaderOfItem(dyeVid);
       this.net?.resendAppearance();   // msg4 外观重发——远端发色/派对彩纸实时生效（2026-08-14）
@@ -14471,13 +14498,13 @@ export class Game implements GameHooks {
         this.player.inv.removeHeld(1);
         // useTime/useAnimation 17（DefaultToHealingPotion Item.cs:48173-48183；
         // 旧写死 60——表缺兜 17）
-        this.player.useTime = itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.useTime ?? 17;
+        this.player.useTime = itemCombat(heldDef.vid ?? -1)?.useTime ?? 17;
         this.useSwing(heldDef);   // useStyle 9 饮用姿势（:48174）——旧全程无动画
-        this.playUseSound(heldDef.vid ?? viIdFromKey(heldDef.key), 'drink');
+        this.playUseSound(heldDef.vid ?? -1, 'drink');
         this.cb.onInventoryChanged();
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BuffSeconds', heldDef.name, p.duration));
       }
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && viIdFromKey(heldDef.key) === 29) {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && (heldDef.vid ?? -1) === 29) {
       // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
       if (this.player.baseMaxHp >= 400) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached'));
@@ -14543,7 +14570,7 @@ export class Game implements GameHooks {
         this.player.useTime = 45;   // Item 5340 useTime（Item.cs:42342）
       }
       // 旗标置位后再点：原版 !usedGalaxyPearl 支外无 ApplyItemTime → 全惰性（不耗不再举）
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && viIdFromKey(heldDef.key) === 2610) {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && (heldDef.vid ?? -1) === 2610) {
       // 史莱姆枪 2610（Item.cs case 2610 :25505-25518 useStyle5/autoReuse 12t/
       // shoot 406 speed8/damage 0/UseSound Item181）——combatWeapon 因无伤害类
       // 标志返 null(玩具件,melee/ranged/magic/noMelee 全 false),通用 'shot' 兜底
@@ -14551,36 +14578,36 @@ export class Game implements GameHooks {
       // 按住经 autoReuse 每 12t 连发
       this.fireSlimeGun(heldDef);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
-      && ORPHAN_B1_BUFF_VIDS.has(viIdFromKey(heldDef.key) ?? -1)
+      && ORPHAN_B1_BUFF_VIDS.has(heldDef.vid ?? -1)
       // fresh click 门（同下方 thrownCombat ⑩：非 autoReuse 消耗件必须松手再点,
       // 否则 useTime 到零后按住连掷——原版 TryStartUse 门 itemAnimation==0 语义）
       // SW-AT1 2026-09-05：全局连发臂（TryAllowingItemReuse Player.cs:53550,
       // damage>0）——蜜雷锋 1130 damage 12 全局档持按连发
-      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse
-        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)
+      && (itemCombat(heldDef.vid ?? -1)?.autoReuse
+        || this.autoReuseAllChain(heldDef.vid ?? -1)
         || (inp.mouseDown && !this._prevMouseDown))) {
       // ---- 孤儿武器 B1 波（buff/光环簇）分派（2026-08-30；见 ORPHAN_B1_BUFF_VIDS 注）。
       //       必须排在下方 thrownCombat 之前——1130 现走该通用档会被射成 ai2 直坠箭体，
       //       原版弹 183 是 aiStyle14 弹跳瓶体（SetDefaults P.cs:2699-2708 timeLeft180）
-      const b1Vid = viIdFromKey(heldDef.key) ?? -1;
+      const b1Vid = (heldDef.vid ?? -1);
       if (b1Vid === 1130) this.throwBeenade(heldDef);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
-      && ORPHAN_B2_VIDS.has(viIdFromKey(heldDef.key) ?? -1)
+      && ORPHAN_B2_VIDS.has(heldDef.vid ?? -1)
       // ★fresh-click 门（⑩ 统一式,X-F1）：非 autoReuse 消耗件必须松手再点——
       // 门此前由 throwFertilizer 尾部 this.input.mouseDown=false 吞边沿承担,现上提
       // 到分派位与 A/B3/B1 统一(处理器不再伪造"松手",全链 _prevMouseDown 电沿对齐)
       // SW-AT1 2026-09-05：全局连发臂（TryAllowingItemReuse Player.cs:53550, damage>0）——
       // 肥料二件 5438/5518 原版 damage 0 → 全局档不连发（保持单发）
-      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse
-        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)
+      && (itemCombat(heldDef.vid ?? -1)?.autoReuse
+        || this.autoReuseAllChain(heldDef.vid ?? -1)
         || (inp.mouseDown && !this._prevMouseDown))) {
       // ---- 孤儿武器 B2 波·世界改造簇分派（2026-08-30；见 ORPHAN_B2_VIDS 注）。
       //       肥料二件 combatWeapon 返 null + thrownCombat 已加显式退出——不拦截则
       //       落通用投掷档被射成箭体（1019/1051 实为 aiStyle6 云体）
-      const b2Vid = viIdFromKey(heldDef.key) ?? -1;
+      const b2Vid = (heldDef.vid ?? -1);
       if (b2Vid === 5438 || b2Vid === 5518) this.throwFertilizer(heldDef, b2Vid);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
-      && ORPHAN_THROW_VIDS.has(viIdFromKey(heldDef.key) ?? -1)
+      && ORPHAN_THROW_VIDS.has(heldDef.vid ?? -1)
       // ★fresh-click 门（⑩ 统一式,同上方 B1 支与下方 thrownCombat）：非 autoReuse
       // 消耗件必须松手再点才可再次使用——原版 TryingToUseItem 门
       // itemAnimation==0 且 !Main.mouseLeftRelease 即拒再起用(P.cs:24518-24523),
@@ -14590,28 +14617,28 @@ export class Game implements GameHooks {
       // 是 autoReuse=true(Item.cs:22888/:43326)故保留豁免项,按住照常连发
       // SW-AT1 2026-09-05：全局连发臂（TryAllowingItemReuse Player.cs:53550, damage>0）——
       // 打窝桶 4608/天灯 4702/晶洞 4400 原版 damage 0 → 全局档不连发（保持单发）
-      && (itemCombat(viIdFromKey(heldDef.key))?.autoReuse
-        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)
+      && (itemCombat(heldDef.vid ?? -1)?.autoReuse
+        || this.autoReuseAllChain(heldDef.vid ?? -1)
         || (inp.mouseDown && !this._prevMouseDown))) {
       // ---- 孤儿武器 A 波五件分派（2026-08-30；见 ORPHAN_THROW_VIDS 注——各件
       //       vanilla 行号锚与行为摘要在各自 fire*/throw* 方法注内）----
-      const owVid = viIdFromKey(heldDef.key) ?? -1;
+      const owVid = (heldDef.vid ?? -1);
       if (owVid === 2272 || owVid === 5495) this.fireGlobGun(heldDef, owVid);
       else if (owVid === 4608) this.throwChumBucket(heldDef);
       else if (owVid === 4702) this.throwSkyLantern(heldDef);
       else if (owVid === 4400) this.throwGeode(heldDef);
-    } else if (heldDef && ((((itemCombat(viIdFromKey(heldDef.key))?.autoReuse
-        || this.autoReuseAllChain(viIdFromKey(heldDef.key) ?? -1)   // SW-AT1 2026-09-05（:53550 damage>0）——B3 四件全 damage 0 → 全局档不连发
+    } else if (heldDef && ((((itemCombat(heldDef.vid ?? -1)?.autoReuse
+        || this.autoReuseAllChain(heldDef.vid ?? -1)   // SW-AT1 2026-09-05（:53550 damage>0）——B3 四件全 damage 0 → 全局档不连发
         || (inp.mouseDown && !this._prevMouseDown)))
         && this.player.useTime === 0)                       // ★左键 fresh-click 门（⑩ 统一式,X-F1,
         //   注同 A 波支）——球类/透镜弹全非 autoReuse(Item.cs SetDefaults 无该行),
         //   按住 useTime 归零后不再复发;
         || (inp.rightDown && !this._prevRightDown && this.player.useTime === 0))
-      && ORPHAN_B3_VIDS.has(viIdFromKey(heldDef.key) ?? -1)) {
+      && ORPHAN_B3_VIDS.has(heldDef.vid ?? -1)) {
       // ---- 孤儿武器 B3 波分派（2026-08-30 工单1/2/3；行号锚在 ORPHAN_B3_VIDS 注
       //       与各 throw* 方法注内）。右键边沿仅供虚空袋对换型（快换表语义，
       //       球类只吃左键）；左键走 fresh-click 门（⑩,X-F1——右键支不受影响）----
-      const b3Vid = viIdFromKey(heldDef.key) ?? -1;
+      const b3Vid = (heldDef.vid ?? -1);
       if ((b3Vid === 4131 || b3Vid === 5325)
         && inp.rightDown && !this._prevRightDown) {
         // Player.cs:31796-31801 右键换型——吞边沿（tileInteraction 已消费则不达）
@@ -14619,7 +14646,7 @@ export class Game implements GameHooks {
       } else if (b3Vid === 4131 || b3Vid === 5325) this.throwVoidLens(heldDef, b3Vid);
       else if (b3Vid === 859) this.throwBeachBall(heldDef);
       else if (b3Vid === 4743) this.throwFootball(heldDef);
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && viIdFromKey(heldDef.key) === 75) {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && (heldDef.vid ?? -1) === 75) {
       // 坠落星 75 点击消耗（Item.cs:2283-2297 useStyle4/useAnimation=useTime=17/
       // consumable/UseSound Item4；Player.cs:42602 消耗门无豁免——手持点击即
       // 白耗 1 颗无任何效果，星星炮 197 才是把坠落星当弹药打弹 955 的消费者。
@@ -14629,7 +14656,7 @@ export class Game implements GameHooks {
       this.player.inv.removeHeld(1);
       this.cb.onInventoryChanged();
       this.player.useTime = 17;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 114) {
+    } else if (heldDef && (heldDef.vid ?? -1) === 114) {
       // ---- SW-K1 2026-09-03：Dirt Rod 114（泥土棒）使用链 ----
       // Player.cs:43137 use-start 门（controlUseItem && releaseUseItem=非 autoReuse
       // fresh click && itemAnimation==0 && useStyle!=0）→ TryStartUse：
@@ -14644,13 +14671,13 @@ export class Game implements GameHooks {
       // ★射程：原版 shoot==17 支【无】IsInTileInteractionRange 门——全屏可抓。
       this.useDirtRod(heldDef, rawTx, rawTy);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
-      && FUN_USE_VIDS.has(viIdFromKey(heldDef.key) ?? -1)) {
+      && FUN_USE_VIDS.has(heldDef.vid ?? -1)) {
       // ---- §4 乐器 + §5 趣味使用族（纯函数层 src/items/FunItems.ts，行号锚在其内）----
       // 508 竖琴 / 4673 鼓槌 / 856 棍上独角兽 / 1450 泡泡棒。
       // 2026-08-22 补 C 审计 ❌批扩容：507 铃 / 425 仙灵铃左键 / 1124 蜂巢 /
       // 5328 金锁 / 5343 货郎背包 / 1345 彩带（见 FUN_USE_VIDS 注）。
       // 5464 Mitey-Titey 走上方 tryPlace 放置链（consumable=false 不消耗，见其尾段门）
-      const fvid = viIdFromKey(heldDef.key) ?? -1;
+      const fvid = (heldDef.vid ?? -1);
       const p = this.player;
       const axis = Math.min(this.renderer.canvas.width, this.renderer.canvas.height);
       const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
@@ -14892,9 +14919,9 @@ export class Game implements GameHooks {
           break;
       }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
-      && PERMANENT_USE_VIDS.has(viIdFromKey(heldDef.key))) {
+      && PERMANENT_USE_VIDS.has(heldDef.vid ?? -1)) {
       // ---- 永久升级/特殊消耗品（Player.cs:44575-44802/:42462/:42516/:42205/:44861/:44609）----
-      const pvid = viIdFromKey(heldDef.key);
+      const pvid = (heldDef.vid ?? -1);
       const p = this.player;
       const consume = () => { p.inv.removeHeld(1); this.cb.onInventoryChanged(); };
       const flagOnce = (setter: () => void) => { setter(); consume(); };
@@ -15202,8 +15229,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.cb.onInventoryChanged();
         }
       }
-    } else if (heldDef && ((itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true
-      || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key)))   // SW-AT1 2026-09-05：全局连发电平臂
+    } else if (heldDef && ((itemCombat(heldDef.vid ?? -1)?.autoReuse === true
+      || this.autoReuseAllChain(heldDef.vid ?? -1))   // SW-AT1 2026-09-05：全局连发电平臂
       ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（同 cw 门 2026-08-24）
       : inp.mouseDown) && this.player.useTime === 0
       && (heldDef.ranged || rangedAmmoWeapon(heldDef))
@@ -15217,8 +15244,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  && (!sItem.channel || !channel)` → releaseUseItem）——全局连发开时弓/枪族
       //  持按连发（damage>0 原条件;channel 例外=630/705 载体 SetDummyItemTime 钉
       //  useTime+在场唯一性守卫,见 autoReuseAllChain 注）
-      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true
-        || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key))
+      && (itemCombat(heldDef.vid ?? -1)?.autoReuse === true
+        || this.autoReuseAllChain(heldDef.vid ?? -1)
         || (inp.mouseDown && !this._prevMouseDown))) {
       // 远程武器（弓/枪/吹箭筒）：PickAmmo + ItemCheck_Shoot 1:1（Player.cs:52590+/46426）
       //   速度 = 弓 shootSpeed + 弹药 shootSpeed；伤害 = 弓 damage + 弹药 damage；
@@ -15230,7 +15257,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   useAmmo 此前恒 -1 系提取器 AmmoID 表缺 9 项（Flare=931 等）的假数据——
       //   原版无 -1 语义，全表补齐后信号枪/星星炮/吹叶机族弹药链天然恢复
       const rg = heldDef.ranged ?? null;
-      const bowVid = rg?.vid ?? viIdFromKey(heldDef.key);
+      const bowVid = rg?.vid ?? (heldDef.vid ?? -1);
       const bowC = bowVid >= 0 ? itemCombat(bowVid) : null;
       const useAmmo = bowC?.useAmmo ?? AMMO_ARROW;
       // ★翻转先于弹药判定（ItemCheck_Shoot :47614-47633 ChangeDir(dot) 逐次执行、
@@ -15255,7 +15282,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   FullInventory·Random=默认序轮换 / None=默认序首个），每发实耗后
       //   noteAmmoCycledShot 推进偏移（:54209-54217）
       const ammoOf = (d: (typeof ITEM_DEFS)[number]): number =>
-        d.ammoId ?? (d.vid != null || viIdFromKey(d.key) >= 0 ? itemCombat(d.vid ?? viIdFromKey(d.key))?.ammo ?? 0 : 0);
+        d.ammoId ?? (d.vid != null || (d.vid ?? -1) >= 0 ? itemCombat(d.vid ?? -1)?.ammo ?? 0 : 0);
       let ammoSlot = -1;
       let ammoDef: (typeof ITEM_DEFS)[number] | null = null;
       {
@@ -15269,8 +15296,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ammoDef = sl ? ITEM_DEFS[sl.id] ?? null : null;
       }
       if (ammoSlot >= 0 && ammoDef) {
-        const ammoC = ammoDef.vid != null || viIdFromKey(ammoDef.key) >= 0
-          ? itemCombat(ammoDef.vid ?? viIdFromKey(ammoDef.key)) : null;
+        const ammoC = ammoDef.vid != null || (ammoDef.vid ?? -1) >= 0
+          ? itemCombat(ammoDef.vid ?? -1) : null;
         // 1457 弹药轮换实耗推进（PickAmmo :54209-54217：!dontConsume 且模式≠None →
         //  cooldown = useAnimation+120、offset++（Random 直写随机）——原版在
         //  PickAmmo 内每发必走（省弹掷/不消耗弹型不影响），无弹药早退不推进）
@@ -15329,13 +15356,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                     const sl = this.player.inv.slots[i];
                     if (!sl || sl.stack <= 0) continue;
                     const d2 = ITEM_DEFS[sl.id];
-                    const am = d2 ? (d2.ammoId ?? (viIdFromKey(d2.key) >= 0 ? itemCombat(viIdFromKey(d2.key))?.ammo ?? 0 : 0)) : 0;
+                    const am = d2 ? (d2.ammoId ?? ((d2.vid ?? -1) >= 0 ? itemCombat(d2.vid ?? -1)?.ammo ?? 0 : 0)) : 0;
                     if (d2 && am === useAmmo) { mSlot = i; mDef = d2; break; }
                   }
                   if (mSlot >= 0) break;
                 }
                 if (!mDef) return false;                       // 无弹药 → muzzle Kill
-                const mVid = viIdFromKey(mDef.key);
+                const mVid = (mDef.vid ?? -1);
                 const mC = itemCombat(mVid);
                 const rKind2 = useAmmo === 97 ? 'bullet' as const : 'rocket' as const;
                 const dmg2 = Math.round(mzBase * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind2))
@@ -15391,7 +15418,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 // ★R29：逐 volley 省弹掷接通（PickAmmo 省弹旗链 :54200-54205——
                 // 3475 Next(3)!=0 即省=仅耗 1/3、3930 Next(2)==0 省 1/2；GUN_AMMO_SAVE
                 // 三档已补。此前无条件 removeAt = 耗弹 ×3/×2,红队 §13）
-                if (!(viIdFromKey(mDef.key) === 3104) && !this.gunAmmoSaveRoll(bowVid2)) {
+                if (!((mDef.vid ?? -1) === 3104) && !this.gunAmmoSaveRoll(bowVid2)) {
                   this.player.inv.removeAt(mSlot, 1);
                 }
                 this.cb.onInventoryChanged();
@@ -15410,11 +15437,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 箭吃箭袋/射手/蘑菇矿箭头，弹/火箭吃对应蘑菇矿头；Archery 不再误伤枪械
       const rKind = ammoDamageKind(useAmmo);
       // ---- PickAmmo 弹型解析 1:1（Player.cs:52635-52668，resolveAmmoProjId）----
-      let projId = resolveAmmoProjId(bowVid2, viIdFromKey(ammoDef.key), useAmmo, bowC?.shoot, ammoC?.shoot);
+      let projId = resolveAmmoProjId(bowVid2, (ammoDef.vid ?? -1), useAmmo, bowC?.shoot, ammoC?.shoot);
       // ---- 沙枪 266 三色砂换弹（PickAmmo :52666-52678，resolveSandGunSwap）：
       //      projToShoot==42 时黑檀砂 370→65 / 猩红砂 408→68 / 化石 1246→354
       //      各 +5 伤（ammoBonus 同熔火箭袋通道结算）----
-      const sandSwap = resolveSandGunSwap(bowVid2, projId, viIdFromKey(ammoDef.key));
+      const sandSwap = resolveSandGunSwap(bowVid2, projId, (ammoDef.vid ?? -1));
       if (sandSwap) { projId = sandSwap.projId; }
       // ---- 弓族弹型换体全链（PickAmmo 尾链 Player.cs:52660-52705 + ItemCheck_Shoot
       //      弹型段 :46525-46545，顺序敏感见 resolveBowProjOverride）——此前仅
@@ -15503,7 +15530,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             fw.launcherFirework = 1;                    // ai[1]=1（AI_034 发射器档）
             this.entities.add(fw, 'projectiles');
           }
-          if (viIdFromKey(ammoDef.key) !== 3103 && viIdFromKey(ammoDef.key) !== 3104
+          if ((ammoDef.vid ?? -1) !== 3103 && (ammoDef.vid ?? -1) !== 3104
             && !this.ammoSaveRoll()) {
             this.player.inv.removeAt(ammoSlot, 1);
           }
@@ -15612,7 +15639,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           placeAtShootSpawn(rocket, ax, ay);
           this.entities.add(rocket, 'projectiles');
           // 段尾与 Arrow 路径共用（消耗→useTime→swing→音效→UI 刷新）
-          const ammoVid16 = viIdFromKey(ammoDef.key);
+          const ammoVid16 = (ammoDef.vid ?? -1);
           // 橡实弹弓 5629 恒耗弹（PickAmmo :52806-52808 flag2=false 压制省弹掷）
           // ★2026-09-07 布尔修正（用户实报"橡实不消耗可无限发射"）：旧式
           //  `bowVid2 !== 5629 && !saveRoll` 把 5629 整个排除出消耗=免费发射——
@@ -15642,7 +15669,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.entities.add(spray, 'projectiles');
           // 溶液消耗门（Player.cs:52739/:52815）：每 useAnimation 轮仅前 useTime+1 帧
           // 内的连发扣（30/5 → 6 发扣 2）；5134 另 1/3 免耗；再叠通用省弹掷
-          const ammoVidSpray = viIdFromKey(ammoDef.key);
+          const ammoVidSpray = (ammoDef.vid ?? -1);
           if (ammoVidSpray !== 3103 && ammoVidSpray !== 3104
             && solutionConsumesThisShot(bowVid2, bowC?.useTime ?? 5, this.swing,
               ITEM_BY_KEY[heldDef.key] ?? -1)
@@ -16120,7 +16147,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 暮夕 4953 前 4 发不耗弹（:52783 itemAnimation > useAnimation−8 → flag2）
         // 无尽袋(3103 箭袋/3104 弹药袋) consumable=false 恒不耗(Item.cs:8232;
         // 旧实现无条件 removeAt 致无尽袋被逐发吞尽,2026-08-13 修)
-        const ammoVid = viIdFromKey(ammoDef.key);
+        const ammoVid = (ammoDef.vid ?? -1);
         // 凝胶耗弹门（PickAmmo :52816-52818）：projToShoot==85（火焰喷射器 506/
         // 精灵熔炉 1910 的火焰弹）时每轮动画仅首帧扣 1 凝胶（itemAnimation <
         // max−useTime → flag2）——30/6 = 每轮 5 发仅首发扣（wiki 实测"消耗一个
@@ -16210,12 +16237,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           * (this.heldPrefixStat()?.spd ?? 1)));
       }
     } else if (heldDef && cw && (((cw as { autoReuse?: boolean }).autoReuse
-      || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key)))   // SW-AT1 2026-09-05：改走单一真源（补 damage>0）
+      || this.autoReuseAllChain(heldDef.vid ?? -1))   // SW-AT1 2026-09-05：改走单一真源（补 damage>0）
       ? (inp.mouseDown || inp.mouseHeld)   // ★autoReuse=电平语义（mouseHeld）——mouseDown
       : inp.mouseDown)                     //   是边沿消费量,发射即被清=按住只出一发
       && this.player.useTime === 0 && cw.kind !== 'melee'
       && ((cw as { autoReuse?: boolean }).autoReuse
-        || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key))
+        || this.autoReuseAllChain(heldDef.vid ?? -1)
         || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门（★全局档并列：
         // Main.SettingsEnabled_AutoReuseAllItems 归 Player.cs:24182 autoReuseAllWeapons,
         // TryAllowingItemReuse(P.cs:52044) 对【一切 damage>0 物品】生效——此前本支漏并
@@ -16224,14 +16251,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
       this.useCombatWeapon(cw, heldDef);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && thrownCombat(heldDef)
-      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse
-        || this.autoReuseAllChain(heldDef.vid ?? viIdFromKey(heldDef.key))   // SW-AT1 2026-09-05：补 damage>0 原条件
+      && (itemCombat(heldDef.vid ?? -1)?.autoReuse
+        || this.autoReuseAllChain(heldDef.vid ?? -1)   // SW-AT1 2026-09-05：补 damage>0 原条件
         || (inp.mouseDown && !this._prevMouseDown))) { // ⑩（全局档并列,同上支 :12186 注记）
       // 消耗型投掷武器（手里剑/飞刀/毒刀等，Item.shoot + consumable + noMelee 且无 useAmmo）：
       // 朝鼠标投出 item.shoot 投射物，消耗 1 个，数值全取 vanilla-itemcombat.json；
       // 投射物复用 Arrow（重力 0.3/tick = 原版 aiStyle 2 抛物线同值；命中可回收）
       const tc = thrownCombat(heldDef)!;
-      const vid = heldDef.vid ?? viIdFromKey(heldDef.key);
+      const vid = heldDef.vid ?? -1;
       const c = itemCombat(vid);
       const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
       // 投掷（shuriken 等 shoot>0）面向鼠标同款 :46578
@@ -16383,13 +16410,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //（手里剑 47/48 表内 false——持物动画保留，与原版 DefaultToThrownWeapon 一致）
       this.playUseSound(vid, 'throw');
       this.cb.onInventoryChanged();
-    } else if (heldDef && [70, 1331, 560].includes(viIdFromKey(heldDef.key))
+    } else if (heldDef && [70, 1331, 560].includes(heldDef.vid ?? -1)
       && inp.mouseDown && this.player.useTime === 0) {
       // Boss 召唤物(原版 Worm Food 70/Bloody Spine 1331/Slime Crown 560)
       // 群系门（Player.cs:43107-43121/:43194-43208）：蠕虫食物需 ZoneCorrupt、
       // 血腥脊椎需 ZoneCrimson——群系外整支不生效（不消耗/不进 useTime/无音效，
       // 原版 if 内才 ApplyItemTime）；史莱姆王冠无门
-      const svid = viIdFromKey(heldDef.key);
+      const svid = (heldDef.vid ?? -1);
       const scene = this.scene;
       const zoneOk = svid === 70 ? (scene == null || scene.zoneCorrupt)
         : svid === 1331 ? (scene == null || scene.zoneCrimson) : true;
@@ -16411,7 +16438,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
       this.input.mouseDown = false;
-    } else if (heldDef && [556, 544, 557].includes(viIdFromKey(heldDef.key))
+    } else if (heldDef && [556, 544, 557].includes(heldDef.vid ?? -1)
       && inp.mouseDown && this.player.useTime === 0) {
       // 机械三王召唤物（原版 556/544/557，Player.cs:43117-43179 ItemCheck_：
       //  门仅 !IsItDay()——**无 hardmode 门**，困难模式前的夜晚原版即可召唤
@@ -16421,12 +16448,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   getfixedboi）：Item.cs:7855/:7987/:8000 分支收回 useStyle4/consumable/
       //   useTime 45 → 物品整支不可用（点击无动作、不消耗、无提示）；
       //   Player.cs:43125/:43143/:43159 使用门为同门二次防线（2026-08-20））
-      if (bossSummonDisabledVid(viIdFromKey(heldDef.key))) {
+      if (bossSummonDisabledVid(heldDef.vid ?? -1)) {
         // 静默不可用（三王均由 5334 奥库瑞姆剃刀的 mechQueen 链召唤接管）
       } else if (this.world.clock.isDay) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else {
-        const mvid = viIdFromKey(heldDef.key);
+        const mvid = (heldDef.vid ?? -1);
         // 成功才扣（Player.cs:43073 头门 SummonItemCheck 同型拦 544↔125/126、
         // 556↔134、557↔127——false 无 ApplyItemTime 无消耗，2026-08-18 统一）
         // 落位 = SpawnOnPlayer（Player.cs:43140-43179：556→134 / 544→125+126 /
@@ -16442,7 +16469,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
       this.input.mouseDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 5120
+    } else if (heldDef && (heldDef.vid ?? -1) === 5120
       && inp.mouseDown && this.player.useTime === 0) {
       // 鹿角怪召唤物 Deer Thing（Player.cs:43225-43237：门仅 ZoneSnow——无昼夜门；
       //  成功 → ApplyItemTime(45) + Roar(:43229) + SpawnOnPlayer(668) → 公告走表）。
@@ -16465,7 +16492,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  「其它物品 useStyle 分族」臂（:13562 区,13619 兜底 useSwing）仍接住袋子
       //  起挥摆（不耗不响不进 useTime）=原版没有的行为,已在该臂加 BOSS_BAG_NO_USE_
       //  VIDS 整族抑制（变异实验捕红→修后 21 件全量零副作用,tests/sw-fx21）。
-    } else if (heldDef && viIdFromKey(heldDef.key) === 3213
+    } else if (heldDef && (heldDef.vid ?? -1) === 3213
       && inp.mouseDown && this.player.useTime === 0) {
       // ---- 钱槽 3213（Item.cs:28979-28990：useStyle 1 / useTime=useAnimation 28 /
       // shoot 525 飞猪 / shootSpeed 4 / UseSound Item59，不消耗）。1:1 发射链
@@ -16486,7 +16513,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.useSwing(heldDef);                               // useStyle 1 举持
       this.player.useTime = itemCombat(3213)?.useTime ?? 28;
       this.input.mouseDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 3384
+    } else if (heldDef && (heldDef.vid ?? -1) === 3384
       && inp.mouseDown && this.player.useTime === 0) {
       // 传送门枪（Item.cs:30926-30942：useTime 20 / autoReuse / channel / UseSound=null /
       // 不消耗；左键 form 0 橙门）。弹体 PortalGunBolt（601，extraUpdates=30 近瞬达）
@@ -16512,7 +16539,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       }
       this.input.mouseDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) >= 1874 && viIdFromKey(heldDef.key) <= 1905
+    } else if (heldDef && (heldDef.vid ?? -1) >= 1874 && (heldDef.vid ?? -1) <= 1905
       && inp.mouseDown && this.player.useTime === 0
       && this.world.store.hasTile(tx, ty)   // ★X2-F8:active 门（Player.cs:42002 `!tile.active() || type!=171 → return`）
       && this.world.store.get(tx, ty) === TILE_BY_KEY['v_171_christmas_tree'] && this.inTileRange(tx, ty)) {
@@ -16521,7 +16548,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // :41053-41136 无扣减）。门 = 目标格 active 且是圣诞树 + 射程（:42002/:41055）；
       // 同槽同款不动作（:41063 checkXmasTreeDrop != type 才 ApplyItemTime+换装）
       {
-        const dec = xmasDecorOfItem(viIdFromKey(heldDef.key))!;
+        const dec = xmasDecorOfItem(heldDef.vid ?? -1)!;
         const cell = xmasCell(this.world.store, tx, ty);
         if (cell) {
           const cur = xmasDecorStyle(this.world.store, cell.ax, cell.ay, dec.obj);
@@ -16536,13 +16563,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
       this.input.mouseDown = false;
-    } else if (heldDef && [361, 602, 1315].includes(viIdFromKey(heldDef.key))
+    } else if (heldDef && [361, 602, 1315].includes(heldDef.vid ?? -1)
       && inp.mouseDown && this.player.useTime === 0) {
       // 入侵触发物品（Player.ItemCheck_UseEventItems，Player.cs:43243/43260/43277：
       // 战旗 ignoreDelay，成功才消耗；Goblin Battle Standard 361/Snow Globe 602/Pirate Map 1315）。
       // ★门 = Main.CanStartInvasion(:63863)：无进行中 + 生命上限≥200——**无昼夜门**
       // （海盗地图白天可用，"夜间使用"是常见误传；goTo 下发 -1/-2/-3 三类）
-      const ivid = viIdFromKey(heldDef.key);
+      const ivid = (heldDef.vid ?? -1);
       const type = ivid === 361 ? INVASION_GOBLIN
         : ivid === 602 ? INVASION_SNOW_LEGION : INVASION_PIRATE;
       if (this.startInvasionAndAnnounce(type, true)) {
@@ -16552,7 +16579,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 5644
+    } else if (heldDef && (heldDef.vid ?? -1) === 5644
       && inp.mouseDown && this.player.useTime === 0) {
       // 5644 占卜球（Item.cs:44324-44333：useStyle 15 HoldOrb/holdStyle 8/useTime 100,
       //  不消耗）。Player.ItemCheck :43011-43030：动画首帧 AnyoneToSpectate() 有目标 →
@@ -16571,7 +16598,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.player.useTime = itemCombat(5644)?.useTime ?? 100;              // ApplyItemTime
       this.input.mouseDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 5334
+    } else if (heldDef && (heldDef.vid ?? -1) === 5334
       && inp.mouseDown && this.player.useTime === 0) {
       // 5334 奥库瑞姆剃刀（Item.cs:42276-42287：getfixedboi 秘密种子召唤物,
       //  consumable/useTime 45）。Player.cs:43173-43180 → NPC.SpawnMechQueen :19724-19750：
@@ -16620,7 +16647,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  DefaultToMagicWeapon 默认 autoReuse=false（Item.cs:48045）——按住连发
       //  不再成立，须真实松开重按；vi_ 表 autoReuse===true 才连发（undefined
       //  视为 false，legacy magic 无 vid 数据 → 单发）
-      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true
+      && (itemCombat(heldDef.vid ?? -1)?.autoReuse === true
         || (inp.mouseDown && !this._prevMouseDown))) {
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
       const mg = heldDef.magic;
@@ -16642,7 +16669,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.player.mana -= mgCost;
       }   // ← 并行会话删 MagicProj 体时误删本闭合(2026-08-21 语法修复;magic 支
           //    现为"扣蓝无弹"空壳,待并行会话 legacy 链重写完成后由其接手)
-    } else if (heldDef && TELEPORT_ITEM_VIDS.has(viIdFromKey(heldDef.key))
+    } else if (heldDef && TELEPORT_ITEM_VIDS.has(heldDef.vid ?? -1)
       && inp.mouseDown && this.player.useTime === 0) {
       // ---- 传送族使用（Player.cs:42297-42516 汇总）----
       // 魔镜族 {50,3124,3199,5358}/贝壳手机出生点 5359：引导 useTime 90,半程 Spawn(RecallFromItem);
@@ -16651,7 +16678,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★SW-BJ57：4870 回归药水并入——itemTime==20 引导触发（Player.cs:43472-43502,
       //   1458 同域 diff=same）,起手音/尘与 2350 同款（:43477-43481 Item3+10 青尘）,
       //   触发拍 :43485 UseSound(Item6)+70×2 青尘+DoPotionOfReturn…(Spawn 等价面)。
-      const tvid = viIdFromKey(heldDef.key);
+      const tvid = (heldDef.vid ?? -1);
       // ★SW-BJ57：4870 在 vanilla-itemcombat.json 为空对象（提取缺口）→ 旧兜底 90
       //  会把 itemTime==20 触发拍拉长 3×。按 Item.cs SetDefaults 逐件钉值兜底：
       //  魔镜族/海螺族 90（case 50 :1985/case 4263 :36666/case 4819 :39460/case 5359/
@@ -16692,15 +16719,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.input.mouseDown = false;
     } else if (heldDef && [205, 206, 207, 1128, 3031, 3032, 4820, 4872, 5302, 5303, 5304, 5364]
-      .includes(viIdFromKey(heldDef.key)) && inp.mouseDown && this.player.useTime === 0) {
+      .includes(heldDef.vid ?? -1) && inp.mouseDown && this.player.useTime === 0) {
       // 桶/海绵族入口门（Player.cs:45706 族表 + :45715 ItemTimeIsZero && controlUseItem）：
       // 原分支无 mouseDown/useTime 门——持桶悬停即每帧倾倒;本次补齐(autoReuse 族
       // 按住连倒是原版语义,门由 useTime 节流)
       // 桶族余辉（1457 Player.cs:46708-46718:TB = sItem.tileBoost（无 blockRange）——
       // 无底族 4820/4872/5302/5303=2、5304=3,常规桶 0,统一从 TILE_BOOST_BY_VID 出）
-      if (this.inTileRange(tx, ty, tileBoostOfVid(viIdFromKey(heldDef.key) ?? -1)))
-        this.itemIconCacheUpdate(viIdFromKey(heldDef.key));
-      this.useBucket(viIdFromKey(heldDef.key), tx, ty);
+      if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1)))
+        this.itemIconCacheUpdate(heldDef.vid ?? -1);
+      this.useBucket((heldDef.vid ?? -1), tx, ty);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
       // ---- 高尔夫球投掷（物品 3989/染色彩蛋 4242-4253 → proj 721/739+）：
       //      Player.cs:46884-46906 三分支——|光标-中心|<100px → 球座自动摆球；
@@ -16741,19 +16768,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.sfx.play('tink', 0.7, this.player.cx, this.player.cy); // UseSound Item128
         this.input.mouseDown = false;
       }
-      // ---- 战斗书 4382/5336（Player.cs:44703-44730 ItemCheck_UseCombatBook）：
-      //      世界级一次性旗标 + 世界公告；不消耗（ApplyItemTime 仅冷却）
+      // ---- 战斗书 4382/5336（1457 Player.cs:45707-45735 ItemCheck_UseCombatBook，
+      //      调用点 :43938；1456 旧锚 44703-44730）——★BJ257：
+      //      起手面 = ItemCheck_StartActualUse（:52291-52314）ApplyItemAnimation
+      //      (useAnimation 45,Item.cs:37291-37292/:42330-42331)+UseSound Item92
+      //      （:37293/:42332,不在 SkipsInitialUseSound）——旗标已置位后每次点击
+      //      照播照响（惰性书原版语义）,只是无效果不计时；
+      //      效果面 = 旗标未置位 → ApplyItemTime(useTime 45 → itemTime==itemTimeMax)
+      //      → 通用消耗门（:43612 `itemTimeMax!=0 && itemTime==itemTimeMax &&
+      //      consumable` → stack-1;Item.cs:37290/:42329 consumable=true,无
+      //      ForceConsumption/SkipItemConsumption 覆写）——曾注"不消耗（ApplyItemTime
+      //      仅冷却）"系误读:消耗不走 ApplyItemTime 自身,走通用段同拍判定 →
+      //      用户实报"卷二用了不消失"即此（卷一同支同漏,一并修）
       else if (bvid === 4382 || bvid === 5336) {
         const flagKey = bvid === 4382 ? 'combatBookWasUsed' : 'combatBookVolumeTwoWasUsed';
+        this.useSwing(heldDef);            // useStyle 4 举持 45t（itemfunc/itemcombat 表）
+        this.playUseSound(bvid, 'drink');  // UseSound=Item_92（vanilla-itemusesound 表值）
         if (!this.world.flags[flagKey]) {
           this.world.flags[flagKey] = true;
           this.newText(Lang.text(bvid === 4382 ? 'Misc.CombatBookUsed' : 'Misc.CombatBookVolumeTwoUsed'), 50, 255, 130);
-          this.player.useTime = 30;
-          // 场上城镇 NPC 立即吃到增益（NPC.cs:53419：lifeMax+250/伤×0.8/速+0.25/防+8）
+          this.player.useTime = 45;        // ApplyItemTime(useTime 45)（旧 30 无据）
+          // 场上城镇 NPC 立即吃到增益（1457 NPC.cs:53568-53581：lifeMax+250/伤×0.8/速+0.25/防+8）
           for (const n of this.entities.npcs) {
             const tn = n as TownNPC;
             if (tn instanceof TownNPC && !tn.dead) tn.applyCombatBook();
           }
+          this.player.inv.removeHeld(1);   // 通用消耗门（:43612 itemTime==itemTimeMax && consumable）
+          this.cb.onInventoryChanged();
         }
         this.input.mouseDown = false;
       }
@@ -16767,7 +16808,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //      本仓单计时模型在起手拍等价触发（useTime 17 冷却后可再发,按住连发同
       //      原版 reusable 语义）——窗相位差登记。
       else if (heldDef && this.player.useTime === 0 && inp.mouseDown) {
-        const vsVid = viIdFromKey(heldDef.key);
+        const vsVid = (heldDef.vid ?? -1);
         const vs = voiceSlotOfItem(vsVid);
         if (vs > 0) {
           this.player.useTime = 17;                          // ApplyItemTime(useTime 17)
@@ -17059,10 +17100,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const dmgKind = cwIn.kind === 'magic' ? 'magic'
       : (cwIn.kind === 'boomerang' || cwIn.kind === 'spear' || cwIn.kind === 'yoyo' || cwIn.kind === 'flail'
         || cwIn.kind === 'flairon'   // 2611 melee=true（Item.cs:25534）→ melee 乘区,R4（曾随 'shot' 兜底同款 melee 判定）
-        || (cwIn.kind === 'shot' && !!itemCombat(def.vid ?? viIdFromKey(def.key))?.melee)
+        || (cwIn.kind === 'shot' && !!itemCombat(def.vid ?? -1)?.melee)
         // 锚定族按物品伤害类分流（Item.cs 各 case）：23 鱼叉 ranged=true → ranged 乘区,
         // 1297/1314/1325 melee=true → melee
-        || (cwIn.kind === 'anchored' && !!itemCombat(def.vid ?? viIdFromKey(def.key))?.melee))
+        || (cwIn.kind === 'anchored' && !!itemCombat(def.vid ?? -1)?.melee))
         ? 'melee' as const : 'ranged' as const;
     const cw = {
       ...cwIn,
@@ -17074,7 +17115,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
     // GetWeaponCrit（Player.cs:42531 族）= 4 基础 + 武器 item.crit + 装备/buff——
     // 投射物近战四族此前写死 4%（Sunfury item.crit=7 原版应 11%）
-    const critVid = def.vid ?? viIdFromKey(def.key);
+    const critVid = def.vid ?? -1;
     // GetWeaponCrit（Player.cs:42531 族）= 4 基础 + 武器 item.crit + 装备/buff + 词缀 crt
     // ★2026-08-26 审计修：成就块曾插进本表达式中部——ASI 把 critTotal 截在首行,
     //   余下两行 `+ …` 成独立废语句（合法编译、零报错）,全 combat 武器暴击丢
@@ -19055,7 +19096,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 持械旋剑 50t 两整圈。原版 SetDummyItemTime(2) 冻结物品时间（:66344）→
         // 下一挥须等旋完 + reuseDelay2 = useTime 52 近似；t=25 松手提前收剑时
         // onEnd 把 useTime 钳回 2。右键 alt（708 椭圆弧+709 弹+1110 圈）在
-        // 右键分派（viIdFromKey 3858 分支，同传送门枪位）
+        // 右键分派（3858 vid 分支，同传送门枪位）
         if (cw.shoot === 707) {
           const sdAlive = this.entities.projectiles.some(
             (e) => e instanceof SkyDragonSpin && !e.dead);
@@ -20639,7 +20680,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!s || s.stack <= 0) continue;
       const def = ITEM_DEFS[s.id];
       if (!def) continue;
-      const vid = def.vid ?? viIdFromKey(def.key);
+      const vid = def.vid ?? -1;
       if (vid < 0) continue;
       const pick = itemFuncOfVid(vid)?.pick ?? 0;
       if (pick > best) best = pick;
@@ -22948,7 +22989,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 射程门 = IsInTileInteractionRange(Simple, sItem.tileBoost + blockRange)
     // （1457 Player.cs:47154 全支门）——族内件 tileBoost 恒 20（Item.cs SetDefaults
     // :7444-7457/:11349/:11362/:32539/:32619/:32680），统一从 TILE_BOOST_BY_VID 出
-    if (!this.inTileRange(tx, ty, tileBoostOfVid(viIdFromKey(itemDef.key) ?? -1) + this.blockRange())) return;
+    if (!this.inTileRange(tx, ty, tileBoostOfVid(itemDef.vid ?? -1) + this.blockRange())) return;
     if (this.player.useTime > 0) return;
     const wt = itemDef.wireTool!;
     const inv = this.player.inv;
@@ -23005,7 +23046,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     // 五彩扳手:单点,用当前模式
-    const mode = viIdFromKey(itemDef.key) === 3625 ? this.wireToolMode : (wt.place ?? 0);
+    const mode = (itemDef.vid ?? -1) === 3625 ? this.wireToolMode : (wt.place ?? 0);
     if (mode & TOOL_CUTTER) {
       const done =
         (mode & TOOL_ACTUATOR ? w.killActuator(tx, ty) : false) ||
@@ -23040,7 +23081,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (needActuator > 0) inv.remove(VI_ID(849), needActuator);
       // useTime 逐工具取表（Item.cs SetDefaults：四色扳手 5 / 致动器 849 = 10 :11315 /
       // 五彩扳手 3625 = 5）——此前统一写 5，致动器放置冷却减半（2026-08-22 审计修）
-      this.player.useTime = itemCombat(viIdFromKey(itemDef.key))?.useTime ?? 5;
+      this.player.useTime = itemCombat(itemDef.vid ?? -1)?.useTime ?? 5;
       this.sfx.play('place');
       this.cb.onInventoryChanged();
     }
@@ -23119,7 +23160,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   泥墙 93 useTime 7 / 灰墙 94? 10 等,Item.cs SetDefaults 逐件;旧硬编码 15 把
       //   快墙面物品冷却钉慢一倍余）
       this.player.useTime = Math.max(1,
-        Math.round((itemCombat(itemDef.vid ?? viIdFromKey(itemDef.key))?.useTime ?? 15)
+        Math.round((itemCombat(itemDef.vid ?? -1)?.useTime ?? 15)
           * this.paintWallSpeed()));
       // PlaceIt_Walls autoPaint 尾奏（Player.cs:40136-40141 TryReplacingWalls）：
       // ReplaceWall 成功 → `autoPaint && builderAccStatus[3]==0` → TryPainting(wall
@@ -23446,12 +23487,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // gsheet：itemDef.tile 优先，量产 def（无 tile 字段）从 vanilla meta 推导
     const gsheet = gsheetIn ?? (itemDef.tile
       ? (TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1)
-      : vanillaItemCreateTile(viIdFromKey(itemDef.key)));
+      : vanillaItemCreateTile(itemDef.vid ?? -1));
     if (!GRASS_CONVERT_SHEETS.has(gsheet)) return false;
     const gt = TILE_INTERNAL_BY_SHEET.get(gsheet);
     if (gt === undefined) return false;
     if (!opts?.noCooldown && this.player.useTime > 0) return false;
-    const heldVid = viIdFromKey(itemDef.key);
+    const heldVid = (itemDef.vid ?? -1);
     const staff = heldVid === 213 || heldVid === 5295;
     const target = st.get(tx, ty);
     // 空格 type 读作 0（vanilla AssortedThings 直接读 Main.tile.type，inactive/空格同为 0）
@@ -23493,7 +23534,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     const gsheet = gsheetIn ?? (itemDef.tile
       ? (TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1)
-      : vanillaItemCreateTile(viIdFromKey(itemDef.key)));
+      : vanillaItemCreateTile(itemDef.vid ?? -1));
     if (!MOSS_CONVERT_SHEETS.has(gsheet)) return false;
     // 外门 ItemTimeIsZero（Player.cs:40060）——冷却中连转化尝试都不发生
     if (this.player.useTime > 0) return false;
@@ -23524,7 +23565,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 消耗门（Player.cs:42602 itemTime==itemTimeMax && consumable——DefaultToPlaceableTile
     //  Item.cs:48494-48504 置 consumable=true;itemfunc 提取面缺 moss 条目故按
     //  "非 false 即消耗"口径,与通用放置链 :18372 一致）
-    const heldVid = viIdFromKey(itemDef.key);
+    const heldVid = (itemDef.vid ?? -1);
     if (itemCombat(heldVid)?.consumable !== false) {
       this.player.inv.removeHeld(1);
       this.cb.onInventoryChanged();
@@ -23621,12 +23662,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       cause: 'dye', s: style,
     });
     // consumable=true（itemfunc 提取面齐全,1107-1112/1114 逐件带键）
-    if (itemCombat(viIdFromKey(itemDef.key))?.consumable !== false) {
+    if (itemCombat(itemDef.vid ?? -1)?.consumable !== false) {
       this.player.inv.removeHeld(1);
       this.cb.onInventoryChanged();
     }
     {
-      const ut = itemCombat(viIdFromKey(itemDef.key))?.useTime;
+      const ut = itemCombat(itemDef.vid ?? -1)?.useTime;
       this.player.useTime = ut && ut > 0
         ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
         : 14;
@@ -24138,12 +24179,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //      花园侏儒 4609 / 火烈鸟 4420 / 珊瑚贝星族 / 南瓜灯 / 生日礼物 / 书 149 /
     //      洞穴晶体六宝石等 30 件——放置物 = 背包首个命中弹药桶的 tile+style
     //      （cycleOffset 模容量，持杖 ↑/↓ 循环）；弹药非耗材族不扣 ----
-    const wandVid = viIdFromKey(itemDef.key);
+    const wandVid = (itemDef.vid ?? -1);
     const wand = wandVid > 0 ? flexibleWandOf(wandVid) : null;
     if (wand) {
       const slots = this.player.inv.slots;
       const invVids = slots.map((s) => s
-        ? { vid: viIdFromKey(ITEM_DEFS[s.id]?.key ?? ''), favorited: !!s.favorited }
+        ? { vid: (ITEM_DEFS[s.id]?.vid ?? -1), favorited: !!s.favorited }
         : { vid: -1, favorited: false });
       const opt = tryGetPlacementOption(wand, invVids, this.flexWandCycle);
       if (!opt) return;   // 背包无弹药 → 不可放（TryGetPlacementOption false → canUse false）
@@ -24163,7 +24204,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const idx = slots.findIndex((s) => {
           if (!s) return false;
           const d = ITEM_DEFS[s.id];
-          return d != null && viIdFromKey(d.key) === opt.ammoVid;
+          return d != null && (d.vid ?? -1) === opt.ammoVid;
         });
         if (idx >= 0) this.player.inv.removeAt(idx, 1);
       }
@@ -24184,7 +24225,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   vanilla meta createTile 推导（首版按 tile 字段前置=真种子根本进不了转化门）；
     //   法杖特权在 tryGrassConvert 内按 vid 细分。place_v_* 是本仓草"块"面板物品 →
     //   通用链（空格+支撑铺设/Block Swap 排除表），不吃 AssortedThings 门。
-    const hv0 = viIdFromKey(itemDef.key);
+    const hv0 = (itemDef.vid ?? -1);
     const g0 = itemDef.tile
       ? (TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1)
       : vanillaItemCreateTile(hv0);
@@ -24230,7 +24271,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  active 位（含已致动格——原版 active() 不含 inActive 修正，与改前
       //  已致动格行为一致）。
       if (targetType !== 0 && st.flags[st.idx(tx, ty)] !== 0) {
-        const placeVid = viIdFromKey(itemDef.key);
+        const placeVid = (itemDef.vid ?? -1);
         const tdef = TILE_DEFS[targetType];
         // ★2026-09-03：表单源化至模块层 BLOCK_SWAP_DOESNT_*（族 verdict 共用同表,值不变）
         const NO_SWAP_PLACE = BLOCK_SWAP_DOESNT_PLACE_SHEETS;
@@ -24389,7 +24430,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               if (!sI || sI.stack <= 0) continue;
               const defI = ITEM_DEFS[sI.id];
               if (!defI) continue;
-              const vidI = defI.vid ?? viIdFromKey(defI.key);
+              const vidI = defI.vid ?? -1;
               if (vidI < 0) continue;
               const fI = itemFuncOfVid(vidI);
               if (!fI?.pick || fI.pick <= 0) continue;
@@ -24490,11 +24531,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               //  （blockSwapPickSeg 合并,:23063 同式）→ SetItemAnimation（本仓 useSwing
               //  承载,登记）→ PlaceIt_AutoPaintAndActuate（placeItAutoAcc 1×1,多格家族
               //  由 vanilla :40931-40941 全域扫面近似=逐格）。成功即 return,不回落通用链。
-              if (itemCombat(viIdFromKey(itemDef.key) ?? -1)?.consumable !== false) {
+              if (itemCombat(itemDef.vid ?? -1)?.consumable !== false) {
                 this.player.inv.removeHeld(1);
               }
               {
-                const utSwap = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
+                const utSwap = itemCombat(itemDef.vid ?? -1)?.useTime;
                 this.player.useTime = (utSwap && utSwap > 0
                   ? Math.max(1, Math.round(utSwap * this.paintTileSpeed()))
                   : 14) + blockSwapPickSeg;
@@ -24796,7 +24837,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 橡实（TileObjectData tile20 全锚点表 1:1，见 placeAcornSapling）：绿草/
     // 腐化/猩红/神圣/丛林/灰烬草/雪 + 沙族（棕榈苗，帧 6-9 档）/灰烬草（档 10）——
     // 旧实现仅 T.GRASS + toast 是自创限制。原版不可种处静默失败（无 toast）
-    if (viIdFromKey(itemDef.key) === 27) {
+    if ((itemDef.vid ?? -1) === 27) {
       if (this.player.useTime > 0) return;
       if (this.placeAcornSapling(tx, ty)) {
         this.player.inv.removeHeld(1);
@@ -24917,7 +24958,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       st.setTile(tx, ty, ropeTile, 0, 0);
       this.player.inv.removeHeld(1);
       {
-        const ut = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
+        const ut = itemCombat(itemDef.vid ?? -1)?.useTime;
         this.player.useTime = ut && ut > 0
           ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
           : 14;
@@ -25221,11 +25262,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         cause: 'place',
       });
       this.checkDecorSquareFrame(clickX, clickY);           // PlaceIt 尾 SquareTileFrame（:40439）
-      if (itemCombat(viIdFromKey(itemDef.key) ?? -1)?.consumable !== false) {
+      if (itemCombat(itemDef.vid ?? -1)?.consumable !== false) {
         this.player.inv.removeHeld(1);
       }
       {
-        const ut = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
+        const ut = itemCombat(itemDef.vid ?? -1)?.useTime;
         this.player.useTime = ut && ut > 0
           ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
           : 14;
@@ -25371,7 +25412,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (tileId === TILE_BY_KEY['v_724_critter_anchor']) {
       const held = this.player.inv.heldItem();
       if (held) {
-        const vid = viIdFromKey(ITEM_DEFS[held.id]?.key ?? '');
+        const vid = (ITEM_DEFS[held.id]?.vid ?? -1);
         if (vid > 0) {
           st.setTile(tx, ty, tileId, anchorStyleOfItem(vid) * 18, 0);
           // 联机：实体层房主权威（= 原版 AddNewEntity :357-373 netMode==2 → FullSync）。
@@ -25395,7 +25436,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (tileId === TILE_BY_KEY['v_723_kite_anchor']) {
       const held = this.player.inv.heldItem();
       if (held) {
-        const vid = viIdFromKey(ITEM_DEFS[held.id]?.key ?? '');
+        const vid = (ITEM_DEFS[held.id]?.vid ?? -1);
         const proj = vid > 0 ? KITE_ITEM_PROJ[vid] : undefined;
         if (proj !== undefined) {
           // Size = _dummy.Size（LeashedKite.SetDefaults :32-35 → Projectile.SetDefaults →
@@ -25559,7 +25600,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // consumable=false 的放置物放置不消耗：5464 Mitey-Titey（Item.cs:43089 显式
     // 覆写 DefaultToPlaceableTile 的 consumable=true）。数据源 = vanilla-itemcombat
     // （extract-itemfunc 漏录该件的 consumable 键）；legacy/缺条目维持原消耗行为
-    if (itemCombat(viIdFromKey(itemDef.key) ?? -1)?.consumable !== false) {
+    if (itemCombat(itemDef.vid ?? -1)?.consumable !== false) {
       this.player.inv.removeHeld(1);
     }
     // ApplyItemTime（PlaceIt :39485 → :4221-4230）：itemTime = useTime×tileSpeed
@@ -25569,7 +25610,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  :40235-40239 = 镐 useTime×pickSpeed + 本件 useTime×tileSpeed 双段总冷却;
     //  pickSeg 在块换分支暂存,此处合并——同拍写面不推迟,总冷却不变）
     {
-      const ut = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
+      const ut = itemCombat(itemDef.vid ?? -1)?.useTime;
       this.player.useTime = (ut && ut > 0
         ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
         : 14) + blockSwapPickSeg;
@@ -26168,7 +26209,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.dialogNpc) this.closeNpcDialog(true);
       this.interactAt(tx, ty);
       this.input.rightDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 5289) {
+    } else if (heldDef && (heldDef.vid ?? -1) === 5289) {
       // 矿车升级套件（Item 5289 MinecartPowerup → Player.unlockedSuperCart = true）：
       // 永久解锁 SuperCart 档（runSpeed 20/accel 0.1/jump 5.15，Mount.cs:371-379），
       // 持久化于世界 flags；已解锁时不再消耗
@@ -26179,7 +26220,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
       }
       this.input.rightDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 43) {
+    } else if (heldDef && (heldDef.vid ?? -1) === 43) {
       if (!this.world.clock.isDay) {
         // 被召唤门拦下（场上已有 NPC 4）时 SummonItemCheck=false → 不消耗（Player.cs:51441-51447）
         if (this.useSuspiciousEye()) {
@@ -26190,7 +26231,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
       }
       this.input.rightDown = false;
-    } else if (heldDef?.tile && PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
+    } else if (heldDef?.tile && PLACE_TILE_ON_ALT_USE.has(heldDef.vid ?? -1)) {
       // PlaceTileOnAltUse 族右键放置（Player.cs:42842-42847 altFunctionUse==2 →
       // doPlacementAction）：捕获小动物 → 锚桩 724（tryPlace 内登记 TECritterAnchor
       // 等价记录）。不消费 rightDown：按住连放由 tryPlace 的 useTime 门节流
@@ -26988,7 +27029,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       (e) => (e as { projId?: number }).projId === PIRANHA_PROJ && !(e as { dead?: boolean }).dead).length;
     if (alive > 0) return;                       // 1-2 条 → 实体侧 pTopUp 已覆盖
     const def = ITEM_DEFS[held!.id];
-    const cw = def ? itemCombat(def.vid ?? viIdFromKey(def.key)) : null;
+    const cw = def ? itemCombat(def.vid ?? -1) : null;
     if (!cw || cw.shoot !== PIRANHA_PROJ || cw.shootSpeed == null) { this.piranhaChanItemId = -1; return; }
     const pgSpd = cw.shootSpeed;
     const pgDmg = cw.damage ?? 40;      // ItemCombat 可选字段（食人鱼枪表值 40）
@@ -30134,6 +30175,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （bj240 语义锁 OFF 态全绿;tests/bj242-conch-right-ocean-compensation.test.ts）。 */
   static CONCH_RIGHT_OCEAN_COMPENSATION = true;
 
+  /** ★★BJ258 用户明令分歧闸（2026-09-22 拍板 B;先例 CONCH_RIGHT_OCEAN_COMPENSATION 同型）:
+   *  非困难模式放光明/夜光钥匙 → 拒绝点 toast 提示。原版本相=静默拒绝（NPC.cs:78320
+   *  `netMode==1||!hardMode` 整链短路,BJ213 定谳）,用户拍板加提示。触发面=关箱拍且箱内
+   *  恰为召唤配方全匹配（空箱+恰 1 堆叠钥匙,仅被 hardMode 拦）→ cb.onToast(Lang
+   *  'Mods.SandboxWorld.Toast.KeyHardModeGate');关箱拍天然单发无刷屏（不加额外节流）。
+   *  仅权威端可达:访客在 chestChangeEvents 入口被 netMode 门拦,toast 不可能在访客端
+   *  弹出。回滚=置 false ⇒ 回调不接,与原版逐字全等（静默;
+   *  tests/bj258-key-hardmode-toast.test.ts）。 */
+  static KEY_HARDMODE_TOAST = true;
+
   private requestMagicConchTeleportPosition(rightOcean: boolean, inwardRetry = false): { x: number; y: number } | null {
     const st = this.world.store;
     const p = this.player;
@@ -30778,6 +30829,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return e;
       },
       markDirtyArea: (x0, y0, x1, y1) => this.chunks?.markDirtyArea(x0, y0, x1, y1),
+      // ★BJ258 明令分歧（回滚口 Game.KEY_HARDMODE_TOAST;缺省 ON）：配方全匹配且仅被
+      // hardMode 拦 → 拒绝 toast（原版=静默,BJ213 定谳）。false ⇒ 回调不接=与原版
+      // 逐字全等。访客已被上行 netMode 门拦,toast 不可能在访客端弹出。
+      onKeyHardModeReject: Game.KEY_HARDMODE_TOAST
+        ? () => this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.KeyHardModeGate'))
+        : undefined,
       smoke: (box) => bigMimicSpawnSmoke(
         (x, y, w, h, type, sx, sy, alpha, color, scale) =>
           this.spawnDust(x, y, w, h, type, sx, sy, alpha, color, scale),
@@ -31171,7 +31228,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const s = pl.inv.slots[k];
         if (!s || s.stack <= 0) continue;
         const def = ITEM_DEFS[s.id];
-        const vid = def ? (def.vid ?? viIdFromKey(def.key)) : -1;
+        const vid = def ? (def.vid ?? -1) : -1;
         if (vid >= 0 && itemFuncOfVid(vid)?.createTile === 4) {
           torchCount += s.stack;
           if (torchCount >= torchThreshold) break;
@@ -31373,7 +31430,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!bkSelf.hurtBuckets) bkSelf.hurtBuckets = new HurtCooldownBuckets();
     if (catchItemId === 4845 || catchItemId === 4847 || catchItemId === 4849) {
       const netDef = ITEM_DEFS[this.swing?.item ?? -1];
-      const netVid = netDef?.vid ?? viIdFromKey(netDef?.key ?? '') ?? -1;
+      const netVid = netDef?.vid ?? -1;
       if (netVid !== 3183 && netVid !== 4821) {
         // ImmunityCooldownID.WrongBugNet(=3)：与 General(=-1,玩家 immune 位)分离
         if (bkSelf.hurtBuckets.blocksHit(ImmunityCooldownID.WrongBugNet)) return;   // :38495-38498
@@ -31417,7 +31474,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!held || !this.swing) return;
     const def = ITEM_DEFS[held.id];
     if (!def) return;
-    const vid = def.vid ?? viIdFromKey(def.key);
+    const vid = def.vid ?? -1;
     if (vid < 0) return;
     const p = this.player;
     const mx = p.cx + p.facing * 8, my = p.cy - 4;          // MouthPosition 近似
@@ -31467,7 +31524,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const p = this.player;
     const held = p.inv.heldItem();
     const def = held ? ITEM_DEFS[held.id] : null;
-    if (!def || (def.vid ?? viIdFromKey(def.key)) !== 968) return;   // :50955 支外冻结
+    if (!def || (def.vid ?? -1) !== 968) return;   // :50955 支外冻结
     if (p.dead || p.pulley) return;      // 死亡不跑 ItemCheck；:50881 && !pulley
     const st = this.world.store;
     const { tx, ty } = marshmallowProbeTile(p.x, p.y, p.w, p.facing);
@@ -31558,24 +31615,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (cw.kind !== 'magic') return false;
     const isGem = isGemBolt(cw.shoot);
     const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
-    const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
+    const chestVid = chestDef ? (chestDef.vid ?? -1) : -1;
     // 非宝石魔法弹（水矢/恶魔镰…）走同一条 Arrow 直射，gem 位缺省——与重构前
     // case 'magic' 尾部通用路径逐字段同形（勿丢：曾因 early-return 让全魔法系哑火）
     const gemFlags = isGem
       ? packGemStaffFeatures(cw.shoot, chestVid >= 0 ? chestVid : undefined,
-        def.vid ?? viIdFromKey(def.key) ?? undefined)
+        def.vid ?? -1)
       : undefined;
     const gsM = projGravSpec(cw.shoot);
     const life = projectileData(cw.shoot)?.timeLeft ?? 3600;
     const arpen = (this.player.equipStats.armorPen ?? 0) + (ps?.arpen ?? 0); // ⑥+⑧
     const critBonus = this.player.critChance('magic')
-      + (itemCombat(def.vid ?? viIdFromKey(def.key) ?? -1)?.crit ?? 0) + (ps?.crt ?? 0); // 审计 §6 + ⑧
+      + (itemCombat(def.vid ?? -1)?.crit ?? 0) + (ps?.crt ?? 0); // 审计 §6 + ⑧
     // 出手参数（:49796-49812，仅宝石弹）：FastThenSlow 出速 ×5、CanBounce ×1.25、
     // ArPenSpread 出手点 NextVector2CircularEdge(12,12) 环形偏移
     let gvx = Math.cos(ang) * cw.shootSpeed, gvy = Math.sin(ang) * cw.shootSpeed;
     // ★R27：水晶风暴出速随机散布（Player.cs:48258-48267）：num50/num51 各 +=
     // Next(-40,41)×0.04（±1.6px/t 双轴）——原版扇形乱射的签名（红队 R27 §3 P1）
-    if ((def.vid ?? viIdFromKey(def.key) ?? -1) === 518) {
+    if ((def.vid ?? -1) === 518) {
       gvx += (Math.floor(Math.random() * 81) - 40) * 0.04;
       gvy += (Math.floor(Math.random() * 81) - 40) * 0.04;
     }
@@ -31673,7 +31730,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!sw) return false;
     const heldDef = ITEM_DEFS[sw.item];
     if (!heldDef) return false;
-    const vid = heldDef.vid ?? viIdFromKey(heldDef.key ?? '');
+    const vid = heldDef.vid ?? -1;
     const combat = vid >= 0 ? itemCombat(vid) : null;
     const tool = heldDef.tool ?? this.itemFuncTool(sw.item);
     const dmgRaw = sw.dmg ?? tool?.damage ?? combat?.damage ?? 0; // :43999 sItem.damage>0
@@ -31809,7 +31866,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (this.swing.volcanoInit !== true) {
       this.swing.volcanoInit = true;
       const vDef = ITEM_DEFS[this.swing.item];
-      const sv0 = (vDef?.vid ?? viIdFromKey(vDef?.key ?? ''));
+      const sv0 = (vDef?.vid ?? -1);
       // ★R2-07 挥击首拍窗口旗（Player.cs:43803-43818——type 判定族照抄）
       this.swing.volcanoWindow = sv0 === 121;                    // _spawnVolcanoExplosion
       this.swing.batbatHeal = sv0 === 5097;                      // _batbatCanHeal
@@ -31820,7 +31877,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // SW-K1 2026-09-03：割草机行走割草（Player.cs:20322-20325 HorizontalMovement 尾
     // MowTheLawn——itemAnimation≥1 门即挥击在途;本函数每逻辑帧运行且无输入早退,
     // 松手后余下动画照割,与原版"动画独立走完"同拍）
-    if (this.swing.t > 0 && viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '') === 4049) {
+    if (this.swing.t > 0 && (ITEM_DEFS[this.swing.item]?.vid ?? -1) === 4049) {
       this.mowTheLawnTick();
     }
     this.swing.t--;
@@ -31831,9 +31888,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  下一 updateUse 重施刷新（停发窗以 swT0>1 放行 t≤1 重施）
       const held = this.player.inv.heldItem();
       // ★vid/key 在 def 上不在实例上(InvItem={id,stack,prefix…})——曾读 held.vid/held.key
-      //  → viIdFromKey(undefined)='reading match' 每次挥击到期帧崩停机(实报帧循环异常)
+      //  → vid 反解吃 undefined key='reading match' 每次挥击到期帧崩停机(实报帧循环异常)
       const heldDef = held ? ITEM_DEFS[held.id] : null;
-      const vidHeld = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+      const vidHeld = heldDef ? (heldDef.vid ?? -1) : -1;
       const au = heldDef ? itemCombat(vidHeld)?.autoReuse : false;
       // pendingItemReuse 写真（ItemCheck :43148 `itemAnimation==0 && reuseDelay==0 &&
       //  controlUseItem && releaseUseItem`，releaseUseItem 由 AutoReuseLogic :53523
@@ -31889,7 +31946,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  743/红晶袍 1286 臂）+ itemAnimation == itemAnimationMax/2（整除，恰一帧）→
     //  再调一次 ItemCheck_Shoot(withAudioVisualFeedback:false)——红晶杖/红晶袍臂
     //  每次挥击双发（第二发在动画中点，不重置 itemTime/不耗魔）。蓝队 R2-04 补
-    const gemVid = heldDef.vid ?? viIdFromKey(heldDef.key) ?? -1;
+    const gemVid = heldDef.vid ?? -1;
     if (this.swing && this.swing.item === held.id
       && (gemVid >= 739 && gemVid <= 744 || gemVid === 3377)
       && this.swing.t === Math.floor(this.swing.dur / 2)) {
@@ -31897,7 +31954,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (gemCw && gemCw.kind === 'magic' && isGemBolt(gemCw.shoot)) {
         const gPs = this.heldPrefixStat();
         const chestDef = ITEM_DEFS[this.player.inv.armor[1]?.id ?? -1];
-        const chestVid = chestDef ? (chestDef.vid ?? viIdFromKey(chestDef.key) ?? -1) : -1;
+        const chestVid = chestDef ? (chestDef.vid ?? -1) : -1;
         if (packGemStaffFeatures(gemCw.shoot, chestVid >= 0 ? chestVid : undefined, gemVid).arPenSpread) {
           // 出手链同 case 'magic'：当前光标向、出生点=杖尖（v5 resolveShotAnchor
           //  直算;曾用 中心+瞄准×18 旧锚,2026-08-31 统一）;红晶环偏移在
@@ -31920,7 +31977,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★门位下移到判定盒算完之后：原版顺序 ItemCheck_GetMeleeHitboxParticles
     // （:42958-42961）在近战门（:42962）**之前**——泡泡棒 1450 noMelee 但要吃
     // 判定盒喷气泡，门放这里会把它饿死（门的 return 移至判定盒之后，无副作用差）
-    const swingVid = heldDef.vid ?? viIdFromKey(heldDef.key);
+    const swingVid = heldDef.vid ?? -1;
     const swingCombat = swingVid >= 0 ? itemCombat(swingVid) : null;
     const meleeDmg = this.swing.dmg ?? tool?.damage ?? swingCombat?.damage ?? 0;
     const noMelee = heldDef.magic || swingCombat?.noMelee;
@@ -32292,7 +32349,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // || sItem.type != 5129 && sItem.type != 3351`——苍蝇美食可打 likeATownNPC 族;
       // ★R2-06③：3351 税官杖为 :44628 第三豁免（`sItem.type != 3351`），isLikeATownNPC
       // 目标 damage 钉 1（:44647-448 `if (isLikeATownNPC && type==3351) damage=1;`）。
-      const heldVidFly = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
+      const heldVidFly = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? -1) : -1;
       const isFlyMeal = heldVidFly === 5129;
       const isStickOfDoom = heldVidFly === 3351;
       // 视线门（ProcessHitAgainstNPC friendly 支同样过 CanHit(nPC)，1457 :44641）：
@@ -32440,7 +32497,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       let crit = Math.random() < 0.04 + this.player.critChance('melee') / 100
         // ★武器 item.crit(GetWeaponCrit:4 基础+武器+装备)——vi_ 数据驱动近战武器 crit
         // 字段此前未入链(挥砍侧全族只有装备 crit)
-        + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1)?.crit ?? 0) / 100;
+        + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? -1) : -1)?.crit ?? 0) / 100;
       // 1457 蓄能暴击 6170（TryConsumingTimerCrit :28564-28595,近战命中调用点
       // :44657 ItemCheck）：满蓄(≥1000)/负冷却窗(<0) → 强制暴击并消费(−15)。
       // 传入盒 = itemRectangle∩npcRect（:44656 Rectangle.Intersect——仅粒子定位面；
@@ -32595,7 +32652,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // （:6541-6546）/催化指环（:6533-6536）/持械武器专属表——全部同函数域一并搬前。
       // （挥砍侧 applyMagmaStoneSwing 的时长掷公式保持 :6184-6198 三段掷不变）
       {
-        const heldVidStatus = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
+        const heldVidStatus = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? -1) : -1;
         if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
         if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);
         if (this.player.buffs.has(BuffType.ImbueFire)) {
@@ -32867,7 +32924,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // （原文字面 `itemRectangle.Left + Next(itemRectangle.Width)`、
       //   `Top + Next(itemRectangle.Height/2)` —— 整数采样，近战判定盒域非敌怪盒；
       //   Next(W) 与 NextFloat 不同源：int 值 [0,W)，故 x/y 以整格抖动）。
-      const heldVidBone = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
+      const heldVidBone = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? -1) : -1;
       if (heldVidBone === 1166 || heldVidBone === 1320) {
         const bxBone = mHX + Math.floor(Math.random() * mHW);              // Left+Next(W)
         const byBone = mHY + Math.floor(Math.random() * (mHH / 2));         // Top+Next(H/2)
@@ -33782,8 +33839,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★IIIII228 offensiveToTim（NPC.cs:419）：胸甲（GetEffectiveArmor(1)）∈
     //  {4256 琥珀长袍, 1282..1287 彩色长袍} && 头盔(0) != 238 法师帽——"对 Tim 敌对"
     //  着装语义；消费 = Tim 45 的 1/50 加掷臂（NPC.cs:5022 remix 或支同支）
-    const timHeadV = viIdFromKey(ITEM_DEFS[this.player.inv.getEffectiveArmor(0)?.id ?? -1]?.key ?? '') ?? -1;
-    const timChestV = viIdFromKey(ITEM_DEFS[this.player.inv.getEffectiveArmor(1)?.id ?? -1]?.key ?? '') ?? -1;
+    const timHeadV = (ITEM_DEFS[this.player.inv.getEffectiveArmor(0)?.id ?? -1]?.vid ?? -1) ?? -1;
+    const timChestV = (ITEM_DEFS[this.player.inv.getEffectiveArmor(1)?.id ?? -1]?.vid ?? -1) ?? -1;
     const offensiveToTim = (timChestV === 4256 || (timChestV >= 1282 && timChestV <= 1287))
       && timHeadV !== 238;
     this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon,
@@ -33815,9 +33872,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     );
     // 狙击镜扩圈（GetSpawnArea :846-862）：手持 1254/1299 或装备 1299 → num3 档
     {
-      const heldV = viIdFromKey(ITEM_DEFS[p.inv.heldItem()?.id ?? -1]?.key ?? '') ?? -1;
+      const heldV = (ITEM_DEFS[p.inv.heldItem()?.id ?? -1]?.vid ?? -1) ?? -1;
       const scopeAcc = p.inv.equippedAccessories()
-        .some((id) => viIdFromKey(ITEM_DEFS[id]?.key ?? '') === 1299);
+        .some((id) => (ITEM_DEFS[id]?.vid ?? -1) === 1299);
       this.vanillaSpawner.scopeNum3 = (heldV === 1254 || heldV === 1299 || scopeAcc)
         ? (heldV === 1254 && scopeAcc ? 1.25 : (heldV === 1254 || heldV === 1299) ? 1.5 : 2.0)
         : 0;
@@ -34047,7 +34104,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!s) continue;
           const def = ITEM_DEFS[s.id];
           if (!def) continue;
-          const vid = def.vid ?? viIdFromKey(def.key);
+          const vid = def.vid ?? -1;
           const c = vid >= 0 ? itemCombat(vid) : null;
           if (c && (c.ammo === AMMO_BULLET || c.useAmmo === AMMO_BULLET)) return true;
         }
@@ -34120,7 +34177,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!s) continue;
           const def = ITEM_DEFS[s.id];
           if (!def) continue;
-          const vid = def.vid ?? viIdFromKey(def.key);
+          const vid = def.vid ?? -1;
           if ((vid >= 1107 && vid <= 1120) || (vid >= 3385 && vid <= 3388)) return true;
         }
         for (let k = 0; k < 10; k++) {
@@ -34200,7 +34257,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const occupied: Array<{ x: number; y: number; npcId?: number }> = [];
     for (const n of this.entities.npcs) {
       if (!(n instanceof TownNPC) || n.dead) continue;
-      views.push({ key: n.npcKey, npcId: n.vanillaId, bound: n.bound, home: n.home, ref: n });
+      views.push({ key: n.npcKey, npcId: n.vanillaId, bound: n.bound, home: n.home,
+        lookForHomeTimeout: n.lookForHomeTimeout, ref: n });   // ★BJ259:踢出冷却随行
       if (n.home) occupied.push({ x: n.home.x, y: n.home.y, npcId: n.vanillaId });
     }
     const r = checkHousesNearAPlayer(w.store, players, this.worldHousingScan++, views, occupied,
@@ -34216,6 +34274,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   homelessDespawn=false / :5382 prioritizedTownNPCType=0——vanilla 该支
       //   同写 townNPCCanSpawn[lock]=false,本仓无 townNPCCanSpawn 对应物,登记）
       mover.homelessDespawn = false;
+      mover.kickedOut = false;   // ★BJ259：近链再安家即摘踢出标（vanilla 被踢者唯一
+                                 // 自愈面=近链迁入,RelocatedHomeless :5380 同位）
       this.prioritizedTownNPCType = 0;
       mover.x = r.home.x * TILE + 8 - mover.w / 2;
       mover.y = (r.home.y + 1) * TILE - mover.h;
@@ -34340,12 +34400,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   Main.cs:66586 `type != 368/37/453` + 非 townNPC;37 已由 key 门排除）。
     //   ★面语义登记：原版对 homeless 者【无】每轮再安置轮（复核循环仅 !homeless），
     //   本轮面为本仓长持的安置 affordance——本轮只换选址内核,面本身保留。
+    //   ★BJ259：被踢者（kickedOut）整面排除——否则下一入驻轮以旧 homeTile 锚把
+    //   NPC 塞回原房 = 踢出被自动回填（vanilla 被踢者唯一自愈面=近链迁入/手动分配,
+    //   lookForHomeTimeout 60s 冷却由 :5543/:72176 消费;清标面=任一再安家成功）。
     // ★锚池空 → 原版 :5035-5037 直接 return（找/发都停）——无任何兜底
     // bound（被绑待救）不入住不搬动——原版 AI_007 bound 态原地，否则五个救援 NPC
     // 会被塞进同一间空房叠在一点（读档/新世界 7200 tick 后必现）
     if (anchorPool.length > 0) {
       for (const n of npcs) {
-        if (n.home || n.bound || n.npcKey === 'old_man'
+        if (n.home || n.bound || n.npcKey === 'old_man' || n.kickedOut
           || n.vanillaId === 368 || n.vanillaId === 453) continue;
         if (!n.anchorTile) continue;   // homeTile==-1 同形（QuickFindHome :5661 no-op）
         // 安家受理+成就+homelessDespawn 清位收尾在 helper 内（与 ①''/全堵支/流浪
@@ -34641,6 +34704,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       n.home = qfh.home;
       n.leashHome = true;
       n.homelessDespawn = false;
+      n.kickedOut = false;   // ★BJ259：凡经本 helper 安家即摘踢出标（被踢者走
+                             // 手动分配/近链再安家后恢复 ① 轮资格）
       // 成就：NO_HOBO prog 8（cs:5702 AchievementsHelper.NotifyProgressionEvent(8)——
       // vanilla 每轮复核重锚同掷,TeleportToHome 全堵支重安家同掷）
       this.achievements.notifyProgressionEvent(8);
@@ -35117,7 +35182,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private dryadCanPlayStardew(): boolean {
     const held = this.player.inv.heldItem();
     if (!held || held.stack <= 0) return false;
-    return vanillaIdOfItem(held.id) === 5275 && !stardewActive();
+    return (ITEM_DEFS[held.id]?.vid ?? -1) === 5275 && !stardewActive();
   }
 
   /** 向导帮助建议计数器（Main.helpText Main.cs:1292——跨对话滚动的静态游标，
@@ -35167,7 +35232,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const BIOME_KEYS = new Set([1533, 1534, 1535, 1536, 1537, 4714]);
     for (const sl of p.inv.slots) {
       if (!sl || sl.stack <= 0) continue;
-      const vid = vanillaIdOfItem(sl.id);
+      const vid = (ITEM_DEFS[sl.id]?.vid ?? -1);
       const tool = ITEM_DEFS[sl.id]?.tool ?? this.itemFuncTool(sl.id);
       if (tool) {
         if ((tool.pickPower ?? tool.power ?? 0) > 0 && vid !== exemptPick) starterGear = false;
@@ -35628,7 +35693,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const inp = this.input;
     const p = this.player;
     const held = p.inv.heldItem();
-    const heldVid = held ? viIdFromKey(ITEM_DEFS[held.id].key) : 0;
+    const heldVid = held ? (ITEM_DEFS[held.id].vid ?? -1) : 0;
     this.itemIconCache.verify(inp.mouseX, inp.mouseY, heldVid);
     // 渲染上下文（DrawInterface_40 消费面）——群系炬门 = UsingBiomeTorches
     // （Player.cs:3934-3941）,原版 :45800 直接读该属性;旧实现只读 unlockedBiomeTorches
@@ -35849,7 +35914,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 本支可达。变体稀有度覆写先于表查（同 UI tooltip 组合式 variantRareOfVid(vid)
       // ?? ITEM_RARE[vid]）;expert 旗与之正交、最后覆写（原版 rare=inner.rare →
       // if (inner.expert) rare=-12 同序,treasure bag 3332 rare=8 实测仍 -12）
-      const vid = vanillaIdOfItem(d.itemId);
+      const vid = (ITEM_DEFS[d.itemId]?.vid ?? -1);
       const baseRare = vid > 0 ? (variantRareOfVid(vid) ?? ITEM_RARE[String(vid)] ?? 0) : 0;
       p.cursorItemIconRare = vid > 0 && ITEM_EXPERT[String(vid)] === 1 ? -12 : baseRare;
       p.cursorItemIconDiff = 0;                    // :43628 diff=0
@@ -35877,7 +35942,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const pick = f?.type === 'pick' ? (f.power ?? 0) : (f?.pickPower ?? 0);
     const axe = Math.max(f?.type === 'axe' ? (f.power ?? 0) : 0, f?.axePower ?? 0, def?.axePower ?? 0);
     const hammer = f?.type === 'hammer' ? (f.power ?? 0) : (f?.hammerPower ?? 0);
-    const vid = def?.vid ?? viIdFromKey(def?.key ?? '');
+    const vid = def?.vid ?? -1;
     const fm = vid > 0 ? itemFuncOfVid(vid) : null;
     // tileTarget 钳界（Player.cs:25593-25607 [5, maxTilesX/Y-5]）
     const st = this.world.store;
@@ -35962,7 +36027,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const sl = inv[i];
       if (!sl) { buf[i] = null; continue; }
       const d = ITEM_DEFS[sl.id];
-      const v = d ? (d.vid ?? viIdFromKey(d.key)) : -1;
+      const v = d ? (d.vid ?? -1) : -1;
       buf[i] = {
         stack: sl.stack,
         bait: (v > 0 ? itemFuncOfVid(v)?.bait ?? 0 : 0),
@@ -36005,8 +36070,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const d = ITEM_DEFS[it.id];
       return d?.paint !== undefined && d.paint > 0;
     };
-    for (let i = 54; i < 58 && i < p.inv.slots.length; i++) if (isPaint(p.inv.slots[i])) return viIdFromKey(ITEM_DEFS[p.inv.slots[i]!.id].key);
-    for (let i = 0; i < p.inv.slots.length; i++) if (isPaint(p.inv.slots[i])) return viIdFromKey(ITEM_DEFS[p.inv.slots[i]!.id].key);
+    for (let i = 54; i < 58 && i < p.inv.slots.length; i++) if (isPaint(p.inv.slots[i])) return ITEM_DEFS[p.inv.slots[i]!.id]?.vid ?? -1;   // ★方案 A：vid 直读（BJ265）
+    for (let i = 0; i < p.inv.slots.length; i++) if (isPaint(p.inv.slots[i])) return ITEM_DEFS[p.inv.slots[i]!.id]?.vid ?? -1;   // ★方案 A：vid 直读（BJ265）
     return 0;
   }
 
@@ -36200,6 +36265,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     npc.home = { x: q.room.standX, y: q.room.standY };
     npc.leashHome = true;
     npc.homelessDespawn = false;   // 手动安家 = RelocatedHomeless 同面清流浪标（:5380）
+    npc.kickedOut = false;         // ★BJ259：再安家即摘踢出标（① 轮臂恢复资格——被踢者
+                                   // 手动重新分配后不再被排除,语义=vanilla 无此标等价）
     // ★分配收尾不变量（2026-08-30 增量#2·UI 手动分配侧）：q 已过 housingCheckAt
     //  （scoreRoom tiles 含对判）几乎不可能形成共室双认领，此为该防线之上的兜底断言
     //  ——一旦极端几何仍漏网，点击即收敛而非等下一入驻轮。宠物+主人异类别合法共住
@@ -36211,6 +36278,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 同掷位——住房菜单分配与自动入住共用 QuickFindHome 成功支的成就面）
     this.achievements.notifyProgressionEvent(8);
     return true;
+  }
+
+  /** ★BJ259（2026-09-22 用户实报）：WorldGen.kickOut（WorldGen.cs:4791-4799）1:1——
+   *  玩家侧触发面 = 住房 UI 开时右键驻家旗（DrawNPCHousesInWorld Main.cs:41530-41535,
+   *  updateUse 踢出臂）。效果面：homeless=true（本仓 home=null 承接）+
+   *  lookForHomeTimeout=KickOutLookForHomeTimeout（NPC.cs:6556=3600,NPC.UpdateNPC
+   *  :91434 每 tick 递减;消费面=近链迁入门 WorldGen.cs:5543 + 优先型锁 :72176——
+   *  被踢者 60s 冷却）+ TownManager.KickOut（:4798 清房位登记）——本仓无 TownManager
+   *  房位面（Housing.ts 差异登记）=无操作等价,占用面由 home=null 直接受理。
+   *  本仓 kickedOut=true 为 ①「无家者每轮再安置」臂豁免标（vanilla 无每轮再安置面,
+   *  不豁免则下一入驻轮被旧 homeTile 锚自动回填=踢出失效）。不发公告不播消息
+   *  （vanilla kickOut 无文案;Sound 12 在 UI 旗臂侧）。MP SendData(60) 面单人无关。 */
+  kickOutNPC(n: TownNPC): void {
+    n.home = null;
+    n.lookForHomeTimeout = 3600;   // NPC.KickOutLookForHomeTimeout（NPC.cs:6556）
+    n.kickedOut = true;
+    n.leashHome = false;           // 本仓拴家标清零（同 dropped 臂 Game.ts:3843 口径）
   }
 
   /** 台词 = NPC.GetChat(NPC.cs:94974+) type 17/18/22/37/19/20/38 分支 1:1。
@@ -36709,7 +36793,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       let colaIdx = -1;
       for (let i = slots.length - 1; i >= 0; i--) {   // reverseOrder:true
         const sl = slots[i];
-        if (sl && sl.stack > 0 && vanillaIdOfItem(sl.id) === 5275) { colaIdx = i; break; }
+        if (sl && sl.stack > 0 && (ITEM_DEFS[sl.id]?.vid ?? -1) === 5275) { colaIdx = i; break; }
       }
       if (colaIdx >= 0) {
         this.player.inv.removeAt(colaIdx, 1);
@@ -37623,7 +37707,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let coins = 0;
         for (const sl of this.player.inv.slots) {
           if (!sl || sl.stack <= 0) continue;
-          const vid = vanillaIdOfItem(sl.id);
+          const vid = (ITEM_DEFS[sl.id]?.vid ?? -1);
           coins += vid === 74 ? sl.stack * 1000000 : vid === 73 ? sl.stack * 10000
             : vid === 72 ? sl.stack * 100 : vid === 71 ? sl.stack : 0;
         }
@@ -38110,7 +38194,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 光标持有门（:1878 !CanStack 早退 + :1890-1893 满叠停买）
     if (held) {
       const hd = ITEM_DEFS[held.id];
-      if (!hd || vanillaIdOfItem(held.id) !== vanillaId) return false;
+      if (!hd || (ITEM_DEFS[held.id]?.vid ?? -1) !== vanillaId) return false;
       if ((held.prefix ?? 0) !== prefix) return false;
       if (held.stack >= (hd.maxStack ?? 1)) return false;
     }
@@ -38184,7 +38268,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 成就：购买落背包 = ItemSlot case 0 落格拾取（ItemSlot.cs:932 NotifyItemPickup：
         // 原版买入先上光标,落主背包格（context 0）才发;本仓空手直入背包模型等价位）。
         // ★上光标支（held）不通知——光标物品未"落背包",与原版 case-0 语义一致
-        const buyVid = vanillaIdOfItem(invId);
+        const buyVid = (ITEM_DEFS[invId]?.vid ?? -1);
         if (buyVid > 0) this.achievements.notifyItemPickup(buyVid);
       }
       if (bb) {
@@ -38247,7 +38331,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const it = inv.slots[slot];
     if (!it) return true;                          // 空格无动作（IsAir 早退 ItemSlot.cs:535）
     if (it.favorited) return true;                 // 收藏禁 Shift 转移（ItemSlot.cs:566）
-    const vid = vanillaIdOfItem(it.id);
+    const vid = (ITEM_DEFS[it.id]?.vid ?? -1);
     if (vid < 0) return true;
     if (!canSellFromShopUi(vid)) return true;      // 钱币 71-74 → null 不动作（:191-194）
     const memoKey = `${vid}:${it.prefix ?? 0}`;
@@ -38297,7 +38381,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  返回 true = 已售出/白送（调用方清光标）；false = 无动作/币装不下（光标原样） */
   npcShopSellHeld(held: { id: number; stack: number; prefix?: number }): boolean {
     if (!this.npcShopOpen) return false;
-    const vid = vanillaIdOfItem(held.id);
+    const vid = (ITEM_DEFS[held.id]?.vid ?? -1);
     if (vid < 0) return false;
     if (!canSellFromShopUi(vid)) return false;      // 钱币 71-74 → result -1（:1435）
     const prefix = held.prefix ?? 0;
@@ -38773,7 +38857,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ① bank 段（QuickStackToNearbyBanks :238-250 / 1456 :230-242）——tile 段盒扫
     //   与合成侧同源（GetBanksInRangeOf :33-91）;bank 径源件不含袋臂（includeVoidBag:false）
     const cx = Math.floor(p.cx / TILE), cy = Math.floor(p.cy / TILE);
-    const vaultHeld = p.inv.slots.some((s) => s && s.stack > 0 && vanillaIdOfItem(s.id) === 5325);
+    const vaultHeld = p.inv.slots.some((s) => s && s.stack > 0 && (ITEM_DEFS[s.id]?.vid ?? -1) === 5325);
     const bankHits = nearbyBanksInRange(this.world.store, cx, cy, p.banks, vaultHeld);
     for (const b of bankHits) {
       const bx = (b.tx + 1) * 16, by = (b.ty + 1) * 16;   // item.position=(j·16+16,k·16+16)
@@ -39304,7 +39388,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   1735/糖梅 1868,掷源 Main.rand。落在 key→id 解析前=唯一 chokepoint,原版同位
     //   （罐/怪/Boss 心星全走 NewItem 整型重载）;pickup 语义按原始 id 打标
     //   （Enemy.ts spawn 闭包）→ 替代后心族 Heal(20)/星族 +100MP 不变,Player.cs:35344-35362）
-    const dropVid = viIdFromKey(itemKey);
+    // ★方案 A 阶段 4（BJ265）：vid 直读（items.ts 回填后 def.vid≡键前缀反解值）；
+    //   未注册键兜底保留键前缀解析（原语义:未注册 vi_ 键也命中节日替代/manastar 判定）
+    const dropVid = ITEM_DEFS[ITEM_BY_KEY[itemKey] ?? -1]?.vid
+      ?? (/^vi_(\d+)_/.exec(itemKey) ? Number(/^vi_(\d+)_/.exec(itemKey)![1]) : -1);
     if (dropVid === 58 || dropVid === 184) {
       const sub = holidayPickupSubstitute(dropVid, {
         halloween: !!this.world.clock.halloween,
@@ -39322,7 +39409,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
     if (placeStyle !== undefined) drop.placeStyle = placeStyle;
     // 法力斗篷之星 4143 = pickup 类(拾取 +50 魔力 + ManaHeat,Player.cs:35357-35371)
-    if (viIdFromKey(itemKey) === 4143) drop.pickup = 'manastar';
+    //   （dropVid=入参 key 的 vid;节日替代仅 58/184 两 vid 触发,替代后两侧判值均≠4143,复用同相）
+    if (dropVid === 4143) drop.pickup = 'manastar';
     // ★原版 Main.item 槽位上限 400（Main.cs:1696 WorldItem[401],NewItem 扫 0..399）:
     //  满槽 → 回收【最老的 pickup 类】槽位（Item.cs:49781-49800:IsAPickup 里
     //  timeSinceItemSpawned 最大者——普通掉落从不被抢占;曾不判型 shift() 最旧,
@@ -39345,7 +39433,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (const dRaw of drops) {
         const d = dRaw as ItemDrop;
         if (d.dead) continue;
-        const vid = vanillaIdOfItem(d.itemId);
+        const vid = (ITEM_DEFS[d.itemId]?.vid ?? -1);
         if (vid > 0 && ITEM_IS_A_PICKUP.has(vid) && d.age > 1200
           && (!oldest || d.age > oldest.age)) oldest = d;
       }
@@ -39407,7 +39495,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const res = emergencyStackItemsToMakeSpace(
       this.entities.drops as ItemDrop[],
       {
-        vidOf: (d) => vanillaIdOfItem(d.itemId),
+        vidOf: (d) => (ITEM_DEFS[d.itemId]?.vid ?? -1),
         viewCenters: players,
         // MP 所有权门：联机时排除傀儡（他端所有）与 netLocalOnly（本端私有袋）
         mpOwned: netActive ? ((d: ItemDrop) => !d.netPuppet && !d.netLocalOnly) : undefined,
@@ -39427,7 +39515,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         promoteCoin: (d) => {
           // OnReachingMaxStack（:436-449）inner.SetDefaults(下一级)——SetDefaults 语义
           // 含 stack=1（100 银币=1 金币;漏重置=百倍价值）
-          const vid = vanillaIdOfItem(d.itemId);
+          const vid = (ITEM_DEFS[d.itemId]?.vid ?? -1);
           if (vid >= 71 && vid < 74) {
             const k = VANILLA_ITEM_KEY_BY_ID[vid + 1];
             if (k) { const nid = ITEM_BY_KEY[k]; if (nid !== undefined) { d.itemId = nid; d.stack = 1; } }
@@ -39649,7 +39737,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const sf = invFb.slots[i];
         if (!sf) continue;
         const dv = ITEM_DEFS[sf.id];
-        if ((dv?.vid ?? viIdFromKey(dv?.key ?? '')) === 4743) { hasFootball = true; break; }
+        if ((dv?.vid ?? -1) === 4743) { hasFootball = true; break; }
       }
       if (hasFootball) {
         // hitDirection 本仓以「玩家−来源」x 符号近似（knockback 方向位）
@@ -39658,7 +39746,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const sf = invFb.slots[i];
           if (!sf) continue;
           const dv2 = ITEM_DEFS[sf.id];
-          if ((dv2?.vid ?? viIdFromKey(dv2?.key ?? '')) !== 4743) continue;
+          if ((dv2?.vid ?? -1) !== 4743) continue;
           const fbSpill = new FootballProj(p.cx, p.cy, -hitDir * 4, -6, sf.stack, true);
           this.entities.add(fbSpill, 'projectiles');      // NewProjectile(…861…, ai1=1, ai2=stack)
           invFb.slots[i] = null;                          // :38547 SetDefaults(0)
@@ -41566,7 +41654,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const notifyAll = (arr: ReadonlyArray<{ id: number; stack: number } | null>) => {
       for (const s of arr) {
         if (!s) continue;
-        const vid = vanillaIdOfItem(s.id);
+        const vid = (ITEM_DEFS[s.id]?.vid ?? -1);
         if (vid > 0) this.achievements.notifyItemPickup(vid);
       }
     };
@@ -41937,7 +42025,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.entities.add(new SlimeGlob(this.player.cx, this.player.cy - 4,
       Math.cos(ang) * 8, Math.sin(ang) * 8), 'projectiles');
     if (Math.cos(ang) !== 0) this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
-    this.playUseSound(heldDef.vid ?? viIdFromKey(heldDef.key), 'throw');
+    this.playUseSound(heldDef.vid ?? -1, 'throw');
     this.useSwing(heldDef, ang);                            // useStyle5 举持指向
     this.player.useTime = 12;                               // useAnimation=useTime=12
   }
@@ -42288,7 +42376,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   private updatePetSlot(slot: 0 | 1, visible: boolean, cur: PetFollower | null): PetFollower | null {
     const item = this.player.inv.miscEquips[slot];
-    const info = item ? petInfoOfVid(vanillaIdOfItem(item.id)) : null;
+    const info = item ? petInfoOfVid(ITEM_DEFS[item.id]?.vid ?? -1) : null;
     // ★SW-FX2：UpdatePet/UpdatePetLight 补挂面（1457 Player.cs:17414-17425 / :17427-17445）——
     // 装备槽在位（petInfo 反查 = Main.vanityPet/lightPet 成员集 :17417/:17430）+ 未隐藏
     //（!hideMisc = visible :17418/:17431）+ FindBuffIndex==-1（:17420/:17442）→
@@ -42310,7 +42398,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const bt = BUFF_BY_VANILLA.get(vb);
         if (bt !== undefined && !this.player.buffs.has(bt)) {
           this.player.buffs.apply(bt, 60);                        // AddBuff(num, 3600t)
-          this.playUseSound(vanillaIdOfItem(item.id), 'tink');    // miscEquips.UseSound（:17422）
+          this.playUseSound((ITEM_DEFS[item.id]?.vid ?? -1), 'tink');    // miscEquips.UseSound（:17422）
         }
       }
     }
@@ -42351,7 +42439,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  次帧重挂（updatePetSlot,音/时长原版语义）
     if ((slot === 0 && this.petHidden) || (slot === 1 && this.lightPetHidden)) {
       const eq = this.player.inv.miscEquips[slot]!;
-      const vb = petInfoOfVid(vanillaIdOfItem(eq.id))?.buff;
+      const vb = petInfoOfVid(ITEM_DEFS[eq.id]?.vid ?? -1)?.buff;
       const bt = vb !== undefined ? BUFF_BY_VANILLA.get(vb) : undefined;
       if (bt !== undefined) this.player.buffs.remove(bt);
       if (slot === 1 && vb === 27) {
@@ -42373,13 +42461,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     let vid = 0;
     const equipped = p.inv.miscEquips[4];
     if (equipped) {
-      const hi = hookItemOf(vanillaIdOfItem(equipped.id));
-      if (hi) vid = vanillaIdOfItem(equipped.id);
+      const hi = hookItemOf(ITEM_DEFS[equipped.id]?.vid ?? -1);
+      if (hi) vid = (ITEM_DEFS[equipped.id]?.vid ?? -1);
     }
     if (!vid) {
       for (const s of p.inv.slots) {
         if (!s) continue;
-        const v = vanillaIdOfItem(s.id);
+        const v = (ITEM_DEFS[s.id]?.vid ?? -1);
         if (hookItemOf(v)) { vid = v; break; }
       }
     }
@@ -42457,7 +42545,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (let i = 0; i < p.inv.slots.length; i++) {
       const s = p.inv.slots[i];
       if (!s) continue;
-      const ff = itemFuncOfVid(vanillaIdOfItem(s.id));
+      const ff = itemFuncOfVid(ITEM_DEFS[s.id]?.vid ?? -1);
       if (!ff?.consumable || ff.createTile || ff.shoot || ff.pick || ff.axe || ff.hammer) continue;
       if (kind === 'heal' ? !ff.healLife : !ff.healMana) continue;
       slot = i;
@@ -42471,7 +42559,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     const s = p.inv.slots[slot]!;
-    const ff = itemFuncOfVid(vanillaIdOfItem(s.id))!;
+    const ff = itemFuncOfVid(ITEM_DEFS[s.id]?.vid ?? -1)!;
     if (ff.buffType && ff.buffType > 0) {
       const bt = BUFF_BY_VANILLA.get(ff.buffType);
       if (bt !== undefined && bt !== BuffType.Resistance) {
@@ -42481,7 +42569,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (ff.healLife) {
       // 诡药 3001：随机 70-120 + i-帧档（Player.cs:51126-51146，与主链同构）
-      const qvid = vanillaIdOfItem(s.id);
+      const qvid = (ITEM_DEFS[s.id]?.vid ?? -1);
       const heal = qvid === 3001 ? this.strangeBrewRoll() : ff.healLife;
       p.hp = Math.min(p.maxHp, p.hp + heal);
       this.addDamageNumber(p.cx, p.y, heal, false, '#40E080');
@@ -42496,7 +42584,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     p.inv.removeAt(slot, 1);
     // useTime 17（DefaultToFood/HealingPotion :48171——曾写死 60）
-    p.useTime = itemCombat(vanillaIdOfItem(s.id))?.useTime ?? 17;
+    p.useTime = itemCombat(ITEM_DEFS[s.id]?.vid ?? -1)?.useTime ?? 17;
     this.sfx.play('drink');
     this.cb.onInventoryChanged();
   }
@@ -43250,7 +43338,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 城镇 NPC 存档快照（原版 WorldFile town NPC 段：位置+home+bound+自定义名） */
-  townNpcsForSave(): Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean; homelessDespawn?: boolean }> {
+  townNpcsForSave(): Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean; homelessDespawn?: boolean; kickedOut?: boolean }> {
     // ★写盘前置护栏（2026-08-30 增量#3）：autosave / 手动存档 / 退出存档 / 断线保存
     //  四条路径（mainFlow.ts ×3 + main.ts ×1）全部汇经本函数 ⇒ 这里是唯一统一的
     //  "SaveFile data 构造前"闸口。serialize 前再跑一遍读档同款共室去重，防运行期
@@ -43290,6 +43378,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // ★SW-BO1 2026-09-07：流浪清场标随档（vanilla WorldFile.cs:1741 写/:2932 读
         //  v315+——城镇 NPC 段逐位持久,夜扫链跨存档成立）
         homelessDespawn: n.homelessDespawn || undefined,
+        // ★BJ259：踢出标随档（repo 侧标,原版无对应字段——① 轮臂豁免面跨存档成立;
+        //  lookForHomeTimeout 原版即运行时位不持久,同相不落盘）
+        kickedOut: n.kickedOut || undefined,
       }));
   }
 
@@ -43388,7 +43479,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  值（基表读法=神级迷你鲨 2 档绿 #96FF96,原版 2+2→4 档 (255,150,150)=实报
    *  伪影,BJ165 登记）;重铸两调用点（UI.ts classic doBtn/vinv 锤击）传
    *  UI.tooltipRareOf(·,np,{forPopup}) 产物（BJ125 单源链;forPopup=跳过④
-   *  MouseText −12 覆写——专家旗在飘字链走 somePopup.expert 不改色）。缺省基表
+   *  MouseText −12 覆写——专家旗在飘字链走 somePopup.expert 不改色（★S5 勘误
+   *  BJ263:原版 expert 飘字色=Disco 动色 PopupText.cs:670-674,本仓静态画线=登记偏差））。缺省基表
    *  读法=普通拾取同相（拾取链不携词缀域）。变异哨=tests/sw-n4-reforge-popup-rare
    *  .test.ts（传基表→红）。
    *  noStack 语义（BJ173 登记,2026-09-20 注释确认）：原版 noStack 只关合并
@@ -46160,7 +46252,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const outId = ITEM_BY_KEY[outKey];
     const def = outId !== undefined ? ITEM_DEFS[outId] : undefined;
     if (!def) return false;
-    if (vanillaIdOfItem(cur.id) !== r.create) return false;      // CanStack 同型臂
+    if ((ITEM_DEFS[cur.id]?.vid ?? -1) !== r.create) return false;      // CanStack 同型臂
     if ((cur.prefix ?? 0) !== 0) return false;                   // CanStack 词缀臂（成品 prefix=0）
     const pool = rollablePrefixes(r.create, !!def.accessory);    // !CanHavePrefixes 臂
     if (pool && pool.length) return false;
@@ -46178,7 +46270,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (!outKey) return;
     const outId = ITEM_BY_KEY[outKey];
     if (outId === undefined) return;
-    const outVid0 = vanillaIdOfItem(outId);
+    const outVid0 = (ITEM_DEFS[outId]?.vid ?? -1);
     // ★SW-BM1 2026-09-06 RB4a 债①②（CraftingRequests.CraftItem :97-120 逐轮循环 1:1）：
     //  旧实现在循环【外】一次 consumeMaterials(times) 批量扣料+整批一次授予,两处偏离——
     //  ① CursorHasSpaceToCraftRecipe 只在点击时查一次（满包边缘:成品溢出入包的转化
@@ -46262,7 +46354,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
   private achNotifyCraft(outKey: string): void {
     const id = ITEM_BY_KEY[outKey];
     if (id === undefined) return;
-    const vid = vanillaIdOfItem(id);
+    const vid = (ITEM_DEFS[id]?.vid ?? -1);
     if (vid != null) this.achievements.notifyItemCraft(vid);
   }
 
@@ -47813,7 +47905,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (!(p.itemAnimTicks > 0)) return;
     const held = p.inv.heldItem();
     const heldDef = held ? ITEM_DEFS[held.id] : undefined;
-    const vid = heldDef ? (heldDef.vid ?? viIdFromKey(heldDef.key)) : -1;
+    const vid = heldDef ? (heldDef.vid ?? -1) : -1;
     if (vid < 0 || (itemCombat(vid)?.damage ?? 0) <= 0) return;
     p.boneGloveTimer = 60;                                                    // :43963
     const cam = this.camera;

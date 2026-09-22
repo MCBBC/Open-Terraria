@@ -37,7 +37,7 @@ import { applyBannerDamageDealt } from './projTargets';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
-import { viIdFromKey } from '../data/vanillaItemCombat';
+
 import { playerCanHitEnemy } from './projTargets';
 import {
   trackCollision, trackRotation, onTrack,
@@ -914,7 +914,7 @@ export class Minecart extends Entity {
       if (!s) continue;
       if (p.inv.selected === i && p.itemAnimTicks > 0) continue;   // :78
       const def = ITEM_DEFS[s.id];
-      const vid = def?.vid ?? (def ? viIdFromKey(def.key) : -1);
+      const vid = def?.vid ?? (def ? (def.vid ?? -1) : -1);
       if (vid === TRACK_ITEM_VID && s.stack > 0) return i;
     }
     return -1;

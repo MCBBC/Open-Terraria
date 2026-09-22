@@ -19,7 +19,7 @@ import { Game } from '../src/core/Game';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { itemCombat, resolveAmmoProjId, AMMO_SOLUTION } from '../src/data/vanillaItemCombat';
 import { projectileData } from '../src/data/vanillaProjectiles';
-import { viIdFromKey } from '../src/data/vanillaItemCombat';
+
 import { FLARE_PROJS, Arrow } from '../src/entities/Arrow';
 import { resetGorePool, liveGorePieces } from '../src/entities/GorePiece';
 import { TileStore } from '../src/world/TileStore';
@@ -33,10 +33,10 @@ describe('SW-FX4 ❶ 5392-5394 溶液获得链（item def/图集/商店/弹药�
     for (const vid of [5392, 5393, 5394]) {
       const key = VANILLA_ITEM_KEY_BY_ID[vid];
       expect(key, `vid ${vid} 注册键`).toBeTruthy();
-      const idx = ITEM_DEFS.findIndex((d) => d.key === key);
+      const idx = ITEM_DEFS.findIndex((d) => d && d.key === key);   // ★方案 A:守洞
       expect(idx, `vid ${vid} def 在册`).toBeGreaterThanOrEqual(0);
       const d = ITEM_DEFS[idx];
-      const v = d.vid ?? viIdFromKey(d.key);
+      const v = d.vid ?? -1;   // ★方案 A:vid 直读(BJ265)
       expect(v).toBe(vid);
       // Game.ts:14041 ammoOf 等价（legacy ammoId 优先,vi_ 走 combat.ammo 反查）
       const ammoOf = d.ammoId ?? (itemCombat(v)?.ammo ?? 0);

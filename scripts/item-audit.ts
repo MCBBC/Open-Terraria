@@ -27,8 +27,9 @@ for (const d of Object.values(BUFF_DEFS) as Array<{ vanillaBuff?: number }>) {
   if (d.vanillaBuff) BUFF_VANILLA_IDS.add(d.vanillaBuff);
 }
 // 墙放置覆盖：任一 def 带该 wallId（wallitems 循环注册的 snake_case 墙物品）
+// ★方案 A（BJ265）：ITEM_DEFS 重排后稀疏——for..of 对洞产出 undefined，须 !d 守卫
 const WALL_IDS = new Set<number>();
-for (const d of ITEM_DEFS) if (d.wallId !== undefined) WALL_IDS.add(d.wallId);
+for (const d of ITEM_DEFS) if (d && d.wallId !== undefined) WALL_IDS.add(d.wallId);
 // vi_ key → 内部 id（功能桥接检查）
 const viId = (vid: number) => ITEM_BY_KEY[`vi_${vid}_${vmeta[String(vid)]?.key ?? ''}`];
 

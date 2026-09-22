@@ -47,7 +47,7 @@ function defOf(vid: number): (typeof ITEM_DEFS)[number] {
   return d;
 }
 function panelDefOf(tileKey: string): (typeof ITEM_DEFS)[number] {
-  const d = ITEM_DEFS.find((x) => x.key.startsWith('place_') && x.tile === tileKey);
+  const d = ITEM_DEFS.find((x) => x && x.key.startsWith('place_') && x.tile === tileKey);   // ★方案 A:守洞
   if (!d) throw new Error(`missing place panel for ${tileKey}`);
   return d;
 }
@@ -539,7 +539,7 @@ describe('E7 换墙冷却（SW-BF1 面 data 化）', () => {
     const st = w.store;
     st.setWall(9, 20, 5);                                 // 旧墙 5（木墙,非地牢/87/350）
     // SW-BG1:wallId 挂在影子 def 上（蛇形/驼峰双 def 家族）——按 wallId 查
-    const wallDef = ITEM_DEFS.find((d) => d.wallId === 21);
+    const wallDef = ITEM_DEFS.find((d) => d && d.wallId === 21);   // ★方案 A:守洞
     expect(wallDef?.wallId).toBe(21);
     expect(wallDef!.key.startsWith('vi_392_')).toBe(true);   // vid 392 = 玻璃墙（useTime 7）
     const g = shell(w, { heldDef: wallDef! });

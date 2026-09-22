@@ -261,11 +261,10 @@ export const AMMO_SNOWBALL = 949;
 
 // ================= vi_* 武器语义解析（json 数据驱动;json 已过 recon-item 闸门=1457 终值,DRIFT=0） =================
 
-/** vi_<id>_<slug> key → 原版 item id（vi_ 批次未显式存 vid 时从 key 反解） */
-export function viIdFromKey(key: string): number {
-  const m = key.match(/^vi_(\d+)_/);
-  return m ? Number(m[1]) : -1;
-}
+/** 〔退役注 · 方案 A 阶段 4（BJ265,2026-09-22）〕键前缀 vid 反解器已整体退役：
+ *  items.ts reorder 块 ⑥ 已把 vi_ 键 defs 的 vid 字段回填=自身下标（internal≡stable≡
+ *  键解析 vid 恒等域,place_v/PRIV 不回填）——消费面一律 `d.vid ?? -1` 直读,禁再引入
+ *  键前缀正则反解。本函数体删除,名号留注防复活。 */
 
 export type CombatWeapon =
   | { kind: 'melee'; damage: number; knockback: number; useTime: number; useAnimation: number; autoReuse: boolean; shoot?: number; shootSpeed?: number }
@@ -286,7 +285,10 @@ export type CombatWeapon =
       useAnimation?: number;
     };
 
-/** 物品定义的最小形状（items.ts 的 ItemDef 满足之） */
+/** 物品定义的最小形状（items.ts 的 ItemDef 满足之）。
+ *  ★方案 A 阶段 5（BJ266）：键前缀兜底 keyFallbackVid 已退役——vid 缺省一律按 -1
+ *  （未注册语义）。真实 def 经 items.ts reorder 块 ⑥ 回填恒有值；测试夹具一律显式
+ *  带 vid（14 文件键-only 夹具已全量补齐,本刀同步）。 */
 export interface CombatWeaponItemLike {
   key: string;
   vid?: number;
@@ -298,7 +300,7 @@ export interface CombatWeaponItemLike {
  *  注意：消耗型 aiStyle 2（手里剑等抛物线投掷）仍走 Game.thrownCombat，
  *  这里只接管爆炸物族（ai16）——判定顺序见 Game.useItem */
 export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
-  const vid = def.vid ?? viIdFromKey(def.key);
+  const vid = def.vid ?? -1;
   if (vid < 0) return null;
   // 传送门枪 3384（Item.cs:30926-30942）：shoot=600 是 aiStyle75 手持光束投射物
   // （本身不落门，其首帧 AI 在 Projectile.cs:63883-63911 发出真正的 601 落门弹）。
@@ -495,7 +497,7 @@ const THROWN_EXPLICIT_NULL = new Set([4608, 4702, 5438, 5518, 859, 4743]);
 /** 旧判定（消耗型投掷武器）：shoot+consumable+noMelee 且无 useAmmo；
  *  ammo 双职件仅白名单（雪球）可掷——原版按 useStyle/IsACoin 判定（见上注） */
 export function thrownCombat(def: CombatWeaponItemLike): { shoot: number; damage: number } | null {
-  const vid = def.vid ?? viIdFromKey(def.key);
+  const vid = def.vid ?? -1;
   if (vid < 0 || THROWN_EXPLICIT_NULL.has(vid)) return null;
   const c = itemCombat(vid);
   if (!c?.shoot || !c.consumable || !c.noMelee || c.useAmmo) return null;
@@ -648,7 +650,7 @@ export function resolveSandGunSwap(launcherVid: number, projId: number, ammoVid:
  *  combatWeapon 对 useAmmo 物品返回 null（弓弩/弹药体系另走 PickAmmo），Game 远程
  *  分支据此接管枪族——此前 vi_ 手枪/雪球炮等无 def.ranged 又被 combatWeapon 排除 = 静默失效 */
 export function rangedAmmoWeapon(def: CombatWeaponItemLike): number {
-  const vid = def.vid ?? viIdFromKey(def.key);
+  const vid = def.vid ?? -1;
   if (vid < 0) return 0;
   const ua = itemCombat(vid)?.useAmmo ?? 0;
   return ua > 0 ? ua : 0;

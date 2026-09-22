@@ -322,7 +322,7 @@ describe('BJ116 ① 右键链逐 context 路由序（源码结构锁,fx52 C4 同
     const gate = src.indexOf("if (!this.invPanel || this.invPanel.style.display !== 'block') return;");
     const order = [
       'this.tryOpenContainer(cur, i);',
-      'tryItemSwapVid(vanillaIdOfItemKey',
+      'tryItemSwapVid(ITEM_DEFS[cur.id]?.vid ?? -1)',   // ★方案 A 重锚(BJ265):vid 直读
       'this.swapVanityEquip(i);',
       "if (this.pickupEquipIntoMouse(where, i)) this.refreshStackSplitCooldown();",
       'this.swapEquipItem(cur, where, i);',

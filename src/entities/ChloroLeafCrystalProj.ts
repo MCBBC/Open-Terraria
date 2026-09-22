@@ -57,6 +57,7 @@ import { BuffType } from '../stats/Buffs';
 import { canHit } from '../physics/LineOfSight';
 import { canBeChasedBy } from './projTargets';
 import { HitCdImpl, dealContacts } from './proj1457';
+import { cutTilesBox } from './ProjCutTiles';
 import { leafTrailInfoByte, leafCrystalShotFx } from '../fx/orchestraFx';
 import { projSprite } from './Arrow';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
@@ -348,6 +349,16 @@ export class ChloroLeafShot extends Entity {
       this.x += this.vx;
       this.y += this.vy;
       this.trailStep(game, u);
+      // ★BJ232 补课（BJ260 S7）：CutTiles 前置于伤害结算——原版 Damage()（每子步
+      //  :17184 Damage 在 numUpdates 循环内=181 子步逐拍,UpdateJumpHeight 同构）内
+      //  CutTiles（:12517）先于 Damage_PVE（:12523）→ 命中即亡弹当拍【照割】;
+      //  本仓中央割（Entity.ts:165）带 !e.dead 门=死亡拍整缺。227 过 CanCutTiles
+      //  （:15407 排除表无 227,aiStyle 43 亦不在 45/137/92/105/106 排除列）+
+      //  Damage_CanDealDamage（:12461 排除表无）+ friendly&&!npcProj&&!minion 门
+      //  → 子步逐拍弹盒上报（幂等,Game.cutTile 收口零操作重复面;活拍与中央割
+      //  双报同 Arrow 惯例）。908 同批实锤【被本刀证伪】：CanCutTiles 排除表显式
+      //  `type != 908`（:15421）→ 原版 908 全程不割,SW CUT_EXCLUDE_VIDS 同位=已对齐。
+      cutTilesBox(game, this.x, this.y, this.w, this.h);
       // Damage()（每子步结算面——DamageVar/banner/SnapStrike/crit 单源经共享
       // dealContacts;pierce=1 = flag3 免疫豁免+不设帧,命中即亡 penetrate;尾参 true=
       // maxPenetrate 1 keepIterating 截断——重叠多怪同拍只伤桶序首个,δA bug②）

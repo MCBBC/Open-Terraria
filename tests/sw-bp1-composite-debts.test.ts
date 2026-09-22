@@ -60,7 +60,7 @@ const TILE = 16;
 const DIRT = TILE_BY_KEY['dirt']!;
 const STONE_T = TILE_BY_KEY['stone']!;
 const PLATFORM = TILE_BY_KEY['platform']!;
-const STONE_ITEM = ITEM_DEFS.find((d) => d.tile === 'stone');
+const STONE_ITEM = ITEM_DEFS.find((d) => d && d.tile === 'stone');   // ★方案 A:守洞
 
 type Shell = { tryPlace(tx: number, ty: number, def: typeof ITEM_DEFS[number]): void };
 

@@ -248,8 +248,10 @@ export interface SaveData {
   };
   /** homelessDespawn = 原版 NPC.homelessDespawn（SpawnHomelessNPC 生成位 :5110 专设、
    *  WorldFile.cs:1741 写/:2932 读 v315+ 随城镇 NPC 段持久化）——夜间清场扫
-   *  UnspawnHomelessNPC（WorldGen.cs:5127-5155）的标的位。旧档缺省 undefined=false */
-  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean; homelessDespawn?: boolean }>;
+   *  UnspawnHomelessNPC（WorldGen.cs:5127-5155）的标的位。旧档缺省 undefined=false。
+   *  kickedOut = ★BJ259 repo 侧标（被玩家踢出,① 轮再安置臂豁免面跨档;原版无对应
+   *  字段——.wld 导出不落,边界登记）。旧档缺省 undefined=false */
+  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean; homelessDespawn?: boolean; kickedOut?: boolean }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
   /** 世界事件态（原版 header 内 party/灯笼夜段,WF:1361-1368/1381-1384;旧档缺省=无派对无预约） */
   events?: {
@@ -475,7 +477,11 @@ export function serializeSave(
   const mapItem = (it: { id: number; stack: number; favorited?: boolean; prefix?: number; placeStyle?: number } | null) =>
     it
       ? {
-        id: it.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[it.id] ?? 0,
+        // ★方案 A（BJ264）：`it.id === 0 ? 0` 特判撤除——重排后 internal 0=原版 netID 0
+        //   语义（0 号位=空洞无 def），恒等表落盘即「写新序」：魔力水晶=internal 109
+        //   → 磁盘 109（旧特判曾把旧 0 号位水晶写成磁盘 0）。旧档磁盘 0 由 SaveFile
+        //   读档边界迁移回水晶（MANA_CRYSTAL_IID）。
+        id: ITEM_STABLE_OF_INTERNAL[it.id] ?? 0,
         stack: it.stack,
         favorited: it.favorited || undefined,
         prefix: it.prefix || undefined,
@@ -572,7 +578,7 @@ export function serializeSave(
     // ★SW-BO1（SW-BL1 P1）：模特姿态 pose 可选字段透传（undefined 旧档自动兼容）
     furniture: meta.furniture?.map((e) => ({
       x: e.x, y: e.y, kind: e.kind,
-      slots: e.slots.map((s) => (s ? { id: s.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[s.id] ?? 0, stack: s.stack, prefix: s.prefix } : null)),
+      slots: e.slots.map((s) => (s ? { id: ITEM_STABLE_OF_INTERNAL[s.id] ?? 0, stack: s.stack, prefix: s.prefix } : null)),
       pose: e.pose,
     })),
     flags: meta.flags,

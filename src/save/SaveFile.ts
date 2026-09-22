@@ -7,7 +7,7 @@ import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { TILE_INTERNAL_OF_STABLE, TILE_BY_KEY } from '../data/tiles';
-import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY } from '../data/items';
+import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
 import type { SavedItem as SavedItemT } from './serialize';
 import { weatherToSave } from '../world/weather/Weather';
@@ -16,6 +16,24 @@ import { furnitureFromSave } from '../world/FurnitureItems';
 
 export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
 export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
+
+// ★方案 A disk-0 迁移锚（BJ264 2026-09-22，阶段 2·唯一真险点）：
+//   旧 serialize `it.id === 0 ? 0` 特判把【旧 internal 0 号位物品】落盘为磁盘 0——
+//   重排前 0 号位 = vi_109 魔力水晶，故 v3+ 稳定域槽位（inventory/banks/chests）
+//   的磁盘 id 0 ≡ 魔力水晶。方案 A 重排后 0 号位 = 原版 netID 0 语义（空洞、无 def），
+//   读档 `.get(0)` 将静默归 0 丢水晶 → 读档边界显式迁移：磁盘 0 → vi_109 内部 id。
+//   新档水晶落盘即 109（serialize 特判已撤），磁盘 0 仅剩 `?? 0` 未知 id 兜底面——
+//   迁移臂把它读成水晶与旧行为（未知→internal 0→水晶）完全同相（零恶化不新增）。
+//   ★v2 直读裸下标分支（`: it` 透传）不挂迁移：v2 id 域=旧版注册序裸下标（既有
+//   「接受破损」政策），磁盘 0 归空洞（0 号位无 def）——比旧漂移（旧 0 号位物品
+//   被读成当期 0 号位=错件幽灵）干净。
+//   ★v3 armor/dye/trash/misc 裸下标段（mapLegacySlot）不在此迁移：其磁盘 0 走
+//   LEGACY_KEY_OF_INTERNAL_V3 快照键链（快照[0]='dirt_block'→退役链 vi_2）——
+//   快照域语义独立且顺序无关，重排零波及。
+const MANA_CRYSTAL_IID: number = (() => {
+  const k = VANILLA_ITEM_KEY_BY_ID[109] ?? 'vi_109_mana_crystal';
+  return ITEM_BY_KEY[k] ?? 0;
+})();
 
 function b64ToBytes(b64: string): Uint8Array {
   const s = atob(b64);
@@ -249,8 +267,10 @@ export function buildSaveParts(world: World): {
  *  loadSaveData 主路径与角色随身态(CharacterStore.getState → playerFromDiskForm)
  *  共用同一映射——保证两条读入路径物品 id 语义一致。 */
 function remapPlayerSlots(p: SaveData['player'], v3: boolean, v4: boolean): SaveData['player'] {
+  // ★方案 A disk-0 迁移（BJ264）：`it.id === 0 ? 0` → `it.id === 0 ? MANA_CRYSTAL_IID`
+  //   （旧档磁盘 0=旧 internal 0=魔力水晶,重排后显式迁移;见 MANA_CRYSTAL_IID 头注）
   const mapItem = (it: SavedItemT | null): SavedItemT | null =>
-    it && v3 ? { ...it, id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
+    it && v3 ? { ...it, id: it.id === 0 ? MANA_CRYSTAL_IID : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
   const mapLegacySlot = (it: SavedItemT | null): SavedItemT | null => {
     if (!it) return it;
     if (v4) return mapItem(it);
@@ -306,7 +326,7 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   const v3 = (data.version ?? 1) >= 3;
   const v4 = (data.version ?? 1) >= 4;
   const mapItem = (it: SavedItemT | null): SavedItemT | null =>
-    it && v3 ? { ...it, id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
+    it && v3 ? { ...it, id: it.id === 0 ? MANA_CRYSTAL_IID : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
   // v3 稳定 id → 内部 id(含 locked 透传);★曾未接线直接用 data.chests——
   // 现有物品 stable≡internal 掩盖,自定义物品进箱即错
   // R21：旧档箱恒 10 槽 → 读档统一补齐到 CHEST_MAX_ITEMS=40（原版 Chest.cs:58

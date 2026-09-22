@@ -41,6 +41,7 @@ describe('同 vid 反查不变量（items.ts 自动循环 vid 去重）', () => 
     const seen = new Set<number>();
     const dups = new Set<number>();
     for (const d of ITEM_DEFS) {
+      if (!d) continue;   // ★方案 A:守洞（for..of 对洞产出 undefined）
       const m = /^vi_(\d+)_/.exec(d.key);
       if (!m) continue;
       const vid = Number(m[1]);

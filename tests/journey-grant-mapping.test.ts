@@ -80,11 +80,12 @@ describe('JourneyBrowser 授予映射（vid→def 全量）', () => {
   });
 });
 
-describe('★哨兵 0 撞合法 def 位回归（2026-09-02 review 实锤）', () => {
-  it('vid 109 魔力水晶=ITEM_DEFS[0]：internalIdOfVid 必须解析出 ≥0 而非吞成失败', () => {
-    expect(ITEM_DEFS[0]?.key).toBe('vi_109_mana_crystal');   // 注册序首位=vid 109
+describe('★哨兵 0 撞合法 def 位回归（2026-09-02 review 实锤;方案 A 恒等域重钉 BJ264 2026-09-22）', () => {
+  it('vid 109 魔力水晶=ITEM_DEFS[109]（恒等;旧序 0 号位已退役为空洞）:internalIdOfVid 解析=109', () => {
+    expect(ITEM_DEFS[0]).toBeUndefined();                    // 方案 A:0 号位=空洞(原版 netID 0 语义)
+    expect(ITEM_DEFS[109]?.key).toBe('vi_109_mana_crystal'); // internal≡vid 恒等
     const id = internalIdOfVid(109);
-    expect(id).toBe(0);                                      // 恰落 0 号位
+    expect(id).toBe(109);                                    // ≥0 且=vid（未注册 vid 仍归 -1 哨兵）
     expect(ITEM_DEFS[id]?.key).toBe('vi_109_mana_crystal');  // 授予保真
   });
 });

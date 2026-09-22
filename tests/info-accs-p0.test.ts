@@ -6,7 +6,7 @@ const IDS = [15,16,17,18,393,395,707,708,709,3036,3037,3084,3095,3096,3099,3102,
 
 it('P0: 27 件信息饰品 acc==1 且物品已登记可装备', () => {
   // statOfInternal 吃内部数组下标——经 key 反查(vi_<vid>_)再验
-  const keyOf = (vid: number) => ITEM_DEFS.findIndex(d => d.vid === vid || (d.key.startsWith(`vi_${vid}_`)));
+  const keyOf = (vid: number) => ITEM_DEFS.findIndex(d => d && (d.vid === vid || (d.key.startsWith(`vi_${vid}_`))));   // ★方案 A:守洞
   for (const vid of IDS) {
     const iid = keyOf(vid);
     expect(iid, `vid ${vid} 未登记`).toBeGreaterThanOrEqual(0);

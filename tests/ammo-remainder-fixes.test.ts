@@ -431,7 +431,7 @@ describe('⑥ 迷你核弹伤害盒（SW-R3 2026-09-03 M-4 重锚:PrepareBombToB
 
 describe('⑦ 坠落星 75 点击消耗（:42602 门无豁免）', () => {
   it('use 分支接线（源码锚）+ 数据面 useStyle4 档 useTime 17', () => {
-    expect(gameSrc).toMatch(/viIdFromKey\(heldDef\.key\) === 75/);
+    expect(gameSrc).toMatch(/heldDef\.vid \?\? -1\) === 75/);   // ★方案 A 重锚(BJ265):vid 直读
     expect(itemCombat(75)?.useTime).toBe(17);
     expect(itemCombat(75)?.useAnimation).toBe(17);
     expect(itemCombat(75)?.consumable).toBe(true);

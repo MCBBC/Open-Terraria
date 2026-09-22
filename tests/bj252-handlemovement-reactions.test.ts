@@ -10,6 +10,9 @@
 //     （:15761-15775 Colliding 特支,25 槽步 2）。
 //   · 普查结构锁：弹力族表成员 + 116 计数位 + 休眠登记面（601/921/540/658/
 //     700/254 等=无载体,详见报告登记表）。
+//   ★S1 勘误（BJ263 2026-09-22）：普查覆盖口径勘误——HandleMovement（Projectile.cs
+//     :17578-19980）全方法=111 支头/179 个 type id 引用（1458 同段逐字节全等）,
+//     此前报告「~50 支」系口径低估;本测结构锁覆盖面不变。
 import { describe, it, expect } from 'vitest';
 import { Arrow } from '../src/entities/Arrow';
 import { GrenadeProj, GlowstickProj, BOUNCY_PROJS } from '../src/entities/WeaponProj';

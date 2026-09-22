@@ -36,7 +36,7 @@
 //  · 原版无逐件飞行动画——唯一反馈=槽位 hue 色带渐隐(SetGlow 300t)+音效 12。
 import rawJson from '../data/vanilla-itemsorting.json';
 import { ITEM_DEFS } from '../data/items';
-import { internalIdOfVanilla, vanillaIdOfItem } from './Shimmer';
+import { internalIdOfVanilla } from './Shimmer';
 import { itemMatchKey } from './QuickStacking';
 
 /** 仓内槽位物品形状（Inventory.InvItem 的引擎视图域） */
@@ -127,7 +127,7 @@ const n = (a: AttrRecord, k: string): number => (typeof a[k] === 'number' ? (a[k
 const b = (a: AttrRecord, k: string): boolean => a[k] !== undefined;
 
 function viewOfSlot(item: NonNullable<SortSlot>): SortView {
-  const vid = vanillaIdOfItem(item.id);
+  const vid = (ITEM_DEFS[item.id]?.vid ?? -1);
   const a = vid >= 0 ? DATA.attrs.get(vid) : undefined;
   const def = ITEM_DEFS[item.id];
   const type = itemMatchKey(item.id);
@@ -421,7 +421,7 @@ function coinsCountCopper(slots: SortSlot[], ignore: number[]): { count: number;
     if (ignore.includes(i)) continue;
     const it = slots[i];
     if (!it || it.stack <= 0) continue;
-    const vid = vanillaIdOfItem(it.id);
+    const vid = (ITEM_DEFS[it.id]?.vid ?? -1);
     if (vid === 71) num += it.stack;
     else if (vid === 72) num += it.stack * 100;
     else if (vid === 73) num += it.stack * 10000;
@@ -463,14 +463,14 @@ function sortCoins(slots: SortSlot[], feedback?: SortFeedback): void {
   for (let j = 0; j < slots.length; j++) {
     const it = slots[j];
     if (!it || it.stack <= 0) continue;
-    const vid = vanillaIdOfItem(it.id);
+    const vid = (ITEM_DEFS[it.id]?.vid ?? -1);
     if (vid >= 71 && vid <= 74) num4++;
   }
   if (num4 < needed) return;                                      // :1749-1751 币槽不足整段放弃
   for (let k = 0; k < slots.length; k++) {                        // 清币（含收藏币,TurnToAir :1753-1759）
     const it = slots[k];
     if (!it || it.stack <= 0) continue;
-    const vid = vanillaIdOfItem(it.id);
+    const vid = (ITEM_DEFS[it.id]?.vid ?? -1);
     if (vid >= 71 && vid <= 74) slots[k] = null;
   }
   let guard = 100;                                                // num5(:1760)
@@ -640,7 +640,7 @@ export function sortPlayerInventory(slots: SortSlot[], feedback?: SortFeedback, 
   let moneyTrough = false;                          // HasItem(905)（:1564,Player.cs:56551 i<58）
   for (let i = 0; i < 58 && i < slots.length; i++) {
     const it = slots[i];
-    if (it && it.stack > 0 && vanillaIdOfItem(it.id) === 905) { moneyTrough = true; break; }
+    if (it && it.stack > 0 && (ITEM_DEFS[it.id]?.vid ?? -1) === 905) { moneyTrough = true; break; }
   }
   if (!moneyTrough) sortCoins(slots, feedback);     // :1566-1568
   sortAmmo(slots, feedback);                        // :1568

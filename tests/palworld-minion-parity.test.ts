@@ -52,7 +52,7 @@ describe('① 四杖 itemCombat 映射（Item.cs:47345-47530）', () => {
   });
   it('combatWeapon 分流：四件全 kind=summon 非哨兵（vanillaItemCombat c.summon 门）', () => {
     for (const vid of [6148, 6149, 6161, 6164]) {
-      const cw = combatWeapon({ key: `vi_${vid}_x` });
+      const cw = combatWeapon({ key: `vi_${vid}_x`, vid });
       expect(cw?.kind, `vid ${vid}`).toBe('summon');
       expect((cw as { sentry?: boolean }).sentry, `vid ${vid}`).toBe(false);
     }

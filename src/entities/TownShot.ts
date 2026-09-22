@@ -76,7 +76,7 @@ const TOWN_DRAW_SPEC: Record<number, TownDrawSpec> = {
   880: { rot: 'upright-mirror', cols: 0, spinRate: 0 }, // AI_183 :40418-40430(34×256 八帧行)
   590: { rot: 'upright', cols: 6, spinRate: 0 },        // 96×20 六列条(AI_112 不赋 rotation)
   950: { rot: 'upright', cols: 0, spinRate: 0 },        // AI_186(rotation 0;★SW-BJ33 2026-09-08 起公主 663 面=PrincessAuraShot 专类（四层脉冲叠画已接）,本条=通用 TownShot 兜底形)
-  586: { rot: 'grow', cols: 0, spinRate: 0 },           // 24×80 竖条 + 生长
+  586: { rot: 'grow', cols: 0, spinRate: 0 },           // 24×80 竖条 + 生长（★BJ256 起树妖面=DryadWardRingShot 专类（十叶双环轨道画）;本条=通用 TownShot 兜底形）
 };
 
 /** 纯函数:弹型 → 绘制规格(未列入走 AI_001 默认 +π/2) */
@@ -536,6 +536,157 @@ export class PrincessAuraShot extends TownShot {
     layer(pink, this.sclInner * 0.95, pinkA);   // :28753 粉 inner
     layer(face, this.scl, whiteA);         // :28754 color6 脸 outer
     layer(pink, this.scl * 0.95, pinkA);   // :28755 粉 outer
+    ctx.restore();
+  }
+}
+
+// ==================== ★BJ256 2026-09-21：树妖净化脉冲 586（AI_111 域内专类） ====================
+// 用户实报「树妖好像不会释放树妖祝福」。定谳=机制面（buff 165 玩家/186 敌怪/自 ward/
+// 600t 施法循环）2026-08-31 台账批已 1:1 且实机探针全绿；真缺口=视觉面：发射端曾把
+// 586 交给通用 TownShot——有靶时坠入 160/663 落点弹支（弹体出生在目标身上）、通用
+// 命中环「命中即亡」（0 伤也 dead）+无 noGrav 坠地撞块杀+寿命 3600——五轴全偏，施法
+// 全程零帧可见（与 SW-BJ33 公主 950 同病灶）。原版面（P.cs:41871-41977 +
+// Main.cs:32404-32440）本类逐项对齐：
+//   · SetDefaults P.cs:6360-6368：26×26/aiStyle111/alpha255/friendly/penetrate=-1；
+//   · 出膛（NPC.cs:55531-55536）：Center+(spriteDirection×16,−2) 原地固定，
+//     velocity = DirectionTo(目标)×num63（20 型 num63=0f 未赋值 → 速度恒 0，
+//     :55394 声明 + :55486 乘），ai1=ownerNPC whoAmI/ai2=townNpcVariationIndex；
+//   · AI_111：owner 消亡/离 ai[0]=14 态 → Kill（:41873-77）；age≥570 Kill（:41973）；
+//     rotation += π/300（age≥500 再加一次：:41879/:41899）；scale=age/100 钳 1
+//     （:41880-41884）；alpha=(int)(255×(1−scale))，≥500 → Lerp(0,255,(age−500)/100)
+//     渐隐（:41885/:41895-41900）；
+//   · 半径（:41886-41900，Main.cs:32407-32419 同式）：出生 300 → 100t 起 Lerp 至
+//     600 → 500t 起 Lerp 至 1200（视觉环/尘/施加域同径）；
+//   · 绘制 Main.cs:32404-32440：内环 10 叶（半径/3，angle=rot+π/5×i）+外环 20 叶
+//     （全半径，angle=(−rot+π/10×j)×2 逆向双速），帧=(age/6+i)%5（24×80 五帧叶，
+//     Frame(1,5)），origin=帧中心（rectangle9.Size()/2），逐叶 Lighting.GetColor
+//     采样 → GetAlpha(×(255−alpha)/255) → A/=2；canvas 等价 = 离屏三步（叶帧 →
+//     multiply 乘色 → destination-in 还 α）+ globalAlpha=f/2（★f 折进乘色 rgb=
+//     f×light/255——XNA 预乘贡献 = tex×light×f×texA×f/2，canvas 通道乘不上 α，
+//     拆「乘色入 rgb + globalAlpha 入 α」两处写入=合成贡献精确等价；tintIconRect
+//     Renderer.ts:1586 同族三步法；像素锁面 imageSmoothing=false）；
+//   · 命中面：penetrate=−1（:14189 `penetrate>0` 减命支不可达=命中不亡）+
+//     damage≡0（num62=0 → GetAttackDamage_ForTownNPC(0×num2)=0，:55471）→ 零战斗
+//     效果；buff/bane 施加面在 TownNPC.updateDryadWardAura（AI_111 :41947-41972
+//     直驱，台账批 2026-08-31）不在弹体——本类 fixedUpdate 不含命中环（通用
+//     TownShot「命中即亡」对 586 是伪影）；
+//   · 尘面（AI_111 :41901-41946）由 updateDryadWardAura 同批 1:1（环缘向心尘 +
+//     30px 尘两支；微光变体 ai2==1 正弦混金尘 70）。
+/** 叶帧离屏乘色 scratch（BJ256;24×16 恒尺寸,tintIconRect Renderer 同族） */
+const dryadLeafScratch = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+
+export class DryadWardRingShot extends TownShot {
+  /** AI_111 ai[0]（弹龄,:41878 逐 t++,≥570 Kill） */
+  private t = 0;
+  /** proj.rotation（:41879 += π/300;age≥500 双加 :41899） */
+  private rot = 0;
+  /** owner 存活门（:41873 `!Main.npc[ai[1]].active || type != 20 || ai[0] != 14f`；
+   *  TownNPC.wardCasting getter 承接 ai[0]==14 面） */
+  private readonly owner: { dead: boolean; wardCasting: boolean };
+
+  /** (cx,cy)=出膛中心（原版 NewProjectile X,Y 语义 = Center+(dir×16,−2)）;
+   *  ai2 = townNpcVariationIndex（微光变体金尘混入比 surface,本类不消费尘面仅存档） */
+  constructor(cx: number, cy: number, ai2: number, owner: { dead: boolean; wardCasting: boolean }) {
+    const def = projectileData(586);
+    const hw = (def?.width ?? 26) / 2;
+    const hh = (def?.height ?? 26) / 2;
+    super(cx - hw, cy - hh, 0, 0, 0, 3, 586, { noGravity: true, ai2 });
+    this.owner = owner;
+  }
+
+  override fixedUpdate(_dt: number, game: GameHooks): void {
+    // 湿段共享体调用面保留（域纪律,PrincessAuraShot 先例）——586 无 ignoreWater
+    //（vanilla-projectiles.json 面）→ 段门照走;无位移 → 拖曳项零消费
+    projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
+      this.projId, !!projectileData(this.projId)?.ignoreWater);
+    if (this.dead) return;
+    // Kill 门 :41873-41877（owner 消亡/离施法态）+ :41973-41976（age≥570）
+    if (this.owner.dead || !this.owner.wardCasting || ++this.t >= 570) {
+      this.dead = true;
+      return;
+    }
+    this.rot += Math.PI / 300;              // :41879
+    if (this.t >= 500) this.rot += Math.PI / 300;   // :41895-41900 内第二加
+    // 位移/重力/命中全无——AI_111 不动弹（velocity 恒 0）+ 落点弹注 :55525-55537
+    // 无 num70 守卫 = 出膛块无条件,弹体 AI 无 tileCollide 消费面
+  }
+
+  /** 视觉半径（Main.cs:32407-32419 = AI_111 :41886-41900 同式;300→600→1200） */
+  private static auraRadius(age: number): number {
+    let r = 300;
+    if (age >= 500) r = 600 + (1200 - 600) * Math.min(1, (age - 500) / 100);
+    else if (age >= 100) r = 300 + (600 - 300) * Math.min(1, (age - 100) / 200);
+    return r;
+  }
+
+  override draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.ctx;
+    if (!ctx) return;
+    const img = projSprite(586);
+    if (!img || img.width <= 0 || img.height <= 0) return;   // 叶帧缺失 → 静默（尘仍可见）
+    const age = this.t;
+    const radius = DryadWardRingShot.auraRadius(age);
+    const scale = Math.min(1, age / 100);                    // proj.scale（:41880-84）
+    // alpha（:41885/:41895-41900）——0=全显,255=全隐;100-500t 恒 0（全显段）
+    let alpha: number;
+    if (age >= 500) alpha = ((age - 500) / 100) * 255;
+    else alpha = 255 * (1 - scale);
+    const f = Math.max(0, Math.min(1, (255 - alpha) / 255)); // GetAlpha 因子（:4319 族）
+    if (f <= 0) return;                                      // 全隐帧免画（age0 拍）
+    const fw = img.width;                                    // 帧 24
+    const fh = img.height / 5;                               // 五帧行 Frame(1,5) → 16
+    const frameIdx = Math.floor(age / 6);                    // num264（:32416）
+    const cx = this.x + this.w / 2;
+    const cy = this.y + this.h / 2;
+    const scratch = dryadLeafScratch;
+    const scratchCtx = scratch?.getContext('2d') ?? null;
+    if (scratch) {
+      if (scratch.width !== fw || scratch.height !== fh) { scratch.width = fw; scratch.height = fh; }
+      scratchCtx!.imageSmoothingEnabled = false;
+    }
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    // 单叶绘制（闭包内 lightAt 采样 → 离屏三步 → 旋转直画）
+    const leaf = (angle: number, frameRow: number, dist: number): void => {
+      const lx = cx + Math.sin(angle) * dist;                // (0,−num263).RotatedBy(angle)
+      const ly = cy - Math.cos(angle) * dist;                //   = (sin·d, −cos·d)+C
+      const lt = r.lighting?.lightAt(Math.floor(lx / 16), Math.floor(ly / 16)) ?? [255, 255, 255];
+      const sx = 0;
+      const sy = frameRow * fh;
+      if (scratch && scratchCtx) {
+        scratchCtx.clearRect(0, 0, fw, fh);
+        scratchCtx.globalCompositeOperation = 'source-over';
+        scratchCtx.drawImage(img, sx, sy, fw, fh, 0, 0, fw, fh);
+        scratchCtx.globalCompositeOperation = 'multiply';
+        scratchCtx.fillStyle = `rgb(${Math.round(lt[0] * f)},${Math.round(lt[1] * f)},${Math.round(lt[2] * f)})`;
+        scratchCtx.fillRect(0, 0, fw, fh);
+        scratchCtx.globalCompositeOperation = 'destination-in';
+        scratchCtx.drawImage(img, sx, sy, fw, fh, 0, 0, fw, fh);
+        scratchCtx.globalCompositeOperation = 'source-over';
+      }
+      ctx.save();
+      ctx.translate(lx, ly);
+      ctx.rotate(angle);
+      ctx.globalAlpha = f / 2;                               // alpha8.A /= 2（:32427/:32438）
+      // ★BJ260-F2（S6）：叶精灵乘 proj.scale——原版 EntitySpriteDraw 尾参 scale
+      //  （:32428/:32439,1458 :32430/:32440 同值）,生长窗 age<100 时 scale=age/100
+      //  （AI_111 :41880-41884）→ 叶从小长满;旧写恒全尺寸=出膛 100t 内叶偏大。
+      //  origin=帧中心（rectangle.Size()/2）→ 缩放围绕中心,canvas 尺寸 ×scale 等价。
+      const lw = fw * scale, lh = fh * scale;
+      if (scratch) ctx.drawImage(scratch, -lw / 2, -lh / 2, lw, lh);
+      else ctx.drawImage(img, sx, sy, fw, fh, -lw / 2, -lh / 2, lw, lh);   // 无 scratch 环境（node 测试）=未乘色直画
+      ctx.restore();
+    };
+    // 内环 10 叶（:32421-32430）：半径/3、angle=rot+π/5×i、帧 (base+i)%5
+    // （(0,−num263).RotatedBy(θ) = (r·sinθ, −r·cosθ)——dist 传正半径,负号已含在 ly 式）
+    for (let i = 0; i < 10; i++) {
+      leaf(this.rot + (Math.PI / 5) * i, (frameIdx + i) % 5, radius / 3);
+    }
+    // 外环 20 叶（:32431-32440）：全半径、angle=(−rot+π/10×j)×2（逆向双速）、帧 (base+j)%5
+    for (let j = 0; j < 20; j++) {
+      const ang = (-this.rot + (Math.PI / 10) * j) * 2;
+      leaf(ang, (frameIdx + j) % 5, radius);
+    }
     ctx.restore();
   }
 }

@@ -83,24 +83,31 @@ describe('拍板#6A:10140 place_v_225_hive_block 读档 remap（BJ114-b 翻案�
   });
 });
 
-describe('D1 稳定 id 闸门（2026-08-21）', () => {
-  it('全 def 必有稳定 id：稳定表覆盖 ITEM_DEFS 全量（存盘写 0 = 读档丢物）', () => {
-    // 表建在 items.ts 文件尾（全部注册之后）。若有人把注册段挪到表构建之后,
-    // 新 def 落在 Uint16Array 长度外 → serialize.ts `?? 0` 存 0 → 读档 id 0 静默丢失
-    // （曾吞敌旗 290+钓鱼 35+具名 5 件,2026-08-21 D1 修复）。
+describe('D1 稳定 id 闸门（2026-08-21;方案 A 恒等域重钉 BJ264 2026-09-22）', () => {
+  it('全 def 必有稳定 id（恒等域:实件 stable≡下标≡读档反查;0 号位=空洞）', () => {
+    // 表建在 items.ts 文件尾（全部注册之后）+ 文件尾 reorder pass 重排为 internal≡stable。
+    // 方案 A 稀疏域：ITEM_DEFS 含洞（0 号位=原版 netID 0 语义等无 def 位）——洞位写向
+    // 表=i（恒等良定义）,读向表无条目（get()=undefined→消费端 ?? 0 兜底）。实件必须
+    // 恒等,否则存盘/读档丢物（D1 事故家族,2026-08-21 曾吞敌旗 290+钓鱼 35+具名 5 件）。
     expect(ITEM_STABLE_OF_INTERNAL.length).toBe(ITEM_DEFS.length);
-    const holes: string[] = [];
+    expect(ITEM_DEFS[0]).toBeUndefined();                 // 0 号位=空洞（原版 netID 0 语义）
+    const bad: string[] = [];
+    let occupied = 0;
     for (let i = 0; i < ITEM_DEFS.length; i++) {
-      if (!ITEM_STABLE_OF_INTERNAL[i]) holes.push(`#${i} ${ITEM_DEFS[i].key}`);
+      const d = ITEM_DEFS[i];
+      if (!d) continue;
+      occupied++;
+      if (ITEM_STABLE_OF_INTERNAL[i] !== i) bad.push(`#${i} ${d.key} 写向≠恒等`);
+      // 读向恒等带唯一有意豁免:10140 蜂巢读档单向漏斗（itemMigration 尾部覆写
+      //   10140→vi_1124 内部 id;拍板#6A/BJ114-b）——恒等域下仅存非恒等映射
+      const wantHive = i === 10140;
+      const got = ITEM_INTERNAL_OF_STABLE.get(i);
+      if (wantHive ? !/^vi_1124_/.test(ITEM_DEFS[got ?? -1]?.key ?? '') : got !== i) {
+        bad.push(`#${i} ${d.key} 反查失败`);
+      }
     }
-    expect(holes, `缺稳定 id ${holes.length} 件: ${JSON.stringify(holes.slice(0, 10))}`).toEqual([]);
-    // 反查表也必须能还原每件(读档链 SaveFile.ts ITEM_INTERNAL_OF_STABLE.get)
-    const unmapped: string[] = [];
-    for (let i = 0; i < ITEM_DEFS.length; i++) {
-      const s = ITEM_STABLE_OF_INTERNAL[i];
-      if (s && ITEM_INTERNAL_OF_STABLE.get(s) === undefined) unmapped.push(`${ITEM_DEFS[i].key}#${s}`);
-    }
-    expect(unmapped, JSON.stringify(unmapped.slice(0, 10))).toEqual([]);
+    expect(bad, JSON.stringify(bad.slice(0, 10))).toEqual([]);
+    expect(occupied).toBe(6856);   // BJ150 普查实件数（注册面变更须有意识重钉）
   });
 
   it('抽检：敌旗/钓鱼族/1457 新三件稳定 id 可存盘并可反查（存读往返语义）', () => {
