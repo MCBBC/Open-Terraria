@@ -541,7 +541,9 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
         game.playSfxWav?.('NPC_Killed_19', 1, e.cx, e.cy);   // :49843 每颗吐音(case4,19)
         if (bub) {
           bub.bInit = true; bub.ai0 = 0; bub.ai1 = 0;          // 预置初速,跳过自初始化
-          bub.ai3 = (80 + Math.random() * 41) / 100;            // :49751 随机 scale
+          // :50003 随机 scale——Main.rand.Next(80,121) 整数域 0.80..1.20（★BJ310 续刀
+          //  整散化:曾 Math.random()*41 连续域=上限 1.21 且非离散,371 scale=ai3 面可见）
+          bub.ai3 = (80 + Math.floor(Math.random() * 41)) / 100;
           bub.x = e.cx + (e.vx / vlen) * ((e.w + 20) / 2) - bub.w / 2;
           bub.y = e.cy + (e.vy / vlen) * ((e.w + 20) / 2) + 45 - bub.h;   // Bottom 锚(同上,R2-F4)
           const ang = Math.atan2(e.vy / vlen, e.vx / vlen) + (Math.PI / 2) * st.dir;
@@ -1317,7 +1319,8 @@ export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 非致命擦伤同样即刻进入引信态(不再有"吃下伤害继续漂浮"的中间相)
   if (e.ai0 !== 1 && e.justHit) { e.ai0 = 1; e.ai1 = 4; }
   if (e.bInit && player && e.ai3 <= 0) { // :35124-35131 初速 = 朝玩家 ±100px 随机偏移 × 11~17.7 速
-    e.ai3 = (80 + Math.random() * 41) / 100;
+    // :35215 随机 scale——Next(80,121) 整数域 0.80..1.20（★BJ310 续刀整散化,同上）
+    e.ai3 = (80 + Math.floor(Math.random() * 41)) / 100;
     const jx = e.cx - player.cx + (Math.random() - 0.5) * 200;
     const jy = e.cy - player.cy + (Math.random() - 0.5) * 200;
     const d = Math.hypot(jx, jy) || 1;

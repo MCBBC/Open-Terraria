@@ -178,29 +178,9 @@ export class GLWorldCompose {
     const w = world.width, h = world.height;
     if (w === 0 || h === 0) { this.lastFail = 'dim'; return false; }
     pipeline.beginFrame(w, h);
-    // ---- Pass1：world × light → FBO('lit')（GLWorldLight.composite:179-232 逐式） ----
-    this.fboLit = pipeline.fbo('lit', w, h);
-    if (!this.fboLit) return false;
-    pipeline.bindTarget(this.fboLit);
-    gl.viewport(0, 0, w, h);
-    gl.useProgram(this.pLit.prog);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.texWorld);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);   // canvas 源预乘直拷（原 :186 同式）
-    const kW = `${w}x${h}`;
-    if (this._texKeyWorld !== kW) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);
-      glStatTexCreate(this.pipeline.statName, w * h * 4);
-      this._texKeyWorld = kW;
-    } else {
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, world);
-    }
-    glStatUpload(this.pipeline.statName, w * h * 4);
-    gl.activeTexture(gl.TEXTURE1);
-    // ★A3 支路：rawLight 在场 → recon pass0 产 FBO('light2')（替代 lightCanvas
-    //   带上传——CPU 4-tap 重建/putImageData/脏带比对/带 blit 四消）;缺省走原路径
     let lightTex: WebGLTexture | null = this.texLight;
+    // ★A3 支路：rawLight 在场 → recon pass0【独立 pre-pass,置于 pass1 状态设置之前】 产 FBO('light2')（替代 lightCanvas
+    //   带上传——CPU 4-tap 重建/putImageData/脏带比对/带 blit 四消）;缺省走原路径
     // ★recon 不可用时必须整体返 false——调用方（Renderer lrecon 分支）在本帧【跳过了
     //  CPU 重建】,若此处回落 texLight 空纹理=黑世界（2026-09-23 实报案第二层）。
     //  返 false → Renderer 继续走 CPU 重建 → A2/旧链照常。
@@ -228,6 +208,27 @@ export class GLWorldCompose {
       lightTex = this.fboLight2.tex;
       gl.activeTexture(gl.TEXTURE1);
     }
+
+    // ---- Pass1：world × light → FBO('lit')（GLWorldLight.composite:179-232 逐式） ----
+    this.fboLit = pipeline.fbo('lit', w, h);
+    if (!this.fboLit) return false;
+    pipeline.bindTarget(this.fboLit);
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(this.pLit.prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.texWorld);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);   // canvas 源预乘直拷（原 :186 同式）
+    const kW = `${w}x${h}`;
+    if (this._texKeyWorld !== kW) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);
+      glStatTexCreate(this.pipeline.statName, w * h * 4);
+      this._texKeyWorld = kW;
+    } else {
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, world);
+    }
+    glStatUpload(this.pipeline.statName, w * h * 4);
+    gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, lightTex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     if (rawLight) { /* recon 已产 uLight 来源;legacy 上传整段跳过 */ } else {

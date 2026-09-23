@@ -196,6 +196,11 @@ export class GLPipeline {
       gl.deleteFramebuffer(f.fbo!);
       glStatDelete(this.statName, texBytes('RGBA8', f.w, f.h));
     }
+    // ★绑定卫生（2026-09-23 反馈环案）:创建时 bindTexture 落【当前激活单元】且顶掉
+    //  原绑定——pass2 建 warped 纹理恰落 unit1（pass1 的 light 绑定位）→ 往 warped
+    //  里画时 unit1=warped 自身=Feedback loop（drawArrays 拒绝/未定义行为）。
+    //  保存/还原激活单元绑定,创建不留痕。
+    const prevTex = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -203,6 +208,7 @@ export class GLPipeline {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, prevTex);
     const fb = gl.createFramebuffer()!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
