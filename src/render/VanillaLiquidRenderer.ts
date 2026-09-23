@@ -286,6 +286,38 @@ const _liqDebug: LiquidDebugState = {
   warp: { active: false, path: 'off', passes: 0 },
 };
 
+// ---- ★BJ317 液体绘制窗（2026-09-23 用户实报"水贴屏幕边缘被渲染成瀑布下流样式,
+// 内移即恢复"定谳落刀）----
+// 【机制】LiquidRenderer 管线 P2 可见液位只跑内窗（vanilla LiquidRenderer.cs
+//  `for (k = 2; k < rectangle.Width - 2; ...)` 内窗遍历），±2 pad 列的
+//  HasVisibleLiquid 恒假（P1 每帧重置 VisibleLiquidLevel=0、P2/trail 不写 pad）→
+//  内窗边缘水格的窗外邻格被当"无可见液体"→ P4 误置 HasLeft/Right/TopEdge=true →
+//  误用边缘变体带（sx=0/32 侧柱纹理 + oy 16/32；表面格还丢 srcY=1280 静态带）。
+//  ★该管线级误判【原版同样存在】（pad 列收敛为假是原版语义,本仓 P1-P7 逐行同构）——
+//  原版靠绘制窗比可见屏大一圈把它掩蔽：GetScreenDrawArea（TileDrawing.cs:6661）
+//  firstTileX = 屏左 -1 - offScreenRange/16（offScreenRange=200=12.5 格,Main.cs:840）、
+//  lastTileX = 屏右 +2 +12.5、屏下 +5 +12.5 → 伪影格深居屏外 13 格,玩家永不可见。
+// 【修】本仓窗口原=可见屏（底缘已有 +5）,伪影恰好落屏缘 → 左/右/上各外扩 MARGIN
+//  格,使误判列/行出屏。MARGIN=4 ≥ 内窗 pad(2)+包围盒 M(3) 需求（液池恰起于屏缘时
+//  bx0=liquid±3 仍盖住屏缘格 ±1 邻域）,且伪影格 ≥1 格出屏。管线本体零触碰。
+export const LIQUID_WINDOW_MARGIN = 4;
+
+/** 液体绘制窗（Renderer.drawLiquids 双 pass 共用；纯函数供单测）。
+ *  返回 [tx0, ty0, tx1, ty1]——比可见屏左/右/上各外扩 LIQUID_WINDOW_MARGIN 格、
+ *  下缘沿用原版 +5（Main.cs:42900-42908 屏下边距,P3 底带不建区出屏）。 */
+export function liquidDrawWindow(
+  camX: number, camY: number, viewW: number, viewH: number, z: number,
+  worldW: number, worldH: number,
+): [number, number, number, number] {
+  const ts = 16;
+  return [
+    Math.max(2, Math.floor((camX - viewW / 2 / z) / ts) - LIQUID_WINDOW_MARGIN),
+    Math.max(2, Math.floor((camY - viewH / 2 / z) / ts) - LIQUID_WINDOW_MARGIN),
+    Math.min(worldW - 3, Math.ceil((camX + viewW / 2 / z) / ts) + LIQUID_WINDOW_MARGIN),
+    Math.min(worldH - 3, Math.ceil((camY + viewH / 2 / z) / ts) + 5),
+  ];
+}
+
 /** WaterWarpCompositor 写入管线态（DebugReport/探针消费） */
 export function setWaterWarpDebug(path: 'gl' | '2d'): void {
   _liqDebug.warp.active = true;

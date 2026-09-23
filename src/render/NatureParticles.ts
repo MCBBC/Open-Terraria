@@ -97,6 +97,10 @@ export class NatureParticles {
   clear(): void { this.leaves.length = 0; this.drips.length = 0; this.clouds.length = 0; this.windCounter = 0; this.airSpots.length = 0; }
   /** Game 每帧绑定当前世界 store */
   bindStore(st: TileStore): void { this.st = st; }
+  /** ★BJ318（2026-09-23）：世界解绑——Game.destroy 调用。模块单例跨世界存活，
+   *  曾只 clear() 粒子不清 st=旧世界 TileStore（小世界 86MB/中世界 196MB）被
+   *  __swNatureParticles.st 直钉,进出世界每轮漏一份（堆快照 retainer 定谳）。 */
+  unbindStore(): void { this.st = null; }
 
   private liquidAt(px: number, py: number): number {
     const st = this.st;

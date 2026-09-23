@@ -9,6 +9,7 @@ import { resolveTouchMode } from './core/input/touchMode';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
+import { isOomLoadError } from './save/LoadErrors';   // ★BJ318：读档 OOM 族判别→可操作文案
 import { builderAccDefaults } from './stats/builderAcc';   // ★SW-FX19:builderAccStatus 回填缺省形
 import { PlayTimeTracker } from './save/PlayTime';
 import { saveClient } from './workers/SaveClient';
@@ -787,7 +788,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       console.error(e);
       ui.hideProgress();
       VUI.setState(null);   // 加载页退场(失败回菜单)
-      alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
+      // ★BJ318（2026-09-23 用户实报「Array buffer allocation failed」）：OOM 族错误
+      //  上抛为可操作自救文案（原始技术消息留 console.error——上行的开发排查面不动）
+      alert(isOomLoadError(String((e as Error)?.message ?? e))
+        ? Lang.text('Mods.SandboxWorld.Toast.LoadOom')
+        : Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
     } finally {
       loadFlowBusy = false;
       menuBg?.setBGLock(false);   // ★IIIII229 ④：读档收场解锁（嵌套 loadFromJson 双解锁幂等）
@@ -855,7 +860,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       console.error(e);
       ui.hideProgress();
       VUI.setState(null);   // 加载页退场(失败回菜单)
-      alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
+      // ★BJ318（2026-09-23 用户实报「Array buffer allocation failed」）：OOM 族错误
+      //  上抛为可操作自救文案（原始技术消息留 console.error——上行的开发排查面不动）
+      alert(isOomLoadError(String((e as Error)?.message ?? e))
+        ? Lang.text('Mods.SandboxWorld.Toast.LoadOom')
+        : Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
     } finally {
       menuBg?.setBGLock(false);   // ★IIIII229 ④：读档收场解锁（成败同途）
     }
@@ -1515,6 +1524,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 由 closeAll→detachGame 摘
       (window as unknown as { __swGame?: Game | null }).__swGame = null;
       currentWorld = null;
+      // ★BJ318（2026-09-23 退出链释放审计补刀,须在 game=null 后——面板 onClosed
+      //  的 `if (game) ui.openInventory()` 在退出路径不得误开背包）：
+      //  ① F6 住房面板挂 document.body 且持 Game 引用（__swHousingPanel）——
+      //    不随 ui.closeAll 拆,用户开过面板再退出=死 Game 整图滞留;
+      //  ② flowGenClient worker 收刀:worker isolate 堆里上一轮读档的 JSON 字符串/
+      //    SaveData/解码中间态大垃圾(百 MB 级)随 isolate 整体释放——下次读档/
+      //    图标预热 ensureWorker 懒重建(SW 预取缓存秒开)
+      (window as unknown as { __swHousingPanel?: { destroy(): void } | null }).__swHousingPanel?.destroy();
+      (window as unknown as { __swHousingPanel?: unknown }).__swHousingPanel = null;
+      flowGenClient?.terminate();
+      flowGenClient = null;
       ui.closeAll();
       showTitle();
     } finally {

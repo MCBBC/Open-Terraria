@@ -357,8 +357,12 @@ export interface WaterWaveDebug {
  *  验证。?waveworker=0 = 逃生门（回主线程模拟,失联看门狗双保险保留）。 */
 const wwWorkerFlag = (() => {
   try {
+    // ★fork bomb 修复（2026-09-23 用户实机 217 workers 实锤）：Worker 上下文
+    //  （无 document）恒 false——转正缺省开的表达式在 worker 里也为 true,
+    //  worker 的 frame() 会 _wwEnsure 自嵌套=每帧消息沿链 spawn 一级。
+    if (typeof document === 'undefined') return false;
     return typeof location === 'undefined' || new URLSearchParams(location.search).get('waveworker') !== '0';
-  } catch { return true; }
+  } catch { return false; }
 })();
 
 class WaterWaveSystem {
@@ -400,6 +404,7 @@ class WaterWaveSystem {
 
   private _wwEnsure(): void {
     if (this._wwSpawned) return;
+    if (typeof document === 'undefined') { this._wwSpawned = true; return; }   // ★worker 上下文禁自嵌套（双保险）
     this._wwSpawned = true;
     try {
       this._ww = new Worker(new URL('../workers/WaveWorker.ts', import.meta.url), { type: 'module' });

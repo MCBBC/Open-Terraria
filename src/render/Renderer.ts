@@ -234,7 +234,7 @@ function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').A
   return { head, body, legs };
 }
 import { WeatherRenderer } from './WeatherRenderer';
-import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled } from './VanillaLiquidRenderer';
+import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample, type WaveFrameInput } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
@@ -3082,6 +3082,11 @@ export class Renderer {
 
   /** GPU 看门狗(2026-08-18 用户实报"关掉另一窗口也不恢复"):熔断链终止后
    *  没有任何机制再触发恢复——低频巡检(20s),非熔断期发现死上下文即静默重建 */
+  /** ★BJ318：GPU 看门狗定时器句柄——dispose 必摘。曾裸 setInterval 无句柄：
+   *  闭包持 this（Renderer）→ renderer.world → 旧世界 TileStore；Game.destroy
+   *  只拆画布不清本定时器 = 退世界后整个 Renderer+世界格数组被 20s interval
+   *  永久钉死（进出世界每轮一份，BJ318 泄漏审计与 memSentinel 同族第二钉）。 */
+  private gpuWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   installGpuHealthWatchdog(): void {
     // 僵尸画布三振(2026-08-19 第四场双开:GPU 进程活着,但主画布后备 1088×864
     // 连败 7 次——内核预算见底时新画布的后备分不出来,重建即死 = tab 永不恢复。
@@ -3090,7 +3095,7 @@ export class Renderer {
     // → SHM 后备,零 IOSurface,分配必成,页面至少活着)
     let zombieStrikes = 0;
     let lastRecreateAt = 0;
-    setInterval(() => {
+    this.gpuWatchdogTimer = setInterval(() => {
       if (this.gpuDegraded || !this.canvas.isConnected) return;
       const mainLost = (this.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.() ?? false;
       if (mainLost) {
@@ -3354,6 +3359,9 @@ export class Renderer {
    *  window 强引用导致整个旧 Game(含 ChunkCache 数百张 chunk 画布)无法回收,
    *  连续多次读档累积显存 → contextlost 风暴(2026-08-10 trace 实证) */
   dispose(): void {
+    // ★BJ318：GPU 看门狗 interval 先摘（闭包持 this——留到后面=整个 Renderer
+    //  连同 world.store 引用被永久钉死,见 gpuWatchdogTimer 注）
+    if (this.gpuWatchdogTimer) { clearInterval(this.gpuWatchdogTimer); this.gpuWatchdogTimer = null; }
     window.removeEventListener('resize', this.onResize);
     this.canvas.width = 0; this.canvas.height = 0;
     this.lightCanvas.width = 0; this.lightCanvas.height = 0;
@@ -5400,13 +5408,9 @@ export class Renderer {
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
     // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）。
     // isBackground：背景 pass（墙层之前，不透明）或前景 pass（实体之后，0.6）
-    const ts = TILE;
-    const tx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
-    const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
-    const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
-    // 底边 +5 行（原版 Main.cs:42900-42908 屏下 +5/+4 边距）：P3 不处理窗口底部 10 行，
-    // 外扩后未构建带落在屏幕外，防止视口底缘液体类型错画
-    const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
+    // ★BJ317：窗口改走 liquidDrawWindow 单源——左/右/上外扩 4 格（底缘保持原版 +5），
+    //   把管线级内窗边缘误判（边缘变体带）推到屏外，见 liquidDrawWindow 头注。
+    const [tx0, ty0, tx1, ty1] = liquidDrawWindow(cam.x, cam.y, viewW, viewH, z, world.w, world.h);
     // ==== 全屏扭曲管线（原版 waterTarget/backWaterTarget 直画 + EndCapture 全屏
     //      FilterWaterDistortion 语义；激活 = WaveQuality>0 + 噪声就绪 + 非 CPU 渲染）====
     // ★水体本体不扭（Main.cs:61748/:61635 直画）：背景水直画世界层（墙/方块之前）；

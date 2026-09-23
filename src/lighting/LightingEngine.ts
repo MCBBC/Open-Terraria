@@ -9,6 +9,8 @@ import { AREA_PADDING, globalBrightness, NON_VISIBLE_PADDING } from './lightTabl
 import { FlickerClock } from './SkyColor';
 import { LightMap } from './LightMap';
 import { PerFrameLight, ScannerWorld, TileLightScanner } from './TileLightScanner';
+import { LightWorkerLink, lightWorkerFlag } from './LightWorkerLink';
+import { buildEngineSnapshot, type DecayArgs, type LightSnapshotMsg } from './LightWorkerProtocol';
 
 /** 引擎依赖的最小世界结构(World 结构兼容;单测可注入 fake) */
 export interface LightingWorld {
@@ -54,12 +56,32 @@ export class LightingEngine {
   private scanner: TileLightScanner;
   private perFrame: PerFrameLight[] = [];
   private liqTick = 0;
+  /** ★C9 光照 Worker 门面（?lightworker=1,缺省关=null）：快照发 worker、结果回填
+   *  公共面;失联/异常 → 置 null 永久回落本地。镜像引擎在 worker 线程（LightWorker.ts） */
+  private _lw: LightWorkerLink | null = null;
+  /** ★C9：Game 每帧 updateLightDecay 实参捕获（noteDecayArgs）——lightTables 模块级
+   *  衰减/shimmer 状态无外部 setter,worker 侧按同参重放 updateLightDecay 同步演化 */
+  private _lwDecay: DecayArgs | null = null;
 
   constructor(world: LightingWorld) {
     this.world = world;
     this.scanner = new TileLightScanner(this.flicker);
     world.store.onTileChanged(() => { this.dirty = true; });
     world.store.onLiquidChanged(() => { this.liquidDirty = true; });
+    // ★C9：惰性建链（Worker 首帧 compute 才真正 spawn）;旗关恒 null=本地路径零分叉
+    if (lightWorkerFlag) this._lw = new LightWorkerLink();
+  }
+
+  /** ★C9：Game 在每帧 updateLightDecay(...) 后调用（同参捕获,worker 重放同步） */
+  noteDecayArgs(waterStyle: number, nightVision: boolean, blackout: boolean, blind: boolean,
+    opts: { headcovered?: boolean; inShimmer?: boolean; ftwDecay?: 'queen' | 'temple' | 'dungeon' }): void {
+    this._lwDecay = { waterStyle, nightVision, blackout, blind, opts };
+  }
+
+  /** ★C9：实例弃用前拆除 Worker 链（Game.destroy 调用）——不拆则跨世界旧 worker
+   *  持续自跑（泄漏 + 双份 CPU） */
+  dispose(): void {
+    if (this._lw !== null) { this._lw.dispose(); this._lw = null; }
   }
 
   /**
@@ -89,6 +111,34 @@ export class LightingEngine {
   /** 每帧调用。dayFactor 参数弃用(天空色改由 clock 内部推导;旧调用方签名兼容)。 */
   compute(_dayFactor: number): void {
     if (this.rw === 0) return;
+    // ---- ★C9 光照 Worker 分支（?lightworker=1）----
+    // 快照（区域 ± padding tile 切片 + 时钟/天空/衰减/点光参数）发 worker,结果回填
+    // 公共面。三态：warmup(结果未达)=快照+本地双跑兜底(首帧不黑屏) → live=worker
+    // only(本地 scan/blur 整段跳过,主线程拿回 7-12%) → 失联看门狗 2s/异常回执=
+    // dispose+_lw 置 null 永久回落本地(dirty 强制首帧全周期)。时钟仍在主线程 tick
+    // (HUD/渲染层 cursorScale/mouseTextColor 消费面照常);快照捕获 pre-tick 状态,
+    // worker 侧恢复后由其 compute 的 tick 推进到同态(位级同相)。
+    const lw = this._lw;
+    if (lw !== null) {
+      if (!lw.healthy()) {
+        lw.dispose();
+        this._lw = null;
+        this.dirty = true;   // 回落后首帧强制全周期
+      } else {
+        const live = lw.isLive();
+        // 快照区域须取本帧 ensureRegion 现值——applyPending 会把公共面区域回拨成
+        // worker 上一帧区域(1 帧滞后;渲染读 (区域,数组) 恒成对一致),先捕获再回填。
+        const reg = { rx: this.rx, ry: this.ry, rw: this.rw, rh: this.rh };
+        lw.applyPending(this);
+        lw.send(this.buildWorkerSnapshot(reg));
+        if (live) {
+          this.flicker.tick();        // HUD/渲染层闪烁消费面照常推进
+          this.perFrame.length = 0;   // 点光已随快照带走(本地 processScan 不再跑)
+          return;
+        }
+        // warmup：快照已发,本地照算兜底——tick 交给下方本地路径(勿双推进)
+      }
+    }
     this.flicker.tick();
 
     if (this.dirty) {
@@ -103,6 +153,22 @@ export class LightingEngine {
     }
     // 空闲:每 tick 一态(完整周期 4 tick,原版 4 帧节奏)
     this.step();
+  }
+
+  /** ★C9：组装每帧快照（区域捕获值 + 点光/时钟/天空/衰减;tile 切片由门面暂存切出）。
+   *  读表面清单见 LightWorkerProtocol 头注——快照协议的契约边界。 */
+  private buildWorkerSnapshot(reg: { rx: number; ry: number; rw: number; rh: number }): Omit<LightSnapshotMsg, 'op' | 'seq'> {
+    const lw = this._lw!;
+    const tiles = lw.buildSlice(this.world.store, reg.rx, reg.ry, reg.rw, reg.rh);
+    return buildEngineSnapshot({
+      rx: reg.rx, ry: reg.ry, rw: reg.rw, rh: reg.rh,
+      world: this.world,
+      flicker: this.flicker,
+      heldLight: this.heldLight,
+      buffLights: this.buffLights,
+      perFrame: this.perFrame,
+      decay: this._lwDecay,
+    }, tiles, 0);
   }
 
   /** 快进:同 tick 完成 Scan→Blur→Present(状态回 0) */

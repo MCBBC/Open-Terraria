@@ -6453,10 +6453,15 @@ export class Game implements GameHooks {
    *  vimages 数)——snap() 一起看。window.__swMemLog 常开,?mlog=0 关 */
   private memSamplePrev = 0;
   private memRloadPrev = 0;
+  /** ★BJ318：memSentinel 定时器句柄——destroy 必摘。曾裸 setInterval 无句柄：
+   *  闭包持有 this（Game）→ 退出世界后死 Game 整图（World TileStore ~86-196MB+
+   *  实体+玩家）被 5s interval 永久钉死,进出世界一轮漏一份（探针实测小世界
+   *  ~103MB/轮阶梯爬升,4 轮 177→637MB——用户 tab 1.7GB 的主因）。 */
+  private memSentinelTimer: ReturnType<typeof setInterval> | null = null;
   attachMemSentinel(): void {
     if (new URLSearchParams(location.search).has('mlog')) return;
     const perf = performance as unknown as { memory?: { usedJSHeapSize: number } };
-    setInterval(() => {
+    this.memSentinelTimer = setInterval(() => {
       if (!perf.memory) return;
       const now = perf.memory.usedJSHeapSize / 1048576;
       const rloads = this.atlas ? this.atlas.vimages.size : 0;
@@ -7876,6 +7881,7 @@ export class Game implements GameHooks {
     window.removeEventListener('focus', this.onWindowFocus);
     Sfx.mpProbe = null;   // 失焦闸 MP 豁免探针随实例摘除（构造期接线）
     this.input.destroy();
+    this.lighting?.dispose();   // ★C9：光照 Worker 链拆除（?lightworker=1 时防跨世界 worker 泄漏双跑）
     this.chunks?.dispose();
     this.renderer.dispose();
     this.renderer.canvas.remove();
@@ -7890,6 +7896,36 @@ export class Game implements GameHooks {
     this.smartCursor.wanted = false;
     this.smartCursor.showing = false;
     VUI.smartCursorOn = false;
+    // ★BJ318（2026-09-23 退出链释放审计）：三处死实例钉死面随 destroy 摘除——
+    //  ① memSentinel 5s interval（闭包持 this=Game；不摘=死 Game 整图含 World
+    //    TileStore 永久滞留，进出世界每轮一份——探针实测小世界 ~103MB/轮阶梯,
+    //    4 轮 177→637MB，用户 tab 1.7GB 读档 OOM 主因）
+    if (this.memSentinelTimer) { clearInterval(this.memSentinelTimer); this.memSentinelTimer = null; }
+    //  ② __swRenderLog 全局调试句柄（探针消费面，持 Game 引用；回标题仍可达=
+    //    钉死最近一个死 Game。下次 afterWorldLoad 的 attachRenderLogHandle 重挂）
+    (globalThis as unknown as { __swRenderLog?: unknown }).__swRenderLog = null;
+    //  ③ 本实例 worldGen worker（newWorld 每局各建一个 genClient——不 terminate 则
+    //    worker isolate 连同堆里上一局 generate 的 JSON/SaveData 大垃圾跨局滞留）
+    this.genClient?.terminate();
+    this.genClient = null;
+    //  ④ window 调试句柄族（★BJ318 堆快照定谳的【主钉】——每次进世界覆写挂载、
+    //    退世界不摘=死实例钉死族。探针实测:3 轮进出堆里 6 个 Game/TileStore,
+    //    retainer 链 __swRec@Window → BehaviorRecorder.tickSource 闭包 → this(Game)
+    //    → world.store。__swAudioRec 同构（wire 闭包）;__swMapDebug 闭包直捕 this;
+    //    __swResearch/__swAchievements 实例引用同摘）
+    const dbg = window as unknown as {
+      __swRec?: unknown; __swAudioRec?: unknown; __swResearch?: unknown;
+      __swMapDebug?: unknown; __swAchievements?: unknown;
+    };
+    if (dbg.__swRec === this.recorder) dbg.__swRec = null;
+    if (dbg.__swAudioRec === this.audioRec) dbg.__swAudioRec = null;
+    if (dbg.__swResearch === this.research) dbg.__swResearch = null;
+    if (dbg.__swAchievements === this.achievements) dbg.__swAchievements = null;
+    dbg.__swMapDebug = null;
+    //  ⑤ natureParticles 模块单例的 bindStore 引用——st 持旧世界 TileStore
+    //    （小世界 86MB/中世界 196MB;快照 retainer 链:__swNatureParticles.st →
+    //    TileStore 直钉,destroy 曾只 clear() 粒子不清 store 引用）
+    natureParticles.unbindStore();
   }
 
   /** 渲染锁帧时间戳(帧率上限用;逻辑 tick 恒 60Hz 不受影响) */
@@ -11100,14 +11136,20 @@ export class Game implements GameHooks {
         : this.scene?.zoneTemple ? 'temple'
           : this.scene?.zoneDungeon ? 'dungeon' : undefined;
     }
-    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl)
-      || player.equipStats.nightVision,   // 夜视头盔 3109/超亮头盔 4008 甲面旗（:13408-11,组A 批）
-      this.blackout || player.buffs.has(BuffType.Blackout),   // buff 80 双源（:190-194）
-      player.buffs.has(BuffType.Darkness), {                  // buff 22 blind（:185-189 + GlobalBrightness 1.0）
-        headcovered: player.buffs.obstructed,                 // buff 163（Player.cs:11421;LightingEngine.cs:199-203）
-        inShimmer: !!this.scene?.zoneShimmer,                 // SceneState.UpdateShimmer :338-360
-        ftwDecay,
-      });
+    const lwDecayWater = this.renderer.waterStyle;
+    const lwDecayNV = player.buffs.has(BuffType.NightOwl)
+      || player.equipStats.nightVision;   // 夜视头盔 3109/超亮头盔 4008 甲面旗（:13408-11,组A 批）
+    const lwDecayBlackout = this.blackout || player.buffs.has(BuffType.Blackout);   // buff 80 双源（:190-194）
+    const lwDecayBlind = player.buffs.has(BuffType.Darkness);                  // buff 22 blind（:185-189 + GlobalBrightness 1.0）
+    const lwDecayOpts = {
+      headcovered: player.buffs.obstructed,                 // buff 163（Player.cs:11421;LightingEngine.cs:199-203）
+      inShimmer: !!this.scene?.zoneShimmer,                 // SceneState.UpdateShimmer :338-360
+      ftwDecay,
+    };
+    updateLightDecay(lwDecayWater, lwDecayNV, lwDecayBlackout, lwDecayBlind, lwDecayOpts);
+    // ★C9 光照 Worker：同参捕获（?lightworker=1 时 worker 侧按同参重放 updateLightDecay
+    // 同步 DECAY_*/globalBrightness/shimmer 状态机;旗关时捕获即无消费方,零开销）
+    this.lighting.noteDecayArgs(lwDecayWater, lwDecayNV, lwDecayBlackout, lwDecayBlind, lwDecayOpts);
     // 手持光源（原版 ItemCheck_EmitHeldItemLight Player.cs:48990）：
     // (Torches[type] && !wet) || WaterTorches[type] 才发光——入水熄灭；
     // 颜色 = TorchID.TorchColor(torchId)（TorchID.cs _lights 全表：

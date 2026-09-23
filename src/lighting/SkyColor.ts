@@ -217,6 +217,33 @@ let frameBiome: BiomeInfluence | null = null;
 export function setFrameBiome(v: BiomeInfluence | null): void {
   frameBiome = v;
 }
+
+/** ★C9 光照 Worker 快照读口（2026-09-23;只读零行为）：skySeed 在 worker 模块实例里
+ *  读到的全部模块级帧状态,经本口捕获、applySkyFrameState(LightWorkerProtocol)在
+ *  worker 侧按原 setter 重放——漏一项=worker 天空光种子错值（云暗/群系/晨昏/闪电/
+ *  atmo/remix 黑天幕/dontStarve/极光八项全量）。对象通道浅拷贝（postMessage 克隆
+ *  前防主线程原地改写）。 */
+export function getSkyFrameState(): {
+  cloudDim: number; biome: BiomeInfluence | null;
+  horizon: { sunrise: number; sunset: number; phase: number } | null;
+  remixWorld: boolean; remixBlackSky: boolean; dontStarve: boolean;
+  lightning: number; atmo: number;
+  aurora: AuroraFrameState | null;
+} {
+  return {
+    cloudDim: frameCloudDim,
+    biome: frameBiome ? { ...frameBiome } : null,
+    horizon: frameHorizon ? { ...frameHorizon } : null,
+    remixWorld: frameRemixWorld,
+    remixBlackSky: frameRemixBlackSky,
+    dontStarve: frameDontStarve,
+    lightning: frameLightning,
+    atmo: frameAtmo,
+    aurora: frameAurora
+      ? { rgb: [frameAurora.rgb[0], frameAurora.rgb[1], frameAurora.rgb[2]], opacity: frameAurora.opacity, phase: frameAurora.phase }
+      : null,
+  };
+}
 /** 群系块作用到 bgColor(:63002-63228 逐式;序:墓园→腐化→猩红→丛林→蘑菇,
  *  在云暗后/月相地板前)。in place 修改。 */
 function applyBiomeToBg(bg: [number, number, number], bio: BiomeInfluence): void {
