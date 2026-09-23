@@ -11,6 +11,7 @@ import { ITEM_DEFS } from '../data/items';
 import { TILE } from '../core/constants';
 import { liquidDebugState } from '../render/VanillaLiquidRenderer';
 import { wwWorkerStats } from '../render/WaterWaves';
+import { lightWorkerStats } from '../lighting/LightWorkerLink';
 import { waterWaves, waveTexReady as waterWavesTexReady } from '../render/WaterWaves';
 import { autoFrameAt } from '../render/VanillaTiler';
 import { TILE_ANIM_RATE, animFrameIdx, animYOffset, tileAnim } from '../render/TileAnim';
@@ -946,6 +947,13 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       waveWorker: (() => {
         try {
           return { ...wwWorkerStats(), flag: !/waveworker=0/.test(globalThis.location?.search ?? '') };
+        } catch { return { on: false, flag: false }; }
+      })(),
+      // ★C9 诊断面（2026-09-24 遗留接线）:光照 Worker 运行态——posted/results
+      //  =快照发出/回达（1:1=健康,差值持续增大=丢包需报障）,falls=失联回落计数
+      lightWorker: (() => {
+        try {
+          return { ...lightWorkerStats(), flag: !/lightworker=0/.test(globalThis.location?.search ?? '') };
         } catch { return { on: false, flag: false }; }
       })(),
       // 资产健康(2026-08-13 运行期防线):失败的 vanilla/UI 贴图(404 终态)与

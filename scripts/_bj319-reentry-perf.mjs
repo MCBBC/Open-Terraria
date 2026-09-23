@@ -1,8 +1,10 @@
-// BJ319 探针：掉帧残留四相位对比（用户实报：杀怪多→掉帧；重进不恢复；刷新恢复）。
-// 相位：P0 新页进世界(基线) → P1 杀怪堆积(100敌怪杀掉,drops/gore/尘在场) →
+// BJ319 探针 v2：掉帧残留四相位对比（用户实报：杀怪多→掉帧；重进不恢复；刷新恢复）。
+// 相位：P0 新页进世界(基线) → P1 杀怪堆积(杀 162,drops/gore/尘在场) →
 //        P2 同页 save&quit+重进 → P3 page.reload 后重进。
-// 每相位双测：natural(自然态) + fixed(固定合成负载=60 活敌怪,不杀)——把「残留税」
-// 与场景内容解耦。rAF 包装统计 JS/帧+帧距；Performance.getMetrics 拿 nodes/listeners/heap。
+// 每相位双测：natural(自然态) + fixed(固定合成负载=60 活敌怪)——把「残留税」与场景内容解耦。
+// 指标：①游戏真帧 JS 耗时（rAF 包装,过滤 <1ms 空拍——游戏 60Hz 固定步进自限速,
+//        非真帧早退 0.36ms 会污染均值）②CDP Tracing 3s：Commit 均值/帧 + BMF fps
+//       （对齐用户 trace 002132 的病灶指标）③canvases/nodes/listeners/heap/实体桶。
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -12,28 +14,34 @@ const LIVE_N = 60;
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new',
   defaultViewport: { width: 1280, height: 800 },
-  args: ['--disable-frame-rate-limit', '--disable-gpu-vsync', '--hide-scrollbars'],
+  args: ['--hide-scrollbars'],
 });
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e?.message ?? e)));
 // BJ280 UnloadGuard:局内刷新会弹 beforeunload 原生对话框——自动接受
 page.on('dialog', (d) => { void d.accept(); });
+// 失焦暂停(playWhenUnfocused 默认关=失焦即暂停):headless 页未聚焦会整局冻结
+const cdp0 = await page.createCDPSession();
+await cdp0.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
+await page.bringToFront().catch(() => {});
 
-// rAF 包装:统计游戏主循环回调 JS 耗时与帧距
+// rAF 包装:只统计真帧(回调 ≥1ms)——空拍早退不计
 await page.evaluateOnNewDocument(() => {
   const orig = window.requestAnimationFrame.bind(window);
-  const stats = { n: 0, jsTotal: 0, jsMax: 0, intervals: [], lastTs: 0, mark: 0 };
+  const stats = { mark: 0, real: 0, jsTotal: 0, intervals: [], lastRealTs: 0 };
   window.__frameStats = stats;
-  window.__frameMark = () => { stats.mark = stats.n; stats.intervals.length = 0; };
+  window.__frameMark = () => { stats.mark = stats.real; stats.intervals.length = 0; stats.lastRealTs = 0; };
   window.requestAnimationFrame = (cb) => orig((ts) => {
     const t0 = performance.now();
     try { cb(ts); } finally {
       const dt = performance.now() - t0;
-      if (stats.n >= stats.mark) {
-        stats.jsTotal += dt; if (dt > stats.jsMax) stats.jsMax = dt;
-        if (stats.lastTs) stats.intervals.push(ts - stats.lastTs);
-        stats.lastTs = ts; stats.n++;
+      const s = window.__frameStats;
+      if (dt >= 1 && s.real >= s.mark) {
+        s.real++;
+        s.jsTotal += dt;
+        if (s.lastRealTs) s.intervals.push(ts - s.lastRealTs);
+        s.lastRealTs = ts;
       }
     }
   });
@@ -51,21 +59,8 @@ async function enterWorld() {
 }
 
 async function quitAndReenter() {
-  // Esc 打开暂停面板（可能先关背包/地图,按最多 4 次）
-  for (let i = 0; i < 4; i++) {
-    await page.keyboard.press('Escape');
-    await new Promise((r) => setTimeout(r, 350));
-    const has = await page.evaluate(() => !!document.querySelector('.sw-pause-panel'));
-    if (has) break;
-  }
-  const clicked = await page.evaluate(() => {
-    const btns = [...document.querySelectorAll('.sw-pause-panel .sw-pause-btn')];
-    if (!btns.length) return false;
-    btns[btns.length - 1].click(); // bQuit 恒最后
-    return true;
-  });
-  if (!clicked) throw new Error('pause quit button not found');
-  // 等 quitToMenu 保存完成回标题（__swGame 置 null）
+  // 直调探针桥（含保存链;比 UI 点击链稳）
+  await page.evaluate(() => window.__swFlow.quitToMenu());
   await page.waitForFunction(() => !window.__swGame, { timeout: 120000 });
   await new Promise((r) => setTimeout(r, 1500));
   await page.waitForSelector('select', { timeout: 60000 });
@@ -91,7 +86,7 @@ async function spawnLive(n) {
       const id = ids[i % ids.length];
       const x = p.x + ((i % 20) - 10) * 48;
       const y = p.y - 96 - Math.floor(i / 20) * 48;
-      const e = g.spawnNpcByVanilla(id, x, y);
+      const e = g.spawnEnemy('v_' + id, x, y);
       if (e) added++;
     }
     return added;
@@ -121,16 +116,42 @@ async function bucketCounts() {
   });
 }
 
-async function measure(label, secs = 3.5) {
-  await page.evaluate(() => { window.__frameMark(); if (window.__swGame?.player) { window.__swGame.player.maxHp = 1000000; window.__swGame.player.hp = 1000000; } });
+/** CDP Tracing secs 秒,聚合主线程 Commit/BMF */
+async function traceCommit(secs = 3) {
+  const cdp = await page.createCDPSession();
+  const evs = [];
+  cdp.on('Tracing.dataCollected', (e) => { if (Array.isArray(e.value)) evs.push(...e.value); else evs.push(e.value); });
+  const done = new Promise((res) => cdp.once('Tracing.tracingComplete', res));
+  await cdp.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline.frame' });
   await new Promise((r) => setTimeout(r, secs * 1000));
+  await cdp.send('Tracing.end');
+  await done;
+  try { await cdp.detach(); } catch { /* ignore */ }
+  const bmfByTid = new Map();
+  const commitByTid = new Map();
+  for (const ev of evs) {
+    if (ev.name === 'BeginMainThreadFrame') bmfByTid.set(ev.tid, (bmfByTid.get(ev.tid) ?? 0) + 1);
+    else if (ev.name === 'Commit' && typeof ev.dur === 'number') {
+      const a = commitByTid.get(ev.tid) ?? [0, 0];
+      a[0] += ev.dur / 1000; a[1] += 1;
+      commitByTid.set(ev.tid, a);
+    }
+  }
+  let mt = -1, best = 0;
+  for (const [tid, n] of bmfByTid) if (n > best) { best = n; mt = tid; }
+  const [cSum, cN] = commitByTid.get(mt) ?? [0, 0];
+  return { fps: best / secs, commitMsPerF: cN ? +(cSum / cN).toFixed(2) : -1, commits: cN };
+}
+
+async function measure(label) {
+  await page.evaluate(() => { window.__frameMark(); if (window.__swGame?.player) { window.__swGame.player.maxHp = 1000000; window.__swGame.player.hp = 1000000; } });
+  const tr = await traceCommit(3);
   const fs = await page.evaluate(() => {
     const s = window.__frameStats;
-    return { n: s.n - s.mark, jsAvg: s.jsTotal / Math.max(1, s.n - s.mark), intervals: s.intervals.slice() };
+    return { real: s.real - s.mark, jsAvg: s.jsTotal / Math.max(1, s.real - s.mark), intervals: s.intervals.slice() };
   });
-  const iv = fs.intervals.filter((v) => v > 0 && v < 1000);
-  const fps = 1000 / median(iv);
-  const natural = await bucketCounts();
+  const realFps = fs.intervals.length ? +(1000 / median(fs.intervals.filter((v) => v > 0 && v < 400))).toFixed(1) : -1;
+  const buckets = await bucketCounts();
   const m = await page.evaluate(() => ({
     canvases: document.querySelectorAll('canvas').length,
     canvasPx: [...document.querySelectorAll('canvas')].reduce((s, c) => s + c.width * c.height, 0),
@@ -143,11 +164,11 @@ async function measure(label, secs = 3.5) {
   await cdp.detach();
   const g = (n) => metrics.find((x) => x.name === n)?.value ?? -1;
   return {
-    label, fps: +fps.toFixed(1), jsMs: +fs.jsAvg.toFixed(2),
-    frameMs: +median(iv).toFixed(2), nativeMs: +(median(iv) - fs.jsAvg).toFixed(2),
+    label, commitFps: tr.fps, commitMsPerF: tr.commitMsPerF,
+    realFrames: fs.real, jsMs: +fs.jsAvg.toFixed(2), realFps,
     canvases: m.canvases, canvasMPx: +(m.canvasPx / 1e6).toFixed(1), domNodes: m.domNodes,
     listeners: Math.round(g('JSEventListeners')), heapMB: +(g('JSHeapUsedSize') / 1e6).toFixed(0),
-    buckets: natural,
+    buckets,
   };
 }
 
@@ -155,23 +176,22 @@ async function measure(label, secs = 3.5) {
 const rows = [];
 const show = (r) => {
   rows.push(r);
-  console.log(`${r.label.padEnd(26)} fps=${String(r.fps).padStart(6)} js=${String(r.jsMs).padStart(6)}ms native=${String(r.nativeMs).padStart(6)}ms frame=${String(r.frameMs).padStart(7)}ms cv=${String(r.canvases).padStart(3)}(${r.canvasMPx}MPx) nodes=${String(r.domNodes).padStart(5)} lis=${String(r.listeners).padStart(5)} heap=${String(r.heapMB).padStart(5)}MB buckets=${JSON.stringify(r.buckets)}`);
+  console.log(`${r.label.padEnd(24)} traceFps=${String(r.commitFps).padStart(5)} commit=${String(r.commitMsPerF).padStart(5)}ms/f realFrames=${String(r.realFrames).padStart(4)} js=${String(r.jsMs).padStart(6)}ms realFps=${String(r.realFps).padStart(5)} cv=${String(r.canvases).padStart(3)}(${r.canvasMPx}MPx) nodes=${String(r.domNodes).padStart(5)} lis=${String(r.listeners).padStart(5)} heap=${String(r.heapMB).padStart(5)}MB ${JSON.stringify(r.buckets)}`);
 };
 
 await enterWorld();
 await makeImmovablePlayer();
 show(await measure('P0 fresh:natural'));
-// 固定负载 60 活敌
 const added0 = await spawnLive(LIVE_N);
 await new Promise((r) => setTimeout(r, 1200));
 show(await measure(`P0 fresh:fixed${added0}`));
 
-// P1 杀怪堆积: 杀掉全部（含固定负载 60）+ 再杀 100 新刷的
+// P1 杀怪堆积
 const killed1 = await killAllEnemies();
 const added1 = await spawnLive(100);
 await new Promise((r) => setTimeout(r, 1200));
 const killed2 = await killAllEnemies();
-await new Promise((r) => setTimeout(r, 2500)); // drops/gore/尘沉降
+await new Promise((r) => setTimeout(r, 2500));
 show(await measure(`P1 killed${killed1 + killed2}:natural`));
 const addedP1 = await spawnLive(LIVE_N);
 await new Promise((r) => setTimeout(r, 1200));
@@ -193,9 +213,6 @@ const added3 = await spawnLive(LIVE_N);
 await new Promise((r) => setTimeout(r, 1200));
 show(await measure(`P3 reload:fixed${added3}`));
 
-console.log('\n===== BJ319 四相位帧成本对比 =====');
-for (const r of rows) {
-  console.log(`${r.label.padEnd(26)} fps=${String(r.fps).padStart(6)} js=${String(r.jsMs).padStart(6)}ms native=${String(r.nativeMs).padStart(6)}ms frame=${String(r.frameMs).padStart(7)}ms cv=${String(r.canvases).padStart(3)}(${r.canvasMPx}MPx) nodes=${String(r.domNodes).padStart(5)} lis=${String(r.listeners).padStart(5)} heap=${String(r.heapMB).padStart(5)}MB buckets=${JSON.stringify(r.buckets)}`);
-}
+console.log('\nphase key: traceFps=BeginMainFrame/秒 commit=主线程Commit ms/帧 js=真帧JS均值 realFps=真帧间隔fps');
 if (errors.length) console.log('页面异常:', errors.slice(0, 5));
 await browser.close();
