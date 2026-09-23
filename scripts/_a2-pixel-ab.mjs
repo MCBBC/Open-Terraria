@@ -86,6 +86,14 @@ await page.evaluate(() => window.__wfboSet(true));
 const B = await capture('B FBO链');
 await page.evaluate(() => window.__wfboSet(false));
 const C = await capture('C 翻回');
+// ★A3 光照 GPU 重建翻面（D=wfbo+lrecon,E=lrecon 翻回,F=全回）
+await page.evaluate(() => { window.__lreconSet = (v) => window.__swGame.renderer.constructor.lreconSetForTest(v); });
+await page.evaluate(() => { window.__wfboSet(true); window.__lreconSet(true); });
+const D = await capture('D FBO+GPU光照');
+await page.evaluate(() => window.__lreconSet(false));
+const E = await capture('E lrecon翻回');
+await page.evaluate(() => window.__wfboSet(false));
+const F = await capture('F 全回');
 
 console.log(`A=${A.m1.slice(0, 10)} B=${B.m1.slice(0, 10)} C=${C.m1.slice(0, 10)}`);
 L.chk('[land] B==A 逐字节（FBO 链等价）', A.m1 === B.m1, `A=${A.m1.slice(0, 8)} B=${B.m1.slice(0, 8)}`);
@@ -102,6 +110,10 @@ if (A.m1 !== B.m1) {
   console.log(`diff=${d.n} maxΔ=${d.maxd}`);
   L.chk('[land] diff 分级（0=字节等价;≤1-2LSB 备案口径）', d.n === 0, `diff=${d.n} maxΔ=${d.maxd}`);
 }
+console.log(`D=${D.m1.slice(0, 10)} E=${E.m1.slice(0, 10)} F=${F.m1.slice(0, 10)}`);
+L.chk('[land] D==B（GPU 光照重建 ≡ lightCanvas 路径）', D.m1 === B.m1, `D=${D.m1.slice(0, 8)} B=${B.m1.slice(0, 8)}`);
+L.chk('[land] E==B（lrecon 翻回无残留）', E.m1 === B.m1, `E=${E.m1.slice(0, 8)}`);
+L.chk('[land] F==A（全回恢复）', F.m1 === A.m1, `F=${F.m1.slice(0, 8)}`);
 await browser.close();
 console.log(L.ok ? 'ALL PASS' : 'HAS FAIL');
 process.exitCode = L.ok ? 0 : 1;

@@ -15,7 +15,7 @@
 // 接线：Renderer.compositeLight `?wfbo=1` 激活（首版默认关;对拍过翻缺省+逃生门
 //   改 ?wfbo=0）。旧路径与 2D 兜底全保留。
 import { GLPipeline, type PipelineFbo, type PipelineProgram } from './GLPipeline';
-import { glStatUpload, glStatTexCreate } from './GLStats';
+import { glStatUpload, glStatTexCreate, starvedLock } from './GLStats';
 import { GLWorldLight } from './GLWorldLight';
 import { GLWaterDistortion } from './GLWaterDistortion';
 
@@ -29,6 +29,51 @@ import { GLWaterDistortion } from './GLWaterDistortion';
  *  pass2 保持原 VERT:vUv=0 采 lit v0=图像顶 ✓,写入经原翻转→图像顶落 warped v1;
  *  present(flipY=1) 画布顶采 v1=图像顶 → 三级闭合,屏上正立。 */
 const LIT_VERT = GLWorldLight.VERT.replace('1.0 - aPos.y * 2.0', 'aPos.y * 2.0 - 1.0');
+
+/** ★A3 光照小图 GPU 重建 pass0（2026-09-23）。等价性论证（对 CPU 循环
+ *  Renderer.compositeLight BJ77 快路径逐式）：
+ *  ① SS=2 → gx=px·0.5−0.5 精确（2 的幂运算 fp32 无误差）→ fx∈{0,0.5} →
+ *     权重 w∈{0,0.25,0.5,1} 全 2 的负幂,8bit 整数×幂权 fp32 精确,≤4 项和
+ *     =k/4(k≤1020) 精确可表示;
+ *  ② Math.round(r) ≡ floor(r+0.5)（r≥0 且分数 ∈{0,.25,.5,.75}——精确半值成立）;
+ *  ③ 窗外 tap=0：raw 光照按 (rw+2)×(rh+2) 整数纹理上传,窗内容在 (1,1) 偏移,
+ *     边缘一圈 0 + clamp 取零环 = 任意窗外 tap 恒 0（CPU 窗口谓词逐位同）;
+ *  ④ texelFetch(usampler2D) 返回整数（UNORM 的 k/255 除法不精确,故 RGBA8UI）;
+ *  ⑤ 求和序 = CPU 左结合同序 t00·w00+t10·w10+t01·w01+t11·w11;
+ *  ⑥ 输出 min(255,·) 钳位 + α=255 同 CPU;UNORM 回写 round(k/255·255)=k 精确。
+ *  朝向：复用 LIT_VERT（no-flip）→ FBO v0=图像顶 ≙ lightCanvas 上传布局,
+ *  pass1 uLightRect 映射零改动。 */
+const LRECON_FRAG = `precision highp float;
+uniform highp usampler2D uRaw;
+uniform int uRx; uniform int uRy; uniform int uRw; uniform int uRh;
+uniform int uTx0; uniform int uTy0;
+out vec4 outColor;
+void main() {
+  ivec2 fc = ivec2(gl_FragCoord.xy);
+  float gx = float(fc.x) * 0.5 - 0.5;
+  float gy = float(fc.y) * 0.5 - 0.5;
+  int x0 = int(floor(gx)); float fx = gx - float(x0);
+  int y0 = int(floor(gy)); float fy = gy - float(y0);
+  float wx0 = 1.0 - fx, wx1 = fx, wy0 = 1.0 - fy, wy1 = fy;
+  float w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
+  int bx = (uTx0 + x0) - uRx + 1;
+  int by = (uTy0 + y0) - uRy + 1;
+  ivec2 lim = ivec2(uRw + 1, uRh + 1);
+  uvec4 t00 = texelFetch(uRaw, clamp(ivec2(bx, by), ivec2(0), lim), 0);
+  uvec4 t10 = texelFetch(uRaw, clamp(ivec2(bx + 1, by), ivec2(0), lim), 0);
+  uvec4 t01 = texelFetch(uRaw, clamp(ivec2(bx, by + 1), ivec2(0), lim), 0);
+  uvec4 t11 = texelFetch(uRaw, clamp(ivec2(bx + 1, by + 1), ivec2(0), lim), 0);
+  vec3 r = vec3(t00.rgb) * w00 + vec3(t10.rgb) * w10 + vec3(t01.rgb) * w01 + vec3(t11.rgb) * w11;
+  outColor = vec4(min(vec3(255.0), floor(r + 0.5)) / 255.0, 1.0);
+}`;
+
+/** ★A3 raw 光照采样面（scan 输出直传——零 CPU 重建/putImageData/脏带/带 blit） */
+export interface RawLight {
+  r: Uint8Array; g: Uint8Array; b: Uint8Array;
+  rx: number; ry: number; rw: number; rh: number;   // 光照扫描窗（tile 系）
+  tx0: number; ty0: number;                          // 视口基 tile（重建网格对齐）
+  w2: number; h2: number;                            // SS=2 小图尺寸=tilesX/Y·2
+}
 
 export class GLWorldCompose {
   /** 无扭曲帧的中性波场（0.5 中心值 → 位移 (0.5−0.5)·intensity=0;gridW/H=1 防
@@ -46,6 +91,10 @@ export class GLWorldCompose {
   private texWave: WebGLTexture | null = null;
   private texWater: WebGLTexture | null = null;
   private texWaterEmpty: WebGLTexture | null = null;
+  private texRaw: WebGLTexture | null = null;      // ★A3 raw 光照（RGBA8UI,+1 零边框）
+  private fboLight2: PipelineFbo | null = null;    // ★A3 recon 产出（SS=2 小图,替代 lightCanvas 带上传）
+  private pRecon: PipelineProgram | null = null;
+  private _rawBuf: Uint8Array | null = null;
   private _texKeyWorld = '';
   private _texKeyLight = '';
   private _texKeyNoise = '';
@@ -61,7 +110,10 @@ export class GLWorldCompose {
     if (!gl) return;
     this.pLit = this.pipeline.program('worldLight', LIT_VERT, GLWorldLight.FRAG);
     this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
-    if (!this.pLit?.prog || !this.pDistort?.prog) { this.unavailable = true; return; }
+    this.pRecon = this.pipeline.program('lrecon', LIT_VERT, LRECON_FRAG);
+    if (!this.pLit?.prog || !this.pDistort?.prog || !this.pRecon?.prog) { this.unavailable = true; return; }
+    this.texRaw = gl.createTexture();
+    this.setParams(gl, this.texRaw, 'NEAREST', 'CLAMP');   // texelFetch 不经采样器过滤;NEAREST 合法搭配
     // 纹理创建+采样参数（逐字对照两原模块 init:GLWorldLight.ts:140-148 / GLWaterDistortion.ts:243-270 表）
     this.texWorld = gl.createTexture();
     this.texLight = gl.createTexture();
@@ -95,6 +147,7 @@ export class GLWorldCompose {
     cssW = 0, cssH = 0, progress = 0, intensity = 0,
     waveR: Float32Array | null = null, gridW = 0, gridH = 0,
     worldX = 0, worldY = 0, waveOffX = 0, waveOffY = 0,
+    rawLight?: RawLight,
   ): boolean {
     const pipeline = this.pipeline;
     const gl = pipeline.glx;
@@ -122,8 +175,32 @@ export class GLWorldCompose {
     }
     glStatUpload(this.pipeline.statName, w * h * 4);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.texLight);
+    // ★A3 支路：rawLight 在场 → recon pass0 产 FBO('light2')（替代 lightCanvas
+    //   带上传——CPU 4-tap 重建/putImageData/脏带比对/带 blit 四消）;缺省走原路径
+    let lightTex: WebGLTexture | null = this.texLight;
+    if (rawLight && this.pRecon?.prog) {
+      if (!this.uploadRaw(gl, rawLight)) return false;
+      this.fboLight2 = pipeline.fbo('light2', rawLight.w2, rawLight.h2);
+      if (!this.fboLight2 || !this.fboLight2.tex) return false;
+      pipeline.bindTarget(this.fboLight2);
+      gl.viewport(0, 0, rawLight.w2, rawLight.h2);
+      gl.useProgram(this.pRecon.prog);
+      gl.uniform1i(this.pipeline.uni(this.pRecon, 'uRx'), rawLight.rx);
+      gl.uniform1i(this.pipeline.uni(this.pRecon, 'uRy'), rawLight.ry);
+      gl.uniform1i(this.pipeline.uni(this.pRecon, 'uRw'), rawLight.rw);
+      gl.uniform1i(this.pipeline.uni(this.pRecon, 'uRh'), rawLight.rh);
+      gl.uniform1i(this.pipeline.uni(this.pRecon, 'uTx0'), rawLight.tx0);
+      gl.uniform1i(this.pipeline.uni(this.pRecon, 'uTy0'), rawLight.ty0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.texRaw);
+      pipeline.setBlend('off');
+      pipeline.drawQuad(this.pRecon, [0, 0, rawLight.w2, rawLight.h2], 0);
+      lightTex = this.fboLight2.tex;
+      gl.activeTexture(gl.TEXTURE1);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, lightTex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    if (rawLight) { /* recon 已产 uLight 来源;legacy 上传整段跳过 */ } else {
     const kb = `${light.width}x${light.height}`;
     if (this._texKeyLight !== kb) {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, light);
@@ -141,6 +218,7 @@ export class GLWorldCompose {
     } else {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, light);
       glStatUpload(this.pipeline.statName, light.width * light.height * 4);
+    }
     }
     gl.uniform1i(this.pipeline.uni(this.pLit, 'uWorld'), 0);
     gl.uniform1i(this.pipeline.uni(this.pLit, 'uLight'), 1);
@@ -216,6 +294,37 @@ export class GLWorldCompose {
     return true;
   }
 
+  /** ★哨兵族同款获取面（2026-09-23 资源风暴防护补齐）：贫困锁不建（starvedLock,
+   *  与 waterWarp.glLayer 同款）;上下文丢失后 5s 退避重建（diedAt 哨兵,防重建风暴）。
+   *  unavailable 即返 null=调用方落回旧链,永不刷屏重试。 */
+  acquire(): GLWorldCompose | null {
+    if (starvedLock()) return null;
+    if (this.unavailable && performance.now() - this.pipeline.diedAt > 5000) this.recreate();
+    return this.unavailable ? null : this;
+  }
+
+  /** ★A3 raw 光照上传：(rw+2)×(rh+2) RGBA8UI,窗内容 (1,1) 偏移,边缘零环。
+   *  整数纹理=采样返回原字节（UNORM k/255 不精确会破坏位等价,见 LRECON_FRAG 注④） */
+  private uploadRaw(gl: WebGL2RenderingContext, rl: RawLight): boolean {
+    const W = rl.rw + 2, H = rl.rh + 2;
+    if (!this._rawBuf || this._rawBuf.length !== W * H * 4) this._rawBuf = new Uint8Array(W * H * 4);
+    const buf = this._rawBuf;
+    for (let y = 0; y < rl.rh; y++) {
+      let di = ((y + 1) * W + 1) * 4;
+      let si = y * rl.rw;
+      for (let x = 0; x < rl.rw; x++, di += 4, si++) {
+        buf[di] = rl.r[si]; buf[di + 1] = rl.g[si]; buf[di + 2] = rl.b[si]; buf[di + 3] = 255;
+      }
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.texRaw);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, W, H, 0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, buf);
+    glStatUpload(this.pipeline.statName, W * H * 4);
+    return true;
+  }
+
   /** 噪声懒上传（ensureNoise:278-289 逐式;纯数据源预乘 false） */
   private ensureNoise(gl: WebGL2RenderingContext, noise: TexImageSource): boolean {
     gl.activeTexture(gl.TEXTURE1);
@@ -256,6 +365,10 @@ export class GLWorldCompose {
     const ok = this.pipeline.recreate();
     this.unavailable = this.pipeline.unavailable;
     if (ok) {
+      // ★程序登记重跑（pipeline.recreate 清空程序表——句柄重注册,否则悬空）
+      this.pLit = this.pipeline.program('worldLight', LIT_VERT, GLWorldLight.FRAG);
+      this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
+      this.pRecon = this.pipeline.program('lrecon', LIT_VERT, LRECON_FRAG);
       const gl = this.pipeline.glx;
       if (gl) {
         this.texWorld = gl.createTexture();
@@ -267,6 +380,8 @@ export class GLWorldCompose {
         this.setParams(gl, this.texWave, 'LINEAR', 'CLAMP');
         this.texWater = gl.createTexture();
         this.setParams(gl, this.texWater, 'NEAREST', 'CLAMP');
+        this.texRaw = gl.createTexture();
+        this.setParams(gl, this.texRaw, 'NEAREST', 'CLAMP');
       }
       this._texKeyWorld = ''; this._texKeyLight = ''; this._texKeyNoise = ''; this._texKeyWater = '';
       this.texWaterEmpty = null;

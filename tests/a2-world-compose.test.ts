@@ -36,9 +36,9 @@ describe('A2 GLWorldCompose 结构锁', () => {
     }
   });
 
-  it('数据源上传预乘 false（noise/wave 纯数据——画布源收口不适用）', () => {
-    // ensureNoise + uploadWave + 无噪声帧 1×1 中性垫底,各一次显式 false
-    expect((composeSrc.match(/UNPACK_PREMULTIPLY_ALPHA_WEBGL, false/g) || []).length).toBe(3);
+  it('数据源上传预乘 false（noise/wave/raw 纯数据——画布源收口不适用）', () => {
+    // ensureNoise + uploadWave + 无噪声帧 1×1 垫底 + A3 uploadRaw,各一次显式 false
+    expect((composeSrc.match(/UNPACK_PREMULTIPLY_ALPHA_WEBGL, false/g) || []).length).toBe(4);
   });
 
   it('波场 8bit 量化式逐字（R32F 已否决——量化=输出语义）', () => {

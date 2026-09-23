@@ -5157,6 +5157,17 @@ export class Renderer {
   })();
   static get wfbo() { return this._wfbo; }
   static wfboSetForTest(v: boolean): void { this._wfbo = v; }
+  /** ?lrecon=1：A3 光照小图 GPU 重建（raw 直传+recon pass0;须 wfbo 同开）。
+   *  首版默认关,对拍过翻缺省+逃生门改 lrecon=0。运行时可翻（wfbo 同款）。 */
+  private static _lrecon = (() => {
+    try {
+      // ★A3 转正（2026-09-23）：缺省开——像素对拍 ALL PASS（六态同 md5 c33291d5,
+      //  D=GPU 重建 ≡ B=lightCanvas 路径 ≡ A=旧链）。?lrecon=0 = 逃生门。
+      return typeof location === 'undefined' || new URLSearchParams(location.search).get('lrecon') !== '0';
+    } catch { return true; }
+  })();
+  static get lrecon() { return this._lrecon; }
+  static lreconSetForTest(v: boolean): void { this._lrecon = v; }
   static readonly b0Shadow = (() => {
     try {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).has('b0shadow');
@@ -16722,6 +16733,48 @@ export class Renderer {
     // 光斑梯度曲率更细腻（每格一采样时火把光斑有明显的马赛克棱面感）
     const SS = 2;
     const w2 = tilesX * SS, h2 = tilesY * SS;
+    // ★A3（2026-09-23）：darkSkip+光矩形计算组【上提】至此（原在 ImageData 重建后;
+    //  依赖 tx0/k/z/cam 皆已就绪）——lrecon 分流须在 CPU 重建之前。
+    const darkSkip = this.monoFilters.shimmerAlpha >= 1 ? 1 : 0;
+    const k = this._worldLowK;
+    const zzL = z * k;
+    const camRXl = Math.round(cam.x * z) / z;
+    const camRYl = Math.round(cam.y * z) / z;
+    const oxW = Math.round(this._worldLowW / 2), oyW = Math.round(this._worldLowH / 2);
+    // ★光矩形设备取整（2026-09-01 全宽发丝缝定案）：与 chunk/动态层同源取整表达式
+    //  （oxW+round((世界坐标-camRX)*zz)）——光照矩形与世界内容像素级配准且恒整数。
+    const lx0 = oxW + Math.round((tx0 * ts - camRXl) * zzL);
+    const ly0 = oyW + Math.round((ty0 * ts - camRYl) * zzL);
+    const lx1 = oxW + Math.round(((tx0 + tilesX) * ts - camRXl) * zzL);
+    const ly1 = oyW + Math.round(((ty0 + tilesY) * ts - camRYl) * zzL);
+    // ★A3 光照 GPU 重建（?lrecon=1,与 wfbo 同为运行时可翻旗）:raw scan 直传 +
+    //  recon pass0——CPU 4-tap 重建/putImageData/脏带比对/带 blit 四消。
+    //  失败/unavailable → 继续下方原路径（CPU 重建照旧,双路径并存）。
+    if (Renderer.wfbo && Renderer.lrecon && !this.isCpuRender() && this.worldCanvas) {
+      const wcL = (this.worldCompose ??= new GLWorldCompose()).acquire();
+      if (wcL) {
+        const warpOn = !!(this._waveCss && waterWaves.quality > 0
+          && (!Renderer.dryWarpSkip || this._waveLiquidInView));
+        const stL = this._waveCss;
+        const woL = warpOn ? waterWaves.waveReadOffset() : [0, 0];
+        const okL = wcL.compose(
+          this.worldCanvas, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, undefined,
+          warpOn ? this.waterWarp.gateCanvas() : null,
+          warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
+          stL ? stL.cssW : this.worldCanvas.width, stL ? stL.cssH : this.worldCanvas.height,
+          warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,
+          warpOn ? waterWaves.readGridR() : GLWorldCompose.neutralWave,
+          warpOn ? waterWaves.gridW() : 1, warpOn ? waterWaves.gridH() : 1,
+          stL ? stL.camL * stL.cssZoom : 0, stL ? stL.camT * stL.cssZoom : 0,
+          woL[0], woL[1],
+          { r: lightR, g: lightG, b: lightB, rx, ry, rw, rh, tx0, ty0, w2, h2 },
+        );
+        if (okL) {
+          this.ctx.drawImage(wcL.pipeline.canvas, 0, 0, viewW, viewH);
+          return;
+        }
+      }
+    }
     if (this.lightCanvas.width !== w2 || this.lightCanvas.height !== h2) {
       this.lightCanvas.width = w2;
       this.lightCanvas.height = h2;
@@ -16903,26 +16956,8 @@ export class Renderer {
       //  星空 = wiki「完全黑暗之中的图格上也显示星空」。门=shimmerAlpha≥1 精确镜像
       //  原版 `== 1f` 二值开关（MoveTowards 必达 1）；粒度逐像素平滑 vs 原版逐格
       //  16px——登记渲染粒度债（与本层双线性光照架构一致）
-      const darkSkip = this.monoFilters.shimmerAlpha >= 1 ? 1 : 0;
-      // ★A2（2026-09-23）：旧链 worldLight 实例获取移入下方旧链分支——wfbo=1 且
-      //   A2 成功时不触达 = 旧 C1 画布不创建（IOSurface 净-1;原在此无条件获取=
-      //   新链下白挂 1 张离屏画布）
-      // 低清档(#perf-gpulog):world 纹理已 K 缩,lightRect 同比缩(world-layer 像素系)
-      const k = this._worldLowK;
-      // ★光矩形设备取整（2026-09-01 全宽发丝缝定案）：旧 [sx*k, sy*k, lw*k, lh*k]
-      //   是浮点屏幕坐标——相机高度/缩放变化时矩形小数部分漂移，GL 线性采样在
-      //   边缘行插值到纹理夹持边 → 整屏宽 1px 错位行（必须特定高度/缩放复现，
-      //   用户截图43 横贯机器+墙+背景）。改用与 chunk/动态层完全同源的取整
-      //   表达式（oxW+round((世界坐标-camRX)*zz)）——光照矩形与世界内容像素
-      //   级配准且恒整数，边缘行不再跨界采样；光照渐变本身不受影响。
-      const zzL = z * k;
-      const camRXl = Math.round(cam.x * z) / z;
-      const camRYl = Math.round(cam.y * z) / z;
-      const oxW = Math.round(this._worldLowW / 2), oyW = Math.round(this._worldLowH / 2);
-      const lx0 = oxW + Math.round((tx0 * ts - camRXl) * zzL);
-      const ly0 = oyW + Math.round((ty0 * ts - camRYl) * zzL);
-      const lx1 = oxW + Math.round(((tx0 + tilesX) * ts - camRXl) * zzL);
-      const ly1 = oyW + Math.round(((ty0 + tilesY) * ts - camRYl) * zzL);
+      // ★A3：darkSkip+光矩形组已上提至函数头（lrecon 分流前置）;A2 注解随组迁移。
+      //  （旧链 worldLight 实例获取仍在下方旧链分支——A2 成功不触达=IOSurface 净-1）
       void lw; void lh; void sx; void sy;
       // ★IIIII248:光照脏行带下传 GL(null=零变化跳过上传;undefined=旧行为恒全幅)。
       //  带 = 本帧逐行比对结果(prevValid 且有变化);带内容画进带画布 (0,0,w,bandH),
@@ -16956,28 +16991,29 @@ export class Renderer {
       //   驻留 FBO,扭曲 pass 直采 FBO 纹理（旧链 scene 全帧重传+GL→2D→GL 乒乓消灭）,
       //   present 单次回贴。失败/unavailable → 落回下方旧链（双路径并存,对拍期纪律）。
       if (Renderer.wfbo && !this.isCpuRender()) {
-        this.worldCompose ??= new GLWorldCompose();
-        const wc = this.worldCompose;
-        // warp 激活判定与旧链 :16925 同源（同四门:帧态/软渲染/waveQuality/旱地探针）
-        const warpOn = !!(this._waveCss && waterWaves.quality > 0
-          && (!Renderer.dryWarpSkip || this._waveLiquidInView));
-        const st = this._waveCss;
-        // 无扭曲帧:pass2 直采回贴=恒等（空门控+intensity=0,dryskip 判决同源）;
-        // ★中性波场垫底防 uWaveSize=(0,0) 的 NaN 除法（gridW/H=1+0.5 中心值）
-        const ok = wc.compose(
-          this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand,
-          warpOn ? this.waterWarp.gateCanvas() : null,
-          warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
-          st ? st.cssW : this.worldCanvas!.width, st ? st.cssH : this.worldCanvas!.height,   // ★css 兜底=世界层尺寸（防 uCssSize 除零 NaN;无扭曲帧该值不参与可见项）
-          warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,
-          warpOn ? waterWaves.readGridR() : GLWorldCompose.neutralWave,
-          warpOn ? waterWaves.gridW() : 1, warpOn ? waterWaves.gridH() : 1,
-          st ? st.camL * st.cssZoom : 0, st ? st.camT * st.cssZoom : 0,
-          ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]),
-        );
-        if (ok) {
-          this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
-          return;
+        const wc = (this.worldCompose ??= new GLWorldCompose()).acquire();
+        if (wc) {
+          // warp 激活判定与旧链 :16925 同源（同四门:帧态/软渲染/waveQuality/旱地探针）
+          const warpOn = !!(this._waveCss && waterWaves.quality > 0
+            && (!Renderer.dryWarpSkip || this._waveLiquidInView));
+          const st = this._waveCss;
+          // 无扭曲帧:pass2 直采回贴=恒等（空门控+intensity=0,dryskip 判决同源）;
+          // ★中性波场垫底防 uWaveSize=(0,0) 的 NaN 除法（gridW/H=1+0.5 中心值）
+          const ok = wc.compose(
+            this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand,
+            warpOn ? this.waterWarp.gateCanvas() : null,
+            warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
+            st ? st.cssW : this.worldCanvas!.width, st ? st.cssH : this.worldCanvas!.height,   // ★css 兜底=世界层尺寸（防 uCssSize 除零 NaN;无扭曲帧该值不参与可见项）
+            warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,
+            warpOn ? waterWaves.readGridR() : GLWorldCompose.neutralWave,
+            warpOn ? waterWaves.gridW() : 1, warpOn ? waterWaves.gridH() : 1,
+            st ? st.camL * st.cssZoom : 0, st ? st.camT * st.cssZoom : 0,
+            ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]),
+          );
+          if (ok) {
+            this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
+            return;
+          }
         }
       }
       const gl = this.worldLightLayer();   // ★A2：仅旧链路径触达（实例获取后移,见上注）

@@ -4,7 +4,7 @@
 // 原版结构性事实（锁）：HitEffect 无通用尾支（最终 else = `if(type!=156) return`）
 // ——未列型受击/死亡原版不出尘；鸟族块 = ceil(dmg/lifeMax×100) 簇 5 号血尘
 // （DustID.Blood，SpeedX=hitDirection/SpeedY=-1）+ 死亡 50 簇（×2,-2）后 gore。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -14,7 +14,10 @@ import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 80, FLOOR = 60;
 
-interface DustCall { x: number; y: number; w: number; h: number; type: number; sx: number; sy: number }
+interface DustCall {
+  x: number; y: number; w: number; h: number; type: number; sx: number; sy: number;
+  vx: number; vy: number; noGravity: boolean; scale: number; fadeIn: number   // ★BJ309 活尘记账域
+}
 
 function makeWorld(): World {
   const w = new World(W, H, 11, 'raven-hitfall');
@@ -47,13 +50,15 @@ function makeHooks(w: World, playerAt?: { x: number; y: number } | null) {
     scene: { zoneGraveyard: false },
     dust: {
       spawn: (x: number, y: number, dw: number, dh: number, type: number, sx = 0, sy = 0) => {
-        rec.dusts.push({ x, y, w: dw, h: dh, type, sx, sy });
+        rec.dusts.push({ x, y, w: dw, h: dh, type, sx, sy, vx: sx, vy: sy, noGravity: false, scale: 1, fadeIn: 0 });
         return null;
       },
     },
     // ★BJ254：受击/死亡尘改走 spawnDust 查表通道（NpcHitDust 单源）——同一记账桶
     spawnDust: (x: number, y: number, dw: number, dh: number, type: number, sx = 0, sy = 0) => {
-      const rec2 = { x, y, w: dw, h: dh, type, sx, sy, noGravity: false, scale: 1 };
+      // ★BJ309：补 vx/vy/fadeIn 记账域（BJ304 批3 叶族 post 算子 velMul3/fadeIn 落活尘
+      // 对象——缺域会让 applyOps 写 NaN、fadeIn 断言无锚;与 bj304 钩子同构）
+      const rec2 = { x, y, w: dw, h: dh, type, sx, sy, vx: sx, vy: sy, noGravity: false, scale: 1, fadeIn: 0 };
       rec.dusts.push(rec2);
       return rec2;
     },
@@ -118,15 +123,50 @@ describe('鸟族 HitEffect 血尘（61 秃鹫/252 鹦鹉/301 渡鸦,:87518-87556
     expect(h.rec.particles.length).toBe(0);
   });
 
-  it('★BJ254 表外型受击/死亡零尘（原版结构:无通用尾支）；表内型（僵尸 3）=查表精确', () => {
+  it('★BJ309 重钉：419（Selenian）已入尘表（BJ304 批3 fadeIn 叶族,原 BJ254「零尘」前提过时）；表内型（僵尸 3）=查表精确', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 42, y: FLOOR - 4 });
-    // 419（占有铠甲）= 表外型（HitEffect 支带 Main.rand 概率门,首批未接）→ 零尘
-    const e419 = spawn(h, 419, 40, FLOOR - 2);
-    e419.hurt(5, 1, 0, h.hooks);
-    e419.hurt(e419.hp + 9999, 1, 0, h.hooks);
-    expect(h.rec.dusts.filter((d) => d.type === 5).length).toBe(0);
-    expect(h.rec.dusts.length).toBe(0);
+    // 419（Selenian,lifeMax=800/def=30）= BJ304 批3 fadeIn 叶族入表（NPC.cs :83719-:83738:
+    // hit 循环 dmg/lifeMax×20 拍 [d241, Next(4)==0→d6 叶];死亡 20 拍 [d241, Next(3)==0→d6 叶]）
+    // ——旧「表外型零尘」系 BJ254 时代前提（419 当时未接）,已过时。掷流钉定 rand=0 →
+    // Next 恒中 → 每拍出叶,粒数全定（真实 RNG 下 hit 相叶 0|1 粒摇摆 = 旧断言摇摆根因）。
+    const rand = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const e419 = spawn(h, 419, 40, FLOOR - 2);
+      // —— hit 相（:83719-:83722）——
+      const hp0 = e419.hp;
+      e419.hurt(5, 1, 0, h.hooks);                 // 防后伤 = max(1, 5−30×0.5) = 1 → ceil(1/800×20) = 1 拍
+      expect(Math.ceil(((hp0 - e419.hp) / e419.maxHp) * 20)).toBe(1);
+      const hitMain = h.rec.dusts.filter((d) => d.type === 241);
+      expect(hitMain.length, 'hit 相主尘 d241 = 拍数').toBe(1);
+      expect(hitMain[0].sx).toBe(1);               // hd（kbx=1）
+      expect(hitMain[0].sy).toBe(-1);
+      expect(hitMain[0].w).toBe(e419.w);           // 击中矩形 = NPC 盒
+      const hitLeaf = h.rec.dusts.filter((d) => d.type === 6);
+      expect(hitLeaf.length, 'Next(4)==0 恒中 → 每拍 1 叶').toBe(1);
+      expect(hitLeaf[0].noGravity).toBe(true);     // 叶 posts：ng+scale1.5+fadeIn1（生长目标语义,Dust.cs :2148-2171）+velMul3
+      expect(hitLeaf[0].scale).toBe(1.5);
+      expect(hitLeaf[0].fadeIn).toBe(1);
+      expect(h.rec.dusts[1]).toBe(hitLeaf[0]);     // 交错序：叶紧跟本拍主尘（源序 NewDust→掷门→叶）
+      // —— 死亡相（:83735-:83738）——旧断言的第二 hurt 被免疫帧拦下（pierce=0 →
+      // iframes=10 早退,hurt() 头门）,死亡面此前从未真被测;清帧致死 = 重开死亡面
+      h.rec.dusts.length = 0;
+      e419.iframes = 0;
+      e419.hurt(e419.hp + 9999, 1, 0, h.hooks);
+      expect(e419.dead).toBe(true);
+      expect(h.rec.dusts.length, '死亡 20 拍 × [d241 + d6]').toBe(40);
+      for (let k = 0; k < 20; k++) {
+        expect(h.rec.dusts[k * 2].type).toBe(241);
+        expect(h.rec.dusts[k * 2].sx).toBe(1);     // hd
+        expect(h.rec.dusts[k * 2].sy).toBe(-1);
+        expect(h.rec.dusts[k * 2 + 1].type).toBe(6);
+        expect(h.rec.dusts[k * 2 + 1].fadeIn).toBe(1);
+      }
+      // 419 原版块无彩色粒子段（通用近似让位,同 301 面）
+      expect(h.rec.particles.length).toBe(0);
+    } finally {
+      rand.mockRestore();
+    }
     // 僵尸 3 = 表内型（vanilla :87923/:87951 确有 5 号尘块——旧断言"僵尸无块"系
     // 仓内覆盖面误当原版真值,本测试更正为查表精确钉值）
     const e3 = spawn(h, 3, 50, FLOOR - 2);
