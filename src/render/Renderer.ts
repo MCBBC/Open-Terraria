@@ -620,24 +620,23 @@ export function prettyStarSparkle(
   //   合成——主 ctx 任何残留合成态/异常路径都不可能把臂包围盒画成暗块。
   //   （当年"?nosparkle 消失"二分实为旧版代码 era 的证据；黑十字真身 =
   //   摊平 alpha 画布 × source-over，2026-09-02 最小复现 E 面板逐像素复现定谳）
-  let sbuf: HTMLCanvasElement | null = null;
   const stroke = (img: HTMLCanvasElement, rot: number, sw: number, sh: number, alpha: number) => {
     if (alpha <= 0 || sw <= 0 || sh <= 0) return;
     const w = Math.max(1, Math.round(tw * sw)), h = Math.max(1, Math.round(th * sh));
     // ★canvas 哨兵案（2026-09-23 用户实报 30-40fps）：原 sbuf 每次 call 新建 +
     //  4 次 stroke 各因宽高不同 resize 4 次 = 天顶剑 60-113 张/秒 canvas churn
     //  （哨兵栈:createElement←stroke←prettyStarSparkle←ZenithSword.draw）→
-    //  surface 分配压力 → 全局 drawImage 减速。改模块级复用槽：stroke 同步
-    //  消费（clear→draw→即回主 ctx）,共享安全、稳态零分配、像素零变化。
-    sbuf ??= _sparkleScratch ??= document.createElement('canvas');
-    if (sbuf.width !== w || sbuf.height !== h) { sbuf.width = w; sbuf.height = h; }
-    // ★BJ314（2026-09-23）：willReadFrequently CPU 面——本槽每 stroke「写后即读」
-    //  （drawImage 进软件世界层）,GPU-backed 时每次都是刚写完的纹理→CPU 面跨界
-    //  回读同步（挥砍稳态 8 次/帧）。同写同读同指令=像素零差,仅后备面落 CPU。
-    const bc = sbuf.getContext('2d', { willReadFrequently: true })!;
-    bc.clearRect(0, 0, w, h);
-    bc.imageSmoothingEnabled = false;
-    bc.drawImage(img, 0, 0, w, h);
+    //  surface 分配压力 → 全局 drawImage 减速。
+    // ★BJ314（2026-09-23）拉伸缓存定容（终形态）：C6 复用槽仍带「宽高不同即
+    //  resize」churn——实机归因 drawSparkle=0.432ms/调用（_bj314-decomp,挥弧残差
+    //  热点本体）;grow-only 定容槽 + 9 参子矩形回贴反而更差（256² GPU 槽读回按
+    //  整画布计,CPU 槽 9 参子矩形 ~195µs/笔——_bj314-spark2）。定容=按 (img,w,h)
+    //  缓存拉伸结果（Portal.tintedFrame/arcTintCache 同族）:纯拷贝无混合 →
+    //  CPU 面无舍入差字节恒等;miss 烘焙 ~8µs/4 笔、hit ~4µs（_bj314-spark3,
+    //  对照 resize 槽实机 432µs=54×）;零 resize 零跨界。LRU 96 逐条淘汰
+    //  （禁整表 clear=重分配雪崩,C6 同纪律）。
+    const sbuf = sparkleStrokeTex(img, w, h);
+    if (!sbuf) return;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
@@ -652,10 +651,32 @@ export function prettyStarSparkle(
   stroke(draw, rotation, v2x * 0.6, v2y * 0.6, aDraw);
 }
 
-/** ★C6-sparkle 复用槽（2026-09-23 canvas 哨兵案）：prettyStarSparkle 的 stroke
- *  中转画布——原每次调用新建+4 次 resize=天顶剑 60-113 张/秒 churn（surface
- *  压力→全局 drawImage 减速,用户实报 30-40fps）。同步消费共享安全。 */
-let _sparkleScratch: HTMLCanvasElement | null = null;
+/** ★C6-sparkle 复用槽（2026-09-23 canvas 哨兵案）→ ★BJ314（2026-09-23）退役：
+ *  复用槽仍带「宽高不同即 resize」churn（实机 drawSparkle 0.432ms/调用=挥弧残差
+ *  热点），由下方 sparkleStrokeCache 按 (img,w,h) 缓存拉伸结果取代——零 resize
+ *  零跨界,两步管线（最近邻拉伸→旋转采样）字节恒等保留。 */
+const sparkleStrokeCache = new WeakMap<object, Map<string, HTMLCanvasElement>>();
+
+/** stroke 拉伸结果缓存（源 img 已是染色定稿——内容只依赖 (img,w,h) 纯函数）：
+ *  精确尺寸 CPU 面画布,5-9 参最近邻拉伸（imageSmoothingEnabled=false 同旧槽）,
+ *  消费端 1:1 直贴（同旧 3 参形态）。miss=createElement+拷贝（µs 级）,命中零开销。 */
+function sparkleStrokeTex(img: HTMLCanvasElement, w: number, h: number): HTMLCanvasElement | null {
+  let cache = sparkleStrokeCache.get(img);
+  if (!cache) { cache = new Map(); sparkleStrokeCache.set(img, cache); }
+  const key = `${w}x${h}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  const c = cv.getContext('2d', { willReadFrequently: true });
+  if (!c) return null;
+  c.imageSmoothingEnabled = false;
+  c.drawImage(img, 0, 0, img.width, img.height, 0, 0, w, h);
+  if (cache.size > 96) { const k0 = cache.keys().next().value; if (k0 !== undefined) cache.delete(k0); }
+  cache.set(key, cv);
+  return cv;
+}
 
 /** PrettySparkle 臂几何（纯函数,tests/dust-premultiplied-blend.test.ts 直测）——
  *  XNA 拉伸=贴图尺寸×scale（PrettySparkleParticle.cs:72-73,Extra_98=72×72）：

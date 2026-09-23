@@ -209,12 +209,15 @@ export function lightingFromValue(r: unknown, wx: number, wy: number): number {
  *  面」跨界回读同步（scratch 逐帧重写=回读缓存永不可复用）。定谳链（探针
  *  _bj314-perf/_bj314-perf2/_bj314-perf3 + scripts/_bj314-hash.mjs）：
  *  · 恒等性：烘焙输出只依赖 (img, frame, rgb 整型)——fillStyle 本就按 `rgb(${r|0})`
- *    截断,键=同一输入 ⇒ 缓存命中输出与现烘逐字节恒等（落刀前后 FNV-1a 全等实拍）。
+ *    截断,键=同一输入 ⇒ 缓存命中输出与现烘逐字节恒等（落刀前后 FNV-1a 全等实拍,
+ *    _bj314-hash.mjs 四面 694bec29/9bc96cb8/ce78015f 全等）。
+ *  · 缓存面=GPU（无 attrs,与旧 scratch 同面）：★CPU 面（willReadFrequently）烘焙
+ *    禁用——Skia 软件光栅 multiply 与 GPU 在同指令下系统性漂移（_bj314-delta 实测
+ *    maxDelta 255/万级像素差）,非 ±1 舍入级,保 BJ313 物证基线必须同面。
+ *  · 回读摊销：条目只写一次=快照恒定,Blink 跨帧复用其 CPU 拷贝（旧 scratch 逐帧
+ *    重写=快照永失效→每 blit 强制回读同步;现飞斩 5 blit 实测 0.011ms/调用）。
  *  · 972 五层中 4 层 rgb 恒定（base/l3/l4/帧3 白芯,alpha 全在 globalAlpha 链不进
  *    烘焙）=每帧全冗余;层2 白衍生链键随 K/n3 漂移但整数域有界（每挥 ~25 档）。
- *  · 缓存面 willReadFrequently（CPU 面,Portal.tintedFrame 帧染缓存同族+texId 头注
- *    判例）：消费端=软件世界层,CPU→CPU 同步 blit,跨界回读 18 次/帧（10 弧+8 星芒）
- *    → 0;烘焙面同序同指令（含 clearRect/imageSmoothingEnabled=false）逐位恒等。
  *  · texReady 入口守卫：半加载窗烘焙平色矩形按键永久入缓存 = 镜头光斑"淡色方片"
  *    同族毒化（texId.ts 头注判例）,禁入（projSprite 只在 onload 后出图,本守卫为
  *    素材包/升级链半窗兜底）。返回 null = 无 DOM‖未就绪（调用方降级直出）。 */
