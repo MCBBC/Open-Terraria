@@ -472,6 +472,16 @@ export class VanillaDust {
           this.lights.push({ x: d.x, y: d.y, r: k * k * 0.1, g: k * k * 0.6, b: k * k });   // :813-817 无门恒发光
           break;
         }
+        case 172: { // ★BJ310（2026-09-23）：:670-684 独立 if 段（非链 A 链接）——蓝光
+          // (0, .25k, k),k=min(scale·0.5,1)。★【无 noLight 门】（对照 263/264/182 的
+          // !noLight 门,原文直呼 Lighting.AddLight——猪鲨尾流尘自带 noLight 仍发光）。
+          // 发射方=dukeDashDust 冲撞尾流 7/拍。chainLink 不置位 → 重力门照常
+          // （尾流尘 noGravity 不加重力）;:2136 vx×0.99 按独立段惯例显式乘。
+          const k18 = Math.min(d.scale * 0.5, 1);
+          this.lights.push({ x: d.x, y: d.y, r: 0, g: k18 * 0.25, b: k18 });
+          d.vx *= 0.99;
+          break;
+        }
         case 174: { // :873-882（独立 if 段,非链 A 链接）：专属 scale−0.01（+通用 −0.01=−0.02/t）
           d.scale -= 0.01;
           if (!d.noLight && !d.noLightEmittance) {        // :880-881 光 min(scale,0.6)×(1,0.4,0)
@@ -927,6 +937,12 @@ export class VanillaDust {
       case 293: case 294: case 295: case 296: case 297: case 298:
         return { rgb: 1, a: 25 / 255 };
       case 170: return { rgb: 200 / 255, a: 100 / 255 };                        // :2606-2608
+      // ★BJ310（2026-09-23）猪鲨尾流 d172：GetAlpha 恒 (250,250,250,150)（:2623-2626,
+      //  常量不读光照——旧落 default 压暗档 rgb(255−α)/255≈0.61;头注 R2 补档清单曾
+      //  虚标 172 入 A=25 族,实际 switch 缺 case）。发射方=dukeDashDust 冲撞尾流
+      //  （bossAI_duke_moonlord,7/拍 α100）+ 出生环(暂 spawnParticles 近似,登记债)。
+      //  lit pass 逐像素乘光的近似与 170/175/180 常量族同口径备案。
+      case 172: return { rgb: 250 / 255, a: 150 / 255 };                        // :2623-2626
       case 185: return { rgb: 200 / 255, a: 125 / 255 };                        // :2635-2637(蓝通道 255 标量近似备案)
       case 182: case 206: return { rgb: 1, a: 0 };   // :2517/:2595 同句 (255,255,255,0)——A=0 预乘加法白光,恒亮不读尘 α
       case 267: return { rgb: 1, a: 0 };                                        // :2743-2746 Color(color.RGB,0)——色走 color pass

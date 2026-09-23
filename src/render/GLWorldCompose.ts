@@ -43,10 +43,24 @@ const LIT_VERT = GLWorldLight.VERT.replace('1.0 - aPos.y * 2.0', 'aPos.y * 2.0 -
  *  ⑥ 输出 min(255,·) 钳位 + α=255 同 CPU;UNORM 回写 round(k/255·255)=k 精确。
  *  朝向：复用 LIT_VERT（no-flip）→ FBO v0=图像顶 ≙ lightCanvas 上传布局,
  *  pass1 uLightRect 映射零改动。 */
-const LRECON_FRAG = `precision highp float;
+const LRECON_VERT = `#version 300 es
+in vec2 aPos;
+out vec2 vUv;
+void main() {
+  vUv = aPos;
+  // no-flip（同 LIT_VERT 派生式）:aPos.y=0→clip-1→FBO row0=v0=图像顶
+  gl_Position = vec4(aPos.x * 2.0 - 1.0, aPos.y * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+/** ★300 es 对（usampler2D/texelFetch 需 ESSL3——ESSL1 无 usampler=编译失败,
+ *  2026-09-23 用户实报全黑案真凶）。★VERT/FRAG 必须同版本——混编非法。 */
+const LRECON_FRAG = `#version 300 es
+precision highp float;
+precision highp usampler2D;
 uniform highp usampler2D uRaw;
 uniform int uRx; uniform int uRy; uniform int uRw; uniform int uRh;
 uniform int uTx0; uniform int uTy0;
+in vec2 vUv;
 out vec4 outColor;
 void main() {
   ivec2 fc = ivec2(gl_FragCoord.xy);
@@ -67,7 +81,6 @@ void main() {
   outColor = vec4(min(vec3(255.0), floor(r + 0.5)) / 255.0, 1.0);
 }`;
 
-/** ★A3 raw 光照采样面（scan 输出直传——零 CPU 重建/putImageData/脏带/带 blit） */
 export interface RawLight {
   r: Uint8Array; g: Uint8Array; b: Uint8Array;
   rx: number; ry: number; rw: number; rh: number;   // 光照扫描窗（tile 系）
@@ -94,7 +107,14 @@ export class GLWorldCompose {
   private texRaw: WebGLTexture | null = null;      // ★A3 raw 光照（RGBA8UI,+1 零边框）
   private fboLight2: PipelineFbo | null = null;    // ★A3 recon 产出（SS=2 小图,替代 lightCanvas 带上传）
   private pRecon: PipelineProgram | null = null;
+  /** recon 编译失败位（只废 A3;A2 照常） */
+  private lreconDead = false;
   private _rawBuf: Uint8Array | null = null;
+  /** ★RGBA8UI 上传被驱动拒后永久回落 lightCanvas 路径（getError 体检位） */
+  private _rawBroken = false;
+  private _rawWarned = false;
+  /** ★诊断:最近一次 compose 失败原因（探针面） */
+  lastFail = '';
   private _texKeyWorld = '';
   private _texKeyLight = '';
   private _texKeyNoise = '';
@@ -110,8 +130,11 @@ export class GLWorldCompose {
     if (!gl) return;
     this.pLit = this.pipeline.program('worldLight', LIT_VERT, GLWorldLight.FRAG);
     this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
-    this.pRecon = this.pipeline.program('lrecon', LIT_VERT, LRECON_FRAG);
-    if (!this.pLit?.prog || !this.pDistort?.prog || !this.pRecon?.prog) { this.unavailable = true; return; }
+    this.pRecon = this.pipeline.program('lrecon', LRECON_VERT, LRECON_FRAG);
+    if (!this.pLit?.prog || !this.pDistort?.prog) { this.unavailable = true; return; }
+    // ★pRecon 编译失败只废 A3（lreconDead）不废 A2——原全有全无 early-return 会
+    //  跳过纹理创建,recreate 复活后半残态=黑世界（2026-09-23 用户实报案）
+    this.lreconDead = !this.pRecon?.prog;
     this.texRaw = gl.createTexture();
     this.setParams(gl, this.texRaw, 'NEAREST', 'CLAMP');   // texelFetch 不经采样器过滤;NEAREST 合法搭配
     // 纹理创建+采样参数（逐字对照两原模块 init:GLWorldLight.ts:140-148 / GLWaterDistortion.ts:243-270 表）
@@ -151,9 +174,9 @@ export class GLWorldCompose {
   ): boolean {
     const pipeline = this.pipeline;
     const gl = pipeline.glx;
-    if (!gl || !this.pLit?.prog || !this.pDistort?.prog || this.unavailable) return false;
+    if (!gl || !this.pLit?.prog || !this.pDistort?.prog || this.unavailable) { this.lastFail = 'unavailable'; return false; }
     const w = world.width, h = world.height;
-    if (w === 0 || h === 0) return false;
+    if (w === 0 || h === 0) { this.lastFail = 'dim'; return false; }
     pipeline.beginFrame(w, h);
     // ---- Pass1：world × light → FBO('lit')（GLWorldLight.composite:179-232 逐式） ----
     this.fboLit = pipeline.fbo('lit', w, h);
@@ -178,10 +201,17 @@ export class GLWorldCompose {
     // ★A3 支路：rawLight 在场 → recon pass0 产 FBO('light2')（替代 lightCanvas
     //   带上传——CPU 4-tap 重建/putImageData/脏带比对/带 blit 四消）;缺省走原路径
     let lightTex: WebGLTexture | null = this.texLight;
+    // ★recon 不可用时必须整体返 false——调用方（Renderer lrecon 分支）在本帧【跳过了
+    //  CPU 重建】,若此处回落 texLight 空纹理=黑世界（2026-09-23 实报案第二层）。
+    //  返 false → Renderer 继续走 CPU 重建 → A2/旧链照常。
+    if (rawLight && (this._rawBroken || this.lreconDead || !this.pRecon?.prog)) {
+      this.lastFail = 'guard:' + (this._rawBroken ? 'rawBroken' : this.lreconDead ? 'lreconDead' : 'noprog');
+      return false;
+    }
     if (rawLight && this.pRecon?.prog) {
       if (!this.uploadRaw(gl, rawLight)) return false;
       this.fboLight2 = pipeline.fbo('light2', rawLight.w2, rawLight.h2);
-      if (!this.fboLight2 || !this.fboLight2.tex) return false;
+      if (!this.fboLight2 || !this.fboLight2.tex) { this.lastFail = 'fbo'; return false; }
       pipeline.bindTarget(this.fboLight2);
       gl.viewport(0, 0, rawLight.w2, rawLight.h2);
       gl.useProgram(this.pRecon.prog);
@@ -320,7 +350,14 @@ export class GLWorldCompose {
     gl.bindTexture(gl.TEXTURE_2D, this.texRaw);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // ★先排空历史错误队列再体检——getError 返回最老未读错误,不排空会把帧内
+    //  其他调用的旧错误记到本次上传头上（2026-09-23 探针实测误伤案）
+    while (gl.getError() !== gl.NO_ERROR) { /* 排空 */ }
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, W, H, 0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, buf);
+    // ★RGBA8UI 上传体检：被驱动拒（INVALID_OPERATION）时纹理不完整 → texelFetch
+    //  恒 0 → recon 全黑 → 世界全黑（用户实报案防御）——坏即 _rawBroken 回落
+    //  lightCanvas 路径（compose 返 false → Renderer 落 CPU 重建+A2/旧链）。
+    if (gl.getError() !== gl.NO_ERROR) { this._rawBroken = true; this.lastFail = 'raw-upload-glerror'; return false; }
     glStatUpload(this.pipeline.statName, W * H * 4);
     return true;
   }
@@ -368,7 +405,8 @@ export class GLWorldCompose {
       // ★程序登记重跑（pipeline.recreate 清空程序表——句柄重注册,否则悬空）
       this.pLit = this.pipeline.program('worldLight', LIT_VERT, GLWorldLight.FRAG);
       this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
-      this.pRecon = this.pipeline.program('lrecon', LIT_VERT, LRECON_FRAG);
+      this.pRecon = this.pipeline.program('lrecon', LRECON_VERT, LRECON_FRAG);
+      this.lreconDead = !this.pRecon?.prog;
       const gl = this.pipeline.glx;
       if (gl) {
         this.texWorld = gl.createTexture();

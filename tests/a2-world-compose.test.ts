@@ -15,8 +15,18 @@ describe('A2 GLWorldCompose 结构锁', () => {
     expect(composeSrc).toContain('LIT_VERT, GLWorldLight.FRAG');
     expect(composeSrc).toContain('GLWaterDistortion.VERT, GLWaterDistortion.FRAG');
     expect(composeSrc).toContain('GLWorldLight.VERT.replace(');
-    // 模块内不得出现内联 GLSL（转录副本=漂移源）
-    expect(composeSrc).not.toMatch(/#version 300 es/);
+    // recon 对=内联 300 es（usampler2D 需 ESSL3——ESSL1 编译失败=黑世界案真凶）
+    expect(composeSrc).toContain("const LRECON_VERT = `#version 300 es");
+    expect(composeSrc).toContain("const LRECON_FRAG = `#version 300 es");
+    expect(composeSrc).toContain("program('lrecon', LRECON_VERT, LRECON_FRAG)");
+  });
+
+  it('★recon 失效域锁（2026-09-23 黑世界案第二层）:pRecon 失败只废 A3+compose 返 false', () => {
+    // 构造器不得因 pRecon 失败整体 unavailable（跳过纹理创建=recreate 半残态）
+    expect(composeSrc).toContain('this.lreconDead = !this.pRecon?.prog;');
+    expect(composeSrc).toContain('this.lreconDead = !this.pRecon?.prog;\n      const gl');
+    // recon 不可用时 compose 必须返 false（调用方落 CPU 重建,禁空 texLight 黑屏）
+    expect(composeSrc).toContain('if (rawLight && (this._rawBroken || this.lreconDead || !this.pRecon?.prog)) return false;');
   });
 
   it('两级 pass FBO 链（lit→warped→present;scene 直采 FBO 纹理免重传）', () => {

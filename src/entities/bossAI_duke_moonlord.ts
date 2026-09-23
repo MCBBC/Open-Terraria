@@ -272,6 +272,36 @@ function dukeHover(e: Enemy, player: Player, acc: number, spd: number, sideOff: 
   st.spr = -st.dir;
 }
 
+/** 冲撞尾流（:49696-49708 / :49964-49976 / :50171-50189 三态逐字同构;1456 :49544-49554 系）。
+ *  原版每 tick 7 粒 d172（气泡尾流,α100/scale1.4,后置 noGravity+noLight）：
+ *   · pos = center + [norm(v)⊙((w+50)/2,h)·0.75].RotatedBy((j−2)·π/7) + vector5
+ *     ——★Vector2×Vector2=组件乘(RB12a 家族);扇形角 (j−2)π/7, j=0..6（原版整除
+ *     num29/2−1=2,非对称扇）;vector5 = 均匀角 [−π/2,π/2) × Next(3,8)=3..7 整数幅;
+ *   · NewDust 0×0 盒 → 池内 +4 落点/±2 初速抖动由 spawnDust 1:1 承载;
+ *   · 后置覆写：noLight=true、velocity=(抖动+v5·2)/4 − npc 速度（尾流向后拖——
+ *     冲刺时尘相对本体后掠的观感来源）。
+ *  ★BJ310（2026-09-23,用户实报"冲刺没有粒子"）：旧实现 = 2 粒 #8FD8FF 泛用
+ *  spawnParticles（case6/11 连偏移都没有）——d172 尾流整缺,本案判谳锚。 */
+function dukeDashDust(e: Enemy, game: GameHooks): void {
+  const nv = Math.hypot(e.vx, e.vy) || 1;
+  const nvx = e.vx / nv, nvy = e.vy / nv;
+  for (let j = 0; j < 7; j++) {
+    const ang = (j - 2) * Math.PI / 7;
+    const bx = nvx * ((e.w + 50) / 2) * 0.75, by = nvy * e.h * 0.75;
+    const rx = bx * Math.cos(ang) - by * Math.sin(ang), ry = bx * Math.sin(ang) + by * Math.cos(ang);
+    const a5 = Math.random() * Math.PI - Math.PI / 2;
+    const m5 = 3 + Math.floor(Math.random() * 5);          // Main.rand.Next(3,8) → 3..7
+    const v5x = Math.cos(a5) * m5, v5y = Math.sin(a5) * m5;
+    const d = game.spawnDust?.(e.cx + rx + v5x, e.cy + ry + v5y, 0, 0, 172,
+      v5x * 2, v5y * 2, 100, null, 1.4, true);
+    if (d) {   // 池满 null → 原版 Main.dust[6000] 越界槽不存在的等价豁免
+      d.noLight = true;
+      d.vx = d.vx / 4 - e.vx;
+      d.vy = d.vy / 4 - e.vy;
+    }
+  }
+}
+
 /** 猪鲨 FindFrame(NPC.cs FindFrame case 370 :72824-72917)——AI 侧每 tick 维护,
  *  帧号直写 customFrameIdx 供渲染端直读(694 先例;npcFrameT = frameCounter)。
  *  帧 0-5 = 游动帶(6t/帧,二阶段悬浮 5t/帧)、6/7 = 张口帶;8 帧贴图:
@@ -429,7 +459,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       break;
     }
     case 1: { // 冲撞(:49544-49566)
-      game.spawnParticles(e.cx + e.w / 2 - Math.cos(e.spin) * e.w * 0.3, e.cy + e.h / 2 - Math.sin(e.spin) * e.h * 0.3, '#8FD8FF', 2, 1.5, { life: 18 });
+      dukeDashDust(e, game);                                // ★BJ310:7×d172 尾流(旧=2 粒泛用近似,整缺判谳)
       e.ai2 += 1;
       if (e.ai2 >= chargeT) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 += 2; }
       break;
@@ -498,7 +528,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       break;
     }
     case 6: { // 二阶段冲撞(:49812-49834)
-      game.spawnParticles(e.cx, e.cy, '#8FD8FF', 2, 1.5, { life: 18 });
+      dukeDashDust(e, game);                                // ★BJ310:7×d172 尾流(同态1)
       e.ai2 += 1;
       if (e.ai2 >= chargeT) { e.ai0 = 5; e.ai1 = 0; e.ai2 = 0; e.ai3 += 2; }
       break;
@@ -559,7 +589,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
     }
     case 11: { // expert 狂暴段冲撞(:50019-50047)
       e.spawnAlpha = Math.max(0, e.spawnAlpha - 25);
-      game.spawnParticles(e.cx, e.cy, '#8FD8FF', 2, 1.5, { life: 18 });
+      dukeDashDust(e, game);                                // ★BJ310:7×d172 尾流(同态1)
       e.ai2 += 1;
       if (e.ai2 >= chargeT) { e.ai0 = 10; e.ai1 = 0; e.ai2 = 0; e.ai3 += 1; }
       break;

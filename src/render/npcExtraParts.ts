@@ -284,94 +284,220 @@ export function draw522Overlay(
   }
 }
 
-// ---- Duke Fishron 370 残影系统（Main.cs aiStyle 69 分支内 value76 链）----
-// oldPos 拖影（10 段间隔 2）+ 圆周爆发残影（N 张绕本体均匀角度）+ ai0≥4 换贴图。
+// ---- Duke Fishron 370/372/373 残影系统（Main.cs :24674-24856 aiStyle 69 case 逐值）----
+// 结构（原版 case 内绘制序）：①npcColor 相位染色 → ②oldPos 拖影（NPC 贴图）→
+// ③圆周脉冲拷贝（NPC 贴图）→ ④本体（Renderer 通用路径）→ ⑤ai0≥4 DukeFishron.png
+// 叠层（trail 步 1 + burst i=1 起 + 本体叠画，Yellow 系配色）。
+// ★BJ310 续刀（2026-09-23 用户追问"二阶段形态贴图移植对吗"定谳=近似版偏差重写）：
+//  旧实现（2026-08-27 审计批）三处结构性偏差——a) ai0≥4 把残影贴图【整换】为
+//  DukeFishron.png，原版是 NPC_370 本体之上【另画一整层】（:24802 门后 value76 重赋
+//  值，本体仍画 NPC_370）；b) 圆周爆发状态表自造（悬浮 0/5/10 发 7 张 α=0 恒零、
+//  ai0≥4 恒发 10 张 R10 α0.5）——原版仅 3/8 态 ai2>60(R40)/4 态 ai2>120(R60)/
+//  9 态 ai2>120(R60)/12 态(R20) 四窗、amp=(1−cos)/3 振荡、α×(1−amp)；c) 拖影段数
+//  态表（num335：−1 态 0/悬浮 0·5·10 态 7/其余 10）与 ×0.5 α 因子（原版无此数）
+//  缺失，ai0==1 蓝色冲刺残影（Lerp(色,Blue,0.5)）整缺。
+// XNA Color 语义备忘：Color×float 乘 RGBA 四通道（=premultiplied α 同步衰减，Canvas
+// 侧等价【bake rgb×k + globalAlpha=k】）；Color.Lerp 截断取整（(int) 戄断,127.5→127）。
+// 残影 rotation/flip = 本体当前值（原版 :24742 传 rCurrentNPC.rotation+spriteEffects,
+// 非历史值）;位置 = oldPos[i] 中心（绝对世界位,不随本体 transform）。
+// 登记债（per-channel 手术域,非本批）：GetAlpha d370 蓝通道增亮（NPC.cs:94684-94691
+// B×Lerp((255−α)/255,1,0.25),α>0 即入块半隐时可见）对拖影/爆发/本体三面均未实现;
+// 冲刺蓝残影的 light 无关蓝加项在暗处偏差（bake 乘 (0.5,0.5,1) 在光照=1 时逐值精确）。
+
+/** 猪鲨相位染色（Main.cs :24686-24699 buffColor 链,0-1 rgb 乘数）——本体/拖影/爆发
+ *  共用。ai0>9 终怒 (0.4,0.8,0.4)/ai0>4 二阶段 (0.5,0.7,0.5)/变身窗 ai0==4&&ai2>120
+ *  渐变 ramp k=(ai2−120)/60。null = 无染色（一阶段常规）。 */
+export function dukePhaseTint(e: Enemy): [number, number, number] | null {
+  if (e.vanillaId !== 370) return null;
+  const ai0 = e.ai0, ai2 = e.ai2 ?? 0;
+  if (ai0 > 9) return [0.4, 0.8, 0.4];
+  if (ai0 > 4) return [0.5, 0.7, 0.5];
+  if (ai0 === 4 && ai2 > 120) {
+    const t = (ai2 - 120) / 60;
+    return [1 - 0.5 * t, 1 - 0.3 * t, 1 - 0.5 * t];
+  }
+  return null;
+}
+
+/** num335 拖影段数态表（Main.cs :24700-24712）：370 的 −1 态 0/悬浮 0·5·10 态 7/
+ *  其余（含 372/373 全态）10。 */
+function dukeTrailCount(e: Enemy): number {
+  if (e.vanillaId !== 370) return 10;
+  if (e.ai0 === -1) return 0;
+  if (e.ai0 === 0 || e.ai0 === 5 || e.ai0 === 10) return 7;
+  return 10;
+}
+
+/** 圆周脉冲参数（Main.cs :24747-24786）：[拷贝数 num338, 幅 num339, 半径 num340]。
+ *  3/8 态 ai2>60 → R40；(4/9) 态 ai2>120 → R60；12 态 → R20；amp=(1−cos(θ))/3。 */
+function dukeBurstParams(e: Enemy): [number, number, number] {
+  const ai0 = e.ai0, ai2 = e.ai2 ?? 0;
+  if ((ai0 === 3 || ai0 === 8) && ai2 > 60) {
+    return [6, (1 - Math.cos(((ai2 - 60) / 30) * Math.PI * 2)) / 3, 40];
+  }
+  if ((ai0 === 4 || ai0 === 9) && ai2 > 120) {
+    return [6, (1 - Math.cos(((ai2 - 120) / 60) * Math.PI * 2)) / 3, 60];
+  }
+  if (ai0 === 12) {
+    return [6, (1 - Math.cos((ai2 / 30) * Math.PI * 2)) / 3, 20];
+  }
+  return [0, 0, 0];
+}
+
+/** 染色帧烘焙缓存（key 含 vid/贴图/变体/量化色）。multiply+destination-in。 */
+function dukeBake(
+  atlas: SpriteAtlas, texKey: string, tex: HTMLImageElement | HTMLCanvasElement,
+  frame: { sx: number; sy: number; sw: number; sh: number },
+  tint: [number, number, number], variant: string,
+): HTMLCanvasElement | null {
+  if (!dukeBake._cache) dukeBake._cache = new Map<string, HTMLCanvasElement>();
+  const q = (v: number) => Math.round(v * 255) & ~15;   // 0-1→0-255 量化 16 步进（ramp 60 值→≤4 桶/通道）
+  const key = `${texKey}|${variant}|${q(tint[0])}_${q(tint[1])}_${q(tint[2])}|${frame.sx},${frame.sy},${frame.sw},${frame.sh}`;
+  let c = dukeBake._cache.get(key);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = frame.sw; c.height = frame.sh;
+  const tc = c.getContext('2d')!;
+  tc.drawImage(tex, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, frame.sw, frame.sh);
+  tc.globalCompositeOperation = 'multiply';
+  tc.fillStyle = `rgb(${Math.round(tint[0] * 255)},${Math.round(tint[1] * 255)},${Math.round(tint[2] * 255)})`;
+  tc.fillRect(0, 0, frame.sw, frame.sh);
+  tc.globalCompositeOperation = 'destination-in';
+  tc.drawImage(tex, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, frame.sw, frame.sh);
+  dukeBake._cache.set(key, c);
+  return c;
+}
+// eslint-disable-next-line @typescript-eslint/no-namespace
+export namespace dukeBake {
+  export let _cache: Map<string, HTMLCanvasElement> | undefined;
+}
+
+/** layer='base'：NPC 贴图拖影+爆发（本体之下,pre-transform 挂点）；
+ *  layer='overlay'：370 且 ai0≥4 的 DukeFishron.png 叠层（本体之上,后绘挂点）。
+ *  npcColor = 相位染色 dukePhaseTint(e) ?? [255,255,255]（调用方传入）。 */
 export function drawDukeAfterimages(
   ctx: Ctx, e: Enemy, atlas: SpriteAtlas,
   frame: { sx: number; sy: number; sw: number; sh: number },
   npcColor: [number, number, number],
+  layer: 'base' | 'overlay' = 'base',
 ): void {
   const vid = e.vanillaId;
   if (vid !== 370 && vid !== 372 && vid !== 373) return;
   const ai0 = e.ai0;
   const s = e.vanillaScale || 1;
-  // 贴图选择：ai0≥4 → DukeFishron.png（黄色怒态），否则 NPC_370 正常帧
-  const useDuke = vid === 370 && ai0 >= 4;
-  const tex = useDuke
+  const isDuke = vid === 370;
+  if (layer === 'overlay' && !(isDuke && ai0 >= 4)) return;   // :24802 叠层门
+
+  const overlay = layer === 'overlay';
+  const tex = overlay
     ? atlas.ensureVImage('vanilla/DukeFishron.png')
     : atlas.ensureVImage(`vanilla/NPC_${vid}.png`);
   if (!tex) return;
 
-  // npcColor 状态色（vanilla buffColor 链：ai0>9 绿×(0.4,0.8)、ai0>4 绿×(0.5,0.7)、
-  // ai0==4 && ai[2]>120 白→黄渐变）
-  let cr = 1, cg = 1, cb = 1;
-  if (vid === 370) {
-    if (ai0 > 9) { cr = 0.4; cg = 0.8; }
-    else if (ai0 > 4) { cr = 0.5; cg = 0.7; }
-    else if (ai0 === 4 && (e.ai2 ?? 0) > 120) {
-      const t = Math.min(1, ((e.ai2 ?? 0) - 120) / 60);
-      cr = 1 - 0.5 * t; cg = 1 - 0.3 * t; cb = 1 - 0.5 * t;
-    }
-  }
+  // XNA 颜色链（:24707-24721 基座 / :24806-24812 叠层）：
+  //  基座拖影/爆发色 = Lerp(color46, value77, amount11) → GetAlpha → ×段衰减；
+  //  color46 在非冲刺态被重赋值为【染色后】npcColor（:24720）；ai0==1 冲刺保
+  //  染色前值且 Lerp 目标 = Blue(0,0,255)、量 0.5（:24713-24717,372/373 同款
+  //  :24725-24728）——ai0==1 与 ai0>4 互斥,染色前=染色后（等价简化,登记）。
+  //  叠层色：color47 = Lerp(White,Yellow,0.5) = (255,255,127)（(int) 戫断）、
+  //  value77 = Yellow、amount11 = 1（trail/burst 色恒 = Yellow×k）、本体 = color47。
+  const blue = !overlay && ai0 === 1;
+  const cr = npcColor[0], cg = npcColor[1], cb = npcColor[2];
+  const ghostTint: [number, number, number] = overlay
+    ? [1, 1, 0]                                       // Yellow(255,255,0)
+    : blue
+      ? [cr * 0.5, cg * 0.5, cb * 0.5 + 0.5]          // Lerp(色,Blue,0.5)（登记债:蓝加项）
+      : [cr, cg, cb];
+  const baked = dukeBake(atlas, overlay ? 'DukeFishron' : `NPC_${vid}`, tex, frame, ghostTint,
+    overlay ? 'ov' : blue ? 'blue' : 'n');
+  if (!baked) return;
 
-  // oldPos 拖影 + 圆周爆发残影（XNA 颜色 = buffColor(npcColor, …) × GetAlpha——
-  // Canvas2D 1:1 = drawImage 后 globalCompositeOperation='multiply' 乘 tint 色 +
-  // 'destination-in' 保 alpha → 等效 XNA 预乘 tint×alpha 混合）。
-  // 缓存 canvas 避免每帧 per-afterimage 重烤（≤3 状态 × 1 贴图）。
-  const depth = e.historyDepth();
-  // 状态色 → RGB 0-255（vanilla buffColor 链已算入 cr/cg/cb）
-  const tintR = Math.round(cr * 255), tintG = Math.round(cg * 255), tintB = Math.round(cb * 255);
-  // 缓存 canvas（懒建、复用——同帧多残影不重烤）
-  const tintKey = `${tintR}_${tintG}_${tintB}_${frame.sw}x${frame.sh}`;
-  if (!drawDukeAfterimages._cache) drawDukeAfterimages._cache = new Map<string, HTMLCanvasElement>();
-  let tinted = drawDukeAfterimages._cache.get(tintKey);
-  if (!tinted) {
-    tinted = document.createElement('canvas');
-    tinted.width = frame.sw; tinted.height = frame.sh;
-    const tc = tinted.getContext('2d')!;
-    tc.drawImage(tex, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, frame.sw, frame.sh);
-    tc.globalCompositeOperation = 'multiply';
-    tc.fillStyle = `rgb(${tintR},${tintG},${tintB})`;
-    tc.fillRect(0, 0, frame.sw, frame.sh);
-    tc.globalCompositeOperation = 'destination-in';
-    tc.drawImage(tex, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, frame.sw, frame.sh);
-    drawDukeAfterimages._cache.set(tintKey, tinted);
-  }
-  // oldPos 拖影（10 段间隔 2、α=(10-i)/15×0.5）
-  for (let i = 1; i < 10; i += 2) {
-    if (i >= depth) continue;
-    const alpha = ((10 - i) / 15) * 0.5;
-    const ox = e.histXAt(i) + e.w / 2 - frame.sw * s / 2;
-    const oy = e.histYAt(i) + e.h / 2 - frame.sh * s / 2;
+  // 共同变换：本体当前 rotation(e.spin)+flip（:24742 spriteEffects 同源,B1-E10 门）
+  const withGhostTransform = (px: number, py: number, draw: () => void): void => {
     ctx.save();
-    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    ctx.drawImage(tinted, ox, oy, frame.sw * s, frame.sh * s);
+    ctx.translate(px, py);
+    if (e.spin) ctx.rotate(e.spin);
+    ctx.scale(s * (e.facing > 0 ? -1 : 1), s);
+    draw();
     ctx.restore();
+  };
+
+  if (!overlay) {
+    // ---- ②基座拖影（:24732-24743）：i=1,3,…<num335（步 num336=2）----
+    const num335 = dukeTrailCount(e);
+    const num = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;   // GetAlpha 缺省尾
+    for (let i = 1; i < num335; i += 2) {
+      if (i >= e.historyDepth()) continue;
+      const alpha = num * ((num335 - i) / 15);
+      if (alpha <= 0.004) continue;
+      const px = e.histXAt(i) + e.w / 2, py = e.histYAt(i) + e.h / 2;
+      withGhostTransform(px, py, () => {
+        ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+        ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
+      });
+    }
+    // ---- ③基座圆周脉冲（:24787-24797）：i=0..5，位=Center+((i/6)2π+rotation)·R·amp ----
+    const [n338, amp, rad] = dukeBurstParams(e);
+    for (let i = 0; i < n338; i++) {
+      const ang = (i / n338) * Math.PI * 2 + e.spin;
+      const px = e.cx + Math.cos(ang) * rad * amp;
+      const py = e.cy + Math.sin(ang) * rad * amp;
+      withGhostTransform(px, py, () => {
+        ctx.globalAlpha = Math.max(0, Math.min(1, num * (1 - amp)));
+        ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
+      });
+    }
+    return;
   }
 
-  // 圆周爆发残影（ai0 特定态）
-  let burstN = 0, burstR = 0, burstAlpha = 0;
-  if (vid === 370) {
-    if (ai0 === -1) { burstN = 0; }
-    else if (ai0 === 0 || ai0 === 5 || ai0 === 10) { burstN = 7; burstR = 10; burstAlpha = 0; }
-    else if (ai0 >= 4) { burstN = 10; burstR = 10; burstAlpha = 0.5; }
-    if (burstN > 0) {
-      for (let i = 0; i < burstN; i++) {
-        const ang = (i / burstN) * Math.PI * 2 + (e.visAngle || 0);
-        const dx = e.cx + Math.cos(ang) * burstR * s;
-        const dy = e.cy + Math.sin(ang) * burstR * s;
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, Math.min(1, burstAlpha));
-        ctx.drawImage(tinted, dx - frame.sw * s / 2, dy - frame.sh * s / 2, frame.sw * s, frame.sh * s);
-        ctx.restore();
-      }
-    }
+  // ---- ⑤DukeFishron 叠层（:24806-24855）。k 因子（Color×float 乘 RGBA=α 同步衰减）：
+  //  ai0==4 → k=(ai2−120)/60 渐显；ai0==12 → 三角脉冲 1−|2·ai2/30−1|；其余 1。 ----
+  const ai2 = e.ai2 ?? 0;
+  let k = 1;
+  if (ai0 === 4) k = (ai2 - 120) / 60;
+  else if (ai0 === 12) {
+    let t = ai2 / 30;
+    if (t > 0.5) t = 1 - t;
+    k = 1 - t * 2;
   }
-}
-// 缓存挂载点（TypeScript 静态属性扩展）
-// eslint-disable-next-line @typescript-eslint/no-namespace
-export namespace drawDukeAfterimages {
-  export let _cache: Map<string, HTMLCanvasElement> | undefined;
+  if (k <= 0) return;
+  const num335 = dukeTrailCount(e);
+  // 叠层拖影（:24833-24843）：num336 重赋 1 → i=1..num335−1 步 1；【无 GetAlpha】
+  // （:24838 仅 ×(num335−i)/15）；色 = Lerp(color47,Yellow,1) = Yellow×k。
+  for (let i = 1; i < num335; i += 1) {
+    if (i >= e.historyDepth()) continue;
+    const alpha = k * ((num335 - i) / 15);
+    if (alpha <= 0.004) continue;
+    const px = e.histXAt(i) + e.w / 2, py = e.histYAt(i) + e.h / 2;
+    withGhostTransform(px, py, () => {
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
+    });
+  }
+  // 叠层圆周脉冲（:24844-24854）：i=1..num338−1（【1 起】,基座 0 起）；色 = Yellow →
+  // GetAlpha（ai0≥4 → 缺省尾 num）→ ×(1−num339=0.5)。
+  const [n338] = dukeBurstParams(e);
+  const num = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+  for (let i = 1; i < n338; i++) {
+    const ang = (i / n338) * Math.PI * 2 + e.spin;
+    const px = e.cx + Math.cos(ang) * 10 * 0.5;
+    const py = e.cy + Math.sin(ang) * 10 * 0.5;
+    withGhostTransform(px, py, () => {
+      ctx.globalAlpha = Math.max(0, Math.min(1, k * num * (1 - 0.5)));   // value77×k 的 Color×float 乘 A → α 含 k
+      ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
+    });
+  }
+  // 叠层本体（:24855）：色 = color47 = (255,255,127)×k（GetAlpha 不经——α 不随
+  // spawnAlpha 衰减,瞬移态本体隐而金光留=原版本相）。k 进 rgb bake（Color×float,
+  // ai2<120 时 k<0 的负色域原文字节回绕无定义,本仓 k≤0 早退=同效不可见,登记）。
+  const bodyTint: [number, number, number] = [k, k, (127 / 255) * k];   // color47=(255,255,127)×k
+  const bakedBody = dukeBake(atlas, 'DukeFishron', tex, frame, bodyTint, 'ovBody');
+  if (bakedBody) {
+    withGhostTransform(e.cx, e.cy, () => {
+      ctx.globalAlpha = 1;
+      ctx.drawImage(bakedBody, -frame.sw / 2, -frame.sh / 2);
+    });
+  }
 }
 
 // ---- 大宝箱怪 473-476 拖影（NPCID.Sets.TrailingMode=2 老位历史残影）----

@@ -77,7 +77,8 @@ async function capture(label) {
     console.log(`[${label}] 漂移定位: n=${loc.n} maxΔ=${loc.maxd} bbox=${JSON.stringify(loc.bbox)}`);
   }
   L.chk(`[${label}] 连续帧确定性`, m1 === m2, m1 === m2 ? '' : '随机面在场');
-  return { m1, b64: b1 };
+  const path = await page.evaluate(() => window.__swGame.renderer.composePathUsed);
+  return { m1, b64: b1, path };
 }
 
 await page.evaluate(() => window.__wfboSet(false));
@@ -89,6 +90,8 @@ const C = await capture('C 翻回');
 // ★A3 光照 GPU 重建翻面（D=wfbo+lrecon,E=lrecon 翻回,F=全回）
 await page.evaluate(() => { window.__lreconSet = (v) => window.__swGame.renderer.constructor.lreconSetForTest(v); });
 await page.evaluate(() => { window.__wfboSet(true); window.__lreconSet(true); });
+const dcond = await page.evaluate(() => { const R = window.__swGame.renderer.constructor; const g = window.__swGame.renderer; return { wfbo: R.wfbo, lrecon: R.lrecon, cpu: g.isCpuRender(), wc: !!g.worldCanvas, fail: wc0() }; function wc0() { try { return (window.__swGame.renderer).worldCompose?.lastFail ?? 'n/a'; } catch { return 'err'; } } });
+console.log('D cond:', JSON.stringify(dcond));
 const D = await capture('D FBO+GPU光照');
 await page.evaluate(() => window.__lreconSet(false));
 const E = await capture('E lrecon翻回');
@@ -111,6 +114,7 @@ if (A.m1 !== B.m1) {
   L.chk('[land] diff 分级（0=字节等价;≤1-2LSB 备案口径）', d.n === 0, `diff=${d.n} maxΔ=${d.maxd}`);
 }
 console.log(`D=${D.m1.slice(0, 10)} E=${E.m1.slice(0, 10)} F=${F.m1.slice(0, 10)}`);
+L.chk('[land] D 态实走 recon 路径', D.path === 'lrecon', '实际=' + D.path);
 L.chk('[land] D==B（GPU 光照重建 ≡ lightCanvas 路径）', D.m1 === B.m1, `D=${D.m1.slice(0, 8)} B=${B.m1.slice(0, 8)}`);
 L.chk('[land] E==B（lrecon 翻回无残留）', E.m1 === B.m1, `E=${E.m1.slice(0, 8)}`);
 L.chk('[land] F==A（全回恢复）', F.m1 === A.m1, `F=${F.m1.slice(0, 8)}`);

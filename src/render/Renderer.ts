@@ -253,7 +253,7 @@ import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
-  drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay,
+  drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
   drawMimicAfterimages, drawNpcTrailGhosts, drawNpcTrailGhostsOverBody,
   drawNpcAuraRings, NPC_AURA_RING_IDS, NPC_TRAIL_GHOST_IDS } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
@@ -2795,6 +2795,8 @@ export class Renderer {
   private _b0Wrap: CanvasRenderingContext2D | null = null;
   /** ★A2 光照×扭曲 FBO 链（?wfbo=1 惰性建;unavailable/失败自动落回旧 GL 链） */
   private worldCompose: GLWorldCompose | null = null;
+  /** ★诊断面（2026-09-23 全黑案）:本帧光照合成实际走的路径('lrecon'/'lrecon-fail'/'a2'/'oldchain') */
+  composePathUsed = '';
   /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
   waterWarpMode(): 'auto' | '2d' | 'off' { return this.waterWarp.mode; }
   waterWarpActive(): boolean { return this.waterWarp.active(); }
@@ -7722,13 +7724,16 @@ export class Renderer {
           }
         }
         // 370 猪鲨/372/373 残影系统（vanilla aiStyle 69 分支 value76 链——oldPos 拖影
-        // + 圆周爆发 + ai0≥4 DukeFishron.png 换贴图，2026-08-27 审计补缺）
+        // + 圆周爆发，2026-08-27 审计补缺；★BJ310 续刀重写 1:1+拆双相：base=本层
+        // （本体之下），overlay=DukeFishron.png 叠层迁后绘挂点（原版 :24802-24855
+        // 在本体 Draw 之后）——旧版"ai0≥4 残影贴图整换"判谳=结构偏差,见 npcExtraParts 注）
         if (e.vanillaId === 370 || e.vanillaId === 372 || e.vanillaId === 373) {
           const fr370 = this.atlas.vnpc(e.vanillaId, vanillaFrameIdx(e, Math.max(1, e.vanilla?.frames ?? 1)));
           if (fr370) {
             drawDukeAfterimages(ctx, e, this.atlas,
               { sx: fr370.sx, sy: fr370.sy, sw: fr370.sw, sh: fr370.sh },
-              [1, 1, 1]);
+              dukePhaseTint(e) ?? [1, 1, 1],
+              'base');
           }
         }
         // 473-476 大宝箱怪拖影：★BJ248 迁至【本体之上】挂点（本体 restore 后,
@@ -8040,6 +8045,17 @@ export class Renderer {
         // GetNPCColorTintedByBuffs（1457 NPC.cs:92142）debuff 染色乘区先并入 color——
         //   原版 draw color = light × npcColor,tint 是 npcColor 的通道乘区
         const dbTint = e.debuffTintRGB;
+        // ★BJ310 续刀：370 相位染色（Main.cs :24686-24699 buffColor 链——ai0>9 终怒
+        // (0.4,0.8,0.4)/ai0>4 二阶段 (0.5,0.7,0.5)/变身窗 ai0==4&&ai2>120 ramp）。原版
+        // 乘进 npcColor（=light×tint 调制色）,本仓等价整精灵 RGB 乘区（tintedSprite
+        // 通道,与 dbTint 同构,0-1→0-255）;debuff 并存时复合乘（原版两段 buffColor 级联）。
+        const dukeT = dukePhaseTint(e);
+        const dukeTint: number[] | null = dukeT
+          ? [dukeT[0] * 255, dukeT[1] * 255, dukeT[2] * 255]
+          : null;
+        const bodyTint370: number[] | null = dbTint && dukeTint
+          ? [dbTint[0] * dukeTint[0] / 255, dbTint[1] * dukeTint[1] / 255, dbTint[2] * dukeTint[2] / 255]
+          : (dbTint ?? dukeTint);
         const drawColor = dbTint && e.colorRGBA
           ? [e.colorRGBA[0] * dbTint[0] / 255, e.colorRGBA[1] * dbTint[1] / 255,
             e.colorRGBA[2] * dbTint[2] / 255, e.colorRGBA[3]] as number[]
@@ -8166,7 +8182,8 @@ export class Renderer {
             });
         }
         // debuff 染色在身时基础层由下方 tintedSprite(multiply) 版本承担（双画=叠亮）
-        if (!xnaColor && !dbTint) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
+        // ★BJ310：370 相位染色（bodyTint370）同走本门——直绘跳过、tintedSprite 承担
+        if (!xnaColor && !bodyTint370) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
         // 618 血月潜舰触腕叠加层（DrawNPC Extra_129 段：通用帧后追加同帧叠画）
         if (e.vanillaId === 618) {
           drawDreadnautilusOverlay(ctx, e, this.atlas,
@@ -8211,8 +8228,9 @@ export class Renderer {
         }
         // debuff 染色（无自身 color 的 NPC）：tintedSprite(multiply) 替代基础精灵
         // 直绘——原版 npcColor 乘进 draw color,等价于整精灵 RGB 乘区（α 保持轮廓）
-        else if (dbTint) {
-          const tinted = this.tintedSprite(`npcTint${e.vanillaId}`, r, dbTint);
+        // ★BJ310：370 相位染色（bodyTint370）同通道（key 含量化色,各相位/ramp 桶自分）
+        else if (bodyTint370) {
+          const tinted = this.tintedSprite(`npcTint${e.vanillaId}`, r, bodyTint370);
           if (tinted) {
             ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
             ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h,
@@ -8271,6 +8289,14 @@ export class Renderer {
         // 微光染色管线→恒等备案同 BJ209 惯例。记录面 mode 2 态门 4/4.1/5/6 不变）
         if (e.vanillaId === 473 || e.vanillaId === 474 || e.vanillaId === 475 || e.vanillaId === 476) {
           drawMimicAfterimages(ctx, e, this.atlas, { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh });
+        }
+        // ★BJ310 续刀：370 DukeFishron.png 叠层（Main.cs :24802-24855——ai0≥4 门后
+        // value76 重赋值另画一整层：trail 步1 + burst i=1 起 + 本体叠画,Yellow 系,
+        // 4 态 ramp/12 态三角脉冲）。原版该层画在本体 Draw【之后】=本体之上（同 case
+        // 内顺序）→ 后绘挂点（BJ248 同位惯例）；基座拖影/爆发仍在 pre-transform 位。
+        if (e.vanillaId === 370) {
+          drawDukeAfterimages(ctx, e, this.atlas, { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh },
+            dukePhaseTint(e) ?? [1, 1, 1], 'overlay');
         }
         // 星璇塔护盾半球（在精灵之后叠画，对齐原版 DrawNPC 尾段顺序）
         if (isTowerId(e.vanillaId)) this.drawTowerShield(e, world);
@@ -16770,9 +16796,11 @@ export class Renderer {
           { r: lightR, g: lightG, b: lightB, rx, ry, rw, rh, tx0, ty0, w2, h2 },
         );
         if (okL) {
+          this.composePathUsed = 'lrecon';
           this.ctx.drawImage(wcL.pipeline.canvas, 0, 0, viewW, viewH);
           return;
         }
+        this.composePathUsed = 'lrecon-fail:' + (wcL.lastFail || '?');
       }
     }
     if (this.lightCanvas.width !== w2 || this.lightCanvas.height !== h2) {
@@ -17011,6 +17039,7 @@ export class Renderer {
             ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]),
           );
           if (ok) {
+            this.composePathUsed = 'a2';
             this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
             return;
           }
@@ -17018,6 +17047,7 @@ export class Renderer {
       }
       const gl = this.worldLightLayer();   // ★A2：仅旧链路径触达（实例获取后移,见上注）
       if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand)) {
+        this.composePathUsed = 'oldchain';
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
         //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/

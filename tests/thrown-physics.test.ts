@@ -92,7 +92,7 @@ describe('丢弃抛出（DropSelectedItem，Player.cs:4990-4997）', () => {
     } as never;
   }
 
-  it('noGrabDelay=100：30t（>全局 25 门）拾不回，101t 后才拾取', () => {
+  it('noGrabDelay=100：30t 拾不回，101t 后才拾取（原版 GrabDelayForLocalPlayer 同构）', () => {
     const hooks = dropHooks(makeWorld());
     const p = (hooks as unknown as { player: Player }).player;
     const d = new ItemDrop(p.cx, p.y, DIRT_ID, 1, p.facing * 4 + p.vx, -2);  // 丢弃速度公式
@@ -101,19 +101,21 @@ describe('丢弃抛出（DropSelectedItem，Player.cs:4990-4997）', () => {
     d.vx = 0; d.vy = 0;              // 时序段钉在玩家身上（否则飞出/落出拾取范围）
     d.noGrabDelay = 100;
     for (let i = 0; i < 30; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }
-    expect(d.dead).toBe(false);      // 全局 25 门已过但仍被 noGrab 挡住
+    expect(d.dead).toBe(false);      // 仍被 noGrab 挡住（BJ311 前还有全局 25 门,现仅此门）
     expect(p.inv.slots.every((s) => s === null)).toBe(true);
     for (let i = 0; i < 90; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }   // age>100
     expect(d.dead).toBe(true);       // 已被拾取
   });
 
-  it('普通掉落（noGrab=0）走全局 PICKUP_DELAY=25 门', () => {
+  // ★BJ311（2026-09-23）重钉：原版 GrabItems（Player.cs:35181-35203）对普通战利品
+  //  零年龄门——tick1 即可拾取。旧断言「前 25 拍拾不回」钉的是自造全局门
+  //  （wiki-mechanics-audit-2026-08-13.md:912 挂账债,已摘）。
+  it('普通掉落（noGrab=0）tick1 即可拾取（原版 GrabItems 无年龄门,BJ311）', () => {
     const hooks = dropHooks(makeWorld());
     const p = (hooks as unknown as { player: Player }).player;
     const d = new ItemDrop(p.cx, p.y, DIRT_ID, 1, 0, -2);
-    for (let i = 0; i < 20; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }
-    expect(d.dead).toBe(false);
-    for (let i = 0; i < 10; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }   // age>25
-    expect(d.dead).toBe(true);
+    d.x = p.cx; d.y = p.y;           // 拾取判定先于物理段,出生位即可拾
+    d.fixedUpdate(1, hooks);
+    expect(d.dead).toBe(true);       // age=1 即拾（原版同相）
   });
 });

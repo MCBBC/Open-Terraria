@@ -64,8 +64,16 @@ export class ItemDrop extends Entity {
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
   pickup?: 'heart' | 'star' | 'manastar';
-  /** 原版 Item.noGrabDelay：玩家主动抛出的物品 =100t（Player.cs:4990/:4996
-   *  DropSelectedItem），期间抛出者拾不回；普通战利品 0（走全局 PICKUP_DELAY） */
+  /** 原版 grabDelayTime 同构位：玩家主动抛出的物品 =100t（Player.cs:5191
+   *  DropSelectedItem → NewItemOwnership.GrabDelayForLocalPlayer/ForAllPlayers →
+   *  WorldItem.cs:309-317 grabDelayTime=DefaultGrabDelay(100)），GrabItems
+   *  （Player.cs:35183）按 grabDelayPlayer 挡抛出者拾回；普通战利品
+   *  （ownership None→单人 ReserveForLocalPlayer,Item.cs:49737-49740）恒 0。
+   *  ★BJ311（2026-09-23）：摘除全物品统一 25t 拾取延迟门（wiki-mechanics-audit
+   *  -2026-08-13.md:912 挂账债）——原版 GrabItems 无任何年龄门，NPC 掉落 tick1
+   *  即可拾取/拉取；用户实报「岩浆烫死旅商不掉商贩帽」根因：帽触浆首拍即烧
+   *  （CheckLavaDeath 无计时）<26 拍门期 → 贴旁玩家救场窗被关死（原版拉取
+   *  先于物品更新,且被抓取帧跳过岩浆检测=必救活） */
   noGrabDelay = 0;
   /** 实例级放置样式（旗 place_v_91:掉旗时注入 bannerId;拾取随实例流转——
    *  ItemDef.placeStyle 是类级,多 style 单物品需实例位,2026-08-13） */
@@ -208,6 +216,9 @@ export class ItemDrop extends Entity {
 
     const player = (game as unknown as { player: Player }).player;
     let beingGrabbed = false;
+    // ★BJ311（2026-09-23）：摘全局 25t 门（见 noGrabDelay 块注）——仅保留
+    // noGrabDelay（≙原版 grabDelayTime,只挡玩家自抛件）；GrabItems
+    // （Player.cs:35181-35203）对普通战利品零延迟,本门曾连带拉取一起挡 26 拍
     if (player && !player.dead && this.age > PICKUP_DELAY && this.age > this.noGrabDelay) {
       // 顶部速度门（GrabItems Player.cs:34466）：shimmered 且速度 ≥0.2 → **拾取与
       // 拉取整体跳过**（此前只拦拾取不拦拉动 → 拉动加速反而把物品锁死在 ≥0.2 永不可拾）

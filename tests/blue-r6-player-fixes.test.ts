@@ -285,9 +285,9 @@ describe('F5① CanAcceptItemIntoInventory：拖累石 4346 白名单门', () =>
     const dirt = internalIdOfVanilla(176);
     const heart = internalIdOfVanilla(58);
 
-    // 泥土落在身上 → age 过拾取延迟 → 门应挡下（stack 保持在地上）
+    // 泥土落在身上 → 拾取窗已开（BJ311:tick1 即拾,全局 25 门已摘）→ 4346 门应挡下
     const d = new (await import('../src/entities/ItemDrop')).ItemDrop(p.x, p.y, dirt, 2);
-    d.age = 26;                                                   // PICKUP_DELAY=25 之后
+    d.age = 1;                                                    // 过 noGrabDelay 门（=0）
     d.noGrabDelay = 0;
     d.shimmered = false;
     const beforeInv = JSON.stringify(p.inv.slots.map((s) => s ? { id: s.id, stack: s.stack } : null));

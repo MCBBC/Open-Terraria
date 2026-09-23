@@ -45,7 +45,7 @@ import { TownShot, PrincessAuraShot, DryadWardRingShot } from './TownShot';   //
 import { projectileData } from '../data/vanillaProjectiles';
 // ★通用湿段（2026-09-08 F2）：NurseSyringeShot 584 override 自接（基类位被替代）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
-import { resolveDrops, npcValueOf, type NpcDropCtx } from '../drops/NpcDrops';
+import { resolveDrops, npcValueOf, dropVelocity, type NpcDropCtx } from '../drops/NpcDrops';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { RNG } from '../core/rng';
@@ -1565,7 +1565,16 @@ export class TownNPC extends Entity {
     };
     for (const d of resolveDrops(ctx).drops) {
       const key = VANILLA_ITEM_KEY_BY_ID[d.id];
-      if (key) game.spawnDrop(this.cx, this.cy, key, d.n, 0, -2);
+      // ★BJ311（2026-09-23）初速对拍（Item.NewItem 默认支 Item.cs:49756-49764）：
+      //  原版 NPC 掉落初速=随机弹跳（vx=Next(-30,31)×0.1，vy=Next(-40,-15)×0.1
+      //  向上弹；[Obsolete] 整型重载 :49727 中心语义不变）。Enemy.die 同款
+      //  dropVelocity 通道（Enemy.ts:14763/14782）；城镇通道曾固定 (0,-2) →
+      //  无水平散布，岩浆烫死旅商时商贩帽直上直下落回浆面必烧（配 BJ311 前的
+      //  拾取窗死锁=用户实报「岩浆烫死旅商不掉商贩帽」合成根因之一）。
+      if (key) {
+        const v = dropVelocity(rng, d.id);
+        game.spawnDrop(this.cx, this.cy, key, d.n, v.vx, v.vy);
+      }
     }
   }
 

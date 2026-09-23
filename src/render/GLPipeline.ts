@@ -276,12 +276,16 @@ export class GLPipeline {
   }
 
   /** 把 source FBO 1:1 present 到自身画布（调用方随后 ctx.drawImage 单次回贴 2D）。
-   *  blend off+flipY=1（GL 纹理 Y 向上→画布 Y 向下,≙2D drawImage 语义） */
+   *  blend off+flipY=1（GL 纹理 Y 向上→画布 Y 向下,≙2D drawImage 语义）。
+   *  ★2026-09-23 用户实报全黑案:uniform1i 必须在 useProgram 之后——原实现先设
+   *  uTex 再于 drawQuad 内 useProgram = 上一 pass 程序在场 → INVALID_OPERATION
+   *  每帧刷屏（location is not from the associated program）且 uTex 未落。 */
   present(src: PipelineFbo): void {
     const gl = this.gll();
     if (!gl || !src.tex || !this.presentProg?.prog) return;
     this.bindTarget(null);
     this.setBlend('off');
+    gl.useProgram(this.presentProg.prog);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, src.tex);
     gl.uniform1i(this.uni(this.presentProg, 'uTex'), 0);
