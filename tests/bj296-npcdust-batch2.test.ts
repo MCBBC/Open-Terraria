@@ -445,10 +445,11 @@ describe('BJ296 C. 边界', () => {
     for (const vid of [134, 135, 136, 262, 263, 264, 265, 407, 409, 410, 411, 428, 478, 516, 636]) {
       expect(pendIds.has(vid)).toBe(false);
     }
-    // 批3/4 边界：fadeIn 族/402/661/524-527 仍 pending
+    // 批3/4 边界（★BJ304 后收敛）：fadeIn 族/524-527 已入表（fadeIn 定谳翻案=生长目标语义,
+    // VDust.fadeIn 引擎 1:1）;661（四缺口）/402（oldPos,批4）仍零尘
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(314);
-    for (const vid of ['415', '419', '661', '402', '524']) expect(TABLE[vid]).toBeUndefined();
+    expect(ids.length).toBe(332);
+    for (const vid of ['661', '402']) expect(TABLE[vid]).toBeUndefined();
   });
 });
 

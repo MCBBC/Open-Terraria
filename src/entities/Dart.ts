@@ -975,7 +975,12 @@ export class TrapShot extends Entity {
       }
       // num625 = 2 * min(1, timeLeft/60)（:29378-29383）——最后 60t 出速衰减
       const sp = 2 * Math.min(1, this.life / 60);
-      const burst = game.spawnBurst;
+      // ★BJ306（2026-09-23 BJ303 姊妹崩点）：spawnBurst 必须以绑定/方法调用形态发出
+      // ——detach 成局部引用后裸调用 this=undefined（ESM 严格模式），Game.spawnBurst
+      // 体首句 this.acquireParticle（Game.ts:46446）抛 "Cannot read properties of
+      // undefined (reading 'acquireParticle')" → 帧循环熔断。bind 保下方 burst(...)
+      // 调用点逐字节不变；?. 与缺省=测试桩静默跳过（types.ts:242 可选钩子）。
+      const burst = game.spawnBurst?.bind(game);
       if (!burst) return;
       if (this.form === 0) {
         // 419 黄（:29385-29406）：尘 222，±PI/4 散布，vy×2
@@ -1007,7 +1012,8 @@ export class TrapShot extends Entity {
       this.dead = true;
       return;
     }
-    const burst = game.spawnBurst;
+    // ★BJ306 同上（马桶水花 733 站）：bind 防 detach 裸调用 this=undefined 崩
+    const burst = game.spawnBurst?.bind(game);
     if (!burst) return;
     if (this.age === 1) {
       burst(cx, cy, FW_DUST.d216_water, 6, 2, -Math.PI / 2, 0.9, { xMul: 0.5, life: 26, damp: 0.96 });
@@ -1028,7 +1034,9 @@ export class TrapShot extends Entity {
     this.dead = true;
     const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
     game.playSfx('explosion', 1, cx, cy); // SoundID.Item14（:73437）
-    const burst = game.spawnBurst
+    // ★BJ306 同上（烟花爆花 explodeFirework 站；radial 闭包内消费 burst=闭包传递,
+    // 必 bind）——原 detach 形态在 Kill 拍（timeLeft 45 到点/撞块）即抛 TypeError
+    const burst = game.spawnBurst?.bind(game)
       ?? ((x: number, y: number, c: string, n: number, s: number) => game.spawnParticles(x, y, c, n, s));
     /** 全向径向爆花（dir=0/spread=PI 覆盖全圆；原版尘方向为随机角，整体旋转不变） */
     const radial = (color: string, count: number, speed: number,

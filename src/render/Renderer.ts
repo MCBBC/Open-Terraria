@@ -4998,6 +4998,11 @@ export class Renderer {
     //     drawCursorItemIcon（步骤 7b'）→ 早于步骤 9 信息列,行标签被行文字压住;
     //     全屏地图（9.5 提前返）不画——原与现可见结果一致（列/文本均被图盖）。
     this.drawMouseTextLayer(ctx, player);
+
+    // 14. FPS 读数（★BJ305 用户明令新功能——设置「帧率显示」门禁;层位=MouseText
+    //     收尾(步 13)之后=接口层之上,调试读数压全部 UI。拍照重渲(_capturePass)
+    //     同画——与死亡屏/资源条等 HUD 层既有拍照行为一致,偏差登记）
+    this.drawFpsReadout(ctx, viewW, viewH);
   }
 
   /** 死亡 UI（原版 DrawInterface_35_YouDied :44765-44801 1:1 + 1457 跳过提示）：
@@ -5074,6 +5079,11 @@ export class Renderer {
   }
   /** Game 每帧注入：本次死亡掉落钱数（LocalPlayer.lostCoins） */
   deathLostCoins = 0;
+
+  /** ★BJ305 Game 每帧注入：FPS 读数（设置「帧率显示」开=Game.fps——最近 60 帧 rAF
+   *  均值唯一数据源;关=注入 null 且注入侧不取 getter=零开销。绘制侧再门一道
+   *  options.fpsDisplay=双保险,见 drawFpsReadout 注） */
+  fpsReadout: number | null = null;
 
   /** ★BJ103-A1（2026-09-16）：黑幕计数（Main.BlackFadeIn :558,初值 0）。写点=
    *  Game.blackFadeCameraTeleport（=255,Main.cs:63506/:63512）;读+衰减=render() 尾
@@ -18839,6 +18849,30 @@ export class Renderer {
     ctx.textAlign = 'center';
     const pctTxt = `${Math.floor(Math.max(0, Math.min(1, invasion.pct)) * 100)}%`;
     ctx.fillText(`${invasion.name}  ${invasion.label ?? pctTxt}`, viewW / 2, y + 15);
+  }
+
+  /** ★BJ305(2026-09-23 用户明令新功能,原版无对应物)FPS 读数——画面底部中间。
+   *  门=options.fpsDisplay(设置「帧率显示」,缺省关=不进入绘制=零开销)∧fpsReadout
+   *  非 null(Game.fps 样本不足 2 帧时为 null,不画)。样式沿 11b' 标尺读数 MouseText
+   *  范式(CANVAS_MOUSETEXT_FONT+四向 ±1.5 黑影=Utils.DrawBorderString 同构——FX58
+   *  字体档同源,无新文字通道/无 HiDPI 新档);定位=视口宽居中、底部留边 16px
+   *  (viewW/2, viewH-16)——全幅地图提示行同锚。文案 `${Math.round(fps)} FPS`
+   *  语言中立(同 FrameCap 行 '120 FPS' 硬编码先例,不设 l10n 键)。
+   *  save/restore 包体(死亡屏判例:canvas 状态跨帧持久,泄漏家族性坑) */
+  private drawFpsReadout(ctx: CanvasRenderingContext2D, viewW: number, viewH: number): void {
+    if (!options.data.fpsDisplay || this.fpsReadout == null) return;
+    const text = `${Math.round(this.fpsReadout)} FPS`;
+    ctx.save();
+    ctx.font = CANVAS_MOUSETEXT_FONT;
+    ctx.textAlign = 'center';
+    const y = viewH - 16;
+    ctx.fillStyle = '#000';
+    for (const [ox, oy] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) {
+      ctx.fillText(text, viewW / 2 + ox, y + oy);
+    }
+    ctx.fillStyle = '#FFF';
+    ctx.fillText(text, viewW / 2, y);
+    ctx.restore();
   }
 
   // ---- Boss 血条（BossBars.ts：BigProgressBarSystem 15 类特化条 1:1）----

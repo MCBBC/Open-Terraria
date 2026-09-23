@@ -294,6 +294,12 @@ export interface OptionsData {
    *  ★RB29(2026-09-15)迁移块退役（见 craftingGridControl 注）：本旗仅余历史档
    *  记账价值,保留字段防旧档键位漂移,不再有写点。 */
   craftingGridControlMigrated?: boolean;
+  /** ★BJ305(2026-09-23)帧率显示开关（用户明令新功能,原版无对应物=Web 便利档,缺省关）。
+   *  开启后画面底部中央显示实时帧率——消费=Renderer.drawFpsReadout（HUD 绘制相读
+   *  本开关门禁,关=零绘制开销）;数据源=Game.fps（最近 60 帧 rAF 均值唯一数据源,
+   *  Game.render 每帧按本开关注入 renderer.fpsReadout）。设置行=Settings game 组
+   *  渲染帧率上限行后（帧率族相邻） */
+  fpsDisplay: boolean;
 }
 
 const KEY = 'sandboxworld.options';
@@ -380,6 +386,7 @@ export class OptionsStore {
     craftFromNearbyChests: true,            // ★SW-AZ1 2026-09-06（Player.cs:355 缺省 true）
     craftingGridControl: 'modern',           // ★SW-FX41 缺省回切原版缺省 Modern(Player.cs:363;FX30 偏差备案清偿)
     inventoryLayout: 'vanilla',             // ★SW-FX39(2026-09-11)缺省转正(原版布局;旧自创退 ?invlayout=legacy 回退旗)
+    fpsDisplay: false,                      // ★BJ305 帧率显示缺省关（用户明令新功能）
   };
   loaded = false;
   /** ★红队 F1(2026-09-08):?invlayout= 会话覆盖生效中——set() 序列化时把
@@ -567,6 +574,8 @@ export class OptionsStore {
       if (this.data.inventoryLayout !== 'vanilla' && this.data.inventoryLayout !== 'classic') {
         this.data.inventoryLayout = 'vanilla';
       }
+      // ★BJ305 帧率显示：坏值回缺省「关」（布尔卫门,同 playWhenUnfocused 等家族判式）
+      if (typeof this.data.fpsDisplay !== 'boolean') this.data.fpsDisplay = false;
       this.persistedLayout = this.data.inventoryLayout;
     } catch { /* 无存档用默认 */ }
     // URL 会话覆盖在 try 外执行:kvGet 拒绝(隐私模式)时覆盖仍生效(红队 F7)

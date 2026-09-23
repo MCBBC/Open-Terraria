@@ -6341,6 +6341,1010 @@
    }
   ]
  },
+ "415": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83782
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83785
+       }
+      ],
+      "line": 83785
+     }
+    ],
+    "line": 83782
+   }
+  ],
+  "death": [
+   {
+    "n": 40,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83798
+     },
+     {
+      "dust": 6,
+      "posts": [
+       [
+        "ng",
+        true
+       ],
+       [
+        "scaleSet",
+        1.5
+       ],
+       [
+        "fadeIn",
+        1
+       ],
+       [
+        "velMul",
+        3
+       ]
+      ],
+      "line": 83799
+     }
+    ],
+    "line": 83798
+   }
+  ]
+ },
+ "416": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83679
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83682
+       }
+      ],
+      "line": 83682
+     }
+    ],
+    "line": 83679
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83695
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83698
+       }
+      ],
+      "line": 83698
+     }
+    ],
+    "line": 83695
+   }
+  ]
+ },
+ "417": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83818
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83821
+       }
+      ],
+      "line": 83821
+     }
+    ],
+    "line": 83818
+   }
+  ],
+  "death": [
+   {
+    "n": 30,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83834
+     },
+     {
+      "roll": {
+       "k": 2,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83837
+       }
+      ],
+      "line": 83837
+     }
+    ],
+    "line": 83834
+   }
+  ]
+ },
+ "418": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83861
+     },
+     {
+      "roll": {
+       "k": 2,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83864
+       }
+      ],
+      "line": 83864
+     }
+    ],
+    "line": 83861
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83877
+     },
+     {
+      "dust": 6,
+      "posts": [
+       [
+        "ng",
+        true
+       ],
+       [
+        "scaleSet",
+        1.5
+       ],
+       [
+        "fadeIn",
+        1
+       ],
+       [
+        "velMul",
+        3
+       ]
+      ],
+      "line": 83878
+     }
+    ],
+    "line": 83877
+   }
+  ]
+ },
+ "419": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83719
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83722
+       }
+      ],
+      "line": 83722
+     }
+    ],
+    "line": 83719
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83735
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83738
+       }
+      ],
+      "line": 83738
+     }
+    ],
+    "line": 83735
+   }
+  ]
+ },
+ "420": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84307
+     },
+     {
+      "roll": {
+       "k": 2,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 242,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84310
+       }
+      ],
+      "line": 84310
+     }
+    ],
+    "line": 84307
+   }
+  ],
+  "death": [
+   {
+    "n": 10,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84323
+     },
+     {
+      "dust": 242,
+      "posts": [
+       [
+        "ng",
+        true
+       ],
+       [
+        "scaleSet",
+        1.5
+       ],
+       [
+        "fadeIn",
+        1
+       ],
+       [
+        "velMul",
+        3
+       ]
+      ],
+      "line": 84324
+     }
+    ],
+    "line": 84323
+   }
+  ]
+ },
+ "421": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84272
+     },
+     {
+      "roll": {
+       "k": 2,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 242,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84275
+       }
+      ],
+      "line": 84275
+     }
+    ],
+    "line": 84272
+   }
+  ],
+  "death": [
+   {
+    "n": 10,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84288
+     },
+     {
+      "dust": 242,
+      "posts": [
+       [
+        "ng",
+        true
+       ],
+       [
+        "scaleSet",
+        1.5
+       ],
+       [
+        "fadeIn",
+        1
+       ],
+       [
+        "velMul",
+        3
+       ]
+      ],
+      "line": 84289
+     }
+    ],
+    "line": 84288
+   }
+  ]
+ },
+ "423": {
+  "hit": [
+   {
+    "hitK": 50,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84237
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 242,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84240
+       }
+      ],
+      "line": 84240
+     }
+    ],
+    "line": 84237
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84253
+     },
+     {
+      "dust": 242,
+      "posts": [
+       [
+        "ng",
+        true
+       ],
+       [
+        "scaleSet",
+        1.5
+       ],
+       [
+        "fadeIn",
+        1
+       ],
+       [
+        "velMul",
+        3
+       ]
+      ],
+      "line": 84254
+     }
+    ],
+    "line": 84253
+   }
+  ]
+ },
+ "424": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84197
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 242,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84200
+       }
+      ],
+      "line": 84200
+     }
+    ],
+    "line": 84197
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 249,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84213
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 242,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84216
+       }
+      ],
+      "line": 84216
+     }
+    ],
+    "line": 84213
+   }
+  ]
+ },
+ "425": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84128
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 229,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84131
+       }
+      ],
+      "line": 84131
+     }
+    ],
+    "line": 84128
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84144
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 229,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84147
+       }
+      ],
+      "line": 84147
+     }
+    ],
+    "line": 84144
+   }
+  ]
+ },
+ "426": {
+  "hit": [
+   {
+    "hitK": 50,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83949
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 229,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83952
+       }
+      ],
+      "line": 83952
+     }
+    ],
+    "line": 83949
+   }
+  ],
+  "death": [
+   {
+    "dust": 241,
+    "n": 20,
+    "sx": "hd",
+    "sy": -1,
+    "line": 83965
+   }
+  ]
+ },
+ "427": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84003
+     },
+     {
+      "roll": {
+       "k": 2,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 229,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84006
+       }
+      ],
+      "line": 84006
+     }
+    ],
+    "line": 84003
+   }
+  ],
+  "death": [
+   {
+    "dust": 241,
+    "n": 10,
+    "sx": "hd",
+    "sy": -1,
+    "line": 84019
+   }
+  ]
+ },
  "428": {
   "hit": [
    {
@@ -6383,6 +7387,100 @@
      }
     ],
     "line": 84177
+   }
+  ]
+ },
+ "429": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84044
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 229,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84047
+       }
+      ],
+      "line": 84047
+     }
+    ],
+    "line": 84044
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84060
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 229,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84063
+       }
+      ],
+      "line": 84063
+     }
+    ],
+    "line": 84060
    }
   ]
  },
@@ -7105,6 +8203,428 @@
      }
     ],
     "line": 83896
+   }
+  ]
+ },
+ "518": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83679
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83682
+       }
+      ],
+      "line": 83682
+     }
+    ],
+    "line": 83679
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 241,
+      "sx": "hd",
+      "sy": -1,
+      "line": 83695
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 6,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 83698
+       }
+      ],
+      "line": 83698
+     }
+    ],
+    "line": 83695
+   }
+  ]
+ },
+ "524": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84707
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "line": 84710
+     }
+    ],
+    "line": 84707
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84723
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "line": 84726
+     }
+    ],
+    "line": 84723
+   }
+  ]
+ },
+ "525": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84707
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 75,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84710
+       }
+      ],
+      "line": 84710
+     }
+    ],
+    "line": 84707
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84723
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 75,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84726
+       }
+      ],
+      "line": 84726
+     }
+    ],
+    "line": 84723
+   }
+  ]
+ },
+ "526": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84707
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 170,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84710
+       }
+      ],
+      "line": 84710
+     }
+    ],
+    "line": 84707
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84723
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 170,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84726
+       }
+      ],
+      "line": 84726
+     }
+    ],
+    "line": 84723
+   }
+  ]
+ },
+ "527": {
+  "hit": [
+   {
+    "hitK": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84707
+     },
+     {
+      "roll": {
+       "k": 4,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 67,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84710
+       }
+      ],
+      "line": 84710
+     }
+    ],
+    "line": 84707
+   }
+  ],
+  "death": [
+   {
+    "n": 20,
+    "body": [
+     {
+      "dust": 5,
+      "sx": "hd",
+      "sy": -1,
+      "line": 84723
+     },
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 67,
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "scaleSet",
+          1.5
+         ],
+         [
+          "fadeIn",
+          1
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84726
+       }
+      ],
+      "line": 84726
+     }
+    ],
+    "line": 84723
    }
   ]
  },
@@ -7864,13 +9384,14 @@
   "generatedBy": "tools/extract-npcdust.mjs",
   "callTotal": 629,
   "entryCount": 629,
-  "stdStmts": 1170,
-  "unsupStmts": 125,
-  "npcIds": 565,
-  "entryNpcIds": 565,
-  "schema": "per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,pre?,posts?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat()); alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支",
+  "stdStmts": 1237,
+  "unsupStmts": 63,
+  "npcIds": 597,
+  "entryNpcIds": 597,
+  "schema": "per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,pre?,posts?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支",
   "noGenericTail": "★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）",
   "batch2": "BJ296 批2（2026-09-23）概率门族接入：帧树逐型臂解析（死臂剪枝/循环组/单掷分支/pre 谓词/idRand）；掷流通道=Math.random（与批1 alt 同源,引擎侧 spawnDust 抖动同拍）; 接入 15 型：134-136/262-265/407/409/410/411/428/478/516/636",
+  "batch3": "BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending:noLight=VDust.noLight 字段在位但引擎不消费+idPick 未建）。仍排除：661（hslToRgb 彩虹色+NextVector2Circular 位移+velocity 派生+CloneDust 回声,零尘登记）/402（oldPos,批4）",
   "carveOuts": [
    "泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)",
    "gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）",
@@ -7912,33 +9433,6 @@
     "line": 86145,
     "phase": "death",
     "reason": "id:248 + type - 484",
-    "count": 1
-   },
-   {
-    "types": [
-     23
-    ],
-    "line": 90578,
-    "phase": "hit",
-    "reason": "id:num836",
-    "count": 1
-   },
-   {
-    "types": [
-     23
-    ],
-    "line": 90579,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     23
-    ],
-    "line": 90591,
-    "phase": "death",
-    "reason": "id:num839",
     "count": 1
    },
    {
@@ -8003,26 +9497,6 @@
     "line": 87544,
     "phase": "death",
     "reason": "forCond",
-    "count": 1
-   },
-   {
-    "types": [
-     85,
-     629
-    ],
-    "line": 89781,
-    "phase": "hit",
-    "reason": "id:num722",
-    "count": 1
-   },
-   {
-    "types": [
-     85,
-     629
-    ],
-    "line": 89787,
-    "phase": "death",
-    "reason": "id:num722",
     "count": 1
    },
    {
@@ -8244,411 +9718,11 @@
    },
    {
     "types": [
-     415
-    ],
-    "line": 83785,
-    "phase": "hit",
-    "reason": "postUnsupported:dust23.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     415
-    ],
-    "line": 83782,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     415
-    ],
-    "line": 83799,
-    "phase": "death",
-    "reason": "postUnsupported:dust24.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     415
-    ],
-    "line": 83798,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     416,
-     518
-    ],
-    "line": 83682,
-    "phase": "hit",
-    "reason": "postUnsupported:dust19.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     416,
-     518
-    ],
-    "line": 83679,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     416,
-     518
-    ],
-    "line": 83698,
-    "phase": "death",
-    "reason": "postUnsupported:dust20.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     416,
-     518
-    ],
-    "line": 83695,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     417
-    ],
-    "line": 83821,
-    "phase": "hit",
-    "reason": "postUnsupported:dust25.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     417
-    ],
-    "line": 83818,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     417
-    ],
-    "line": 83837,
-    "phase": "death",
-    "reason": "postUnsupported:dust26.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     417
-    ],
-    "line": 83834,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     418
-    ],
-    "line": 83864,
-    "phase": "hit",
-    "reason": "postUnsupported:dust27.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     418
-    ],
-    "line": 83861,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     418
-    ],
-    "line": 83878,
-    "phase": "death",
-    "reason": "postUnsupported:dust28.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     418
-    ],
-    "line": 83877,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     419
-    ],
-    "line": 83722,
-    "phase": "hit",
-    "reason": "postUnsupported:dust21.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     419
-    ],
-    "line": 83719,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     419
-    ],
-    "line": 83738,
-    "phase": "death",
-    "reason": "postUnsupported:dust22.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     419
-    ],
-    "line": 83735,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     420
-    ],
-    "line": 84310,
-    "phase": "hit",
-    "reason": "postUnsupported:dust43.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     420
-    ],
-    "line": 84307,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     420
-    ],
-    "line": 84324,
-    "phase": "death",
-    "reason": "postUnsupported:dust44.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     420
-    ],
-    "line": 84323,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     421
-    ],
-    "line": 84275,
-    "phase": "hit",
-    "reason": "postUnsupported:dust41.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     421
-    ],
-    "line": 84272,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     421
-    ],
-    "line": 84289,
-    "phase": "death",
-    "reason": "postUnsupported:dust42.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     421
-    ],
-    "line": 84288,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     423
-    ],
-    "line": 84240,
-    "phase": "hit",
-    "reason": "postUnsupported:dust39.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     423
-    ],
-    "line": 84237,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     423
-    ],
-    "line": 84254,
-    "phase": "death",
-    "reason": "postUnsupported:dust40.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     423
-    ],
-    "line": 84253,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     424
-    ],
-    "line": 84200,
-    "phase": "hit",
-    "reason": "postUnsupported:dust37.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     424
-    ],
-    "line": 84197,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     424
-    ],
-    "line": 84216,
-    "phase": "death",
-    "reason": "postUnsupported:dust38.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     424
-    ],
-    "line": 84213,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     425
-    ],
-    "line": 84131,
-    "phase": "hit",
-    "reason": "postUnsupported:dust35.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     425
-    ],
-    "line": 84128,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     425
-    ],
-    "line": 84147,
-    "phase": "death",
-    "reason": "postUnsupported:dust36.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     425
-    ],
-    "line": 84144,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     426
-    ],
-    "line": 83952,
-    "phase": "hit",
-    "reason": "postUnsupported:dust29.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     426
-    ],
-    "line": 83949,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
      426
     ],
     "line": 83970,
     "phase": "death",
-    "reason": "id:num136;postUnsupported:dust30.scale = 1.25f + Main.rand.NextFloat();",
-    "count": 1
-   },
-   {
-    "types": [
-     427
-    ],
-    "line": 84006,
-    "phase": "hit",
-    "reason": "postUnsupported:dust31.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     427
-    ],
-    "line": 84003,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
+    "reason": "id:num136;postUnsupported:dust30.noLight = true;",
     "count": 1
    },
    {
@@ -8657,43 +9731,7 @@
     ],
     "line": 84024,
     "phase": "death",
-    "reason": "id:num144;postUnsupported:dust32.scale = 1.25f + Main.rand.NextFloat();",
-    "count": 1
-   },
-   {
-    "types": [
-     429
-    ],
-    "line": 84047,
-    "phase": "hit",
-    "reason": "postUnsupported:dust33.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     429
-    ],
-    "line": 84044,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     429
-    ],
-    "line": 84063,
-    "phase": "death",
-    "reason": "postUnsupported:dust34.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     429
-    ],
-    "line": 84060,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
+    "reason": "id:num144;postUnsupported:dust32.noLight = true;",
     "count": 1
    },
    {
@@ -8739,63 +9777,6 @@
     "line": 83934,
     "phase": "both",
     "reason": "postUnsupported:dz.position = base.Center;",
-    "count": 1
-   },
-   {
-    "types": [
-     524,
-     525,
-     526,
-     527
-    ],
-    "line": 84710,
-    "phase": "hit",
-    "reason": "id:num205;postUnsupported:dust59.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     524,
-     525,
-     526,
-     527
-    ],
-    "line": 84707,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     524,
-     525,
-     526,
-     527
-    ],
-    "line": 84726,
-    "phase": "death",
-    "reason": "id:num205;postUnsupported:dust60.fadeIn = 1f;",
-    "count": 1
-   },
-   {
-    "types": [
-     524,
-     525,
-     526,
-     527
-    ],
-    "line": 84723,
-    "phase": "death",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     533
-    ],
-    "line": 84828,
-    "phase": "death",
-    "reason": "postUnsupported:dz.fadeIn = 1f;",
     "count": 1
    },
    {
@@ -8904,66 +9885,6 @@
    },
    {
     "types": [
-     639,
-     640,
-     641,
-     642,
-     643,
-     644,
-     645
-    ],
-    "line": 86910,
-    "phase": "hit",
-    "reason": "id:num484",
-    "count": 1
-   },
-   {
-    "types": [
-     639,
-     640,
-     641,
-     642,
-     643,
-     644,
-     645
-    ],
-    "line": 86916,
-    "phase": "death",
-    "reason": "id:num484",
-    "count": 1
-   },
-   {
-    "types": [
-     646,
-     647,
-     648,
-     649,
-     650,
-     651,
-     652
-    ],
-    "line": 86887,
-    "phase": "hit",
-    "reason": "id:num480",
-    "count": 1
-   },
-   {
-    "types": [
-     646,
-     647,
-     648,
-     649,
-     650,
-     651,
-     652
-    ],
-    "line": 86893,
-    "phase": "death",
-    "reason": "id:num480",
-    "count": 1
-   },
-   {
-    "types": [
      657
     ],
     "line": 82825,
@@ -8997,7 +9918,7 @@
     ],
     "line": 82885,
     "phase": "both",
-    "reason": "id:num28;scale:num27",
+    "reason": "scale:num27",
     "count": 1
    },
    {
@@ -9067,7 +9988,7 @@
     "types": [
      23
     ],
-    "line": 90595,
+    "line": 90575,
     "phase": "both",
     "reason": "batch3+:std-expressible（未接组滚动清单）",
     "count": 1
@@ -9176,6 +10097,15 @@
      81
     ],
     "line": 86403,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     85
+    ],
+    "line": 89781,
     "phase": "both",
     "reason": "batch3+:std-expressible（未接组滚动清单）",
     "count": 1
@@ -10289,24 +11219,6 @@
    },
    {
     "types": [
-     426
-    ],
-    "line": 83965,
-    "phase": "both",
-    "reason": "batch3+:std-expressible（未接组滚动清单）",
-    "count": 1
-   },
-   {
-    "types": [
-     427
-    ],
-    "line": 84019,
-    "phase": "both",
-    "reason": "batch3+:std-expressible（未接组滚动清单）",
-    "count": 1
-   },
-   {
-    "types": [
      438
     ],
     "line": 85060,
@@ -11171,6 +12083,15 @@
    },
    {
     "types": [
+     629
+    ],
+    "line": 89781,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
      631
     ],
     "line": 85578,
@@ -11201,6 +12122,132 @@
      635
     ],
     "line": 90098,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     639
+    ],
+    "line": 86910,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     640
+    ],
+    "line": 86910,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     641
+    ],
+    "line": 86910,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     642
+    ],
+    "line": 86910,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     643
+    ],
+    "line": 86910,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     644
+    ],
+    "line": 86910,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     645
+    ],
+    "line": 86910,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     646
+    ],
+    "line": 86887,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     647
+    ],
+    "line": 86887,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     648
+    ],
+    "line": 86887,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     649
+    ],
+    "line": 86887,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     650
+    ],
+    "line": 86887,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     651
+    ],
+    "line": 86887,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     652
+    ],
+    "line": 86887,
     "phase": "both",
     "reason": "batch3+:std-expressible（未接组滚动清单）",
     "count": 1

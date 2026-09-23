@@ -2,11 +2,18 @@
 // BJ296（2026-09-23）批2 概率门接入：语句级分支（roll 单掷二选一）/循环组（loop body 逐拍
 // 按序）/pre 臂条件（判负→e 臂不掷=原版 && 短路）与 gate 区域门（判负→整支跳过）/idRand 逐尘掷 id/
 // scaleAddR01 post（scale+=NextFloat）。
+// BJ304（2026-09-23）批3 fadeIn 定谳翻案接入：★fadeIn=生长目标语义（原版 Dust.cs :2148-2171:
+// 0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与——BJ296 曾误登记
+// 「alpha 渐入/本仓不可用」;本仓 VDust.fadeIn 在位+老化链 1:1 fx/VanillaDust.ts :740-745）
+// → 新 post 算子 ['fadeIn',N]（活尘对象后置赋值=原版 NewDust 后写同相）;无臂 branch=
+// 掷流占位（roll 照耗零尘,524 静态死臂）;426/427 death 半接（d241 主环入表,SelectRandom
+// 环 pending:noLight 引擎不消费+idPick 未建）。
 //
 // 数据源：tools/extract-npcdust.mjs（Terarria1457/Terraria/NPC.cs HitEffect
 // :82492-:90939 机械提取；1458 同区逐字节全等）。首批 = 78 门组 / 275 型（BJ254）；
 // 批2 = 概率门族 15 型（134-136/262-265/407/409/410/411/428/478/516/636,BJ296）；
-// _meta.pending = 未接组滚动清单（批3 postUnsupported 族/批4 oldPos 族）。
+// 批3 = fadeIn 定谳翻案族 18 型（415-421/423-427/429/518/524-527,BJ304）；
+// _meta.pending = 未接组滚动清单（661 四缺口零尘登记/426-427 SelectRandom 环/批4 oldPos 族）。
 //
 // ★原版无通用尘尾（HitEffect 最终 else = `if (type != 156) return` 的 156 专属支）：
 // 表外型受击/死亡【不出尘】= 原版本相。BJ254 双向偏差收口（旧仓对未列型发通用彩色
@@ -46,7 +53,8 @@ type DustOp =
   | ['velMul', number] | ['velDiv', number]
   | ['scaleMul', number] | ['scaleDiv', number]
   | ['scaleSet', number] | ['scaleSetNpc', number]
-  | ['scaleAddR01'];
+  | ['scaleAddR01']
+  | ['fadeIn', number];   // ★BJ304 批3:原版生长目标语义（Dust.cs :2148-2171）,引擎侧老化 1:1
 
 /** 谓词求值：pre=臂条件（判负→e 臂不掷）|gate=区域门（判负→整元素跳过）；均不耗掷 */
 export type NpcDustPre = 'lifeGtHalf' | 'lifeLt0';
@@ -132,7 +140,7 @@ function prePass(pre: NpcDustPre[] | undefined, e: Enemy): boolean {
 }
 
 /** post 算子应用（spawnDust 返回的活尘对象;池满 null 静默跳过=原版尘池语义） */
-function applyOps(d: { noGravity: boolean; vx: number; vy: number; scale: number }, ops: DustOp[] | null | undefined, e: Enemy): void {
+function applyOps(d: { noGravity: boolean; vx: number; vy: number; scale: number; fadeIn: number }, ops: DustOp[] | null | undefined, e: Enemy): void {
   if (!ops) return;
   for (const op of ops) {
     switch (op[0]) {
@@ -144,6 +152,7 @@ function applyOps(d: { noGravity: boolean; vx: number; vy: number; scale: number
       case 'scaleSet': d.scale = op[1]; break;
       case 'scaleSetNpc': d.scale = op[1] * (e.vanillaScale ?? 1); break;
       case 'scaleAddR01': d.scale += Math.random(); break;   // vanilla `scale += Main.rand.NextFloat()`
+      case 'fadeIn': break; // ★变异:摘 fadeIn 应用                // vanilla `dust.fadeIn = N`（生长目标,首拍引擎老化链消费）
     }
   }
 }
@@ -174,7 +183,7 @@ function emitStmt(e: Enemy, game: GameHooks, hd: number, st: NpcDustStmt, dmg: n
     const dustId = st.idRand != null ? st.dust + Math.floor(Math.random() * st.idRand) : st.dust;
     const d = game.spawnDust?.(x, y, w0, h0, dustId, sx, sy, alpha, color, scale);
     if (!d) continue;
-    const dust = d as unknown as { noGravity: boolean; vx: number; vy: number; scale: number };
+    const dust = d as unknown as { noGravity: boolean; vx: number; vy: number; scale: number; fadeIn: number };
     applyOps(dust, st.posts, e);
     if (st.alt) {
       const roll = Math.floor(Math.random() * st.alt.k);

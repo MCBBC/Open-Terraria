@@ -524,6 +524,12 @@ export class SettingsPanel {
             : d.frameCap === 120 ? '120 FPS' : '60 FPS',
           () => void options.set('frameCap', d.frameCap === 60 ? 120 : d.frameCap === 120 ? 0 : 60),
         ),
+        // ★BJ305(2026-09-23 用户明令新功能,原版无对应物)帧率显示开关(缺省关)——
+        //  开启后画面底部中央显示实时帧率(Renderer.drawFpsReadout;数据源 Game.fps
+        //  最近 60 帧 rAF 均值唯一数据源)。行范式=本组既有 toggle(背景/风中摆动
+        //  同款 checkbox);持久化走 options 通道(KvStore 'sandboxworld.options'),
+        //  行位紧随「帧率上限」=帧率族相邻
+        this.toggle(Lang.text('Mods.SandboxWorld.Settings.FpsDisplay'), () => d.fpsDisplay, (v) => void options.set('fpsDisplay', v)),
         // 渲染模式三档(2026-08-18):GPU 加速(默认)/CPU 软渲染(零 GPU 预算,
         // 多开稳定)/自动(GPU 优先,崩溃自动切 CPU,稳定回切)
         this.modeRow(

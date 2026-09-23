@@ -47943,6 +47943,9 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     this.renderer.scene = this.scene; // 群系背景（BiomeBackground）每帧注入最新环境采样
     this.renderer._worldPaused = this.paused; // 暂停镜像:冻结天气物理/滤镜状态机
     this.renderer.deathLostCoins = this.lostCoins; // 死亡 UI「掉了{0}」每帧注入
+    // ★BJ305：FPS 读数注入（设置「帧率显示」开=读 this.fps——最近 60 帧 rAF 均值
+    // 唯一数据源(frameDts),勿另算;关=null 且不取 getter=零开销。消费=Renderer.drawFpsReadout）
+    this.renderer.fpsReadout = options.data.fpsDisplay ? this.fps : null;
     // 标注常显(不再只随标注模式):标记保留到清空为止,关面板后仍可在画面核对,
     // F5 报告截图里也带红圈——用户流程:Shift+F5 标格 → F5 出报告
     this.renderer.annotateMarks = this.marks.length ? this.marks : null;

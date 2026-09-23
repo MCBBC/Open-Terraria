@@ -2605,7 +2605,11 @@ export class SantankShellProj extends TownShot {
         g.vy += sy2;
       }
     }
-    const pool = game.spawnDust;
+    // ★BJ306（2026-09-23 BJ303 姊妹崩点普查刀）：spawnDust 同 spawnBurst 家族——
+    // detach 裸调用 this=undefined，Game.spawnDust 首句 this.vanillaDust
+    // （Game.ts:44036）抛 TypeError → 圣坦炮弹爆散拍崩。bind 保下方 pool(...)
+    // 调用点不变；if (pool) 守卫语义不变（缺省=走 spawnBurst 兜底臂）。
+    const pool = game.spawnDust?.bind(game);
     if (pool) {
       for (let i = 0; i < 30; i++) {
         const d = pool(gx, gy, 22, 22, 31, 0, 0, 100, null, 1.5);   // d31 ×30（:79843-79848）

@@ -21,7 +21,7 @@ import { TILE } from '../src/core/constants';
 import npcDustJson from '../src/data/vanilla-npcdust.json';
 import type { GameHooks } from '../src/entities/types';
 import { seededRandom, BATTERY_SEED } from './seeded-rng';
-import { spawnNpcHitDust } from '../src/entities/NpcHitDust';
+import { spawnNpcHitDust, spawnNpcDeathDust } from '../src/entities/NpcHitDust';
 
 beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
 afterEach(() => { vi.restoreAllMocks(); });
@@ -142,17 +142,18 @@ describe('BJ254 A. vanilla-npcdust.json 首批钉值', () => {
     expect(TABLE['4'].death).toEqual([{ dust: 5, n: 150, sx: '2hd', sy: -2, line: 88271 }]);
   });
 
-  it('★结构锁：_meta.noGenericTail 声明 + WoF 族 113-116/probability 批3 组 415-419/光女 661 不在表', () => {
+  it('★结构锁：_meta.noGenericTail 声明 + WoF 族 113-116/光女 661 不在表（415-419 已随 BJ304 批3 fadeIn 翻案入表）', () => {
     expect(String(TABLE._meta.noGenericTail)).toContain('原版无通用尘尾');
     expect(String(TABLE._meta.source)).toContain('HitEffect');
-    // ★BJ296 批2 后：415-419 属 fadeIn postUnsupported 族（批3 BJ298 面）仍不入表；
-    //   661（NextVector2Circular post）不入表；113-116 WoF 手块保留。
-    for (const vid of ['113', '114', '115', '116', '415', '416', '417', '418', '419', '661']) {
+    // ★BJ304 批3 后：415-419/518 等 fadeIn 族已入表（定谳翻案:fadeIn=生长目标语义,
+    //   VDust.fadeIn 引擎 1:1,非「alpha 渐入/本仓不可用」）；661（NextVector2Circular
+    //   post+color local+CloneDust 回声,真 postUnsupported）仍不入表；113-116 WoF 手块保留。
+    for (const vid of ['113', '114', '115', '116', '661']) {
       expect(TABLE[vid], `vid=${vid} 不应出现在表`).toBeUndefined();
     }
-    // 规模（批1 78 门组/299 型 + 批2 概率门族 15 型 = 314,BJ296）
+    // 规模（批1 78 门组/299 型 + 批2 概率门族 15 型 = 314 + 批3 fadeIn 族 18 型 = 332,BJ304）
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(314);
+    expect(ids.length).toBe(332);
   });
 });
 
@@ -279,17 +280,15 @@ describe('BJ254 B. 受击/死亡尘查表行为', () => {
 
 // ===================== C. 未列型零尘 + WoF 手块保留 =====================
 describe('BJ254 C. 未列型零尘（原版相锁）与 WoF 手块', () => {
-  it('★419（占有铠甲,概率门族未接）受击/死亡零尘零粒子=原版本相（唯一故意行为变化钉死）', () => {
+  it('★661（光女,postUnsupported 四缺口未接——BJ304 批3 起 419 已入表,零尘钉面移 661）受击/死亡零尘零粒子=原版本相', () => {
     const w = makeWorld();
     const cap: DustCall[] = []; const parts: number[] = []; const legacy: number[] = [];
     const g = makeHooks(w, cap, parts, legacy);
-    const e = spawn(419);
-    e.hurt(10, 1, 0, g);
-    expect(e.hp).toBeGreaterThan(0);
+    const e = spawn(661);
+    // ★直驱（661 仓内 stats 缺口 maxHp=5,与尘面无关——查表零尘钉面走 NpcHitDust 单源）
+    spawnNpcHitDust(e, g, 1, 10);
     expect(cap.length).toBe(0);
-    const e2 = spawn(419, 110, FLOOR - 4);
-    e2.hurt(e2.hp + 9999, 1, 0, g);
-    expect(e2.dead).toBe(true);
+    spawnNpcDeathDust(e, g, 1);
     expect(cap.length).toBe(0);
     expect(parts.length).toBe(0);                      // 通用彩色粒子近似已退役
   });

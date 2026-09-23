@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-// tools/extract-npcdust.mjs —— NPC.HitEffect 受击/死亡尘提取器（BJ254 2026-09-21；BJ296 批2 2026-09-23）
+// tools/extract-npcdust.mjs —— NPC.HitEffect 受击/死亡尘提取器（BJ254 2026-09-21；BJ296 批2 2026-09-23；BJ304 批3 2026-09-23）
+//
+// ★BJ304 批3（2026-09-23）fadeIn 定谳翻案+per-type 局部：`fadeIn = N` 收编 std 算子
+//   （原版=生长目标语义 Dust.cs :2148-2171,本仓 VDust.fadeIn 引擎 1:1——BJ296 批2 曾误
+//   登记 postUnsupported「alpha 渐入」）；复合 `scale = A + NextFloat()` = scaleSet+scaleAddR01;
+//   typedLocals per-type 数值局部桶（组头初值+型帧覆写,524-527 num205）；门静态析取
+//   `numN > 0`（per-type 判,假→掷流占位空分支:roll 照耗臂体死）。
 //
 // ★BJ296 批2（2026-09-23）概率门接入：帧树化重构（帧 id/parent/elseOf 链 + 逐型臂解析）。
 //   概率门语义（原版 Main.rand 直译,掷序=源序）：`if (Main.rand.Next(K) op V) {尘A} [else {尘B}]`
@@ -426,6 +432,12 @@ const POST_OP_RES = [
   [/^D\.fadeIn = (-?\d+(?:\.\d+)?)f?;?$/, (m) => ['fadeIn', Number(m[1])]],
 ];
 const POST_BAD_RE = /^D\.(position|fadeIn|velocity\.X|velocity\.Y|color|noLight|shader|type|frame)\b|^D\.scale (?:\*|\/)?= (?!-?\d+(?:\.\d+)?f?;?$)/;
+/** ★BJ304:mk 产物归一入栈——单算子（op 元组）push 整元组,复合（op 元组数组）逐个 push
+ *  （直接 push(...mk) 会把 ['ng',true] 摊平成两个元素,曾炸出扁平 posts） */
+function pushOps(dst, out) {
+  if (Array.isArray(out[0])) dst.push(...out);
+  else dst.push(out);
+}
 /** 编译一段 post 语句（别名链/直引形直译）→ ops|null(不可表达) */
 function compilePostStmts(stmts) {
   const ops = [];
@@ -442,7 +454,7 @@ function compilePostStmts(stmts) {
     let matched = false;
     for (const [re, mk] of POST_OP_RES) {
       const mm = body.match(re);
-      if (mm) { ops.push(...mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子（复合 scale）
+      if (mm) { pushOps(ops, mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子（复合 scale）
     }
     if (matched) continue;
     if (POST_BAD_RE.test(body)) return { bad: `postUnsupported:${s.slice(0, 60)}` };
@@ -489,7 +501,7 @@ function capturePosts(callVar, i, preAlias) {
       let matched = false;
       for (const [re, mk] of POST_OP_RES) {
         const mm = body.match(re);
-        if (mm) { posts.push(...mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子
+        if (mm) { pushOps(posts, mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子
       }
       if (!matched) {
         if (POST_BAD_RE.test(body)) return { ok: false, reason: `postUnsupported:${t.slice(0, 60)}`, consumed: j - i };
@@ -818,7 +830,31 @@ const BATCH1_TYPES = new Set([
 const BATCH2_TYPES = new Set([
   134, 135, 136, 262, 263, 264, 265, 407, 409, 410, 411, 428, 478, 516, 636,
 ]);
-const WIRED_TYPES = new Set([...BATCH1_TYPES, ...BATCH2_TYPES]);
+
+// ---------------- BJ304 批3 接入名单（fadeIn 定谳翻案族,2026-09-23 定谳） ----------------
+// ★定谳翻案（BJ296 批2 报告曾按「fadeIn=alpha 渐入,本仓不可用」登记 postUnsupported）：
+//   原版 fadeIn=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale += 0.03/t(46/213/260=
+//   0.1,235=0.007) 至超 fadeIn 归零转衰落,无 alpha 参与）;本仓 VDust.fadeIn 在位+老化链
+//   1:1（fx/VanillaDust.ts :740-745）+spawnDust 返活尘 → `fadeIn = N` 收编为 std 算子。
+// 接入面（手核 NPC.cs 亲读 diff=0）：
+//   · fadeIn 叶族 15 型（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主尘 d241|d249+叶 d6|d242|d229）：
+//     415（death n40 无门双发）/416+518（Next4/3）/417（Next4/2）/418（Next2/death 无门 n20）/
+//     419（Next4/3）/420·421（d249+d242,Next2,death n10 无门）/423（hitK50,death n20 无门）/
+//     424（d249+d242,Next4/3）/425·429（d241+d229,Next4/3）/426·427 hit 相（d229 叶）。
+//   · 426/427 death 半接（保守形态）：d241 主环 n20|n10 入表;SelectRandom 环
+//     （Utils.SelectRandom id 掷+fadeIn0.25+复合 scale）仍 pending——阻塞面=noLight
+//     （VDust.noLight 字段在位但引擎不消费,接线=假保真）+idPick 机制未建。
+//   · 524-527（num205 运行时门+per-type 局部 id）：组头 `int num205=0`+型帧覆写
+//     （525=75/526=170/527=67）→ typedLocals 逐型桶;门 `Next(K)==0 && num205>0` 静态
+//     析取逐型判——524（=0）臂体静态死→掷流占位空分支（roll 照耗,&& 左先同相）,
+//     525/526/527 恒真脱门正常分支。叶 d75/170/67 仍带 fadeIn=1（std）。
+// ★仍排除：661（color local=hslToRgb 彩虹+position=Center+NextVector2Circular+velocity=
+//   position−Center+CloneDust 回声四缺口,零尘登记）;402（oldPos 轨迹盒 → 批4）;
+//   426/427 SelectRandom 死亡环（noLight+idPick）。
+const BATCH3_TYPES = new Set([
+  415, 416, 417, 418, 419, 420, 421, 423, 424, 425, 426, 427, 429, 518, 524, 525, 526, 527,
+]);
+const WIRED_TYPES = new Set([...BATCH1_TYPES, ...BATCH2_TYPES, ...BATCH3_TYPES]);
 
 // ---------------- BJ296 帧树逐型解析（汇总分组） ----------------
 // 树结构：kidsMap（frameId → 帧/语句源序）；SUCCESSOR（elseOfId → 后继臂）。
@@ -1088,13 +1124,26 @@ function resolveArmChain(head, S, out, ctx) {
     return undefined;
   }
   const gates = cur.cond ? cur.cond.gates : [];
-  const cls = gates.length ? classifyGates(gates) : { ok: true, pre: [], roll: null };
+  const cls = gates.length ? classifyGates(gates, ctx.t) : { ok: true, pre: [], roll: null };
   if (!cls.ok) {
     // 不可表达门（ai[1]/!wet/netMode/daybreak/双掷…）→ 本臂 pending + 失败面逐型清扫
     const reason = `gate:${gates.join(' && ')}`;
     markChainPending(cur, ctx, reason);
     sweepFailureFace(SUCCESSOR.get(cur.id) || null, S, ctx, reason);
     consumed.add(cur.id);
+    return undefined;
+  }
+  // ★BJ304 批3：`roll && per-type 静态假` 复合门（524 num205=0 → num205>0 恒假,&& 左先
+  //   求值）→ roll 照耗（掷流占位）+ 臂体对 t 静态死（dead 标记,零尘不臆发）。仅无 pre
+  //   （roll 为首析取,短路序同相）且无后继臂（无 else 链）的形状走此道,其余保守 pending。
+  if (cls.staticFalse && cls.pre.length === 0 && !SUCCESSOR.has(cur.id)) {
+    const acc = [];
+    collectStmts(cur.id, acc);
+    for (const se of acc) se.__dead = true;
+    consumed.add(cur.id);
+    if (cls.roll) {
+      out.push(wrapEl({ roll: { ...cls.roll }, line: (firstLineOf(cur) ?? cur.line) ?? 0 }, new Set([cur.phase || ctx.phaseCtx || 'both'])));
+    }
     return undefined;
   }
   if ((cls.roll || cls.pre.length) && subtreePend(cur.id)) {
@@ -1151,8 +1200,8 @@ function elseTail(s, S, ctx) {
     return { ok: true, els };
   }
   const gates = cur.cond ? cur.cond.gates : [];
-  const cls = gates.length ? classifyGates(gates) : { ok: true, pre: [], roll: null };
-  if (!cls.ok) return { ok: false, reason: `gate:${gates.join(' && ')}` };
+  const cls = gates.length ? classifyGates(gates, ctx.t) : { ok: true, pre: [], roll: null };
+  if (!cls.ok || cls.staticFalse) return { ok: false, reason: `gate:${gates.join(' && ')}` };   // ★BJ304:staticFalse 失败面保守 pending（本批无此形状）
   if ((cls.roll || cls.pre.length) && subtreePend(cur.id)) return { ok: false, reason: 'branchMixedWithPending' };
   const savedPhase = ctx.phaseCtx;
   if (cur.cond && cur.cond.life) ctx.phaseCtx = cur.cond.life;
@@ -1269,9 +1318,10 @@ data._meta = {
   unsupStmts,
   npcIds: typeIds.length,
   entryNpcIds: typeIds.length,
-  schema: 'per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,pre?,posts?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat()); alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支',
+  schema: 'per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,pre?,posts?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支',
   noGenericTail: '★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）',
   batch2: 'BJ296 批2（2026-09-23）概率门族接入：帧树逐型臂解析（死臂剪枝/循环组/单掷分支/pre 谓词/idRand）；掷流通道=Math.random（与批1 alt 同源,引擎侧 spawnDust 抖动同拍）; 接入 15 型：134-136/262-265/407/409/410/411/428/478/516/636',
+  batch3: 'BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending:noLight=VDust.noLight 字段在位但引擎不消费+idPick 未建）。仍排除：661（hslToRgb 彩虹色+NextVector2Circular 位移+velocity 派生+CloneDust 回声,零尘登记）/402（oldPos,批4）',
   carveOuts: [
     '泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)',
     'gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）',
