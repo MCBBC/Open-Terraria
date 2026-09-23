@@ -215,6 +215,20 @@ const _rqRot = new Float64Array(MAX_RIPPLES);
 const _rqShape = new Uint8Array(MAX_RIPPLES);
 let _rqCount = 0;
 
+// ---- ★C8 波场 Worker（2026-09-23;?waveworker=1,缺省关）----
+// capture 模式：写侧方法（injectWash/queueRippleRaw/setCamera）把参数推入
+// _wwCapture 而非本地模拟；frame() 把注入批+帧输入 postMessage 给 Worker，
+// Worker 步进后回传场快照写入类字段（读侧方法零改动）。主线程零阻塞、
+// 零同步等待；注入锚=F_prev 语义由消息序天然保持（注入批先于 frame 应用）。
+let _wwCapture: { k: string; a: number[] }[] | null = null;
+
+/** ★C8 诊断计数器（探针对账:queued(capture 推入) vs posted(帧批发出) vs
+ *  fields(场快照回达);falls=看门狗回落。纯读面零行为影响） */
+const _wwStat = { camQ: 0, washQ: 0, rippleQ: 0, posted: 0, fields: 0, falls: 0 };
+export function wwWorkerStats(): { camQ: number; washQ: number; rippleQ: number; posted: number; fields: number; falls: number } {
+  return { ..._wwStat };
+}
+
 /** QueueRipple(pos, strength=1, shape=Square, rotation=0)（:446-451）。
  *  色 (0.5, s·0.5+0.5, 0)·min(|s|,1)、尺寸 4·max(|s|,1)×4·max(|s|,1)。
  *  Gore.cs:986 血块落水走此重载。 */
@@ -241,6 +255,8 @@ export function queueRippleRaw(
   x: number, y: number, sx: number, sy: number,
   colR: number, colG: number, colA: number, shape: RippleShape, rotation: number,
 ): void {
+  // ★C8 capture 模式：推参入批（worker 侧自行跑 gates/清队语义）
+  if (_wwCapture) { _wwStat.rippleQ++; _wwCapture.push({ k: 'rippleRaw', a: [x, y, sx, sy, colR, colG, colA, shape, rotation] }); return; }
   if (!waterWaves.gates.ripple) { _rqCount = 0; return; }
   if (_rqCount >= MAX_RIPPLES) return;
   _rqX[_rqCount] = x; _rqY[_rqCount] = y;
@@ -336,6 +352,15 @@ export interface WaterWaveDebug {
   rippleQueueUsed: number; activeTexels: number;
 }
 
+/** ★C8 转正（2026-09-23）：缺省开——双模式对拍（worker nonNeutral=25652 vs main
+ *  25415,+0.9% 混沌系等价;343 帧批全应答;falls=0）+BJ316 getError 审计窗共存
+ *  验证。?waveworker=0 = 逃生门（回主线程模拟,失联看门狗双保险保留）。 */
+const wwWorkerFlag = (() => {
+  try {
+    return typeof location === 'undefined' || new URLSearchParams(location.search).get('waveworker') !== '0';
+  } catch { return true; }
+})();
+
 class WaterWaveSystem {
   quality = 3;
   gates = waveSourceGates(3);
@@ -358,9 +383,81 @@ class WaterWaveSystem {
   private _scrollX = 0; private _scrollY = 0;
   private _stepsLast = 0;
 
+  /** ★C8 波场 Worker（?waveworker=1）:模拟整体移出主线程——弱机 _step 死亡
+   *  螺旋（dt 补偿 2 步×11 万格）在 worker 线程无害化，渲染主线程拿回预算。
+   *  内核同源（worker 导入本模块=同一份类）零转录；同步纪律：主线程零阻塞
+   *  （全异步消息）、场快照原子替换、注入批随帧发送（锚=F_prev 时序同构）。 */
+  private _ww: Worker | null = null;
+  private _wwOn = false;
+  private _wwSpawned = false;
+  /** ★C8 纹理下发旗：Ripples 形状纹理是否已喂给 worker（一次性 32KB） */
+  private _wwTexSent = false;
+  /** ★失联看门狗：最后一场快照到达时刻（0=从未到达）。2s 无回传=worker 失效
+   *  （脚本加载失败/运行时死亡/消息丢失）→ 自动terminate+回落主线程模拟
+   *  （2026-09-23 用户实报"入水无波纹"案：注入被发往死 worker=静态水面）。 */
+  private _wwLastField = 0;
+  private _wwStartedAt = 0;
+
+  private _wwEnsure(): void {
+    if (this._wwSpawned) return;
+    this._wwSpawned = true;
+    try {
+      this._ww = new Worker(new URL('../workers/WaveWorker.ts', import.meta.url), { type: 'module' });
+      this._wwStartedAt = performance.now();
+      this._ww.onerror = (e) => console.warn('[WaveWaves] worker error:', String(e.message ?? '').slice(0, 140));
+      this._ww.onmessage = (e: MessageEvent) => { _wwStat.fields++; this._wwLastField = performance.now(); this._wwApplyField(e.data); };
+      this._ww.postMessage({ op: 'quality', q: this.quality });
+      _wwCapture = _wwCapture || [];
+      // ★C8 修复（2026-09-23 探针定谳：worker 臂 washQ=206/rippleQ=9 被 capture 吞
+      //  而 posted=0/fields=0）——_wwOn 此前【全文件无置 true 点】：frame() 的 worker
+      //  分支永不进入 → 注入批永不 postMessage、场快照永不回传、_wwCapture 无界增长
+      //  （内存泄漏）→ 用户实报"水面有噪声波动但无实体交互波纹"（本地 sim 照跑=环境
+      //  噪声在，全部实体注入被吞=交互波纹无）。旗开即切换 capture 模式。
+      this._wwOn = true;
+      this._wwTrySendTex();
+    } catch { this._ww = null; this._wwOn = false; }
+  }
+
+  /** ★C8：Ripples 形状纹理下发（worker 模块实例无 document，ensureWaveTextures
+   *  不可达 → 不喂则 worker 侧 _drawRipples 的 !_rippleData 门把涟漪整批清队
+   *  =worker 模式涟漪全缺）。atlas 未就绪时随帧重试直至发出（一次性开销）。 */
+  private _wwTrySendTex(): void {
+    if (this._wwTexSent || !this._wwOn || !this._ww) return;
+    if (!_rippleData) return;   // 纹理懒提取未就绪——下帧再试
+    this._wwTexSent = true;
+    this._ww.postMessage({ op: 'tex', ripple: _rippleData });
+  }
+
+  /** worker 场快照 → 类字段（读侧方法 sampleDisplace/readGridR/waveReadOffset 零改动） */
+  private _wwApplyField(m: { R: Float32Array; G: Float32Array; gW: number; gH: number;
+    progress: number; intensity: number; waveOff: [number, number];
+    cam: [number, number, number]; scroll: [number, number] }): void {
+    if (this._R.length === m.R.length) { this._R.set(m.R); this._G.set(m.G); }
+    else { this._R = m.R as typeof this._R; this._G = m.G as typeof this._G; }
+    this._gW = m.gW; this._gH = m.gH;
+    this.progress = m.progress; this.intensity = m.intensity;
+    this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
+    this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
+  }
+
+  /** worker 回传快照（worker 侧调用,读私有字段） */
+  exportFieldSnapshot(): { R: Float32Array; G: Float32Array; gW: number; gH: number;
+    progress: number; intensity: number; waveOff: [number, number];
+    cam: [number, number, number]; scroll: [number, number] } {
+    return {
+      R: this._R.slice(), G: this._G.slice(),
+      gW: this._gW, gH: this._gH,
+      progress: this.progress, intensity: this.intensity,
+      waveOff: this.waveReadOffset(),
+      cam: [this._camX, this._camY, this._zoom],
+      scroll: [this._scrollX, this._scrollY],
+    };
+  }
+
   setQuality(q: number): void {
     const clamped = Math.min(3, Math.max(0, Math.round(q)));   // Main.cs:4466-4473 钳 [0,3]
     if (clamped === this.quality) return;
+    if (this._wwOn) { this._ww!.postMessage({ op: 'quality', q: clamped }); }   // ★C8：worker 侧同步换档
     this.quality = clamped;
     this.gates = waveSourceGates(this.quality);
     // 降档/升档横跳时缓冲回到中性（原版档位变化 → 滤镜重激活 → _clearNextFrame）
@@ -369,6 +466,7 @@ class WaterWaveSystem {
 
   /** 相机态（注入/采样换算共用；Renderer 在实体注入前调用） */
   setCamera(camX: number, camY: number, zoom: number): void {
+    if (_wwCapture) { _wwStat.camQ++; _wwCapture.push({ k: 'camera', a: [camX, camY, zoom] }); return; }   // ★C8
     this._camX = camX; this._camY = camY; this._zoom = zoom;
   }
 
@@ -377,6 +475,31 @@ class WaterWaveSystem {
 
   /** 每渲染帧：Update(:112-129) + PreDraw(:336-360) + 涟漪队列注入。 */
   frame(inp: WaveFrameInput): void {
+    // ★C8：worker 模式=注入批+帧输入发往 worker,本地模拟整段跳过（读侧由
+    //  _wwApplyField 快照喂）。主线程零阻塞;模拟在 worker 线程自harmless。
+    if (this._wwOn) {
+      // ★失联看门狗：2s 无场回传=worker 失效（加载失败/死亡）→ terminate+回落
+      //  本地模拟（主线程 _R 已由历史快照喂过=平滑续接）。宁可回落不可静态水。
+      const now = performance.now();
+      const since = this._wwLastField === 0 ? now - this._wwStartedAt : now - this._wwLastField;
+      if (since > 2000) {
+        _wwStat.falls++;
+        console.warn('[WaveWaves] worker 失联回落主线程模拟 (' + since.toFixed(0) + 'ms 无场回传)');
+        this._wwOn = false;
+        try { this._ww?.terminate(); } catch { /* 已死 */ }
+        this._ww = null;
+        _wwCapture = null;
+        // 落回后继续走本地模拟（下方原路径）
+      } else {
+        this._wwTrySendTex();   // ★C8：纹理未就绪时随帧补发（一次性）
+        const inj = _wwCapture || [];
+        _wwCapture = [];
+        _wwStat.posted++;
+        this._ww!.postMessage({ op: 'frame', inp, inj });
+        return;
+      }
+    }
+    if (wwWorkerFlag) this._wwEnsure();   // 首帧惰性建（旗开即 Worker 化）
     this.setCamera(inp.camX, inp.camY, inp.zoom);
     this.intensity = waterDistortionIntensity(
       inp.windAbs, inp.rain, inp.tileX, inp.tileY,
@@ -504,6 +627,7 @@ class WaterWaveSystem {
    *  写 s = 大 ~25× 过强）。 */
   injectWash(centerX: number, centerY: number, quadW: number, quadH: number,
     flowX: number, flowY: number, strength: number): void {
+    if (_wwCapture) { _wwStat.washQ++; _wwCapture.push({ k: 'wash', a: [centerX, centerY, quadW, quadH, flowX, flowY, strength] }); return; }   // ★C8
     if (this.quality === 0) return;
     const z = this._zoom;
     // ★BJ89 注入锚 = snapUp 栅格（DrawWaves :183 `vector4 = Center − vector2`，

@@ -3636,10 +3636,21 @@ export class WorldEvolution {
       const bs = sheetOf(st.type[bi]);
       if (bs !== 2 && bs !== 477 && bs !== 109 && bs !== 492) return;
     }
+    // ★BJ315（2026-09-23）：成长写面 setTileSilent 化。原版成长=裸帧直写
+    //  （cs:53006-53012 `Main.tile[m,n].frameX += 36`——无 PlaceTile/KillTile/
+    //  TileFrame/SquareTileFrame,仅 netMode==2 SendTileSquare :53012-53014）。
+    //  曾走 setTile（挂 onTileChanged）→ 首写【半写态】（左上格已 +36 余三格未写）
+    //  即触发 DECOR 3×3 扫（Game.checkDecorSquareFrame :7058 监听）→ 'pumpkin'
+    //  完整性裁决（Check2x2Style :52753 同判据,块内 frameX 混帧=bad）→
+    //  killDecorTile→breakPumpkin 整株清;stage 0→1 帧段（fx<72）零掉落 =
+    //  用户实报「南瓜子种下去一段时间就不见了」（fx=0 门 1/1 恒真 → 首次
+    //  采样必死,种下无一存活）。改静默直写 + 渲染补标（afterSilentTileWrite=
+    //  陨石/花苞同款,单机 SendTileSquare 等价;联机边界沿该口既有挂账）。
     for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
       const ii = st.idx(ax + dx, ay + dy);
-      st.setTile(ax + dx, ay + dy, t, st.frameX[ii] + 36, st.frameY[ii]);   // cs:52570-52580 全格 frameX+=36
+      st.setTileSilent(ax + dx, ay + dy, t, st.frameX[ii] + 36, st.frameY[ii]);   // cs:53006-53012 裸 frameX+=36
     }
+    this.host.afterSilentTileWrite?.(ax - 1, ay - 1, ax + 1, ay + 1);
   }
 
   // ================= 仙人掌（cs:56584） =================

@@ -7219,7 +7219,25 @@ export class UI {
      --invpulse=(invAlpha-180)/60 由 rAF 单点驱动(root 单写,全槽 calc 派生);
      --slot-alpha 显式置 1 的槽(经典列表格)退出脉冲 */
   opacity:var(--slot-alpha, calc(0.706 + var(--invpulse, 0) * 0.235)); }
-.sw-vinv .sw-slot:hover::after { opacity:1; }
+/* ★BJ316 2026-09-23:脉冲改合成器驱动 CSS 动画（真机 trace 定谳
+   Trace-20260923T222003.json:rAF 逐帧写 --invpulse → 全槽 ::after opacity calc
+   派生 → 开包每帧 style recalc 0.97ms + 94 个 Paint 事件/帧 1.06ms + 142
+   PaintImage/帧 0.25ms（关包态全部为 0）→ GPU 光栅争用又把 uploadRaw getError
+   同步等待推到 4.0ms/帧 = 开包掉帧主链）。动画包络 = 原逐帧写同域:
+   invAlpha 180↔240 @±0.2/tick·60Hz(12/s) → 半程 5s 线性三角波,opacity
+   0.706↔0.941（原式 calc(0.706+var(--invpulse)×0.235) 值域）。will-change=
+   合成层常驻;vinvRoot 关包 display:none → 零层零成本。相位面偏差备案:
+   动画钟=墙钟域,开合周期/隐藏页间不续相（原=rAF 续相）——包络/速率/值域
+   零差,呼吸相位无绝对语义。 */
+@keyframes sw-vinv-pulse { from { opacity:0.706; } to { opacity:0.941; } }
+.sw-vinv .sw-slot::after { animation:sw-vinv-pulse 5s linear 0s infinite alternate;
+  will-change:opacity; }
+/* 显式 --slot-alpha 的槽（经典列表格/mcraft/向导格等）退出脉冲——属性子串选择器
+   与原「--slot-alpha 显式置值走定值支不进 calc 缺省」语义逐槽同域 */
+.sw-vinv .sw-slot[style*="--slot-alpha"]::after { animation:none; will-change:auto; }
+/* hover 全亮须 !important——CSS 级联序 author important > 运行中动画值,普通规则
+   会被动画盖掉;!important 不摘动画（移开即恢复动画当帧值 = 原 unhover 回脉冲同观感） */
+.sw-vinv .sw-slot:hover::after { opacity:1 !important; }
 .sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
 /* ★FX43(2026-09-16)modern 合成窗(.sw-mcraft)槽视觉面 1:1——
    ①格/成品/材料槽层 α 定值(ItemSlot.cs ctx41/42/43 InventoryBack18 × (10,58,74)@162;
@@ -10108,11 +10126,12 @@ export class UI {
     return original !== num2;
   }
 
-  /** ★原版槽底脉冲(Main.cs:46460-46474):invAlpha 每游戏拍 ±0.2 循环 180↔240。
-   *  rAF 单点驱动:root 单写 --invpulse(全槽 calc 派生),材料行/列表 alpha 读数。
-   *  dt 归一(高刷屏 1:1 周期);开包启动/关包停(广播零开销) */
-  private vinvPulseA = 180;
-  private vinvPulseDir = 1;
+  /** ★原版槽底脉冲域 rAF 环（Main.cs:46460-46474 脉冲本体已迁 CSS 合成器动画,
+   *  ★BJ316 2026-09-23——--invpulse 逐帧写 → 全槽 opacity 派生逐帧 style recalc
+   *  +整面板重绘 + GPU 光栅争用放大 uploadRaw getError sync = 真机 trace 定谳的
+   *  开包掉帧主链;动画迁 vinvStyleEnsure @keyframes sw-vinv-pulse,包络同域）。
+   *  本环保留其余逐帧职责：mH 新鲜度重排（FX10 债⑨）/modern 滤器失效拍（FX41）/
+   *  列表吸附步进（FX38）,全部条件比对,稳态零 DOM 写。开包启动/关包自停。 */
   private vinvPulseRaf = 0;
   private vinvPulseLast = 0;
   private vinvPulseTick = (ts: number): void => {
@@ -10160,10 +10179,9 @@ export class UI {
         for (let k = 0; k < steps; k++) this.vinvCraftSnapStep();
       }
     }
-    this.vinvPulseA += this.vinvPulseDir * 0.2 * (dt / 16.67);
-    if (this.vinvPulseA > 240) { this.vinvPulseA = 240; this.vinvPulseDir = -1; }
-    if (this.vinvPulseA < 180) { this.vinvPulseA = 180; this.vinvPulseDir = 1; }
-    this.vinvRoot.style.setProperty('--invpulse', ((this.vinvPulseA - 180) / 60).toFixed(4));
+    // ★BJ316 2026-09-23:脉冲账面退役（原此步进 invAlpha ±0.2/tick 并逐帧
+    //   setProperty('--invpulse')——掉帧主链定谳见类字段注/vinvStyleEnsure 注;
+    //   CSS @keyframes 合成器驱动接管,稳态零主线程写零重绘）。
     this.vinvPulseRaf = requestAnimationFrame(this.vinvPulseTick);
   };
   private vinvPulseStart(): void {

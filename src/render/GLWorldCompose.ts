@@ -113,6 +113,11 @@ export class GLWorldCompose {
   /** ★RGBA8UI 上传被驱动拒后永久回落 lightCanvas 路径（getError 体检位） */
   private _rawBroken = false;
   private _rawWarned = false;
+  /** ★BJ316（2026-09-23）getError 体检审计窗：首 3 次上传+尺寸首见+recreate 后重审
+   *  ——getError=全管线 sync（真机 trace:稳态 ~1ms/帧,DOM 争用态 4.0ms/帧）,
+   *  稳态禁逐帧;RGBA8UI 拒收=逐上下文确定性条件,审计窗覆盖即等价。 */
+  private _rawAuditLeft = 3;
+  private _rawAuditKey = '';
   /** ★诊断:最近一次 compose 失败原因（探针面） */
   lastFail = '';
   private _texKeyWorld = '';
@@ -351,14 +356,31 @@ export class GLWorldCompose {
     gl.bindTexture(gl.TEXTURE_2D, this.texRaw);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    // ★先排空历史错误队列再体检——getError 返回最老未读错误,不排空会把帧内
-    //  其他调用的旧错误记到本次上传头上（2026-09-23 探针实测误伤案）
-    while (gl.getError() !== gl.NO_ERROR) { /* 排空 */ }
+    // ★BJ316 体检收窗（真机 trace 定谳 2026-09-23,Trace-20260923T222003.json）：
+    //  getError 是全管线同步点（排空 while+上传后体检=每帧 2 次 flush+GPU 回读
+    //  等待），稳态自付 ~1ms/帧；DOM 每帧重绘与 WebGL 争 GPU 时单点膨胀到
+    //  4.0ms/帧（开包掉帧主凶,占 120→82fps 缺口六成）。RGBA8UI 被驱动拒是
+    //  【逐上下文确定性】条件（2026-09-23 全黑案形态:首传即拒,无逐帧随机面）
+    //  → 体检收窄到「审计窗」：①首 3 次上传 ②尺寸首见（视口/缩放变化 →
+    //  rw/rh 变 → W×H 变）③recreate 重建上下文后重置。稳态零 getError=零
+    //  sync;错误队列此后不再消费（全仓无其他 getError 消费方,grep 核对
+    //  2026-09-23;GL 错误码槽合并覆写,无累积面）。审计窗内仍先排空
+    //  （getError 返回最老未读错误,不排空会把帧内其他调用的旧错误记到本次
+    //  上传头上,2026-09-23 探针实测误伤案）。
+    const kW = `${W}x${H}`;
+    const audit = this._rawAuditLeft > 0 || this._rawAuditKey !== kW;
+    if (audit) {
+      if (this._rawAuditLeft > 0) this._rawAuditLeft--;
+      this._rawAuditKey = kW;
+      while (gl.getError() !== gl.NO_ERROR) { /* 排空 */ }
+    }
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8UI, W, H, 0, gl.RGBA_INTEGER, gl.UNSIGNED_BYTE, buf);
-    // ★RGBA8UI 上传体检：被驱动拒（INVALID_OPERATION）时纹理不完整 → texelFetch
-    //  恒 0 → recon 全黑 → 世界全黑（用户实报案防御）——坏即 _rawBroken 回落
-    //  lightCanvas 路径（compose 返 false → Renderer 落 CPU 重建+A2/旧链）。
-    if (gl.getError() !== gl.NO_ERROR) { this._rawBroken = true; this.lastFail = 'raw-upload-glerror'; return false; }
+    // ★RGBA8UI 上传体检（审计窗内）：被驱动拒（INVALID_OPERATION）时纹理不完整 →
+    //  texelFetch 恒 0 → recon 全黑 → 世界全黑（用户实报案防御）——坏即 _rawBroken
+    //  回落 lightCanvas 路径（compose 返 false → Renderer 落 CPU 重建+A2/旧链）。
+    //  语义收窄备案：稳态（已过审同尺寸）上传失败不再逐帧检出——唯一登记失效面
+    //  是逐上下文确定性拒绝（审计窗已覆盖）与 OOM（尺寸变化触发重审已覆盖）。
+    if (audit && gl.getError() !== gl.NO_ERROR) { this._rawBroken = true; this.lastFail = 'raw-upload-glerror'; return false; }
     glStatUpload(this.pipeline.statName, W * H * 4);
     return true;
   }
@@ -423,6 +445,7 @@ export class GLWorldCompose {
         this.setParams(gl, this.texRaw, 'NEAREST', 'CLAMP');
       }
       this._texKeyWorld = ''; this._texKeyLight = ''; this._texKeyNoise = ''; this._texKeyWater = '';
+      this._rawAuditLeft = 3; this._rawAuditKey = '';   // ★BJ316:重建后重审 RGBA8UI 体检
       this.texWaterEmpty = null;
     }
     return ok;
