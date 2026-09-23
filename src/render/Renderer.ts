@@ -624,9 +624,17 @@ export function prettyStarSparkle(
   const stroke = (img: HTMLCanvasElement, rot: number, sw: number, sh: number, alpha: number) => {
     if (alpha <= 0 || sw <= 0 || sh <= 0) return;
     const w = Math.max(1, Math.round(tw * sw)), h = Math.max(1, Math.round(th * sh));
-    if (!sbuf) sbuf = document.createElement('canvas');
+    // ★canvas 哨兵案（2026-09-23 用户实报 30-40fps）：原 sbuf 每次 call 新建 +
+    //  4 次 stroke 各因宽高不同 resize 4 次 = 天顶剑 60-113 张/秒 canvas churn
+    //  （哨兵栈:createElement←stroke←prettyStarSparkle←ZenithSword.draw）→
+    //  surface 分配压力 → 全局 drawImage 减速。改模块级复用槽：stroke 同步
+    //  消费（clear→draw→即回主 ctx）,共享安全、稳态零分配、像素零变化。
+    sbuf ??= _sparkleScratch ??= document.createElement('canvas');
     if (sbuf.width !== w || sbuf.height !== h) { sbuf.width = w; sbuf.height = h; }
-    const bc = sbuf.getContext('2d')!;
+    // ★BJ314（2026-09-23）：willReadFrequently CPU 面——本槽每 stroke「写后即读」
+    //  （drawImage 进软件世界层）,GPU-backed 时每次都是刚写完的纹理→CPU 面跨界
+    //  回读同步（挥砍稳态 8 次/帧）。同写同读同指令=像素零差,仅后备面落 CPU。
+    const bc = sbuf.getContext('2d', { willReadFrequently: true })!;
     bc.clearRect(0, 0, w, h);
     bc.imageSmoothingEnabled = false;
     bc.drawImage(img, 0, 0, w, h);
@@ -643,6 +651,11 @@ export function prettyStarSparkle(
   stroke(draw, Math.PI / 2 + rotation, v1x * 0.6, v1y * 0.6, aDraw);
   stroke(draw, rotation, v2x * 0.6, v2y * 0.6, aDraw);
 }
+
+/** ★C6-sparkle 复用槽（2026-09-23 canvas 哨兵案）：prettyStarSparkle 的 stroke
+ *  中转画布——原每次调用新建+4 次 resize=天顶剑 60-113 张/秒 churn（surface
+ *  压力→全局 drawImage 减速,用户实报 30-40fps）。同步消费共享安全。 */
+let _sparkleScratch: HTMLCanvasElement | null = null;
 
 /** PrettySparkle 臂几何（纯函数,tests/dust-premultiplied-blend.test.ts 直测）——
  *  XNA 拉伸=贴图尺寸×scale（PrettySparkleParticle.cs:72-73,Extra_98=72×72）：
@@ -2795,8 +2808,27 @@ export class Renderer {
   private _b0Wrap: CanvasRenderingContext2D | null = null;
   /** ★A2 光照×扭曲 FBO 链（?wfbo=1 惰性建;unavailable/失败自动落回旧 GL 链） */
   private worldCompose: GLWorldCompose | null = null;
+  /** ★路径变更回调（Game 接线到行为记录器——转场才记一条,环形缓冲不刷屏） */
+  cbOnComposePath: ((p: string) => void) | null = null;
+  private _lastMarkedPath = '';
+  _markPath(p: string): void {
+    this.composePathUsed = p;
+    this.composePathStats[p] = (this.composePathStats[p] || 0) + 1;
+    if (p.startsWith('lrecon-fail')) {
+      const m = /:(.+)$/.exec(p);
+      if (m) this.composeLastFail = m[1];
+    }
+    if (p !== this._lastMarkedPath) {
+      this._lastMarkedPath = p;
+      this.cbOnComposePath?.(p);
+    }
+  }
   /** ★诊断面（2026-09-23 全黑案）:本帧光照合成实际走的路径('lrecon'/'lrecon-fail'/'a2'/'oldchain') */
   composePathUsed = '';
+  /** ★路径分布累计（F5 报告面）:全会话各路径帧数——分布比瞬时值有诊断力 */
+  composePathStats: Record<string, number> = {};
+  /** 最近一次 recon 失败原因（lrecon-fail 时由 compose.lastFail 填入） */
+  composeLastFail = '';
   /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
   waterWarpMode(): 'auto' | '2d' | 'off' { return this.waterWarp.mode; }
   waterWarpActive(): boolean { return this.waterWarp.active(); }
@@ -16796,11 +16828,11 @@ export class Renderer {
           { r: lightR, g: lightG, b: lightB, rx, ry, rw, rh, tx0, ty0, w2, h2 },
         );
         if (okL) {
-          this.composePathUsed = 'lrecon';
+          this._markPath('lrecon');
           this.ctx.drawImage(wcL.pipeline.canvas, 0, 0, viewW, viewH);
           return;
         }
-        this.composePathUsed = 'lrecon-fail:' + (wcL.lastFail || '?');
+        this._markPath('lrecon-fail:' + (wcL.lastFail || '?'));
       }
     }
     if (this.lightCanvas.width !== w2 || this.lightCanvas.height !== h2) {
@@ -17039,7 +17071,7 @@ export class Renderer {
             ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]),
           );
           if (ok) {
-            this.composePathUsed = 'a2';
+            this._markPath('a2');
             this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
             return;
           }
@@ -17047,7 +17079,7 @@ export class Renderer {
       }
       const gl = this.worldLightLayer();   // ★A2：仅旧链路径触达（实例获取后移,见上注）
       if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand)) {
-        this.composePathUsed = 'oldchain';
+        this._markPath('oldchain');
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，
         //   全由 obj19 alpha 门控交付（GLWaterDistortion 头注）。GL 不可用/逃生门/

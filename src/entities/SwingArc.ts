@@ -27,6 +27,7 @@ import { playerCanHitEnemy, canBeChasedBy, applyBannerDamageDealt } from './proj
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { damageVarRoll } from '../stats/DamageVar';   // ★SW-T1 2026-09-04 DV 单源接线
 import { prettyStarSparkle } from '../render/Renderer';
+import { texId, texReady } from '../render/texId';
 import { canHitLine } from '../physics/LineOfSight';
 import { drawStripTrail } from '../fx/TrailShader';
 import { cutTilesBox } from './ProjCutTiles';
@@ -201,20 +202,38 @@ export function lightingFromValue(r: unknown, wx: number, wy: number): number {
 }
 
 /** 帧染色烘焙（tintIconRect 三步式 draw→multiply→destination-in——Renderer.ts tintedSprite
- *  同配方；单共享 scratch 零缓存：剑影色随 n3/fv 逐拍连续漂移,进 TintAtlas 会以高频键
- *  冲刷共享 LRU（FX24 tq churn 同族）,170×170 双 pass 成本可忽略）。返回 null = 无 DOM。 */
-let arcTintScratch: HTMLCanvasElement | null = null;
+ *  同配方）。★BJ314 2026-09-23 染色烘焙记忆化（用户实报"永夜刃挥起来很卡,像 CPU
+ *  软像素实现"）：旧实现 = 单共享 GPU-backed scratch 每层每帧重烘——972 挥砍稳态
+ *  10 烘焙/帧（锚弧 5+飞斩 5）、TNE 973 39 烘焙/帧（3 残影位×13 层）,烘焙结果随即
+ *  drawImage 进 willReadFrequently 软件世界层 ⇒ 每次都是「刚写完的 GPU 纹理→CPU
+ *  面」跨界回读同步（scratch 逐帧重写=回读缓存永不可复用）。定谳链（探针
+ *  _bj314-perf/_bj314-perf2/_bj314-perf3 + scripts/_bj314-hash.mjs）：
+ *  · 恒等性：烘焙输出只依赖 (img, frame, rgb 整型)——fillStyle 本就按 `rgb(${r|0})`
+ *    截断,键=同一输入 ⇒ 缓存命中输出与现烘逐字节恒等（落刀前后 FNV-1a 全等实拍）。
+ *  · 972 五层中 4 层 rgb 恒定（base/l3/l4/帧3 白芯,alpha 全在 globalAlpha 链不进
+ *    烘焙）=每帧全冗余;层2 白衍生链键随 K/n3 漂移但整数域有界（每挥 ~25 档）。
+ *  · 缓存面 willReadFrequently（CPU 面,Portal.tintedFrame 帧染缓存同族+texId 头注
+ *    判例）：消费端=软件世界层,CPU→CPU 同步 blit,跨界回读 18 次/帧（10 弧+8 星芒）
+ *    → 0;烘焙面同序同指令（含 clearRect/imageSmoothingEnabled=false）逐位恒等。
+ *  · texReady 入口守卫：半加载窗烘焙平色矩形按键永久入缓存 = 镜头光斑"淡色方片"
+ *    同族毒化（texId.ts 头注判例）,禁入（projSprite 只在 onload 后出图,本守卫为
+ *    素材包/升级链半窗兜底）。返回 null = 无 DOM‖未就绪（调用方降级直出）。 */
+const arcTintCache = new WeakMap<object, Map<string, HTMLCanvasElement>>();
 
 function tintedFrame(
   img: ImageBitmap | HTMLImageElement, fw: number, fh: number, frame: number, rgb: RGB,
 ): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;    // node 域（无 DOM）降级直出
-  if (!arcTintScratch) arcTintScratch = document.createElement('canvas');
-  if (arcTintScratch.width !== fw || arcTintScratch.height !== fh) {
-    arcTintScratch.width = fw;
-    arcTintScratch.height = fh;
-  }
-  const c = arcTintScratch.getContext('2d');
+  if (!texReady(img)) return null;                     // 半加载窗禁入缓存（毒化守卫）
+  let cache = arcTintCache.get(img);
+  if (!cache) { cache = new Map(); arcTintCache.set(img, cache); }
+  const key = `${texId(img)}|${frame}|${rgb[0] | 0},${rgb[1] | 0},${rgb[2] | 0}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const cv = document.createElement('canvas');
+  cv.width = fw;
+  cv.height = fh;
+  const c = cv.getContext('2d');
   if (!c) return null;
   c.globalCompositeOperation = 'source-over';
   c.clearRect(0, 0, fw, fh);
@@ -226,7 +245,11 @@ function tintedFrame(
   c.globalCompositeOperation = 'destination-in';
   c.drawImage(img, 0, frame * fh, fw, fh, 0, 0, fw, fh);
   c.globalCompositeOperation = 'source-over';
-  return arcTintScratch;
+  // 有界缓存（sparkleTintCache 同款逐条淘汰——禁整表 clear=重分配雪崩,2026-09-07
+  // canvas 哨兵案）：65 项×170²×4 ≈ 7.5MB 上界;漂移键挤掉最旧项,恒定层键热驻。
+  if (cache.size > 64) { const k0 = cache.keys().next().value; if (k0 !== undefined) cache.delete(k0); }
+  cache.set(key, cv);
+  return cv;
 }
 
 /** 层表消费端（XNA 预乘 AlphaBlend 等价合成）：染色帧 source-over ×A 链。

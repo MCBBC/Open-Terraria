@@ -26,7 +26,7 @@ describe('A2 GLWorldCompose 结构锁', () => {
     expect(composeSrc).toContain('this.lreconDead = !this.pRecon?.prog;');
     expect(composeSrc).toContain('this.lreconDead = !this.pRecon?.prog;\n      const gl');
     // recon 不可用时 compose 必须返 false（调用方落 CPU 重建,禁空 texLight 黑屏）
-    expect(composeSrc).toContain('if (rawLight && (this._rawBroken || this.lreconDead || !this.pRecon?.prog)) return false;');
+    expect(composeSrc).toContain('if (rawLight && (this._rawBroken || this.lreconDead || !this.pRecon?.prog)) {');
   });
 
   it('两级 pass FBO 链（lit→warped→present;scene 直采 FBO 纹理免重传）', () => {

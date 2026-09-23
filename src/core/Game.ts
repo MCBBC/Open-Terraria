@@ -5811,6 +5811,7 @@ export class Game implements GameHooks {
     };
     let gpuTripToasted = false;
     // 渲染模式切换 toast(自动降级/回切)
+    this.renderer.cbOnComposePath = (p) => this.recLog('composePath', p);   // ★A3 诊断:路径转场入行为时间线
     this.renderer.cbOnRenderModeSwitch = (mode) => {
       this.cb.onToast?.(Lang.text(mode === 'cpu'
         ? 'Mods.SandboxWorld.Toast.CpuRender'

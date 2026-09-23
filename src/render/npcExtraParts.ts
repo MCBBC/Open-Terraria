@@ -356,6 +356,13 @@ export function dukeBake(
   const key = `${texKey}|${variant}|${q(tint[0])}_${q(tint[1])}_${q(tint[2])}|${frame.sx},${frame.sy},${frame.sw},${frame.sh}`;
   let c = dukeBake._cache.get(key);
   if (c) return c;
+  // ★canvas 哨兵案（2026-09-23 猪鲨海实报）：战斗中光照 tint 逐帧变 → key 海量
+  //  miss → 缓存无上限增长（哨兵 63-90 张/秒）= 杀后 surface 压力驻留。LRU 上限
+  //  （dustPmCacheEvict 同款）：超限逐最旧——被逐键重烘像素确定性相同,零语义。
+  if (dukeBake._cache.size >= 512) {
+    const k0 = dukeBake._cache.keys().next().value;
+    if (k0 !== undefined) dukeBake._cache.delete(k0);
+  }
   c = document.createElement('canvas');
   c.width = frame.sw; c.height = frame.sh;
   const tc = c.getContext('2d')!;

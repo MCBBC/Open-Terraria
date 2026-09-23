@@ -46,7 +46,10 @@ export function startUpdateCheck(onNewVersion: (version: string, bundle: string)
       //  必须形如 index-*.js 才认,否则静默忽略等下轮(探针自愈:边缘同步后自正)
       const parts = (await r.text()).trim().split(/\s+/);
       const bundle = parts[1] ?? parts[0] ?? '';
-      const version = parts[1] && /^\d+\.\d+\.\d+$/.test(parts[0] ?? '') ? parts[0]! : '';
+      // ★2026-09-23:版本段允许预发布后缀(0.1.35-beta;用户令测试版一律带 -beta,
+      //   bump-version.mjs 自动补缀)——旧纯三段式正则把 -beta 判非版本,横幅回退
+      //   显示 bundle 指纹短码(用户实报「vBvemkH」根因)
+      const version = parts[1] && /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?$/.test(parts[0] ?? '') ? parts[0]! : '';
       if (/^index-[A-Za-z0-9_-]+\.js$/.test(bundle) && bundle !== cur) {
         stopped = true;
         onNewVersion(version || bundle, bundle);

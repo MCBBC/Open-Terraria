@@ -933,6 +933,13 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         lastFlushCount: g.chunks.lastFlushCount,
       } : null,
       minimapDirtyChunks: g.renderer?.minimap?.dirtyChunks?.size ?? 0,
+      // ★A3 诊断面（2026-09-23）:光照合成路径分布+最近失败原因——Windows 用户
+      //  反馈的 getImageData 30% 归因依赖此字段（部署包须含）
+      composePath: {
+        used: g.renderer?.composePathUsed ?? null,
+        stats: g.renderer?.composePathStats ?? null,
+        lastFail: g.renderer?.composeLastFail ?? null,
+      },
       // 资产健康(2026-08-13 运行期防线):失败的 vanilla/UI 贴图(404 终态)与
       // vui 键失配一目了然——此前 NPC_Head 40 个 404/全屏地图键失配这类 bug
       // 只能靠翻网络面板发现
