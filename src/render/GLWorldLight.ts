@@ -26,7 +26,7 @@ export class GLWorldLight {
   unavailable = false;
 
   // GLSL 100(WebGL1/2 皆可编)——attribute/varying 形式
-  private static VERT = `
+  static VERT = `
 attribute vec2 aPos;              // 单位 quad (0..1)^2
 uniform vec2 uCanvas;             // (仅 FRAG 采样用;此处 aPos 已是归一化)
 varying vec2 vUv;
@@ -36,7 +36,7 @@ void main() {
   //   aPos 已 0..1,直接映 clip(曾误除 uCanvas → quad 缩成 1px 碎片)
   gl_Position = vec4(aPos.x * 2.0 - 1.0, 1.0 - aPos.y * 2.0, 0.0, 1.0);
 }`;
-  private static FRAG = `
+  static FRAG = `
 precision highp float;   // uCanvas 与 VS 共享,精度必须一致(链接器要求)
 uniform sampler2D uWorld;
 uniform sampler2D uLight;

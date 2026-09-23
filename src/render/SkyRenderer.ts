@@ -3335,9 +3335,11 @@ export class SkyRenderer {
   }
 
   // ================= 月总死亡戏剧（MoonlordDeathDrama.cs 1:1） =================
-  // 消费锚点：ThrowPieces = NPC.cs:83496（398 终死 HitEffect(0,1337)）；
-  // AddExplosion = NPC.cs:36982（死亡态 ai0==2，ai1%3==0 且 60<ai1<580）；
-  // RequestLight = :36796/:36820（出生态 -1/-2 闪白 ai1/30）与 :37055（死亡态 ≥480 段）。
+  // 消费锚点（NPC.cs 1456/1457 双标,BJ298 2026-09-23 亲核）：
+  // ThrowPieces = 1456:83496 / 1457:83567（398 终死 HitEffect(0,1337)）；
+  // AddExplosion = 1456:36982 / 1457:41794（死亡态 ai0==2，ai1%3==0 且 60<ai1<580）；
+  // RequestLight = 1456:36796/:36820（出生态 -1/-2 闪白 ai1/30；1457:41609/:41633）
+  // 与 1456:37055 / 1457:41867（死亡态 ≥480 段）。
   // 任务描述"登场爆炸"系推测有误：Misc/MoonExplosion 五件贴图全部挂在**死亡**戏剧。
 
   private dramaCore: { cx: number; cy: number; ai0: number; ai1: number } | null = null;

@@ -27,10 +27,52 @@
 //     bgPreference: { "<npcId>": ["<path>" | { corrupt, crimson }] },
 //     moonLordBg: [398],
 //     derivations: { "<Visuals.X>": "<前提条件>" } }
-import { readFileSync, writeFileSync } from 'node:fs';
+//
+// ★BJ298 2026-09-23 era guard 落闸（四要素习语 docs/era-guard-family.md,BJ284 banners
+//   同构;BJ261 续批排期②【洗库险·B 形】清偿——原缺省无 env 无旗直写现库）：
+//   ① SW_ITEM_VER 白名单 {1457,1458}（读域 BestiaryDatabaseNPCsPopulator.cs 三版逐字节
+//     全等 md5 4874424e,BJ298 亲核——1458 交叉重放天然 byte-perfect;1456 退役显式拒+指引）;
+//     缺省 1457（拍板#7A）;
+//   ② 输出通道三分离：缺省=干跑对拍零写盘（双向路径级 diff——live-only=洗库预警/
+//     fresh-only=现库退化缺键型,任一非空 exit 1+物证）/ SW_OUT=<dir>=沙箱 / --write-real=
+//     写真库（diff 非纯增量拒,强推须 --force-full --overwrite-append-era 双旗）;SW_OUT 与
+//     --write-real 双旗互斥;非 1457 禁写真库;探测注入面 SW_BESTIARYSPAWN_JSON 与
+//     --write-real 混用拒（g1 footgun）;
+//   ③ 锚 fail-loud：conditions 空表 throw（原有）+GetCommonInfoElementsForFilters/
+//     MoonLord 背景锚（原有）+基数护栏（conditions≥80/byNpc≥600/条目≥1500,BJ298 亲数）;
+//   ④ 判别力自证：tests/extract-tables2-era-guard.test.ts（M1 摘干跑门/M3 摘 fresh-only 轴）。
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const src = readFileSync(`${ROOT}/Terarria1457/Terraria.GameContent.Bestiary/BestiaryDatabaseNPCsPopulator.cs`, 'utf8');
+// ---- ★BJ298 era guard ①②：版本白名单 + 输出通道开关（对拍在文末落盘段） ----
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457', '1458']);
+if (!VER_ALLOWED.has(VER) || !existsSync(`${ROOT}/Terarria${VER}/Terraria.GameContent.Bestiary/BestiaryDatabaseNPCsPopulator.cs`)) {
+  console.error(`[extract-bestiary-spawn] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1456') console.error('  1456 锚集已退役（BJ183 基准对齐 1457,BJ298 落闸）；1456 回拍读时代快照。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+const SW_OUT = process.env.SW_OUT;
+if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+  console.error('[extract-bestiary-spawn] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  process.exit(1);
+}
+if (WRITE_REAL && VER !== '1457') {
+  console.error(`[extract-bestiary-spawn] 拒绝写真库：SW_ITEM_VER=${VER}≠1457（旧基线重放禁写 vanilla-bestiary-spawn.json）。`);
+  process.exit(1);
+}
+if (WRITE_REAL && process.env.SW_BESTIARYSPAWN_JSON !== undefined) {
+  console.error('[extract-bestiary-spawn] 拒绝运行：探测注入面（SW_BESTIARYSPAWN_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  process.exit(1);
+}
+const LIVE_JSON = process.env.SW_BESTIARYSPAWN_JSON ?? `${ROOT}/game/src/data/vanilla-bestiary-spawn.json`;
+const OUT_JSON = WRITE_REAL
+  ? LIVE_JSON
+  : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-bestiary-spawn.json` : null);
+const src = readFileSync(`${ROOT}/Terarria${VER}/Terraria.GameContent.Bestiary/BestiaryDatabaseNPCsPopulator.cs`, 'utf8');
 const lines = src.split('\n');
 
 // ---- 嵌套类栈 → 字段全路径 ----
@@ -205,6 +247,67 @@ for (const [vis, need] of derivRules) {
 }
 
 const data = { conditions, byNpc, commonFilters, bgPreference, moonLordBg, derivations };
-writeFileSync(`${ROOT}/game/src/data/vanilla-bestiary-spawn.json`, JSON.stringify(data));
+
+// ---- ★BJ298 ③ 基数护栏（1457 实测,BJ298 亲数;漂移=解析面残表）----
+if (nCond < 60 || Object.keys(byNpc).length < 600 || total < 800 || commonFilters.length < 50) {
+  throw new Error(`[extract-bestiary-spawn] 锚点失配: 基数护栏: conditions ${nCond} < 60 / byNpc ${Object.keys(byNpc).length} < 600 / 条目 ${total} < 800 / commonFilters ${commonFilters.length} < 50（解析面漂移,禁止静默半表）`);
+}
+
+// ---- ★BJ298 era guard ②：干跑对拍 / 沙箱 / 逃生门（banners 同构 deepWash）----
+/** 现库 vs 重产双向路径级 diff。live-only=洗库预警面 / fresh-only=现库退化缺键型面
+ *  （★G-1/S3 处方）/ drift=同路径值漂移。 */
+function deepWash(live, fresh, prefix = '') {
+  const w = { liveOnly: [], freshOnly: [], drift: [] };
+  const base = prefix || '<root>';
+  if (live === null || fresh === null || typeof live !== 'object' || typeof fresh !== 'object') {
+    if (JSON.stringify(live) !== JSON.stringify(fresh)) w.drift.push(`${base}: ${JSON.stringify(live)}→${JSON.stringify(fresh)}`);
+    return w;
+  }
+  if (Array.isArray(live) !== Array.isArray(fresh)) {
+    w.drift.push(`${base}: 类型漂移 ${Array.isArray(live) ? 'arr' : 'obj'}↔${Array.isArray(fresh) ? 'arr' : 'obj'}`);
+    return w;
+  }
+  const lk = new Set(Object.keys(live));
+  const fk = new Set(Object.keys(fresh));
+  for (const k of Object.keys(live)) {
+    const p = `${prefix}.${k}`;
+    if (!fk.has(k)) { w.liveOnly.push(p); continue; }
+    const sub = deepWash(live[k], fresh[k], p);
+    w.liveOnly.push(...sub.liveOnly); w.freshOnly.push(...sub.freshOnly); w.drift.push(...sub.drift);
+  }
+  for (const k of Object.keys(fresh)) if (!lk.has(k)) w.freshOnly.push(`${prefix}.${k}`);
+  return w;
+}
+const washEmpty = (v) => !v.liveOnly.length && !v.freshOnly.length && !v.drift.length;
+function washReport(v) {
+  console.error('  物证：');
+  if (v.liveOnly.length) console.error(`    [live-only] 现库独有 ${v.liveOnly.length} 处（重产缺=提取器退化/洗库面）: ${v.liveOnly.slice(0, 6).join(', ')}`);
+  if (v.freshOnly.length) console.error(`    [fresh-only] 重产独有 ${v.freshOnly.length} 处（现库缺=源侧新增/现库退化）: ${v.freshOnly.slice(0, 6).join(', ')}`);
+  if (v.drift.length) console.error(`    [drift] 值漂移 ${v.drift.length}: ${v.drift.slice(0, 6).join(' | ')}`);
+}
+const json = JSON.stringify(data);
+let live = null;
+if (existsSync(LIVE_JSON)) { try { live = JSON.parse(readFileSync(LIVE_JSON, 'utf8')); } catch { /* 坏损:不拦（npcdrops 同款） */ } }
+const wash = live === null ? null : deepWash(live, JSON.parse(json));
 console.error(`conditions: ${nCond} 条 / byNpc: ${Object.keys(byNpc).length} NPC / 条目: ${total}`);
 console.error(`commonFilters: ${commonFilters.length} 条 / bgPreference: ${Object.keys(bgPreference).length} NPC / moonLord: [${moonLordBg}]`);
+if (OUT_JSON) {
+  if (WRITE_REAL && wash && !washEmpty(wash) && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+    console.error('[extract-bestiary-spawn] 拒绝 --write-real：重产 diff 非纯增量（双向差异非空）——先逐值定谳（反编译为准）再回写。');
+    washReport(wash);
+    console.error('  确需原地强推：--force-full --overwrite-append-era 双旗（单旗仍拒）。');
+    process.exit(1);
+  }
+  mkdirSync(OUT_JSON.slice(0, OUT_JSON.lastIndexOf('/')), { recursive: true });
+  writeFileSync(OUT_JSON, json);
+  console.error(`[extract-bestiary-spawn] 已写 ${OUT_JSON}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}）`);
+} else if (wash === null) {
+  console.error('[extract-bestiary-spawn] 干跑（零写盘）：现库缺 vanilla-bestiary-spawn.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+} else if (!washEmpty(wash)) {
+  console.error('[extract-bestiary-spawn] 干跑对拍：双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
+  washReport(wash);
+  console.error('  处置：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 SW_OUT=<dir>。');
+  process.exit(1);
+} else {
+  console.error('[extract-bestiary-spawn] 干跑对拍：重产盖住现库（双向零差,零写盘）。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+}

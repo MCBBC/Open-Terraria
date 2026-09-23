@@ -86,14 +86,31 @@
 //     no-op）。重产 dry-run 对账（vs 手补面 663 行）：622 解析同值/41 沉默
 //     （fakecontainers 3666-3706 `(type>N).ToInt()` 布尔计数式=登记债,手补仍权威）/
 //     0 冲突/0 缺失;守卫 tests/sw-fx53-extractor-blindspots.test.ts。
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 // SW-V1 2026-09-04: 增 AMMO_ID——DefaultTo* 参数化展开需解 AmmoID.X 枚举实参
 // （RangedWeapon 第二参/Solution 的 AmmoID.Solution;权威表与 combat 提取器同源）。
 import { EXTRA_USETURN, AMMO_ID } from './extract-itemcombat.mjs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const OUT = process.env.ITEMFUNC_OUT ?? `${ROOT}/game/src/data/vanilla-itemfunc.json`;
+// ★BJ298 2026-09-23 era guard 补缺省干跑臂（docs/era-guard-family.md 四之二续批排期③
+//   【降级面】清偿——原「缺省直跑仍写真库」半闸面收口;四之二部分闸表残缺面注销）：
+//   · 缺省（无 env 无旗）= 干跑对拍零写盘（重产 vs 现库双向路径级 diff——fresh-only/
+//     drift 非空 exit 1+物证;live-only=【选报】轴 loud 不拒跑,shops 刻意剥离面家族变体）;
+//   · ITEMFUNC_OUT=<path> = 沙箱写（原通道保留）;--write-real = 真库逃生门（新增;
+//     与 ITEMFUNC_OUT 双旗互斥）;★锚 1458 系刻意（2026-08-25 用户令,1458 SetDefaults
+//     数值面零变更）——「非 1457 禁写真库」按 research 同款合法定谳基线豁免;
+//   · placeStyle 金标漂移拒产（process.exit(1)）保留,先于写盘/对拍。
+const WRITE_REAL = process.argv.includes('--write-real');
+const ITEMFUNC_OUT = process.env.ITEMFUNC_OUT;
+if (ITEMFUNC_OUT && WRITE_REAL) {
+  console.error('[extract-itemfunc] 拒绝运行：ITEMFUNC_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  process.exit(1);
+}
+const LIVE_JSON = `${ROOT}/game/src/data/vanilla-itemfunc.json`;
+const OUT = WRITE_REAL
+  ? LIVE_JSON
+  : (ITEMFUNC_OUT ?? null);
 const itemSrc = readFileSync(`${ROOT}/Terarria1458/Terraria/Item.cs`, 'utf8');
 
 function methodBodyOf(src, name) {
@@ -1643,7 +1660,61 @@ function main() {
     }
     console.error(`useTurn=1: ${n} 件（EXTRA_USETURN 全量 ${EXTRA_USETURN.size}）`);
   }
-  writeFileSync(OUT, JSON.stringify(FUNC));
+  const freshJson = JSON.stringify(FUNC);
+  // ---- ★BJ298 era guard：干跑对拍 / 沙箱 / 逃生门（banners 同构 deepWash） ----
+  if (!OUT) {
+    let live = null;
+    try { live = JSON.parse(readFileSync(LIVE_JSON, 'utf8')); } catch { /* 坏损/缺库:不拦 */ }
+    function deepWash(liveObj, freshObj, prefix = '') {
+      const w = { liveOnly: [], freshOnly: [], drift: [] };
+      const base = prefix || '<root>';
+      if (liveObj === null || freshObj === null || typeof liveObj !== 'object' || typeof freshObj !== 'object') {
+        if (JSON.stringify(liveObj) !== JSON.stringify(freshObj)) w.drift.push(`${base}: ${JSON.stringify(liveObj)}→${JSON.stringify(freshObj)}`);
+        return w;
+      }
+      const lk = new Set(Object.keys(liveObj));
+      const fk = new Set(Object.keys(freshObj));
+      for (const k of Object.keys(liveObj)) {
+        const p = `${prefix}.${k}`;
+        if (!fk.has(k)) { w.liveOnly.push(p); continue; }
+        const sub = deepWash(liveObj[k], freshObj[k], p);
+        w.liveOnly.push(...sub.liveOnly); w.freshOnly.push(...sub.freshOnly); w.drift.push(...sub.drift);
+      }
+      for (const k of Object.keys(freshObj)) if (!lk.has(k)) w.freshOnly.push(`${prefix}.${k}`);
+      return w;
+    }
+    if (live === null) {
+      console.error('[extract-itemfunc] 干跑（零写盘）：现库缺 vanilla-itemfunc.json,跳过对拍。写盘须显式 ITEMFUNC_OUT=<path> 或 --write-real。');
+    } else {
+      const wash = deepWash(live, JSON.parse(freshJson));
+      // 一门一职责（itemrare 同款）：fresh-only 全轴【选报】=登记的「重产有而现库刻意
+      // 不采纳」面（★BJ298 2026-09-23 亲数定谳:866 处 = 785 整条目 + 81 叶键
+      // （placeStyle 67/bait 7 蠕虫笼 Item.cs:21343-21388/noUseGraphic 6/useTurn 1）——
+      // F-STRUCT 设计即「不新增 cur 缺的键,缺档面由 items.ts 纠偏层+vanilla.json 回填链
+      // 承载」,全量 --write-real 被登记史禁止:placeStyle 扩面含 F1 伪值家族病面）；
+      // 拒轴 = live-only（现库退化）+ drift（同路径值漂移;2413.placeStyle 23→17 已由
+      // 本刀数据手术对齐 items.ts:1463 真值,drift 轴现清零）。
+      if (wash.freshOnly.length) console.error(`  [fresh-only·登记未采纳面,选报] ${wash.freshOnly.length} 处（纠偏层/回填链承载,data-cut 债）: ${wash.freshOnly.slice(0, 5).join(', ')}`);
+      if (wash.drift.length) console.error(`  [drift] 值漂移 ${wash.drift.length}: ${wash.drift.slice(0, 5).join(' | ')}`);
+      if (wash.drift.length) {
+        console.error('[extract-itemfunc] 干跑对拍：同路径值漂移非空——零写盘,exit 1。');
+        console.error('  处置：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 ITEMFUNC_OUT=<path>。');
+        process.exit(1);
+      }
+      if (wash.liveOnly.length) {
+        console.error(`[extract-itemfunc] 干跑对拍：live-only ${wash.liveOnly.length} 处（现库退化缺键型）——零写盘,exit 1: ${wash.liveOnly.slice(0, 6).join(', ')}`);
+        console.error('  处置：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 ITEMFUNC_OUT=<path>。');
+        process.exit(1);
+      }
+      if (!wash.drift.length) {
+        console.error('[extract-itemfunc] 干跑对拍：live-only/drift 双零（零写盘）。写盘须显式 ITEMFUNC_OUT=<path> 或 --write-real。');
+      }
+    }
+  } else {
+    mkdirSync(OUT.slice(0, OUT.lastIndexOf('/')), { recursive: true });
+    writeFileSync(OUT, freshJson);
+    console.error(`[extract-itemfunc] 已写 ${OUT}（${WRITE_REAL ? '--write-real 真库' : 'ITEMFUNC_OUT 沙箱'}）`);
+  }
   console.error(`itemfunc: ${Object.keys(FUNC).length} 件`);
   const stats = {};
   for (const f of Object.values(FUNC)) {

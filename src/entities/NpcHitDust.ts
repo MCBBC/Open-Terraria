@@ -1,26 +1,37 @@
 // BJ254（2026-09-21）NPC.HitEffect 受击/死亡尘单源消费——vanilla-npcdust.json 查表驱动。
+// BJ296（2026-09-23）批2 概率门接入：语句级分支（roll 单掷二选一）/循环组（loop body 逐拍
+// 按序）/pre 臂条件（判负→e 臂不掷=原版 && 短路）与 gate 区域门（判负→整支跳过）/idRand 逐尘掷 id/
+// scaleAddR01 post（scale+=NextFloat）。
 //
 // 数据源：tools/extract-npcdust.mjs（Terarria1457/Terraria/NPC.cs HitEffect
-// :82492-:90939 机械提取；1458 同区逐字节全等）。首批 = 78 门组 / 299 型；
-// _meta.pending = 未接组滚动清单（batch2+ 可表达组 + 白名单外形态组）。
+// :82492-:90939 机械提取；1458 同区逐字节全等）。首批 = 78 门组 / 275 型（BJ254）；
+// 批2 = 概率门族 15 型（134-136/262-265/407/409/410/411/428/478/516/636,BJ296）；
+// _meta.pending = 未接组滚动清单（批3 postUnsupported 族/批4 oldPos 族）。
 //
 // ★原版无通用尘尾（HitEffect 最终 else = `if (type != 156) return` 的 156 专属支）：
 // 表外型受击/死亡【不出尘】= 原版本相。BJ254 双向偏差收口（旧仓对未列型发通用彩色
 // 粒子 = 多发+参数错）是本批唯一故意行为变化，tests/bj254-npcdust.test.ts 结构锁钉死。
 //
-// 语义（对齐 Dust.NewDust :75-196）：
+// 语义（对齐 Dust.NewDust :75-196 执行语义 + HitEffect 源序）：
 //   · hit 相 count = ceil(dmg/lifeMax×hitK)（`for (num < dmg/(double)lifeMax*K)` 直译）；
 //     death 相 = 固定 n；无 n/hitK = 1。
-//   · hd = hitDirection（StrikeNPC 入参,调用侧恒 ±1；本仓由 kbx 符号蒸馏,0 兜 1——
-//     与被替位的手块同约定,金标保形）。
+//   · ★掷序纪律（playbook 反伪影）：所有 Main.rand 掷与原版同拍同序——循环组逐拍走
+//     body（先出尘后掷门/先掷门后出尘按源序）；分支单掷二选一（勿双掷）；pre 谓词在
+//     掷前短路（life 判负→走 else 臂且不耗掷,与 C# && 短路同相）；alt/leaf 掷在 spawn
+//     之后（post 形）。掷流通道 = Math.random（批1 alt 同源;测试侧 seededRandom 钉流）。
+//   · hd = hitDirection（StrikeNPC 入参,调用侧恒 ±1；本仓由 kbx 符号蒸馏,0 兜 1）。
 //   · alpha='npc' → npc.alpha（本仓 spawnAlpha）；color='npc' → npc.color（本仓
 //     colorRGBA,null=default(Color)）；scale='npc' → npc.scale（本仓 vanillaScale）。
+//   · pre 谓词（命中时点 hp=post-deduction,StrikeNPC :82206/:82213 life-=num 先于
+//     HitEffect :82325——与原版 HitEffect 相位内 life 同相）：
+//     lifeGtHalf = hp > floor(maxHp/2)（C# lifeMax/2 整除）；lifeLt0 = hp < 0（265
+//     `life>=0 return`：life==0 拍原版不出尘）。
+//   · posts 逐尘后置：ng/velMul/velDiv/scaleMul/scaleDiv/scaleSet/scaleSetNpc/
+//     scaleAddR01（velMul/velDiv 对应 vanilla `velocity *= / /=`——先叠 NewDust 通用
+//     ±2 抖动再乘除,由引擎 VanillaDust.spawn 侧保真,此处只做调用侧算子）。
 //   · alt = `if (Main.rand.Next(K) op V) {posts} [else {posts}]` 逐尘掷骰直译
 //     （59/60/151 尘 6 的 Next(8)!=0→noGravity 7/8、112/666 尘 18 的 Next(2)==0
 //     → scale×0.6 否则 vel×1.4+noGravity）。
-//   · posts 逐尘后置：ng/velMul/velDiv/scaleMul/scaleDiv/scaleSet/scaleSetNpc
-//     （velMul/velDiv 对应 vanilla `velocity *= / /=`——先叠 NewDust 通用 ±2 抖动
-//     再乘除,由引擎 VanillaDust.spawn 侧保真,此处只做调用侧算子）。
 //   · anchor='center' → 盒顶左 = Center+(dx,dy)（372/373 中心±25 盒 50×50）。
 //
 // carve-out 不在本表/本模块：泼岩浆（BJ246 deathLavaSplash1457）、亡体 NewNPC 分裂链
@@ -34,7 +45,11 @@ type DustOp =
   | ['ng', boolean]
   | ['velMul', number] | ['velDiv', number]
   | ['scaleMul', number] | ['scaleDiv', number]
-  | ['scaleSet', number] | ['scaleSetNpc', number];
+  | ['scaleSet', number] | ['scaleSetNpc', number]
+  | ['scaleAddR01'];
+
+/** 谓词求值：pre=臂条件（判负→e 臂不掷）|gate=区域门（判负→整元素跳过）；均不耗掷 */
+export type NpcDustPre = 'lifeGtHalf' | 'lifeLt0';
 
 /** `if (Main.rand.Next(K) op V) {ifOps} else {elseOps}` 概率分支（逐尘掷骰） */
 interface DustAlt {
@@ -44,8 +59,10 @@ interface DustAlt {
 
 export interface NpcDustStmt {
   dust: number;
+  idRand?: number;         // dust = dust + Next(idRand) 逐尘掷 id（478：237/238）
   n?: number;              // 固定计数（缺省 1）
   hitK?: number;           // ceil(dmg/lifeMax×K)——hit 相专用
+  gate?: NpcDustPre[];     // 区域门（phaseAfterPre 早退面）：判负→整 stmt 跳过,不耗掷
   anchor?: 'center';       // 盒锚：Center+(dx,dy) 为盒顶左（缺省=实体 position）
   dx?: number; dy?: number;
   w?: number; h?: number;  // 盒尺寸（缺省=实体 w/h）
@@ -58,7 +75,27 @@ export interface NpcDustStmt {
   line: number;            // HitEffect 源锚行（守卫/对账反查用,运行时不消费）
 }
 
-interface NpcDustPhase { hit?: NpcDustStmt[]; death?: NpcDustStmt[]; }
+/** 语句级概率分支：`if (Main.rand.Next(K) op V) {t} [else {e}]`（单掷二选一；pre 先短路） */
+export interface NpcDustBranch {
+  pre?: NpcDustPre[];      // 臂条件（与 roll 同一 if）：判负→e 臂且不耗掷（&& 短路同相）
+  gate?: NpcDustPre[];     // 区域门（早退面）：判负→整支跳过
+  roll: { k: number; op: '==' | '!='; v: number };
+  n?: number; hitK?: number;
+  t?: NpcDustEl[];
+  e?: NpcDustEl[];
+  line: number;
+}
+
+/** 循环组：for 体多元素（逐拍按序走 body——掷流/出尘序与原版同相） */
+export interface NpcDustLoop {
+  n?: number; hitK?: number;
+  body: NpcDustEl[];
+  line?: number;
+}
+
+export type NpcDustEl = NpcDustStmt | NpcDustBranch | NpcDustLoop;
+
+interface NpcDustPhase { hit?: NpcDustEl[]; death?: NpcDustEl[]; }
 
 const DUST_TABLE = dustTableJson as unknown as Record<string, NpcDustPhase>;
 
@@ -84,6 +121,16 @@ function resolveSpeed(v: number | string | undefined, hd: number, e: Enemy): num
   return 0;
 }
 
+/** pre 谓词求值（命中/死亡时点 hp = post-deduction,与原版 HitEffect 相位内 life 同相） */
+function prePass(pre: NpcDustPre[] | undefined, e: Enemy): boolean {
+  if (!pre) return true;
+  for (const p of pre) {
+    if (p === 'lifeGtHalf' && !(e.hp > Math.floor(e.maxHp / 2))) return false;
+    if (p === 'lifeLt0' && !(e.hp < 0)) return false;
+  }
+  return true;
+}
+
 /** post 算子应用（spawnDust 返回的活尘对象;池满 null 静默跳过=原版尘池语义） */
 function applyOps(d: { noGravity: boolean; vx: number; vy: number; scale: number }, ops: DustOp[] | null | undefined, e: Enemy): void {
   if (!ops) return;
@@ -96,8 +143,15 @@ function applyOps(d: { noGravity: boolean; vx: number; vy: number; scale: number
       case 'scaleDiv': d.scale /= op[1]; break;
       case 'scaleSet': d.scale = op[1]; break;
       case 'scaleSetNpc': d.scale = op[1] * (e.vanillaScale ?? 1); break;
+      case 'scaleAddR01': d.scale += Math.random(); break;   // vanilla `scale += Main.rand.NextFloat()`
     }
   }
+}
+
+/** 循环计数：hitK=ceil(dmg/lifeMax×K)（hit 相 dmg 直传）;death 相固定 n */
+function countOf(el: { n?: number; hitK?: number }, dmg: number, e: Enemy): number {
+  if (el.hitK != null) return Math.ceil((dmg / e.maxHp) * el.hitK);
+  return el.n ?? 1;
 }
 
 /** 单语句发射（盒/参解析 + 逐尘掷骰分支） */
@@ -106,9 +160,7 @@ function emitStmt(e: Enemy, game: GameHooks, hd: number, st: NpcDustStmt, dmg: n
   const h0 = st.h ?? e.h;
   const x = st.anchor === 'center' ? e.cx + (st.dx ?? 0) : e.x + (st.dx ?? 0);
   const y = st.anchor === 'center' ? e.cy + (st.dy ?? 0) : e.y + (st.dy ?? 0);
-  const n = st.hitK != null
-    ? Math.ceil((dmg / e.maxHp) * st.hitK)
-    : (st.n ?? 1);
+  const n = countOf(st, dmg, e);
   if (n <= 0) return;
   const alpha = st.alpha === 'npc' ? e.spawnAlpha : (st.alpha ?? 0);
   const color = st.color === 'npc'
@@ -117,8 +169,10 @@ function emitStmt(e: Enemy, game: GameHooks, hd: number, st: NpcDustStmt, dmg: n
   const scale = st.scale === 'npc' ? (e.vanillaScale ?? 1) : (st.scale ?? 1);
   const sx = resolveSpeed(st.sx, hd, e);
   const sy = resolveSpeed(st.sy, hd, e);
+  if (!prePass(st.gate, e)) return;                     // 区域门：判负整 stmt 跳过（life==0 拍原版不出尘）
   for (let k = 0; k < n; k++) {
-    const d = game.spawnDust?.(x, y, w0, h0, st.dust, sx, sy, alpha, color, scale);
+    const dustId = st.idRand != null ? st.dust + Math.floor(Math.random() * st.idRand) : st.dust;
+    const d = game.spawnDust?.(x, y, w0, h0, dustId, sx, sy, alpha, color, scale);
     if (!d) continue;
     const dust = d as unknown as { noGravity: boolean; vx: number; vy: number; scale: number };
     applyOps(dust, st.posts, e);
@@ -130,12 +184,39 @@ function emitStmt(e: Enemy, game: GameHooks, hd: number, st: NpcDustStmt, dmg: n
   }
 }
 
+/** 元素发射（stmt|branch|loop 统一入口；掷序=源序） */
+function emitEl(e: Enemy, game: GameHooks, hd: number, el: NpcDustEl, dmg: number): void {
+  if ('body' in el) {
+    const n = countOf(el, dmg, e);
+    for (let k = 0; k < n; k++) {
+      for (const child of el.body) emitEl(e, game, hd, child, dmg);
+    }
+    return;
+  }
+  if ('roll' in el) {
+    if (!prePass(el.gate, e)) return;                   // 区域门：判负整支跳过,不耗掷
+    const n = countOf(el, dmg, e);
+    for (let k = 0; k < n; k++) {
+      if (!prePass(el.pre, e)) {                        // 臂条件判负：走 else 臂,不耗掷（&& 短路同相）
+        if (el.e) for (const child of el.e) emitEl(e, game, hd, child, dmg);
+        continue;
+      }
+      const roll = Math.floor(Math.random() * el.roll.k);
+      const pass = el.roll.op === '==' ? roll === el.roll.v : roll !== el.roll.v;
+      const arm = pass ? el.t : el.e;
+      if (arm) for (const child of arm) emitEl(e, game, hd, child, dmg);
+    }
+    return;
+  }
+  emitStmt(e, game, hd, el, dmg);
+}
+
 function applyPhase(e: Enemy, game: GameHooks, hd: number, phase: 'hit' | 'death', dmg: number): void {
   const rec = e.vanillaId != null ? DUST_TABLE[String(e.vanillaId)] : undefined;
   if (!rec) return;                     // 表外型 = 原版本相不出尘（结构锁见 bj254 测试）
-  const stmts = rec[phase];
-  if (!stmts) return;
-  for (const st of stmts) emitStmt(e, game, hd, st, dmg);
+  const els = rec[phase];
+  if (!els) return;
+  for (const el of els) emitEl(e, game, hd, el, dmg);
 }
 
 /** 受击相（hurt() 实扣存活支,hitDirection=StrikeNPC 入参蒸馏,kbx 符号 0 兜 1） */

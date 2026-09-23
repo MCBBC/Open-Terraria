@@ -49,6 +49,18 @@ function makeWorld(name = 'open') {
     critters: () => [],
     spawnEnemy: () => {},
     damagePlayer: (): number => 0,
+    // ★BJ303 判别面（2026-09-23 用户实报：反重力钩发射即崩停机）：与
+    // Game.addLightAt（Game.ts:46368-46371）同形——首句读 this.world。钩爪
+    // emitLineLight 必须以方法调用/绑定形态发出；若 detach 成局部引用
+    // （this=undefined，ESM 严格模式）即抛 "Cannot read properties of
+    // undefined (reading 'world')"。446/646-649 lineLight 钩每 AI 步走本
+    // 通道 → 本文件全部钩步进皆过此判别（注册位记入 lights 供断言）。
+    addLightAt(this: { world: World; lights: Array<[number, number]> },
+      x: number, y: number, _r: number, _g: number, _b: number): void {
+      const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+      if (this.world.store.inBounds(tx, ty)) this.lights.push([tx, ty]);
+    },
+    lights: [] as Array<[number, number]>,
   } as never;
   return { w, st, p, hooks };
 }
@@ -604,5 +616,55 @@ describe('变体参数全表（HOOK_PROJ_STATS / HOOK_ITEMS 逐项对照源码�
     // num9=12.5f`;1456 无覆盖走缺省 11 :22559——2026-08-23 基准切换反转）
     expect(HOOK_PROJ_STATS[73]!.pull).toBe(12.5);
     expect(HOOK_PROJ_STATS[74]!.pull).toBe(12.5);
+  });
+});
+
+// ★BJ303（2026-09-23 用户实报：装备反重力钩使用即崩"Cannot read properties of
+// undefined (reading 'world')"→帧循环熔断停机）。根因 = GrappleProj.emitLineLight
+// 曾把 game.addLightAt detach 成局部引用再调用（this=undefined）→ Game.addLightAt
+// 首句 this.world 抛 TypeError。触发面 = hookChainOf(projType).lineLight 非空
+// （grappleChains.ts：仅 446 反重力钩/646-649 月亮钩）——普通钩无沿线光不走本段。
+// 修复 = bind 调用（this=preserved）。本组测试：446 全态（飞/锚）光照通道畅通 +
+// 普通钩零光照注册（判别面），stub 的 addLightAt 为 this 依赖方法（见 makeWorld）。
+describe('BJ303 沿线光通道（emitLineLight this 保持判别——反重力钩/月亮钩崩点回归）', () => {
+  it('446 反重力钩：飞行→挂墙→锚定全态 addLightAt 以 this=hooks 形态逐 tick 注册', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);   // 天花板（与 13 号用例同景）
+    const g = fire(p, 446, 0, -1, 14);            // 反重力钩 shootSpeed 14（Item.cs case 2800）
+    const h = hooks as unknown as { lights: Array<[number, number]> };
+    // 飞行段：每 AI 步至少两枚（mountedCenter + 钩心；沿线再补）——修复前此步即抛
+    // TypeError（崩点=用户实报第一帧）
+    expect(() => step(g, p, hooks, 5)).not.toThrow();
+    expect(h.lights.length).toBeGreaterThanOrEqual(2);
+    // 挂墙（446 range=500，天花板 269px 内）→ 锚定态持续发光（用户挂墙游走常驻态）
+    for (let i = 0; i < 120 && !g.latched; i++) step(g, p, hooks);
+    expect(g.latched).toBe(true);
+    const n = h.lights.length;
+    expect(n).toBeGreaterThanOrEqual(2);
+    step(g, p, hooks, 5);
+    expect(h.lights.length).toBeGreaterThan(n);   // 锚定态逐 tick 持续注册
+  });
+
+  it('普通钩 13：无 lineLight → 不走 emitLineLight（全程零光照注册）', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);
+    const g = fire(p, 13, 0, -1, 11.5);           // 普通钩 shootSpeed 11.5
+    expect(() => step(g, p, hooks, 20)).not.toThrow();
+    const h = hooks as unknown as { lights: Array<[number, number]> };
+    expect(h.lights.length).toBe(0);              // 13 无沿线光（grappleChains.ts lineLight 缺省）
+    // 挂墙回归：锚定态不受影响
+    for (let i = 0; i < 120 && !g.latched; i++) step(g, p, hooks);
+    expect(g.latched).toBe(true);
+  });
+
+  it('646 月亮钩：同 lineLight 面（另一触发族）全态同判别', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);
+    const g = fire(p, 646, 0, -1, 18);            // 月亮钩 shootSpeed 18（Item.cs:32201-32211）
+    const h = hooks as unknown as { lights: Array<[number, number]> };
+    expect(() => step(g, p, hooks, 5)).not.toThrow();
+    expect(h.lights.length).toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < 120 && !g.latched; i++) step(g, p, hooks);
+    expect(g.latched).toBe(true);
   });
 });

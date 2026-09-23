@@ -204,6 +204,16 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
   // ---- 自毁态（:36357-36360,普通模式由 392 置 ai0=3）----
   if (e.ai0 === 3) {
     e.iframes = 0;
+    // ★BJ302（2026-09-23 用户实报「飞碟打死不掉落+打死后过一会才消失」定谳）：
+    //   先清无敌旗——原版 StrikeNPCNoInteraction(9999)(NPC.cs:36459) → StrikeNPC
+    //   (:82017) → StrikeNPC_Inner(:82063) 全链【无 dontTakeDamage 门】（仅 immortal
+    //   一门 :82197,395 未置 immortal）——dontTakeDamage 只属玩家受击面 NPC.hurt()。
+    //   本仓 hurt() 合并两通道,门在函数头;395 经典模式全程 latch true（:14069
+    //   SetDefaults + 下方 ai0===0 支逐拍回钉）→ 9999 被吞 → ai0 恒 3 自毁支空转
+    //   （无掉落无记账）+ 机体冻结悬停直至离屏消散 = 用户双症状。与 bossAI_dd2.ts
+    //   荷兰人自毁「先清无敌旗」同款范式（golem 批注:StrikeNPCNoInteraction 族绕
+    //   dontTakeDamage）。iframes 同理（StrikeNPC 不查免疫帧）本支原有清零先例。
+    e.dontTakeDamage = false;
     e.hp = 0;
     e.hurt(9999, 0, 0, game);   // StrikeNPCNoInteraction(9999) → 标准死亡管线(掉落/记账)
     return;

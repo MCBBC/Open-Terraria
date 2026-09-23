@@ -1,5 +1,19 @@
 #!/usr/bin/env node
-// tools/extract-npcdust.mjs —— NPC.HitEffect 受击/死亡尘提取器（BJ254 2026-09-21）
+// tools/extract-npcdust.mjs —— NPC.HitEffect 受击/死亡尘提取器（BJ254 2026-09-21；BJ296 批2 2026-09-23）
+//
+// ★BJ296 批2（2026-09-23）概率门接入：帧树化重构（帧 id/parent/elseOf 链 + 逐型臂解析）。
+//   概率门语义（原版 Main.rand 直译,掷序=源序）：`if (Main.rand.Next(K) op V) {尘A} [else {尘B}]`
+//   → 分支元素 {roll:{k,op,v}, t:[…], e:[…]}（单掷二选一,勿双掷）；臂上前置非掷谓词
+//   `life > lifeMax / 2` → pre:['lifeGtHalf']（短路与掷门,life 判负→e 臂不掷,262）;
+//   区域门（`if (life >= 0) {return;}` 早退）→ phaseAfter='death'+gate:['lifeLt0']
+//   （判负→整支跳过,life==0 拍原版不出尘,265）。
+//   for 体多元素 → 循环组 {n?|hitK?, body:[…]}（单元素仍内联 n/hitK=批1 相容）——旧扁平
+//   编码对多尘循环体掷流/出尘序错位（409/410 死亡支 d17,d229 交错 vs 扁平两连发）,批2 起
+//   循环组保真。死臂剪枝：臂 type 集 ∩ 外层 type 集 = ∅（262-264 块内 `type == 265` 臂）
+//   → 对组内所有型静态假 → else 无条件化+死臂登记 _meta.deadArms。id 表达式
+//   `N + Main.rand.Next(K)` → {dust:N, idRand:K}（478 死亡支 237/238 逐尘掷）。
+//   无尘空门（186/632 `Next(5)==0` 只含 gore）→ 空分支元素 {roll} 保留掷流占位（与原版
+//   同拍耗掷）。
 //
 // 方法结构（Terarria1457/Terraria/NPC.cs）：`public void HitEffect(int hitDirection = 0,
 // double dmg = 10.0)`（:82492-:90941）。Allman 括号（`{`/`}` 独立行）。主体 = 一串顶层
@@ -207,6 +221,21 @@ function splitArgs(s) {
 // ---------------- 局部字面赋值流（唯一赋值才可还原） ----------------
 const locals = new Map();        // name → {v, count}
 const colorLocals = new Map();   // name → Map(typeId|0 → {r,g,b,a})——per-type 条件色（63/64/103、333-336）
+// ★BJ304 批3：per-type 数值局部桶（组头初始化 + 型内覆写族,524-527 num205=0/75/170/67）——
+//   全局唯一赋值还原（locals.count==1）对「组头 `int numN = 0` + 各型帧内覆写」形失效
+//   （count≥2）,按 colorLocals 同款逐型桶挂帧栈最近单型 id（0=中性桶=组头初值）;
+//   materialize/门分类按 ctx.t 取（桶缺 t 回落桶 0=该型未覆写走初值,与原版赋值流同相）。
+const typedLocals = new Map();   // name → Map(typeId|0 → literal)
+function noteTypedLocal(name, v) {
+  const tid = nearestTypeId();
+  if (!typedLocals.has(name)) typedLocals.set(name, new Map());
+  typedLocals.get(name).set(tid, v);
+}
+function typedLocalValue(name, t) {
+  const b = typedLocals.get(name);
+  if (!b) return null;
+  return b.has(t) ? b.get(t) : b.get(0);
+}
 function nearestTypeId() {       // 当前帧栈最近 if 帧的唯一 type id（无/多义 → 0）
   for (let k = frames.length - 1; k >= 0; k--) {
     const f = frames[k];
@@ -219,11 +248,15 @@ function noteAssign(text) {
   let m;
   if ((m = text.match(/^(?:int|float)\s+(num\d+)\s*=\s*(-?\d+(?:\.\d+)?)f?\s*(?:;|$)/))) {
     const e = locals.get(m[1]) || { v: null, count: 0 };
-    e.count++; e.v = Number(m[2]); locals.set(m[1], e); return;
+    e.count++; e.v = Number(m[2]); locals.set(m[1], e);
+    noteTypedLocal(m[1], Number(m[2]));   // ★BJ304:per-type 桶（中性帧→桶0=组头初值）
+    return;
   }
   if ((m = text.match(/^(num\d+)\s*=\s*(-?\d+(?:\.\d+)?)f?\s*(?:;|$)/))) {
     const e = locals.get(m[1]) || { v: null, count: 0 };
-    e.count++; e.v = Number(m[2]); locals.set(m[1], e); return;
+    e.count++; e.v = Number(m[2]); locals.set(m[1], e);
+    noteTypedLocal(m[1], Number(m[2]));   // ★BJ304:型帧内覆写→该型桶
+    return;
   }
   // 非纯字面右值（含 Next/velocity/算式）→ 撤销还原资格
   if ((m = text.match(/^(?:int|float)\s+(num\d+)\s*=\s*(?!-?\d+(?:\.\d+)?f?\s*(?:;|$))/))) {
@@ -324,9 +357,14 @@ function classifyBox(pos, w, h) {
 function classifyDustId(e) {
   const s = e.trim();
   if (/^\d+$/.test(s)) return { ok: true, v: Number(s) };
+  let m;   // ★BJ296：`N + Main.rand.Next(K)` 逐尘掷 id（478 死亡支 237/238）
+  if ((m = s.match(/^(\d+) \+ Main\.rand\.Next\((\d+)\)$/))) return { ok: true, v: Number(m[1]), rand: Number(m[2]) };
   if (/^num\d+$/.test(s)) {
     const v = localValue(s);
     if (v != null && Number.isInteger(v)) return { ok: true, v };
+    // ★BJ304：全局唯一赋值还原失败 + 有 per-type 桶 → 延迟到 materialize 按 ctx.t 取
+    //   （524-527 num205:525/526/527 桶=75/170/67,其余型回落桶0=0）
+    if (typedLocals.has(s)) return { ok: false, typedLocal: s, v: s };
     return { ok: false, v: s };
   }
   return { ok: false, v: s };
@@ -372,8 +410,20 @@ const POST_OP_RES = [
   [/^D\.velocity \/= (\d+(?:\.\d+)?)f?;?$/, (m) => ['velDiv', Number(m[1])]],
   [/^D\.scale \*= (-?\d+(?:\.\d+)?)f?;?$/, (m) => ['scaleMul', Number(m[1])]],
   [/^D\.scale \/= (\d+(?:\.\d+)?)f?;?$/, (m) => ['scaleDiv', Number(m[1])]],
+  // ★BJ304：复合 `scale = A + Main.rand.NextFloat()`（426/427 死亡支）——既有两算子机械
+  //   组合（先定值后掷;与原版语句序同相:scaleSet 无掷,scaleAddR01 掷 [0,1)）,须排在
+  //   纯 scaleSet 前（正则互不碰撞,序排纯可读性）
+  [/^D\.scale = (-?\d+(?:\.\d+)?)f? \+ Main\.rand\.NextFloat\(\);?$/, (m) => [['scaleSet', Number(m[1])], ['scaleAddR01']]],
   [/^D\.scale = (-?\d+(?:\.\d+)?)f?;?$/, (m) => ['scaleSet', Number(m[1])]],
   [/^D\.scale = (-?\d+(?:\.\d+)?)f? \* scale;?$/, (m) => ['scaleSetNpc', Number(m[1])]],
+  // ★BJ296：`scale += Main.rand.NextFloat()`（516 尘 6 随机放大 [0,1)）——曾沿 break 路径静默丢
+  [/^D\.scale \+= Main\.rand\.NextFloat\(\);?$/, () => ['scaleAddR01']],
+  // ★BJ304 批3：`fadeIn = N`——定谳翻案（BJ296 批2 报告曾按「alpha 渐入,本仓不可用」
+  //   登记 postUnsupported）：原版语义=生长目标（Dust.cs :2148-2171,0<fadeIn<100 时
+  //   scale += 0.03/t(46/213/260=0.1,235=0.007) 至超 fadeIn 归零转衰落,无 alpha 参与）;
+  //   本仓 VDust.fadeIn 字段在位+老化链 1:1（fx/VanillaDust.ts :740-745）,spawnDust 返
+  //   活尘对象 → 后置赋值=原版 NewDust 后 fadeIn 写同相。fadeIn *= 等其余形态仍 unsupported。
+  [/^D\.fadeIn = (-?\d+(?:\.\d+)?)f?;?$/, (m) => ['fadeIn', Number(m[1])]],
 ];
 const POST_BAD_RE = /^D\.(position|fadeIn|velocity\.X|velocity\.Y|color|noLight|shader|type|frame)\b|^D\.scale (?:\*|\/)?= (?!-?\d+(?:\.\d+)?f?;?$)/;
 /** 编译一段 post 语句（别名链/直引形直译）→ ops|null(不可表达) */
@@ -392,7 +442,7 @@ function compilePostStmts(stmts) {
     let matched = false;
     for (const [re, mk] of POST_OP_RES) {
       const mm = body.match(re);
-      if (mm) { ops.push(mk(mm)); matched = true; break; }
+      if (mm) { ops.push(...mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子（复合 scale）
     }
     if (matched) continue;
     if (POST_BAD_RE.test(body)) return { bad: `postUnsupported:${s.slice(0, 60)}` };
@@ -419,6 +469,12 @@ function capturePosts(callVar, i, preAlias) {
       bound.add(m[1]);
       j++; continue;
     }
+    // ★BJ296：别名拷贝重绑定（`Dust dust = dust48;`）——曾静默断链丢后续
+    //   `dust.velocity *= 3f`（409/410/407 死亡支 d229 只剩 ng）
+    if ((m = t.match(/^(?:Dust )?(\w+) = (\w+);$/)) && bound.has(m[2])) {
+      bound.add(m[1]);
+      j++; continue;
+    }
     // 直引 Main.dust[numX]（归一成 dz. 形交给编译器）
     if (callVar && t.includes(`Main.dust[${callVar}]`)) {
       const raw = t.replace(`Main.dust[${callVar}]`, 'dz');
@@ -433,7 +489,7 @@ function capturePosts(callVar, i, preAlias) {
       let matched = false;
       for (const [re, mk] of POST_OP_RES) {
         const mm = body.match(re);
-        if (mm) { posts.push(mk(mm)); matched = true; break; }
+        if (mm) { posts.push(...mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子
       }
       if (!matched) {
         if (POST_BAD_RE.test(body)) return { ok: false, reason: `postUnsupported:${t.slice(0, 60)}`, consumed: j - i };
@@ -443,6 +499,8 @@ function capturePosts(callVar, i, preAlias) {
     }
     // 概率分支：inline 单行（`if (Main.rand.Next(K) op V) { Main.dust[numX].f = ...; }`）
     if ((m = t.match(/^if \(Main\.rand\.Next\((\d+)\) (==|!=) (\d+)\) \{ (.*) \};?$/))) {
+      // ★BJ296：分支体内含 NewDust = 语句级分支（树面处理）,非本尘的 post——停止捕获
+      if (/NewDust/.test(m[4])) break;
       const stmts = m[4].split(';').map((x) => x.trim()).filter(Boolean);
       // 直引形改写：Main.dust[numX].f → dz.f
       const r2 = compilePostStmts(stmts.map((x) => x.replace(new RegExp(`^Main\\.dust\\[${callVar}\\]\\.`), 'dz.')));
@@ -451,6 +509,8 @@ function capturePosts(callVar, i, preAlias) {
     }
     // 概率分支：Allman
     if ((m = t.match(/^if \(Main\.rand\.Next\((\d+)\) (==|!=) (\d+)\)$/))) {
+      // ★BJ296：首语句含 NewDust = 语句级分支——停止捕获（树面处理）
+      if (/NewDust/.test(LOGICAL[j + 2]?.text || '')) break;
       let j2 = j + 1;
       if (!/^\{$/.test(LOGICAL[j2]?.text || '')) return { ok: false, reason: 'altNoBrace', consumed: j2 - i };
       j2++;
@@ -492,12 +552,21 @@ function capturePosts(callVar, i, preAlias) {
   }
 }
 
-// ---------------- 主扫描（缩进块栈,Allman） ----------------
-const frames = [];        // {ind, kind:'if'|'else'|'for'|'neutral', cond, loop}
+// ---------------- 主扫描（缩进块栈,Allman；BJ296 帧树 id/parent/elseOf） ----------------
+const frames = [];        // {ind, kind:'if'|'else'|'for'|'neutral', cond, loop, id, parentId, elseOfId?}
 const lastIfAtInd = new Map();   // indent → 最近 if 帧（else 取反 life 用）
 let callsTotal = 0;
 const entries = [];
 const unreachableMarks = [];
+const kidsMap = new Map();        // ★BJ296 帧树：frameId → [{ev:'frame',f}|{ev:'stmt',e}] 源序
+let frameSeq = 0;
+function kidPush(fid, ev) {
+  let a = kidsMap.get(fid);
+  if (!a) { a = []; kidsMap.set(fid, a); }
+  a.push(ev);
+}
+const frameById = new Map();   // id → frame（else 链 life 回溯用）
+const ROOT_FID = 0;
 
 for (let i = 0; i < LOGICAL.length; i++) {
   const L = LOGICAL[i];
@@ -507,23 +576,62 @@ for (let i = 0; i < LOGICAL.length; i++) {
   if (/^\{$/.test(t)) {
     const prev = LOGICAL[i - 1];
     const h = prev && !/^[{}]$/.test(prev.text) ? prev.text : '';
+    const parentId = frames.length ? frames[frames.length - 1].id : ROOT_FID;
+    // 帧级相位（叶-less 空门分支用）：链上 life 帧（内层胜）→ phaseAfter（内层胜）
+    let frPhase = null;
+    for (const fr of frames) { const c = fr.cond; if (c && c.life) frPhase = c.life; }
+    if (!frPhase) {
+      for (let k = frames.length - 1; k >= 0; k--) {
+        if (frames[k].phaseAfter) { frPhase = frPhase || frames[k].phaseAfter; break; }
+      }
+    }
     if (/^if \((.*)\)$/.test(h)) {
-      const f = { ind: L.ind, kind: 'if', cond: parseCond(h.match(/^if \((.*)\)$/)[1]) };
+      const f = { ind: L.ind, kind: 'if', cond: parseCond(h.match(/^if \((.*)\)$/)[1]), id: ++frameSeq, parentId, line: L.line, elseOfId: 0, phase: frPhase };
+      // ★BJ296：Allman post-alt 帧（体=Main.dust 写,已由 capturePosts 并入上一语句 alt）
+      //   不再当语句分支——曾致 59/60/151 alt+空分支双掷
+      const lastE = entries[entries.length - 1];
+      const mg = f.cond && f.cond.gates.length === 1 && f.cond.typeIds.size === 0 && f.cond.ranges.length === 0
+        ? f.cond.gates[0].match(/^Main\.rand\.Next\((\d+)\) (==|!=) (\d+)$/) : null;
+      if (lastE && lastE.alt && mg && +mg[1] === lastE.alt.k && mg[2] === lastE.alt.op && +mg[3] === lastE.alt.v) {
+        f.postAltConsumed = true;
+      }
       frames.push(f); lastIfAtInd.set(L.ind, f);
+      frameById.set(f.id, f);
+      kidPush(parentId, { ev: 'frame', f });
     } else if (/^else if \((.*)\)$/.test(h)) {
       const sib = lastIfAtInd.get(L.ind) || null;
       const c = parseCond(h.match(/^else if \((.*)\)$/)[1]);
-      const f = { ind: L.ind, kind: 'if', cond: c, _sibElse: true };
+      const f = { ind: L.ind, kind: 'if', cond: c, _sibElse: true, id: ++frameSeq, parentId, line: L.line, elseOfId: sib ? sib.id : 0, phase: frPhase };
       frames.push(f); lastIfAtInd.set(L.ind, f);
+      frameById.set(f.id, f);
+      kidPush(parentId, { ev: 'frame', f });
     } else if (/^else$/.test(h)) {
       const sib = lastIfAtInd.get(L.ind) || null;
       const neg = { typeIds: new Set(), ranges: [], excludes: new Set(), gates: sib ? [...sib.cond.gates] : [], life: null, others: true };
-      if (sib) { if (sib.cond.life === 'hit') neg.life = 'death'; else if (sib.cond.life === 'death') neg.life = 'hit'; }
-      frames.push({ ind: L.ind, kind: 'else', cond: neg });
+      // ★BJ296：else = 否定【整条前臂链】——life 相位沿 elseOf 链回溯最近 life 臂取反
+      //  （曾只看直系 sib：245-249 尾 else 漏判 death → n50 双相误发 hit）
+      {
+        let s = sib;
+        while (s) {
+          if (s.cond && s.cond.life) { neg.life = s.cond.life === 'hit' ? 'death' : 'hit'; break; }
+          s = s.elseOfId ? frameById.get(s.elseOfId) : null;
+        }
+      }
+      // ★BJ296：else 帧语义 = 「前臂全败」——抄门不作数（树解析按链走）；elseOfId 记链
+      const f = { ind: L.ind, kind: 'else', cond: neg, id: ++frameSeq, parentId, line: L.line, elseOfId: sib ? sib.id : 0, phase: frPhase };
+      frames.push(f);
+      frameById.set(f.id, f);
+      kidPush(parentId, { ev: 'frame', f });
     } else if (/^for \(/.test(h)) {
-      frames.push({ ind: L.ind, kind: 'for', cond: null, loop: parseFor(h) });
+      const f = { ind: L.ind, kind: 'for', cond: null, loop: parseFor(h), id: ++frameSeq, parentId, line: L.line, phase: frPhase };
+      frames.push(f);
+      frameById.set(f.id, f);
+      kidPush(parentId, { ev: 'frame', f });
     } else {
-      frames.push({ ind: L.ind, kind: 'neutral', cond: null });
+      const f = { ind: L.ind, kind: 'neutral', cond: null, id: ++frameSeq, parentId, line: L.line, phase: frPhase };
+      frames.push(f);
+      frameById.set(f.id, f);
+      kidPush(parentId, { ev: 'frame', f });
     }
     continue;
   }
@@ -537,10 +645,14 @@ for (let i = 0; i < LOGICAL.length; i++) {
         if (f.kind === 'if' && f.cond && f.cond.life && f.hadReturn && frames.length) {
           frames[frames.length - 1].phaseAfter = f.cond.life === 'hit' ? 'death' : 'hit';
         }
-        // `if (type != N) { return; }` 开门式（无正谓词/门,体仅 return）→ 之后的语句 = N 专属
-        if (f.kind === 'if' && f.cond && f.hadReturn && f.cond.typeIds.size === 0
-          && f.cond.ranges.length === 0 && f.cond.gates.length === 0 && f.cond.excludes.size >= 1 && frames.length) {
-          frames[frames.length - 1].exclusiveAfter = new Set([...(frames[frames.length - 1].exclusiveAfter || []), ...f.cond.excludes]);
+        // ★BJ296：`if (life >= 0) { return; }`（265）——相位门+life==0 拍不出尘：
+        //   后续同层 = death 相且须 pre lifeLt0（原版 life>lifeMax/2 族同款短路面）
+        if (f.kind === 'if' && f.hadReturn && f.cond && f.cond.life === null
+          && f.cond.typeIds.size === 0 && f.cond.ranges.length === 0 && f.cond.excludes.size === 0
+          && f.cond.gates.length === 1 && f.cond.gates[0] === 'life >= 0' && frames.length) {
+          frames[frames.length - 1].phaseAfter = 'death';
+          frames[frames.length - 1].phaseAfterPre = ['lifeLt0'];
+          f.phaseReturnGuard = true;   // 树解析跳过（相位由 phaseAfter 承载）
         }
         break;
       }
@@ -567,9 +679,10 @@ for (let i = 0; i < LOGICAL.length; i++) {
   }
 }
 
-// ---------------- 语句提取 ----------------
+// ---------------- 语句提取（★BJ296：type/门移交帧树逐型解析,此处只认参/相位/post） ----------------
 function extractStmts(text, line, li) {
   const out = [];
+  const parentFid = frames.length ? frames[frames.length - 1].id : ROOT_FID;
   const re = /Dust\.NewDust(Direct|Perfect)?\(/g;
   let m;
   while ((m = re.exec(text))) {
@@ -580,9 +693,9 @@ function extractStmts(text, line, li) {
       else if (text[j] === ')') { d--; if (d === 0) { end = j; break; } }
     }
     if (end < 0) continue;
-    if (/:\s*\w/.test(text.slice(start, end)) && /\w+: /.test(text.slice(start, end))) { out.push({ unsupported: true, reasons: ['namedArgs'], line }); continue; }
+    if (/:\s*\w/.test(text.slice(start, end)) && /\w+: /.test(text.slice(start, end))) { out.push(mkEntry({ unsupported: true, reasons: ['namedArgs'] })); continue; }
     const args = splitArgs(text.slice(start + 1, end));
-    if (args.length < 4) { out.push({ unsupported: true, reasons: ['args<4'], line }); continue; }
+    if (args.length < 4) { out.push(mkEntry({ unsupported: true, reasons: ['args<4'] })); continue; }
     const [pos, w, h, id, sx, sy, al, col, sc] = args;
     const boxR = classifyBox(pos, w, h);
     const idR = classifyDustId(id);
@@ -591,58 +704,29 @@ function extractStmts(text, line, li) {
     const alR = classifyAlpha(al);
     const colR = classifyColor(col);
     const scR = classifyScale(sc);
-    const loopFrame = [...frames].reverse().find((f) => f.kind === 'for');
-    const loop = loopFrame ? loopFrame.loop : { ok: true, n: 1 };
-    // 守卫链合成
+    // 相位：链上最近 life 帧 + phaseAfter（`if (life>0){…return}` 落出段=death 相）
     const chain = frames.filter((f) => f.kind === 'if' || f.kind === 'else');
-    let typeIds = null;
-    const gates = [];
     let phase = null;
-    let unresolvableGate = null;
     for (const f of chain) {
       const c = f.cond;
-      if (!c) continue;
-      if (c.gates.length) gates.push(...c.gates);
-      if (c.life) phase = c.life;
-      const setHere = new Set(c.typeIds);
-      for (const [a, b] of c.ranges) for (let k = a; k <= b; k++) setHere.add(k);
-      if (setHere.size === 0 && c.excludes.size === 1 && c.ranges.length === 0 && c.gates.length === 0) {
-        // 尾层 catch-all else 内 `if (type != 156) { return; }` 开门式 → 专属型 156
-        const [only] = c.excludes;
-        setHere.add(only);
-      }
-      if (setHere.size === 0) {
-        if (c.gates.length) { unresolvableGate = unresolvableGate || c.gates.join(' && '); continue; }
-        continue;   // else 帧不收窄
-      }
-      if (typeIds === null) typeIds = setHere;
-      else typeIds = new Set([...typeIds].filter((x) => setHere.has(x)));
+      if (c && c.life) phase = c.life;
     }
-    // 无 type 谓词但链上有 exclusiveAfter（`if (type != N){return}` 开门）→ N 专属
-    if (typeIds === null) {
-      for (let k = frames.length - 1; k >= 0; k--) {
-        if (frames[k].exclusiveAfter && frames[k].exclusiveAfter.size) { typeIds = new Set(frames[k].exclusiveAfter); break; }
-      }
-    }
-    // 无显式 life 帧 → 找最近的 phaseAfter（`if (life>0){…return}` 落出段=death 相）
-    if (!phase) {
-      for (let k = frames.length - 1; k >= 0; k--) {
-        if (frames[k].phaseAfter) { phase = frames[k].phaseAfter; break; }
+    // ★BJ296：phaseAfterPre（`if (life >= 0){return}` 落出段 = death 且 life<0 才出尘）
+    const pres = [];
+    for (let k = frames.length - 1; k >= 0; k--) {
+      if (frames[k].phaseAfter) {
+        phase = phase || frames[k].phaseAfter;
+        if (frames[k].phaseAfterPre) pres.push(...frames[k].phaseAfterPre);
       }
     }
     const bad = [];
-    // v1：一切非 type 谓词（ai[1]/!wet/dmg/netMode/IsGoldCritter/…）→ 整条 pending
-    // （曾只拦空谓词帧——正 type 帧上的 gate 会静默丢门,590 !wet 案）
-    if (gates.length) bad.push(`gate:${gates.join(' && ')}`);
     if (!boxR.ok) bad.push(`pos:${pos.slice(0, 50)}`);
-    if (!idR.ok) bad.push(`id:${idR.v}`);
+    if (!idR.ok && !idR.typedLocal) bad.push(`id:${idR.v ?? (idR.rand != null ? idR.v : 'id')}`);   // ★BJ304:typedLocal 延迟逐型取,不入 bad
     if (!sxR.ok) bad.push(`sx:${sxR.v}`);
     if (!syR.ok) bad.push(`sy:${syR.v}`);
     if (!alR.ok) bad.push(`alpha:${alR.v}`);
     if (!colR.ok) bad.push(`color:${colR.v}`);
     if (!scR.ok) bad.push(`scale:${scR.v}`);
-    if (loop.ok === false) bad.push(loop.reason || 'loop');
-    if (unresolvableGate) bad.push(`gate:${unresolvableGate}`);
     // post 捕获：callVar = `int numX = Dust.NewDust` / `numX = Dust.NewDust`；
     // preAlias = `Dust dustN = Main.dust[Dust.NewDust` 内嵌别名形态
     const pre = text.slice(0, start);
@@ -655,28 +739,39 @@ function extractStmts(text, line, li) {
     if (callVar) postR = capturePosts(callVar, li, null);
     else if (preAlias) postR = capturePosts(null, li, preAlias);
     if (postR.ok === false) bad.push(postR.reason);
-    out.push({
-      line,
-      box: boxR.ok ? boxR.box : null,
-      id: idR.ok ? idR.v : null,
-      sx: sxR.ok ? sxR.v : null,
-      sy: syR.ok ? syR.v : null,
-      alpha: alR.ok ? alR.v : null,
-      color: colR.ok ? colR.v : null,
-      scale: scR.ok ? scR.v : null,
-      n: loop.ok && loop.n != null ? loop.n : null,
-      hitK: loop.ok && loop.hitK != null ? loop.hitK : null,
-      posts: postR.posts || [],
-      alt: postR.alt || null,
-      types: typeIds ? [...typeIds].sort((a, b) => a - b) : null,
-      gates: [...gates],
-      phase,
-      unsupported: bad.length > 0,
-      reasons: bad,
-      src: text.slice(0, 120),
+    // ★BJ296：路径上是否出现过正 type 谓词帧（无 → 全局悬空,树解析判 typesUnknown）
+    const inTypeScope = frames.some((f) => {
+      const c = f.cond;
+      return c && (c.typeIds.size > 0 || c.ranges.length > 0);
     });
+    const e = mkEntry({});
+    e.line = line;
+    e.parentFid = parentFid;
+    e.box = boxR.ok ? boxR.box : null;
+    e.id = idR.ok ? idR.v : null;
+    e.idTyped = idR.typedLocal ?? null;
+    e.idRand = idR.ok && idR.rand != null ? idR.rand : null;
+    e.sx = sxR.ok ? sxR.v : null;
+    e.sy = syR.ok ? syR.v : null;
+    e.alpha = alR.ok ? alR.v : null;
+    e.color = colR.ok ? colR.v : null;
+    e.scale = scR.ok ? scR.v : null;
+    e.posts = postR.posts || [];
+    e.alt = postR.alt || null;
+    e.phase = phase;
+    e.pres = pres;
+    e.inTypeScope = inTypeScope;
+    e.unsupported = bad.length > 0;
+    e.reasons = bad;
+    e.src = text.slice(0, 120);
+    out.push(e);
   }
   return out;
+  function mkEntry(base) {
+    const e = { line, parentFid, ...base };
+    kidPush(parentFid, { ev: 'stmt', e });
+    return e;
+  }
 }
 if (callsTotal !== ANCHOR_CALLS) failAnchor('HitEffect 尘调用基数', callsTotal, ANCHOR_CALLS);
 
@@ -706,68 +801,463 @@ const BATCH1_TYPES = new Set([
   625, 626, 627, 628, 630, 632, 666, 671, 672, 673, 674, 675, 689, 692, 693,
 ]);
 
-// ---------------- 汇总分组 ----------------
-// types=null（无法定界）或含 unsupported statement 的组 → pending
+// ---------------- BJ296 批2 接入名单（概率门族,2026-09-23 定谳） ----------------
+// 带掷门/概率条件的门组（手核反编译 diff=0 后批量重产）：
+//   · 636 沙元素（:82780-:82798 hit/death Next(2)==0→d67 else d69 单掷二选一）；
+//   · 516 （:83896-:83905 both 循环组 20×[d6 velMul3+scaleAddR01, Next(2)==0→d259 ng]）；
+//   · 428 （:84177-:84184 death 循环组 10×[d241, Next(2)==0→d229 else d240]）；
+//   · 409/410/407/411 （:84412-:84590 史莱姆母巢族 hitK 循环组内 Next(2..4) 掷门副尘）；
+//   · 262/263/264/265 （:88157-:88218 262 pre lifeGtHalf+Next(3)!=0→d166 else d167；
+//     263/264 死臂剪枝后恒 d167 无掷；265 death pre lifeLt0+Next(3)!=0 分支）；
+//   · 134/135/136 （:90359-:90369 death Next(2)==0 单臂 [d31×10, 循环组 5×[d6,d6]]）；
+//   · 478 （:84914 death id=`237+Next(2)` 逐尘掷 id）。
+// ★刻意排除（边界）：661（Next(5)+NextVector2Circular post+color local → 批3 postUnsupported）、
+//   415-429/518（fadeIn postUnsupported 族 → 批3）、524-527（num205 运行时门+fadeIn → 批3/4）、
+//   402（oldPos 轨迹盒+oldPos.Length 计数,需 Enemy oldPos 支持 → 批4）、非概率门
+//   （gold critter/ai[1]/!wet/netMode/TownPet/IsShimmerVariant/daybreak/484-487 区间门）。
+const BATCH2_TYPES = new Set([
+  134, 135, 136, 262, 263, 264, 265, 407, 409, 410, 411, 428, 478, 516, 636,
+]);
+const WIRED_TYPES = new Set([...BATCH1_TYPES, ...BATCH2_TYPES]);
+
+// ---------------- BJ296 帧树逐型解析（汇总分组） ----------------
+// 树结构：kidsMap（frameId → 帧/语句源序）；SUCCESSOR（elseOfId → 后继臂）。
+// 逐型 t 解析：臂对 t 静态活/死（type 谓词+excludes）→ 活臂按门分类：
+//   · 概率门（Main.rand.Next(K) op V / life>lifeMax/2）→ 分支元素（单掷二选一,pre 短路在前）；
+//   · 不可表达门 → 整链 pending（批3/4 边界）；无门 → 内联。
+// 死臂（臂 type 集 ∩ 外层 type 集=∅）→ 对组内全型静态假 → 跳过 + _meta.deadArms 登记。
+const SUCCESSOR = new Map();   // elseOfId → 后继臂帧
+for (const [, evs] of kidsMap) {
+  for (const ev of evs) {
+    if (ev.ev === 'frame' && ev.f.elseOfId && !SUCCESSOR.has(ev.f.elseOfId)) SUCCESSOR.set(ev.f.elseOfId, ev.f);
+  }
+}
+function framePosTypes(f) {
+  if (!f.cond) return null;
+  const s = new Set(f.cond.typeIds);
+  for (const [a, b] of f.cond.ranges) for (let k = a; k <= b; k++) s.add(k);
+  return s.size ? s : null;
+}
+function setDisjoint(a, b) { if (!a || !b) return false; for (const x of a) if (b.has(x)) return false; return true; }
+function condStaticTrue(f, t) {   // 帧条件在型 t 上的静态真值（gates=运行时面不参与）
+  if (!f.cond) return true;
+  const s = framePosTypes(f);
+  if (s && !s.has(t)) return false;
+  if (f.cond.excludes.has(t)) return false;
+  return true;
+}
+function classifyGates(gates, t) {   // → {ok:true, pre:[], roll, staticFalse?}|{ok:false}
+  const pre = [];
+  let roll = null;
+  let staticFalse = false;
+  for (const g of gates) {
+    let m;
+    if ((m = g.match(/^Main\.rand\.Next\((\d+)\) (==|!=) (\d+)$/))) {
+      if (roll) return { ok: false };   // 双掷帧（402 Next4&&Next3 族）不表达
+      roll = { k: +m[1], op: m[2], v: +m[3] };
+      continue;
+    }
+    if (g === 'life > lifeMax / 2') { pre.push('lifeGtHalf'); continue; }
+    // ★BJ304 批3：per-type 静态门析取 `numN > 0`（524-527 num205>0:524=0 静态假,
+    //   525/526/527=75/170/67 恒真脱门）——桶无 t 回落桶 0（组头初值,原版赋值流同相）
+    if ((m = g.match(/^(num\d+) > 0$/)) && typedLocals.has(m[1])) {
+      const v = typedLocalValue(m[1], t);
+      if (v == null) return { ok: false };
+      if (v <= 0) staticFalse = true;
+      continue;
+    }
+    return { ok: false };
+  }
+  return { ok: true, pre, roll, staticFalse };
+}
+function hasStmtKids(fid) {
+  const a = kidsMap.get(fid);
+  if (!a) return false;
+  for (const ev of a) if (ev.ev === 'stmt') return true;
+  return false;
+}
+function firstLineOf(f) {
+  const a = kidsMap.get(f.id);
+  if (a) for (const ev of a) {
+    if (ev.ev === 'stmt') return ev.e.line;
+    const r = firstLineOf(ev.f);
+    if (r != null) return r;
+  }
+  return null;
+}
+function collectStmts(fid, acc) {
+  const a = kidsMap.get(fid);
+  if (!a) return;
+  for (const ev of a) { if (ev.ev === 'stmt') acc.push(ev.e); else collectStmts(ev.f.id, acc); }
+}
+function subtreePend(fid) {
+  const acc = [];
+  collectStmts(fid, acc);
+  return acc.some((e) => e.__pend);
+}
+function SChild(S, f) {
+  const ft = framePosTypes(f);
+  if (!ft) return S;
+  if (!S) return new Set(ft);
+  return new Set([...S].filter((x) => ft.has(x)));
+}
+
 const byType = new Map();     // id → {hit:[], death:[]}
-const pendings = new Map();   // key → {key, line, types, phase, reason, count}
+const pendings = new Map();   // key → {key, line, types:Set, phase, reason, count}
+const deadArms = [];
 let stdStmts = 0, unsupStmts = 0;
-for (const e of entries) {
-  if (e.unsupported || e.types === null) {
-    unsupStmts++;
-    const key = `${e.types ? 'T' + e.types.join('_') : 'OTHER'}@${e.line}`;
-    const p = pendings.get(key) || { key, line: e.line, types: e.types, phase: e.phase || 'both', reason: (e.reasons || []).join(';') || 'typesUnknown', count: 0 };
-    p.count++;
-    pendings.set(key, p);
-    continue;
+
+function registerPending(e, t, reasons) {
+  e.__pend = true;
+  const reason = reasons.join(';');
+  const key = `${e.line}|${reason}`;
+  const p = pendings.get(key) || { key, line: e.line, types: new Set(), phase: e.phase || 'both', reason, count: 0 };
+  if (t != null) p.types.add(t);
+  if (!e.__pendKeys) e.__pendKeys = new Set();
+  if (!e.__pendKeys.has(key)) { e.__pendKeys.add(key); p.count++; unsupStmts++; }
+  pendings.set(key, p);
+}
+function markChainPending(f, ctx, reason) {
+  const acc = [];
+  collectStmts(f.id, acc);
+  for (const e of acc) registerPending(e, e.inTypeScope ? ctx.t : null, e.unsupported && e.reasons.length ? e.reasons : [reason]);
+}
+const deadArmSeen = new Set();   // 全局去重（逐型解析每 t 走一遍,曾重复登记）
+function markDeadArm(f, S, ctx) {
+  const ft = framePosTypes(f);
+  if (!ft || !S || !setDisjoint(ft, S)) return;
+  const dk = `${firstLineOf(f)}|${[...ft].sort((a, b) => a - b).join(',')}`;
+  if (deadArmSeen.has(dk)) { const acc0 = []; collectStmts(f.id, acc0); for (const e of acc0) e.__dead = true; return; }
+  deadArmSeen.add(dk);
+  const acc = [];
+  collectStmts(f.id, acc);
+  for (const e of acc) e.__dead = true;
+  deadArms.push({ line: firstLineOf(f), types: [...ft].sort((a, b) => a - b), enclosing: [...S].sort((a, b) => a - b) });
+}
+function wrapEl(el, phases) { return { el, phases }; }
+
+/** 循环计数内联：按元素形态规范键序（stmt: dust,idRand?,n?,hitK?…/branch: pre?,roll?,n?,hitK?…） */
+function withCount(el, n, hitK) {
+  const out = {};
+  if (el.dust !== undefined) {
+    out.dust = el.dust;
+    if (el.idRand !== undefined) out.idRand = el.idRand;
+    if (n != null && n !== 1) out.n = n;
+    if (hitK != null) out.hitK = hitK;
+    for (const k of ['anchor', 'dx', 'dy', 'w', 'h', 'sx', 'sy', 'alpha', 'color', 'scale', 'pre', 'posts', 'alt', 'line']) {
+      if (el[k] !== undefined) out[k] = el[k];
+    }
+    return out;
   }
-  const phases = e.phase ? [e.phase] : ['hit', 'death'];
+  if (el.roll !== undefined || el.pre !== undefined) {   // branch
+    if (el.pre !== undefined) out.pre = el.pre;
+    if (el.roll !== undefined) out.roll = el.roll;
+    if (n != null && n !== 1) out.n = n;
+    if (hitK != null) out.hitK = hitK;
+    for (const k of ['gate', 't', 'e', 'line']) if (el[k] !== undefined) out[k] = el[k];
+    return out;
+  }
+  // loop 组（嵌套）
+  if (n != null && n !== 1) out.n = n;
+  if (hitK != null) out.hitK = hitK;
+  for (const k of ['body', 'line']) if (el[k] !== undefined) out[k] = el[k];
+  return out;
+}
+
+function materialize(e, out, ctx) {
+  e.__seen = true;
+  const t = e.inTypeScope ? ctx.t : null;   // 无 type 域（daybreak/gold-critter 等根级门）→ 单条 pending,不逐型膨胀
+  if (ctx.failFace) { registerPending(e, t, [ctx.failFace]); return; }   // 运行时失败面：叶改登记（割面/死臂语义照走）
+  if (e.unsupported) { registerPending(e, t, e.reasons); return; }
+  // ★BJ304 批3：per-type 数值局部 id（typedLocals 延迟取,524-527 num205）
+  let dustId = e.id;
+  if (e.idTyped != null) {
+    const v = typedLocalValue(e.idTyped, ctx.t);
+    if (v == null || !Number.isInteger(v)) { registerPending(e, t, [`idTyped:${e.idTyped}@${ctx.t}`]); return; }
+    dustId = v;
+  }
   // color local（newColorN）→ 逐型解析（63/64/103、333-336 per-type 条件色）
+  let color = e.color;
   const colorLocal = e.color && typeof e.color === 'object' && e.color.local ? e.color.local : null;
-  for (const ty of e.types) {
-    let color = e.color;
-    if (colorLocal) {
-      const m2 = colorLocals.get(colorLocal);
-      color = (m2 && (m2.get(ty) ?? m2.get(0))) || null;
-      if (!color) {
-        unsupStmts++;
-        const key = `T${e.types.join('_')}@${e.line}`;
-        const pp = pendings.get(key) || { key, line: e.line, types: e.types, phase: e.phase || 'both', reason: `colorLocal:${colorLocal}@${ty}`, count: 0 };
-        pp.count++; pendings.set(key, pp);
-        continue;
-      }
-    }
-    stdStmts++;
-    const stmt = {};
-    stmt.dust = e.id;
-    if (e.n != null && e.n !== 1) stmt.n = e.n;
-    if (e.hitK != null) stmt.hitK = e.hitK;
-    if (e.box && (e.box.anchor !== 'pos' || e.box.dx !== 0 || e.box.dy !== 0 || e.box.w !== 'npc' || e.box.h !== 'npc')) {
-      if (e.box.anchor === 'center') stmt.anchor = 'center';
-      if (e.box.dx !== 0) stmt.dx = e.box.dx;
-      if (e.box.dy !== 0) stmt.dy = e.box.dy;
-      if (e.box.w !== 'npc') stmt.w = e.box.w;
-      if (e.box.h !== 'npc') stmt.h = e.box.h;
-    }
-    if (e.sx !== 0 && e.sx != null) stmt.sx = e.sx;
-    if (e.sy !== 0 && e.sy != null) stmt.sy = e.sy;
-    if (e.alpha !== 0 && e.alpha != null) stmt.alpha = e.alpha;
-    if (color != null) stmt.color = color;
-    if (e.scale !== 1 && e.scale != null) stmt.scale = e.scale;
-    if (e.posts.length) stmt.posts = e.posts;
-    if (e.alt) stmt.alt = { k: e.alt.k, op: e.alt.op, v: e.alt.v, ifOps: e.alt.ifOps, elseOps: e.alt.elseOps };
-    stmt.line = e.line;
-    let rec = byType.get(ty);
-    if (!rec) { rec = { hit: [], death: [] }; byType.set(ty, rec); }
-    for (const ph of phases) rec[ph].push(stmt);
+  if (colorLocal) {
+    const m2 = colorLocals.get(colorLocal);
+    color = (m2 && (m2.get(ctx.t) ?? m2.get(0))) || null;
+    if (!color) { registerPending(e, t, [`colorLocal:${colorLocal}@${ctx.t}`]); return; }
   }
+  stdStmts++;
+  const stmt = {};
+  stmt.dust = dustId;
+  if (e.idRand != null) stmt.idRand = e.idRand;
+  if (e.box && (e.box.anchor !== 'pos' || e.box.dx !== 0 || e.box.dy !== 0 || e.box.w !== 'npc' || e.box.h !== 'npc')) {
+    if (e.box.anchor === 'center') stmt.anchor = 'center';
+    if (e.box.dx !== 0) stmt.dx = e.box.dx;
+    if (e.box.dy !== 0) stmt.dy = e.box.dy;
+    if (e.box.w !== 'npc') stmt.w = e.box.w;
+    if (e.box.h !== 'npc') stmt.h = e.box.h;
+  }
+  if (e.sx !== 0 && e.sx != null) stmt.sx = e.sx;
+  if (e.sy !== 0 && e.sy != null) stmt.sy = e.sy;
+  if (e.alpha !== 0 && e.alpha != null) stmt.alpha = e.alpha;
+  if (color != null) stmt.color = color;
+  if (e.scale !== 1 && e.scale != null) stmt.scale = e.scale;
+  if (e.pres && e.pres.length) stmt.gate = [...e.pres];   // 区域门（phaseAfterPre）：判负整元素跳过
+  if (e.posts.length) stmt.posts = e.posts;
+  if (e.alt) stmt.alt = { k: e.alt.k, op: e.alt.op, v: e.alt.v, ifOps: e.alt.ifOps, elseOps: e.alt.elseOps };
+  stmt.line = e.line;
+  out.push(wrapEl(stmt, e.phase ? new Set([e.phase]) : new Set(['both'])));
+}
+
+/** 分支叶 pre 归并（phaseAfterPre 落叶 → 提到分支,掷门短路在前）；不均匀 → null */
+function mergeLeafPres(frames2, ctx) {
+  const acc = [];
+  for (const f of frames2) {
+    const a = [];
+    collectStmts(f.id, a);
+    for (const e of a) if (e.pres && e.pres.length) acc.push(e);
+  }
+  if (!acc.length) return [];
+  const first = JSON.stringify(acc[0].pres);
+  for (const e of acc) if (JSON.stringify(e.pres) !== first) { registerPending(e, ctx.t, ['preNonUniform']); return null; }
+  const vals = [...acc[0].pres];   // ★先取值再清（曾取已清空副本 → 265 pre 丢失）
+  for (const e of acc) e.pres = [];
+  return vals;
+}
+
+function buildBranchEl(cls, body, eels, f, ctx) {
+  const phases = new Set();
+  for (const b of body) for (const p of b.phases) phases.add(p);
+  if (eels) for (const b of eels) for (const p of b.phases) phases.add(p);
+  if (phases.size === 0) phases.add(f.phase || ctx.phaseCtx || 'both');   // 无叶空门（186/632 掷流占位）
+  if (phases.size > 1) {                                                  // 混相复合（不应出现）→ 保守 pending
+    const acc = [];
+    collectStmts(f.id, acc);
+    for (const e of acc) registerPending(e, ctx.t, ['mixedPhaseComposite']);
+    return null;
+  }
+  const leafPres = mergeLeafPres([f], ctx);
+  if (leafPres === null) return null;
+  if (leafPres.length) {
+    // 叶 stmt 已在 materialize 时烤入 gate —— 上提到分支后从叶上摘除（防双写）
+    for (const b of body) if (b.el.dust !== undefined) delete b.el.gate;
+    if (eels) for (const b of eels) if (b.el.dust !== undefined) delete b.el.gate;
+  }
+  const el = {};
+  // ★pre=臂条件（判负→e 臂,262 lifeGtHalf）；gate=区域门（判负→整支跳过,265 lifeLt0）
+  if (cls.pre.length) el.pre = [...cls.pre];
+  if (leafPres.length) el.gate = [...leafPres];
+  if (cls.roll) el.roll = { ...cls.roll };
+  if (body.length) el.t = body.map((b) => b.el);
+  if (eels && eels.length) el.e = eels.map((b) => b.el);
+  el.line = (body.length ? body[0].el.line : (firstLineOf(f) ?? f.line)) ?? 0;
+  return wrapEl(el, phases);
+}
+
+/** 臂链解析：f 起（含死臂跳跃）找第一个对 t 活的臂；返回 'cut' = 纯门 return 割同层后续 */
+/** 运行时失败面清扫：不可表达门/混合组之后继臂——对 t 静态活者递归解析（failFace 模式:
+ *  叶改登记,割面/死臂/相位语义照走——曾盲扫 collectStmts → 156 专属尘被镇宠臂连坐 pending）。
+ *  对 t 死的臂跳过（曾全局盲扫 → 449-452 骷髅族被 369 镇宠臂连坐 pending）。 */
+function sweepFailureFace(from, S, ctx, reason) {
+  const { t } = ctx;
+  for (let x = from; x; x = SUCCESSOR.get(x.id)) {
+    if (!condStaticTrue(x, t)) { markDeadArm(x, S, ctx); ctx.consumed.add(x.id); continue; }
+    ctx.consumed.add(x.id);
+    const saved = ctx.failFace;
+    ctx.failFace = reason;
+    resolveKids(x.id, SChild(S, x), [], ctx);
+    ctx.failFace = saved;
+    if (x.kind === 'if' && x.cond && !x.cond.life
+      && (x.cond.typeIds.size > 0 || x.cond.ranges.length > 0) && x.cond.gates.length === 0) {
+      for (let y = SUCCESSOR.get(x.id); y; y = SUCCESSOR.get(y.id)) { markDeadArm(y, S, ctx); ctx.consumed.add(y.id); }
+      break;   // 纯 type 活臂：其后继不可达
+    }
+  }
+}
+
+function resolveArmChain(head, S, out, ctx) {
+  const { t, consumed } = ctx;
+  let cur = head;
+  while (cur && !condStaticTrue(cur, t)) {
+    markDeadArm(cur, S, ctx);
+    consumed.add(cur.id);
+    cur = SUCCESSOR.get(cur.id) || null;
+  }
+  if (!cur) return undefined;
+  if (cur.kind === 'else') {              // else 臂 = 前臂全败后的无条件体（不收门）
+    consumed.add(cur.id);
+    resolveKids(cur.id, S, out, ctx);
+    return undefined;
+  }
+  const gates = cur.cond ? cur.cond.gates : [];
+  const cls = gates.length ? classifyGates(gates) : { ok: true, pre: [], roll: null };
+  if (!cls.ok) {
+    // 不可表达门（ai[1]/!wet/netMode/daybreak/双掷…）→ 本臂 pending + 失败面逐型清扫
+    const reason = `gate:${gates.join(' && ')}`;
+    markChainPending(cur, ctx, reason);
+    sweepFailureFace(SUCCESSOR.get(cur.id) || null, S, ctx, reason);
+    consumed.add(cur.id);
+    return undefined;
+  }
+  if ((cls.roll || cls.pre.length) && subtreePend(cur.id)) {
+    // 分支叶含 pending（postUnsupported/colorLocal 族）→ 掷门结构不可表达 → 整链 pending
+    const reason = 'branchMixedWithPending';
+    markChainPending(cur, ctx, reason);
+    sweepFailureFace(SUCCESSOR.get(cur.id) || null, S, ctx, reason);
+    consumed.add(cur.id);
+    return undefined;
+  }
+  const savedPhase = ctx.phaseCtx;
+  if (cur.cond && cur.cond.life) ctx.phaseCtx = cur.cond.life;
+  const body = [];
+  resolveKids(cur.id, SChild(S, cur), body, ctx);
+  ctx.phaseCtx = savedPhase;
+  consumed.add(cur.id);
+  if (cls.roll || cls.pre.length) {
+    const tail = elseTail(SUCCESSOR.get(cur.id) || null, S, ctx);
+    if (!tail.ok) {
+      const reason = tail.reason;
+      markChainPending(cur, ctx, reason);
+      sweepFailureFace(SUCCESSOR.get(cur.id) || null, S, ctx, reason);
+      return undefined;
+    }
+    for (let x = SUCCESSOR.get(cur.id); x; x = SUCCESSOR.get(x.id)) consumed.add(x.id);
+    const br = buildBranchEl(cls, body, tail.els, cur, ctx);
+    if (br) out.push(br);
+    return undefined;
+  }
+  out.push(...body);
+  if (cur.cond && cur.cond.life) return undefined;   // 相位臂：后继 = 补相位,由 kids-loop 续走
+  if (cur.hadReturn && !hasStmtKids(cur.id) && cur.cond.typeIds.size === 0
+    && cur.cond.ranges.length === 0 && cur.cond.gates.length === 0 && cur.cond.excludes.size >= 1) {
+    return 'cut';   // `if (type != N) { return; }` 纯门割面：同层后续 = N 专属
+  }
+  for (let x = SUCCESSOR.get(cur.id); x; x = SUCCESSOR.get(x.id)) consumed.add(x.id);   // 纯 type 臂后继对 t 不可达
+  return undefined;
+}
+
+/** 运行时失败面（分支 e 臂）解析 */
+function elseTail(s, S, ctx) {
+  const { t, consumed } = ctx;
+  let cur = s;
+  while (cur && !condStaticTrue(cur, t)) {
+    markDeadArm(cur, S, ctx);
+    consumed.add(cur.id);
+    cur = SUCCESSOR.get(cur.id) || null;
+  }
+  if (!cur) return { ok: true, els: null };
+  if (cur.kind === 'else') {
+    consumed.add(cur.id);
+    const els = [];
+    resolveKids(cur.id, S, els, ctx);
+    return { ok: true, els };
+  }
+  const gates = cur.cond ? cur.cond.gates : [];
+  const cls = gates.length ? classifyGates(gates) : { ok: true, pre: [], roll: null };
+  if (!cls.ok) return { ok: false, reason: `gate:${gates.join(' && ')}` };
+  if ((cls.roll || cls.pre.length) && subtreePend(cur.id)) return { ok: false, reason: 'branchMixedWithPending' };
+  const savedPhase = ctx.phaseCtx;
+  if (cur.cond && cur.cond.life) ctx.phaseCtx = cur.cond.life;
+  const body = [];
+  resolveKids(cur.id, SChild(S, cur), body, ctx);
+  ctx.phaseCtx = savedPhase;
+  consumed.add(cur.id);
+  if (cls.roll || cls.pre.length) {
+    const sub = elseTail(SUCCESSOR.get(cur.id) || null, S, ctx);
+    if (!sub.ok) return sub;
+    for (let x = SUCCESSOR.get(cur.id); x; x = SUCCESSOR.get(x.id)) consumed.add(x.id);
+    const br = buildBranchEl(cls, body, sub.els, cur, ctx);
+    return { ok: true, els: br ? [br] : [] };
+  }
+  if (cur.cond && cur.cond.life) {         // 相位臂：补相位后继仍在失败面内 → 续链并入
+    const rest = elseTail(SUCCESSOR.get(cur.id) || null, S, ctx);
+    if (!rest.ok) return rest;
+    return { ok: true, els: [...body, ...(rest.els || [])] };
+  }
+  for (let x = SUCCESSOR.get(cur.id); x; x = SUCCESSOR.get(x.id)) consumed.add(x.id);
+  return { ok: true, els: body };
+}
+
+function resolveKids(fid, S, out, ctx) {
+  const evs = kidsMap.get(fid);
+  if (!evs) return;
+  let cutRest = false;
+  for (const ev of evs) {
+    if (cutRest) break;               // 纯门 return 割面：`if (type != N) return` 后同层 = N 专属
+    if (ev.ev === 'stmt') { materialize(ev.e, out, ctx); continue; }
+    const f = ev.f;
+    if (ctx.consumed.has(f.id)) continue;
+    if (f.kind === 'for') {
+      ctx.consumed.add(f.id);
+      if (!f.loop.ok) { markChainPending(f, ctx, f.loop.reason || 'loop'); continue; }
+      const body = [];
+      resolveKids(f.id, S, body, ctx);
+      if (!body.length) continue;
+      if (subtreePend(f.id)) { markChainPending(f, ctx, 'groupMixedWithPending'); continue; }   // 循环体部分 pending → 整组保守 pending
+      if (body.length === 1) {
+        const el = body[0].el;
+        if (f.loop.n != null || f.loop.hitK != null) {
+          body[0].el = withCount(el, f.loop.n, f.loop.hitK);
+        }
+        out.push(body[0]);
+      } else {
+        const phases = new Set();
+        for (const b of body) for (const p of b.phases) phases.add(p);
+        const el = {};
+        if (f.loop.n != null && f.loop.n !== 1) el.n = f.loop.n;
+        if (f.loop.hitK != null) el.hitK = f.loop.hitK;
+        el.body = body.map((b) => b.el);
+        el.line = body[0].el.line ?? 0;
+        out.push(wrapEl(el, phases));
+      }
+      continue;
+    }
+    if (f.kind === 'if' || f.kind === 'else') {
+      if (f.phaseReturnGuard) { ctx.consumed.add(f.id); continue; }   // `life >= 0` return：相位由 phaseAfter 承载
+      if (f.postAltConsumed) { ctx.consumed.add(f.id); continue; }    // Allman post-alt 已并入上一语句 alt
+      const r = resolveArmChain(f, S, out, ctx);
+      if (r === 'cut') cutRest = true;
+      continue;
+    }
+    resolveKids(f.id, S, out, ctx);   // neutral 帧透传
+  }
+}
+
+function resolveType(t) {
+  const ctx = { t, consumed: new Set(), deadSeen: new Set(), phaseCtx: null, failFace: null };
+  const out = [];
+  resolveKids(ROOT_FID, null, out, ctx);
+  return out;
+}
+
+// 候选型宇宙 = 所有帧正 type 集 ∪ excludes
+const allTypes = new Set();
+for (const [, evs] of kidsMap) {
+  for (const ev of evs) {
+    if (ev.ev !== 'frame' || !ev.f.cond) continue;
+    const ft = framePosTypes(ev.f);
+    if (ft) for (const x of ft) allTypes.add(x);
+    for (const x of ev.f.cond.excludes) allTypes.add(x);
+  }
+}
+for (const t of [...allTypes].sort((a, b) => a - b)) {
+  const out = resolveType(t);
+  for (const wp of out) {
+    let rec = byType.get(t);
+    if (!rec) { rec = { hit: [], death: [] }; byType.set(t, rec); }
+    const phases = [...wp.phases];
+    for (const ph of (phases.includes('both') ? ['hit', 'death'] : phases)) rec[ph].push(wp.el);
+  }
+}
+// 未达语句（全局悬空,无 type 域）→ typesUnknown pending（保守,不臆发）
+for (const e of entries) {
+  if (!e.__seen && !e.__dead && !e.__pend) registerPending(e, null, ['typesUnknown']);
 }
 
 // ---------------- 产物 ----------------
 const data = { _meta: {} };
 const typeIds = [...byType.keys()].sort((a, b) => a - b);
 for (const id of typeIds) {
-  if (BATCH1_TYPES.has(id)) data[String(id)] = byType.get(id);
-  else pendings.set('batch:' + id, { key: 'batch:' + id, line: byType.get(id).hit[0]?.line ?? byType.get(id).death[0]?.line ?? 0, types: [id], phase: 'both', reason: 'batch2+:std-expressible（未接组滚动清单）', count: 1 });
+  if (WIRED_TYPES.has(id)) data[String(id)] = byType.get(id);
+  else pendings.set('batch:' + id, { key: 'batch:' + id, line: byType.get(id).hit[0]?.line ?? byType.get(id).death[0]?.line ?? 0, types: new Set([id]), phase: 'both', reason: 'batch3+:std-expressible（未接组滚动清单）', count: 1 });
 }
 data._meta = {
   source: `Terarria${VER}/Terraria/NPC.cs NPC.HitEffect (:${SIG_LINE}-:${endLine})`,
@@ -779,14 +1269,16 @@ data._meta = {
   unsupStmts,
   npcIds: typeIds.length,
   entryNpcIds: typeIds.length,
-  schema: 'per-npcId: {hit:[stmt],death:[stmt]}; stmt={dust,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,posts?,alt?,line}; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; sx token: hd|2hd|2.5hd|1.5hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv; alt={k,op,v,ifOps,elseOps}=Main.rand.Next(k) op v 掷骰分支',
+  schema: 'per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,pre?,posts?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat()); alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支',
   noGenericTail: '★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）',
+  batch2: 'BJ296 批2（2026-09-23）概率门族接入：帧树逐型臂解析（死臂剪枝/循环组/单掷分支/pre 谓词/idRand）；掷流通道=Math.random（与批1 alt 同源,引擎侧 spawnDust 抖动同拍）; 接入 15 型：134-136/262-265/407/409/410/411/428/478/516/636',
   carveOuts: [
     '泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)',
     'gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）',
     '音效（SoundID.NPCHit/NPCDeath）/DBT/公告/探针生成（135 探针等）非尘面',
   ],
-  pending: [...pendings.values()].map((p) => ({ types: p.types, line: p.line, phase: p.phase, reason: p.reason, count: p.count })),
+  pending: [...pendings.values()].map((p) => ({ types: [...p.types].sort((a, b) => a - b), line: p.line, phase: p.phase, reason: p.reason, count: p.count })),
+  deadArms: deadArms,
   unreachableAfterReturn: unreachableMarks,
 };
 
@@ -822,7 +1314,8 @@ if (PROBE) {
   }
   console.log('===== pending（前 40 条）=====');
   for (const p of [...pendings.values()].slice(0, 40)) {
-    console.log(`  L${p.line} phase=${p.phase} types=${p.types ? p.types.join(',') : '?'} ×${p.count} ${p.reason}`);
+    const tys = p.types instanceof Set ? [...p.types] : p.types;
+    console.log(`  L${p.line} phase=${p.phase} types=${tys ? tys.join(',') : '?'} ×${p.count} ${p.reason}`);
   }
   process.exit(0);
 }

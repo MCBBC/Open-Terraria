@@ -13,7 +13,7 @@
 //     词缀名（PrefixID.cs 常量 1-97）+ 属性修正（TryGetPrefixStatMultipliersForItem :691-1061
 //     switch）+ 传奇档 value 加成（:1043-1060）+ 各武器类可掷池（PrefixLegacy.Prefixes）+
 //     物品类集合（PrefixLegacy.ItemSets / ItemID.Sets.CanGetPrefixes）。
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
@@ -24,10 +24,26 @@ const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
 const AUDIT = process.argv.includes('--audit');
 // SW-FX53 2026-09-13: SW_FX53_OUT=<dir> 试产重定向——全部产物改写进指定目录
 // （文件名不变）,真文件零触碰;供重产 dry-run 对拍测试与人工审计（禁真写纪律）。
+// ★BJ298 2026-09-23 era guard 补缺省干跑臂（docs/era-guard-family.md 四之二续批排期③
+//   【降级面】清偿——原「缺省（无 env 无旗）仍写真库」半闸面收口）：
+//   · 缺省（无 env 无旗无 AUDIT）= 干跑对拍零写盘：五产物逐件 vs 现库双向路径级 diff
+//     ——fresh-only/drift 任一非空 exit 1+物证（现库退化/值漂移）;live-only=【选报】轴
+//     loud 打印不拒跑——本器现库领先面系登记的手补（头注:pet/light 系 FX48 手补、
+//     itemstats/accfx 审计手增条目）,全量重产会回退 = shops 刻意剥离面同款家族变体;
+//   · SW_FX53_OUT=<dir> = 沙箱写（原通道保留）;--write-real = 真库逃生门（新增;与
+//     SW_FX53_OUT 双旗互斥;本器锚 1457 固定,非 1457 禁写规则天然满足）。
+const WRITE_REAL = process.argv.includes('--write-real');
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
 const DRY_DIR = process.env.SW_FX53_OUT;
+if (DRY_DIR && WRITE_REAL) {
+  console.error('[extract-equip-prefix] 拒绝运行：SW_FX53_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  process.exit(1);
+}
+const PENDING = new Map();   // ★BJ298 缺省干跑臂：路径 → fresh 全文（零写盘,文末对拍/写实库闸）
 const writeOut = (p, data) => {
   if (DRY_DIR) { mkdirSync(DRY_DIR, { recursive: true }); writeFileSync(p.replace(/^.*\//, `${DRY_DIR}/`), data); return; }
-  if (!AUDIT) writeFileSync(p, data);
+  PENDING.set(p, data);      // 缺省/--write-real：一律只记,写实库臂经文末对拍闸（防非纯增量洗库）
 };
 const itemSrc = read('Terarria1457/Terraria/Item.cs');
 
@@ -726,6 +742,82 @@ const doc = {
 };
 writeOut(`${ROOT}/game/src/data/vanilla-prefix.json`, JSON.stringify(doc));
 console.error(`prefix: ${Object.keys(PREFIX_STATS).length} 条属性 / ${Object.keys(PREFIX_NAMES).length} 名 / 池 ${Object.keys(POOLS).length} / 集合 ${Object.keys(SETS).length}`);
+
+// ---- ★BJ298 缺省干跑对拍闸 / --write-real 闸（banners 同构 deepWash;五产物逐件）----
+// 器语义选报/拒双形态（shops 刻意剥离面家族变体）：
+//   选报产物 = vanilla-accfx.json / vanilla-itemstats.json——登记手增面（头注:审计手增
+//     条目 25+ 件与手增键 lavaRose/dmgMinion/crit* 等,亲核 2026-09-23:1209 live 多 crit*
+//     三键、908/4003 多 lavaRose、935 多 dmgMinion——全量重产会回退,新增档须走对拍增量
+//     合并,残差 fresh-only 6166/6175/6181/6182 登记 data-cut 债）——任一轴非空只 loud 不拒;
+//   拒产物 = vanilla-equip/vanilla-prefix/vanilla-wingstats——fresh-only/drift 非空 exit 1。
+if (!DRY_DIR) {
+  const 选报 = new Set(['vanilla-accfx.json', 'vanilla-itemstats.json']);
+  function deepWash(live, fresh, prefix = '') {
+    const w = { liveOnly: [], freshOnly: [], drift: [] };
+    const base = prefix || '<root>';
+    if (live === null || fresh === null || typeof live !== 'object' || typeof fresh !== 'object') {
+      if (JSON.stringify(live) !== JSON.stringify(fresh)) w.drift.push(`${base}: ${JSON.stringify(live)}→${JSON.stringify(fresh)}`);
+      return w;
+    }
+    if (Array.isArray(live) !== Array.isArray(fresh)) {
+      w.drift.push(`${base}: 类型漂移 ${Array.isArray(live) ? 'arr' : 'obj'}↔${Array.isArray(fresh) ? 'arr' : 'obj'}`);
+      return w;
+    }
+    const lk = new Set(Object.keys(live));
+    const fk = new Set(Object.keys(fresh));
+    for (const k of Object.keys(live)) {
+      const p = `${prefix}.${k}`;
+      if (!fk.has(k)) { w.liveOnly.push(p); continue; }
+      const sub = deepWash(live[k], fresh[k], p);
+      w.liveOnly.push(...sub.liveOnly); w.freshOnly.push(...sub.freshOnly); w.drift.push(...sub.drift);
+    }
+    for (const k of Object.keys(fresh)) if (!lk.has(k)) w.freshOnly.push(`${prefix}.${k}`);
+    return w;
+  }
+  const FORCE = FORCE_FULL && OVERWRITE_APPEND_ERA;
+  const rejectPaths = [];
+  for (const [p, freshJson] of PENDING) {
+    const name = p.replace(/^.*\//, '');
+    let live = null;
+    if (existsSync(p)) { try { live = JSON.parse(readFileSync(p, 'utf8')); } catch { /* 坏损:不拦 */ } }
+    if (live === null) { console.error(`[extract-equip-prefix] 现库缺 ${name},跳过该件对拍。`); continue; }
+    const wash = deepWash(live, JSON.parse(freshJson));
+    const dirty = wash.liveOnly.length + wash.freshOnly.length + wash.drift.length > 0;
+    if (WRITE_REAL) {
+      // --write-real 闸：任一轴非空即拒（防手增面整洗）,强推须 --force-full --overwrite-append-era
+      if (dirty && !FORCE) {
+        rejectPaths.push(name);
+        console.error(`[extract-equip-prefix] 拒绝 --write-real ${name}：diff 非纯增量（live-only ${wash.liveOnly.length}/fresh-only ${wash.freshOnly.length}/drift ${wash.drift.length}）——先逐值定谳再回写。`);
+      } else if (dirty && FORCE) {
+        console.error(`[extract-equip-prefix] ★双旗强推 ${name}：原地覆盖（live-only ${wash.liveOnly.length} 处将整洗——选报面被回退自负）。`);
+      }
+      continue;
+    }
+    if (选报.has(name)) {
+      // 选报产物：任一轴 loud 不拒跑
+      if (wash.liveOnly.length) console.error(`[extract-equip-prefix] ${name}：live-only ${wash.liveOnly.length} 处（登记手增面,选报不拒跑）: ${wash.liveOnly.slice(0, 5).join(', ')}`);
+      if (wash.freshOnly.length) console.error(`[extract-equip-prefix] ${name}：fresh-only ${wash.freshOnly.length} 处（残差 data-cut 债登记）: ${wash.freshOnly.slice(0, 5).join(', ')}`);
+      if (wash.drift.length) console.error(`[extract-equip-prefix] ${name}：drift ${wash.drift.length} 处（live 手增键差异,选报不拒跑）: ${wash.drift.slice(0, 5).join(' | ')}`);
+    } else if (wash.freshOnly.length || wash.drift.length) {
+      rejectPaths.push(name);
+      console.error(`[extract-equip-prefix] ${name}：fresh-only/drift 非空（现库退化缺键型/值漂移）。`);
+      if (wash.freshOnly.length) console.error(`  [fresh-only] 重产独有 ${wash.freshOnly.length}: ${wash.freshOnly.slice(0, 6).join(', ')}`);
+      if (wash.drift.length) console.error(`  [drift] 值漂移 ${wash.drift.length}: ${wash.drift.slice(0, 6).join(' | ')}`);
+    } else if (wash.liveOnly.length) {
+      console.error(`[extract-equip-prefix] ${name}：live-only ${wash.liveOnly.length} 处（现库领先=手补面,选报不拒跑）: ${wash.liveOnly.slice(0, 6).join(', ')}`);
+    } else {
+      console.error(`[extract-equip-prefix] ${name}：双向零差。`);
+    }
+  }
+  if (rejectPaths.length) {
+    console.error(`[extract-equip-prefix] ${WRITE_REAL ? '--write-real 拒产' : '干跑对拍拒跑'}：${rejectPaths.join(', ')}——exit 1。处置：逐值定谳（反编译为准）；沙箱试验用 SW_FX53_OUT=<dir>；确需原地强推 --force-full --overwrite-append-era 双旗。`);
+    process.exit(1);
+  }
+  if (WRITE_REAL) {
+    for (const [p, freshJson] of PENDING) { mkdirSync(p.slice(0, p.lastIndexOf('/')), { recursive: true }); writeFileSync(p, freshJson); }
+    console.error('[extract-equip-prefix] --write-real：五产物已写（真库）。');
+  }
+}
 
 // ---- 审计出口（--audit）：pinned 钉死件（表达式槽位）+ 基数（stdout 单行 JSON）----
 if (AUDIT) {

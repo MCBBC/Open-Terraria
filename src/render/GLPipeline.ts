@@ -88,6 +88,12 @@ export class GLPipeline {
   }
 
   statName: string;
+  /** 消费模块的原始上下文访问器（纹理对象创建/逐上传 pixelStorei 精细控制——
+   *  ★noise/wave 等纯数据源须 UNPACK_PREMULTIPLY=false,不适用画布源预乘收口）。
+   *  unavailable 时返回 null;消费方一律先判。 */
+  get glx(): WebGL2RenderingContext | null {
+    return this.unavailable ? null : this.gl;
+  }
   private gll(): WebGL2RenderingContext | null {
     return this.unavailable ? null : this.gl;
   }

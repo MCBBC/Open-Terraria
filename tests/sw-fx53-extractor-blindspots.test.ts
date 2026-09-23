@@ -19,8 +19,8 @@
 // 即对应断言红）：
 //   · itemfunc：手补面 663 行（items.ts PLACE_STYLE_BACKFILL_1458 620 + SHARED_GROUP
 //     43）→ 622 解析同值 / 41 沉默（fakecontainers 3666-3706 `(type>N).ToInt()` 布尔
-//     计数式=登记债,手补仍权威）/ 0 冲突;盘面零缺失,既有条目仅 2413.placeStyle
-//     23→17 一处值变更（FX3 定谳的伪值纠偏,区间 return 死码判据）。
+//     计数式=登记债,手补仍权威）/ 0 冲突;盘面零缺失零值变（★BJ298 2026-09-23:旧唯一
+//     例外 2413.placeStyle 23→17 已按 items.ts:1463 真值数据刀落盘,例外清零）。
 //   · pets：dry ≡ 盘上 83 行全等（FX48 21 行转解析直出）。
 //   · equip：pet/light ≡ 盘上全等;itemstats/prefix/wingstats/accfx 零漂移。
 //   · journey：boss 宠 21 行 dmg:0/shoot 解析直出;盘面行零缺失（30 件字面实参
@@ -96,7 +96,7 @@ function parseItemsTsTables(): { rows: [number, string, number][]; shared: [numb
 
 // ==================== A. extract-itemfunc：dry-run 对拍 ====================
 describe('A. itemfunc dry-run：四形态教学 + 零回退', () => {
-  it('A1 盘面零缺失零值变（唯一例外=2413.placeStyle 23→17 FX3 伪值纠偏）', () => {
+  it('A1 盘面零缺失零值变（★BJ298 2026-09-23 数据刀:旧唯一例外 2413.placeStyle 23→17 已对齐 items.ts:1463 真值落盘,例外清零）', () => {
     const disk = diskItemfunc();
     const diffs: string[] = [];
     for (const [vid, entry] of Object.entries(disk)) {
@@ -106,7 +106,7 @@ describe('A. itemfunc dry-run：四形态教学 + 零回退', () => {
         if (dry[k] !== v) diffs.push(`${vid}.${k}: ${v} -> ${dry[k]}`);
       }
     }
-    expect(diffs).toEqual(['2413.placeStyle: 23 -> 17']);
+    expect(diffs).toEqual([]);
   });
 
   it('A2 手补面 663 行逐键对账：622 解析同值 / 41 沉默 / 0 冲突（沉默集=fakecontainers 登记债）', () => {

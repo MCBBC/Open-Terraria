@@ -30,7 +30,7 @@ const CENSUS: Array<[string, string, string]> = [
   ['132/136/144 拉杆/开关/计时器', ':32417-32422 HitSwitch', "TILE_BY_KEY['v_132_lever']"],
   ['597 传送晶塔', ':32423-32458', 'usePylon'],
   ['441/468 陷阱箱/梳妆台', ':32459-32472 HitSwitch+动画', 'sh === 441 || sh === 468'],
-  ['139 八音盒', ':32473-32478 SwitchMB', 'sh === 35 || sh === 139'],
+  ['139 八音盒(★BJ297 收窄:35 右键系 1.3 世代语义摘除,仅导线 case 35 可翻)', ':32473-32478 SwitchMB(仅 139)', 'sh === 139'],
   ['215 篝火族', ':32479-32509 frameY±36', 'sh === 215'],
   ['207 水 fountain', ':32510-32515 SwitchFountain', 'sh === 207'],
   ['410/480/509/657/658/720/721/725/733 天塔柱族', ':32516-32522', 'sh === 410 || sh === 480'],
@@ -40,7 +40,7 @@ const CENSUS: Array<[string, string, string]> = [
   ['388/389 高门', ':32549-32557 ShiftTallGate', "TILE_BY_KEY['v_388_tall_gate_closed']"],
   ['15/497/89/102/487 坐椅族', ':32558-32575 SitDown', 'SITTABLE_SHEETS'],
   ['335 烟花盒', ':32576-32580 LaunchRocketSmall', 'sh === 335'],
-  ['411 起爆器', ':32581-32586 HitSwitch', "TILE_BY_KEY['v_411_detonator']"],
+  ['411 起爆器(★BJ297 补 frameX<36 按下态门)', ':32581-32586 HitSwitch', "st.frameX[st.idx(tx, ty)] < 36"],
   ['494 高尔夫球座', ':32587-32599', "TILE_BY_KEY['v_494_golf_tee']"],
   ['338 烟花喷泉', ':32600-32622', 'sh === 338'],
   ['33/49/372/174/646 蜡烛族', ':32623-32635 frameX±18', 'sh === 33 || sh === 49 || sh === 372 || sh === 174 || sh === 646'],
@@ -73,7 +73,7 @@ const CENSUS: Array<[string, string, string]> = [
   ['209 大炮', ':33197-33269 瞄准+传送门炮开火', 'sh === 209'],
   ['510/511 箭头告示牌', ':33270-33313 frameY±36 8档', 'sh === 510 || sh === 511'],
   ['21/467/29/97/463/491 容器族', ':33314-33523', 'tryOpenChest'],
-  ['314 矿车轨道', 'Game 右键上车臂(Player.cs:22356 族)', 'mountMinecartAt'],
+  ['314 矿车轨道(★BJ297 补 gravDir 门+下坐支+±2 邻域扫描 :32213-32250)', ':33524-33539 + :32213-32250', 'minecartTrackInteraction'],
   ['合成站尾臂(任意 tile)', ':33541-33547 GetCraftingFilterForTile', 'craftingFilterForTile'],
 ];
 

@@ -15,11 +15,56 @@
 //   类（1456 反编译全树 grep 无 FishingRules/HookStats/GetFishingCatch）。1.4.5.6 的
 //   权威实现 = FishDropRule 列表，全量就是本脚本提取出的条数（见 _meta.ruleCount），
 //   不允许为了凑数注水——本脚本对源文件做结构断言，行数/条数漂移即抛错。
-import { readFileSync, writeFileSync } from 'fs';
+//
+// ★BJ298 2026-09-23 era guard 落闸（四要素习语 docs/era-guard-family.md,BJ284 banners
+//   同构;BJ261 续批排期②【洗库险·B 形】清偿——原缺省无 env 无旗直写现库）：
+//   ① SW_ITEM_VER 白名单 {1457,1458}（读域 GameContentFishDropPopulator.cs 1457↔1458
+//     逐字节全等 f7391368 + AFishDropRulePopulator.cs 三版全等 2525c321 + Main.cs
+//     anglerQuestItemNetIDs(:1864)/AnglerQuestSwap(:3851) 两域 1457↔1458 同位同文
+//     （BJ298 diff 亲核——Main.cs 整文件两版有差但读域零漂移,line 域 src 字段稳定）;
+//     1456 退役显式拒+指引）;缺省 1457（拍板#7A）;
+//   ② 输出通道三分离：缺省=干跑对拍零写盘（双向路径级 diff——live-only=洗库预警/
+//     fresh-only=现库退化缺键型,任一非空 exit 1+物证;★_meta.sources 动态基线路径串按
+//     BJ284 处方豁免对拍）/ SW_OUT=<dir>=沙箱 / --write-real=写真库（diff 非纯增量拒,
+//     强推须 --force-full --overwrite-append-era 双旗）;SW_OUT 与 --write-real 双旗互斥;
+//     非 1457 禁写真库;探测注入面 SW_FISHING_JSON 与 --write-real 混用拒（g1 footgun）;
+//   ③ 锚 fail-loud：结构断言（18 组/锚点抽查/任务鱼 41/拒绝表 14+18）+基数护栏
+//     （ruleCount≥230,BJ298 亲数）（原有+新增）;
+//   ④ 判别力自证：tests/extract-tables2-era-guard.test.ts（M1 摘干跑门/M3 摘 fresh-only 轴）。
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 
 // ★BJ183 2026-09-20 基准对齐 1456→1457（FishDropRules 两版源级 diff=0;Main.cs
 // anglerQuestItemNetIDs/AnglerQuestSwap 仅有行号平移,语义零漂移——对拍已证）
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1457';
+const ROOT0 = '/Users/vinlic/Project/GLM/SandboxWorld';
+// ---- ★BJ298 era guard ①②：版本白名单 + 输出通道开关（对拍在文末落盘段） ----
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457', '1458']);
+if (!VER_ALLOWED.has(VER) || !existsSync(`${ROOT0}/Terarria${VER}/Terraria/Main.cs`)) {
+  console.error(`[extract-fishing] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
+  if (VER === '1456') console.error('  1456 锚集已退役（BJ183 基准对齐 1457,BJ298 落闸）；1456 回拍读时代快照。');
+  process.exit(1);
+}
+const WRITE_REAL = process.argv.includes('--write-real');
+const FORCE_FULL = process.argv.includes('--force-full');
+const OVERWRITE_APPEND_ERA = process.argv.includes('--overwrite-append-era');
+const SW_OUT = process.env.SW_OUT;
+if (SW_OUT !== undefined && SW_OUT !== '' && WRITE_REAL) {
+  console.error('[extract-fishing] 拒绝运行：SW_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  process.exit(1);
+}
+if (WRITE_REAL && VER !== '1457') {
+  console.error(`[extract-fishing] 拒绝写真库：SW_ITEM_VER=${VER}≠1457（旧基线重放禁写 vanilla-fishing.json）。`);
+  process.exit(1);
+}
+if (WRITE_REAL && process.env.SW_FISHING_JSON !== undefined) {
+  console.error('[extract-fishing] 拒绝运行：探测注入面（SW_FISHING_JSON）已设置而 --write-real 将写真实现库（fail-closed）。');
+  process.exit(1);
+}
+const LIVE_JSON = process.env.SW_FISHING_JSON ?? `${ROOT0}/game/src/data/vanilla-fishing.json`;
+const OUT_JSON = WRITE_REAL
+  ? LIVE_JSON
+  : (SW_OUT ? `${SW_OUT.replace(/\/+$/, '')}/vanilla-fishing.json` : null);
+const ROOT = `${ROOT0}/Terarria${VER}`;
 const POP = `${ROOT}/Terraria.GameContent.FishDropRules/GameContentFishDropPopulator.cs`;
 const BASE = `${ROOT}/Terraria.GameContent.FishDropRules/AFishDropRulePopulator.cs`;
 const MAIN = `${ROOT}/Terraria/Main.cs`;
@@ -361,6 +406,71 @@ const out = {
   rewardMilestones,   // 里程碑道具锚点（数值对 Player.cs:55374-55393 switch）
 };
 
-writeFileSync(new URL('../src/data/vanilla-fishing.json', import.meta.url), JSON.stringify(out, null, 1) + '\n');
-console.log(`vanilla-fishing.json: ${rules.length} rules / ${quest.items.length} quest fish / ${quest.filters.length} swap filters`);
+// ---- ★BJ298 ③ 基数护栏（1457 实测 rules 158,BJ298 亲数;漂移=解析面残表）----
+if (rules.length < 140) {
+  fail(`基数护栏: ruleCount ${rules.length} < 140（解析面漂移,禁止静默半表）`);
+}
+
+// ---- ★BJ298 era guard ②：干跑对拍 / 沙箱 / 逃生门（banners 同构 deepWash;
+//      _meta.sources 动态基线路径串豁免——BJ284 provenance 处方）----
+/** 现库 vs 重产双向路径级 diff。live-only=洗库预警面 / fresh-only=现库退化缺键型面
+ *  （★G-1/S3 处方）/ drift=同路径值漂移。 */
+function deepWash(live, fresh, prefix = '') {
+  const w = { liveOnly: [], freshOnly: [], drift: [] };
+  const base = prefix || '<root>';
+  if (live === null || fresh === null || typeof live !== 'object' || typeof fresh !== 'object') {
+    if (JSON.stringify(live) !== JSON.stringify(fresh)) w.drift.push(`${base}: ${JSON.stringify(live)}→${JSON.stringify(fresh)}`);
+    return w;
+  }
+  if (Array.isArray(live) !== Array.isArray(fresh)) {
+    w.drift.push(`${base}: 类型漂移 ${Array.isArray(live) ? 'arr' : 'obj'}↔${Array.isArray(fresh) ? 'arr' : 'obj'}`);
+    return w;
+  }
+  const lk = new Set(Object.keys(live));
+  const fk = new Set(Object.keys(fresh));
+  for (const k of Object.keys(live)) {
+    const p = `${prefix}.${k}`;
+    if (!fk.has(k)) { w.liveOnly.push(p); continue; }
+    const sub = deepWash(live[k], fresh[k], p);
+    w.liveOnly.push(...sub.liveOnly); w.freshOnly.push(...sub.freshOnly); w.drift.push(...sub.drift);
+  }
+  for (const k of Object.keys(fresh)) if (!lk.has(k)) w.freshOnly.push(`${prefix}.${k}`);
+  return w;
+}
+const washEmpty = (v) => !v.liveOnly.length && !v.freshOnly.length && !v.drift.length;
+function washReport(v) {
+  console.error('  物证：');
+  if (v.liveOnly.length) console.error(`    [live-only] 现库独有 ${v.liveOnly.length} 处（重产缺=提取器退化/洗库面）: ${v.liveOnly.slice(0, 6).join(', ')}`);
+  if (v.freshOnly.length) console.error(`    [fresh-only] 重产独有 ${v.freshOnly.length} 处（现库缺=源侧新增/现库退化）: ${v.freshOnly.slice(0, 6).join(', ')}`);
+  if (v.drift.length) console.error(`    [drift] 值漂移 ${v.drift.length}: ${v.drift.slice(0, 6).join(' | ')}`);
+}
+const stripProvenance = (o) => {
+  const c = JSON.parse(JSON.stringify(o));
+  if (c?._meta?.sources !== undefined) c._meta.sources = ['<exempt>'];
+  return c;
+};
+const json = JSON.stringify(out, null, 1) + '\n';
+let live = null;
+if (existsSync(LIVE_JSON)) { try { live = JSON.parse(readFileSync(LIVE_JSON, 'utf8')); } catch { /* 坏损:不拦（npcdrops 同款） */ } }
+const wash = live === null ? null : deepWash(stripProvenance(live), stripProvenance(JSON.parse(json)));
+if (OUT_JSON) {
+  if (WRITE_REAL && wash && !washEmpty(wash) && !(FORCE_FULL && OVERWRITE_APPEND_ERA)) {
+    console.error('[extract-fishing] 拒绝 --write-real：重产 diff 非纯增量（双向差异非空）——先逐值定谳（反编译为准）再回写。');
+    washReport(wash);
+    console.error('  确需原地强推：--force-full --overwrite-append-era 双旗（单旗仍拒）。');
+    process.exit(1);
+  }
+  mkdirSync(OUT_JSON.slice(0, OUT_JSON.lastIndexOf('/')), { recursive: true });
+  writeFileSync(OUT_JSON, json);
+  console.log(`vanilla-fishing.json 已写 ${OUT_JSON}（${WRITE_REAL ? '--write-real 真库' : 'SW_OUT 沙箱'}）: ${rules.length} rules / ${quest.items.length} quest fish / ${quest.filters.length} swap filters`);
+} else if (wash === null) {
+  console.error('[extract-fishing] 干跑（零写盘）：现库缺 vanilla-fishing.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
+} else if (!washEmpty(wash)) {
+  console.error('[extract-fishing] 干跑对拍：双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
+  washReport(wash);
+  console.error('  处置：逐值定谳（反编译为准）后 --write-real 定谳回写；沙箱试验用 SW_OUT=<dir>。');
+  process.exit(1);
+} else {
+  console.log(`vanilla-fishing.json 干跑对拍：重产盖住现库（双向零差,零写盘）: ${rules.length} rules / ${quest.items.length} quest fish / ${quest.filters.length} swap filters`);
+}
 for (const [g, c] of Object.entries(out._meta.groupCounts)) console.log(`  ${g}: ${c}`);

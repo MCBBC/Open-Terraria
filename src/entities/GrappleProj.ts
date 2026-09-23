@@ -451,7 +451,14 @@ export class GrappleProj extends Entity {
    *  lineLight 段）；PlotTileLine = Utils.cs:2428 + PlotLine :2329 + CastLightOpen
    *  门 :729-743 */
   private emitLineLight(game: GameHooks, p: Player, rgb: readonly [number, number, number]): void {
-    const add = game.addLightAt;
+    // ★BJ303（2026-09-23 用户实报：装反重力钩发射即崩"停机"）：addLightAt 必须以
+    // 方法调用形态发出——detach 成局部引用后 this=undefined，Game.addLightAt 首句
+    // `this.world?.store.inBounds` 抛 "Cannot read properties of undefined
+    // (reading 'world')" → 帧循环熔断停机（Game.ts 帧循环 catch）。
+    // 触发面 = hookChainOf(projType).lineLight 非空（grappleChains.ts：仅 446 反重力钩
+    // /646-649 月亮钩）——普通钩无沿线光不走本段=装反重力钩专用炸点。
+    // bind 保后续 add(...) 调用点（含 plot 闭包内）逐字节不变。
+    const add = game.addLightAt?.bind(game);
     if (!add) return;                       // 测试桩无光照通道（types.ts:111 可选钩子）
     const hx = this.cx, hy = this.cy, mx = p.cx, my = p.cy;
     add(mx, my, rgb[0], rgb[1], rgb[2]);    // AddLight(mountedCenter)（:49688/:49725）

@@ -22,6 +22,24 @@ export const INVASION_GROUP: Record<number, number> = (() => {
   return g;
 })();
 
+/**
+ * 事件进度条文案键（Main.DrawInvasionProgress :48536-48551 的 icon→Lang.inter 表反解）。
+ * 常规入侵 icon = invasionType + 3（CheckInvasionProgressDisplay :47040-47044 的
+ * `(num2<0)?(-num2):(num2+3)` / SyncAnInvasion :48481 同式）⇒ 1 哥布林→icon4→inter[88]
+ * （LegacyInterface.88 哥布林军队）/ 2 雪人军团→icon5→inter[87] / 3 海盗→icon6→inter[86] /
+ * 4 火星→icon7→inter[85]（火星暴乱）。
+ * ★BJ301 定谳（用户实报）：旧实现三元 else 兜底把火星(4)一并吞进 88——火星暴乱事件
+ * 进度条显「哥布林军队」。
+ */
+export function invasionBarNameKey(invasionType: number): number {
+  switch (invasionType) {
+    case INVASION_MARTIAN: return 85;
+    case INVASION_PIRATE: return 86;
+    case INVASION_SNOW_LEGION: return 87;
+    default: return 88;   // 哥布林（INVASION_GOBLIN；原版 icon 表外无第五型）
+  }
+}
+
 /** 击杀扣分权重（NPC.cs:79026-79050；默认 1，船长 216=5；飞碟 395=10，
  *  召唤师 471=10、飞船 491=10、幻影 472=0、特斯拉炮塔 387=0） */
 export const KILL_WEIGHT: Record<number, number> = {

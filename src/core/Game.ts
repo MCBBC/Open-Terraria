@@ -61,7 +61,7 @@ function bottomSideOfBed(fx: number): boolean {
 import {
   INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION, INVASION_MARTIAN,
   INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
-  tickInvasion, invasionWarningMisc, shouldSpawnInvasionEnemies,
+  tickInvasion, invasionWarningMisc, shouldSpawnInvasionEnemies, invasionBarNameKey,
 } from '../world/Invasion';
 import {
   TreeShakeState, TREE_SHAKEABLE_SHEETS, shakeTree,
@@ -91,6 +91,7 @@ import {
   canRaiseGoblinsHere as dd2CanRaiseGoblinsHere, findArenaHitbox as dd2FindArenaHitbox,
   announceGoblinDeath as dd2AnnounceGoblinDeath, shouldDropCrystals as dd2ShouldDropCrystals,
   summonBetsy as dd2SummonBetsy, shouldBlockBuilding, type OldOnesArmyHost,
+  invasionStatus as dd2InvasionStatus, DD2_EVENT_GROUP,
 } from '../world/OldOnesArmy';
 import {
   scanPylons, pylonAnchorAt, mapFocusRect, checkPylonTeleport,
@@ -1482,6 +1483,25 @@ function internalIdsOfVanSheets(sheets: readonly number[]): Set<number> {
     if (d.vanilla && s.has(d.vanilla.sheet)) acc.push(id);
     return acc;
   }, []));
+}
+// ★BJ300（2026-09-23）镰刀干草掉落表（Player.cs:45041-45056 直译）——
+//  ItemCheck_CutTiles `if (sItem.type == 1786)` 支：KillTile 成功（!tile.active()）
+//  后按捕获型掷 Hay 1727——{3 长草,24 腐化植物,61 丛林植物,110 神圣植物,201 猩红植物,
+//  529 海燕麦,637 灰烬草}→Next(1,3)=1-2 束；{73 长草2,74 丛林植物2,113 神圣植物2}
+//  →Next(2,5)=2-4 束。全 10 型 ∈ Main.tileCut（Main.cs:7516/7520/7915-7933）→
+//  TILE_CUT 挥割门已先受理,本表只补镰刀专属加掷（sheet 键,内部 id 经
+//  TILE_DEFS[].vanilla?.sheet 换算——canCutTile vanSheet 同口径）。
+const SICKLE_HAY_SHEETS_1_2: readonly number[] = [3, 24, 61, 110, 201, 529, 637];
+const SICKLE_HAY_SHEETS_2_4: readonly number[] = [73, 74, 113];
+
+/** ★BJ300 干草堆叠掷（Player.cs:45041-45056 逐字）——表外型零掷（原版 switch 不入
+ *  case 连 Main.rand 都不消费,掷序纪律）；表内 Next(1,3)/Next(2,5) 闭下开上。
+ *  骰源 Math.random = 本文件 killTileDropItems「原版 Main.rand → Math.random 通道」
+ *  同款。独立导出 = 行为面可测（cutTilesTypeExempt 先例）。 */
+export function sickleHayStackForSheet(sheet: number): number {
+  if (SICKLE_HAY_SHEETS_1_2.includes(sheet)) return 1 + Math.floor(Math.random() * 2);
+  if (SICKLE_HAY_SHEETS_2_4.includes(sheet)) return 2 + Math.floor(Math.random() * 3);
+  return 0;
 }
 /** DECOR 3×3 邻域扫候选 → 内部 id 集（checkDecorSquareFrame 逐格 O(1) 早退用） */
 const DECOR_SWEEP_TILE_IDS = internalIdsOfVanSheets(DECOR_SWEEP_SHEETS);
@@ -5186,6 +5206,24 @@ export class Game implements GameHooks {
     // 上车声（DelegateMethods.Minecart.LandingSound = SoundID.Item53）
     this.playSfxFile('Item_53', 0.7, cart.x, cart.y);
     return true;
+  }
+
+  /** 轨道右键 314 分支体（Player.cs:33524-33539 单源,★BJ297 抽出——直接臂/邻域
+   *  扫描臂/骑乘下车臂三消费点共用）：骑矿车 → TryDismount 下车【不重上】
+   *  （mount.Cart → flag17=false :33530-33533）；未骑 → 非矿车坐骑先 TryDismount
+   *  （:33534,结果不检,vanilla 同）→ LaunchMinecartHook（:33817-33824 发 403 轨道
+   *  钩,到轨段 GrappleMovement :22852-22871 GetOnTrack+!SolidCollision 后 SetMount
+   *  ——本仓无 403 悬钩建模（quickMinecartSnap 注同案登记）,塌缩为同步
+   *  mountMinecartAt（吸附+落点实心门同 :22864 两门语义）。
+   *  gravDir==1f 整支门（:33524）由各消费点自持（本方法不含）。
+   *  @returns 上车成功（下车支恒 true = vanilla flag2 分支入口置旗 :33526 面） */
+  private minecartTrackInteraction(tx: number, ty: number): boolean {
+    if (this.minecart) {
+      this.dismountMinecart();
+      return true;
+    }
+    if (this.player.ridingMount) this.player.mount.tryDismount(this.player);
+    return this.mountMinecartAt(tx, ty, this.bestCartMount());
   }
 
   /** 下车（Mount.TryDismount：位置保持、坐骑消失——矿车 buff 结束即移除） */
@@ -13225,9 +13263,12 @@ export class Game implements GameHooks {
         this.cartKeyLatch = true;
       }
       if (!inp.downAction('QuickMount')) this.cartKeyLatch = false;
-      // 右键轨道：骑乘中 → 下车（Player.cs:32806-32812 type==314 && mount.Cart 分支）
-      if (inp.rightDown && mType === this.trackTile && this.trackTile !== 0) {
-        this.dismountMinecart();
+      // 右键轨道：骑乘中 → 下车（★BJ297 重锚+单源：Player.cs:33524-33539 314 分支
+      //  mount.Cart 支——旧注 :32806-32812 系 1456 世代行号；gravDir==1f 整支门
+      //  :33524 同相,倒挂右键轨道零交互不消费）。下车后 rightDown 消费=flag2
+      //  分支入口置旗面；!minecart 守卫使 minecartTrackInteraction 恒走下车支
+      if (inp.rightDown && this.player.gravDir === 1 && mType === this.trackTile && this.trackTile !== 0) {
+        this.minecartTrackInteraction(mtx, mty);
         this.input.rightDown = false;
       }
       if (cart.dead || !cart.mounted) {
@@ -13306,15 +13347,25 @@ export class Game implements GameHooks {
     const vw2 = this.renderer.canvas.width, vh2 = this.renderer.canvas.height;
 
     // 右键轨道：(最优先,防 NPC 交谈拦截) → 附近宝箱 → NPC 交谈 → 交互
-    //（Player.cs:32806-32812：右键轨道格 → LaunchMinecartHook——与手持物品无关，
+    //（★BJ297 重锚：TileInteractionsUse :33524-33539 314 分支——旧注 :32806-32812
+    //  系 1456 世代行号。右键轨道格 → LaunchMinecartHook——与手持物品无关，
     //  用"最佳矿车"（装备槽 > 手持 > 背包）；矿车是坐骑召唤物，不消耗）
     const type = this.world.store.get(tx, ty);
-    // 原版 active() 门（Player.cs:6125/:6152 LaunchMinecartHook 族与 :32233 均为
-    // `tile.active() && tile.type == 314`）——幽灵残型轨道不上车
-    if (inp.rightDown && !this.minecart && type === this.trackTile && this.trackTile !== 0
+    // 原版 active() 门（Player.cs:6125/:6152 QuickMinecart/QuickMinecartSnap 与
+    // :32233 邻域扫描均为 `tile.active() && tile.type == 314`）——幽灵残型轨道不上车。
+    // ★BJ297 补 gravDir==1f 整支门（:33524 `type == 314 && gravDir == 1f`）——
+    // 反重力（gravDir=-1）悬停轨道右键零交互（不消费,交谈臂照常；本臂 return 前
+    // 移出分派,倒挂态须放行后续链=vanilla 314 分支不进同相）。
+    // ★BJ297 补非矿车坐骑下坐支（:33528-33535 mount.Active → TryDismount → 照发
+    // LaunchMinecartHook）——旧缺=骑乘中右键轨道直接上车成 ridingMount∧ridingCart
+    // 双坐骑态（vanilla 走 SetMount 强制换骑净语义,本仓矿车为独立实体非 mount 族）。
+    // 下车支（骑矿车再点轨道=下车不重上）在上方矿车块臂（minecartTrackInteraction
+    // Cart 支）——本臂 !this.minecart 门与其互斥共轭。
+    if (inp.rightDown && this.player.gravDir === 1 && !this.minecart
+      && type === this.trackTile && this.trackTile !== 0
       && this.world.store.hasTile(tx, ty)) {
       // 无矿车族物品也上车（默认木质车 13，Player.cs:22401）
-      if (this.mountMinecartAt(tx, ty, this.bestCartMount())) this.input.rightDown = false;
+      if (this.minecartTrackInteraction(tx, ty)) this.input.rightDown = false;
       return;
     }
     if (inp.rightDown) {
@@ -21182,7 +21233,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (d) { if (d.vy > 0) d.vy *= -1; d.vx *= 0.25; d.vy *= 0.25; }
     // 切割盒（:20490 CenteredRectangle(8×20) X -= dir*10 → CutTiles cutExtraTiles:true）
     const rx = Math.trunc(mx - dir * 10) - 4, ry = Math.trunc(my) - 10;
-    this.mowCutTiles(rx, ry, 8, 20);
+    this.mowCutTiles(rx, ry, 8, 20, ITEM_DEFS[swing.item]?.vid ?? -1);   // ★BJ300 heldVid 穿线
     this.mowGrassTile(mx, my);
     // 割点格非实心 → 再割其下一格（:20516-20518 SolidTile 门）
     const stx = Math.floor(mx / TILE), sty = Math.floor(my / TILE);
@@ -21195,7 +21246,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** CutTiles（Player.ItemCheck_CutTiles :44002 调用链 Projectile.CutTiles 语义）
    *  矩形版：tileCut 表 + bonusCutTiles{233}（cutExtraTiles:true 支——金网同款）
    *  + GetTileCutIgnoreList（4049 无 Regrowth 支,唯 dontHurtNature 配饰 Nature 表） */
-  private mowCutTiles(rx: number, ry: number, rw: number, rh: number): void {
+  private mowCutTiles(rx: number, ry: number, rw: number, rh: number, heldVid = -1): void {
+    // ★BJ300 heldVid = 挥动中物品 vid（原版 MowTheLawn :20494 传 HeldItem——
+    //  ItemCheck_CutTiles 的 Sickle 支因此对割草机路径同效;无挥动/异形调用=−1 恒不掷）
     const st = this.world.store;
     // GetTileCutIgnorance（Player.cs:45003-45014）：nature 表仅在 dontHurtNature
     // （配饰 5309/5323）时生效——曾恒常忽略=无配饰推割草机过丛林植物/蜂巢/TNT 桶
@@ -21226,9 +21279,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           && !(natureGuard && CUT_IGNORE_NATURE.has(t))) {
           this.swingTileCutSet.add(tk);
           this.breakTile(tx, ty);
+          this.sickleHayDropIfSickle(heldVid, t, tx, ty);   // ★BJ300（MowTheLawn :20494 传 HeldItem 面）
         }
       }
     }
+  }
+
+  /** ★BJ300（2026-09-23）镰刀干草链（Player.cs:45033-45062 直译）——ItemCheck_CutTiles
+   *  循环体 `if (sItem.type == 1786)` 支的掉落面。调用位=vanilla 该函数全部两处
+   *  消费者：近战挥割循环（:44018 支镜像,updateSwingHits 内）+ mowCutTiles
+   *  （MowTheLawn :20494 传 HeldItem——持镰刀割草/骑乘割草同掷）。原序门链：
+   *  KillTile 成功（!tile.active(),:45037——被保护门吞=零掷零耗骰）→ 捕获型
+   *  （破坏前 type,sheet 换算）switch 掷 stack → num>0 才 RequestNewItem。
+   *  出生点 = 格中心（Point.ToWorldCoordinates ≙ 全仓 tile 掉落 x*TILE+8 惯例,
+   *  killTileDropItems 同款）；速度 (0,-2) = spawnDrop 家族缺省（原版 RequestNewItem
+   *  velocity=null → NewItem 随机初速掷 Item.cs:49743-49752,全仓掉落族统一简化面,
+   *  种子/蘑菇掉落同相,不在此单点展开）。弹域 CutTiles（Projectile.CutTilesAt）
+   *  无此支（1727 全反编译仅 Player:45062/WorldGen:64914 干草块格掉落/Recipe 三锚）
+   *  =原版本相,勿扩散 ProjCutTiles。 */
+  private sickleHayDropIfSickle(heldVid: number, tileTypeInternal: number, x: number, y: number): void {
+    if (heldVid !== 1786) return;                    // Sickle（ItemID.cs:5118）
+    if (this.world.store.hasTile(x, y)) return;      // !tile.active()（:45037）
+    const sheet = TILE_DEFS[tileTypeInternal]?.vanilla?.sheet;
+    if (sheet === undefined) return;
+    const num = sickleHayStackForSheet(sheet);       // 表外型零掷（原版 switch 同相）
+    if (num <= 0) return;
+    const key = VANILLA_ITEM_KEY_BY_ID[1727];        // Hay（ItemID.cs:5000）;禁手拼 vi_ 键
+    if (!key) return;
+    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, num, 0, -2);
   }
 
   /** Player.CollideWithNPCs（Player.cs:20536-20577,SW-L1 2026-09-03 F12 注释对码）
@@ -26477,6 +26555,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  ——原版 :32414 if(flag) 面）；rightDown 不消费=交谈臂尾随放行
       this.interactAt(tx, ty);
     }
+    // ---- ★BJ297：±2 邻域"盲瞄轨道"右键（TryInteractingWithMinecartTrackInNearbyArea
+    //  Player.cs:32213-32250,由 LookForTileInteractions :32210 在光标 tile 全臂之后
+    //  调用——本仓同位插在 interactAt 链后/交谈臂前）。光标格非轨道但 ±2 内有轨道
+    //  （x 外层/y 内层升序,首个命中即止 :32220-32248）→ 对候选跑 314 分支同语义
+    //  （minecartTrackInteraction 单源:骑矿车=下车/未骑=上车）。
+    //  门链（:32215 逐项）：!tileInteractionHappened（光标臂已命中即跳过;本仓旗代理
+    //  =旗未置 ∧ rightDown 未被前臂消费）∧ 无智能交互目标（SmartInteractShowingGenuine
+    //  =smartInteractTileFrame.tileWon 镜像(:35097 ⟺TileInteractionLX..HY 有效);
+    //  SmartInteractNPC==-1;SmartInteractProj 本仓无弹体提供者恒 -1 登记不可达）
+    //  ∧ InWorld(cursor,10) ∧ gravDir==1f。botherWithUnaimedMinecartTracks 私有
+    //  字段恒 true（:3133 声明外全仓零写=死字段,门恒过）。逐候选
+    //  IsInTileInteractionRange(:32224)=inTileRange。tileInteractAttempted=false
+    //  语境（交谈闩等）原版 TileInteractionsCheck 内 flag 门拦截净效果=无操作,
+    //  bubbleLatch 时不进本扫描同相。悬停图标 2343 面（:32235-32240 MouseOver 域,
+    //  无 Use 语义）本刀不建模登记。
+    if (this.input.rightDown && !this.tileInteractHappened && !bubbleLatch
+      && this.player.gravDir === 1 && this.smartInteractNpcId === -1
+      && !smartInteractTileFrame.tileWon
+      && tx >= 10 && ty >= 10 && tx < this.world.store.w - 10 && ty < this.world.store.h - 10) {
+      const stN = this.world.store;
+      scan:
+      for (let ix = tx - 2; ix <= tx + 2; ix++) {
+        for (let iy = ty - 2; iy <= ty + 2; iy++) {
+          if (this.trackTile === 0 || !stN.inBounds(ix, iy) || !stN.hasTile(ix, iy)
+            || stN.get(ix, iy) !== this.trackTile || !this.inTileRange(ix, iy)) continue;
+          this.minecartTrackInteraction(ix, iy);
+          this.input.rightDown = false;   // flag2 分支入口置旗面（:33526→:33551）
+          break scan;
+        }
+      }
+    }
     // ---- NPC 交谈（★SW-BJ25 2026-09-07 移位：格交互先行，旗/边沿门见方法头注）----
     // ★BJ250：`!this.tileInteractHappened` = 原版交谈臂 `!tileInteractionHappened`
     //  面（Main.cs:43807）——雪球发射器 212 不吞 rightDown,由该旗同拍压制交谈
@@ -26518,7 +26627,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       || type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
       || type === TILE_BY_KEY['v_356_enchanted_sundial'] || type === TILE_BY_KEY['v_663_enchanted_moondial'] // 日晷/月晷右键改世界时间态
       || FURNITURE_TILE_KIND.has(type) // 挂物族右键会改存放物（世界状态）
-      || sh === 35 || sh === 139 || sh === 207 || sh === 410 || sh === 480 || sh === 509 || sh === 455
+      || sh === 139 || sh === 207 || sh === 410 || sh === 480 || sh === 509 || sh === 455
       || sh === 425
       // ★BJ250 右键长尾批新臂（改方块/发弹/拆取面,与上方同辖）：
       || sh === 4 // 火把右键即拾取（KillTile）
@@ -27041,12 +27150,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.breakTile(tx, ty);
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
-      || type === TILE_BY_KEY['v_411_detonator']) {
+      || (type === TILE_BY_KEY['v_411_detonator'] && st.frameX[st.idx(tx, ty)] < 36)) {
       // 拉杆/开关/计时器：HitSwitch（Wiring.cs:163-252 1:1）——帧翻转 + tripWire
       // 四色信号 BFS（hitWire :693-827，沿导线网络传播），沿线全部器件真实触发；
       // 非"直线可见"近似（旧注释已过期，电路系统全量移植后语义为导线连通）
-      // 起爆器 411：原版为"对准使用任意物品"触发（Player.cs:31865）+ 坠落触发（:34368，
-      // 已接 Game.fixedUpdate landImpactVy）——本作并入右键交互
+      // 起爆器 411（★BJ297 勘误+补门）：右键臂 = TileInteractionsUse :32581-32586
+      // `type == 411 && frameX < 36`（旧注"对准使用任意物品触发:31865"系 1456 行号
+      // +机制误记——31865 即 1456 同一右键分支,非任意物品触发）；frameX≥36（按下态,
+      // HitSwitch 翻帧 +36/-36）时右键整支不进=压住连点不重复触发,60t CheckMech
+      // 回弹拍前再点无效果。坠落触发 = TryLandingOnDetonator :35088-35100
+      // （velY≥3 + 脚格 frameY==0 + frameX<36,已接 Game.fixedUpdate landImpactVy）
       this.toggleSwitch(tx, ty, type);
     } else if (type === TILE_BY_KEY['v_83_herbs_mature'] || type === TILE_BY_KEY['v_84_herbs_bloom']) {
       // 药草定向采收（PlaceThing :40611-40637 链 1:1；本右键入口是对原版"砍取"
@@ -27092,8 +27205,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.sfx.play('chop', 1, tx * TILE + 8, ty * TILE + 8);
       this.input.rightDown = false;
-    } else if (sh === 35 || sh === 139) {
-      // 八音盒/南瓜灯右键（Player.cs:31759-31764）：SoundID 28 + SwitchMB（与电路共用）
+    } else if (sh === 139) {
+      // 八音盒右键（★BJ297 收窄 1:1：TileInteractionsUse :32473-32478 仅 `type == 139`
+      //  ——南瓜灯 35 右键翻面系 1.3 世代语义,1.4 三基准（1457 :32473/1456 :31757/
+      //  1405 :20469）分支均只认 139,35 仅导线路径 devices case 35（Wiring.cs:2019
+      //  →SwitchMB :51405 内部兼容 35/139）可翻,右键翻面=越权支摘除）。
+      //  SoundID 28 + SwitchMB（与电路共用）
       this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
       this.wiring && switchMB(this.wiring, tx, ty);
       this.input.rightDown = false;
@@ -32527,6 +32644,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             && !(shouldIgnore?.has(t))) {
             this.swingTileCutSet.add(tk);
             this.breakTile(tx, ty);
+            this.sickleHayDropIfSickle(swingVid, t, tx, ty);   // ★BJ300 镰刀干草（Player.cs:45033-45062;表外型零掷）
           }
         }
       }
@@ -47983,8 +48101,32 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
           }
           return null;
         }
+        // 撒旦军队分支（CheckInvasionProgressDisplay :47037-47039：snowMoon/pumpkinMoon
+        // 之后、常规入侵之前 DD2Event.Ongoing → ReportEventProgress DD2Event.cs:182-187
+        // = GetInvasionStatus :517-536（T3 第7波=Betsy 血量比即进度 :1503-1513）；icon 3 =
+        // Extra[79] + DungeonDefenders2.InvasionProgressTitle（撒旦军队）:48532-48535。
+        // 显示门同款 ±5000px 有 -3 组 NPC（547/548/549/551-578，NPC.GetNPCInvasionGroup
+        // NPC.cs:79190-79228——水晶 548/传送门 549 恒在场 ⇒ 玩家近竞技场即显）。
+        // required=0（哨兵波 wave=-1，实际不可达防险）→ Game.InvasionPoints+满格，同月事件 wave20 支）
+        if (w.oldOnesArmy.ongoing) {
+          const s = dd2InvasionStatus(w.oldOnesArmy, this.betsyLifeRatio());
+          for (const e of this.entities.enemies) {
+            const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
+            if (en.vanillaId != null && DD2_EVENT_GROUP[en.vanillaId] === -3
+              && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) {
+              const pct = s.required > 0 ? Math.min(1, s.kills / s.required) : 1;
+              const label = s.required > 0 ? undefined : Lang.text('Game.WaveMessage',
+                s.wave, Lang.text('Game.InvasionPoints', s.kills));
+              return { name: Lang.text('DungeonDefenders2.InvasionProgressTitle'), pct, label };
+            }
+          }
+          return null;
+        }
         if (w.invasionType <= 0 || w.invasionSizeStart <= 0) return null;
-        const nameKey = w.invasionType === INVASION_PIRATE ? 86 : w.invasionType === INVASION_SNOW_LEGION ? 87 : 88;
+        // 文案=DrawInvasionProgress :48536-48551 icon→inter 表（icon=invasionType+3）：
+        // 1 哥布林→88 / 2 雪人军团→87 / 3 海盗→86 / 4 火星暴乱→85。
+        // ★BJ301 定谳：旧三元 else 兜底把火星(4)一并吞进 88（用户实报=火星暴乱显「哥布林军队 0%」）
+        const nameKey = invasionBarNameKey(w.invasionType);
         for (const e of this.entities.enemies) {
           const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
           if (en.vanillaId != null && INVASION_GROUP[en.vanillaId] === w.invasionType

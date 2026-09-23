@@ -27,9 +27,24 @@
 //   ④ createTile 权威 = public/sprites/vanilla.json（游戏数据转储，与 TEdit 对账过）
 //   ⑤ tileFrameImportant = Main.cs 全量赋值（404 处 = true + 435-439 循环，无 = false）
 // 用法：node tools/extract-journey-browser.mjs（在 game/ 下运行）
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+//
+// ★BJ298 2026-09-23 era guard 补缺省干跑臂（docs/era-guard-family.md 四之二续批排期③
+//   【降级面】——原缺省直写现库,仅 SW_FX53_OUT 试产重定向;BJ261 登记"补缺省干跑臂即可"）：
+//   · 缺省（无 env 无旗）= 干跑对拍零写盘（重产 vs 现库双向路径级 diff——fresh-only/
+//     drift 非空 exit 1+物证（现库退化/值漂移）;live-only=【选报】轴 loud 打印不拒跑
+//     ——本器现库领先面含手补可能,人工判别,shops 刻意剥离面同款家族变体）;
+//   · SW_FX53_OUT=<dir> = 沙箱写（SW-FX53 原通道,保留）;--write-real = 真库逃生门（新增;
+//     与 SW_FX53_OUT 双旗互斥;★本器锚 1457 固定,非 1457 禁写规则天然满足）;
+//   · 锚 fail-loud/基数护栏：沿用既有 stats 出口（提取器健康度目检）。
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const WRITE_REAL = process.argv.includes('--write-real');
+const SW_FX53_OUT = process.env.SW_FX53_OUT;
+if (SW_FX53_OUT && WRITE_REAL) {
+  console.error('[extract-journey-browser] 拒绝运行：SW_FX53_OUT 与 --write-real 双旗互斥（输出通道必须唯一）。');
+  process.exit(1);
+}
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
 const itemSrc = read('Terarria1457/Terraria/Item.cs');
 const mainSrc = read('Terarria1457/Terraria/Main.cs');
@@ -405,11 +420,17 @@ const doc = {
   tileFrameImportant: [...frameImportant].sort((a, b) => a - b),
 };
 // SW-FX53 2026-09-13: SW_FX53_OUT=<dir> 试产重定向（禁真写纪律,与 equip 提取器同约定）
-const JC_OUT = process.env.SW_FX53_OUT
-  ? `${process.env.SW_FX53_OUT}/vanilla-journeycat.json`
-  : `${ROOT}/game/src/data/vanilla-journeycat.json`;
-if (process.env.SW_FX53_OUT) mkdirSync(process.env.SW_FX53_OUT, { recursive: true });
-writeFileSync(JC_OUT, JSON.stringify(doc));
+// ★BJ298 缺省干跑臂：无 env 无旗 = 零写盘,改走文末对拍闸
+const JC_LIVE = `${ROOT}/game/src/data/vanilla-journeycat.json`;
+const JC_OUT = WRITE_REAL
+  ? JC_LIVE
+  : (SW_FX53_OUT ? `${SW_FX53_OUT.replace(/\/+$/, '')}/vanilla-journeycat.json` : null);
+const freshDoc = JSON.stringify(doc);
+if (JC_OUT) {
+  if (SW_FX53_OUT) mkdirSync(SW_FX53_OUT, { recursive: true });
+  writeFileSync(JC_OUT, freshDoc);
+  console.error(`[extract-journey-browser] 已写 ${JC_OUT}（${WRITE_REAL ? '--write-real 真库' : 'SW_FX53_OUT 沙箱'}）`);
+}
 
 // ---- 统计出口（提取器健康度目检）----
 const stats = { vanity: VANITY.size, tileWand: TILE_WAND.size, makeNPC: MAKE_NPC.size,
@@ -417,3 +438,49 @@ const stats = { vanity: VANITY.size, tileWand: TILE_WAND.size, makeNPC: MAKE_NPC
   material: material.size, frameImportant: frameImportant.size,
   entries: Object.keys(out).length };
 console.error(JSON.stringify(stats));
+
+// ---- ★BJ298 缺省干跑对拍闸（banners 同构 deepWash;live-only=选报轴）----
+function deepWash(live, fresh, prefix = '') {
+  const w = { liveOnly: [], freshOnly: [], drift: [] };
+  const base = prefix || '<root>';
+  if (live === null || fresh === null || typeof live !== 'object' || typeof fresh !== 'object') {
+    if (JSON.stringify(live) !== JSON.stringify(fresh)) w.drift.push(`${base}: ${JSON.stringify(live)}→${JSON.stringify(fresh)}`);
+    return w;
+  }
+  if (Array.isArray(live) !== Array.isArray(fresh)) {
+    w.drift.push(`${base}: 类型漂移 ${Array.isArray(live) ? 'arr' : 'obj'}↔${Array.isArray(fresh) ? 'arr' : 'obj'}`);
+    return w;
+  }
+  const lk = new Set(Object.keys(live));
+  const fk = new Set(Object.keys(fresh));
+  for (const k of Object.keys(live)) {
+    const p = `${prefix}.${k}`;
+    if (!fk.has(k)) { w.liveOnly.push(p); continue; }
+    const sub = deepWash(live[k], fresh[k], p);
+    w.liveOnly.push(...sub.liveOnly); w.freshOnly.push(...sub.freshOnly); w.drift.push(...sub.drift);
+  }
+  for (const k of Object.keys(fresh)) if (!lk.has(k)) w.freshOnly.push(`${prefix}.${k}`);
+  return w;
+}
+const washEmpty = (v) => !v.liveOnly.length && !v.freshOnly.length && !v.drift.length;
+if (!JC_OUT) {
+  let live = null;
+  if (existsSync(JC_LIVE)) { try { live = JSON.parse(readFileSync(JC_LIVE, 'utf8')); } catch { /* 坏损:不拦 */ } }
+  if (live === null) {
+    console.error('[extract-journey-browser] 干跑（零写盘）：现库缺 vanilla-journeycat.json,跳过对拍。写盘须显式 SW_FX53_OUT=<dir> 或 --write-real。');
+  } else {
+    const wash = deepWash(live, JSON.parse(freshDoc));
+    if (wash.freshOnly.length || wash.drift.length) {
+      console.error('[extract-journey-browser] 干跑对拍：fresh-only/drift 非空（现库退化缺键型/值漂移）——零写盘,exit 1。');
+      if (wash.freshOnly.length) console.error(`  [fresh-only] 重产独有 ${wash.freshOnly.length}: ${wash.freshOnly.slice(0, 6).join(', ')}`);
+      if (wash.drift.length) console.error(`  [drift] 值漂移 ${wash.drift.length}: ${wash.drift.slice(0, 6).join(' | ')}`);
+      process.exit(1);
+    }
+    if (wash.liveOnly.length) {
+      // live-only=选报轴（现库领先面,人工判别;shops 刻意剥离面同款家族变体）
+      console.error(`[extract-journey-browser] 干跑对拍：live-only ${wash.liveOnly.length} 处（现库领先=手补面,选报不拒跑）: ${wash.liveOnly.slice(0, 6).join(', ')}`);
+    } else {
+      console.error('[extract-journey-browser] 干跑对拍：重产盖住现库（双向零差,零写盘）。写盘须显式 SW_FX53_OUT=<dir> 或 --write-real。');
+    }
+  }
+}

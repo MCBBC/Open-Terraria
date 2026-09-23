@@ -213,6 +213,19 @@ export function invasionStatus(
   return { wave, required, kills, victoryScene };
 }
 
+/**
+ * DD2 组号表（NPC.GetNPCInvasionGroup 的 -3 支,NPC.cs:79190-79228：
+ * 547/548/549/551-578 → -3;550 不在原版 case 表,故不含）。
+ * 事件进度条显示门消费（Game 侧 ±5000px 内须有 -3 组 NPC,Main.CheckInvasionProgressDisplay
+ * :48398-48413 的 `(num2 != -3 || DD2Event.Ongoing)` 支）。
+ */
+export const DD2_EVENT_GROUP: Record<number, number> = (() => {
+  const g: Record<number, number> = {};
+  for (const id of [547, 548, 549]) g[id] = -3;
+  for (let id = 551; id <= 578; id++) g[id] = -3;
+  return g;
+})();
+
 // ---------------------------------------------------------------------------
 // 击杀分值（GetMonsterPointsWorth）
 // ---------------------------------------------------------------------------

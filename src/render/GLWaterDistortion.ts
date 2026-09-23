@@ -88,7 +88,7 @@ export class GLWaterDistortion {
   /** GL 永不可用(WebGL 缺失/shader 失败/软件渲染)——调用方直接原样直画不再重建 */
   unavailable = false;
 
-  private static VERT = `
+  static VERT = `
 attribute vec2 aPos;
 varying vec2 vUv;
 void main() {

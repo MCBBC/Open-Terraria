@@ -6488,9 +6488,10 @@ export class Enemy extends Entity {
     return true;
   }
 
-  /** TransformVisuals（NPC.cs:81739-81771——Transform 尾部 :81902 对所有转化统一
+  /** TransformVisuals（NPC.cs 1456:81739-81771 / 1457:81788-81820——Transform 尾部
+   *  1456:81902 / 1457:81961 对所有转化统一
    *  调用,按 (oldType,newType) 对分发）。当前移植对仅 158⇄159（吸血蝙蝠⇄吸血鬼,
-   *  :81742-81749）：Item_8 + 3 个 gore 99（三锚点 y−10 / y+h/2−10 / y+h−10、
+   *  1456:81742-81749 / 1457:81791-81798）：Item_8 + 3 个 gore 99（三锚点 y−10 / y+h/2−10 / y+h−10、
    *  初速 ×0.3——GorePiece 血块收缩族含 99）。478→479（dust 238+gore 684-686）/
    *  406→405 等其余对无音效号,粒子侧未移植维持现状。 */
   private transformVisuals(game: GameHooks | undefined, oldType: number | null, newType: number): void {
@@ -13275,9 +13276,9 @@ export class Enemy extends Entity {
             // 段二满 100t → P2（:20312-20315）：ai[2] 清零收住残余自旋
             this.spinSpeed = 0;
           } else {
-            // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 5 ×20 + Roar(15)
+            // 段一满 100t（1456:20316-20330 / 1457:20417-20431）：NPCHit(3) + gore 8/7/6 ×2 + 尘 5 ×20 + Roar(15)
             game.playSfxFiles?.(['NPC_Hit_1'], 1, this.cx, this.cy);
-            game.playSfx('roar', 1, this.cx, this.cy);   // :20329 style0(带坐标衰减,曾缺坐标)
+            game.playSfx('roar', 1, this.cx, this.cy);   // 1456:20329/1457:20430 style0(带坐标衰减,曾缺坐标)
             // gore 8/7/6 ×2（1456:20321-20326 / 1457:20421-20424）：眼肉红条飞散(Gore_6/7/8),速度 ±6px/t,
             // GorePiece.newGore 内叠 NewGore 随机扰动——★曾是 '#8A1A1A' 色块近似,
             // 二阶段变身后的红色触须飞散观感全靠它们(2026-09-01 用户对照原版视频)
@@ -14176,7 +14177,7 @@ export class Enemy extends Entity {
     if (this.hp > 0) spawnNpcHitDust(this, game, Math.sign(kbx) || 1, dmg);
     // WoF 家族受击尘（HitEffect life>0 段）：血肉墙 113/114 = 20 簇 5 号血尘、
     // 115/116 = 5 簇（1457 :88353-88355/:88405-88408）。★本族死亡面有 netMode 权威
-    // 门+StrikeNPC 扇出派发（:82313-82328）与 gore 跳过纠缠,首批不入尘表——手块保留,
+    // 门+StrikeNPC 扇出派发（1457:82313-82328 / 1456:82240-82255）与 gore 跳过纠缠,首批不入尘表——手块保留,
     // 待后续批次 gates 支持后转表（extract-npcdust _meta.pending 有登记）。
     const wofVid = this.vanillaId;
     if ((wofVid === 113 || wofVid === 114 || wofVid === 115 || wofVid === 116) && this.hp > 0) {
@@ -14526,7 +14527,7 @@ export class Enemy extends Entity {
       // Bottom 锚落在父体下半带内（与 Slimer 的父底锚不同源,勿并轨）;速度=
       // (Next(−10,10)×0.2, −3.5−Next(5,10)×0.3−k×0.5)（:87987/:87991 vector28 逐只重掷）;
       // netUpdate=true=原版联机同步位（房主权威已由 netPuppet 门承载）。gore 1214-1216
-      // +受击面 gore 1217(:87928 Next(5)==0)走 gore 表。
+      // +受击面 gore 1217（1457:87929-87931 / 1456:87857-87859 Next(5)==0）走 gore 表。
       if (this.vanillaId === 632 && !this.netPuppet) {
         const n632 = 2 + Math.floor(Math.random() * 2);
         for (let k = 0; k < n632; k++) {
@@ -14861,7 +14862,7 @@ export class Enemy extends Entity {
       // 死亡声 = 本体 DeathSound（NPC.Strike :48316 全 NPC 同链，Boss 亦然——
       // 血肉墙 NPCDeath10 / 机械族 NPCDeath14 / 克脑 NPCDeath11 / 猪鲨 NPCDeath20 /
       // 光皇 65 / 史后 64 / 异教徒 59 / 月总头手 62 / Betsy DD2 / 鹿角怪专属）。
-      // HitEffect 里唯一额外 Boss 咆哮 = EoC（NPC.cs:88205-88210：gore 循环体内
+      // HitEffect 里唯一额外 Boss 咆哮 = EoC（NPC.cs 1456:88205-88210 / 1457:88277-88282：gore 循环体内
       // PlaySound(15)，×2 次迭代 → 连播两声）；月总核心 398 DeathSound=null 无声。
       // （旧"Boss 一律咆哮吞掉 DeathSound"2026-08-14 对账修正）
       if (this.vanillaId === 4) {
@@ -14924,7 +14925,8 @@ export class Enemy extends Entity {
         const hdWofD = Math.sign(kbx) || 1;
         for (let k = 0; k < 20; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdWofD, -1);
       }
-      // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →
+      // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs 1456:82421-90873 /
+      // 1457:82492-90939 →
       // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece
       // （位置/速度/ai 门/gates 守卫/post 后处理 1:1，Gore.NewGore 随机扰动在
       // GorePiece.newGore 内）。spriteDirection = 本仓 facing（同符号约定，表内

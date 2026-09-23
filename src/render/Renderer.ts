@@ -257,6 +257,7 @@ import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawMimicAfterimages, drawNpcTrailGhosts, drawNpcTrailGhostsOverBody,
   drawNpcAuraRings, NPC_AURA_RING_IDS, NPC_TRAIL_GHOST_IDS } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
+import { GLWorldCompose } from './GLWorldCompose';   // ★A2 光照×扭曲 FBO 链(?wfbo=1 激活,失败落回旧链)
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
 /** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制。
@@ -2792,6 +2793,8 @@ export class Renderer {
   // ---- ★B0 census 仪具面（?b0shadow=1;缺省 null=渲染路径零触碰）----
   private _b0shim: GLShimCensus | null = null;
   private _b0Wrap: CanvasRenderingContext2D | null = null;
+  /** ★A2 光照×扭曲 FBO 链（?wfbo=1 惰性建;unavailable/失败自动落回旧 GL 链） */
+  private worldCompose: GLWorldCompose | null = null;
   /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
   waterWarpMode(): 'auto' | '2d' | 'off' { return this.waterWarp.mode; }
   waterWarpActive(): boolean { return this.waterWarp.active(); }
@@ -5130,6 +5133,13 @@ export class Renderer {
   })();
   /** ?b0shadow=1：B0 世界层 API 谱普查（glshim/GLShimCensus,渲染改造方案 §三 B0
    *  一段仪具;快照面=renderer.b0ShimSnapshot()/_b0shadow-audit.mjs 探针） */
+  /** ?wfbo=1：A2 光照×扭曲 FBO 链（GLWorldCompose 单上下文两级 pass——scene 免重传+
+   *  单回贴;渲染改造方案 §三 A2）。首版默认关,四场景像素对拍过翻缺省+逃生门改 wfbo=0。 */
+  static readonly wfbo = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('wfbo') === '1';
+    } catch { return false; }
+  })();
   static readonly b0Shadow = (() => {
     try {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).has('b0shadow');
@@ -16217,10 +16227,16 @@ export class Renderer {
     }
     this._glPrewarmed = true;
     const t0 = performance.now();
-    try { this.worldLightLayer(); } catch { /* 工厂内部已退避 */ }
+    // ★A2：wfbo=1 时预热新管线（旧 worldLight 不预热=C1 画布零创建;A2 失败回退时
+    //   旧链工厂自建,5s 退避语义不变）
+    if (Renderer.wfbo) {
+      try { (this.worldCompose ??= new GLWorldCompose()); } catch { /* 构造内 unavailable 自愈 */ }
+    } else {
+      try { this.worldLightLayer(); } catch { /* 工厂内部已退避 */ }
+    }
     try { this.screenFxLayer(); } catch { /* 同上 */ }
     try { this.acquireGL(); } catch { /* glfx/bg 层 */ }
-    try { this.waterWarp.prewarm(); } catch { /* 扭曲层 */ }
+    if (!Renderer.wfbo) { try { this.waterWarp.prewarm(); } catch { /* 扭曲层(新链并入 worldCompose,独立层不建) */ } }
     // ★极光 GL(#perf2026-08-28 trace 定罪):AuroraSky 字段初始化式 new GLAurora()
     // 曾在构造链上同步引爆 getContext+着色器编译 ~790ms=进图风暴主犯;改惰性访问器
     // 后由此显式预热进加载页窗口
@@ -16871,7 +16887,9 @@ export class Renderer {
       //  原版 `== 1f` 二值开关（MoveTowards 必达 1）；粒度逐像素平滑 vs 原版逐格
       //  16px——登记渲染粒度债（与本层双线性光照架构一致）
       const darkSkip = this.monoFilters.shimmerAlpha >= 1 ? 1 : 0;
-      const gl = this.worldLightLayer();
+      // ★A2（2026-09-23）：旧链 worldLight 实例获取移入下方旧链分支——wfbo=1 且
+      //   A2 成功时不触达 = 旧 C1 画布不创建（IOSurface 净-1;原在此无条件获取=
+      //   新链下白挂 1 张离屏画布）
       // 低清档(#perf-gpulog):world 纹理已 K 缩,lightRect 同比缩(world-layer 像素系)
       const k = this._worldLowK;
       // ★光矩形设备取整（2026-09-01 全宽发丝缝定案）：旧 [sx*k, sy*k, lw*k, lh*k]
@@ -16917,6 +16935,35 @@ export class Renderer {
         bc.drawImage(this.lightCanvas, 0, dirtyY0, w2, bh, 0, 0, w2, bh);
         lightBand = { canvas: this._lightBandCanvas, y: dirtyY0, w: w2, h: bh };
       }
+      // ★A2 光照×扭曲 FBO 链（?wfbo=1）：GLPipeline 单上下文两级 pass——worldLight 输出
+      //   驻留 FBO,扭曲 pass 直采 FBO 纹理（旧链 scene 全帧重传+GL→2D→GL 乒乓消灭）,
+      //   present 单次回贴。失败/unavailable → 落回下方旧链（双路径并存,对拍期纪律）。
+      if (Renderer.wfbo && !this.isCpuRender()) {
+        this.worldCompose ??= new GLWorldCompose();
+        const wc = this.worldCompose;
+        // warp 激活判定与旧链 :16925 同源（同四门:帧态/软渲染/waveQuality/旱地探针）
+        const warpOn = !!(this._waveCss && waterWaves.quality > 0
+          && (!Renderer.dryWarpSkip || this._waveLiquidInView));
+        const st = this._waveCss;
+        // 无扭曲帧:pass2 直采回贴=恒等（空门控+intensity=0,dryskip 判决同源）;
+        // ★中性波场垫底防 uWaveSize=(0,0) 的 NaN 除法（gridW/H=1+0.5 中心值）
+        const ok = wc.compose(
+          this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand,
+          warpOn ? this.waterWarp.gateCanvas() : null,
+          warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
+          st ? st.cssW : this.worldCanvas!.width, st ? st.cssH : this.worldCanvas!.height,   // ★css 兜底=世界层尺寸（防 uCssSize 除零 NaN;无扭曲帧该值不参与可见项）
+          warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,
+          warpOn ? waterWaves.readGridR() : GLWorldCompose.neutralWave,
+          warpOn ? waterWaves.gridW() : 1, warpOn ? waterWaves.gridH() : 1,
+          st ? st.camL * st.cssZoom : 0, st ? st.camT * st.cssZoom : 0,
+          ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]),
+        );
+        if (ok) {
+          this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
+          return;
+        }
+      }
+      const gl = this.worldLightLayer();   // ★A2：仅旧链路径触达（实例获取后移,见上注）
       if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand)) {
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
         //   【带光照的完整合成场景】——水下整屏随噪声+波场晃动、水线果冻、旱地 0，

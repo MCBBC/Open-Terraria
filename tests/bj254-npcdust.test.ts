@@ -142,15 +142,17 @@ describe('BJ254 A. vanilla-npcdust.json 首批钉值', () => {
     expect(TABLE['4'].death).toEqual([{ dust: 5, n: 150, sx: '2hd', sy: -2, line: 88271 }]);
   });
 
-  it('★结构锁：_meta.noGenericTail 声明 + WoF 族 113-116/概率门族 415-419/光女 661 不在首批表', () => {
+  it('★结构锁：_meta.noGenericTail 声明 + WoF 族 113-116/probability 批3 组 415-419/光女 661 不在表', () => {
     expect(String(TABLE._meta.noGenericTail)).toContain('原版无通用尘尾');
     expect(String(TABLE._meta.source)).toContain('HitEffect');
+    // ★BJ296 批2 后：415-419 属 fadeIn postUnsupported 族（批3 BJ298 面）仍不入表；
+    //   661（NextVector2Circular post）不入表；113-116 WoF 手块保留。
     for (const vid of ['113', '114', '115', '116', '415', '416', '417', '418', '419', '661']) {
-      expect(TABLE[vid], `vid=${vid} 不应出现在首批表`).toBeUndefined();
+      expect(TABLE[vid], `vid=${vid} 不应出现在表`).toBeUndefined();
     }
-    // 首批规模（78 门组/299 型）
+    // 规模（批1 78 门组/299 型 + 批2 概率门族 15 型 = 314,BJ296）
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(299);
+    expect(ids.length).toBe(314);
   });
 });
 

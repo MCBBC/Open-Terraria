@@ -949,7 +949,7 @@ export class DukeSharknadoTornado extends Entity {
     //  → 段门恒闭零行为;插 tick 头与 AI/位移序无观察差（段内唯一可见面=溅花,豁免即恒无）
     projectileWetSection(this, game, game.world.store, this.x, this.y, this.w, this.h,
       this.big ? 386 : 384, !!projectileData(this.big ? 386 : 384)?.ignoreWater);
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) { this.killDust(game); this.dead = true; return; }
     this.age++;
     // alpha(:28336-28360):嵌实体块渐隐,否则向 60(大 100)显形
     const st = game.world.store;
@@ -1035,25 +1035,96 @@ export class DukeSharknadoTornado extends Entity {
     this.ai1 = ai1;
     this.ai0 = Number.isFinite(ai0) ? ai0 : 10;
     this.segs = this.ai1Start - ai1;
+    // 帧相位重建（BJ299）：age 仅贴图帧消费,由 (segs, ai0) 反解与房主同相——
+    // 根段 ai0=16−age;子段 ai0=10−(age−s_k),s_k=15+9(k−1)（sway 支无条件 −1,
+    // 与生长段同线性,负 ai0 亦成立）。segs=0 → age=16−ai0;segs≥1 →
+    // age=15+9(segs−1)+10−ai0。ai0 缺省 10（旧宿主无此参）=列顶初生拍近似。
+    this.age = this.segs === 0 ? 16 - this.ai0 : 15 + 9 * (this.segs - 1) + 10 - this.ai0;
     this.resize();
     this.x = snapX;                    // cx = snapX + w/2,resize 后 x = cx − w/2 = snapX
     this.topY = snapY + this.h / 2;    // 反解列顶（y = topY − h/2 的逆）
     this.y = snapY;
   }
 
+  /** 段中心链（BJ299）：cy[k] = 段 k 中心 y（k=0 基座 … k=segs 列顶=this.cy）。
+   *  生成公式反演（P.cs:29958-29968 子中心 = 父中心 − 42(sP+sC)/2 + 2）→ 往下
+   *  逐段 centerY_k = centerY_{k+1} + 42·(s_k + s_{k+1})/2 − 2（段间重叠 2px,
+   *  塔顶到基座累计 2·segs px——旧画法连续堆叠缺此重叠,整塔偏矮）。 */
+  private segCenterYs(): number[] {
+    const cy: number[] = new Array(this.segs + 1);
+    cy[this.segs] = this.cy;
+    for (let k = this.segs - 1; k >= 0; k--) {
+      const sTop = this.scaleOf(Math.max(0, this.ai1Start - k - 1));
+      const sCur = this.scaleOf(Math.max(0, this.ai1Start - k));
+      cy[k] = cy[k + 1] + (42 * (sTop + sCur)) / 2 - 2;
+    }
+    return cy;
+  }
+
+  /** Kill 尘（BJ299;P.cs:75381-75390）：20 × d212（vx = direction·2——direction
+   *  链定谳恒 1,见 draw 注;vy=0;α=100;scale=1.4;色 CornflowerBlue(100,149,237)
+   *  → lerp White 0.3 = (146,180,242);noGravity=true）。原版=各段弹幕随自身
+   *  timeLeft 底→顶逐段消散、各自盒 20 颗;本仓单实体整塔同拍亡 → 20 颗散布
+   *  整列盒（单实体近似,登记;基座段宽 < 列顶 → 盒宽取列顶最宽段）。 */
+  private killDust(game: GameHooks): void {
+    if (!game.spawnDust) return;
+    const cy = this.segCenterYs();
+    const s0 = this.scaleOf(Math.max(0, this.ai1Start));
+    const colTop = this.y;
+    const colH = Math.max(4, cy[0] + (42 * s0) / 2 - colTop);
+    for (let k = 0; k < 20; k++) {
+      game.spawnDust(this.x, colTop, this.w, colH, 212, 2, 0, 100,
+        { r: 146, g: 180, b: 242, a: 255 }, 1.4, true);
+    }
+  }
+
+  /** 绘制（BJ299 定谳刀,替换 2026-08-31"贴图未解包"占位柱——贴图早已在盘
+   *  Projectile_384/386.png 162×264×6 帧）：原版 384/386 每段=独立弹幕走专支
+   *  （Main.cs:32580-32589）——帧窗 H/projFrames=44px（projFrames 384/386=6,
+   *  Main.cs:8651/8653）、origin=帧中心、scale=段缩放、rotation=0（AI 不写）、
+   *  色=GetAlpha(projectileColor) 缺省尾 rgb×(255−α)/255（P.cs:81509 →
+   *  globalAlpha 系数,385 同仓口径）。翻转=1:1 无:通用 dir 仅 spriteDirection==−1
+   *  才 FlipHorizontally（Main.cs:30525-30529）,而龙卷 spriteDirection 恒 1——
+   *  direction 链:Entity.cs:20 缺省 1、NewProjectile 不写、385 aiStyle65 不写 →
+   *  小塔出生 vx=(−1)×0.01（P.cs:75191）经 AI :29903 `direction=(spriteDirection=
+   *  −Sign(vx))` 反号仍 1;大塔 vx=0（:75228）不进该支,SetDefaults :752 复位 1。
+   *  段账:段 k（0=基座）生成拍 s_k=15+9(k−1)（根段 ai0=16 :75191/:75228;子段
+   *  ai0=10 :29970,==1 时生成下段=9 拍/段）;帧每 3 拍进 1 mod 6（:29908-29916）→
+   *  frame_k = ⌊(age−s_k)/3⌋ mod 6。层序=DrawProjectiles index 升序（:22396 区）
+   *  → 基座先画、列顶后画。
+   *  ★登记债（AI 域既有近似,牵动命中盒/kind6 同步,非本批）:sway 逐段化（原版
+   *  每段 ai0≤0 后独立摆,amp=各段宽/5、386 ×2,:29926-29943;本仓整塔刚性、
+   *  仅生长完后以顶段相位摆）。 */
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.ctx;
     if (!ctx) return;
+    const id = this.big ? 386 : 384;
+    const img = projSprite(id);
     ctx.save();
-    ctx.globalAlpha = 1 - this.alpha / 255;
-    // 塔形:自基座向列顶逐段变宽(384 族贴图未解包,按段缩放画半透明白蓝柱)
-    let segY = this.cy + this.h / 2;
-    for (let i = this.segs; i >= 0; i--) {
-      const s = this.scaleOf(Math.max(0, this.ai1Start - i));
-      const sw = 150 * s, sh = 42 * s;
-      segY -= sh;
-      ctx.fillStyle = i % 2 ? '#9FD4F0' : '#7FB8E8';
-      ctx.fillRect(this.cx - sw / 2, segY, sw, sh);
+    if (img && img.width > 0) {
+      const fh = img.height / projFrameCount(id);        // 264/6=44（Main.cs:32582）
+      ctx.imageSmoothingEnabled = false;
+      // GetAlpha(rgb×(255−α)/255) 单系数口径（P.cs:81509;385 draw 同款）
+      ctx.globalAlpha = Math.max(0, Math.min(1, (255 - this.alpha) / 255));
+      const cy = this.segCenterYs();
+      for (let k = 0; k <= this.segs; k++) {             // 基座先画、列顶后画
+        const s = this.scaleOf(Math.max(0, this.ai1Start - k));
+        const s_k = k === 0 ? 0 : 15 + 9 * (k - 1);
+        const frame = Math.floor(Math.max(0, this.age - s_k) / 3) % 6;
+        const dw = img.width * s, dh = fh * s;
+        ctx.drawImage(img, 0, frame * fh, img.width, fh,
+          this.cx - dw / 2, cy[k] - dh / 2, dw, dh);     // origin=帧中心(:32588)
+      }
+    } else {
+      // 兜底(贴图懒加载未就绪;projSprite 失败带 10s TTL 自愈):占位柱降级保留
+      ctx.globalAlpha = 1 - this.alpha / 255;
+      const cy = this.segCenterYs();
+      for (let k = 0; k <= this.segs; k++) {
+        const s = this.scaleOf(Math.max(0, this.ai1Start - k));
+        const sh = 42 * s;
+        ctx.fillStyle = k % 2 ? '#9FD4F0' : '#7FB8E8';
+        ctx.fillRect(this.cx - (150 * s) / 2, cy[k] - sh / 2, 150 * s, sh);
+      }
     }
     ctx.restore();
   }

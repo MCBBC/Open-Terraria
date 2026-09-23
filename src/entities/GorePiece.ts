@@ -1,6 +1,9 @@
 // Gore 死亡碎块（Terraria/Gore.cs 1:1）+ NPC.HitEffect 死亡 gore 全表驱动。
 //   数据：src/data/vanilla-gore.json（tools/extract-gore.mjs 从 NPC.cs HitEffect
-//         :82421-:90873 提取；表结构/字段语义见其 _meta.notes）
+//         1456:82421-90873 / 1457:82492-90939 提取；表结构/字段语义见其 _meta.notes）
+//   行号基准（BJ298 2026-09-23 亲核）：Gore.cs/GoreID.cs/ChildSafety.cs 三版
+//   （1456/1457/1458）逐字节全等（md5 3f7708af/a8018139/2b671c07）→ 本文 Gore.cs/
+//   GoreID.cs 行号三版通用；NPC.cs/Main.cs/Utils.cs 两版漂移 → 1456/1457 双标。
 //   物理：Gore.Update（Gore.cs:313-1102）——本表能产出的家族全实现：
 //     · 默认粘滞碎块：重力 0.2 + rotation += vx*0.05（:762-763）→ 碰撞盒
 //       min(w,h)*0.9*scale（:1000-1014）→ 落地 vx*=0.97（:1015-1029）→
@@ -24,7 +27,8 @@
 //   出生：Gore.NewGore（:1306-1482）——vy -= rand(10,31)*0.1 / vx += rand(-20,21)*0.1
 //   随机扰动（:1347-1348）、ChildSafety 替换（:1339-1345）、粘滞/时档（:1361-1374）、
 //   600 槽池（:1328-1340）。
-//   屏幕坐标档（screenGrid）：肉山死亡屏幕级尘幕（NPC.cs:88307-88327）——位置依赖
+//   屏幕坐标档（screenGrid）：肉山死亡屏幕级尘幕（NPC.cs 1456:88307-88327 /
+//   1457:88379-88399）——位置依赖
 //   Main.screenPosition（相机态），提取器编译为结构化网格域，运行时以
 //   setGoreScreen 注入的相机快照求值（玩家深度门 playerDeepHell 同源）。
 //   落叶(SpecialAI 3)/滴水族不出自 HitEffect，由 render/NatureParticles 独占。
@@ -129,7 +133,7 @@ export function goreNetModeValue(): number {
 
 /**
  * Main.screenPosition / screenWidth / screenHeight 相机快照——屏幕坐标档表项
- * （screenGrid，WoF 死亡屏幕级尘幕 NPC.cs:88307-88327）的唯一位置源。Game 每帧
+ * （screenGrid，WoF 死亡屏幕级尘幕 NPC.cs 1456:88307-88327 / 1457:88379-88399）的唯一位置源。Game 每帧
  * 相机定位后注入；未注入（菜单/纯逻辑测试）= null → 该档表项静默跳过。
  * 语义：x/y = 视区左上角世界坐标（Main.screenPosition），w/h = 画布像素尺寸
  * （Main.screenWidth/Height——原版以屏宽当日幕纵向跨度，怪癖在求值侧照搬）。
@@ -172,7 +176,7 @@ export type GorePostOp =
   | ['ro', number]
   | ['ps', Record<string, unknown>];
 
-/** 屏幕锚定网格尘幕域（WoF NPC.cs:88307-88327，提取器 compileScreenGrid 产物）：
+/** 屏幕锚定网格尘幕域（WoF NPC.cs 1456:88307-88327 / 1457:88379-88399，提取器 compileScreenGrid 产物）：
  *  外层 y 自 (int)Main.screenPosition.Y 起、步 yStep、跨度 ySpan（原版拿屏宽当
  *  纵向跨度的怪癖）；内层 x 自 (int)npc.position.X（direction>0 时 +dirShift）起、
  *  宽 xSpan、步 xStep。每格一枚 gore（id/速度逐格重采样）。 */
@@ -181,9 +185,9 @@ export interface GoreScreenGrid {
   ySpan: 'screenWidth';
   xSpan: number;
   xStep: number;
-  /** direction>0 时 x0 偏移（:88310-88313 -= 80） */
+  /** direction>0 时 x0 偏移（1456:88310-88313 / 1457:88382-88385 -= 80） */
   dirShift?: number;
-  /** 深度门（:88303）：玩家 tileY > maxTilesY − gateTiles 才出 */
+  /** 深度门（1456:88303 / 1457:88375）：玩家 tileY > maxTilesY − gateTiles 才出 */
   gate?: 'playerDeepHell';
   gateTiles?: number;
 }
@@ -257,7 +261,7 @@ export interface GoreNpcSource {
   hitDir?: number;
   /** NPC.altTexture（变体贴图槽，缺省 0） */
   altTexture?: number;
-  /** NPC.IsShimmerVariant（NPC.cs:6643：城镇 NPC 微光变体态，缺省 false） */
+  /** NPC.IsShimmerVariant（NPC.cs 1456:6643 / 1457:6737：城镇 NPC 微光变体态，缺省 false） */
   isShimmerVariant?: boolean;
   /** NPC.spriteDirection（缺省 1；本仓 Enemy.facing 同符号约定） */
   spriteDirection?: number;
@@ -290,7 +294,7 @@ const irand2 = (min: number, max: number) => min + Math.floor(Math.random() * (m
 const uniform = (m: number, a: number) => m + (Math.random() * 2 - 1) * a;
 /** 区间均匀取值 [lo, hi]（端点闭合近似） */
 const range01 = (r: readonly [number, number]) => r[0] + Math.random() * (r[1] - r[0]);
-/** Utils.NextVector2Circular（Utils.cs:1269）：单位向量 × (rx,ry) × u */
+/** Utils.NextVector2Circular（Utils.cs 1456:1269 / 1457:1301）：单位向量 × (rx,ry) × u */
 function disk(rx: number, ry: number): { x: number; y: number } {
   const a = Math.random() * Math.PI * 2;
   const u = Math.random();
@@ -626,7 +630,7 @@ export class GorePiece extends Entity {
     livePool.delete(this);
   }
 
-  /** Renderer 统一绘制（Main.DrawGore Main.cs:21712-21742：中心锚 + scale + rotation） */
+  /** Renderer 统一绘制（Main.DrawGore Main.cs 1456:21712-21745 / 1457:22079-22112：中心锚 + scale + rotation） */
   draw(): void { /* 见 Renderer.drawGorePieces */ }
 
   /** 多帧行数（1 = 整张贴图） */
@@ -729,7 +733,7 @@ const cmp = (a: number, op: string | undefined, b: number): boolean => {
   }
 };
 
-/** RedHatSkeletronAdjustmentsEnabled（NPC.cs:67282）：35/33 看 ai[3]、36/32 看 localAI[3] */
+/** RedHatSkeletronAdjustmentsEnabled（NPC.cs 1456:67282 / 1457:67435）：35/33 看 ai[3]、36/32 看 localAI[3] */
 function redHatOk(s: GoreNpcSource): boolean {
   const t = s.vanillaId;
   if (t === 35) return s.ai3 === 1;
@@ -795,7 +799,7 @@ function applyPost(g: GorePiece, e: GoreSpawnEntry, s: GoreNpcSource): void {
   (g as unknown as { resizeBox(): void }).resizeBox();
 }
 
-/** 屏幕锚定网格尘幕（NPC.cs:88307-88327 两层循环 1:1）：
+/** 屏幕锚定网格尘幕（NPC.cs 1456:88307-88327 / 1457:88379-88399 两层循环 1:1）：
  *  外层 y 自屏顶世界坐标起、步 yStep、纵向跨度 = 屏宽（原版怪癖）；内层 x 自
  *  npc 位（direction>0 时 +dirShift）起、宽 xSpan、步 xStep。逐格采样 id/速度。 */
 function spawnScreenGridGore(e: GoreSpawnEntry, s: GoreNpcSource,
@@ -804,13 +808,13 @@ function spawnScreenGridGore(e: GoreSpawnEntry, s: GoreNpcSource,
   if (!g) return 0;
   const scr = ctx?.screen ?? null;
   if (!scr) return 0;                          // 相机快照未注入（菜单/纯逻辑测试）→ 静默跳过
-  if (g.gate === 'playerDeepHell') {           // :88303 玩家深于 maxTilesY-250
+  if (g.gate === 'playerDeepHell') {           // 1456:88303/1457:88375 玩家深于 maxTilesY-250
     const pt = ctx?.playerTileY, mt = ctx?.maxTilesY;
     if (pt == null || mt == null || !(pt > mt - (g.gateTiles ?? 250))) return 0;
   }
-  let x0 = Math.trunc(s.x);                    // :88309 (int)position.X
-  if ((s.direction ?? s.spriteDirection ?? 1) > 0 && g.dirShift) x0 += g.dirShift;  // :88310-88313
-  const y0 = Math.trunc(scr.y);                // :88307 (int)Main.screenPosition.Y
+  let x0 = Math.trunc(s.x);                    // 1456:88309/1457:88381 (int)position.X
+  if ((s.direction ?? s.spriteDirection ?? 1) > 0 && g.dirShift) x0 += g.dirShift;  // 1456:88310-88313/1457:88382-88385
+  const y0 = Math.trunc(scr.y);                // 1456:88307/1457:88379 (int)Main.screenPosition.Y
   const ySpan = g.ySpan === 'screenWidth' ? scr.w : scr.h;
   const scale = e.scale ?? (e.scaleExpr === 'scale' ? s.vanillaScale : 1);
   let n = 0;

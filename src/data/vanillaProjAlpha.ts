@@ -47,7 +47,8 @@
  *  ①rgb>0 加算白/灰/彩色（未接线 off 项=登记残留,承接式见各条注）;②Color.Transparent=(0,0,0,0)
  *  真零（隐形结论本就成立,但不得再引 5 作先例）。数据面零改动,本批只勘误注释。
  *
- *  生成：解析 :75940 方法体全部分支（源码条件提及 307 个 id，首中即返序；default 7 id/死支 16 id 不进表），表 300 项。
+ *  生成：解析 GetAlpha 方法体全部分支（★BJ297 重锚 2026-09-23：1457 Projectile.cs:80595
+ *  起,旧注 :75940 系 1456 退役基准行号；口径/条数零变,表 300 项= bj228 census 锁）
  *
  *  ★登记债（BJ236,2026-09-21,只登记不落）：aiStyle==1 凤凰/炽天使 charm 分流全表普查
  *  ——:80605-80615 `if (aiStyle==1 && (PhoenixQuivered||SeraphNecklaced)) return
@@ -116,7 +117,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   102: { kind: 'fixed', rgba: [200,200,200,25], off: 1 },  // :76336 | (200,200,200,25) 恒（102 另 gate α<255，α=255 落缺省≈0 未建模）；SKIP: drawGlobalAlpha 94/95 同族 (200,200,200,25)→200/255 近加算先例（缺光晕/尘载体，25/255 直译近隐形）
   104: { kind: 'invisible', off: 1 },  // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
   114: { kind: 'fade', off: 1 },  // :76773 | gate localAI[1] ramp（同 116 族）——★BJ228 已接线（2026-09-21）:GA case 114 重写为 :81445 专属支模型（localAI[1] 梯×α/255,翻案 R7-6 反向曲线）,本 off 档转存档（★BJ228 事故补回：截断恢复快照缺本项,按会话首读快照重放）
-  115: { kind: 'fade', off: 1 },  // :76773 | gate localAI[1] ramp（同 116 族）——115 登记忽略；SKIP: 门控条件未建模（登记忽略）
+  115: { kind: 'fade', off: 1 },  // ★BJ297 重锚 2026-09-23（1457 :81444-81453,旧锚 :76773 系 1456 世代）| gate localAI[1]：<5→Transparent /5..15 灰梯 (l−5)/10 /≥15→(255,255,255,α)——与 114 同支（1457 `type == 114 || type == 115`）且与 116 族 :81264 公式同构;BJ228 已给 114 接 GA case 专模,115 尚无接线面（登记忽略维持）
   116: { kind: 'fade', off: 1 },  // :76593 | gate localAI[1]：<5→Transparent /5..15 线性 ramp /≥15→(255,255,255,α)——★BJ236 已接线（2026-09-21）:GA case 116/132/156/157/173 重写为 :81264 专属支模型（gem114Ramp 族梯×脉动 α,剑气 114 同配方;绘制段无 ×(1−Opacity) 乘区→≥15 段 ga=α/255 脉动直通）,AI 侧 subStepAI 剑气支建梯,本 off 档转存档
   130: { kind: 'fixed', rgba: [255,255,255,175] },  // :76714 | (255,255,255,175) 恒
   131: { kind: 'invisible', off: 1 },  // (255−α,255−α,255−α,0) A=0 加算白渐显——非隐形;已接线（★2026-09-01 审计批）:GA case 131 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter'（真值起步 α≡0=恒满强）;'5 小丑箭'先例已反转,勿按隐形登记
@@ -129,7 +130,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   173: { kind: 'fade', off: 1 },  // :76593 | gate localAI[1]：<5→Transparent /5..15 线性 ramp /≥15→(255,255,255,α)——★BJ236 已接线（2026-09-21）:同 116（剑气族 GA case+AI 梯;出生面=附魔剑 989）,本 off 档转存档
   180: { kind: 'lerp', k: 0.75 },  // :76063 | Lerp(White,0.75)
   182: { kind: 'fixed', rgba: [255,255,255,200], off: 1 },  // :76718 | (255,255,255,200) 恒；SKIP: WeaponProj 专属类消费
-  207: { kind: 'fade', off: 1 },  // :76682 | r=g=b=255−α 后落缺省（双重衰减）——现有缺省路径档保留；SKIP: drawGlobalAlpha 缺省路径档
+  207: { kind: 'fade', off: 1 },  // ★BJ297 勘误 2026-09-23（1457 :81353-81358,旧锚 :76682 系 1456 世代）| r=g=b=255−α 后落尾段——旧注「双重衰减」系误读:尾段 num14 用 newColor 重算 r/g/b（1456/1457 同构）,207 分支赋值=死码,净值≡缺省公式 (255−α)/255 单衰减;SKIP: drawGlobalAlpha case 207 显式档（同式,原「缺省路径档」注已过时）
   209: { kind: 'fade', off: 1 },  // :76706 | r=R−α/g=G−α/b=B−α/2 后落缺省——Dart 消费 skip；SKIP: Dart 专属类消费
   211: { kind: 'invisible', off: 1 },  // (255,255,255,0) A=0 纯加算白（XNA 预乘 dst+=tex.rgb 满强）;SKIP→正确承接=GA 恒 1+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;★BJ236 已接线（2026-09-21）:载体=PetFollower（Wisp 瓶 1183 光宠,projPet 型非 Arrow 域）draw 本体支 'lighter'+ga=1（GetAlpha :81329-81332 恒值不读 α,SetDefaults α≡0）,本 off 档转存档
   221: { kind: 'fixed', rgba: [255,255,255,200] },  // :76666 | (255,255,255,200) 恒
@@ -155,7 +156,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   286: { kind: 'invisible', off: 1 },  // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
   287: { kind: 'invisible', off: 1 },  // α<200→(255−α,…,0) A=0 加算白渐显 / α≥200→Transparent 真零——非隐形;已接线（★2026-09-01 激光批）:GA case <200 门 (255−α)/255 + ADDITIVE_GLOW_PROJS 'lighter';off=本表不消费维持
   300: { kind: 'fixed', rgba: [250,250,250,50] },  // :76573 | (250,250,250,50) 恒
-  301: { kind: 'fixed', rgba: [250,250,250,50], off: 1 },  // :76577 | gate ai[0]==1→newColor 直通（WeaponProj 消费 skip）；SKIP: WeaponProj 专属类消费
+  301: { kind: 'fixed', rgba: [250,250,250,50], off: 1 },  // ★BJ297 勘误 2026-09-23（1457 :81248-81255,旧锚 :76577 系 1456 世代）| gate ai[0]==1f【∨ ai[0]==−1000f——1457 新增第二门值,1456 仅 ==1f,旧注漏】→newColor 直通,else (250,250,250,50)（WeaponProj 消费 skip）；SKIP: WeaponProj 专属类消费
   304: { kind: 'afade', rgba: [255,255,255,85], slope: 0.3333, inv: 1 },  // :76589 | (255−α,255−α,255−α,(255−α)/3)
   308: { kind: 'fixed', rgba: [200,200,255,125] },  // :76547 | (200,200,255,125) 恒
   321: { kind: 'invisible', off: 1 },  // (200,200,200,0) A=0 加算灰（tex×200/255,同 91）;SKIP→正确承接=GA 200/255+'lighter',勿按隐形登记（'5 小丑箭 PROJ_ALPHA0 先例'已 R1/M-4 反转定谳:5=A=0 纯加算白非隐形）;本 id 尚未接线,off=登记残留（若接线须 GA+'lighter' 承接）
@@ -312,7 +313,7 @@ export const PROJ_ALPHA_MOD: Record<number, ProjAlphaMod> = {
   833: { kind: 'lerp', k: 0.25 },  // :76106 | Lerp(White,0.25)
   834: { kind: 'lerp', k: 0.25, off: 1 },  // :76106 | Lerp(White,0.25)；SKIP: MinionProj 专属类消费
   835: { kind: 'lerp', k: 0.25, off: 1 },  // :76106 | Lerp(White,0.25)；SKIP: MinionProj 专属类消费
-  837: { kind: 'fade', off: 1 },  // :76055 | 1456: α>0→Transparent / α=0→(255,255,255,200)——现有 drawGlobalAlpha (255−α)/255 档保留；SKIP: drawGlobalAlpha 缺省路径档
+  837: { kind: 'fade', off: 1 },  // ★BJ297 勘误 2026-09-23（1457 :80726-80732,旧锚 :76055 系 1456 世代）| α>0→Transparent / α=0→(255,255,255,200)——旧注「现有 drawGlobalAlpha (255−α)/255 档保留」已过时:现 GA case 837 = α===0?200/255:0（与 1457 逐值同构）
   855: { kind: 'lerpcolor', k: 0.5, rgba: [255,200,60,255] },  // :76043 | Lerp(newColor,(255,200,60),0.5) 后落缺省（橙化滤镜近似）
   856: { kind: 'fixed', rgba: [255,255,255,255] },  // :76078 | Color.White
   857: { kind: 'fixed', rgba: [255,255,255,255] },  // :76078 | Color.White
