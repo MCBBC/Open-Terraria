@@ -42,10 +42,14 @@ describe('BJ318 退世界释放链（源码锚 tripwire）', () => {
     expect(np).toContain('unbindStore(): void');
   });
 
-  it('Renderer.dispose 摘 GPU 看门狗 interval（闭包持 Renderer→world.store）', () => {
+  it('Renderer.dispose 摘 GPU 看门狗 interval + window contextlost 哨兵（闭包持 Renderer→world.store）', () => {
     const rd = read('src/render/Renderer.ts');
     expect(rd).toContain('this.gpuWatchdogTimer');
     expect(rd).toContain('clearInterval(this.gpuWatchdogTimer)');
+    // ★BJ318 残锚定谳：window contextlost 哨兵 onLost 闭包捕获 Renderer,
+    // dispose 不摘=退世界死 Renderer 岛永久滞留（WeakRef 二分实测）
+    expect(rd).toContain('this.gpuSentinelRemove?.()');
+    expect(rd).toMatch(/dispose\(\): void [\s\S]*gpuSentinelRemove\?\.\(\)[\s\S]*removeEventListener\('resize'/);
   });
 
   it('mainFlow.quitToMenu 拆住房面板 + 收 flowGenClient worker', () => {

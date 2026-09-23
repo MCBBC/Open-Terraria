@@ -191,6 +191,13 @@ const starveCbs: StarveCb[] = [];
 let lastActive = false;
 /** 订阅饥饿沿(进入 true / 解除 false)——Renderer 挂 renderScale 自动降档用 */
 export function onStarveTransition(cb: StarveCb): void { starveCbs.push(cb); }
+/** ★BJ318（2026-09-24）：退订——starveCbs 是模块级数组,Renderer 每局构造期
+ *  push 的回调闭包捕获 this,dispose 不退订=死 Renderer→Game→World 整岛被模块
+ *  单例永久钉死,进出世界每轮一份（WeakRef 二分+正向可达定谳的【主锚】）。 */
+export function offStarveTransition(cb: StarveCb): void {
+  const i = starveCbs.indexOf(cb);
+  if (i >= 0) starveCbs.splice(i, 1);
+}
 /** ≥3 次/90s = 饥饿;进入与解除沿各告警一条 */
 export function starvedLock(): boolean {
   const now = performance.now();

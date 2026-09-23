@@ -1,5 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
-import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, onStarveTransition, starvedEver, starvedLock } from '../render/GLStats';
+import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, offStarveTransition, onStarveTransition, starvedEver, starvedLock } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { findBannerAnchorY, houseBannerVisible } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
@@ -3362,6 +3362,17 @@ export class Renderer {
     // ★BJ318：GPU 看门狗 interval 先摘（闭包持 this——留到后面=整个 Renderer
     //  连同 world.store 引用被永久钉死,见 gpuWatchdogTimer 注）
     if (this.gpuWatchdogTimer) { clearInterval(this.gpuWatchdogTimer); this.gpuWatchdogTimer = null; }
+    // ★BJ318（主锚）：GLStats.starveCbs 模块数组退订——bindRenderScaleAuto 的
+    //  回调闭包捕获 this,曾只 push 不摘=每局 Renderer→Game→World 整岛被模块
+    //  单例钉死（正向可达分析+WeakRef 二分定谳,进出世界每轮 ~103MB/小 ~210MB/中）
+    if (this._starveCb) { offStarveTransition(this._starveCb); this._starveCb = null; }
+    // ★BJ318（2026-09-24 堆快照+WeakRef 二分定谳的【残锚】）：window 级 contextlost
+    //  哨兵必摘——onLost 闭包捕获 this(Renderer→world.store),只在画布重建时单例
+    //  替换,dispose 曾不摘=退世界后 window listener 永久钉死整个 Renderer 岛
+    //  （监听器不是 window 属性,WeakRef 二分 window.__sw* 全摘仍存活即此锚;
+    //  进出世界每轮 ~103MB(小)/~210MB(中) 阶梯的真身）
+    this.gpuSentinelRemove?.();
+    this.gpuSentinelRemove = null;
     window.removeEventListener('resize', this.onResize);
     this.canvas.width = 0; this.canvas.height = 0;
     this.lightCanvas.width = 0; this.lightCanvas.height = 0;
@@ -3429,11 +3440,14 @@ export class Renderer {
   private _worldLowW = 0;
   private _worldLowH = 0;
   private _starveHooked = false;
+  /** ★BJ318：饥饿沿回调句柄——dispose 必退订（GLStats.starveCbs 模块数组捕获
+   *  this,不退订=死 Renderer→Game→World 整岛跨局滞留,主锚见 dispose 注） */
+  private _starveCb: ((active: boolean) => void) | null = null;
   /** 饥饿沿→自动降档挂钩(Game 构造期一次;方案A #perf-gpulog) */
   bindRenderScaleAuto(): void {
     if (this._starveHooked) return;
     this._starveHooked = true;
-    onStarveTransition((active) => {
+    this._starveCb = (active) => {
       if (!active || !options.data.renderScaleAuto || options.data.renderScale > 0) return;
       if (this._autoRungIdx < Renderer.RSCALE_RUNGS.length - 1) {
         this._autoRungIdx++;
@@ -3441,7 +3455,8 @@ export class Renderer {
         this.applyRenderScale();
         (this.cbOnAutoResolution ?? (() => {}))(pct);   // Game 侧转 Toast(带百分比文案)
       }
-    });
+    };
+    onStarveTransition(this._starveCb);
   }
   /** 设置面板手动改档后的应用入口(Settings 经 __swGame 桥调用) */
   applyUserRenderScale(): void {

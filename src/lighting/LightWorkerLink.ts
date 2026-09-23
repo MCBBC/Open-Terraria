@@ -13,11 +13,14 @@
 import { SNAPSHOT_PAD, LIGHT_WATCHDOG_MS, type LightResultMsg, type LightSnapshotMsg, type TileSlicePack } from './LightWorkerProtocol';
 import type { TileStore } from '../world/TileStore';
 
-/** ?lightworker=1 显式启用（缺省关;与 waveworker 的「缺省开」极性相反——C9 为第一期灰度） */
+/** ★C9 转正（2026-09-24）：缺省开——逐字节对拍三场景全等+浏览器探针 1:1 零丢包
+ *  +133 守卫绿后转正。?lightworker=0 = 逃生门（回主线程光照引擎）。
+ *  ★C8 fork bomb 范畴禁令：document 存在性判定——worker 上下文恒 false（worker 里
+ *  旗若为 true 会让镜像引擎的 compute 再 spawn 同脚本子 worker=每帧消息沿链 spawn） */
 export const lightWorkerFlag = (() => {
   try {
-    return typeof location !== 'undefined' && new URLSearchParams(location.search).get('lightworker') === '1';
-  } catch { return false; }
+    return typeof document !== 'undefined' && new URLSearchParams(location.search).get('lightworker') !== '0';
+  } catch { return true; }
 })();
 
 /** 引擎公共面回填目标（结构最小面,避免与 LightingEngine 运行时互相导入） */

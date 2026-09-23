@@ -351,8 +351,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // E2E/控制台调试:直接加载存档 JSON 文本(绕过设置面板的 file input)
     // (挂模块级而非 enterGame:菜单阶段测试脚本就要用)
     // 液体浸润实验台:?liquidlab 参数 / window.__swLiquidLab() 控制台命令
+    // ★BJ318：动态解析模块活实例 `game`（enterGame 已先置）——曾捕获 g,
+    // 退世界不清句柄=死 Game 整图被 window 直钉（WeakRef 二分定谳锚之一）
     (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab = () => {
-      liquidLab(g);
+      if (game) liquidLab(game);
     };
     if (new URLSearchParams(location.search).has('liquidlab')) {
       setTimeout(() => (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab?.(), 1500);
