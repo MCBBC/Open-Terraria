@@ -25,6 +25,14 @@
 //   · equip：pet/light ≡ 盘上全等;itemstats/prefix/wingstats/accfx 零漂移。
 //   · journey：boss 宠 21 行 dmg:0/shoot 解析直出;盘面行零缺失（30 件字面实参
 //     vanity pet 的 dmg/shoot 为反编译真值新增）。
+//   · ★BJ292（2026-09-23）D2 定谳补钉：D2 单向守卫（盘⊆dry）曾放过盘面陈旧漂移——
+//     盘上 vanilla-journeycat.json 缺 48 mat（94/631-634/913/1384-1389/…/3957,
+//     全员∈配方素材∪已用 RecipeGroup 成员并集 1186,Recipe.cs:15205-15240
+//     UpdateWhichItemsAreMaterials 亲读）+31 acc（6156-6194,1457 新配饰,
+//     vanilla-itemstats acc 面在而 journey 盘面未随）→ 研究浏览器 Material 组
+//     （JourneyBrowser:360）/materials·accessories 过滤（:439/:425）错桶。重产
+//     盘面清偿后以 D4 把 mat/acc 两通道改双向全等（提取器回退由 D2 兜,盘面
+//     再陈旧由 D4 兜）。
 import { describe, it, expect, beforeAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, mkdtempSync } from 'node:fs';
@@ -291,5 +299,19 @@ describe('D. journey dry-run：boss 宠 dmg/shoot 直出 + 盘面零缺失', () 
     expect(journeyDry.items['4694']?.ps).toBe(13);
     expect(journeyDry.items['3608']?.ps).toBe(5);
     expect(journeyDry.items['3215']?.ps, 'ps=0 缺省档不落表（falsy 门,原口径）').toBeUndefined();
+  });
+
+  it('D4 mat/acc 通道盘面双向全等（BJ292 清偿 BJ153：D2 单向守卫曾放过盘面陈旧——48 mat+31 acc 缺键=研究浏览器错桶）', () => {
+    const disk = diskJourney().items;
+    const lagged: string[] = [];
+    for (const [vid, dryRow] of Object.entries(journeyDry.items)) {
+      for (const k of ['mat', 'acc'] as const) {
+        if (k in dryRow && dryRow[k] !== disk[vid]?.[k]) {
+          lagged.push(`${vid}.${k}: dry=${dryRow[k]} disk=${disk[vid]?.[k]}`);
+        }
+      }
+    }
+    // 盘面缺键/值漂/提取器多出该通道键,任一形态即红（通道全等,无豁免集）
+    expect(lagged).toEqual([]);
   });
 });

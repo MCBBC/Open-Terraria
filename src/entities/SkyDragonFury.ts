@@ -531,6 +531,10 @@ export class SkyDragonCircle extends Entity {
   private timeLeft: number;
   /** friendly 旗（消费后退场不再判定 :29604-29606） */
   private friendlyT = true;
+  /** ★BJ294（件 2）中央割门运行时覆写口：渐隐退场相（consume 后 ai[1]==1）原版
+   *  `friendly = false`（aiStyle77 P.cs:31213-31226）→ CutTiles 门（:12515）不进。
+   *  U3 旧锚 :29128/:29156 系行段漂移（那两行在 aiStyle54 块）。 */
+  get noVanillaCut(): boolean { return !this.friendlyT; }
   private hitCd = new HitCd();
   private cx0 = 0; private cy0 = 0;
 
@@ -565,7 +569,10 @@ export class SkyDragonCircle extends Entity {
     this.x = this.cx0 - size / 2;
     this.y = this.cy0 - size / 2;
     this.w = size; this.h = size;
-    cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 1110）
+    // ★BJ294（件 2）回收期拒割：CutTiles 在原版 Damage() 内 `friendly && …`（:12515）
+    //  门下——渐隐退场相 friendly=false（:31215）不割;旧自砍面无此门=渐隐相照割
+    //  （多割相位差）——补 friendlyT 门,与中央门 noVanillaCut 覆写口同相。
+    if (this.friendlyT) cutTilesBox(game, this.x, this.y, this.w, this.h);   // CutTiles（:12517/:15276;两门排除表均无 1110）
     if (++this.frameCtr >= 3) {                      // 4 帧 3t（:29643-29652）
       this.frameCtr = 0;
       this.frame = (this.frame + 1) % 4;

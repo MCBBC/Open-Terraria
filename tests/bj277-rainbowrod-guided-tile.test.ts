@@ -18,9 +18,10 @@ import type { GameHooks } from '../src/entities/types';
 const WALL_FACE = 100 * TILE;   // 墙列 x=100 左缘 px=1600
 
 /** 200×200 世界 + x=100 起竖实心墙（y=50..150,土块,厚度 thick）。
- *  ★① 引导档用 2 格厚：TileCollision 夹速为【逐格覆写,末格胜出】（:2416-2418）——
- *  目的位盒 [bx+32,bx+36) 跨压两列时取【最远】列面（原版字面,wiki「Wall-piercing
- *  weapons」穿墙 quirk 成因）→ t3 夹至 x=1616 面（残量 30）;2 格厚保证跨压可复现。
+ *  ★① 引导档用 2 格厚：★BJ288 F1 后扫描带=vanilla 独占界（i<value2,Collision.cs
+ *  :2318/:2326）——t3 目的位盒 [1614,1618) 只与列 100 相交（列 101 越出界不扫,
+ *  旧闭末槽多扫曾冻 rx=30=deviating 面已退役）→ 夹至 x=1600 面（残量 14）;2 格厚
+ *  供后续按压穿墙 creep 段（列 101 界内时仍参与扫描）复现。
  *  ②③④ 用 1 格厚（首触单列夹速,死亡位=近墙面 1598 干净钉值）。 */
 function wallWorld(thick: 1 | 2): World {
   const w = new World(200, 200, 30, 'open');
@@ -68,12 +69,14 @@ describe('BJ277 ①79 引导档碰实心墙不消亡+贴墙跟随（:19442-19456
     m.fixedUpdate(1 / 60, game);
     expect(m.dead).toBe(false);
     expect(m.cx).toBeCloseTo(95 * TILE + 64, 6);
-    // t3：目的盒 [1614,1618) 跨压 x=100/101 两列 → 从左覆写取最远列面 1616:
-    // rx = 1616−1586 = 30 → ×0.1（:19448-19455 字面;多列末格胜出 = :2416 原版序）
+    // t3：目的盒 [1614,1618) 与列 100 相交——列 101 越出 vanilla 独占扫描界
+    // （value2=floor(1586/16)+2=101,i<101=★BJ288 F1;旧闭末槽多扫列 101 曾冻 rx=30
+    // =deviating 面）→ 从左取列 100 面 1600: rx = 1600−1586 = 14 → ×0.1
+    // （:19448-19455 字面;界内多行同面覆写=:2416 原版序）
     m.fixedUpdate(1 / 60, game);
     expect(m.dead).toBe(false);                          // 引导档不 Kill（用户实报面）
-    expect(m.vx).toBeCloseTo(3.0, 9);                    // 30×0.1
-    expect(m.cx).toBeCloseTo(95 * TILE + 64 + 3, 6);     // 只走夹后残量的一成
+    expect(m.vx).toBeCloseTo(1.4, 9);                    // 14×0.1
+    expect(m.cx).toBeCloseTo(95 * TILE + 64 + 1.4, 6);   // 只走夹后残量的一成
     // 续 60 拍按压穿墙（原版覆写序 → ~2.5px/拍渐渗后自由穿出,wiki 穿墙 quirk）:
     // 全程【永不消亡】= 本刀核心
     for (let t = 0; t < 60; t++) m.fixedUpdate(1 / 60, game);
@@ -120,13 +123,15 @@ describe('BJ277 ⑤引导光标钳射程（:44044-44046 LimitPointToPlayerReacha
     const w = new World(200, 200, 30, 'open');   // 空场（无墙）——纯钳射程面
     const game = makeGame(w);
     const ch = { on: true };
-    // 玩家 (1488,1600) → 可达盒 x∈[640,2448]（世界 3200px−640 缓冲右缘 2560 取 min）
-    // 裸光标 5000 → vx=3456>hw=904 → 钳至 (2448,1600)
+    // 玩家 (1488,1600) → ★BJ290 件2 定尺寸平移钳（Utils.cs:236-239,盒恒 1920×1200）
+    // 世界 3200px 退化域:盒 x=Clamp(528,640,640)=640 → x∈[640,2560] 心 1600、恒不裁小
+    // ——裸光标 5000 → dx=3400>hw=960 → 钳至盒右面 (2560,1600)=play area 右缘
+    // （旧相交裁剪版钳 2448,系 P1③ 偏差本体,金标随刀重产）
     const m = mk(game, 79, 95 * TILE, 100 * TILE, 32, ch, { x: 5000, y: 100 * TILE });
     for (let t = 0; t < 90; t++) m.fixedUpdate(1 / 60, game);
     expect(m.dead).toBe(false);
-    expect(m.cx).toBeGreaterThan(2380);          // 已飞到钳点邻域
-    expect(m.cx).toBeLessThan(2520);             // 悬停于 2448,不越往裸光标 5000
+    expect(m.cx).toBeGreaterThan(2550);          // 已飞到钳点邻域（盒右面 2560）
+    expect(m.cx).toBeLessThan(2570);             // 悬停于 2560,不越往裸光标 5000
   });
 });
 

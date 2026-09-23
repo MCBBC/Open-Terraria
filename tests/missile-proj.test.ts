@@ -1,6 +1,16 @@
 // 可控导弹族（MagicMissileProj，aiStyle 9 = AI_009_MagicMissiles
 // Projectile.cs:40518-40751）+ 老星怒落星（StarfuryStar，proj 9 aiStyle 5
 // :22130-22247）行为回归——操控转向 / 松手语义 / 旋转角 / 穿透 / 持按连发。
+// ★BJ288（2026-09-23）7 例金标重产（BJ277 中心格杀位退役+BJ279 钳射程落刀后未重产
+// 的陈旧红）：oracle=反编译 :19439-19462 引导豁免 + :44044-44046 光标钳可达区——
+// 4 条弹道断言改以 limitPointToPlayerReachableArea 复算的【钳后】点冻结;2 条穿透
+// 计数把敌心钉到可达盒上缘钳点 (684,701) 保悬停连击面;撞块消亡改走扫掠反应链
+// （行 50 墙,行 ≥h−40 不入 BJ288 F2 扫描带）。
+// ★BJ290（2026-09-23）件2 平移钳语义修正后金标再重产：limitPointToPlayerReachableArea
+// 迁单源 PlayerReachableArea（定尺寸平移钳,Utils.cs:236-239）——小世界 1600px 盒改为
+// 恒 1920×1200 钉靠 Right−W/Bottom−H 一侧（心 (0,360)）,盒罩全 play area;(684,701)
+// 等旧"盒上缘"点在新盒内=钳恒等,悬停连击面钉值不变;首例 aim 改钉 (840,1600) 保持
+// 「盒外回拉」考验面,冻结值=(840,960) 盒底面。
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj,
@@ -96,27 +106,46 @@ afterEach(() => {
 
 describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () => {
   it('channel 期间速度直接对准光标 min(32, 距离)（:40639-40655，amount=1）', () => {
-    const { hooks } = makeHooks();
+    const { hooks, player } = makeHooks();
     const m = mkMissile(hooks, {
       x: 40 * 16, y: 40 * 16, vx: 0, vy: 0,
-      aim: () => ({ x: 40 * 16 + 200, y: 40 * 16 + 16 }),   // 与中心同高 → 水平
+      aim: () => ({ x: 40 * 16 + 200, y: 100 * 16 }),   // 裸光标超射程（y 在可达盒下方）
     });
+    // ★BJ290 重产（件2 平移钳语义修正后金标陈旧）：光标先经 LimitPointToPlayerReachableArea
+    // 钳进可达区（:44044-44046;oracle=导出 helper 复算）——速度对准【钳后】点,
+    // 量级面不变 = min(32, 距离) = 32（旧断言按未钳光标冻结=已退役）
+    const lim = limitPointToPlayerReachableArea(40 * 16 + 200, 100 * 16,
+      player.cx, player.cy, 1600, 1600);
+    // 钳后点冻结值（独立复算：★BJ290 件2 定尺寸平移钳——盒 x∈[−960,960]/y∈[−240,960]
+    // 心 (0,360)（小世界 1600px<1920 视窗,盒按 Utils.cs:238 判序钉靠 Right−W/Bottom−H
+    // 一侧、恒不裁小）;裸光标 (840,1600) y 超盒底 → 径向回拉 k=600/1240=0.48387
+    // 【两轴同比】（Player.cs:45856 pointPosition=rectCenter+offset×k）→
+    // 钳点=(840×k, 360+1240×k)=(406.4516…,960) 恰盒底面）——防「oracle=被测函数
+    // 自身」自洽空转（★BJ288 变异试验定谳:无冻结值则钳失效不爆红）
+    expect(lim[0]).toBeCloseTo(406.4516129032258, 6);
+    expect(lim[1]).toBeCloseTo(960, 6);
+    const c0x = m.cx, c0y = m.cy;                 // 首拍转向前弹心
     fly(m, hooks, 1);
-    expect(Math.hypot(m.vx, m.vy)).toBeCloseTo(32, 5);   // 距离 200 > 32 → 顶速
-    expect(m.vx).toBeCloseTo(32, 5);
-    expect(m.vy).toBeCloseTo(0, 5);
+    const dx = lim[0] - c0x, dy = lim[1] - c0y, d = Math.hypot(dx, dy);
+    expect(d).toBeGreaterThan(32);                // 钳后点仍在顶速域
+    expect(Math.hypot(m.vx, m.vy)).toBeCloseTo(32, 5);   // 距离 > 32 → 顶速
+    expect(m.vx).toBeCloseTo(dx / d * 32, 5);            // 方向 = 钳后光标向
+    expect(m.vy).toBeCloseTo(dy / d * 32, 5);
   });
 
   it('近距 <64px 盘旋：vel×0.3 + (目标−中心)×0.3（:40657-40660）', () => {
     const { hooks } = makeHooks();
     const m = mkMissile(hooks, {
       x: 40 * 16, y: 40 * 16, vx: 0, vy: 0,
-      aim: () => ({ x: 40 * 16 + 20, y: 40 * 16 }),
+      // ★BJ288 重产：目标改钉可达盒【内】点 (664,712)（★BJ290 新盒 y∈[−240,960]
+      // 含 712 → 盒内=钳恒等）——旧光标 (40*16+20, 40*16) 在旧盒外,BJ279 钳射程后
+      // 被拉飞改走远距支,近距前提失真
+      aim: () => ({ x: 664, y: 712 }),
     });
     fly(m, hooks, 1);
-    // 中心 (40*16+16, 40*16+16)；目标差 = (20−16, −16) → vel = (1.2, −4.8)
-    expect(m.vx).toBeCloseTo(1.2, 3);
-    expect(m.vy).toBeCloseTo(-4.8, 3);
+    // 中心 (40*16+16, 40*16+16)；目标差 = (8, 56) → vel = (2.4, 16.8)
+    expect(m.vx).toBeCloseTo(2.4, 3);
+    expect(m.vy).toBeCloseTo(16.8, 3);
   });
 
   it('视觉转向 π/4/tick 朝速度角（:40678-40681 AngleTowards；初值 0 = :523）', () => {
@@ -132,19 +161,35 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
   });
 
   it('AngleTowards 每拍上限 π/4（反向大转角分拍收敛，Utils.cs:2142-2159）', () => {
-    const { hooks } = makeHooks();
+    const { hooks, player } = makeHooks();
     let left = false;
     const m = mkMissile(hooks, {
       x: 40 * 16, y: 40 * 16, vx: 6, vy: 0,
       aim: () => (left ? { x: 40 * 16 - 200, y: 40 * 16 + 16 } : { x: 40 * 16 + 200, y: 40 * 16 + 16 }),
     });
+    const wrap = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
+    // ★BJ290 重产（件2 平移钳语义修正后金标陈旧）：转向角全程以【钳后】光标方向为 oracle
+    const limR = limitPointToPlayerReachableArea(40 * 16 + 200, 40 * 16 + 16,
+      player.cx, player.cy, 1600, 1600);
     fly(m, hooks, 1);
-    expect(m.rot).toBeCloseTo(0, 5);               // 速度向 0 → 不转
-    left = true;                                   // 光标甩到正左 → 速度角 π
+    // 首拍：钳后点 (840,656)（★BJ290 盒 x∈[−960,960]/y∈[−240,960] → 恒等）→
+    // θ1 = atan2(0,184) = 0 → 一拍即到速度角
+    const th1 = Math.atan2(limR[1] - 656, limR[0] - 656);
+    expect(th1).toBeLessThan(Math.PI / 4);
+    expect(th1).toBeCloseTo(0, 12);   // 冻结（防 oracle 自洽空转,同 R1 注）
+    expect(m.rot).toBeCloseTo(th1, 9);
+    left = true;                                   // 光标甩到盒内左 → 钳后点 (440,656) 恒等
     fly(m, hooks, 1);
-    expect(m.rot).toBeCloseTo(Math.PI / 4, 5);     // 每拍最多 +π/4
+    // |θ2−rot1| > π/4 → 满步 π/4（每拍上限,反向大转角分拍收敛）
+    expect(m.rot - th1).toBeCloseTo(Math.PI / 4, 9);
+    const rot2 = m.rot;
     fly(m, hooks, 3);
-    expect(m.rot).toBeCloseTo(Math.PI, 4);         // 4 拍到 π
+    // 分拍收敛：末拍 rot 已落到速度角 = 指向钳后左向点
+    expect(Math.abs(m.rot - rot2)).toBeGreaterThan(0);   // 确在继续收敛（非冻结）
+    const limL = limitPointToPlayerReachableArea(40 * 16 - 200, 40 * 16 + 16,
+      player.cx, player.cy, 1600, 1600);
+    const th2 = Math.atan2(limL[1] - m.cy, limL[0] - m.cx);
+    expect(wrap(m.rot - th2)).toBeCloseTo(0, 6);   // 收敛到钳后目标角
   });
 
   it('松手无目标：速度归一 32 直飞 + timeLeft 钳 300（:40575-40593/:40667-40676）', () => {
@@ -169,17 +214,23 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
   });
 
   it('松手低速 (<2)：取 DirectionFrom(玩家) ×32（:40585-40588）', () => {
-    const { hooks } = makeHooks();
+    const { hooks, player } = makeHooks();
+    // ★BJ288 重产（BJ279 钳射程后金标陈旧）：玩家上移到 (45*16,40*16)、弹/光标全钉
+    // 可达盒【内】（钳恒等）——近距盘旋收敛前提保真,DirectionFrom(=弹−玩家) 保持
+    // 右下向（vx>0/vy>0 原断言不变）;旧几何 (60*16,84*16) 在盒外,钳后目标恒远,
+    // 近距支不可达
+    player.x = 45 * 16; player.y = 40 * 16;        // 玩家中心 (730,661)
     let held = true;
     const m = mkMissile(hooks, {
-      x: 60 * 16, y: 84 * 16, vx: 0.5, vy: 0,
+      x: 52 * 16, y: 45 * 16, vx: 0.5, vy: 0,
       channel: () => held,
-      aim: () => ({ x: 60 * 16 + 10, y: 84 * 16 }),
+      aim: () => ({ x: 52 * 16 + 26, y: 45 * 16 + 20 }),   // 盒内点 → 钳恒等
     });
     fly(m, hooks, 15);                            // 近距盘旋收敛到光标（|v|<2）
+    expect(Math.hypot(m.vx, m.vy)).toBeLessThan(2);
     held = false;
     fly(m, hooks, 1);
-    // 玩家中心 (810,1301) 在弹的左上 → DirectionFrom 指向右下、模 32
+    // 弹心收敛在玩家 (730,661) 的右下 → DirectionFrom 指向右下、模 32
     expect(m.vx).toBeGreaterThan(0);
     expect(m.vy).toBeGreaterThan(0);
     expect(Math.hypot(m.vx, m.vy)).toBeCloseTo(32, 3);
@@ -230,12 +281,19 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
   });
 
   it('34 穿透 2 + 同敌 12t 冷却（SetDefaults :902-912 localNPCHitCooldown=12）+ Kill 爆 AoE', () => {
-    const en = enemyAt(3, 42, 40);
-    const { hooks } = makeHooks({ enemies: [en] });
+    // ★BJ288 重产（BJ279 钳射程后金标陈旧）：敌心钉在可达盒上缘钳点 (684,701)——
+    // 光标 (684,701) 恰在盒缘（vy=−hh → 钳恒等）→ 引导目标=敌心,悬停连击面保真;
+    // 旧敌位 (42,40) 的悬停点 (684,660) 在盒外,钳后目标被拉到 (711.9,701) 失真
+    // （★BJ290 新盒 y∈[−240,960] 含 701 且为盒内点 → 钳恒等结论不变,钉值不重产）
+    const en = enemyAt(3, 42, 42.5625);            // 盒心 (684, 701)
+    const { hooks, player } = makeHooks({ enemies: [en] });
     const m = mkMissile(hooks, {
       projId: 34, x: 40 * 16, y: 40 * 16, vx: 6, vy: 0,
-      aim: () => ({ x: 42 * 16 + 12, y: 40 * 16 + 20 }),   // 悬停在敌中心
+      aim: () => ({ x: 684, y: 701 }),             // 悬停在敌中心
     });
+    const lim = limitPointToPlayerReachableArea(684, 701, player.cx, player.cy, 1600, 1600);
+    expect(lim[0]).toBeCloseTo(en.cx, 6);          // 钳恒等自证：引导目标=敌心
+    expect(lim[1]).toBeCloseTo(en.cy, 6);
     expect(m.pierce).toBe(2);
     fly(m, hooks, 20);
     expect(en.hits).toBe(3);                     // 2 次接触（第 2 次等 12t 冷却）+ Kill 爆 1 跳
@@ -303,11 +361,13 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
   });
 
   it('79 彩虹弹穿透 3 + 命中清追踪重索（SetDefaults :1322-1333 / StrikeNPC :13271）', () => {
-    const en = enemyAt(4, 42, 40);
+    // ★BJ288 重产（BJ279 钳射程后金标陈旧）：敌心钉盒上缘钳点 (684,701)（同 34 例布景;
+    // ★BJ290 新盒内点=钳恒等,钉值不重产）
+    const en = enemyAt(4, 42, 42.5625);            // 盒心 (684, 701)
     const { hooks } = makeHooks({ enemies: [en] });
     const m = mkMissile(hooks, {
       projId: 79, x: 40 * 16, y: 40 * 16, vx: 6, vy: 0,
-      aim: () => ({ x: 42 * 16 + 12, y: 40 * 16 + 20 }),
+      aim: () => ({ x: 684, y: 701 }),             // 悬停在敌中心
     });
     expect(m.pierce).toBe(3);
     expect(m['homingId']).toBe(-1);
@@ -318,14 +378,16 @@ describe('MagicMissileProj 操控（AI_009_MagicMissiles :40518-40751）', () =>
     expect(m.dead).toBe(true);
   });
 
-  it('撞实心块消亡（tileCollide 默认 true，SetDefaults 无覆写）', () => {
-    const { hooks } = makeHooks();
+  it('撞实心块消亡（★BJ288 重产：BJ277 中心格杀位退役 → 消亡=HandleMovement 扫掠+反应链 :19458-19461）', () => {
+    const { hooks, st } = makeHooks();
+    for (let x = 5; x <= 95; x++) st.setTileSilent(x, 50, 1);   // 50 行石板（★BJ288 F2 后行 ≥h−40 不入扫描带,碰撞墙须在带内）
     const m = mkMissile(hooks, {
-      x: 50 * 16, y: 86 * 16, vx: 0, vy: 10,
+      x: 50 * 16, y: 44 * 16, vx: 0, vy: 10,
+      channel: () => false,                        // 松手直下（mode=1 → flag22 支 Kill）
       aim: () => ({ x: 50 * 16, y: 100 * 16 }),
     });
     fly(m, hooks, 10);
-    expect(m.dead).toBe(true);                   // 90 行石地板
+    expect(m.dead).toBe(true);                   // t3 从上支夹速 ry=14 → 反应链 Kill
   });
 });
 

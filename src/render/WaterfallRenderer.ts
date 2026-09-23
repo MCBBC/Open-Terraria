@@ -282,8 +282,10 @@ export class WaterfallRenderer {
       //  drawWaterfalls），16px 全幅盖在草地上=实报观感。修 = 逐 draw 对覆盖到的
       //  【全实心格】子域做减法裁剪（solidT 单源=本行走断流谓词，WaterfallManager.cs:551
       //  blockType()==0 同域），像素等价于原版层级；非实心格（植物/半砖/坡面）上的
-      //  瀑布仍全幅可见（原版瀑布画于非实心块之后=同效）。无实心覆盖走原单调用快径
-      //  （调用序列与既有对拍逐位一致）。
+      //  瀑布仍全幅可见（★BJ289 勘误:此处对原版=近似(债)非同效——原版 Solid pass
+      //  按 tile 类型分档后画,形状格的不透明子域在原版实会遮挡瀑布下半幅,本仓
+      //  形状格不裁=可见域偏大;memory bj274 判例如实登记,注释与之矛盾系笔误）。
+      //  无实心覆盖走原单调用快径（调用序列与既有对拍逐位一致）。
       const drawFlipped = (
         flip: boolean, sx: number, sy: number, sw: number, sh: number,
         px: number, py: number, dw: number, dh: number,

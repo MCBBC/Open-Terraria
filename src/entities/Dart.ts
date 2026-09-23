@@ -27,6 +27,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { GorePiece } from './GorePiece';
 import { beeWallPushDir } from './WeaponProj';   // SW-AF1 2026-09-04（F-3）：99 巨石踢墙门单源化（与 655/1047 同摄取器）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ290 件1 死亡段割面（BJ260/285 同款前置习语）
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -717,6 +718,15 @@ export class TrapShot extends Entity {
     if (!this.reflected) {
       const trapProjId = TRAP_PROJ_ID[this.kind];
       const kb = st.kb ?? 2;   // ★R20-F5:逐型击退（Wiring 各 NewProjectile 实参）
+      // ★BJ290 件1（死亡段割面族 BJ260/285 同款前置习语,2026-09-23）：CutTiles
+      //  （P.cs:12517）在 Damage() 内先于 Damage_PVE（:12523）——命中即亡弹死亡拍
+      //  【照割】（:781 afterHit 计数归零 killNow:166 雪球 pen1 首中亡/162 炮弹 pen4
+      //  末击亡,均 vanilla friendly;中央割 !e.dead 门=死亡拍整缺 → 环前前置弹盒上报,
+      //  hurt 前序=原版序,幂等双报同惯例）。门 !this.hostile=本仓"伤玩家"档（与
+      //  vanilla friendly/hostile 数据面不同域,见 :745 注）——现役可达死亡位仅
+      //  162/166 两 friendly 型;陷阱镖族虽 vanilla friendly+hostile 双旗,但
+      //  penetrate=-1（pierceLeft=Infinity）恒不经死亡位,零扰面。
+      if (!this.hostile) cutTilesBox(game, this.x, this.y, this.w, this.h);
       for (const ent of game.enemies()) {
         // ★dontTakeDamage 目标排除（:12600 同款——拒收命中不得耗穿透/免工件窗/snapStrike，最终清零补）
         if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
@@ -810,6 +820,13 @@ export class TrapShot extends Entity {
     //  （PetFollower 宠物走 Game.ts:36787 入 npcs 桶、无 hurt 方法），机关弹碰上
     //  即 `k.hurt is not a function` 帧循环停机（SW-BI1 报告同族二道防线；原版
     //  单数组 Main.npc 全员有 StrikeNPC，本仓分桶后必须逐员验 hurt）。
+    // ★BJ290 件1 备案锁（2026-09-23,死亡段割面族普查）：下方两死亡位（小动物
+    //  `!afterHit→dead`/城镇 NPC 同式）【不加割】——原版 CutTiles 调用点
+    //  （P.cs:12516）在 `friendly&&…` 门内,hostile 弹全程无割面;本位仅 hostile
+    //  非反射弹可达（上方 `!this.hostile||reflected` 早退）,且现役 hostile 路径
+    //  全型 penetrate=-1（pierceLeft=Infinity,:370）恒不经 afterHit 死亡位
+    //  =死码位。未来若加 vanilla-hostile 有限穿透弹,原版本就不割=勿补;若加
+    //  vanilla-friendly 有限穿透陷阱型,死亡拍割随中央收口语义另议（登记）。
     const buckets = (game as unknown as { entities?: { critters: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt?: (g: GameHooks) => boolean }>; npcs: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt?: (d: number, kx: number, ky: number, g: GameHooks) => boolean }> } }).entities;
     if (buckets) {
       for (const c of buckets.critters) {
@@ -3293,6 +3310,9 @@ export class TowerBolt extends Entity {
   /** 命中回调（盾结算/闪光/盾破音，Game 注入） */
   private onHit: (tower: Enemy) => void;
   private life = 3600;
+  /** ★BJ294 敌射侧拒割位：629 SetDefaults hostile（型录 hostile:true,aiStyle 122）→
+   *  原版 CutTiles 调用点 friendly 门（P.cs:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   constructor(x: number, y: number, target: () => Enemy | null, onHit: (tower: Enemy) => void) {
     super();

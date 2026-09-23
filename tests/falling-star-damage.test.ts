@@ -10,7 +10,7 @@
 //   · WorldItem 75 本体【无】伤害面（WorldItem.cs 全文无星伤害支,唯一 StrikeNPC
 //     =巫毒娃 :725/:758）——"落地后不伤"为原版语义,本文件以星死+落品断言承载。
 //   · warmup(Spawner 720 damage=0) 期不伤 = 原版 AI_148 无 Damage 面直接推论。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -118,5 +118,98 @@ describe('FallingStar 对敌伤害面（BJ272 守卫闸：弹 12 dmg=1000/kb=10f
     s.fixedUpdate(1 / 60, g);
     expect(s.dead).toBe(true);
     expect(drops).not.toContain('vi_75_fallen_star');
+  });
+});
+
+// ---- ★BJ289（2026-09-23 B①）remix 敌星伤玩家面（Damage_EVP :14846-14949）----
+describe('BJ289 remix 敌星伤玩家面（SetDefaults :932-934 hostile=true → EVP）', () => {
+  type DpCall = { dmg: number; srcX: number; srcY: number };
+  /** 活体玩家 mock（35,60 空域同上组）+ damagePlayer 记录并置 30t 无敌帧 */
+  function mkGameRemix(w: World, dpLog: DpCall[]): { g: GameHooks; player: Record<string, number | boolean> } {
+    const px = 35 * TILE, py = 60 * TILE;
+    const player: Record<string, number | boolean> = {
+      x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21,
+      dead: false, iframes: 0, luck: 0, facing: 1, shieldParryTimeLeft: 0,
+      maxHp: 100, maxMana: 20,
+    };
+    const g = {
+      world: w,
+      player,
+      enemies: () => [], critters: () => [], npcs: () => [],
+      spawnDust: () => null,
+      playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
+      spawnDrop: () => null,
+      damagePlayer: (dmg: number, sx: number, sy: number) => {
+        dpLog.push({ dmg, srcX: sx, srcY: sy });
+        player.iframes = 30;                  // Hurt→immune 语义（General 桶）
+        return dmg;
+      },
+      addDamageNumber: () => {},
+      cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
+      notifyInventoryChanged: () => {}, addLightAt: () => {},
+    } as unknown as GameHooks;
+    return { g, player };
+  }
+
+  it('remix：星落穿过玩家 → damagePlayer 2000（rnd 钉 0.5：DamageVar(1000,0)=1000 ×曲线1.0 ×2）', () => {
+    const w = mkWorld();
+    w.seedFlags.remix = true;
+    const dpLog: DpCall[] = [];
+    const { g } = mkGameRemix(w, dpLog);
+    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.5);   // tier=0 → 因子 1.0
+    try {
+      // 星盒 x=35T..35T+18 与玩家 35T..35T+20 横叠;y 起 py−24 → 一拍后 py−12..py+6 纵叠
+      const s = new FallingStar(35 * TILE, 60 * TILE - 24, 0, 12, 0, false, true);
+      s.fixedUpdate(1 / 60, g);
+      expect(dpLog.length).toBe(1);
+      expect(dpLog[0].dmg).toBe(2000);        // 1000 ×(Classic 采样 1.0) ×2(:14915)
+      expect(dpLog[0].srcX).toBe(s.cx);       // 击退源=弹心
+      expect(s.dead).toBe(false);             // EVP 命中不消亡（唯一死=撞地/越界）
+      s.fixedUpdate(1 / 60, g);               // 玩家 iframes=30 → 不再扣
+      expect(dpLog.length).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('非 remix：hostile=false 整面不达（自然星常态）', () => {
+    const w = mkWorld();                      // seedFlags 无 remix
+    const dpLog: DpCall[] = [];
+    const { g } = mkGameRemix(w, dpLog);
+    const s = new FallingStar(35 * TILE, 60 * TILE - 24, 0, 12, 0, false, true);
+    for (let t = 0; t < 5; t++) s.fixedUpdate(1 / 60, g);
+    expect(dpLog.length).toBe(0);
+  });
+
+  it('remix 门：玩家已死 / 无敌帧期 / 暖机相（720 无 hostile 行）三者均不达', () => {
+    const w = mkWorld();
+    w.seedFlags.remix = true;
+    const dpLog: DpCall[] = [];
+    const { g, player } = mkGameRemix(w, dpLog);
+    player.dead = true;                       // dead 门
+    let s = new FallingStar(35 * TILE, 60 * TILE - 24, 0, 12, 0, false, true);
+    s.fixedUpdate(1 / 60, g);
+    expect(dpLog.length).toBe(0);
+    player.dead = false;
+    player.iframes = 10;                      // immune 门（General 桶 !immune）
+    s = new FallingStar(35 * TILE, 60 * TILE - 24, 0, 12, 0, false, true);
+    s.fixedUpdate(1 / 60, g);
+    expect(dpLog.length).toBe(0);
+    player.iframes = 0;
+    s = new FallingStar(35 * TILE, 60 * TILE - 24, 0, 12, 180, false, true);   // 暖机相
+    for (let t = 0; t < 3; t++) s.fixedUpdate(1 / 60, g);
+    expect(dpLog.length).toBe(0);
+  });
+
+  it('remix 盾反（CanParryAgainst :31673）：盾反窗 + 星在面向侧 → 零伤', () => {
+    const w = mkWorld();
+    w.seedFlags.remix = true;
+    const dpLog: DpCall[] = [];
+    const { g, player } = mkGameRemix(w, dpLog);
+    player.facing = -1;                       // 星在玩家左侧、面向左 → sign(−1)==facing
+    player.shieldParryTimeLeft = 5;
+    const s = new FallingStar(35 * TILE - 12, 60 * TILE - 24, 0, 12, 0, false, true);
+    for (let t = 0; t < 3; t++) s.fixedUpdate(1 / 60, g);
+    expect(dpLog.length).toBe(0);
   });
 });

@@ -44,12 +44,14 @@ export class InfernoHostileBlast extends Entity {
   //  镜像重建本地 292（2026-09-02 访客缺口清偿,旧"访客缺口登记"就此撤销）——本类
   //  维持不上线、各端本地自算（hostile 盒对本地玩家 Damage_EVP,victim-settles 同构）；
   //  下方 netPuppet 早退保留为防御位（镜像本体永不入快照,该分支实际不可达）。
-  // ★minion=true 仅借 Entity 收口 CutTiles 排除门（EntityManager.update 唯一消费
-  //  位）：原版 CanCutTiles（Projectile.cs:15407）只对 friendly 弹跑 CutTiles，
-  //  292 为 hostile 不砍地形；本仓中央收口无 friendly 门，130×130 盒每拍上报会
-  //  误碎爆区内陶罐/草。本仓 minion 旗无召唤槽计数消费面（按类 instanceof 计数），
-  //  借旗规避为最小侵入——若未来收口补 friendly 门可摘除。
-  minion = true;
+  // ★BJ294（2026-09-23）：借位 `minion = true` 退役（其注「若未来收口补 friendly 门
+  //  可摘除」的兑现）——BJ293 中央收口已补 vanilla friendly 投影门,但 vid=0（本类
+  //  刻意不设 projId,见上注）分支缺省照报,292 仍会越权上报;现按 BJ294 敌射侧
+  //  正一位收口：292 SetDefaults hostile（P.cs:3822）→ 原版 CutTiles 调用点
+  //  `friendly && owner==myPlayer…`（:12515）整支不进 → noVanillaCut=true 拒割。
+  //  minion 旗摘除经核零消费面（召唤计数按类 instanceof;projTargets.ts:988 门
+  //  对本敌射弹不在路径）。
+  noVanillaCut = true;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,projWetSection.ts 共享体
   //  1:1;溅花尘/音由共享体 wetSplashStepShared 承载,本类不自写）----

@@ -5,6 +5,7 @@ import type { Renderer } from '../render/Renderer';
 import { beginDropScanCtx } from './dropScanCtx';
 import { beginProjScanCtx, endProjScanCtx } from './projScanCtx';
 import { cutTilesBox } from './ProjCutTiles';
+import { projectileData } from '../data/vanillaProjectiles';   // ★BJ293 friendly 型录位
 
 export abstract class Entity {
   id = 0;
@@ -148,7 +149,7 @@ export class EntityManager {
         //     承载（玩家弹无此位=行为不变）
         if (list === this.projectiles) {
           const m = e as { vanillaId?: number; projId?: number; minion?: boolean; npcProj?: boolean;
-            cutExtraTreeCactus?: boolean };
+            cutExtraTreeCactus?: boolean; reflected?: boolean; noVanillaCut?: boolean };
           const vid = m.vanillaId ?? m.projId ?? 0;
           // ★BJ232（2026-09-21）死弹 1-tick 过割窗：原版 Update 在 HandleMovement
           //   （AI/Kill 可达）后、Damage/CutTiles 前有 `if (!active) return` 门
@@ -158,7 +159,73 @@ export class EntityManager {
           //   当拍多割一拍（症状向=多割非漏割,弹 Kill 与收口同拍窗口）。
           //   dead=compact 唯一移除通道,与 active 一一对应;门位语义同构
           //   （AI 后、割前）——当拍跳过,无一拍延迟。
-          if (!e.dead && !m.minion && m.npcProj !== true && !CUT_EXCLUDE_VIDS.has(vid)) {
+          // ★BJ293（2026-09-23）friendly 投影门（敌对弹越权割收口）：原版 CutTiles
+          //   调用点在 Damage() 内（P.cs:12515-12518;1458 :12516-12519 同文）——
+          //   `friendly && owner == Main.myPlayer && !npcProj && !minion && type != 1054`
+          //   外层再套 Damage_CanDealDamage()（:12461/:12512）。此前中央门只承接
+          //   minion/npcProj/CanCutTiles 三支,vanilla friendly=false 的弹照走收口
+          //   =越权割瓦罐/草药（红蓝-U2 探针实锤：敌对弹如 84 PinkLaser P.cs:1653
+          //   hostile-only,Enemy.ts:8038 出膛活拍每拍上报 cutTile）。
+          //   · ★域辨析：repo hostile ≠ vanilla friendly——机关/陷阱弹 vanilla
+          //     friendly+hostile 双旗（98 :1830-31/99 族 :1840-41/31 :1139-40/
+          //     40 :1235-36/763 :19217）照样割（trap 出膛 owner=Main.myPlayer,
+          //     Wiring.cs:1965/:72267）;TrapShot.hostile=原版!friendly（Dart.ts:366）、
+          //     Arrow.hostile=结算方向位（Damage_EVP）——两域都不可取反,门走数据面
+          //     vanillaFriendly 投影：projectileData(vid)?.friendly（SetDefaults 型录,
+          //     1457 提取 recon 闸门;RollingBoulder.ts:920 同款先例）。敌对弹漏斗
+          //     全普查（shoot/shootM/shootD/shootD2/shootE/shootL,43 vid+VAR 组）唯
+          //     一双标例=763 RollingCactusSpike（727 亲射 :19217 owner=myPlayer 不翻
+          //     旗）→ 照割,与原版同相。
+          //   · vid=0（SW 自造弹无型录行）无 vanilla 真值 → BJ293 现状=缺省照报
+          //     （FirstFractalSlash(857) 等未挂 projId 的玩家弹割面零回退）;BJ294
+          //     在此之上加敌射侧 `noVanillaCut` 拒割位（见下块）。
+          //   · !e.netPuppet = owner==Main.myPlayer 投影：联机傀儡弹本地不割
+          //     （原版切割归 owner 端;单机恒 false=零开销）。
+          //   · m.reflected !== true：反射支 friendly=false（NPC.cs:67197-67199
+          //     三联写是全 vanilla 唯一置位点;projTargets.reflectProjectile 同置
+          //     reflected/hostile——双标拒切同相）。
+          //   · vid !== 1054（:12515 原文第五因;1054 型录 friendly=true 双标,不在
+          //     :15407 CanCutTiles 表=CUT_EXCLUDE_VIDS——两门不同锚,不可并集）。
+          // ★BJ294（2026-09-23）敌射侧拒割正一位 `noVanillaCut`（缺省策略定谳=保守）：
+          //   vid=0 缺省照报（BJ293 定谳现状,玩家侧零回退）+ 敌射/环境侧「vanilla 无
+          //   割面」弹在类级显式标 `noVanillaCut = true` 拒割。位语义=「vanilla 本弹
+          //   （或本相）无 CutTiles 调用」——独立正一位,【不】征用 projId（联机快照
+          //   `projId !== undefined` 归 kind1 的架构约束,InfernoHostileBlast.ts:40/
+          //   bossAI_duke_moonlord.ts:789 注）也【不】复用 repo hostile 位（域警告:
+          //   TrapShot.hostile=原版!friendly 取反先例,Dart.ts:366）。字段可被运行时
+          //   getter 覆写=型录弹的相位覆写口（件 2：443 电球/1110 星圈回收期拒割——
+          //   ElectroSphereProj/SkyDragonCircle getter;FallingStar 双相同款）。
+          //   · 定谳理由（保守 vs 激进）＝失败不对称（★F5 勘误,缺省向真依据）：保守
+          //     漏网=敌弹过割草/罐（外观级,U2/U3 探针族可查）;激进漏网=玩家弹静默
+          //     失割（玩法损失,更劣）→ 取其轻=缺省保守。旧注「桶成员不可静态穷举→
+          //     激进缺省风险不可被 tripwire 完全覆盖」系误证已撤——tripwire 锁类面
+          //     定性本可结构性穷举（间接继承链普查缺口另见 bj294 测试头 F4 登记注）。
+          //     普查全表+tripwire（vid=0 能力类逐类登记定性,结构性锁）=
+          //     tests/bj294-vid0-cut-facing.test.ts。
+          //   · 逐类锚：292 P.cs:3822 hostile;455 :5277;456 :5288;385 :4682;
+          //     384/386 :4670/:4692（★F3 勘误 2026-09-23:455/456/385/384/386 hostile
+          //     行号按 1457 反编译亲读重钉,旧 :5281/:5292/:4684/:4672/:4694 系误记——
+          //     两基线该处均非 hostile 行）;687 :7324 friendly=false+hostile;
+          //     629 :6756;961/962/965 敌对;526 :5964-72 无 friendly 行;
+          //     1078 :10069-10078（★F1 勘误:旧 :9783-93 系 1456 行号,两基线双旗
+          //     同值仅行号漂）双旗但 vanilla 出生 NewProjectile 8 参 owner 缺省=255
+          //     （W.cs:72337,★F3:旧 :72335 系误记→P.cs:10866-69）≠myPlayer → 不割;
+          //     813 血云双旗但 vanilla 出生显式
+          //     owner=Main.myPlayer（NPC.cs:48026）→ vanilla 照割,不标=同相。
+          //   · 玩家侧登记债（本刀不修,照报=零回退豁免）：250/298/305 型录无
+          //     friendly 行;444/460/633/971·975（钉扎态 ai0==1,Player.cs:44518 出生
+          //     即 1）/818 落 vanilla Damage_CanDealDamage（:12461）豁免表 → vanilla
+          //     实际不割、本仓照割=多割相位差家族（SW 自造玩家弹侧,登记待刀）。
+          //   · ★307 防回潮锚（件 4 零修刀）：vanilla 306 尖球 Kill 原位派生 307
+          //     （P.cs:78055）→ AI_036 锁敌支 `friendly = true`（P.cs:27789-27792,
+          //     全 vanilla 唯一置位;型录 307 无 friendly 行）→ 锁敌后每 tick 割。
+          //     本仓无 306 分裂链 → 307 零生成=当前零影响;【306 链移植时须同步补
+          //     307 运行时翻旗割草面】（锁敌态 noVanillaCut getter 翻 false,型录
+          //     投影无 friendly 字段会照拦/照放两不知——以此注为锁）。
+          const cutFriendly = m.noVanillaCut !== true
+            && (vid === 0 ? true : projectileData(vid)?.friendly === true);
+          if (!e.dead && cutFriendly && m.reflected !== true && !e.netPuppet
+            && m.npcProj !== true && !m.minion && vid !== 1054 && !CUT_EXCLUDE_VIDS.has(vid)) {
             // ★SW-BJ67（2026-09-14）：vid 随盒穿线——CutTiles 逐型豁免面
             //   （P.cs:15391-15393 1047 滚过幼虫 231 不割,详 ProjCutTiles.ts 注）
             // ★债刀-4 ②（2026-09-17）：出程旗随盒穿线——CutTilesAt :15384-86

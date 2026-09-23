@@ -459,6 +459,10 @@ export class DeerclopsSpikeProj extends Entity {
   /** 变体帧:AI_157 flag=true → frame=rand(5)（Projectile.cs:48487-48490,maxValue=5） */
   private readonly frame: number;
   life = 20;                // num9=20 出世
+  /** ★BJ294 敌射侧拒割位：961 SharpTears SetDefaults hostile（型录 hostile:true,
+   *  aiStyle 157）→ 原版 CutTiles 调用点 friendly 门（P.cs:12515）整支不进。
+   *  详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
   constructor(x: number, y: number, angle: number, private dmg: number, ai1: number) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
@@ -522,6 +526,9 @@ export class DeerclopsRubbleProj extends Entity {
   w = 32; h = 32;
   dead = false;
   life = 220;
+  /** ★BJ294 敌射侧拒割位：962 Rubble SetDefaults hostile（型录 hostile:true,aiStyle 1）→
+   *  原版 CutTiles 调用点 friendly 门（P.cs:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
   /** 出世姿态角（:54039 localAI[0]==0 时 rotation = velocity.ToRotation() 一次定型,
    *  此后不随当前速度更新——曾每帧重算 atan2(vy,vx)） */
   private readonly spawnRot: number;
@@ -571,6 +578,10 @@ export class InsanityShadowProj extends Entity {
   w = 40; h = 40;
   dead = false;
   life = 300;   // Projectile.cs:8833 timeLeft=300(曾 480,终审修)
+  /** ★BJ294 敌射侧拒割位：965 敌对影手 SetDefaults hostile（型录 hostile:true,
+   *  aiStyle 187;964 玩家侧镜像 InsanityShadowFriendly 才 friendly）→ 原版
+   *  CutTiles 调用点 friendly 门（P.cs:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
   alpha = 255;              // 255=全透明（SetDefaults）→ 淡入至 50
   private ai0: number;
   private readonly ai1: number;

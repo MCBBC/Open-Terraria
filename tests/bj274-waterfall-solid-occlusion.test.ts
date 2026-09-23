@@ -66,7 +66,7 @@ describe('BJ274 丛林草半砖唇瀑布横流带·实心遮挡裁剪', () => {
     expect(creeps.every((c) => c.sh === 8)).toBe(true);
     expect(creeps[0].px).toBe(1867 * 16);
   });
-  it('坡格 (1885,295) 上的扇形片不裁（形状格非全实心,与原版瀑布画于非实心块后同效）', () => {
+  it('坡格 (1885,295) 上的扇形片不裁（形状格非全实心;★BJ289:对原版=近似(债)非同效——原版 Solid pass 形状格不透明子域实会遮挡,本仓可见域偏大）', () => {
     const fans = calls.filter((c) => c.sw === 2 && c.sh === 8
       && c.px >= 1885 * 16 && c.px < 1886 * 16);
     expect(fans.length).toBe(8);

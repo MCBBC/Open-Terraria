@@ -2507,7 +2507,16 @@ export class MolotovProj extends Entity {
     // → 次拍 AI 复涨盒;本仓涨盒/递减同拍连排,涨盒早一拍——该拍起 alpha=255 已隐身,
     // 无观感差,登记维持）：期满 Kill = 火云出口 breakOpen（:75347 Kill 链）。
     // 旧 `t>600` 静默消失（无爆裂）退役
-    if (--this.timeLeft <= 0) { this.breakOpen(game); return; }
+    // ★BJ290 件1 定谳修订注（2026-09-23）：U1 判语「期满死=:17132 !active 门原版本
+    //  就不割」与反编译相悖——:17132 门只拦 HandleMovement 内杀位;原版 timeLeft--
+    //  Kill 在 :17308-17313=Damage()【:17184 之后】同一子步体内,故期满拍 CutTiles
+    //  （:12517）先照跑再 Kill（盒=前拍涨盒支 80×80、位=本拍位移后,与本仓此处
+    //  全同）。按「反编译唯一标杆」补前置割;红队若推翻此修订,摘本支即可单点回退。
+    if (--this.timeLeft <= 0) {
+      cutTilesBox(game, this.x, this.y, this.w, this.h);
+      this.breakOpen(game);
+      return;
+    }
     if (this.timeLeft <= 3) {
       // 涨盒支（:30704-30717）：tileCollide=false（上支已读）/alpha=255（隐身）/
       // 盒 80×80 中心重排（position±width/2 重排原文）/knockBack=8
@@ -2522,6 +2531,11 @@ export class MolotovProj extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean };
       if (e.dead || this.hitSet.has(e.id)) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
+        // ★BJ290 件1（死亡段割面族 BJ260/285 同款前置习语,2026-09-23）：CutTiles
+        //  （P.cs:12517）在 Damage() 内先于 Damage_PVE（:12523）——399 penetrate 1
+        //  命中敌即裂拍【照割】（CanCutTiles :15407 / CanDealDamage :12461 两排除表
+        //  均无 399;中央割 !e.dead 门=死亡拍整缺 → 前置弹盒上报,幂等双报同惯例）。
+        cutTilesBox(game, this.x, this.y, this.w, this.h);
         this.hitSet.add(e.id);
         this.breakOpen(game);
         return;
@@ -2871,6 +2885,13 @@ export class CounterweightProj extends Entity {
       const ns = Math.hypot(this.vx, this.vy);
       if (ns > 6) { this.vx *= 0.5; this.vy *= 0.5; }
     }
+    // ★BJ290 件1（死亡段割面族 BJ260/285 同款前置习语,2026-09-23）：CutTiles
+    //  （P.cs:12517）先于 Damage_PVE（:12523）aiStyle 99 段——-2 脱离克隆 penetrate 1
+    //  （:64741-64744）一次命中即亡拍【照割】（556-561/1079 过 CanCutTiles :15407 /
+    //  CanDealDamage :12461 两表;中央割 !e.dead 门=死亡拍整缺 → 前置弹盒上报,hurt
+    //  (:403)/onHit(:413) 前序=原版序）。撞墙亡（上方 chX 支）=原版 HandleMovement
+    //  杀位 → :17132 !active 门,原版本就不割勿扩;环绕态 0/1 命中只弹不亡无死亡拍。
+    if (this.ai0 === -2) cutTilesBox(game, this.x, this.y, this.w, this.h);
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen,
       (e) => this.onHit(e), undefined, true);   // 玩家级共享免疫（DefaultToYoyo :5809-5813）
   }

@@ -137,6 +137,11 @@ const ID_STATIC_1122_TABLE = new IdStaticSharedTable(10 * TICK_MS);
  *  全场同型一张 30t 窗：多颗云同拍扑同敌只结算一颗 */
 const ID_STATIC_1128_TABLE = new IdStaticSharedTable(30 * TICK_MS);
 
+/** ★BJ286 482 诅咒焰墙（爬藤怪法杖 3014：usesIDStaticNPCImmunity +
+ *  idStaticNPCHitCooldown=10，Projectile.cs:5584-5585）——全场同型一张 10t 窗，
+ *  ClingerStaffWallProj 消费 */
+export const ID_STATIC_482_TABLE = new IdStaticSharedTable(10 * TICK_MS);
+
 // ================= L1 GameMode 难度乘区正解（风暴家 EVP/PVE 双轴） =================
 
 /** LightningPlayerDamageScaling（GameDifficultyData.cs:71；**曲线键在 Main.Difficulty
@@ -319,6 +324,9 @@ export function dealContacts(
    *  :12592 ⇒ 同拍重叠多怪只结算【桶序首个】，随后弹亡再无第二目标）。叶弹 227
    *  调用侧启用（其一拍 181 子步全路径扫掠,每子步只允许一次命中结算面） */
   stopAfterFirstHit = false,
+  /** ★BJ286：per-target 伤害调整（Projectile.Damage 段逐型算式挂点——DamageVar 后/
+   *  banner 前调用，返回调整后 dmg）。首位消费者 = 482 蠕形 aiStyle6/37 减半 :12983 */
+  damageAdj?: (ent: unknown, dmg: number) => number,
 ): void {
   cd.tick();
   for (const ent of game.enemies()) {
@@ -408,6 +416,10 @@ export function dealContacts(
     //   截断式同值）。
     let dmg = damageVarRoll(self.damage,
       ((game.player as unknown as { luck?: number } | null)?.luck) ?? 0);
+    // ★BJ286：per-target 伤害调整尾参（Projectile.Damage 段内逐型算式的挂点——
+    //  首位消费者 = 482 诅咒焰墙蠕形减半 :12983 `dmg /= 2`，序在 DamageVar(:12970)
+    //  后、banner(:13388)/暴击翻倍前 = 原文序）。既有调用零传参零变化。
+    if (damageAdj) dmg = damageAdj(e, dmg);
     dmg = applyBannerDamageDealt(game, e, dmg);
     dmg *= crit ? 2 : 1;
     // ★F3 接线（蓝队四轮）：焰爆石+拍击石弹幕双支（Projectile.cs:13439-13446）——

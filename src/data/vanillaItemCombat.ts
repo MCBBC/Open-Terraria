@@ -218,6 +218,10 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //   · 1319 useAmmo=【末值语义】——源序 Bullet(:16335)→Snowball(:16343,1458:16343)
   //     双赋值终值 949,提取器首匹配取 97,本表 949 权威（提取器盲区记录,供未来反哺
   //     useAmmo 双赋值末值语义）。
+  //   · ★BJ292 2026-09-23 机械复验（BJ153「itemcombat LAG 盘点」销账核对）：
+  //     --dump 1457 × 本表 45 件逐字段重跑=29 全等/8 部分/1 末值/15 LAG 33 字段,
+  //     与 BJ205 盘点逐项吻合——上方清单即现行权威残余（数据源/字段数均可机械
+  //     重算）,勿按旧口径重盘。
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };

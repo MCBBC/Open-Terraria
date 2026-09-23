@@ -1,5 +1,7 @@
-// 夜间坠星（WorldGen.SpawnFallingObjects :71861-71898 → 弹幕 720 Spawner →
-// AI_148 :50191-50225 弹幕 12 FallingStar）1:1：
+// 夜间坠星（WorldGen.SpawnFallingObjects :72217 起,坠星支出生 :72425 → 弹幕
+// 720 Spawner → AI_148_StarSpawner :54027-54060 弹幕 12 FallingStar）1:1：
+//（★F3 勘误:旧锚 :71861-71898/:50191-50225 系 1456 行号——1457 该两处实为
+//  蘑菇草 PlaceTile 段与 AI_067 段,按 1457 亲读重钉）
 //   生成：仅夜（非 remix）、X 列 100..maxTilesX-51、Y 顶部 maxTilesY×5% 内；
 //         运气定向（FindClosest + RollLuck(15)==0 → 玩家 ±640px，ai[1] 记玩家）；
 //         初速 = (Next(-100,101), Next(200)+100) 归一化到恒速 12px/tick（无重力）。
@@ -31,13 +33,35 @@
 //         hitCritters({trap}) 接线,penetrate=-1 命中不消亡。
 //         T4 音量重校：Kill SoundID.Item10（:77261）与 AI SoundID.Item9（:24133-24136）
 //         两处 PlaySound 均无音量参=缺省 1.0,旧 0.8/0.5 系手调近似。
+// ★BJ289（2026-09-23 B①）：remix 敌星伤玩家面落刀——SetDefaults :932-934
+//         `if (Main.remixWorld) hostile = true`（曾误记 :1759-1761,本批勘误）+
+//         SkipDamage_EVP={108,164,1002} 不含 12（ProjectileID.cs:275）→ Damage_EVP
+//         （Projectile.cs:14846-14949）对本地玩家生效且 owner==myPlayer 不豁免
+//         （EVP 无 owner 门）;非 remix 世界 hostile=false 整面不达=自然星常态不变。
+//         终值序/登记面见文件尾 EVP 段注。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { GorePiece } from './GorePiece';
 import { applyBannerDamageDealt, hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy } from './projTargets';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { f32, HOSTILE_PROJECTILE_DAMAGE_MULTIPLIER, mainDifficulty, sampleCurve } from '../stats/ScaleStats';
+import { damageVarRoll } from '../stats/DamageVar';
+import { ITEM_BY_KEY } from '../data/items';
 import type { GameHooks } from './types';
+
+/** 死囚毛衣 5007 佩戴态（Player.deadMansSweater :2087,armor[0..9] 功能槽扫描;
+ *  本地镜像 proj1457.playerDeadMansSweater——equipStats 无此键 GAP 登记维持） */
+const DEAD_MANS_SWEATER_ID = ITEM_BY_KEY['vi_5007_dead_man_s_sweater'] ?? NaN;
+function playerDeadMansSweater(game: GameHooks): boolean {
+  const armor = (game.player as unknown as { inv?: { armor?: Array<{ id?: number } | null> } })?.inv?.armor;
+  if (!Array.isArray(armor)) return false;
+  for (let i = 0; i < Math.min(10, armor.length); i++) {
+    const slot = armor[i];
+    if (slot && slot.id === DEAD_MANS_SWEATER_ID) return true;
+  }
+  return false;
+}
 
 /** 弹 12 数据面（AI_148 星临盆 NewProjectile :54059 实参）：damage=1000（natural 星
  *  专值——白天 Kill 门 :24092 `damage == 1000` 印证）/ knockBack=10f /
@@ -54,6 +78,14 @@ export class FallingStar extends Entity {
   private homing = false;
   /** Spawner 阶段剩余 tick（原版 ai[0] 180 后转正星） */
   private warmup: number;
+  /** ★BJ294 双相拒割位（getter=中央割门运行时覆写口）：暖机相=720 催生器
+   *  （SetDefaults :7619-7627 无 friendly 行=friendly 缺省 false）→ 原版
+   *  CutTiles 不跑。★F2 勘误（2026-09-23）：旧注「WorldGen 出生 owner=255」系
+   *  事实错误——W.cs:72425 生成 720 显式 owner=Main.myPlayer（亲读实证）,
+   *  不割真依据仅为 720 SetDefaults 无 friendly 行。转正相=12 正星（friendly
+   *  :926-940 + AI_148 临盆出生显式 owner=Main.myPlayer P.cs:54059）→ 原版
+   *  每 tick 割 = 本相不标照割同相。详 Entity.ts 中央门 BJ294 注。 */
+  get noVanillaCut(): boolean { return this.warmup > 0; }
   private soundT = 0;
   private nextSound: number;
   // ---- ★G′ 补刀批（2026-09-02）视觉/数据对齐位 ----
@@ -120,7 +152,7 @@ export class FallingStar extends Entity {
     const wetId = this.warmup > 0 ? 720 : 12;
     projectileWetSection(this, game, w.store, this.x, this.y, this.w, this.h,
       wetId, !!projectileData(wetId)?.ignoreWater);
-    // 白天清除（Spawner :50193 / 正星 :22141——仅自然星）
+    // 白天清除（Spawner Kill 门 :54029-54032 / 正星 :22141——仅自然星）
     // ★IIIII224（Projectile.cs:24093/:54030 两 Kill 门均带 !remixWorld）：
     //  remix 世界自然星/催生器白天不灭
     if (w.clock.isDay && !w.seedFlags?.remix) {
@@ -247,8 +279,9 @@ export class FallingStar extends Entity {
     //  （:12622-12631 受理式 `(!friendly || (!flag && !Zap)) && !(hostile&flag2)` 对
     //  friendly 目标恒 return）,唯巫毒窄门
     //  :11970-11972（向导 22 killGuide/裁缝师 54 killClothier）——hitTownNpcs
-    //  ('playerProj') 内建同门,无娃零命中。原版/remix SetDefaults hostile=true
-    //  分支（:1759-1761）未建模=登记残差。本仓两桶独立于 enemies 桶;hitCritters
+    //  ('playerProj') 内建同门,无娃零命中。原版 remix SetDefaults hostile=true
+    //  分支（:932-934,★BJ289 行号勘误,曾误记 :1759-1761）的伤玩家面已建模=
+    //  文件尾 EVP 段（★BJ289 B①,remix 门内）。本仓两桶独立于 enemies 桶;hitCritters
     //  一击致死/hitTownNpcs 8t 无敌帧,均不消亡本弹（penetrate=-1,同 FallingBlock/
     //  Piranha 先例）;kb 同敌怪环 direction×10,伤面平传 STAR_DAMAGE（helper 单值
     //  参,旗面乘区同其他调用点粒度）。
@@ -270,12 +303,66 @@ export class FallingStar extends Entity {
       //  `!npcProj ? !trap : false`）=false → 写位链全不达：lastCreatureHit（:13382
       //  ownedBySomeone 门）/addDPS（:13712 同门）/StrikeNPC(255)（:13702）→
       //  LocalPlayerInteraction 不置位（NPC.cs:82097 owner==myPlayer 门）= 坠星杀怪
-      //  不进旗杀账/图鉴/DPS 计（自然坠星与星炮同 trap 面）。旧 true=反向偏差。
+      //  不进旗杀账/图鉴/DPS 计（仅弹 12 有 trap 行;★BJ289 勘误:星炮 197 实为
+      //  shoot955——955 SetDefaults :9015-9025 无 trap 行,fromPlayer=true 杀账同相,
+      //  不与 12 同 trap 面）。旧 true=反向偏差。
       const hurtOk = e.hurt(applyBannerDamageDealt(game, e, STAR_DAMAGE),
         (this.vx < 0 ? -1 : 1) * STAR_KB, 0, game, 0, false, -1, false);
       // Damage 尾梯（:14180-14183,pen≠1 档）写 immune[owner]=10——仅实扣跳写
       // （iframes 头门拒收跳原版不达尾梯）
       if (hurtOk) noteVanillaProjImmune(game, 12, e.id);
+    }
+    // ---- ★BJ289（2026-09-23 B①）remix 敌星伤玩家面（Damage_EVP 全口径）----
+    //  锚：SetDefaults :932-934 remix→hostile=true + :940 trap=true;
+    //  Damage() :12518-12528 PVE→EVP 序（本段置于对敌环后同序）;Damage_EVP
+    //  :14846-14949 门 = hostile && damage>0 && !SkipDamage_EVP[12]（{108,164,1002},
+    //  ProjectileID.cs:275）&& 玩家 !dead/!immune（General 桶）——owner==myPlayer
+    //  不豁免（EVP 无 owner 门,remix 自然星本就 owner=本地玩家 :54059）。
+    //  终值序 :14905-14922：DamageVar(damage,−ownerLuck) →(int)(×HOSTILE_PROJECTILE_
+    //  DAMAGE_MULTIPLIER[GameDifficultyData.cs:67,Journey .5→Master 3;12 无曲线覆写
+    //  默认档]) → ×2(:14915 num4) → 死囚毛衣 trap×0.5 帽 300(:14919-14922;本地镜像
+    //  proj1457.playerDeadMansSweater——equipStats 无键 GAP 登记维持)。
+    //  Colliding=平面 AABB（Damage_GetHitbox :15037 12 无 Inflate 支）。
+    //  登记不建模：SpawnHitVisuals 受击尘（:14904）;dodgeable（IsDamageDodgeable
+    //  :15146 对 12 恒 true,本仓 damagePlayer 无闪避位）;trapDebuffSource 位
+    //  （:14943）;ByProjectile 死因档（attacker 缺省走环境死因,1091 同备案）;
+    //  MP 服务端轴（netMode==2 EVP 不达,本仓单机/本地面）。
+    {
+      const p = game.player as unknown as {
+        x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
+        dead?: boolean; iframes?: number; luck?: number; facing?: number;
+        shieldParryTimeLeft?: number; maxHp?: number; maxMana?: number;
+      };
+      if (!!w.seedFlags?.remix && p && !p.dead && !((p.iframes ?? 0) > 0)) {
+        const px = p.x ?? (p.cx ?? this.cx) - 10;
+        const py = p.y ?? (p.cy ?? this.cy) - 21;
+        const pw = p.w ?? 20, ph = p.h ?? 42;
+        // CanParryAgainst（Player.cs:31673-31679）：盾反窗 + 弹在面向侧 + 速度非零
+        // （恒速 12px/t 恒真）——格挡成功=零伤（flag2 短路,不 SpawnHitVisuals）
+        const parried = ((p.shieldParryTimeLeft ?? 0) > 0)
+          && Math.sign(this.cx - (p.cx ?? px + pw / 2)) === (p.facing ?? 1);
+        const collides = this.x < px + pw && this.x + this.w > px
+          && this.y < py + ph && this.y + this.h > py;
+        if (!parried && collides) {
+          let dmg = damageVarRoll(STAR_DAMAGE, -(p.luck ?? 0));       // :14905
+          dmg = Math.trunc(f32(f32(dmg)
+            * sampleCurve(HOSTILE_PROJECTILE_DAMAGE_MULTIPLIER, mainDifficulty(game.world))));
+          dmg *= 2;                                                    // :14915-14916
+          if (playerDeadMansSweater(game)) {                           // :14919-14922
+            dmg = Math.trunc(f32(f32(dmg) * 0.5));
+            dmg = Math.min(dmg, 300);
+          }
+          if (dmg >= 1) {                                              // <1 由 Hurt 丢弃
+            game.damagePlayer(dmg, this.cx, this.cy, undefined, false, false);
+            if ((game.player as unknown as { dead?: boolean }).dead) {   // :14945-14947
+              game.achievements?.handleSpecialEvent(4, {
+                statLifeMax: p.maxHp ?? 100,
+                statManaMax: p.maxMana ?? 20,
+              });
+            }
+          }
+        }
+      }
     }
     // 周期音效（AI :24132-24136 soundDelay 20+rand(40) 播 Item9）
     if (++this.soundT >= this.nextSound) {

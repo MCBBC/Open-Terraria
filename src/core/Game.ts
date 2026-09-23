@@ -455,6 +455,7 @@ import { SolutionProj, WaterSplashProj, SPRAY_PROJ_IDS, WATER_PROJ_CONV, solutio
 import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../entities/MissileProj';
+import { limitPointToPlayerReachableArea } from '../entities/PlayerReachableArea';   // ★BJ290 件3 单源化
 import { SkyDragonSpin, SkyDragonSwing, SkyDragonShot, SkyDragonCircle } from '../entities/SkyDragonFury';
 import { PhoenixChannel, PhoenixBolt } from '../entities/PhoenixBowProj';
 import { MonkStaffSpin, MonkSlam, GhastlyGlaiveProj, MonkGhast } from '../entities/MonkStaffFury';
@@ -472,6 +473,7 @@ import { SolarEruptionWhip } from '../entities/SolarEruption';
 import { TideSlash } from '../entities/TideSlash';
 import { FirstFractalSlash } from '../entities/FirstFractal';
 import { ChainsawProj } from '../entities/ChainsawProj';
+import { ClingerStaffWallProj, computeClingerWallSpawn } from '../entities/ClingerStaffWallProj';   // ★BJ286 爬藤怪法杖 482 诅咒焰墙
 import { MinionProj, pickSentryLandingSpot, minionTrueBox } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
@@ -3643,6 +3645,13 @@ export class Game implements GameHooks {
         //  重放 projId（netMakeProj case 3）——快照通道无需携 vid。
         kind = 3; tag = p.kind ?? 'dart';
         if (p.hostile) kind |= 0x80; // 机关/陷阱弹（环境危害，原版伤所有玩家）
+      }
+      else if (p instanceof ClingerStaffWallProj) {
+        // ★BJ286：482 诅咒焰墙必须在 projId!==undefined 通判前拦截（否则访客按
+        //  kind1 重建成回旋镖）。走 kind0 静态 Arrow 傀儡位（vx=1E-06 级恒驻,
+        //  贴图 alpha=255 本就不画）——访客侧尘效不重建（dust-only 视觉,与现网
+        //  全部 dust-only 弹同档），登记债 BJ286-MP。
+        kind = 0; tag = String(p.projId ?? 482);
       }
       else if (p.projId !== undefined) {
         kind = 1; tag = String(p.projId);
@@ -17030,35 +17039,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** LimitPointToPlayerReachableArea（Player.cs:45832-45860）近似：鼠标世界点本就
-   *  在视口内（≤MaxWorldViewSize），只做世界边界内钳——6155/6173 出手落点用。 */
+   *  在视口内（≤MaxWorldViewSize），只做世界边界内钳——6173/950 出手落点用。
+   *  ★BJ290-M2 备案（2026-09-23）：与单源 ./PlayerReachableArea 语义不同（无可达区
+   *  盒钳）——950 原版走 GetFarthestSpawnPositionOnLine :50063-50089 调【全式】:50068,
+   *  收编时行为会变须随刀重产钉值,故本刀不并（详 PlayerReachableArea.ts 头注）。 */
   private limitPointToPlayerReach(x: number, y: number): { x: number; y: number } {
     const st = this.world.store;
     const cx = Math.min(Math.max(x, TILE * 2), (st.w - 2) * TILE);
     const cy = Math.min(Math.max(y, TILE * 2), (st.h - 2) * TILE);
     return { x: cx, y: cy };
   }
-  /** LimitPointToPlayerReachableArea（Player.cs:44828-44855）全式：以玩家中心为心的
-   *  MaxWorldViewSize(1920×1200,Main.cs:736-740) 矩形（CenteredRectangle 截断取整,
-   *  Utils.cs:929-932）先 ClampToWorldBorders（WorldUtils.cs:26-33 = Utils.Clamp 进
-   *  GetWorldPlayArea（:18-24,世界四界内收 640px））,再把点沿 矩形心→点 方向等比
-   *  缩回矩形内（scale=min(半宽/|dx|,半高/|dy|,1),:44837-44853）——SpawnMinionOnCursor
-   *  （Player.cs:48748-48752）召唤出生点钳制。上方 limitPointToPlayerReach 是仅世界
-   *  边界钳的近似版（6155/6173 用）,两者语义不同勿混用。 */
+  /** LimitPointToPlayerReachableArea（Player.cs:45830-45858）全式：以玩家中心为心的
+   *  MaxWorldViewSize(1920×1200,Main.cs:758) 矩形（CenteredRectangle 截断取整,
+   *  Utils.cs:961-963）先 ClampToWorldBorders（WorldUtils.cs:29-34 = Utils.Clamp
+   *  【定尺寸平移钳】进 GetWorldPlayArea（:18-24,世界四界内收 640px））,再把点沿
+   *  矩形心→点 方向等比缩回矩形内（scale=min(960/|dx|,600/|dy|,1)）——
+   *  SpawnMinionOnCursor（Player.cs:50097）召唤出生点钳制 + 6155 闪电之击（:49647）。
+   *  ★BJ290 件3（2026-09-23,普-U1 单源化）：实现迁往单源 ./PlayerReachableArea
+   *  （含 Utils.Clamp<T> :223-231 先 max 后 min 判序统一——旧 min(max(v,min),max)
+   *  在退化域 v≤max 带恒取 max=反向,★BJ286② 定谳）;本方法仅保留 {x,y} 包装面。
+   *  上方 limitPointToPlayerReach 是仅世界边界钳的近似版（6173/950 用,备案
+   *  BJ290-M2 未收编）,两者语义不同勿混用。 */
   private clampPointToPlayerReachableArea(x: number, y: number): { x: number; y: number } {
-    const st = this.world.store;
-    let rx = Math.trunc(this.player.cx) - 960;             // CenteredRectangle（Utils.cs:931 截断）
-    let ry = Math.trunc(this.player.cy) - 600;
-    const PA = 640;                                        // GetWorldPlayArea 内收（WorldUtils.cs:20）
-    // Utils.Clamp(r, bounds)（Utils.cs:204-207）：X∈[640, 右界−640−1920]（越界取 max 侧）
-    rx = Math.min(Math.max(rx, PA), st.w * TILE - PA - 1920);
-    ry = Math.min(Math.max(ry, PA), st.h * TILE - PA - 1200);
-    const ccx = rx + 960, ccy = ry + 600;                  // worldRect.Center（X + Width/2）
-    const dx = x - ccx, dy = y - ccy;
-    const adx = Math.abs(dx), ady = Math.abs(dy);
-    let scale = 1;
-    if (adx > 960) scale = Math.min(scale, 960 / adx);     // num4 = Width/2（:44840-44845）
-    if (ady > 600) scale = Math.min(scale, 600 / ady);     // num6 = Height/2（:44846-44851）
-    return { x: ccx + dx * scale, y: ccy + dy * scale };
+    const [rx, ry] = limitPointToPlayerReachableArea(
+      x, y, this.player.cx, this.player.cy, this.world.store.w * TILE, this.world.store.h * TILE);
+    return { x: rx, y: ry };
   }
   /** Collision.CanHitLine(玩家中心→点) 转发（6155 吸附步进/6173 补雷走线门） */
   private lineOfSightWalkable(x: number, y: number, fromX: number, fromY: number): boolean {
@@ -18057,6 +18062,48 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.onManaItemUsed();
           this.useSwing(def, ang, ps?.spd ?? 1);
           this.regrowSlowMagicSwing(critVid);                      // ★F-7：useSwing 重播重置付款点拉伸 → 补拉
+          this.input.mouseDown = false;
+          break;
+        }
+        // ---- ★BJ286 爬藤怪法杖 3014（ItemCheck_Shoot 专支 Player.cs:49084-49141，
+        //      1458 同域 diff=same）：发射点沿弹道逐速度步推进（CanHitLine 断点或
+        //      距鼠标 <20+|vx|+|vy| 吸附鼠标）→ 以该点图格列为墙柱：向下扫 ≤30 格
+        //      找实心/平台/380 播种盒定墙底（无底=flag7 整支不发射），向上扫 ≤30 格
+        //      定自由跨度，墙高钳 240px（16×15），X 吸附格左缘。NewProjectile(·, ai0=
+        //      墙顶Y, ai1=墙高) → 弹 482 静态竖柱（AI_087，ClingerStaffWallProj）。
+        //      此前全落通用尾支=直飞 Arrow 弹（用户实报"弹幕效果错误"根因）。
+        //      残留③（BJ291 登记,低影响备案）：推进原点本仓=玩家盒心,原版字面=
+        //      RotatedRelativePoint(MountedCenter)（Player.cs:47605→:4209-4222,
+        //      Bottom+gfxOffY 基线 + mount.PlayerOffset/2+4 随 fullRotation 旋转）——
+        //      mount.PlayerOffset≠0（矿车等）骑乘发射时吸附起点 Y 有微差（首拍
+        //      ai0 覆写不受影响,仅 CanHitLine 断点/吸附列选取面）=备案不建模 ----
+        if (critVid === 3014) {
+          const stW = this.world.store;
+          const [cwx0, cwy0] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          // 发射侧几何全量（LimitPointToPlayerReachableArea + 推进吸附 + 竖扫）
+          // = computeClingerWallSpawn 纯函数单源（ClingerStaffWallProj.ts，钉值单测锚）
+          const spawn = computeClingerWallSpawn({
+            mouse: { x: cwx0, y: cwy0 },
+            playerCenter: { x: this.player.cx, y: this.player.cy },
+            playerBox: { x: this.player.x, y: this.player.y, w: this.player.w, h: this.player.h },
+            facing: this.player.facing,
+            shootSpeed: cw.shootSpeed,
+            worldPx: { w: stW.w * 16, h: stW.h * 16 },
+            canHitLine: (x1, y1, w1, h1, x2, y2, w2, h2) => canHit(stW, x1, y1, w1, h1, x2, y2, w2, h2),
+            isSolid: (tx, ty) => stW.isSolid(tx, ty),
+            sheetAt: (tx, ty) => TILE_DEFS[stW.type[stW.idx(tx, ty)]]?.vanilla?.sheet ?? -1,
+          });
+          if (!spawn.noFloor) {
+            const wall = new ClingerStaffWallProj(spawn.x, spawn.y, spawn.topY, spawn.hpx, cw.damage, cw.knockback);
+            wall.critChance = critTotal;
+            wall.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
+            this.entities.add(wall, 'projectiles');
+          }
+          this.playUseSound(critVid, 'tink');                   // UseSound=Item_100（vanilla-itemusesound 表值）
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.useSwing(def, ang, ps?.spd ?? 1);
+          this.regrowSlowMagicSwing(critVid);
           this.input.mouseDown = false;
           break;
         }
@@ -31794,13 +31841,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private fireZenithSword(cycle: number, z: { useTime: number; fired: number; vid: number; dmg: number; crit: number; pen: number }): void {
     const inp = this.input;
     const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-    // LimitPointToPlayerReachableArea（Player.cs:44828-44851）：钳入玩家中心
-    // Main.MaxWorldViewSize(1920×1200) 矩形（Main.cs:740）
-    let tzx = mwx, tzy = mwy;
+    // LimitPointToPlayerReachableArea（Player.cs:49208 pointPosition4=原版调用真锚,
+    //  旧注 :44828 系行号漂移）：钳入玩家可达区。★BJ290 件3（2026-09-23,普-U1）：
+    //  旧内联 ±960/600（无 play area 平移钳,贴边玩家第三套分叉语义）退役,改指
+    //  单源 ./PlayerReachableArea（定尺寸平移钳 Utils.cs:236-239+判序 :223-231）
+    let tzx: number, tzy: number;
     {
-      const hw = 960, hh = 600;
-      tzx = Math.max(this.player.cx - hw, Math.min(this.player.cx + hw, tzx));
-      tzy = Math.max(this.player.cy - hh, Math.min(this.player.cy + hh, tzy));
+      const [zx, zy] = limitPointToPlayerReachableArea(
+        mwx, mwy, this.player.cx, this.player.cy,
+        this.world.store.w * TILE, this.world.store.h * TILE);
+      tzx = zx; tzy = zy;
     }
     if (cycle === 1 || cycle === 2) {
       // GetZenithTarget（:46045-46070）：搜索中心=钳后鼠标点、400px 内最近敌

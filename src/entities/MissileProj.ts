@@ -63,35 +63,18 @@ import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ
 // ===================== 数学原语（逐字对源码） =====================
 
 /**
- * Player.LimitPointToPlayerReachableArea（Player.cs:45830-45858，2026-08-31 台账清偿）
- * ——光标点钳进"玩家可达区"：以玩家中心为心、Main.MaxWorldViewSize(1920×1200,
- * Main.cs:754-758) 的矩形经 WorldUtils.ClampToWorldBorders（:26-33 = Utils.Clamp 到
- * GetWorldPlayArea(:18-24)——世界四边各留 640px 缓冲）裁剪后的盒；盒外点沿中心射线
- * 等比回拉到盒面（X/Y 各取更紧的半宽比例，方向不变、距离归界）。
+ * Player.LimitPointToPlayerReachableArea（Player.cs:45830-45858）——★BJ290 件2/件3
+ * （2026-09-23,普-U1 单源化）：实现迁往单源 ./PlayerReachableArea（定尺寸平移钳——
+ * Utils.Clamp 矩形版 Utils.cs:236-239 盒恒 1920×1200 只平移,不与 play area 相交裁剪;
+ * 判序=先 max 后 min）。本文件旧【相交裁剪】实现（盒可缩小+玩家恒居裁后盒心,
+ * 半宽按裁后尺寸）=P1③ 偏差本体（U1 例:世界宽 8400/玩家 cx=700/目标 2000:
+ * 原版可达不动,旧版钳到 1660）,就此退役。re-export 承接 491/16/34/79 与测试旧 import 面。
  * 消费位：AI_009_MagicMissiles_Old :44247-44249（491 飞刀）与 AI_009_MagicMissiles
  * :44045-44046（16/34/79 新导弹族）都在算距离前先钳。★BJ279 移交②（BJ277 批并刀,
  * 2026-09-22）：新导弹族接线已补（steer 引导支）——「接线遗漏判定」销账。
  */
-export function limitPointToPlayerReachableArea(
-  px: number, py: number, pcx: number, pcy: number, worldWPx: number, worldHPx: number,
-): [number, number] {
-  // worldRect = CenteredRectangle(Center, MaxWorldViewSize)（左上=心−Size/2）
-  // ∩ GetWorldPlayArea()（世界边框 px 域 0..W/H 内缩 640）——Utils.Clamp 矩形
-  // 相交语义：贴边玩家处盒被裁小、Center 随之位移,num4/num6 用【裁后】半宽/高。
-  const pl = 640, pt = 640, pr = Math.max(pl, worldWPx - 640), pb = Math.max(pt, worldHPx - 640);
-  const l = Math.max(pcx - 960, pl);
-  const r = Math.min(pcx + 960, pr);
-  const t = Math.max(pcy - 600, pt);
-  const b = Math.min(pcy + 600, pb);
-  const cx = (l + r) / 2, cy = (t + b) / 2;
-  const hw = Math.max((r - l) / 2, 0), hh = Math.max((b - t) / 2, 0);
-  const vx = px - cx, vy = py - cy;
-  const ax = Math.abs(vx), ay = Math.abs(vy);
-  let k = 1;
-  if (ax > hw) k = Math.min(k, hw / ax);
-  if (ay > hh) k = Math.min(k, hh / ay);
-  return [cx + vx * k, cy + vy * k];
-}
+import { limitPointToPlayerReachableArea } from './PlayerReachableArea';
+export { limitPointToPlayerReachableArea };
 
 /** Utils.GetLerpValue（Utils.cs:283-307，clamped=true）——含 from>to 倒置区间 */
 function lerpValue(from: number, to: number, t: number): number {
@@ -762,6 +745,8 @@ export class MagicMissileProj extends Entity {
   /** ★BJ277 TileCollision 核心扫掠（Collision.cs:2299-2459 单遍 1:1,aiStyle 9 专参）。
    *  · 盒 = GetCollisionParams（:19982 resizeAnchor 缺省 (0.5,0.5) + :20127-20131
    *    aiStyle 9 → colWidth=colHeight=4）→ 盒左上 = Center−(2,2)（:17698）。
+   *  · 扫描带 = [value,value2)/[value3,value4)【独占】界（:2315-2324;value3/value4
+   *    双钳 maxTilesY−40=底 40 行不扫,★BJ288 F1/F2——旧闭末槽多扫右/底一列已退役）。
    *  · 单遍【目标位盒】重叠判定（:2355 vector2=Position+Velocity）——32px/拍对单格墙
    *    可隧穿 = 原版同款快弹 quirk（wiki「Wall-piercing weapons」类,刻意不补步进）。
    *  · 四向夹速残量=贴面距（从上 :2388/从左 :2406/从右 :2426/从下 :2446）+ 原版
@@ -785,14 +770,21 @@ export class MagicMissileProj extends Entity {
     const bx = this.cx - 2, by = this.cy - 2;   // resizeAnchor 0.5 → 盒左上 = Center−半盒
     const dx = this.vx, dy = this.vy;
     let rx = dx, ry = dy;
-    const tx0 = Math.max(0, Math.floor(bx / TILE) - 1), tx1 = Math.min(st.w - 1, Math.floor((bx + bw) / TILE) + 2);
-    const ty0 = Math.max(0, Math.floor(by / TILE) - 1), ty1 = Math.min(st.h - 1, Math.floor((by + bh) / TILE) + 2);
-    let num6 = (ty1 + 3) * TILE;                // :2319 num6（从上支最顶面门,初值=扫描带底外）
+    // ★BJ288 F1/F2（Collision.cs:2315-2324 逐字;physics/TileCollision.ts:1299-1302 同习语）：
+    //  上界=【独占】界（i<value2/j<value4）——旧 `<=` 把 floor+2 当闭末槽=右/底各多扫
+    //  一列/行（vanilla 从不扫描的列面曾把引导星锁在墙面上,deviating 面退役;独占界下
+    //  「整速穿墙」=原版快弹隧穿 quirk 刻意保留）;value3/value4 双双钳 maxTilesY−40
+    //  （底 40 行 TileCollision 永不扫=原版 quirk;旧钳 st.h−1 系 tileSweep 孤例）。
+    const tx0 = Math.max(0, Math.min(Math.floor(bx / TILE) - 1, st.w - 1));
+    const tx1 = Math.max(0, Math.min(Math.floor((bx + bw) / TILE) + 2, st.w - 1));   // 独占
+    const ty0 = Math.max(0, Math.min(Math.floor(by / TILE) - 1, st.h - 40));
+    const ty1 = Math.max(0, Math.min(Math.floor((by + bh) / TILE) + 2, st.h - 40));  // 独占+底钳
+    let num6 = (ty1 + 3) * TILE;                // :2319 num6（从上支最顶面门,初值=扫描带底外;用钳后 value4）
     let num = -1, num2 = -1, num3 = -1, num4 = -1;   // :2311-2314 X 命中格(num,num2)/Y 命中格(num3,num4)
     const slopeAt = (i: number, j: number): number =>
       i >= 0 && i < st.w && j >= 0 && j < st.h ? st.slope[st.idx(i, j)] : 0;   // null 格=坡 0（:2408-2411/:2428-2431）
-    for (let i = tx0; i <= tx1; i++) {
-      for (let j = ty0; j <= ty1; j++) {
+    for (let i = tx0; i < tx1; i++) {
+      for (let j = ty0; j < ty1; j++) {
         if (!st.inBounds(i, j) || !st.isActive(i, j) || !st.isSolid(i, j)) continue;
         let vy4 = j * TILE, h7 = TILE;
         if (st.half[st.idx(i, j)]) { vy4 += 8; h7 -= 8; }            // halfBrick :2349-2354
@@ -1165,28 +1157,44 @@ export class MagicMissileProj extends Entity {
           // ★MINOR-2：34 充能白热光环（Main.cs:33680-33694,glow 链段本体前）——
           // redT>0 时 4 份白模本体绕 anchor 公转：offset=(4×t2d,0) RotBy
           // (rot+num387×2π)（num387 0.25 步进 0/.25/.5/.75）、绘制 rotation=本体角、
-          // scale=t2d、color=(255,255,255,127)×0.75 → alpha≈0.373。本仓无 glowmask
-          // 图集,以本体帧 source-in 白填充等价合成（whiteHot34 按帧缓存）
+          // scale=t2d、color105=(255,255,255,127)×0.75=(191,191,191,95) 固定色【无
+          // GetAlpha 光乘】。本仓无 glowmask 图集,以本体帧 source-in 白填充等价合成
+          // （whiteHot34 按帧缓存）。
+          // ★BJ288（红蓝 T1 漏修#2,与 79 黑影 BJ278 同族）：旧直绘 worldCanvas
+          //  source-over+α 面 ga=0.373 双重偏差——①被 compositeLight 光乘（原版全亮）
+          //  ②source-over 把 α 面当 rgb 权重=rgb 减半且遮挡亮背景（XNA 预乘 AlphaBlend:
+          //  rgb 面 191/255 恒加算,α 面 95/255 只进 dst 衰减因子）。收编 BJ278
+          //  projFullbrightQueue（compositeLight 后主画布 'lighter' 加算,opaque 底 α
+          //  无意义）——ga=rgb 面 191/255;α 面 dst 衰减 (1−texA×95/255) 不建模（79
+          //  A=0 同族登记残差,opaque 加算底不可表达）。几何当帧冻结入闭包;mock（无
+          //  队列方法）回退直绘保持既有验证链。
           const t2d = lerpValue(0, 6, this.redT);          // lerpValue10（:33682 GetLerpValue(0,6,localAI[0])）
           if (t2d > 0) {
             const wf = whiteHot34(this.frame);
             if (wf) {
               const drawRot = lerpS * this.rot - Math.PI / 2 * lerpS;   // num340（:33223/:33225）
               const ax = this.cx - this.vx / 2, ay = this.cy - this.vy / 2;   // vector81（:33229）
-              ctx.save();
-              ctx.imageSmoothingEnabled = false;
-              ctx.globalAlpha = (127 * 0.75) / 255;        // color105.A=127×0.75
               const rw = wf.width * t2d, rh = wf.height * t2d;
-              for (let k = 0; k < 4; k++) {
-                const oa = drawRot + k * 0.25 * Math.PI * 2;            // num387×2π 步进
-                ctx.save();
-                ctx.translate(ax + Math.cos(oa) * 4 * t2d, ay + Math.sin(oa) * 4 * t2d);
-                ctx.rotate(drawRot);
-                ctx.drawImage(wf, -rw / 2, -rh / 2, rw, rh);            // scale16=t2d
-                ctx.restore();
-              }
-              ctx.restore();
-              ctx.globalAlpha = 1;
+              const drawAura = (c: CanvasRenderingContext2D): void => {
+                c.save();
+                c.globalCompositeOperation = 'lighter';
+                c.imageSmoothingEnabled = false;
+                c.globalAlpha = 191 / 255;               // color105.rgb 面=(255×0.75) 截断入 byte
+                for (let k = 0; k < 4; k++) {
+                  const oa = drawRot + k * 0.25 * Math.PI * 2;          // num387×2π 步进
+                  c.save();
+                  c.translate(ax + Math.cos(oa) * 4 * t2d, ay + Math.sin(oa) * 4 * t2d);
+                  c.rotate(drawRot);
+                  c.drawImage(wf, -rw / 2, -rh / 2, rw, rh);            // scale16=t2d
+                  c.restore();
+                }
+                c.restore();
+              };
+              const q = (r as unknown as {
+                queueProjFullbright?: (fn: (c: CanvasRenderingContext2D) => void) => void;
+              } | undefined)?.queueProjFullbright;
+              if (typeof q === 'function') q.call(r, drawAura);
+              else drawAura(ctx);
             }
           }
         }

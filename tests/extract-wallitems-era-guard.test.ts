@@ -186,4 +186,55 @@ describe('extract-wallitems era guard（BJ284 落闸+BJ283 锚门组合）', () 
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // ---- ★BJ289 D（2026-09-23）：同锚 line 漂移拒跑轴（T4 漏修 P3——头注「同锚严判
+  //      drift」此前 washEmpty 未实现,lineDivergent 无条件出轴=同锚漂移恒绿） ----
+  /** 造同锚+line 漂移现库拷贝：第 2 条 line 复制首条 line（1456 可归因行,≠自身提取值
+   *  → lineDivergent=1;首条未动 → liveAnchor 仍 1456;SW_ITEM_VER=1456 → 同相） */
+  const sameAnchorDriftEnv = (dir: string) => {
+    const liveObj = JSON.parse(readFileSync(LIVE, 'utf8')) as Record<string, { line: number }>;
+    const ids = Object.keys(liveObj);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    const poisoned = JSON.parse(JSON.stringify(liveObj));
+    poisoned[ids[1]].line = liveObj[ids[0]].line;
+    expect(poisoned[ids[1]].line).not.toBe(liveObj[ids[1]].line);
+    const p = join(dir, 'same-anchor-drift.json');
+    writeFileSync(p, JSON.stringify(poisoned));
+    return { SW_WALLITEMS_JSON: p, SW_ITEM_VER: '1456' };
+  };
+
+  it('行为面:同锚 line 漂移拒跑（SW_ITEM_VER=1456 vs 1456 锚毒化拷贝 → exit 1+轴名指认）', () => {
+    const dir = mkdtempSync(join(TMP, 'wallitems-guard-'));
+    const before = md5(LIVE);
+    try {
+      const r = spawn([], sameAnchorDriftEnv(dir));
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('拒跑轴非空');
+      expect(r.stderr).toContain('同锚 line 域漂移');
+      expect(r.stderr).toContain('line 域二相');
+      expect(md5(LIVE)).toBe(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('变异 M4:摘同锚拒跑轴后对同锚 line 漂移恒绿复现（判别力）', () => {
+    const dir = mkdtempSync(join(TMP, 'wallitems-guard-'));
+    try {
+      const probeEnv = sameAnchorDriftEnv(dir);
+      const real = spawn([], probeEnv);
+      expect(real.status).toBe(1);                       // 真身拒（上侧行为面）
+      let src = readFileSync(SCRIPT, 'utf8');
+      src = src.replace(GAME_TRIGGER, GAME_ABS);
+      const TRIGGER = 'const sameAnchorLineDrift = (w) => liveAnchor != null && liveAnchor === SRC_VER && w.lineDivergent > 0;';
+      expect(src).toContain(TRIGGER);
+      const mutant = join(dir, 'mutant-sameanchor.mjs');
+      writeFileSync(mutant, src.replace(TRIGGER, 'const sameAnchorLineDrift = () => false; // ★变异:同锚拒跑轴摘除'));
+      const r = spawnSync('node', [mutant], { cwd: ROOT, encoding: 'utf8', timeout: 300_000, env: { ...process.env, ...probeEnv } });
+      expect(r.status).toBe(0);                          // 变异后恒绿=轴是唯一拦截面
+      expect(r.stderr).toContain('line 域二相 1 件');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

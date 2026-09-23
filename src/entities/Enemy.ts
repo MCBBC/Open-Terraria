@@ -3100,7 +3100,8 @@ export class Enemy extends Entity {
         // 稀有变体先掷（联合概率 = 主掷命中 × rare 掷命中,原版两层掷在 LSP case 内
         // 串联:鸭 case30 :1105-1126 Next(300)==0 换 Zombie_12 / 枭 case46 :1074-1093
         // Next(300)==0 三均分 {112,113,114}）——命中即独占本次发声跳过常规池
-        // （原版稀有支的"独占忙检"简化为普通掷,WebAudio 短音叠加无碍）
+        // （★BJ291：鸭稀有支 Zombie_12 的"独占忙检"已由 Sfx.SINGLE_INSTANCE 逐文件
+        //   槽承接=在播跳过,:1110-1114 原文语义;枭稀有支 {112,113,114} 原文本就无忙检）
         if (cs.rare && Math.floor(Math.random() * cs.rare.denom) === 0) {
           game.playSfxWav?.(cs.rare.files[Math.floor(Math.random() * cs.rare.files.length)], 1, this.cx, this.cy);
         } else {

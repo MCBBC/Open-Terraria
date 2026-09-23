@@ -281,8 +281,10 @@ if (Object.keys(out).length < 280) {
 }
 const FRESH = JSON.stringify(out);
 /** 双向 diff：id 集+wall/key/name 核心面严格（live-only/fresh-only/drift 三轴）;
- *  line 域按锚二相——现库锚==SRC_VER 时同严格（drift 轴）,异锚=line 域版本二相预期
- *  （lineDivergent 计数,报告不拒跑——写侧由 BJ283 锚门把关）。 */
+ *  line 域按锚二相——现库锚==SRC_VER 时同严格（同锚 line 漂移=sameAnchorLineDrift
+ *  纳入拒跑轴,★BJ289 D 落闸：此前 washEmpty 无条件漏 lineDivergent=同锚 line 漂移
+ *  恒绿,头注「同锚严判 drift」未实现）,异锚=line 域版本二相预期（仅计数报告——
+ *  写侧由 BJ283 锚门把关）;锚不可归因（anchorOf null）保守不拒。 */
 function washOf(liveObj) {
   const wash = { liveOnly: [], freshOnly: [], drift: [], lineDivergent: 0 };
   const coreOf = (o) => {
@@ -306,13 +308,15 @@ function washOf(liveObj) {
   }
   return wash;
 }
-const washEmpty = (w) => !w.liveOnly.length && !w.freshOnly.length && !w.drift.length;
+/** 拒跑轴判空（★BJ289 D：同锚 line 漂移入轴;异锚/锚不可归因维持仅报告） */
+const sameAnchorLineDrift = (w) => liveAnchor != null && liveAnchor === SRC_VER && w.lineDivergent > 0;
+const washEmpty = (w) => !w.liveOnly.length && !w.freshOnly.length && !w.drift.length && !sameAnchorLineDrift(w);
 function washReport(w) {
   console.error('  物证：');
   if (w.liveOnly.length) console.error(`    [live-only] 现库独有 ${w.liveOnly.length} 件（重产缺=提取器退化/洗库面）: ${w.liveOnly.slice(0, 6).join(', ')}`);
   if (w.freshOnly.length) console.error(`    [fresh-only] 重产独有 ${w.freshOnly.length} 件（现库缺=源侧新增/现库退化）: ${w.freshOnly.slice(0, 6).join(', ')}`);
   if (w.drift.length) console.error(`    [drift] 核心面值漂移 ${w.drift.length}: ${w.drift.slice(0, 6).join(' | ')}`);
-  if (w.lineDivergent) console.error(`    [line 域二相] line 差异 ${w.lineDivergent} 件（现库锚≠本次版本=预期二相,写侧由 BJ283 锚门把关）`);
+  if (w.lineDivergent) console.error(`    [line 域二相] line 差异 ${w.lineDivergent} 件（现库锚=${liveAnchor ?? '未知'}/本次=${SRC_VER}：异锚=版本二相预期,写侧由 BJ283 锚门把关;同锚=line 域漂移=拒跑轴成员）`);
 }
 let liveObj = null;
 try { liveObj = JSON.parse(readFileSync(LIVE_JSON, 'utf8')); } catch { liveObj = null; /* 首次生成/坏损:对拍跳过 */ }
@@ -346,12 +350,12 @@ if (OUT_JSON) {
 } else if (wash === null) {
   console.error('[extract-wallitems] 干跑（零写盘）：现库缺 vanilla-wallitems.json,跳过对拍。写盘须显式 SW_OUT=<dir> 或 --write-real。');
 } else if (!washEmpty(wash)) {
-  console.error('[extract-wallitems] 干跑对拍：核心面双向 diff 非空（live-only=洗库预警 / fresh-only=现库退化缺键型）——零写盘。');
+  console.error('[extract-wallitems] 干跑对拍：拒跑轴非空（live-only=洗库预警 / fresh-only=现库退化缺键型 / 同锚 line 域漂移）——零写盘。');
   washReport(wash);
   console.error('  处置：逐值定谳（反编译为准）后显式 SW_ITEM_VER + --write-real 定谳回写；沙箱试验用 SW_OUT=<dir>。');
   process.exit(1);
 } else {
-  console.error(`[extract-wallitems] 干跑对拍：核心面重产盖住现库（双向零差,零写盘;line 域二相 ${wash.lineDivergent} 件,现库锚=${liveAnchor ?? '未知'}/本次=${SRC_VER}）。写盘须显式 SW_OUT=<dir> 或 --write-real。`);
+  console.error(`[extract-wallitems] 干跑对拍：核心面重产盖住现库（双向零差,零写盘;line 域二相 ${wash.lineDivergent} 件=异锚预期仅报告,现库锚=${liveAnchor ?? '未知'}/本次=${SRC_VER}）。写盘须显式 SW_OUT=<dir> 或 --write-real。`);
 }
 
 // ---- 报告（与旧表 diff：新增/更正/删除） ----

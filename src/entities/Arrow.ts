@@ -151,6 +151,7 @@ import { isGemBolt, type GemStaffFlags, gemDamageMultiplier } from '../data/vani
 import { projGravSpec } from '../data/vanillaItemCombat';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { GorePiece } from './GorePiece';
+import { cutTilesBox } from './ProjCutTiles';   // ★BJ290 件1 死亡段割面（BJ260/285 同款前置习语）
 import { createTownNpcByShellKey } from './townNpcFactory';   // ★环切：原 `import { TownNPC }`（TownNPC→TownShot→Arrow 三节环）
 import { MedusaHeadProj } from './MedusaHeadProj';
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
@@ -8684,6 +8685,16 @@ export class Arrow extends Entity {
         } // ★SW-FX34c hoikAdmit 包裹层闭合——放行弹跳过整段撞块杀/反弹链,直落命中管线
       }
     }
+    // ★BJ290 件1（死亡段割面族 BJ260/285 同款前置习语,2026-09-23）：CutTiles
+    //  （P.cs:12517）在 Damage() 内先于 Damage_PVE（:12523）——木箭等 aiStyle1/2
+    //  有限穿透弹（1/2/3/48/54…penetrate 1）命中即亡拍（穿透耗尽 killNow,下敌环
+    //  与城镇 NPC 支）【照割】;本仓中央割（Entity.ts）!e.dead 门=死亡拍整缺 →
+    //  前置弹盒上报（=原版 Damage() 头位,下环 hurt 前序 1:1）。门 = 原版 :12516
+    //  friendly&&owner&&!npcProj&&!minion（本位=!hostile&&!reflected——反射弹原版
+    //  已翻转敌对无割面）;幂等双报（活拍与中央割同 Arrow 惯例）。★:8139 撞块割草
+    //  面（HandleMovement 域,弹在=活拍）分域勿混。盖 318 臭蛋（:8704 死亡位）/
+    //  小动物（:8719）/敌怪穿透（:9183）/城镇 NPC（:9192）四个死亡位。
+    if (!this.hostile && !this.reflected) cutTilesBox(game, this.x, this.y, this.w, this.h);
     // 敌对弹命中玩家（原版 Projectile.Damage_EVP :13706-13830）：不消耗弹体，
     // Player.damage 自带 iframes 去重（= 原版 player.immune 门禁）；
     // 实际造成伤害才走 StatusPlayer 的 debuff 授予（:13798-13800；

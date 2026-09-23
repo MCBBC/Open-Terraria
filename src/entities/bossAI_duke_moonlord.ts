@@ -692,6 +692,9 @@ export class DukeSharknadoBolt extends Entity {
    *  =undefined → 回退 src.targetRef→本地玩家,同访客端旧行为) */
   private tgt: Player | null;
   dead = false;
+  /** ★BJ294 敌射侧拒割位：385 SetDefaults hostile（P.cs:4684）→ 原版 CutTiles 调用点
+   *  `friendly && owner==myPlayer…`（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,projWetSection.ts 共享体
   //  1:1;溅花尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
@@ -891,6 +894,9 @@ export class DukeSharknadoTornado extends Entity {
   life: number;          // timeLeft 小 540 / 大 840
   private src: Enemy;
   dead = false;
+  /** ★BJ294 敌射侧拒割位：384/386 SetDefaults hostile（P.cs:4666-75/:4688-97）→ 原版
+   *  CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
   //  豁免核对（双 id）：384 Sharknado SetDefaults P.cs:4666-4675 ignoreWater=true
@@ -1336,6 +1342,9 @@ export class MoonLeechProj extends Entity {
    *  曾按自身速度角近似——出膛加速相与回程折返相姿态滞后失真） */
   private poseAng = 0;
   dead = false;
+  /** ★BJ294 敌射侧拒割位：456 MoonLeech SetDefaults hostile（P.cs:5292）→ 原版
+   *  CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   constructor(src: Enemy, player: Player) {
     super();
@@ -1485,6 +1494,9 @@ export class MLDeathray extends Entity {
   private len = 0;
   private dmg: number;
   dead = false;
+  /** ★BJ294 敌射侧拒割位：455 PhantasmalDeathray SetDefaults hostile（P.cs:5281）→
+   *  原版 CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
   //  豁免核对：455 PhantasmalDeathray SetDefaults P.cs:5272-5282（36×36/aiStyle 84/

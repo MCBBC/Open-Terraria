@@ -119,6 +119,10 @@ export class TabletShardProj extends Entity {
   w = 8;
   h = 8;
   dead = false;
+  /** ★BJ294 敌射侧拒割位：526 CultistBossParticle SetDefaults 无 friendly 行
+   *  （P.cs:5964-72,friendly 缺省 false）+ 敌侧仪式生成 owner=255 → 原版 CutTiles
+   *  调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
   private age = 0;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
@@ -2321,6 +2325,9 @@ export class LunarOrb extends Entity {
   private frame = 0;
   private frameT = 0;
   dead = false;
+  /** ★BJ294 敌射侧拒割位：539/574 SetDefaults hostile（P.cs:6144-52/:6241-49）→ 原版
+   *  CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
   //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）----

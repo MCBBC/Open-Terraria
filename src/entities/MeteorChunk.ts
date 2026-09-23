@@ -1,7 +1,8 @@
 // 流星雨陨石碎块(Projectile 1078 "MeteorOre",WorldGen.UpdateWorld :71771-71810
 // 消耗 meteorShowerCount 的产物)。与夜间坠星(FallingStar,弹幕 12)是两个东西:
 // 1078 无重力恒速直线(★2026-09-06 翻案:AI_199(:40743-40761)与 Projectile 通用
-// 路径均无 velocity 写行,初速即终速——WorldGen.cs:72326-72335 num11=12 归一注入,
+// 路径均无 velocity 写行,初速即终速——WorldGen.cs:72305 num11=12 置值+
+// :72321-72326 归一注入(★F3 勘误:旧 :72326-72335 系 1456 行号),
 // 直到 tileCollide 撞块消亡;旧"带重力抛物线 vy+=0.3"系既有近似,已退役)、
 // 伤害 50(专家40/大师35)+ 击退 5、命中玩家施加 OnFire(24)
 // 300-600t(Projectile.cs:11456-11459)、撞地消亡但带掉落(Kill :76509-76511:
@@ -9,7 +10,7 @@
 // 系审计误读(F2 2026-08-26 勘误):把 1078 与坠星弹幕 12 的掉落语义混记了。两者
 // 区分:1078=概率小量陨石矿;弹幕 12 自然星(damage>500)落地必掉 item75×1
 // (Kill_ExplodeTiles :79349-79351,FallingStar natural 支已对齐)。
-// · SetDefaults(:9783-9793):w=h=14, hostile+friendly, penetrate=-1
+// · SetDefaults(:10069-10078,★F1 勘误:旧 :9783-9793 系 1456 行号):w=h=14, hostile+friendly, penetrate=-1
 // · AI_199(:40743-40761):frame=rand(3) 视觉;尘 31(无门)+尘 6(!wet 门);红光(1,0,0);
 //   rotation += vx*0.06 + direction*0.06;运动=无重力恒速直线(无 velocity 写行)
 import { Entity } from './Entity';
@@ -28,11 +29,19 @@ export class MeteorChunk extends Entity {
   /** 帧变体(:37673 Main.rand.Next(3),帧不自增) */
   frame: number;
   life = 5400;
+  /** ★BJ294 敌射/环境侧拒割位：1078 SetDefaults friendly+hostile 双旗
+   *  （P.cs:10069-10078 型录同,★F1 勘误:旧 :9783-93 系 1456 行号）但 vanilla 出生
+   *  = WorldGen 陨石雨 NewProjectile 8 参
+   *  【owner 缺省】→ NewProjectile Owner=-1→255（P.cs:10866-69;W.cs:72337 无
+   *  owner 实参,★F3 勘误:旧 :72335 系误记）≠ Main.myPlayer → :12515 CutTiles 门
+   *  不进。详 Entity.ts 中央门
+   *  BJ294 注（对照：813 血云出生显式 owner=myPlayer 故照割不标）。 */
+  noVanillaCut = true;
   private hitPlayer = false;
   private hitCd = new Map<number, number>();
 
   // ---- ★通用湿段（Projectile.cs:16903-17113 全体弹共用段,2026-09-04 溅花缺口批
-  //  → projWetSection 共享体接入;豁免核对：1078 SetDefaults :10069-10079 无
+  //  → projWetSection 共享体接入;豁免核对：1078 SetDefaults :10069-10078 无
   //  ignoreWater 行 → 受段）----
   //  位序口径：原版 AI_199(:40743-40761) → 湿段(:16903) → UpdatePosition(:19973)。
   //  AI_199 有湿旗消费者（尘 6 !wet 门 :40752,读上拍旗）→ 湿段【必须】在 AI 段后、
@@ -106,7 +115,7 @@ export class MeteorChunk extends Entity {
       1078, !!projectileData(1078)?.ignoreWater);
     // ★运动=纯直线（2026-09-06 翻案清偿,旧 vy+=0.3 抛物线近似退役）：AI_199
     // （:40743-40761）无任何 velocity 写行、Projectile 通用路径亦无跨型重力——
-    // 1078 初速即终速恒 12px/t 直线（WorldGen.cs:72326-72335 num11=12 归一注入,
+    // 1078 初速即终速恒 12px/t 直线（WorldGen.cs:72305 num11=12 置值+:72321-72326 归一注入,
     // 本仓 Game.ts 生成位同式 k0=12/hypot）,直至 tileCollide 撞块消亡（:76509）。
     // ★水中位移阻尼（HandleMovement :17721-17764,湿段批）：速度【场】不减只削
     // 位移（UpdatePosition :20557 position += wetVelocity,直积分乘进位移行）

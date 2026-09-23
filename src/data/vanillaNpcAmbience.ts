@@ -2,7 +2,10 @@
 //   播放通道 = playSfxWav（GameHooks→Sfx.playWavFile 直文件,FILE_CASE_VOL 自带
 //   Zombie_24-87 ×0.5 等档）——数字音效号→wav 映射见 FILE_CASE_VOL/SoundID.cs。
 //
-// 【表一 IDLE_SOUNDS】UpdateNPC 段 :91184-91246（"IdleSounds",门 !shimmerTransparency>0）——
+// 【表一 IDLE_SOUNDS】NPC.IdleSounds() 段 :91184-91317（"IdleSounds",门
+//   !shimmerTransparency>0 :91186;1458 同 :91184 起——★BJ293 2026-09-23 锚勘误:
+//   旧注 :91119-91246/:91184-91246 系 1456 旧行段漂移,1456 方法头 :91115;本表
+//   52 型键 = vanilla 32 支 else-if 分支的逐型展开）——
 //   PlaySound(29, style) 的逐 type 掷骰（denom = Main.rand.Next(denom)==0）。
 //   style 为 [lo,hi) 左闭右开区间（原版 Next(lo,hi)）。
 // 【表二 CHATTER】AI_003 尾段 :57914-57945（战士族闲话,TargetClosest 前;门
@@ -21,60 +24,64 @@ export interface IdleSoundSpec {
   gate?: 'wet' | 'day' | 'night' | 'nightOrUnderground' | 'dayDawn';
 }
 
-/** :91119-91246 IdleSounds 32 类（全部 PlaySound(29, variants)） */
+/** NPC.IdleSounds() :91184-91317（1456 :91115 起）——vanilla 32 支 else-if 分段,
+ *  仓表按共享谓词逐型展开成 52 键（全部 PlaySound(29, variants)） */
 export const IDLE_SOUNDS: Record<number, IdleSoundSpec> = {
-  239: { denom: 900, range: [24, 26] },    // Cavebat 族(:91119 共享 Next(24,26))
-  240: { denom: 900, range: [24, 26] },    // Giant Bat(同段共享;★曾误写 [24,25] 少一变体)
-  62: { denom: 700, range: [26, 30] },     // Demon
-  156: { denom: 700, range: [26, 30] },    // Arch Demon
-  177: { denom: 600, range: [30, 32] },    // Derpling
-  226: { denom: 800, range: [32, 33] },    // Flying Snake
-  153: { denom: 1000, range: [33, 34] },   // Giant Tortoise
-  63: { denom: 1000, range: [34, 36], gate: 'wet' },   // Pink Jellyfish(湿)
-  64: { denom: 1000, range: [34, 36], gate: 'wet' },   // Green Jellyfish
-  103: { denom: 1000, range: [34, 36], gate: 'wet' },  // Blue Jellyfish
-  198: { denom: 1000, range: [36, 38] },   // Lihzahrd
-  199: { denom: 1000, range: [36, 38] },   // Lihzahrd(祭司形)
-  170: { denom: 600, range: [38, 41] },    // Pigron(粉)
-  171: { denom: 600, range: [38, 41] },    // Pigron(棕)
-  180: { denom: 600, range: [38, 41] },    // Pigron(紫)
-  250: { denom: 700, range: [41, 44] },    // Angry Nimbuse
-  580: { denom: 800, range: [44, 45] },    // Antlion(此段 Charger)
-  582: { denom: 800, range: [44, 45] },    // Walker(幼虫形)
-  581: { denom: 800, range: [44, 47] },    // Antlion Swarmer
-  508: { denom: 800, range: [44, 45] },    // Sandshark(黑檀)
-  509: { denom: 800, range: [44, 47] },    // Sandshark(猩红)
-  494: { denom: 600, range: [47, 48] },    // Crawdad
-  467: { denom: 700, range: [48, 50] },    // Deadly Sphere
-  468: { denom: 700, range: [50, 53] },    // Man Eater…(原 Man Fly 468)
-  288: { denom: 400, range: [53, 55] },    // Dungeon Spirit
-  524: { denom: 700, range: [55, 57] },    // Ghoul 族四色
-  525: { denom: 700, range: [55, 57] },
-  526: { denom: 700, range: [55, 57] },
-  527: { denom: 700, range: [55, 57] },
-  496: { denom: 600, range: [57, 59] },    // Snail
-  497: { denom: 600, range: [57, 59] },    // Glow Snail
-  389: { denom: 800, range: [59, 61] },    // Electrified Slime…(原Tesla)
-  471: { denom: 600, range: [61, 63] },    // Goblin Sorcerer
-  482: { denom: 600, range: [63, 66] },    // Granite Golem
-  388: { denom: 700, range: [66, 69] },    // Martian Drone
-  520: { denom: 800, range: [69, 73] },    // Martian Walker
-  477: { denom: 600, range: [73, 74] },    // Mothron
-  258: { denom: 700, range: [74, 78] },    // Mushi Ladybug…(Fungo Fish 族;原表 74-78)
-  252: { denom: 700, range: [78, 79] },    // Parrot
-  469: { denom: 700, range: [79, 81] },    // The Possessed
-  253: { denom: 700, range: [81, 84] },    // Reaper
-  82: { denom: 700, range: [81, 84] },     // Reaper(旧id;原表 253||82 同段)
-  498: { denom: 600, range: [84, 86] },    // 城镇史莱姆族 498-506
-  499: { denom: 600, range: [84, 86] },
-  500: { denom: 600, range: [84, 86] },
-  501: { denom: 600, range: [84, 86] },
-  502: { denom: 600, range: [84, 86] },
-  503: { denom: 600, range: [84, 86] },
-  504: { denom: 600, range: [84, 86] },
-  505: { denom: 600, range: [84, 86] },
-  506: { denom: 600, range: [84, 86] },
-  391: { denom: 700, range: [86, 87] },    // Scutlix
+  // ★BJ294（2026-09-23）逐键行号勘误批：键内注释锚全部校准到 1457 终值
+  //  （cond=掷骰门行/play=PlaySound 行;旧 :91119 锚=1456 行段漂移,1457 实际 :91188;
+  //  数据面 denom/range/gate 逐键对读 1457 NPC.cs:91186-91315 零变更=纯注释批）。
+  239: { denom: 900, range: [24, 26] },    // Cavebat 族(cond :91188/play :91190;★旧锚 :91119 系 1456 漂移)
+  240: { denom: 900, range: [24, 26] },    // Giant Bat(同段共享 :91188;★曾误写 [24,25] 少一变体)
+  62: { denom: 700, range: [26, 30] },     // Demon(:91192/:91194)
+  156: { denom: 700, range: [26, 30] },    // Arch Demon(同段共享 :91192)
+  177: { denom: 600, range: [30, 32] },    // Derpling(:91196/:91198)
+  226: { denom: 800, range: [32, 33] },    // Flying Snake(:91200/:91202)
+  153: { denom: 1000, range: [33, 34] },   // Giant Tortoise(:91204/:91206)
+  63: { denom: 1000, range: [34, 36], gate: 'wet' },   // Pink Jellyfish(湿;:91208/:91210)
+  64: { denom: 1000, range: [34, 36], gate: 'wet' },   // Green Jellyfish(同段共享 :91208)
+  103: { denom: 1000, range: [34, 36], gate: 'wet' },  // Blue Jellyfish(同段共享 :91208)
+  198: { denom: 1000, range: [36, 38] },   // Lihzahrd(:91212/:91214)
+  199: { denom: 1000, range: [36, 38] },   // Lihzahrd(祭司形;同段共享 :91212)
+  170: { denom: 600, range: [38, 41] },    // Pigron(粉;:91216/:91218)
+  171: { denom: 600, range: [38, 41] },    // Pigron(棕;同段共享 :91216)
+  180: { denom: 600, range: [38, 41] },    // Pigron(紫;同段共享 :91216)
+  250: { denom: 700, range: [41, 44] },    // Angry Nimbuse(:91220/:91222)
+  580: { denom: 800, range: [44, 45] },    // Antlion(此段 Charger;:91224/:91226)
+  582: { denom: 800, range: [44, 45] },    // Walker(幼虫形;:91228/:91230)
+  581: { denom: 800, range: [44, 47] },    // Antlion Swarmer(:91232/:91234)
+  508: { denom: 800, range: [44, 45] },    // Sandshark(黑檀;:91236/:91238)
+  509: { denom: 800, range: [44, 47] },    // Sandshark(猩红;:91240/:91242)
+  494: { denom: 600, range: [47, 48] },    // Crawdad(:91244/:91246)
+  467: { denom: 700, range: [48, 50] },    // Deadly Sphere(:91248/:91250)
+  468: { denom: 700, range: [50, 53] },    // Man Eater…(原 Man Fly 468;:91252/:91254)
+  288: { denom: 400, range: [53, 55] },    // Dungeon Spirit(:91256/:91258)
+  524: { denom: 700, range: [55, 57] },    // Ghoul 族四色(:91260/:91262)
+  525: { denom: 700, range: [55, 57] },    // (同段共享 :91260)
+  526: { denom: 700, range: [55, 57] },    // (同段共享 :91260)
+  527: { denom: 700, range: [55, 57] },    // (同段共享 :91260)
+  496: { denom: 600, range: [57, 59] },    // Snail(:91264/:91266)
+  497: { denom: 600, range: [57, 59] },    // Glow Snail(同段共享 :91264)
+  389: { denom: 800, range: [59, 61] },    // Electrified Slime…(原Tesla;:91268/:91270)
+  471: { denom: 600, range: [61, 63] },    // Goblin Sorcerer(:91272/:91274)
+  482: { denom: 600, range: [63, 66] },    // Granite Golem(:91276/:91278)
+  388: { denom: 700, range: [66, 69] },    // Martian Drone(:91280/:91282)
+  520: { denom: 800, range: [69, 73] },    // Martian Walker(:91284/:91286)
+  477: { denom: 600, range: [73, 74] },    // Mothron(:91288/:91290)
+  258: { denom: 700, range: [74, 78] },    // Mushi Ladybug…(Fungo Fish 族;原表 74-78;:91292/:91294)
+  252: { denom: 700, range: [78, 79] },    // Parrot(:91296/:91298)
+  469: { denom: 700, range: [79, 81] },    // The Possessed(:91300/:91302)
+  253: { denom: 700, range: [81, 84] },    // Reaper(:91304/:91306)
+  82: { denom: 700, range: [81, 84] },     // Reaper(旧id;原表 253||82 同段 :91304)
+  498: { denom: 600, range: [84, 86] },    // 城镇史莱姆族 498-506(:91308/:91310)
+  499: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  500: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  501: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  502: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  503: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  504: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  505: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  506: { denom: 600, range: [84, 86] },    // (同段共享 :91308)
+  391: { denom: 700, range: [86, 87] },    // Scutlix(:91312/:91314)
 };
 
 /** AI_003 闲话表（:57914-57945,1457/1458 行段）——各族掷骰 + 音效文件（直接 wav 名）
@@ -152,7 +159,8 @@ export const CRITTER_SOUNDS: Record<number, CritterSoundSpec> = {
   602: { denom: 1200, file: 'Zombie_106', gate: 'day', pool: ['Zombie_106', 'Zombie_107', 'Zombie_108'] },  // 海鸥(:93375,(44))
   603: { denom: 1200, file: 'Zombie_106', gate: 'day', pool: ['Zombie_106', 'Zombie_107', 'Zombie_108'] },
   // 鸭族 362-365(:93379-93383,(30))——case30 常规 Next(10,12)=10/11 均匀;Next(300)==0
-  //   稀有换 Zombie_12（LSP.cs:1105-1114,独占忙检省略=普通掷）
+  //   稀有换 Zombie_12（LSP.cs:1105-1114;★BJ291:rare 槽忙检由 Sfx.SINGLE_INSTANCE
+  //   Zombie_12 承接=在播跳过,不再省略）
   362: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'],
     rare: { denom: 300, files: ['Zombie_12'] } },
   363: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11'],

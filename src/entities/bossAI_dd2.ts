@@ -1868,6 +1868,10 @@ export class BetsyBreath extends Entity {
   /** 主死亡后的冻结锚（原版 npc 槽位数据残留——焰心停驻直到 78t 走完） */
   private anchor: { x: number; y: number } | null = null;
   dead = false;
+  /** ★BJ294 敌射侧拒割位：687 BetsyFlameBreath SetDefaults friendly=false+hostile
+   *  （P.cs:7324）→ 原版 CutTiles 调用点 friendly 门（:12515）整支不进。
+   *  详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1;溅花
   //  尘/音由共享体 wetSplashStepShared 承载,本类不自写）----
@@ -3138,6 +3142,9 @@ export class DD2GoblinBomb extends Entity {
   private cxPx = 0; private cyPx = 0;
   /** SW-Q1 2026-09-03：ai[0]（AI_016 :48332 每 tick +1）——重力门节拍轴 */
   private ai0 = 0;
+  /** ★BJ294 敌射侧拒割位：681 DD2GoblinBomb SetDefaults hostile（P.cs:7265-73）→
+   *  原版 CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
   /** 引信嘶声循环句柄（:47780 PlayTrackedLoopedSound;Kill Stop——同 GrenadeProj） */
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
 
@@ -3345,6 +3352,9 @@ export class DD2OgreSmash extends Entity {
   private ai0 = 0;
   private dmg: number;
   private readonly hitIds = new Set<number>();
+  /** ★BJ294 敌射侧拒割位：683 DD2OgreSmash SetDefaults hostile（P.cs:7284-95）→
+   *  原版 CutTiles 调用点 friendly 门（:12515）整支不进。详 Entity.ts 中央门 BJ294 注。 */
+  noVanillaCut = true;
 
   // ---- ★通用湿段（Projectile.cs:16903-17113,projWetSection.ts 共享体 1:1）----
   //  豁免核对：683 DD2OgreSmash SetDefaults P.cs:7284-7295（30×30/aiStyle 135/

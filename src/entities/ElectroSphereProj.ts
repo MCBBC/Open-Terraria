@@ -38,6 +38,10 @@ export class ElectroSphereProj extends Entity {
   private ai0 = 0;
   /** ai[1]=1 替换态（:74935 邻近新球置位）→ friendly=false 淡出 */
   replaced = false;
+  /** ★BJ294（件 2）中央割门运行时覆写口：替换态原版 `friendly = false`
+   *  （aiStyle77 P.cs:31213-31226）→ CutTiles 门（:12515）不进=拒割。
+   *  U3 旧锚 :29128/:29156 系行段漂移（那两行在 aiStyle54 块）。 */
+  get noVanillaCut(): boolean { return this.replaced === true; }
   /** alpha（SetDefaults 255 起；渐显 −50/t / 替换态 +51/t） */
   alpha = 255;
   private frame = 0;

@@ -694,10 +694,13 @@ export class Sfx {
    *  漏斗进 playWavFile 已被盖）；循环轨（天气/BGM/雨声）不经此门 */
   suppress = false;
 
-  /** 原版单实例"播着跳过"族(LegacySoundPlayer.cs case 15 :825-841:实例 State==Playing
-   *  时 return null 不重触发)——仅 Roar:多段蠕虫(毁灭者 80 段各自掷 soundDelay)靠
-   *  同槽互斥收敛为单声,否则每 10-20t 满响吼叫叠成音墙。NPC_Hit(case3)是 Stop-重播、
-   *  NPC_Killed(case4)/僵尸族(case14/26/29)每次都播,均不在此列(R22 登记面维持) */
+  /** 原版单实例"播着跳过"族(LegacySoundPlayer.cs:实例 State==Playing 时 return null
+   *  不重触发)——Roar(case 15 :825-841):多段蠕虫(毁灭者 80 段各自掷 soundDelay)靠
+   *  同槽互斥收敛为单声,否则每 10-20t 满响吼叫叠成音墙。
+   *  ★BJ291 勘误:BJ273 头注「僵尸族(case14/26/29)每次都播」半错——case 14(:796-827)/
+   *  case 26(:972-983)确无 State 门每次都播;case 29(:1044-1048)【有】逐变体槽
+   *  State==Playing → return null 在播跳过门,已入本集(下方 BJ291 块)。
+   *  NPC_Hit(case3)是 Stop-重播、NPC_Killed(case4)每次都播,仍不在此列(R22 登记面维持)。 */
   private static readonly SINGLE_INSTANCE = new Set([
     'Roar_0', 'Roar_1', 'NPC_Killed_10',
     // 成就解锁音去重（AchievementInitializer.cs OnAchievementCompleted：FindActiveSound
@@ -708,6 +711,43 @@ export class Sfx {
     // → return null）——同 case 其余 style 是停旧播新（:666-674,SINGLE_SLOT_STOP）,
     // 57 单独走 skip 语义,勿并入 stop 集
     'NPC_Hit_57',
+    // ★BJ289（2026-09-23 T2 全表差集落刀）：case 19 Splash 逐变体槽在播跳过
+    // （LegacySoundPlayer.cs:875-878 SoundInstanceSplash[num].State != Stopped
+    // → break 无声）——Splash_4/5 另有兄弟互斥门（:899-913,SPLASH_SIBLING 注）:
+    // 微光(style4)/岩浆(style5)对同帧只出先到者。play() 合成回退已被
+    // lastTriggerOutcome==='skip' 闸拦住（在播跳过=原版无声,不得补近似音）
+    'Splash_0', 'Splash_1', 'Splash_2', 'Splash_3', 'Splash_4', 'Splash_5',
+    // ★BJ289：case 28 Mech 在播跳过（:1001-1004 SoundInstanceMech[num].State ==
+    // Playing → return null;器件右键切换音,Player.cs:31762/31799/31803）
+    'Mech_0',
+    // ★BJ291（2026-09-23,U1 漏修④⑤落刀;1457=1458 同门——LSP.cs:1044-1048/:1064-1068）：
+    // case 29 怪物语音库逐变体槽在播跳过（num=Style 槽 State==Playing → return null;
+    // 音量档乘全在 FILE_CASE_VOL:24-87 ×0.5/88-91 ×0.7/92 ×0.5/93-99 ×0.4/100-101
+    // ×0.25/102 ×0.4/103 ×0.4/104 ×0.55）。24..104=档乘全域钉死;门本身对一切 style
+    // 生效——仓内可达 style 补 6/8/9/20/105/124/125（弗兰肯闲话/面怪/猪龙 grunt/猪龙鱼
+    // 公爵/暗影焰游魂显形/狼 378 起跳咬齿/蜂后冲刺吼;各文件单写者=case29,逐文件槽
+    // 同构 1:1）。style 7(吸血鬼)例外不入:同文件被 case14-542 沙鲨扑咬无门面共用
+    // （FILE_CASE_VOL Zombie_7 注）,入集会错杀 case14 面 → 登记近似（BJ291 残留）。
+    // 消费面:vanillaNpcAmbience IDLE_SOUNDS——「32」=vanilla NPC.IdleSounds()
+    // 的 else-if【分段数】（NPC.cs:91184-91317,1458 同 :91184 起;1456 :91115 起）
+    // 非仓表条目数（仓表=32 分支按共享谓词展开成 52 型键;Enemy.ts:3147 逐变体
+    // 直名播。★BJ293 2026-09-23 口径勘误:旧注「IdleSounds 32 类」未注明口径,
+    // 易误读作仓表条目;闲话/受击族 case 14-69 分段与本表无关——本表全 PlaySound(29))+
+    // CHATTER/CRITTER+Enemy.ts:7335(:7516)+bossAI 89/100/102/105/125/20——同变体叠响可闻差。
+    // ★组3.2 核后并入（逐变体门=逐文件槽同构）:case 30 稀有支 Zombie_12（:1110-1114
+    // rare 槽忙检;常规 10/11 无门不入）/case 32 逐变体(:1137-1140)/case 33(:1205-1208)/
+    // case 67/68/69 逐变体(:1149-1152/:1161-1164/:1173-1176)。case 46(:1075-1082 先查
+    // 110+111 任一在播即整支 null)/case 65(:1391-1401)/case 66(:1185-1195)是【整体
+    // 忙检】≠逐文件槽,不入集=登记近似（BJ291 残留;case44 Seagull 原文本就无门）。
+    ...Array.from({ length: 81 }, (_, k) => `Zombie_${k + 24}`),
+    'Zombie_6', 'Zombie_8', 'Zombie_9', 'Zombie_20', 'Zombie_105', 'Zombie_124', 'Zombie_125',
+    'Zombie_109',   // ★BJ291（U1 漏修⑤）：case 45 Dolphin 在播跳过（音量档 FILE_CASE_VOL:244 已在）
+    'Zombie_12',    // case 30 稀有支 1/300（:1110-1114）
+    'Zombie_14', 'Zombie_15', 'Zombie_16', 'Zombie_17', 'Zombie_18', 'Zombie_19',
+                    // case 32 逐变体(:1137-1140)/case 33 num=15(:1205-1208)
+    'Zombie_118', 'Zombie_119', 'Zombie_120',   // case 67 逐变体(:1149-1152)
+    'Zombie_126', 'Zombie_127', 'Zombie_128',   // case 68 逐变体(:1161-1164)
+    'Zombie_129', 'Zombie_130',                 // case 69 逐变体(:1173-1176)
   ]);
   /** ★R26 GAP-05:Item 音库(case 2 LegacySoundPlayer.cs:519-643)三组实例槽语义——
    *  原版每个 style 一条 SoundInstanceItem[num] 槽,快速连发时:
@@ -748,8 +788,19 @@ export class Sfx {
    *  逐变体槽=逐文件槽（singlePlaying 键=文件名:同变体才互斥截断,跨变体照常叠响,
    *  与原版 SoundInstanceDig[num13]/SoundInstancePlayerHit[num15] 按下标分槽同构）。
    *  对照不收入=原版语义本就叠响/另档：case 4 NPCKilled 仅覆槽引用不 Stop（:693）、
-   *  case 2 Item 三组槽（R26 ITEM_* 表）、case 15 Roar 在播跳过（SINGLE_INSTANCE）。
-   *  未逐案核案号（16/18/19/21-24/26/29-33/36/44-46/65-69 等）维持 'none' =登记债。 */
+   *  case 2 Item 三组槽（R26 ITEM_* 表）、case 15 Roar/case 19 Splash/case 28 Mech/
+   *  case 29 僵尸族/case 45 Dolphin 在播跳过（SINGLE_INSTANCE;★BJ291 勘误——case 29
+   *  非「每次都播」,BJ273 头注半错,见 SINGLE_INSTANCE 头勘误注）。
+   *  ★BJ289（2026-09-23 T2 全表差集落刀）：case 21/22/23/43 停旧播新入集。逐案锚
+   *  （Terarria1457/Terraria.Audio/LegacySoundPlayer.cs;1458 行号全同）：case 21 Tink
+   *  逐变体槽 num17=Next(3) 停旧播新（:927-939）/ case 22 Unlock 命名槽（:940-949）/
+   *  case 23 Drown 命名槽（:950-960）/ case 43 Thunder 六变体槽（:457-477——掷前先
+   *  挑非在播槽至多 6 掷,全在播才停末掷槽;本仓逐文件槽 stop 与之等价,「挑空槽预掷」
+   *  不建模=登记近似:雷声触发间隔≫样本长,仅多雷并发时可闻有差）。
+   *  T2 表外 direct-name 族（不经 WAV_MAP 的 playWavFile 直名播,各案登记面）：
+   *  16 DoubleJump（Player.ts 登记不建模）/ 63·64 Research（ResearchUI.ts 登记不建模）
+   *  ——新登记债：case 20 FemaleHit 逐变体 stop（PlayerVoice 可达）/ case 27 Pixie
+   *  在播跳过+在播实例音量刷新（Enemy.ts 可达）未建模。 */
   private static readonly SINGLE_SLOT_STOP = new Set([
     'Menu_Tick', 'Menu_Open', 'Menu_Close',
     'Grab', 'Door_Opened', 'Door_Closed', 'Shatter', 'Grass',
@@ -757,8 +808,25 @@ export class Sfx {
     'Dig_0', 'Dig_1', 'Dig_2',
     ...Array.from({ length: 56 }, (_, k) => `NPC_Hit_${k + 1}`),   // style 1..56
     'NPC_Hit_58',   // 57=skip 档（SINGLE_INSTANCE）,58 回归 stop
+    // ★BJ289：case 43 Thunder 六变体槽轮转 stop（:457-477;PITCH_CASE ±0.10 已档）
+    ...Array.from({ length: 6 }, (_, k) => `Thunder_${k}`),
+    'Tink_0', 'Tink_1', 'Tink_2',   // case 21 :927-939 逐变体槽（PITCH null 已档）
+    'Unlock',                       // case 22 :940-949 命名槽
+    'Drown',                        // case 23 :950-960 命名槽
+    // ★BJ291（U1 漏修⑥）：case 40 Camera 快门命名槽停旧播新（LegacySoundPlayer.cs
+    // :1366-1372 SoundInstanceCamera != null → .Stop() 再 CreateInstance;1458 :1367-1373
+    // 同构零变更）——CaptureMode.ts:377 playWavFile('Camera') 连拍叠响消除
+    'Camera',
   ]);
 
+  /** ★BJ289：case 19 Splash_4/5 兄弟互斥门（LegacySoundPlayer.cs:899-913）——num=4
+   *  须 Splash_5 槽空/已停才出声,num=5 对称;实例虽已建但 soundEffectInstance 置 null
+   *  不 Play（:1417-1424）=本次无声无占位（未播实例 State=Stopped 不拦后播）。
+   *  微光配对(style4)与岩浆(style5)相邻触发同帧只出先到者。 */
+  private static readonly SPLASH_SIBLING: Record<string, string> = {
+    Splash_4: 'Splash_5',
+    Splash_5: 'Splash_4',
+  };
   /** 单实例槽分类('skip'=在播跳过 / 'stop'=先停后播 / 'none'=不管理可自由叠响):
    *  Item_N 全体入槽管理(槽引用照记,default 组停旧、例外组只换绑),Roar 族维持 skip,
    *  ★BJ273 单槽停旧播新族见 SINGLE_SLOT_STOP 注 */
@@ -774,6 +842,18 @@ export class Sfx {
   }
   /** 单实例槽:file → 正在播的 source(onended 清) */
   private singlePlaying = new Map<string, AudioBufferSourceNode>();
+  /** ★BJ289 case 19 兄弟互斥门：本文件的兄弟槽在播 = 本次无声（skip 同语义,
+   *  结局码同 'skip';即时路径与 deferPlay 补播两处消费） */
+  private siblingBlocked(file: string): boolean {
+    const sib = Sfx.SPLASH_SIBLING[file];
+    return sib !== undefined && this.singlePlaying.has(sib);
+  }
+  /** 最近一次同步触发链的结局码（play() 合成回退判据专用）：playWavFile 在
+   *  playWavFileCore 返回处单点落值,play() 先清后读——同同步块内无重入窗口;
+   *  异步 deferPlay 的 skip 重判不经此（只静默 return）。★BJ289：'skip'=原版在播
+   *  跳过=无声,play() 据此跳过合成兜底（否则 case 15/19/28 的"在播跳过"会凭空
+   *  补一声近似音,违背原版静默语义）;其余结局码不改变 play() 原有回退面 */
+  private lastTriggerOutcome: 'ok' | 'q' | 'sup' | 'skip' | 'mut' | 'att' | 'fail' | null = null;
   /** Stop-then-play 的"先停"半边(default 分支 :600-603 SoundInstanceItem[num].Stop()):
    *  立即停旧源并清槽,新实例随后入槽。幂等(空槽静默) */
   private stopSingleSlot(file: string): void {
@@ -1294,7 +1374,10 @@ export class Sfx {
       if (!buf || this.suppress) return;
       if (!replace) {
         const act = Sfx.slotAction(file);
-        if (act === 'skip' && this.singlePlaying.has(file)) return;
+        if (act === 'skip') {
+          if (this.singlePlaying.has(file)) return;
+          if (this.siblingBlocked(file)) return;   // ★BJ289 case 19 Splash_4/5 兄弟互斥
+        }
         if (act === 'stop') this.stopSingleSlot(file);
       }
       const fire = () => {
@@ -1338,6 +1421,7 @@ export class Sfx {
     // mut=静音或无 AudioContext / att=距离衰减归零 / fail=负缓存（合成兜底在即）
     // ★未挂钩时零分配（dig 高频路径,载荷仅在钩存在时构造）
     const oc = this.playWavFileCore(file, vol, x, y, pitch, replace);
+    this.lastTriggerOutcome = oc;   // ★BJ289：play() 合成回退判据（同步窗口,见字段注）
     if (Sfx.onEvent) {
       this.emit('wav', {
         f: file,
@@ -1358,7 +1442,10 @@ export class Sfx {
     // 见 slotAction 注释——case 15 Roar 维持 skip、case36 replace 豁免一切)
     if (!replace) {
       const act = Sfx.slotAction(file);
-      if (act === 'skip' && this.singlePlaying.has(file)) return 'skip';
+      if (act === 'skip') {
+        if (this.singlePlaying.has(file)) return 'skip';
+        if (this.siblingBlocked(file)) return 'skip';   // ★BJ289 case 19 Splash_4/5 兄弟互斥
+      }
       if (act === 'stop') this.stopSingleSlot(file);
     }
     const ctx = this.ensure();
@@ -1381,7 +1468,9 @@ export class Sfx {
     // 优先原版素材，失败回退合成（master 在 playWavFile/osc 各自生效一次）。
     // 带坐标时衰减（atten），≤0 直接不播——合成回退也不触发
     if (x != null && y != null && this.atten(vol, x, y) <= 0) return;
+    this.lastTriggerOutcome = null;          // 先清后读（playWav 未触达 playWavFile 时防陈旧值）
     if (this.playWav(name, vol, x, y)) return;
+    if (this.lastTriggerOutcome === 'skip') return;   // ★BJ289：在播跳过=原版无声,勿落合成兜底补近似音
     const ctx = this.ensure();
     if (!ctx) return;
     // 合成兜底实际出声事件：仅 wav 面 fail/缺档才达此路径——听感是"近似音"

@@ -688,6 +688,10 @@ class WaterWaveSystem {
       //   随机场/走动/大跳 dx,dy 双支对拍+min/max 计数锁)。内域=行走帧的
       //   ~全格(dx,dy∈{-1,0,1} 时内域≈(w-2)×(h-2));W3(dx=dy=0)仍走上方专路。
       //   原路径整段保留于下方= ?swperf=0 豁免臂逐字不动。
+      //   ★BJ289 GPU 段指针：BJ270 trace 期 T3 观察「GPU 进程 ~50% busy」——
+      //   判读=GPU 半忙非饱和,瓶颈在 CPU 侧读回/步进（与本刀落点一致）;
+      //   登记=memory bj270 判例文件 GPU 段（观察项非缺陷定谳,后续 perf 波判读背景:
+      //   若现 GPU>80% 且 CPU self 低,再启 canvas/GPU 分工核查）。
       const xLo = Math.max(0, dx + 1), xHi = Math.max(xLo, Math.min(w, dx + w - 1));
       const yLo = Math.max(0, dy + 1), yHi = Math.max(yLo, Math.min(h, dy + h - 1));
       // 边缘像素(内域外的 L 形带:出界中性/0、w-1 与 h-1 缚边钳制)——与原路径
