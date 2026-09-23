@@ -168,8 +168,11 @@ export function invasionStatus(
       else if (wave === 6) required = 180;
       else if (wave === 7) {
         // Betsy 血量即进度（:1503-1513）：无 Betsy → required 1
+        // ★BJ308 截断语义（DD2Event.cs:1494 `100 - (int)(life/lifeMax*100f)`）：
+        //   (int) 强转截断内积再被 100 减 = 100 - Math.trunc(ratio*100),曾用
+        //   Math.round(100 - ratio*100)——非整内积时差 1 点（round≠先截后减）。
         if (betsyLifeRatio == null) required = 1;
-        else { kills = Math.round(100 - betsyLifeRatio * 100); required = 100; }
+        else { kills = 100 - Math.trunc(betsyLifeRatio * 100); required = 100; }
       } else if (wave === 8) {
         wave = 7; kills = 1; required = 1;
         if (inCheckProgress) victoryScene = true;

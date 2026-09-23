@@ -13946,7 +13946,12 @@ export class Enemy extends Entity {
     // Damage_PVE 的 npc.active 前置门(Projectile.cs:11869)天然防重;此处等价。
     if (this.dead) return false;
     if (pierce !== 1 && this.iframes > 0) return false; // 单发弹豁免免疫检查（flag3）
-    if (this.dontTakeDamage) return false; // 原版 NPC.dontTakeDamage（StrikeNPC 早退）
+    // ★BJ308 注勘误:原注「StrikeNPC 早退」失实——dontTakeDamage 门在原版
+    //   NPC.hurt()（玩家受击面）;StrikeNPC 全链（:82017→:82063,仅 immortal 一门
+    //   :82197）无此门（BJ302 395 自毁支 9999 伤害实证）。本仓 hurt() 合并玩家
+    //   面+弹幕结算面两通道,门置函数头=合并通道的等价补偿（原版弹幕面对
+    //   dontTakeDamage 的拦截在攻端命中层 Damage_PVE/StrikeNPC 调用者）。
+    if (this.dontTakeDamage) return false;
     // ★F1 翻案收口（2026-08-31 蓝队三批）：本函数【不再】内挂旗乘区。原版旗加伤
     // （Player.GetBannerBuffEffect→effect.DamageDealt.Sample）是**攻端调用面**乘区：
     //   · ApplyDamageToNPC 内置段 Player.cs:20599（狱火/矿车冲撞/荆棘反伤/TryHittingNPC 等）；
@@ -14925,8 +14930,9 @@ export class Enemy extends Entity {
         const hdWofD = Math.sign(kbx) || 1;
         for (let k = 0; k < 20; k++) game.dust?.spawn(this.x, this.y, this.w, this.h, 5, hdWofD, -1);
       }
-      // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs 1456:82421-90873 /
-      // 1457:82492-90939 →
+      // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs 1456:82421-90870 /
+      // 1457:82492-90939（★BJ308 终点勘误:90870=方法体闭括号,旧 90873 伪锚落
+      // 入邻方法 CountNPCS）→
       // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece
       // （位置/速度/ai 门/gates 守卫/post 后处理 1:1，Gore.NewGore 随机扰动在
       // GorePiece.newGore 内）。spriteDirection = 本仓 facing（同符号约定，表内

@@ -1,6 +1,7 @@
 // Gore 死亡碎块（Terraria/Gore.cs 1:1）+ NPC.HitEffect 死亡 gore 全表驱动。
 //   数据：src/data/vanilla-gore.json（tools/extract-gore.mjs 从 NPC.cs HitEffect
-//         1456:82421-90873 / 1457:82492-90939 提取；表结构/字段语义见其 _meta.notes）
+//         1456:82421-90870 / 1457:82492-90939 提取（★BJ308 终点勘误:90870=方法体
+//         闭括号,旧 90873 伪锚落入邻方法 CountNPCS）;表结构/字段语义见其 _meta.notes）
 //   行号基准（BJ298 2026-09-23 亲核）：Gore.cs/GoreID.cs/ChildSafety.cs 三版
 //   （1456/1457/1458）逐字节全等（md5 3f7708af/a8018139/2b671c07）→ 本文 Gore.cs/
 //   GoreID.cs 行号三版通用；NPC.cs/Main.cs/Utils.cs 两版漂移 → 1456/1457 双标。

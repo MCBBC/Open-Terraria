@@ -48094,9 +48094,14 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
               if (en.vanillaId != null && MOON_EVENT_GROUP[en.vanillaId] === group
                 && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) {
                 const pct = need > 0 ? Math.min(1, w.moonEvent.waveKills / need) : 1;
-                const label = need > 0 ? undefined : Lang.text('Game.WaveMessage',
-                  w.moonEvent.waveNumber,
-                  Lang.text('Game.InvasionPoints', Math.floor(w.moonEvent.waveKills)));
+                // ★BJ308 文案对齐（Main.cs:48586-48587）：invasionProgressWave>0 时
+                //   恒画 Game.WaveMessage"Wave {0}: {1}"——arg1 = max≠0 ?
+                //   (int)(progress*100/max)+"%" : Game.InvasionPoints。progress=
+                //   (int)waveKills（SyncAnInvasion :48459 强转截断）,% 文本不钳 100
+                //   （钳制只作用进度条 num4,文案原样 (int) 截断）。
+                const label = Lang.text('Game.WaveMessage', w.moonEvent.waveNumber,
+                  need > 0 ? `${Math.trunc(Math.floor(w.moonEvent.waveKills) * 100 / need)}%`
+                    : Lang.text('Game.InvasionPoints', Math.floor(w.moonEvent.waveKills)));
                 return { name: Lang.inter(w.moonEvent.kind === MOON_KIND_PUMPKIN ? 84 : 83),
                   pct, label };
               }
@@ -48118,14 +48123,25 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
             if (en.vanillaId != null && DD2_EVENT_GROUP[en.vanillaId] === -3
               && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) {
               const pct = s.required > 0 ? Math.min(1, s.kills / s.required) : 1;
-              const label = s.required > 0 ? undefined : Lang.text('Game.WaveMessage',
-                s.wave, Lang.text('Game.InvasionPoints', s.kills));
+              // ★BJ308 文案对齐（Main.cs:48586-48587）：required>0 恒带波次前缀,
+              //   arg1=(int)(progress*100/max)+"%"（:48611 同式 (int) 截断）;
+              //   required=0（哨兵波防险,同月事件 wave20 支）维持 InvasionPoints。
+              const label = Lang.text('Game.WaveMessage', s.wave,
+                s.required > 0 ? `${Math.trunc(s.kills * 100 / s.required)}%`
+                  : Lang.text('Game.InvasionPoints', s.kills));
               return { name: Lang.text('DungeonDefenders2.InvasionProgressTitle'), pct, label };
             }
           }
           return null;
         }
         if (w.invasionType <= 0 || w.invasionSizeStart <= 0) return null;
+        // ★BJ308 地表门（CheckInvasionProgressDisplay :48407 常规支 `(num2 <= 0 ||
+        //   (!(player.position.Y > worldSurface * 16.0) && invasionType == num2))`——
+        //   常规入侵组要求玩家不在地下,地下+屏内有残留入侵怪时原版不显进度条）。
+        //   地表判定亲读=position.Y(盒顶 Y)×16 高度对比,非 Zone 旗;worldSurface=
+        //   w.groundLevel（WorldGen.ts:1154 同源）。月事件支同款门(:48091) BJ301 已立
+        //   ——彼处取 player.cy(盒心)先例,本支按反编译逐字取盒顶 y。
+        if (this.player.y > w.groundLevel * 16) return null;
         // 文案=DrawInvasionProgress :48536-48551 icon→inter 表（icon=invasionType+3）：
         // 1 哥布林→88 / 2 雪人军团→87 / 3 海盗→86 / 4 火星暴乱→85。
         // ★BJ301 定谳：旧三元 else 兜底把火星(4)一并吞进 88（用户实报=火星暴乱显「哥布林军队 0%」）

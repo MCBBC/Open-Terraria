@@ -195,6 +195,20 @@ export class TileStore {
     return TileStore.SOLID_LUT[this.type[i]] === 1;
   }
 
+  /** ★BJ308 严格 SolidTile（WorldGen.SolidTile(int,int,noDoors=false) WorldGen.cs
+   *  :70642-70664 全谓词;Tile 重载 :70487-70502 同判据）——isSolid 基础上补实例面
+   *  两排除:!halfBrick() ∧ slope()==0。三排除中 !tileSolidTop 已折入 SOLID_LUT
+   *  （defs.solid ≡ tileSolid∧!tileSolidTop——tileSolid∩tileSolidTop 平台九件套
+   *  {19,239,380,427,435-439} defs solid:false,BJ187 SOLID_TOP_SHEETS 判定单源）。
+   *  消费面=液体渲染器门②（TileDrawing.cs:4141-4148 num15=0 悬空门,增强段+浸润带
+   *  两处）——曾以宽谓词 isSolid 充数,邻格半砖/坡面格误判实心 → 门②少触发=多画。
+   *  其余 isSolid 消费位语义各自锚定,禁盲换本谓词。 */
+  isSolidStrict(x: number, y: number): boolean {
+    if (!this.isSolid(x, y)) return false;
+    const i = this.idx(x, y);
+    return this.half[i] === 0 && this.slope[i] === 0;
+  }
+
   /** 实心 LUT(内部类型 id → 1/0;与 TILE_DEFS 同长,模块加载时构建一次) */
   static readonly SOLID_LUT = (() => {
     const lut = new Uint8Array(TILE_DEFS.length);

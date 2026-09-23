@@ -887,10 +887,28 @@ export function drawVanillaLiquids(
         const take = (c: { amt: number; vt: number } | null): void => {
           if (c && c.amt > openLq) { openLq = c.amt; openVt = c.vt; }   // 严格大于=L,R,U,D 序平手取先(同浸润带)
         };
+        // ★BJ307（2026-09-23 用户实报"临近水面的斜坡渲染异常,海面线处斜坡格多出
+        //   水色块 #083DBF"定谳）：增强谓词曾缺原版浸润带两道门,把原版刻意不画的
+        //   坡面格画了整格水（物证 Starter World (6155,314)=273 slope3、(6170,314)
+        //   =272 slope4,下邻海面表层格液位恒 238≤240,debug-report tiles.areaCamera
+        //   enc 行解码实证）：
+        //   ①下方旗 >240 门（TileDrawing.cs:4023-4026 flag4）：下邻液位 ≤240 不置旗
+        //     → :4044 五旗全空 return = 原版不画。海面表层 93% 液位正落此门。
+        //   ②slope3/4 悬空门（:4141-4148 → num15=0 整带不画）：slope4 左邻无液且
+        //     不实 / slope3 右邻同 → 坡面背侧无支撑,水不爬背侧斜边。浸润带移植段
+        //     （本文件 drawLiquidBehindTilesOnly ★坡面边角门注）已 1:1,唯增强缺。
+        //   两门补齐后增强触发集 ≡ 浸润带触发集（坡面格）,不再超原版"水爬坡"。
         take(slope === 1 || slope === 3 ? null : liqAt(-1, 0));
         take(slope === 2 || slope === 4 ? null : liqAt(1, 0));
         take(slope === 3 || slope === 4 ? null : liqAt(0, -1));
-        take(slope === 1 || slope === 2 ? null : liqAt(0, 1));
+        const dCell = slope === 1 || slope === 2 ? null : liqAt(0, 1);
+        take(dCell && dCell.amt > 240 ? dCell : null);   // ★BJ307 门①(:4023-4026 flag4)
+        // ★BJ307 门②(:4141-4148 num15=0；与浸润带 slope 边角门同式)。★BJ308:原版
+        //   谓词=WorldGen.SolidTile 全式（:70642 实例面 !halfBrick∧slope==0 三排除
+        //  ——solidTop 支已折 SOLID_LUT）,曾以宽谓词 isSolid 充数 → 邻格半砖/坡面
+        //   格误判实心,门②少触发=坡面多画。两处（本段+浸润带 :4141 移植段）同修。
+        if (slope === 4 && (liqAt(-1, 0)?.amt ?? 0) === 0 && !st.isSolidStrict(x - 1, y)) continue;
+        if (slope === 3 && (liqAt(1, 0)?.amt ?? 0) === 0 && !st.isSolidStrict(x + 1, y)) continue;
         if (openLq <= 0) continue;
         const slopeTex = slopeTexForType(openVt);
         if (!slopeTex || slopeTex.width <= 0) continue;   // 懒加载未就绪跳帧,下帧自愈
@@ -1160,9 +1178,11 @@ export function drawLiquidBehindTilesOnly(
         if (fD && Dq > maxLq) { maxLq = Dq; lt = toVanillaType(Dqt); }
         if (f5 && selfLq > maxLq) { maxLq = selfLq; lt = toVanillaType(st.liquidType[i] || 1); }
       }
-      // ★坡面边角门(:4155-4162):slope4 左侧无液无实心 / slope3 右侧同 → 整带不画
-      if (slope === 4 && Lq === 0 && !st.isSolid(x - 1, y)) continue;
-      if (slope === 3 && Rq === 0 && !st.isSolid(x + 1, y)) continue;
+      // ★坡面边角门(:4141-4148,旧注 :4155-4162 系行号漂移勘误):slope4 左侧无液
+      //   无实心 / slope3 右侧同 → 整带不画。★BJ308:实心谓词=SolidTile 全式
+      //  （!halfBrick∧slope==0,solidTop 已折 SOLID_LUT）→ isSolidStrict,同增强段。
+      if (slope === 4 && Lq === 0 && !st.isSolidStrict(x - 1, y)) continue;
+      if (slope === 3 && Rq === 0 && !st.isSolidStrict(x + 1, y)) continue;
       const tex = texFor(lt); // lt=3 微光走 Liquid_14
       if (!tex) continue;
 

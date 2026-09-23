@@ -152,7 +152,7 @@ function applyOps(d: { noGravity: boolean; vx: number; vy: number; scale: number
       case 'scaleSet': d.scale = op[1]; break;
       case 'scaleSetNpc': d.scale = op[1] * (e.vanillaScale ?? 1); break;
       case 'scaleAddR01': d.scale += Math.random(); break;   // vanilla `scale += Main.rand.NextFloat()`
-      case 'fadeIn': break; // ★变异:摘 fadeIn 应用                // vanilla `dust.fadeIn = N`（生长目标,首拍引擎老化链消费）
+      case 'fadeIn': d.fadeIn = op[1]; break;                // vanilla `dust.fadeIn = N`（生长目标,首拍引擎老化链消费）
     }
   }
 }

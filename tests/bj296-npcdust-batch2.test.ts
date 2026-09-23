@@ -13,10 +13,11 @@
 //   C. 边界——批3/4 未接组零尘（419/402）、deadArms 死臂登记、_meta 声明。
 //   D. 变异自证——M1 摘分支单掷（恒 t 臂）=636 死亡 d69 消失；M2 摘 pre 短路=
 //      262 低血拍耗掷。原子+逐字节还原（禁 git checkout）。
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -29,6 +30,10 @@ import { spawnNpcHitDust, spawnNpcDeathDust } from '../src/entities/NpcHitDust';
 
 beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
 afterEach(() => { vi.restoreAllMocks(); });
+
+// ★残留检测闸（文件级 beforeAll,BJ304 加装）：等在途变异窗结束+锚校验——bj304 D 面
+//   与本文件 D 面共锁（tests/npcdust-mutation-mutex.ts）,变异子进程以 SW_BJ296_MUT=1 豁免。
+beforeAll(() => { gateConsumerMutation('SW_BJ296_MUT', join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts')); });
 
 const W = 180, H = 150, FLOOR = 110;
 const TABLE = npcDustJson as unknown as Record<string, {
@@ -460,7 +465,13 @@ describe('BJ296 D. 变异自证', () => {
   //   = 无递归）→ 判别面红 = 消费行为锁对变异有捕获力;finally 逐字节还原（禁 git checkout）。
   const spawnVitest = (filter: string) => spawnSync('npx', ['vitest', 'run', 'tests/bj296-npcdust-batch2.test.ts', '--no-file-parallelism', '-t', filter], {
     cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
+    env: { ...process.env, SW_BJ296_MUT: '1' },   // ★子进程豁免残留检测闸（对变异文件跑 B 面）
   });
+  // ★BJ304：消费面变异互斥锁（跨文件）——bj304 D 面同样变异本消费文件,vitest 多文件并行
+  //   时两个 D 面的 write→sub-vitest→restore 窗口交错会让对方子进程读到「无变异」现库
+  //   （判别面假绿）。实现=tests/npcdust-mutation-mutex.ts（共锁）;子进程 -t 过滤不执行 D 面=无死锁。
+  beforeAll(() => { lockConsumerMutation(); });
+  afterAll(() => { unlockConsumerMutation(); });
 
   it('M1 摘分支单掷（roll 恒真=恒 t 臂）→ 恒 t 臂两臂齐现面红（B 面 636 hit 必炸）', () => {
     const src = readFileSync(CONSUMER, 'utf8');

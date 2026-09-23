@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// tools/extract-gore.mjs —— NPC.HitEffect（Terarria1456/Terraria/NPC.cs:82421-:90873）死亡 gore 提取器
+// tools/extract-gore.mjs —— NPC.HitEffect（Terarria1456/Terraria/NPC.cs:82421-:90870）死亡 gore 提取器
+// ★BJ308 行号勘误：方法体闭括号=:90870（:90872 起 CountNPCS）——旧注 :90873 系伪锚
+//   （落入邻方法体内）。纯 provenance 注释面,提取器 span 终点由 bodyEnd 实算,不消费本值。
 //
 // 方法结构：`public void HitEffect(int hitDirection = 0, double dmg = 10.0)`（NPC.cs:82421），
 // 逐 type 的 if/else-if 长链（:82877 `if (type == 552 || …)` 起）+ 尾部 catch-all `else`
@@ -1801,7 +1803,8 @@ const entryCount = [...entries.values()].reduce((n, l) => n + l.length, 0);
 const countField = (pred) => [...entries.values()].reduce((n, l) => n + l.filter(pred).length, 0);
 const out = {
   _meta: {
-    source: 'Terarria1456/Terraria/NPC.cs HitEffect (:82421-:90873)；物理=Terraria/Gore.cs',
+    // ★BJ308：span 终点 90870（方法体闭括号;旧 90873 伪锚落入 CountNPCS——provenance 面）
+    source: 'Terarria1456/Terraria/NPC.cs HitEffect (:82421-:90870)；物理=Terraria/Gore.cs',
     generatedBy: 'tools/extract-gore.mjs',
     callsTotal,
     callsHitSkipped,

@@ -19049,7 +19049,7 @@
   }
  ],
  "_meta": {
-  "source": "Terarria1456/Terraria/NPC.cs HitEffect (:82421-:90873)；物理=Terraria/Gore.cs",
+  "source": "Terarria1456/Terraria/NPC.cs HitEffect (:82421-:90870)；物理=Terraria/Gore.cs",
   "generatedBy": "tools/extract-gore.mjs",
   "callsTotal": 1304,
   "callsHitSkipped": 4,

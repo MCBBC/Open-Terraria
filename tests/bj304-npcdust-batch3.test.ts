@@ -15,11 +15,11 @@
 //   C. 边界——661 四缺口零尘+pending 精确登记（noLight=id 字段在位引擎不消费）、_meta.batch3。
 //   D. 变异自证——M1 摘 fadeIn 算子应用=叶 fadeIn 断言红；M2 摘无臂占位掷流=524 耗掷锁红。
 //      原子+逐字节还原（禁 git checkout）。
-import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from 'vitest';
-import { readFileSync, writeFileSync, statSync, unlinkSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { gateConsumerMutation, lockConsumerMutation, unlockConsumerMutation } from './npcdust-mutation-mutex';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { Inventory } from '../src/items/Inventory';
@@ -33,16 +33,10 @@ import { spawnNpcHitDust, spawnNpcDeathDust } from '../src/entities/NpcHitDust';
 beforeEach(() => { vi.spyOn(Math, 'random').mockImplementation(seededRandom(BATTERY_SEED)); });
 afterEach(() => { vi.restoreAllMocks(); });
 
-// ★残留检测闸（文件级 beforeAll,先于 A/B/C 面执行）：上轮变异运行若在 write→finally 窗口
-//   被中断,残留会让消费面静默中毒——此处 loud 红,指示先恢复盘上最新内容（禁 git checkout）。
-//   ★变异子进程以 SW_BJ304_MUT=1 豁免（子进程就是要对变异文件跑 B 面）。
-beforeAll(() => {
-  if (process.env.SW_BJ304_MUT) return;
-  const src = readFileSync(join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts'), 'utf8');
-  if (!src.includes("case 'fadeIn': d.fadeIn = op[1]; break;")) {
-    throw new Error('NpcHitDust.ts 缺批3 fadeIn 算子——上轮变异残留或并行覆写,先恢复盘上最新内容再跑（读盘核对后小粒度 Edit）');
-  }
-});
+// ★残留检测闸（文件级 beforeAll,先于 A/B/C 面执行）：等在途变异窗结束+锚校验——上轮
+//   变异残留或并行覆写会让消费面静默中毒,此处 loud 红。★变异子进程以 SW_BJ304_MUT=1 豁免
+//   （子进程就是要对变异文件跑 B 面）。实现=tests/npcdust-mutation-mutex.ts（与 bj296 D 面共锁）。
+beforeAll(() => { gateConsumerMutation('SW_BJ304_MUT', join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts')); });
 
 const W = 180, H = 150, FLOOR = 110;
 const TABLE = npcDustJson as unknown as Record<string, {
@@ -386,7 +380,7 @@ describe('BJ304 C. 边界', () => {
 //   失败/中断都不会把变异残留进后续运行（曾因 guard 在 try 外失败跳过 finally,
 //   上轮残留毒化下轮 B 面——快照+afterEach 双保险后,残留至多活到本轮 afterEach）。
 const CONSUMER = join(process.cwd(), 'src', 'entities', 'NpcHitDust.ts');
-const PRISTINE = readFileSync(CONSUMER, 'utf8');
+// ★消费面变异互斥（与 bj296 D 面共锁,实现=tests/npcdust-mutation-mutex.ts）
 describe('BJ304 D. 变异自证', () => {
   // ★子进程模式（era-guard ④/bj296 D 同款）：变异写盘 → 子 vitest 只跑 B 面（-t 过滤,D 面
   //   不注册执行=无递归）→ 判别面红 = 行为锁对变异有捕获力;finally+afterEach 逐字节还原
@@ -395,7 +389,18 @@ describe('BJ304 D. 变异自证', () => {
     cwd: process.cwd(), encoding: 'utf8', timeout: 300_000,
     env: { ...process.env, SW_BJ304_MUT: '1' },   // ★子进程豁免残留检测闸（对变异文件跑 B 面）
   });
-  afterEach(() => { writeFileSync(CONSUMER, PRISTINE); });
+  // ★快照在【持锁后】取（D beforeAll）——模块加载期快照在并行运行下可能读到他文件
+  //   变异窗内的内容（bj296 D 面共锁,错拍加载→毒快照回写=残留根因）;锁内读盘=免毒。
+  let PRISTINE = '';
+  afterEach(() => { if (PRISTINE) writeFileSync(CONSUMER, PRISTINE); });
+  beforeAll(() => {
+    lockConsumerMutation();
+    PRISTINE = readFileSync(CONSUMER, 'utf8');   // 锁内快照（互斥面内=恒净本）
+  });
+  afterAll(() => {
+    if (PRISTINE) writeFileSync(CONSUMER, PRISTINE);   // 出闸前再钉一次原样（防最后一条用例中断残留）
+    unlockConsumerMutation();
+  });
 
   it('M1 摘 fadeIn 算子应用（case 空转）→ 叶 fadeIn=1 断言红（B 面 416 hit 必炸）', () => {
     const TRIGGER = "      case 'fadeIn': d.fadeIn = op[1]; break;";

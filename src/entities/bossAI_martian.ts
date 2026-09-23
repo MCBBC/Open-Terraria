@@ -201,7 +201,7 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
       if (e.lai0 >= 54 || e.lai0 < 36) e.lai0 = 36;
     }
   };
-  // ---- 自毁态（:36357-36360,普通模式由 392 置 ai0=3）----
+  // ---- 自毁态（:36457-36461,1457 行号——旧注 :36357-36360 系 1456 伪锚 BJ308 勘误;普通模式由 392 置 ai0=3）----
   if (e.ai0 === 3) {
     e.iframes = 0;
     // ★BJ302（2026-09-23 用户实报「飞碟打死不掉落+打死后过一会才消失」定谳）：

@@ -5143,13 +5143,20 @@ export class Renderer {
   })();
   /** ?b0shadow=1：B0 世界层 API 谱普查（glshim/GLShimCensus,渲染改造方案 §三 B0
    *  一段仪具;快照面=renderer.b0ShimSnapshot()/_b0shadow-audit.mjs 探针） */
-  /** ?wfbo=1：A2 光照×扭曲 FBO 链（GLWorldCompose 单上下文两级 pass——scene 免重传+
-   *  单回贴;渲染改造方案 §三 A2）。首版默认关,四场景像素对拍过翻缺省+逃生门改 wfbo=0。 */
-  static readonly wfbo = (() => {
+  /** ?wfbo：A2 光照×扭曲 FBO 链（GLWorldCompose 单上下文两级 pass——scene 免重传+
+   *  单回贴;渲染改造方案 §三 A2）。首版默认关(?wfbo=1 显式激活),对拍过翻缺省+
+   *  逃生门改 wfbo=0。★运行时可翻（swperf 同款 mutable 槽+ForTest 钩）——像素对拍
+   *  走 bj77 页内翻面范式（跨载入对拍受 bootstrap 洗参杀桥问题阻塞,2026-09-23）。 */
+  private static _wfbo = (() => {
     try {
-      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('wfbo') === '1';
-    } catch { return false; }
+      // ★A2 转正（2026-09-23）：缺省开——像素对拍 ALL PASS（世界区三态同 md5
+      //   c33291d5,scripts/_a2-pixel-ab 页内翻面范式）+ 用户两轮实机验收。
+      //   ?wfbo=0 = 逃生门（回旧 GLWorldLight/GLWaterDistortion 双上下文链）。
+      return typeof location === 'undefined' || new URLSearchParams(location.search).get('wfbo') !== '0';
+    } catch { return true; }
   })();
+  static get wfbo() { return this._wfbo; }
+  static wfboSetForTest(v: boolean): void { this._wfbo = v; }
   static readonly b0Shadow = (() => {
     try {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).has('b0shadow');
@@ -18865,6 +18872,7 @@ export class Renderer {
     ctx.save();
     ctx.font = CANVAS_MOUSETEXT_FONT;
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';   // ★BJ308 显式钉死（与 11b' 标尺读数同形,勿依赖外层继承——canvas 状态跨帧持久家族坑）
     const y = viewH - 16;
     ctx.fillStyle = '#000';
     for (const [ox, oy] of [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]]) {
