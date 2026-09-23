@@ -225,8 +225,8 @@ let _wwCapture: { k: string; a: number[] }[] | null = null;
 /** ★C8 诊断计数器（探针对账:queued(capture 推入) vs posted(帧批发出) vs
  *  fields(场快照回达);falls=看门狗回落。纯读面零行为影响） */
 const _wwStat = { camQ: 0, washQ: 0, rippleQ: 0, posted: 0, fields: 0, falls: 0 };
-export function wwWorkerStats(): { camQ: number; washQ: number; rippleQ: number; posted: number; fields: number; falls: number } {
-  return { ..._wwStat };
+export function wwWorkerStats(): { on: boolean; camQ: number; washQ: number; rippleQ: number; posted: number; fields: number; falls: number } {
+  return { on: waterWaves.wwActive(), ..._wwStat };
 }
 
 /** QueueRipple(pos, strength=1, shape=Square, rotation=0)（:446-451）。
@@ -661,6 +661,9 @@ class WaterWaveSystem {
   }
 
   /** 0 档停机（Renderer 早退路径调用；重置步进计数防陈旧读数 + 清缓冲/队列） */
+  /** ★C8 诊断:worker 模式是否激活（F5 报告/控制台访问面） */
+  wwActive(): boolean { return this._wwOn; }
+
   disable(): void {
     this._clear();
     _rqCount = 0;

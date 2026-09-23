@@ -10,6 +10,7 @@ import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import { TILE } from '../core/constants';
 import { liquidDebugState } from '../render/VanillaLiquidRenderer';
+import { wwWorkerStats } from '../render/WaterWaves';
 import { waterWaves, waveTexReady as waterWavesTexReady } from '../render/WaterWaves';
 import { autoFrameAt } from '../render/VanillaTiler';
 import { TILE_ANIM_RATE, animFrameIdx, animYOffset, tileAnim } from '../render/TileAnim';
@@ -940,6 +941,13 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         stats: g.renderer?.composePathStats ?? null,
         lastFail: g.renderer?.composeLastFail ?? null,
       },
+      // ★C8 诊断面（2026-09-23）:波场 Worker 运行态——on=worker 在跑,fields/falls
+      //  =场快照应答/失联回落计数（falls>0=已自动回落主线程模拟,需报障）
+      waveWorker: (() => {
+        try {
+          return { ...wwWorkerStats(), flag: !/waveworker=0/.test(globalThis.location?.search ?? '') };
+        } catch { return { on: false, flag: false }; }
+      })(),
       // 资产健康(2026-08-13 运行期防线):失败的 vanilla/UI 贴图(404 终态)与
       // vui 键失配一目了然——此前 NPC_Head 40 个 404/全屏地图键失配这类 bug
       // 只能靠翻网络面板发现
