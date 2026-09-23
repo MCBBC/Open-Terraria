@@ -320,8 +320,8 @@ export function dukePhaseTint(e: Enemy): [number, number, number] | null {
 }
 
 /** num335 拖影段数态表（Main.cs :24700-24712）：370 的 −1 态 0/悬浮 0·5·10 态 7/
- *  其余（含 372/373 全态）10。 */
-function dukeTrailCount(e: Enemy): number {
+ *  其余（含 372/373 全态）10。导出供 BJ310 回归测试锚定。 */
+export function dukeTrailCount(e: Enemy): number {
   if (e.vanillaId !== 370) return 10;
   if (e.ai0 === -1) return 0;
   if (e.ai0 === 0 || e.ai0 === 5 || e.ai0 === 10) return 7;
@@ -329,8 +329,9 @@ function dukeTrailCount(e: Enemy): number {
 }
 
 /** 圆周脉冲参数（Main.cs :24747-24786）：[拷贝数 num338, 幅 num339, 半径 num340]。
- *  3/8 态 ai2>60 → R40；(4/9) 态 ai2>120 → R60；12 态 → R20；amp=(1−cos(θ))/3。 */
-function dukeBurstParams(e: Enemy): [number, number, number] {
+ *  3/8 态 ai2>60 → R40；(4/9) 态 ai2>120 → R60；12 态 → R20；amp=(1−cos(θ))/3。
+ *  导出供 BJ310 回归测试锚定。 */
+export function dukeBurstParams(e: Enemy): [number, number, number] {
   const ai0 = e.ai0, ai2 = e.ai2 ?? 0;
   if ((ai0 === 3 || ai0 === 8) && ai2 > 60) {
     return [6, (1 - Math.cos(((ai2 - 60) / 30) * Math.PI * 2)) / 3, 40];
@@ -345,8 +346,8 @@ function dukeBurstParams(e: Enemy): [number, number, number] {
 }
 
 /** 染色帧烘焙缓存（key 含 vid/贴图/变体/量化色）。multiply+destination-in。 */
-function dukeBake(
-  atlas: SpriteAtlas, texKey: string, tex: HTMLImageElement | HTMLCanvasElement,
+export function dukeBake(
+  atlas: SpriteAtlas, texKey: string, tex: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   frame: { sx: number; sy: number; sw: number; sh: number },
   tint: [number, number, number], variant: string,
 ): HTMLCanvasElement | null {

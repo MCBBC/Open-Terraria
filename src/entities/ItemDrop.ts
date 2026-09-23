@@ -1,7 +1,7 @@
 // 掉落物实体：重力、落地、磁吸拾取
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
-import { ITEM_GRAVITY, ITEM_MAX_FALL, MAGNET_RADIUS, PICKUP_DELAY, TILE } from '../core/constants';
+import { ITEM_GRAVITY, ITEM_MAX_FALL, MAGNET_RADIUS, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { ITEM_DEFS, ITEM_NO_GRAVITY_VIDS, ITEM_RECOVERABLE_IMPORTANT } from '../data/items';
 import { coinIndexOf } from '../items/Inventory';
@@ -219,7 +219,7 @@ export class ItemDrop extends Entity {
     // ★BJ311（2026-09-23）：摘全局 25t 门（见 noGrabDelay 块注）——仅保留
     // noGrabDelay（≙原版 grabDelayTime,只挡玩家自抛件）；GrabItems
     // （Player.cs:35181-35203）对普通战利品零延迟,本门曾连带拉取一起挡 26 拍
-    if (player && !player.dead && this.age > PICKUP_DELAY && this.age > this.noGrabDelay) {
+    if (player && !player.dead && this.age > this.noGrabDelay) {
       // 顶部速度门（GrabItems Player.cs:34466）：shimmered 且速度 ≥0.2 → **拾取与
       // 拉取整体跳过**（此前只拦拾取不拦拉动 → 拉动加速反而把物品锁死在 ≥0.2 永不可拾）
       const grabbable = !(this.shimmered && Math.hypot(this.vx, this.vy) >= 0.2);

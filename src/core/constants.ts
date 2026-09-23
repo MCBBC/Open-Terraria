@@ -56,7 +56,6 @@ export const PLAYER_MAX_HP = 100;
 export const KNOCKBACK_BASE = 3.2;
 export const ENEMY_CAP = 9;
 export const MAGNET_RADIUS = 3.2 * TILE; // 掉落物磁吸半径（px）
-export const PICKUP_DELAY = 25; // 掉落物产生后多少 tick 才能被拾取
 // ★BJ311（2026-09-23）：PICKUP_DELAY=25 全局拾取延迟门已摘除——原版 GrabItems
 // （Player.cs:35181-35203）对普通战利品零年龄门（仅玩家自抛件 grabDelayTime
 // 100t,ItemDrop.noGrabDelay 承载）。挂账债 wiki-mechanics-audit-2026-08-13.md:912。
