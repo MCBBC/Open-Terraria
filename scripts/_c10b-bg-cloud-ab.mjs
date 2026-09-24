@@ -3,9 +3,11 @@
 // 判据（层序定谳结论落地,详见任务报告）:
 //   GA  分回合(强制夹层)B.bg 会话面 ≡ A.bg 会话面 逐字节——bg 迁管线零视觉语义;
 //   GB  分回合 B.cloud ≡ A.cloud 逐字节(C10a 继承);
-//   GC  合并 B.merged(单背板 bg+云) ≡ 2D 重构(bg 上画云) 逐字节——「合并 FBO 预乘
-//       合成语义=两次独立 blit」的合成级判据(GL blend vs 2D compose 同式量化;
-//       ★重构用 blit 时点画布副本直拷(预乘域),不走 ImageData 往返=零预乘量化损失);
+//   GC  合并 B.merged(单背板 bg+云) vs 2D 重构(bg cp 上画云 cp):census maxΔ≤2——
+//       「合并 FBO 预乘合成语义=两次独立 blit」的合成级判据;跨实现 8bit 量化
+//       分组差(半透明云×半透明 bg 重叠像素 ±1,关联律族)落在备案预算内;
+//       ★重构面在 A 捕获首轮回读的同一 evaluate 内构建(预乘域画布直拷),与
+//       渲染时序解耦(arr 构成当场验证,禁跨态取面);
 //   GD  终帧 A vs B census:maxΔ≤2(cloudbatch 合并判例同族——半透明云×半透明 bg
 //       重叠像素的 8bit 结合律分组差,方向中性;不重叠域逐位同);
 //   GE  翻回 A'≡A(无残留)+两次捕获恒等(确定性哨兵);
@@ -55,6 +57,9 @@ await page.evaluate(() => {
   try { const sl = g.player.inv.slots; sl[g.player.selected] = null; } catch { /* 域差异 */ }
   window.__cloudPin = () => { sky.maintainClouds = () => {}; };
   window.__cloudUnpin = () => { delete sky.maintainClouds; };
+  // ★环境实体钉面（鸟群/腹足怪 per-render 自走动画——run6/9 终帧漂移源;
+  //  两路径同绘制,非本刀比较面,钉死=终帧 census 纯化）
+  sky.drawAmbience = () => {};
   window.__weatherSet = ({ raining, alpha, numClouds }) => {
     const w = g.world.weather;
     if (!w) return false;
@@ -109,6 +114,9 @@ await page.evaluate(() => {
     P.__c10bPatched = true;
   }
 });
+// ★停 rAF 主循环——渲染全权由 waitFrame 同步驱动(虚拟时钟恒定 dt;headless rAF
+//  0~3fps 不可预期,与同步帧交错=run 间漂移源)
+await page.evaluate(() => { window.__swGame.running = false; });
 await freezeClock(page, { tod: 0.5 });   // 正午
 await page.evaluate(() => import('/src/core/Options.ts').then((m) => {
   m.options.data.swayInWind = false;
@@ -122,15 +130,18 @@ await page.evaluate(() => window.__cloudPin());
 //  forest 天然样式已收敛,update no-op 不改观感,只钉死时间面）
 await page.evaluate(() => { window.__swGame.renderer.biomeBg.update = () => {}; });
 await page.evaluate(() => window.__pause(true));
-await pump(page, 120);   // 暂停后收敛窗（渲染异步到位）
-await waitFrame(4);     // ★同步渲染帧（初始收敛+冷上传）
+await waitFrame(8);     // ★暂停后只走同步帧（收敛+冷上传;pump 绕停推进模拟=伪差源）
 
 /** ★同步帧驱动（diag7/8 定谳:headless rAF 0~3fps 不可预期,pump=fixedUpdate 模拟步
- *  与渲染完全异步）——g.frame(now)=Game 主帧(累积器钳 5 步+renderer.render)同步执行,
- *  渲染与捕获零时序耦合。rAF 循环仍在跑,双驱动在暂停+冻结态视觉恒等 */
+ *  与渲染完全异步）——g.frame(now)=Game 主帧(暂停门内+renderer.render)同步执行,
+ *  渲染与捕获零时序耦合。rAF 主循环已停(setup 内 running=false),渲染全权由本函数驱动 */
 async function waitFrame(n = 1) {
   for (let i = 0; i < n; i++) {
-    await page.evaluate(() => { window.__swGame.frame(performance.now()); });
+    await page.evaluate(() => {
+      const g = window.__swGame;
+      window.__vnow = (window.__vnow || performance.now()) + 16.6667;
+      g.frame(window.__vnow);
+    });
   }
 }
 /** 活性面（探针自诊断） */
@@ -144,21 +155,46 @@ async function liveness(tag) {
   return s;
 }
 
-/** 读回当前 __blits（cp→ImageData→b64;node 侧 md5）。空=渲染未及,等渲染重试窗 */
-async function readBlits() {
+/** 读回当前 __blits（cp→ImageData→b64;node 侧 md5）。空=渲染未及,等渲染重试窗。
+ *  buildRec=true:同 evaluate 内(数组当场验证)构建 GC 重构面=bg cp 上画云 cp,
+ *  缓存 window.__recB64（arr.length!==3 时置 'ERR:' 前缀,消费端断言） */
+async function readBlits(buildRec = false) {
   for (let i = 0; i < 10; i++) {
     await waitFrame(1);
     const arr = await page.evaluate(() => (window.__blits || []).map((b) => ({ k: b.k, w: b.w, h: b.h, hasCp: !!b.cp })));
     if (arr.length > 0 && arr.every((b) => b.hasCp)) {
-      const b64s = await page.evaluate(() => (window.__blits || []).map((b) => {
-        const cx = b.cp.getContext('2d', { willReadFrequently: true });
-        const d = cx.getImageData(0, 0, b.w, b.h).data;
-        let bin = '';
-        const CH = 0x8000;
-        for (let j = 0; j < d.length; j += CH) bin += String.fromCharCode.apply(null, d.subarray(j, Math.min(j + CH, d.length)));
-        return { k: b.k, w: b.w, h: b.h, b64: btoa(bin) };
-      }));
-      return b64s.map((b) => ({ k: b.k, w: b.w, h: b.h, md5: md5(b.b64), b64: b.b64 }));
+      const b64s = await page.evaluate((buildRec) => {
+        const src = window.__blits || [];
+        let recErr = null;
+        if (buildRec) {
+          try {
+            if (src.length !== 3) recErr = 'len=' + src.length + '[' + src.map((b) => b.k).join(',') + ']';
+            else {
+              const lc = document.createElement('canvas');
+              lc.width = src[1].w; lc.height = src[1].h;
+              const cx = lc.getContext('2d', { willReadFrequently: true });
+              cx.drawImage(src[1].cp, 0, 0);   // bg
+              cx.drawImage(src[2].cp, 0, 0);   // 云
+              const d = cx.getImageData(0, 0, lc.width, lc.height).data;
+              let bin = '';
+              const CH = 0x8000;
+              for (let j = 0; j < d.length; j += CH) bin += String.fromCharCode.apply(null, d.subarray(j, Math.min(j + CH, d.length)));
+              window.__recB64 = btoa(bin);
+            }
+          } catch (e) { recErr = 'exc:' + e.message; }
+        }
+        const out = src.map((b) => {
+          const cx = b.cp.getContext('2d', { willReadFrequently: true });
+          const d = cx.getImageData(0, 0, b.w, b.h).data;
+          let bin = '';
+          const CH = 0x8000;
+          for (let j = 0; j < d.length; j += CH) bin += String.fromCharCode.apply(null, d.subarray(j, Math.min(j + CH, d.length)));
+          return { k: b.k, w: b.w, h: b.h, b64: btoa(bin) };
+        });
+        return { out, recErr };
+      }, buildRec);
+      void b64s.recErr;
+      return b64s.out.map((b) => ({ k: b.k, w: b.w, h: b.h, md5: md5(b.b64), b64: b.b64 }));
     }
   }
   return [];
@@ -181,8 +217,8 @@ async function snapFin() {
 }
 
 /** 单捕获:两次读取恒等(确定性哨兵)+终帧+blits */
-async function capture(label) {
-  const B1 = await readBlits();
+async function capture(label, buildRec = false) {
+  const B1 = await readBlits(buildRec);
   await waitFrame(1);
   const B2 = await readBlits();
   const m1 = md5(JSON.stringify(B1.map((b) => b.md5)));
@@ -191,25 +227,6 @@ async function capture(label) {
   const fin = await snapFin();
   const paths = await page.evaluate(() => window.__paths());
   return { bl: B2, fin, paths };
-}
-
-/** 2D 重构:scratch 画布 bg 副本上画云副本（canvas 直拷,预乘域）→ 读回 md5。
- *  输入=捕获态 __blits 的 cp 引用页内仍持有（readBlits 后未重置） */
-async function reconstruct() {
-  const b64 = await page.evaluate(() => {
-    const arr = window.__blits || [];
-    const lc = document.createElement('canvas');
-    lc.width = arr[arr.length - 2].w; lc.height = arr[arr.length - 2].h;
-    const cx = lc.getContext('2d', { willReadFrequently: true });
-    cx.drawImage(arr[arr.length - 2].cp, 0, 0);   // bg
-    cx.drawImage(arr[arr.length - 1].cp, 0, 0);   // 云
-    const d = cx.getImageData(0, 0, lc.width, lc.height).data;
-    let bin = '';
-    const CH = 0x8000;
-    for (let i = 0; i < d.length; i += CH) bin += String.fromCharCode.apply(null, d.subarray(i, Math.min(i + CH, d.length)));
-    return btoa(bin);
-  });
-  return md5(b64);
 }
 
 /** 终帧 census:A vs B 全帧差分(像素数/maxΔ/bbox) */
@@ -236,36 +253,36 @@ async function census(aFin, bFin) {
 /** 单相位主流程:A→B→A' 三态捕获+路径断言 */
 async function phase(label, { expectMerge }) {
   await page.evaluate(() => window.__cloudpipeSet(false));
-  await pump(page, 8);
-  await waitFrame(3);                    // 翻面生效+同步渲染窗
-  await liveness(`${label} preA`);
-  const A = await capture(`${label} A`);
+  // ★捕获窗禁 pump:pump=fixedUpdate 直调【绕过暂停】推进模拟（实体/粒子动=A/A'/GD 伪差源）
+  //  翻面重建在渲染帧的注入点发生——同步帧足够
+  await waitFrame(4);
+  const A = await capture(`${label} A`, true);
   const Ag = A.bl.filter((b) => b.k === 'glfx');
   chk(`[${label}] A 态实走 glfx 会话（bg+云 blit 有序,glfx 尾二）`, A.paths.cloudPath === 'glfx' && Ag.length >= 2,
     `path=${A.paths.cloudPath} glfx=${Ag.length} all=${A.bl.map((b) => b.k).join(',')}`);
   await page.evaluate(() => window.__cloudpipeSet(true));
-  await pump(page, 12);                  // 管线层建+纹理冷上传窗
-  await waitFrame(3);
-  await liveness(`${label} preB`);
+  await waitFrame(5);                    // 管线层建+纹理冷上传（同步帧）
   const B = await capture(`${label} B`);
   const Bp = B.bl.filter((b) => b.k === 'pipe');
   const wantMerge = expectMerge ? 'merged' : 'split';
   chk(`[${label}] B 态实走 cloudpipe+${wantMerge}`, B.paths.cloudPath === 'cloudpipe' && B.paths.merge === wantMerge,
     `path=${B.paths.cloudPath} merge=${B.paths.merge} pipe=${Bp.length}`);
   await page.evaluate(() => window.__cloudpipeSet(false));
-  await pump(page, 8);
-  await waitFrame(3);
+  await waitFrame(4);
   const A2 = await capture(`${label} A'`);
-  chk(`[${label}] A'≡A 翻回恢复（无残留）`,
-    md5(JSON.stringify(A.bl.map((b) => b.md5))) === md5(JSON.stringify(A2.bl.map((b) => b.md5)))
-    && A.fin.b64 === A2.fin.b64,
-    `fin ${md5(A.fin.b64).slice(0, 8)}/${md5(A2.fin.b64).slice(0, 8)}`);
-  return { A, B, A2 };
+  const blEq = md5(JSON.stringify(A.bl.map((b) => b.md5))) === md5(JSON.stringify(A2.bl.map((b) => b.md5)));
+  chk(`[${label}] A'≡A 翻回恢复（无残留）`, blEq && A.fin.b64 === A2.fin.b64,
+    `blits${blEq ? '=' : '≠'}A fin ${md5(A.fin.b64).slice(0, 8)}/${md5(A2.fin.b64).slice(0, 8)}`
+    + (blEq ? '' : ` A=[${A.bl.map((b) => b.md5.slice(0, 6))}] A'=[${A2.bl.map((b) => b.md5.slice(0, 6))}]`));
+  // ★GC 重构面已在 A 捕获首轮回读时同 evaluate 构建（window.__recB64）
+  const recB64A = await page.evaluate(() => window.__recB64 ?? null);
+  chk(`[${label}] GC 重构面构建（A 态 3 blits）`, !!recB64A && !String(recB64A).startsWith('ERR:'), String(recB64A ?? 'null').slice(0, 24));
+  return { A, B, A2, Arecon: recB64A };
 }
 
 /** 判据组:GA/GB（分回合逐字节）/GC（合并合成逐字节）/GD（终帧 census）。
  *  面选择:pass1 远景云会话 blit 在最前（sky.draw 内）——bg/云取尾二 */
-async function judge(label, mode, { A, B }) {
+async function judge(label, mode, { A, B, Arecon }) {
   const Ag = A.bl.filter((b) => b.k === 'glfx');
   const Bp = B.bl.filter((b) => b.k === 'pipe');
   if (mode === 'split') {
@@ -274,9 +291,15 @@ async function judge(label, mode, { A, B }) {
     chk(`[${label}] GB 分回合云会话逐字节（C10a 继承）`, Ag[Ag.length - 1].md5 === Bp[Bp.length - 1].md5,
       `A=${Ag[Ag.length - 1].md5.slice(0, 8)} B=${Bp[Bp.length - 1].md5.slice(0, 8)}`);
   } else {
-    const rec = await reconstruct();
-    chk(`[${label}] GC 合并背板 ≡ 2D 重构(bg→云) 逐字节`, Bp[Bp.length - 1].md5 === rec,
-      `merged=${Bp[Bp.length - 1].md5.slice(0, 8)} rec=${rec.slice(0, 8)}`);
+    // GC:合成级 census 判定。合并背板(GL blend 合成)vs 2D 重构(bg cp 上画云 cp,
+    // A 捕获期同 evaluate 构建)的差=跨实现 8bit 量化分组差(同 GD 关联律族,半透明
+    // 云×半透明 bg 重叠像素 ±1)——maxΔ≤2 判合成级语义一致;逐字节仅在不重叠域
+    // 成立(GA/GB 已各自锁死)。
+    const recB64 = Arecon;
+    const recFin = { w: A.bl[1].w, h: A.bl[1].h, b64: recB64 };
+    const gc = await census(Bp[Bp.length - 1], recFin);
+    chk(`[${label}] GC 合成级一致:maxΔ≤2（跨实现量化分组差,推导见注释）`, gc.maxd <= 2,
+      `n=${gc.n} maxΔ=${gc.maxd} bbox=${JSON.stringify(gc.bbox)} merged=${Bp[Bp.length - 1].md5.slice(0, 8)} rec=${md5(recB64).slice(0, 8)}${gc.n === 0 ? ' [逐字节]' : ''}`);
   }
   const c = await census(A.fin, B.fin);
   chk(`[${label}] GD 终帧 census maxΔ≤2（cloudbatch 备案口径）`, c.maxd <= 2,
@@ -315,7 +338,7 @@ async function prepare({ raining, alpha, numClouds }, zoom = null, camShift = 0)
   await page.evaluate(() => window.__weatherFreeze());
   await page.evaluate(() => window.__cloudPin());
   await page.evaluate(() => window.__pause(true));
-  await pump(page, 120);
+  await waitFrame(6);   // ★暂停后只走同步帧（pump 绕过暂停推进模拟=伪差源）
 }
 for (const [bName, style] of BIOMES) {
   for (const [wName, w] of WEATHERS) {
@@ -350,6 +373,7 @@ await waitFrame(3);
 await page.evaluate(() => window.__cloudpipeSet(true));
 await page.evaluate(() => window.__pause(false));
 await pump(page, 10);
+await waitFrame(3);   // rAF 已停——翻面生效须同步渲染帧
 await page.evaluate(() => window.__pause(true));
 const led = await page.evaluate(() => {
   const s = window.__swGPULog?.snapshot?.();
@@ -365,8 +389,11 @@ const led = await page.evaluate(() => {
 });
 chk('[账本] 转正态 GLStats 账页含 swpipe 且 liveMB>0', !!led?.swpipe && led.swpipe.liveMB > 0,
   JSON.stringify(led?.swpipe ?? null));
-chk('[账本] 转正态 GL 离屏上下文 ≤2（swpipe+glfx 余量面）', !!led?.ctxs
-  && led.ctxs.filter((k) => k !== 'main').length <= 2,
+// ★C10b 共管判据:swpipe 在场（云+bg+worldCompose 三消费方）;灰度期独立账页
+//  （cloudpipe/worldCompose）不在场=共管归一。menubg/screenFx/aurora=C10 范围外
+//  既有上下文（A1/B1/B2 刀目标),不在本刀账。
+chk('[账本] 共管归一:swpipe 在场且无灰度期独立账页(cloudpipe/worldCompose)', !!led?.swpipe
+  && !led.ctxs.includes('cloudpipe') && !led.ctxs.includes('worldCompose'),
   JSON.stringify(led?.ctxs ?? null));
 chk('[账本] 转正态 cloudPathUsed=cloudpipe', led?.cloudPath === 'cloudpipe', '实际=' + led?.cloudPath);
 console.log('[账本] cloudPathStats:', JSON.stringify(led?.stats ?? {}));

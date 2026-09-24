@@ -1237,9 +1237,13 @@ export function drawLiquidBehindTilesOnly(
           // 侧向有水(:4095-4123)
           let y0 = 4;
           const upNi = st.idx(x, y - 1);
-          // ★num4!=0 门(:4084-4087):半砖/坡面格即便上格实心也从格顶画——
-          //   (num4 != 0 || !SolidTile(above)),旧版漏前半 = 半格带矮 4px
-          if (st.liquid[upNi] === 0 && (num4 !== 0 || !st.isSolid(x, y - 1))) y0 = 0;
+          // ★num4!=0 门(:4087):半砖/坡面格即便上格实心也从格顶画——
+          //   (num5 == 0 && (num12 != 0 || !WorldGen.SolidTile(tileX, tileY - 1)),
+          //   TileDrawing.cs:4087,num12=blockType(:3907))。★BJ325:实心臂=SolidTile
+          //   全式(WorldGen.cs:70642 !halfBrick∧slope==0 三排除)→ isSolidStrict,
+          //   同 BJ308 门②——曾以宽谓词 isSolid 充数,上格半砖/坡面误判实心 →
+          //   带源 y0 滞 4 = 带矮 4px 且亮顶行不入带。
+          if (st.liquid[upNi] === 0 && (num4 !== 0 || !st.isSolidStrict(x, y - 1))) y0 = 0;
           const num6 = Math.floor((256 - maxLq) / 32) * 2; // 深度=液位不足时从底收(:4096,4102)
           const isHalf = st.half[i];
           if (slope !== 0) {
@@ -1381,7 +1385,11 @@ export function drawLiquidBehindTilesOnly(
       // "GL 路随位移场波动"仅在 ?slopewave=1 灰度支成立，缺省足迹缺席 gate=0
       // =用户实报"亮线静止"的根因（255 verify-report off/on 臂对照实证）。转正
       // 后常开，?slopewave=0 回退（亮线仍在、静止同灰度期）。
-      if (solidLayer && (slope === 1 || slope === 2) && Uq === 0 && !st.isSolid(x, y - 1)
+      // ★BJ325:「上格实心」谓词=SolidTile 全式 → isSolidStrict（与 num4 门
+      //   :4087 的 !SolidTile(above) 臂同源——本偏差门镜像该暴露条件,亮线只在
+      //   带顶=可见水面时画;上格半砖/坡面(SolidTile=false)时带顶对下方 8px
+      //   空腔暴露,亮线应画——宽谓词曾误判实心=漏画）。
+      if (solidLayer && (slope === 1 || slope === 2) && Uq === 0 && !st.isSolidStrict(x, y - 1)
         && (fL || fR)) {
         ctx.globalAlpha = alpha;
         ctx.drawImage(tex, rx, 0, Math.min(rw, tex.width - rx), 2, px, py + bobDy251, rw, 2);

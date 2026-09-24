@@ -1,19 +1,20 @@
 #!/usr/bin/env node
-// tools/extract-gore.mjs —— NPC.HitEffect（Terarria1456/Terraria/NPC.cs:82421-:90870）死亡 gore 提取器
-// ★BJ308 行号勘误：方法体闭括号=:90870（:90872 起 CountNPCS）——旧注 :90873 系伪锚
-//   （落入邻方法体内）。纯 provenance 注释面,提取器 span 终点由 bodyEnd 实算,不消费本值。
+// tools/extract-gore.mjs —— NPC.HitEffect（Terarria1457/Terraria/NPC.cs:82492-:90939）死亡 gore 提取器
+// ★BJ308 行号勘误（1456 域）：方法体闭括号=:90870（:90872 起 CountNPCS）——旧注 :90873
+//   系伪锚（落入邻方法体内）。★BJ329 1457 域：闭括号=:90939（:90941 起 CountNPCS）。
+//   纯 provenance 注释面,提取器 span 终点由 bodyEnd 实算,不消费本值。
 //
-// 方法结构：`public void HitEffect(int hitDirection = 0, double dmg = 10.0)`（NPC.cs:82421），
-// 逐 type 的 if/else-if 长链（:82877 `if (type == 552 || …)` 起）+ 尾部 catch-all `else`
-// （:86465）内嵌第二层 type 链；每支内 `if (life > 0) { …; return; }` 之后即死亡段
-// （life<=0 才执行到 gore 调用）。人形族共用支（:87845）尾段是 `type != 187 && type != 433`
-// 排除守卫 + 通用碎块（gore 3/4/4/5/5）。
+// 方法结构：`public void HitEffect(int hitDirection = 0, double dmg = 10.0)`（NPC.cs:82492），
+// 逐 type 的 if/else-if 长链（:82948 `if (type == 552 || …)` 起；1456 :82877）+ 尾部 catch-all
+// `else`（:86537；1456 :86465）内嵌第二层 type 链；每支内 `if (life > 0) { …; return; }` 之后即
+// 死亡段（life<=0 才执行到 gore 调用）。人形族共用支（:87917；1456 :87845）尾段是
+// `type != 187 && type != 433` 排除守卫 + 通用碎块（gore 3/4/4/5/5）。
 //
 // 提取语义（对齐原版执行语义，偏差登记在产物 _meta.notes）：
 //   1. 物理行先按括号深度拼成逻辑行（跨行实参/命名实参 Position:/Velocity:/Type: 支持）；
 //   2. 逻辑行扫描，深度栈记录每个 Gore.NewGore[Perfect|Direct] 调用的完整守卫链；
 //   3. npcId = 守卫链上 type 谓词的【并集∩跨层交集】（`type == N`、`type >= A && type <= B`、
-//      `type != N` 排除、`type < N` 收窄）；`NPCID.Sets.IsTownPet[type]`（NPCID.cs:4444）静态
+//      `type != N` 排除、`type < N` 收窄）；`NPCID.Sets.IsTownPet[type]`（NPCID.cs:4446）静态
 //      展开进 include（OR 项）；无 type 谓词 → _meta.defaultEntries 不摊到全部 id；
 //   4. life 相位：内层最近 `life > 0` → hit 段跳过；`life <= 0` → 死亡段；无 life 守卫 →
 //      hit/death 双段都会执行（HitEffect 死亡时必被调）→ 计为死亡 gore；
@@ -21,10 +22,10 @@
 //      `num + K` 局部变量按同 type 分支赋值流还原，仍不可求值保留表达式字符串；
 //   6. 守卫编译成结构化 gates（运行时求值，语义=HitEffect 守卫链）：
 //      · altTexture / spriteDirection / dmg —— NPC 字段门（运行时按来源 NPC 判定）
-//      · IsShimmerVariant —— 微光变体门（NPC.cs:6643：townNpcVariationIndex==1）
+//      · IsShimmerVariant —— 微光变体门（NPC.cs:6737；1456 :6643：townNpcVariationIndex==1）
 //      · Main.netMode —— 联机模式门（运行时常量，单人=0）
 //      · Main.rand.Next(N)==V —— 概率门（运行时掷骰）
-//      · RedHatSkeletronAdjustmentsEnabled()（NPC.cs:67282：type/ai[3]/localAI[3] 组合）
+//      · RedHatSkeletronAdjustmentsEnabled()（NPC.cs:67435：type/ai[3]/localAI[3] 组合）
 //      · `<循环变量> < K` —— 循环相位门 → 静态折算成 loop 次数，不进 gates
 //      · `A || type == N` —— OR 内带 type 谓词：N 型免门（freeTypes），其余型带 A 门
 //      派对帽段（townNPC && life <= 0 && UsesPartyHat）整体剔除；
@@ -39,28 +40,31 @@
 //   { "_meta": {...含 tex 尺寸表}, "<npcId>": [ { id|idAlt|idMin/idMax|ids, n?, vx?, vy?, velExpr?,
 //      scale?, scaleExpr?, posExpr?, expr?, ai?, gates?, post?, line } , ... ] }
 // velocity=velocity（缺省）表示继承 NPC 当前速度；NewGore 自带随机扰动（Gore.cs:1347-1348）
-// 是运行时行为不进表。tex 尺寸供运行时碰撞盒 min(w,h)*0.9*scale（1456 :1000-1012 /
-// 1457 :999-1014：num36=32 回退 → TextureAssets.Gore[type].Width()/Height() 取小）。
+// 是运行时行为不进表。tex 尺寸供运行时碰撞盒 min(w,h)*0.9*scale（Gore.cs :998-1013
+// 三版全等 md5 3f7708af：num36=32 回退 → TextureAssets.Gore[type].Width()/Height() 取小）。
 //
-// 提取锚保持 Terarria1456（全表 line 域=1456 行号，金标测试钉 :84540/:84554/:83038
-// 等，不可整表换 1457——那会把 553 条 line 平移 ~+71）；1457 语义 delta 由
-// MANUAL_1457_DELTAS 定点覆写（发型师 353/354 头块微光变体重排 1351/1352 + 独角兽
-// 121 alpha 继承；1458 的 HitEffect 与 1457 逐字节一致 ：82492-:90939，无新增 delta）。
+// 提取锚=Terarria1457（★BJ329 2026-09-24 数据面重锚清偿：全表 line 域 553 条由 1456
+// 平移至 1457 终值（基准切换欠账，era-guard-family 四之二④），金标 gore.test.ts 三钉
+// 同步重冻 84540→84611/84554→84625/83038→83109）；MANUAL_1457_DELTAS 保留为幂等钉补
+// （发型师 353/354 头块微光变体 1351/1352 + 独角兽 121 alpha 继承——1457 原生提取即
+// 同值，delta 层退化为 no-op+note1457 溯源注）。1458 的 HitEffect 与 1457 逐字节一致
+// （:82492-:90939，md5 ae487fa5，BJ284 复证+BJ329 复核）→ 1458 交叉重放 byte-perfect。
 // tex 真值面 = HitEffect 表内 id ∪ EXTRA_TEX_FAMILIES（运行时直调面：罐瓦砾 34/
 // 火苗 16-17/气泡 411-430 等【非 HitEffect 出点】——缺面曾落 32px 回退盒、停靠点偏高）。
 //
 // 用法：node tools/extract-gore.mjs [--audit]   （--audit = 只输出诊断 JSON，不落盘）
 //
-// ★BJ284 2026-09-22 era guard 落闸（四要素习语 docs/era-guard-family.md）：
-//   ① SW_ITEM_VER 白名单单值 {1456}——★本器 1456 锚系「刻意保留」（非漏迁移）：产物
-//     line 域=1456 行号（金标 gore.test.ts 钉 :84540/:84554/:83038 等,553 条 line 平移
-//     ~+71=独立刀量级）;1457 语义 delta 由 MANUAL_1457_DELTAS 承载（1457↔1458 HitEffect
-//     区 :82492-:90939 逐字节全等,md5 ae487fa5,BJ284 复证）。显式 1457/1458 → 拒+指引
-//     （重锚=数据刀+金标重冻,须按 BJ261 件 1 流程另立刀）;② 输出通道三分离：缺省=干跑
+// ★BJ284 2026-09-22 era guard 落闸（四要素习语 docs/era-guard-family.md）；★BJ329
+//   2026-09-24 重锚 1457 清偿（白名单 {1456}→{1457,1458}，1456 退役拒）：
+//   ① SW_ITEM_VER 白名单 {1457,1458}——产物 line 域=1457 行号（金标 gore.test.ts 三钉
+//     已同步重冻 :84611/:84625/:83109）；1457↔1458 HitEffect 区 :82492-:90939 逐字节
+//     全等（md5 ae487fa5,BJ284 复证+BJ329 复核）→ 1458 交叉重放 byte-perfect；
+//     1456 锚退役拒（历史锚,重跑会整表回退 line 域）;② 输出通道三分离：缺省=干跑
 //     对拍零写盘（双向路径级 diff,live-only=洗库预警/fresh-only=现库退化缺键型,任一非空
 //     exit 1+物证）/ SW_OUT=沙箱 / --write-real=写真库（diff 非纯增量拒,强推双旗
 //     --force-full --overwrite-append-era）；双旗互斥+探测注入面 SW_GORE_JSON 与
-//     --write-real 混用拒（g1）——非 1457 禁写规则不适用本器（白名单本就单值 1456）;
+//     --write-real 混用拒（g1）——★BJ329 起家族「非 1457 禁写」规则对本器恢复适用
+//     （重锚前曾因 1456 单值白名单豁免备案）;
 //   ③ 锚 fail-loud：HitEffect 签名行+EXTRA_TEX_FAMILIES 基数+entries 基数护栏 550;
 //   ④ 判别力自证：tests/extract-gore-era-guard.test.ts（mutant ROOT_TRIGGER 前置重锚）。
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -68,11 +72,11 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const VER = process.env.SW_ITEM_VER ?? '1456';
-const VER_ALLOWED = new Set(['1456']);
+const VER = process.env.SW_ITEM_VER ?? '1457';
+const VER_ALLOWED = new Set(['1457', '1458']);
 if (!VER_ALLOWED.has(VER) || !existsSync(join(ROOT, '..', `Terarria${VER}`, 'Terraria', 'NPC.cs'))) {
   console.error(`[extract-gore] 拒绝运行：SW_ITEM_VER="${VER}" 非法（白名单 ${[...VER_ALLOWED].join('/')}，且需存在 Terarria${VER}/ 反编译目录）。`);
-  if (VER === '1457' || VER === '1458') console.error('  1456 锚系「刻意保留」（line 域=1456 行号,金标钉死;1457 语义 delta=MANUAL_1457_DELTAS;1457↔1458 HitEffect 逐字节全等）。重锚 1457=553 条 line 平移+金标重冻=独立数据刀（BJ261 件 1 流程）,禁止裸跑洗表。');
+  if (VER === '1456') console.error('  1456 锚已退役（★BJ329 2026-09-24 数据面重锚 1457 清偿,line 域=1457 行号,金标 gore.test.ts 已重冻 :84611/:84625/:83109）。裸跑 1456 会整表回退 line 域,禁止。');
   process.exit(1);
 }
 const WRITE_REAL = process.argv.includes('--write-real');
@@ -446,7 +450,7 @@ function resolveChain(extraCase) {
       typeCtxId = typeCtxId ?? c.id;
     }
     if (c.staticTypes) {
-      // `NPCID.Sets.IsTownPet[type]` 是 OR 项（NPCID.cs:4444 静态集）→ 与本层 type 谓词并集
+      // `NPCID.Sets.IsTownPet[type]` 是 OR 项（NPCID.cs:4446 静态集）→ 与本层 type 谓词并集
       include = include ? new Set([...include, ...c.staticTypes]) : new Set(c.staticTypes);
       typeCtxId = typeCtxId ?? c.id;
     }
@@ -1133,6 +1137,19 @@ function handlePostLine(plain, lineNo) {
   };
   const stmts = plain.split(';').map((x) => x.trim()).filter(Boolean);
   for (const st of stmts) {
+    // 后置自增/自减（★BJ329 1457 反编译形态：`x++` ≡ `x += 1`——1456 域同址曾为
+    //  `x += 1f`，BJ298 记「+=1f→++ 反编译噪声」；1437 span 内仅 velocity.X/Y 形态，
+    //  未见标量域自增/别名自增——其他域落 unresolvablePost fail-loud）
+    let inc = st.match(/^([\w.\[\]]+?)\s*(\+\+|--)$/);
+    if (inc) {
+      const tgt = targetOf(inc[1]);
+      const d = inc[2] === '++' ? 1 : -1;
+      const list = tgt ? goreIdx.get(tgt.idx) : null;
+      if (list && tgt.field === 'velocity.X') { for (const e of list) (e.post ??= []).push(['va', 'x', d, d]); continue; }
+      if (list && tgt.field === 'velocity.Y') { for (const e of list) (e.post ??= []).push(['va', 'y', d, d]); continue; }
+      unresolvablePost.push({ line: lineNo, stmt: st });
+      continue;
+    }
     // `<lhs> <op> <rhs>` 单语句（lhs 形如 Main.gore[n].velocity.X / alias.scale）
     let mm = st.match(/^([\w.\[\]]+?)\s*(\*=|\+=|-=|=)\s*(.+)$/);
     if (!mm || !mm[1].includes('.')) continue;
@@ -1558,13 +1575,14 @@ function emitCallEntry(callee, a, lineNo, r, lhs) {
 }
 
 // ============ 手工补丁：守卫链为排除式(`type != N` + return)的收尾支 ============
-// catch-all else 尾支（NPC.cs:90859-90867）：`if (type != 156) return;` → 仅 Red Devil
-// 走到 184/185/185。排除式守卫无法从链上还原出正集（需要整链 else 语义），按源行手工钉死。
+// catch-all else 尾支（1457 :90928-90936；1456 :90859-90867）：`if (type != 156) return;`
+// → 仅 Red Devil 走到 184/185/185。排除式守卫无法从链上还原出正集（需要整链 else 语义），
+// 按源行手工钉死。★BJ329 line 域随重锚平移 90865-90867→90934-90936（1457 源行亲读）。
 const MANUAL_PATCHES = {
   156: [
-    { id: 184, line: 90865 },
-    { id: 185, line: 90866 },
-    { id: 185, line: 90867 },
+    { id: 184, line: 90934 },
+    { id: 185, line: 90935 },
+    { id: 185, line: 90936 },
   ],
 };
 for (const [npcId, list] of Object.entries(MANUAL_PATCHES)) {
@@ -1572,10 +1590,12 @@ for (const [npcId, list] of Object.entries(MANUAL_PATCHES)) {
   entries.get(+npcId).push(...list);
 }
 
-// ============ 1457 语义钉补（提取锚 1456 + 1457 终值定点覆写） ============
+// ============ 1457 语义钉补（★BJ329 起提取锚=1457 原生,本层退化为幂等钉补+溯源注） ============
 // 盘上 vanilla-gore.json 自 2026-08-23 基准切换起 carry 1457 语义钉补（此前为盘上
 // 手补，重产会静默回退 1456 语义并炸金标——现收编为提取器一层，保证重产幂等）。
 // 1458 的 HitEffect 与 1457 逐字节一致（:82492-:90939），无新增 delta。
+// ★BJ329 重锚后：提取源=1457 原生（发型师/独角兽语义原生在源），下方覆写全部命中
+// 同值=no-op（除 note1457 溯源注补写），保留以守 1456 期历史重放幂等。
 //
 // ① 发型师 353/354 头部碎块微光变体重排（1456 :89133-89139 → 1457 :89204-89209）：
 //    1456: `if (altTexture == 0) NewGore(IsShimmerVariant ? 1353 : 544)` +
@@ -1606,7 +1626,7 @@ function applyManual1457Deltas(entries) {
 }
 applyManual1457Deltas(entries);
 
-// ============ 屏幕锚定网格尘幕（WoF NPC.cs:88307-88327）→ 结构化 screenGrid ============
+// ============ 屏幕锚定网格尘幕（WoF NPC.cs:88379-88399；1456 :88307-88327）→ 结构化 screenGrid ============
 // 残留 posExpr 的唯一来源：肉山（113）死亡屏幕级血尘扫掠。Position =
 // new Vector2(<x条带变量>, <y外层循环变量>)，两层循环的界/步依赖运行时相机态
 // （Main.screenPosition / Main.screenWidth）+ npc 位——通用 Position 编译器不覆盖，
@@ -1804,7 +1824,8 @@ const countField = (pred) => [...entries.values()].reduce((n, l) => n + l.filter
 const out = {
   _meta: {
     // ★BJ308：span 终点 90870（方法体闭括号;旧 90873 伪锚落入 CountNPCS——provenance 面）
-    source: 'Terarria1456/Terraria/NPC.cs HitEffect (:82421-:90870)；物理=Terraria/Gore.cs',
+    // ★BJ329：提取锚 1456→1457（span :82492-:90939;静态串,1458 交叉重放同 span 同值）
+    source: 'Terarria1457/Terraria/NPC.cs HitEffect (:82492-:90939)；物理=Terraria/Gore.cs',
     generatedBy: 'tools/extract-gore.mjs',
     callsTotal,
     callsHitSkipped,
@@ -1832,10 +1853,10 @@ const out = {
       'ai=[{slot,value}] = 原版 ai[N]==V 门（运行时按 NPC ai 槽位判定，不满足跳过该条）',
       'gates = 结构化守卫门（运行时求值，不满足跳过该条）：alt=altTexture / sdir=spriteDirection /',
       '  dmg=HitEffect dmg 实参 / shim=IsShimmerVariant / net=Main.netMode / rnd=Main.rand.Next(N)==V /',
-      '  redhat=RedHatSkeletronAdjustmentsEnabled()（NPC.cs:67282；not=true 为 else 支取反——',
+      '  redhat=RedHatSkeletronAdjustmentsEnabled()（NPC.cs:67435；not=true 为 else 支取反——',
       '  `if (spriteDirection != -1) {A} else {B}` 的 B 段自动带 `== -1` 门，551 镜像分支即此）。',
       '  OR 型守卫 `A || type == N` 中 N 型免门（freeTypes，仅豁免同层门），其余型带 A 门；',
-      '  `NPCID.Sets.IsTownPet[type]`（NPCID.cs:4444）静态展开进 npcId 集',
+      '  `NPCID.Sets.IsTownPet[type]`（NPCID.cs:4446）静态展开进 npcId 集',
       'perfect=true = Gore.NewGorePerfect：随机扰动后回写精确 pos/vel（运行时不抖动）',
       'loop=N = 原版常量次数 for 循环体内（运行时重复生成 N 次，如 EoC <2 循环 = 8 块）；',
       '  pos/vel/id 引用循环变量时已按循环域逐值展开（每变体 loop=1，如 EoL 437 `728+num97` →',
@@ -1847,12 +1868,12 @@ const out = {
       '  (spriteDirection!=1?1:-1)）；dc=[rx,ry] 椭圆盘随机偏移（Utils.cs:1269）',
       'vel 新字段：dc=[rx,ry] 椭圆盘速度；de=均匀随机方向定速；rv=[k,flip]=rotation.ToRotationVector2()',
       '  ×k（flip 奇数次=spriteDirection==1 时 X 取反）；hdm=[lo,hi]=随机幅值×击退方向',
-      'screenGrid = 屏幕锚定网格尘幕（WoF :88307-88327）：yStep=外层行步/ySpan=纵向跨度来源',
+      'screenGrid = 屏幕锚定网格尘幕（WoF :88379-88399；1456 :88307-88327）：yStep=外层行步/ySpan=纵向跨度来源',
       '  （screenWidth——原版拿屏宽当纵向跨度的怪癖照搬）/xSpan+xStep=条带宽与列步/dirShift=',
       '  direction>0 时 x0 偏移/gate=playerDeepHell（玩家 tileY>maxTilesY-gateTiles 门）。常量逐项',
       '  从源 for 头与赋值流解析（compileScreenGrid，解析失败回退 posExpr 原文）；运行时以相机',
       '  快照（GorePiece.setGoreScreen）求值，每网格格一枚 gore（原版另有 5 尘/格走尘系统）',
-      '早退排除：`if (type == 114) {…; return;}`（:88291-88298）后的嘴部四件+尘幕网格不归 114',
+      '早退排除：`if (type == 114) {…; return;}`（:88363-88370；1456 :88291-88298）后的嘴部四件+尘幕网格不归 114',
       '  （守卫链不建模 return，此前误摊给 113|114 双方；仅对该调用点定点剔除，不改全局语义）',
       'tex = gore 贴图 {w,h}（IHDR 直读）＝ GorePiece 碰撞盒真值源（Gore.cs 1456',
       '  :1000-1012 / 1457 :999-1014：num36=min(Width,Height)×0.9×scale；缺图回退 32）。',
@@ -1861,9 +1882,10 @@ const out = {
       '  16-17、沙暴 220-222、心 331、克脑 392-395、气泡 411-430、骨尘 435-437、猪鲨',
       '  619-622、毒瓶 704-705、DD2 水晶 1027-1030、1085 火溅 1394-1397）——缺面 id 曾',
       '  落 32px 回退盒（停靠点偏高），已全量清偿；明细见 texExtraFamilies',
-      '1457 语义钉补（MANUAL_1457_DELTAS）：发型师 353/354 头块微光变体 544→1351/:89207、',
-      '  543→1352/:89209（1456 为 1353 + shim 门，:89135/:89139）；独角兽 121 post +al:npc',
-      '  （1457 :86422 NewGoreDirect + gore.alpha=alpha；1456 :86351 无）——重产幂等',
+      '1457 语义钉补（MANUAL_1457_DELTAS，★BJ329 起提取锚=1457 原生,本层幂等 no-op）：',
+      '  发型师 353/354 头块微光变体 544→1351/:89207、543→1352/:89209（1456 为 1353 + shim',
+      '  门，:89135/:89139）；独角兽 121 post +al:npc（1457 :86422 NewGoreDirect +',
+      '  gore.alpha=alpha；1456 :86351 无）——重产幂等',
     ],
     tex,
     texExtraCount,
@@ -1873,7 +1895,7 @@ const out = {
 };
 for (const [k, v] of [...entries.entries()].sort((a, b) => (+a[0]) - (+b[0]))) out[k] = v;
 
-// ---- ③ 基数护栏（1456 锚实测:npcIds 554——地板防静默半表;HitEffect 签名锚已在 :342） ----
+// ---- ③ 基数护栏（1456/1457 锚实测:npcIds 554——地板防静默半表;HitEffect 签名锚已在 :342） ----
 if (entries.size < 550) throw new Error(`[extract-gore] 锚点失配: entries 基数 ${entries.size} < 550（解析面漂移,禁止静默半表）`);
 
 // ================= ★BJ284 era guard：干跑对拍 / 沙箱 / 逃生门（头注见上） =================

@@ -31,7 +31,7 @@ import { anchorBeeBottom, beeSpawnAuthority, breakHiveBlock, larvaSummonInRange 
 import { canCutTile } from '../world/CanCutTile';
 import { bigMimicSummonCheck, bigMimicSpawnSmoke } from '../world/BigMimicSummon';   // ★SW-BJ147 钥匙放箱召宝箱怪（NPC.cs:78318）
 import { generateWorld, lastGenState, requestWorldGenAbort, WorldGenAbortedError } from '../world/gen/WorldGen';   // ★IIIII229 ① Esc 中止链
-import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor,
+import { openDoor, closeDoor, clearDoorAt, shiftTallGate, shiftTrapdoor, isLockedDoor, unlockDoor,
   TALL_GATE_HEIGHTS, TALL_GATE_CFH, TALL_GATE_ROW_FY } from '../world/Door';
 import { DoorOpeningHelper } from '../world/DoorOpeningHelper';   // SW-AS1 2026-09-05 门自动开关全量移植
 import { torchAnchorFrame, torchStillAnchored, torchReanchorFrame, torchStyleOfItemKey, isWaterTorchStyle, biomeTorchPlaceStyle, biomeCampfirePlaceStyle, IS_BIOME_TORCH_STYLE, isUnlitTorch, TORCH_UNLIT_OFFSET } from '../world/Torch';
@@ -116,7 +116,7 @@ import {
   attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith,
   musicBoxRecordItem, musicBoxDropItemOf, fountainDropItemOf, announcementBoxMessage,
   MUSIC_BOX_EMPTY_VID,
-  flipBlock, flipCell, shiftTrapdoorFlip,
+  flipBlock, flipCell,
 } from '../world/wiring/devices';
 import { LOGIC_SENSOR_MODE, logicSensorMode, playerAboveSensorState, liquidSensorState, dayNightSensorState } from '../world/wiring/logicSensor';
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, partyNaturalAttempt, type PartyState } from '../world/wiring/party';
@@ -1084,7 +1084,11 @@ type DecorSupportKind =
   | 'ontable'
   // —— SW-FX8（2026-09-10）：Check2x1 桌面支撑门（审计 E ❌#9 随批备案清偿）——
   //  存钱罐 29/碗 103/沙漠精灵灯 462（Check2x1 case 103/29/462,WorldGen.cs:47426-47451）
-  | 'table2x1';
+  | 'table2x1'
+  // —— ★BJ323（2026-09-24）：多向锚件 CheckAndAdjustMultiDirectionalTile（:60805）——
+  //  129 水晶碎晶/149 节日灯（TileFrameImportant case 129/149 组 :86339-86400 唯一派发;
+  //  原 129 缺席落家具 hasSupport 近似/149 走同近似,挖支撑悬空=用户实报）
+  | 'multidir';
 const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // PlantCheck（派发 :85970-85981 {3,24,61,71,73,74,110,113,201,637,703}）
   3: 'plant', 24: 'plant', 61: 'plant', 71: 'plant', 73: 'plant', 74: 'plant',
@@ -1110,7 +1114,8 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   // 吊挂族：CheckChand（:52826，34 顶行中列上方实心）/Check1x2Top（:46719，42 上方实心/平台/绳）
   34: 'hangs', 42: 'hangs',
   // 家具机制族（底行/墙/桌面近似）：烛 33/烛台 100/骷髅灯笼 98/路灯 92/
-  // 八音盒 139/泵 142/143/节日灯 149/白金烛台 173/白金烛 174/炮 209/雪球发射器 212/
+  // 八音盒 139/泵 142/143/白金烛台 173/白金烛 174/炮 209/雪球发射器 212/
+  //（★BJ323：节日灯 149 移出本组 → 'multidir' 原版多向锚,见下方注册块）
   // 烟花 216/泡泡机 244/烟花盒 335/烟花喷泉 338/和平烛 372/天塔柱 410/
   // 广播盒 425/假容器 441/气球机 452/派对石 455/假容器二 468/血月石 480/
   // ★2026-09-02 八批（幸存链缺口）：高门 389/宝石锁 440 移出本组（388/389 → 'tallgate'
@@ -1123,7 +1128,7 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   //  正确放置后在写循环末格被误杀——95/126/531/386 实测 placed 后 cells=0）
   33: 'furniture', 49: 'furniture', 85: 'furniture', 92: 'furniture',
   98: 'furniture', 100: 'furniture', 139: 'furniture',
-  142: 'furniture', 143: 'furniture', 149: 'furniture', 173: 'furniture', 174: 'furniture',
+  142: 'furniture', 143: 'furniture', 173: 'furniture', 174: 'furniture',
   209: 'furniture', 212: 'furniture', 216: 'furniture', 244: 'furniture', 335: 'furniture',
   338: 'furniture', 372: 'furniture', 410: 'furniture',
   425: 'furniture', 441: 'furniture', 452: 'furniture', 455: 'furniture',
@@ -1289,6 +1294,17 @@ const DECOR_SUPPORT_KIND: Record<number, DecorSupportKind> = {
   //  原版幸存门=下方两格 active∧tileTable∧!halfBrick∧!topSlope（103 另有
   //  AnchorValid(Table) 兜底臂）→ 失配整件杀（WorldGen.cs:47507-47519 KillTile）
   29: 'table2x1', 103: 'table2x1', 462: 'table2x1',
+  // —— ★BJ323（2026-09-24）：CheckAndAdjustMultiDirectionalTile（:60805-60855）多向锚——
+  //  TileFrameImportant case 129/149 组（:86339-86400 组内唯一派发;:66036 是
+  //  KillTile_GetItemDrops 的 case 149 帧表非派发）：四邻任一 ValidAnchor
+  //  （:60788-60803——非巨石族+非门10+按向坡面豁免）∧调用门
+  //  Main.tileSolid∧!tileSolidTop（:60844-60849,平台/绳恒拒）→ 重帧 frameY
+  //  {下0,上18,左54,右36}（优先级 下→左→右→上）;全失 KillTile。
+  //  掉落：129=KillTile_GetItemDrops case 129 :65496-65503 fx≥324→4988 else 502
+  //  （styleDropVidOfFrames :622 同源,breakTile 掉落面已接）;149=帧表 :66036-66046。
+  //  曾 129 缺席（落家具 hasSupport 底行∨任一格墙近似——墙误活/旁侧锚误杀/
+  //  上·侧锚变化不触发）、149 走同近似——挖支撑悬空=用户实报（水晶碎块）
+  129: 'multidir', 149: 'multidir',
 };
 /** DECOR 3×3 邻域扫候选（SquareTileFrame→TileFrame→tileFrameImportant 派发面的
  *  DECOR 子集,内部 id 集）——'furniture' 族由家具近似链(checkFurnitureSupport)承担,
@@ -25471,11 +25487,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  误拒）。权威门 = PlaceLogicTiles 419 支（WorldGen.cs:45712-45721：下方须
     //  active 419/420）——在下方通用放置头单独实现（见 placeLogicLampGate）。
     const isLogicLamp = def?.vanilla?.sheet === 419;
-    const needSupport = !isTrack && !isAlchPlace && !isLogicLamp
+    // ★BJ323（2026-09-24）：129 水晶碎晶/149 节日灯多向锚放置门——幸存面 'multidir'
+    //  （CheckAndAdjustMultiDirectionalTile :60805）同源判据,不走 hasSupport 底行∨墙
+    //  近似（原版四邻实心锚,墙不作支撑——防"贴墙放得上、落完即被失撑链拆走掉落"
+    //  的放置/幸存不对称）
+    const isMultiDirPlace = (def?.vanilla?.sheet ?? -1) === 129
+      || (def?.vanilla?.sheet ?? -1) === 149;
+    const needSupport = !isTrack && !isAlchPlace && !isLogicLamp && !isMultiDirPlace
       && (def.solid || def.platform || def.framed);
     // ★表驱动路径已在候选筛选时通过锚点满分制（含 AnchorWall 白名单），跳过旧近似
     if (needSupport && !anchorCovered && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
       ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1), def.vanilla?.sheet ?? -1)) return;
+    if (isMultiDirPlace && this.multiDirBestDirAt(tx, ty) < 0) return;   // 全失锚=原版拒绝放置
     if (needSupport && anchorCovered
       // stylePlumb（M-3b）：placeStyle 子样式液体档（火把外 27 族水下/岩浆可放性，
       // recon-tileobj liqStyles；缺省 0=基记录,行为不变）
@@ -27169,12 +27192,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.input.rightDown = false;
     } else if (sh === 386 || sh === 387) {
-      // 活板门右键（Player.cs:32535-32548 → WorldGen.ShiftTrapdoor）：翻转实现与
-      // 导线 case 386/387 共用（shiftTrapdoorFlip：帧近似 + 关门实体占位门）。原版
-      // 按玩家相对高度选折翼方向且失败反向重试（:32539-32543）——原位近似下两向
-      // 等价,单次调用=两向尝试并集（详 devices.shiftTrapdoorFlip 注）
-      if (this.wiring) shiftTrapdoorFlip(this.wiring, tx, ty, (x, y, w2, h2) => this.areaEmptyAt(x, y, w2, h2));
-      this.input.rightDown = false;
+      // 活板门右键（Player.cs:32535-32548 → WorldGen.ShiftTrapdoor）——★BJ324 改完整
+      // 移植链 toggleTrapdoor：playerAbove=玩家中心相对高度（:32539 `(myY*16) > Center.Y`）
+      // 失败反向重试（:32540-32543）;flag2=true 恒消费右键（:32537,切换失败也可重按）
+      this.toggleTrapdoor(tx, ty);
     } else if (sh === 440) {
       // 宝石锁右键（Player.cs:32747-32808 → WorldGen.ToggleGemLock :46872-46927）：
       // frameX/54 选宝石（0→1526 1→1524 2→1525 3→1523 4→1522 5→1527 6→3643）；
@@ -27680,7 +27701,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** Collision.EmptyTile(x,y,ignoreTiles) 等价——格区矩形内无任何实体（★BJ250 抽出：
-   *  devices ctx.areaEmpty 与活板门右键臂 shiftTrapdoorFlip 关门占位门单源共用） */
+   *  devices ctx.areaEmpty 与活板门右键臂（BJ324 后=Door.shiftTrapdoor 关臂占位门）
+   *  关门占位门单源共用） */
   private areaEmptyAt(x: number, y: number, w2: number, h2: number): boolean {
     const rx = x * TILE, ry = y * TILE, rw = w2 * TILE, rh = h2 * TILE;
     const hit = (e: { x: number; y: number; w: number; h: number }) =>
@@ -29145,6 +29167,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       areaEmpty: (x: number, y: number, w2: number, h2: number) => this.areaEmptyAt(x, y, w2, h2),
       // ★BJ322:高门导线切换（devices case 388/389 委托 shiftTallGate）尾 TileFrame 面注入
       afterWrite: (ax: number, ay: number) => this.tallGateTileFrameFace(ax, ay),
+      // ★BJ324:活板门导线切换（devices case 386/387 委托 shiftTrapdoor）尾 TileFrame
+      // 逐格面注入（WorldGen.cs:51925-51929/:51950-51954/:52034-52040 逐格回调面）
+      tileFrame: (tx2: number, ty2: number) => this.checkDecorSquareFrame(tx2, ty2),
       // SW-R3 2026-09-03（F-5 同径）：hook 增加 hurtBox 位（108=130/164=64,
       // SetDefaults 盒半宽;缺省 undefined → explodeAt 内 R*TILE 旧行为）
       explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, hurtBox?: number, projId?: number) =>
@@ -31244,6 +31269,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  NPC/怪开合高门路径同消费;overlapsEntity 同理） */
   tallGateTileFrameFace(ax: number, ay: number): void {
     for (let cy = ay - 1; cy <= ay + 5; cy += 2) this.checkDecorSquareFrame(ax, cy);
+  }
+
+  /** 活板门右键切换（Player.cs:32535-32548 → WorldGen.ShiftTrapdoor :51897-52048;
+   *  ★BJ324 2026-09-24 完整移植链——右键/导线/helper/NPC 四调用面中右键+导线两真实
+   *  面同委托 Door.shiftTrapdoor;helper/NPC 面原版即不涉活板门:DoorOpeningHelper 仅
+   *  10/11+388/389（DoorOpeningHelper.cs:144-226 TallGateOpeningInfoProvider）、城镇
+   *  NPC 开关门仅 10/11,386/387 无 NPC 触发臂）。原版序:playerAbove 首试→失败反向
+   *  重试（:32539-32543）;flag2=true 恒消费右键（:32537,失败也置 rightDown=false
+   *  可重按）。★导线 helper/NPC N/A 备案:四调用面收敛为两真实面+两 N/A 面 */
+  private toggleTrapdoor(x: number, y: number): void {
+    const st = this.world.store;
+    const opts = {
+      // 实体占位门（Collision.EmptyTile(ignoreTiles:true) :51915-51919/:51957-51961,
+      // 只关臂两向目标行逐格;开门臂原版无实体门）——areaEmptyAt 单源（BJ250 面）
+      blocked: (bx: number, by: number) => !this.areaEmptyAt(bx, by, 1, 1),
+      // CanKillTile 门（:51990-51992 关门件本体可毁检查）
+      canKill: (cx: number, cy: number) => this.canKillTile(cx, cy),
+      // 音效:成功 SoundID 8 两向同声 / 尾流 SoundID 9（'door_close'）
+      sfx: (n: 'door_open' | 'door_close', px: number, py: number) => this.playSfx(n, 1, px, py),
+      // 尾 TileFrame 逐格面（:51925-51929/:51950-51954/:52034-52040）——裸写窗后
+      // checkDecorSquareFrame 收口完整性/邻件复检=「写完再评估」原版等价
+      tileFrame: (fx: number, fy: number) => this.checkDecorSquareFrame(fx, fy),
+    };
+    // 右键无 Wiring.running 语境 → 不注入 skipCell（原版 `netMode!=1 && Wiring.running`
+    // 门 :51907/:51949/:52004 同相;旧 shiftTrapdoorFlip 右键也 skipCell=污染下一轮
+    // wireSkip 判定,本刀随原版门修正）
+    if (!shiftTrapdoor(st, x, y, y * 16 > this.player.cy, opts)) {
+      shiftTrapdoor(st, x, y, y * 16 <= this.player.cy, opts);
+    }
+    this.input.rightDown = false;
   }
 
   openChest: ((c: ChestData) => void) | null = null;
@@ -44883,6 +44938,59 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return sl !== 1 && sl !== 3;
   }
 
+  /** ★BJ323（2026-09-24）：ValidAnchorForMultiDirectionalTile（WorldGen.cs:60788-60803）
+   *  + 调用方实心门（:60844-60849 `Main.tileSolid[num] && !Main.tileSolidTop[num]`）
+   *  1:1 合判：锚格界内 active（界外=原版 Main.tile 越界 null → ValidAnchor false）
+   *  + 非巨石族（Boulders 表）+ 非门 10 + 按向坡面豁免（dir0=上锚
+   *  SolidTileAllowTopSlope :70851/dir1=下锚 BottomSlope :70698/dir2=左锚 LeftSlope
+   *  :70871/dir3=右锚 RightSlope :70891——repo solidAllow*At 四件已 1:1）+ 锚 sheet
+   *  实心非 solidTop（repo def.platform ⊇ tileSolidTop∪tileTable,平台 19/239/427 族
+   *  恒拒——BottomSlope 虽放行平台,调用门滤掉,两道门 1:1 双保留） */
+  private multiDirAnchorValidAt(x: number, y: number, direction: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y) || !st.hasTile(x, y)) return false;
+    const d = TILE_DEFS[st.type[st.idx(x, y)]];
+    if (!d) return false;
+    const sheet = d.vanilla?.sheet ?? -1;
+    if (Game.BOULDER_SUPPORT_SHEETS.has(sheet) || sheet === 10) return false;
+    const slopeOk = direction === 0 ? this.solidAllowTopSlopeAt(x, y)
+      : direction === 1 ? this.solidAllowBottomSlopeAt(x, y)
+      : direction === 2 ? this.solidAllowLeftSlopeAt(x, y)
+      : direction === 3 ? this.solidAllowRightSlopeAt(x, y) : false;
+    if (!slopeOk) return false;
+    return !!d.solid && !d.platform;   // :60844-60849 调用门
+  }
+
+  /** ★BJ323：CheckAndAdjustMultiDirectionalTile（WorldGen.cs:60805-60855）方向选取
+   *  纯读变体：优先级 下(:60831 num)→左(:60836 num3)→右(:60841 num4)→上(:60846 num2)
+   *  取首个有效方向,全失 → -1。放置门（写格前判,避免对空格写帧）与
+   *  checkAndAdjustMultiDirAt 共用 */
+  private multiDirBestDirAt(x: number, y: number): number {
+    if (this.multiDirAnchorValidAt(x, y + 1, 1)) return 0;      // 下锚 → fy0
+    if (this.multiDirAnchorValidAt(x - 1, y, 2)) return 2;      // 左锚 → fy54
+    if (this.multiDirAnchorValidAt(x + 1, y, 3)) return 3;      // 右锚 → fy36
+    if (this.multiDirAnchorValidAt(x, y - 1, 0)) return 1;      // 上锚 → fy18
+    return -1;
+  }
+
+  /** ★BJ323：CheckAndAdjustMultiDirectionalTile（WorldGen.cs:60805-60855）1:1——
+   *  129 水晶碎晶/149 节日灯支撑裁决（TileFrameImportant case 129/149 组
+   *  :86339-86400 唯一派发）：四邻任一有效锚 → 重帧 frameY {下0,上18,左54,右36}
+   *  （:86348-86360,帧直写不走 setTile 监听链——同 'sapling' 重帧/checkTorchDetach
+   *  口径）;全失 → false（派发处 KillTile）。真=true 时已按需写帧（同向幂等 no-op） */
+  private checkAndAdjustMultiDirAt(x: number, y: number): boolean {
+    const dir = this.multiDirBestDirAt(x, y);
+    if (dir < 0) return false;
+    const st = this.world.store;
+    const fy = dir === 0 ? 0 : dir === 1 ? 18 : dir === 2 ? 54 : 36;
+    const i = st.idx(x, y);
+    if (st.frameY[i] !== fy) {
+      st.frameY[i] = fy;
+      this.chunks.markDirtyArea(x - 1, y - 1, x + 1, y + 1);
+    }
+    return true;
+  }
+
   /** TileObject.Place 裸写口（TileObject.cs:94-110 + PlaceObject 尾 SquareTileFrame
    *  WorldGen.cs:51886-51888）：写循环期置 _decorPlaceBuilding 抑制 DECOR 逐格
    *  完整性裁决 → 逐格 setTile（netReporter 照常逐格广播）→ 锚点一次
@@ -46151,6 +46259,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (!bad && !this.solidAllowBottomSlopeAt(ax + dx, ay + 3)) bad = true;
         }
         if (bad) this.killDecorTile(Math.max(0, ax), Math.max(0, ay));
+        return;
+      }
+      case 'multidir': {
+        // ★BJ323（2026-09-24）：CheckAndAdjustMultiDirectionalTile（WorldGen.cs:60805-60855）
+        //  1:1——TileFrameImportant case 129/149 组（:86339-86400）唯一派发：
+        //  四邻任一有效锚 → 重帧 frameY 到优先方向（存活）;全失 → KillTile
+        //  （killDecorTile→breakTile 掉落：129 fx≥324→4988 else 502,149 帧表——
+        //  两档 styleDropVidOfFrames 同源已接）。触发面=checkDecorSquareFrame 3×3
+        //  扫（SquareTileFrame :81462 等价——上/侧/下锚变化全覆盖,旧家具链只查
+        //  变化格上方=悬顶·侧附碎块漏检根因）+ 家具监听路由（dKind≠'furniture'）
+        if (!this.checkAndAdjustMultiDirAt(x, y)) this.killDecorTile(x, y);
         return;
       }
       default:

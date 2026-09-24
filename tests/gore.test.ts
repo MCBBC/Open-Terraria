@@ -1,4 +1,5 @@
-// Gore 死亡碎块系统测试：
+// Gore 死亡碎块系统测试（★BJ329 2026-09-24 line 域金标重冻：提取锚 1456→1457,三钉
+//   84540→84611/84554→84625/83038→83109,注释 span 逐站重锚——语义面对拍零差,仅 provenance 平移）：
 //   ① 提取表健全性（tools/extract-gore.mjs → src/data/vanilla-gore.json）
 //   ② GorePiece 物理 1:1（Gore.cs：重力/粘滞落地摩擦/timeLeft→alpha 渐隐/血块收缩/帆降/16-17 火苗）
 //   ③ 表驱动死亡钩（僵尸 3 = gore 3/4/4/5/5；史莱姆 1 无表项；ai 门 1345 庆典史莱姆）
@@ -101,7 +102,7 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     // 沙暴 Player.cs:22102；心 Projectile.cs:78898；克脑 NPC.cs:32658-32661；
     // 气泡 Player.cs:45438-45459；骨尘 Player.cs:21030/Projectile.cs:78915；
     // 猪鲨 NPC.cs:72721-72724；毒瓶 Projectile.cs:75096；DD2 Projectile.cs:36999；
-    // 火溅 Projectile.cs:72044-72047；微光变体 NPC.cs:89207/:89209（idAlt 面）。
+    // 火溅 Projectile.cs:72044-72047；微光变体 NPC.cs:89207/:89209（idAlt 面；1457 域原生）。
     const tex = (goreJson as unknown as { _meta: { tex: Record<string, { w: number; h: number }> } })._meta.tex;
     const want: Record<number, [number, number]> = {
       16: [22, 24], 17: [22, 24],
@@ -138,7 +139,7 @@ describe('① vanilla-gore.json 提取表健全性', () => {
   });
 
   it('1457 语义钉补（extract-gore MANUAL_1457_DELTAS）：发型师头块变体 1351/1352、独角兽 alpha 继承', () => {
-    // 提取锚保持 1456（line 域=1456 行号），1457 终值定点覆写并保证重产幂等：
+    // ★BJ329 起提取锚=1457 原生（本 delta 层退化为幂等钉补），line 域=1457 行号：
     // 1456 :89135 `IsShimmerVariant ? 1353 : 544` → 1457 :89207 `? 1351 : 544`
     // 1456 :89139 `if (!IsShimmerVariant) NewGore(543)` → 1457 :89209 无条件
     //   `IsShimmerVariant ? 1352 : 543`（shim 门移除、变体改 idAlt 承载）
@@ -158,14 +159,14 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     expect(tex[1352]).toEqual({ w: 38, h: 24 });
   });
 
-  it('钉死锚点：僵尸 3 = 头 3 + 臂 4×2 + 腿 5×2（NPC.cs:88034-88039）', () => {
+  it('钉死锚点：僵尸 3 = 头 3 + 臂 4×2 + 腿 5×2（NPC.cs:88106-88111；1456 :88034-88039）', () => {
     const e = npcEntries(3);
     expect(e.map((x) => x.id)).toEqual([3, 4, 4, 5, 5]);
     expect(e[1].oy).toBe(20);
     expect(e[3].oy).toBe(34);
   });
 
-  it('钉死锚点：史莱姆族无死亡 gore（NPC.cs:85608 支只出尘），庆典门 ai[1]==1345', () => {
+  it('钉死锚点：史莱姆族无死亡 gore（NPC.cs:85679 支只出尘；1456 :85608），庆典门 ai[1]==1345', () => {
     expect(npcEntries(16)).toEqual([]);
     const one = npcEntries(1);
     expect(one.length).toBe(1);
@@ -182,7 +183,7 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     expect(meta.unresolvedCount).toBe(0);
     expect(meta.velExprCount).toBe(0);
     // WoF 屏幕级尘幕（num593/594 依赖 Main.screenPosition）已由提取器
-    // compileScreenGrid 编译为 screenGrid 域（NPC.cs:88307-88327），posExpr 清零
+    // compileScreenGrid 编译为 screenGrid 域（NPC.cs:88379-88399；1456 :88307-88327），posExpr 清零
     expect(meta.posExprCount).toBe(0);
     expect(meta.screenGridCount).toBe(1);
     const residual: string[] = [];
@@ -193,7 +194,7 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     expect(residual).toEqual([]);
   });
 
-  it('WoF 屏幕网格尘幕域常量对拍源码（NPC.cs:88307-88327）且仅 113 持有', () => {
+  it('WoF 屏幕网格尘幕域常量对拍源码（NPC.cs:88379-88399；1456 :88307-88327）且仅 113 持有', () => {
     const curtain = npcEntries(113).filter((e) => e.screenGrid);
     expect(curtain.length).toBe(1);
     expect(curtain[0].screenGrid).toEqual({
@@ -202,7 +203,7 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     });
     expect(curtain[0].idMin).toBe(140);
     expect(curtain[0].idMax).toBe(142);
-    // 早退排除（:88291-88298 `if (type == 114) {…; return;}`）：114 只剩 4 件眼 gore，
+    // 早退排除（:88363-88370 `if (type == 114) {…; return;}`；1456 :88291-88298）：114 只剩 4 件眼 gore，
     // 不再误摊嘴部四件 + 尘幕网格
     expect(npcEntries(114).filter((e) => e.screenGrid)).toEqual([]);
     expect(npcEntries(114).map((e) => e.id)).toEqual([137, 139, 139, 137]);
@@ -221,7 +222,7 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     }
     // HitEffect 守卫全集（提取器 _meta.notes 逐项对应原版守卫）。
     // 1457 移除了最后一处 shim 门（发型师 353/354 头部 gore 第二段
-    // `!IsShimmerVariant` → 无条件 `IsShimmerVariant ? 1352 : 543`,:89208）——
+    // `!IsShimmerVariant` → 无条件 `IsShimmerVariant ? 1352 : 543`,:89209）——
     // shim 语义改由 idAlt 承载,门集不再含 'shim'
     expect([...kinds].sort()).toEqual(['alt', 'dmg', 'net', 'redhat', 'rnd', 'sdir']);
   });
@@ -425,7 +426,7 @@ describe('③ 表驱动死亡钩', () => {
       resetGorePool();                                    // 600 槽池：循环内复位防满池截断
       const got: GorePiece[] = [];
       spawnDeathGore(src({ vanillaId: 4, vx: 9 }), (p) => got.push(p));
-      expect(got.length).toBe(8);                         // NPC.cs:88200-88210（2 次迭代 × 4 调用）
+      expect(got.length).toBe(8);                         // NPC.cs:88273-88284（2 次迭代 × 4 调用；1456 :88201-88211）
       expect(new Set(got.map((p) => p.goreId))).toEqual(new Set([2, 7, 9, 10]));
       for (const p of got) {
         // 表速 = Next(-30,31)*0.2 ∈ [-6,6]（替换而非叠加 NPC 速度 9）
@@ -465,7 +466,7 @@ describe('③ 表驱动死亡钩', () => {
 });
 
 describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', () => {
-  it('altTexture==0：变体贴图槽门（NPC.cs:88585），微光变体取 idAlt（NPC.cs:6643）', () => {
+  it('altTexture==0：变体贴图槽门（NPC.cs:88657；1456 :88585），微光变体取 idAlt（NPC.cs:6643）', () => {
     resetGorePool();
     const e = npcEntries(17).find((x) => x.gates?.length);
     expect(e?.gates).toEqual([{ k: 'alt', op: '==', v: 0 }]);
@@ -482,7 +483,7 @@ describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', 
     resetGorePool();
   });
 
-  it('spriteDirection 镜像分支（NPC.cs:82992/:83005）：!==-1 与 ===-1 互斥各出 10 块', () => {
+  it('spriteDirection 镜像分支（NPC.cs:83062/:83075；1456 :82992/:83005）：!==-1 与 ===-1 互斥各出 10 块', () => {
     resetGorePool();
     const gates = new Set(npcEntries(551).map((e) => JSON.stringify(e.gates)));
     expect(gates).toEqual(new Set([
@@ -501,9 +502,9 @@ describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', 
     resetGorePool();
   });
 
-  it('dmg==9999 门（NPC.cs:83487）：EoL 式脚本化死亡才出 728-733 六向碎块', () => {
+  it('dmg==9999 门（NPC.cs:83558；1456 :83487）：EoL 式脚本化死亡才出 728-733 六向碎块', () => {
     resetGorePool();
-    // `for (num97 < 6) NewGore(..., 728 + num97)`（NPC.cs:83488-83493）→ 循环变量
+    // `for (num97 < 6) NewGore(..., 728 + num97)`（NPC.cs:83560-83563；1456 :83488-83493）→ 循环变量
     // 逐值展开成 6 条固定 id（728-733），各带 dmg 门
     expect(npcEntries(437).map((e) => e.id)).toEqual([728, 729, 730, 731, 732, 733]);
     expect(npcEntries(437).every((e) => e.gates)).toBe(true);
@@ -523,7 +524,7 @@ describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', 
     resetGorePool();
   });
 
-  it('Main.netMode!=1 门（NPC.cs:86345）：单人(0)出块、客户端(1)不出', () => {
+  it('Main.netMode!=1 门（NPC.cs:86414；1456 :86345）：单人(0)出块、客户端(1)不出', () => {
     resetGorePool();
     expect(npcEntries(121)[0].gates).toEqual([{ k: 'net', op: '!=', v: 1 }]);
     setGoreNetMode(0);
@@ -604,13 +605,13 @@ describe('⑤ posExpr 编译产物（Vector2 局部流 + 项式代数）', () =>
     resetGorePool();
   });
 
-  it('循环变量逐值展开：num189∈{-1,0,1} → 3 条 loop=1、rot 系数 0.35/0.45/0.55（NPC.cs:84539-84544）', () => {
-    const vars = npcEntries(491).filter((e) => e.line === 84540);
+  it('循环变量逐值展开：num189∈{-1,0,1} → 3 条 loop=1、rot 系数 0.35/0.45/0.55（NPC.cs:84610-84615；1456 :84539-84544）', () => {
+    const vars = npcEntries(491).filter((e) => e.line === 84611);
     expect(vars.length).toBe(3);
     expect(vars.every((e) => (e.loop ?? 1) === 1)).toBe(true);
     expect(vars.map((e) => e.rot![0].k).sort((a, b) => a - b)).toEqual([0.35, 0.45, 0.55]);
     // num191/num192 混用：`160 + 60*num191` 的 y 偏移也逐值编译
-    const n191 = npcEntries(491).filter((e) => e.line === 84554);
+    const n191 = npcEntries(491).filter((e) => e.line === 84625);
     expect(n191.length).toBe(2);
     // vector19 自带 oy=-60：-(160 + 60*num191) - 60 → -220 / -280
     expect(n191.map((e) => e.oy).sort((x, y) => (x ?? 0) - (y ?? 0))).toEqual([-280, -220]);
@@ -630,7 +631,7 @@ describe('⑤ posExpr 编译产物（Vector2 局部流 + 项式代数）', () =>
     resetGorePool();
   });
 
-  it('Vector2 局部链（vector10）：中心偏移 + 逐轴分量引用编译（NPC.cs:83036-83041）', () => {
+  it('Vector2 局部链（vector10）：中心偏移 + 逐轴分量引用编译（NPC.cs:83107-83112；1456 :83036-83041）', () => {
     // `vector10 = base.Center - new Vector2(10f, 10f)` 直接引用
     const first = npcEntries(572)[0];
     expect(first.fx).toBe(0.5);
@@ -638,7 +639,7 @@ describe('⑤ posExpr 编译产物（Vector2 局部流 + 项式代数）', () =>
     expect(first.ox).toBe(-10);
     expect(first.oy).toBe(-10);
     // `new Vector2(vector10.X, vector10.Y + 20f)` → 分量引用展开（oy = -10 + 20）
-    const sub = npcEntries(572).find((e) => e.line === 83038);
+    const sub = npcEntries(572).find((e) => e.line === 83109);
     expect(sub?.fx).toBe(0.5);
     expect(sub?.ox).toBe(-10);
     expect(sub?.oy).toBe(10);
@@ -646,7 +647,7 @@ describe('⑤ posExpr 编译产物（Vector2 局部流 + 项式代数）', () =>
 });
 
 describe('⑥ post 实例后处理（NewGore 之后的赋值流）', () => {
-  it('庆典彩带（NPC.cs:85627-85629）：scale *= 0.8..1.2 + velocity.X += ±2.5', () => {
+  it('庆典彩带（NPC.cs:85698-85700；1456 :85627-85629）：scale *= 0.8..1.2 + velocity.X += ±2.5', () => {
     resetGorePool();
     const e = npcEntries(1)[0];
     expect(e.post).toEqual([['sm', 0.8, 1.2], ['va', 'x', -2.5, 2.5]]);

@@ -113,25 +113,32 @@ describe('BJ308 件 3.4/3.5：drawFpsReadout 基线钉死 + HitEffect span 终�
     expect(body).toContain("ctx.textBaseline = 'top'");
   });
 
-  it('六处冻结面 90873→90870：span 形态 `82421-90873` 全树绝迹,`82421-90870` 在册', () => {
-    const sites = [
+  it('冻结面 span 域分账（★BJ329 重锚后）：伪锚 90873 全树绝迹;src 双标面留 1456 span,工具+产物=1457 span', () => {
+    // 伪锚形态（90873）绝迹不变；
+    const allSites = [
       'tools/extract-gore.mjs',
       'src/data/vanilla-gore.json',
       'src/entities/GorePiece.ts',
       'src/entities/Enemy.ts',
       'docs/era-guard-family.md',
     ];
-    for (const p of sites) {
-      const raw = rawOf(p);
-      expect(/82421-:?90873/.test(raw), p).toBe(false);   // 伪锚 span 全形态绝迹
-      expect(/82421-:?90870/.test(raw), p).toBe(true);    // 真值 span（带/不带冒号形皆可）
+    for (const p of allSites) {
+      expect(/82421-:?90873/.test(rawOf(p)), p).toBe(false);
+    }
+    // 1456 域 span（:82421-:90870）仍保留在 src 注释双标站（BJ298 双标,BJ329 不动 src 面）；
+    for (const p of ['src/entities/GorePiece.ts', 'src/entities/Enemy.ts', 'docs/era-guard-family.md']) {
+      expect(/82421-:?90870/.test(rawOf(p)), p).toBe(true);
+    }
+    // 1457 域 span（:82492-:90939）= 工具头注 + 产物 _meta.source（BJ329 数据面重锚）；
+    for (const p of ['tools/extract-gore.mjs', 'src/data/vanilla-gore.json']) {
+      expect(/82492-:?90939/.test(rawOf(p)), p).toBe(true);
     }
   });
 
-  it('提取器产物内 90870 锚与 vanilla-gore.json _meta.source 同值（工具↔产物 provenance 一致）', () => {
+  it('提取器产物内 1457 span 锚与 vanilla-gore.json _meta.source 同值（工具↔产物 provenance 一致,BJ329）', () => {
     const tool = rawOf('tools/extract-gore.mjs');
     const json = JSON.parse(rawOf('src/data/vanilla-gore.json')) as { _meta?: { source?: string } };
-    expect(json._meta?.source).toContain(':82421-:90870');
-    expect(tool).toContain(':82421-:90870');
+    expect(json._meta?.source).toContain(':82492-:90939');
+    expect(tool).toContain(':82492-:90939');
   });
 });

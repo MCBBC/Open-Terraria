@@ -300,9 +300,12 @@ export function draw522Overlay(
 // 侧等价【bake rgb×k + globalAlpha=k】）；Color.Lerp 截断取整（(int) 戄断,127.5→127）。
 // 残影 rotation/flip = 本体当前值（原版 :24742 传 rCurrentNPC.rotation+spriteEffects,
 // 非历史值）;位置 = oldPos[i] 中心（绝对世界位,不随本体 transform）。
-// 登记债（per-channel 手术域,非本批）：GetAlpha d370 蓝通道增亮（NPC.cs:94684-94691
-// B×Lerp((255−α)/255,1,0.25),α>0 即入块半隐时可见）对拖影/爆发/本体三面均未实现;
+// ★BJ325（2026-09-24）登记债清偿：GetAlpha d370 蓝通道增亮（NPC.cs:94684-94691
+// B×Lerp((255−α)/255,1,0.25),α>0 即入块半隐时可见）——基座拖影/基座爆发两面经
+// duke370PremulPair 预乘烘焙对接线（本体面在 Renderer.drawEnemy 同判据接线）;
 // 冲刺蓝残影的 light 无关蓝加项在暗处偏差（bake 乘 (0.5,0.5,1) 在光照=1 时逐值精确）。
+// 叠层爆发 :24849 虽经 GetAlpha 但 value81=Yellow×k（B=0）→ num9×0=0 数学恒等,
+// 零观感不接线（登记）;叠层拖影/叠层本体原文不经 GetAlpha,不涉本刀。
 
 /** 猪鲨相位染色（Main.cs :24686-24699 buffColor 链,0-1 rgb 乘数）——本体/拖影/爆发
  *  共用。ai0>9 终怒 (0.4,0.8,0.4)/ai0>4 二阶段 (0.5,0.7,0.5)/变身窗 ai0==4&&ai2>120

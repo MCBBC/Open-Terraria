@@ -7,7 +7,7 @@ import { PREVENTS_ACTUATION_UNDER } from '../Wiring';
 import type { TrapShotKind } from '../../entities/Dart';
 import { TILE_BY_KEY } from '../../data/tiles';
 import { flipSwitchTrack } from '../MinecartTrack';
-import { shiftTallGate } from '../Door';
+import { shiftTallGate, shiftTrapdoor } from '../Door';
 
 /** 器件运行环境(Game 实现;保持窄接口以便单测注入) */
 export interface DeviceCtx {
@@ -65,6 +65,10 @@ export interface DeviceCtx {
   /** ★BJ322（2026-09-24）：ShiftTallGate 尾 TileFrame 面（:52224-52231）注入——
    *  导线切换高门走裸写窗后由 Game 侧扫面收口完整性/邻件复检 */
   afterWrite?(ax: number, ay: number): void;
+  /** ★BJ324（2026-09-24）：ShiftTrapdoor 尾 TileFrame 逐格面（WorldGen.cs:51925-51929/
+   *  :51950-51954/:52034-52040）注入——导线切换活板门后由 Game 侧逐格扫面
+   *  （checkDecorSquareFrame 等价;幂等,件内任一格评估=整件裁决） */
+  tileFrame?(x: number, y: number): void;
   /** 魔幻日晷/月晷快进（Wiring.cs:1150/:1168 → Main.Sundialing/Moondialing :6304/:6319：
    *  fastForwardTimeToDawn/Dusk=true + cooldown=8；冷却中/已在快进则静默） */
   timeSkip?(kind: 'dawn' | 'dusk'): void;
@@ -166,36 +170,6 @@ export function flipCell(w: Wiring, x: number, y: number, delta: number): void {
     st.setTile(x, y, st.type[i], st.frameX[i] + d, st.frameY[i]);
   } finally {
     st.suppressListeners = false;
-  }
-}
-
-/** 活板门开/关互换（ShiftTrapdoor 帧近似；HitWireSingle case 386/387 与右键交互臂
- *  ★BJ250 Player.cs:32535-32548 共用）。★R20-I8:关门(→387)前查目标格实体占位
- *  (Collision.EmptyTile ignoreTiles,WorldGen.cs:51931-51956——实体在格拒换,曾可把
- *  实体关进实心格)。★BJ250 偏差备案：原版右键按玩家相对高度选折翼方向
- *  (`ShiftTrapdoor(myX,myY, myY*16 > Center.Y)` 失败再反向重试 :32539-32543),
- *  本近似为原位翻转两向等价 → 单次调用=两向尝试的并集,方向参数不消费。
- *  SkipWire 面保留在导线路径（right-click 无 Wiring.running 语境,原版右键
- *  ShiftTrapdoor 内 `netMode!=1 && Wiring.running` 门同样不触发）。 */
-export function shiftTrapdoorFlip(
-  w: Wiring, x: number, y: number,
-  areaEmpty?: (x: number, y: number, w2: number, h2: number) => boolean,
-): void {
-  const st = w.st;
-  if (!st.inBounds(x, y)) return;
-  const i = st.idx(x, y);
-  const sheet = w.sheetOf(x, y);
-  const openK = 'v_386_trapdooropen', closedK = 'v_387_trap_door_closed';
-  const toOpen = sheet === 387;
-  const target = TILE_BY_KEY[toOpen ? openK : closedK] ?? 0;
-  if (!target) return;
-  const ox = x - Math.floor(st.frameX[i] % 36 / 18);
-  if (!toOpen && areaEmpty && !areaEmpty(ox, y, 2, 1)) return;
-  for (let ix = ox; ix < ox + 2; ix++) {
-    if (!st.inBounds(ix, y)) continue;
-    const ii = st.idx(ix, y);
-    w.skipCell(ix, y);
-    st.setTile(ix, y, target, (ix - ox) * 18, st.frameY[ii]);
   }
 }
 
@@ -976,10 +950,23 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
         Math.floor(Math.random() * 4), [num70, num69]);
       return true;
     }
-    case 386: case 387: // 活板门开/关互换(ShiftTrapdoor;帧近似)——主体抽为导出函数,
-      //  导线触发与右键交互臂(★BJ250 Player.cs:32535-32548)共用同一翻转实现
-      shiftTrapdoorFlip(w, x, y, ctx.areaEmpty);
+    case 386: case 387: { // 活板门开/关互换——★BJ324（2026-09-24）改完整委托 shiftTrapdoor
+      //（Wiring.cs:1443-1449 同函数面:playerAbove:true 先试,失败反向重试 :1446-1449
+      //  ——导线路径玩家高度不可得,原版即按 playerAbove:true/false 双掷并集;SkipWire
+      //  面由 shiftTrapdoor 原版序内联[关臂先 Validate 后 SkipWire 再占位门早退也照跳
+      //  :51907/:51949,开臂 :52004];EmptyTile 占位门=ctx.areaEmpty 单源 per-cell 化;
+      //  CanKillTile 门 :51990=Wiring.canKillTile;尾 TileFrame 逐格面=ctx.tileFrame;
+      //  音效 SoundID 8 成功/9 尾流经 ctx.sfx 带原版落点）
+      const opts = {
+        skipCell: (sx: number, sy: number) => w.skipCell(sx, sy),
+        blocked: ctx.areaEmpty ? (bx: number, by: number) => !ctx.areaEmpty!(bx, by, 1, 1) : undefined,
+        canKill: (cx: number, cy: number) => canKillTileAt(w, cx, cy),
+        sfx: (n: 'door_open' | 'door_close', px: number, py: number) => ctx.sfx?.(n, px, py),
+        tileFrame: (tx2: number, ty2: number) => ctx.tileFrame?.(tx2, ty2),
+      };
+      if (!shiftTrapdoor(w.st, x, y, true, opts)) shiftTrapdoor(w.st, x, y, false, opts);
       return true;
+    }
     case 388: case 389: { // 高门关/开互换——★BJ322（2026-09-24）改委托 shiftTallGate
       //（Wiring.cs:1460 `WorldGen.ShiftTallGate(i, j, flag4)` 同函数同参面:forced 缺省
       //  false=实体占位门生效（EmptyTile ignoreTiles,开/关两向 :52206-52212）→
