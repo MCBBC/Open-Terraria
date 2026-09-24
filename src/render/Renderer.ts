@@ -105,6 +105,7 @@ function npcFootBiasExempt(id: number): boolean {
 import type { Camera } from './Camera';
 import { swPerf, searchHasParam } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)+★BJ94 D1 渲染循环 has 缓存读取面
 import { GLShimCensus } from './glshim/GLShimCensus';   // ★B0 census 仪具(?b0shadow=1 激活,缺省零触碰)
+import { GLShimExecutor } from './glshim/GLShimExecutor';   // ★B2 shim 执行器（实体/弹/尘族 drawImage→GL quad 桥;riding ?bgl=1）
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -2830,6 +2831,11 @@ export class Renderer {
   // ---- ★B0 census 仪具面（?b0shadow=1;缺省 null=渲染路径零触碰）----
   private _b0shim: GLShimCensus | null = null;
   private _b0Wrap: CanvasRenderingContext2D | null = null;
+  /** ★B2 shim 执行器（实体/弹/掉落/尘族翻 GL;窗口制——仅实体段/behindTiles 段
+   *  挂到 this.ctx 上,段外零触碰零开销）。 riding ?bgl=1（不新增旗）;
+   *  族级回退=census 未支持算子 flush+保 2D。 */
+  private bglEntShim: GLShimExecutor | null = null;
+  private _bglEntPrevCtx: CanvasRenderingContext2D | null = null;
   /** ★A2 光照×扭曲 FBO 链（?wfbo=1 惰性建;unavailable/失败自动落回旧 GL 链） */
   private worldCompose: GLWorldCompose | null = null;
   /** ★路径变更回调（Game 接线到行为记录器——转场才记一条,环形缓冲不刷屏） */
@@ -3042,12 +3048,54 @@ export class Renderer {
     this._bglPageUploaded.w = 0;
     this._bglPageUploaded.t = 0;
   }
+
+  // ==== ★B2 shim 执行器窗口（实体/弹/掉落/尘族翻 GL;riding ?bgl=1）====
+  /** 窗口开：把 this.ctx 换成执行器包装（GL 不可用/旗关/世界层不在 = 整窗保持
+   *  2D 原链,零触碰）。执行器矩阵镜像从 raw CTM 起步（世界变换/屏空间均支持——
+   *  尘 lit pass 在窗内 setTransform 复位,镜像同步跟进）。 */
+  private bglEntWindowBegin(tag: 'ent' | 'behind'): void {
+    // ★bglShim 总闸缺省关:玩家/NPC 族在执行器过对拍前恒保 2D 热路径
+    //  （2026-09-24 用户实报角色透明;?bgl=1 裸开=B1 网格段语义不变）
+    if (!Renderer.bgl || !Renderer.bglShim || this.isCpuRender() || !this.worldLayerActive || !this.worldCtxLayer) return;
+    this.bglEntShim ??= new GLShimExecutor({
+      acquireGl: () => this.acquireWorldGl(),
+      worldCtx: () => this.worldCtxLayer,
+      worldW: () => this._worldLowW,
+      worldH: () => this._worldLowH,
+    });
+    this.bglEntShim.frameReset();
+    const w = this.bglEntShim.attach(this.worldCtxLayer);
+    if (!w) {
+      this.bglPathUsed = 'world-2d-' + tag;
+      this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
+      return;
+    }
+    this._bglEntPrevCtx = this.ctx;
+    this.ctx = w;
+    this.bglPathUsed = 'world-gl-' + tag;
+    this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
+  }
+
+  /** 窗口关：flush（SO 批→ADD 批 present 回贴）+ this.ctx 恢复。 */
+  private bglEntWindowEnd(): void {
+    const shim = this.bglEntShim;
+    if (!shim?.active) return;
+    shim.detach();
+    if (this._bglEntPrevCtx) { this.ctx = this._bglEntPrevCtx; this._bglEntPrevCtx = null; }
+  }
+
+  /** ★B2 探针面：执行器窗内统计（scripts/_b2-entity-ab.mjs 消费） */
+  bglShimStats(): { active: boolean; stats: unknown } | null {
+    const s = this.bglEntShim;
+    return s ? { active: s.active, stats: { ...s.stats } } : null;
+  }
   /** ★B1 chunk 页纹理确保（'wpg:<idx>'/'tpg:<idx>'）。页生命周期三态:
    *  ①idx ≥ 已上传计数（新页/trim 后 idx 复用）:drop 陈旧键+texFromImage
    *    全量上传（noMip;预乘上传=画布源判例）,清该页脏标;
    *  ②idx < 已上传计数:texFromImage 幂等键命中（零上传）+flush 脏 slot
-   *    （ChunkCache.glDirtyPages→256² scratch texSubUpdate 判例,只传烘焙脏块
-   *    ——禁每帧全量重传纪律）;
+   *    （ChunkCache.glDirtySlots/Clear 按层分账 W/T→256² scratch texSubUpdate
+   *    判例,只传烘焙脏块——禁每帧全量重传纪律;★消费即清只许清本层账,
+   *    清他层=对层饥饿定性,见 ChunkCache 页纹理生命周期不变式 I1-I4）;
    *  ③页表收缩（trimFreePages 尾裁）：计数下同步+尾部键 drop,防同 idx
    *    复用串味。世界切换:dropSwPipe→dropWorldPipe 层整弃=页纹理随
    *    texs 表蒸发（不跨世界持有,swpipe 熔断链同款）。 */
@@ -3072,17 +3120,18 @@ export class Renderer {
         if (kind === 'w') this._bglPageUploaded.w = idx + 1;
         else this._bglPageUploaded.t = idx + 1;
       }
-      chunks.glDirtyPages.delete(idx);   // 全量上传已含全部 cell
+      chunks.glDirtyClear(layer, idx);   // ★全量上传已含全部 cell——只清本层账
       return e;
     }
-    // ②已驻留页：flush 烘焙脏 slot（增量 256²）
-    const dirty = chunks.glDirtyPages.get(idx);
+    // ②已驻留页：flush 烘焙脏 slot（增量 256²;★读/清都走本层账——墙段清共享账
+    //   曾令 tile 段永远饥饿,= ?bgl=1 物块透明洞根因,见 ChunkCache 不变式 I1）
+    const dirty = chunks.glDirtySlots(layer, idx);
     if (dirty && dirty.size) {
       for (const slot of dirty) {
         glw.texSubUpdate(key, page, (slot % ChunkCache.PAGE_COLS) * 256,
           Math.floor(slot / ChunkCache.PAGE_COLS) * 256, 256, 256);
       }
-      chunks.glDirtyPages.delete(idx);
+      chunks.glDirtyClear(layer, idx);
     }
     return glw.texFromImage(key, page, false, true);
   }
@@ -4403,9 +4452,13 @@ export class Renderer {
     for (let i = 0; i < nS; i++) sBuf[i] = entities[this._sortIdx[i]];
     if (sBuf.length > nS) sBuf.length = nS;
     const sorted = sBuf;
+    // ★B2 behindTiles 实体 shim 窗（钻地蠕虫族;墙段后/tile 段前的独立夹层——
+    //   flush 在窗尾 present,先于 tile 段 FBO 租用,层序同 2D）
+    this.bglEntWindowBegin('behind');
     for (const e of sorted) {
       if (e instanceof Enemy && this.isBehindTilesEnemy(e)) this.drawEnemy(e, world, entities);
     }
+    this.bglEntWindowEnd();
 
     // 2b''. 浸润带·实心层 pass（TileDrawing.Draw :528-529 solidLayer=true——
     //       原版在逐 tile 绘制时,每个实心格先画浸润带(Layer_LiquidBehindTiles=0)
@@ -4569,6 +4622,11 @@ export class Renderer {
     // heldProj 账本:帧首清账,实体自带 draw 分支登记活体投射物中心;
     // 同帧 drawPlayer 消费(实体先画玩家后画 → 无跨帧陈旧)。见 heldProj.ts 头注
     heldProjFrameBegin();
+    // ★B2 实体主窗（玩家/镇民/敌怪/弹幕/掉落/雨/gore/尘 lit——整个实体族段一张
+    //   FBO('world') 票:窗尾单次 flush=SO 批+ADD 批两 present;窗内不支持算子
+    //   触发保序 flush+2D 回退）。transform 语境:世界变换（4181-4199）在镜,
+    //   尘 lit 段 setTransform 复位也镜像（执行器跟随）。
+    this.bglEntWindowBegin('ent');
     // ★r15 R15-6:isLockedToATile 玩家(坐椅/睡床,Player.cs:4004-4012 = sitting||
     //    sleeping)先于全部实体绘制(RefreshPlayerDrawOrder :22465-22498 两档制 →
     //    DrawPlayers_BehindNPCs :64261 在 NPC 层之前)——NPC 走过坐椅玩家时遮住玩家
@@ -4733,6 +4791,7 @@ export class Renderer {
     if (wK < 1) ctx.scale(wK, wK);   // 低清档:同上
     this.drawVanillaDustPass(false, cam, player);
     ctx.restore();
+    this.bglEntWindowEnd();   // ★B2 实体主窗收口（flush present+ctx 恢复）
 
     // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720；
     //     ★r15 R15-7：在 gore/尘【之后】= 水 0.6 半透明罩住碎块与尘——水中爆炸
@@ -5585,8 +5644,12 @@ export class Renderer {
    *  ?bgl=0 总逃生门）。运行时可翻（wfbo 同款页内翻面范式——探针
    *  scripts/_b1-world-ab.mjs;页面内部改静态不受 bootstrap 洗参影响）。 */
   private static _bgl = (() => {
+    // ★B1 转正（2026-09-24 用户实测验收:「B1 和 B2 好像没问题」——Skia tie 非整数
+    //  缩放 census 口径经用户实测裁决接受,登记备案）。缺省开,?bgl=0=总逃生门
+    //  （回 2D 栅格化全链）。node/worker 上下文恒关（document 判死,fork bomb 判例家族）。
     try {
-      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('bgl') === '1';
+      if (typeof document === 'undefined') return false;
+      return new URLSearchParams(location.search).get('bgl') !== '0';
     } catch { return false; }
   })();
   static get bgl() { return this._bgl; }
@@ -5599,6 +5662,20 @@ export class Renderer {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).has('b0shadow');
     } catch { return false; }
   })();
+  /** ★B2 shim 执行器总闸（?bglshim=1;缺省关——2026-09-24 用户实报 bgl=1 角色移动
+   *  变透明,执行器未过对拍前强制回退 2D 热路径=盘上任意时刻构建必须可用;
+   *  探针 scripts/_b2-entity-ab.mjs 带 ?bglshim=1 复现/对拍;定谳后按任务书
+   *  评估收口回 riding ?bgl=1） */
+  private static _bglShim = (() => {
+    // ★B2 转正（2026-09-24 用户实测验收同 B1）。缺省开（须 bgl 同开,B1 为其地基）,
+    //  ?bglshim=0=逃生门（实体族回 2D 热路径）。node/worker 恒关（document 判死）。
+    try {
+      if (typeof document === 'undefined') return false;
+      return new URLSearchParams(location.search).get('bglshim') !== '0';
+    } catch { return false; }
+  })();
+  static get bglShim() { return this._bglShim; }
+  static bglShimSetForTest(v: boolean): void { this._bglShim = v; }
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -6604,7 +6681,7 @@ export class Renderer {
    *  8bit 精度;每 帧×档 一次性烘焙,稳态运行零 getImageData。上限 2048,溢出走分代 LRU
    *  （dustPmCacheTouch/Evict：命中重插入+逐出最旧 1/4——2026-09-02 红队 finding 清偿,
    *  旧整体 clear 会让多色键周期打穿时每键重烘 1×getImageData=帧尖峰）。 */
-  private dustPmCache: Map<number, { add: HTMLCanvasElement; erase: HTMLCanvasElement }> | null = null;
+  private dustPmCache: Map<number, { add: HTMLCanvasElement; erase: HTMLCanvasElement; glb?: Uint8Array }> | null = null;
   private dustPmBake: HTMLCanvasElement | null = null;
 
   /** 取/烘一帧的预乘对。mr/mg/mb/ma ∈0-1 = XNA Draw 的 Color 入参逐通道
@@ -6623,7 +6700,13 @@ export class Renderer {
     const key = ((((fx * 2048 + fy) * 256 + mR) * 256 + mG) * 256 + mB) * 256 + mA;
     this.dustPmCache ??= new Map();
     const hit = this.dustPmCache.get(key);
-    if (hit) { dustPmCacheTouch(this.dustPmCache, key); return hit; }   // LRU 访问序
+    if (hit) {
+      dustPmCacheTouch(this.dustPmCache, key);   // LRU 访问序
+      // ★B2 命中支同注册（bgl 运行时翻面晚于首批烘焙的旗面顺序无关性——
+      //  WeakMap.set 幂等,稳态命中每尘一次 ~50ns）
+      if (Renderer.bgl && hit.glb) this.bglShimReg().registerDustPair(hit.add, hit.erase, hit.glb);
+      return hit;
+    }
     const bake = (this.dustPmBake ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     const bc = bake.getContext('2d', { willReadFrequently: true })!;
     bc.clearRect(0, 0, 8, 8);
@@ -6637,10 +6720,21 @@ export class Renderer {
     const eraseCtx = eraseC.getContext('2d')!;
     const eraseIm = eraseCtx.createImageData(8, 8); eraseIm.data.set(baked.erase);
     eraseCtx.putImageData(eraseIm, 0, 0);
-    const entry = { add: addC, erase: eraseC };
+    const entry = { add: addC, erase: eraseC, glb: baked.gl };
+    if (Renderer.bgl) this.bglShimReg().registerDustPair(addC, eraseC, baked.gl);   // ★B2 尘对 GL 合并面注册
     dustPmCacheEvict(this.dustPmCache);   // 分代 LRU:超 2048 逐最旧 1/4(非整体清空)
     this.dustPmCache.set(key, entry);
     return entry;
+  }
+
+  /** ★B2 执行器确保存在（仅 bgl 开时被调用;惰性建,构造零 GL 工作——GL 判定在 attach） */
+  private bglShimReg(): GLShimExecutor {
+    return this.bglEntShim ??= new GLShimExecutor({
+      acquireGl: () => this.acquireWorldGl(),
+      worldCtx: () => this.worldCtxLayer,
+      worldW: () => this._worldLowW,
+      worldH: () => this._worldLowH,
+    });
   }
 
   /** 预乘对两步绘制（须在尘变换内调用;ox/oy = origin 偏移,缺省 −4 = 原版 (4,4)）。
@@ -6689,6 +6783,13 @@ export class Renderer {
     const s2 = (this.dustScratch2 ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     const c1 = s1.getContext('2d', { willReadFrequently: true })!;
     const c2 = s2.getContext('2d', { willReadFrequently: true })!;
+    // ★B2 动态源登记（s1 重着色面/s2 染料面内容每绘都变——执行器 flush 期
+    //  texRefresh 全量重传;8×8 小面,重传成本可忽略）
+    if (Renderer.bgl) {
+      const sh = this.bglShimReg();
+      sh.markDynamic(s1);
+      sh.markDynamic(s2);
+    }
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (const d of vd.each(fullbright)) {
@@ -15179,6 +15280,8 @@ export class Renderer {
       this.mountTintCtx = this.mountTintCanvas.getContext('2d');
       if (!this.mountTintCtx) return null;
     }
+    // ★B2 动态源登记（猪鲨崽液色渐染面内容每绘都变——执行器 flush 期重传）
+    if (Renderer.bgl) this.bglShimReg().markDynamic(this.mountTintCanvas!);
     return this.mountTintCanvas ? { c: this.mountTintCanvas, x: this.mountTintCtx! } : null;
   }
 

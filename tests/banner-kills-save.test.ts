@@ -287,7 +287,12 @@ describe('BannerToNPC 规范代表表（BannerSystem.cs:1156,提取面 vanilla-b
     expect(bannerToNpcOf(8)).toBe(74);
     expect(bannerToNpcOf(1)).toBe(102);
     expect(bannerToNpcOf(292)).toBe(694);
-    expect(bannerToNpcOf(90)).toBe(0);   // 表外 12 旗之一（原版 `_ => 0`,NPCtoBanner 侧不可达）
+    // ★BJ334(2026-09-24)：旧判词「表外 12 旗之一不可达」=提取器负数盲区伪锚——
+    //  原版 BannerToNPC(90)=-6（BannerSystem.cs:1336,黑史莱姆规范代表）,负 netID
+    //  键入库后 90/119/131/151/155/159/183 七旗恢复可达。真不可达仅 94/181/182/194/200。
+    expect(bannerToNpcOf(90)).toBe(-6);
+    expect(bannerToNpcOf(119)).toBe(-3);   // 绿史莱姆旗（用户实报 BJ334 面）
+    expect(bannerToNpcOf(94)).toBe(0);     // 真表外（NPCtoBanner 侧无 NPC 映射）
   });
 });
 

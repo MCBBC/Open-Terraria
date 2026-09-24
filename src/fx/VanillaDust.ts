@@ -305,10 +305,20 @@ export class VanillaDust {
     //  prettySparkle 载体不进 NewDust 链,特例随链跳过（见 spawn 头注 ps 分支）
     if (!ps && (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
       || type === 242 || type === 75 || type === 169 || type === 29 || (type >= 59 && type <= 65)
-      || type === 158 || (type >= 293 && type <= 298) || type === 302 || type === 307 || type === 310
-      || type === 127 || type === 187)) {   // ★R2' F3::232-235 同句 127/187 补(vx×0.3/scale×0.7)
+      || type === 158 || (type >= 293 && type <= 298) || type === 302 || type === 307 || type === 310)) {
       d.vy = ((Math.random() * 16 | 0) - 10) * 0.1;
       d.vx *= 0.3;
+      d.scale *= 0.7;
+    }
+    // ★BJ338 件2（2026-09-24）:227-230 127/187 烟雾分立 if 转正——原版两支互斥
+    //  独立（烟雾族句不含 127/187）：velocity 矢量×0.3（vx/vy 同乘,vy=基础掷
+    //  rand(-20,21)×0.1+SpeedY 后 ×0.3=±0.63 对称,SpeedY 随行）+ scale×0.7。
+    //  曾并入烟雾族句=127/187 的 vy 走族内重掷 rand(-10,6)×0.1（[-1.0,0.5] 不对称
+    //  下坠偏置,且 SpeedY 丢弃）→ 飘散轨迹可见面（火焰箭尾迹 Arrow.ts FLARE_DUST
+    //  163→127/310→187、DD2 敌怪施法烟 Enemy.ts:13593 517→127）。
+    if (!ps && (type === 127 || type === 187)) {
+      d.vx *= 0.3;
+      d.vy *= 0.3;
       d.scale *= 0.7;
     }
     // ★F5（2026-09-08 红队清偿）:227-230 308 兄弟支——velocity×0.5 + Y++，【无】
@@ -1068,9 +1078,16 @@ function fullbrightnessWanted(wantFb: boolean, d: VDust): boolean {
  *  'lighter'（预乘换算在画布内完成）,勿按预乘直读。 */
 export function dustPremulBake(
   tex: Uint8ClampedArray, mR: number, mG: number, mB: number, mA: number,
-): { add: Uint8ClampedArray; erase: Uint8ClampedArray } {
+): { add: Uint8ClampedArray; erase: Uint8ClampedArray; gl: Uint8Array } {
   const add = new Uint8ClampedArray(tex.length);
   const erase = new Uint8ClampedArray(tex.length);
+  // ★B2（2026-09-24）GL 合并面：rgb=预乘 add 面（=2D 'lighter' 实加值,putImageData
+  //  直色→预乘换算 round(v×A/255) 的 JS 复刻——SkMulDiv255Round 同式,整数域无 tie）、
+  //  a=erase e。执行器单 quad 输出 (rgb,e) 走 (ONE,1−SA) present:
+  //  out.rgb = aR×mul + dst×(1−e×mul)（=2D erase+lighter 两步的 rgb 式）;α 项 =
+  //  e×mul + dst.a×(1−e×mul),2D 为 m×mul + dst.a×(1−e×mul)——m>e 亮点位 α 偏差
+  //  ≤(m−e)×mul（e<0.5 二值档 m=255 偏差全档;α 只影响天空透出,登记 census 有界）。
+  const glb = new Uint8Array(tex.length);
   for (let i = 0; i < tex.length; i += 4) {
     const tA = tex[i + 3];
     const aR = (tex[i] * tA * mR) / 65025;
@@ -1104,8 +1121,13 @@ export function dustPremulBake(
       add[i + 3] = add[i] + add[i + 1] + add[i + 2] > 0 ? 255 : 0;
     }
     erase[i + 3] = e;
+    // GL 合并字节（此处 add[] 已是最终直色字节;预乘 = round(add×A/255)）
+    glb[i] = Math.round((add[i] * add[i + 3]) / 255);
+    glb[i + 1] = Math.round((add[i + 1] * add[i + 3]) / 255);
+    glb[i + 2] = Math.round((add[i + 2] * add[i + 3]) / 255);
+    glb[i + 3] = Math.round(e);   // erase 面经 putImageData 同款 round（Uint8 直存会截断）
   }
-  return { add, erase };
+  return { add, erase, gl: glb };
 }
 
 // ===================== dustPmCache 分代 LRU（Renderer.dustPremulPair 消费）=====================

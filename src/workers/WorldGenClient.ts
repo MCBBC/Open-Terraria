@@ -51,6 +51,45 @@ export function worldGenTimeoutMs(width: number, height: number): number {
   const factor = Math.min(4, Math.max(1, area / (4200 * 1200)));
   return Math.round(DEFAULT_TIMEOUT_MS * factor);
 }
+
+/** ★BJ336（2026-09-24）件1：读档超时扩面的尺寸窥取——存档 JSON 的 meta 头按
+ *  saveGame 装配序固定 name,seed,w,h（SaveFile.ts meta 字面量插序）⇒ `"w":<n>,"h":<n>`
+ *  落在头部数十字节内；JSON 字符串内部的引号必转义（\"w\":）⇒ 正则误匹配不可能，
+ *  首个命中即真头。有界窗口（4KB）防超长 name 场景全串扫描。非存档 JSON/损坏头
+ *  → null（调用方回退 worker 客户端固定 180s 缺省，同现行）。 */
+export function peekSaveDims(json: string): { w: number; h: number } | null {
+  if (!json) return null;
+  const head = json.length > 4096 ? json.slice(0, 4096) : json;
+  const m = /"w":(\d{1,5}),"h":(\d{1,5})/.exec(head);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  return w > 0 && h > 0 ? { w, h } : null;
+}
+
+/** 静默看门狗 interval 装配（★BJ336 件1：generate 之外 loadSave 也武装——worker 读档
+ *  parse/RLE/沉降三段均有 progress 事件流动，30s 无事件=段内冻结的最早信号，与生成
+ *  面同款点名。getPend 延迟解析：装配点 pend 字面量尚未赋值、回调运行期才读取
+ *  （与 generate 内联写法同 TDZ 形态）。generate 的内联块保持 BJ331 原样不动。 */
+function armStallWatchdog(noun: string, getPend: () => Pending | undefined): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    const pend = getPend();
+    if (!pend?.lastEventAt) return;
+    const silent = Date.now() - pend.lastEventAt;
+    if (silent > STALL_WARN_MS) {
+      if (pend.stallWarned) return;
+      console.error(
+        `[worldGen] ⚠️ ${noun}疑似卡死：已 ${Math.round(silent / 1000)}s 无进展` +
+        `（最后进度：${pend.lastLabel}${pend.lastPhase ? ` [${pend.lastPhase}]` : ''}）。` +
+        `${noun === '生成' ? 'pass 为同步代码,内部死循环会停摆事件循环——排查该 pass 内的 while/拒绝采样' : '读档 parse/RLE 解码/沉降三段均为同步段,段内冻结会停摆事件循环——排查该段内循环'}` +
+        `（参考 liquidType +1 编码血案,硬超时后将自动终止）`,
+      );
+      pend.stallWarned = true;
+    } else {
+      pend.stallWarned = false;
+    }
+  }, STALL_CHECK_MS);
+}
 /** 静默看门狗阈值：生成中超过此时长无任何 worker 事件 → 控制台点名(pass 内死循环
  *  的最早信号——2026-08-12 水中箱 liquidType 死循环卡了整场才被发现,本看门狗 30s 即报) */
 const STALL_WARN_MS = 30_000;
@@ -206,6 +245,10 @@ export class WorldGenClient {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        // ★BJ336 件1：超时路径同步清 stallTimer（BJ331 同案：pending 已删而 interval
+        //  永续=拿冻结的 lastEventAt 每 10s 报一次直到页面刷新）
+        const pend = this.pending.get(id);
+        if (pend?.stallTimer) clearInterval(pend.stallTimer);
         this.pending.delete(id);
         this.teardown();
         reject(new WorldGenUnavailable('读档超时'));
@@ -215,6 +258,12 @@ export class WorldGenClient {
         reject,
         onProgress: cb?.onProgress as Pending['onProgress'],
         timer,
+        // ★BJ336 件1：读档面静默看门狗（worker parse/tiles/settle 三段 progress 流动
+        //  复位 lastEventAt；onEvent result/error 臂已有配对清理）——超时值由调用方按
+        //  peekSaveDims/worldGenTimeoutMs 扩面（loadFromJson/loadFromKey），此处缺省
+        //  仍 180s：key 路径客户端无档内容可窥时由 meta 槽位表兜底，无 meta 回退本值。
+        lastEventAt: Date.now(), lastLabel: '开始', stallWarned: false,
+        stallTimer: armStallWatchdog('读档', () => this.pending.get(id)),
         onLoadResult: (ev) => {
           if (ev.wkLog?.length) (globalThis as unknown as { __swWkLog?: string[] }).__swWkLog = ev.wkLog;
           resolve({ world: World.fromPacket(ev.world), player: ev.player, save: ev.save });

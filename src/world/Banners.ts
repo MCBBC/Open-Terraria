@@ -1,7 +1,8 @@
 // 旗帜系统（Terraria.GameContent/BannerSystem.cs + ItemID.Sets 1:1）
-// 数据 = tools/extract-banners.mjs 提取（NPCtoBanner 447 怪 / BannerToItem 特例+级联区间 /
-// BannerToNPC 规范代表表 / KillsToBanner 门槛表,默认 50）。击杀计数→达标公告+授予;
-// 屏内旗 tile 91 解码→bannerId→npc 集（buff 乘区在 Game/Enemy 消费）。
+// 数据 = tools/extract-banners.mjs 提取（NPCtoBanner 457 怪【★BJ334 负 netID 盲区
+// 修复,含 -1..-10 史莱姆族 10 键】/ BannerToItem 特例+级联区间 /
+// BannerToNPC 规范代表表 287 项【含 7 负规范】/ KillsToBanner 门槛表,默认 50）。
+// 击杀计数→达标公告+授予;屏内旗 tile 91 解码→bannerId→npc 集（buff 乘区在 Game/Enemy 消费）。
 import bannersJson from '../data/vanilla-banners.json';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';

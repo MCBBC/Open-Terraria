@@ -6193,6 +6193,9 @@ export class Game implements GameHooks {
       }
     }
     // ---- 主线程 fallback（原路径原样保留：worker 不可用 + 探针依赖） ----
+    // ★BJ336 件1：同步回退无看门狗（同线程冻结期计时器不可达）——进点提示即最小
+    //  安全网（pass 间 nextFrame 让帧=进度照走、Esc 中止链仅在 pass 边界生效）。
+    console.warn(`[newWorld] worker 不可用/失败 → 主线程同步生成回退（${width}×${height} 预计数十秒~数分钟,pass 间让帧;pass 内冻结无法告警）`);
     this.world = await generateWorld({ width, height, size: opts?.size, seedText, name: opts?.name, evil: opts?.evil, seedFlags: opts?.seedFlags, onWorldPartial: opts?.onWorldPartial }, (label, p, local) => onProgress?.(label ?? undefined, p * 0.7, local));
     // 新生成世界免索引帧修复扫描（生成端写像素帧终态；与 worker 路径同置位语义）
     this.world.indexFramesRepaired = true;
@@ -20630,8 +20633,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       } else {
         const [mwx, mwy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
         const gx = mwx / TILE, gy = mwy / TILE;
-        const num = (gx - Math.floor(gx)) < 0.5 ? 0 : -1;
-        const num2 = (gy - Math.floor(gy)) < 0.5 ? 0 : -1;
+        // ★BJ333（2026-09-24）象限方向勘误：原版 Player.cs:46251-46262
+        //   `if ((double)(v) < Math.Round(v)) num = 0;`（v=世界px/16）——v < Round(v)
+        //   ⟺ 亚格 frac>0.5（frac==0.5 时 C# Math.Round 银行家舍入 .5→偶数:偶行
+        //   Round=floor → 假、奇行 Round=ceil → 真）→ num=0 = 扫描 2×2 伸向鼠标
+        //   【所压半格】方向。旧实现 `< 0.5 → 0` 反向（SW-BO1 审计误读该比较）,
+        //   后果=穿角锤墙 QoL 与内部格 2×2 代理目标全部选错方向:瞄墙角空格敲不动、
+        //   朝开口侧倚的啃边瞄准死——天然墙大片「敲完残留」体感根因之一（3×3 开口
+        //   规则本身=原版刻意语义 CanPlayerSmashWall :46307）。
+        const numDir = (v: number): number => {
+          const f = Math.floor(v);
+          const frac = v - f;
+          if (frac > 0.5) return 0;
+          if (frac === 0.5) return (f % 2 === 1) ? 0 : -1;   // 银行家:.5 → 偶方向
+          return -1;
+        };
+        const num = numDir(gx);
+        const num2 = numDir(gy);
         for (let k = tx + num; k <= tx + num + 1; k++) {
           for (let l = ty + num2; l <= ty + num2 + 1; l++) {
             if (!flag) continue;
@@ -23386,7 +23404,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.chunks.markDirtyArea(x - 2, topY, x + 2, y + 1);
     if (cactusKey && ITEM_BY_KEY[cactusKey] !== undefined) {
       for (const [kx, ky] of killed) {
-        this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 10, ky * TILE, cactusKey, 1);
+        // ★BJ338 件1.3（2026-09-24）：KillTile_DropItems（WorldGen.cs:64461-64469）
+        //   → NewItem(x*16,y*16,16,16,276) 矩形载=格【中心】(x*16+8,y*16+8)
+        //   （Item.cs:49657）,无任何位置抖动——曾自创 x ±5px 抖动 + y 顶锚（-8px 偏上）
+        //   =位置面偏差已摘。276 掉落链 GetItemDrops case 80（:65232）。
+        this.spawnDrop(kx * TILE + 8, ky * TILE + 8, cactusKey, 1);
       }
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, '#497811', 10, 1.8);
@@ -27407,7 +27429,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (give !== undefined) {
         this.player.inv.removeHeld(1);
         this.cb.onInventoryChanged();
-        this.dropFromExtractinator({ itemType: give, stack: 1 }, tx, ty);
+        this.dropFromExtractinator({ itemType: give, stack: 1 });
         this.sfx.play('pickup'); // SoundID 7（:41025 Grab）
         if (viaUse) this.player.useTime = extractinatorUseTime(10, sheet);
         return true;
@@ -27422,19 +27444,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const drop = rollExtractinatorDrop(mode, sheet, mathRand(), this.world.flags.hardMode);
     this.player.inv.removeHeld(1);
     this.cb.onInventoryChanged();
-    this.dropFromExtractinator(drop, tx, ty);
+    this.dropFromExtractinator(drop);
     this.sfx.play('pickup'); // SoundID 7（Player.cs:41040）
     if (viaUse) this.player.useTime = extractinatorUseTime(10, sheet);
     return true;
   }
 
-  /** 转化产物掉落（Player.cs:41426-41436 DropItemFromExtractinator：鼠标世界坐标生成；
-   *  此处落在提取机顶格上方，带向上初速便于拾取） */
-  private dropFromExtractinator(drop: ExtractDrop, tx: number, ty: number): void {
+  /** 转化产物掉落（1457 Player.cs:42402-42410 DropItemFromExtractinator 1:1;1456
+   *  :41426-41436）：出生点 = 鼠标世界坐标（ReverseGravitySupport(MouseScreen)
+   *  + screenPosition——本仓 Camera.screenToWorld 内置鼠标 Y 镜像同相）；智能光标
+   *  开（Main.SmartCursorIsUsed=SmartCursorWanted,Main.cs:2985 ⇒ 本仓 smartCursor
+   *  .wanted）/ 手柄 → 玩家中心。RequestNewItem 中心锚随机初速（BJ326 件1 通道）。
+   *  ★BJ338 件1.4（2026-09-24）：曾落提取机顶格上方 (tx*16+24,(ty-1)*16) 自有近似
+   *  =锚微差登记债。原版 gamepad 面（PlayerInput.UsingGamepad）本仓无手柄域=不建模。 */
+  private dropFromExtractinator(drop: ExtractDrop): void {
     if (drop.itemType <= 0) return;
     const key = VANILLA_ITEM_KEY_BY_ID[drop.itemType];
     if (key && ITEM_BY_KEY[key] !== undefined) {
-      this.spawnDrop(tx * TILE + 24, (ty - 1) * TILE, key, drop.stack);
+      const c = this.smartCursor.wanted
+        ? { x: this.player.cx, y: this.player.cy }
+        : (([wx, wy]) => ({ x: wx, y: wy }))(this.camera.screenToWorld(this.input.mouseX, this.input.mouseY));
+      this.spawnDrop(c.x, c.y, key, drop.stack);
     }
   }
 
@@ -28745,10 +28775,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return st.inBounds(ptx, pty) && st.wall[st.idx(ptx, pty)] !== 0;
       })(),
       onAmbience: (v) => this.applyWeatherLoops(v, atmo),
-      // 金币雨玩家锚定（WorldGen.cs:71825 FindClosest 单机等价）
-      playerForCoinRain: { x: this.player.cx, active: true, dead: this.player.dead },
+      // 金币雨玩家锚定（WorldGen.cs:71825 FindClosest 单机等价）——★BJ338 件1.4
+      //（2026-09-24）：原版 (int)player.Center.X 截断进掷（:72369）→ 本仓 trunc 同相
+      playerForCoinRain: { x: Math.trunc(this.player.cx), active: true, dead: this.player.dead },
       onCoinRain: (x, y, type, stack) => {
-        // 非实心 32×32 门（WorldGen.cs:71847）
+        // 非实心 32×32 门（WorldGen.cs:71847 SolidCollision(x,y,32,32)——格对齐 32px 盒
+        // 恰跨 2×2 格,瓦重叠精判与 2×2 全格判等价）
         const st = w.store;
         const tx0 = Math.floor(x / 16), ty0 = Math.floor(y / 16);
         let solid = false;
@@ -28759,7 +28791,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // type 即原版钱币 item id 71/72/73(铜/银/金,Weather.cs 对齐 cs:71836)——
         // 曾整体 +1 错位(铜雨掉银/银雨掉金/金雨掉铂,每次降雨 ×100 通胀)
         const key = VI(type);
-        this.spawnDrop(x, y, key, stack);
+        // ★BJ338 件1.4：Item.NewItem(num18,num19,16,16) 矩形载 → 世界盒中心
+        // (num18+8,num19+8)（Item.cs:49657 X+Width/2）——曾按左上锚=偏 (−8,−8)px
+        this.spawnDrop(x + 8, y + 8, key, stack);
       },
       onThunder: (distPx) => {
         // 原版 SoundID 43：thunderDistance×15px 处发声——按距离衰减近似
@@ -36389,9 +36423,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★BJ334(2026-09-24)：名喂 netID 而非基底——原版 GivenOrTypeName → TypeName
       //  = Lang.GetNPCNameValue(npc.netID)（NPC.cs:6751/:6767,Main.cs:43820-43831）。
       //  绿史莱姆 vanillaNetId=-3（基底 vanillaId=1）曾喂基底 → 悬停显示「蓝史莱姆」。
-      //  0=无变体哨兵（Game.ts:41983 惯用法,禁 ??）；命中/排除集仍按基底 vid
-      //  （原版 HoverOverNPCs 排除面按 nPC.type,Main.cs:43740-43748）。
-      this.setHoverNpcName(e.vanillaNetId !== 0 ? e.vanillaNetId : vid, '', e.hp, e.maxHp);
+      //  0=无变体哨兵（`||` 兼容哨兵与未初始化 undefined——实例域 0 缺省同相）；
+      //  命中/排除集仍按基底 vid（原版 HoverOverNPCs 排除面按 nPC.type,Main.cs:43740-43748）。
+      this.setHoverNpcName(e.vanillaNetId || vid, '', e.hp, e.maxHp);
       return;
     }
     for (const n of this.entities.npcs) {
@@ -36416,8 +36450,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const c = ent as Enemy;
       if (!(c instanceof Enemy) || c.dead || c.vanillaId == null) continue;
       if (!hit(c.vanillaId, c.x, c.y, c.w, c.h)) continue;
-      // ★BJ334：同敌怪桶喂 netID（小动物无负变体,哨兵 0 回退 vanillaId 等价）
-      this.setHoverNpcName(c.vanillaNetId !== 0 ? c.vanillaNetId : c.vanillaId, '', c.hp, c.maxHp);
+      // ★BJ334：同敌怪桶喂 netID（小动物无负变体,哨兵 0/未初始化回退 vanillaId 等价）
+      this.setHoverNpcName(c.vanillaNetId || c.vanillaId, '', c.hp, c.maxHp);
       return;
     }
   }
@@ -37461,7 +37495,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         downedMoonlord: !!f['downed_398'],
       });
       const key = VANILLA_ITEM_KEY_BY_ID[reward.id];
-      if (key) this.spawnDrop(this.player.cx, this.player.cy, key, reward.stack);
+      // ★BJ338 件1.1（2026-09-24）：原版两段语义 1:1——QuickSpawnItem(GiftRecieved
+      //  :57401;1456 :55789) → GetOrDropItem（:7197-7203）= 先 GetItem 全力入包
+      //  （GetItem :39640-39705：币格/弹药/并堆/空格/降序臂），余量才 RequestNewItem
+      //  (base.Center :7202) 溢出为玩家中心世界掉落（picked=0 不飘字,拾取时才飘）。
+      //  曾直接 spawnDrop 世界掉落=近似（BJ326 登记债）。inv.add=GetItem 移植
+      //  （Inventory.ts:465 注），溢出语义与钓鱼捕获 BJ36 同构。
+      const id = key ? ITEM_BY_KEY[key] : undefined;
+      if (id !== undefined) {
+        const left = this.player.inv.add(id, reward.stack);
+        if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, key!, left);
+        if (left < reward.stack) this.showPickupLabel(key!, reward.stack - left);
+      } else if (key) {
+        this.spawnDrop(this.player.cx, this.player.cy, key, reward.stack);  // 未注册键回退（旧行为同相）
+      }
       this.cb.onInventoryChanged?.();
     }
     const chat = Lang.specialText(gotDye ? 'DyeTraderSpecialText.HasPlant' : 'DyeTraderSpecialText.NoPlant') ?? '';
@@ -37517,7 +37564,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   flag 置位后即播,先于 anglerQuestsFinished++/GetAnglerReward）
         this.sfx.play('chat');
         p.anglerQuestsFinished++;           // :39671
-        this.grantAnglerRewards(npc, questId);   // GetAnglerReward :39672
+        this.grantAnglerRewards(questId);        // GetAnglerReward :39672
       }
     }
     // 台词（Lang.AnglerQuestChat Lang.cs:430-443）：成功 → TurnIn 池；今日已交/未带鱼 →
@@ -37550,10 +37597,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.cb.onInventoryChanged?.();
   }
 
-  /** Player.GetAnglerReward（Player.cs:55351-55361）四段奖励落物：主奖励/装饰/金币/鱼饵
-   *  全部经 rollAnglerRewards 纯函数结算（数值逐条行号见 data/vanillaFishing.ts），
-   *  在渔夫脚旁生成（QuickSpawnItem → 本仓 spawnDrop） */
-  private grantAnglerRewards(npc: TownNPC, questItemType: number): void {
+  /** Player.GetAnglerReward（1457 :56963-56973;1456 :55351-55361）四段奖励落物：
+   *  主奖励/装饰/金币/鱼饵全部经 rollAnglerRewards 纯函数结算（数值逐条行号见
+   *  data/vanillaFishing.ts）。★BJ338 件1.1（2026-09-24）：每段 QuickSpawnItem
+   *  (GiftRecieved——Main :57110/Decoration :57162/Money :57252/Bait :57207;1456 同构)
+   *  → GetOrDropItem（:7197-7203）= 先入包（GetItem :39640-39705,钱币 72/73 走币格
+   *  50-53+DoCoins 臂）满则溢出玩家中心世界掉落（RequestNewItem base.Center :7202）。
+   *  曾在渔夫脚旁（npc.cx, npc.cy-8）直接世界掉落=BJ326 登记债（原版渔夫只递奖不落物）。
+   *  溢出 picked=0 不飘字=原版同相（钓鱼捕获 BJ36 同构）；原版逐段独立 GetItem →
+   *  本仓逐 grant 独立 inv.add（顺序=Main→Decoration→Money→Bait 保持）。 */
+  private grantAnglerRewards(questItemType: number): void {
     const p = this.player;
     // DropAnglerAccByMissing 的持有集（Player.cs:55647-55685：inventory+armor+bank×4+loadouts）
     const owned = new Set<number>();
@@ -37574,7 +37627,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       ownedTypes: owned,
     })) {
       const key = VI(g.id);
-      if (key) this.spawnDrop(npc.cx, npc.cy - 8, key, g.stack);
+      if (!key) continue;
+      const id = ITEM_BY_KEY[key];
+      if (id === undefined) { this.spawnDrop(p.cx, p.cy, key, g.stack); continue; }  // 未注册键回退
+      const left = p.inv.add(id, g.stack);
+      if (left > 0) this.spawnDrop(p.cx, p.cy, key, left);
+      if (left < g.stack) this.showPickupLabel(key, g.stack - left);
     }
   }
 

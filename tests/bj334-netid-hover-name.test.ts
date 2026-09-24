@@ -226,12 +226,13 @@ describe('BJ334 ③ 数据面：vanilla-banners.json 负 netID 键（提取器�
 
 describe('BJ334 ④ scanBannerReps 规范代表（负键入库后最小 id 近似翻错面）', () => {
   function stubStore(frameX: number[]): unknown {
+    const t = TILE_BY_KEY['v_91_banners'];
     return {
       hasTile: () => true,
       idx: (x: number) => x,
-      type: [TILE_BY_KEY['v_91_banners']],
+      type: frameX.map(() => t),
       frameX,
-      frameY: [0],
+      frameY: frameX.map(() => 0),
     };
   }
 

@@ -397,7 +397,8 @@ export class WeatherState {
     };
   }
 
-  /** 金币雨掉落（WorldGen.cs:71811-71858） */
+  /** 金币雨掉落（1457 WorldGen.cs:72341-72391;1456 :71811-71858——掷程/玩家锚截断/
+   *  钳制逐字,掉落锚 +8/+8 与 (int)Center.X 见 Game.ts onCoinRain BJ338 件1.4） */
   private updateCoinRain(ctx: WeatherCtx) {
     if (this.coinRain <= 0) return;
     if (!this.raining || this.shouldUseStormMusic) { this.coinRain = 0; return; }

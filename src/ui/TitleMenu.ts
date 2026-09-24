@@ -203,6 +203,11 @@ export class TitleMenu {
   private celestial!: HTMLDivElement;
   private rafId = 0;
   private unsubLang: (() => void) | null = null;
+  /** ★BJ335：logo 连点诊断 window 捕获监听句柄——destroy 对称摘除。
+   *  曾只靠 onTap 内「菜单游离后首次 pointerdown 自解绑」兜底：探针/无点击路径
+   *  永不解绑 ⇒ 每次重建菜单泄漏整个 TitleMenu 家族（实例+flow 回调环+游离
+   *  标题按钮树 ~28 节点/轮,快照实测 ×5 实例滞留）。 */
+  private onLogoTap: ((e: PointerEvent) => void) | null = null;
   /** alreadyGrabbingSunOrMoon（Main.cs:62428/:62451-62454 抓取闩） */
   private grabbing = false;
   /** sunModY/moonModY（:1244/:1246，绘制与命中盒的垂直抓取偏移——拖动中 = mouseY-基准，
@@ -353,6 +358,7 @@ export class TitleMenu {
         }
       };
       window.addEventListener('pointerdown', onTap, true);
+      this.onLogoTap = onTap;   // ★BJ335：登记句柄,destroy 对称摘除
     }
     // 调试句柄(探针/远程 Console 用;与 __swAssetCache 同族先例)
     (window as unknown as { __swAssetDiag?: () => void }).__swAssetDiag = openAssetDiagPanel;
@@ -544,6 +550,9 @@ export class TitleMenu {
 
   destroy() {
     cancelAnimationFrame(this.rafId);
+    // ★BJ335：window 捕获 pointerdown(logo 连点诊断)对称摘除——原依赖
+    //  「游离后首次 pointerdown 自解绑」,无点击路径(探针/挂机看菜单)整族滞留
+    if (this.onLogoTap) { window.removeEventListener('pointerdown', this.onLogoTap, true); this.onLogoTap = null; }
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
     window.removeEventListener('sw-ach-toggle', this.onAchToggle);

@@ -144,11 +144,17 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
       ox = rng.int(500, w - 501); // Next(500, w-500)
       oy = rng.int(0, h - 1);     // Next(0, maxTilesY)
       let fJungle = Math.abs(ox - gs.jungleX) < Math.trunc(600 * scale);
-      const fCenter = Math.abs(ox - w / 2) < 300;
+      let fCenter = Math.abs(ox - w / 2) < 300;
       let fSnow = ox > gs.snowOriginLeft - 300 && ox < gs.snowOriginRight + 300;
       tries++;
       if (tries >= w) fJungle = false;
       if (tries >= 2 * w) fSnow = false;
+      // ★BJ328（2026-09-24）：中央带补 4w 次放松——原版无此支，但 w<1800 的非 UI
+      //   尺寸（探针 1200×850）ox∈[500,w-501] 全域落在中心 ±300 带内=拒绝采样
+      //   永不终止（BJ318 两发复现：世界生成挂死在 pass1[沙丘] 40s+ 无进展）。
+      //   支持档（≥4200）p(单次拒)≤~0.75，P(连拒 4w 次)=0.75^16800≈0——放松臂
+      //   对支持尺寸数学不可达，掷流零扰动；退化尺寸从挂死转为可完成生成。
+      if (tries >= 4 * w) fCenter = false;
       if (!(fJungle || fCenter || fSnow)) break;
     }
     placeDunes(st, rng, ox, oy);

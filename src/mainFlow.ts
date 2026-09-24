@@ -3,6 +3,7 @@
 import { maybeInstallGpuLoggerFromUrl } from './render/GLStats';
 import { Game, grantStarterKit } from './core/Game';
 import { WorldGenAbortedError } from './world/gen/WorldGen';   // ★IIIII229 ① Esc 中止判别
+import { peekSaveDims, worldGenTimeoutMs } from './workers/WorldGenClient';   // ★BJ336 件1 读档超时扩面
 import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
 import { resolveTouchMode } from './core/input/touchMode';
@@ -749,8 +750,18 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           // ★与创建世界同款 VUI 加载页(原版风 UIWorldLoadState;用户报"读档 UI 还是旧的")
           const loadState = new UIWorldLoadState();
           VUI.setState(loadState);
+          // ★BJ336 件1：读档硬超时按世界面积扩面（同 BJ331 worldGenTimeoutMs 同式）。
+          //  key 路径客户端无档内容可窥（档体由 worker 内直读 IDB）——尺寸取世界槽位
+          //  meta（sandboxworld.world.<id> 键可反解 id;quicksave/异形键无 meta → undefined
+          //  回退 worker 客户端 180s 缺省）。meta.w/h 与档内容同源（register 时写定）。
+          await worldStore.ensureLoaded();
+          const keyMeta = /^sandboxworld\.world\.(\d+)$/.exec(key ?? '');
+          const meta = keyMeta
+            ? worldStore.list().find((m) => m.id === Number(keyMeta[1]))
+            : undefined;
           const { world, player, save } = await client.loadSave({ key }, {
             onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
+            ...(meta ? { timeoutMs: worldGenTimeoutMs(meta.w, meta.h) } : {}),
           });
           const g = makeGame();
           await ensureCharAppearanceFiles();   // 角色贴图就绪再进世界（2026-08-28）
@@ -803,8 +814,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           const loadState = new UIWorldLoadState();
           VUI.setState(loadState);
           __m('load.roundtrip.begin');
+          // ★BJ336 件1：json 路径客户端持有档全文——头部有界窥取 meta.w/h（saveGame
+          //  装配序固定 name,seed,w,h；字符串内引号必转义⇒首个命中即真头），按面积
+          //  扩面硬超时（同 worldGenTimeoutMs 同式）；窥取失败回退 180s 缺省。
+          const dims = peekSaveDims(text);
           const { world, player, save } = await client.loadSave({ json: text }, {
             onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
+            ...(dims ? { timeoutMs: worldGenTimeoutMs(dims.w, dims.h) } : {}),
           });
           __m('load.roundtrip.end');
           const g = makeGame();
@@ -830,6 +846,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           // worker 失败 → 主线程 fallback
         }
       }
+      // ★BJ336 件1：主线程同步读档回退无看门狗（同线程冻结期任何计时器不可达）——
+      //  最小安全网=进点提示（parse/RLE/沉降逐列让帧进度照走,Esc 链不覆盖读档）。
+      console.warn('[load] worker 不可用 → 主线程同步读档回退（JSON 解析+RLE+沉降全程主线程,大世界可能数十秒卡顿）');
       const { world, player, data } = loadSave(text);
       applyDifficultyFallback(world, data);
       const g = makeGame();

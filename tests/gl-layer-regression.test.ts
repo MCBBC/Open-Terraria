@@ -28,7 +28,10 @@ describe('GLSpriteLayer 回归守卫(源码级锁定)', () => {
 
   it('预乘上传(mip 平均预乘像素能量正确;直 Alpha 边缘发暗)', () => {
     expect(SRC.match(/UNPACK_PREMULTIPLY_ALPHA_WEBGL, true/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-    expect(SRC).not.toContain('UNPACK_PREMULTIPLY_ALPHA_WEBGL, false');
+    // ★B2 唯一豁免点:texFromData 尘对合并面——字节【已是预乘】(dustPremulBake.gl),
+    //  再开预乘标志=二次预乘 rgb×a 错一档;豁免必须带锚注释防扩散
+    expect(SRC.match(/UNPACK_PREMULTIPLY_ALPHA_WEBGL, false/g)?.length ?? 0).toBe(1);
+    expect(SRC).toMatch(/禁 UNPACK_PREMULTIPLY[\s\S]{0,500}texFromData\(/);
   });
 
   it('纹理缓存按字节预算(曾按条数 96:多 MB 纹理×96=GB 级打爆 GPU)', () => {

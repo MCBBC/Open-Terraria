@@ -166,13 +166,39 @@ export class ChunkCache {
   // GLSpriteLayer.texSubUpdate)。页生命周期:trimFreePages 尾裁同页清理;
   // dispose 全清;世界切换走 Renderer.dropSwPipe→dropWorldPipe 整弃（纹理
   // 随 GLSpriteLayer.texs 表蒸发,本表同步清）。
-  readonly glDirtyPages = new Map<number, Set<number>>();
+  // ★★按层分账（bgl-tile-starve 定谳 2026-09-24）:一次 bakeChunkInto 同时
+  //  写墙/tile 两张页画布(同 cell)——脏账必须【双层同记】;消费方(墙段/tile 段
+  //  各自的 worldPageTex)只许消费并清除【本层】账。曾用单账 Map<页号,…> 共享:
+  //  墙段先跑先删 → tile 段永远读到空账 = tpg 纹理永缺「页驻留后增量烘焙」格
+  //  （实测定谳:全会话 sub wpg:*=47 条而 sub tpg:*=0 条;44/123 槽画布 α>0 纹理
+  //  α=0）= 用户实报 ?bgl=1 物块整片透明洞(墙/背景正常)根因。
+  //  【页纹理生命周期不变式】
+  //  I1 记账完备:bakeChunkInto(cell≥0) 恰好一次双记 W+T;消费即清账(不清=每帧
+  //     重传,清他层=对层饥饿),两不变式互为存在前提。
+  //  I2 全量合法:state① 全量上传「上传时刻」的整张画布并清【本层】账——账中
+  //     既有 slot 必已在画布上;此后该页任何格再烘焙必走 state② 增量补传。
+  //  I3 三态推进:①新页(idx≥层内计数) drop+全量;②驻留 只 texSubUpdate 本层账
+  //     中 slot;③尾裁 计数回落+尾键 drop+双层账同清(idx 复用防陈旧增量)。
+  //  I4 纹理蒸发自愈:GL 层 dispose/键驱逐后 state① 的 texFromImage 键未命中
+  //     会以画布现态全量重建——账只是增量化优化,画布才是唯一真值。
+  readonly glDirtyPagesW = new Map<number, Set<number>>();
+  readonly glDirtyPagesT = new Map<number, Set<number>>();
   private glMarkPageDirty(cell: number): void {
     const pg = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
     const slot = cell % ChunkCache.CELLS_PER_PAGE;
-    let s = this.glDirtyPages.get(pg);
-    if (!s) { s = new Set(); this.glDirtyPages.set(pg, s); }
-    s.add(slot);
+    for (const m of [this.glDirtyPagesW, this.glDirtyPagesT]) {
+      let s = m.get(pg);
+      if (!s) { s = new Set(); m.set(pg, s); }
+      s.add(slot);
+    }
+  }
+  /** ★B1 消费方访问器(层分账):取指定层指定页的脏 slot 集(undefined=无脏) */
+  glDirtySlots(layer: 'wall' | 'tile', idx: number): Set<number> | undefined {
+    return (layer === 'wall' ? this.glDirtyPagesW : this.glDirtyPagesT).get(idx);
+  }
+  /** ★B1 消费方访问器(层分账):清指定层指定页的脏账(消费即清;只许清本层) */
+  glDirtyClear(layer: 'wall' | 'tile', idx: number): void {
+    (layer === 'wall' ? this.glDirtyPagesW : this.glDirtyPagesT).delete(idx);
   }
   /** ★B1 页画布访问器（GL 页纹理上传源;只读面）。越界/不存在返 null */
   pageCanvas(layer: 'wall' | 'tile', idx: number): HTMLCanvasElement | null {
@@ -195,7 +221,8 @@ export class ChunkCache {
   trimFreePages(): void {
     while (this.wallPages.length && this.pageUsed[this.wallPages.length - 1] === 0) {
       const idx = this.wallPages.length - 1;
-      this.glDirtyPages.delete(idx);   // ★B1:页销毁同页清脏标（idx 复用防陈旧增量）
+      this.glDirtyPagesW.delete(idx);   // ★B1:页销毁双层同清脏标（idx 复用防陈旧增量）
+      this.glDirtyPagesT.delete(idx);
       const wp = this.wallPages.pop()!, tp = this.tilePages.pop()!;
       this.pageUsed.pop();
       wp.width = 0; wp.height = 0;
@@ -238,7 +265,8 @@ export class ChunkCache {
     this.pageUsed.length = 0;
     this.cellFree.length = 0;
     this.stickyCell.clear();
-    this.glDirtyPages.clear();   // ★B1:页纹理账随世界整弃
+    this.glDirtyPagesW.clear();   // ★B1:页纹理账随世界整弃（双层）
+    this.glDirtyPagesT.clear();
     this.chunks.clear();
     this.dirtyQueue.length = 0;
     this.dirtySet.clear();

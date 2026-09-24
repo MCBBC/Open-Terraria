@@ -28,12 +28,13 @@ const ENV_IDS: Array<{ id: number; crystal: number; black: boolean }> = [
   { id: 517, crystal: 6, black: false },
 ];
 const DEATH_ID: Record<number, number> = { 517: 127, 422: 229, 507: 242, 493: 135 };
-// 原版 NewDust 烟雾族初速表（Dust.cs:216-222）成员态：135/6/242 ∈ 表（vy 重掷
-// [−1,0.5]、vx×0.3）；229 ∉ 表（表内是 228）→ 抖 vy/vx 保持原始 ±2 域。127 在
-// 本仓引擎折叠进烟雾表（vy 重掷）而原版 127/187 是独立支 velocity×0.3（无重掷、
-// vy 域 [−0.6,0.6]）——本仓引擎层偏差，登记债（影响仅速度公式输入 ±0.4 域宽），
-// 本测试按【本仓引擎】实际值断言。
-const JITTER_VY = (t: number): number => (t === 229 ? -2 : -1);
+// 原版 NewDust spawn 侧特例终值（Dust.cs:221-230）成员态：
+//  · 135/6/242 ∈ 烟雾族句（:221-226）→ vy 重掷 seed=0 恒 (0×16|0−10)×0.1=−1、vx×0.3；
+//  · 229 ∉ 任何 spawn 特例（表内是 228）→ 基础抖 seed=0 恒 −2/−2；
+//  · 127/187 独立支（:227-230）→ velocity 矢量×0.3（无重掷）=基础抖 −2×0.3=−0.6。
+//    ★BJ338 件2（2026-09-24）：曾折叠进烟雾表（vy 重掷 [−1,0.5]）=BJ327 登记债
+//    （bj107 备案「本仓引擎层偏差」），现按原版分立支转正——JITTER_VY(127)=−0.6。
+const JITTER_VY = (t: number): number => (t === 229 ? -2 : t === 127 ? -0.6 : -1);
 const JITTER_VX = (t: number): number => (t === 229 ? -2 : -0.6);
 
 function makeWorld(): World {

@@ -246,6 +246,8 @@ export class LiquidSim {
   private wetCounter = 0;
   /** 读档沉降：quickSettle=true 时 cycles=1 全量处理、下灌快速补满（WorldFile.cs:365-389 / Main.cs:12251） */
   quickSettle = false;
+  /** ★BJ336 沉降环终止性守卫触发计数（生产恒 0；测试零触发对照判据，首触发点名校） */
+  settleGuardTrips = 0;
   private quickFall = false;
   private stuck = false;
   private stuckCount = 0;
@@ -1858,6 +1860,18 @@ export class LiquidSim {
     }
   }
 
+  /** ★BJ336 沉降环守卫触发：首触发 console.error 点名（防病理循环刷屏），计数供
+   *  测试断言零触发对照。触发后由调用点按原版同拍截断语义就地收场（写回当前落点）。 */
+  private tripSettleGuard(loop: 'outer' | 'inner', ox: number, oy: number): void {
+    this.settleGuardTrips++;
+    if (this.settleGuardTrips === 1) {
+      console.error(
+        `[LiquidSim] ⚠️ settleWaterAt ${loop === 'outer' ? '沉降外环' : '蛇形内环'}迭代越界上限（origin=(${ox},${oy})）` +
+        `——终止性不变量（外层 Y 单调递增≤h / 内层蛇形扩张≤2w）被破坏,按原版同拍截断语义就地落点;请排查 LiquidSim 近期改动`,
+      );
+    }
+  }
+
   /** 单格液体直接搬到最终落点（Liquid.cs:105-212 逐行对照） */
   private settleWaterAt(originX: number, originY: number) {
     const st = this.world.store;
@@ -1879,7 +1893,21 @@ export class LiquidSim {
     st.liquid[oi] = 0;
     let flag1 = true;
     let fellAny = false; // ★IIIII70b 取证钩伴生：全程是否发生过下落（观测用）
+    // ★BJ336（2026-09-24）沉降环终止性守卫：两环各设迭代硬上限（=终止性分析自然界
+    //  的 2 倍余量），正常几何数学不可达——外层每拍 Y 单调递增（fall while 与 dropped
+    //  后的 Y++ 两臂只增不减，且 dropped 蕴含 Y<h-5）⇒ 外层迭代 ≤h-3（帽 2h+16）；
+    //  内层蛇形每左右腿扩 1（probeX<5 / >w-5 边界必命中）⇒ ≤2w+O(1)（帽 4w+64）。
+    //  越界即不变量被后续改动破坏（BJ328 曾据"1200×850 地狱面 quickWater 不返回"立案
+    //  settleWaterAt 非终止——本刀六籽实测该环 maxCallO≤104、全相 0.3s 内完成，真实
+    //  挂点实为 CorruptionPass 拒绝环；守卫按原版同拍截断语义兜底：液体写回当前
+    //  (X,Y)，与正常 break 同路径，液体金标零扰动、大世界正常路径零触发）。
+    const settleOuterCap = 2 * st.h + 16;
+    let settleOuterIters = 0;
     for (;;) {
+      if (++settleOuterIters > settleOuterCap) {
+        this.tripSettleGuard('outer', originX, originY);
+        break;
+      }
       LiquidSim.settleEv?.('O', `${X}|${Y}|${liquid}|${type}`);
       // 1) 垂直下落：下方空且可通行就一直落（Liquid.cs:121-130）
       let flag2 = false;
@@ -1912,7 +1940,14 @@ export class LiquidSim {
       let hitL = false;      // flag4：左边界
       let hitR = false;      // flag3：右边界
       let dropped = false;   // flag5：本轮发生下落
+      const settleInnerCap = 4 * st.w + 64;
+      let settleInnerIters = 0;
       for (;;) {
+        if (++settleInnerIters > settleInnerCap) {
+          this.tripSettleGuard('inner', originX, originY);
+          hitL = true; hitR = true;   // 置双边界命中=与自然 break 完全同语义收场
+          break;
+        }
         const probeX = X + step * dir;
         // 越界防护：原版 C# 越界会抛异常，JS 的 idx 会静默回绕到上一行——
         // 超出 [0, w-1] 的探测一律视为边界命中，不再读取

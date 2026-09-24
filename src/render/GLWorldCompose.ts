@@ -30,6 +30,28 @@ import { GLWaterDistortion } from './GLWaterDistortion';
  *  present(flipY=1) 画布顶采 v1=图像顶 → 三级闭合,屏上正立。 */
 const LIT_VERT = GLWorldLight.VERT.replace('1.0 - aPos.y * 2.0', 'aPos.y * 2.0 - 1.0');
 
+/** ★B2b worldTex 源换指（2026-09-24）：uWorld 采样 Y 翻转单点派生 FRAG。
+ *  B2b 累积态下 uWorld=FBO('world') 纹理——GLSpriteLayer quad VERT 自带
+ *  `1.0-screen.y·2/canvas.y` 翻转 → FBO 内 stored GL 朝向（图像顶=v1）,与
+ *  画布上传布局（v0=图像顶）上下颠倒;canvas 路径须恒等。派生式=采样坐标
+ *  mix(vUv.y, 1−vUv.y, uWorldFlip)（uWorldFlip=0 恒等:mix(x,y,0)=x*1+y*0
+ *  =x 逐位精确——canvas 路径与原 FRAG 逐位同,由对拍锁）。只翻 uWorld 采样,
+ *  uLight（lightCanvas 上传/recon FBO,两者皆 v0=图像顶）不动。 */
+const LIT_FRAG = GLWorldLight.FRAG
+  .replace('uniform float uDarkSkip;',
+    'uniform float uDarkSkip;\nuniform float uWorldFlip;')
+  .replace('vec4 w = texture2D(uWorld, vUv);',
+    'vec4 w = texture2D(uWorld, vec2(vUv.x, mix(vUv.y, 1.0 - vUv.y, uWorldFlip)));');
+
+/** ★B2b 世界纹理句柄（FBO('world') 累积纹理直采——A 线句柄面冻结,B 线换指）。
+ *  flipY=1=FBO GL 朝向（图像顶在 v1,采样须 Y 翻转）;canvas 直传路径不走此型。 */
+export interface WorldTexSrc {
+  tex: WebGLTexture;
+  w: number;
+  h: number;
+  flipY: number;
+}
+
 /** ★A3 光照小图 GPU 重建 pass0（2026-09-23）。等价性论证（对 CPU 循环
  *  Renderer.compositeLight BJ77 快路径逐式）：
  *  ① SS=2 → gx=px·0.5−0.5 精确（2 的幂运算 fp32 无误差）→ fx∈{0,0.5} →
@@ -140,7 +162,7 @@ export class GLWorldCompose {
     this.unavailable = this.pipeline.unavailable;
     const gl = this.pipeline.glx;
     if (!gl) return;
-    this.pLit = this.pipeline.program('worldLight', LIT_VERT, GLWorldLight.FRAG);
+    this.pLit = this.pipeline.program('worldLight', LIT_VERT, LIT_FRAG);
     this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
     this.pRecon = this.pipeline.program('lrecon', LRECON_VERT, LRECON_FRAG);
     if (!this.pLit?.prog || !this.pDistort?.prog) { this.unavailable = true; return; }
@@ -172,10 +194,12 @@ export class GLWorldCompose {
   }
 
   /** 整链合成。入参语义=旧 GLWorldLight.composite+GLWaterDistortion.composite 拼合。
-   *  成功返回 true——调用方随后 ctx.drawImage(compose.pipeline.canvas, 0, 0, viewW, viewH)
-   *  单次回贴（替代旧 warped ?? gl.canvas 两次判空回贴链）。 */
+   *  ★B2b（2026-09-24）：world 入参双型——HTMLCanvasElement（旧上传链,逃生门/降级
+   *  路径）或 WorldTexSrc 句柄（FBO('world') 累积纹理直采,worldCanvas 上传链退役:
+   *  texSubImage2D 全幅上传归零,采样换 uWorldFlip=1）。成功返回 true——调用方随后
+   *  ctx.drawImage(compose.pipeline.canvas, 0, 0, viewW, viewH) 单次回贴。 */
   compose(
-    world: HTMLCanvasElement, light: HTMLCanvasElement,
+    world: HTMLCanvasElement | WorldTexSrc, light: HTMLCanvasElement,
     lightRect: readonly [number, number, number, number], darkSkip = 0,
     lightBand?: { canvas: HTMLCanvasElement; y: number; w: number; h: number } | null,
     water: HTMLCanvasElement | null = null, noise: TexImageSource | null = null,
@@ -187,7 +211,8 @@ export class GLWorldCompose {
     const pipeline = this.pipeline;
     const gl = pipeline.glx;
     if (!gl || !this.pLit?.prog || !this.pDistort?.prog || this.unavailable) { this.lastFail = 'unavailable'; return false; }
-    const w = world.width, h = world.height;
+    const w = (world as WorldTexSrc).tex ? (world as WorldTexSrc).w : (world as HTMLCanvasElement).width;
+    const h = (world as WorldTexSrc).tex ? (world as WorldTexSrc).h : (world as HTMLCanvasElement).height;
     if (w === 0 || h === 0) { this.lastFail = 'dim'; return false; }
     pipeline.beginFrame(w, h);
     let lightTex: WebGLTexture | null = this.texLight;
@@ -228,18 +253,29 @@ export class GLWorldCompose {
     gl.viewport(0, 0, w, h);
     gl.useProgram(this.pLit.prog);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.texWorld);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);   // canvas 源预乘直拷（原 :186 同式）
-    const kW = `${w}x${h}`;
-    if (this._texKeyWorld !== kW) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);
-      glStatTexCreate(this.pipeline.statName, w * h * 4);
-      this._texKeyWorld = kW;
+    const worldTex = (world as WorldTexSrc).tex;
+    if (worldTex) {
+      // ★B2b 句柄路径：FBO('world') 累积纹理直采——零上传（texSubImage2D 全幅
+      //   上传退役）,采样朝向经 uWorldFlip=1 翻转（LIT_FRAG 派生式,见该注）。
+      //   预乘语义:FBO 内容=quad (ONE,1−SA) 混合产物=预乘域,与 canvas 预乘
+      //   上传同域（A 线零改动验证=光照链像素逐字节,对拍锁）。
+      gl.bindTexture(gl.TEXTURE_2D, worldTex);
+      gl.uniform1f(this.pipeline.uni(this.pLit, 'uWorldFlip'), (world as WorldTexSrc).flipY);
     } else {
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, world);
+      gl.bindTexture(gl.TEXTURE_2D, this.texWorld);
+      gl.uniform1f(this.pipeline.uni(this.pLit, 'uWorldFlip'), 0);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);   // canvas 源预乘直拷（原 :186 同式）
+      const kW = `${w}x${h}`;
+      if (this._texKeyWorld !== kW) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world as HTMLCanvasElement);
+        glStatTexCreate(this.pipeline.statName, w * h * 4);
+        this._texKeyWorld = kW;
+      } else {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, world as HTMLCanvasElement);
+      }
+      glStatUpload(this.pipeline.statName, w * h * 4);
     }
-    glStatUpload(this.pipeline.statName, w * h * 4);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, lightTex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
@@ -441,7 +477,7 @@ export class GLWorldCompose {
     this.unavailable = this.pipeline.unavailable;
     if (ok) {
       // ★程序登记重跑（pipeline.recreate 清空程序表——句柄重注册,否则悬空）
-      this.pLit = this.pipeline.program('worldLight', LIT_VERT, GLWorldLight.FRAG);
+      this.pLit = this.pipeline.program('worldLight', LIT_VERT, LIT_FRAG);
       this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
       this.pRecon = this.pipeline.program('lrecon', LRECON_VERT, LRECON_FRAG);
       this.lreconDead = !this.pRecon?.prog;

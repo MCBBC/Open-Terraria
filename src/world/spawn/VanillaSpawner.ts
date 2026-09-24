@@ -212,9 +212,14 @@ export function rollCavernMonsterType(rng: RNG): void {
 import vanillaNetIdJson from '../../data/vanilla-npcnetid.json';
 const NET_ID_OVERRIDE: Record<string, { scale?: number; color?: number[]; alpha?: number }> = vanillaNetIdJson;
 
-const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number }> = {
-  '-1': { base: 16, scale: 0.6, hp: 90, dmg: 45, def: 10 },   // 母史莱姆
-  '-2': { base: 16, scale: 0.9, hp: 90, dmg: 45, def: 20 },
+export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number }> = {
+  // ★BJ337(2026-09-24)：-1/-2 base 16（母史莱姆）系旧表误值——原版 FromNetId(-1/-2)
+  //  → NetIdMap[0]/[1]=81 腐化史莱姆（NPCID.cs:10450/:12478-12484；SetDefaultsFromNetId
+  //  case -1/-2 :7687-7702 只做 SetDefaults_ForNetId(81, scale)+硬置 life/damage/defense）。
+  //  真刷出点在 Enemy.ts BJ263 死亡分裂链（base 81 已硬编码正确）——刷生侧无 D(-1/-2)
+  //  掷点=纯潜伏数据,但值以原版为准。hp/dmg/def=case 硬置值（1:1）。
+  '-1': { base: 81, scale: 0.6, hp: 90, dmg: 45, def: 10 },   // Slimeling 小腐化史莱姆
+  '-2': { base: 81, scale: 0.9, hp: 90, dmg: 45, def: 20 },   // Slimer2 大腐化史莱姆
   '-3': { base: 1, scale: 0.9, hp: 14, dmg: 6, def: 0 },   // 绿史莱姆
   '-4': { base: 1, scale: 0.6, hp: 150, dmg: 5, def: 5 },
   '-5': { base: 1, scale: 0.9, hp: 30, dmg: 13, def: 4 },  // 黑史莱姆
@@ -227,6 +232,14 @@ const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg
   '-12': { base: 6, scale: 1.15 },   // 大噬魂怪
   // 黄蜂族大小变体（FromNetId NetIdMap[55..64]：两两一族 231-235；scale 取 netid 表）
   '-16': { base: 42, scale: 0.85 }, '-17': { base: 42, scale: 1.2 },    // Little/Big Stinger
+  // ★BJ337(2026-09-24)：-18..-21 苔藓黄蜂大小变体整缺（NetIdMap[17..20]=176 基底,
+  //  原版 SetDefaultsFromNetId case -18..-21 NPC.cs:7867-7900 scale 0.8/0.9/1.1/1.2）。
+  //  缺行=spawnNPC 走 map?.base??netId → fromVanilla(-18..-21)=null（vanilla-npcs.json
+  //  无负键）→ 静默丢刷。活性面：蜂巢块 225 与深层丛林草 60 两刷点 hard 1/10 四支
+  //  D(-21..-18) 曾全空掷（原版 NPC.cs:3835-3860/:3893-3918 同构支）。stat×scale
+  //  家族债同 -15（spawn-parity-gaps.md）。
+  '-18': { base: 176, scale: 0.8 }, '-19': { base: 176, scale: 0.9 },   // Tiny/Little Moss Hornet
+  '-20': { base: 176, scale: 1.1 }, '-21': { base: 176, scale: 1.2 },   // Big/Giant Moss Hornet
   '-56': { base: 231, scale: 0.85 }, '-57': { base: 231, scale: 1.25 },
   '-58': { base: 232, scale: 0.8 }, '-59': { base: 232, scale: 1.17 },
   '-60': { base: 233, scale: 0.83 }, '-61': { base: 233, scale: 1.21 },
@@ -235,7 +248,12 @@ const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg
   // 地牢骷髅变体（SetDefaultsFromNetId L7770-7788：scale 后再乘 stat）
   '-13': { base: 31, scale: 0.9, hp: 72, dmg: 23, def: 7 },    // Short Bones(80/26/8 ×0.9)
   '-14': { base: 31, scale: 1.15, hp: 101, dmg: 33, def: 10 }, // Big Boned(×1.15 再 ×1.1)
-  '-15': { base: 1, scale: 1.15 },   // 史莱姆王子
+  // ★BJ337(2026-09-24)：-15 旧表 base:1（绿史莱姆!）系误值——原版 FromNetId(-15)
+  //  → NetIdMap[14]=77 Heavy Skeleton（NPCID.cs:10453），且 case -15（NPC.cs:7831-7842）
+  //  硬置 life=400。旧值非潜伏：硬模洞穴主池 L4959（原版 NPC.cs:5059 同构）实刷点
+  //  hard&&(remix||深层)&&1/5 → D(-15) 曾刷出 1.15 倍绿史莱姆。dmg/def 的 ×scale 面+
+  //  height=44 硬置另登记 spawn-parity-gaps.md 家族债（case 体 stat×scale 全族口径）。
+  '-15': { base: 77, scale: 1.15, hp: 400 },   // Heavy Skeleton（case -15 life=400 硬置）
   // -22..-25 猩红族大小变体（SetDefaultsFromNetId L7858-7911 + NPCID.NetIdMap idx21-24）：
   //  -22/-23 = 小/大 Crimera（基底 173，scale 0.85/1.15）；-24/-25 = 小/大 Crimslime
   //  （基底 183，scale 0.85/1.15）。旧表误写 base:223（雨僵尸）——猩红分支

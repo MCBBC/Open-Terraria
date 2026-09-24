@@ -40,8 +40,13 @@ export function bindHint(el: HTMLElement, fn: (host: HTMLElement) => void): () =
   };
   // 长按回调异步触发拿不到事件——WeakRef 取宿主（不挽留）。无 WeakRef 引擎：
   // 不 arm（长按提示降级为无），绝不直捕 el。
+  // ★BJ328 追刀：IIFE 必须以【形参】接宿主——若 IIFE 体内词法引用 el，esbuild 后
+  //  仍是 bindHint 作用域闭包 ⇒ el 被迫上下文分配（Context 槽 'el' 直指宿主元素），
+  //  挂在宿主上的 ts/tm/h 共享该 Context ⇒ 注册↔闭包↔宿主环复活（快照实证：
+  //  游离 slot 持有者 Context 槽表含 el/timer/sx/sy/cancel/arm/ts/tm 全套）。
+  //  形参注入后 IIFE 闭包只捕自身局部 ref，el 不再上下文分配。
   const arm: ((ms: number) => void) | null = WRCtor
-    ? (() => { const ref = new WRCtor(el); return (ms: number) => { timer = setTimeout(() => { const h2 = ref.deref(); if (h2) fn(h2); }, ms); }; })()
+    ? ((host: HTMLElement) => { const ref = new WRCtor(host); return (ms: number) => { timer = setTimeout(() => { const h2 = ref.deref(); if (h2) fn(h2); }, ms); }; })(el)
     : null;
   const ts = (e: TouchEvent) => {
     const t = e.changedTouches[0];

@@ -31,7 +31,7 @@ export interface QuadOpts {
   flipX?: boolean;                                   // 水平镜像(u0/u1 交换;云族用)
 }
 
-interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number; bytes: number; mipped: boolean }
+export interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number; bytes: number; mipped: boolean; key?: string }
 
 /** ★B1 quadExact tie 相位补正（texel 单位;见 quadExact 内注） */
 const QUAD_TIE_EPS = 1 / 4096;
@@ -500,8 +500,12 @@ export class GLSpriteLayer {
    *  每帧显式重建（谁设谁还原判例:管线共享上下文无「init 一次性状态」可倚）。
    *  ★C10b fboName 参数化:云会话缺省 'clouds';bg 会话传 'bg'（纯 bg 与
    *  bg+云合并会话同 FBO——合并=bg quads 后保持开放续交云 quads,FBO 名随
-   *  开会话方;管线 FBO 命名空间防撞:clouds/bg/lit/warped/light2 各归各） */
-  begin(fboName = 'clouds'): void {
+   *  开会话方;管线 FBO 命名空间防撞:clouds/bg/lit/warped/light2 各归各）。
+   *  ★B2b clear 参数化（2026-09-24）:世界层单 FBO 累积态（B2b accumulate）——
+   *  帧内首段 begin('world') 清透明,后续段/层以 clear=false 续交（FBO 保持
+   *  绑定, quad 顺序=层序）,compositeLight 末尾 endAccumulate 取 FBO 纹理
+   *  直采（worldCanvas 上传链退役）。clear=false 不重租 FBO（同名幂等）。 */
+  begin(fboName = 'clouds', clear = true): void {
     if (this.unavailable || !this.gl) return;
     const gl = this.gl;
     if (this.pipe) {
@@ -522,7 +526,7 @@ export class GLSpriteLayer {
         while (gl.getError() !== gl.NO_ERROR) { /* 排空 */ }
       }
       gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT);
+      if (clear) gl.clear(gl.COLOR_BUFFER_BIT);
       gl.disable(gl.DEPTH_TEST);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -572,6 +576,23 @@ export class GLSpriteLayer {
     }
   }
 
+  /** ★B2b 累积态收口（2026-09-24）：解绑 VAO、【不 present】,把开着的世界 FBO
+   *  交还调用方（GLWorldCompose compose 直采其纹理=worldCanvas 上传链退役;
+   *  降级路径用 pipeline.present(fbo) 落画布）。返回 null=无开着 FBO。 */
+  endAccumulate(): PipelineFbo | null {
+    if (this.unavailable || !this.gl) return null;
+    this.gl.bindVertexArray(null);
+    const f = this.pipeFbo;
+    this.pipeFbo = null;
+    return f;
+  }
+
+  /** ★B2b 累积态查询：指定名 FBO 当前是否开着（open 未 present）——
+   *  帧内后续段续交时跳过 begin(clear) 的判据。 */
+  isAccumOpen(name: string): boolean {
+    return !!(this.pipe && this.pipeFbo && this.pipeFbo.name === name);
+  }
+
   /** 图片源(ImageBitmap/Image/canvas)入纹理;repeatX 横向 REPEAT;
    *  noMip=跳过 mip 链(超大纹理/恒放大或 NEAREST 采样的贴图:小地图/迷雾——
    *  8400×2400 的 mip 重生成是巨量 GPU churn,且它只在 zoom≥1 放大或 NEAREST
@@ -606,7 +627,7 @@ export class GLSpriteLayer {
     if (mipped) gl.generateMipmap(gl.TEXTURE_2D);   // LINEAR 档三线采样(LINEAR_MIPMAP_LINEAR)
     gl.bindTexture(gl.TEXTURE_2D, null);
     const base = w * h * 4;
-    const entry: TexEntry = { tex, w, h, stamp: ++this.stamp, bytes: mipped ? base * 4 / 3 : base, mipped };
+    const entry: TexEntry = { tex, w, h, stamp: ++this.stamp, bytes: mipped ? base * 4 / 3 : base, mipped, key };
     this.texs.set(key, entry);
     this.bytes += entry.bytes;
     this.evictLRU(key);
@@ -656,6 +677,87 @@ export class GLSpriteLayer {
     if (e.mipped) gl.generateMipmap(gl.TEXTURE_2D);
     gl.bindTexture(gl.TEXTURE_2D, null);
     e.stamp = ++this.stamp;
+  }
+
+  /** ★B2 子区上传（atlas 页 sub-rect → 独立小纹理;实体/弹/尘帧纹理口）。
+   *  【为何不整页上传】NPC/player 素材页可达数百 KB~MB,帧工作集逐页驻留会顶爆
+   *  MAX_BYTES LRU 引发逐帧换页抖动;帧级 sub-rect 工作集 KB 级。
+   *  【scratch 转存】texImage2D 的 DOM 源无 9 参子区重载（texSubUpdate 同款判例）
+   *  ——先抠到 scratch 再整面上传。noMip 恒真（实体/尘恒放大或 1:1 采样）。
+   *  ★只服务【内容不变】的稳定源（atlas 页/烘焙缓存）;内容会变的 scratch 源
+   *  （s1 重着色面等）走 texRefresh 全量重传,不走本口（键会撞陈旧字节）。 */
+  texFromRegion(key: string, img: TexImageSource, sx: number, sy: number, sw: number, sh: number): TexEntry | null {
+    if (this.unavailable || !this.gl) return null;
+    if (sw <= 0 || sh <= 0) return null;
+    const hit = this.texs.get(key);
+    if (hit) { hit.stamp = ++this.stamp; return hit; }
+    if (!this.regScratch) this.regScratch = document.createElement('canvas');
+    const sc = this.regScratch;
+    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    const scx = this.regScratchCtx ??= sc.getContext('2d', { willReadFrequently: true })!;
+    scx.clearRect(0, 0, sw, sh);
+    scx.drawImage(img as CanvasImageSource, sx, sy, sw, sh, 0, 0, sw, sh);
+    return this.texFromImage(key, sc, false, true);
+  }
+  private regScratch: HTMLCanvasElement | null = null;
+  private regScratchCtx: CanvasRenderingContext2D | null = null;
+
+  /** ★B2 动态源全量重传（s1/mountTintScratch 等内容每绘都变的 scratch 源）。
+   *  已驻留则同纹理 texImage2D 重规格化（零 createTexture/deleteTexture 抖动——
+   *  逐尘 create/delete 是驱动 churn 反模式）;未驻留则 texFromImage 建键。
+   *  键 = 动态源 img 实例 id（全画布;子区绘制也只是多传无效区,字节数小可忽略）。 */
+  texRefresh(key: string, img: TexImageSource): TexEntry | null {
+    if (this.unavailable || !this.gl) return null;
+    const hit = this.texs.get(key);
+    if (!hit) return this.texFromImage(key, img, false, true);
+    const gl = this.gl;
+    if (!(img as { width: number }).width || !(img as { height: number }).height) return hit;
+    if ((img as { width: number }).width !== hit.w || (img as { height: number }).height !== hit.h) {
+      this.dropTexture(key);   // 尺寸变了:重规格化不可用,走重建
+      return this.texFromImage(key, img, false, true);
+    }
+    gl.bindTexture(gl.TEXTURE_2D, hit.tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    glStatUpload(this.statName, hit.w * hit.h * 4);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    hit.stamp = ++this.stamp;
+    return hit;
+  }
+
+  /** ★B2 字节直传（尘预乘对合并纹理:rgb=预乘 add 面,a=erase 面）。数据已是
+   *  预乘字节——禁 UNPACK_PREMULTIPLY（二次预乘=rgb 再乘 a=暗一档）;无 mip。
+   *  采样档由 quadSprite 按调用面绑定（纹理参数只兜底）。 */
+  texFromData(key: string, data: Uint8Array, w: number, h: number): TexEntry | null {
+    if (this.unavailable || !this.gl) return null;
+    const hit = this.texs.get(key);
+    if (hit) { hit.stamp = ++this.stamp; return hit; }
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    glStatUpload(this.statName, w * h * 4);
+    glStatTexCreate(this.statName, w * h * 4);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    const entry: TexEntry = { tex, w, h, stamp: ++this.stamp, bytes: w * h * 4, mipped: false, key };
+    this.texs.set(key, entry);
+    this.bytes += entry.bytes;
+    this.evictLRU(key);
+    return entry;
+  }
+
+  /** ★B2 纹理存活查询（flush 期逐 rec 解析防 LRU 逐出后画死纹理——缓存命中但
+   *  已被 evictLRU/世界切换清表的 entry 必须重传）。texFromData/texFromRegion
+   *  建的 entry 带 key（texFromImage 同步补）;null-key entry（外部直持）按存活算。 */
+  texAlive(e: TexEntry): boolean {
+    return !e.key || this.texs.get(e.key) === e;
   }
 
   /** 按键主动释放(全屏地图关闭时丢弃整幅纹理——地图只在打开期占 GPU) */
@@ -748,6 +850,47 @@ export class GLSpriteLayer {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     glStatDraw(this.statName, 4);
     gl.bindSampler(0, null);
+  }
+
+  /** ★B2 shim 执行器发射口（2026-09-24）：quadExact 的全跨度 uv+ε tie 补正推广版
+   *  ——支持 alpha/tint/rot/flipX/flipY/smooth（quadExact 是本式的零 opts 特例）。
+   *  【为何不用 quad()】quad() 的 uv 半像素内缩是 LINEAR CLAMP 渗色判例的防渗
+   *  手法，NEAREST 下尾列/尾行采错档（quadExact 注）；实体/弹/尘的 2D 语义是
+   *  「全跨度映射+按 imageSmoothingEnabled 选采样」，故全跨度为正身。
+   *  【tie 补正】同 quadExact：src 域整体 −ε（texel 单位）复刻 Chrome 2D 最近邻
+   *  精确 tie 取 c−1 语义；分数 dst 相位下的 tie 本就随 Skia 定点游走漂移
+   *  （B1 Skia tie 定谳）=census 有界登记，不在此复现。
+   *  blend 不在此设——SO 批走 begin 的 (ONE,1−SA)，ADD 批由调用方 blendAdditive
+   *  包裹（谁设谁还原）。 */
+  quadSprite(
+    e: TexEntry, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    opts?: { alpha?: number; tint?: readonly [number, number, number] | null; rot?: number; flipX?: boolean; flipY?: boolean; smooth?: boolean },
+  ): void {
+    if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.bindSampler(0, (opts?.smooth ?? false)
+      ? (e.mipped ? this.samp.linear! : this.samp.linearNoMip!)
+      : this.samp.nearest!);
+    const ua = (sx - QUAD_TIE_EPS) / e.w, ub = (sx + sw - QUAD_TIE_EPS) / e.w;
+    const va = (sy - QUAD_TIE_EPS) / e.h, vb = (sy + sh - QUAD_TIE_EPS) / e.h;
+    const u0 = opts?.flipX ? ub : ua, u1 = opts?.flipX ? ua : ub;
+    const v0 = opts?.flipY ? vb : va, v1 = opts?.flipY ? va : vb;
+    gl.uniform4f(this.uni.uSrc, u0, v0, u1 - u0, v1 - v0);
+    this.setCommon(dx, dy, dw, dh, opts as QuadOpts | undefined);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    glStatDraw(this.statName, 4);
+    gl.bindSampler(0, null);
+  }
+
+  /** ★B2 ADD 批混合切换（尘 A=0 加性族 'lighter' 精确映射）。on=true 切 (ONE,ONE)
+   *  加算，false 还原 begin 约定的 (ONE,1−SA)——谁设谁还原判例，批间必须成对。 */
+  blendAdditive(on: boolean): void {
+    if (this.unavailable || !this.gl) return;
+    const gl = this.gl;
+    if (on) gl.blendFunc(gl.ONE, gl.ONE);
+    else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
   /** ★B1 tile 面 quad（gl_FragCoord texelFetch——任意 dst offset/缩放相位下

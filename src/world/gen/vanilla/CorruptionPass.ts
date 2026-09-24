@@ -156,8 +156,10 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       let snowLo = sLo, snowHi = sHi, jungLo = jLo, jungHi = jHi;
       let cx = 0, zLo = 0, zHi = 0;
       let ok = false;
+      let relaxTries = 0;
       // 拒绝采样（cs:13979-14009）：地牢侧钳制 → 地牢 ±100 → 中央带 → 沙漠 → 雪原 → 丛林
       while (!ok) {
+        relaxTries++;
         ok = true;
         cx = pickCenter(which);                                // Next(...)（上注）
         zLo = cx - rng.int(0, 199) - 100;                      // Next(200)
@@ -198,6 +200,17 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (!gs.seedFlags.notTheBees
             && zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
         }
+        // ★BJ336（2026-09-24）：拒绝环 4w 次强制收口——原版 while(!flag2) 纯重采样
+        //  无放松支（cs:14039-14111 猩红/cs:14358-14432 腐化），支持档（≥4200）拒绝
+        //  空间非空故恒终止。非 UI 小宽度（探针 1200×850）cx∈[num8,w-num8-1]=[500,699]
+        //  全域落在中央 ±200 带内（mid=600），地牢回避带对窄世界同样可能全域命中 ⇒
+        //  拒绝空间为空、永不终止（CDP 栈实锤 runBranch 忙循环,六籽 100% 复现;
+        //  BJ328 DunesPass 拒绝环同族第三发）。修法同 BJ328 沙丘件4①：连拒 4w 次接受
+        //  当前候选（含 beachAvoid/地牢侧钳制后的钳位值）。支持档 P(连拒 4w)≤
+        //  ~0.5^16800≈0 ⇒ 放松臂数学不可达、掷流零扰动（seed-parity 金标不受扰）；
+        //  退化尺寸从挂死转为可完成生成（候选可能压回避带=登记偏差,原版对
+        //  w<1800 本就未定义）。
+        if (relaxTries >= 4 * w) break;
       }
       gs.evilZones.push({ x0: zLo, x1: zHi });
       __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);
