@@ -30,6 +30,7 @@ function vImgW(atlas: SpriteAtlas, sheet: number): number {
   return img ? img.width : 0;
 }
 import { vanillaFrameFor, vanillaFrameUnified, setVanillaSolidTables, deriveVanillaSolidTablesFromDefs, isVanillaMergeDirtFamily, isVanillaSeamPair } from './VanillaFraming';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 // 原版 TileFrameCosmetic 全链分帧(2026-08-27 对齐工程;2026-08-28 转正默认启用)。
 // ★回退开关(发现严重问题时无需改代码):
 //   ①URL ?vf=0 —— 单次强制关,压过一切(含 localStorage);
@@ -2080,9 +2081,10 @@ export function drawAdjust(
     //   （TileDrawing 全文件唯一一处 GTW×15 块;28/105/470 无此案）。恢复如下,钟=：
     //   num34=(x+y+(int)(GTW×15))%14 → addFrX+=288×(num34/4)、addFrY+=270×(num34%4)。
     //   (x+y) 逐格相位=原版刻意的对角彩虹渐变（邻格差 1 相=斜向滚动,非错位）。
-    //   GTW=真实时间秒%3600（Main.cs:17014）→ 15 相/秒=60fps 固定步每 4 tick 一相
-    //   （tileAnim.tick/4 采样;暂停冻结=原版 GTW 实时钟的已知采样偏差,490 习语同款
-    //   备案）。719 不入 RATE/FRAMES/PITCH 三表（AnimateTiles 无 719 写位,golden
+    //   GTW=运行秒%3600（Main.cs:17014;★BJ330 收编 GameTime 单源=60Hz 逻辑 tick,
+    //   暂停冻结）→ 15 相/秒=60fps 固定步每 4 tick 一相（tileAnim.tick/4 采样——
+    //   该钟亦 !paused 门推进,★BJ330 后画/光两侧同冻结同相,旧"墙钟×tick 采样
+    //   偏差"消除）。719 不入 RATE/FRAMES/PITCH 三表（AnimateTiles 无 719 写位,golden
     //   「无多」锁;须走动态层→ isDynamicAnimSheet 719 特判,314 同款）。
     case 719: {
       const n = (x + y + Math.floor(tileAnim.tick / 4)) % 14;   // :4610
@@ -2202,14 +2204,15 @@ export function drawAdjust(
 // ×0.3（FNA Color*float 逐通道 byte 截断）→ 有效 tint ≈ (r·0.3,g·0.3,b·0.3,α38)。
 // ★钟源定谳：GlobalTimeWrappedHourly（:1284 实文;非 FlickerClock、非 Disco——
 //   160/692 彩虹 moss 才走 Disco 钟）。本仓口径 = SkyColor.globalTimeWrappedHourly
-//   同款 performance.now 秒 %3600（Main.cs:17014 TotalGameTime 秒 %3600）。
+//   同款 GameTime 单源秒 %3600（Main.cs:17014 TotalGameTime 秒 %3600——★BJ330
+//   钟源归正：Game.fixedUpdate 60Hz 逻辑 tick,暂停/失焦冻结,与 719 采样钟同相）。
 
 /** 基底 α（(255,255,255,100) → 纹理 α×100/255） */
 export const SHARD_BASE_ALPHA = 100 / 255;
 
-/** Main.GlobalTimeWrappedHourly（真实运行秒 %3600;无 performance 环境恒 0） */
+/** Main.GlobalTimeWrappedHourly（★BJ330 收编 GameTime 单源;TileDrawing.cs:4688 消费） */
 export function shardGlowClock(): number {
-  return typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+  return globalTimeWrappedHourly();
 }
 
 /** Main.hslToRgb + hue2rgb verbatim（Main.cs:48689-48741,Math.Round ×255） */

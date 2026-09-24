@@ -12,7 +12,8 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS, WALL_DUNGEON_SHEETS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 
-export function runPotsPass(store: TileStore, rng: RNG, gs: GenState): void {
+export function runPotsPass(store: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const g0 = globalThis as { __swPotCap?: (gs: GenState, st: TileStore) => void };
   try { g0.__swPotCap?.(gs, store); } catch { /* probe */ }
   const { w, h } = store;
@@ -29,6 +30,7 @@ export function runPotsPass(store: TileStore, rng: RNG, gs: GenState): void {
 
   for (let n = 0; n < count; n++) {
     const progress = n / count;
+    gp?.set(progress);   // ★BJ331：cs:18215-18218 Set(num9/num7) 每尝试行位（曾整 pass 零 Set ⇒ 大世界静默 34s 被看门狗误报卡死;零 RNG 面）
     // 原版外层 while(!flag) 重试：每罐最多 10000 次全列尝试（cs:18198/18290 num7）
     let placed = false;
     for (let attempt = 0; attempt < 10000 && !placed; attempt++) {

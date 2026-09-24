@@ -62,7 +62,7 @@ export class InfoAccsLayer {
     accThirdEyeNumber: number; accCritterGuideText: string | null; accCritterGuideVid: number | null;
     speedSlice: Float32Array; vx: number; vy: number;
   }, enemies: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vanillaId: number | null }>,
-    critters: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; def?: { npc?: number } }>,
+    critters: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vanillaId: number | null }>,
     npcs: Array<{ cx: number; cy: number; dead: boolean; vanillaId: number | null; givenName?: string }>,
     pcx: number, pcy: number,
     countEnemy: (e: { vanillaId: number | null; cx: number; cy: number }) => boolean,
@@ -93,7 +93,16 @@ export class InfoAccsLayer {
         let best: { name: string; rarity: number; vid: number } | null = null;
         const pool: Array<{ dead: boolean; cx: number; cy: number; vanillaId: number | null; given?: string }> = [
           ...enemies.map((e) => ({ dead: e.dead, cx: e.cx, cy: e.cy, vanillaId: e.vanillaId })),
-          ...critters.map((c) => ({ dead: c.dead, cx: c.cx, cy: c.cy, vanillaId: c.def?.npc ?? null })),
+          // ★BJ332 2026-09-24：载体勘误——旧 `c.def?.npc` 引用 2026-08-17 已退役的
+          //  CritterDef 形状（critters.ts 头注：Critter 类终删），现役 critters 桶成员
+          //  是 Enemy，身份域 = vanillaId（Enemy.ts:491）；EnemyDef（enemies.ts:5-37）
+          //  无 npc 字段 → 旧映射恒 undefined → vanillaId=null → rarityOf=0 →
+          //  critters 桶 99 型小动物对分析仪全盲（661 七彩草蛉 rarity=4，NPC.cs:17383-17397
+          //  实报即此族）。原版无 critter 分桶——Main.npc 全表一扫（:47776），
+          //  CountsAsCritter（NPCID.cs:4829，99 型）仅是计数/捕获旗，不参与稀有判定。
+          //  受影响稀有族 20 型：374 松露虫/442-448/539 金系/583-585 仙女/592/593 金金鱼/
+          //  601 金蜻蜓/605 金瓢虫/613 金水黾/627 金海马/661 七彩草蛉/687 神秘青蛙。
+          ...critters.map((c) => ({ dead: c.dead, cx: c.cx, cy: c.cy, vanillaId: c.vanillaId ?? null })),
           // ★BJ122 2026-09-18：npcs 桶入池——原版扫 Main.npc 全表（:47776 活跃+
           //  rarity 择优,无 townNPC/bound 排除门）;被缚族 105/106/123/354/376/579/589
           //  rarity=1（:10283/:10297/:10534/:13543/:13837/:16595/:16692）、

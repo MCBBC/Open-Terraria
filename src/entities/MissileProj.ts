@@ -59,6 +59,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ285 死亡段割面（BJ260 同款前置习语）
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 // ===================== 数学原语（逐字对源码） =====================
 
@@ -371,9 +372,9 @@ export class MagicMissileProj extends Entity {
   private stripCap: number;
   /** Main.GlobalTimeWrappedHourly（Main.cs:17014 游戏运行秒 %3600）——拖尾色相相位
    *  基准。★2026-08-31 台账 C1 清偿：曾用逐弹本地钟（每 tick +1/60 自起点起算），
-   *  同帧发射的多弹色相恒差一个常数偏移、也和世界的 GlobalTime 不同相；改为直读
-   *  共享墙钟 %3600（与本仓 Game.ts:7435 沙暴节拍的既有口径一致） */
-  private globalT = (performance.now() / 1000) % 3600;
+   *  同帧发射的多弹色相恒差一个常数偏移、也和世界的 GlobalTime 不同相；★BJ330 起直读
+   *  GameTime 单源 %3600（Main.TotalGameTime 等价——暂停/失焦随世界冻结） */
+  private globalT = globalTimeWrappedHourly();
   /** Main.DiscoR/G/B（Main.cs:19441 六段 ±7/帧；79 点光 :15157-15160） */
   private discoR = 255;
   private discoG = 0;
@@ -470,7 +471,7 @@ export class MagicMissileProj extends Entity {
     if (--this.timeLeft <= 0) this.killNow(game);
     if (!this.dead) {
       this.pvx = this.vx; this.pvy = this.vy;
-      this.globalT = (performance.now() / 1000) % 3600;   // GlobalTimeWrappedHourly（Main.cs:17014）
+      this.globalT = globalTimeWrappedHourly();   // GlobalTimeWrappedHourly（Main.cs:17014）——★BJ330 GTW 单源
       this.steer(game);
     }
     if (this.dead) { this.wetSectionStep(game); return; }   // ★杀拍补跑（防双跑见 wetSectionRan 注）

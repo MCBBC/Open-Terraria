@@ -42,6 +42,7 @@ import { rainbowBoulderCell } from './RollingBoulder';
 import { TREE_SHAKEABLE_SHEETS } from '../world/TreeShake';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 // ===================== 数据表类型（vanilla-petai.json） =====================
 type PetFamily = 'ground' | 'fly' | 'hover';
@@ -1345,7 +1346,7 @@ export class PetFollower extends Entity {
     }
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    const gtw = typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+    const gtw = globalTimeWrappedHourly();   // ★BJ330：GTW 单源（原 performance.now 墙钟）
     if (!rolling) {
       // ---- 非滚动：Extra_283 虹晕三重（:33348-33361）----
       const glow = r.atlas?.ensureVImage('vanilla/Extra_283.png');

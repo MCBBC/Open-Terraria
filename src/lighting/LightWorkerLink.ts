@@ -53,8 +53,16 @@ export class LightWorkerLink {
    *  compute 里执行——120fps 渲染下主线程任务翻倍,回传消息常滑到下下个 tick
    *  才被消费（间歇 2 tick=33ms≈4 渲染帧=用户所见割裂）。onmessage 直接回填
    *  后:数据逐字节不变,只是更早可见;region+数组仍成对原子（主线程单线程,
-   *  消息是独立 task,不可能撕裂同步段内的一致对）。引擎侧注册本回调。 */
+   *  消息是独立 task,不可能撕裂同步段内的一致对）。引擎侧注册本回调。
+   *  ★C9c（2026-09-24 用户复报不限帧率/进世界仍有延迟）:liveAuth 门——到达即
+   *  应用仅在引擎 live 态生效;warmup 期本地每 tick 可能全周期出【新鲜】光,
+   *  若被 1-tick 陈旧的 worker 结果倒灌覆写反而退步（进世界 dirty 风暴实锤）。
+   *  引擎在 live 分支置 true,warmup 分支置 false。 */
+  liveAuth = false;
   onResult: ((m: LightResultMsg) => void) | null = null;
+  private lastLag = 0;
+  /** 最近一次结果 send→apply 实测延迟（C9c live 滞回门的传感器,毫秒;0=尚无结果） */
+  get lastLagMs(): number { return this.lastLag; }
 
   /** worker 已产出过结果（warmup → live 的分界） */
   isLive(): boolean { return this.results > 0; }
@@ -139,9 +147,11 @@ export class LightWorkerLink {
           lwStat.results++;
           this.lastResultAt = performance.now();
           lwStat.lagMs = this.lastSentAt > 0 ? performance.now() - this.lastSentAt : 0;
+          this.lastLag = lwStat.lagMs;
           this.pending = m;
-          // ★C9b 到达即应用（compute 的 applyPending 保留为兜底,已应用则 no-op）
-          if (this.onResult) this.onResult(m);
+          // ★C9b 到达即应用（compute 的 applyPending 保留为兜底,已应用则 no-op）;
+          //  ★C9c 仅 live 态生效——warmup 期本地新鲜光优先,禁陈旧倒灌
+          if (this.liveAuth && this.onResult) this.onResult(m);
         };
       } catch (err) {
         this.errored = true;

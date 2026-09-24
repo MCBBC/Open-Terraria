@@ -4,6 +4,7 @@
 // 不改 Clock 本身(SkyRenderer/音频仍吃 World.dayFactor)。
 import { MOON_FLOOR } from './lightTables';
 import { modifyHorizonLight } from './Horizon';
+import { globalTimeWrappedHourly as globalTimeWrappedHourlySec } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 /** timeOfDay → 原版 Main.time(0-86400)。★昼夜锚 = Clock.DAWN/DUSK(0.1875/0.8125
  *  = 4:30AM-7:30PM ↔ Main.time 0..54000,Main.cs:64460 SetBackColor dayTime 窗)——
@@ -420,9 +421,13 @@ export class FlickerClock {
   /** cursorScale(Main.cs:51905):= cursorAlpha*0.3 + 0.8,资源条 flag 心/星缩放脉冲源 */
   get cursorScale(): number { return this.cursorAlpha * 0.3 + 0.8; }
 
-  /** Main.GlobalTimeWrappedHourly（Main.cs:16777 TotalGameTime 秒数 % 3600——真实运行秒） */
+  /** Main.GlobalTimeWrappedHourly（Main.cs:17014 TotalGameTime 秒数 % 3600）——
+   *  ★BJ330：钟源归正 GameTime 单源（Game.fixedUpdate 60Hz 逻辑 tick 累计,
+   *  暂停/失焦冻结、游玩/菜单推进——原 performance.now 墙钟与游戏时间漂移;
+   *  worker 分立实例经 LightWorkerProtocol 每帧主线程同步,getter 在 worker 侧
+   *  被 defineProperty 覆写不受影响） */
   get globalTimeWrappedHourly(): number {
-    return typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+    return globalTimeWrappedHourlySec();
   }
 
   /** 水母笼 mode 读口（TileLightScanner case 316-318：mode==2 = 高亮档） */

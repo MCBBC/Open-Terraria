@@ -39,10 +39,12 @@ function hooks(w: World, p: Player, drops: ItemDrop[], spawns: SpawnRec[]): Game
   return {
     world: w, player: p,
     enemies: () => [], critters: () => [],
-    // 镜像 Game.spawnDrop 落位语义（(x,y)=中心 → 左上 −6）;spawn 原始参全录
+    // 镜像 Game.spawnDrop 落位语义（(x,y)=中心 → 左上按 vid 半盒回退,BJ326 件 2
+    //  vanilla-itemdims）;spawn 原始参全录
     spawnDrop: (x: number, y: number, key: string, stack: number, vx: number, vy: number) => {
       spawns.push({ x, y, vx, vy });
-      const d = new ItemDrop(x - 6, y - 6, ITEM_BY_KEY[key], stack);
+      const d = new ItemDrop(x, y, ITEM_BY_KEY[key], stack);
+      d.x = x - d.w / 2; d.y = y - d.h / 2;
       d.vx = vx; d.vy = vy;
       drops.push(d);
       return d;
@@ -83,7 +85,7 @@ describe('D1 散射初速对齐 1457（SpawnShimmeredItem WorldItem.cs:631 整�
     expect(spawns.map((s) => s.vx)).toEqual(expectVx);
     expect(spawns.map((s) => s.vx)).toEqual([0, 1]);
     expect(spawns.every((s) => s.vy === 0)).toBe(true);   // :631 Y 恒 0（曾 =父速×0.1）
-    expect(spawns.every((s) => s.x === 20 * TILE + 6)).toBe(true);  // off=0 保持原版中心像素
+    expect(spawns.every((s) => s.x === 20 * TILE + 12)).toBe(true);  // off=0 保持原版中心像素（源物 3509 盒 24×28 → 中心 =20T+12,BJ326 件 2）
     expect(new Set(spawns.map((s) => s.y)).size).toBe(1);           // 同高出生（=原 cy）
     expect(drops.map((x) => vanillaIdOfItem(x.itemId)).sort((a, b) => a - b)).toEqual([9, 12]);
     expect(drops.every((x) => x.shimmered)).toBe(true);
@@ -114,7 +116,7 @@ describe('偏差2 出生列预扫选择表（明令分歧 2026-09-17;原版对�
       const spawns: SpawnRec[] = [];
       const h = hooks(w, p, drops, spawns);
       decraft(w, h, drops);
-      expect(spawns.every((s) => s.x === 20 * TILE + 6)).toBe(true);
+      expect(spawns.every((s) => s.x === 20 * TILE + 12)).toBe(true);   // 源物中心（3509 盒 24×28,BJ326）
     }
     // 案3:右侧全盖至钳外（21..26）,左侧近端 −3 通畅 → 取 col 17
     {
@@ -159,7 +161,7 @@ describe('偏差1 钉死超时穿块（明令分歧 2026-09-17;原版 = 永久�
     const spawns: SpawnRec[] = [];
     const h = hooks(w, p, drops, spawns);
     decraft(w, h, drops);
-    expect(spawns.every((s) => s.x === 20 * TILE + 6)).toBe(true);  // 整盖 → 回退原位
+    expect(spawns.every((s) => s.x === 20 * TILE + 12)).toBe(true);  // 整盖 → 回退原位（源物中心,3509 盒 24×28,BJ326）
     const prod = drops[0];
     // 自由上浮 → 首次顶头（钳到 33*16 格底）→ 连锁计数
     let firstPin = -1, flipT = -1;

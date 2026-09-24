@@ -10,6 +10,26 @@ import { ITEM_BY_KEY, ITEM_DEFS } from '../data/items';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { worldgenProgressKey, worldgenProgressStringKey } from './worldgenKeys';
 
+// ---- ★BJ334(2026-09-24)负 netID 名字表（Lang.cs:520-539 1:1） ----
+// 原版 NetIdMap（NPCID.cs:10451-10516,65 位逐值照录）——FromNetId(NPCID.cs:12478-12484)
+// 负 id → 本表[-id-1] = 基底正 id。负表缺省名 = 基底名（Lang.cs:525-527）。
+const NPC_NETID_BASE: readonly number[] = [
+  81, 81, 1, 1, 1, 1, 1, 1, 1, 1,
+  6, 6, 31, 31, 77, 42, 42, 176, 176, 176,
+  176, 173, 173, 183, 183, 3, 3, 132, 132, 186,
+  186, 187, 187, 188, 188, 189, 189, 190, 191, 192,
+  193, 194, 2, 200, 200, 21, 21, 201, 201, 202,
+  202, 203, 203, 223, 223, 231, 231, 232, 232, 233,
+  233, 234, 234, 235, 235,
+];
+// 负表显式覆写 12 条（Lang.cs:528-539;下标 = -netID-1,即 -1..-10 与 -54/-55）。
+// 其余 53 位负 netID（僵尸/黄蜂/噬魂怪等大小变体）原版悬停名 = 基底名,不覆写。
+const NPC_NAME_NEGATIVE_OVERRIDE: Record<number, string> = {
+  0: 'Slimeling', 1: 'Slimer2', 2: 'GreenSlime', 3: 'Pinky', 4: 'BabySlime',
+  5: 'BlackSlime', 6: 'PurpleSlime', 7: 'RedSlime', 8: 'YellowSlime', 9: 'JungleSlime',
+  53: 'SmallRainZombie', 54: 'BigRainZombie',
+};
+
 export const Lang = {
   get loaded(): boolean { return languageManager.loaded; },
   /** 语言列表(设置面板数据源,来自 l10n/index.json) */
@@ -143,13 +163,23 @@ export const Lang = {
   },
 
   /**
-   * NPC 名(原版 netID,Lang.cs:175 GetNPCName)。
-   * 正 id → NPCName.<Internal>;负 id(变种史莱姆)暂按 -netId 正查近似——
-   * 原版 65 条 _negativeNpcNameCache 硬表(Lang.cs:520-535)待 NPC 变种移植时补全。
+   * NPC 名(原版 netID,Lang.cs:175 GetNPCNameValue)。
+   * ★BJ334(2026-09-24)负 netID 1:1:负表缺省=基底名(Lang.cs:525-527
+   * `_negativeNpcNameCache[-n-1] = _npcNameCache[NPCID.FromNetId(n)]`)+12 条显式
+   * 覆写(:528-539);FromNetId(NPCID.cs:12478-12484)负 id → NetIdMap[-id-1]
+   * (NPCID.cs:10451-10516)。旧实现 `-netId` 正查近似把 -3(绿史莱姆)打到
+   * 3(僵尸)、-2(恶翅史莱姆)打到 2(恶魔眼)=悬停名/旗名错名的解析根。
+   * 越界(<-65)=原版 LocalizedText.Empty → null。
    */
   npcName(netId: number): string | null {
-    const id = netId > 0 ? netId : -netId;
-    const internal = NPC_NAME_BY_ID[id];
+    let internal: string | undefined;
+    if (netId < 0) {
+      const idx = -netId - 1;                                       // Lang.cs:525 负表下标
+      if (idx >= NPC_NETID_BASE.length) return null;                // :185-190 越界=Empty
+      internal = NPC_NAME_NEGATIVE_OVERRIDE[idx] ?? NPC_NAME_BY_ID[NPC_NETID_BASE[idx]];
+    } else {
+      internal = NPC_NAME_BY_ID[netId];
+    }
     return internal && Lang.has(`NPCName.${internal}`) ? Lang.text(`NPCName.${internal}`) : null;
   },
 

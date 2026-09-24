@@ -60,9 +60,9 @@ describe('C10a GLSpriteLayer 管线后端', () => {
     // HorizonClouds 覆盖率公式(:2950-2954)+厚度公式(:2955-2957)各恰一次
     expect(SRC.match(/float coverage = 1\.0 - 0\.2 \* \(up\.a \+ dn\.a \+ lf\.a \+ rt\.a \+ cc\.a\)/g)?.length).toBe(1);
     expect(SRC.match(/float thickness = 1\.0 - 4\.0 \* clamp\(cc\.r - 0\.62, 0\.0, 1\.0\)/g)?.length).toBe(1);
-    // 基础 quad y 翻转行:恰两处=VERT_SRC+CLOUD_VERT_SRC 两个着色器常量各一
-    // (既有结构;管线模式复用同常量——出现第 3 处即转录漂移)
-    expect(SRC.match(/1\.0 - screen\.y \/ uCanvas\.y \* 2\.0/g)?.length).toBe(2);
+    // 基础 quad y 翻转行:恰三处=VERT_SRC+CLOUD_VERT_SRC+B1 TILE_VERT_SRC
+    // (2026-09-24 B1 增第三着色器常量——同派生式非转录漂移;再增需随锁)
+    expect(SRC.match(/1\.0 - screen\.y \/ uCanvas\.y \* 2\.0/g)?.length).toBe(3);
   });
 
   it('quads 渲进管线 FBO;begin 显式重建会话态(blend premul+depth off);end present', () => {

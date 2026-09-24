@@ -22,6 +22,37 @@ export interface LightingWorld {
 
 const enum State { MinimapUpdate = 0, ExportMetrics = 1, Scan = 2, Blur = 3 }
 
+// ---- ★C9c 自适应 live 门参数（2026-09-24 用户复报两案定谳后落刀）----
+// lagMs 阈值（缺省 12ms<60fps tick 的 72%;?lightlag=ms 可调）。进=连续 8 拍健康
+// （~133ms@60fps 稳态几秒内转 live）,出=连续 2 拍超阈回退 warmup（滞回防抖）。
+// worker 上下文禁 URL 探测（fork bomb 判例家族,恒缺省值）。
+const LIGHT_LIVE_LAG_MS = (() => {
+  try {
+    if (typeof document === 'undefined') return 12;
+    const v = Number(new URLSearchParams(location.search).get('lightlag'));
+    return v > 0 ? v : 12;
+  } catch { return 12; }
+})();
+const LIGHT_LIVE_ENTER = 8;
+const LIGHT_LIVE_EXIT = 2;
+
+/** ★C9c 门步进（纯函数供单测）：lag>阈值→坏拍计数（清好拍）,≤阈值→好拍计数
+ *  （清坏拍）;lag≤0（尚无结果）不计拍。warmup 态好拍满 ENTER 且已有结果→进 live;
+ *  live 态坏拍满 EXIT→回退 warmup（fell=true,引擎侧 dirty 强制本地全周期重建）。 */
+export function liveGateStep(
+  live: boolean, good: number, bad: number, lag: number, hasResult: boolean,
+): { live: boolean; good: number; bad: number; fell: boolean } {
+  if (lag > LIGHT_LIVE_LAG_MS) { bad++; good = 0; }
+  else if (lag > 0) { good++; bad = 0; }
+  let fell = false;
+  if (!live) {
+    if (hasResult && good >= LIGHT_LIVE_ENTER) live = true;
+  } else if (bad >= LIGHT_LIVE_EXIT) {
+    live = false; good = 0; bad = 0; fell = true;
+  }
+  return { live, good, bad, fell };
+}
+
 export class LightingEngine {
   world: LightingWorld;
   // ---- 公共面(与 Game.ts/Renderer.ts 契约,勿改) ----
@@ -138,7 +169,9 @@ export class LightingEngine {
         this._lw = null;
         this.dirty = true;   // 回落后首帧强制全周期
       } else {
-        const live = lw.isLive();
+        // ★C9c：live 由滞回健康门判定（warmup 期本地新鲜光优先,onResult 被
+        //  liveAuth 抑制;转 live 后到达即应用接管,compute 内 applyPending 降兜底）
+        const live = this.lwGate(lw);
         // 快照区域须取本帧 ensureRegion 现值——onResult/applyPending 会把公共面
         // 区域回拨成 worker 上一帧区域(0-1 帧滞后;渲染读 (区域,数组) 恒成对一致),
         // 先捕获再回填。
@@ -167,6 +200,22 @@ export class LightingEngine {
     }
     // 空闲:每 tick 一态(完整周期 4 tick,原版 4 帧节奏)
     this.step();
+  }
+
+  /** ★C9c 自适应 live 门状态（滞回;见 liveGateStep） */
+  private lwLive = false;
+  private lwGood = 0;
+  private lwBad = 0;
+
+  /** ★C9c：live 判定=管线实测健康（lastLagMs 滞回）,非「首结果到达即切」——
+   *  不限帧率饱和/进场 dirty 风暴期滞留 warmup（本地 0 延迟新鲜光优先,代价
+   *  7-12% CPU）,消息健康后才转 live 省 CPU。 */
+  private lwGate(lw: LightWorkerLink): boolean {
+    const r = liveGateStep(this.lwLive, this.lwGood, this.lwBad, lw.lastLagMs, lw.isLive());
+    this.lwLive = r.live; this.lwGood = r.good; this.lwBad = r.bad;
+    if (r.fell) this.dirty = true;   // 回退 warmup 首帧本地全周期重建
+    lw.liveAuth = this.lwLive;       // 到达即应用仅 live 态放行（C9c 倒灌修复）
+    return this.lwLive;
   }
 
   /** ★C9：组装每帧快照（区域捕获值 + 点光/时钟/天空/衰减;tile 切片由门面暂存切出）。

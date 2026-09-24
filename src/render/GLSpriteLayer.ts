@@ -33,6 +33,43 @@ export interface QuadOpts {
 
 interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number; bytes: number; mipped: boolean }
 
+/** ★B1 quadExact tie 相位补正（texel 单位;见 quadExact 内注） */
+const QUAD_TIE_EPS = 1 / 4096;
+
+// ---- ★B1 tile 面专用程序（2026-09-24）:uv 插值自由的最邻近采样 ----
+// 【为何不用 quad/quadExact 的 varying vUv】插值误差随目标矩形绝对坐标增大
+// （光栅化 barycentric 精度 ~1e-4 相对）→ 精确 tie（src 坐标恰落 texel 整数
+// 边界,如 2:1 整档缩放全像素 tie、z1.27 的 325 周期 tie）在大幅 offset 下
+// 两臂随机分裂（微测 _b1-micro-quad 原点处 ε 可钉,游戏内 1280 偏移处不可钉）。
+// 【本程序】FS 由 gl_FragCoord（=像素中心,精确整数+0.5）直接算 texel 索引:
+//   texel = src.xy + floor((frag−dst.xy)/dst.wh×src.wh − ε)
+// float32 误差 ~1.5e-5 texel ≪ ε=2⁻¹²≪非 tie 最小分数距 ≥1/512 —— 全 W 稳定。
+// tie 取 floor(c−ε)=c−1 ≙ Chrome 2D 最近邻 tie 语义（微测实证）。texelFetch
+// 不经采样器（NEAREST/LINEAR 均无关）,返回预乘 texel 原值 → blend (ONE,1−SA)。
+const TILE_VERT_SRC = `#version 300 es
+uniform vec2 uCanvas;
+uniform vec4 uDst;
+layout(location=0) in vec2 aPos;
+void main() {
+  vec2 screen = uDst.xy + aPos * uDst.zw;
+  gl_Position = vec4(screen.x / uCanvas.x * 2.0 - 1.0,
+                     1.0 - screen.y / uCanvas.y * 2.0, 0.0, 1.0);
+}`;
+
+const TILE_FRAG_SRC = `#version 300 es
+precision highp float;
+uniform sampler2D uTex;
+uniform vec4 uDst;      // 设备矩形 (x,y,w,h)
+uniform vec4 uSrcT;     // texel 矩形 (sx,sy,sw,sh)
+uniform float uFboH;    // FBO 高(设备像素;gl_FragCoord.y 自底向上)
+out vec4 outColor;
+void main() {
+  vec2 dev = vec2(gl_FragCoord.x, uFboH - gl_FragCoord.y);   // 设备坐标(中心=整数+0.5)
+  vec2 local = dev - uDst.xy;                                 // 目标内坐标
+  vec2 t = uSrcT.xy + floor(local / uDst.zw * uSrcT.zw - 1.0 / 4096.0);
+  outColor = texelFetch(uTex, ivec2(t), 0);
+}`;
+
 const VERT_SRC = `#version 300 es
 uniform vec2 uCanvas;
 uniform vec4 uSrc;    // uv 基 + uv 跨度
@@ -157,6 +194,10 @@ export class GLSpriteLayer {
   private progCloud: WebGLProgram | null = null;
   private uniCloud: Record<string, WebGLUniformLocation | null> = {};
   cloudFxOK = false;
+  /** ★B1 tile 面程序（gl_FragCoord texelFetch——见 TILE_*_SRC 注） */
+  private progTile: WebGLProgram | null = null;
+  private progTileHandle: PipelineProgram | null = null;
+  private uniTile: Record<string, WebGLUniformLocation | null> = {};
   private vao: WebGLVertexArrayObject | null = null;
   private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null } =
     { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
@@ -251,6 +292,17 @@ export class GLSpriteLayer {
     } else {
       console.warn('[GLSpriteLayer:pipe] HorizonClouds 程序链接失败——cloudQuad 回退普通 quad');
     }
+    // ★B1 tile 面程序（quadTile 消费;编译失败→ progTile=null,调用方回 2D 栅格化）
+    const pTile = pipe.program('sprite:tile', TILE_VERT_SRC, TILE_FRAG_SRC);
+    if (pTile.prog) {
+      this.progTileHandle = pTile;
+      this.progTile = pTile.prog;
+      for (const n of ['uCanvas', 'uDst', 'uSrcT', 'uFboH', 'uTex']) {
+        this.uniTile[n] = pipe.uni(pTile, n);
+      }
+    } else {
+      console.warn('[GLSpriteLayer:pipe] tile 面程序链接失败——quadTile 不可用');
+    }
     this.buildCommonObjects(gl);
     // 上下文丢失:管线画布上的第二监听（管线自身也监听并标自身不可用）——本层同步
     // 标记,消费方回退 2D,退避期后由持有方整体重建（语义同旧路径自愈钩子）
@@ -331,6 +383,25 @@ export class GLSpriteLayer {
         }
       } else {
         console.warn('[GLSpriteLayer] HorizonClouds 程序链接失败:', gl.getProgramInfoLog(cp));
+      }
+    }
+    // ★B1 tile 面程序（standalone 上下文;管线模式在 initPipeMode 同参登记）
+    {
+      const tvs = compile(gl.VERTEX_SHADER, TILE_VERT_SRC);
+      const tfs = compile(gl.FRAGMENT_SHADER, TILE_FRAG_SRC);
+      if (tvs && tfs) {
+        const tp = gl.createProgram()!;
+        gl.attachShader(tp, tvs);
+        gl.attachShader(tp, tfs);
+        gl.linkProgram(tp);
+        if (gl.getProgramParameter(tp, gl.LINK_STATUS)) {
+          this.progTile = tp;
+          for (const n of ['uCanvas', 'uDst', 'uSrcT', 'uFboH', 'uTex']) {
+            this.uniTile[n] = gl.getUniformLocation(tp, n);
+          }
+        } else {
+          console.warn('[GLSpriteLayer] tile 面程序链接失败:', gl.getProgramInfoLog(tp));
+        }
       }
     }
     // 单位 quad VAO+五采样器（旧上下文/管线后端两路共用构造段）
@@ -666,12 +737,41 @@ export class GLSpriteLayer {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
     gl.bindSampler(0, this.samp.nearest!);   // 恒 NEAREST(与 2D smoothing off 同采样)
-    // 全跨度 uv:sx/e.w .. (sx+sw)/e.w——无内缩
-    gl.uniform4f(this.uni.uSrc, sx / e.w, sy / e.h, sw / e.w, sh / e.h);
+    // ★tie 相位补正:采样域整体 −ε（texel 单位）——Chrome 2D 最近邻在【精确 tie】
+    //  (src 坐标恰落 texel 整数边界,2:1 整档缩放全像素 tie)取 c−1,硬件 NEAREST
+    //  floor 取 c（微测 scripts/_b1-micro-quad.mjs:W=325 n=649=325+324 恰 tie 网格
+    //  实证）。ε=2⁻¹² ≪ 非 tie 最小分数距(≥1/512)且 ≫ varying 插值误差
+    //  (微测非 tie 零翻转约束 <3e-3);左缘 c−ε>0、右缘 c<sw 恒不出源矩形。
+    gl.uniform4f(this.uni.uSrc, (sx - QUAD_TIE_EPS) / e.w, (sy - QUAD_TIE_EPS) / e.h,
+      sw / e.w, sh / e.h);
     this.setCommon(dx, dy, dw, dh, undefined);   // α=1/tint=白/rot=0
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     glStatDraw(this.statName, 4);
     gl.bindSampler(0, null);
+  }
+
+  /** ★B1 tile 面 quad（gl_FragCoord texelFetch——任意 dst offset/缩放相位下
+   *  最近邻映射精确;tie 语义 ≙ Chrome 2D,见 TILE_*_SRC 注）。程序不可用返回
+   *  false（调用方回 2D 栅格化）。draw 后恢复基础 quad 程序态（begin 约定）。 */
+  quadTile(
+    e: TexEntry, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+  ): boolean {
+    if (this.unavailable || !this.gl || !this.progTile) return false;
+    if (sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return false;
+    const gl = this.gl;
+    gl.useProgram(this.progTile);
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.bindSampler(0, null);   // texelFetch 不经采样器;解绑防残留
+    gl.uniform2f(this.uniTile.uCanvas, this.canvas.width, this.canvas.height);
+    gl.uniform4f(this.uniTile.uDst, dx, dy, dw, dh);
+    gl.uniform4f(this.uniTile.uSrcT, sx, sy, sw, sh);
+    gl.uniform1f(this.uniTile.uFboH, this.canvas.height);
+    gl.uniform1i(this.uniTile.uTex, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    glStatDraw(this.statName, 4);
+    gl.useProgram(this.prog);   // 程序态还原（begin 设定基础 quad 程序在场）
+    return true;
   }
 
   /** 横向平铺:dst 区间内按"dw 对应一个源周期"重复(GL REPEAT 一次画整段,
@@ -1110,7 +1210,9 @@ void main(){
       for (const s of Object.values(this.samp)) if (s) gl.deleteSampler(s);
     }
     this.progHandle = null; this.progCloudHandle = null;
-    this.prog = null; this.progCloud = null; this.cloudFxOK = false;
+    this.progTileHandle = null;
+    this.prog = null; this.progCloud = null; this.progTile = null; this.cloudFxOK = false;
+    this.uniTile = {};
     this.vao = null;
     this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.pipeFbo = null;

@@ -21,7 +21,8 @@
 //        awk 实测,见 FACTORY_DIMS 注）;
 //      - 参化工厂（DefaultToFood/HealingPotion/Headgear/Body/Legs/GolfClub/
 //        LawnMower）= 方法体 `width = newwidth;` → 调用点前两整型实参;
-//   ⑦ 反编译无 `width = height = N` 联合赋值（实测 0 处）,无需处理;
+//   ⑦ 反编译无裸 `width = height = N` 形（0 处）,但有括号赋值表达式伪影
+//      `width = (height = N);`（case 3351 等）——按双字段同值处理;
 //   ⑧ SetDefaults 尾段（:48760-48947 的 if(type==2015) 族）无 width/height 赋值
 //      （实测 0 行）,不扫。
 //
@@ -304,6 +305,8 @@ if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFile
       }
     }
     writeFileSync(OUT, JSON.stringify(DIMS));
-    console.error(`itemdims 条目: ${Object.keys(DIMS).length}（源 Terarria${SRC_VER}）`);
+    let miss = 0;
+    for (let i = 1; i <= 6195; i++) if (DIMS[String(i)] === undefined) miss++;
+    console.error(`itemdims 条目: ${Object.keys(DIMS).length}（域内缺口 ${miss} → 运行时 12×12 兜底;源 Terarria${SRC_VER}）`);
   }
 }

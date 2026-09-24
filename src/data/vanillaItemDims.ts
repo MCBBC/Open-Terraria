@@ -6,7 +6,7 @@
 // 流分析形态缺口——yoyo 共体/空 case 等）回落 12×12 = 旧统一盒。
 import dimsJson from './vanilla-itemdims.json';
 
-const DIMS = dimsJson as Record<string, [number, number]>;
+const DIMS = dimsJson as unknown as Record<string, [number, number]>;
 
 /** 原版 vid → 掉落命中盒 [width, height]（px）;表外 null */
 export function vanillaItemDimsOfVid(vid: number): [number, number] | null {

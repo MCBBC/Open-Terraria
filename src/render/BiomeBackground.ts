@@ -13,6 +13,7 @@ import type { World } from '../world/World';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { atmoOf } from './SkyRenderer';
 import { texReady } from './texId';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 // ---- SurfaceBackgroundID（Terraria.ID/SurfaceBackgroundID.cs） ----
 const Forest1 = 0, Corruption = 1, Desert = 2, Jungle = 3, Ocean = 4, CorruptDesert = 5,
@@ -1809,9 +1810,11 @@ export class BiomeBackground {
     ctx.restore();
   }
 
-  /** GetBackgroundCounter gameMenu 分支（cs:62214-62220 = GlobalTimeWrappedHourly×40） */
+  /** GetBackgroundCounter gameMenu 分支（cs:62214-62220 = GlobalTimeWrappedHourly×40）——
+   *  ★BJ330：GTW 钟源收编 GameTime 单源（标题菜单 fixedUpdate pre-world 照跑,
+   *  计数器照进;失焦/暂停冻结） */
   private menuBgCounter(): number {
-    return (performance.now() / 1000 % 3600) * 40;
+    return globalTimeWrappedHourly() * 40;
   }
 
   /** 菜单层 tint 烘焙（multiply + destination-in 保 α；颜色按 4 单位量化桶，

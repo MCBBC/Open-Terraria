@@ -1439,10 +1439,16 @@ export class UI {
     const ghostFrame = slotGhostFrame(where, i);
     if (ghostFrame >= 0) s.appendChild(makeSlotGhostEl(ghostFrame));
     s.addEventListener('mousedown', (e) => {
+      // ★BJ328（2026-09-24）：本闭包族【禁止词法自引宿主元素】——曾捕 `s`（dataset
+      //  探针 + rcHold el 槽），监听器注册 ↔ 闭包上下文 ↔ 宿主元素构成跨组件环，
+      //  退世界 detach 后 Oilpan 不收（堆快照定谳：游离 sw-slot 仅剩 listener 环
+      //  持有，每重进世界整批滞留=+~900 JSEventListeners）。统一改经
+      //  e.currentTarget 取宿主（分发期等价同一元素），闭包槽表不再含元素引用。
+      const host = e.currentTarget as HTMLElement;
       // ★SW-FX10 债⑪热键锁穿透（Main.cs:44353-44359）：锁定+关包时快捷栏格不是
       //  mouseInterface——不 stopPropagation/preventDefault，事件透传 window（domTargets
       //  按 data-sw-world-passthrough 豁免 → 世界使用/挖掘链照常吃这一按）
-      if (s.dataset.swWorldPassthrough === '1') return;
+      if (host.dataset.swWorldPassthrough === '1') return;
       e.stopPropagation();
       e.preventDefault();
       if (e.button === 2) {
@@ -1531,12 +1537,12 @@ export class UI {
         //  不挂 rcHold。
         if (ctx === 9 || ctx === 11) {
           if (!heldStacks) { this.swapVanityEquip(i); return; }
-          this.rcHold = { where, i, el: s };
+          this.rcHold = { where, i, el: host };
           if (this.pickupEquipIntoMouse(where, i)) this.refreshStackSplitCooldown();
           return;
         }
         if (ctx === 8 || ctx === 10 || ctx === 12 || (ctx >= 16 && ctx <= 20) || ctx === 33) {
-          this.rcHold = { where, i, el: s };
+          this.rcHold = { where, i, el: host };
           if (this.pickupEquipIntoMouse(where, i)) this.refreshStackSplitCooldown();
           return;
         }
@@ -1554,7 +1560,7 @@ export class UI {
         //  原版 RightClick case 0/3/4/32 装备门 fall-through（含钱币 1/弹药 2 无 switch
         //  case 直落）→ PickupItemIntoMouse 取【1】到光标 :1685-1690）。rcHold 挂接=
         //  按住连取电平面（tickStackSplitMain 逐拍重跑本臂）。
-        this.rcHold = { where, i, el: s };
+        this.rcHold = { where, i, el: host };
         this.runPickupArm(where, i, cur);
         return;
       }
@@ -1579,7 +1585,7 @@ export class UI {
     // ★反馈轮7:vanilla 布局显式传自身为 anchor——tooltip 定位回退的 slotEl(i,where)
     //  全局首匹配在开包态命中【隐藏热键栏】(0-9 DOM 序在前,rect=(0,0))→ 气泡钉
     //  左上角(用户报 ESC 开包热栏格气泡错位);classic 不传=行为零变化白名单
-    bindHint(s, () => this.showSlotHintTouch(i, where, this._builtLayout === 'vanilla' ? s : undefined));
+    bindHint(s, (host) => this.showSlotHintTouch(i, where, this._builtLayout === 'vanilla' ? host : undefined));   // ★BJ328:宿主经形参注入,闭包不自引 s
     s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
     s.addEventListener('contextmenu', (e) => e.preventDefault());
     return s;
@@ -2412,7 +2418,7 @@ export class UI {
       const iid = ITEM_BY_KEY[key];
       if (iid === undefined) return;
       const left = inv.add(iid, n ?? 1);
-      if (left > 0) game.spawnDrop(px, py, key, left, 0, -2); // 溢出落地（:6817-6820）
+      if (left > 0) game.spawnDrop(px, py, key, left); // 溢出落地（GetOrDropItem 尾 RequestNewItem(base.Center) :7202 velocity=null→随机,BJ326）
     }, {
       hardMode: !!game.world.flags.hardMode,   // OpenPresent :6654 硬模式门读档
       remixWorld: !!game.world.seedFlags?.remix,
@@ -2856,7 +2862,10 @@ export class UI {
           // NPCName.None → 该旗对应 NPC 的显示名（原版由旗帜 tooltip 代码动态注入）
           if (tip && tip.includes('NPCName.None')) {
             const bn = bannerNpcOfItem(vid);
-            if (bn > 0) tip = tip.split('NPCName.None').join(Lang.npcName(bn) ?? '');
+            // ★BJ334(2026-09-24)：负 netID 旗也注入名——绿史莱姆旗 item 2928 →
+            //  BannerToNPC(119)=-3（BannerSystem.cs:1337）,原版 tooltip 名走负表
+            //  （Lang.cs:186-189）。哨兵 -1（非旗帜）与 0 仍排除。
+            if (bn > 0 || bn <= -2) tip = tip.split('NPCName.None').join(Lang.npcName(bn) ?? '');
           }
           staticTip = tip || null;
         }
@@ -3284,7 +3293,7 @@ export class UI {
       const left = this.game.player.inv.add(h.id, h.stack, h.prefix, h.placeStyle, false, false, !!h.favorited);
       if (left > 0) {
         const p = this.game.player;
-        this.game.spawnDrop(p.cx, p.cy, hDef?.key ?? '', left, 0, -2, h.placeStyle);
+        this.game.spawnDrop(p.cx, p.cy, hDef?.key ?? '', left, undefined, undefined, h.placeStyle);
       }
       this.heldStack = null;
     }
@@ -3502,8 +3511,8 @@ export class UI {
           item.title = `${e.name}  [${e.key}]`;
           // 悬停 = 背包同款详情气泡（2026-08-27 用户要求）——合成槽语义（stack1 无
           // 词缀/收藏）,锚=行元素;离开即收
-          item.addEventListener('mouseenter', () =>
-            this.showTooltipFor(e.id, 'inv', { slot: { id: e.id, stack: 1 }, anchor: item }));
+          item.addEventListener('mouseenter', (ev) =>
+            this.showTooltipFor(e.id, 'inv', { slot: { id: e.id, stack: 1 }, anchor: ev.currentTarget as HTMLElement }));
           item.addEventListener('mouseleave', () => {
             this.tooltip.style.display = 'none';
             cancelAnimationFrame(this.tooltipPulseRaf);
@@ -3688,7 +3697,7 @@ export class UI {
     panel.appendChild(closeBtn);
     overlay.appendChild(panel);
     overlay.addEventListener('mousedown', (e) => {
-      if (e.target === overlay) this.closeReforge();
+      if (e.target === e.currentTarget) this.closeReforge();
     });
     document.body.appendChild(overlay);
     this.reforgeEl = overlay;
@@ -3936,8 +3945,8 @@ export class UI {
       this.guideSlotMouseDown(e as MouseEvent, () => { refreshHeader(); renderRecipes(); applyFilter(); });
     });
     slotBox.addEventListener('contextmenu', (e) => e.preventDefault());
-    filterInput.addEventListener('input', () => {
-      filterQ = filterInput.value.trim().toLowerCase();
+    filterInput.addEventListener('input', (e) => {
+      filterQ = (e.currentTarget as HTMLInputElement).value.trim().toLowerCase();
       applyFilter();
     });
     const applyFilter = (): void => {
@@ -4463,8 +4472,8 @@ export class UI {
         this.refreshHousingBtn();
         // hover 态 = 原版 EquipPage[7]（DrawPageIcons :43538 悬停叠 [7] 金染）——
         // DOM 等价 = 悬停切 _7 贴图；开态(_5)保持
-        b.addEventListener('mouseenter', () => {
-          if (!this.housingOpen) b.style.backgroundImage = 'url(sprites/vanilla-ui/UI_DisplaySlots_7.png)';
+        b.addEventListener('mouseenter', (e) => {
+          if (!this.housingOpen) (e.currentTarget as HTMLElement).style.backgroundImage = 'url(sprites/vanilla-ui/UI_DisplaySlots_7.png)';
         });
         b.addEventListener('mouseleave', () => this.refreshHousingBtn());
         b.addEventListener('mousedown', (e) => {
@@ -4615,7 +4624,7 @@ export class UI {
           e.stopPropagation();
           if (this.heldStack) return;   // 原版 mouseItem.IsAir 门（:40670）
           this.game.togglePetSlot(k as 0 | 1);
-          this.paintPetEye(eye, k as 0 | 1);
+          this.paintPetEye((e.currentTarget as HTMLElement), k as 0 | 1);
         });
         slotEl.style.position = 'relative';
         slotEl.appendChild(eye);
@@ -4745,11 +4754,11 @@ export class UI {
       b.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none;'
         + `border:none; background:url(sprites/vanilla-ui/UI_ChestStack_${base}.png) 0 0 / 100% 100%;`
         + 'image-rendering:pixelated; cursor:pointer;';
-      b.addEventListener('mouseenter', () => {
-        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base + 1}.png)`;
+      b.addEventListener('mouseenter', (e) => {
+        (e.currentTarget as HTMLElement).style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base + 1}.png)`;
       });
-      b.addEventListener('mouseleave', () => {
-        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
+      b.addEventListener('mouseleave', (e) => {
+        (e.currentTarget as HTMLElement).style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
       });
       b.addEventListener('mousedown', (e) => {
         e.stopPropagation();
@@ -5109,10 +5118,10 @@ export class UI {
     time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
     block.appendChild(time);
     // 悬停提亮（原版 buffAlpha 悬停 +0.1/t 至 1、离开 -0.05/t 至 0.4 的 CSS 近似）
-    block.addEventListener('mouseenter', () => {
+    block.addEventListener('mouseenter', (e) => {
       icon.style.opacity = '1';
-      const nm = block.dataset.swTipName ?? '';
-      if (nm) this.showBuffTooltip(block, nm, block.dataset.swTipDesc ?? '');
+      const nm = (e.currentTarget as HTMLElement).dataset.swTipName ?? '';
+      if (nm) this.showBuffTooltip((e.currentTarget as HTMLElement), nm, (e.currentTarget as HTMLElement).dataset.swTipDesc ?? '');
     });
     block.addEventListener('mouseleave', () => {
       icon.style.opacity = '0.4';
@@ -6465,15 +6474,15 @@ export class UI {
       // 材料源聚合后仍不可合成 = 置灰（.sw-recipe.no img/span opacity .45）——
       // SW-AV2 起与「需动用箱料」的排序垫底层解耦：垫底层行样式正常、可点击
       row.classList.toggle('no', rec.count <= 0);
-      row.addEventListener('mouseenter', () => {
+      row.addEventListener('mouseenter', (e) => {
         // 悬停预选两门（2026-08-21/24/25 定标,只动材料格不动列表）：
         // mousemove 门 150ms——滚动经停行无伴随 mousemove,不预选;
         // 滚轮门 350ms——滚动手势期间不预选
         if (performance.now() - this.craftMouseMoveLast > 150) return;
         if (performance.now() - this.craftWheelLast < 350) return;
         this.craftHoverEl?.classList.remove('hov');
-        row.classList.add('hov');
-        this.craftHoverEl = row;
+        (e.currentTarget as HTMLElement).classList.add('hov');
+        this.craftHoverEl = (e.currentTarget as HTMLElement);
         if (this.hoverFocus !== idx) { this.hoverFocus = idx; this.refreshCraftGrid(this.craftAvailRef); }
       });
       row.addEventListener('mousedown', (ev) => {
@@ -6792,6 +6801,22 @@ export class UI {
       // 槽位视图数组（元素为 {el,...} 复合对象——el 指向游离树节点）
       else if (Array.isArray(v) && (v.length === 0 || v.every((x) => x === null || hasNode(x)))) (this as unknown as Record<string, unknown>)[k] = [];
     }
+    // ★BJ328（2026-09-24）：命名不合 *El/*Els 的元素持有字段补扫——上刀反射扫场只认
+    //  (El|Els)$ 后缀，漏掉背包面板树根两字段（invPanel/vinvRoot，7313 处同指一棵树）。
+    //  退世界后仍钉整棵游离树（~700 元素/~950 监听器）；teardownInventoryPanel 只在
+    //  【重建时】跑，菜单期与「重建后旧树」两形态都靠这里摘。下局 initInGame→
+    //  buildInventoryFor 全部重填，无消费窗（回标题路径无背包面板读写）。
+    this.invPanel = null as unknown as HTMLElement;
+    this.vinvRoot = null;
+    this.vinvSlots.clear();
+    this.vinvLayoutItems = [];
+    this.vinvShopCells = [];
+    this.vinvCraftCellEls = [];
+    this.loadoutBtns = [];
+    this.pvpTeamBtns = [];
+    this.vinvQuickBtn = this.vinvSortBtn = this.vinvBestiaryBtn = this.vinvEmoteBtn = null;
+    this.vinvTabMisc = this.vinvTabHousing = this.vinvTabCamera = null;
+    this.vinvHousingPage = null;
   }
 
   /** 摘除 Game 引用(quitToMenu→closeAll 调用):防旧 Game 整图(世界 store
@@ -7374,17 +7399,18 @@ export class UI {
     {
       const b = btn(32, 30);
       this.vinvQuickBtn = b;
-      const paintQuick = (): void => {
+      // ★BJ328:paintQuick 走形参注入(闭包不捕 b;原 mouseleave 直挂 paintQuick=注册↔闭包↔b 环)
+      const paintQuick = (host: HTMLElement): void => {
         const base = options.data.quickStackMode === 'smart' ? 2 : 0;
-        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
-        b.style.backgroundSize = '100% 100%';
+        host.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
+        host.style.backgroundSize = '100% 100%';
       };
-      paintQuick();
-      b.addEventListener('mouseenter', () => {
+      paintQuick(b);
+      b.addEventListener('mouseenter', (e) => {
         const base = options.data.quickStackMode === 'smart' ? 3 : 1;
-        b.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
+        (e.currentTarget as HTMLElement).style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${base}.png)`;
       });
-      b.addEventListener('mouseleave', paintQuick);
+      b.addEventListener('mouseleave', (e) => paintQuick(e.currentTarget as HTMLElement));
       b.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         if (e.button !== 0) return;
@@ -7396,7 +7422,7 @@ export class UI {
         e.preventDefault();
         e.stopPropagation();
         void options.set('quickStackMode', options.data.quickStackMode === 'quick' ? 'smart' : 'quick');
-        paintQuick();
+        paintQuick(e.currentTarget as HTMLElement);   // ★BJ328:形参注入(原 paintQuick() 闭包捕 b)
         this.game.sfx.play('menuTick', 1);
       });
       pos(b, () => quickStackXY(!!this.vinvLayoutCtx?.chestOpen));
@@ -7492,7 +7518,7 @@ export class UI {
         p.hideVisibleAccessory[slot] = !p.hideVisibleAccessory[slot];
         this.game!.sfx.play('menuTick');
         this.paintAccEyes();
-        this.showBuffTooltip(eye, eye.dataset.swTipText ?? '', '');   // ★反馈轮6:点击即刷新(mousedown 必在悬停态)
+        this.showBuffTooltip((e.currentTarget as HTMLElement), (e.currentTarget as HTMLElement).dataset.swTipText ?? '', '');   // ★反馈轮6:点击即刷新(mousedown 必在悬停态)
       });
       this.accEyeEls.set(slot, eye);   // 复用 paintAccEyes 共享重刷(:1405)
       this.paintAccEye(eye, slot);
@@ -7515,11 +7541,11 @@ export class UI {
         b.style.backgroundImage = 'url(sprites/vanilla/Extra_259.png)';
         b.style.backgroundSize = '300% 300%';
         b.style.backgroundPosition = `0% ${k * 50}%`;
-        b.addEventListener('mouseenter', () => {
-          if (this.game.player.inv.currentLoadout !== k) b.style.backgroundPosition = `100% ${k * 50}%`;
+        b.addEventListener('mouseenter', (e) => {
+          if (this.game.player.inv.currentLoadout !== k) (e.currentTarget as HTMLElement).style.backgroundPosition = `100% ${k * 50}%`;
         });
-        b.addEventListener('mouseleave', () => {
-          if (this.game.player.inv.currentLoadout !== k) b.style.backgroundPosition = `0% ${k * 50}%`;
+        b.addEventListener('mouseleave', (e) => {
+          if (this.game.player.inv.currentLoadout !== k) (e.currentTarget as HTMLElement).style.backgroundPosition = `0% ${k * 50}%`;
         });
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
@@ -7550,7 +7576,7 @@ export class UI {
         + 'padding-top:2px; font-size:13px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000;';
       defWrap.appendChild(defNum);
       defRow.appendChild(defWrap);
-      defRow.addEventListener('mouseenter', () => {
+      defRow.addEventListener('mouseenter', (e) => {
         if (!this.game) return;
         const p = this.game.player;
         const st = p.defense;
@@ -7562,7 +7588,7 @@ export class UI {
         if (dl >= GDL.LEGENDARY) tipLines.push(Lang.text('UI.Legendary'));
         else if (dl >= GDL.MASTER) tipLines.push(Lang.text('UI.Master'));
         else if (dl >= GDL.EXPERT) tipLines.push(Lang.text('UI.Expert'));
-        this.showBuffTooltip(defRow, tipLines[0], tipLines.slice(1).join('\n'));
+        this.showBuffTooltip((e.currentTarget as HTMLElement), tipLines[0], tipLines.slice(1).join('\n'));
       });
       defRow.addEventListener('mouseleave', () => this.hideBuffTooltip());
       pageEquip.appendChild(defRow);
@@ -7697,8 +7723,8 @@ export class UI {
           e.stopPropagation();
           if (this.heldStack) return;
           this.game.togglePetSlot(m as 0 | 1);
-          this.paintPetEye(eye, m as 0 | 1);
-          this.showBuffTooltip(eye, eye.dataset.swTipText ?? '', '');   // ★反馈轮6:点击即刷新
+          this.paintPetEye((e.currentTarget as HTMLElement), m as 0 | 1);
+          this.showBuffTooltip((e.currentTarget as HTMLElement), (e.currentTarget as HTMLElement).dataset.swTipText ?? '', '');   // ★反馈轮6:点击即刷新
         });
         this.paintPetEye(eye, m as 0 | 1);
         pageMisc.appendChild(eye);
@@ -8187,9 +8213,9 @@ export class UI {
     nearBtn.style.cssText = 'width:32px; height:34px; padding:0;';
     nearBtn.appendChild(nearImg);
     // ★2026-09-13 用户要求:hover 态(帧 1/3)+ 自有气泡(title 原生气泡慢)
-    nearBtn.addEventListener('mouseenter', () => {
+    nearBtn.addEventListener('mouseenter', (e) => {
       nearImg.src = `sprites/vanilla-ui/UI_ChestCraft_${options.data.craftFromNearbyChests ? 1 : 3}.png`;
-      this.showBuffTooltip(nearBtn, Lang.text(options.data.craftFromNearbyChests
+      this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.text(options.data.craftFromNearbyChests
         ? 'GameUI.CraftFromNearbyChestsOn' : 'GameUI.CraftFromNearbyChestsOff'), '');
     });
     nearBtn.addEventListener('mouseleave', () => {
@@ -8328,11 +8354,11 @@ export class UI {
     this.vinvGridToggleImg = img;
     this.vinvSyncGridToggle();
     // ★2026-09-13 用户要求:hover 名走自有气泡(showBuffTooltip),弃原生 title(慢)
-    btn.addEventListener('mouseenter', () => {
+    btn.addEventListener('mouseenter', (e) => {
       this.vinvGridToggleHover = true;
       this.vinvSyncGridToggle();                        // num += flag.ToInt()(:291)
       this.game.sfx.play('menuTick', 1);                // DoStatefulTickSound(Main.cs:3333-3344)沿
-      this.showBuffTooltip(btn, Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl)), '');
+      this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl)), '');
     });
     btn.addEventListener('mouseleave', () => {
       this.vinvGridToggleHover = false;
@@ -8346,7 +8372,7 @@ export class UI {
         // 右键支(:322-331):Classic↔Modern 循环 + PlaySound(12)
         void options.set('craftingGridControl',
           cycleCraftingGridControl(options.data.craftingGridControl));
-        this.showBuffTooltip(btn, Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl)), '');
+        this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.text(craftingWindowTextTipKey(options.data.craftingGridControl)), '');
         this.game.sfx.play('menuTick', 1);
         return;
       }
@@ -8468,11 +8494,11 @@ export class UI {
         + `background-position:${mcraftIconBgX(fb.icon)}px 0px;`;
       b.appendChild(tab);
       b.appendChild(icon);
-      b.addEventListener('mouseenter', () => {
+      b.addEventListener('mouseenter', (e) => {
         this.vinvModernFilterHovers[i] = true;
         this.game.sfx.play('menuTick', 1);            // button_OnMouseOver :76-79 Sound 12
         // ShowButtonName :128-135 → ★2026-09-13 反馈轮6:自有气泡替代 title
-        this.showBuffTooltip(b, Lang.text(fb.l10n), '');
+        this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.text(fb.l10n), '');
         this.vinvSyncModernFilterBtn(i);
       });
       b.addEventListener('mouseleave', () => {
@@ -8604,8 +8630,8 @@ export class UI {
     //  (UISearchBar.cs:74 ! takingInput 臂)——scoped 规则在 vinvStyleEnsure
     input.style.cssText = 'flex:1; min-width:0; background:transparent; border:none; outline:none; color:#fff;'
       + 'font-size:16px; padding:0 24px 0 12px; font-family:inherit;';
-    input.addEventListener('input', () => {
-      this.vinvModernSearch = input.value;
+    input.addEventListener('input', (e) => {
+      this.vinvModernSearch = (e.currentTarget as HTMLInputElement).value;
       // SetSearchFilter+ResetRecipes(OnSearchContentsChanged :649-653);空白归零走
       // normalizeSearch(EntryFilterer.SetSearchFilter :85-94 IsNullOrWhiteSpace→null)
       this.vinvModernResetRecipes();
@@ -8946,25 +8972,25 @@ export class UI {
     let hoverSounded = false;   // :116-121 isHoveringOverHandle 沿触发;拖拽中不重播(RB29b F3 判)
     const myOf = (e: MouseEvent): number => e.clientY / this.vinvModernScaleK();
     // 柄色 = White*(拖拽|悬停 ? 1 : 0.85)(:123)——enter/leave 即 isHoveringOverHandle 域
-    handle.addEventListener('mouseenter', () => {
+    handle.addEventListener('mouseenter', (e) => {
       hovering = true;
-      handle.style.opacity = '1';
+      (e.currentTarget as HTMLElement).style.opacity = '1';
       if (!hoverSounded) {
         hoverSounded = true;
         if (!dragging) this.game.sfx.play('menuTick', 1);        // ★RB29b F3:进柄 Sound 12(:118-121)
       }
     });
-    handle.addEventListener('mouseleave', () => {
+    handle.addEventListener('mouseleave', (e) => {
       hovering = false;
       hoverSounded = false;
-      if (!dragging) handle.style.opacity = `${MCRAFT_SCROLLBAR_HANDLE_ALPHA}`;
+      if (!dragging) (e.currentTarget as HTMLElement).style.opacity = `${MCRAFT_SCROLLBAR_HANDLE_ALPHA}`;
     });
     handle.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       const g = this.vinvModernGridGeometry();
       if (!g) return;
       dragging = true;
-      handle.style.opacity = '1';                                // :123 拖拽 α 1
+      (e.currentTarget as HTMLElement).style.opacity = '1';                                // :123 拖拽 α 1
       // _dragYOffset = mouseY − handleRect.Y(:146-148;handleRect.Y = sbarY + 5 +
       //   innerH·(pos/max) − 3,即 GetHandleRectangle :78-84 屏位)
       const handleRectY = g.scrollbar.y + 5 + Math.trunc(g.scrollbar.innerH * (this.vinvModernViewPos / Math.max(1, g.contentH))) - 3;
@@ -9297,10 +9323,10 @@ export class UI {
    *  ★变量名 slotEl:classic 网格域「cell 不绑 wheel」反向锚(FX30/RB13b)不受扰——
    *  本域格面绑 wheel 是窗列表滚动(UIList.cs:109-115),非 classic 分页面 */
   private vinvBindModernCell(slotEl: HTMLElement, r: VanillaRecipeLike, availNow: boolean): void {
-    slotEl.addEventListener('mouseenter', () => {
+    slotEl.addEventListener('mouseenter', (e) => {
       const iid = this.game.itemId(vanillaItemKey(r.create) ?? '');
       if (iid > 0) {
-        this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: r.createStack }, anchor: slotEl });
+        this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: r.createStack }, anchor: (e.currentTarget as HTMLElement) });
         if (!availNow) {
           const line = document.createElement('div');
           line.style.color = MCRAFT_MISSING_COLOR;
@@ -9365,8 +9391,8 @@ export class UI {
     if (!availNow && !this.vinvGuideMenuOpen) img.style.filter = `grayscale(1) brightness(${MCRAFT_DISABLED_GRAY})`;
     slot.appendChild(img);
     if (r.createStack > 1) slot.appendChild(el('span', 'cnt', String(r.createStack)));
-    slot.addEventListener('mouseenter', () => {
-      if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: r.createStack }, anchor: slot });
+    slot.addEventListener('mouseenter', (e) => {
+      if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: r.createStack }, anchor: (e.currentTarget as HTMLElement) });
     });
     slot.addEventListener('mouseleave', () => {
       this.tooltip.style.display = 'none';
@@ -9428,9 +9454,9 @@ export class UI {
       cnt.style.cssText = `position:absolute; left:${cp.x}px; top:${cp.y}px; color:${mcraftOwnedCountColor(enough)};`
         + `font-size:${Math.max(8, Math.trunc(11 * mp.scale))}px; text-shadow:1px 1px 0 #000; pointer-events:none;`
         + (showOwned ? '' : 'display:none;');
-      box.addEventListener('mouseenter', () => {
+      box.addEventListener('mouseenter', (e) => {
         const miid = k2 ? this.game.itemId(k2) : -1;
-        if (miid > 0) this.showTooltipFor(miid, 'inv', { slot: { id: miid, stack: req.stack }, anchor: box });
+        if (miid > 0) this.showTooltipFor(miid, 'inv', { slot: { id: miid, stack: req.stack }, anchor: (e.currentTarget as HTMLElement) });
       });
       box.addEventListener('mouseleave', () => {
         this.tooltip.style.display = 'none';
@@ -9618,9 +9644,9 @@ export class UI {
       cell.style.top = `${pos.y}px`;
       // 悬停(:528-540):mouseInterface + craftingHide + HoverItem=clone + MouseHover(22) +
       // hoverItemName(名/×stack)——本仓 tooltip 全载荷面与列表格同源(showTooltipFor)
-      cell.addEventListener('mouseenter', () => {
+      cell.addEventListener('mouseenter', (e) => {
         const iid = this.game.itemId(outKey ?? '');
-        if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: rec.r.createStack }, anchor: cell });
+        if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: rec.r.createStack }, anchor: (e.currentTarget as HTMLElement) });
       });
       cell.addEventListener('mouseleave', () => {
         this.tooltip.style.display = 'none';
@@ -9929,10 +9955,10 @@ export class UI {
     hammer.appendChild(hImg);
     // 悬停面(:42371-42374:hoverItemName=inter[19] MouseText + !mouseReforge→PlaySound(12)
     // +mouseReforge=true;:42383 离开锤盒 mouseReforge=false)——旧码只换贴图无悬停名/音
-    hammer.addEventListener('mouseenter', () => {
+    hammer.addEventListener('mouseenter', (e) => {
       hImg.src = 'sprites/vanilla-ui/UI_Reforge_1.png';
       this.game.sfx.play('menuTick', 1);
-      this.showBuffTooltip(hammer, Lang.inter(19), '');
+      this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.inter(19), '');
     });
     hammer.addEventListener('mouseleave', () => {
       hImg.src = 'sprites/vanilla-ui/UI_Reforge_0.png';
@@ -10285,7 +10311,7 @@ export class UI {
         else toggleBuilderAccBit(st, slot.accIndex);
         this.game?.sfx.play('menuTick', 1);       // SoundEngine.PlaySound(12) :48203 等
         paintSlot(i);
-        this.showBuffTooltip(b, baccTipOf(slot.accIndex), '');   // 点击即刷新(mousedown 必在悬停态)
+        this.showBuffTooltip((e.currentTarget as HTMLElement), baccTipOf(slot.accIndex), '');   // 点击即刷新(mousedown 必在悬停态)
       });
       root.appendChild(b);
       slotEls[i] = b;
@@ -10334,7 +10360,7 @@ export class UI {
         toggleBuilderAccBit(statusOf(), BACC.BlockSwap);
         this.game?.sfx.play('unlock', 1);           // SoundEngine.PlaySound(22) :43268
         paint();
-        this.showBuffTooltip(b, Lang.text(statusOf()[BACC.BlockSwap] === 0 ? 'GameUI.BlockReplacerOn' : 'GameUI.BlockReplacerOff'), '');
+        this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.text(statusOf()[BACC.BlockSwap] === 0 ? 'GameUI.BlockReplacerOn' : 'GameUI.BlockReplacerOff'), '');
       });
       root.appendChild(b);
       this.vinvLayoutItems.push({
@@ -10368,7 +10394,7 @@ export class UI {
         toggleBuilderAccBit(statusOf(), BACC.TorchBiome);
         this.game?.sfx.play('unlock', 1);           // SoundEngine.PlaySound(22) :43308
         paint();
-        this.showBuffTooltip(b, Lang.text(statusOf()[BACC.TorchBiome] === 0 ? 'GameUI.TorchTypeSwapperOn' : 'GameUI.TorchTypeSwapperOff'), '');
+        this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.text(statusOf()[BACC.TorchBiome] === 0 ? 'GameUI.TorchTypeSwapperOn' : 'GameUI.TorchTypeSwapperOff'), '');
       });
       root.appendChild(b);
       this.vinvLayoutItems.push({
@@ -10548,7 +10574,7 @@ export class UI {
     input.addEventListener('keydown', (e) => {
       e.stopPropagation();                          // 键位面隔离（Esc 链/热栏数字不串）
       if (e.key === 'Enter') {                      // UIVirtualKeyboard Enter=submit
-        this.chestRenameSubmit(input.value);
+        this.chestRenameSubmit((e.currentTarget as HTMLInputElement).value);
         this.closeChestRenameDialog();
       } else if (e.key === 'Escape') {              // UIVirtualKeyboard Esc=cancel
         UISfx.click();
@@ -10727,7 +10753,7 @@ export class UI {
           }
           return;
         }
-        if (cell.dataset.ok !== '1') return;   // 买不起 = 无动作(原版 BuyItem 静默失败)
+        if ((e.currentTarget as HTMLElement).dataset.ok !== '1') return;   // 买不起 = 无动作(原版 BuyItem 静默失败)
         const bulk = e.shiftKey || undefined;  // Shift 批量买 10(GetBulkBuyAmount ItemSlot.cs:2861-2870)
         const held = this.heldStack;
         if (held) {
@@ -10738,10 +10764,10 @@ export class UI {
         this.game?.npcShopBuy(it.vanillaId, it.buyback, undefined, bulk);
       });
       // 格位悬停 = MouseHover context 15(单源 showShopCellTooltip;SW-BJ22 语义面)
-      cell.addEventListener('mouseenter', () => {
+      cell.addEventListener('mouseenter', (e) => {
         const it = entry();
         if (!it) return;
-        this.showShopCellTooltip({ vid: it.vanillaId, stack: 1, prefix: it.prefix, buyback: it.buyback }, cell);
+        this.showShopCellTooltip({ vid: it.vanillaId, stack: 1, prefix: it.prefix, buyback: it.buyback }, (e.currentTarget as HTMLElement));
       });
       cell.addEventListener('mouseleave', () => this.showShopCellTooltip(null, null));
       root.appendChild(cell);
@@ -10918,17 +10944,17 @@ export class UI {
       this.refreshAll();
     });
     s.style.setProperty('--slot-alpha', '1');   // 列表格距离渐隐走元素 opacity,退出脉冲
-    s.addEventListener('mouseover', () => {
+    s.addEventListener('mouseover', (e) => {
       // HoverItem = createItem.Clone()(:42978)→ 完整物品 tooltip
       const iid = this.game.itemId(vanillaItemKey(rec.r.create) ?? '');
-      if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: rec.r.createStack }, anchor: s });
+      if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: rec.r.createStack }, anchor: (e.currentTarget as HTMLElement) });
       // hover 态(★用户实测三轮:原版悬停配方=描金背景)
-      if (this.vinvCraftFocusV !== idx) s.style.setProperty('--slot-bgimg', 'url(sprites/vanilla/Inventory_Back14.png)');
+      if (this.vinvCraftFocusV !== idx) (e.currentTarget as HTMLElement).style.setProperty('--slot-bgimg', 'url(sprites/vanilla/Inventory_Back14.png)');
     });
-    s.addEventListener('mouseleave', () => {
+    s.addEventListener('mouseleave', (e) => {
       this.tooltip.style.display = 'none';
       cancelAnimationFrame(this.tooltipPulseRaf);
-      s.style.setProperty('--slot-bgimg',
+      (e.currentTarget as HTMLElement).style.setProperty('--slot-bgimg',
         `url(sprites/vanilla/Inventory_Back${this.vinvCraftFocusV === idx ? 14 : ''}.png)`);
     });
     s.addEventListener('wheel', (e) => this.vinvCraftWheel(e));
@@ -11027,9 +11053,9 @@ export class UI {
       box.appendChild(img);
       if (req.stack > 1) box.appendChild(el('span', 'cnt', String(req.stack)));
       box.style.pointerEvents = 'auto';
-      box.addEventListener('mouseover', () => {
+      box.addEventListener('mouseover', (e) => {
         const iid = k2 ? this.game.itemId(k2) : -1;
-        if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: req.stack }, anchor: box });
+        if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: req.stack }, anchor: (e.currentTarget as HTMLElement) });
       });
       box.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
       box.addEventListener('wheel', (e) => this.vinvCraftWheel(e));

@@ -555,9 +555,16 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
 }
 
 // ============ SpeleothemsAndGemTrees 钟乳石+宝石树（:22196-22282） ============
-export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
+// ★BJ331（2026-09-24）：补 progress.Set 接线（1457 cs:22231-22237——pass 头 Set(0.0)
+//   + 外层每列 Set(i/(maxTilesX-20))）。曾整 pass 零 Set ⇒ 进度短条冻结+worker 静默
+//   看门狗把「大世界慢 pass」误报成「疑似卡死」（用户实报 seed 152394290 大世界
+//   Speleothems 连续告警 71s→199s），180s 硬超时把健康生成杀掉再同步重做一遍。
+//   1457 原文本就逐列 Set，本刀=对齐缺线，非自创。零 RNG 面（gp 仅旁路读值）。
+export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState,
+  gp?: import('../GenProgress').GenProgress): void {
   const g0 = globalThis as { __swSpCap?: (gs: GenState, st: TileStore) => void; __swScanCap?: (x: number, y: number, phase: number) => void };
   try { g0.__swSpCap?.(gs, st); } catch { /* probe */ }
+  gp?.set(0);                                            // cs:22232 Set(0.0)
   const f = gs.seedFlags ?? {};
   const alwaysTry = !!(f.tenthAnniversary || f.drunkWorld);
   const oceanDepths = (x: number, y: number): boolean => {
@@ -571,7 +578,9 @@ export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
   };
   const rockFamily = (s: number): boolean =>
     STONE_FAMILY.has(s) || TILE_MOSS.has(s);
+  const numDenom = st.w - 20;                            // cs:22233 num = maxTilesX-20
   for (let x = 20; x < st.w - 20; x++) {
+    gp?.set(x / numDenom);                               // cs:22235-22237 Set(i/num) 逐列
     for (let y = Math.floor(gs.worldSurface); y < st.h - 20; y++) {
       g0.__swScanCap?.(x, y, 0);
       // 宝石树段（:22208-22237）：掷骰在液体判定之前（短路与求值序 1:1）

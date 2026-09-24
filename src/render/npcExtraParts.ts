@@ -6,10 +6,11 @@
 import type { Enemy } from '../entities/Enemy';
 import { SpriteAtlas } from '../assets/SpriteAtlas';
 import { dustPremulBake } from '../fx/VanillaDust';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
-/** GlobalTimeWrappedHourly 近似（Main.cs:16777 每帧 +1/60s，3600 回卷） */
+/** GlobalTimeWrappedHourly（Main.cs:17014——★BJ330 收编 GameTime 单源,暂停/失焦冻结） */
 function gtw(): number {
-  return (performance.now() / 1000) % 3600;
+  return globalTimeWrappedHourly();
 }
 
 type Ctx = CanvasRenderingContext2D;

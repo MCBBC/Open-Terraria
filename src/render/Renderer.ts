@@ -768,6 +768,7 @@ import {
   BigProgressBarSystem, drawBigProgressBar, refLifeMaxOf,
   type BarContext, type BarNpc, type CollectInfo,
 } from './BossBars';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源（Main.TotalGameTime 等价）
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; ax?: number; ay?: number; }
 
@@ -4338,7 +4339,9 @@ export class Renderer {
           if (p.cell < 0) return false;   // 外部 stub（测试桩）→ 本段整体回落 2D
           const e = this.worldPageTex(glw, kind, Math.floor(p.cell / 16), chunks);
           if (!e) return false;
-          glw.quadExact(e, p.sx, p.sy, CHUNK * ts, CHUNK * ts, xd0, yd0, xd1 - xd0, yd1 - yd0);
+          // ★quadTile=gl_FragCoord texelFetch（任意 offset/相位精确;quadExact 的
+          //   varying 插值误差在大幅 offset 下 tie 分裂,见 GLSpriteLayer TILE_*_SRC 注）
+          if (!glw.quadTile(e, p.sx, p.sy, CHUNK * ts, CHUNK * ts, xd0, yd0, xd1 - xd0, yd1 - yd0)) return false;
         }
       }
       glw.end();   // present: FBO('world') → pipe.canvas（blend off 离场,1:1 拷贝）
@@ -6837,7 +6840,7 @@ export class Renderer {
           const key = d.dyeVid * 2097152 + d.fx * 2048 + d.fy;   // ★C1 数值键（单射性见缓存字段注）
           let canvas: HTMLCanvasElement | null | undefined = isStatic ? this.dustDyeCache!.get(key) : undefined;
           if (canvas === undefined) {
-            dyeEmu.uniforms.uTime = (performance.now() / 1000) % 3600;
+            dyeEmu.uniforms.uTime = globalTimeWrappedHourly();   // ★BJ330 GTW 单源
             dyeEmu.uniforms.uDirection = player ? player.facing : 1;
             if (dyeEmu.tech === 'ArmorReflective' || dyeEmu.tech === 'ArmorReflectiveColor') {
               dyeEmu.uniforms.uLightSource = player ? this.reflectiveLightSource(player) as [number, number, number, number] : [0, 0, 0, 0];
@@ -9378,7 +9381,7 @@ export class Renderer {
       // 环绕 count 份拷贝。锚点 = Center（:26091/:26107/:26123）——与 frame 族
       // Bottom+4 不同源，故不沿用 bx/by，按 noGravity 自行换算盒心。
       const prm = Renderer.npcGlowOrbitParams(
-        e.vanillaId ?? -1, performance.now() / 1000, e.ai2,
+        e.vanillaId ?? -1, globalTimeWrappedHourly(), e.ai2,   // ★BJ330 GTW 单源（num300 呼吸钟=Main.cs:23481-23566 cos(GTW%period)）
         (e.vanillaId === 568 || e.vanillaId === 569) ? witherBeastLocal(e)[1] : e.lai3,
       );
       if (prm) {
@@ -9389,7 +9392,7 @@ export class Renderer {
         const ocy = dyo;
         const ox = -r.sw / 2, oy = ocy - r.sh / 2;             // 帧左上（盒心 − 半帧）
         const base = (127 - alphaRaw) / 255;                   // Color(127-α,…,0) 基底
-        const t = performance.now() / 1000;
+        const t = globalTimeWrappedHourly();                   // ★BJ330 GTW 单源
         // 中心层：541/568 原色（无 GetAlpha/无 num300 衰减）；661 White×0.1（:26113）
         if (e.vanillaId === 661) {
           ctx.globalAlpha = Math.max(0, Math.min(1, 0.1));
@@ -9423,7 +9426,7 @@ export class Renderer {
       else if (e.vanillaId === 564 || e.vanillaId === 565) { alpha = 0.5 * opacity; } // :23484 white.A/2×Opacity
       else if (e.vanillaId === 548) {
         // :23590-23596 num63/65 三秒呼吸三角波 ×0.6 紫底（(140,50,255)）
-        const t3 = (performance.now() / 1000) % 3 / 3;
+        const t3 = globalTimeWrappedHourly() % 3 / 3;   // ★BJ330 GTW 单源（num63/65 三秒呼吸=GTW%3）
         flashPulse = t3 > 0.5 ? 1 - t3 : t3;
         alpha = 0.6 * Math.max(0, flashPulse);
       } else if (e.vanillaId === 399) { alpha = (127 - alphaRaw / 2) / 255; }  // :24568 Color(127-α/2,…)
@@ -10305,7 +10308,7 @@ export class Renderer {
       };
       const s1 = mkSampler('Extra_180'), s2 = mkSampler('Extra_179');
       const u = defaultUniforms();
-      u.uTime = (performance.now() / 1000) % 3600;
+      u.uTime = globalTimeWrappedHourly();   // ★BJ330 GTW 单源（SM2 pass uTime=Apply 口径）
       u.uSourceRect = [sx, sy, sw, sh];
       u.uImageSize0 = [img.width, img.height];
       u.uColor = [1, 1, 1]; u.uOpacity = 1; u.uSaturation = 1;
@@ -10520,8 +10523,8 @@ export class Renderer {
    *  Lerp(白,(50,0,160),Remap(lai3,0,20,0,1))，alpha×(1-r²)，:26755-26762+:26790）
    *  ④Extra_245 前层红雾【源矩形=本体同格帧 rect】（:26792-26800 第 3 参 rectangle；
    *  曾整图压缩进帧格；★SW-RB10e 移至 drawDeerclopsGlow）。
-   *  GT=GlobalTimeWrappedHourly（进程秒%3600，Main.cs:16777——★暂停冻结
-   *  GlobalTimerPaused 门 :17013,本仓 performance.now 暂停不掉表,登记） */
+   *  GT=GlobalTimeWrappedHourly（Main.cs:16777——★BJ330 债清偿：钟源收编 GameTime
+   *  单源（60Hz 逻辑 tick）,暂停/失焦冻结,与原版 GlobalTimerPaused 门同相） */
   private drawDeerclopsGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
@@ -10543,7 +10546,7 @@ export class Renderer {
     const facingRight = e.facing > 0;
     const mirrored = !facingRight;                                        // 贴图朝右
     const originX = facingRight ? 106 : vw - 106, originY = vh - 4;
-    const GT = (performance.now() / 1000) % 3600;
+    const GT = globalTimeWrappedHourly();   // ★BJ330 GTW 单源（Main.cs:16777——旧债「本仓 performance.now 暂停不掉表,登记」今清偿:暂停/失焦冻结）
     // ---- 状态量+层计划（纯函数 deerclopsDrawLayers,SW-BJ51 抽出可测）----
     const lai3 = e.lai3;
     const { layers, tPurple } = deerclopsDrawLayers({ lai3, ai0: e.ai0, ai1: e.ai1, opacity, gt: GT });
@@ -10595,7 +10598,7 @@ export class Renderer {
     const facingRight = e.facing > 0;
     const mirrored = !facingRight;
     const originX = facingRight ? 106 : vw - 106, originY = vh - 4;
-    const GT = (performance.now() / 1000) % 3600;
+    const GT = globalTimeWrappedHourly();   // ★BJ330 GTW 单源
     const lai3 = e.lai3;
     const { layers } = deerclopsDrawLayers({ lai3, ai0: e.ai0, ai1: e.ai1, opacity, gt: GT });
     if (!layers.some((l) => l.kind === 'redGhost' || l.kind === 'fog')) return;
@@ -11130,8 +11133,8 @@ export class Renderer {
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
     };
-    // num14：正弦脉动 0..1（:26500），二阶段轨道半径 Lerp(2,8)
-    const pulse = Math.sin((performance.now() / 1000) * Math.PI * 2 * 0.5) * 0.5 + 0.5;
+    // num14：正弦脉动 0..1（Main.cs:27010 sin(GTW×2π×0.5)——★BJ330 GTW 单源）
+    const pulse = Math.sin(globalTimeWrappedHourly() * Math.PI * 2 * 0.5) * 0.5 + 0.5;
     // ---- 攻击态 8/9/10 残影环（:26394-26441 包络 + :26442-26487 环体）----
     const atk = e.ai0;
     let num4 = 1;                                   // color ×= num4（:26394/26411）
@@ -11308,7 +11311,7 @@ export class Renderer {
       frac: Math.max(0, Math.min(1, shield / shieldMax(world))),
       breakT: breaking ? Math.min(1, e.ai3 / 30) : -1,    // num321=min(ai3/30,1)（:24586-24587）
       reformT: !breaking && e.ai3 > 0 && e.ai3 <= 30 ? 1 - e.ai3 / 30 : -1,  // num319（:24562）
-      time: performance.now() / 1000,
+      time: globalTimeWrappedHourly(),   // ★BJ330 GTW 单源（ForceField shader Apply uTime 口径,Main.cs:24559-24574）
     });
   }
 
@@ -12503,7 +12506,7 @@ export class Renderer {
   private drawNotificationIcon(ctx: CanvasRenderingContext2D, x: number, y: number, rotMul: number, worldSpace: boolean): void {
     const img = quickiconImg();
     if (!img) return;
-    const t = performance.now() / 1000;
+    const t = globalTimeWrappedHourly();   // ★BJ330 GTW 单源（Utils.DrawNotificationIcon :454-456 GTW%1/%2）
     const amount = Math.sin(Math.PI * 2 * (t % 1)) * 0.5 + 0.5;
     let cr = 255, cg = 255, cb = 255;
     if (worldSpace) {
@@ -12547,7 +12550,7 @@ export class Renderer {
     cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
     const id = cx.getImageData(0, 0, r.sw, r.sh);
     const u = defaultUniforms();
-    u.uTime = (performance.now() / 1000) % 3600;
+    u.uTime = globalTimeWrappedHourly();   // ★BJ330 GTW 单源（SM2 pass uTime=Apply 口径）
     u.uSourceRect = [r.sx, r.sy, r.sw, r.sh];
     u.uImageSize0 = [r.img.width, r.img.height];
     runPassOnImageData(pass, id.data, r.sw, r.sh, u, [],
@@ -13284,7 +13287,7 @@ export class Renderer {
     cc.drawImage(mask, 0, 0);
     const id = cc.getImageData(0, 0, canvas.width, canvas.height);
     const u = defaultUniforms();
-    u.uTime = (performance.now() / 1000) % 3600;   // Main.GlobalTimeWrappedHourly
+    u.uTime = globalTimeWrappedHourly();   // Main.GlobalTimeWrappedHourly——★BJ330 GTW 单源
     runPassOnImageData(pass, id.data, canvas.width, canvas.height, u, [s1]);
     cc.putImageData(id, 0, 0);
     this.hallowBake = { canvas, w: canvas.width, h: canvas.height };
@@ -13334,7 +13337,7 @@ export class Renderer {
   private applyDyeToImageData(data: Uint8ClampedArray, w: number, h: number,
     dye: DyeApply, rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): void {
     const u = dye.uniforms;
-    u.uTime = (performance.now() / 1000) % 3600;   // Main.GlobalTimeWrappedHourly
+    u.uTime = globalTimeWrappedHourly();   // Main.GlobalTimeWrappedHourly——★BJ330 GTW 单源
     u.uSourceRect = rect ? [rect.sx, rect.sy, w, h] : [0, 0, w, h];
     u.uImageSize0 = rect ? [rect.sheetW, rect.sheetH] : [w, h];
     const extra = dye.needsImage1 ? [this.hallowRampSampler() ?? undefined] : [];
@@ -13354,7 +13357,7 @@ export class Renderer {
     dye: DyeApply, vertexColor: [number, number, number],
     rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): boolean {
     const u = dye.uniforms;
-    u.uTime = (performance.now() / 1000) % 3600;   // Main.GlobalTimeWrappedHourly
+    u.uTime = globalTimeWrappedHourly();   // Main.GlobalTimeWrappedHourly——★BJ330 GTW 单源
     u.uSourceRect = rect ? [rect.sx, rect.sy, w, h] : [0, 0, w, h];
     u.uImageSize0 = rect ? [rect.sheetW, rect.sheetH] : [w, h];
     const extra = dye.needsImage1 ? [this.hallowRampSampler() ?? undefined] : [];
@@ -13583,7 +13586,7 @@ export class Renderer {
       if (tex && tex.width > 0) {
         const dy = p.shieldRaised ? -4 : 0;
         if (p.shieldRaised) {
-          const t = (performance.now() / 1000) % 3600;   // Main.GlobalTimeWrappedHourly
+          const t = globalTimeWrappedHourly();   // Main.GlobalTimeWrappedHourly——★BJ330 GTW 单源（PlayerDrawLayers.cs:3083 sin(GTW×2π)）
           const halo = shieldHaloFactor(t);
           const dyeEmu = ad.dyeShield > 0 ? dyeApplyOf(ad.dyeShield) : null;
           if (dyeEmu) dyeEmu.uniforms.uDirection = p.facing;
@@ -16806,7 +16809,7 @@ export class Renderer {
         passes.push({
           kind: 'FilterHeatDistortion', screenRes, screenPos,
           intensity: mono.heatIntensity, opacity: mono.heatOpacity,
-          time: (performance.now() / 1000) % 3600,   // GlobalTimeWrappedHourly(Main.cs:16777)
+          time: globalTimeWrappedHourly(),   // GlobalTimeWrappedHourly(Main.cs:16777)——★BJ330 GTW 单源
         });
       }
       // ---- ★批III尾窗：事件屏效三 pass ----
@@ -16814,7 +16817,7 @@ export class Renderer {
       // ×(0.75−0.5·cd/max)；MaxMoonLordCountdown=3600→我方 countdownMax 同源）
       if (shakeI > 0) {
         passes.push({ kind: 'FilterMoonLordShake', intensity: shakeI,
-          time: (performance.now() / 1000) % 3600 });
+          time: globalTimeWrappedHourly() });   // ★BJ330 GTW 单源
       }
       // ★BJ109-I 塔邻接染色（SceneState.cs:107-110 ManageSpecialBiomeVisuals +
       //  ScreenEffectInitializer.cs:14-17 分塔预设；UseTargetPosition=塔心−(0,10)。
@@ -16835,7 +16838,7 @@ export class Renderer {
           opacity: preset.useOpacity * this._towerFilterOpacity,
           screenRes, screenPos,
           targetPx: [tow.x - screenPos[0], tow.y - screenPos[1]],
-          intensity, progress, time: (performance.now() / 1000) % 3600,
+          intensity, progress, time: globalTimeWrappedHourly(),   // ★BJ330 GTW 单源
         });
       }
       for (const f of mono.visibleFilters()) {
@@ -16865,7 +16868,7 @@ export class Renderer {
             break;
           case 'noir':
             passes.push({ kind: 'FilterNoir', opacity: f.opacity,
-              time: (performance.now() / 1000) % 3600 });
+              time: globalTimeWrappedHourly() });   // ★BJ330 GTW 单源
             break;
           default:
             break;   // moonLord 未入 GL 端口(在 GL 链上方补画见下)
@@ -16891,7 +16894,7 @@ export class Renderer {
     if (mono.heatVisible) {
       mono.drawHeat2D(ctx, this.canvas, viewW, viewH,
         { x: screenPos[0], y: screenPos[1] }, { x: screenRes[0], y: screenRes[1] },
-        (performance.now() / 1000) % 3600);
+        globalTimeWrappedHourly());   // ★BJ330 GTW 单源（=GL FilterHeatDistortion uTime 同口径）
     }
     if (mono.anyInUse) {
       // 月总核心屏幕位（MoonLord 滤镜 UseTargetPosition=npc[398].Center，

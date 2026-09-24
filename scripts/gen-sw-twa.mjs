@@ -53,13 +53,14 @@ self.addEventListener('install', (e) => {
 // ---------- 补丁② 文档 stale-while-revalidate ----------
 const DOC_SRC = `  if (isDoc) {
     e.respondWith((async () => {
-      const cache = await getCache();
+      let cache = null;
+      try { cache = await getCache(); } catch { /* 存储不可用:纯网络直通(同 shell 支 2026-09-24 修) */ }
       try {
         const res = await fetch(req);
-        if (res && res.ok) cache.put(req, res.clone());
+        if (res && res.ok && cache) cache.put(req, res.clone()).catch(() => {});
         return res;
       } catch (err) {
-        const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
+        const hit = cache ? await cache.match(req, { ignoreVary: true }).catch(() => null) : null;
         if (hit) return hit;
         throw err;
       }

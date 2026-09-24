@@ -1520,6 +1520,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       (window as unknown as { __swHousingPanel?: unknown }).__swHousingPanel = null;
       flowGenClient?.terminate();
       flowGenClient = null;
+      // ★BJ328（2026-09-24）：save.worker 常驻单例收刀——terminate + 链槽归零
+      //  （isolate 堆内上一轮存档的全图快照/序列化大垃圾随 isolate 释放；下次
+      //  doSave/importWld/exportWld ensure() 懒重建，SW 预取秒开）。须在 doSave
+      //  全链落定之后（上方 await），无在途作业窗口。
+      saveClient.release();
       ui.closeAll();
       showTitle();
     } finally {

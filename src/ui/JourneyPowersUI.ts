@@ -45,7 +45,7 @@ export function giveItem(game: Game, internalId: number, stack: number): void {
   const key = (def as { key?: string } | undefined)?.key;
   if (left > 0 && key) {
     game.spawnDrop(game.player.cx, game.player.cy,
-      key, left, 0, -2);   // 溢出落地（GetItem 溢出语义）
+      key, left);   // 溢出落地（GetOrDropItem 尾 RequestNewItem :7202 velocity=null→随机,BJ326）
   }
   game.cb.onInventoryChanged?.();
 }

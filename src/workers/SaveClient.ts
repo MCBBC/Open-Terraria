@@ -301,6 +301,27 @@ export class SaveClient {
     }
   }
 
+  /** ★BJ328（2026-09-24）：退世界收刀——terminate 常驻 save.worker + 清串行链槽。
+   *  定谳：saveClient 是模块单例，worker 首次 doSave 后【常驻不退】；每次存档的
+   *  全图快照（结构化克隆 15-60ms memcpy）/RLE/base64/JSON 大中间态都在 worker
+   *  isolate 堆里走一遍，退世界后 isolate 连同堆内克隆垃圾跨局滞留（BJ318 登记
+   *  件1）。取舍=terminate + 懒重建（ SW 预取缓存秒开，prefetchSaveWorker 同款
+   *  通道），不做「复用清空」——isolate 堆无法从外部收缩，重建成本（模块求值
+   *  数 ms+首存时 ensure）落在保存链后台，与 flowGenClient.terminate 同范式。
+   *  链槽 this.chain 兑现后仍钉最近一份存档 JSON 字符串（单槽、跨轮不增长），
+   *  一并归零。调用点=quitToMenu（await doSave 全链落定之后，无在途作业；
+   *  在途作业防御性 reject 走同步回退，与 worker-fatal 同形）。 */
+  release(): void {
+    if (this.worker) {
+      const w = this.worker;
+      this.worker = null;
+      for (const [, p] of this.pending) p.reject(new Error('save worker released'));
+      this.pending.clear();
+      try { w.terminate(); } catch { /* 已死 */ }
+    }
+    this.chain = Promise.resolve();
+  }
+
   /** 懒建 worker(首次 save 时);失败标记 broken 永久回退 */
   ensure(): void {
     if (this.worker || this.broken || typeof Worker === 'undefined') return;

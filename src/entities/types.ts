@@ -90,7 +90,9 @@ export interface GameHooks {
   critters(): unknown[];
   /** 城镇 NPC 列表(受击判定用;Game 实现 = entities.npcs 桶) */
   npcs?(): unknown[];
-  /** 在世界上生成掉落物（返回实体便于染色等后处理） */
+  /** 在世界上生成掉落物（返回实体便于染色等后处理）。x/y=掉落中心锚（盒左上按
+   *  vid 半宽/半高回退,vanilla-itemdims）；vx/vy 缺省 undefined = 原版 NewItem
+   *  velocity=null 随机初速掷（Item.cs:49746-49756,BJ326），显式传值=固定初速面 */
   spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): import('./ItemDrop').ItemDrop | null;
   /** 对玩家造成伤害（attacker 用于荆棘反伤/死亡归因；contactOnly=true 表示伤害源是
    *  NPC 接触（1457 Player.cs:31555-31692 Update_NPCCollision 循环）——荆棘只在接触

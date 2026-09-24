@@ -1737,10 +1737,12 @@ function vanillaGems({ store, rng }: GenCtx) {
 
 /** SpeleothemsAndGemTrees（cs:22196-22282）——独立槽（清零批 2026-08-13
  *  前捆绑在 vanillaGems 内 ≈20842 位执行，顺序偏差已归位，见"钟乳石宝石树"槽注释） */
-function speleothemSlot({ store, rng }: GenCtx) {
+// ★BJ331：prog 接线（vanilla cs:22231-22237 pass 头 Set(0) + 逐列 Set(i/num)——曾缺线
+//   =大世界本 pass 静默 199s+ 被静默看门狗误报「疑似卡死」并撞 180s 硬超时回退同步重做）
+function speleothemSlot({ store, rng, prog }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runGemTreesPass(store, rng, gs);
+  runGemTreesPass(store, rng, gs, prog);
 }
 
 /** SunflowersPart2（cs:20043-20084）——普通种子向日葵唯一生成来源 */
@@ -2234,7 +2236,9 @@ export function spawnGraveyardBiomesEverywhere(
 }
 
 // ---------- 瓦罐散布 ----------
-function potPass({ store, rng, world }: GenCtx) {
+// ★BJ331：prog 接线（vanilla Pots cs:18215 逐尝试 Set(num9/num7)——曾缺线=大世界
+//   本 pass 静默 34s 被静默看门狗误报「疑似卡死」；传参零 RNG 面）
+function potPass({ store, rng, world, prog }: GenCtx) {
   // 原版 Pots pass(1.4.5.6 WorldGen.cs:18108-18286)——实现体外提 vanilla/PotsPass.ts
   // （尾部清剿批 2026-08-17：行为/掷序零变化；样式链/PlacePot 细注见彼处）。
   const gs = ctxGs[0];
@@ -2264,7 +2268,7 @@ function potPass({ store, rng, world }: GenCtx) {
   //      归属 **本 pass**（teleporters/墓园段之后、瓦罐主循环之前）——SSSSSS 批曾错挂
   //      PilesPass 头 → notraps 链 #71 起全流位漂移。执行序=原版注册序。
   runBoulderPileSection(store, rng, gs);
-  runPotsPass(store, rng, gs);
+  runPotsPass(store, rng, gs, prog);
 }
 
 /** tile 379（SpawnPoint 回避族，cs:19683/19704-19707：列扫描跳过 + IsTileNearby(10) 重试） */

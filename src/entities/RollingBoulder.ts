@@ -28,6 +28,7 @@ import { f32 } from '../stats/ScaleStats';
 import { shimmerBlockFx, rainbowBoulderFx, rainbowRodHitFx, orchestraHslCss, hexToRgbArr, pooFlyFx }
   from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 const KB_X = 10;               // 出生 kb 第二参 = 10f
 
@@ -692,7 +693,7 @@ export class RollingBoulder extends Entity {
         this.frameCounter = 0;
         if (++this.frame >= 100) this.frame = 0;
       }
-      const gtw = typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+      const gtw = globalTimeWrappedHourly();   // ★BJ330：GTW 单源（原 performance.now 墙钟）
       const st = game.world.store;
       for (let i = 0; i < this.trailN; i++) {
         const tx = Math.floor((this.trailX[i] + this.w / 2) / 16);

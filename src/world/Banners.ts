@@ -33,11 +33,19 @@ const BANNER_TO_NPCS = (() => {
  *  特例,反查自然覆盖）。 */
 const ITEM_TO_NPC: Map<number, number> = (() => {
   const m = new Map<number, number>();
+  // ★BJ334(2026-09-24)：规范代表优先（D.bannerToNpc = 原版 BannerToNPC 箭头表）
+  //  ——同旗多 NPC 时原版 tooltip/公告名一律取规范代表（BannerSystem.cs:249-255）,
+  //  负键入库后最小 id 近似会翻错（母史莱姆旗 146 的 NPC 集 {-5,16},最小=-5 宝宝,
+  //  原版规范=16 母史莱姆）;负变体旗本身（2928→-3 绿史莱姆等）也由此覆盖。
+  for (const [banner, npc] of Object.entries(D.bannerToNpc)) {
+    const item = bannerItemId(Number(banner));
+    if (item > 0 && !m.has(item)) m.set(item, Number(npc));
+  }
+  // npcToBanner 反查补缺（规范表外仍可达的旗）
   for (const [npc, banner] of Object.entries(NPC_TO_BANNER)) {
     const item = bannerItemId(Number(banner));
     if (item > 0 && !m.has(item)) m.set(item, Number(npc));
   }
-  // 共享 item 的家族取最小 npc id（如 104 族共用一旗——名取家族首位）
   return m;
 })();
 
@@ -79,10 +87,12 @@ export function bannerToNpcOf(banner: number): number {
  *   - NPCID.Sets.ProjectileNPC（NPCID.cs:4805）11 类：25/30/665/33/112/666/261/265/371/516/519
  *   - NPCID.Sets.PositiveNPCTypesExcludedFromDeathTally（NPCID.cs:4869）7 类：
  *     121/384/478/479/410/472/378
- * 原版 CountKillForBannersAndDropThem（NPC.cs:80627-80637）整门在其内——这 18 类即便
+ *   - ★BJ334：负 netID 分支（NPC.cs:80610-80619）-5/-1 排除,其余负变体计旗——
+ *     实现+锚见 excludedFromDeathTally 内注（曾注"本仓不建模/恒非负"=负变体
+ *     未入数据面时的陈旧判词,今废）。
+ * 原版 CountKillForBannersAndDropThem（NPC.cs:80627-80637）整门在其内——即便
  * vanilla-banners.json 有映射也【不计旗数/不掉旗】（Boss/弹幕型/特殊 NPC 杀数只进
- * NPC.kills 计数行,不进 BannerSystem.killCount）。负 netID 分支（:80612-80618
- * netID==-5/-1 排除）本仓不建模——vanillaNetId 域恒非负。1456:4799/:4861 = 1457 逐值相同。
+ * NPC.kills 计数行,不进 BannerSystem.killCount）。1456:4799/:4861 = 1457 逐值相同。
  */
 const EXCLUDED_FROM_DEATH_TALLY = new Set([
   25, 30, 665, 33, 112, 666, 261, 265, 371, 516, 519,   // NPCID.Sets.ProjectileNPC :4805
@@ -90,6 +100,12 @@ const EXCLUDED_FROM_DEATH_TALLY = new Set([
 ]);
 
 export function excludedFromDeathTally(npcId: number): boolean {
+  // ★BJ334(2026-09-24)：负 netID 分支（NPC.cs:80610-80619）——仅 -5(BabySlime)/
+  //  -1(Slimeling) 排除,其余负变体（-2 恶翅/-3 绿/-4 粉/-6 黑/-7 紫/-8 红/-9 黄/
+  //  -10 丛林史莱姆）照常计旗。曾整缺（表无负键时负 id 查不到旗=banner<=0 早退,
+  //  碰巧同相;vanilla-banners.json 补负键后此门成为活性位——-5 若漏排会误计
+  //  母史莱姆旗 146）。
+  if (npcId < 0) return npcId === -5 || npcId === -1;
   return EXCLUDED_FROM_DEATH_TALLY.has(npcId);
 }
 
@@ -177,7 +193,8 @@ export function scanBannerNpcs(
  *  bannerMouseOver 1:1：循环按 BannerSystem 旗种枚举，每面旗经 BannerToNPC(i)
  *  取一个代表 NPC 名 = 一旗一行。同种多面旗去重（Set）；多 NPC 旗（僵尸旗覆盖
  *  全僵尸族变体）只出一行代表名，不逐变体罗列——2026-09-01 用户实报名单重复根因。
- *  代表取该旗 NPC 集最小 id（原版注册序 ≈ id 升序的确定性等价物） */
+ *  ★BJ334：代表 = BannerToNPC 规范代表（循环内注;最小 id 仅规范 0 时兜底,
+ *  负变体旗入库后最小 id 近似会把母史莱姆旗翻成 -5 宝宝名） */
 export function scanBannerReps(
   store: import('./TileStore').TileStore,
   x0: number, y0: number, x1: number, y1: number,
@@ -202,9 +219,18 @@ export function scanBannerReps(
       if (num >= 312) banner--;
       const set = BANNER_TO_NPCS.get(banner);
       if (set) {
-        let min = Infinity;
-        for (const n of set) if (n < min) min = n;
-        reps.add(min);
+        // ★BJ334(2026-09-24)：代表 = 原版 BannerToNPC 规范代表（Main.cs:21558-21612
+        //  每旗一行名的原文口径;本函数头注同）。最小 id 近似在负变体旗入库后翻错
+        //  （146 集 {-5,16} 取 -5=宝宝,原版规范=16 母史莱姆）。规范 0（12 不可达旗）
+        //  回退最小 id 保旧行为。
+        const canonical = bannerToNpcOf(banner);
+        if (canonical !== 0) {
+          reps.add(canonical);
+        } else {
+          let min = Infinity;
+          for (const n of set) if (n < min) min = n;
+          reps.add(min);
+        }
       }
     }
   }

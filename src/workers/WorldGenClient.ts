@@ -37,8 +37,20 @@ interface Pending {
 
 /** 握手超时：覆盖老 Safari 无 module worker / CSP 禁 worker / file:// 全挂 */
 const HANDSHAKE_MS = 3000;
-/** 任务超时看门狗：大世界 8400×2400 生成余量（超时 terminate 杀掉挂死任务） */
+/** 任务超时看门狗基准：小世界 4200×1200 生成余量（超时 terminate 杀掉挂死任务）。
+ *  实际超时按世界面积缩放（worldGenTimeoutMs），generate 默认取缩放值。 */
 const DEFAULT_TIMEOUT_MS = 180000;
+/** ★BJ331（2026-09-24）：按世界面积缩放的生成硬超时——原 180s 固定值注释口径是
+ *  「大世界余量」，但慢机（用户 Windows Edge 实报 seed 152394290 大世界）光
+ *  Speleothems 单 pass 就静默 199s+，健康生成在 180s 被硬超时杀死后落回主线程
+ *  同步【从头重做一遍】（总时长翻倍+主线程全程卡顿=「自动回退成了同步生成」实报）。
+ *  以 4200×1200 为基准 180s，面积线性放大封顶 4×（大世界 8400×2400=720s）。
+ *  真死循环的兜底不再只靠硬超时：静默看门狗 30s 告警 + Esc 中止链（IIIII229）。 */
+export function worldGenTimeoutMs(width: number, height: number): number {
+  const area = Math.max(1, width) * Math.max(1, height);
+  const factor = Math.min(4, Math.max(1, area / (4200 * 1200)));
+  return Math.round(DEFAULT_TIMEOUT_MS * factor);
+}
 /** 静默看门狗阈值：生成中超过此时长无任何 worker 事件 → 控制台点名(pass 内死循环
  *  的最早信号——2026-08-12 水中箱 liquidType 死循环卡了整场才被发现,本看门狗 30s 即报) */
 const STALL_WARN_MS = 30_000;
@@ -110,10 +122,14 @@ export class WorldGenClient {
     const id = this.nextId++;
     return new Promise<World>((resolve, reject) => {
       const timer = setTimeout(() => {
+        // ★BJ331：超时路径必须同步清掉 stallTimer（曾漏清 ⇒ pending 已删而 interval
+        //  永续,拿冻结的 lastEventAt 每 10s 报一次「已 Xs 无进展」直到页面刷新——
+        //  用户实报:回退同步生成+进世界游玩后告警仍连发到 199s+）
+        if (pend.stallTimer) clearInterval(pend.stallTimer);
         this.pending.delete(id);
         this.teardown(); // 杀掉挂死任务，下次请求重新 spawn
         reject(new WorldGenUnavailable('生成超时'));
-      }, cb?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      }, cb?.timeoutMs ?? worldGenTimeoutMs(cfg.width, cfg.height));
       const pend: Pending = {
         resolve, reject,
         onProgress: cb?.onProgress as Pending['onProgress'], onPreview: cb?.onPreview,
@@ -123,14 +139,19 @@ export class WorldGenClient {
           if (!pend.lastEventAt) return;
           const silent = Date.now() - pend.lastEventAt;
           if (silent > STALL_WARN_MS) {
-            // 只报一次;点名最后进度 + 静默时长,指向"pass 内部死循环"排查路径
+            // 每段静默只报一次（注释口径 2026-08-12 起即是,曾漏 gate 每 10s 刷屏;
+            // 进度事件复位 lastEventAt 后自动再武装,下一段静默重新点名）:
+            // 点名最后进度 + 静默时长,指向"pass 内部死循环"排查路径
+            if (pend.stallWarned) return;
             console.error(
               `[worldGen] ⚠️ 生成疑似卡死：已 ${Math.round(silent / 1000)}s 无进展` +
               `（最后进度：${pend.lastLabel}${pend.lastPhase ? ` [${pend.lastPhase}]` : ''}）。` +
               `pass 为同步代码,内部死循环会停摆事件循环——排查该 pass 内的 while/拒绝采样` +
-              `（参考 liquidType +1 编码血案,3 分钟硬超时后将自动终止）`,
+              `（参考 liquidType +1 编码血案,硬超时(小世界 3 分钟/大世界封顶 12 分钟)后将自动终止）`,
             );
             pend.stallWarned = true;
+          } else {
+            pend.stallWarned = false;
           }
         }, STALL_CHECK_MS),
       };

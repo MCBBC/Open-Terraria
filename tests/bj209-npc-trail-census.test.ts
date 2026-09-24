@@ -20,6 +20,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import type { Enemy as EnemyT } from '../src/entities/Enemy';
 import { Renderer } from '../src/render/Renderer';
+import { pinGameTimeTicks } from '../src/core/GameTime';   // ★BJ330：GTW 钟源单源化后相位钉钟走 GameTime（performance spy 退役保留兼容）
 import {
   drawNpcTrailGhosts, drawNpcTrailGhostsOverBody, drawGenericTableGhosts,
   drawCultistGhosts, drawBetsyGhosts, drawSolarGoopGhosts,
@@ -485,6 +486,7 @@ describe('BJ237-B drawEnemy 绘制序锁（记录型 ctx 直调——antlion-til
 
   it('620（残影+环双成员）：残影槽 < 环拷贝 < 本体，本体=最后一次 draw', () => {
     const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(1200);
+    pinGameTimeTicks(72);   // ★BJ330：72 tick=1.2s——GTW 单源收编后钟不再读 performance.now,相位钉钟改走 GameTime（同 tSec=1.2 谷底语义）
     try {
       // tSec=1.2 → 620 环包络谷底（num58=0、fade=1）→ 环拷贝必画
       const e = Enemy.fromVanilla(620, 100, 100) as EnemyT;

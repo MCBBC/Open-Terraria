@@ -199,7 +199,7 @@ export class FallingStar extends Entity {
       if (this.natural && !w.seedFlags?.remix) {
         // ★IIIII224（Projectile.cs:79348）：`type==12 && damage>500 && !remixWorld`
         //  才掉坠星物品——remix 自然星不落 item 75
-        game.spawnDrop(this.cx - 8, this.y - 4, 'vi_75_fallen_star', 1, 0, -2);
+        game.spawnDrop(this.cx - 8, this.y - 4, 'vi_75_fallen_star', 1);
       }
       // ★G′ T4：Kill 12 特效逐项（Projectile.cs:77259-77323；替换旧 spawnParticles/
       //  spawnBurst 近似——原版为 VanillaDust 池尘 + Gore 火苗,非编排粒子）

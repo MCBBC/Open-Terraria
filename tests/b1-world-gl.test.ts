@@ -75,13 +75,22 @@ describe('B1 chunk 页纹理 GPU 驻留', () => {
   });
 });
 
-describe('B1 quadExact 判例', () => {
-  it('全跨度 uv+NEAREST(2D smoothing-off 最近邻逐式复刻);quad() 半像素内缩判例不回归', () => {
+describe('B1 quadTile/quadExact 判例', () => {
+  it('Renderer 用 quadTile(gl_FragCoord texelFetch);quadExact 全跨度+NEAREST 备用;quad() 半像素内缩判例不回归', () => {
+    expect(SRC).toContain('quadTile(');
     expect(SRC).toContain('quadExact(');
-    // quadExact 体:全跨度(无 0.5 内缩)+恒 NEAREST 采样器
-    expect(SRC).toMatch(/quadExact\([\s\S]{0,1200}?gl\.bindSampler\(0, this\.samp\.nearest!\);[\s\S]{0,400}?gl\.uniform4f\(this\.uni\.uSrc, sx \/ e\.w, sy \/ e\.h, sw \/ e\.w, sh \/ e\.h\);/);
+    // quadTile 体:texelFetch 直取(不经采样器)+程序态还原
+    expect(SRC).toMatch(/quadTile\([\s\S]{0,900}?gl\.bindSampler\(0, null\);[\s\S]{0,600}?gl\.useProgram\(this\.prog\);/);
+    // tile 面 shader:gl_FragCoord→texel 索引,tie 补正 2^-12
+    expect(SRC).toContain('vec2 t = uSrcT.xy + floor(local / uDst.zw * uSrcT.zw - 1.0 / 4096.0);');
+    expect(SRC).toContain('outColor = texelFetch(uTex, ivec2(t), 0);');
+    // quadExact 体:全跨度(无 0.5 内缩)+恒 NEAREST 采样器+tie ε
+    expect(SRC).toMatch(/quadExact\([\s\S]{0,1400}?gl\.bindSampler\(0, this\.samp\.nearest!\);[\s\S]{0,400}?gl\.uniform4f\(this\.uni\.uSrc, \(sx - QUAD_TIE_EPS\) \/ e\.w/);
     // 原 quad() 内缩判例原样(既有消费方零变化)
     expect(SRC).toContain('const px = 0.5 / e.w, py = 0.5 / e.h;');
+  });
+  it('Renderer bgl 段调 quadTile(失败回落 2D)', () => {
+    expect(RDR).toMatch(/if \(!glw\.quadTile\(e, p\.sx, p\.sy, CHUNK \* ts, CHUNK \* ts, xd0, yd0, xd1 - xd0, yd1 - yd0\)\) return false;/);
   });
 });
 

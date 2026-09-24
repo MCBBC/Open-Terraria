@@ -1,5 +1,8 @@
 // 提取 BannerSystem 映射(NPCtoBanner switch / BannerToItem 特例+级联区间 /
 // BannerToNPC 规范代表 / KillsToBanner)
+// ★BJ334 2026-09-24：负 netID 盲区修复（case/箭头两 regex 补 -? 号）——史莱姆族
+//   变体旗（-2/-3/-4/-5/-6/-7/-8/-9/-10 → 167/119/151/146/90/155/159/183/131）
+//   曾整链静默丢失；详见 §1/§3 内注与 tests/bj334-*。
 // ★2026-09-03：基准 1456 → 1457（CLAUDE.md 1457 权威；NPCtoBanner/BannerToItem/
 // BannerToNPC/KillsToBanner 四面 1456↔1457 逐值相同——1457 仅动 claimable/net 面）,
 // BannerToNPC 为本批新增（旗达标公告规范名 Game.ts 消费,BannerSystem.cs:249-255）。
@@ -60,7 +63,10 @@ const npcToBanner = {};
 {
   const start = src.indexOf('public static int NPCtoBanner');
   const body = src.slice(start, src.indexOf('public static', start + 40));
-  const re = /case (\d+):\s*(?:return (\d+);)?/g;
+  // ★BJ334(2026-09-24)盲区修复：`case (\d+)` 曾静默丢全部负 netID case（case -3:
+  // 等 9 条,placeStyle-extractor-blindspot 同族）——绿/黑/紫/红/黄/丛林史莱姆旗
+  // (90/119/131/151/155/159/183/146)整链不可达。反向定谳=BannerSystem.cs:788-896。
+  const re = /case (-?\d+):\s*(?:return (-?\d+);)?/g;
   let group = [];
   let m;
   while ((m = re.exec(body))) {
@@ -98,7 +104,10 @@ const bannerToNpc = {};
   const start = src.indexOf('public static int BannerToNPC');
   const body = src.slice(start, src.indexOf('public static', start + 40));
   let m;
-  const re = /(\d+) => (\d+)/g;
+  // ★BJ334(2026-09-24)盲区修复：值域 `(\d+)` 曾丢负规范代表（90=>-6/119=>-3/
+  //  131=>-10/151=>-4/155=>-7/159=>-8/183=>-9 七旗,BannerSystem.cs:1306-1341）,
+  //  整旗从 bannerToNpc 消失=旗 tooltip/达标公告名缺名根。
+  const re = /(-?\d+) => (-?\d+)/g;
   while ((m = re.exec(body))) bannerToNpc[+m[1]] = +m[2];
 }
 
@@ -112,7 +121,8 @@ const killsToBanner = {};
   for (let i = 1; i + 1 < parts.length; i += 2) killsToBanner[+parts[i]] = +parts[i + 1];
 }
 
-// ---- ③ 基数护栏（1457 实测:npcToBanner 447/bannerToItem 6/ranges 9/bannerToNpc 280/kills 43） ----
+// ---- ③ 基数护栏（1457 实测:★BJ334 负 netID 盲区修复后 npcToBanner 457/bannerToItem 6/ranges 9/bannerToNpc 287/kills 43;
+//      修复前 447/280=负 case 静默丢失;-1 与 81 同旗 99,BannerSystem.cs:689-691） ----
 {
   const floors = [
     ['npcToBanner', Object.keys(npcToBanner).length, 400],

@@ -154,6 +154,7 @@ import { GorePiece } from './GorePiece';
 import { cutTilesBox } from './ProjCutTiles';   // ★BJ290 件1 死亡段割面（BJ260/285 同款前置习语）
 import { createTownNpcByShellKey } from './townNpcFactory';   // ★环切：原 `import { TownNPC }`（TownNPC→TownShot→Arrow 三节环）
 import { MedusaHeadProj } from './MedusaHeadProj';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 
 /** 网格切片表（Main.cs 逐型特判——竖条 projFrames 模型装不下的多列网格图；
@@ -3122,7 +3123,7 @@ export class Arrow extends Entity {
       //   同语义)——卫门内曾令 node 单测/无图环境 rotate 缺失(proj-rotation 121 例红)
       ctx.rotate(ang);                                       // num341 = velocity.ToRotation()
       if (imgG && (imgG.width > 0)) {
-        const gtS = performance.now() / 1000;                 // GlobalTimeWrappedHourly 近似
+        const gtS = globalTimeWrappedHourly();                // GlobalTimeWrappedHourly——★BJ330 GTW 单源（原 performance.now 墙钟）
         const slowPulse = 1 + Math.cos(gtS * Math.PI * 2) * 0.2;
         const sBase = this.drawScale;
         const iw0 = imgG.width * sBase, ih0 = imgG.height * sBase;

@@ -66,6 +66,7 @@ import { applyBiomeToSun, applyBiomeToMoon } from '../lighting/SkyColor';
 import { AuroraSky } from './AuroraSky';
 import { SlimeSky, slimeSilhouetteTint, slimeProject } from './SlimeSky';
 import { MartianSky, ufoTintColor, ufoProject } from './MartianSky';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 // 天空关键色 [时刻, 顶色, 底色]（时刻 0-1）
 const SKY_KEYS: Array<[number, string, string]> = [
@@ -421,7 +422,7 @@ class TowerSkyState {
   active = false;
   /** _fadeOpacity（Activate 置 0.002，±0.01/帧 1:1 Update :47-67） */
   fade = 0;
-  /** Main.GlobalTimeWrappedHourly 近似（秒，驱动星尘闪烁/星云落石） */
+  /** Main.GlobalTimeWrappedHourly（秒，驱动星尘闪烁/星云落石——★BJ330 起由 GameTime 单源每帧覆写） */
   time = 0;
   private texs = new Map<string, ImageBitmap | HTMLImageElement>();
   // NebulaSky._pillars（Activate :121-133：40 根光柱，X 均布世界宽±20000、Y -2000..-1800、Depth 7-15）
@@ -523,7 +524,7 @@ class TowerSkyState {
   /** Update（各 Sky.Update :47-67 通用淡入淡出 + Solar 流星下坠/Vortex 落雷计时） */
   update(fam: TowerFamily, dtMs: number): void {
     const frames = dtMs / (1000 / 60);
-    this.time += dtMs / 1000;
+    this.time = globalTimeWrappedHourly();   // ★BJ330：GTW 单源（原本地 dt 累计——绘制帧率依赖且暂停不冻结;今=Main.TotalGameTime 等价,星尘闪烁/星云落石相位与全局同钟）
     this.fade = this.active
       ? Math.min(1, 0.01 * frames + this.fade)
       : Math.max(0, this.fade - 0.01 * frames);

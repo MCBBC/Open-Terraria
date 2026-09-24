@@ -132,7 +132,7 @@ export interface InfoAccCtx {
   weather: {
     storming: boolean; maxRaining: number; cloudBGActive: number; numClouds: number;
     windSpeedCurrent: number; sandstorm: boolean;
-    /** 真实墙钟秒(原版 GlobalTimeWrappedHourly = TotalGameTime%3600,Main.cs:16777)——沙尘暴文字 5s 闪烁驱动 */
+    /** GlobalTimeWrappedHourly 秒（★BJ330:GameTime 单源=Main.TotalGameTime 等价,暂停/失焦冻结——沙尘暴文字 5s 闪烁驱动） */
     globalTimeSec: number;
   };
   moonPhase: number; bloodMoon: boolean; eclipse: boolean;

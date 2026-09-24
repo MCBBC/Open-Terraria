@@ -29,6 +29,7 @@ export function remap(v: number, fromMin: number, fromMax: number, toMin: number
 
 import { getPass, defaultUniforms, SM2Pass, SM2Sampler } from '../fx/SM2Effect';
 import { GLAurora } from './GLAurora';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 /** Main.hslToRgb(Main.cs:47266-47296,byte 取整)——极光带色 hue 源 */
 export function hslToRgb255(hue: number, saturation: number, luminosity: number): [number, number, number] {
@@ -335,7 +336,7 @@ export interface AuroraDrawOpts {
   isDay: boolean;
   /** 月相 0-7 */
   moonPhase: number;
-  /** Main.GlobalTimeWrappedHourly(秒,%3600;缺省 performance.now 推导)——
+  /** Main.GlobalTimeWrappedHourly(秒,%3600;缺省 GameTime 单源——★BJ330)——
    *  兼作像素公式的 uTime(MiscShaderData.Apply :91) */
   globalTime?: number;
   /** 屏顶 tile Y(地表门用,Main.cs:58775 screenPosition.Y/16) */
@@ -472,8 +473,7 @@ export class AuroraSky {
     if (o.camTopTiles > o.surfaceTiles + 10) return;
     this.phase = o.moonPhase;
     if (o.moonFrac) this._moonFrac = o.moonFrac;
-    const globalTime = o.globalTime ?? (typeof performance !== 'undefined'
-      ? (performance.now() / 1000) % 3600 : 0);
+    const globalTime = o.globalTime ?? globalTimeWrappedHourly();   // ★BJ330：GTW 单源（原 performance.now 缺省）
     // :126-128 参考空间 → 屏空间:scale = 屏宽/1920(背景矩阵按恒等屏空间处理【推断】)
     const scale = viewW / AURORA_REF_W;
     ensureNoise();                                        // 噪声面懒加载(首 draw 触发)

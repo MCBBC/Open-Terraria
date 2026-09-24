@@ -34,6 +34,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { cattivaHitFx, stardustPunchFx } from '../fx/orchestraFx';   // δB B11：捣蛋猫命中六芒簇收编本体（Projectile.cs:14493）+ 星尘拳（:14331）
 import { playerCanHitEnemy, canBeChasedBy, rollGolemSentryCrit } from './projTargets';
 import { ITEM_DEFS } from '../data/items';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 import { MushroomBoiExplosionProj, requestMushroomBoiExplosion } from './DeadCellsMushroom';
 
@@ -6607,9 +6608,9 @@ function tintFrameCache(src: HTMLCanvasElement, color: string): HTMLCanvasElemen
 
 // ---- ★SW-BJ56 2026-09-10：泰拉棱镜 946 绘制辅助（三件,仅 946 消费）----
 
-/** GlobalTimeWrappedHourly 近似（Main.cs:16777 每帧 +1/60s,3600 回卷;npcExtraParts.gtw 同式） */
+/** GlobalTimeWrappedHourly（Main.cs:17014——★BJ330 收编 GameTime 单源,暂停/失焦冻结;npcExtraParts.gtw 同源） */
 function gtwSec(): number {
-  return (performance.now() / 1000) % 3600;
+  return globalTimeWrappedHourly();
 }
 
 /** Main.hslToRgb(h,1,0.5) 逐式移植（Main.cs:48689-48717 + hue2rgb :48719-48734;

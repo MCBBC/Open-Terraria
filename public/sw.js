@@ -277,13 +277,14 @@ self.addEventListener('fetch', (e) => {
   const isDoc = req.destination === 'document' || path === '/' || path.endsWith('.html');
   if (isDoc) {
     e.respondWith((async () => {
-      const cache = await getCache();
+      let cache = null;
+      try { cache = await getCache(); } catch { /* 存储不可用:纯网络直通(同 shell 支 2026-09-24 修) */ }
       try {
         const res = await fetch(req);
-        if (res && res.ok) cache.put(req, res.clone());
+        if (res && res.ok && cache) cache.put(req, res.clone()).catch(() => {});
         return res;
       } catch (err) {
-        const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
+        const hit = cache ? await cache.match(req, { ignoreVary: true }).catch(() => null) : null;
         if (hit) return hit;
         throw err;
       }
@@ -292,12 +293,20 @@ self.addEventListener('fetch', (e) => {
   }
   if (isShellJs) {
     e.respondWith((async () => {
-      const cache = await getCache();
-      const hit = await cache.match(req, { ignoreVary: true });
-      if (hit) return hit;
+      // ★2026-09-24 修「部分机器新版本 504 offline 强刷无用」:①getCache 失败
+      //   (存储禁用/隐私模式)不得整链炸——降级纯网络直通;②cache.put 拒绝
+      //   (QuotaExceeded 等)不得吞掉已 fetch 到的响应(旧代码 await put 在返回
+      //   路径 try 内,put 炸→好响应被 catch 吞→504,缓存命中面新资产全灭)。
+      //   put 改 fire-and-forget(.catch 吸收),与其他回填位点(:227/:316/:341)同款。
+      let cache = null;
+      try { cache = await getCache(); } catch { /* 存储不可用:纯网络直通 */ }
+      if (cache) {
+        const hit = await cache.match(req, { ignoreVary: true }).catch(() => null);
+        if (hit) return hit;
+      }
       try {
         const res = await fetch(req);
-        if (res && res.ok && mimeOk(path, res)) { await cache.put(req, res.clone()); return res; }
+        if (res && res.ok && mimeOk(path, res) && cache) cache.put(req, res.clone()).catch(() => {});
         if (res) return res;   // 非 ok(404 等)直通不缓存
       } catch (err) { /* 离线且无缓存 → 504 */ }
       return new Response('', { status: 504, statusText: 'offline' });

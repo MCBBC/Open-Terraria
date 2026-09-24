@@ -36,7 +36,7 @@ import { createFlow } from './mainFlow';
 import { startUpdateCheck } from './update/UpdateCheck';
 import { mountUpdateBanner } from './update/UpdateBanner';
 import type { FlowHandle } from './mainFlow';
-import { downloadDebugReport } from './debug/DebugReport';
+import { downloadDebugReport, stackFrameSummary } from './debug/DebugReport';
 import { initTileFrameCapture, tileFrameCapture } from './debug/TileFrameCapture';
 import { tileAnim, TILE_ANIM_RATE, TILE_ANIM_PITCH, TILE_ANIM_FRAMES } from './render/TileAnim';
 import { showFeatureGate } from './ui/QuickGate';
@@ -92,7 +92,7 @@ if (new URLSearchParams(location.search).get('imglog') === '1') {
 }
 
 // ---- 调试报告基础设施：错误 ring（F5 报告 errors 段唯一数据源）----
-// kind: 0=pageerror 1=unhandledrejection 2=console.error；stack 取首行
+// kind: 0=pageerror 1=unhandledrejection 2=console.error；stack 取帧行（★BJ331 前取首行=消息行,帧全丢）
 // ★SW-BM1 2026-09-06（工具链债扩容）：总环 50→300 + fatal 独立环——旧 50 深环在
 // 渲染层 warn-once 失修刷屏时会把真错误挤出窗口;分级留存 = kind 0/1（pageerror/
 // unhandledrejection,崩溃类）另入 __swErrorsFatal(100) 独立环,console.error 噪声
@@ -108,7 +108,9 @@ function pushSwError(kind: number, msg: unknown, stack: string | null | undefine
   const rec: SwErrorRecord = {
     t: Date.now(), kind,
     msg: String(msg).slice(0, 500),
-    stack: stack ? stack.split('\n')[0].slice(0, 300) : null,
+    // ★BJ331：stack 改取帧行（stackFrameSummary）——曾取首行=消息行与 msg 字段重复,
+    //  帧全丢,打包态事故栈只剩一行无从定位
+    stack: stackFrameSummary(stack),
   };
   w.__swErrors.push(rec);
   if (w.__swErrors.length > ERR_RING_CAP) w.__swErrors.shift();

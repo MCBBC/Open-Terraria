@@ -101,7 +101,7 @@ describe('BJ325 GetAlpha d370 蓝通道增亮（NPC.cs:94684-94691）', () => {
   });
 
   it('G5 兜底：node 无 DOM → duke370PremulPair 恒 null,调用方回退 source-over 直绘', () => {
-    expect(duke370PremulPair({} as CanvasImageSource, { sx: 0, sy: 0, sw: 4, sh: 4 },
+    expect(duke370PremulPair({} as HTMLCanvasElement, { sx: 0, sy: 0, sw: 4, sh: 4 },
       105, 105, 143, 105, 't')).toBeNull();
   });
 

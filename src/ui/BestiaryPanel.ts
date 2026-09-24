@@ -555,7 +555,10 @@ export function bestiaryBgPreferencePaths(npcId: number, crimson = false): strin
  *  偏好条件绝对优先（Info 序首个），其余取 DisplayTextPriority 最高者（并列取注册序
  *  后者），映射 `Bestiary_BiomeText.biome_<键名去类别>`。两路都无 → null */
 export function bestiaryFlavorText(npcId: number, crimson = false): string | null {
-  const internal = NPC_NAME_BY_ID[npcId > 0 ? npcId : -npcId];
+  // ★BJ334(2026-09-24)：负 netID 直查——表（idNames.generated NPC_NAME_BY_ID）本就
+  //  含 -1..-65 键（'-3': 'GreenSlime'）;旧 `-npcId` 反转把 -3 打到 3=Zombie,变体
+  //  图鉴页风味文本错拿基域键（原版键=Bestiary_FlavorText.npc_GreenSlime）。
+  const internal = NPC_NAME_BY_ID[npcId];
   const key = internal ? `Bestiary_FlavorText.npc_${internal}` : '';
   if (key && Lang.has(key)) return Lang.text(key);
   const paths = SPAWN_BY_NPC[String(npcId)] ?? [];

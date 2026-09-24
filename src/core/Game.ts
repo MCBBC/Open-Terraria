@@ -1,5 +1,6 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { Achievements } from './Achievements';
+import { advanceGameTimeTick, globalTimeWrappedHourly } from './GameTime';   // ★BJ330 GTW 钟源（Main.TotalGameTime 等价）
 import { tileAnim } from '../render/TileAnim';
 import { swPerf } from '../render/perfFlags';   // ★BJ94 D2 fixedUpdate 每帧常量 Set 消除快路径
 import { prewarmTrailTextures } from '../fx/TrailShader';
@@ -3808,7 +3809,7 @@ export class Game implements GameHooks {
           const rec = this.world.furnitureItems.find(
             (r) => r.x === e.ax && r.y === e.ay && (r.kind === 'critter_anchor' || r.kind === 'kite_anchor'));
           const stored = rec?.slots[0] ?? null;
-          if (stored) this.spawnDrop(e.ax * TILE + 8, e.ay * TILE, ITEM_DEFS[stored.id].key, stored.stack, 0, -2);
+          if (stored) this.spawnDrop(e.ax * TILE + 8, e.ay * TILE, ITEM_DEFS[stored.id].key, stored.stack);
           if (rec) removeFurnitureAt(this.world.furnitureItems, e.ax, e.ay);
           net.sendLeashedRemove(e.netId);
           continue;
@@ -3867,7 +3868,7 @@ export class Game implements GameHooks {
       records: this.world.furnitureItems,
       netIdsAt: (x, y) => this.leashed.netIdsAt(x, y),
       removeAt: (x, y) => this.leashed.removeAt(x, y),
-      dropItem: (x, y, key, stack) => { this.spawnDrop(x, y, key, stack, 0, -2); },
+      dropItem: (x, y, key, stack) => { this.spawnDrop(x, y, key, stack); },
       broadcastRemove: (id) => {
         if (this.net?.active && this.net.policy.isHost) this.net.sendLeashedRemove(id);
       },
@@ -8466,6 +8467,7 @@ export class Game implements GameHooks {
     //  暂停拍清零同门）。详见 frame() 头注 BJ320 段。
     if (this.world) this.mouseOversClear();
     this.tickCount++;
+    advanceGameTimeTick();   // ★BJ330（2026-09-24）GTW 钟源推进：与 tickCount 同拍同门（!paused）——暂停/失焦冻结、游玩/菜单推进（Main.TotalGameTime 等价,Main.cs:17014）
     this.updateChestFrames();   // ★SW-BJ17 2026-09-07 宝箱盖动画帧（Chest.cs:3599,Main.cs:17993 60Hz 同拍）
     this.reactivateDummies();   // 训练假人再激活(TETrainingDummy.Update 节流)
     // 行为录制：玩家运动轨迹骨干（每 60t ≈ 1s 一采样；vx/vy 一位小数防噪）
@@ -10739,7 +10741,7 @@ export class Game implements GameHooks {
       // 窗口旗 flag = num 初值,:72225-72233 `(int)GlobalTimeWrappedHourly % 80 < 45 → false`
       let spawnWindow = cond;
       if (spawnWindow) {
-        const wrappedHourly = (performance.now() / 1000) % 3600;
+        const wrappedHourly = globalTimeWrappedHourly();   // ★BJ330：GTW 钟源归正（原 performance.now 墙钟与游戏时间漂移;暂停/失焦随世界冻结=用户拍板语义）
         if (Math.floor(wrappedHourly) % 80 < 45) spawnWindow = false;
       }
       // :72235-72239 逐字：关闭沿 notify 幂等（沿后 _isRainingBoulders=false 不再重发）
@@ -16823,7 +16825,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (cur !== dec.style) {
             if (cur > 0) {   // dropXmasTree :39396-39426：旧装饰物掉落回收
               const oldKey = VANILLA_ITEM_KEY_BY_ID[xmasDecorItem(dec.obj, cur)];
-              if (oldKey) this.spawnDrop(tx * TILE + 8, ty * TILE, oldKey, 1, 0, -2);
+              if (oldKey) this.spawnDrop(tx * TILE + 8, ty * TILE, oldKey, 1);
             }
             xmasSetDecor(this.world.store, cell.ax, cell.ay, dec.obj, dec.style);   // setXmasTree :39430
             this.player.useTime = 10;                                  // ApplyItemTime（useTime 10）
@@ -20104,7 +20106,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         st.setWall(tx, ty, 0);
         const dropVid = wallDropItemVid(wall);
         const dropKey = dropVid > 0 ? VI(dropVid) : '';
-        if (dropKey) this.spawnDrop(tx * TILE + 8, ty * TILE + 8, dropKey, 1, 0, -2);   // Stack 缺省 1
+        if (dropKey) this.spawnDrop(tx * TILE + 8, ty * TILE + 8, dropKey, 1);   // Stack 缺省 1
       }
       // ★SW-BN5 2026-09-08：KillWall 音/尘对齐（:60876 音恒放含 fail;:60877-60884
       //  尘 10/fail 3）——旧 'chop' 近似+8 尘成功档=BF1 简化面退役
@@ -20687,7 +20689,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           st.setWall(wX, wY, 0);
           const dropVid = wallDropItemVid(w);
           const dropKey = dropVid > 0 ? VI(dropVid) : '';
-          if (dropKey) this.spawnDrop(wX * TILE + 8, wY * TILE + 8, dropKey, 1, 0, -2);
+          if (dropKey) this.spawnDrop(wX * TILE + 8, wY * TILE + 8, dropKey, 1);
         }
         // ★SW-BN5 2026-09-08：KillWall 音/尘对齐（:60876 音恒放含 fail;:60877-60884
         //  尘 10/fail 3）——旧 'chop' 近似+8 尘成功档=BF1 简化面退役
@@ -21087,7 +21089,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // Item.NewItem 16×16 盒内均匀取点（原版 NewItem 语义）；速度 0 靠重力散落
       item: (vid, px, py, stack) => {
         const key = VI(vid);
-        if (key) this.spawnDrop(px + Math.random() * 16, py + Math.random() * 16, key, stack, 0, 0);
+        if (key) this.spawnDrop(px + Math.random() * 16, py + Math.random() * 16, key, stack);
       },
       npc: (vid, px, py, o) => this.spawnTreeShakeNpc(vid, px, py, o),
       // 弹 28 炸弹 / 75 快乐炸弹走引信弹通道（AI_016，fuse 180）：
@@ -21135,7 +21137,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             // 放置面。两掉落臂归一 vi_1124_Hive（=原版物品 id;挥动发蜂武器面
             // swingVid===1124 已接;放置走 1129 魔杖——魔杖 tileWand 弹药消耗面未接,
             // 登记债）;vi_1124 补 tile 的任务原案按反编译证伪废弃）
-            this.spawnDrop(bx, by, VI(1124), 2 + Math.floor(Math.random() * 4), 0, 0);
+            this.spawnDrop(bx, by, VI(1124), 2 + Math.floor(Math.random() * 4));
             return;
           }
           let n = 2;
@@ -21420,7 +21422,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (num <= 0) return;
     const key = VANILLA_ITEM_KEY_BY_ID[1727];        // Hay（ItemID.cs:5000）;禁手拼 vi_ 键
     if (!key) return;
-    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, num, 0, -2);
+    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, num);
   }
 
   /** Player.CollideWithNPCs（Player.cs:20536-20577,SW-L1 2026-09-03 F12 注释对码）
@@ -21815,7 +21817,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!dropId) return;
     const key = VANILLA_ITEM_KEY_BY_ID[dropId];
     if (!key) return;
-    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack, 0, -2);
+    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack);
   }
 
   /** KillTile_ShouldDropSeeds（WorldGen.cs:66232）：1/2 且玩家背包有吹管(281)/
@@ -21873,7 +21875,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 1/1000——与虫族掷骰相互独立（原版顺序独立 if），无 CountNPCS 上限门
     if (dropCloverRoll(sheet, fx, Math.random)) {
       const cloverKey = VANILLA_ITEM_KEY_BY_ID[5574];
-      if (cloverKey) this.spawnDrop(x * TILE + 8, y * TILE, cloverKey, 1, 0, -2);
+      if (cloverKey) this.spawnDrop(x * TILE + 8, y * TILE, cloverKey, 1);
     }
     if (!r) return;
     // cap 计数按原版数**基型**（:66416 CountNPCS(num7)=357|606——金蚯蚓 448 不计；
@@ -22021,7 +22023,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.chunks.markDirtyArea(ax696 - 1, ay696 - 1, ax696 + 2, ay696 + 2);
       for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) st.setTile(ax696 + dx, ay696 + dy, 0);
       const key696 = VANILLA_ITEM_KEY_BY_ID[crimson696 ? 5470 : 5469];
-      if (key696) this.spawnDrop(ax696 * TILE + 8, ay696 * TILE + 8, key696, 1, 0, -2); // SW-C1 placeStyle 回填后=真掉落
+      if (key696) this.spawnDrop(ax696 * TILE + 8, ay696 * TILE + 8, key696, 1); // SW-C1 placeStyle 回填后=真掉落
       if (crimson696) this.sfx.playWavFile('NPC_Killed_1', 1, ax696 * TILE + 16, ay696 * TILE + 16);
       else this.sfx.play('shatter', 1, ax696 * TILE + 16, ay696 * TILE + 16);
       return;
@@ -22034,7 +22036,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.chunks.markDirtyArea(ax695 - 1, ay695 - 1, ax695 + 3, ay695 + 2);
       for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) st.setTileSilent(ax695 + dx, ay695 + dy, 0);
       const key695 = VANILLA_ITEM_KEY_BY_ID[crimson695 ? 5468 : 5467];
-      if (key695) this.spawnDrop(ax695 * TILE + 24, ay695 * TILE + 8, key695, 1, 0, -2);
+      if (key695) this.spawnDrop(ax695 * TILE + 24, ay695 * TILE + 8, key695, 1);
       // 音分档（KillTile_PlaySounds :67045-67047：(26||695) && frameX>=54 → PlaySound(4)）
       if (crimson695) this.sfx.playWavFile('NPC_Killed_1', 1, x * TILE + 24, y * TILE + 16);
       else this.killTileBreakSound(type, x, y);
@@ -22256,7 +22258,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const fbr = furnitureTryBreak(this.world.furnitureItems, fKind, fax, fay, type);
       if (fbr.result === 'pop') {
         if (fbr.item) {
-          this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack, 0, -2);
+          this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack);
         }
         this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 4, 1.2);
         return;
@@ -22268,7 +22270,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  :64151）+ CheckWeaponsRack :46855 架体 2699 同击;两段式 early-return 是 471
       //  TE 专属（:64186-64192）。此处先弹武器,再落 object 路径碎架 + def.drop 2699。
       if (fbr.item) {
-        this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack, 0, -2);
+        this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack);
       }
     }
     // 锚桩 724 / 风筝桩 723（KillTile_DropItems :63739-63744 DropItemForTileBreak，
@@ -22283,7 +22285,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ? critterAnchorBreakDrop(this.world.furnitureItems, x, y)
         : kiteAnchorBreakDrop(this.world.furnitureItems, x, y);
       if (stored) {
-        this.spawnDrop(x * TILE + 8, y * TILE, ITEM_DEFS[stored.id].key, stored.stack, 0, -2);
+        this.spawnDrop(x * TILE + 8, y * TILE, ITEM_DEFS[stored.id].key, stored.stack);
       }
       // 联机：锚桩消散广播 Remove（= 原版 LeashedEntity.Remove :385-398 → NetModule.Remove）。
       // 房主权威链路才上行（访客破坏走 tile 层 msg17，房主锚格巡检兜底下发 Remove）；
@@ -22788,7 +22790,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!key) return;
     const ri = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo));   // Next(lo,hi) 上开区间
     const hit = (n: number) => Math.floor(Math.random() * n) === 0;
-    const drop = (stack: number) => this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack, 0, -2);
+    const drop = (stack: number) => this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack);
     if (vid === 71) {
       drop(ri(10, 100)); drop(ri(10, 100));
       if (Math.floor(Math.random() * 3) !== 0) drop(ri(10, 100));
@@ -23088,10 +23090,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.chunks.markDirtyArea(ax, ay, ax + 3, ay + 7);
     const treeKey = VANILLA_ITEM_KEY_BY_ID[1873];
-    if (treeKey) this.spawnDrop(ax * TILE + 8, ay * TILE, treeKey, 1, 0, -2);
+    if (treeKey) this.spawnDrop(ax * TILE + 8, ay * TILE, treeKey, 1);
     for (const vid of decorDrops) {
       const k = VANILLA_ITEM_KEY_BY_ID[vid];
-      if (k) this.spawnDrop(ax * TILE + 8, ay * TILE, k, 1, 0, -2);
+      if (k) this.spawnDrop(ax * TILE + 8, ay * TILE, k, 1);
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, '#218755', 10, 2);
     this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
@@ -23268,10 +23270,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const roll = first ? 0 : Math.floor(Math.random() * 5);   // Main.rand.Next(5)
     const vid = POOLS[isDemonHeart ? 'heart' : 'orb'][roll];
     const key = VANILLA_ITEM_KEY_BY_ID[vid];
-    if (key) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, 1, (Math.random() - 0.5) * 3, -3);
+    if (key) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, 1);
     if (roll === 0) {
       const gelKey = VANILLA_ITEM_KEY_BY_ID[97];               // 凝胶 ×100（genRand.Next(100,101)）
-      if (gelKey) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, gelKey, 100, (Math.random() - 0.5) * 3, -3);
+      if (gelKey) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, gelKey, 100);
     }
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
     // 破碎音分档（WorldGen.cs:54361-54368：flag=frameX>=36 心 → PlaySound(4)=
@@ -23384,8 +23386,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.chunks.markDirtyArea(x - 2, topY, x + 2, y + 1);
     if (cactusKey && ITEM_BY_KEY[cactusKey] !== undefined) {
       for (const [kx, ky] of killed) {
-        this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 10, ky * TILE, cactusKey, 1,
-          (Math.random() - 0.5) * 2, -2 - Math.random());
+        this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 10, ky * TILE, cactusKey, 1);
       }
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, '#497811', 10, 1.8);
@@ -23551,7 +23552,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // （GetItemDrops=0）。fail 门（上方 WALL_DUNGEON/87 两行）已按原版先行拦截。
       const oldDropVid = wallDropItemVid(oldWall);
       const oldDropKey = oldDropVid > 0 ? VI(oldDropVid) : '';
-      if (oldDropKey) this.spawnDrop(tx * TILE + 8, ty * TILE + 8, oldDropKey, 1, 0, -2);
+      if (oldDropKey) this.spawnDrop(tx * TILE + 8, ty * TILE + 8, oldDropKey, 1);
       st.setWall(tx, ty, wallId);
       // ReplaceWall 尾 ClearWallPaintAndCoating（WorldGen.cs:63049-63050 `tile.wall =
       // targetWall; tile.ClearWallPaintAndCoating();`）——非0→非0 换墙清旧墙漆/涂层
@@ -23747,7 +23748,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // ★SW-FX12：掉落面 1:1——原版 RequestNewItem(..., ReserveForLocalPlayer)
           //  （:42187；1456 为 Item.NewItem(x*16,y*16)+NetMessage 21）= 世界掉落物
           //  而非直接入包（旧实现 p.inv.add 越过拾取面）
-          this.spawnDrop(tx * TILE, ty * TILE, mossKey, 1, 0, -2);
+          this.spawnDrop(tx * TILE, ty * TILE, mossKey, 1);
         }
       }
     }
@@ -26247,7 +26248,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (r.ok) {
           // 占位旧物先弹出（TryPlacing :91-93 result.DropItem → 世界掉落）
           if (r.replaced) {
-            this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[r.replaced.id].key, r.replaced.stack, 0, -2);
+            this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[r.replaced.id].key, r.replaced.stack);
           }
           this.player.inv.removeHeld(1);
           this.cb.onInventoryChanged();
@@ -26265,14 +26266,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.inv.slots[sel] = { id: taken.item.id, stack: taken.item.stack, prefix: taken.item.prefix };
         } else {
           const left = this.player.inv.add(taken.item.id, taken.item.stack);
-          if (left > 0) this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[taken.item.id].key, left, 0, -2);
+          if (left > 0) this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[taken.item.id].key, left);
         }
         this.cb.onInventoryChanged();
       }
     } else {
       const popped = furniturePopSingle(list, kind, ax, ay);
       if (popped) {
-        this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[popped.id].key, popped.stack, 0, -2);
+        this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[popped.id].key, popped.stack);
       }
     }
     this.input.rightDown = false;
@@ -27433,7 +27434,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (drop.itemType <= 0) return;
     const key = VANILLA_ITEM_KEY_BY_ID[drop.itemType];
     if (key && ITEM_BY_KEY[key] !== undefined) {
-      this.spawnDrop(tx * TILE + 24, (ty - 1) * TILE, key, drop.stack, 0, -2);
+      this.spawnDrop(tx * TILE + 24, (ty - 1) * TILE, key, drop.stack);
     }
   }
 
@@ -27454,7 +27455,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 提取机通电产物掉落（Wiring.cs:2588 Item.NewItem 32×32 判定框中心） */
   private dropItemStackImpl(vanillaItemId: number, stack: number, px: number, py: number): void {
     const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
-    if (key && ITEM_BY_KEY[key] !== undefined) this.spawnDrop(px, py, key, stack, 0, -2);
+    if (key && ITEM_BY_KEY[key] !== undefined) this.spawnDrop(px, py, key, stack);
   }
 
   /** 放置态生命水晶使用(Player.cs:29358:statLifeMax≥400 拒绝,+20 上限+回复,消耗) */
@@ -27953,7 +27954,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.chunks.markDirtyArea(anchor.x - 1, anchor.y - 1, anchor.x + 3, anchor.y + 4);
     const key = VANILLA_ITEM_KEY_BY_ID[pylonItemTypeFromStyle(style)];
-    if (key) this.spawnDrop(anchor.x * TILE + 24, anchor.y * TILE, key, 1, 0, -2);
+    if (key) this.spawnDrop(anchor.x * TILE + 24, anchor.y * TILE, key, 1);
     this.sfx.play('place');
     this.refreshPylons();
   }
@@ -28169,7 +28170,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
         const crystal = (this.entities.enemies as Enemy[]).find((e) => !e.dead && e.vanillaId === 548);
         if (!key || !crystal) return;
-        this.spawnDrop(crystal.cx, crystal.cy + 8, key, count, 0, -2);
+        this.spawnDrop(crystal.cx, crystal.cy + 8, key, count);
       },
       arenaEnds: (x, y) => checkArenaScore(this, x * TILE + 8, y * TILE + 8),
       findGroundY: (tileX, tileY) => {
@@ -28758,7 +28759,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // type 即原版钱币 item id 71/72/73(铜/银/金,Weather.cs 对齐 cs:71836)——
         // 曾整体 +1 错位(铜雨掉银/银雨掉金/金雨掉铂,每次降雨 ×100 通胀)
         const key = VI(type);
-        this.spawnDrop(x, y, key, stack, 0, 3);
+        this.spawnDrop(x, y, key, stack);
       },
       onThunder: (distPx) => {
         // 原版 SoundID 43：thunderDistance×15px 处发声——按距离衰减近似
@@ -29736,7 +29737,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               if (explWallFail) continue;               // fail=墙保持原状不掉物（:60890-60892）
               st.setWall(wx, wy, 0);
               const dropVid = wallDropItemVid(w);
-              if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, VI(dropVid), 1, 0, -2);
+              if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, VI(dropVid), 1);
             }
           }
         }
@@ -30361,7 +30362,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 //  与 explodeAt 支同修,注见彼处）
                 st.setWall(wx, wy, 0);
                 const dropVid = wallDropItemVid(w);
-                if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, VI(dropVid), 1, 0, -2);
+                if (dropVid > 0) this.spawnDrop(wx * TILE + 8, wy * TILE + 8, VI(dropVid), 1);
               }
             }
           }
@@ -31508,7 +31509,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const c = this.findChest(x, y);
     if (!c) return;
     for (const item of c.items) {
-      if (item) this.spawnDrop(x * TILE + 16, y * TILE, ITEM_DEFS[item.id].key, item.stack);
+      if (item) this.spawnDrop(x * TILE + 16, y * TILE, ITEM_DEFS[item.id].key, item.stack, 0, -2);   // SW 兜底面（原版 DestroyChest 有物拒拆=无此掉落锚,保 12×12 旧缺省）
     }
     this.world.chests = this.world.chests.filter((cc) => cc !== c);
   }
@@ -31761,7 +31762,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const drop = (itemId: number, n = 1): ItemDrop | null => {
       const key = VANILLA_ITEM_KEY_BY_ID[itemId];
       if (!key) return null;
-      return this.spawnDrop(x * TILE + 8, y * TILE + 8, key, n, (Math.random() - 0.5) * 2.4, -2 - Math.random());
+      return this.spawnDrop(x * TILE + 8, y * TILE + 8, key, n);
     };
     /** 心 pickup（item 58 是 IsAPickup：触碰回血不进包——此处曾误当蘑菇收集物） */
     const dropHeart = () => { const h = drop(58); if (h) h.pickup = 'heart'; };
@@ -31957,8 +31958,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  捕获物掉在【玩家中心】可秒拾（noGrabDelay）；687 神秘青蛙永远传送逃走
    *  （TryTeleportingCaughtMysticFrog :80657-80682：±15 格采样 telefrag 8，
    *   Teleport style 13 = 每侧 Item8 + 21 尘 27；失败 PoofOfSmoke 消散）。 */
-  /** critters 桶实体的原版 NPC id（桶内混装 Enemy 与遗留 Critter：
-   *  Enemy.vanillaId 优先，Critter 走 def.npc 兜底；均无 = -1） */
+  /** critters 桶实体的原版 NPC id（★BJ332 勘误 2026-09-24：Critter 类 2026-08-17
+   *  终删后桶内已全 Enemy 化（见 netCatchCritter 注），身份域恒 = Enemy.vanillaId；
+   *  EnemyDef 无 npc 字段，`def?.npc` 兜底是死码留作防御，勿再当活路径引用） */
   private critterVid(c: unknown): number {
     const e = c as { vanillaId?: number; dead?: boolean; def?: { npc?: number } };
     return e.vanillaId ?? e.def?.npc ?? -1;
@@ -32040,7 +32042,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     const key = VANILLA_ITEM_KEY_BY_ID[catchItemId];
-    if (key) this.spawnDrop(this.player.cx - 8, this.player.cy - 8, key, 1, 0, -1);
+    if (key) this.spawnDrop(this.player.cx - 8, this.player.cy - 8, key, 1);
     this.spawnParticles(c.cx, c.cy, '#D8D8C8', 8, 1.5, { life: 20 });
     c.dead = true;                                     // :80719 active=false（非 Kill 不掉落）
   }
@@ -32120,7 +32122,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!step.cooked) return;
     // QuickSpawnItem(969)（:50976→RequestItemAt player.Center :7202）——掉落中心=玩家
     // 中心（★RV1 复核：曾 (cx-8,cy-8) 左上偏 8px,测试断言同步）
-    this.spawnDrop(p.cx, p.cy, 'vi_969_CookedMarshmallow', 1, 0, -1);
+    this.spawnDrop(p.cx, p.cy, 'vi_969_CookedMarshmallow', 1);
     p.inv.removeHeld(1);                             // stack--/TurnToAir（:50977-50981）
     this.cb.onInventoryChanged();
   }
@@ -36384,7 +36386,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if ((vid === 85 || vid === 341 || vid === 629) && (e.ai0 ?? 0) === 0) continue;
       if (vid === 694 && (e.ai3 ?? 0) === 3) continue;
       if (!this.npcHoverHit(vid, wx, wy, e.x, e.y, e.w, e.h)) continue;
-      this.setHoverNpcName(vid, '', e.hp, e.maxHp);
+      // ★BJ334(2026-09-24)：名喂 netID 而非基底——原版 GivenOrTypeName → TypeName
+      //  = Lang.GetNPCNameValue(npc.netID)（NPC.cs:6751/:6767,Main.cs:43820-43831）。
+      //  绿史莱姆 vanillaNetId=-3（基底 vanillaId=1）曾喂基底 → 悬停显示「蓝史莱姆」。
+      //  0=无变体哨兵（Game.ts:41983 惯用法,禁 ??）；命中/排除集仍按基底 vid
+      //  （原版 HoverOverNPCs 排除面按 nPC.type,Main.cs:43740-43748）。
+      this.setHoverNpcName(e.vanillaNetId !== 0 ? e.vanillaNetId : vid, '', e.hp, e.maxHp);
       return;
     }
     for (const n of this.entities.npcs) {
@@ -36409,15 +36416,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const c = ent as Enemy;
       if (!(c instanceof Enemy) || c.dead || c.vanillaId == null) continue;
       if (!hit(c.vanillaId, c.x, c.y, c.w, c.h)) continue;
-      this.setHoverNpcName(c.vanillaId, '', c.hp, c.maxHp);
+      // ★BJ334：同敌怪桶喂 netID（小动物无负变体,哨兵 0 回退 vanillaId 等价）
+      this.setHoverNpcName(c.vanillaNetId !== 0 ? c.vanillaNetId : c.vanillaId, '', c.hp, c.maxHp);
       return;
     }
   }
 
-  /** 名牌落位（GivenOrTypeName + ShowLife 血量行,Main.cs:43823-43831 1:1） */
-  private setHoverNpcName(vid: number, givenName: string, hp: number, maxHp: number): void {
+  /** 名牌落位（GivenOrTypeName + ShowLife 血量行,Main.cs:43823-43831 1:1）。
+   *  ★BJ334：netId 参数=原版 npc.netID 域（TypeName=GetNPCNameValue(netID),
+   *  NPC.cs:6751）——调用方传 vanillaNetId!==0?v:vanillaId（0=无变体哨兵）。 */
+  private setHoverNpcName(netId: number, givenName: string, hp: number, maxHp: number): void {
     const p = this.player;
-    const typeName = Lang.npcName(vid) ?? '';
+    const typeName = Lang.npcName(netId) ?? '';
     const name = givenName || typeName;            // NPC.GivenOrTypeName（NPC.cs:6767-6774）
     p.cursorItemIconEnabled = false;               // :43822 压悬停/手持图标
     // :43827-43829 `lifeMax > 1 && ShowLife` → "名: hp/maxHp"（ShowLife 恒 true,见上注）
@@ -37451,7 +37461,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         downedMoonlord: !!f['downed_398'],
       });
       const key = VANILLA_ITEM_KEY_BY_ID[reward.id];
-      if (key) this.spawnDrop(this.player.cx, this.player.cy, key, reward.stack, 0, -2);
+      if (key) this.spawnDrop(this.player.cx, this.player.cy, key, reward.stack);
       this.cb.onInventoryChanged?.();
     }
     const chat = Lang.specialText(gotDye ? 'DyeTraderSpecialText.HasPlant' : 'DyeTraderSpecialText.NoPlant') ?? '';
@@ -37564,7 +37574,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       ownedTypes: owned,
     })) {
       const key = VI(g.id);
-      if (key) this.spawnDrop(npc.cx, npc.cy - 8, key, g.stack, 0, -2);
+      if (key) this.spawnDrop(npc.cx, npc.cy - 8, key, g.stack);
     }
   }
 
@@ -37703,7 +37713,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         numClouds: w.weather?.numClouds ?? 200,
         windSpeedCurrent: w.weather?.windSpeedCurrent ?? 0,
         sandstorm: !!w.weather?.sandstorm.happening,
-        globalTimeSec: performance.now() / 1000,   // GlobalTimeWrappedHourly(:16777)
+        globalTimeSec: globalTimeWrappedHourly(),   // ★BJ330：GTW 钟源（Main.cs:16777;沙暴文字 5s 闪烁——暂停/失焦随世界冻结）
       },
       moonPhase: clock.moonPhase, bloodMoon: !!clock.bloodMoon, eclipse: !!clock.eclipse,
       fishingText, oreText,
@@ -40597,7 +40607,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 才走 gemsOnly=true 只掉宝石——本仓无背包宝石，近似为不掉）
     if (dropsAllItemsOnDeath(charDiff)) {
       dropInventoryOnDeath(p.inv, (key, stack) => {
-        this.spawnDrop(p.cx, p.cy, key, stack, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
+        // ★BJ326：TryDroppingSingleItem 显式速度逐字（Player.cs:55027 Next(-20,21)×0.2,
+        //  Next(-20,1)×0.2=vx[-4,4] 步 0.2 / vy[-4,-0.2] 步 0.2）——旧 (rand-0.5)×8/
+        //  -2-rand×2 vy 分布不符（[-4,-2] 恒快坠）
+        this.spawnDrop(p.cx, p.cy, key, stack,
+          (Math.floor(Math.random() * 41) - 20) * 0.2, (Math.floor(Math.random() * 21) - 20) * 0.2);
       });
     }
     // 硬核：HardcoreDeathPenalty（1457 Player.cs:39075-39087 1:1；调用位 KillMe
@@ -40640,7 +40654,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // ★ 掉出的钱要落地（DropCoins→TryDroppingSingleItem :53386 掉的是
           //   coin 物品实体，死亡点可拾回——此前只 remove 没生成=钱凭空蒸发）
           if (dropN > 0) {
-            this.spawnDrop(p.cx, p.cy, ck, dropN, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
+            // ★BJ326：TryDroppingSingleItem 同式（DropCoins 经同一出口,Player.cs:55027）
+            this.spawnDrop(p.cx, p.cy, ck, dropN,
+              (Math.floor(Math.random() * 41) - 20) * 0.2, (Math.floor(Math.random() * 21) - 20) * 0.2);
           }
         }
       });
@@ -47382,7 +47398,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       // 生成盒【中心】语义,非顶 y
       if (key) {
         const left = this.player.inv.add(ITEM_BY_KEY[key]!, stack);
-        if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, key, left, 0, -2);
+        if (left > 0) this.spawnDrop(this.player.cx, this.player.cy, key, left);
         // SW-BJ36 2026-09-08：渔获拾取飘名（用户实报"钓上东西没有拾取提示"）——原版
         // GiveItemToPlayer(PRJ57:54904) → QuickSpawnItem(PLR57:7186) → GetOrDropItem(:7197)
         // 内联 GetItem(GetItemSettings.PickupItemFromWorld,GetItemSettings.cs:13 NoText=false)，

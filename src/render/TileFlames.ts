@@ -379,6 +379,11 @@ export function furnitureFlameTint(
 // ---- Main.TileFrameSeed（Main.cs:395 初值 + :61156-61159 每 5 绘制周期推进）----
 let _frameSeed = 0x2545f4914f6cdd1dn & MASK48; // 初值任意（原版 = Guid 哈希，仅要"每局不同"）
 let _drawCycle = 0;
+/** ★B1 对拍仪具（2026-09-24）:火苗种子冻结——TileFrameSeed 按绘制周期推进且
+ *  不受暂停/时钟冻结门控 = 渲染帧非确定性面,页内 A/B 像素对拍须钉死
+ *  （scripts/_b1-world-ab.mjs 动态 import 消费;生产路径零触碰）。 */
+let _seedFrozen = false;
+export function tileFrameSeedFreezeForTest(v: boolean): void { _seedFrozen = v; }
 
 /** Main.TileFrameSeed 只读访问：全局唯一种子（tile 火苗与 FlameParticle.Draw :57
  *  的抖动种子同源——`TileFrameSeed ^ (x<<32|y)`，两族共用同一推进节拍） */
@@ -546,8 +551,10 @@ export function drawTileFlames(
   flicker: FlickerClock | null,
 ): void {
   // 颜色/抖动只依赖 TileFrameSeed 与 FlickerClock（同原版，无时钟项）
-  if (_drawCycle === 0) _frameSeed = randomNextSeed(_frameSeed);   // Main.cs:61156-61159
-  _drawCycle = (_drawCycle + 1) % 5;
+  if (!_seedFrozen) {
+    if (_drawCycle === 0) _frameSeed = randomNextSeed(_frameSeed);   // Main.cs:61156-61159
+    _drawCycle = (_drawCycle + 1) % 5;
+  }
 
   const flameImg = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const imgFor = (idx: number) => {

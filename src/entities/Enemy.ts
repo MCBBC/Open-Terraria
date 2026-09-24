@@ -132,6 +132,7 @@ import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { spawnNpcDeathGore, GorePiece } from './GorePiece';
 import { spawnNpcHitDust, spawnNpcDeathDust } from './NpcHitDust';   // ★BJ254 HitEffect 尘查表
 import { hslToRgb } from '../player/Appearance';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源（661 光皇蝴蝶点光相位）
 import { npcContactBucketId, getGlobalHurtBuckets, type HurtCooldownBuckets } from '../player/HurtCooldownBuckets';
 import { getMeleeCollisionData, boxesIntersect } from '../player/MeleeCollisionData';
 import { enemyHurtFloatColor } from '../fx/CombatTextColors';
@@ -10094,11 +10095,14 @@ export class Enemy extends Entity {
         : r100 < 34 ? 3 : r100 < 53 ? 6 : r100 >= 75 ? 0 : 4;
       this.ai2 = 1 + sp;
     }
-    // ---- 点光（AI_065_Butterflies，cs:45233-45241 / :45448-45453）----
+    // ---- 点光（AI_065_Butterflies，NPC.cs:45389 实文）----
     if (isLacewing) {
-      // :45233-45237 光皇蝴蝶：hslToRgb(GlobalTimeWrappedHourly×0.33 % 1, 1, 0.5)×0.3
-      //  + 白 0.1。GlobalTimeWrappedHourly 1 游戏小时 = 54000 帧 → 色相周期 ≈163636 帧
-      const [hr, hg, hb] = hslToRgb((visEffectFrames() / 54000) * 0.33, 1, 0.5);
+      // :45389 光皇蝴蝶：hslToRgb(GlobalTimeWrappedHourly×0.33 % 1, 1, 0.5)×0.3
+      //  + 白 0.1。★BJ330 二次窗口（BJ327 归队后补齐）：原 (visEffectFrames()/54000)×0.33
+      //  系把 GTW 误读进 Main.time 域（54000=昼夜全长 tick 数,且 GTW 本非游戏内钟）,
+      //  色相周期被拉长 ~900×（≈45.5min vs 原版 1/0.33≈3.03s 一轮）——今 1:1 校准并入
+      //  GameTime 单源（hslToRgb 内含 ((h%1)+1)%1 包绕,%1 显式照抄原版表达式）。
+      const [hr, hg, hb] = hslToRgb(globalTimeWrappedHourly() * 0.33 % 1, 1, 0.5);
       this.lightRGB = [hr * 0.3 + 0.1, hg * 0.3 + 0.1, hb * 0.3 + 0.1];
     } else if (this.vanillaId === 653) {
       this.lightRGB = [0.6, 0.3, 0.1];      // :45448-45453 地狱蝴蝶恒亮 + 尘 6 号 1/60
@@ -12005,7 +12009,7 @@ export class Enemy extends Entity {
       if (++this.ai1 >= 120) {
         // :43341-43349 奖赏：695→5663 Cattiva / 696→5664 Foxsparks（Item.NewItem）
         const key = VANILLA_ITEM_KEY_BY_ID[this.vanillaId === 696 ? 5664 : 5663];
-        if (key) game.spawnDrop(this.cx, this.y, key, 1, 0, -2);
+        if (key) game.spawnDrop(this.cx, this.y, key, 1);
         this.hp = 0; this.dead = true;             // life=0 + active=false（无死亡管线）
         return;
       }

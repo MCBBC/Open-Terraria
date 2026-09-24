@@ -61,34 +61,23 @@ try {
   log('duke spawned', JSON.stringify(sp.box), 'scale', sp.vanillaScale);
   await sleep(200);
 
-  // ---- 泵帧（光照收敛）+ 采样盒读回（盒中心 ±96px 世界域）----
+  // ---- 泵帧（光照收敛）+ worldLayer 预乘层读回（无光照乘=跨构建字节确定;
+  //   合成面曾读回全黑=高空光照衰减,worldLayer 比值面免疫光照）----
   for (let k = 0; k < 12; k++) { await sleep(100); }
   const sample = await page.evaluate(({ ai0, alpha, box }) => {
     const g = window.__swGame;
-    const cv = g?.renderer?.canvas ?? document.querySelectorAll('canvas')[1];
-    const cxw = box.x + box.w / 2, cyw = box.y + box.h / 2;
-    const [sx, sy] = g.camera.worldToScreen(cxw, cyw);
-    const z = g.camera.zoom;
-    const W = Math.round(192 * z), H = Math.round(192 * z);
-    const c2 = document.createElement('canvas');
-    c2.width = W; c2.height = H;
-    const c = c2.getContext('2d', { willReadFrequently: true });
-    c.drawImage(cv, Math.round(sx - W / 2), Math.round(sy - H / 2), W, H, 0, 0, W, H);
-    const d = c.getImageData(0, 0, W, H).data;
-    // 体部抽样 = 蓝分量显著、非纯天色的像素（天 ≈ (a, 略高 R, 高 G)? 天空亮蓝 —
-    //   须与鱼身区分：鱼身像素由两条构建比对,天像素跨构建恒等 → 比值面天然剔除）。
-    let s = '';
-    let n = 0, rs = 0, gs = 0, bs = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      s += d[i] + ',' + d[i + 1] + ',' + d[i + 2] + ' ';
-      if (d[i + 3] === 255) { n++; rs += d[i]; gs += d[i + 1]; bs += d[i + 2]; }
-    }
-    return { W, H, mean: n ? [rs / n, gs / n, bs / n].map((v) => +v.toFixed(2)) : null, n, px: s.trim() };
+    const wc = g.renderer.worldCanvas;
+    return {
+      wl: wc.toDataURL('image/png'),
+      wlSize: [wc.width, wc.height],
+      cam: { x: g.camera.x, y: g.camera.y, zoom: g.camera.zoom },
+      box,
+    };
   }, { ai0: AI0, alpha: ALPHA, box: sp.box });
 
   writeFileSync(join(OUT, `duke-${TAG}-ai${AI0}-a${ALPHA}.json`),
-    JSON.stringify({ tag: TAG, ai0: AI0, alpha: ALPHA, box: sp.box, ...sample }, null, 1));
-  log('OK tag=' + TAG, 'ai0=' + AI0, 'alpha=' + ALPHA, 'opaque px=', sample.n, 'mean=', JSON.stringify(sample.mean));
+    JSON.stringify({ tag: TAG, ai0: AI0, alpha: ALPHA, ...sample }, null, 1));
+  log('OK tag=' + TAG, 'ai0=' + AI0, 'alpha=' + ALPHA);
 } catch (err) {
   console.error('[bj325-duke] FAIL', err?.message ?? err);
   process.exitCode = 1;

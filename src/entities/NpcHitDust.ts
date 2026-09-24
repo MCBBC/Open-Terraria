@@ -328,6 +328,7 @@ function emitEl(e: Enemy, game: GameHooks, hd: number, el: NpcDustEl, dmg: numbe
   if ('body' in el) {
     if (el.over === 'oldPos') {                         // ★批4 402:oldPos 轨迹环——len 拍逐 index 走 body
       const len = el.len ?? 10;                         // （原版 oldPos.Length=TrailCacheLength[型],NPCID.cs:4809）
+      const prevOld = ctx.oldIdx;
       for (let i = 0; i < len; i++) {
         ctx.oldIdx = i;
         ctx.brk = false; ctx.skip = false;
@@ -340,9 +341,11 @@ function emitEl(e: Enemy, game: GameHooks, hd: number, el: NpcDustEl, dmg: numbe
         if (brk) break;                                 // 原版 break:余下 index 不迭代（掷门不再耗）
         // skip → 原版 continue:余下 body 跳过,续走下一 index
       }
+      ctx.oldIdx = prevOld;
       return;
     }
     const n = countOf(el, dmg, e);
+    const prevIdx = ctx.idx;
     for (let k = 0; k < n; k++) {
       ctx.idx = k;                                      // ★批4 661:色相环索（colorHsl 读 ctx.idx）
       ctx.brk = false; ctx.skip = false;
@@ -354,12 +357,15 @@ function emitEl(e: Enemy, game: GameHooks, hd: number, el: NpcDustEl, dmg: numbe
       ctx.brk = false; ctx.skip = false;
       if (brk) break;
     }
+    ctx.idx = prevIdx;
     return;
   }
   if ('roll' in el) {
     if (!prePass(el.gate, e)) return;                   // 区域门：判负整支跳过,不耗掷
     const n = countOf(el, dmg, e);
+    const prevIdx = ctx.idx;                            // ★批4 661:branch 自带 hitK/n 环——色相环索绑定本环 k
     for (let k = 0; k < n; k++) {
+      ctx.idx = k;
       if (!prePass(el.pre, e)) {                        // 臂条件判负：走 else 臂,不耗掷（&& 短路同相）
         if (el.e) {
           for (const child of el.e) {
@@ -384,6 +390,7 @@ function emitEl(e: Enemy, game: GameHooks, hd: number, el: NpcDustEl, dmg: numbe
         break;
       }
     }
+    ctx.idx = prevIdx;                                  // 环索恢复（外层 for 的 idx 语义不受内支扰动）
     return;
   }
   emitStmt(e, game, hd, el, dmg, ctx);

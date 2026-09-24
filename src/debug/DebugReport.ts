@@ -48,6 +48,19 @@ const MINIMAP_CROP_R = 100;
 export interface SwErrorRecord { t: number; kind: number; msg: string; stack: string | null }
 export interface SwWarnRecord { t: number; msg: string }
 
+/** ★BJ331（2026-09-24）：错误环 stack 字段取帧行（曾 `split('\n')[0]` = 只留消息行,
+ *  与 msg 字段纯重复、帧全丢 ⇒ 打包态事故只剩 "X is not defined" 一行无从定位
+ *  ——BJ331 用户实报 amount 案靠线下拉线上 bundle 逐字节比对才定谳）。本函数丢第
+ *  一行（消息,已在 msg 字段），保前 4 帧行（打包态 minified 帧 file:line:col 可直接
+ *  定位 bundle 字节位）；无帧栈（单行,极端环境）原样保留。预算沿用 300B/条。 */
+export function stackFrameSummary(stack: string | null | undefined): string | null {
+  if (!stack) return null;
+  const lines = stack.split('\n').map((s) => s.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  if (lines.length === 1) return lines[0]!.slice(0, 300);
+  return lines.slice(1, 5).join('\n').slice(0, 300);
+}
+
 export interface DebugReportOptions {
   /** 截图段（默认 true）；无 DOM 环境自动降级为 null */
   screenshot?: boolean;

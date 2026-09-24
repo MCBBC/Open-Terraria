@@ -96,6 +96,7 @@ import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
+import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源
 
 // 弹幕贴图:Projectile_{240,675,682,686,687}.png 已自 terraria-assets/Images 入
 // sprites/vanilla 管线(scripts/vanilla-atlas.mjs MISC 表),Arrow 按 projId 懒加载真图——
@@ -1990,8 +1991,7 @@ export class BetsyBreath extends Entity {
     const num240 = 40, num241 = 80;
     const num229 = this.frameT / num240;                      // num242：焰面前沿（0..~1.95）
     const frac = num229 % 1;
-    const gt = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000
-      % 3600;                                                 // GlobalTimeWrappedHourly(:17014)
+    const gt = globalTimeWrappedHourly();                     // GlobalTimeWrappedHourly(:17014)——★BJ330 GTW 单源（原 performance.now 墙钟）
     for (let layer = 0; layer < 15; layer++) {
       seed = (seed * 25214903917 + 11) % 281474976710656;
       const rfSeed = Math.floor(seed / 16777216) / 16777216;
