@@ -44,7 +44,9 @@ export interface ShimHost {
 
 /** 单 quad 记录（池化;同时携带 2D 重放面——flush 遇 GL 失败逐条原样回放） */
 interface QuadRec {
-  tier: 0 | 1;                        // 0=SO 1=ADD(lighter)
+  /** 0=SO 1=ADD(lighter) ★B2b acc 新增 2=ERASE(destination-out 独立削底面——
+   *  未注册尘对/光环削底+加算两步族的 acc 直译;bridge 态不产生） */
+  tier: 0 | 1 | 2;
   img: CanvasImageSource | null;      // 2D 重放源（solid 面为 null）
   solid: boolean;                     // fillRect 纯色面（白纹理+tint）
   a: number[];                        // 归一化 9 参 [img?忽略, sx,sy,sw,sh, dx,dy,dw,dh]（重放用原参形态存 raw 参）
@@ -75,6 +77,7 @@ export interface ShimExecStats {
   draws: number;        // 窗内 drawImage 总数
   emitSO: number;       // SO quad 发射
   emitADD: number;      // ADD quad 发射
+  emitErase: number;    // ★B2b acc ERASE quad 发射（tier 2）
   pairEmitted: number;  // 尘预乘对合并 quad
   pairSuppressed: number;
   fallback: number;     // 2D 回退（flush+raw）
@@ -139,10 +142,12 @@ export class GLShimExecutor {
   private gco: GlobalCompositeOperation = 'source-over';
   private smooth = false;
   private fillStyleS = '#000';
-  /** ★B2b acc 隔离栅格化所需状态镜像（strokeStyle/lineWidth 任意值原样保） */
+  /** ★B2b acc 隔离栅格化所需状态镜像（strokeStyle/lineWidth/filter 任意值原样保） */
   private strokeStyleV: string | CanvasGradient | CanvasPattern = '#000';
   private lineWidthV = 1;
-  private stack: Array<{ m: typeof GLShimExecutor.prototype.m; ga: number; gco: GlobalCompositeOperation; smooth: boolean; fill: string; clip: boolean }> = [];
+  /** ctx.filter 镜像（非 'none' 的 drawImage=源级滤镜——quad 不表达,走隔离栅格化） */
+  private filterV = 'none';
+  private stack: Array<{ m: typeof GLShimExecutor.prototype.m; ga: number; gco: GlobalCompositeOperation; smooth: boolean; fill: string; clip: boolean; stroke: string | CanvasGradient | CanvasPattern; lw: number; filter: string }> = [];
   /** 队列（单序表+tier 标签——重放保原序,SO/ADD 分批 present） */
   private head: QuadRec | null = null;
   private tail: QuadRec | null = null;
@@ -160,7 +165,7 @@ export class GLShimExecutor {
   stats: ShimExecStats = GLShimExecutor.blankStats();
 
   static blankStats(): ShimExecStats {
-    return { draws: 0, emitSO: 0, emitADD: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, replays: 0 };
+    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, replays: 0 };
   }
 
   constructor(host: ShimHost) {
@@ -181,6 +186,7 @@ export class GLShimExecutor {
     this.ga = raw.globalAlpha;
     this.gco = raw.globalCompositeOperation;
     this.smooth = raw.imageSmoothingEnabled;
+    this.filterV = String(raw.filter ?? 'none');
     this.clipped = false;
     this.active = true;
     return this.wrap();
@@ -196,7 +202,7 @@ export class GLShimExecutor {
     this.glw = this.host.acquireGl();
     if (!this.glw || this.glw.unavailable) { this.accMode = false; return null; }
     this.m.a = 1; this.m.b = 0; this.m.c = 0; this.m.d = 1; this.m.e = 0; this.m.f = 0;
-    this.ga = 1; this.gco = 'source-over'; this.smooth = false;
+    this.ga = 1; this.gco = 'source-over'; this.smooth = false; this.filterV = 'none';
     this.clipped = false;
     this.active = true;
     return this.wrap();
@@ -215,6 +221,7 @@ export class GLShimExecutor {
     try {
       raw.strokeStyle = this.strokeStyleV;
       raw.lineWidth = this.lineWidthV;
+      raw.filter = this.filterV;
     } catch { /* 非法值保 raw 现状 */ }
   }
 
@@ -267,32 +274,98 @@ export class GLShimExecutor {
     this.boundBuilt = true;
   }
 
-  /** 包装 raw ctx：热方法预绑定（零逐调用 bind 分配）;长尾走 raw 委托,
-   *  「会落笔」长尾先 flush 保序。属性 set 镜像+透传（raw 保持 2D 回退正确态）。 */
+  /** 包装 ctx：热方法预绑定（零逐调用 bind 分配）;长尾走 raw 委托,
+   *  「会落笔」长尾先 flush 保序。属性 set 镜像+透传（raw 保持 2D 回退正确态）。
+   *  ★B2b acc 态（raw=null）：target=哑对象,属性读走 acc 分支——canvas→尺寸桩
+   *  （worldW/H,消费面=gateFootprintCtx/beginFgPass 的画布尺寸读取）、
+   *  getTransform→镜像、落笔长尾→隔离栅格化或降级、未知函数→降级后委托;
+   *  属性 set 只镜像不落 raw。 */
   wrap(): CanvasRenderingContext2D {
     if (!this.boundBuilt) this.buildBound();
     const self = this;
-    const raw = this.raw!;
     const bound = this.bound;
-    return new Proxy(raw, {
-      get(t, prop) {
+    const dummy = (this._dummy ??= {}) as unknown as CanvasRenderingContext2D;
+    return new Proxy(dummy, {
+      get(_t, prop) {
+        // ★raw 动态读（acc→bridge 换桥重指后闭包不得持陈旧引用）
+        const raw = self.raw;
         if (typeof prop === 'string') {
           const b = bound[prop];
           if (b !== undefined) return b;
+          if (self.accMode) {
+            if (prop === 'canvas') return self.canvasStub();
+            if (prop === 'getTransform') {
+              const m = self.m;
+              return () => new DOMMatrix([m.a, m.b, m.c, m.d, m.e, m.f]);
+            }
+            if (DRAWING_TAIL.has(prop)) {
+              const fn = (...args: unknown[]) => { self.accTailOp(prop, args); return undefined; };
+              bound[prop] = fn;
+              return fn;
+            }
+            if (prop === 'getImageData' || prop === 'createPattern' || prop === 'createLinearGradient'
+              || prop === 'createRadialGradient' || prop === 'measureText' || prop === 'isPointInPath') {
+              // 读值面/样式工厂:acc 态无落笔语义,降级后委托（防御性——世界层现无调用点）
+              return (...args: unknown[]) => { self.ensureBridged(); const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown>; return r[prop](...args); };
+            }
+            return undefined;
+          }
           if (DRAWING_TAIL.has(prop)) {
-            const fn = (...args: unknown[]) => { self.flushForFallback(); return (t as unknown as Record<string, (...a: unknown[]) => unknown>)[prop](...args); };
+            const fn = (...args: unknown[]) => { self.flushForFallback(); return (raw as unknown as Record<string, (...a: unknown[]) => unknown>)[prop](...args); };
             bound[prop] = fn;
             return fn;
           }
         }
-        const v = Reflect.get(t, prop, t);
-        return typeof v === 'function' ? v.bind(t) : v;
+        const v = Reflect.get(raw as object, prop, raw as object);
+        return typeof v === 'function' ? v.bind(raw) : v;
       },
-      set(t, prop, value) {
+      set(_t, prop, value) {
         self.observeSet(prop, value);
-        return Reflect.set(t, prop, value);
+        const raw = self.raw;
+        if (raw) return Reflect.set(raw, prop, value);
+        return true;
       },
     }) as CanvasRenderingContext2D;
+  }
+
+  private _dummy: Record<string, unknown> | null = null;
+  private _stub: { width: number; height: number } | null = null;
+
+  /** acc 态 ctx.canvas 桩（只暴露尺寸;世界层消费面=画布尺寸读取,无 getContext 落笔） */
+  private canvasStub(): { width: number; height: number } {
+    const w = this.host.worldW(), h = this.host.worldH();
+    if (!this._stub || this._stub.width !== w || this._stub.height !== h) {
+      this._stub = { width: w, height: h };
+    }
+    return this._stub;
+  }
+
+  /** acc 态未知算子收口：优先降级换桥再委托真 ctx（宁降级不丢内容）。 */
+  private ensureBridged(): void {
+    if (this.raw || !this.accMode) return;
+    this.host.degradeAcc?.();
+  }
+
+  /** ★B2b acc 落笔长尾分流：strokeRect=隔离栅格化直支（像素恒等,见 rasterizeOp）;
+   *  其余（fillText/putImageData/stroke/fill/clearRect…世界层现无调用点）→
+   *  flush 保序+降级换桥+raw 委托。 */
+  private accTailOp(op: string, args: unknown[]): void {
+    if (op === 'strokeRect' && !this.clipped) {
+      const ok = this.rasterizeOp('strokeRect', args);
+      if (ok) return;
+    }
+    this.flushForFallback();
+    if (!this.ensureBridgedNow()) return;
+    const r = this.raw as unknown as Record<string, (...a: unknown[]) => unknown>;
+    r[op](...args);
+    this.stats.fallback++;
+  }
+
+  /** 降级同步版：调 host.degradeAcc;成功=raw 可用（bridge 已回放镜像态）。 */
+  private ensureBridgedNow(): boolean {
+    if (this.raw) return true;
+    if (!this.host.degradeAcc?.()) return false;
+    return !!this.raw;
   }
 
   private observeSet(prop: PropertyKey, value: unknown): void {
@@ -300,6 +373,9 @@ export class GLShimExecutor {
     else if (prop === 'globalCompositeOperation') this.gco = value as GlobalCompositeOperation;
     else if (prop === 'imageSmoothingEnabled') this.smooth = value === true;
     else if (prop === 'fillStyle' && typeof value === 'string') this.fillStyleS = value;
+    else if (prop === 'strokeStyle') this.strokeStyleV = value as string | CanvasGradient | CanvasPattern;
+    else if (prop === 'lineWidth' && typeof value === 'number') this.lineWidthV = value;
+    else if (prop === 'filter' && typeof value === 'string') this.filterV = value;
   }
 
   // ================= 变换（镜像+委托,fround 复刻 Skia f32 拼接） =================
@@ -308,8 +384,9 @@ export class GLShimExecutor {
     this.stack.push({
       m: { ...this.m }, ga: this.ga, gco: this.gco, smooth: this.smooth,
       fill: this.fillStyleS, clip: this.clipped,
+      stroke: this.strokeStyleV, lw: this.lineWidthV, filter: this.filterV,
     });
-    this.raw!.save();
+    if (this.raw) this.raw.save();
   }
 
   restore(): void {
@@ -317,22 +394,23 @@ export class GLShimExecutor {
     if (s) {
       this.m = s.m; this.ga = s.ga; this.gco = s.gco; this.smooth = s.smooth;
       this.fillStyleS = s.fill; this.clipped = s.clip;
+      this.strokeStyleV = s.stroke; this.lineWidthV = s.lw; this.filterV = s.filter;
     }
-    this.raw!.restore();
+    if (this.raw) this.raw.restore();
   }
 
   translate(x: number, y: number): void {
     const m = this.m;
     m.e = fround(fround(m.a * x) + fround(fround(m.c * y) + m.e));
     m.f = fround(fround(m.b * x) + fround(fround(m.d * y) + m.f));
-    this.raw!.translate(x, y);
+    if (this.raw) this.raw.translate(x, y);
   }
 
   scale(x: number, y: number): void {
     const m = this.m;
     m.a = fround(m.a * x); m.b = fround(m.b * x);
     m.c = fround(m.c * y); m.d = fround(m.d * y);
-    this.raw!.scale(x, y);
+    if (this.raw) this.raw.scale(x, y);
   }
 
   rotate(th: number): void {
@@ -343,7 +421,7 @@ export class GLShimExecutor {
     m.b = fround(fround(b * cos) + fround(d * sin));
     m.c = fround(fround(c * cos) - fround(a * sin));
     m.d = fround(fround(d * cos) - fround(b * sin));
-    this.raw!.rotate(th);
+    if (this.raw) this.raw.rotate(th);
   }
 
   setTransform(...args: unknown[]): void {
@@ -356,7 +434,7 @@ export class GLShimExecutor {
       this.m.a = fround(v[0]); this.m.b = fround(v[1]); this.m.c = fround(v[2]);
       this.m.d = fround(v[3]); this.m.e = fround(v[4]); this.m.f = fround(v[5]);
     }
-    (this.raw as unknown as { setTransform: (...a: unknown[]) => void }).setTransform(...args);
+    if (this.raw) (this.raw as unknown as { setTransform: (...a: unknown[]) => void }).setTransform(...args);
   }
 
   transform(...args: unknown[]): void {
@@ -369,7 +447,7 @@ export class GLShimExecutor {
     m.d = fround(fround(b * v[2]) + fround(d * v[3]));
     m.e = fround(fround(a * v[4]) + fround(c * v[5]) + m.e);
     m.f = fround(fround(b * v[4]) + fround(d * v[5]) + m.f);
-    (this.raw as unknown as { transform: (...a: unknown[]) => void }).transform(...args);
+    if (this.raw) (this.raw as unknown as { transform: (...a: unknown[]) => void }).transform(...args);
   }
 
   // ================= drawImage 主桥 =================
@@ -387,9 +465,7 @@ export class GLShimExecutor {
     this.suppressAdd = null;
     // 长尾形态/回退判:clip 活跃、filter 非 none、3/5/9 参以外
     if (this.clipped || n !== 2 && n !== 4 && n !== 8) {
-      this.flushForFallback();
-      Reflect.apply(raw.drawImage, raw, [img, ...rest]);
-      this.stats.fallback++;
+      this.rawDrawImage(img, rest);
       return;
     }
     // 源矩形（3 参=全图）
@@ -402,9 +478,7 @@ export class GLShimExecutor {
     if (sw === 0 || sh === 0 || dw === 0 || dh === 0) return;
     // 源越界=2D 有源裁剪+dst 补偿语义（spec）——不逐式复刻,回退
     if (!(sx >= 0 && sy >= 0 && sx + sw <= iw && sy + sh <= ih) || sw < 0 || sh < 0) {
-      this.flushForFallback();
-      Reflect.apply(raw.drawImage, raw, [img, ...rest]);
-      this.stats.fallback++;
+      this.rawDrawImage(img, rest);
       return;
     }
     // 负 dst = 翻转
@@ -414,9 +488,7 @@ export class GLShimExecutor {
     // 几何解码（CTM×dst 矩形）
     const geo = this.decode(dx, dy, dw, dh);
     if (!geo) {
-      this.flushForFallback();
-      Reflect.apply(raw.drawImage, raw, [img, ...rest]);
-      this.stats.fallback++;
+      this.rawDrawImage(img, rest);
       return;
     }
     // 尘预乘对面:destination-out 画 erase 面 → 合并 quad + 吞后随 add
@@ -430,16 +502,31 @@ export class GLShimExecutor {
         this.stats.pairEmitted++;
         return;
       }
-      this.flushForFallback();
-      Reflect.apply(raw.drawImage, raw, [img, ...rest]);
-      this.stats.fallback++;
+      // ★B2b acc:未注册削底面（duke 拖影对/光环 A∈(0,255) 两步族）→ tier-2 ERASE
+      //  quad——blend(ZERO,1−SA) 直削【累积面】=2D destination-out 直绘逐位同构
+      //  （dst 衰减吃到身后全部已画内容）;bridge 态不产生（分批 FBO 语义不含
+      //  独立削底,保持 flush+2D 回退）。
+      if (this.accMode) {
+        this.push(2, null, false, img, rest, sx, sy, sw, sh,
+          geo.dx, geo.dy, geo.dw, geo.dh, geo.rot, this.ga,
+          1, 1, 1, geo.flipX !== flipNegX, geo.flipY !== flipNegY, this.smooth,
+          this.dynamicSrc.has(img), null);
+        return;
+      }
+      this.rawDrawImage(img, rest);
       return;
     }
     const additive = this.gco === 'lighter';
     if (!additive && this.gco !== 'source-over') {
-      this.flushForFallback();
-      Reflect.apply(raw.drawImage, raw, [img, ...rest]);
-      this.stats.fallback++;
+      this.rawDrawImage(img, rest);
+      return;
+    }
+    // ★B2b:ctx.filter 非 none（敌怪受击 brightness/水下 sepia 染色族）——quad
+    //  不表达源级滤镜,acc 态走隔离栅格化（滤镜在 scratch 上施加,SO 合成逐位同）;
+    //  非 source-over 滤镜面=不可隔离 → 降级。bridge 态保持 census 回退（B2 现状）。
+    if (this.accMode && this.filterV !== 'none') {
+      if (this.gco === 'source-over' && this.rasterizeDrawImage(img, sx, sy, sw, sh, geo)) return;
+      this.rawDrawImage(img, rest);
       return;
     }
     const tier = additive ? 1 : 0;
@@ -453,17 +540,26 @@ export class GLShimExecutor {
   /** fillRect→纯色 quad（白纹理 tint+α;平色 ±1LSB census 登记）。
    *  无法表达（斜切/非解析色）→ flush+2D。 */
   fillRect(x: number, y: number, w: number, h: number): void {
-    const raw = this.raw!;
+    const raw = this.raw;
     if (this.clipped || w === 0 || h === 0) {
-      if (w !== 0 && h !== 0) this.flushForFallback();
-      raw.fillRect(x, y, w, h);
+      if (w !== 0 && h !== 0) {
+        // ★B2b acc:渐变/图案 fillStyle 直译不出→隔离栅格化（像素恒等）;败→降级
+        if (this.accMode && this.rasterizeFillRect(x, y, w, h)) return;
+        this.flushForFallback();
+        if (this.accMode && !this.ensureBridgedNow()) { this.stats.fallback++; return; }
+        (this.raw as CanvasRenderingContext2D).fillRect(x, y, w, h);
+        this.stats.fallback++;
+      }
       return;
     }
     const col = parseColor(this.fillStyleS);
     const geo = col ? this.decode(x, y, w, h) : null;
     if (!col || !geo || (this.gco !== 'source-over' && this.gco !== 'lighter')) {
+      if (this.accMode && this.rasterizeFillRect(x, y, w, h)) return;
       this.flushForFallback();
-      raw.fillRect(x, y, w, h);
+      if (this.accMode && !this.ensureBridgedNow()) { this.stats.fallback++; return; }
+      (this.raw as CanvasRenderingContext2D).fillRect(x, y, w, h);
+      this.stats.fallback++;
       return;
     }
     const A = col[3] * this.ga;
@@ -472,6 +568,85 @@ export class GLShimExecutor {
       geo.dx, geo.dy, geo.dw, geo.dh, geo.rot, A,
       col[0] / 255, col[1] / 255, col[2] / 255,
       geo.flipX, geo.flipY, false, false, null);
+  }
+
+  /** 不可直译 drawImage 的统一回退口：flush 保序 + acc 态降级换桥 + raw 原参重放。 */
+  private rawDrawImage(img: CanvasImageSource, rest: unknown[]): void {
+    this.flushForFallback();
+    if (this.accMode && !this.ensureBridgedNow()) { this.stats.fallback++; return; }
+    const raw = this.raw;
+    if (raw) Reflect.apply(raw.drawImage, raw, [img, ...rest]);
+    this.stats.fallback++;
+  }
+
+  /** ★B2b acc drawImage 隔离栅格化（ctx.filter 非 none 的源级滤镜族——滤镜在
+   *  scratch 上施加后 SO 合成回原设备矩形=像素恒等;仅 source-over 态可隔离） */
+  private rasterizeDrawImage(img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
+    geo: { dx: number; dy: number; dw: number; dh: number; rot: number; flipX: boolean; flipY: boolean }): boolean {
+    if (this.clipped || this.gco !== 'source-over' || this.filterV === 'none') return false;
+    const { a, b, c, d, e, f } = this.m;
+    const xs = [geo.dx, geo.dx + geo.dw, geo.dx, geo.dx + geo.dw];
+    const ys = [geo.dy, geo.dy, geo.dy + geo.dh, geo.dy + geo.dh];
+    void xs; void ys;
+    // 几何已由 decode 解出（设备空间）——rot/flip 用中心锚变换在 scratch 复现
+    const bx0 = geo.dx - 1, bx1 = geo.dx + geo.dw + 1;
+    const by0 = geo.dy - 1, by1 = geo.dy + geo.dh + 1;
+    const fx = Math.floor(bx0), fy = Math.floor(by0);
+    const sx2 = Math.ceil(bx1) - fx, sy2 = Math.ceil(by1) - fy;
+    if (sx2 <= 0 || sy2 <= 0 || sx2 > 4096 || sy2 > 4096) return false;
+    const sc = accScratch(sx2, sy2);
+    if (!sc) return false;
+    const sctx = sc.getContext('2d');
+    if (!sctx) return false;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, sx2, sy2);
+    sctx.setTransform(a, b, c, d, e - fx, f - fy);
+    sctx.globalAlpha = this.ga;
+    sctx.imageSmoothingEnabled = this.smooth;
+    try { sctx.filter = this.filterV; } catch { return false; }
+    if (geo.rot || geo.flipX || geo.flipY) {
+      sctx.translate(geo.dx + geo.dw / 2, geo.dy + geo.dh / 2);
+      if (geo.rot) sctx.rotate(geo.rot);
+      if (geo.flipX || geo.flipY) sctx.scale(geo.flipX ? -1 : 1, geo.flipY ? -1 : 1);
+      sctx.drawImage(img, sx, sy, sw, sh, -geo.dw / 2, -geo.dh / 2, geo.dw, geo.dh);
+    } else {
+      sctx.drawImage(img, sx, sy, sw, sh, geo.dx, geo.dy, geo.dw, geo.dh);
+    }
+    this.markDynamic(sc);
+    this.push(0, null, false, sc, null, 0, 0, sx2, sy2, fx, fy, sx2, sy2, 0, 1,
+      1, 1, 1, false, false, false, true, null);
+    this.flush();
+    return true;
+  }
+
+  /** ★B2b acc fillRect 隔离栅格化（fillStyle 渐变/图案/非解析色——直译不出,
+   *  栅格化到 scratch 保像素恒等;失败返 false → 调用方降级）。 */
+  private rasterizeFillRect(x: number, y: number, w: number, h: number): boolean {
+    // multiply 等改面算子不可隔离（见 rasterizeOp 注）→ 整帧降级
+    if (this.clipped || this.gco !== 'source-over') return false;
+    const { a, b, c, d, e, f } = this.m;
+    const xs = [a * x + c * y + e, a * (x + w) + c * y + e, a * x + c * (y + h) + e, a * (x + w) + c * (y + h) + e];
+    const ys = [b * x + d * y + f, b * (x + w) + d * y + f, b * x + d * (y + h) + f, b * (x + w) + d * (y + h) + f];
+    const bx0 = Math.min(...xs) - 1, bx1 = Math.max(...xs) + 1;
+    const by0 = Math.min(...ys) - 1, by1 = Math.max(...ys) + 1;
+    const fx = Math.floor(bx0), fy = Math.floor(by0);
+    const sx = Math.ceil(bx1) - fx, sy = Math.ceil(by1) - fy;
+    if (sx <= 0 || sy <= 0 || sx > 4096 || sy > 4096) return false;
+    const sc = accScratch(sx, sy);
+    if (!sc) return false;
+    const sctx = sc.getContext('2d');
+    if (!sctx) return false;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, sx, sy);
+    sctx.setTransform(a, b, c, d, e - fx, f - fy);
+    sctx.globalAlpha = this.ga;
+    try { sctx.fillStyle = this.fillStyleS as string | CanvasGradient | CanvasPattern; } catch { return false; }
+    sctx.fillRect(x, y, w, h);
+    this.markDynamic(sc);
+    this.push(0, null, false, sc, null, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,
+      1, 1, 1, false, false, false, true, null);
+    this.flush();
+    return true;
   }
 
   /** 几何解码：CTM×dst 矩形 → {dx,dy,dw,dh,rot,flipX,flipY}。斜切=不可表达（null）。 */
@@ -508,7 +683,7 @@ export class GLShimExecutor {
 
   // ================= 队列与 flush =================
 
-  private push(tier: 0 | 1, _e: TexEntry | null, solid: boolean, img: CanvasImageSource | null,
+  private push(tier: 0 | 1 | 2, _e: TexEntry | null, solid: boolean, img: CanvasImageSource | null,
     rawArgs: unknown[] | null, sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number, rot: number, alpha: number,
     fr: number, fg: number, fb: number, flipX: boolean, flipY: boolean, smooth: boolean,
@@ -524,7 +699,9 @@ export class GLShimExecutor {
     rec.texKind = pair ? 'pair' : (dynamic ? 'full' : 'region');
     if (this.tail) this.tail.next = rec; else this.head = rec;
     this.tail = rec;
-    if (tier === 0) this.stats.emitSO++; else this.stats.emitADD++;
+    if (tier === 0) this.stats.emitSO++;
+    else if (tier === 2) this.stats.emitErase++;
+    else this.stats.emitADD++;
   }
 
   private popAll(): void {
@@ -539,9 +716,11 @@ export class GLShimExecutor {
   }
 
   /** flush：SO 批 → ADD 批，各一段 FBO('world') 租用+present 回贴。
-   *  GL 失败 → 全队列 2D 重放（重放面=原参,保序）。 */
+   *  GL 失败 → 全队列 2D 重放（重放面=原参,保序）。
+   *  ★B2b acc 态：改走 flushAcc（单 FBO 累积直发,无 present 无回贴）。 */
   flush(): void {
     if (!this.head) return;
+    if (this.accMode) { this.flushAcc(); return; }
     const glw = this.glw && !this.glw.unavailable ? this.glw : this.host.acquireGl();
     const wctx = this.host.worldCtx();
     if (!glw || glw.unavailable || !wctx) { this.replay2D(); return; }
@@ -551,6 +730,110 @@ export class GLShimExecutor {
     // ADD 批（(ONE,ONE) 逐加;2D 'lighter' 整批回贴=加法交换律保位）
     if (this.hasTier(1)) this.presentBatch(glw, wctx, w, h, 1, true);
     this.popAll();
+  }
+
+  /** ★B2b acc flush：整队列按【发射序】逐条混合进开着的世界 FBO——
+   *  无批拆分无 present（2D 每条 drawImage 即时落面的语义;SO/ADD 交错序保持=
+   *  B2 登记的「跨档序偏差」在 acc 态自然消失,比 bridge 更贴近 2D 原语义）。
+   *  尘对合并 quad 的 dst=累积面 ⇒ erase 衰减吃到身后全部已画内容=原版
+   *  destination-out 对 worldCanvas 语义（B2b 步2）;tier-2 独立削底 quad 同理。
+   *  GL 不可用/纹理解析失败 → host.degradeAcc 降级（FBO 现量 present 到
+   *  worldCanvas）+ 全队列 2D 重放（宁回退不丢精灵,B2 判例沿袭）。 */
+  private flushAcc(): void {
+    if (!this.head) return;
+    const glw = this.glw && !this.glw.unavailable ? this.glw : this.host.acquireGl();
+    if (!glw || glw.unavailable) { this.accFail('nogl'); return; }
+    // 预解析门（bridge presentBatch 同款;动态源在发射期解析）
+    for (let p: QuadRec | null = this.head; p; p = p.next) {
+      if (p.solid || p.pair || p.dynamic) continue;
+      if (!this.resolveTex(glw, p)) { this.accFail('tex'); return; }
+    }
+    // 开 FBO（帧首段 clear;后续段续交幂等）
+    if (!glw.isAccumOpen('world')) {
+      const w = this.host.worldW(), h = this.host.worldH();
+      glw.resize(w, h);
+      glw.begin('world', true);
+      if (glw.unavailable) { this.accFail('begin'); return; }
+    }
+    // 逐条发射（连续同档合并 blend 切换;blend 离场还原 (ONE,1−SA) 基态）
+    let curTier = -1;
+    for (let p: QuadRec | null = this.head; p; p = p.next) {
+      if (p.tier !== curTier) {
+        if (curTier === 1) glw.blendAdditive(false);
+        if (curTier === 2) glw.blendErase(false);
+        if (p.tier === 1) glw.blendAdditive(true);
+        if (p.tier === 2) glw.blendErase(true);
+        curTier = p.tier;
+      }
+      if (p.solid) {
+        glw.quadSprite(WHITE_E(glw), 0, 0, 1, 1, p.dx, p.dy, p.dw, p.dh,
+          { alpha: p.alpha, tint: [p.fr, p.fg, p.fb], rot: p.rot, smooth: false });
+        continue;
+      }
+      const e = this.resolveTex(glw, p);
+      if (!e) { if (curTier === 1) glw.blendAdditive(false); if (curTier === 2) glw.blendErase(false); this.accFail('tex2'); return; }
+      const usx = p.texKind === 'full' ? p.sx : 0;
+      const usy = p.texKind === 'full' ? p.sy : 0;
+      glw.quadSprite(e, usx, usy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh,
+        { alpha: p.alpha, rot: p.rot, flipX: p.flipX, flipY: p.flipY, smooth: p.smooth });
+    }
+    if (curTier === 1) glw.blendAdditive(false);
+    if (curTier === 2) glw.blendErase(false);
+    this.popAll();
+    this.stats.flushes++;
+  }
+
+  /** acc 发射失败收口：GL 存活且 FBO 有量 → 降级换桥（present 已画内容到
+   *  worldCanvas）+ 全队列 2D 重放;无法降级 → 弃队列（帧已不可救,B2 弃画
+   *  判例同款——不动已画内容）。 */
+  private accFail(why: string): void {
+    const hadFbo = this.glw?.isAccumOpen('world') ?? false;
+    if (this.host.degradeAcc && (hadFbo || why === 'nogl')) {
+      if (this.host.degradeAcc()) { this.replay2D(); return; }
+    }
+    this.popAll();
+  }
+
+  /** ★B2b 隔离栅格化（acc 态不可直译算子的像素恒等兜底——方案 B0 设计落地）：
+   *  以【当前镜像 CTM 平移整数设备偏移】把该算子栅格化到独立小 scratch
+   *  （整数平移下 Skia 覆盖率逐位不变=亚像素相位保持）,再以 (ONE,1−SA) quad
+   *  1:1 合成回原设备矩形=source-over 逐位同。scratch 即发即弃（发射前立即
+   *  flush,防同帧二次栅格化覆写同面）。仅 strokeRect 有调用点;失败返 false
+   *  →调用方降级。 */
+  private rasterizeOp(op: string, args: unknown[]): boolean {
+    const x = args[0] as number, y = args[1] as number;
+    const w = args[2] as number, h = args[3] as number;
+    // ★隔离栅格化只保「落笔」类算子——multiply 等改面算子在透明 scratch 上
+    //  栅格化≠原语义（dst 缺席）,必须整帧降级走真 2D 面
+    if (this.clipped || this.gco !== 'source-over') return false;
+    const { a, b, c, d, e, f } = this.m;
+    // 设备 bbox（四角 CTM 变换;含 lineWidth 半宽外扩+AA 1px 边）
+    const xs = [a * x + c * y + e, a * (x + w) + c * y + e, a * x + c * (y + h) + e, a * (x + w) + c * (y + h) + e];
+    const ys = [b * x + d * y + f, b * (x + w) + d * y + f, b * x + d * (y + h) + f, b * (x + w) + d * (y + h) + f];
+    const pad = op === 'strokeRect' ? (this.lineWidthV * Math.max(Math.abs(a), Math.abs(b), Math.abs(c), Math.abs(d))) / 2 + 1 : 1;
+    const bx0 = Math.min(...xs) - pad, bx1 = Math.max(...xs) + pad;
+    const by0 = Math.min(...ys) - pad, by1 = Math.max(...ys) + pad;
+    const fx = Math.floor(bx0), fy = Math.floor(by0);
+    const sx = Math.ceil(bx1) - fx, sy = Math.ceil(by1) - fy;
+    if (sx <= 0 || sy <= 0 || sx > 4096 || sy > 4096) return false;
+    const sc = accScratch(sx, sy);
+    if (!sc) return false;
+    const sctx = sc.getContext('2d');
+    if (!sctx) return false;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, sx, sy);
+    // 整数设备平移 (−fx,−fy) 后同 CTM 栅格化——覆盖率与原位逐位同
+    sctx.setTransform(a, b, c, d, e - fx, f - fy);
+    sctx.globalAlpha = this.ga;
+    sctx.strokeStyle = this.strokeStyleV;
+    sctx.lineWidth = this.lineWidthV;
+    sctx.strokeRect(x, y, w, h);
+    // 发射:scratch=动态源（逐帧重画）,UV=整幅,设备矩形 1:1;α 已烘进 scratch
+    this.markDynamic(sc);   // 稳定 dyn 键→texRefresh 复用纹理（防 createTexture churn）
+    this.push(0, null, false, sc, null, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,
+      1, 1, 1, false, false, false, true, null);
+    this.flush();   // 即发即弃（acc flush=直发累积面;保序+防 scratch 覆写）
+    return true;
   }
 
   private hasTier(t: 0 | 1): boolean {
@@ -704,3 +987,19 @@ function WHITE_E(glw: GLSpriteLayer): TexEntry {
   return e;
 }
 const WHITE_CACHE = new WeakMap<GLSpriteLayer, TexEntry>();
+
+/** ★B2b 隔离栅格化 scratch（模块级复用,只增不减——CanvasWatch churn 判例:
+ *  禁逐帧新建;内容即发即弃（push 后立即 flush 消费）,同帧多次栅格化按序
+ *  复用同面无串味）。 */
+let _accScratch: HTMLCanvasElement | null = null;
+function accScratch(w: number, h: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  if (!_accScratch) {
+    _accScratch = document.createElement('canvas');
+    _accScratch.width = 64; _accScratch.height = 64;
+  }
+  // 只增不减 resize（缩小不缩——churn 面归零;尺寸变化自动清屏）
+  if (_accScratch.width < w) _accScratch.width = w;
+  if (_accScratch.height < h) _accScratch.height = h;
+  return _accScratch;
+}

@@ -6817,6 +6817,25 @@ export class UI {
     this.vinvQuickBtn = this.vinvSortBtn = this.vinvBestiaryBtn = this.vinvEmoteBtn = null;
     this.vinvTabMisc = this.vinvTabHousing = this.vinvTabCamera = null;
     this.vinvHousingPage = null;
+    // ★BJ335（2026-09-24）：退世界主锚收刀——closeAll 直接跑 teardownInventoryPanel。
+    //  快照定谳（中立探针 /tmp/bj335-neutral.heapsnapshot,零插桩;活对象桥 queryObjects
+    //  测得 +376/轮 为自捕伪影——DevTools console 全局句柄钉住查询结果数组,弃用）：
+    //  每轮游离 vinv 面板整树（~400 节点/~900 监听器）经 UI 单例【漏网字段】滞留——
+    //  vinvModernGridInner(14 钮)/vinvModernFilterBtns(11 钮)/vinvPageEls(equip/misc/
+    //  housing 页)/accEyeEls(Map×7)/pvpSwordBtn/vinvShopHappyIcon/Text/vinvShopCoinRow/
+    //  tooltip 等既不合 *El/*Els 命名门也不在 BJ328 补扫清单;window 级
+    //  vinvGridWheelHandler(wheel)/vinvResizeHandler(resize)/modern 滚轮
+    //  mousemove/mouseup 更是只有【重建时】才跑的 teardownInventoryPanel 才解绑。
+    //  这些外部钉拉住环内 closure 岛(statusOf/gatesOf/paintSlot/panelBg…),
+    //  GC 对环本身无能为力。teardown 全量摘字段+对称解绑 window 监听,下局
+    //  initInGame→buildInventoryFor 全部重填,退世界窗口期无消费路径。
+    this.teardownInventoryPanel();
+    // tooltip/onEmoteMenu 在 teardown 辖域外:tooltip 由 buildHud 每轮重建覆盖,
+    // onEmoteMenu 由表情钮构建每轮重写——退世界窗口期两者钉游离节点/轮次 context
+    // （快照:UI#310353 property:'onEmoteMenu'/'tooltip' 直指游离树成员）。
+    this.tooltip = null as unknown as HTMLElement;
+    this.tooltipHome = null;
+    this.onEmoteMenu = undefined;
   }
 
   /** 摘除 Game 引用(quitToMenu→closeAll 调用):防旧 Game 整图(世界 store

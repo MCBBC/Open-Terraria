@@ -252,7 +252,7 @@ import { WaterfallRenderer } from './WaterfallRenderer';
 import { CaptureInterface } from './CaptureMode';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
-import { GLPipeline } from './GLPipeline';   // ★C10b:共管管线（云+bg+worldCompose 单实例）
+import { GLPipeline, type PipelineFbo } from './GLPipeline';   // ★C10b:共管管线（云+bg+worldCompose 单实例）
 import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
@@ -260,7 +260,7 @@ import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawNpcAuraRings, NPC_AURA_RING_IDS, NPC_TRAIL_GHOST_IDS,
   duke370GetAlphaBoost, duke370PremulPair, drawDukePremulPair } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
-import { GLWorldCompose } from './GLWorldCompose';   // ★A2 光照×扭曲 FBO 链(?wfbo=1 激活,失败落回旧链)
+import { GLWorldCompose, type WorldTexSrc } from './GLWorldCompose';   // ★A2 光照×扭曲 FBO 链(?wfbo=1 激活,失败落回旧链)
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
 /** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制。
@@ -2835,6 +2835,112 @@ export class Renderer {
    *  挂到 this.ctx 上,段外零触碰零开销）。 riding ?bgl=1（不新增旗）;
    *  族级回退=census 未支持算子 flush+保 2D。 */
   private bglEntShim: GLShimExecutor | null = null;
+  /** ★B2b 累积态（2026-09-24）：'off'=bridge/2D（worldCanvas 全链）/'acc'=整层
+   *  单 FBO 累积（worldCanvas 零创建）/'bridged'=acc 帧内降级（worldCanvas 惰性
+   *  建,余量走 bridge 语义）。帧级生命周期:beginWorldLayer 判定置位,
+   *  finishAccFrame（compositeLight）收口。 */
+  private _accMode: 'off' | 'acc' | 'bridged' = 'off';
+  /** 本帧累积 GL 会话（=acquireWorldGl 产物;帧级缓存,死亡由降级链处理） */
+  private _accGlw: GLSpriteLayer | null = null;
+  /** ★B2b 降级惰性建面（degradeAcc 内;与 beginWorldLayer 创建块同式） */
+  private degradeAcc(): boolean {
+    if (this._accMode !== 'acc') return false;
+    const lw = this._worldLowW, lh = this._worldLowH;
+    if (lw <= 0 || lh <= 0) return false;
+    this._accMode = 'bridged';
+    if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
+      this.worldCanvas = document.createElement('canvas');
+      this.worldCtxLayer = this.worldCanvas.getContext('2d', { willReadFrequently: true })!;
+      this.lightMaskCanvas = document.createElement('canvas');
+      this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
+    }
+    if (this.worldCanvas.width !== lw || this.worldCanvas.height !== lh) {
+      this.worldCanvas.width = lw; this.worldCanvas.height = lh;
+      this.lightMaskCanvas.width = lw; this.lightMaskCanvas.height = lh;
+    } else {
+      this.worldCtxLayer.setTransform(1, 0, 0, 1, 0, 0);
+      this.worldCtxLayer.clearRect(0, 0, lw, lh);
+    }
+    // FBO 现量 present 到 worldCanvas（已画内容不丢;后续 GL 段恢复 B1/B2 桥接）
+    const f = this._accGlw?.endAccumulate() ?? null;
+    if (f && this.swPipe) {
+      this.swPipe.present(f);
+      this.worldCtxLayer.drawImage(this.swPipe.canvas, 0, 0);
+    }
+    this.bglPathUsed = 'b2b-acc-degraded';
+    this.bglPathStats['b2b-acc-degraded'] = (this.bglPathStats['b2b-acc-degraded'] || 0) + 1;
+    // shim 换桥（raw=真 worldCtx;镜像态回放——降级帧后续绘制/回放按现值续走）
+    if (this.bglEntShim?.active) this.bglEntShim.bridge(this.worldCtxLayer);
+    return true;
+  }
+
+  /** ★B2b 累积帧收口（compositeLight 头部调用）：shim 队列 flushAcc（末段 quads
+   *  落 FBO）→ endAccumulate（解绑,不 present）→ shim detach（摘包装）。
+   *  返回世界 FBO（compositeLight 直采/present）;null=非 acc 帧或已收口。 */
+  private finishAccFrame(): PipelineFbo | null {
+    if (this._accMode !== 'acc') return null;
+    this._accMode = 'off';
+    this.bglEntShim?.flush();          // acc flush=直发累积面（空队列 no-op）
+    const f = this._accGlw?.endAccumulate() ?? null;
+    this.bglEntShim?.detach();
+    return f;
+  }
+
+  /** ★B2b FBO('world') → 世界纹理句柄（GLWorldCompose compose 直采;uWorldFlip=1
+   *  =GL 朝向翻转采样,见 GLWorldCompose LIT_FRAG 注）。 */
+  private accHandle(f: PipelineFbo): WorldTexSrc | null {
+    if (!f.tex) return null;
+    return { tex: f.tex, w: f.w, h: f.h, flipY: 1 };
+  }
+
+  /** ★B2b FBO 世界面读回（CPU 乘光回退链的 GL 读回替代,2026-09-24）：
+   *  readPixels（RGBA8 premultiplied,row0=底）→ getImageData 语义
+   *  （straight-alpha,row0=顶）:行序翻转+unpremultiply。输出 viewW×viewH
+   *  （FBO=lw×lh≤viewW/H,越界区=透明黑 ≙ getImageData 越界语义）。
+   *  缓冲/输出 ImageData 复用（深回退帧 GC 面;仅尺寸变化重分配）。
+   *  返回 null=GL 不可用（调用方保底直画光照图,视觉降级不炸）。 */
+  private accReadbackImageData(f: PipelineFbo, viewW: number, viewH: number): ImageData | null {
+    const pipe = this.swPipe;
+    const gl = pipe?.glx;
+    if (!gl || !f.fbo) return null;
+    const lw = f.w, lh = f.h;
+    if (lw <= 0 || lh <= 0) return null;
+    if (!this._accRbBuf || this._accRbBuf.length !== lw * lh * 4) {
+      this._accRbBuf = new Uint8Array(lw * lh * 4);
+    }
+    if (!this._accRbImg || this._accRbImg.width !== viewW || this._accRbImg.height !== viewH) {
+      this._accRbImg = new ImageData(viewW, viewH);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f.fbo);
+    gl.readPixels(0, 0, lw, lh, gl.RGBA, gl.UNSIGNED_BYTE, this._accRbBuf);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const src = this._accRbBuf!;
+    const dst = this._accRbImg!.data;
+    const rowCopy = Math.min(lw, viewW);
+    const rowFull = lw * 4;
+    for (let y = 0; y < lh && y < viewH; y++) {
+      // GL row0=图像底 → 输出 row0=图像顶:行序翻转
+      let si = (lh - 1 - y) * rowFull;
+      let di = y * viewW * 4;
+      for (let x = 0; x < rowCopy; x++, si += 4, di += 4) {
+        const a = src[si + 3];
+        if (a === 255) {
+          dst[di] = src[si]; dst[di + 1] = src[si + 1]; dst[di + 2] = src[si + 2]; dst[di + 3] = 255;
+        } else if (a === 0) {
+          dst[di] = 0; dst[di + 1] = 0; dst[di + 2] = 0; dst[di + 3] = 0;
+        } else {
+          // unpremultiply:round(c·255/a)（≤1LSB 与 Skia 舍入表差异,登记）
+          dst[di] = Math.round(src[si] * 255 / a);
+          dst[di + 1] = Math.round(src[si + 1] * 255 / a);
+          dst[di + 2] = Math.round(src[si + 2] * 255 / a);
+          dst[di + 3] = a;
+        }
+      }
+    }
+    return this._accRbImg;
+  }
+  private _accRbBuf: Uint8Array | null = null;
+  private _accRbImg: ImageData | null = null;
   private _bglEntPrevCtx: CanvasRenderingContext2D | null = null;
   /** ★A2 光照×扭曲 FBO 链（?wfbo=1 惰性建;unavailable/失败自动落回旧 GL 链） */
   private worldCompose: GLWorldCompose | null = null;
@@ -3054,6 +3160,14 @@ export class Renderer {
    *  2D 原链,零触碰）。执行器矩阵镜像从 raw CTM 起步（世界变换/屏空间均支持——
    *  尘 lit pass 在窗内 setTransform 复位,镜像同步跟进）。 */
   private bglEntWindowBegin(tag: 'ent' | 'behind'): void {
+    // ★B2b acc/bridged 帧:整层单窗（beginWorldLayer attachAcc）已覆盖——
+    //  分窗 flush/present 语义不适用（降级帧亦由整层 shim 换桥承接,分窗
+    //  detach 会杀整层包装=后续 ctx 调用落空）;只记路径账。
+    if (this._accMode !== 'off') {
+      this.bglPathUsed = (this._accMode === 'acc' ? 'b2b-acc-' : 'b2b-acc-degraded-') + tag;
+      this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
+      return;
+    }
     // ★bglShim 总闸缺省关:玩家/NPC 族在执行器过对拍前恒保 2D 热路径
     //  （2026-09-24 用户实报角色透明;?bgl=1 裸开=B1 网格段语义不变）
     if (!Renderer.bgl || !Renderer.bglShim || this.isCpuRender() || !this.worldLayerActive || !this.worldCtxLayer) return;
@@ -3076,8 +3190,11 @@ export class Renderer {
     this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
   }
 
-  /** 窗口关：flush（SO 批→ADD 批 present 回贴）+ this.ctx 恢复。 */
+  /** 窗口关：flush（SO 批→ADD 批 present 回贴）+ this.ctx 恢复。
+   *  ★B2b acc/bridged 帧 no-op（整层窗收口在 finishAccFrame;分窗 detach 会
+   *  杀整层包装——降级帧由 shim.bridge 承接,见 bglEntWindowBegin 注）。 */
   private bglEntWindowEnd(): void {
+    if (this._accMode !== 'off') return;
     const shim = this.bglEntShim;
     if (!shim?.active) return;
     shim.detach();
@@ -4369,11 +4486,24 @@ export class Renderer {
     //  （逃生门 ?bgl=0 同路径;失败段 FBO 内容丢弃不 present=零半成品泄漏）。
     const bglStageGrid = (layer: 'wall' | 'tile'): boolean => {
       if (!Renderer.bgl || this.isCpuRender() || !this.worldLayerActive) return false;
-      const glw = this.acquireWorldGl();
+      // ★B2b acc 帧:先 flush shim 队列（前方 2D 夹层 quads 落 FBO 保序）,
+      //  本段续交同一 FBO——【无 end 无回贴】(present→worldCanvas 桥退役)。
+      //  失败回落 drawChunkGrid→经整层 shim 翻 quad（仍 GL 落面,页级失败
+      //  降级为页子矩形上传）;GL 中帧死亡由 flushAcc 降级链兜。
+      const acc = this._accMode === 'acc';
+      if (acc) this.bglEntShim?.flush();
+      const glw = acc ? this._accGlw : this.acquireWorldGl();
       if (!glw || glw.unavailable) return false;
-      glw.resize(lw, lh);
-      glw.begin('world');
-      if (glw.unavailable) return false;
+      if (!acc) glw.resize(lw, lh);
+      if (acc) {
+        if (!glw.isAccumOpen('world')) {
+          glw.begin('world', true);   // 帧首段清透明;后续段续交
+          if (glw.unavailable) return false;
+        }
+      } else {
+        glw.begin('world');
+        if (glw.unavailable) return false;
+      }
       const kind = layer === 'wall' ? ('w' as const) : ('t' as const);
       const oxg = Math.round(lw / 2), oyg = Math.round(lh / 2);   // 与 drawChunkGrid 同式（共享边 round 同源 doctrine）
       const zzg = z * wK;
@@ -4392,6 +4522,12 @@ export class Renderer {
           //   varying 插值误差在大幅 offset 下 tie 分裂,见 GLSpriteLayer TILE_*_SRC 注）
           if (!glw.quadTile(e, p.sx, p.sy, CHUNK * ts, CHUNK * ts, xd0, yd0, xd1 - xd0, yd1 - yd0)) return false;
         }
+      }
+      if (acc) {
+        // 续交态:不 end（FBO 保持开,compositeLight finishAccFrame 收口）
+        this.bglPathUsed = layer === 'wall' ? 'world-gl-wall' : 'world-gl-tile';
+        this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
+        return true;
       }
       glw.end();   // present: FBO('world') → pipe.canvas（blend off 离场,1:1 拷贝）
       const wctx = this.worldCtxLayer;
@@ -5676,6 +5812,20 @@ export class Renderer {
   })();
   static get bglShim() { return this._bglShim; }
   static bglShimSetForTest(v: boolean): void { this._bglShim = v; }
+  /** ★B2b（2026-09-24）worldCanvas 退役总闸：bgl+bglShim 地基上把世界层从
+   *  「GL 段 present 回贴 worldCanvas 桥接」翻成「单 FBO('world') 整层累积」
+   *  ——worldCanvas 稳态零创建（三消:compose 全幅 texSubImage2D 上传/
+   *  present→worldCanvas 全幅回贴群/worldCanvas 画布本体）,compositeLight
+   *  直采 FBO 纹理（uWorldFlip 朝向链）。?b2b=0=逃生门（回 B1/B2 桥接态,
+   *  worldCanvas 全链;双路径并存）。运行时可翻（页内翻面范式）。 */
+  private static _b2b = (() => {
+    try {
+      if (typeof document === 'undefined') return false;
+      return new URLSearchParams(location.search).get('b2b') !== '0';
+    } catch { return false; }
+  })();
+  static get b2b() { return this._b2b; }
+  static b2bSetForTest(v: boolean): void { this._b2b = v; }
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -5882,7 +6032,13 @@ export class Renderer {
       const fgCtx = this.waterWarp.beginFgPass(this.ctx);
       drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
         world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick);
-      if (fgCtx) this.waterWarp.endFgPass(this.ctx);
+      if (fgCtx) {
+        // ★B2b:endFgPass 的 drawImage(fgCanvas) 经 shim 翻 quad——门控面逐帧重画
+        //  =动态源（texRefresh 重传;不登记=按 texId+rect 缓存陈旧纹理=水冻结）
+        const gate = this.waterWarp.gateCanvas();
+        if (gate && Renderer.bgl && Renderer.bglShim) this.bglShimReg().markDynamic(gate);
+        this.waterWarp.endFgPass(this.ctx);
+      }
     } else {
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
         world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt, this.animTick);
@@ -6734,6 +6890,7 @@ export class Renderer {
       worldCtx: () => this.worldCtxLayer,
       worldW: () => this._worldLowW,
       worldH: () => this._worldLowH,
+      degradeAcc: () => this.degradeAcc(),   // ★B2b:整层 acc 窗降级钩（尘对注册复用同实例）
     });
   }
 
@@ -17085,16 +17242,50 @@ export class Renderer {
   }
 
   /** render() 世界段入口调用：切换 this.ctx → 世界层（返回 null = 逃生门关闭，
-   *  调用方继续用主画布 ctx）。每帧清屏；尺寸跟随主画布。 */
+   *  调用方继续用主画布 ctx）。每帧清屏；尺寸跟随主画布。
+   *  ★B2b 累积态分支（2026-09-24）：bgl+bglshim+b2b 全开且 GL 会话可用 →
+   *  整层单 FBO('world') 累积——worldCanvas/lightMask 【不创建】（三消第③项:
+   *  画布本体;稳态零 IOSurface/CPU 面）,ctx=shim 整层包装（raw-less acc 态,
+   *  不可表达算子→隔离栅格化/降级）。compositeLight 经 finishAccFrame 收口
+   *  直采 FBO 纹理。降级帧（degradeAcc）惰性建回 worldCanvas 全链=双路径。 */
   private beginWorldLayer(viewW: number, viewH: number, wK = 1): CanvasRenderingContext2D | null {
     if (!this.worldLayerEnabled || typeof document === 'undefined') { this.worldLayerActive = false; return null; }
     const lw = Math.max(64, Math.round(viewW * wK));
     const lh = Math.max(64, Math.round(viewH * wK));
     this._worldLowW = lw; this._worldLowH = lh;
+    // ★B2b 累积态判定（帧级）
+    this._accMode = 'off'; this._accGlw = null;
+    if (Renderer.bgl && Renderer.bglShim && Renderer.b2b && !this.isCpuRender()) {
+      const glw = this.acquireWorldGl();
+      if (glw && !glw.unavailable) {
+        glw.resize(lw, lh);
+        if (!glw.unavailable) {
+          this.bglEntShim ??= new GLShimExecutor({
+            acquireGl: () => this.acquireWorldGl(),
+            worldCtx: () => this.worldCtxLayer,
+            worldW: () => this._worldLowW,
+            worldH: () => this._worldLowH,
+            degradeAcc: () => this.degradeAcc(),
+          });
+          this.bglEntShim.frameReset();
+          const w = this.bglEntShim.attachAcc();
+          if (w) {
+            this._accMode = 'acc';
+            this._accGlw = glw;
+            this.worldLayerActive = true;
+            this.bglPathUsed = 'b2b-acc';
+            this.bglPathStats['b2b-acc'] = (this.bglPathStats['b2b-acc'] || 0) + 1;
+            this.ctx = w;
+            return w;
+          }
+        }
+      }
+    }
     if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
       this.worldCanvas = document.createElement('canvas');
       // ★willReadFrequently：CPU 乘光回退路径每帧 getImageData 全屏（GL 路径则
       //   texImage2D 上传）——提示 Skia 保持 CPU 光栅面，读取免 GPU 回读
+      //   ★B2b:本创建点仅非 acc 帧（bridge/降级/逃生门）触达=稳态零创建
       this.worldCtxLayer = this.worldCanvas.getContext('2d', { willReadFrequently: true })!;
       this.lightMaskCanvas = document.createElement('canvas');
       this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
@@ -17315,8 +17506,16 @@ export class Renderer {
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
     rx: number, ry: number, rw: number, rh: number,
   ) {
+    // ★B2b 累积帧收口：末段 shim 队列 flushAcc → endAccumulate（不 present）→
+    //  摘 shim 包装。accFbo=世界累积纹理（compose 直采/present/读回三用）。
+    const accFbo = this.finishAccFrame();
     if (this.fullbright) { // 开灯：不做 multiply，全部原色（世界层仍须叠回主画布）
       // 低清档(#perf-gpulog):世界层 K 缩 → 拉伸回填全尺寸
+      if (accFbo && this.swPipe) {
+        this.swPipe.present(accFbo);
+        this.ctx.drawImage(this.swPipe.canvas, 0, 0, viewW, viewH);
+        return;
+      }
       if (this.worldLayerActive && this.worldCanvas) this.ctx.drawImage(this.worldCanvas, 0, 0, viewW, viewH);
       return;
     }
@@ -17347,18 +17546,23 @@ export class Renderer {
     // ★A3 光照 GPU 重建（?lrecon=1,与 wfbo 同为运行时可翻旗）:raw scan 直传 +
     //  recon pass0——CPU 4-tap 重建/putImageData/脏带比对/带 blit 四消。
     //  失败/unavailable → 继续下方原路径（CPU 重建照旧,双路径并存）。
-    if (Renderer.wfbo && Renderer.lrecon && !this.isCpuRender() && this.worldCanvas) {
+    //  ★B2b:worldCanvas 缺席的 acc 帧=accHandle(FBO('world')) 句柄换指（A 线
+    //  compose 面零改动——句柄型入参走直采,uWorldFlip=1 朝向链）。
+    if (Renderer.wfbo && Renderer.lrecon && !this.isCpuRender() && (accFbo?.tex || this.worldCanvas)) {
       const wcL = (this.worldCompose ??= this.newWorldCompose()).acquire();
       if (wcL) {
         const warpOn = !!(this._waveCss && waterWaves.quality > 0
           && (!Renderer.dryWarpSkip || this._waveLiquidInView));
         const stL = this._waveCss;
         const woL = warpOn ? waterWaves.waveReadOffset() : [0, 0];
+        const worldArgL = accFbo?.tex ? this.accHandle(accFbo)! : this.worldCanvas!;   // tex 门保证句柄非 null
+        const cssWL = stL ? stL.cssW : (accFbo ? accFbo.w : this.worldCanvas!.width);
+        const cssHL = stL ? stL.cssH : (accFbo ? accFbo.h : this.worldCanvas!.height);
         const okL = wcL.compose(
-          this.worldCanvas, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, undefined,
+          worldArgL, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, undefined,
           warpOn ? this.waterWarp.gateCanvas() : null,
           warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
-          stL ? stL.cssW : this.worldCanvas.width, stL ? stL.cssH : this.worldCanvas.height,
+          cssWL, cssHL,
           warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,
           warpOn ? waterWaves.readGridR() : GLWorldCompose.neutralWave,
           warpOn ? waterWaves.gridW() : 1, warpOn ? waterWaves.gridH() : 1,
@@ -17544,7 +17748,7 @@ export class Renderer {
     //      ① GL 路径(GLWorldLight,?wgl=0 关闭)
     //      ② 2D 三步回退:copy→multiply(全 α 光照)→destination-in 恢复 α
     //        ——不透明像素精确;半透明像素留 (1-α)·光 洗色(GL 路径无此项) ====
-    if (this.worldLayerActive && this.worldCtxLayer && this.lightMaskCtxLayer) {
+    if (accFbo || (this.worldLayerActive && this.worldCtxLayer && this.lightMaskCtxLayer)) {
       const lw = tilesX * ts * z, lh = tilesY * ts * z;
       // ★SW-BJ41 2026-09-09：以太域零光跳过（darkSkip）——原版两半机制合一：
       //  ① Main.DrawBlack :58831 `if (shimmerAlpha == 1f ...) return;`（黑幕罩整缺）
@@ -17596,13 +17800,17 @@ export class Renderer {
           const warpOn = !!(this._waveCss && waterWaves.quality > 0
             && (!Renderer.dryWarpSkip || this._waveLiquidInView));
           const st = this._waveCss;
+          // ★B2b:acc 帧=FBO 句柄换指（compose 面零改动）;css 兜底同步换 FBO 尺寸
+          const worldArg = accFbo?.tex ? this.accHandle(accFbo)! : this.worldCanvas!;
+          const cssWf = st ? st.cssW : (accFbo ? accFbo.w : this.worldCanvas!.width);
+          const cssHf = st ? st.cssH : (accFbo ? accFbo.h : this.worldCanvas!.height);
           // 无扭曲帧:pass2 直采回贴=恒等（空门控+intensity=0,dryskip 判决同源）;
           // ★中性波场垫底防 uWaveSize=(0,0) 的 NaN 除法（gridW/H=1+0.5 中心值）
           const ok = wc.compose(
-            this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand,
+            worldArg, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand,
             warpOn ? this.waterWarp.gateCanvas() : null,
             warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
-            st ? st.cssW : this.worldCanvas!.width, st ? st.cssH : this.worldCanvas!.height,   // ★css 兜底=世界层尺寸（防 uCssSize 除零 NaN;无扭曲帧该值不参与可见项）
+            cssWf, cssHf,   // ★css 兜底=世界层尺寸（防 uCssSize 除零 NaN;无扭曲帧该值不参与可见项）
             warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,
             warpOn ? waterWaves.readGridR() : GLWorldCompose.neutralWave,
             warpOn ? waterWaves.gridW() : 1, warpOn ? waterWaves.gridH() : 1,
@@ -17616,7 +17824,9 @@ export class Renderer {
           }
         }
       }
-      const gl = this.worldLightLayer();   // ★A2：仅旧链路径触达（实例获取后移,见上注）
+      // ★B2b:acc 帧旧链（GLWorldLight 需 canvas 全幅上传）不可达——FBO 句柄
+      //  只此一家;读回替代链在下方（GL 读回替代 getImageData）。
+      const gl = accFbo ? null : this.worldLightLayer();   // ★A2：仅旧链路径触达（实例获取后移,见上注）
       if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand)) {
         this._markPath('oldchain');
         // ★全屏水体扭曲（原版 FilterManager.EndCapture :127-176 语义）：滤镜作用于
@@ -17631,7 +17841,8 @@ export class Renderer {
         this.ctx.drawImage(warped ?? gl.canvas, 0, 0, viewW, viewH);   // 低清→全尺寸拉伸回填
         return;
       }
-      const mctx = this.lightMaskCtxLayer;
+      // ★B2b:acc 帧 lightMaskCtxLayer 稳态为 null——乘光输出面惰性建（见乘光
+      //  尾段;此处 const 移除防双声明）
       // ★满亮行旗【提前】到 getImageData 之前（2026-08-25 软渲染 trace：本回退分支
       //   6.2s/26.6s=23% 帧时，其中全屏 getImageData ~2.7ms/帧）。数据源同为
       //   img.data（光图本就在 CPU 内存），扫描先行不改变任何时序语义。
@@ -17655,16 +17866,27 @@ export class Renderer {
           all &= a;
         }
         if (Renderer.lightFast && all === 255) {
-          this.ctx.drawImage(this.worldCanvas!, 0, 0);
+          // ★B2b:acc 帧=世界面在 FBO——present 落管线画布再单次回贴（全亮帧
+          //  乘光恒等,与 worldCanvas 直画同构）
+          if (accFbo && this.swPipe) {
+            this.swPipe.present(accFbo);
+            this.ctx.drawImage(this.swPipe.canvas, 0, 0);
+          } else {
+            this.ctx.drawImage(this.worldCanvas!, 0, 0);
+          }
           return;
         }
       }
-      // ★CPU 逐像素精确乘（2026-08-20 史莱姆浊暗终案：Canvas multiply 三步法对
-      //   半透明像素留 (1-αd)·光 洗色——PDF 混合的 Cs 项无法在 Canvas 2D 消去。
-      //   光照数组与 lightCanvas 同源（4-tap 双线性），直接在 worldCanvas 像素上
-      //   乘：out.rgb=rgb×光、α 原样（原版顶点色语义，与 GL 路径逐位一致）。
-      //   ~1.3M px 全屏 ×4-tap ≈ 8-15ms/帧——仅 GL 不可用回退时承受）
-      const wimg = this.worldCtxLayer!.getImageData(0, 0, viewW, viewH);
+      // ★B2b acc 读回替代（2026-09-24）：GL 乘光链失败而管线尚存的帧,世界像素
+      //  经 readPixels 读回（替代 worldCtxLayer.getImageData——worldCanvas 稳态
+      //  不存在）。premultiplied(GL 域,row0=底) → getImageData 语义
+      //  （非预乘,row0=顶）换算:行序翻转+unpremultiply(a=0→0,else round(c·255/a))
+      //  ——舍入表与 Skia 实现差异 ≤1LSB,深回退路径登记,对拍不适用。
+      //  读回失败（GL 死透）:世界面不可得,保底按纯透明处理（画面=主画布底层,
+      //  深回退帧视觉降级不炸——登记）。
+      const wimg = accFbo ? this.accReadbackImageData(accFbo, viewW, viewH)
+        : this.worldCtxLayer!.getImageData(0, 0, viewW, viewH);
+      if (!wimg) { this.ctx.drawImage(this.lightCanvas, 0, 0); return; }
       const wd = wimg.data;
       const lxRatio = w2 / (tilesX * ts * z), lyRatio = h2 / (tilesY * ts * z);
       if (Renderer.legacyCpuMult) {
@@ -17756,6 +17978,18 @@ export class Renderer {
           if (darkSkip && lSum <= 0) wd[i + 3] = 0;   // 零光 α→0
         }
       }
+      }
+      // ★B2b:acc 帧乘光输出面惰性建（worldCtxLayer/lightMask 稳态不存在;
+      //  本分支=深回退帧,创建一次后随帧复用——CanvasWatch churn 判例:不逐帧新建）
+      let mctx = this.lightMaskCtxLayer;
+      if (!mctx || !this.lightMaskCanvas) {
+        this.lightMaskCanvas = document.createElement('canvas');
+        mctx = this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
+      }
+      const lmW = accFbo ? accFbo.w : (this.worldCanvas?.width ?? viewW);
+      const lmH = accFbo ? accFbo.h : (this.worldCanvas?.height ?? viewH);
+      if (this.lightMaskCanvas.width !== lmW || this.lightMaskCanvas.height !== lmH) {
+        this.lightMaskCanvas.width = lmW; this.lightMaskCanvas.height = lmH;
       }
       mctx.setTransform(1, 0, 0, 1, 0, 0);
       mctx.globalCompositeOperation = 'source-over';
