@@ -29,9 +29,11 @@ export interface LightTarget {
   r: Uint8Array; g: Uint8Array; b: Uint8Array;
 }
 
-/** C9 诊断计数器（探针对账:posted(快照发出)/results(回达)/falls(看门狗回落)。纯读面） */
-const lwStat = { posted: 0, results: 0, falls: 0 };
-export function lightWorkerStats(): { on: boolean; posted: number; results: number; falls: number } {
+/** C9 诊断计数器（探针对账:posted(快照发出)/results(回达)/falls(看门狗回落)/
+ *  lagMs(最近一次结果 send→apply 端到端延迟,含 worker 计算+主线程消息调度)。
+ *  纯读面） */
+const lwStat = { posted: 0, results: 0, falls: 0, lagMs: 0 };
+export function lightWorkerStats(): { on: boolean; posted: number; results: number; falls: number; lagMs: number } {
   return { on: lightWorkerFlag, ...lwStat };
 }
 
@@ -44,6 +46,15 @@ export class LightWorkerLink {
   private dead = false;
   private pending: LightResultMsg | null = null;
   private seq = 0;
+  private lastSentAt = 0;
+
+  /** ★C9b 到达即应用（2026-09-24,用户实报 120fps 光照慢几帧定谳）:结果回填点从
+   *  「下一个 compute」提前到「消息到达瞬间」。原 applyPending 只在 tick 的
+   *  compute 里执行——120fps 渲染下主线程任务翻倍,回传消息常滑到下下个 tick
+   *  才被消费（间歇 2 tick=33ms≈4 渲染帧=用户所见割裂）。onmessage 直接回填
+   *  后:数据逐字节不变,只是更早可见;region+数组仍成对原子（主线程单线程,
+   *  消息是独立 task,不可能撕裂同步段内的一致对）。引擎侧注册本回调。 */
+  onResult: ((m: LightResultMsg) => void) | null = null;
 
   /** worker 已产出过结果（warmup → live 的分界） */
   isLive(): boolean { return this.results > 0; }
@@ -127,7 +138,10 @@ export class LightWorkerLink {
           this.results++;
           lwStat.results++;
           this.lastResultAt = performance.now();
+          lwStat.lagMs = this.lastSentAt > 0 ? performance.now() - this.lastSentAt : 0;
           this.pending = m;
+          // ★C9b 到达即应用（compute 的 applyPending 保留为兜底,已应用则 no-op）
+          if (this.onResult) this.onResult(m);
         };
       } catch (err) {
         this.errored = true;
@@ -136,6 +150,7 @@ export class LightWorkerLink {
       }
     }
     lwStat.posted++;
+    this.lastSentAt = performance.now();
     this.worker.postMessage({ ...msg, op: 'frame', seq: ++this.seq });
   }
 

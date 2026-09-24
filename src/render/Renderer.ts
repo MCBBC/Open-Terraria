@@ -2848,6 +2848,12 @@ export class Renderer {
   composePathUsed = '';
   /** ★路径分布累计（F5 报告面）:全会话各路径帧数——分布比瞬时值有诊断力 */
   composePathStats: Record<string, number> = {};
+  /** ★C10a 诊断面:本帧云 GL 会话来源（'cloudpipe'=GLPipeline 后端/'glfx'=旧共享
+   *  会话/'2d'=未注入——GL 不可用/退避/cpuRender/?cloudgl=0。注入点每帧写,
+   *  composePathUsed 同款探针读面） */
+  cloudPathUsed = '';
+  /** ★C10a 路径分布累计（全会话各来源帧数） */
+  cloudPathStats: Record<string, number> = {};
   /** 最近一次 recon 失败原因（lrecon-fail 时由 compose.lastFail 填入） */
   composeLastFail = '';
   /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
@@ -2947,6 +2953,33 @@ export class Renderer {
     this.glfx = inst;
     return inst;
   }
+  // ---- ★C10a 云会话 GLPipeline 后端（?cloudpipe=1;渲染改造方案 §三 C10a）----
+  /** 云专用管线后端层（GLSpriteLayer 管线模式=GLPipeline 单上下文+FBO('clouds')+
+   *  present 回贴;管线/层 1:1 持有,dispose 随层）。null=未建/退避中 */
+  private cloudPipeLayer: GLSpriteLayer | null = null;
+  /** 初始化失败 30s 闩（acquireGL glInitRetryAt 同款——防每帧 createElement 风暴） */
+  private cloudPipeRetryAt = 0;
+  /** 云管线层获取:活实例直取;死亡 5s 退避;初始化失败 30s 闩;饥饿锁同门。
+   *  与 acquireGL(glfx) 互不共享——glfx 继续承载群系背景/全屏地图/拖尾（一期
+   *  只迁云,其余消费方行为零变化） */
+  acquireCloudPipe(): GLSpriteLayer | null {
+    const cur = this.cloudPipeLayer;
+    if (cur) {
+      if (!cur.unavailable) return cur;
+      if (performance.now() - cur.diedAt < 5000) { this.dropCloudPipe(); return null; }
+      this.dropCloudPipe();
+    }
+    if (performance.now() < this.cloudPipeRetryAt) return null;
+    if (starvedLock()) return null;
+    const inst = GLSpriteLayer.createPipelineBacked('cloudpipe');
+    if (!inst) { this.cloudPipeRetryAt = performance.now() + 30_000; return null; }
+    this.cloudPipeLayer = inst;
+    return inst;
+  }
+  /** 云管线层释放（旗关/CPU 切换/熔断/销毁;层 dispose 级联管线本体） */
+  dropCloudPipe(): void {
+    if (this.cloudPipeLayer) { this.cloudPipeLayer.dispose(); this.cloudPipeLayer = null; }
+  }
   /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
    *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
    *  释放最旧一半,恢复后续跑;连续丢失连续收缩(下限 64) */
@@ -3005,6 +3038,7 @@ export class Renderer {
         GLSpriteLayer.MAX_BYTES = Math.max(48 * 1024 * 1024, Math.floor(GLSpriteLayer.MAX_BYTES / 2));
         this.glfx?.dispose();
         this.glfx = null;
+        this.dropCloudPipe();   // ★C10a:云管线会话同批硬释放(GPU 预算让位)
         this.worldLight?.dispose();
         this.worldLight = null;
         console.warn(`[Renderer] GPU 压力熔断(第 ${trips} 次):10s 内 ${losses.length} 次画布丢失——暂停渲染冷却 ${cooldown / 1000}s + 已释放 GL 纹理池(${GLSpriteLayer.MAX_BYTES >> 20}MB 档)`);
@@ -3159,6 +3193,7 @@ export class Renderer {
     if (cpu) {
       this.glfx?.dispose();
       this.glfx = null;
+      this.dropCloudPipe();   // ★C10a:CPU 软渲染零 GPU 预算——云管线会话同批释放
       this.worldLight?.dispose();
       this.worldLight = null;
     } else {
@@ -3366,6 +3401,9 @@ export class Renderer {
     //  回调闭包捕获 this,曾只 push 不摘=每局 Renderer→Game→World 整岛被模块
     //  单例钉死（正向可达分析+WeakRef 二分定谳,进出世界每轮 ~103MB/小 ~210MB/中）
     if (this._starveCb) { offStarveTransition(this._starveCb); this._starveCb = null; }
+    // ★BJ318（锚族⑤）：模块级 _waveCtx.st 清空——每帧 wave 注入上下文持本局
+    //  TileStore,dispose 不清=store.listeners 闭包链反向钉死死 Game 整岛
+    _waveCtx.st = null as unknown as TileStore;
     // ★BJ318（2026-09-24 堆快照+WeakRef 二分定谳的【残锚】）：window 级 contextlost
     //  哨兵必摘——onLost 闭包捕获 this(Renderer→world.store),只在画布重建时单例
     //  替换,dispose 曾不摘=退世界后 window listener 永久钉死整个 Renderer 岛
@@ -3393,6 +3431,7 @@ export class Renderer {
     // 风暴;背景纹理懒加载重传成本低,不值得跨世界持有)
     this.glfx?.dispose();
     this.glfx = null;
+    this.dropCloudPipe();   // ★C10a:云管线会话(纹理 LRU 同链——不跨世界持有)
     this.worldLight?.dispose();
     this.worldLight = null;
     this.sky.disposeCloudGL();
@@ -3774,8 +3813,18 @@ export class Renderer {
     this.sky.biomeBgBands = () => this.biomeBg.surfaceGradientBands();
     // #A 云 GL 共享层注入:云与背景层共用 glfx 一个 WebGL 上下文(每帧注入,
     // 退避/死亡期 acquireGL 返回 null → 当帧云走 2D cloudTint 兜底,自然恢复)
-    this.sky.cloudGlLayer = !this.cpuRender && (this.bgGlEnabled || this.sky.useGLClouds)
-      ? this.acquireGL() : null;
+    // ★C10a(?cloudpipe=1):云会话改走 GLPipeline 后端(独立 acquire,glfx 不再供云;
+    //  退避/死亡期同语义返 null → 2D 兜底)。缺省/0 = 旧 glfx 共享会话(逃生门)。
+    //  useGLClouds/cpuRender 总门对两路一致生效。
+    const cloudGl = !this.cpuRender && this.sky.useGLClouds
+      ? (Renderer.cloudPipe ? this.acquireCloudPipe() : this.acquireGL())
+      : null;
+    this.sky.cloudGlLayer = cloudGl;
+    // ★C10a 仪器面(composePathUsed 同款口径):本帧云 GL 会话来源
+    //  'cloudpipe'=管线后端/'glfx'=旧共享会话/'2d'=未注入(GL 不可用/退避/cpu)
+    const cloudPath = cloudGl ? (Renderer.cloudPipe ? 'cloudpipe' : 'glfx') : '2d';
+    this.cloudPathUsed = cloudPath;
+    this.cloudPathStats[cloudPath] = (this.cloudPathStats[cloudPath] || 0) + 1;
     // ★海拔大气系数帧状态(Main.cs:62618 UpdateAtmosphereTransparencyToSkyColor,
     // 61421 每帧以视口中心 Y 调用)——colorOfTheSkies/skySeed 尾段乘 atmo:
     // 天空/远景/云/光种子同源变暗 = 太空场景本体 + 高空环境光下降
@@ -5246,6 +5295,22 @@ export class Renderer {
   })();
   static get lrecon() { return this._lrecon; }
   static lreconSetForTest(v: boolean): void { this._lrecon = v; }
+  /** ?cloudpipe=1：C10a 云 GL 会话迁入 GLPipeline 单上下文（GLSpriteLayer 管线后端:
+   *  quads 渲 FBO('clouds')→present→cloudBlitRect bbox 子矩形 blit 结构照旧;
+   *  渲染改造方案 §三 C10a）。★缺省关（灰度）——缺省/0 = 旧 glfx 共享会话
+   *  （逃生门语义=回旧会话,云视觉零变化为判据）。运行时可翻（wfbo 同款页内翻面
+   *  范式——像素对拍探针 _c10a-cloud-ab 用,跨载入对拍受 bootstrap 洗参限制）。 */
+  private static _cloudPipe = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('cloudpipe') === '1';
+    } catch { return false; }
+  })();
+  static get cloudPipe() { return this._cloudPipe; }
+  /** 运行时翻面（对拍探针用）。关=同时摘层（下一帧云回旧 glfx 会话）;开=懒建。 */
+  setCloudPipeForTest(v: boolean): void {
+    Renderer._cloudPipe = v;
+    if (!v) this.dropCloudPipe();
+  }
   static readonly b0Shadow = (() => {
     try {
       return typeof location !== 'undefined' && new URLSearchParams(location.search).has('b0shadow');

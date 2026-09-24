@@ -131,7 +131,7 @@ describe('结构锁（变异即红）', () => {
     return src.slice(s, e);
   }
 
-  it('拍位序：applyAutoPauseUI → mouseOversClear →（暂停分支前）→ fixedUpdate → refreshCursorIconDrawState → render', () => {
+  it('拍位序：applyAutoPauseUI → mouseOversClear（暂停拍门）→（暂停分支前）→ fixedUpdate → refreshCursorIconDrawState → render', () => {
     const f = frameBody();
     const iAuto = f.indexOf('this.applyAutoPauseUI()');
     const iClear = f.indexOf('this.mouseOversClear()');
@@ -154,7 +154,6 @@ describe('结构锁（变异即红）', () => {
 
   it('清零/重建调用带 world 门（pre-world 帧不炸）', () => {
     const f = frameBody();
-    expect(f).toContain('if (this.world) this.mouseOversClear()');
     expect(f).toContain('if (this.world) this.refreshCursorIconDrawState()');
   });
 
@@ -234,5 +233,135 @@ describe('SW-BJ99 暂停帧绘制相悬停回填（DrawMouseOver 同相）', () 
     expect(iReclaim).toBeGreaterThan(iRefresh);
     expect(iReclaim).toBeLessThan(iRender);
     expect(f.slice(iReclaim)).toContain('this.tickHoverNpcName();');
+  });
+});
+
+// ===================== SW-BJ320（2026-09-24）：清零拍位归一（0 步进帧频闪清偿） =====================
+// 用户实报：悬停门/宝箱等交互物,光标处交互图标频闪。取证定谳（1457 反编译锚）：
+//   - 原版不变量 = MouseOversClear 挂 Update 头部但在 accumulator 门【之后】
+//     （Main.cs:17182-17213：Off/Subtle 档 0 步进帧 :17184 提前 return【不进清零】;
+//     On 档 IsFixedTimeStep 60Hz 锁步无 0 步进帧）→ 清与 claim 恒同 tick 耦合,
+//     "清后无回填"的绘制帧不存在:Off 档 0 步进帧照画上一 tick claim（图标恒亮）,
+//     Subtle 档 SuppressDraw 画布保留。
+//   - 本仓曾把清零挂 frame() 头【每绘制帧】+ claim 留 fixedUpdate → 非暂停 0 步进帧
+//     清后无回填;悬停门/箱族原版【永不】调 ItemIconCacheUpdate（Player.cs 全文仅 4
+//     站点 :43954/:46010/:46717/:47165 全在手持支）→ cacheTime 桥接对悬停族整缺 =
+//     Off/On 档（旧档 frameSkip 迁移落在 off/on）静止悬停即隔帧频闪（探针 256 帧
+//     133 次翻转;subtle 档被 SuppressDraw 掩蔽故默认档不显）。BJ320 修刀 = 清零拆两拍:
+//     ①fixedUpdate 头每逻辑 tick 清（同 tick claim 耦合）②frame() 头仅暂停拍清
+//     （BJ72 残留防线保留）。非暂停 0 步进帧不清 → 画上一 tick claim 态 = 原版同相。
+// 测试法：BJ72 同法 Game 原型桩 + 真 tileInteractionsMouseOver claim 面 +
+//   [0,2,1] 步序 N 帧可见性恒定断言 + 源文本结构锁（变异即红）。
+import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
+
+type AnyGame = Record<string, any>;
+
+describe('SW-BJ320 清零拍位归一（0 步进帧图标可见性恒定）', () => {
+  const DOOR_TILE = (TILE_BY_KEY as Record<string, number>)['door_closed'] ?? -1;
+
+  /** bj72Game 桩 + 门(60,90..92) + 玩家邻接站位 → tileInteractionsMouseOver 真 claim 面 */
+  function bj320Game() {
+    const g = bj72Game() as AnyGame & { world: World; player: Player };
+    const st = (g.world as unknown as { store: { setTileSilent: (x: number, y: number, t: number, fx: number, fy: number) => void } }).store;
+    for (let j = 0; j < 3; j++) st.setTileSilent(60, 90 + j, DOOR_TILE, 0, j * 54);
+    (g.player as unknown as { x: number; y: number; vx: number; vy: number }).x = 58 * TILE;
+    (g.player as unknown as { x: number; y: number; vx: number; vy: number }).y = 92 * TILE - (g.player as unknown as { h: number }).h;
+    (g.player as unknown as { vx: number; vy: number }).vx = 0;
+    (g.player as unknown as { vx: number; vy: number }).vy = 0;
+    return g;
+  }
+
+  /** 真 claim 面：门中格 (60,91) 悬停扫描（tickCursorIcon 内同参调用） */
+  function claimDoor(g: AnyGame): void {
+    (g as unknown as { tileInteractionsMouseOver(tx: number, ty: number, p: Player): void })
+      .tileInteractionsMouseOver(60, 91, g.player as Player);
+  }
+
+  /** 绘制门（Renderer.drawCursorItemIcon flag 支同式）：enabled && ID≠0 → 图标进 */
+  function iconVisible(g: AnyGame): boolean {
+    const p = g.player as unknown as { cursorItemIconEnabled: boolean; cursorItemIconID: number };
+    return p.cursorItemIconEnabled && p.cursorItemIconID !== 0;
+  }
+
+  it('claim 面自洁核查：门中格悬停 → enabled+ID 置位（木门 vid>0）', () => {
+    const g = bj320Game();
+    expect(DOOR_TILE).toBeGreaterThan(0);
+    claimDoor(g);
+    const p = g.player as unknown as { cursorItemIconEnabled: boolean; cursorItemIconID: number };
+    expect(p.cursorItemIconEnabled).toBe(true);
+    expect(p.cursorItemIconID).toBeGreaterThan(0);   // styleDropVidOfFrames(10,0,·) 表值
+    expect(TILE_DEFS[DOOR_TILE]?.vanilla?.sheet).toBe(10);
+  });
+
+  it('★判别面：[0,2,1] 步序 × 8 循环,off 档悬停图标可见性恒定（变异回滚逐帧清即红）', () => {
+    const g = bj320Game();
+    const drive = g as unknown as { mouseOversClear(): void; refreshCursorIconDrawState(): void };
+    // 预置=悬停已稳态（真实序列前置若干逻辑 tick 的 claim;否则首帧无 claim 非频闪语义）
+    drive.mouseOversClear();
+    claimDoor(g);
+    const seq = [0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1, 0, 2, 1];
+    const vis: boolean[] = [];
+    for (const steps of seq) {
+      // frame() 头：仅暂停拍清（非暂停 0 步进帧不清 = 原版 accumulator 门同相）
+      const paused = false;
+      if (paused) drive.mouseOversClear();
+      // fixedUpdate：每逻辑 tick 头清 + 真 claim 面（0 步进帧整段不跑）
+      for (let s = 0; s < steps; s++) {
+        drive.mouseOversClear();
+        claimDoor(g);
+      }
+      drive.refreshCursorIconDrawState();   // 绘制拍：余辉验证+ctx（不清零）
+      vis.push(iconVisible(g));
+    }
+    expect(vis.length).toBe(seq.length);
+    expect(vis.every((v) => v === true), `可见性翻转序列=${vis.map((v) => (v ? 1 : 0)).join('')}`).toBe(true);
+  });
+
+  it('变异判别：0 步进帧若被逐帧清（回滚 BJ72 旧拍位）→ 可见性翻转（本测试钉死该回归）', () => {
+    // 反相证明：同一序列,若把清零挪回每绘制帧（旧偏差拍位）,0 步进帧必翻红
+    const g = bj320Game();
+    const drive = g as unknown as { mouseOversClear(): void; refreshCursorIconDrawState(): void };
+    const seq = [0, 2, 1];
+    const vis: boolean[] = [];
+    for (const steps of seq) {
+      drive.mouseOversClear();               // 旧拍位：每绘制帧无条件清（偏差形态）
+      for (let s = 0; s < steps; s++) { claimDoor(g); }
+      drive.refreshCursorIconDrawState();
+      vis.push(iconVisible(g));
+    }
+    expect(vis).toEqual([false, true, true]);   // 0 步进帧=空窗（用户实报频闪的一帧）
+  });
+
+  it('暂停拍残留防线保留（BJ72 主修不回退）：暂停帧逐绘制帧清 → 无残留可画', () => {
+    const g = bj320Game();
+    claimDoor(g);                              // 暂停前 claim 残留
+    const p = g.player as unknown as { cursorItemIconEnabled: boolean; cursorItemIconID: number };
+    expect(iconVisible(g)).toBe(true);
+    (g as unknown as { mouseOversClear(): void }).mouseOversClear();   // frame() 头暂停拍门（paused=true 时逐帧走）
+    expect(p.cursorItemIconEnabled).toBe(false);
+    expect(p.cursorItemIconID).toBe(0);
+    (g as unknown as { refreshCursorIconDrawState(): void }).refreshCursorIconDrawState();
+    expect(iconVisible(g)).toBe(false);        // 暂停期 update 相 claim 停摆 → 图标不显（原版同相）
+  });
+
+  it('结构锁：fixedUpdate 头每 tick 清（tickCount 前）+ frame() 头清零带暂停拍门（回滚无条件清即红）', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../src/core/Game.ts'), 'utf8');
+    const sF = src.indexOf('private frame(now: number) {');
+    const sScan = src.indexOf('private scanBoulderFamilyNear', sF);
+    const f = src.slice(sF, sScan);
+    // frame() 头清零 = 暂停拍门形态（非暂停 0 步进帧不清）
+    const iClear = f.indexOf('this.mouseOversClear()');
+    expect(iClear, 'frame() 头须有 mouseOversClear（暂停拍）').toBeGreaterThan(0);
+    expect(f.slice(Math.max(0, iClear - 40), iClear)).toContain('this.paused && this.world');
+    // 旧偏差形态禁入 frame() 体：无条件每绘制帧清
+    expect(f).not.toContain('if (this.world) this.mouseOversClear()');
+    // fixedUpdate 头：world 门内清零先于 tickCount++（每逻辑 tick,与 claim 同拍耦合）
+    const sFu = src.indexOf('private fixedUpdate(dt: number) {');
+    expect(sFu).toBeGreaterThan(0);
+    const fuHead = src.slice(sFu, sFu + 600);
+    const iFuClear = fuHead.indexOf('if (this.world) this.mouseOversClear()');
+    const iTick = fuHead.indexOf('this.tickCount++');
+    expect(iFuClear, 'fixedUpdate 头须有 world 门内清零').toBeGreaterThan(0);
+    expect(iTick).toBeGreaterThan(iFuClear);
   });
 });

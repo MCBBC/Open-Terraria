@@ -499,6 +499,9 @@ export const vanillaFrameCache = new Map<number, FrameEntry>();
 // 统一常量步长(>最大世界宽 8400;j<2400 ⇒ 键上限 ~2.4e8,安全)。
 const VF_CACHE_STRIDE = 100000;
 let frameCacheWorld: object | null = null;
+/** ★BJ318（2026-09-24）：退世界解绑——持本局 World 对象（含 store→listeners→Game
+ *  链），Game.destroy 调用；下局 invalidateVanillaFrames 按世界切换语义自然重绑。 */
+export function framingWorldUnbind(): void { frameCacheWorld = null; }
 export function invalidateVanillaFrames(world: object): void {
   if (frameCacheWorld !== world) { frameCacheWorld = world; vanillaFrameCache.clear(); ghostFrameCache.clear(); }
 }

@@ -69,7 +69,18 @@ export class LightingEngine {
     world.store.onTileChanged(() => { this.dirty = true; });
     world.store.onLiquidChanged(() => { this.liquidDirty = true; });
     // ★C9：惰性建链（Worker 首帧 compute 才真正 spawn）;旗关恒 null=本地路径零分叉
-    if (lightWorkerFlag) this._lw = new LightWorkerLink();
+    if (lightWorkerFlag) {
+      this._lw = new LightWorkerLink();
+      // ★C9b 到达即应用（2026-09-24）：结果回填点提前到消息到达——120fps 渲染下
+      //  原起「下个 compute 才应用」会因主线程繁忙滑到下下 tick（间歇 33ms 割裂,
+      //  用户实报）。region+数组成对原子回填（与 applyPending 同逻辑,compute 内
+      //  的 applyPending 保留为兜底 no-op）。快照区域仍由 ensureRegion 每 tick
+      //  收敛（onResult 的滞后对先落盘,下个 ensureRegion 照常覆盖,区域不振荡）。
+      this._lw.onResult = (m) => {
+        this.rx = m.rx; this.ry = m.ry; this.rw = m.rw; this.rh = m.rh;
+        this.r = m.R; this.g = m.G; this.b = m.B;
+      };
+    }
   }
 
   /** ★C9：Game 在每帧 updateLightDecay(...) 后调用（同参捕获,worker 重放同步） */
@@ -118,6 +129,8 @@ export class LightingEngine {
     // dispose+_lw 置 null 永久回落本地(dirty 强制首帧全周期)。时钟仍在主线程 tick
     // (HUD/渲染层 cursorScale/mouseTextColor 消费面照常);快照捕获 pre-tick 状态,
     // worker 侧恢复后由其 compute 的 tick 推进到同态(位级同相)。
+    // ★C9b(2026-09-24)：结果应用点=消息到达瞬间(onResult),compute 内 applyPending
+    // 仅作兜底——渲染帧可即时读到最新回传,120fps 下不再滑档。
     const lw = this._lw;
     if (lw !== null) {
       if (!lw.healthy()) {
@@ -126,8 +139,9 @@ export class LightingEngine {
         this.dirty = true;   // 回落后首帧强制全周期
       } else {
         const live = lw.isLive();
-        // 快照区域须取本帧 ensureRegion 现值——applyPending 会把公共面区域回拨成
-        // worker 上一帧区域(1 帧滞后;渲染读 (区域,数组) 恒成对一致),先捕获再回填。
+        // 快照区域须取本帧 ensureRegion 现值——onResult/applyPending 会把公共面
+        // 区域回拨成 worker 上一帧区域(0-1 帧滞后;渲染读 (区域,数组) 恒成对一致),
+        // 先捕获再回填。
         const reg = { rx: this.rx, ry: this.ry, rw: this.rw, rh: this.rh };
         lw.applyPending(this);
         lw.send(this.buildWorkerSnapshot(reg));

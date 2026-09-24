@@ -1323,7 +1323,8 @@ export class UI {
     const btn = el('button', 'sw-manual-btn', '?');
     btn.title = Lang.text('Mods.SandboxWorld.UI.Manual');
     btn.addEventListener('mousedown', (e) => e.stopPropagation());   // 防触发拖拽/世界点击
-    btn.addEventListener('click', () => this.openManualPanel(game));
+    // ★BJ318：动态解析——曾捕获每局 game 形参,manualBtn 随 UI 单例跨局存活=死 Game 钉
+    btn.addEventListener('click', () => { if (this.game) this.openManualPanel(this.game); });
     wrap.appendChild(btn);
     if (!options.data.manualSeen) wrap.appendChild(el('div', 'sw-manual-badge', '!'));
     this.root.appendChild(wrap);
@@ -4708,7 +4709,7 @@ export class UI {
     // 同样移至 rightRail 之后、成就/杂项列之前（用户要求整体右迁）
     // 成就提示牌（AchievementAdvisor：未完成成就小卡，点击开成就菜单）
     // ——挂载点在物品格之后（见 body.appendChild(right) 处），此处仅创建
-    this.achAdvisorEl = createAchievementAdvisor(this.game);
+    this.achAdvisorEl = createAchievementAdvisor(() => this.game);   // ★BJ318 动态解析
 
     // 背包 10×4（10-39）。★「背包」标签行已摘（2026-09-02 用户要求：去掉二字
     // 直接贴紧热键栏;道具搜索文字钮此前已图标化,向导反查钮 2026-08-14 摘）
@@ -6776,6 +6777,21 @@ export class UI {
     this.refreshHousingBtn();
     (window as unknown as { __swHousingPanel?: { destroy(): void } }).__swHousingPanel?.destroy();
     document.querySelector('.sw-housing-panel')?.remove();
+    // ★BJ318/BJ319（2026-09-24）：游离 HUD 树滞留扫除——root.innerHTML 清了 DOM,
+    //  但数十个 this.*El/*Els 字段继续引用已脱离节点树,其上的监听器闭包把上一局
+    //  Game 钉在 UI 单例上（BJ319 探针实测:每重进 +~900 listeners,基线 1106→3025）。
+    //  反射扫场:凡 *El/*Els 命名且值为 Node / Node[] 的实例字段一律清空
+    //  （root 本体保留;下局 initInGame/build* 重建时全部重填）。
+    const hasNode = (o: unknown): boolean =>
+      !!o && typeof o === 'object' && Object.values(o as Record<string, unknown>).some((p) => p instanceof Node);
+    for (const k of Object.getOwnPropertyNames(this)) {
+      if (k === 'root' || !/(El|Els)$/.test(k)) continue;
+      const v = (this as unknown as Record<string, unknown>)[k];
+      if (v instanceof Node) (this as unknown as Record<string, unknown>)[k] = null;
+      else if (Array.isArray(v) && (v.length === 0 || v.every((x) => x === null || x instanceof Node))) (this as unknown as Record<string, unknown>)[k] = [];
+      // 槽位视图数组（元素为 {el,...} 复合对象——el 指向游离树节点）
+      else if (Array.isArray(v) && (v.length === 0 || v.every((x) => x === null || hasNode(x)))) (this as unknown as Record<string, unknown>)[k] = [];
+    }
   }
 
   /** 摘除 Game 引用(quitToMenu→closeAll 调用):防旧 Game 整图(世界 store
@@ -7321,7 +7337,7 @@ export class UI {
     // 成就 Advisor(Main.cs:41758-41763 @(501,25))
     const advWrap = el('div');
     advWrap.style.cssText = 'position:absolute; pointer-events:auto;';
-    advWrap.appendChild(createAchievementAdvisor(this.game));
+    advWrap.appendChild(createAchievementAdvisor(() => this.game));   // ★BJ318 动态解析
     this.achAdvisorEl = advWrap.firstChild as HTMLElement & { update(): void };
     root.appendChild(advWrap);
     // ★红队 m8b 清偿:CanDrawAboveCoins 在 sw<1000 为 false(AchievementAdvisor.cs:26-36)

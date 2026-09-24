@@ -38,10 +38,12 @@ describe('A0 GLPipeline 管线壳', () => {
     expect(pipelineSrc).toContain('dispose(): void');
   });
 
-  it('★消费方白名单锁：仅 A2 合成模块可 import GLPipeline（其余 src 模块禁入）', () => {
-    // ★A2 动工（2026-09-23）：GLWorldCompose 成为首个消费方——白名单制替代零消费方锁
+  it('★消费方白名单锁：仅 A2 合成模块+C10a 云后端可 import GLPipeline（其余 src 模块禁入）', () => {
+    // ★A2 动工（2026-09-23）：GLWorldCompose 首个消费方——白名单制替代零消费方锁
+    // ★C10a 动工（2026-09-24）：GLSpriteLayer 获「GLPipeline 后端」模式（?cloudpipe=1
+    //   灰度;工厂 createPipelineBacked 在层内构造管线,1:1 持有）
     const root = fileURLToPath(new URL('../src', import.meta.url));
-    const ALLOWED = new Set(['GLWorldCompose.ts']);
+    const ALLOWED = new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts']);
     const offenders: string[] = [];
     for (const f of walkTs(root)) {
       if (f.endsWith('GLPipeline.ts')) continue;

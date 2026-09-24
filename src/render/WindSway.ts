@@ -523,6 +523,10 @@ function drawDirectionalGrass(
 
 /** 当前帧 store 引用（glow/药草查帧用；drawWindSwayTiles 注入） */
 let ST: TileStore = null as unknown as TileStore;
+/** ★BJ318（2026-09-24）：退世界解绑——drawWindSwayTiles 是根可达导出函数,其模块
+ *  上下文的 ST 槽持本局 TileStore,经 store.listeners 闭包反向钉死死 Game 整岛
+ *  （forward-BFS 锚枚举定谳）。Game.destroy 调用,下局 drawWindSwayTiles 重绑。 */
+export function windSwayUnbind(): void { ST = null as unknown as TileStore; }
 
 // MultiTileGrass 尺寸/锚点表（DrawMultiTileGrass :8922-8970 + 路由 :608-690）
 function multiGrassSize(sheet: number, fy: number): { sx: number; sy: number } {

@@ -204,6 +204,12 @@ export function bindBossDamageHost(host: Partial<TrackerHost> & { ownerName?: (s
   if (host.npcName) bossDamageHost.npcName = host.npcName;
   if (host.ownerName) bossDamageHost.ownerName = host.ownerName;
 }
+/** ★BJ318（2026-09-24）：退订——npcName/ownerName 闭包捕获 Game,模块单例不清=
+ *  死 Game 滞留（forward-BFS 锚枚举定谳）。Game.destroy 调用,下局重 bind。 */
+export function unbindBossDamageHost(): void {
+  bossDamageHost.npcName = (type) => Lang.npcName(type) ?? `NPC ${type}`;
+  bossDamageHost.ownerName = undefined;
+}
 
 function getRealActive(npc: TrackerNpcLike): TrackerNpcLike | null {
   // GetRealActiveNPC（:123-136）：realLife 归主段；主段失活 → null

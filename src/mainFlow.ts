@@ -323,7 +323,6 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     g.uiHeldStack = () => !!ui.heldStack;
     (window as unknown as { __swGame: Game }).__swGame = g;
     (window as unknown as { __swUI: UI }).__swUI = ui; // 探针/控制台直调(成就弹窗预览等)
-    (window as unknown as { __swITEMS?: typeof ITEM_DEFS }).__swITEMS = ITEM_DEFS; // 信息饰品探针:vi_ key → 内部 id
     // 移动端：虚拟控件层（触屏设备启用；桌面零渲染零影响）——在世界触摸的
     // 用户手势内尝试全屏+横屏锁定（ⓞ 进世界点击即手势；失败静默，⛶ 按钮兜底）
     if (resolveTouchMode() === 'touch') {
@@ -340,25 +339,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // HMR 双实例检测（F5 调试报告 instance 段）：每次挂载计数 +1，>1 即模块分叉
     (window as unknown as { __swInstanceCount?: number }).__swInstanceCount =
       ((window as unknown as { __swInstanceCount?: number }).__swInstanceCount ?? 0) + 1;
-    // E2E/控制台调试:tile key → 内部 id 反查(测试脚本放置图块用)
-    (window as unknown as { __swTileByKey?: (k: string) => number }).__swTileByKey = (k: string) =>
-      (TILE_BY_KEY as Record<string, number>)[k] ?? -1;
-    // E2E 调试:内部 id → def 关键字段(注册表漂移排查)
-    (window as unknown as { __swTileDefById?: (id: number) => unknown }).__swTileDefById = (id: number) => {
-      const d = (TILE_DEFS as Array<{ key: string; vanilla?: { sheet: number; frame: string; fw?: number; fh?: number } }>)[id];
-      return d ? { key: d.key, sheet: d.vanilla?.sheet, frame: d.vanilla?.frame, fw: d.vanilla?.fw, fh: d.vanilla?.fh } : null;
-    };
+
     // E2E/控制台调试:直接加载存档 JSON 文本(绕过设置面板的 file input)
     // (挂模块级而非 enterGame:菜单阶段测试脚本就要用)
-    // 液体浸润实验台:?liquidlab 参数 / window.__swLiquidLab() 控制台命令
-    // ★BJ318：动态解析模块活实例 `game`（enterGame 已先置）——曾捕获 g,
-    // 退世界不清句柄=死 Game 整图被 window 直钉（WeakRef 二分定谳锚之一）
-    (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab = () => {
-      if (game) liquidLab(game);
-    };
-    if (new URLSearchParams(location.search).has('liquidlab')) {
-      setTimeout(() => (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab?.(), 1500);
-    }
     // SW-BJ5 2026-09-07：会话起点=计费锚点（原版 StartPlayTimer,PlayerFileData.cs:159）。
     // 基线钉死为槽位 meta 上次存档终值（新世界/导入=0）——此后存档对 meta 的回写不回流
     play.start(currentWorld?.playTimeMs ?? 0, Date.now());
@@ -1654,6 +1637,23 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   // 快速存档存在性预查
   void kvHas(QUICK_SAVE_KEY).then((v) => { quickSaveExists = v; });
+
+  // ★BJ318（2026-09-24）：纯注册表调试桥一次性挂载（createFlow 作用域,不含 g 槽）。
+  //  曾在 enterGame 内逐局覆写——闭包与 enterGame 作用域共享 `g` 槽,被 window 长持=
+  //  每局退世界后死 Game 整图多一份滞留（forward-BFS 锚枚举定谳）。此处桥体不用 g。
+  (window as unknown as { __swITEMS?: typeof ITEM_DEFS }).__swITEMS = ITEM_DEFS; // 信息饰品探针:vi_ key → 内部 id
+  (window as unknown as { __swTileByKey?: (k: string) => number }).__swTileByKey = (k: string) =>
+    (TILE_BY_KEY as Record<string, number>)[k] ?? -1;
+  (window as unknown as { __swTileDefById?: (id: number) => unknown }).__swTileDefById = (id: number) => {
+    const d = (TILE_DEFS as Array<{ key: string; vanilla?: { sheet: number; frame: string; fw?: number; fh?: number } }>)[id];
+    return d ? { key: d.key, sheet: d.vanilla?.sheet, frame: d.vanilla?.frame, fw: d.vanilla?.fw, fh: d.vanilla?.fh } : null;
+  };
+  // 液体浸润实验台:?liquidlab 参数 / window.__swLiquidLab() 控制台命令——动态解析
+  // 模块活实例 `game`（createFlow 作用域,退世界置 null=不钉任何 Game 实例）
+  (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab = () => {
+    if (game) liquidLab(game);
+  };
+
 
   // 调试桥（puppeteer 脚本用）
   (window as unknown as { __swFlow?: unknown }).__swFlow = {

@@ -286,6 +286,37 @@ async function loadAssets() {
 let remasterRuntime: RemasterRuntime | null = null;
 let remasterManager: RemasterManager | null = null;
 
+/** ★BJ318：虚拟键接线独立函数——g 走形参（入子调用上下文）。曾与 onSheetReplaced
+ *  闭包共享 enterGameHooks 作用域:该闭包被 RemasterRuntime（模块单例）长期持有,
+ *  其上下文里的 `g` 槽=退世界后钉死最后一局 Game 的残锚（forward-BFS 定谳）。 */
+function wireMobileVirtualKeys(g: Game): void {
+  // ---- 移动端虚拟 Inventory/Esc 键入口(mobile-adaptation-plan 模块①):触屏系统
+  //      列的背包/暂停钮 = input.tapVirtual('Inventory') 虚拟边沿在此转调同一优先
+  //      级链。★origin==='virtual' 门防双触发:真实键盘 Escape 既走上方 window
+  //      keydown 监听(preventDefault/打字豁免是物理专属),也会派发进
+  //      keydownHandlers——不过滤则同一次按键链跑两遍(Esc 开面板→瞬关)。
+  //      虚拟沿自带 virtualAction='Inventory',不再经 isBound 反查(code 是绑定
+  //      表首个码,重绑后仍一致)
+  g.input.keydownHandlers.push((code, ke) => {
+    if (ke.origin !== 'virtual') return;
+    // action 口(系统列背包/暂停钮):intent 显式携带。SW-BN2 起 intent=触发源形态
+    // 'escape'(Esc 键面)/'inventory'(背包钮/其余绑定键)/'pause'(触屏暂停小钮)
+    if (ke.virtualAction === 'Inventory') {
+      runInventoryEscapeChain(g,
+        ke.virtualIntent === 'inventory' ? 'inventory'
+          : ke.virtualIntent === 'pause' ? 'pause'
+          : ke.virtualIntent === 'escape' ? 'escape'
+          : code === 'Escape' ? 'escape' : 'inventory');
+      return;
+    }
+    // code 口直发 Escape(调试脚本/未来控件):归还 Inventory 链 escape 形态
+    // (默认绑定表含 Escape;用户清空该绑定时按表不响应=重绑一致)
+    if (code === 'Escape' && isBound('Inventory', 'Escape')) {
+      runInventoryEscapeChain(g, ke.virtualIntent === 'inventory' ? 'inventory' : 'escape');
+    }
+  });
+}
+
 function enterGameHooks() {
   const g = flow?.game ?? undefined;
   inGame = true;
@@ -299,38 +330,14 @@ function enterGameHooks() {
   (window as unknown as { __swGore?: typeof liveGorePieces }).__swGore = liveGorePieces;
   // 素材重制热补丁:运行中替换 tile/wall sheet → ChunkCache 消费登记精确重烘
   // (★禁 invalidateAll——21 万次重解码风暴前科);闭包每次现取 game,换世界安全
+  // ★BJ318：本闭包与 keydown 接线共享作用域曾把 `g` 槽带进 RemasterRuntime 长持
+  //  上下文——接线已抽独立函数（wireMobileVirtualKeys）,本作用域不再捕获 Game。
   if (remasterRuntime) {
     remasterRuntime.onSheetReplaced = (file) => {
       flow?.game?.chunks?.onSheetReplaced(file);
     };
   }
-  // ---- 移动端虚拟 Inventory/Esc 键入口(mobile-adaptation-plan 模块①):触屏系统
-  //      列的背包/暂停钮 = input.tapVirtual('Inventory') 虚拟边沿在此转调同一优先
-  //      级链。★origin==='virtual' 门防双触发:真实键盘 Escape 既走上方 window
-  //      keydown 监听(preventDefault/打字豁免是物理专属),也会派发进
-  //      keydownHandlers——不过滤则同一次按键链跑两遍(Esc 开面板→瞬关)。
-  //      虚拟沿自带 virtualAction='Inventory',不再经 isBound 反查(code 是绑定
-  //      表首个码,重绑后仍一致)
-  if (g) {
-    g.input.keydownHandlers.push((code, ke) => {
-      if (ke.origin !== 'virtual') return;
-      // action 口(系统列背包/暂停钮):intent 显式携带。SW-BN2 起 intent=触发源形态
-      // 'escape'(Esc 键面)/'inventory'(背包钮/其余绑定键)/'pause'(触屏暂停小钮)
-      if (ke.virtualAction === 'Inventory') {
-        runInventoryEscapeChain(g,
-          ke.virtualIntent === 'inventory' ? 'inventory'
-            : ke.virtualIntent === 'pause' ? 'pause'
-            : ke.virtualIntent === 'escape' ? 'escape'
-            : code === 'Escape' ? 'escape' : 'inventory');
-        return;
-      }
-      // code 口直发 Escape(调试脚本/未来控件):归还 Inventory 链 escape 形态
-      // (默认绑定表含 Escape;用户清空该绑定时按表不响应=重绑一致)
-      if (code === 'Escape' && isBound('Inventory', 'Escape')) {
-        runInventoryEscapeChain(g, ke.virtualIntent === 'inventory' ? 'inventory' : 'escape');
-      }
-    });
-  }
+  if (g) wireMobileVirtualKeys(g);
 }
 
 // ---- M6 拍照模式接线（F4）：Input 直连 + DOM HUD 让位 ----

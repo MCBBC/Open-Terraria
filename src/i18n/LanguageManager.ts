@@ -62,6 +62,14 @@ export function setGlobalSubstitutionContext(ctx: GlobalSubstitutionContext): vo
   subCtx = ctx;
 }
 
+/** ★BJ318（2026-09-24）：世界钩子清槽——npcNameResolver/subCtx 都持 afterWorldLoad
+ *  闭包（捕获 Game/World），模块单例跨局存活，退世界不清=死 Game 整图滞留一份
+ *  （forward-BFS 锚枚举定谳；Game.destroy 调用，下次进世界 afterWorldLoad 重注）。 */
+export function clearWorldHooks(): void {
+  npcNameResolver = null;
+  subCtx = null;
+}
+
 interface LangTextSource {
   getText(key: string): string;
   getTextValue(key: string, ...args: (string | number)[]): string;

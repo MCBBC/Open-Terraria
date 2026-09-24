@@ -262,7 +262,10 @@ const ADVISOR_ORDER = [
   'STAR_DESTROYER', 'CHAMPION_OF_TERRARIA',
 ];
 
-export function createAchievementAdvisor(game: Game): HTMLElement & { update(): void } {
+/** ★BJ318：getGame 动态解析——曾直捕 Game 实例,Advisor DOM 卡随 UI 单例跨局
+ *  存活（teardownInventoryPanel 只在重建时清）,退世界后 card.update/mousedown
+ *  闭包把死 Game 整图钉在 UI 上（forward-BFS 定谳锚之一）。动态解析零滞留。 */
+export function createAchievementAdvisor(getGame: () => Game | null): HTMLElement & { update(): void } {
   ensureCss();
   const card = el('div', 'sw-ach-advisor') as unknown as HTMLElement & { update(): void };
   const glyph = el('div', 'glyph');
@@ -271,12 +274,15 @@ export function createAchievementAdvisor(game: Game): HTMLElement & { update(): 
   card.appendChild(tx);
   card.addEventListener('mousedown', (e) => {
     e.stopPropagation();
-    openAchievementsPanel(game);
+    const game = getGame();
+    if (game) openAchievementsPanel(game);
   });
   card.update = () => {
     // Advisor 选择 = 原版 AchievementAdvisor.GetBestCards(1)（1458 同 1456）：
     // 精选序列（AchievementAdvisor.Initialize 36 项，序≠注册序）中首个未完成。
     // IsAchievableInWorld 未建模（原版检查世界进度门槛，本仓成就无条件可达）略。
+    const game = getGame();
+    if (!game) { card.style.display = 'none'; return; }
     const a = game.achievements;
     let best: string | null = null;
     for (const name of ADVISOR_ORDER) {

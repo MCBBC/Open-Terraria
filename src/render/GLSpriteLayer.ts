@@ -18,6 +18,10 @@ import { noteContextLost } from './GLStats';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { texId, texReady } from './texId';
 import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw } from './GLStats';
+// ★C10a（2026-09-24）：GLPipeline 后端模式——GL 调用面（程序/VAO/纹理/draw）重定向到
+// GLPipeline 单上下文,quads 渲进管线 FBO('clouds'),end() present() 到管线画布。
+// 值导入（createPipelineBacked 工厂现场构造管线;类型面无环:GLPipeline 只依赖 GLStats）
+import { GLPipeline, type PipelineFbo, type PipelineProgram } from './GLPipeline';
 
 export interface QuadOpts {
   alpha?: number;                                    // 整体透明度(默认 1)
@@ -142,7 +146,8 @@ export interface CloudFx {
 }
 
 export class GLSpriteLayer {
-  /** GPU 账本命名(glfx/menubg…)——所有方构造后赋值;同名实例共享账页 */
+  /** GPU 账本命名(glfx/menubg…)——所有方构造后赋值;同名实例共享账页。
+   *  ★C10a 管线后端模式=构造期取 pipe.statName（GLStats 记账随上下文归属走管线账页） */
   statName = 'sprite';
   readonly canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext | null = null;
@@ -153,7 +158,8 @@ export class GLSpriteLayer {
   private uniCloud: Record<string, WebGLUniformLocation | null> = {};
   cloudFxOK = false;
   private vao: WebGLVertexArrayObject | null = null;
-  private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null };
+  private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null } =
+    { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
   private texs = new Map<string, TexEntry>();
   private stamp = 0;
   /** 字节预算(★2026-08-18:曾按条数 96 限额——96 张多 MB 纹理+mip 链可达 GB 级,
@@ -162,17 +168,98 @@ export class GLSpriteLayer {
   private bytes = 0;
   /** GL 不可用(WebGL2 缺失/初始化失败)时置 true,调用方回退 2D 路径 */
   unavailable = false;
+  // ---- ★C10a「GLPipeline 后端」模式（?cloudpipe=1;云会话迁入管线单上下文）----
+  /** 持有的管线（null=旧独立上下文模式）。1:1 所有:dispose 随层释放——
+   *  二期多消费方共享一管线时归属上移到持有方,此处同步改 */
+  private pipe: GLPipeline | null = null;
+  /** 管线 program 表句柄（程序禁单删:program() 按名缓存,单删=悬空句柄毒化重登记） */
+  private progHandle: PipelineProgram | null = null;
+  private progCloudHandle: PipelineProgram | null = null;
+  /** 当帧云 FBO（begin 租借,end present 后落引用） */
+  private pipeFbo: PipelineFbo | null = null;
+  /** ★BJ316 判例 getError 审计窗（仅管线模式;begin 内）:首 3 次+尺寸首见;稳态零 sync。
+   *  recreate=整体新实例,天然重审 */
+  private pipeAuditLeft = 3;
+  private pipeAuditKey = '';
   /** 设备最大纹理边长(大世界整幅 8400 超限的 GPU 走 2D 回退,防静默花屏) */
   get maxTextureSize(): number {
     return this.gl ? this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number : 0;
   }
 
-  constructor() {
+  constructor(pipe?: GLPipeline) {
+    if (pipe) {
+      // ★C10a 管线后端：GL 上下文/画布/present 面全归管线,本类只自管
+      // 纹理(LRU)/采样器/VAO/quads 提交。canvas=pipe.canvas（cloudBlitRect 的 blit 源）
+      this.pipe = pipe;
+      this.canvas = pipe.canvas;
+      this.statName = pipe.statName;
+      this.initPipeMode();
+      return;
+    }
     this.canvas = document.createElement('canvas');
     this.canvas.width = 0;
     this.canvas.height = 0;
-    this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.init();
+  }
+
+  /** ★C10a 工厂：管线后端实例（管线+层 1:1 持有,statName=GLStats 账本名）。
+   *  不可用返 null（调用方 30s 退避——acquireGL 哨兵同款）。★worker 判死判例:
+   *  GLPipeline 上下文判定用 document 存在性,worker 里恒不可启用。 */
+  static createPipelineBacked(statName: string): GLSpriteLayer | null {
+    if (typeof document === 'undefined') return null;
+    const pipe = new GLPipeline(statName);
+    const layer = new GLSpriteLayer(pipe);
+    if (layer.unavailable) { layer.dispose(); return null; }
+    return layer;
+  }
+
+  /** 管线后端初始化：程序登记进管线 program 表+共用 VAO/采样器构造。
+   *  ★着色器源与旧路径【同一常量】（VERT_SRC/FRAG_SRC/CLOUD_*_SRC 单源——obj62
+   *  字节码 1:1 禁转录漂移,uniform 表逐式同旧 init） */
+  private initPipeMode(): void {
+    const pipe = this.pipe!;
+    const gl = pipe.glx;
+    if (!gl || pipe.unavailable) {
+      this.unavailable = true;
+      this.diedAt = pipe.diedAt || performance.now();
+      return;
+    }
+    this.gl = gl;   // 全部 quad/texFromImage 调用面走管线上下文（调用点零改动）
+    const pQuad = pipe.program('sprite:quad', VERT_SRC, FRAG_SRC);
+    if (!pQuad.prog) { this.unavailable = true; this.diedAt = performance.now(); return; }
+    this.progHandle = pQuad;
+    this.prog = pQuad.prog;
+    for (const n of ['uCanvas', 'uSrc', 'uDst', 'uRot', 'uTex', 'uAlpha', 'uTint']) {
+      this.uni[n] = pipe.uni(pQuad, n);
+    }
+    // HorizonClouds 程序（独立登记;失败不致命——cloudQuad 回退普通 quad,同旧路径）
+    const pCloud = pipe.program('sprite:cloud', CLOUD_VERT_SRC, CLOUD_FRAG_SRC);
+    if (pCloud.prog) {
+      this.progCloudHandle = pCloud;
+      this.progCloud = pCloud.prog;
+      this.cloudFxOK = true;
+      for (const n of ['uCanvas', 'uSrc', 'uDst', 'uRot', 'uTex', 'uVertColor', 'uCelestialCol', 'uDrawPos', 'uCelestial']) {
+        this.uniCloud[n] = pipe.uni(pCloud, n);
+      }
+    } else {
+      console.warn('[GLSpriteLayer:pipe] HorizonClouds 程序链接失败——cloudQuad 回退普通 quad');
+    }
+    this.buildCommonObjects(gl);
+    // 上下文丢失:管线画布上的第二监听（管线自身也监听并标自身不可用）——本层同步
+    // 标记,消费方回退 2D,退避期后由持有方整体重建（语义同旧路径自愈钩子）
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+      noteContextLost(`sprite:${this.statName}`);   // #三开压测批
+      e.preventDefault();
+      this.unavailable = true;
+      this.diedAt = performance.now();
+      this.objectsStale = true;
+      console.warn('[GLSpriteLayer:pipe] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建');
+    });
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      this.unavailable = true;
+      this.diedAt = performance.now();
+      this.objectsStale = true;
+    });
   }
 
   private init(): void {
@@ -239,6 +326,38 @@ export class GLSpriteLayer {
         console.warn('[GLSpriteLayer] HorizonClouds 程序链接失败:', gl.getProgramInfoLog(cp));
       }
     }
+    // 单位 quad VAO+五采样器（旧上下文/管线后端两路共用构造段）
+    this.buildCommonObjects(gl);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    // ★自愈钩子(2026-08-18 双开"关掉另一窗口也恢复不了"根因):GL 上下文
+    // 丢失后【不会自恢复】(2D 会),曾无人监听=永远持有死上下文,背景层
+    // 全空且不再重试。死亡即标 unavailable,消费方丢弃实例走 2D 兜底,
+    // 退避期后重建新实例
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+      noteContextLost(`sprite:${this.statName}`);   // #三开压测批
+      e.preventDefault();               // 保留恢复资格(部分驱动可自动恢复)
+      this.unavailable = true;
+      this.diedAt = performance.now();
+      this.objectsStale = true;
+      console.warn('[GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建');
+    });
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      // 内容(纹理/程序)已全部蒸发:仍按死亡处理,由消费方整体重建更干净
+      this.unavailable = true;
+      this.diedAt = performance.now();
+      this.objectsStale = true;   // restore 后 isContextLost()=false 但旧对象已蒸发
+    });
+  }
+  /** 上下文死亡时刻(重建退避用;0=未死) */
+  diedAt = 0;
+  /** 对象陈旧旗:lost/restored 后旧对象已蒸发或不属于恢复后的上下文——dispose 跳过 delete */
+  objectsStale = false;
+
+  /** 单位 quad VAO+五采样器构造（旧 init 与 C10a 管线后端共用——★采样器参数两路
+   *  必须同参,gl-layer-regression 守卫锁 mkSampler 字面量） */
+  private buildCommonObjects(gl: WebGL2RenderingContext): void {
     // 单位 quad(TRIANGLE_STRIP)
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
@@ -284,46 +403,60 @@ export class GLSpriteLayer {
       gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       return s;
     })();
-    gl.disable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    // ★自愈钩子(2026-08-18 双开"关掉另一窗口也恢复不了"根因):GL 上下文
-    // 丢失后【不会自恢复】(2D 会),曾无人监听=永远持有死上下文,背景层
-    // 全空且不再重试。死亡即标 unavailable,消费方丢弃实例走 2D 兜底,
-    // 退避期后重建新实例
-    this.canvas.addEventListener('webglcontextlost', (e) => {
-      noteContextLost(`sprite:${this.statName}`);   // #三开压测批
-      e.preventDefault();               // 保留恢复资格(部分驱动可自动恢复)
-      this.unavailable = true;
-      this.diedAt = performance.now();
-      this.objectsStale = true;
-      console.warn('[GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建');
-    });
-    this.canvas.addEventListener('webglcontextrestored', () => {
-      // 内容(纹理/程序)已全部蒸发:仍按死亡处理,由消费方整体重建更干净
-      this.unavailable = true;
-      this.diedAt = performance.now();
-      this.objectsStale = true;   // restore 后 isContextLost()=false 但旧对象已蒸发
-    });
   }
-  /** 上下文死亡时刻(重建退避用;0=未死) */
-  diedAt = 0;
-  /** 对象陈旧旗:lost/restored 后旧对象已蒸发或不属于恢复后的上下文——dispose 跳过 delete */
-  objectsStale = false;
 
-  /** 画布尺寸(与主画布同尺寸;DPR 内部像素) */
+  /** 画布尺寸(与主画布同尺寸;DPR 内部像素)。
+   *  ★C10a 管线后端=pipe.beginFrame（管线画布尺寸+帧界同步,present 的 uDst 域） */
   resize(w: number, h: number): void {
     if (this.unavailable) return;
+    if (this.pipe) { this.pipe.beginFrame(w, h); return; }
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
     }
   }
 
-  /** 帧开始:清透明(不透明底用 fillQuad 铺) */
+  /** 帧开始:清透明(不透明底用 fillQuad 铺)。
+   *  ★C10a 管线后端:清的是管线 FBO('clouds')（RGBA8——与旧 glfx 画布背板同构,
+   *  中间产物字节语义=原画布字节）;present 离场留 blend off → 会话态(blend/depth)
+   *  每帧显式重建（谁设谁还原判例:管线共享上下文无「init 一次性状态」可倚） */
   begin(): void {
     if (this.unavailable || !this.gl) return;
     const gl = this.gl;
+    if (this.pipe) {
+      const w = this.canvas.width, h = this.canvas.height;
+      if (w === 0 || h === 0) { this.pipeFbo = null; return; }   // 防上一会话残留 FBO 被 end 误 present
+      const f = this.pipe.fbo('clouds', w, h);
+      if (!f) { this.unavailable = true; this.diedAt = performance.now(); return; }
+      this.pipeFbo = f;
+      this.pipe.bindTarget(f);   // 绑 FBO+viewport(0,0,f.w,f.h)
+      // ★BJ316 判例 getError 审计窗:首 3 次 begin+尺寸首见;先排空（getError 返回
+      //  最老未读错误,不排空会把帧内其他调用的旧错误记到本次头上）;稳态零 sync。
+      //  错误=上下文级确定性坏 → unavailable 走 2D 兜底（escape=旧会话在旗面）
+      const k = `${w}x${h}`;
+      const audit = this.pipeAuditLeft > 0 || this.pipeAuditKey !== k;
+      if (audit) {
+        if (this.pipeAuditLeft > 0) this.pipeAuditLeft--;
+        this.pipeAuditKey = k;
+        while (gl.getError() !== gl.NO_ERROR) { /* 排空 */ }
+      }
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(this.prog);
+      gl.uniform2f(this.uni.uCanvas, w, h);
+      gl.uniform1i(this.uni.uTex, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindVertexArray(this.vao);
+      if (audit && gl.getError() !== gl.NO_ERROR) {
+        this.unavailable = true;
+        this.diedAt = performance.now();
+        console.warn('[GLSpriteLayer:pipe] begin 审计窗 GL 错误——标记不可用走 2D 兜底');
+      }
+      return;
+    }
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -345,10 +478,17 @@ export class GLSpriteLayer {
     } catch { return null; }
   }
 
-  /** 帧结束(离屏画布交给调用方 drawImage) */
+  /** 帧结束(离屏画布交给调用方 drawImage)。
+   *  ★C10a 管线后端:FBO → 管线画布 present(GLPipeline.present:blend off+flipY=1;
+   *  1:1 LINEAR 采样落 texel 中心=逐位拷贝)——调用方 cloudBlitRect 从 pipe.canvas
+   *  取 bbox 子矩形,blit 结构与旧路径同构（一期不改 blit 合并） */
   end(): void {
     if (this.unavailable || !this.gl) return;
     this.gl.bindVertexArray(null);
+    if (this.pipe && this.pipeFbo) {
+      this.pipe.present(this.pipeFbo);
+      this.pipeFbo = null;
+    }
   }
 
   /** 图片源(ImageBitmap/Image/canvas)入纹理;repeatX 横向 REPEAT;
@@ -632,8 +772,11 @@ void main(){
   oC = vec4(oc.rgb, 1.0);
 }`;
 
-  /** 惰性编译拖尾程序（失败→trailOK=false 永久走 2D 兜底） */
+  /** 惰性编译拖尾程序（失败→trailOK=false 永久走 2D 兜底）。
+   *  ★C10a:管线后端不承载拖尾（管线模式仅云会话;拖尾仍走旧 glfx 独立上下文,
+   *  条带渲其默认帧缓冲——管线 FBO 面上无此 pass 的落点语义） */
   private ensureTrail(): boolean {
+    if (this.pipe) return false;
     if (this.unavailable || !this.gl) return false;
     if (this.trailProg) return true;
     const gl = this.gl;
@@ -783,8 +926,9 @@ void main(){
   oC = vec4(oc.rgb, 1.0);
 }`;
 
-  /** 惰性编译 obj55 程序（失败→null 永久走 CPU 兜底） */
+  /** 惰性编译 obj55 程序（失败→null 永久走 CPU 兜底;管线后端同 ensureTrail 不承载） */
   private ensureTrailMM(): boolean {
+    if (this.pipe) return false;
     if (this.unavailable || !this.gl) return false;
     if (this.trailMMProg) return true;
     const gl = this.gl;
@@ -888,6 +1032,7 @@ void main(){
   /** 全量释放(切世界/读档——★曾漏挂此链:连续读档逐次叠满 LRU=GB 级显存
    *  打爆 → contextlost 风暴 26 万次,tab 3.4GB 用户实报 2026-08-18) */
   dispose(): void {
+    if (this.pipe) { this.disposePipeMode(); return; }
     if (!this.gl) return;
     // 上下文已丢失 → 驱动侧资源已蒸发,delete 只会打 INVALID_OPERATION 噪声
     if (!this.gl.isContextLost() && !this.objectsStale) {
@@ -910,6 +1055,28 @@ void main(){
     this.bytes = 0;
     this.canvas.width = 0;
     this.canvas.height = 0;
+  }
+
+  /** ★C10a 管线后端释放：自管对象（纹理/VAO/采样器）删于管线上下文+字节账归账页;
+   *  程序【禁单删】——pipe.program() 按名缓存句柄,单删=悬空句柄毒化重登记,
+   *  归 pipe.dispose() 整表清理。管线本体随层 1:1 释放（二期共享归属上移时同步改） */
+  private disposePipeMode(): void {
+    const gl = this.pipe?.glx;
+    if (gl && !gl.isContextLost() && !this.objectsStale) {
+      let freed = 0;
+      for (const [, e] of this.texs) { gl.deleteTexture(e.tex); freed += e.bytes; }
+      glStatDelete(this.statName, freed);   // #perf-gpulog:整包释放记净额
+      if (this.vao) gl.deleteVertexArray(this.vao);
+      for (const s of Object.values(this.samp)) if (s) gl.deleteSampler(s);
+    }
+    this.progHandle = null; this.progCloudHandle = null;
+    this.prog = null; this.progCloud = null; this.cloudFxOK = false;
+    this.vao = null;
+    this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
+    this.pipeFbo = null;
+    this.texs.clear();
+    this.bytes = 0;
+    this.pipe?.dispose();
   }
 }
 

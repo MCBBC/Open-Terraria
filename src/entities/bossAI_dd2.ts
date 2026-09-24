@@ -272,6 +272,13 @@ export const DD2_EVENT_HOOKS = {
   difficulty: (): number => 1,
 };
 
+const DD2_EVENT_HOOKS_DEFAULTS = { ...DD2_EVENT_HOOKS };
+/** ★BJ318（2026-09-24）：退世界复位——wireDD2Hooks 逐局覆写的闭包捕获 Game/World,
+ *  模块单例不复位=死 Game 滞留。Game.destroy 调用,下局 wireDD2Hooks 重挂。 */
+export function resetDD2Hooks(): void {
+  Object.assign(DD2_EVENT_HOOKS, DD2_EVENT_HOOKS_DEFAULTS);
+}
+
 // ---------------------------------------------------------------------------
 // 弹幕：ProjectileID.cs：240 CannonballHostile（荷兰大炮炮弹,14 速-5 上抛）/
 // 658 SandnadoHostileMark（沙暴标记,damage 0 纯视觉尘柱）/ 673 DD2DarkMageRaise

@@ -100,7 +100,7 @@ import {
   type TeleportPylonInfo, type NpcHomeLike, type PylonTeleportCheck,
 } from '../world/TeleportPylons';
 import { WALL_DUNGEON_SHEETS } from '../world/DungeonDualZones';   // ★IIIII228 海螺 TileIsDangerous wallDungeon 集
-import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
+import { DD2_EVENT_HOOKS, checkArenaScore, resetDD2Hooks } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import { dryadMoonPhaseStock, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
@@ -226,7 +226,9 @@ import { pickMusic, pickTowMusic, newMusicState, MUSIC_SLOT, TOW_MUSIC_SLOT, res
 import { Tombstone } from '../entities/Tombstone';
 import { resetGorePool, liveGorePieces, setGoreScreen, GorePiece } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
-import { setNpcNameResolver, setGlobalSubstitutionContext } from '../i18n/LanguageManager';
+import { windSwayUnbind } from '../render/WindSway';
+import { framingWorldUnbind } from '../render/VanillaFraming';
+import { setNpcNameResolver, setGlobalSubstitutionContext, clearWorldHooks } from '../i18n/LanguageManager';
 import { clearPaperDollCache, variantSheetName } from '../player/PaperDoll';
 import { portraitForNpc, portraitUrl, type DialoguePortraitPayload } from '../data/npcPortraits';
 import { oreRunner } from '../world/gen/vanilla/TileRunner';
@@ -240,7 +242,7 @@ import { spawnEmote, tickEmotes, checkForNPCsToReactToEmoteBubble, makeLocalPlay
 import { createOutgoingMessage, executeCommand, chatColorOfDifficulty, type OutgoingChatMessage } from '../chat/ChatCommands';
 import {
   bossDamageUpdate, recentBossReports, resetBossDamage, bossDamageKilled,
-  bindBossDamageHost, bossDamageSink, bossDamageAddDamage, setPendingStrikeOwner,
+  bindBossDamageHost, unbindBossDamageHost, bossDamageSink, bossDamageAddDamage, setPendingStrikeOwner,
 } from '../chat/BossDamageTracker';
 import { createDeathText, newNpcName } from '../i18n/RandomText';
 import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } from '../stats/Pvp';
@@ -5518,7 +5520,7 @@ export class Game implements GameHooks {
   private tickRecallChannel(): void {
     if (!this.recallChannel) return;
     const c = this.recallChannel;
-    const heldVid = (ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.vid ?? -1) ?? -1;
+    const heldVid = ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.vid ?? -1;
     if (this.player.useTime === c.triggerAt && heldVid === c.vid) {
       this.recallChannel = null;
       this.fireRecallTeleport(c);
@@ -5544,7 +5546,7 @@ export class Game implements GameHooks {
    *     色 {绿×2/4,黄,白}、velocity×2、scale0.8+rand×0.6、noGravity。 */
   private tickRecallFamilyDust(): void {
     if (this.player.itemAnimTicks <= 0) return;
-    const vid = (ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.vid ?? -1) ?? -1;
+    const vid = ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.vid ?? -1;
     const p = this.player;
     if (vid === 50 || vid === 3124 || vid === 3199 || vid === 5358) {
       if (Math.random() * 2 < 1) {                    // Main.rand.Next(2) == 0
@@ -5828,14 +5830,18 @@ export class Game implements GameHooks {
     this.renderer.installGpuHealthWatchdog();
     // 渲染模式手动切换 → 立即重建画布(不等下次进世界)
     // auto→gpu/cpu:cpuRender 标志按选项独立判定(isCpuRender 里 cpu 恒真)
-    options.onChange((d) => {
+    // ★BJ318：句柄化+destroy 退订——options 是模块单例,曾裸闭包捕获 this 且
+    // 永不退订=死 Game 整图被 options.listeners 逐局累积钉死（WeakRef 二分+
+    // forward-BFS 定谳的第二锚,与 GLStats.starveCbs 同族）
+    this._optionsCb = (d) => {
       // renderer 可能未构造(构造首帧立即回调)——守卫
       if (!this.renderer?.canvas) return;
       const wantCpu = d.renderMode === 'cpu';
       if (this.renderer.cpuRender !== wantCpu) {
         this.renderer.setRenderMode(wantCpu);
       }
-    });
+    };
+    options.onChange(this._optionsCb);
     this.renderer.cbOnGpuPressure = () => {
       this.shrinkChunks();
       if (this.renderer.gpuDegraded && !gpuTripToasted) {
@@ -6453,6 +6459,8 @@ export class Game implements GameHooks {
    *  vimages 数)——snap() 一起看。window.__swMemLog 常开,?mlog=0 关 */
   private memSamplePrev = 0;
   private memRloadPrev = 0;
+  /** ★BJ318：options.onChange 订阅句柄——destroy 必退订（闭包捕获 this） */
+  private _optionsCb: ((d: import('./Options').OptionsData) => void) | null = null;
   /** ★BJ318：memSentinel 定时器句柄——destroy 必摘。曾裸 setInterval 无句柄：
    *  闭包持有 this（Game）→ 退出世界后死 Game 整图（World TileStore ~86-196MB+
    *  实体+玩家）被 5s interval 永久钉死,进出世界一轮漏一份（探针实测小世界
@@ -7908,6 +7916,27 @@ export class Game implements GameHooks {
     //    worker isolate 连同堆里上一局 generate 的 JSON/SaveData 大垃圾跨局滞留）
     this.genClient?.terminate();
     this.genClient = null;
+    //  ③b options 单例退订（构造期 onChange 闭包捕获 this——BJ318 第二锚,
+    //    removeListener API 2026-08-29 已有,Game 侧一直没接）
+    if (this._optionsCb) { options.removeListener(this._optionsCb); this._optionsCb = null; }
+    //  ③c 共享 atlas 的晚到回调摘除（闭包捕 afterWorldLoad 上下文含 world——
+    //    BJ318 第三锚;atlas 单例跨局存活,句柄被下一局覆写前钉死上一局）
+    if (this.atlas) this.atlas.onVImageLoaded = null;
+    //  ③d 模块单例槽族清槽（afterWorldLoad 注入的捕获 Game/World 闭包——
+    //    BJ318 第四锚族:i18n npcNameResolver/subCtx + LucyAxe sinks。
+    //    曾只注入不清理,回标题后死 Game 整图各滞留一份）
+    clearWorldHooks();
+    setLucySinks(null);
+    bindEnemySoundPrewarm(null);   // Enemy.ts 模块槽同族（闭包捕 this）
+    TownNPC.emoteHost = null;      // 静态槽同族（afterWorldLoad 闭包捕 this/世界）
+    resetDD2Hooks();               // DD2_EVENT_HOOKS 模块单例复位（wireDD2Hooks 闭包族）
+    GolfBall.host = null;          // 高尔夫宿主静态槽（playerRef 闭包捕 this/世界）
+    bindScaleStatsWorld(null);     // ScaleStats.boundWorld（anyNpc 闭包捕 this）
+    windSwayUnbind();              // WindSway.ST 模块槽（store→listeners→Game 链）
+    framingWorldUnbind();          // VanillaFraming.frameCacheWorld（持 World 对象）
+    bindJourneyPowers(null);       // JourneyPowers.bound（持 world.journeyPowers）
+    bindGhostBudgetHost(null);     // SpectreSoulProj.HOST（持 player）
+    unbindBossDamageHost();        // BossDamageTracker.npcName/ownerName 闭包族
     //  ④ window 调试句柄族（★BJ318 堆快照定谳的【主钉】——每次进世界覆写挂载、
     //    退世界不摘=死实例钉死族。探针实测:3 轮进出堆里 6 个 Game/TileStore,
     //    retainer 链 __swRec@Window → BehaviorRecorder.tickSource 闭包 → this(Game)
@@ -8022,22 +8051,33 @@ export class Game implements GameHooks {
       ssSteps++;
     }
     if (ssSteps === 5) this.stackSplitAcc = 0;
-    // ★SW-BJ72 2026-09-14：光标跟随态逐帧清空（MouseOversClear Main.cs:17213——Update
-    //  头部【无条件每帧】清 _mouseTextCache+cursorItemIcon 五字段+signHover/signBubble,
-    //  先于 :17372 gamePaused 门;1458 :17213 同位零漂移）。本仓五字段重置曾只挂
-    //  tickCursorIcon（fixedUpdate,暂停冻结）头部 → autoPause∧开背包/失焦暂停拍 claim
-    //  停摆,悬停文字/悬停图标冻结残留且随实时鼠标位移继续跟随（用户实报:autoPause 开
-    //  +悬停带光标文字的钮/物+Esc 开背包 → 文字永驻光标旁）。claim 面仍只在
-    //  fixedUpdate（原版 update 相:TileInteractionsMouseOver/HoverOverNPCs 世界扫描）
-    //  → 暂停帧清空后不回填,与原版"暂停期 update 相悬停（箱/梳妆台）不重 claim"同相;
-    //  原版绘制相悬停（DrawMouseOver :43595 → DrawInterface_39）暂停帧照重 claim
-    //  （NPC 名/掉落物名）,本仓该族 claim 亦在 fixedUpdate → 暂停期不显示,偏差方向
-    //  "少显"非"残留"。★SW-BJ99（2026-09-16）清偿：NPC 名暂停帧回填已接（render 前
-    //  `if (this.paused && this.world) this.tickHoverNpcName()`,见 refreshCursorIconDrawState
-    //  之后）;掉落物名/他玩家血名本仓无 claim 面（非暂停期亦缺,独立功能缺口）+
-    //  信息饰品行标签（DrawInfoAccs :48075 亦绘制相）整链仍登记不接（要接须拆 draw
-    //  相 claim 面,独立刀）。
-    if (this.world) this.mouseOversClear();
+    // ★SW-BJ72 2026-09-14：光标跟随态逐帧清空（MouseOversClear Main.cs:47279-47289,
+    //  调用点 :17213——Update 头部清 _mouseTextCache+cursorItemIcon 五字段+
+    //  signHover/signBubble,先于 :17372 gamePaused 门;1458 :17213 同位零漂移）。
+    //  本仓五字段重置曾只挂 tickCursorIcon（fixedUpdate,暂停冻结）头部 → autoPause∧
+    //  开背包/失焦暂停拍 claim 停摆,悬停文字/悬停图标冻结残留且随实时鼠标位移继续
+    //  跟随（用户实报:autoPause 开+悬停带光标文字的钮/物+Esc 开背包 → 文字永驻光标旁）。
+    // ★SW-BJ320（2026-09-24）清零拍位归一（BJ72 登记债清偿）：原版不变量 = 清零挂
+    //  Update 头部但在 accumulator 门【之后】（Main.cs:17182-17213——Off/Subtle 档
+    //  0 步进帧 :17184 提前 return【不进清零】,字段保持上一 tick 的 claim 态;On 档
+    //  IsFixedTimeStep 60Hz 锁步无 0 步进帧）→ 清与 claim 恒同 tick 耦合,"清后无回填"
+    //  的绘制帧不存在:Off 档 0 步进帧照画旧 claim（图标恒亮）,Subtle 档 SuppressDraw
+    //  画布保留。本仓曾把清零挂 frame() 头【每绘制帧】→ 非暂停 0 步进帧清后无回填
+    //  （悬停族 claim 在 fixedUpdate;余辉 cache 只喂手持四支——悬停门/箱族原版永不调
+    //  ItemIconCacheUpdate,flag2 桥接全缺）= Off/On 档（旧档 frameSkip 迁移落在
+    //  off/on,Options.ts :426）悬停门/箱/椅图标隔帧频闪（BJ320 用户实报,探针
+    //  256 帧 133 次翻转;subtle 档被 SuppressDraw 掩蔽故默认档不显）。故清零拆两拍:
+    //  ①逻辑 tick 头（fixedUpdate 头,原版每 Update tick 清,与当 tick claim 同拍耦合）;
+    //  ②暂停拍逐绘制帧清（fixedUpdate 冻结,BJ72 残留防线——原版暂停 Update tick 照跑
+    //  照清,:17213 先于 :17372 门同相）。非暂停 0 步进帧不清 → 画上一 tick claim 态
+    //  = 原版 Off 档同相。
+    //  claim 面只在 fixedUpdate（原版 update 相:TileInteractionsMouseOver/
+    //  HoverOverNPCs 世界扫描）→ 暂停帧清空后不回填,与原版"暂停期 update 相悬停
+    //  （箱/梳妆台）不重 claim"同相;原版绘制相悬停（DrawMouseOver :43595 →
+    //  DrawInterface_39）暂停帧照重 claim（NPC 名/掉落物名）,本仓该族回填见下
+    //  ★SW-BJ99（2026-09-16）清偿（render 前无条件块）;掉落物名/他玩家血名
+    //  ★SW-BJ105（2026-09-16）补全。
+    if (this.paused && this.world) this.mouseOversClear();
     windSway.active = !this.paused; // _isActiveAndNotPaused（暂停不喷落叶；物理随 !paused 冻结）
     // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）
     (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
@@ -8125,8 +8165,12 @@ export class Game implements GameHooks {
     //  update 相无对应面）,本块转 `if (this.world)` 每绘制帧 claim = 原版同相。
     //  update 相族（箱文本/手持图标/容器宠/坐骑/帕鲁）留 fixedUpdate（原版同相）;
     //  其 0 步进帧视窗由图标支余辉 cacheTime 桥接（ItemIconCacheUpdate 每次 update
-    //  步续 10 帧）,静止悬停无缝、光标移动中可闪——清零点差（本仓每绘制帧 vs 原版
-    //  每 Update 步）登记债,清偿须动 BJ72 清零拍位,独立刀。
+    //  步续 10 帧）。★SW-BJ320（2026-09-24）登记债清偿：清零点差（本仓每绘制帧 vs
+    //  原版每 Update 步）已按 BJ72 清零拍位归一（frame() 头暂停拍门 + fixedUpdate 头
+    //  每 tick 清）——"静止悬停无缝"的原注判词有误:悬停门/箱族原版【永不】调
+    //  ItemIconCacheUpdate（Player.cs 全文仅 4 站点 :43954/:46010/:46717/:47165 全在
+    //  手持支）,cacheTime 桥接对悬停族整缺 → off/on 档静止悬停即频闪（用户实报坐实）。
+    //  归一后 0 步进帧不清零,flag 走上一 tick claim 态,无需桥接。
     if (this.world) {
       this.tickHoverNpcName();
       this.tickHoverRemotePlayerName();
@@ -8394,6 +8438,12 @@ export class Game implements GameHooks {
   }
 
   private fixedUpdate(dt: number) {
+    // ★SW-BJ320 2026-09-24：MouseOversClear 拍位归一（Main.cs:17213 每 Update tick
+    //  头清,与当 tick 内 claim 面【同 tick 耦合】——:17184 accumulator 门保证 0 步进
+    //  帧不进清零,本仓等价面=非暂停 0 步进绘制帧不清,画上一 tick claim 态=原版
+    //  Off 档同相）。world 门=pre-world 帧安全（player 随 world 同建,frame() 头
+    //  暂停拍清零同门）。详见 frame() 头注 BJ320 段。
+    if (this.world) this.mouseOversClear();
     this.tickCount++;
     this.updateChestFrames();   // ★SW-BJ17 2026-09-07 宝箱盖动画帧（Chest.cs:3599,Main.cs:17993 60Hz 同拍）
     this.reactivateDummies();   // 训练假人再激活(TETrainingDummy.Update 节流)
@@ -13002,7 +13052,7 @@ export class Game implements GameHooks {
       // GetAvailableToolRanges（Player.cs:17797-17831）射程 TB = inventory[i].tileBoost
       // （红蓝对抗 A-F1：曾恒 0——铜镐 3509/铜斧 3506/铜锤 3505/木锤 196 = -1、
       // The Axe 1305/+1、激光钻头 2798/+11 六类在池，±(5+tb)/±(3+tb) 盒随首件伸缩）
-      this._smartSelectSlots[i].tileBoost = tileBoostOfVid((def?.vid ?? -1) ?? 0);
+      this._smartSelectSlots[i].tileBoost = tileBoostOfVid(def?.vid ?? -1);
     }
     return this._smartSelectSlots;
   }
@@ -14490,7 +14540,7 @@ export class Game implements GameHooks {
       // 电路工具余辉（1457 Player.cs:47152-47166:TB = sItem.tileBoost + blockRange；
       // 族内件 tileBoost 恒 20 = Item.cs SetDefaults,统一从 TILE_BOOST_BY_VID 出）
       if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
-        this.itemIconCacheUpdate((heldDef.vid ?? -1) ?? 0);
+        this.itemIconCacheUpdate(heldDef.vid ?? 0);
       this.useWireTool(tx, ty, heldDef);
       return;
     }
@@ -14503,7 +14553,7 @@ export class Game implements GameHooks {
       //  + blockRange——★原版此支只置 cursorItemIconEnabled 不调 ItemIconCacheUpdate，
       //  本调用为我方扩展余辉,登记于 ToolCursorIcon.ts 注）
       if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
-        this.itemIconCacheUpdate((heldDef.vid ?? -1) ?? 0);
+        this.itemIconCacheUpdate(heldDef.vid ?? 0);
       // ItemCheck_StartActualUse→ApplyItemAnimation（:4255/:4273-4275 createWall→
       // useAnimation×wallSpeed）：useStyle 1 挥动动画，周期独立于 itemTime/useTime
       // 复用节流（持键按 useAnimation 节拍循环重启；此前缺动画=放置无动作）
@@ -14520,7 +14570,7 @@ export class Game implements GameHooks {
       // 放置路径余辉（1457 Player.cs:40033-40040 PlaceThing_Tiles:TB = item.tileBoost
       //  + blockRange——★原版此支只置 enabled 不进缓存,本调用同上为我方扩展登记）
       if (this.inTileRange(tx, ty, tileBoostOfVid(heldDef.vid ?? -1) + this.blockRange()))
-        this.itemIconCacheUpdate((heldDef.vid ?? -1) ?? 0);
+        this.itemIconCacheUpdate(heldDef.vid ?? 0);
       // 同上 createTile 档（:4270-4272 useAnimation×tileSpeed）
       if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
       this.tryPlace(tx, ty, heldDef);
@@ -34285,8 +34335,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ★IIIII228 offensiveToTim（NPC.cs:419）：胸甲（GetEffectiveArmor(1)）∈
     //  {4256 琥珀长袍, 1282..1287 彩色长袍} && 头盔(0) != 238 法师帽——"对 Tim 敌对"
     //  着装语义；消费 = Tim 45 的 1/50 加掷臂（NPC.cs:5022 remix 或支同支）
-    const timHeadV = (ITEM_DEFS[this.player.inv.getEffectiveArmor(0)?.id ?? -1]?.vid ?? -1) ?? -1;
-    const timChestV = (ITEM_DEFS[this.player.inv.getEffectiveArmor(1)?.id ?? -1]?.vid ?? -1) ?? -1;
+    const timHeadV = ITEM_DEFS[this.player.inv.getEffectiveArmor(0)?.id ?? -1]?.vid ?? -1;
+    const timChestV = ITEM_DEFS[this.player.inv.getEffectiveArmor(1)?.id ?? -1]?.vid ?? -1;
     const offensiveToTim = (timChestV === 4256 || (timChestV >= 1282 && timChestV <= 1287))
       && timHeadV !== 238;
     this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon,
@@ -34318,7 +34368,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     );
     // 狙击镜扩圈（GetSpawnArea :846-862）：手持 1254/1299 或装备 1299 → num3 档
     {
-      const heldV = (ITEM_DEFS[p.inv.heldItem()?.id ?? -1]?.vid ?? -1) ?? -1;
+      const heldV = ITEM_DEFS[p.inv.heldItem()?.id ?? -1]?.vid ?? -1;
       const scopeAcc = p.inv.equippedAccessories()
         .some((id) => (ITEM_DEFS[id]?.vid ?? -1) === 1299);
       this.vanillaSpawner.scopeNum3 = (heldV === 1254 || heldV === 1299 || scopeAcc)
@@ -36059,8 +36109,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** update 相数据面（fixedUpdate 拍,暂停冻结——原版 update 相悬停扫描同相）：
    *  五字段重置 → 悬停扫描(TileInteractionsMouseOver 语义)。★SW-BJ72 2026-09-14：
    *  余辉验证+renderer.cursorIconCtx 组装已拆 refreshCursorIconDrawState（绘制拍
-   *  逐帧,暂停不停）;帧头清零之外还有 frame() 逐帧 mouseOversClear（Main.cs:17213
-   *  同位）兜底暂停拍残留——本函数头部重置保留=直接驱动面（测试/复用）自洁。 */
+   *  逐帧,暂停不停）;★SW-BJ320 2026-09-24 清零拍位归一:mouseOversClear 挂
+   *  fixedUpdate 头（本函数前,Main.cs:17213 每 Update tick 同位）+ frame() 头仅
+   *  暂停拍清（fixedUpdate 冻结段的 BJ72 残留防线）——本函数头部重置保留=直接
+   *  驱动面（测试/复用）自洁。 */
   private tickCursorIcon(): void {
     const p = this.player;
     p.cursorItemIconEnabled = false;
@@ -36174,14 +36226,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  是 Renderer 渲染拍局部态（每绘制帧自清重claim,Renderer :4257-4258）不在此域。
    *  claim 面在绘制相（三族悬停 NPC 名/他玩家血名/掉落物名,★SW-F1 自 tickCursorIcon
    *  迁入 frame() 无条件块 + tickInfoAccsHover BJ105 拆出;原版 DrawMouseOver/
-   *  DrawInfoAccs 同相）+ update 相族（图标族）留 fixedUpdate（原版同相）,本方法挂
-   *  frame() 头（world 门内）保证暂停拍也清零。
-   *  ★SW-BJ99：暂停拍清零后由 render 前的 tickHoverNpcName 回填（绘制相族,原版
+   *  DrawInfoAccs 同相）+ update 相族（图标族）留 fixedUpdate（原版同相）。
+   *  ★SW-BJ320（2026-09-24）拍位归一：本方法现挂两拍——①fixedUpdate 头（每逻辑
+   *  tick 清,Main.cs:17213 同位,与当 tick claim 同拍耦合;非暂停 0 步进绘制帧不清
+   *  =原版 Off 档 0 步进帧照画旧 claim 同相）②frame() 头仅暂停拍清（fixedUpdate
+   *  冻结段,BJ72 残留防线;原版暂停 Update tick 照跑照清同相）。
+   *  ★SW-BJ99：暂停拍清零后由 render 前的无条件块回填三族（绘制相族,原版
    *  DrawMouseOver 暂停帧照 claim 同相）;★SW-BJ105：回填面扩到三族（NPC 名/他玩家
    *  血名/掉落物名）+ tickInfoAccsHover 绘制相族;update 相族（箱文本/手持图标）暂停
-   *  不回填 = 原版同相（update 相停摆）。★SW-F1：非暂停 0 步进帧（本方法每绘制帧清,
-   *  update 相 claim 不跑）由绘制相三族块每帧回填,空窗清偿;update 相图标族 0 步进帧
-   *  视窗靠余辉 cacheTime 桥接（登记债,见 frame() 注）。 */
+   *  不回填 = 原版同相（update 相停摆）。★SW-F1 空窗判词随 BJ320 归一改写:0 步进帧
+   *  不再清零,绘制相三族照回填,update 相图标族走上一 tick claim 态（无需 cacheTime
+   *  桥接,见 frame() 注）。 */
   private mouseOversClear(): void {
     const p = this.player;
     p.cursorItemIconEnabled = false;

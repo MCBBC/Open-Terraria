@@ -86,6 +86,7 @@ describe('A2 GLWorldCompose 结构锁', () => {
   });
 
   it('a0 白名单已收 GLWorldCompose', () => {
-    expect(src('../tests/a0-glpipeline-shell.test.ts')).toContain("new Set(['GLWorldCompose.ts'])");
+    // ★C10a（2026-09-24）：白名单扩入 GLSpriteLayer.ts（云管线后端,?cloudpipe=1）
+    expect(src('../tests/a0-glpipeline-shell.test.ts')).toContain("new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts'])");
   });
 });

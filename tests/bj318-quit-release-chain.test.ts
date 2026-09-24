@@ -58,6 +58,48 @@ describe('BJ318 退世界释放链（源码锚 tripwire）', () => {
     expect(mf).toContain('flowGenClient?.terminate();');
   });
 
+  it('模块单例槽族退订（forward-BFS 锚枚举定谳的完整锚清单）', () => {
+    const g = game;
+    // options.onChange 订阅句柄
+    expect(g).toContain('options.removeListener(this._optionsCb)');
+    // 共享 atlas 晚到回调 + 高尔夫宿主静态槽
+    expect(g).toContain('this.atlas.onVImageLoaded = null');
+    expect(g).toContain('GolfBall.host = null');
+    // i18n 双槽 + LucyAxe + Enemy 音效预热 + ScaleStats/JourneyPowers/GhostBudget
+    expect(g).toContain('clearWorldHooks();');
+    expect(g).toContain('setLucySinks(null);');
+    expect(g).toContain('bindEnemySoundPrewarm(null);');
+    expect(g).toContain('bindScaleStatsWorld(null);');
+    expect(g).toContain('bindJourneyPowers(null);');
+    expect(g).toContain('bindGhostBudgetHost(null);');
+    expect(g).toContain('unbindBossDamageHost();');
+    // DD2 钩族复位 + WindSway/VanillaFraming per-world 缓存解绑
+    expect(g).toContain('resetDD2Hooks();');
+    expect(g).toContain('windSwayUnbind();');
+    expect(g).toContain('framingWorldUnbind();');
+    // Renderer.dispose 摘 window contextlost 哨兵 + _waveCtx.st + starveCbs 退订
+    const rd = read('src/render/Renderer.ts');
+    expect(rd).toContain('this.gpuSentinelRemove?.()');
+    expect(rd).toContain('_waveCtx.st = null');
+    expect(rd).toContain('offStarveTransition(this._starveCb)');
+  });
+
+  it('UI.closeAll 游离 HUD 树扫场（*El/*Els 反射清空,root 保留）', () => {
+    const ui = read('src/ui/UI.ts');
+    expect(ui).toContain('/(El|Els)$/.test(k)');
+    expect(ui).toContain("k === 'root'");
+  });
+
+  it('enterGame 级窗口桥不持 g 槽（桥体迁移 createFlow 作用域）', () => {
+    const mf = read('src/mainFlow.ts');
+    // __swLiquidLab/__swTileByKey/__swTileDefById 已迁出 enterGame（动态解析 game）
+    expect(mf).toContain('if (game) liquidLab(game);');
+    // 旧捕获形（enterGame 作用域 `g`）必须不存在
+    expect(mf).not.toContain('liquidLab(g);');
+    // __swTileByKey 旧双行 enterGame 形（6 空格续行）不存在
+    expect(mf).not.toContain('__swTileByKey = (k: string) =>\n      (TILE_BY_KEY');
+  });
+
   it('WaterWaves worker 上下文禁 fork（C8 叉炸弹修复双保险锚定）', () => {
     const ww = read('src/render/WaterWaves.ts');
     // ①旗表达式：无 document 恒 false（worker 上下文）
