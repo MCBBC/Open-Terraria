@@ -391,6 +391,13 @@ export interface GameHooks {
     color?: { r: number; g: number; b: number; a: number } | null, scale?: number,
     noGravity?: boolean, perfect?: boolean, prettySparkle?: boolean,
   ): import('../fx/VanillaDust').VDust | null;
+  /** Dust.CloneDust（Dust.cs:260-288）：字段级复制回池（position/velocity/fadeIn/noGravity/
+   *  scale/rotation/noLight/active/type/color/alpha/frame/shader/customData;noLightEmittance
+   *  不复制=原版字段表语义）。Game 实现 = VanillaDust.clone 直通;池满/源尘失活 = null。
+   *  首消费 = 661 光女 HitEffect CloneDust 回声（NPC.cs:82692-:82698/:82718-:82724——
+   *  `if (numX != 6000)` 池满守卫=出尘成功才回声,消费侧 spawn null 短路同面）。
+   *  LeashedCritter 帝皇蝶二段尘同源走 dust.clone 对象钩（Game.ts:26113）,非本钩 */
+  cloneDust?(d: import('../fx/VanillaDust').VDust): import('../fx/VanillaDust').VDust | null;
   /** 鼠马车挖掘链的镐力门（MinecartDiggerHelper.HasPickPower :163-170 ←
    *  Player.HasEnoughPickPowerToHurtTile Player.cs:52964-52979）：背包最佳镐
    *  （GetBestPickaxe :39439-39450 前五十格最高 pick）对该格可伤。

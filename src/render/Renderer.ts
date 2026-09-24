@@ -256,7 +256,8 @@ import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
   drawDreadnautilusOverlay, drawDD2SkeletonCrown, drawBetsyWings,
   drawLibrarianSkeleton, drawDukeAfterimages, draw522Overlay, dukePhaseTint,
   drawMimicAfterimages, drawNpcTrailGhosts, drawNpcTrailGhostsOverBody,
-  drawNpcAuraRings, NPC_AURA_RING_IDS, NPC_TRAIL_GHOST_IDS } from './npcExtraParts';
+  drawNpcAuraRings, NPC_AURA_RING_IDS, NPC_TRAIL_GHOST_IDS,
+  duke370GetAlphaBoost, duke370PremulPair, drawDukePremulPair } from './npcExtraParts';
 import { GLWorldLight } from './GLWorldLight';
 import { GLWorldCompose } from './GLWorldCompose';   // ★A2 光照×扭曲 FBO 链(?wfbo=1 激活,失败落回旧链)
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
@@ -2999,6 +3000,91 @@ export class Renderer {
   dropCloudPipe(): void {
     if (this.cloudPipeLayer) { this.cloudPipeLayer.dispose(); this.cloudPipeLayer = null; }
   }
+  // ---- ★B1 世界层 GL 会话（2026-09-24;渲染改造方案 §三 B1 第一役）----
+  /** 世界层会话（GLSpriteLayer 管线模式,共管注入 ownsPipe=false）:两段式
+   *  墙格段/tile 格段复用单 FBO('world') 串行——begin→chunk 页 quads→end(present)
+   *  →1:1 drawImage 回贴 worldCanvas,两段之间保留 2D 夹层（动画墙/behindTiles
+   *  实体/浸润带）原位。null=未建/退避中（整格回落 2D drawChunkGrid）。 */
+  private worldPipeLayer: GLSpriteLayer | null = null;
+  private worldPipeRetryAt = 0;
+  /** 页纹理已上传计数（墙/tile 各一摞;页连续分配+尾裁——worldPageTex 同步注） */
+  private _bglPageUploaded = { w: 0, t: 0 };
+  /** ★B1 诊断面:最近一次 chunk 格段路径（'world-gl-wall'/'world-gl-tile'/
+   *  'world-2d-wall'/'world-2d-tile'）;bglPathStats=全会话分布（F5/探针面） */
+  bglPathUsed = '-';
+  bglPathStats: Record<string, number> = {};
+  /** 世界层 GL 会话获取（acquireCloudPipe 同款哨兵:活实例直取;死亡 5s 退避;
+   *  初始化失败 30s 闩;饥饿锁同门）。
+   *  ★reviveSwPipe 链挂点：dropSwPipe→dropWorldPipe 整弃（旧层持有死管线引用,
+   *  dispose 清自管纹理/VAO/采样器）——重建由本函数对【新管线】initPipeMode
+   *  重注册 sprite:quad（GLWorldCompose.recreate 同款落点;程序表按名缓存幂等）。 */
+  private acquireWorldGl(): GLSpriteLayer | null {
+    const cur = this.worldPipeLayer;
+    if (cur) {
+      if (!cur.unavailable) return cur;
+      if (performance.now() - cur.diedAt < 5000) { this.dropWorldPipe(); return null; }
+      this.dropWorldPipe();
+    }
+    if (performance.now() < this.worldPipeRetryAt) return null;
+    if (starvedLock()) return null;
+    const pipe = this.acquireSwPipe();
+    if (!pipe) { this.worldPipeRetryAt = performance.now() + 30_000; return null; }
+    const inst = new GLSpriteLayer(pipe, false);
+    if (inst.unavailable) { inst.dispose(); this.worldPipeRetryAt = performance.now() + 30_000; return null; }
+    this.worldPipeLayer = inst;
+    return inst;
+  }
+  /** 世界层会话释放（revive 前置/CPU 切换/熔断/销毁;页纹理计数同步归零——
+   *  层 dispose 清 texs 全表,计数不复位会让新页走「已驻留」支撞陈旧键） */
+  private dropWorldPipe(): void {
+    if (this.worldPipeLayer) { this.worldPipeLayer.dispose(); this.worldPipeLayer = null; }
+    this._bglPageUploaded.w = 0;
+    this._bglPageUploaded.t = 0;
+  }
+  /** ★B1 chunk 页纹理确保（'wpg:<idx>'/'tpg:<idx>'）。页生命周期三态:
+   *  ①idx ≥ 已上传计数（新页/trim 后 idx 复用）:drop 陈旧键+texFromImage
+   *    全量上传（noMip;预乘上传=画布源判例）,清该页脏标;
+   *  ②idx < 已上传计数:texFromImage 幂等键命中（零上传）+flush 脏 slot
+   *    （ChunkCache.glDirtyPages→256² scratch texSubUpdate 判例,只传烘焙脏块
+   *    ——禁每帧全量重传纪律）;
+   *  ③页表收缩（trimFreePages 尾裁）：计数下同步+尾部键 drop,防同 idx
+   *    复用串味。世界切换:dropSwPipe→dropWorldPipe 层整弃=页纹理随
+   *    texs 表蒸发（不跨世界持有,swpipe 熔断链同款）。 */
+  private worldPageTex(glw: GLSpriteLayer, kind: 'w' | 't', idx: number,
+    chunks: ChunkCache): ReturnType<GLSpriteLayer['texFromImage']> {
+    const layer = kind === 'w' ? ('wall' as const) : ('tile' as const);
+    const page = chunks.pageCanvas(layer, idx);
+    if (!page || page.width === 0) return null;
+    const uploaded = () => (kind === 'w' ? this._bglPageUploaded.w : this._bglPageUploaded.t);
+    // ③收缩同步：页表尾裁后计数回落（同 idx 复用必走①全量重传）
+    if (uploaded() > chunks.pageCount) {
+      for (let i = chunks.pageCount; i < uploaded(); i++) glw.dropTexture(`${kind}pg:${i}`);
+      if (kind === 'w') this._bglPageUploaded.w = chunks.pageCount;
+      else this._bglPageUploaded.t = chunks.pageCount;
+    }
+    const key = `${kind}pg:${idx}`;
+    if (idx >= uploaded()) {
+      // ①新页：强制全新（drop 防 trim 复用撞陈旧纹理）
+      glw.dropTexture(key);
+      const e = glw.texFromImage(key, page, false, true);
+      if (e && idx >= uploaded()) {
+        if (kind === 'w') this._bglPageUploaded.w = idx + 1;
+        else this._bglPageUploaded.t = idx + 1;
+      }
+      chunks.glDirtyPages.delete(idx);   // 全量上传已含全部 cell
+      return e;
+    }
+    // ②已驻留页：flush 烘焙脏 slot（增量 256²）
+    const dirty = chunks.glDirtyPages.get(idx);
+    if (dirty && dirty.size) {
+      for (const slot of dirty) {
+        glw.texSubUpdate(key, page, (slot % ChunkCache.PAGE_COLS) * 256,
+          Math.floor(slot / ChunkCache.PAGE_COLS) * 256, 256, 256);
+      }
+      chunks.glDirtyPages.delete(idx);
+    }
+    return glw.texFromImage(key, page, false, true);
+  }
   // ---- ★C10b 共管 GLPipeline（云+bg+worldCompose 三消费方单实例;总上下文数
   //      目标=swpipe 1+glfx 1=2）----
   /** 共管管线（懒建;statName='swpipe' 账页）。null=未建/退避中 */
@@ -3044,9 +3130,11 @@ export class Renderer {
     return false;
   }
   /** 共管管线整体释放（CPU 切换/熔断硬释放/销毁链/revive 前置）:层+worldCompose
-   *  +管线本体三件齐清——消费方各自 dispose 只清自管对象（ownsPipe=false 不级联） */
+   *  +管线本体齐清——消费方各自 dispose 只清自管对象（ownsPipe=false 不级联）。
+   *  ★B1:世界层会话同链（第四消费方;revive 后 acquireWorldGl 重注册 sprite:quad） */
   private dropSwPipe(): void {
     this.dropCloudPipe();
+    this.dropWorldPipe();
     if (this.worldCompose) { this.worldCompose.dispose(); this.worldCompose = null; }
     if (this.swPipe) { this.swPipe.dispose(); this.swPipe = null; }
   }
@@ -3451,6 +3539,9 @@ export class Renderer {
   private onResize = () => this.resize();
 
   constructor(public assets: AssetBundle, public atlas: SpriteAtlas | null = null) {
+    // ★B1:bgl 灰度态页画布走 willReadFrequently（GPU 驻移交页纹理,反降 IOSurface;
+    //   主线 bgl=0 保持 GPU 加速页=烘焙栅格化零变化）
+    ChunkCache.PAGE_WRF = Renderer.bgl;
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d', this.mainCtxAttrs())!;
     this.lightCanvas = document.createElement('canvas');
@@ -4216,7 +4307,59 @@ export class Renderer {
       }
       ctx.restore();
     };
-    drawChunkGrid('wall');
+    // ★B1 世界层翻面段（2026-09-24;?bgl=1 灰度）:chunk 页纹理 GPU 驻留+整数设备
+    //  矩形 quad 发射进共管管线 FBO('world')——2D drawChunkGrid 的逐格 drawImage
+    //  换 GL quadExact（NEAREST+全跨度 uv,最近邻映射逐式复刻,见 GLSpriteLayer 注）。
+    //  【层序定谳】墙格段与 tile 格段各自 begin→quads→end(present) 后以 1:1
+    //  drawImage 回贴 worldCanvas,两段之间保留 2D 夹层原位——source-over 合成
+    //  结合律（(A over ∅) over B ≡ A over B,预乘域逐位）保证与原单画布链
+    //  像素等价:GL 段透明处透出夹层内容、不透明处覆盖=2D 同款遮挡;
+    //  夹层（动画墙/behindTiles 实体/浸润带）留 worldCanvas=光照乘照常吃。
+    //  【回退】GL 不可用/退避/页纹理失败 → 本格段整体回落 2D drawChunkGrid
+    //  （逃生门 ?bgl=0 同路径;失败段 FBO 内容丢弃不 present=零半成品泄漏）。
+    const bglStageGrid = (layer: 'wall' | 'tile'): boolean => {
+      if (!Renderer.bgl || this.isCpuRender() || !this.worldLayerActive) return false;
+      const glw = this.acquireWorldGl();
+      if (!glw || glw.unavailable) return false;
+      glw.resize(lw, lh);
+      glw.begin('world');
+      if (glw.unavailable) return false;
+      const kind = layer === 'wall' ? ('w' as const) : ('t' as const);
+      const oxg = Math.round(lw / 2), oyg = Math.round(lh / 2);   // 与 drawChunkGrid 同式（共享边 round 同源 doctrine）
+      const zzg = z * wK;
+      for (let cy = y0; cy <= y1; cy++) {
+        for (let cx = x0; cx <= x1; cx++) {
+          if (!chunkVisible(cx, cy)) continue;
+          const xd0 = oxg + Math.round((cx * CHUNK * ts - camRX) * zzg);
+          const yd0 = oyg + Math.round((cy * CHUNK * ts - camRY) * zzg);
+          const xd1 = oxg + Math.round(((cx + 1) * CHUNK * ts - camRX) * zzg);
+          const yd1 = oyg + Math.round(((cy + 1) * CHUNK * ts - camRY) * zzg);
+          const p = chunks.get(cx, cy);
+          if (p.cell < 0) return false;   // 外部 stub（测试桩）→ 本段整体回落 2D
+          const e = this.worldPageTex(glw, kind, Math.floor(p.cell / 16), chunks);
+          if (!e) return false;
+          glw.quadExact(e, p.sx, p.sy, CHUNK * ts, CHUNK * ts, xd0, yd0, xd1 - xd0, yd1 - yd0);
+        }
+      }
+      glw.end();   // present: FBO('world') → pipe.canvas（blend off 离场,1:1 拷贝）
+      const wctx = this.worldCtxLayer;
+      if (!wctx) return false;
+      // ★世界变换在场（render 世界段 ctx 已 translate/scale）——回贴必须身份变换
+      wctx.save();
+      wctx.setTransform(1, 0, 0, 1, 0, 0);
+      wctx.drawImage(glw.canvas, 0, 0, lw, lh);
+      wctx.restore();
+      this.bglPathUsed = layer === 'wall' ? 'world-gl-wall' : 'world-gl-tile';
+      this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
+      return true;
+    };
+    if (!bglStageGrid('wall')) {
+      if (Renderer.bgl) {
+        this.bglPathUsed = 'world-2d-wall';
+        this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
+      }
+      drawChunkGrid('wall');
+    }
 
     // 2a'. 动画墙动态层（烘焙摘除补画，见 drawAnimatedWallLayer 注）
     this.drawAnimatedWallLayer(ctx, world, cam, viewW, viewH, z, chunks);
@@ -4272,7 +4415,15 @@ export class Renderer {
     this.drawLiquidBehindSolidTiles(world, cam, viewW, viewH, z);
 
     // 2c. 前景 tile/物体层（drawChunkGrid 整数设备矩形——见 2b 注释）
-    drawChunkGrid('tile');
+    // ★B1:tile 格段（第二段;浸润带/behindTiles 实体等 2D 夹层已在两段间原位画过,
+    //   tile quads present 回贴后不透明处覆盖夹层=原「贴图盖浸润带」遮挡语义）
+    if (!bglStageGrid('tile')) {
+      if (Renderer.bgl) {
+        this.bglPathUsed = 'world-2d-tile';
+        this.bglPathStats[this.bglPathUsed] = (this.bglPathStats[this.bglPathUsed] || 0) + 1;
+      }
+      drawChunkGrid('tile');
+    }
 
     // 2c''. 动画格统一动态层（根治：动画格永不进烘焙，见 drawAnimatedTileLayer 注）
     //   dev 参数 = 设备空间取整（与 drawChunkGrid 同 zz/ox/oy/camRX 同源,发丝缝）
@@ -5421,6 +5572,24 @@ export class Renderer {
   setCloudPipeForTest(v: boolean): void {
     Renderer._cloudPipe = v;
     if (!v) this.dropCloudPipe();
+  }
+  /** ?bgl=1：B1 世界层翻面第一役（2026-09-24）——tile/墙 chunk 格从 2D 栅格化
+   *  翻 GL quad 发射进共管管线 FBO('world')，chunk 页纹理 GPU 驻留（脏 slot
+   *  增量 texSubUpdate）。WorldCanvas 累积面/光照链/A 线零改动：GL 段以
+   *  present+1:1 drawImage 回贴 worldCanvas,source-over 合成结合律保序——
+   *  与 2D 夹层（动画墙/behindTiles 实体/浸润带）的原层序逐位同。
+   *  ★首版灰度缺省关（?bgl=1 显式激活）;对拍过另行走转正流程（翻缺省+
+   *  ?bgl=0 总逃生门）。运行时可翻（wfbo 同款页内翻面范式——探针
+   *  scripts/_b1-world-ab.mjs;页面内部改静态不受 bootstrap 洗参影响）。 */
+  private static _bgl = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('bgl') === '1';
+    } catch { return false; }
+  })();
+  static get bgl() { return this._bgl; }
+  static bglSetForTest(v: boolean): void {
+    Renderer._bgl = v;
+    ChunkCache.PAGE_WRF = v;   // 页画布背板随旗面（只影响后续新建页;见 ChunkCache.PAGE_WRF 注）
   }
   static readonly b0Shadow = (() => {
     try {
@@ -8304,6 +8473,12 @@ export class Renderer {
         const bodyTint370: number[] | null = dbTint && dukeTint
           ? [dbTint[0] * dukeTint[0] / 255, dbTint[1] * dukeTint[1] / 255, dbTint[2] * dukeTint[2] / 255]
           : (dbTint ?? dukeTint);
+        // ★BJ325 GetAlpha d370 蓝通道增亮（NPC.cs:94684-94691,BJ312 债）：d370 支活
+        //  （ai0≠−1∧<9∧α∈(0,255)）时 B 因子=num9=Lerp(num,1,0.25)——本体经预乘烘焙对
+        //  （cRGB=(num,num,num9)、cA=num,erase+lighter 两步=XNA AlphaBlend 精确式）。
+        //  370 无 color（vanilla-npcs.json 370 color:null）→ xnaColor 路径不可及;
+        //  372/373 恒 null=无增亮（type==370 门逐字）。
+        const boost370 = duke370GetAlphaBoost(e);
         const drawColor = dbTint && e.colorRGBA
           ? [e.colorRGBA[0] * dbTint[0] / 255, e.colorRGBA[1] * dbTint[1] / 255,
             e.colorRGBA[2] * dbTint[2] / 255, e.colorRGBA[3]] as number[]
@@ -8431,7 +8606,27 @@ export class Renderer {
         }
         // debuff 染色在身时基础层由下方 tintedSprite(multiply) 版本承担（双画=叠亮）
         // ★BJ310：370 相位染色（bodyTint370）同走本门——直绘跳过、tintedSprite 承担
-        if (!xnaColor && !bodyTint370) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
+        // ★BJ325：d370 蓝增亮支活 → 预乘对两步（cRGB=(num,num,num9)/cA=num,XNA 精确）;
+        //  缺省支维持 source-over 直绘（=cRGB=(num,num,num) 恒等式,零行为面）
+        if (!xnaColor && !bodyTint370) {
+          if (boost370) {
+            const mR = Math.round(255 * boost370.num);
+            const mB = Math.round(255 * boost370.num9);
+            const mA = Math.round(255 * boost370.num);
+            const pair = duke370PremulPair(r.img, { sx: r.sx, sy: r.sy, sw: r.sw, sh: r.sh },
+              mR, mR, mB, mA, 'duke370body');
+            if (pair) {
+              const ga0 = ctx.globalAlpha;
+              ctx.globalAlpha = 1;
+              drawDukePremulPair(ctx, pair, -r.sw / 2, bodyY);
+              ctx.globalAlpha = ga0;
+            } else {
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
+            }
+          } else {
+            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, bodyY, r.sw, r.sh);
+          }
+        }
         // 618 血月潜舰触腕叠加层（DrawNPC Extra_129 段：通用帧后追加同帧叠画）
         if (e.vanillaId === 618) {
           drawDreadnautilusOverlay(ctx, e, this.atlas,
@@ -8477,13 +8672,35 @@ export class Renderer {
         // debuff 染色（无自身 color 的 NPC）：tintedSprite(multiply) 替代基础精灵
         // 直绘——原版 npcColor 乘进 draw color,等价于整精灵 RGB 乘区（α 保持轮廓）
         // ★BJ310：370 相位染色（bodyTint370）同通道（key 含量化色,各相位/ramp 桶自分）
+        // ★BJ325：d370 蓝增亮支活 → 染色烘焙面再过预乘对（GetAlpha 乘于相位染色之后
+        //  =原版序;R/G 仍 num、B=num9）
         else if (bodyTint370) {
           const tinted = this.tintedSprite(`npcTint${e.vanillaId}`, r, bodyTint370);
           if (tinted) {
-            ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
-            ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h,
-              -r.sw / 2, bodyY, r.sw, r.sh);
-            ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+            if (boost370) {
+              const mR = Math.round(255 * boost370.num);
+              const mB = Math.round(255 * boost370.num9);
+              const mA = Math.round(255 * boost370.num);
+              const pair = duke370PremulPair(tinted.c,
+                { sx: tinted.x, sy: tinted.y, sw: tinted.w, sh: tinted.h },
+                mR, mR, mB, mA, 'duke370tintbody');
+              if (pair) {
+                const ga0 = ctx.globalAlpha;
+                ctx.globalAlpha = 1;
+                drawDukePremulPair(ctx, pair, -r.sw / 2, bodyY);
+                ctx.globalAlpha = ga0;
+              } else {
+                ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+                ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h,
+                  -r.sw / 2, bodyY, r.sw, r.sh);
+                ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+              }
+            } else {
+              ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+              ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h,
+                -r.sw / 2, bodyY, r.sw, r.sh);
+              ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+            }
           }
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在

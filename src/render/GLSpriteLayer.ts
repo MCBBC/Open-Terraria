@@ -645,6 +645,35 @@ export class GLSpriteLayer {
     gl.bindSampler(0, null);
   }
 
+  /** ★B1 世界层 tile 面 quad（2026-09-24）：全跨度 uv（无半像素内缩）+ NEAREST
+   *  采样——2D drawImage(imageSmoothingEnabled=false) 最近邻映射的逐式复刻。
+   *  ★为何不复用 quad()：quad() 的 uv 半像素内缩（px=0.5/w,CLAMP 渗色判例）
+   *  把采样域收缩到 [sx+0.5, sx+sw−0.5]——NEAREST 下尾列/尾行采到倒数第二
+   *  texel（i=dw−1 → src≈sx+sw−1.5,floor 少 1），与 2D 的
+   *  floor(sx+(i+0.5)·sw/dw) 全域错位,禁用于最近邻 tile 面。
+   *  【逐字节等价论证】全跨度 uv+NEAREST 下 GL src = sx+(i+0.5−dx)·sw/dw,
+   *  与 2D 同式;整数设备矩形(dx/dw 恒整)下:①最近邻 tie（src 恰落整数）⟺
+   *  sw·(2i'+1)/dw ∈ ℤ → tie 位 i'=(dw·k−1)/2 → 顶点插值参数
+   *  t=(i'+0.5)/dw=k/2 恒 2 的幂分数=fp32 精确,两侧同取 floor;②非 tie
+   *  最小分数距 = 1/dw ≥ 1/512 ≈ 2e-3 ≫ varying 插值 fp32 误差(~2.5e-5
+   *  texel)→ 无翻转面。缩放相位(1.25/1.27/1.5625/低清 K<1)全档成立,
+   *  像素对拍 scripts/_b1-world-ab.mjs 锁。 */
+  quadExact(
+    e: TexEntry, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+  ): void {
+    if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.bindSampler(0, this.samp.nearest!);   // 恒 NEAREST(与 2D smoothing off 同采样)
+    // 全跨度 uv:sx/e.w .. (sx+sw)/e.w——无内缩
+    gl.uniform4f(this.uni.uSrc, sx / e.w, sy / e.h, sw / e.w, sh / e.h);
+    this.setCommon(dx, dy, dw, dh, undefined);   // α=1/tint=白/rot=0
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    glStatDraw(this.statName, 4);
+    gl.bindSampler(0, null);
+  }
+
   /** 横向平铺:dst 区间内按"dw 对应一个源周期"重复(GL REPEAT 一次画整段,
    *  替代 2D for 循环逐 tile drawImage)。纹理须以 repeatX=true 创建 */
   tileX(

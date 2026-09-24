@@ -505,7 +505,7 @@ import { AshBallProj } from '../entities/AshBallProj';     // FTW 灰烬连锁�
 import { MagicProj } from '../entities/MagicProj';
 import { RainCloudProj } from '../entities/WeaponProj';
 import { firePortalGun } from '../entities/PortalGunBolt';
-import { type DropExtras, npcValueOf } from '../drops/NpcDrops';
+import { type DropExtras, npcValueOf, dropVelocity } from '../drops/NpcDrops';
 import { holidayPickupSubstitute } from '../drops/SeasonalPickups';   // ★SW-BJ55 Item.cs:49670-49720
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
@@ -39979,14 +39979,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2, placeStyle?: number): ItemDrop | null {
-    // ★SW-BJ55 节日拾取替代（Item.NewItem 节日变体臂,Item.cs:49670-49720/1458 同位：
-    //   十周年 ∪ 双季 ∪ 单季三分支——心 58→糖苹果 1734/拐杖糖 1867、星 184→灵魂蛋糕
-    //   1735/糖梅 1868,掷源 Main.rand。落在 key→id 解析前=唯一 chokepoint,原版同位
-    //   （罐/怪/Boss 心星全走 NewItem 整型重载）;pickup 语义按原始 id 打标
-    //   （Enemy.ts spawn 闭包）→ 替代后心族 Heal(20)/星族 +100MP 不变,Player.cs:35344-35362）
-    // ★方案 A 阶段 4（BJ265）：vid 直读（items.ts 回填后 def.vid≡键前缀反解值）；
-    //   未注册键兜底保留键前缀解析（原语义:未注册 vi_ 键也命中节日替代/manastar 判定）
+  /** ★BJ326 件 1（2026-09-24）：初速缺省语义翻转——vx/vy 缺省【undefined = 原版
+   *  NewItem velocity=null → 随机初速掷】（Item.cs:49746-49756 经 NpcDrops.dropVelocity：
+   *  ItemNoGravity 族双向 Next(-30,31)×0.1、默认族 vx Next(-30,31)/vy Next(-40,-15)×0.1
+   *  （上开区间,×0.1=[-4.0,-1.6],RB30b-F4）;X 先 Y 同序两掷）。掷源=每次掉落一粒
+   *  Math.random 种子 RNG（Enemy.ts:14623/TownNPC.ts:1548 掉落族同惯例,非世界种子流）。
+   *  显式传值=固定初速面（DropSelectedItem :5191/LuckyCoin :44919/ClassyCane :44729/
+   *  SpawnShimmeredItem WorldItem.cs:631 等,逐站判谳见 BJ326 台账）。旧家族缺省
+   *  (0,-2) 系统一简化面,与原版 velocity=null 随机掷不符,BJ311 登记债就此清偿。
+   *  中心锚 x/y：掉落中心（原版 NewItem(Vector2 center) → worldItem.Center）;盒
+   *  左上按 vid 半宽/半高回退（件 2,vanilla-itemdims）。
+   *  ★SW-BJ55 节日拾取替代（Item.NewItem 节日变体臂,Item.cs:49670-49720/1458 同位：
+   *   十周年 ∪ 双季 ∪ 单季三分支——心 58→糖苹果 1734/拐杖糖 1867、星 184→灵魂蛋糕
+   *   1735/糖梅 1868,掷源 Main.rand。落在 key→id 解析前=唯一 chokepoint,原版同位
+   *   （罐/怪/Boss 心星全走 NewItem 整型重载）;pickup 语义按原始 id 打标
+   *   （Enemy.ts spawn 闭包）→ 替代后心族 Heal(20)/星族 +100MP 不变,Player.cs:35344-35362）
+   *  ★方案 A 阶段 4（BJ265）：vid 直读（items.ts 回填后 def.vid≡键前缀反解值）；
+   *   未注册键兜底保留键前缀解析（原语义:未注册 vi_ 键也命中节日替代/manastar 判定） */
+  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx?: number, vy?: number, placeStyle?: number): ItemDrop | null {
     const dropVid = ITEM_DEFS[ITEM_BY_KEY[itemKey] ?? -1]?.vid
       ?? (/^vi_(\d+)_/.exec(itemKey) ? Number(/^vi_(\d+)_/.exec(itemKey)![1]) : -1);
     if (dropVid === 58 || dropVid === 184) {
@@ -40002,8 +40012,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const id = ITEM_BY_KEY[itemKey];
     if (id === undefined) return null;
+    // ★BJ326 件 1：velocity=null 随机初速掷（初速域独立于节日替代掷——原版替代改
+    //  type 在先、掷速在后,同拍同序;末 vid 判 ItemNoGravity=worldItem.type 同源）
+    if (vx === undefined || vy === undefined) {
+      const v = dropVelocity(new RNG((Math.random() * 0x7fffffff) | 0), ITEM_DEFS[id]?.vid ?? -1);
+      if (vx === undefined) vx = v.vx;
+      if (vy === undefined) vy = v.vy;
+    }
     this.recLog('drop', { key: itemKey, n: count, x: Math.round(x), y: Math.round(y) });   // 行为录制：掉落物生成（唯一入口）
-    const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
+    // 中心锚 → 盒左上按 vid 半盒回退（件 2;构造先定 w/h 再回退,原版 Center 同义）
+    const drop = new ItemDrop(x, y, id, count, vx, vy);
+    drop.x = x - drop.w / 2;
+    drop.y = y - drop.h / 2;
     if (placeStyle !== undefined) drop.placeStyle = placeStyle;
     // 法力斗篷之星 4143 = pickup 类(拾取 +50 魔力 + ManaHeat,Player.cs:35357-35371)
     //   （dropVid=入参 key 的 vid;节日替代仅 58/184 两 vid 触发,替代后两侧判值均≠4143,复用同相）
@@ -44230,6 +44250,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         : undefined);
     if (d && noGravity) d.noGravity = true;
     return d ?? null;
+  }
+
+  /** GameHooks.cloneDust（Dust.cs:260-288 CloneDust）：fx/VanillaDust.clone 直通（字段级
+   *  复制回池——CloneDust 内部 NewDust 的抖动掷流被逐字段覆写消解,noLightEmittance 不复制
+   *  原版字段表语义;池满/源尘失活 = null）。首消费 = 661 光女 HitEffect CloneDust 回声
+   *  （NPC.cs:82692-:82698/:82718-:82724,`numX != 6000` 池满守卫=消费侧 spawn null 短路同面） */
+  cloneDust(d: import('../fx/VanillaDust').VDust): import('../fx/VanillaDust').VDust | null {
+    if (!this.vanillaDust) return null;
+    return this.vanillaDust.clone(d);
   }
 
   /** GameHooks.pickPowerEnough（Player.cs:52964-52979 HasEnoughPickPowerToHurtTile）：

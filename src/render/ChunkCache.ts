@@ -104,7 +104,15 @@ export class ChunkCache {
   // (稳态 ~6 张、满额 50 张),重烘焙 = clip+translate 原位重画 cell,
   // 运行期画布创建/销毁 = 0(页只在 dispose/退出世界时销毁)。
   private static readonly CELLS_PER_PAGE = 16;
-  private static readonly PAGE_COLS = 4;
+  /** ★B1 改公开（2026-09-24）:Renderer 世界层 GL 页纹理增量上传按 slot 推
+   *  页内 256² 矩形坐标（slot%PAGE_COLS, ⌊slot/PAGE_COLS⌋） */
+  static readonly PAGE_COLS = 4;
+  /** ★B1（2026-09-24）:GL 页纹理驻留态下页画布走 willReadFrequently——GPU 驻留
+   *  已由页纹理接管,页画布只作上传源,CPU 背板反降 IOSurface 张数（GPU 加速
+   *  画布每张一个 IOSurface,内核级计费）。Renderer.bgl 激活时置 true（构造期
+   *  与 setBglForTest 两处写）。★仅 bgl 灰度态生效,主线（bgl=0）页保持 GPU
+   *  加速=烘焙栅格化路径零变化。 */
+  static PAGE_WRF = false;
   private wallPages: HTMLCanvasElement[] = [];
   private tilePages: HTMLCanvasElement[] = [];
   /** 每页在用 cell 数(与 wallPages 同长;页全空可被 trimFreePages 回收——
@@ -152,6 +160,26 @@ export class ChunkCache {
   /** 调试/F5:当前 atlas 页数(墙+tile 双层各一摞,画布张数 = 2×页数) */
   get pageCount(): number { return this.wallPages.length; }
 
+  // ---- ★B1 页纹理脏标（2026-09-24）:chunk 页 GPU 驻留的增量上传账 ----
+  // 烘焙落页后登记 (页号→页内 slot 集),Renderer.worldPageTex 消费:新页全量
+  // texFromImage 上传时整组清账;已驻留页逐 slot 256² texSubUpdate(判例
+  // GLSpriteLayer.texSubUpdate)。页生命周期:trimFreePages 尾裁同页清理;
+  // dispose 全清;世界切换走 Renderer.dropSwPipe→dropWorldPipe 整弃（纹理
+  // 随 GLSpriteLayer.texs 表蒸发,本表同步清）。
+  readonly glDirtyPages = new Map<number, Set<number>>();
+  private glMarkPageDirty(cell: number): void {
+    const pg = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
+    const slot = cell % ChunkCache.CELLS_PER_PAGE;
+    let s = this.glDirtyPages.get(pg);
+    if (!s) { s = new Set(); this.glDirtyPages.set(pg, s); }
+    s.add(slot);
+  }
+  /** ★B1 页画布访问器（GL 页纹理上传源;只读面）。越界/不存在返 null */
+  pageCanvas(layer: 'wall' | 'tile', idx: number): HTMLCanvasElement | null {
+    const arr = layer === 'wall' ? this.wallPages : this.tilePages;
+    return idx >= 0 && idx < arr.length ? arr[idx] : null;
+  }
+
   /** 归还 chunk cell(★页不销毁——重烘焙/换 chunk 复用同一批页,零画布churn)。
    *  所有丢弃旧 pair 的路径(标脏重建/LRU 淘汰/全量标脏)都必须先过这里;
    *  外部 stub(测试)/独立目标(cell=-1)无页可还 = no-op */
@@ -166,6 +194,8 @@ export class ChunkCache {
    *  中段空页留待复用不毁——索引稳定性,只从尾部收缩) */
   trimFreePages(): void {
     while (this.wallPages.length && this.pageUsed[this.wallPages.length - 1] === 0) {
+      const idx = this.wallPages.length - 1;
+      this.glDirtyPages.delete(idx);   // ★B1:页销毁同页清脏标（idx 复用防陈旧增量）
       const wp = this.wallPages.pop()!, tp = this.tilePages.pop()!;
       this.pageUsed.pop();
       wp.width = 0; wp.height = 0;
@@ -183,7 +213,7 @@ export class ChunkCache {
       const S = CHUNK * TILE * ChunkCache.PAGE_COLS;
       const mkPage = (): HTMLCanvasElement => {
         const c = document.createElement('canvas');
-        if (ChunkCache.CPU_RENDER) { c.getContext('2d', { willReadFrequently: true }); }
+        if (ChunkCache.CPU_RENDER || ChunkCache.PAGE_WRF) { c.getContext('2d', { willReadFrequently: true }); }
         c.width = S; c.height = S;
         return c;
       };
@@ -208,6 +238,7 @@ export class ChunkCache {
     this.pageUsed.length = 0;
     this.cellFree.length = 0;
     this.stickyCell.clear();
+    this.glDirtyPages.clear();   // ★B1:页纹理账随世界整弃
     this.chunks.clear();
     this.dirtyQueue.length = 0;
     this.dirtySet.clear();
@@ -587,6 +618,7 @@ export class ChunkCache {
       ctx.restore();
     }
     pair = { wall, tile, sx: ox, sy: oy, cell };
+    if (cell >= 0) this.glMarkPageDirty(cell);   // ★B1:GL 页纹理增量上传账（外部独立目标 cell<0 不入账）
     // ---- 荧光涂层叠层烘焙（fullbrightBlock/Wall 位格 16×16 拷贝；无涂层格零开销）----
     //  墙区先拷、tile 区后拷 = 同格内墙下 tile 上的世界层序（跨格序与原版逐格
     //  绘制一致：涂层格各自独立 16×16）。多格物件只有被涂格区域进叠层 = 与油漆

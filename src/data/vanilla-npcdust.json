@@ -6062,6 +6062,221 @@
    }
   ]
  },
+ "402": {
+  "hit": [
+   {
+    "hitK": 3,
+    "body": [
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 17,
+        "sx": "hd",
+        "sy": -1,
+        "color": {
+         "r": 0,
+         "g": 0,
+         "b": 0,
+         "a": 0
+        },
+        "scale": 0.75,
+        "line": 84504
+       }
+      ],
+      "line": 84504
+     },
+     {
+      "roll": {
+       "k": 2,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 229,
+        "posts": [
+         [
+          "ng",
+          true
+         ]
+        ],
+        "line": 84508
+       }
+      ],
+      "line": 84508
+     },
+     {
+      "over": "oldPos",
+      "len": 36,
+      "body": [
+       {
+        "roll": {
+         "k": 4,
+         "op": "==",
+         "v": 0
+        },
+        "t": [
+         {
+          "brk": true,
+          "line": 84516
+         },
+         {
+          "roll": {
+           "k": 3,
+           "op": "==",
+           "v": 0
+          },
+          "t": [
+           {
+            "dust": 17,
+            "pos": "oldPos",
+            "sx": "hd",
+            "sy": -1,
+            "color": {
+             "r": 0,
+             "g": 0,
+             "b": 0,
+             "a": 0
+            },
+            "scale": 0.75,
+            "line": 84521
+           }
+          ],
+          "line": 84521
+         },
+         {
+          "roll": {
+           "k": 2,
+           "op": "==",
+           "v": 0
+          },
+          "t": [
+           {
+            "dust": 229,
+            "pos": "oldPos",
+            "posts": [
+             [
+              "ng",
+              true
+             ]
+            ],
+            "line": 84525
+           }
+          ],
+          "line": 84525
+         }
+        ],
+        "line": 84516
+       }
+      ],
+      "line": 84516
+     }
+    ],
+    "line": 84504
+   }
+  ],
+  "death": [
+   {
+    "n": 5,
+    "body": [
+     {
+      "roll": {
+       "k": 3,
+       "op": "==",
+       "v": 0
+      },
+      "t": [
+       {
+        "dust": 17,
+        "sx": "hd",
+        "sy": -1,
+        "line": 84538
+       }
+      ],
+      "line": 84538
+     },
+     {
+      "dust": 229,
+      "posts": [
+       [
+        "ng",
+        true
+       ],
+       [
+        "velMul",
+        3
+       ]
+      ],
+      "line": 84540
+     }
+    ],
+    "line": 84538
+   },
+   {
+    "over": "oldPos",
+    "len": 36,
+    "body": [
+     {
+      "roll": {
+       "k": 4,
+       "op": "!=",
+       "v": 0
+      },
+      "skip": true,
+      "line": 84548
+     },
+     {
+      "brk": true,
+      "line": 84552
+     },
+     {
+      "n": 2,
+      "body": [
+       {
+        "roll": {
+         "k": 3,
+         "op": "==",
+         "v": 0
+        },
+        "t": [
+         {
+          "dust": 17,
+          "pos": "oldPos",
+          "sx": "hd",
+          "sy": -1,
+          "line": 84559
+         }
+        ],
+        "line": 84559
+       },
+       {
+        "dust": 229,
+        "pos": "oldPos",
+        "posts": [
+         [
+          "ng",
+          true
+         ],
+         [
+          "velMul",
+          3
+         ]
+        ],
+        "line": 84561
+       }
+      ],
+      "line": 84559
+     }
+    ],
+    "line": 84548
+   }
+  ]
+ },
  "407": {
   "hit": [
    {
@@ -7285,6 +7500,41 @@
     "sx": "hd",
     "sy": -1,
     "line": 83965
+   },
+   {
+    "dust": 0,
+    "idPick": [
+     229,
+     240,
+     161
+    ],
+    "n": 30,
+    "posts": [
+     [
+      "ng",
+      true
+     ],
+     [
+      "scaleSet",
+      1.25
+     ],
+     [
+      "scaleAddR01"
+     ],
+     [
+      "fadeIn",
+      0.25
+     ],
+     [
+      "velMul",
+      2
+     ],
+     [
+      "noLight",
+      true
+     ]
+    ],
+    "line": 83970
    }
   ]
  },
@@ -7342,6 +7592,41 @@
     "sx": "hd",
     "sy": -1,
     "line": 84019
+   },
+   {
+    "dust": 0,
+    "idPick": [
+     229,
+     229,
+     240
+    ],
+    "n": 20,
+    "posts": [
+     [
+      "ng",
+      true
+     ],
+     [
+      "scaleSet",
+      1.25
+     ],
+     [
+      "scaleAddR01"
+     ],
+     [
+      "fadeIn",
+      0.25
+     ],
+     [
+      "velMul",
+      3
+     ],
+     [
+      "noLight",
+      true
+     ]
+    ],
+    "line": 84024
    }
   ]
  },
@@ -9154,6 +9439,140 @@
    }
   ]
  },
+ "661": {
+  "hit": [
+   {
+    "roll": {
+     "k": 5,
+     "op": "==",
+     "v": 0
+    },
+    "hitK": 100,
+    "t": [
+     {
+      "dust": 267,
+      "colorHsl": {
+       "div": 100,
+       "sat": 1,
+       "lum": 0.5,
+       "mul": 0.5
+      },
+      "posts": [
+       [
+        "posCircular"
+       ],
+       [
+        "velFromCenter",
+        1
+       ],
+       [
+        "ng",
+        true
+       ],
+       [
+        "fadeInR01",
+        0.6,
+        0.7
+       ],
+       [
+        "scaleSet",
+        0.35
+       ]
+      ],
+      "clone": {
+       "posts": [
+        [
+         "scaleDiv",
+         2
+        ],
+        [
+         "fadeInMul",
+         0.85
+        ],
+        [
+         "colorSet",
+         {
+          "r": 127.5,
+          "g": 127.5,
+          "b": 127.5,
+          "a": 127.5
+         }
+        ]
+       ]
+      },
+      "line": 82676
+     }
+    ],
+    "line": 82676
+   }
+  ],
+  "death": [
+   {
+    "roll": {
+     "k": 5,
+     "op": "==",
+     "v": 0
+    },
+    "n": 100,
+    "t": [
+     {
+      "dust": 267,
+      "colorHsl": {
+       "div": 100,
+       "sat": 1,
+       "lum": 0.5,
+       "mul": 0.5
+      },
+      "posts": [
+       [
+        "posCircular"
+       ],
+       [
+        "velFromCenter",
+        0.6
+       ],
+       [
+        "ng",
+        true
+       ],
+       [
+        "fadeInR01",
+        0.7,
+        1.1
+       ],
+       [
+        "scaleSet",
+        0.35
+       ]
+      ],
+      "clone": {
+       "posts": [
+        [
+         "scaleDiv",
+         2
+        ],
+        [
+         "fadeInMul",
+         0.85
+        ],
+        [
+         "colorSet",
+         {
+          "r": 127.5,
+          "g": 127.5,
+          "b": 127.5,
+          "a": 127.5
+         }
+        ]
+       ]
+      },
+      "line": 82702
+     }
+    ],
+    "line": 82702
+   }
+  ]
+ },
  "666": {
   "hit": [
    {
@@ -9384,14 +9803,15 @@
   "generatedBy": "tools/extract-npcdust.mjs",
   "callTotal": 629,
   "entryCount": 629,
-  "stdStmts": 1237,
-  "unsupStmts": 63,
-  "npcIds": 597,
-  "entryNpcIds": 597,
-  "schema": "per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,pre?,posts?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支",
+  "stdStmts": 1251,
+  "unsupStmts": 47,
+  "npcIds": 600,
+  "entryNpcIds": 600,
+  "schema": "per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,idPick?,n?|hitK?,anchor?/pos?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,colorHsl?,scale?,pre?,posts?,clone?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},skip?,n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过;skip=roll 过→跳过本轮余下 body,402 continue）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; {brk:true}=oldPos 零位 break 标记（掷门后求值,越深度/零位→跳出所在 oldPos 环,402）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）|{over:'oldPos',len,body}=轨迹环（len=TrailCacheLength[型] NPCID.cs:4809,402=36;index 绑定 stmt.pos='oldPos'）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; idPick=[a,b,c] → dust=idPick[Next(len)] 带权掷表（重复项=权重,Utils.SelectRandom 直译;dust 字段=0 占位）; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pos=oldPos → 盒顶左=hist[环 index]（Enemy 轨迹环,绝对位）; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）|★批4: fadeInR01(A,span)=A+NextFloat()×span（661）/fadeInMul(k)（clone 回声）/noLight(b)（引擎光链消费,VanillaDust.ts :551）/posCircular（position=Center+NextVector2Circular(w,h),2 掷）/velFromCenter(k)（velocity=(position−Center)×k,0 掷）/colorSet(rgba)（Color×k float 域）; colorHsl={div,sat,lum,mul}=hslToRgb(fround(idx/div%1),sat,lum)×mul（661 彩虹,Main.cs :48689 直译）; clone={posts}=CloneDust 回声（Dust.cs :260-288,施于克隆尘）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支",
   "noGenericTail": "★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）",
   "batch2": "BJ296 批2（2026-09-23）概率门族接入：帧树逐型臂解析（死臂剪枝/循环组/单掷分支/pre 谓词/idRand）；掷流通道=Math.random（与批1 alt 同源,引擎侧 spawnDust 抖动同拍）; 接入 15 型：134-136/262-265/407/409/410/411/428/478/516/636",
-  "batch3": "BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending:noLight=VDust.noLight 字段在位但引擎不消费+idPick 未建）。仍排除：661（hslToRgb 彩虹色+NextVector2Circular 位移+velocity 派生+CloneDust 回声,零尘登记）/402（oldPos,批4）",
+  "batch3": "BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending）→ 已随 BJ327 批4 转正。仍排除（批4 后清零）：661（四缺口,批4 接）/402（oldPos,批4 接）",
+  "batch4": "BJ327 批4（2026-09-24）HitEffect 尘面收官批：①402 oldPos 轨迹盒 6 组——★Enemy 定谳=有轨迹环（histXAt/histYAt/historyDepth,容量 60≥TrailCacheLength[402]=36,TrailingMode[402]=7 逐拍推入）无需扩展;loop.over='oldPos'（len=NPCID.cs:4809 环长）+stmt.pos='oldPos'+brk 标记（oldPos[i]==Zero break,掷门后求值）+branch.skip（Next(4)!=0 continue）。②426/427 SelectRandom 带权 id 环——idPick=[…]=choices[Next(len)]（重复项=权重,426 [229,240,161] 均一/427 [229,229,240] 2:1）;★noLight 定谳翻案（BJ304「字段在位但引擎不消费」判词误:VDust.noLight 引擎光链 VanillaDust.ts :551 烟雾族 !noLight 门消费,240/161 原文本无光=no-op 同相）→ std 算子 noLight(true)。③661 四缺口一次接齐——hslToRgb 纯函数 std-expressible（Main.cs :48689-:48717 直译,hue=fround(idx/100%1) float32 环索循环 index,Math.Round=ToEven;乘色走 float 域=LeashedCritter.ts:1577 White×0.5 同源判例）/posCircular（Center+NextVector2Circular(w,h),Utils.cs:1301-1303,2 掷角+幅）/velFromCenter（(position−Center)×k,0 掷派生）/CloneDust 回声（Dust.cs :260-288,引擎 VanillaDust.clone 在位,GameHooks.cloneDust 钩子新建;clone.posts=[scaleDiv2,fadeInMul0.85,colorSet(127.5×4)]）。接入 4 型：402/426/427/661——尘面收官:_meta.pending 中型域组只剩 std-expressible 滚动清单+根级门组（daybreak/gold-critter/ai[1]/netMode/IsShimmerVariant/TownPet/!wet/forStep/pos 派生/color 派生族）",
   "carveOuts": [
    "泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)",
    "gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）",
@@ -9402,7 +9822,7 @@
     "types": [],
     "line": 82577,
     "phase": "death",
-    "reason": "pos:hitbox.TopLeft();id:num2;postUnknown:dz.alpha = 200;",
+    "reason": "pos:hitbox.TopLeft();postUnknown:dz.alpha = 200;",
     "count": 1
    },
    {
@@ -9433,42 +9853,6 @@
     "line": 86145,
     "phase": "death",
     "reason": "id:248 + type - 484",
-    "count": 1
-   },
-   {
-    "types": [
-     34
-    ],
-    "line": 90169,
-    "phase": "hit",
-    "reason": "postUnsupported:dz.noLight = true;",
-    "count": 1
-   },
-   {
-    "types": [
-     34
-    ],
-    "line": 90174,
-    "phase": "hit",
-    "reason": "postUnsupported:dz.noLight = true;",
-    "count": 1
-   },
-   {
-    "types": [
-     34
-    ],
-    "line": 90184,
-    "phase": "death",
-    "reason": "postUnsupported:dz.noLight = true;",
-    "count": 1
-   },
-   {
-    "types": [
-     34
-    ],
-    "line": 90189,
-    "phase": "death",
-    "reason": "postUnsupported:dz.noLight = true;",
     "count": 1
    },
    {
@@ -9529,24 +9913,6 @@
    },
    {
     "types": [
-     289
-    ],
-    "line": 90202,
-    "phase": "hit",
-    "reason": "postUnsupported:dz.noLight = true;",
-    "count": 1
-   },
-   {
-    "types": [
-     289
-    ],
-    "line": 90213,
-    "phase": "death",
-    "reason": "postUnsupported:dz.noLight = true;",
-    "count": 1
-   },
-   {
-    "types": [
      369,
      376,
      663,
@@ -9555,7 +9921,7 @@
     ],
     "line": 89043,
     "phase": "death",
-    "reason": "postUnsupported:dz.noLight = true;",
+    "reason": "gate:NPCID.Sets.IsTownPet[type]",
     "count": 1
    },
    {
@@ -9644,60 +10010,6 @@
    },
    {
     "types": [
-     402
-    ],
-    "line": 84521,
-    "phase": "hit",
-    "reason": "pos:oldPos[num183]",
-    "count": 1
-   },
-   {
-    "types": [
-     402
-    ],
-    "line": 84525,
-    "phase": "hit",
-    "reason": "pos:oldPos[num183]",
-    "count": 1
-   },
-   {
-    "types": [
-     402
-    ],
-    "line": 84504,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     402
-    ],
-    "line": 84508,
-    "phase": "hit",
-    "reason": "groupMixedWithPending",
-    "count": 1
-   },
-   {
-    "types": [
-     402
-    ],
-    "line": 84559,
-    "phase": "death",
-    "reason": "pos:oldPos[num185]",
-    "count": 1
-   },
-   {
-    "types": [
-     402
-    ],
-    "line": 84561,
-    "phase": "death",
-    "reason": "pos:oldPos[num185]",
-    "count": 1
-   },
-   {
-    "types": [
      405,
      406
     ],
@@ -9714,24 +10026,6 @@
     "line": 84366,
     "phase": "death",
     "reason": "pos:base.Center - Vector2.One * num170",
-    "count": 1
-   },
-   {
-    "types": [
-     426
-    ],
-    "line": 83970,
-    "phase": "death",
-    "reason": "id:num136;postUnsupported:dust30.noLight = true;",
-    "count": 1
-   },
-   {
-    "types": [
-     427
-    ],
-    "line": 84024,
-    "phase": "death",
-    "reason": "id:num144;postUnsupported:dust32.noLight = true;",
     "count": 1
    },
    {
@@ -9758,7 +10052,7 @@
     ],
     "line": 83918,
     "phase": "both",
-    "reason": "pos:hitbox2.TopLeft();id:num128;postUnknown:dz.alpha = 200;",
+    "reason": "pos:hitbox2.TopLeft();postUnknown:dz.alpha = 200;",
     "count": 1
    },
    {
@@ -9923,24 +10217,6 @@
    },
    {
     "types": [
-     661
-    ],
-    "line": 82676,
-    "phase": "hit",
-    "reason": "color:newColor;postUnsupported:dz.position = base.Center + Main.rand.NextVector2Circular(wi",
-    "count": 1
-   },
-   {
-    "types": [
-     661
-    ],
-    "line": 82702,
-    "phase": "death",
-    "reason": "postUnsupported:dz.position = base.Center + Main.rand.NextVector2Circular(wi",
-    "count": 1
-   },
-   {
-    "types": [
      663
     ],
     "line": 89410,
@@ -10025,6 +10301,15 @@
      33
     ],
     "line": 90644,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
+     34
+    ],
+    "line": 90169,
     "phase": "both",
     "reason": "batch3+:std-expressible（未接组滚动清单）",
     "count": 1
@@ -10670,6 +10955,15 @@
    },
    {
     "types": [
+     289
+    ],
+    "line": 90202,
+    "phase": "both",
+    "reason": "batch3+:std-expressible（未接组滚动清单）",
+    "count": 1
+   },
+   {
+    "types": [
      303
     ],
     "line": 86926,
@@ -11177,15 +11471,6 @@
      395
     ],
     "line": 85525,
-    "phase": "both",
-    "reason": "batch3+:std-expressible（未接组滚动清单）",
-    "count": 1
-   },
-   {
-    "types": [
-     402
-    ],
-    "line": 84538,
     "phase": "both",
     "reason": "batch3+:std-expressible（未接组滚动清单）",
     "count": 1

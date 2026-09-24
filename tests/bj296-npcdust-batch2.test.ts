@@ -425,18 +425,18 @@ describe('BJ296 B. 批2 消费行为（掷序/短路/单掷/循环组交错）',
 
 // ===================== C. 边界（批3/4 未接组零尘 + _meta 声明） =====================
 describe('BJ296 C. 边界', () => {
-  it('402（oldPos 轨迹盒,批4）：受击/死亡零尘=未接组原版相保守（整组 pending 无半接）', () => {
+  it('402（oldPos 轨迹盒,已随 BJ327 批4 转正——判别面移 tests/bj327-npcdust-batch4.test.ts）出尘型域锁', () => {
     const w = makeWorld();
     const cap: DustCall[] = [];
     const g = makeHooks(w, cap);
     const e = spawn(402);
     e.hurt(10, 1, 0, g);
     expect(e.hp).toBeGreaterThan(0);
-    expect(cap.length).toBe(0);
+    expect(cap.every((d) => d.type === 17 || d.type === 229)).toBe(true);   // 批4 转正:d17/d229 族（轨迹环判别在 bj327）
     const e2 = spawn(402, 110, FLOOR - 4);
     e2.hurt(e2.hp + 9999, 1, 0, g);
     expect(e2.dead).toBe(true);
-    expect(cap.length).toBe(0);
+    expect(cap.every((d) => d.type === 17 || d.type === 229)).toBe(true);
   });
 
   it('_meta 声明：batch2 接入 15 型 + noGenericTail 维持 + pending 不含已接型', () => {
@@ -450,11 +450,11 @@ describe('BJ296 C. 边界', () => {
     for (const vid of [134, 135, 136, 262, 263, 264, 265, 407, 409, 410, 411, 428, 478, 516, 636]) {
       expect(pendIds.has(vid)).toBe(false);
     }
-    // 批3/4 边界（★BJ304 后收敛）：fadeIn 族/524-527 已入表（fadeIn 定谳翻案=生长目标语义,
-    // VDust.fadeIn 引擎 1:1）;661（四缺口）/402（oldPos,批4）仍零尘
+    // 批3/4 边界（★BJ327 后收敛）：fadeIn 族/524-527 已入表（fadeIn 定谳翻案=生长目标语义,
+    // VDust.fadeIn 引擎 1:1）;402/661 已随批4 转正（尘面收官）
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(332);
-    for (const vid of ['661', '402']) expect(TABLE[vid]).toBeUndefined();
+    expect(ids.length).toBe(334);
+    for (const vid of ['661', '402']) expect(TABLE[vid]).toBeDefined();
   });
 });
 

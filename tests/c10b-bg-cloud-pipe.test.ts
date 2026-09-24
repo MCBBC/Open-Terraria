@@ -104,8 +104,8 @@ describe('C10b 管线实例共管（三消费方单实例）', () => {
 
   it('★熔断链全覆盖:reviveSwPipe=整链 dispose+全新实例（recreate 清程序表=A3 判例,全消费方重注册）', () => {
     expect(RDR).toMatch(/private reviveSwPipe\(\): boolean \{\s*\n\s*this\.dropSwPipe\(\);/);
-    // 整链三件:云/bg 层+worldCompose+管线本体
-    expect(RDR).toMatch(/private dropSwPipe\(\): void \{\s*\n\s*this\.dropCloudPipe\(\);\s*\n\s*if \(this\.worldCompose\) \{ this\.worldCompose\.dispose\(\); this\.worldCompose = null; \}\s*\n\s*if \(this\.swPipe\) \{ this\.swPipe\.dispose\(\); this\.swPipe = null; \}/);
+    // 整链四件:云/bg 层+世界层（★B1 2026-09-24 挂链）+worldCompose+管线本体
+    expect(RDR).toMatch(/private dropSwPipe\(\): void \{\s*\n\s*this\.dropCloudPipe\(\);\s*\n\s*this\.dropWorldPipe\(\);\s*\n\s*if \(this\.worldCompose\) \{ this\.worldCompose\.dispose\(\); this\.worldCompose = null; \}\s*\n\s*if \(this\.swPipe\) \{ this\.swPipe\.dispose\(\); this\.swPipe = null; \}/);
     // 治理面唯一走 dispose+全新（不走 GLPipeline.recreate 同画布复活——lost 未恢复
     // 上下文 getContext 返回同一死上下文,recreate 半残态在多消费方面被放大）
     expect(RDR).not.toContain('this.swPipe.recreate()');

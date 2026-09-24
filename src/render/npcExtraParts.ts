@@ -5,6 +5,7 @@
 // 参数 ctx/e/atlas + 所需散参由调用方（Renderer.drawEnemy）从 Enemy 属性算好传入。
 import type { Enemy } from '../entities/Enemy';
 import { SpriteAtlas } from '../assets/SpriteAtlas';
+import { dustPremulBake } from '../fx/VanillaDust';
 
 /** GlobalTimeWrappedHourly 近似（Main.cs:16777 每帧 +1/60s，3600 回卷） */
 function gtw(): number {
@@ -348,6 +349,84 @@ export function dukeBurstParams(e: Enemy): [number, number, number] {
   return [0, 0, 0];
 }
 
+// ---- ★BJ325 GetAlpha d370 蓝通道增亮（NPC.cs:94684-94691,BJ312 per-channel 手术域）----
+// 原版 GetAlpha type==370 支:ai[0]!=-1 && ai[0]<9 时蓝通道因子改用
+// num9=Lerp(num,1,0.25)（num=(255−alpha)/255;>1 钳死码照抄）——B 通道比 R/G 少衰减,
+// 入块半隐时（AI_069 :49498-49516 SolidCollision ±15 钳 [0,150]）鱼身呈蓝调而非均匀淡出。
+// 本仓 GetAlpha 等价面=灰度单系数 num 进 globalAlpha（光照由 compositeLight 事后乘）,
+// per-channel 维度无载体 → 走【预乘烘焙对】（dustPremulBake 精确判例,
+// tests/dust-premultiplied-blend 数值验证）：erase 面（α=texA×cA）+ add 面
+// （premult=texP×cRGB,cRGB=(num,num,num9)）,两步 'destination-out'+'lighter'
+// = XNA AlphaBlend 逐字节精确（α 过冲偏差类见 dustPremulBake 头注:仅 rgb>e 亮点位,
+// 本刀 mB=num9>mA=num 时 texB>255·num/num9 才触发,亮蓝高光受限）。
+// 模型边界（备案）：本仓缺省尾=单系数 num（globalAlpha）,非 XNA cRGB+cA 双因子完整式
+// ——R/G 通道维持仓内既有口径不动（用户定标域,NPC_TINT_KA 同域）,本刀只补 B 相对增亮
+// =登记债「蓝通道增亮整支」的精确边界;R/G 若改 cRGB=num 全式属另一笔模型债,不越界。
+
+/** d370 GetAlpha 蓝增亮因子（NPC.cs:94684-94691 逐值）。null=分支不活：
+ *  门外（ai0==-1 潜行 intro / ai0>=9 终怒,或 372/373 非本支）、α 端点
+ *  （α=0 → num=1 → num9=1 恒等无操作;α=255 → ga=0 不可见,手术无面）。 */
+export function duke370GetAlphaBoost(e: Enemy): { num: number; num9: number } | null {
+  if (e.vanillaId !== 370) return null;
+  if (!(e.ai0 !== -1 && e.ai0 < 9)) return null;
+  const a = Math.min(255, Math.max(e.spawnAlpha, 0));
+  if (a <= 0 || a >= 255) return null;
+  const num = (255 - a) / 255;
+  const num9 = Math.min(1, num + (1 - num) * 0.25);   // Lerp(num,1f,0.25f)+num9>1 钳
+  return { num, num9 };
+}
+
+/** 预乘对烘焙缓存（key=tag|rect|m 四字节）。dustPremulBake 纯函数尺寸无关,
+ *  直接喂 NPC 帧级 ImageData;LRU 溢出逐最旧（dukeBake 同式,勿整表 clear）。
+ *  上限 160×(2 面×202×162×4B)≈42MB 最坏,实际工作集（帧×α 桶×decay 档）远低。 */
+const dukePairCache = new Map<string, { add: HTMLCanvasElement; erase: HTMLCanvasElement }>();
+const DUKE_PAIR_CACHE_MAX = 160;
+
+export function duke370PremulPair(
+  src: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+  rect: { sx: number; sy: number; sw: number; sh: number },
+  mR: number, mG: number, mB: number, mA: number,
+  tag: string,
+): { add: HTMLCanvasElement; erase: HTMLCanvasElement } | null {
+  if (typeof document === 'undefined') return null;
+  const key = `${tag}|${rect.sx},${rect.sy},${rect.sw},${rect.sh}|${mR}_${mG}_${mB}_${mA}`;
+  const hit = dukePairCache.get(key);
+  if (hit) return hit;
+  if (dukePairCache.size >= DUKE_PAIR_CACHE_MAX) {
+    const k0 = dukePairCache.keys().next().value;
+    if (k0 !== undefined) dukePairCache.delete(k0);
+  }
+  const mid = document.createElement('canvas');
+  mid.width = rect.sw; mid.height = rect.sh;
+  const mc = mid.getContext('2d', { willReadFrequently: true })!;
+  mc.drawImage(src, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, rect.sw, rect.sh);
+  const baked = dustPremulBake(mc.getImageData(0, 0, rect.sw, rect.sh).data, mR, mG, mB, mA);
+  const mk = (bytes: Uint8ClampedArray) => {
+    const c = document.createElement('canvas');
+    c.width = rect.sw; c.height = rect.sh;
+    const cc = c.getContext('2d')!;
+    const im = cc.createImageData(rect.sw, rect.sh);
+    im.data.set(bytes);
+    cc.putImageData(im, 0, 0);
+    return c;
+  };
+  const pair = { add: mk(baked.add), erase: mk(baked.erase) };
+  dukePairCache.set(key, pair);
+  return pair;
+}
+
+/** 预乘对两步绘制（'destination-out' 擦 + 'lighter' 叠,dustPremulPair 同式）。
+ *  调用方须持 globalAlpha=1（因子已折入 m 四字节）;出口复位 gCO（ga 归调用方管）。 */
+export function drawDukePremulPair(
+  ctx: Ctx, pair: { add: HTMLCanvasElement; erase: HTMLCanvasElement }, dx: number, dy: number,
+): void {
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.drawImage(pair.erase, dx, dy);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.drawImage(pair.add, dx, dy);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
 /** 染色帧烘焙缓存（key 含 vid/贴图/变体/量化色）。multiply+destination-in。 */
 export function dukeBake(
   atlas: SpriteAtlas, texKey: string, tex: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
@@ -434,7 +513,13 @@ export function drawDukeAfterimages(
   };
 
   if (!overlay) {
+    // ★BJ325:GetAlpha d370 蓝增亮因子（门=ai0≠−1∧<9∧α∈(0,255),372/373 恒 null）
+    const boost = duke370GetAlphaBoost(e);
     // ---- ②基座拖影（:24732-24743）：i=1,3,…<num335（步 num336=2）----
+    //  原版色链=Lerp(color46,value77,0.5门)→GetAlpha(:24738)→×(num335−i)/15。
+    //  GetAlpha 缺省尾=单系数 num;★BJ325:d370 支活时 B 因子=num9 —— 预乘对
+    //  cRGB=(num,num,num9)×decay、cA=num×decay（decay 档集 {1/15..9/15} 有界,
+    //  m 四字节精确量化;缓存键含 rect+m,LRU 160）。
     const num335 = dukeTrailCount(e);
     const num = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;   // GetAlpha 缺省尾
     for (let i = 1; i < num335; i += 2) {
@@ -443,17 +528,47 @@ export function drawDukeAfterimages(
       if (alpha <= 0.004) continue;
       const px = e.histXAt(i) + e.w / 2, py = e.histYAt(i) + e.h / 2;
       withGhostTransform(px, py, () => {
+        if (boost) {
+          const decay = (num335 - i) / 15;
+          const mR = Math.round(255 * boost.num * decay);
+          const mB = Math.round(255 * boost.num9 * decay);
+          const mA = Math.round(255 * boost.num * decay);
+          const pair = duke370PremulPair(baked, { sx: 0, sy: 0, sw: frame.sw, sh: frame.sh },
+            mR, mR, mB, mA, 'duke370trail');
+          if (pair) {
+            ctx.globalAlpha = 1;
+            drawDukePremulPair(ctx, pair, -frame.sw / 2, -frame.sh / 2);
+            return;
+          }
+        }
         ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
         ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
       });
     }
     // ---- ③基座圆周脉冲（:24787-24797）：i=0..5，位=Center+((i/6)2π+rotation)·R·amp ----
+    //  GetAlpha(:24792)→×(1−amp)。amp=(1−cos)/3 连续摆动 → m 四字节按 16 步进
+    //  量化（&~15,dukeBake 同款;≤15/255 乘数误差作用于 ≤num×1 的爆发鬼影 α 上
+    //  =绝对 ≤2%,登记偏差类同染色量化）,否则缓存逐帧打穿=每帧 6×getImageData。
     const [n338, amp, rad] = dukeBurstParams(e);
     for (let i = 0; i < n338; i++) {
       const ang = (i / n338) * Math.PI * 2 + e.spin;
       const px = e.cx + Math.cos(ang) * rad * amp;
       const py = e.cy + Math.sin(ang) * rad * amp;
       withGhostTransform(px, py, () => {
+        if (boost) {
+          const decay = 1 - amp;
+          const q16 = (b: number) => b & ~15;
+          const mR = q16(Math.round(255 * boost.num * decay));
+          const mB = q16(Math.round(255 * boost.num9 * decay));
+          const mA = q16(Math.round(255 * boost.num * decay));
+          const pair = duke370PremulPair(baked, { sx: 0, sy: 0, sw: frame.sw, sh: frame.sh },
+            mR, mR, mB, mA, 'duke370burst');
+          if (pair) {
+            ctx.globalAlpha = 1;
+            drawDukePremulPair(ctx, pair, -frame.sw / 2, -frame.sh / 2);
+            return;
+          }
+        }
         ctx.globalAlpha = Math.max(0, Math.min(1, num * (1 - amp)));
         ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
       });

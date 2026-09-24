@@ -131,6 +131,24 @@ for (const [ln, frag] of ANCHOR_PROBES) {
   if (!String(LINES[ln - 1] || '').includes(frag)) failAnchor(`探针锚行 :${ln}`, String(LINES[ln - 1] || '').trim().slice(0, 60), frag);
 }
 
+// ---------------- NPCID.Sets.TrailCacheLength（★BJ327 批4:oldPos.Length 环长权威） ----------------
+// NPC.cs SetDefaults :8480-8488 Array.Resize(ref oldPos, NPCID.Sets.TrailCacheLength[Type])
+// ——HitEffect 的 oldPos 环上界 = oldPos.Length = TrailCacheLength[type]（缺省 10,402=36）。
+const NPCID_CS = join(REPO_VER, 'Terraria.ID', 'NPCID.cs');
+const NPCID_LINES = readFileSync(NPCID_CS, 'utf8').split('\n');
+const TCL_SIG = 'public static int[] TrailCacheLength = Factory.CreateIntSet(';
+const TCL_LINE = NPCID_LINES.findIndex((l) => l.includes(TCL_SIG)) + 1;
+if (TCL_LINE !== 4809) failAnchor('TrailCacheLength 声明行', TCL_LINE, 4809);
+const TRAIL_LEN = new Map();   // typeId → 环长；key 0 = 缺省
+{
+  const mm = NPCID_LINES[TCL_LINE - 1].match(/Factory\.CreateIntSet\((\d+)([^)]*)\)/);
+  if (!mm) failAnchor('TrailCacheLength 实参解析', 'nomatch', 'CreateIntSet(default, k, v, ...)');
+  TRAIL_LEN.set(0, Number(mm[1]));
+  const re2 = /(\d+), (\d+)/g;
+  let m2;
+  while ((m2 = re2.exec(mm[2]))) TRAIL_LEN.set(Number(m2[1]), Number(m2[2]));
+}
+
 // ---------------- 逻辑行装配（括号深度续行 + 注释丢弃） ----------------
 function parenDepth(s) { let d = 0; for (const c of s) { if (c === '(') d++; else if (c === ')') d--; } return d; }
 const phys = LINES.slice(SIG_LINE - 1, endLine);
@@ -227,6 +245,12 @@ function splitArgs(s) {
 // ---------------- 局部字面赋值流（唯一赋值才可还原） ----------------
 const locals = new Map();        // name → {v, count}
 const colorLocals = new Map();   // name → Map(typeId|0 → {r,g,b,a})——per-type 条件色（63/64/103、333-336）
+// ★BJ327 批4：hslToRgb 彩虹色局部（661）——`Color newColorN = Main.hslToRgb((float)numN / Df % 1f, S, L) * M;`
+//   hue 源必须 = 最近 for 帧计数器（环索色相,组帧核验不过不登记→materialize pending）;
+const hslLocals = new Map();     // name → Map(typeId|0 → {div,sat,lum,mul})
+// ★BJ327 批4：Utils.SelectRandom<int>(Main.rand, a, b, c) 带权 id 局部（426/427 死亡环;
+//   daybreak 82577/519 83917 同形——id 得解但 pos/post 仍阻 → pending reason 相应变窄）
+const selectLocals = new Map();  // name → number[]（重复项=权重,SelectRandom=choices[Next(len)]）
 // ★BJ304 批3：per-type 数值局部桶（组头初始化 + 型内覆写族,524-527 num205=0/75/170/67）——
 //   全局唯一赋值还原（locals.count==1）对「组头 `int numN = 0` + 各型帧内覆写」形失效
 //   （count≥2）,按 colorLocals 同款逐型桶挂帧栈最近单型 id（0=中性桶=组头初值）;
@@ -250,8 +274,33 @@ function nearestTypeId() {       // 当前帧栈最近 if 帧的唯一 type id�
   }
   return 0;
 }
+function nearestForCounter() {   // ★BJ327 批4：帧栈最近 for 帧的循环计数器名（无 → null）
+  for (let k = frames.length - 1; k >= 0; k--) {
+    const f = frames[k];
+    if (f.kind === 'for') return f.loop && f.loop.ok ? (f.loop.counter ?? null) : null;
+  }
+  return null;
+}
 function noteAssign(text) {
   let m;
+  // ★BJ327 批4：SelectRandom 带权 id 局部（426/427 死亡环,daybreak/519 同形）——
+  //   `numN = Utils.SelectRandom<int>(Main.rand, a, b, c)` = choices[Next(len)] 掷表
+  if ((m = text.match(/^(?:int )?(num\d+) = Utils\.SelectRandom<int>\(Main\.rand, ((?:\d+)(?:, \d+)*)\);?$/))) {
+    const e = locals.get(m[1]) || { v: null, count: 0 };
+    e.count++; e.v = null; locals.set(m[1], e);          // 数值还原面保持不可还原（id 走 selectLocals）
+    selectLocals.set(m[1], m[2].split(', ').map(Number));
+    return;
+  }
+  // ★BJ327 批4：hslToRgb 彩虹色局部（661）——hue 源核验 = 最近 for 帧计数器（环索色相,
+  //   不合 → 不登记,materialize 按 colorLocal 缺桶 pending）
+  let mh;
+  if ((mh = text.match(/^(?:Color )?(newColor\d*) = Main\.hslToRgb\(\(float\)(num\d+) \/ (\d+)f? % 1f, (-?[\d.]+)f?, (-?[\d.]+)f?\) \* (-?[\d.]+)f?;?$/))) {
+    if (nearestForCounter() === mh[2]) {
+      if (!hslLocals.has(mh[1])) hslLocals.set(mh[1], new Map());
+      hslLocals.get(mh[1]).set(nearestTypeId(), { div: Number(mh[3]), sat: Number(mh[4]), lum: Number(mh[5]), mul: Number(mh[6]) });
+    }
+    return;
+  }
   if ((m = text.match(/^(?:int|float)\s+(num\d+)\s*=\s*(-?\d+(?:\.\d+)?)f?\s*(?:;|$)/))) {
     const e = locals.get(m[1]) || { v: null, count: 0 };
     e.count++; e.v = Number(m[2]); locals.set(m[1], e);
@@ -331,7 +380,7 @@ function classifyColor(e) {
     return { ok: true, v: { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 255 : +m[4] } };
   }
   if (s === 'Color.Transparent') return { ok: true, v: { r: 0, g: 0, b: 0, a: 0 } };
-  if (/^newColor\d+$/.test(s)) return { ok: true, v: { local: s } };
+  if (/^newColor\d*$/.test(s)) return { ok: true, v: { local: s } };   // ★BJ327 批4:\d*（661 裸名 newColor）
   return { ok: false, v: s };
 }
 function classifyScale(e) {
@@ -352,13 +401,15 @@ function classifyBox(pos, w, h) {
   else if (p === 'base.Center') anchor = 'center';
   else if ((m0 = p.match(/^base\.Center - new Vector2\((-?\d+(?:\.\d+)?)f?, (-?\d+(?:\.\d+)?)f?\)$/))) { anchor = 'center'; dx = Number(m0[1]); dy = Number(m0[2]); }
   else if ((m0 = p.match(/^base\.Center - Vector2\.One \* (\d+(?:\.\d+)?)f?$/))) { anchor = 'center'; dx = dy = -Number(m0[1]); }
+  // ★BJ327 批4：oldPos 轨迹盒（402）——盒顶左 = oldPos[环 index]（绝对位,width/height 照 npc）
+  else if ((m0 = p.match(/^oldPos\[(num\d+)\]$/))) { anchor = 'oldPos'; var oldPosRef = m0[1]; }
   else return { ok: false };
   const wS = (w || '').trim(), hS = (h || '').trim();
   if (wS === 'width') W = 'npc'; else if (/^\d+f?$/.test(wS)) W = Number(wS.replace(/f$/, ''));
   else return { ok: false };
   if (hS === 'height') H = 'npc'; else if (/^\d+f?$/.test(hS)) H = Number(hS.replace(/f$/, ''));
   else return { ok: false };
-  return { ok: true, box: { anchor, dx, dy, w: W, h: H } };
+  return { ok: true, box: { anchor, dx, dy, w: W, h: H, ...(oldPosRef ? { ref: oldPosRef } : {}) } };
 }
 function classifyDustId(e) {
   const s = e.trim();
@@ -368,6 +419,8 @@ function classifyDustId(e) {
   if (/^num\d+$/.test(s)) {
     const v = localValue(s);
     if (v != null && Number.isInteger(v)) return { ok: true, v };
+    // ★BJ327 批4：SelectRandom 带权 id 局部（426/427 死亡环）——choices[Next(len)] 掷表
+    if (selectLocals.has(s)) return { ok: true, v: 0, pick: selectLocals.get(s) };
     // ★BJ304：全局唯一赋值还原失败 + 有 per-type 桶 → 延迟到 materialize 按 ctx.t 取
     //   （524-527 num205:525/526/527 桶=75/170/67,其余型回落桶0=0）
     if (typedLocals.has(s)) return { ok: false, typedLocal: s, v: s };
@@ -395,9 +448,17 @@ function parseFor(text) {
   if (parts.length !== 3) return { ok: false, reason: 'forParts' };
   const cond = parts[1].trim();
   let m;
-  if ((m = cond.match(/^\(double\)num\d+ < dmg \/ \(double\)lifeMax \* (\d+(?:\.\d+)?)f?$/))) return { ok: true, hitK: Number(m[1]) };
-  if ((m = cond.match(/^\(double\)num\d+ < dmg \/ \(double\)\(lifeMax \* (\d+)\)$/))) return { ok: true, hitK: Number(m[1]) };
-  if ((m = cond.match(/^(?:\(double\)|\(float\))?num\d+ < (\d+(?:\.\d+)?)f?$/))) return { ok: true, n: Number(m[1]) };
+  const counter = (parts[0].match(/^int (num\d+) = /) || [])[1] ?? null;   // ★BJ327 批4：计数器名（hsl 色相/oldPos 环索）
+  if ((m = cond.match(/^\(double\)num\d+ < dmg \/ \(double\)lifeMax \* (\d+(?:\.\d+)?)f?$/))) return { ok: true, hitK: Number(m[1]), counter };
+  if ((m = cond.match(/^\(double\)num\d+ < dmg \/ \(double\)\(lifeMax \* (\d+)\)$/))) return { ok: true, hitK: Number(m[1]), counter };
+  // ★BJ327 批4：oldPos 轨迹环（402）——`numN < oldPos.Length`（环长 = TrailCacheLength[type],
+  //   NPCID.cs:4809）;步进必须 ++（`+= K` 步进如 519 :83911 num126+=3 不表达 → forStep pending）
+  if ((m = cond.match(/^num\d+ < oldPos\.Length$/))) {
+    const step = parts[2].trim();
+    if (counter && step === counter + '++') return { ok: true, over: 'oldPos', counter };
+    return { ok: false, reason: `forStep:${step}` };
+  }
+  if ((m = cond.match(/^(?:\(double\)|\(float\))?num\d+ < (\d+(?:\.\d+)?)f?$/))) return { ok: true, n: Number(m[1]), counter };
   if ((m = cond.match(/^num\d+ < (num\d+)(?: \* (\d+))?$/))) {
     const base = localValue(m[1]);
     if (base != null && Number.isInteger(base)) return { ok: true, n: base * (m[2] ? Number(m[2]) : 1) };
@@ -430,8 +491,33 @@ const POST_OP_RES = [
   //   本仓 VDust.fadeIn 字段在位+老化链 1:1（fx/VanillaDust.ts :740-745）,spawnDust 返
   //   活尘对象 → 后置赋值=原版 NewDust 后 fadeIn 写同相。fadeIn *= 等其余形态仍 unsupported。
   [/^D\.fadeIn = (-?\d+(?:\.\d+)?)f?;?$/, (m) => ['fadeIn', Number(m[1])]],
+  // ★BJ327 批4（661）：`fadeIn = A + Main.rand.NextFloat() * B * (float)numN`——乘数局部
+  //   唯一字面赋值才还原（num8/num11=1）;不可还原 → mk 返 null 落 POST_BAD_RE pending
+  [/^D\.fadeIn = (-?\d+(?:\.\d+)?)f? \+ Main\.rand\.NextFloat\(\) \* (-?\d+(?:\.\d+)?)f? \* \(float\)(num\d+);?$/, (m) => {
+    const k = localValue(m[3]);
+    if (k == null) return null;
+    return ['fadeInR01', Number(m[1]), Number(m[2]) * k];
+  }],
+  // ★BJ327 批4（661）：`fadeIn *= k`（CloneDust 回声块内）
+  [/^D\.fadeIn \*= (-?\d+(?:\.\d+)?)f?;?$/, (m) => ['fadeInMul', Number(m[1])]],
+  // ★BJ327 批4（426/427 死亡环）：`noLight = true`——VDust.noLight 字段在位且引擎光链
+  //   消费（VanillaDust.ts :551 烟雾族 !noLight 门;★BJ304「引擎不消费」判词翻案,同 fadeIn 判例）
+  [/^D\.noLight = (true|false);?$/, (m) => ['noLight', m[1] === 'true']],
+  // ★BJ327 批4（661）：position = Center + NextVector2Circular(width,height)——
+  //   Utils.cs:1301-1303 = unit(θ)×(w,h)×NextFloat（2 掷:角+幅）;width/height 照 npc
+  [/^D\.position = base\.Center \+ Main\.rand\.NextVector2Circular\(width, height\);?$/, () => ['posCircular']],
+  // ★BJ327 批4（661）：velocity = (position − Center)[× k]——位置派生（0 掷,posCircular 后求值;
+  //   内层 position 引用保持 Main.dust[numN] 原形——首引用归一只换 velocity 前缀）
+  [/^D\.velocity = (?:Main\.dust\[\w+\]\.)?position - base\.Center;?$/, () => ['velFromCenter', 1]],
+  [/^D\.velocity = \((?:Main\.dust\[\w+\]\.)?position - base\.Center\) \* (-?\d+(?:\.\d+)?)f?;?$/, (m) => ['velFromCenter', Number(m[1])]],
+  // ★BJ327 批4（661 clone 回声）：color = new Color(...) × k——XNA Color×float 乘 RGBA 四通道,
+  //   本仓尘色域 = float RGBA（LeashedCritter.ts:1577 White×0.5={127.5×4} 同源判例）
+  [/^D\.color = new Color\((\d+), (\d+), (\d+)(?:, (\d+))?\) \* (-?\d+(?:\.\d+)?)f?;?$/, (m) => {
+    const k = Number(m[5]);
+    return ['colorSet', { r: +m[1] * k, g: +m[2] * k, b: +m[3] * k, a: (m[4] === undefined ? 255 : +m[4]) * k }];
+  }],
 ];
-const POST_BAD_RE = /^D\.(position|fadeIn|velocity\.X|velocity\.Y|color|noLight|shader|type|frame)\b|^D\.scale (?:\*|\/)?= (?!-?\d+(?:\.\d+)?f?;?$)/;
+const POST_BAD_RE = /^D\.(position|fadeIn|velocity\.X|velocity\.Y|color|shader|type|frame)\b|^D\.scale (?:\*|\/)?= (?!-?\d+(?:\.\d+)?f?;?$)/;
 /** ★BJ304:mk 产物归一入栈——单算子（op 元组）push 整元组,复合（op 元组数组）逐个 push
  *  （直接 push(...mk) 会把 ['ng',true] 摊平成两个元素,曾炸出扁平 posts） */
 function pushOps(dst, out) {
@@ -447,14 +533,18 @@ function compilePostStmts(stmts) {
     let m;
     if ((m = s.match(/^(?:Dust )?(\w+) = Main\.dust\[(?:num\d+)\];?$/))) { alias = m[1]; continue; }
     let body = null;
-    if (alias && s.startsWith(alias + '.')) body = 'D' + s.slice(alias.length);
+    if (s.startsWith('D.')) body = s;                                      // ★BJ327 批4:已归一形（clone 回声块直喂）
+    else if (alias && s.startsWith(alias + '.')) body = 'D' + s.slice(alias.length);
     else if (s.startsWith('dz.')) body = 'D' + s.slice(2);                 // normDirect 归一形
     else if (s.includes('Main.dust[')) body = 'D' + s.replace(/^.*?Main\.dust\[\w+\]\./, '');
     if (!body || !body.startsWith('D')) return { bad: `aliasMiss:${s.slice(0, 60)}` };
     let matched = false;
     for (const [re, mk] of POST_OP_RES) {
       const mm = body.match(re);
-      if (mm) { pushOps(ops, mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子（复合 scale）
+      if (mm) {
+        const out = mk(mm);                                        // ★BJ327 批4:mk 可返 null（乘数局部不可还原）→ 落 BAD
+        if (out) { pushOps(ops, out); matched = true; break; }
+      }
     }
     if (matched) continue;
     if (POST_BAD_RE.test(body)) return { bad: `postUnsupported:${s.slice(0, 60)}` };
@@ -467,6 +557,7 @@ function compilePostStmts(stmts) {
 function capturePosts(callVar, i, preAlias) {
   const posts = [];
   let alt = null;
+  let clone = null;   // ★BJ327 批4：CloneDust 回声（661）——{posts} 施于克隆尘
   let j = i + 1;
   const bound = new Set(preAlias ? [preAlias] : []);
   const STOP_RE = /Dust\.NewDust|Gore\.NewGore|NewNPC|PlaySound|NPCID\.|NetMessage|CloneDust|^NPC |^Player |^Item |^Vector2 \w+ = |^float |^int |^bool /;
@@ -487,7 +578,8 @@ function capturePosts(callVar, i, preAlias) {
       bound.add(m[1]);
       j++; continue;
     }
-    // 直引 Main.dust[numX]（归一成 dz. 形交给编译器）
+    // 直引 Main.dust[numX]（归一成 dz. 形交给编译器）——首引用替换（661 速度行内层
+    //   Main.dust[numN] 引用由 velFromCenter 正则直配,不做全量归一防 lerp 族 reason 漂移）
     if (callVar && t.includes(`Main.dust[${callVar}]`)) {
       const raw = t.replace(`Main.dust[${callVar}]`, 'dz');
       const r = compilePostStmts([raw]);
@@ -501,7 +593,10 @@ function capturePosts(callVar, i, preAlias) {
       let matched = false;
       for (const [re, mk] of POST_OP_RES) {
         const mm = body.match(re);
-        if (mm) { pushOps(posts, mk(mm)); matched = true; break; }   // ★BJ304:mk 可返多算子
+        if (mm) {
+          const out = mk(mm);                                        // ★BJ327 批4:mk 可返 null（乘数局部不可还原）→ 落 BAD
+          if (out) { pushOps(posts, out); matched = true; break; }
+        }
       }
       if (!matched) {
         if (POST_BAD_RE.test(body)) return { ok: false, reason: `postUnsupported:${t.slice(0, 60)}`, consumed: j - i };
@@ -555,9 +650,40 @@ function capturePosts(callVar, i, preAlias) {
       alt = { k: +m[1], op: m[2], v: +m[3], ifOps: rI.ops, elseOps };
       j = j2; continue;
     }
+    // ★BJ327 批4（661）：CloneDust 回声块——`if (numX != 6000) { Dust dN = Dust.CloneDust(numX);
+    //   <别名链字段写> }`（6000 = NewDust 池满哨兵,守卫=出尘成功才回声;引擎侧 spawn null 已同面;
+    //   反编译器重复 `dust = dust2;` 重绑同名 → 别名并集而非线性链）
+    if ((m = t.match(/^if \((num\d+) != 6000\)$/)) && callVar && m[1] === callVar) {
+      if (!/^\{$/.test(LOGICAL[j + 1]?.text || '')) return { ok: false, reason: 'cloneNoBrace', consumed: j - i };
+      let j2 = j + 2;
+      const calias = new Set();
+      const cposts = [];
+      let closed = false;
+      while (j2 < LOGICAL.length) {
+        const ct = LOGICAL[j2].text;
+        if (/^\}$/.test(ct)) { closed = true; j2++; break; }
+        let mm;
+        if ((mm = ct.match(/^(?:Dust )?(\w+) = Dust\.CloneDust\((num\d+)\);?$/))) {   // ★CloneDust 行先认（STOP_RE 含 CloneDust,防自截）
+          if (mm[2] !== callVar) return { ok: false, reason: 'cloneSrcMismatch', consumed: j2 - i };
+          calias.add(mm[1]); j2++; continue;
+        }
+        if (STOP_RE.test(ct)) return { ok: false, reason: 'cloneStop', consumed: j2 - i };
+        if ((mm = ct.match(/^(?:Dust )?(\w+) = (\w+);?$/)) && calias.has(mm[2])) { calias.add(mm[1]); j2++; continue; }
+        const wref = ct.match(/^(\w+)\./);
+        if (wref && calias.has(wref[1])) {
+          const r = compilePostStmts(['D' + ct.slice(wref[1].length)]);
+          if (!r.ops) return { ok: false, reason: r.bad, consumed: j2 - i };
+          cposts.push(...r.ops); j2++; continue;
+        }
+        return { ok: false, reason: `cloneUnknown:${ct.slice(0, 40)}`, consumed: j2 - i };
+      }
+      if (!closed || !cposts.length) return { ok: false, reason: 'cloneEmpty', consumed: j2 - i };
+      clone = { posts: cposts };
+      j = j2; continue;
+    }
     break;
   }
-  return { ok: true, posts, alt, consumed: j - i - 1 };
+  return { ok: true, posts, alt, clone, consumed: j - i - 1 };
   /** 分支内直引形归一：`Main.dust[numX].f …` → `dz.f …`（配合编译器别名约定） */
   function normDirect(s) {
     return s.replace(new RegExp(`^Main\\.dust\\[${callVar}\\]\\.`), 'dz.');
@@ -677,6 +803,13 @@ for (let i = 0; i < LOGICAL.length; i++) {
     if (f && L.ind === f.ind + 1) f.hadReturn = true;
     continue;
   }
+  // ★BJ327 批4：`continue;`——标记所在 if 帧（402 死亡环 `if (Next(4)!=0) { continue; }`
+  //   = roll 过 → 跳过本轮余下 body;同 return 缩进纪律,嵌套不计）
+  if (/^continue;?$/.test(t)) {
+    const f = frames[frames.length - 1];
+    if (f && L.ind === f.ind + 1) f.hadContinue = true;
+    continue;
+  }
   // 语句行：dust 调用
   if (/Dust\.NewDust(Direct|Perfect)?\(/.test(t)) {
     callsTotal++;
@@ -747,7 +880,7 @@ function extractStmts(text, line, li) {
     let mv;
     if ((mv = pre.match(/(?:int )?(num\d+) = Dust\.NewDust$/))) callVar = mv[1];
     else if ((mv = pre.match(/(?:Dust )?(dust\w*) = Main\.dust\[Dust\.NewDust$/))) preAlias = mv[1];
-    let postR = { ok: true, posts: [], alt: null };
+    let postR = { ok: true, posts: [], alt: null, clone: null };
     if (callVar) postR = capturePosts(callVar, li, null);
     else if (preAlias) postR = capturePosts(null, li, preAlias);
     if (postR.ok === false) bad.push(postR.reason);
@@ -770,6 +903,8 @@ function extractStmts(text, line, li) {
     e.scale = scR.ok ? scR.v : null;
     e.posts = postR.posts || [];
     e.alt = postR.alt || null;
+    e.clone = postR.clone || null;          // ★BJ327 批4：CloneDust 回声
+    e.idPick = idR.ok && idR.pick ? idR.pick : null;   // ★BJ327 批4：SelectRandom 带权 id 表
     e.phase = phase;
     e.pres = pres;
     e.inTypeScope = inTypeScope;
@@ -854,7 +989,33 @@ const BATCH2_TYPES = new Set([
 const BATCH3_TYPES = new Set([
   415, 416, 417, 418, 419, 420, 421, 423, 424, 425, 426, 427, 429, 518, 524, 525, 526, 527,
 ]);
-const WIRED_TYPES = new Set([...BATCH1_TYPES, ...BATCH2_TYPES, ...BATCH3_TYPES]);
+
+// ---------------- BJ327 批4 接入名单（HitEffect 尘面收官批,2026-09-24 定谳） ----------------
+// 手核 NPC.cs 亲读 diff=0；post 算子定性三步（原版语义→引擎字段在位→引擎消费路径）逐件定谳：
+//   · 402 风暴潜航者（:84496-:84568,批4 之 1——oldPos 轨迹盒 6 组）：★Enemy 定谳=有轨迹环
+//     （histXAt/histYAt/historyDepth,容量 60≥TrailCacheLength[402]=36,TrailingMode[402]=7
+//     逐拍推入 NPCID.cs:4769/4809）→ 无需扩展,直接接。hit hitK3 循环组 [Next3→d17 透明 0.75,
+//     Next2→d229+ng, oldPos 环 len36×(Next4==0→[brk(零位 break,掷门后求值), Next3→d17@oldPos,
+//     Next2→d229@oldPos+ng])];death n5×[Next3→d17,d229+ng+velMul3] + oldPos 环×(Next4!=0→
+//     continue(skip)+brk+循环2×[Next3→d17@oldPos,d229@oldPos+ng+velMul3])。
+//   · 426/427（:83970/:84024,批4 之 2——SelectRandom 带权 id 环+noLight）：★idPick 带权 id
+//     机制（Utils.SelectRandom<int> = choices[Next(len)],重复项=权重——426 [229,240,161] 均一/
+//     427 [229,229,240] 2:1）;★noLight 定谳翻案（BJ304「字段在位但引擎不消费」判词误——
+//     VDust.noLight 引擎光链 :551 消费（烟雾族 229 !noLight 门）,240/161 原文本无光=no-op 同相;
+//     缺的只是消费面算子）→ 收编 std 算子 noLight(true)。death 环 426 n30/427 n20：
+//     [idPick 尘, ng, scale=1.25+NextFloat(复合), fadeIn0.25, velMul2|3, noLight]。
+//   · 661 光女（:82666-:82722,批4 之 3——四缺口一次接齐）：①hslToRgb 彩虹色局部=纯函数
+//     std-expressible（Main.cs :48689-:48717 直译,hue=fround(idx/100%1) float32 环索循环
+//     index,Math.Round=ToEven）;②position=Center+NextVector2Circular(width,height)
+//     （Utils.cs:1301-1303 = unit(θ)×(w,h)×NextFloat,2 掷）→ 算子 posCircular;
+//     ③velocity=position−Center[×0.6 死亡]（0 掷派生）→ 算子 velFromCenter;
+//     ④CloneDust 回声（Dust.cs :260-288,引擎 VanillaDust.clone 1:1 在位+GameHooks.cloneDust
+//     钩子新建）→ stmt.clone={posts:[scaleDiv2,fadeInMul0.85,colorSet White×0.5]}（LeashedCritter
+//     ts:1577 同源判例:尘色域 float RGBA,127.5 保真）。hit hitK100/death n100：Next5==0 门→
+//     [d267 色=colorHsl, posCircular, velFromCenter, ng, fadeInR01(0.6|0.7+NextFloat×0.7|1.1),
+//     scaleSet0.35, clone]。
+const BATCH4_TYPES = new Set([402, 426, 427, 661]);
+const WIRED_TYPES = new Set([...BATCH1_TYPES, ...BATCH2_TYPES, ...BATCH3_TYPES, ...BATCH4_TYPES]);
 
 // ---------------- BJ296 帧树逐型解析（汇总分组） ----------------
 // 树结构：kidsMap（frameId → 帧/语句源序）；SUCCESSOR（elseOfId → 后继臂）。
@@ -972,15 +1133,16 @@ function markDeadArm(f, S, ctx) {
 }
 function wrapEl(el, phases) { return { el, phases }; }
 
-/** 循环计数内联：按元素形态规范键序（stmt: dust,idRand?,n?,hitK?…/branch: pre?,roll?,n?,hitK?…） */
+/** 循环计数内联：按元素形态规范键序（stmt: dust,idRand?,idPick?,n?,hitK?…/branch: pre?,roll?,n?,hitK?…） */
 function withCount(el, n, hitK) {
   const out = {};
   if (el.dust !== undefined) {
     out.dust = el.dust;
     if (el.idRand !== undefined) out.idRand = el.idRand;
+    if (el.idPick !== undefined) out.idPick = el.idPick;
     if (n != null && n !== 1) out.n = n;
     if (hitK != null) out.hitK = hitK;
-    for (const k of ['anchor', 'dx', 'dy', 'w', 'h', 'sx', 'sy', 'alpha', 'color', 'scale', 'pre', 'posts', 'alt', 'line']) {
+    for (const k of ['anchor', 'pos', 'dx', 'dy', 'w', 'h', 'sx', 'sy', 'alpha', 'color', 'colorHsl', 'scale', 'pre', 'gate', 'posts', 'clone', 'alt', 'line']) {
       if (el[k] !== undefined) out[k] = el[k];
     }
     return out;
@@ -990,7 +1152,7 @@ function withCount(el, n, hitK) {
     if (el.roll !== undefined) out.roll = el.roll;
     if (n != null && n !== 1) out.n = n;
     if (hitK != null) out.hitK = hitK;
-    for (const k of ['gate', 't', 'e', 'line']) if (el[k] !== undefined) out[k] = el[k];
+    for (const k of ['skip', 'gate', 't', 'e', 'line']) if (el[k] !== undefined) out[k] = el[k];
     return out;
   }
   // loop 组（嵌套）
@@ -998,6 +1160,15 @@ function withCount(el, n, hitK) {
   if (hitK != null) out.hitK = hitK;
   for (const k of ['body', 'line']) if (el[k] !== undefined) out[k] = el[k];
   return out;
+}
+
+/** ★BJ327 批4：stmt parent 帧链回溯最近 over-oldPos for 帧计数器（扫描后 frames 已空,走 frameById） */
+function nearestOverCounter(fid) {
+  for (let id = fid; id; id = frameById.get(id)?.parentId) {
+    const f = frameById.get(id);
+    if (f && f.kind === 'for' && f.loop && f.loop.ok && f.loop.over === 'oldPos') return f.loop.counter ?? null;
+  }
+  return null;
 }
 
 function materialize(e, out, ctx) {
@@ -1012,20 +1183,36 @@ function materialize(e, out, ctx) {
     if (v == null || !Number.isInteger(v)) { registerPending(e, t, [`idTyped:${e.idTyped}@${ctx.t}`]); return; }
     dustId = v;
   }
-  // color local（newColorN）→ 逐型解析（63/64/103、333-336 per-type 条件色）
+  // ★BJ327 批4：SelectRandom 带权 id 表（426/427 死亡环）——dust 字段=0 占位,id 全由 idPick 掷
+  if (e.idPick != null) dustId = 0;
+  // color local（newColorN）→ 逐型解析（63/64/103、333-336 per-type 条件色;
+  //   ★批4:hslLocals 优先——661 彩虹色相环索循环 index,消费侧逐尘求值）
   let color = e.color;
+  let colorHsl = null;
   const colorLocal = e.color && typeof e.color === 'object' && e.color.local ? e.color.local : null;
   if (colorLocal) {
-    const m2 = colorLocals.get(colorLocal);
-    color = (m2 && (m2.get(ctx.t) ?? m2.get(0))) || null;
-    if (!color) { registerPending(e, t, [`colorLocal:${colorLocal}@${ctx.t}`]); return; }
+    const hm = hslLocals.get(colorLocal);
+    const hv = hm && (hm.get(ctx.t) ?? hm.get(0));
+    if (hv) { colorHsl = { div: hv.div, sat: hv.sat, lum: hv.lum, mul: hv.mul }; color = null; }
+    else {
+      const m2 = colorLocals.get(colorLocal);
+      color = (m2 && (m2.get(ctx.t) ?? m2.get(0))) || null;
+      if (!color) { registerPending(e, t, [`colorLocal:${colorLocal}@${ctx.t}`]); return; }
+    }
   }
   stdStmts++;
   const stmt = {};
   stmt.dust = dustId;
   if (e.idRand != null) stmt.idRand = e.idRand;
+  if (e.idPick != null) stmt.idPick = e.idPick;
   if (e.box && (e.box.anchor !== 'pos' || e.box.dx !== 0 || e.box.dy !== 0 || e.box.w !== 'npc' || e.box.h !== 'npc')) {
     if (e.box.anchor === 'center') stmt.anchor = 'center';
+    // ★BJ327 批4：oldPos 轨迹盒——pos 引用必须 = 最近 over-oldPos for 帧计数器（parent 链回溯）
+    if (e.box.anchor === 'oldPos') {
+      const cnt = nearestOverCounter(e.parentFid);
+      if (cnt == null || cnt !== e.box.ref) { registerPending(e, t, [`posRef:${e.box.ref}!=${cnt ?? 'none'}`]); return; }
+      stmt.pos = 'oldPos';
+    }
     if (e.box.dx !== 0) stmt.dx = e.box.dx;
     if (e.box.dy !== 0) stmt.dy = e.box.dy;
     if (e.box.w !== 'npc') stmt.w = e.box.w;
@@ -1035,10 +1222,12 @@ function materialize(e, out, ctx) {
   if (e.sy !== 0 && e.sy != null) stmt.sy = e.sy;
   if (e.alpha !== 0 && e.alpha != null) stmt.alpha = e.alpha;
   if (color != null) stmt.color = color;
+  if (colorHsl) stmt.colorHsl = colorHsl;
   if (e.scale !== 1 && e.scale != null) stmt.scale = e.scale;
   if (e.pres && e.pres.length) stmt.gate = [...e.pres];   // 区域门（phaseAfterPre）：判负整元素跳过
   if (e.posts.length) stmt.posts = e.posts;
   if (e.alt) stmt.alt = { k: e.alt.k, op: e.alt.op, v: e.alt.v, ifOps: e.alt.ifOps, elseOps: e.alt.elseOps };
+  if (e.clone) stmt.clone = e.clone;                      // ★BJ327 批4：CloneDust 回声
   stmt.line = e.line;
   out.push(wrapEl(stmt, e.phase ? new Set([e.phase]) : new Set(['both'])));
 }
@@ -1082,6 +1271,9 @@ function buildBranchEl(cls, body, eels, f, ctx) {
   if (cls.pre.length) el.pre = [...cls.pre];
   if (leafPres.length) el.gate = [...leafPres];
   if (cls.roll) el.roll = { ...cls.roll };
+  // ★BJ327 批4：continue 分支（402 死亡环 `if (Next(4)!=0) { continue; }`）——roll 过 →
+  //   跳过本轮余下 body（空臂+hadContinue 标记;与 524 掷流占位静默相区分）
+  if (!body.length && !eels && f.hadContinue) el.skip = true;
   if (body.length) el.t = body.map((b) => b.el);
   if (eels && eels.length) el.e = eels.map((b) => b.el);
   el.line = (body.length ? body[0].el.line : (firstLineOf(f) ?? f.line)) ?? 0;
@@ -1241,6 +1433,14 @@ function resolveKids(fid, S, out, ctx) {
       resolveKids(f.id, S, body, ctx);
       if (!body.length) continue;
       if (subtreePend(f.id)) { markChainPending(f, ctx, 'groupMixedWithPending'); continue; }   // 循环体部分 pending → 整组保守 pending
+      // ★BJ327 批4：oldPos 轨迹环（402）——环长 = TrailCacheLength[型]（NPCID.cs:4809,缺省 10）,
+      //   逐 index 走 body（掷流/出尘序与原版同相）;index 绑定由 stmt.pos='oldPos' 消费
+      if (f.loop.over === 'oldPos') {
+        const phases = new Set();
+        for (const b of body) for (const p of b.phases) phases.add(p);
+        out.push(wrapEl({ over: 'oldPos', len: TRAIL_LEN.get(ctx.t) ?? TRAIL_LEN.get(0), body: body.map((b) => b.el), line: body[0].el.line ?? 0 }, phases));
+        continue;
+      }
       if (body.length === 1) {
         const el = body[0].el;
         if (f.loop.n != null || f.loop.hitK != null) {
@@ -1262,6 +1462,14 @@ function resolveKids(fid, S, out, ctx) {
     if (f.kind === 'if' || f.kind === 'else') {
       if (f.phaseReturnGuard) { ctx.consumed.add(f.id); continue; }   // `life >= 0` return：相位由 phaseAfter 承载
       if (f.postAltConsumed) { ctx.consumed.add(f.id); continue; }    // Allman post-alt 已并入上一语句 alt
+      // ★BJ327 批4：break 守卫帧（402 `if (oldPos[numN] == Vector2.Zero) { break; }`）——
+      //   brk 标记元素（消费侧：环 index 越深度/零位 → 跳出 oldPos 环;掷门后求值,与原版短路同序）
+      if (f.kind === 'if' && f.cond && f.cond.typeIds.size === 0 && f.cond.ranges.length === 0
+        && f.cond.gates.length === 1 && /^oldPos\[num\d+\] == Vector2\.Zero$/.test(f.cond.gates[0]) && !hasStmtKids(f.id)) {
+        ctx.consumed.add(f.id);
+        out.push(wrapEl({ brk: true, line: f.line }, new Set()));
+        continue;
+      }
       const r = resolveArmChain(f, S, out, ctx);
       if (r === 'cut') cutRest = true;
       continue;
@@ -1318,10 +1526,11 @@ data._meta = {
   unsupStmts,
   npcIds: typeIds.length,
   entryNpcIds: typeIds.length,
-  schema: 'per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,n?|hitK?,anchor?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,scale?,pre?,posts?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支',
+  schema: 'per-npcId: {hit:[el],death:[el]}; el=stmt|branch|loop; stmt={dust,idRand?,idPick?,n?|hitK?,anchor?/pos?/dx?/dy?/w?/h?,sx?,sy?,alpha?,color?,colorHsl?,scale?,pre?,posts?,clone?,alt?,line}; branch={pre?,gate?,roll:{k,op,v},skip?,n?|hitK?,t?:[el],e?:[el],line}=Main.rand.Next(k) op v 单掷二选一（pre=臂条件判负→e 臂不掷;gate=区域门判负→整支跳过;skip=roll 过→跳过本轮余下 body,402 continue）; 无臂 branch=掷流占位（roll 照耗零尘,★BJ304 524 静态死臂）; {brk:true}=oldPos 零位 break 标记（掷门后求值,越深度/零位→跳出所在 oldPos 环,402）; loop={n?|hitK?,body:[el],line}=循环组（逐拍按序走 body）|{over:\'oldPos\',len,body}=轨迹环（len=TrailCacheLength[型] NPCID.cs:4809,402=36;index 绑定 stmt.pos=\'oldPos\'）; n 缺省 1/hitK=ceil(dmg/lifeMax*K)/alpha0/color 默认/scale1; idRand=K → dust=base+Next(K) 逐尘掷; idPick=[a,b,c] → dust=idPick[Next(len)] 带权掷表（重复项=权重,Utils.SelectRandom 直译;dust 字段=0 占位）; sx token: hd|2hd|2.5hd|1.5hd|6hd|-1hd|-1.5hd|velX|velY|negVelX*0.2|negVelY*0.2|velX*0.2|velY*0.2|数; anchor=center → 盒=中心±(dx,dy) 半开 w×h; pos=oldPos → 盒顶左=hist[环 index]（Enemy 轨迹环,绝对位）; pre/gate: lifeGtHalf=hp>floor(maxHp/2)|lifeLt0=hp<0（命中时点 post-deduction,StrikeNPC :82206/:82213 life-=num 先于 HitEffect :82325）; posts ops: ng|velMul|velDiv|scaleMul|scaleDiv|scaleSet|scaleSetNpc|scaleAddR01(scale+=NextFloat())|fadeIn(N)=原版生长目标语义 Dust.cs :2148-2171（★BJ304 定谳:非 alpha 渐入;VanillaDust.ts :740-745 引擎 1:1）|复合 scale=A+NextFloat()=scaleSet+scaleAddR01（426/427 死亡支形态）|★批4: fadeInR01(A,span)=A+NextFloat()×span（661）/fadeInMul(k)（clone 回声）/noLight(b)（引擎光链消费,VanillaDust.ts :551）/posCircular（position=Center+NextVector2Circular(w,h),2 掷）/velFromCenter(k)（velocity=(position−Center)×k,0 掷）/colorSet(rgba)（Color×k float 域）; colorHsl={div,sat,lum,mul}=hslToRgb(fround(idx/div%1),sat,lum)×mul（661 彩虹,Main.cs :48689 直译）; clone={posts}=CloneDust 回声（Dust.cs :260-288,施于克隆尘）; alt={k,op,v,ifOps,elseOps}=逐尘掷骰 post 分支',
   noGenericTail: '★原版无通用尘尾（最终 else=if(type!=156) return 专属支）——表外型受击/死亡不出尘（BJ254 双向偏差收口的行为变化面）',
   batch2: 'BJ296 批2（2026-09-23）概率门族接入：帧树逐型臂解析（死臂剪枝/循环组/单掷分支/pre 谓词/idRand）；掷流通道=Math.random（与批1 alt 同源,引擎侧 spawnDust 抖动同拍）; 接入 15 型：134-136/262-265/407/409/410/411/428/478/516/636',
-  batch3: 'BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending:noLight=VDust.noLight 字段在位但引擎不消费+idPick 未建）。仍排除：661（hslToRgb 彩虹色+NextVector2Circular 位移+velocity 派生+CloneDust 回声,零尘登记）/402（oldPos,批4）',
+  batch3: 'BJ304 批3（2026-09-23）fadeIn 定谳翻案族接入：★翻案=fadeIn 非「alpha 渐入/本仓不可用」（BJ296 批2 报告登记误）——原版语义=生长目标（Dust.cs :2148-2171:0<fadeIn<100 时 scale+=0.03/t 至超 fadeIn 归零转衰落,无 alpha 参与）,本仓 VDust.fadeIn 在位+老化 1:1（VanillaDust.ts :740-745）→ 收编 std 算子 fadeIn(N)。接入 18 型：fadeIn 叶族 415-421/423-427/429/518（叶=[ng,scaleSet1.5,fadeIn1,velMul3],主 d241|d249+叶 d6|d242|d229）+524-527（typedLocals per-type 局部 id:num205=0/75/170/67;门 Next(K)==0&&num205>0 静态析取——524 臂体静态死→掷流占位空分支,525/526/527 恒真脱门）。426/427 death 半接（d241 主环入表;SelectRandom 环 pending）→ 已随 BJ327 批4 转正。仍排除（批4 后清零）：661（四缺口,批4 接）/402（oldPos,批4 接）',
+  batch4: 'BJ327 批4（2026-09-24）HitEffect 尘面收官批：①402 oldPos 轨迹盒 6 组——★Enemy 定谳=有轨迹环（histXAt/histYAt/historyDepth,容量 60≥TrailCacheLength[402]=36,TrailingMode[402]=7 逐拍推入）无需扩展;loop.over=\'oldPos\'（len=NPCID.cs:4809 环长）+stmt.pos=\'oldPos\'+brk 标记（oldPos[i]==Zero break,掷门后求值）+branch.skip（Next(4)!=0 continue）。②426/427 SelectRandom 带权 id 环——idPick=[…]=choices[Next(len)]（重复项=权重,426 [229,240,161] 均一/427 [229,229,240] 2:1）;★noLight 定谳翻案（BJ304「字段在位但引擎不消费」判词误:VDust.noLight 引擎光链 VanillaDust.ts :551 烟雾族 !noLight 门消费,240/161 原文本无光=no-op 同相）→ std 算子 noLight(true)。③661 四缺口一次接齐——hslToRgb 纯函数 std-expressible（Main.cs :48689-:48717 直译,hue=fround(idx/100%1) float32 环索循环 index,Math.Round=ToEven;乘色走 float 域=LeashedCritter.ts:1577 White×0.5 同源判例）/posCircular（Center+NextVector2Circular(w,h),Utils.cs:1301-1303,2 掷角+幅）/velFromCenter（(position−Center)×k,0 掷派生）/CloneDust 回声（Dust.cs :260-288,引擎 VanillaDust.clone 在位,GameHooks.cloneDust 钩子新建;clone.posts=[scaleDiv2,fadeInMul0.85,colorSet(127.5×4)]）。接入 4 型：402/426/427/661——尘面收官:_meta.pending 中型域组只剩 std-expressible 滚动清单+根级门组（daybreak/gold-critter/ai[1]/netMode/IsShimmerVariant/TownPet/!wet/forStep/pos 派生/color 派生族）',
   carveOuts: [
     '泼岩浆（BJ246 已接）/亡体 NewNPC 分裂等世界改写不入尘表——★S4 亡体 NewNPC 10 站站点级登记（HitEffect :82492-:90939 逐站普查;接刀=Enemy.ts 死亡管线,防批 2+ 普查误读为缺刀）: :83989 426外星蜂后→428×3 已接/:84400 405星细胞→406≤4 已接/:85721 16母史莱姆→-5×2-3 已接/:85917 246石巨人挂载头→249 已接(golemHeadAI 血尽转自由态,非 NewNPC 直出)/:86418 121飞尸→-2 ★BJ263 接/:86434 81腐化史莱姆→-1×2-3 ★BJ263 接/:86671 50史莱姆王→1×4-7 已接/:87982 632蛆虫僵尸→606×2-3 ★BJ263 接/:88413 115饥饿者→116 已接/:90342 135毁灭者身段→139 已接(存活面 ai2==0 掷探针)',
     'gore 表由 tools/extract-gore.mjs 全量承担（spawnNpcDeathGore）',

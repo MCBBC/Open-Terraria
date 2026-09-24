@@ -142,18 +142,18 @@ describe('BJ254 A. vanilla-npcdust.json 首批钉值', () => {
     expect(TABLE['4'].death).toEqual([{ dust: 5, n: 150, sx: '2hd', sy: -2, line: 88271 }]);
   });
 
-  it('★结构锁：_meta.noGenericTail 声明 + WoF 族 113-116/光女 661 不在表（415-419 已随 BJ304 批3 fadeIn 翻案入表）', () => {
+  it('★结构锁：_meta.noGenericTail 声明 + WoF 族 113-116 不在表（415-419 已随 BJ304 批3 fadeIn 翻案入表;661 已随 BJ327 批4 转正）', () => {
     expect(String(TABLE._meta.noGenericTail)).toContain('原版无通用尘尾');
     expect(String(TABLE._meta.source)).toContain('HitEffect');
-    // ★BJ304 批3 后：415-419/518 等 fadeIn 族已入表（定谳翻案:fadeIn=生长目标语义,
-    //   VDust.fadeIn 引擎 1:1,非「alpha 渐入/本仓不可用」）；661（NextVector2Circular
-    //   post+color local+CloneDust 回声,真 postUnsupported）仍不入表；113-116 WoF 手块保留。
-    for (const vid of ['113', '114', '115', '116', '661']) {
+    // ★BJ327 批4 后：402/426/427/661 已入表（尘面收官）——零尘钉面收敛于 pending
+    //   滚动清单（std-expressible 族+根级门组）;113-116 WoF 手块保留。
+    for (const vid of ['113', '114', '115', '116']) {
       expect(TABLE[vid], `vid=${vid} 不应出现在表`).toBeUndefined();
     }
-    // 规模（批1 78 门组/299 型 + 批2 概率门族 15 型 = 314 + 批3 fadeIn 族 18 型 = 332,BJ304）
+    // 规模（批1 78 门组/299 型 + 批2 概率门族 15 型 = 314 + 批3 fadeIn 族 18 型 = 332
+    //   + 批4 收官 402/661 转正 = 334,BJ327;426/427 批3 已在表）
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(332);
+    expect(ids.length).toBe(334);
   });
 });
 
@@ -280,17 +280,20 @@ describe('BJ254 B. 受击/死亡尘查表行为', () => {
 
 // ===================== C. 未列型零尘 + WoF 手块保留 =====================
 describe('BJ254 C. 未列型零尘（原版相锁）与 WoF 手块', () => {
-  it('★661（光女,postUnsupported 四缺口未接——BJ304 批3 起 419 已入表,零尘钉面移 661）受击/死亡零尘零粒子=原版本相', () => {
+  it('★661（光女,已随 BJ327 批4 转正——判别面移 tests/bj327-npcdust-batch4.test.ts）出尘走查表单源,零通用彩色粒子', () => {
     const w = makeWorld();
     const cap: DustCall[] = []; const parts: number[] = []; const legacy: number[] = [];
     const g = makeHooks(w, cap, parts, legacy);
     const e = spawn(661);
-    // ★直驱（661 仓内 stats 缺口 maxHp=5,与尘面无关——查表零尘钉面走 NpcHitDust 单源）
+    // ★直驱（661 仓内 stats 缺口 maxHp=5,与尘面无关——查表钉面走 NpcHitDust 单源;
+    //   BJ327 批4 后 661 表内出尘,此处只锁「无 parts/legacy 旁路」旧偏差不回归）
     spawnNpcHitDust(e, g, 1, 10);
-    expect(cap.length).toBe(0);
+    expect(cap.length).toBeGreaterThan(0);             // 批4 转正:Next(5) 门彩虹 d267 环入表出尘
+    expect(cap.every((d) => d.type === 267)).toBe(true);
     spawnNpcDeathDust(e, g, 1);
-    expect(cap.length).toBe(0);
+    expect(cap.every((d) => d.type === 267)).toBe(true);
     expect(parts.length).toBe(0);                      // 通用彩色粒子近似已退役
+    expect(legacy.length).toBe(0);                     // 无 dust.spawn 旧通道旁路
   });
 
   it('WoF 113 手块保留（首批不转表）：受击 20 簇 / 死亡 50 簇（dust.spawn 旧通道）', () => {

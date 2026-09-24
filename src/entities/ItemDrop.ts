@@ -16,6 +16,7 @@ import {
 } from '../stats/Shimmer';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { VANILLA_ITEM_COLOR, VANILLA_ITEM_ALPHA } from '../data/vanillaItemColor';
+import { vanillaItemDimsOfVid } from '../data/vanillaItemDims';
 
 /** CantTakeLunchMoney（NPCID.cs:4468,39 型）——专家模式怪捡钱豁免表（R14-A3） */
 const CANT_TAKE_LUNCH_MONEY = new Set([394, 393, 392, 690, 492, 491, 662, 384, 478, 535,
@@ -46,6 +47,10 @@ const LAVA_IMMUNE_ITEMS = new Set([
 const SHIMMER_UNSTICK_T = 300;
 
 export class ItemDrop extends Entity {
+  /** 命中盒尺寸：★BJ326 件 2（2026-09-24）——12×12 统一简化退役,构造期按 vid 自
+   *  vanilla-itemdims（Item.cs SetDefaults width/height 终值,99.6% 覆盖）注入；
+   *  表外（SW 物品/流分析缺口）回落 12×12。消费面=物理/拾取/岩浆/微光探针（全吃
+   *  this.w/h,原版本相=按 vid）;渲染 drawDrop 盒中心锚定 → 中心不变绘制不变 */
   w = 12; h = 12;
   itemId: number;
   stack: number;
@@ -135,6 +140,10 @@ export class ItemDrop extends Entity {
     // 语义随实例走：掉落物一落地就带着色，渲染端 tintedSprite 消费（此前无人赋值
     // = 死代码，凝胶掉地上也是灰的）。存档/重建走构造自愈，无需序列化。
     const vid = (ITEM_DEFS[itemId]?.vid ?? -1);
+    // ★BJ326 件 2：命中盒按 vid（原版 Item.NewItem 收【中心】→ worldItem.Center,
+    // Item.cs:49739——盒尺寸取 Item.width/height;spawnDrop 中心锚由此承担半盒偏移）
+    const dims = vanillaItemDimsOfVid(vid);
+    if (dims) { this.w = dims[0]; this.h = dims[1]; }
     const ic = vid > 0 ? VANILLA_ITEM_COLOR[vid] : undefined;
     if (ic && ic[3] > 0) this.color = [...ic];
     // ★SW-FX49 Item.alpha 静态表注入（GetAlpha 默认支 pass1 维,与 color 域无

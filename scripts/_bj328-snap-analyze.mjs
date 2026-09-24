@@ -43,6 +43,59 @@ if (mode === 'census') {
   rows.sort((x, y) => (y.b - y.a) - (x.b - x.a));
   console.log('class                       A(1轮菜单)  B(2轮菜单)  Δ');
   for (const r of rows.slice(0, 45)) console.log(`${r.k.padEnd(26)} ${String(r.a).padStart(8)} ${String(r.b).padStart(10)} ${String(r.b - r.a).padStart(4)}`);
+} else if (mode === 'native-chain') {
+  // 用法: native-chain <file> <exactNodeName> <idx,...> —— native 类型节点（blink::）正向语义链
+  const file = process.argv[3]; const wantName = process.argv[4];
+  const idxs = (process.argv[5] ?? '0').split(',').map(Number);
+  const s = parse(file);
+  const { nodes, edges, strings, F, EF, typeNames, edgeTypeNames, nodeCount, eName, eType, eTo, nEdges } = s;
+  const label = (i) => `${tpOf(s, i)}:${String(nmOf(s, i)).slice(0, 70)}#${i}`;
+  const startArr = new Uint32Array(nodeCount + 1);
+  let ep = 0;
+  for (let i = 0; i < nodeCount; i++) { startArr[i] = ep; ep += nodes[i * F + nEdges]; }
+  startArr[nodeCount] = ep;
+  const edgeToArr = new Uint32Array(ep), edgeNameArr = new Uint32Array(ep), edgeTypeArr = new Uint8Array(ep);
+  for (let k = 0; k < ep; k++) {
+    edgeToArr[k] = edges[k * EF + eTo] / F;
+    edgeNameArr[k] = edges[k * EF + eName];
+    edgeTypeArr[k] = edges[k * EF + eType];
+  }
+  const ALLOW = new Set(['property', 'element', 'context', 'internal', 'hidden', 'shortcut', 'variable', 'weak']);
+  const chainTo = (tgt) => {
+    const parent = new Int32Array(nodeCount).fill(-1);
+    const viaEdge = new Int32Array(nodeCount).fill(-1);
+    const q = new Int32Array(nodeCount);
+    let h = 0, t = 0;
+    for (let i = 0; i < nodeCount; i++) if (tpOf(s, i) === 'synthetic') { parent[i] = -2; q[t++] = i; }
+    let found = false;
+    while (h < t && !found) {
+      const cur = q[h++];
+      for (let k = startArr[cur]; k < startArr[cur + 1]; k++) {
+        if (!ALLOW.has(edgeTypeNames[edgeTypeArr[k]])) continue;
+        const to = edgeToArr[k];
+        if (parent[to] !== -1) continue;
+        parent[to] = cur; viaEdge[to] = k; q[t++] = to;
+        if (to === tgt) { found = true; break; }
+      }
+    }
+    if (!found) return '(不可达)';
+    const path = [];
+    let cur = tgt, steps = 0;
+    while (cur !== -2 && cur >= 0 && steps < 30) {
+      const k = viaEdge[cur];
+      const e = k >= 0 ? `--(${edgeTypeNames[edgeTypeArr[k]]}:${strings[edgeNameArr[k]] ?? edgeNameArr[k]})-->` : '(root)';
+      path.push(e + ' ' + label(cur));
+      cur = parent[cur]; steps++;
+    }
+    return path.join('\n  ');
+  };
+  const targets = [];
+  for (let i = 0; i < nodeCount; i++) if (nmOf(s, i) === wantName) targets.push(i);
+  console.log(`${wantName} 实例共 ${targets.length} 个`);
+  for (const idx of idxs) {
+    if (targets[idx] === undefined) { console.log(`#${idx}: 越界`); continue; }
+    console.log(`\n=== #${idx} ===\n  ` + chainTo(targets[idx]));
+  }
 } else if (mode === 'chain') {
   const file = process.argv[3]; const wantName = process.argv[4]; const wantIdx = Number(process.argv[5] ?? 0);
   const s = parse(file);

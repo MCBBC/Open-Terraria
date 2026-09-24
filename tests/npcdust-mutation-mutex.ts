@@ -15,6 +15,7 @@ const MUT_LOCK = join(realpathSync(tmpdir()), 'bj-npcdust-consumer-mutation.lock
 const ANCHORS = [
   "case 'fadeIn': d.fadeIn = op[1]; break;",   // BJ304 批3 fadeIn 算子
   "if (!prePass(el.pre, e)) {",                // BJ296 批2 pre 短路
+  "case 'noLight': d.noLight = op[1]; break;", // BJ327 批4 noLight 算子（引擎光链消费面）
 ];
 
 function stealIfStale(): boolean {

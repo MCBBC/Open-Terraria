@@ -169,25 +169,33 @@ describe('BJ304 A. 批3 数据面金标（手核 NPC.cs diff=0 组钉值）', ()
     }
   });
 
-  it('426/427（:83944-:84030）：hit 相 d229 叶入表;death 半接=仅 d241 主环（SelectRandom 环 pending 不入表）', () => {
+  it('426/427（:83944-:84030）：hit 相 d229 叶入表;death d241 主环+SelectRandom 环已随 BJ327 批4 转正（idPick 带权+noLight 算子）', () => {
     expect(TABLE['426'].hit).toEqual([
       { hitK: 50, body: [
         { dust: 241, sx: 'hd', sy: -1, line: 83949 },
         { roll: { k: 4, op: '==', v: 0 }, t: [{ dust: 229, posts: [['ng', true], ['scaleSet', 1.5], ['fadeIn', 1], ['velMul', 3]], line: 83952 }], line: 83952 },
       ], line: 83949 },
     ]);
-    expect(TABLE['426'].death).toEqual([{ dust: 241, n: 20, sx: 'hd', sy: -1, line: 83965 }]);
+    // ★BJ327 批4:death 第二环入表——idPick=[229,240,161]（Utils.SelectRandom 直译,均一）+
+    //   复合 scale+fadeIn0.25+velMul2+noLight（算子转正:引擎光链 VanillaDust.ts :551 消费）
+    expect(TABLE['426'].death).toEqual([
+      { dust: 241, n: 20, sx: 'hd', sy: -1, line: 83965 },
+      { dust: 0, idPick: [229, 240, 161], n: 30, posts: [['ng', true], ['scaleSet', 1.25], ['scaleAddR01'], ['fadeIn', 0.25], ['velMul', 2], ['noLight', true]], line: 83970 },
+    ]);
     expect(TABLE['427'].hit).toEqual([
       { hitK: 20, body: [
         { dust: 241, sx: 'hd', sy: -1, line: 84003 },
         { roll: { k: 2, op: '==', v: 0 }, t: [{ dust: 229, posts: [['ng', true], ['scaleSet', 1.5], ['fadeIn', 1], ['velMul', 3]], line: 84006 }], line: 84006 },
       ], line: 84003 },
     ]);
-    expect(TABLE['427'].death).toEqual([{ dust: 241, n: 10, sx: 'hd', sy: -1, line: 84019 }]);
-    // pending 精确登记：SelectRandom 环阻塞面=noLight（复合 scale 已收编走完捕获链到 noLight 停）
+    // ★427 idPick=[229,229,240]——重复项=权重（2:1）;velMul3
+    expect(TABLE['427'].death).toEqual([
+      { dust: 241, n: 10, sx: 'hd', sy: -1, line: 84019 },
+      { dust: 0, idPick: [229, 229, 240], n: 20, posts: [['ng', true], ['scaleSet', 1.25], ['scaleAddR01'], ['fadeIn', 0.25], ['velMul', 3], ['noLight', true]], line: 84024 },
+    ]);
+    // ★BJ327 批4:pending 清空（SelectRandom 环不再登记）
     const pend = TABLE._meta.pending as Array<{ types: number[]; reason: string; line: number }>;
-    expect(pend.find((p) => p.types.includes(426) && p.line === 83970)?.reason).toBe('id:num136;postUnsupported:dust30.noLight = true;');
-    expect(pend.find((p) => p.types.includes(427) && p.line === 84024)?.reason).toBe('id:num144;postUnsupported:dust32.noLight = true;');
+    expect(pend.find((p) => p.types.includes(426) || p.types.includes(427))).toBeUndefined();
   });
 
   it('524-527（:84683-:84744）：num205 per-type 局部 id（0/75/170/67）;524 掷流占位空分支（无 t 臂）', () => {
@@ -306,22 +314,37 @@ describe('BJ304 B. 批3 消费行为（fadeIn 落尘/占位耗掷/半接零掷�
     expect(cap3.some((d) => d.type === 75)).toBe(false);   // 不串型
   });
 
-  it('426/427 death 半接：恰 20|10 粒 d241,SelectRandom 环零发零掷（229/240/161 不现）', () => {
+  it('426/427 death（★BJ327 批4 转正）：d241 主环+SelectRandom 环齐发（noLight/fadeIn0.25/复合 scale 落活尘;逐尘 2 掷=idPick+scaleAddR01）', () => {
     const w = makeWorld();
     const cap: DustCall[] = [];
     const g = makeHooks(w, cap);
     const e = spawn(426, 110, FLOOR - 4);
     const r = countRolls();
     spawnNpcDeathDust(e, g, 1);
-    expect(cap.length).toBe(20);
-    expect(cap.every((d) => d.type === 241)).toBe(true);
-    expect(r.rolls()).toBe(0);                             // pending 环不入表→零耗掷（登记偏差）
+    expect(cap.length).toBe(50);                           // 20 d241 主环 + 30 SelectRandom 环
+    expect(cap.filter((d) => d.type === 241).length).toBe(20);
+    expect(cap.filter((d) => d.type !== 241).length).toBe(30);
+    for (const d of cap) {
+      if (d.type === 241) continue;
+      expect(d.fadeIn).toBe(0.25);                         // 环尘 fadeIn=0.25（生长目标）
+      expect(d.scale).toBeGreaterThanOrEqual(1.25);        // scale=1.25+NextFloat()（复合算子）
+      expect(d.scale).toBeLessThan(2.25);
+      expect(d.noGravity).toBe(true);
+      expect((d as unknown as { noLight: boolean }).noLight).toBe(true);   // ★noLight 落活尘（引擎光链消费位）
+      expect(d.vx).toBeCloseTo(d.sx * 2, 10);              // velocity ×= 2（426）
+    }
+    expect(r.rolls()).toBe(60);                            // 30×(idPick 1 掷+scaleAddR01 1 掷)
     const cap2: DustCall[] = [];
     const g2 = makeHooks(w, cap2);
     const e2 = spawn(427, 110, FLOOR - 4);
     spawnNpcDeathDust(e2, g2, 1);
-    expect(cap2.length).toBe(10);
-    expect(cap2.every((d) => d.type === 241)).toBe(true);
+    expect(cap2.length).toBe(30);                          // 10 d241 + 20 环
+    expect(cap2.filter((d) => d.type === 241).length).toBe(10);
+    for (const d of cap2) {
+      if (d.type === 241) continue;
+      expect((d as unknown as { noLight: boolean }).noLight).toBe(true);
+      expect(d.vx).toBeCloseTo(d.sx * 3, 10);              // velocity ×= 3（427）
+    }
   });
 
   it('429 death：20 迭代 [d241, Next(3)==0→d229];叶 posts 同相（ng/scale/fadeIn）', () => {
@@ -342,35 +365,33 @@ describe('BJ304 B. 批3 消费行为（fadeIn 落尘/占位耗掷/半接零掷�
   });
 });
 
-// ===================== C. 边界（661 四缺口零尘 + _meta 声明） =====================
+// ===================== C. 边界（661 已随 BJ327 批4 转正 + _meta 声明） =====================
 describe('BJ304 C. 边界', () => {
-  it('661（光女,四缺口:color local hslToRgb/NextVector2Circular 位移/velocity 派生/CloneDust 回声）hit/death 零尘', () => {
+  it('661（光女,四缺口已随 BJ327 批4 一次接齐——判别面移 tests/bj327-npcdust-batch4.test.ts）出尘型域+落尘面锁', () => {
     const w = makeWorld();
     const cap: DustCall[] = [];
     const g = makeHooks(w, cap);
     const e = spawn(661);
-    // ★直驱（661 仓内 stats 缺口 maxHp=5,与尘面无关——查表零尘钉面走 NpcHitDust 单源）
+    // ★直驱（661 仓内 stats 缺口 maxHp=5,与尘面无关——查表钉面走 NpcHitDust 单源）
     spawnNpcHitDust(e, g, 1, 10);
     spawnNpcDeathDust(e, g, 1);
-    expect(cap.length).toBe(0);
-    expect(TABLE['661']).toBeUndefined();
+    expect(cap.length).toBeGreaterThan(0);             // 批4 转正:Next(5) 门 d267 彩虹环出尘
+    expect(cap.every((d) => d.type === 267)).toBe(true);
+    expect(TABLE['661']).toBeDefined();               // 表内登记（四缺口:colorHsl/posCircular/velFromCenter/clone）
   });
 
-  it('_meta 声明：batch3 翻案面 + pending 收敛（fadeIn 族/524-527 不在 pending;426/427 death 半接行+661 在）', () => {
+  it('_meta 声明：batch3 翻案面 + pending 收敛（fadeIn 族/524-527/426/427/661 批4 后全不在 pending）', () => {
     expect(String(TABLE._meta.batch3)).toContain('翻案');
     expect(String(TABLE._meta.batch3)).toContain('生长目标');
     const ids = Object.keys(TABLE).filter((k) => k !== '_meta');
-    expect(ids.length).toBe(332);
+    expect(ids.length).toBe(334);                      // 332 + 402/661（★BJ327 批4 转正;426/427 批3 已在）
     for (const vid of ['415', '416', '417', '418', '419', '420', '421', '423', '424', '425', '426', '427', '429', '518', '524', '525', '526', '527']) {
       expect(TABLE[vid]).toBeDefined();
     }
     const pend = TABLE._meta.pending as Array<{ types: number[]; reason: string }>;
     const pendIds = new Set(pend.filter((p) => p.types.length < 100).flatMap((p) => p.types));
-    for (const vid of [415, 416, 417, 418, 419, 420, 421, 423, 424, 425, 429, 518, 524, 525, 526, 527]) {
-      expect(pendIds.has(vid)).toBe(false);              // 全接型 pending 清空
-    }
-    for (const vid of [426, 427, 661]) {
-      expect(pendIds.has(vid)).toBe(true);               // 半接/未接登记在案
+    for (const vid of [415, 416, 417, 418, 419, 420, 421, 423, 424, 425, 429, 518, 524, 525, 526, 527, 426, 427, 661, 402]) {
+      expect(pendIds.has(vid)).toBe(false);            // 全接型 pending 清空（★批4 收官含 426/427/661/402）
     }
   });
 });
