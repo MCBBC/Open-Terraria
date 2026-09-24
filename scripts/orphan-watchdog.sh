@@ -45,9 +45,9 @@ while IFS= read -r line; do
   cpu=$(echo "$line" | awk '{print $4}' | cut -d. -f1)
   et=0
   case "$etime" in
-    *-*) d=${etime%%-*}; r=${etime#*-}; h=${r%%:*}; r2=${r#*:}; m=${r2%%:*}; s=${r2##*:}; et=$((d*86400+h*3600+m*60+s));;
-    *:*:*) h=${etime%%:*}; r=${etime#*:}; m=${r%%:*}; s=${r##*:}; et=$((h*3600+m*60+s));;
-    *:*) m=${etime%%:*}; s=${etime##*:}; et=$((m*60+s));;
+    *-*) d=${etime%%-*}; r=${etime#*-}; h=${r%%:*}; r2=${r#*:}; m=${r2%%:*}; s=${r2##*:}; et=$((10#$d*86400+10#$h*3600+10#$m*60+10#$s));;
+    *:*:*) h=${etime%%:*}; r=${etime#*:}; m=${r%%:*}; s=${r##*:}; et=$((10#$h*3600+10#$m*60+10#$s));;
+    *:*) m=${etime%%:*}; s=${etime##*:}; et=$((10#$m*60+10#$s));;
   esac
   [ "$cpu" -gt 40 ] 2>/dev/null || continue
   [ "$et" -gt 2700 ] || continue   # 45min 年龄门槛

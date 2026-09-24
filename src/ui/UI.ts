@@ -1454,7 +1454,9 @@ export class UI {
       // ★SW-FX10 债⑪热键锁穿透（Main.cs:44353-44359）：锁定+关包时快捷栏格不是
       //  mouseInterface——不 stopPropagation/preventDefault，事件透传 window（domTargets
       //  按 data-sw-world-passthrough 豁免 → 世界使用/挖掘链照常吃这一按）
-      if (host.dataset.swWorldPassthrough === '1') return;
+      //  ★BJ335:host 经 e.currentTarget 取（BJ328 刀）——真分发恒有值;测试 shim
+      //  直调 handler 无 currentTarget,须容 undefined（守卫仅护 dataset 读）。
+      if (host && host.dataset.swWorldPassthrough === '1') return;
       e.stopPropagation();
       e.preventDefault();
       if (e.button === 2) {
