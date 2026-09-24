@@ -966,6 +966,14 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         merge: g.renderer?.cloudMergeUsed ?? null,
         mergeStats: g.renderer?.cloudMergeStats ?? null,
       },
+      // ★opresent 诊断面（2026-09-25 单 present 合并刀）:used=上帧是否实际走
+      //  pass3 合并（旗 ?opresent=1 灰度缺省关）;stats={merged,fallback} 分布——
+      //  fallback 占比高=夹层谓词常真（灯笼/气球/事件天幕/戏剧/环境实体）或
+      //  门常假（低清档/fullbright/compose 失败）,合并收益丢失的归因面
+      opresent: {
+        used: g.renderer?.opresentUsed ?? null,
+        stats: g.renderer?.opresentStats ?? null,
+      },
       // ★C8 诊断面（2026-09-23）:波场 Worker 运行态——on=worker 在跑,fields/falls
       //  =场快照应答/失联回落计数（falls>0=已自动回落主线程模拟,需报障）
       waveWorker: (() => {

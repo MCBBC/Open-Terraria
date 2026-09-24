@@ -146,12 +146,18 @@ export class GLShimExecutor {
   private gco: GlobalCompositeOperation = 'source-over';
   private smooth = false;
   private fillStyleS = '#000';
+  /** ★普查修复（2026-09-25 旗错色同病普查案②）：font/textAlign 状态镜像——acc 态
+   *  旧代码路径（Bobber 声呐渔获名/Banner 悬停名）先 set font+textAlign 再 fillText,
+   *  未镜像属性在 acc 态被静默丢弃（set 落空+raw=null）,fillText 触发降级后 bridge()
+   *  又不回放 → 默认字体+左对齐错位渲染（undefined 传播面同 gCO 族病根）。 */
+  private fontV = '10px sans-serif';
+  private alignV: CanvasTextAlign = 'left';
   /** ★B2b acc 隔离栅格化所需状态镜像（strokeStyle/lineWidth/filter 任意值原样保） */
   private strokeStyleV: string | CanvasGradient | CanvasPattern = '#000';
   private lineWidthV = 1;
   /** ctx.filter 镜像（非 'none' 的 drawImage=源级滤镜——quad 不表达,走隔离栅格化） */
   private filterV = 'none';
-  private stack: Array<{ m: typeof GLShimExecutor.prototype.m; ga: number; gco: GlobalCompositeOperation; smooth: boolean; fill: string; clip: boolean; stroke: string | CanvasGradient | CanvasPattern; lw: number; filter: string }> = [];
+  private stack: Array<{ m: typeof GLShimExecutor.prototype.m; ga: number; gco: GlobalCompositeOperation; smooth: boolean; fill: string; clip: boolean; stroke: string | CanvasGradient | CanvasPattern; lw: number; filter: string; font: string; align: CanvasTextAlign }> = [];
   /** 队列（单序表+tier 标签——重放保原序,SO/ADD 分批 present） */
   private head: QuadRec | null = null;
   private tail: QuadRec | null = null;
@@ -191,6 +197,8 @@ export class GLShimExecutor {
     this.gco = raw.globalCompositeOperation;
     this.smooth = raw.imageSmoothingEnabled;
     this.filterV = String(raw.filter ?? 'none');
+    this.fontV = String(raw.font ?? '10px sans-serif');
+    this.alignV = (raw.textAlign ?? 'left') as CanvasTextAlign;
     this.clipped = false;
     this.active = true;
     return this.wrap();
@@ -207,7 +215,14 @@ export class GLShimExecutor {
     if (!this.glw || this.glw.unavailable) { this.accMode = false; return null; }
     this.m.a = 1; this.m.b = 0; this.m.c = 0; this.m.d = 1; this.m.e = 0; this.m.f = 0;
     this.ga = 1; this.gco = 'source-over'; this.smooth = false; this.filterV = 'none';
+    this.fontV = '10px sans-serif'; this.alignV = 'left';
     this.clipped = false;
+    // ★普查修复（2026-09-25 旗错色同病普查案③）：上一帧异常残留的【开着 FBO】必须
+    //  弃用——endAccumulate 前残帧 pipeFbo 仍绑 'world',本帧首个 flushAcc 撞
+    //  isAccumOpen=true 会跳过 begin(clear) → 新帧内容叠在残帧上=残影跨帧串层
+    //  （与下方残队守卫同案同拍:异常帧 queue+开 FBO 双残,残队已治,FBO 此治）。
+    //  正常帧 finishAccFrame→endAccumulate 已解绑=本支恒 no-op。
+    if (this.glw.isAccumOpen('world')) this.glw.endAccumulate();
     // ★B2b 修复:新帧 acc 窗开=队列必须空——上一帧异常路径（渲染 throw 于
     //  compositeLight 前）会留残队,残队在本帧首个 flush 点（墙格段 flush）
     //  先于墙发射=角色/实体垫到墙后（用户实报症状）。宁弃残帧内容不跨帧串层。
@@ -231,6 +246,8 @@ export class GLShimExecutor {
       raw.strokeStyle = this.strokeStyleV;
       raw.lineWidth = this.lineWidthV;
       raw.filter = this.filterV;
+      raw.font = this.fontV;        // ★普查案②:文本态回放（降级帧 fillText 用对字体）
+      raw.textAlign = this.alignV;
     } catch { /* 非法值保 raw 现状 */ }
   }
 
@@ -319,6 +336,9 @@ export class GLShimExecutor {
             if (prop === 'strokeStyle') return self.strokeStyleV;
             if (prop === 'lineWidth') return self.lineWidthV;
             if (prop === 'filter') return self.filterV;
+            // ★普查案②:font/textAlign 读回镜像值（undefined 传播面封口）
+            if (prop === 'font') return self.fontV;
+            if (prop === 'textAlign') return self.alignV;
             if (DRAWING_TAIL.has(prop)) {
               const fn = (...args: unknown[]) => { self.accTailOp(prop, args); return undefined; };
               bound[prop] = fn;
@@ -401,6 +421,9 @@ export class GLShimExecutor {
     else if (prop === 'strokeStyle') this.strokeStyleV = value as string | CanvasGradient | CanvasPattern;
     else if (prop === 'lineWidth' && typeof value === 'number') this.lineWidthV = value;
     else if (prop === 'filter' && typeof value === 'string') this.filterV = value;
+    // ★普查案②:font/textAlign 镜像（acc 态 set 只落镜像,降级后 bridge 回放）
+    else if (prop === 'font' && typeof value === 'string') this.fontV = value;
+    else if (prop === 'textAlign' && typeof value === 'string') this.alignV = value as CanvasTextAlign;
   }
 
   // ================= 变换（镜像+委托,fround 复刻 Skia f32 拼接） =================
@@ -410,6 +433,7 @@ export class GLShimExecutor {
       m: { ...this.m }, ga: this.ga, gco: this.gco, smooth: this.smooth,
       fill: this.fillStyleS, clip: this.clipped,
       stroke: this.strokeStyleV, lw: this.lineWidthV, filter: this.filterV,
+      font: this.fontV, align: this.alignV,
     });
     if (this.raw) this.raw.save();
   }
@@ -420,6 +444,7 @@ export class GLShimExecutor {
       this.m = s.m; this.ga = s.ga; this.gco = s.gco; this.smooth = s.smooth;
       this.fillStyleS = s.fill; this.clipped = s.clip;
       this.strokeStyleV = s.stroke; this.lineWidthV = s.lw; this.filterV = s.filter;
+      this.fontV = s.font; this.alignV = s.align;
     }
     if (this.raw) this.raw.restore();
   }
@@ -580,12 +605,14 @@ export class GLShimExecutor {
     const col = parseColor(this.fillStyleS);
     const geo = col ? this.decode(x, y, w, h) : null;
     // ★B2b 修复（2026-09-24 用户实报「NPC 旗子闪烁错色」）:multiply 实心矩形
-    //  =tier-3 MULT quad（ZERO,SRC_COLOR=dst×C,Skia multiply 不透明 dst 主面
-    //  逐字节同式）——此前整帧降级;更早版本（用户页在跑）栅格化到透明 scratch
-    //  =实心色块盖旗=绿/暗/常三态闪（色=旗格光照值绕 252 门摆动）。
-    //  α 域差（2D blend αo=αs+αb(1−αs)→1 vs GL α 保）只在透明/半透明 dst 格
-    //  呈现（旗贴墙=墙不透明主面）→census 登记。非轴对齐/ga≠1 → 降级。
-    if (this.accMode && this.gco === 'multiply' && col && geo && geo.rot === 0
+    //  =tier-3 MULT quad（GLSpriteLayer.blendMult=Canvas multiply 逐字节精确式,
+    //  ★2026-09-25 普查翻案为 (ONE_MINUS_DST_ALPHA,SRC_COLOR)——半透明/透明 dst
+    //  格亦逐字节,见 GLSpriteLayer 注+探针 _census-flagcolor-dolltint ③）。
+    //  此前整帧降级;更早版本（用户页在跑）栅格化到透明 scratch=实心色块盖旗。
+    //  ★普查案④:门加 col[3]===1——rgba 半透明 fillStyle 的 multiply 有
+    //  (1−αs)αbCb 项,固定功能 blend 不表达 → 走降级（两现网调用点均 rgb() 实色）。
+    //  非轴对齐/ga≠1 → 降级。
+    if (this.accMode && this.gco === 'multiply' && col && col[3] === 1 && geo && geo.rot === 0
       && !geo.flipX && !geo.flipY && this.ga === 1 && this.filterV === 'none') {
       this.push(3, null, true, null, null, 0, 0, 1, 1,
         geo.dx, geo.dy, geo.dw, geo.dh, 0, 1,

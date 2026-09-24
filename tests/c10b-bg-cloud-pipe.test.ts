@@ -50,14 +50,15 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
   });
 
   it('合并会话:bg begin 后保开放续交云 quads;drawCloudsNear 恒收口（早退路径含——防 bg 丢）', () => {
-    // bg 侧:合并分支 begin('bg') 后无 end/blit（延迟到云后单次）
+    // bg 侧:合并分支 begin('bg') 后无 end/blit（延迟到云后单次;★opresent defer 旗在分支内置位）
     expect(RDR).toMatch(/if \(skyMergeable\) \{[\s\S]{0,600}glbg\.begin\('bg'\);[\s\S]{0,400}biomeBg\.draw\(new GLBgBlit\(glbg\)[\s\S]{0,200}mergedSession = glbg;/);
-    // 消费侧:早退路径也收口（merged.end()+全幅 blit+globalAlpha 归位）
-    expect(SKY).toMatch(/if \(camTop >= this\.fx\.surfaceY \+ 16\) \{\s*\n\s*if \(merged\) \{ merged\.end\(\); ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\n\s*return;/);
+    // 消费侧:早退路径也收口（merged.end()+全幅 blit+globalAlpha 归位;
+    // ★opresent deferBlit=true 收口不 present/blit——FBO 挂起给世界合成 pass3）
+    expect(SKY).toMatch(/if \(camTop >= this\.fx\.surfaceY \+ 16\) \{\s*\n\s*if \(merged\) \{ merged\.end\(!deferBlit\); if \(!deferBlit\) \{ ctx\.drawImage\(merged\.canvas, 0, 0\); ctx\.globalAlpha = 1; \}\s*\}\s*\n\s*return;/);
     // 正常路径:合并会话禁再 begin（begin=清屏会抹掉已交 bg quads）
     expect(SKY).toContain('let batchBegun = mergedMode;');
-    // 收口后 Renderer 清引用（每帧独立判定,无跨帧残留）
-    expect(RDR).toMatch(/this\.sky\.drawCloudsNear\(ctx, viewW, viewH, cam\.y, 'both', mergedSession\);\s*\n\s*const wasMerged = mergedSession !== null;\s*\n\s*mergedSession = null;/);
+    // 收口后 Renderer 清引用（每帧独立判定,无跨帧残留;★opresent defer 挂起登记在清引用后）
+    expect(RDR).toMatch(/this\.sky\.drawCloudsNear\(ctx, viewW, viewH, cam\.y, 'both', mergedSession, opresentDefer\);\s*\n\s*const wasMerged = mergedSession !== null;\s*\n\s*mergedSession = null;/);
   });
 
   it('分回合回退=双会话双 blit（夹层内容在场;bg 全幅 blit 结构与 C10a/glfx 同）', () => {
@@ -69,7 +70,8 @@ describe('C10b 层序定谳→合并判定（先定谳再动刀）', () => {
   });
 
   it('合并收口=全幅 blit（bg 覆盖面不以云 bbox 为界——cloudBlitRect bbox 收口不适用）', () => {
-    expect(SKY).toMatch(/if \(mergedMode\) \{[\s\S]{0,400}ctx\.drawImage\(shared\.canvas, 0, 0\);[\s\S]{0,120}\} else \{\s*\n\s*this\.cloudBlitRect\(ctx, shared\);/);
+    // ★opresent:deferBlit=true 时收口跳过 blit（FBO 挂起）——缺省路径仍全幅 blit
+    expect(SKY).toMatch(/if \(mergedMode\) \{[\s\S]{0,400}if \(!deferBlit\) ctx\.drawImage\(shared\.canvas, 0, 0\);[\s\S]{0,120}\} else \{\s*\n\s*this\.cloudBlitRect\(ctx, shared\);/);
   });
 
   it('诊断面:cloudMergeUsed/cloudMergeStats（merged/split/- 三态;DebugReport cloudPath 段）', () => {

@@ -276,6 +276,21 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
    *  Colliding（:14554-14576）语义 = 弹心→盒心按 max(w,h)(min12) 步进连续方盒
    *  + 延伸盒本体,与弹体 AABB 并集判定 */
   extBox?: { x: number; y: number; w: number; h: number } | null,
+  /** ★BJ339（2026-09-25）：hurt pierce 位实参（Enemy.hurt 第 7 参,Projectile.cs
+   *  :13702 StrikeNPC 链）。0 = 缺省档（pen≠1 弹命中写敌免疫 10t,:14176-14182
+   *  `penetrate != 1` 分支——回旋镖/悠悠球/404 等共享窗弹同款）；1 = 单发弹
+   *  flag3（:12635 `maxPenetrate == 1` 门）→ 命中【不写】immune[owner]（:14176
+   *  else-if 分支不达）——405 泡泡 penetrate=1 即此档,命中后 404/悠悠球等共享
+   *  窗弹【不被自己挡】。缺省 0 = 既有调用方行为零漂移 */
+  hurtPierce = 0,
+  /** ★BJ339：击退方向覆写（num40,Projectile.cs:13653）。原版缺省 = 弹 direction
+   *  字段（每拍由 AI 重写的弹,如 404 :30742-30751 球侧）——仅 697/699/707/708/759、
+   *  aiStyle 188-191/15、type 22 覆写为「玩家相对敌位」（:13654-13678）。缺省
+   *  undefined = 既有承载（敌相对弹位 Math.sign）零漂移；404 传球侧 direction
+   *  1:1（69 族不在覆写表,回收途中命中击退仍朝玩家面朝向,不随敌位翻转）。
+   *  405 direction 原版=弹池槽残留（NewProjectile/SetDefaults 均不写,无稳定语义）
+   *  → 405 不传,维持敌相对弹位承载（备案） */
+  dirOverride?: number,
 ): void {
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
@@ -363,7 +378,9 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     // (int) 截断 + 命中乘区（悠悠球无视线 ×0.75，:12504）。两旗皆关时 mul==1 与旧式
     // 完全同值（舍入面零漂移）
     const dmg = Math.trunc((crit ? self.damage * 2 : self.damage) * (dmgScale?.(e) ?? 1) * mul);
-    const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
+    // ★BJ339：num40 = direction 缺省语义（:13653）——dirOverride 在传时强占
+    //（404 球侧 direction 每拍重写 :30742-30751;未传弹保持敌相对弹位既有承载）
+    const kdir = dirOverride ?? (Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX);
     // ★α-H6/A5 弹幕侧：浸剂/debuff 施加搬前到【StrikeNPC 前】（原版 StatusNPC(victimIndex)
     // :13640 → armorPen add :13686 → nano :13688 → StrikeNPC :13716。ichor 池反例与
     // 挥砍侧同一案，见 Game.ts 敌怪循环 A5 注）。
@@ -400,7 +417,9 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
         cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 } });
     // （结构锚 tests/blue-batch3-combat-parity「F1 弹侧旗乘区」钉本站 hurt 首参字面——
     //   加伤并入写成同行表达式,勿再折行拆散 applyBannerDamageDealt 前缀）
-    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
+    // ★BJ339：pierce 位 = hurtPierce（0 缺省档写敌免疫 10t / 1 flag3 单发不写窗——
+    //  :14176-14182 `penetrate != 1` 分支的门,405 泡泡=1）
+    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线;音/飘值=单点
     // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——StrikeNPC
     // 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :320 事前支恒不触发）。
     // 本环弹型（回旋镖 3/长矛 19,161/悠悠球 99,15）全不在 CanBeReflected 白名单,
@@ -4959,7 +4978,11 @@ export class FlaironSpike extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    if (--this.life <= 0) { this.dead = true; return; }
+    // ★BJ339-T1：寿命尽【不再头部静默退场】——原版 timeLeft-- 与 Kill 在 Update 尾
+    //  （:17307-17312）,当拍 AI/湿段/位移/割面/伤害段全跑完后才 Kill（Kill 走 :74183
+    //  type==405 支 = Item54 音 + 20×d212 爆尘）。旧头部判 = 提前一拍死且无尘无音,
+    //  2 秒飘满的泡泡无声消失（用户可见面）。生命判断移至 fixedUpdate 尾（hit 段后,
+    //  与 :17307 位序同——命中致灭 hitAny 出口先 return,与原版单次 Kill 幂等同构）
     this.hitCd.tick();
     const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
     if (this.ai0 === 0) {
@@ -5052,8 +5075,14 @@ export class FlaironSpike extends Entity {
     cutTilesBox(game, this.x, this.y, this.w, this.h);
     let hitAny = false;
     // ④ pen = armorPen（:12852 num6 命中段合并玩家近战项——旧码硬 0 = 泡泡不掉防）
-    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen, () => { hitAny = true; });
+    //  ★BJ339-T3：hurtPierce=1（flag3 单发弹 :12635 maxPenetrate==1——命中门无视共享
+    //  免疫窗已由逐弹私账承载,此处对齐 hurt 侧 :14176 `penetrate != 1` 分支不达 =
+    //  命中【不写】敌免疫帧——405 命中后 404/悠悠球等共享窗弹不被自己挡）
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen,
+      () => { hitAny = true; }, undefined, false, undefined, 1);
     if (hitAny) { this.killExplode(game); return; }
+    // ★BJ339-T1：寿命尽 = timeLeft 到期（:17307-17312 → Kill → :74183 尘+音）
+    if (--this.life <= 0) { this.killExplode(game); return; }
   }
 
   /** Kill 出口（:18443 else→Kill → P.cs:74184-74208 爆尘;MAJOR-2 命中致灭同走此件）。
@@ -5280,12 +5309,23 @@ export class FlaironHeadProj extends Entity {
     } else {
       this.x += this.vx; this.y += this.vy;              // tileCollide=false 段（Update 积分序）
     }
+    // ---- 割面（★BJ339-T4 补：CutTiles :12516-12517 门 friendly && owner==myPlayer
+    //      && !npcProj && !minion && type!=1054 → 404 friendly 全过;CanCutTiles :15407
+    //      两表均无 404;Damage_CanDealDamage :12461 排除表无 404）——盒=Damage_GetHitbox
+    //      弹盒,位序=位移后/伤害前（CutTiles :12517 先于 Damage_PVE :12523,同 405 BJ285 口径）----
+    cutTilesBox(game, this.x, this.y, this.w, this.h);
     // ---- 命中结算（:14230-14233/:14778-14781 aiStyle69 支：命中即转回收,同回旋镖族）----
-    // 同敌免疫 10t（404 无 usesLocalNPCImmunity/localNPCHitCooldown → :14180-14183
-    // immune[owner]=10 共享档,本仓逐弹私账 10t 同回旋镖/链锤口径）
+    // ★BJ339-T2：命中门走【玩家级共享免疫档】——原版 :12636 flag3=false（maxPenetrate
+    //  =-1 ≠1）→ 门 = npc.immune[owner]==0（受所有共享窗弹命中写下的 10t 挡,含悠悠球/
+    //  链锤掷弹/404 自身）;命中后 :14176-14182 `penetrate != 1` 分支写 immune[owner]=10
+    //  （本仓承载 = hurt pierce 位 0 → Enemy.hurt 置 iframes 10t,等价）。旧逐弹私账
+    //  不读共享窗 = 悠悠球刚打中的敌 404 立即再中（原版相:被共享窗挡 10t）
+    //  ★BJ339-T5：dirOverride = direction 球侧（:13653 num40=direction 缺省,69 族不在
+    //  :13654-13678 玩家相对敌位覆写表;:30742-30751 direction 每拍按球侧重写——回收途中
+    //  命中击退仍朝玩家面朝向,不随敌相对弹位翻转）
     // 击退方向 = direction（:30742-30751 球在玩家哪侧;1058 同式先例 FlailProj kdir）
     hitEnemies(this, game, this.hitCd, 10, p.cx < this.cx ? 1 : -1, this.armorPen,
-      () => { this.st = 1; });
+      () => { this.st = 1; }, undefined, true, undefined, 0, p.cx < this.cx ? 1 : -1);
   }
 }
 

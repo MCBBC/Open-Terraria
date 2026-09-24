@@ -150,7 +150,13 @@ export function dollLightTint(
   cx.fillStyle = `rgb(${q(rgb[0])},${q(rgb[1])},${q(rgb[2])})`;
   cx.fillRect(0, 0, sw, sh);
   cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(c, 0, 0);
+  // ★普查修复（2026-09-25 旗错色同病普查案①）：裁剪必须回贴【源精灵】α——
+  //  曾自引 drawImage(c,0,0)：multiply 填色后 scratch 全域 α=1（Canvas multiply
+  //  αo=αs+αb(1−αs),αs=1→1），自引 destination-in=×1 no-op → 框外泄漏实色
+  //  （探针 scripts/_census-flagcolor-dolltint.mjs ①:角像素 α=255 实锤,修后 0）。
+  //  同仓全部预染色配方（NatureParticles.tintedGore/BiomeBackground/PaperDoll
+  //  tint/tintedExtra/auraRingTinted…）均为 destination-in(源精灵),此处系孤例。
+  cx.drawImage(src, sx, sy, sw, sh, 0, 0, sw, sh);
   perSrc.set(key, c);
   return c;
 }

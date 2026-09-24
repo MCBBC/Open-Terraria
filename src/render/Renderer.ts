@@ -2993,6 +2993,30 @@ export class Renderer {
     }
     return false;
   }
+  /** ★opresent（2026-09-25）:本帧天空栈挂起引用（bg+云合并会话延迟收口——
+   *  drawCloudsNear defer 收口不 present/blit,FBO('bg') 留在管线）。帧界状态:
+   *  bg 段先清后置,compositeLight 单消费（compose pass3 合并=清空;未走=
+   *  presentPendingSky 补贴后清空）。 */
+  private _opresentSky: { fboName: string; w: number; h: number } | null = null;
+  /** ★opresent 诊断面:上帧是否实际走单 present 合并（compose pass3） */
+  opresentUsed = false;
+  /** ★opresent 分布累计（merged=pass3 合并帧/fallback=补贴回退帧——合并率异常
+   *  低=夹层谓词常真或门常假,查 opresentInterlayerPending/低清档） */
+  opresentStats: Record<string, number> = {};
+  /** ★opresent 回退补贴（2026-09-25）：合并未走（compose 失败/pass3 程序缺/
+   *  低清档/fullbright/旧链回落）时把挂起的天空栈 FBO present+blit 回主画布——
+   *  恢复双 blit 基线,层序与现行为逐位同（FBO 内容=本帧 bg+云合并会话产物,
+   *  消费点在一切世界侧回贴之前=夹层语义保持）。管线死亡窗:present no-op+
+   *  陈旧画布=C10b 会话中途死亡同族既有语义,下帧 acquire 自愈。 */
+  private presentPendingSky(sky: { fboName: string; w: number; h: number }, viewW: number, viewH: number): void {
+    const pipe = this.swPipe;
+    const f = pipe && !pipe.unavailable ? pipe.fbo(sky.fboName, sky.w, sky.h) : null;
+    if (f?.tex) {
+      pipe!.present(f);
+      this.ctx.drawImage(pipe!.canvas, 0, 0, viewW, viewH);
+    }
+    this.opresentStats['fallback'] = (this.opresentStats['fallback'] || 0) + 1;
+  }
   /** 最近一次 recon 失败原因（lrecon-fail 时由 compose.lastFail 填入） */
   composeLastFail = '';
   /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
@@ -4221,6 +4245,14 @@ export class Renderer {
     this.sky.shimmerAlpha = this.monoFilters.shimmerAlpha;
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
+    // ★opresent 前置:世界层缩放系数在此定值（原计算在世界层切换段,opresent 合并
+    //  门须在 bg 段判 wK——defer 一旦成立,天空栈 blit 即被豁免,门条件必须先于
+    //  收口全数定谳。表达式逐字上移,输入（_waveLiquidInView=updateWaterWaves 帧头
+    //  已写/waterWarp.active()/options/capturePass）在两位置间无变异点=值恒等）
+    let wK = this.effectiveRenderScale();
+    if (wK < 1 && this._waveLiquidInView && waterWaves.quality > 0 && this.waterWarp.active()) wK = 1;
+    this._worldLowK = wK;
+
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
     if (this.scene) {
       // 远景层 tint = ColorOfTheSkies/255(×ColorOfSurfaceBackgrounds :56194)
@@ -4244,7 +4276,23 @@ export class Renderer {
       //  ±1~2LSB(cloudbatch 合并判例同族备案,方向中性)。
       const skyMergeable = Renderer.cloudPipe && !remixSkipSurfaceBg
         && this.sky.useGLClouds && !this.sky.hasSkyWeatherTint() && !this.hasBgFlash();
+      // ★opresent 合并门（2026-09-25 单 present 合并刀;全部条件在此定谳——defer
+      //  一旦成立,本帧天空栈 present/blit 即被豁免,消费端任一环失败都由
+      //  presentPendingSky 补贴兜底,故门必须先于收口全数可判）：
+      //  旗开 × 非拍照 × 非 fullbright × wfbo 在 × 非 CPU 渲染 × 世界层开 ×
+      //  全分辨率（wK=1——世界 FBO 与天空栈同帧界,pass3 1:1 采样逐位;低清档
+      //  帧回退双 blit）× 无 shimmer 夹层（黑幕+人工星空在本 blit 后、世界
+      //  present 前）× 无 lantern/气球/事件天幕/月总戏剧/环境实体夹层
+      //  （sky.opresentInterlayerPending 保守谓词）。skyMergeable（色罩/黑闪/
+      //  remix/云 GL 门）在上游已含。
+      const opresentWanted = Renderer.opresent && !this._capturePass && !this.fullbright
+        && Renderer.wfbo && !this.isCpuRender() && this.worldLayerEnabled && wK === 1
+        && this.monoFilters.shimmerAlpha <= 0
+        && !this.sky.opresentInterlayerPending();
+      this._opresentSky = null;   // ★opresent 帧界清（上帧残留防御——早退帧不漏清）
+      this.opresentUsed = false;
       let mergedSession: GLSpriteLayer | null = null;
+      let opresentDefer = false;   // ★opresent:合并会话收口不 present/blit（FBO('bg') 挂起给 pass3）
       if (this.bgGlEnabled && !this.isCpuRender()) {
         // 死实例丢弃(双开风暴中 GL 反复死亡;5s 退避防重建风暴)
         // ★统一走 acquireGL(2026-08-19 哨兵三捕真凶):初始化失败(WebGL2 缺失/
@@ -4262,6 +4310,7 @@ export class Renderer {
             // ★只画地表层(2026-08-20 地下背景光照修复):地下层须进世界层吃光
             this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
             mergedSession = glbg;
+            opresentDefer = opresentWanted;   // ★opresent:合并帧延迟收口（旗门齐才 defer）
           } else {
             glbg.begin('bg');
             if (!remixSkipSurfaceBg) {
@@ -4301,9 +4350,16 @@ export class Renderer {
       }
       // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后）
       // ★C10b:mergedSession 在场=合并会话（此处收口单 blit）;恒消费后清
-      this.sky.drawCloudsNear(ctx, viewW, viewH, cam.y, 'both', mergedSession);
+      // ★opresent:opresentDefer=true 时收口不 present/blit——FBO('bg') 挂起,
+      //  compositeLight 消费（compose pass3 合并/presentPendingSky 补贴）
+      this.sky.drawCloudsNear(ctx, viewW, viewH, cam.y, 'both', mergedSession, opresentDefer);
       const wasMerged = mergedSession !== null;
       mergedSession = null;
+      if (opresentDefer && wasMerged) {
+        // ★opresent 挂起登记:天空栈 FBO 名+帧界（世界合成按此直采;尺寸门在
+        //  compose 复核——不一致自动回退单 present+补贴）
+        this._opresentSky = { fboName: 'bg', w: this.canvas.width, h: this.canvas.height };
+      }
       {
         const mk = bgDone ? (wasMerged ? 'merged' : 'split') : '-';
         this.cloudMergeUsed = mk;
@@ -4334,9 +4390,7 @@ export class Renderer {
     //   (用户实报"缩放满 250 时发生"=最大缩放 GPU 负载→飢饿降档;低缩放不降档→干净,
     //   与固化机案"特定缩放才出现"判别口诀同族)。扭曲激活帧(_waveLiquidInView 取
     //   上帧值,1 帧陈旧无害)强制 K=1——全屏位移需要全分辨率场景纹理。
-    let wK = this.effectiveRenderScale();
-    if (wK < 1 && this._waveLiquidInView && waterWaves.quality > 0 && this.waterWarp.active()) wK = 1;
-    this._worldLowK = wK;
+    //   ★opresent:wK 计算已上移至 bg 段前（本段共用同值,表达式逐字同——见上移注）
     // ★SW-BJ41 2026-09-09：以太域背景黑幕 + 人工星空（Main.DoDraw
     //  :63132-63133 `if (shimmerAlpha > 0f) spriteBatch.Draw(MagicPixel, Color.Black
     //  * shimmerAlpha, 全屏)` → :63147-63153 `if (shimmerAlpha > 0f)
@@ -5858,6 +5912,25 @@ export class Renderer {
   })();
   static get b2b() { return this._b2b; }
   static b2bSetForTest(v: boolean): void { this._b2b = v; }
+  /** ?opresent=1：单 present 合并（2026-09-25,主战役收官后第一枚收割刀）——天空栈
+   *  （C10b bg+云合并背板）与世界合成（A2 光照×扭曲链）在同一共管管线内本分两次
+   *  全屏回贴主画布,合并为一次：drawCloudsNear 收口不 present/blit（FBO('bg')
+   *  挂起）→ worldCompose compose 尾 pass3 over(warped,bg)→FBO('opresent')→
+   *  present → 主画布单 blit（回贴账 2→1）。字节等价=porter-duff over 结合律
+   *  （预乘域,GLWorldCompose OPRESENT_VERT 注推导;半透明重叠像素 ±1~2LSB=
+   *  cloudbatch/C10b GC·GD 备案族）。回退面（任一门不满足=双 blit 现行为逐位）：
+   *  夹层谓词（灯笼/气球/事件天幕/月总戏剧/环境实体/shimmer）、天气色罩/黑闪
+   *  （skyMergeable 假=分回合）、低清档 wK≠1、fullbright、拍照、GL 不可用、
+   *  compose 失败（presentPendingSky 补贴）。首版灰度缺省关（?opresent=1 显式
+   *  激活）;全矩阵对拍 ALL PASS 后走转正流程（翻缺省+?opresent=0 总逃生门）。
+   *  运行时可翻（wfbo 同款页内翻面范式——探针 scripts/_opresent-ab.mjs）。 */
+  private static _opresent = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('opresent') === '1';
+    } catch { return false; }
+  })();
+  static get opresent() { return this._opresent; }
+  static opresentSetForTest(v: boolean): void { this._opresent = v; }
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -17542,7 +17615,15 @@ export class Renderer {
     // ★B2b 累积帧收口：末段 shim 队列 flushAcc → endAccumulate（不 present）→
     //  摘 shim 包装。accFbo=世界累积纹理（compose 直采/present/读回三用）。
     const accFbo = this.finishAccFrame();
+    // ★opresent 消费（2026-09-25）：本帧天空栈挂起引用取出（帧界单消费）。
+    //  合并路径=传给 compose 走尾段 pass3（over(warped,sky)→单 present,本函数
+    //  出口的 drawImage 即成唯一全屏回贴）;未合并（门假/失败/低清档/fullbright）
+    //  → presentPendingSky 补贴=恢复双 blit 基线（层序与现行为逐位同）。
+    const skyPend = this._opresentSky;
+    this._opresentSky = null;
     if (this.fullbright) { // 开灯：不做 multiply，全部原色（世界层仍须叠回主画布）
+      // ★opresent:defer 帧补贴（门已挡 fullbright——防运行时翻面竞态漏挂起）
+      if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
       // 低清档(#perf-gpulog):世界层 K 缩 → 拉伸回填全尺寸
       if (accFbo && this.swPipe) {
         this.swPipe.present(accFbo);
@@ -17602,9 +17683,19 @@ export class Renderer {
           stL ? stL.camL * stL.cssZoom : 0, stL ? stL.camT * stL.cssZoom : 0,
           woL[0], woL[1],
           { r: lightR, g: lightG, b: lightB, rx, ry, rw, rh, tx0, ty0, w2, h2 },
+          skyPend,   // ★opresent:天空栈挂起→pass3 合并（单 present）
         );
         if (okL) {
-          this._markPath('lrecon');
+          // ★opresent:合并走了=本 blit 即唯一全屏回贴;未走（程序缺/FBO 失败/
+          //  低清档尺寸不一致）=补贴天空栈再 blit（恢复双 blit 基线）
+          if (wcL.lastMergeUsed) {
+            this._markPath('lrecon+opresent');
+            this.opresentUsed = true;
+            this.opresentStats['merged'] = (this.opresentStats['merged'] || 0) + 1;
+          } else {
+            this._markPath('lrecon');
+            if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
+          }
           this.ctx.drawImage(wcL.pipeline.canvas, 0, 0, viewW, viewH);
           return;
         }
@@ -17848,15 +17939,30 @@ export class Renderer {
             warpOn ? waterWaves.readGridR() : GLWorldCompose.neutralWave,
             warpOn ? waterWaves.gridW() : 1, warpOn ? waterWaves.gridH() : 1,
             st ? st.camL * st.cssZoom : 0, st ? st.camT * st.cssZoom : 0,
-            ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]),
+            // ★opresent:尾参 skyPend 入列须显式元素展开——数组 spread 后的实参
+            //  不携带位置语义（TS 按剩余参数左对齐误配 worldX 位,tsc TS2345 实证）
+            ...(warpOn ? waterWaves.waveReadOffset() : [0, 0]) as readonly [number, number],
+            undefined,   // rawLight:本支=lightCanvas 路径（raw 直传是 lrecon 支专属）
+            skyPend,   // ★opresent:天空栈挂起→pass3 合并（单 present）
           );
           if (ok) {
-            this._markPath('a2');
+            // ★opresent:同 lrecon 支——合并走了=单回贴;未走=补贴天空栈
+            if (wc.lastMergeUsed) {
+              this._markPath('a2+opresent');
+              this.opresentUsed = true;
+              this.opresentStats['merged'] = (this.opresentStats['merged'] || 0) + 1;
+            } else {
+              this._markPath('a2');
+              if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
+            }
             this.ctx.drawImage(wc.pipeline.canvas, 0, 0, viewW, viewH);
             return;
           }
         }
       }
+      // ★opresent:A2 未走成（wc 缺/compose 失败）——补贴天空栈再落旧链/读回链
+      //  （旧链自产回贴群画在天空栈之上=层序保持;补贴恒先于一切世界回贴）
+      if (skyPend) this.presentPendingSky(skyPend, viewW, viewH);
       // ★B2b:acc 帧旧链（GLWorldLight 需 canvas 全幅上传）不可达——FBO 句柄
       //  只此一家;读回替代链在下方（GL 读回替代 getImageData）。
       const gl = accFbo ? null : this.worldLightLayer();   // ★A2：仅旧链路径触达（实例获取后移,见上注）

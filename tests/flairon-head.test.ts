@@ -480,3 +480,120 @@ describe('⑥ 撞块尘真值单口 + Kill 面静默（type==404 无 Kill 支,P.
     expect(sfx.filter((s) => s === 'dig').length).toBe(0);   // 无 SoundID 0
   });
 });
+
+// ================= BJ339（2026-09-25 用户实报利刃台风弹幕全面对拍落刀） =================
+// 五真差异：T1 405 寿命尽走 Kill 尘+音（:17307-17312→:74183）/ T2 404 命中门共享免疫
+// 档（:12636 flag3=false）/ T3 405 命中不写共享窗（:14176 `penetrate != 1` 分支不达）
+// / T4 404 补 CutTiles（:12516-12517 friendly 门,:15407 两表无 404）/ T5 404 击退
+// 方向 = direction 球侧（:13653 num40 缺省,69 族不在 :13654-13678 覆写表）
+describe('BJ339-T1: 405 寿命尽 = timeLeft 到期 Kill（尘+音,Update 尾 :17307-17312）', () => {
+  it('①第 120 拍 Kill 走 :74183 type==405 支——Item54 音 + 20 粒尘（不再静默退场）', () => {
+    const { hooks, player, particles } = makeHooks();
+    const item54: string[] = [];
+    (hooks as unknown as { playSfxFiles: unknown }).playSfxFiles =
+      (names: string[]) => { for (const n of names) item54.push(n); };
+    const s = new FlaironSpike(player.cx + 30, player.cy, 0.5, 0, 66, 4.5);
+    for (let i = 0; i < 119 && !s.dead; i++) s.fixedUpdate(1 / 60, hooks);   // 第 119 拍 life=1
+    expect(s.dead).toBe(false);                  // timeLeft 1 → 仍活（:17308 尚未 ≤0）
+    s.fixedUpdate(1 / 60, hooks);                // 第 120 拍 timeLeft-- → 0 → Kill
+    expect(s.dead).toBe(true);
+    expect(item54).toContain('Item_54');         // :74184 SoundEngine.PlaySound(SoundID.Item54)
+    expect(particles).toEqual([20]);             // :74187-74208 20×d212（无 spawnDust 宿主退合成档一次 20 粒）
+  });
+  it('②当拍 AI/位移/伤害段全跑后才 Kill（位序 1:1——头部判曾提前一拍死且跳过伤害）', () => {
+    const { hooks, player } = makeHooks();
+    const pierces: number[] = [];
+    hooks.enemies = () => [{
+      id: 1, x: player.cx + 20, y: player.cy - 7, w: 24, h: 40, dead: false, vx: 0, vy: 0,
+      hurt: (_d: number, _kx: number, _ky: number, _g: GameHooks, _pen: number, _c: boolean, pierce: number) => {
+        pierces.push(pierce); return true;
+      },
+    } as never];
+    const s = new FlaironSpike(player.cx + 10, player.cy - 7, 3, 0, 66, 4.5);
+    s.life = 1;                                  // 本拍寿命尽
+    s.fixedUpdate(1 / 60, hooks);
+    expect(pierces.length).toBe(1);              // 同拍伤害段先于 timeLeft（:12517 Damage 段 → :17307）
+    expect(pierces[0]).toBe(1);                  // 且 hurt pierce=1（T3 同拍并验）
+    expect(s.dead).toBe(true);                   // 命中致死 killExplode 先 return（单次 Kill 幂等）
+  });
+});
+
+describe('BJ339-T3: 405 命中不写共享免疫窗（flag3 单发弹 :12635/:14176 分支不达）', () => {
+  it('①hurt pierce=1——命中后 404/悠悠球等共享窗弹不被自己挡', () => {
+    const { hooks, player } = makeHooks();
+    const pierces: number[] = [];
+    hooks.enemies = () => [{
+      id: 1, x: player.cx + 50, y: player.cy - 7, w: 24, h: 40, dead: false, vx: 0, vy: 0,
+      hurt: (_d: number, _kx: number, _ky: number, _g: GameHooks, _pen: number, _c: boolean, pierce: number) => {
+        pierces.push(pierce); return true;
+      },
+    } as never];
+    const s = new FlaironSpike(player.cx + 43, player.cy - 7, 3, 0, 66, 4.5);
+    s.fixedUpdate(1 / 60, hooks);
+    expect(pierces).toEqual([1]);                // 旧 pierce=0 = 写窗（反向偏差）
+    expect(s.dead).toBe(true);
+  });
+});
+
+describe('BJ339-T2: 404 命中门走共享免疫档（:12636 flag3=false → immune[owner]==0 门）', () => {
+  it('①敌共享窗内（iframes>0）不中;窗清即中且 hurt pierce=0 写回 10t 窗', () => {
+    const { hooks, player } = makeHooks();
+    const hits: number[] = [];
+    const pierces: number[] = [];
+    const foe = {
+      id: 1, x: player.cx + 50, y: player.cy - 13, w: 24, h: 40, dead: false, vx: 0, vy: 0, iframes: 2,
+      hurt: (_d: number, _kx: number, _ky: number, _g: GameHooks, _pen: number, _c: boolean, pierce: number) => {
+        pierces.push(pierce); hits.push(1); return true;
+      },
+    } as never as Record<string, unknown>;
+    hooks.enemies = () => [foe as never];
+    const b = ballRightOf(player, 30);
+    run(b, hooks, 2);
+    expect(hits.length).toBe(0);                 // 共享窗 2t 内不中（旧私账不受 iframes 挡=偏差）
+    (foe as unknown as { iframes: number }).iframes = 0;
+    b.fixedUpdate(1 / 60, hooks);                // 第 3 拍球盒 cx+59..cx+85 仍与敌 cx+50..cx+74 重叠
+    expect(hits.length).toBe(1);
+    expect(pierces).toEqual([0]);                // pen=-1 ≠1 → :14176-14182 写窗（hurt 缺省档）
+    expect(b.aiState).toBe(1);                   // 命中转回收（:14230 aiStyle 69 支）
+  });
+});
+
+describe('BJ339-T5: 404 击退方向 = direction 球侧（:13653 num40 缺省,69 族无覆写）', () => {
+  it('①回收途中命中敌在球左侧仍推右（不随敌相对弹位翻转——旧 kdir=敌相对位=反向）', () => {
+    const { hooks, player } = makeHooks();
+    const kxs: number[] = [];
+    const foe: Record<string, unknown> = {
+      id: 1, x: player.cx + 150, y: player.cy - 13, w: 24, h: 40, dead: false, vx: 0, vy: 0,
+      hurt: (_d: number, kx: number) => { kxs.push(Math.sign(kx)); foe.iframes = 10; return true; },
+    };
+    hooks.enemies = () => [foe as never];
+    const b = ballRightOf(player, 410);          // 出生即 >400px → 首拍转回收向左
+    run(b, hooks, 30);
+    expect(kxs.length).toBe(1);                  // 回收途中穿过敌一次（命中写窗防重）
+    expect(kxs[0]).toBe(1);                      // 球在玩家右 → direction 1 → kx>0（恒球侧）
+  });
+});
+
+describe('BJ339-T4: 404 补 CutTiles（:12516-12517 friendly 门;CanCutTiles :15407 两表无 404）', () => {
+  it('①出程每拍割面——盒=弹盒 26×26,位序=位移后/伤害前（CutTiles :12517 < Damage_PVE :12523）', () => {
+    const { hooks, player, store } = makeHooks();
+    const cuts: Array<[number, number]> = [];
+    (hooks as unknown as { cutTile: unknown }).cutTile =
+      (x: number, y: number) => { cuts.push([x, y]); };
+    for (let x = 56; x <= 60; x++) store.setTile(x, 90, 42);   // 球道（player.cy=row 91.3,球盒 rows 90-92）草族列
+    const b = ballRightOf(player, 20);
+    run(b, hooks, 10);
+    expect(cuts.length).toBeGreaterThan(0);
+    expect(cuts.some(([x, y]) => x >= 56 && x <= 60 && y === 90)).toBe(true);
+  });
+  it('②405 割面 BJ285 既有位序不回归（同拍照割）', () => {
+    const { hooks, player, store } = makeHooks();
+    const cuts: Array<[number, number]> = [];
+    (hooks as unknown as { cutTile: unknown }).cutTile =
+      (x: number, y: number) => { cuts.push([x, y]); };
+    store.setTile(51, 90, 42);
+    const s = new FlaironSpike(player.cx + 7, player.cy - 7, 3, 0, 66, 4.5);
+    s.fixedUpdate(1 / 60, hooks);
+    expect(cuts.some(([x, y]) => x === 51 && y === 90)).toBe(true);
+  });
+});

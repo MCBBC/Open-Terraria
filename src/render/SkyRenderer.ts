@@ -2028,6 +2028,27 @@ export class SkyRenderer {
     });
   }
 
+  /** ★opresent 夹层谓词（2026-09-25,单 present 合并刀）：主画布在「天空栈 blit
+   *  之后、世界 present 之前」是否有 2D 绘制内容夹层——true=本帧必回退双 blit
+   *  （C10b 夹层判例同族:合并须无夹层）。覆盖面=本类四个夹层绘制位的早退条件
+   *  析取,取保守超集（宁可不合并,不可漏判——谓词假阴=层序破坏）：
+   *  · drawLanternsNear：lanternOpacity>0.001（首门,灯夜激活/衰减全程）;
+   *  · drawPartyBalloonsNear：fx.party（派对气球整程）;
+   *  · drawAmbience：事件天幕激活（史莱姆雨/火星人）/月总死亡戏剧（核心在场或
+   *    碎块·爆炎滞留窗——终死后 dramaCore 已空但碎块仍画数秒,双查）/环境实体
+   *    在场或本帧 tick 窗内可能到期掷族（Next(600,7200)=10-120s 一次,余量≤2
+   *    tick 时本帧可能掷中;60fps ticks≤2）。shimmer 黑幕+人工星空（shimAlpha>0）
+   *    的门在 Renderer 侧同源判定,此处不重复。 */
+  opresentInterlayerPending(): boolean {
+    if (this.lanternOpacity > 0.001) return true;
+    if (this.fx.party && this.fx.surfaceY > 0) return true;
+    if (this.slimeSky.isActive || this.martianSky.isActive) return true;
+    if (this.dramaCore !== null || this.dramaPieces.length > 0 || this.dramaExplosions.length > 0) return true;
+    if (this.ambEntities.length > 0 || this.pendingAmbientSpawns.length > 0) return true;
+    if (!this.ambientRemoteDriven && this.ambNextAttempt <= 2) return true;
+    return false;
+  }
+
   /** 灯笼夜 near 带（深度≤5 的近灯 = 全部群系背景层之前,原版 :59310 后带）——
    *  Renderer 在 biomeBg.draw('surface') 之后调用。状态推进仍在 far 遍历内
    *  （本方法只读不推进,重复调用安全） */
@@ -2401,12 +2422,20 @@ export class SkyRenderer {
    *  present 对死管线 no-op,画布为陈旧帧=既有 GL 死亡窗同族语义,下帧 acquire 自愈 */
   drawCloudsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camY: number,
     which: 'both' | 'closer' | 'closest' = 'both',
-    mergedSession?: GLSpriteLayer | null) {
-    // ★C10b:合并会话先收权(所有路径必收口——早退含,防 bg 丢)
+    mergedSession?: GLSpriteLayer | null,
+    /** ★opresent（2026-09-25）:true=合并会话收口不 present 不 blit——FBO('bg')
+     *  内容挂起在管线,由 worldCompose compose 尾 pass3 over(warped, sky) 直采后
+     *  单 present 消费（单 present 合并刀:天空栈+世界合成两次全屏回贴并成一次）。
+     *  仅 mergedSession 在场且 Renderer 已锁定全部门（opresentWanted）时传 true;
+     *  消费端任一环失败由 Renderer.presentPendingSky 补贴 present+blit（回退双
+     *  blit 基线）。 */
+    deferBlit = false) {
+    // ★C10b:合并会话先收权(所有路径必收口——早退含,防 bg 丢;★opresent defer=
+    //  收口不 present/blit,FBO 挂起给 pass3,消费失败 Renderer 补贴)
     const merged = mergedSession ?? null;
     const camTop = camY - viewH / 2;
     if (camTop >= this.fx.surfaceY + 16) {
-      if (merged) { merged.end(); ctx.drawImage(merged.canvas, 0, 0); ctx.globalAlpha = 1; }
+      if (merged) { merged.end(!deferBlit); if (!deferBlit) { ctx.drawImage(merged.canvas, 0, 0); ctx.globalAlpha = 1; } }
       return;
     }
     const { bgTopY } = this.cloudBgTop(camY, viewH);
@@ -2447,11 +2476,12 @@ export class SkyRenderer {
     };
     const finishBatch = () => {
       if (shared && batchBegun) {
-        shared.end();
+        shared.end(!deferBlit);   // ★opresent:defer=不 present,FBO 挂起给 pass3
         if (mergedMode) {
           // ★C10b 合并收口:bg+云单背板【全幅】blit(单次 drawImage 替代旧
           //  「bg 全幅+云 bbox」两次;bg 层平铺全宽,bbox 收口不适用)
-          ctx.drawImage(shared.canvas, 0, 0);
+          //  ★opresent:deferBlit=跳过 blit——FBO('bg') 挂起,世界合成 pass3 消费
+          if (!deferBlit) ctx.drawImage(shared.canvas, 0, 0);
         } else {
           this.cloudBlitRect(ctx, shared);      // ★perf3:全幅→当帧 bbox 子矩形(?cloudcache=0 退全幅;空 bbox=零提交,跳过=旧全透明 blit 同效)
         }

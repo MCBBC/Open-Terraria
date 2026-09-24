@@ -566,12 +566,16 @@ export class GLSpriteLayer {
   /** 帧结束(离屏画布交给调用方 drawImage)。
    *  ★C10a 管线后端:FBO → 管线画布 present(GLPipeline.present:blend off+flipY=1;
    *  1:1 LINEAR 采样落 texel 中心=逐位拷贝)——调用方 cloudBlitRect 从 pipe.canvas
-   *  取 bbox 子矩形,blit 结构与旧路径同构（一期不改 blit 合并） */
-  end(): void {
+   *  取 bbox 子矩形,blit 结构与旧路径同构（一期不改 blit 合并）
+   *  ★opresent（2026-09-25）：present=false=延迟收口——FBO 内容留在管线（不 present
+   *  不回贴）,供 worldCompose pass3 over(warped, sky) 直采后单 present 消费（单
+   *  present 合并刀:两次全屏回贴并成一次）。仅共管管线合并会话（mergedSession,
+   *  恒 pipe 后端）使用;FBO 引用必清（防后续 end() 双重 present）。 */
+  end(present = true): void {
     if (this.unavailable || !this.gl) return;
     this.gl.bindVertexArray(null);
     if (this.pipe && this.pipeFbo) {
-      this.pipe.present(this.pipeFbo);
+      if (present) this.pipe.present(this.pipeFbo);
       this.pipeFbo = null;
     }
   }
@@ -904,13 +908,18 @@ export class GLSpriteLayer {
   }
 
   /** ★B2b MULT 档混合切换（tier-3 multiply 实心矩形——Canvas 'multiply' 的
-   *  不透明 dst 主面=dst×C,GL (ZERO,SRC_COLOR):out=dst×src.rgb;src=白纹理
-   *  ×tint=C、α=1 → α 面 out.a=dst.a×1=dst.a（2D blend 的 αo→1 差仅在
-   *  透明/半透明 dst 格,census 登记）。false 还原 (ONE,1−SA) 基态。 */
+   *  逐字节精确式（★2026-09-25 普查翻案,原 (ZERO,SRC_COLOR) 已证病）：
+   *  Canvas multiply（αs=1 不透明源,预乘域推导）out.rgb=Cs×(1−αb+αbCb)
+   *  =S×(1−Da)+D×S、αo=αs+αb(1−αs)=1 → GL (ONE_MINUS_DST_ALPHA, SRC_COLOR)
+   *  双通道同表。旧 (ZERO,SRC_COLOR)=dst×C 丢了 S×(1−Da) 项且 α 保 dst.a——
+   *  半透明/透明 dst 格与 2D 分道（探针 _census-flagcolor-dolltint ③:
+   *  GL(128,64,0,128) vs 2D(127,64,0,255) 实锤;shimmer 瀑布拖尾 opacity<1
+   *  拖尾格=可见受害面）。不透明 dst（旗贴墙主面）两式逐位同=旗案回归零。
+   *  false 还原 (ONE,1−SA) 基态。 */
   blendMult(on: boolean): void {
     if (this.unavailable || !this.gl) return;
     const gl = this.gl;
-    if (on) gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
+    if (on) gl.blendFunc(gl.ONE_MINUS_DST_ALPHA, gl.SRC_COLOR);
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 

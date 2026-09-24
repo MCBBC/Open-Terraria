@@ -103,6 +103,55 @@ void main() {
   outColor = vec4(min(vec3(255.0), floor(r + 0.5)) / 255.0, 1.0);
 }`;
 
+/** ★opresent 单 present 合并 pass3（2026-09-25）：FBO('warped') over 天空栈 FBO
+ *  → FBO('opresent') → present 一次——天空栈（C10b bg+云合并背板）与世界合成的
+ *  两次全屏回贴主画布并成一次（回贴账 2→1;全幅 IOSurface 往返同账）。
+ *
+ *  字节等价推导（porter-duff over 结合律,预乘域,C10b GC/GD 同族论证）：
+ *  现行为  main = q2d( W over_2d q2d( S over_2d G ) )
+ *  合并后  main = q2d( qGL( W overGL S ) over_2d q2d( G ) )
+ *    G=主画布 2D 天空渐变（预乘）, S=天空栈 FBO 8bit 预乘, W=FBO('warped')
+ *    8bit 预乘, q2d/qGL=2D 画布/GL FBO 的 8bit 量化。精确算术下
+ *    over(W, over(S,G)) = over(over(W,S), G)（预乘域 over 可结合）,两路各恰有
+ *    2 个 8bit 量化点,仅分组位置不同：
+ *    · W.a∈{0,1}（世界不透明/全空——绝大多数像素）over 退化为选择,两路逐位同;
+ *    · W.a∈(0,1) ∧ S.a∈(0,1) 的重叠像素（水面边/玻璃×云/背景渐变）±1~2LSB
+ *      （cloudbatch/C10b GC·GD 备案族同源,方向中性）。
+ *  朝向：FBO('bg')/FBO('warped') 同为「图像顶=v1」GL 朝向（bg=GLSpriteLayer
+ *  quad VERT 自带翻转;warped=pass2 原 VERT 写入翻转）,本 pass no-flip 同 vUv
+ *  直采保持相对对齐,输出同朝向（v0=图像底）→ present(flipY=1) 三级闭合。 */
+const OPRESENT_VERT = `#version 300 es
+in vec2 aPos;
+out vec2 vUv;
+void main() {
+  vUv = aPos;
+  // no-flip（同 LRECON_VERT 派生式）:aPos.y=0→clip-1→FBO row0=v0;双源同朝向同 vUv
+  gl_Position = vec4(aPos.x * 2.0 - 1.0, aPos.y * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const OPRESENT_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uWorld;   // FBO('warped') 世界合成输出（预乘,图像顶=v1）
+uniform sampler2D uSky;     // 天空栈 FBO（'bg';bg+云合并背板,预乘,图像顶=v1）
+out vec4 outColor;
+void main() {
+  vec4 w = texture(uWorld, vUv);
+  vec4 s = texture(uSky, vUv);
+  // porter-duff over（预乘域）:out = src + dst·(1−src.a)——与 2D drawImage
+  // source-over 同式（uWorld 为上层=世界合成盖天空栈）
+  outColor = vec4(w.rgb + s.rgb * (1.0 - w.a), w.a + s.a * (1.0 - w.a));
+}`;
+
+/** ★opresent 天空栈挂起引用（Renderer 延迟收口时传入）：管线内 FBO 名+帧界尺寸。
+ *  compose 尾段在 w/h 与其一致时走 pass3 合并（不一致=低清档帧 → 回退双 blit,
+ *  调用方按 lastMergeUsed 自行补贴 presentPendingSky）。 */
+export interface SkyPresentRef {
+  fboName: string;
+  w: number;
+  h: number;
+}
+
 export interface RawLight {
   r: Uint8Array; g: Uint8Array; b: Uint8Array;
   rx: number; ry: number; rw: number; rh: number;   // 光照扫描窗（tile 系）
@@ -123,6 +172,13 @@ export class GLWorldCompose {
   unavailable: boolean;
   private pLit: PipelineProgram | null = null;
   private pDistort: PipelineProgram | null = null;
+  /** ★opresent pass3 程序（over 合成;编译失败只废合并——compose 尾回退单 present） */
+  private pOver: PipelineProgram | null = null;
+  private fboOpresent: PipelineFbo | null = null;
+  /** ★opresent:最近一次 compose 是否实际走了 pass3 合并（调用方据此决定是否需
+   *  回贴挂起的天空栈——compose 返 true 但合并未走（程序缺/FBO 租借失败/尺寸
+   *  不一致）时天空栈仍在管线 FBO 里,Renderer presentPendingSky 补贴=回退双 blit） */
+  lastMergeUsed = false;
   private fboLit: PipelineFbo | null = null;
   private fboWarped: PipelineFbo | null = null;
   private texWorld: WebGLTexture | null = null;
@@ -165,6 +221,8 @@ export class GLWorldCompose {
     this.pLit = this.pipeline.program('worldLight', LIT_VERT, LIT_FRAG);
     this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
     this.pRecon = this.pipeline.program('lrecon', LRECON_VERT, LRECON_FRAG);
+    // ★opresent:pass3 程序登记（失败不致命——合并跳过走单 present 回退）
+    this.pOver = this.pipeline.program('opresent', OPRESENT_VERT, OPRESENT_FRAG);
     if (!this.pLit?.prog || !this.pDistort?.prog) { this.unavailable = true; return; }
     // ★pRecon 编译失败只废 A3（lreconDead）不废 A2——原全有全无 early-return 会
     //  跳过纹理创建,recreate 复活后半残态=黑世界（2026-09-23 用户实报案）
@@ -197,7 +255,11 @@ export class GLWorldCompose {
    *  ★B2b（2026-09-24）：world 入参双型——HTMLCanvasElement（旧上传链,逃生门/降级
    *  路径）或 WorldTexSrc 句柄（FBO('world') 累积纹理直采,worldCanvas 上传链退役:
    *  texSubImage2D 全幅上传归零,采样换 uWorldFlip=1）。成功返回 true——调用方随后
-   *  ctx.drawImage(compose.pipeline.canvas, 0, 0, viewW, viewH) 单次回贴。 */
+   *  ctx.drawImage(compose.pipeline.canvas, 0, 0, viewW, viewH) 单次回贴。
+   *  ★opresent（2026-09-25）：sky 在场（Renderer 延迟收口的天空栈挂起引用）且帧界
+   *  一致 → 尾段 pass3 over(warped, sky) → FBO('opresent') → present 单次,调用方
+   *  仍单次 drawImage——两次全屏回贴并成一次（等价性推导见 OPRESENT_VERT 注）。
+   *  合并未走（程序缺/FBO 失败/尺寸不一致）时 lastMergeUsed=false,调用方补贴。 */
   compose(
     world: HTMLCanvasElement | WorldTexSrc, light: HTMLCanvasElement,
     lightRect: readonly [number, number, number, number], darkSkip = 0,
@@ -207,7 +269,9 @@ export class GLWorldCompose {
     waveR: Float32Array | null = null, gridW = 0, gridH = 0,
     worldX = 0, worldY = 0, waveOffX = 0, waveOffY = 0,
     rawLight?: RawLight,
+    sky?: SkyPresentRef | null,
   ): boolean {
+    this.lastMergeUsed = false;   // ★opresent:每次 compose 重置（失败/回退面=未合并）
     const pipeline = this.pipeline;
     const gl = pipeline.glx;
     if (!gl || !this.pLit?.prog || !this.pDistort?.prog || this.unavailable) { this.lastFail = 'unavailable'; return false; }
@@ -369,6 +433,30 @@ export class GLWorldCompose {
     pipeline.setBlend('off');
     pipeline.drawQuad(this.pDistort, [0, 0, w, h], 0);
     // ---- present：FBO('warped') → pipeline 画布（调用方单次 drawImage 回贴 2D） ----
+    // ★opresent pass3：天空栈挂起在场且帧界一致 → over(warped, sky) → present 一次
+    //  （两次全屏回贴并成一次;字节等价推导见 OPRESENT_VERT 注）。合并不可用
+    //  （程序缺/FBO 租借失败/尺寸不一致=低清档帧）→ 原样单 present,lastMergeUsed
+    //  保持 false=调用方 presentPendingSky 补贴天空栈（回退双 blit 基线）。
+    const fboSky = sky && sky.w === w && sky.h === h ? pipeline.fbo(sky.fboName, sky.w, sky.h) : null;
+    if (fboSky?.tex && this.pOver?.prog && this.fboWarped.tex) {
+      this.fboOpresent = pipeline.fbo('opresent', w, h);
+      if (this.fboOpresent) {
+        pipeline.bindTarget(this.fboOpresent);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(this.pOver.prog);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.fboWarped.tex);
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, fboSky.tex);
+        gl.uniform1i(this.pipeline.uni(this.pOver, 'uWorld'), 0);
+        gl.uniform1i(this.pipeline.uni(this.pOver, 'uSky'), 1);
+        pipeline.setBlend('off');
+        pipeline.drawQuad(this.pOver, [0, 0, w, h], 0);
+        this.lastMergeUsed = true;
+        pipeline.present(this.fboOpresent);
+        return true;
+      }
+    }
     pipeline.present(this.fboWarped);
     return true;
   }
@@ -480,6 +568,7 @@ export class GLWorldCompose {
       this.pLit = this.pipeline.program('worldLight', LIT_VERT, LIT_FRAG);
       this.pDistort = this.pipeline.program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG);
       this.pRecon = this.pipeline.program('lrecon', LRECON_VERT, LRECON_FRAG);
+      this.pOver = this.pipeline.program('opresent', OPRESENT_VERT, OPRESENT_FRAG);   // ★opresent 同链重注册
       this.lreconDead = !this.pRecon?.prog;
       const gl = this.pipeline.glx;
       if (gl) {
