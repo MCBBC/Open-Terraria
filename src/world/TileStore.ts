@@ -68,6 +68,16 @@ export class TileStore {
 
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
   private listeners: Array<(x: number, y: number) => void> = [];
+  /** ★BJ322（2026-09-24）：多格件「裸写窗」——置位期间 setTile 跳过 listeners 派发
+   *  （netReporter 照常上报）。原版 ShiftTallGate/ShiftTrapdoor 对 w×h 全格直写
+   *  tile.type（WorldGen.cs:52215-52219/:51958-51964）【无任何逐格 TileFrame】，写完
+   *  才整体 TileFrame 面（:52224-52231）；本仓逐格 setTile 即时派发会把【半写态】交给
+   *  Check* 完整性裁决 → killDecorTile 在写循环中途吃掉已写格（机关门右击=残缺贴图
+   *  +误掉落物,用户实报）。写方（Door.shiftTallGate 等）try/finally 包裹此窗,写完后
+   *  由 afterWrite 钩跑一次完整性面=「写完再评估」原版等价。（与 _decorPlaceBuilding
+   *  的差异：那是在 Game 侧按放置操作包整段；此窗在 store 侧按单次多格裸写包,导线/
+   *  DoorOpeningHelper/网络重放等无 Game 栈的调用方同享） */
+  suppressListeners = false;
 
   // ---- 多人联机上报钩子（ClientNet 注入；单机为 null 零开销） ----
   /** 本地 tile 变更上报（协议层 TileOp 收集器）。liquid 通道不报（客户端本地模拟） */
@@ -290,7 +300,8 @@ export class TileStore {
       this.coat[i] &= ~TileStore.COAT_BLOCK_MASK; // ClearBlockPaintAndCoating（Tile.cs:934-939：color/fullbright/invisible 三清，只清方块侧）
     }
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: type, fx: frameX, fy: frameY });
-    this.listeners.forEach((fn) => fn(x, y));
+    // ★BJ322：suppressListeners 窗内跳过监听派发（netReporter 不受影响——联机同步面照常）
+    if (!this.suppressListeners) this.listeners.forEach((fn) => fn(x, y));
   }
 
   /** 运行期改半砖/坡面位（锤子交互用；生成期直接写数组即可） */

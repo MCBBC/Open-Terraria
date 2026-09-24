@@ -306,6 +306,13 @@ export interface GameHooks {
    *  TileBatch 收敛）。kind='door' 普通 2×3 门 / 'gate' 高门(388/389)；closing=false=开。
    *  缺省 = 单人/旧客户端零发送 */
   npcDoorNet?(kind: 'door' | 'gate', x: number, y: number, closing: boolean, dir: number): void;
+  /** ★BJ322（2026-09-24）：Collision.EmptyTile(x,y,ignoreTiles) 占位谓词（占用=true,
+   *  只看玩家/NPC）——NPC/怪开合高门 ShiftTallGate(forced=false) 的实体占位门
+   *  （WorldGen.cs:52206-52212,开/关两向）。缺省 = 无门（测试 mock/SimHost 零回归） */
+  overlapsEntity?(px: number, py: number): boolean;
+  /** ★BJ322：ShiftTallGate 尾 TileFrame 面（WorldGen.cs:52224-52231）等价扫面——
+   *  NPC/怪开合高门裸写后的完整性/邻件复检。缺省 = 不评估（同上零回归） */
+  tallGateTileFrameFace?(ax: number, ay: number): void;
   playSfxWav?(file: string, vol?: number, x?: number, y?: number, pitch?: number, replace?: boolean): void;   // 单 wav 直播（环境声三表;pitch=变调/EoC 连冲 0.6;replace=case36 ForceRoar 覆盖语义;可选=测试 mock 兼容）
   /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound——AI_016 引信嘶声/
    *  DD2 传送门 idle 环(:41409/:41458)/小妖精引信双轨(:63969+)；

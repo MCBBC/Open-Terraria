@@ -7,7 +7,7 @@
 // msg19/msg13 等价面=联机层（ClientNet.DoorEvent）,单机直写 store 先落（同旧简化面口径）。
 import type { TileStore } from './TileStore';
 import { T, TILE_BY_KEY } from '../data/tiles';
-import { openDoor, closeDoor, shiftTallGate, tallGateRowOf } from './Door';
+import { openDoor, closeDoor, shiftTallGate, tallGateRowOf, type ShiftTallGateOpts } from './Door';
 import { MOUNT_SETS } from '../entities/Mounts';
 
 // 原版 tile id 10/11/388/389 的本仓内部 id（sheet id 空间≠内部 id,见 Door.isLockedDoor 注）
@@ -36,6 +36,9 @@ export interface DoorHelperEnv {
   sfx?: (name: string) => void;
   /** CloseDoor 的 Collision.EmptyTile(ignoreTiles:true) 臂——只看玩家/NPC 占位 */
   blocked?: (x: number, y: number) => boolean;
+  /** ★BJ322（2026-09-24）：ShiftTallGate 尾 TileFrame 面（:52224-52231）注入——
+   *  helper 自动开/关高门走裸写窗后由 Game 侧扫面收口完整性/邻件复检 */
+  afterWrite?: (ax: number, ay: number) => void;
 }
 
 /** DoorCloseAttemptResult（:17-23） */
@@ -134,28 +137,32 @@ export function tallGateProvideAnchor(st: TileStore, x: number, y: number): [num
 }
 
 /** TryOpenDoor（:158-187）。门盒=锚格 16×80（gravDir 同上）;ShiftTallGate(X,Y,false)=开
- *  （本仓 shiftTallGate 成功侧内播 SoundID 8,:52213 不分开关）。 */
+ *  （本仓 shiftTallGate 成功侧内播 SoundID 8,:52213 不分开关）。
+ *  ★BJ322：blocked/afterWrite 透传 shiftTallGate（原版 ShiftTallGate 内置 EmptyTile
+ *  :52206 + 尾 TileFrame 面 :52224,helper 路径 forced=false 同门生效）。 */
 export function tallGateTryOpenDoor(
   st: TileStore, ax: number, ay: number, gravDir: number,
   hitbox: Rect, sfx?: (name: string) => void,
+  opts?: ShiftTallGateOpts,
 ): boolean {
   const rect: Rect = { x: ax * 16, y: ay * 16, w: 16, h: 80 };                        // :161
   if (gravDir === 1) rect.h += 16;
   else if (gravDir === -1) { rect.y -= 16; rect.h += 16; }
   if (!rectsIntersect(rect, hitbox)) return false;                                    // :172-175
   if (hitbox.y < rect.y || hitbox.y + hitbox.h > rect.y + rect.h) return false;       // :176-179
-  return shiftTallGate(st, ax, ay, false, sfx) !== null;                              // :180-186
+  return shiftTallGate(st, ax, ay, false, sfx, opts) !== null;                        // :180-186
 }
 
 /** TryCloseDoor（:189-213）。足印=锚格 16×80 + Inflate(1,0)（高门无列移,:197 为死赋值）。 */
 export function tallGateTryCloseDoor(
   st: TileStore, ax: number, ay: number, hitbox: Rect, sfx?: (name: string) => void,
+  opts?: ShiftTallGateOpts,
 ): DoorCloseAttemptResult {
   if (!st.hasTile(ax, ay) || st.get(ax, ay) !== TALL_GATE_OPEN_T) return 'doorIsInvalidated';  // :193-196
   const rect: Rect = { x: ax * 16, y: ay * 16, w: 16, h: 80 };                                 // :198
   rect.x -= 1; rect.w += 2;                                                                    // :199
   if (rectsTouchOrOverlap(rect, hitbox)) return 'stillInDoorArea';                             // :200-204
-  if (shiftTallGate(st, ax, ay, true, sfx)) return 'closedDoor';                               // :205-211
+  if (shiftTallGate(st, ax, ay, true, sfx, opts)) return 'closedDoor';                         // :205-211
   return 'failedToCloseDoor';                                                                  // :212
 }
 
@@ -212,7 +219,8 @@ export class DoorOpeningHelper {
       const info = this.ongoing[i];
       const res = info.kind === 'common'
         ? commonDoorTryCloseDoor(st, info.x, info.y, hitbox, env.sfx, env.blocked)
-        : tallGateTryCloseDoor(st, info.x, info.y, hitbox, env.sfx);
+        : tallGateTryCloseDoor(st, info.x, info.y, hitbox, env.sfx,
+          { blocked: env.blocked, afterWrite: env.afterWrite });
       if (res !== 'stillInDoorArea') this.ongoing.splice(i, 1);
     }
   }
@@ -262,7 +270,8 @@ export class DoorOpeningHelper {
     const [ax, ay] = kind === 'common' ? commonDoorProvideAnchor(st, x, y) : tallGateProvideAnchor(st, x, y);
     const opened = kind === 'common'
       ? commonDoorTryOpenDoor(st, ax, ay, info.intendedOpeningDirection, info.playerGravityDirection, info.hitboxToOpenDoor, env.sfx)
-      : tallGateTryOpenDoor(st, ax, ay, info.playerGravityDirection, info.hitboxToOpenDoor, env.sfx);
+      : tallGateTryOpenDoor(st, ax, ay, info.playerGravityDirection, info.hitboxToOpenDoor, env.sfx,
+        { blocked: env.blocked, afterWrite: env.afterWrite });
     if (opened) this.ongoing.push({ x: ax, y: ay, kind });
   }
 }

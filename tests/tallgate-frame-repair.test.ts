@@ -27,15 +27,21 @@ describe('高门右键切换（toggleTallGate 行为锁）', () => {
     const T389 = TILE_BY_KEY['v_389_tall_gate_open'] ?? -1;
     const g = Object.create(Game.prototype) as unknown as {
       world: World; sfx: { play(n: string): void }; input: { rightDown: boolean };
+      overlapsEntity(x: number, y: number): boolean;
       toggleTallGate(x: number, y: number, closing: boolean): void;
     };
     g.world = w;
     const played: string[] = [];
     g.sfx = { play: (n: string) => played.push(n) };
     g.input = { rightDown: true };
+    g.overlapsEntity = () => false;   // ★BJ322：blocked 臂注入（无实体桩）
 
     // 布一扇右开向高门:锚 (30, 40),388 五行
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);   // 行帧 0/20/38/56/74
+    // ★BJ322：顶/底锚行（CheckTallGate :52142 双行 StrictSolid;afterWrite 扫面对
+    //  无锚门=原版毁门本相,行为锁场景须合法锚定）
+    st.setTileSilent(30, 39, TILE_BY_KEY['stone']!, 0, 0);
+    st.setTileSilent(30, 45, TILE_BY_KEY['stone']!, 0, 0);
     // 帧面:走 shiftTallGate 开→关 自循环生成合法帧（构造期直接手写帧易错,用产物）
     g.toggleTallGate(30, 40, false);                       // 右键闭态=开
     expect(st.get(30, 40)).toBe(T389);
@@ -121,6 +127,9 @@ describe('高门自动开站定门', () => {
       inputLeft: false, inputRight: false, getAutoDoorVelocityContribution: () => 0 };
     g.player = player;
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    // ★BJ322：顶/底锚行（afterWrite 扫面对无锚门=原版毁门本相）
+    st.setTileSilent(30, 39, TILE_BY_KEY['stone']!, 0, 0);
+    st.setTileSilent(30, 45, TILE_BY_KEY['stone']!, 0, 0);
     g.updateDoorHelperAuto();                            // 站定:不重开
     expect(st.get(30, 40)).toBe(T388);
     player.inputRight = true; player.vx = 1;
@@ -238,6 +247,9 @@ describe('高门自动开几何门（TryOpenDoor :172-192 行为锁）', () => {
       inputLeft: false, inputRight: true, getAutoDoorVelocityContribution: () => 0 };   // 持输入(过站定门)
     g.player = player;
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    // ★BJ322：顶/底锚行（afterWrite 扫面对无锚门=原版毁门本相）
+    st.setTileSilent(30, 39, TILE_BY_KEY['stone']!, 0, 0);
+    st.setTileSilent(30, 45, TILE_BY_KEY['stone']!, 0, 0);
     return { g, st, player, T388, T389 };
   };
 
@@ -299,6 +311,9 @@ describe('高门自动关 R6 贴边带 + R7 失败放弃跟踪（TryCloseDoor :1
       inputLeft: false, inputRight: true, getAutoDoorVelocityContribution: () => 0 };
     g.player = player;
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(30, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    // ★BJ322：顶/底锚行（afterWrite 扫面对无锚门=原版毁门本相）
+    st.setTileSilent(30, 39, TILE_BY_KEY['stone']!, 0, 0);
+    st.setTileSilent(30, 45, TILE_BY_KEY['stone']!, 0, 0);
     g.updateDoorHelperAuto();                        // 自动开 → 389 + 跟踪
     expect(st.get(30, 40)).toBe(T389);
     return { g, st, player, T388, T389, played };
@@ -329,6 +344,8 @@ describe('高门自动关 R6 贴边带 + R7 失败放弃跟踪（TryCloseDoor :1
     expect(st.get(30, 40)).toBe(T389);      // 残门保持开门态未强行关成(原版同)
     // DoorIsInvalidated:再走真实开路径开一扇(34 列)→锚格被拆 → 同样移除跟踪
     for (let dy = 0; dy < 5; dy++) st.setTileSilent(34, 40 + dy, T388, 0, TALL_GATE_ROW_FY[dy]);
+    st.setTileSilent(34, 39, TILE_BY_KEY['stone']!, 0, 0);   // ★BJ322：顶/底锚行
+    st.setTileSilent(34, 45, TILE_BY_KEY['stone']!, 0, 0);
     player.x = 34 * 16 - 2; player.y = 44 * 16 - 42; player.inputRight = true;
     g.updateDoorHelperAuto();
     expect(g.doorHelper.isTrackingOpenDoor(34, 40)).toBe(true);

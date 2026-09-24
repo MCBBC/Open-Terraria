@@ -169,9 +169,14 @@ export class GLSpriteLayer {
   /** GL 不可用(WebGL2 缺失/初始化失败)时置 true,调用方回退 2D 路径 */
   unavailable = false;
   // ---- ★C10a「GLPipeline 后端」模式（?cloudpipe=1;云会话迁入管线单上下文）----
-  /** 持有的管线（null=旧独立上下文模式）。1:1 所有:dispose 随层释放——
-   *  二期多消费方共享一管线时归属上移到持有方,此处同步改 */
+  // ---- ★C10b（2026-09-24）共管：管线归属上移持有方（Renderer 单实例注入
+  //  云+bg 两类会话+worldCompose），ownsPipe=false 时 dispose 不级联管线本体 ----
+  /** 持有的管线（null=旧独立上下文模式）。★C10b 起共享注入为常态:dispose 是否
+   *  级联管线本体由 ownsPipe 决定（Renderer 持有单一 GLPipeline 注入） */
   private pipe: GLPipeline | null = null;
+  /** ★C10b:管线所有权（createPipelineBacked 工厂/独占构造=true——dispose 级联;
+   *  Renderer 共管注入=false——管线归 Renderer 治理,层 dispose 只清自管对象） */
+  private ownsPipe = true;
   /** 管线 program 表句柄（程序禁单删:program() 按名缓存,单删=悬空句柄毒化重登记） */
   private progHandle: PipelineProgram | null = null;
   private progCloudHandle: PipelineProgram | null = null;
@@ -186,11 +191,13 @@ export class GLSpriteLayer {
     return this.gl ? this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number : 0;
   }
 
-  constructor(pipe?: GLPipeline) {
+  constructor(pipe?: GLPipeline, ownsPipe = true) {
     if (pipe) {
       // ★C10a 管线后端：GL 上下文/画布/present 面全归管线,本类只自管
       // 纹理(LRU)/采样器/VAO/quads 提交。canvas=pipe.canvas（cloudBlitRect 的 blit 源）
+      // ★C10b:ownsPipe=false=共管注入（Renderer 单管线多消费方）——dispose 不级联
       this.pipe = pipe;
+      this.ownsPipe = ownsPipe;
       this.canvas = pipe.canvas;
       this.statName = pipe.statName;
       this.initPipeMode();
@@ -417,16 +424,19 @@ export class GLSpriteLayer {
   }
 
   /** 帧开始:清透明(不透明底用 fillQuad 铺)。
-   *  ★C10a 管线后端:清的是管线 FBO('clouds')（RGBA8——与旧 glfx 画布背板同构,
+   *  ★C10a 管线后端:清的是管线 FBO（RGBA8——与旧 glfx 画布背板同构,
    *  中间产物字节语义=原画布字节）;present 离场留 blend off → 会话态(blend/depth)
-   *  每帧显式重建（谁设谁还原判例:管线共享上下文无「init 一次性状态」可倚） */
-  begin(): void {
+   *  每帧显式重建（谁设谁还原判例:管线共享上下文无「init 一次性状态」可倚）。
+   *  ★C10b fboName 参数化:云会话缺省 'clouds';bg 会话传 'bg'（纯 bg 与
+   *  bg+云合并会话同 FBO——合并=bg quads 后保持开放续交云 quads,FBO 名随
+   *  开会话方;管线 FBO 命名空间防撞:clouds/bg/lit/warped/light2 各归各） */
+  begin(fboName = 'clouds'): void {
     if (this.unavailable || !this.gl) return;
     const gl = this.gl;
     if (this.pipe) {
       const w = this.canvas.width, h = this.canvas.height;
       if (w === 0 || h === 0) { this.pipeFbo = null; return; }   // 防上一会话残留 FBO 被 end 误 present
-      const f = this.pipe.fbo('clouds', w, h);
+      const f = this.pipe.fbo(fboName, w, h);
       if (!f) { this.unavailable = true; this.diedAt = performance.now(); return; }
       this.pipeFbo = f;
       this.pipe.bindTarget(f);   // 绑 FBO+viewport(0,0,f.w,f.h)
@@ -1059,7 +1069,8 @@ void main(){
 
   /** ★C10a 管线后端释放：自管对象（纹理/VAO/采样器）删于管线上下文+字节账归账页;
    *  程序【禁单删】——pipe.program() 按名缓存句柄,单删=悬空句柄毒化重登记,
-   *  归 pipe.dispose() 整表清理。管线本体随层 1:1 释放（二期共享归属上移时同步改） */
+   *  归 pipe.dispose() 整表清理。★C10b:管线本体仅 ownsPipe 时随层释放——
+   *  共管注入（Renderer 单管线多消费方）时归 Renderer 治理（revive/drop 链） */
   private disposePipeMode(): void {
     const gl = this.pipe?.glx;
     if (gl && !gl.isContextLost() && !this.objectsStale) {
@@ -1076,7 +1087,7 @@ void main(){
     this.pipeFbo = null;
     this.texs.clear();
     this.bytes = 0;
-    this.pipe?.dispose();
+    if (this.ownsPipe) this.pipe?.dispose();
   }
 }
 

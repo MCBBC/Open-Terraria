@@ -3953,7 +3953,12 @@ export class Game implements GameHooks {
     st.netSuppress = true;
     try {
       if (ev.gate) {
-        shiftTallGate(st, ev.x, ev.y, ev.closing);
+        // msg19 重放臂 = ShiftTallGate(forced:true)（MessageBuffer.cs:1320/:1323——
+        // 跳实体占位门,主机权威已决）+ 尾 TileFrame 面（:52224-52231）
+        shiftTallGate(st, ev.x, ev.y, ev.closing, undefined, {
+          forced: true,
+          afterWrite: (ax, ay) => this.tallGateTileFrameFace(ax, ay),
+        });
       } else if (ev.closing) {
         closeDoor(st, ev.x, ev.y);
       } else {
@@ -26092,7 +26097,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
   }
 
-  private overlapsEntity(px: number, py: number): boolean {
+  /** Collision.EmptyTile(x,y,ignoreTiles) 占位谓词（占用=true）——门族实体占位门共用
+   *  （closeDoor blocked 臂/shiftTallGate :52206 臂/NPC 面经 GameHooks）。★BJ322 转正 */
+  overlapsEntity(px: number, py: number): boolean {
     const rx = px * TILE, ry = py * TILE;
     if (this.player.x < rx + TILE && this.player.x + this.player.w > rx && this.player.y < ry + TILE && this.player.y + this.player.h > ry) return true;
     for (const e of this.entities.enemies) {
@@ -27700,17 +27707,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const gem = GEM_LOCK_GEM_IDS[Math.floor(fx / 54)] ?? -1;
     const ax = tx - Math.floor(fx % 54 / 18);
     const ay = ty - Math.floor(fy % 54 / 18);
-    for (let ix = ax; ix < ax + 3; ix++) {
-      for (let iy = ay; iy < ay + 3; iy++) {
-        if (!st.inBounds(ix, iy)) continue;
-        const ii = st.idx(ix, iy);
-        st.setTile(ix, iy, st.type[ii], st.frameX[ii], (on ? 54 : 0) + (iy - ay) * 18);
+    // ★BJ322（2026-09-24）：9 格 frameY 直写包 suppressListeners 裸写窗——原版
+    //  ToggleGemLock（WorldGen.cs:46898-46902）`tile.frameY = …` 直赋【无逐格
+    //  TileFrame】,写完才 SquareTileFrame(i,j)（:46920）一次评估。逐格 setTile
+    //  即时派发会把带基混写态（0/54 带）交给 'wallhang' Check3x3Wall 完整性
+    //  （:44722 逐格 frameY 比对）→ 中途判坏整件清+掉宝石/锁本体（探针实测
+    //  0/9 格存活+双掉落,与机关门 BJ322 同族疾病同治）。
+    st.suppressListeners = true;
+    try {
+      for (let ix = ax; ix < ax + 3; ix++) {
+        for (let iy = ay; iy < ay + 3; iy++) {
+          if (!st.inBounds(ix, iy)) continue;
+          const ii = st.idx(ix, iy);
+          st.setTile(ix, iy, st.type[ii], st.frameX[ii], (on ? 54 : 0) + (iy - ay) * 18);
+        }
       }
+    } finally {
+      st.suppressListeners = false;
     }
     if (gem !== -1 && wasOn) {
       const key = VANILLA_ITEM_KEY_BY_ID[gem];
       if (key && ITEM_BY_KEY[key] !== undefined) this.spawnDrop(tx * TILE, ty * TILE, key, 1);
     }
+    this.checkDecorSquareFrame(tx, ty);   // SquareTileFrame(i,j)（:46920,3×3 面一次评估=checkDecorSquareFrame 等价）
     this.wiring?.hitSwitch(ax, ay);
   }
 
@@ -29124,6 +29143,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★R20-I8:Collision.EmptyTile(x,y,ignoreTiles) 等价——格区内无任何实体
       //（★BJ250 抽 this.areaEmptyAt 单源:活板门右键臂同门消费）
       areaEmpty: (x: number, y: number, w2: number, h2: number) => this.areaEmptyAt(x, y, w2, h2),
+      // ★BJ322:高门导线切换（devices case 388/389 委托 shiftTallGate）尾 TileFrame 面注入
+      afterWrite: (ax: number, ay: number) => this.tallGateTileFrameFace(ax, ay),
       // SW-R3 2026-09-03（F-5 同径）：hook 增加 hurtBox 位（108=130/164=64,
       // SetDefaults 盒半宽;缺省 undefined → explodeAt 内 R*TILE 旧行为）
       explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, hurtBox?: number, projId?: number) =>
@@ -31206,8 +31227,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  _ongoingOpenDoors 跟踪(vanilla 右键开不进 _ongoingOpenDoors 同语义) */
   private toggleTallGate(x: number, y: number, closing: boolean) {
     const st = this.world.store;
-    if (!shiftTallGate(st, x, y, closing, (n: string) => this.sfx.play(n as SfxName))) return;
+    if (!shiftTallGate(st, x, y, closing, (n: string) => this.sfx.play(n as SfxName), {
+      // 实体占位门（ShiftTallGate :52206-52212 EmptyTile(ignoreTiles:true),开/关两向,
+      // forced 缺省 false=原版本相;右击关门时玩家站门洞内 → 拒（vanilla 同相））
+      blocked: (bx, by) => this.overlapsEntity(bx, by),
+      afterWrite: (ax, ay) => this.tallGateTileFrameFace(ax, ay),
+    })) return;
     this.input.rightDown = false;
+  }
+
+  /** ShiftTallGate 尾 TileFrame 面（WorldGen.cs:52224-52231,x-1..x+1 × y-1..y+h）的
+   *  checkDecorSquareFrame 扫面等价：3×3 扫步 2 行四连发（cy=ay-1/ay+1/ay+3/ay+5,
+   *  每发覆盖 cy±1 → 并集 ay-2..ay+6 ⊇ 原版面 ay-1..ay+5;外溢一格为幂等复检,
+   *  原版该两行由下一拍 TileFrame 链同式覆盖）。★BJ322：shiftTallGate 改裸写窗后,
+   *  写循环不再逐格触发监听,完整性/邻件复检全靠此面收口。（public=GameHooks
+   *  NPC/怪开合高门路径同消费;overlapsEntity 同理） */
+  tallGateTileFrameFace(ax: number, ay: number): void {
+    for (let cy = ay - 1; cy <= ay + 5; cy += 2) this.checkDecorSquareFrame(ax, cy);
   }
 
   openChest: ((c: ChestData) => void) | null = null;
@@ -44482,6 +44518,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }, {
       sfx: (n: string) => this.sfx.play(n as SfxName),
       blocked: (bx, by) => this.overlapsEntity(bx, by),         // CloseDoor EmptyTile(ignoreTiles:true) 臂
+      afterWrite: (ax, ay) => this.tallGateTileFrameFace(ax, ay),   // ★BJ322 高门裸写尾扫面
     });
   }
 
@@ -45390,10 +45427,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //   _decor-sweep ㉒ tallGate388Drop 守门）。
         // ★388/389 混合格容忍（本仓私有,非原版偏离）：原版 ShiftTallGate（:52175）先
         //   直写全列 type（:52215-52219 tile.type 直赋无 TileFrame）再整体 TileFrame
-        //   （:52224-52231 x-1..x+1 × y-1..y+h）——运行期从不评估半写态;本仓
-        //   shiftTallGate（Door.ts:158）与 wiring devices case 388/389（devices.ts:951）
-        //   逐格 setTile 即时触发监听,半写态必被完整性判坏 → 对配对态格放行=「写完
-        //   再评估」等价（切换面保帧写,各格序列自洽）。
+        //   （:52224-52231 x-1..x+1 × y-1..y+h）——运行期从不评估半写态。★BJ322
+        //   （2026-09-24）后本仓同相：shiftTallGate（Door.ts）整列裸写（store
+        //   suppressListeners 窗,监听不派发）+写完 afterWrite 扫面=「写完再评估」;
+        //   导线 devices case 388/389 亦改委托 shiftTallGate。此容忍降级为纯防御面
+        //   （旧存档残态/外部直写）,配对态格放行语义不变。
         let row = 0;
         for (let num = st.frameY[i] % TALL_GATE_CFH; row < 5 && num - TALL_GATE_HEIGHTS[row] >= 0; row++) {
           num -= TALL_GATE_HEIGHTS[row];
@@ -45406,7 +45444,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let bad = false;
         for (let dy = 0; !bad && dy < 5; dy++) {
           const qi = st.idx(x, ay + dy);
-          if (!st.isActive(x, ay + dy) || !TALL_GATE_STATE_IDS.has(st.get(x, ay + dy))
+          // ★BJ322（2026-09-24）：原版完整性循环（:52136-52145）只比帧（frameX/frameY）,
+          //  无 active/nactive 谓词——曾用 isActive(nactive) → 致动高门（WIRE_ACTUATED,
+          //  帧完好）被误判坏整件清+掉 3240（vanilla 同态幸存）。改 hasTile（active()
+          //  裸位）保「幽灵格不复活」X2-F7 纪律;STATE_IDS 保配对态容忍+破格不复活。
+          if (!st.hasTile(x, ay + dy) || !TALL_GATE_STATE_IDS.has(st.get(x, ay + dy))
             || st.frameX[qi] !== st.frameX[st.idx(x, ay)]
             || st.frameY[qi] !== fyTop + TALL_GATE_ROW_FY[dy]) bad = true;
         }

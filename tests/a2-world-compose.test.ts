@@ -81,12 +81,13 @@ describe('A2 GLWorldCompose 结构锁', () => {
     const a2 = r.indexOf('Renderer.wfbo && !this.isCpuRender()');
     expect(acquire).toBeGreaterThan(a2);            // 获取点在 A2 分支之后
     expect(branch).toBeGreaterThan(acquire);        // 且紧邻旧链分支
-    expect(r).toContain('if (Renderer.wfbo) {\n      try { (this.worldCompose ??= new GLWorldCompose()); }');
+    expect(r).toContain('if (Renderer.wfbo) {\n      try { (this.worldCompose ??= this.newWorldCompose()); }');
     expect(r).toContain('if (!Renderer.wfbo) { try { this.waterWarp.prewarm(); }');
   });
 
   it('a0 白名单已收 GLWorldCompose', () => {
     // ★C10a（2026-09-24）：白名单扩入 GLSpriteLayer.ts（云管线后端,?cloudpipe=1）
-    expect(src('../tests/a0-glpipeline-shell.test.ts')).toContain("new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts'])");
+    // ★C10b（2026-09-24）：白名单扩入 Renderer.ts（共管管线持有/revive/drop 治理面）
+    expect(src('../tests/a0-glpipeline-shell.test.ts')).toContain("new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts'])");
   });
 });

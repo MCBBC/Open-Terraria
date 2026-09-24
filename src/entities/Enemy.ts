@@ -5365,7 +5365,11 @@ export class Enemy extends Entity {
             } else {
               game.npcDoorNet?.('door', dtx, dty, false, dir); // msg19 等价：即时广播
             }
-          } else if (!shiftTallGate(st, dtx, dty, false)) {
+          } else if (!shiftTallGate(st, dtx, dty, false, undefined, {
+            // ★BJ322：forced=false 同 vanilla（NPC.cs:60668）——实体占位门+尾 TileFrame 面
+            blocked: game.overlapsEntity ? (bx, by) => game.overlapsEntity!(bx, by) : undefined,
+            afterWrite: game.tallGateTileFrameFace ? (ax, ay) => game.tallGateTileFrameFace!(ax, ay) : undefined,
+          })) {
             this.ai3 = num58F;                         // 高门开启失败（:60668-60673）
           } else {
             game.npcDoorNet?.('gate', dtx, dty, false, dir); // msg19 等价：闸开即时广播

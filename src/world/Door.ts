@@ -166,10 +166,31 @@ export function tallGateRowOf(frameY: number): number {
   return row;
 }
 
-/** 切换高门（closing=true 关、false 开）。锚点可为门内任意格；返回锚点坐标或 null */
+/** shiftTallGate 环境注入（★BJ322 2026-09-24,原版 ShiftTallGate 内置臂的外置面） */
+export interface ShiftTallGateOpts {
+  /** msg19 网络重放臂（MessageBuffer.cs:1320/:1323 `forced:true`）——跳过实体占位门 */
+  forced?: boolean;
+  /** Collision.EmptyTile(x,y+k,ignoreTiles:true) 占位谓词（占用=true,WorldGen.cs:52206-52212
+   *  `!forced && !EmptyTile → return false`;开/关两向同门）。无注入=无门（纯函数测试面） */
+  blocked?: (x: number, y: number) => boolean;
+  /** Wiring.SkipWire(x,y+j) 臂（:52201-52207,Wiring.running 时导线路径注入） */
+  skipCell?: (x: number, y: number) => void;
+  /** 尾 TileFrame 面（:52224-52231 x-1..x+1 × y-1..y+h）——写完整列后跑一次完整性/
+   *  邻件复检（本仓 checkDecorSquareFrame 扫面）。不注入=不评估（旧行为） */
+  afterWrite?: (ax: number, ay: number) => void;
+}
+
+/** 切换高门（closing=true 关、false 开）。锚点可为门内任意格；返回锚点坐标或 null。
+ *  原版序（WorldGen.cs:52175-52231）：Validate 方格(:52196)→SkipWire(:52201)→
+ *  EmptyTile 实体门(:52206,forced 豁免)→Sound 8(:52213)→整列 type 直写(:52215-52219,
+ *  帧逐格原样保留)→TileFrame 面(:52224)。★BJ322：整列写包 st.suppressListeners 裸写窗
+ *  （原版逐格直写无 TileFrame）,写完经 afterWrite 跑一次完整性=「写完再评估」——
+ *  修复右击时半写态被 CheckTallGate 判坏 → killDecorTile 中途吃掉已写格
+ *  （残缺贴图+误掉 3240,用户实报）。 */
 export function shiftTallGate(
   st: TileStore, x: number, y: number, closing: boolean,
   sfx?: (name: string) => void,
+  opts?: ShiftTallGateOpts,
 ): [number, number] | null {
   const CLOSED = TILE_BY_KEY['v_388_tall_gate_closed'];
   const OPEN = TILE_BY_KEY['v_389_tall_gate_open'];
@@ -188,8 +209,34 @@ export function shiftTallGate(
     if (!st.inBounds(x, anchorY + dy) || !st.hasTile(x, anchorY + dy)
       || st.type[ii] !== from) return null;
   }
-  for (let dy = 0; dy < 5; dy++) st.setTile(x, anchorY + dy, to, st.frameX[i0], st.frameY[st.idx(x, anchorY + dy)]);
+  // SkipWire 先于实体门（:52201-52207 → :52206 原版序;失败早退也照跳=原版本相）
+  if (opts?.skipCell) {
+    for (let dy = 0; dy < 5; dy++) opts.skipCell(x, anchorY + dy);
+  }
+  // 实体占位门（:52206-52212,开/关两向;EmptyTile(ignoreTiles:true)=只看玩家/NPC）
+  if (!opts?.forced && opts?.blocked) {
+    for (let dy = 0; dy < 5; dy++) {
+      if (opts.blocked(x, anchorY + dy)) return null;
+    }
+  }
   sfx?.('door_open'); // 高门恒播 SoundID 8 不分开关(ShiftTallGate :52213,★引注修正:旧注 :51786 失真);旧'door'非法名经 as 断言静默失效
+  // 整列 type 直写（:52215-52219 `tileSafely.type = type`——帧【逐格】原样保留,
+  //  ★不以下击格 frameX 齐化他行;裸写窗内无监听派发=原版无逐格 TileFrame 同相）
+  const snap: Array<[number, number]> = [];
+  for (let dy = 0; dy < 5; dy++) {
+    const ii = st.idx(x, anchorY + dy);
+    snap.push([st.frameX[ii], st.frameY[ii]]);
+  }
+  st.suppressListeners = true;
+  try {
+    for (let dy = 0; dy < 5; dy++) {
+      st.setTile(x, anchorY + dy, to, snap[dy][0], snap[dy][1]);
+    }
+  } finally {
+    st.suppressListeners = false;
+  }
+  // 尾 TileFrame 面（:52224-52231）——Game 侧注入 checkDecorSquareFrame 扫面
+  opts?.afterWrite?.(x, anchorY);
   return [x, anchorY];
 }
 

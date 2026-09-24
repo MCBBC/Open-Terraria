@@ -7,7 +7,7 @@ import { PREVENTS_ACTUATION_UNDER } from '../Wiring';
 import type { TrapShotKind } from '../../entities/Dart';
 import { TILE_BY_KEY } from '../../data/tiles';
 import { flipSwitchTrack } from '../MinecartTrack';
-import { tallGateRowOf } from '../Door';
+import { shiftTallGate } from '../Door';
 
 /** 器件运行环境(Game 实现;保持窄接口以便单测注入) */
 export interface DeviceCtx {
@@ -62,6 +62,9 @@ export interface DeviceCtx {
   /** ★R20-I8:格区无实体(Collision.EmptyTile ignoreTiles 等价——活板门/高门关门
    *  前查目标格,WorldGen.cs:51931-51932/:51955-51956;实体占位拒换) */
   areaEmpty?(x: number, y: number, w: number, h: number): boolean;
+  /** ★BJ322（2026-09-24）：ShiftTallGate 尾 TileFrame 面（:52224-52231）注入——
+   *  导线切换高门走裸写窗后由 Game 侧扫面收口完整性/邻件复检 */
+  afterWrite?(ax: number, ay: number): void;
   /** 魔幻日晷/月晷快进（Wiring.cs:1150/:1168 → Main.Sundialing/Moondialing :6304/:6319：
    *  fastForwardTimeToDawn/Dusk=true + cooldown=8；冷却中/已在快进则静默） */
   timeSkip?(kind: 'dawn' | 'dusk'): void;
@@ -128,25 +131,42 @@ export function flipBlock(
       }
     }
   }
-  for (let ix = ox; ix < ox + tilesW; ix++) {
-    for (let iy = oy; iy < oy + tilesH; iy++) {
-      if (!st.inBounds(ix, iy)) continue;
-      const ii = st.idx(ix, iy);
-      w.skipCell(ix, iy);
-      if (axis === 'y') st.setTile(ix, iy, st.type[ii], st.frameX[ii], st.frameY[ii] + d);
-      else st.setTile(ix, iy, st.type[ii], st.frameX[ii] + d, st.frameY[ii]);
+  // ★BJ322（2026-09-24）：整块帧翻包 suppressListeners 裸写窗——原版灯族/吊灯翻转
+  //  = `Main.tile[k,l].frameX += num` 直赋（Wiring.cs:1381-1387 灯 2×2 族/
+  //  ToggleChandelier :1754-1774 34 吊灯 3×3 同式）【无逐格 TileFrame】,尾仅
+  //  SendTileSquare。逐格 setTile 即时派发会把带基混写态交给 Check* 完整性
+  //  （34 'hangs' 3×3 帧比对:53300-53310 / 95·126 'hang2x2'）→ 中途判坏整件清
+  //  +误掉落（探针实测吊灯/灯笼导线开关 0 存活+掉本体,与机关门/宝石锁同族疾病）。
+  st.suppressListeners = true;
+  try {
+    for (let ix = ox; ix < ox + tilesW; ix++) {
+      for (let iy = oy; iy < oy + tilesH; iy++) {
+        if (!st.inBounds(ix, iy)) continue;
+        const ii = st.idx(ix, iy);
+        w.skipCell(ix, iy);
+        if (axis === 'y') st.setTile(ix, iy, st.type[ii], st.frameX[ii], st.frameY[ii] + d);
+        else st.setTile(ix, iy, st.type[ii], st.frameX[ii] + d, st.frameY[ii]);
+      }
     }
+  } finally {
+    st.suppressListeners = false;
   }
 }
 
-/** 单格帧翻转(火把/蜡烛等) */
+/** 单格帧翻转(火把/蜡烛等)。★BJ322：裸写窗同 flipBlock（原版 ToggleCandle/
+ *  火把臂 = frameX 直赋无 TileFrame） */
 export function flipCell(w: Wiring, x: number, y: number, delta: number): void {
   const st = w.st;
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   let d = delta;
   if (st.frameX[i] >= delta) d = -delta;
-  st.setTile(x, y, st.type[i], st.frameX[i] + d, st.frameY[i]);
+  st.suppressListeners = true;
+  try {
+    st.setTile(x, y, st.type[i], st.frameX[i] + d, st.frameY[i]);
+  } finally {
+    st.suppressListeners = false;
+  }
 }
 
 /** 活板门开/关互换（ShiftTrapdoor 帧近似；HitWireSingle case 386/387 与右键交互臂
@@ -960,24 +980,18 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       //  导线触发与右键交互臂(★BJ250 Player.cs:32535-32548)共用同一翻转实现
       shiftTrapdoorFlip(w, x, y, ctx.areaEmpty);
       return true;
-    case 388: case 389: { // 高门关/开互换(ShiftTallGate;帧近似)
-      const openK = 'v_389_tall_gate_open', closedK = 'v_388_tall_gate_closed';   // ⚠️5 并 def:v_389_tallgateopen 已退役
-      const toOpen = sheet === 388;
-      const target = TILE_BY_KEY[toOpen ? openK : closedK] ?? 0;
-      if (!target) return true;
-      const ox = x - Math.floor(st.frameX[i] % 20 / 18);
-      // ★M-2（2026-09-02）行归一随帧约定归原版：fy%90/18（旧 18px 步进自洽）→
-      // heights 递减（CheckTallGate :52129-52133 同式,CFH=94,Door.ts 唯一权威）
-      const oy = y - tallGateRowOf(st.frameY[i]);
-      if (!toOpen && ctx.areaEmpty && !ctx.areaEmpty(ox, oy, 1, 5)) return true;  // ★R20-I8
-      for (let ix = ox; ix < ox + 1; ix++) {
-        for (let iy = oy; iy < oy + 5; iy++) {
-          if (!st.inBounds(ix, iy)) continue;
-          const ii = st.idx(ix, iy);
-          w.skipCell(ix, iy);
-          st.setTile(ix, iy, target, st.frameX[ii], st.frameY[ii]);
-        }
-      }
+    case 388: case 389: { // 高门关/开互换——★BJ322（2026-09-24）改委托 shiftTallGate
+      //（Wiring.cs:1460 `WorldGen.ShiftTallGate(i, j, flag4)` 同函数同参面:forced 缺省
+      //  false=实体占位门生效（EmptyTile ignoreTiles,开/关两向 :52206-52212）→
+      //  ctx.areaEmpty 单源;SkipWire(:52201-52207)→w.skipCell;Validate 方格+
+      //  整列裸写+尾 TileFrame 面全在 shiftTallGate 内,替代旧 ox/oy 手工归一
+      //  +逐格 setTile 直写（后者半写态会被 CheckTallGate 中途判坏=BJ322 病灶;
+      //  旧 `frameX%20/18` 锚偏移亦非原版——vanilla 无此算,1 宽门列=点击列本相））
+      shiftTallGate(st, x, y, sheet === 389, undefined, {
+        skipCell: (sx, sy) => w.skipCell(sx, sy),
+        blocked: ctx.areaEmpty ? (bx, by) => !ctx.areaEmpty!(bx, by, 1, 1) : undefined,
+        afterWrite: ctx.afterWrite,
+      });
       return true;
     }
     case 405: // 壁炉 3×2 frameX ±54(:1021-1038)

@@ -4945,8 +4945,13 @@ export class TownNPC extends Entity {
           }
         } else if (doorType === GATE_OPEN) {
           // 高门关门（原版 54266-54274：ShiftTallGate(closing:true)，tile 389 → 388）
+          // ★BJ322：blocked/afterWrite 注入（vanilla forced=false——NPC 仍站门列内则拒,
+          // EmptyTile :52206 同门;尾 TileFrame 面 :52224）
           if (shiftTallGate(st, this.doorX, this.doorY, true,
-            () => game.playSfx('door_close', 1, this.cx, this.cy))) {
+            () => game.playSfx('door_close', 1, this.cx, this.cy), {
+            blocked: game.overlapsEntity ? (bx, by) => game.overlapsEntity!(bx, by) : undefined,
+            afterWrite: game.tallGateTileFrameFace ? (ax, ay) => game.tallGateTileFrameFace!(ax, ay) : undefined,
+          })) {
             this.closeDoor = false;
             game.behavioLog?.('npcDoor', { phase: 'gateClosed', x: this.doorX, y: this.doorY });
             game.npcDoorNet?.('gate', this.doorX, this.doorY, true, this.facing);  // msg19:闸关
@@ -5041,7 +5046,11 @@ export class TownNPC extends Entity {
       }
       return opened;
     }
-    const anchor = shiftTallGate(st, n25, hitY, false, () => game.playSfx('door_open', 1, this.cx, this.cy));
+    const anchor = shiftTallGate(st, n25, hitY, false, () => game.playSfx('door_open', 1, this.cx, this.cy), {
+      // ★BJ322：forced=false 同 vanilla（NPC.cs:54628）——实体占位门+尾 TileFrame 面
+      blocked: game.overlapsEntity ? (bx, by) => game.overlapsEntity!(bx, by) : undefined,
+      afterWrite: game.tallGateTileFrameFace ? (ax, ay) => game.tallGateTileFrameFace!(ax, ay) : undefined,
+    });
     if (anchor) {
       this.closeDoor = true;
       this.doorX = anchor[0]; this.doorY = anchor[1];

@@ -2206,6 +2206,14 @@ export class SkyRenderer {
     SkyRenderer.stepTintState(this.blizzTintState, blizzOn, dtSec);
   }
 
+  /** ★C10b 合并判定面（零分配）:天气色罩是否在场——与 weatherTintPasses 非空
+   *  同判（cots 空=passes 恒空一并同判;判窄不判宽方向安全:误判在场只多走
+   *  分回合回退,绝不误合并）。Renderer bg+云合并会话以此定谳有无 2D 夹层 */
+  hasSkyWeatherTint(): boolean {
+    if (!this.cots) return false;
+    return this.sandTintState.opacity > 0.001 || this.blizzTintState.opacity > 0.001;
+  }
+
   /** 色罩 pass 输出（Renderer.drawScreenFilterChain 头插;无 cots/零强度 → 空） */
   weatherTintPasses(): import('./GLScreenFilters').ScreenFxPass[] {
     const out: import('./GLScreenFilters').ScreenFxPass[] = [];
@@ -2385,10 +2393,21 @@ export class SkyRenderer {
    *  which 分 pass 选择（2026-08-24 菜单插层：原版 DrawSurfaceBG 层序 cs:60386/:60457
    *  把两 pass 夹在远山 Step1/Step2 与树层之间——菜单经 BiomeBackground.drawMenu 的
    *  near 回调分次调用；游戏内 Renderer 缺省 'both' 行为零改动 */
+  /** ★C10b mergedSession:Renderer 在 bg GL 会话无 2D 夹层内容时预开的「bg+云合并
+   *  会话」（begin('bg') 已清屏+已交 bg quads,本方法必须收口——含早退路径,否则
+   *  bg 永不回贴）。收口=单次 present+单次【全幅】blit（bg 覆盖面不以云 bbox 为界,
+   *  cloudBlitRect 的 bbox 收口不适用）。会话中途死亡(unavailable)照旧 blit——
+   *  present 对死管线 no-op,画布为陈旧帧=既有 GL 死亡窗同族语义,下帧 acquire 自愈 */
   drawCloudsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camY: number,
-    which: 'both' | 'closer' | 'closest' = 'both') {
+    which: 'both' | 'closer' | 'closest' = 'both',
+    mergedSession?: GLSpriteLayer | null) {
+    // ★C10b:合并会话先收权(所有路径必收口——早退含,防 bg 丢)
+    const merged = mergedSession ?? null;
     const camTop = camY - viewH / 2;
-    if (camTop >= this.fx.surfaceY + 16) return;
+    if (camTop >= this.fx.surfaceY + 16) {
+      if (merged) { merged.end(); ctx.drawImage(merged.canvas, 0, 0); ctx.globalAlpha = 1; }
+      return;
+    }
     const { bgTopY } = this.cloudBgTop(camY, viewH);
     const sH = viewH / 600;
     const scratch = this.cloudScratch;   // 两 pass 同步消费,单 scratch 顺序复用
@@ -2402,13 +2421,19 @@ export class SkyRenderer {
     // 结合,但两条路径的 8bit 中间量化分组不同 → 云贴图半透明重叠像素 ±1~2 LSB
     // (实测 988×862 全屏 67 像素差,maxΔ=2;无重叠即逐位同)。方向中性且更贴近
     // 原版 SpriteBatch 单背板流式语义。?cloudbatch=0 一键回退独立会话。
+    // ★C10b:合并会话优先(已由 Renderer begin,绕过 batchBoth/cloudcache 语义——
+    //  会话本体已是 bg+云单背板,±1~2LSB 备案口径同 cloudbatch 判例)。
     let shared: GLSpriteLayer | null = null;
-    if (which === 'both' && SkyRenderer.batchBoth) {
+    let mergedMode = false;
+    if (merged) {
+      shared = merged;
+      mergedMode = true;
+    } else if (which === 'both' && SkyRenderer.batchBoth) {
       const g = this.useGLClouds ? this.cloudGlLayer : null;
       shared = g && !g.unavailable ? g : null;
     }
-    if (shared && SkyRenderer.cloudRegionBlit) this.cloudBlitBoxReset();   // 'both' 批会话 bbox 跨两通道累积,会话头清零
-    let batchBegun = false;
+    if (shared && !mergedMode && SkyRenderer.cloudRegionBlit) this.cloudBlitBoxReset();   // 'both' 批会话 bbox 跨两通道累积,会话头清零(合并会话全幅 blit 不消费 bbox,免重置)
+    let batchBegun = mergedMode;   // ★合并会话已由 Renderer begin——禁再 begin(begin=清屏会抹掉已交 bg quads)
     /** 懒开启共享会话(首个非空通道触发;两通道全空则零工作=旧 early-return 语义) */
     const openBatch = (): GLSpriteLayer | null => {
       if (!shared) return null;
@@ -2422,7 +2447,13 @@ export class SkyRenderer {
     const finishBatch = () => {
       if (shared && batchBegun) {
         shared.end();
-        this.cloudBlitRect(ctx, shared);      // ★perf3:全幅→当帧 bbox 子矩形(?cloudcache=0 退全幅;空 bbox=零提交,跳过=旧全透明 blit 同效)
+        if (mergedMode) {
+          // ★C10b 合并收口:bg+云单背板【全幅】blit(单次 drawImage 替代旧
+          //  「bg 全幅+云 bbox」两次;bg 层平铺全宽,bbox 收口不适用)
+          ctx.drawImage(shared.canvas, 0, 0);
+        } else {
+          this.cloudBlitRect(ctx, shared);      // ★perf3:全幅→当帧 bbox 子矩形(?cloudcache=0 退全幅;空 bbox=零提交,跳过=旧全透明 blit 同效)
+        }
         ctx.globalAlpha = 1;
       }
     };

@@ -89,6 +89,11 @@ export interface RawLight {
 }
 
 export class GLWorldCompose {
+  /** ★C10b 共管注入:管线所有权。true=自建（?cloudpipe=0 逃生门下的旧行为,
+   *  statName 账页='worldCompose'）;false=Renderer 单实例 GLPipeline 注入
+   *  （云+bg+本模块三消费方共管）——dispose 不级联管线本体,上下文重生归
+   *  Renderer.reviveSwPipe 治理（recreate 清程序表=A3 判例,全消费方须重注册） */
+  readonly ownsPipe: boolean;
   /** 无扭曲帧的中性波场（0.5 中心值 → 位移 (0.5−0.5)·intensity=0;gridW/H=1 防
    *  uWaveSize=(0,0) 的 NaN 除法——mix(NaN×0)=NaN 污染恒等直通） */
   static readonly neutralWave = new Float32Array([0.5]);
@@ -128,8 +133,10 @@ export class GLWorldCompose {
   private noiseH = 0;
   private waveBytes: Uint8Array | null = null;
 
-  constructor(statName = 'worldCompose') {
-    this.pipeline = new GLPipeline(statName);
+  constructor(statName = 'worldCompose', pipe?: GLPipeline | null) {
+    // ★C10b:注入管线上限参——传入即共管（statName 随管线账页）;缺省自建=旧行为
+    this.ownsPipe = !pipe;
+    this.pipeline = pipe ?? new GLPipeline(statName);
     this.unavailable = this.pipeline.unavailable;
     const gl = this.pipeline.glx;
     if (!gl) return;
@@ -332,10 +339,16 @@ export class GLWorldCompose {
 
   /** ★哨兵族同款获取面（2026-09-23 资源风暴防护补齐）：贫困锁不建（starvedLock,
    *  与 waterWarp.glLayer 同款）;上下文丢失后 5s 退避重建（diedAt 哨兵,防重建风暴）。
-   *  unavailable 即返 null=调用方落回旧链,永不刷屏重试。 */
+   *  unavailable 即返 null=调用方落回旧链,永不刷屏重试。
+   *  ★C10b 共管模式（ownsPipe=false）不自行重生管线——recreate 清程序表会连带
+   *  毒化云/bg 层的已登记句柄（悬空程序=INVALID_OPERATION 静默弃画）,重生链统一
+   *  归 Renderer.reviveSwPipe（全消费方重注册后才放行 acquire）。 */
   acquire(): GLWorldCompose | null {
     if (starvedLock()) return null;
-    if (this.unavailable && performance.now() - this.pipeline.diedAt > 5000) this.recreate();
+    if (this.unavailable) {
+      if (!this.ownsPipe) return null;
+      if (performance.now() - this.pipeline.diedAt > 5000) this.recreate();
+    }
     return this.unavailable ? null : this;
   }
 
@@ -420,9 +433,11 @@ export class GLWorldCompose {
     glStatUpload(this.pipeline.statName, w * h);
   }
 
-  /** 上下文丢失/退避后重建（透传 pipeline.recreate;纹理/键全弃） */
+  /** 上下文丢失/退避后重建（透传 pipeline.recreate;纹理/键全弃）。
+   *  ★C10b 共管模式:管线重生归 Renderer（reviveSwPipe 先行——此处只在管线已
+   *  活时重注册程序+重建纹理;管线仍死则保持 unavailable 待下轮） */
   recreate(): boolean {
-    const ok = this.pipeline.recreate();
+    const ok = this.ownsPipe ? this.pipeline.recreate() : !this.pipeline.unavailable;
     this.unavailable = this.pipeline.unavailable;
     if (ok) {
       // ★程序登记重跑（pipeline.recreate 清空程序表——句柄重注册,否则悬空）
@@ -452,7 +467,8 @@ export class GLWorldCompose {
   }
 
   dispose(): void {
-    this.pipeline.dispose();
+    // ★C10b:仅自建管线时级联 dispose——共管注入的管线归 Renderer 治理
+    if (this.ownsPipe) this.pipeline.dispose();
     this.unavailable = true;
   }
 }

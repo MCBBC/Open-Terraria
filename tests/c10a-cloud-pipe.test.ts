@@ -15,10 +15,12 @@ const RDR = readFileSync(resolve(__dirname, '../src/render/Renderer.ts'), 'utf8'
 const SKY = readFileSync(resolve(__dirname, '../src/render/SkyRenderer.ts'), 'utf8');
 const PIPE = readFileSync(resolve(__dirname, '../src/render/GLPipeline.ts'), 'utf8');
 
-describe('C10a 旗面与接线（缺省关=旧 glfx 会话）', () => {
-  it('?cloudpipe 缺省关（灰度;===\'1\' 显式激活）,逃生门=回旧 glfx 共享会话', () => {
-    expect(RDR).toContain("get('cloudpipe') === '1'");
-    expect(RDR).toMatch(/_cloudPipe = \(\(\) => \{[\s\S]{0,200}cloudpipe[\s\S]{0,120}=== '1'/);
+describe('C10a 旗面与接线（C10b 转正后旗面演进——缺省开,逃生门=0）', () => {
+  it('?cloudpipe 缺省开（C10b 转正 2026-09-24;!==\'0\'）,node 无 location 恒关,逃生门=0', () => {
+    expect(RDR).toContain("get('cloudpipe') !== '0'");
+    expect(RDR).toMatch(/_cloudPipe = \(\(\) => \{[\s\S]{0,300}cloudpipe[\s\S]{0,160}!== '0'/);
+    // node 判死:typeof location 守卫在旗内（GLPipeline 管线面 document 判死同族）
+    expect(RDR).toMatch(/typeof location !== 'undefined' && new URLSearchParams\(location\.search\)\.get\('cloudpipe'\) !== '0'/);
   });
 
   it('注入点分支:cloudpipe 开=acquireCloudPipe;关=acquireGL(旧会话);useGLClouds/cpuRender 总门一致', () => {
@@ -63,8 +65,11 @@ describe('C10a GLSpriteLayer 管线后端', () => {
     expect(SRC.match(/1\.0 - screen\.y \/ uCanvas\.y \* 2\.0/g)?.length).toBe(2);
   });
 
-  it('quads 渲进管线 FBO(\'clouds\');begin 显式重建会话态(blend premul+depth off);end present', () => {
-    expect(SRC).toContain("this.pipe.fbo('clouds', w, h)");
+  it('quads 渲进管线 FBO;begin 显式重建会话态(blend premul+depth off);end present', () => {
+    // ★C10b:FBO 名参数化（云缺省 'clouds'/bg 会话 'bg'/合并会话随开会方）——
+    //  命名空间防撞锁迁 tests/c10b-bg-cloud-pipe.test.ts
+    expect(SRC).toContain('begin(fboName = \'clouds\')');
+    expect(SRC).toContain('this.pipe.fbo(fboName, w, h)');
     expect(SRC).toContain('this.pipe.bindTarget(f)');
     expect(SRC).toContain('this.pipe.present(this.pipeFbo)');
     // 会话态逐帧显式（present 离场留 blend off——谁设谁还原判例）

@@ -942,6 +942,17 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         stats: g.renderer?.composePathStats ?? null,
         lastFail: g.renderer?.composeLastFail ?? null,
       },
+      // ★C10b 诊断面（2026-09-24）:云+群系背景 GL 会话路径与合并形态——转正后
+      //  used='cloudpipe'（共管管线,缺省）/'glfx'（?cloudpipe=0 逃生门）/'2d'
+      //  （GL 不可用/退避/cpu）;merge='merged'（bg+云单会话单 blit）/'split'
+      //  （夹层内容在场——天气色罩/切换黑闪——双会话双 blit）/'-'（bg 未走 GL）。
+      //  split 占比异常高=色罩/黑闪常驻,合并收益丢失的归因面
+      cloudPath: {
+        used: g.renderer?.cloudPathUsed ?? null,
+        stats: g.renderer?.cloudPathStats ?? null,
+        merge: g.renderer?.cloudMergeUsed ?? null,
+        mergeStats: g.renderer?.cloudMergeStats ?? null,
+      },
       // ★C8 诊断面（2026-09-23）:波场 Worker 运行态——on=worker 在跑,fields/falls
       //  =场快照应答/失联回落计数（falls>0=已自动回落主线程模拟,需报障）
       waveWorker: (() => {
