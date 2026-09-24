@@ -5921,12 +5921,16 @@ export class Renderer {
    *  cloudbatch/C10b GC·GD 备案族）。回退面（任一门不满足=双 blit 现行为逐位）：
    *  夹层谓词（灯笼/气球/事件天幕/月总戏剧/环境实体/shimmer）、天气色罩/黑闪
    *  （skyMergeable 假=分回合）、低清档 wK≠1、fullbright、拍照、GL 不可用、
-   *  compose 失败（presentPendingSky 补贴）。首版灰度缺省关（?opresent=1 显式
-   *  激活）;全矩阵对拍 ALL PASS 后走转正流程（翻缺省+?opresent=0 总逃生门）。
+   *  compose 失败（presentPendingSky 补贴）。★转正（2026-09-25 首日）：像素对拍
+   *  全矩阵逐字节 ALL PASS（18 相位 census n=0 maxΔ=0——地表/洞穴/水下 warp/
+   *  重力翻转/6 群系×3 天气/缩放/相机相位;回退相位=双 blit 逐字节,scripts/
+   *  _opresent-ab.mjs）——强于 C10b 转正判据（census maxΔ≤2）,按 cloudpipe
+   *  先例直接翻缺省开。?opresent=0=总逃生门（回双 blit 现行为）。
    *  运行时可翻（wfbo 同款页内翻面范式——探针 scripts/_opresent-ab.mjs）。 */
   private static _opresent = (() => {
     try {
-      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('opresent') === '1';
+      // node（无 location）恒关——GLPipeline/GLSpriteLayer 管线面 document 判死
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('opresent') !== '0';
     } catch { return false; }
   })();
   static get opresent() { return this._opresent; }

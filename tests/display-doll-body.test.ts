@@ -112,6 +112,13 @@ describe('SW-BN6 假人 P3a ⑤结构锁：Renderer 接线位与兜底链', () =
     expect(rendererSrc).toContain('displayDollFacing(stFx.frameX[stFx.idx(rec.x, rec.y)])');
     expect(rendererSrc).toContain('dollLightTint(f.img, f.sx, f.sy, f.sw, f.sh,');
   });
+  it('★普查案①（2026-09-25）dollLightTint 裁剪回贴【源精灵】α:自引 destination-in=multiply 后全域 α=1 的 no-op(框外实色泄漏,探针 _census-flagcolor-dolltint ①角像素 α=255 实锤→修后 0)', () => {
+    const dd = readFileSync(new URL('../src/render/DisplayDoll.ts', import.meta.url), 'utf8');
+    // 旧病形态禁再现:destination-in 后自引 drawImage(c,0,0)
+    expect(dd).not.toMatch(/globalCompositeOperation = 'destination-in';\s*\n\s*cx\.drawImage\(c, 0, 0\);/);
+    // 正身:与全仓预染色配方族同式——destination-in(源精灵同源矩形)
+    expect(dd).toMatch(/globalCompositeOperation = 'destination-in';\s*\n\s*\/\/[^\n]*\n(?:[^\n]*\n){0,8}?\s*cx\.drawImage\(src, sx, sy, sw, sh, 0, 0, sw, sh\);/);
+  });
   it('贴图未就绪回落旧图标叠画（ready 门自愈,CharCreation 同语义）', () => {
     const caseBody = rendererSrc.slice(rendererSrc.indexOf("case 'display_doll': {"));
     const nextCase = caseBody.indexOf("case 'hat_rack':");

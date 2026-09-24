@@ -19,6 +19,9 @@ class FakeCtx {
   globalCompositeOperation: GlobalCompositeOperation = 'source-over';
   imageSmoothingEnabled = false;
   fillStyle = '#000';
+  font = '10px sans-serif';
+  textAlign: CanvasTextAlign = 'left';
+  fillTextLog: Array<{ text: string; x: number; y: number }> = [];
   stack: Array<Pick<FakeCtx, 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'globalAlpha' | 'globalCompositeOperation' | 'imageSmoothingEnabled' | 'fillStyle'>> = [];
   log: DrawRec[] = [];
   getTransform() { const t = { a: this.a, b: this.b, c: this.c, d: this.d, e: this.e, f: this.f }; return t as DOMMatrix; }
@@ -37,6 +40,39 @@ class FakeCtx {
   }
   drawImage(img: unknown, ...args: unknown[]) { this.log.push({ op: 'draw', img, args, gco: this.globalCompositeOperation, alpha: this.globalAlpha, smooth: this.imageSmoothingEnabled }); }
   fillRect(x: number, y: number, w: number, h: number) { this.log.push({ op: 'fill', img: null, args: [x, y, w, h], gco: this.globalCompositeOperation, alpha: this.globalAlpha, smooth: this.imageSmoothingEnabled }); }
+  fillText(text: string, x: number, y: number) { this.fillTextLog.push({ text, x, y }); }
+}
+
+/** acc 态 host 桩：有状态 stub 层（isAccumOpen/begin/endAccumulate 可观测）——
+ *  普查案③（残 FBO 弃用）与案②（font/textAlign 镜像）行为锁 */
+function mkAccHost() {
+  const layer = {
+    unavailable: false,
+    open: false,
+    beginCalls: [] as Array<[string, boolean]>,
+    endAccumCalls: 0,
+    isAccumOpen(name: string) { return name === 'world' && this.open; },
+    begin(name: string, clear: boolean) { this.beginCalls.push([name, clear]); this.open = true; },
+    resize() { /* no-op */ },
+    endAccumulate() { this.endAccumCalls++; this.open = false; return null; },
+    blendAdditive() { /* no-op */ },
+    blendErase() { /* no-op */ },
+    blendMult() { /* no-op */ },
+    quadSprite() { /* no-op */ },
+    texFromRegion() { return { tex: {}, w: 8, h: 8, key: 'stub' }; },   // 假条目：过预解析门（本组只锁 begin/clear 时序）
+    texFromData() { return null; },
+    texRefresh() { return null; },
+    texFromImage() { return null; },
+    texAlive() { return true; },
+  };
+  return {
+    layer,
+    host: {
+      acquireGl: () => (layer.unavailable ? null : (layer as never)),
+      worldCtx: () => null,
+      worldW: () => 128, worldH: () => 72,
+    },
+  };
 }
 
 /** host 桩:attach 期层可用;翻 layer.unavailable=true 后 flush 走 2D 重放支 */
@@ -261,3 +297,85 @@ function flushReplay(ex: GLShimExecutor, layer: { unavailable: boolean }): void 
   layer.unavailable = true;
   ex.flush();
 }
+
+// ================= ★普查（2026-09-25 旗错色同病普查） =================
+
+describe('★普查案② acc 态 font/textAlign 镜像（Bobber 声呐渔获名/Banner 悬停名）', () => {
+  it('set→读回镜像值（undefined 传播面封口）+save/restore 往返', () => {
+    const { host } = mkAccHost();
+    const ex = new GLShimExecutor(host);
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    expect(wrap).not.toBeNull();
+    wrap.font = '12px "Fusion Pixel 12px", sans-serif';
+    wrap.textAlign = 'center';
+    expect(wrap.font).toBe('12px "Fusion Pixel 12px", sans-serif');
+    expect(wrap.textAlign).toBe('center');
+    wrap.save();
+    wrap.font = '20px x';
+    wrap.textAlign = 'right';
+    wrap.restore();
+    expect(wrap.font).toBe('12px "Fusion Pixel 12px", sans-serif');
+    expect(wrap.textAlign).toBe('center');
+  });
+
+  it('fillText 长尾→降级 bridge 回放 font/textAlign→raw.fillText 用对文本态', () => {
+    const { host } = mkAccHost();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      ...host,
+      degradeAcc: () => { ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.font = '10px monospace';        // Bobber.ts:953 同款
+    wrap.textAlign = 'center';
+    wrap.fillText('Marlin', 0, -12);     // 触发 DRAWING_TAIL→degrade→bridge 回放
+    expect(raw2.fillTextLog).toEqual([{ text: 'Marlin', x: 0, y: -12 }]);
+    expect(raw2.font).toBe('10px monospace');
+    expect(raw2.textAlign).toBe('center');
+  });
+
+  it('attach(raw) 从真 ctx 起步镜像（bridge/2D 窗零回归）', () => {
+    const raw = new FakeCtx();
+    raw.font = 'bold 14px monospace';
+    raw.textAlign = 'right';
+    const { host } = mkAccHost();
+    const ex = new GLShimExecutor(host);
+    const wrap = ex.attach(raw as unknown as CanvasRenderingContext2D) as unknown as FakeCtx;
+    expect(wrap.font).toBe('bold 14px monospace');
+    expect(wrap.textAlign).toBe('right');
+  });
+});
+
+describe('★普查案③ attachAcc 弃用上一帧残留开 FBO（残影跨帧串层,残队守卫姊妹案）', () => {
+  it("isAccumOpen('world')=true 残留 → attachAcc endAccumulate 弃用 → flushAcc 重 begin(clear=true)", () => {
+    const { layer, host } = mkAccHost();
+    layer.open = true;   // 模拟上一帧异常（throw 于 compositeLight 前）残留
+    const ex = new GLShimExecutor(host);
+    ex.attachAcc();
+    expect(layer.endAccumCalls).toBe(1);
+    const img = mkImg(1);
+    ex.drawImage(img, 0, 0, 8, 8, 4, 4, 8, 8);
+    ex.flush();
+    expect(layer.beginCalls).toEqual([['world', true]]);   // 新帧首段清透明
+  });
+
+  it('正常帧（FBO 已收口）attachAcc 零触碰（endAccumulate 恒 no-op）', () => {
+    const { layer, host } = mkAccHost();
+    layer.open = false;
+    const ex = new GLShimExecutor(host);
+    ex.attachAcc();
+    expect(layer.endAccumCalls).toBe(0);
+    expect(layer.beginCalls).toEqual([]);
+  });
+});
+
+describe('★普查案④/⑤ 结构锁（GL MULT 精确式+dollLightTint 裁剪）', () => {
+  it('blendMult=(ONE_MINUS_DST_ALPHA,SRC_COLOR)：Canvas multiply 半透明 dst 逐字节精确式（旧 (ZERO,SRC_COLOR) 丢 S×(1−Da) 项+α保=探针③实锤 (128,64,0,128) vs 2D (127,64,0,255)）', () => {
+    expect(SRC).toMatch(/blendMult\(on: boolean\): void \{\s*\n\s*if \(this\.unavailable \|\| !this\.gl\) return;\s*\n\s*const gl = this\.gl;\s*\n\s*if \(on\) gl\.blendFunc\(gl\.ONE_MINUS_DST_ALPHA, gl\.SRC_COLOR\);\s*\n\s*else gl\.blendFunc\(gl\.ONE, gl\.ONE_MINUS_SRC_ALPHA\);/);
+  });
+
+  it('tier-3 门加 col[3]===1（rgba 半透明 fillStyle multiply 有 (1−αs)αbCb 项不可直译→降级）', () => {
+    const EXEC = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
+    expect(EXEC).toContain("if (this.accMode && this.gco === 'multiply' && col && col[3] === 1 && geo && geo.rot === 0");
+  });
+});

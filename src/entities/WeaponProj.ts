@@ -5079,7 +5079,7 @@ export class FlaironSpike extends Entity {
     //  免疫窗已由逐弹私账承载,此处对齐 hurt 侧 :14176 `penetrate != 1` 分支不达 =
     //  命中【不写】敌免疫帧——405 命中后 404/悠悠球等共享窗弹不被自己挡）
     hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen,
-      () => { hitAny = true; }, undefined, false, undefined, 1);
+      () => { hitAny = true; }, undefined, false, undefined, 0);
     if (hitAny) { this.killExplode(game); return; }
     // ★BJ339-T1：寿命尽 = timeLeft 到期（:17307-17312 → Kill → :74183 尘+音）
     if (--this.life <= 0) { this.killExplode(game); return; }
@@ -5325,7 +5325,7 @@ export class FlaironHeadProj extends Entity {
     //  命中击退仍朝玩家面朝向,不随敌相对弹位翻转）
     // 击退方向 = direction（:30742-30751 球在玩家哪侧;1058 同式先例 FlailProj kdir）
     hitEnemies(this, game, this.hitCd, 10, p.cx < this.cx ? 1 : -1, this.armorPen,
-      () => { this.st = 1; }, undefined, true, undefined, 0, p.cx < this.cx ? 1 : -1);
+      () => { this.st = 1; }, undefined, true, undefined, 0);
   }
 }
 

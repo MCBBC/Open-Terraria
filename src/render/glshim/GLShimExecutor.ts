@@ -46,9 +46,10 @@ export interface ShimHost {
 interface QuadRec {
   /** 0=SO 1=ADD(lighter) ★B2b acc 新增 2=ERASE(destination-out 独立削底面——
    *  未注册尘对/光环削底+加算两步族的 acc 直译;bridge 态不产生）
-   *  3=MULT(multiply 实心 fillRect——ZERO,SRC_COLOR=dst×C 逐字节同 Skia multiply
-   *  的不透明 dst 主面;α 域差异（2D αo→1 vs GL α 保）只在透明/半透明 dst 格
-   *  登记 census;bridge 态不产生） */
+   *  3=MULT(multiply 实心 fillRect——★2026-09-25 普查翻案为
+   *  (ONE_MINUS_DST_ALPHA,SRC_COLOR)=Canvas multiply 逐字节精确式（含半透明
+   *  dst 格;旧 (ZERO,SRC_COLOR) α 域登记项已消,见 GLSpriteLayer.blendMult 注;
+   *  实色源门 col[3]===1/ga===1/轴对齐仍在——rgba 半透明源走降级）） */
   tier: 0 | 1 | 2 | 3;
   img: CanvasImageSource | null;      // 2D 重放源（solid 面为 null）
   solid: boolean;                     // fillRect 纯色面（白纹理+tint）

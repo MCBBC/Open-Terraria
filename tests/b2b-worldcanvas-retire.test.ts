@@ -300,8 +300,10 @@ describe('B2b GLShimExecutor acc 行为', () => {
     expect(sh.stats.fallback).toBe(0);            // 不再整帧降级
     expect(blends).toContain('mult:on');
     expect(blends).toContain('mult:off');
-    // GLSpriteLayer 源锚:(ZERO,SRC_COLOR)=dst×C
-    expect(GSL).toContain('gl.blendFunc(gl.ZERO, gl.SRC_COLOR);');
+    // GLSpriteLayer 源锚:Canvas multiply 逐字节精确式（★2026-09-25 普查翻案——
+    //  旧 (ZERO,SRC_COLOR) 丢 S×(1−Da) 项+α保,半透明 dst 格与 2D 分道;
+    //  探针 _census-flagcolor-dolltint ③:GL(128,64,0,128) vs 2D(127,64,0,255) 实锤）
+    expect(GSL).toContain('gl.blendFunc(gl.ONE_MINUS_DST_ALPHA, gl.SRC_COLOR);');
   });
   it('★回归锁:bridged 帧 finishAccFrame 走桥接 flush（队列排空,内容 present 到 worldCtx）', () => {
     // Renderer 源锚:bridged 分支在早退之前 flush+detach

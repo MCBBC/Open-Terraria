@@ -21,8 +21,8 @@ const PIPE = readFileSync(resolve(__dirname, '../src/render/GLPipeline.ts'), 'ut
 const REP = readFileSync(resolve(__dirname, '../src/debug/DebugReport.ts'), 'utf8');
 
 describe('opresent 旗面与帧状态', () => {
-  it('?opresent=1 显式激活,缺省关（灰度;=0/缺省=双 blit 现行为;无 =0 逃生门歧义）', () => {
-    expect(RDR).toContain("get('opresent') === '1'");
+  it('?opresent 转正缺省开（2026-09-25 首日全矩阵逐字节 ALL PASS——cloudpipe 先例）,?opresent=0 总逃生门', () => {
+    expect(RDR).toContain("get('opresent') !== '0'");
     expect(RDR).toContain('static get opresent()');
     expect(RDR).toContain('static opresentSetForTest(v: boolean): void');
   });
