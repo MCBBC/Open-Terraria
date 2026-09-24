@@ -29,14 +29,16 @@ describe('B1 旗面与逃生门', () => {
 
   it('CPU 渲染/worldLayer 关闭不进 GL 段(2D 全链保留)', () => {
     // bglStageGrid 首门四判:旗+CPU+worldLayerActive+GL 可用
-    expect(RDR).toMatch(/const bglStageGrid = \(layer: 'wall' \| 'tile'\): boolean => \{\s*\n\s*if \(!Renderer\.bgl \|\| this\.isCpuRender\(\) \|\| !this\.worldLayerActive\) return false;\s*\n\s*const glw = this\.acquireWorldGl\(\);/);
+    // ★B2b:acc 分支先行（flush+句柄取层）,bridge 分支保持首门四判
+    expect(RDR).toMatch(/const bglStageGrid = \(layer: 'wall' \| 'tile'\): boolean => \{\s*\n\s*if \(!Renderer\.bgl \|\| this\.isCpuRender\(\) \|\| !this\.worldLayerActive\) return false;/);
+    expect(RDR).toMatch(/const glw = acc \? this\._accGlw : this\.acquireWorldGl\(\);/);
   });
 });
 
 describe('B1 共管管线租用与 revive 链', () => {
   it('FBO 租名 world(两段串行复用,无乒乓)——命名空间 clouds/bg/lit/warped/light2/world 各归各', () => {
-    expect(RDR).toContain("glw.begin('world')");
-    expect(SRC).toContain("begin(fboName = 'clouds')");
+    expect(RDR).toContain("glw.begin('world'");   // ★B2b:acc 帧带 clear 参续交
+    expect(SRC).toContain("begin(fboName = 'clouds'");   // ★B2b 起带 clear 缺省参
     expect(COMP).toContain("pipeline.fbo('lit', w, h)");
     expect(COMP).toContain("pipeline.fbo('warped', w, h)");
     expect(COMP).toContain("pipeline.fbo('light2', rawLight.w2, rawLight.h2)");
@@ -110,12 +112,14 @@ describe('B1 quadTile/quadExact 判例', () => {
 });
 
 describe('B1 A 线零改动(worldTex 退役=B2 入口,本役句柄面不动)', () => {
-  it('GLWorldCompose pass1 仍直传 worldCanvas(上传链/A 线结构零触碰)', () => {
-    expect(COMP).toContain('gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, world);');
+  it('GLWorldCompose pass1 canvas 上传链保留(逃生门/降级帧)+句柄直采支零上传(★B2b 换指)', () => {
+    expect(COMP).toContain('gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, world as HTMLCanvasElement);');
     expect(COMP).toContain("pipeline.fbo('lit', w, h)");
+    expect(COMP).toContain('if (worldTex) {');   // 句柄支:acc 帧零上传
   });
-  it('Renderer compositeLight 仍以 worldCanvas 为 worldTex 源(2D 回退路径全保留)', () => {
-    expect(RDR).toContain('wc.compose(\n            this.worldCanvas!,');
+  it('Renderer compositeLight:acc 帧句柄换指/bridge 帧 worldCanvas 源(2D 回退路径全保留)', () => {
+    expect(RDR).toContain('wc.compose(\n            worldArg, this.lightCanvas,');
+    expect(RDR).toContain('accFbo?.tex ? this.accHandle(accFbo)! : this.worldCanvas!');
     expect(RDR).toContain('gl.composite(this.worldCanvas!, this.lightCanvas,');
   });
 });

@@ -304,7 +304,11 @@ export class GLShimExecutor {
               return fn;
             }
             if (prop === 'getImageData' || prop === 'createPattern' || prop === 'createLinearGradient'
-              || prop === 'createRadialGradient' || prop === 'measureText' || prop === 'isPointInPath') {
+              || prop === 'createRadialGradient' || prop === 'measureText' || prop === 'isPointInPath'
+              || prop === 'clip' || prop === 'beginPath' || prop === 'rect' || prop === 'moveTo'
+              || prop === 'lineTo' || prop === 'arc' || prop === 'closePath' || prop === 'ellipse'
+              || prop === 'arcTo' || prop === 'bezierCurveTo' || prop === 'quadraticCurveTo'
+              || prop === 'setLineDash' || prop === 'drawFocusIfNeeded') {
               // 读值面/样式工厂:acc 态无落笔语义,降级后委托（防御性——世界层现无调用点）
               return (...args: unknown[]) => { self.ensureBridged(); const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown>; return r[prop](...args); };
             }

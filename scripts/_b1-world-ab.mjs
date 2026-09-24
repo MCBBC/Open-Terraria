@@ -232,9 +232,11 @@ async function phase(label, strict = false) {
     chk(`[${label}] GA A≈B census 有界（tie 发散<5% 像素,定谳见报告）`, ok,
       allEq ? '逐字节' : `worst n=${worst.c.n}(${(worst.c.n * 100 / total).toFixed(2)}%) maxΔ=${worst.c.maxd}`);
   }
-  // B 态路径活性
+  // B 态路径活性（★B2b 起注:bgl=1 缺省=acc 累积态,帧末路径账=b2b-acc-ent;
+  //  桥接态（?b2b=0）=world-gl-tile。两态都算「GL 段实走」）
   const st = await page.evaluate(() => window.__bglState());
-  chk(`[${label}] GC B 态实走 world-gl 双段`, st.path === 'world-gl-tile' && st.flag === true,
+  const pathOk = st.path === 'world-gl-tile' || st.path.startsWith('b2b-acc');
+  chk(`[${label}] GC B 态实走 world-gl 段（acc/桥接）`, pathOk && st.flag === true,
     `path=${st.path} flag=${st.flag} stats=${JSON.stringify(st.stats)}`);
   // A' 翻回恢复（tick0 复拍）
   await page.evaluate(() => window.__bglSet(false));
@@ -325,12 +327,14 @@ const msA = await frameTiming('A(2D)');
 await page.evaluate(() => window.__bglSet(true));
 await waitFrame(6);
 const msB = await frameTiming('B(bgl)');
-// 分解:GL 画布→WRF worldCanvas 全幅 blit 单价（GPU→CPU 交叉成本——B 臂每帧 2 次）
+// 分解:GL 画布→WRF worldCanvas 全幅 blit 单价（GPU→CPU 交叉成本——B1/B2 桥接态每帧多次;
+// ★B2b acc 态 worldCanvas=null → 本测量跳过（-1,桥已退役））
 const blitMs = await page.evaluate(() => {
   const r = window.__swGame.renderer;
   const gl = r['worldPipeLayer'];
   if (!gl || !gl.canvas || gl.canvas.width === 0) return -1;
   const wc = r.worldCanvas;
+  if (!wc) return -1;   // ★B2b:acc 态无 worldCanvas=回贴桥不存在
   const wctx = wc.getContext('2d');
   wctx.save(); wctx.setTransform(1, 0, 0, 1, 0, 0);
   wctx.drawImage(gl.canvas, 0, 0, wc.width, wc.height);   // 预热（含首次 readback）
@@ -339,8 +343,8 @@ const blitMs = await page.evaluate(() => {
   wctx.restore();
   return (performance.now() - t0) / 60;
 });
-console.log(`[GE'] 单次 GL→WRF 全幅 blit=${(blitMs * 1000).toFixed(0)}µs（B 臂每帧 2 次）`);
-chk("[GE'] 帧耗时:B(bgl) ≤ A(2D)+2×blit(交叉成本有界)", msB <= msA + blitMs * 2 + 0.2, `A=${msA.toFixed(3)}ms B=${msB.toFixed(3)}ms blit=${(blitMs * 1000).toFixed(0)}µs`);
+console.log(`[GE'] 单次 GL→WRF 全幅 blit=${blitMs < 0 ? 'N/A(acc 无桥)' : (blitMs * 1000).toFixed(0) + 'µs'}`);
+chk("[GE'] 帧耗时:B ≤ A+交叉成本有界", blitMs < 0 ? msB <= msA + 0.5 : msB <= msA + blitMs * 2 + 0.2, `A=${msA.toFixed(3)}ms B=${msB.toFixed(3)}ms blit=${blitMs < 0 ? 'N/A' : (blitMs * 1000).toFixed(0) + 'µs'}`);
 
 // ---- GE 热点账本:单帧计数 A vs B（地表静立态） ----
 await page.evaluate(() => { window.__teleport(window.__swGame.player.x, window.__swGame.world.groundLevel * 16 - 80); });

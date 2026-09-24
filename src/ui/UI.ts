@@ -733,6 +733,12 @@ export class UI {
   onBestiary?: () => void;
   /** 表情窗口入口（M4：背包表情角按钮 → Game.openEmoteMenu——原版 DrawEmoteIcon） */
   onEmoteMenu?: () => void;
+  /** ★BJ335（2026-09-24）：options.onChange 订阅退订句柄册。本单例长存,但三个
+   *  订阅点(:1224 applyTooltipBox/:4975 sync/:8252 syncNear)位于【每轮重建】的
+   *  buildHud/vinv 构建器内——不退订时旧闭包携整轮 context 岛滞留,长存 store 的
+   *  listeners 数组按轮累积钉死游离面板（快照定谳主锚）。closeAll 统一摘,
+   *  下局构建器重订阅。:765 布局切换订阅在构造器(真一次性)不入册。 */
+  private optionsUnsubs: Array<() => void> = [];
   /** 住房面板入口（背包内房屋按钮 → HousingPanel；分配/查询走 game.housingMode） */
   onHousing?: () => void;
   /** 暂停/设置浮层入口（背包面板设置钮 → main.openInGamePause;原版
@@ -1221,7 +1227,7 @@ export class UI {
     // 经 applyTooltipBg 统一落底（内联 style 会盖 class 规则——九宫底也在那里）
     const applyTooltipBox = () => this.applyTooltipBg();
     applyTooltipBox();
-    options.onChange(applyTooltipBox);   // UI 单例长存，无退订点
+    this.optionsUnsubs.push(options.onChange(applyTooltipBox));   // ★BJ335:每轮订阅入册,closeAll 摘(旧注"单例长存无退订点"=每轮累积泄漏根)
 
     game.openChest = (c) => this.openChestPanel(c);
     // 死亡收 UI 链用（Main.cs:46435-46440 dead ⇒ playerInventory=false ⇒ chest=-1 的
@@ -4972,7 +4978,7 @@ export class UI {
           options.data.craftFromNearbyChests ? 0 : 2}.png`;
       };
       sync();
-      options.onChange(sync);   // 设置页入口翻转时同步贴图（UI 单例长存无退订点,同 :1071）
+      this.optionsUnsubs.push(options.onChange(sync));   // ★BJ335:每轮订阅入册,closeAll 摘(sync 捕本轮 img)
       const tip = (): void => this.showBuffTooltip(btn,
         Lang.text(options.data.craftFromNearbyChests
           ? 'GameUI.CraftFromNearbyChestsOn' : 'GameUI.CraftFromNearbyChestsOff'), '');
@@ -6836,6 +6842,16 @@ export class UI {
     this.tooltip = null as unknown as HTMLElement;
     this.tooltipHome = null;
     this.onEmoteMenu = undefined;
+    // ★BJ335 主锚:options 长存 store 的每轮订阅统一退订（快照定谳——OptionsStore.
+    // listeners 10 项=1 构造器订阅+3 轮×3 每轮订阅,闭包 context 连整轮构建岛,
+    // 不退订=游离 vinv 面板 ~400 节点/轮被钉死）。下局构建器重订阅,无行为变化。
+    for (const u of this.optionsUnsubs) u();
+    this.optionsUnsubs.length = 0;
+    // buff 三 Map(buildBuffBar 逐轮覆写键值,退世界窗口期持旧轮 buff 节点)
+    // ——只在 closeAll 清（rebuildInventoryPanel→teardown 路径不清:紧接重建依赖旧值显示）
+    this.buffBlocks.clear();
+    this.petBuffBlocks.clear();
+    this.nebulaBuffBlocks.clear();
   }
 
   /** 摘除 Game 引用(quitToMenu→closeAll 调用):防旧 Game 整图(世界 store
@@ -8249,7 +8265,7 @@ export class UI {
       //   NewCraftingUI.cs:988-994 ResetRecipes)——就近箱集变化即重排窗格
       if (this.vinvModernCraftOpen) { this.vinvModernResetRecipes(); this.vinvUpdateModernCraft(); }
     });
-    options.onChange(() => syncNear());
+    this.optionsUnsubs.push(options.onChange(() => syncNear()));   // ★BJ335:每轮订阅入册,closeAll 摘
     this.vinvRoot?.appendChild(nearBtn);
     this.vinvLayoutItems.push({ el: nearBtn, pos: () => {
       const c = this.vinvLayoutCtx;

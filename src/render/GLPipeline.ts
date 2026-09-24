@@ -323,10 +323,16 @@ export class GLPipeline {
         if (f.fbo) gl.deleteFramebuffer(f.fbo);
       }
       for (const p of this.programs.values()) if (p.prog) gl.deleteProgram(p.prog);
+      // ★BJ335：主动丢上下文——dropSwPipe 是「整弃」语义(revive 走全新管线),
+      //  丢掉的画布若保活 webgl2 上下文,合成器为它保留 texture 层(实测每次
+      //  drop/revive +1 层,LayerTree 计数逐轮爬升直到刷新);loseContext 后
+      //  层即释放,画布可回收。对已丢上下文为无害空操作。
+      if (!gl.isContextLost()) gl.getExtension('WEBGL_lose_context')?.loseContext();
     }
     this.fbos.clear();
     this.programs.clear();
     this.gl = null;
+    this.canvas.width = 0; this.canvas.height = 0;   // ★BJ335:随丢上下文清画布尺寸
     this.unavailable = true;
     this.diedAt = performance.now();
   }

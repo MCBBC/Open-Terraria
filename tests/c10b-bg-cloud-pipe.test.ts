@@ -29,7 +29,7 @@ describe('C10b 转正旗面与 bg 注入点', () => {
 
   it('bg 会话 FBO=\'bg\'（纯 bg 与合并会话同 FBO 名=开会方）;云会话缺省 \'clouds\'——命名空间防撞', () => {
     expect(RDR).toContain("glbg.begin('bg')");
-    expect(SRC).toContain("begin(fboName = 'clouds')");
+    expect(SRC).toContain("begin(fboName = 'clouds'");   // ★B2b 起带 clear 缺省参
     // 管线 FBO 面:云/bg/lit/warped/light2 各归各（worldCompose 三名不与天空面撞）
     expect(COMP).toContain("pipeline.fbo('lit', w, h)");
     expect(COMP).toContain("pipeline.fbo('warped', w, h)");

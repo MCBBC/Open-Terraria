@@ -184,7 +184,8 @@ async function census(aFin, bFin, region) {
   }, { a: aFin, b: bFin, region: region ?? null });
 }
 
-/** 三臂对拍:0=A2D 1=B1 2=B2（tick 注入 3 相;strict=逐字节/census 有界宽限<pctMax%） */
+/** 三臂对拍:0=A2D 1=B1桥接 2=B2b累积（★2026-09-24 B2b 起:bgl+shim=acc 累积态,
+ *  主判据换 B2b≡A(2D 真值);B1 桥接=回归哨兵。tick 注入 3 相;strict=逐字节/census 有界宽限<pctMax%） */
 function cs0(w) { return w ? `n=${w.n}(${(100 * w.n / (1280 * 560)).toFixed(2)}%)` : '?'; }
 async function phase(label, { strict = false, pctMax = 5, ticks = 3 } = {}) {
   const fins = {};
@@ -200,13 +201,14 @@ async function phase(label, { strict = false, pctMax = 5, ticks = 3 } = {}) {
   }
   let worst = null, worstSent = null;
   for (let k = 0; k < ticks; k++) {
-    const c = await census(fins['B1' + k], fins['B2' + k]);
+    // ★B2b:主判据=B2b(acc) vs A(2D 真值);哨兵=B1(桥接) vs A
+    const c = await census(fins['A' + k], fins['B2' + k]);
     if (!worst || c.n > worst.c.n) worst = { k, c };
     if (fins['A' + k].b64 !== fins['B1' + k].b64) {
       const cs = await census(fins['A' + k], fins['B1' + k]);
       if (!worstSent || cs.n > worstSent.n) worstSent = cs;
     }
-    console.log(`  [${label} tick${k}] B1${fins['A' + k].b64 === fins['B1' + k].b64 ? '≡' : `≈A n=${cs0(worstSent)}`}  B2 ${fins['B1' + k].b64 === fins['B2' + k].b64 ? '≡' : `census n=${c.n}(${c.pct}%) maxΔ=${c.maxd} bbox=${JSON.stringify(c.bbox)}`} B1`);
+    console.log(`  [${label} tick${k}] B2b${fins['A' + k].b64 === fins['B2' + k].b64 ? '≡A' : `≈A census n=${c.n}(${c.pct}%) maxΔ=${c.maxd} bbox=${JSON.stringify(c.bbox)}`}  B1${fins['A' + k].b64 === fins['B1' + k].b64 ? '≡' : `≈A n=${cs0(worstSent)}`}`);
   }
   // 回归哨兵:strict 相=B1≡A 逐字节;非 strict 相（1.5625/重力翻转=census 相）容忍 <5%
   const total0 = fins['A0'].w * fins['A0'].h;
@@ -215,7 +217,7 @@ async function phase(label, { strict = false, pctMax = 5, ticks = 3 } = {}) {
     worstSent ? `census n=${worstSent.n}(${(100 * worstSent.n / total0).toFixed(3)}%) maxΔ=${worstSent.maxd}` : '');
   const total = fins['A0'].w * fins['A0'].h;
   const ok = strict ? worst.c.n === 0 : (worst.c.n < total * pctMax / 100);
-  chk(`[${label}] B2 ${strict ? '≡B1 逐字节' : `≈B1 census 有界(<${pctMax}%)`}`, ok,
+  chk(`[${label}] B2b ${strict ? '≡A 逐字节' : `≈A census 有界(<${pctMax}%)`}`, ok,
     worst.c.n === 0 ? '逐字节' : `worst n=${worst.c.n}(${worst.c.pct}%) maxΔ=${worst.c.maxd}`);
   const st = await page.evaluate(() => window.__shimState());
   return { st, fins };

@@ -2849,6 +2849,7 @@ export class Renderer {
     if (lw <= 0 || lh <= 0) return false;
     this._accMode = 'bridged';
     if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
+      this.b2bWorldCanvasCreations++;   // ★B2b 探针面:降级建面计数（稳态恒 0）
       this.worldCanvas = document.createElement('canvas');
       this.worldCtxLayer = this.worldCanvas.getContext('2d', { willReadFrequently: true })!;
       this.lightMaskCanvas = document.createElement('canvas');
@@ -3126,6 +3127,8 @@ export class Renderer {
    *  'world-2d-wall'/'world-2d-tile'）;bglPathStats=全会话分布（F5/探针面） */
   bglPathUsed = '-';
   bglPathStats: Record<string, number> = {};
+  /** ★B2b 探针面：worldCanvas 建面次数（acc 稳态恒 0;非 acc 帧/降级帧首次 +1） */
+  b2bWorldCanvasCreations = 0;
   /** 世界层 GL 会话获取（acquireCloudPipe 同款哨兵:活实例直取;死亡 5s 退避;
    *  初始化失败 30s 闩;饥饿锁同门）。
    *  ★reviveSwPipe 链挂点：dropSwPipe→dropWorldPipe 整弃（旧层持有死管线引用,
@@ -4507,6 +4510,22 @@ export class Renderer {
       const kind = layer === 'wall' ? ('w' as const) : ('t' as const);
       const oxg = Math.round(lw / 2), oyg = Math.round(lh / 2);   // 与 drawChunkGrid 同式（共享边 round 同源 doctrine）
       const zzg = z * wK;
+      // ★B2b acc 两段化：acc 帧的段失败不能像 bridge 那样「弃 FBO 内容」——
+      //  半截 quads 已在累积面,回落 drawChunkGrid 会整层重画=半透明像素双重
+      //  混合（S over D=S 时 out=S(2−Sa)≠S）。故先【全量预验】（cell 有效+
+      //  页纹理就绪——worldPageTex 幂等,预验即完成页上传/脏槽消费,发射期
+      //  零失败面）再发射;GL 错误级失败（quadTile 假）仍走降级链（深回退帧
+      //  视觉近似,B2 replay2D 同判例）。
+      if (acc) {
+        for (let cy = y0; cy <= y1; cy++) {
+          for (let cx = x0; cx <= x1; cx++) {
+            if (!chunkVisible(cx, cy)) continue;
+            const pv = chunks.get(cx, cy);
+            if (pv.cell < 0) return false;
+            if (!this.worldPageTex(glw, kind, Math.floor(pv.cell / 16), chunks)) return false;
+          }
+        }
+      }
       for (let cy = y0; cy <= y1; cy++) {
         for (let cx = x0; cx <= x1; cx++) {
           if (!chunkVisible(cx, cy)) continue;
@@ -17282,6 +17301,7 @@ export class Renderer {
       }
     }
     if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
+      this.b2bWorldCanvasCreations++;   // ★B2b 探针面:建面计数（acc 帧不触达=稳态恒 0）
       this.worldCanvas = document.createElement('canvas');
       // ★willReadFrequently：CPU 乘光回退路径每帧 getImageData 全屏（GL 路径则
       //   texImage2D 上传）——提示 Skia 保持 CPU 光栅面，读取免 GPU 回读

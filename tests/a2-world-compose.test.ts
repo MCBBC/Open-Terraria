@@ -12,7 +12,8 @@ const composeSrc = src('../src/render/GLWorldCompose.ts');
 describe('A2 GLWorldCompose 结构锁', () => {
   it('shader 单源引用（禁转录——byte-equal 前提）', () => {
     // pass1 VERT=单点派生（朝向链锁管）,FRAG=原模块直引;pass2 全直引
-    expect(composeSrc).toContain('LIT_VERT, GLWorldLight.FRAG');
+    expect(composeSrc).toContain('LIT_VERT, LIT_FRAG');   // ★B2b:LIT_FRAG=GLWorldLight.FRAG 单点派生(uWorldFlip)
+    expect(composeSrc).toContain('const LIT_FRAG = GLWorldLight.FRAG');
     expect(composeSrc).toContain('GLWaterDistortion.VERT, GLWaterDistortion.FRAG');
     expect(composeSrc).toContain('GLWorldLight.VERT.replace(');
     // recon 对=内联 300 es（usampler2D 需 ESSL3——ESSL1 编译失败=黑世界案真凶）
@@ -61,7 +62,7 @@ describe('A2 GLWorldCompose 结构锁', () => {
     // （aPos.y=0→clip-1→row0=v0=图像顶）;pass2 原翻转写入（图像顶→v1）+present
     // flipY=1 画布顶采 v1 → 三级闭合。锁死派生式与消费点,防回退。
     expect(composeSrc).toContain("GLWorldLight.VERT.replace('1.0 - aPos.y * 2.0', 'aPos.y * 2.0 - 1.0')");
-    expect(composeSrc).toContain("program('worldLight', LIT_VERT, GLWorldLight.FRAG)");
+    expect(composeSrc).toContain("program('worldLight', LIT_VERT, LIT_FRAG)");   // ★B2b 派生 FRAG
     expect(composeSrc).toContain("program('distort', GLWaterDistortion.VERT, GLWaterDistortion.FRAG)");
   });
 
@@ -76,11 +77,12 @@ describe('A2 GLWorldCompose 结构锁', () => {
     // rendererSrc 不在本文件顶部——就地读
     const r = readFileSync(fileURLToPath(new URL('../src/render/Renderer.ts', import.meta.url)), 'utf8');
     // 实例获取在旧链 if(glu && glu.composite...) 前 1 行内（A2 成功路径不触达=C1 零创建）
-    const acquire = r.indexOf('const gl = this.worldLightLayer();   // ★A2：仅旧链路径触达');
+    const acquire = r.indexOf('this.worldLightLayer();   // ★A2：仅旧链路径触达');   // ★B2b:acc 帧旧链不可达(accFbo?null:)
     const branch = r.indexOf("if (gl && gl.composite(this.worldCanvas!");
     const a2 = r.indexOf('Renderer.wfbo && !this.isCpuRender()');
     expect(acquire).toBeGreaterThan(a2);            // 获取点在 A2 分支之后
     expect(branch).toBeGreaterThan(acquire);        // 且紧邻旧链分支
+    expect(r).toContain('const gl = accFbo ? null : this.worldLightLayer();');   // ★B2b:acc 帧不可达锁
     expect(r).toContain('if (Renderer.wfbo) {\n      try { (this.worldCompose ??= this.newWorldCompose()); }');
     expect(r).toContain('if (!Renderer.wfbo) { try { this.waterWarp.prewarm(); }');
   });

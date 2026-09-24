@@ -72,7 +72,9 @@ describe('B2 Renderer 接线结构锁', () => {
     expect(RDR).toContain("this.bglEntWindowBegin('behind')");
     expect(RDR).toContain("this.bglEntWindowBegin('ent')");
     expect(RDR).toContain('this.bglEntWindowEnd();   // ★B2 实体主窗收口（flush present+ctx 恢复）');
-    expect(RDR).toMatch(/private bglEntWindowBegin\(tag: 'ent' \| 'behind'\): void \{[\s\S]{0,200}?if \(!Renderer\.bgl \|\| !Renderer\.bglShim \|\| this\.isCpuRender\(\) \|\| !this\.worldLayerActive \|\| !this\.worldCtxLayer\) return;/);
+    // ★B2b:acc/bridged 分窗 no-op 支插入首门前——原四判首门仍在 acc 支之后
+    expect(RDR).toMatch(/private bglEntWindowBegin\(tag: 'ent' \| 'behind'\): void \{[\s\S]{0,700}?if \(!Renderer\.bgl \|\| !Renderer\.bglShim \|\| this\.isCpuRender\(\) \|\| !this\.worldLayerActive \|\| !this\.worldCtxLayer\) return;/);
+    expect(RDR).toContain("private bglEntWindowEnd(): void {\n    if (this._accMode !== 'off') return;");
     expect(RDR).toContain("new URLSearchParams(location.search).get('bglshim') !== '0'");
   });
 

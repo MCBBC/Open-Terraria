@@ -68,7 +68,7 @@ describe('C10a GLSpriteLayer 管线后端', () => {
   it('quads 渲进管线 FBO;begin 显式重建会话态(blend premul+depth off);end present', () => {
     // ★C10b:FBO 名参数化（云缺省 'clouds'/bg 会话 'bg'/合并会话随开会方）——
     //  命名空间防撞锁迁 tests/c10b-bg-cloud-pipe.test.ts
-    expect(SRC).toContain('begin(fboName = \'clouds\')');
+    expect(SRC).toContain("begin(fboName = 'clouds'");   // ★B2b 起带 clear 缺省参
     expect(SRC).toContain('this.pipe.fbo(fboName, w, h)');
     expect(SRC).toContain('this.pipe.bindTarget(f)');
     expect(SRC).toContain('this.pipe.present(this.pipeFbo)');

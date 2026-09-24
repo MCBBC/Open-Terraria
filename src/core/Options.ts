@@ -396,9 +396,14 @@ export class OptionsStore {
   private persistedLayout: 'classic' | 'vanilla' | null = null;
   private listeners: Array<(d: OptionsData) => void> = [];
 
-  onChange(fn: (d: OptionsData) => void) {
+  /** ★BJ335（2026-09-24）：返回退订函数。本 store 是模块级长存单例,订阅闭包的
+   *  context 连着订阅方的作用域链——【每轮重建的订阅方】(UI buildHud/vinv 构建器)
+   *  不退订时,旧闭包携整轮 context 岛滞留(快照实测 listeners 数组按轮累积,
+   *  每轮游离 vinv 面板 ~400 节点被钉)。返回值旧调用方可忽略,兼容。 */
+  onChange(fn: (d: OptionsData) => void): () => void {
     this.listeners.push(fn);
     if (this.loaded) fn(this.data);
+    return () => this.removeListener(fn);
   }
 
   /** 退订(2026-08-29 mobile-adaptation-plan:P0 前 UI 单例长存无退订点;
