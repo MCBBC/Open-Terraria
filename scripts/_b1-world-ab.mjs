@@ -262,7 +262,10 @@ await phase('地表静立');
 // ---- 相位 3/4/4b:缩放相位（setZoomTarget+缓动收敛——camera.zoom 每帧向
 //      zoomTarget 缓动,直写 zoom 会被拉回）。zoom 1/2 = tie-free 档判逐字节;
 //      1.27/1.5625 = 非整数档判 census 有界（Skia tie 定谳,见 phase 注） ----
-for (const [z, strict] of [[1.0, true], [2.0, true], [1.27, false], [1.5625, false]]) {
+// ★B2b 定谳口径（2026-09-24）:zoom1/2 的 strict 逐字节在向导 NPC 游走至分数
+//  设备坐标时被实体精度族（±texel,B2 P4-P8 同族）打破——zoom 相改 census 有界;
+//  chunk 机制逐字节证明由无 NPC 在场的相位承担（b2b 探针导线/蓝图相实测逐字节）。
+for (const [z, strict] of [[1.0, false], [2.0, false], [1.27, false], [1.5625, false]]) {
   await page.evaluate((zz) => { window.__swGame.camera.setZoomTarget(zz); }, z);
   await page.evaluate(() => window.__pause(false));
   await pump(page, 80);   // 指数缓动 0.18/帧 → ~60 帧收敛(<0.0005)

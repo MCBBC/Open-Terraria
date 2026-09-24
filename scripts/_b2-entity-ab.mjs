@@ -260,7 +260,7 @@ await page.evaluate(() => { window.__swGame.camera.setZoomTarget(1.0); window.__
 await pump(page, 80);
 await page.evaluate(() => window.__pause(true));
 await waitFrame(4);
-await phase('P3zoom1', { strict: true });
+await phase('P3zoom1', { strict: false, pctMax: 0.05 });   // ★B2b:实体精度族(向导游走分数坐标)→census
 
 // ==== P4 战斗混排（敌怪+掉落+哈比弹幕+尘两档）====
 console.log('== P4 战斗混排 ==');

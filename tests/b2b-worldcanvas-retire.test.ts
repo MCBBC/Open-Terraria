@@ -61,7 +61,7 @@ describe('B2b Renderer 装配（源码锚）', () => {
     expect(RDR).toContain("private bglEntWindowEnd(): void {\n    if (this._accMode !== 'off') return;");
   });
   it('bglStageGrid acc 续交:无 end 无回贴+全量预验（防半截 quads 落累积面后重画双混）', () => {
-    expect(RDR).toContain('if (acc) this.bglEntShim?.flush();');
+    expect(RDR).toContain("if (acc || this._accMode === 'bridged') this.bglEntShim?.flush();");   // ★B2b 修复:bridged 帧也排空
     expect(RDR).toContain('// 续交态:不 end（FBO 保持开,compositeLight finishAccFrame 收口）');
     expect(RDR).toContain('if (acc) {\n        for (let cy = y0; cy <= y1; cy++) {');
   });
@@ -123,6 +123,7 @@ function mkAccLayer() {
     begin: (_n: string, clear?: boolean) => { blends.push('begin' + (clear === false ? ':noclear' : ':clear')); layer.__open = true; },
     blendAdditive: (on: boolean) => blends.push(on ? 'add:on' : 'add:off'),
     blendErase: (on: boolean) => blends.push(on ? 'erase:on' : 'erase:off'),
+    blendMult: (on: boolean) => blends.push(on ? 'mult:on' : 'mult:off'),
     quadSprite: (e: { key?: string }, _ux: number, _uy: number, _sw: number, _sh: number,
       dx: number, dy: number, dw: number, dh: number) => {
       quads.push({ kind: 'quad', dx, dy, dw, dh, texKey: e?.key });
@@ -238,6 +239,75 @@ describe('B2b GLShimExecutor acc 行为', () => {
     sh.flush();
     expect(degraded).toBe(1);
     expect(sh.stats.flushes).toBe(0);   // 队列未发射（弃/replay 均不计发射）
+  });
+  it('★回归锁（2026-09-24 用户实报「角色垫墙后」）:acc 态状态属性读回镜像值（非 undefined）', () => {
+    const { layer } = mkAccLayer();
+    const sh = new GLShimExecutor({
+      acquireGl: () => layer as never,
+      worldCtx: () => null,
+      worldW: () => 1280, worldH: () => 720,
+    });
+    const ctx = sh.attachAcc()!;
+    ctx.globalAlpha = 0.5;
+    ctx.globalCompositeOperation = 'lighter';
+    expect(ctx.globalAlpha).toBe(0.5);                    // undefined 读曾沿「写回→伪降级」链炸层序
+    expect(ctx.globalCompositeOperation).toBe('lighter');
+    expect(ctx.imageSmoothingEnabled).toBe(false);
+    expect(ctx.lineWidth).toBe(1);
+    expect(ctx.filter).toBe('none');
+    expect(ctx.fillStyle).toBe('#000');
+  });
+  it('★回归锁:attachAcc 清残队（异常帧滞留内容不得跨帧串层）', () => {
+    const { layer, quads } = mkAccLayer();
+    const sh = new GLShimExecutor({
+      acquireGl: () => layer as never,
+      worldCtx: () => null,
+      worldW: () => 1280, worldH: () => 720,
+    });
+    const ctx1 = sh.attachAcc()!;
+    ctx1.drawImage(mkImg(1), 0, 0);   // 模拟异常帧滞留（渲染 throw 于 flush 前=无 flush 残队）
+    const ctx2 = sh.attachAcc()!;      // 重入 acc 窗:attachAcc 必须清残队（防跨帧串层）
+    ctx2.drawImage(mkImg(2), 0, 0);
+    sh.flush();
+    expect(quads.length).toBe(1);      // 只有本帧内容（残帧 img1 已弃）
+    expect(quads[0].texKey).toBe('r2');
+  });
+  it('★回归锁（2026-09-24 用户实报「旗子闪烁错色」）:multiply 实心 fillRect=tier-3 MULT quad', () => {
+    const { layer, quads, blends } = mkAccLayer();
+    const sh = new GLShimExecutor({
+      acquireGl: () => layer as never,
+      worldCtx: () => null,
+      worldW: () => 1280, worldH: () => 720,
+    });
+    const ctx = sh.attachAcc()!;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = 'rgb(120,96,72)';
+    ctx.fillRect(10, 20, 32, 40);
+    ctx.globalCompositeOperation = 'source-over';
+    // WHITE_E 需 document（node 无 DOM）——最小桩仅本测试窗
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => ({ width: 1, height: 1, getContext: () => ({ fillStyle: '#fff', fillRect: () => {} }) }),
+    };
+    const prevTFI = (layer as { texFromImage?: unknown }).texFromImage;
+    (layer as { texFromImage?: unknown }).texFromImage = () => ({ key: 'white', tex: {}, w: 1, h: 1, stamp: 1, bytes: 4 });
+    try { sh.flush(); } finally {
+      if (prevDoc === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = prevDoc;
+      (layer as { texFromImage?: unknown }).texFromImage = prevTFI;
+    }
+    expect(sh.stats.emitMult).toBe(1);
+    expect(sh.stats.fallback).toBe(0);            // 不再整帧降级
+    expect(blends).toContain('mult:on');
+    expect(blends).toContain('mult:off');
+    // GLSpriteLayer 源锚:(ZERO,SRC_COLOR)=dst×C
+    expect(GSL).toContain('gl.blendFunc(gl.ZERO, gl.SRC_COLOR);');
+  });
+  it('★回归锁:bridged 帧 finishAccFrame 走桥接 flush（队列排空,内容 present 到 worldCtx）', () => {
+    // Renderer 源锚:bridged 分支在早退之前 flush+detach
+    expect(RDR).toContain("if (this._accMode === 'bridged') {");
+    expect(RDR.indexOf("if (this._accMode === 'bridged') {")).toBeLessThan(RDR.indexOf("if (this._accMode !== 'acc') return null;"));
+    expect(RDR).toContain("if (acc || this._accMode === 'bridged') this.bglEntShim?.flush();");
   });
   it('bridge 态不产生 tier-2（destination-out 未注册=flush+2D 回退,B2 现状不变）', () => {
     const rec: Array<[string, unknown[]]> = [];

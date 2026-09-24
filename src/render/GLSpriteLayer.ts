@@ -903,6 +903,17 @@ export class GLSpriteLayer {
     else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
+  /** ★B2b MULT 档混合切换（tier-3 multiply 实心矩形——Canvas 'multiply' 的
+   *  不透明 dst 主面=dst×C,GL (ZERO,SRC_COLOR):out=dst×src.rgb;src=白纹理
+   *  ×tint=C、α=1 → α 面 out.a=dst.a×1=dst.a（2D blend 的 αo→1 差仅在
+   *  透明/半透明 dst 格,census 登记）。false 还原 (ONE,1−SA) 基态。 */
+  blendMult(on: boolean): void {
+    if (this.unavailable || !this.gl) return;
+    const gl = this.gl;
+    if (on) gl.blendFunc(gl.ZERO, gl.SRC_COLOR);
+    else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
   /** ★B1 tile 面 quad（gl_FragCoord texelFetch——任意 dst offset/缩放相位下
    *  最近邻映射精确;tie 语义 ≙ Chrome 2D,见 TILE_*_SRC 注）。程序不可用返回
    *  false（调用方回 2D 栅格化）。draw 后恢复基础 quad 程序态（begin 约定）。 */

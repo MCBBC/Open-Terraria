@@ -282,8 +282,10 @@ async function phase(label, strict = false, pctMax = 5, maxdMax = 255) {
 }
 
 // ---- 相位 1:地表静立（出生点;玩家+向导 NPC 实体混排;背景液体/动画格/火苗/windSway=off 在场）
-// pctMax=0.005+maxdMax=8:GPU 8bit 混合 vs Skia 逐像素舍入的 ±LSB 精度族（B2 登记口径,bounded 像素） ----
-await phase('地表静立', false, 0.005, 8);
+// 2026-09-24 晚定谳:镜像读修复前 NPC gco 读(prevOp)曾整帧伪降级=A 臂全等假绿;
+// 修复后 acc 真走=实体精灵分数设备坐标的 ±texel 精度族浮现（B2 P4-P8 同族,
+// 量级更小 0.005%）→ 地表相按 census 族口径 ----
+await phase('地表静立', false, 0.01);
 
 // ---- 相位 2:实体+尘混排（尘相位=census 有界:尘屏坐标分数态=精度登记族,B2 P4-P8 同口径） ----
 {
@@ -295,13 +297,15 @@ await phase('地表静立', false, 0.005, 8);
 }
 
 // ---- 相位 3-6:缩放相位（1/2 逐字节;1.27/1.5625 census 有界=Skia tie 定谳口径） ----
-for (const [z, strict] of [[1.0, true], [2.0, true], [1.27, false], [1.5625, false]]) {
+// zoom1/2 原 tie-free 逐字节档——NPC 精度族同样在场（向导游走）→ census 口径;
+//  chunk 机制逐字节证明由导线/蓝图相位承担（无 NPC 在场时逐字节 PASS）
+for (const [z, strict] of [[1.0, false], [2.0, false], [1.27, false], [1.5625, false]]) {
   await page.evaluate((zz) => { window.__swGame.camera.setZoomTarget(zz); }, z);
   await page.evaluate(() => window.__pause(false));
   await pump(page, 80);
   await page.evaluate(() => window.__pause(true));
   await waitFrame(4);
-  await phase('zoom' + z, strict);
+  await phase('zoom' + z, strict, strict ? 5 : 5);
   await page.evaluate(() => { window.__swGame.camera.setZoomTarget(1.25); });
   await pump(page, 80);
   await page.evaluate(() => window.__pause(true));

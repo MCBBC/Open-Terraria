@@ -45,8 +45,11 @@ export interface ShimHost {
 /** 单 quad 记录（池化;同时携带 2D 重放面——flush 遇 GL 失败逐条原样回放） */
 interface QuadRec {
   /** 0=SO 1=ADD(lighter) ★B2b acc 新增 2=ERASE(destination-out 独立削底面——
-   *  未注册尘对/光环削底+加算两步族的 acc 直译;bridge 态不产生） */
-  tier: 0 | 1 | 2;
+   *  未注册尘对/光环削底+加算两步族的 acc 直译;bridge 态不产生）
+   *  3=MULT(multiply 实心 fillRect——ZERO,SRC_COLOR=dst×C 逐字节同 Skia multiply
+   *  的不透明 dst 主面;α 域差异（2D αo→1 vs GL α 保）只在透明/半透明 dst 格
+   *  登记 census;bridge 态不产生） */
+  tier: 0 | 1 | 2 | 3;
   img: CanvasImageSource | null;      // 2D 重放源（solid 面为 null）
   solid: boolean;                     // fillRect 纯色面（白纹理+tint）
   a: number[];                        // 归一化 9 参 [img?忽略, sx,sy,sw,sh, dx,dy,dw,dh]（重放用原参形态存 raw 参）
@@ -78,6 +81,7 @@ export interface ShimExecStats {
   emitSO: number;       // SO quad 发射
   emitADD: number;      // ADD quad 发射
   emitErase: number;    // ★B2b acc ERASE quad 发射（tier 2）
+  emitMult: number;     // ★B2b acc MULT quad 发射（tier 3,multiply 实心矩形）
   pairEmitted: number;  // 尘预乘对合并 quad
   pairSuppressed: number;
   fallback: number;     // 2D 回退（flush+raw）
@@ -165,7 +169,7 @@ export class GLShimExecutor {
   stats: ShimExecStats = GLShimExecutor.blankStats();
 
   static blankStats(): ShimExecStats {
-    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, replays: 0 };
+    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, replays: 0 };
   }
 
   constructor(host: ShimHost) {
@@ -204,6 +208,11 @@ export class GLShimExecutor {
     this.m.a = 1; this.m.b = 0; this.m.c = 0; this.m.d = 1; this.m.e = 0; this.m.f = 0;
     this.ga = 1; this.gco = 'source-over'; this.smooth = false; this.filterV = 'none';
     this.clipped = false;
+    // ★B2b 修复:新帧 acc 窗开=队列必须空——上一帧异常路径（渲染 throw 于
+    //  compositeLight 前）会留残队,残队在本帧首个 flush 点（墙格段 flush）
+    //  先于墙发射=角色/实体垫到墙后（用户实报症状）。宁弃残帧内容不跨帧串层。
+    if (this.head) this.popAll();
+    this.suppressAdd = null;
     this.active = true;
     return this.wrap();
   }
@@ -298,6 +307,18 @@ export class GLShimExecutor {
               const m = self.m;
               return () => new DOMMatrix([m.a, m.b, m.c, m.d, m.e, m.f]);
             }
+            // ★B2b 修复（2026-09-24 用户实报「角色合成到背景墙后面」）:状态属性读
+            //  必须回镜像值——undefined 会沿「gco 读→undefined→写回→后续 drawImage
+            //  判非 source-over→rawDrawImage→整帧降级」链触发伪降级,降级帧叠加
+            //  桥接队列无 flush 点=内容跨帧滞留（层序炸,症状见 Renderer 注）。
+            //  消费面实证:npcExtraParts 光环 prevOp=ctx.globalCompositeOperation 读。
+            if (prop === 'globalAlpha') return self.ga;
+            if (prop === 'globalCompositeOperation') return self.gco;
+            if (prop === 'imageSmoothingEnabled') return self.smooth;
+            if (prop === 'fillStyle') return self.fillStyleS;
+            if (prop === 'strokeStyle') return self.strokeStyleV;
+            if (prop === 'lineWidth') return self.lineWidthV;
+            if (prop === 'filter') return self.filterV;
             if (DRAWING_TAIL.has(prop)) {
               const fn = (...args: unknown[]) => { self.accTailOp(prop, args); return undefined; };
               bound[prop] = fn;
@@ -558,6 +579,19 @@ export class GLShimExecutor {
     }
     const col = parseColor(this.fillStyleS);
     const geo = col ? this.decode(x, y, w, h) : null;
+    // ★B2b 修复（2026-09-24 用户实报「NPC 旗子闪烁错色」）:multiply 实心矩形
+    //  =tier-3 MULT quad（ZERO,SRC_COLOR=dst×C,Skia multiply 不透明 dst 主面
+    //  逐字节同式）——此前整帧降级;更早版本（用户页在跑）栅格化到透明 scratch
+    //  =实心色块盖旗=绿/暗/常三态闪（色=旗格光照值绕 252 门摆动）。
+    //  α 域差（2D blend αo=αs+αb(1−αs)→1 vs GL α 保）只在透明/半透明 dst 格
+    //  呈现（旗贴墙=墙不透明主面）→census 登记。非轴对齐/ga≠1 → 降级。
+    if (this.accMode && this.gco === 'multiply' && col && geo && geo.rot === 0
+      && !geo.flipX && !geo.flipY && this.ga === 1 && this.filterV === 'none') {
+      this.push(3, null, true, null, null, 0, 0, 1, 1,
+        geo.dx, geo.dy, geo.dw, geo.dh, 0, 1,
+        col[0] / 255, col[1] / 255, col[2] / 255, false, false, false, false, null);
+      return;
+    }
     if (!col || !geo || (this.gco !== 'source-over' && this.gco !== 'lighter')) {
       if (this.accMode && this.rasterizeFillRect(x, y, w, h)) return;
       this.flushForFallback();
@@ -687,7 +721,7 @@ export class GLShimExecutor {
 
   // ================= 队列与 flush =================
 
-  private push(tier: 0 | 1 | 2, _e: TexEntry | null, solid: boolean, img: CanvasImageSource | null,
+  private push(tier: 0 | 1 | 2 | 3, _e: TexEntry | null, solid: boolean, img: CanvasImageSource | null,
     rawArgs: unknown[] | null, sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number, rot: number, alpha: number,
     fr: number, fg: number, fb: number, flipX: boolean, flipY: boolean, smooth: boolean,
@@ -705,6 +739,7 @@ export class GLShimExecutor {
     this.tail = rec;
     if (tier === 0) this.stats.emitSO++;
     else if (tier === 2) this.stats.emitErase++;
+    else if (tier === 3) this.stats.emitMult++;
     else this.stats.emitADD++;
   }
 
@@ -765,8 +800,10 @@ export class GLShimExecutor {
       if (p.tier !== curTier) {
         if (curTier === 1) glw.blendAdditive(false);
         if (curTier === 2) glw.blendErase(false);
+        if (curTier === 3) glw.blendMult(false);
         if (p.tier === 1) glw.blendAdditive(true);
         if (p.tier === 2) glw.blendErase(true);
+        if (p.tier === 3) glw.blendMult(true);
         curTier = p.tier;
       }
       if (p.solid) {
@@ -775,7 +812,7 @@ export class GLShimExecutor {
         continue;
       }
       const e = this.resolveTex(glw, p);
-      if (!e) { if (curTier === 1) glw.blendAdditive(false); if (curTier === 2) glw.blendErase(false); this.accFail('tex2'); return; }
+      if (!e) { if (curTier === 1) glw.blendAdditive(false); if (curTier === 2) glw.blendErase(false); if (curTier === 3) glw.blendMult(false); this.accFail('tex2'); return; }
       const usx = p.texKind === 'full' ? p.sx : 0;
       const usy = p.texKind === 'full' ? p.sy : 0;
       glw.quadSprite(e, usx, usy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh,
@@ -783,6 +820,7 @@ export class GLShimExecutor {
     }
     if (curTier === 1) glw.blendAdditive(false);
     if (curTier === 2) glw.blendErase(false);
+    if (curTier === 3) glw.blendMult(false);
     this.popAll();
     this.stats.flushes++;
   }

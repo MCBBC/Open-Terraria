@@ -32,6 +32,7 @@ await page.evaluate(() => {
   const g = window.__swGame;
   const r = g.renderer;
   window.__armSet = (bgl, b2b) => { r.constructor.bglSetForTest(bgl); r.constructor.b2bSetForTest(b2b); };
+  window.__pause = (v) => { g.paused = v; };
   window.__ledger = () => {
     const born = window.__canvasBorn;
     let alive = 0;

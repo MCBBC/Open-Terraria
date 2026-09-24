@@ -2879,6 +2879,17 @@ export class Renderer {
    *  落 FBO）→ endAccumulate（解绑,不 present）→ shim detach（摘包装）。
    *  返回世界 FBO（compositeLight 直采/present）;null=非 acc 帧或已收口。 */
   private finishAccFrame(): PipelineFbo | null {
+    // ★2026-09-24 用户实报「角色合成到背景墙后面」修复:bridged 帧（帧内降级）
+    //  也必须 flush+detach——降级后内容走桥接队列,而分窗 end 在 acc/bridged 帧
+    //  是 no-op、本函数早退曾令队列【永无 flush 点】→内容跨帧滞留→下帧首个
+    //  flush 点（墙格段）先于墙发射=角色垫到墙后。桥接 flush=present 批回贴
+    //  worldCanvas（叠在降级已 present 的底面上,层序保持）。
+    if (this._accMode === 'bridged') {
+      this._accMode = 'off';
+      this.bglEntShim?.flush();        // 桥接 flush=SO/ADD 批 present 回贴（降级帧内容落位）
+      this.bglEntShim?.detach();
+      return null;
+    }
     if (this._accMode !== 'acc') return null;
     this._accMode = 'off';
     this.bglEntShim?.flush();          // acc flush=直发累积面（空队列 no-op）
@@ -4494,7 +4505,9 @@ export class Renderer {
       //  失败回落 drawChunkGrid→经整层 shim 翻 quad（仍 GL 落面,页级失败
       //  降级为页子矩形上传）;GL 中帧死亡由 flushAcc 降级链兜。
       const acc = this._accMode === 'acc';
-      if (acc) this.bglEntShim?.flush();
+      // ★B2b 修复:acc 与 bridged 帧都在格段前 flush——降级帧的桥接队列若不在此
+      //  排空,墙/格段 present 会盖到先入队的夹层内容上（层序倒挂）
+      if (acc || this._accMode === 'bridged') this.bglEntShim?.flush();
       const glw = acc ? this._accGlw : this.acquireWorldGl();
       if (!glw || glw.unavailable) return false;
       if (!acc) glw.resize(lw, lh);
