@@ -1345,11 +1345,6 @@ void main(){
     this.trailDirty = false;
     this.texs.clear();
     this.bytes = 0;
-    // ★BJ335：非管线层的自有 webgl2 上下文随 dispose 主动丢失——canvas 置 0 不
-    //  释放上下文的合成器层；loseContext 后画布/层才真正可回收（对已丢上下文
-    //  与 SwiftShader 早退路径均为无害空操作）
-    if (this.gl && !this.gl.isContextLost()) this.gl.getExtension('WEBGL_lose_context')?.loseContext();
-    this.gl = null;
     this.canvas.width = 0;
     this.canvas.height = 0;
   }
