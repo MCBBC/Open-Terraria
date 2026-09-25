@@ -22,27 +22,46 @@ export interface LightingWorld {
 
 const enum State { MinimapUpdate = 0, ExportMetrics = 1, Scan = 2, Blur = 3 }
 
-// ---- ★C9c 自适应 live 门参数（2026-09-24 用户复报两案定谳后落刀）----
-// lagMs 阈值（缺省 12ms<60fps tick 的 72%;?lightlag=ms 可调）。进=连续 8 拍健康
-// （~133ms@60fps 稳态几秒内转 live）,出=连续 2 拍超阈回退 warmup（滞回防抖）。
-// worker 上下文禁 URL 探测（fork bomb 判例家族,恒缺省值）。
-const LIGHT_LIVE_LAG_MS = (() => {
+// ---- ★C9c-v2 自适应 live 门（2026-09-25 trace-231810 定谳续刀——v1 设计错翻案）----
+// v1 固定 12ms 绝对阈的缺陷:lagMs=send→apply 端到端（含主线程消息调度延迟）,忙机
+// （帧耗 ~8-20ms）恒超标（用户机 F5 实测恒 ~20>12）→ live 永不可达=warmup 本地
+// 双跑【永久化】（trace:光照主线程残部 1911ms——exportTo 250+blurLine 172+
+// processBlurPresent 171,worker 同跑;且双跑自身维持忙=正反馈锁死。「骤降难回升」
+// 闩族合集的第三枚）。v2=滑动 p50 相对判据:阈随 tick 周期走——进=1.5×TICK
+// （60Hz≈25ms,容忍忙机 ≤1 tick 级调度延迟;新鲜度初衷保留——warmup 本地 0 延迟
+// 新鲜光优先,双跑只发生在管线真病态时）,出=2.5×TICK(≈42ms,滞回带加宽防抖)。
+// ?lightlag=ms 仍=绝对阈手动模式（enter=exit=ms,探针/强扭矩面）。滞回拍数不变（8/2）。
+// worker 上下文禁 URL 探测（fork bomb 判例家族,恒自适应缺省）。
+export const LIGHT_TICK_MS = 1000 / 60;
+const LIGHT_LAG_MANUAL = (() => {
   try {
-    if (typeof document === 'undefined') return 12;
+    if (typeof document === 'undefined') return 0;
     const v = Number(new URLSearchParams(location.search).get('lightlag'));
-    return v > 0 ? v : 12;
-  } catch { return 12; }
+    return v > 0 ? v : 0;   // 0=未设→自适应模式
+  } catch { return 0; }
 })();
+export const LIGHT_GATE_MODE: 'adaptive' | 'manual' = LIGHT_LAG_MANUAL > 0 ? 'manual' : 'adaptive';
+/** 进/出阈（ms）:手动模式 enter=exit=lightlag 值（v1 语义）;自适应=p50 相对判据 */
+export const LIGHT_LIVE_ENTER_MS = LIGHT_LAG_MANUAL > 0 ? LIGHT_LAG_MANUAL : LIGHT_TICK_MS * 1.5;
+export const LIGHT_LIVE_EXIT_MS = LIGHT_LAG_MANUAL > 0 ? LIGHT_LAG_MANUAL : LIGHT_TICK_MS * 2.5;
 const LIGHT_LIVE_ENTER = 8;
 const LIGHT_LIVE_EXIT = 2;
+/** ★C9c-v2 门诊断面（F5 消费;模块级单例——引擎实例归 Game 内部,报告面免接线） */
+export const lightGateDiag = {
+  live: false, good: 0, bad: 0, p50Ms: 0, lastLagMs: 0,
+  enterMs: LIGHT_LIVE_ENTER_MS, exitMs: LIGHT_LIVE_EXIT_MS, mode: LIGHT_GATE_MODE, ring: 0,
+};
 
-/** ★C9c 门步进（纯函数供单测）：lag>阈值→坏拍计数（清好拍）,≤阈值→好拍计数
+/** ★C9c-v2 门步进（纯函数供单测）：lag>p50 阈→坏拍计数（清好拍）,≤阈值→好拍计数
  *  （清坏拍）;lag≤0（尚无结果）不计拍。warmup 态好拍满 ENTER 且已有结果→进 live;
- *  live 态坏拍满 EXIT→回退 warmup（fell=true,引擎侧 dirty 强制本地全周期重建）。 */
+ *  live 态坏拍满 EXIT→回退 warmup（fell=true,引擎侧 dirty 强制本地全周期重建）。
+ *  enterMs/exitMs=v2 自适应阈（相对 tick 周期;?lightlag 手动模式两者相等）——
+ *  缺省取模块常量,既有单测契约（无阈参调用）保持同行为。 */
 export function liveGateStep(
   live: boolean, good: number, bad: number, lag: number, hasResult: boolean,
+  enterMs: number = LIGHT_LIVE_ENTER_MS, exitMs: number = LIGHT_LIVE_EXIT_MS,
 ): { live: boolean; good: number; bad: number; fell: boolean } {
-  if (lag > LIGHT_LIVE_LAG_MS) { bad++; good = 0; }
+  if (lag > enterMs) { bad++; good = 0; }
   else if (lag > 0) { good++; bad = 0; }
   let fell = false;
   if (!live) {
@@ -207,14 +226,30 @@ export class LightingEngine {
   private lwGood = 0;
   private lwBad = 0;
 
-  /** ★C9c：live 判定=管线实测健康（lastLagMs 滞回）,非「首结果到达即切」——
-   *  不限帧率饱和/进场 dirty 风暴期滞留 warmup（本地 0 延迟新鲜光优先,代价
-   *  7-12% CPU）,消息健康后才转 live 省 CPU。 */
+  /** ★C9c-v2 lag 滑动窗（最近 24 拍样本;尚无结果(≤0)不入窗——p50 抗单拍毛刺,
+   *  忙机双跑锁死翻案面:v1 逐拍绝对阈被调度延迟钉死,v2 相对判据看的是分布） */
+  private lwLagRing: number[] = [];
+  /** ★C9c-v2：live 判定=管线实测健康（lag 滑动 p50 对相对阈滞回）,非「首结果到达
+   *  即切」——不限帧率饱和/进场 dirty 风暴期滞留 warmup（本地 0 延迟新鲜光优先,
+   *  代价 7-12% CPU）,消息健康后才转 live 省 CPU;忙机（lag p50 ≤1.5 tick）不再被
+   *  罚永久双跑（v1 12ms 绝对阈翻案,见文件头注）。 */
   private lwGate(lw: LightWorkerLink): boolean {
-    const r = liveGateStep(this.lwLive, this.lwGood, this.lwBad, lw.lastLagMs, lw.isLive());
+    if (lw.lastLagMs > 0) {
+      this.lwLagRing.push(lw.lastLagMs);
+      if (this.lwLagRing.length > 24) this.lwLagRing.shift();
+    }
+    let p50 = 0;
+    if (this.lwLagRing.length) {
+      const sorted = [...this.lwLagRing].sort((a, b) => a - b);
+      p50 = sorted[sorted.length >> 1];
+    }
+    const r = liveGateStep(this.lwLive, this.lwGood, this.lwBad, p50, lw.isLive());
     this.lwLive = r.live; this.lwGood = r.good; this.lwBad = r.bad;
     if (r.fell) this.dirty = true;   // 回退 warmup 首帧本地全周期重建
     lw.liveAuth = this.lwLive;       // 到达即应用仅 live 态放行（C9c 倒灌修复）
+    lightGateDiag.live = this.lwLive; lightGateDiag.good = r.good; lightGateDiag.bad = r.bad;
+    lightGateDiag.p50Ms = p50; lightGateDiag.lastLagMs = lw.lastLagMs;
+    lightGateDiag.ring = this.lwLagRing.length;
     return this.lwLive;
   }
 

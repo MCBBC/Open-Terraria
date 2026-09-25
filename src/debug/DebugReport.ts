@@ -12,6 +12,7 @@ import { TILE } from '../core/constants';
 import { liquidDebugState } from '../render/VanillaLiquidRenderer';
 import { wwWorkerStats } from '../render/WaterWaves';
 import { lightWorkerStats } from '../lighting/LightWorkerLink';
+import { lightGateDiag } from '../lighting/LightingEngine';
 import { waterWaves, waveTexReady as waterWavesTexReady } from '../render/WaterWaves';
 import { autoFrameAt } from '../render/VanillaTiler';
 import { TILE_ANIM_RATE, animFrameIdx, animYOffset, tileAnim } from '../render/TileAnim';
@@ -1007,6 +1008,10 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
           return { ...lightWorkerStats(), flag: !/lightworker=0/.test(globalThis.location?.search ?? '') };
         } catch { return { on: false, flag: false }; }
       })(),
+      // ★C9c-v2 诊断面（2026-09-25 trace-231810 定谳续刀）:live 门状态——live=false
+      //  且 p50Ms 长期 >enterMs 即忙机被门罚双跑（v1 12ms 绝对阈翻案面）;mode=
+      //  adaptive（缺省,阈=1.5/2.5×tick）/manual（?lightlag=ms）
+      lightGate: { ...lightGateDiag },
       // 资产健康(2026-08-13 运行期防线):失败的 vanilla/UI 贴图(404 终态)与
       // vui 键失配一目了然——此前 NPC_Head 40 个 404/全屏地图键失配这类 bug
       // 只能靠翻网络面板发现
