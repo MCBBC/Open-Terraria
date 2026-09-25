@@ -21,7 +21,7 @@ import { getGlobalHurtBuckets, ImmunityCooldownID } from '../player/HurtCooldown
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 
-import { BUFF_DEFS, BuffState, BuffType } from '../stats/Buffs';
+import { BUFF_DEFS, BuffState, BuffType, buffTypeByVanilla } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { itemCombat } from '../data/vanillaItemCombat';
@@ -3415,6 +3415,22 @@ export class Player extends Entity {
           d.y -= 4;                                             // :3302 position.Y -= 4
         }
       },
+      // ★BJ357 仙灵武库 61 拖尾辉尘落池（Mount.cs UpdateEffects case 61 :5203-5224
+      //  发粒段;掷门/色算/速度式在 Mounts.updateMountEffects）——NewDustDirect
+      //  (Center,0,0,278,0,0,α200,color,0.65) 后 velocity×mul + v×0.3、noGravity、
+      //  noLight 字段覆写（:5213-5223）。0 宽盒出尘=抖动窗仍掷（mul 消费它）,
+      //  perfect 变体不用（会消解抖动=丢 :5214/:5217 乘项）
+      pixieTrailDust: ({ x, y, mul, pvx, pvy, color }) => {
+        const pool = game.vanillaDust;
+        if (!pool) return;
+        const d = pool.spawn(x, y, 0, 0, 278, 0, 0, 200, color, 0.65);
+        if (!d) return;
+        d.vx = d.vx * mul + pvx * 0.3;
+        d.vy = d.vy * mul + pvy * 0.3;
+        d.noGravity = true;
+        d.noLight = true;
+      },
+      miscCounter: this.miscCounter,
       fishron: {
         hp: this.hp, maxHp: this.maxHp,
         inWater: this.inWater, inLava: this.inLava, inHoney: this.inHoney,
@@ -3915,6 +3931,16 @@ export class Player extends Entity {
     // ★曾误写 2【秒】(120t) 顶破 >2t 无字门显「2秒」（2026-08-31 tick/秒单位族审计）
     if (this.soulDrain > 0) this.buffs.apply(BuffType.SoulDrain, 2 / 60);
     const buffHeal = this.buffs.tick(dt);
+    // ★BJ357 坐骑 buff 钉时（Player.cs:9968-9971 UpdateBuffs：MountType buff 每 tick
+    //  buffTime=10 重钉）——首授予 AddBuff(_data.buff,3600) 在 Game.useMountItem
+    //  （SetMount :6291）;图标无倒计时字+不入档 = Main.cs:9344-9352 双置位
+    //  （BUFF_NO_TIME_DISPLAY/BUFF_NO_SAVE 已收 374/377/384）。CheckMountBuff
+    //  （Mount.cs:5333,经 Player.cs:18948）缺 buff 强制下坐——本仓 buff 无主动移除面
+    //  （右键取消 UI 未建,登记）,钉时恒同相,该支随取消 UI 域批接续
+    if (this.ridingMount) {
+      const mbt = buffTypeByVanilla(this.mount.data?.buff ?? -1);
+      if (mbt !== undefined) this.buffs.apply(mbt, 10 / 60);
+    }
     // 叶绿孢子 397 玩家侧孢子云发射器（★2026-08-24 r15 R15-19：PL57:26178-26193
     //  chlorophyteSpore && Next(60)==0 → 盒内 Inflated(−2,−2) 掷点,v=velocity×0.5
     //  钳 5 的 SporeCloud 编排；DoT 15 HP/s 已入 Buffs ENV_DOTS。buff 来源 =
@@ -5026,7 +5052,11 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned) || this.buffs.has(BuffType.Webbed)) {
         // 坐骑抚摸随下坐终止（Mount.Dismount :6219-6222 petting.mount → Stop）
         if (this.petting.mount) this.stopPettingAnimal();
+        // ★BJ357 清坐骑伴生 buff（Dismount :6214 ClearBuff）——id 先于 dismount 捕获
+        //  （reset() 后 mount.data 已 null）;Game.tryDismountMount 强制链同式
+        const prevBuff = buffTypeByVanilla(this.mount.data?.buff ?? -1);
         this.mount.dismount(this, game);
+        if (prevBuff !== undefined) this.buffs.remove(prevBuff);
       } else {
         this.mount.upkeep(this);
         // 能力维护（Player.cs:25373 UpdateEffects 能力子集）：猪鲨崽计数器/增益 +

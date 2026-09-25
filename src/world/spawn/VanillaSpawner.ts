@@ -1379,6 +1379,15 @@ export class VanillaSpawner {
       spawnRate = 20;
       maxSpawns = Math.floor(5 * (2 + 0.3 * 1));
     }
+    // ★BJ356 DD2 复位臂（NPC.cs:777-780）：事件进行中且扫描玩家在旧军 Zone →
+    //  rate/max 复位缺省 600/5（defaultSpawnRate/defaultMaxSpawns L6108/6110）——
+    //  覆盖月事件等先前修正;原版 invaders 覆盖在其后（本仓 invaders 早退于函数头,
+    //  终值等价）;地牢 rate=10 / skyblock ÷2 在本臂之后仍生效（原序）。
+    //  ★曾整臂缺席=事件期竞技场周边刷怪率被血月等修正放大
+    if (this.dd2Ongoing && this.zoneDD2) {
+      spawnRate = 600;
+      maxSpawns = 5;
+    }
     // L787-790：未杀骷髅王 rate=10（旅程滑杆之后、skyblock 整除之前——
     //  地牢守卫(68) 快速轮换主守卫；杀过骷髅王保持常规地牢修正 ×0.3/×1.8）。
     //  ★并行会话曾在本轮把该 arm 意外挤丢（只剩注释），dg.spawnRate 由 10 漂成
@@ -1400,8 +1409,11 @@ export class VanillaSpawner {
     //  无城镇 NPC 也会满地兔鼠(甚至刷到浮空岛——原版岛边 townNPCs=0 永不出小动物)
     this.spawnFriendlyCycle = false;
     this.townNoWorms = false;
+    // ★BJ356 补 !ZoneOldOneArmy 臂（NPC.cs:800 尾项,字面无条件——门 549 活体距离旗,
+    //  事件收场 WipeEntities 撤门后自然归 false;旧注"旧军系统缺席恒 false"已废）
     if (!this.invaders && ((!bloodMoon && !this.moonEvent) || dayTime)
-      && !(w.clock.eclipse && dayTime) && !zoneEvil && !(this.zoneCounts.meteor >= 75)) {
+      && !(w.clock.eclipse && dayTime) && !zoneEvil && !(this.zoneCounts.meteor >= 75)
+      && !this.zoneDD2) {
       const deep = playerYpx / TILE > w.h - 200;   // :711 player.Center.Y/16 > UnderworldLayer
       if (deep) {
         // 地狱侧(:713-763)：友好概率低；命中时 maxSpawns×0.5（:724/:741/:757——
@@ -3213,6 +3225,13 @@ export class VanillaSpawner {
       if (N(3)) return D(-12);   // 大噬魂怪
       return D(6);               // 默认 Eater of Souls
     }
+    // ---- ★BJ356 DD2 生成抑制门（NPC.cs:2803-2805）----
+    //  原版在缺省 else 链头：`if (DD2Event.Ongoing && ZoneOldOneArmy) return;`——
+    //  事件进行中且扫描玩家距任一门 549 ≤4000px（250 格）→ 本轮**零自然生成**。
+    //  群系专属分支（丛林/地牢/猩红/腐化/陨石等）在其上不受门限=原版同序（门只护
+    //  缺省地表/地下选择面）。★曾整门缺席=事件期竞技场周边混刷普通怪 → 普通怪
+    //  接触伤水晶（水晶受击通道 vanilla 合法,但原版靠本门+Zone 抑制把接触面压到近零）
+    if (this.dd2Ongoing && this.zoneDD2) return null;
     // ---- 地表（L4075-4717）----
     //  群系判定：雪原不走 ZoneSnow 旗标兜底段——原版白昼走小动物/基础史莱姆，
     //  夜晚走 IcesSnow 落脚 tile 段（L4555），此前的 ZoneSnow 拦截段为误植已移除
@@ -3895,6 +3914,14 @@ export class VanillaSpawner {
    *  绕圈仙女同样算）——SpawnNPC :745-749 刷怪率窗（×1.2/×0.8）消费。Game 每周期喂入
    *  （窗口判定在 Game 侧做：spawner 无实体桶访问；isNearFairyWindow 下方共用谓词） */
   isNearFairy = false;
+  /** ★BJ356 DD2 事件双旗（Game 每周期喂入,spawner 无事件态/实体桶访问）：
+   *  dd2Ongoing = DD2Event.Ongoing（DD2Event.cs:67）;zoneDD2 = ZoneOldOneArmy
+   *  （SetSpawnFlags NPC.cs:397 自 Player.ZoneOldOneArmy;Player.cs:16836 =
+   *  SceneMetrics.CloseEnoughToDD2LanePortal = WithinRangeOfNPC(549,4000)，
+   *  SceneMetrics.cs:284——任一活门 549 距玩家中心 ≤4000px,DistanceSquared ≤ range²）。
+   *  消费点：getSpawnRate 复位臂（NPC.cs:777-780）+ spawnAnNPC 抑制门（NPC.cs:2803-2805） */
+  dd2Ongoing = false;
+  zoneDD2 = false;
   private spawnFrog(rng: RNG): Enemy | null {
     const x = this.spawnTileX * TILE + 8;
     const y = this.spawnTileY * TILE;

@@ -950,11 +950,22 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       minimapDirtyChunks: g.renderer?.minimap?.dirtyChunks?.size ?? 0,
       // ★A3 诊断面（2026-09-23）:光照合成路径分布+最近失败原因——Windows 用户
       //  反馈的 getImageData 30% 归因依赖此字段（部署包须含）
+      //  ★P0-A（2026-09-25 塌方定谳续刀）:skipFrames=共管管线降级帧累计/
+      //  skipStreak=连续降级帧（恢复探测面）——lrecon-skip:swpipe-* 分布即塌方
+      //  一键归因（backoff=退避窗扣押/init-fail=init 实败/starvelock=饥饿锁）
       composePath: {
         used: g.renderer?.composePathUsed ?? null,
         stats: g.renderer?.composePathStats ?? null,
         lastFail: g.renderer?.composeLastFail ?? null,
+        skipFrames: g.renderer?.composeSkipFrames ?? null,
+        skipStreak: g.renderer?.composeSkipStreak ?? null,
       },
+      // ★P0-A 诊断面（2026-09-25）:共管 GLPipeline（swpipe）生死账——alive=false
+      //  即在 2D 降级;retryInMs/retryLadderMs=渐进闩（2-3.5-5s 阶）;starve=饥饿锁
+      //  快照（90s 窗余量+半开试探 streak,见 GLStats.starveSnapshot）
+      swpipe: typeof (g.renderer as { swPipeDiag?: () => unknown })?.swPipeDiag === 'function'
+        ? (g.renderer as { swPipeDiag: () => unknown }).swPipeDiag()
+        : null,
       // ★C10b 诊断面（2026-09-24）:云+群系背景 GL 会话路径与合并形态——转正后
       //  used='cloudpipe'（共管管线,缺省）/'glfx'（?cloudpipe=0 逃生门）/'2d'
       //  （GL 不可用/退避/cpu）;merge='merged'（bg+云单会话单 blit）/'split'

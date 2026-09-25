@@ -11935,7 +11935,10 @@ export class Enemy extends Entity {
       // 不吃攻击方 damage（原版 `if (type == 695 || type == 696) num2 = 5;`）
       const contactDmg = (id === 695 || id === 696) ? 5 : foe.def.damage;
       this.hurt(contactDmg, dir * 6, 0, game, 0, false, 1);   // StrikeNPCNoInteraction
-      this.npcImmune255 = 30;                       // :93664 immune[255]=num
+      // immune[255]=num（:93663-93664）：缺省 30,**水晶 548 特档 20**（:93653-93655
+      // `int num = 30; if (type == 548) num = 20;`）——★BJ356 补:曾漏特档=水晶受击
+      // 频率低 1/3（DD2 怪拆水晶节奏变慢）
+      this.npcImmune255 = id === 548 ? 20 : 30;
       if (isBee) {
         // :93666-93696 蜂段：蜂受【victim.damage】反蜇（damage=0 也走 Strike
         // 管线——防后 Math.Max(1,…) 下限 1，原版同款）

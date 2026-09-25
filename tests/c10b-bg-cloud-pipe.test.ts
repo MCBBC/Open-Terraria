@@ -94,8 +94,9 @@ describe('C10b 管线实例共管（三消费方单实例）', () => {
 
   it('worldCompose 注入共管管线（cloudpipe 开）;逃生门（=0）回自建=全量旧行为', () => {
     // ★R1-F10（2026-09-25 红蓝批 B）：构造口可返 null——共管旗开而 acquireSwPipe
-    //  缺（退避窗/饥饿/30s 闩）走旧链/降级,禁自建第二管线（旧锁面按新承诺改）
-    expect(RDR).toMatch(/private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*return pipe \? new GLWorldCompose\('worldCompose', pipe\) : null;/);
+    //  缺（退避窗/饥饿/渐进闩）走旧链/降级,禁自建第二管线（旧锁面按新承诺改）
+    //  ★P0-A 金标再生（2026-09-25 塌方定谳续刀）：null 支带指纹落账+一次性 toast
+    expect(RDR).toMatch(/private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(!pipe\) \{[^]*?this\.markSwPipeSkip\(\(this\.swPipeFailWhy \|\| 'backoff'\)[^]*?this\.notifySwPipeDegrade\(\);\s*\n\s*return null;\s*\n\s*\}\s*\n\s*return new GLWorldCompose\('worldCompose', pipe\);/);
     expect(COMP).toContain("constructor(statName = 'worldCompose', pipe?: GLPipeline | null)");
     expect(COMP).toContain('this.ownsPipe = !pipe;');
     expect(COMP).toContain('this.pipeline = pipe ?? new GLPipeline(statName);');

@@ -2684,12 +2684,15 @@ function fireWalkerProj(
 }
 
 /** AI_107 目标（NPCUtils.TargetClosestOldOnesInvasion :261-273 + SearchForTarget
- *  :196-259）：水晶 548（!dontTakeDamageFromHostiles）恒候选;200px 内玩家按距夺标 */
+ *  :196-259）：水晶 548（!dontTakeDamageFromHostiles）恒候选;玩家**恒**受 200px
+ *  距离滤（OnlyPlayersInCertainDistance :24-28 `player.Distance(position) <= maxDistance`
+ *  ——★BJ356 勘误:原滤与水晶在场无关,曾写成"无水晶时全图咬玩家"=事件收场后
+ *  DD2 怪跨图追杀/相位穿墙的放大器）;候选间比较按 aggro 折扣（SearchForTarget
+ *  :229-231 num5 = dist − aggro） */
 interface W107Target { x: number; y: number; w: number; h: number; cx: number; cy: number; }
 
 function w107Target(game: GameHooks, e: Enemy, player: Player | null): W107Target | null {
-  // TargetClosestOldOnesInvasion（NPCUtils.cs:261-273）：水晶候选 + 200px 内玩家，
-  // 近者胜（玩家距离按 aggro 折扣，SearchForTarget :229-231 num5 = dist − aggro）
+  // TargetClosestOldOnesInvasion（NPCUtils.cs:261-273）：水晶候选 + 200px 内玩家
   let crystal: Enemy | null = null;
   for (const n of game.enemies() as Enemy[]) {
     if (!n.dead && n.vanillaId === 548 && !n.dontTakeDamage) { crystal = n; break; }
@@ -2705,7 +2708,8 @@ function w107Target(game: GameHooks, e: Enemy, player: Player | null): W107Targe
     }
     return { x: crystal.x, y: crystal.y, w: crystal.w, h: crystal.h, cx: crystal.cx, cy: crystal.cy };
   }
-  if (pd !== Infinity) {
+  // 无水晶：玩家仍限 200px（OnlyPlayersInCertainDistance 恒参与,与水晶无关）
+  if (pd <= 200) {
     return { x: player!.x, y: player!.y, w: player!.w, h: player!.h, cx: player!.cx, cy: player!.cy };
   }
   return null;
@@ -2894,20 +2898,31 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       game.playSfxFiles(soundTrackFiles('dd2_goblin_bomber_throw'), 0.7, e.cx, e.cy);
     }
   }
-  // ---- 穿墙相位判定（flag2,cs:63487-63507） ----
+  // ---- 穿墙相位判定（flag2,cs:63487-63507）----
+  // ★BJ356 对拍勘误三件（cs:63490-63503 亲读）：
+  //   ① 目标无效 → flag2 保持初值 false → 每拍 noGravity/noTileCollide 双清
+  //     （:63705-63710 else 支）——曾用 WeakSet 滞回让"目标消失仍粘相位"=事件
+  //     收场后无目标怪飘行穿地不止的放大器;
+  //   ② 闩锁门（:63700-63704）：flag2 真但【未】处于相位时,须 vy==0（落地）或
+  //     |ΔY|>800 才置 noGravity/noTileCollide;已相位则 flag2 维持即可（门只门
+  //     「置位」不清位）;
+  //   ③ 滞回第二析取项读的是当前 noGravity 位（:63491）= 上一拍相位态,语义同 WeakSet。
   let phase = false;
   if (W107_PORTAL_FADE.has(id)) {
-    phase = w107Phasing.has(e);            // noGravity 滞回（:63491 第二析取项）
+    const prevPhase = w107Phasing.has(e);   // noGravity 滞回（:63491 第二析取项）
+    phase = prevPhase;
     if (tgt) {
       const noLos = !losClear(game, e.cx, e.cy, tgt.cx, tgt.cy);
       const dist = Math.hypot(tgt.cx - e.cx, tgt.cy - e.cy);
-      if (noLos && (e.facing === sign(tgt.cx - e.cx) || (phase && dist > 50 && e.cy > tgt.cy))) {
+      if (noLos && (e.facing === sign(tgt.cx - e.cx) || (prevPhase && dist > 50 && e.cy > tgt.cy))) {
         phase = e.ai0 <= 0;                // flag2 &= ai[0] <= 0（攻击中不穿墙）
+        // 闩锁门（:63700-63704）：仅「新进相位」须落地或目标极远;已相位维持
+        if (phase && !prevPhase && !(e.vy === 0 || Math.abs(tgt.cy - e.cy) > 800)) phase = false;
       } else {
-        phase = false;
+        phase = false;                     // :63705-63710 else 支=双清
       }
     } else {
-      phase = false;
+      phase = false;                       // 目标无效 → flag2=false（:63490 无赋值=初值）
     }
     if (phase) w107Phasing.add(e); else w107Phasing.delete(e);
   }
@@ -3050,7 +3065,21 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     if (below) {
       e.vy += 0.5;                         // 目标在下方 → 直坠（:64869-64876）
     } else {
-      const probeSolid = solidAt(game, Math.floor((e.cx - 40) / TILE), Math.floor((e.y + e.h - e.h) / TILE))
+      // ★BJ356 勘误：上升探针 = Collision.SolidCollision((Center.X−40, position.Y), 80,
+      //  height)（:64880-64881 vector14/num71/num72）= 80×h 【体盒整扫】——曾只探
+      //  左上一格 (cx−40, top),埋身而顶格悬空时永不判实心 → 伺服失稳持续下坠
+      let bodySolid = false;
+      {
+        const st = game.world.store;
+        const bx0 = Math.floor((e.cx - 40) / TILE), bx1 = Math.floor((e.cx + 40 - 0.01) / TILE);
+        const by0 = Math.floor(e.y / TILE), by1 = Math.floor((e.y + e.h - 0.01) / TILE);
+        outer: for (let tx = bx0; tx <= bx1; tx++) {
+          for (let ty = by0; ty <= by1; ty++) {
+            if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { bodySolid = true; break outer; }
+          }
+        }
+      }
+      const probeSolid = bodySolid
         || (tgt && (tgt.cy - e.cy < -100
           || (tgt.cy - e.cy < 10 && Math.abs(tgt.cx - e.cx) < 60)));
       if (tgt && probeSolid) {

@@ -4,7 +4,7 @@
 // 像素对拍=scripts/_b2-entity-ab.mjs（node 无 GL/canvas,该面探针锁）。
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GLShimExecutor } from '../src/render/glshim/GLShimExecutor';
 import { dustPremulBake } from '../src/fx/VanillaDust';
 import { texId } from '../src/render/texId';
@@ -885,5 +885,104 @@ describe('★rot 发射支全链(decode→rec→quadSprite opts;acc 态 fake 层
     expect(quads[0].rot).toBeCloseTo(Math.PI / 2, 5);
     expect(quads[1].rot).toBe(0);
     expect(quads[1].dx).toBeCloseTo(20, 5);
+  });
+});
+
+// ================= ★浸没透明案:drawImage filter 隔离栅格化双变换翻案 =================
+// 定谳（2026-09-25 用户实报「完全浸水角色消失」;?bglshim=0 正常;半截（头出水）正常）:
+//   分支差异 = Renderer drawPlayer `if (p.headUnderwater) ctx.filter='sepia(...)'`
+//   （Renderer.ts 水下染色族;NPC 水下/受击 filter 同族）→ shim acc 态 filter≠none
+//   的 drawImage 全走 rasterizeDrawImage。旧实现把 decode 产出的【设备空间】geo
+//   矩形在 scratch 上【再乘一次镜像 CTM】（setTransform(a,b,c,d,e−fx,f−fy) 后
+//   drawImage 到 geo.dx/dy）= 双变换——世界层 CTM 非单位时内容整体落到 scratch 外
+//   （被裁空）→ 全透明 quad 发射在正确设备矩形 = 精灵整体消失（ret=true/fallback=0
+//   /replay=0 全绿静默）。单位阵下 scratch x=geo.dx−fx 恰好正确 = 既有单测与纯 2D
+//   对拍（_bj348b2-layer-iso）全绿漏网;BJ348b2「glow 可见主层消失」同根未除。
+//   修复 = rasterizeFillRect/rasterizeOp 判例:user 空间【原参重放】（负 dw/dh 翻转/
+//   旋转/斜切全由 2D 语义自洽;设备 bbox=dst 四角 CTM 变换 min/max）。
+interface ScratchDrawRec { mat: [number, number, number, number, number, number]; args: unknown[]; filter: string; alpha: number }
+describe('★浸没透明案 rasterizeDrawImage user 空间原参重放（双变换翻案）', () => {
+  // accScratch 模块级缓存（生产=全程单例）→ fake 也用共享单例画布,每测试只换日志面
+  let currentLog: ScratchDrawRec[] = [];
+  const sharedCtx = {
+    filter: 'none', globalAlpha: 1, imageSmoothingEnabled: false,
+    a: 1, b: 0, c: 0, d: 1, e: 0, f: 0,
+    setTransform(...a: number[]) { [this.a, this.b, this.c, this.d, this.e, this.f] = a; },
+    clearRect() { /* no-op */ },
+    translate(..._a: number[]) { /* 旧码 flip/rot 支桩 */ },
+    rotate(..._a: number[]) { /* 同上 */ },
+    scale(..._a: number[]) { /* 同上 */ },
+    drawImage(img: unknown, ...rest: unknown[]) {
+      currentLog.push({ mat: [sharedCtx.a, sharedCtx.b, sharedCtx.c, sharedCtx.d, sharedCtx.e, sharedCtx.f], args: [img, ...rest], filter: sharedCtx.filter, alpha: sharedCtx.globalAlpha });
+    },
+  };
+  const sharedCanvas = { width: 0, height: 0, getContext: () => sharedCtx };
+  async function withFakeDoc(scratchLog: ScratchDrawRec[], fn: () => Promise<void> | void): Promise<void> {
+    currentLog = scratchLog;
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = { createElement: () => sharedCanvas };
+    try { await fn(); } finally {
+      if (prevDoc === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = prevDoc;
+    }
+  }
+
+  it('非单位 CTM（镜像+平移,实测定谳 [-1,0,0,1,638,421]）下 filter drawImage:scratch 重放=CTM 整数平移+user 空间原参（旧码画设备坐标=双变换→红）', async () => {
+    const scratchLog: ScratchDrawRec[] = [];
+    await withFakeDoc(scratchLog, async () => {
+      // 本文件前段测试已用各自 fake document 触发过 accScratch 模块级缓存——
+      // resetModules+动态导入取全新模块实例（_accScratch 未建,落到本 describe 的共享桩）
+      vi.resetModules();
+      const { GLShimExecutor: FreshExec } = await import('../src/render/glshim/GLShimExecutor');
+      const { L, quads } = mkFullAccLayer();
+      const ex = new FreshExec({
+        acquireGl: () => L, worldCtx: () => null, worldW: () => 128, worldH: () => 72,
+        degradeAcc: () => false,
+      });
+      const wrap = ex.attachAcc() as unknown as { filter: string; drawImage: (i: CanvasImageSource, ...r: unknown[]) => void; setTransform: (...a: number[]) => void };
+      wrap.setTransform(-1, 0, 0, 1, 638, 421);          // 世界层 CTM（X 镜像+平移）
+      wrap.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
+      const img = { width: 40, height: 1334, __id: 7 } as unknown as CanvasImageSource;
+      wrap.drawImage(img, 0, 56, 40, 56, 20, 0, 40, 56); // user 空间 dst(20,0,40,56)
+      // 设备矩形（镜像 min 角）=(578,421,40,56) → fx=577,fy=420,sx2=42,sy2=58
+      expect(scratchLog.length).toBe(1);
+      const rec = scratchLog[0];
+      expect(rec.filter).toContain('sepia');
+      expect(rec.mat).toEqual([-1, 0, 0, 1, 638 - 577, 421 - 420]);  // CTM+整数设备平移
+      expect(rec.args[0]).toBe(img);
+      expect(rec.args.slice(1, 5)).toEqual([0, 56, 40, 56]);          // 源矩形原样
+      // ★判别面:重放 dst 必须是【user 空间原参 (20,0,40,56)】——旧码画设备坐标 (578,421,…) 再乘 CTM=双变换（scratch 落点 −558=裁空）→ 红
+      expect(rec.args.slice(5, 9)).toEqual([20, 0, 40, 56]);
+      // 发射:动态 scratch quad 落设备 bbox 整数外扩矩形（texKey=stub 对 scratch 画布的 'd'+__id——scratch 无 __id → 'd?'）
+      expect(quads.length).toBe(1);
+      expect(quads[0].texKey).toBe('d?');
+      expect(quads[0].dx).toBe(577); expect(quads[0].dy).toBe(420);
+      expect(quads[0].dw).toBe(42); expect(quads[0].dh).toBe(58);
+      expect(ex.stats.fallback).toBe(0);
+    });
+  });
+
+  it('单位 CTM 等价回归锁:2 参形态 scratch 落点=geo.dx−fx（旧行为正确面不回退）', async () => {
+    const scratchLog: ScratchDrawRec[] = [];
+    await withFakeDoc(scratchLog, async () => {
+      vi.resetModules();
+      const { GLShimExecutor: FreshExec } = await import('../src/render/glshim/GLShimExecutor');
+      const { L, quads } = mkFullAccLayer();
+      const ex = new FreshExec({
+        acquireGl: () => L, worldCtx: () => null, worldW: () => 128, worldH: () => 72,
+        degradeAcc: () => false,
+      });
+      const wrap = ex.attachAcc() as unknown as { filter: string; drawImage: (i: CanvasImageSource, ...r: unknown[]) => void };
+      wrap.filter = 'brightness(2.5)';
+      const img = { width: 64, height: 64, __id: 9 } as unknown as CanvasImageSource;
+      wrap.drawImage(img, 10, 10);
+      // 设备矩形=(10,10,64,64) → fx=fy=9,sx2=sy2=66;scratch x=10−9=1
+      expect(scratchLog.length).toBe(1);
+      expect(scratchLog[0].mat).toEqual([1, 0, 0, 1, -9, -9]);
+      expect(scratchLog[0].args).toEqual([img, 10, 10]);
+      expect(quads.length).toBe(1);
+      expect(quads[0].dx).toBe(9); expect(quads[0].dy).toBe(9);
+      expect(quads[0].dw).toBe(66); expect(quads[0].dh).toBe(66);
+    });
   });
 });

@@ -55,9 +55,12 @@ describe('R1-F9 死亡帧挂起天空栈显式丢弃', () => {
 
 // ---- R1-F10:newWorldCompose 退避窗自建第二管线 → 返 null 走旧链 ----
 describe('R1-F10 共管退避窗禁自建管线', () => {
-  it('newWorldCompose 可返 null:cloudpipe 开而 acquireSwPipe 缺 = null(旧链/降级)', () => {
+  it('newWorldCompose 可返 null:cloudpipe 开而 acquireSwPipe 缺 = null(旧链/降级)★P0-A 金标再生:null 支带指纹+toast', () => {
+    // ★P0-A（2026-09-25 塌方定谳续刀）:null 支不再静默——markSwPipeSkip 按 acquire
+    //  失败因落 lrecon-skip:swpipe-* 指纹+notifySwPipeDegrade 一次性 toast;禁自建
+    //  第二管线承诺不变（pipe 缺 → return null,不触 GLWorldCompose 构造）。
     expect(RDR).toMatch(
-      /private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*return pipe \? new GLWorldCompose\('worldCompose', pipe\) : null;\s*\n\s*\}/);
+      /private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(!pipe\) \{[^]*?this\.markSwPipeSkip\(\(this\.swPipeFailWhy \|\| 'backoff'\) as 'backoff' \| 'init-fail' \| 'starvelock'\);\s*\n\s*this\.notifySwPipeDegrade\(\);\s*\n\s*return null;\s*\n\s*\}\s*\n\s*return new GLWorldCompose\('worldCompose', pipe\);\s*\n\s*\}/);
   });
   it('双消费点 null 安全（lrecon 支+A2 支;??= 每帧重试语义保持）', () => {
     expect(RDR.match(/this\.worldCompose \?\?= this\.newWorldCompose\(\);\s*\n\s*const wcL = this\.worldCompose\?\.acquire\(\) \?\? null;/g)?.length ?? 0).toBe(1);

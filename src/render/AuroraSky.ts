@@ -448,7 +448,12 @@ export class AuroraSky {
   }
 
   get opacity(): number { return this._opacity; }
-  get isActive(): boolean { return this._isActive; }
+  get isActive(): boolean {
+    // ★债登记（2026-09-25 塌方 trace:P0-A 路径面 isActive 轮询占 8.4%）——上游
+    //  高频轮询本 getter 的消费方随 P0-A 自愈提速回落,观察项非定谳;若回落后仍
+    //  热点,再评估把 isActive 并入每帧一次的天空态快照（勿单方面改谓词语义）。
+    return this._isActive;
+  }
   get lastSkyColor(): readonly [number, number, number] { return this._lastSkyColor; }
 
   /** Renderer 每帧读出 → SkyColor.setFrameAurora(ModifyTileColor 的输入态)。

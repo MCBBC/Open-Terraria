@@ -59,7 +59,10 @@ const res = await page.evaluate(async () => {
   for (let wx = -6; wx <= -4; wx++) for (let wy = -8; wy <= -1; wy++) st.setTile(bx + wx, by + wy, 0);
 
   // ============ ② 事件期自然生成抑制门 ============
-  // 手动置 ongoing（等同 startInvasion 后态）+ 门 549 在 4000px 内
+  // 活水晶 548（updateTime 的 !anyNpc(548) 每拍清 ongoing）+ 手动置 ongoing + 门 549 在 4000px 内
+  const crystal3 = Enemy.fromVanilla(548, (bx - 24) * TILE, groundY - 44);
+  g.entities.add(crystal3, 'enemies');
+  await new Promise(r => setTimeout(r, 200));
   w.oldOnesArmy.ongoing = true;
   w.oldOnesArmy.waveNumber = 1; w.oldOnesArmy.timeLeftUntilSpawningBegins = 0;
   const portal = Enemy.fromVanilla(549, (bx + 10) * TILE, groundY - 90);
@@ -80,8 +83,8 @@ const res = await page.evaluate(async () => {
   f2.naturalSpawned = g.entities.enemies.filter(e => !e.dead && !before.has(e.vanillaId) && !isDD2(e.vanillaId)).map(e => e.vanillaId);
   f2.spawnRateNow = (() => { try { const s = g.vanillaSpawner; return s.getSpawnRate(g.player.cy, 0, false, g.camera.viewH, g.player.cx, false, false, false, false, 0, true, false, false, false, false, false); } catch (e) { return String(e); } })();
   out.face2 = f2;
-  // 清场②（portal 留给 face4 前的最后状态使用后清）
-  w.oldOnesArmy.ongoing = false;
+  // 清场②
+  w.oldOnesArmy.ongoing = false; crystal3.dead = true; portal.dead = true;
 
   // ============ ③ 水晶受击面（NPC 互伤通道）============
   const crystal2 = Enemy.fromVanilla(548, (bx - 24) * TILE, groundY - 44);
@@ -100,10 +103,14 @@ const res = await page.evaluate(async () => {
   const manaKey = VANILLA_ITEM_KEY_BY_ID[3822];
   const manaIid = window.__swFlow.itemByVid(3822);
   out.face4 = { manaKey, manaIid };
+  // 活水晶压阵：防 updateTime 的 !anyNpc(548) 一拍清 ongoing（否则 Purge 先于断言跑）
+  const crystal4 = Enemy.fromVanilla(548, (bx - 24) * TILE, groundY - 44);
+  g.entities.add(crystal4, 'enemies');
+  await new Promise(r => setTimeout(r, 200));
   w.oldOnesArmy.ongoing = true;   // 事件进行中给魔力 → 结束后应被清
   const addRes = g.player.inv.add(manaIid, 5);
   const worldDrop = g.spawnDrop(g.player.cx + 30, g.player.cy - 10, manaKey, 3, 0, 0);
-  await new Promise(r => setTimeout(r, 300));
+  await new Promise(r => setTimeout(r, 400));
   const slotHasMana = () => g.player.inv.slots.some(s => s && (s.id === manaIid || s.key === manaKey));
   out.face4.invHadManaBefore = slotHasMana();
   out.face4.addRes = addRes;

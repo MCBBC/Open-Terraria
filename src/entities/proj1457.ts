@@ -1138,6 +1138,17 @@ export class StormLightning extends Entity {
   /** 全 bolt 列表（主雷+分支叉——StormLightningParticle.Draw foreach bolts 全画,
    *  叉强度 0.5×0.8^(depth−1);曾 generateMainBoltPath 传 null 列表=叉生成即丢弃） */
   private bolts: Bolt[] = [];
+  /** ★P0-B③ 绘制并发钳上界（防御位;正常生成恒不触发——vanilla 语义核对:
+   *  LightningGenerator.cs StormLightning MaxForksPerBolt=2/MaxForkDepth=2
+   *  → ≤1+2+4=7,ArcSurge GetArcSurgeWeaponGenerator 3/3 → ≤13=本值;
+   *  本仓克隆 src/fx/LightningGenerator.ts 同参同界）。 */
+  static readonly BOLT_DRAW_CAP = 13;
+  /** ★P0-B① 烘焙通道逃生门（探针 A/B 面+回滚口;?boltbake=0 回原链逐切片直画） */
+  static BOLT_BAKE_OFF = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('boltbake') === '0';
+    } catch { return false; }
+  })();
   private boltColor: [number, number, number] = [1, 1, 1];
   private visualT = 0;
   /** 尸检寿命：1117=45（Spawn_StormLightning num=45;★R35 勘误:曾误用宽度 num2=12 当
@@ -1702,9 +1713,24 @@ export class StormLightning extends Entity {
         * remapL(progress, anim.fadeMid, anim.fadeEnd, 1, anim.final);
       const waveInP = remapL(progress, 0, anim.waveIn, 0, 1);
       const waveOutP = remapL(progress, 1 - anim.waveOut, 1, 0, 1);
-      for (const b of this.bolts) {
-        const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
-        this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP);
+      // ★P0-B③ 并发钳（vanilla 语义核对定谳 2026-09-25:LightningGenerator.cs
+      //  StormLightning MaxForksPerBolt=2/MaxForkDepth=2 → bolts ≤1+2+4=7;
+      //  ArcSurge 3/3 → ≤13。本仓克隆生成端同值已封顶——此钳=纯防御位,正常会话
+      //  零截断;触发时保主雷(=bolts.Last(),vanilla MainBolt 同位)上屏。
+      //  opacity≤ε 早退:全部切片 am≤ε 本就被逐 fill 剔除=逐位等价 no-op。
+      if (opacity > 0.004) {
+        const n = this.bolts.length;
+        const end = Math.min(n, StormLightning.BOLT_DRAW_CAP);
+        for (let bi = 0; bi < end; bi++) {
+          const b = this.bolts[bi];
+          const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
+          this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP);
+        }
+        if (n > end) {
+          const b = this.bolts[n - 1];   // 主雷恒最后（生成序:forks…主雷收尾）
+          const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
+          this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP);
+        }
       }
     } else {
       // 飞行期本体贴图（:40450-40455 光强包络近似亮度）
@@ -1753,53 +1779,142 @@ export class StormLightning extends Entity {
     const [cr, cg, cb] = this.boltColor;
     const range = bolt.progressRange;
     ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < pts.length - 1; i++) {
-      const s0 = range.min + (range.max - range.min) * (i / (pts.length - 1));
-      const s1 = range.min + (range.max - range.min) * ((i + 1) / (pts.length - 1));
-      // 波前双门（WaveTransition :88-91）
-      const a0 = waveGate(s0, waveIn, anim.waveLen, 0, 1) * waveGate(s0, waveOut, anim.waveLen, 1, 0);
-      const a1 = waveGate(s1, waveIn, anim.waveLen, 0, 1) * waveGate(s1, waveOut, anim.waveLen, 1, 0);
-      if (a0 <= 0.004 && a1 <= 0.004) continue;
-      const w0 = stripWidthAt(s0, W, progress, taperEnd, bolt) * intensity;
-      const w1 = stripWidthAt(s1, W, progress, taperEnd, bolt) * intensity;
-      const dx = pts[i + 1].x - pts[i].x, dy = pts[i + 1].y - pts[i].y;
-      const l = Math.hypot(dx, dy) || 1;
-      const px = -dy / l, py = dx / l;
-      const am = (a0 + a1) / 2 * opacity;
-      if (am <= 0.004) continue;
-      // ★StormLightning shader 复刻（PixelShader.cso pass StormLightning）：
-      //   片元色=vColor×(Extra_288.r×8×uOpacity×uSaturation)——条带横向 K 切片,
-      //   每片按 v 采 LUT 亮度:中央亮带×8 过曝=白热芯,上下暗=蓝辉光边
-      //   ('lighter' 加算,fill alpha=波门,rgb 折增益)
-      const K = 6;
-      for (let k9 = 0; k9 < K; k9++) {
-        const v9 = (k9 + 0.5) / K;
-        const lut = stormTexBrightness(r9, v9);
-        // ★C2 勘误（字节码 :3207-3210 writemask）：×8×uOpacity×uSaturation 增益链
-        //   只写 r0.x【红通道】——末指令 mul r0.xyzw,r0,v0 逐通道展开后 G/B=
-        //   tex.g/b×vColor 不吃增益。曾三通道全乘 → 边带亮度比 2.77× 偏差
-        const gainR = lut * 8 * opacity * intensity;
-        // vColor=StormLightningDrawer 白顶点色（StripColors=White——蓝调由风窗粒子/
-        //   光 tint 承担;曾用 GetLightningColor 蓝基 → C2 分通道后亮度重心崩塌）
-        const wcr = 1 - (1 - cr) * 0.35, wcb = 1 - (1 - cb) * 0.35;
-        const e9r = Math.min(255, wcr * 255 * gainR);
-        const e9g = Math.min(255, 255 * lut * (1 - (1 - cg) * 0.35));
-        const e9b = Math.min(255, wcb * 255 * lut);
-        if (e9r + e9g + e9b < 6) continue;
-        const sw0 = w0 / K, sw1 = w1 / K;
-        const o0 = -w0 / 2 + k9 * sw0, o1 = -w1 / 2 + k9 * sw1;
-        ctx.fillStyle = `rgba(${e9r | 0},${e9g | 0},${e9b | 0},${Math.min(1, am).toFixed(3)})`;
-        ctx.beginPath();
-        ctx.moveTo(pts[i].x + px * o0, pts[i].y + py * o0);
-        ctx.lineTo(pts[i + 1].x + px * o1, pts[i + 1].y + py * o1);
-        ctx.lineTo(pts[i + 1].x + px * (o1 + sw1), pts[i + 1].y + py * (o1 + sw1));
-        ctx.lineTo(pts[i].x + px * (o0 + sw0), pts[i].y + py * (o0 + sw0));
-        ctx.closePath();
-        ctx.fill();
+    // ★P0-B① 专用化通道（2026-09-25 雷击风暴定谳续刀）：bolt 几何视觉期恒定
+    //  （LightningGenerator.Generate 生成后 positions 冻结,变的只有波前 α/强度/
+    //  宽度包络）→ 整 bolt K=6 切片烘进【一张】scratch(1 次栅格化+1 次上传+
+    //  1 个 ADD quad),替代逐切片 fill——旧链在 acc shim 态=每 fill 走
+    //  rasterizePathOp 隔离栅格化+即发即弃 texImage2D(2000-3500 次/雷帧≈11ms
+    //  上传风暴,雷单独砍半帧率)。vanilla 同构锚:StormLightningDrawer.Draw 每
+    //  bolt 一次 VertexStrip PrepareStrip+DrawTrail=一次 draw call。
+    //  像素等价性:①切片几何/配色/α 逐参同源(emit 闭包单实现,烘焙与兜底共 consumption);
+    //  ②'lighter' 纯加算+8bit 逐加钳=min 单调性⇒「先钳底再合加」与逐加逐位同;
+    //  ③整数设备平移(-fx,-fy) 下栅格化覆盖率逐位不变(rasterizeOp 判例);
+    //  ④α 烘入 scratch,blit 时 globalAlpha 钉 1 防二次乘。
+    //  失败(退化 CTM/面超 4096 帽)→false 走下方兜底=原链逐切片直画(逐字节同参)。
+    const emitSlices = (g: CanvasRenderingContext2D): void => {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const s0 = range.min + (range.max - range.min) * (i / (pts.length - 1));
+        const s1 = range.min + (range.max - range.min) * ((i + 1) / (pts.length - 1));
+        // 波前双门（WaveTransition :88-91）
+        const a0 = waveGate(s0, waveIn, anim.waveLen, 0, 1) * waveGate(s0, waveOut, anim.waveLen, 1, 0);
+        const a1 = waveGate(s1, waveIn, anim.waveLen, 0, 1) * waveGate(s1, waveOut, anim.waveLen, 1, 0);
+        if (a0 <= 0.004 && a1 <= 0.004) continue;
+        const w0 = stripWidthAt(s0, W, progress, taperEnd, bolt) * intensity;
+        const w1 = stripWidthAt(s1, W, progress, taperEnd, bolt) * intensity;
+        const dx = pts[i + 1].x - pts[i].x, dy = pts[i + 1].y - pts[i].y;
+        const l = Math.hypot(dx, dy) || 1;
+        const px = -dy / l, py = dx / l;
+        const am = (a0 + a1) / 2 * opacity;
+        if (am <= 0.004) continue;
+        // ★StormLightning shader 复刻（PixelShader.cso pass StormLightning）：
+        //   片元色=vColor×(Extra_288.r×8×uOpacity×uSaturation)——条带横向 K 切片,
+        //   每片按 v 采 LUT 亮度:中央亮带×8 过曝=白热芯,上下暗=蓝辉光边
+        //   ('lighter' 加算,fill alpha=波门,rgb 折增益)
+        const K = 6;
+        for (let k9 = 0; k9 < K; k9++) {
+          const v9 = (k9 + 0.5) / K;
+          const lut = stormTexBrightness(r9, v9);
+          // ★C2 勘误（字节码 :3207-3210 writemask）：×8×uOpacity×uSaturation 增益链
+          //   只写 r0.x【红通道】——末指令 mul r0.xyzw,r0,v0 逐通道展开后 G/B=
+          //   tex.g/b×vColor 不吃增益。曾三通道全乘 → 边带亮度比 2.77× 偏差
+          const gainR = lut * 8 * opacity * intensity;
+          // vColor=StormLightningDrawer 白顶点色（StripColors=White——蓝调由风窗粒子/
+          //   光 tint 承担;曾用 GetLightningColor 蓝基 → C2 分通道后亮度重心崩塌）
+          const wcr = 1 - (1 - cr) * 0.35, wcb = 1 - (1 - cb) * 0.35;
+          const e9r = Math.min(255, wcr * 255 * gainR);
+          const e9g = Math.min(255, 255 * lut * (1 - (1 - cg) * 0.35));
+          const e9b = Math.min(255, wcb * 255 * lut);
+          if (e9r + e9g + e9b < 6) continue;
+          const sw0 = w0 / K, sw1 = w1 / K;
+          const o0 = -w0 / 2 + k9 * sw0, o1 = -w1 / 2 + k9 * sw1;
+          g.fillStyle = `rgba(${e9r | 0},${e9g | 0},${e9b | 0},${Math.min(1, am).toFixed(3)})`;
+          g.beginPath();
+          g.moveTo(pts[i].x + px * o0, pts[i].y + py * o0);
+          g.lineTo(pts[i + 1].x + px * o1, pts[i + 1].y + py * o1);
+          g.lineTo(pts[i + 1].x + px * (o1 + sw1), pts[i + 1].y + py * (o1 + sw1));
+          g.lineTo(pts[i].x + px * (o0 + sw0), pts[i].y + py * (o0 + sw0));
+          g.closePath();
+          g.fill();
+        }
       }
+    };
+    if (!StormLightning.BOLT_BAKE_OFF && intensity > 0 && this.bakeBolt(ctx, r9, pts, W, intensity, emitSlices)) {
+      ctx.globalCompositeOperation = 'source-over';
+      return;
     }
+    emitSlices(ctx);   // 兜底=原链逐切片直画(仅烘焙失败可达;正常会话零走)
     ctx.globalCompositeOperation = 'source-over';
   }
+
+  /** ★P0-B① 整 bolt 一次烘焙（2026-09-25 雷击风暴定谳续刀——emit 闭包单源,
+   *  本方法只管 scratch 几何+发射）：设备域保守 bbox→scratch 同 CTM 整数平移
+   *  重放全部切片→markWorldDynamicScratch(1 次 texRefresh 上传)+1 个 ADD quad。
+   *  返 false=走原链兜底(退化 CTM/面超 4096 帽/无 2D)。 */
+  private bakeBolt(ctx: CanvasRenderingContext2D, r9: import('../render/Renderer').Renderer,
+    pts: ReadonlyArray<{ x: number; y: number }>, W: number, intensity: number,
+    emit: (g: CanvasRenderingContext2D) => void): boolean {
+    if (typeof document === 'undefined') return false;
+    const M = ctx.getTransform();
+    const { a, b, c, d, e, f } = M;
+    if (!(Math.abs(a * d - b * c) >= 1e-12)) return false;   // 退化 CTM→原链
+    // 保守设备 bbox:角=pt±perp·o(|o|≤w/2,|perp|=1)——stripWidthAt 有 0.5 下限,
+    // 半宽 ≤ max(W·intensity,0.5)/2;设备域半径 ≤ ‖M‖F·半宽(Frobenius 上界 superset)
+    const scale = Math.sqrt(a * a + b * b + c * c + d * d);
+    const halfW = Math.max(W * intensity, 0.5) / 2;
+    const pad = scale * halfW + 1;
+    let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const px = a * pts[i].x + c * pts[i].y + e;
+      const py = b * pts[i].x + d * pts[i].y + f;
+      if (px - pad < bx0) bx0 = px - pad;
+      if (px + pad > bx1) bx1 = px + pad;
+      if (py - pad < by0) by0 = py - pad;
+      if (py + pad > by1) by1 = py + pad;
+    }
+    const fx = Math.floor(bx0), fy = Math.floor(by0);
+    const sx = Math.ceil(bx1) - fx, sy = Math.ceil(by1) - fy;
+    if (!(sx > 0 && sy > 0) || sx > 4096 || sy > 4096) return false;
+    const sc = boltScratch(sx, sy);
+    if (!sc) return false;
+    const sctx = sc.getContext('2d', { willReadFrequently: true });
+    if (!sctx) return false;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, sx, sy);
+    // 整数设备平移 (−fx,−fy) 后同 CTM 重放=栅格化覆盖率与原位逐位同(rasterizeOp 判例);
+    // 环境态(α/filter)取自 ctx 镜像——与原链逐 fill 的生效态同源
+    sctx.setTransform(a, b, c, d, e - fx, f - fy);
+    sctx.globalAlpha = ctx.globalAlpha;
+    sctx.globalCompositeOperation = 'lighter';
+    try { sctx.filter = ctx.filter; } catch { /* 非法值保缺省 */ }
+    emit(sctx);
+    r9.markWorldDynamicScratch(sc);
+    // blit:恒等 CTM+α 钉 1(α/滤镜均已烘入 scratch)——acc shim 态=1 个 ADD quad 入队
+    // (flush 时一次 texRefresh),裸 2D 态=一次 drawImage。★滤镜钉 none:shim 对
+    // filter≠none 的 drawImage 走 rawDrawImage 整帧降级,而滤镜语义已由 bake 面承担
+    // (与 rasterizePathOp 同构——栅格化面施加滤镜,发射 quad 不再带)。
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    if (ctx.filter !== 'none') { try { ctx.filter = 'none'; } catch { /* 非法值忽略 */ } }
+    ctx.drawImage(sc, 0, 0, sx, sy, fx, fy, sx, sy);
+    ctx.restore();
+    return true;
+  }
+}
+
+/** ★P0-B bolt 烘焙 scratch（模块级只增不减;CanvasWatch churn 判例禁逐帧新建;
+ *  willReadFrequently=R3-F8 判例——纯上传中转面,无 readPixels 读回需求） */
+let _boltScratch: HTMLCanvasElement | null = null;
+function boltScratch(w: number, h: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  if (!_boltScratch) {
+    _boltScratch = document.createElement('canvas');
+    _boltScratch.width = 256;
+    _boltScratch.height = 256;
+  }
+  if (_boltScratch.width < w) _boltScratch.width = w;     // 只增不减(尺寸变化自动清屏)
+  if (_boltScratch.height < h) _boltScratch.height = h;
+  return _boltScratch;
 }
 
 /** StripWidth（:104-115）单点宽度 */

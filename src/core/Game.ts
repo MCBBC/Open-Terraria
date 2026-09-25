@@ -92,6 +92,7 @@ import {
   canRaiseGoblinsHere as dd2CanRaiseGoblinsHere, findArenaHitbox as dd2FindArenaHitbox,
   announceGoblinDeath as dd2AnnounceGoblinDeath, shouldDropCrystals as dd2ShouldDropCrystals,
   summonBetsy as dd2SummonBetsy, shouldBlockBuilding, type OldOnesArmyHost,
+  purgeEnergyCrystalSlots,
   invasionStatus as dd2InvasionStatus, DD2_EVENT_GROUP,
 } from '../world/OldOnesArmy';
 import {
@@ -102,7 +103,7 @@ import {
 } from '../world/TeleportPylons';
 import { WALL_DUNGEON_SHEETS } from '../world/DungeonDualZones';   // ★IIIII228 海螺 TileIsDangerous wallDungeon 集
 import { DD2_EVENT_HOOKS, checkArenaScore, resetDD2Hooks } from '../entities/bossAI_dd2';
-import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
+import { golemSpawnFromAltar, eterniaStandBottomRow, eterniaStandSummonAnchor } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import { dryadMoonPhaseStock, rollTownPetVariant, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
@@ -372,7 +373,7 @@ import {
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { PlayerHurtFlags } from '../net/protocol';
 import { bindGhostBudgetHost, projPveNumHits } from '../entities/SpectreSoulProj';
-import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, wetFromBubbleContact, buffTypeByVanilla } from '../stats/Buffs';
 import { options } from './Options';
 import { cround } from './csCompat';
 import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank, nearbyBanksInRange,
@@ -5333,10 +5334,18 @@ export class Game implements GameHooks {
     // 先走下坐支，:6040-6059），显式门防外溢；Rat/Bat/Pixie（55/56/61，
     // Mount.cs:2376/:2434/:2498 dismountsOnItemUse=true；DismountsOnItemUse 全表查无第五）
     // 在 :6077-6079 被 flag=false 压住整支——TryingToUseItem 本仓快挂路径不建模
-    // itemAnimation（近似恒真窗），这几型未入本仓坐骑目录,守卫为前向护栏。
+    // itemAnimation（近似恒真窗）。★BJ357 勘误：旧注「这几型未入本仓坐骑目录」
+    // 已陈旧——55/56/61 现全量在轨（vanilla-mounts.json itemMount+缩盒/禁道具/
+    // 伴生 buff 随本刀落全）,本门保留为原版 flag=false 同相护栏。
     if (!p.ridingMount && mountId !== 55 && mountId !== 56 && mountId !== 61
       && this.quickMinecartSnap()) return true;
     if (!p.mount.setMount(mountId, p, this)) return false;
+    // ★BJ357 坐骑伴生 buff（SetMount :6291 AddBuff(_data.buff, 3600)）：61=法埃的
+    //  形态 384 / 55=大鼠本性 374 / 56=蝙蝠诅咒 377——每 tick 重钉 10t 在
+    //  Player.fixedUpdate（Player.cs:9968-9971）;图标无字+不入档=Main.cs:9344-9352。
+    //  未入 BUFF_DEFS 的坐骑 buff 静默跳过（域债:全坐骑 buff 图标未建,登记）
+    const mbt = buffTypeByVanilla(p.mount.data?.buff ?? -1);
+    if (mbt !== undefined) p.buffs.apply(mbt, 60);
     // 起坐音效（Item.UseSound：鞍族 Item_25 / 胡萝卜 Item_79 / 猪龙 Item_80 / 史莱姆
     // Item_81 / 帕鲁坐骑 62-65 = PalSummon——1457 Item.cs:44510-44535（5665/5666）与
     // :47385-47410（6150/6151）同 `UseSound = SoundID.PalSummon`，SoundID.cs:1072 音量
@@ -5358,8 +5367,13 @@ export class Game implements GameHooks {
     const p = this.player;
     if (!p.ridingMount) return;
     if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6229-6231（下坐即停抚摸）
+    // ★BJ357 清坐骑伴生 buff（Dismount :6214 ClearBuff(_data.buff)——法埃的形态等）。
+    //  ★buff id 须在下坐【前】捕获：dismount 内部 reset() 后 mount.data 已 null
+    const prevBuffVanilla = p.mount.data?.buff ?? -1;
     if (p.mount.tryDismount(p)) {
       this.mountNoSpaceCount = 0;
+      const mbt = buffTypeByVanilla(prevBuffVanilla);
+      if (mbt !== undefined) p.buffs.remove(mbt);
       return;
     }
     // QuickMount（Player.cs:5738-5753）：失败 1/2 次 = Sound 0 + 尘(计数×20)；第 3 次
@@ -5374,6 +5388,8 @@ export class Game implements GameHooks {
     this.mountNoSpaceCount = 0;
     if (p.petting.mount) p.stopPettingAnimal();   // Mount.Dismount :6229-6231
     p.mount.dismount(p);
+    const mbt = buffTypeByVanilla(prevBuffVanilla);            // ★BJ357 同 :6214 清 buff
+    if (mbt !== undefined) p.buffs.remove(mbt);
     this.playerNoSpaceTeleport();
   }
 
@@ -5857,6 +5873,12 @@ export class Game implements GameHooks {
       this.cb.onToast?.(Lang.text(mode === 'cpu'
         ? 'Mods.SandboxWorld.Toast.CpuRender'
         : 'Mods.SandboxWorld.Toast.GpuRender'));
+    };
+    // ★P0-A（2026-09-25 塌方定谳续刀）:共管管线降级一次性 toast——17 分钟全 2D
+    // 静默塌方(26484 帧 acquire 恒 null 零提示)的用户侧告知面。Renderer 侧
+    // episode 闩保证降级首帧一次、恢复不重复;回滚口 Renderer.SWPIPE_DEGRADE_TOAST。
+    this.renderer.cbOnSwPipeDegrade = () => {
+      this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.Gpu2DFallback'));
     };
     this.renderer.cbOnGpuRecover = () => {
       this.chunks?.dispose();
@@ -11047,6 +11069,9 @@ export class Game implements GameHooks {
     }
     // ---- 入侵状态推进（Main.cs:63775 UpdateInvasion：前线推进+胜利判定+周期公告） ----
     {
+      // ★BJ356 PurgeDD2EnergyCrystals（Player.cs:24889-24893）：本地玩家 !Ongoing
+      //   每帧清魔力（vanilla 在 Player.Update 同位）
+      if (!w.oldOnesArmy.ongoing) this.purgeDD2EnergyCrystals();
       // 旧日军团 UpdateTime（Main.cs:64431 DD2Event.UpdateTime：波间间歇/水晶在场判定）
       this.tickOldOnesArmy();
       const inv = tickInvasion(w, this.invasionWarn);
@@ -13493,6 +13518,16 @@ export class Game implements GameHooks {
       this.mining = null;
       return;
     }
+    // ★BJ357 变身坐骑禁道具（Mount.cs UpdateEffects case 55/56/61 :5201-5202
+    //  IsAllowedToHoldItems=false + noItems=true——骑大鼠/蝙蝠/妖精（附魔精灵尘
+    //  5662）期间物品整链禁用,含坐骑召唤物本体）。★位次三保：
+    //  ①上/下坐 R 键处理【之后】——原版 QuickMount 骑乘分支（:6039-6059）不吃
+    //    noItems 门,变身中按 R 仍可下坐,门若前置即软锁（下坐是唯一退出面）;
+    //  ②uiBlocking/fullMap 早退块【之后】——UI 面的 mining 清理不受骑乘影响;
+    //  ③钻头 mount 8 接管支【之前】互不重达（8 不在 DontHoldItems 表）。
+    //  矿车同样不在表 → 骑矿车照常使用（原版同相）
+    if (this.player.ridingMount
+      && (MOUNT_SETS.DontHoldItems?.[this.player.mount.type] ?? false)) return;
     // ---- 钻头坐骑（mount 8）：接管整条使用路径（ItemCheck_HandleMount :52066-52081
     //      noItems=true——骑乘钻头时手持物品全部禁用；左键按住挖块/右键按住拆墙，
     //      按压边沿开激光、双松关激光） ----
@@ -26627,7 +26662,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （CanHit 直判 → TryAllowingSnappingToPosition 四组 (w−2,0) 2px 窄条回退
    *  :32973-32988 → 横向 ±width 一步再试 :32964-32971——原版 TileCollision(x)==x
    *  无阻挡判以扫掠盒无实心近似）。mount 自定义尺寸子支（Delegations.
-   *  PlayerSize <20×42 改按默认盒）本仓坐骑不改碰撞盒,N/A */
+   *  PlayerSize <20×42 改按默认盒）★BJ357 起变身坐骑（55/56/61）已实缩盒
+   *  （MOUNT_PLAYER_SIZE,Mount.cs:6309-6328）——本支原注「N/A」退役;语义=以
+   *  缩后实盒直判,与原版 CanFitInSpaceWithSize(DefaultSize) 等价面登记近似 */
   private canSnapPlayerTo(offX: number, offY: number): boolean {
     const p = this.player, st = this.world.store;
     const tx = p.x + offX, ty = p.y + offY;
@@ -28041,7 +28078,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       // ConsumeItem(3828)（:31968-31970）
       this.consumeVanillaItem(3828);
-      dd2SummonCrystalDirect(oa, w, this.dd2Host(), tx, by, st.frameX[i], fy);
+      // ★BJ356：StartInvasion 尾 WipeEntities（DD2Event.cs:289-291 SetEnemySpawningOnHold(300)
+      //  + WipeEntities——300t hold 已在模块内）——清上届残塔/残怪/开箱残魔力;须在
+      //  水晶 548 落地【前】（vanilla 水晶 NewNPC 在 StartInvasion 返回后的调用方段）
+      this.dd2WipeEntities();
+      // ★BJ356 Face5 帧锚勘误（vanilla Player.cs:32689+DD2Event.cs:584-597）：调用方传
+      //  (myX, num28=底行),Direct 内部读【(x,y)=底行格自身】的 frameX/Y 回推顶行
+      //  （底行 frameY≡54→-3 格）→ 水晶 Bottom=座顶+64=地表。曾传【点击格】的帧配
+      //  底行坐标=混合锚：点上部格（frameY 0/18/36）时水晶 Bottom 埋 1-3 格——薄平台
+      //  （桥式竞技场）下水晶悬空 → CheckArenaScore 扫场起点落空 → SendWalker i=0
+      //  坑探 6 格无地即断 → 双端 ±1 → 双传送门贴脸水晶（用户实报）。
+      const anchor = eterniaStandSummonAnchor(st, tx, ty);
+      dd2SummonCrystalDirect(oa, w, this.dd2Host(), anchor.x, anchor.y, anchor.frameX, anchor.frameY);
       // InvasionStart 广播（DD2Event.cs:285，ChatColors.World 50,255,130）
       this.newText(Lang.text('DungeonDefenders2.InvasionStart'), 50, 255, 130);
     }
@@ -28373,7 +28421,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     DD2_EVENT_HOOKS.stopInvasion = (_g, win) => {
       // StopInvasion（:294-320）+ WinInvasionInternal（:322-343；win 时 downed 旗标/
       // 奖牌/InvasionWin 广播在模块内完成，host 落副作用）
-      dd2StopInvasion(this.world.oldOnesArmy, this.world, this.dd2Host(), win);
+      const r = dd2StopInvasion(this.world.oldOnesArmy, this.world, this.dd2Host(), win);
+      // ★BJ356：StopInvasion 尾 WipeEntities（DD2Event.cs:305-307）——仅真停止时清
+      if (r) this.dd2WipeEntities();
+      return r;
     };
     DD2_EVENT_HOOKS.reportLoss = () => dd2ReportLoss(this.world.oldOnesArmy);
     DD2_EVENT_HOOKS.findArenaHitbox = () => {
@@ -34573,6 +34624,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // VanillaSpawner.nearSpikeBall 落点 600×600 盒与 (ai1,ai2,20,20) 锚盒相交门,
     // 1456:90933-90948=1457:91002-91016）
     this.vanillaSpawner.spikeBallAnchors = spikeBallAnchors;
+    // ★BJ356 DD2 事件旗+旧军 Zone 注入（SceneMetrics.cs:284 CloseEnoughToDD2LanePortal =
+    //  WithinRangeOfNPC(549, NPCEventZoneRadius=4000 :130)——任意活门 549 距玩家中心
+    //  DistanceSquared ≤ 4000²;Player.cs:16836 ZoneOldOneArmy 同式直赋）。消费 =
+    //  getSpawnRate 复位臂（NPC.cs:777-780）+ spawnAnNPC 抑制门（:2803-2805）
+    //  + spawnFriendly 决策器 !ZoneOldOneArmy 臂（:800）
+    this.vanillaSpawner.dd2Ongoing = w.oldOnesArmy.ongoing;
+    this.vanillaSpawner.zoneDD2 = false;
+    for (const e of this.entities.enemies) {
+      const en = e as Enemy;
+      if (en.dead || en.vanillaId !== 549) continue;
+      const dx = en.cx - p.cx, dy = en.cy - p.cy;
+      if (dx * dx + dy * dy <= 4000 * 4000) { this.vanillaSpawner.zoneDD2 = true; break; }
+    }
     // ★SW-FX7（2026-09-10）CountNPCS 全量计数注入（NPC.cs CountNPCS = Main.npc
     //  全表遍历）：消费=昼夜链 N 阈值门 250<2（:4192）/ 467<2（:3575）/ 510<4
     //  （:3973）/ 74+297+298<6（:4328）与唯一门 513==0（:1703）、gnome cap（:5773）。
@@ -43441,6 +43505,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const res = dd2UpdateTime(oa, this.dd2Host(), this.betsyLifeRatio());
     if (res.stopped) {
       // 水晶亡 → StopInvasion（:218-220）——败北文案由水晶 AI 演出钩子播
+      // ★BJ356：vanilla StopInvasion 尾 WipeEntities（:305-307）——本路径的停止在
+      //   模块内完成（不经 stopInvasion 钩子）→ 此处补同一清除面
+      this.dd2WipeEntities();
       return;
     }
     if (res.waveAnnounce) {
@@ -43458,6 +43525,55 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (res.lose) {
       this.newText(Lang.text('DungeonDefenders2.InvasionLose'), 255, 0, 0);
     }
+  }
+
+  // ================= ★BJ356 DD2 事件收场清除链（WipeEntities/PurgeDD2EnergyCrystals） =================
+
+  /** WipeEntities（DD2Event.cs:628-638）：StartInvasion（:289）与 StopInvasion（:305-307）
+   *  尾都调用——① ClearAllTowersInGame（:642-649 IsADD2Turret 弹幕全灭）
+   *  ② ClearAllDD2HostilesInGame（:621-631 BelongsToInvasionOldOnesArmy 全灭——
+   *     NPCID.cs:4773 = {548,549,551..578}（550 不在表）：门/水晶/全部 DD2 怪,
+   *     事件收场即刻撤台,曾整链缺席=收场后 DD2 态滞留（相位穿墙态怪跨图漂行））
+   *  ③ ClearAllDD2EnergyCrystalsInChests（:666-690 已开容器内 3822 TurnToAir）。 */
+  private dd2WipeEntities(): void {
+    // ProjectileID.cs:395 IsADD2Turret = 663,665,667,677,678,679,688,689,690,691,692,693
+    const turrets = new Set([663, 665, 667, 677, 678, 679, 688, 689, 690, 691, 692, 693]);
+    for (const ent of this.entities.projectiles) {
+      const pr = ent as Entity & { projId?: number; dead?: boolean };
+      if (pr.dead || pr.projId == null) continue;
+      if (turrets.has(pr.projId)) pr.dead = true;
+    }
+    for (const e of this.entities.enemies) {
+      const en = e as Enemy;
+      if (en.dead || en.vanillaId == null) continue;
+      if (en.vanillaId >= 548 && en.vanillaId <= 578 && en.vanillaId !== 550) en.dead = true;
+    }
+    const mana = invIndexOfVanilla(3822);   // DD2EnergyCrystal（ItemID.cs:9190）
+    if (mana < 0) return;
+    const oc = this.openChestRef?.();
+    if (oc) {
+      for (let i = 0; i < oc.items.length; i++) {
+        const s = oc.items[i];
+        if (s && s.id === mana) oc.items[i] = null;   // TurnToAir
+      }
+    }
+  }
+
+  /** PurgeDD2EnergyCrystals（Player.cs:31684-31765,Update :24889-24893 本地玩家
+   *  每帧 !Ongoing 调用）：埃特尼亚魔力 3822 事件结束即清——垃圾槽/光标持物
+   *  （mouseItem）/背包全 58 格/已开容器。wiki 语义「事件结束后所有在世界内掉落的
+   *  （ItemDrop !Ongoing 蒸散,ItemDrop.ts 已接）和玩家物品栏中的魔力被移除」的
+   *  物品栏侧——★曾整函数缺席=背包魔力跨事件残留。原版 bank2/3/4 分支在本仓
+   *  已开容器统一走 openChest 面板（bank-only 备案）。槽位核在
+   *  OldOnesArmy.purgeEnergyCrystalSlots（纯函数,测试判别面）。 */
+  private purgeDD2EnergyCrystals(): void {
+    const mana = invIndexOfVanilla(3822);
+    if (mana < 0) return;
+    const inv = this.player.inv;
+    const oc = this.openChestRef?.() ?? null;
+    const r = purgeEnergyCrystalSlots(mana, inv.slots, inv.trash, inv.cursorMirror,
+      oc ? [oc.items] : []);
+    if (r.trash) inv.trash = null;   // stack=0 → 垃圾槽直清（Game.ts:7766 同判据）
   }
 
   // ================= 星璇塔 / 天界入侵（LunarEvent.ts 宿主回调侧） =================

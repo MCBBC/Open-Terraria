@@ -267,6 +267,17 @@ export class TileStore {
     this.listeners.push(fn);
   }
 
+  /** ★BJ361（2026-09-25）：裸写窗后的手动补派发原语——suppressListeners 窗把整批
+   *  写入的监听派发一并吃掉,其中含渲染 mark 主通道（ChunkCache 构造期订阅
+   *  onTileChanged→markDirtyAround,ChunkCache.ts:300,chunk 烘焙失效唯一口）——
+   *  门开关贴图不变化回归即此（用户实报:type 已切换/chunk 缓存不失效=旧 type 像素）。
+   *  裸写窗宿主（Door.shiftTallGate/shiftTrapdoor）在窗关闭后对【写入域】逐格补派发:
+   *  整件已完整 → Check* 完整性裁决不会判坏（BJ322 半写态病灶不复发）,监听全族
+   *  （mark/火把/藤/巨石/家具/DECOR/触发板）恢复原版「逐格直写监听即时派发」语义。 */
+  notifyChanged(x: number, y: number): void {
+    this.listeners.forEach((fn) => fn(x, y));
+  }
+
   /** 液体变化独立通道：chunk 缓存不订阅（水不入烘焙画布，无需重建），
    *  只有光照订阅（水的光衰减）——避免水流时每帧冲爆 chunk 重建队列造成卡顿 */
   private liquidListeners: Array<(x: number, y: number) => void> = [];

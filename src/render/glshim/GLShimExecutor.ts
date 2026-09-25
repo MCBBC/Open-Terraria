@@ -545,7 +545,15 @@ export class GLShimExecutor {
    *  rasterizeOp 同款——整数对齐 scratch 按当前镜像 CTM 原样重放录制路径,覆盖率
    *  逐位;发射 SO/ADD quad 由 gco 分档）。空路径=canvas no-op 语义,返回 true 不
    *  发射。gco∉{source-over,lighter}（multiply 等改面语义在透明 scratch 上不成立）
-   *  → false 走降级原链。 */
+   *  → false 走降级原链。
+   *  ★P0-B 判例登记（2026-09-25 雷击风暴定谳）：本通道【每 op 隔离栅格化+
+   *  markDynamic+即发即弃 flush】=每 op 一次 texImage2D 上传,只可承载【低频】
+   *  落笔（每帧个位数形状）。高频路径形状（每帧数十~数千 fill 的矢量体——
+   *  StormLightning bolt 每雷 ~1500 fill 曾打出 2000-3500 次/帧上传风暴≈11ms,
+   *  单独砍半帧率）必须在上游【批化/预烘】后走单 drawImage 动态源（判例:
+   *  proj1457.StormLightning.bakeBolt——整 bolt K=6 切片一张 scratch,~1500 fill
+   *  →1 次上传+1 个 ADD quad）。fillText/strokeText 若未来接入本通道（通用化
+   *  债,同律适用）:逐字形栅格化即重演同型上传风暴,须整段文本一次烘焙。 */
   private rasterizePathOp(op: 'stroke' | 'fill', fillArgs: unknown[]): boolean {
     if (this.gco !== 'source-over' && this.gco !== 'lighter') return false;
     const segs = this.pathOps;
@@ -800,10 +808,11 @@ export class GLShimExecutor {
       return;
     }
     // ★B2b:ctx.filter 非 none（敌怪受击 brightness/水下 sepia 染色族）——quad
-    //  不表达源级滤镜,acc 态走隔离栅格化（滤镜在 scratch 上施加,SO 合成逐位同）;
+    //  不表达源级滤镜,acc 态走隔离栅格化（滤镜在 scratch 上施加,SO 合成逐位同;
+    //  ★浸没透明案:user 空间原参重放,勿再吃一次 CTM——见 rasterizeDrawImage 注）;
     //  非 source-over 滤镜面=不可隔离 → 降级。bridge 态保持 census 回退（B2 现状）。
     if (this.accMode && this.filterV !== 'none') {
-      if (this.gco === 'source-over' && this.rasterizeDrawImage(img, sx, sy, sw, sh, geo)) return;
+      if (this.gco === 'source-over' && this.rasterizeDrawImage(img, rest)) return;
       this.rawDrawImage(img, rest);
       return;
     }
@@ -875,17 +884,35 @@ export class GLShimExecutor {
   }
 
   /** ★B2b acc drawImage 隔离栅格化（ctx.filter 非 none 的源级滤镜族——滤镜在
-   *  scratch 上施加后 SO 合成回原设备矩形=像素恒等;仅 source-over 态可隔离） */
-  private rasterizeDrawImage(img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
-    geo: { dx: number; dy: number; dw: number; dh: number; rot: number; flipX: boolean; flipY: boolean }): boolean {
+   *  scratch 上施加后 SO 合成回原设备矩形=像素恒等;仅 source-over 态可隔离）。
+   *  ★浸没透明案定谳（2026-09-25 用户实报「完全浸水角色消失」;?bglshim=0 正常;
+   *  BJ348b2「glow 可见主层消失」同根翻案）:旧实现把 decode 产出的【设备空间】
+   *  geo 矩形在 scratch 上【再乘一次镜像 CTM】（setTransform(a,b,c,d,e−fx,f−fy)
+   *  后 drawImage 到 geo.dx/dy）= 双变换——世界层 CTM 非单位时内容整体落到
+   *  scratch 外（被裁空）→ 全透明 quad 发射在正确设备矩形 = 精灵整体消失
+   *  （ret=true/fallback=0/replay=0 全绿静默;探针实测 CTM[-1,0,0,1,638,421] 下
+   *  scratch 落点 x=−558）。单位阵下 scratch x=geo.dx−fx 恰好正确 = 既有单测与
+   *  纯 2D 对拍全绿漏网。修复 = rasterizeFillRect/rasterizeOp 同判例:user 空间
+   *  【原参重放】——负 dw/dh 翻转/旋转/斜切全由 2D 语义自洽;设备 bbox 由 dst
+   *  四角 CTM 变换取 min/max（覆盖旋转/镜像;AA 1px 边）。 */
+  private rasterizeDrawImage(img: CanvasImageSource, rest: unknown[]): boolean {
     if (this.clipped || this.gco !== 'source-over' || this.filterV === 'none') return false;
+    const n = rest.length;
+    // dst 矩形（user 空间,与主桥同式解参;负 dw/dh=翻转,由四角 min/max 自然覆盖）
+    let dx: number, dy: number, dw: number, dh: number;
+    if (n === 2) { dx = rest[0] as number; dy = rest[1] as number; dw = (img as { width: number }).width; dh = (img as { height: number }).height; }
+    else if (n === 4) { dx = rest[0] as number; dy = rest[1] as number; dw = rest[2] as number; dh = rest[3] as number; }
+    else if (n === 8) { dx = rest[4] as number; dy = rest[5] as number; dw = rest[6] as number; dh = rest[7] as number; }
+    else return false;
+    if (!Number.isFinite(dx) || !Number.isFinite(dy) || !Number.isFinite(dw) || !Number.isFinite(dh)) return false;
     const { a, b, c, d, e, f } = this.m;
-    const xs = [geo.dx, geo.dx + geo.dw, geo.dx, geo.dx + geo.dw];
-    const ys = [geo.dy, geo.dy, geo.dy + geo.dh, geo.dy + geo.dh];
-    void xs; void ys;
-    // 几何已由 decode 解出（设备空间）——rot/flip 用中心锚变换在 scratch 复现
-    const bx0 = geo.dx - 1, bx1 = geo.dx + geo.dw + 1;
-    const by0 = geo.dy - 1, by1 = geo.dy + geo.dh + 1;
+    // 设备 bbox（dst 四角 CTM 变换——旋转/镜像/负宽高全覆盖）
+    const x0 = a * dx + c * dy + e, x1 = a * (dx + dw) + c * dy + e;
+    const x2 = a * dx + c * (dy + dh) + e, x3 = a * (dx + dw) + c * (dy + dh) + e;
+    const y0 = b * dx + d * dy + f, y1 = b * (dx + dw) + d * dy + f;
+    const y2 = b * dx + d * (dy + dh) + f, y3 = b * (dx + dw) + d * (dy + dh) + f;
+    const bx0 = Math.min(x0, x1, x2, x3) - 1, bx1 = Math.max(x0, x1, x2, x3) + 1;
+    const by0 = Math.min(y0, y1, y2, y3) - 1, by1 = Math.max(y0, y1, y2, y3) + 1;
     const fx = Math.floor(bx0), fy = Math.floor(by0);
     const sx2 = Math.ceil(bx1) - fx, sy2 = Math.ceil(by1) - fy;
     if (sx2 <= 0 || sy2 <= 0 || sx2 > 4096 || sy2 > 4096) return false;
@@ -895,18 +922,13 @@ export class GLShimExecutor {
     if (!sctx) return false;
     sctx.setTransform(1, 0, 0, 1, 0, 0);
     sctx.clearRect(0, 0, sx2, sy2);
+    // ★user 空间原参重放:镜像 CTM 整数设备平移后 drawImage(img,...rest) 原样
+    //  （覆盖率与原位逐位同——rasterizeFillRect/rasterizeOp 同判例）
     sctx.setTransform(a, b, c, d, e - fx, f - fy);
     sctx.globalAlpha = this.ga;
     sctx.imageSmoothingEnabled = this.smooth;
     try { sctx.filter = this.filterV; } catch { return false; }
-    if (geo.rot || geo.flipX || geo.flipY) {
-      sctx.translate(geo.dx + geo.dw / 2, geo.dy + geo.dh / 2);
-      if (geo.rot) sctx.rotate(geo.rot);
-      if (geo.flipX || geo.flipY) sctx.scale(geo.flipX ? -1 : 1, geo.flipY ? -1 : 1);
-      sctx.drawImage(img, sx, sy, sw, sh, -geo.dw / 2, -geo.dh / 2, geo.dw, geo.dh);
-    } else {
-      sctx.drawImage(img, sx, sy, sw, sh, geo.dx, geo.dy, geo.dw, geo.dh);
-    }
+    Reflect.apply(sctx.drawImage, sctx, [img, ...rest]);
     this.markDynamic(sc);
     this.push(0, null, false, sc, 0, 0, sx2, sy2, fx, fy, sx2, sy2, 0, 1,
       1, 1, 1, false, false, false, true, null);

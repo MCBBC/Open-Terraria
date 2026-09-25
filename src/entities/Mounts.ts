@@ -116,6 +116,18 @@ const MOUNT_FALLBACK_COLOR: Record<number, string> = {
 };
 export const mountFallbackColor = (id: number): string => MOUNT_FALLBACK_COLOR[id] ?? '#8A6A4A';
 
+/** ★BJ357 变身坐骑玩家盒覆写（MountData.delegations.PlayerSize → DelegateMethods.Mount.
+ *  *PlayerSize,DelegateMethods.cs:166-189;挂点 Mount.cs:2371 Rat/:2426 Bat/:2489 Pixie）：
+ *  SetMount :6309-6328 上坐即把 mountedPlayer.width/height 改写为该 size（底锚,x 重心
+ *  对齐,无空间检查——盒只会变小恒可容）+ Player.ResizeHitbox :29447-29456 持保。
+ *  1457 仅此三坐骑有委派（grep 全量）;其余坐骑零改盒。vanilla-mounts.json 未含该字段
+ *  （提取器漏 DelegateMethods 委派面）→ 硬表登记,重产 json 前须反哺提取器。 */
+export const MOUNT_PLAYER_SIZE: Record<number, [number, number]> = {
+  55: [14, 14],   // RatPlayerSize（DelegateMethods.cs:186-189）
+  56: [20, 18],   // BatPlayerSize（DelegateMethods.cs:166-169）
+  61: [8, 14],    // PixiePlayerSize（DelegateMethods.cs:171-175）——附魔精灵尘 5662
+};
+
 /** 坐骑 buff 授予的水下自由语义（Player.cs UpdateBuffs :9592-9608：
  *  131 海龟 / 168 猪鲨崽 → ignoreWater+accFlipper；265 熔岩鲨 → canFloatInWater+accFlipper） */
 const BUFF_SWIM_FREE = new Set([131, 168, 265, 279, 305]); // +305 熔岩鲨（Player.cs:9602-9608：ignoreWater+accFlipper+lavaImmune+lavaVision+fireWalk）
@@ -318,6 +330,17 @@ export interface MountEffectsCtx {
    *  = −direction（:4727 向量 (−direction, −gravDir)）；实心地面门（:4720）与
    *  KillTile_MakeTileDust 发粒面在消费侧（mapColor 粒子制,同 breakTile 登记口径） */
   wheelDust?(x: number, y: number, kickDir: number): void;
+  /** 每 tick 视效钟（Main.timeForVisualEffects 的本仓对应,拖尾尘偶数拍门用） */
+  miscCounter?: number;
+  /** ★BJ357 仙灵武库 61 拖尾辉尘（Mount.cs UpdateEffects case 61 :5203-5224）——
+   *  掷门/色算/速度式在 Mounts.updateMountEffects,此处承接落池：
+   *  NewDustDirect(Center,0,0,278,0,0,α200,color,0.65) 后 position/velocity/noGravity/
+   *  noLight 字段覆写。入参 x/y = 终位、mul = 出尘抖动速度乘数（flag?0.4:0.04×|v|）、
+   *  pvx/pvy = 玩家速度（velocity += v×0.3） */
+  pixieTrailDust?(args: {
+    x: number; y: number; mul: number; pvx: number; pvy: number;
+    color: { r: number; g: number; b: number; a: number };
+  }): void;
   fishron: FishronView;
 }
 
@@ -1034,6 +1057,83 @@ export function scutlixFindTarget(
   return found ? best : null;
 }
 
+// ============================================================================
+// ★BJ357 变身坐骑回盒（Mount.cs Dismount :6240-6257 / CanDismountWithResult :6670-6681）
+// ============================================================================
+
+/** 盒-实心重叠探针（Collision.SolidCollision 近似）：active && isSolid && 非平台、
+ *  halfBrick 顶面 +8；坡面按满格近似（TryChangingSizeFromBottomCenter 的
+ *  TileCollisionInStepsOf16 :2462-2488 含 slope 精算与 1px 内缩探针——平台/半砖
+ *  已对齐,坡面与亚像素残量登记近似）。 */
+function mountBoxSolid(st: SolidTileView, px: number, py: number, w: number, h: number): boolean {
+  const x0 = Math.floor(px / 16), x1 = Math.floor((px + w - 1) / 16);
+  const y0 = Math.floor(py / 16), y1 = Math.floor((py + h - 1) / 16);
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (!st.inBounds(tx, ty) || !st.isSolid(tx, ty)) continue;
+      const k = st.idx(tx, ty);
+      if (TILE_DEFS[st.type[k]]?.platform) continue;    // tileSolidTop（平台）不算实心
+      let tyPx = ty * 16, thPx = 16;
+      if (st.half?.[k]) { tyPx += 8; thPx -= 8; }       // halfBrick 下半
+      if (px + w > tx * 16 && px < tx * 16 + 16 && py + h > tyPx && py < tyPx + thPx) return true;
+    }
+  }
+  return false;
+}
+
+/** Collision.TryChangingSizeFromBottomCenter（Collision.cs:2495-2543）1:1：底中心
+ *  锚定把盒改为 (tw×th)——先纵向（上探 num3 slack 优先、余量向下伸 num5）后横向
+ *  （num10 左档先对半、余量左补,再右补 num9,各吃自身 slack）;任一轴总 slack 不足
+ *  → null。缩支（目标≤现盒）零探针：Y 底锚、X 居中（Offset(0,-num)/Offset(num6/2)）。
+ *  步进探针原版 16px 步长+碰撞残量，此处逐像素精化（平台不算实心,同 mountBoxSolid）。
+ *  消费位 = MountInstance.canDismount / dismount 回盒。 */
+export function tryChangingSizeFromBottomCenter(
+  st: SolidTileView, x: number, y: number, w: number, h: number,
+  tw: number, th: number,
+): { x: number; y: number; w: number; h: number } | null {
+  const slack = (bx: number, by: number, bw: number, bh: number,
+    dx: number, dy: number, dist: number): number => {
+    let moved = 0;
+    while (moved < dist) {
+      if (mountBoxSolid(st, bx + dx * (moved + 1), by + dy * (moved + 1), bw, bh)) break;
+      moved++;
+    }
+    return moved;
+  };
+  const out = { x, y, w, h };
+  const num = th - h;
+  if (num > 0) {
+    const num2 = slack(out.x, out.y, out.w, out.h, 0, 1, num);    // +Y 下探（:2501）
+    const num3 = slack(out.x, out.y, out.w, out.h, 0, -1, num);   // −Y 上探（:2502）
+    if (num3 + num2 < num) return null;                            // :2504
+    const num4 = Math.min(num, num3);                              // :2507（上伸优先）
+    let num5 = 0;
+    num5 += Math.min(num - num4 - num5, num2 - num5);              // :2510-2511 余量下伸
+    out.y -= num4;                                                 // :2512 Offset(0,-num4)
+    out.h += num4 + num5;                                          // :2513
+  } else {
+    out.y -= num;                                                  // :2516 底锚
+    out.h = th;
+  }
+  const num6 = tw - out.w;
+  if (num6 > 0) {
+    const num7 = slack(out.x, out.y, out.w, out.h, 1, 0, num6);   // +X 右探（:2524）
+    const num8 = slack(out.x, out.y, out.w, out.h, -1, 0, num6);  // −X 左探（:2525）
+    if (num8 + num7 < num6) return null;                           // :2526
+    let num9 = Math.min(Math.trunc(num6 / 2), Math.min(num8, num7));  // :2528 左右对半
+    let num10 = num9;
+    num10 += Math.min(num6 - num10 - num9, num8 - num10);          // :2529-2530 余量左补
+    const val2 = num6 - num10 - num9;
+    num9 += Math.min(val2, num7 - num9);                           // :2531-2532 剩余右补
+    out.x -= num10;                                                // :2533 Offset(-num10)
+    out.w += num10 + num9;                                         // :2534
+  } else {
+    out.x += Math.trunc(num6 / 2);                                 // :2537 居中
+    out.w = tw;
+  }
+  return out;
+}
+
 /**
  * 单坐骑实例状态机（Mount.cs 实例字段 + 行为 1:1）。
  * 玩家持有恒一个实例（player.mount），active 即骑乘中。
@@ -1565,6 +1665,32 @@ export class MountInstance {
         ctx.wheelDust(p.x + p.w / 2 + off, p.y + p.h, -p.facing);
       }
     }
+    if (this.type === 61 && ctx.pixieTrailDust) {
+      // ★BJ357 仙灵武库拖尾辉尘（Mount.cs UpdateEffects case 61 :5203-5224 1:1）：
+      // 偶数视效拍（:5205 timeForVisualEffects%2==0）且（1/15 旗 :5204 或
+      // Next(6)+1<|v| :5206）才发；色 = hsl(0.91,1,0.7) 基色二档 lerpToWhite 0.45/0
+      // 后 Color.Lerp 随机插值（:5207-5209,通名支=dev 名分色表不建模,同 mountLights
+      // 登记）;位 = Center+(0,-2)+v×0.7+随机圆×r×2（:5209-5221）;速度 = 出尘抖动
+      // ×(flag?0.4:0.04|v|)+v×0.3（:5213-5219）;尘 278 α200 scale0.65 noGravity noLight
+      if (((ctx.miscCounter ?? 0) % 2 + 2) % 2 !== 0) return;
+      const flag = Math.floor(Math.random() * 15) === 0;            // :5204 Next(15)==0
+      const spd = Math.hypot(p.vx, p.vy);
+      if (!flag && Math.floor(Math.random() * 6) + 1 >= spd) return; // :5206
+      const base = fairyQueenHslToRgb((0.41 + 0.5) % 1);            // hueRaw 0.41（:5207）
+      const lum07 = base.map((c) => c + (255 - c) * 0.4);           // luminance 0.7 = lerp(base,white,0.4)
+      const c1 = lum07.map((c) => c + (255 - c) * 0.45);            // lerpToWhite 0.45（:5207）
+      const t = Math.random();                                      // :5209 Lerp 随机插值
+      const mix = (i: number): number => Math.round(c1[i] + (lum07[i] - c1[i]) * t);
+      const ang = Math.random() * Math.PI * 2;                      // :5220 随机圆
+      const rad = Math.random() * 2;                                // :5221 ×r×2
+      ctx.pixieTrailDust({
+        x: p.x + p.w / 2 + p.vx * 0.7 + Math.cos(ang) * rad,        // :5209/:5221/:5222
+        y: p.y + p.h / 2 - 2 + p.vy * 0.7 + Math.sin(ang) * rad,    // :5210 Center+(0,-2)
+        mul: flag ? 0.4 : 0.04 * spd,                               // :5214/:5217-5218
+        pvx: p.vx, pvy: p.vy,                                       // :5219 += v×0.3
+        color: { r: mix(0), g: mix(1), b: mix(2), a: 255 },
+      });
+    }
   }
 
   /** 非悬停飞行坐骑的能量消费（Flight :2937：flyTime 递减，耗尽返回 false） */
@@ -2046,6 +2172,10 @@ export class MountInstance {
   }): boolean {
     if (this.type === m || m < 0 || m >= MOUNT_COUNT) return false;
     if (m === 5 && p.inWater) return false;              // 蜜蜂座骑浸水不可上（:6190）
+    // ★BJ357 蝙蝠诅咒 56 湿身拒上（CanMount :6662 `m == 56 && (wet || dripping ||
+    //  WetCollision(...))`——本仓视图仅 inWater 一量,dripping/WetCollision 探针未建模,
+    //  以 inWater 近似（登记）;变身骑族同批的 55/61 无此门）
+    if (m === 56 && p.inWater) return false;
     if (this.active) {
       this.reset();
     }
@@ -2057,6 +2187,20 @@ export class MountInstance {
     // 眼炮族冷却下限（SetMount :6224-6231：Scutlix 上坐即预热 20 / 圣诞坦克 40）
     if (m === 9 && this.abilityCooldown < 20) this.abilityCooldown = 20;
     if (m === 46 && this.abilityCooldown < 40) this.abilityCooldown = 40;
+    // ★BJ357 变身坐骑缩盒（SetMount :6309-6328 1:1）：PlayerSize 委派坐骑上坐即改写
+    //  玩家碰撞盒——先记 Bottom，后按 size 重置 w/h，再底锚回放（x 重心对齐）。
+    //  原版无空间检查（盒只会变小恒可容）;shadowPos 重锚（:6313-6315/:6321-6323）
+    //  本仓视图无该字段，拖影由 Player.fixedUpdate 采样自然跟随（登记）。
+    //  位次=出生尘（:6363 DoSpawnDust 在缩盒后——尘以新盒中心为锚）之前。
+    //  非委派坐骑（表外）零改盒（原版委派 null 同相）。
+    const psz = MOUNT_PLAYER_SIZE[m];
+    if (psz) {
+      const bx = p.x + p.w / 2, by = p.y + p.h;
+      p.w = psz[0];
+      p.h = psz[1];
+      p.x = bx - p.w / 2;
+      p.y = by - p.h;
+    }
     // 出生尘（DoSpawnDust :6363：spawnDust 族；本仓粒子为程序化圆，数量 10）
     if (game?.spawnParticles && d?.spawnDust) {
       game.spawnParticles(p.x + p.w / 2, p.y + p.h / 2, '#C8C8C8', 10, 1.5);
@@ -2069,17 +2213,18 @@ export class MountInstance {
     return true;
   }
 
-  /** 下坐空间检查（Mount.cs CanDismountWithResult :6600：42 高玩家盒能放下才许下） */
+  /** 下坐空间检查（★BJ357 重锚 Mount.cs CanDismountWithResult :6670-6681：
+   *  `!TryChangingSizeFromBottomCenter(Hitbox,20,42)` → FailedNoSpace——与当前骑乘盒
+   *  大小无关恒按 20×42 目标盒判。同尺寸盒（非变身坐骑 20×42）缩支零探针=恒可下
+   *  （原版同相,旧「头顶 42px 列扫」近似编码了更严语义,随本刀退役）;
+   *  变身盒（8×14/14×14/20×18）回长 20×42 才走探针。DontDismountWhenCCed 支本仓
+   *  CCed 未建模（登记） */
   canDismount(p: MountedPlayerView): boolean {
     const st = p.store;
     if (!st) return true;
-    const h = 42;
-    for (let tx = Math.floor(p.x / 16); tx <= Math.floor((p.x + p.w - 1) / 16); tx++) {
-      for (let ty = Math.floor((p.y + p.h - h) / 16); ty <= Math.floor((p.y + p.h - 1) / 16); ty++) {
-        if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)) return false;
-      }
-    }
-    return true;
+    return tryChangingSizeFromBottomCenter(
+      st as unknown as SolidTileView, p.x, p.y, p.w, p.h, 20, 42,
+    ) !== null;
   }
 
   tryDismount(p: MountedPlayerView): boolean {
@@ -2096,6 +2241,26 @@ export class MountInstance {
       game.spawnParticles((p?.x ?? 0) + (p?.w ?? 0) / 2, (p?.y ?? 0) + (p?.h ?? 0) / 2, '#C8C8C8', 10, 1.5);
     }
     this.reset();
+    // ★BJ357 回盒（Dismount :6240-6257 1:1）：TryChangingSizeFromBottomCenter(20×42)
+    //  成功 → 贴 fit 位（TopLeft 平移,盒内 shadowPos 补偿原版 :6245-6253 本仓无该
+    //  字段,拖影采样自然跟随,登记）;失败 → 底锚强改（原版 :6254-6258 else 支,可嵌墙
+    //  ——上闸 canDismount 已按同式判,此处为强制下坐链兜底）。原版缩放前盒=骑乘盒
+    //  （非变身骑无位差,tryChanging 缩支零探针恒成功,位不变=同相）。
+    if (p && (p.w !== 20 || p.h !== 42)) {
+      const st = p.store;
+      const fit = st
+        ? tryChangingSizeFromBottomCenter(st as unknown as SolidTileView, p.x, p.y, p.w, p.h, 20, 42)
+        : null;
+      if (fit) {
+        p.x = fit.x;
+        p.y = fit.y;
+      } else {
+        p.y += p.h;
+      }
+      p.w = 20;
+      p.h = 42;
+      if (!fit) p.y -= p.h;
+    }
   }
 
   reset(): void {

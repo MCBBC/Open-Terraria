@@ -185,14 +185,27 @@ export function installGpuLogger(intervalSec = 2): void {
 // 本锁 = 90s 窗口内 ≥3 次 contextlost 即判定系统性饥饿:工厂新建入口直接让路,
 // 渲染走各消费方既有 2D 回退链,直到滚动窗口自然衰减。VUI 光标等 2D 自愈不受限。
 const lossTimes: number[] = [];
-/** 记一次真实 GL 上下文丢失(isContextLost==true 或 webglcontextlost 事件;分配失败不计) */
+/** 记一次真实 GL 上下文丢失(isContextLost==true 或 webglcontextlost 事件;分配失败不计)。
+ *  ★P0-A:新丢失=半开试探 streak 作废(「连续成功才闭合」被打断,窗照常滚动)。 */
 export function noteContextLost(tag: string): void {
   lossTimes.push(performance.now());
+  probeOkStreak = 0;
   if (lossTimes.length > 64) lossTimes.shift();
 }
 let lastStarveLogAt = -Infinity;
 let _starvedEver = false;   /** 会话级闩:饥饿发生过一次即真(贫困模式依据) */
 export function starvedEver(): boolean { return _starvedEver; }
+/** ★P0-A 半开试探（2026-09-25 塌方定谳续刀）：饥饿锁原语义=90s 滚动窗内 ≥3 次
+ *  contextlost 即扣押全部 GL 工厂,窗内每次新丢失都续期——系统性饥饿(三开/GPU
+ *  进程挤压)缓解后仍要等满 90s 无新丢失才解锁,实测拖出 17 分钟全 2D 塌方
+ *  （ acquireSwPipe 恒 null 面）。熔断器 half-open 语义修复:饥饿期内每
+ *  STARVE_PROBE_MS 放行一拍（starvedLock() 返 false 让工厂试建,失败时 init
+ *  成本极低）,不被滚动窗无限续期扣押;【连续】≥2 拍试建成功才闭合（清窗）,
+ *  单拍成功只计 streak——防单次侥幸抖动回切再炸。 */
+const STARVE_PROBE_MS = 5000;
+let lastProbeAt = -Infinity;
+let probeOkStreak = 0;
+let _probePass = false;     /** 本拍是否处于半开放行（诊断面） */
 type StarveCb = (active: boolean) => void;
 const starveCbs: StarveCb[] = [];
 let lastActive = false;
@@ -205,21 +218,61 @@ export function offStarveTransition(cb: StarveCb): void {
   const i = starveCbs.indexOf(cb);
   if (i >= 0) starveCbs.splice(i, 1);
 }
-/** ≥3 次/90s = 饥饿;进入与解除沿各告警一条 */
+/** 饥饿转场沿结算（starvedLock/闭合清窗共用;active 变更才走 cb, cb 链不抖） */
+function settleStarve(active: boolean): void {
+  if (active === lastActive) return;
+  lastActive = active;
+  if (active) _starvedEver = true;
+  for (const cb of starveCbs) { try { cb(active); } catch { /* 观察者异常静默 */ } }
+}
+/** ≥3 次/90s = 饥饿;进入与解除沿各告警一条。
+ *  ★P0-A 半开试探:饥饿窗内每 STARVE_PROBE_MS 放行一拍(返 false,工厂可试建)
+ *  ——windowActive 转场沿照常结算(首次进饥饿仍告警/降档),试探拍不翻转沿。 */
 export function starvedLock(): boolean {
   const now = performance.now();
   while (lossTimes.length && now - lossTimes[0] > 90_000) lossTimes.shift();
   const active = lossTimes.length >= 3;
-  if (active !== lastActive) {
-    lastActive = active;
-    if (active) _starvedEver = true;
-    for (const cb of starveCbs) { try { cb(active); } catch { /* 观察者异常静默 */ } }
+  _probePass = false;
+  if (active && now - lastProbeAt >= STARVE_PROBE_MS) {
+    lastProbeAt = now;
+    _probePass = true;
+    settleStarve(true);          // 转场沿照常结算(饥饿态不因试探拍隐瞒)
+    return false;                // 半开放行一拍
   }
+  settleStarve(active);
   if (active && now - lastStarveLogAt > 30_000) {
     lastStarveLogAt = now;
-    console.warn(`[gpulog] GPU 饥饿锁生效(90s 内丢失 ${lossTimes.length} 次)——GL 层重建暂停,走 2D 回退`);
+    console.warn(`[gpulog] GPU 饥饿锁生效(90s 内丢失 ${lossTimes.length} 次;每 ${Math.round(STARVE_PROBE_MS / 1000)}s 半开试探一次)——GL 层重建暂停,走 2D 回退`);
   }
   return active;
+}
+/** ★P0-A 半开试探成功登记（Renderer.acquireSwPipe init 成功时调）:连续 ≥2 拍
+ *  成功即闭合(清 90s 窗=解除饥饿锁,立即结算解除沿);非饥饿期调用只清 streak。 */
+export function noteStarveProbeOk(): void {
+  if (lossTimes.length < 3) { probeOkStreak = 0; return; }
+  if (++probeOkStreak >= 2) {
+    lossTimes.length = 0;
+    probeOkStreak = 0;
+    settleStarve(false);
+  }
+}
+/** ★P0-A 半开试探失败登记（init 失败/构造异常时调）——streak 归零,窗自然衰减 */
+export function noteStarveProbeFail(): void { probeOkStreak = 0; }
+/** ★P0-A F5 快照面:饥饿锁状态一次取全（DebugReport.swpipe 块消费） */
+export function starveSnapshot(): {
+  active: boolean; ever: boolean; losses: number; windowRemainMs: number;
+  probeOkStreak: number; nextProbeInMs: number;
+} {
+  const now = performance.now();
+  while (lossTimes.length && now - lossTimes[0] > 90_000) lossTimes.shift();
+  return {
+    active: lossTimes.length >= 3,
+    ever: _starvedEver,
+    losses: lossTimes.length,
+    windowRemainMs: lossTimes.length ? Math.max(0, 90_000 - (now - lossTimes[0])) : 0,
+    probeOkStreak,
+    nextProbeInMs: lossTimes.length >= 3 ? Math.max(0, STARVE_PROBE_MS - (now - lastProbeAt)) : 0,
+  };
 }
 let tag = '';
 export function setStarveTag(t: string): void { tag = t; }

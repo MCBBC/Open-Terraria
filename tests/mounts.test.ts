@@ -341,20 +341,20 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
     expect(scut.abilityCharge).toBe(40);          // 钳在 max
   });
 
-  it('canDismount：头顶 42px 被实心占据时拒绝下坐（:6600 空间检查）', () => {
+  it('canDismount：同尺寸盒下坐恒可（★BJ357 重锚 CanDismountWithResult :6670-6681——TryChangingSizeFromBottomCenter(20×42) 对 20×42 盒缩支零探针恒真；旧「头顶填实心拒绝」系旧列扫近似的过严语义,随缩盒刀退役;变身盒 8×14 回长被拒的判别面移至 bj357-pixie-mount-transform.test.ts）', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     tick(p, w, 8);                                // 落地
     p.mount.setMount(1, p);
     expect(p.mount.canDismount(p)).toBe(true);
-    // 正上方填实心 → 放不下 42 高玩家盒
+    // 正上方填实心：同尺寸盒零探针仍可下（原版同相——骑乘盒本已占据该空间）
     const tx = Math.floor(p.x / TILE);
     const ty = Math.floor((p.y + p.h - 42) / TILE);
     w.store.setTileSilent(tx, ty, 1);
     w.store.setTileSilent(tx, ty - 1, 1);
-    expect(p.mount.canDismount(p)).toBe(false);
-    expect(p.mount.tryDismount(p)).toBe(false);
-    expect(p.ridingMount).toBe(true);             // 下坐失败仍骑乘
+    expect(p.mount.canDismount(p)).toBe(true);
+    expect(p.mount.tryDismount(p)).toBe(true);
+    expect(p.ridingMount).toBe(false);
   });
 
   it('upkeep：控场（冰冻）强制下坐（Player.cs:26556 frozen → TryDismount）', () => {

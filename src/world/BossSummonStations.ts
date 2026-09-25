@@ -42,3 +42,18 @@ export function eterniaStandBottomRow(frameY: number): number {
   if (frameY === 36) return 1;
   return 0;
 }
+
+/** ★BJ356 Face5：水晶召唤锚四元组（Player.cs:32689 + DD2Event.cs:584-597 1:1）：
+ *  (x,y) = 座【底行】格（num28=所点行+eterniaStandBottomRow）;frameX/Y = **底行格
+ *  自身**的帧（vanilla Direct 内 GetTileSafely(x,y) 读帧回推——底行 frameY≡54→
+ *  -3 格=顶行 → 水晶 Bottom = 顶行+64 = 地表）。
+ *  ★曾传点击格帧配底行坐标=混合锚：点上部格（frameY 0/18/36）时水晶 Bottom 埋
+ *  1-3 格——薄平台（桥式竞技场）下水晶悬空 → CheckArenaScore 扫场起点落空 →
+ *  SendWalker i=0 坑探 6 格无地即断 → 双端 ±1 → 双传送门贴脸水晶（用户实报）。 */
+export function eterniaStandSummonAnchor(
+  st: TileStore, tx: number, ty: number,
+): { x: number; y: number; frameX: number; frameY: number } {
+  const by = ty + eterniaStandBottomRow(st.frameY[st.idx(tx, ty)]);
+  const b = st.idx(tx, by);
+  return { x: tx, y: by, frameX: st.frameX[b], frameY: st.frameY[b] };
+}

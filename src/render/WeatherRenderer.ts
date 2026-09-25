@@ -286,6 +286,9 @@ export class WeatherRenderer {
    *  ★P0（2026-09-25）：克隆载体走复用池（takeClone/giveClone,见池注）——
    *  语义不变量:池条目 clearRect 后 source-over 重画=全新画布逐位同。 */
   private bakeMemoized(key: string | number, gen: () => HTMLCanvasElement | null): HTMLCanvasElement | null {
+    // ★债登记（2026-09-25 trace:雨强爬坡期含子烘 1361ms/10.9s=miss 风暴）——
+    //  键含连续强度/密度标量时爬坡期逐帧 miss;候补刀=①强度键量化（0.05 步进）
+    //  ②相邻档预烘（miss 时顺带烘 ±1 档）。勿在雨停路径顺手动键语义（对拍面）。
     const hit = this.bakeMemo.get(key);
     if (hit !== undefined) return hit;
     if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) {

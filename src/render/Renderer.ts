@@ -1,5 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
-import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, offStarveTransition, onStarveTransition, starvedEver, starvedLock } from '../render/GLStats';
+import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, noteStarveProbeFail, noteStarveProbeOk, offStarveTransition, onStarveTransition, starvedEver, starvedLock, starveSnapshot } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { findBannerAnchorY, houseBannerVisible } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
@@ -758,7 +758,7 @@ import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { ICE_SLIP_IDS, FROZEN_SLIME_ID } from '../entities/Player';
-import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA } from '../entities/Mounts';
+import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA, fairyQueenHslToRgb } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
@@ -3099,6 +3099,12 @@ export class Renderer {
   }
   /** 最近一次 recon 失败原因（lrecon-fail 时由 compose.lastFail 填入） */
   composeLastFail = '';
+  /** ★P0-A 共管管线降级帧累计（swpipe acquire 任一失败支的【去重帧】数——
+   *  塌方定谳面:持续增长=仍在降级;配合 composePathStats['lrecon-skip:swpipe-*']
+   *  分布一步归因） */
+  composeSkipFrames = 0;
+  /** ★P0-A 连续降级帧 streak（acquire 成功即清零——恢复探测面） */
+  composeSkipStreak = 0;
   /** 水波动诊断（F5 报告）：全屏扭曲管线状态三件套 */
   waterWarpMode(): 'auto' | '2d' | 'off' { return this.waterWarp.mode; }
   waterWarpActive(): boolean { return this.waterWarp.active(); }
@@ -3216,16 +3222,17 @@ export class Renderer {
   acquireCloudPipe(): GLSpriteLayer | null {
     const cur = this.cloudPipeLayer;
     if (cur) {
-      if (!cur.unavailable) return cur;
+      if (!cur.unavailable) { this.cloudPipeRetryLadder = 0; return cur; }
       if (performance.now() - cur.diedAt < 5000) { this.dropCloudPipe(); return null; }
       this.dropCloudPipe();
     }
     if (performance.now() < this.cloudPipeRetryAt) return null;
     if (starvedLock()) return null;
     const pipe = this.acquireSwPipe();
-    if (!pipe) { this.cloudPipeRetryAt = performance.now() + 30_000; return null; }
+    // ★P0-A:30s 定值闩→渐进阶（2-3.5-5s;swpipe 侧已自记指纹,层闩只管本层重试节奏）
+    if (!pipe) { this.armRetryLatch('cloud'); return null; }
     const inst = new GLSpriteLayer(pipe, false);
-    if (inst.unavailable) { inst.dispose(); this.cloudPipeRetryAt = performance.now() + 30_000; return null; }
+    if (inst.unavailable) { inst.dispose(); this.armRetryLatch('cloud'); return null; }
     this.cloudPipeLayer = inst;
     return inst;
   }
@@ -3257,16 +3264,17 @@ export class Renderer {
   private acquireWorldGl(): GLSpriteLayer | null {
     const cur = this.worldPipeLayer;
     if (cur) {
-      if (!cur.unavailable) return cur;
+      if (!cur.unavailable) { this.worldPipeRetryLadder = 0; return cur; }
       if (performance.now() - cur.diedAt < 5000) { this.dropWorldPipe(); return null; }
       this.dropWorldPipe();
     }
     if (performance.now() < this.worldPipeRetryAt) return null;
     if (starvedLock()) return null;
     const pipe = this.acquireSwPipe();
-    if (!pipe) { this.worldPipeRetryAt = performance.now() + 30_000; return null; }
+    // ★P0-A:30s 定值闩→渐进阶（同 acquireCloudPipe 注）
+    if (!pipe) { this.armRetryLatch('world'); return null; }
     const inst = new GLSpriteLayer(pipe, false);
-    if (inst.unavailable) { inst.dispose(); this.worldPipeRetryAt = performance.now() + 30_000; return null; }
+    if (inst.unavailable) { inst.dispose(); this.armRetryLatch('world'); return null; }
     this.worldPipeLayer = inst;
     return inst;
   }
@@ -3381,24 +3389,79 @@ export class Renderer {
   private swPipe: GLPipeline | null = null;
   private swPipeRetryAt = 0;
   private static readonly SWPIPE_STAT = 'swpipe';
-  /** 共管管线获取:活实例直取;死亡 5s 退避;初始化失败 30s 闩;饥饿锁同门。 */
+  /** ★P0-A 渐进退避阶（2→3.5→5s 封顶;各 latch 成功归零）——原 30s 定值闩在
+   *  失败后无谓扣押（init 失败时构造成本极低）,与 90s 饥饿窗叠加曾把塌方自愈
+   *  拖到 17 分钟（用户会话 26484 帧@25fps）。 */
+  private static readonly RETRY_LADDER_MS = [2_000, 3_500, 5_000] as const;
+  private swPipeRetryLadder = 0;
+  private cloudPipeRetryLadder = 0;
+  private worldPipeRetryLadder = 0;
+  /** ★P0-A 归因面:最近一次 acquire 失败因（'backoff'=死亡退避窗/渐进闩扣押 |
+   *  'init-fail'=init 实败帧 | 'starvelock'=饥饿锁;''=健康）——skip 指纹按此落账 */
+  private swPipeFailWhy = '';
+  /** ★P0-A 最近一次 acquire 成功时刻（降级 episode 判定/诊断面） */
+  private swPipeLastOkAt = 0;
+  /** ★P0-A 诊断帧戳（同帧多消费方 acquire 失败只记一次指纹/只计一帧 skip;
+   *  render() 头推进——见 _diagFrame） */
+  private _diagFrame = 0;
+  private _swPipeMarkFrame = -1;
+  /** ★P0-A 降级指纹落账（帧去重）:失败因写归因面+composePath 记
+   *  'lrecon-skip:swpipe-*'（此前置 unavailable 全程零日志零指纹=17 分钟盲区
+   *  主犯）+composeSkipFrames 逐降级帧累计（任一消费方失败帧计一次）。 */
+  private markSwPipeSkip(why: 'backoff' | 'init-fail' | 'starvelock'): void {
+    this.swPipeFailWhy = why;
+    if (this._diagFrame !== this._swPipeMarkFrame) {
+      this._swPipeMarkFrame = this._diagFrame;
+      this._markPath('lrecon-skip:swpipe-' + why);
+      this.composeSkipFrames++;
+      this.composeSkipStreak++;
+    }
+  }
+  /** ★P0-A 渐进退避闩武装（2→3.5→5s 封顶;成功归零）+半开试探失败登记 */
+  private armRetryLatch(kind: 'swpipe' | 'cloud' | 'world'): void {
+    const idx = kind === 'swpipe' ? this.swPipeRetryLadder
+      : kind === 'cloud' ? this.cloudPipeRetryLadder : this.worldPipeRetryLadder;
+    const ms = Renderer.RETRY_LADDER_MS[Math.min(idx, Renderer.RETRY_LADDER_MS.length - 1)];
+    const at = performance.now() + ms;
+    if (kind === 'swpipe') { this.swPipeRetryAt = at; this.swPipeRetryLadder++; }
+    else if (kind === 'cloud') { this.cloudPipeRetryAt = at; this.cloudPipeRetryLadder++; }
+    else { this.worldPipeRetryAt = at; this.worldPipeRetryLadder++; }
+    noteStarveProbeFail();
+  }
+  /** 共管管线获取:活实例直取;死亡 5s 退避;初始化失败渐进闩（2-5s,P0-A）;饥饿锁同门。
+   *  ★P0-A:各失败支写指纹（markSwPipeSkip）;成功支半开试探登记+episode 再武装。 */
   private acquireSwPipe(): GLPipeline | null {
     const cur = this.swPipe;
     if (cur) {
-      if (!cur.unavailable) return cur;
-      if (performance.now() - cur.diedAt < 5000) return null;   // 退避窗（哨兵同款）
+      if (!cur.unavailable) {
+        const now = performance.now();
+        // 健康 10s（SWPIPE_TOAST_REARM_MS）=静默重置降级 episode（恢复不 toast;
+        // 下次塌方首帧可再提示）
+        if (this._swPipeDegradeToasted && now - this._swPipeDegradeToastAt > Renderer.SWPIPE_TOAST_REARM_MS) {
+          this._swPipeDegradeToasted = false;
+        }
+        this.swPipeLastOkAt = now;
+        this.swPipeFailWhy = '';
+        this.composeSkipStreak = 0;
+        return cur;
+      }
+      if (performance.now() - cur.diedAt < 5000) { this.markSwPipeSkip('backoff'); return null; }   // 退避窗（哨兵同款）
       this.reviveSwPipe();
       return this.swPipe && !this.swPipe.unavailable ? this.swPipe : null;
     }
-    if (performance.now() < this.swPipeRetryAt) return null;
-    if (starvedLock()) return null;
+    if (performance.now() < this.swPipeRetryAt) { this.markSwPipeSkip('backoff'); return null; }
+    if (starvedLock()) { this.markSwPipeSkip('starvelock'); return null; }
     try {
       const inst = new GLPipeline(Renderer.SWPIPE_STAT);
-      if (inst.unavailable) { inst.dispose(); this.swPipeRetryAt = performance.now() + 30_000; return null; }
+      if (inst.unavailable) { inst.dispose(); this.armRetryLatch('swpipe'); this.markSwPipeSkip('init-fail'); return null; }
       this.swPipe = inst;
+      this.swPipeRetryLadder = 0;
+      this.swPipeLastOkAt = performance.now();
+      noteStarveProbeOk();   // ★P0-A 半开试探成功（连续 ≥2 拍成功即闭合饥饿锁）
       return inst;
     } catch {
-      this.swPipeRetryAt = performance.now() + 30_000;
+      this.armRetryLatch('swpipe');
+      this.markSwPipeSkip('init-fail');
       return null;
     }
   }
@@ -3410,13 +3473,22 @@ export class Renderer {
    *  同一死上下文,recreate 半残态在多消费方面被放大,整换最稳 */
   private reviveSwPipe(): boolean {
     this.dropSwPipe();
-    if (performance.now() < this.swPipeRetryAt || starvedLock()) return false;
+    if (performance.now() < this.swPipeRetryAt) { this.markSwPipeSkip('backoff'); return false; }
+    if (starvedLock()) { this.markSwPipeSkip('starvelock'); return false; }
     try {
       const inst = new GLPipeline(Renderer.SWPIPE_STAT);
-      if (!inst.unavailable) { this.swPipe = inst; return true; }
+      if (!inst.unavailable) {
+        this.swPipe = inst;
+        this.swPipeRetryLadder = 0;
+        this.swPipeLastOkAt = performance.now();
+        this.composeSkipStreak = 0;
+        noteStarveProbeOk();
+        return true;
+      }
       inst.dispose();
     } catch { /* 构造异常按失败计 */ }
-    this.swPipeRetryAt = performance.now() + 30_000;
+    this.armRetryLatch('swpipe');
+    this.markSwPipeSkip('init-fail');
     return false;
   }
   /** 共管管线整体释放（CPU 切换/熔断硬释放/销毁链/revive 前置）:层+worldCompose
@@ -3438,7 +3510,46 @@ export class Renderer {
   private newWorldCompose(): GLWorldCompose | null {
     if (!Renderer.cloudPipe) return new GLWorldCompose('worldCompose', null);
     const pipe = this.acquireSwPipe();
-    return pipe ? new GLWorldCompose('worldCompose', pipe) : null;
+    if (!pipe) {
+      // ★P0-A(R1-F10 续):静默返 null+每帧 ??= 重试不写指纹=F5 盲区主犯——
+      //  skip 帧按 acquire 失败因落账（acquire 支本帧已记则帧去重跳过）+notify 一次性 toast。
+      this.markSwPipeSkip((this.swPipeFailWhy || 'backoff') as 'backoff' | 'init-fail' | 'starvelock');
+      this.notifySwPipeDegrade();
+      return null;
+    }
+    return new GLWorldCompose('worldCompose', pipe);
+  }
+  /** ★P0-A 一次性降级 toast（BJ258 式用户明令通道;回滚口 SWPIPE_DEGRADE_TOAST）:
+   *  共管管线塌方（compose/云/世界层任一消费方降级）首帧提示「已临时回退 2D 渲染」,
+   *  恢复侧【不】提示不刷屏;健康持续 SWPIPE_TOAST_REARM_MS 后静默再武装
+   *  （acquireSwPipe 健康早退支）。 */
+  static SWPIPE_DEGRADE_TOAST = true;
+  private static readonly SWPIPE_TOAST_REARM_MS = 10_000;
+  private _swPipeDegradeToasted = false;
+  private _swPipeDegradeToastAt = 0;
+  cbOnSwPipeDegrade: (() => void) | null = null;
+  private notifySwPipeDegrade(): void {
+    if (!Renderer.SWPIPE_DEGRADE_TOAST || this._swPipeDegradeToasted) return;
+    this._swPipeDegradeToasted = true;
+    this._swPipeDegradeToastAt = performance.now();
+    try { this.cbOnSwPipeDegrade?.(); } catch { /* toast 链异常不反噬渲染 */ }
+  }
+  /** ★P0-A F5 诊断快照（DebugReport.swpipe 块消费——塌方一键归因面） */
+  swPipeDiag(): Record<string, unknown> {
+    const p = this.swPipe;
+    const now = performance.now();
+    return {
+      alive: !!p && !p.unavailable,
+      diedAgoMs: p?.diedAt ? Math.round(now - p.diedAt) : null,
+      retryInMs: Math.max(0, Math.round(this.swPipeRetryAt - now)),
+      retryLadderMs: Renderer.RETRY_LADDER_MS[Math.min(this.swPipeRetryLadder, Renderer.RETRY_LADDER_MS.length - 1)],
+      lastFailWhy: this.swPipeFailWhy || null,
+      lastOkAgoMs: this.swPipeLastOkAt ? Math.round(now - this.swPipeLastOkAt) : null,
+      composeSkipFrames: this.composeSkipFrames,
+      composeSkipStreak: this.composeSkipStreak,
+      degradeToasted: this._swPipeDegradeToasted,
+      starve: starveSnapshot(),
+    };
   }
   /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
    *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
@@ -4079,6 +4190,7 @@ export class Renderer {
     invasion: { name: string; pct: number; label?: string } | null = null,
     leashed: import('../entities/LeashedCritter').LeashedEntityManager | null = null,
   ) {
+    this._diagFrame++;   // ★P0-A:诊断帧戳（swpipe 降级指纹/计数按帧去重的时基）
     // 全屏地图关闭 → 释放整幅资源(GL 纹理 + 2D 临时画布;开图期才占 GPU,
     // 常态零占用——2026-08-18 CPU 化的核心收益点)
     // ★M6 拍照模式:_capturePass 的全屏地图关闭是截图重渲的临时态
@@ -7132,6 +7244,12 @@ export class Renderer {
       degradeAcc: () => this.degradeAcc(),   // ★B2b:整层 acc 窗降级钩（尘对注册复用同实例）
     });
   }
+  /** ★P0-B（雷击风暴）:bolt 烘焙 scratch 的动态源登记——acc shim 态 flush 期
+   *  texRefresh 全量重传（1 bolt/帧=1 次上传,替代旧链每 fill 一次即发即弃
+   *  rasterizePathOp 上传风暴 2000-3500 次/雷帧）。非 bgl/裸 2D 会话 no-op。 */
+  markWorldDynamicScratch(img: HTMLCanvasElement): void {
+    if (Renderer.bgl && Renderer.bglShim) this.bglShimReg().markDynamic(img);
+  }
 
   /** 预乘对两步绘制（须在尘变换内调用;ox/oy = origin 偏移,缺省 −4 = 原版 (4,4)）。
    *  mul = Color×k 档（同乘擦除强度与加性项——XNA 里 Color×k 逐通道含 α,如 264
@@ -7224,6 +7342,24 @@ export class Renderer {
         //  不含 43），不触其余路径；成本=逐尘逐帧 8×8 getImageData×2（A=0 族同款,
         //  闪尘 life≈22t 密度门限流,可承受）。
         if (Math.max(mR, mG, mB) <= 0.004) continue;
+        // ★BJ360 A=0 恒等乘数直绘快路径（perf,输出逐位等价）：mR/mG/mB 全 =1 时下方
+        //  逐尘 getImageData+putImageData 重着色是纯 no-op（×1 逐字节恒等,α 通道本就
+        //  不进循环）——直接从图集帧源 drawImage（同 8×8 源矩形/同变换/同 'lighter'）,
+        //  跳过 8×8 读回×2。爆炸/尾迹级 A=0 尘族（86-91 GetAlpha :2511 rgb=1 恒档——
+        //  星云奥秘 617 环尘/618 尾迹/爆裂 618 清场尘/620 尾迹全是 86|90,58/92/106/
+        //  107/156/182/204/206/230/234/235/254/255/267 同恒等档）单帧可挂 2000+ 枚,
+        //  实测 getImageData≈1.5-2µs/枚×2 读回 → lit pass 4-9ms/帧 = 爆炸窗掉帧主因。
+        //  43 乘数 (num+9)/10≠1、66 涉 disco colorPass 语义——两者保守留读回支。
+        if (d.type !== 43 && d.type !== 66 && mR === 1 && mG === 1 && mB === 1) {
+          ctx.save();
+          ctx.translate(px, py);
+          if (d.rotation) ctx.rotate(d.rotation);
+          if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.drawImage(img, d.fx, d.fy, 8, 8, -4, -4, 8, 8);
+          ctx.restore();
+          continue;
+        }
         c1.clearRect(0, 0, 8, 8);
         c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
         const ida = c1.getImageData(0, 0, 8, 8);
@@ -15933,7 +16069,34 @@ export class Renderer {
             return;
           }
         }
-        ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+        // ★BJ357 仙灵武库 61 本体增亮（Mount.Draw case 61 drawType 2 :5808-5810）：
+        // drawColor = 环境光×0.5+0.5——黑暗中自发光半亮（lightAt 标量近似原版
+        // RGB 调制,同发光层口径登记）;其余坐骑原贴图直绘。multiply+destination-in
+        // 两步法（同猪鲨崽液染管线,保 alpha 蒙版）
+        if (mnt.type === 61 && layer === 'front') {
+          const scratch = this.mountTintScratch();
+          const lt = this.lighting?.lightAt(Math.floor((p.x + p.w / 2) / 16), Math.floor((p.y + p.h / 2) / 16));
+          const lum = lt ? Math.max(lt[0], lt[1], lt[2]) / 255 : 1;
+          const bv = Math.round((0.5 + 0.5 * lum) * 255);   // c×0.5+0.5
+          if (scratch) {
+            const { c, x: tc } = scratch;
+            if (c.width !== img.width || c.height !== fh) { c.width = img.width; c.height = fh; }
+            tc.globalCompositeOperation = 'source-over';
+            tc.clearRect(0, 0, img.width, fh);
+            tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
+            tc.globalCompositeOperation = 'multiply';
+            tc.fillStyle = `rgb(${bv},${bv},${bv})`;
+            tc.fillRect(0, 0, img.width, fh);
+            tc.globalCompositeOperation = 'destination-in';
+            tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
+            tc.globalCompositeOperation = 'source-over';
+            ctx.drawImage(c, 0, 0, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+          } else {
+            ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+          }
+        } else {
+          ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+        }
         // ---- 发光层（Mount.Draw :5520-5535 texture2D2 同帧同位二次 DrawData）----
         // 原版发光色 color = drawColor×0.25 + 0.75（:5818）再 ×(drawColor.A/255)
         // （:5850）——drawColor≈环境光照调制色（0-1），即发光贴图在黑暗中仍保有
@@ -16000,6 +16163,35 @@ export class Renderer {
                 }
               }
               ctx.restore();
+            } else if (mnt.type === 61 && layer === 'front') {
+              // ★BJ357 辉层妖精染色（Mount.Draw case 61 drawType 3 :5811-5816）：
+              // drawColor = GetFairyQueenWeaponsColorFull(...,0.41,1,0.15,1,0.7)
+              // 通名支 = hsl(0.91,1,0.7) 再 lerpWhite 0.15（dev 名分色表不建模,同
+              // mountLights 登记）,A×0.65;×stealth×(1-shadow)——stealth 缺省 1、
+              // 拖影层本仓不画（登记）。multiply+destination-in 两步法
+              const scratch = this.mountTintScratch();
+              const base = fairyQueenHslToRgb((0.41 + 0.5) % 1);
+              const lum07 = base.map((v) => v + (255 - v) * 0.4);        // luminance 0.7
+              const tint = lum07.map((v) => Math.round(v + (255 - v) * 0.15)); // lerpWhite 0.15
+              const ga = ctx.globalAlpha;
+              if (scratch) {
+                const { c, x: tc } = scratch;
+                if (c.width !== ex.width || c.height !== efh) { c.width = ex.width; c.height = efh; }
+                tc.globalCompositeOperation = 'source-over';
+                tc.clearRect(0, 0, ex.width, efh);
+                tc.drawImage(ex, 0, efr * efh, ex.width, efh, 0, 0, ex.width, efh);
+                tc.globalCompositeOperation = 'multiply';
+                tc.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+                tc.fillRect(0, 0, ex.width, efh);
+                tc.globalCompositeOperation = 'destination-in';
+                tc.drawImage(ex, 0, efr * efh, ex.width, efh, 0, 0, ex.width, efh);
+                tc.globalCompositeOperation = 'source-over';
+                ctx.globalAlpha = ga * 0.65;                              // A×0.65（:5815）
+                ctx.drawImage(c, 0, 0, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+                ctx.globalAlpha = ga;
+              } else {
+                ctx.drawImage(ex, 0, efr * efh, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+              }
             } else {
               ctx.drawImage(ex, 0, efr * efh, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
               // ★SW-FX18 高尔夫球车灯辉层（Mount.Draw case 17 drawType==1 :6043-6054）：

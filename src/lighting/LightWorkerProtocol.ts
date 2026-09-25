@@ -1,4 +1,7 @@
 // ★C9 光照引擎 Worker 化·快照协议（2026-09-23;?lightworker=1 缺省关）。
+// ★债登记（2026-09-25 trace:主线程残部 2-4% 恒在=TileLightScanner.exportTo/
+//  blurLine 内联段）——C9 二期差量面:exportTo/blurLine 全量迁 worker（沿本文件
+//  快照协议;scanner.reseed 掷流史与 FlickerClock 类随机源已登记的残余分歧面照抄）。
 // 主线程每帧把「扫描窗 ± SNAPSHOT_PAD 的 tile 切片 + 相机/天空/时钟/点光参数」
 // postMessage 给 LightWorker;worker 侧用同一份内核模块（TileLightScanner/LightMap/
 // LightingEngine 零转录导入）在一个「快照 store」上跑 scan→blur→export,回传

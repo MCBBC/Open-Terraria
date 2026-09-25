@@ -473,9 +473,13 @@ export interface CrystalSummonResult {
 }
 
 /** SummonCrystalDirect（:584-601）：无 548 + 座 466 在位 → 水晶生成点 =
- *  座锚点（点按帧偏移回左上）px + (40,64)；StartInvasion + NewNPC(548) + 掉 5×2 魔力。
+ *  座锚点（帧偏移回左上）px + (40,64)；StartInvasion + NewNPC(548) + 掉 5×2 魔力。
  *  调用方负责：arena 检查（WouldFailSpawningHere）/3828 消耗/失败文案（FailureMessage）。
- *  @param frameX/frameY 所点座格的帧（锚点回推 = x - frameX/18 / y - frameY/18，:590-592） */
+ *  @param x/y 座【底行】格（vanilla Player.cs:32689 num28 语义）
+ *  @param frameX/frameY **(x,y)=底行格自身**的帧（vanilla Direct 内
+ *    GetTileSafely(x,y) 读帧回推,底行 frameY≡54→-3 格=顶行;★BJ356 Face5 勘误:
+ *    曾按"所点座格"帧消费=点上部格时水晶 Bottom 埋 1-3 格,薄平台下悬空 →
+ *    CheckArenaScore 扫场崩塌 → 传送门贴脸水晶） */
 export function summonCrystalDirect(
   st: OldOnesArmyState, w: World, host: OldOnesArmyHost,
   x: number, y: number, frameX: number, frameY: number,
@@ -863,4 +867,41 @@ export function summonBetsy(st: OldOnesArmyState, host: OldOnesArmyHost, cx: num
     return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// ★BJ356 事件收场清除链（PurgeDD2EnergyCrystals Player.cs:31684-31765）
+// ---------------------------------------------------------------------------
+/** 纯槽位核：manaIid 在背包/垃圾/光标镜像/已开容器中的条目原位清除
+ *  （TurnToAir 等价面）。vanilla !Ongoing 每帧跑（Player.Update :24889-24893）——
+ *  光标镜像走 stack=0（消费方 syncCursorMirror 的 cur.stack<=0 支清镜像+UI 光标,
+ *  与消耗尽同链）;其余槽位直置 null。返回清除计数（测试判别面）。
+ *  世界掉落域不在此（ItemDrop !Ongoing 蒸散,WorldItem.cs:669 已在实体侧接线）。 */
+export function purgeEnergyCrystalSlots(
+  manaIid: number,
+  slots: Array<{ id: number; stack: number } | null>,
+  trash: { id: number; stack: number } | null,
+  mouse: { id: number; stack: number } | null,
+  containers: Array<Array<{ id: number; stack: number } | null>>,
+): { slots: number; trash: boolean; mouse: boolean; containers: number } {
+  let nSlots = 0, nContainers = 0, trashHit = false, mouseHit = false;
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i];                       // inventory[0..58]（:31694-31701）
+    if (s && s.id === manaIid) { slots[i] = null; nSlots++; }
+  }
+  if (trash && trash.id === manaIid) {        // trashItem（:31685-31688）
+    (trash as { stack: number }).stack = 0;
+    trashHit = true;
+  }
+  if (mouse && mouse.id === manaIid) {        // mouseItem（:31689-31692）
+    mouse.stack = 0;
+    mouseHit = true;
+  }
+  for (const items of containers) {           // 已开容器系（:31703-31765）
+    for (let i = 0; i < items.length; i++) {
+      const s = items[i];
+      if (s && s.id === manaIid) { items[i] = null; nContainers++; }
+    }
+  }
+  return { slots: nSlots, trash: trashHit, mouse: mouseHit, containers: nContainers };
 }

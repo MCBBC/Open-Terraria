@@ -498,6 +498,13 @@ export enum BuffType {
   //  deadCellsPotionStation 场景倍率 :5422-5423 ×1.2 走独立字段,不读此 buff）。
   //  枚举值避开原版 366（已被 DestroyerPet 占）按序续编；图标 Buff_366.png 在库。
   DeadCellsPotionStation = 381,
+  // ★BJ357 变身坐骑伴生 buff（Mount.cs Initialize：55 buff=374 / 56 buff=377 /
+  //  61 buff=384,SetMount :6291 AddBuff(_data.buff,3600) + Player.cs:9968-9971
+  //  每 tick buffTime=10 重钉）。Main.cs:9344-9352 对全部 MountType buff 置
+  //  buffNoTimeDisplay+buffNoSave（图标无倒计时字、不入档）
+  RatMount = 382,     // 大鼠本性(374)：骑乘 55 变身鼠
+  BatMount = 383,     // 蝙蝠诅咒(377)：骑乘 56 变身蝠
+  PixieMount = 384,   // 法埃的形态(384)：骑乘 61 变身妖精——「附魔精灵尘」5662 召唤物
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -513,7 +520,9 @@ const BUFF_TIME_EXTENDED_BY_DIFFICULTY = new Set([20, 22, 23, 24, 323, 30, 31, 3
  *  唯一隐字防线=每帧 2t 重钉+>2t 门（成对设计，Game.ts 场景光环块）；曾误注
  *  "表内双保险"（红队 A3），后人勿据该误注往表里补光环 id。坐骑族另经
  *  MountType 循环(:9343-9351)全标——本仓坐骑不进 buff 栏，故不含 */
-export const BUFF_NO_TIME_DISPLAY = new Set<number>([19, 27, 28, 29, 34, 37, 38, 40, 41, 42, 43, 45, 49, 60, 62, 64, 68, 81, 82, 83, 93, 95, 96, 97, 98, 99, 100, 101, 102, 125, 126, 133, 134, 135, 136, 139, 140, 150, 159, 161, 163, 165, 170, 171, 172, 182, 186, 187, 188, 199, 200, 201, 202, 213, 214, 216, 217, 219, 258, 259, 260, 261, 262, 263, 264, 266, 267, 268, 271, 274, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 312, 317, 322, 325, 327, 328, 329, 330, 331, 334, 335, 341, 345, 348, 349, 351, 352, 353, 354, 355, 356, 365, 366, 371, 372, 373, 382, 385, 386, 389, 390, 393, 394]);
+export const BUFF_NO_TIME_DISPLAY = new Set<number>([19, 27, 28, 29, 34, 37, 38, 40, 41, 42, 43, 45, 49, 60, 62, 64, 68, 81, 82, 83, 93, 95, 96, 97, 98, 99, 100, 101, 102, 125, 126, 133, 134, 135, 136, 139, 140, 150, 159, 161, 163, 165, 170, 171, 172, 182, 186, 187, 188, 199, 200, 201, 202, 213, 214, 216, 217, 219, 258, 259, 260, 261, 262, 263, 264, 266, 267, 268, 271, 274, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 312, 317, 322, 325, 327, 328, 329, 330, 331, 334, 335, 341, 345, 348, 349, 351, 352, 353, 354, 355, 356, 365, 366, 371, 372, 373,
+ 374, 377, 384,   // ★BJ357 变身坐骑伴生（Main.cs:9344-9352 全 MountType buff 循环段）
+ 382, 385, 386, 389, 390, 393, 394]);
 
 /** BuffID.Sets.BuffTextHandlers（1457 Terraria.ID/BuffID.cs:36-145，共 28 项）：
  *  随从族 buff 图标下方的文字不是时长而是**在册随从计数**——CachedProjectileCounterBuffTextHandler
@@ -575,6 +584,11 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   //  缺 BuffName.366 → 走 fallbackName「炼金药瓶」= tile 699 官方名 Alchemy Flask 直译；
   //  原版无机械效果，desc 标记纯增益来源）
   [BuffType.DeadCellsPotionStation]: { vanillaBuff: 366, descKey: 'Mods.SandboxWorld.Buff.DeadCellsPotionStation.Desc', fallbackName: '炼金药瓶' },
+  // ★BJ357 变身坐骑伴生 buff（374/377/384）——名称/描述走原版 l10n 键
+  //  （BuffName.RatMount=大鼠本性/BatMount=蝙蝠诅咒/PixieMount=法埃的形态）
+  [BuffType.RatMount]: { vanillaBuff: 374, descKey: 'BuffDescription.RatMount', fallbackName: '大鼠本性' },
+  [BuffType.BatMount]: { vanillaBuff: 377, descKey: 'BuffDescription.BatMount', fallbackName: '蝙蝠诅咒' },
+  [BuffType.PixieMount]: { vanillaBuff: 384, descKey: 'BuffDescription.PixieMount', fallbackName: '法埃的形态' },
   [BuffType.Battle]: { vanillaBuff: 13, descKey: 'Mods.SandboxWorld.Buff.Battle.Desc', fallbackName: '战斗' },
   [BuffType.Calming]: { vanillaBuff: 106, descKey: 'Mods.SandboxWorld.Buff.Calming.Desc', fallbackName: '镇静' },
   [BuffType.Mining]: { vanillaBuff: 104, descKey: 'Mods.SandboxWorld.Buff.Mining.Desc', fallbackName: '挖矿' },
@@ -908,15 +922,18 @@ const FED_STATE_TYPES: ReadonlySet<BuffType> = new Set([
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
  *  含 173-181 整段 for 循环）——本仓仅存 BUFF_DEFS 已映射项,交集生效 */
-const BUFF_NO_SAVE = new Set([
+export const BUFF_NO_SAVE = new Set([
   20, 22, 23, 24, 28, 29, 30, 31, 34, 35, 37, 38, 39, 43, 44, 46, 47, 48,
   58, 59, 60, 62, 63, 64, 67, 68, 69, 70, 72, 80, 87, 88, 89, 93, 94, 95,
   96, 97, 98, 99, 100, 103, 119, 120, 125, 126, 133, 134, 135, 137, 139,
   140, 144, 146, 147, 150, 158, 159, 161, 163, 164, 170, 171, 172, 173, 174,
   175, 176, 177, 178, 179, 180, 181, 182, 187, 188, 194, 195, 196, 197, 198,
   199, 205, 213, 214, 215, 263, 271, 320, 321, 322, 325, 335, 348, 353, 355,
-  366, 385, 386, 389, 390, 393, 394,   // 1457 Palworld 随从伴生（Main.cs:9199-9204；
-]);                                    //  391/392 坐骑伴生不在表=随档保存）
+  366, 385, 386, 389, 390, 393, 394,   // 1457 Palworld 随从伴生（Main.cs:9199-9204）
+  374, 377, 384,   // ★BJ357 变身坐骑伴生——Main.cs:9344-9352 对【全部】MountType buff
+                   //  置 buffNoSave（★勘误：旧注「391/392 坐骑伴生不在表=随档保存」系
+                   //  漏读该循环段——391/392 同属 MountType 表,本仓未映射不落库,同相）
+]);
 /** vanilla buff id → 本仓 BuffType 反查（存档恢复 + statusPlayer 授予链共用）。
  *  ★Object.keys 恒返回【字符串】——必须 Number() 还原枚举数值键，否则
  *  BuffState.active 的 Map 以 '93' 存键，has(BuffType.X)/get(BuffType.X) 的
