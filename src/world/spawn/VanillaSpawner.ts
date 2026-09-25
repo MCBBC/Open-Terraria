@@ -212,7 +212,10 @@ export function rollCavernMonsterType(rng: RNG): void {
 import vanillaNetIdJson from '../../data/vanilla-npcnetid.json';
 const NET_ID_OVERRIDE: Record<string, { scale?: number; color?: number[]; alpha?: number }> = vanillaNetIdJson;
 
-export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number }> = {
+export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number;
+  /** ★BJ344：dmg/life 双精度 ×1.1 链旗（case -14 :7830-7831 / case -15 dmg :7840——
+   *  `(int)((double)((float)v×scale)×1.1)`：f32 乘 scale 后拓宽 f64 乘 1.1 再截断） */
+  x11?: boolean }> = {
   // ★BJ337(2026-09-24)：-1/-2 base 16（母史莱姆）系旧表误值——原版 FromNetId(-1/-2)
   //  → NetIdMap[0]/[1]=81 腐化史莱姆（NPCID.cs:10450/:12478-12484；SetDefaultsFromNetId
   //  case -1/-2 :7687-7702 只做 SetDefaults_ForNetId(81, scale)+硬置 life/damage/defense）。
@@ -241,19 +244,26 @@ export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: numb
   '-18': { base: 176, scale: 0.8 }, '-19': { base: 176, scale: 0.9 },   // Tiny/Little Moss Hornet
   '-20': { base: 176, scale: 1.1 }, '-21': { base: 176, scale: 1.2 },   // Big/Giant Moss Hornet
   '-56': { base: 231, scale: 0.85 }, '-57': { base: 231, scale: 1.25 },
-  '-58': { base: 232, scale: 0.8 }, '-59': { base: 232, scale: 1.17 },
-  '-60': { base: 233, scale: 0.83 }, '-61': { base: 233, scale: 1.21 },
+  '-58': { base: 232, scale: 0.8 }, '-59': { base: 232, scale: 1.15 },   // ★BJ344 勘正（case -59=1.15f,旧 1.17）
+  '-60': { base: 233, scale: 0.92 },   // ★BJ344 勘正（case -60=0.92f,旧 0.83）
+  '-61': { base: 233, scale: 1.1 },    // ★BJ344 勘正（case -61=1.1f,旧 1.21）
   '-62': { base: 234, scale: 0.78 }, '-63': { base: 234, scale: 1.16 },
   '-64': { base: 235, scale: 0.87 }, '-65': { base: 235, scale: 1.21 },
-  // 地牢骷髅变体（SetDefaultsFromNetId L7770-7788：scale 后再乘 stat）
-  '-13': { base: 31, scale: 0.9, hp: 72, dmg: 23, def: 7 },    // Short Bones(80/26/8 ×0.9)
-  '-14': { base: 31, scale: 1.15, hp: 101, dmg: 33, def: 10 }, // Big Boned(×1.15 再 ×1.1)
+  // 地牢骷髅变体（case -13/-14/-15 :7818-7846）——★BJ344：flag=false 族 stat×scale 转
+  //  运行时派生（见 spawnNPC 派生块），预计算硬置退役（专家/master 档原版序=基底
+  //  ScaleStats 终值上再 ×scale，硬置值只对经典档且 -14 dmg/def 曾差 1）。
+  //  f32 逐拍定谳（Math.fround 逐级）：-13 = 72/23/7（与旧硬置同值）; -14 def
+  //  (int)(fround(8×1.15f))=9（旧 10 系先四舍五入 9.2→9 再×1.1 的错链）、dmg
+  //  (int)(fround(fround(26×1.15f))×1.1)=32（旧 33 同病）、life 101 两法同值。
+  '-13': { base: 31, scale: 0.9 },    // Short Bones（基底 31:80/26/8/130 ×0.9）
+  '-14': { base: 31, scale: 1.15, x11: true },   // Big Boned（dmg/life 双精度 ×1.1 链）
   // ★BJ337(2026-09-24)：-15 旧表 base:1（绿史莱姆!）系误值——原版 FromNetId(-15)
-  //  → NetIdMap[14]=77 Heavy Skeleton（NPCID.cs:10453），且 case -15（NPC.cs:7831-7842）
+  //  → NetIdMap[14]=77 Heavy Skeleton（NPCID.cs:10453），且 case -15（NPC.cs:7836-7846）
   //  硬置 life=400。旧值非潜伏：硬模洞穴主池 L4959（原版 NPC.cs:5059 同构）实刷点
-  //  hard&&(remix||深层)&&1/5 → D(-15) 曾刷出 1.15 倍绿史莱姆。dmg/def 的 ×scale 面+
-  //  height=44 硬置另登记 spawn-parity-gaps.md 家族债（case 体 stat×scale 全族口径）。
-  '-15': { base: 77, scale: 1.15, hp: 400 },   // Heavy Skeleton（case -15 life=400 硬置）
+  //  hard&&(remix||深层)&&1/5 → D(-15) 曾刷出 1.15 倍绿史莱姆。★BJ344：dmg/def
+  //  ×scale（dmg 走 x11 双精度链,基底 77:40/28 → 50/32）+ knockBackResist×(2−scale)
+  //  (0.4→0.34) + height=44 硬置（:7845,盒后覆写）转运行时派生。
+  '-15': { base: 77, scale: 1.15, hp: 400, x11: true },   // Heavy Skeleton（life=400 硬置）
   // -22..-25 猩红族大小变体（SetDefaultsFromNetId L7858-7911 + NPCID.NetIdMap idx21-24）：
   //  -22/-23 = 小/大 Crimera（基底 173，scale 0.85/1.15）；-24/-25 = 小/大 Crimslime
   //  （基底 183，scale 0.85/1.15）。旧表误写 base:223（雨僵尸）——猩红分支
@@ -273,12 +283,15 @@ export const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: numb
   '-38': { base: 190, scale: 1.15 }, '-39': { base: 191, scale: 1.1 },
   '-40': { base: 192, scale: 0.9 }, '-41': { base: 193, scale: 0.85 },
   '-42': { base: 194, scale: 1.1 },
-  '-43': { base: 2, scale: 0.85 },  // 小恶魔眼
+  '-43': { base: 2, scale: 1.15 },  // 小恶魔眼（★BJ344 勘正:旧 0.85 系 -41 错抄,case -43 :8130-8131=1.15f）
   '-44': { base: 200, scale: 0.87 }, '-45': { base: 200, scale: 1.05 },
-  '-46': { base: 21, scale: 0.9 }, '-47': { base: 21, scale: 0.9 },
-  '-48': { base: 201, scale: 0.9 }, '-49': { base: 201, scale: 0.9 },
-  '-50': { base: 202, scale: 0.9 }, '-51': { base: 202, scale: 0.9 },
-  '-52': { base: 203, scale: 0.9 }, '-53': { base: 203, scale: 0.9 },
+  '-46': { base: 21, scale: 0.9 }, '-47': { base: 21, scale: 1.1 },   // ★BJ344 勘正 scale（case -47 :8171=1.1f,旧 0.9 全族错抄）
+  '-48': { base: 201, scale: 0.93 },   // ★BJ344 勘正（:8181=0.93f,旧 0.9 全族错抄）
+  '-49': { base: 201, scale: 1.07 },   // ★BJ344 勘正（:8191=1.07f）
+  '-50': { base: 202, scale: 0.87 },   // ★BJ344 勘正（:8201=0.87f）
+  '-51': { base: 202, scale: 1.13 },   // ★BJ344 勘正（case -51=1.13f）
+  '-52': { base: 203, scale: 0.85 },   // ★BJ344 勘正（case -52=0.85f）
+  '-53': { base: 203, scale: 1.15 },   // ★BJ344 勘正（case -53=1.15f）
   '-54': { base: 223, scale: 0.9 }, '-55': { base: 223, scale: 1.1 },
 };
 
@@ -712,6 +725,7 @@ export class VanillaSpawner {
         oScale = f32(oScale * f32(1.3));
       }
     }
+    let netScale: number | null = null;
     if (oScale != null) {
       const v = e.vanilla!;
       const box = netIdSpawnScale(baseId, oScale, v.width, v.height, scaleStatsWorld());
@@ -719,6 +733,7 @@ export class VanillaSpawner {
       e.h = e.def.height = box.height;
       e.vanillaScale = box.scale / (v.scale ?? 1);   // 渲染（v.scale × vanillaScale）= npc.scale
       if (box.canDisplayBuffs === false) e.canDisplayBuffs = false;
+      netScale = box.scale;   // ★BJ344：终值 scale（含 FTW/种子档链）——stat 派生同源
     }
     // 原版 NewNPC 锚点(NPC.cs:46596-46597):X-width/2, Y-height(底部贴格顶)——
     // 盒定后再锚（此前 fromVanilla 中心锚 y-h/2 埋进落脚实心格半格高）
@@ -729,6 +744,33 @@ export class VanillaSpawner {
       if (map.hp != null) e.hp = e.maxHp = map.hp;
       if (map.dmg != null) e.def.damage = map.dmg;
       if (map.def != null) e.def.defense = map.def;
+    }
+    // ★BJ344（spawn-parity-gaps「flag=false netID 族 case 体 stat×scale」清偿）：
+    //  SetDefaultsFromNetId 各 case 体（NPC.cs:7784-8360）在基底完整 SetDefaults
+    //  【含尾段 ScaleStats :17888 与种子档调整 :17873-17881】之后跑：
+    //  def/dmg/life/value = (int)((float)v×scale)（-14 dmg/life 与 -15 dmg 另走
+    //  (int)((double)((float)v×scale)×1.1) 双精度链 :7830-7831/:7840）+
+    //  knockBackResist ×= 2f−scale。flag=false ⇒ :8368-8372 的 ScaleStats 门不达
+    //  （flag=true 硬置族才补）——本仓 fromVanilla 产出=ScaleStats 终值（基底
+    //  SetDefaults 尾 :17888 同序），此位 ×scale 截断即原版序。f32 逐拍：scale 先
+    //  fround、乘积 fround（= C# (float) 单精度乘）后 trunc；×1.1 链乘在 f32 积的
+    //  f64 拓宽上。flag=true 硬置族（-1..-10,三值全硬置）不动=其硬置后 ScaleStats
+    //  重排另案登记；npcSlots 仓库无运行时承载=登记 residual。
+    if (map && netScale != null && !(map.hp != null && map.dmg != null && map.def != null)) {
+      const s = f32(netScale);
+      const sMul = (x: number): number => f32(x * s);
+      const tr = (x: number): number => Math.trunc(x);
+      if (map.hp != null) e.hp = e.maxHp = map.hp;   // -15 life=400 硬置（无 ×1.1 链）
+      else e.hp = e.maxHp = tr(map.x11 ? sMul(e.maxHp) * 1.1 : sMul(e.maxHp));
+      if (map.dmg != null) e.def.damage = map.dmg;
+      else e.def.damage = tr(map.x11 ? sMul(e.def.damage ?? 0) * 1.1 : sMul(e.def.damage ?? 0));
+      if (map.def != null) e.def.defense = map.def;
+      else e.def.defense = tr(sMul(e.def.defense ?? 0));
+      // knockBackResist ×= 2f−scale（:7798 等——C# 2f−scale f32 减 + f32 乘）
+      e.def.knockbackResist = f32((e.def.knockbackResist ?? 1) * f32(2 - s));
+      if (e.def.value != null) e.def.value = tr(sMul(e.def.value));
+      // -15 height=44 硬置（case -15 :7845,盒链后覆写,仅高不宽）+ 底锚随盒重算
+      if (netId === -15) { e.def.height = 44; e.h = 44; e.y = y - e.h; }
     }
     // SetDefaultsFromNetId 覆盖 color/alpha（L7633+：color = new Color(...) / alpha = N）
     if (ov?.color) e.colorRGBA = [ov.color[0], ov.color[1], ov.color[2], ov.color[3] ?? 255];

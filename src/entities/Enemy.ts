@@ -14140,8 +14140,11 @@ export class Enemy extends Entity {
       this.dummyShake = Math.max(20, Math.min(120, dmg));
       this.dummyHitDir = Math.sign(kbx);   // cs:83506 localAI[1]=hitDirection 无条件写入（0=未定向）
       // 免疫帧与通用档一致（:13152 对全 NPC 含假人 10t；旧 8 偏差）;−2=IDStatic
-      // 单发型不写（云命中三不写,拍板#1A——假人上多云同拍连击=原版本相）
-      if (pierce !== -2) this.iframes = 10;
+      // 单发型不写（云命中三不写,拍板#1A——假人上多云同拍连击=原版本相）;
+      // ★BJ340 F-A（2026-09-25）:1=flag3 单发弹同样不写——命中写分支表
+      // （:14032-14196）对 488 同样适用,:14176-14182 尾档 `penetrate != 1` 不达
+      // =原版单发弹打假人【不改】共享窗余值（旧支写 10=无中生有新窗）
+      if (pierce !== -2 && pierce !== 1) this.iframes = 10;
       this.hpBarT = 240;
       // ★蓝队二轮 F2①（2026-08-31）：immortal 只跳过 `life -= num` 扣血段
       // （StrikeNPC_Inner :82197-82215 的 if (!immortal) 支），num41 在 :82067 防后
@@ -14243,10 +14246,16 @@ export class Enemy extends Entity {
         if (probe) addEnemy(game, probe);
       }
     }
-    // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）;−2=IDStatic 单发型
-    //（云 567/568,:14031-14038 首支内层假=命中三不写,拍板#1A）——免疫门已保证
-    // 进此路径时 iframes==0,不写=原版字面（写 0 等价,取字面防未来门域变动）
-    if (pierce !== -2) this.iframes = pierce === 1 ? 0 : 10;
+    // 通用档 10t（:13152 默认;旧恒 8）;−2=IDStatic 单发型（云 567/568,:14032-14039
+    // 组行内层假=命中三不写,拍板#1A）。★BJ340 F-A（2026-09-25）:1=flag3 单发弹
+    //（maxPenetrate==1,如 405 泡泡）命中【三不写】——写分支表三档全不达：
+    // 组行 :14032-14039（内层 `penetrate != 1` 假）/ 局部行 :14172-14175（flag3 要求
+    // !usesLocalNPCImmunity,不进）/ 尾档 :14176-14182（`penetrate != 1 ||` 假）——
+    // immune[owner]（=本仓 iframes 共享窗）余值原样保持。旧 `pierce===1?0:10` 写 0
+    // =把 404/悠悠球已建的剩余窗【擦除】（405 命中解锁共享窗=多打），与假人支写 10
+    // 同为原版无的两向偏差。免疫门（:13956 `pierce !== 1` 臂）保证非单发弹进此路径
+    // 时 iframes==0 → 写 10 等价原版缺省档
+    if (pierce !== -2 && pierce !== 1) this.iframes = 10;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
     // 击退管线（NPC.cs:82144-82239 1:1）。武器路径（kby===0，kbx=方向×力度）：
     //   num3 = kb×resist（:82145 ★resist 先乘、五段软封顶作用在乘后值——旧实现

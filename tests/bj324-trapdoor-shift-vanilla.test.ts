@@ -48,8 +48,10 @@ function mkShell(w: World, drops: Drop[]) {
   g.scene = null;
   g.input = { rightDown: true };
   // 玩家站远处（cy 决定 playerAbove：cy < ty*16 → playerAbove=true 折翼向下）
+  // ★BJ343：+dead/isGhostPhase（EmptyTile 谓词玩家臂 :1368 豁免判据,真实 Player API 面）
   g.player = {
     x: -500, y: -500, w: 20, h: 42, cx: -490, cy: -479,
+    dead: false, isGhostPhase: () => false,
     inv: { countOf: () => 0 }, equipStats: { cordage: false, flowerBoots: false },
   };
   return g as unknown as {

@@ -31,6 +31,13 @@ export function maybeShowWelcomeAnnounce(): void {
     if (localStorage.getItem(ACK_KEY)) return;
   } catch { /* 隐私模式:每次进世界都显示 */ }
 
+  // ★BJ344（件3,合成层 +3/轮清偿）：单例化——每次进世界 onWorldReady 都会走到这里,
+  //  旧覆层唯一的移除面是「我已知晓」按钮;未 ack（或隐私模式 localStorage 抛异常
+  //  =每次进世界都显示）时 quit/重进逐轮 append 新覆层,旧覆层永不摘 → 全屏
+  //  position:fixed 层组按轮累积（探针实证:未 ack 16→19→22 每轮 +3,预种 ack 后
+  //  13→13→13 全平;LayerTree 16−13=3=单覆层层组）。挂新前摘旧=任意路径下恒单实例。
+  document.getElementById('sw-welcome-announce')?.remove();
+
   const root = document.createElement('div');
   root.id = 'sw-welcome-announce';
   root.style.cssText = 'position:fixed; inset:0; z-index:60; background:rgba(0,0,0,0.72); display:flex; align-items:center; justify-content:center; padding:16px;';

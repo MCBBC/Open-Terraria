@@ -690,9 +690,11 @@ export class TrueNightsEdgeSlash extends Entity {
   }
 }
 
-/** 永夜刃飞斩变体（273 第二发：ai0=0.1×dir → |ai0|<0.2 分支 :39457-39466）：
- *  自由飞行、rotation += π×4×ai0×10×num 旋进、10t 起前漂 45px、scale +0.4、
- *  寿命 ai1=30t。 */
+/** 永夜刃飞斩变体（273 第二发：ai0=dir×gravDir×0.1 → |ai0|<0.2 飞斩支
+ *  Projectile.cs:42783-42791 [1457]——旧注 :39457-39466 系 1456 行号已废）：
+ *  自由飞行、rotation 每 tick【绝对重赋】= num4 + π×4×ai0×10×num
+ *  （rot(t)=aim+0.1sπ+4.1sπ·t/ai1,s=dir×gravDir——★BJ342 ND1 定谳,见 fixedUpdate）、
+ *  10t 起前漂 45px、scale=(1+0.2num+0.4num7)×ai2（★ND3 复合序）、寿命 ai1=30t。 */
 export class NightsEdgeFly extends Entity {
   w = 16; h = 16;
   damage: number;
@@ -728,12 +730,26 @@ export class NightsEdgeFly extends Entity {
     this.t++;
     if (this.t >= this.ai1) { this.dead = true; return; }
     const num = this.num;
-    // |ai0|<0.2 分支（:39459-39466）
-    this.rot += Math.PI * 4 * this.ai0 * 10 * num;
+    // ★BJ342 ND1（W3 定谳翻案,先定谳再动刀）:AI_190 每 tick【绝对重赋】
+    //  rotation = num4（Projectile.cs:42751 = π×num2×num + num3 + num2×π +
+    //  player.fullRotation;num3 = velocity.ToRotation() = aim 角、num2 = ai0 =
+    //  dir×gravDir×0.1（Player.cs:49382 飞斩实参）、num = localAI[0]/ai1）,
+    //  飞斩支（|num2|<0.2,:42783-42791）再 += π×4×num2×10×num
+    //  ⇒ rot(t) = aim + 0.1sπ + 4.1sπ·(t/ai1)（s=dir×gravDir;匀角速 ~2.05 圈、
+    //  aim 锚定）。fullRotation 项本族不建模（同 SwingArc 锚弧约定,倒挂镜像面由
+    //  ai0+draw scale(1,-1) 承载,Game.ts:14038-14041 判例）。旧实现 rot += … 自 0
+    //  累积 = 二次型 ~31 圈/零 aim 锚/末段 720°/tick,连带尘弧带角与命中锥 num14
+    //  时序错位（尘/锥消费 this.rot,绝对式落地即同步对齐）。
+    const aim = Math.atan2(this.vy, this.vx);   // num3 = velocity.ToRotation()（972 vel 恒=aim 向）
+    this.rot = Math.PI * this.ai0 * num + aim + this.ai0 * Math.PI
+      + Math.PI * 4 * this.ai0 * 10 * num;
     const num7 = Math.min(1, Math.max(0, (this.t - 10) / (this.ai1 - 5 - 10)));
     this.x += this.dx * 45 * num7;
     this.y += this.dy * 45 * num7;
-    this.scaleCur = (1 + num * 0.2) * this.ai2 + num7 * 0.4;
+    // ★BJ342 ND3：复合序 scale = (num6+num·num5 :42765) → += num7×0.4（:42789）
+    //  → ×= ai[2]（函数尾 :42997）——旧 (1+0.2num)×ai2+0.4·num7 乘加序错（仅 size
+    //  stat≠1 可见,仍修）;尘弧半径 84×sc0（=×ai2 前值 :42787 序）由此式恢复精确。
+    this.scaleCur = (1 + num * 0.2 + num7 * 0.4) * this.ai2;
     this.x += this.vx; this.y += this.vy;
     this.hist.push({ x: this.cx, y: this.cy, rot: this.rot });
     if (this.hist.length > 4) this.hist.shift();
@@ -749,8 +765,15 @@ export class NightsEdgeFly extends Entity {
         if (d) { d.noLight = true; d.noLightEmittance = true; }
       }
       if (Math.random() < 0.5) {
+        // ★BJ342 ND2：尘 27 速度源 = player.velocity（:42797 = player.velocity.X×0.2 +
+        //  player.direction×3 / player.velocity.Y×0.2——AI_190 尘支共用玩家速度,锚弧站
+        //  SwingArc:378-386 已同源;曾用弹速 this.vx×0.2+sign(dx)×3 = 速度源与方向项
+        //  双偏离。player.direction=玩家朝向,倒挂不翻转;tests 无 player 走 ?? 兜底,
+        //  spawnDust 缺省桩不观感）
+        const pl = game.player as { vx?: number; vy?: number; facing?: number } | null | undefined;
         game.spawnDust?.(dx0, dy0, 0, 0, 27,
-          this.vx * 0.2 + Math.sign(this.dx) * 3, this.vy * 0.2, 100, null, 1.4, true, true);
+          (pl?.vx ?? 0) * 0.2 + (pl?.facing ?? 1) * 3, (pl?.vy ?? 0) * 0.2,
+          100, null, 1.4, true, true);
       }
     }
     // 命中（穿透 2；同敌单跳）——Colliding aiStyle 190 锥判定逐式（同 972 弹;

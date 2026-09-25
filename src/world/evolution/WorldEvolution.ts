@@ -167,6 +167,15 @@ export interface EvolutionHost {
   /** 静默直写后的渲染补标（陨石同款：chunks.markDirtyArea+lighting.dirty）。
    *  缺省 = 宿主无 chunk 缓存（离线测试），仅写数据不通知渲染。 */
   afterSilentTileWrite?: (x0: number, y0: number, x1: number, y1: number) => void;
+  /** ★BJ341 件2：末态单发 DECOR 复查面（宿主=Game.checkDecorSquareFrame——
+   *  SquareTileFrame 运行期等价面）。原版放置链锚分立（亲读 1457）：
+   *  · PlaceTile→PlaceObject 尾 SquareTileFrame(x,y)（WorldGen.cs:51886-51888，
+   *    485 幼虫经 cs:60215 `else if (num == 485) PlaceObject(…)` 消费）；
+   *  · PlaceTight 尾显式 CheckStalactite(x,y)（:38705-38708,写后单发）；
+   *  · 裸写链【无】尾检：蜂巢 444 = 裸数组直写+SendTileSquare（:74140-74159）、
+   *    751 = PlaceTile default 支 Place2x2 裸写（:60686→:51780,x--/y-- 原点族）。
+   *  缺省 = 无复查（离线测试静默）。 */
+  tileFrame?: (x: number, y: number) => void;
   /** WorldGen.GetWorldUpdateRate（cs:72056-72063）= min(desiredWorldTilesUpdateRate, 24)、
    *  FreezeTime 时 0。desiredWorldTilesUpdateRate 随 dayRate 走（Main.cs:6290——全员熟睡
    *  ×5；快进中恒 1 与 dayRate=60 解耦）。缺省 1 = 无时间倍率系统（单测/离线宿主） */
@@ -1743,7 +1752,14 @@ export class WorldEvolution {
     return -1;
   }
   /** 放置 w×h 整件（帧 dx*18, dy*18；区域全空才放）。styleX=样式基偏移（X 轴，
-   *  如 2×2 横排样式族 style*36，TileObjectData StyleHorizontal=true） */
+   *  如 2×2 横排样式族 style*36，TileObjectData StyleHorizontal=true）。
+   *  ★BJ341 件2：写面 setTileSilent 化——原版 TileObject.Place=裸数组直写
+   *  （TileObject.cs:94-110,写循环期无逐格监听级联）。曾走 setTile→首格写完即触
+   *  DECOR 3×3 扫（Game.checkDecorSquareFrame 监听）→'super' 完整性裁决（余格
+   *  未写=bad）→killDecorTile 吃掉半件：蜂巢 444=breakBeeHive 伪触发（蜂未成巢
+   *  先出）、蚁狮幼虫 485=breakAntlionLarva 伪触发+残件。写后渲染补标
+   *  afterSilentTileWrite（陨石/花苞同款）；末态复查由调用点按原版放置链锚分立
+   *  消费（485=PlaceObject 尾 SquareTileFrame;444/751 裸写链无尾检）。 */
   private placeBlock(x: number, y: number, sheet: number, w: number, h: number, styleX = 0): boolean {
     const st = this.host.store;
     for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) {
@@ -1752,8 +1768,9 @@ export class WorldEvolution {
     const t = S(sheet);
     if (!t) return false;
     for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) {
-      st.setTile(x + dx, y + dy, t, styleX + dx * 18, dy * 18);
+      st.setTileSilent(x + dx, y + dy, t, styleX + dx * 18, dy * 18);
     }
+    this.host.afterSilentTileWrite?.(x, y, x + w - 1, y + h - 1);
     return true;
   }
 
@@ -2311,12 +2328,19 @@ export class WorldEvolution {
         if (this.solidTile(i, j) && this.solidTile(i + 1, j)) {
           if (this.rng() < 1 / 100) {
             this.placeBlock(i, j - 2, 751, 2, 2);
+            // ★BJ341 件2③：751=PlaceTile default 支 Place2x2 裸写（cs:60686→:51780,
+            //  无尾检）——本复查对其整件为 no-op（751 不在 TileFrameImportant 派发表,
+            //  cs:86969-86975 break 组;同判据 1:1 已核）,保留单发面=锚点 3×3 邻件复验。
+            this.host.tileFrame?.(i, j - 1);
             this.inheritAntLarvaPaint(i, j, 751);
           } else {
             let clear = true;
             for (let d = -1; d >= -3; d--) { if (this.active(i, j + d)) { clear = false; break; } }
             if (clear) {
               this.placeBlock(i, j - 2, 485, 2, 2, Math.floor(this.rng() * 4) * 36);
+              // ★BJ341 件2③：PlaceTile→PlaceObject 尾 SquareTileFrame(i,j-1)
+              //  （cs:60215 num==485 支→:51886-51888）——整件写完后末态单发复查。
+              this.host.tileFrame?.(i, j - 1);
               this.inheritAntLarvaPaint(i, j, 485);
             }
           }
@@ -4234,10 +4258,19 @@ export class WorldEvolution {
       this.copyPaintAndCoating(x, y - 1, x, y);                 // ★⑥ PlaceUncheckedStalactite（other=顶锚）
       return;
     }
-    st.setTile(x, y, t, base + variation * 18, 0);
-    st.setTile(x, y + 1, t, base + variation * 18, 18);
+    // ★BJ341 件2①：两格大钟乳石改静默直写——原版 PlaceUncheckedStalactite=裸数组
+    //  直写（cs:38724-38738,无逐格级联）。曾走 setTile→首格（fy0）写完即触 DECOR
+    //  3×3 扫（Game.checkDecorSquareFrame 监听）→'stalactite' 完整性裁决（底格
+    //  未写=bad）→killDecorTile 吃掉首格;次格写入再扫再杀 → 2 格大型钟乳石永不
+    //  生成（小档 fy72 单格自洽=裁决过,保持 setTile 原样）。写后渲染补标
+    //  afterSilentTileWrite + 末态单发复查=原版 PlaceTight 尾 CheckStalactite(x,y)
+    //  （cs:38705-38708,写后按 active&&type==165 单发,大小两档同锚）。
+    st.setTileSilent(x, y, t, base + variation * 18, 0);
+    st.setTileSilent(x, y + 1, t, base + variation * 18, 18);
     this.copyPaintAndCoating(x, y - 1, x, y);                   // ★⑥（cs:38735 区 other=x,y-1）
     this.copyPaintAndCoating(x, y - 1, x, y + 1);
+    this.host.afterSilentTileWrite?.(x, y, x, y + 1);
+    this.host.tileFrame?.(x, y);
   }
 
   /** GrowWeb（cs:74141-74175）：1/10 + ±2-3 内有实心 → 放蛛网 51 */

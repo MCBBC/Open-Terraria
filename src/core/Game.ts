@@ -218,7 +218,7 @@ import { spawnForceClearArea, spawnGetPositionAtSpawn, spawnIsAreaValidSpawn } f
 import { scanLuckScene, torchLuckCheckCenterBelowSurface, rollLuck, rollOnlyBadLuckExtreme, starfallHoming, AFK_TIME_NO_LUCKY_STARS } from '../stats/Luck';
 import { TILE_SOLID_TOP_FAMILY, canTileHurt } from '../stats/TouchDamage';   // A-2:liqGateLegacy tileSolid 短路真表代理 + IIIII228 海螺 TileIsDangerous
 import { playerVidCarried, BACC, builderAccGateSet } from '../stats/builderAcc';   // ★SW-FX19:建筑配件开关位+配饰 vid 扫描（★FX36:装备改背包∪装备扫描）
-import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）
+import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar, mainDifficulty, GDL, OLD_ONES_ARMY, netIdSpawnScale, scaleStatsWorld, roundCSf32Mul, truncCSf32Mul, truncCSf32MulBias } from '../stats/ScaleStats'; // SW-M1 2026-09-03 +OLD_ONES_ARMY（BelongsToInvasionOldOnesArmy,爆炸 trap 半伤消费）+★BJ343 件 2 舍入单源
 import { damageVarRoll } from '../stats/DamageVar';
 import {
   bindJourneyPowers, journeyPowers, shouldDisableSpawns, spawnRateMultiplier,
@@ -4042,6 +4042,7 @@ export class Game implements GameHooks {
           const d = ent as ItemDrop;
           if (!d.netPuppet && !d.dead && d.netId === op.netId) {
             d.itemId = id; d.stack = Math.max(1, op.stack);
+            d.refreshDimsFromVid();   // ★BJ343 件1：msg21 全态覆写换 type=SetDefaults 语义（w/h 重置）
             d.x = op.x; d.y = op.y; d.vx = op.vx; d.vy = op.vy;
             d.shimmered = op.shimmered ?? false;
             d.shimmerTime = op.shimmerTime ?? 0;
@@ -4062,7 +4063,7 @@ export class Game implements GameHooks {
       // 原版 msg21 = 槽位全态覆写（NetMessage.WriteItem：type/stack/pos 全写）。
       // upsert 只校位不刷内容 → 拥有端的堆变化（合并加数/升面换物/残余上报/
       // 怪吸币扣减）永远到不了他端。itemId 对不上（钱币升面 71→72→73→74）一并换
-      if (pup.d.itemId !== id) pup.d.itemId = id;
+      if (pup.d.itemId !== id) { pup.d.itemId = id; pup.d.refreshDimsFromVid(); }   // ★BJ343 件1：全态覆写换 type 刷 w/h
       pup.d.stack = Math.max(1, op.stack);
       // 145 尾段：微光态镜像（缺省=非微光——发送端无尾段即清，upsert 语义）
       pup.d.shimmered = op.shimmered ?? false;
@@ -6878,6 +6879,10 @@ export class Game implements GameHooks {
     });
     attachDevices(this.wiring, this.makeDeviceCtx());
     this.scanTriggerTiles();
+    // ★R3-F7（2026-09-25 红蓝批 B）：双 loadWorld 不留旧引擎孤儿——dispose 拆光照
+    //  Worker 链（?lightworker=1 时旧 _lw worker 跨世界泄漏双跑;dispose 幂等,
+    //  首次 loadWorld 旧引用 undefined 可选链 no-op）。C9 卸载链 :7924 同款语义。
+    this.lighting?.dispose();
     this.lighting = new LightingEngine(w);
     this.renderer.lighting = this.lighting; // 岩浆瀑布 AddLight 等渲染端光源注入
     this.renderer.mapPings = this.mapPings; // 地图 ping 图标层（PingMapLayer）
@@ -6918,6 +6923,12 @@ export class Game implements GameHooks {
         this.chunks.markDirtyArea(x0 - 1, y0 - 1, x1 + 1, y1 + 1);
         this.lighting.dirty = true;
       },
+      // ★BJ341 件2：演化域末态单发 DECOR 复查面（SquareTileFrame 运行期等价面
+      //  单源委托）——消费点按原版放置链锚分立：485 幼虫=PlaceObject 尾
+      //  SquareTileFrame(i,j-1)（WorldGen.cs:51886-51888）、钟乳石大档=PlaceTight
+      //  尾 CheckStalactite(x,y)（:38705-38708）；裸写链（蜂巢 444 :74140-74159、
+      //  751 Place2x2 :51780）原版无尾检=不消费本面。
+      tileFrame: (x, y) => this.checkDecorSquareFrame(x, y),
       // 旅程力量·停止感染蔓延（CreativePowers.StopBiomeSpreadPower，
       // WorldGen.cs:71515-71519 AllowedToSpreadInfections = !Enabled——原版消费点
       // 无 IsJourneyMode 门，状态随世界存档）
@@ -7900,8 +7911,26 @@ export class Game implements GameHooks {
     this.renderer.weatherFx.detach();
     this.renderer.sky.weatherRef = null;
     this.renderer.sky.clearAmbience();
+    // ★BJ344（件3）：GPU 压力回调随实例摘除（闭包捕 this=Game——Renderer 死实例滞留面）
+    this.renderer.cbOnGpuPressure = null;
     natureParticles.clear(); // 落叶/滴水粒子不跨世界残留
     natureParticles.onDripSplash = null;
+    // ★BJ344（件3,合成层 +3/轮清偿）：Wiring 器件闭包组随实例摘除——attachDevices
+    //  （:6880）挂的 device/teleportPair 箭头闭包捕 makeDeviceCtx() 全量（timeSkip/
+    //  dropItem/spawnNpc/mechSpawnOk/itemSpawnOk → this=Game）,killTileCtxProvider
+    //  （:6876）/hitSwitchSound（:6870）同捕 this。旧实例经 Game.wiring→device→ctx→
+    //  this 环存活时,其 GLPipeline/GLWorldLight/WaterWarpCompositor.fgCanvas 三张
+    //  脱离 canvas 的 WebGL 合成层滞留 = LayerTree P2b 16→19→22 +3/轮（堆快照
+    //  retainer 定谳 scripts/_bj344-retainer.mjs:/tmp/bj344.heapsnapshot;
+    //  探针 scripts/_bj344-layer-own.mjs）。destroy 期 wiring 无后续消费,整组摘除。
+    const wiringDead = this.wiring;
+    if (wiringDead) {
+      wiringDead.device = null;
+      wiringDead.teleportPair = null;
+      wiringDead.killTileCtxProvider = null;
+      wiringDead.hitSwitchSound = undefined;
+    }
+    this.wiring = null;
     flameParticles.clear(); // 山羊火焰 FlameParticle 同理不跨世界残留
     fadingParticles.clear(); // 编排器 FadingParticle 池（拍击石系环带）同理不跨世界残留
     clearFakeFish();        // FakeFish 装饰鱼群同理不跨世界残留（寿命 ≤420t,防泄漏）
@@ -12556,8 +12585,14 @@ export class Game implements GameHooks {
     pidP = resolveBowProjOverride(bowVid, pidP, this.player.equipStats.moltenQuiver).projId;
     pidP = forceGunProjId(bowVid, pidP);
     // Damage3/KnockBack3 终值（主链同式：词缀只乘武器基伤,弹药伤乘分道乘区后截断叠加）
-    const dmgP = Math.round((c3540.damage ?? 50) * (psP?.dmg ?? 1) * this.player.rangedDamageMult(rKindP))
-      + Math.trunc(((ammoCP?.damage ?? 0)) * this.player.rangedDamageMult(rKindP));
+    // ★BJ343 件 2 两步链 1:1：武器侧=①词缀步 Item.cs:577（f32+银行家）②GetWeaponDamage
+    //  Player.cs:54066 `(int)((float)damage×mult+5E-06f)`（截断+偏置——ItemCheck_Shoot
+    //  :47479 `int Damage = weaponDamage` 直传 PickAmmo）；弹药侧=PickAmmo :54193
+    //  `Damage += (int)((float)num×GetWeaponDamageMultiplier)`（截断,无偏置）。旧式
+    //  Math.round(武器步)=half-up,小数部 ≥0.5 段整段+1
+    const dmgPAff = roundCSf32Mul((c3540.damage ?? 50), psP?.dmg ?? 1);
+    const dmgP = truncCSf32MulBias(this.player.rangedDamageMult(rKindP), dmgPAff)
+      + truncCSf32Mul(this.player.rangedDamageMult(rKindP), (ammoCP?.damage ?? 0));
     let kbP = (c3540.knockBack ?? 2) * (psP?.kb ?? 1) + (ammoCP?.knockBack ?? 0);
     // speed3 = speedBase 基准（630 段硬编码 14；705 段 =12，Projectile.cs:68319——
     // 经参数注入）+ 弹药 shootSpeed + 箭袋 ×1.1 +
@@ -13974,13 +14009,18 @@ export class Game implements GameHooks {
       if ((heldVid === 4956 || heldVid === 5669) && this.player.useTime === 0 && canChain && swingOver) {
         const arcCritZ = 0.04 + (itemCombat(heldVid)?.crit ?? 0) / 100
           + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
-        // GetWeaponDamage：物品伤害×词缀×近战全系乘区（NewProjectile Damage 实参）
-        const zDmg = Math.max(1, Math.round(cwMelee!.damage * (ps?.dmg ?? 1) * this.player.damageMult('melee')));
+        // GetWeaponDamage：物品伤害×词缀×近战全系乘区（NewProjectile Damage 实参）。
+        // ★BJ343 件 2 两步链 1:1：①词缀步 Item.cs:577 `(int)Math.Round((float)damage
+        //  ×dmg)`（f32+银行家——原版在 Prefix 期已烙入 item.damage,本仓不烙 def 逐用点
+        //  补算）②GetWeaponDamage Player.cs:54066 `(int)((float)damage×mult+5E-06f)`
+        //  （截断+偏置,非 Math.Round——旧单步 Math.round 在小数部 ≥0.5 段整段+1）
+        const zAff = roundCSf32Mul(cwMelee!.damage, ps?.dmg ?? 1);
+        const zDmg = Math.max(1, truncCSf32MulBias(this.player.damageMult('melee'), zAff));
         const zPayload = { useTime: reuseSpd, fired: 1, vid: heldVid, dmg: zDmg, crit: arcCritZ,
           pen: (eq.armorPen ?? 0) + this.player.meleeArmorPen };
         this.swing = {
           t: animSpd, dur: animSpd, item: held!.id,
-          dmg: Math.max(1, Math.round(cwMelee!.damage * (ps?.dmg ?? 1))),
+          dmg: Math.max(1, zAff),   // 词缀步=烙定 item.damage（Item.cs:577 语义）
           kb: cwMelee!.knockback * (ps?.kb ?? 1),
           noGraphic: true,   // noUseGraphic（Item.cs:39991）——投射物即本体，不再画持物
           zenith: zPayload,
@@ -25613,8 +25653,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //      （占位左上）+名单像素档——各档与 TileObjectData W×H 逐一同值（2×2/3×1/
     //      1×1/2×1）= 物件整框。
     //    · 非表驱动 legacy 实心件：PlaceTile → Collision.EmptyTile（Collision.cs:1361-1384）
-    //      查玩家（active&&!dead&&!ghost）+敌怪（active）→ 保留 overlapsEntity
-    //      （本仓既有玩家+敌怪近似;closeDoor :22101 同消费,本体勿改）。
+    //      查玩家（active&&!dead&&!ghost）+NPC 全表（active）→ overlapsEntity
+    //      （★BJ343 件 3 起委托 emptyTileEntitiesRect 单源=原版全语义:玩家豁免面+
+    //      敌怪/城镇/小动物同池,非旧"玩家+敌怪"近似;closeDoor 同消费）。
     if (anchorRec) {
       if (PLACE_OVER_PLAYER_ROSTER.has(def.vanilla?.sheet ?? -1)
         && this.playerOverlapsRect(tx * TILE, ty * TILE, ow * TILE, oh * TILE)) return;
@@ -26143,15 +26184,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
   }
 
-  /** Collision.EmptyTile(x,y,ignoreTiles) 占位谓词（占用=true）——门族实体占位门共用
-   *  （closeDoor blocked 臂/shiftTallGate :52206 臂/NPC 面经 GameHooks）。★BJ322 转正 */
-  overlapsEntity(px: number, py: number): boolean {
-    const rx = px * TILE, ry = py * TILE;
-    if (this.player.x < rx + TILE && this.player.x + this.player.w > rx && this.player.y < ry + TILE && this.player.y + this.player.h > ry) return true;
-    for (const e of this.entities.enemies) {
-      if (e.x < rx + TILE && e.x + e.w > rx && e.y < ry + TILE && e.y + e.h > ry) return true;
+  /** Collision.EmptyTile 实体占位臂【单源】（Collision.cs:1361-1384 亲读；占用=true）。
+   *  ★BJ343 件 3（2026-09-25）：原版语义逐条——
+   *  · 玩家臂 `active && !dead && !ghost`（:1368）——死亡/幽灵玩家【豁免】不占位
+   *    （本仓 single-player 恒 active;dead/isGhostPhase 同 playerOverlapsRect 判据）;
+   *  · NPC 臂 `Main.npc[l].active`（:1374-1380）——原版无分池,敌怪+城镇 NPC+小动物
+   *    同在 Main.npc 一张表 → 本仓 enemies+npcs+critters 三桶全收;
+   *  · 【无】projectile/item 臂——弹幕不占门位（Collision.cs 全文无 Main.projectile
+   *    查询）。tile 臂（`tile.active() && !ignoreTiles`）由各消费面自持（门族全走
+   *    ignoreTiles:true=纯实体域）。
+   *  消费面：overlapsEntity（单格壳,手动关门/放置 EmptyTile 近似/NPC 开关门）与
+   *  areaEmptyAt（矩形壳,导线门 devices ctx.areaEmpty/活板门/高门关臂）统一委托——
+   *  四门族（手动关门/高门/活板门/导线门）占位语义单源（此前 overlapsEntity 漏城镇
+   *  NPC/critter、areaEmptyAt 多收弹幕、两壳均缺 dead/ghost 玩家豁免）。 */
+  private emptyTileEntitiesRect(rx: number, ry: number, rw: number, rh: number): boolean {
+    const hit = (e: { x: number; y: number; w: number; h: number }) =>
+      e.x < rx + rw && e.x + e.w > rx && e.y < ry + rh && e.y + e.h > ry;
+    const p = this.player;
+    if (!p.dead && !p.isGhostPhase(this.world) && hit(p)) return true;   // :1368
+    for (const b of [this.entities.enemies, this.entities.npcs, this.entities.critters]) {   // :1374-1380
+      for (const e of b) { if (hit(e as unknown as { x: number; y: number; w: number; h: number })) return true; }
     }
     return false;
+  }
+
+  /** Collision.EmptyTile(x,y,ignoreTiles) 占位谓词（占用=true）——门族实体占位门共用
+   *  （closeDoor blocked 臂/shiftTallGate :52206 臂/NPC 面经 GameHooks）。★BJ322 转正;
+   *  ★BJ343 件 3：委托 emptyTileEntitiesRect 单源（1×1 格矩形） */
+  overlapsEntity(px: number, py: number): boolean {
+    return this.emptyTileEntitiesRect(px * TILE, py * TILE, TILE, TILE);
   }
 
   /** ★M-4（2026-09-02 九批）：PlaceThing_Tiles_BlockPlacementIfOverPlayers 玩家门
@@ -27733,16 +27794,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** Collision.EmptyTile(x,y,ignoreTiles) 等价——格区矩形内无任何实体（★BJ250 抽出：
    *  devices ctx.areaEmpty 与活板门右键臂（BJ324 后=Door.shiftTrapdoor 关臂占位门）
-   *  关门占位门单源共用） */
+   *  关门占位门单源共用）。★BJ343 件 3：委托 emptyTileEntitiesRect 单源（矩形域）
+   *  ——弹幕臂已摘（原版 EmptyTile 无 projectile 查询,弹幕穿门不咬导线门） */
   private areaEmptyAt(x: number, y: number, w2: number, h2: number): boolean {
-    const rx = x * TILE, ry = y * TILE, rw = w2 * TILE, rh = h2 * TILE;
-    const hit = (e: { x: number; y: number; w: number; h: number }) =>
-      e.x < rx + rw && e.x + e.w > rx && e.y < ry + rh && e.y + e.h > ry;
-    if (hit(this.player)) return false;
-    for (const b of [this.entities.enemies, this.entities.npcs, this.entities.critters, this.entities.projectiles]) {
-      for (const e of b) { if (hit(e as unknown as { x: number; y: number; w: number; h: number })) return false; }
-    }
-    return true;
+    return !this.emptyTileEntitiesRect(x * TILE, y * TILE, w2 * TILE, h2 * TILE);
   }
 
   /** 宝石锁开/关（WorldGen.ToggleGemLock :46872-46927 1:1，★BJ250）：
@@ -40199,11 +40254,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         },
         promoteCoin: (d) => {
           // OnReachingMaxStack（:436-449）inner.SetDefaults(下一级)——SetDefaults 语义
-          // 含 stack=1（100 银币=1 金币;漏重置=百倍价值）
+          // 含 stack=1（100 银币=1 金币;漏重置=百倍价值）+ w/h 重置（71-74 尺寸互异
+          // [10,10]/[10,12]/[10,14]/[12,14],Item.cs:2219-2282——★BJ343 件1 补刷）
           const vid = (ITEM_DEFS[d.itemId]?.vid ?? -1);
           if (vid >= 71 && vid < 74) {
             const k = VANILLA_ITEM_KEY_BY_ID[vid + 1];
-            if (k) { const nid = ITEM_BY_KEY[k]; if (nid !== undefined) { d.itemId = nid; d.stack = 1; } }
+            if (k) { const nid = ITEM_BY_KEY[k]; if (nid !== undefined) { d.itemId = nid; d.stack = 1; d.refreshDimsFromVid(); } }
           }
         },
       },
@@ -40666,7 +40722,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (dropsAllItemsOnDeath(charDiff)) {
       dropInventoryOnDeath(p.inv, (key, stack) => {
         // ★BJ326：TryDroppingSingleItem 显式速度逐字（Player.cs:55027 Next(-20,21)×0.2,
-        //  Next(-20,1)×0.2=vx[-4,4] 步 0.2 / vy[-4,-0.2] 步 0.2）——旧 (rand-0.5)×8/
+        //  Next(-20,1)×0.2=vx[-4,4] 步 0.2 / ★BJ343 勘误:vy[-4.0,0.0] 步 0.2——
+        //  Next(min,max) 上开界 [-20,0] 而非 [-4,-0.2]）——旧 (rand-0.5)×8/
         //  -2-rand×2 vy 分布不符（[-4,-2] 恒快坠）
         this.spawnDrop(p.cx, p.cy, key, stack,
           (Math.floor(Math.random() * 41) - 20) * 0.2, (Math.floor(Math.random() * 21) - 20) * 0.2);

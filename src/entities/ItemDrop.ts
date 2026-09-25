@@ -152,6 +152,20 @@ export class ItemDrop extends Entity {
     if (al && al > 0) this.alpha = al;
   }
 
+  /** ★BJ343 件 1（2026-09-25）：变型点按 vid 重刷命中盒——原版三处变型全走 Item.
+   *  SetDefaults 语义（重置 width/height）：①WorldItem.cs:1752 微光转化
+   *  `inner.SetDefaults(transformToItem)` ②EmergencyStacking.cs:447 钱币升面
+   *  （71/72/73/74 盒互异 [10,10]/[10,12]/[10,14]/[12,14],Item.cs:2219-2282）
+   *  ③NetMessage msg21 槽位全态覆写换 type（WriteItem 全写,重 assert 重建同语义）。
+   *  此前变型只改 itemId 不刷 w/h → 命中盒沿用旧 vid 尺寸（物理/拾取/岩浆烧毁/
+   *  微光探针全消费）。表外 vid 回落 12×12 统一盒（构造同款缺省语义） */
+  refreshDimsFromVid(): void {
+    const vid = (ITEM_DEFS[this.itemId]?.vid ?? -1);
+    const dims = vanillaItemDimsOfVid(vid);
+    if (dims) { this.w = dims[0]; this.h = dims[1]; }
+    else { this.w = 12; this.h = 12; }
+  }
+
   fixedUpdate(dt: number, game: GameHooks) {
     this.age++;
     this.grabbed = false;   // beingGrabbed 每 tick 复位（WorldItem.cs:437,拉取路径再置位）
@@ -628,6 +642,7 @@ export class ItemDrop extends Entity {
       const iid = internalIdOfVanilla(target);
       if (iid >= 0) {
         this.itemId = iid;       // SetDefaults(target) 原堆叠保留（:1813-1817）
+        this.refreshDimsFromVid();   // ★BJ343 件1：SetDefaults 语义含 w/h 重置（WorldItem.cs:1752）
         this.shimmered = true;    // 上浮漂浮
         this.shimmerTime = 1;
         this.vx *= 0.1; this.vy *= 0.1;

@@ -10,6 +10,8 @@
 //  三面：①窗口纯函数（margin/世界钳/缩放）②管线机制锁（伪影恰限于窗口边缘 1 列,
 //   与原版管线 1:1；内移 1 格即恢复原带）③修复面（窗缘外扩 ≥1 格出屏）。
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { TileStore } from '../src/world/TileStore';
 import type { SpriteAtlas } from '../src/assets/SpriteAtlas';
 import { drawVanillaLiquids, liquidDrawWindow, LIQUID_WINDOW_MARGIN } from '../src/render/VanillaLiquidRenderer';
@@ -82,6 +84,19 @@ describe('BJ317 液体绘制窗边界采样', () => {
     expect(w[0]).toBeLessThanOrEqual(screenLeftTile - 1);
     const screenTopTile = Math.floor((4000 - 800 / 2 / 1) / 16);
     expect(w[1]).toBeLessThanOrEqual(screenTopTile - 1);
+    // ★BJ343 件 7 出屏不变式强化（钉伪影格整体出屏,margin 退化即红）：
+    //  原版管线 pad=k∈[2,W-2)——伪影可入窗深 PAD=2 列（P2 扫描窗内缘两列 hasVisA
+    //  恒假）→ 不变式 = w[0]+PAD ≤ 屏左−1（窗缘+pad 深度全在屏外）;右/上同构;
+    //  且 MARGIN≥3（margin 2 时 w[0]+PAD=屏左 → 不变式破 = 伪影回屏）。
+    //  底缘沿用原版 +5（vanilla GetScreenDrawArea offScreenRange 同相,只验 ≥屏底+1）
+    const PAD = 2;
+    expect(LIQUID_WINDOW_MARGIN, 'margin 须 ≥3（伪影入窗深 2 列+屏外 ≥1 格）').toBeGreaterThanOrEqual(3);
+    expect(w[0] + PAD, '左缘伪影带须全出屏').toBeLessThanOrEqual(screenLeftTile - 1);
+    expect(w[1] + PAD, '上缘伪影带须全出屏').toBeLessThanOrEqual(screenTopTile - 1);
+    const screenRightTile = Math.ceil((32000 + 1280 / 2 / 1) / 16);
+    expect(w[2] - PAD, '右缘伪影带须全出屏').toBeGreaterThanOrEqual(screenRightTile + 1);
+    const screenBottomTile = Math.ceil((4000 + 800 / 2 / 1) / 16);
+    expect(w[3]).toBeGreaterThanOrEqual(screenBottomTile + 1);
   });
 
   it('②管线机制锁：窗口切湖时边缘列误用 sx=0 边缘变体+表面格丢 1280 静态带；恰限 1 列（=原版管线 1:1）', () => {
@@ -142,5 +157,26 @@ describe('BJ317 液体绘制窗边界采样', () => {
     expect(edgeT!.sy % 80).toBe(0);          // 误置表面带（fx=16∧fy=0 → isSurface 假阳性）
     const inT = cutT.get('40,34');
     expect(inT!.sy % 80).toBe(48);           // 一格之下即池体带
+  });
+
+  it('④★BJ343 Renderer 集成锚：drawLiquids 接线走 liquidDrawWindow 单源（回退接线爆红）', () => {
+    // 现②③经纯函数直调——Renderer 侧接线回退（自算窗口/退旧 tx0=屏左）不爆红。
+    // 结构锁（codeOf 源码锚,BJ330/BJ280 判例——node 不可 boot Renderer）：
+    //  · import 面：drawVanillaLiquids 与 liquidDrawWindow 同源引入（缺一即断链）
+    //  · 接线面：Renderer.drawLiquids 内窗口先算（liquidDrawWindow(cam.x,...) 解构
+    //    [tx0,ty0,tx1,ty1]）再喂全部 drawVanillaLiquids 调用点（三调用点同参 =
+    //    背景液/前景液/修饰层同窗,单点换窗）
+    const renderer = readFileSync(resolve(__dirname, '../src/render/Renderer.ts'), 'utf8')
+      .replace(/^\s*\/\/.*$/gm, '');
+    expect(renderer).toContain("drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow } from './VanillaLiquidRenderer'");
+    expect(renderer).toContain('const [tx0, ty0, tx1, ty1] = liquidDrawWindow(cam.x, cam.y, viewW, viewH, z, world.w, world.h);');
+    // 三调用点全部吃解构窗口（直改任一调用点回自算坐标 = 红面）
+    const callSites = renderer.match(/drawVanillaLiquids\((?:fgCtx \?\? this\.ctx|this\.ctx), this\.atlas, world\.store, world\.groundLevel, tx0, ty0, tx1, ty1/g) ?? [];
+    expect(callSites.length, 'drawVanillaLiquids 调用点须全走单源窗口').toBeGreaterThanOrEqual(3);
+    // 窗口计算必须先于首个调用点（顺序 = 单点换窗而非各点自算）
+    const winAt = renderer.indexOf('liquidDrawWindow(cam.x');
+    const callAt = renderer.indexOf('drawVanillaLiquids(this.ctx');
+    expect(winAt).toBeGreaterThan(0);
+    expect(callAt).toBeGreaterThan(winAt);
   });
 });

@@ -388,3 +388,78 @@ describe('dust 43 闪光尘档（★F1:a=num、rgb=(num+9)/10;43+color 不走烘
     expect(src).toContain('VanillaDust.colorPass(d, rgb, a)');
   });
 });
+
+// ===========================================================================
+// ★BJ342 ND5（2026-09-25）GetAlpha 全表补缺金标（Dust.cs:2497-2798 [1457] 逐档,
+// 1458 同文）。变异证红：缺档尘落 default {num,num}=亮度/擦除双偏离——本面任一
+// 档回退 default 即红。63/288/289/400/542-545 原版本就无 GetAlpha 分支（default
+// 尾=原版相,勿补,BJ228 CENSUS_EXEMPT 同款钉）。
+// ===========================================================================
+describe('BJ342 ND5 GetAlpha 全表补缺金标', () => {
+  const nd = (type: number, o: { alpha?: number; scale?: number; color?: { r: number; g: number; b: number; a: number } | null } = {}) =>
+    ({ type, alpha: o.alpha ?? 0, scale: o.scale ?? 1, color: o.color ?? null } as never);
+  const num = (a: number) => (255 - a) / 255;
+
+  it('27/197 判别面：27=(num+3)/4 亮度比值档（α100 rgb 0.608→0.902,BJ313 观感域）、197=(250,250,250,150) 与 172 同档', () => {
+    expect(VanillaDust.alphaOf(nd(27, { alpha: 100 })))
+      .toEqual({ rgb: (num(100) + 3) / 4, a: num(100) });
+    expect(VanillaDust.alphaOf(nd(197)))
+      .toEqual({ rgb: 250 / 255, a: 150 / 255 });
+  });
+
+  it('活跃面：15 rgb 面 + (num+3)/4 族余员、213/260 亮度档、157 脉冲档（f32 双相+无钟兜底）、226·272·228/269/259/306/263', () => {
+    expect(VanillaDust.alphaOf(nd(15, { alpha: 150 })))
+      .toEqual({ rgb: (num(150) + 3) / 4, a: num(150) });   // 全亮桶成员仍经 alphaOf 取 rgb 面
+    for (const t of [29, 35, 41, 44, 45, 56, 57, 73, 74, 274]) {
+      expect(VanillaDust.alphaOf(nd(t, { alpha: 100 })))
+        .toEqual({ rgb: (num(100) + 3) / 4, a: num(100) });
+    }
+    expect(VanillaDust.alphaOf(nd(213, { scale: 1 }))).toEqual({ rgb: 102 / 255, a: 102 / 255 });   // (int)(1/2.5×255)=102
+    expect(VanillaDust.alphaOf(nd(260, { scale: 1 }))).toEqual({ rgb: 102 / 255, a: 102 / 255 });
+    // 157 f32 语义：2.55f=2.54999995（就近舍入向下）→ n7=0.9499999f →
+    // rgb=min(255,(int)242.25+50)=255、a=(int)94.99999=94
+    expect(VanillaDust.alphaOf(nd(157), { mouseTextColor: 255 })).toEqual({ rgb: 1, a: 94 / 255 });
+    // mtc=190（脉冲谷）→ n7=0.29999995f → rgb=(int)76.5+50=126、a=(int)29.999995=29（f64 直算=30 偏差）
+    expect(VanillaDust.alphaOf(nd(157), { mouseTextColor: 190 })).toEqual({ rgb: 126 / 255, a: 29 / 255 });
+    expect(VanillaDust.alphaOf(nd(157))).toEqual({ rgb: 1, a: 94 / 255 });   // 无钟兜底=255 相
+    for (const t of [226, 272, 228]) {
+      expect(VanillaDust.alphaOf(nd(t))).toEqual({ rgb: 1, a: 25 / 255 });   // Lerp(light,White,.8) rgb=1 备案、A=25 精确
+    }
+    expect(VanillaDust.alphaOf(nd(269))).toEqual({ rgb: 1, a: 25 / 255 });   // 与 229 同句 :2687
+    expect(VanillaDust.alphaOf(nd(259))).toEqual({ rgb: 230 / 255, a: 230 / 255 });
+    expect(VanillaDust.alphaOf(nd(306, { alpha: 100, color: { r: 1, g: 0.5, b: 0.25, a: 1 } })))
+      .toEqual({ rgb: 0, a: num(100), rgbv: [num(100), 0.5 * num(100), 0.25 * num(100)] });   // this.color×num 四通道
+    expect(VanillaDust.alphaOf(nd(263, { color: { r: 255, g: 0, b: 0, a: 64 } })))
+      .toEqual({ rgb: 0.5, a: (8 / 255) * 0.5 });   // 与 264 同句 :2558
+  });
+
+  it('dormant 抽验：323/292 恒白、299-301/305 四色 rgbv、308/309/324×num、304/159、270/271、219-223、279 scale 面、244-247/71/72、284/327', () => {
+    expect(VanillaDust.alphaOf(nd(323))).toEqual({ rgb: 1, a: 1 });          // :2506 Color.White
+    expect(VanillaDust.alphaOf(nd(292))).toEqual({ rgb: 1, a: 1 });          // :2538 Color.White
+    expect(VanillaDust.alphaOf(nd(299))).toEqual({ rgb: 0, a: 200 / 255, rgbv: [50 / 255, 1, 50 / 255] });
+    expect(VanillaDust.alphaOf(nd(300))).toEqual({ rgb: 0, a: 1, rgbv: [50 / 255, 200 / 255, 1] });
+    expect(VanillaDust.alphaOf(nd(301))).toEqual({ rgb: 0, a: 200 / 255, rgbv: [1, 50 / 255, 125 / 255] });
+    expect(VanillaDust.alphaOf(nd(305))).toEqual({ rgb: 0, a: 200 / 255, rgbv: [200 / 255, 50 / 255, 200 / 255] });
+    expect(VanillaDust.alphaOf(nd(308))).toEqual({ rgb: 0, a: 190 / 255, rgbv: [225 / 255, 200 / 255, 250 / 255] });
+    expect(VanillaDust.alphaOf(nd(309))).toEqual(VanillaDust.alphaOf(nd(308)));
+    expect(VanillaDust.alphaOf(nd(324, { alpha: 100 })))
+      .toEqual({ rgb: 0, a: (190 / 255) * num(100), rgbv: [(225 / 255) * num(100), (200 / 255) * num(100), (250 / 255) * num(100)] });
+    expect(VanillaDust.alphaOf(nd(304, { alpha: 100 }))).toEqual({ rgb: 1, a: num(100) });   // White×num
+    expect(VanillaDust.alphaOf(nd(159))).toEqual({ rgb: 250 / 255, a: 50 / 255 });
+    expect(VanillaDust.alphaOf(nd(270))).toEqual({ rgb: 1, a: 25 / 255 });   // Lerp .5 仿射光面备案
+    expect(VanillaDust.alphaOf(nd(271))).toEqual({ rgb: 1, a: 127 / 255 });
+    for (const t of [219, 220, 221, 222, 223]) {
+      expect(VanillaDust.alphaOf(nd(t))).toEqual({ rgb: 1, a: 25 / 255 });   // 219/220 活发射方（966/436）
+    }
+    expect(VanillaDust.alphaOf(nd(279, { scale: 0.64 }))).toEqual({ rgb: 0.64, a: 0.64 });   // ×min(scale,1) 四通道
+    expect(VanillaDust.alphaOf(nd(279, { scale: 2 }))).toEqual({ rgb: 1, a: 1 });
+    for (const t of [244, 245, 246, 247]) {
+      expect(VanillaDust.alphaOf(nd(t))).toEqual({ rgb: 1, a: 0 });
+    }
+    expect(VanillaDust.alphaOf(nd(71))).toEqual({ rgb: 200 / 255, a: 0 });
+    expect(VanillaDust.alphaOf(nd(72))).toEqual({ rgb: 200 / 255, a: 200 / 255 });
+    expect(VanillaDust.alphaOf(nd(284, { color: { r: 0.8, g: 0.6, b: 0.4, a: 0.5 } })))
+      .toEqual({ rgb: 0, a: 0.5, rgbv: [0.8, 0.6, 0.4] });   // newColor×color,A=color.A
+    expect(VanillaDust.alphaOf(nd(327))).toEqual({ rgb: 1, a: 1 });   // 夜相面（dormant,isDay 二相判别接线时补）
+  });
+});

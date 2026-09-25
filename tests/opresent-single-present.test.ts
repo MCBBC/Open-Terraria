@@ -118,9 +118,9 @@ describe('opresent pass3（GLWorldCompose compose 尾）', () => {
     expect(RDR).toMatch(/★opresent:A2 未走成（wc 缺\/compose 失败）——补贴天空栈再落旧链\/读回链[\s\S]{0,120}if \(skyPend\) this\.presentPendingSky\(skyPend, viewW, viewH\);/);
   });
 
-  it('fullbright 支补贴（防运行时翻面竞态漏挂起）;补贴面=presentPendingSky（管线死亡窗静默）', () => {
+  it('fullbright 支补贴（防运行时翻面竞态漏挂起）;补贴面=presentPendingSky（★R1-F9:死亡帧 dead-drop 显式丢弃）', () => {
     expect(RDR).toMatch(/if \(this\.fullbright\) \{ \/\/ 开灯：不做 multiply，全部原色（世界层仍须叠回主画布）\s*\n\s*\/\/ ★opresent:defer 帧补贴（门已挡 fullbright——防运行时翻面竞态漏挂起）\s*\n\s*if \(skyPend\) this\.presentPendingSky\(skyPend, viewW, viewH\);/);
-    expect(RDR).toMatch(/private presentPendingSky\(sky: \{ fboName: string; w: number; h: number \}, viewW: number, viewH: number\): void \{\s*\n\s*const pipe = this\.swPipe;\s*\n\s*const f = pipe && !pipe\.unavailable \? pipe\.fbo\(sky\.fboName, sky\.w, sky\.h\) : null;\s*\n\s*if \(f\?\.tex\) \{\s*\n\s*pipe!\.present\(f\);\s*\n\s*this\.ctx\.drawImage\(pipe!\.canvas, 0, 0, viewW, viewH\);/);
+    expect(RDR).toMatch(/private presentPendingSky\(sky: \{ fboName: string; w: number; h: number \}, viewW: number, viewH: number\): void \{\s*\n\s*const pipe = this\.swPipe;\s*\n\s*if \(!pipe \|\| pipe\.unavailable\) \{\s*\n\s*this\.opresentStats\['dead-drop'\] = \(this\.opresentStats\['dead-drop'\] \|\| 0\) \+ 1;\s*\n\s*return;\s*\n\s*\}\s*\n\s*const f = pipe\.fbo\(sky\.fboName, sky\.w, sky\.h\);\s*\n\s*if \(f\?\.tex\) \{\s*\n\s*pipe\.present\(f\);\s*\n\s*this\.ctx\.drawImage\(pipe\.canvas, 0, 0, viewW, viewH\);/);
   });
 });
 

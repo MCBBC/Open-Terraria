@@ -8,8 +8,9 @@
 //                ★2026-09-23 修复案:worker 模块实例无 document,ensureWaveTextures
 //                不可达,不喂则 _drawRipples 的 !_rippleData 门把涟漪整批清队）
 //              | {op:'frame', inp, inj:[...]}（注入批量随帧）
-//   worker→main: {op:'field', R:Float32Array(copy), gW, gH, progress, intensity,
-//                 waveOff:[x,y], cam:[x,y,zoom]}
+//   worker→main: {op:'field', R:Float32Array(transferable), gW, gH, progress,
+//                 intensity, waveOff:[x,y], cam:[x,y,zoom]}——R/G buffer 走
+//                 transfer list（★R3-F2 零拷贝;worker 侧副本 detach 即弃）
 // 同步纪律：主线程零阻塞（全异步 postMessage）；场快照原子替换；注入锚=F_prev
 //   （注入批先于 frame 应用=天然 F_prev 语义,与主线程版时序同构）。
 // 本 worker 导入 WaterWaves 模块本体=内核逐式同源（零转录）；模块级 DOM 触点
@@ -50,7 +51,12 @@ self.onmessage = (e: MessageEvent) => {
       }
     }
     waterWaves.frame(m.inp as Parameters<typeof waterWaves.frame>[0]);
-    // 场快照回传（slice 复制——grid 留在 worker 侧继续步进,不 transfer）
-    self.postMessage({ op: 'field', ...waterWaves.exportFieldSnapshot() });
+    // 场快照回传。★R3-F2（2026-09-25 红蓝批 B）：transferable 零拷贝——slice 产
+    //  独立 buffer 副本（本体 _R/_G 留 worker 继续步进,不受 detach 影响）,buffer
+    //  转移主线程=旧结构克隆 125-180MB/s churn 清零;量化收益注释见 exportFieldSnapshot。
+    //  所有权单向:postMessage 后 worker 侧副本 detach 即弃（本 handler 立即返回,
+    //  无再引用面）——capture-protocol 判例「主线程收达数组不得再被 worker 引用」。
+    const snap = waterWaves.exportFieldSnapshot();
+    self.postMessage({ op: 'field', ...snap }, [snap.R.buffer, snap.G.buffer]);
   }
 };

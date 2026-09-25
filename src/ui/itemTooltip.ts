@@ -37,6 +37,7 @@ const WHIP_ITEMS: Record<string, { proj: number; dmg: number; kb: number; speed:
 const SOCIAL_VANITY_EFFECTS_VIDS: ReadonlySet<number> = new Set(vanityEffectsJson.social as number[]);
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
+import { roundCSf32Mul, truncCSf32MulBias, f32 } from '../stats/ScaleStats';   // ★BJ343 件 2 舍入单源
 
 /** 原版物品 PascalCase 名键（ItemName.Xxx 查 l10n） */
 const vanillaItemNameKey = (vid: number): string => ITEM_NAME_BY_ID[vid] ?? `Item${vid}`;
@@ -241,7 +242,8 @@ export function buildTooltipBody(
   // ── legacy（非 vi_）物品：维持原近似（damage/pick/axe/防御/恢复）──
   if (vid < 0) {
     if (def.tool?.damage) {
-      lines.push({ text: T('Mods.SandboxWorld.Item.Damage', Math.round(def.tool.damage * pm('dmg'))), tag: 'damage' });
+      // ★BJ343 件 2：Item.cs:577 f32+银行家（旧 Math.round=f64+half-up）
+      lines.push({ text: T('Mods.SandboxWorld.Item.Damage', roundCSf32Mul(def.tool.damage, pm('dmg'))), tag: 'damage' });
     }
     if (def.tool?.power && def.tool.type !== 'sword') {
       lines.push({ text: T(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power), tag: 'toolpower' });
@@ -295,7 +297,13 @@ export function buildTooltipBody(
     const kind = f2?.melee ? 'melee' : f2?.ranged ? 'ranged' : f2?.magic ? 'magic' : f2?.summon ? 'summon' : null;
     // :20516-20523：×ToolTipDamageMultiplier（回响族 ×2 显示）→ ×玩家乘区（+5e-6 舍入偏置）
     const mult = (player ? player.dmgMult[kind ?? 'melee'] : 1);
-    const dmg = Math.round(cd!.damage! * (TOOLTIP_DMG_MUL[vid] ?? 1) * pm('dmg') * mult + 5e-6);
+    // ★BJ343 件 2：原式 Main.cs:20863-20870 两步 (int) 截断链（非 Math.Round!）——
+    //  ①damage=(int)((float)damage×ToolTipDamageMultiplier)（截断,表值全 ×2 整数=数值
+    //  no-op,结构 1:1 保留）②(int)(GetWeaponDamageMultiplier×(float)damage+5E-06f)。
+    //  旧式 Math.round(全部乘完+偏置)=half-up 舍入,小数部 ≥0.5 段整段+1（f64 精度另计）
+    const dmgT = Math.trunc(f32(f32(cd!.damage!) * f32(TOOLTIP_DMG_MUL[vid] ?? 1)));   // :20863
+    const multCS = f32(f32(pm('dmg')) * f32(mult));   // 本仓词缀/玩家乘区拆双因子,合成单乘子（f32 域）
+    const dmg = truncCSf32MulBias(multCS, dmgT);
     const tipSuffix = kind === 'melee' ? 2 : kind === 'ranged' ? 3 : kind === 'magic' ? 4 : kind === 'summon' ? 53 : 55;
     lines.push({ text: dmg + T(`LegacyTooltip.${tipSuffix}`), tag: 'damage' });
     // 暴击（近/远/魔，:20518-20544）：视觉暴击 = 4 基础 + 装备/buff + 词条

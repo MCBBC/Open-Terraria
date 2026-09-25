@@ -7,18 +7,21 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GLShimExecutor } from '../src/render/glshim/GLShimExecutor';
 import { dustPremulBake } from '../src/fx/VanillaDust';
+import { texId } from '../src/render/texId';
 
 const RDR = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
 const SRC = readFileSync(join(__dirname, '../src/render/GLSpriteLayer.ts'), 'utf8');
 
 // ---- FakeCtx：记录面 drawImage/fillRect 参数与状态（重放落点） ----
-interface DrawRec { op: 'draw' | 'fill'; img: unknown; args: unknown[]; gco: string; alpha: number; smooth: boolean }
+// ★R2-F1 判别器面:mat=落笔瞬间的 CTM 快照（rot/flip 经 translate/rotate/scale
+// 折进矩阵——flip 轴错置在矩阵符号上可判;args 携源矩形=非对称精灵判别面）。
+interface DrawRec { op: 'draw' | 'fill'; img: unknown; args: unknown[]; gco: string; alpha: number; smooth: boolean; mat: [number, number, number, number, number, number] }
 class FakeCtx {
   a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
   globalAlpha = 1;
   globalCompositeOperation: GlobalCompositeOperation = 'source-over';
   imageSmoothingEnabled = false;
-  fillStyle = '#000';
+  fillStyle: string | CanvasGradient | CanvasPattern = '#000';
   font = '10px sans-serif';
   textAlign: CanvasTextAlign = 'left';
   fillTextLog: Array<{ text: string; x: number; y: number }> = [];
@@ -38,9 +41,10 @@ class FakeCtx {
     this.a = a * cos + c * sin; this.b = b * cos + d * sin;
     this.c = c * cos - a * sin; this.d = d * cos - b * sin;
   }
-  drawImage(img: unknown, ...args: unknown[]) { this.log.push({ op: 'draw', img, args, gco: this.globalCompositeOperation, alpha: this.globalAlpha, smooth: this.imageSmoothingEnabled }); }
-  fillRect(x: number, y: number, w: number, h: number) { this.log.push({ op: 'fill', img: null, args: [x, y, w, h], gco: this.globalCompositeOperation, alpha: this.globalAlpha, smooth: this.imageSmoothingEnabled }); }
+  drawImage(img: unknown, ...args: unknown[]) { this.log.push({ op: 'draw', img, args, gco: this.globalCompositeOperation, alpha: this.globalAlpha, smooth: this.imageSmoothingEnabled, mat: [this.a, this.b, this.c, this.d, this.e, this.f] }); }
+  fillRect(x: number, y: number, w: number, h: number) { this.log.push({ op: 'fill', img: null, args: [x, y, w, h], gco: this.globalCompositeOperation, alpha: this.globalAlpha, smooth: this.imageSmoothingEnabled, mat: [this.a, this.b, this.c, this.d, this.e, this.f] }); }
   fillText(text: string, x: number, y: number) { this.fillTextLog.push({ text, x, y }); }
+  createLinearGradient(_x0: number, _y0: number, _x1: number, _y1: number) { return { addColorStop() {} }; }
 }
 
 /** acc 态 host 桩：有状态 stub 层（isAccumOpen/begin/endAccumulate 可观测）——
@@ -75,9 +79,14 @@ function mkAccHost() {
   };
 }
 
-/** host 桩:attach 期层可用;翻 layer.unavailable=true 后 flush 走 2D 重放支 */
+/** host 桩:attach 期层可用;翻 layer.unavailable=true 后 flush 走 2D 重放支。
+ *  ★R1-F8:attach 现含残开 FBO 守卫——桩补 isAccumOpen/endAccumulate 最小面。 */
 function mkHost() {
-  const layer = { unavailable: false } as { unavailable: boolean };
+  const layer = {
+    unavailable: false,
+    isAccumOpen: (_n: string) => false,
+    endAccumulate: () => null,
+  } as { unavailable: boolean };
   return {
     layer,
     host: {
@@ -377,5 +386,397 @@ describe('★普查案④/⑤ 结构锁（GL MULT 精确式+dollLightTint 裁剪
   it('tier-3 门加 col[3]===1（rgba 半透明 fillStyle multiply 有 (1−αs)αbCb 项不可直译→降级）', () => {
     const EXEC = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
     expect(EXEC).toContain("if (this.accMode && this.gco === 'multiply' && col && col[3] === 1 && geo && geo.rot === 0");
+  });
+});
+
+// ================= ★红蓝修复刃批 A（2026-09-25） =================
+
+/** 全功能 acc 层桩（批 A 红蓝共用）：quad/texFromImage 可观测+texAlive 可控+end 在位 */
+function mkFullAccLayer() {
+  const quads: Array<{ texKey?: string; dx: number; dy: number; dw: number; dh: number; alpha: number; rot: number }> = [];
+  const L: Record<string, unknown> = {
+    unavailable: false,
+    open: false,
+    texAliveOk: true,
+    texFromImageCalls: 0,
+    beginCalls: [] as Array<[string, boolean?]>,
+    endAccumCalls: 0,
+    isAccumOpen: (n: string) => n === 'world' && L.open === true,
+    resize: () => { /* no-op */ },
+    begin: (n: string, clear?: boolean) => { (L.beginCalls as Array<[string, boolean?]>).push([n, clear]); L.open = true; },
+    end: () => { L.open = false; },
+    endAccumulate: () => { L.endAccumCalls = (L.endAccumCalls as number) + 1; L.open = false; return null; },
+    blendAdditive: () => { /* no-op */ },
+    blendErase: () => { /* no-op */ },
+    blendMult: () => { /* no-op */ },
+    quadSprite: (e: { key?: string } | null, _ux: number, _uy: number, _sw: number, _sh: number,
+      dx: number, dy: number, dw: number, dh: number, o?: { alpha?: number; rot?: number }) => {
+      quads.push({ texKey: e?.key, dx, dy, dw, dh, alpha: o?.alpha ?? 1, rot: o?.rot ?? 0 });
+    },
+    texAlive: () => L.texAliveOk === true,
+    texFromRegion: (_k: string, img: { __id?: number }) => ({ key: 'r' + String(img.__id ?? '?'), tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),
+    texRefresh: (_k: string, img: { __id?: number }) => ({ key: 'd' + String(img.__id ?? '?'), tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),
+    texFromData: () => ({ key: 'pair', tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),
+    texFromImage: (k: string) => { L.texFromImageCalls = (L.texFromImageCalls as number) + 1; return { key: k, tex: {}, w: 1, h: 1, stamp: 1, bytes: 4 }; },
+  };
+  return { L: L as never, Lraw: L, quads };
+}
+
+describe('★R2-F1 decode 旋转支镜像轴:det<0 落局部 V 轴（flipY）,非 flipX（内容点反射 180° 病）', () => {
+  it('判别器:非对称精灵(源 8×16) + scale(-1,1)+rotate(π−0.6) CTM → 重放中心锚矩阵=R(ang)·S(1,−1)', () => {
+    // 正交列恒等式:v̂=sign(det)·û⊥——det<0 时局部 V 轴镜像（flipY）;
+    // 旧码 flipX=R(ang)·S(−1,1)=线性部分整体取负=内容点反射 180°（Arrow 左斜飞族受击面）。
+    const { raw, ex, layer, wrap } = setup();
+    wrap.scale(-1, 1);
+    wrap.rotate(Math.PI - 0.6);   // rot=atan2(b,a)=0.6（任务书构造:rotate(π−ang)）
+    const img = mkImg(1);          // 非对称精灵:源 8×16——180° 内容旋转不可与矩形对称混淆
+    wrap.drawImage(img, 0, 0, 8, 16, 10, 20, 8, 16);
+    flushReplay(ex, layer);
+    expect(raw.log.length).toBe(1);
+    const rec = raw.log[0];
+    expect(rec.args.slice(0, 2)).toEqual([0, 0]);
+    expect(rec.args.slice(2, 4)).toEqual([8, 16]);        // 非对称源矩形原样
+    // 中心锚 dst（−dw/2,−dh/2,Dw,Dh;fround 镜像下 lu=1+ε → 逐元 closeTo）
+    [-4, -8, 8, 16].forEach((v, k) => expect(rec.args[4 + k]).toBeCloseTo(v, 5));
+    // 重放矩阵=T(C)·R(0.6)·S(1,−1):线性部分=(cosθ,sinθ,sinθ,−cosθ)（flipY 语义）
+    const c = Math.cos(0.6), s = Math.sin(0.6);
+    expect(rec.mat[0]).toBeCloseTo(c, 5);     // a——旧码=−c（flipX）→ 判别红
+    expect(rec.mat[1]).toBeCloseTo(s, 5);     // b
+    expect(rec.mat[2]).toBeCloseTo(s, 5);     // c
+    expect(rec.mat[3]).toBeCloseTo(-c, 5);    // d
+    // 平移=C−0（C=CTM×dst 中心=M·(14,28)）:cx=14cos+28sin, cy=14sin−28cos
+    expect(rec.mat[4]).toBeCloseTo(14 * c + 28 * s, 4);
+    expect(rec.mat[5]).toBeCloseTo(14 * s - 28 * c, 4);
+  });
+
+  it('轴对齐支(722-730)按屏幕轴翻转不动:scale(-1,1) 恒 flipX=a<0', () => {
+    const { raw, ex, layer, wrap } = setup();
+    wrap.scale(-1, 1);
+    const img = mkImg(1);
+    wrap.drawImage(img, 0, 0, 8, 16, 10, 20, 8, 16);
+    flushReplay(ex, layer);
+    const rec = raw.log[0];
+    expect(rec.args.slice(4)).toEqual([-4, -8, 8, 16]);
+    // 矩阵=T(−14,28)·S(−1,1)（rot=0,flipX=屏幕 X 轴翻转;C=M·(14,28)=(−14,28)）
+    expect(rec.mat[0]).toBeCloseTo(-1, 5);
+    expect(rec.mat[1]).toBeCloseTo(0, 5);
+    expect(rec.mat[2]).toBeCloseTo(0, 5);
+    expect(rec.mat[3]).toBeCloseTo(1, 5);
+    expect(rec.mat[4]).toBeCloseTo(-14, 4);
+    expect(rec.mat[5]).toBeCloseTo(28, 4);
+  });
+});
+
+describe('★R1-F1 replay2D tier→2D 算子全表（0=source-over/1=lighter/2=destination-out/3=multiply）', () => {
+  it('tier-2 ERASE rec 重放=destination-out（旧码 source-over=削底面画成不透明精灵）', () => {
+    const { L } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.globalCompositeOperation = 'destination-out';
+    wrap.drawImage(mkImg(9), 0, 0);   // 未注册削底 → tier-2（acc 态直译）
+    (L as { unavailable: boolean }).unavailable = true;
+    ex.flush();                        // 收官 flush 失败→降级+replay2D
+    expect(ex.stats.replays).toBe(1);
+    expect(raw2.log.length).toBe(1);
+    expect(raw2.log[0].gco).toBe('destination-out');   // 旧码='source-over' → 红
+  });
+
+  it('tier-3 MULT rec 重放=multiply（旧码 source-over=multiply 面画成实色块）', () => {
+    const { L } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.globalCompositeOperation = 'multiply';
+    wrap.fillStyle = 'rgb(120,96,72)';
+    wrap.fillRect(10, 10, 20, 20);     // tier-3 MULT quad
+    expect(ex.stats.emitMult).toBe(1);
+    (L as { unavailable: boolean }).unavailable = true;
+    ex.flush();
+    expect(ex.stats.replays).toBe(1);
+    expect(raw2.log.length).toBe(1);
+    expect(raw2.log[0].op).toBe('fill');
+    expect(raw2.log[0].gco).toBe('multiply');   // 旧码='source-over' → 红
+  });
+});
+
+describe('★R1-F2 收官 flush 失败必走 replay2D 不弃队', () => {
+  it('契约锁（shim 面）:acc flush 失败→degradeAcc→replay2D,队列不弃', () => {
+    const { L } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    let degraded = 0;
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { degraded++; ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.drawImage(mkImg(1), 0, 0);
+    (L as { unavailable: boolean }).unavailable = true;   // 收官 flush 时 GL 已死
+    ex.flush();
+    expect(degraded).toBe(1);
+    expect(ex.stats.replays).toBe(1);     // 不弃队（弃队=replays 0）
+    expect(raw2.log.length).toBe(1);
+  });
+
+  it('结构锁（Renderer 面,红=置序错）:finishAccFrame acc 支 _accMode=off 必须后置于 flush——先置位=本 flush 内 accFail 的 degradeAcc 卫兵（_accMode!=="acc"）恒 false→popAll 静默弃队', () => {
+    // 顺序锚:acc 支内 'flush();' 先于 "_accMode = 'off';"（bridged 分支不涉 degradeAcc 卫兵,不锁）
+    const m = RDR.match(/if \(this\._accMode !== 'acc'\) return null;[\s\S]{0,400}?this\.bglEntShim\?\.flush\(\);[\s\S]{0,200}?this\._accMode = 'off';/);
+    expect(m).not.toBeNull();
+  });
+});
+
+describe('★R1-F3 ensureBridged 降级前全 tier flush + bridge flush 覆盖 tier-2/3', () => {
+  it('ensureBridged 先 flush 再降级:残队逐条落 FBO（旧码不 flush 即降级=残队跨档）', () => {
+    const { L, quads } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.drawImage(mkImg(1), 0, 0, 8, 8, 0, 0, 8, 8);
+    wrap.drawImage(mkImg(1), 0, 0, 8, 8, 8, 0, 8, 8);
+    (wrap as unknown as Record<string, (...a: unknown[]) => unknown>).createLinearGradient(0, 0, 1, 1);   // 读值面工厂→ensureBridged
+    expect(quads.length).toBe(2);          // 降级前残队已全 tier flush 落 FBO（旧码=0）
+    expect(ex.stats.flushes).toBe(1);
+  });
+
+  it('bridge flush 覆盖 tier-2/3:2D 侧按算子直画（旧码 presentBatch 只发 tier 0/1→静默弃）', () => {
+    const { L } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.globalCompositeOperation = 'destination-out';
+    wrap.drawImage(mkImg(9), 0, 0);   // tier-2 残队（未 flush）
+    ex.bridge(raw2 as unknown as CanvasRenderingContext2D);   // 模拟残队跨档进 bridge 态
+    ex.flush();
+    expect(raw2.log.length).toBe(1);                    // 旧码=0（静默弃）→ 红
+    expect(raw2.log[0].gco).toBe('destination-out');
+  });
+});
+
+describe('★R1-F4/R2-F4 fillStyle 全值镜像 + parseColor 哨兵', () => {
+  it('bridge 态非 string fillStyle:不走 stale 色 fast path,回退 raw.fillRect（旧码发 stale 色黑 quad）', () => {
+    const { raw, ex, layer, wrap } = setup();
+    const grad = { __grad: 1 } as unknown as CanvasGradient;
+    wrap.fillStyle = grad;
+    expect(wrap.fillStyle).toBe(grad);    // 镜像收全值（旧码 get 回 stale '#000'）
+    wrap.fillRect(10, 10, 5, 5);
+    flushReplay(ex, layer);
+    expect(ex.stats.emitSO).toBe(0);      // 旧码=1（stale '#000' 被解析成黑 quad）→ 红
+    expect(ex.stats.fallback).toBe(1);
+    expect(raw.log[0].op).toBe('fill');
+    expect(raw.log[0].args).toEqual([10, 10, 5, 5]);
+  });
+
+  it('acc 态非 string fillStyle:镜像+fillRect 隔离栅格化兜底可达（渐变落 scratch）', () => {
+    const { L } = mkFullAccLayer();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => null,
+      worldW: () => 128, worldH: () => 72,
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    const grad = { __grad: 1 } as unknown as CanvasGradient;
+    wrap.fillStyle = grad;
+    expect(wrap.fillStyle).toBe(grad);
+    const scratchFills: unknown[] = [];
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => ({ width: 0, height: 0, getContext: () => ({ setTransform() {}, clearRect() {}, fillRect() {}, set fillStyle(v: unknown) { scratchFills.push(v); } }) }),
+    };
+    try {
+      wrap.fillRect(10, 10, 5, 5);
+      expect(ex.stats.fallback).toBe(0);      // 渐变兜底可达:栅格化直支（旧码=错色 quad 或降级）→ 红
+      expect(ex.stats.emitSO).toBe(1);        // scratch 面发 SO quad
+      expect(scratchFills).toContain(grad);   // 渐变对象落在 scratch ctx
+    } finally {
+      if (prevDoc === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = prevDoc;
+    }
+  });
+
+  it('parseColor 哨兵:解析失败恒 null 走回退（旧码缓存 [0,0,0,0] 黑哨兵→同串二次调用 A=0 静默丢笔）', () => {
+    const { raw, ex, layer, wrap } = setup();
+    wrap.fillStyle = 'definitely-not-a-color';
+    wrap.fillRect(10, 10, 5, 5);
+    wrap.fillRect(20, 10, 5, 5);   // 同串二次:旧码命中黑哨兵→A=0→静默 no-op
+    flushReplay(ex, layer);
+    expect(raw.log.length).toBe(2);       // 旧码=1 → 红
+    expect(raw.log[0].args).toEqual([10, 10, 5, 5]);
+    expect(raw.log[1].args).toEqual([20, 10, 5, 5]);
+    expect(ex.stats.fallback).toBe(2);
+  });
+
+  it('命名色判不可解析走回退:重复调用稳定回退不丢笔（② 修复的契约面）', () => {
+    const { raw, ex, layer, wrap } = setup();
+    wrap.fillStyle = 'red';
+    wrap.fillRect(10, 10, 5, 5);
+    wrap.fillRect(20, 10, 5, 5);
+    flushReplay(ex, layer);
+    expect(raw.log.length).toBe(2);
+    expect(ex.stats.fallback).toBe(2);
+  });
+
+  it('hsl()/hsla() 进 parseColor:实心 quad 直译不回退', () => {
+    const { raw, ex, layer, wrap } = setup();
+    wrap.fillStyle = 'hsl(120, 50%, 50%)';
+    wrap.fillRect(10, 10, 5, 5);
+    expect(ex.stats.emitSO).toBe(1);      // 旧码=不可解析→fallback → 红
+    wrap.fillStyle = 'hsla(0, 100%, 50%, 0.5)';
+    wrap.fillRect(20, 10, 5, 5);
+    expect(ex.stats.emitSO).toBe(2);
+    flushReplay(ex, layer);
+    expect(ex.stats.fallback).toBe(0);
+    expect(raw.log[0].alpha).toBe(1);
+    expect(raw.log[1].alpha).toBeCloseTo(0.5, 10);
+  });
+});
+
+describe('★R2-F5 globalAlpha 镜像钳制（2D 语义:非有限/越界忽略保旧值）', () => {
+  it('越界/NaN 忽略保旧值（acc 镜像读）;合法值照收;重放 α=镜像钳制值', () => {
+    // 注:bridge 态属性读走 raw（真 ctx 引擎自钳同语义）;镜像读断言走 acc 态
+    const { L } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    wrap.globalAlpha = 1.5;
+    expect(wrap.globalAlpha).toBe(1);     // 旧码=1.5 → 红
+    wrap.globalAlpha = -0.5;
+    expect(wrap.globalAlpha).toBe(1);
+    wrap.globalAlpha = Number.NaN;
+    expect(wrap.globalAlpha).toBe(1);
+    wrap.globalAlpha = 0.25;
+    expect(wrap.globalAlpha).toBe(0.25);
+    wrap.drawImage(mkImg(1), 0, 0, 8, 8, 0, 0, 8, 8);
+    (L as { unavailable: boolean }).unavailable = true;
+    ex.flush();                            // 收官 flush 失败→降级+replay2D
+    expect(ex.stats.replays).toBe(1);
+    expect(raw2.log[0].alpha).toBe(0.25);
+  });
+});
+
+describe('★R1-F7 WHITE_E WeakMap texAlive 卫兵（LRU 逐出/清表后死条目重解析）', () => {
+  it('死条目（texAlive=false）→重解析 texFromImage（旧码=画死纹理,零重传）', () => {
+    const { L, Lraw } = mkFullAccLayer();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => null,
+      worldW: () => 128, worldH: () => 72,
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => ({ width: 1, height: 1, getContext: () => ({ fillStyle: '#fff', fillRect: () => {} }) }),
+    };
+    try {
+      wrap.fillStyle = 'rgb(255,0,0)';
+      wrap.fillRect(0, 0, 4, 4);
+      ex.flush();
+      expect((Lraw as { texFromImageCalls: number }).texFromImageCalls).toBe(1);
+      (Lraw as { texAliveOk: boolean }).texAliveOk = false;   // 纹理已被 evictLRU/世界切换清表
+      wrap.fillRect(8, 0, 4, 4);
+      ex.flush();
+      expect((Lraw as { texFromImageCalls: number }).texFromImageCalls).toBe(2);   // 旧码=1 → 红
+    } finally {
+      if (prevDoc === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = prevDoc;
+    }
+  });
+});
+
+describe('★R1-F8 attach（bridge 态）残帧守卫三面（对齐 attachAcc 孪生守卫）', () => {
+  it('残队弃+残 save 栈清+残开 FBO 弃用', () => {
+    const { L, Lraw } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+    });
+    const ctx1 = ex.attachAcc() as unknown as FakeCtx;   // 上一 acc 帧:异常滞留（throw 于 finishAccFrame 前）
+    ctx1.globalAlpha = 0.5;
+    ctx1.save();
+    ctx1.drawImage(mkImg(1), 0, 0);
+    (Lraw as { open: boolean }).open = true;             // 残开 FBO（endAccumulate 未走）
+    // 次帧 bridge 窗:attach 的 raw=worldCtx（真宿主两处同 ctx——回放/present 同面）
+    const ctx2 = ex.attach(raw2 as unknown as CanvasRenderingContext2D) as unknown as FakeCtx;
+    expect((Lraw as { endAccumCalls: number }).endAccumCalls).toBe(1);   // 残开 FBO 弃用（旧码=0）→ 红
+    ctx2.restore();                                       // 残栈不得吃本帧状态
+    ctx2.drawImage(mkImg(2), 0, 0, 8, 8, 0, 0, 8, 8);
+    (L as { unavailable: boolean }).unavailable = true;
+    ex.flush();                                           // 残队已弃:只重放本帧 1 笔,α=1
+    expect(raw2.log.length).toBe(1);                      // 旧码=2（stale img1 串入）→ 红
+    expect(raw2.log[0].alpha).toBe(1);                    // 旧码=0.5（残栈复活）→ 红
+  });
+});
+
+describe('★R3-F6 attachAcc 残 save 栈镜像清（第三面守卫）', () => {
+  it('重入 acc 窗后 restore 必为 no-op（旧码弹出残条=α/CTM 跨帧串层）', () => {
+    const { L, quads } = mkFullAccLayer();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => null,
+      worldW: () => 128, worldH: () => 72,
+    });
+    const ctx1 = ex.attachAcc() as unknown as FakeCtx;
+    ctx1.globalAlpha = 0.5;
+    ctx1.translate(10, 0);
+    ctx1.save();                  // save 捕获帧中段已污染态;此帧异常未 restore
+    const ctx2 = ex.attachAcc() as unknown as FakeCtx;
+    ctx2.restore();               // 新帧 restore 必 no-op
+    ctx2.drawImage(mkImg(1), 0, 0, 8, 8, 0, 0, 8, 8);
+    ex.flush();
+    expect(quads.length).toBe(1);
+    expect(quads[0].alpha).toBe(1);   // 旧码=0.5（残栈复活）→ 红
+    expect(quads[0].dx).toBe(0);      // 旧码=10（残 CTM 复活）→ 红
+  });
+});
+
+describe('★R3-F1 texCache 驻留上界（逐出仅 JS 侧 Map,GL 纹理由层 LRU 兜底）', () => {
+  it('sub-Map ≤32 条 + 全表 ≤256 texId', () => {
+    const { L } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+    });
+    const wrap = ex.attach(new FakeCtx() as unknown as CanvasRenderingContext2D) as unknown as FakeCtx;
+    const big = { width: 1024, height: 64, __id: 7 } as unknown as CanvasImageSource;
+    for (let i = 0; i < 40; i++) wrap.drawImage(big, i * 8, 0, 8, 8, i * 9, 0, 8, 8);
+    ex.flush();
+    const cache = (ex as unknown as { texCache: Map<number, Map<number, unknown>> }).texCache;
+    expect(cache.size).toBe(1);
+    expect(cache.get(texId(big as unknown as object))!.size).toBeLessThanOrEqual(32);   // 旧码=40 → 红
+    for (let k = 0; k < 300; k++) {
+      const im = { width: 8, height: 8, __id: 100 + k } as unknown as CanvasImageSource;
+      wrap.drawImage(im, 0, 0, 8, 8, k * 9, 20, 8, 8);
+    }
+    ex.flush();
+    expect(cache.size).toBeLessThanOrEqual(256);   // 旧码=301 → 红
   });
 });

@@ -93,13 +93,16 @@ describe('C10b 管线实例共管（三消费方单实例）', () => {
   });
 
   it('worldCompose 注入共管管线（cloudpipe 开）;逃生门（=0）回自建=全量旧行为', () => {
-    expect(RDR).toMatch(/private newWorldCompose\(\): GLWorldCompose \{\s*\n\s*return new GLWorldCompose\('worldCompose', Renderer\.cloudPipe \? this\.acquireSwPipe\(\) : null\);/);
+    // ★R1-F10（2026-09-25 红蓝批 B）：构造口可返 null——共管旗开而 acquireSwPipe
+    //  缺（退避窗/饥饿/30s 闩）走旧链/降级,禁自建第二管线（旧锁面按新承诺改）
+    expect(RDR).toMatch(/private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*return pipe \? new GLWorldCompose\('worldCompose', pipe\) : null;/);
     expect(COMP).toContain("constructor(statName = 'worldCompose', pipe?: GLPipeline | null)");
     expect(COMP).toContain('this.ownsPipe = !pipe;');
     expect(COMP).toContain('this.pipeline = pipe ?? new GLPipeline(statName);');
-    // 非拥有模式:dispose 不级联管线;acquire 不自行重生（重生归 Renderer 治理）
+    // 非拥有模式:dispose 不级联管线;acquire 同等 5s 退避重试（★R1-F12——recreate
+    //  在非拥有支只重注册不触 pipeline.recreate,管线重生链仍归 Renderer 治理）
     expect(COMP).toMatch(/dispose\(\): void \{\s*\n\s*\/\/ ★C10b:仅自建管线时级联 dispose[^]*?if \(this\.ownsPipe\) this\.pipeline\.dispose\(\);/);
-    expect(COMP).toMatch(/acquire\(\): GLWorldCompose \| null \{[\s\S]{0,300}if \(!this\.ownsPipe\) return null;/);
+    expect(COMP).toMatch(/acquire\(\): GLWorldCompose \| null \{[\s\S]{0,400}if \(performance\.now\(\) - this\.pipeline\.diedAt > 5000\) this\.recreate\(\);/);
     // recreate:非拥有模式不 recreate 管线本体（防毒化云/bg 层已登记句柄）
     expect(COMP).toContain('const ok = this.ownsPipe ? this.pipeline.recreate() : !this.pipeline.unavailable;');
   });

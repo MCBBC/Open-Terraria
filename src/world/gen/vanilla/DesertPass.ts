@@ -222,6 +222,9 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
   let num4 = Math.trunc(rng.nextIntRange(0, half) / 8) + Math.trunc(half / 8);
   let x = half + num4 * -side;
   let desc: DesertDesc | null = null;
+  // ★BJ341 件5（红蓝-W2 备案执行,2026-09-25）：终止性守卫计数——tries 会在换向时
+  //  归零,不作守卫;guard 单调递增。
+  let guard = 0;
   for (;;) {
     desc = desertPlaceMound(st, rng, x, gs.worldSurface, false, ntbSkipMud, gs.seedFlags);
     if (desc) break;
@@ -235,6 +238,16 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
     }
     if (skipCheck) {
       // 恒过：RowHasInvalidTiles 直接 false（GenVars.skipDesertTileCheck 语义）
+      desc = desertPlaceMound(st, rng, x, gs.worldSurface, true, false, gs.seedFlags);
+      break;
+    }
+    // ★BJ341 件5 判谳（亲读接受域）：本环【非空有界】——skipCheck 臂在换向 2 次
+    //  （≤~2×(⌊w/4⌋+1)+1 次迭代）后强制落位收口,而 skipCheck 档 desertPlaceMound
+    //  的唯一 null 路 rowHasInvalidTiles 被 :89 `!skipCheck &&` 门短路=恒非 null,
+    //  return desc! 安全。4w 硬帽=不变量守卫（BJ336 件2b 范式：对健康掷流数学
+    //  不可达——skipCheck 在 ~w/2 次必触发 ≪ 4w ⇒ 掷流零扰动,金标验证;越界=
+    //  skipCheck 臂被未来改动破坏,就地强制落位,挂死转为可完成生成）。
+    if (++guard >= 4 * w) {
       desc = desertPlaceMound(st, rng, x, gs.worldSurface, true, false, gs.seedFlags);
       break;
     }
@@ -1186,6 +1199,13 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState,
           //   旧写法整段少耗骰且带宽不同 → 深域沙↔沙岩边界族 T53>396/T396>53。
           //   短路序：k<j+Roll() → active(k+1) → t[k]∈{396,397}（cs 逐项）。
           let k = j;
+          // ★BJ341 件5（备案执行·判谳=非空有界）：本环非拒绝采样——**结构有界**
+          //  转换环：k 每轮 +1、bound=j+Next(4,7)∈[j+4,j+6] 有限且 k≥bound 必断
+          //  （另有 k+1≥st.h 世界底界）⇒ 健康流 ≤7 轮,不依赖接受域。16 次硬帽=
+          //  不变量守卫（BJ336 件2b「自然界 2 倍余量」范式,7×2 取整放余）：对健康
+          //  掷流数学不可达 ⇒ 骰流零扰动（每轮恰 1 骰不变,金标验证）;越界=k++ 被
+          //  未来改动破坏,就地截断防挂死（掷流仍逐轮对拍,截断只丢尾段=登记偏差）。
+          let passes = 0;
           for (;;) {
             const bound = j + rng.int(4, 6);        // Next(4,7)：每轮条件求值先掷
             if (k >= bound) break;
@@ -1196,6 +1216,7 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState,
             if (!SS.has(st.type[ki])) break;
             st.type[ki] = SAND;
             k++;
+            if (++passes >= 16) break;
           }
         }
       }

@@ -136,6 +136,37 @@ describe('BJ322 高门右击开合链（shiftTallGate 裸写窗 × afterWrite �
     expect(drops).toEqual([]);
   });
 
+  it('★BJ343 原版序判别位：SkipWire(:52201)→EmptyTile(:52206)→Sound(:52213) 序互换应红', () => {
+    // 三记录器同喂一个被占门列：占位拒切换时——
+    //  · skips=5     ：SkipWire 先于 EmptyTile 早退（失败早退也照跳 = 原版本相；
+    //                  若 blocked 臂被提到 skip 前 → skips=0 立红）
+    //  · sfx=0 次    ：Sound 8 在 EmptyTile 之后（被拒不开声；若 sfx 提到 blocked
+    //                  前 → sfx=1 立红）
+    //  · 门列零写入  ：切换发生在 sfx 后（原版 :52213→:52215）
+    //  forced=true 对照：跳过实体门 → skips=5 + sfx=1 + 全列换型（skip 仍在 sfx 前）
+    const w = new World(40, 40, 7, 'bj343-order');
+    const st = w.store;
+    setupGate(w, TALL_GATE_ROW_FY, OPEN);
+    const skips: Array<[number, number]> = [];
+    const sfxs: string[] = [];
+    const blockedOpts = {
+      blocked: (bx: number, by: number) => bx === 10 && by >= 9 && by <= 13,
+      skipCell: (sx: number, sy: number) => skips.push([sx, sy]),
+      afterWrite: () => {},
+    };
+    expect(shiftTallGate(st, 10, 9, true, (n) => sfxs.push(n), blockedOpts)).toBeNull();
+    expect(skips.length).toBe(5);
+    expect(sfxs).toEqual([]);
+    for (let dy = 0; dy < 5; dy++) expect(st.get(10, 9 + dy)).toBe(OPEN);
+    // forced 臂：实体门被跳过 → 序走到 sfx+写列
+    skips.length = 0; sfxs.length = 0;
+    expect(shiftTallGate(st, 10, 9, true, (n) => sfxs.push(n), { ...blockedOpts, blocked: undefined, forced: true }))
+      .toEqual([10, 9]);
+    expect(skips.length).toBe(5);
+    expect(sfxs).toEqual(['door_open']);
+    for (let dy = 0; dy < 5; dy++) expect(st.get(10, 9 + dy)).toBe(CLOSED);
+  });
+
   it('导线臂委托（Wiring.cs:1460 同函数面）：deviceTable case 388 → shiftTallGate（skipCell×5+afterWrite+areaEmpty 占位门）', () => {
     const w = new World(40, 40, 7, 'bj322-wire');
     const drops: Drop[] = [];

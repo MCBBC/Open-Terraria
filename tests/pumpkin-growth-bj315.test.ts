@@ -108,9 +108,15 @@ describe('BJ315 南瓜株成长链（GrowPumpkin cs:52950 / 派发 cs:72912）',
     expect(marks).toEqual([[39, 19, 41, 21]]);
   });
 
-  it('门阶 1/4·1/8·1/11（Next((fx+10)/10) 逐档）+ stage≥4 停（cs:52541-52543）', () => {
-    // stage1（fx=36 → Next(4)=1/4）:0.2 过 / 0.9 不过
-    for (const [roll, grows] of [[0.2, true], [0.9, false]] as const) {
+  // ★BJ341 件4②重钉（2026-09-25）：掷位改「跨档判别值」——每档一对掷位分别落在
+  //  正确阈值 1/d(N) 的相邻两档之间（d=[1,4,8,11,15,…]），把「逐档对拍」做成真的：
+  //  旧钉 stage1 {0.2,0.9}/stage2 {0.05,0.9}/stage3 {0.01,0.95} 对阈值整体错档的
+  //  变异（如 stage1 误用 1/2 档:0.2<0.5 过/0.9≥0.5 不过=两掷同判）无判别力。
+  //  带界：stage1 过∈(1/8,1/4)=0.2、不过∈(1/4,1/2]=0.3；stage2 过∈(1/11,1/8)=0.1、
+  //  不过∈(1/8,1/4]=0.2；stage3 过∈(1/15,1/11)=0.08、不过∈(1/11,1/8]=0.12。
+  it('门阶 1/4·1/8·1/11（Next((fx+10)/10) 逐档,跨档判别掷位）+ stage≥4 停（cs:52541-52543）', () => {
+    // stage1（fx=36 → Next(4)=1/4）:0.2 过（∈(1/8,1/4)）/ 0.3 不过（∈(1/4,1/2]）
+    for (const [roll, grows] of [[0.2, true], [0.3, false]] as const) {
       const st = new TileStore(80, 80);
       plantPumpkin(st, 40, 20, 1);
       const evo = makeEvo(st);
@@ -118,8 +124,8 @@ describe('BJ315 南瓜株成长链（GrowPumpkin cs:52950 / 派发 cs:72912）',
       priv(evo).overgroundTile(40, 20, 3);
       expect(st.frameX[st.idx(40, 20)]).toBe(grows ? 72 : 36);
     }
-    // stage2（fx=72 → Next(8)=1/8）:0.05 过 / 0.9 不过
-    for (const [roll, grows] of [[0.05, true], [0.9, false]] as const) {
+    // stage2（fx=72 → Next(8)=1/8）:0.1 过（∈(1/11,1/8)）/ 0.2 不过（∈(1/8,1/4]）
+    for (const [roll, grows] of [[0.1, true], [0.2, false]] as const) {
       const st = new TileStore(80, 80);
       plantPumpkin(st, 40, 20, 2);
       const evo = makeEvo(st);
@@ -127,8 +133,9 @@ describe('BJ315 南瓜株成长链（GrowPumpkin cs:52950 / 派发 cs:72912）',
       priv(evo).overgroundTile(40, 20, 3);
       expect(st.frameX[st.idx(40, 20)]).toBe(grows ? 108 : 72);
     }
-    // stage3（fx=108 → Next(11)=1/11）:0.01 过 / 0.95 不过 → 熟档 144/162
-    for (const [roll, grows] of [[0.01, true], [0.95, false]] as const) {
+    // stage3（fx=108 → Next(11)=1/11）:0.08 过（∈(1/15,1/11)）/ 0.12 不过（∈(1/11,1/8]）
+    // → 过档=熟档 144/162
+    for (const [roll, grows] of [[0.08, true], [0.12, false]] as const) {
       const st = new TileStore(80, 80);
       plantPumpkin(st, 40, 20, 3);
       const evo = makeEvo(st);

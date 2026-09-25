@@ -814,9 +814,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           const loadState = new UIWorldLoadState();
           VUI.setState(loadState);
           __m('load.roundtrip.begin');
-          // ★BJ336 件1：json 路径客户端持有档全文——头部有界窥取 meta.w/h（saveGame
-          //  装配序固定 name,seed,w,h；字符串内引号必转义⇒首个命中即真头），按面积
-          //  扩面硬超时（同 worldGenTimeoutMs 同式）；窥取失败回退 180s 缺省。
+          // ★BJ336 件1：json 路径客户端持有档全文——头部有界窥取 meta.w/h（★BJ341
+          //  键名锚修正：真实头键=width/height（serialize.ts:505 投影），落盘序固定
+          //  format,version,header{name,seed,width,height,…}；字符串内引号必转义⇒
+          //  首个命中即真头），按面积扩面硬超时（同 worldGenTimeoutMs 同式）；窥取
+          //  失败回退 180s 缺省。
           const dims = peekSaveDims(text);
           const { world, player, save } = await client.loadSave({ json: text }, {
             onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),

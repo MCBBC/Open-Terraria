@@ -433,19 +433,32 @@ class WaterWaveSystem {
     this._ww.postMessage({ op: 'tex', ripple: _rippleData });
   }
 
-  /** worker 场快照 → 类字段（读侧方法 sampleDisplace/readGridR/waveReadOffset 零改动） */
+  /** worker 场快照 → 类字段（读侧方法 sampleDisplace/readGridR/waveReadOffset 零改动）。
+   *  ★R2-F2（2026-09-25 红蓝批 B）：换长支贴身对齐步进 scratch _R2/_G2——worker 模式
+   *  frame() 走快照喂早退,主线程 _ensure 不跑;快照换长后 _R2/_G2 若留旧长,看门狗
+   *  回落帧 _step 写越界（typed array 静默丢）+swap 后 _R 变短长=读侧 _readR OOB
+   *  undefined→NaN 毒化。_ensure 兜底查四数组（同批刀）。 */
   private _wwApplyField(m: { R: Float32Array; G: Float32Array; gW: number; gH: number;
     progress: number; intensity: number; waveOff: [number, number];
     cam: [number, number, number]; scroll: [number, number] }): void {
     if (this._R.length === m.R.length) { this._R.set(m.R); this._G.set(m.G); }
-    else { this._R = m.R as typeof this._R; this._G = m.G as typeof this._G; }
+    else {
+      this._R = m.R as typeof this._R; this._G = m.G as typeof this._G;
+      this._R2 = new Float32Array(m.R.length).fill(0.5);
+      this._G2 = new Float32Array(m.G.length).fill(0.5);
+    }
     this._gW = m.gW; this._gH = m.gH;
     this.progress = m.progress; this.intensity = m.intensity;
     this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
     this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
   }
 
-  /** worker 回传快照（worker 侧调用,读私有字段） */
+  /** worker 回传快照（worker 侧调用,读私有字段）。★R3-F2（2026-09-25 红蓝批 B）：
+   *  slice 产【独立 buffer 副本】供 WaveWorker 走 transferable 零拷贝回传（旧
+   *  结构克隆 125-180MB/s churn 清零）——所有权单向转移:主线程收达后 worker 侧
+   *  副本即弃（WaveWorker slice 后无再引用面,本体 _R/_G 留 worker 继续步进）;
+   *  主线程读侧 sampleDisplace 单线程消费,与收达时序无交叠面。脏区/降采样
+   *  不做（登记债）。 */
   exportFieldSnapshot(): { R: Float32Array; G: Float32Array; gW: number; gH: number;
     progress: number; intensity: number; waveOff: [number, number];
     cam: [number, number, number]; scroll: [number, number] } {
@@ -490,10 +503,29 @@ class WaterWaveSystem {
       if (since > 2000) {
         _wwStat.falls++;
         console.warn('[WaveWaves] worker 失联回落主线程模拟 (' + since.toFixed(0) + 'ms 无场回传)');
+        // ★R2-F3（2026-09-25 红蓝批 B）：回落帧不得丢注入批——先摘 capture 态再
+        //  把已捕获批按 capture 语义本地重放（injectWash/queueRippleRaw/setCamera
+        //  走正常本地路径=worker 侧逐式同源;摘态在前,防重放再入 capture 批）。
+        //  时序锚=F_prev:此刻 _scroll 仍是最后快照值,本帧注入+步进同帧完成。
+        const pending = _wwCapture;
+        _wwCapture = null;
         this._wwOn = false;
         try { this._ww?.terminate(); } catch { /* 已死 */ }
         this._ww = null;
-        _wwCapture = null;
+        if (pending) {
+          for (const inj of pending) {
+            if (inj.k === 'wash') {
+              const [cx, cy, qw, qh, fx, fy, st] = inj.a;
+              this.injectWash(cx, cy, qw, qh, fx, fy, st);
+            } else if (inj.k === 'rippleRaw') {
+              const [x, y, sx, sy, colR, colG, colA, shape, rot] = inj.a as [number, number, number, number, number, number, number, RippleShape, number];
+              queueRippleRaw(x, y, sx, sy, colR, colG, colA, shape, rot);
+            } else if (inj.k === 'camera') {
+              const [x, y, z] = inj.a;
+              this.setCamera(x, y, z);
+            }
+          }
+        }
         // 落回后继续走本地模拟（下方原路径）
       } else {
         this._wwTrySendTex();   // ★C8：纹理未就绪时随帧补发（一次性）
@@ -687,8 +719,11 @@ class WaterWaveSystem {
   }
 
   private _ensure(w: number, h: number): void {
-    if (w === this._gW && h === this._gH) return;
+    // ★R2-F2:兜底查四数组——gW/gH 对不上快照换长后的 _R（worker 模式主线程
+    //  _ensure 不跑,回落帧 _gW 已被快照改写）或 _R2/_G2 陈旧长时重建全套
     const n = w * h;
+    if (w === this._gW && h === this._gH
+      && this._R.length === n && this._R2.length === n) return;
     this._R = new Float32Array(n).fill(0.5);
     this._G = new Float32Array(n).fill(0.5);
     this._R2 = new Float32Array(n).fill(0.5);

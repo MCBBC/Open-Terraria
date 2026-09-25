@@ -144,7 +144,24 @@ describe('BJ330 结构锁：钟源接线（codeOf 源码锚——node 不可 boo
     }
     const offenders = files
       .filter((f) => !EXEMPT.some((e) => f.endsWith(e)))
-      .filter((f) => /performance\.now\(\)\s*\/\s*1000\s*%\s*3600/.test(codeOf(f.replace(`${ROOT}/`, ''))));
+      // ★BJ343 件 6 扩形：除 %3600 外再禁两漏收编站形态——SkyRenderer 灯笼夜闪烁
+      //  （LanternSky.cs:245 GTW%6f/6f）与 npcExtraParts DD2 骷髅头冠（Main.cs:23750
+      //  GTW%0.5f/0.5f*4f）曾以 performance.now 墙钟同病回流,两形态一并入哨
+      .filter((f) => /performance\.now\(\)\s*\/\s*1000\s*%\s*3600/.test(codeOf(f.replace(`${ROOT}/`, '')))
+        || /performance\.now\(\)\s*\/\s*1000\s*\)\s*%\s*6\b/.test(codeOf(f.replace(`${ROOT}/`, '')))
+        || /performance\.now\(\)\s*\/\s*1000\s*\)\s*%\s*0\.5\b/.test(codeOf(f.replace(`${ROOT}/`, ''))));
     expect(offenders, `墙钟回流站:${offenders.join(',')}`).toEqual([]);
+  });
+
+  it('⑦★BJ343 件 6：GTW 漏收编两站逐站锁（灯笼夜闪烁/DD2 骷髅头冠）', () => {
+    // 站 1：SkyRenderer 灯笼 DrawLantern flicker（LanternSky.cs:245 GTW%6f/6f*2π 的 Y 分量）
+    const sky = codeOf('src/render/SkyRenderer.ts');
+    expect(sky, '灯笼闪烁须读 GTW 单源').toContain('Math.sin((globalTimeWrappedHourly() % 6) / 6 * Math.PI * 2)');
+    expect(sky, '墙钟形态须绝迹').not.toMatch(/performance\.now\(\)\s*\/\s*1000\s*\)\s*%\s*6\b/);
+    // 站 2：npcExtraParts DD2 旧日之誓骷髅头冠（Main.cs:23750 GTW%0.5f/0.5f*4f → 4 帧）
+    const parts = codeOf('src/render/npcExtraParts.ts');
+    expect(parts, '头冠帧须读 GTW 单源（gtw=GameTime 包装）').toMatch(/gtw\(\)\s*%\s*0\.5\s*\/\s*0\.5\s*\*\s*4/);
+    expect(parts, '墙钟形态须绝迹').not.toMatch(/performance\.now\(\)\s*\/\s*1000\s*\)\s*%\s*0\.5\b/);
+    expect(parts).toContain("from '../core/GameTime'");
   });
 });

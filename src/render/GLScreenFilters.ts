@@ -80,6 +80,17 @@ void main() {
   gl_Position = vec4(aPos.x * 2.0 - 1.0, 1.0 - aPos.y * 2.0, 0.0, 1.0);
 }`;
 
+/** ★A1 FBO→FBO 直通 blit（偶数长度链的朝向归还;纯位搬运=零舍入面）:
+ *  原 VERT 的 clip 翻转让「片元@FBO row v 采 vUv.y=(h−v−0.5)/h=源 row h−1−v 的
+ *  精确 texel 中心」——源为恒等布局（v0=图像顶）时直通采样即产出 GL 朝向
+ *  （v1=图像顶）副本,LINEAR 精确对齐中心=恒等重采样（A2/opresent present 同族
+ *  已对拍实证）,8bit 值 k→k 零算术零舍入。 */
+const FRAG_PASSTHRU = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uTex;
+void main() { gl_FragColor = texture2D(uTex, vUv); }`;
+
 // ---- 各 pass 片元着色器（GLSL 100；常量/指令序照抄字节码） ----
 
 /** FilterHeatDistortion（obj18 :839-871）：双噪声场差分 → 屏幕重采样 */
@@ -509,6 +520,7 @@ export function noiseData(): { w: number; h: number; data: Uint8ClampedArray } |
 }
 
 import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw, registerFence } from './GLStats';
+import { GLPipeline, type PipelineFbo, type PipelineProgram } from './GLPipeline';   // ★A1:FBO 乒乓链宿主（A0 消费方白名单已收录）
 export class GLScreenFilters {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGLRenderingContext | null = null;
@@ -532,7 +544,18 @@ export class GLScreenFilters {
     this.canvas = document.createElement('canvas');
     this.canvas.width = 0;
     this.canvas.height = 0;
-    this.init();
+    // ★A1:独立上下文惰性建——管线链（drawChainPipe）可用时旧上下文零创建
+    //  （滤镜帧 GL 离屏画布 2→0:sfx GL 画布+staging 2D 画布均不再存在=IOSurface
+    //  净−1 个 WebGL 表面;staging 彻底退役）。旧链首用/Renderer 旧链模式获取
+    //  probe 时经 ensureStandalone() 建,unavailable/diedAt 退避语义不变。
+  }
+
+  private inited = false;
+  /** 独立上下文确保（旧乒乓链 drawChain 首用;Renderer 旧链模式获取时 probe）。
+   *  返回 !unavailable;初始化失败置 unavailable+diedAt（调用方退避语义不变） */
+  ensureStandalone(): boolean {
+    if (!this.inited) { this.inited = true; this.init(); }
+    return !this.unavailable;
   }
 
   dispose(): void {
@@ -674,7 +697,8 @@ export class GLScreenFilters {
    */
   drawChain(source: HTMLCanvasElement, passes: readonly ScreenFxPass[],
     tint: readonly [number, number, number]): boolean {
-    const gl = this.gl;
+    if (!this.ensureStandalone()) return false;   // ★A1:独立上下文惰性建（首用 probe）
+    const gl = this.gl!;
     if (!gl || this.diedAt || this.unavailable || passes.length === 0) return false;
     const w = source.width, h = source.height;
     if (w === 0 || h === 0) return false;
@@ -711,6 +735,13 @@ export class GLScreenFilters {
       gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
       gl.uniform1i(entry.uni.uScreen, 0);
       if (p.kind === 'FilterHeatDistortion') {
+        // ★A1 定谳补绑（2026-09-25）：unit1 逐 pass 显式——旧链此前靠 ensureNoise
+        //  时刻的 latched 绑定,同会话 Sepia/Noir 链后 unit1=kind 噪声（跨链渗漏,
+        //  地狱/沙漠热扭曲在 noir/sepia 会话后采错噪声场=潜在伪影）;uNoise=s1=
+        //  Images/Misc/noise 是 ScreenShaderData.cs:175-178 的设计绑定,显式化
+        //  =语义修正非行为分歧（首链本就如此）。管线链同式（共享管线纪律）。
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, this.texNoise);
         gl.uniform1i(entry.uni.uNoise, 1);
         gl.uniform2f(entry.uni.uScreenRes, p.screenRes[0], p.screenRes[1]);
         gl.uniform2f(entry.uni.uScreenPos, p.screenPos[0], p.screenPos[1]);
@@ -726,6 +757,8 @@ export class GLScreenFilters {
         gl.uniform1f(entry.uni.uIntensity, p.intensity);
         gl.uniform1f(entry.uni.uOpacity, p.opacity);
       } else if (p.kind === 'FilterCrystalDestructionVortex') {
+        gl.activeTexture(gl.TEXTURE1);   // ★A1 定谳补绑（同 heat 注）
+        gl.bindTexture(gl.TEXTURE_2D, this.texNoise);
         gl.uniform1i(entry.uni.uNoise, 1);
         gl.uniform2f(entry.uni.uScreenRes, p.screenRes[0], p.screenRes[1]);
         gl.uniform2f(entry.uni.uTargetPx, p.targetPx[0], p.targetPx[1]);
@@ -794,5 +827,349 @@ export class GLScreenFilters {
       }
     }
     return true;
+  }
+
+  // ==== ★A1 GLPipeline FBO 乒乓链（2026-09-25;渲染改造方案 §三 A1 收割刀）====
+  //
+  // 旧 drawChain（上方）=「GL 画布→2D staging drawImage→GL 全幅重传」逐 pass 乒乓:
+  //  N 条链付 N 次全幅 texImage2D 上传+N−1 次 GL→2D 回读+1 张 staging 画布+sfx
+  //  独立 WebGL 上下文。本方法把 pass 间产物驻留【注入管线】的 RGBA8 FBO
+  //  （'sfxA'/'sfxB' 租名——GLPipeline fbos 命名空间 clouds/bg/lit/warped/light2/
+  //  world/opresent 已占）:首 pass 采主画布全幅上传（滤镜作用于含天空整屏,语义
+  //  不变）,其后 FBO 直采,末 pass present→调用方 ctx.drawImage(pipe.canvas,0,0)
+  //  单次回贴。程序/采样参数/滤镜数学原样（血月 tint/墓地灰化/塔扫描/热扭曲噪声
+  //  场全值不动）,只动「中间产物搬运面」。
+  //
+  // 字节等价论证（对拍锁 scripts/_sfxgl-ab.mjs;定谳实验 scripts/_sfxgl-diag.mjs）:
+  // ① 程序=VERT/FRAGS 单源直编（GLSL 100 于 WebGL2 上下文合法,GLWorldCompose
+  //    同族先例;唯一 active attribute aPos→location 0=管线 VAO 槽,GLWorldLight/
+  //    GLWaterDistortion 同形已实证）;uniform 表/取值/次序逐式对照旧链（下方
+  //    switch=drawChain uniform 段的转录,漂移即对拍爆红）。
+  //    ★★全 pass 用原版 VERT（='F:' 编译单元,与旧链逐字同源）——★二版定谳
+  //    （2026-09-25）:首版曾派生 no-flip 变体 VERT 写中间 FBO,实测 heat 中间产物
+  //    单 texel ±1（px216638 old=139 pipe=138,中间产物直比实验）——同一 FRAG 源
+  //    挂不同 VERT=不同链接单元=驱动编译调度差,在 8bit 舍入边界暴露;而全单 pass
+  //    矩阵（'F:' 单元 vs 旧链）n=0 实证「同单元跨上下文=逐字节」。故弃变体,
+  //    朝向全部交给几何/布局账（③）。
+  // ② 输入字节同:源/噪声上传显式 UNPACK_PREMULTIPLY_ALPHA_WEBGL=false（旧链
+  //    从未设该态=WebGL 缺省 false 直拷画布 RGBA——主画布 α 恒 255 时预乘恒等,
+  //    但逐字节口径以「同 pixelStorei 态」钉死;GLPipeline init 收口预乘 true,
+  //    此处逐笔显式翻回+链尾还原）;UNPACK_FLIP_Y_WEBGL=false 同旧 init。
+  // ③ 朝向账（★三版定谳:全 pass 原版 VERT+逐 pass 直通 blit）:源上传=恒等布局
+  //    （v0=图像顶）。原 VERT 片元@输出 row v 的 vUv.y=1−(v+.5)/h ⇒ 读恒等输入时
+  //    采 image row h−1−v、写输出 row v=GL 朝向（v1=图像顶）——产「画布行 r」的
+  //    片元 vUv=(·,(r+.5)/h) ≙ 旧链画布行采样式（坐标数学逐位同）;数据流同构
+  //    （片元采输入 row h−1−v=image row h−1−v）。非末 pass 后经 FRAG_PASSTHRU
+  //    直通 blit（LINEAR 精确对齐 texel 中心=恒等重采样,8bit k→k 零算术零舍入）
+  //    翻回恒等布局喂下级;末 pass GL 朝出→present(flipY=1) 闭合。
+  //    ★二版教训存档:no-flip 变体 VERT（'I:' 单元）坐标数学对但链接单元变=编译
+  //    调度差 ±1（heat 中间产物单 texel 实证）;全 old-VERT 无 blit 则中间 pass 的
+  //    vUv 倒置=坐标数学错（nebula+sepia maxΔ=233 实证）。三版=两全。
+  // ④ 中间量化同构:旧链中间=RGBA8 画布 round trip（逐 FRAG 尾式核实全部输出
+  //    α=1——premult ×1/÷1 精确无损）;新链=RGBA8 FBO（pipeline.fbo 同构存储）
+  //    直写直采,逐位同。
+  // ⑤ 末 pass present=1:1 全幅 blit（uDst=(0,0,w,h) uv 精确对齐 texel 中心,
+  //    LINEAR 恒等重采样——A2/opresent present 同族已对拍实证）。
+  // 状态机纪律:blend 每 pass setBlend('off')（旧链 init 关一次,管线为多消费方
+  //  共享须逐 pass 定谳）;pixelStorei 逐笔显式+链尾还原预乘 true（GLPipeline.
+  //  uploadCanvas 依赖 init 收口缺省,GLSpriteLayer/GLWorldCompose 逐笔自设不受
+  //  影响,收口归还防跨消费方渗漏）;其余 GL 态由 pipeline 门面自管。
+  // 管线重生（reviveSwPipe 整换实例）:pipeGlId 上下文指纹不符即弃自管句柄/纹理
+  //  表重建（GLWorldCompose.recreate 同族;程序经 pipe.program 按名幂等重登记,
+  //  同名返回注册表既有句柄=零重编译）。★共管管线不走 GLPipeline.recreate
+  //  （opresent 结构锁断言）,指纹检测面已覆盖全部重生路径。
+  // 失败面:返回 false → 调用方落旧 drawChain（双路径并存,逃生门 ?sfxgl=0）。
+  private pipeGlId: WebGL2RenderingContext | null = null;
+  private pipeProgHandles = new Map<string, PipelineProgram>();
+  private pipeTexScreen: WebGLTexture | null = null;
+  private pipeTexNoise: WebGLTexture | null = null;
+  private pipeNoiseReady = false;
+  private pipeNoiseW = 256;
+  private pipeNoiseH = 256;
+  private pipeKindTex: Record<string, WebGLTexture | null> = {};
+  private pipeKindReady: Record<string, boolean> = {};
+  private pipeKindFail: Record<string, number> = {};
+  private pipeKindImg: Record<string, HTMLImageElement> = {};
+
+  /** ★A1 管线面资源弃表（上下文指纹变更时;悬空 GL 对象交 GC——死上下文句柄
+   *  不可 delete,同 GLWorldCompose.recreate 弃置法） */
+  private pipeDrop(): void {
+    this.pipeProgHandles.clear();
+    this.pipeTexScreen = null;
+    this.pipeTexNoise = null;
+    this.pipeNoiseReady = false;
+    this.pipeKindTex = {};
+    this.pipeKindReady = {};
+    this.pipeKindFail = {};
+  }
+
+  /** pass 程序登记（pipe.program 按名幂等:'sfxF:'+kind=原版 VERT+FRAG 链接单元
+   *  ——与旧链编译单元逐字同源（★二版定谳:挂不同 VERT 的变体单元会在 8bit
+   *  舍入边界产生 ±1 编译差,见头注①）;'sfx:flip'=非末 pass 朝向归还直通 blit。
+   *  不撞 clouds/bg 层命名空间;失败 prog=null→drawChainPipe 返 false 落旧链。 */
+  private pipeProgram(pipe: GLPipeline, kind: ScreenFxPass['kind']): PipelineProgram | null {
+    const key = `F:${kind}`;
+    let h = this.pipeProgHandles.get(key);
+    if (h) return h;
+    h = pipe.program(`sfxF:${kind}`, VERT, FRAGS[kind]);
+    this.pipeProgHandles.set(key, h);
+    return h;
+  }
+
+  /** 非末 pass 朝向归还直通 blit 程序（'sfx:flip'=原版 VERT+FRAG_PASSTHRU——
+   *  FRAG 无算术,LINEAR 精确中心采样=k→k 纯位搬运,零舍入面） */
+  private pipeFlipProgram(pipe: GLPipeline): PipelineProgram | null {
+    let h = this.pipeProgHandles.get('FLIP');
+    if (h) return h;
+    h = pipe.program('sfx:flip', VERT, FRAG_PASSTHRU);
+    this.pipeProgHandles.set('FLIP', h);
+    return h;
+  }
+
+  /** ★A1 Misc 噪声上传（Images/Misc/noise;旧 ensureNoise 同式:LINEAR+REPEAT,
+   *  POT 256²;纯数据源预乘 false;unit1 绑定同旧——跨链驻留=旧链同款状态面） */
+  private pipeEnsureNoise(pipe: GLPipeline): boolean {
+    if (this.pipeNoiseReady) return true;
+    const gl = pipe.glx;
+    const im = noiseImage;
+    if (!gl || !im || !im.complete || im.naturalWidth === 0) return false;
+    if (!this.pipeTexNoise) this.pipeTexNoise = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.pipeTexNoise);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    glStatUpload(pipe.statName, im.naturalWidth * im.naturalHeight * 4);
+    glStatTexCreate(pipe.statName, im.naturalWidth * im.naturalHeight * 4);
+    this.pipeNoiseW = im.naturalWidth;
+    this.pipeNoiseH = im.naturalHeight;
+    this.pipeNoiseReady = true;
+    return true;
+  }
+
+  /** ★A1 kind 噪声就绪（Noir=NoirNoise NEAREST≈PointWrap/Sepia=DSTNoise LINEAR;
+   *  旧 ensureKindNoise 同式——Image 懒载缓存,完整即同步上传管线纹理。上传绑
+   *  TEXTURE2 同旧 onload（不动 unit1 驻留面——链头就绪检查与 pass 内 unit1
+   *  绑定的时序分离照抄,跨链状态面逐位同旧链）。未就绪返回 false=本帧剔 pass。 */
+  private pipeKindNoiseOk(file: string, gl: WebGL2RenderingContext, stat: string): boolean {
+    if (this.pipeKindReady[file] && this.pipeKindTex[file]) return true;
+    const failAt = this.pipeKindFail[file];
+    if (failAt && performance.now() - failAt < 10000) return false;   // IMG-SELF-HEAL 同旧
+    let im = this.pipeKindImg[file];
+    if (!im) {
+      im = new Image();
+      this.pipeKindImg[file] = im;
+      im.onerror = () => { this.pipeKindFail[file] = performance.now(); };
+      im.src = `sprites/vanilla/${file}.png`;
+    }
+    if (!im.complete || im.naturalWidth === 0) return false;
+    if (!this.pipeKindTex[file]) this.pipeKindTex[file] = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.pipeKindTex[file]!);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    const nearest = file.includes('Noir');
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, nearest ? gl.NEAREST : gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    glStatUpload(stat, im.naturalWidth * im.naturalHeight * 4);
+    glStatTexCreate(stat, im.naturalWidth * im.naturalHeight * 4);
+    this.pipeKindReady[file] = true;
+    return true;
+  }
+
+  /** ★A1 管线程序预热（prewarmGameGL 载入页窗调用——旧链把「上下文+着色器编译」
+   *  挪进加载页的契约在管线模式下的承接面:13 pass 程序+偶链直通 blit 全登记;
+   *  失败静默=懒建兜底） */
+  prewarmPipe(pipe: GLPipeline): void {
+    const gl = pipe.glx;
+    if (!gl || pipe.unavailable) return;
+    if (this.pipeGlId !== gl) { this.pipeDrop(); this.pipeGlId = gl; }
+    for (const kind of Object.keys(FRAGS) as ScreenFxPass['kind'][]) this.pipeProgram(pipe, kind);
+    this.pipeFlipProgram(pipe);
+  }
+
+  /**
+   * ★A1 滤镜链入管线：FBO 乒乓,末 pass present 单次回贴（字节等价论证见上方
+   * ★A1 段头注）。pipe=Renderer 共管 GLPipeline（swpipe）;成功返回 true——调用方
+   * ctx.drawImage(pipe.canvas, 0, 0)。失败返回 false——调用方落旧 drawChain。
+   */
+  drawChainPipe(pipe: GLPipeline, source: HTMLCanvasElement, passes: readonly ScreenFxPass[],
+    tint: readonly [number, number, number]): boolean {
+    const gl = pipe.glx;
+    if (!gl || pipe.unavailable || passes.length === 0) return false;
+    const w = source.width, h = source.height;
+    if (w === 0 || h === 0) return false;
+    if (this.pipeGlId !== gl) { this.pipeDrop(); this.pipeGlId = gl; }
+    // ---- pass 链噪声依赖过滤（旧链 drawChain :681-693 逐式转录——Noir/Sepia
+    //      未就绪剔该 pass;Misc 噪声未就绪只剔 Heat/Vortex;空链返 false）----
+    let chain = passes;
+    const needNoise = chain.some((p) => p.kind === 'FilterHeatDistortion' || p.kind === 'FilterCrystalDestructionVortex'
+      || p.kind === 'FilterNoir' || p.kind === 'FilterSepia');
+    for (const p2 of chain) {
+      if ((p2.kind === 'FilterNoir' || p2.kind === 'FilterSepia')
+        && !this.pipeKindNoiseOk(p2.kind === 'FilterNoir' ? 'NoirNoise' : 'DSTNoise', gl, pipe.statName)) {
+        chain = chain.filter((q) => q !== p2);
+      }
+    }
+    if (chain.length === 0) return false;
+    if (needNoise && !this.pipeEnsureNoise(pipe)) {
+      chain = chain.filter((p) => p.kind !== 'FilterHeatDistortion' && p.kind !== 'FilterCrystalDestructionVortex');
+      if (chain.length === 0) return false;
+    }
+    // 帧界（管线画布=主画布尺寸;调用方已保证 wK===1 防 compose 帧界振荡churn）
+    pipe.beginFrame(w, h);
+    const fboA = pipe.fbo('sfxA', w, h);
+    const fboB = pipe.fbo('sfxB', w, h);
+    if (!fboA?.tex || !fboB?.tex) return false;
+    let ok = false;
+    try {
+      // ---- 源纹理上传（首 pass 输入=主画布全幅;语义与旧链一致。旧链 texScreen
+      //      参数 init 一次:LINEAR+CLAMP_TO_EDGE——此处建时同参,驻留复用）----
+      if (!this.pipeTexScreen) {
+        this.pipeTexScreen = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.pipeTexScreen);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        glStatTexCreate(pipe.statName, w * h * 4);
+      }
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.pipeTexScreen);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);   // 旧链未设=缺省 false 直拷
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+      glStatUpload(pipe.statName, w * h * 4);
+      // ---- 逐 pass（全 pass=原版 VERT 编译单元（'sfxF:'——字节等价①）;每 pass 读
+      //      恒等布局输入、写 GL 朝向输出（原 VERT 片元@row v 的 vUv.y=1−(v+.5)/h,
+      //      产「画布行 r」的片元 vUv=(·,(r+.5)/h) ≙ 旧链 ✓坐标数学逐位同;数据流:
+      //      片元采输入 row h−1−v=恒等布局 image row h−1−v ✓）;非末 pass 后经
+      //      FRAG_PASSTHRU 直通 blit（纯位搬运）翻回恒等布局喂下级。uniform
+      //      switch=旧链 :713-780 逐式转录,禁改滤镜数学。----
+      let srcTex: WebGLTexture = this.pipeTexScreen;   // 恒等布局（v0=图像顶）
+      for (let i = 0; i < chain.length; i++) {
+        const p = chain[i];
+        const entry = this.pipeProgram(pipe, p.kind);
+        if (!entry?.prog || !fboA.tex || !fboB.tex) return false;
+        const last = i === chain.length - 1;
+        const outFbo: PipelineFbo = fboA;   // 每轮写 A（输入面=源纹理/B,互斥无反馈环）
+        pipe.bindTarget(outFbo);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(entry.prog);   // ★uniform 必在 useProgram 后（present 全黑案判例）
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, srcTex);
+        gl.uniform1i(pipe.uni(entry, 'uScreen'), 0);
+        if (p.kind === 'FilterHeatDistortion') {
+          // ★共享管线纪律:unit1 绑定逐 pass 显式——compose/云 bg 层同帧早前重绑
+          //  过 unit1（GLWorldCompose pass1 uLight/pass2 uNoise），ensureNoise 时刻
+          //  的latched 绑定在共享上下文=陈旧（首跑定谳:heat 采样到光照小图→扭曲
+          //  场错;scroll0 实验判别=重采样面逐字节✓,差异全在噪声项）。
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, this.pipeTexNoise);
+          gl.uniform1i(pipe.uni(entry, 'uNoise'), 1);
+          gl.uniform2f(pipe.uni(entry, 'uScreenRes'), p.screenRes[0], p.screenRes[1]);
+          gl.uniform2f(pipe.uni(entry, 'uScreenPos'), p.screenPos[0], p.screenPos[1]);
+          gl.uniform2f(pipe.uni(entry, 'uNoiseRcp'), 1 / this.pipeNoiseW, 1 / this.pipeNoiseH);
+          gl.uniform1f(pipe.uni(entry, 'uTimeScroll'), 0.04 * p.time);
+          const s = p.intensity * p.opacity;
+          gl.uniform2f(pipe.uni(entry, 'uOffset'), s / p.screenRes[0], s / p.screenRes[1]);
+        } else if (p.kind === 'FilterMoonLordShake') {
+          gl.uniform1f(pipe.uni(entry, 'uIntensity'), p.intensity);
+          gl.uniform1f(pipe.uni(entry, 'uTime'), p.time);
+        } else if (p.kind === 'FilterCrystalDestructionColor') {
+          gl.uniform3f(pipe.uni(entry, 'uColor'), p.color[0], p.color[1], p.color[2]);
+          gl.uniform1f(pipe.uni(entry, 'uIntensity'), p.intensity);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        } else if (p.kind === 'FilterCrystalDestructionVortex') {
+          gl.activeTexture(gl.TEXTURE1);   // ★共享管线纪律:同 heat——unit1 逐 pass 显式
+          gl.bindTexture(gl.TEXTURE_2D, this.pipeTexNoise);
+          gl.uniform1i(pipe.uni(entry, 'uNoise'), 1);
+          gl.uniform2f(pipe.uni(entry, 'uScreenRes'), p.screenRes[0], p.screenRes[1]);
+          gl.uniform2f(pipe.uni(entry, 'uTargetPx'), p.targetPx[0], p.targetPx[1]);
+          gl.uniform1f(pipe.uni(entry, 'uIntensity'), p.intensity);
+          gl.uniform1f(pipe.uni(entry, 'uProgress'), p.progress);
+          gl.uniform1f(pipe.uni(entry, 'uTimeScroll'), -2.5 * p.time);
+        } else if (p.kind === 'FilterMiniTower') {
+          gl.uniform3f(pipe.uni(entry, 'uColor'), p.color[0], p.color[1], p.color[2]);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        } else if (p.kind === 'FilterTower') {
+          gl.uniform3f(pipe.uni(entry, 'uColor'), p.color[0], p.color[1], p.color[2]);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+          gl.uniform1f(pipe.uni(entry, 'uIntensity'), p.intensity);
+          gl.uniform1f(pipe.uni(entry, 'uProgress'), p.progress);
+          gl.uniform2f(pipe.uni(entry, 'uScreenRes'), p.screenRes[0], p.screenRes[1]);
+          gl.uniform2f(pipe.uni(entry, 'uScreenPos'), p.screenPos[0], p.screenPos[1]);
+          gl.uniform2f(pipe.uni(entry, 'uTargetPx'), p.targetPx[0], p.targetPx[1]);
+          gl.uniform1f(pipe.uni(entry, 'uTime'), p.time);
+        } else if (p.kind === 'FilterGraveyard') {
+          gl.uniform1f(pipe.uni(entry, 'uIntensity'), p.intensity);
+          gl.uniform1f(pipe.uni(entry, 'uProgress'), p.progress);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        } else if (p.kind === 'FilterBloodMoon') {
+          gl.uniform3f(pipe.uni(entry, 'uColor'), p.color[0], p.color[1], p.color[2]);
+          gl.uniform1f(pipe.uni(entry, 'uIntensity'), p.intensity);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        } else if (p.kind === 'FilterTest2') {
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        } else if (p.kind === 'SkyWeatherTint') {
+          gl.uniform3f(pipe.uni(entry, 'uColor'), p.color[0], p.color[1], p.color[2]);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.alpha);
+        } else if (p.kind === 'FilterSepia') {
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, this.pipeKindTex['DSTNoise']!);
+          gl.uniform1i(pipe.uni(entry, 'uNoiseTex'), 1);
+          gl.uniform2f(pipe.uni(entry, 'uRes'), w, h);
+          gl.uniform3f(pipe.uni(entry, 'uColor'), p.color[0], p.color[1], p.color[2]);
+          gl.uniform1f(pipe.uni(entry, 'uIntensity'), p.intensity);
+          gl.uniform1f(pipe.uni(entry, 'uProgress'), p.progress);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        } else if (p.kind === 'FilterNoir') {
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, this.pipeKindTex['NoirNoise']!);
+          gl.uniform1i(pipe.uni(entry, 'uNoiseTex'), 1);
+          gl.uniform1f(pipe.uni(entry, 'uTime'), p.time);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        } else {
+          gl.uniform1f(pipe.uni(entry, 'uScreenH'), p.screenH);
+          gl.uniform1f(pipe.uni(entry, 'uZoom'), p.zoom);
+          gl.uniform1f(pipe.uni(entry, 'uOpacity'), p.opacity);
+        }
+        gl.uniform3f(pipe.uni(entry, 'uTint'), tint[0], tint[1], tint[2]);
+        pipe.setBlend('off');
+        pipe.drawQuad(entry, [0, 0, w, h], 0);   // flipY 参数无 uFlipY uniform=被忽略（原版 VERT 自管朝向）
+        if (gl.isContextLost()) return false;
+        if (last) break;
+        // 非末 pass:直通 blit A(GL 朝向)→B(恒等布局)喂下级（纯位搬运零舍入）
+        const flipEntry = this.pipeFlipProgram(pipe);
+        if (!flipEntry?.prog || !fboA.tex || !fboB.tex) return false;
+        pipe.bindTarget(fboB);
+        gl.viewport(0, 0, w, h);
+        gl.useProgram(flipEntry.prog);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+        gl.uniform1i(pipe.uni(flipEntry, 'uTex'), 0);
+        pipe.setBlend('off');
+        pipe.drawQuad(flipEntry, [0, 0, w, h], 0);
+        if (gl.isContextLost()) return false;
+        srcTex = fboB.tex!;
+      }
+      // ---- 末 pass 出口:GL 朝向 FBO('sfxA') → present（调用方 ctx.drawImage
+      //      (pipe.canvas) 单次回贴;flipY=1 画布顶采 v1=图像顶 ✓闭合）----
+      pipe.present(fboA);
+      ok = true;
+    } finally {
+      // 预乘态还原（GLPipeline.uploadCanvas 依赖 init 收口缺省 true——防跨消费方渗漏）
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    }
+    return ok;
   }
 }

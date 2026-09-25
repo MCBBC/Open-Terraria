@@ -95,8 +95,15 @@ const fencesByCtx = new Map<string, FenceSlot>();
 let lastLag = { p50: 0, max: 0, n: 0 };
 
 export function registerFence(name: string, gl: WebGLRenderingContext): void {
-  if (fencesByCtx.has(name)) return;
   if (!('fenceSync' in gl)) return;            // WebGL1 无围栏,静默跳过
+  // ★R3-F9（2026-09-25 红蓝批 B）：同名槽 revive 后持死上下文引用——旧实现
+  //  has(name) 即返,槽永远钉死旧 gl（pollFences 对死上下文恒 skip=fence 观测面
+  //  整链盲区）;现检测旧槽 isContextLost 即重建槽（新 gl 顶替）。活槽幂等不换。
+  const old = fencesByCtx.get(name);
+  if (old) {
+    const lost = (() => { try { return old.gl.isContextLost(); } catch { return true; } })();
+    if (!lost) return;
+  }
   fencesByCtx.set(name, { name, gl: gl as WebGL2RenderingContext, obj: null, issuedAt: 0 });
 }
 const FENCE_EVERY = 10;                        // 每 10 帧一发

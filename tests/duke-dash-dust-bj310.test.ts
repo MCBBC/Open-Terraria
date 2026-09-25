@@ -247,3 +247,39 @@ describe('BJ310 件2：狂暴参数面补钉（既有套件缺位三面）', () 
     expect(e.cy).toBeCloseTo(pcy - 200, 6);
   });
 });
+
+// ===========================================================================
+// ★BJ342 ND4（2026-09-25）出生尘环落点 = Center + 2×rotOffset（1457 NPC.cs:49548-
+// 49556 `Dust.NewDust(vector + vector2,…)`——vector=Center+rotOffset、vector2=
+// vector−Center ⇒ 落点=(Center+off)+off）。速度面（=Normalize(vector2)×3）与
+// 环几何（36 粒/(i−17)·2π/36）不变——旧 1× 环半径减半=红。
+// ===========================================================================
+describe('BJ342 ND4：出生尘环 2× rotOffset（NPC.cs:49548-49556）', () => {
+  it('36 粒位置 = Center + 2×[Normalize(v)·(w/2,h)·0.375].RotatedBy((i−17)·2π/36)；速度=径向 3 不变', () => {
+    const parts: Array<{ x: number; y: number; opts: { vx: number; vy: number } }> = [];
+    const { hooks } = makeHooks(makeWorld(), { x: 20, y: 55 });
+    (hooks as unknown as { spawnParticles: (x: number, y: number, c: unknown, n: unknown, s: unknown, opts: { vx: number; vy: number }) => void }).spawnParticles =
+      (x, y, _c, _n, _s, opts) => { parts.push({ x, y, opts }); };
+    const e = Enemy.fromVanilla(370, 20 * TILE, 52 * TILE)!;
+    e.bInit = true;
+    e.ai0 = -1; e.ai1 = 0; e.ai2 = 60;   // nadoT(90)−30 出生环拍（分支判定先于 ai2++）
+    e.spawnAlpha = 255;
+    e.vx = 10; e.vy = 0;
+    const cx0 = e.cx, cy0 = e.cy;   // 原版尘用【积分前】center（AI 尾 position+=velocity 在环之后）
+    tickDuke(e, hooks, 1);
+    expect(parts.length).toBe(36);
+    // 出生支前置：vx×0.98 + ai2>20 → vy=−2（环基向量取该拍速度）
+    const vx = 10 * 0.98, vy = -2;
+    const nv = Math.hypot(vx, vy);
+    for (let i = 0; i < 36; i++) {
+      const ang = (i - 17) * (Math.PI * 2) / 36;
+      const bx = (vx / nv) * (e.w / 2) * 0.375, by = (vy / nv) * e.h * 0.375;
+      const rx = bx * Math.cos(ang) - by * Math.sin(ang), ry = bx * Math.sin(ang) + by * Math.cos(ang);
+      const ol = Math.hypot(rx, ry) || 1;
+      expect(parts[i].x).toBeCloseTo(cx0 + 2 * rx, 6);       // ★2× rotOffset（旧 1× 红）
+      expect(parts[i].y).toBeCloseTo(cy0 + 2 * ry, 6);
+      expect(parts[i].opts.vx).toBeCloseTo((rx / ol) * 3, 6);
+      expect(parts[i].opts.vy).toBeCloseTo((ry / ol) * 3, 6);
+    }
+  });
+});

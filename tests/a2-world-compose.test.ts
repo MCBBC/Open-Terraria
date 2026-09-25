@@ -90,6 +90,7 @@ describe('A2 GLWorldCompose 结构锁', () => {
   it('a0 白名单已收 GLWorldCompose', () => {
     // ★C10a（2026-09-24）：白名单扩入 GLSpriteLayer.ts（云管线后端,?cloudpipe=1）
     // ★C10b（2026-09-24）：白名单扩入 Renderer.ts（共管管线持有/revive/drop 治理面）
-    expect(src('../tests/a0-glpipeline-shell.test.ts')).toContain("new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts'])");
+    // ★A1（2026-09-25）：白名单扩入 GLScreenFilters.ts（滤镜链入管线,?sfxgl）
+    expect(src('../tests/a0-glpipeline-shell.test.ts')).toContain("new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts'])");
   });
 });

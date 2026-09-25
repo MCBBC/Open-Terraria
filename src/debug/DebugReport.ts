@@ -974,6 +974,14 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         used: g.renderer?.opresentUsed ?? null,
         stats: g.renderer?.opresentStats ?? null,
       },
+      // ★A1 诊断面（2026-09-25 滤镜链入管线）:used=上帧滤镜链路径（'pipe'=
+      //  GLPipeline FBO 乒乓（缺省）/'pingpong'=旧 GL→2D→GL 乒乓（?sfxgl=0 逃生门/
+      //  管线失败回落）/'2d'=2D 近似/'-'=本帧无滤镜）;stats=全会话分布——pipe
+      //  占比异常低=acquireSwPipe 退避中/低清档帧（wK<1 回退门）,归因面
+      sfx: {
+        used: g.renderer?.sfxPathUsed ?? null,
+        stats: g.renderer?.sfxPathStats ?? null,
+      },
       // ★C8 诊断面（2026-09-23）:波场 Worker 运行态——on=worker 在跑,fields/falls
       //  =场快照应答/失联回落计数（falls>0=已自动回落主线程模拟,需报障）
       waveWorker: (() => {

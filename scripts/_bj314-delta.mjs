@@ -1,5 +1,9 @@
 // BJ314 落刀偏差定量：现模块路径（CPU 面缓存烘焙）vs 落刀前原始配方（GPU 面 scratch
-// 现烘）逐像素差分——确认漂移纯源=烘焙面 GPU/CPU 舍入（±1/255 级）且无结构差。
+// 现烘）逐像素差分。★BJ342 ND7 勘误：本头注旧文「确认漂移纯源=烘焙面 GPU/CPU 舍入
+// （±1/255 级）且无结构差」与终态结论相反——实测 CPU(software)×GPU 两光栅器在
+// multiply 同指令下系统性漂移（本探针读数 maxDelta 255/万级像素差,非 ±1 舍入级,
+// 见 SwingArc.ts BJ314 头注定谳链）,落刀因此取同面（缓存面=GPU,CPU 面禁用）。
+// 本脚本为取证工具,结论以 SwingArc.ts 头注为准。
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5201';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';

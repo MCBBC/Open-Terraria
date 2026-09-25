@@ -353,11 +353,20 @@ export class GLWorldCompose {
     } else if (lightBand === null) {
       // 零变化:跳过上传（原 :211 同式）
     } else if (lightBand !== undefined) {
-      // WebGL2 9 参 DOM 源重载（GLPipeline 仅 WebGL2,原 _isGL2 门恒真）
-      (gl as unknown as { texSubImage2D: (...a: unknown[]) => void }).texSubImage2D(
-        gl.TEXTURE_2D, 0, 0, lightBand.y, lightBand.w, lightBand.h,
-        gl.RGBA, gl.UNSIGNED_BYTE, lightBand.canvas);
-      glStatUpload(this.pipeline.statName, lightBand.w * lightBand.h * 4);
+      // ★R1-F5（2026-09-25 红蓝批 B）：9 参 DOM 源重载非标准（Firefox 按规范抛
+      //  TypeError=每脏带帧崩;Chrome 左上 w×h 语义=侥幸对齐）——统一走
+      //  GLSpriteLayer.texSubUpdate 判例:带内容 (0,0,w,h)（Renderer 生产面）先抠进
+      //  带尺寸 scratch,再按标准 7 参 DOM 源整面上传 (0, band.y)。scratch 抠取=
+      //  恒等复制+上传 pixelStorei 态逐式同 → Chrome 上传字节逐位不变。
+      const bs = this.bandScratch(lightBand.canvas, lightBand.w, lightBand.h);
+      if (bs) {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, lightBand.y, gl.RGBA, gl.UNSIGNED_BYTE, bs);
+        glStatUpload(this.pipeline.statName, lightBand.w * lightBand.h * 4);
+      } else {
+        // scratch 不可得（无 document——理论不可达,compose 面无此环境）:全幅回退
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, light);
+        glStatUpload(this.pipeline.statName, light.width * light.height * 4);
+      }
     } else {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, light);
       glStatUpload(this.pipeline.statName, light.width * light.height * 4);
@@ -463,14 +472,18 @@ export class GLWorldCompose {
 
   /** ★哨兵族同款获取面（2026-09-23 资源风暴防护补齐）：贫困锁不建（starvedLock,
    *  与 waterWarp.glLayer 同款）;上下文丢失后 5s 退避重建（diedAt 哨兵,防重建风暴）。
-   *  unavailable 即返 null=调用方落回旧链,永不刷屏重试。
-   *  ★C10b 共管模式（ownsPipe=false）不自行重生管线——recreate 清程序表会连带
-   *  毒化云/bg 层的已登记句柄（悬空程序=INVALID_OPERATION 静默弃画）,重生链统一
-   *  归 Renderer.reviveSwPipe（全消费方重注册后才放行 acquire）。 */
+   *  unavailable 即返 null=调用方落回旧链。
+   *  ★C10b 共管模式（ownsPipe=false）不自行重生管线本体——pipeline.recreate 清
+   *  程序表会连带毒化云/bg 层的已登记句柄（悬空程序=INVALID_OPERATION 静默弃画）,
+   *  管线重生链统一归 Renderer.reviveSwPipe。
+   *  ★R1-F12（2026-09-25 红蓝批 B）：共管支【同等 5s 退避重试】（对齐 ownsPipe=true
+   *  支承诺）——recreate 在 ownsPipe=false 只做「管线已活则重注册」（不触
+   *  pipeline.recreate、不清程序表,见 recreate 注）;管线仍死（ok=false）保持
+   *  unavailable 返 null,不刷屏。可达面：构造期 shader 编译失败/句柄半残——
+   *  此前永久熄火,现 5s 后经 recreate 重登记自愈。 */
   acquire(): GLWorldCompose | null {
     if (starvedLock()) return null;
     if (this.unavailable) {
-      if (!this.ownsPipe) return null;
       if (performance.now() - this.pipeline.diedAt > 5000) this.recreate();
     }
     return this.unavailable ? null : this;
@@ -538,6 +551,30 @@ export class GLWorldCompose {
     return true;
   }
 
+  /** ★R1-F5 光照脏行带 scratch（GLSpriteLayer.texSubUpdate 同款判例）：带画布是
+   *  全尺寸 w2×h2 面带内容只在 (0,0,w,bandH)（Renderer 生产面）,DOM 源无子区重载
+   *  → 抠进恰好 band 尺寸的 scratch 再整面上传。resize-on-change（尺寸变才重分配;
+   *  band 高逐帧变=换页 churn 接受面,与 texSubUpdate 判例同款）。
+   *  willReadFrequently=纯上传中转（SHM 后备不占 IOSurface,GLSpriteLayer 判例同注）。 */
+  private _bandScratch: HTMLCanvasElement | null = null;
+  private _bandScratchCtx: CanvasRenderingContext2D | null = null;
+  private bandScratch(src: HTMLCanvasElement, w: number, h: number): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') return null;
+    if (!this._bandScratch) {
+      this._bandScratch = document.createElement('canvas');
+      this._bandScratchCtx = this._bandScratch.getContext('2d', { willReadFrequently: true });
+    }
+    const c = this._bandScratchCtx;
+    if (!c || !this._bandScratch) return null;
+    if (this._bandScratch.width !== w || this._bandScratch.height !== h) {
+      this._bandScratch.width = w;
+      this._bandScratch.height = h;
+    }
+    c.clearRect(0, 0, w, h);
+    c.drawImage(src, 0, 0, w, h, 0, 0, w, h);
+    return this._bandScratch;
+  }
+
   /** 波场 _R → LUMINANCE 8bit（uploadWave:293-321 逐式;★8bit 量化=输出语义,勿改浮点直传） */
   private uploadWave(gl: WebGL2RenderingContext, waveR: Float32Array, w: number, h: number): void {
     const n = w * h;
@@ -585,6 +622,10 @@ export class GLWorldCompose {
         this.setParams(gl, this.texRaw, 'NEAREST', 'CLAMP');
       }
       this._texKeyWorld = ''; this._texKeyLight = ''; this._texKeyNoise = ''; this._texKeyWater = '';
+      // ★R1-F6（2026-09-25 红蓝批 B）：噪声尺寸一并重置——texNoise 已是全新无存储
+      //  纹理,陈旧 noiseW/H 会让「无噪声帧中性 1×1 垫底」门（noiseW===0）被跳过 →
+      //  uNoise 采 incomplete 纹理恒 (0,0,0,1)（噪声位移项静默归零面）。
+      this.noiseW = 0; this.noiseH = 0;
       this._rawAuditLeft = 3; this._rawAuditKey = '';   // ★BJ316:重建后重审 RGBA8UI 体检
       this.texWaterEmpty = null;
     }

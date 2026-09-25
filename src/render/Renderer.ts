@@ -2891,8 +2891,13 @@ export class Renderer {
       return null;
     }
     if (this._accMode !== 'acc') return null;
-    this._accMode = 'off';
+    // ★R1-F2（2026-09-25 红蓝实锤）:'off' 必须后置于 flush——先置位会让本次
+    //  flush 内 accFail 的 degradeAcc 卫兵（_accMode!=='acc' 恒 false）失效 →
+    //  popAll 静默弃队列;后置=失败支保持 acc 态可降级（degrade→FBO present+
+    //  bridge→replay2D 不弃队）。flush 内部已降级的场合此处改写 'off' 仍正确:
+    //  帧已收口,下帧 beginWorldLayer 重判定。
     this.bglEntShim?.flush();          // acc flush=直发累积面（空队列 no-op）
+    this._accMode = 'off';
     const f = this._accGlw?.endAccumulate() ?? null;
     this.bglEntShim?.detach();
     return f;
@@ -3003,17 +3008,31 @@ export class Renderer {
   /** ★opresent 分布累计（merged=pass3 合并帧/fallback=补贴回退帧——合并率异常
    *  低=夹层谓词常真或门常假,查 opresentInterlayerPending/低清档） */
   opresentStats: Record<string, number> = {};
+  /** ★A1 诊断面:本帧滤镜链实际路径（drawScreenFilterChain 每帧写）——'pipe'=
+   *  GLPipeline FBO 乒乓（缺省）/'pingpong'=旧 GL→2D→GL 乒乓（?sfxgl=0 逃生门/
+   *  管线失败回落）/'2d'=2D 近似回退/'-'=本帧无滤镜;sfxPathStats=全会话分布
+   *  （pipe 占比异常低=acquireSwPipe 退避中/低清档帧——探针/F5 归因面） */
+  sfxPathUsed = '-';
+  sfxPathStats: Record<string, number> = {};
   /** ★opresent 回退补贴（2026-09-25）：合并未走（compose 失败/pass3 程序缺/
    *  低清档/fullbright/旧链回落）时把挂起的天空栈 FBO present+blit 回主画布——
    *  恢复双 blit 基线,层序与现行为逐位同（FBO 内容=本帧 bg+云合并会话产物,
    *  消费点在一切世界侧回贴之前=夹层语义保持）。管线死亡窗:present no-op+
-   *  陈旧画布=C10b 会话中途死亡同族既有语义,下帧 acquire 自愈。 */
+   *  陈旧画布=C10b 会话中途死亡同族既有语义,下帧 acquire 自愈。
+   *  ★R1-F9（2026-09-25 红蓝批 B）：死亡帧挂起引用【显式丢弃】+独立观测位——
+   *  旧静默路径对死管线 fbo/present 全 no-op 却照涨 fallback 计数=归因全盲,
+   *  且帧中死亡（块跳过→消费点照达）时该帧天空+世界全缺、FBO('bg') 挂起内容
+   *  被下帧 bg 会话冲掉。此处收口=死亡帧不残留挂起语义（tests/b2b-rb-fixes-b）。 */
   private presentPendingSky(sky: { fboName: string; w: number; h: number }, viewW: number, viewH: number): void {
     const pipe = this.swPipe;
-    const f = pipe && !pipe.unavailable ? pipe.fbo(sky.fboName, sky.w, sky.h) : null;
+    if (!pipe || pipe.unavailable) {
+      this.opresentStats['dead-drop'] = (this.opresentStats['dead-drop'] || 0) + 1;
+      return;
+    }
+    const f = pipe.fbo(sky.fboName, sky.w, sky.h);
     if (f?.tex) {
-      pipe!.present(f);
-      this.ctx.drawImage(pipe!.canvas, 0, 0, viewW, viewH);
+      pipe.present(f);
+      this.ctx.drawImage(pipe.canvas, 0, 0, viewW, viewH);
     }
     this.opresentStats['fallback'] = (this.opresentStats['fallback'] || 0) + 1;
   }
@@ -3054,6 +3073,11 @@ export class Renderer {
   moonLordShake: { t: number; x: number; y: number } | null = null;
   /** 眼球伞云盖染料×光照烘焙缓存（key = 染料vid:帧:光照RGB；>96 项整清防膨胀） */
   private readonly eyebrellaDyeCache = new Map<string, HTMLImageElement | HTMLCanvasElement | ImageBitmap>();
+  /** ★R3-F4 日曜盾球染面缓存（2026-09-25 红蓝批 B;eyebrellaDyeCache/R33 wingBakeCache
+   *  同族判例）：键=solarShields 计数|染料 vid|朝向(uDirection 入键)|200ms 时间桶——
+   *  桶=SM2 染料动画 ~5fps（R33 判例;uTime 逐帧喂的动画面不冻结）。容量闸+2s 修剪。 */
+  private readonly solarDyeCache = new Map<string, HTMLCanvasElement>();
+  private solarDyeCachePruneAt = 0;
   /** 眼球伞云盖合成后逃逸队列（A4 终版 2026-09-03；drawPlayer 收集、flushEyebrellaCloud 消费） */
   private eyebrellaQueue: Array<{ wx: number; wy: number; num2: number; src: HTMLImageElement | HTMLCanvasElement | ImageBitmap; cw: number; ch: number }> = [];
   lightCanvas: HTMLCanvasElement;
@@ -3344,9 +3368,16 @@ export class Renderer {
     if (this.swPipe) { this.swPipe.dispose(); this.swPipe = null; }
   }
   /** ★C10b worldCompose 构造统一口:cloudpipe 开=注入共管管线（ownsPipe=false）;
-   *  关（逃生门）=自建管线（?cloudpipe=0 全量回旧行为,含 A2 独立上下文） */
-  private newWorldCompose(): GLWorldCompose {
-    return new GLWorldCompose('worldCompose', Renderer.cloudPipe ? this.acquireSwPipe() : null);
+   *  关（逃生门）=自建管线（?cloudpipe=0 全量回旧行为,含 A2 独立上下文）。
+   *  ★R1-F10（2026-09-25 红蓝批 B）：共管旗开而 acquireSwPipe 返 null（5s 退避窗/
+   *  饥饿锁/30s 初始化闩）→ 返 null 走旧链/降级——【禁自建第二管线】:传 pipe=null
+   *  会让 GLWorldCompose ownsPipe=true 自建 'worldCompose' 管线=第 3 个 GL 上下文,
+   *  且 opresent pass3 会在自建上下文里租 FBO('bg')（错上下文空面）→ 天空栈直采
+   *  恒透明=世界盖掉整帧天空。调用方 ??= 每帧重试至 acquire 成功（构造零成本）。 */
+  private newWorldCompose(): GLWorldCompose | null {
+    if (!Renderer.cloudPipe) return new GLWorldCompose('worldCompose', null);
+    const pipe = this.acquireSwPipe();
+    return pipe ? new GLWorldCompose('worldCompose', pipe) : null;
   }
   /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
    *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
@@ -5935,6 +5966,26 @@ export class Renderer {
   })();
   static get opresent() { return this._opresent; }
   static opresentSetForTest(v: boolean): void { this._opresent = v; }
+  /** ★A1 screenFx 滤镜链入管线旗（2026-09-25,渲染 v2 路线图最后一枚收割刀）——
+   *  GLScreenFilters 多 pass 链从「GL→2D→GL 乒乓、每 pass 全帧重传」迁入共管
+   *  GLPipeline：FBO('sfxA'/'sfxB') 乒乓直采+非末 pass 直通 blit 翻向+末 pass
+   *  present 单次回贴（旧链 N 次全幅上传+N−1 次 GL→2D 回读+staging 画布+sfx
+   *  独立上下文全消,字节等价论证见 GLScreenFilters drawChainPipe 头注）。
+   *  ?sfxgl=0=逃生门（回旧「GL→2D→GL」乒乓链,双路径并存;链失败亦自动落旧链,
+   *  再败落 2D 近似链——既有回退语义不动）。运行时可翻（wfbo 同款页内翻面范式
+   *  ——探针 scripts/_sfxgl-ab.mjs）。
+   *  ★转正（2026-09-25）：像素对拍 ALL PASS 逐字节（pass 链全清单 14 相位——
+   *  单 pass 7 场景+多 pass 深乒乓 4/2/10-pass+夜/zoom/opresent-off 组合——全
+   *  census n=0 maxΔ=0,scripts/_sfxgl-ab.mjs;定谳实验链 scripts/_sfxgl-diag.mjs:
+   *  中间产物直比/scroll0 判别/±1 编译差三版定谳）+组合帧（opresent/b2b 同开）
+   *  不回归+账本面（'screenFx' 账页缺席=独立上下文零创建）——翻缺省开。 */
+  private static _sfxPipe = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).get('sfxgl') !== '0';
+    } catch { return false; }
+  })();
+  static get sfxPipe() { return this._sfxPipe; }
+  static sfxPipeSetForTest(v: boolean): void { this._sfxPipe = v; }
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -7073,7 +7124,8 @@ export class Renderer {
         this.drawSparkleArms(d, px, py, axis.sx, axis.sy);
         continue;
       }
-      const { rgb, a, rgbv } = VanillaDust.alphaOf(d);
+      // ★BJ342 ND5：注入闪烁钟（唯 d157 mouseTextColor 脉冲档消费;:4728 同钟源）
+      const { rgb, a, rgbv } = VanillaDust.alphaOf(d, this.lighting?.clock);
       // ★N 批:rgbv 三通道（183 (50,0,0)/255 纯红、258 (150,50,50)/255——GetAlpha
       // 字面彩色档);标量档 rgbv=undefined → 三通道全取标量,零回归
       const mR = rgbv ? rgbv[0] : rgb, mG = rgbv ? rgbv[1] : rgb, mB = rgbv ? rgbv[2] : rgb;
@@ -13701,6 +13753,38 @@ export class Renderer {
 
   /** cWings 染料应用（SM2Effect 字节码执行；uniforms 补齐烘焙上下文）。
    *  rect = 切片在大图内的位置（uSourceRect/uImageSize0，vanilla DrawData 同源） */
+  /** ★R3-F4（2026-09-25 红蓝批 B）身体系配饰染面缓存烘焙（日曜盾球 cBody/禁戒符号环
+   *  cBody 两消费点同族）：旧实现条件性每帧 createElement+getImageData+SM2 全幅
+   *  逐像素解释（~420px²/帧 GC churn+烘焙 CPU）。键=src 前缀|染料 vid|朝向
+   *  （uDirection 入键:方向性染料翻面语义）|200ms 时间桶（R33 wingBakeCache 判例:
+   *  SM2 染料动画 ~5fps 可接受,uTime 逐帧喂的动画面不冻结）。miss 才重烘进
+   *  【缓存条目画布本体】（免独立 scratch:结果即条目,mountTintScratch 单面复用
+   *  判例的免冲突形态——命中路径零触碰共享面,无跨尺寸覆写 hazard）。
+   *  容量闸 32+2s 修剪防膨胀（勿整表 clear=重分配雪崩,2026-09-07 canvas 哨兵案）。 */
+  private bodyAccDyeBake(tex: HTMLImageElement | ImageBitmap | HTMLCanvasElement,
+    emu: DyeApply, dyeVid: number, facing: number, keyPrefix: string): HTMLCanvasElement {
+    const bucket = Math.floor(performance.now() / 200);
+    const key = `${keyPrefix}:${dyeVid}:${facing}:${bucket}`;
+    const hit = this.solarDyeCache.get(key);
+    if (hit) return hit;
+    const sc = document.createElement('canvas');
+    sc.width = tex.width; sc.height = tex.height;
+    const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+    sctx.drawImage(tex, 0, 0);
+    const id = sctx.getImageData(0, 0, sc.width, sc.height);
+    emu.uniforms.uDirection = facing;
+    this.applyDyeToImageData(id.data, sc.width, sc.height, emu);
+    sctx.putImageData(id, 0, 0);
+    if (performance.now() - this.solarDyeCachePruneAt > 2000) {
+      this.solarDyeCachePruneAt = performance.now();
+      while (this.solarDyeCache.size >= 32) {
+        this.solarDyeCache.delete(this.solarDyeCache.keys().next().value as string);
+      }
+    }
+    this.solarDyeCache.set(key, sc);
+    return sc;
+  }
+
   private applyDyeToImageData(data: Uint8ClampedArray, w: number, h: number,
     dye: DyeApply, rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): void {
     const u = dye.uniforms;
@@ -15297,15 +15381,7 @@ export class Renderer {
         const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
         let src: HTMLImageElement | ImageBitmap | HTMLCanvasElement = tex;
         if (emu) {
-          const sc = document.createElement('canvas');
-          sc.width = tex.width; sc.height = tex.height;
-          const sctx = sc.getContext('2d', { willReadFrequently: true })!;
-          sctx.drawImage(tex, 0, 0);
-          const id = sctx.getImageData(0, 0, sc.width, sc.height);
-          emu.uniforms.uDirection = p.facing;
-          this.applyDyeToImageData(id.data, sc.width, sc.height, emu);
-          sctx.putImageData(id, 0, 0);
-          src = sc;
+          src = this.bodyAccDyeBake(tex, emu, dyeVid, p.facing, `s:${p.solarShields}`);
         }
         ctx.save();
         ctx.translate(p.x + p.w / 2 + pos.x, p.y + p.h / 2 + pos.y);
@@ -15346,15 +15422,8 @@ export class Renderer {
         const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
         let src: HTMLImageElement | ImageBitmap | HTMLCanvasElement = tex;
         if (emu) {
-          const sc = document.createElement('canvas');
-          sc.width = tex.width; sc.height = tex.height;
-          const sctx = sc.getContext('2d', { willReadFrequently: true })!;
-          sctx.drawImage(tex, 0, 0);
-          const id = sctx.getImageData(0, 0, sc.width, sc.height);
-          emu.uniforms.uDirection = p.facing;
-          this.applyDyeToImageData(id.data, sc.width, sc.height, emu);
-          sctx.putImageData(id, 0, 0);
-          src = sc;
+          // ★R3-F4 同族（禁戒符号环 cBody 染面,同病理同治——见 bodyAccDyeBake 注）
+          src = this.bodyAccDyeBake(tex, emu, dyeVid, p.facing, 'f:74');
         }
         ctx.translate(cxp, cyp);
         if (p.facing === -1) ctx.scale(-1, 1);                   // playerEffect（body 翻转族）
@@ -17067,13 +17136,12 @@ export class Renderer {
     return inst;
   }
 
-  /** 屏幕滤镜链 GL 后端(?sfxgl=0 逃生门;ScreenShader.cso SM2 字节码 1:1) */
+  /** 屏幕滤镜链 GL 后端总门——★A1 起恒开（?sfxgl 参数已收编为管线旗:sfxgl=0
+   *  语义改为「回旧乒乓链」而非关 GL;2D MonolithFilters 仅剩 GL 失败自动回退/
+   *  CPU 渲染路径。运行时仍可置 false 强制 2D——探针 _bm-lightmap 同款口保留） */
+  private screenFxEnabled = true;
   private screenFx: GLScreenFilters | null = null;
   private screenFxRetryAt = 0;
-  private screenFxEnabled = (() => {
-    try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('sfxgl') !== '0'; }
-    catch { return false; }
-  })();
   /** 同 worldLightLayer 哨兵模式(活实例直取;死亡 5s 退避;初始化失败 30s 闩) */
   private screenFxLayer(): GLScreenFilters | null {
     if (!this.screenFxEnabled || this.isCpuRender()) return null;
@@ -17086,7 +17154,11 @@ export class Renderer {
     if (performance.now() < this.screenFxRetryAt) return null;
     if (starvedLock()) return null;
     const inst = new GLScreenFilters();
-    if (inst.unavailable) {
+    // ★A1:管线模式不 probe 独立上下文（drawChainPipe 在用时零创建=IOSurface 净
+    //  −1;独立上下文仅旧链模式/管线失败回落时惰性建）。旧链模式即时 probe 保持
+    //  30s 闩语义——管线失败回落窗内惰性建若失败退化为 5s 周期（罕见路径,备案:
+    //  每次 5s 仅一次构造尝试,非风暴面）。
+    if (!Renderer.sfxPipe && !inst.ensureStandalone()) {
       inst.dispose();
       this.screenFxRetryAt = performance.now() + 30_000;
       return null;
@@ -17126,6 +17198,14 @@ export class Renderer {
       try { this.worldLightLayer(); } catch { /* 工厂内部已退避 */ }
     }
     try { this.screenFxLayer(); } catch { /* 同上 */ }
+    // ★A1:管线模式下滤镜程序登记进共管管线（旧链「上下文+着色器编译」预热契约
+    //  的承接面——独立上下文在管线模式零创建,编译成本移到加载页窗;失败静默=懒建兜底）
+    if (Renderer.sfxPipe) {
+      try {
+        const pipeSfx = this.swPipe ?? this.acquireSwPipe();
+        if (pipeSfx && !pipeSfx.unavailable) this.screenFx?.prewarmPipe(pipeSfx);
+      } catch { /* 懒建兜底 */ }
+    }
     try { this.acquireGL(); } catch { /* glfx/bg 层 */ }
     if (!Renderer.wfbo) { try { this.waterWarp.prewarm(); } catch { /* 扭曲层(新链并入 worldCompose,独立层不建) */ } }
     // ★极光 GL(#perf2026-08-28 trace 定罪):AuroraSky 字段初始化式 new GLAurora()
@@ -17165,7 +17245,7 @@ export class Renderer {
         : Math.max(this._towerFilterOpacity - dt, 0);
     }
     const towVisible = tow != null && this._towerFilterOpacity > 0;
-    if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !towVisible) return;
+    if (!mono.anyInUse && !mono.heatInUse && shakeI <= 0 && !towVisible) { this.sfxPathUsed = '-'; return; }
     // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
     // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
     // 语义等价——vanilla 垫值只是为比屏幕大的离屏采集目标)
@@ -17243,23 +17323,54 @@ export class Renderer {
             break;   // moonLord 未入 GL 端口(在 GL 链上方补画见下)
         }
       }
-      if (passes.length > 0 && gl.drawChain(this.canvas, passes,
-        [this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255])) {
-        ctx.drawImage(gl.canvas, 0, 0);
-        // moonLord 族补画（无像素读取，GL 链结果上直叠——VeryHigh 序在 Medium
-        // 柱族之后即补画在后，次序同原版 EndCapture 链表）
-        const core4 = this._moonLordFilterTarget(this._frameEntities);
-        const playerScr = { x: (player.cx - cam.x) * z + viewW / 2, y: (player.cy - cam.y) * z + viewH / 2 };
-        for (const f of mono.visibleFilters()) {
-          if (f.def.kind !== 'moonLord') continue;
-          mono.drawMoonLordPass(ctx, f, viewW, viewH,
-            f.def.aimAtPlayer === false && core4 ? {
-              x: (core4.x - cam.x) * z + viewW / 2, y: (core4.y - cam.y) * z + viewH / 2,
-            } : playerScr);
+      if (passes.length > 0) {
+        // ★A1:管线链先行（GLPipeline FBO('sfxA'/'sfxB') 乒乓——旧链 N 次全幅上传+
+        //  N−1 次 GL→2D 回读+staging 画布+sfx 独立上下文全消;字节等价论证见
+        //  GLScreenFilters drawChainPipe 头注）。低清档（wK<1）回退旧链:管线画布
+        //  帧界在 compose（世界层尺寸 viewW·wK）与本链（主画布尺寸）间逐帧振荡=
+        //  表面重分配 churn,opresent 低清档门同款哲学（回退=旧行为）。
+        let chainOk = false;
+        if (Renderer.sfxPipe && this._worldLowK === 1) {
+          const pipe = this.acquireSwPipe();
+          if (pipe && !pipe.unavailable) {
+            chainOk = gl.drawChainPipe(pipe, this.canvas, passes, [
+              this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255,
+            ]);
+            if (chainOk) {
+              ctx.drawImage(pipe.canvas, 0, 0);
+              this.sfxPathUsed = 'pipe';
+              this.sfxPathStats['pipe'] = (this.sfxPathStats['pipe'] || 0) + 1;
+            }
+          }
         }
-        return;
+        // 逃生门（?sfxgl=0）/管线失败回落=旧「GL→2D→GL」乒乓链（双路径并存;
+        //  再败落下方 2D 近似链——既有回退语义不动）
+        if (!chainOk && gl.drawChain(this.canvas, passes,
+          [this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255])) {
+          ctx.drawImage(gl.canvas, 0, 0);
+          chainOk = true;
+          this.sfxPathUsed = 'pingpong';
+          this.sfxPathStats['pingpong'] = (this.sfxPathStats['pingpong'] || 0) + 1;
+        }
+        if (chainOk) {
+          // moonLord 族补画（无像素读取，GL 链结果上直叠——VeryHigh 序在 Medium
+          // 柱族之后即补画在后，次序同原版 EndCapture 链表）
+          const core4 = this._moonLordFilterTarget(this._frameEntities);
+          const playerScr = { x: (player.cx - cam.x) * z + viewW / 2, y: (player.cy - cam.y) * z + viewH / 2 };
+          for (const f of mono.visibleFilters()) {
+            if (f.def.kind !== 'moonLord') continue;
+            mono.drawMoonLordPass(ctx, f, viewW, viewH,
+              f.def.aimAtPlayer === false && core4 ? {
+                x: (core4.x - cam.x) * z + viewW / 2, y: (core4.y - cam.y) * z + viewH / 2,
+              } : playerScr);
+          }
+          return;
+        }
       }
     }
+    // ★A1 诊断面:2D 近似链（GL 层全败/CPU 渲染/滤镜退避窗——既有回退语义）
+    this.sfxPathUsed = '2d';
+    this.sfxPathStats['2d'] = (this.sfxPathStats['2d'] || 0) + 1;
     if (mono.heatVisible) {
       mono.drawHeat2D(ctx, this.canvas, viewW, viewH,
         { x: screenPos[0], y: screenPos[1] }, { x: screenRes[0], y: screenRes[1] },
@@ -17667,7 +17778,9 @@ export class Renderer {
     //  ★B2b:worldCanvas 缺席的 acc 帧=accHandle(FBO('world')) 句柄换指（A 线
     //  compose 面零改动——句柄型入参走直采,uWorldFlip=1 朝向链）。
     if (Renderer.wfbo && Renderer.lrecon && !this.isCpuRender() && (accFbo?.tex || this.worldCanvas)) {
-      const wcL = (this.worldCompose ??= this.newWorldCompose()).acquire();
+      // ★R1-F10:构造口可返 null（共管管线退避窗）——null 安全,下帧 ??= 重试
+      this.worldCompose ??= this.newWorldCompose();
+      const wcL = this.worldCompose?.acquire() ?? null;
       if (wcL) {
         const warpOn = !!(this._waveCss && waterWaves.quality > 0
           && (!Renderer.dryWarpSkip || this._waveLiquidInView));
@@ -17922,7 +18035,9 @@ export class Renderer {
       //   驻留 FBO,扭曲 pass 直采 FBO 纹理（旧链 scene 全帧重传+GL→2D→GL 乒乓消灭）,
       //   present 单次回贴。失败/unavailable → 落回下方旧链（双路径并存,对拍期纪律）。
       if (Renderer.wfbo && !this.isCpuRender()) {
-        const wc = (this.worldCompose ??= this.newWorldCompose()).acquire();
+        // ★R1-F10:构造口可返 null（共管管线退避窗）——null 安全,下帧 ??= 重试
+        this.worldCompose ??= this.newWorldCompose();
+        const wc = this.worldCompose?.acquire() ?? null;
         if (wc) {
           // warp 激活判定与旧链 :16925 同源（同四门:帧态/软渲染/waveQuality/旱地探针）
           const warpOn = !!(this._waveCss && waterWaves.quality > 0
@@ -18011,11 +18126,15 @@ export class Renderer {
         if (Renderer.lightFast && all === 255) {
           // ★B2b:acc 帧=世界面在 FBO——present 落管线画布再单次回贴（全亮帧
           //  乘光恒等,与 worldCanvas 直画同构）
+          // ★R1-F11（2026-09-25 红蓝批 B）：低清档（K<1）世界 FBO=lw×lh<视口——
+          //  回贴必须带 dst 尺寸拉伸（fullbright 支 :17708 同款约定）,1:1 直画
+          //  曾把低清世界画在左上角（可达面:?wfbo=0 逃生门或 A2 compose 失败帧
+          //  × lightFast 全亮 × K<1 角落链）。
           if (accFbo && this.swPipe) {
             this.swPipe.present(accFbo);
-            this.ctx.drawImage(this.swPipe.canvas, 0, 0);
+            this.ctx.drawImage(this.swPipe.canvas, 0, 0, viewW, viewH);
           } else {
-            this.ctx.drawImage(this.worldCanvas!, 0, 0);
+            this.ctx.drawImage(this.worldCanvas!, 0, 0, viewW, viewH);
           }
           return;
         }
@@ -18029,7 +18148,10 @@ export class Renderer {
       //  深回退帧视觉降级不炸——登记）。
       const wimg = accFbo ? this.accReadbackImageData(accFbo, viewW, viewH)
         : this.worldCtxLayer!.getImageData(0, 0, viewW, viewH);
-      if (!wimg) { this.ctx.drawImage(this.lightCanvas, 0, 0); return; }
+      // ★R1-F11:读回失败保底直画光照图——dst 尺寸拉伸补齐（lightCanvas=w2×h2 小图,
+      //  1:1 直画=左上角碎片;拉伸填满=accReadbackImageData 注「保底直画光照图」
+      //  语义的整幅形态,与 fullbright/lightFast 支同约定）
+      if (!wimg) { this.ctx.drawImage(this.lightCanvas, 0, 0, viewW, viewH); return; }
       const wd = wimg.data;
       const lxRatio = w2 / (tilesX * ts * z), lyRatio = h2 / (tilesY * ts * z);
       if (Renderer.legacyCpuMult) {

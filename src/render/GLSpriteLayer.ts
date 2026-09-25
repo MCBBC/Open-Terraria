@@ -306,19 +306,24 @@ export class GLSpriteLayer {
     this.buildCommonObjects(gl);
     // 上下文丢失:管线画布上的第二监听（管线自身也监听并标自身不可用）——本层同步
     // 标记,消费方回退 2D,退避期后由持有方整体重建（语义同旧路径自愈钩子）
-    this.canvas.addEventListener('webglcontextlost', (e) => {
+    // ★BJ344（件3）：具名化（dispose 摘除——脱离 canvas 上闭包捕 this=层→Renderer→Game
+    //  整链滞留,合成层 +3/轮的 blink 侧入边之一）
+    const lostPipe = (e: Event) => {
       noteContextLost(`sprite:${this.statName}`);   // #三开压测批
       e.preventDefault();
       this.unavailable = true;
       this.diedAt = performance.now();
       this.objectsStale = true;
       console.warn('[GLSpriteLayer:pipe] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建');
-    });
-    this.canvas.addEventListener('webglcontextrestored', () => {
+    };
+    const restoredPipe = () => {
       this.unavailable = true;
       this.diedAt = performance.now();
       this.objectsStale = true;
-    });
+    };
+    this.ctxLostHandlers.push(lostPipe, restoredPipe);
+    this.canvas.addEventListener('webglcontextlost', lostPipe);
+    this.canvas.addEventListener('webglcontextrestored', restoredPipe);
   }
 
   private init(): void {
@@ -413,23 +418,29 @@ export class GLSpriteLayer {
     // 丢失后【不会自恢复】(2D 会),曾无人监听=永远持有死上下文,背景层
     // 全空且不再重试。死亡即标 unavailable,消费方丢弃实例走 2D 兜底,
     // 退避期后重建新实例
-    this.canvas.addEventListener('webglcontextlost', (e) => {
+    // ★BJ344（件3）：具名化（dispose 摘除,同 initPipeMode 注）
+    const lost = (e: Event) => {
       noteContextLost(`sprite:${this.statName}`);   // #三开压测批
       e.preventDefault();               // 保留恢复资格(部分驱动可自动恢复)
       this.unavailable = true;
       this.diedAt = performance.now();
       this.objectsStale = true;
       console.warn('[GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建');
-    });
-    this.canvas.addEventListener('webglcontextrestored', () => {
+    };
+    const restored = () => {
       // 内容(纹理/程序)已全部蒸发:仍按死亡处理,由消费方整体重建更干净
       this.unavailable = true;
       this.diedAt = performance.now();
       this.objectsStale = true;   // restore 后 isContextLost()=false 但旧对象已蒸发
-    });
+    };
+    this.ctxLostHandlers.push(lost, restored);
+    this.canvas.addEventListener('webglcontextlost', lost);
+    this.canvas.addEventListener('webglcontextrestored', restored);
   }
   /** 上下文死亡时刻(重建退避用;0=未死) */
   diedAt = 0;
+  /** ★BJ344（件3）：具名 lost/restored 监听柄（dispose 摘除——脱离 canvas 上的闭包滞留面） */
+  private ctxLostHandlers: Array<(e: Event) => void> = [];
   /** 对象陈旧旗:lost/restored 后旧对象已蒸发或不属于恢复后的上下文——dispose 跳过 delete */
   objectsStale = false;
 
@@ -1344,6 +1355,10 @@ void main(){
   /** 全量释放(切世界/读档——★曾漏挂此链:连续读档逐次叠满 LRU=GB 级显存
    *  打爆 → contextlost 风暴 26 万次,tab 3.4GB 用户实报 2026-08-18) */
   dispose(): void {
+    // ★BJ344（件3）：contextlost/restored 监听随实例摘除
+    for (const h of this.ctxLostHandlers) this.canvas.removeEventListener('webglcontextlost', h);
+    for (const h of this.ctxLostHandlers) this.canvas.removeEventListener('webglcontextrestored', h);
+    this.ctxLostHandlers.length = 0;
     if (this.pipe) { this.disposePipeMode(); return; }
     if (!this.gl) return;
     // 上下文已丢失 → 驱动侧资源已蒸发,delete 只会打 INVALID_OPERATION 噪声

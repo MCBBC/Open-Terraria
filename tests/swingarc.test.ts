@@ -86,6 +86,39 @@ describe('永夜刃飞斩（273 第二发 |ai0|<0.2 分支）', () => {
     for (let t = 0; t < 60 && !fly.dead; t++) fly.fixedUpdate(1, game);
     expect(fly.dead).toBe(true);                       // ai1=30
   });
+
+  // ★BJ342 ND1 变异证红（W3 定谳：AI_190 每 tick 绝对重赋 rotation=num4 后
+  // += π×4×num2×10×num ⇒ rot(t)=aim+0.1sπ+4.1sπ·(t/ai1)）——旧累积式
+  // （rot+=… 自 0 起）在本面全红：二次型 ~29 圈/零 aim 锚/Δ角随 num 线性增长
+  it('ND1 旋转曲线钉值：rot(t)=π·ai0+41π·ai0·t/ai1（t=1..29 全程逐拍）+ 匀角速 + ~2 圈', () => {
+    const game = makeGame(new World(120, 120, 30, 'open'));
+    const ai0 = 0.1, ai1 = 30;                          // facing=1 → ai0=dir×gravDir×0.1
+    const fly = new NightsEdgeFly(50 * TILE, 90 * TILE, 5, 0, 40, 1, ai1, 1);
+    for (let t = 1; t < ai1; t++) {                     // t=30 拍亡（Kill 门在 rot 赋值前）
+      fly.fixedUpdate(1, game);
+      expect(fly['rot']).toBeCloseTo(Math.PI * ai0 + 41 * Math.PI * ai0 * (t / ai1), 9);
+    }
+    // 圈数断言：净扫掠 = 4.1π·(29/30) ≈ 1.98 圈（W3「~2 圈」;旧累积式 ≈29 圈）
+    const sweep = (fly['rot'] as number) - Math.PI * ai0;
+    expect(sweep / (2 * Math.PI)).toBeGreaterThan(1.9);
+    expect(sweep / (2 * Math.PI)).toBeLessThan(2.1);
+    // 匀角速：相邻拍差恒 41π·ai0/ai1（Projectile.cs:42751 绝对式 ⇒ Δ 常数）
+    const fly2 = new NightsEdgeFly(50 * TILE, 90 * TILE, 5, 0, 40, 1, ai1, 1);
+    fly2.fixedUpdate(1, game);
+    const r1 = fly2['rot'] as number;
+    fly2.fixedUpdate(1, game);
+    expect((fly2['rot'] as number) - r1).toBeCloseTo(41 * Math.PI * ai0 / ai1, 9);
+  });
+
+  it('ND1 aim 锚定 + 镜像支：(3,4) → rot(1)=atan2(4,3)+0.1π+41π·0.1/30；facing=−1 全式反号', () => {
+    const game = makeGame(new World(120, 120, 30, 'open'));
+    const fly = new NightsEdgeFly(50 * TILE, 90 * TILE, 3, 4, 40, 1, 30, 1);
+    fly.fixedUpdate(1, game);
+    expect(fly['rot']).toBeCloseTo(Math.atan2(4, 3) + Math.PI * 0.1 + 41 * Math.PI * 0.1 / 30, 9);
+    const flyL = new NightsEdgeFly(50 * TILE, 90 * TILE, 5, 0, 40, -1, 30, 1);
+    flyL.fixedUpdate(1, game);
+    expect(flyL['rot']).toBeCloseTo(-(Math.PI * 0.1 + 41 * Math.PI * 0.1 / 30), 9);
+  });
 });
 
 describe('Zenith 933（AI_182 FinalFractal）', () => {

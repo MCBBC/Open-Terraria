@@ -102,9 +102,6 @@ void main() {
       }
     } catch { /* RENDERER 查询失败按硬件处理 */ }
     this.gl = gl;
-    // ★IIIII248:DOM 源带源矩形的 texSubImage2D 重载仅 WebGL2 提供(WebGL1 规范
-    //  无此签名,调用会 TypeError)——按实际上下文域分派
-    this._isGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
     const compile = (type: number, src: string): WebGLShader | null => {
       const sh = gl.createShader(type)!;
       gl.shaderSource(sh, src);
@@ -158,9 +155,27 @@ void main() {
    *  null=零变化跳过上传;undefined=旧全幅路径)。world 纹理无内容级脏迹,恒全幅。 */
   private _texKeyWorld = '';
   private _texKeyLight = '';
-  /** WebGL2 通道(webgl2 上下文才有 DOM 源带 src-rect 的 texSubImage2D 重载;
-   *  WebGL1 回退全幅——正确性不变,只是少省带宽) */
-  private _isGL2 = false;
+  /** ★R1-F5 光照脏行带 scratch（GLSpriteLayer.texSubUpdate 同款判例,见 composite
+   *  带支注）：带画布全尺寸面带内容只在 (0,0,w,bandH) → 抠进恰 band 尺寸 scratch
+   *  再整面上传。willReadFrequently=纯上传中转（SHM 后备不占 IOSurface）。 */
+  private _bandScratch: HTMLCanvasElement | null = null;
+  private _bandScratchCtx: CanvasRenderingContext2D | null = null;
+  private bandScratch(src: HTMLCanvasElement, w: number, h: number): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') return null;
+    if (!this._bandScratch) {
+      this._bandScratch = document.createElement('canvas');
+      this._bandScratchCtx = this._bandScratch.getContext('2d', { willReadFrequently: true });
+    }
+    const c = this._bandScratchCtx;
+    if (!c || !this._bandScratch) return null;
+    if (this._bandScratch.width !== w || this._bandScratch.height !== h) {
+      this._bandScratch.width = w;
+      this._bandScratch.height = h;
+    }
+    c.clearRect(0, 0, w, h);
+    c.drawImage(src, 0, 0, w, h, 0, 0, w, h);
+    return this._bandScratch;
+  }
   /** 每帧合成:world(worldCanvas) × light(lightCanvas @ lightRect 像素矩形) → this.canvas
    *  darkSkip（★SW-BJ41 2026-09-09）：1 = 以太域零光 α→0（shimmerAlpha≥1 时传入）
    *  lightBand（★IIIII248）：light 纹理脏行带 {canvas,y,w,h}——canvas 的 (0,0,w,h)
@@ -210,13 +225,22 @@ void main() {
       glStatUpload('worldLight', light.width * light.height * 4);
     } else if (lightBand === null) {
       // 零变化:跳过上传(账本零带宽)
-    } else if (lightBand !== undefined && this._isGL2) {
-      // WebGL2 9 参 DOM 源重载(target,level,xoff,yoff,w,h,fmt,type,source)——
-      // 本仓 TS DOM 库版本未收录该重载,松散调用面 + _isGL2 门控(GL1 走全幅回退)
-      (gl as unknown as { texSubImage2D: (...a: unknown[]) => void }).texSubImage2D(
-        gl.TEXTURE_2D, 0, 0, lightBand.y, lightBand.w, lightBand.h,
-        gl.RGBA, gl.UNSIGNED_BYTE, lightBand.canvas);
-      glStatUpload('worldLight', lightBand.w * lightBand.h * 4);
+    } else if (lightBand !== undefined) {
+      // ★R1-F5（2026-09-25 红蓝批 B）：9 参 DOM 源重载非标准（Firefox 按规范抛
+      //  TypeError=每脏带帧崩;Chrome 左上 w×h 语义=侥幸对齐,原 _isGL2 门因此设——
+      //  门随重载一并退役）——统一走 GLSpriteLayer.texSubUpdate 判例:带内容
+      //  (0,0,w,h)（Renderer 生产面）先抠进带尺寸 scratch,再按标准 7 参 DOM 源
+      //  整面上传 (0, band.y)（WebGL1/2 皆合法）。scratch 抠取=恒等复制+上传
+      //  pixelStorei 态逐式同 → Chrome 上传字节逐位不变。GL1 由全幅回退改吃带
+      //  上传（正确性同源:带外纹素=带外画布像素恒等,见上注）。
+      const bs = this.bandScratch(lightBand.canvas, lightBand.w, lightBand.h);
+      if (bs) {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, lightBand.y, gl.RGBA, gl.UNSIGNED_BYTE, bs);
+        glStatUpload('worldLight', lightBand.w * lightBand.h * 4);
+      } else {
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, light);
+        glStatUpload('worldLight', light.width * light.height * 4);
+      }
     } else {
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, light);
       glStatUpload('worldLight', light.width * light.height * 4);

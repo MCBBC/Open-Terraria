@@ -142,7 +142,7 @@ import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { tryItemSwapVid } from '../render/CursorItemIcon';
 import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames } from '../stats/Buffs';
-import { mainDifficulty, GDL, mainMasterMode } from '../stats/ScaleStats'; // ★SW-FX21 +mainMasterMode（BossBag 右键上下文）
+import { mainDifficulty, GDL, mainMasterMode, roundCSf32Mul } from '../stats/ScaleStats'; // ★SW-FX21 +mainMasterMode（BossBag 右键上下文）
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
@@ -259,7 +259,9 @@ function prefixDisplayName(prefix: number): string {
 /** 词缀后伤害值（Item.Prefix :551：damage = round(damage × dmg)） */
 function prefixedDamage(def: (typeof ITEM_DEFS)[number], prefix?: number): number {
   if (!def.tool?.damage || !prefix) return def.tool?.damage ?? 0;
-  return Math.max(1, Math.round(def.tool.damage * prefixStat(prefix).dmg));
+  // ★BJ343 件 2：原式 Item.cs:577 `(int)Math.Round((float)damage * dmg)`——f32 操作数
+  //  + 银行家舍入（旧 Math.round=f64+half-up,半值/f32 精密处发散）
+  return Math.max(1, roundCSf32Mul(def.tool.damage, prefixStat(prefix).dmg));
 }
 /** 内部 item id → 原版 item id（UI 层 vid 直读同 Shimmer 反解旧函数：vid 直取 +
  *  vi_ 前缀反解——避免 UI 模块图再挂 Shimmer 全链） */
@@ -7314,8 +7316,13 @@ export class UI {
    与原「--slot-alpha 显式置值走定值支不进 calc 缺省」语义逐槽同域 */
 .sw-vinv .sw-slot[style*="--slot-alpha"]::after { animation:none; will-change:auto; }
 /* hover 全亮须 !important——CSS 级联序 author important > 运行中动画值,普通规则
-   会被动画盖掉;!important 不摘动画（移开即恢复动画当帧值 = 原 unhover 回脉冲同观感） */
-.sw-vinv .sw-slot:hover::after { opacity:1 !important; }
+   会被动画盖掉;!important 不摘动画（移开即恢复动画当帧值 = 原 unhover 回脉冲同观感）。
+   ★BJ316-D1/BJ340（2026-09-25）收窄 :not([style*="--slot-alpha"])——裸 :hover 毯过捕
+   豁免族,把 FX43 刻意压制的 mcraft 定 α 槽 hover 全亮复活（夹具
+   scripts/_bj316-hover-cascade.mjs 实测 0.635→1 击穿 :7329-7330 压制;author
+   important 级联序压过普通规则,更低层 mcraft hover 规则永远赢不回）。收窄后豁免槽
+   hover 保持定 α,普通槽（动画域）hover 全亮不变 */
+.sw-vinv .sw-slot:not([style*="--slot-alpha"]):hover::after { opacity:1 !important; }
 .sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
 /* ★FX43(2026-09-16)modern 合成窗(.sw-mcraft)槽视觉面 1:1——
    ①格/成品/材料槽层 α 定值(ItemSlot.cs ctx41/42/43 InventoryBack18 × (10,58,74)@162;

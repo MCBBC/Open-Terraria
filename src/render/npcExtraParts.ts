@@ -170,7 +170,10 @@ export function drawDD2SkeletonCrown(
   if ((e.lai3 ?? 0) < 115) return;
   const tex = atlas.ensureVImage('vanilla/Extra_80.png');
   if (!tex) return;
-  const animT = (performance.now() / 1000) % 0.5 / 0.5 * 4;
+  // ★BJ343 件 6：GTW 漏收编站收编——原版 Main.cs:23750 `(int)(GlobalTimeWrappedHourly
+  //  % 0.5f / 0.5f * 4f)`（Extra_80 头冠 4 帧）。GTW 单源=暂停/失焦随世界冻结（BJ330
+  //  语义,原 performance.now 墙钟相位照走=漂移）
+  const animT = gtw() % 0.5 / 0.5 * 4;
   const frameY = Math.floor(animT);
   const fh = tex.height / 4;
   const s = e.vanillaScale || 1;
@@ -601,16 +604,21 @@ export function drawDukeAfterimages(
       ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
     });
   }
-  // 叠层圆周脉冲（:24844-24854）：i=1..num338−1（【1 起】,基座 0 起）；色 = Yellow →
-  // GetAlpha（ai0≥4 → 缺省尾 num）→ ×(1−num339=0.5)。
+  // 叠层圆周脉冲（Main.cs:24844-24854）：i=1..num338−1（【1 起】,基座 0 起）；色 =
+  // value81 = Lerp(color47,value77,1) = Yellow×k → GetAlpha → ×(1−num339=0.5)。
+  // ★BJ342 ND6：GetAlpha A 面 = num5 = newColor.A − alpha（NPC.cs:94557,尾段钳
+  // [0,255] :94820-94824）——newColor.A = 255k（Color×float 四通道乘）⇒
+  // A = clamp(255k−α)/255,再 ×0.5。旧 k×(1−α/255)×0.5 少扣 α 全额且缺 0 钳,
+  // 仅 α>0∧k<1 域发散（隐身渐显期偏亮）
   const [n338] = dukeBurstParams(e);
-  const num = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+  const alphaSpawn = Math.min(255, Math.max(e.spawnAlpha, 0));
   for (let i = 1; i < n338; i++) {
     const ang = (i / n338) * Math.PI * 2 + e.spin;
     const px = e.cx + Math.cos(ang) * 10 * 0.5;
     const py = e.cy + Math.sin(ang) * 10 * 0.5;
     withGhostTransform(px, py, () => {
-      ctx.globalAlpha = Math.max(0, Math.min(1, k * num * (1 - 0.5)));   // value77×k 的 Color×float 乘 A → α 含 k
+      ctx.globalAlpha = Math.max(0, Math.min(1,
+        (Math.max(0, Math.min(255, 255 * k - alphaSpawn)) / 255) * (1 - 0.5)));
       ctx.drawImage(baked, -frame.sw / 2, -frame.sh / 2);
     });
   }

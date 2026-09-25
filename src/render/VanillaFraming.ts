@@ -661,7 +661,18 @@ function buildUnifiedView(st: TileStore, centerVan: number): TileStore {
   const targetInternal = vanToInternalTable()[centerVan];
   const realType = st.type;
   const flags = st.flags;
-  const ghost = Object.create(st) as { type: TileStore['type'] };
+  // ★BJ344（件3,合成层 +3/轮清偿）：幽灵视图不再原型继承【实例】——旧式
+  //  Object.create(st) 使 ghostViewCache 的 WeakMap 值(ghost)经 __proto__ 强引用键(st)
+  //  =条目自钉（值活⇔键活→键死值亦活,条目永生）→ 旧世界 TileStore+Game 全图
+  //  （含三张脱离 GL canvas 的合成层）永久滞留 = LayerTree P2b 16→19→22 +3/轮
+  //  （堆快照强边根路径定谳 scripts/_bj344-retainer.mjs:ghostViewCache Map→
+  //  WeakMap pair→TileStore→listeners→Context→Game）。改挂 TileStore.prototype +
+  //  自身数组引用浅拷贝：TileStore 数组仅构造期赋值（TileStore.ts:93-118,恒不
+  //  重赋）→ 引用共享与活世界同相；键(st)亡 ⇒ 条目亡,跨世界零滞留。
+  const ghost = Object.create(Object.getPrototypeOf(st)) as { type: TileStore['type'] };
+  for (const k of Object.keys(st) as unknown as Array<keyof TileStore & string>) {
+    (ghost as unknown as Record<string, unknown>)[k] = st[k];
+  }
   Object.defineProperty(ghost, 'type', {
     value: new Proxy(realType, {
       get(t: unknown, prop: string | symbol) {

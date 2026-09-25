@@ -2210,7 +2210,9 @@ export function drawAdjust(
 /** 基底 α（(255,255,255,100) → 纹理 α×100/255） */
 export const SHARD_BASE_ALPHA = 100 / 255;
 
-/** Main.GlobalTimeWrappedHourly（★BJ330 收编 GameTime 单源;TileDrawing.cs:4688 消费） */
+/** Main.GlobalTimeWrappedHourly（★BJ330 收编 GameTime 单源;TileDrawing.cs:1284 消费
+ *  ——★BJ343 行号勘误:旧注 :4688 系 case 129 帧动画支 GTW 站,:1284 才是 129 晶簇
+ *  辉光 hslToRgb(0.7±sin(2π·GTW·0.16+x·0.3+y·0.7)·0.16) 消费行） */
 export function shardGlowClock(): number {
   return globalTimeWrappedHourly();
 }

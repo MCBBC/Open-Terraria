@@ -48,6 +48,32 @@ export const roundCS = (v: number): number => {
 };
 
 // ---------------------------------------------------------------------------
+// ★BJ343 件 2（2026-09-25）：词缀/武器伤害舍入单源收编——三式 C# 数值语义
+//   （f32 操作数 + 银行家/(int) 截断）。JS Math.round=f64+half-up 双偏离。
+//   收编五站：UI.ts prefixedDamage / itemTooltip.ts legacy+tooltip 伤害行 /
+//   Game.ts 天顶剑族 / Game.ts PickAmmo 弹药伤害（各站注释锚原版行号）。
+// ---------------------------------------------------------------------------
+
+/** (int)Math.Round((float)a * b)——Item.Prefix 词缀乘区（Item.cs:577-581：
+ *  `damage = (int)Math.Round((float)damage * dmg)` 等）。语义 = f32 乘积 +
+ *  Math.Round(double) 银行家 + (int)（乘积已整,无截断效应）。
+ *  两操作数先各自 f32（C# int→float 隐转/float 常量）,乘法在 f32 域进行：
+ *  f64 精确积再 f32 舍入 ≡ C# float 乘法（24 位尾数积 ≤48 位 ⊆ f64 尾数域） */
+export const roundCSf32Mul = (a: number, b: number): number => roundCS(f32(f32(a) * f32(b)));
+
+/** (int)((float)a * b)——PickAmmo 弹药伤害叠臂（Player.cs:54193
+ *  `Damage += (int)((float)num * GetWeaponDamageMultiplier(item))`）。
+ *  (int) 强转 = 朝零截断（非舍入!）——正域 = floor。无 +5E-06f 偏置 */
+export const truncCSf32Mul = (a: number, b: number): number => Math.trunc(f32(f32(a) * f32(b)));
+
+/** (int)((float)a * b + 5E-06f)——GetWeaponDamage/tooltip 伤害行族（Player.cs:54066
+ *  `return (int)((float)damage * GetWeaponDamageMultiplier(sItem) + 5E-06f)`；
+ *  Main.cs:20870 同式）。f32 乘 → f32 加偏置 → (int) 朝零截断。偏置语义 =
+ *  抬动恰在整数邻域的 f32 积（f64 侧略亏时回到期望整值） */
+export const truncCSf32MulBias = (a: number, b: number, bias = 5e-6): number =>
+  Math.trunc(f32(f32(f32(a) * f32(b)) + f32(bias)));
+
+// ---------------------------------------------------------------------------
 // Utils.GetLerpValue / Remap（Utils.cs:283-320，Remap 重载默认 clamped=true）
 // ---------------------------------------------------------------------------
 export function getLerpValue(from: number, to: number, t: number, clamped = false): number {

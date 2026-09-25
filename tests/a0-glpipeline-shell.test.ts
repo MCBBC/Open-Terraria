@@ -38,14 +38,16 @@ describe('A0 GLPipeline 管线壳', () => {
     expect(pipelineSrc).toContain('dispose(): void');
   });
 
-  it('★消费方白名单锁：仅 A2 合成模块+C10a/b 云bg后端+Renderer 治理面可 import GLPipeline（其余 src 模块禁入）', () => {
+  it('★消费方白名单锁：仅 A2 合成模块+C10a/b 云bg后端+Renderer 治理面+A1 滤镜链可 import GLPipeline（其余 src 模块禁入）', () => {
     // ★A2 动工（2026-09-23）：GLWorldCompose 首个消费方——白名单制替代零消费方锁
     // ★C10a 动工（2026-09-24）：GLSpriteLayer 获「GLPipeline 后端」模式（?cloudpipe=1
     //   灰度;工厂 createPipelineBacked 在层内构造管线,1:1 持有）
     // ★C10b 动工（2026-09-24）：Renderer 持有单一 GLPipeline 共管注入（云+bg 层
     //   ownsPipe=false+worldCompose 注入）——Renderer 入白名单（持有/revive/drop 治理面）
+    // ★A1 动工（2026-09-25）：GLScreenFilters 滤镜链入管线（drawChainPipe FBO 乒乓,
+    //   ?sfxgl 旗）——第五消费方入白名单
     const root = fileURLToPath(new URL('../src', import.meta.url));
-    const ALLOWED = new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts']);
+    const ALLOWED = new Set(['GLWorldCompose.ts', 'GLSpriteLayer.ts', 'Renderer.ts', 'GLScreenFilters.ts']);
     const offenders: string[] = [];
     for (const f of walkTs(root)) {
       if (f.endsWith('GLPipeline.ts')) continue;

@@ -138,8 +138,8 @@ describe('BJ316 刀2：脉冲 CSS 合成器动画+逐帧 DOM 写退役', () => {
     expect(uiSrc).toContain('.sw-vinv .sw-slot[style*="--slot-alpha"]::after { animation:none; will-change:auto; }');
   });
 
-  it('hover 全亮 !important（author important > 运行中动画;不摘动画）', () => {
-    expect(uiSrc).toContain('.sw-vinv .sw-slot:hover::after { opacity:1 !important; }');
+  it('hover 全亮 !important（author important > 运行中动画;不摘动画;★BJ316-D1/BJ340 收窄豁免 [style*=--slot-alpha] 槽）', () => {
+    expect(uiSrc).toContain('.sw-vinv .sw-slot:not([style*="--slot-alpha"]):hover::after { opacity:1 !important; }');
   });
 
   it('★稳态零逐帧 DOM 写：--invpulse setProperty 与 invAlpha 账面全撤', () => {

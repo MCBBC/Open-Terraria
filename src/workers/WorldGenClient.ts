@@ -52,15 +52,20 @@ export function worldGenTimeoutMs(width: number, height: number): number {
   return Math.round(DEFAULT_TIMEOUT_MS * factor);
 }
 
-/** ★BJ336（2026-09-24）件1：读档超时扩面的尺寸窥取——存档 JSON 的 meta 头按
- *  saveGame 装配序固定 name,seed,w,h（SaveFile.ts meta 字面量插序）⇒ `"w":<n>,"h":<n>`
- *  落在头部数十字节内；JSON 字符串内部的引号必转义（\"w\":）⇒ 正则误匹配不可能，
- *  首个命中即真头。有界窗口（4KB）防超长 name 场景全串扫描。非存档 JSON/损坏头
- *  → null（调用方回退 worker 客户端固定 180s 缺省，同现行）。 */
+/** ★BJ336（2026-09-24）件1：读档超时扩面的尺寸窥取。
+ *  ★BJ341（2026-09-25）键名锚修正（红蓝-W2 F3）：真实序列化头的键名是
+ *  **width/height**（serialize.ts:505 header 投影 `width: meta.w, height: meta.h`
+ *  ——SaveFile.ts meta 的 w/h 键在落盘前被改名投影），旧正则 `"w":(\d),"h":(\d)`
+ *  对真实存档恒不命中 ⇒ json 读档路超时扩面全死（loadFromJson 恒回退 180s 缺省）。
+ *  落盘序固定 format,version,header{name,seed,width,height,…}（serializeSave
+ *  装配序）⇒ 首个 `"width":<n>,"height":<n>` 落在头部数十字节内；JSON 字符串内部
+ *  的引号必转义（\"width\":）⇒ 正则误匹配不可能，首个命中即真头。有界窗口（4KB）
+ *  防超长 name 场景全串扫描。非存档 JSON/损坏头 → null（调用方回退 worker 客户端
+ *  固定 180s 缺省，同现行）。 */
 export function peekSaveDims(json: string): { w: number; h: number } | null {
   if (!json) return null;
   const head = json.length > 4096 ? json.slice(0, 4096) : json;
-  const m = /"w":(\d{1,5}),"h":(\d{1,5})/.exec(head);
+  const m = /"width":(\d{1,5}),"height":(\d{1,5})/.exec(head);
   if (!m) return null;
   const w = Number(m[1]);
   const h = Number(m[2]);
@@ -331,11 +336,17 @@ export class WorldGenClient {
     }
   }
 
-  /** worker 级故障（onerror/messageerror）：全量 reject + 标记不可用 */
+  /** worker 级故障（onerror/messageerror）：全量 reject + 标记不可用。
+   *  ★BJ341 件3：同步清 stallTimer（arm/clear 配对矩阵唯一缺口）——generate 的
+   *  内联看门狗闭包直捕 pend（非 map 解析），pending.clear() 后仍每 10s 拿冻结的
+   *  lastEventAt 判静默，30s 起报「生成疑似卡死」直到页面刷新（BJ331 超时路径
+   *  同案：读档面 armStallWatchdog 走 getPend() map 解析，clear 后读 undefined
+   *  早退=只漏 interval 不刷屏，一并清齐）。 */
   private onFatal() {
     this.workerBroken = true;
     for (const [, p] of this.pending) {
       clearTimeout(p.timer);
+      if (p.stallTimer) clearInterval(p.stallTimer);
       p.reject(new WorldGenUnavailable('worker 故障'));
     }
     this.pending.clear();

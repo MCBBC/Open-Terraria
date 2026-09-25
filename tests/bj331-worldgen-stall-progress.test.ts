@@ -83,17 +83,37 @@ describe('BJ331 WorldGenClient 静默看门狗', () => {
 
   const CFG_LARGE = { width: 8400, height: 2400, seedText: 'bj331' } as GenConfigDTO;
 
-  it('超时路径清 stallTimer:超时 reject 后不再有「生成疑似卡死」告警（泄漏修）', async () => {
+  // ★BJ341 件4①重钉（2026-09-25）：旧钉 45s 场景先走 30s 告警窗——stallWarned 被
+  //  告警锁存为 true 后,泄漏 interval 拿冻结 lastEventAt 只会命中 `if (stallWarned)
+  //  return` 早退=【零增量】,摘 clear（变异 G）照样满绿=无判别力。改 20s 短超时：
+  //  reject 先于告警窗（stallWarned 恒 false）→ 泄漏 interval 在静默 >30s（t=40s
+  //  检查点）必报一次「生成疑似卡死」= 变异 G 证红。
+  it('超时路径清 stallTimer:20s 短超时（30s 告警窗内 reject）后不再有「生成疑似卡死」告警', async () => {
     const { client } = clientWithFakeWorker();
-    const genP = client.generate(CFG_LARGE, { timeoutMs: 45_000 });
+    const genP = client.generate(CFG_LARGE, { timeoutMs: 20_000 });
     const guard = genP.catch((e) => e);
-    await vi.advanceTimersByTimeAsync(40_000);      // 静默 40s>30s → 恰 1 次告警
-    expect(errSpy).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(5_000);       // 45s 硬超时 → reject
+    await vi.advanceTimersByTimeAsync(20_000);      // 20s 硬超时 → reject（未进告警窗）
     await guard.then((e) => expect((e as Error).message).toContain('生成超时'));
     expect(client.hasPendingWork()).toBe(false);
-    await vi.advanceTimersByTimeAsync(120_000);     // 旧实现:泄漏 interval 每 10s 续报 ~12 次
-    expect(errSpy).toHaveBeenCalledTimes(1);        // 修后:0 增量
+    expect(errSpy).toHaveBeenCalledTimes(0);        // 告警窗未触达
+    await vi.advanceTimersByTimeAsync(120_000);     // 旧实现:泄漏 interval 静默>30s 起报
+    expect(errSpy).toHaveBeenCalledTimes(0);        // 修后:0（变异 G 在此报 1 次=红）
+  });
+
+  // ★BJ341 件3：onFatal（worker onerror/messageerror）全量 reject 臂的 stallTimer
+  //  清理——arm/clear 配对矩阵唯一缺口。generate 的内联看门狗闭包直捕 pend（非
+  //  getPend() map 解析）,onFatal 原只清 p.timer ⇒ pending.clear() 后 interval 仍
+  //  每 10s 拿冻结 lastEventAt 判静默,30s 起刷「生成疑似卡死」直到页面刷新。
+  it('onFatal 同步清 stallTimer:worker 故障 reject 后不再有「生成疑似卡死」告警', async () => {
+    const { client } = clientWithFakeWorker();
+    const genP = client.generate(CFG_LARGE, { timeoutMs: 600_000 });
+    const guard = genP.catch((e) => e);
+    await vi.advanceTimersByTimeAsync(0);           // pending 装配微任务
+    (client as unknown as { onFatal(): void }).onFatal();   // worker 级故障全量 reject
+    await guard.then((e) => expect((e as Error).message).toContain('worker 故障'));
+    expect(client.hasPendingWork()).toBe(false);
+    await vi.advanceTimersByTimeAsync(40_000);      // 故障后静默 40s>30s
+    expect(errSpy).toHaveBeenCalledTimes(0);        // 修后:0（摘 clearInterval 变异:报 1 次=红）
   });
 
   it('每段静默只报一次;进度事件后再静默 re-arm 重报（gate 语义）', async () => {

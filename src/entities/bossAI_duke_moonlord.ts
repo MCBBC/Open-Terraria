@@ -424,9 +424,12 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
         e.spawnAlpha = clamp(e.spawnAlpha - 5 + (inSolid(game, e) ? 15 : 0), 0, 150); // :49517-49533
       }
       // (原版本支无 else 复位支——spawnAlpha 初值 255 使 else 恒不可达,R2-F7 清)
-      if (e.ai2 === DUKE.nadoT - 30) { // :49507-49528 出生尘环(1456 :49392)
-        // 36 粒 d172 椭圆环:pos = Center + [Normalize(v)·(w/2,h)·0.375].RotatedBy(
-        // (i−17)·2π/36),速度 = 径向外 3(R5-F13-9 补:曾 18 粒泛用泛向近似)
+      if (e.ai2 === DUKE.nadoT - 30) { // 出生尘环（1457 NPC.cs:49548-49556;旧注 :49507-49528 系 1456 行号）
+        // 36 粒 d172 椭圆环:pos = Center + 2×[Normalize(v)·(w/2,h)·0.375].RotatedBy(
+        // (i−17)·2π/36),速度 = 径向外 3(R5-F13-9 补:曾 18 粒泛用泛向近似)。
+        // ★BJ342 ND4：原版 `Dust.NewDust(vector + vector2,…)`（:49548-49556——
+        // vector=Center+rotOffset、vector2=vector−Center ⇒ 落点=(Center+off)+off
+        // =Center+2×rotOffset;曾 1×=环半径减半偏离）
         const n = 36;
         const nv = Math.hypot(e.vx, e.vy) || 1;
         for (let i = 0; i < n; i++) {
@@ -434,7 +437,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
           const bx = (e.vx / nv) * (e.w / 2) * 0.375, by = (e.vy / nv) * e.h * 0.375;
           const rx = bx * Math.cos(ang) - by * Math.sin(ang), ry = bx * Math.sin(ang) + by * Math.cos(ang);
           const ol = Math.hypot(rx, ry) || 1;
-          game.spawnParticles(rx + e.cx, ry + e.cy, '#8FD8FF', 1, 3,
+          game.spawnParticles(2 * rx + e.cx, 2 * ry + e.cy, '#8FD8FF', 1, 3,
             { life: 100, grav: 0, size: 1.4, vx: (rx / ol) * 3, vy: (ry / ol) * 3 });
         }
         game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49529 PlaySound(29,…,20) 满响(曾借 roar 0.8)

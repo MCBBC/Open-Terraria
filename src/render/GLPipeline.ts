@@ -72,6 +72,8 @@ export class GLPipeline {
   unavailable = false;
   diedAt = 0;
   private gl: WebGL2RenderingContext | null = null;
+  /** ★BJ344（件3）：contextlost 具名监听（dispose 摘除——脱离 canvas 上的闭包滞留面） */
+  private ctxLostHandler: ((e: Event) => void) | null = null;
   private fbos = new Map<string, PipelineFbo>();
   private programs = new Map<string, PipelineProgram>();
   private vao: WebGLVertexArrayObject | null = null;
@@ -114,11 +116,14 @@ export class GLPipeline {
       }
     } catch { /* RENDERER 查询失败按硬件处理 */ }
     this.gl = gl;
-    this.canvas.addEventListener('webglcontextlost', (e) => {
+    // ★BJ344（件3）：具名化（destroy 后 canvas 脱离文档仍被实例持有,匿名监听器闭包
+    //  捕 this=管线→Renderer→Game 整链滞留——dispose removeEventListener 摘除）
+    this.ctxLostHandler = (e: Event) => {
       e.preventDefault();
       this.unavailable = true;
       this.diedAt = performance.now();
-    });
+    };
+    this.canvas.addEventListener('webglcontextlost', this.ctxLostHandler);
     // 预乘收口：所有上传恒真（模块级状态一次设齐,upload 不再逐次设）
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);   // Y 翻转由 present uFlipY 显式管
@@ -313,6 +318,9 @@ export class GLPipeline {
   }
 
   dispose(): void {
+    // ★BJ344（件3）：监听器随实例摘除（闭包捕 this——脱离 canvas 上滞留即整链滞留）
+    if (this.ctxLostHandler) this.canvas.removeEventListener('webglcontextlost', this.ctxLostHandler);
+    this.ctxLostHandler = null;
     const gl = this.gl;
     if (gl) {
       for (const f of this.fbos.values()) {

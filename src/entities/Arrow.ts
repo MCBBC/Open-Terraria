@@ -8723,8 +8723,8 @@ export class Arrow extends Entity {
     //   均会误杀。敌对弹不受影响（上方 hostile 分支已 return/continue）
     if (!this.hostile && this.damage <= 0) return;
     if (hitCritters(this, game)) { this.killNow(game); return; }
-    // 敌对弹不入敌怪判定（原版 Damage_PVE_Inner :11902-11905 `hostile && flag2`
-    // 门：hostile 弹对非 friendly NPC 整段 return——Boss 自射弹幕不会误伤/消耗在
+    // 敌对弹不入敌怪判定（原版 Damage_PVE_Inner :12626/:12631-12634 `hostile && flag2`
+    // 门：hostile 弹对非 friendly NPC 整段 return;★BJ344 勘误:旧锚 :11902-11905 系 1456 世代——Boss 自射弹幕不会误伤/消耗在
     // 自家部件上（月总 454 附手随行 30t 若走此环会在手心爆掉）；城镇 NPC 侧已在
     // 上方 hitTownNpcs('hostile') 走"敌方弹恒命中"档，反射弹也已在上方拦截）
     if (this.hostile) return;
@@ -8893,7 +8893,7 @@ export class Arrow extends Entity {
           if (cd > 0) continue;
           this.localImmuneCd.set(e.id, this.localImmune);
         } else {
-          // 全局 immune[owner] 门（Damage_PVE_Inner :11905）：敌怪 iframes 内不命中、
+          // 全局 immune[owner] 门（Damage_PVE_Inner :12635-12637;★BJ344 勘误:旧锚 :11905 系 1456 世代,1457 该行为命中玩家 buff 支,非免疫门）：敌怪 iframes 内不命中、
           // 不耗穿透（曾缺 = 穿透弹穿过刚被别弹打中的敌白耗穿透数；piranhaStep
           // :1744 同门先例）。pierceInit 1 = 单发弹 flag3 豁免（Enemy.hurt :11457 同门）
           if (this.pierceInit !== 1 && ((e as { iframes?: number }).iframes ?? 0) > 0) continue;
@@ -9375,8 +9375,9 @@ export class Arrow extends Entity {
   // ================= 食人鱼 190（aiStyle 39，Projectile.cs:26065-26315）=================
   // 状态机 1:1：ai[0]=0 直飞咬敌（:26245）/ 1 返回玩家（:26266）；ai[1]=0 未咬可咬 /
   // >0 咬住（Damage_PVE :12447 首咬写入 index+1）/ −1 松手禁再咬（:26095）。
-  // 咬住伤害 = 普通 hitbox 接触走 Damage_PVE（:11868-11871 localNPCImmunity 门 +
-  // :11905 全局 immune 门），localNPCHitCooldown=14t 同敌周期撕咬（:13157）。
+  // 咬住伤害 = 普通 hitbox 接触走 Damage_PVE（:12595 localNPCImmunity 门 +
+  // :12635-12637 全局 immune 门），localNPCHitCooldown=14t 同敌周期撕咬（:14175-14179）。
+  // ★BJ344 勘误:旧锚 :11868-11871/:11905/:13157 系 1456 世代,1457 对应上行三新锚。
 
   /** 姿态记录（:26119-26125/:26139-26143/:26252-26287 三处 rotation 赋值：
    *  vx<0 → spriteDirection=−1 + rotation=atan2(−vy,−vx)，等效 draw 的
@@ -9630,7 +9631,7 @@ export class Arrow extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (this.pHitCd.has(e.id)) continue;                   // :11869 localNPCImmunity 门
-      if ((e.iframes ?? 0) > 0) continue;                    // :11905 npc.immune[owner] 门
+      if ((e.iframes ?? 0) > 0) continue;                    // :12635-12637 npc.immune[owner] 门（★BJ344 勘误:旧锚 :11905 系 1456 世代）
       // StrikeNPC :12811（暴击链同通用弹：基 4% + spawn 注入系暴击）
       const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
       const dmg = crit ? this.damage * 2 : this.damage;

@@ -138,6 +138,29 @@ describe('BJ323 多向锚支撑失效链（129 水晶碎晶/149 节日灯）', (
     expect(drops).toEqual([]);
   });
 
+  it('★BJ343 双锚并存判别位：左锚优先于右锚（:60836 num3 在 :60841 num4 前）', () => {
+    // 双侧锚并存（下/上锚缺）→ 重帧取左锚档 fy=54,不取右锚档 36——
+    //  互换两支序（右先）会选 36 = 立即爆红。存档态摆成右附档（fy=36）作再证：
+    //  右锚仍在时复评也翻回左锚档（存活重帧,非杀格）
+    const w = new World(60, 60, 7, 'bj323');
+    const drops: Drop[] = [];
+    const g = mkShell(w, drops);
+    const SHARD = keyOf('v_129_crystal_shard'), STONE = keyOf('stone');
+    w.store.setTileSilent(29, 20, STONE, 0, 0);        // 左锚
+    w.store.setTileSilent(31, 20, STONE, 0, 0);        // 右锚
+    w.store.setTileSilent(30, 20, SHARD, 0, 36);       // 摆右附档（双侧锚并存不应维持）
+    g.checkDecorSquareFrame(30, 20);                   // 邻格扰动复评
+    expect(w.store.get(30, 20)).toBe(SHARD);           // 有锚存活
+    expect(frameYAt(w, 30, 20)).toBe(54);              // 左锚胜（右锚档 36 被翻）
+    expect(drops).toEqual([]);
+    // 二段：左锚失 → 右锚接管（换档不塌）
+    w.store.setTile(29, 20, 0);
+    g.checkDecorSquareFrame(29, 20);
+    expect(w.store.get(30, 20)).toBe(SHARD);
+    expect(frameYAt(w, 30, 20)).toBe(36);              // 右锚档
+    expect(drops).toEqual([]);
+  });
+
   it('上锚接管重帧 frameY=18（下锚失、头顶块接管）', () => {
     const w = new World(60, 60, 7, 'bj323');
     const drops: Drop[] = [];

@@ -918,20 +918,24 @@ export class VanillaDust {
     }
   }
 
-  /** GetAlpha（:2469-2772 消费型精植）：返回乘数 [rgb, alpha]（0-1）。
+  /** GetAlpha（Dust.cs:2497-2798 [1457] 消费型精植,1458 同文）：返回乘数 [rgb, alpha]（0-1）。
    *  ★2026-09-03 逐通道乘数 rgbv（183/258 红主档实装）：GetAlpha 返回非白 RGB 的
    *  A=0 加性尘,标量 rgb 表达不了三通道比——rgbv?: [r,g,b]（0-1,XNA Color 字面
    *  /255）优先于 rgb 消费（Renderer A=0 加性位逐通道乘,id.data 本就逐通道）;
    *  未设 rgbv 的既有标量档消费面零改动。曾评 union {rgb:number|[r,g,b]} 整型
-   *  方案弃:wing-visuals.test `.rgb` toBeCloseTo 断言类型泄漏 → tsc 红(域外文件) */
-  static alphaOf(d: VDust): { rgb: number; a: number; rgbv?: [number, number, number] } {
+   *  方案弃:wing-visuals.test `.rgb` toBeCloseTo 断言类型泄漏 → tsc 红(域外文件)。
+   *  ★BJ342 ND5：flicker = FlickerClock（mouseTextColor 190↔255 脉冲钟）——唯 157
+   *  消费（Dust.cs:2699-2721 Main.cs:18399-18406）;tests/无钟走 ?? 255 兜底 */
+  static alphaOf(d: VDust, flicker?: { mouseTextColor: number }): { rgb: number; a: number; rgbv?: [number, number, number] } {
     const num = (255 - d.alpha) / 255;
     switch (d.type) {
       case 261: return { rgb: 230 / 255, a: 115 / 255 };                       // :2521
       case 6: return { rgb: 1, a: 25 / 255 };                                   // :2583
       // ---- ★R2 补档(:2656 与 6 同句 A=25 族;光色随环境——rgb=1 为既有 6 号近似口径):
-      // 174/75/135/169/242/20/21/231/130-134/158/293-298/307/310(292 火柱/291 尾迹/
-      // 103·172·278 尾尘曾落 default 压暗档) + 127/187(:2684 同句)
+      // 174/75/135/169/242/20/21/231/130-134/158/293-298/307/310 + 127/187(:2684 同句)
+      //  （★BJ342 ND7 勘误:旧注括号「292 火柱/291 尾迹/103·172·278 尾尘曾落 default
+      //  压暗档」半误——292/172/278 系真缺档(292=BJ342 ND5 补、172=BJ310、278=在案);
+      //  291 尾迹/103 原版 Dust.GetAlpha【本就无分支】=default 尾即原版相,非缺档勿补）
       //  ★2026-09-02 评估定谳（红队 finding）：A=25 族「光色随环境」已由管线交付，
       //  rgb=1 是精确项非缺光——lit 尘画在 worldLayer 内、compositeLight 之前
       //  （Renderer.render :3530 → 合成 :3590），合成 out.rgb=世界.rgb×光.rgb（GL/2D
@@ -968,7 +972,7 @@ export class VanillaDust {
       case 278: return { rgb: 1, a: 25 / 255 };                                 // :2632-2637 newColor×color, A=25
       case 58: return { rgb: 1, a: 0 };                                         // :2721-2724 Color(255,255,255,0)
       case 230: return { rgb: 1, a: 0 };   // :2616-2619 Color(255,255,255,0)——钻头尘本体透明，纯光源
-      case 229: return { rgb: 1, a: 25 / 255 };   // :2659-2663（Lerp(lighting,White,0.6) 近似为全亮基底，备案）
+      case 229: case 269: return { rgb: 1, a: 25 / 255 };   // :2687-2689（269=BJ342 ND5 补,与 229 同句;Lerp(lighting,White,0.6) 近似为全亮基底，备案）
       // ★F1（2026-09-08 红队清偿,用户可见伪影）：原文 (num+9)/10 【只乘 RGB】
       //  （Dust.cs:2757-2758；num=(255−alpha)/255 :2503）；alpha 通道走 GetAlpha 尾段
       //  `newColor.A − alpha`（:2786-2792），而 DrawDust :39664 传 Lighting 色其 A 恒
@@ -978,10 +982,15 @@ export class VanillaDust {
       //  修复后 α≈num=1/255 ≈ 纯加性 glint、rgb≈0.9×光。消费面：43 型恒走 Renderer
       //  A=0 直绘双 pass（drawVanillaDustPass ★F1 判据，不经烘焙对）。
       case 43: return { rgb: (num + 9) / 10, a: num };   // :2755-2758 + :2786-2792
-      case 55: return { rgb: (num + 3) / 4, a: num };   // :2725-2727（num+3)/4 光乘区折减族
-      // 15/57/274 亮色族走默认档：本体 A=255−alpha（:2756-2759），(num+3)/4 的
-      // 光乘区折减由"画在合成后强制 White"（DrawDust :38406）等价表达
-      case 264: {                                                               // :2508
+      // ★BJ342 ND5：(num+3)/4 亮度比值档全族补齐（:2753-2755——58 早退支 :2747 在先、
+      //  20/21 被 A=25 族先截,group 内两型为原版死位不录;15∈全亮桶仍经 alphaOf 取
+      //  rgb 面,57 活发射方 WeaponProj:2336 等;27=永夜刃/DD2/咒火主力,rgb 暗约 33%
+      //  正落 BJ313 观感域）。旧「15/57/274 走默认档」注作废——(num+3)/4 是对光色
+      //  的 rgb 乘数,强制 White 只换光源不消去折减
+      case 15: case 27: case 29: case 35: case 41: case 44: case 45:
+      case 55: case 56: case 57: case 73: case 74: case 274:
+        return { rgb: (num + 3) / 4, a: num };
+      case 263: case 264: {                                                     // :2558-2562（263 同句 ND5 补）
         const c = d.color ?? { r: 0, g: 0, b: 0, a: 0 };
         return { rgb: 0.5, a: (clamp255(c.a / 8) / 255) * 0.5 };
       }
@@ -1015,6 +1024,62 @@ export class VanillaDust {
       case 64:                                                                  // :2576-2578 α==255&&noLight 门
         if (d.alpha === 255 && d.noLight) return { rgb: 1, a: 0 };
         return { rgb: num, a: num };
+      // ---- ★BJ342 ND5（2026-09-25）GetAlpha 全表补缺（Dust.cs:2497-2798 [1457] 逐档
+      //  录入,1458 同文;缺档尘落 default {num,num}=亮度/擦除双偏离）----
+      case 323: return { rgb: 1, a: 1 };                                        // :2506 Color.White
+      case 308: case 309:                                                       // :2508-2510 (225,200,250,190)
+        return { rgb: 0, a: 190 / 255, rgbv: [225 / 255, 200 / 255, 250 / 255] };
+      case 324:                                                                 // :2511-2512 同色×num（四通道）
+        return { rgb: 0, a: (190 / 255) * num, rgbv: [(225 / 255) * num, (200 / 255) * num, (250 / 255) * num] };
+      case 299: return { rgb: 0, a: 200 / 255, rgbv: [50 / 255, 1, 50 / 255] };       // :2513-2528 四色符文尘
+      case 300: return { rgb: 0, a: 1, rgbv: [50 / 255, 200 / 255, 1] };
+      case 301: return { rgb: 0, a: 200 / 255, rgbv: [1, 50 / 255, 125 / 255] };
+      case 305: return { rgb: 0, a: 200 / 255, rgbv: [200 / 255, 50 / 255, 200 / 255] };
+      case 304: return { rgb: 1, a: num };                                      // :2530 White×num
+      case 306: {                                                               // :2534-2536 this.color×num（四通道）
+        const c = d.color ?? { r: 0, g: 0, b: 0, a: 0 };
+        return { rgb: 0, a: c.a * num, rgbv: [c.r * num, c.g * num, c.b * num] };
+      }
+      case 292: return { rgb: 1, a: 1 };                                        // :2538-2539 Color.White
+      case 259: return { rgb: 230 / 255, a: 230 / 255 };                        // :2542-2543 (230,230,230,230)（lunar 活发射方）
+      case 213: case 260: {                                                     // :2570-2572 亮度=(int)(scale/2.5×255)
+        const v = Math.trunc((d.scale / 2.5) * 255) & 255;   // (byte) 截断（原版无上钳,scale>2.5 回绕同相）
+        return { rgb: v / 255, a: v / 255 };
+      }
+      case 197: return { rgb: 250 / 255, a: 150 / 255 };                        // :2579-2580 与 172 同档（Arrow.ts:3573 活发射方）
+      case 159: return { rgb: 250 / 255, a: 50 / 255 };                         // :2599-2600 (250,250,250,50)
+      case 157: {                                                               // :2699-2721 mouseTextColor 脉冲（活发射方=叶绿晶簇）
+        // 原版 f32 算术：num7 = mtc/100f − 1.6f;rgb=(int)(255f×num7)+50 钳 255;
+        // a=(int)(100f×num7)。★f32 阈值判例（BJ116-139 家族）——f64 直算在
+        // mtc=190 拍 a=30 ≠ 原版 f32 (int)29.999995=29
+        const n7 = Math.fround(Math.fround((flicker?.mouseTextColor ?? 255) / 100) - Math.fround(1.6));   // Main.cs:18399-18406 190↔255 步进 1
+        const c157 = Math.min(255, Math.trunc(Math.fround(255 * n7)) + 50);
+        return { rgb: c157 / 255, a: Math.trunc(Math.fround(100 * n7)) / 255 };
+      }
+      case 284: {                                                               // :2724-2728 newColor×color 四通道,A=color.A
+        const c = d.color ?? { r: 0, g: 0, b: 0, a: 0 };
+        return { rgb: 0, a: c.a, rgbv: [c.r, c.g, c.b] };
+      }
+      // 270/271/219-223/226/272/228 = Lerp(light,White,x) 仿射光面 → rgb=1 全亮基底
+      // 备案（同 229 口径,光色由管线逐像素交付;A 常量精确）。219/220 活发射方
+      // （MinionProj:5304 弹 966/Dart:2345 弹 436）;226/272/228 活发射方。
+      case 270: return { rgb: 1, a: 25 / 255 };                                 // :2648-2651 Lerp .5
+      case 271: return { rgb: 1, a: 127 / 255 };                                // :2652-2655 Lerp .5 A=127
+      case 219: case 220: case 221: case 222: case 223:
+        return { rgb: 1, a: 25 / 255 };                                         // :2666-2670 Lerp .5
+      case 226: case 272: case 228:
+        return { rgb: 1, a: 25 / 255 };                                         // :2671-2680 Lerp .8
+      case 279: {                                                               // :2681-2686 ×min(scale,1) 四通道
+        const s = Math.min(d.scale, 1);   // Lerp .8 仿射光面失真备案（全光下精确）
+        return { rgb: s, a: s };
+      }
+      // 327 星尘：夜相 = 光色+disco/rand 抬升后原样返回（:2730-2746,rgb=1 近似、
+      // A=newColor.A=255）——disco 抬升面与 isDay 二相判别（昼相=default 尾）须
+      // 发射方接线时一并建模（同 66 烘焙口径;dormant 仓内零发射方）
+      case 327: return { rgb: 1, a: 1 };
+      case 244: case 245: case 246: case 247: return { rgb: 1, a: 0 };          // :2763-2765 (255,255,255,0)
+      case 71: return { rgb: 200 / 255, a: 0 };                                 // :2775-2777 (200,200,200,0)
+      case 72: return { rgb: 200 / 255, a: 200 / 255 };                         // :2779-2781 (200,200,200,200)
       default:
         return { rgb: num, a: num };
     }

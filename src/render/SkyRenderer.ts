@@ -1966,7 +1966,10 @@ export class SkyRenderer {
     if (drawing === 0 || !tex || !(tex.width > 0) || tex.width === 0) return;
     const fw = tex.width / 3, fh = tex.height;
     const cx = camX + viewW / 2, cy = camY + viewH / 2; // 屏中心（世界 px）
-    const hourY = Math.sin(((performance.now() / 1000) % 6) / 6 * Math.PI * 2); // GlobalTime 6s 环绕的 Y 分量
+    // ★BJ343 件 6：GTW 漏收编站收编——原版 LanternSky.cs:245 `(GlobalTimeWrappedHourly
+    //  % 6f / 6f * 2π).ToRotationVector2().Y`（Y 分量=sin）。GTW 单源=暂停/失焦随世界
+    //  冻结（BJ330 语义,原 performance.now 墙钟相位照走=漂移）
+    const hourY = Math.sin((globalTimeWrappedHourly() % 6) / 6 * Math.PI * 2);
     const flicker = hourY * 0.2 + 0.8;                  // DrawLantern :245-246
     for (let i = 0; i < N; i++) {
       const l = this.lanterns[i];

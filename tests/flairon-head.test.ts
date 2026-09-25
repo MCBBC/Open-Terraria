@@ -485,7 +485,7 @@ describe('⑥ 撞块尘真值单口 + Kill 面静默（type==404 无 Kill 支,P.
 // 五真差异：T1 405 寿命尽走 Kill 尘+音（:17307-17312→:74183）/ T2 404 命中门共享免疫
 // 档（:12636 flag3=false）/ T3 405 命中不写共享窗（:14176 `penetrate != 1` 分支不达）
 // / T4 404 补 CutTiles（:12516-12517 friendly 门,:15407 两表无 404）/ T5 404 击退
-// 方向 = direction 球侧（:13653 num40 缺省,69 族不在 :13654-13678 覆写表）
+// 方向 = direction 球侧（:13652 num40 缺省,69 族不在 :13654-13678 覆写表）
 describe('BJ339-T1: 405 寿命尽 = timeLeft 到期 Kill（尘+音,Update 尾 :17307-17312）', () => {
   it('①第 120 拍 Kill 走 :74183 type==405 支——Item54 音 + 20 粒尘（不再静默退场）', () => {
     const { hooks, player, particles } = makeHooks();
@@ -558,7 +558,7 @@ describe('BJ339-T2: 404 命中门走共享免疫档（:12636 flag3=false → imm
   });
 });
 
-describe('BJ339-T5: 404 击退方向 = direction 球侧（:13653 num40 缺省,69 族无覆写）', () => {
+describe('BJ339-T5: 404 击退方向 = direction 球侧（:13652 num40 缺省,69 族无覆写）', () => {
   it('①回收途中命中敌在球左侧仍推右（不随敌相对弹位翻转——旧 kdir=敌相对位=反向）', () => {
     const { hooks, player } = makeHooks();
     const kxs: number[] = [];
