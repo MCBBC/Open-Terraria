@@ -107,12 +107,15 @@ export class ChunkCache {
   /** ★B1 改公开（2026-09-24）:Renderer 世界层 GL 页纹理增量上传按 slot 推
    *  页内 256² 矩形坐标（slot%PAGE_COLS, ⌊slot/PAGE_COLS⌋） */
   static readonly PAGE_COLS = 4;
-  /** ★B1（2026-09-24）:GL 页纹理驻留态下页画布走 willReadFrequently——GPU 驻留
-   *  已由页纹理接管,页画布只作上传源,CPU 背板反降 IOSurface 张数（GPU 加速
-   *  画布每张一个 IOSurface,内核级计费）。Renderer.bgl 激活时置 true（构造期
-   *  与 setBglForTest 两处写）。★仅 bgl 灰度态生效,主线（bgl=0）页保持 GPU
-   *  加速=烘焙栅格化路径零变化。 */
-  static PAGE_WRF = false;
+  /** ★P0 回退路径去毒（2026-09-25）：旧 ★B1 设计「bgl 激活⇒页画布 WRF（CPU/SHM
+   *  背板,反降 IOSurface 张数）」已废除——页画布背板耦合在旗上=「为 happy path
+   *  优化毒杀回退路径」,违背分级回退承诺（用户实机 trace 定谳:GL 世界路径未
+   *  介入的会话里,drawChunkGrid 逐块 blit SHM 页单 op 5.4µs→36-66µs（7-12×）,
+   *  渲染帧 5.1→26.7ms=20fps）。修=页画布恒 GPU 后备（WRF=false;页画布无
+   *  getImageData 读回面——消费方仅 bakeChunkInto 写入/drawChunkGrid 读绘/
+   *  worldPageTex texFromImage+texSubUpdate 上传,全不需要 WRF）,IOSurface 张数
+   *  回升（+12~24）显式备案:回退速度 > 张数优化。旗耦合删除点=Renderer 构造期
+   *  与 bglSetForTest 两处。 */
   private wallPages: HTMLCanvasElement[] = [];
   private tilePages: HTMLCanvasElement[] = [];
   /** 每页在用 cell 数(与 wallPages 同长;页全空可被 trimFreePages 回收——
@@ -240,7 +243,9 @@ export class ChunkCache {
       const S = CHUNK * TILE * ChunkCache.PAGE_COLS;
       const mkPage = (): HTMLCanvasElement => {
         const c = document.createElement('canvas');
-        if (ChunkCache.CPU_RENDER || ChunkCache.PAGE_WRF) { c.getContext('2d', { willReadFrequently: true }); }
+        // ★P0 去毒:仅 CPU 软渲染门（真 CPU 态整链本来就在软件光栅,WRF 无害且省张）;
+        //  GL/2D 回退态页画布恒 GPU 后备（SHM 页=回退路径 7-12× 慢 op,见类内注）
+        if (ChunkCache.CPU_RENDER) { c.getContext('2d', { willReadFrequently: true }); }
         c.width = S; c.height = S;
         return c;
       };

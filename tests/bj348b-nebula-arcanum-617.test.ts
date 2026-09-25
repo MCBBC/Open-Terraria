@@ -129,13 +129,19 @@ describe('BJ348b-2 手持视觉专支（PlayerDrawLayers.cs:3334-3351 case 3476 
     const hits = src.match(/miscCounter % ARCANUM_HOLD_FRAME_PERIOD/g)?.length ?? 0;
     expect(hits).toBe(2);
   });
-  it('双层绘制式：第一层暗化(0.5,0.5,0.5,0.8)+第二层 Glow_195 A=0 纯加算(125/255 lighter)', () => {
+  it('双层绘制式：主层暗化预烘焙（RGB×0.5,去 ctx.filter 依赖）+第二层 Glow_195 A=0 纯加算', () => {
     const src = rs();
-    expect(src).toContain("ctx.filter = 'brightness(0.5)'");
+    // ★BJ348b-3：暗化烘焙函数在位（MultiplyRGBA RGB 面 ×0.5,α 面不动）
+    expect(src).toContain('function arcanumDimTex');
+    expect(src.match(/id\.data\[i(?: \+ \d)?\] = \(id\.data\[i(?: \+ \d)?\] \* 0\.5\) \| 0;/g)?.length).toBe(3);
+    // 手持两处主层零 ctx.filter 依赖（shim acc 链 filter 分叉根因防御）
+    expect(src).not.toContain("ctx.filter = 'brightness(0.5)'");
     expect(src.match(/globalAlpha = 0\.8/g)?.length).toBe(2);            // 静持+挥舞两处第一层
     // 发光层组合字面（lighter + 125/255 相邻行）×2（静持+挥舞）
     const glowPair = src.match(/globalCompositeOperation = 'lighter';\s*\n\s*ctx\.globalAlpha = 125 \/ 255;/g)?.length ?? 0;
     expect(glowPair).toBe(2);
+    // 主层走烘焙帧（null 兜底原帧）×2
+    expect(src.match(/if \(dim\) \{/g)?.length).toBe(2);
   });
   it('使用期专支：无 0.785 斜持 + vector6(+12) + 帧中心 origin', () => {
     expect(rs()).toContain('offX = Math.cos(aim) * 14 + ARCANUM_HOLD_FRAME_PX / 2');

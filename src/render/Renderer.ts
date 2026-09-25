@@ -352,6 +352,38 @@ const ARCANUM_HOLD_TEX = 'vanilla/Extra_64.png';
 const ARCANUM_HOLD_GLOW_TEX = 'vanilla/Glow_195.png';
 const ARCANUM_HOLD_FRAME_PX = 24;
 
+/** ★BJ348b-3 主层暗化预烘焙（2026-09-25 用户实报"球体内部纯透明"根因防御）：
+ *  bgl+bglShim+b2b 三旗 2026-09-24 起缺省全开 = 用户普通 URL 即 acc/shim 链
+ *  （drawUseItem 的 this.ctx = GLShimExecutor）。此前主层暗化用
+ *  ctx.filter='brightness(0.5)'——shim 对 filter≠none 的 drawImage 走
+ *  rasterizeDrawImage 隔离栅格化/降级链（GLShimExecutor.ts:803-806）,与 glow 层
+ *  （filter=none → quad 快路径）分叉 = "glow 可见而主层消失"的唯一实现差异点
+ *  （分层隔离探针 _bj348b2-layer-iso 实证纯 2D 下两层全对 = shim filter 路径
+ *  是唯一环境分叉）。防御 = 一次性把暗化(RGB×0.5,α 面 0.8 由 globalAlpha 承载
+ *  =原版 MultiplyRGBA(0.5,0.5,0.5,0.8) 逐字节)烘进 canvas,运行时主层
+ *  filter=none 走 quad 快路径零 shim 兼容面。懒烘焙:ensureVImage 晚到自愈
+ *  （每帧重调,null 帧画原帧=首帧偏亮 1-2 帧可忽略）。 */
+let arcanumDimCanvas: HTMLCanvasElement | null = null;
+function arcanumDimTex(atlas: SpriteAtlas): HTMLCanvasElement | null {
+  if (arcanumDimCanvas) return arcanumDimCanvas;
+  const img = atlas.ensureVImage(ARCANUM_HOLD_TEX);
+  if (!img || !(img.width > 0)) return null;
+  const cv = document.createElement('canvas');
+  cv.width = img.width; cv.height = img.height;
+  const c = cv.getContext('2d', { willReadFrequently: true });
+  if (!c) return null;
+  c.drawImage(img, 0, 0);
+  const id = c.getImageData(0, 0, cv.width, cv.height);
+  for (let i = 0; i < id.data.length; i += 4) {
+    id.data[i] = (id.data[i] * 0.5) | 0;          // MultiplyRGBA RGB 面 ×0.5（:3345）
+    id.data[i + 1] = (id.data[i + 1] * 0.5) | 0;
+    id.data[i + 2] = (id.data[i + 2] * 0.5) | 0;  // α 面不动（0.8 由 globalAlpha 承载）
+  }
+  c.putImageData(id, 0, 0);
+  arcanumDimCanvas = cv;
+  return cv;
+}
+
 /** useStyle 5 的"法杖持位"物品（Main.cs:6695-6740 Item.staff=true 全 34 件）：
  *  ApplyUseStyle 5 的 staff 分支（Player.cs:50374）把 itemLocation 钉在
  *  MountedCenter + 瞄准向量×6（贴图斜持指向鼠标），与默认持位不同 */
@@ -2880,7 +2912,7 @@ export class Renderer {
     if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
       this.b2bWorldCanvasCreations++;   // ★B2b 探针面:降级建面计数（稳态恒 0）
       this.worldCanvas = document.createElement('canvas');
-      this.worldCtxLayer = this.worldCanvas.getContext('2d', { willReadFrequently: true })!;
+      this.worldCtxLayer = this.worldCanvas.getContext('2d')!;   // ★P0 去毒:恒 GPU 后备（同 beginWorldLayer 创建点注）
       this.lightMaskCanvas = document.createElement('canvas');
       this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
     }
@@ -2996,7 +3028,7 @@ export class Renderer {
   _markPath(p: string): void {
     this.composePathUsed = p;
     this.composePathStats[p] = (this.composePathStats[p] || 0) + 1;
-    if (p.startsWith('lrecon-fail')) {
+    if (p.startsWith('lrecon-fail') || p.startsWith('lrecon-skip')) {   // ★P0:闩预检 skip 与 fail 同账面(归因连续)
       const m = /:(.+)$/.exec(p);
       if (m) this.composeLastFail = m[1];
     }
@@ -3804,9 +3836,9 @@ export class Renderer {
   private onResize = () => this.resize();
 
   constructor(public assets: AssetBundle, public atlas: SpriteAtlas | null = null) {
-    // ★B1:bgl 灰度态页画布走 willReadFrequently（GPU 驻移交页纹理,反降 IOSurface;
-    //   主线 bgl=0 保持 GPU 加速页=烘焙栅格化零变化）
-    ChunkCache.PAGE_WRF = Renderer.bgl;
+    // ★P0 去毒（2026-09-25）:原此处把 ChunkCache 页画布 WRF 旗随 bgl 置位的写点已删——
+    //   页画布背板不再随 bgl 旗降 CPU/SHM（耦合=GL 路径死亡时回退 blit 7-12× 慢 op
+    //   的凶器,见 ChunkCache 页画布去毒注）;页恒 GPU 后备。
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d', this.mainCtxAttrs())!;
     this.lightCanvas = document.createElement('canvas');
@@ -5954,7 +5986,8 @@ export class Renderer {
   static get bgl() { return this._bgl; }
   static bglSetForTest(v: boolean): void {
     Renderer._bgl = v;
-    ChunkCache.PAGE_WRF = v;   // 页画布背板随旗面（只影响后续新建页;见 ChunkCache.PAGE_WRF 注）
+    // ★P0 去毒:原此处页画布 WRF=旗面的写点已删——页画布背板与旗面解耦（恒 GPU
+    //  后备,回退路径零毒化;见 ChunkCache 页画布去毒注）
   }
   static readonly b0Shadow = (() => {
     try {
@@ -15573,12 +15606,19 @@ export class Renderer {
       const holdDX = arcanumHold0 ? -ar!.sw / 2 : 0;
       const holdDY = arcanumHold0 ? -ar!.sh / 2 : holdOYEff;
       if (ar) {
-        // ★BJ348b-2 3476 第一层暗化（:3344-3346 MultiplyRGBA(0.5,0.5,0.5,0.8)）同挥舞段
+        // ★BJ348b-2 3476 第一层暗化（:3344-3346 MultiplyRGBA(0.5,0.5,0.5,0.8)）
+        //  ★BJ348b-3：暗化预烘焙进 canvas（arcanumDimTex）——ctx.filter 在
+        //  shim/acc 链走栅格化/降级分叉 = 主层消失根因防御;null 帧画原帧自愈
         if (arcanumHold0) {
+          const dim = arcanumDimTex(this.atlas!);
           ctx.save();
           ctx.globalAlpha = 0.8;
-          ctx.filter = 'brightness(0.5)';
-          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
+          if (dim) {
+            ctx.drawImage(dim, 0, heldDraw!.arcanumFrame * ARCANUM_HOLD_FRAME_PX,
+              ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, holdDX, holdDY, ar.sw, ar.sh);
+          } else {
+            ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
+          }
           ctx.restore();
         } else {
           ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
@@ -16538,11 +16578,17 @@ export class Renderer {
       // useStyle 5 非法杖（握把 (-num9,H/2)）与 9（Size*(0.5,0.4) 轴心）经 drawOX/drawOY 覆盖
       // ★BJ348b-2 3476 第一层 = GetAlpha(itemColor).MultiplyRGBA(0.5,0.5,0.5,0.8)
       //  （:3344-3346）——RGB×0.5 + A×0.8（光照染色无逐物品管线,登记近似恒白）
+      //  ★BJ348b-3：暗化预烘焙（arcanumDimTex）——去 ctx.filter 依赖（同静持段注）
       if (heldVid === 3476) {
+        const dim = arcanumDimTex(this.atlas!);
         ctx.save();
         ctx.globalAlpha = 0.8;
-        ctx.filter = 'brightness(0.5)';
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
+        if (dim) {
+          ctx.drawImage(dim, 0, arcanumFrame * ARCANUM_HOLD_FRAME_PX,
+            ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, drawOX, drawOYEff, ar.sw, ar.sh);
+        } else {
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
+        }
         ctx.restore();
       } else {
         ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
@@ -17670,10 +17716,16 @@ export class Renderer {
     if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
       this.b2bWorldCanvasCreations++;   // ★B2b 探针面:建面计数（acc 帧不触达=稳态恒 0）
       this.worldCanvas = document.createElement('canvas');
-      // ★willReadFrequently：CPU 乘光回退路径每帧 getImageData 全屏（GL 路径则
-      //   texImage2D 上传）——提示 Skia 保持 CPU 光栅面，读取免 GPU 回读
+      // ★P0 去毒（2026-09-25）：恒 GPU 后备（不再 willReadFrequently）。原 WRF 定谳
+      //   是「为 CPU 乘光回退路径的每帧全屏 getImageData 免回读」——但同一画布在
+      //   bridge/降级/2D 回退态首先是【每帧工作面】（drawChunkGrid 逐块 blit×260/
+      //   bglStageGrid 桥回贴/2D 夹层直绘）,SHM 化=这些 op 全落软件光栅（实机
+      //   5.4µs→36-66µs）,为读回面优化毒杀工作面=分级回退违背（页画布同案判例）。
+      //   读回保底接受慢:深回退帧（GL 全死）的 worldCtxLayer.getImageData 全屏
+      //   （:18361 附近）付一次 GPU 回读（~2-4ms/帧）——登记债 p0-fallback-readback。
+      //   GL 路径（compose texSubImage2D 上传/句柄直采）无读回面,不受影响。
       //   ★B2b:本创建点仅非 acc 帧（bridge/降级/逃生门）触达=稳态零创建
-      this.worldCtxLayer = this.worldCanvas.getContext('2d', { willReadFrequently: true })!;
+      this.worldCtxLayer = this.worldCanvas.getContext('2d')!;
       this.lightMaskCanvas = document.createElement('canvas');
       this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
     }
@@ -17947,7 +17999,16 @@ export class Renderer {
       // ★R1-F10:构造口可返 null（共管管线退避窗）——null 安全,下帧 ??= 重试
       this.worldCompose ??= this.newWorldCompose();
       const wcL = this.worldCompose?.acquire() ?? null;
-      if (wcL) {
+      // ★P0 闩位收口（2026-09-25）:rawBroken/lreconDead 是逐上下文确定性闩（RGBA8UI
+      //  驱动拒收/程序编译死位,不自愈）——置位后 compose guard 每帧早退,而本分支
+      //  已跳过 CPU 光照重建=每帧双付费 [compose 进入+guard 早退]+CPU 重建。
+      //  预检在【跳过 CPU 重建之前】知情:闩帧直接落 CPU 重建+A2（lightCanvas 路径
+      //  =废 A3 不废 A2 整链,lastFail 保留首因串,与 ?lrecon=0 逃生门同构）。
+      //  compose 内 guard 保留为防御位。latch 窗内路径账='lrecon-skip:…' 可归因。
+      if (wcL && !wcL.lreconUsable()) {
+        this._markPath('lrecon-skip:' + (wcL.lastFail || '?'));
+        wcL.lastMergeUsed = false;   // 天空栈由下方补贴链 present（skyPend 未消费）
+      } else if (wcL) {
         const warpOn = !!(this._waveCss && waterWaves.quality > 0
           && (!Renderer.dryWarpSkip || this._waveLiquidInView));
         const stL = this._waveCss;

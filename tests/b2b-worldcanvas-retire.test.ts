@@ -53,7 +53,11 @@ describe('B2b Renderer 装配（源码锚）', () => {
   });
   it('degradeAcc:惰性建 worldCanvas+present FBO+shim.bridge（双路径并存）', () => {
     expect(RDR).toContain('private degradeAcc(): boolean {');
-    expect(RDR).toContain("this.worldCanvas = document.createElement('canvas');\n      this.worldCtxLayer = this.worldCanvas.getContext('2d', { willReadFrequently: true })!;");
+    // ★P0 去毒（2026-09-25）:worldCanvas 恒 GPU 后备（WRF 旗耦合废除——两创建点
+    //   beginWorldLayer/degradeAcc 同改;回归哨兵=worldCanvas 建面禁 WRF 复辟）
+    expect(RDR).toContain("this.worldCanvas = document.createElement('canvas');\n      this.worldCtxLayer = this.worldCanvas.getContext('2d')!;");
+    // 负锁只钉 worldCanvas 建面表达式（其余 CPU scratch 的 WRF 合法用途不受影响）
+    expect(RDR).not.toContain("this.worldCanvas.getContext('2d', { willReadFrequently: true })");
     expect(RDR).toContain('this.bglEntShim.bridge(this.worldCtxLayer)');
   });
   it('分窗在 acc/bridged 帧 no-op（防整层包装被 detach 杀）', () => {

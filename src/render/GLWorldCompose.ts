@@ -489,6 +489,22 @@ export class GLWorldCompose {
     return this.unavailable ? null : this;
   }
 
+  /** ★P0 闩位收口（2026-09-25）：A3（lrecon raw 直传）可用性【预检】。
+   *  真值面与 compose 内 guard（:288 `guard:rawBroken|lreconDead|noprog`）逐字
+   *  同源（单一事实源=同一布尔组合,lastFail 面同串）。为什么要预检:guard 早退
+   *  返 false 时调用方（Renderer lrecon 分支）已在本帧【跳过 CPU 光照重建】——
+   *  rawBroken/lreconDead 是逐上下文确定性闩（RGBA8UI 驱动拒收/程序编译失败,
+   *  不自愈）,一旦置位=此后每帧重复付费 [compose 进入+guard 早退]+CPU 重建,
+   *  且 lastFail 账面与路径账在帧间反复横跳难归因。预检让 Renderer 在跳过
+   *  CPU 重建【之前】知情:闩置位帧直接走 CPU 重建+A2（lightCanvas 路径,
+   *  lastFail 保留首因串）——与 ?lrecon=0 逃生门同构,语义=废 A3 不废 A2 整链。
+   *  compose 内 guard 保留为防御位（调用方漏检/运行中置位的当帧仍由它兜底）。 */
+  lreconUsable(): boolean {
+    if (this._rawBroken) { this.lastFail = 'guard:rawBroken'; return false; }
+    if (this.lreconDead || !this.pRecon?.prog) { this.lastFail = 'guard:lreconDead'; return false; }
+    return true;
+  }
+
   /** ★A3 raw 光照上传：(rw+2)×(rh+2) RGBA8UI,窗内容 (1,1) 偏移,边缘零环。
    *  整数纹理=采样返回原字节（UNORM k/255 不精确会破坏位等价,见 LRECON_FRAG 注④） */
   private uploadRaw(gl: WebGL2RenderingContext, rl: RawLight): boolean {
@@ -626,7 +642,12 @@ export class GLWorldCompose {
       //  纹理,陈旧 noiseW/H 会让「无噪声帧中性 1×1 垫底」门（noiseW===0）被跳过 →
       //  uNoise 采 incomplete 纹理恒 (0,0,0,1)（噪声位移项静默归零面）。
       this.noiseW = 0; this.noiseH = 0;
-      this._rawAuditLeft = 3; this._rawAuditKey = '';   // ★BJ316:重建后重审 RGBA8UI 体检
+      // ★BJ316:重建后重审 RGBA8UI 体检。★P0（2026-09-25）:_rawBroken 闩必须随
+      //  体检窗一起复位——RGBA8UI 拒收是【逐上下文】确定性条件,重建=新上下文可能
+      //  接受;闩残留则重审窗成死代码,A3 永久熄火（新上下文拒绝时首 3 传内再检出
+      //  再闩,安全面不变）。lreconDead 同理已随 :625 程序重登记重估。
+      this._rawAuditLeft = 3; this._rawAuditKey = '';
+      this._rawBroken = false;
       this.texWaterEmpty = null;
     }
     return ok;

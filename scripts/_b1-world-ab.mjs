@@ -11,7 +11,7 @@
 //       「GL 段不扰动画相位」）;
 //   GE  热点账本:drawImage 调用数/texSubImage2D 调用数 单帧 A vs B 计数
 //       （B1 目标=chunk 格 drawImage 群消灭,worldTex 上传 A 线不动）;
-//   GF  页纹理账:PAGE_WRF/页数/GL 驻留（GLStats swpipe liveMB>0）。
+//   GF  页纹理账:PAGE_WRF 解耦缺席(★P0 去毒)/页数/GL 驻留（GLStats swpipe liveMB>0）。
 // 矩阵:地表静立/实体混排(+尘)/zoom1.27/zoom1.5625/低清K=0.5/洞穴暗光/海洋水边/
 //       重力翻转。
 // 运行:SW_ORIGIN=http://localhost:5209 node tools/run-diag.mjs --timeout=900000 scripts/_b1-world-ab.mjs
@@ -379,7 +379,10 @@ const led = await page.evaluate(() => {
     swpipe: s?.ctxs?.swpipe ?? null,
   };
 });
-chk('[GF] 页纹理账:PAGE_WRF 开+GL 驻留 liveMB>0', led.state.wrf === true && led.state.pages > 0 && !!led.swpipe && led.swpipe.liveMB > 0,
+// ★P0 去毒（2026-09-25）:PAGE_WRF 已废除——页画布恒 GPU 后备（WRF=bgl 耦合曾令
+//   GL 失效会话回退 blit 落 SHM 7-12× 慢 op）。GF 判据翻面=旗面缺席（undefined）
+//   +GL 驻留活着（页纹理上传链健在）。
+chk('[GF] 页纹理账:PAGE_WRF 已解耦(旗缺席)+GL 驻留 liveMB>0', led.state.wrf == null && led.state.pages > 0 && !!led.swpipe && led.swpipe.liveMB > 0,
   `wrf=${led.state.wrf} pages=${led.state.pages} swpipe.liveMB=${led.swpipe?.liveMB ?? 'null'}`);
 console.log('[GF]', JSON.stringify(led.state), 'swpipe:', JSON.stringify(led.swpipe ?? {}));
 

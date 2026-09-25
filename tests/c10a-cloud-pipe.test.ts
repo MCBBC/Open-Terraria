@@ -104,7 +104,10 @@ describe('C10a GLSpriteLayer 管线后端', () => {
 
   it('旧上下文路径零漂移:init 自建上下文/预乘上传/字节预算原样(gl-layer-regression 同域)', () => {
     expect(SRC).toContain("this.canvas.getContext('webgl2'");
-    expect(SRC).toMatch(/dispose\(\): void \{\s*\n\s*if \(this\.pipe\) \{ this\.disposePipeMode\(\); return; \}/);
+    // ★2026-09-25 修陈旧锁:BJ344（件3）在 dispose 头部补 contextlost/restored 监听
+    //  摘除（合法变更）——锁语义改为「pipe 支=disposePipeMode 委托+return（不级联）」
+    //  仍在 dispose 体内,不再钉「首语句」位置。
+    expect(SRC).toMatch(/dispose\(\): void \{[\s\S]*?if \(this\.pipe\) \{ this\.disposePipeMode\(\); return; \}/);
   });
 });
 

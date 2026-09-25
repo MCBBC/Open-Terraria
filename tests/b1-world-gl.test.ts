@@ -16,7 +16,11 @@ describe('B1 旗面与逃生门', () => {
     expect(RDR).toContain("new URLSearchParams(location.search).get('bgl') !== '0'");
     expect(RDR).toContain('static get bgl() { return this._bgl; }');
     expect(RDR).toContain('static bglSetForTest(v: boolean): void {');
-    expect(RDR).toContain('ChunkCache.PAGE_WRF = v;   // 页画布背板随旗面');
+    // ★P0 去毒（2026-09-25）:页画布背板与 bgl 旗解耦——旗耦合（PAGE_WRF=bgl）曾令
+    //   GL 路径死亡会话的 2D 回退 blit 全落 SHM（单 op 7-12× 慢=26.7ms 帧凶器）。
+    //   回归哨兵:任何 PAGE_WRF 复辟（旗写/静态/条件）一律爆红。
+    expect(RDR).not.toContain('ChunkCache.PAGE_WRF');
+    expect(RDR).toContain('★P0 去毒');
   });
 
   it('逃生门双路:GL 段失败整格回落 2D drawChunkGrid(路径记账面)', () => {
@@ -66,7 +70,7 @@ describe('B1 chunk 页纹理 GPU 驻留', () => {
     expect(RDR).toContain('if (uploaded() > chunks.pageCount) {');
   });
 
-  it('ChunkCache 侧:页脏账按层分账(W/T 双记)/页访问器/trim-dispose 双层清账/PAGE_WRF', () => {
+  it('ChunkCache 侧:页脏账按层分账(W/T 双记)/页访问器/trim-dispose 双层清账/页背板去毒', () => {
     // ★bgl-tile-starve 定谳:单账共享被墙段先删 → tpg 永缺增量格;锁双层分账结构
     expect(CHK).toContain('readonly glDirtyPagesW = new Map<number, Set<number>>();');
     expect(CHK).toContain('readonly glDirtyPagesT = new Map<number, Set<number>>();');
@@ -77,8 +81,9 @@ describe('B1 chunk 页纹理 GPU 驻留', () => {
     expect(CHK).toContain("pageCanvas(layer: 'wall' | 'tile', idx: number)");
     expect(CHK).toContain('this.glDirtyPagesW.delete(idx);   // ★B1:页销毁双层同清脏标');
     expect(CHK).toContain('this.glDirtyPagesW.clear();   // ★B1:页纹理账随世界整弃（双层）');
-    expect(CHK).toContain('static PAGE_WRF = false;');
-    expect(CHK).toContain('if (ChunkCache.CPU_RENDER || ChunkCache.PAGE_WRF)');
+    // ★P0 去毒:页画布恒 GPU 后备（仅 CPU_RENDER 门;WRF 旗耦合已废除——回归哨兵）
+    expect(CHK).not.toContain('PAGE_WRF');
+    expect(CHK).toContain('if (ChunkCache.CPU_RENDER)');
     // 旧单账禁回流(回归哨兵:任何 glDirtyPages 裸引用=单账复辟)
     expect(CHK).not.toMatch(/[^WT]\bglDirtyPages\./);
     expect(RDR).not.toMatch(/chunks\.glDirtyPages\./);

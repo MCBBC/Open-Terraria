@@ -254,22 +254,54 @@ export class WeatherRenderer {
   //     >512 清空惯例，清后首帧补烘代价微小）。
   private bakeMemo = new Map<string | number, HTMLCanvasElement | null>();
   private static readonly BAKE_MEMO_CAP = 4096;
+  /** ★P0 miss 克隆复用池（2026-09-25）：原 miss 路径逐次 createElement+整面克隆
+   *  （实测病灶:雨幕光照色随实体移动/火苗闪烁连续滚新键 → 每帧数十 miss,每 miss
+   *  一张新画布=GPU 后备分配+全屏外小面 churn;SHM 慢路径会话里被放大 8×——
+   *  trace 2026-09-25 drawRain 链 26.7ms 帧的可见项）。池=淘汰回池/miss 取池,
+   *  键=`${w}x${h}`（条目尺寸互异必须精确匹配——克隆 drawImage 只覆盖 w×h,
+   *  复用同尺寸画布+先 clearRect 保证 α 语义与全新画布逐位同）。张数上界=
+   *  memo 条目 1:1（淘汰回池不新增）,与 BAKE_MEMO_CAP 同级自律。 */
+  private clonePool = new Map<string, HTMLCanvasElement[]>();
+  private takeClone(w: number, h: number): HTMLCanvasElement {
+    const k = `${w}x${h}`;
+    const arr = this.clonePool.get(k);
+    const c = arr && arr.length ? arr.pop()! : document.createElement('canvas');
+    c.width = w; c.height = h;   // 池条目尺寸恒同键（防御性重置,零成本）
+    return c;
+  }
+  private giveClone(c: HTMLCanvasElement): void {
+    if (c.width <= 0 || c.height <= 0) return;   // 已被 width=0 释放的病态面不入池
+    const k = `${c.width}x${c.height}`;
+    let arr = this.clonePool.get(k);
+    if (!arr) { arr = []; this.clonePool.set(k, arr); }
+    arr.push(c);
+  }
   /** ★F1 热修（2026-09-01 二轮 review 自捕）：初始实现把 gen() 返回的【固定 key 共享
    *  scratch】直接存表——同一原始 key 的两次不同语义烘焙（不同 RGB）互相覆写像素，
    *  旧 memo 条目命中时画出的是后烘颜色=错色雨条。修正：miss 时对 scratch 立即做
    *  【自有克隆】再入表，条目对外不可变；原始 key 的后续烘焙永远伤不到缓存内容。
    *  克隆本身按"写一次→反复采样"形态走默认 GPU 后备（见 memory canvas-readback-flag-policy）。
    *  ★perf3（2026-09-19 trace 三批）：key 放宽为 string | number——雨条走数字键
-   *  （rainStripMemoKey，0 分配），雪/沙尘仍串键。 */
+   *  （rainStripMemoKey，0 分配），雪/沙尘仍串键。
+   *  ★P0（2026-09-25）：克隆载体走复用池（takeClone/giveClone,见池注）——
+   *  语义不变量:池条目 clearRect 后 source-over 重画=全新画布逐位同。 */
   private bakeMemoized(key: string | number, gen: () => HTMLCanvasElement | null): HTMLCanvasElement | null {
     const hit = this.bakeMemo.get(key);
     if (hit !== undefined) return hit;
-    if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) { const k0 = this.bakeMemo.keys().next().value; if (k0 !== undefined) this.bakeMemo.delete(k0); }   // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案)
+    if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) {
+      // ★逐条淘汰最旧(勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案);淘汰载体回池
+      const k0 = this.bakeMemo.keys().next().value;
+      if (k0 !== undefined) {
+        const ev = this.bakeMemo.get(k0);
+        if (ev) this.giveClone(ev);
+        this.bakeMemo.delete(k0);
+      }
+    }
     const baked = gen();
     if (!baked) { this.bakeMemo.set(key, null); return null; }
-    const own = document.createElement('canvas');
-    own.width = baked.width; own.height = baked.height;
+    const own = this.takeClone(baked.width, baked.height);
     const octx = own.getContext('2d')!;
+    octx.clearRect(0, 0, own.width, own.height);  // 池复用:清陈旧内容（含 α）=全新画布语义
     octx.drawImage(baked, 0, 0);                 // 像素级克隆（w/h 相同无缩放歧义）
     this.bakeMemo.set(key, own);
     return own;
