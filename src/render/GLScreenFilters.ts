@@ -45,7 +45,10 @@ export type ScreenFxPass =
    *  uProgress=塔盾态驱动（Main.cs:24565 盾在 UseIntensity(1+num319).UseProgress(0)/
    *  :24584 破盾 UseIntensity(min(5,15·num320)+1).UseProgress(num320)） */
   | { kind: 'FilterTower'; color: readonly [number, number, number]; opacity: number;
-    screenRes: [number, number]; screenPos: [number, number]; targetPx: [number, number];
+    screenRes: [number, number]; screenPos: [number, number];
+    /** ★BJ346 勘误：塔心−(0,10)【世界】px（ScreenShaderData.Apply uTargetPosition 与
+     *  uScreenPosition 同域；旧屏幕系致 rel 场被相机坐标污染） */
+    targetPx: [number, number];
     intensity: number; progress: number; time: number }
   | { kind: 'FilterGraveyard'; intensity: number; progress: number; opacity: number }
   | { kind: 'FilterBloodMoon'; color: readonly [number, number, number]; intensity: number; opacity: number }
@@ -150,15 +153,20 @@ void main() {
   gl_FragColor = vec4(mix(s.rgb, tgt * s.a, uOpacity), 1.0); // :501-502（★v0 死参数,见 FRAG_HEAT 注）
 }`;
 
-/** ★BJ109-I FilterTower（obj9 :342-412，SceneShader.cso 反汇编直读）：目标向极坐标
- *  sin 扫描微扰采样（dir=rel/len（len 按 ×(1.5,1) 纵横度量 c11.xy）、
- *  amp=min(|50/(len−uProgress)|,5)×uIntensity、ph=frac(len·0.2+…)×2π−π、
- *  采样位=dir·(sin(ph)·amp+len)+target）+ V+min 亮度度量塔色推色
- *  （k=V+mn−1；hi=uColor+k·(1−2uColor)——与 FilterMiniTower :496-500 同度量族，
- *  字节码 cmp r3.w 恒负→恒走 hi 支）+lerp uOpacity；尾段 tapA.b−tapC.b/tapB.g−tapC.g
- *  两通道色差修正（:397-403，三 tap=uv→u 存插值 1/2.25/3.5）。
- *  ★近似备案：c1/c2 相位系数（preshader 输出）按 defs 邻值以 uTime 滚动近似；
- *  尾段两通道修正按主项重构。 */
+/** ★BJ109-I FilterTower（obj9 :342-412，SceneShader.cso 反汇编直读）+ ★BJ346 勘误重对
+ *  （2026-09-25 用户实报星云柱满屏实心洋红——preshader 按「dst=末位操作数」完整破译后
+ *  五处偏离字节码，全部按 obj9 直读修正）：
+ *  ① rel 场坐标系：uTargetPosition=塔心【世界】px（ScreenShaderData.Apply 与 uScreenPosition
+ *     同减 offScreenRange(200)——差量恒世界系；旧组装端传屏幕系致 rel 被相机坐标污染，
+ *     涡旋中心甩出屏外、tapC 采到屏幕边缘恒色）→ 组装端已改传世界系，本 frag 恒按世界系。
+ *  ② 波前半径：preshader c0=1000·uProgress+180（lit16/17 直读），旧式 len−uProgress 错。
+ *  ③ 相位：preshader c1=1−uProgress、c2=−5·uTime → X=0.2·(1−p)·len−5·t，经 frac(X/2π+0.5)
+ *     ·2π−π 范围约简（≈sin(X)，保留约简保 f32 精度同相）；旧近似 fract(len·0.2+t·0.045)
+ *     波长 6.28×过密+时向反。
+ *  ④ hi 斜率：preshader c4=1−uColor（ps.add_s[3] lit18(1),−uColor 直读）；旧 (1−uColor)·2−uColor 错。
+ *  ⑤ cmp 分支真实存在：sel=r3.w=k/2（k=V+mn−1），sel≥0→hi、<0→lo=sum·uColor（暗像素推暗
+ *     塔色）——旧「恒走 hi 支」误判使暗像素被推到过饱和洋红（GL 输出钳制后≈实心洋红），
+ *     为满屏洋红主因。 */
 const FRAG_TOWER = `
 precision highp float;
 varying vec2 vUv;
@@ -166,18 +174,24 @@ uniform sampler2D uScreen;      // s0
 uniform vec3 uColor;            // c5 = UseColor（ScreenEffectInitializer.cs:14-17 分塔）
 uniform float uOpacity;         // c9 = UseOpacity×Filter.Opacity
 uniform float uIntensity;       // c10 = UseIntensity（塔盾态）
-uniform float uProgress;        // c0 = UseProgress（破盾波前）
+uniform float uProgress;        // C# UseProgress（0..1；preshader 折算波前/波长）
 uniform vec2 uScreenRes;        // c6
-uniform vec2 uScreenPos;        // c7
-uniform vec2 uTargetPx;         // c8 = 塔心−(0,10) 世界px
+uniform vec2 uScreenPos;        // c7（屏幕左上世界px）
+uniform vec2 uTargetPx;         // c8 = 塔心−(0,10) 世界px（★BJ346 ①）
 uniform float uTime;
 void main() {
   vec2 world = vUv * uScreenRes + uScreenPos;                     // :347-348
   vec2 rel = world - uTargetPx;                                   // :349
   float len = length(rel * vec2(1.5, 1.0));                       // :350-356（c11=(1.5,1,…)）
   vec2 dir = rel / max(len, 1e-4);                                // :357
-  float amp = min(abs(50.0 / max(len - uProgress, 1e-3)), 5.0) * uIntensity; // :358-363
-  float ph = fract(len * 0.2 + uTime * 0.045) * 6.2831853 - 3.1415927; // :364-370（相位近似,备案）
+  float wavefront = 180.0 + 1000.0 * uProgress;                   // preshader c0（★BJ346 ②）
+  // :358-363 rcp(-（len-c0))：分母带号（环外 |50/(c0−len)| 随 len 衰减,近环 →∞ 被 min 5 截）。
+  //  ★零除哨=保号（max(denom,1e-4) 会把负分母翻正=远场 amp 恒 5=全屏浪环,本刀曾犯,探针 12 分离）
+  float denom = wavefront - len;
+  if (abs(denom) < 1e-4) denom = 1e-4 * (denom >= 0.0 ? 1.0 : -1.0);
+  float amp = min(abs(50.0 / denom), 5.0) * uIntensity;
+  float ph = fract((0.2 * (1.0 - uProgress) * len - 5.0 * uTime) * 0.15915494 + 0.5) // :364-370+371
+    * 6.2831853 - 3.1415927;                                      // （c12.z=1/2π,c12.w=0.5;c1/c2 见头注③）
   float r2 = sin(ph) * amp + len;                                 // :371
   vec2 duv = (dir * r2 + uTargetPx - uScreenPos) / uScreenRes;    // :372-377
   vec4 sA = texture2D(uScreen, duv);                              // :378 tapA=全失真位
@@ -185,8 +199,11 @@ void main() {
   vec4 sC = texture2D(uScreen, vUv + 3.5 * (duv - vUv));          // :381-382 tapC（c13.w=3.5）
   float V = max(max(sC.r, sC.g), sC.b);                           // :384-386
   float mn = min(min(sC.r, sC.g), sC.b);                          // :387-389
-  float k = (V + mn) - 1.0;                                       // :390-391（c11.y=1）
-  vec3 tgt = uColor + k * ((vec3(1.0) - uColor) * 2.0 - uColor);  // :392-396（hi 支,c4=1−2uColor 近似）
+  float sum = V + mn;                                             // :390
+  float k = sum - 1.0;                                            // :391（c11.y=1）
+  vec3 hi = uColor + k * (vec3(1.0) - uColor);                    // :392-395（c4=1−uColor,★BJ346 ④）
+  vec3 lo = sum * uColor;                                         // :396（r4）
+  vec3 tgt = (k * 0.5 >= 0.0) ? hi : lo;                          // :397 cmp r3.w=k/2（★BJ346 ⑤）
   vec3 col = mix(sC.rgb, tgt * sC.a, uOpacity);                   // :404-406
   col.b += sA.b - sC.b;                                           // :397-399
   col.g += sB.g - sC.g;                                           // :401-403
@@ -487,6 +504,60 @@ export const TOWER_FILTER_PRESETS: Readonly<Record<'solar' | 'vortex' | 'nebula'
   stardust: { color: [0, 0.5, 1], useOpacity: 0.5 },   // :16（493）
   vortex: { color: [0, 0.7, 0.7], useOpacity: 0.5 },   // :17（422）
 };
+
+/** ★BJ346 FilterTower 盾态驱动（Main.cs:24564/24573/24581 三支 1:1）：
+ *  盾上 ai3∈(0,30] 重塑闪光 num319=1−ai3/30 → intensity=1+num319/progress=0；
+ *  盾破 ai3>0 破裂冲击 num320=ai3/120 → intensity=min(5,15·num320)+1/progress=num320；
+ *  盾破 ai3==0（破裂演出毕）→ intensity=0/progress=0（涡旋停，染色仍在）。
+ *  旧实现缺第三支（破盾演出后永久 intensity=1）。 */
+export function towerFilterDrive(shieldUp: boolean, ai3: number): { intensity: number; progress: number } {
+  if (!shieldUp && ai3 > 0) {
+    const num320 = Math.min(1, ai3 / 120);
+    return { intensity: Math.min(5, 15 * num320) + 1, progress: ai3 / 120 };
+  }
+  if (!shieldUp) return { intensity: 0, progress: 0 };
+  const num319 = ai3 > 0 && ai3 <= 30 ? 1 - ai3 / 30 : 0;
+  return { intensity: 1 + num319, progress: 0 };
+}
+
+/** ★BJ346 FilterTower 波前半径（preshader c0 = 1000·uProgress + 180，lit16/lit17 直读）。
+ *  旧实现把 uProgress 当半径直接用（波前恒 0..1px=静止）。 */
+export function towerWavefront(progress: number): number {
+  return 180 + 1000 * progress;
+}
+
+const fract = (x: number) => x - Math.floor(x);
+
+/** ★BJ346 FilterTower 相位角（obj9 :364-371+preshader c1=1−uProgress、c2=−5·uTime）：
+ *  X = 0.2·(1−uProgress)·len − 5·uTime；字节码经 frac(X/2π+0.5)·2π−π 范围约简后 sincos
+ *  ——数学上 ≡ sin(X)（约简保 f32 大参数精度，GLSL 端保留同款约简）。 */
+export function towerPhaseAngle(len: number, progress: number, time: number): number {
+  return Math.sin(fract((0.2 * (1 - progress) * len - 5 * time) * 0.15915494 + 0.5) * 6.2831853 - 3.1415927);
+}
+
+/** ★BJ346 FilterTower 色推核（obj9 :390-406 直译）：V+min 亮度度量 sum=V+mn、
+ *  k=sum−1；cmp sel=k/2：k≥0 → hi=uColor+k·(1−uColor)（preshader c4=1−uColor）、
+ *  k<0 → lo=sum·uColor（暗像素推暗塔色）；lerp(sC.rgb, tgt·a, uOpacity)。
+ *  旧实现：恒走 hi 且斜率误用 (1−uColor)·2−uColor → 暗像素被推到过饱和洋红
+ *  （GL 输出钳制后≈实心洋红）=满屏洋红主因。 */
+export function towerFilterColorPush(
+  s: { r: number; g: number; b: number; a: number },
+  uColor: readonly [number, number, number],
+  uOpacity: number,
+): [number, number, number] {
+  const V = Math.max(s.r, s.g, s.b);
+  const mn = Math.min(s.r, s.g, s.b);
+  const sum = V + mn;
+  const k = sum - 1;
+  const hi = [uColor[0] + k * (1 - uColor[0]), uColor[1] + k * (1 - uColor[1]), uColor[2] + k * (1 - uColor[2])];
+  const lo = [sum * uColor[0], sum * uColor[1], sum * uColor[2]];
+  const tgt = k * 0.5 >= 0 ? hi : lo;
+  return [
+    s.r + uOpacity * (tgt[0] * s.a - s.r),
+    s.g + uOpacity * (tgt[1] * s.a - s.g),
+    s.b + uOpacity * (tgt[2] * s.a - s.b),
+  ];
+}
 
 /** 噪声贴图（Images/Misc/noise → public/sprites/vanilla/Misc_noise.png，256²） */
 let noiseImage: HTMLImageElement | null = null;

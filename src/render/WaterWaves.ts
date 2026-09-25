@@ -128,7 +128,10 @@ export const WATER_DAMP = Math.pow(2, -0.0551415532827);
  *  小速度被 8bit 量化截断是涟漪能量汇，浮点缓冲会出"永生驻波"） */
 const q256 = (v: number): number => {
   const q = Math.round(v * 256);
-  return q < 0 ? 0 : q > 256 ? 1 : q / 256;
+  // ★C8-D:`q <= 0`（原 `q < 0`）——Math.round(v·256) 对 v∈(−0.002,0) 产出 −0,
+  // 旧 guard `−0 < 0`=false 会把 −0/256 写进场=数值同 +0 但字节面 0x80000000,
+  // 破坏脏区字节编码「逐位同」判据。数值恒等(IEEE −0≡+0),零行为差。
+  return q <= 0 ? 0 : q > 256 ? 1 : q / 256;
 };
 
 /** WaterProcessor 传播内核（纯函数，供单测金标；encoded R/G ∈ [0,1]）。
@@ -223,10 +226,74 @@ let _rqCount = 0;
 let _wwCapture: { k: string; a: number[] }[] | null = null;
 
 /** ★C8 诊断计数器（探针对账:queued(capture 推入) vs posted(帧批发出) vs
- *  fields(场快照回达);falls=看门狗回落。纯读面零行为影响） */
-const _wwStat = { camQ: 0, washQ: 0, rippleQ: 0, posted: 0, fields: 0, falls: 0 };
-export function wwWorkerStats(): { on: boolean; camQ: number; washQ: number; rippleQ: number; posted: number; fields: number; falls: number } {
-  return { on: waterWaves.wwActive(), ..._wwStat };
+ *  fields(场快照回达);falls=看门狗回落。纯读面零行为影响）。
+ *  ★C8-D 追加:bytes=场消息载荷累计字节(主线程收达侧计;流量账探针消费)、
+ *  fmt=三种场消息形态计数、resyncs=主线程请求重锚次数。 */
+const _wwStat = { camQ: 0, washQ: 0, rippleQ: 0, posted: 0, fields: 0, falls: 0,
+  bytes: 0, resyncs: 0, fmt: { full: 0, delta: 0, f32: 0 } };
+export function wwWorkerStats(): { on: boolean; camQ: number; washQ: number; rippleQ: number;
+  posted: number; fields: number; falls: number; bytes: number; resyncs: number;
+  fmt: { full: number; delta: number; f32: number } } {
+  return { on: waterWaves.wwActive(), ..._wwStat, fmt: { ..._wwStat.fmt } };
+}
+
+// ---- ★C8-D 波场脏区增量回传（2026-09-25;三笔登记债之最大笔收偿）----
+// 现状（R3-F2 后）：worker 每帧全量回传场快照——1080p 视口栅格 ~480×270×2 通道×
+// Float32 = ~1MB/帧的 transferable churn（slice+memcpy 虽零拷贝过 postMessage,
+// worker 侧复制与主线程收达带宽仍在）。本刀改脏区增量：
+//   · 波场内核不动点是中性 (0.5,0.5)（kernel S=0,T=0,w=0 → out=(0.5,0.5)）——
+//     活跃区（涟漪/洗掠波前）高度局部化,大部分格恒中性;
+//   · 场值量化不变式：_R/_G 每格恒为 k/256（k∈0..256 整数——全部写入路径
+//     q256()/rq/256/gq/256、_ensure/_clear fill(0.5)=128/256）→ 字节精确可表,
+//     **解码后主线程 _R/_G 与 worker 全量逐位同**（硬判据,非混沌口径——场内容
+//     确定性同源,无掷流分叉面）;
+//   · worker 侧每帧 diff「影子」（=主线程已知场的 Float32 副本）→ 行扫描收集
+//     变更跨度（span RLE）,跨间距奇 R,G 字节交织;影子在成功编码后按跨度补写;
+//   · 保底锚帧：每 WW_FULL_ANCHOR_EVERY 帧强制全量字节快照;resize（影子失配）/
+//     换档/相机大跳（WaveWorker 侧判据）/主线程 resync 请求同样强制全量;
+//     diff 超限（载荷 > 全量字节）或量化不变式破坏 → 全量;不变式破坏再犯 →
+//     旧 f32 全量逐帧逃生（=R3-F2 前行为,登记债回滚口）。
+//   · 实测流量账（_c8d-wave-delta-probe,seed 05162020 small,64000 格栅格,
+//     旧基线 = f32 全量 8B/格 = 512KB/帧）:静水（传送落水后静置,溅落能量衰减期
+//     + 浮力振荡持续注入,~28k 格/帧仍逐位变更）56.2KB/帧 ≈ **11%基线（~9×）,
+//     158 帧仅 1 次全量（周期锚）**;海浪（水中行走振荡）114.5KB/帧 ≈ **22%基线
+//     （~4.5×）**,busy 帧（>75% 格变更）按设计回退 2B/格字节全量。f32 逃生=0、
+//     resync=0。位等价硬判据由 tests/ww-delta-field.test.ts 锁（非混沌口径）。
+// 协议（op:'field' 三形态,主线程按 fmt 分派;无 fmt=旧 f32 形态向后兼容）：
+//   {fmt:'full', R,G:Uint8Array(n)}                       全量字节快照（2B/格）
+//   {fmt:'delta', meta:Uint32Array, data:Uint8Array}      脏区增量（meta=[跨度数,
+//     (y,x0,len)…],data=[R,G 字节交织,按跨度序]）        典型静水 ~4B/帧
+//   {fmt:'f32', R,G:Float32Array}                         旧全量（逃生口/兼容）
+// 元数据（gW/gH/progress/intensity/waveOff/cam/scroll）三形态恒带——读侧
+//   sampleDisplace/_readR/waveReadOffset 零改动纪律。
+export const WW_FULL_ANCHOR_EVERY = 120;
+export const WW_JUMP_TEXELS = 8;
+/** 字节 k → 场值 k/256 精确 LUT（k/256 在 float32 精确可表:k≤256=2^8,尾数≤9 位）*/
+const WW_B2F = (() => { const t = new Float32Array(257); for (let k = 0; k <= 256; k++) t[k] = k / 256; return t; })();
+
+/** 场消息三形态（worker→main op:'field' 载荷;主线程 _wwApplyField 按 fmt 分派） */
+export type WWFieldMsg =
+  | { fmt: 'full'; R: Uint8Array; G: Uint8Array; gW: number; gH: number;
+    progress: number; intensity: number; waveOff: [number, number];
+    cam: [number, number, number]; scroll: [number, number] }
+  | { fmt: 'delta'; meta: Uint32Array; data: Uint8Array; gW: number; gH: number;
+    progress: number; intensity: number; waveOff: [number, number];
+    cam: [number, number, number]; scroll: [number, number] }
+  | { fmt: 'f32'; R: Float32Array; G: Float32Array; gW: number; gH: number;
+    progress: number; intensity: number; waveOff: [number, number];
+    cam: [number, number, number]; scroll: [number, number] };
+
+/** ★C8-D 相机大跳判据（WaveWorker 每帧调用,纯函数供单测）：F=floor(−camCss·0.25)
+ *  （WaterShaderData.StepLiquids :148-157 滚动偏移,texel 单位）位移超过
+ *  WW_JUMP_TEXELS texel（=32 css px@0.25 栅格）视为大跳（传送/respawn/大甩镜）
+ *  → 强制下一场消息全量锚帧。正常行走 ΔF∈{0,±1} 恒不触发。返回 [是否大跳, 新F]。 */
+export function wwCameraJumpForceFull(
+  lastF: readonly [number, number] | null, camX: number, camY: number, zoom: number,
+): [boolean, [number, number]] {
+  const fx = Math.floor(-camX * zoom * 0.25), fy = Math.floor(-camY * zoom * 0.25);
+  const jump = lastF !== null
+    && (Math.abs(fx - lastF[0]) > WW_JUMP_TEXELS || Math.abs(fy - lastF[1]) > WW_JUMP_TEXELS);
+  return [jump, [fx, fy]];
 }
 
 /** QueueRipple(pos, strength=1, shape=Square, rotation=0)（:446-451）。
@@ -365,7 +432,7 @@ const wwWorkerFlag = (() => {
   } catch { return false; }
 })();
 
-class WaterWaveSystem {
+export class WaterWaveSystem {
   quality = 3;
   gates = waveSourceGates(3);
   /** uProgress（WaterShaderData._progress :67/:121） */
@@ -433,14 +500,73 @@ class WaterWaveSystem {
     this._ww.postMessage({ op: 'tex', ripple: _rippleData });
   }
 
-  /** worker 场快照 → 类字段（读侧方法 sampleDisplace/readGridR/waveReadOffset 零改动）。
-   *  ★R2-F2（2026-09-25 红蓝批 B）：换长支贴身对齐步进 scratch _R2/_G2——worker 模式
-   *  frame() 走快照喂早退,主线程 _ensure 不跑;快照换长后 _R2/_G2 若留旧长,看门狗
-   *  回落帧 _step 写越界（typed array 静默丢）+swap 后 _R 变短长=读侧 _readR OOB
-   *  undefined→NaN 毒化。_ensure 兜底查四数组（同批刀）。 */
-  private _wwApplyField(m: { R: Float32Array; G: Float32Array; gW: number; gH: number;
-    progress: number; intensity: number; waveOff: [number, number];
-    cam: [number, number, number]; scroll: [number, number] }): void {
+  /** worker 场消息 → 类字段（读侧方法 sampleDisplace/readGridR/waveReadOffset 零改动）。
+   *  ★C8-D（2026-09-25）：按 fmt 三形态分派——
+   *    'delta'  脏区增量:主线程 _R/_G 原地按跨度补写（零分配解码,B2F LUT 精确
+   *             k/256→逐位同 worker 全量;网格失配/跨度越界=丢帧+resync 重锚请求,
+   *             防半应用毒化）;
+   *    'full'   全量字节快照:2B/格解码（换长支同步对齐步进 scratch _R2/_G2）;
+   *    'f32'/无fmt  旧全量逐字保留（逃生口/向后兼容——b2b 批 B 假消息面不变）。
+   *  ★R2-F2（2026-09-25 红蓝批 B）：换长支贴身对齐 _R2/_G2 语义在 full/f32 两形态
+   *  原样保留（worker 模式 frame() 走快照喂早退,主线程 _ensure 不跑;看门狗回落帧
+   *  _step 依赖四数组同长）。delta 形态不改长度 → _R2/_G2 无需触碰。 */
+  private _wwApplyField(m: WWFieldMsg): void {
+    // 运行时兼容:旧形态消息无 fmt 字段 → undefined 落 f32 支（判别式收窄仍成立）
+    if (m.fmt === 'delta') {
+      // 网格守卫：worker 保证 delta 只在无 resize 帧发出（消息序天然同相）;
+      // 失配=协议异常 → 丢弃+请求重锚（下帧全量），绝不半应用。
+      if (m.gW !== this._gW || m.gH !== this._gH || this._R.length !== m.gW * m.gH) {
+        this._wwRequestResync(); return;
+      }
+      const meta = m.meta, data = m.data, gW = m.gW, gH = m.gH;
+      const spans = meta[0] | 0;
+      // 跨度预验证（防半应用:任何越界/载荷短缺 → 整帧丢弃+resync）
+      let need = 0;
+      for (let s = 0; s < spans; s++) {
+        const y = meta[1 + s * 3], x0 = meta[2 + s * 3], len = meta[3 + s * 3];
+        if (y >= gH || x0 + len > gW) { this._wwRequestResync(); return; }
+        need += len;
+      }
+      if (data.length < need * 2) { this._wwRequestResync(); return; }
+      const R = this._R, G = this._G;
+      let c = 0;
+      for (let s = 0; s < spans; s++) {
+        const y = meta[1 + s * 3], x0 = meta[2 + s * 3], len = meta[3 + s * 3];
+        let i = y * gW + x0;
+        for (let t = 0; t < len; t++, i++) {
+          R[i] = WW_B2F[data[c]]; G[i] = WW_B2F[data[c + 1]]; c += 2;
+        }
+      }
+      this.progress = m.progress; this.intensity = m.intensity;
+      this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
+      this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
+      _wwStat.fmt.delta++;
+      _wwStat.bytes += meta.length * 4 + data.length;
+      return;
+    }
+    if (m.fmt === 'full') {
+      const n = m.gW * m.gH;
+      const R8 = m.R, G8 = m.G;
+      if (R8.length !== n || G8.length !== n) { this._wwRequestResync(); return; }   // 载荷短缺守卫
+      if (this._R.length === n && this._gW === m.gW && this._gH === m.gH) {
+        const R = this._R, G = this._G;
+        for (let i = 0; i < n; i++) { R[i] = WW_B2F[R8[i]]; G[i] = WW_B2F[G8[i]]; }
+      } else {
+        const R = new Float32Array(n), G = new Float32Array(n);
+        for (let i = 0; i < n; i++) { R[i] = WW_B2F[R8[i]]; G[i] = WW_B2F[G8[i]]; }
+        this._R = R; this._G = G;
+        this._R2 = new Float32Array(n).fill(0.5);
+        this._G2 = new Float32Array(n).fill(0.5);
+      }
+      this._gW = m.gW; this._gH = m.gH;
+      this.progress = m.progress; this.intensity = m.intensity;
+      this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
+      this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
+      _wwStat.fmt.full++;
+      _wwStat.bytes += n * 2;
+      return;
+    }
+    // 旧 f32 全量（fmt 缺省=批 B 前消息形态;逐字保留）
     if (this._R.length === m.R.length) { this._R.set(m.R); this._G.set(m.G); }
     else {
       this._R = m.R as typeof this._R; this._G = m.G as typeof this._G;
@@ -451,14 +577,24 @@ class WaterWaveSystem {
     this.progress = m.progress; this.intensity = m.intensity;
     this._camX = m.cam[0]; this._camY = m.cam[1]; this._zoom = m.cam[2];
     this._scrollX = m.scroll[0]; this._scrollY = m.scroll[1];
+    _wwStat.fmt.f32++;
+    _wwStat.bytes += m.R.length * 8;
+  }
+
+  /** ★C8-D 主线程请求 worker 重锚（delta 网格失配/跨度越界丢帧后;worker 下帧
+   *  强制全量。worker 已死时静默——看门狗回落兜底） */
+  private _wwRequestResync(): void {
+    _wwStat.resyncs++;
+    try { this._ww?.postMessage({ op: 'resync' }); } catch { /* 死 worker,看门狗兜底 */ }
   }
 
   /** worker 回传快照（worker 侧调用,读私有字段）。★R3-F2（2026-09-25 红蓝批 B）：
    *  slice 产【独立 buffer 副本】供 WaveWorker 走 transferable 零拷贝回传（旧
    *  结构克隆 125-180MB/s churn 清零）——所有权单向转移:主线程收达后 worker 侧
    *  副本即弃（WaveWorker slice 后无再引用面,本体 _R/_G 留 worker 继续步进）;
-   *  主线程读侧 sampleDisplace 单线程消费,与收达时序无交叠面。脏区/降采样
-   *  不做（登记债）。 */
+   *  主线程读侧 sampleDisplace 单线程消费,与收达时序无交叠面。★C8-D 起
+   *  WaveWorker 常规走 exportFieldDelta（脏区增量）;本方法保留为 f32 逃生口
+   *  与探针/金标全量面（降采样仍不做,登记债）。 */
   exportFieldSnapshot(): { R: Float32Array; G: Float32Array; gW: number; gH: number;
     progress: number; intensity: number; waveOff: [number, number];
     cam: [number, number, number]; scroll: [number, number] } {
@@ -470,6 +606,123 @@ class WaterWaveSystem {
       cam: [this._camX, this._camY, this._zoom],
       scroll: [this._scrollX, this._scrollY],
     };
+  }
+
+  // ---- ★C8-D 脏区增量编码态（仅 worker 侧实例消费;主线程实例零触碰）----
+  /** 影子=主线程已知场（成功回传后与 _R/_G 逐位同;diff 判据=Float32 全等比较） */
+  private _dShR = new Float32Array(0);
+  private _dShG = new Float32Array(0);
+  /** 距上次全量锚帧的场消息数（≥WW_FULL_ANCHOR_EVERY → 强制全量） */
+  private _dFrame = 0;
+  /** 量化不变式破坏 sticky 逃生：恒走旧 f32 全量（=R3-F2 前行为回滚口） */
+  private _dF32Escape = false;
+  /** 跨度/payload 复用 scratch（成功编码后 slice 出精确尺寸回传;容量按需长） */
+  private _dMetaBuf = new Uint32Array(1 + 3 * 8192);
+  private _dDataBuf = new Uint8Array(1 << 16);
+
+  private _dHead(): Pick<WWFieldMsg, 'gW' | 'gH' | 'progress' | 'intensity' | 'waveOff' | 'cam' | 'scroll'> {
+    return {
+      gW: this._gW, gH: this._gH,
+      progress: this.progress, intensity: this.intensity,
+      waveOff: this.waveReadOffset(),
+      cam: [this._camX, this._camY, this._zoom],
+      scroll: [this._scrollX, this._scrollY],
+    };
+  }
+
+  /** 量化不变式破坏 → sticky f32 逃生（一次性告警;worker 上下文 console 可用） */
+  private _dViolate(): WWFieldMsg {
+    if (!this._dF32Escape) {
+      console.warn('[WaveWaves] 场量化不变式破坏（k/256 外值）→ f32 全量逃生（8B/格,登记债）');
+      this._dF32Escape = true;
+    }
+    this._dFrame = 0;
+    return { fmt: 'f32', R: this._R.slice(), G: this._G.slice(), ...this._dHead() };
+  }
+
+  /** 全量字节快照（2B/格;含逐格不变式复核,破坏返 null）。影子随全量重置。 */
+  private _dFullBytes(): { fmt: 'full'; R: Uint8Array; G: Uint8Array } | null {
+    const n = this._R.length;
+    const R = this._R, G = this._G;
+    const R8 = new Uint8Array(n), G8 = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const kf = R[i] * 256, kg = G[i] * 256;
+      const kR = Math.round(kf), kG = Math.round(kg);
+      if (kR !== kf || kG !== kg || kR < 0 || kR > 256 || kG < 0 || kG > 256) return null;
+      R8[i] = kR; G8[i] = kG;
+    }
+    return { fmt: 'full', R: R8, G: G8 };
+  }
+
+  /** 脏区 diff 编码（行扫描跨度 RLE;R,G 字节交织）。返回 null=超限落全量,
+   *  'violation'=量化不变式破坏走 f32 逃生。成功时影子尚未补写（调用方按跨度补）。 */
+  private _dEncode(): { meta: Uint32Array; data: Uint8Array; spans: number } | null | 'violation' {
+    const w = this._gW, h = this._gH, n = w * h;
+    const R = this._R, G = this._G, shR = this._dShR, shG = this._dShG;
+    // scratch 容量与 0.75 全量阈值对齐（超出必走全量,slice 前无需增长路径）。
+    // ★阈值 0.75（探针实测定谳）:玩家浮水时浮力振荡持续注入 → 真实场 50~75% 格
+    //  逐帧变更,delta（2B/格+跨度头）在 75% 密度内仍恒优于全量 2B/格——0.5 阈值
+    //  会在浮水场景把过半帧顶成全量回退（_c8d-wave-delta-probe 海浪臂 168/206 full）。
+    const cellsCap = Math.ceil(n * 0.75) + 1024;
+    if (this._dDataBuf.length < cellsCap * 2) this._dDataBuf = new Uint8Array(cellsCap * 2);
+    if (this._dMetaBuf.length < 1 + 3 * 8192) this._dMetaBuf = new Uint32Array(1 + 3 * 8192);
+    const meta = this._dMetaBuf, data = this._dDataBuf;
+    let mOff = 1, dOff = 0, spans = 0;
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w;) {
+        while (x < w && R[row + x] === shR[row + x] && G[row + x] === shG[row + x]) x++;
+        if (x >= w) break;
+        const x0 = x;
+        while (x < w && (R[row + x] !== shR[row + x] || G[row + x] !== shG[row + x])) x++;
+        const len = x - x0;
+        if (mOff + 3 > meta.length || dOff + len + len > data.length) return null;
+        meta[mOff] = y; meta[mOff + 1] = x0; meta[mOff + 2] = len; mOff += 3;
+        for (let t = 0; t < len; t++) {
+          const i = row + x0 + t;
+          const kf = R[i] * 256, kg = G[i] * 256;
+          const kR = Math.round(kf), kG = Math.round(kg);
+          if (kR !== kf || kG !== kg || kR < 0 || kR > 256 || kG < 0 || kG > 256) return 'violation';
+          data[dOff++] = kR; data[dOff++] = kG;
+        }
+        spans++;
+      }
+    }
+    // 真实收益判据：delta 载荷（含 12B/跨度开销）大于全量字节 → 不如全量
+    if (dOff + mOff * 4 > n * 2) return null;
+    meta[0] = spans;   // ★跨度数写头部（消费端 meta[0] 驱动解码循环）
+    return { meta: meta.slice(0, mOff), data: data.slice(0, dOff), spans };
+  }
+
+  /** ★C8-D 场消息出口（WaveWorker 每帧调用,替代 exportFieldSnapshot 常规面）。
+   *  forceFull=true（换档/大跳/resync/首帧）或周期锚或影子失配（resize）→ 全量
+   *  字节快照;否则脏区增量（静水帧 ~4B vs 旧全量 8B/格）。 */
+  exportFieldDelta(forceFull: boolean): WWFieldMsg {
+    const head = this._dHead();
+    if (this._dF32Escape) return { fmt: 'f32', R: this._R.slice(), G: this._G.slice(), ...head };
+    this._dFrame++;
+    const n = this._R.length;
+    const needFull = forceFull || this._dShR.length !== n || this._dFrame >= WW_FULL_ANCHOR_EVERY;
+    if (!needFull) {
+      const enc = this._dEncode();
+      if (enc === 'violation') return this._dViolate();
+      if (enc) {
+        // 影子补写（按跨度;未变格影子本就同相）
+        const { meta, data, spans } = enc;
+        const w = this._gW, R = this._R, G = this._G, shR = this._dShR, shG = this._dShG;
+        for (let s = 0; s < spans; s++) {
+          const y = meta[1 + s * 3], x0 = meta[2 + s * 3], len = meta[3 + s * 3];
+          let i = y * w + x0;
+          for (let t = 0; t < len; t++, i++) { shR[i] = R[i]; shG[i] = G[i]; }
+        }
+        return { fmt: 'delta', meta, data, ...head };
+      }
+    }
+    this._dFrame = 0;
+    const fb = this._dFullBytes();
+    if (!fb) return this._dViolate();
+    this._dShR = this._R.slice(); this._dShG = this._G.slice();
+    return { ...fb, ...head };
   }
 
   setQuality(q: number): void {
@@ -834,7 +1087,7 @@ class WaterWaveSystem {
           const i = rowM + x;
           const q = Math.round(512 * (newH * 0.5 + 0.5));
           let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
-          if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
+          if (rq <= 0) rq = 0; else if (rq > 256) rq = 256;   // ★C8-D `<=` 收 −0(Math.round(−0)=−0,旧 guard 漏)
           R2[i] = rq / 256;
           const dv = newH - signedC;
           let gq = Math.round((0.5 + 0.3 * Math.sign(dv) * Math.sqrt(Math.abs(dv))) * 256);
@@ -882,7 +1135,7 @@ class WaterWaveSystem {
         const newH = (signedC + 2 * (S * 0.25 - signedC) + wv * Math.abs(wv)) * WATER_DAMP;
         const q = Math.round(512 * (newH * 0.5 + 0.5));
         let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
-        if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
+        if (rq <= 0) rq = 0; else if (rq > 256) rq = 256;   // ★C8-D `<=` 收 −0(Math.round(−0)=−0,旧 guard 漏)
         R2[i] = rq / 256;
         const dv = newH - signedC;
         let gq = Math.round((0.5 + 0.3 * Math.sign(dv) * Math.sqrt(Math.abs(dv))) * 256);
@@ -908,7 +1161,7 @@ class WaterWaveSystem {
             const newH = (signedC + 2 * (S * 0.25 - signedC) + wv * Math.abs(wv)) * WATER_DAMP;
             const q = Math.round(512 * (newH * 0.5 + 0.5));
             let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
-            if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
+            if (rq <= 0) rq = 0; else if (rq > 256) rq = 256;   // ★C8-D `<=` 收 −0(Math.round(−0)=−0,旧 guard 漏)
             R2[i] = rq / 256;
             const dv = newH - signedC;
             let gq = Math.round((0.5 + 0.3 * Math.sign(dv) * Math.sqrt(Math.abs(dv))) * 256);
@@ -955,7 +1208,7 @@ class WaterWaveSystem {
         const newH = (signedC + 2 * (S * 0.25 - signedC) + wv * Math.abs(wv)) * WATER_DAMP;
         const q = Math.round(512 * (newH * 0.5 + 0.5));
         let rq = Math.round((q < 0 ? 0 : q > 512 ? 1 : q / 512) * 256);
-        if (rq < 0) rq = 0; else if (rq > 256) rq = 256;
+        if (rq <= 0) rq = 0; else if (rq > 256) rq = 256;   // ★C8-D `<=` 收 −0(Math.round(−0)=−0,旧 guard 漏)
         R2[i] = rq / 256;
         const dv = newH - signedC;
         let gq = Math.round((0.5 + 0.3 * Math.sign(dv) * Math.sqrt(Math.abs(dv))) * 256);
@@ -984,6 +1237,10 @@ class WaterWaveSystem {
     this.progress = 0; this._scrollX = 0; this._scrollY = 0;
     this.quality = -1;          // 使后续 setQuality 必经换档路径（重算 gates）
     _rqCount = 0;
+    // ★C8-D:增量编码态一并归零（影子/锚帧计数/f32 逃生）——单例生产者跨场景
+    // 串态会让新场景首场消息误判 delta（消费者空场 → resync 丢帧=假红）。
+    this._dShR = new Float32Array(0); this._dShG = new Float32Array(0);
+    this._dFrame = 0; this._dF32Escape = false;
   }
 }
 

@@ -13,6 +13,25 @@ describe('GLSpriteLayer 回归守卫(源码级锁定)', () => {
     expect(SRC).toContain('1.0 - screen.y / uCanvas.y * 2.0');
   });
 
+  it('★rot 双轴修复(2026-09-25 用户实报全武器/弹幕旋转失效):vUv 取未旋转 aPos+位置先展开后旋转', () => {
+    // 断言域=VERT_SRC 块(CLOUD_VERT_SRC 是 obj62 1:1 移植锁,vUv-from-p 为其
+    //   移植形态——本案不动,同构剪切为登记债,见 GLSpriteLayer 修复注)
+    const vs = SRC.split('const VERT_SRC =')[1]?.split('const FRAG_SRC =')[0] ?? '';
+    expect(vs.length).toBeGreaterThan(100);
+    // 【轴1】vUv 用未旋转 aPos——旧码用旋转后 p ⇒ uv=dst 归一化坐标逐轴仿射
+    //   (与 uRot 无关)=内容恒不转,只有 outline 转(武器/弹幕固定朝向的根因)。
+    //   丢此行 = 旋转内容退化为未旋转内容+CLAMP 边拖影。
+    expect(vs).toContain('vUv = vec2(uSrc.x + aPos.x * uSrc.z, uSrc.y + aPos.y * uSrc.w);');
+    expect(vs).not.toContain('p.x * uSrc.z');
+    // 【轴2】位置先按 dst 尺寸展开像素域后旋转——旧码先旋转归一化坐标再逐轴
+    //   乘 dst.zw:非方形 dst(w≠h)下 scale∘rotate≠rotate∘scale=剪切畸变
+    //   (32×48@45° 纵弦 45→68px 实锤)。像素域展开必须先于旋转。
+    expect(vs).toContain('vec2 d = (aPos - vec2(0.5)) * uDst.zw;');
+    expect(vs).toContain('vec2 screen = uDst.xy + uDst.zw * 0.5 + vec2(d.x * co - d.y * s, d.x * s + d.y * co);');
+    // 像素判谳面:scripts/_rot-shader-micro.mjs 六场景(纯旋转/镜像/持枪档/-90°/
+    // 小角度)pinDist≤0.22px+象限色锚全对(2026-09-25 修复后全绿)
+  });
+
   it('LINEAR/REPEAT 采样器 MIN 带 mipmap,MAG 恒 LINEAR(MAG 只收 NEAREST|LINEAR)', () => {
     expect(SRC).toContain('mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE)');
     expect(SRC).toContain('mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.REPEAT)');

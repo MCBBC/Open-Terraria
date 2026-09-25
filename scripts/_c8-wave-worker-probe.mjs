@@ -20,8 +20,10 @@ async function probe(tag, flag) {
     if (/WaveWaves|waveworker/i.test(t) || m.type?.() === 'error') warns.push(`[${m.type?.()}]` + t.slice(0, 200));
   });
   page.on('pageerror', (e) => warns.push('[pageerror]' + String(e?.message ?? e).slice(0, 200)));
-  // ★修①:旗必须在 ? 后;双模式各自导航(main 臂无旗=原路径)
-  const url = flag ? `${ORIGIN}/?waveworker=1&pbust=${Date.now()}` : `${ORIGIN}/?pbust=${Date.now()}`;
+  // ★修①:旗必须在 ? 后;双模式各自导航。★C8-D 勘误(2026-09-25):C8 转正后
+  //   缺省开,main 臂「无旗=原路径」已失效(无旗=worker 模式)——main 臂显式
+  //   ?waveworker=0 才是真主线程模拟臂,双模式对拍语义方成立。
+  const url = flag ? `${ORIGIN}/?waveworker=1&pbust=${Date.now()}` : `${ORIGIN}/?waveworker=0&pbust=${Date.now()}`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   const boot = await bootstrap(page, ORIGIN);
   // 首臂冷启动 flake(本机实测:冷臂桥等 >180s 偶发,与旗无关——热身后必过):重试一次

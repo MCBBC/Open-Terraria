@@ -219,11 +219,13 @@ describe('BJ109-I：FilterTower 染色', () => {
     const { SCREEN_FX_FRAGS } = await import('../src/render/GLScreenFilters');
     const f = SCREEN_FX_FRAGS['FilterTower']!;
     expect(f).toContain('rel * vec2(1.5, 1.0)');                  // c11=(1.5,1,…) 纵横度量
-    expect(f).toContain('50.0 / max(len - uProgress, 1e-3)');     // 波前半径（c11.w=50）
+    // ★BJ346 勘误重产（preshader c0=1000·uProgress+180 直读；旧式 len−uProgress 系误读）：
+    expect(f).toContain('50.0 / denom');                          // 波前半径（c11.w=50,带号保向）
+    expect(f).toContain('180.0 + 1000.0 * uProgress');            // preshader c0（lit16=1000/lit17=180）
     expect(f).toContain('5.0) * uIntensity');                     // 幅帽 c12.x=5
     expect(f).toContain('2.25 * (duv - vUv)');                    // tapB（c13.z=2.25）
     expect(f).toContain('3.5 * (duv - vUv)');                     // tapC（c13.w=3.5）
-    expect(f).toContain('(V + mn) - 1.0');                        // k=V+mn−1（c11.y=1）
+    expect(f).toContain('float k = sum - 1.0');                   // k=V+mn−1（c11.y=1）★BJ346 重产
     expect(f).toContain('mix(sC.rgb, tgt * sC.a, uOpacity)');     // lerp 尾段
     expect(f).toContain('col.b += sA.b - sC.b');                  // :397-399 色差修正
     expect(f).toContain('col.g += sB.g - sC.g');                  // :401-403
@@ -232,10 +234,13 @@ describe('BJ109-I：FilterTower 染色', () => {
     const src = rendererSrc();
     expect(src).toContain('lunarTowersNear: this._lunarTowerFilterTarget(');
     expect(src).toContain("kind: 'FilterTower'");
-    expect(src).toContain('targetPx: [tow.x - screenPos[0], tow.y - screenPos[1]]');
+    // ★BJ346 勘误重产：targetPx=塔心世界系（ScreenShaderData.Apply 双端同减 offScreenRange）
+    expect(src).toContain('targetPx: [tow.x, tow.y]');
+    expect(src).not.toContain('targetPx: [tow.x - screenPos[0]');
     expect(src).toContain('preset.useOpacity * this._towerFilterOpacity');
-    // 破盾波强度（Main.cs:24584-24586）
-    expect(src).toContain('intensity = Math.min(5, 15 * num320) + 1;');
+    // 盾态三支驱动抽纯函数（Main.cs:24564/24573/24581，★BJ346）
+    expect(src).toContain('towerFilterDrive(tow.shieldUp, tow.ai3)');
+    expect(src).not.toContain('intensity = Math.min(5, 15 * num320) + 1;');
     // MonolithFilters stub 注释更新（flag4 已接真喂数）
     const mono = readFileSync(new URL('../src/render/MonolithFilters.ts', import.meta.url), 'utf8');
     expect(mono).toContain('★BJ109-I 2026-09-16 已接真喂数');

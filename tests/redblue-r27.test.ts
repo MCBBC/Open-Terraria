@@ -243,7 +243,9 @@ describe('⑤ 荆棘链段系统（aiStyle 4 :23943-24080）', () => {
     expect(added.length).toBe(1);
     expect(added[0].projId).toBe(7);
     expect((added[0] as unknown as { thornAi1: number }).thornAi1).toBe(2);
-    expect(added[0].x).toBe(root.x + 32 + 14);                      // position+v+(w/2)
+    // ★BJ353 勘误：NewProjectile 调用式 position+v+(w/2) 经 :10878-10879 居中后
+    //  净效果 = 子段左上 = 父段左上 + v（旧断言把调用式当左上=每代半盒漂移）
+    expect(added[0].x).toBe(root.x + 32);
     // 淡出期 alpha 回升 → ≥255 静默消亡（无声无尘）
     const r0 = rec(game).dusts.length;
     const s0 = rec(game).sfx.length;

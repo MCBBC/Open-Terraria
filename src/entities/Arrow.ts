@@ -421,7 +421,7 @@ export interface ArrowOpts {
    *  30t 内不得命中目标本体,飞出后才可伤及；1457 重制版 :32 同款保留）。与
    *  localNPCHitCooldown（命中后写档,数据列驱动）独立：本表项只在出生时写入 */
   localImmuneSeed?: { npcId: number; t: number };
-  /** 荆棘链段 ai[1]（Vilethorn 7/8、Nettle Burst 150/151/152——aiStyle 4）：
+  /** 荆棘链段 ai[1]（Vilethorn 7/8、Nettle Burst 150/151/152、魔晶碎块 494 杆——aiStyle 4）：
    *  武器首发不传（=0），链生子段传父段递增后的 ai[1]。消费见 THORN_CHAIN_PROJS 支 */
   thornChainAi1?: number;
 }
@@ -773,6 +773,9 @@ export const PROJ_ALPHA0: Record<number, number> = {
   22: 255, 27: 255, 45: 100,
   410: 255,                                                          // 泡泡枪泡体（:4926 alpha=255,ai72 −25/t 渐显钳 50）
   7: 255, 8: 255, 150: 255, 151: 255, 152: 255,
+  // BJ353：魔晶碎块链 493 头/494 杆（SetDefaults :5669-5681 alpha=255——aiStyle4 渐显
+  //  −100/t 消费;曾缺列 = 首发段出生即全显,渐显链无起点且淡出面全缺）
+  493: 255, 494: 255,
   876: 255,                                                          // 灰/橙 zapinator（:8426）
   // ★R28：294 暗影束（SetDefaults :3840-3849 alpha 无显式行——aiStyle48 AI 支
   // :28640-28644 `alpha = 255` 每 update 直写）/ 295 地狱火叉弹（aiStyle50
@@ -1102,14 +1105,18 @@ function empressHslRgb(hue: number): [number, number, number] {
   return [Math.round(rgb[0] * 255), Math.round(rgb[1] * 255), Math.round(rgb[2] * 255)];
 }
 
-/** 荆棘链族（Vilethorn 7/8 + Nettle Burst 150/151/152，aiStyle 4，红队 R27 §10/§11）：
+/** 荆棘链族（Vilethorn 7/8 + Nettle Burst 150/151/152 + 魔晶碎块 493/494，aiStyle 4，
+ *  红队 R27 §10/§11；493/494 批=BJ353 2026-09-25）：
  *  UpdatePosition 对 aiStyle==4 整体早退（Projectile.cs:20552）= 链段【全程静止】；
- *  AI_004 :23943-24080 状态机：alpha −50(/−75 nettle)/update 渐显期不动 → 归零转 ai[0]=1
- *  并链生子段（position+velocity+(w/2,h/2) 处、同速度、damage 同值、ai[1]+1；type7 在
- *  ai[1]≥6 后升 type8 尾刺 / 150↔151 每节翻转、ai[1]≥10 且 type151 → 152 尾端）；淡出期
- *  alpha += 5(nettle 3) 至 ≥255 Kill（无声无尘）。出生音 Item8 于 localAI[0]==0 门播一次。
+ *  AI_004 :23943-24080 状态机：alpha −50(/−75 nettle/−100 493|494)/update 渐显期不动 →
+ *  归零转 ai[0]=1 并链生子段（position+velocity+(w/2,h/2) 处、同速度、damage 同值、
+ *  ai[1]+1；type7 在 ai[1]≥6 后升 type8 尾刺 / 150↔151 每节翻转、ai[1]≥10 且 type151 →
+ *  152 尾端 / 494 链生 494、ai[1]≥7+rand(2) 升 493 头且伤/击退 ×1.25）；淡出期
+ *  alpha += 5(nettle 3/493|494 4) 至 ≥255 Kill（493|494 淡出穿 170 时 8× d68-70 尘爆）。
+ *  出生音 Item8 于 localAI[0]==0 门播一次（type494 → Item101 :23949-23951——BJ353 前
+ *  "无武器可达不接"系台账陈旧：物品 3051 魔晶碎块 Item.cs:28200 shoot=494）。
  *  ctor 按 THORN_CHAIN_PROJS 自动置位（同 sandBall/flare 先例），thornChainAi1 注入段号 */
-const THORN_CHAIN_PROJS = new Set([7, 8, 150, 151, 152]);
+const THORN_CHAIN_PROJS = new Set([7, 8, 150, 151, 152, 493, 494]);
 
 /** ★R29 幻象弓 630 载体控制面（Game 注入,同 PiranhaCtl 模式）：
  *  volley() = Game.phantasmPickAmmo 等价（每轮现解析弹药:弹型/伤/kb/速终值+耗弹掷;
@@ -1397,7 +1404,7 @@ export class Arrow extends Entity {
   seraphNecklaced = false;
   /** R4-38：宝石法珠首帧音已播闸（AI_029 soundDelay 0→-1 单发语义） */
   gemShotSounded = false;
-  // ---- 荆棘链族（7/8/150/151/152，aiStyle4，红队 R27 §10/§11）----
+  // ---- 荆棘链族（7/8/150/151/152 + 魔晶碎块 493/494，aiStyle4，红队 R27 §10/§11 + BJ353）----
   /** 族激活（ctor 按 THORN_CHAIN_PROJS 自动置位）——subStep 独占状态机 */
   thornChain = false;
   /** ai[0]：0=渐显期（不动）/ 1=淡出期（alpha 回升） */
@@ -1508,7 +1515,8 @@ export class Arrow extends Entity {
 
   /** ★R28 §6 星璇秘术死亡爆（Kill :73553-73612）：176×176 居中 Damage() AoE +
    *  Item14 + 4×d240 + 30 循环×(d62 scale3.7 + d90 Crimson fadeIn1) + 10×d62 +
-   *  10×d240 + 2 烟 gore(61-63)（自属 618 火花由 naParent 分支父亡即杀承载） */
+   *  10×d240 + 2 烟 gore(61-63)（自属 618 火花由 naParent 分支父亡即杀承载）+
+   *  ★BJ348 爆裂碎片 620×(5..8)+(5..8)（:73622-73658,伤×0.65/击退×0.8/尘色键 86|90） */
   private arcanumDeathBurst(game: GameHooks): void {
     const R = 88;                                       // Resize(176) → 半径 88
     for (const ent of game.enemies()) {
@@ -1547,6 +1555,59 @@ export class Arrow extends Entity {
         g.vx *= 0.3; g.vy *= 0.3;
         g.vx += (Math.floor(Math.random() * 21) - 10) * 0.05;
         g.vy += (Math.floor(Math.random() * 21) - 10) * 0.05;
+      }
+    }
+    // ★BJ348 爆裂碎片 620（:73622-73658，myPlayer==owner 单机恒真；自属 618 清场由
+    //   naParent 父亡链承载=Next tick 自杀）。num213/num214 = Next(5,9) 各 5..8 枚、
+    //   尾迹尘色 num215=SelectRandom(86,90) / num216=互补——掷序：先二数量后色键，
+    //   逐枚掷散布向（Next(-100,101) 双轴、零向重掷、归一、Y>0.2|0.4 反折上抛）
+    //   × Next(70,101)|Next(40,81)×0.1。伤 = damage×0.65（C# double→int 截断）、
+    //   击退 ×0.8、ai[0]=尘色键。出生 = 心 + RandomVector2(±30)（NewProjectile 盒心
+    //   语义 → ctor 左上 −w/2 回正）。本体全隐（α≡255），视觉 = 尾迹尘（620 AI 支）。
+    {
+      const ents620 = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+      if (ents620?.add) {
+        const nA620 = 5 + Math.floor(Math.random() * 4);            // Next(5,9)
+        const nB620 = 5 + Math.floor(Math.random() * 4);            // Next(5,9)
+        const tA620 = Math.random() < 0.5 ? 86 : 90;                // SelectRandom
+        const tB620 = tA620 === 86 ? 90 : 86;
+        const shardVel620 = (yFlip: number, spdMul: { lo: number; n: number }): [number, number] => {
+          let vx620 = Math.floor(Math.random() * 201) - 100;        // Next(-100,101)
+          let vy620 = Math.floor(Math.random() * 201) - 100;
+          while (vx620 === 0 && vy620 === 0) {                      // 零向重掷（:73627-73629）
+            vx620 = Math.floor(Math.random() * 201) - 100;
+            vy620 = Math.floor(Math.random() * 201) - 100;
+          }
+          const l620 = Math.hypot(vx620, vy620);
+          vx620 /= l620; vy620 /= l620;                             // Normalize（:73631）
+          if (vy620 > yFlip) vy620 = -vy620;                        // 上抛反折（:73632-73634）
+          const s620 = (Math.floor(Math.random() * spdMul.n) + spdMul.lo) * 0.1;
+          return [vx620 * s620, vy620 * s620];
+        };
+        for (let i620 = 0; i620 < nA620; i620++) {                  // A 环：Y>0.2 反折、速 7..10
+          const ox620 = (30 - -30) * Math.random() + -30;           // RandomVector2(±30)
+          const oy620 = (30 - -30) * Math.random() + -30;
+          const [svx620, svy620] = shardVel620(0.2, { lo: 70, n: 31 });
+          const sh620 = new Arrow(this.cx + ox620 - 2, this.cy + oy620 - 2,
+            svx620, svy620, Math.max(1, Math.trunc(this.damage * 0.65)),
+            this.knockback * 0.8, 620, { grav: 0, life: 3600, pierce: 1 });
+          sh620.na620Dust = tA620;
+          sh620.critChance = this.critChance;
+          sh620.armorPen = this.armorPen;
+          ents620.add(sh620, 'projectiles');
+        }
+        for (let i620 = 0; i620 < nB620; i620++) {                  // B 环：Y>0.4 反折、速 4..8
+          const ox620 = (30 - -30) * Math.random() + -30;
+          const oy620 = (30 - -30) * Math.random() + -30;
+          const [svx620, svy620] = shardVel620(0.4, { lo: 40, n: 41 });
+          const sh620 = new Arrow(this.cx + ox620 - 2, this.cy + oy620 - 2,
+            svx620, svy620, Math.max(1, Math.trunc(this.damage * 0.65)),
+            this.knockback * 0.8, 620, { grav: 0, life: 3600, pierce: 1 });
+          sh620.na620Dust = tB620;
+          sh620.critChance = this.critChance;
+          sh620.armorPen = this.armorPen;
+          ents620.add(sh620, 'projectiles');
+        }
       }
     }
   }
@@ -1959,6 +2020,11 @@ export class Arrow extends Entity {
   private naLastPY = 0;
   /** ai[0]（≥420 停止骑乘，:35479-35481） */
   private naAi0 = 0;
+  // ---- 620 星云奥秘爆裂碎片（aiStyle 29 GemStaffs type 支 :38357-38387）----
+  /** ai[0] = 尾迹/Kill 尘色键（父球 Kill 掷定 86|90 二选一,双子环互补 :73631-73633） */
+  na620Dust = 86;
+  /** ai[1] 计龄（>40t Kill :38361-38363） */
+  private na620Ai1 = 0;
 
   /** 451 ≤250 寻的 + 骑乘（:31649-31661/:31707-31725）：无视线门最近 CanBeChasedBy，
    *  命中即 position += npc.velocity（随敌漂移）；存中心供瞬移重射 */
@@ -3330,6 +3396,30 @@ export class Arrow extends Entity {
     // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
     // 自毁全部走此口）
     if (this.martianRocket) this.rocketExplode(game);
+    // ★BJ348 618/620 Kill 尘爆（Projectile.Kill :73671-73740 共段）：10× 尘
+    //   （618→86 / 620→ai[0]=na620Dust,vel×0.1 种,α0,scale 0.5）——1/3 升档
+    //   （type+1、fadeIn 0.75±0.10、scale 0.25±0.05）/ else scale 1.0±0.10；
+    //   noGravity + vel×1.25 + vel−=oldVelocity/10 逆冲（oldVelocity 取杀拍速度快照,
+    //   485 同款先例）。618=父亡/420t 自然亡的可见消散,620=碎片落地/命中的可见消散。
+    if (this.projId === 618 || this.projId === 620) {
+      const dustBase618 = this.projId === 618 ? 86 : this.na620Dust;
+      for (let i = 0; i < 10; i++) {
+        const bump = Math.random() < 1 / 3;
+        const tKill = bump ? dustBase618 + 1 : dustBase618;
+        const dK = game.spawnDust?.(this.x, this.y, this.w, this.h, tKill,
+          this.vx * 0.1, this.vy * 0.1, 0, null, 0.5, true);
+        if (dK) {
+          if (bump) {
+            dK.fadeIn = 0.75 + (Math.floor(Math.random() * 21) - 10) * 0.01;
+            dK.scale = 0.25 + (Math.floor(Math.random() * 21) - 10) * 0.005;
+          } else {
+            dK.scale = 1 + (Math.floor(Math.random() * 21) - 10) * 0.01;
+          }
+          dK.vx = dK.vx * 1.25 - this.vx / 10;
+          dK.vy = dK.vy * 1.25 - this.vy / 10;
+        }
+      }
+    }
     // 斗篷星落地(Kill :76692-76748)——★R1 红队逐参修正:723=NewDustDirect(88,
     // v×0.1,150,s1.2)+noGravity+仅 X ×2(终值 vx×0.2/vy×0.1);else 桶(724/725/726/
     // 1133→d57/907→d58)无 noGravity 无 ×2(907 尘 vel×0.75);音 723/724/725/726/
@@ -4845,7 +4935,7 @@ export class Arrow extends Entity {
       this.birthSelfCorrect(game);
       if (this.dead) return;
     }
-    // ---- 荆棘链族（7/8/150-152）独占状态机：UpdatePosition 对 aiStyle4 早退
+    // ---- 荆棘链族（7/8/150-152 + 魔晶碎块 493/494）独占状态机：UpdatePosition 对 aiStyle4 早退
     //      （Projectile.cs:20552）= 无通用位移（下方位移行按 thornChain 跳过）、
     //      重力恒 0（aiStyle≠1）；命中管线照常（接触伤害在 Damage() 独立结算）。
     //      击杀由 thornStep 内 killNow 收口 ----
@@ -6606,7 +6696,8 @@ export class Arrow extends Entity {
       // 隐形伤弹（alpha 恒 255 :35533）：①父亡即 Kill（:35475-35478 proj4==null →
       // ai[0]=420 + Kill）；②骑乘（:35483-35486 position += 父位移）；③速度向父
       // 符号步进 ±0.15/轴、|v|>6 归一 6（:35490-35495）；④ai[0] ≥ 420 停骑乘
-      // （:35479-35481 直飞到 timeLeft 420 自然亡）。
+      // （:35479-35481 直飞到 timeLeft 420 自然亡）；⑤★BJ348 尾迹尘 d86 1/2 掷
+      // （:35517-35528，vel=弹速/noGravity/scale 1.5——可见面全靠此尘）。
       this.naAi0++;
       const parent = this.naParent;
       if (parent.dead) { this.killNow(game); return; }       //（:35475-35478）
@@ -6620,6 +6711,15 @@ export class Arrow extends Entity {
       }
       this.naLastPX = parent.cx;
       this.naLastPY = parent.cy;
+      // ★BJ348 尘尾（:35517-35528）：1/2 掷 → d86 弹心（NewDust 后 position=Center 钉心、
+      //   velocity=弹速、noGravity、scale 1.5、customData=父球）——原版本体 α≡255 全隐
+      //   （GetAlpha 缺省路径 A=0），**可见面全靠此尘尾**（用户实报"射弹从球体中生成"的
+      //   视觉承载）；customData 随动语义本仓未接 = 617 环尘同款近似（盒心 ±4px 抖动）
+      if (Math.random() < 0.5) {
+        const d618 = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 86,
+          this.vx, this.vy, 0, null, 1.5, true);
+        if (d618) { d618.x = this.cx; d618.y = this.cy; }
+      }
       this.alpha = 255;                                      //（:35533 恒隐身）
     } else if (this.projId === 617) {
       // ---- 617 星璇秘术（aiStyle 118，Projectile.cs:35283-35455，3476 星璇秘术）----
@@ -6653,25 +6753,28 @@ export class Arrow extends Entity {
               if (d617b) d617b.fadeIn = 0.5;
             }
           }
-        } else if (Math.floor(Math.random() * 2) === 0) {
-          // 慢速段（:35345-35372）：1/2 掷 → d86+d90(Crimson) 切向环绕一组 +
-          // d240 外环（×20~31、反切向×5）；scale 升档 0.9+
+        } else {
+          // 慢速段（:35363-35372）★BJ348b 修正：每拍必发、单次 Next(2) 二选一——
+          // if 支 = d86+d90(Crimson) 切向环绕一组（×10..21、切向×6）、else 支 =
+          // d240 外环（×20..31、反切向×5）。旧版双重病：①240 并进 if 支三枚齐发、
+          // ②外层再套 1/2 发尘门（50% 拍全无尘）——原版 for(1) 循环体每拍执行
           const s617s = 0.9 + Math.random();
-          {
-            const [uxa, uya] = unit617();
-            const da = game.spawnDust?.(this.cx - uxa * (10 + Math.random() * 11),
-              this.cy - uya * (10 + Math.random() * 11), 1, 1, 86,
-              -uya * 6, uxa * 6, 0, null, s617s, true);
-            if (da) da.fadeIn = 0.5;
-          }
-          {
-            const [uxb, uyb] = unit617();
-            const db = game.spawnDust?.(this.cx - uxb * (10 + Math.random() * 11),
-              this.cy - uyb * (10 + Math.random() * 11), 1, 1, 90,
-              -uyb * 6, uxb * 6, 0, { r: 220, g: 20, b: 60, a: 255 }, s617s, true);
-            if (db) db.fadeIn = 0.5;
-          }
-          {
+          if (Math.floor(Math.random() * 2) === 0) {
+            {
+              const [uxa, uya] = unit617();
+              const da = game.spawnDust?.(this.cx - uxa * (10 + Math.random() * 11),
+                this.cy - uya * (10 + Math.random() * 11), 1, 1, 86,
+                -uya * 6, uxa * 6, 0, null, s617s, true);
+              if (da) da.fadeIn = 0.5;
+            }
+            {
+              const [uxb, uyb] = unit617();
+              const db = game.spawnDust?.(this.cx - uxb * (10 + Math.random() * 11),
+                this.cy - uyb * (10 + Math.random() * 11), 1, 1, 90,
+                -uyb * 6, uxb * 6, 0, { r: 220, g: 20, b: 60, a: 255 }, s617s, true);
+              if (db) db.fadeIn = 0.5;
+            }
+          } else {
             const [uxc, uyc] = unit617();
             const dc = game.spawnDust?.(this.cx - uxc * (20 + Math.random() * 11),
               this.cy - uyc * (20 + Math.random() * 11), 1, 1, 240,
@@ -6746,6 +6849,42 @@ export class Arrow extends Entity {
           this.vy = (this.vy * 7 + (dy617 / dl617) * 4) / 8;
         }
         if (this.na617Ai0 >= 600) { this.killNow(game); return; }   //（:35453-35455）
+      }
+      // ★BJ348 粉色光晕点光（:35449-35451 `alpha<150 → AddLight(Center,0.7,0.2,0.6)`，
+      //   switch 后/Kill 前序位）：α 渐显 17t 后恒亮——此前整缺 = 球体夜间/洞穴无光环
+      this.lightRGB = this.alpha < 150 ? [0.7, 0.2, 0.6] : null;
+    } else if (this.projId === 620) {
+      // ---- 620 星云奥秘爆裂碎片（aiStyle 29 GemStaffs type 支 :38357-38387）----
+      // 父球 Kill 掷出（:73622-73658）：ai[0]=尾迹尘色 86|90（ctor 侧 na620Dust 注入）、
+      // ai[1] 计龄 >40t Kill（:38361-38363）；重力 0.2 钳 18 + X 阻力 ×0.98（:38364-38367）；
+      // 尾迹 2+1 枚 ai[0] 色尘（:38368-38384，pos=(尘+心)/2 与 (尘+心×5)/6 双混）。本体
+      // α≡255 → GetAlpha 缺省路径全隐（视觉=尘尾,618 同律）；Kill 尘爆在 killNow 618/620 支。
+      this.na620Ai1++;
+      if (this.na620Ai1 > 40) { this.killNow(game); return; }    //（:38361-38363）
+      this.vy += 0.2;                                            //（:38364）
+      if (this.vy > 18) this.vy = 18;                            //（:38365-38366）
+      this.vx *= 0.98;                                           //（:38367）
+      const fade620 = (60 - this.na620Ai1) / 60;                 // num4（:38360）
+      for (let k620 = 0; k620 < 2; k620++) {
+        const d620a = game.spawnDust?.(this.x, this.y, this.w, this.h, this.na620Dust,
+          this.vx, this.vy, 50, null, 1.1, true);
+        if (d620a) {                                             //（:38370-38374）
+          d620a.x = (d620a.x + this.cx) / 2;
+          d620a.y = (d620a.y + this.cy) / 2;
+          d620a.vx *= 0.3; d620a.vy *= 0.3;
+          d620a.scale *= fade620;
+        }
+      }
+      {
+        const d620b = game.spawnDust?.(this.x, this.y, this.w, this.h, this.na620Dust,
+          this.vx, this.vy, 50, null, 0.6, true);
+        if (d620b) {                                             //（:38375-38384）
+          d620b.x = (d620b.x + this.cx * 5) / 6;
+          d620b.y = (d620b.y + this.cy * 5) / 6;
+          d620b.vx *= 0.1; d620b.vy *= 0.1;
+          d620b.fadeIn = 0.9 * fade620;
+          d620b.scale *= fade620;
+        }
       }
     } else if (this.projId === 92) {
       // 92 坠星（aiStyle 5，Projectile.cs:24108-24112 命中线 + :24308-24318 可见面，圣箭
@@ -8235,6 +8374,28 @@ export class Arrow extends Entity {
           if (hit94) return;
           // 双轴回退皆失败=嵌入过深 → 交还通用消亡口（532 档同契约）
         }
+        // ---- ★BJ348b 星璇秘术球 617 撞块弱反弹（HandleMovement type 段
+        //      Projectile.cs:18378-18388）：velocity.X!=lastVelocity.X →
+        //      velocity.X = −lastVelocity.X×0.35（Y 轴同式独立）——不消亡、不耗
+        //      penetrate、无音/无尘/无计数。撞墙衰减后 |v|<4 落 AI 慢速段（球体
+        //      就地悬停+掷 618）=原版"球体弹墙驻场"链的入口。本仓单点碰撞无轴
+        //      信息 → 逐轴回退探针反射（AI8/532 档同法）；双轴皆嵌=嵌入过深 →
+        //      交还通用消亡口（532 档同契约）----
+        if (this.projId === 617) {
+          const st617b = game.world.store;
+          const free617b = (px: number, py: number) => {
+            const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+            return st617b.inBounds(t0, t1) && !st617b.isSolid(t0, t1);
+          };
+          const freeX617 = free617b(this.x + this.w / 2 - this.vx, this.y + this.h / 2);
+          const freeY617 = free617b(this.x + this.w / 2, this.y + this.h / 2 - this.vy);
+          if (freeX617 || freeY617) {
+            // 回退步=脱离嵌入（94/AI8 档同契约），反弹取入撞速度 ×0.35
+            if (freeX617) { this.x -= this.vx; this.vx = -this.vx * 0.35; }   //（:18380-18382）
+            if (freeY617) { this.y -= this.vy; this.vy = -this.vy * 0.35; }   //（:18383-18385）
+            return;
+          }
+        }
         // ---- ★BJ229 aiStyle 8 魔法弹撞块反射族（HandleMovement aiStyle8 支
         //      Projectile.cs:19688-19725,1458:19689-19726 同值）：AI8_BOUNCE_PROJS
         //      五型,每撞 Item_10 音(:19689 无音量参=1.0)+ai[0]++ 计数;达帽 →
@@ -9430,11 +9591,15 @@ export class Arrow extends Entity {
    *  非弹体位移。返回前已置 dead 时由调用方收口。 */
   private thornStep(game: GameHooks): void {
     const nettle = this.projId >= 150 && this.projId <= 152;
-    // 出生音 Item8（localAI[0]==0 && ai[1]==0 门 :23945-23954——仅武器首发段播,
-    // 链生段 ai[1]>=2 静默；494→Item101 档无武器可达不接）
+    // ★BJ353：魔晶碎块链（494 杆→493 头,aiStyle 4 同族;Item.cs:28200 shoot=494）
+    const crystalVile = this.projId === 493 || this.projId === 494;
+    // 出生音（localAI[0]==0 && ai[1]==0 门 :23945-23954——仅武器首发段播,
+    // 链生段 ai[1]>=1 静默；type494 → Item101 :23949-23951,余型 Item8）
     if (!this.thornBornSounded) {
       this.thornBornSounded = true;
-      if (this.thornAi1 === 0) game.playSfxFiles?.(['Item_8'], 1, this.cx, this.cy);
+      if (this.thornAi1 === 0) {
+        game.playSfxFiles?.([this.projId === 494 ? 'Item_101' : 'Item_8'], 1, this.cx, this.cy);
+      }
     }
     if (this.thornAi0 === 0) {
       // 渐显期（:23956-24032）
@@ -9444,6 +9609,7 @@ export class Arrow extends Entity {
       }
       this.alpha -= 50;                    // :23963
       if (nettle) this.alpha -= 25;        // :23964-23967（净步长 −75）
+      else if (crystalVile) this.alpha -= 50;   // :23968-23970（BJ353：493|494 净步长 −100 → 3 拍渐显）
       if (this.alpha > 0) return;          // 渐显期不动（UpdatePosition 早退）
       this.alpha = 0;
       this.thornAi0 = 1;
@@ -9459,16 +9625,31 @@ export class Arrow extends Entity {
       }).entities;
       if (!ents?.add) return;
       let childType = this.projId;
+      let childDmg = this.damage;
+      let childKb = this.knockback;
       if (this.projId === 7) {                       // :23985-23989（ai[1]>=6 升尾刺 8）
         if (this.thornAi1 >= 6) childType = 8;
-      } else if (this.projId === 150 || this.projId === 151) {   // :24014-24026
+      } else if (this.projId === 150 || this.projId === 151) {   // :23990-24008
         childType = this.projId === 150 ? 151 : 150;            // 150↔151 每节翻转
         if (this.thornAi1 >= 10 && this.projId === 151) childType = 152;   // 尾端
+      } else if (this.projId === 494) {
+        // ★BJ353 魔晶碎块链（:24012-24029）：494 链生 494,ai[1]≥7+rand(2) 该节升
+        //  493 头;升头时伤/击退 ×1.25（:24016-24021,(int)((double)damage*1.25) C# 截断;
+        //  rand(2) 掷在父段渐显归零拍=本位,掷序与原版同位）
+        if (this.thornAi1 >= 7 + Math.floor(Math.random() * 2)) childType = 493;
       } else {
-        return;                                   // 8/152 尾端不再链生
+        return;                                   // 8/152/493 头尾端不再链生
       }
-      const child = new Arrow(this.x + this.vx + this.w / 2, this.y + this.vy + this.h / 2,
-        this.vx, this.vy, this.damage, this.knockback, childType,
+      if (childType === 493) {                     // :24018-24021（num32==493 门）
+        childDmg = Math.trunc(this.damage * 1.25);
+        childKb = this.knockback * 1.25;
+      }
+      // ★BJ353 出生位勘误（全族）：原版调用式 `position+v+(w/2,h/2)` 是喂给
+      //  NewProjectile 的【中心】,:10878-10879 内部再减 (w/2,h/2) 居中 —— 净效果 =
+      //  子段左上 = 父段左上 + v（无半盒项）。R27 旧式把调用式当左上直传 = 每代
+      //  右下漂移半盒、沿链累积（7/8 28px 盒 14px/代、150 族 12px/代、494 族 16px/代）
+      const child = new Arrow(this.x + this.vx, this.y + this.vy,
+        this.vx, this.vy, childDmg, childKb, childType,
         { thornChainAi1: this.thornAi1 + 1 });
       child.critChance = this.critChance;
       child.critBonus = this.critBonus;
@@ -9477,11 +9658,20 @@ export class Arrow extends Entity {
       return;
     }
     // 淡出期（:24034-24080）
-    // 穿 170 尘爆（门字面 = alpha < 170 && alpha+5 >= 170 :24034——nettle 步长 3 但门仍 +5）
+    // 穿 170 尘爆（门字面 = alpha < 170 && alpha+5 >= 170 :24034——nettle/494 步长 3/4 但门仍 +5）
     if (this.alpha < 170 && this.alpha + 5 >= 170) {
       if (nettle) {
         for (let i = 0; i < 8; i++) {            // :24038-24044 d7 ×8
           const d = game.spawnDust?.(this.x, this.y, this.w, this.h, 7,
+            this.vx * 0.025, this.vy * 0.025, 200, null, 1.3, true);
+          if (d) { d.vx *= 0.5; d.vy *= 0.5; }
+        }
+      } else if (crystalVile) {
+        // ★BJ353：493|494 穿 170 尘爆（:24046-24053 d=rand(68,71) 晶尘 ×8,
+        //  noGravity scale1.3 α200,v×0.025 起 + ×0.5 收——同 nettle 形,异尘号）
+        for (let i = 0; i < 8; i++) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
+            68 + Math.floor(Math.random() * 3),
             this.vx * 0.025, this.vy * 0.025, 200, null, 1.3, true);
           if (d) { d.vx *= 0.5; d.vy *= 0.5; }
         }
@@ -9493,7 +9683,7 @@ export class Arrow extends Entity {
         game.spawnDust?.(this.x, this.y, this.w, this.h, 14, 0, 0, 170, null, 1.1);
       }
     }
-    this.alpha += nettle ? 3 : 5;                // :24065-24076
+    this.alpha += crystalVile ? 4 : nettle ? 3 : 5;   // :24066-24074（493|494 步长 4）
     if (this.alpha >= 255) this.killNow(game);   // :24077-24080（无声无尘自然消亡）
   }
 

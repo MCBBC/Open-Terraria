@@ -78,12 +78,27 @@ uniform float uRot;
 layout(location=0) in vec2 aPos;                     // 单位 quad (0..1)^2
 out vec2 vUv;
 void main() {
-  vec2 c = vec2(0.5);
-  vec2 d = aPos - c;
+  // ★rot 双轴修复（2026-09-25 用户实报「全武器/弹幕旋转失效」定谳,探针
+  //   scripts/_rot-shader-micro.mjs 六场景判谳）:
+  //   【轴1 内容旋转】vUv 必须取【未旋转】aPos——贴图按精灵自身坐标采样,
+  //   几何由旋转项驱动,内容才随 outline 同转 ≙ 2D translate·rotate·drawImage。
+  //   旧码 vUv 用旋转后 p:screen 与 uv 同用 p ⇒ uv 成为 dst 矩形归一化坐标的
+  //   逐轴仿射(与 uRot 无关——仿射映射由四角值唯一确定)——内容恒不转,只有
+  //   outline 转 = 旋转精灵画成「未旋转内容+旋转裁剪框+边外 CLAMP 拖影」。
+  //   【轴2 各向异性序】位置必须【先按 dst 尺寸展开像素域、后旋转】——
+  //   旧码先旋转归一化坐标再逐轴乘 dst.zw:非方形 dst(w≠h)下 scale∘rotate
+  //   ≠rotate∘scale = 剪切畸变(32×48@45° 纵弦 45→68px 实锤)。方形 dst 两序
+  //   同构=旧码方形档 outline 恰好的根源。uRot=0 时两轴修复均逐位恒等
+  //   （aPos==p、d*wh 展开回原式——tile/背景/地图全 unrotated 面零回归）。
+  //   flipX/flipY(u/v 区间反向)=旋转【前】局部框内容镜像=R(rot)·F ≙ 重放面
+  //   drawRec2D 的 translate·rotate·scale 语义与 decode R2-F1 判谳（tests/
+  //   b2-shim-executor ★R2-F1 判别器+gl-layer-regression 源码锁双守卫）。
+  //   ★CLOUD_VERT_SRC 同构剪切为登记债（obj62 1:1 移植锁+云 rot 微小+vScreen
+  //   域联动,本案不动——见修复刃档案）。
+  vec2 d = (aPos - vec2(0.5)) * uDst.zw;
   float s = sin(uRot), co = cos(uRot);
-  vec2 p = c + vec2(d.x * co - d.y * s, d.x * s + d.y * co);
-  vUv = vec2(uSrc.x + p.x * uSrc.z, uSrc.y + p.y * uSrc.w);
-  vec2 screen = vec2(uDst.x + p.x * uDst.z, uDst.y + p.y * uDst.w);
+  vec2 screen = uDst.xy + uDst.zw * 0.5 + vec2(d.x * co - d.y * s, d.x * s + d.y * co);
+  vUv = vec2(uSrc.x + aPos.x * uSrc.z, uSrc.y + aPos.y * uSrc.w);
   // ★y 翻转:canvas 2D 的 y 向下,clip space 的 y 向上——不翻则整画布垂直颠倒
   //   (两次实测翻车:2026-08-18 用户两报背景/地图倒置;texImage2D 未开 FLIP_Y,
   //   纹理行 0=图像顶行,配此翻转后 dst 顶=图像顶 ✓。tests/gl-layer-regression 锁定)

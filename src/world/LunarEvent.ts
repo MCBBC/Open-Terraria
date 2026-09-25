@@ -213,12 +213,34 @@ export function messageLunarApocalypse(w: World, host: LunarHost): void {
 }
 
 /**
- * UpdateLunarApocalypse（WorldGen.cs:87438-87493）：场上无对应塔 NPC → TowerActive 置 false；
+ * UpdateLunarApocalypse（WorldGen.cs:87976-88031）：场上无对应塔 NPC → TowerActive 置 false；
  * 四塔全灭且无 398 → StartImpendingDoom(3600)。has = 场上是否存在该 id 的存活 NPC（调用方遍历）。
+ *
+ * ★BJ351 不变式回填（2026-09-25）：原版恒有「塔在场 ⇒ LunarApocalypseIsUp=true」——
+ * 唯一塔生成器 TriggerLunarApocalypse（WorldGen.cs:87966-87968）置塔同拍置 IsUp，
+ * IsUp 翻 false 仅 StartImpendingDoom（:88030，此刻四塔必已全灭）与 case 398 死亡
+ * （NPC.cs:80213-80216），故「塔在场 ∧ IsUp=false」在原版不可达。本仓旧档可达：
+ * BJ109 前生成的塔（towerActive 四旗与 lunarApocalypseUp 未落盘）+ F6 召塔——此态下四塔
+ * 全灭后本函数的 !IsUp 早退（:87979 同门）把 doom 整支吞掉 = 用户实报「四柱打完
+ * 无月总、连倒计时文字提示都没有」第一因。回填 = 触发终态 1:1（active=true + 在场塔
+ * TowerActive=true + 盾满，后者同 WF:2242-2246 读档重置式）；倒计时已在途时跳过
+ * （AnyDanger 门 NPC.cs:81066：MoonLordCountdown>0 记危险，同门语义下不重复武装）。
+ * 正常局 active=true 恒不进此支（零行为差）；无塔在场 = 维持原版 !IsUp 早退同相。
  */
 export function updateLunarApocalypse(w: World, has: (id: number) => boolean, host: LunarHost): void {
-  if (!w.lunarEvent.active) return;
   const s = w.lunarEvent;
+  if (!s.active) {
+    if (s.moonLordCountdown > 0) return;               // doom 已武装，不重复武装（:81066 同门）
+    const present = TOWER_IDS.filter((id) => has(id));
+    if (!present.length) return;                       // 无塔在场 = 原版 !IsUp 早退（:87979）同相
+    s.active = true;
+    for (const id of present) {
+      const k = TOWER_KEY[id];
+      s.towerActive[k] = true;
+      s.shield[k] = shieldMax(w);                      // WF:2242-2246 TowerActive→Shield=Max 同式
+    }
+    persist(w);
+  }
   if (!has(TOWER_SOLAR)) s.towerActive.solar = false;
   if (!has(TOWER_VORTEX)) s.towerActive.vortex = false;
   if (!has(TOWER_NEBULA)) s.towerActive.nebula = false;

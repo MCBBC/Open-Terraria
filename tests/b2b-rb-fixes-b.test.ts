@@ -155,9 +155,12 @@ describe('R2-F3 看门狗回落帧重放注入批', () => {
 });
 
 describe('R3-F2 场快照 transferable 零拷贝', () => {
-  it('WaveWorker postMessage 带 transfer list（R/G buffer）;slice 副本即弃语义注释在位', () => {
-    expect(WWK).toContain('const snap = waterWaves.exportFieldSnapshot();');
-    expect(WWK).toContain("self.postMessage({ op: 'field', ...snap }, [snap.R.buffer, snap.G.buffer]);");
+  // ★C8-D（2026-09-25）更新：常规面改 exportFieldDelta 脏区增量（三形态 per-fmt
+  // transfer list）——transferable 零拷贝语义沿用,source 锚随协议升级换锚。
+  it('WaveWorker postMessage 带 per-fmt transfer list;exportFieldDelta 出口在位', () => {
+    expect(WWK).toContain('const snap: WWFieldMsg = waterWaves.exportFieldDelta(');
+    expect(WWK).toContain('? [snap.meta.buffer, snap.data.buffer]');
+    expect(WWK).toContain(': [snap.R.buffer, snap.G.buffer];');
     expect(WWK).toContain('detach 即弃');
   });
   it('exportFieldSnapshot=独立 buffer 副本（本体不被快照写穿透;transfer 安全前提）', () => {
@@ -193,8 +196,10 @@ describe('R3-F7 双 loadWorld 旧光照引擎 dispose', () => {
 });
 
 describe('R3-F8 隔离栅格化 scratch willReadFrequently', () => {
-  it('三栅格化消费点 getContext 全带 WRF（纯上传中转,SHM 后备不占 IOSurface）', () => {
-    expect((SHIM.match(/const sctx = sc\.getContext\('2d', \{ willReadFrequently: true \}\);/g) ?? []).length).toBe(3);
+  it('四栅格化消费点 getContext 全带 WRF（纯上传中转,SHM 后备不占 IOSurface）', () => {
+    // ★四柱掉帧批（2026-09-25）+1：rasterizePathOp（acc 态 stroke/fill 录制路径
+    //   隔离栅格化,drawForceFieldBubble 尾环消费面）同款 WRF 口径入列
+    expect((SHIM.match(/const sctx = sc\.getContext\('2d', \{ willReadFrequently: true \}\);/g) ?? []).length).toBe(4);
     expect(SHIM).not.toContain("const sctx = sc.getContext('2d');");
   });
 });

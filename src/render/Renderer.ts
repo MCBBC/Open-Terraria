@@ -129,7 +129,7 @@ import { VanillaResourceBars } from './ResourceBars';
 import { FancyResourceBars } from './FancyResourceBars';
 import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
-import { GLScreenFilters, TOWER_FILTER_PRESETS, type ScreenFxPass } from './GLScreenFilters';
+import { GLScreenFilters, TOWER_FILTER_PRESETS, towerFilterDrive, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora, setFrameAtmo, setFrameRemix, setFrameDontStarve } from '../lighting/SkyColor';
 import { raiseShimmerLiquidLightFloor, restoreShimmerLiquidLightFloor, type ShimmerFloorLedger } from '../lighting/TileLightScanner';
@@ -327,6 +327,30 @@ const NO_WET_ITEMS = new Set([
   5802, 5823, 5844, 5862, 5883, 5902, 5936, 5959, 5979, 6002, 6025, 6048, 6071,
   6094, 6115,
 ]);
+
+/** ★BJ348b-2 星云奥秘 3476 手持绘制专支参数（PlayerDrawLayers.cs:3334-3351
+ *  case 3476 逐字节）：**item sprite（贝壳状道具贴图）完全不画**——专支 return
+ *  早退于通用 staff/物品支。贴图 = Extra[64]（Extra_64.png 24×216 = 24×24×9 帧
+ *  竖条**旋转暗紫球动画**,帧 0 avgRGB 94,48,125 实锤）帧序 = miscCounter%54/6
+ *  （54 绘制帧循环、6 帧一步、9 步）；双层：
+ *   ① Extra_64 帧 × heldItem.GetAlpha(itemColor).MultiplyRGBA(0.5,0.5,0.5,0.8)
+ *     ——光照色 × RGB 半暗 + A×0.8（canvas ≙ source-over + globalAlpha 0.8 +
+ *     brightness(0.5);光照染色本仓无逐物品管线,登记近似）
+ *   ② GlowMask[195]（Glow_195.png 24×216 同帧表,NebulaArcanumItemHold——
+ *     **此前误判死 ID**,实为手持专用 glowmask;852px avgRGB 181,47,173 粉紫）
+ *     × Color(250,250,250, heldItem.alpha)×0.5 = (125,125,125,0) —— **A=0 纯加算**
+ *     （XNA AlphaBlend 预乘语义判例）≙ canvas 'lighter' + globalAlpha 125/255。
+ *  位置 = itemLocation + (帧宽/2×direction, 0)（:3341 vector6）、origin=帧中心
+ *  （:3343 origin3=Size()/2）、rotation=itemRotation（瞄准角,**无 staff 0.785
+ *  斜持**——专支 return 早于通用 staff 支）。itemLocation 仍走 staff 持位支
+ *  （Player.cs:51754 num22=14 前伸/静持 :51038 (Center+14dir, MountedCenter.Y)）。
+ *  手持期不画 Glow_194（14×14 小光斑 = 物品态/掉落态光斑,DrawItem 通道,非手持）。 */
+const ARCANUM_HOLD_FRAMES = 9;
+const ARCANUM_HOLD_FRAME_PERIOD = 54;
+const ARCANUM_HOLD_FRAME_STEP = 6;
+const ARCANUM_HOLD_TEX = 'vanilla/Extra_64.png';
+const ARCANUM_HOLD_GLOW_TEX = 'vanilla/Glow_195.png';
+const ARCANUM_HOLD_FRAME_PX = 24;
 
 /** useStyle 5 的"法杖持位"物品（Main.cs:6695-6740 Item.staff=true 全 34 件）：
  *  ApplyUseStyle 5 的 staff 分支（Player.cs:50374）把 itemLocation 钉在
@@ -963,6 +987,11 @@ const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 116, 125, 126, 127, 128, 12
 // ★372/373 鲨鱼龙（sharkronAI 已按 :35222-35315 写 spin）、477-479 飞蛾魔族
 // （mothron 三 AI 已按 :39935-40614 全 14 式写 spin）——2026-08-20 审计前写了
 // spin 却不在本集 = 无消费（spin 通道本集独占）
+
+// ★四柱掉帧定谳批（2026-09-25）：NPCID.Sets.MustAlwaysDraw（NPCID.cs:4877
+//   Factory.CreateBoolSet(113,114,115,116,126,125) 1:1）——视域剔除白名单族
+//   （Prime 头+三部件 113-116 / 双子 125/126）无条件画（链接/部件联动跨屏语义）
+const NPC_MUST_ALWAYS_DRAW = new Set([113, 114, 115, 116, 125, 126]);
 
 // Main.wofDrawFrameIndex（Main.cs:820 静态；同屏只有一只血肉墙，模块级等价）。
 // 原版在 DrawWOFBody 内自增（:37861-37863），bossAI_wof 未维护 → 渲染侧持有。
@@ -4709,7 +4738,9 @@ export class Renderer {
     //   flush 在窗尾 present,先于 tile 段 FBO 租用,层序同 2D）
     this.bglEntWindowBegin('behind');
     for (const e of sorted) {
-      if (e instanceof Enemy && this.isBehindTilesEnemy(e)) this.drawEnemy(e, world, entities);
+      // ★四柱掉帧批:behindTiles 段同受原版视域门（DrawNPCs(behindTiles) 同一
+      //   rectangle/Intersects 在 behindTiles==behindTiles 支内,:22536-22660）
+      if (e instanceof Enemy && this.isBehindTilesEnemy(e) && !this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities);
     }
     this.bglEntWindowEnd();
 
@@ -4903,7 +4934,12 @@ export class Renderer {
         if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
         // NPC.hide（Main.cs:22172 常规绘制跳过;月总水蛭块 401=纯紫尘拖尾体,终审补）
         if (e.vanilla?.hide) { this.drawHealthBar(e, world.isExpert); continue; }
-        this.drawEnemy(e, world, entities); this.drawHealthBar(e, world.isExpert);
+        // ★四柱掉帧定谳批（2026-09-25）:原版视域剔除（Main.cs:22653 门在
+        //   DrawNPCCheckAlt+DrawNPC 之前;血条不随门——屏外实体血条本不可见,
+        //   drawEnemy 内唯一回写面 spriteBottomWorld 陈旧只喂屏外血条=零视觉差,
+        //   副作用巡检表见批档案）。MustAlwaysDraw 族在 npcOffscreen 内恒画。
+        if (!this.npcOffscreen(e, cam, z, viewW, viewH)) this.drawEnemy(e, world, entities);
+        this.drawHealthBar(e, world.isExpert);
       }
       // ★r15 R15-5:掉落物摘出排序循环——原版 DrawItems(:63226)在
       //    DrawPlayers_AfterProjectiles(:63204)之后=物品盖玩家;移至 drawPlayer 后
@@ -5888,6 +5924,16 @@ export class Renderer {
     Renderer._cloudPipe = v;
     if (!v) this.dropCloudPipe();
   }
+  /** ★四柱掉帧定谳批（2026-09-25）：原版 NPC 视域剔除总闸（Main.cs:22534/:22653
+   *  移植,npcOffscreen 消费）。缺省开,?npccull=0=逃生门（回全场无剔除旧行为,
+   *  探针 AB 对拍/用户回滚口）;node/worker 上下文恒关（fork bomb 判例家族）。 */
+  private static _npcCull = (() => {
+    try {
+      if (typeof document === 'undefined') return false;
+      return new URLSearchParams(location.search).get('npccull') !== '0';
+    } catch { return false; }
+  })();
+  static npcCullSetForTest(v: boolean): void { Renderer._npcCull = v; }
   /** ?bgl=1：B1 世界层翻面第一役（2026-09-24）——tile/墙 chunk 格从 2D 栅格化
    *  翻 GL quad 发射进共管管线 FBO('world')，chunk 页纹理 GPU 驻留（脏 slot
    *  增量 texSubUpdate）。WorldCanvas 累积面/光照链/A 线零改动：GL 段以
@@ -8433,6 +8479,34 @@ export class Renderer {
    *  （113/114/115）SetDefaults 同为 behindTiles=true，但本仓墙身(3.7)画在 tile 之上，
    *  随族前移会被墙身盖掉——留在实体层保住"墙身垫底、精灵压上"的原版相对序
    *  （它们被前景 tile 遮挡的语义是单 tile 层下的既知折损，见 2b' 注释） */
+  /** ★四柱掉帧定谳批（2026-09-25）：原版 DrawNPCs 视域剔除（Main.cs:22534
+   *  `new Rectangle((int)screenPosition.X-800, (int)screenPosition.Y-800,
+   *  screenWidth+1600, screenHeight+1600)` + :22653 `MustAlwaysDraw[type] ||
+   *  rectangle.Intersects(new Rectangle((int)npc.position.X, (int)npc.position.Y,
+   *  npc.width, npc.height))` 1:1）。
+   *  @returns true=屏外剔除（跳过 drawEnemy）;false=画。
+   *  · rect=屏矩形世界 px 外扩 ±800（本仓可视世界宽=viewW/z——与原版 screenWidth
+   *    同域等价,z=1 逐字同式;zoom<1 比原版更保守不误剔屏内,差异登记）。
+   *  · XNA Intersects=半开 [x,x+w) 语义,x/y/w/h=实体左上角/尺寸（Entity 左上角存,
+   *    BJ113 锚）——撞线邻接格不剔除,与原版同相。
+   *  · MustAlwaysDraw{113-116,125,126} 白名单族恒 false（NPCID.cs:4877）。
+   *  · ?npccull=0 逃生门（回退全场无剔除旧行为,探针 AB 对拍面）。
+   *  · camRX/RY=世界变换渲染锚（round(cam·z)/z,:4454 同式）——与实际 draw 变换
+   *    同源,±800 余量吞掉 round 误差。 */
+  private npcOffscreen(e: Enemy, cam: Camera, z: number, viewW: number, viewH: number): boolean {
+    if (!Renderer._npcCull) return false;
+    const id = e.vanillaId ?? -1;
+    if (NPC_MUST_ALWAYS_DRAW.has(id)) return false;
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    const L = camRX - viewW / (2 * z) - 800;
+    const T = camRY - viewH / (2 * z) - 800;
+    const RW = viewW / z + 1600;
+    const RH = viewH / z + 1600;
+    // XNA Rectangle.Intersects 半开语义（e.x/e.y=左上角,与原版 (int)position 同域）
+    return !(e.x < L + RW && L < e.x + e.w && e.y < T + RH && T < e.y + e.h);
+  }
+
   private isBehindTilesEnemy(e: Enemy): boolean {
     const id = e.vanillaId;
     if (id === 113 || id === 114 || id === 115) return false;
@@ -14839,7 +14913,7 @@ export class Renderer {
      *  = BehindFrontArm 本体之上；曾整段画在本体之前=被身体挡住,用户实报） */
     let heldDraw: { vid: number; hs: number; ar: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number } | null;
       icon: HTMLCanvasElement | HTMLImageElement | null;
-      fw: number; fh: number; offX: number; offY: number; rot: number } | null = null;
+      fw: number; fh: number; offX: number; offY: number; rot: number; arcanumFrame: number } | null = null;
     if (!swing) {
       const held = p.inv.heldItem();
       const def = held ? ITEM_DEFS[held.id] : undefined;
@@ -14875,10 +14949,22 @@ export class Renderer {
         if (staticHoldStyle) {
           // ★手持帧规格同 drawUseItem（GetItemDrawFrame :41901-41903）：IsFood 取
           // 竖 3 帧条第 2 行（atlasIcon 切的是掉落物顶行 → 从 vicon 原条重切）
+          // ★BJ348b-2：3476 静持贴图 = Extra_64 旋转球帧（case 3476 专支 return
+          //  早退同样覆盖静持——PlayerDrawLayers.cs:3334-3351 无 itemAnimation 门,
+          //  miscCounter 动画照放;贝壳道具贴图不画）
+          const arcanumFrameS = vid === 3476
+            ? Math.floor((p.miscCounter % ARCANUM_HOLD_FRAME_PERIOD) / ARCANUM_HOLD_FRAME_STEP)
+            : -1;
           const arRaw = this.atlasIcon(held.id);
-          const ar = vid >= 0 && arRaw && VANILLA_IS_FOOD.has(vid) && this.atlas
-            ? Renderer.foodHeldFrame(this.atlas.vicon(vid), arRaw)
-            : arRaw;
+          const ar = vid === 3476
+            ? (this.atlas
+              ? ((img) => img && img.width > 0
+                ? { img, sx: 0, sy: arcanumFrameS * ARCANUM_HOLD_FRAME_PX, sw: ARCANUM_HOLD_FRAME_PX, sh: ARCANUM_HOLD_FRAME_PX }
+                : arRaw)(this.atlas.ensureVImage(ARCANUM_HOLD_TEX))
+              : arRaw)
+            : vid >= 0 && arRaw && VANILLA_IS_FOOD.has(vid) && this.atlas
+              ? Renderer.foodHeldFrame(this.atlas.vicon(vid), arRaw)
+              : arRaw;
           const icon = ar ? null : this.itemIcon(held.id);
           if (ar || icon) {
             const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
@@ -14906,6 +14992,14 @@ export class Renderer {
             }
             else if (hs === 1 && vid === 968) { offX = 8; }
             else if (hs === 1 && vid === 856) { offX = 4; offY = 34; }
+            // ★BJ348b 星云奥秘 3476（:51038-51043 holdStyle1 链逐型特位）：
+            //  itemLocation = (Center.X + 14·dir, MountedCenter.Y)——暗紫球静持
+            //  前伸 14px（与使用期 staff 支 num22=14 同值,观感连续）；Y=盒中心
+            //  （曾落默认档 (fw/2+2, 24) = 前伸 19px/Y 偏差 3px）
+            //  ★BJ348b-2：+ (帧宽/2×dir, 0)（PlayerDrawLayers.cs:3341 vector6）=
+            //  +12 → 静持球心 X = Center+26·dir；origin=帧中心（dest −fw/2 由
+            //  绘制段 drawOX 承载,此处 offX 为锚点）
+            else if (hs === 1 && vid === 3476) { offX = 14 + ARCANUM_HOLD_FRAME_PX / 2; offY = p.h * 0.5; }
             else if (hs === 1 && vid === 353) { offX = 6; offY = p.h * 0.5 + 11; }
             else if (hs === 1 && vid >= 0 && VANILLA_IS_FOOD.has(vid)) { offX = 4; offY = p.h * 0.5 + fh * 0.5; }
             if (hs === 2) {
@@ -14935,7 +15029,7 @@ export class Renderer {
                 else { offX += m.dx; offY += m.dy; }
               }
             }
-            heldDraw = { vid, hs: staticHoldStyle, ar, icon, fw, fh, offX, offY, rot };
+            heldDraw = { vid, hs: staticHoldStyle, ar, icon, fw, fh, offX, offY, rot, arcanumFrame: arcanumFrameS };
           }
         }
       }
@@ -15473,15 +15567,43 @@ export class Renderer {
       ctx.scale(p.facing, 1);
       ctx.rotate(gOffY.rot);
       if (p.gravDir === -1) ctx.scale(1, -1);
+      // ★BJ348b-2 3476 = origin 帧中心（PlayerDrawLayers.cs:3343 origin3=Size()/2）
+      //  ——dest 左上 = (−fw/2, −fh/2),非通用底左角 (0, holdOYEff)
+      const arcanumHold0 = vid === 3476 && !!ar;
+      const holdDX = arcanumHold0 ? -ar!.sw / 2 : 0;
+      const holdDY = arcanumHold0 ? -ar!.sh / 2 : holdOYEff;
       if (ar) {
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, holdOYEff, ar.sw, ar.sh);
+        // ★BJ348b-2 3476 第一层暗化（:3344-3346 MultiplyRGBA(0.5,0.5,0.5,0.8)）同挥舞段
+        if (arcanumHold0) {
+          ctx.save();
+          ctx.globalAlpha = 1;
+          ctx.filter = 'brightness(0.5)';
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
+          ctx.restore();
+        } else {
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
+        }
       } else if (icon) {
         ctx.drawImage(icon, 0, p.gravDir === -1 ? heldItemOriginFlipY(-icon.height * 0.6, icon.height * 0.6, -1) : -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
       }
       // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
       // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）
       if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
-        drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: holdOYEff, w: ar.sw, h: ar.sh }, flicker);
+        drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: holdDX, y: holdDY, w: ar.sw, h: ar.sh }, flicker);
+      }
+      // ★BJ348b-2 3476 发光层（PlayerDrawLayers.cs:3349-3352）：GlowMask[195] 同帧
+      //  × Color(250,250,250, heldItem.alpha)×0.5 = (125,125,125,0) —— A=0 纯加算
+      //  ≙ canvas 'lighter' + globalAlpha 125/255（同挥舞段）
+      if (ar && vid === 3476 && this.atlas) {
+        const gmImg0 = this.atlas.ensureVImage(ARCANUM_HOLD_GLOW_TEX);
+        if (gmImg0 && gmImg0.width > 0) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 125 / 255;
+          ctx.drawImage(gmImg0, 0, heldDraw.arcanumFrame * ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX,
+            holdDX, holdDY, ar.sw, ar.sh);
+          ctx.restore();
+        }
       }
       ctx.restore();
     }
@@ -16105,9 +16227,20 @@ export class Renderer {
     // 非 IsFood 无动画 → 32×10 整图直画（atlasIcon 原样，勿再切片）。此前整条/
     // 帧 0 近似 → 食物手持三帧叠画/取错行
     const heldVid = (ITEM_DEFS[swing.item]?.vid ?? -1);
-    const ar = heldVid >= 0 && arRaw && VANILLA_IS_FOOD.has(heldVid) && this.atlas
-      ? Renderer.foodHeldFrame(this.atlas.vicon(heldVid), arRaw)
-      : arRaw;
+    // ★BJ348b-2：3476 手持贴图 = Extra_64 旋转球帧（case 3476 专支 return 早退,
+    //  贝壳道具贴图不画;PlayerDrawLayers.cs:3334-3351）
+    const arcanumFrame = heldVid === 3476
+      ? Math.floor((p.miscCounter % ARCANUM_HOLD_FRAME_PERIOD) / ARCANUM_HOLD_FRAME_STEP)
+      : -1;
+    const ar = heldVid === 3476
+      ? (this.atlas
+        ? ((img) => img && img.width > 0
+          ? { img, sx: 0, sy: arcanumFrame * ARCANUM_HOLD_FRAME_PX, sw: ARCANUM_HOLD_FRAME_PX, sh: ARCANUM_HOLD_FRAME_PX }
+          : arRaw)(this.atlas.ensureVImage(ARCANUM_HOLD_TEX))
+        : arRaw)
+      : heldVid >= 0 && arRaw && VANILLA_IS_FOOD.has(heldVid) && this.atlas
+        ? Renderer.foodHeldFrame(this.atlas.vicon(heldVid), arRaw)
+        : arRaw;
     const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
     const us = swing.useStyle ?? 1;
     // ★aim 方向化（Player.cs:46730/46737：itemRotation = Atan2(aimY*dir, aimX*dir)——
@@ -16202,7 +16335,17 @@ export class Renderer {
         // 朝鼠标静持（:50339-50422 + :46708 itemRotation=瞄准角）：
         // 法杖族钉 MountedCenter+瞄准向量×6；默认 X=中心-2*dir、Y=中心-fh/2
         const vid = (ITEM_DEFS[swing.item]?.vid ?? -1);
-        if (vid === 3779) { offX = 6; offY = p.h * 0.5 + 6; rot = 0; }      // :50343（itemRotation=0）
+        if (vid === 3476) {
+          // ★BJ348b-2 case 3476 专支（PlayerDrawLayers.cs:3334-3351）：位置 =
+          //  itemLocation(staff 14px 前伸 :51754) + (帧宽/2×dir, 0)（:3341 vector6）、
+          //  origin=帧中心（:3343）、rotation=itemRotation（:3347,瞄准角——
+          //  **无 0.785 斜持**,专支 return 早于通用 staff 支）
+          offX = Math.cos(aim) * 14 + ARCANUM_HOLD_FRAME_PX / 2;
+          offY = p.h * 0.5 + Math.sin(aim) * 14;
+          rot = aim;
+          drawOX = -fw * 0.5; drawOY = -fh * 0.5;
+        }
+        else if (vid === 3779) { offX = 6; offY = p.h * 0.5 + 6; rot = 0; }      // :50343（itemRotation=0）
         else if (vid === 4262) { offX = -6; offY = p.h * 0.5 - 6; rot = 0; } // :50349
         else if (vid >= 0 && STAFF_ITEMS.has(vid)) {
           // :50382-50383 itemLocation = MountedCenter + itemRotation 向量×6；
@@ -16393,7 +16536,17 @@ export class Renderer {
       // dir=1 → 底左角 / dir=−1 → 底右角钉在 itemLocation（握点）旋转——
       // 镜像空间里统一画在 (0,−fh) 即底左角=握点，镜像自动翻成底右角；
       // useStyle 5 非法杖（握把 (-num9,H/2)）与 9（Size*(0.5,0.4) 轴心）经 drawOX/drawOY 覆盖
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
+      // ★BJ348b-2 3476 第一层 = GetAlpha(itemColor).MultiplyRGBA(0.5,0.5,0.5,0.8)
+      //  （:3344-3346）——RGB×0.5 + A×0.8（光照染色无逐物品管线,登记近似恒白）
+      if (heldVid === 3476) {
+        ctx.save();
+        ctx.globalAlpha = 1;
+        ctx.filter = 'brightness(0.5)';
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
+        ctx.restore();
+      } else {
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
+      }
     } else if (icon) {
       ctx.drawImage(icon, drawOX, p.gravDir === -1 ? heldItemOriginFlipY(-14, 14, -1) : -14, 14, 14);
     }
@@ -16404,6 +16557,20 @@ export class Renderer {
       const fvid = (ITEM_DEFS[swing.item]?.vid ?? -1);
       if (fvid >= 0 && FLAME_ITEMS.has(fvid)) {
         drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOYEff, w: ar.sw, h: ar.sh }, flicker);
+      }
+      // ★BJ348b-2 3476 发光层（PlayerDrawLayers.cs:3349-3352）：GlowMask[195] 同帧
+      //  矩形 × Color(250,250,250, heldItem.alpha)×0.5 = (125,125,125,0) —— **A=0
+      //  纯加算**（XNA AlphaBlend 预乘判例）≙ canvas 'lighter' + globalAlpha 125/255
+      if (fvid === 3476) {
+        const gmImg1 = this.atlas.ensureVImage(ARCANUM_HOLD_GLOW_TEX);
+        if (gmImg1 && gmImg1.width > 0) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 125 / 255;
+          ctx.drawImage(gmImg1, 0, arcanumFrame * ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX, ARCANUM_HOLD_FRAME_PX,
+            drawOX, drawOYEff, ar.sw, ar.sh);
+          ctx.restore();
+        }
       }
     }
     ctx.restore();
@@ -17271,23 +17438,22 @@ export class Renderer {
       // ★BJ109-I 塔邻接染色（SceneState.cs:107-110 ManageSpecialBiomeVisuals +
       //  ScreenEffectInitializer.cs:14-17 分塔预设；UseTargetPosition=塔心−(0,10)。
       //  uIntensity/uProgress=盾态（Main.cs:24565 盾在 1+num319/0；:24584 破盾
-      //  min(5,15·num320)+1/num320，num320=ai3/120））
+      //  min(5,15·num320)+1/num320，num320=ai3/120；:24581 盾破且 ai3==0 →
+      //  UseIntensity(0)——涡旋停但染色仍在，★BJ346 补第三支）。
+      //  ★BJ346 勘误：targetPx=塔心【世界】px（ScreenShaderData.Apply 里
+      //  uTargetPosition 与 uScreenPosition 同减 offScreenRange(200)，差量恒世界系；
+      //  旧传屏幕系（tow−screenPos）致 frag rel 场被相机坐标污染=涡旋中心甩出屏外）
       if (tow && towVisible) {
         const preset = TOWER_FILTER_PRESETS[tow.key];
-        let intensity = 1, progress = 0;
-        if (!tow.shieldUp && tow.ai3 > 0) {
-          const num320 = Math.min(1, tow.ai3 / 120);
-          intensity = Math.min(5, 15 * num320) + 1;
-          progress = tow.ai3 / 120;
-        } else if (tow.shieldUp && tow.ai3 > 0 && tow.ai3 <= 30) {
-          intensity = 1 + (1 - tow.ai3 / 30);   // num319=1−ai3/30（:24562-24564）
-        }
+        // ★BJ346：盾态三支驱动抽纯函数 towerFilterDrive（Main.cs:24564/24573/24581）
+        const drive = towerFilterDrive(tow.shieldUp, tow.ai3);
         passes.push({
           kind: 'FilterTower', color: preset.color,
           opacity: preset.useOpacity * this._towerFilterOpacity,
           screenRes, screenPos,
-          targetPx: [tow.x - screenPos[0], tow.y - screenPos[1]],
-          intensity, progress, time: globalTimeWrappedHourly(),   // ★BJ330 GTW 单源
+          targetPx: [tow.x, tow.y],
+          intensity: drive.intensity, progress: drive.progress,
+          time: globalTimeWrappedHourly(),   // ★BJ330 GTW 单源
         });
       }
       for (const f of mono.visibleFilters()) {

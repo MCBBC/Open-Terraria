@@ -807,6 +807,13 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
   e.def.defense = Math.floor(phase2 ? b.def * 0.65 : b.def); // :64982-64985 半血防御 ×0.65
 
   // :65060-65088 玩家死/超 5600px → 消散退场(连带清全部克隆体,:65078-65087)
+  // ★BJ347：原版自毁 = life=0+HitEffect+active=false（NPC.cs:65272-65276，不走
+  //   checkDead→Kill→NPCLoot）→ 无掉落、不写 downed_439、不召四柱、无击败公告
+  //   （DoDeathEvents case 439 只挂击杀链 :80209）。TargetClosest(:78453) 跳过
+  //   dead 玩家 → 单人死亡 = 无目标 = 自毁。本支必须置 bossFled=非击杀消散
+  //   （同 Enemy.runDespawnFx 语义），否则 Game bossBlock 误走击败链
+  //   （downed_439+triggerLunarApocalypse+击败公告）——用户实报"同归于尽没掉
+  //   远古操作机"根因：自毁被误记账成击败。
   if (!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 5600) {
     game.spawnParticles(e.cx, e.cy, '#6040A0', 14, 2.4);
     if (isReal) {
@@ -815,6 +822,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
         c.dead = true;
       }
     }
+    e.bossFled = true;    // 非击杀消散：无掉落无记账（原版 life=0+active=false 同相）
     e.dead = true;
     return;
   }

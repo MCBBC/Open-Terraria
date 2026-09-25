@@ -393,7 +393,7 @@ describe('★普查案④/⑤ 结构锁（GL MULT 精确式+dollLightTint 裁剪
 
 /** 全功能 acc 层桩（批 A 红蓝共用）：quad/texFromImage 可观测+texAlive 可控+end 在位 */
 function mkFullAccLayer() {
-  const quads: Array<{ texKey?: string; dx: number; dy: number; dw: number; dh: number; alpha: number; rot: number }> = [];
+  const quads: Array<{ texKey?: string; dx: number; dy: number; dw: number; dh: number; alpha: number; rot: number; flipX: boolean; flipY: boolean }> = [];
   const L: Record<string, unknown> = {
     unavailable: false,
     open: false,
@@ -410,8 +410,9 @@ function mkFullAccLayer() {
     blendErase: () => { /* no-op */ },
     blendMult: () => { /* no-op */ },
     quadSprite: (e: { key?: string } | null, _ux: number, _uy: number, _sw: number, _sh: number,
-      dx: number, dy: number, dw: number, dh: number, o?: { alpha?: number; rot?: number }) => {
-      quads.push({ texKey: e?.key, dx, dy, dw, dh, alpha: o?.alpha ?? 1, rot: o?.rot ?? 0 });
+      dx: number, dy: number, dw: number, dh: number, o?: { alpha?: number; rot?: number; flipX?: boolean; flipY?: boolean }) => {
+      quads.push({ texKey: e?.key, dx, dy, dw, dh, alpha: o?.alpha ?? 1, rot: o?.rot ?? 0,
+        flipX: o?.flipX ?? false, flipY: o?.flipY ?? false });
     },
     texAlive: () => L.texAliveOk === true,
     texFromRegion: (_k: string, img: { __id?: number }) => ({ key: 'r' + String(img.__id ?? '?'), tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),
@@ -778,5 +779,111 @@ describe('★R3-F1 texCache 驻留上界（逐出仅 JS 侧 Map,GL 纹理由层 
     }
     ex.flush();
     expect(cache.size).toBeLessThanOrEqual(256);   // 旧码=301 → 红
+  });
+});
+
+// ================= ★rot 发射支锁（2026-09-25 用户实报「全武器/弹幕旋转失效」） =================
+// 【结构性盲区封口】node 无 GL——批 A 全部红绿证据落在 replay2D 重放面/发射面
+//  dx·α 维度,rot 经 decode→rec→QOPTS→quadSprite uRot 的【发射支】零断言;
+//  用户屏幕走 acc 发射支(shader 消费),着色器级病=node 全盲(判谳=
+//  scripts/_rot-shader-micro.mjs 像素探针)。本组用 mkFullAccLayer 的 quadSprite
+//  桩断言【发射支 rot 全链】:decode 旋转支→rec.rot→opts.rot 逐值锁,防发射面
+//  rot 载体再次失联;着色器语义由 gl-layer-regression 源码锁+像素探针守卫。
+
+describe('★rot 发射支全链(decode→rec→quadSprite opts;acc 态 fake 层)', () => {
+  /** acc 态执行器+全功能层桩（GL 可用=发射支;flushAcc 直发） */
+  function setupAcc() {
+    const { L, quads } = mkFullAccLayer();
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => null,
+      worldW: () => 128, worldH: () => 72,
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    return { ex, wrap, quads };
+  }
+
+  it('纯旋转:translate+rotate(π/4) → 发射 rot=atan2(b,a)、中心锚 dst=中心±尺寸/2', () => {
+    const { ex, wrap, quads } = setupAcc();
+    wrap.translate(500, 400);
+    wrap.rotate(Math.PI / 4);
+    wrap.drawImage(mkImg(1), 0, 0, 32, 32, -16, -16, 32, 32);
+    ex.flush();                                  // acc 态直发(层可用)
+    expect(quads.length).toBe(1);
+    expect(quads[0].rot).toBeCloseTo(Math.PI / 4, 5);
+    expect(quads[0].dx).toBeCloseTo(484, 3);     // 500−16(lu=1)
+    expect(quads[0].dy).toBeCloseTo(384, 3);
+    expect(quads[0].dw).toBeCloseTo(32, 3);
+    expect(quads[0].dh).toBeCloseTo(32, 3);
+    expect(quads[0].alpha).toBe(1);
+  });
+
+  it('镜像旋转(R2-F1 案):scale(-1,1)+rotate(π−0.6) → 发射 rot=0.6+flipY(det<0)+flipX=false', () => {
+    const { ex, wrap, quads } = setupAcc();
+    wrap.translate(100, 100);
+    wrap.scale(-1, 1);
+    wrap.rotate(Math.PI - 0.6);
+    wrap.drawImage(mkImg(1), 0, 0, 8, 16, 10, 20, 8, 16);
+    ex.flush();
+    expect(quads.length).toBe(1);
+    expect(quads[0].rot).toBeCloseTo(0.6, 5);
+    expect(quads[0].dw).toBeCloseTo(8, 4);
+    expect(quads[0].dh).toBeCloseTo(16, 4);
+    // 中心=M·(14,28)+T:线性=S(-1,1)·R(π-0.6)=[a=cθ,c=sθ,b=sθ,d=-cθ]
+    //  cx=14cos0.6+28sin0.6, cy=14sin0.6-28cos0.6;dx=cx-dw·lu/2, dy=cy-dh·lv/2
+    const c = Math.cos(0.6), s = Math.sin(0.6);
+    expect(quads[0].dx).toBeCloseTo(100 + 14 * c + 28 * s - 4, 3);
+    expect(quads[0].dy).toBeCloseTo(100 + 14 * s - 28 * c - 8, 3);
+    // ★flip 轴判别(发射面复刻 R2-F1 判别器):det<0=局部 V 轴(flipY),非 flipX
+    expect(quads[0].flipY).toBe(true);
+    expect(quads[0].flipX).toBe(false);
+  });
+
+  it('持枪档复合 CTM(translate+scale(-1,1)+rotate(aim)+非居中dst):rot=π−|aim| 族+flipY', () => {
+    // Renderer.drawPlayer 持物链同款(facing=-1):drawImage dst 非中心锚
+    const { ex, wrap, quads } = setupAcc();
+    wrap.translate(200, 128);
+    wrap.scale(-1, 1);
+    wrap.rotate(-1.0);
+    wrap.drawImage(mkImg(1), 0, 0, 32, 48, -2, -24, 32, 48);
+    ex.flush();
+    expect(quads.length).toBe(1);
+    expect(quads[0].rot).toBeCloseTo(-(Math.PI - 1), 4);   // atan2(sin(-1),-cos(-1))
+    expect(quads[0].flipY).toBe(true);                     // det=S(-1,1)·R=-1<0
+    expect(quads[0].flipX).toBe(false);
+    expect(quads[0].dw).toBeCloseTo(32, 4);
+    expect(quads[0].dh).toBeCloseTo(48, 4);
+    // 中心=M·(14,0):a=-cos1 → dx=200-14cos1-16;dy=128-14sin1-24
+    expect(quads[0].dx).toBeCloseTo(200 - 14 * Math.cos(1) - 16, 3);
+    expect(quads[0].dy).toBeCloseTo(128 - 14 * Math.sin(1) - 24, 3);
+  });
+
+  it('QOPTS 单槽复用不串味:连续两笔不同 rot/α/flip 逐笔保真(发射期消费即弃)', () => {
+    const { ex, wrap, quads } = setupAcc();
+    wrap.translate(10, 10);
+    wrap.rotate(0.3);
+    wrap.drawImage(mkImg(1), 0, 0, 8, 8, -4, -4, 8, 8);    // rot=0.3
+    wrap.rotate(0.4);                                       // 累计 0.7
+    wrap.globalAlpha = 0.5;
+    wrap.drawImage(mkImg(1), 0, 0, 8, 8, -4, -4, 8, 8);    // rot=0.7,α=0.5
+    ex.flush();
+    expect(quads.length).toBe(2);
+    expect(quads[0].rot).toBeCloseTo(0.3, 5);
+    expect(quads[0].alpha).toBe(1);
+    expect(quads[1].rot).toBeCloseTo(0.7, 5);
+    expect(quads[1].alpha).toBeCloseTo(0.5, 8);
+  });
+
+  it('轴对齐支 rot=0 不被旋转支污染:rotate(2π) 回落后发射 rot=0', () => {
+    const { ex, wrap, quads } = setupAcc();
+    wrap.rotate(Math.PI / 2);
+    wrap.drawImage(mkImg(1), 0, 0, 8, 8, 0, 0, 8, 8);      // rot=π/2
+    wrap.rotate(-Math.PI / 2);                              // 回落 b=c=0
+    wrap.drawImage(mkImg(1), 0, 0, 8, 8, 20, 0, 8, 8);     // 轴对齐支 rot=0
+    ex.flush();
+    expect(quads.length).toBe(2);
+    expect(quads[0].rot).toBeCloseTo(Math.PI / 2, 5);
+    expect(quads[1].rot).toBe(0);
+    expect(quads[1].dx).toBeCloseTo(20, 5);
   });
 });

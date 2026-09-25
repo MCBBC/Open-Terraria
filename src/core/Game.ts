@@ -408,6 +408,7 @@ import { cutTilesBox } from '../entities/ProjCutTiles';   // ★SW-BJ102 债①�
 import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE, BULLET_KILL_SFX } from '../entities/Arrow';
 import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities/XenoBubbleProj';
 import { ElectroSphereProj } from '../entities/ElectroSphereProj';
+import { MagnetSphereProj, BeamBoltProj, HEAT_RAY_BOLT, MAGNET_SPHERE_BALL } from '../entities/MagnetSphereProj';
 import { resetCageAnim } from '../render/CritterCage';
 import { hitPlayer, playerCanHitEnemy, statusPlayer, canBeChasedBy, playerProjectileCanHitNpcGate, isCritterThatIsHostileToPlayers, hittableForOnHitRewards, COLD_DAMAGE_NPCS, projClassOfProjId, applyBannerDamageDealt, bannerDamageDealtSample, bannerDamageDealtMultOf } from '../entities/projTargets';
 import { npcImmuneTo } from '../data/vanillaNpcImmunity';
@@ -1976,7 +1977,9 @@ const PERMANENT_USE_VIDS = new Set([
  *  425 仙灵铃左键直用（:52252-52272 三选一——QuickBuff 同入口）、1124 蜂巢
  *  （:42946-42958 挥动发蜂+通用消耗 :42602）、5328 金锁（:40946-41010
  *  PlaceThing_LockChest+Chest.Lock :409）、5343 货郎背包（:44749-44762）、
- *  1345 彩带（★原版零使用效果——仅 :42602 通用消耗,审计"彩纸弹"系误记）。
+ *  1345 彩带（★原版零使用效果且【不消耗】——通用消耗门 :43612 有 itemTimeMax!=0
+ *  前置而 1345 零效果字段恒不可达,旧注":42602 通用消耗"系 75 同款误读,
+ *  2026-09-25 翻案;审计"彩纸弹"系误记）。
  *  2026-08-26 演奏通道批：4057 CarbonGuitar(Rain Song)/4372 IvyGuitar(Ivy)/
  *  4715 SparkleGuitar(Stellar Tune) 三吉他（Player.cs:46972-47004 PlayGuitarChord）
  *  + 1305 The Axe 和弦音（:46945-46970 SoundID.Item47） */
@@ -3691,6 +3694,19 @@ export class Game implements GameHooks {
         //  贴图 alpha=255 本就不画）——访客侧尘效不重建（dust-only 视觉,与现网
         //  全部 dust-only 弹同档），登记债 BJ286-MP。
         kind = 0; tag = String(p.projId ?? 482);
+      }
+      else if (p instanceof BeamBoltProj) {
+        // ★BJ345：255/260 激光弹不同步（kind 恒 -1 → 下方 continue）——单 tick 短命
+        // 尘束,dust-only 视觉（BJ286-MP 同档备案）。必须先于 projId!==undefined 通判
+        // 拦截：BeamBoltProj 带 projId 字段,漏拦会被 kind1 抢分类 → 访客重建回旋镖。
+        // 发束粒子事件=拥有者端本地直生,broadcast 通道仅联机中继面。
+      }
+      else if (p instanceof MagnetSphereProj) {
+        // ★BJ345：磁球 254 走 kind0 静态 Arrow 傀儡位（ClingerStaffWallProj 先例）——
+        // projGravSpec(254)=grav0（aiStyle47≠1）+ 真速度透传 → 访客 Arrow 254 慢漂
+        // 同相;PROJ_FRAMES[254]=5 帧切片 + GA case 254 加算白淡出（BJ236 面）远端
+        // 自带。撞墙反弹/发弹/激光不重建（拥有者端权威,激光=尘-only 上述备案）。
+        kind = 0; tag = String(MAGNET_SPHERE_BALL);   // 无 bit6：球本体零玩家结算面（ClingerStaffWallProj 同惯例）
       }
       else if (p.projId !== undefined) {
         kind = 1; tag = String(p.projId);
@@ -14939,15 +14955,27 @@ export class Game implements GameHooks {
       else if (b3Vid === 859) this.throwBeachBall(heldDef);
       else if (b3Vid === 4743) this.throwFootball(heldDef);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && (heldDef.vid ?? -1) === 75) {
-      // 坠落星 75 点击消耗（Item.cs:2283-2297 useStyle4/useAnimation=useTime=17/
-      // consumable/UseSound Item4；Player.cs:42602 消耗门无豁免——手持点击即
-      // 白耗 1 颗无任何效果，星星炮 197 才是把坠落星当弹药打弹 955 的消费者。
-      // 此前 repo 无动作不消耗 = 与原版"点击即耗"偏差，2026-08-22 补 B 批补）
-      this.useSwing(heldDef);                                   // useStyle 4 举持
-      this.playSfxFiles(['Item_4'], 1, this.player.cx, this.player.cy);
-      this.player.inv.removeHeld(1);
-      this.cb.onInventoryChanged();
-      this.player.useTime = 17;
+      // 坠落星 75 点击（Item.cs:2302-2316 useStyle4/useAnimation=useTime=17/
+      // consumable/UseSound Item4）——★2026-09-25 用户实报翻案（2026-08-22 补 B 批
+      // 曾按 1456 Player.cs:42602 判"点击即耗"=误读:该门与 1457 :43612 同式,均有
+      // `itemTimeMax != 0` 前置;itemTime/itemTimeMax 仅由效果路径 ApplyItemTime/
+      // SetItemTime 置位（Player.cs:4397/:4424/:43655/:45954/:46167/:46303）——75
+      // 零效果字段（case 2302-2316 仅 ammo/status 文本,无 healLife/healMana/buffType/
+      // hairDye/createTile/createWall/shoot/mountType/pick/axe/hammer/makeNPC）,
+      // 主循环 ItemTimeIsZero 段（:43206-43330）各 ApplyItemTime 支全不命中 →
+      // itemTimeMax 恒 0 → 消耗门恒假 = consumable=true 形同虚设【不消耗】;
+      // ForceConsumption 表（ItemID.cs:161-173）全 6 项不含 75,无覆写。原版点击=
+      // StartActualUse（:52291）ApplyItemAnimation 举持 17t + :52306 无条件
+      // PlaySound(Item4),仅此而已。星星炮 197（useAmmo=75）才是坠落星的消费者。
+      // 同构同案=彩带 1345（case 16645-16654,零效果字段,本仓同日已摘消耗）;
+      // 对照真消耗件=Boss/事件召唤物（361/602/544/556/557/1331/1844/…——效果面在
+      // ItemCheck_UseBossSpawners 等专支,ApplyItemTime 可达）。fresh-click 边沿门
+      // （⑩ 统一式）——75 非 autoReuse,原版松手重按才可再举。
+      if (!this._prevMouseDown) {
+        this.useSwing(heldDef);                                 // useStyle 4 举持
+        this.playSfxFiles(['Item_4'], 1, this.player.cx, this.player.cy);
+        this.player.useTime = 17;
+      }
     } else if (heldDef && (heldDef.vid ?? -1) === 114) {
       // ---- SW-K1 2026-09-03：Dirt Rod 114（泥土棒）使用链 ----
       // Player.cs:43137 use-start 门（controlUseItem && releaseUseItem=非 autoReuse
@@ -15220,13 +15248,18 @@ export class Game implements GameHooks {
           break;                        // 吞按住连发（原版松手再点才再用）
         }
         case 1345:
-          // 彩带（Item.cs:16620-16629）：★原版零使用效果——Player.cs 全源对 1345
+          // 彩带（Item.cs:16645-16654）：★原版零使用效果——Player.cs 全源对 1345
           // 零引用（仅 Main.cs:26764/:26777 微光转换绘制），审计"彩纸弹"系与
-          // 彩带炮 6658/弹 178 混淆；行为=纯挥动 + 通用消耗门（:42602 consumable=1）
+          // 彩带炮 6658/弹 178 混淆。★2026-09-25 翻案：旧注"通用消耗门（:42602
+          // consumable=1）"系同 75 误读——消耗门（1456 :42602/1457 :43612）均有
+          // `itemTimeMax != 0` 前置，1345 零效果字段（无 shoot/heal/buff/createTile）
+          // → itemTime 恒 0 → 门恒假【不消耗】；ForceConsumption 表不含 1345。
+          // 原版点击=纯挥动（useStyle1/useTime=useAnimation=20/autoReuse=true
+          // 按住连挥）,UseSound 未设=无声。坠落星 75 同案同批摘消耗。
+          // ★冷却直写 20——useTimeOf 兜 100 是 ResetStats 缺省（:48626）,SetDefaults
+          // 明写 20（:16651-16652）不得落兜底;combat 表缺 useTime 列系提取面债。
           this.useSwing(heldDef);
-          p.inv.removeHeld(1);
-          this.cb.onInventoryChanged();
-          p.useTime = useTimeOf(1345);  // 20（Item.cs:16620-16629 useTime=useAnimation=20）
+          p.useTime = itemCombat(1345)?.useTime ?? 20;  // useTime=useAnimation=20（:16651）
           break;
         default:
           break;
@@ -18317,6 +18350,45 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
+        // ---- ★BJ345 磁球 1266（AI_047_MagnetSphere Projectile.cs:42145-42243，
+        //      1458 同域 SetDefaults 零变更）：发悬停球 254（shootSpeed 1.2 慢漂,
+        //      撞墙全弹返,:18640 弹性档;本体无 friendly=零接触伤）。此前走通用尾支
+        //      = Arrow 直飞弹（AI_047 整缺+激光弹 255 从未生成 = 用户实报"不发射
+        //      激光"根因）。发弹/激光面在 MagnetSphereProj 实体（TryAttacking 每
+        //      9 flag-tick 1 发,300px 曼哈顿+CanHitPoint 索敌,死亡拍铺束 d160）----
+        if (critVid === 1266) {
+          const sphere = new MagnetSphereProj(mzX, mzY,
+            Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
+            cw.damage, cw.knockback);
+          placeAtShootSpawn(sphere, mzX, mzY);                   // NewProjectile 盒心落点（:10878-10879）
+          sphere.critChance = critTotal;                         // 透传 255 弹暴击链
+          sphere.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
+          this.entities.add(sphere, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');                    // UseSound=Item_20（vanilla-itemusesound 表值）
+          this.useSwing(def, ang, ps?.spd ?? 1);
+          this.input.mouseDown = false;
+          break;
+        }
+        // ---- ★BJ345 同族收编：炼狱叉 1295（shoot=260 HeatRay,aiStyle48 发束族——
+        //      本体全隐形 α=255(:28628-28630 else 支),delay 3/life 200,死亡拍铺
+        //      HeatRay d162 束）。此前走通用尾支 = 可见 Arrow 弹体+零束 = 同病 ----
+        if (critVid === 1295) {
+          const bolt260 = new BeamBoltProj(mzX, mzY,
+            Math.cos(mzAng) * cw.shootSpeed, Math.sin(mzAng) * cw.shootSpeed,
+            cw.damage, cw.knockback, HEAT_RAY_BOLT);
+          placeAtShootSpawn(bolt260, mzX, mzY);
+          bolt260.critChance = critTotal;
+          bolt260.armorPen = (eq.armorPen ?? 0) + (ps?.arpen ?? 0);
+          this.entities.add(bolt260, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'zap');                     // UseSound=Item_12（表值）
+          this.useSwing(def, ang, ps?.spd ?? 1);
+          this.input.mouseDown = false;
+          break;
+        }
         if (critVid === 3053) {
           const swSf = this.swing;
           // 相位基准 A = itemAnimationMax−1（:4443-4447 itemAnimationMax=useAnimation
@@ -19636,9 +19708,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 追踪族穿透/寿命按 SetDefaults 表终值（追踪弹全族批）：通用兜底曾硬编码
         // pierce 1——蜂枪 181/黄蜂枪 189 表值 3、巨蜂 566 表值 4、幽灵法杖弹 297 表值 3、
         // 灵魂之焰 659/剃刀台风 409 表值 −1（命中侧走全局 immune 帧冷却再命中）全被压成 1
-        const HOMING_FAMILY_PIERCE = new Set([181, 189, 307, 316, 566, 297, 659, 409]);
+        // ★BJ348b：617 星璇秘术球入表（SetDefaults penetrate=3 :6646-6658，
+        //   usesLocalNPCImmunity=localNPCHitCooldown 8）——曾压成 1 = 命中一次即爆
+        //   （触发 620 碎片环），原版穿怪 3 次后才在 600t 寿终/撞块耗尽时爆裂
+        const HOMING_FAMILY_PIERCE = new Set([181, 189, 307, 316, 566, 297, 659, 409, 617]);
         const shotTip = this.resolveShotAnchor(def.key, ang);
-        const shotArrow = new Arrow(shotTip.x, shotTip.y,
+        // ★BJ348b 星云奥秘 3476 出生锚豁免杖尖族备案（2026-08-26 拍板只覆盖
+        //  "发射弹的法杖"观感;3476 = 召球器物,原版字面 pointPosition =
+        //  RotatedRelativePoint(MountedCenter) = 盒心（ItemCheck_Shoot :47605,
+        //  3476 无逐型偏移）——"角色身边的紫色光球"=弹 617 从身上出生+drawLayer=1
+        //  （CacheProjDraws case 1 = BehindNPCsAndTiles,被玩家 sprite 遮挡、
+        //  穿出身体后可见=HOUSE 门同构遮挡语义）。速度向 = 盒心→鼠标（原版
+        //  num4/num5 以 pointPosition 为基准 :47681-47707,ang 同基准自洽）。
+        const arcanumSpawn = critVid === 3476;
+        const spawnX = arcanumSpawn ? this.player.cx : shotTip.x;
+        const spawnY = arcanumSpawn ? this.player.cy : shotTip.y;
+        const shotArrow = new Arrow(spawnX, spawnY,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot,
           { grav: gsS.grav, gravDelay: gsS.delay, grav2: gsS.grav2, grav2At: gsS.grav2At,
@@ -19648,7 +19733,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         //  NewProjectile(pointPosition)（盒心,:10878-10879）——Arrow ctor 收盒左上,
         //  曾直传 = 弹盒右下偏 (w/2,h/2) 随件（404/405 走 'flairon'/'flail' 专支不经
         //  此路,无重复清偿面）
-        placeAtShootSpawn(shotArrow, shotTip.x, shotTip.y);
+        placeAtShootSpawn(shotArrow, spawnX, spawnY);
         shotArrow.frostEligible = dmgKind !== 'magic'; // melee/ranged 兜底弹吃冰霜引擎
         // 暴击链:装备 critChance(dmgKind) + 武器 item.crit(GetWeaponCrit)
         shotArrow.critBonus = this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee')
@@ -44425,7 +44510,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // R28：1931 暴雪法杖（使用音=弹幕 Kill 侧 Item27,Projectile.cs :57940 段）/
     // 3269 美杜莎之首（音效全在弹体侧 volley 链）——SetDefaults 无 UseSound 行,
     // fallback 合成 'tink' 同为错音（R28 落点清单 #3）
-    if (!wav && (vid === 1931 || vid === 3269)) return;
+    // ★BJ353：3051 魔晶碎块同族（Item.cs:28200-28216 全 case 无 UseSound 行——
+    //  水晶音 Item101 由弹幕侧播,AI_004 :23945-23954 type494 档,Arrow.thornStep 承载）
+    if (!wav && (vid === 1931 || vid === 3269 || vid === 3051)) return;
     // R4-41：WithVolumePerceived（LegacySoundStyle.cs:69-74 ×volume^1.6609）——
     // 感知音量挂在 style 上（6154 MysticBloom 0.65→0.489）,显式 vol 优先
     const v = vol ?? itemUseSoundPerceivedVol(vid) ?? undefined;

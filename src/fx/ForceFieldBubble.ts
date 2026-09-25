@@ -7,6 +7,11 @@
 // pass（PixelShader.cso ForceField）：极坐标 swirl 采 Perlin(s0),c2=rect 半宽,c3=uTime×5,
 //   c4=uColor。SM2 直连（getPass('ForceField')+runPassOnImageData,Perlin 为输入 ImageData）,
 //   异常回退双层的旋转 Perlin 近似。
+// ★四柱掉帧定谳批（2026-09-25）：SM2 产物按 uTime 200ms 时间桶+LRU≤8 缓存
+//   （bubbleCache;rainbowSlimeCache 判例同款 5fps 语义）——旧每塔每帧 128² 解释器
+//   冷跑+createImageData GC 面（探针 SM2 族 44% 帧自耗）。产物键=(uTime 桶,uColor),
+//   半径/alpha/grow 全在 blit 侧不入键;桶左沿渲染=同桶像素逐位。计数面
+//   __forceFieldBubbleStats（sm2Runs/cacheHits）供红→绿探针/单测断言。
 import { getPass, runPassOnImageData, defaultUniforms } from './SM2Effect';
 import type { Renderer } from '../render/Renderer';
 
@@ -14,8 +19,31 @@ interface ImgData { data: Uint8ClampedArray; width: number; height: number }
 const SIZE = 128;
 let perlinCache: ImgData | null = null;
 
+// ★四柱掉帧定谳批（2026-09-25）主犯①：SM2 产物时间桶缓存。
+//  旧实现每塔每帧 CPU 跑 128² ForceField 字节码解释器 + createImageData 分配 +
+//  600² blit（探针 cpuprofile SM2 族 44% 帧自耗;4 塔同屏 ×60fps = 240 次/秒冷跑）。
+//  修=按 uTime 200ms 时间桶 + LRU≤8 缓存产物（rainbowSlimeCache 判例
+//  Renderer.ts bakeRainbowSlimeFrame 同款:相位动画 ≈5fps 语义,census 备案口径）。
+//  ★产物纯函数性：SM2 入参只有 (uTime,uColor,uSourceRect,uImageSize0)——半径/包络
+//  （alpha/grow）全在 blit 侧（globalAlpha+drawImage 目标矩形）,不入键;uColor 稳态
+//  恒 (1,1,1)（4 塔共享同一条目）,破盾 (2,2,2),重塑窗逐 tick 变化（30t 窗外事件,
+//  冷跑上界=事件粒度非逐帧）。同桶像素逐位（缓存画布直 blit）;首帧建面后零解释器。
+const bubbleCache = new Map<string, HTMLCanvasElement>();
+let bubbleCachePruneAt = 0;
+const BUBBLE_CACHE_CAP = 8;
+const BUCKET_DT = 0.2;             // 200ms 桶（uTime 单位=秒,GTW 每 tick +1/60）
+const BUCKET_PHASE = 1 / BUCKET_DT; // ×5 相位步进=原 shader c3=uTime×5 每桶 1 单位
+
+/** 测试/探针计数面：sm2Runs=解释器冷跑次数,cacheHits=桶内命中次数 */
+export const __forceFieldBubbleStats = { sm2Runs: 0, cacheHits: 0 };
+
 /** 测试钩：清模块态（冷启动重放） */
-export function __resetForceFieldBubbleForTest(): void { perlinCache = null; }
+export function __resetForceFieldBubbleForTest(): void {
+  perlinCache = null;
+  bubbleCache.clear();
+  __forceFieldBubbleStats.sm2Runs = 0;
+  __forceFieldBubbleStats.cacheHits = 0;
+}
 
 function perlinData(renderer: Renderer): ImgData | null {
   if (perlinCache) return perlinCache;
@@ -46,6 +74,8 @@ function perlinData(renderer: Renderer): ImgData | null {
 }
 
 let scratch: HTMLCanvasElement | null = null;
+/** SM2 运行缓冲（桶 miss 复用,消逐帧 createImageData GC 面;data.set 全量覆写安全） */
+let frameData: ImageData | null = null;
 
 export interface ForceFieldOpts {
   cx: number; cy: number;
@@ -83,23 +113,43 @@ export function drawForceFieldBubble(
   let drawn = false;
   if (pass) {
     try {
-      if (!scratch) scratch = document.createElement('canvas');
-      if (scratch.width !== SIZE || scratch.height !== SIZE) { scratch.width = SIZE; scratch.height = SIZE; }
-      const scx = scratch.getContext('2d', { willReadFrequently: true });
-      if (!scx) return false;
-      const frame = scx.createImageData(SIZE, SIZE);
-      frame.data.set(per.data);
-      const u = defaultUniforms();
-      u.uColor = uColor;
-      u.uTime = o.time;
-      u.uSourceRect = [0, 0, SIZE, SIZE];
-      u.uImageSize0 = [SIZE, SIZE];
-      runPassOnImageData(pass, frame.data, SIZE, SIZE, u);
-      scx.putImageData(frame, 0, 0);
+      // ★时间桶缓存查找（主犯①）：键=(uTime 桶,uColor)——半径/alpha/grow 全在
+      //  blit 侧不入键;命中零解释器、零 createImageData（GC 面同消）。
+      const bucket = Math.floor(o.time * BUCKET_PHASE);
+      const key = bucket + '|' + uColor[0] + ',' + uColor[1] + ',' + uColor[2];
+      let product = bubbleCache.get(key);
+      if (!product) {
+        if (!scratch) scratch = document.createElement('canvas');
+        if (scratch.width !== SIZE || scratch.height !== SIZE) { scratch.width = SIZE; scratch.height = SIZE; }
+        const scx = scratch.getContext('2d', { willReadFrequently: true });
+        if (!scx) return false;
+        if (bubbleCache.size >= BUBBLE_CACHE_CAP && performance.now() - bubbleCachePruneAt > 2000) {
+          bubbleCachePruneAt = performance.now();
+          while (bubbleCache.size >= BUBBLE_CACHE_CAP) bubbleCache.delete(bubbleCache.keys().next().value as string);
+        }
+        // 桶左沿渲染（uTime=bucket×0.2）——产物=键的纯函数,同桶逐位可复现
+        product = document.createElement('canvas');
+        product.width = SIZE; product.height = SIZE;
+        const pcx = product.getContext('2d', { willReadFrequently: true });
+        if (!pcx) return false;
+        const frame = frameData ?? (frameData = scx.createImageData(SIZE, SIZE));
+        frame.data.set(per.data);
+        const u = defaultUniforms();
+        u.uColor = uColor;
+        u.uTime = bucket * BUCKET_DT;
+        u.uSourceRect = [0, 0, SIZE, SIZE];
+        u.uImageSize0 = [SIZE, SIZE];
+        runPassOnImageData(pass, frame.data, SIZE, SIZE, u);
+        pcx.putImageData(frame, 0, 0);
+        bubbleCache.set(key, product);
+        __forceFieldBubbleStats.sm2Runs++;
+      } else {
+        __forceFieldBubbleStats.cacheHits++;
+      }
       ctx.save();
       ctx.globalAlpha = Math.min(1, alpha);
       const r = o.radius * grow * 2;
-      ctx.drawImage(scratch, o.cx - r / 2, o.cy - r / 2, r, r);
+      ctx.drawImage(product, o.cx - r / 2, o.cy - r / 2, r, r);
       ctx.restore();
       drawn = true;
     } catch {

@@ -206,6 +206,18 @@ export class GLShimExecutor {
   /** ★B2b acc 隔离栅格化所需状态镜像（strokeStyle/lineWidth/filter 任意值原样保） */
   private strokeStyleV: string | CanvasGradient | CanvasPattern = '#000';
   private lineWidthV = 1;
+  /** ★四柱掉帧批（2026-09-25）acc 路径镜像：pathOps=逐 op 录制（beginPath 起清,
+   *  canvas 语义 stroke/fill 不清路径）;pathOverflow=超帽保守降级位。
+   *  消费面=rasterizePathOp（stroke/fill 隔离栅格化——drawForceFieldBubble 尾部
+   *  arc/stroke 曾触发 beginPath→ensureBridged 整帧降级,四柱档 100% 降级元凶）。 */
+  private pathOps: Array<[string, unknown[]]> = [];
+  private pathOverflow = false;
+  /** 路径 op 录制帽（防病态长路径无界驻留;超帽 stroke/fill 走降级原链） */
+  private static readonly PATH_OPS_CAP = 512;
+  /** 描边样式收尾镜像（rasterizePathOp/bridge 回放;canvas 缺省值） */
+  private lineCapV: CanvasLineCap = 'butt';
+  private lineJoinV: CanvasLineJoin = 'miter';
+  private miterLimitV = 10;
   /** ctx.filter 镜像（非 'none' 的 drawImage=源级滤镜——quad 不表达,走隔离栅格化） */
   private filterV = 'none';
   private stack: Array<{ m: typeof GLShimExecutor.prototype.m; ga: number; gco: GlobalCompositeOperation; smooth: boolean; fill: string | CanvasGradient | CanvasPattern; clip: boolean; stroke: string | CanvasGradient | CanvasPattern; lw: number; filter: string; font: string; align: CanvasTextAlign }> = [];
@@ -265,6 +277,13 @@ export class GLShimExecutor {
     this.fontV = String(raw.font ?? '10px sans-serif');
     this.alignV = (raw.textAlign ?? 'left') as CanvasTextAlign;
     this.clipped = false;
+    // ★四柱掉帧批:路径镜像清窗（attach=窗开,模拟 ctx 路径从空起——raw 残路径
+    //  不可读,与既有镜像态同口径）;描边样式收尾镜像从 raw 起步
+    this.pathOps.length = 0;
+    this.pathOverflow = false;
+    this.lineCapV = (raw.lineCap ?? 'butt') as CanvasLineCap;
+    this.lineJoinV = (raw.lineJoin ?? 'miter') as CanvasLineJoin;
+    this.miterLimitV = typeof raw.miterLimit === 'number' ? raw.miterLimit : 10;
     this.active = true;
     return this.wrap();
   }
@@ -282,6 +301,10 @@ export class GLShimExecutor {
     this.ga = 1; this.gco = 'source-over'; this.smooth = false; this.filterV = 'none';
     this.fontV = '10px sans-serif'; this.alignV = 'left';
     this.clipped = false;
+    // ★四柱掉帧批:acc 窗开=路径镜像/描边样式收尾同步复位（canvas 缺省值）
+    this.pathOps.length = 0;
+    this.pathOverflow = false;
+    this.lineCapV = 'butt'; this.lineJoinV = 'miter'; this.miterLimitV = 10;
     // ★普查修复（2026-09-25 旗错色同病普查案③）：上一帧异常残留的【开着 FBO】必须
     //  弃用——endAccumulate 前残帧 pipeFbo 仍绑 'world',本帧首个 flushAcc 撞
     //  isAccumOpen=true 会跳过 begin(clear) → 新帧内容叠在残帧上=残影跨帧串层
@@ -317,7 +340,17 @@ export class GLShimExecutor {
       raw.filter = this.filterV;
       raw.font = this.fontV;        // ★普查案②:文本态回放（降级帧 fillText 用对字体）
       raw.textAlign = this.alignV;
+      raw.lineCap = this.lineCapV;   // ★四柱掉帧批:描边样式收尾回放（降级帧 stroke 同态）
+      raw.lineJoin = this.lineJoinV;
+      raw.miterLimit = this.miterLimitV;
     } catch { /* 非法值保 raw 现状 */ }
+    // ★四柱掉帧批:录制路径原样重放（acc 期 path op 只落镜像不落 raw;换桥后
+    //  stroke/fill 原生消费须有路径——重放=「op 本就发给 raw」的等价态,降级帧
+    //  尾部 arc+stroke 环仍画出）
+    for (const [o, a] of this.pathOps) {
+      const f = (raw as unknown as Record<string, (...x: unknown[]) => unknown>)[o];
+      if (typeof f === 'function') f.apply(raw, a);
+    }
   }
 
   /** 窗口关：flush + 摘除（返回原 ctx;调用方恢复 this.ctx）。 */
@@ -413,13 +446,22 @@ export class GLShimExecutor {
               bound[prop] = fn;
               return fn;
             }
+            if (prop === 'beginPath' || prop === 'moveTo' || prop === 'lineTo' || prop === 'arc'
+              || prop === 'arcTo' || prop === 'bezierCurveTo' || prop === 'quadraticCurveTo'
+              || prop === 'rect' || prop === 'closePath' || prop === 'ellipse' || prop === 'setLineDash') {
+              // ★四柱掉帧批（2026-09-25）:路径构造 op 落【镜像录制】不再降级——
+              //  旧码走「读值面」支 ensureBridged（flush+degradeAcc）=world 层任何
+              //  beginPath 必整帧降级（drawForceFieldBubble 尾环 2268/2502 帧必降
+              //  定谳面）。录制后由 accTailOp 的 stroke/fill 隔离栅格化消费
+              //  （rasterizePathOp）;降级换桥时 bridge() 原样重放=等价态。
+              const fn = (...args: unknown[]) => { self.recordPathOp(prop, args); return undefined; };
+              bound[prop] = fn;
+              return fn;
+            }
             if (prop === 'getImageData' || prop === 'createPattern' || prop === 'createLinearGradient'
               || prop === 'createRadialGradient' || prop === 'measureText' || prop === 'isPointInPath'
-              || prop === 'clip' || prop === 'beginPath' || prop === 'rect' || prop === 'moveTo'
-              || prop === 'lineTo' || prop === 'arc' || prop === 'closePath' || prop === 'ellipse'
-              || prop === 'arcTo' || prop === 'bezierCurveTo' || prop === 'quadraticCurveTo'
-              || prop === 'setLineDash' || prop === 'drawFocusIfNeeded') {
-              // 读值面/样式工厂:acc 态无落笔语义,降级后委托（防御性——世界层现无调用点）
+              || prop === 'clip' || prop === 'drawFocusIfNeeded') {
+              // 读值面/样式工厂:acc 态无落笔语义,降级后委托（防御性）
               return (...args: unknown[]) => { self.ensureBridged(); const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown>; return r[prop](...args); };
             }
             return undefined;
@@ -465,11 +507,16 @@ export class GLShimExecutor {
   }
 
   /** ★B2b acc 落笔长尾分流：strokeRect=隔离栅格化直支（像素恒等,见 rasterizeOp）;
-   *  其余（fillText/putImageData/stroke/fill/clearRect…世界层现无调用点）→
-   *  flush 保序+降级换桥+raw 委托。 */
+   *  ★四柱掉帧批（2026-09-25）新增 stroke/fill=录制的路径 op 隔离栅格化直支
+   *  （rasterizePathOp——drawForceFieldBubble 尾部 arc+stroke 环,旧码整帧降级）;
+   *  其余（fillText/putImageData/clearRect…）→ flush 保序+降级换桥+raw 委托。 */
   private accTailOp(op: string, args: unknown[]): void {
     if (op === 'strokeRect' && !this.clipped) {
       const ok = this.rasterizeOp('strokeRect', args);
+      if (ok) return;
+    }
+    if ((op === 'stroke' || op === 'fill') && !this.clipped && !this.pathOverflow) {
+      const ok = this.rasterizePathOp(op, args);
       if (ok) return;
     }
     this.flushForFallback();
@@ -477,6 +524,105 @@ export class GLShimExecutor {
     const r = this.raw as unknown as Record<string, (...a: unknown[]) => unknown>;
     r[op](...args);
     this.stats.fallback++;
+  }
+
+  /** ★四柱掉帧批：acc 路径 op 录制（构造面零落笔零降级;beginPath=清录制）。
+   *  canvas 语义路径不属于绘图状态（save/restore 不存取）;录制裁断帽防病态驻留。 */
+  private recordPathOp(op: string, args: unknown[]): void {
+    if (op === 'beginPath') {
+      this.pathOps.length = 0;
+      this.pathOverflow = false;
+      return;
+    }
+    if (this.pathOps.length >= GLShimExecutor.PATH_OPS_CAP) {
+      this.pathOverflow = true;   // 超帽:stroke/fill 走降级原链（宁降级不丢内容）
+      return;
+    }
+    this.pathOps.push([op, args]);
+  }
+
+  /** ★四柱掉帧批（2026-09-25）：acc 态 stroke/fill 隔离栅格化（B2b strokeRect 判例
+   *  rasterizeOp 同款——整数对齐 scratch 按当前镜像 CTM 原样重放录制路径,覆盖率
+   *  逐位;发射 SO/ADD quad 由 gco 分档）。空路径=canvas no-op 语义,返回 true 不
+   *  发射。gco∉{source-over,lighter}（multiply 等改面语义在透明 scratch 上不成立）
+   *  → false 走降级原链。 */
+  private rasterizePathOp(op: 'stroke' | 'fill', fillArgs: unknown[]): boolean {
+    if (this.gco !== 'source-over' && this.gco !== 'lighter') return false;
+    const segs = this.pathOps;
+    if (!segs.length) return true;   // 空路径落笔=no-op（当前 acc 帧语义亦然）
+    const { a, b, c, d, e, f } = this.m;
+    if (Math.abs(a * d - b * c) < 1e-12) return false;   // 退化 CTM→保守降级
+    // 设备 bbox（保守超集:圆/椭圆按全径,贝塞尔按控制点凸包;stroke 加半宽+AA 1px）
+    let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+    const pt = (x: number, y: number): void => {
+      const px = a * x + c * y + e, py = b * x + d * y + f;
+      if (px < bx0) bx0 = px; if (px > bx1) bx1 = px;
+      if (py < by0) by0 = py; if (py > by1) by1 = py;
+    };
+    const circle = (x: number, y: number, r: number): void => {
+      // 仿射下圆→椭圆:x 半轴=r·hypot(a,c)（精确）,y 半轴=r·hypot(b,d)——
+      // 部分弧取全径=保守超集（像素面只多不多）
+      const rx = r * Math.hypot(a, c), ry = r * Math.hypot(b, d);
+      pt(x - rx, y - ry); pt(x + rx, y - ry); pt(x - rx, y + ry); pt(x + rx, y + ry);
+    };
+    for (const [o, s] of segs) {
+      switch (o) {
+        case 'moveTo': case 'lineTo': pt(s[0] as number, s[1] as number); break;
+        case 'arc': circle(s[0] as number, s[1] as number, Math.max(s[2] as number, 0)); break;
+        case 'ellipse': circle(s[0] as number, s[1] as number,
+          Math.max(Math.abs(s[2] as number), Math.abs(s[3] as number), 0)); break;   // 旋转载荷取全径=超集
+        case 'arcTo': pt(s[0] as number, s[1] as number); pt(s[2] as number, s[3] as number);
+          circle(s[0] as number, s[1] as number, Math.max(s[4] as number, 0)); break;
+        case 'bezierCurveTo': pt(s[0] as number, s[1] as number); pt(s[2] as number, s[3] as number);
+          pt(s[4] as number, s[5] as number); break;
+        case 'quadraticCurveTo': pt(s[0] as number, s[1] as number); pt(s[2] as number, s[3] as number); break;
+        case 'rect': {   // 四角（斜切 CTM 下对角两点不足界,2026-09-25 自查补）
+          const rx = s[0] as number, ry = s[1] as number, rw = s[2] as number, rh = s[3] as number;
+          pt(rx, ry); pt(rx + rw, ry); pt(rx, ry + rh); pt(rx + rw, ry + rh);
+          break;
+        }
+        default: break;   // closePath/setLineDash 无几何
+      }
+    }
+    const ms = Math.max(Math.abs(a), Math.abs(b), Math.abs(c), Math.abs(d));
+    const pad = (op === 'stroke' ? (this.lineWidthV * ms) / 2 : 0) + 1;
+    const fx = Math.floor(bx0 - pad), fy = Math.floor(by0 - pad);
+    const sx = Math.ceil(bx1 + pad) - fx, sy = Math.ceil(by1 + pad) - fy;
+    if (!(sx > 0 && sy > 0) || sx > 4096 || sy > 4096) return false;
+    const sc = accScratch(sx, sy);
+    if (!sc) return false;
+    const sctx = sc.getContext('2d', { willReadFrequently: true });
+    if (!sctx) return false;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.clearRect(0, 0, sx, sy);
+    // 整数设备平移 (−fx,−fy) 后同 CTM 重放——覆盖率与原位逐位同（B2b 判例）
+    sctx.setTransform(a, b, c, d, e - fx, f - fy);
+    sctx.globalAlpha = this.ga;
+    sctx.lineWidth = this.lineWidthV;
+    sctx.lineCap = this.lineCapV;
+    sctx.lineJoin = this.lineJoinV;
+    sctx.miterLimit = this.miterLimitV;
+    try { sctx.filter = this.filterV; } catch { /* 非法值保缺省 */ }
+    sctx.beginPath();
+    for (const [o, s] of segs) {
+      const fn = (sctx as unknown as Record<string, (...x: unknown[]) => unknown>)[o];
+      if (typeof fn === 'function') fn.apply(sctx, s);
+    }
+    if (op === 'stroke') {
+      sctx.strokeStyle = this.strokeStyleV;
+      sctx.stroke();
+    } else {
+      sctx.fillStyle = this.fillStyleV;
+      if (fillArgs.length > 0) sctx.fill(fillArgs[0] as CanvasFillRule);
+      else sctx.fill();
+    }
+    // 发射:scratch=动态源,UV=整幅,设备矩形 1:1;α/样式已烘进 scratch;
+    // gco='lighter'→ADD quad（canvas lighter 同式 src+dst）,SO→tier 0
+    this.markDynamic(sc);
+    this.push(this.gco === 'lighter' ? 1 : 0, null, false, sc, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,
+      1, 1, 1, false, false, false, true, null);
+    this.flush();   // 即发即弃（保序+防 scratch 覆写,rasterizeOp 同款）
+    return true;
   }
 
   /** 降级同步版：调 host.degradeAcc;成功=raw 可用（bridge 已回放镜像态）。 */
@@ -497,6 +643,11 @@ export class GLShimExecutor {
     else if (prop === 'fillStyle' && (typeof value === 'string' || (typeof value === 'object' && value !== null))) this.fillStyleV = value as string | CanvasGradient | CanvasPattern;
     else if (prop === 'strokeStyle') this.strokeStyleV = value as string | CanvasGradient | CanvasPattern;
     else if (prop === 'lineWidth' && typeof value === 'number') this.lineWidthV = value;
+    // ★四柱掉帧批:描边样式收尾镜像（rasterizePathOp 在 scratch 上原值重放;
+    //  2D 语义=非法值忽略保旧,与 lineWidth 同门）
+    else if (prop === 'lineCap' && typeof value === 'string') this.lineCapV = value as CanvasLineCap;
+    else if (prop === 'lineJoin' && typeof value === 'string') this.lineJoinV = value as CanvasLineJoin;
+    else if (prop === 'miterLimit' && typeof value === 'number' && value >= 0) this.miterLimitV = value;
     else if (prop === 'filter' && typeof value === 'string') this.filterV = value;
     // ★普查案②:font/textAlign 镜像（acc 态 set 只落镜像,降级后 bridge 回放）
     else if (prop === 'font' && typeof value === 'string') this.fontV = value;

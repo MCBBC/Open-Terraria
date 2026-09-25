@@ -241,6 +241,13 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     if (e.y < -100 || e.x < -100 || e.y > st.h * TILE + 100 || e.x > st.w * TILE + 100) {
       e.x = clamp(e.x, -100, st.w * TILE + 100);
       e.y = clamp(e.y, -100, st.h * TILE + 100);
+      // ★BJ352（2026-09-25 全 boss 消散记账普查,用户实报"传送走=击败"家族）：
+      //   原版越界 = position 钳 + active=false 直清（1458 :36844-36859 零掉落零计分,
+      //   不经 checkDead→Kill→NPCLoot）= 非击杀消散。曾只写 dead → 玩家传送走后
+      //   飞碟 -1 态爬升出界（despawnTimer=300 逐拍回填压住通用消散,原版唯一出口
+      //   即本支）被 Game bossBlock 误记为击败（downed_395+击败公告）。
+      //   BJ347 教主 439 同范式；对全态生效（含战斗中撞出界,原版同相均非击杀）。
+      e.bossFled = true;
       e.dead = true;
       return true;
     }

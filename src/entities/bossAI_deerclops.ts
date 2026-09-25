@@ -226,7 +226,16 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
         punch(game, e.cx, e.cy, Math.cos(Math.random() * Math.PI * 2), Math.sin(Math.random() * Math.PI * 2), 20);
       }
       if (e.ai1 >= 40) {
-        // :44667-44670 life=-1 → 无掉落消散（直置 dead 绕过 hurt 死亡链即无掉落/公告）
+        // :44667-44670 离场消散：life=-1 + HitEffect + active=false（1457 NPC.cs:44821-44830，
+        //   不走 checkDead→Kill→NPCLoot）→ 无掉落无击败记账（原版无 downedBoss 面）。
+        //   ★BJ352（2026-09-25 全 boss 消散记账普查,用户实报"传送走=击败"家族）：
+        //   直置 dead 曾漏 bossFled → Game bossBlock 误走击败链（downed_668+
+        //   "鹿角怪已被打败！"+灯笼夜 25 假触发）。BJ347 教主 439 同范式。
+        //   ★668 是 DoesntDespawnToInactivityAndCountsNPCSlots 唯一成员
+        //   （NPC.cs:78587-78589 → CheckActive :78786-78789 `if (flag) return`
+        //   永不代消散;本仓 NO_DESPAWN_IDS 同批）→ 本支是 668 唯一非击杀退场口,
+        //   bossFled 必须同置（同 Enemy.runDespawnFx 语义）。
+        e.bossFled = true;
         e.hp = -1; e.dead = true;
         return;
       }
