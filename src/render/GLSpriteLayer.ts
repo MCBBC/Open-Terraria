@@ -14,7 +14,7 @@
 //    imageSmoothingEnabled 开关与横向平铺 1:1 映射
 //  · tint 为 uniform 乘法(canvas multiply+destination-in 的等价,零离屏)
 //  · WebGL2 NPOT 纹理可 REPEAT(地下带横向平铺)
-import { noteContextLost } from './GLStats';
+import { noteContextLostOnce } from './GLStats';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { texId, texReady } from './texId';
 import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw } from './GLStats';
@@ -324,7 +324,10 @@ export class GLSpriteLayer {
     // ★BJ344（件3）：具名化（dispose 摘除——脱离 canvas 上闭包捕 this=层→Renderer→Game
     //  整链滞留,合成层 +3/轮的 blink 侧入边之一）
     const lostPipe = (e: Event) => {
-      noteContextLost(`sprite:${this.statName}`);   // #三开压测批
+      // ★P0-C（trace-231810 续刀）:共管画布多监听者同事件齐发——noteContextLostOnce
+      // 按【共享 canvas】去重（250ms 窗）,单次真实丢失只记饥饿窗一笔（原链云层+世界层
+      // 各记一笔=2 次真实丢失即假性饥饿,工厂被扣而已建 compose 照跑=分层塌方）
+      noteContextLostOnce(this.canvas, `sprite:${this.statName}`);   // #三开压测批
       e.preventDefault();
       this.unavailable = true;
       this.diedAt = performance.now();

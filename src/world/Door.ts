@@ -235,6 +235,12 @@ export function shiftTallGate(
   } finally {
     st.suppressListeners = false;
   }
+  // ★BJ361（2026-09-25）：裸写窗吃掉了监听派发,其中含渲染 mark 主通道（ChunkCache
+  //  订阅 onTileChanged→markDirtyAround,ChunkCache.ts:300）——窗后不补派发 = type 已
+  //  切换而 chunk 烘焙缓存不失效 = 门开关贴图不变化（用户实报回归,BJ361 探针定谳:
+  //  toggle 后门 chunk 零 markDirty）。窗后整件已完整 → 补派发不会半写态判坏（BJ322
+  //  窗动机保留）。域=写入的 5 格列（帧逐格原样保留,周边格未被写无需派发）。
+  for (let dy = 0; dy < 5; dy++) st.notifyChanged(x, anchorY + dy);
   // 尾 TileFrame 面（:52224-52231）——Game 侧注入 checkDecorSquareFrame 扫面
   opts?.afterWrite?.(x, anchorY);
   return [x, anchorY];
@@ -396,6 +402,8 @@ export function shiftTrapdoor(
           st.setTile(ax + j, ay + 1, CLOSED, j * 18, styleY * 18);
         }
       } finally { st.suppressListeners = false; }
+      // ★BJ361：窗后写入域补派发（渲染 mark 主通道,同 shiftTallGate 注）
+      for (let i = 0; i < 2; i++) { st.notifyChanged(ax + i, ay); st.notifyChanged(ax + i, ay + 1); }
       for (let k = -1; k < 3; k++) for (let l = 0; l < 3; l++) {   // TileFace x-1..x+2 × y..y+2(:51937-51943)
         if (st.inBounds(ax + k, ay + l)) opts?.tileFrame?.(ax + k, ay + l);
       }
@@ -418,6 +426,8 @@ export function shiftTrapdoor(
           st.setTile(ax + n, ay, CLOSED, n * 18, styleY * 18);
         }
       } finally { st.suppressListeners = false; }
+      // ★BJ361：窗后写入域补派发（渲染 mark 主通道,同 shiftTallGate 注）
+      for (let m = 0; m < 2; m++) { st.notifyChanged(ax + m, ay); st.notifyChanged(ax + m, ay + 1); }
       for (let k = -1; k < 3; k++) for (let l = -1; l < 2; l++) {  // TileFace x-1..x+2 × y-1..y+1(:51978-51984)
         if (st.inBounds(ax + k, ay + l)) opts?.tileFrame?.(ax + k, ay + l);
       }
@@ -475,6 +485,12 @@ export function shiftTrapdoor(
         }
       }
     } finally { st.suppressListeners = false; }
+    // ★BJ361：窗后写入域补派发（渲染 mark 主通道,同 shiftTallGate 注）——
+    // 域=开态写入 2×2（wy 范围随 playerAbove: y..y+1 / y-1..y）
+    const wy0 = y - (playerAbove ? 0 : 1);
+    for (let col = 0; col < 2; col++) {
+      for (let row7 = 0; row7 < 2; row7++) st.notifyChanged(ax + col, wy0 + row7);
+    }
     // TileFace x-1..x+2 × y-1..y+2 带基 -(!playerAbove)*2（:52034-52040）：
     //   playerAbove→y-1..y+2 / !playerAbove→y-3..y
     const yOff = playerAbove ? 0 : -2;

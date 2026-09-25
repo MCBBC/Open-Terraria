@@ -3261,20 +3261,39 @@ export class Renderer {
    *  ★reviveSwPipe 链挂点：dropSwPipe→dropWorldPipe 整弃（旧层持有死管线引用,
    *  dispose 清自管纹理/VAO/采样器）——重建由本函数对【新管线】initPipeMode
    *  重注册 sprite:quad（GLWorldCompose.recreate 同款落点;程序表按名缓存幂等）。 */
+  /** ★P0-C worldGl 层闩归因面（2026-09-25 trace-231810:drawArrays 全 trace 仅 22
+   *  次/616 帧=GL quad 发射几乎不在场,而 compose 活着（texSubImage2D≈1/帧）——
+   *  已建 worldCompose 实例无逐帧门照跑,bgl 工厂（acquireWorldGl）却逐帧过
+   *  starvedLock/闩门=「compose 活而它死」的分层塌方形态;bgl 路径面零指纹=F5 盲区
+   *  主犯之二。失败因写 bglPathStats['world-gl-skip:*']+worldGlSkipFrames,帧去重
+   *  同 markSwPipeSkip 口径。 */
+  private worldGlFailWhy = '';
+  private _worldGlMarkFrame = -1;
+  private markWorldGlSkip(why: 'backoff' | 'init-fail' | 'starvelock'): void {
+    this.worldGlFailWhy = why;
+    if (this._diagFrame !== this._worldGlMarkFrame) {
+      this._worldGlMarkFrame = this._diagFrame;
+      const k = 'world-gl-skip:' + why;
+      this.bglPathStats[k] = (this.bglPathStats[k] || 0) + 1;
+      this.worldGlSkipFrames++;
+    }
+  }
+  /** ★P0-C worldGl 层降级帧累计（bgl 面塌方定谳值） */
+  worldGlSkipFrames = 0;
   private acquireWorldGl(): GLSpriteLayer | null {
     const cur = this.worldPipeLayer;
     if (cur) {
-      if (!cur.unavailable) { this.worldPipeRetryLadder = 0; return cur; }
-      if (performance.now() - cur.diedAt < 5000) { this.dropWorldPipe(); return null; }
+      if (!cur.unavailable) { this.worldPipeRetryLadder = 0; this.worldGlFailWhy = ''; return cur; }
+      if (performance.now() - cur.diedAt < 5000) { this.dropWorldPipe(); this.markWorldGlSkip('backoff'); return null; }
       this.dropWorldPipe();
     }
-    if (performance.now() < this.worldPipeRetryAt) return null;
-    if (starvedLock()) return null;
+    if (performance.now() < this.worldPipeRetryAt) { this.markWorldGlSkip('backoff'); return null; }
+    if (starvedLock()) { this.markWorldGlSkip('starvelock'); return null; }
     const pipe = this.acquireSwPipe();
-    // ★P0-A:30s 定值闩→渐进阶（同 acquireCloudPipe 注）
-    if (!pipe) { this.armRetryLatch('world'); return null; }
+    // ★P0-A:30s 定值闩→渐进阶（同 acquireCloudPipe 注）;失败因沿用 acquire 支归因
+    if (!pipe) { this.armRetryLatch('world'); this.markWorldGlSkip((this.swPipeFailWhy || 'backoff') as 'backoff' | 'init-fail' | 'starvelock'); return null; }
     const inst = new GLSpriteLayer(pipe, false);
-    if (inst.unavailable) { inst.dispose(); this.armRetryLatch('world'); return null; }
+    if (inst.unavailable) { inst.dispose(); this.armRetryLatch('world'); this.markWorldGlSkip('init-fail'); return null; }
     this.worldPipeLayer = inst;
     return inst;
   }
@@ -3548,6 +3567,13 @@ export class Renderer {
       composeSkipFrames: this.composeSkipFrames,
       composeSkipStreak: this.composeSkipStreak,
       degradeToasted: this._swPipeDegradeToasted,
+      worldGl: {
+        alive: !!this.worldPipeLayer && !this.worldPipeLayer.unavailable,
+        failWhy: this.worldGlFailWhy || null,
+        skipFrames: this.worldGlSkipFrames,
+        retryInMs: Math.max(0, Math.round(this.worldPipeRetryAt - now)),
+        retryLadderMs: Renderer.RETRY_LADDER_MS[Math.min(this.worldPipeRetryLadder, Renderer.RETRY_LADDER_MS.length - 1)],
+      },
       starve: starveSnapshot(),
     };
   }

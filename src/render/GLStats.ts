@@ -192,6 +192,20 @@ export function noteContextLost(tag: string): void {
   probeOkStreak = 0;
   if (lossTimes.length > 64) lossTimes.shift();
 }
+/** ★P0-C（2026-09-25 trace-231810 定谳续刀）同上下文丢失去重口径:共管管线画布上
+ *  挂着 N 个监听者（管线本体+云层+世界层…同一真实丢失事件全体齐发）——旧链每监听者
+ *  各记一笔=单次真实丢失即污染饥饿窗 N 笔,2 次真实丢失即 ≥3 次判饥饿=锁被「审计窗
+ *  被共挂者灌满」假阳性瞬间扳动（compose 已建活着而 worldGl 工厂恒被扣押的分层
+ *  塌方形态主因之一）。以 ctxKey（=共享 canvas 对象,WeakMap 不滞留）去重:同 key
+ *  250ms 内的多笔报告只记窗一次——250ms 内同上下文二次丢失物理不可能（须先 restore）。 */
+const lossDedupe = new WeakMap<object, number>();
+export function noteContextLostOnce(ctxKey: object, tag: string): void {
+  const now = performance.now();
+  const last = lossDedupe.get(ctxKey);
+  if (last !== undefined && now - last < 250) return;
+  lossDedupe.set(ctxKey, now);
+  noteContextLost(tag);
+}
 let lastStarveLogAt = -Infinity;
 let _starvedEver = false;   /** 会话级闩:饥饿发生过一次即真(贫困模式依据) */
 export function starvedEver(): boolean { return _starvedEver; }

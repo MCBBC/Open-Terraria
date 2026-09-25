@@ -21,7 +21,7 @@ const pool = await page.evaluate(() => {
   const px = Math.floor((g.player.x + g.player.w / 2) / T);
   let surf = -1;
   for (let y = 10; y < 500; y++) { const i = st.idx(px, y); if ((st.flags[i] & 1) && st.type[i]) { surf = y; break; } }
-  for (let x = px - 4; x <= px + 4; x++) for (let y = surf; y < surf + 7; y++) {
+  for (let x = px - 4; x <= px + 4; x++) for (let y = surf; y < surf + 12; y++) {
     const i = st.idx(x, y);
     st.flags[i] = 0; st.type[i] = 0; st.half[i] = 0; st.slope[i] = 0;
     st.liquid[i] = 255; st.liquidType[i] = 1;
@@ -38,6 +38,7 @@ const pool = await page.evaluate(() => {
     foe.vx = 0; foe.vy = 0;
     moved = { kind: foe.constructor?.name, x: foe.x, y: foe.y, w: foe.w, h: foe.h, wet: foe.wet, hp: foe.hp };
   }
+  window.__poolPx = px; window.__poolTop = surf;
   return { surf, px, n: all.length, moved };
 });
 console.log('POOL=' + JSON.stringify(pool));
