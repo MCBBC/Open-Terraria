@@ -15576,7 +15576,7 @@ export class Renderer {
         // ★BJ348b-2 3476 第一层暗化（:3344-3346 MultiplyRGBA(0.5,0.5,0.5,0.8)）同挥舞段
         if (arcanumHold0) {
           ctx.save();
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = 0.8;
           ctx.filter = 'brightness(0.5)';
           ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, holdDX, holdDY, ar.sw, ar.sh);
           ctx.restore();
@@ -16540,7 +16540,7 @@ export class Renderer {
       //  （:3344-3346）——RGB×0.5 + A×0.8（光照染色无逐物品管线,登记近似恒白）
       if (heldVid === 3476) {
         ctx.save();
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = 0.8;
         ctx.filter = 'brightness(0.5)';
         ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOYEff, ar.sw, ar.sh);
         ctx.restore();
