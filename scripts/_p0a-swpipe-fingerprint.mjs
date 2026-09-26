@@ -32,7 +32,7 @@ await page.evaluateOnNewDocument(() => {
   };
 });
 page.on('pageerror', (e) => console.log('PAGEERROR:', (e.message ?? '').slice(0, 200)));
-await bootstrap(page, ORIGIN + '/');
+await bootstrap(page, ORIGIN + '/?lightworker=1');   // ★P0-C:光照 worker 开→lightGate 面可验
 const gen = await createGame(page, { mode: 'direct', seed: '05162020', size: 'small', pinRandom: 20260925 });
 chk('createGame（GL 全阻断下 2D 链自举）', !!gen?.ok, gen?.why ?? '');
 
@@ -159,6 +159,30 @@ console.log('[F] F5 面', JSON.stringify(f5));
 chk('F1 F5 composePath.skipFrames/skipStreak 在场', typeof f5.skipFrames === 'number' && typeof f5.skipStreak === 'number', `${f5.skipFrames}/${f5.skipStreak}`);
 chk('F2 F5 composePath.stats 含 swpipe-* 指纹键', f5.statsKeys.length >= 2, f5.statsKeys.join(','));
 chk('F3 F5 swpipe 块 alive+starve 快照在场', f5.swpipeAlive === true && !!f5.swpipeStarve, JSON.stringify(f5.swpipeStarve));
+
+// ---- P0-C 增补:worldGl 闩指纹 + C9c-v2 lightGate 面（trace-231810 分层） ----
+const wg = await page.evaluate(() => {
+  const r = window.__swGame.renderer;
+  return {
+    skipKeys: Object.keys(r.bglPathStats ?? {}).filter((k) => k.indexOf('world-gl-skip:') === 0),
+    skipFrames: r.worldGlSkipFrames ?? null,
+    diag: r.swPipeDiag ? r.swPipeDiag().worldGl : null,
+  };
+});
+console.log('[W] worldGl 闩面', JSON.stringify(wg));
+chk('W1 worldGl 失败因指纹落账（world-gl-skip:*>0）', wg.skipKeys.length >= 1 && wg.skipFrames > 0, `${wg.skipKeys.join(',')} frames=${wg.skipFrames}`);
+// failWhy=「最近失败因」活值:自愈后健康支正确清空（塌方期非空,W1 的 skipKeys 即证据）
+chk('W2 swPipeDiag.worldGl 块形状+降级计数在场（活值 failWhy 自愈后清空=正确语义）',
+  !!wg.diag && typeof wg.diag.alive === 'boolean' && wg.diag.skipFrames > 0 && wg.skipKeys.length > 0 && wg.diag.failWhy === null,
+  JSON.stringify(wg.diag));
+const lg = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const rep = await import('/src/debug/DebugReport.ts');
+  return rep.collectDebugReport(g).render?.lightGate ?? null;
+});
+console.log('[G] lightGate 面', JSON.stringify(lg));
+chk('G1 C9c-v2 门=adaptive 且进阈=1.5×tick≈25ms', !!lg && lg.mode === 'adaptive' && Math.abs(lg.enterMs - 25) < 0.1, JSON.stringify({ mode: lg?.mode, enterMs: lg?.enterMs }));
+chk('G2 忙机门不再永久扣押:live=true 或好拍在涨（p50≤进阈）', !!lg && (lg.live === true || (lg.p50Ms > 0 && lg.p50Ms <= lg.enterMs && lg.good > 0)), JSON.stringify({ live: lg?.live, p50: lg?.p50Ms, good: lg?.good }));
 
 await browser.close();
 const bad = results.filter((r) => !r.ok);

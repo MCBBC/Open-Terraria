@@ -3356,6 +3356,18 @@ export class Renderer {
     const s = this.bglEntShim;
     return s ? { active: s.active, stats: { ...s.stats } } : null;
   }
+
+  /** ★C5 雨批中介（2026-09-26 rain-gl 收官刀）：WeatherRenderer 逐滴四边形一次
+   *  成批的发射口——活跃 shim 执行器（bglEntShim 单实例,acc 整层窗 attachAcc 与
+   *  ent 分窗 attach 二态共用）存在则递入执行器按调用点原位入队（保序:批 rec
+   *  落在实体后 gore 前,flush 期顺序混合进累积 FBO=层序零改动）;无活跃窗
+   *  （纯 2D 帧/逃生门/GL 死）返回 false=调用方走 2D 原链。 */
+  emitRainQuadBatch(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean {
+    const shim = this.bglEntShim;
+    if (!shim?.active) return false;
+    return shim.pushQuadBatch(img, key, data, quads, replay);
+  }
   /** ★B1 chunk 页纹理确保（'wpg:<idx>'/'tpg:<idx>'）。页生命周期三态:
    *  ①idx ≥ 已上传计数（新页/trim 后 idx 复用）:drop 陈旧键+texFromImage
    *    全量上传（noMip;预乘上传=画布源判例）,清该页脏标;

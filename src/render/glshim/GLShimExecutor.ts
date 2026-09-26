@@ -66,6 +66,9 @@ interface QuadRec {
    *  /full=全画布纹理(UV=sx,sy,sw,sh=页内矩形)/pair=尘对合并面(UV=0,0,w,h)。
    *  曾把页内矩形直接喂裁剪纹理 → UV 出界 CLAMP=大面积透明/常量色块（用户实报案）。 */
   texKind: 'region' | 'full' | 'pair';
+  /** ★C5 雨批（非 null=本 rec 是一个预变换四边形批,上列几何/源字段全部不用;
+   *  tier 恒 0=SO——雨无 ADD 需求,纯 SO 单档）。push 写 null+本类型特设。 */
+  batch: RainBatchRef | null;
   next: QuadRec | null;               // 池链
 }
 
@@ -75,6 +78,19 @@ interface PairReg {
   gl: Uint8Array;                     // 合并字节（rgb=预乘 add,a=erase e）
   tex: TexEntry | null;               // 惰性建（首 flush）
   add: HTMLCanvasElement;             // 吞抑标记（后随 add drawImage）
+}
+
+/** ★C5 雨批引用（2026-09-26 rain-gl 收官刀;WeatherRenderer 构建,Renderer
+ *  emitRainQuadBatch 中介递入）：N 个预变换四边形单 drawArrays 发射。
+ *  data 布局=6 顶点/quad×7 float（x,y,u,v,r,g,b）;img/key=GL 纹理惰性解析
+ *  （flush 期 texFromImage 幂等键——层重建/LRU 逐出自愈）;replay=降级帧 2D
+ *  逐滴回放闭包（宁回退不丢精灵判例;读构建方单槽 scratch,同帧消费）。 */
+interface RainBatchRef {
+  img: CanvasImageSource;
+  key: string;
+  data: Float32Array;
+  quads: number;
+  replay: (ctx: CanvasRenderingContext2D) => void;
 }
 
 export interface ShimExecStats {
@@ -89,6 +105,7 @@ export interface ShimExecStats {
   flushes: number;      // FBO present 次数
   uploads: number;      // 纹理（重）上传
   replays: number;      // GL 失败 2D 重放
+  emitBatchQuads: number; // ★C5 雨批发射四边形数（quadBatch 路径;探针对账面）
 }
 
 const fround = Math.fround;
@@ -238,7 +255,7 @@ export class GLShimExecutor {
   stats: ShimExecStats = GLShimExecutor.blankStats();
 
   static blankStats(): ShimExecStats {
-    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, replays: 0 };
+    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, replays: 0, emitBatchQuads: 0 };
   }
 
   constructor(host: ShimHost) {
@@ -1019,6 +1036,7 @@ export class GLShimExecutor {
     rec.rot = rot; rec.alpha = alpha; rec.fr = fr; rec.fg = fg; rec.fb = fb;
     rec.flipX = flipX; rec.flipY = flipY; rec.smooth = smooth;
     rec.dynamic = dynamic; rec.pair = pair; rec.next = null;
+    rec.batch = null;                   // ★C5:池复用卫生（批引用单槽,非批 rec 恒空）
     rec.texKind = pair ? 'pair' : (dynamic ? 'full' : 'region');
     if (this.tail) this.tail.next = rec; else this.head = rec;
     this.tail = rec;
@@ -1032,6 +1050,23 @@ export class GLShimExecutor {
     let p = this.head;
     while (p) { const n = p.next; p.next = this.pool; this.pool = p; p = n; }
     this.head = this.tail = null;
+  }
+
+  /** ★C5 雨批入队（2026-09-26 rain-gl 收官刀;Renderer.emitRainQuadBatch 中介调用）：
+   *  预变换四边形批作为【一条 rec】按调用点原位入队（保序:批在实体 rec 之后
+   *  gore 之前,flush 期顺序混合进累积 FBO）。可表达性门=与 drawImage 主桥同构:
+   *  窗活跃/GL 层在场/无 clip/无 filter/SO 态/ga=1——任一不满足返回 false,
+   *  调用方整帧回 2D 原链（宁回退不丢精灵）。 */
+  pushQuadBatch(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean {
+    if (!this.active || !this.glw || this.glw.unavailable) return false;
+    if (this.clipped || this.filterV !== 'none') return false;
+    if (this.ga !== 1 || this.gco !== 'source-over') return false;
+    if (quads <= 0) return true;        // 零活滴=无事可画（与 2D 零绘制等价）
+    this.push(0, null, false, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+      1, 1, 1, false, false, false, false, null);
+    this.tail!.batch = { img, key, data, quads, replay };
+    return true;
   }
 
   /** 落笔前保序 flush（2D 回退面） */
@@ -1072,9 +1107,9 @@ export class GLShimExecutor {
     if (!this.head) return;
     const glw = this.glw && !this.glw.unavailable ? this.glw : this.host.acquireGl();
     if (!glw || glw.unavailable) { this.accFail('nogl'); return; }
-    // 预解析门（bridge presentBatch 同款;动态源在发射期解析）
+    // 预解析门（bridge presentBatch 同款;动态源在发射期解析;批纹理在发射期解析）
     for (let p: QuadRec | null = this.head; p; p = p.next) {
-      if (p.solid || p.pair || p.dynamic) continue;
+      if (p.solid || p.pair || p.dynamic || p.batch) continue;
       if (!this.resolveTex(glw, p)) { this.accFail('tex'); return; }
     }
     // 开 FBO（帧首段 clear;后续段续交幂等）
@@ -1101,6 +1136,15 @@ export class GLShimExecutor {
         o.alpha = p.alpha; o.tint = TINT3; TINT3[0] = p.fr; TINT3[1] = p.fg; TINT3[2] = p.fb;
         o.rot = p.rot; o.flipX = false; o.flipY = false; o.smooth = false;
         glw.quadSprite(WHITE_E(glw), 0, 0, 1, 1, p.dx, p.dy, p.dw, p.dh, o);
+        continue;
+      }
+      // ★C5 雨批发射（单 drawArrays;纹理惰性解析幂等键——层重建/LRU 逐出自愈;
+      //  发射失败=accFail 降级换桥+全队列 2D 重放,宁回退不丢精灵）
+      if (p.batch) {
+        const e = glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
+        if (!e) { this.accFail('tex'); return; }
+        if (!glw.quadBatch(e, p.batch.data, p.batch.quads)) { this.accFail('gl'); return; }
+        this.stats.emitBatchQuads += p.batch.quads;
         continue;
       }
       const e = this.resolveTex(glw, p);
@@ -1187,7 +1231,7 @@ export class GLShimExecutor {
     //  任一失败 → 本批整体走 2D 重放（静默丢=「角色变透明」形态的禁下面,
     //  2026-09-24 用户实报案防线;宁回退不丢内容）
     for (let p = this.head; p; p = p.next) {
-      if (p.tier !== tier || p.solid) continue;
+      if (p.tier !== tier || p.solid || p.batch) continue;
       if (!this.resolveTex(glw, p)) {
         if (additive) glw.blendAdditive(false);
         glw.end();
@@ -1202,6 +1246,16 @@ export class GLShimExecutor {
         o.alpha = p.alpha; o.tint = TINT3; TINT3[0] = p.fr; TINT3[1] = p.fg; TINT3[2] = p.fb;
         o.rot = p.rot; o.flipX = false; o.flipY = false; o.smooth = false;
         glw.quadSprite(WHITE_E(glw), 0, 0, 1, 1, p.dx, p.dy, p.dw, p.dh, o);
+      } else if (p.batch) {
+        // ★C5 雨批（bridge SO 批;纹理解析失败=本批整体 2D 重放,同上门）
+        const e = glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
+        if (!e || !glw.quadBatch(e, p.batch.data, p.batch.quads)) {
+          if (additive) glw.blendAdditive(false);
+          glw.end();
+          this.replay2D();
+          return;
+        }
+        this.stats.emitBatchQuads += p.batch.quads;
       } else {
         const e = this.resolveTex(glw, p);
         if (!e) continue;   // 预解析门已兜;防御支
@@ -1284,6 +1338,8 @@ export class GLShimExecutor {
     const raw = this.raw;
     if (!raw) { this.popAll(); return; }
     for (let p = this.head; p; p = p.next) {
+      // ★C5 雨批回放：构建方闭包逐滴 2D 直画（角点仿射+现烘 tint;宁回退不丢精灵）
+      if (p.batch) { p.batch.replay(raw); this.stats.replays++; continue; }
       this.drawRec2D(raw, p);
       this.stats.replays++;
     }

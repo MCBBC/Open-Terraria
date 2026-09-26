@@ -61,7 +61,10 @@ export function liveGateStep(
   live: boolean, good: number, bad: number, lag: number, hasResult: boolean,
   enterMs: number = LIGHT_LIVE_ENTER_MS, exitMs: number = LIGHT_LIVE_EXIT_MS,
 ): { live: boolean; good: number; bad: number; fell: boolean } {
-  if (lag > enterMs) { bad++; good = 0; }
+  // ★C9c-v2 坏拍阈=双阈分态:warmup 对进阈（lag>p50 进阈=坏拍禁 entry）,live 对
+  // 出阈（带宽滞回——进阈~出阈间的毛刺容忍不退,防抖）;手动模式两者相等=v1 语义
+  const threshold = live ? exitMs : enterMs;
+  if (lag > threshold) { bad++; good = 0; }
   else if (lag > 0) { good++; bad = 0; }
   let fell = false;
   if (!live) {

@@ -83,19 +83,18 @@ describe('BJ361 门裸写窗后的渲染 mark 补派发（onTileChanged 写入�
     expect(st.get(21, 21)).toBe(TP_CLOSED);
     expect(st.get(20, 20)).toBe(0);
     expect(st.get(21, 20)).toBe(0);
-    // 写入域=(20..21,20..21) 4 格（清 2+写 2）,各恰一次
-    expect(marks).toEqual([[20, 20], [21, 20], [20, 21], [21, 21]]);
+    // 写入域=(20..21,20..21) 4 格（清 2+写 2）,各恰一次（列优先序=补派发循环序）
+    expect(marks).toEqual([[20, 20], [20, 21], [21, 20], [21, 21]]);
   });
 
   it('活板门开（387→386,playerAbove 两态）：监听替身恰收开态写入 2×2 域', () => {
     for (const playerAbove of [true, false]) {
       const w = new World(40, 40, 7, `bj361-tp-open-${playerAbove}`);
       const st = w.store;
-      // 关态 387 2×1（styleY0）置于 (20,21)..(21,21)（左右外格+下方支撑面）
+      // 关态 387 2×1（styleY0）置于 (20,21)..(21,21)——折翼行（下折=22 行/上折=20 行）
+      // 须保持空气（foldRowBlocked 对不可砍件正确拒开）
       st.setTileSilent(20, 21, TP_CLOSED, 0, 0);
       st.setTileSilent(21, 21, TP_CLOSED, 18, 0);
-      st.setTileSilent(20, 22, STONE, 0, 0);
-      st.setTileSilent(21, 22, STONE, 0, 0);
       const marks = markSpy(st);
       expect(shiftTrapdoor(st, 20, 21, playerAbove)).toBe(true);
       const wy0 = 21 - (playerAbove ? 0 : 1);

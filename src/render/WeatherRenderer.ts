@@ -13,7 +13,7 @@ import type { Camera } from './Camera';
 import type { Renderer } from './Renderer';
 import type { WeatherState } from '../world/weather/Weather';
 
-interface RainDrop {
+export interface RainDrop {
   x: number; y: number;
   vx: number; vy: number;
   scale: number;
@@ -228,6 +228,150 @@ function getDustTex(): ImageBitmap | HTMLImageElement | null {
  *   本仓旧实现 min(2400,max(600,viewW×1.2)) 即误把屏宽比例当池帽,构成真实雨密度偏差。
  */
 const MAIN_MAX_RAIN = 750;
+
+// ── ★C5 雨批（2026-09-26 rain-gl 收官刀）────────────────────────────────────
+// trace 20260926（强降雨桶 rain 1076ms/2s≈54% 墙钟,慢帧 top10 全雨帧）定谳批构成:
+//   ①bakeMemoized miss 风暴——雨强爬坡/相机移动期键连续换新,每 miss=
+//     bakeTintFrame(×2 drawImage)+克隆(×1 drawImage) 真实 canvas 光栅
+//     （digest drawImage callers bakeMemoized 3851.5ms 全 trace 第一名）;
+//   ②750 滴/帧逐滴 shim rec（Proxy+decode+push 分配）+flushAcc 逐 rec
+//     quadSprite=750 bindTexture+drawArrays/帧。
+// 本刀:雨条纹理预烘【一张】（vanilla Rain.png 原样入 GL 纹理,帧=type×4 偏移）,
+// 逐滴光照 tint 折进顶点色（量化式与烘焙路径同一 Math.round(light×k)）,每帧
+// 一次成批（单 Float32Array 动态上传+单 drawArrays,GLSpriteLayer.quadBatch/
+// GLShimExecutor.pushQuadBatch）——①②全消。lightAtTo 逐滴采样保留（C6 判例,
+// 数据面不动）;随机系/物理/消亡门/溅花尘零触碰。
+/** 旗：?raingl=0 逃生门（回 2D 逐滴烘焙链）。灰度序：?raingl=1 灰度开 →
+ *  对拍全绿转正缺省开（rainGlSetForTest=页内翻面范式,探针 A/B 用）。 */
+export let rainGl = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('raingl') === '1' : false;
+export function rainGlSetForTest(v: boolean): void { rainGl = v; }
+
+/** 雨批顶点数据单槽（消费即弃,QOPTS/TINT3 判例族——批 rec 同帧入队同帧 flush,
+ *  下帧构建覆写前必已消费;750 quad×6 顶点×7 float=126KB STREAM_UPLOAD/帧）。 */
+const RAIN_STRIDE = 7;                                   // x,y,u,v,r,g,b
+const rainBatchData = new Float32Array(MAIN_MAX_RAIN * 6 * RAIN_STRIDE);
+/** 重放面单槽（degrade→replay2D 同帧消费）:每滴 [co,si,w,h,type] + 基矩阵。
+ *  x/y 不存——角点已含平移,回放从顶点角点直构仿射（零重复存储）。 */
+const rainReplay = new Float32Array(MAIN_MAX_RAIN * 5);
+const rainReplayBase = new Float64Array(6);
+let rainReplayQuads = 0;
+/** quadSprite 同款 tie 补正（texel 单位;见 GLSpriteLayer.QUAD_TIE_EPS 注） */
+const RAIN_TIE_EPS = 1 / 4096;
+/** GL 纹理键（vanilla Rain.png 原样;幂等键——层重建/LRU 逐出自愈重传） */
+const RAIN_TEX_KEY = 'rain:raw';
+
+const frnd = Math.fround;
+
+/**
+ * ★C5 雨批构建（drawRain GL 支/结构锁测试共用）：逐滴把 2D 路径的
+ * setTransform(base)+translate(x,y)+rotate(θ)+drawImage(strip) 折成设备空间
+ * 四角+uv+tint 顶点。矩阵拼接与 executor 镜像【同式同 fround 链】
+ * （translate/rotate 逐式复刻 GLShimExecutor 镜像算子——2D 链若走 shim,
+ * 镜像矩阵即此值;角点直构比 decode 的 hypot/atan2 重构少一次往返,census 同族）。
+ * 返回 quad 数;-1=存在不可批面（源矩形越界等）→ 调用方整帧回 2D 原链。
+ * @param base  绘制点 CTM（shim 窗内=镜像矩阵,即世界变换;f32 扩宽值）
+ * @param drops 雨滴池（仅消费 active 滴;物理/随机面零触碰）
+ * @param lightAtTo C6 零分配光照采样（原样逐滴调用,数据面不动）
+ * @param shimmerAlpha Main.shimmerAlpha（DrawRain 色淡出系数）
+ */
+export function buildRainBatch(
+  base: { a: number; b: number; c: number; d: number; e: number; f: number },
+  drops: RainDrop[],
+  lightAtTo: (tx: number, ty: number, out: number[]) => number[],
+  shimmerAlpha: number,
+  texW: number, texH: number,
+): number {
+  const k = 0.85 * (1 - shimmerAlpha);
+  let n = 0;
+  const lt = _lt3;
+  for (const d of drops) {
+    if (!d.active) continue;
+    // 源矩形越界=2D spec 有源裁剪语义、GL 全跨度 uv 不表达 → 整帧回 2D
+    // （vanilla waterStyle≤13 → type≤41 → sx+2≤166≤168 恒内;越界面仅病态档）
+    const sx = d.type * 4;
+    if (sx < 0 || sx + 2 > texW || texH < 40) { rainReplayQuads = 0; return -1; }
+    // 光照采样（与 2D 路径同式:((x+4)/16,(y+4)/16)）;tint 量化同一 Math.round——
+    // 【钳位序对齐】2D 路径 cr=round(light×k) 后经 tintByte 钳 [0,255] 入
+    // fillStyle;本式同一序（先乘后钳）,异常光照输入两侧同值
+    const tx = Math.floor((d.x + 4) / TILE);
+    const ty = Math.floor((d.y + 4) / TILE);
+    lightAtTo(tx, ty, lt);
+    const cr = Math.max(0, Math.min(255, Math.round(lt[0] * k)));
+    const cg = Math.max(0, Math.min(255, Math.round(lt[1] * k)));
+    const cb = Math.max(0, Math.min(255, Math.round(lt[2] * k)));
+    // 矩阵拼接（executor 镜像同式:fround 逐式）——base·T(x,y)·R(θ)
+    const co = frnd(Math.cos(d.rotation)), si = frnd(Math.sin(d.rotation));
+    const e1 = frnd(frnd(base.a * d.x) + frnd(frnd(base.c * d.y) + base.e));
+    const f1 = frnd(frnd(base.b * d.x) + frnd(frnd(base.d * d.y) + base.f));
+    const a = frnd(frnd(base.a * co) + frnd(base.c * si));
+    const b = frnd(frnd(base.b * co) + frnd(base.d * si));
+    const c = frnd(frnd(base.c * co) - frnd(base.a * si));
+    const dd = frnd(frnd(base.d * co) - frnd(base.b * si));
+    // 四角（decode 旋转支同精度式;origin=(0,0) 顶点锚=vanilla DrawRain 同款）
+    const w = 2 * d.scale, h = 40 * d.scale;
+    const p0x = e1, p0y = f1;
+    const p1x = frnd(a * w) + e1, p1y = frnd(b * w) + f1;
+    const p2x = frnd(frnd(a * w) + frnd(c * h)) + e1, p2y = frnd(frnd(b * w) + frnd(dd * h)) + f1;
+    const p3x = frnd(c * h) + e1, p3y = frnd(dd * h) + f1;
+    // uv 全跨度−ε（quadSprite 同款;flipY=det<0 → v 区间反向,R2-F1 判谳同式）
+    const det = a * dd - b * c;
+    const ua = (sx - RAIN_TIE_EPS) / texW, ub = (sx + 2 - RAIN_TIE_EPS) / texW;
+    const va0 = (0 - RAIN_TIE_EPS) / texH, vb0 = (40 - RAIN_TIE_EPS) / texH;
+    const va = det < 0 ? vb0 : va0, vb = det < 0 ? va0 : vb0;
+    const r = cr / 255, g = cg / 255, bl = cb / 255;
+    // 6 顶点（TRIANGLES:(p0,p1,p2)+(p0,p2,p3)）
+    let o = n * 42;
+    const D = rainBatchData;
+    D[o] = p0x; D[o + 1] = p0y; D[o + 2] = ua; D[o + 3] = va; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl;
+    D[o += 7] = p1x; D[o + 1] = p1y; D[o + 2] = ub; D[o + 3] = va; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl;
+    D[o += 7] = p2x; D[o + 1] = p2y; D[o + 2] = ub; D[o + 3] = vb; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl;
+    D[o += 7] = p0x; D[o + 1] = p0y; D[o + 2] = ua; D[o + 3] = va; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl;
+    D[o += 7] = p2x; D[o + 1] = p2y; D[o + 2] = ub; D[o + 3] = vb; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl;
+    D[o += 7] = p3x; D[o + 1] = p3y; D[o + 2] = ua; D[o + 3] = vb; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl;
+    // 重放面（x/y 不存——角点已含;顶点色×255 往返可逆:整数/255 的 f32 舍入
+    // 误差 ≪0.5LSB,Math.round 恢复原 8bit 值）
+    const ro = n * 5;
+    rainReplay[ro] = co; rainReplay[ro + 1] = si;
+    rainReplay[ro + 2] = w; rainReplay[ro + 3] = h; rainReplay[ro + 4] = sx;
+    n++;
+    if (n >= MAIN_MAX_RAIN) break;      // 池帽护栏（=MAIN_MAX_RAIN 恒不触）
+  }
+  if (n > 0) {
+    rainReplayBase[0] = base.a; rainReplayBase[1] = base.b; rainReplayBase[2] = base.c;
+    rainReplayBase[3] = base.d; rainReplayBase[4] = base.e; rainReplayBase[5] = base.f;
+  }
+  rainReplayQuads = n;
+  return n;
+}
+
+/** ★C5 雨批降级回放（GLShimExecutor.replay2D 经 rec.batch.replay 调用;宁回退
+ *  不丢精灵）：逐滴 2D 直画——tint 现烘（bakeTintFrame 共享 scratch,即烘即画,
+ *  无 memo——降级帧已是灾难路径,正确性优先）;角点仿射直构 setTransform
+ *  （图像空间 (0..2,0..40) → 设备四边形,与批顶点同源同精度）。 */
+function replayRainBatch2D(ctx: CanvasRenderingContext2D): void {
+  if (rainReplayQuads <= 0) return;
+  const tex = getRainTex();
+  if (!tex || !(tex.width > 0)) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  const D = rainBatchData;
+  for (let i = 0; i < rainReplayQuads; i++) {
+    const o = i * 42, ro = i * 5;
+    const cr = Math.round(D[o + 4] * 255), cg = Math.round(D[o + 5] * 255), cb = Math.round(D[o + 6] * 255);
+    const tinted = bakeTintFrame('rain-gl-replay', tex, rainReplay[ro + 4], 0, 2, 40, cr, cg, cb);
+    if (!tinted) continue;
+    const w = rainReplay[ro + 2], h = rainReplay[ro + 3];
+    const p1x = D[o + 7], p1y = D[o + 8], p3x = D[o + 21], p3y = D[o + 22];
+    ctx.setTransform(
+      (p1x - D[o]) / w, (p1y - D[o + 1]) / w,
+      (p3x - D[o]) / h, (p3y - D[o + 1]) / h,
+      D[o], D[o + 1]);
+    ctx.drawImage(tinted, 0, 0);
+  }
+  ctx.restore();
+}
 
 export class WeatherRenderer {
   /** ★perf3 逃生门（与云侧 ?cloudcache=0 同参同批）：0 = 雨条逐滴走旧路径
@@ -673,12 +817,16 @@ export class WeatherRenderer {
 
   /** Rain.Draw（Main.cs:38238-38266）：2×40 条 × type 偏移，光照着色 ×0.85。
    *  ★2026-08-24 r15 R15-1 拆分：原版雨在 DrawItems/全部实体之后（Main.cs:63226→
-   *  :63227）、DrawGore 之前——Renderer 在实体循环后调用本方法（雨幕盖角色/敌怪）。 */
+   *  :63227）、DrawGore 之前——Renderer 在实体循环后调用本方法（雨幕盖角色/敌怪）。
+   *  ★C5（2026-09-26）GL 批化支前置：raingl 开且执行器窗可表达 → tryDrawRainGL
+   *  一次成批（单 drawArrays）原位入队（批 rec 落本调用点=实体后 gore 前层序零
+   *  改动）并 return;不可批/失败面整帧落下方 2D 原链（逐滴烘焙,行为不变）。 */
   drawRain(r: Renderer, world: World) {
     const w = this.weather;
     const hooks = this.hooks;
     if (!w || !hooks) return;
     if (w.cloudAlpha <= 0) return;
+    if (rainGl && this.tryDrawRainGL(r)) return;
     const ctx = r.ctx;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -749,6 +897,27 @@ export class WeatherRenderer {
     }
     ctx.restore();
     void world;
+  }
+
+  /** ★C5 雨批 GL 支（2026-09-26）：vanilla Rain.png 原样一张 GL 纹理（帧=type×4
+   *  偏移,永不重烘——tint 走顶点色,消 bakeMemoized miss 风暴）+ 逐滴构建
+   *  设备空间四边形批（buildRainBatch,矩阵拼接=执行器镜像同式同 fround 链）+
+   *  Renderer.emitRainQuadBatch 按调用点原位入队（单 drawArrays 发射）。
+   *  返回 false=不可批（无执行器窗/纹理解析败/源矩形越界）→ 调用方走 2D 原链。 */
+  private tryDrawRainGL(r: Renderer): boolean {
+    const hooks = this.hooks;
+    if (!hooks) return false;
+    const tex = getRainTex();
+    if (!tex || !(tex.width > 0) || tex.height <= 0) return false;
+    // 基 CTM：shim 窗内=执行器镜像矩阵（getTransform 返回镜像,与 2D 路径
+    // 捕获同源——f32 扩宽值,逐帧一次捕获）
+    const bt = r.ctx.getTransform();
+    const quads = buildRainBatch(
+      { a: bt.a, b: bt.b, c: bt.c, d: bt.d, e: bt.e, f: bt.f },
+      this.pool, hooks.lightAtTo, hooks.shimmerAlpha, tex.width, tex.height);
+    if (quads < 0) return false;
+    if (quads === 0) return true;       // 零活滴=两路径等价零绘制
+    return r.emitRainQuadBatch(tex, RAIN_TEX_KEY, rainBatchData, quads, replayRainBatch2D);
   }
 
   /** 雪/沙尘 precip（★r15 R15-1 拆分：原版雪=dust 76、沙尘=dust 268 走 DrawDust

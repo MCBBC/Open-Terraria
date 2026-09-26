@@ -14,7 +14,7 @@
 //    imageSmoothingEnabled 开关与横向平铺 1:1 映射
 //  · tint 为 uniform 乘法(canvas multiply+destination-in 的等价,零离屏)
 //  · WebGL2 NPOT 纹理可 REPEAT(地下带横向平铺)
-import { noteContextLostOnce } from './GLStats';
+import { noteContextLost, noteContextLostOnce } from './GLStats';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { texId, texReady } from './texId';
 import { glStatUpload, glStatTexCreate, glStatDelete, glStatDraw } from './GLStats';
@@ -68,6 +68,43 @@ void main() {
   vec2 local = dev - uDst.xy;                                 // 目标内坐标
   vec2 t = uSrcT.xy + floor(local / uDst.zw * uSrcT.zw - 1.0 / 4096.0);
   outColor = texelFetch(uTex, ivec2(t), 0);
+}`;
+
+// ---- ★C5 雨批程序（2026-09-26 rain-gl 收官刀）：逐滴四边形单 drawArrays 成批 ----
+// 【为何不用 quadSprite】雨=750 滴/帧×每滴独立光照色——quadSprite 每滴一次
+// bindTexture+drawArrays（=750 draw call/帧;trace 20260926 强降雨桶 rain 1076ms/2s
+// ≈54% 墙钟定谳批的构成面之一）且 uTint 是 per-call uniform 无法逐滴。
+// 【本程序】顶点自带 pos/uv/color（stride 7 float:pos2+uv2+col3），一次
+// drawArrays(TRIANGLES, 6N) 全量发射；blend 不在此设（SO 批走 begin 的
+// (ONE,1−SA) 基态——雨无 ADD 需求=纯 SO 单档,少一次档切换）。
+// 【像素语义】片元 c.rgb×vCol 与 2D 烘焙路径 bakeTintFrame 的
+// multiply+destination-in 同式（Rain.png α∈{0,255} 二值 → 预乘上传恒等；
+// vCol=与烘焙同一量化 tint 值 /255）——±1LSB census 登记（乘法舍入域）；
+// 采样恒 NEAREST（2D imageSmoothingEnabled=false 判例）；uv 全跨度−ε
+// （quadSprite 同款 tie 补正）。旋转边=硬边 vs Skia AA——与实体旋转 quad
+// 同族（B2b 分数路径 census 有界登记口径），非新增偏差类。
+const RAIN_VS = `#version 300 es
+uniform vec2 uCanvas;
+layout(location=0) in vec2 aPos;   // 设备 px（顶点已含世界变换,WeatherRenderer 构建）
+layout(location=1) in vec2 aUv;    // 图集 uv
+layout(location=2) in vec3 aCol;   // 逐滴光照 tint（0..1）
+out vec2 vUv;
+out vec3 vCol;
+void main() {
+  gl_Position = vec4(aPos.x / uCanvas.x * 2.0 - 1.0,
+                     1.0 - aPos.y / uCanvas.y * 2.0, 0.0, 1.0);
+  vUv = aUv; vCol = aCol;
+}`;
+
+const RAIN_FS = `#version 300 es
+precision mediump float;
+uniform sampler2D uTex;
+in vec2 vUv;
+in vec3 vCol;
+out vec4 outColor;
+void main() {
+  vec4 c = texture(uTex, vUv);
+  outColor = vec4(c.rgb * vCol, c.a);   // 预乘纹理×顶点色 = 烘焙 multiply 同式
 }`;
 
 const VERT_SRC = `#version 300 es
@@ -213,6 +250,13 @@ export class GLSpriteLayer {
   private progTile: WebGLProgram | null = null;
   private progTileHandle: PipelineProgram | null = null;
   private uniTile: Record<string, WebGLUniformLocation | null> = {};
+  /** ★C5 雨批程序（RAIN_*_SRC——见注;惰性编译/登记,失败 rainFail 恒走 2D 兜底） */
+  private rainProg: WebGLProgram | null = null;
+  private rainProgHandle: PipelineProgram | null = null;
+  private rainUni: Record<string, WebGLUniformLocation | null> = {};
+  private rainVao: WebGLVertexArrayObject | null = null;
+  private rainVbo: WebGLBuffer | null = null;
+  private rainFail = false;
   private vao: WebGLVertexArrayObject | null = null;
   private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null } =
     { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
@@ -976,6 +1020,87 @@ export class GLSpriteLayer {
     return true;
   }
 
+  /** ★C5 雨批程序惰性装配（quadTile 同款失败面:rainFail=true 恒走 2D 兜底）。
+   *  管线模式走 pipe.program('sprite:rain') 按名登记（禁单删判例——程序表归
+   *  pipe.dispose 整表清理）;独立上下文模式走 trail 同款本地编译。
+   *  VAO:location0=aPos(vec2)/1=aUv(vec2)/2=aCol(vec3),stride 28B（7 float）,
+   *  顶点数据由调用方每帧 STREAM_DRAW 重传（单动态源上传=IOSurface 零新增——
+   *  复用本层单 VBO,无逐帧建面）。 */
+  private ensureRain(): boolean {
+    if (this.rainFail) return false;
+    if (this.rainProg) return true;
+    const gl = this.gl;
+    if (!gl) return false;
+    if (this.pipe) {
+      const p = this.pipe.program('sprite:rain', RAIN_VS, RAIN_FS);
+      if (!p.prog) { this.rainFail = true; return false; }
+      this.rainProgHandle = p;
+      this.rainProg = p.prog;
+      for (const n of ['uCanvas', 'uTex']) this.rainUni[n] = this.pipe.uni(p, n);
+    } else {
+      const mk = (type: number, src: string): WebGLShader | null => {
+        const sh = gl.createShader(type)!;
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+          console.warn('[GLSpriteLayer] rain batch shader 编译失败:', gl.getShaderInfoLog(sh));
+          gl.deleteShader(sh);
+          return null;
+        }
+        return sh;
+      };
+      const vs = mk(gl.VERTEX_SHADER, RAIN_VS);
+      const fs = mk(gl.FRAGMENT_SHADER, RAIN_FS);
+      if (!vs || !fs) { this.rainFail = true; return false; }
+      const prog = gl.createProgram()!;
+      gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.warn('[GLSpriteLayer] rain batch 程序链接失败:', gl.getProgramInfoLog(prog));
+        this.rainFail = true;
+        return false;
+      }
+      this.rainProg = prog;
+      for (const n of ['uCanvas', 'uTex']) this.rainUni[n] = gl.getUniformLocation(prog, n);
+    }
+    this.rainVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.rainVao);
+    this.rainVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rainVbo);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 28, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 28, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 28, 16);
+    gl.bindVertexArray(null);
+    return true;
+  }
+
+  /** ★C5 雨批发射口（GLShimExecutor.pushQuadBatch 消费）：N 个预变换四边形
+   *  单 drawArrays(TRIANGLES, 6N) 发射——750 滴/帧 750 draw call → 1。
+   *  data 布局 = 6 顶点/quad × 7 float（x,y,u,v,r,g,b;TRIANGLES 两三角
+   *  (p0,p1,p2)+(p0,p2,p3)）;NEAREST 采样;blend/纹理参数不在本方法设
+   *  （SO 基态由 begin 约定;纹理参数由调用方 texFromImage 兜底）。
+   *  离场还原程序态/VAO（quadTile 判例:begin 设定基础 quad 程序在场）。 */
+  quadBatch(e: TexEntry, data: Float32Array, quads: number): boolean {
+    if (this.unavailable || !this.gl || quads <= 0) return false;
+    if (!this.ensureRain()) return false;
+    const gl = this.gl;
+    gl.useProgram(this.rainProg);
+    gl.uniform2f(this.rainUni.uCanvas, this.canvas.width, this.canvas.height);
+    gl.uniform1i(this.rainUni.uTex, 0);
+    gl.bindVertexArray(this.rainVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rainVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.bindSampler(0, this.samp.nearest!);
+    gl.drawArrays(gl.TRIANGLES, 0, quads * 6);
+    glStatDraw(this.statName, quads * 6);
+    gl.bindSampler(0, null);
+    gl.bindVertexArray(this.vao);
+    gl.useProgram(this.prog);
+    return true;
+  }
+
   /** 横向平铺:dst 区间内按"dw 对应一个源周期"重复(GL REPEAT 一次画整段,
    *  替代 2D for 循环逐 tile drawImage)。纹理须以 repeatX=true 创建 */
   tileX(
@@ -1392,7 +1517,12 @@ void main(){
       if (this.trailVbo) this.gl.deleteBuffer(this.trailVbo);
       if (this.trailIbo) this.gl.deleteBuffer(this.trailIbo);
       if (this.trailWrapSampler) this.gl.deleteSampler(this.trailWrapSampler);
+      if (this.rainProg) this.gl.deleteProgram(this.rainProg);
+      if (this.rainVao) this.gl.deleteVertexArray(this.rainVao);
+      if (this.rainVbo) this.gl.deleteBuffer(this.rainVbo);
     }
+    this.rainProg = null; this.rainProgHandle = null; this.rainVao = null; this.rainVbo = null;
+    this.rainFail = false;
     this.trailProg = null; this.trailMMProg = null; this.trailVAO = null; this.trailVbo = null;
     this.trailIbo = null; this.trailWrapSampler = null;
     this.trailDirty = false;
@@ -1417,8 +1547,10 @@ void main(){
     }
     this.progHandle = null; this.progCloudHandle = null;
     this.progTileHandle = null;
+    this.rainProgHandle = null;
     this.prog = null; this.progCloud = null; this.progTile = null; this.cloudFxOK = false;
     this.uniTile = {};
+    this.rainProg = null; this.rainVao = null; this.rainVbo = null; this.rainFail = false;
     this.vao = null;
     this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.pipeFbo = null;
