@@ -1724,12 +1724,12 @@ export class StormLightning extends Entity {
         for (let bi = 0; bi < end; bi++) {
           const b = this.bolts[bi];
           const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
-          this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP);
+          this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP, bi);
         }
         if (n > end) {
           const b = this.bolts[n - 1];   // 主雷恒最后（生成序:forks…主雷收尾）
           const inten = (b.forkDepth === 0 ? 1 : 0.5 * Math.pow(0.8, b.forkDepth - 1));
-          this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP);
+          this.drawBolt(ctx, r, b, inten, progress, opacity, anim, waveInP, waveOutP, n - 1);
         }
       }
     } else {
@@ -1766,7 +1766,7 @@ export class StormLightning extends Entity {
     bolt: Bolt,
     intensity: number, progress: number, opacity: number,
     anim: { waveLen: number; waveIn: number; waveOut: number },
-    waveInP: number, waveOutP: number): void {
+    waveInP: number, waveOutP: number, bi = 0): void {
     const pts = bolt.positions;
     if (pts.length < 2) return;
     // Prepare 的 width 参（StormLightningParticle._Prepare → Spawn_StormLightning
@@ -1838,7 +1838,7 @@ export class StormLightning extends Entity {
         }
       }
     };
-    if (!StormLightning.BOLT_BAKE_OFF && intensity > 0 && this.bakeBolt(ctx, r9, pts, W, intensity, emitSlices)) {
+    if (!StormLightning.BOLT_BAKE_OFF && intensity > 0 && this.bakeBolt(ctx, r9, pts, W, intensity, emitSlices, bi)) {
       ctx.globalCompositeOperation = 'source-over';
       return;
     }
@@ -1852,7 +1852,7 @@ export class StormLightning extends Entity {
    *  返 false=走原链兜底(退化 CTM/面超 4096 帽/无 2D)。 */
   private bakeBolt(ctx: CanvasRenderingContext2D, r9: import('../render/Renderer').Renderer,
     pts: ReadonlyArray<{ x: number; y: number }>, W: number, intensity: number,
-    emit: (g: CanvasRenderingContext2D) => void): boolean {
+    emit: (g: CanvasRenderingContext2D) => void, bi = 0): boolean {
     if (typeof document === 'undefined') return false;
     const M = ctx.getTransform();
     const { a, b, c, d, e, f } = M;
@@ -1887,7 +1887,11 @@ export class StormLightning extends Entity {
     sctx.globalCompositeOperation = 'lighter';
     try { sctx.filter = ctx.filter; } catch { /* 非法值保缺省 */ }
     emit(sctx);
-    r9.markWorldDynamicScratch(sc);
+    // ★I类(2026-09-27):稳定键 bake 期立即上传——共享 boltScratch 同帧多雷烘焙
+    //   （1 实体 ≤7 bolts/ArcSurge ≤13×3 发）时,flush 期 texRefresh 全读末次字节
+    //   =先行 bolt quad 错拿内容（定谳机制链见 GLShimExecutor.uploadScratchNow）。
+    //   键=(实体 id,bolt 序号) 跨帧稳定→同纹理重传,零 createTexture 抖动。
+    r9.markWorldDynamicScratch(sc, `boltBake:${this.id}:${bi}`);
     // blit:恒等 CTM+α 钉 1(α/滤镜均已烘入 scratch)——acc shim 态=1 个 ADD quad 入队
     // (flush 时一次 texRefresh),裸 2D 态=一次 drawImage。★滤镜钉 none:shim 对
     // filter≠none 的 drawImage 走 rawDrawImage 整帧降级,而滤镜语义已由 bake 面承担

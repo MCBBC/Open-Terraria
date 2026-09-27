@@ -1992,6 +1992,12 @@ export class Arrow extends Entity {
   private ty409Ai0 = 0;
   /** localAI[0] 锁敌冷却（未锁时 30 update 一搜，:30907-30910） */
   private ty409Cd = 0;
+  /** ★BJ371 localAI[1] 节拍计数（每 AI 子步 +1 :30849；>10 且 1/3 掷开出旋/尘/
+   *  α/帧/光块 :30850-30882） */
+  private ty409L1 = 0;
+  /** ★BJ371 绘制帧 = (int)(localAI[1]/3f)%3（:30879——触发位写入;draw fIdx 链+
+   *  残影 frame 消费;触发前恒 0=原版 proj.frame 初值） */
+  private ty409Frame = 0;
   // ---- 451 涌流剑（aiStyle 81 :31541-31760，2880 涌流剑）----
   /** ai[0] 状态机：0=飞行（0↔75 alpha 脉动）/[1,1+pen)=命中后淡出+寻的瞬移/
    *  [1+pen,1+2pen)=末段淡出可伤（ai[1]<5 期豁免）。命中钩：0→+pen，否则 −(pen+1) */

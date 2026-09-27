@@ -706,6 +706,29 @@ export class GLSpriteLayer {
     return !!(this.pipe && this.pipeFbo && this.pipeFbo.name === name);
   }
 
+  /** ★liqgl 当前绑定 FBO 的纹理句柄（'liqgate' 绑定期由 emitVanillaLiquidGate 捕获;
+   *  无管线/未开会话返回 null） */
+  pipeFboTex(): WebGLTexture | null {
+    return this.pipeFbo?.tex ?? null;
+  }
+
+  /** ★liqgl gate FBO 采样参数（NEAREST CLAMP=canvas 上传 texWater 同档「原版
+   *  PointClamp 门控」——GLPipeline.fbo 统一 LINEAR,门控 α×100 饱和场的边缘
+   *  采样档必须与 canvas 路径同档:LINEAR 会在水线边缘混出中间 α=门控域半 texel
+   *  漂移）。绑定卫生同 fbo 创建判例:存/还当前单元绑定。FBO 重建（变尺寸）后
+   *  参数随纹理蒸发=每次发射重设（4 次 texParameteri,帧级可忽略）。 */
+  liqGateParams(): void {
+    if (this.unavailable || !this.gl || !this.pipeFbo?.tex) return;
+    const gl = this.gl;
+    const prev = gl.getParameter(gl.TEXTURE_BINDING_2D) as WebGLTexture | null;
+    gl.bindTexture(gl.TEXTURE_2D, this.pipeFbo.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, prev);
+  }
+
   /** 图片源(ImageBitmap/Image/canvas)入纹理;repeatX 横向 REPEAT;
    *  noMip=跳过 mip 链(超大纹理/恒放大或 NEAREST 采样的贴图:小地图/迷雾——
    *  8400×2400 的 mip 重生成是巨量 GPU churn,且它只在 zoom≥1 放大或 NEAREST

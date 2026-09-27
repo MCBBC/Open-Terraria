@@ -264,7 +264,10 @@ export class GLWorldCompose {
     world: HTMLCanvasElement | WorldTexSrc, light: HTMLCanvasElement,
     lightRect: readonly [number, number, number, number], darkSkip = 0,
     lightBand?: { canvas: HTMLCanvasElement; y: number; w: number; h: number } | null,
-    water: HTMLCanvasElement | null = null, noise: TexImageSource | null = null,
+    /** ★liqgl（2026-09-27）门控双型：HTMLCanvasElement（fgCanvas 每帧全幅上传,
+     *  canvas 原路帧）| WorldTexSrc 句柄（FBO('liqgate') 纹理直采——批化帧零上传;
+     *  发射侧 y 镜像几何=canvas 上传同朝向,NEAREST CLAMP 已在发射侧钉死） */
+    water: HTMLCanvasElement | WorldTexSrc | null = null, noise: TexImageSource | null = null,
     cssW = 0, cssH = 0, progress = 0, intensity = 0,
     waveR: Float32Array | null = null, gridW = 0, gridH = 0,
     worldX = 0, worldY = 0, waveOffX = 0, waveOffY = 0,
@@ -390,23 +393,32 @@ export class GLWorldCompose {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.fboLit.tex);
     // 前景水门控纹理
+    // ★liqgl：句柄支直绑 FBO('liqgate') 纹理（同管线共管=跨会话安全由调用方保证
+    //   ——liqMode 恒真须 acc 窗=acquireWorldGl 同管线）;canvas 支照旧全幅上传。
     gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, this.texWater);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    if (water && water.width > 0 && water.height > 0) {
+    const wHandle = (water as WorldTexSrc | null)?.tex ?? null;
+    if (wHandle) {
+      gl.bindTexture(gl.TEXTURE_2D, wHandle);
+    } else {
+      gl.bindTexture(gl.TEXTURE_2D, this.texWater);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    }
+    if (wHandle) {
+      // ★liqgl 句柄支：零上传（内容随批发射驻留 FBO）;绑定已在上方完成
+    } else if (water && (water as HTMLCanvasElement).width > 0 && (water as HTMLCanvasElement).height > 0) {
       // ★首传/变尺寸必须 texImage2D 分配存储——只 texSubImage2D 于无存储纹理=
       //   INVALID_OPERATION 静默 → 采样不完整纹理恒 (0,0,0,1) → 门控 α≡1 全屏
       //   （2026-09-23 用户实报"全屏热扭曲状"定谳,即此）
-      const kW = `${water.width}x${water.height}`;
+      const kW = `${(water as HTMLCanvasElement).width}x${(water as HTMLCanvasElement).height}`;
       if (this._texKeyWater !== kW) {
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water);
-        glStatTexCreate(this.pipeline.statName, water.width * water.height * 4);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water as HTMLCanvasElement);
+        glStatTexCreate(this.pipeline.statName, (water as HTMLCanvasElement).width * (water as HTMLCanvasElement).height * 4);
         this._texKeyWater = kW;
       } else {
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, water);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, water as HTMLCanvasElement);
       }
-      glStatUpload(this.pipeline.statName, water.width * water.height * 4);
+      glStatUpload(this.pipeline.statName, (water as HTMLCanvasElement).width * (water as HTMLCanvasElement).height * 4);
     } else {
       if (!this.texWaterEmpty) {
         this.texWaterEmpty = gl.createTexture();

@@ -235,7 +235,8 @@ function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').A
   return { head, body, legs };
 }
 import { WeatherRenderer } from './WeatherRenderer';
-import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow } from './VanillaLiquidRenderer';
+import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow,
+  liqgl, emitVanillaLiquidGate, resetLiquidBatchForFrame, type LiqBatchEmit } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample, type WaveFrameInput } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
@@ -1030,16 +1031,33 @@ const NPC_MUST_ALWAYS_DRAW = new Set([113, 114, 115, 116, 125, 126]);
 // 18 步循环、/6 换帧 = 3 帧各 6 步；gamePaused 冻结语义本仓无暂停态，恒推进（差异登记）
 let wofDrawFrameIndex = 0;
 
-// ---- 状态化 FindFrame case（WeakMap 持 counter/frame,每调用推进一次 ≈ 每 tick）----
+// ---- 状态化 FindFrame case（WeakMap 持 counter/frame;★D类 2026-09-27 重钉逻辑 tick——
+//  原版 FindFrame 每 update 调一次（NPC.cs:91626）,旧版每 draw 调用推进一次,
+//  rAF>60Hz（用户实报 120fps）动画加速;现经 tickClockSteps 按 animT 门闸,同 tick 多绘零推进）----
+
+/** ★D类重钉共门（2026-09-27,火焰族 TileFlames 同判例）：按实体 animT（每 fixedUpdate +1,
+ *  Enemy.ts:2104/2122）门闸状态机推进——返回本拍应推进步数：首绘=1、同 tick 重入=0、
+ *  跨 tick=已流逝 tick 数（钳 3：长停滞追赶无意义且放大 RNG 消耗；60fps 帧序逐位不变,
+ *  30fps 低帧率渲染不掉速）。暂停期 fixedUpdate 停摆→animT 冻结→动画冻结=原版
+ *  update 停摆语义。附修：vanillaFrameIdx 的 DebugReport 复算路径同 tick 重入不再污染态 */
+export function tickClockSteps(prev: number | undefined, animT: number): number {
+  if (prev === undefined || prev < 0) return 1;   // 首绘恒推 1 步（原版首 update 即推）
+  return Math.min(Math.max(animT - prev, 0), 3);
+}
+
 /** 鸮族 611/689 站定转头待机（NPC.cs:74383-74429 1:1,替代顺序轮播近似）:
  *  counter 每 tick +1（band 边界 1/80 掷停顿）；(counter+1)%40==39 → 重掷 band
  *  = 40×rand(3)。band0=[0,1,2,1] band1=[0,3,4,3] band2=[0,5,6,7]（各帧 10t） */
-const owlIdleStates = new WeakMap<Enemy, { counter: number }>();
+const owlIdleStates = new WeakMap<Enemy, { counter: number; tick: number }>();
 function owlIdleFrame(e: Enemy): number {
-  const s = owlIdleStates.get(e) ?? { counter: 0 };
+  const s = owlIdleStates.get(e) ?? { counter: 0, tick: -1 };
   owlIdleStates.set(e, s);
-  if (Math.trunc(s.counter) % 40 !== 0 || Math.random() * 80 < 1) s.counter += 1;
-  if ((s.counter + 1) % 40 === 39) s.counter = 40 * Math.floor(Math.random() * 3);
+  const steps = tickClockSteps(s.tick, e.animT);   // ★D类：同 tick 重入零推进（RNG 同拍不重掷）
+  for (let i = 0; i < steps; i++) {
+    if (Math.trunc(s.counter) % 40 !== 0 || Math.random() * 80 < 1) s.counter += 1;
+    if ((s.counter + 1) % 40 === 39) s.counter = 40 * Math.floor(Math.random() * 3);
+  }
+  s.tick = e.animT;
   const num113 = Math.floor((s.counter % 40) / 10);   // C# 整除((int)counter%40/10)——曾浮点除致帧号 2.5/7.3
   const num114 = Math.trunc(s.counter / 40);
   if (num114 === 0) return num113 === 3 ? 1 : num113;
@@ -1052,10 +1070,17 @@ function owlIdleFrame(e: Enemy): number {
  *  （counter 24 回卷）；2/6 地面 = 低帧抬 12→<10 每 8t +1 至 10（counter=12）、
  *  ≥10 后 6t 眨 12/11/10/11（23 回卷），腾空=13；3 每 6t 从 >7 递减回落；
  *  4/5=13。原版 ai[0]==4.1 特殊段（三段跳劈帧序）本仓 ai0 为整数不产生,备案 */
-const mimicStates = new WeakMap<Enemy, { counter: number; frame: number }>();
+const mimicStates = new WeakMap<Enemy, { counter: number; frame: number; tick: number; last: number }>();
 function mimicFrame(e: Enemy, frames: number): number {
-  const s = mimicStates.get(e) ?? { counter: 0, frame: 0 };
+  const s = mimicStates.get(e) ?? { counter: 0, frame: 0, tick: -1, last: 0 };
   mimicStates.set(e, s);
+  const steps = tickClockSteps(s.tick, e.animT);   // ★D类：同 tick 重入零推进,跨 tick 追赶
+  for (let i = 0; i < steps; i++) s.last = mimicFrameStep(s, e, frames);
+  s.tick = e.animT;
+  return s.last;
+}
+/** 状态机体（case 473 逐字;★D类拆出=一次调用≡原版 FindFrame 一次 update） */
+function mimicFrameStep(s: { counter: number; frame: number }, e: Enemy, frames: number): number {
   const ai0 = e.ai0;
   if (ai0 === 0 || ai0 === 7) { s.counter = 0; s.frame = 0; return 0; }
   if (ai0 === 1) {
@@ -1715,9 +1740,10 @@ function tintIconRect(
 // ============ 2D 网格贴图 NPC 帧引擎（FindFrame 大 switch 专属 case，NPC.cs:67295+） ============
 // 这些 NPC 的贴图是【cols×rows 二维网格】而非纵向帧条，通用 vnpc 竖切会把整行画出来
 // （画错成多倍宽）。帧索引状态机按原版 FindFrame 逐 case 1:1，供 drawNpcGrid 切格。
-// 状态 {counter,idx} 由 Renderer 持 WeakMap（每 draw 调用 = 每 tick 推进一次，
-// 等价原版 FindFrame 每 update 调一次）。
-export interface NpcGridFrameState { counter: number; idx: number }
+// 状态 {counter,idx,tick} 由 Renderer 持 WeakMap（★D类 2026-09-27：原版 FindFrame 每
+// update 调一次（NPC.cs:91626）=tick 驱动;旧版每 draw 调用推进一次,rAF>60Hz 加速——
+// 现经 Renderer.gridFrameTick 按 animT 门闸,同 tick 多绘零推进）。
+export interface NpcGridFrameState { counter: number; idx: number; tick?: number }
 
 /** 657 水晶核 Extra_186 Y 偏移表（Main.cs :23950-23986 switch(num100)，键=帧索引）。
  *  王冠 Extra_177 表同值唯 idx=6 反号（冠 +10 / 核 −10,:24003-24005），消费侧差分补正 */
@@ -3385,6 +3411,37 @@ export class Renderer {
     if (!shim?.active) return false;
     return shim.pushQuadBatchRgba(img, key, data, quads, replay);
   }
+  /** ★liqgl 液体批中介（2026-09-27 微光液体批化刀;emitPrecipQuadBatch 同构——
+   *  drawVanillaLiquids 列→顶点批的发射口,pushQuadBatchRgba 通道复用） */
+  emitLiquidQuadBatch(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean {
+    const shim = this.bglEntShim;
+    if (!shim?.active) return false;
+    return shim.pushQuadBatchRgba(img, key, data, quads, replay);
+  }
+  /** ★liqgl 批可用性预检（pass 级 all-or-nothing 判据;ga/gco 由调用方过归一后
+   *  pushQuadBatchRgba 同门复核） */
+  liqBatchAvail(): boolean {
+    const shim = this.bglEntShim;
+    return !!shim && shim.active && shim.batchAvail();
+  }
+  /** ★liqgl gate 发射收口（drawLiquids 前景支批化路径终点）：
+   *  同批数据 y 镜像重发射进 FBO('liqgate')=obj19 门控纹理;本帧句柄存
+   *  _liqGateHandle 供 compositeLight 的 compose 直采（fgCanvas 两次全幅上传退役）。
+   *  失败（GL 死/world FBO 未开）=句柄 null→compose gate=null→obj19 gate=0 恒等
+   *  直通（安全降级,登记:降级帧水扭曲缺席）。 */
+  private _liqGateHandle: { tex: WebGLTexture; w: number; h: number; flipY: number } | null = null;
+  private emitLiquidGate(w: number, h: number): void {
+    this._liqGateHandle = null;
+    const glw = this._accGlw;
+    if (!glw || glw.unavailable) return;
+    this._liqGateHandle = emitVanillaLiquidGate(glw, w, h);
+  }
+  /** ★liqgl 批钩（drawVanillaLiquids 注入面;acc 窗活性+可用性逐 pass 预检） */
+  private liqBatchHook(): LiqBatchEmit | null {
+    if (!liqgl || this._accMode !== 'acc' || !this.liqBatchAvail()) return null;
+    return { emit: (img, key, data, quads, replay) => this.emitLiquidQuadBatch(img, key, data, quads, replay) };
+  }
   /** ★B1 chunk 页纹理确保（'wpg:<idx>'/'tpg:<idx>'）。页生命周期三态:
    *  ①idx ≥ 已上传计数（新页/trim 后 idx 复用）:drop 陈旧键+texFromImage
    *    全量上传（noMip;预乘上传=画布源判例）,清该页脏标;
@@ -3619,12 +3676,20 @@ export class Renderer {
     let tripped = false;
     let cooldown = 8_000;                 // ★逐次翻倍(8→16→32→60s 封顶)
     let trips = 0;
+    // ★G类去重(2026-09-27):主画布的 contextlost 会被【window capture 哨兵+画布监听】
+    //  双路收到(捕获阶段先过 window,再达目标画布)——同一事件旧版 onLost 执行两次:
+    //  losses.push×2(熔断阈值 3 实际 1.5 次真丢失即触发)+ChunkCache.MAX_CHUNKS 每次
+    //  事件被腰斩两次(480→120 而非 480→240)+缓存失效扫双跑。按事件对象身份去重,
+    //  单事件恒计一次(canvas+window 双注册面保留:哨兵覆盖全部无守卫画布的语义不变)。
+    const seenLossEvents = new WeakSet<Event>();
     // 自动降级(用户方案 2026-08-18:不检测多实例,GPU 崩即切 CPU,稳定回切):
     // auto 模式下第 2 次熔断 → 切 CPU 软渲染 + toast;CPU 稳定 120s 后尝试回
     // GPU(立即再熔 → 切回 CPU,5 分钟内不重试)。gpu/cpu 模式不自动切。
     let lastTripAt = 0;
     let gpuRetryAfter = 0;
     const onLost = (e: Event) => {
+      if (seenLossEvents.has(e)) return;   // 同一事件双路到达(window capture+画布)只计一次
+      seenLossEvents.add(e);
       // ★写一次缓存失效扫(2026-08-19 playtrace 实证:GPU 进程死后恢复时"角色贴图
       // 不恢复,其它正常"——写一次烘焙的缓存画布(PaperDoll 合成/TintAtlas 页/云染/
       // 火焰预染/群系背景 2D 染色/墓碑)内容随后备 IOSurface 蒸发,且永不重画;
@@ -5086,8 +5151,17 @@ export class Renderer {
     //      2026-08-20;原版耀斑是 backbuffer 后处理不吃 tile 光)
     //      （月总死亡白闪已挪帧尾 7c' 段，Main.cs:61763）
 
-    // 3.5 入驻旗帜（Main.cs:40152 DrawNPCHousesInWorld：有家 NPC 在家坐标上方
-    // 挂 House_Banner 旗布 + 叠画 NPC 头像；实体层之前画，让 NPC 从旗前走过）
+    // 3.5 入驻旗帜（DrawNPCHousesInWorld：Main.cs:41414-41537，唯一调用点
+    //     DrawInterface_7_TownNPCHouseBanners :46992=UI 层——★BJ370 定谳：原版旗布
+    //     压一切（含玩家/NPC/家具；旗布天花板下第一格起、Frame(2,2) 单帧 34×42，
+    //     标准矮房垂进站人行 23px=原版常态压桌）。旧注锚 :40152 系伪锚（向导帮助
+    //     文本段）。本仓画在实体层之前=让 NPC/玩家从旗前走过=刻意偏差备案：
+    //     旗 vs 家具面两仓同相（旗压桌），实体面本仓较原版少压一层。）
+    //     ★序位同调（BJ370 普查）：击杀旗 tile 91 原版在 non-solid 扫描后、solid pass
+    //     前 spriteBatch 直绘（TileDrawing.cs:583-588 continue→:419-447 PostDrawTiles
+    //     (false)→DrawMultiTileVines :426；Main.cs:64241→:64335→:64256）——旗压
+    //     non-solid 家具=原版本相，本仓走 WindSway 层（tile 层后）同相；旗 vs solid
+    //     块面本仓反相（原版 solid pass 压旗）=像素级架构债登记。
     this.drawHouseBanners(entities, world, cam);
 
     // 3.8 拴绳实体（LeashedEntity.DrawEntities，Main.cs:22163——DrawNPCs 起手调用；
@@ -6424,30 +6498,55 @@ export class Renderer {
       const [r, g, b] = this.lighting?.lightAt(tx, ty) ?? [192, 192, 192];
       return (r + g + b) / 765;
     };
+    // ★liqgl（2026-09-27 微光液体批化+染色 GL 化刀;B3 液体 quad 旧计划语义并入;
+    //   ?liqgl=0 逃生门,灰度缺省关）:acc 窗内液体主循环批化（列→顶点批）+
+    //   微光染色顶点化（applyShimmerBaseTint 批路径退役）+warpOn 前景水 gate FBO 化
+    //   （fgCanvas 的 texRefresh 全幅上传+compose 全幅 texSubImage2D 双上传退役）。
+    //   预检失败（非 acc 帧/GL 死/旗关）=bg/fg 双路径全链回 CPU 原路（并存纪律）。
+    //   【句柄跨上下文安全】_accGlw 与 worldCompose 共用同一 swPipe 管线
+    //   （acquireWorldGl→acquireSwPipe;cloudPipe=0 时 acquireWorldGl 不可用=acc 关
+    //   =liqMode 恒 false=句柄永不产生）——'liqgate' FBO 纹理对 compose 恒同上下文。
+    const liqMode = liqgl && this._accMode === 'acc' && !this.isCpuRender();
     if (isBackground) {
+      this._liqGateHandle = null;   // 帧界复位（canvas 原路帧不得消费上帧句柄）
+      const bat = liqMode ? this.liqBatchHook() : null;
       // ★IIIII251 GL 路（★IIIII257 转正缺省开）：bg 浸润 pass 把坡面水形状 α≈0.02
       // 预画进前景离屏（本帧 fg pass beginFgPass 跳过清屏）→ obj19 门控覆盖斜坡
       // 水缘——同时是 256 坡面亮线的位移/扭曲接入面（足迹楔形 ⊇ 亮线条带）。
       // ?slopewave=0 逃生门回退灰度期行为（gate 缺席=坡面静态）。
-      const footCtx = warpOn && slopeWaveEnabled
+      // ★liqgl：足迹画布退役——足迹改四边形收集（bg 调用 gateCapture 面）,
+      // emitVanillaLiquidGate 画进 FBO('liqgate')。
+      const footCtx = !liqMode && warpOn && slopeWaveEnabled
         ? this.waterWarp.gateFootprintCtx(this.ctx.canvas.width, this.ctx.canvas.height)
         : null;
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt, this.animTick, footCtx);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt, this.animTick, footCtx,
+        bat, liqMode && warpOn);
     } else if (warpOn) {
-      const fgCtx = this.waterWarp.beginFgPass(this.ctx);
-      drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick);
-      if (fgCtx) {
-        // ★B2b:endFgPass 的 drawImage(fgCanvas) 经 shim 翻 quad——门控面逐帧重画
-        //  =动态源（texRefresh 重传;不登记=按 texId+rect 缓存陈旧纹理=水冻结）
-        const gate = this.waterWarp.gateCanvas();
-        if (gate && Renderer.bgl && Renderer.bglShim) this.bglShimReg().markDynamic(gate);
-        this.waterWarp.endFgPass(this.ctx);
+      const bat = liqMode ? this.liqBatchHook() : null;
+      if (bat) {
+        // ★liqgl：前景水直入 FBO('world')（批化段;SO 合成结合律
+        //  (w over ∅) over scene ≡ w over scene=endFgPass 1:1 合成逐位同,B1 判例）
+        //  +同批数据 y 镜像重发射 FBO('liqgate')=obj19 门控纹理（compose 直采）。
+        drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
+          world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick, null, bat, true);
+        this.emitLiquidGate(this._worldLowW, this._worldLowH);
+      } else {
+        const fgCtx = this.waterWarp.beginFgPass(this.ctx);
+        drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
+          world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick);
+        if (fgCtx) {
+          // ★B2b:endFgPass 的 drawImage(fgCanvas) 经 shim 翻 quad——门控面逐帧重画
+          //  =动态源（texRefresh 重传;不登记=按 texId+rect 缓存陈旧纹理=水冻结）
+          const gate = this.waterWarp.gateCanvas();
+          if (gate && Renderer.bgl && Renderer.bglShim) this.bglShimReg().markDynamic(gate);
+          this.waterWarp.endFgPass(this.ctx);
+        }
       }
     } else {
       drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt, this.animTick);
+        world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, false, glintLumAt, this.animTick, null,
+        liqMode ? this.liqBatchHook() : null, false);
     }
   }
 
@@ -7304,9 +7403,16 @@ export class Renderer {
   }
   /** ★P0-B（雷击风暴）:bolt 烘焙 scratch 的动态源登记——acc shim 态 flush 期
    *  texRefresh 全量重传（1 bolt/帧=1 次上传,替代旧链每 fill 一次即发即弃
-   *  rasterizePathOp 上传风暴 2000-3500 次/雷帧）。非 bgl/裸 2D 会话 no-op。 */
-  markWorldDynamicScratch(img: HTMLCanvasElement): void {
-    if (Renderer.bgl && Renderer.bglShim) this.bglShimReg().markDynamic(img);
+   *  rasterizePathOp 上传风暴 2000-3500 次/雷帧）。非 bgl/裸 2D 会话 no-op。
+   *  ★I类(2026-09-27):带 key=改走【bake 期立即上传】（uploadScratchNow）——
+   *  共享 boltScratch 同帧多次烘焙（1 实体 ≤7 bolts、ArcSurge ≤13×3 发）时
+   *  flush 期重传全部读到末次烘焙字节=先行 bolt quad 错拿内容;key 须按
+   *  (实体,bolt 序号) 稳定（跨帧同键重传,零 createTexture 抖动）。 */
+  markWorldDynamicScratch(img: HTMLCanvasElement, key?: string): void {
+    if (Renderer.bgl && Renderer.bglShim) {
+      if (key) this.bglShimReg().uploadScratchNow(img, key);
+      else this.bglShimReg().markDynamic(img);
+    }
   }
 
   /** 预乘对两步绘制（须在尘变换内调用;ox/oy = origin 偏移,缺省 −4 = 原版 (4,4)）。
@@ -10810,13 +10916,25 @@ export class Renderer {
   }
 
   // ===================== 2D 网格贴图 NPC（drawNpcGrid 切格族） =====================
-  /** 帧索引持久态（≈原版 NPC.frameCounter / NPC.frame.Y）：WeakMap 按 Enemy 持有，
-   *  每 draw 调用推进一次（与原版 FindFrame 每 update 调一次 1:1） */
+  /** 帧索引持久态（≈原版 NPC.frameCounter / NPC.frame.Y）：WeakMap 按 Enemy 持有 */
   private npcGridFrameState = new WeakMap<Enemy, NpcGridFrameState>();
   private npcGridFrame(e: Enemy): NpcGridFrameState {
     let s = this.npcGridFrameState.get(e);
     if (!s) { s = { counter: 0, idx: 0 }; this.npcGridFrameState.set(e, s); }
     return s;
+  }
+  /** ★D类重钉（2026-09-27）：原版 FindFrame 每 update 调一次（NPC.cs:91626,tick 驱动）——
+   *  旧版每 draw 调用推进一次,rAF>60Hz（用户实报 120fps）格帧机加速×2（火焰族
+   *  TileFlames 同判例）。现按 animT 门闸：首绘推 1 步、同 tick 重入零推进、跨 tick 按
+   *  elapsed 追赶（钳 3）——60fps 帧序逐位不变,暂停期随 fixedUpdate 停摆自然冻结。
+   *  附修：vanillaGridFrameIdx 的 gameplay 消费面（576/577 近挥帧窗 GetMeleeCollisionData
+   *  :96185-96235、668 斧臂帧 :96253-96278）从"每 draw 漂移"钉回每 tick 一格 */
+  private gridFrameTick(e: Enemy, step: (s: NpcGridFrameState) => number): number {
+    const s = this.npcGridFrame(e);
+    const steps = tickClockSteps(s.tick, e.animT);
+    for (let i = 0; i < steps; i++) s.idx = step(s);
+    s.tick = e.animT;
+    return s.idx;
   }
 
   /** 网格切格绘制：源格 = (col*cellW+padX, row*cellH+padY, cellW-2padX, cellH-2padY)，
@@ -10924,13 +11042,13 @@ export class Renderer {
     const img = this.atlas!.ensureVImage('vanilla/NPC_657.png');
     if (!img) return;
     const half = e.hp <= e.maxHp / 2;
-    const idx = queenSlimeNextFrame(this.npcGridFrame(e), {
+    const idx = this.gridFrameTick(e, (s) => queenSlimeNextFrame(s, {
       half,
       // 与 bossAI_lategame queenSlimeAI 的 noGravity 判定同式(:949)——
       // 渲染/AI 两处 flying 语义必须一致,否则半血 ai0∈{4,5} 飞行帧段走错
       flying: e.ai0 === 5 || (e.ai0 === 4 && e.ai2 === 0) || (half && e.ai0 === 0),
       vy: e.vy, ai0: e.ai0, ai1: e.ai1,
-    });
+    }));
     // 几何(cols/rows/cell/inflateY)查 NPC_GRIDS 单一真源(重制管线共用)
     const g = NPC_GRIDS[657]!;
     // ★shader 修齐收口：QueenSlime pass 全幅洗染（Main.cs:23964/23989/23996 三 Apply
@@ -11181,7 +11299,7 @@ export class Renderer {
   private drawDd2OgreGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage(`vanilla/NPC_${e.vanillaId}.png`);
     if (!img) return;
-    const idx = dd2OgreNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy });
+    const idx = this.gridFrameTick(e, (s) => dd2OgreNextFrame(s, { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy }));
     // 玩家接触侧回填（GetMeleeCollisionData 576/577 近挥帧窗 :96185-96235 消费，
     // 相位锚证见 Enemy.vanillaGridFrameIdx 字段注）
     e.vanillaGridFrameIdx = idx;
@@ -11200,7 +11318,7 @@ export class Renderer {
   private drawNpc696Grid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_696.png');
     if (!img) return;
-    const idx = npc696NextFrame(this.npcGridFrame(e), { ai0: e.ai0 });
+    const idx = this.gridFrameTick(e, (s) => npc696NextFrame(s, { ai0: e.ai0 }));
     const g = NPC_GRIDS[696]!;
     this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
       perRow: g.perRow, originYOff: 4, mirrorTexFaces: 'left', echoRowShift: 18,
@@ -11216,9 +11334,9 @@ export class Renderer {
   private drawDarkMageGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage(`vanilla/NPC_${e.vanillaId}.png`);
     if (!img) return;
-    const idx = darkMageNextFrame(this.npcGridFrame(e), {
+    const idx = this.gridFrameTick(e, (s) => darkMageNextFrame(s, {
       ai0: e.ai0, ai1: e.ai1, speed: Math.hypot(e.vx, e.vy),
-    });
+    }));
     const g = e.vanillaId != null ? NPC_GRIDS[e.vanillaId] : undefined;
     if (!g) return;
     this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
@@ -11249,7 +11367,7 @@ export class Renderer {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
     // 1457：攻击态帧计数读 ai[1]（AI 同步相位）
-    const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy, lai0: e.lai0 });
+    const idx = this.gridFrameTick(e, (s) => deerclopsNextFrame(s, { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy, lai0: e.lai0 }));
     // 玩家接触侧回填（GetMeleeCollisionData 668 斧臂帧判定 :96253-96278 消费）
     e.vanillaGridFrameIdx = idx;
     // 几何查 NPC_GRIDS[668]（5×5×218×240 网格基准）+ 原版 sizeOffset +2 外扩
@@ -13693,7 +13811,13 @@ export class Renderer {
     /** cWings 染料（SM2 字节码执行描述；null = 无染料） */
     dye: DyeApply | null;
   }> = [];
-  /** 均一色调 scratch（叠画 tint 精确化：RGB×tint/255 + A×alpha/255） */
+  /** 均一色调 scratch（叠画 tint 精确化：RGB×tint/255 + A×alpha/255）。
+   *  ★翼案约束（2026-09-27）：本单槽仅限【compositeLight 之后真 2D 直绘】消费者
+   *  共用（tintSlice/tintSliceRGB/addScratch——drawWingOverlay/betsy 全在
+   *  flushWingGlow=shim 窗外,烘→画相邻无插序）。shim 窗内（drawPlayer 族）消费
+   *  者【禁止】用本槽作缓存条目/跨队引用——acc-shim 链按 texId+rect 永久缓存
+   *  纹理 + 窗内多消费者互相覆写,双病（wingBakeCache 翼案判例）;此类站点一律
+   *  烘进条目自有画布（bodyAccDyeBake 同款）。 */
   private wingTintScratch: HTMLCanvasElement | null = null;
   /** 1034 星辰鞭线体全亮队列（flag3 :36747-36749 color2=color 免逐段取光——
    *  固定色不受光照合成;WhipProj 收集、flushWhipFullbright 消费） */
@@ -14455,7 +14579,27 @@ export class Renderer {
   /** ★R33 回归轮：翅膀染料烘焙缓存（时间桶 LRU）——ArmorPhase 单帧 SM2 烘焙实测
    *  232ms（184×56,最重 pass 3216B 逐像素解释器），wingTexSource 每帧重烘=4fps
    *  卡顿（用户终验实报）。桶 200ms=染料动画 ~5fps（微光闪灼语义可接受）；
-   *  键=dyeVid|tint|切片|桶(|v0Light)；上限 48 条 + 2s 修剪防膨胀。 */
+   *  键=dyeVid|tint|切片|桶(|v0Light)；上限 48 条 + 2s 修剪防膨胀。
+   *  ★翼案修复（2026-09-27 用户实报「翅膀装染料后飞行动画冻结」）：条目=
+   *  【自有画布】（烘焙直入条目本体,不再借共享单槽 wingTintScratch——B2 批之前
+   *  曾把 scratch 本体存进条目,两面俱伤）：
+   *  (a) acc-shim 链（bgl+bglshim+b2b 2026-09-24 转正=用户普通 URL）:染翼
+   *      drawImage(sc) 入 shim 队,flush 期 resolveTex 非动态支按
+   *      texId(画布)+子矩形 缓存纹理（GLShimExecutor.resolveTex→texFromRegion,
+   *      键幂等永不再传）——单槽 scratch 首帧字节被 GL 纹理永久驻留,此后每帧
+   *      染翼 draw 全部命中陈旧纹理 = 扑动冻结在首帧切片（像素探针实证
+   *      2026-09-27:缺省链翼区停驻首帧行;页内 Renderer.bglShimSetForTest(false)
+   *      回 2D 链立即恢复轮转）。无染料翼走原图直绘（tex 子矩形逐帧换键纹理
+   *      正确）故不受累 =「最近优化后出现」=B2 shim 转正窗。
+   *  (b) 裸 2D 链:同槽被同帧后续染料烘焙覆写（染甲/气球/盾球等,重置尺寸即清面）,
+   *      同桶 cache-hit 返回被覆写的槽 = 串味像素（micro-test 实证:两次不同键烘焙
+   *      之间先烘焙的条目内容被改写）。
+   *  条目自有画布 = R3-F4 bodyAccDyeBake / eyebrellaDyeCache 免冲突形态 +
+   *  WeatherRenderer.bakeMemoized F1 判例「条目对外不可变」:条目身份=键,内容仅
+   *  本键 rebake（LRU 逐出后）才变 → shim 静态纹理缓存语义正确。代价=每 miss
+   *  一次 createElement（桶 200ms,活跃键 ~5-15/秒,翼切片 ≤41KB,GC 托管;共享槽
+   *  复用被否:同 texId 重投会撞 shim 陈旧纹理键——量级可忽略,不设画布池,
+   *  债登记 wing-dye-canvas-churn）。LRU 容量闸/修剪沿用。 */
   private wingBakeCache = new Map<string, HTMLCanvasElement>();
   private wingBakeCachePruneAt = 0;
   private wingTexSource(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
@@ -14473,26 +14617,23 @@ export class Renderer {
         this.wingBakeCache.delete(this.wingBakeCache.keys().next().value as string);
       }
     }
-    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
-    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    // ★翼案修复:烘进条目自有画布（见类注 (a)/(b) 两面病灶）——零共享槽触碰
+    const sc = document.createElement('canvas');
+    sc.width = sw; sc.height = sh;
     const sctx = sc.getContext('2d', { willReadFrequently: true })!;
-    sctx.clearRect(0, 0, sw, sh);
     sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-    if (dye || tint) {
-      const id = sctx.getImageData(0, 0, sw, sh);
-      if (dye) {
-        const dyeRect = { sx, sy, sheetW: img instanceof HTMLImageElement ? img.width : img.width,
-          sheetH: img instanceof HTMLImageElement ? img.height : img.height };
-        if (litDye) this.applyDyeLitToImageData(id.data, sw, sh, dye, v0Light!, dyeRect);
-        else this.applyDyeToImageData(id.data, sw, sh, dye, dyeRect);
-      }
-      if (tint) {
-        for (let i = 0; i < id.data.length; i += 4) {
-          id.data[i] *= tint[0]; id.data[i + 1] *= tint[1]; id.data[i + 2] *= tint[2];
-        }
-      }
-      sctx.putImageData(id, 0, 0);
+    const id = sctx.getImageData(0, 0, sw, sh);
+    if (dye) {
+      const dyeRect = { sx, sy, sheetW: img.width, sheetH: img.height };
+      if (litDye) this.applyDyeLitToImageData(id.data, sw, sh, dye, v0Light!, dyeRect);
+      else this.applyDyeToImageData(id.data, sw, sh, dye, dyeRect);
     }
+    if (tint) {
+      for (let i = 0; i < id.data.length; i += 4) {
+        id.data[i] *= tint[0]; id.data[i + 1] *= tint[1]; id.data[i + 2] *= tint[2];
+      }
+    }
+    sctx.putImageData(id, 0, 0);
     this.wingBakeCache.set(cacheKey, sc);
     return sc;
   }
@@ -18529,9 +18670,11 @@ export class Renderer {
           const cssHf = st ? st.cssH : (accFbo ? accFbo.h : this.worldCanvas!.height);
           // 无扭曲帧:pass2 直采回贴=恒等（空门控+intensity=0,dryskip 判决同源）;
           // ★中性波场垫底防 uWaveSize=(0,0) 的 NaN 除法（gridW/H=1+0.5 中心值）
+          // ★liqgl：门控纹理双型——FBO('liqgate') 句柄直采（批化帧,canvas 上传退役）
+          //   优先,缺省回 fgCanvas（canvas 原路帧/?liqgl=0）
           const ok = wc.compose(
             worldArg, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand,
-            warpOn ? this.waterWarp.gateCanvas() : null,
+            warpOn ? (this._liqGateHandle ?? this.waterWarp.gateCanvas()) : null,
             warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
             cssWf, cssHf,   // ★css 兜底=世界层尺寸（防 uCssSize 除零 NaN;无扭曲帧该值不参与可见项）
             warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,

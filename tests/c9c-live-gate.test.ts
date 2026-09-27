@@ -36,22 +36,15 @@ describe('C9c live 滞回门', () => {
     expect(s.live).toBe(false);
   });
 
-  it('live 态连续 2 拍超阈 → 回退 warmup（fell=true,计数清零）', () => {
+  it('★C9c-v3 粘性 live:live 态连续坏拍不退场（lag 出场已删——弱机横跳定谳 2026-09-27）', () => {
     let s = { live: true, good: 0, bad: 0, fell: false };
     s = liveGateStep(s.live, s.good, s.bad, 50, true);
-    expect(s.live).toBe(true);            // 1 拍超阈不退（滞回）
+    expect(s.live).toBe(true);            // 1 拍超阈不退（滞回 retained）
     s = liveGateStep(s.live, s.good, s.bad, 50, true);
-    expect(s.live).toBe(false);
-    expect(s.fell).toBe(true);
-    expect(s.good).toBe(0);
-    expect(s.bad).toBe(0);
-  });
-
-  it('回退后好拍重满 8 拍可再进 live（往复治理）', () => {
-    let s = { live: true, good: 0, bad: 2, fell: true };
-    s = liveGateStep(s.live, s.good, s.bad, 50, true);    // 保持坏
-    expect(s.live).toBe(false);
-    for (let i = 0; i < 8; i++) s = liveGateStep(s.live, s.good, s.bad, 4, true);
-    expect(s.live).toBe(true);
+    expect(s.live).toBe(true);            // 旧 v2 在此退场=弱机 live/warmup 横跳源,已删
+    for (let i = 0; i < 100; i++) s = liveGateStep(s.live, s.good, s.bad, 60, true);
+    expect(s.live).toBe(true);            // 恒 live——出场只归看门狗级硬故障
+    expect(s.fell).toBe(false);
+    expect(s.bad).toBeGreaterThan(0);     // 坏拍仍计数（纯诊断面,不驱动退场）
   });
 });

@@ -8,6 +8,7 @@
 //  P6/P7 角落修正（瀑布侧/内角填充）
 //  绘制：water_N 表（48×1360：3 列变体 × 80px 动画带）按四壁裁源矩形 + 偏移贴图
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
+import type { GLSpriteLayer, TexEntry } from './GLSpriteLayer';
 import { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
@@ -45,6 +46,273 @@ export const slopeWaveEnabled = (() => {
 // 我们的 liquidType（1 水 / 2 岩浆 / 3 蜂蜜 / 4 微光）→ 原版 LiquidType（0/1/2/3）
 function toVanillaType(t: number): number {
   return t === 2 ? 1 : t === 3 ? 2 : t === 4 ? 3 : 0;
+}
+
+// ---- ★liqgl（2026-09-27 微光液体批化+染色 GL 化刀;B3 液体 quad 旧计划语义并入）----
+// 【trace 定谳（/tmp/txr-shimmer.digest.json,实机 trace 20260927T101610）】微光湖
+// 三笔成本:
+//  ① applyShimmerBaseTint self 6.77%（1116.6ms）+fillRect 300.6ms——微光基色
+//     每帧 2×2 子块 multiply（Canvas2D 无顶点色的最优近似）;实测定谳探针
+//     （scripts/_liqgl-forensic2.mjs）:acc 窗内 bg pass 走 shim tier-3 MULT quad
+//     （CPU 侧只剩 JS 数学+Proxy 面约一半）,**前景 pass 在 warpOn 时走 fgCanvas
+//     原生 2D**（beginFgPass 返回裸 ctx）= 780 次/帧原生 multiply fillRect。
+//  ② texImage2D 风暴 760ms（texRefresh 715.2ms）——fgCanvas 每帧全幅重传:
+//     endFgPass 的 drawImage(fgCanvas) 经 shim→markDynamic→texRefresh（uploads
+//     ≥1/帧,探针实证）;compose 侧 GLWorldCompose 再 texSubImage2D 全幅一次。
+//  ③ drawVanillaLiquids self 9.12%/incl 27.2%——逐 tile 发射:acc 窗内逐 tile
+//     quadSprite（bindTexture+drawArrays 各一次/格）,warpOn 前景逐 tile 原生
+//     drawImage（SHM 慢路径）。
+// 【本刀】?liqgl=1 激活:
+//  刀1 列→顶点批:主循环 tile 全部折进单 Float32Array 环（stride 8=x,y,u,v,
+//      r,g,b,a）,按纹理段单 drawArrays 发射（GLShimExecutor.pushQuadBatchRgba
+//      复用=C5b 雪沙批通道;雨刀 buildRainBatch 判例同构;prep 数组面零改动）。
+//  刀2 微光基色染色 GL 化:每微光 tile 一枚【顶点色调制 quad】——四角色 =
+//      SetShimmerVertexColors（LiquidRenderer.cs:745-759）双线性张量在裁剪角
+//      处的值（双线性场对子矩形封闭=逐位）,GPU 插值=原版逐顶点插值 1:1;
+//      applyShimmerBaseTint 在批路径退役（CPU 路径保留=?liqgl=0 逃生门）。
+//      【语义备案】批化支=原版 XNA SpriteBatch modulate 单式;现 CPU 式的
+//      canvas multiply 在半透明 dst（贴图 AA 边缘/前景 0.75/拖尾）多一项
+//      color×(1−αdst) 补正——原版无此项=批化支更贴原版;census 有界登记。
+//  刀3 gate 出生在 GPU:warpOn 前景水不再进 fgCanvas——可见水批直入
+//      FBO('world')（SO 结合律=(w over ∅) over scene ≡ w over scene,B1 判例）,
+//      同一批数据 y 镜像重发射进 FBO('liqgate')=obj19 门控纹理（compose 直采
+//      句柄,两次全幅上传全消）。坡面足迹（α≈0.02）同步改四边形收集进 gate。
+export let liqgl = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('liqgl') === '1' : false;
+export function liqglSetForTest(v: boolean): void { liqgl = v; }
+
+/** 批发射钩（Renderer 中介→GLShimExecutor.pushQuadBatchRgba;emitPrecipQuadBatch 同构） */
+export interface LiqBatchEmit {
+  emit(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean;
+}
+
+// ---- 批环（单槽跨帧复用;雨刀 rainBatchData 判例）----
+const LIQ_STRIDE = 8;                        // x,y,u,v,r,g,b,a
+const LIQ_QUAD_FLOATS = 6 * LIQ_STRIDE;      // 48
+const LIQ_RING_CAP = 16384;                  // quad/帧帽（超出=余帧回 CPU 路径,登记有界）
+const LIQ_TIE_EPS = 1 / 4096;                // quadSprite 同款 texel tie 补正（QUAD_TIE_EPS 判例）
+const _batRing = new Float32Array(LIQ_RING_CAP * LIQ_QUAD_FLOATS);
+/** 每 quad 重放面:sx,sy,sw,shSrc（dst 几何在顶点环内;重放 drawImage 取源矩形） */
+const _batMeta = new Float32Array(LIQ_RING_CAP * 4);
+let _batN = 0;                               // 本帧已入环 quad 总数
+let _batFrame = -1;                          // 环复位帧号（frameToken=animTick）
+let _batOverflow = false;                    // 帽触发位（触发后本帧余量恒 CPU 路径）
+/** gate y 镜像重发射数据槽（消费即弃,单槽同帧消费——雨刀同判例） */
+const _gateData = new Float32Array(LIQ_RING_CAP * LIQ_QUAD_FLOATS);
+/** 微光四角色单槽（shimmerCornerColors 写入,batQuad 读——消费即弃零驻留） */
+const _batCols = new Float32Array(12);
+
+/** 批段（一次发射=同纹理连续 quad 区间;可见批与 gate 重发射共用） */
+interface LiqRun { img: CanvasImageSource; key: string; start: number; quads: number; }
+/** 前景 pass 批段登记（emitVanillaLiquidGate 消费;帧界由 gateCapture 调用重置） */
+let _fgRuns: LiqRun[] = [];
+/** 坡面足迹四边形（世界坐标;gate 发射时经 wldT 折算设备——fgCanvas 足迹画布退役面） */
+interface FootQuad {
+  tex: ImageBitmap | HTMLImageElement | null; solid: boolean;
+  sx: number; sy: number; sw: number; sh: number;
+  dx: number; dy: number; dw: number; dh: number;
+}
+let _footQuads: FootQuad[] = [];
+let _footFrame = -1;
+/** 足迹世界→设备折算矩阵（bg pass 恢复世界变换后捕获;轴对齐=世界变换构造面保证） */
+const _footWld = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+
+/** 微光 tile 顶点色四角（SetShimmerVertexColors :745-759 双线性张量在裁剪角的值）。
+ *  c00..c11=tile 四角整数坐标基色（4×shimmerWave）;裁剪角 (u,v) 处 = 张量双线性——
+ *  双线性场对子矩形封闭 ⇒ GPU 对裁剪 quad 的顶点插值=原版整格插值场的受限重_param,
+ *  逐位等价（正交投影下仿射=GPU 透视校正退化）。out 写调用方槽（零分配）。 */
+function shimmerCornerColors(
+  x: number, y: number, tVis: number,
+  uL: number, uR: number, vT: number, vB: number,
+  out: Float32Array, o: number,
+): void {
+  const c00 = shimmerBaseColorF(x, y, tVis), c10 = shimmerBaseColorF(x + 1, y, tVis);
+  const c01 = shimmerBaseColorF(x, y + 1, tVis), c11 = shimmerBaseColorF(x + 1, y + 1, tVis);
+  const bil = (u: number, v: number, k: number): number =>
+    c00[k] * (1 - u) * (1 - v) + c10[k] * u * (1 - v) + c01[k] * (1 - u) * v + c11[k] * u * v;
+  // 角序 = 顶点序 v0 TL / v1 TR / v2 BR / v3 BL（入环序一致）
+  const corners: readonly (readonly [number, number])[] = [[uL, vT], [uR, vT], [uR, vB], [uL, vB]];
+  for (let ci = 0; ci < 4; ci++) {
+    const [u, v] = corners[ci];
+    out[o + ci * 3] = bil(u, v, 0) / 255;
+    out[o + ci * 3 + 1] = bil(u, v, 1) / 255;
+    out[o + ci * 3 + 2] = bil(u, v, 2) / 255;
+  }
+}
+
+/** 2D tile quad 入批环（设备空间;uv=全跨度−ε tie 补正,quadSprite 同式）。
+ *  r=g=b=1 → 恒等调制;微光 tile 传四角逐通道色。 */
+function batQuad(
+  sx: number, sy: number, sw: number, shSrc: number, texW: number, texH: number,
+  dx0: number, dy0: number, dw: number, dh: number, a: number,
+  cols: Float32Array | null, colOff: number,
+): boolean {
+  if (_batN >= LIQ_RING_CAP) { _batOverflow = true; return false; }
+  const o = _batN * LIQ_QUAD_FLOATS;
+  const ua = (sx - LIQ_TIE_EPS) / texW, ub = (sx + sw - LIQ_TIE_EPS) / texW;
+  const va = (sy - LIQ_TIE_EPS) / texH, vb = (sy + shSrc - LIQ_TIE_EPS) / texH;
+  const D = _batRing;
+  const r0 = cols ? cols[colOff] : 1, g0 = cols ? cols[colOff + 1] : 1, b0 = cols ? cols[colOff + 2] : 1;
+  const r1 = cols ? cols[colOff + 3] : 1, g1 = cols ? cols[colOff + 4] : 1, b1 = cols ? cols[colOff + 5] : 1;
+  const r2 = cols ? cols[colOff + 6] : 1, g2 = cols ? cols[colOff + 7] : 1, b2 = cols ? cols[colOff + 8] : 1;
+  const r3 = cols ? cols[colOff + 9] : 1, g3 = cols ? cols[colOff + 10] : 1, b3 = cols ? cols[colOff + 11] : 1;
+  const x1 = dx0 + dw, y1 = dy0 + dh;
+  // TRIANGLES 两三角 (p0,p1,p2)+(p0,p2,p3)（buildRainBatch 同式）
+  D[o] = dx0; D[o + 1] = dy0; D[o + 2] = ua; D[o + 3] = va; D[o + 4] = r0; D[o + 5] = g0; D[o + 6] = b0; D[o + 7] = a;
+  D[o + 8] = x1; D[o + 9] = dy0; D[o + 10] = ub; D[o + 11] = va; D[o + 12] = r1; D[o + 13] = g1; D[o + 14] = b1; D[o + 15] = a;
+  D[o + 16] = x1; D[o + 17] = y1; D[o + 18] = ub; D[o + 19] = vb; D[o + 20] = r2; D[o + 21] = g2; D[o + 22] = b2; D[o + 23] = a;
+  D[o + 24] = dx0; D[o + 25] = dy0; D[o + 26] = ua; D[o + 27] = va; D[o + 28] = r0; D[o + 29] = g0; D[o + 30] = b0; D[o + 31] = a;
+  D[o + 32] = x1; D[o + 33] = y1; D[o + 34] = ub; D[o + 35] = vb; D[o + 36] = r2; D[o + 37] = g2; D[o + 38] = b2; D[o + 39] = a;
+  D[o + 40] = dx0; D[o + 41] = y1; D[o + 42] = ua; D[o + 43] = vb; D[o + 44] = r3; D[o + 45] = g3; D[o + 46] = b3; D[o + 47] = a;
+  const m = _batN * 4;
+  _batMeta[m] = sx; _batMeta[m + 1] = sy; _batMeta[m + 2] = sw; _batMeta[m + 3] = shSrc;
+  _batN++;
+  return true;
+}
+
+/** 批段 2D 降级重放（GLShimExecutor.replay2D 经 rec.batch.replay 调用;宁回退不丢精灵）。
+ *  恒等 tile:drawImage 原参;微光 tile:drawImage+2×2 子块 multiply（顶点环内四角色
+ *  重构双线性——降级帧已是灾难路径,census 有界登记:子块中心相对 quad 而非 tile）。 */
+function replayLiqRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads: number,
+  tex: CanvasImageSource): void {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  const D = _batRing;
+  for (let q = 0; q < quads; q++) {
+    const o = (startQuad + q) * LIQ_QUAD_FLOATS;
+    const m = (startQuad + q) * 4;
+    const dw = D[o + 8] - D[o], dh = D[o + 41] - D[o + 1];
+    if (dw <= 0 || dh <= 0) continue;
+    ctx.globalAlpha = D[o + 7];
+    ctx.drawImage(tex, _batMeta[m], _batMeta[m + 1], _batMeta[m + 2], _batMeta[m + 3],
+      D[o], D[o + 1], dw, dh);
+    const r0 = D[o + 4], g0 = D[o + 5], b0 = D[o + 6];
+    const r1 = D[o + 12], g1 = D[o + 13], b1 = D[o + 14];
+    const r2 = D[o + 20], g2 = D[o + 21], b2 = D[o + 22];
+    const r3 = D[o + 44], g3 = D[o + 45], b3 = D[o + 46];
+    if (r0 !== 1 || g0 !== 1 || b0 !== 1 || r1 !== 1 || g1 !== 1 || b1 !== 1
+      || r2 !== 1 || g2 !== 1 || b2 !== 1 || r3 !== 1 || g3 !== 1 || b3 !== 1) {
+      // 微光调制 quad:2×2 子块 multiply（顶点色域即裁剪角域,u/v 取子块中心）
+      const subW = Math.ceil(dw / 2), subH = Math.ceil(dh / 2);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'multiply';
+      for (let by = 0; by < 2; by++) {
+        for (let bx = 0; bx < 2; bx++) {
+          const bw = Math.min(subW, dw - bx * subW), bh = Math.min(subH, dh - by * subH);
+          if (bw <= 0 || bh <= 0) continue;
+          const u = (bx * subW + bw / 2) / dw, v = (by * subH + bh / 2) / dh;
+          const ch = (k: number): number => {
+            const c0 = k === 0 ? r0 : k === 1 ? g0 : b0;
+            const c1 = k === 0 ? r1 : k === 1 ? g1 : b1;
+            const c2 = k === 0 ? r2 : k === 1 ? g2 : b2;
+            const c3 = k === 0 ? r3 : k === 1 ? g3 : b3;
+            return 255 * (c0 * (1 - u) * (1 - v) + c1 * u * (1 - v) + c2 * (1 - u) * v + c3 * u * v);
+          };
+          ctx.fillStyle = `rgb(${Math.round(ch(0))},${Math.round(ch(1))},${Math.round(ch(2))})`;
+          ctx.fillRect(D[o] + bx * subW, D[o + 1] + by * subH, bw, bh);
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
+  }
+  ctx.restore();
+}
+
+/** ★liqgl gate 发射（Renderer.drawLiquids 前景支收口调用）：同一批数据 y 镜像
+ *  重发射进 FBO('liqgate')（= obj19 门控纹理;canvas 采样朝向 v=0=顶 ↔ FBO 行 0=
+ *  GL 底 ⇒ 设备 y'=H−y 几何镜像、uv 不动=门控图与 canvas 上传同朝向）。
+ *  前置:坡面足迹四边形先画（=fgCanvas 足迹 α≈0.02 同语义）。
+ *  返回句柄（WorldTexSrc 形,flipY=0=预翻转几何）=null=发射失败（调用方本帧
+ *  gate=null→obj19 gate=0 恒等直通,安全）。
+ *  【绑定卫生】begin('liqgate') 换绑管线当前 FBO,离场 begin('world', false)
+ *  续交回世界层（同名幂等重租,clear=false 不清量——flushAcc isAccumOpen('world')
+ *  判据不受扰）。 */
+export function emitVanillaLiquidGate(
+  glw: GLSpriteLayer, W: number, H: number,
+): { tex: WebGLTexture; w: number; h: number; flipY: number } | null {
+  if (glw.unavailable || W <= 0 || H <= 0) return null;
+  if (!glw.isAccumOpen('world')) return null;   // 防 stale FBO 续交（flushAcc begin(clear) 判据同门）
+  glw.begin('liqgate', true);
+  if (glw.unavailable) return null;
+  let ok = true;
+  // 足迹（世界→设备折算;先于水=fgCanvas 足迹先画同序）
+  if (_footQuads.length) {
+    const { a, b, c, d, e, f } = _footWld;
+    for (const q of _footQuads) {
+      const ex0 = a * q.dx + c * q.dy + e, ey0 = b * q.dx + d * q.dy + f;
+      const ex1 = a * (q.dx + q.dw) + c * (q.dy + q.dh) + e, ey1 = b * (q.dx + q.dw) + d * (q.dy + q.dh) + f;
+      const dx = Math.min(ex0, ex1), dy = Math.min(ey0, ey1);
+      const dw = Math.abs(ex1 - ex0), dh = Math.abs(ey1 - ey0);
+      if (dw <= 0 || dh <= 0) continue;
+      // y 镜像:rect [dy,dy+dh] → [H−dy−dh, H−dy]
+      const gy = H - dy - dh;
+      if (q.solid) {
+        glw.quadSprite(whiteEntry(glw), 0, 0, 1, 1, dx, gy, dw, dh,
+          { alpha: 0.02, tint: [0.5, 0.5, 0.5] });
+      } else if (q.tex) {
+        const te = glw.texFromRegion(`er:${texId(q.tex)}:${q.sx},${q.sy},${q.sw},${q.sh}`,
+          q.tex, q.sx, q.sy, q.sw, q.sh);
+        if (te) glw.quadSprite(te, 0, 0, q.sw, q.sh, dx, gy, dw, dh, { alpha: 0.02 });
+      }
+    }
+  }
+  // 水批段:y 镜像重发射（同 uv/tint/α——gate 只读 α,obj19 ×100 饱和）
+  for (const run of _fgRuns) {
+    const nF = run.quads * LIQ_QUAD_FLOATS;
+    const src = run.start * LIQ_QUAD_FLOATS;
+    const G = _gateData;
+    for (let i = 0; i < nF; i += LIQ_STRIDE) {
+      G[src + i] = _batRing[src + i];
+      G[src + i + 1] = H - _batRing[src + i + 1];   // y 镜像（逐顶点）
+      for (let k = 2; k < LIQ_STRIDE; k++) G[src + i + k] = _batRing[src + i + k];
+    }
+    const e = glw.texFromImage(run.key, run.img as TexImageSource, false, true);
+    if (!e || !glw.quadBatchRgba(e, G.subarray(src, src + nF), run.quads)) { ok = false; break; }
+  }
+  glw.liqGateParams();
+  const tex = glw.pipeFboTex();       // 'liqgate' 绑定期捕获
+  glw.begin('world', false);          // 续交回世界层（不清量）
+  if (!ok || !tex) return null;
+  return { tex, w: W, h: H, flipY: 0 };
+}
+
+/** white 1×1 entry（GLShimExecutor.WHITE_E 同式;模块缓存防重复建面） */
+const _whiteCache = new WeakMap<GLSpriteLayer, TexEntry>();
+function whiteEntry(glw: GLSpriteLayer): TexEntry {
+  const hit = _whiteCache.get(glw);
+  if (hit && glw.texAlive(hit)) return hit;
+  const c = document.createElement('canvas');
+  c.width = 1; c.height = 1;
+  const x = c.getContext('2d')!;
+  x.fillStyle = '#fff';
+  x.fillRect(0, 0, 1, 1);
+  const e = glw.texFromImage('__liqwhite', c, false, true)!;
+  _whiteCache.set(glw, e);
+  return e;
+}
+
+/** 帧界批状态复位（Renderer 世界段前调用;frameToken 变化亦自愈复位） */
+export function resetLiquidBatchForFrame(frame: number): void {
+  if (_batFrame !== frame) {
+    _batFrame = frame; _batN = 0; _batOverflow = false; _fgRuns = [];
+  }
+  if (_footFrame !== frame) {
+    _footFrame = frame; _footQuads = [];
+  }
+}
+
+/** 微光 sparkle 顶点色诊断面（测试/探针直读四角双线性色;纯函数） */
+export function shimmerCornerColorsForTest(
+  x: number, y: number, tVis: number,
+  uL: number, uR: number, vT: number, vB: number,
+): [number, number, number][] {
+  const out = new Float32Array(12);
+  shimmerCornerColors(x, y, tVis, uL, uR, vT, vB, out, 0);
+  const r: [number, number, number][] = [];
+  for (let i = 0; i < 4; i++) r.push([out[i * 3], out[i * 3 + 1], out[i * 3 + 2]]);
+  return r;
 }
 
 /** LiquidCache.IsSolid（LiquidRenderer.cs:198 → WorldGen.SolidOrSlopedTile :70515-70537）
@@ -408,6 +676,12 @@ export function drawVanillaLiquids(
    *  ?slopewave=1 时给 waterWarp.gateFootprintCtx()——浸润 pass 把坡面水形状
    *  以 α≈0.02 预画进去,obj19 门控由此覆盖斜坡水缘。null=不画） */
   gateFootprintCtx?: CanvasRenderingContext2D | null,
+  /** ★liqgl 批发射钩（列→顶点批;null=CPU 原链。Renderer 在 liqgl+acc 窗传入——
+   *  pass 级 all-or-nothing:可用性预检失败整 pass 走 CPU 原链,中途不换道） */
+  bat?: LiqBatchEmit | null,
+  /** ★liqgl gate 采集（warpOn 且批化时 bg/fg 都传 true:bg=足迹四边形收集替代
+   *  fgCanvas 足迹画布;fg=水批段登记供 emitVanillaLiquidGate 重发射） */
+  gateCapture?: boolean,
 ): void {
   if (!atlas) { _liqDebug.atlasReady = false; return; }
   const PAD = 2;
@@ -758,6 +1032,31 @@ export function drawVanillaLiquids(
   const wldT = ctx.getTransform();
   const devSX = wldT.a, devSY = wldT.d, devTE = wldT.e, devTF = wldT.f;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // ---- ★liqgl 批通道（列→顶点批;pass 级 all-or-nothing——预检在 Renderer 侧,
+  //  此处仅防御:帧环复位/帽溢出/非轴对齐 CTM 回 CPU 原链）----
+  resetLiquidBatchForFrame(frameToken ?? -1);
+  let batOn = !!bat && frameToken !== undefined && !_batOverflow
+    && wldT.b === 0 && wldT.c === 0;
+  let runStart = _batN;
+  let runImg: CanvasImageSource | null = null;
+  let runKey = '';
+  let tVisCache = -1;   // 微光 tVis 每 pass 取一次（visEffectFrames 渲染段内不变）
+  const flushRun = (): void => {
+    const quads = _batN - runStart;
+    if (quads <= 0 || !runImg || !bat) return;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    const img = runImg, s0 = runStart, nQ = quads, k = runKey;
+    bat.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
+      (raw) => replayLiqRun2D(raw, s0, nQ, img));
+    if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ });
+    runStart = _batN;
+    runImg = null;
+  };
+  if (gateCapture && isBackground) {
+    _footWld.a = wldT.a; _footWld.b = wldT.b; _footWld.c = wldT.c;
+    _footWld.d = wldT.d; _footWld.e = wldT.e; _footWld.f = wldT.f;
+  }
   for (let lx = bx0; lx <= bx1; lx++) {
     const x = px0 + lx;
     for (let ly = by0; ly <= by1; ly++) {
@@ -816,64 +1115,92 @@ export function drawVanillaLiquids(
       // ②sparkle 层：源矩形 X+48（water_14 的第 4 列 16px 闪纹带）、Y+80×GetShimmerFrame
       // 16 帧动画，仅 flag（非内部/瀑布帧）或 (x+y)%2==0 的格子画（:720-729）
       // ③sparkle 顶点色 = GetShimmerGlitterColor 漂移彩虹 + 呼吸 alpha（:766-790）
-      // Canvas 无逐顶点色：基底层 2×2 子块双线性 multiply（applyShimmerBaseTint，
-      // 薄边缘条 sw<8 跳过防透明像素被压暗）；sparkle 用离线染色变体（hue 16 档量化）、
-      // alpha 取四角均值
+      // ★liqgl 批路径：①=顶点色调制单 quad（GPU 插值=原版逐顶点插值 1:1）;
+      //   CPU 原链保留 canvas multiply 2×2 子块近似（applyShimmerBaseTint）。
       if (vt === 3) {
-        // 微光分支以 x*16 为参照（applyShimmerBaseTint 的 u/v 归一化）→ 恢复世界
-        // 变换按世界像素绘制（微光液稀疏，逐 tile 切换开销可忽略）
-        ctx.setTransform(wldT);
-        // ★2026-09-27 重钉（火苗速率案普查株连）：旧 (nowMs/1000)*60 = 墙钟折帧
-        //  近似 Main.timeForVisualEffects（暂停/宕帧漂移,与 FlickerClock.tick 的
-        //  tick 面分叉）——改消费 visEffectFrames()（逐 tick 计数器,stepVisEffectTick
-        //  每 fixedUpdate +1;C 批改型 2026-08-31 同判例同钟面）。
-        const tVis = visEffectFrames();                        // Main.timeForVisualEffects（帧计数,1458 Main.cs:17340）
-        ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
-        ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dstX, dstY, sw, drawSh);
-        if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
+        // ★2026-09-27 重钉（火苗速率案普查株连）：消费 visEffectFrames()（逐 tick
+        //  计数器,stepVisEffectTick 每 fixedUpdate +1;C 批改型 2026-08-31 同判例
+        //  同钟面）——渲染段内计数器不变,每 pass 取一次（原逐 tile 读同值）。
+        const tVis = tVisCache < 0 ? (tVisCache = visEffectFrames()) : tVisCache;   // Main.timeForVisualEffects（帧计数,1458 Main.cs:17340）
         const flag = shimmerSparkleGate(sx, sy);               // :717（★FX61：曾误写 !(A||B)=∧，表层格彩虹条整缺）
-        if (flag || (x + y) % 2 === 0) {
-          // alpha = 像素亮度（tintSparkleBand 已把灰度写进 alpha）× 四角
-          // GetShimmerGlitterOpacity 均值。四角均值与原版逐顶点双线性插值的面积均值
-          // 数值等价（全网格采样验证平均差 0.0000），top（=有干燥邻边的表层/边缘格，
-          // :719 flag=true）四角恒 0.5；body（全浸没 (sx,sy)=(16,48) 内部格）复算
-          // 均值 0.09 / 峰值 0.34 → 星点恒为极淡彩虹（近白微闪）。注意 sparkle 不乘
-          // 前景 0.75/背景 1 系数——SetShimmerVertexColors_Sparkle :732-743 直接
-          // ×= ptr->Opacity
-          const ga = (shimmerGlitterOpacity(flag, x, y, tVis)
-            + shimmerGlitterOpacity(flag, x + 1, y, tVis)
-            + shimmerGlitterOpacity(flag, x, y + 1, tVis)
-            + shimmerGlitterOpacity(flag, x + 1, y + 1, tVis)) * 0.25;  // :773-790
-          if (ga > 0.02) {
-            const fr = shimmerFrame(flag, x, y, tVis);         // :791-801
-            // :716 sparkle 前把 sourceRectangle 重置回原始 SourceRectangle 再加偏移——
-            // 表面格的基底层虽强制切 Y=1280（:700），但 sparkle 的 Y 用的是原始 sy+80*fr
-            // （shimmerSparkleSource）。旧实现误用 1280+80*fr：表面格 sparkle 几乎全部
-            // 越界被跳过（=表层"彩虹条"消失），仅 fr=0 时命中 Y=1280 的黑底块反而画出黑斑。
-            const [sSrcX, sSrcY] = shimmerSparkleSource(sx, sy, fr);
-            if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
-              const hue = shimmerGlitterHue(x, y, tVis);       // :768 彩虹相位（纯函数单源）
-              const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)
-                + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
-              const spark = shimmerSparkleTint(tex, hueIdx);   // 染色带；null 则退回原图（无彩虹）
-              ctx.save();
-              // 原版 sparkle pass 是【加色叠加】非 source-over：GetShimmerGlitterColor
-              // :766-771 先 color.A=0 再 vector4×glitter → 顶点 alpha 恒 0、RGB 已预乘
-              // glitter 强度；tileBatch = SpriteBatch 默认 AlphaBlend（预乘 (One,
-              // InvSrcAlpha)，TileBatch.Begin :216）→ 最终像素 = 基底 + 灰度纹素×彩虹×
-              // glitter×tileOpacity，黑底纹素贡献恰为 0、基色不被替换。旧实现 source-over
-              // 以饱和彩虹【替换】基色（dst×(1-a)+彩虹×a）→ body 星点呈高可见度彩色块
-              // （用户实测"闪光点变成彩色的"），改 'lighter' 后 body 星点 = 基底上微弱
-              // 增亮的近白微闪、表面白基底上呈漂移彩虹条（与原版一致）。
-              ctx.globalCompositeOperation = 'lighter';
-              ctx.globalAlpha = Math.min(1, opacity[i] * ga);
-              ctx.drawImage(spark ?? tex, sSrcX + (spark ? -48 : 0), sSrcY, sw, sh,
-                dstX, dstY, sw, sh);
-              ctx.restore();
-            }
+        const wantSpark = flag || (x + y) % 2 === 0;
+        // alpha = 像素亮度（tintSparkleBand 已把灰度写进 alpha）× 四角
+        // GetShimmerGlitterOpacity 均值。四角均值与原版逐顶点双线性插值的面积均值
+        // 数值等价（全网格采样验证平均差 0.0000），top（=有干燥邻边的表层/边缘格，
+        // :719 flag=true）四角恒 0.5；body（全浸没 (sx,sy)=(16,48) 内部格）复算
+        // 均值 0.09 / 峰值 0.34 → 星点恒为极淡彩虹（近白微闪）。注意 sparkle 不乘
+        // 前景 0.75/背景 1 系数——SetShimmerVertexColors_Sparkle :732-743 直接
+        // ×= ptr->Opacity
+        const sparkGa = wantSpark ? (shimmerGlitterOpacity(flag, x, y, tVis)
+          + shimmerGlitterOpacity(flag, x + 1, y, tVis)
+          + shimmerGlitterOpacity(flag, x, y + 1, tVis)
+          + shimmerGlitterOpacity(flag, x + 1, y + 1, tVis)) * 0.25 : 0;  // :773-790
+        const doSpark = wantSpark && sparkGa > 0.02;
+        let batched = false;
+        if (batOn) {
+          // ★liqgl 刀2：基底层+波色 = 【顶点色调制单 quad】——原版
+          //  SetShimmerVertexColors（LiquidRenderer.cs:745-759）SpriteBatch modulate
+          //  1:1（out = tex.premul × baseColor × opacity,GPU 顶点插值=原版逐顶点
+          //  插值）;applyShimmerBaseTint 的 canvas multiply 2×2 子块近似在本路径
+          //  退役（CPU 原链保留=?liqgl=0 逃生门;语义差=canvas multiply 半透明 dst
+          //  补正项 color×(1−αdst)——原版无此项=批化支更贴原版,census 有界登记）。
+          if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; }
+          const gaT = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
+          // 裁剪角 (u,v)（tile 内归一）——双线性场对子矩形封闭=顶点插值逐位等价
+          // （正交投影下 GPU 仿射插值,见 shimmerCornerColors 注）
+          const uL = (dstX - x * 16) / 16, uR = (dstX + sw - x * 16) / 16;
+          const vT = (dstY - y * 16) / 16, vB = (dstY + drawSh - y * 16) / 16;
+          shimmerCornerColors(x, y, tVis, uL, uR, vT, vB, _batCols, 0);
+          const sex0 = dstX * devSX + devTE, sey0 = dstY * devSY + devTF;
+          const sex1 = (dstX + sw) * devSX + devTE, sey1 = (dstY + drawSh) * devSY + devTF;
+          if (batQuad(sx, srcY, sw, waveSrcH, tex.width, tex.height,
+            sex0, sey0, sex1 - sex0, sey1 - sey0, gaT, _batCols, 0)) {
+            batched = true;
+            if (doSpark) flushRun();   // sparkle=ADD quad,须在基底层批段之后（层序）
+          } else {
+            batOn = false;             // 帽溢出:批段收尾,本 tile 落 CPU 原链
+            flushRun();
           }
         }
-        ctx.setTransform(1, 0, 0, 1, 0, 0);   // 回身份变换（设备像素主循环）
+        if (!batched) {
+          // 微光分支以 x*16 为参照（applyShimmerBaseTint 的 u/v 归一化）→ 恢复世界
+          // 变换按世界像素绘制（微光液稀疏，逐 tile 切换开销可忽略）
+          ctx.setTransform(wldT);
+          ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
+          ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dstX, dstY, sw, drawSh);
+          if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
+        }
+        if (doSpark) {
+          if (batched) ctx.setTransform(wldT);
+          const fr = shimmerFrame(flag, x, y, tVis);         // :791-801
+          // :716 sparkle 前把 sourceRectangle 重置回原始 SourceRectangle 再加偏移——
+          // 表面格的基底层虽强制切 Y=1280（:700），但 sparkle 的 Y 用的是原始 sy+80*fr
+          // （shimmerSparkleSource）。旧实现误用 1280+80*fr：表面格 sparkle 几乎全部
+          // 越界被跳过（=表层"彩虹条"消失），仅 fr=0 时命中 Y=1280 的黑底块反而画出黑斑。
+          const [sSrcX, sSrcY] = shimmerSparkleSource(sx, sy, fr);
+          if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
+            const hue = shimmerGlitterHue(x, y, tVis);       // :768 彩虹相位（纯函数单源）
+            const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)
+              + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
+            const spark = shimmerSparkleTint(tex, hueIdx);   // 染色带；null 则退回原图（无彩虹）
+            ctx.save();
+            // 原版 sparkle pass 是【加色叠加】非 source-over：GetShimmerGlitterColor
+            // :766-771 先 color.A=0 再 vector4×glitter → 顶点 alpha 恒 0、RGB 已预乘
+            // glitter 强度；tileBatch = SpriteBatch 默认 AlphaBlend（预乘 (One,
+            // InvSrcAlpha)，TileBatch.Begin :216）→ 最终像素 = 基底 + 灰度纹素×彩虹×
+            // glitter×tileOpacity，黑底纹素贡献恰为 0、基色不被替换。旧实现 source-over
+            // 以饱和彩虹【替换】基色（dst×(1-a)+彩虹×a）→ body 星点呈高可见度彩色块
+            // （用户实测"闪光点变成彩色的"），改 'lighter' 后 body 星点 = 基底上微弱
+            // 增亮的近白微闪、表面白基底上呈漂移彩虹条（与原版一致）。
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.min(1, opacity[i] * sparkGa);
+            ctx.drawImage(spark ?? tex, sSrcX + (spark ? -48 : 0), sSrcY, sw, sh,
+              dstX, dstY, sw, sh);
+            ctx.restore();
+          }
+          if (batched) ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        if (!batched) ctx.setTransform(1, 0, 0, 1, 0, 0);   // 回身份变换（设备像素主循环）
         continue;
       }
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
@@ -885,23 +1212,39 @@ export function drawVanillaLiquids(
       const dy0 = hasVisA[at(lx, ly - 1)] ? Math.ceil(ey0) : Math.floor(ey0);
       const dw = Math.ceil(ex1) - dx0, dh = Math.ceil(ey1) - dy0;
       if (dw <= 0 || dh <= 0) continue;
-      ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
-      ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dx0, dy0, dw, dh);
       // 波光 tint（FilterWaterDistortion :106-111；仅表层 + 前景 pass，阈值 0.03 跳弱波）。
       // ★warpMode 下仍画（进离屏随位移场整体扭动——原版 glint 加在全屏 pass 输出上，
-      //   位置与波前水线一致）；波光仅 q>0 门，不受 warpMode 关闭影响
-      if (waterWaves.quality > 0 && !isBackground && hasTE[i]) {
-        const gl = waterWaves.sampleGlint(x * 16 + 8, y * 16 + 8, lumAt?.(x, y) ?? 0.75);
-        if (gl > 0.03) {
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = Math.min(1, gl * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(dx0, dy0, dw, dh);
-          ctx.globalCompositeOperation = 'source-over';
+      //   位置与波前水线一致）；波光仅 q>0 门，不受 warpMode 关闭影响。
+      //   采样前置（批化分支也要做 doGlint 判削;sampleGlint 纯采样无副作用）
+      const glintOn = waterWaves.quality > 0 && !isBackground && hasTE[i];
+      const glV = glintOn ? waterWaves.sampleGlint(x * 16 + 8, y * 16 + 8, lumAt?.(x, y) ?? 0.75) : 0;
+      const doGlint = glintOn && glV > 0.03;
+      let batched = false;
+      if (batOn) {
+        if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; }
+        if (batQuad(sx, srcY, sw, waveSrcH, tex.width, tex.height, dx0, dy0, dw, dh,
+          Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6))), null, 0)) {
+          batched = true;
+          if (doGlint) flushRun();   // glint=ADD quad,须在本 tile 批段之后（层序）
+        } else {
+          batOn = false;             // 帽溢出:批段收尾,本 tile 落 CPU 原链
+          flushRun();
         }
+      }
+      if (!batched) {
+        ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
+        ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dx0, dy0, dw, dh);
+      }
+      if (doGlint) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = Math.min(1, glV * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(dx0, dy0, dw, dh);
+        ctx.globalCompositeOperation = 'source-over';
       }
     }
   }
+  flushRun();                 // ★liqgl:主循环批段收尾（后随坡面增强/浸润带仍 ctx 直绘）
   ctx.setTransform(wldT);   // 恢复世界变换（坡面增强/浸润带仍世界坐标）
 
   // ---- 斜面格水体覆盖增强（2026-08-21 用户定案"做得更好"）----
@@ -1008,7 +1351,9 @@ export function drawVanillaLiquids(
   // ★浸润带恒内联直画（2026-08-22 全屏扭曲重构：水体不再进离屏分层——浸润带
   //   属于墙/方块层渲染，背景 pass 在墙/方块之前画 = 原版层序；全屏扭曲在
   //   compositeLight 后统一施加，浸润带随场景一起扭，无需离屏足迹机制）
-  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false, 0, slopeWaveBob, gateFootprintCtx ?? null);
+  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false, 0, slopeWaveBob, gateFootprintCtx ?? null,
+    // ★liqgl：足迹画布缺席时改四边形收集（gate 发射消费;canvas 路径不受扰）
+    (gateCapture && !gateFootprintCtx) ? _footQuads : null);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;
@@ -1104,6 +1449,10 @@ export function drawLiquidBehindTilesOnly(
    *  256 批坡面亮线的位移/扭曲接入面：足迹楔形含亮线 2px 条带全宽
    *  （LiquidSlope 表 slope1/2 行 0-3 全宽，见 /tmp/iii257-out alpha 台账） */
   footprintCtx: CanvasRenderingContext2D | null = null,
+  /** ★liqgl 足迹四边形收集（fgCanvas 足迹画布退役面;footprintCtx 为 null 时启用）：
+   *  坡面/半砖足迹改推 _footQuads（世界坐标）,emitVanillaLiquidGate 折算设备后
+   *  画进 FBO('liqgate')——语义=canvas 足迹同款（α≈0.02 饱和 obj19 门控）。 */
+  footSink: FootQuad[] | null = null,
 ): void {
   // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
   //  ①:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D 近似
@@ -1366,6 +1715,23 @@ export function drawLiquidBehindTilesOnly(
           footprintCtx.globalAlpha = 0.02;
           footprintCtx.fillStyle = '#808080';   // 门控只读 alpha,色值无关
           footprintCtx.fillRect(px, y * 16, rw, 8);
+        }
+      } else if (footSink && num4 !== 0) {
+        // ★liqgl：同语义足迹改四边形收集（世界坐标;gate 发射时折算设备+y 镜像,
+        // α=0.02 恒定——obj19 门控 ×100 饱和,色值无关）
+        if (slope !== 0) {
+          const stex = slopeTexFor(lt);
+          if (stex && stex.width > 0) {
+            const fsw = Math.min(rw, stex.width - (18 * (slope - 1) + rx));
+            const fsh = Math.min(rh, stex.height - ry);
+            if (fsw > 0 && fsh > 0) {
+              footSink.push({ tex: stex, solid: false, sx: 18 * (slope - 1) + rx, sy: ry,
+                sw: fsw, sh: fsh, dx: px, dy: py + bobDy251, dw: fsw, dh: fsh });
+            }
+          }
+        } else if (st.half[i]) {
+          footSink.push({ tex: null, solid: true, sx: 0, sy: 0, sw: 1, sh: 1,
+            dx: px, dy: y * 16, dw: rw, dh: 8 });
         }
       }
 

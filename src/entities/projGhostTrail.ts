@@ -340,6 +340,10 @@ const BLUE: [number, number, number] = [0, 0, 255];
 const WHITE: [number, number, number] = [255, 255, 255];
 
 export const GHOST_TINT: Readonly<Record<number, GhostTintFn>> = {
+  // ★BJ371：409 剃刀台风（GetAlpha 409 专属支 P.cs:81148-81151 恒 (250,250,250,200)
+  //  不读 α——本体/残影同色;aMul=1 = 单笔 source-over 档,A 侧 200/255 由调用位
+  //  bodyAlpha 承载（Arrow.draw 409 支）,fade=(10−i)/15 在环内通用式）
+  409: () => ({ rgb: [250, 250, 250], aMul: 1 }),
   // ---- 蓝染 0.5 族（:31141-31143）----
   408: () => ({ rgb: lerpC(WHITE, BLUE, 0.5), aMul: 1 }),
   435: () => ({ rgb: lerpC(WHITE, BLUE, 0.5), aMul: 1 }),
@@ -592,7 +596,9 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
     const addGa = Math.max(0, Math.min(1, o.bodyAlpha * fadeEff));
     const cutGa = Math.max(0, Math.min(1, o.bodyAlpha * fadeEff * aMul));
     if (addGa <= 0 && cutGa <= 0) continue;
-    const addTex = tintedTex(img, [Math.round(rgb[0]), Math.round(rgb[1]), Math.round(rgb[2])], true);
+    // ★BJ371：flatten=true→false（白底大方块根因,头注 BJ371 刀位注）——
+    //  染色后保 alpha 形状 = XNA 预乘 src.rgb=tex.rgb×tex.a×color 语义
+    const addTex = tintedTex(img, [Math.round(rgb[0]), Math.round(rgb[1]), Math.round(rgb[2])], false);
     if (!addTex) continue;
     const drawOnce = (tex: Tex, ga: number, blend: GlobalCompositeOperation): void => {
       ctx.save();
@@ -605,6 +611,14 @@ export function drawProjGhosts(ctx: Ctx, o: DrawGhostOpts): void {
       ctx.drawImage(tex, sx, syI, sw, sh, -ox * scale, -oy * scale, sw * scale, sh * scale);
       ctx.restore();
     };
+    // ★BJ371（2026-09-27 用户实报「剃刀台风白底大方块」定谳刀）：addTex 染面
+    //  flatten=true 会把贴图透明域 multiply 填成【不透明染色底】（canvas multiply:
+    //  αb=0 域 Co=Cs,αo=1——页内微测 srcOpaquePx 5028→13872 全幅填实,探针
+    //  _bj371-typhoon-verdict M1）——409 白染面画 source-over=半透白底大方块
+    //  （用户症状①）；aMul<1 族 'lighter' 面同把白底全额加算=同族白块。
+    //  XNA SpriteBatch 预乘语义 src.rgb=tex.rgb×tex.a×color.rgb——canvas 复刻必须
+    //  保 alpha 形状（flatten=false）：单笔 source-over+ga=色.a 与预乘逐项相等，
+    //  'lighter' 面贡献=tex.rgb×color×tex.a×ga（透明域贡献 0）——两式均正确。
     if (aMul >= 0.999) {
       drawOnce(addTex, addGa, 'source-over');
     } else {

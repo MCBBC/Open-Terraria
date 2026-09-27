@@ -61,6 +61,11 @@ interface QuadRec {
   fr: number; fg: number; fb: number;
   flipX: boolean; flipY: boolean; smooth: boolean;
   dynamic: boolean;                   // 动态源:flush 期 texRefresh 重传
+  /** ★I类(2026-09-27):bake 期已上传的固定纹理（bolt 烘焙面）——resolve 直取不再重传。
+   *  背景:共享 boltScratch 同帧多次烘焙时,flush 期逐 rec texRefresh 全部读到
+   *  【最后烘焙】的字节（1 实体 ≤7 bolts/ArcSurge ≤13×3 发,单槽+单键=先行 quad
+   *  全部错拿末次内容）。preTex=bake 字节仍新鲜时立即上传的驻留纹理。 */
+  preTex: TexEntry | null;
   pair: PairReg | null;               // 尘预乘对合并纹理记录
   /** ★UV 空间分道（2026-09-24 角色透明案定谳修正）:region=裁剪小纹理(UV=0,0,sw,sh)
    *  /full=全画布纹理(UV=sx,sy,sw,sh=页内矩形)/pair=尘对合并面(UV=0,0,w,h)。
@@ -277,6 +282,7 @@ export class GLShimExecutor {
     //  跑在 _accMode==='off' 帧（acc/bridged 帧分窗早退）→ 残留必为垃圾,宁弃不跨帧
     //  串层。正常链 detach 已 flush+restore 平衡=恒 no-op。
     this.suppressAdd = null;
+    this.bakedTexPending = null;   // ★I类:跨帧陈旧烘焙 pending 禁串窗（残队同门）
     if (this.head) this.popAll();
     this.stack.length = 0;
     this.glw = this.host.acquireGl();
@@ -406,6 +412,20 @@ export class GLShimExecutor {
     this.dynamicSrc.add(img);
     if (!this.dynKeys.has(img)) this.dynKeys.set(img, `dyn:${++this.dynKeySeq}`);
   }
+
+  /** ★I类修复（2026-09-27 bolt 烘焙多雷同帧错拿字节）:bake 期【立即上传】口——
+   *  共享 scratch 同帧多次烘焙时,flush 期逐 rec texRefresh 全部读到末次烘焙字节
+   *  （1 实体 ≤7 bolts、ArcSurge ≤13 bolts×3 发/帧;旧单键 dynamic 路径=先行 quad
+   *  全错）。本口在字节仍新鲜的 bake 点立即 texRefresh 到【调用方给的稳定键】
+   *  （跨帧复用同纹理,零 createTexture 抖动）,挂入 pending 由下一个该 img 的
+   *  acc drawImage 消费（rec.preTex=直取,resolveTex 不再重传）。
+   *  无 GL/非 bgl 会话 no-op（2D 兜底链本就逐 bolt 即画,无此病）。 */
+  uploadScratchNow(img: HTMLCanvasElement, key: string): void {
+    if (!this.active || !this.glw || this.glw.unavailable) return;
+    const e = this.glw.texRefresh(key, img);
+    if (e) this.bakedTexPending = { img, tex: e };
+  }
+  private bakedTexPending: { img: object; tex: TexEntry } | null = null;
 
   // ================= ctx 包装 =================
 
@@ -837,11 +857,16 @@ export class GLShimExecutor {
       return;
     }
     const tier = additive ? 1 : 0;
+    // ★I类:bake 期上传面（bolt 烘焙）——markWorldDynamicScratch(key) 刚上传的纹理
+    //  挂到本 rec（resolve 直取,flush 期不再重传共享 scratch 的末次字节）
+    const preTex = this.bakedTexPending && this.bakedTexPending.img === img
+      ? this.bakedTexPending.tex : null;
+    this.bakedTexPending = null;
     // 纯色面?（fillRect 不走此;此处 img 恒 sprite）
     this.push(tier, null, false, img, sx, sy, sw, sh,
       geo.dx, geo.dy, geo.dw, geo.dh, geo.rot, this.ga,
       1, 1, 1, geo.flipX !== flipNegX, geo.flipY !== flipNegY, this.smooth,
-      this.dynamicSrc.has(img), null);
+      this.dynamicSrc.has(img), null, preTex);
   }
 
   /** fillRect→纯色 quad（白纹理 tint+α;平色 ±1LSB census 登记）。
@@ -1030,7 +1055,7 @@ export class GLShimExecutor {
     sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number, rot: number, alpha: number,
     fr: number, fg: number, fb: number, flipX: boolean, flipY: boolean, smooth: boolean,
-    dynamic: boolean, pair: PairReg | null): void {
+    dynamic: boolean, pair: PairReg | null, preTex: TexEntry | null = null): void {
     const rec = this.pool ?? ({} as QuadRec);
     this.pool = rec.next;
     rec.tier = tier; rec.solid = solid; rec.img = img;
@@ -1039,6 +1064,7 @@ export class GLShimExecutor {
     rec.rot = rot; rec.alpha = alpha; rec.fr = fr; rec.fg = fg; rec.fb = fb;
     rec.flipX = flipX; rec.flipY = flipY; rec.smooth = smooth;
     rec.dynamic = dynamic; rec.pair = pair; rec.next = null;
+    rec.preTex = preTex;                // ★I类:池复用卫生（恒显式置位,防陈旧纹理驻留）
     rec.batch = null;                   // ★C5:池复用卫生（批引用单槽,非批 rec 恒空）
     rec.texKind = pair ? 'pair' : (dynamic ? 'full' : 'region');
     if (this.tail) this.tail.next = rec; else this.head = rec;
@@ -1084,6 +1110,14 @@ export class GLShimExecutor {
       1, 1, 1, false, false, false, false, null);
     this.tail!.batch = { img, key, data, quads, replay, rgba: true };
     return true;
+  }
+
+  /** ★liqgl 批通道可用性预检（drawVanillaLiquids pass 级 all-or-nothing 判据）——
+   *  窗活跃/GL 层在场/无 clip/无 filter;ga/gco 由调用方归一后再过 pushQuadBatchRgba
+   *  同门（本预检不含二者,避免预检面重复状态耦合）。 */
+  batchAvail(): boolean {
+    return this.active && !!this.glw && !this.glw.unavailable
+      && !this.clipped && this.filterV === 'none';
   }
 
   /** 落笔前保序 flush（2D 回退面） */
@@ -1306,6 +1340,10 @@ export class GLShimExecutor {
 
   /** 纹理解析（flush 期逐 rec;LRU 逐出/动态源/尘对惰性建面都在此收口） */
   private resolveTex(glw: GLSpriteLayer, p: QuadRec): TexEntry | null {
+    // ★I类:bake 期已上传纹理直取（flush 期绝不再 texRefresh——共享 scratch 的字节
+    //  此时已是【最后一次烘焙】的,重传=先行 quad 错拿末次内容）。LRU 逐出（罕见）
+    //  → null → accFail 2D 重放（有界降级,宁降级不丢）。
+    if (p.preTex) return glw.texAlive(p.preTex) ? p.preTex : null;
     if (p.pair) {
       if (!p.pair.tex || !glw.texAlive(p.pair.tex)) {
         p.pair.tex = glw.texFromData(`dpair:${texId(p.pair.add)}`, p.pair.gl, p.pair.w, p.pair.h);

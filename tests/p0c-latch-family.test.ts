@@ -90,18 +90,18 @@ describe('P0-C ③ C9c-v2 自适应 live 门（忙机双跑锁死翻案）', () 
     for (let i = 0; i < 8; i++) s = liveGateStep(s.live, s.good, s.bad, 20, true);
     expect(s.live).toBe(true);            // v1(12ms 阈)恒拒→v2 放行=双跑锁死消除
   });
-  it('出阈滞回:2.5×tick≈41.7ms（带宽于进阈,防抖）', () => {
+  it('★C9c-v3 粘性 live:阈常量保留（进=1.5×tick/出=2.5×tick 仅作计数诊断）,lag 出场已删', () => {
     expect(LIGHT_LIVE_EXIT_MS).toBeGreaterThan(LIGHT_LIVE_ENTER_MS);
     expect(LIGHT_LIVE_ENTER_MS).toBeCloseTo(LIGHT_TICK_MS * 1.5, 6);
     expect(LIGHT_LIVE_EXIT_MS).toBeCloseTo(LIGHT_TICK_MS * 2.5, 6);
     let s = { live: true, good: 0, bad: 0, fell: false };
-    s = liveGateStep(s.live, s.good, s.bad, 30, true);    // 30>进阈但<出阈:live 不退
+    s = liveGateStep(s.live, s.good, s.bad, 30, true);    // 30>进阈但<出阈:坏拍 0（live 态按出阈计数）
     expect(s.live).toBe(true);
-    s = liveGateStep(s.live, s.good, s.bad, 50, true);    // >出阈:坏拍 1
+    s = liveGateStep(s.live, s.good, s.bad, 50, true);    // >出阈:坏拍 1（仅诊断）
     expect(s.live).toBe(true);
-    s = liveGateStep(s.live, s.good, s.bad, 50, true);    // 坏拍 2→退
-    expect(s.live).toBe(false);
-    expect(s.fell).toBe(true);
+    s = liveGateStep(s.live, s.good, s.bad, 50, true);    // 坏拍 2→旧 v2 在此退场;v3 粘性恒 live
+    expect(s.live).toBe(true);
+    expect(s.fell).toBe(false);
   });
   it('缺省=adaptive 模式;手动阈 ?lightlag 源码锚（v1 绝对语义保留）', () => {
     expect(LIGHT_GATE_MODE).toBe('adaptive');             // node 无 document→非手动
