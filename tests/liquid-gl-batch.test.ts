@@ -164,7 +164,7 @@ describe('★liqgl 批支端到端（drawVanillaLiquids + bat 钩）', () => {
     expect(calls.filter((c) => c.op === 'drawImage').length).toBe(caps[0].quads);
   });
 
-  it('旗面:liqgl 缺省 true（2026-09-27 转正;?liqgl=0 逃生门）;setForTest 可翻', () => {
+  it('旗面:liqgl 缺省 true（2026-09-27 转正,lrecon compose 调用点病灶修复后;?liqgl=0 逃生门）', () => {
     expect(liqglDefault).toBe(true);
     liqglSetForTest(false);
     liqglSetForTest(true);

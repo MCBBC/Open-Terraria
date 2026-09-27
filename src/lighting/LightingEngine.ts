@@ -326,14 +326,18 @@ export class LightingEngine {
     }, tiles, 0);
   }
 
-  /** ★C9d：快照区域是否被公共采样对完整覆盖（live 态早退门——覆盖=尾随 ≤1 tick 的
-   *  光照照常可用;不覆盖=传送级跳变,视口落在公共域外/边缘带,走本地同帧兜底）。
-   *  正常移动永不触发:公共域=上帧视口 ± AREA_PADDING(28),每 tick 合法移速峰值
-   *  ≤2 格 ≪ 28;结果滞后 N tick 时尾随量=N×移速,14 tick 内仍被覆盖（见快照面头注）。 */
+  /** ★C9d：快照【视口】是否被公共采样对完整覆盖（live 态早退门——覆盖=尾随 ≤1 tick
+   *  的光照照常可用;不覆盖=传送级跳变,视口落在公共域外/边缘带,走本地同帧兜底）。
+   *  判据对象是视口（区域去 padding 带:ensureRegion 数学 x0=P+1/x1=P+2 内缩,此处各
+   *  再收 1 格保守）而非整块区域——正常移动时区域原点每 tick 平移,padding 带必然
+   *  露出,但视口被上帧区域覆盖余量=28−每 tick 移速 ≥26 格,永不触发;结果滞后 N
+   *  tick 时余量=28−N×移速,≥14 tick 滞后内仍覆盖（峰值移速算术见快照面头注）。 */
   private snapCoveredByPublic(): boolean {
-    return this.snapRx >= this.rx && this.snapRy >= this.ry
-      && this.snapRx + this.snapRw <= this.rx + this.rw
-      && this.snapRy + this.snapRh <= this.ry + this.rh;
+    const vx0 = this.snapRx + AREA_PADDING + 2, vy0 = this.snapRy + AREA_PADDING + 2;
+    const vx1 = this.snapRx + this.snapRw - AREA_PADDING - 2;
+    const vy1 = this.snapRy + this.snapRh - AREA_PADDING - 2;
+    return vx0 >= this.rx && vy0 >= this.ry
+      && vx1 < this.rx + this.rw && vy1 < this.ry + this.rh;
   }
 
   /** 快进:同 tick 完成 Scan→Blur→Present(状态回 0) */

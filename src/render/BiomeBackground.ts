@@ -436,8 +436,11 @@ export class BiomeBackground {
   bgStyle = 0;
   /** 瞬切计数（instantBGTransitionCounter :63518；森林→森林同生成背景） */
   private instantBG = 0;
-  /** BackgroundChangeFlashInfo._flashPower（13 area 槽；Renderer 消费画黑闪） */
+  /** BackgroundChangeFlashInfo._flashPower（13 area 槽；drawSurface 前景循环逐槽消费画黑闪） */
   readonly bgFlash = new Float64Array(13);
+  /** 拍照重渲黑闪抑制（Renderer._capturePass 每帧同步；原版 DrawCapture 无切换黑闪层。
+   *  常态 false；置 true 时 drawSurface 前景循环跳过 overlay 绘制,状态机照跑） */
+  flashSuppressed = false;
   private lastFlashStyle = -1;   // −1=未登记（首帧只登记不闪）
   /** 森林风格 → 该段 WorldGen 生成背景 ID（GetCurrentBackgroundOfStyle :8062
    *  的 treeBG1..4 = treeStyle[0..3]；等值 ⇒ 视觉相同 ⇒ 过渡可瞬切） */
@@ -972,7 +975,6 @@ export class BiomeBackground {
     // 地下风格（:52245-52249：变更时新旧并行，ugBackTransition -= 0.25/帧）
     const ugWant = this.pickUnderground(world, scene, geom);
     if (ugWant !== this.ugStyle) {
-      if (this.ugAlpha > 0 && this.ugStyle === ugWant) { /* noop */ }
       this.ugOld = this.ugStyle;
       this.ugStyle = ugWant;
       this.ugAlpha = 0;
@@ -1303,7 +1305,21 @@ export class BiomeBackground {
         drawLayer(d[2], 1.34, 0.49, 2100, 2150, aF);   // 仅样式 4 的 250 非空
       }
       // l===Ocean：原版海洋无前景树层组（海洋单层 = Step2 远山槽 3；front 槽 4
-      // 只画变更换屏闪光 overlay——未实装=常态不画）
+      // 仍画变更换屏黑闪 overlay——:60488-60490 无层支）
+      // ★BJ372 逐槽黑闪（DrawSurfaceBG_DrawChangeOverlay :62042-62051 原位内联于
+      //   前景循环 :60460-60532）：每组群系层画完紧跟该槽 area 的黑闪遮罩
+      //   （flash=1 落定、−0.05/帧衰减 20 帧,BackgroundChangeFlashInfo）。
+      //   ★画位=层间非全局后置:低 l 槽的黑闪被循环内后绘的高 l 槽层覆盖——
+      //   Snow(7)→Forest(0) 交叉淡化期雪层画在黑闪之上保持可见（原版观感）;
+      //   曾 Renderer 全局后置单遍 = 黑闪盖住含新槽在内的一切 = 每次切换近
+      //   全屏黑闪一现（交界处 ABAB 抖动的"跳"感知放大,2026-09-27 用户实报）;
+      //   且曾画在暴风雪/沙尘暴色罩之上（原版色罩 SkyManager.DrawToDepth 在
+      //   DrawSurfaceBG 之后=色罩盖黑闪,本次归位）。
+      if (!this.flashSuppressed) {
+        const area = STYLE_TO_AREA[l];
+        const p = area !== undefined ? this.bgFlash[area] : 0;
+        if (p > 0.01) b.fill(0, 0, viewW, viewH, 0, 0, 0, p);
+      }
     }
   }
 

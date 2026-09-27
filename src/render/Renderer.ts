@@ -4589,6 +4589,9 @@ export class Renderer {
       //  属 drunk 菜单域,本仓菜单不走 remixWorldGen → 恒 false,只判 remix&&!menu
       let bgDone = false;
       const remixSkipSurfaceBg = !!world.seedFlags?.remix;
+      // ★BJ372:拍照重渲黑闪抑制同步（原版 DrawCapture 无切换黑闪层;黑闪绘制
+      //   已归位 BiomeBackground.drawSurface 前景循环逐槽内联,见下 方块注）
+      this.biomeBg.flashSuppressed = this._capturePass;
       // ★C10b 合并判定（先定谳再动刀——层序定谳结论,详见刀报告）:主画布 2D 序列
       //  中 bg 回贴与 cloudBlitRect 之间的绘制项恰两类且都是条件性全屏 source-over
       //  矩形——①drawWeatherTint2D(暴风雪/沙尘暴色罩,weatherTintPasses 非空才有)
@@ -4658,20 +4661,12 @@ export class Renderer {
       if (!this.isCpuRender()) {
         this.sky.drawWeatherTint2D(ctx, viewW, viewH);
       }
-      // DrawSurfaceBG_DrawChangeOverlay（:60533-60542 BackgroundChangeFlashInfo）：
-      // 群系背景切换的黑闪遮罩（flash=1 落定、−0.05/帧衰减 20 帧；ValueChanged
-      // !gameMenu 门=仅游戏内，菜单换样式无闪）。原版画在每组层后=世界层之前
-      for (let a = 0; a < 13; a++) {
-        if (this._capturePass) break;   // 截图重渲不烘切换黑闪（原版 DrawCapture 无此层）
-        const p = this.biomeBg.bgFlash[a];
-        if (p > 0.01) {
-          ctx.save();
-          ctx.globalAlpha = p;
-          ctx.fillStyle = '#000';
-          ctx.fillRect(0, 0, viewW, viewH);
-          ctx.restore();
-        }
-      }
+      // 群系切换黑闪（DrawSurfaceBG_DrawChangeOverlay :60460-60532/:62042）：
+      // ★BJ372（2026-09-27）画位归位=逐槽内联于 BiomeBackground.drawSurface 前景
+      // 循环（原版每组群系层后紧跟该槽 overlay——低 l 槽黑闪被高 l 槽层覆盖,
+      // Snow→Forest 交叉淡化期雪层画在黑闪之上;曾在此全局后置单遍=黑闪盖住
+      // 含新槽/色罩在内的一切=交界处"跳"感知放大）。拍照重渲不烘经
+      // flashSuppressed 同步（原版 DrawCapture 无此层）。
       // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后）
       // ★C10b:mergedSession 在场=合并会话（此处收口单 blit）;恒消费后清
       // ★opresent:opresentDefer=true 时收口不 present/blit——FBO('bg') 挂起,
@@ -18412,7 +18407,9 @@ export class Renderer {
         const cssHL = stL ? stL.cssH : (accFbo ? accFbo.h : this.worldCanvas!.height);
         const okL = wcL.compose(
           worldArgL, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, undefined,
-          warpOn ? this.waterWarp.gateCanvas() : null,
+          // ★liqgl：门控双型（与下方 A2 直采同式）——批化帧=FBO('liqgate') 句柄
+          //   （fgCanvas 缺席,canvas 回退=恒 null=gate≡0=扭曲消失——用户实报病灶）
+          warpOn ? (this._liqGateHandle ?? this.waterWarp.gateCanvas()) : null,
           warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
           cssWL, cssHL,
           warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,
@@ -18672,9 +18669,10 @@ export class Renderer {
           // ★中性波场垫底防 uWaveSize=(0,0) 的 NaN 除法（gridW/H=1+0.5 中心值）
           // ★liqgl：门控纹理双型——FBO('liqgate') 句柄直采（批化帧,canvas 上传退役）
           //   优先,缺省回 fgCanvas（canvas 原路帧/?liqgl=0）
+          const waterArg = warpOn ? (this._liqGateHandle ?? this.waterWarp.gateCanvas()) : null;
           const ok = wc.compose(
             worldArg, this.lightCanvas, [lx0, ly0, lx1 - lx0, ly1 - ly0], darkSkip, lightBand,
-            warpOn ? (this._liqGateHandle ?? this.waterWarp.gateCanvas()) : null,
+            waterArg,
             warpOn ? (this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null) : null,
             cssWf, cssHf,   // ★css 兜底=世界层尺寸（防 uCssSize 除零 NaN;无扭曲帧该值不参与可见项）
             warpOn ? waterWaves.progress : 0, warpOn ? waterWaves.intensity : 0,

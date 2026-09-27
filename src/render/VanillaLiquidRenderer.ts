@@ -77,10 +77,21 @@ function toVanillaType(t: number): number {
 //      FBO('world')（SO 结合律=(w over ∅) over scene ≡ w over scene,B1 判例）,
 //      同一批数据 y 镜像重发射进 FBO('liqgate')=obj19 门控纹理（compose 直采
 //      句柄,两次全幅上传全消）。坡面足迹（α≈0.02）同步改四边形收集进 gate。
-// 【转正暂缓（2026-09-27 用户实报"?liqgl 缺省开=水面波动 GL 渲染消失"）——缺省
-//  回灰度关,病灶定位中;?liqgl=1 显式激活复现面。】
+// 【转正（2026-09-27,用户实报翻案后修复验证）】用户实报"?liqgl 缺省开=水面波动
+//  GL 渲染消失"定谳=病灶在【lrecon 支的 compose 调用点漏改】——compositeLight 的
+//  A3(lrecon,缺省开)compose 恒先于 A2 支 return,其 water 实参曾恒 gateCanvas()
+//  =批化帧 fgCanvas 缺席→gate≡null→obj19 gate≡0→全屏扭曲整体缺席（W1b 探针:
+//  compose waterKind='canvas'+'no liqgate 采样'实锤）。修=该调用点与 A2 同式双型
+//  （_liqGateHandle ?? gateCanvas()）;修复后 W1b compose waterKind='fbo-handle'
+//  全绿+W1c 水下静区运动判别器 ON 7806/OFF 6404 同量级（扭曲两臂皆活）+
+//  _liqgl-ab 全部 PASS（LA census maxd=29≤72 登记域/LB batch=464 fb=0 rp=0/
+//  LC uploads 帧间零增长/LE drawLiquids 0.94→0.46ms 2.02×,整帧 7.38→5.04ms）。
+//  → 缺省开。?liqgl=0 = 逃生门（回 fgCanvas CPU 全链:原生 2D 前景+canvas
+//  multiply 染色+gate 全幅上传）。【教训登记】多调用点共享入参改造必须全量
+//  grep 调用点（本次 compositeLight 内 compose 有 lrecon/A2 两处,只改一处=
+//  用户实报回归;desert-heathaze 同族判例）。
 export let liqgl = typeof location !== 'undefined'
-  ? new URLSearchParams(location.search).get('liqgl') === '1' : false;
+  ? new URLSearchParams(location.search).get('liqgl') !== '0' : true;
 export function liqglSetForTest(v: boolean): void { liqgl = v; }
 
 /** 批发射钩（Renderer 中介→GLShimExecutor.pushQuadBatchRgba;emitPrecipQuadBatch 同构） */

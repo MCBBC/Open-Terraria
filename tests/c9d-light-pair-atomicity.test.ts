@@ -143,13 +143,15 @@ describe('C9d ② 传送大跳同帧兜底（live 态,快照区域跳出公共�
       link.deliverNow();
     }
     expect(lightGateDiag.live).toBe(true);
-    // 传送：跳出 padding 带（>28 格）
+    // 传送：跳出 padding 带（>28 格）;落点亮源=手持光（本地兜底扫描真实消费面）
     camX = 180 * 16;
+    e.heldLight = { tx: 180, ty: 60, r: 1, g: 0.95, b: 0.8 };
     e.ensureRegion(camX, camY, VIEW_W, VIEW_H);
     e.compute(0);
-    // 传送落点格：新视口中心
-    const tx = 180, ty = 60;
-    expect(e.lightAt(tx, ty)[0]).toBe(pat(tx, ty));   // 本地兜底已同帧发布成对结果
+    // 传送落点格：新视口中心——本地兜底同帧发布成对结果（真实扫描值,非黑窗/非垃圾）
+    expect(e.lightAt(180, 60)[0]).toBeGreaterThan(0);
+    expect(e.rw * e.rh).toBe(e.r.length);   // 公共对自洽
+    expect(lightGateDiag.live).toBe(true);  // 粘性 live 门不受兜底影响
     link.deliverNow();
   });
 });
@@ -173,8 +175,8 @@ describe('C9d ③ 公共采样对写点结构锁（源码扫描）', () => {
   it('LightingEngine 公共面写点仅 applyWorkerResult（=onResult）与 processBlurAndPresent 发布两处', () => {
     const src = srcOf('../src/lighting/LightingEngine.ts');
     const spans = [
-      methodSpan(src, /applyWorkerResult\(/),
-      methodSpan(src, /processBlurAndPresent\(/),
+      methodSpan(src, /private applyWorkerResult\(m: LightResultMsg\): void/),
+      methodSpan(src, /private processBlurAndPresent\(\): void/),
     ];
     const writes = [...src.matchAll(/this\.(?:rx|ry|rw|rh|r|g|b)\s*=/g)];
     expect(writes.length).toBeGreaterThan(0);

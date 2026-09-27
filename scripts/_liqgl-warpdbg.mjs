@@ -9,7 +9,7 @@ const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
 const browser = await launchBrowser({});
 const page = await openPage(browser, {});
 page.on('pageerror', (e) => console.log('PAGEERR:', String(e.message).slice(0, 300)));
-await bootstrap(page, ORIGIN + '/?liqgl=1');
+await bootstrap(page, ORIGIN + '/');
 const gen = await createGame(page, { mode: 'direct', seed: '05162020', size: 'small', pinRandom: 20260927 });
 console.log('createGame', gen?.ok);
 await godMode(page, true);
@@ -30,6 +30,32 @@ await page.evaluate(() => {
   g.camera.x = g.player.x; g.camera.y = g.player.y;
   window.__vnow = performance.now();
   window.__drive = (n) => { for (let i = 0; i < n; i++) { window.__vnow += 16.6667; g.frame(window.__vnow); } return window.__vnow; };
+});
+await page.evaluate(() => import('/src/render/VanillaLiquidRenderer.ts').then((m) => { window.__vlMod = m; }));
+await page.evaluate(() => { window.__vlMod.liqglSetForTest(true); });
+// compose 包裹:ok 面+water 入参型
+await page.evaluate(() => {
+  const r = window.__swGame.renderer;
+  window.__composeLog = [];
+  const tryWrap = () => {
+    if (!r.worldCompose || !r.worldCompose.acquire) { setTimeout(tryWrap, 500); return; }
+    const origAcquire = r.worldCompose.acquire.bind(r.worldCompose);
+    r.worldCompose.acquire = function () {
+      const wc = origAcquire();
+      if (wc && !wc.__wrapped) {
+        const orig = wc.compose.bind(wc);
+        wc.compose = function (world, light, lr, ds, lb, water, ...rest) {
+          const ok = orig(world, light, lr, ds, lb, water, ...rest);
+          window.__composeLog.push({ ok, waterKind: water ? (water.tex ? 'fbo-handle' : 'canvas') : 'null', wH: !!r._liqGateHandle });
+          if (window.__composeLog.length > 6) window.__composeLog.shift();
+          return ok;
+        };
+        wc.__wrapped = true;
+      }
+      return wc;
+    };
+  };
+  tryWrap();
 });
 await page.evaluate(() => { window.__swGame.running = false; });
 await freezeClock(page, { tod: 0.5 });
@@ -65,6 +91,55 @@ const w1 = await page.evaluate(() => {
   return { W, H, rows, handle: !!r._liqGateHandle };
 });
 console.log('W1 gate FBO α 剖面（GL row0=FBO 底）:', JSON.stringify(w1));
+
+// W1c: 水下静区帧间运动（扭曲判别器——水体内部砖墙/贴图静止,唯一运动源=obj19 位移;
+//      ON/OFF 双臂都应显著>0;若 ON≈0=扭曲仍死）
+const w1c = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const cam = g.camera, c = g.renderer.canvas;
+  const z = cam.zoom;
+  const gy = Math.floor(g.world.groundLevel);
+  const ry = gy + 2;
+  const wy = (ry * 16 - cam.y) * z + c.height / 2;   // 水线屏幕 y
+  const y0 = Math.round(wy + 14), y1 = Math.min(c.height - 1, Math.round(wy + 74));
+  const x0 = Math.round(c.width * 0.15), x1 = Math.round(c.width * 0.7);
+  const snap = () => {
+    const lc = document.createElement('canvas');
+    lc.width = c.width; lc.height = c.height;
+    const lx = lc.getContext('2d', { willReadFrequently: true });
+    lx.drawImage(c, 0, 0);
+    return lx.getImageData(0, 0, lc.width, lc.height).data;
+  };
+  const f1 = snap();
+  await new Promise((r2) => setTimeout(r2, 90));
+  await new Promise((r2) => requestAnimationFrame(() => { window.__vnow += 16.6667; g.frame(window.__vnow); r2(); }));
+  const f2 = snap();
+  let moved = 0, maxd = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * c.width + x) * 4;
+      const dd = Math.max(Math.abs(f1[i] - f2[i]), Math.abs(f1[i + 1] - f2[i + 1]), Math.abs(f1[i + 2] - f2[i + 2]));
+      if (dd > 6) { moved++; maxd = Math.max(maxd, dd); }
+    }
+  }
+  return { band: [x0, y0, x1, y1], moved, maxd };
+});
+console.log('W1c 水下静区运动（liqgl ON）:', JSON.stringify(w1c));
+// A2 compose 路由死因:acquire/unavailable/lastFail/starvedLock
+console.log('A2 state:', JSON.stringify(await page.evaluate(() => {
+  const r = window.__swGame.renderer;
+  window.__vlMod.liqglSetForTest(true);
+  const wc = r.worldCompose ?? null;
+  return {
+    hasWc: !!wc,
+    unavailable: wc?.unavailable ?? null,
+    lastFail: wc?.lastFail ?? null,
+    starved: (window.__glStats?.starvedLock?.() ?? 'noglobals'),
+    wfbo: r.constructor.wfbo,
+    cpu: r.isCpuRender(),
+  };
+})));
+console.log('W1b compose log:', JSON.stringify(await page.evaluate(() => window.__composeLog ?? null)));
 
 // 屏幕上水带位置（主画布 α>0 的行剖面,微光水在暗夜里显著）
 const w2 = await page.evaluate(() => {
@@ -122,7 +197,45 @@ async function motionProbe() {
 }
 const mOn = await motionProbe();
 console.log('W3 liqgl=ON 水线邻域帧间运动:', JSON.stringify(mOn));
+const w1cOn = w1c;
 await page.evaluate(() => { window.__vlMod.liqglSetForTest(false); });
 const mOff = await motionProbe();
 console.log('W3 liqgl=OFF 水线邻域帧间运动:', JSON.stringify(mOff));
+// W1c-OFF 对照（同 band 重测）
+const w1cOff = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const cam = g.camera, c = g.renderer.canvas;
+  const gy = Math.floor(g.world.groundLevel);
+  const ry = gy + 2;
+  const wy = (ry * 16 - cam.y) * c.height / (c.height) * 0 + (ry * 16 - cam.y) * cam.zoom + c.height / 2;
+  const y0 = Math.round(wy + 14), y1 = Math.min(c.height - 1, Math.round(wy + 74));
+  const x0 = Math.round(c.width * 0.15), x1 = Math.round(c.width * 0.7);
+  const snap = () => {
+    const lc = document.createElement('canvas');
+    lc.width = c.width; lc.height = c.height;
+    const lx = lc.getContext('2d', { willReadFrequently: true });
+    lx.drawImage(c, 0, 0);
+    return lx.getImageData(0, 0, lc.width, lc.height).data;
+  };
+  const f1 = snap();
+  await new Promise((r2) => setTimeout(r2, 90));
+  await new Promise((r2) => requestAnimationFrame(() => { window.__vnow += 16.6667; g.frame(window.__vnow); r2(); }));
+  const f2 = snap();
+  let moved = 0, maxd = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * c.width + x) * 4;
+      const dd = Math.max(Math.abs(f1[i] - f2[i]), Math.abs(f1[i + 1] - f2[i + 1]), Math.abs(f1[i + 2] - f2[i + 2]));
+      if (dd > 6) { moved++; maxd = Math.max(maxd, dd); }
+    }
+  }
+  return { moved, maxd };
+});
+console.log('W1c 水下静区运动（liqgl OFF 对照）:', JSON.stringify(w1cOff));
+console.log('判读: ON.moved 与 OFF.moved 同量级=扭曲两臂皆活;ON≈0=仍死');
+console.log('DBG:', JSON.stringify(await page.evaluate(() => (globalThis).__liqDbg ?? null)));
+console.log('DBG2:', JSON.stringify(await page.evaluate(() => (globalThis).__liqDbg2 ?? null)));
+console.log('probeMod liqgl:', JSON.stringify(await page.evaluate(() => window.__vlMod?.liqgl)));
+console.log('location:', JSON.stringify(await page.evaluate(() => location.href)));
+console.log('handle:', JSON.stringify(await page.evaluate(() => { const r = window.__swGame.renderer; return { h: !!r._liqGateHandle, acc: r._accMode, path: r.bglPathUsed, glUnavail: r._accGlw?.unavailable ?? null, worldOpen: r._accGlw?.isAccumOpen?.('world') ?? null }; })));
 process.exit(0);
