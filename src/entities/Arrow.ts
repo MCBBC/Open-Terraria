@@ -772,6 +772,10 @@ export const PROJ_ALPHA0: Record<number, number> = {
   // 7/8/150/151/152 荆棘链 alpha=255(:884/:2408，aiStyle4 渐显期 −50[/−75]/update 消费)
   22: 255, 27: 255, 45: 100,
   410: 255,                                                          // 泡泡枪泡体（:4926 alpha=255,ai72 −25/t 渐显钳 50）
+  // ★BJ371：409 剃刀台风（SetDefaults :4911 alpha=255——AI −5/触发 钳 50 :30872-30877;
+  //  ★绘制面 inert：GetAlpha 409 专属支 :81148-81151 恒 (250,250,250,200) 不读 α,
+  //  vanillaProjAlpha[409] fixed 档承载——本键=AI α 场台账初值,勿按 (255−α)/255 兜底消费）
+  409: 255,
   7: 255, 8: 255, 150: 255, 151: 255, 152: 255,
   // BJ353：魔晶碎块链 493 头/494 杆（SetDefaults :5669-5681 alpha=255——aiStyle4 渐显
   //  −100/t 消费;曾缺列 = 首发段出生即全显,渐显链无起点且淡出面全缺）
@@ -1998,6 +2002,8 @@ export class Arrow extends Entity {
   /** ★BJ371 绘制帧 = (int)(localAI[1]/3f)%3（:30879——触发位写入;draw fIdx 链+
    *  残影 frame 消费;触发前恒 0=原版 proj.frame 初值） */
   private ty409Frame = 0;
+  // （★BJ371 自报点光复用既有 lightRGB 字段（:30881 AddLight(0.1,0.4,0.6)——
+  //  触发位置位后常驻=稳态等价原版 ~1 触发/帧 连续加光））
   // ---- 451 涌流剑（aiStyle 81 :31541-31760，2880 涌流剑）----
   /** ai[0] 状态机：0=飞行（0↔75 alpha 脉动）/[1,1+pen)=命中后淡出+寻的瞬移/
    *  [1+pen,1+2pen)=末段淡出可伤（ai[1]<5 期豁免）。命中钩：0→+pen，否则 −(pen+1) */
@@ -3134,16 +3140,20 @@ export class Arrow extends Entity {
     }
     if (this.ghostRing !== undefined && this.ghostRing !== null) {
       const ghostA = this.drawGlobalAlpha() ?? Math.max(0, Math.min(1, (255 - this.alpha) / 255));
+      // ★BJ371：409 剃刀台风专用帧残影块（Main.cs:32539-32560）——残影 5 槽同用
+      //  proj.rotation（自旋角,非速度角）、帧锚=当前帧 y13、色 A=200×(10−i)/15
+      //  （GetAlpha 恒 (250,250,250,200) :81148,RGB 侧 250 走 GHOST_TINT[409]）
+      const isTy409 = this.projId === 409;
       drawProjGhosts(ctx, {
         ring: this.ghostRing,
         id: this.projId,
         tex: (img && img.width > 0) ? img : null,
         frames: projFrameCount(this.projId),
-        frame: 0,                     // 通用表帧锚基准行（repo 无通用逐帧字段,登记②）
+        frame: isTy409 ? this.ty409Frame : 0,  // 通用表帧锚基准行（repo 无通用逐帧字段,登记②）;409=当前帧（:32543 y13=num271×frame）
         bodyW: this.w, bodyH: this.h,
-        bodyRot: ang,
+        bodyRot: isTy409 ? this.spinRot : ang, // 409=自旋角（:32555 proj.rotation,与本体同角）
         bodyScale: 1,                 // proj.scale 缺省 1（SetDefaults 表内 id 无显式 scale 行;660=1.1 已排除集）
-        bodyAlpha: ghostA,
+        bodyAlpha: isTy409 ? 200 / 255 : ghostA, // 409=GetAlpha A 侧恒值（fade=(10−i)/15 环内通用式相乘）
         // ★BJ235 ai1 喂入（登记④清偿——AI_171/172/173 族 hue=(ai[1]+0.5)%1 不随时间
         //  cycle,值=发射点注入静态档）：873 已有 empressHue 通道（bossAI_lategame
         //  :1747 NPC.ai[1]/60）;872 同注（:46982 num65=k/13）;931/1039 未实现载体
@@ -3267,6 +3277,8 @@ export class Arrow extends Entity {
       ctx.rotate(this.spinRot);      // 1021 巨砾滚动旋转（:24666 rotation += vx·0.06 累积）
     } else if (this.projId === 1024) {
       ctx.rotate(this.spinRot);       // 杀意牌 ai[2] 自旋（R35 清单⑥）
+    } else if (this.projId === 409) {
+      ctx.rotate(this.spinRot);       // ★BJ371 剃刀台风自旋（:30878 rotation += velocity.X×0.1f 触发位累积;非速度角对齐）
     } else if (this.projId >= 167 && this.projId <= 170) {
       ctx.rotate(ang + Math.PI / 2);  // 烟花（AI_034 :30xxx rotation=velocity+π/2）
     } else if (PROJ_NO_ROT.has(this.projId)) {
@@ -3309,6 +3321,7 @@ export class Arrow extends Entity {
               : this.bee36Tilt !== null ? this.bee36Frame   // aiStyle 36 蜂族：3/6 拍/帧（:27699/:27720）
                 : this.pinFrame !== null ? this.pinFrame    // ★R28 337 帧恒 ai[1]（发射掷,AI 不推进 :57927）
                   : this.projId === 467 ? this.f467Frame    // 教徒火球：3 拍/帧 4 帧循环（:55208-55218）
+                    : this.projId === 409 ? this.ty409Frame // ★BJ371 剃刀台风：触发位写帧 (int)(localAI[1]/3f)%3（:30879）
                     : (this.projId === 660 || this.projId === 712) ? this.f712Frame
                       // 660 天界碎裂：出生 Next(14) 掷定恒定帧（AI_001 :56651 写入,
                       //   DrawProj 手切 38×frame 横切 :30974-30980——本表 PROJ_GRID[660]
@@ -6568,6 +6581,45 @@ export class Arrow extends Entity {
       }
     } else if (this.projId === 409) {
       // ---- 409 剃刀台风（aiStyle 71，Projectile.cs:30848-30951，2622 剃刀台风）----
+      // ⓪ ★BJ371 节拍块（:30849-30882——本段先于锁敌,每 AI 子步 1 拍;
+      //    extraUpdates=2 → 3 子步/帧,1/3 掷 ≈ 1 触发/帧）：
+      //    localAI[1]>10 且 rand(3)==0 →
+      //    a. 6× d217 缘尘（:30853-30871——spinningpoint=normalize(v)×(w,h)/2
+      //      【Vector2×Vector2 分量乘】RotatedBy((i−2)×π/6)+Center;vector49=
+      //      角(−π/2..π/2)×rand(3,8);NewDust(pos+vector49,0,0,217,v×2,100,
+      //      scale1.4)+noGravity+noLight+velocity=v/4−proj.v）;
+      //    b. alpha −5 钳 50（:30872-30877——GetAlpha 409 恒 (250,250,250,200)
+      //      :81148-81151 不读 α,此面=台账值非绘制面）;
+      //    c. rotation += velocity.X×0.1f（:30878——自旋,draw 侧 spinRot 消费）;
+      //    d. frame=(int)(localAI[1]/3f)%3（:30879——3 帧 68×68 竖条带,projFrames
+      //      [409]=3 Main.cs:8663）;
+      //    e. Lighting.AddLight(0.1,0.4,0.6)（:30881——lightRGB 自报通道）。
+      this.ty409L1++;
+      if (this.ty409L1 > 10 && Math.floor(Math.random() * 3) === 0) {
+        const nrm409 = Math.hypot(this.vx, this.vy) || 1;
+        for (let i = 0; i < 6; i++) {
+          const bx409 = (this.vx / nrm409) * (this.w / 2);        // 分量乘（w,h)/2
+          const by409 = (this.vy / nrm409) * (this.h / 2);
+          const ra409 = (i - 2) * Math.PI / 6;                    // (i−(6/2−1))×π/6
+          const rx409 = bx409 * Math.cos(ra409) - by409 * Math.sin(ra409);
+          const ry409 = bx409 * Math.sin(ra409) + by409 * Math.cos(ra409);
+          const va409 = Math.random() * Math.PI - Math.PI / 2;    // NextDouble×π−π/2
+          const vl409 = 3 + Math.floor(Math.random() * 5);        // Next(3,8)=3..7
+          const wx409 = Math.cos(va409) * vl409;
+          const wy409 = Math.sin(va409) * vl409;
+          const d409 = game.spawnDust?.(this.cx + rx409 + wx409, this.cy + ry409 + wy409,
+            0, 0, 217, wx409 * 2, wy409 * 2, 100, null, 1.4, true);
+          if (d409) {
+            d409.noLight = true;
+            d409.vx = d409.vx / 4 - this.vx;                      // velocity /=4 −= proj.v
+            d409.vy = d409.vy / 4 - this.vy;
+          }
+        }
+        this.alpha = Math.max(50, this.alpha - 5);                // :30872-30877
+        this.spinRot += this.vx * 0.1;                            // :30878
+        this.ty409Frame = Math.floor(this.ty409L1 / 3) % 3;       // :30879
+        this.lightRGB = [0.1, 0.4, 0.6];                          // :30881
+      }
       // ① 一次性锁敌（ai[0]==0 且 localAI[0]==0，:30883-30906）：500 欧氏 +
       //   CanHit 全盒最近敌 → ai[0]=敌+1；无目标 → localAI[0]=30（30 update 后再掷）；
       // ② 保持（:30912-30931）：目标 active+!dontTakeDamage+immune[owner]==0 且

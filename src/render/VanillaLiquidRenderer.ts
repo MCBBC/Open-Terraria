@@ -283,6 +283,13 @@ const _whiteCache = new WeakMap<GLSpriteLayer, TexEntry>();
 function whiteEntry(glw: GLSpriteLayer): TexEntry {
   const hit = _whiteCache.get(glw);
   if (hit && glw.texAlive(hit)) return hit;
+  if (typeof document === 'undefined') {
+    // node 测试环境（无 canvas）:结构桩 entry（仅测试 fake glw 可达;生产 GL 会话
+    // 恒有 document）
+    const stub: TexEntry = { tex: {} as WebGLTexture, w: 1, h: 1, stamp: 0, bytes: 4, mipped: false, key: '__liqwhite' };
+    _whiteCache.set(glw, stub);
+    return stub;
+  }
   const c = document.createElement('canvas');
   c.width = 1; c.height = 1;
   const x = c.getContext('2d')!;
