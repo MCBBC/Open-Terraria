@@ -7470,8 +7470,13 @@ export class Renderer {
    *  ★R3b-6（2026-09-27 红蓝批 β）：计数【帧界重置】——跨帧单调计数曾让瞬态
    *  家族键（bv:<实体 id> 族）在本 Map 永久驻留=无界增长;现每帧从 1 起算,
    *  帧内不复用语义不变（rec 帧界清空,跨帧键复用只会撞上已退休纹理,texRefresh
-   *  重传幂等）。家族触帧账 600 帧未触即删（瞬态 id 账随实体消亡退休）。 */
-  uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number): void {
+   *  重传幂等）。家族触帧账 600 帧未触即删（瞬态 id 账随实体消亡退休）。
+   *  ★P1-B（2026-09-28）：可选子区参 (rw,rh) 透传 uploadScratchNow——bake 链
+   *  quad 实采 scratch 左上 (0,0,rw,rh) 时按 p1bRegionGate 分档走 texRefreshRegion
+   *  子区增量（boltBake=烘焙 bbox;雷暴持续期 boltScratch 恒大滞回不回落,
+   *  整幅/op 收益与风险同 accScratch 族判）;不带子区参的家族调用点（尘/飞灵/
+   *  wingTint/mountTint——实采≈全幅）语义零变化。 */
+  uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number): void {
     if (!Renderer.bgl || !Renderer.bglShim) return;
     const sh = this.bglShimReg();
     sh.markDynamic(img);
@@ -7485,7 +7490,7 @@ export class Renderer {
     const rec = this.scratchBakeSeqs.get(fam);
     const n = rec && rec.f === f ? rec.n + 1 : 1;
     this.scratchBakeSeqs.set(fam, { n, f });
-    sh.uploadScratchNow(img, `${fam}:${n % ring}`);
+    sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh);
   }
   /** 共享 scratch 烘焙环形序号（按家族独立;★R3b-6 帧界重置+触帧账:
    *  n=帧内序号,f=最近触帧——600 帧未触家族删账防瞬态实体 id 键驻留） */

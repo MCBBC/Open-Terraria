@@ -452,6 +452,15 @@ export class VanillaDust {
         && solidBoxAt(d.x, d.y, 4, 4)) {              // :598-602 SolidCollision(position,4,4)
         d.scale *= 0.8;
       }
+      // :571-581 宝石火花族（86-92/286）customData=Player/Projectile 跟随——
+      // _Player 档 followPlayer、_Projectile 档 followEnt 闭包承载（★2026-09-28
+      // 星云奥秘补式接入：618 弹尾 customData=父球（:35524-35527）+ 617 环尘
+      // customData=本体（:35310/:35322/:35368-35377））。active 门 = 闭包内
+      // dead 判（父弹死 → 零位移,同 `if (projectile.active)`）。
+      if ((d.type >= 86 && d.type <= 92) || d.type === 286) {
+        if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }
+        else if (d.followEnt) { const q = d.followEnt(); d.x += q.dx; d.y += q.dy; }
+      }
       // ---- 链 A 独占段（:883-1894 独占链：命中者跳过其余链接与 :1884 重力）----
       //  230/217/240 是独立段/无档型（非 883 链链接）：chainLink 不置位，重力门
       //  照常评估，:2136 vx×0.99 显式乘（链 A 命中型的 0.99 沿用既有近似不乘，

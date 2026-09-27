@@ -69,12 +69,16 @@ export interface OptionsData {
   /** 渲染帧率上限(2026-08-18 原版对齐):原版锁 60fps;0=不锁(跟随显示器 rAF)。
    *  逻辑 tick 恒 60Hz 不受影响(fixedUpdate 累加器);仅 gate 渲染帧 */
   frameCap: number;
-  /** 帧模式三态(原版 FrameSkipMode Off/On/Subtle,Main.cs:16950-16975 1456 实况):
-   *  ★"落后跳帧"在原版是死代码(num3=0 使 successiveSkippedDraws 门永假 :16968),
-   *  任何档位都不因渲染落后而跳绘制。Subtle=超前帧节流(accumulator 未满整帧的
-   *  tick SuppressDraw :16954——高刷屏把绘制压回逻辑帧率;慢机每 tick 都落后
-   *  永不触发);Off/On=跟随 rAF(两态在 1456 的其余差异为 XNA 固定时间步/失焦
-   *  节流 :16893,无 Web 对应物,本仓同效)。默认 Subtle(原版 improved 路径) */
+  /** 帧模式三态(原版 FrameSkipMode Off/On/Subtle,1457 Main.cs:17129-17197 亲读;
+   *  1456 旧锚 :16950-16975):
+   *  ★"落后跳帧"在原版是死代码(num3=0 使 successiveSkippedDraws 门永假 :17195-17202),
+   *  任何档位都不因渲染落后而跳绘制。★Subtle=确定性节拍对齐(2026-09-28 调度面修复刃
+   *  重译):1457 默认 improvedSubtleFrameSkip=true 的真实语义 = EndDraw 忙等钳 60Hz
+   *  present 网格(Main.cs:62624-62644),Update 每循环照跑、无绘制抑制——本仓以
+   *  帧序计数落拍移植(每 k 个 vsync 渲一次,容量+frameCap 选拍,滞回防震荡,
+   *  FrameBeat.ts);旧"0 步进帧 SuppressDraw"译法(:17182-17193,仅 Subtle&&
+   *  !improved 旧路径)已退役。Off/On=跟随 rAF 自由渲染(off=逃生门;On 的 XNA
+   *  固定时间步 :17133-17137 无 Web 对应物,两态同效)。默认 Subtle(原版同) */
   frameSkipMode: 'off' | 'on' | 'subtle';
   /** 水波质量四档（Main.WaveQuality，Main.cs:405 默认 3）：0=关 1=低 2=中 3=高。
    *  档位门见 WaterShaderData.cs:114-118（>=3 弹幕波/黏度补偿、>=2 玩家+涟漪、

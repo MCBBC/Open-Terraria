@@ -123,6 +123,7 @@ export interface ShimExecStats {
   fallback: number;     // 2D 回退（flush+raw）
   flushes: number;      // FBO present 次数
   uploads: number;      // 纹理（重）上传
+  regionUploads: number; // ★P1-B 子区增量上传笔数（texRefreshRegion 支;探针分账面）
   replays: number;      // GL 失败 2D 重放
   emitBatchQuads: number; // ★C5 雨批发射四边形数（quadBatch 路径;探针对账面）
 }
@@ -207,7 +208,18 @@ const DRAWING_TAIL = new Set([
   'drawFocusIfNeeded', 'fillText2',
 ]);
 
+/** ★P1-B 子区上传门（2026-09-28 纯函数供单测/两调用点共用）：子区 <半幅 才换刀
+ *  （登记债注中预案分档——子区收益 ≥2× 才值得吃抠图的第二次 premul 往返 ±1LSB;
+ *  大子区/越界/零尺寸保整幅精确链）。cw/ch=宿主画布（accScratch/boltScratch）
+ *  当前尺寸。 */
+export function p1bRegionGate(sw: number, sh: number, cw: number, ch: number): boolean {
+  return sw > 0 && sh > 0 && sw <= cw && sh <= ch && sw * sh * 2 < cw * ch;
+}
+
 export class GLShimExecutor {
+  /** ★P1-B 子区上传逃生门（探针 A/B 面+回滚口;缺省开。StormLightning.BOLT_BAKE_OFF
+   *  判例同款静态可扭面——探针页内 m.GLShimExecutor.P1B_REGION_OFF=true 切臂） */
+  static P1B_REGION_OFF = false;
   private host: ShimHost;
   private raw: CanvasRenderingContext2D | null = null;
   private glw: GLSpriteLayer | null = null;
@@ -274,7 +286,7 @@ export class GLShimExecutor {
   stats: ShimExecStats = GLShimExecutor.blankStats();
 
   static blankStats(): ShimExecStats {
-    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, replays: 0, emitBatchQuads: 0 };
+    return { draws: 0, emitSO: 0, emitADD: 0, emitErase: 0, emitMult: 0, pairEmitted: 0, pairSuppressed: 0, fallback: 0, flushes: 0, uploads: 0, regionUploads: 0, replays: 0, emitBatchQuads: 0 };
   }
 
   constructor(host: ShimHost) {
@@ -443,10 +455,19 @@ export class GLShimExecutor {
    *  resolveTex null → accFail 重放）同被本快照兜住。
    *  ★R3b-4:shineCell 键触帧账+帽（CAP 超限清扫 600 帧未触键 dropTexture——
    *  键空间=可见 shine 格并集,相机漫游无界增长会顶替 chunk 页等活纹理）。
+   *  ★P1-B（2026-09-28）:可选子区参 (rw,rh)——bake 链 quad 实采 scratch 左上
+   *  (0,0,rw,rh) 时按 p1bRegionGate 分档走 texRefreshRegion（雷暴持续期
+   *  boltScratch 恒大滞回不回落,整幅/op=与 bake bbox 无关的浪费;子区门同判）;
+   *  不带子区参的调用点（shine/empressTint——实采≈全幅,子区无收益）保整幅链。
    *  无 GL/非 bgl 会话 no-op（2D 兜底链本就逐 bolt 即画,无此病）。 */
-  uploadScratchNow(img: HTMLCanvasElement, key: string): void {
+  uploadScratchNow(img: HTMLCanvasElement, key: string, rw?: number, rh?: number): void {
     if (!this.active || !this.glw || this.glw.unavailable) return;
-    const e = this.glw.texRefresh(key, img);
+    const regionPath = rw !== undefined && rh !== undefined && !GLShimExecutor.P1B_REGION_OFF
+      && p1bRegionGate(rw, rh, img.width, img.height);
+    const e = regionPath
+      ? this.glw.texRefreshRegion(key, img, rw, rh)
+      : this.glw.texRefresh(key, img);
+    if (regionPath && e) this.stats.regionUploads++;
     if (!e) return;
     const rec0 = { img, tex: e, snap: this.snapBakeBytes(img) };
     this.bakedTexPending = rec0;
@@ -1444,17 +1465,26 @@ export class GLShimExecutor {
     }
     if (p.dynamic) {
       const key = this.dynKeys.get(p.img as object) ?? `dyn:${++this.dynKeySeq}`;
-      // ★P1-B 登记债（2026-09-27 星云案批,评估后超边界不落刀）:子区上传防波堤——
-      //  栅格化族的 quad 只采 scratch 左上 (0,0,sw,sh),texRefresh 却整幅上传;面被
-      //  撑大后残余上传=整幅/ op。P1-A 滞回回落已把稳态压回「上传≈需求」,残余带
-      //  仅剩需求∈(面/2,面] 的流（罕见）。本刀不上理由:①DOM 源无 9 参子区重载
-      //  （texSubUpdate :810 判例）→ 须 CPU 抠图过渡或 getImageData 读回;②抠图/
-      //  读回引入第二次 premultiply↔unpremultiply 往返=±1LSB 漂移面（Skia CPU/GPU
-      //  漂移 255 判例;现上传链只一次往返）;③glStatUpload 口径/驻留尺寸账本联动
-      //  面（texFromImage/texRefresh/LRU bytes）需同批改。若落刀:新增
-      //  texRefreshRegion(key,img,w,h)（同尺寸 texSubImage2D 增量/换尺寸 drop 重建,
-      //  抠图用 GLSpriteLayer.regScratch 同款隔离面）,本支按 p.img===accScratch 且
-      //  p.sw*p.sh < 面积一半分档接入;收益=残余带 2-100× 上传减量。
+      // ★P1-B 子区上传落刀（2026-09-28——上注为 2026-09-27 登记债,设计+三风险
+      //  预案原样兑现,见 GLSpriteLayer.texRefreshRegion 头注）:栅格化族四口
+      //  （rasterizeDrawImage/rasterizePathOp/rasterizeFillRect/rasterizeOp）的
+      //  quad 只实采 accScratch 左上 (0,0,sw,sh),texRefresh 却整幅上传——面被
+      //  「需求∈(半幅,全幅] 的 op 流」顶住滞回不回落时逐 op 全幅重传（霜月
+      //  1650²=10.9MB/op,42.4% 墙钟定谳面）。本支:img===accScratch 且子区<半幅
+      //  → texRefreshRegion（同尺寸 texSubImage2D 增量,上传=sw×sh;纹理恒全幅
+      //  尺寸,UV/texKind/quad 采样语义不变）;其余动态源（尘 s1/s2、mountTint、
+      //  boltScratch 兜底散画、empressTint 等——实采≈全幅）与 ≥半幅子区保整幅
+      //  texRefresh 精确链。P1B_REGION_OFF=探针 A/B 逃生门。
+      //  ★texEpoch 交互:er: 纪元键只在本函数下方静态支（texCache 命中判定）,
+      //  本支 dyn: 键与其零交集;texRefreshRegion 返回同一 entry 对象（stamp 推进）,
+      //  缓存/持引用面语义不变。
+      const acc = _accScratch;
+      if (acc && p.img === acc && !GLShimExecutor.P1B_REGION_OFF
+        && p1bRegionGate(p.sw, p.sh, acc.width, acc.height)) {
+        const er = glw.texRefreshRegion(key, p.img as TexImageSource, p.sw, p.sh);
+        if (er) { this.stats.uploads++; this.stats.regionUploads++; }
+        return er;
+      }
       const e = glw.texRefresh(key, p.img as TexImageSource);
       if (e) this.stats.uploads++;
       return e;
@@ -1622,6 +1652,10 @@ function accScratch(w: number, h: number): HTMLCanvasElement | null {
   //  ≥需求,UV(0,0,需求) 落点不变;尺寸回落走 texRefresh 换尺寸重建通道
   //  （dropTexture+texFromImage,GLSpriteLayer 851-853）天然衔接;resize 自动清屏
   //  与消费方首行 clearRect(0,0,需求) 语义不变。
+  //  ★P1-B（2026-09-28）:需求∈(半幅,全幅] 的 op 流把面顶在高位时不回落——
+  //  此前每 op 仍整幅上传;resolveTex 对 img===本面 且子区<半幅 走 texRefreshRegion
+  //  子区增量（上传=sw×sh;四消费口的内容恒落 (0,0,sw,sh) 左上=子区读取域,
+  //  面其余部分为陈旧字节但 quad 从不采样）。本 let 被 resolveTex 门按身份比对。
   if (w * 2 <= cw && h * 2 <= ch) {
     const tw = Math.max(ACC_SCRATCH_BASE, w), th = Math.max(ACC_SCRATCH_BASE, h);
     if (tw < cw || th < ch) { _accScratch.width = tw; _accScratch.height = th; }

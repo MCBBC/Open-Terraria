@@ -540,14 +540,16 @@ export class SettingsPanel {
             : Lang.text('Mods.SandboxWorld.Settings.RenderModeAuto'),
           () => void options.set('renderMode', d.renderMode === 'gpu' ? 'cpu' : d.renderMode === 'cpu' ? 'auto' : 'gpu'),
         ),
-        // 帧模式三态(原版 FrameSkipMode,Main.cs:16950-16975):温和=超前帧节流
-        // (高刷屏绘制压回逻辑帧率;慢机永不触发——原版"落后跳帧"是死代码 num3=0)
+        // 帧模式三态(原版 FrameSkipMode,1457 Main.cs:17129-17197;1456 旧锚 :16950-16975)
         // 文案=原版 LegacyMenu.247/248/249 拆「标签|档名」(IngameOptions.cs:964
         // Lang.menu[247+FrameSkipMode],枚举 Off/On/Subtle=Enums/FrameSkipMode.cs;
         // zh 跳帧/关/开/隐蔽,en Frame Skip/Off/On/Subtle;2026-09-28 用户令对齐原版)。
-        // 语义偏差注记(本行无 tooltip 位,存此):本仓解耦架构 Off/On=自由渲染照画
-        // (逻辑 tick 恒 60Hz;原版 Off/On 的 XNA 固定时间步差异无 Web 对应物,
-        // Game.ts:8214-8223 定谳),Subtle 同原版=超前帧 SuppressDraw。
+        // ★语义锚(2026-09-28 调度面修复刃后,Game.ts start() beat 门定谳):Subtle=
+        // 确定性节拍对齐(原版 improvedSubtleFrameSkip 默认路径,EndDraw 钳 60Hz present
+        // 网格 Main.cs:62624-62644 的 rAF 帧序计数移植——渲染恒 ≤60fps,高刷屏帧距
+        // 恒定;旧"0 步进帧 SuppressDraw"译法已退役);Off/On=自由渲染照画(逻辑 tick
+        // 恒 60Hz;On 的 XNA 固定时间步差异 Main.cs:17133-17137 无 Web 对应物,同效),
+        // off 档=用户明令逃生门。文案与原版逐字对齐,语义归位后无需改动。
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.FrameSkip'),
           () => d.frameSkipMode,

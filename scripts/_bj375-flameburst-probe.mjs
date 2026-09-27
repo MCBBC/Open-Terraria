@@ -27,12 +27,17 @@ for (let i = 0; i < 6 && !(await page.$('.sw-vsel')); i++) {
 if (!(await page.$('.sw-vsel'))) throw new Error('面板未出现');
 // 建角色
 if (!(await page.$('.sw-vsel .sw-vitem'))) {
-  await page.click('.sw-vsel [data-act=new]');
-  await page.waitForSelector('.sw-char-row input[type=text]', { timeout: 10000 });
-  await page.click('.sw-char-row input[type=text]');
+  for (let i = 0; i < 4 && !(await page.$('.sw-char-row input[type=text]')); i++) {
+    await page.click('.sw-vsel [data-act=new]').catch(() => {});
+    await page.waitForSelector('.sw-char-row input[type=text]', { timeout: 10000 }).catch(() => {});
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  await page.click('.sw-char-row input[type=text]').catch(() => {});
   await page.keyboard.type('bj375p');
-  await page.click('[data-act=create]');
-  await page.waitForSelector('.sw-vsel .sw-vitem', { timeout: 20000 }).catch(() => {});
+  for (let i = 0; i < 4; i++) {
+    await page.click('[data-act=create]').catch(() => {});
+    if (await page.waitForSelector('.sw-vsel .sw-vitem', { timeout: 5000 }).catch(() => false)) break;
+  }
 }
 for (let i = 0; i < 3; i++) {
   if (!(await page.$('.sw-vsel .sw-vitem'))) break;
@@ -145,8 +150,8 @@ const res = await page.evaluate(async () => {
     g.entities.add(a, 'projectiles');
     return a;
   };
-  const s1 = mk(0, -80, 15, 0, 'ghost-on', false);
-  const s2 = mk(0, 0, 15, 0, 'ghost-off', true);
+  const s1 = mk(0, -40, 15, 0, 'ghost-on', false);
+  const s2 = mk(0, 60, 15, 0, 'ghost-off', true);
   const s3 = mk(0, 80, 10.6, 10.6, 'ghost-off-diag', true);
   step(6);   // 独立弹飞 6 拍
   // ---- 冻结拍照

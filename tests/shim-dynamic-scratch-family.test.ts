@@ -193,10 +193,12 @@ describe('★变体①修复锁 TintAtlas:回收矩形 bump 页纪元', () => {
 });
 
 describe('★变体①修复锁 源级锁:各共享 scratch 烘焙点逐次上传接线在位', () => {
-  it('Renderer.uploadScratchBake 助手（家族独立环形序号;★R3b-6 帧界重置+触帧账）在位', () => {
-    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number): void {');
+  it('Renderer.uploadScratchBake 助手（家族独立环形序号;★R3b-6 帧界重置+触帧账;★P1-B 子区参透传）在位', () => {
+    // ★2026-09-28 锚重产:签 名扩可选子区参 (rw,rh)（bolt 链携 bbox 走 p1bRegionGate
+    //  分档;不带参的家族调用点语义零变化）
+    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number): void {');
     expect(RDR).toContain('this.scratchBakeSeqs.set(fam, { n, f });');
-    expect(RDR).toContain("sh.uploadScratchNow(img, `${fam}:${n % ring}`);");
+    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh);');
   });
 
   it('尘族 s1/s2 三烘焙点（dustTint/dustColor/dustDye）逐尘即刻上传;★R3b-1:环=池上界 6000', () => {

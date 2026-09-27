@@ -25,7 +25,7 @@ export interface LightingWorld {
 
 const enum State { MinimapUpdate = 0, ExportMetrics = 1, Scan = 2, Blur = 3 }
 
-// ---- ★C9c-v3 粘性 live 门（2026-09-27 处方——v2 出阈残留缺陷定谳;v1 设计错翻案史 retained）----
+// ---- ★C9c-v4 进场简化（2026-09-28 处方——弱机永久 warmup 根治;v1→v4 教训链 retained）----
 // v1 固定 12ms 绝对阈的缺陷:lagMs=send→apply 端到端（含主线程消息调度延迟）,忙机
 // （帧耗 ~8-20ms）恒超标（用户机 F5 实测恒 ~20>12）→ live 永不可达=warmup 本地
 // 双跑【永久化】（trace:光照主线程残部 1911ms——exportTo 250+blurLine 172+
@@ -35,8 +35,19 @@ const enum State { MinimapUpdate = 0, ExportMetrics = 1, Scan = 2, Blur = 3 }
 // 震荡跨出阈→live/warmup 交替两源上屏闪烁,每次回退强制本地全周期=更卡→更深横跳
 // 正反馈。v3=粘性 live:lag 只作【进场资格】（连续 8 拍 ≤进阈即入）,入后出场唯一
 // 条件=看门狗级硬故障（2s 无回传/异常回执/onerror——LightWorkerLink 既有 fallback
-// 面）;live 恒 1 tick 陈旧但稳定 > 新鲜/陈旧交替闪烁,双跑省下 7-12% 给弱机续命。
-// ?lightlag=ms 仍=绝对阈手动模式（阈只作用于进场资格,探针/强扭矩面）。
+// 面）;live 恒 1 tick 陈旧但稳定 > 新鲜/陈旧交替闪烁。
+// ★v4 定谳（2026-09-28 双 trace 实证:Windows 霜月+本机黄昏——worker 线程空闲而
+// 主线程跑本地光照双跑,light 残部 9.5-12% 墙钟）:v3 修了出场（粘性）但【进场条件】
+// （连续 8 拍 lag≤25ms）在持续高压下永不满足——lag=send→apply 含主线程消息调度,
+// 主线程忙 99% 时 lag 恒 50-200ms→8 连拍永不成→warmup 永久=双跑正反馈（v1 同病
+// 换阈复发）。进场门槛是协调者的过度设计:C9c 的原始担忧（worker 病态陈旧倒灌）
+// 已被 liveAuth 门（warmup 禁到达即应用,结果 1 tick 内经 applyPending 成对回填）
+// 与看门狗（2s 硬故障永久回落）双兜底,lag 判据唯一实际效果=弱机永拒。
+// v4=三级收敛终态（v1 永拒忙机→v2 出场横跳→v3 粘性出场→v4 进场简化）:
+// 【进场】adaptive 模式 hasResult（首个健康结果）即 live;【lag 环】保留为纯诊断
+// （good/bad/p50 记账不驱动门态,lightGateDiag 字段全兼容）;【出场】唯一条件=看门狗
+// （v3 已是,exitReason='watchdog'）;?lightlag=ms 手动模式语义保留=绝对阈全语义
+// （8 连拍 ≤阈进场+坏拍满 2 强制出场=v1 面,探针/强扭矩面）。
 // worker 上下文禁 URL 探测（fork bomb 判例家族,恒自适应缺省）。
 export const LIGHT_TICK_MS = 1000 / 60;
 const LIGHT_LAG_MANUAL = (() => {
@@ -51,33 +62,44 @@ export const LIGHT_GATE_MODE: 'adaptive' | 'manual' = LIGHT_LAG_MANUAL > 0 ? 'ma
 export const LIGHT_LIVE_ENTER_MS = LIGHT_LAG_MANUAL > 0 ? LIGHT_LAG_MANUAL : LIGHT_TICK_MS * 1.5;
 export const LIGHT_LIVE_EXIT_MS = LIGHT_LAG_MANUAL > 0 ? LIGHT_LAG_MANUAL : LIGHT_TICK_MS * 2.5;
 const LIGHT_LIVE_ENTER = 8;
-/** ★C9c-v3 门诊断面（F5 消费;模块级单例——引擎实例归 Game 内部,报告面免接线）。
+/** ★C9c-v4 门诊断面（F5 消费;模块级单例——引擎实例归 Game 内部,报告面免接线）。
  *  exitReason=出场原因（'watchdog'=看门狗级硬故障唯一出场;null=未出场）——v3 新增
- *  字段,F5 既有字段（live/good/bad/p50Ms/lastLagMs/enterMs/exitMs/mode/ring）全兼容 */
+ *  字段,F5 既有字段（live/good/bad/p50Ms/lastLagMs/enterMs/exitMs/mode/ring）全兼容。
+ *  ★v4 语义:good/bad/p50/ring 全为纯诊断记账（不驱动门态）;live=门态本相。 */
 export const lightGateDiag = {
   live: false, good: 0, bad: 0, p50Ms: 0, lastLagMs: 0,
   enterMs: LIGHT_LIVE_ENTER_MS, exitMs: LIGHT_LIVE_EXIT_MS, mode: LIGHT_GATE_MODE, ring: 0,
   exitReason: null as 'watchdog' | null,
 };
 
-/** ★C9c-v3 粘性 live 门步进（纯函数供单测）：lag>p50 阈→坏拍计数（清好拍）,≤阈值→
- *  好拍计数（清坏拍）;lag≤0（尚无结果）不计拍。warmup 态好拍满 ENTER 且已有结果→
- *  进 live。【出场已删】（v2「live 态坏拍满 2→回退」在弱机成横跳源,见文件头注）——
- *  入后出场唯一条件=看门狗级硬故障（引擎 compute() !lw.healthy() 面,非本函数）。
- *  enterMs/exitMs=v2 自适应阈（相对 tick 周期;?lightlag 手动模式两者相等,只作用于
- *  进场资格）——缺省取模块常量,既有单测契约（无阈参调用）进场行为保持同行为;
- *  fell 字段保留兼容（恒 false,lag 出场已删）;live 态坏拍计数保留=纯诊断面。 */
+/** ★C9c-v4 live 门步进（纯函数供单测）：lag 计拍保留=【纯诊断】（好拍/坏拍账本,
+ *  lightGateDiag 消费面不变;不驱动门态——v3 起出场已删,v4 起进场亦不再看 lag）。
+ *  【进场】adaptive 模式=hasResult（首个健康结果）即 live——v3「连续 8 拍 ≤进阈」
+ *  在忙机（主线程忙 99%→lag 恒 50-200ms）永不满足=warmup 永久化（v1 同病换阈复发,
+ *  见文件头注 v4 定谳;C9c 原始担忧=陈旧倒灌,由 liveAuth 门+看门狗双兜底）。
+ *  【出场】adaptive 无 lag 出场——唯一条件=看门狗级硬故障（引擎 compute()
+ *  !lw.healthy() 面,非本函数）。手动模式（enterMs===exitMs,?lightlag 面）语义
+ *  保留=v1 绝对阈全形态:8 连拍 ≤阈+已有结果进场,坏拍满 2 强制出场（探针强扭矩
+ *  面:小阈可稳定钉 warmup,大阈可稳定钉 live）。
+ *  enterMs/exitMs 缺省取模块常量（生产路径 lwGate 无阈参调用,缺省值自带模式身份:
+ *  自适应恒进<出;手动 enter=exit=lightlag）;fell 字段保留兼容（恒 false——v2
+ *  复刻件对照面字段,lag 出场已删）。 */
 export function liveGateStep(
   live: boolean, good: number, bad: number, lag: number, hasResult: boolean,
   enterMs: number = LIGHT_LIVE_ENTER_MS, exitMs: number = LIGHT_LIVE_EXIT_MS,
 ): { live: boolean; good: number; bad: number; fell: boolean } {
-  // 坏拍阈=双阈分态:warmup 对进阈（lag>p50 进阈=坏拍禁 entry）,live 对出阈（仅
-  // 诊断计数不退场）;手动模式两者相等=v1 语义（进场资格侧）
+  // 计拍阈分态:warmup 对进阈、live 对出阈（手动模式两者相等=v1 绝对阈）;v4 起纯记账
   const threshold = live ? exitMs : enterMs;
   if (lag > threshold) { bad++; good = 0; }
   else if (lag > 0) { good++; bad = 0; }
-  if (!live) {
-    if (hasResult && good >= LIGHT_LIVE_ENTER) live = true;
+  if (enterMs === exitMs) {
+    // ★手动模式（?lightlag=ms）:v1 绝对阈全语义保留（探针/强扭矩面）
+    if (!live) {
+      if (hasResult && good >= LIGHT_LIVE_ENTER) live = true;
+    } else if (bad >= 2) { live = false; good = 0; bad = 0; }
+  } else {
+    // ★v4 adaptive:首个健康结果即 live（忙机 8 连拍永不成=warmup 永拒定谳删除）
+    if (hasResult) live = true;
   }
   return { live, good, bad, fell: false };
 }
@@ -256,14 +278,16 @@ export class LightingEngine {
         lw.dispose();
         this._lw = null;
         this.dirty = true;   // 回落后首帧强制全周期
-        // ★C9c-v3：粘性 live 的唯一出场=看门狗级硬故障（2s 无回传/异常回执/onerror）
+        // ★C9c-v3/v4：live 的唯一出场=看门狗级硬故障（2s 无回传/异常回执/onerror;
+        //  v4 进场简化后 lag 判据全面退役为诊断）
         // ——诊断面出场原因标记（F5 兼容新增字段;lag 驱动出场已删不产 'lag' 值）
         this.lwLive = false; this.lwGood = 0; this.lwBad = 0;
         lightGateDiag.live = false;
         lightGateDiag.exitReason = 'watchdog';
       } else {
-        // ★C9c：live 由滞回健康门判定（warmup 期本地新鲜光优先,onResult 被
-        //  liveAuth 抑制;转 live 后到达即应用接管,compute 内 applyPending 降兜底）
+        // ★C9c-v4：live 由门步进判定（hasResult 首个健康结果即 live;warmup 短窗期
+        //  本地新鲜光优先,onResult 被 liveAuth 抑制;转 live 后到达即应用接管,
+        //  compute 内 applyPending 降兜底）
         const live = this.lwGate(lw);
         // ★C9d：快照区域取本帧 ensureRegion 现值（快照面恒最新）。公共采样对=上一
         // 帧成对结果（结果未达时不回拨/不直改,渲染读 (区域,数组) 恒成对一致,值恒
@@ -299,19 +323,21 @@ export class LightingEngine {
     this.step();
   }
 
-  /** ★C9c 自适应 live 门状态（滞回;见 liveGateStep） */
+  /** ★C9c-v4 live 门状态（进场=首个健康结果;出场唯一=看门狗;见 liveGateStep） */
   private lwLive = false;
   private lwGood = 0;
   private lwBad = 0;
 
-  /** ★C9c-v2 lag 滑动窗（最近 24 拍样本;尚无结果(≤0)不入窗——p50 抗单拍毛刺,
-   *  忙机双跑锁死翻案面:v1 逐拍绝对阈被调度延迟钉死,v2 相对判据看的是分布） */
+  /** ★C9c-v2 lag 滑动窗（最近 24 拍样本;尚无结果(≤0)不入窗）——★v4 起纯诊断面
+   *  （p50 只进 lightGateDiag 不驱动门态;v1 逐拍绝对阈被调度延迟钉死的历史翻案面
+   *  retained:F5/探针据此观察 send→apply 端到端分布） */
   private lwLagRing: number[] = [];
-  /** ★C9c-v3 粘性 live 门（lag 滑动 p50 只作【进场资格】——连续 8 拍 ≤进阈+已有结果
-   *  才转 live;入场后 lag 驱动出场已删（弱机横跳定谳,见文件头注/liveGateStep 注）,
-   *  唯一出场=compute() 看门狗级硬故障（diag.exitReason='watchdog'）。不限帧率饱和/
-   *  进场 dirty 风暴期滞留 warmup（本地 0 延迟新鲜光优先,代价 7-12% CPU）,消息健康
-   *  后转 live 省 CPU;忙机（lag p50 ≤1.5 tick）不再被罚永久双跑（v1 翻案 retained）。 */
+  /** ★C9c-v4 live 门（进场=hasResult 首个健康结果即 live——v3「连续 8 拍 ≤进阈」
+   *  进场资格在忙机永不满足=warmup 永久化,定谳删除,见文件头注/liveGateStep 注;
+   *  lag 环/p50 保留为纯诊断记账。唯一出场=compute() 看门狗级硬故障
+   *  （diag.exitReason='watchdog'）。不限帧率饱和/进场 dirty 风暴期首结果前的
+   *  warmup 短窗行为不变（本地 0 延迟新鲜光优先,代价 ≤首结果到达窗）;
+   *  手动模式 ?lightlag=ms 保留 v1 绝对阈全形态（探针强扭矩面）。 */
   private lwGate(lw: LightWorkerLink): boolean {
     if (lw.lastLagMs > 0) {
       this.lwLagRing.push(lw.lastLagMs);

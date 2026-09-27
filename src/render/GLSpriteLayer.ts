@@ -865,6 +865,57 @@ export class GLSpriteLayer {
     return hit;
   }
 
+  /** ★P1-B 子区上传（2026-09-28 栅格化族上传风暴根治;GLShimExecutor.resolveTex
+   *  2026-09-27 登记债注含完整设计+三风险预案,本刀按注落地）:动态 scratch 的
+   *  【左上子区】(0,0,sw,sh) 增量重传——栅格化族（rasterizeDrawImage/rasterizePathOp/
+   *  rasterizeFillRect/rasterizeOp）与 bolt bake 的 quad 只实采 scratch 左上
+   *  (0,0,sw,sh),整幅 texRefresh 在面被「需求∈(半幅,全幅] 的 op 流」顶住滞回
+   *  不回落时逐 op 全幅重传（实测 1650²=10.9MB/op,霜月 42.4% 墙钟定谳面）。
+   *  【三链分档】①未驻留/换尺寸 → 整幅 texFromImage/drop 重建（首次创建仍需全幅,
+   *  按注:单 premul 往返=逐字节精确）;②同尺寸驻留 → 抠 (0,0,sw,sh) 到隔离面 +
+   *  texSubImage2D 增量（上传量=sw×sh,典型 10-100× 缩减）;③越界/零尺寸防御 →
+   *  整幅 texRefresh 退回。驻留纹理恒全幅尺寸（hit.w/h 不变）——调用方 UV
+   *  (÷e.w/e.h)/texKind 语义零改动。
+   *  【三风险处置（注中预案）】①首建/换尺寸=整幅精确链（见上）;②抠图引入第二次
+   *  premul↔unpremul 往返=α<255 像素 ±1LSB 漂移（尘对合并「中间舍入差 ≤1LSB,
+   *  登记」同款 census 有界口径——栅格化族为特效面,调用方半幅门把收益不足的
+   *  op 挡回整幅精确链）;③账本联动:glStatUpload 记【子区】字节（带宽真值,
+   *  texSubUpdate 小地图 :798 判例同口径）,entry.bytes/LRU 驻留账恒全幅
+   *  （texFromImage 建账,纹理对象尺寸未变,不动 evictLRU）。
+   *  ★texEpoch 交互:er: 纪元键只存在于静态 texFromRegion 支（texCache 命中判定）,
+   *  本口只服务 dyn:/bake 稳定键——纪元命中语义零交集;同键返回同一 entry 对象
+   *  （stamp 推进）,外部持引用面（texAlive/preTex/texCache）语义不变。
+   *  隔离面复用 regScratch（texFromRegion 同款 willReadFrequently 上传中转,
+   *  判例 R3-F8;调用同步单线程无重入）。 */
+  texRefreshRegion(key: string, img: TexImageSource, sw: number, sh: number): TexEntry | null {
+    if (this.unavailable || !this.gl) return null;
+    const hit = this.texs.get(key);
+    if (!hit) return this.texFromImage(key, img, false, true);   // ①首建=整幅（精确单往返）
+    const iw = (img as { width: number }).width, ih = (img as { height: number }).height;
+    if (!iw || !ih) return hit;
+    if (iw !== hit.w || ih !== hit.h) {   // 换尺寸:重规格化不可用,drop 重建（同 texRefresh 通道）
+      this.dropTexture(key);
+      return this.texFromImage(key, img, false, true);
+    }
+    if (!(sw > 0 && sh > 0) || sw > hit.w || sh > hit.h) return this.texRefresh(key, img);   // ③防御
+    const gl = this.gl;
+    if (!this.regScratch) this.regScratch = document.createElement('canvas');
+    const sc = this.regScratch;
+    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    const scx = this.regScratchCtx ??= sc.getContext('2d', { willReadFrequently: true })!;
+    scx.clearRect(0, 0, sw, sh);
+    scx.drawImage(img as CanvasImageSource, 0, 0, sw, sh, 0, 0, sw, sh);
+    gl.bindTexture(gl.TEXTURE_2D, hit.tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, sc);
+    glStatUpload(this.statName, sw * sh * 4);   // ③带宽=子区;驻留账（entry.bytes）恒全幅
+    if (hit.mipped) gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    hit.stamp = ++this.stamp;
+    return hit;
+  }
+
   /** ★B2 字节直传（尘预乘对合并纹理:rgb=预乘 add 面,a=erase 面）。数据已是
    *  预乘字节——禁 UNPACK_PREMULTIPLY（二次预乘=rgb 再乘 a=暗一档）;无 mip。
    *  采样档由 quadSprite 按调用面绑定（纹理参数只兜底）。 */

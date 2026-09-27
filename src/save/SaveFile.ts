@@ -13,6 +13,7 @@ import type { SavedItem as SavedItemT } from './serialize';
 import { weatherToSave } from '../world/weather/Weather';
 import { applyLunarSave } from '../world/LunarEvent';
 import { furnitureFromSave } from '../world/FurnitureItems';
+import { repairLegacyContainerAnchorsInStore } from '../world/repairIndexFrames';
 
 export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
 export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
@@ -542,6 +543,15 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
         nextMilestone += nAll / 100;
       }
     }
+  }
+  // ★BJ377（2026-09-28）存量 .wld 导入档容器锚格误写批修（467 箱族/88 梳妆台锚
+  //  被旧导入兜底强写成 21 保帧 → 左上格贴图错/破坏链碎片化/误锁 37 锚）。
+  //  纯函数幂等（修后锚 type≠21 恒跳过,合法世界零写）；只在本文件收口=worker 与
+  //  主线程两条读档链一次覆盖。v3 门：v2 旧内部下标域与现行 TILE_BY_KEY 无保序
+  //  契约不判（v2 档首存转 v5 后下一读档自动入修）。
+  if (v3) {
+    const repaired = repairLegacyContainerAnchorsInStore(st, world.chests);
+    if (repaired) console.log(`[load] BJ377 容器锚修复 ${repaired} 锚（467/88 家族归位）`);
   }
   // ★幽灵保域（v5）：active 位差分通道（serialize.ts rleTileActiveDiff 的逆变换）。
   //   v[i]=1 → 活位与"type≠0 即激活"派生式取反：幽灵格（type≠0 未激活）保持

@@ -256,4 +256,27 @@ describe('BJ348b 星云族回归（BJ348 面）', () => {
     flyFrames(six18[0]!, game, 1);
     expect(six18[0]!.dead).toBe(true);
   });
+  it('尘 followEnt 随动接线（Dust.cs:571-581 customData=Projectile）：617 环尘/618 尾尘骑父弹本拍位移,父死零位移', () => {
+    const dusts: (DustRec & { followEnt?: () => { dx: number; dy: number } })[] = [];
+    const bucket: Arrow[] = [];
+    const game = makeGame(emptyWorld(), dusts, bucket);
+    const a = new Arrow(800, 1500, 7, 0, 70, 5, 617, { grav: 0, life: 3600, pierce: 3 });
+    flyFrames(a, game, 122);                     // 快速段环尘 + 慢速段环尘 + 618 尾尘全接线
+    const rode = dusts.filter((d) => typeof d.followEnt === 'function');
+    expect(rode.length).toBeGreaterThanOrEqual(1);   // 环尘 86/90/240 + 618 尾尘均带闭包
+    // 闭包返回父弹本拍位移（x−oldX）：父移 10 → (10, 0)
+    a.oldX = a.x - 10; a.oldY = a.y;
+    for (const d of rode) {
+      const q = d.followEnt!();
+      expect(q.dx).toBeCloseTo(10, 6);
+      expect(q.dy).toBeCloseTo(0, 6);
+    }
+    // 父死 → 零位移（:573 `if (projectile.active)` 门镜像）
+    a.dead = true;
+    for (const d of rode) {
+      const q = d.followEnt!();
+      expect(q.dx).toBe(0);
+      expect(q.dy).toBe(0);
+    }
+  });
 });

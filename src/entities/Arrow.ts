@@ -765,6 +765,10 @@ export const PROJ_ALPHA0: Record<number, number> = {
   640: 255,                                    // 月总箭衍生体（SetDefaults :6902 alpha=255；
                                                 //  AI −25/substep 渐显并入 639 支,Kill 批 2026-09-02）
   207: 255, 837: 255,
+  // ★BJ375：664/666/668 爆炸烈焰塔弹（SetDefaults :7155-7163 alpha=255）——
+  //  AI_131 −25/t 渐显（:69543-69549,约 11 拍全显）,消费=vanillaProjAlpha lerp 档
+  //  fade 乘子;逐 tick 衰减支见 subStep 段 BJ375 块
+  664: 255, 666: 255, 668: 255,
   // R27：22 水花权杖 alpha=255(:1048)/27 水矢 alpha=255(:1103)+timeLeft/=2=1800(:1104)/
   // 45 恶魔镰刀 alpha=100(:1288，GetAlpha :81465-81468 恒 White 不读 α)——★F2 升格：
   // 显式 GA 豁免（drawGlobalAlpha case 44/45 return 1）,通用兜底禁止消费本值
@@ -3152,7 +3156,14 @@ export class Arrow extends Entity {
         frames: projFrameCount(this.projId),
         frame: isTy409 ? this.ty409Frame : 0,  // 通用表帧锚基准行（repo 无通用逐帧字段,登记②）;409=当前帧（:32543 y13=num271×frame）
         bodyW: this.w, bodyH: this.h,
-        bodyRot: isTy409 ? this.spinRot : ang, // 409=自旋角（:32555 proj.rotation,与本体同角）
+        // ★BJ375：mode0 残影角 = 本体有效旋转（vanilla num177=proj.rotation,
+        //  Main.cs:31333-31335——AI_001 系弹 rotation=velocity+π/2 :54877）。
+        //  此前传裸 ang → 缺省支（ang+π/2）弹族残影整体落后 π/2：664/666/668
+        //  爆炸烈焰弹残影画成「未旋转直立彗星」散落速度向轨迹 = 用户实报
+        //  「弯月/钩状缺半贴图」。GHOST_PARAMS 全族∩特判旋转集=空（BJ375 普查）
+        //  → 除 409 自旋特例与 503/660 独占支外,mode0 族恒 = 缺省支 ang+π/2；
+        //  mode2/3/4 族 rotMul=0 不消费本值,零改动面。
+        bodyRot: isTy409 ? this.spinRot : ang + Math.PI / 2, // 409=自旋角（:32555 proj.rotation,与本体同角）
         bodyScale: 1,                 // proj.scale 缺省 1（SetDefaults 表内 id 无显式 scale 行;660=1.1 已排除集）
         bodyAlpha: isTy409 ? 200 / 255 : ghostA, // 409=GetAlpha A 侧恒值（fade=(10−i)/15 环内通用式相乘）
         // ★BJ235 ai1 喂入（登记④清偿——AI_171/172/173 族 hue=(ai[1]+0.5)%1 不随时间
@@ -5609,6 +5620,31 @@ export class Arrow extends Entity {
       if (this.age > 3) this.alpha = Math.max(50, this.alpha - 25);
       this.vx *= 0.96; this.vy *= 0.96;
     }
+    // ---- ★BJ375：664/666/668 爆炸烈焰塔弹 AI_131 头段（Projectile.cs:69519-69559,
+    //  aiStyle 131 直译；此前仅生成侧 grav=0+音效,渐显/尘链整缺）----
+    //  ①alpha −25/t 钳 0（:69543-69549,SetDefaults 255 起步=PROJ_ALPHA0 注入,
+    //    消费=vanillaProjAlpha[664/666/668] lerp 档 fade 乘子+残影 bodyAlpha）；
+    //  ②逐拍尘 6 Fire：attempts=1/2/3（664/666/668,num 档 :69551-69558）,每掷
+    //    50% 门（:69557 Next(2)!=0）；尘速=弹速×0.2（:69561-69562）×0.3（:69567）
+    //    → ×0.06,vy += Sign(dvy)×1.2、fadeIn += 0.5（:69568-69571——原文
+    //    Main.rand.Next(1)==0 恒真 quirk 照抄=恒入支）；noGravity、scale 2、α100。
+    //    弹首拍音效 dd2_flameburst_tower_shot 已在塔生成侧（MinionProj F5 随收）,
+    //    localAI 声轨跟踪面不另建（登记：原版 ActiveSound.Position 每拍追位）。
+    if (this.projId === 664 || this.projId === 666 || this.projId === 668) {
+      if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 25);
+      const attempts = this.projId === 664 ? 1 : this.projId === 666 ? 2 : 3;
+      for (let ai = 0; ai < attempts; ai++) {
+        if (Math.floor(Math.random() * 2) !== 0) continue;   // Next(2)!=0 → 50% 跳过
+        const d131 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+          this.vx * 0.2, this.vy * 0.2, 100, null, 2, true);
+        if (d131) {
+          d131.noGravity = true;
+          d131.vx *= 0.3; d131.vy *= 0.3;
+          d131.vy += Math.sign(d131.vy || 0) * 1.2;
+          d131.fadeIn += 0.5;
+        }
+      }
+    }
     // ---- R35 清单③：烟花 167-170（AI_034,Projectile.cs aiStyle34 支）----
     // rotation=velocity+π/2（draw 侧）;发射器档(ai1==1):ai0++,==1 拍 8×d6 尘花
     // （noGravity ×3 vel,fadeIn0.5,pos+=v/2,vel+=v/4+player.v×0.1 近似略玩家项）,
@@ -6772,11 +6808,18 @@ export class Arrow extends Entity {
       // ★BJ348 尘尾（:35517-35528）：1/2 掷 → d86 弹心（NewDust 后 position=Center 钉心、
       //   velocity=弹速、noGravity、scale 1.5、customData=父球）——原版本体 α≡255 全隐
       //   （GetAlpha 缺省路径 A=0），**可见面全靠此尘尾**（用户实报"射弹从球体中生成"的
-      //   视觉承载）；customData 随动语义本仓未接 = 617 环尘同款近似（盒心 ±4px 抖动）
+      //   视觉承载）。★2026-09-28 随动补式：customData=父球 → d86 骑父球本拍位移
+      //   （Dust.cs:571-581 customData=Projectile → position+=父位移,active 门）,
+      //   followEnt 闭包承载（父死 → 零位移）——尘结贴球飞行,不再沿径拖尾散开。
       if (Math.random() < 0.5) {
         const d618 = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 86,
           this.vx, this.vy, 0, null, 1.5, true);
-        if (d618) { d618.x = this.cx; d618.y = this.cy; }
+        if (d618) {
+          d618.x = this.cx; d618.y = this.cy;
+          d618.followEnt = () => parent.dead
+            ? { dx: 0, dy: 0 }
+            : { dx: parent.x - (parent.oldX ?? parent.x), dy: parent.y - (parent.oldY ?? parent.y) };
+        }
       }
       this.alpha = 255;                                      //（:35533 恒隐身）
     } else if (this.projId === 617) {
@@ -6790,12 +6833,20 @@ export class Arrow extends Entity {
       if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 15);
       // ★R28 环绕尘带（:35293-35342 快速段 1/3 掷 / :35345-35372 慢速段每拍一组）：
       //   半数 d86|d90 Crimson 切向环绕（pos=心−UnitY.rot 随机×10~21、v=切向×6）、
-      //   半数 d240 外环 ×30（v=反切向×3）；customData=弹体跟随语义未接,普通尘近似
+      //   半数 d240 外环 ×30（v=反切向×3）。★2026-09-28 随动补式：customData=本体
+      //   （:35310/:35322/:35368-35377）→ followEnt 骑本拍位移（Dust.cs:571-581）,
+      //   尘晕贴球飞行（原版 halo 语义,曾"未接"致光晕沿径拖尾=用户实报观感差）。
       {
         const unit617 = (): [number, number] => {
           const a = Math.random() * Math.PI * 2;             // UnitY.RotatedByRandom(2π)
           return [-Math.sin(a), Math.cos(a)];
         };
+        const ride617 = (): { dx: number; dy: number } => this.dead
+          ? { dx: 0, dy: 0 }                                 //（:573 `if (projectile.active)` 门）
+          : {
+              dx: this.x - (this.oldX ?? this.x),
+              dy: this.y - (this.oldY ?? this.y),
+            };
         if (Math.hypot(this.vx, this.vy) > 4) {
           if (Math.floor(Math.random() * 3) === 0) {
             const [ux, uy] = unit617();
@@ -6804,11 +6855,11 @@ export class Arrow extends Entity {
                 this.cy - uy * (10 + Math.random() * 11), 1, 1,
                 Math.random() < 0.5 ? 86 : 90,
                 -uy * 6, ux * 6, 0, null, 0.5 + Math.random(), true);   // 切向 = rot(+π/2)
-              if (d617a) d617a.fadeIn = 0.5;
+              if (d617a) { d617a.fadeIn = 0.5; d617a.followEnt = ride617; }
             } else {
               const d617b = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30,
                 1, 1, 240, uy * 3, -ux * 3, 0, null, 0.5 + Math.random(), true);
-              if (d617b) d617b.fadeIn = 0.5;
+              if (d617b) { d617b.fadeIn = 0.5; d617b.followEnt = ride617; }
             }
           }
         } else {
@@ -6823,21 +6874,21 @@ export class Arrow extends Entity {
               const da = game.spawnDust?.(this.cx - uxa * (10 + Math.random() * 11),
                 this.cy - uya * (10 + Math.random() * 11), 1, 1, 86,
                 -uya * 6, uxa * 6, 0, null, s617s, true);
-              if (da) da.fadeIn = 0.5;
+              if (da) { da.fadeIn = 0.5; da.followEnt = ride617; }
             }
             {
               const [uxb, uyb] = unit617();
               const db = game.spawnDust?.(this.cx - uxb * (10 + Math.random() * 11),
                 this.cy - uyb * (10 + Math.random() * 11), 1, 1, 90,
                 -uyb * 6, uxb * 6, 0, { r: 220, g: 20, b: 60, a: 255 }, s617s, true);
-              if (db) db.fadeIn = 0.5;
+              if (db) { db.fadeIn = 0.5; db.followEnt = ride617; }
             }
           } else {
             const [uxc, uyc] = unit617();
             const dc = game.spawnDust?.(this.cx - uxc * (20 + Math.random() * 11),
               this.cy - uyc * (20 + Math.random() * 11), 1, 1, 240,
               uyc * 5, -uxc * 5, 0, null, s617s, true);
-            if (dc) dc.fadeIn = 0.5;
+            if (dc) { dc.fadeIn = 0.5; dc.followEnt = ride617; }
           }
         }
       }

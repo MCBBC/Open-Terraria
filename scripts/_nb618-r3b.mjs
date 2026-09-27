@@ -38,7 +38,6 @@ const setup = await page.evaluate(async () => {
       if (yy !== y0) { flat = false; break; }
     }
     if (flat) { col0 = c; gy = y0; break; }
-    if (col0 < 0 && k_end) ;
   }
   if (col0 < 0) return { fail: 'no-flat-ground' };
   p.x = col0 * 16; p.y = gy * 16 - p.h; p.vx = 0; p.vy = 0;

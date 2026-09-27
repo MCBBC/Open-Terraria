@@ -1,4 +1,6 @@
-// ★P0-B 雷击风暴修复锁（2026-09-25 定谳续刀）。
+// ★P0-B 雷击风暴修复锁（2026-09-25 定谳续刀;★2026-09-28 锚重产——R3b-2 滞回面/
+// R3b-2③ 帧界环形键/R1b-6 快照/P1-B 子区参 落地后旧锚停前代形态,在途金标禁重冻
+// 判据=按盘上现势重产,行为面语义不变）。
 // 定谳:StormLightning.draw→drawBolt 每 bolt K=6 切片×逐段 beginPath+fill
 // （~1500 fill/雷帧）在 acc shim 态=逐 fill rasterizePathOp 隔离栅格化+markDynamic
 // +即发即弃 flush→texImage2D 2000-3500 次/雷帧≈11ms 上传风暴（雷单独砍半帧率）。
@@ -46,15 +48,21 @@ describe('P0-B ① 专用化通道:整 bolt 单 scratch 烘焙', () => {
     expect(SRC).toContain("if (ctx.filter !== 'none') { try { ctx.filter = 'none'; } catch { /* 非法值忽略 */ } }");
     expect(SRC).toContain('ctx.drawImage(sc, 0, 0, sx, sy, fx, fy, sx, sy);');
     // 动态源登记=acc shim 单上传通道（Renderer 侧 no-op 安全出口）
-    expect(SRC).toContain('r9.markWorldDynamicScratch(sc);');
+    // ★2026-09-28 锚重产:R3b-2③ 帧界环形键 uploadScratchBake + P1-B 携 bbox 子区
+    // （旧锚 markWorldDynamicScratch(sc) 已停两代前形态,在途金标禁重冻判据重产）
+    expect(SRC).toContain("r9.uploadScratchBake(sc, 'boltBake', 1024, sx, sy);");
     const RDR = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
-    expect(RDR).toContain('markWorldDynamicScratch(img: HTMLCanvasElement): void {');
-    expect(RDR).toContain('if (Renderer.bgl && Renderer.bglShim) this.bglShimReg().markDynamic(img);');
+    expect(RDR).toContain('markWorldDynamicScratch(img: HTMLCanvasElement, key?: string): void {');
+    expect(RDR).toContain('if (key) this.bglShimReg().uploadScratchNow(img, key);');
+    expect(RDR).toContain('else this.bglShimReg().markDynamic(img);');
   });
-  it('scratch 面纪律:模块级只增不减+willReadFrequently（CanvasWatch/R3-F8 判例）', () => {
+  it('scratch 面纪律:模块级复用+P1-A 滞回回落+willReadFrequently（CanvasWatch/R3-F8/R3b-2① 判例）', () => {
+    // ★2026-09-28 锚重产:旧「只增不减」已按 R3b-2① 换滞回回落（单次离群大 bbox
+    //  不再永久撑面;回落与 texRefresh 换尺寸重建通道天然衔接）
     expect(SRC).toContain('let _boltScratch: HTMLCanvasElement | null = null;');
     expect(SRC).toContain("sc.getContext('2d', { willReadFrequently: true })");
-    expect(SRC).toContain('if (_boltScratch.width < w) _boltScratch.width = w;');
+    expect(SRC).toContain('if (w > cw) _boltScratch.width = w;      // 涨:直接扩到需求(尺寸变化自动清屏)');
+    expect(SRC).toContain('if (w * 2 <= cw && h * 2 <= ch) {          // 滞回:需求≤当前一半才缩');
   });
   it('加算钳底等价性（8bit 模拟锁）:逐加逐钳 ≡ 钳底后一次合加——烘焙像素论证的根', () => {
     // 'lighter' 纯加算+8bit 逐加钳 = min 单调性 ⇒ min(255,w+min(255,S)) ≡ 逐加

@@ -22,6 +22,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
+import { GorePiece } from './GorePiece';
 import { damageVarRoll } from '../stats/DamageVar';
 import { applyProjStatus } from './projStatus';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
@@ -1894,7 +1895,11 @@ export class StormLightning extends Entity {
     //   （boltBake 族,帧内序号环 1024）——旧 (实体 id,bolt 序号) 键在实体死亡后
     //   永久驻留层 texs 表（LRU 兜底但顶替活纹理+键空间随弹体 id 无界）;帧界键
     //   保同帧唯一性（I类判据不变）,跨帧自然退休。
-    r9.uploadScratchBake(sc, 'boltBake', 1024);
+    //   ★P1-B(2026-09-28)：携带子区 (sx,sy)=烘焙 bbox（blit 下行 drawImage 实采
+    //   域,见本函数尾部）——雷暴持续期 boltScratch 恒大（滞回回落不触发）时按
+    //   p1bRegionGate 分档走 texRefreshRegion 子区增量（上传=子区而非整张面）;
+    //   子区≥半幅时门内自动保整幅精确链（收益与风险同 accScratch 族判）。
+    r9.uploadScratchBake(sc, 'boltBake', 1024, sx, sy);
     // blit:恒等 CTM+α 钉 1(α/滤镜均已烘入 scratch)——acc shim 态=1 个 ADD quad 入队
     // (flush 时一次 texRefresh),裸 2D 态=一次 drawImage。★滤镜钉 none:shim 对
     // filter≠none 的 drawImage 走 rawDrawImage 整帧降级,而滤镜语义已由 bake 面承担
@@ -2660,6 +2665,10 @@ export class BookStormTwister extends Entity {
     } else {
       this.loop?.setVolume(Math.max(0, 1 - Math.max(this.t - (this.life - 15), 0) / 15));
     }
+    // ★BJ374 被埋提前收口（:71445-71447 `localAI[0] >= 16 && ai[0] < num−15 →
+    //  ai[0] = num−15`）：快升支（被固块/液体埋住连续快升）累积 localAI0 ≥16 →
+    //  计数直接跳 285——300t 帽不变,仅提前 15t 收口（旧实现只累积不消费）
+    if (this.localAI0 >= 16 && this.t < this.life - 15) this.t = this.life - 15;
     if (this.t >= this.life) {
       this.loop?.stop();
       this.dead = true;
@@ -2684,9 +2693,13 @@ export class BookStormTwister extends Entity {
     }
     if (blocked) {                                              // 支撑/浸液 → 升
       if (this.vy > 0) this.vy = 0;
-      this.vy -= this.vy > -4 ? 2 : 4;
+      // ★BJ374 快升支判据勘误（:71477-71481）：原版 +2 步进在 else 支（递减【前】
+      //  vy ≤ −4）——localAI0 += 2 与 −4 步进同支;旧实现按递减后 vy ≤ −4 判,
+      //  过渡带 vy∈(−4,−2] 多累积（提前触发收口跳）
+      const fast704 = this.vy <= -4;
+      this.vy -= fast704 ? 4 : 2;
       if (this.vy < -16) this.vy = -16;
-      if (this.vy <= -4) this.localAI0 += 2;
+      if (fast704) this.localAI0 += 2;
     } else {                                                    // 悬空 → 坠
       this.localAI0 = Math.max(0, this.localAI0 - 1);
       if (this.vy < 0) this.vy = 0;
@@ -2696,22 +2709,51 @@ export class BookStormTwister extends Entity {
     this.x += this.vx; this.y += this.vy;
     cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 704）
     // 尘 274 ×1（:71511-71537,ai[0]<270 门略作恒真近似——末 30t 收尾停尘登记）
+    // ★BJ374 几何逐值（:71515-71526）：vector2=(0.2×210,210)=(42,210) 纵向椭柱;
+    //  vector4.X=−Lerp(0.1,1,r1)×Lerp(2.2,0.6,amt)∈[−2.2,−0.06]、vector4.Y=
+    //  Lerp(−1,0.9,amt);位=Center+(42,210)×vector4×0.5+(6,10)=Center+(21·vx4+6,
+    //  105·vy4+10)——尘柱偏中心左（左旋拖尾签名;旧 ±21 均匀分布形状不符）
     if (this.t < this.life - 30) {
       const amt = Math.random();
-      const px = this.cx + (amt - 0.5) * this.h * 0.2 * 0.5 * 2;
-      const py = this.y + this.h * (0.5 + (Math.random() * 1.9 - 0.95)) * 0.5 + 10;
-      const d = game.spawnDust?.(px, py, 0, 0, 274, 0, Math.random() * -0.5 - 1.3, 211, null, 0.87);
+      const vx4 = -(0.1 + 0.9 * Math.random()) * (2.2 - 1.6 * amt);
+      const vy4 = -1 + 1.9 * amt;
+      const d = game.spawnDust?.(this.cx + 21 * vx4 + 6, this.cy + 105 * vy4 + 10,
+        0, 0, 274, 0, 0, 211, null, 0.87);
       if (d) {
         d.fadeIn = 1.3;
         d.noGravity = true;
         d.noLight = true;
-        d.vx = (1 + Math.random()) + this.vx * 2.1;
+        if (vx4 > -1.2) d.vx = 1 + Math.random();   // 内圈尘基速覆写（:71528;外圈保留 NewDust 基速 rand±2.0）
+        d.vy = Math.random() * -0.5 - 1.3;          // :71530 覆写
+        d.vx += this.vx * 2.1;                      // :71532
       }
     }
     for (let k = 0; k < 4; k++) {                               // 底部尘 31×4(:71538-71544)
       const d = game.spawnDust?.(this.x + this.w / 2 - 25, this.y + this.h - 25, 50, 25, 31,
         this.vx, -2, 100, null, 1);
-      if (d) d.noGravity = true;
+      if (d) { d.noGravity = true; d.fadeIn = 1.1; }            // fadeIn（:71542）
+    }
+    // ★BJ374 彩带 gore（:71545-71575 三独立掷,整缺补齐）：1/5（timeLeft 60/alpha 50/
+    //  vx 再 += 风暴 vx=合计 2.5×）+ 1/7×2（timeLeft 0/alpha 80 走 alpha 渐隐支）;
+    //  型 SelectRandom(1007,1008,1008)=1007 权 1/1008 权 2;位=TopLeft+
+    //  NextVector2Square(0,1)×Size（Utils.cs:1286 [0,1) 方格）;初速=(vx×1.5,
+    //  −rand×16)+NewGoreDirect 内置扰动（GorePiece.newGore 已建模 :1347-1348）
+    {
+      const gv704 = (): [number, number] => [this.vx * 1.5, -Math.random() * 16];
+      const gp704 = (): [number, number] => [this.x + Math.random() * this.w, this.y + Math.random() * this.h];
+      const gt704 = (): number => (Math.random() * 3 < 1 ? 1007 : 1008);
+      if (Math.floor(Math.random() * 5) === 0) {
+        const [gx, gy] = gp704(); const [gvx, gvy] = gv704();
+        const g = GorePiece.newGore(gt704(), gx, gy, gvx, gvy);
+        if (g) { g.timeLeft = 60; g.alpha = 50; g.vx += this.vx; }
+      }
+      for (let gn = 0; gn < 2; gn++) {
+        if (Math.floor(Math.random() * 7) === 0) {
+          const [gx, gy] = gp704(); const [gvx, gvy] = gv704();
+          const g = GorePiece.newGore(gt704(), gx, gy, gvx, gvy);
+          if (g) { g.timeLeft = 0; g.alpha = 80; }
+        }
+      }
     }
     dealContacts(this, game, this.hitCd, -1);                   // localNPCHitCooldown=−1
   }

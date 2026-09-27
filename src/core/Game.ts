@@ -24,6 +24,7 @@ import { plates428Pressed } from '../render/VanillaTiler';
 import { imageToGrid, findArtPlacement, placeArt } from '../dev/PixelArtImport';
 import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
+import { FrameBeat } from './FrameBeat';
 import { Input, armBlockMouse } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, CHEST_MAX_ITEMS, deathCoinKeepFraction, seasonalHolidayFlags } from '../world/World';
@@ -6581,6 +6582,10 @@ export class Game implements GameHooks {
   }
 
   private afterWorldLoad() {
+    // ★调度面修复刃(2026-09-28):节拍机采样面复位——世界生成/读档期的重载帧成本
+    //  (生成页/烘焙尖峰)不得滞留成本窗污染进图后的容量判断(实测:开机样本滞留
+    //  60 样本窗 → 进图后数秒过度降拍再逐级爬回);拍 k 与 vsync 估计保留
+    this.beat.resetSampling();
     this.prewarmTrailTextures();   // ★2026-08-30 拖尾族贴图预热（GL 分支防懒加载退化）
     const w = this.world;
     // ★M-2b（2026-09-02 九批）：存量自放高门 388/389/侏儒 567 行帧迁移（18px 步进 →
@@ -8051,6 +8056,10 @@ export class Game implements GameHooks {
 
   /** 渲染锁帧时间戳(帧率上限用;逻辑 tick 恒 60Hz 不受影响) */
   private _lastCapTs = 0;
+  /** ★调度面修复刃(2026-09-28):subtle 档确定性节拍对齐引擎(每 k 个 vsync 渲一次;
+   *  vanilla improvedSubtleFrameSkip EndDraw present 网格 Main.cs:62624-62644 的
+   *  rAF 移植——帧序计数落拍非忙等;拍选择/滞回/失拍吸附纯状态机见 FrameBeat.ts) */
+  private beat = new FrameBeat();
   private _paintedFrames = 0;
   /** ★SW-BJ157 stackSplit 计时面 60Hz 累加器（帧率无关;暂停期照走） */
   private stackSplitAcc = 0;
@@ -8069,16 +8078,41 @@ export class Game implements GameHooks {
     const loop = (now: number) => {
       if (!this.running) return;
       try {
-        // 渲染帧率上限(2026-08-18,原版锁 60fps 对齐):档内提前到达的 rAF 直接
-        // 跳过(逻辑恒 60Hz——fixedUpdate 累加器在下个渲染帧补步,≤5 步钳内);
-        // -1ms 余量防 vsync 抖动下的漂移卡顿
-        const cap = options.data.frameCap;
-        if (cap > 0 && now - this._lastCapTs < 1000 / cap - 1) {
-          requestAnimationFrame(loop);
-          return;
+        const mode = options.data.frameSkipMode;
+        if (mode === 'subtle') {
+          // ★调度面修复刃(2026-09-28) subtle=确定性节拍对齐:vanilla improvedSubtleFrameSkip
+          // (1457 默认,Main.cs:67615-67616)EndDraw 忙等钳 60Hz present 网格
+          // (Main.cs:62624-62644)的 rAF 移植——每 k 个 vsync 渲一次(帧序计数落拍,
+          // 非忙等:present 由合成器掌控,只能选 vsync 整数倍,k 恒定=帧距恒定=节拍确定)。
+          // 拍 k 由容量(渲染帧成本 p95/预算)+frameCap 天花板选出,降快升慢滞回;
+          // 失拍帧序计数天然吸附下一拍不追赶中途。被跳过的回调不进 frame()(逻辑恒
+          // 60Hz——fixedUpdate 累计器在下个渲染帧补步,≤5 步钳内;_paintedFrames
+          // 只认真实渲染帧,whenFirstPaint 语义不变)。旧被动门(阈值 1000/cap-1 落在
+          // vsync 整数倍±抖动带内,跳 1/2 个 vsync 随机翻转)与旧 SuppressDraw(0 步进
+          // 帧跳绘=累计器相位随 rAF 抖动随机游走)是"高于 60fps 仍卡一下"的摆动源,故停用
+          this.beat.observeVsync(now, options.data.frameCap);
+          if (!this.beat.shouldRender(now)) {
+            requestAnimationFrame(loop);
+            return;
+          }
+          this.beat.beginRender(now);
+        } else {
+          // on/off 档(off=用户明令逃生门=旧自由渲染):原版 On=IsFixedTimeStep 每 Tick
+          // 一绘(Main.cs:17133-17137)、Off=累计器门但【不】SuppressDraw(:17182-17197
+          // ——SuppressDraw 仅 Subtle&&!improved 旧路径;其"落后跳帧"分支 num3=0 死代码),
+          // 本仓解耦架构(逻辑恒 60Hz 定步累计器)下两态同效=跟随 rAF 自由绘制。保留
+          // 2026-08-18 被动 frameCap 门原样(cap>0 且 1000/cap-1ms 未到即跳;-1ms 余量)
+          const cap = options.data.frameCap;
+          if (cap > 0 && now - this._lastCapTs < 1000 / cap - 1) {
+            requestAnimationFrame(loop);
+            return;
+          }
         }
         this._lastCapTs = now;
         this.frame(now);
+        // 节拍机记账:成本=渲染帧主线程占用(rAF 时间戳→frame 完成;与合成器 present
+        // 截止同源),驱动容量降拍/滞回升拍/失拍判定(纯状态机,见 FrameBeat.ts)
+        if (mode === 'subtle') this.beat.endRender(performance.now());
         this._paintedFrames++;
         if (this._paintWaits.length) {
           this._paintWaits = this._paintWaits.filter((w) => {
@@ -8211,19 +8245,24 @@ export class Game implements GameHooks {
         asteps++;
       }
     }
-    // 跳帧（原版 FrameSkipMode 三态，Main.cs:16950-16975 1456 实况）：
+    // 帧模式三态(原版 FrameSkipMode,1457 Main.cs:17129-17197 亲读;1456 同域
+    //  :16950-16975 旧锚):
     //  ★原版"落后跳帧"分支是【死代码】——num3=0 使 ++successiveSkippedDraws<=0
-    //    永假（:16967-16973），任何档位都【不因渲染落后而跳过绘制】。本仓曾把
-    //    num3 误读成连跳上限 2/1，造出原版不存在的"落后跳帧"= 用户实报"温和档
-    //    激进、关掉反而流畅"（不规则跳帧=卡顿感；均匀落后=纯降帧，观感反而顺）。
-    //  三态的真实差异 = 超前帧节流：Subtle 对 accumulator 未满整帧的 tick
-    //    SuppressDraw（:16954-16959）——高刷屏上把绘制压回逻辑帧率（60）；
-    //    慢机（每 tick 都落后）永不触发 = 永不跳。Off/On 照画（跟随 rAF）。
-    //    On 与 Off 在 1456 的其余差异（XNA 固定时间步/失焦节流 :16893）无 Web
-    //    对应物——本仓逻辑恒 60Hz 定步累加器 + rAF 节拍已覆盖，两态同效。
-    if (!this.paused && options.data.frameSkipMode === 'subtle' && steps === 0) {
-      return;   // SuppressDraw 语义：逻辑未推进的超前帧不重绘（画布保留上一帧）
-    }
+    //    永假(:17195-17202),任何档位都【不因渲染落后而跳过绘制】。本仓曾把
+    //    num3 误读成连跳上限 2/1,造出原版不存在的"落后跳帧"(2026-09 前已勘误)。
+    //  ★本分支已退役(2026-09-28 调度面修复刃):旧实现把 Subtle 译成"steps===0 →
+    //    不重绘"(SuppressDraw 旧路径 :17182-17193,仅 Off 或 Subtle&&
+    //    !improvedSubtleFrameSkip 走);1457 默认 improvedSubtleFrameSkip=true 的
+    //    Subtle 实际走 EndDraw 忙等钳 60Hz present 网格(Main.cs:62624-62644),
+    //    Update 每循环照跑、【无绘制抑制】。本仓现按默认路径移植=帧序计数落拍
+    //    (start() 内 beat 门),0 步进帧照常渲染(与 Off 档同相;原版 improved-subtle
+    //    同样画 0 步进帧)——下方绘制相悬停 claim 族(BJ99/F1/BJ105)每渲染帧重
+    //    claim,0 步进帧不空窗;BJ320 清零拍位归一(逻辑 tick 头+暂停拍)不受影响。
+    //    旧"0 步进帧跳绘"即节拍摆动源之一(累计器相位随 rAF 抖动随机游走,渲染
+    //    落点不规律=用户实报"高于 60fps 仍卡一下")。
+    //  三态差异归位:Subtle=60Hz 节拍对齐(≤60fps,frameCap 只能再往下压);
+    //    Off/On=跟随 rAF 自由绘制(On 的 IsFixedTimeStep/Off 的累计器门在 1457
+    //    :17129-17137/:17182-17197,本仓逻辑恒 60Hz 定步累加器已覆盖,两态同效)。
     // ★SW-BJ72 2026-09-14：余辉验证+指针图标上下文改挂【绘制拍】逐帧（原版
     //  ItemIconCacheVerification 调用点 = DrawInterface_40 :45817/1458 :45823——每
     //  【绘制】帧衰减,暂停帧照衰减;上下文组装是纯读快照）。曾挂 tickCursorIcon
@@ -13782,6 +13821,11 @@ export class Game implements GameHooks {
           this.player.checkMana(bsCost);              // ManaV2 空蓝照放语义单点端口
           const bsDmg = Math.max(1, Math.trunc((this.player.damageMult('magic')
             * (bsData?.damage ?? 36) * (bsPs?.dmg ?? 1)) * 1.75));    // weaponDamage 链再 ×1.75 截断
+          // ★BJ374 风暴方向=鼠标侧（:47626-47634 ChangeDir 点积）：alt 窗首拍
+          //  ItemCheck_Shoot 以鼠标向跑 ChangeDir → direction=sign(鼠标X−pointPosition.X)。
+          //  旧用陈旧 player.facing=面朝反侧时风暴背身飞（实测 vx=−11 而鼠标在右）
+          const [bsMwx] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          this.player.facing = bsMwx >= this.player.cx ? 1 : -1;
           const pb = this.player as unknown as { cy: number; y?: number; h?: number };
           const feetY = pb.y !== undefined && pb.h ? pb.y + pb.h : pb.cy + 22;
           const twister = new BookStormTwister(this.player.cx, feetY - 100,
@@ -13791,7 +13835,10 @@ export class Game implements GameHooks {
           twister.armorPen = (eq.armorPen ?? 0) + (bsPs?.arpen ?? 0);
           this.entities.add(twister, 'projectiles');
           this.useSwing(heldDef, undefined);
-          this.player.useTime = bsData?.useAnimation ?? 25;  // 动画窗节流（alt 仅 ItemAnimationJustStarted :43826）
+          // ★BJ374 窗长=useAnimation+1（ApplyItemAnimation :4471-4484 style5+autoReuse+
+          //  useTime≤useAnimation+shoot>0 → SetItemAnimation(useAnimation+num)=26）——
+          //  旧 25=每柱早 1t 出手
+          this.player.useTime = (bsData?.useAnimation ?? 25) + 1;
           this.playUseSound(3852, 'tink');                   // UseSound=DD2_BookStaffCast（起手播）
         }
       }
@@ -19391,7 +19438,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let ms27: { useTime: number; fired: number; maxShots: number; fire: () => void;
           gate?: () => boolean } | null = null;
         if (spray27 && this.swing) {
+          // ★BJ374 3852 锁向捕获（Player.cs:47615/47739）：窗首 dispath 时 ang/mzAng
+          //  即原版 ItemAnimationJustStarted 拍的鼠标向——续发 num4/num5 被锁向量
+          //  接管（v=itemRotation 向量自锁）→ 全窗沿此向平行飞
+          const lockAng27 = mzAng, lockPose27 = ang;
           const fireAgain27 = (): void => {
+            // ★BJ374 3852 锁向：续发沿窗首方向（47615/47739 唯一 vid 覆盖）;
+            //  锚点=杖尖按锁定姿势重算（原版 pointPosition=RotatedRelativePoint
+            //  逐弹拍重算,随玩家位移）;4952/6152 无此覆盖=保持逐发重瞄
+            if (critVid === 3852) {
+              const aAnchor27 = this.resolveShotAnchor(def.key, lockPose27);
+              this.fireGemStaffBolts(cw, def, ps, lockAng27, aAnchor27.x, aAnchor27.y, critVid, pen, true);
+              return;
+            }
             const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
             // 续发锚点=杖尖（v5 resolveShotAnchor 直算;曾用 中心+瞄准×18 旧锚）+ 重瞄
             const aRaw27 = Math.atan2(mwy - this.player.cy, mwx - this.player.cx);
@@ -19401,6 +19460,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           };
           // 尾停发窗 gate：动画末 useTime×N 静默（Player.cs:43820-43852 同式族）——
           // 与 case 'magic' 头部的 dispatch 时门同一式,按【实时】swing 相位判
+          // ★BJ374 边界勘误：原版静默谓词 = itemAnimation < max−win,而 itemAnimation
+          //  在【起手拍已递减一次】(StartActualUse 置 max→:43145 同拍 −1) →
+          //  anim = 25−e = (swT−1)（swT=dur−e）→ 静默 ⟺ swT−1 < dur−win ⟺
+          //  swT <= dur−win。旧 `swT <` 在 e=win 拍（anim=13<14,如 3852 第 5 发）
+          //  放行=每窗多发一发（实测 5 发,原版 4 发）
           const winTail = TAIL_SILENCE_WIN[critVid];
           this.swing.multishot = ms27 = {
             useTime: this.player.getSlowMagicUseTime(cw.useTime),
@@ -19414,7 +19478,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             ...(winTail !== undefined ? {
               gate: (): boolean => {
                 const swT = this.swing?.t ?? 0, swDur = this.swing?.dur ?? 0;
-                return !(swDur > 0 && swT < swDur - winTail * (cw.useTime || 4));
+                return !(swDur > 0 && swT <= swDur - winTail * (cw.useTime || 4));
               },
             } : {}),
           };
@@ -32593,8 +32657,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  非起手快照)。此前 aim 一次快照 → 施法中途扫瞄姿势滞留旧角,发射支又
     //  未逐支调 useSwing（zap 20/88 族即漏）= 持枪视觉与弹道分家（2026-08-31
     //  用户报激光枪"枪口朝向≠激光方向"）。仅改 aim 快照字段,rot 消费侧不变
+    // ★BJ374 3852 例外（Player.cs:47615/47739）：全族唯一 itemRotation 覆盖 vid——
+    //  ItemCheck_Shoot 的 itemRotation 回写只在弹拍运行且续发 num4/num5 被锁向量
+    //  接管（自锁）→ 动画窗内姿势/弹向冻结在首拍鼠标向（JustStarted=窗首拍）。
+    //  4952/6152 无此覆盖,照常跟手
     if (this.swing && this.swing.t > 0 && this.swing.useStyle === 5
-      && this.swing.aim !== undefined) {
+      && this.swing.aim !== undefined
+      && (ITEM_DEFS[this.swing.item]?.vid ?? -1) !== 3852) {
       const [lx, ly] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
       this.swing.aim = Math.atan2(ly - this.player.cy, lx - this.player.cx);
     }

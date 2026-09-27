@@ -417,6 +417,7 @@ function mkFullAccLayer() {
     texAlive: () => L.texAliveOk === true,
     texFromRegion: (_k: string, img: { __id?: number }) => ({ key: 'r' + String(img.__id ?? '?'), tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),
     texRefresh: (_k: string, img: { __id?: number }) => ({ key: 'd' + String(img.__id ?? '?'), tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),
+    texRefreshRegion: (_k: string, img: { __id?: number }, _sw: number, _sh: number) => ({ key: 'd' + String(img.__id ?? '?'), tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),   // ★P1-B 子区增量桩
     texFromData: () => ({ key: 'pair', tex: {}, w: 8, h: 8, stamp: 1, bytes: 256 }),
     texFromImage: (k: string) => { L.texFromImageCalls = (L.texFromImageCalls as number) + 1; return { key: k, tex: {}, w: 1, h: 1, stamp: 1, bytes: 4 }; },
   };

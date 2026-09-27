@@ -9,7 +9,7 @@
 // ——分批/续跑/重复执行绝不二次 ×18（worker 修完 + 门控失灵主线程再跑也安全）。
 // 圣诞树 sheet171 豁免：wld 原生就是"索引帧"约定（锚点 frameX=10 哨兵 + 列/行
 // 裸索引 + 锚点 frameY 装饰位段），×18 会同时毁掉两者（位段溢出 uint16 成垃圾）。
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import type { TileStore } from './TileStore';
 
 /** 平台楼梯坡度帧码（WorldGen.cs:86748 平台表分支专码，坡/平两支互斥）：
@@ -74,6 +74,87 @@ export function repairIndexFramesInStore(st: TileStore): number {
         }
       }
     }
+  }
+  return fixed;
+}
+
+/** Chest.IsLocked（Chest.cs:295-310）帧区间判定：tile21 六段锁定带 + tile467
+ *  style13（沙漠锁箱）。正典位=本文件（BJ377 从 WldImport 平移,WldImport 再导出
+ *  保持 API 不变）——存量锚修复与 .wld 导入必须同源,防两份帧带漂移。 */
+export function vanillaChestIsLocked(sheet: number, fx: number): boolean {
+  return sheet === 21
+    ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
+      || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
+    : sheet === 467 && Math.floor(fx / 36) === 13;
+}
+
+/**
+ * ★BJ377（2026-09-28）存量 .wld 导入档容器锚格类型误写批修（纯函数,幂等）。
+ *
+ * 背景：2026-09-07 蓝队门1 之前 WldImport 的箱锚兜底判据是
+ * `type[anchor] !== CHEST_TILE`——把合法容器族（467 群系箱族 / 88 梳妆台族,
+ * 原版 Chest.CreateChest 三族,IS_A_CONTAINER_SHEETS={21,467,88}）的登记锚格
+ * 判成「登记箱与图格脱节」强改写为 tile 21（**帧不动**）。旧构建导入的 .wld
+ * 从此每个 467 箱/梳妆台的左上锚格变成 type 21 + 家族风格列基帧：
+ *   ①左上格贴图错误（外来帧值落 21 的 sheet 带,画出别款箱）;
+ *   ②破坏链碎片化——整件清格带同类型门（Game.ts 锚点盒 `get()===type` 才清）
+ *     挖 467 格清 3 格留锚格、挖锚格清 1 格留 3 格 =「多段破坏」实感;
+ *   ③锚帧落 21 锁带（144/918/972/1296/1458…∈Chest.IsLocked 区间）→ 白送
+ *     locked=true,开箱白要金钥匙（本种 66 污染锚实测 37 锚误锁）。
+ * 用户存档 66 锚（47×467+19×88）全数命中；现行导入链（蓝队门1 后）重导同源
+ * .wld 已净（421 锚审计 0 坏）,本修只针对存量档。
+ *
+ * 判别（保守,只动注册表锚）：锚格 type=21 且锚帧处锚相位（467:fx%36==0&&fy%36==0;
+ * 88:fx%54==0&&fy%36==0）且物盒内（除锚格）存在同族格帧全等偏移（col·18/row·18）
+ * 证据且无同族格反证 → 锚 type 改回本族（帧一律不动）。重合碰撞不可能：467 非锚格
+ * fx≡18(mod 36) 与 21 锚 fx≡0(mod 36) 不同余;88 同理（54 带内 36k+18≡0(mod 54)
+ * 需 k≡1(mod 3) 即 21 锚 fx=54k 恰是 88 家族锚相位——而该格同时是本族锚格,
+ * 两容器物理上不可重叠,有效布局不存在此态）。
+ * locked 刷新：仅对已修锚按真 sheet 重算（Chest.IsLocked）,合法锁箱（21 锁带
+ * /467 style13）不受影响。
+ * 幂等：修后锚 type≠21 → 判别门恒跳过;合法世界零写入零扰动。
+ * 边界：仅 v3+ 存档调用（SaveFile.loadSaveData v3 门）——v2 旧内部下标域与本仓
+ * 现行 TILE_BY_KEY 域无保序契约,不在本修判别域（v2 档首次存档转 v5 后下一读档
+ * 自动入修）。
+ */
+export function repairLegacyContainerAnchorsInStore(
+  st: Pick<TileStore, 'idx' | 'inBounds' | 'type' | 'frameX' | 'frameY'>,
+  chests: ReadonlyArray<{ x: number; y: number; locked?: boolean }>,
+): number {
+  const CHEST = TILE_BY_KEY['chest'];
+  const CHEST2 = TILE_BY_KEY['v_467_chests_group_2'];
+  const DRESSER = TILE_BY_KEY['dresser'];
+  if (CHEST === undefined || CHEST2 === undefined || DRESSER === undefined) return 0;
+  let fixed = 0;
+  for (const c of chests) {
+    if (!st.inBounds(c.x, c.y)) continue;
+    const a = st.idx(c.x, c.y);
+    if (st.type[a] !== CHEST) continue;                       // 只修误写锚（幂等门）
+    const ax = st.frameX[a], ay = st.frameY[a];
+    if (ay % 18 !== 0) continue;                              // 非格距帧=残缺,不判
+    // 家族证据扫描：物盒内除锚格,同族格帧全等偏移=证据;同族格帧不合=反证即弃
+    const tryFamily = (fw: number, fh: number, family: number): boolean => {
+      let evidence = false;
+      for (let dy = 0; dy < fh; dy++) {
+        for (let dx = 0; dx < fw; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const xx = c.x + dx, yy = c.y + dy;
+          if (!st.inBounds(xx, yy)) continue;
+          const k = st.idx(xx, yy);
+          if (st.type[k] !== family) continue;                // 非本族格（被挖/异物）不证不斥
+          if (st.frameX[k] === ax + dx * 18 && st.frameY[k] === ay + dy * 18) evidence = true;
+          else return false;                                  // 同族格帧不合 = 反证,保守弃修
+        }
+      }
+      return evidence;
+    };
+    let family = 0;
+    if (ax % 36 === 0 && ay % 36 === 0 && tryFamily(2, 2, CHEST2)) family = CHEST2;
+    else if (ax % 54 === 0 && ay % 36 === 0 && tryFamily(3, 2, DRESSER)) family = DRESSER;
+    if (!family) continue;
+    st.type[a] = family;                                      // 帧不动（污染面只改 type）
+    c.locked = vanillaChestIsLocked(TILE_DEFS[family].vanilla?.sheet ?? -1, ax) || undefined;
+    fixed++;
   }
   return fixed;
 }

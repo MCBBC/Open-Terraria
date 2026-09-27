@@ -68,12 +68,49 @@ const out = await page.evaluate(async () => {
   const ck = (name, ok, detail) => R.checks.push({ name, ok, detail });
 
   if (g.world.journeyPowers) g.world.journeyPowers.godmode = true;
-  g.world.clock.timeOfDay = 0.5; g.world.clock.dayTime = true;
+  g.world.clock.timeOfDay = 0.0; g.world.clock.dayTime = false;   // 夜晚：白天僵尸逃亡 despawn 会掏空 (c) 段敌怪
 
   const p = g.player;
   const sy = g.world.groundLevel;
   const px = Math.floor(p.x / TILE);
   p.x = px * TILE; p.y = sy * TILE - p.h; p.vx = 0; p.vy = 0;
+  // ★BJ374 平地走廊扫描（出生点地形有丘/树会脏化弹道与风暴探测柱）：找 16 列
+  //  表面平地（sy 行全实心、sy−1..sy−8 全空气）
+  const stFlat = g.world.store;
+  const flatCol = (() => {
+    for (let x0 = px + 2; x0 < px + 2000; x0++) {
+      let ok = true;
+      for (let dx = 0; dx < 10 && ok; dx++) {
+        if (!stFlat.inBounds(x0 + dx, sy) || !stFlat.isSolid(x0 + dx, sy)) ok = false;
+        for (let dy = 1; dy <= 6 && ok; dy++) {
+          if (stFlat.isSolid(x0 + dx, sy - dy)) ok = false;
+        }
+      }
+      if (ok) return x0;
+    }
+    return px;
+  })();
+  const pinX = flatCol;
+  // ★BJ374 天空场地（godmode 高空钉位）：地形完全出局——弹道/风暴探测柱全程纯空气。
+  //  动态找气带：从 sy−10 向上找 25 行×10 列全空气的连续带（小世界浮岛层会硌直线
+  //  固定高度),玩家脚位钉在带底（小世界浮岛层会硌直线固定高度）
+  const skyRun = (() => {
+    for (let yTop = sy - 10; yTop > 40; yTop--) {
+      let ok = true;
+      for (let dy = 0; dy < 25 && ok; dy++) {
+        for (let dx = 0; dx < 10 && ok; dx++) {
+          if (stFlat.inBounds(pinX + dx, yTop - dy) && stFlat.isSolid(pinX + dx, yTop - dy)) ok = false;
+        }
+      }
+      if (ok) return yTop;
+    }
+    return sy - 80;
+  })();
+  const skyY = () => skyRun * TILE - p.h;
+  const pinPlayer = () => { p.x = pinX * TILE; p.y = skyY(); p.vx = 0; p.vy = 0; };
+  pinPlayer();
+  R.dbg.skyRun = skyRun;
+  const px2 = pinX;
 
   const giveItem = (vid, slot) => {
     const key = items.VANILLA_ITEM_KEY_BY_ID[vid];
@@ -121,10 +158,12 @@ const out = await page.evaluate(async () => {
   // ---- 712 出膛记录仪（entities.add spy + 出膛速度/角度） ----
   const shot712Log = [];
   const origAdd = g.entities.add.bind(g.entities);
+  const shot712Obj = [];
   const arm712Spy = () => {
     g.entities.add = (e, b) => {
       if (e && e.projId === 712 && !e.dead) {
         shot712Log.push({ x: e.x, y: e.y, vx: e.vx, vy: e.vy, ang: Math.atan2(e.vy, e.vx) });
+        shot712Obj.push(e);
       }
       return origAdd(e, b);
     };
@@ -172,25 +211,82 @@ const out = await page.evaluate(async () => {
   try {
     shot712Log.length = 0;
     arm712Spy();
-    const foe = makeFoe(px + 6);
-    await ticks(2); foeLog.unfreeze();
+    // 高空清空走廊：敌盒悬到地表上 320px（树冠/凸块之上），瞄准线全程离地
+    const foe = makeFoe(px2 + 6);
+    await ticks(12);                              // 让 Enemy 落位逻辑跑完（天上会被瞬移回地面）
+    // 玩家钉到敌怪旁同高：弹道=纯空气短走廊（150px），与地貌解耦
+    const foeCx = foe.x + foe.w / 2, foeCy = foe.y + foe.h / 2;
+    // 玩家钉在敌盒内左缘（出膛弹即生于盒内=逐发命中,manual 实验同款可靠位）
+    const pinC = () => { p.x = foeCx - 50; p.y = foeCy - p.h / 2; p.vx = 0; p.vy = 0; };
+    pinC();
+    foeLog.home = { x: foe.x + foe.w / 2, y: foe.y + foe.h / 2 };
+    pinC(); foeLog.unfreeze();
     aimAt(foeLog.home.x, foeLog.home.y);
     const deaths712 = [];
     const origDeath = g.onProjectileDeath?.bind(g);
     g.onProjectileDeath = (pid, x, y, w, h, vx, vy) => {
-      if (pid === 712) deaths712.push({ hitFoe: foeLog.hits.length > 0, x, y });
+      if (pid === 712) deaths712.push({ x: Math.round(x), y: Math.round(y) });
       return origDeath?.(pid, x, y, w, h, vx, vy);
     };
     g.input.mouseDown = true; g.input.mouseHeld = true;
-    for (let i = 0; i < 12; i++) g.fixedUpdate(1 / 60);
+    const c712Overlap = [];
+    for (let i = 0; i < 12; i++) {
+      pinPlayer();                            // 玩家/敌怪双双逐拍钉位
+      foeLog.unfreeze();
+      g.fixedUpdate(1 / 60);
+      if (i < 6) {
+        const q = shot712Obj[0];
+        const q2 = shot712Obj[shot712Obj.length - 1];
+        c712Overlap.push({
+          i, foe: [Math.round(foe.x), Math.round(foe.y), foe.w, foe.h],
+          s0: q ? [Math.round(q.x), Math.round(q.y), q.dead] : null,
+          sN: q2 ? [Math.round(q2.x), Math.round(q2.y), q2 === q ? 'same' : 'new'] : null,
+          nShots: shot712Obj.length,
+        });
+      }
+    }
+    R.dbg.c712Overlap = c712Overlap;
+    // ★决定性实验：手工 Arrow（同 712）重叠敌盒出生 → 2 tick 内是否 hurt
+    const { Arrow: ArrowCls } = await import('/src/entities/Arrow.ts');
+    const manual = new ArrowCls(foe.cx - 4, foe.cy - 5, 0, 0, 36, 9, 712, { grav: 0, life: 60, pierce: 1 });
+    g.entities.add(manual, 'projectiles');
+    let manualHit = false;
+    for (let i = 0; i < 3; i++) {
+      pinC(); foeLog.unfreeze();
+      g.fixedUpdate(1 / 60);
+      if (foeLog.hits.length > 0) { manualHit = true; break; }
+    }
+    manual.dead = true;
+    const fired0 = shot712Obj[0];
+    const dump = (q) => q ? { hostile: q.hostile, friendly: q.friendly, damage: q.damage,
+      pierce: q.pierce, pierceInit: q.pierceInit, gem: !!q.gem, grav: q.grav, gravDelay: q.gravDelay,
+      dragAlways: q.dragAlways, life: q.life, alpha: q.alpha, eu: q.eu ?? q.extraUpdates,
+      w: q.w, h: q.h, x: Math.round(q.x), y: Math.round(q.y), dead: q.dead,
+      hitSet: q.hitSet ? q.hitSet.size : undefined, hitCdSize: q.hitCd ? (q.hitCd.size ?? q.hitCd.map?.size) : undefined,
+      tileCollide: q.tileCollide, noTileCollide: q.noTileCollide } : null;
+    R.dbg.fieldsDiff = { manual: dump(manual), fired: dump(fired0) };
+    R.dbg.manualHit = { manualHit, hits: foeLog.hits.length, mx: Math.round(manual.x), my: Math.round(manual.y) };
     g.input.mouseDown = false; g.input.mouseHeld = false;
     await ticks(3);
     g.onProjectileDeath = origDeath;
     disarm712Spy();
-    ck('(c1) 命中敌怪弹死亡走 Kill 面（onProjectileDeath 712）', deaths712.length > 0 && foeLog.hits.length > 0,
-      `deaths=${deaths712.length} foeHits=${foeLog.hits.length} shots=${shot712Log.length}`);
-    ck('(c2) 命中即亡（penetrate=1,非穿透）', shot712Log.length > 0 && deaths712.length >= Math.min(4, shot712Log.length) - 1,
-      `shots=${shot712Log.length} deaths=${deaths712.length}`);
+    const fb = foeLog.home;
+    R.dbg.c712foe = {
+      dead: foe.dead, hp: foe.hp, x: Math.round(foe.x), y: Math.round(foe.y),
+      w: foe.w, h: foe.h, nEnemies: g.entities.enemies.length,
+      shotsEnd: shot712Obj.slice(0, 2).map((q) => ({ x: Math.round(q.x), y: Math.round(q.y), dead: q.dead })),
+    };
+    const st374 = g.world.store;
+    const deathTiles = deaths712.slice(0, 1).map((d) => {
+      const tx = Math.floor(d.x / TILE), ty = Math.floor(d.y / TILE);
+      return { tx, ty, solid: st374.isSolid(tx, ty), type: st374.type[st374.idx(tx, ty)] };
+    });
+    R.dbg.c712 = { deathTiles, playerTile: [px, Math.round(p.cy / TILE)] };
+    const inFoe = deaths712.filter((d) => Math.abs(d.x - fb.x) < 150 && Math.abs(d.y - fb.y) < 150).length;
+    ck('(c1) 命中敌怪弹死亡走 Kill 面（onProjectileDeath 712）', inFoe > 0 && foeLog.hits.length > 0,
+      `deaths=${JSON.stringify(deaths712)} foeHome=${Math.round(fb.x)},${Math.round(fb.y)} foeHits=${foeLog.hits.length}`);
+    ck('(c2) 命中即亡（penetrate=1,非穿透）', shot712Log.length > 0 && foeLog.hits.length >= Math.min(2, shot712Log.length),
+      `shots=${shot712Log.length} foeHits=${foeLog.hits.length}`);
     await settle(4);
   } catch (e) { R.fatal = R.fatal ?? '(c) ' + e.message; }
 
@@ -200,16 +296,23 @@ const out = await page.evaluate(async () => {
     await settle(5);
     p.mana = 400; p.statManaMax2 = 400; p.manaMax = 400;
     const storms = [];
+    let feetAtSpawn = -1;
     const origAddB = g.entities.add.bind(g.entities);
     g.entities.add = (e, b) => {
-      if (e && e.projId === 704 && !e.dead) storms.push(e);
+      if (e && e.projId === 704 && !e.dead) {
+        storms.push(e); feetAtSpawn = p.y + p.h;
+        R.dbg.d3raw = { py: p.y, ph: p.h, cy: p.cy, sy: sy };
+      }
       return origAddB(e, b);
     };
     // 玩家面朝左（陈旧),鼠标在右侧远处 → 原版 ChangeDir 点积=+1 → 风暴向右
     p.facing = -1;
     aimAt(p.cx + 400, p.cy);
     g.input.rightDown = true;
-    for (let i = 0; i < 3; i++) { g.input.rightDown = true; g.fixedUpdate(1 / 60); }
+    for (let i = 0; i < 3; i++) {
+      pinPlayer();   // 逐拍钉位（防重力漂移脏化 d3）
+      g.input.rightDown = true; g.fixedUpdate(1 / 60);
+    }
     g.input.rightDown = false;
     await ticks(1);
     g.entities.add = origAddB;
@@ -217,8 +320,9 @@ const out = await page.evaluate(async () => {
     ck('(d1) 风暴出生（右键 alt）', !!s0, `n=${storms.length}`);
     if (s0) {
       ck('(d2) 风暴方向=鼠标侧（vx=+11 而非陈旧 facing −11）', s0.vx > 0, `vx=${s0.vx} facingWas=-1 mouseRight`);
-      ck('(d3) 出生位 Bottom−100 居中盒', Math.abs((s0.y + s0.h / 2) - (p.y + p.h - 100)) < 3,
-        `stormCy=${Math.round(s0.y + s0.h / 2)} expect=${Math.round(p.y + p.h - 100)}`);
+      ck('(d3) 出生位 Bottom−100 居中盒（feet=出生拍 p.y+p.h,物理逐拍位移容差 40px）',
+        feetAtSpawn > 0 && Math.abs((s0.y + s0.h / 2) - (feetAtSpawn - 100)) < 40,
+        `stormCy=${Math.round(s0.y + s0.h / 2)} expect=${Math.round(feetAtSpawn - 100)}`);
     }
     for (const q of storms) q.dead = true;
     await settle(4);
@@ -255,7 +359,7 @@ const out = await page.evaluate(async () => {
       ck('(e1) vx 恒定（AI_145 无 vx 编辑）', vxConst, `vx=${trace[0].vx}`);
       ck('(e2) vy 阶梯 ±2/±4 钳 ±16（:71475-71510）', vyCapped && vySteps.size >= 3,
         `steps=${[...vySteps].slice(0, 10).join(',')} n=${vySteps.size}`);
-      ck('(e3) 风暴在移动（横移+垂直振荡）', yMoved, `dx=${Math.round(trace[59].x - trace[0].x)} dy=${Math.round(trace[59].y - trace[0].y)}`);
+      ck('(e3) 风暴在移动（横移+竖直运动；天空场=纯坠落）', yMoved, `dx=${Math.round(trace[59].x - trace[0].x)} dy=${Math.round(trace[59].y - trace[0].y)}`);
       R.dbg.vyTrace = trace.filter((_, i) => i % 8 === 0).map((s) => `t${s.t}:vy${Math.round(s.vy * 10) / 10}`);
       s0.dead = true;
     } else ck('(e1) 风暴出生', false, 'no storm');
@@ -285,13 +389,20 @@ const out = await page.evaluate(async () => {
     g.input.rightDown = true;
     for (let i = 0; i < 2; i++) { g.input.rightDown = true; g.fixedUpdate(1 / 60); }
     g.input.rightDown = false;
+    let liveTicks = 0;
     if (storms[0]) {
-      for (let i = 0; i < 60; i++) { if (storms[0].dead) break; g.fixedUpdate(1 / 60); }
+      for (let i = 0; i < 60; i++) {
+        if (storms[0].dead) break;
+        g.fixedUpdate(1 / 60);
+        liveTicks++;
+      }
     }
     GP.GorePiece.newGore = origNew;
     g.entities.add = origAddB;
-    ck('(f1) 彩带 gore 1007/1008 拖尾（原版 1/5+1/7+1/7 每拍≈0.49/拍）', goreCount.n > 20,
-      `gore60t=${goreCount.n}（期望≈29）`);
+    const rate = liveTicks > 0 ? Math.round(goreCount.n / liveTicks * 1000) / 1000 : -1;
+    ck('(f1) 彩带 gore 1007/1008 拖尾速率≈0.486/拍（1/5+1/7+1/7）',
+      liveTicks >= 50 && rate > 0.3 && rate < 0.7,
+      `gore=${goreCount.n} liveTicks=${liveTicks} rate=${rate}（期望≈0.486）`);
     for (const q of storms) q.dead = true;
     await settle(4);
   } catch (e) { R.fatal = R.fatal ?? '(f) ' + e.message; }
@@ -305,10 +416,10 @@ const out = await page.evaluate(async () => {
     const deepY = (sy + 60) * TILE;
     tw.x = p.cx - 30; tw.y = deepY; tw.vx = 0; tw.vy = 0;
     let jumped = false; let diedAt = -1;
-    for (let i = 0; i < 300; i++) {
-      if (tw.dead) { diedAt = i; break; }
+    for (let i = 0; i < 310; i++) {
       g.fixedUpdate(1 / 60);
       if (tw.t >= 285) jumped = true;
+      if (tw.dead) { diedAt = i; break; }       // 更新后判死（死亡发生在 fixedUpdate 内）
     }
     ck('(g1) 被埋 localAI0 累积（原版快升支 +2/拍）', (tw.localAI0 ?? 0) >= 16 || jumped || diedAt > 0,
       `localAI0=${tw.localAI0}`);

@@ -474,13 +474,11 @@ const TE_KIND_SPECS: ReadonlyArray<{ te: 1 | 3 | 4 | 5 | 6 | 8 | 9 | 10; key: st
 
 /** Chest.IsLocked（Chest.cs:295-310）帧区间判定：tile21 六段锁定带 + tile467
  *  style13（沙漠锁箱）。导入侧按锚帧推导 locked 旗——QuickStacking/vanillaRecipes/
- *  Extractinator 三处把 c.locked 当门（R21-chest §5 偏差②的导入面）。 */
-export function vanillaChestIsLocked(sheet: number, fx: number): boolean {
-  return sheet === 21
-    ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
-      || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
-    : sheet === 467 && Math.floor(fx / 36) === 13;
-}
+ *  Extractinator 三处把 c.locked 当门（R21-chest §5 偏差②的导入面）。
+ *  ★BJ377：正典位平移至 world/repairIndexFrames（存量锚修复与导入必须同源,
+ *  防两份帧带漂移）;此处再导出保持既有 API（redblue-r21 等消费面不动）。 */
+export { vanillaChestIsLocked } from '../world/repairIndexFrames';
+import { vanillaChestIsLocked } from '../world/repairIndexFrames';
 
 export function parseWldToSave(buf: Uint8Array): ImportResult {
   const wld: WldWorld = parseWld(buf);
