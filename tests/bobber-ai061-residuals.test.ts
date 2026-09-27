@@ -109,6 +109,22 @@ describe('微光钩爪面（浮微光 → AddBuff(353,60)+Splash_2 一次门）'
     expect(h.player.buffs.has(BuffType.Shimmered)).toBe(true);
     expect(h.sfx.filter((s) => s === 'Splash_2').length).toBe(0);
   });
+  // ★BJ373 判谳锁（2026-09-27）：微光钩爪面只认 shimmerWet（弹自身盒×微光液,
+  //   Projectile.cs:16911/:54686 `if (shimmerWet)`）,**非任意液体 wet**——原版
+  //   浮标落水/蜜/岩浆绝不给玩家挂 353（用户实报"浮标碰液体→玩家微光化"的
+  //   反向判别面：若误用 wet 当 shimmerWet 即爆红）
+  it('非微光液（水/岩浆/蜜）：owner 永不得 Shimmered(353)、无 Splash_2', () => {
+    for (const lt of [1, 2, 3]) {
+      const h = mkHarness(lt);
+      const b = new Bobber(50 * TILE, 40 * TILE, 0, 0, 5, 0, 5, () => h.player);
+      b.fixedUpdate(1 / 60, h.hooks);
+      b.fixedUpdate(1 / 60, h.hooks);
+      for (let k = 0; k < 30; k++) b.fixedUpdate(1 / 60, h.hooks);
+      expect(b.floating).toBe(true);                                   // 三液皆浮（BJ44 定谳）
+      expect(h.player.buffs.has(BuffType.Shimmered)).toBe(false);      // :54686 shimmerWet 门
+      expect(h.sfx.filter((s) => s === 'Splash_2').length).toBe(0);
+    }
+  });
 });
 
 // ============ ③ 浮支物理 + 咬钩抖动三旗复位（:54699-54802） ============

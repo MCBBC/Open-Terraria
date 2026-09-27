@@ -74,6 +74,29 @@ await p.evaluate(() => {
       g2.player.x = x;
       g2.player.y = groundTopPx(x) - g2.player.h - 1;
       g2.player.vx = dir * speed; g2.player.vy = 0;
+      g2.player.statLife = g2.player.statLifeMax;   // 防摔死污染(zero 死亡重生会瞬移玩家)
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    window.__bj372.walk = null;
+  };
+  // 阈值往复振荡:在 [cx-delta,cx+delta] 间以 half 帧半周期往返
+  window.__bj372Osc = async (cxTiles, deltaTiles, halfMs, seconds, tag = 'OSC') => {
+    const g2 = window.__swGame, st = g2.world.store;
+    window.__bj372.walk = tag;
+    const t0 = performance.now();
+    const groundTopPx = (px) => {
+      const tx = Math.max(1, Math.min(st.w - 2, Math.floor(px / 16)));
+      for (let y = 2; y < st.h; y++) if (st.isSolid(tx, y)) return y * 16;
+      return (g2.world.groundLevel + 10) * 16;
+    };
+    while (performance.now() - t0 < seconds * 1000) {
+      const ph = ((performance.now() - t0) % (2 * halfMs)) / halfMs;   // 0..2
+      const tri = ph < 1 ? ph : 2 - ph;                                 // 0..1..0
+      const x = (cxTiles + (tri * 2 - 1) * deltaTiles) * 16;
+      g2.player.x = x;
+      g2.player.y = groundTopPx(x) - g2.player.h - 1;
+      g2.player.vx = 0; g2.player.vy = 0;
+      g2.player.statLife = g2.player.statLifeMax;
       await new Promise((r) => requestAnimationFrame(r));
     }
     window.__bj372.walk = null;
@@ -105,24 +128,41 @@ const bounds = await p.evaluate(async () => {
 console.log('bounds:', JSON.stringify({ treeX: bounds.treeX, caveBackX: bounds.caveBackX, caveBackStyle: bounds.caveBackStyle, treeStyle: bounds.treeStyle, forestStyles: bounds.forestStyles, gl: bounds.groundLevel, spawn: bounds.spawnX }, null, 1));
 console.log('flips:', JSON.stringify(bounds.flips));
 
-// ---- 选雪原↔森林翻转点(优先),否则第一个翻转 ----
-const target = bounds.flips.find((f) => f.kind === 'snow')
-  ?? bounds.flips.find((f) => f.kind === 'des' || f.kind === 'jun') ?? bounds.flips[0];
+// ---- 选雪原↔森林翻转点(优先),否则第一个翻转;SW_TARGET_X 可指定中心 x ----
+const forcedX = Number(process.env.SW_TARGET_X ?? '0');
+const target = forcedX > 0 ? { x: forcedX, kind: 'forced' }
+  : bounds.flips.find((f) => f.kind === 'snow')
+    ?? bounds.flips.find((f) => f.kind === 'des' || f.kind === 'jun') ?? bounds.flips[0];
 if (!target) { console.log('FAIL: 无边界可测'); await b.close(); process.exit(1); }
 console.log('target:', JSON.stringify(target));
 const bxPx = target.x * 16;
+const spanTiles = Number(process.env.SW_SPAN ?? '70');
 
-// ---- 穿界 A→B→A,各留 4s 观察尾巴 ----
-await p.evaluate(async (bx) => {
+// ---- 穿界:SW_FROM_X/SW_TO_X 自定义区间,否则 bx±span 双向;SW_SWEEP=1 全图单程;SW_OSC=1 阈值振荡 ----
+const sweep = process.env.SW_SWEEP === '1';
+const osc = process.env.SW_OSC === '1';
+const oscDelta = Number(process.env.SW_OSC_DELTA ?? '10');
+const oscHalf = Number(process.env.SW_OSC_HALF_MS ?? '900');
+const fromX = Number(process.env.SW_FROM_X ?? '0') || (forcedX > 0 ? forcedX - spanTiles : target.x - spanTiles);
+const toX = Number(process.env.SW_TO_X ?? '0') || (forcedX > 0 ? forcedX + spanTiles : target.x + spanTiles);
+const walkSpeed = Number(process.env.SW_SPEED ?? '2.5');
+await p.evaluate(async (fx, tx, spd, sweep, osc, bx, od, oh) => {
   const g = window.__swGame;
-  // 起点放到边界左侧 70 格
-  g.player.x = bx - 70 * 16;
+  g.player.x = fx * 16;
   await new Promise((r) => setTimeout(r, 2500));
-  await window.__bj372Walk(bx - 70 * 16, bx + 70 * 16, 3, 'A2B');
-  await new Promise((r) => setTimeout(r, 4000));
-  await window.__bj372Walk(bx + 70 * 16, bx - 70 * 16, 3, 'B2A');
-  await new Promise((r) => setTimeout(r, 4000));
-}, bxPx).catch((e) => console.log('walk err:', String(e).slice(0, 300)));
+  if (osc) {
+    await window.__bj372Osc(bx, od, oh, 30, 'OSC');
+    await new Promise((r) => setTimeout(r, 3000));
+  } else if (sweep) {
+    await window.__bj372Walk(fx * 16, tx * 16, spd, 'SWEEP');
+    await new Promise((r) => setTimeout(r, 3000));
+  } else {
+    await window.__bj372Walk(fx * 16, tx * 16, spd, 'A2B');
+    await new Promise((r) => setTimeout(r, 4000));
+    await window.__bj372Walk(tx * 16, fx * 16, spd, 'B2A');
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+}, fromX, toX, walkSpeed, sweep, osc, forcedX > 0 ? forcedX : target.x, oscDelta, oscHalf).catch((e) => console.log('walk err:', String(e).slice(0, 300)));
 
 const samples = await p.evaluate(() => { cancelAnimationFrame(window.__bj372Raf); return window.__bj372.samples; });
 console.log('samples:', samples.length);

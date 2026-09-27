@@ -118,14 +118,15 @@ function pinMaps(e: LightingEngine): void {
   (e as unknown as { active: { random: FastRandom } }).active.random = new FastRandom(12345);
 }
 
-/** 本地路径引擎（绝对坐标 + 真实 TileStore）——装配不 compute,由调用方控序 */
+/** 本地路径引擎（绝对坐标 + 真实 TileStore）——装配不 compute,由调用方控序。
+ *  ★C9d：区域走快照面（setSnapshotRegion）——公共采样对由 compute 的本地原子发布
+ *  装配,不再手工预分配（旧 e.r/g/b 手工 new 已删,发布面等价产出） */
 function makeLocalEngine(st: TileStore, rx: number, ry: number, rw: number, rh: number): LightingEngine {
   updateLightDecay(DECAY_ARGS.waterStyle, DECAY_ARGS.nightVision, DECAY_ARGS.blackout, DECAY_ARGS.blind, DECAY_ARGS.opts);
   const world = { store: st, groundLevel: GROUND, lavaLine: LAVA, clock: { ...CLOCK }, sundialCooldown: 5, moondialCooldown: 3, weather: { raining: true } };
   const e = new LightingEngine(world as unknown as LightingWorld);
   pinClock((e as unknown as { flicker: import('../src/lighting/SkyColor').FlickerClock }).flicker);
-  e.rx = rx; e.ry = ry; e.rw = rw; e.rh = rh;
-  e.r = new Uint8Array(rw * rh); e.g = new Uint8Array(rw * rh); e.b = new Uint8Array(rw * rh);
+  e.setSnapshotRegion(rx, ry, rw, rh);
   e.heldLight = HELD; e.buffLights = BUFFS;
   e.dirty = true;
   for (const p of PER) e.addLight(p[0], p[1], p[2], p[3], p[4]);

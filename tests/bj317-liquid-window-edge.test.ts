@@ -180,7 +180,9 @@ describe('BJ317 液体绘制窗边界采样', () => {
     //    背景液/前景液/修饰层同窗,单点换窗）
     const renderer = readFileSync(resolve(__dirname, '../src/render/Renderer.ts'), 'utf8')
       .replace(/^\s*\/\/.*$/gm, '');
-    expect(renderer).toContain("drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow } from './VanillaLiquidRenderer'");
+    // ★liqgl（2026-09-27）:import 面扩容（liqgl 旗/批中介/gate 发射/环复位同源引入）
+    expect(renderer).toContain("drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow,");
+    expect(renderer).toContain("liqgl, emitVanillaLiquidGate, resetLiquidBatchForFrame, type LiqBatchEmit } from './VanillaLiquidRenderer'");
     expect(renderer).toContain('const [tx0, ty0, tx1, ty1] = liquidDrawWindow(cam.x, cam.y, viewW, viewH, z, world.w, world.h);');
     // 三调用点全部吃解构窗口（直改任一调用点回自算坐标 = 红面）
     const callSites = renderer.match(/drawVanillaLiquids\((?:fgCtx \?\? this\.ctx|this\.ctx), this\.atlas, world\.store, world\.groundLevel, tx0, ty0, tx1, ty1/g) ?? [];

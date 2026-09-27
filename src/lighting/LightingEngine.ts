@@ -3,6 +3,9 @@
 // dirty(tile 改动/区域移动/手持光)→ 同 tick 快进整个周期(原版传送双 LightTiles 技巧);
 // liquidDirty → 同快进但 3 tick 节流(20Hz)。
 // 替换原 BFS 引擎(备份见 docs/backup/LightingEngine.legacy.bak.ts)。
+// ★C9d(2026-09-27)快照面/公共采样对分离:ensureRegion 只写快照面,公共 (区域,数组)
+// 由三原子写点整体替换(worker 结果到达/applyPending/本地发布)——移动抖动定谳修复,
+// 详见公共面字段头注与 tests/c9d-light-pair-atomicity。
 import { TILE } from '../core/constants';
 import { TileStore } from '../world/TileStore';
 import { AREA_PADDING, globalBrightness, NON_VISIBLE_PADDING } from './lightTables';
@@ -10,7 +13,7 @@ import { FlickerClock } from './SkyColor';
 import { LightMap } from './LightMap';
 import { PerFrameLight, ScannerWorld, TileLightScanner } from './TileLightScanner';
 import { LightWorkerLink, lightWorkerFlag } from './LightWorkerLink';
-import { buildEngineSnapshot, type DecayArgs, type LightSnapshotMsg } from './LightWorkerProtocol';
+import { buildEngineSnapshot, type DecayArgs, type LightResultMsg, type LightSnapshotMsg } from './LightWorkerProtocol';
 
 /** 引擎依赖的最小世界结构(World 结构兼容;单测可注入 fake) */
 export interface LightingWorld {
@@ -82,10 +85,36 @@ export function liveGateStep(
 export class LightingEngine {
   world: LightingWorld;
   // ---- 公共面(与 Game.ts/Renderer.ts 契约,勿改) ----
+  // ★C9d(2026-09-27)公共采样对=「最近一次成对结果」:区域 (rx,ry,rw,rh) 与数组
+  // (r,g,b) 恒同锚,只允许三原子写点整体替换——①applyWorkerResult(onResult 到达)
+  // ②LightWorkerLink.applyPending(兜底回填) ③processBlurAndPresent 尾部本地原子
+  // 发布。ensureRegion 只写快照面,不再直改公共面。
+  // 【抖动定谳】worker 化前本地路径同 tick 重算,区域先行平移不可见;worker 化后
+  // 数组=1 tick 前 worker 结果,ensureRegion 每 tick 先行推原点 → 渲染采样窗口=
+  // (区域 fresh_N+数组 fresh_{N-1}) 拆对 → lightAt 索引偏移每 tick 移动量(峰值
+  // 1-2 格) → 光照格一抖一抖;onResult 到达才恢复成对,下 tick 又拆开=每 tick 循环
+  // (主线程忙→结果晚到→拆对窗口更宽=渲染压力大区域更明显;C9b/C9c 均在拆对之后,
+  // 未触碰此窗口)。tests/c9d-light-pair-atomicity 锁定。
   rx = 0; ry = 0; rw = 0; rh = 0;
   r: Uint8Array = new Uint8Array(0);
   g: Uint8Array = new Uint8Array(0);
   b: Uint8Array = new Uint8Array(0);
+  // ---- ★C9d 快照面(引擎内部扫描锚) ----
+  // ensureRegion 每 tick 收敛于此,可领先公共采样对(领先量≤每 tick 移动量,被
+  // AREA_PADDING=28 完整覆盖:玩家合法移速峰值——步行 3px/tick≈0.19 格、疾跑靴
+  // ~6px/tick≈0.38、冲刺/盾冲峰值 ~16px/tick=1.0、矿车 41mph≈8px/tick=0.5、加速
+  // 轨道 ~20px/tick=1.25、终末坠落 10px/tick=0.625——峰值 ≤2 格/tick,padding 28
+  // ⇒ 容忍 ≥14 tick 的结果滞后;本修复把公共面滞后钉在 ≤1 tick,余量 ≥28×)。
+  private snapRx = 0;
+  private snapRy = 0;
+  private snapRw = 0;
+  private snapRh = 0;
+  /** 本地路径发布暂存(写满后才整体换装进公共面;仅尺寸变化时重分配。worker 镜像
+   *  侧数组每帧 transfer 走 → detached 后 length=0 → 每帧自动重分配,与旧
+   *  runSnapshotOnEngine ⑤「每帧 new Uint8Array」分配面等价) */
+  private pubR: Uint8Array = new Uint8Array(0);
+  private pubG: Uint8Array = new Uint8Array(0);
+  private pubB: Uint8Array = new Uint8Array(0);
   dirty = true;
   liquidDirty = false;
   heldLight: { tx: number; ty: number; r: number; g: number; b: number } | null = null;
@@ -131,13 +160,25 @@ export class LightingEngine {
       // ★C9b 到达即应用（2026-09-24）：结果回填点提前到消息到达——120fps 渲染下
       //  原起「下个 compute 才应用」会因主线程繁忙滑到下下 tick（间歇 33ms 割裂,
       //  用户实报）。region+数组成对原子回填（与 applyPending 同逻辑,compute 内
-      //  的 applyPending 保留为兜底 no-op）。快照区域仍由 ensureRegion 每 tick
-      //  收敛（onResult 的滞后对先落盘,下个 ensureRegion 照常覆盖,区域不振荡）。
-      this._lw.onResult = (m) => {
-        this.rx = m.rx; this.ry = m.ry; this.rw = m.rw; this.rh = m.rh;
-        this.r = m.R; this.g = m.G; this.b = m.B;
-      };
+      //  的 applyPending 保留为兜底 no-op）。★C9d：回填收口到 applyWorkerResult
+      //  (公共面三原子写点之一);快照区域由 ensureRegion 收敛于快照面,公共面对
+      //  不再被 ensureRegion 拆开（移动抖动定谳修复,见公共面头注）。
+      this._lw.onResult = (m) => { this.applyWorkerResult(m); };
     }
+  }
+
+  /** ★C9d 公共采样对三原子写点①：worker 结果到达（区域+数组同锚整体替换——渲染与
+   *  lightAt/lightAtTo 全消费面只会读到成对一致值;单值 1 tick 陈旧但恒稳定） */
+  private applyWorkerResult(m: LightResultMsg): void {
+    this.rx = m.rx; this.ry = m.ry; this.rw = m.rw; this.rh = m.rh;
+    this.r = m.R; this.g = m.G; this.b = m.B;
+  }
+
+  /** ★C9d 快照面直设（worker 镜像引擎 runSnapshotOnEngine / 对拍测试装配专用;
+   *  生产主线程唯一入口=ensureRegion）。不动公共采样对——发布由本地周期或
+   *  结果到达负责。 */
+  setSnapshotRegion(rx: number, ry: number, rw: number, rh: number): void {
+    this.snapRx = rx; this.snapRy = ry; this.snapRw = rw; this.snapRh = rh;
   }
 
   /** ★C9：Game 在每帧 updateLightDecay(...) 后调用（同参捕获,worker 重放同步） */
@@ -155,6 +196,9 @@ export class LightingEngine {
   /**
    * 区域 = 相机视口 ± AREA_PADDING(原版 GetAreaToLight 边界 1..2 + ProcessScan 膨胀 28 合并)。
    * camCX/camCY 为像素;viewW/viewH 为 tile 数(Game 现有调用约定)。
+   * ★C9d：本方法只写【快照面】(snapRx/snapRy/snapRw/snapRh)+dirty 判定——公共采样
+   * 对 (rx,ry,rw,rh,r,g,b) 不在此触碰(三原子写点,见公共面头注)。rw/rh 变更的数组
+   * 重分配随之迁到发布面(公共数组尺寸随结果走)。
    */
   ensureRegion(camCX: number, camCY: number, viewW: number, viewH: number): void {
     const st = this.world.store;
@@ -163,14 +207,11 @@ export class LightingEngine {
     const x1 = Math.min(st.w - 1, Math.floor(camCX / TILE) + Math.ceil(viewW / 2) + 2 + AREA_PADDING);
     const y1 = Math.min(st.h - 1, Math.floor(camCY / TILE) + Math.ceil(viewH / 2) + 2 + AREA_PADDING);
     const rw = x1 - x0 + 1, rh = y1 - y0 + 1;
-    if (rw !== this.rw || rh !== this.rh || x0 !== this.rx || y0 !== this.ry) {
+    if (rw !== this.snapRw || rh !== this.snapRh || x0 !== this.snapRx || y0 !== this.snapRy) {
       // 原点只在重算时原子移动(防光影相对世界平移)
-      this.rx = x0; this.ry = y0;
-      if (rw !== this.rw || rh !== this.rh) {
-        this.rw = rw; this.rh = rh;
-        this.r = new Uint8Array(rw * rh);
-        this.g = new Uint8Array(rw * rh);
-        this.b = new Uint8Array(rw * rh);
+      this.snapRx = x0; this.snapRy = y0;
+      if (rw !== this.snapRw || rh !== this.snapRh) {
+        this.snapRw = rw; this.snapRh = rh;
       }
       this.dirty = true;
     }
@@ -178,7 +219,7 @@ export class LightingEngine {
 
   /** 每帧调用。dayFactor 参数弃用(天空色改由 clock 内部推导;旧调用方签名兼容)。 */
   compute(_dayFactor: number): void {
-    if (this.rw === 0) return;
+    if (this.snapRw === 0) return;   // ★C9d:门挪到快照面(公共面可能尚无首个结果)
     // ---- ★C9 光照 Worker 分支（?lightworker=1）----
     // 快照（区域 ± padding tile 切片 + 时钟/天空/衰减/点光参数）发 worker,结果回填
     // 公共面。三态：warmup(结果未达)=快照+本地双跑兜底(首帧不黑屏) → live=worker
@@ -203,17 +244,21 @@ export class LightingEngine {
         // ★C9c：live 由滞回健康门判定（warmup 期本地新鲜光优先,onResult 被
         //  liveAuth 抑制;转 live 后到达即应用接管,compute 内 applyPending 降兜底）
         const live = this.lwGate(lw);
-        // 快照区域须取本帧 ensureRegion 现值——onResult/applyPending 会把公共面
-        // 区域回拨成 worker 上一帧区域(0-1 帧滞后;渲染读 (区域,数组) 恒成对一致),
-        // 先捕获再回填。
-        const reg = { rx: this.rx, ry: this.ry, rw: this.rw, rh: this.rh };
+        // ★C9d：快照区域取本帧 ensureRegion 现值（快照面恒最新）。公共采样对=上一
+        // 帧成对结果（结果未达时不回拨/不直改,渲染读 (区域,数组) 恒成对一致,值恒
+        // =1 tick 前计算——AREA_PADDING=28 完整覆盖尾随量,见快照面头注）。
+        const reg = { rx: this.snapRx, ry: this.snapRy, rw: this.snapRw, rh: this.snapRh };
         lw.applyPending(this);
         lw.send(this.buildWorkerSnapshot(reg));
-        if (live) {
+        if (live && this.snapCoveredByPublic()) {
           this.flicker.tick();        // HUD/渲染层闪烁消费面照常推进
           this.perFrame.length = 0;   // 点光已随快照带走(本地 processScan 不再跑)
           return;
         }
+        // live 态大跳（传送/召回/重生/读档/离屏截图分块——快照区域跳出公共采样域
+        // 覆盖）→ 落本地全周期同帧兜底:vanilla 双 LightTiles 同帧出光对齐,消除
+        // 「结果下一 tick 才到=公共域外黑窗」。罕见路径一次性 ~7-12% 帧成本,非
+        // C9c-v3 的 lag 驱动逐 tick 双跑（粘性门语义不受影响）。
         // warmup：快照已发,本地照算兜底——tick 交给下方本地路径(勿双推进)
       }
     }
@@ -281,6 +326,16 @@ export class LightingEngine {
     }, tiles, 0);
   }
 
+  /** ★C9d：快照区域是否被公共采样对完整覆盖（live 态早退门——覆盖=尾随 ≤1 tick 的
+   *  光照照常可用;不覆盖=传送级跳变,视口落在公共域外/边缘带,走本地同帧兜底）。
+   *  正常移动永不触发:公共域=上帧视口 ± AREA_PADDING(28),每 tick 合法移速峰值
+   *  ≤2 格 ≪ 28;结果滞后 N tick 时尾随量=N×移速,14 tick 内仍被覆盖（见快照面头注）。 */
+  private snapCoveredByPublic(): boolean {
+    return this.snapRx >= this.rx && this.snapRy >= this.ry
+      && this.snapRx + this.snapRw <= this.rx + this.rw
+      && this.snapRy + this.snapRh <= this.ry + this.rh;
+  }
+
   /** 快进:同 tick 完成 Scan→Blur→Present(状态回 0) */
   private runFullCycle(): void {
     this.dirty = false;
@@ -308,13 +363,15 @@ export class LightingEngine {
 
   private processScan(): void {
     const w = this.world as ScannerWorld;
-    this.work.setSize(this.rw, this.rh);
-    this.work.nonVisiblePadding = Math.min(NON_VISIBLE_PADDING, (Math.min(this.rw, this.rh) - 1) >> 1);
+    // ★C9d:扫描锚=快照面（旧 this.rx/ry/this.rw/rh——live 态下公共面不再被
+    //  ensureRegion 先行平移,warmup 期 applyPending 也不再回拨扫描原点）
+    this.work.setSize(this.snapRw, this.snapRh);
+    this.work.nonVisiblePadding = Math.min(NON_VISIBLE_PADDING, (Math.min(this.snapRw, this.snapRh) - 1) >> 1);
     // 手持光源:RGB 来自 TorchID.TorchColor(原版 ItemCheck_EmitHeldItemLight 按火把种类取色)
     const perFrame = this.perFrame;
     if (this.heldLight) perFrame.push({ x: this.heldLight.tx, y: this.heldLight.ty, r: this.heldLight.r, g: this.heldLight.g, b: this.heldLight.b });
     for (const L of this.buffLights) perFrame.push({ x: L.tx, y: L.ty, r: L.r, g: L.g, b: L.b });
-    this.scanner.exportTo(w, this.work, this.rx, this.ry, perFrame);
+    this.scanner.exportTo(w, this.work, this.snapRx, this.snapRy, perFrame);
     perFrame.length = 0;
   }
 
@@ -324,10 +381,20 @@ export class LightingEngine {
     const tmp = this.active;
     this.active = this.work;
     this.work = tmp;
-    const outR = this.r, outG = this.g, outB = this.b;
+    // ★C9d 本地路径原子发布（三写点③）:导出进发布暂存（尺寸=快照面）,写满后
+    // 区域+数组整体换装——与 worker 结果同纪律,本地/worker 两路同原子语义。
+    // 暂存复用仅尺寸变化重分配;worker 镜像侧每帧 transfer detached → length=0
+    // → 每帧新分配（与旧 runSnapshotOnEngine ⑤ 分配面等价）。
+    const need = this.snapRw * this.snapRh;
+    if (this.pubR.length !== need) {
+      this.pubR = new Uint8Array(need);
+      this.pubG = new Uint8Array(need);
+      this.pubB = new Uint8Array(need);
+    }
+    const outR = this.pubR, outG = this.pubG, outB = this.pubB;
     const ar = this.active.r, ag = this.active.g, ab = this.active.b;
     const scale = globalBrightness * 255;
-    for (let i = 0; i < outR.length; i++) {
+    for (let i = 0; i < need; i++) {
       // 原版 ExportTo(LT57:231-233)是 `(int)(color*num)` 截断,非四舍五入。
       // 2026-09-19:`>=255 ? 255 : |0` 与旧 `Math.min(255, Math.trunc(v))` 全域等值
       // (v≥0 截断=|0;NaN:|0=0=ToUint8(NaN);Inf→255;-0.5:|0=0=ToUint8(-0);
@@ -337,6 +404,10 @@ export class LightingEngine {
       outG[i] = vg >= 255 ? 255 : vg | 0;
       outB[i] = vb >= 255 ? 255 : vb | 0;
     }
+    // 发布（★C9d 三写点③）:区域与数组同锚整体换装,渲染侧永不观察中间态
+    this.rx = this.snapRx; this.ry = this.snapRy;
+    this.rw = this.snapRw; this.rh = this.snapRh;
+    this.r = this.pubR; this.g = this.pubG; this.b = this.pubB;
   }
 
   /** 取某 tile 光照(区域外返回 0;原版 GetColor 区域外语义) */

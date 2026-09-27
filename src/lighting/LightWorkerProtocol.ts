@@ -309,11 +309,11 @@ export function runSnapshotOnEngine(e: LightingEngine, m: LightSnapshotMsg, ds: 
   ds.off.sx = m.tiles.sx; ds.off.sy = m.tiles.sy;
   ds.hourly = m.hourly;
   if (!ds.shimmed) { installClockShims(e, fk, ds); ds.shimmed = true; }
-  // ⑤ 区域（切片内坐标）+ 输出数组（上一帧 R/G/B 已 transfer 走,必须新分配）
-  e.rx = m.tiles.px; e.ry = m.tiles.py; e.rw = m.rw; e.rh = m.rh;
-  e.r = new Uint8Array(m.rw * m.rh);
-  e.g = new Uint8Array(m.rw * m.rh);
-  e.b = new Uint8Array(m.rw * m.rh);
+  // ⑤ 区域（切片内坐标）——★C9d(2026-09-27)：写【快照面】（镜像引擎不走
+  //    ensureRegion,公共面直写已删——发布面按快照尺寸分配输出数组;上一帧 R/G/B
+  //    已 transfer 走 → detached 后 length=0 → 发布面每帧自动重分配,与旧
+  //    「每帧 new Uint8Array」分配面等价）
+  e.setSnapshotRegion(m.tiles.px, m.tiles.py, m.rw, m.rh);
   // ⑥ 点光（坐标 rebase）+ 脏标（快照模式每帧全量重扫,v1 不做脏标优化）
   e.heldLight = m.held ? { tx: m.held[0] - m.tiles.sx, ty: m.held[1] - m.tiles.sy, r: m.held[2], g: m.held[3], b: m.held[4] } : null;
   e.buffLights = m.buffs.map((a) => ({ tx: a[0] - m.tiles.sx, ty: a[1] - m.tiles.sy, r: a[2], g: a[3], b: a[4] }));

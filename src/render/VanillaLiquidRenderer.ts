@@ -77,6 +77,8 @@ function toVanillaType(t: number): number {
 //      FBO('world')（SO 结合律=(w over ∅) over scene ≡ w over scene,B1 判例）,
 //      同一批数据 y 镜像重发射进 FBO('liqgate')=obj19 门控纹理（compose 直采
 //      句柄,两次全幅上传全消）。坡面足迹（α≈0.02）同步改四边形收集进 gate。
+// 【转正暂缓（2026-09-27 用户实报"?liqgl 缺省开=水面波动 GL 渲染消失"）——缺省
+//  回灰度关,病灶定位中;?liqgl=1 显式激活复现面。】
 export let liqgl = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('liqgl') === '1' : false;
 export function liqglSetForTest(v: boolean): void { liqgl = v; }
