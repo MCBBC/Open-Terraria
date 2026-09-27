@@ -258,14 +258,42 @@ describe('WingFrame 逐款分支', () => {
     stepWingFrame(50, s50, inp({ flap: true, vy: -3 }));
     expect(s50.frame).toBe(3);
   });
-  it('33/38：WingFrame 不动帧（只喷尘）；帧仅由滑翔覆盖驱动 → 2，落地保持（原版语义）', () => {
+  it('33（:30541-30601）：WingFrame 不动帧（只喷尘）；帧仅由滑翔覆盖驱动 → 2，落地保持（原版语义）', () => {
     const s = st();
     stepWingFrame(33, s, inp({ flap: true, vy: -3 }));
     expect(s.frame).toBe(0);            // flap 也不动
     stepWingFrame(33, s, inp({ vy: 5, controlJump: true, glide: true }));
     expect(s.frame).toBe(2);            // 滑翔覆盖
     stepWingFrame(33, s, inp({ vy: 0, glide: false }));
-    expect(s.frame).toBe(2);            // 落地不归零（原版 33/38 分支 return 早退）
+    expect(s.frame).toBe(2);            // 落地不归零（原版 33 分支 return 早退）
+  });
+  it('38 Arkhalis（:30594-30633）：flap/jump/下落持跳 → [1,2,3,2]@8t 扑动（counter 回绕 32）；地面/下落未持跳 → 0；滑翔段被覆盖 → 2', () => {
+    // ★翼扑冻结案判别器（2026-09-27）：旧 case 33/38 合并 break=38 飞行帧冻结（此断言红）
+    const s = st();
+    const seq: number[] = [];
+    for (let t = 0; t < 31; t++) {
+      stepWingFrame(38, s, inp({ flap: true, vy: -3 }));
+      seq.push(s.frame);
+    }
+    expect(seq).toEqual([...Array(7).fill(1), ...Array(8).fill(2), ...Array(8).fill(3), ...Array(8).fill(2)]);
+    stepWingFrame(38, s, inp({ flap: true, vy: -3 }));
+    expect(s.frame).toBe(1);            // 第 32 tick：counter 32→回绕 0 → 帧 1
+    stepWingFrame(38, s, inp({ flap: true, vy: -3 }));
+    expect(s.frame).toBe(1);            // 第 33 tick：counter=1 → 帧 1
+    // jump 臂同动画（jumpHold>0 段）
+    const j = st();
+    stepWingFrame(38, j, inp({ jump: true, vy: -3 }));
+    expect(j.frame).toBe(1);
+    // 地面（vy==0）→ 0；下落未持跳 → 0
+    const g = st(2, 5);
+    stepWingFrame(38, g, inp({ vy: 0 }));
+    expect(g.frame).toBe(0);
+    stepWingFrame(38, g, inp({ vy: 5 }));
+    expect(g.frame).toBe(0);
+    // 下落持跳（非 flap）自身动画 → 随后滑翔覆盖 → 2（与原版两段执行序同相）
+    const gl = st();
+    stepWingFrame(38, gl, inp({ vy: 5, controlJump: true, glide: true }));
+    expect(gl.frame).toBe(2);
   });
 });
 

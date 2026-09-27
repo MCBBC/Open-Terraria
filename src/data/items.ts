@@ -1013,6 +1013,7 @@ import vanillaItemMeta from '../../public/sprites/vanilla.json';
 //（★BJ91 2026-09-15 RB17b note③：3860/3861/3862 若链手补终值 8/5/3，见 json 内值）
 import vanillaItemRareJson from './vanilla-itemrare.json';
 import { MUSIC_BOX_ITEM_BY_STYLE } from './musicBoxStyles';   // ★叶子模块(2026-09-03 TDZ 断环,原 wiring/devices)
+import { isFunctionalTileItem } from '../world/evolution/PlantRules';   // ★BJ362 ⑦ 功能件面豁免(草/苔藓转化族;PlantRules→tiles 叶向,无环)
 /** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
 // ===================== 原版工具力道具补齐（锤/镐梯度,Item.cs 提取） =====================
 item({ key: 'vi_103_nightmare_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 65 } }); // ←vi_103_NightmarePickaxe 独有字段搬移(批次A)
@@ -2338,6 +2339,9 @@ item({ key: 'vi_4143_manacloakstar', name: '' });
 export let ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
 /** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */
 export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();
+/** ★BJ362 place_v 克隆退位表（文件尾 ⑦ 填充）：cloneKey → 唯一真件 vid。
+ *  消费面=itemSearch 池构建（克隆条目退役）。克隆 def 本体保留（id 域冻结）。 */
+export const PLACE_CLONE_SUPERSEDED = new Map<string, number>();
 for (let i = 0; i < ITEM_DEFS.length; i++) {
   const k = ITEM_DEFS[i].key;
   const vm = /^vi_(\d+)_/.exec(k);
@@ -2420,5 +2424,58 @@ for (let i = 0; i < ITEM_DEFS.length; i++) {
   for (let s = 0; s <= maxS; s++) {
     const d = placed[s];
     if (d !== undefined && d.vid === undefined && d.key.startsWith('vi_')) d.vid = s;
+  }
+  // ⑦ place_v 克隆退位（★BJ362 2026-09-27 用户实报「附魔日晷扔微光不变月晷」）：
+  //   place_v_<tile> 克隆件（阶段5 注册,{maxStack:999,value:1,tile},vid 恒 undefined=
+  //   原版域外）与回填 tile 的 vi_ 真件（createTile 双源回填,vid/rare/value/maxStack
+  //   全量原版语义）并存。道具搜索的覆盖去重曾把真件滤掉只发克隆
+  //   （ BJ154 前身,2026-08-25）——用户搜「日晷」只得 place_v_356_enchanted_sundial
+  //   （稳定 id 10286,vid 缺省 → 微光转化链 getTransformToItem(-1)=0,扔微光无反应;
+  //   物证 behavior-log-Starter_World t=1661 drop key=place_v_356_enchanted_sundial）。
+  //   退位判据（双写 ①键面 ②读档桥）：
+  //   ①【唯一真件】tile 在 vi_ 域恰一件 → 克隆退位到它。
+  //   ②【多件族基件】tile 持多件独立真件（雕像 82/旗帜 316/画/灯/篝火/晶塔…62 族）
+  //     时,克隆恒放 style0 → 若族内【恰一件】style0(缺省 placeStyle)真件,克隆
+  //     同样退位到基件——否则搜索池「克隆(方块名) + 基件(同物同名)」双行
+  //     （2026-09-27 用户复报「搜索出重复道具」）。功能件面豁免（isFunctionalTileItem=
+  //     草/苔藓转化族,种子 placeStyle≠放置语义,83 药草成熟株克隆须保留）。
+  //   写法：① byKey[cloneKey] → 真件 internal id（键面发放全走真件:tile-break 回退
+  //      World.breakTileAt 'place_'+key 兜底、历史 grant 键、别名字典全consumer）
+  //   ② ITEM_INTERNAL_OF_STABLE[cloneStable] → 真件（读档愈合:v3+ mapItem 稳定 id 桥,
+  //      存量存档槽位 10286 → 3064 即愈;ITEM_STABLE_OF_INTERNAL 恒等表不动——旧值
+  //      照写出 10286,下轮读档收敛到真件,无往返振荡）。克隆 def 本体保留在
+  //      ITEM_DEFS（id 域冻结不平移,图标/键反查消费面零波澜）,仅键与读档桥不可达。
+  //   无对应件 tile（纯装饰 107 族）照旧。
+  //   搜索面配套退役见 ui/itemSearch.ts buildItemSearchPool（PLACE_CLONE_SUPERSEDED）。
+  {
+    const tileVids = new Map<string, Array<{ vid: number; ps: number | undefined }>>();
+    for (let s = 0; s <= maxS; s++) {
+      const d = placed[s];
+      if (d === undefined || d.vid === undefined || !d.tile) continue;
+      const arr = tileVids.get(d.tile);
+      const hit = arr?.find((e) => e.vid === d.vid);
+      if (hit) continue;                       // 同 vid 双注册（蛇/驼峰）只计一件
+      if (arr) arr.push({ vid: d.vid, ps: d.placeStyle }); else tileVids.set(d.tile, [{ vid: d.vid, ps: d.placeStyle }]);
+    }
+    for (let s = 0; s <= maxS; s++) {
+      const d = placed[s];
+      if (d === undefined || !d.key.startsWith('place_v_') || !d.tile) continue;
+      const arr = tileVids.get(d.tile);
+      if (!arr || arr.length === 0) continue;
+      let target = -1;
+      if (arr.length === 1) {
+        target = arr[0].vid;
+      } else {
+        const mp = /^place_v_(\d+)_/.exec(d.key);
+        if (mp && !isFunctionalTileItem(Number(mp[1]))) {
+          const bases = arr.filter((e) => e.ps === undefined || e.ps === 0);
+          if (bases.length === 1) target = bases[0].vid;   // 恰一件 style0 基件
+        }
+      }
+      if (target <= 0) continue;
+      byKey[d.key] = target;                    // ① 键面退位
+      ITEM_INTERNAL_OF_STABLE.set(s, target);   // ② 读档桥退位（s=克隆 stable≡internal）
+      PLACE_CLONE_SUPERSEDED.set(d.key, target);
+    }
   }
 }

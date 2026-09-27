@@ -1588,6 +1588,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   const adj = drawAdjust(sheet, fx, fy, x, y, r.img.width, r.img.height, st, st.w);
   const asx = adj.sx ?? r.sx, asy = adj.sy ?? r.sy;
   const asw = adj.sw ?? r.sw, ash = adj.sh ?? r.sh;
+  const clampBand = adj.clampBand ?? 0;   // ★BJ366 FNA 越界带高(仅 752 现役)
   if (asx < 0 || asy < 0 || asx + asw > r.img.width || asy + ash > r.img.height) {
     // 源矩形越界:静默 return 曾让 id 空间碰撞 bug(物品 case 错抄进 drawAdjust,
     // sheet 28 陶罐被劫持)潜伏数日,表现为神秘空格。此处 warn-once 暴露同类问题。
@@ -1626,6 +1627,12 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     ctx.restore();
   } else {
     ctx.drawImage(r.img, asx, asy, asw, ash, fdx + vx, dpy + vy, asw, ash);
+  }
+  // ★BJ366 FNA CLAMP_TO_EDGE 越界带补画：dst 越界带 = src 最末行 1:1 平铺
+  //   （FNA SpriteBatch UV 直传 + PointClamp 边缘采样语义；现役仅 752，
+  //   752 不在 FLIP_X_EVEN 故镜像支无需镜像带）
+  if (clampBand > 0) {
+    ctx.drawImage(r.img, asx, asy + ash - 1, asw, 1, fdx + vx, dpy + vy + ash, asw, clampBand);
   }
   void fw; void fh;
 }
@@ -1929,8 +1936,8 @@ function biomeVariant529(st: TileStore, x: number, y: number, w: number): number
 export function drawAdjust(
   sheet: number, fx: number, fy: number, x: number, y: number,
   imgW: number, imgH: number, st: TileStore, w: number,
-): { sx?: number; sy?: number; sw?: number; sh?: number } {
-  const a: { sx?: number; sy?: number; sw?: number; sh?: number } = {};
+): { sx?: number; sy?: number; sw?: number; sh?: number; clampBand?: number } {
+  const a: { sx?: number; sy?: number; sw?: number; sh?: number; clampBand?: number } = {};
   const fit = (sx: number, sy: number, sw: number, sh: number) => sx >= 0 && sy >= 0 && sx + sw <= imgW && sy + sh <= imgH;
   switch (sheet) {
     case 529: {   // :4895-4918:源行整替为 34*生物群系变体,高 32
@@ -1944,7 +1951,21 @@ export function drawAdjust(
       break;
     }
     case 751: if (fit(fx, fy, 56, 46)) { a.sw = 56; a.sh = 46; } break;  // :4582-4589
-    case 752: if (fit(fx, fy, 36, 38)) { a.sw = 36; a.sh = 38; } break;  // :4577-4581
+    case 752: {
+      // ★BJ366 巨型龙蛋：TileDrawing.cs:4577-4581 verbatim tileWidth=36/tileHeight=38，
+      //   但 Tiles_752 表仅 38×36（与 terraria-assets 源 md5 全等 c372ea99，非提取伪影）
+      //   ——请求底 2 行越界。原版 FNA 无 CPU 钳制（SpriteBatch.cs PushSprite UV 直传
+      //   source/texSize），SamplerState.*Clamp=CLAMP_TO_EDGE ⇒ 越界带采样贴图边缘行
+      //   （35 行）平铺、dst 仍 38 行高（BJ365 曾断言"dst 等比裁剪成 36 行"——那是
+      //   canvas drawImage 的语义，FNA 机制不符已翻案；可见主体同为"蛋+巢 36 行完整"，
+      //   差异仅底部 2px 边缘带）。本仓 drawImage 走等比裁剪语义，故两段重放：
+      //   ①src 钳到表界（sh=36）；②clampBand 记越界带高（2），尾部补画边缘行=与 FNA
+      //   逐像素等价。曾因 fit(36×38) 恒败静默回退 18×18 格元 = 只画蛋顶残片
+      //   （BJ365 用户实报；全 drawAdjust fit 位普查仅此一处越界请求）。
+      const shF = Math.min(38, imgH - fy);
+      if (fit(fx, fy, 36, shF)) { a.sw = 36; a.sh = shF; a.clampBand = 38 - shF; }
+      break;
+    }
     // ★BJ241 tile 733 收音机（TileDrawing.cs:6081-6088 verbatim）：开/关=左右半 sheet
     //   切换而非上下行——Tiles_733 原版即 108×54 仅 3 行（terraria-assets 源 PNG 亲证），
     //   世界态 frameY 只作开关标记（0/18/36=关、54/72/90=开，右键 SwitchMonolith ±54），

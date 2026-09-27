@@ -597,3 +597,100 @@ describe('BJ339-T4: 404 补 CutTiles（:12516-12517 friendly 门;CanCutTiles :15
     expect(cuts.some(([x, y]) => x === 51 && y === 90)).toBe(true);
   });
 });
+
+// ================= BJ367 绘制面（404 球锚定 + 405 泡尺寸,1457 权威行号） =================
+//   ①404 球锚=通用通支（M.cs:35492 position=(盒左+num153+num152, 盒上+盒高/2)、
+//     origin=(num153, 盒高/2+num151),num153=(30−26)/2+13=15,num151=num152=0 →
+//     贴图左上=盒左上、旋转枢=(盒左+15, 盒上+13)）——曾走中心锚=整球 (−2,−3)px 偏
+//   ②405 泡绘制=贴图原生 20×proj.scale（M.cs:35492 + :29237 scale=ai1,aiStyle70 无专支）
+//     ——曾 drawSize=14×ai1 按盒宽基准=整泡缩 30%
+//   ③旋转语义不变：rotation=atan2(玩家−球)−π/2（:30733）,方向翻转=FlipHorizontally
+//     语义（spriteDirection=−1 时 mirror,M.cs:30534-30537）
+describe('BJ367: 404/405 绘制面锚定与尺寸（M.cs:35492 通支 1:1）', () => {
+  type Call = { m: string; a: unknown[] };
+  function makeRecCtx() {
+    const calls: Call[] = [];
+    const store: Record<string, unknown> = {};
+    const ctx = new Proxy(store, {
+      get: (t, k) => (typeof k === 'string' && k in t ? t[k] : (...a: unknown[]) => { calls.push({ m: String(k), a }); }),
+      set: (_t, k, v) => { store[String(k)] = v; calls.push({ m: `set:${String(k)}`, a: [v] }); return true; },
+    });
+    return { calls, ctx: ctx as unknown as CanvasRenderingContext2D };
+  }
+  beforeAll(() => {
+    vi.stubGlobal('Image', class {
+      width = 30; height = 32;
+      naturalWidth = 30; naturalHeight = 32;
+      complete = true;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(v: string) {
+        // 405 真贴图 20×20（vanilla Projectile_405.png）,其余按 404 的 30×32
+        if (String(v).includes('Projectile_405')) { this.width = 20; this.height = 20; this.naturalWidth = 20; this.naturalHeight = 20; }
+        this.onload?.();
+      }
+    });
+  });
+  afterAll(() => { vi.unstubAllGlobals(); });
+
+  it('①404 球贴图左上=盒左上（translate=(盒左+15,盒上+13),drawImage=(−15,−13,30,32)）——M.cs:35492', () => {
+    const { calls, ctx } = makeRecCtx();
+    const r = { ctx, lighting: { lightAt: () => [255, 255, 255] } } as never;
+    const b = new FlaironHeadProj(100, 100, 14, 0, 66, 4.5);
+    b.handX = 104; b.handY = 104;                 // 近手:零链节,绘制面只剩球体
+    (b as unknown as { alpha: number }).alpha = 0;  // 淡入完成,globalAlpha=1
+    b.draw(r, {} as never);
+    const ball = calls.find((c) => c.m === 'drawImage' && c.a.length === 5);
+    expect(ball).toBeTruthy();
+    // num145 路径:drawImage(img, −num145f×s, −(盒高/2+off143)×s, dwS, dwS×(imgH/imgW))
+    expect(ball!.a[1]).toBeCloseTo(-15, 9);       // origin x=num153=15
+    expect(ball!.a[2]).toBeCloseTo(-13, 9);       // origin y=盒高/2+num151=13
+    expect(ball!.a[3]).toBeCloseTo(30, 9);        // 贴图原生宽
+    expect(ball!.a[4]).toBeCloseTo(32, 9);        // 贴图原生高
+    const tr = calls.filter((c) => c.m === 'translate');
+    expect(tr.length).toBe(1);                    // 近手无链节 → 唯一 translate=球锚
+    expect(tr[0].a[0]).toBeCloseTo(115, 9);       // 盒左 100+num153 15
+    expect(tr[0].a[1]).toBeCloseTo(113, 9);       // 盒上 100+盒高/2 13
+    const rot = (b as unknown as { rotation: number }).rotation;
+    expect(calls.some((c) => c.m === 'rotate' && c.a[0] === rot)).toBe(true);
+  });
+
+  it('②404 出程旋转 1:1（:30733 rotation=atan2(玩家−球)−π/2;右侧球→−π/2 朝玩家）', () => {
+    const { hooks, player } = makeHooks();
+    const b = ballRightOf(player, 40);            // 球在玩家右,向量朝左=π
+    run(b, hooks, 3);
+    expect((b as unknown as { rotation: number }).rotation).toBeCloseTo(Math.PI / 2, 9);   // π−π/2
+  });
+
+  it('③405 泡绘制=20×ai1（drawImage=(−10×ai1,−7×ai1,20×ai1,20×ai1)）——曾 14×ai1 缩 30%', () => {
+    const { calls, ctx } = makeRecCtx();
+    const r = { ctx, lighting: { lightAt: () => [255, 255, 255] } } as never;
+    const s = new FlaironSpike(100, 100, 3, 0, 66, 4.5);
+    (s as unknown as { ai1: number }).ai1 = 1;        // scale=1 档
+    (s as unknown as { alpha: number }).alpha = 50;   // 漂入完成档(下限 50)
+    s.draw(r, {} as never);
+    const bub = calls.find((c) => c.m === 'drawImage' && c.a.length === 5);
+    expect(bub).toBeTruthy();
+    expect(bub!.a[1]).toBeCloseTo(-10, 9);        // num153=(20−14)/2+7=10
+    expect(bub!.a[2]).toBeCloseTo(-7, 9);         // 盒高/2=7
+    expect(bub!.a[3]).toBeCloseTo(20, 9);         // 贴图原生宽 20（非 14）
+    expect(bub!.a[4]).toBeCloseTo(20, 9);
+    const tr = calls.find((c) => c.m === 'translate');
+    expect(tr!.a[0]).toBeCloseTo(110, 9);         // 盒左 100+10
+    expect(tr!.a[1]).toBeCloseTo(107, 9);         // 盒上 100+7
+    const ga = calls.find((c) => c.m === 'set:globalAlpha');
+    expect(ga!.a[0]).toBeCloseTo((255 - 50) / 255, 9);   // α 原版语义方向
+  });
+
+  it('④405 泡 scale 随 ai1 缩放（ai1≈1.2 → dest 24;vanilla Next(80,121)/100 :29237）', () => {
+    const { calls, ctx } = makeRecCtx();
+    const r = { ctx, lighting: { lightAt: () => [255, 255, 255] } } as never;
+    const s = new FlaironSpike(100, 100, 3, 0, 66, 4.5);
+    (s as unknown as { ai1: number }).ai1 = 1.2;
+    (s as unknown as { alpha: number }).alpha = 0;
+    s.draw(r, {} as never);
+    const bub = calls.find((c) => c.m === 'drawImage' && c.a.length === 5);
+    expect(bub!.a[1]).toBeCloseTo(-12, 9);        // −10×1.2
+    expect(bub!.a[3]).toBeCloseTo(24, 9);         // 20×1.2
+  });
+});

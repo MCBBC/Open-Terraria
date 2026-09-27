@@ -825,7 +825,7 @@ import {
   BigProgressBarSystem, drawBigProgressBar, refLifeMaxOf,
   type BarContext, type BarNpc, type CollectInfo,
 } from './BossBars';
-import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源（Main.TotalGameTime 等价）
+import { globalTimeWrappedHourly, gameTickCount } from '../core/GameTime';   // ★BJ330 GTW 单源（Main.TotalGameTime 等价）
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; ax?: number; ay?: number; }
 
@@ -3160,6 +3160,14 @@ export class Renderer {
   infoAccDom: InfoAccsDOM | null = null;
   /** Game 每帧注入的信息行数据(InfoAccCtx;null=未注入不画) */
   infoAccCtx: InfoAccCtx | null = null;
+  /** ★BJ363 CanShowInfoAccs 输入面(Game 每帧注入;Main.cs:3099-3110
+   *  `!(talkNPC>0 && chest==-1) && sign<0` 的 talkNPC/chest 两腿——sign 臂本仓
+   *  牌对话框无可读态,登记未接=恒 false 与既有口径一致)。此前调用点走
+   *  `(player as {talking?}).talking`/`(this as {chestOpen?}).chestOpen` 双
+   *  【幻影字段读】——Player 无 talking 字段、Renderer 无 chestOpen 字段,恒
+   *  undefined → 抑制门死码(信息列对话中照画照收悬停点击)。 */
+  infoAccTalking = false;
+  infoAccChestOpen = false;
   /** 信息列悬停行(-1 无;交互在 Game) */
   infoAccHover = -1;
   /** Game 每帧注入（DrawInterface_40 数据面）:指针图标上下文。
@@ -3367,6 +3375,15 @@ export class Renderer {
     const shim = this.bglEntShim;
     if (!shim?.active) return false;
     return shim.pushQuadBatch(img, key, data, quads, replay);
+  }
+  /** ★C5b 雪沙批中介（2026-09-27）：buildPrecipBatch 逐粒四边形一次成批的发射口
+   *  ——emitRainQuadBatch 镜像（stride 8 带逐 quad α,pushQuadBatchRgba 通道）;
+   *  无活跃窗（纯 2D 帧/逃生门/GL 死）返回 false=调用方走 2D 原链。 */
+  emitPrecipQuadBatch(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean {
+    const shim = this.bglEntShim;
+    if (!shim?.active) return false;
+    return shim.pushQuadBatchRgba(img, key, data, quads, replay);
   }
   /** ★B1 chunk 页纹理确保（'wpg:<idx>'/'tpg:<idx>'）。页生命周期三态:
    *  ①idx ≥ 已上传计数（新页/trim 后 idx 复用）:drop 陈旧键+texFromImage
@@ -5732,8 +5749,8 @@ export class Renderer {
       //  保留(DOM 元素幂等收起,已藏零写)。
       if (infoDomEnabled() && !quickPanelsOpen && !this.fullMap.open) {
         if (this.infoAccCtx && this.infoAccs.canShow(
-          !!((player as unknown as { talking?: boolean }).talking),
-          !!((this as unknown as { chestOpen?: boolean }).chestOpen),
+          this.infoAccTalking,
+          this.infoAccChestOpen,
           false,
         )) {
           this.infoAccDom ??= new InfoAccsDOM(this.infoAccs);
@@ -5749,8 +5766,8 @@ export class Renderer {
       }
       this.infoAccDom?.hide();   // 旗关回退/面板开/全图开:DOM 层收起(canvas 旧路径)
       if (this.infoAccCtx && this.infoAccs.canShow(
-        !!((player as unknown as { talking?: boolean }).talking),
-        !!((this as unknown as { chestOpen?: boolean }).chestOpen),
+        this.infoAccTalking,
+        this.infoAccChestOpen,
         false,
       )) {
         this.infoAccs.draw(ctx, viewW, viewH, this.infoAccCtx, player.hideInfo,
@@ -6993,7 +7010,10 @@ export class Renderer {
     const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
     const now = this._liquidNow; // 与液体双 pass 同帧同时刻
-    this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
+    // ★2026-09-27：去重键改逻辑 tick（火苗速率案普查株连）——旧 Math.floor(now/16.67)
+    //  墙钟键使 findFrame%30 扫描节流随渲染帧率走（120fps 下 0.25s/次=原版双倍频）。
+    //  tick 键 = 同 tick 多绘制幂等 + 30t 节流 ≡ 原版 60Hz 绘制周期口径。
+    this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, gameTickCount());
     this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now, this.waterStyle);  // 群系水色→瀑布贴图(通道表偏移)
     // 岩浆瀑布发光(AddLight :1075-1080:r≈0.55×0.4 脉动,g=r×0.3,b=r×0.1 橙光;
     // mouseTextColor 闪烁项取定值近似)——非岩浆瀑布 litCells 为空,零开销
@@ -11852,7 +11872,10 @@ export class Renderer {
       num4 = 1 - e9; num6 = 4;
     }
     if (num5 + num6 > 0) {
-      const tSec = performance.now() / 1000;        // timeForVisualEffects/60（连续钟近似）
+      // ★2026-09-27 重钉（火苗速率案普查株连）：原版 = Main.timeForVisualEffects/60
+      //  （Main.cs:26933 num11）/90（:26946 num12）——旧 performance.now 墙钟近似退役,
+      //  改 visEffectFrames()（逐 tick,stepVisEffectTick 同拍;暂停冻结=原版同门）。
+      const tSec = visEffectFrames() / 60;          // timeForVisualEffects/60（Main.cs:26933）
       const WHITE: [number, number, number] = [255, 255, 255];
       for (let i = -num6; i <= num6 + num5; i++) {
         if (i === 0) continue;

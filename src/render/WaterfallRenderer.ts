@@ -24,6 +24,19 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { gfxQuality } from '../core/GfxQuality';
+import { gameTickCount } from '../core/GameTime';
+
+// ---- 瀑布帧计数（★2026-09-27 重钉逻辑 tick,火苗速率案普查株连）----
+// 原版钟 = waterfallManager.UpdateFrame（WaterfallManager.cs:260-300,由
+// DoUpdate_AnimateWaterfalls Main.cs:19749 每 Update tick 调用,暂停门同 DoUpdate）：
+//  regularFrame++ 每 3 tick（wFallFrCounter>2）、slowFrame++ 每 7 tick
+//  （wFallFrCounter2>6）、rainFrameForeground++ 每 tick、rainFrameBackground-- 每
+//  3 tick。均 16/8 帧回卷。这里以 gameTickCount 纯函数等价（同速率同相位;暂停
+//  冻结=原版同门;此前 Math.floor(nowMs/50|117|16.7) 墙钟近似已退役）。
+const wfRegularFrame = (): number => Math.floor(gameTickCount() / 3) % 16;
+const wfSlowFrame = (): number => Math.floor(gameTickCount() / 7) % 16;
+const wfRainFgFrame = (): number => gameTickCount() % 8;
+const wfRainBgFrame = (): number => (8 + 2 - (Math.floor(gameTickCount() / 3) % 8)) % 8;
 
 interface Waterfall { x: number; y: number; type: number; } // type: 0水 1岩浆 2蜂蜜 3雨幕 4雪幕 5灰烬雨幕（本仓库编码）
 
@@ -147,7 +160,7 @@ export class WaterfallRenderer {
   draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null, st: TileStore, groundLevel: number, nowMs: number, waterStyle = 0) {
     if (!atlas) {
       // atlas 缺失也留痕（debugState 消费）；条目空则由 debugState 的 count:0 表达
-      this.lastDraw = { ms: nowMs, regular: Math.floor(nowMs / 50) % 16, slow: Math.floor(nowMs / 117) % 16,
+      this.lastDraw = { ms: nowMs, regular: wfRegularFrame(), slow: wfSlowFrame(),
         atlasReady: false, sheetsOk: [false, false, false], waterStyle, waterfallSheet: null };
       return;
     }
@@ -164,13 +177,21 @@ export class WaterfallRenderer {
     if (waterTex) tex[0] = waterTex;
     // 最近一次 draw 参数（debugState 消费；atlas 缺失/条目空也记录——这本身是
     // "瀑布没画出来/水瀑布颜色错误"类报告的关键证据）
-    this.lastDraw = { ms: nowMs, regular: Math.floor(nowMs / 50) % 16, slow: Math.floor(nowMs / 117) % 16,
+    this.lastDraw = { ms: nowMs, regular: wfRegularFrame(), slow: wfSlowFrame(),
       atlasReady: true, sheetsOk: [!!tex[0], !!tex[1], !!tex[2]],
       waterStyle, waterfallSheet: `vanilla/Waterfall_${STYLE_TEX[waterStyle] ?? 0}.png` };
     if (!tex[0] && !tex[1] && !tex[2]) return;
-    // 帧动画：水 3 tick/帧、岩浆蜂蜜 7 tick/帧（1 tick ≈ 16.67ms）
-    const regular = Math.floor(nowMs / 50) % 16;
-    const slow = Math.floor(nowMs / 117) % 16;
+    // 帧动画：水 3 tick/帧、岩浆蜂蜜 7 tick/帧
+    // ★2026-09-27 重钉逻辑 tick（火苗速率案普查株连）：原版帧计数器在
+    //  waterfallManager.UpdateFrame（DoUpdate_AnimateWaterfalls Main.cs:19749 每
+    //  Update tick 调用）——wFallFrCounter>2 → regularFrame++（3 tick/帧）、
+    //  wFallFrCounter2>6 → slowFrame++（7 tick/帧）、rainFrameForeground 每 tick
+    //  ++、rainFrameBackground 每 3 tick --（WaterfallManager.cs:260-300）。旧实现
+    //  Math.floor(nowMs/50|117|16.7) = 墙钟近似（速率对但暂停期照走、宕帧后跳帧）。
+    //  改 gameTickCount 纯函数（tick→帧确定性;暂停冻结=原版 DoUpdate 同门;
+    //  freezeClock 探针期瀑布帧冻结=对拍确定性收益）。
+    const regular = wfRegularFrame();
+    const slow = wfSlowFrame();
     ctx.imageSmoothingEnabled = false;
     for (const wf of this.falls) {
       // ---- 雨幕分支（WaterfallManager :360-517）：双层 18px 窄条、逐格下落 ----
@@ -180,10 +201,9 @@ export class WaterfallRenderer {
         if (!fgTex) continue;
         const len = wf.type === 4 ? 50 : 25;   // waterfallDist/4（雪 /2 :369-372）
         // 帧：前景每 tick 正播（偶列 +3 相位）、背景每 3 tick 倒播（+2 偏移）（:390-427）
-        const tick = Math.floor(nowMs / 16.7);
-        let frameFg = tick % 8;
+        let frameFg = wfRainFgFrame();
         if (wf.x % 2 === 0) frameFg = (frameFg + 3) % 8;
-        const frameBg = (8 + 2 - Math.floor(nowMs / 50) % 8) % 8;
+        const frameBg = wfRainBgFrame();
         // 起始位置（:436）：偶列 +9/奇列 +8（格中心 ±1 错位）；每格 x ±1 交错（:513-516）
         let px = wf.x * 16 + (wf.x % 2 === 0 ? 9 : 8);
         let py = wf.y * 16 + 8;

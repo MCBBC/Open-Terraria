@@ -105,7 +105,32 @@ function getRainTex(): ImageBitmap | HTMLImageElement | null {
   loadBitmapOnly('vanilla/Rain.png', () => rainTex !== null, (x) => { rainTex = x; });
   return rainTex;
 }
+/** ★C5 测试钩：注入雨条纹理桩（node 单测无资产链——has() 早退同时挡住
+ *  Image 构造;探针/像素面锁 scripts/_rain-gl-ab.mjs） */
+export function rainTexSetForTest(tex: ImageBitmap | HTMLImageElement | null): void {
+  rainTex = tex;
+}
+/** ★C5 测试钩：批产出单槽快照（buildRainBatch 写入的 scratch 直读——批数据/
+ *  重放面同构断言用;生产零消费） */
+export function drawRainBatchCaptureForTest(): {
+  data: Float32Array; replay: Float32Array; base: Float64Array; quads: number;
+} {
+  return { data: rainBatchData, replay: rainReplay, base: rainReplayBase, quads: rainReplayQuads };
+}
 
+/** ★C5b 测试钩：雪沙批产出单槽快照（buildPrecipBatch 写入的 scratch 直读——
+ *  批数据/重放面同构断言用;生产零消费） */
+export function drawPrecipBatchCaptureForTest(): {
+  data: Float32Array; replay: Float32Array; base: Float64Array; quads: number;
+} {
+  return { data: precipBatchData, replay: precipReplay, base: precipReplayBase, quads: precipReplayQuads };
+}
+
+/** ★C5b 测试钩：注入雪沙 precip 纹理桩（node 单测无资产链——has() 早退同时挡住
+ *  Image 构造;探针/像素面锁 scripts/_precip-gl-ab.mjs 同族 rainTexSetForTest） */
+export function dustTexSetForTest(tex: ImageBitmap | HTMLImageElement | null): void {
+  dustTex = tex;
+}
 /** Dust.dustWater()（Dust.cs:405-421）：雨溅花尘型按 waterStyle 映射（缺省 33 纯水） */
 export function dustWaterFor(waterStyle: number): number {
   switch (waterStyle) {
@@ -241,10 +266,15 @@ const MAIN_MAX_RAIN = 750;
 // 一次成批（单 Float32Array 动态上传+单 drawArrays,GLSpriteLayer.quadBatch/
 // GLShimExecutor.pushQuadBatch）——①②全消。lightAtTo 逐滴采样保留（C6 判例,
 // 数据面不动）;随机系/物理/消亡门/溅花尘零触碰。
-/** 旗：?raingl=0 逃生门（回 2D 逐滴烘焙链）。灰度序：?raingl=1 灰度开 →
- *  对拍全绿转正缺省开（rainGlSetForTest=页内翻面范式,探针 A/B 用）。 */
+/** 旗：?raingl=0 逃生门（回 2D 逐滴烘焙链）。★2026-09-26 转正：同帧配对对拍
+ *  全绿（scripts/_rain-gl-ab.mjs:pair0 逐字节 md5 全等,余 3 帧 1-4 像素=maxd≤181
+ *  旋转边 AA 差,B2b 实体旋转 quad 同族登记;雨池逐滴位全等;fb=0/rp=0）→
+ *  缺省开。灰度期语义（get('raingl')==='1'）已随转正翻转。
+ *  ★C5b（2026-09-27）语义扩展：旗名沿用 raingl（URL 兼容,?raingl=0 语义不变）,
+ *  管辖面扩为【precip 全族批化】=雨条批+雪/沙尘批（weather 批化一旗总闸）——
+ *  0 = 三族全回 2D 逐粒烘焙链（逃生门语义不变）。 */
 export let rainGl = typeof location !== 'undefined'
-  ? new URLSearchParams(location.search).get('raingl') === '1' : false;
+  ? new URLSearchParams(location.search).get('raingl') !== '0' : true;
 export function rainGlSetForTest(v: boolean): void { rainGl = v; }
 
 /** 雨批顶点数据单槽（消费即弃,QOPTS/TINT3 判例族——批 rec 同帧入队同帧 flush,
@@ -373,6 +403,173 @@ function replayRainBatch2D(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
+// ── ★C5b 雪沙 precip 批（2026-09-27;雨刀 C5 同构收尾）─────────────────────────
+// trace 20260927（雪地暴风雪+沙尘暴,SHM 慢路径会话）定谳批构成:
+//   ①drawPrecipDust incl 9.02%（1976.5ms/21.28s）——bakeMemoized 链 1675.8ms 中
+//     drawImage 1531.4ms=miss 克隆面（8×8 SHM ~0.78ms/张）+逐粒 blit（雪 1080+
+//     沙 728×2 ≈2500 drawImage/帧）;
+//   ②memo 填充期出生 92 张 canvas/s（哨兵实抓;_precip-pool-probe 定谳=CAP 前
+//     池恒空,每首见键一张createElement）。
+// 本刀:vanilla Dust.png 原样一张 GL 纹理（雪帧 (760,10×frame,8,8)、沙帧
+// (680,60+10×frame,8,8),永不重烘——tint 走顶点色）,逐粒光照 tint 折进顶点色
+// （量化式与烘焙路径同一 clamp 序）,沙尘叠画 alpha=180/255 走第 4 顶点分量
+// （PRECIP_VS/FS aCol vec4——批内精确保序:雪→沙基画/叠画交错序与 2D 逐粒
+// 绘制序逐位同构,单 drawArrays 发射）。雪轴对齐无旋转（vanilla DrawDust
+// origin (4,4) rot 0）,矩阵拼接=执行器镜像同式同 fround 链（co=1/si=0 折叠）。
+// 随机系/物理/消亡门/黑光衰减零触碰（光照采样与 active 写序与 2D 路径逐位同）。
+/** 雪沙批顶点数据单槽（消费即弃判例同雨批;8192 quad×6 顶点×8 float=1.5MB
+ *  STREAM_UPLOAD/帧上限——雪 3300(4K)+沙 2200×2 全超场景由构建门整帧回 2D）。 */
+const PRECIP_STRIDE = 8;                                 // x,y,u,v,r,g,b,a
+const MAX_PRECIP_QUADS = 8192;
+const precipBatchData = new Float32Array(MAX_PRECIP_QUADS * 6 * PRECIP_STRIDE);
+/** 重放面单槽（degrade→replay2D 同帧消费）:每 quad [sx, sy, sz, a255]。
+ *  x/y 不存——角点已含平移,回放从顶点角点直构仿射（雨批同式零重复存储）。 */
+const precipReplay = new Float32Array(MAX_PRECIP_QUADS * 4);
+const precipReplayBase = new Float64Array(6);
+let precipReplayQuads = 0;
+/** quadSprite 同款 tie 补正（texel 单位;见 GLSpriteLayer.QUAD_TIE_EPS 注） */
+const PRECIP_TIE_EPS = 1 / 4096;
+/** GL 纹理键（vanilla Dust.png 原样;幂等键——层重建/LRU 逐出自愈重传） */
+const PRECIP_TEX_KEY = 'precip:dust';
+/** 雪帧源矩形（Dust.cs:176-190 frame.Y=10×rand(3);dustFrameOf 76 同表） */
+const FLAKE_SX = 760;
+/** 沙帧源矩形（Dust.cs:186-190 双重 while;X=10×268−2000=680、Y=10×rand(3)+60） */
+const SAND_SX = 680, SAND_SY0 = 60;
+/** 沙尘叠画 alpha（Sandstorm.cs:179-182 四色同值 alpha=180;探针 tintedDust268 消费面同源） */
+const SAND_OVERLAY_A255 = SAND_COLOR_ALPHA;
+
+/**
+ * ★C5b 雪沙批构建（drawPrecipDust GL 支/结构锁测试共用）：逐粒把 2D 路径的
+ * drawImage(tinted, dx, dy, sz, sz)（雪）与基画+globalAlpha(180/255) 叠画（沙）
+ * 折成设备空间四角+uv+rgba 顶点。矩阵拼接=executor 镜像【同式同 fround 链】
+ * （precip 无逐粒 transform——基 CTM 直乘,x0/y0=粒中心−4×scale 左上角）。
+ * 返回 quad 数;-1=存在不可批面（源矩形越界/容量溢出）→ 调用方整帧回 2D 原链。
+ * @param base  绘制点 CTM（shim 窗内=镜像矩阵,即世界变换;f32 扩宽值）
+ * @param snow  雪粒池（仅消费 active;黑光衰减/光照采样序与 2D 路径逐位同）
+ * @param sand  沙尘池（基画+叠画两 quad/粒,交错序=2D 逐粒序）
+ * @param lightAtTo C6 零分配光照采样（原样逐粒调用,数据面不动）
+ */
+export function buildPrecipBatch(
+  base: { a: number; b: number; c: number; d: number; e: number; f: number },
+  snow: SnowFlake[], sand: SandGrain[],
+  lightAtTo: (tx: number, ty: number, out: number[]) => number[],
+  texW: number, texH: number,
+): number {
+  let n = 0;
+  const lt = _lt3;
+  const D = precipBatchData;
+  const RP = precipReplay;
+  // 基 CTM fround 链共因（无逐粒旋转——co=1/si=0 折叠=a=base.a 等直入链）
+  const ba = base.a, bb = base.b, bc = base.c, bd = base.d;
+  const det = ba * bd - bb * bc;
+  const clampT = (v: number) => (Number.isFinite(v) ? (v < 0 ? 0 : v > 255 ? 255 : Math.round(v)) : 0);
+  const quad = (x0: number, y0: number, sz: number,
+    sx: number, sy: number, cr: number, cg: number, cb: number, ca: number, a255: number): boolean => {
+    if (n >= MAX_PRECIP_QUADS) return false;   // 容量门（整帧回 2D,宁回退不丢精灵）
+    // 矩阵拼接（executor 镜像同式:fround 逐式;translate+scale 折叠自 base）
+    const e1 = frnd(frnd(ba * x0) + frnd(frnd(bc * y0) + base.e));
+    const f1 = frnd(frnd(bb * x0) + frnd(frnd(bd * y0) + base.f));
+    const p0x = e1, p0y = f1;
+    const p1x = frnd(ba * sz) + e1, p1y = frnd(bb * sz) + f1;
+    const p2x = frnd(frnd(ba * sz) + frnd(bc * sz)) + e1, p2y = frnd(frnd(bb * sz) + frnd(bd * sz)) + f1;
+    const p3x = frnd(bc * sz) + e1, p3y = frnd(bd * sz) + f1;
+    // uv 全跨度−ε（flipY=det<0 → v 区间反向,R2-F1 判谳同式）
+    const ua = (sx - PRECIP_TIE_EPS) / texW, ub = (sx + 8 - PRECIP_TIE_EPS) / texW;
+    const va0 = (sy - PRECIP_TIE_EPS) / texH, vb0 = (sy + 8 - PRECIP_TIE_EPS) / texH;
+    const va = det < 0 ? vb0 : va0, vb = det < 0 ? va0 : vb0;
+    // ★rgb 原样入顶点（调用方已按 2D 路径同序钳位;叠画=已按 ga 预乘的浮点,
+    //  此处禁再 round——2D globalAlpha 是模拟量合成,8bit 中间舍入=错色）
+    const r = cr / 255, g = cg / 255, bl = cb / 255;
+    // 6 顶点（TRIANGLES:(p0,p1,p2)+(p0,p2,p3)）;stride 8
+    let o = n * 48;
+    D[o] = p0x; D[o + 1] = p0y; D[o + 2] = ua; D[o + 3] = va; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl; D[o + 7] = ca;
+    D[o += 8] = p1x; D[o + 1] = p1y; D[o + 2] = ub; D[o + 3] = va; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl; D[o + 7] = ca;
+    D[o += 8] = p2x; D[o + 1] = p2y; D[o + 2] = ub; D[o + 3] = vb; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl; D[o + 7] = ca;
+    D[o += 8] = p0x; D[o + 1] = p0y; D[o + 2] = ua; D[o + 3] = va; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl; D[o + 7] = ca;
+    D[o += 8] = p2x; D[o + 1] = p2y; D[o + 2] = ub; D[o + 3] = vb; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl; D[o + 7] = ca;
+    D[o += 8] = p3x; D[o + 1] = p3y; D[o + 2] = ua; D[o + 3] = vb; D[o + 4] = r; D[o + 5] = g; D[o + 6] = bl; D[o + 7] = ca;
+    const ro = n * 4;
+    RP[ro] = sx; RP[ro + 1] = sy; RP[ro + 2] = sz; RP[ro + 3] = a255;
+    n++;
+    return true;
+  };
+  // ---- 雪粒（dust 76;单画 GetAlpha 路径,α=1）----
+  for (const f of snow) {
+    if (!f.active) continue;
+    const tx = Math.floor((f.x + 5) / TILE);
+    const ty = Math.floor((f.y + 5) / TILE);
+    lightAtTo(tx, ty, lt);
+    if (lt[0] === 0 && lt[1] === 0 && lt[2] === 0) { f.active = false; continue; } // :39730
+    const sy = 10 * f.frame;
+    // 源矩形越界=2D spec 有源裁剪语义、GL 全跨度 uv 不表达 → 整帧回 2D（vanilla frame<3 恒内）
+    if (f.frame < 0 || f.frame > 2 || FLAKE_SX + 8 > texW || sy + 8 > texH) { precipReplayQuads = 0; return -1; }
+    if (!quad(f.x - 4 * f.scale, f.y - 4 * f.scale, 8 * f.scale, FLAKE_SX, sy,
+      clampT(lt[0]), clampT(lt[1]), clampT(lt[2]), 1, 255)) {
+      precipReplayQuads = 0; return -1;
+    }
+  }
+  // ---- 沙尘 grain（dust 268;基画+叠画交错序=2D 逐粒序）----
+  const ga = SAND_COLOR_ALPHA / 255;
+  for (const g of sand) {
+    if (!g.active) continue;
+    const tx = Math.floor((g.x + 4) / TILE);
+    const ty = Math.floor((g.y + 4) / TILE);
+    lightAtTo(tx, ty, lt);
+    if (lt[0] === 0 && lt[1] === 0 && lt[2] === 0) { g.active = false; continue; } // :39730
+    const sy = SAND_SY0 + 10 * g.frame;
+    if (g.frame < 0 || g.frame > 2 || SAND_SX + 8 > texW || sy + 8 > texH) { precipReplayQuads = 0; return -1; }
+    const x0 = g.x - 4 * g.scale, y0 = g.y - 4 * g.scale;
+    // 叠画 = GetColor(基画) = color − (255 − 基画) 逐通道钳 [0,255]（Dust.cs:2802-2854）;
+    // alpha 语义:2D globalAlpha(180/255) × 叠画 canvas ≙ 顶点 rgb×ga + 第 4 分量 ga
+    // （预乘纹理×顶点色输出下 out.rgb=tex_p.rgb×vCol.rgb、out.a=tex.a×vCol.a;
+    //   vCol.rgb=tint/255×ga、vCol.a=ga ⟺ source-over globalAlpha 同式）
+    const gcr = Math.max(0, Math.min(255, g.cr + lt[0] - 255));
+    const gcg = Math.max(0, Math.min(255, g.cg + lt[1] - 255));
+    const gcb = Math.max(0, Math.min(255, g.cb + lt[2] - 255));
+    if (!quad(x0, y0, 8 * g.scale, SAND_SX, sy, clampT(lt[0]), clampT(lt[1]), clampT(lt[2]), 1, 255)   // 基画 = GetAlpha(light)
+      || !quad(x0, y0, 8 * g.scale, SAND_SX, sy, gcr * ga, gcg * ga, gcb * ga, ga, SAND_OVERLAY_A255)) {
+      precipReplayQuads = 0; return -1;
+    }
+  }
+  if (n > 0) {
+    precipReplayBase[0] = base.a; precipReplayBase[1] = base.b; precipReplayBase[2] = base.c;
+    precipReplayBase[3] = base.d; precipReplayBase[4] = base.e; precipReplayBase[5] = base.f;
+  }
+  precipReplayQuads = n;
+  return n;
+}
+
+/** ★C5b 雪沙批降级回放（GLShimExecutor.replay2D 经 rec.batch.replay 调用;宁回退
+ *  不丢精灵）：逐 quad 2D 直画——tint 现烘（bakeTintFrame 共享 scratch 'precip-replay',
+ *  即烘即画,无 memo——降级帧已是灾难路径,正确性优先,雨批同式）;角点仿射直构
+ *  setTransform（8×8 图像空间 → 设备四边形,与批顶点同源同精度）;叠画 quad 按
+ *  a255/255 施 globalAlpha（批内精确保序=雪→沙基/叠交错）。 */
+function replayPrecipBatch2D(ctx: CanvasRenderingContext2D): void {
+  if (precipReplayQuads <= 0) return;
+  const tex = getDustTex();
+  if (!tex || !(tex.width > 0)) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  const D = precipBatchData;
+  const RP = precipReplay;
+  for (let i = 0; i < precipReplayQuads; i++) {
+    const o = i * 48, ro = i * 4;
+    const cr = Math.round(D[o + 4] * 255), cg = Math.round(D[o + 5] * 255), cb = Math.round(D[o + 6] * 255);
+    const tinted = bakeTintFrame('precip-replay', tex, RP[ro], RP[ro + 1], 8, 8, cr, cg, cb);
+    if (!tinted) continue;
+    const sz = RP[ro + 2];
+    ctx.globalAlpha = RP[ro + 3] / 255;
+    ctx.setTransform(
+      (D[o + 8] - D[o]) / 8, (D[o + 9] - D[o + 1]) / 8,
+      (D[o + 24] - D[o]) / 8, (D[o + 25] - D[o + 1]) / 8,
+      D[o], D[o + 1]);
+    ctx.drawImage(tinted, 0, 0);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 export class WeatherRenderer {
   /** ★perf3 逃生门（与云侧 ?cloudcache=0 同参同批）：0 = 雨条逐滴走旧路径
    *  （save/translate/rotate/restore + 旧串键）——保留至用户验收。 */
@@ -397,28 +594,52 @@ export class WeatherRenderer {
   //     与重烘产出逐位相同；键空间无界由 BAKE_MEMO_CAP 全清兜底（同 swayTintCache
   //     >512 清空惯例，清后首帧补烘代价微小）。
   private bakeMemo = new Map<string | number, HTMLCanvasElement | null>();
-  private static readonly BAKE_MEMO_CAP = 4096;
+  /** ★P0b（2026-09-27 池病定谳后 4096→512）：哨兵实抓 takeClone←bakeMemoized←
+   *  drawPrecipDust 连续窗 92 张 canvas/s 的机制=【memo 填充期出生】——淘汰回池
+   *  只在 size>CAP 后逐 miss 激活,CAP 前池恒空 ⇒ 每个首见键=一张 createElement。
+   *  探针实证（scripts/_precip-pool-probe.mjs）:稳定光照 15 键/15 出生后零 churn;
+   *  相机移动+暗光梯度场景键创新 ~90 张/s 持续 → CAP=4096 时出生风暴持续 45s
+   *  （哨兵急性档 3 连窗必触发=用户实报）。CAP=512 ⇒ 填充期出生 ≤512 张
+   *  （~5.7s,1 窗即衰减,不达 3 连窗判据）,此后淘汰回池⇄miss 取池平衡=出生 0。
+   *  512=swayTintCache >512 清空惯例同档;命中面:雪/沙屏幕光照三元组实测 ≤135,
+   *  512 档工作集足够（批化后本表仅服务 ?raingl=0 逃生门/降级重放面）。 */
+  private static readonly BAKE_MEMO_CAP = 512;
   /** ★P0 miss 克隆复用池（2026-09-25）：原 miss 路径逐次 createElement+整面克隆
    *  （实测病灶:雨幕光照色随实体移动/火苗闪烁连续滚新键 → 每帧数十 miss,每 miss
    *  一张新画布=GPU 后备分配+全屏外小面 churn;SHM 慢路径会话里被放大 8×——
    *  trace 2026-09-25 drawRain 链 26.7ms 帧的可见项）。池=淘汰回池/miss 取池,
    *  键=`${w}x${h}`（条目尺寸互异必须精确匹配——克隆 drawImage 只覆盖 w×h,
    *  复用同尺寸画布+先 clearRect 保证 α 语义与全新画布逐位同）。张数上界=
-   *  memo 条目 1:1（淘汰回池不新增）,与 BAKE_MEMO_CAP 同级自律。 */
+   *  memo 条目 1:1（淘汰回池不新增）,与 BAKE_MEMO_CAP 同级自律。
+   *  ★P0b：giveClone 增单尺寸族存量帽（16）——跨尺寸族换代（如雨条 2×40 存量
+   *  期后切雪沙 8×8 churn）时被淘汰喂回的「死库存」不再无限囤积,超帽即弃
+   *  （GC 回收;出生已发生,弃面=防池无界膨胀）。 */
   private clonePool = new Map<string, HTMLCanvasElement[]>();
+  private static readonly POOL_PER_SIZE_CAP = 16;
+  /** ★P0b 池计数器（探针/单测面;clonePoolStatsForTest 消费） */
+  private poolStats = { takeN: 0, takeBirth: 0, takePool: 0, giveN: 0, giveDrop: 0 };
   private takeClone(w: number, h: number): HTMLCanvasElement {
     const k = `${w}x${h}`;
     const arr = this.clonePool.get(k);
-    const c = arr && arr.length ? arr.pop()! : document.createElement('canvas');
+    const s = this.poolStats;
+    s.takeN++;
+    const c = arr && arr.length ? (s.takePool++, arr.pop()!) : (s.takeBirth++, document.createElement('canvas'));
     c.width = w; c.height = h;   // 池条目尺寸恒同键（防御性重置,零成本）
     return c;
   }
   private giveClone(c: HTMLCanvasElement): void {
     if (c.width <= 0 || c.height <= 0) return;   // 已被 width=0 释放的病态面不入池
+    const s = this.poolStats;
+    s.giveN++;
     const k = `${c.width}x${c.height}`;
     let arr = this.clonePool.get(k);
     if (!arr) { arr = []; this.clonePool.set(k, arr); }
+    if (arr.length >= WeatherRenderer.POOL_PER_SIZE_CAP) { s.giveDrop++; return; }
     arr.push(c);
+  }
+  /** ★P0b 测试/探针钩：池命中/出生计数（单测=池命中绿面锁） */
+  clonePoolStatsForTest(): { takeN: number; takeBirth: number; takePool: number; giveN: number; giveDrop: number } {
+    return { ...this.poolStats };
   }
   /** ★F1 热修（2026-09-01 二轮 review 自捕）：初始实现把 gen() 返回的【固定 key 共享
    *  scratch】直接存表——同一原始 key 的两次不同语义烘焙（不同 RGB）互相覆写像素，
@@ -454,6 +675,42 @@ export class WeatherRenderer {
     return own;
   }
 
+  /** ★P0b 直烘变体（2026-09-27）：miss 时先取池画布、【直接烘进目标面】再入表
+   *  ——消掉 gen()-scratch→整面克隆的第二次 drawImage（trace 20260927 归因:
+   *  bakeMemoized 链 drawImage 1531.4ms 全 trace 第二名,SHM 慢路径下 8×8 克隆
+   *  ~0.78ms/张）。像素语义与 bakeTintFrame+克隆链【逐位同】:同一算子序
+   *  （tex 拷贝→multiply 铺色→destination-in 保形）落在同一尺寸的全新/清空面,
+   *  合成结果只依赖算子序与源像素,与宿主画布身份无关。条目不可变不变式同旧
+   *  （烘完即只读,直到淘汰回池）。paint 返回 false=语义失败（纹理缺位）→
+   *  记 null 键+还池（clearRect 后回池,面已脏须清）。 */
+  private bakeMemoizedInto(key: string | number, w: number, h: number,
+    paint: (ctx: CanvasRenderingContext2D) => boolean): HTMLCanvasElement | null {
+    // node 单测无 DOM 面:tintScratch 同判——烘焙 null 记键,2D 链不落笔（判例同源）
+    if (typeof document === 'undefined') { this.bakeMemo.set(key, null); return null; }
+    const hit = this.bakeMemo.get(key);
+    if (hit !== undefined) return hit;
+    if (this.bakeMemo.size > WeatherRenderer.BAKE_MEMO_CAP) {
+      // 逐条淘汰最旧（勿整表clear=重分配雪崩,2026-09-07 canvas哨兵案）;淘汰载体回池
+      const k0 = this.bakeMemo.keys().next().value;
+      if (k0 !== undefined) {
+        const ev = this.bakeMemo.get(k0);
+        if (ev) this.giveClone(ev);
+        this.bakeMemo.delete(k0);
+      }
+    }
+    const own = this.takeClone(w, h);
+    const octx = own.getContext('2d')!;
+    octx.clearRect(0, 0, w, h);              // 池复用:清陈旧内容（含 α）=全新画布语义
+    if (!paint(octx)) {
+      this.bakeMemo.set(key, null);
+      octx.clearRect(0, 0, w, h);
+      this.giveClone(own);
+      return null;
+    }
+    this.bakeMemo.set(key, own);
+    return own;
+  }
+
   /** Game 每帧注入（weather 状态 + hooks） */
   attach(weather: WeatherState, hooks: WeatherFxHooks) {
     this.weather = weather;
@@ -467,6 +724,13 @@ export class WeatherRenderer {
     while (this.pool.length < cap) {
       this.pool.push({ x: 0, y: 0, vx: 0, vy: 0, scale: 1, rotation: 0, type: 0, active: false });
     }
+  }
+
+  /** ★C5 测试钩：注入池滴（node 单测绕过 update 物理链——雨物理/生成门由
+   *  weather-precip-parity 锁,本钩只供批构建断言用） */
+  poolSetForTest(drops: RainDrop[]): void {
+    this.pool = drops;
+    this.poolCap = drops.length || 1;
   }
 
   /** Rain.MakeRain（Rain.cs:30-92）：每帧按 cloudAlpha 掷新滴。总闸序 = Rain.cs:32 的
@@ -922,18 +1186,24 @@ export class WeatherRenderer {
 
   /** 雪/沙尘 precip（★r15 R15-1 拆分：原版雪=dust 76、沙尘=dust 268 走 DrawDust
    *  Main.cs:39501——碎块后、前景水前；Renderer 在 gore 后调用本方法）。
+   *  ★C5b（2026-09-27）GL 批化支前置：raingl 开且执行器窗可表达 → tryDrawPrecipGL
+   *  一次成批（单 drawArrays,雪+沙基画/叠画批内精确保序）原位入队并 return;
+   *  不可批/失败面整帧落下方 2D 原链（行为不变）。
    *  通用支（:39722-39733）：基画 GetAlpha(Lighting.GetColor(pos)) 全幅 + dust.color 非零时
    *  叠画 GetColor(基画)；GetColor = color−(255−基画) 逐通道钳 [0,255]（Dust.cs:2802-2854），
    *  overlay alpha = color.A 同式（雪 76 无 color=单画）。帧 8×8、origin (4,4)、rot 0。
    *  光照纯黑 → dust.active=false（:39730，GetAlpha(Black)==Black 同判）——两池同遵。
    *  ★2026-09-01 去量化：光照乘数全部改逐粒【全精度 RGB】（基画乘 (lr,lg,lb)、叠画减
-   *  各自配对通道），旧 8 级均值灰 v 全面退役。 */
+   *  各自配对通道），旧 8 级均值灰 v 全面退役。
+   *  ★P0b（2026-09-27）：三处烘焙改 bakeMemoizedInto 直烘（池面直取直画,消 miss
+   *  克隆 drawImage——trace 20260927 归因 1531ms 项;像素算子序与旧链逐位同）。 */
   drawPrecipDust(r: Renderer, world: World) {
     const hooks = this.hooks;
     if (!hooks) return;
     const ctx = r.ctx;
     const dTex = getDustTex();
     if (dTex && (dTex.width > 0) && dTex.width > 0) {
+      if (rainGl && this.tryDrawPrecipGL(r, dTex)) return;
       ctx.save();
       ctx.imageSmoothingEnabled = false;
       for (const f of this.snow) {
@@ -943,10 +1213,10 @@ export class WeatherRenderer {
         const [lr, lg, lb] = hooks.lightAtTo(tx, ty, _lt3);   // ★C6：零分配
         if (lr === 0 && lg === 0 && lb === 0) { f.active = false; continue; } // :39730
         // 单画（GetAlpha 路径，dust 76 无 color 不叠）——雪花本体白格阵，RGB 直接乘全精度光
-        // PR#2：memo（键含全精度 String() 往返,命中逐位相同）
-        const tinted = this.bakeMemoized(
-          `flake|${f.frame}|${lr},${lg},${lb}`,
-          () => tintedFlake(dTex, lr, lg, lb, f.frame));
+        // PR#2：memo（键含全精度 String() 往返,命中逐位相同）;★P0b 直烘入池面
+        const tinted = this.bakeMemoizedInto(
+          `flake|${f.frame}|${lr},${lg},${lb}`, 8, 8,
+          (cx) => paintTintFrame(cx, dTex, 760, 10 * f.frame, 8, 8, lr, lg, lb));
         if (tinted) ctx.drawImage(tinted, f.x - 4 * f.scale, f.y - 4 * f.scale, 8 * f.scale, 8 * f.scale);
       }
       // ---- 沙尘 grain（dust 268；DrawDust 通用支双画：环境光底 + GetColor 叠画）----
@@ -956,9 +1226,9 @@ export class WeatherRenderer {
         const ty = Math.floor((g.y + 4) / TILE);
         const [lr, lg, lb] = hooks.lightAtTo(tx, ty, _lt3);   // ★C6：零分配
         if (lr === 0 && lg === 0 && lb === 0) { g.active = false; continue; } // :39730
-        const base = this.bakeMemoized(
-          `dust268-base|${g.frame}|${lr},${lg},${lb}`,
-          () => bakeTintFrame('dust268-base', dTex, 680, 60 + 10 * g.frame, 8, 8,
+        const base = this.bakeMemoizedInto(
+          `dust268-base|${g.frame}|${lr},${lg},${lb}`, 8, 8,
+          (cx) => paintTintFrame(cx, dTex, 680, 60 + 10 * g.frame, 8, 8,
             lr, lg, lb));                                       // 基画 = GetAlpha(light)（全幅）
         // 叠画 = GetColor(基画) = color − (255 − 基画) 逐通道钳 [0,255]（Dust.cs:2802-2854）；
         // 基画各通道取全精度光。★本模型不含 GetAlpha 的 ka=(255−alpha)/255 与 light.A 项
@@ -968,9 +1238,9 @@ export class WeatherRenderer {
         const gcr = Math.max(0, Math.min(255, g.cr + lr - 255));
         const gcg = Math.max(0, Math.min(255, g.cg + lg - 255));
         const gcb = Math.max(0, Math.min(255, g.cb + lb - 255));
-        const over = this.bakeMemoized(
-          `dust268-tint|${g.frame}|${gcr},${gcg},${gcb}`,
-          () => bakeTintFrame('dust268-tint', dTex, 680, 60 + 10 * g.frame, 8, 8, gcr, gcg, gcb));
+        const over = this.bakeMemoizedInto(
+          `dust268-tint|${g.frame}|${gcr},${gcg},${gcb}`, 8, 8,
+          (cx) => paintTintFrame(cx, dTex, 680, 60 + 10 * g.frame, 8, 8, gcr, gcg, gcb));
         // A 槽：old 曾把灰度 v 代入 GetColor 的 alpha 式 clamp(A+v−255)（量化遗留耦合，
         // 暗 光下叠画整层消失）。斩断后按 light.A≡255 + 本仓不建模 dust.alpha → A = color.A
         // 常量；若日后建模两场再补完整 A 链
@@ -987,6 +1257,27 @@ export class WeatherRenderer {
       ctx.restore();
     }
     void world;
+  }
+
+  /** ★C5b 雪沙批 GL 支（2026-09-27）：vanilla Dust.png 原样一张 GL 纹理（雪/沙帧
+   *  固定源矩形,永不重烘——tint 走顶点色、叠画 α 走第 4 顶点分量,消 bakeMemoized
+   *  miss 风暴+填充期 canvas 出生）+ 逐粒构建设备空间四边形批（buildPrecipBatch,
+   *  矩阵拼接=执行器镜像同式同 fround 链;批内序=2D 逐粒绘制序）+ Renderer.
+   *  emitPrecipQuadBatch 按调用点原位入队（单 drawArrays 发射）。
+   *  返回 false=不可批（无执行器窗/纹理解析败/源矩形越界/容量溢出）→ 调用方走 2D 原链。 */
+  private tryDrawPrecipGL(r: Renderer, dTex: ImageBitmap | HTMLImageElement): boolean {
+    const hooks = this.hooks;
+    if (!hooks) return false;
+    if (!(dTex.width > 0) || dTex.height <= 0) return false;
+    // 基 CTM：shim 窗内=执行器镜像矩阵（getTransform 返回镜像,与 2D 路径
+    // 捕获同源——f32 扩宽值,逐帧一次捕获）
+    const bt = r.ctx.getTransform();
+    const quads = buildPrecipBatch(
+      { a: bt.a, b: bt.b, c: bt.c, d: bt.d, e: bt.e, f: bt.f },
+      this.snow, this.sand, hooks.lightAtTo, dTex.width, dTex.height);
+    if (quads < 0) return false;
+    if (quads === 0) return true;       // 零活粒=两路径等价零绘制
+    return r.emitPrecipQuadBatch(dTex, PRECIP_TEX_KEY, precipBatchData, quads, replayPrecipBatch2D);
   }
 
   /** 全量绘制（雨+雪沙同窗）——兼容旧调用方；Renderer 主路径已拆 drawRain/
@@ -1034,6 +1325,25 @@ function tintByte(v: number): number {
   return Number.isFinite(v) ? Math.max(0, Math.min(255, Math.round(v))) : 0;
 }
 
+/** ★P0b 算子核抽出（2026-09-27）：multiply 铺色+destination-in 保形两步式烘进
+ *  【任意已清空的目标 ctx】——bakeTintFrame（scratch 面）与 bakeMemoizedInto
+ *  （池面直烘）共用,算子序逐位同=两产出逐位同。调用方负责 clearRect。 */
+function paintTintFrame(cx: CanvasRenderingContext2D, tex: ImageBitmap | HTMLImageElement,
+  sx: number, sy: number, w: number, h: number,
+  cr: number, cg: number, cb: number): boolean {
+  cx.globalCompositeOperation = 'source-over';
+  cx.drawImage(tex, sx, sy, w, h, 0, 0, w, h);
+  // ① RGB 乘乘数（multiply 会把精灵透明区铺满成方形伪影，由②裁掉）
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${tintByte(cr)},${tintByte(cg)},${tintByte(cb)})`;
+  cx.fillRect(0, 0, w, h);
+  // ② 本体作 destination-in 源：alpha 回到精灵轮廓
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(tex, sx, sy, w, h, 0, 0, w, h);
+  cx.globalCompositeOperation = 'source-over';
+  return true;
+}
+
 /** 把 tex 的 (sx,sy,w,h) 帧乘精确 RGB 烘进 key 对应的 scratch 后返回该 canvas；
  *  调用方必须当场绘制/取证（toDataURL），下次烘焙即覆写 */
 function bakeTintFrame(key: string, tex: ImageBitmap | HTMLImageElement,
@@ -1044,15 +1354,7 @@ function bakeTintFrame(key: string, tex: ImageBitmap | HTMLImageElement,
   const cx = s.ctx;
   cx.globalCompositeOperation = 'source-over';
   cx.clearRect(0, 0, w, h);
-  cx.drawImage(tex, sx, sy, w, h, 0, 0, w, h);
-  // ① RGB 乘乘数（multiply 会把精灵透明区铺满成方形伪影，由②裁掉）
-  cx.globalCompositeOperation = 'multiply';
-  cx.fillStyle = `rgb(${tintByte(cr)},${tintByte(cg)},${tintByte(cb)})`;
-  cx.fillRect(0, 0, w, h);
-  // ② 本体作 destination-in 源：alpha 回到精灵轮廓
-  cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(tex, sx, sy, w, h, 0, 0, w, h);
-  cx.globalCompositeOperation = 'source-over';
+  if (!paintTintFrame(cx, tex, sx, sy, w, h, cr, cg, cb)) return null;
   return s.canvas;
 }
 

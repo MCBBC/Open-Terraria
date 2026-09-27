@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { WaterfallRenderer } from '../src/render/WaterfallRenderer';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
+import { pinGameTimeTicks } from '../src/core/GameTime';   // ★2026-09-27 重钉：瀑布帧=逻辑 tick 纯函数
 
 const GRANITE = TILE_BY_KEY['v_368_granite_block'];
 if (!GRANITE) throw new Error('no granite');
@@ -52,10 +53,13 @@ const atlas = { ensureVImage: () => ({ width: 512, height: 40 }) };
 const wf: any = new WaterfallRenderer();
 // 直接注入 falls(绕过 findWaterfalls 扫描节流)
 wf.falls = [{ x: 1484, y: 587, type: 0 }];
+// ★2026-09-27 重钉：regular 帧 = ⌊tick/3⌋%16（原版 UpdateFrame 每 3t 一帧）——
+// 旧 nowMs=1000 墙钟金标退役,pin tick=12 取同一帧槽(slot=4,像素金标不变)
+pinGameTimeTicks(12);
 wf.draw(ctx, atlas, st, 331, 1000, 0);
 describe('waterfall draw 1484,587 场景对拍', () => {
   it('唇缘格画 16px 横流条而非 32px 宽带(不压池面)', () => {
-    const slot = 32 * (Math.floor(1000 / 50) % 16); // nowMs=1000 → regular 帧
+    const slot = 32 * (Math.floor(12 / 3) % 16); // tick=12 → regular 帧 4
     expect(calls[0]).toMatchObject({ sx: 16 + slot, sy: 0, sw: 16, sh: 16, px: 1484 * 16, py: 587 * 16 });
   });
   it('坡面格:8x2px 扇形片;无 flag2 切片(上格水平向已同步 num18)、无主带(num15≠0 豁免)', () => {

@@ -444,8 +444,13 @@ function basicGrassGlow(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, rec: 
     }
     const img = atlas.ensureVImage('vanilla/Glow_329.png');
     if (!img || !(img.width > 0)) return;
-    // glowColor = White × (mouseTextColor/255)——鼠标文本脉冲近似
-    ctx.globalAlpha = 0.88 + 0.12 * Math.sin(performance.now() / 180);
+    // glowColor = White × (mouseTextColor/255)（TileDrawing.cs:6162-6165 case 656/701
+    //  `new Color(255,255,255,0) * (Main.mouseTextColor/255f)`）。★2026-09-27 重钉：
+    //  旧 performance.now() 正弦 = 墙钟近似（周期 1.13s≈原版 130t=2.17s 的一半,且
+    //  暂停期照脉冲）——改消费 FlickerClock.mouseTextColor（tick 推进 190↔255 三角
+    //  波,LightingEngine.compute 每 tick 同步,火苗速率案普查株连）。flicker 缺省
+    //  （菜单纯渲染路径）取静态中位 0.88。
+    ctx.globalAlpha = SWAY_FLICKER ? SWAY_FLICKER.mouseTextColor / 255 : 0.88;
     ctx.drawImage(img, fx, fy, TILE, TILE, dpx, dpy, TILE, TILE);
     ctx.globalAlpha = 1;
   };
@@ -523,10 +528,13 @@ function drawDirectionalGrass(
 
 /** 当前帧 store 引用（glow/药草查帧用；drawWindSwayTiles 注入） */
 let ST: TileStore = null as unknown as TileStore;
+/** 当前帧 FlickerClock 引用（basicGrassGlow 的 mouseTextColor 脉冲源;
+ *  drawWindSwayTiles 注入——与 ST 同款帧级注入模式） */
+let SWAY_FLICKER: FlickerClock | null = null;
 /** ★BJ318（2026-09-24）：退世界解绑——drawWindSwayTiles 是根可达导出函数,其模块
  *  上下文的 ST 槽持本局 TileStore,经 store.listeners 闭包反向钉死死 Game 整岛
  *  （forward-BFS 锚枚举定谳）。Game.destroy 调用,下局 drawWindSwayTiles 重绑。 */
-export function windSwayUnbind(): void { ST = null as unknown as TileStore; }
+export function windSwayUnbind(): void { ST = null as unknown as TileStore; SWAY_FLICKER = null; }
 
 // MultiTileGrass 尺寸/锚点表（DrawMultiTileGrass :8922-8970 + 路由 :608-690）
 function multiGrassSize(sheet: number, fy: number): { sx: number; sy: number } {
@@ -1001,6 +1009,7 @@ export function drawWindSwayTiles(
 ): void {
   const st = world.store;
   ST = st;
+  SWAY_FLICKER = flicker ?? null;
   const t = clock?.timeOfDay ?? 0.5;
   const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
   ENV = {

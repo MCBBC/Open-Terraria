@@ -23,9 +23,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID, vanillaItemCreateTile } from '../src/data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, vanillaItemCreateTile } from '../src/data/items';
+import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 import { isFunctionalTileItem } from '../src/world/evolution/PlantRules';
-import { ITEM_NAME_BY_ID } from '../src/i18n/idNames.generated';
+import { ITEM_NAME_BY_ID, TILE_NAME_BY_ID, TILE_NAME_ITEM_BY_SHEET, TILE_NAME_ZH_BY_ID } from '../src/i18n/idNames.generated';
 import { buildItemSearchPool, buildItemSearchView, type ItemSearchPoolEntry } from '../src/ui/itemSearch';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,11 +37,33 @@ const uiSrc = read('src/ui/UI.ts');
 const zh = JSON.parse(read('public/l10n/zh-Hans.json')) as {
   ItemName: Record<string, string>;
   ItemTooltip: Record<string, string>;
+  MapObject: Record<string, string>;
+};
+// ★BJ362：nameOf 须与生产 Lang.itemNameByKey 同链——place_v_* 无独立名,走
+//  tile sheet → MapObject/TILE_NAME_ZH → placer 物品名（缺此链=克隆名=key,
+//  同名克隆退役规则失效,池计数金标虚高）。
+const tileNameOf = (sheet: number): string => {
+  const internal = TILE_NAME_BY_ID[sheet];
+  if (internal && zh.MapObject[internal]) return zh.MapObject[internal];
+  const fb = TILE_NAME_ZH_BY_ID[sheet];
+  if (fb) return fb;
+  const placer = TILE_NAME_ITEM_BY_SHEET[sheet];
+  if (placer !== undefined) {
+    const iid = ITEM_NAME_BY_ID[Number(placer)];
+    if (iid && zh.ItemName[iid]) return zh.ItemName[iid];
+  }
+  return '';
 };
 const nameOf = (key: string): string => {
   const m = /^vi_(\d+)_/.exec(key);
   const internal = m ? ITEM_NAME_BY_ID[Number(m[1])] : undefined;
-  return (internal && zh.ItemName[internal]) || '';
+  if (internal && zh.ItemName[internal]) return zh.ItemName[internal];
+  if (key.startsWith('place_v_')) {
+    const def = ITEM_DEFS[ITEM_BY_KEY[key]];
+    const sheet = def?.tile ? TILE_DEFS[TILE_BY_KEY[def.tile]]?.vanilla?.sheet : undefined;
+    if (sheet !== undefined) return tileNameOf(sheet);
+  }
+  return '';
 };
 const tipOf = (vid: number): string => {
   const internal = ITEM_NAME_BY_ID[vid];
@@ -60,21 +83,12 @@ describe('SW-BJ154 ①搜索池全量对齐（遍历源=全集域,零缺席）',
     expect(e!.name).toBe('粘鞍');   // 官方 zh 终值（idNames/zh-Hans 同源）
   });
 
-  it('全集 6177 vid 零真缺席（池域 ∪ place_v 覆盖死条目域 = 全集）', () => {
-    // missing = 全集中池外的 vid = 被 place_v 覆盖的惰性死条目域（其方块语义由
-    // place_v 件承载=可搜域不缺）。missing 内混入任何非死条目 vid = 真漏件（红）。
-    const coveredSheets = new Set<number>();
-    for (const d of ITEM_DEFS) {
-      if (!d) continue;   // ★方案 A:守洞
-      const mp = /^place_v_(\d+)_/.exec(d.key);
-      if (mp) coveredSheets.add(Number(mp[1]));
-    }
-    const notDead = missing.filter((vid) => {
-      const ct = vanillaItemCreateTile(vid);
-      return !(ct !== -1 && coveredSheets.has(ct) && !isFunctionalTileItem(ct));
-    });
-    expect(notDead).toEqual([]);   // 池外域必须全是死条目（真漏件=红）
-    expect(missing.length).toBeGreaterThan(0);   // 死条目域确实存在（防 vacuous）
+  it('全集 6177 vid 全在池（★BJ362 退位后零缺席;旧「死条目域」=createTile 双源回填前时代语义）', () => {
+    // ★BJ362（2026-09-27）金标再生：旧判据「covered ⇒ 死条目」写于 createTile 双源
+    //  回填之前——回填后 covered∩vi_ def 全部持有 tile（真可放置），死条目域实测
+    //  清零：missing=[]（全集 vid 全在池）。+真件 2040 −退位/同名克隆 → 池 6251。
+    //  missing 混入任何 vid = 真漏件（红）。
+    expect(missing).toEqual([]);   // 零缺席（比旧「∪死条目域=全集」更强）
     // 计数恒等式（+1 = 域外件 4143,见下）;2430 必须在池侧
     expect(poolVids.size + missing.length).toBe(allVids.length + 1);
     expect(poolVids.has(2430)).toBe(true);
@@ -84,9 +98,14 @@ describe('SW-BJ154 ①搜索池全量对齐（遍历源=全集域,零缺席）',
     expect(extra).toEqual([4143]);
   });
 
-  it('池条目数快照（6856 def − 死条目;注册面变化须有意重锚;★方案 A 稀疏长重钉）', () => {
-    // 2026-09-19 定值:6856 def 全量 − 2040 个被 place_v 覆盖的死 vid = 4816
-    expect(pool.length).toBe(4816);
+  it('池条目数快照（★BJ362 重锚:4816 + 2040 回填真件回池 − 567 退位克隆 − 38 同名克隆 = 6251）', () => {
+    // 2026-09-19 定值 4816 = 6856 def − 2040 旧判据滤掉的「死 vid」。
+    // ★BJ362（2026-09-27）：回填真件 2040 回池 + place_v 克隆退位 567
+    //  （items.ts ⑦:唯一真件 509 + 多件族 style0 基件 58;PLACE_CLONE_SUPERSEDED）
+    //  + 搜索面同名克隆退役 38（显示名撞已入池真件:人体模型 legacy/武器架 legacy/
+    //  垃圾桶/晶莹宝石 off×7/苔藓砖×9/高门 open×2/装饰株族等——放置能力不受影响,
+  //  仅搜索面退位）→ 4816 + 2040 − 567 − 38 = 6251。
+    expect(pool.length).toBe(6251);
     expect(ITEM_DEFS.length).toBe(20754);   // ★方案 A:稀疏域数组长=maxStable+1（实件 6856 由 D1 闸门钉）
   });
 });
@@ -160,8 +179,8 @@ describe('SW-BJ207 ④「80 封顶」行为锁（view 全量无封顶,三落点�
     expect(buildItemSearchView(wing, '翅膀').view.length).toBe(0);
   });
 
-  it('行为面①:真实池浏览模式 view=全池 4816（与池计数快照同源,注册面变化须两处同锚）', () => {
-    expect(buildItemSearchView(pool, '').view.length).toBe(4816);
+  it('行为面①:真实池浏览模式 view=全池 6251（★BJ362 重锚,与池计数快照同源）', () => {
+    expect(buildItemSearchView(pool, '').view.length).toBe(6251);
   });
 
   it('UI 锚②:view 构建=单源裸调用+裸赋值（.slice 后缀/中转再截等异拼全数破锚）', () => {

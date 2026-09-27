@@ -14,8 +14,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TileStore } from '../src/world/TileStore';
 import type { SpriteAtlas } from '../src/assets/SpriteAtlas';
-import { drawVanillaLiquids, liquidDrawWindow, LIQUID_WINDOW_MARGIN } from '../src/render/VanillaLiquidRenderer';
+import { drawVanillaLiquids, liquidDrawWindow, LIQUID_WINDOW_MARGIN, __resetLiquidAnimForTest } from '../src/render/VanillaLiquidRenderer';
 import { TILE_DEFS } from '../src/data/tiles';
+import { pinGameTimeTicks } from '../src/core/GameTime';
 
 // ---------- store：宽湖（x∈[20,60] y∈[30,39] 满水 255）+ 地面 y=40 ----------
 function makeStore(): TileStore {
@@ -55,7 +56,18 @@ function drawRecs(st: TileStore, tx0: number, ty0: number, tx1: number, ty1: num
   };
   const ctx = new Proxy(stub, handler) as unknown as CanvasRenderingContext2D;
   const atlas = { width: 256, height: 256, ensureVImage: () => ({ width: 48, height: 1360 }) } as unknown as SpriteAtlas;
-  // nowMs=1000：animFrame=floor(1×(0×25+6))%16=6、waterfallFrame=floor(0.5)%16=0（确定性）
+  // ★2026-09-27 重钉（火苗速率案普查株连）：液体相位 = 逐 tick 累计
+  //  （LiquidRenderer.Update dt=1/60 1:1；旧 nowMs=1000 墙钟退役）。预热 62 个
+  //  单 tick 推进（风速 0 → rate 6/60）→ _liqFrameState≈6.2 → animFrame=6
+  //  ——与旧墙钟金标同带（6×80=480），像素金标零改动。预热记录丢弃。
+  __resetLiquidAnimForTest();
+  for (let t = 1; t <= 62; t++) {
+    pinGameTimeTicks(t);
+    drawVanillaLiquids(ctx, atlas, st, 40, 30, 30, 30, 30, 0, false, 0, 0,
+      undefined, false, undefined, 7);
+  }
+  recs.length = 0;
+  pinGameTimeTicks(62);
   drawVanillaLiquids(ctx, atlas, st, 40, tx0, ty0, tx1, ty1, 1000, false, 0, 0,
     undefined, false, undefined, 7);
   return recs;

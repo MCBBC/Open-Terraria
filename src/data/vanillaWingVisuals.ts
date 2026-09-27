@@ -409,10 +409,29 @@ export function stepWingFrame(slot: number, st: WingFrameState, i: WingFrameInpu
       st.frame = Math.floor(st.counter / rate);
       break;
     }
-    case 33:
+    case 33: {
+      // :30541-30601（1457）：flap/jump/下落持跳（flag9）只驱动喷尘（尘已接
+      //   Player.wingFx flag2 门）后 return——wingFrame/wingFrameCounter 全程
+      //   不写=帧不动；帧只由下方滑翔覆盖（default→2）驱动，落地不归零。
+      //   ★2026-09-27 定谳注：旧注释行号（:29820-29844/:29904-29960）系 case 22
+      //   段内错锚，曾把 33 的「仅喷尘不动帧」连坐到 38（见 case 38 注）。
+      break;
+    }
     case 38: {
-      // :29820-29844 / :29904-29960：仅喷尘（未接）后 return——状态机不动；
-      //   帧只由下方滑翔覆盖驱动（原版语义：首滑翔后停在 2，落地不归零）
+      // :30594-30633（1457）Arkhalis 之翼：flap/jump 或 下落中持跳 → counter++
+      //   回绕 32、frame=1+counter/8（==4 钳 2）= [1,2,3,2]@8t 扑动循环；
+      //   其余（vy==0 / 下落未持跳）→ frame=0。喷尘（flag10→尘 267）仍未接=既有登记。
+      //   ★翼扑冻结案定谳修复（2026-09-27 用户实报「飞行时翅膀扑动没了」）：旧码
+      //   case 33/38 合并 break=38 飞行全程帧冻结；滑翔帧覆盖不受影响（glide 时
+      //   本支动画后照旧被覆盖 → 2，与原版两段执行序同相）。
+      if (i.flap || i.jump || (i.vy !== 0 && i.controlJump)) {
+        st.counter++;
+        if (st.counter >= 32) st.counter = 0;
+        st.frame = 1 + Math.floor(st.counter / 8);
+        if (st.frame === 4) st.frame = 2;
+      } else {
+        st.frame = 0;
+      }
       break;
     }
     default: {

@@ -37928,6 +37928,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const w = this.world;
     const r = this.renderer;
     const clock = w.clock;
+    // ★BJ363 CanShowInfoAccs 输入面注入(Main.cs:3099-3110 talkNPC/chest 两腿)——
+    //   此前 Renderer 调用点读 (player as {talking?}).talking/(renderer as
+    //   {chestOpen?}).chestOpen 双幻影字段=恒 undefined,抑制门死码。sign 臂本仓
+    //   牌对话框无可读态(登记未接)恒 false,绘/悬停两面孔同口径。
+    r.infoAccTalking = this.dialogNpc != null;
+    r.infoAccChestOpen = (this.openChestRef?.() ?? null) != null;
     // 渔情(Main.cs:46296-46316):浮标在场(含飞行中)→ 只显示粘性缓存不更新;
     // 无浮标 → 现算 FinalFishingLevel 并刷缓存;松露虫饵 → FishingWarning 不刷缓存
     let fishingText: string | null = null;
@@ -38044,6 +38050,32 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const r = this.renderer;
     if (!r) return;
     const p = this.player;
+    // ★BJ363 CanShowInfoAccs 门补挂（Main.cs:47559-47567 `if (!CanShowInfoAccs)
+    //  return;` 整链早退——原版悬停/行标签/hideInfo 点击面在 DrawInfoAccs 门内,
+    //  抑制期无绘制即无交互面）。BJ105 拆面时本门丢失=对话中（未开箱）信息列虽
+    //  不画（绘侧同门,输入面曾坏见 tickInfoAccs 注）而【上一绘制帧冻结的
+    //  iconRects/state 仍被 hitTest 命中】→ 行标签照 claim（cursorItemIconText
+    //  覆写三族回填）+ timeUiHover 吞点击 + hideInfo 被误翻转（「某些情况下信息
+    //  栏不显示时间」实报根因带：对话/告示牌期误点隐形图标列,时间行被藏）。
+    //  抑制期 infoAccHover 显式归 -1（消费端 draw/DOM 读点同拍清零,不留陈行）。
+    //  ★sign 臂恒 false=本仓牌对话框无可读态（登记未接,绘/悬停同口径）。
+    if (!r.infoAccs.canShow(r.infoAccTalking, r.infoAccChestOpen, false)) {
+      r.infoAccHover = -1;
+      this._infoAccClickLatch = false;
+      return;
+    }
+    // ★BJ363 DOM 覆盖门（inpOverDomUi=mouseInterface 等价面,IIIII248 缓存）：
+    //  原版图标列与背包格几何恒不重叠,本仓背包 DOM 格（.sw-slot）在常用窗口档
+    //  实测压住图标条右段（scripts/_bj363-overlap-sweep.mjs 五档几何普查）——
+    //  悬停 DOM 格时不再按其下隐形图标 rect 命中（行标签误 claim 覆写槽 tooltip
+    //  + hideInfo 翻转面裸奔）;DOM 点击本就被 Input.isDomUiTarget 吃掉
+    //  （mouseDown 不置位）,本门为悬停 claim 面收口。DOM 信息层(?infodom=1)
+    //  图标非 DOM_UI_TARGET_SELECTOR 成员,不影响其 mouseenter 悬停域。
+    if (this.inpOverDomUi()) {
+      r.infoAccHover = -1;
+      this._infoAccClickLatch = false;
+      return;
+    }
     r.infoAccHover = r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY);
     if (r.infoAccHover >= 0) {
       const hr = r.infoAccs.state.rows[r.infoAccHover];

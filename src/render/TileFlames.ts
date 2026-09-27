@@ -12,7 +12,9 @@
 //   颜色 Color(100,100,100,0) —— XNA 预乘 AlphaBlend 下 A=0 即纯加色累积，
 //   Canvas 用 'lighter' + multiply 预染色（rgb=100,100,100 → ×0.39）等价。
 //   种子 = Main.TileFrameSeed ^ (x<<32 | y)（:2852-2853）；TileFrameSeed 每 5 个
-//   绘制周期推进一次（Main.cs:61156-61159）→ 火苗约 12Hz 闪烁。
+//   绘制周期推进一次（Main.cs:62666-62670,DoDraw）→ 火苗约 12Hz 闪烁（原版默认
+//   Subtle+improved 帧跳闸把绘制率钳回 60Hz ⇒ 绘制周期≡逻辑 tick;本仓重钉
+//   Game.fixedUpdate tick,见 SEED_BASE 块注释）。
 //
 // 【简化登记】
 //  S1 ✅已核销（2026-08-13）：蜡烛(33/174)/烛台(100/173)/吊灯(34)/壁灯(93)/
@@ -37,6 +39,7 @@ import { flameTileTop } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
 import { campfireYOffset, animYOffset, tileAnim } from './TileAnim';
 import type { FlickerClock } from '../lighting/SkyColor';
+import { gameTickCount } from '../core/GameTime';
 
 /** 火苗族 tile → Flame_{n} 贴图索引（TileDrawing.cs:2857-2893 的 num9 switch 1:1；
  *  成员集 = Main.tileFlame 置位表 Main.cs:9210-9222：
@@ -376,18 +379,40 @@ export function furnitureFlameTint(
 }
 
 
-// ---- Main.TileFrameSeed（Main.cs:395 初值 + :61156-61159 每 5 绘制周期推进）----
-let _frameSeed = 0x2545f4914f6cdd1dn & MASK48; // 初值任意（原版 = Guid 哈希，仅要"每局不同"）
-let _drawCycle = 0;
-/** ★B1 对拍仪具（2026-09-24）:火苗种子冻结——TileFrameSeed 按绘制周期推进且
- *  不受暂停/时钟冻结门控 = 渲染帧非确定性面,页内 A/B 像素对拍须钉死
- *  （scripts/_b1-world-ab.mjs 动态 import 消费;生产路径零触碰）。 */
+// ---- Main.TileFrameSeed（Main.cs:421 初值 + DoDraw :62666-62670 每 5 绘制周期推进）----
+// ★2026-09-27 重钉逻辑 tick（fps 依赖定谳,用户实报 120fps 火苗快一倍）：原版推进点
+//  在【绘制】路径（Main.DoDraw 的 _drawCycleCounter%5——旧注释引 61156 为旧行号）,
+//  但原版默认 FrameSkipMode.Subtle+improvedSubtleFrameSkip（Main.cs:67615-67616）
+//  把 present 率钳回 ~60Hz（EndDraw :62624-62634 忙等 TARGET_FRAME_TIME·599/600）
+//  ⇒ 绘制周期 ≡ 60Hz 逻辑 tick,火苗恒 12Hz、任何刷新率同速。本仓 rAF 与逻辑解耦
+//  （frameCap 60/120/∞）,按绘制周期推进 = 120fps 下 24Hz。修 = 节拍重钉
+//  Game.fixedUpdate 60Hz tick 累计（BJ330 GTW 同款判例,advanceGameTimeTick 同拍
+//  同门）：seed = LCG^(⌊tick/5⌋+1) 纯函数化——读侧惰性同步（幂等,多窗/多调用
+//  每帧零推进）,60fps 帧序逐位不变,暂停期随 tick 冻结（原版暂停期照闪 =
+//  BJ330 同款明令分歧;探针 freezeClock 期确定性收益,B1 对拍仪具保留同语义）。
+const SEED_BASE = 0x2545f4914f6cdd1dn & MASK48; // 初值任意（原版 = Guid 哈希，仅要"每局不同"）
+let _frameSeed = SEED_BASE;
+let _seedStep = 0;
+/** ★B1 对拍仪具（2026-09-24）:火苗种子冻结——页内 A/B 像素对拍须钉死
+ *  （scripts/_b1-world-ab.mjs 动态 import 消费;生产路径零触碰）。
+ *  ★重钉后语义：冻结 = tick→seed 同步停摆（seed 恒持当前值）。 */
 let _seedFrozen = false;
 export function tileFrameSeedFreezeForTest(v: boolean): void { _seedFrozen = v; }
+
+/** 逻辑 tick → 种子 LCG 步数（+1 = 原版首绘即推进的同相偏移,60fps 1:1 帧序逐位等价;
+ *  pin 回拨（测试）时从 SEED_BASE 重放,保持 tick 的纯函数性） */
+function syncTileFrameSeed(): void {
+  if (_seedFrozen) return;
+  const target = Math.floor(gameTickCount() / 5) + 1;
+  if (_seedStep === target) return;
+  if (target < _seedStep) { _frameSeed = SEED_BASE; _seedStep = 0; }
+  while (_seedStep < target) { _frameSeed = randomNextSeed(_frameSeed); _seedStep++; }
+}
 
 /** Main.TileFrameSeed 只读访问：全局唯一种子（tile 火苗与 FlameParticle.Draw :57
  *  的抖动种子同源——`TileFrameSeed ^ (x<<32|y)`，两族共用同一推进节拍） */
 export function currentTileFrameSeed(): bigint {
+  syncTileFrameSeed();
   return _frameSeed;
 }
 
@@ -418,8 +443,8 @@ export function vineAdvanceSeed(box: VineSeedBox, cx: number, cy: number): void 
  *  (dpx,dpy) = 本格世界像素原点（含 offX/offY 行偏移与平台 -8 等，同本体 dest 口径）。
  *  与 drawTileFlames 的差异：① 种子 = 组结转盒（num6）；② 无 FLAME_DRAW_SIZE 覆盖
  *  （vine 家族 tileWidth/tileHeight 未被 GetTileDrawData override，画满图集格）；
- *  ③ 不推进 _frameSeed 节拍（主火焰层每帧推进一次，两路共用同一节拍即可对齐
- *  Main.cs:61156 每 5 绘制周期全域推进）。 */
+ *  ③ 不推进 _frameSeed 节拍（种子为逻辑 tick 的纯函数,两路读侧幂等同步即可对齐
+ *  Main.cs:62666 每 5 绘制周期全域推进）。 */
 export function drawVineTileFlame(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   dpx: number, dpy: number,
@@ -550,11 +575,10 @@ export function drawTileFlames(
   tx0: number, ty0: number, tx1: number, ty1: number,
   flicker: FlickerClock | null,
 ): void {
-  // 颜色/抖动只依赖 TileFrameSeed 与 FlickerClock（同原版，无时钟项）
-  if (!_seedFrozen) {
-    if (_drawCycle === 0) _frameSeed = randomNextSeed(_frameSeed);   // Main.cs:61156-61159
-    _drawCycle = (_drawCycle + 1) % 5;
-  }
+  // 颜色/抖动只依赖 TileFrameSeed 与 FlickerClock（同原版，无时钟项）。
+  // ★2026-09-27：本函数不再自带推进（旧 _drawCycle 按调用次数推进 = 渲染帧驱动
+  //   = 120fps 火苗双倍速病灶）——种子改由 currentTileFrameSeed() 读侧同步到
+  //   逻辑 tick（见 SEED_BASE 块注释）,同 tick 多次绘制零推进。
 
   const flameImg = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const imgFor = (idx: number) => {
@@ -650,7 +674,7 @@ export function drawTileFlames(
         tint = spec.tint;
       }
       let cell = tint ? tintedFlameCell(img, r.sx, r.sy, r.sw, r.sh, tint[0], tint[1], tint[2]) : null;
-      const seed = _frameSeed ^ ((BigInt(x) << 32n) | BigInt(y >>> 0));  // :2852-2853
+      const seed = currentTileFrameSeed() ^ ((BigInt(x) << 32n) | BigInt(y >>> 0));  // :2852-2853
       const box = { s: seed };
       for (let k = 0; k < spec.count; k++) {
         const ox = randomInt(box, spec.xRange[0], spec.xRange[1]) * spec.multX;
@@ -723,12 +747,15 @@ export function heldFlameSpec(itemId: number): HeldFlameSpec {
 }
 
 // itemFlamePos（LegacyPlayerRenderer.PrepareDrawForFrame :493-502）：7 槽共享一组
-// 偏移，每 5 绘制帧重掷（Main.rand = 非种子随机——视觉专用，Math.random 等价）
+// 偏移，每 5 绘制帧重掷（Main.rand = 非种子随机——视觉专用，Math.random 等价）。
+// ★2026-09-27 重钉：重掷节拍 = ⌊tick/5⌋ 滚档（与 TileFrameSeed 同判例）——旧
+// --_itemFlameCount 按调用次数推进 = 渲染帧驱动,120fps 下重掷双倍速（同病灶）。
 const _itemFlamePos: Array<[number, number]> = Array.from({ length: 7 }, () => [0, 0]);
-let _itemFlameCount = 0;
+let _itemFlameRoll = -1;
 function refreshItemFlamePos(): void {
-  if (--_itemFlameCount > 0) return;
-  _itemFlameCount = 5;
+  const roll = Math.floor(gameTickCount() / 5);
+  if (roll === _itemFlameRoll) return;
+  _itemFlameRoll = roll;
   for (let i = 0; i < 7; i++) {
     _itemFlamePos[i][0] = (Math.floor(Math.random() * 21) - 10) * 0.15;  // Next(-10,11)
     _itemFlamePos[i][1] = (Math.floor(Math.random() * 11) - 10) * 0.35;  // Next(-10,1)

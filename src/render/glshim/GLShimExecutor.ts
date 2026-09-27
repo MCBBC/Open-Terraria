@@ -91,6 +91,9 @@ interface RainBatchRef {
   data: Float32Array;
   quads: number;
   replay: (ctx: CanvasRenderingContext2D) => void;
+  /** ★C5b（2026-09-27）雪沙批面：true=stride 8（x,y,u,v,r,g,b,a——第 4 分量逐
+   *  quad α,沙尘叠画 180/255）走 quadBatchRgba;缺省 false=雨条 stride 7 原通道。 */
+  rgba?: boolean;
 }
 
 export interface ShimExecStats {
@@ -1069,6 +1072,20 @@ export class GLShimExecutor {
     return true;
   }
 
+  /** ★C5b 雪沙批入队（2026-09-27;pushQuadBatch 镜像,rgba:true——stride 8 带
+   *  逐 quad α,发射走 GLSpriteLayer.quadBatchRgba;可表达性门/保序/降级语义同源）。 */
+  pushQuadBatchRgba(img: CanvasImageSource, key: string, data: Float32Array, quads: number,
+    replay: (ctx: CanvasRenderingContext2D) => void): boolean {
+    if (!this.active || !this.glw || this.glw.unavailable) return false;
+    if (this.clipped || this.filterV !== 'none') return false;
+    if (this.ga !== 1 || this.gco !== 'source-over') return false;
+    if (quads <= 0) return true;        // 零活粒=无事可画（与 2D 零绘制等价）
+    this.push(0, null, false, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+      1, 1, 1, false, false, false, false, null);
+    this.tail!.batch = { img, key, data, quads, replay, rgba: true };
+    return true;
+  }
+
   /** 落笔前保序 flush（2D 回退面） */
   private flushForFallback(): void {
     if (this.head) this.flush();
@@ -1140,10 +1157,14 @@ export class GLShimExecutor {
       }
       // ★C5 雨批发射（单 drawArrays;纹理惰性解析幂等键——层重建/LRU 逐出自愈;
       //  发射失败=accFail 降级换桥+全队列 2D 重放,宁回退不丢精灵）
+      //  ★C5b：rgba 面（雪沙 stride 8）走 quadBatchRgba 分支
       if (p.batch) {
         const e = glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
         if (!e) { this.accFail('tex'); return; }
-        if (!glw.quadBatch(e, p.batch.data, p.batch.quads)) { this.accFail('gl'); return; }
+        const ok = p.batch.rgba
+          ? glw.quadBatchRgba(e, p.batch.data, p.batch.quads)
+          : glw.quadBatch(e, p.batch.data, p.batch.quads);
+        if (!ok) { this.accFail('gl'); return; }
         this.stats.emitBatchQuads += p.batch.quads;
         continue;
       }
@@ -1248,8 +1269,12 @@ export class GLShimExecutor {
         glw.quadSprite(WHITE_E(glw), 0, 0, 1, 1, p.dx, p.dy, p.dw, p.dh, o);
       } else if (p.batch) {
         // ★C5 雨批（bridge SO 批;纹理解析失败=本批整体 2D 重放,同上门）
+        // ★C5b：rgba 面（雪沙 stride 8）走 quadBatchRgba 分支
         const e = glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
-        if (!e || !glw.quadBatch(e, p.batch.data, p.batch.quads)) {
+        const ok = e && (p.batch.rgba
+          ? glw.quadBatchRgba(e, p.batch.data, p.batch.quads)
+          : glw.quadBatch(e, p.batch.data, p.batch.quads));
+        if (!ok) {
           if (additive) glw.blendAdditive(false);
           glw.end();
           this.replay2D();

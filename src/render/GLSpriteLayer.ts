@@ -107,6 +107,35 @@ void main() {
   outColor = vec4(c.rgb * vCol, c.a);   // 预乘纹理×顶点色 = 烘焙 multiply 同式
 }`;
 
+// ★C5b 雪沙 precip 批着色器（2026-09-27;RAIN_* 同构+第 4 顶点分量=逐 quad α）：
+// 沙尘叠画 alpha=180/255（Sandstorm.cs:179-182）按 quad 走 aCol.a——批内雪/沙基画
+// （a=1）与叠画（a=180/255）精确保序单 drawArrays 发射（2D 逐粒 globalAlpha 序）。
+// out.rgb = tex_p.rgb×vCol.rgb、out.a = tex.a×vCol.a：与 2D globalAlpha source-over
+// 逐位同式（out_p = src_p×ga + dst_p×(1−ga·sa),基画 ga=1 / 叠画 ga=180/255）。
+const PRECIP_VS = `#version 300 es
+uniform vec2 uCanvas;
+layout(location=0) in vec2 aPos;   // 设备 px（顶点已含世界变换,WeatherRenderer 构建）
+layout(location=1) in vec2 aUv;    // 图集 uv
+layout(location=2) in vec4 aCol;   // 逐粒 tint rgb + 逐 quad alpha（0..1）
+out vec2 vUv;
+out vec4 vCol;
+void main() {
+  gl_Position = vec4(aPos.x / uCanvas.x * 2.0 - 1.0,
+                     1.0 - aPos.y / uCanvas.y * 2.0, 0.0, 1.0);
+  vUv = aUv; vCol = aCol;
+}`;
+
+const PRECIP_FS = `#version 300 es
+precision mediump float;
+uniform sampler2D uTex;
+in vec2 vUv;
+in vec4 vCol;
+out vec4 outColor;
+void main() {
+  vec4 c = texture(uTex, vUv);
+  outColor = vec4(c.rgb * vCol.rgb, c.a * vCol.a);   // 预乘纹理×顶点色×quad α
+}`;
+
 const VERT_SRC = `#version 300 es
 uniform vec2 uCanvas;
 uniform vec4 uSrc;    // uv 基 + uv 跨度
@@ -257,6 +286,13 @@ export class GLSpriteLayer {
   private rainVao: WebGLVertexArrayObject | null = null;
   private rainVbo: WebGLBuffer | null = null;
   private rainFail = false;
+  /** ★C5b 雪沙 precip 批程序（PRECIP_*——aCol vec4 带 quad α;同款惰性/失败面） */
+  private precipProg: WebGLProgram | null = null;
+  private precipProgHandle: PipelineProgram | null = null;
+  private precipUni: Record<string, WebGLUniformLocation | null> = {};
+  private precipVao: WebGLVertexArrayObject | null = null;
+  private precipVbo: WebGLBuffer | null = null;
+  private precipFail = false;
   private vao: WebGLVertexArrayObject | null = null;
   private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null } =
     { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
@@ -1089,6 +1125,82 @@ export class GLSpriteLayer {
     gl.uniform1i(this.rainUni.uTex, 0);
     gl.bindVertexArray(this.rainVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.rainVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.bindSampler(0, this.samp.nearest!);
+    gl.drawArrays(gl.TRIANGLES, 0, quads * 6);
+    glStatDraw(this.statName, quads * 6);
+    gl.bindSampler(0, null);
+    gl.bindVertexArray(this.vao);
+    gl.useProgram(this.prog);
+    return true;
+  }
+
+  /** ★C5b 雪沙批程序惰性装配（ensureRain 同款失败面:precipFail=true 恒走 2D 兜底）。
+   *  管线模式走 pipe.program('sprite:precip') 按名登记（禁单删判例）;独立上下文
+   *  模式走 rain 同款本地编译。VAO:location0=aPos(vec2)/1=aUv(vec2)/2=aCol(vec4),
+   *  stride 32B（8 float）,顶点数据调用方每帧 STREAM_DRAW 重传（复用本层单 VBO）。 */
+  private ensurePrecip(): boolean {
+    if (this.precipFail) return false;
+    if (this.precipProg) return true;
+    const gl = this.gl;
+    if (!gl) return false;
+    if (this.pipe) {
+      const p = this.pipe.program('sprite:precip', PRECIP_VS, PRECIP_FS);
+      if (!p.prog) { this.precipFail = true; return false; }
+      this.precipProgHandle = p;
+      this.precipProg = p.prog;
+      for (const n of ['uCanvas', 'uTex']) this.precipUni[n] = this.pipe.uni(p, n);
+    } else {
+      const mk = (type: number, src: string): WebGLShader | null => {
+        const sh = gl.createShader(type)!;
+        gl.shaderSource(sh, src);
+        gl.compileShader(sh);
+        if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+          console.warn('[GLSpriteLayer] precip batch shader 编译失败:', gl.getShaderInfoLog(sh));
+          gl.deleteShader(sh);
+          return null;
+        }
+        return sh;
+      };
+      const vs = mk(gl.VERTEX_SHADER, PRECIP_VS);
+      const fs = mk(gl.FRAGMENT_SHADER, PRECIP_FS);
+      if (!vs || !fs) { this.precipFail = true; return false; }
+      const prog = gl.createProgram()!;
+      gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        console.warn('[GLSpriteLayer] precip batch 程序链接失败:', gl.getProgramInfoLog(prog));
+        this.precipFail = true;
+        return false;
+      }
+      this.precipProg = prog;
+      for (const n of ['uCanvas', 'uTex']) this.precipUni[n] = gl.getUniformLocation(prog, n);
+    }
+    this.precipVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.precipVao);
+    this.precipVbo = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.precipVbo);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 32, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 32, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, 16);
+    gl.bindVertexArray(null);
+    return true;
+  }
+
+  /** ★C5b 雪沙批发射口（quadBatch 同款;stride 8=x,y,u,v,r,g,b,a——第 4 分量
+   *  逐 quad α,沙尘叠画 180/255 精确保序单 drawArrays。blend/纹理参数不在本
+   *  方法设（SO 基态由 begin 约定）;离场还原程序态/VAO（quadBatch 判例同款）。 */
+  quadBatchRgba(e: TexEntry, data: Float32Array, quads: number): boolean {
+    if (this.unavailable || !this.gl || quads <= 0) return false;
+    if (!this.ensurePrecip()) return false;
+    const gl = this.gl;
+    gl.useProgram(this.precipProg);
+    gl.uniform2f(this.precipUni.uCanvas, this.canvas.width, this.canvas.height);
+    gl.uniform1i(this.precipUni.uTex, 0);
+    gl.bindVertexArray(this.precipVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.precipVbo);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.STREAM_DRAW);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, e.tex);

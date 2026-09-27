@@ -13,6 +13,8 @@ import { TILE_DEFS } from '../data/tiles';
 import { waterWaves } from './WaterWaves';
 import { texId, texReady } from './texId';
 import { swPerf } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
+import { visEffectFrames } from '../entities/Enemy';   // ★2026-09-27 微光 tVis 重钉钟面（function 声明=环安全;函数体内调用）
+import { gameTickCount } from '../core/GameTime';      // ★2026-09-27 液体相位逐 tick 累计钟源
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 兜底——原版微光无瀑布拖尾分支，DrawShimmer 单独绘制）
 const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
@@ -370,6 +372,23 @@ let _prepKey = '';
 let _boxL = 0, _boxT = 0, _boxR = -1, _boxB = -1;
 let _boxHas = false;
 
+// ---- 液体动画相位（★2026-09-27 重钉逻辑 tick,火苗速率案普查株连）----
+// 原版钟 = LiquidRenderer.Update（LiquidRenderer.cs:840-858,Main.cs:17226 每
+// Update tick 调用,dt = 定步 1/60）：_frameState += (windSpeed·25±6)·dt、
+// _waterfallFrameState += 0.5·dt、<0 回正、%16。旧实现 Math.floor((nowMs/1000)·rate)
+// = 墙钟（速率对,但风速变化时相位跳变、暂停期照走、宕帧后跳帧）。改逐 tick 累计：
+// draw 路径按 tick 变更惰性推进（背景/前景双 pass 同 tick 调用幂等=每 tick 恰推
+// 一次;暂停 tick 冻结=原版 DoUpdate 同门;freezeClock 探针期冻结=对拍确定性）。
+// 跨拍补步钳 8（宕帧追步,同 fixedUpdate ≤5 步同族口径）。
+let _liqWaveTick = -1;
+let _liqFrameState = 0;        // LiquidRenderer._frameState（0..16 浮点相位）
+let _liqWaterfallState = 0;    // LiquidRenderer._waterfallFrameState
+
+/** 测试钉钟：重置液体相位累计（金标测试重放确定性;生产路径禁调） */
+export function __resetLiquidAnimForTest(): void {
+  _liqWaveTick = -1; _liqFrameState = 0; _liqWaterfallState = 0;
+}
+
 export function drawVanillaLiquids(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null,
   st: TileStore, groundLevel: number,
@@ -700,8 +719,17 @@ export function drawVanillaLiquids(
   //  _waterfallAnimationFrame = 0.5 每 秒（X==16 中列 = 下落水柱/池体,慢速流纹——
   //  1.4.4 新增;1405 无此项,旧移植全部格共用快帧导致下落水柱 6fps 快闪"贴图不对"）
   const rate = windSpeed >= 0 ? windSpeed * 25 + 6 : windSpeed * 25 - 6;
-  const animFrame = ((Math.floor((nowMs / 1000) * rate) % 16) + 16) % 16;
-  const waterfallFrame = Math.floor((nowMs / 1000) * 0.5) % 16;
+  // ★2026-09-27 逐 tick 累计（LiquidRenderer.cs:846-848 dt=1/60 定步 1:1）——
+  //  旧 Math.floor((nowMs/1000)·rate) 墙钟退役（见 _liqWaveTick 块注释）
+  const tickNow = gameTickCount();
+  if (tickNow !== _liqWaveTick) {
+    const d = Math.min(Math.max(tickNow - _liqWaveTick, 1), 8);
+    _liqWaveTick = tickNow;
+    _liqFrameState = (((_liqFrameState + (rate / 60) * d) % 16) + 16) % 16;
+    _liqWaterfallState = (((_liqWaterfallState + (0.5 / 60) * d) % 16) + 16) % 16;
+  }
+  const animFrame = Math.floor(_liqFrameState) % 16;
+  const waterfallFrame = Math.floor(_liqWaterfallState) % 16;
   ctx.imageSmoothingEnabled = false;
 
   // 主循环（双 pass 共用：背景 pass 画在方块层前、透明度 1.0；前景 pass 画在方块后、乘 DEFAULT_OPACITY）
@@ -795,7 +823,11 @@ export function drawVanillaLiquids(
         // 微光分支以 x*16 为参照（applyShimmerBaseTint 的 u/v 归一化）→ 恢复世界
         // 变换按世界像素绘制（微光液稀疏，逐 tile 切换开销可忽略）
         ctx.setTransform(wldT);
-        const tVis = (nowMs / 1000) * 60;                      // ≈ Main.timeForVisualEffects（帧计数）
+        // ★2026-09-27 重钉（火苗速率案普查株连）：旧 (nowMs/1000)*60 = 墙钟折帧
+        //  近似 Main.timeForVisualEffects（暂停/宕帧漂移,与 FlickerClock.tick 的
+        //  tick 面分叉）——改消费 visEffectFrames()（逐 tick 计数器,stepVisEffectTick
+        //  每 fixedUpdate +1;C 批改型 2026-08-31 同判例同钟面）。
+        const tVis = visEffectFrames();                        // Main.timeForVisualEffects（帧计数,1458 Main.cs:17340）
         ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
         ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dstX, dstY, sw, drawSh);
         if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
@@ -1347,8 +1379,9 @@ export function drawLiquidBehindTilesOnly(
       if (lt === 3) {
         ctx.globalAlpha = 1;
         drawBand(bobDy251);
+        // ★2026-09-27 重钉：同前景 pass（drawVanillaLiquids 内 tVis）——visEffectFrames()
         if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py + bobDy251, dstW, dstH,
-          (performance.now() / 1000) * 60);
+          visEffectFrames());
         continue;
       }
 

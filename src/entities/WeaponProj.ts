@@ -5048,10 +5048,13 @@ export class FlaironSpike extends Entity {
     // α 原版语义(Main.cs:28965 color *= (255-alpha)/255,越大越透明):SetDefaults 255
     // (:4590)出生隐形,漂入段每 tick -25 至 50(:29225-29229)→ 淡入。
     // 此前直接 alpha/255 当不透明度 = 方向写反(出生全显、越漂越透明)。
-    // scale=ai1(:29237)是贴图缩放非命中盒——此前改 w 会让绘制中心随缩放偏移
+    // ★BJ367 尺寸修正：绘制=贴图原生 20×proj.scale（M.cs:35492 通支 source 全贴图+
+    //   proj.scale,aiStyle70 无专支;scale=ai1 :29237）——旧 drawSize=14×ai1 按盒宽
+    //   基准=整泡缩 30%（尾迹泡偏小,用户可见面）。锚定同通支:origin=(10, 盒高/2)=
+    //   (10,7)→贴图左上=盒左上,与 drawProj num145 路径零参差。
     drawProj(r, cam, this, this.projId,
       Math.atan2(this.vy, this.vx) + Math.PI / 2, '#FFB060',
-      Math.max(0, (255 - this.alpha) / 255), Math.round(14 * this.ai1));
+      Math.max(0, (255 - this.alpha) / 255), 0, false, false, this.ai1);
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -5248,7 +5251,9 @@ export class FlaironHeadProj extends Entity {
   private ai1 = 0;
   private alpha = 255;
   private rotation = 0;
-  /** spriteDirection（:30753 球在玩家右侧=−1/左侧=1;绘制侧 −1 水平翻转 M.cs:30536-30539） */
+  /** spriteDirection（:30753 vector46=玩家−球,vector46.X>0=球在玩家左侧→−1;
+   *  右侧→+1。绘制侧 −1=FlipHorizontally（M.cs:30534-30537 dir 支）——★BJ367 勘误:
+   *  旧注「球在玩家右侧=−1」系左右写反,代码本正确） */
   private spriteDir = 1;
   private hitCd = new HitCooldown();
   /** 手部坐标（链条起点，每 tick 自玩家中心刷新） */
@@ -5285,10 +5290,17 @@ export class FlaironHeadProj extends Entity {
   draw(r: Renderer, cam: Camera): void {
     const ctx = r.ctx;
     if (ctx) drawChain37Link(ctx, r, this.x + this.w / 2, this.y + this.h / 2, this.handX, this.handY);
-    // 球体贴图与 1058 全同（Projectile_404.png=Projectile_1058.png 均 30×32,盒 26×26）——
-    // 沿 1058 已审计的中心锚组绘制（球心=盒中心,链连接点不错位）;α 原版语义（越大越透明）
+    // 球体贴图与 1058 全同（Projectile_404.png=Projectile_1058.png 均 30×32,盒 26×26,md5 同）。
+    // ★BJ367 锚定修正：404 走原版【通用通支】锚（M.cs:35492——非 :32360/:30621 专支,
+    //   404 不在两表;：30606/:34920/:35429 系 221/帧残影/浮标专支同样不辖）：
+    //   position=(盒左+num153+num152, 盒上+盒高/2)、origin=(num153, 盒高/2+num151),
+    //   num153=(texW−盒宽)/2+盒宽/2=15、num151=num152=0 → 贴图左上=盒左上、
+    //   旋转枢=(盒左+15, 盒上+13)（原版球体中心本就比盒心低 3px/右 2px——曾按
+    //   中心锚绘制=整球偏 (−2,−3)px+枢轴偏 2px,经实机像素对拍定谳）。链条起点
+    //   =proj.Center（M.cs:29578 center2,盒心）不变——原版链即自盒心出。
+    // α 原版语义（GetAlpha 缺省 :81523 color×(255−α)/255,越大越透明）
     drawProj(r, cam, this, this.projId, this.rotation, '#E04040',
-      Math.max(0, (255 - this.alpha) / 255), 0, this.spriteDir === -1, true);
+      Math.max(0, (255 - this.alpha) / 255), 0, this.spriteDir === -1, false);
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {

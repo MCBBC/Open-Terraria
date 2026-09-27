@@ -39,6 +39,16 @@ export function totalGameTimeSec(): number {
   return totalGameTicks / 60;
 }
 
+/** 逻辑 tick 计数只读口（与 advanceGameTimeTick 同源同拍）。★2026-09-27 火苗
+ *  速率案新增消费：原版「每 5 绘制周期推进」的视觉钟（TileFrameSeed
+ *  Main.cs:62666-62670 / itemFlamePos LegacyPlayerRenderer.cs:502 / 瀑布帧
+ *  WaterfallManager.UpdateFrame）在原版默认 FrameSkipMode.Subtle+improved
+ *  （Main.cs:67615-67616）下 present 率被钳回 60Hz ⇒ 绘制周期 ≡ 逻辑 tick；
+ *  本仓 rAF 渲染帧率与逻辑解耦,该族钟一律以此为准（火苗 12Hz 任何 fps 同速）。 */
+export function gameTickCount(): number {
+  return totalGameTicks;
+}
+
 /** Main.GlobalTimeWrappedHourly（秒 %3600;全消费站唯一钟源） */
 export function globalTimeWrappedHourly(): number {
   return (totalGameTicks % 216000) / 60;

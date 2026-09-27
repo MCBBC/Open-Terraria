@@ -207,7 +207,7 @@ describe('SW-BJ105 ③ tickInfoAccsHover 信息饰品行（拆面后行为）', 
     const g = bj105Game();
     g.renderer = {
       infoAccHover: -1,
-      infoAccs: { hitTest: () => 0, state: { rows: [{ label: 'Depth Meter', hideIndex: 4 }], inventoryOpen: false } },
+      infoAccs: { hitTest: () => 0, canShow: () => true, state: { rows: [{ label: 'Depth Meter', hideIndex: 4 }], inventoryOpen: false } },   // canShow:★BJ363 门常驻（抑制期整链早退）
     };
     g.player.cursorItemIconText = '铁镐 (1)';   // 掉落物名先行 claim（层 39 域）
     g.player.cursorItemIconRare = 5;
@@ -223,7 +223,7 @@ describe('SW-BJ105 ③ tickInfoAccsHover 信息饰品行（拆面后行为）', 
     g.sfx = { play: () => {} };
     g.renderer = {
       infoAccHover: -1,
-      infoAccs: { hitTest: () => 0, state: { rows: [{ label: 'Time', hideIndex: 0 }], inventoryOpen: true } },
+      infoAccs: { hitTest: () => 0, canShow: () => true, state: { rows: [{ label: 'Time', hideIndex: 0 }], inventoryOpen: true } },   // canShow:★BJ363 门常驻
     };
     g.input.mouseDown = true;
     (g as AnyGame).tickInfoAccsHover();

@@ -12,7 +12,7 @@
 // modernCrafting.ts 零 setInterval/连抓实现，grep 定谳 2026-09-14），取用户规格
 // 档 ~8/s；上限 = 该物品 maxStack（并入钳制走 grantCraftToCursor 既有算式）。
 import { canMergeStack } from './SlotActions';
-import { ITEM_DEFS, vanillaItemCreateTile } from '../data/items';
+import { ITEM_DEFS, vanillaItemCreateTile, PLACE_CLONE_SUPERSEDED } from '../data/items';
 import { ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { isFunctionalTileItem } from '../world/evolution/PlantRules';
 
@@ -99,6 +99,13 @@ export function buildItemSearchPool(io: {
   // ★place_v 覆盖去重（2026-08-25 用户报"两个阿比盖尔的花/苔藓双行"）:place_v_*
   //   族（可放置）与惰性 vi_ 注册（无 tile 字段=不可放置死条目)同 tile 并存——
   //   vi_ 件的 createTile tile 已被 place_v 覆盖时不进搜索（保留可用 place_v 件）
+  //   ★BJ362 判据修正（2026-09-27 用户实报「日晷扔微光不变月晷」）：旧判据写于
+  //   createTile 双源回填之前——「惰性 vi_ 无 tile」前提已失效：回填后 covered∩
+  //   【有 tile】的 vi_ 件=真可放置+vid/rare/maxStack 全量原版语义,恒胜过 place_v
+  //   克隆（vid 恒 undefined → 微光转化/稀有度/原版堆叠全域缺位;物证=用户搜索
+  //   只得 place_v_356_enchanted_sundial,扔微光无反应）。故：covered 且【def.tile
+  //   已回填】→ 真件入池 + 克隆退位（PLACE_CLONE_SUPERSEDED,items.ts ⑦）；
+  //   仅【无 tile】的惰性死条目仍滤（原语义保留）。功能件豁免域不变。
   // ★功能件豁免（2026-09-02 神圣种子第三案真凶）：覆盖去重的本意=滤掉「唯一职能
   //  就是铺那格 tile」的惰性 vi_ 死条目；但草种/法杖/苔藓族的 createTile 虽被
   //  place_v 面板块覆盖,它们在 AssortedThings 里是【转化/消耗】功能件（圣种转
@@ -107,18 +114,33 @@ export function buildItemSearchPool(io: {
   //  集 ∪ 苔藓转化面。
   const seenVid = new Set<number>();
   const out: ItemSearchPoolEntry[] = [];
+  // ★BJ362 件3（2026-09-27 用户复报「搜索出重复道具」）：克隆的显示名若与已入池
+  //  真件同名 → 不进池（直接保证「池内无同名行,除非均为真件」——同名真件对如
+  //  橡实/橡实画=原版本相,保留）。vi_ 内部 id 恒小于 place_v/PRIV 段（方案 A 恒等
+  //  域:vid<10000 ≤ place 10286+/20000+）,forEach 序保证先收真件名后查克隆。
+  //  被隐藏克隆的放置能力不受影响（键发放/世界放置/读档桥均在,仅搜索面退位——
+  //  状态变体克隆如晶莹宝石(灭)/高门(开)/苔藓砖族由此同隐蔽,登记边界）。
+  const realNames = new Set<string>();
   ITEM_DEFS.forEach((d, id) => {
+    // ★BJ362 退位克隆不进池（真件已由 vid 侧入池,防「真件+克隆」双行复辟）
+    if (PLACE_CLONE_SUPERSEDED.has(d.key)) return;
     const mv = /^vi_(\d+)_/.exec(d.key);
     const vid = mv ? Number(mv[1]) : null;
     if (vid !== null) {
       if (seenVid.has(vid)) return;
       seenVid.add(vid);
       const ct = vanillaItemCreateTile(vid);
-      if (ct !== -1 && coveredSheets.has(ct) && !isFunctionalTileItem(ct)) return;   // 惰性 vi_ 死条目
+      if (ct !== -1 && coveredSheets.has(ct) && !isFunctionalTileItem(ct) && !d.tile) return;   // 惰性 vi_ 死条目（无 tile=不可放置）
     }
     const name = io.nameOf(d.key) || d.key;
     const en = vid !== null ? (ITEM_NAME_EN_BY_ID[vid] ?? '') : '';
     const tip = vid !== null && io.tipOf ? io.tipOf(vid) : '';
+    if (vid === null) {
+      // ★BJ362 件3：克隆显示名撞已入池真件名 → 不进池（防同名双行）
+      if (realNames.has(name)) return;
+    } else {
+      realNames.add(name);
+    }
     const lc = (name + ' ' + d.key + ' ' + (vid ?? '') + ' ' + en + ' ' + tip).toLowerCase();
     out.push({ id, key: d.key, vid, name, lc });
   });
