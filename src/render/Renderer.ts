@@ -246,7 +246,7 @@ import { isDynamicAnimSheet, campfireYOffset, fountainYOffset, tileAnim } from '
 import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
-import { drawTileShineGrid, drawTileShineAdditive } from './TileShine';
+import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -5037,6 +5037,16 @@ export class Renderer {
     //    原版 tile 批次。+0.39 加法支（262-268 Gemspark,加在光上与 L 无关）在合成后
     //    drawTileShineAdditive（7-涂层 段后）。atlas 未就绪同火苗层跳过。
     if (this.atlas) {
+      // ★生命水晶 shim ghost 修复（2026-09-27 用户实报「四格位置半透明淡红影子」）：
+      //    TileShine 共享 scratch 内容逐格逐帧变——shim 链下若按静态源收编,区域纹理
+      //    首帧内容永久冻结 = 四格 shine quad 全采样同一冻结切片（心形淡红影子错位
+      //    钉在各格盒;bglshim=0 直画 2D 恒正确）。此处一次性把「stamp 完成即上传」
+      //    钩挂到 Renderer.markWorldDynamicScratch（I类 uploadScratchNow+bakedTexPending/
+      //    preTex 消费链,bolt 判例同款;非 shim 会话内部自判 no-op,2D/B1 恒零触碰）。
+      if (!Renderer._shineScratchHookSet) {
+        Renderer._shineScratchHookSet = true;
+        setShineScratchBakeHook((c, key) => this.markWorldDynamicScratch(c, key));
+      }
       drawTileShineGrid(ctx, this.atlas, world, chunks, cam, viewW, viewH, z,
         { zz: z * wK, ox: Math.round(lw / 2), oy: Math.round(lh / 2), camRX, camRY },
         this.monoFilters.shimmerAlpha,
@@ -6244,6 +6254,9 @@ export class Renderer {
   })();
   static get bglShim() { return this._bglShim; }
   static bglShimSetForTest(v: boolean): void { this._bglShim = v; }
+  /** ★生命水晶 shim ghost 修复（2026-09-27）：TileShine scratch→uploadScratchNow 钩
+   *  一次性注册哨（setShineScratchBakeHook 只挂一次;挂点=render 的 tileShine 段）。 */
+  private static _shineScratchHookSet = false;
   /** ★B2b（2026-09-24）worldCanvas 退役总闸：bgl+bglShim 地基上把世界层从
    *  「GL 段 present 回贴 worldCanvas 桥接」翻成「单 FBO('world') 整层累积」
    *  ——worldCanvas 稳态零创建（三消:compose 全幅 texSubImage2D 上传/

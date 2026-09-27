@@ -345,7 +345,13 @@ export function shimmerCornerColorsForTest(
 export function liquidCacheIsSolid(flags: number, wire: number, solid: boolean | undefined): boolean {
   return flags !== 0 && (wire & TileStore.WIRE_ACTUATED) === 0 && solid === true;
 }
-function waterSheet(vt: number, waterStyle = 0): string {
+/** 液体表选择（原版 _liquidTextures[num2] 语义）：微光/岩浆/蜂蜜 = 固定表【不吃
+ *  waterStyle】（vanilla 血月染红只及 Type0 水：DrawNormalLiquids :655 case 0 才
+ *  remap、shimmer cell 在 PrepareDraw :587-613 整体搬出 _drawCache 走 DrawShimmer
+ *  独立路径无 waterStyle 入参 Main.cs:58403；浸润带同构 TileDrawing.cs :3940-4054
+ *  case 3→num10=14 / case 0→flag6→Main.waterStyle）。导出=血月语义回归锁面
+ *  （tests/bloodmoon-water-style-scope.test.ts：血月 style9 不得染微光/岩浆/蜂蜜）。 */
+export function waterSheet(vt: number, waterStyle = 0): string {
   if (vt === 1) return 'vanilla/Misc_water_1.png';   // 岩浆
   if (vt === 2) return 'vanilla/Misc_water_11.png';  // 蜂蜜
   if (vt === 3) return 'vanilla/Misc_water_14.png';  // 微光（Images/Misc/water_14，LiquidRenderer._liquidTextures[14]）

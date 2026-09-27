@@ -476,14 +476,31 @@ function sameFn(type: number): (t: number) => boolean {
 /** 逐格烘 delta：drawVanillaCell 画进 scratch（与底图同一渲染权威——blend 邻接取帧/
  *  坡面/半砖/衔接帧/宝箱姿态/动画帧行/油漆全同源），multiply 烘 delta 色，
  *  destination-in 裁回 alpha，再整幅盖到 dest。dest 盒 = (dx,dy,dw,dh)，
- *  chunk 烘焙路径 1:1（dx=lx*16−PAD）；逐帧动态路径按格设备缩放。 */
+ *  chunk 烘焙路径 1:1（dx=lx*16−PAD）；逐帧动态路径按格设备缩放。
+ *  ★生命水晶 shim ghost 修复（2026-09-27 用户实报「四格位置半透明淡红影子」）：
+ *  共享 scratch 内容【逐格逐帧变】——acc shim 链下把该 drawImage 当静态源收编时,
+ *  区域纹理按 (texId,0,0,40,40) 首帧内容【永久冻结】,四格 quad 全采样同一冻结片
+ *  = 心形切片影子错位钉在各格盒（bglshim=0 直画 2D 恒正确）。dynamicDest=true 的
+ *  调用点（仅 drawTileShineGrid 逐帧动态支）在最终 dest.drawImage 前触发
+ *  shineScratchBakeHook → Renderer.markWorldDynamicScratch(sc, 'shineCell:x,y') 走
+ *  I类 uploadScratchNow 立即上传（内容定格于本格 stamp 完成时）,本格 quad 经
+ *  bakedTexPending/preTex 直取,不再吃冻结区域纹理。★key 必须按【格】独立
+ *  （'shineCell:x,y'）：texRefresh 复用同一纹理对象——若全格共用单 key,后续格的
+ *  重传会【原地改写】先行 quad 引用的纹理,flush 时四格又全采样末格内容（首版
+ *  单 key 修复的回归教训）。chunk 烘焙支（dest=entry 画布）不触发——entry.mul/add
+ *  画布内容按 (pair,q) 稳定,静态区域纹理语义正确。 */
+let shineScratchBakeHook: ((c: HTMLCanvasElement, key: string) => void) | null = null;
+/** Renderer 启动期注册（markWorldDynamicScratch→uploadScratchNow；非 shim 会话内部自判 no-op） */
+export function setShineScratchBakeHook(fn: ((c: HTMLCanvasElement, key: string) => void) | null): void {
+  shineScratchBakeHook = fn;
+}
 function stampShineCell(
   atlas: SpriteAtlas, world: World, x: number, y: number,
   sheet: number, frame: 'auto' | 'style' | 'blend', fw: number, fh: number,
   type: number, fx: number, fy: number,
   delta: [number, number, number],
   dest: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number,
-  additiveFlat = false,
+  additiveFlat = false, dynamicDest = false,
 ): void {
   const t = devTools();
   if (!t) return;
@@ -535,6 +552,10 @@ function stampShineCell(
   s.globalCompositeOperation = 'destination-in';
   s.drawImage(mk, 0, 0);
   s.globalCompositeOperation = 'source-over';
+  // ★shim ghost 修复:动态支在【draw 之前】定格本次 scratch 内容（I类即传,
+  //  消费面=GLShimExecutor.bakedTexPending/preTex——b2-bolt 判例同款）;
+  //  key 按格独立（见函数头注——单 key 会原地改写先行 quad 引用的纹理）
+  if (dynamicDest) shineScratchBakeHook?.(sc, `shineCell:${x},${y}`);
   dest.drawImage(sc, dx, dy, dw, dh);
 }
 
@@ -1033,11 +1054,11 @@ export function drawTileShineGrid(
         if (additive) {
           stampShineCell(atlas, world, tx, ty, sheet, van.frame, van.fw ?? 1, van.fh ?? 1,
             type, st.frameX[i], st.frameY[i], [0, 0, 0],
-            ctx, dxa - PAD * s, dya - PAD * s, SCR * s, SCR * s, true);
+            ctx, dxa - PAD * s, dya - PAD * s, SCR * s, SCR * s, true, true);
         } else if (delta) {
           stampShineCell(atlas, world, tx, ty, sheet, van.frame, van.fw ?? 1, van.fh ?? 1,
             type, st.frameX[i], st.frameY[i], delta,
-            ctx, dxa - PAD * s, dya - PAD * s, SCR * s, SCR * s);
+            ctx, dxa - PAD * s, dya - PAD * s, SCR * s, SCR * s, false, true);
         }
       }
     }
