@@ -83,7 +83,7 @@ describe('★生命水晶 shim ghost 修复锁（TileShine scratch 逐格 preTex
         .uploadScratchNow(sc, key);
       ctx!.drawImage(sc, dx, dy, 40, 40);
     }
-    ex.flushAcc();
+    ex.flush();   // acc 态路由 flushAcc（公开口）
     // 每格一次独立 texRefresh（per-cell key）
     expect(refreshKeys, 'texRefresh 逐格独立 key').toEqual(cells.map(([, , k]) => k));
     // 四条 quad 发射,纹理条目互异（单 key 回归=全部同条目,在此爆红）
