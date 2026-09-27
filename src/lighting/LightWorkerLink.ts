@@ -31,9 +31,12 @@ export interface LightTarget {
 
 /** C9 诊断计数器（探针对账:posted(快照发出)/results(回达)/falls(看门狗回落)/
  *  lagMs(最近一次结果 send→apply 端到端延迟,含 worker 计算+主线程消息调度)。
- *  纯读面） */
-const lwStat = { posted: 0, results: 0, falls: 0, lagMs: 0 };
-export function lightWorkerStats(): { on: boolean; posted: number; results: number; falls: number; lagMs: number } {
+ *  ★R1b-1≡R2b-F7 增 skipped=世代校验丢弃的晚到旧结果数（传送大跳在途旧世代,
+ *  校验判据在引擎 resultCoversViewport——计数器收口在本模块诊断面）。纯读面） */
+const lwStat = { posted: 0, results: 0, falls: 0, lagMs: 0, skipped: 0 };
+/** ★R1b-1:引擎侧世代校验丢弃一个晚到结果时登记（探针/F5 对账面） */
+export function noteLightResultSkipped(): void { lwStat.skipped++; }
+export function lightWorkerStats(): { on: boolean; posted: number; results: number; falls: number; lagMs: number; skipped: number } {
   return { on: lightWorkerFlag, ...lwStat };
 }
 
@@ -60,6 +63,10 @@ export class LightWorkerLink {
    *  引擎在 live 分支置 true,warmup 分支置 false。 */
   liveAuth = false;
   onResult: ((m: LightResultMsg) => void) | null = null;
+  /** ★R1b-1≡R2b-F7 结果世代过滤器（引擎注入）：applyPending 兜底回填前过同款
+   *  校验（主路径校验在引擎 applyWorkerResult 内）——传送大跳后在途旧世代结果
+   *  经 pending 支抵达时同样拒回填,公共采样对保持本地发布的新区域。 */
+  pendingFilter: ((m: LightResultMsg) => boolean) | null = null;
   private lastLag = 0;
   /** 最近一次结果 send→apply 实测延迟（C9c live 滞回门的传感器,毫秒;0=尚无结果） */
   get lastLagMs(): number { return this.lastLag; }
@@ -164,11 +171,14 @@ export class LightWorkerLink {
     this.worker.postMessage({ ...msg, op: 'frame', seq: ++this.seq });
   }
 
-  /** 回填引擎公共面（引擎 compute 内调用——渲染与 lightAt 全消费面读成对一致值） */
+  /** 回填引擎公共面（引擎 compute 内调用——渲染与 lightAt 全消费面读成对一致值）。
+   *  ★R1b-1:pendingFilter 在场时先过世代校验——不过=丢弃（不回填,计 skipped 由
+   *  引擎校验面统一登记;此处静默拒） */
   applyPending(t: LightTarget): boolean {
     const m = this.pending;
     if (m === null) return false;
     this.pending = null;
+    if (this.pendingFilter && !this.pendingFilter(m)) { noteLightResultSkipped(); return false; }
     t.rx = m.rx; t.ry = m.ry; t.rw = m.rw; t.rh = m.rh;
     t.r = m.R; t.g = m.G; t.b = m.B;
     return true;

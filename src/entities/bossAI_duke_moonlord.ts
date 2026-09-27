@@ -900,10 +900,10 @@ export class DukeSharknadoBolt extends Entity {
         -img.width / 2, -fh / 2, img.width, fh);         // origin=中心(:34895)
     } else {
       // 兜底(贴图懒加载未就绪;projSprite 失败带 10s TTL 自愈):近似色点
+      // ★P0-B 零上传兜底：arc 路径 op 在 acc 态=逐帧栅格化+上传——solid
+      //   fillRect quad 同位同径替形（decode 直译零上传）
       ctx.fillStyle = '#8FD8FF';
-      ctx.beginPath();
-      ctx.arc(this.cx, this.cy, 6, 0, TAU);
-      ctx.fill();
+      ctx.fillRect(this.cx - 6, this.cy - 6, 12, 12);
     }
     ctx.restore();
   }

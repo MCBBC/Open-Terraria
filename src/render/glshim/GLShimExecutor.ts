@@ -27,7 +27,7 @@
 // 矩阵镜像逐算子 Math.fround 复刻 Skia f32 拼接（每元素两积一和,与
 // SkMatrix::setConcat 同构;和内单次舍入差 ≤1e-7 相对,census 口径）。
 import type { GLSpriteLayer, TexEntry } from '../GLSpriteLayer';
-import { texId } from '../texId';
+import { texEpoch, texId } from '../texId';
 
 /** 宿主接口（Renderer 注入;flush 所需的世界层现场） */
 export interface ShimHost {
@@ -67,6 +67,9 @@ interface QuadRec {
    *  全部错拿末次内容）。preTex=bake 字节仍新鲜时立即上传的驻留纹理。 */
   preTex: TexEntry | null;
   pair: PairReg | null;               // 尘预乘对合并纹理记录
+  /** ★R1b-6:bake 期字节快照（preTex 非 null 时由 uploadScratchNow 定格）——
+   *  GL 失败 replay2D 直画共享 scratch=末次烘焙字节的错画源,快照=各自 bake 内容 */
+  preSnap: HTMLCanvasElement | null;
   /** ★UV 空间分道（2026-09-24 角色透明案定谳修正）:region=裁剪小纹理(UV=0,0,sw,sh)
    *  /full=全画布纹理(UV=sx,sy,sw,sh=页内矩形)/pair=尘对合并面(UV=0,0,w,h)。
    *  曾把页内矩形直接喂裁剪纹理 → UV 出界 CLAMP=大面积透明/常量色块（用户实报案）。 */
@@ -83,6 +86,14 @@ interface PairReg {
   gl: Uint8Array;                     // 合并字节（rgb=预乘 add,a=erase e）
   tex: TexEntry | null;               // 惰性建（首 flush）
   add: HTMLCanvasElement;             // 吞抑标记（后随 add drawImage）
+}
+
+/** ★R1b-6 bake 快照账（uploadScratchNow 产物;pending/multi 共用值型） */
+interface BakeSnap {
+  img: object;
+  tex: TexEntry;
+  /** bake 期字节定格拷贝（重放面直画源;null=快照失败按旧链 p.img 兜底） */
+  snap: HTMLCanvasElement | null;
 }
 
 /** ★C5 雨批引用（2026-09-26 rain-gl 收官刀;WeatherRenderer 构建,Renderer
@@ -253,7 +264,7 @@ export class GLShimExecutor {
   /** 后随吞抑（尘对 add 面） */
   private suppressAdd: HTMLCanvasElement | null = null;
   /** 纹理缓存:texId → packed(sx,sy,sw,sh) → entry（静态稳定源） */
-  private texCache = new Map<number, Map<number, TexEntry>>();
+  private texCache = new Map<number, Map<number, { e: TexEntry; ep: number }>>();   // ★值带纪元(变体①终扫)
   /** 尘预乘对登记（Renderer 注册;erase/add 画布 → reg） */
   private pairs = new WeakMap<HTMLCanvasElement, PairReg>();
   /** 动态源登记（内容每绘都变的 scratch 面） */
@@ -345,6 +356,8 @@ export class GLShimExecutor {
     //  异常未 restore 的残条在本帧 restore 时弹出=上帧中段 CTM/α/gco 跨帧复活。
     this.stack.length = 0;
     this.suppressAdd = null;
+    this.bakedTexPending = null;   // ★R1b-7:acc 窗残 pending 同门（attach 孪生守卫,
+    //  旧码只清 multi 不清单槽——上帧 bake 未消费的 pending 跨帧错配本帧首笔同 img 绘制）
     this.active = true;
     return this.wrap();
   }
@@ -392,6 +405,10 @@ export class GLShimExecutor {
   /** 帧界统计复位（Renderer 窗口开时调） */
   frameReset(): void {
     this.stats = GLShimExecutor.blankStats();
+    this.bakedTexMulti.clear();   // ★N类:跨帧 preTex 账清零（残留=陈旧直取）
+    this.bakedTexPending = null;  // ★R1b-7:单槽 pending 同账清（旧码漏——bridge 窗
+    //  残留 pending 跨帧串到 acc 帧首笔 drawImage=上帧 bake 纹理错配本帧内容）
+    this._frameSeq++;             // ★R3b-4 shineCell 键触帧账时基
   }
 
   // ================= 纹理登记（Renderer 侧） =================
@@ -419,13 +436,53 @@ export class GLShimExecutor {
    *  全错）。本口在字节仍新鲜的 bake 点立即 texRefresh 到【调用方给的稳定键】
    *  （跨帧复用同纹理,零 createTexture 抖动）,挂入 pending 由下一个该 img 的
    *  acc drawImage 消费（rec.preTex=直取,resolveTex 不再重传）。
+   *  ★R1b-6:同时快照 bake 字节（一次性小 canvas 拷贝,bolt/shine/尘 tint 共用
+   *  scratch 族代价可忽略）——GL 中途失败走 replay2D 时 drawRec2D 直画 p.img=
+   *  共享 scratch 【当前】字节=末次烘焙内容（先行 quad 重放错画）;携带快照后
+   *  重放按各自 bake 内容逐位还原。preTex 纹理被层 LRU 逐出（texAlive=false →
+   *  resolveTex null → accFail 重放）同被本快照兜住。
+   *  ★R3b-4:shineCell 键触帧账+帽（CAP 超限清扫 600 帧未触键 dropTexture——
+   *  键空间=可见 shine 格并集,相机漫游无界增长会顶替 chunk 页等活纹理）。
    *  无 GL/非 bgl 会话 no-op（2D 兜底链本就逐 bolt 即画,无此病）。 */
   uploadScratchNow(img: HTMLCanvasElement, key: string): void {
     if (!this.active || !this.glw || this.glw.unavailable) return;
     const e = this.glw.texRefresh(key, img);
-    if (e) this.bakedTexPending = { img, tex: e };
+    if (!e) return;
+    const rec0 = { img, tex: e, snap: this.snapBakeBytes(img) };
+    this.bakedTexPending = rec0;
+    this.bakedTexMulti.set(img, rec0);
+    if (key.startsWith('shineCell:')) {
+      this.shineKeySeen.set(key, this._frameSeq);
+      if (this.shineKeySeen.size > GLShimExecutor.SHINE_KEY_CAP) {
+        for (const [k, fr] of this.shineKeySeen) {
+          if (this._frameSeq - fr > GLShimExecutor.SHINE_KEY_IDLE) {
+            this.shineKeySeen.delete(k);
+            this.glw.dropTexture(k);   // 重访由 texRefresh 重建,幂等
+          }
+        }
+      }
+    }
   }
-  private bakedTexPending: { img: object; tex: TexEntry } | null = null;
+  private bakedTexPending: BakeSnap | null = null;
+  /** ★N类（2026-09-27 变体①终扫）:bake 期上传的 1:N 消费账（img→最近 bake 纹理
+   *  +字节快照）。帧界清空（frameReset）——跨帧残留=陈旧 preTex 直取,故必须随帧
+   *  复位（★R1b-7:单槽 pending 与 multi 同账,attachAcc/attach 同门清）。 */
+  private bakedTexMulti = new Map<object, BakeSnap>();
+  /** bake 字节快照共享账（img→{tex,snap}） */
+  private shineKeySeen = new Map<string, number>();
+  private _frameSeq = 0;
+  private static SHINE_KEY_CAP = 1024;
+  private static SHINE_KEY_IDLE = 600;
+  /** ★R1b-6 bake 字节快照（一次性小 canvas;bake 期字节定格,重放期直画） */
+  private snapBakeBytes(img: HTMLCanvasElement): HTMLCanvasElement | null {
+    if (typeof document === 'undefined' || img.width <= 0 || img.height <= 0) return null;
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const g = c.getContext('2d');
+    if (!g) return null;
+    g.drawImage(img, 0, 0);
+    return c;
+  }
 
   // ================= ctx 包装 =================
 
@@ -859,14 +916,20 @@ export class GLShimExecutor {
     const tier = additive ? 1 : 0;
     // ★I类:bake 期上传面（bolt 烘焙）——markWorldDynamicScratch(key) 刚上传的纹理
     //  挂到本 rec（resolve 直取,flush 期不再重传共享 scratch 的末次字节）
-    const preTex = this.bakedTexPending && this.bakedTexPending.img === img
-      ? this.bakedTexPending.tex : null;
+    //  ★N类（2026-09-27 变体①终扫）:单槽 pending 只覆盖 1:1（bake→单 draw）;
+    //  1:N 消费（女皇剑一染十层/尘族逐尘烘焙）与跨 draw 窗口由 bakedTexMulti 承接
+    //  ——语义=「本帧该 img 最近一次 bake 上传」,帧界 frameReset 清（跨帧不残留）。
+    //  消费序 pending(本次 bake)优先 → multi(本帧最近 bake)——逐帧重烘焙的面
+    //  每次 bake 后紧跟消费,与 2D 逐 draw 快照语义逐位同。
+    const pre = this.bakedTexPending && this.bakedTexPending.img === img
+      ? this.bakedTexPending
+      : (this.bakedTexMulti.get(img as object) ?? null);
     this.bakedTexPending = null;
     // 纯色面?（fillRect 不走此;此处 img 恒 sprite）
     this.push(tier, null, false, img, sx, sy, sw, sh,
       geo.dx, geo.dy, geo.dw, geo.dh, geo.rot, this.ga,
       1, 1, 1, geo.flipX !== flipNegX, geo.flipY !== flipNegY, this.smooth,
-      this.dynamicSrc.has(img), null, preTex);
+      this.dynamicSrc.has(img), null, pre?.tex ?? null, pre?.snap ?? null);
   }
 
   /** fillRect→纯色 quad（白纹理 tint+α;平色 ±1LSB census 登记）。
@@ -1055,7 +1118,8 @@ export class GLShimExecutor {
     sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number, rot: number, alpha: number,
     fr: number, fg: number, fb: number, flipX: boolean, flipY: boolean, smooth: boolean,
-    dynamic: boolean, pair: PairReg | null, preTex: TexEntry | null = null): void {
+    dynamic: boolean, pair: PairReg | null, preTex: TexEntry | null = null,
+    preSnap: HTMLCanvasElement | null = null): void {
     const rec = this.pool ?? ({} as QuadRec);
     this.pool = rec.next;
     rec.tier = tier; rec.solid = solid; rec.img = img;
@@ -1065,6 +1129,7 @@ export class GLShimExecutor {
     rec.flipX = flipX; rec.flipY = flipY; rec.smooth = smooth;
     rec.dynamic = dynamic; rec.pair = pair; rec.next = null;
     rec.preTex = preTex;                // ★I类:池复用卫生（恒显式置位,防陈旧纹理驻留）
+    rec.preSnap = preSnap;              // ★R1b-6:池复用卫生同门
     rec.batch = null;                   // ★C5:池复用卫生（批引用单槽,非批 rec 恒空）
     rec.texKind = pair ? 'pair' : (dynamic ? 'full' : 'region');
     if (this.tail) this.tail.next = rec; else this.head = rec;
@@ -1190,20 +1255,28 @@ export class GLShimExecutor {
         continue;
       }
       // ★C5 雨批发射（单 drawArrays;纹理惰性解析幂等键——层重建/LRU 逐出自愈;
-      //  发射失败=accFail 降级换桥+全队列 2D 重放,宁回退不丢精灵）
+      //  发射失败=accFail 降级换桥+队列余量 2D 重放,宁回退不丢精灵）
       //  ★C5b：rgba 面（雪沙 stride 8）走 quadBatchRgba 分支
       if (p.batch) {
         const e = glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
-        if (!e) { this.accFail('tex'); return; }
+        if (!e) { this.dropEmittedPrefix(p); this.accFail('tex'); return; }
         const ok = p.batch.rgba
           ? glw.quadBatchRgba(e, p.batch.data, p.batch.quads)
           : glw.quadBatch(e, p.batch.data, p.batch.quads);
-        if (!ok) { this.accFail('gl'); return; }
+        if (!ok) { this.dropEmittedPrefix(p); this.accFail('gl'); return; }
         this.stats.emitBatchQuads += p.batch.quads;
         continue;
       }
       const e = this.resolveTex(glw, p);
-      if (!e) { if (curTier === 1) glw.blendAdditive(false); if (curTier === 2) glw.blendErase(false); if (curTier === 3) glw.blendMult(false); this.accFail('tex2'); return; }
+      // ★R1b-3:mid-loop 纹理解析失败=前缀已进 FBO——先弃前缀再降级重放（只补尾）
+      if (!e) {
+        if (curTier === 1) glw.blendAdditive(false);
+        if (curTier === 2) glw.blendErase(false);
+        if (curTier === 3) glw.blendMult(false);
+        this.dropEmittedPrefix(p);
+        this.accFail('tex2');
+        return;
+      }
       const usx = p.texKind === 'full' ? p.sx : 0;
       const usy = p.texKind === 'full' ? p.sy : 0;
       const o = QOPTS;
@@ -1220,13 +1293,31 @@ export class GLShimExecutor {
 
   /** acc 发射失败收口：GL 存活且 FBO 有量 → 降级换桥（present 已画内容到
    *  worldCanvas）+ 全队列 2D 重放;无法降级 → 弃队列（帧已不可救,B2 弃画
-   *  判例同款——不动已画内容）。 */
+   *  判例同款——不动已画内容）。
+   *  ★R1b-3:中途失败（发射点之后）调用前先 dropEmittedPrefix——队列只余未发射
+   *  尾段,degrade present 的 FBO 已含前缀,replay 只补尾=前缀不二次落画
+   *  （旧码 replay 全队列=SO 变浓/ADD 双亮）;入口失败（'nogl'/'tex' 预解析门/
+   *  'begin'）无前缀,全队列重放语义不变。 */
   private accFail(why: string): void {
     const hadFbo = this.glw?.isAccumOpen('world') ?? false;
     if (this.host.degradeAcc && (hadFbo || why === 'nogl')) {
       if (this.host.degradeAcc()) { this.replay2D(); return; }
     }
     this.popAll();
+  }
+
+  /** ★R1b-3:acc 中途失败——把已发射进 FBO 的前缀（head..upTo 之前）回池,
+   *  队列头推进到 upTo（=首个未发射 rec） */
+  private dropEmittedPrefix(upTo: QuadRec | null): void {
+    let p = this.head;
+    while (p && p !== upTo) {
+      const n = p.next;
+      p.next = this.pool;
+      this.pool = p;
+      p = n;
+    }
+    this.head = upTo;
+    if (!upTo) this.tail = null;
   }
 
   /** ★B2b 隔离栅格化（acc 态不可直译算子的像素恒等兜底——方案 B0 设计落地）：
@@ -1353,23 +1444,37 @@ export class GLShimExecutor {
     }
     if (p.dynamic) {
       const key = this.dynKeys.get(p.img as object) ?? `dyn:${++this.dynKeySeq}`;
+      // ★P1-B 登记债（2026-09-27 星云案批,评估后超边界不落刀）:子区上传防波堤——
+      //  栅格化族的 quad 只采 scratch 左上 (0,0,sw,sh),texRefresh 却整幅上传;面被
+      //  撑大后残余上传=整幅/ op。P1-A 滞回回落已把稳态压回「上传≈需求」,残余带
+      //  仅剩需求∈(面/2,面] 的流（罕见）。本刀不上理由:①DOM 源无 9 参子区重载
+      //  （texSubUpdate :810 判例）→ 须 CPU 抠图过渡或 getImageData 读回;②抠图/
+      //  读回引入第二次 premultiply↔unpremultiply 往返=±1LSB 漂移面（Skia CPU/GPU
+      //  漂移 255 判例;现上传链只一次往返）;③glStatUpload 口径/驻留尺寸账本联动
+      //  面（texFromImage/texRefresh/LRU bytes）需同批改。若落刀:新增
+      //  texRefreshRegion(key,img,w,h)（同尺寸 texSubImage2D 增量/换尺寸 drop 重建,
+      //  抠图用 GLSpriteLayer.regScratch 同款隔离面）,本支按 p.img===accScratch 且
+      //  p.sw*p.sh < 面积一半分档接入;收益=残余带 2-100× 上传减量。
       const e = glw.texRefresh(key, p.img as TexImageSource);
       if (e) this.stats.uploads++;
       return e;
     }
     const id = texId(p.img as object);
+    const ep = texEpoch(p.img as object);
     // 数值键零分配:packed = ((sx·8192+sy)·4096+sw)·4096+sh < 2⁵³
     const packed = ((p.sx * 8192 + p.sy) * 4096 + p.sw) * 4096 + p.sh;
     let sub = this.texCache.get(id);
     if (sub) {
       const hit = sub.get(packed);
-      if (hit && glw.texAlive(hit)) {
+      // ★纪元参与命中判定（2026-09-27 变体①终扫）:epoch≠缓存纪元=源被原地覆写
+      //  （TintAtlas 页矩形回收族）——旧条目作废重传;epoch 恒 0 的静态源零开销。
+      if (hit && hit.ep === ep && glw.texAlive(hit.e)) {
         // ★R3-F1 驻留上界:满容触达刷新（LRU）——驱逐只删 JS 侧 Map 条目,
         //  GL 纹理仍驻留（texFromRegion 键幂等）由层 192MB LRU 兜底
         if (sub.size >= TEX_CACHE_SUB_CAP) { sub.delete(packed); sub.set(packed, hit); }
-        return hit;
+        return hit.e;
       }
-      if (hit) sub.delete(packed);   // 死条目清位（占容不回收=上界击穿）
+      if (hit) sub.delete(packed);   // 死条目/旧纪元清位（占容不回收=上界击穿）
     } else {
       sub = new Map();
       if (this.texCache.size >= TEX_CACHE_OUTER_CAP) {
@@ -1378,7 +1483,8 @@ export class GLShimExecutor {
       }
       this.texCache.set(id, sub);
     }
-    const key = `er:${id}:${p.sx},${p.sy},${p.sw},${p.sh}`;
+    // ★纪元键:键携带 epoch——bump 后换键,层侧旧键纹理由 192MB LRU 自然回收
+    const key = `er:${id}:${ep}:${p.sx},${p.sy},${p.sw},${p.sh}`;
     const e = glw.texFromRegion(key, p.img as TexImageSource, p.sx, p.sy, p.sw, p.sh);
     if (e) {
       while (sub.size >= TEX_CACHE_SUB_CAP) {
@@ -1386,7 +1492,7 @@ export class GLShimExecutor {
         if (oldest.done) break;
         sub.delete(oldest.value);
       }
-      sub.set(packed, e);
+      sub.set(packed, { e, ep });
       this.stats.uploads++;
     }
     return e;
@@ -1452,13 +1558,16 @@ export class GLShimExecutor {
       }
     } else if (p.img) {
       ctx.imageSmoothingEnabled = p.smooth;
+      // ★R1b-6:preTex rec 重放吃 bake 期字节快照（p.img=共享 scratch,直画=
+      //  末次烘焙内容错画;快照缺失（极端:快照失败）才按 p.img 兜底）
+      const src: CanvasImageSource = p.preSnap ?? p.img;
       if (p.rot || p.flipX || p.flipY) {
         ctx.translate(p.dx + p.dw / 2, p.dy + p.dh / 2);
         if (p.rot) ctx.rotate(p.rot);
         if (p.flipX || p.flipY) ctx.scale(p.flipX ? -1 : 1, p.flipY ? -1 : 1);
-        ctx.drawImage(p.img, p.sx, p.sy, p.sw, p.sh, -p.dw / 2, -p.dh / 2, p.dw, p.dh);
+        ctx.drawImage(src, p.sx, p.sy, p.sw, p.sh, -p.dw / 2, -p.dh / 2, p.dw, p.dh);
       } else {
-        ctx.drawImage(p.img, p.sx, p.sy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh);
+        ctx.drawImage(src, p.sx, p.sy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh);
       }
     }
     ctx.restore();
@@ -1489,14 +1598,33 @@ const WHITE_CACHE = new WeakMap<GLSpriteLayer, TexEntry>();
  *  texImage2D）,SHM/CPU 后备不占 IOSurface,GLSpriteLayer.texSubUpdate 判例同注;
  *  本面无 GL readPixels 读回需求（评估过,非盲改）。 */
 let _accScratch: HTMLCanvasElement | null = null;
+const ACC_SCRATCH_BASE = 64;
 function accScratch(w: number, h: number): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   if (!_accScratch) {
     _accScratch = document.createElement('canvas');
-    _accScratch.width = 64; _accScratch.height = 64;
+    _accScratch.width = ACC_SCRATCH_BASE; _accScratch.height = ACC_SCRATCH_BASE;
   }
-  // 只增不减 resize（缩小不缩——churn 面归零;尺寸变化自动清屏）
-  if (_accScratch.width < w) _accScratch.width = w;
-  if (_accScratch.height < h) _accScratch.height = h;
+  const cw = _accScratch.width, ch = _accScratch.height;
+  if (w > cw || h > ch) {
+    // 涨:直接扩到需求(尺寸变化自动清屏;宽高独立扩=最小必要面)
+    if (w > cw) _accScratch.width = w;
+    if (h > ch) _accScratch.height = h;
+    return _accScratch;
+  }
+  // ★P1-A 滞回回落（2026-09-27,R3b-2 boltScratch proj1457.ts:1918 判例移植）:
+  //  旧「只增不减」让单次离群大 op 把共享面永久撑大（实测 1650²）——此后【所有】
+  //  栅格化按整幅上传（texRefresh 全画布 texImage2D,10.9MB/op 级）。现需求
+  //  ≤当前一半（滞回防抖,双维联合判定）时缩回 max(基线,需求):离群帧后首个
+  //  小 op 即回归稳态=上传≈需求。回落时机边界已核:四消费口（rasterizePathOp/
+  //  rasterizeDrawImage/rasterizeFillRect/rasterizeOp）全部即发即弃
+  //  （markDynamic→push→flush 同步消费,无跨 op 持面）;缩后 canvas=max(基线,需求)
+  //  ≥需求,UV(0,0,需求) 落点不变;尺寸回落走 texRefresh 换尺寸重建通道
+  //  （dropTexture+texFromImage,GLSpriteLayer 851-853）天然衔接;resize 自动清屏
+  //  与消费方首行 clearRect(0,0,需求) 语义不变。
+  if (w * 2 <= cw && h * 2 <= ch) {
+    const tw = Math.max(ACC_SCRATCH_BASE, w), th = Math.max(ACC_SCRATCH_BASE, h);
+    if (tw < cw || th < ch) { _accScratch.width = tw; _accScratch.height = th; }
+  }
   return _accScratch;
 }

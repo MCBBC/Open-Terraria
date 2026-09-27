@@ -260,13 +260,24 @@ export function starvedLock(): boolean {
   }
   return active;
 }
-/** ★P0-A 半开试探成功登记（Renderer.acquireSwPipe init 成功时调）:连续 ≥2 拍
- *  成功即闭合(清 90s 窗=解除饥饿锁,立即结算解除沿);非饥饿期调用只清 streak。 */
+/** ★P0-A 半开试探成功登记（Renderer.acquireSwPipe init 成功【与健康早退支】调用
+ *  ——★R1b-4（2026-09-27 红蓝批 β）：旧码只记新建支,首次试探成功建链后后续
+ *  acquire 走健康早退不记成功 → streak 恒 1 → 锁等 90s 自然衰减,期间
+ *  GLWorldCompose.acquire 恒 null=acc 帧落 CPU 读回链（每帧全幅 readPixels）。
+ *  健康支幂等补记后锁 2 拍内闭合。
+ *  ★同拍去重：健康早退支每帧多消费方各调一次（cloud/world/compose 同帧串联）——
+ *  STARVE_PROBE_MS 时间窗内只计一拍（「连续 ≥2 拍」拍语义保持,单拍多笔确认
+ *  不等效两拍）;闭合/非饥饿期重置时间锚=新饥饿集会的首拍必计数。 */
+let lastProbeOkAt = -Infinity;
 export function noteStarveProbeOk(): void {
-  if (lossTimes.length < 3) { probeOkStreak = 0; return; }
+  if (lossTimes.length < 3) { probeOkStreak = 0; lastProbeOkAt = -Infinity; return; }
+  const now = performance.now();
+  if (now - lastProbeOkAt < STARVE_PROBE_MS) return;   // 同拍多消费方确认只计一拍
+  lastProbeOkAt = now;
   if (++probeOkStreak >= 2) {
     lossTimes.length = 0;
     probeOkStreak = 0;
+    lastProbeOkAt = -Infinity;
     settleStarve(false);
   }
 }

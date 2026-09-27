@@ -12,7 +12,7 @@ import { AREA_PADDING, globalBrightness, NON_VISIBLE_PADDING } from './lightTabl
 import { FlickerClock } from './SkyColor';
 import { LightMap } from './LightMap';
 import { PerFrameLight, ScannerWorld, TileLightScanner } from './TileLightScanner';
-import { LightWorkerLink, lightWorkerFlag } from './LightWorkerLink';
+import { LightWorkerLink, lightWorkerFlag, noteLightResultSkipped } from './LightWorkerLink';
 import { buildEngineSnapshot, type DecayArgs, type LightResultMsg, type LightSnapshotMsg } from './LightWorkerProtocol';
 
 /** 引擎依赖的最小世界结构(World 结构兼容;单测可注入 fake) */
@@ -164,12 +164,33 @@ export class LightingEngine {
       //  (公共面三原子写点之一);快照区域由 ensureRegion 收敛于快照面,公共面对
       //  不再被 ensureRegion 拆开（移动抖动定谳修复,见公共面头注）。
       this._lw.onResult = (m) => { this.applyWorkerResult(m); };
+      // ★R1b-1≡R2b-F7:applyPending 兜底支同款世代校验（过滤器注入,引擎持有
+      //  快照面是唯一校验权威——link 不知 snap 区域）
+      this._lw.pendingFilter = (m) => this.resultCoversViewport(m);
     }
   }
 
+  /** ★R1b-1≡R2b-F7 结果世代校验（2026-09-27）：worker 结果携带其快照区域——仅当
+   *  该区域完整覆盖【当前快照视口】（内缩带,与 snapCoveredByPublic 同款数学）才
+   *  接受回填。定谳机制链：传送大跳后本地全周期已发布新区域 B,在途旧快照 A 结果
+   *  1 worker 往返后到达（忙机 33-66ms+）——无校验时 applyWorkerResult 把公共对
+   *  回拨到 A,而 ensureRegion 区域未变 dirty=false、live 态早退门
+   *  snapCoveredByPublic() 判 B 不被 A 覆盖仅落 step() 慢速纠正（≤4 tick）,期间
+   *  lightAt 全域越界 [0,0,0]=世界黑窗（红）。校验后旧世代丢弃+计 cookieSkipped
+   *  指纹,公共对保持 B（绿）。正常移动 ≤2 格/tick 在 AREA_PADDING=28 余量下恒
+   *  覆盖=零误杀（C9d 快照面头注的移速算术）。 */
+  private resultCoversViewport(m: LightResultMsg): boolean {
+    const vx0 = this.snapRx + AREA_PADDING + 2, vy0 = this.snapRy + AREA_PADDING + 2;
+    const vx1 = this.snapRx + this.snapRw - AREA_PADDING - 2;
+    const vy1 = this.snapRy + this.snapRh - AREA_PADDING - 2;
+    return m.rx <= vx0 && m.ry <= vy0 && vx1 < m.rx + m.rw && vy1 < m.ry + m.rh;
+  }
+
   /** ★C9d 公共采样对三原子写点①：worker 结果到达（区域+数组同锚整体替换——渲染与
-   *  lightAt/lightAtTo 全消费面只会读到成对一致值;单值 1 tick 陈旧但恒稳定） */
+   *  lightAt/lightAtTo 全消费面只会读到成对一致值;单值 1 tick 陈旧但恒稳定）。
+   *  ★R1b-1:世代校验不过=丢弃+skipped 指纹（不触碰公共对——三原子写点语义保持） */
   private applyWorkerResult(m: LightResultMsg): void {
+    if (!this.resultCoversViewport(m)) { noteLightResultSkipped(); return; }
     this.rx = m.rx; this.ry = m.ry; this.rw = m.rw; this.rh = m.rh;
     this.r = m.R; this.g = m.G; this.b = m.B;
   }

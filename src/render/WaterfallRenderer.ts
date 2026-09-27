@@ -14,7 +14,8 @@
 //  - 雨幕（WaterfallManager :204-260 触发 + :360-517 绘制）：雨云 196/雪云 460/灰烬云 717
 //    下方格 !Solid && liquid==0 && slope==0 → 雨丝柱：雨 25 格/雪 50 格，双层贴图
 //    （前景 Waterfall_11 alpha 0.6 + 背景 12 alpha 0.3；雪 22 单层；灰烬雨 26+27），
-//    18px 窄条 8 帧动画（前景每 tick 正播、偶列 +3 相位；背景每 3 tick 倒播 +2 偏移）、
+//    18px 窄条 8 帧动画（前景每 tick 正播、背景每 3 tick 倒播;偶列相位 +3/+2,奇列原始帧
+//    ——★R2b-F6 2026-09-27 勘误:+3/+2 只施偶列 WaterfallManager.cs:416 vs :437）、
 //    每格 x ±1 交错、末 8 格线性衰减、撞实心停、液面裁剪
 //  - 坡面分支（1456 WaterfallManager.cs:576-587 flag2）：下方顶坡（slope 1/2）格 →
 //    贴坡斜向下行 + 溅落 2px 斜切片（:739-748，翻转侧 FlipHorizontally 以镜像实现）
@@ -36,7 +37,11 @@ import { gameTickCount } from '../core/GameTime';
 const wfRegularFrame = (): number => Math.floor(gameTickCount() / 3) % 16;
 const wfSlowFrame = (): number => Math.floor(gameTickCount() / 7) % 16;
 const wfRainFgFrame = (): number => gameTickCount() % 8;
-const wfRainBgFrame = (): number => (8 + 2 - (Math.floor(gameTickCount() / 3) % 8)) % 8;
+// ★R2b-F6（2026-09-27）:钟=raw 倒播（rainFrameBackground-- 每 3 tick,<0→7,
+//  WaterfallManager.cs:277-285）,【不含】+2 相位——原版 +2 只施偶列（DrawWaterfall
+//  :416 vs :437 else 支用原始帧）,旧实现把 +2 折进钟函数全列消费=奇数列相位快 2 帧。
+//  施用点在 draw 内按 wf.x%2 分列（与 fg +3 同式 :205）。
+const wfRainBgFrame = (): number => (8 - (Math.floor(gameTickCount() / 3) % 8)) % 8;
 
 interface Waterfall { x: number; y: number; type: number; } // type: 0水 1岩浆 2蜂蜜 3雨幕 4雪幕 5灰烬雨幕（本仓库编码）
 
@@ -200,10 +205,12 @@ export class WaterfallRenderer {
         const bgTex = wf.type === 4 ? null : atlas.ensureVImage(`vanilla/Waterfall_${wf.type === 3 ? 12 : 27}.png`);
         if (!fgTex) continue;
         const len = wf.type === 4 ? 50 : 25;   // waterfallDist/4（雪 /2 :369-372）
-        // 帧：前景每 tick 正播（偶列 +3 相位）、背景每 3 tick 倒播（+2 偏移）（:390-427）
+        // 帧：前景每 tick 正播、背景每 3 tick 倒播;偶列相位偏移 fg+3 / bg+2,
+        // 奇列原始帧（WaterfallManager.cs:413-447 分列——★R2b-F6:+2/+3 只施偶列,
+        //  旧实现 bg+2 折进钟函数=奇列相位快 2 帧）
         let frameFg = wfRainFgFrame();
-        if (wf.x % 2 === 0) frameFg = (frameFg + 3) % 8;
-        const frameBg = wfRainBgFrame();
+        let frameBg = wfRainBgFrame();
+        if (wf.x % 2 === 0) { frameFg = (frameFg + 3) % 8; frameBg = (frameBg + 2) % 8; }
         // 起始位置（:436）：偶列 +9/奇列 +8（格中心 ±1 错位）；每格 x ±1 交错（:513-516）
         let px = wf.x * 16 + (wf.x % 2 === 0 ? 9 : 8);
         let py = wf.y * 16 + 8;

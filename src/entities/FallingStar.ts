@@ -405,19 +405,9 @@ export class FallingStar extends Entity {
       ctx.restore();
       return;
     }
-    // 星形：四角星简形（贴图缺失时程序兜底）
-    ctx.fillStyle = this.natural ? '#FFF7D8' : '#D8E8FF';
-    ctx.beginPath();
-    ctx.moveTo(0, -9);
-    ctx.lineTo(2.5, -2.5);
-    ctx.lineTo(9, 0);
-    ctx.lineTo(2.5, 2.5);
-    ctx.lineTo(0, 9);
-    ctx.lineTo(-2.5, 2.5);
-    ctx.lineTo(-9, 0);
-    ctx.lineTo(-2.5, -2.5);
-    ctx.closePath();
-    ctx.fill();
+    // ★P0-B（2026-09-27）贴图未就绪帧不画（旧「四角星简形」多边形兜底已摘）：
+    //  多边形 fill 路径 op 在 acc 态=每星每帧 rasterizePathOp 栅格化+整幅上传
+    //  （Arrow.draw 同案同判）;懒加载 1-2 帧到位自愈,原版加载期亦短暂隐形。
     ctx.restore();
   }
 }

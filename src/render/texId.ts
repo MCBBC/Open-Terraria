@@ -11,6 +11,22 @@ export function texId(img: object): number {
   return v;
 }
 
+// 内容纪元（2026-09-27 变体①终扫）:画布身份缓存（shim er:texId:rect 区域纹理键、
+// GLSpriteLayer r: 键）在画布内容被【原地改写】后仍按旧键命中=首帧内容永久冻结
+// （生命水晶 tileShine 案同族根病）。可变画布的产出方在覆写共享面后调用
+// bumpTexEpoch(画布)——shim 侧 er: 键携带纪元 → 覆写后的下一绘走新键重传该矩形
+// （旧键纹理由层 LRU 自然回收）。未 bump 的源恒纪元 0=静态源零开销、键零变化。
+// ★与 markDynamic/uploadScratchNow 的分工：逐帧整体重画的面走 markDynamic
+// （flush 期 texRefresh）;【偶发原地覆写】的长命画布（TintAtlas 页矩形回收）走
+// 纪元键——后者逐帧全量重传不可承受（512² 页），只能按覆写事件换键。
+const epochs = new WeakMap<object, number>();
+export function texEpoch(img: object): number {
+  return epochs.get(img) ?? 0;
+}
+export function bumpTexEpoch(img: object): void {
+  epochs.set(img, (epochs.get(img) ?? 0) + 1);
+}
+
 /** 贴图可绘就绪守卫（2026-08-24 光斑"方片"竞态终案，用户多份截图实报）：
  *  HTMLImageElement 在 HTTP 元数据到达后 `.width` 即 >0，但主体未传完/未解码时
  *  drawImage 画不出内容——旧守卫只查 width>0 挡不住这个半加载窗。该窗内烘焙

@@ -68,9 +68,10 @@ describe('A2 GLWorldCompose 结构锁', () => {
 
   it('★门控纹理首传分配锁（2026-09-23 用户实报全屏扭曲案）:texWater 走 key 门 texImage2D/texSubImage2D', () => {
     // 无存储纹理采样恒 (0,0,0,1) → 门控 α≡1 → 全屏噪声位移（热扭曲状观感）
-    expect(composeSrc).toContain("const kW = `${water.width}x${water.height}`;");
+    // ★liqgl 双型入参（canvas | WorldTexSrc）后取宽高带 cast——键门语义不变
+    expect(composeSrc).toContain("const kW = `${(water as HTMLCanvasElement).width}x${(water as HTMLCanvasElement).height}`;");
     expect(composeSrc).toContain('this._texKeyWater !== kW');
-    expect(composeSrc).toContain('gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water)');
+    expect(composeSrc).toContain('gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, water as HTMLCanvasElement)');
   });
 
   it('★IOSurface 减面锁（2026-09-23）:旧链实例获取后移进旧链分支,prewarm 分流', () => {

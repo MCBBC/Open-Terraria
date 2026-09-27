@@ -113,12 +113,36 @@ console.log('after 2 devotee kills: 439 present =', list.some((e) => e.vid === 4
   '| tablet alive =', list.some((e) => e.vid === 437 && !e.dead));
 const s1a = !list.some((e) => e.vid === 439);
 
+// S4 追加（BJ347-②）：石碑（跪拜魔法阵本体）免疫 pierce=1 单发弹向伤害
+const tabletHit = await page.evaluate(() => {
+  const g = window.__swGame;
+  const tab = g.entities.enemies.find((e) => !e.dead && e.vanillaId === 437);
+  if (!tab) return { found: false };
+  const hp0 = tab.hp;
+  const r1 = tab.hurt(1e9, 0, 0, g, 0, false, 1, true);   // 旧 iframes=2 被此向绕过
+  const r2 = tab.hurt(1e9, 0, 0, g, 0, false, 0, true);
+  return { found: true, dontTakeDamage: !!tab.dontTakeDamage, hp0, hp1: tab.hp, dead: tab.dead };
+});
+console.log('S4 tablet immunity:', JSON.stringify(tabletHit));
+const s4 = tabletHit.found && tabletHit.dontTakeDamage && tabletHit.hp1 === tabletHit.hp0 && !tabletHit.dead;
+
 const a1 = await kill(379); await wait(400);
 const a2 = await kill(379); await wait(400);
 console.log(`killed archers=${a1}+${a2}`);
-await wait(1200);
-list = await enemies();
-const cultist1 = list.find((e) => e.vid === 439);
+let cultist1 = null;
+for (let i = 0; i < 12 && !cultist1; i++) {
+  await wait(500);
+  list = await enemies();
+  cultist1 = list.find((e) => e.vid === 439) ?? null;
+  if (i === 5) {
+    const st = await page.evaluate(() => {
+      const g = window.__swGame;
+      return g.entities.enemies.filter((e) => e && [437, 438, 379, 439].includes(e.vanillaId ?? -1))
+        .map((e) => ({ vid: e.vanillaId, dead: e.dead, id: e.id, ai0: e.ai0 }));
+    });
+    console.log('S1b mid-state:', JSON.stringify(st));
+  }
+}
 console.log('after archer kills: 439 present =', !!cultist1,
   cultist1 ? `@(${Math.round(cultist1.cx / 16)},${Math.round(cultist1.cy / 16)})` : '');
 const s1b = !!cultist1;
@@ -221,7 +245,8 @@ console.log(`S1a 只杀两信徒不出教主: ${s1a ? 'PASS' : 'FAIL'}`);
 console.log(`S1b 补杀弓手教主落地:   ${s1b ? 'PASS' : 'FAIL'}`);
 console.log(`S2  真杀掉 3549+记账:    ${s2 ? 'PASS' : 'FAIL'}`);
 console.log(`S3  玩家死自毁零掉落:    ${s3 ? 'PASS' : 'FAIL'}`);
+console.log(`S4  石碑免疫全通道:      ${s4 ? 'PASS' : 'FAIL'}`);
 console.log('pageerrors:', errors.length, errors.slice(0, 3));
 console.log('NpcDrops warns:', cons.filter((c) => c.includes('NpcDrops')).slice(0, 4));
 await browser.close();
-process.exit(s1a && s1b && s2 && s3 ? 0 : 4);
+process.exit(s1a && s1b && s2 && s3 && s4 ? 0 : 4);

@@ -483,16 +483,22 @@ export class GrappleProj extends Entity {
       (x, y) => plotLine(x + minOX, y + minOY, x + maxOX, y + maxOY, plot, false), true);
   }
 
-  /** 兜底：链贴图未就绪/缺失时旧"线段"渲染（等价边界；下帧自愈） */
+  /** 兜底：链贴图未就绪/缺失时旧"线段"渲染（等价边界；下帧自愈）
+   *  ★P0-B 零上传兜底（2026-09-27）：stroke 路径 op 在 acc 态=逐帧
+   *  rasterizePathOp 栅格化+整幅上传——链为锚爪可见性承路面不摘,改画旋转
+   *  solid fillRect quad（lineWidth 2 butt 端帽 = 2×len 同几何矩形,decode
+   *  旋转直译零上传）。非有限长（测试桩无 x/w）跳过=旧 NaN 线段同为不可见。 */
   private drawLegacyChain(ctx: CanvasRenderingContext2D, p: Player): void {
     const chain = HOOK_CHAIN_COLOR[this.projType] ?? '#9a92b8';
+    const x0 = p.x + p.w / 2, y0 = p.y + 12;
+    const dx = this.cx - x0, dy = this.cy - y0;
+    const len = Math.hypot(dx, dy);
+    if (!(len >= 0.5)) return;
     ctx.save();
-    ctx.strokeStyle = chain;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(p.x + p.w / 2, p.y + 12);
-    ctx.lineTo(this.cx, this.cy);
-    ctx.stroke();
+    ctx.translate(x0, y0);
+    ctx.rotate(Math.atan2(dy, dx));
+    ctx.fillStyle = chain;
+    ctx.fillRect(0, -1, len, 2);
     ctx.restore();
   }
 

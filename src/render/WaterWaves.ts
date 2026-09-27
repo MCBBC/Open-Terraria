@@ -267,6 +267,9 @@ export function wwWorkerStats(): { on: boolean; camQ: number; washQ: number; rip
 // 元数据（gW/gH/progress/intensity/waveOff/cam/scroll）三形态恒带——读侧
 //   sampleDisplace/_readR/waveReadOffset 零改动纪律。
 export const WW_FULL_ANCHOR_EVERY = 120;
+/** ★R3b-3 sticky f32 逃生探针帧距（escape 激活期每 N 帧试恢复 delta;
+ *  N 帧内 f32 全量=带宽代价上界 8B/格×N,恢复后回 delta 模式） */
+export const WW_ESCAPE_PROBE_EVERY = 120;
 export const WW_JUMP_TEXELS = 8;
 /** 字节 k → 场值 k/256 精确 LUT（k/256 在 float32 精确可表:k≤256=2^8,尾数≤9 位）*/
 const WW_B2F = (() => { const t = new Float32Array(257); for (let k = 0; k <= 256; k++) t[k] = k / 256; return t; })();
@@ -614,8 +617,15 @@ export class WaterWaveSystem {
   private _dShG = new Float32Array(0);
   /** 距上次全量锚帧的场消息数（≥WW_FULL_ANCHOR_EVERY → 强制全量） */
   private _dFrame = 0;
-  /** 量化不变式破坏 sticky 逃生：恒走旧 f32 全量（=R3-F2 前行为回滚口） */
+  /** 量化不变式破坏 sticky 逃生：恒走旧 f32 全量（=R3-F2 前行为回滚口）。
+   *  ★R3b-3（2026-09-27 红蓝批 β）：不再永粘——每 WW_ESCAPE_PROBE_EVERY 帧
+   *  试一次全量字节快照（_dFullBytes 自带逐格不变式复核）,成功=场已回到
+   *  k/256 可量化域,清 sticky 恢复 delta 模式（协议侧 'full' 解码无影子依赖,
+   *  主线程 _wwApplyField 三形态分派天然兼容;失败照旧 f32,下轮再试）。
+   *  换档/resync 的 forceFull 帧立即试（forceFull 短路探针节流）。 */
   private _dF32Escape = false;
+  /** sticky 探针帧距计数（escape 激活期推进;WW_ESCAPE_PROBE_EVERY 到点试恢复） */
+  private _dEscProbe = 0;
   /** 跨度/payload 复用 scratch（成功编码后 slice 出精确尺寸回传;容量按需长） */
   private _dMetaBuf = new Uint32Array(1 + 3 * 8192);
   private _dDataBuf = new Uint8Array(1 << 16);
@@ -696,10 +706,27 @@ export class WaterWaveSystem {
 
   /** ★C8-D 场消息出口（WaveWorker 每帧调用,替代 exportFieldSnapshot 常规面）。
    *  forceFull=true（换档/大跳/resync/首帧）或周期锚或影子失配（resize）→ 全量
-   *  字节快照;否则脏区增量（静水帧 ~4B vs 旧全量 8B/格）。 */
+   *  字节快照;否则脏区增量（静水帧 ~4B vs 旧全量 8B/格）。
+   *  ★R3b-3:sticky escape 带探针解除路径（见 _dF32Escape 注）——旧码破坏一次
+   *  恒 f32 全量 8B/格（124MB/s 级）直到实例弃用。 */
   exportFieldDelta(forceFull: boolean): WWFieldMsg {
     const head = this._dHead();
-    if (this._dF32Escape) return { fmt: 'f32', R: this._R.slice(), G: this._G.slice(), ...head };
+    if (this._dF32Escape) {
+      const probe = forceFull || ++this._dEscProbe >= WW_ESCAPE_PROBE_EVERY;
+      if (probe) {
+        this._dEscProbe = 0;
+        const fb = this._dFullBytes();
+        if (fb) {
+          // 恢复 delta:清 sticky+重置锚节拍+影子对齐（与正常全量锚同语义）
+          this._dF32Escape = false;
+          this._dFrame = 0;
+          this._dShR = this._R.slice(); this._dShG = this._G.slice();
+          return { ...fb, ...head };
+        }
+      }
+      return { fmt: 'f32', R: this._R.slice(), G: this._G.slice(), ...head };
+    }
+    this._dEscProbe = 0;
     this._dFrame++;
     const n = this._R.length;
     const needFull = forceFull || this._dShR.length !== n || this._dFrame >= WW_FULL_ANCHOR_EVERY;

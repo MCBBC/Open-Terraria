@@ -542,6 +542,12 @@ export class SettingsPanel {
         ),
         // 帧模式三态(原版 FrameSkipMode,Main.cs:16950-16975):温和=超前帧节流
         // (高刷屏绘制压回逻辑帧率;慢机永不触发——原版"落后跳帧"是死代码 num3=0)
+        // 文案=原版 LegacyMenu.247/248/249 拆「标签|档名」(IngameOptions.cs:964
+        // Lang.menu[247+FrameSkipMode],枚举 Off/On/Subtle=Enums/FrameSkipMode.cs;
+        // zh 跳帧/关/开/隐蔽,en Frame Skip/Off/On/Subtle;2026-09-28 用户令对齐原版)。
+        // 语义偏差注记(本行无 tooltip 位,存此):本仓解耦架构 Off/On=自由渲染照画
+        // (逻辑 tick 恒 60Hz;原版 Off/On 的 XNA 固定时间步差异无 Web 对应物,
+        // Game.ts:8214-8223 定谳),Subtle 同原版=超前帧 SuppressDraw。
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.FrameSkip'),
           () => d.frameSkipMode,

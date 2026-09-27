@@ -50,6 +50,10 @@ export interface WorldTexSrc {
   w: number;
   h: number;
   flipY: number;
+  /** ★R1b-2（2026-09-27 红蓝批 β）：产生面上下文指纹（GLScreenFilters.pipeGlId 判例
+   *  同族）——compose 侧校验句柄与本管线同上下文,跨上下文=结构性禁止（bindTexture
+   *  INVALID_OPERATION=世界消失+全屏最大扭曲）。生产产生面恒填;缺省=测试桩免检。 */
+  gl?: WebGL2RenderingContext;
 }
 
 /** ★A3 光照小图 GPU 重建 pass0（2026-09-23）。等价性论证（对 CPU 循环
@@ -278,6 +282,18 @@ export class GLWorldCompose {
     const pipeline = this.pipeline;
     const gl = pipeline.glx;
     if (!gl || !this.pLit?.prog || !this.pDistort?.prog || this.unavailable) { this.lastFail = 'unavailable'; return false; }
+    // ★R1b-2 跨上下文句柄结构性禁止：world/water 句柄携带产生面 gl——与本管线
+    //  不同上下文即拒（本帧返 false=调用方落 CPU/读回链+指纹,禁跨上下文
+    //  bindTexture）。可达面=运行时翻旗残留（ensureWorldCompose 一致性重建为主
+    //  防线,此处为结构兜底——任何未来句柄产生面的错管线路由都在此拦死）。
+    {
+      const wSrc = world as WorldTexSrc | null | undefined;
+      const gSrc = water as WorldTexSrc | null | undefined;
+      if ((wSrc?.tex && wSrc.gl && wSrc.gl !== gl) || (gSrc?.tex && gSrc.gl && gSrc.gl !== gl)) {
+        this.lastFail = 'xctx-handle';
+        return false;
+      }
+    }
     const w = (world as WorldTexSrc).tex ? (world as WorldTexSrc).w : (world as HTMLCanvasElement).width;
     const h = (world as WorldTexSrc).tex ? (world as WorldTexSrc).h : (world as HTMLCanvasElement).height;
     if (w === 0 || h === 0) { this.lastFail = 'dim'; return false; }

@@ -131,10 +131,17 @@ let _footFrame = -1;
 /** 足迹世界→设备折算矩阵（bg pass 恢复世界变换后捕获;轴对齐=世界变换构造面保证） */
 const _footWld = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 
-/** 微光 tile 顶点色四角（SetShimmerVertexColors :745-759 双线性张量在裁剪角的值）。
- *  c00..c11=tile 四角整数坐标基色（4×shimmerWave）;裁剪角 (u,v) 处 = 张量双线性——
- *  双线性场对子矩形封闭 ⇒ GPU 对裁剪 quad 的顶点插值=原版整格插值场的受限重_param,
- *  逐位等价（正交投影下仿射=GPU 透视校正退化）。out 写调用方槽（零分配）。 */
+/** 微光 tile 顶点色四角。★R2b-F5（2026-09-27 注释翻案）:原版 SetShimmerVertexColors
+ *  （LiquidRenderer.cs:745-759）的机制 = 【节点值置位于 quad 角】——GetShimmerBaseColor
+ *  在四个整节点 (x,y)/(x+1,y)/(x,y+1)/(x+1,y+1) 取值后直接放到（可能被液面裁剪的）
+ *  quad 四角上,并非对场在裁剪角求值;故裁剪格上原版顶点=完整 tile 的 y/y+1 行节点值。
+ *  本函数 = 双线性张量在裁剪角 (u,v) 求值——两式【仅未裁剪时相等】（双线性插值在
+ *  节点处还原节点值;裁剪时本式=场@vT、原版=节点值,差=(1−vT) 加权朝 y+1 行）。
+ *  实测备案（2026-09-27,3600 相位×49 位点×15 裁剪档）:表层裁剪顶角偏差 max 3.92/255
+ *  （≈1.5%）、mean 1.23/255——在微光 census 4.59%（LA maxd 29≤72）备案域内,不立项。
+ *  另注:批两三角对角线 (p0,p1,p2)+(p0,p2,p3)=TL-BR ≠ XNA SpriteBatcher 对角线
+ *  （顶点序 TL,TR,BL,BR、(0,1,2)(1,3,2)=TR-BL）——双线性场的二次项在整格中心
+ *  最大差 max 0.49/255=亚 LSB（8bit 量化步以下）。out 写调用方槽（零分配）。 */
 function shimmerCornerColors(
   x: number, y: number, tVis: number,
   uL: number, uR: number, vT: number, vB: number,
@@ -244,7 +251,7 @@ function replayLiqRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads:
  *  判据不受扰）。 */
 export function emitVanillaLiquidGate(
   glw: GLSpriteLayer, W: number, H: number,
-): { tex: WebGLTexture; w: number; h: number; flipY: number } | null {
+): { tex: WebGLTexture; w: number; h: number; flipY: number; gl?: WebGL2RenderingContext } | null {
   if (glw.unavailable || W <= 0 || H <= 0) return null;
   if (!glw.isAccumOpen('world')) return null;   // 防 stale FBO 续交（flushAcc begin(clear) 判据同门）
   glw.begin('liqgate', true);
@@ -288,8 +295,43 @@ export function emitVanillaLiquidGate(
   const tex = glw.pipeFboTex();       // 'liqgate' 绑定期捕获
   glw.begin('world', false);          // 续交回世界层（不清量）
   if (!ok || !tex) return null;
-  return { tex, w: W, h: H, flipY: 0 };
+  // ★R1b-2:句柄携带产生面上下文（GLWorldCompose.compose 跨上下文校验判据）
+  return { tex, w: W, h: H, flipY: 0, gl: glw.pipeGl ?? undefined };
 }
+
+/** ★R1b-8①（2026-09-27 红蓝批 β）坡面足迹 2D 重放：混合帧（bg 批化足迹收集在
+ *  _footQuads,fg 段 shim/GL 失效回 canvas gate 路径）足迹经此补画进前景离屏——
+ *  emitVanillaLiquidGate 同款世界→设备折算（_footWld 矩阵）,【无 y 镜像】（2D
+ *  画布正立,镜像仅 FBO GL 朝向需要）。空表 no-op（纯 canvas 帧 _footQuads 恒空）。
+ *  调用点=Renderer beginFgPass 之后 drawVanillaLiquids 之前（足迹先于水=bg 同序,
+ *  α≈0.02 饱和语义与 footprintCtx 直画支逐式同）。 */
+export function replayLiquidFootQuads2D(ctx: CanvasRenderingContext2D): void {
+  if (!_footQuads.length) return;
+  const { a, b, c, d, e, f } = _footWld;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  for (const q of _footQuads) {
+    const ex0 = a * q.dx + c * q.dy + e, ey0 = b * q.dx + d * q.dy + f;
+    const ex1 = a * (q.dx + q.dw) + c * (q.dy + q.dh) + e, ey1 = b * (q.dx + q.dw) + d * (q.dy + q.dh) + f;
+    const dx = Math.min(ex0, ex1), dy = Math.min(ey0, ey1);
+    const dw = Math.abs(ex1 - ex0), dh = Math.abs(ey1 - ey0);
+    if (dw <= 0 || dh <= 0) continue;
+    if (q.solid) {
+      ctx.globalAlpha = 0.02;
+      ctx.fillStyle = '#808080';   // 门控只读 alpha,色值无关（footprintCtx 直画支同式）
+      ctx.fillRect(dx, dy, dw, dh);
+    } else if (q.tex) {
+      ctx.globalAlpha = 0.02;
+      ctx.drawImage(q.tex, q.sx, q.sy, q.sw, q.sh, dx, dy, dw, dh);
+    }
+  }
+  ctx.restore();
+}
+
+/** ★R1b-8②批环溢出探针（Renderer fg 批门消费）：本帧 bg/fg 段已触发 16384 帽时
+ *  fg 改走 canvas gate 原链（足迹由 replayLiquidFootQuads2D 补画）——否则批化支
+ *  _fgRuns 空/缺段=gate 缺水主体≈0,整帧位移场丢。 */
+export function liqRingOverflow(): boolean { return _batOverflow; }
 
 /** white 1×1 entry（GLShimExecutor.WHITE_E 同式;模块缓存防重复建面） */
 const _whiteCache = new WeakMap<GLSpriteLayer, TexEntry>();
@@ -1141,7 +1183,9 @@ export function drawVanillaLiquids(
       // ②sparkle 层：源矩形 X+48（water_14 的第 4 列 16px 闪纹带）、Y+80×GetShimmerFrame
       // 16 帧动画，仅 flag（非内部/瀑布帧）或 (x+y)%2==0 的格子画（:720-729）
       // ③sparkle 顶点色 = GetShimmerGlitterColor 漂移彩虹 + 呼吸 alpha（:766-790）
-      // ★liqgl 批路径：①=顶点色调制单 quad（GPU 插值=原版逐顶点插值 1:1）;
+      // ★liqgl 批路径：①=顶点色调制单 quad（机制=原版【节点值置位于 quad 角】的
+      //   近亲:未裁剪格逐位同;裁剪格=场求值 vs 原版节点置位,偏差见
+      //   shimmerCornerColors 注备案——★R2b-F5 2026-09-27 注释翻案）;
       //   CPU 原链保留 canvas multiply 2×2 子块近似（applyShimmerBaseTint）。
       if (vt === 3) {
         // ★2026-09-27 重钉（火苗速率案普查株连）：消费 visEffectFrames()（逐 tick
@@ -1165,15 +1209,18 @@ export function drawVanillaLiquids(
         let batched = false;
         if (batOn) {
           // ★liqgl 刀2：基底层+波色 = 【顶点色调制单 quad】——原版
-          //  SetShimmerVertexColors（LiquidRenderer.cs:745-759）SpriteBatch modulate
-          //  1:1（out = tex.premul × baseColor × opacity,GPU 顶点插值=原版逐顶点
-          //  插值）;applyShimmerBaseTint 的 canvas multiply 2×2 子块近似在本路径
+          //  SetShimmerVertexColors（LiquidRenderer.cs:745-759）SpriteBatch modulate：
+          //  out = tex.premul × baseColor × opacity,GPU 顶点插值≈原版逐顶点插值。
+          //  ★R2b-F5（2026-09-27 注释翻案）:原版机制=节点值置位于 quad 角,非场求值;
+          //  未裁剪格=逐位同,裁剪格两式差 max 3.92/255（census 备案域内,量级见
+          //  shimmerCornerColors 注）;两三角对角线（TL-BR vs XNA TR-BL）亚 LSB 差。
+          //  applyShimmerBaseTint 的 canvas multiply 2×2 子块近似在本路径
           //  退役（CPU 原链保留=?liqgl=0 逃生门;语义差=canvas multiply 半透明 dst
           //  补正项 color×(1−αdst)——原版无此项=批化支更贴原版,census 有界登记）。
           if (runImg !== tex) { flushRun(); runImg = tex; runKey = `liq:${texId(tex)}`; }
           const gaT = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
-          // 裁剪角 (u,v)（tile 内归一）——双线性场对子矩形封闭=顶点插值逐位等价
-          // （正交投影下 GPU 仿射插值,见 shimmerCornerColors 注）
+          // 裁剪角 (u,v)（tile 内归一）——双线性张量在裁剪角求值（原版=节点值置位,
+          // 两式仅未裁剪时相等;偏差备案见 shimmerCornerColors 注）
           const uL = (dstX - x * 16) / 16, uR = (dstX + sw - x * 16) / 16;
           const vT = (dstY - y * 16) / 16, vB = (dstY + drawSh - y * 16) / 16;
           shimmerCornerColors(x, y, tVis, uL, uR, vT, vB, _batCols, 0);

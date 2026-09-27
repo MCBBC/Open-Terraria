@@ -326,6 +326,9 @@ export class GLSpriteLayer {
   get maxTextureSize(): number {
     return this.gl ? this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number : 0;
   }
+  /** ★R1b-2:本层 GL 上下文暴露（句柄产生面指纹——emitVanillaLiquidGate 产
+   *  WorldTexSrc.gl,GLWorldCompose.compose 跨上下文校验判据） */
+  get pipeGl(): WebGL2RenderingContext | null { return this.gl; }
 
   constructor(pipe?: GLPipeline, ownsPipe = true) {
     if (pipe) {
@@ -1655,12 +1658,31 @@ void main(){
       if (this.rainProg) this.gl.deleteProgram(this.rainProg);
       if (this.rainVao) this.gl.deleteVertexArray(this.rainVao);
       if (this.rainVbo) this.gl.deleteBuffer(this.rainVbo);
+      // ★R1b-5（2026-09-27 红蓝批 β）dispose 表补全：quad/cloud/tile/precip 程序
+      //  （standalone 自编译,非 pipe.program 缓存=可单删）+主 VAO/采样器表
+      //  +precip VAO/VBO——此前 leak=每次层重建在旧上下文遗留程序/VAO/缓冲对象。
+      if (this.prog) this.gl.deleteProgram(this.prog);
+      if (this.progCloud) this.gl.deleteProgram(this.progCloud);
+      if (this.progTile) this.gl.deleteProgram(this.progTile);
+      if (this.precipProg) this.gl.deleteProgram(this.precipProg);
+      if (this.precipVao) this.gl.deleteVertexArray(this.precipVao);
+      if (this.precipVbo) this.gl.deleteBuffer(this.precipVbo);
+      if (this.vao) this.gl.deleteVertexArray(this.vao);
+      for (const s of Object.values(this.samp)) if (s) this.gl.deleteSampler(s);
     }
     this.rainProg = null; this.rainProgHandle = null; this.rainVao = null; this.rainVbo = null;
     this.rainFail = false;
     this.trailProg = null; this.trailMMProg = null; this.trailVAO = null; this.trailVbo = null;
     this.trailIbo = null; this.trailWrapSampler = null;
     this.trailDirty = false;
+    // ★R1b-5:补齐程序/VAO/采样器/precip 引用清面（句柄置 null——重建期
+    //  ensureXxx 的 `if (this.xxx) return true` 早退必须失效）
+    this.prog = null; this.progCloud = null; this.progTile = null; this.cloudFxOK = false;
+    this.precipProg = null; this.precipProgHandle = null; this.precipVao = null;
+    this.precipVbo = null; this.precipFail = false; this.precipUni = {};
+    this.vao = null;
+    this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
+    this.uni = {}; this.uniCloud = {}; this.uniTile = {}; this.rainUni = {};
     this.texs.clear();
     this.bytes = 0;
     this.canvas.width = 0;
@@ -1679,13 +1701,27 @@ void main(){
       glStatDelete(this.statName, freed);   // #perf-gpulog:整包释放记净额
       if (this.vao) gl.deleteVertexArray(this.vao);
       for (const s of Object.values(this.samp)) if (s) gl.deleteSampler(s);
+      // ★R1b-5（2026-09-27 红蓝批 β）pipe 模式 dispose 表补全：rain/precip VAO/VBO
+      //  （层自建对象,非 pipe.program 按名缓存=可单删;程序句柄归 pipe.dispose 整表
+      //  ——程序禁单删判例不动。拖尾族管线模式恒不建（ensureTrail `if (this.pipe)
+      //  return false` 判例）,无释放面）——此前 revive/drop 链每次层重建在共管
+      //  上下文遗留 VAO/VBO。
+      if (this.rainVao) gl.deleteVertexArray(this.rainVao);
+      if (this.rainVbo) gl.deleteBuffer(this.rainVbo);
+      if (this.precipVao) gl.deleteVertexArray(this.precipVao);
+      if (this.precipVbo) gl.deleteBuffer(this.precipVbo);
     }
     this.progHandle = null; this.progCloudHandle = null;
     this.progTileHandle = null;
     this.rainProgHandle = null;
+    // ★R1b-5:precip 句柄此前漏置——残留句柄让重建期 ensurePrecip 的
+    //  `if (this.precipProg) return true` 早退命中死上下文对象
+    this.precipProgHandle = null;
     this.prog = null; this.progCloud = null; this.progTile = null; this.cloudFxOK = false;
     this.uniTile = {};
     this.rainProg = null; this.rainVao = null; this.rainVbo = null; this.rainFail = false;
+    this.precipProg = null; this.precipVao = null; this.precipVbo = null;
+    this.precipFail = false; this.precipUni = {};
     this.vao = null;
     this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.pipeFbo = null;

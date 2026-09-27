@@ -15,7 +15,9 @@ describe('★I类 bolt 烘焙共享 scratch 多雷同帧修复', () => {
   it('uploadScratchNow:bake 期立即上传到调用方稳定键+挂 pending（无 GL no-op）', () => {
     expect(SHIM).toContain('uploadScratchNow(img: HTMLCanvasElement, key: string): void {');
     expect(SHIM).toContain('const e = this.glw.texRefresh(key, img);');
-    expect(SHIM).toContain('if (e) this.bakedTexPending = { img, tex: e };');
+    // ★N类扩账（2026-09-27 变体①终扫）:pending 单槽（1:1 消费）+bakedTexMulti
+    //  帧内粘滞账（1:N 消费——女皇剑一染十层/尘族逐尘烘焙）双写
+    expect(SHIM).toContain('if (e) { this.bakedTexPending = { img, tex: e }; this.bakedTexMulti.set(img, e); }');
     expect(SHIM).toContain('if (!this.active || !this.glw || this.glw.unavailable) return;');
   });
 

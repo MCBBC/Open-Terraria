@@ -63,8 +63,10 @@ describe('R1-F10 共管退避窗禁自建管线', () => {
       /private newWorldCompose\(\): GLWorldCompose \| null \{\s*\n\s*if \(!Renderer\.cloudPipe\) return new GLWorldCompose\('worldCompose', null\);\s*\n\s*const pipe = this\.acquireSwPipe\(\);\s*\n\s*if \(!pipe\) \{[^]*?this\.markSwPipeSkip\(\(this\.swPipeFailWhy \|\| 'backoff'\) as 'backoff' \| 'init-fail' \| 'starvelock'\);\s*\n\s*this\.notifySwPipeDegrade\(\);\s*\n\s*return null;\s*\n\s*\}\s*\n\s*return new GLWorldCompose\('worldCompose', pipe\);\s*\n\s*\}/);
   });
   it('双消费点 null 安全（lrecon 支+A2 支;??= 每帧重试语义保持）', () => {
-    expect(RDR.match(/this\.worldCompose \?\?= this\.newWorldCompose\(\);\s*\n\s*const wcL = this\.worldCompose\?\.acquire\(\) \?\? null;/g)?.length ?? 0).toBe(1);
-    expect(RDR.match(/this\.worldCompose \?\?= this\.newWorldCompose\(\);\s*\n\s*const wc = this\.worldCompose\?\.acquire\(\) \?\? null;/g)?.length ?? 0).toBe(1);
+    // ★R1b-2（2026-09-27 红蓝批 β）:??= 收口进 ensureWorldCompose（旗面错位实例
+    //  整弃重建后 ??= 重试语义不变,null 安全承诺不变）
+    expect(RDR.match(/this\.ensureWorldCompose\(\);\s*\n\s*const wcL = this\.worldCompose\?\.acquire\(\) \?\? null;/g)?.length ?? 0).toBe(1);
+    expect(RDR.match(/this\.ensureWorldCompose\(\);\s*\n\s*const wc = this\.worldCompose\?\.acquire\(\) \?\? null;/g)?.length ?? 0).toBe(1);
     // 不得再出现「构造即解引用」形态
     expect(RDR).not.toContain('(this.worldCompose ??= this.newWorldCompose()).acquire()');
   });

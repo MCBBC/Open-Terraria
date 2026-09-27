@@ -695,6 +695,58 @@ export class ChargedBlaster extends Entity {
     if (!pl) { this.dead = true; return; }
     this.x = pl.cx - this.w / 2;
     this.y = pl.cy - this.h / 2;
+    // ---- 蓄力尘（BJ372 2026-09-27 补;:67473-67493 [1457] = :63513-63535 [1456]
+    //  ——曾整缺=用户实报"没有蓄力效果"的唯一视觉面）：ai0>10 严格门且未满蓄;
+    //  每 tick num20+1 粒 226 电尘（k 奇偶 scale 0.4/0.65）在枪口前 18px 点
+    //  （vector11 = Center + UnitX×18 RotatedBy(rotation−π/2) = aim 向）周围半径
+    //  (12−num20×2) 圆环随机出生（NewDust 盒 16×16 @ vector12−(8,8)）;初速
+    //  velocity/2 随即被覆写（传 0 同效）= Normalize(vector11−vector12)×1.5×
+    //  (10−num20×2)/10（档 0/1/2 → 1.5/1.2/0.9,汇向枪口）;noGravity+customData
+    //  =player → 226 支 Dust.cs:2337-2341 position += 主角本拍位移（VanillaDust
+    //  226 followPlayer 通道,BJ372 同批补消费面）
+    if (this.charge > 10 && !full) {
+      const fx = this.cx + this.dirX * 18, fy = this.cy + this.dirY * 18;
+      for (let k = 0; k < stage + 1; k++) {
+        const scl = k % 2 === 1 ? 0.65 : 0.4;
+        const ang = Math.random() * Math.PI * 2;
+        const px = fx + Math.cos(ang) * (12 - stage * 2);
+        const py = fy + Math.sin(ang) * (12 - stage * 2);
+        const d = game.spawnDust?.(px - 8, py - 8, 16, 16, 226, 0, 0, 0, null, scl);
+        if (d) {
+          const dx = fx - px, dy = fy - py;
+          const len = Math.hypot(dx, dy) || 1;
+          const spd = 1.5 * (10 - stage * 2) / 10;
+          d.vx = dx / len * spd; d.vy = dy / len * spd;
+          d.noGravity = true;
+          d.followPlayer = true;
+        }
+      }
+    }
+    // ---- 满蓄喷焰（:67495-67518 [1457] = :63537-63560 [1456]）：每 tick 2 粒
+    //  （scale 0.35/0.45）自枪口前 14px 点（vector13）沿 ±0.2π² 锥
+    //  （rotation + num28×(π/4)×0.8 −π/2,num28 = NextFloatDirection (−π,π]）6px 处
+    //  出生（NewDust 盒 24×24 @ vector14−(12,12)）;速度 = 锥向单位向 × Lerp(1.5,9,
+    //  GetLerpValue(1,0,|num28|,clamped))（|num28|=0 中轴 9 → |num28|≥1 封底 1.5）;
+    //  fadeIn=0.5（生长目标:0.35/0.45 +0.03/t 至越 0.5 转衰）;followPlayer 同上
+    if (full) {
+      const fx = this.cx + this.dirX * 14, fy = this.cy + this.dirY * 14;
+      const base = Math.atan2(this.dirY, this.dirX);
+      for (let l = 0; l < 2; l++) {
+        const scl = l % 2 === 1 ? 0.45 : 0.35;
+        const num28 = Math.random() * Math.PI * 2 - Math.PI;
+        const dAng = base + num28 * (Math.PI / 4) * 0.8;
+        const px = fx + Math.cos(dAng) * 6, py = fy + Math.sin(dAng) * 6;
+        const d = game.spawnDust?.(px - 12, py - 12, 24, 24, 226, 0, 0, 0, null, scl);
+        if (d) {
+          const t = Math.min(1, Math.max(0, 1 - Math.abs(num28)));
+          const spd = 1.5 + (9 - 1.5) * t;
+          d.vx = Math.cos(dAng) * spd; d.vy = Math.sin(dAng) * spd;
+          d.noGravity = true;
+          d.fadeIn = 0.5;
+          d.followPlayer = true;
+        }
+      }
+    }
     // flag5 发射拍（:67430-67440）：ai0==1（0.4 步进永不成立,原版同款哑档）‖
     // 满蓄 ai[0]%20f==0（0.4 累积恒非整 20 倍数——fround/双精都零命中,哑档）‖
     // 瞄准拍（重瞄门内 flag5=true :67439）。★发射/魔耗/光束存活检查全挂此拍

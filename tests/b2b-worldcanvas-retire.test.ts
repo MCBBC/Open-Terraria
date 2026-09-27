@@ -21,8 +21,10 @@ describe('B2b Renderer 装配（源码锚）', () => {
     expect(RDR).toContain("get('b2b') !== '0'");
     expect(RDR).toContain("if (typeof document === 'undefined') return false;\n      return new URLSearchParams(location.search).get('b2b') !== '0';");
   });
-  it('beginWorldLayer acc 分支:bgl+bglShim+b2b 三旗合取+worldCanvas 不创建', () => {
-    expect(RDR).toContain('Renderer.bgl && Renderer.bglShim && Renderer.b2b && !this.isCpuRender()');
+  it('beginWorldLayer acc 分支:bgl+bglShim+b2b+cloudPipe 四旗合取+worldCanvas 不创建', () => {
+    // ★R1b-2（2026-09-27 红蓝批 β）:acc 帧句柄只许流共管管线,cloudpipe=0 逃生门
+    //  下 acc 整体回桥接态（自建 worldCompose 上下文分家=跨上下文句柄禁入）
+    expect(RDR).toContain('Renderer.bgl && Renderer.bglShim && Renderer.b2b && Renderer.cloudPipe && !this.isCpuRender()');
     // acc 分支先于 worldCanvas 创建块（attachAcc 早退返回）
     const accIdx = RDR.indexOf('attachAcc()');
     const createIdx = RDR.indexOf("this.worldCanvas = document.createElement('canvas');", RDR.indexOf('private beginWorldLayer'));

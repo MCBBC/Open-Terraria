@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { WaterfallRenderer } from '../src/render/WaterfallRenderer';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
+import { pinGameTimeTicks } from '../src/core/GameTime';
 
 const GRASS = TILE_BY_KEY['v_60_jungle_grass_block'];
 if (!GRASS) throw new Error('no jungle grass');
@@ -49,6 +50,10 @@ const ctx: any = {
 const atlas = { ensureVImage: () => ({ width: 512, height: 40 }) };
 const wf: any = new WaterfallRenderer();
 wf.falls = [{ x: 1866, y: 294, type: 0 }];
+// ★2026-09-27 重钉逻辑 tick 株连补钉（同 waterfall-draw.test.ts 判例）：帧钟已从
+//  墙钟改 gameTickCount,本测试未钉钟 → regular=0/slot=0 ≠ 金标 slot=128。pin 12
+//  → regular=⌊12/3⌋=4=旧墙钟 nowMs=1000 的帧槽（slot=128,像素金标不变,零改窗）。
+pinGameTimeTicks(12);
 wf.draw(ctx, atlas, st, 337, 1000, 3);
 
 describe('BJ274 丛林草半砖唇瀑布横流带·实心遮挡裁剪', () => {

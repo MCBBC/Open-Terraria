@@ -127,7 +127,7 @@ describe('★C5 drawRain GL 支端到端+buildRainBatch 产出锁', () => {
     expect(v[4]).toBe(1); expect(v[5]).toBe(0); expect(v[6]).toBe(0);
   });
 
-  it('uv 全跨度−ε tie 补正（type×4 帧偏移）;flipY=det<0 → v 区间反向', () => {
+  it('uv 全跨度−ε tie 补正（type×4 帧偏移）;★R2b-F4:uv 恒锚图角,det<0 不反转 v 区间', () => {
     rainGlSetForTest(true);
     const eps = 1 / 4096;
     let v = drawRainCapture([mkDrop({ x: 0, y: 0, type: 5 })], [1, 0, 0, 1, 0, 0])!.data;
@@ -136,8 +136,11 @@ describe('★C5 drawRain GL 支端到端+buildRainBatch 产出锁', () => {
     expect(v[3]).toBeCloseTo(-eps / TEX_H, 7);
     expect(v[17]).toBeCloseTo((40 - eps) / TEX_H, 7);
     v = drawRainCapture([mkDrop({ x: 0, y: 0, type: 5 })], [1, 0, 0, -1, 0, 0])!.data;
-    expect(v[3]).toBeCloseTo((40 - eps) / TEX_H, 7);
-    expect(v[17]).toBeCloseTo(-eps / TEX_H, 7);
+    // ★R2b-F4（2026-09-27 翻案）:批四角由 CTM 直构（镜像在角点几何内）,uv 恒锚
+    // 图角（texFromImage FLIP_Y=false）——det<0 下与 2D drawImage 同语义,v 区间
+    // 不反转（旧断言 swap=decode 支 R2-F1 规则错植,判别器=weather-gl-batch-redgreen）
+    expect(v[3]).toBeCloseTo(-eps / TEX_H, 7);
+    expect(v[17]).toBeCloseTo((40 - eps) / TEX_H, 7);
   });
 
   it('非 active 滴跳过;源矩形越界回 2D;无执行器窗回 2D;旗关走 2D', () => {

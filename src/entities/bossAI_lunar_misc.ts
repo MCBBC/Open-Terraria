@@ -637,7 +637,12 @@ export function ritualCheckFloor(game: GameHooks, cx: number, cy: number): Array
 
 export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | null) {
   const x = lunarLocalAI(e);
-  e.iframes = 2;                       // SetDefaults dontTakeDamage=true(1457:14219,437 块 14204-14222)
+  // ★BJ347-②：真 dontTakeDamage 持续态（SetDefaults :14219 437 块,fromVanilla 手补表
+  //  同位；AI_083a 全程无解除点=恒不可击）。旧 iframes=2 每 tick 刷新近似被 hurt
+  //  免疫门 pierce===1 豁免绕过（`pierce!==1 && iframes>0`,R23b-P1 同族反模式）→
+  //  箭/枪弹/多数随从可磨死 400 血石碑=用户实报「跪拜魔法阵有时可被攻击、
+  //  打掉后不出教主」（碑亡→四守卫 owner 检查连坐消散、召唤门随碑灭）
+  e.dontTakeDamage = true;
   e.lightRGB = [0.8, 0.75, 0.55];      // :37285 Lighting.AddLight
   if (!e.bInit) {
     // ---- 落地校验 + 召四教徒(:37123-37149) ----

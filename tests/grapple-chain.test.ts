@@ -399,8 +399,11 @@ describe('链段绘制几何', () => {
     const host = { ctx: rec.ctx, atlas: { ensureVImage: () => null } };
     drawHook(13, host);
     expect(rec.segs.length).toBe(0);
-    expect(rec.strokes.length).toBe(1);                 // 旧线段
-    expect(rec.fills.length).toBe(1);                   // 旧钩头方块
+    // ★P0-B 零上传兜底（2026-09-27）：旧 stroke 线段改旋转 solid fillRect quad
+    // （acc 态路径 op=逐帧栅格化+上传病）——零 stroke;链 quad 因测试桩 fakePlayer
+    // 无 x/w（len 非有限）被有限门跳过,仅钩头方块 1 fill。
+    expect(rec.strokes.length).toBe(0);                 // 路径 op 归零（零上传判据）
+    expect(rec.fills.length).toBe(1);                   // 旧钩头方块（链 quad 被桩跳过）
   });
 });
 

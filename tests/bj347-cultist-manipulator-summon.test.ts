@@ -88,6 +88,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }) {
   const player = {
     x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21,
     vx: 0, vy: 0, hp: 400, maxHp: 400, dead: false, useTime: 1,
+    addDPS: () => {},                                // hurt 实扣路径 DPS 表桩
   } as unknown as GameHooks['player'];
   const hooks = {
     world, player,
@@ -151,6 +152,86 @@ describe('BJ347 ② 教主自毁 = 非击杀消散（bossFled，NPC.cs:65272-652
     lunaticCultistAI(cult, h.hooks, h.player);
     expect(cult.dead).toBe(false);
     expect(cult.bossFled).toBe(false);
+  });
+});
+
+// ============================================================
+// ②b 仪式锚/克隆体/显形窗 不可击面（BJ347-② 用户补充线索实报：
+//   「跪拜魔法阵有时可被攻击、打掉后不出 boss」=437 石碑 iframes=2 近似被
+//   pierce===1 单发弹绕过；修=真 dontTakeDamage 持续态）
+// ============================================================
+describe('BJ347-②b 仪式锚不可击（437 石碑,SetDefaults :14219）', () => {
+  it('石碑免疫全通道伤害（pierce=1 绕 iframes 向含）——碑活→守卫活→召唤门不受影响', () => {
+    const h = makeHooks(makeWorld(), { x: 40, y: 96 });
+    const { tablet, archers, devotees } = spawnTabletGroup(h);
+    const hp0 = tablet.hp;
+    expect(tablet.dontTakeDamage).toBe(true);      // fromVanilla 手补表 + AI 行双写
+    for (const pierce of [1, 0, -1, 2]) {
+      const r = tablet.hurt(1e9, 0, 0, h.hooks, 0, false, pierce, true);
+      expect(r).toBe(false);                        // 全通道拒绝
+      expect(tablet.hp).toBe(hp0);
+      expect(tablet.dead).toBe(false);
+    }
+    // 召唤门照常：四件套全灭 → 教主落地
+    for (const d of [...devotees, ...archers]) d.dead = true;
+    tickTablet(h, 3);
+    expect(h.enemies.some((e) => e.vanillaId === 439)).toBe(true);
+  });
+});
+
+describe('BJ347-②b 克隆体 440 双相（仪式窗可击/窗外无敌 :65211-65212+合流 :66108）', () => {
+  it('仪式窗(ai0=5)可击：hurt→justHit→下拍自灭+真身进 6 态', () => {
+    const h = makeHooks(makeWorld(), { x: 100, y: 80 });
+    const cult = spawn(h, 439, 100, 70);
+    cult.bInit = true; cult.ai0 = 5; cult.ai1 = 0; cult.ai2 = 0; cult.ai3 = 0;
+    for (let t = 0; t < 31; t++) lunaticCultistAI(cult, h.hooks, h.player);
+    const clones = h.enemies.filter((n) => n.vanillaId === 440 && !n.dead);
+    expect(clones.length).toBe(2);
+    expect(clones[0].dontTakeDamage).toBe(false);   // 仪式窗=可击相
+    const c = clones[0];
+    const hp0 = c.hp;
+    c.hurt(50, 0, 0, h.hooks, 0, false, 1, true);
+    expect(c.hp).toBeLessThan(hp0);                 // hurt 返回值=是否致死,非是否命中——读 hp 差
+    cult.ai0 = 5; cult.ai1 = 130;                   // 仪式窗内（120-420 消费窗）
+    lunaticCultistAI(c, h.hooks, h.player);         // ★驱动克隆体自身 AI（justHit 消费在克隆体分支）
+    expect(c.dead).toBe(true);                      // justHit → 自灭
+    expect(cult.ai0).toBe(6);                       // 真身进硬直态（:65014-65016）
+  });
+
+  it('仪式窗外(ai0≠5)免疫：pierce=1 单发弹也被拒（旧 iframes=2 绕过向）', () => {
+    const h = makeHooks(makeWorld(), { x: 100, y: 80 });
+    const cult = spawn(h, 439, 100, 70);
+    cult.bInit = true; cult.ai0 = 5; cult.ai1 = 0; cult.ai2 = 0; cult.ai3 = 0;
+    for (let t = 0; t < 31; t++) lunaticCultistAI(cult, h.hooks, h.player);
+    const clones = h.enemies.filter((n) => n.vanillaId === 440 && !n.dead);
+    cult.ai0 = 0; cult.ai1 = 0;                     // 拉出仪式态（镜像同步）
+    lunaticCultistAI(cult, h.hooks, h.player);
+    for (const c of clones) {
+      lunaticCultistAI(c, h.hooks, h.player);       // ★克隆体自身 AI tick 写 dontTakeDamage
+      expect(c.dontTakeDamage).toBe(true);          // 窗外=无敌相
+      const hp0 = c.hp;
+      c.hurt(1e9, 0, 0, h.hooks, 0, false, 1, true);
+      expect(c.hp).toBe(hp0);                       // 零伤害（返回值恒 false,以 hp 判别）
+      expect(c.dead).toBe(false);
+    }
+  });
+});
+
+describe('BJ347-②b 本体 439 显形窗（:65345-65346 flag3/4）', () => {
+  it('显形期(ai0=-1)免疫 pierce=1；显形毕(ai0=0)可击', () => {
+    const h = makeHooks(makeWorld(), { x: 100, y: 80 });
+    const cult = spawn(h, 439, 100, 70);
+    cult.bInit = true; cult.ai0 = -1; cult.ai1 = 0; cult.ai2 = 0; cult.ai3 = 0;
+    lunaticCultistAI(cult, h.hooks, h.player);
+    expect(cult.dontTakeDamage).toBe(true);
+    expect(cult.hurt(1e9, 0, 0, h.hooks, 0, false, 1, true)).toBe(false);
+    expect(cult.dead).toBe(false);
+    cult.ai0 = 0; cult.ai1 = 0;                     // 显形毕
+    lunaticCultistAI(cult, h.hooks, h.player);
+    expect(cult.dontTakeDamage).toBe(false);        // 非显形 tick 显式清
+    const hp0 = cult.hp;
+    cult.hurt(50, 0, 0, h.hooks, 0, false, 1, true);
+    expect(cult.hp).toBeLessThan(hp0);              // 非致死返回 false,以 hp 差判命中
   });
 });
 

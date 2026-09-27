@@ -131,7 +131,8 @@ export function projSpriteHealth(ids: Iterable<number>): Array<{ id: number; cac
 }
 
 /** 预热弹幕贴图(2026-08-13,用户报"发射阶段回退兜底,过一会才正确"):
- *  懒加载下首发射击时表未就绪会先画短线兜底。进图/背包变化时把武器/弹药的
+ *  懒加载下首发射击时表未就绪弹体短暂隐形(★P0-B 2026-09-27:旧短线兜底已摘,
+ *  acc 态逐帧路径 op=高频上传病——见 draw 体注)。进图/背包变化时把武器/弹药的
  *  shoot 链先 kick 掉(占位即触发加载,缓存 Map 去重),发射时已就绪 */
 export function prefetchProjectiles(ids: Iterable<number>): void {
   if (typeof Image === 'undefined') return;
@@ -3377,15 +3378,14 @@ export class Arrow extends Entity {
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = baseGa;
       }
-    } else {
-      // 贴图未就绪：短线兜底
-      ctx.strokeStyle = this.projId === 2 ? '#FFB060' : '#D8C8A0';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(0, -Math.min(14, Math.hypot(this.vx, this.vy) * 1.4));
-      ctx.stroke();
     }
+    // ★P0-B（2026-09-27）贴图未就绪帧不画（旧「短线兜底」已摘）：该支在 acc 态
+    //  =每弹每帧 beginPath/stroke 路径 op→rasterizePathOp 隔离栅格化+共享 scratch
+    //  整幅上传——违 proj1457.ts:1780「本通道只可承载低频落笔」判例;发布面贴图
+    //  404（如 Projectile_618 小写案,见 P0-A）时=永久逐帧全幅上传病。原版贴图
+    //  加载期亦短暂隐形（XNA 内容管线同步装载,本仓懒加载 1-2 帧到位自愈,持续
+    //  失败由 projSprite 10s TTL 对账自愈）;缺图诊断走 projSpriteHealth（F5 报告）,
+    //  不再以逐帧路径 op 为代价。
     ctx.restore();
   }
 

@@ -1890,8 +1890,11 @@ export class StormLightning extends Entity {
     // ★I类(2026-09-27):稳定键 bake 期立即上传——共享 boltScratch 同帧多雷烘焙
     //   （1 实体 ≤7 bolts/ArcSurge ≤13×3 发）时,flush 期 texRefresh 全读末次字节
     //   =先行 bolt quad 错拿内容（定谳机制链见 GLShimExecutor.uploadScratchNow）。
-    //   键=(实体 id,bolt 序号) 跨帧稳定→同纹理重传,零 createTexture 抖动。
-    r9.markWorldDynamicScratch(sc, `boltBake:${this.id}:${bi}`);
+    //   ★R3b-2③（2026-09-27 红蓝批 β）：键改「帧界环形」uploadScratchBake
+    //   （boltBake 族,帧内序号环 1024）——旧 (实体 id,bolt 序号) 键在实体死亡后
+    //   永久驻留层 texs 表（LRU 兜底但顶替活纹理+键空间随弹体 id 无界）;帧界键
+    //   保同帧唯一性（I类判据不变）,跨帧自然退休。
+    r9.uploadScratchBake(sc, 'boltBake', 1024);
     // blit:恒等 CTM+α 钉 1(α/滤镜均已烘入 scratch)——acc shim 态=1 个 ADD quad 入队
     // (flush 时一次 texRefresh),裸 2D 态=一次 drawImage。★滤镜钉 none:shim 对
     // filter≠none 的 drawImage 走 rawDrawImage 整帧降级,而滤镜语义已由 bake 面承担
@@ -1906,18 +1909,32 @@ export class StormLightning extends Entity {
   }
 }
 
-/** ★P0-B bolt 烘焙 scratch（模块级只增不减;CanvasWatch churn 判例禁逐帧新建;
- *  willReadFrequently=R3-F8 判例——纯上传中转面,无 readPixels 读回需求） */
+/** ★P0-B bolt 烘焙 scratch（模块级复用;CanvasWatch churn 判例禁逐帧新建;
+ *  willReadFrequently=R3-F8 判例——纯上传中转面,无 readPixels 读回需求）。
+ *  ★R3b-2①（2026-09-27 红蓝批 β）回落支：旧「只增不减」让单次巨 bolt（离群
+ *  bbox 4096² 帽）把面永久撑大——此后每 bolt 整幅上传 2.6-6.5MB/帧（峰值
+ *  50MB/s）。现需求 ≤ 当前一半（滞回防抖）时缩回 max(基线 256,本次需求):
+ *  离群帧后一次小 bake 即回归基线;resize 自动清屏,烘焙路径首行 clearRect
+ *  语义不变（尺寸回落与 texRefresh 的换尺寸重建通道天然衔接）。 */
 let _boltScratch: HTMLCanvasElement | null = null;
+const BOLT_SCRATCH_BASE = 256;
 function boltScratch(w: number, h: number): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   if (!_boltScratch) {
     _boltScratch = document.createElement('canvas');
-    _boltScratch.width = 256;
-    _boltScratch.height = 256;
+    _boltScratch.width = BOLT_SCRATCH_BASE;
+    _boltScratch.height = BOLT_SCRATCH_BASE;
   }
-  if (_boltScratch.width < w) _boltScratch.width = w;     // 只增不减(尺寸变化自动清屏)
-  if (_boltScratch.height < h) _boltScratch.height = h;
+  const cw = _boltScratch.width, ch = _boltScratch.height;
+  if (w > cw || h > ch) {
+    if (w > cw) _boltScratch.width = w;      // 涨:直接扩到需求(尺寸变化自动清屏)
+    if (h > ch) _boltScratch.height = h;
+    return _boltScratch;
+  }
+  if (w * 2 <= cw && h * 2 <= ch) {          // 滞回:需求≤当前一半才缩
+    const tw = Math.max(BOLT_SCRATCH_BASE, w), th = Math.max(BOLT_SCRATCH_BASE, h);
+    if (tw < cw || th < ch) { _boltScratch.width = tw; _boltScratch.height = th; }
+  }
   return _boltScratch;
 }
 

@@ -6377,6 +6377,11 @@ export class MinionProj extends Entity {
       const num22 = empressHuePhase(this.id, own?.maxMinions ?? 1, gtwSec());
       const hueC = fairyHueRgb(((num22 + 0.5) % 1 + 1) % 1);            // :36566 num=(hueRaw+0.5)%1
       const tinted = tintFrameHue(img, hueC);                           // 女皇色剪影（每帧一染,全层共用）
+      // ★变体①终扫（2026-09-27）:HUE_TINT_SCRATCH 全剑共用一染面——每剑 hue 相位
+      //  异（num22=id%maxMinions+GTW 环）,shim 静态区域缓存下全部幻影/环晕层冻结
+      //  在首帧内容。逐剑烘焙即刻上传（I类 bolt 判例 1:N 扩展:一次 bake 十层消费,
+      //  bakedTexMulti 帧内粘滞）+环形键防同键原地改写先行剑纹理（shine 单键教训）。
+      if (tinted) r.markWorldDynamicScratch?.(tinted, `empressTint:${empressTintSeq++ % 64}`);
       const num145a = (63 / 255);                                       // A=255×0.5 → /2 =63（:36568/:36575）
       // ①幻影 6 层（:36578-36586）
       const lerpValue = gl(60, 50, this.tA0);
@@ -6637,6 +6642,9 @@ export function fairyHueRgb(hue: number): [number, number, number] {
  *  ——source-atop 保 silhouette α,与 tintFrameCache 同工艺;返回共享 scratch（调用即画,
  *  同帧内多次 drawImage 安全,跨实体下一帧重染）。 */
 let HUE_TINT_SCRATCH: HTMLCanvasElement | null = null;
+/** ★变体①终扫:女皇剑烘焙环形序号（家族独立计数;环形窗 64 ≥ 单帧烘焙剑数,
+ *  窗内复用=先行剑 rec 纹理被原地改写——shine 单键回归教训） */
+let empressTintSeq = 0;
 function tintFrameHue(src: HTMLCanvasElement, rgb: readonly [number, number, number]): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   HUE_TINT_SCRATCH ??= document.createElement('canvas');

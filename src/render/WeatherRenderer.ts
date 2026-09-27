@@ -344,11 +344,14 @@ export function buildRainBatch(
     const p1x = frnd(a * w) + e1, p1y = frnd(b * w) + f1;
     const p2x = frnd(frnd(a * w) + frnd(c * h)) + e1, p2y = frnd(frnd(b * w) + frnd(dd * h)) + f1;
     const p3x = frnd(c * h) + e1, p3y = frnd(dd * h) + f1;
-    // uv 全跨度−ε（quadSprite 同款;flipY=det<0 → v 区间反向,R2-F1 判谳同式）
-    const det = a * dd - b * c;
+    // uv 全跨度−ε（quadSprite 同款 tie 补正）。★R2b-F4（2026-09-27 翻案）:本批四角
+    //  由 CTM 直构（镜像已含在角点几何内）,uv 恒锚图角（texFromImage FLIP_Y=false,
+    //  v=0=图首行）——与 2D drawImage 同语义,与 det 无关。decode 支 R2-F1 的
+    //  det<0→flipY 是【归一化正 extent quad】对镜像的再表达规则,不适用于直构路径
+    //  （旧码 swap=双重翻转≠2D）。生产面世界 CTM 恒 det>0（反重力=整幅后置自拷）;
+    //  ★登记:未来翻屏若改挂世界 CTM（det 可负）须重审本注。
     const ua = (sx - RAIN_TIE_EPS) / texW, ub = (sx + 2 - RAIN_TIE_EPS) / texW;
-    const va0 = (0 - RAIN_TIE_EPS) / texH, vb0 = (40 - RAIN_TIE_EPS) / texH;
-    const va = det < 0 ? vb0 : va0, vb = det < 0 ? va0 : vb0;
+    const va = (0 - RAIN_TIE_EPS) / texH, vb = (40 - RAIN_TIE_EPS) / texH;
     const r = cr / 255, g = cg / 255, bl = cb / 255;
     // 6 顶点（TRIANGLES:(p0,p1,p2)+(p0,p2,p3)）
     let o = n * 42;
@@ -393,7 +396,10 @@ function replayRainBatch2D(ctx: CanvasRenderingContext2D): void {
     const tinted = bakeTintFrame('rain-gl-replay', tex, rainReplay[ro + 4], 0, 2, 40, cr, cg, cb);
     if (!tinted) continue;
     const w = rainReplay[ro + 2], h = rainReplay[ro + 3];
-    const p1x = D[o + 7], p1y = D[o + 8], p3x = D[o + 21], p3y = D[o + 22];
+    // ★R2b-F1（2026-09-27）:stride 7 六顶点序 (p0,p1,p2,p0,p2,p3)——o+21/22 是
+    //  第 3 顶点=p0 复用,真 p3 在 o+35/36。旧码把 p0 复用顶点当 p3 → setTransform
+    //  c=d=0 奇异 CTM → GL 失败帧 drawImage 零输出=整层雨消失（"宁回退不丢精灵"破）。
+    const p1x = D[o + 7], p1y = D[o + 8], p3x = D[o + 35], p3y = D[o + 36];
     ctx.setTransform(
       (p1x - D[o]) / w, (p1y - D[o + 1]) / w,
       (p3x - D[o]) / h, (p3y - D[o + 1]) / h,
@@ -461,7 +467,6 @@ export function buildPrecipBatch(
   const RP = precipReplay;
   // 基 CTM fround 链共因（无逐粒旋转——co=1/si=0 折叠=a=base.a 等直入链）
   const ba = base.a, bb = base.b, bc = base.c, bd = base.d;
-  const det = ba * bd - bb * bc;
   const clampT = (v: number) => (Number.isFinite(v) ? (v < 0 ? 0 : v > 255 ? 255 : Math.round(v)) : 0);
   const quad = (x0: number, y0: number, sz: number,
     sx: number, sy: number, cr: number, cg: number, cb: number, ca: number, a255: number): boolean => {
@@ -473,10 +478,10 @@ export function buildPrecipBatch(
     const p1x = frnd(ba * sz) + e1, p1y = frnd(bb * sz) + f1;
     const p2x = frnd(frnd(ba * sz) + frnd(bc * sz)) + e1, p2y = frnd(frnd(bb * sz) + frnd(bd * sz)) + f1;
     const p3x = frnd(bc * sz) + e1, p3y = frnd(bd * sz) + f1;
-    // uv 全跨度−ε（flipY=det<0 → v 区间反向,R2-F1 判谳同式）
+    // uv 全跨度−ε（★R2b-F4 雨批同刀:四角直构=镜像在角点几何内,uv 恒锚图角,
+    //  与 det 无关;翻屏改挂世界 CTM 须重审——见 buildRainBatch uv 注）
     const ua = (sx - PRECIP_TIE_EPS) / texW, ub = (sx + 8 - PRECIP_TIE_EPS) / texW;
-    const va0 = (sy - PRECIP_TIE_EPS) / texH, vb0 = (sy + 8 - PRECIP_TIE_EPS) / texH;
-    const va = det < 0 ? vb0 : va0, vb = det < 0 ? va0 : vb0;
+    const va = (sy - PRECIP_TIE_EPS) / texH, vb = (sy + 8 - PRECIP_TIE_EPS) / texH;
     // ★rgb 原样入顶点（调用方已按 2D 路径同序钳位;叠画=已按 ga 预乘的浮点,
     //  此处禁再 round——2D globalAlpha 是模拟量合成,8bit 中间舍入=错色）
     const r = cr / 255, g = cg / 255, bl = cb / 255;
@@ -555,14 +560,22 @@ function replayPrecipBatch2D(ctx: CanvasRenderingContext2D): void {
   const RP = precipReplay;
   for (let i = 0; i < precipReplayQuads; i++) {
     const o = i * 48, ro = i * 4;
-    const cr = Math.round(D[o + 4] * 255), cg = Math.round(D[o + 5] * 255), cb = Math.round(D[o + 6] * 255);
+    // ★R2b-F2（2026-09-27）:stride 8 六顶点序 (p0,p1,p2,p0,p2,p3)——o+24/25 是
+    //  第 3 顶点=p0 复用,真 p3 在 o+40/41（旧码 c=d=0 奇异=雪沙整层消失,雨批 R2b-F1 同刀）。
+    // ★R2b-F3（2026-09-27）:叠画 quad 的顶点 rgb 已预乘 ga（批/GL/2D 三方单次语义,
+    //  buildPrecipBatch :530 ga 注）——回放烘焙色必须【拆回】未预乘 tint,globalAlpha
+    //  单次施 ga;旧码 round(预乘×255) 当烘焙色再叠 ga = 净 gcr×ga²（暗 29.4%）。
+    const a255 = RP[ro + 3];
+    const ga = a255 / 255;
+    const unpre = ga > 0 && ga < 1 ? 1 / ga : 1;   // ga=1 恒等;ga≤0 防御恒等（quad 本就不可见）
+    const cr = Math.round(D[o + 4] * 255 * unpre), cg = Math.round(D[o + 5] * 255 * unpre), cb = Math.round(D[o + 6] * 255 * unpre);
     const tinted = bakeTintFrame('precip-replay', tex, RP[ro], RP[ro + 1], 8, 8, cr, cg, cb);
     if (!tinted) continue;
     const sz = RP[ro + 2];
-    ctx.globalAlpha = RP[ro + 3] / 255;
+    ctx.globalAlpha = ga;
     ctx.setTransform(
       (D[o + 8] - D[o]) / 8, (D[o + 9] - D[o + 1]) / 8,
-      (D[o + 24] - D[o]) / 8, (D[o + 25] - D[o + 1]) / 8,
+      (D[o + 40] - D[o]) / 8, (D[o + 41] - D[o + 1]) / 8,
       D[o], D[o + 1]);
     ctx.drawImage(tinted, 0, 0);
   }

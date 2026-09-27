@@ -924,11 +924,11 @@ export class Bobber extends Entity {
       ctx.drawImage(img, -num145, -(this.h / 2 + 8), img.width, img.height);
     } else {
       // 兜底（贴图懒加载未就绪）：近似色块
+      // ★P0-B 零上传兜底：arc 路径 op 在 acc 态=逐帧 rasterizePathOp 栅格化+上传;
+      //   solid fillRect quad（decode 直译零上传）同位同径替形（本兜底即近似块）
       ctx.translate(this.cx, this.cy);
       ctx.fillStyle = this.biteT > 0 ? '#FF6060' : '#E04838';
-      ctx.beginPath();
-      ctx.arc(0, 0, 4, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillRect(-4, -4, 8, 8);
     }
     // 声呐药水（buff 122,Projectile.cs:19340-19346 渔获 / :19354-19361 敌怪）：
     // 咬钩时浮标上方弹渔获名/血月敌怪名——此前 sonarLabel 数据在而零消费

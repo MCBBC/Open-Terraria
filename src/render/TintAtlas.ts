@@ -8,7 +8,16 @@
 //  - bake 回调在【私有 scratch】上作画再整块 blit 进页——调用方可以任意使用
 //    multiply/destination-in 等全局语义 gCO(destination-in 会清掉整画布其余
 //    内容,绝不能直接在共享页上做;lerp 的 getImageData/putImageData 同理)
+// ★纪元换键（2026-09-27 变体①终扫）:页矩形是回收复用的（evictCold/drop→free-list）
+//  ——回收矩形上的再烘焙=共享页画布【原地覆写】,GL shim 按 (texId,矩形) 身份
+//  缓存的区域纹理不换键就永远命中旧字节=生命水晶案同族（首帧内容冻结）。
+//  修复=回收矩形 blit 后 bumpTexEpoch(page.cv),shim er: 键携带纪元 → 该页全部
+//  矩形换键重传（首绘逐矩形区域上传,成本=受累矩形字节数,非整页）。shelf 新行/
+//  新页分配=纯新区,不覆写既有矩形,零 bump。
+import { bumpTexEpoch } from './texId';
+
 export interface TintRect { c: HTMLCanvasElement; x: number; y: number; w: number; h: number; }
+
 
 interface Page { cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D; rows: { y: number; h: number; w: number }[]; free: { x: number; y: number; w: number; h: number }[]; }
 interface Entry { rect: TintRect; page: Page; }
@@ -35,7 +44,7 @@ export class TintAtlas {
     if (w <= 0 || h <= 0 || w > MAX_ENTRY || h > MAX_ENTRY) return null;
     const spot = this.alloc(w, h);
     if (!spot) return null;
-    const [page, x, y] = spot;
+    const [page, x, y, recycled] = spot;
     // 私有 scratch 烘焙(全局 gCO 语义安全),再整块搬进页
     if (!this.scratchCv) this.scratchCv = document.createElement('canvas');
     if (this.scratchCv.width < w || this.scratchCv.height < h) {
@@ -54,6 +63,9 @@ export class TintAtlas {
     //  透出旧 tq 紫色帧残影)。目标矩形先 clearRect 再 blit 即根治(全 tint 族受益)。
     page.ctx.clearRect(x, y, w, h);
     page.ctx.drawImage(this.scratchCv, 0, 0, w, h, x, y, w, h);
+    // ★纪元换键:回收矩形=对既有矩形区的原地覆写——bump 页纪元令 shim er: 键
+    //  失效重传（FX24 clearRect 修复只清了页内残影,GL 缓存层此案由纪元键收口）
+    if (recycled) bumpTexEpoch(page.cv);
     const rect: TintRect = { c: page.cv, x, y, w, h };
     this.entries.set(key, { rect, page });
     return rect;
@@ -86,7 +98,9 @@ export class TintAtlas {
     }
   }
 
-  private alloc(w: number, h: number): [Page, number, number] | null {
+  /** 返回 [page, x, y, recycled]——recycled=true=该矩形来自 free-list（回收复用,
+   *  覆写既有像素区;调用方须 bump 页纪元）。shelf 新行/新页=纯新区恒 false。 */
+  private alloc(w: number, h: number): [Page, number, number, boolean] | null {
     for (let attempt = 0; attempt < 2; attempt++) {
       // ① 既有页:free-list 最优适应(能放下里的最小面积)→ 分裂余量
       let best: { page: Page; i: number; area: number } | null = null;
@@ -104,7 +118,7 @@ export class TintAtlas {
         const x = f.x, y = f.y;
         if (f.w > w) best.page.free.push({ x: x + w, y, w: f.w - w, h });
         if (f.h > h) best.page.free.push({ x, y: y + h, w, h: f.h - h });
-        return [best.page, x, y];
+        return [best.page, x, y, true];
       }
       // ② 各页 shelf:追加新行(行高 = h,现有行尾放得下优先)
       for (const page of this.pages) {
@@ -112,7 +126,7 @@ export class TintAtlas {
           if (row.h >= h && PAGE - row.w >= w) {
             const x = row.w, y = row.y;
             row.w += w;
-            return [page, x, y];
+            return [page, x, y, false];
           }
         }
         // 新行
@@ -123,7 +137,7 @@ export class TintAtlas {
           page.rows.push(row);
           const x = 0;
           row.w = w;
-          return [page, x, row.y];
+          return [page, x, row.y, false];
         }
       }
       // ③ 新页
@@ -133,7 +147,7 @@ export class TintAtlas {
         const ctx = cv.getContext('2d')!;
         const page: Page = { cv, ctx, rows: [{ y: 0, h, w }], free: [] };
         this.pages.push(page);
-        return [page, 0, 0];
+        return [page, 0, 0, false];
       }
       // ④ 页满:逐出最冷 16 条重试一轮
       if (attempt === 0) this.evictCold(16);

@@ -236,7 +236,8 @@ function dollEquipFromInv(inv: Inventory, app?: import('../player/Appearance').A
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow,
-  liqgl, emitVanillaLiquidGate, resetLiquidBatchForFrame, type LiqBatchEmit } from './VanillaLiquidRenderer';
+  liqgl, emitVanillaLiquidGate, resetLiquidBatchForFrame, replayLiquidFootQuads2D, liqRingOverflow,
+  type LiqBatchEmit } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample, type WaveFrameInput } from './WaterWaves';
 import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv, DRAW_Y_OFFSET, drawVanillaCell, tileTopOf } from './VanillaTiler';
@@ -2991,10 +2992,23 @@ export class Renderer {
   }
 
   /** ★B2b FBO('world') → 世界纹理句柄（GLWorldCompose compose 直采;uWorldFlip=1
-   *  =GL 朝向翻转采样,见 GLWorldCompose LIT_FRAG 注）。 */
+   *  =GL 朝向翻转采样,见 GLWorldCompose LIT_FRAG 注）。★R1b-2:携带产生面上下文
+   *  （gl）=compose 侧跨上下文校验判据（pipeGlId 判例,GLScreenFilters 同族）。 */
   private accHandle(f: PipelineFbo): WorldTexSrc | null {
     if (!f.tex) return null;
-    return { tex: f.tex, w: f.w, h: f.h, flipY: 1 };
+    return { tex: f.tex, w: f.w, h: f.h, flipY: 1, gl: this.swPipe?.glx ?? undefined };
+  }
+
+  /** ★R1b-2 worldCompose 一致性确保：实例存在但 ownsPipe 与当前 cloudPipe 旗错位
+   *  （运行时翻旗 setCloudPipeForTest/页内翻面范式——0→1 翻转后旧自建实例仍在,
+   *  acc 门重开而 compose 仍在另一上下文=跨上下文句柄）→ 整弃重建（构造零成本,
+   *  失败由 newWorldCompose null 支每帧重试兜底）。 */
+  private ensureWorldCompose(): void {
+    if (this.worldCompose && this.worldCompose.ownsPipe !== !Renderer.cloudPipe) {
+      this.worldCompose.dispose();
+      this.worldCompose = null;
+    }
+    this.worldCompose ??= this.newWorldCompose();
   }
 
   /** ★B2b FBO 世界面读回（CPU 乘光回退链的 GL 读回替代,2026-09-24）：
@@ -3261,7 +3275,7 @@ export class Renderer {
       this.dropCloudPipe();
     }
     if (performance.now() < this.cloudPipeRetryAt) return null;
-    if (starvedLock()) return null;
+    if (starvedLock()) { this.notifySwPipeDegrade(); return null; }   // ★R1b-4:塌方 toast 补 wfbo=0/lrecon=0 会话
     const pipe = this.acquireSwPipe();
     // ★P0-A:30s 定值闩→渐进阶（2-3.5-5s;swpipe 侧已自记指纹,层闩只管本层重试节奏）
     if (!pipe) { this.armRetryLatch('cloud'); return null; }
@@ -3322,7 +3336,7 @@ export class Renderer {
       this.dropWorldPipe();
     }
     if (performance.now() < this.worldPipeRetryAt) { this.markWorldGlSkip('backoff'); return null; }
-    if (starvedLock()) { this.markWorldGlSkip('starvelock'); return null; }
+    if (starvedLock()) { this.markWorldGlSkip('starvelock'); this.notifySwPipeDegrade(); return null; }   // ★R1b-4 同上
     const pipe = this.acquireSwPipe();
     // ★P0-A:30s 定值闩→渐进阶（同 acquireCloudPipe 注）;失败因沿用 acquire 支归因
     if (!pipe) { this.armRetryLatch('world'); this.markWorldGlSkip((this.swPipeFailWhy || 'backoff') as 'backoff' | 'init-fail' | 'starvelock'); return null; }
@@ -3521,8 +3535,16 @@ export class Renderer {
       this.composeSkipFrames++;
       this.composeSkipStreak++;
     }
+    // ★R1b-4 连带（BJ258 通道漏报补）：toast 收口统一到本指纹点——?wfbo=0/
+    //  ?lrecon=0 会话无 compose 消费方,塌方 toast 此前只挂在 newWorldCompose
+    //  null 支=这两类逃生门会话永远听不到「已临时回退 2D」。notify 内部
+    //  一次/episode 去重,与既有 compose 支提示面同通道。
+    this.notifySwPipeDegrade();
   }
-  /** ★P0-A 渐进退避闩武装（2→3.5→5s 封顶;成功归零）+半开试探失败登记 */
+  /** ★P0-A 渐进退避闩武装（2→3.5→5s 封顶;成功归零）+半开试探失败登记。
+   *  ★R1b-4（2026-09-27 红蓝批 β）：noteStarveProbeFail 只对 kind='swpipe'（试探
+   *  单元=管线本体试建）——cloud/world 层闩武装不再打断全局试探 streak（试探成功
+   *  后被既有下游失败支清零=闭合永不可达的同族病灶） */
   private armRetryLatch(kind: 'swpipe' | 'cloud' | 'world'): void {
     const idx = kind === 'swpipe' ? this.swPipeRetryLadder
       : kind === 'cloud' ? this.cloudPipeRetryLadder : this.worldPipeRetryLadder;
@@ -3531,7 +3553,7 @@ export class Renderer {
     if (kind === 'swpipe') { this.swPipeRetryAt = at; this.swPipeRetryLadder++; }
     else if (kind === 'cloud') { this.cloudPipeRetryAt = at; this.cloudPipeRetryLadder++; }
     else { this.worldPipeRetryAt = at; this.worldPipeRetryLadder++; }
-    noteStarveProbeFail();
+    if (kind === 'swpipe') noteStarveProbeFail();
   }
   /** 共管管线获取:活实例直取;死亡 5s 退避;初始化失败渐进闩（2-5s,P0-A）;饥饿锁同门。
    *  ★P0-A:各失败支写指纹（markSwPipeSkip）;成功支半开试探登记+episode 再武装。 */
@@ -3548,6 +3570,11 @@ export class Renderer {
         this.swPipeLastOkAt = now;
         this.swPipeFailWhy = '';
         this.composeSkipStreak = 0;
+        // ★R1b-4:健康早退支幂等补记半开试探成功——旧码只记新建支,首拍建链后
+        // 后续拍全走本支不记 → streak 恒 1 → 90s 锁窗内 compose/cloud/world 恒
+        // null（acc 帧全幅 readPixels）。GLStats 内按 STARVE_PROBE_MS 同拍去重,
+        // 多消费方同帧串联确认只计一拍。
+        noteStarveProbeOk();
         return cur;
       }
       if (performance.now() - cur.diedAt < 5000) { this.markSwPipeSkip('backoff'); return null; }   // 退避窗（哨兵同款）
@@ -3617,7 +3644,8 @@ export class Renderer {
     const pipe = this.acquireSwPipe();
     if (!pipe) {
       // ★P0-A(R1-F10 续):静默返 null+每帧 ??= 重试不写指纹=F5 盲区主犯——
-      //  skip 帧按 acquire 失败因落账（acquire 支本帧已记则帧去重跳过）+notify 一次性 toast。
+      //  skip 帧按 acquire 失败因落账+notify 一次性 toast（★R1b-4 后 markSwPipeSkip
+      //  亦统一收口 toast,此处显式保留=compose 消费方语义自描述;notify 幂等去重）。
       this.markSwPipeSkip((this.swPipeFailWhy || 'backoff') as 'backoff' | 'init-fail' | 'starvelock');
       this.notifySwPipeDegrade();
       return null;
@@ -6511,9 +6539,13 @@ export class Renderer {
     //   微光染色顶点化（applyShimmerBaseTint 批路径退役）+warpOn 前景水 gate FBO 化
     //   （fgCanvas 的 texRefresh 全幅上传+compose 全幅 texSubImage2D 双上传退役）。
     //   预检失败（非 acc 帧/GL 死/旗关）=bg/fg 双路径全链回 CPU 原路（并存纪律）。
-    //   【句柄跨上下文安全】_accGlw 与 worldCompose 共用同一 swPipe 管线
-    //   （acquireWorldGl→acquireSwPipe;cloudPipe=0 时 acquireWorldGl 不可用=acc 关
-    //   =liqMode 恒 false=句柄永不产生）——'liqgate' FBO 纹理对 compose 恒同上下文。
+    //   【句柄跨上下文安全★R1b-2 定谳改注】句柄产生面前提=acc 累积态,而 acc 态
+    //   现【显式门在 cloudPipe】（beginWorldLayer;旧头注「cloudPipe=0 时
+    //   acquireWorldGl 不可用」为虚假前提——acquireWorldGl→acquireSwPipe 与旗无关,
+    //   cloudpipe=0 下 acc 照开+句柄流入自建 worldCompose 上下文=INVALID_OPERATION
+    //   实锤）。今:①acc 门加 cloudPipe（cloudpipe=0 → acc 关 → liqMode 恒 false
+    //   → 句柄永不产生,本前提归真）;②句柄携带产生面 gl,compose 入口跨上下文
+    //   校验结构性拦死（ensureWorldCompose 旗面错位重建+GLWorldCompose 守卫双防线）。
     const liqMode = liqgl && this._accMode === 'acc' && !this.isCpuRender();
     if (isBackground) {
       this._liqGateHandle = null;   // 帧界复位（canvas 原路帧不得消费上帧句柄）
@@ -6531,7 +6563,10 @@ export class Renderer {
         world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, warpOn, glintLumAt, this.animTick, footCtx,
         bat, liqMode && warpOn);
     } else if (warpOn) {
-      const bat = liqMode ? this.liqBatchHook() : null;
+      // ★R1b-8②：批环已溢出（bg 段触发 16384 帽）→ fg 回 canvas gate 原链——
+      //  批化支 _fgRuns 空/缺段=gate 缺水主体（足迹子集）≈0,整帧位移场丢。
+      //  canvas 链 gate=fgCanvas 全量内容,足迹由 replayLiquidFootQuads2D 补画。
+      const bat = liqMode && !liqRingOverflow() ? this.liqBatchHook() : null;
       if (bat) {
         // ★liqgl：前景水直入 FBO('world')（批化段;SO 合成结合律
         //  (w over ∅) over scene ≡ w over scene=endFgPass 1:1 合成逐位同,B1 判例）
@@ -6541,6 +6576,10 @@ export class Renderer {
         this.emitLiquidGate(this._worldLowW, this._worldLowH);
       } else {
         const fgCtx = this.waterWarp.beginFgPass(this.ctx);
+        // ★R1b-8①：混合帧足迹补画——bg 批化帧足迹收集在 _footQuads（footCtx
+        //  路径未走）,fg 回 canvas gate 路径时经此落进前景离屏（bg 同序同 α 语义;
+        //  纯 canvas 帧 _footQuads 恒空=no-op）
+        if (fgCtx) replayLiquidFootQuads2D(fgCtx);
         drawVanillaLiquids(fgCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
           world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, true, glintLumAt, this.animTick);
         if (fgCtx) {
@@ -7423,6 +7462,43 @@ export class Renderer {
     }
   }
 
+  /** ★变体①终扫（2026-09-27）:共享 scratch 逐次烘焙的 bolt 判例上传口——
+   *  在【bake 完成点】调用（bake→draw 相邻序列）;键=前缀+环形序号（环形窗须
+   *  ≥ 该面前单帧最大烘焙数,窗内复用=先行 rec 纹理被原地改写=shine 单键回归
+   *  教训;序号按家族独立计数,共享计数器的模环会跨家族互扰）。并 markDynamic
+   *  兜底（无 bake 的散画走 flush 期刷新=2D 语义）。非 bgl/裸 2D 会话 no-op。
+   *  ★R3b-6（2026-09-27 红蓝批 β）：计数【帧界重置】——跨帧单调计数曾让瞬态
+   *  家族键（bv:<实体 id> 族）在本 Map 永久驻留=无界增长;现每帧从 1 起算,
+   *  帧内不复用语义不变（rec 帧界清空,跨帧键复用只会撞上已退休纹理,texRefresh
+   *  重传幂等）。家族触帧账 600 帧未触即删（瞬态 id 账随实体消亡退休）。 */
+  uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number): void {
+    if (!Renderer.bgl || !Renderer.bglShim) return;
+    const sh = this.bglShimReg();
+    sh.markDynamic(img);
+    const f = this._diagFrame;
+    if (this._scratchBakeSweepFrame !== f) {
+      this._scratchBakeSweepFrame = f;
+      if (this.scratchBakeSeqs.size > 64) {
+        for (const [k, v] of this.scratchBakeSeqs) if (f - v.f > 600) this.scratchBakeSeqs.delete(k);
+      }
+    }
+    const rec = this.scratchBakeSeqs.get(fam);
+    const n = rec && rec.f === f ? rec.n + 1 : 1;
+    this.scratchBakeSeqs.set(fam, { n, f });
+    sh.uploadScratchNow(img, `${fam}:${n % ring}`);
+  }
+  /** 共享 scratch 烘焙环形序号（按家族独立;★R3b-6 帧界重置+触帧账:
+   *  n=帧内序号,f=最近触帧——600 帧未触家族删账防瞬态实体 id 键驻留） */
+  private scratchBakeSeqs = new Map<string, { n: number; f: number }>();
+  private _scratchBakeSweepFrame = -1;
+  /** ★R3b-1（2026-09-27）:尘族烘焙环形容量 = 尘池上界（VanillaDust POOL=6000,
+   *  Main.cs:734 dust=new Dust[6000]）。同帧烘焙数上界=池容量（A=0 直绘族逐尘
+   *  1×dustTint + 43/66 带 color 再 1×dustColor、染料档 dustDye）——环形窗<池容量
+   *  时 n%ring 同帧撞键=先行 rec 纹理（同键 texRefresh 原地改写）被覆写,flush 期
+   *  错拿末次烘焙字节（I类 bolt 同病;彩虹火把群/183/258 字面色档/爆窗 A=0 族
+   *  单帧可 1500+）。6000=3 家族各 6000 键×8×8×4B≈4.6MB,192MB LRU 无逐出压力。 */
+  private static readonly DUST_BAKE_RING = 6000;
+
   /** 预乘对两步绘制（须在尘变换内调用;ox/oy = origin 偏移,缺省 −4 = 原版 (4,4)）。
    *  mul = Color×k 档（同乘擦除强度与加性项——XNA 里 Color×k 逐通道含 α,如 264
    *  拖影 GetAlpha×0.3）。出口复位 gCO/globalAlpha。 */
@@ -7541,6 +7617,9 @@ export class Renderer {
           ida.data[i + 2] = ida.data[i + 2] * mB;
         }
         c1.putImageData(ida, 0, 0);
+        // ★变体①终扫:逐尘烘焙即刻上传（markDynamic 的 flush 期刷新读【末次】烘焙
+        //  字节——同帧多尘异 tint 时先行尘 quad 全错拿末尘内容,I类 bolt 同病）
+        this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING);   // ★R3b-1:环=池上界 6000（旧 1024<池=同帧撞键）
         ctx.save();
         ctx.translate(px, py);
         if (d.rotation) ctx.rotate(d.rotation);
@@ -7568,6 +7647,7 @@ export class Renderer {
               idc.data[i + 2] = idc.data[i + 2] * cp43.b;
             }
             c2.putImageData(idc, 0, 0);
+            this.uploadScratchBake(s2, 'dustColor', Renderer.DUST_BAKE_RING);   // ★变体①终扫:逐尘烘焙即刻上传;★R3b-1:环=池上界 6000
             ctx.save();
             ctx.translate(px, py);
             if (d.rotation) ctx.rotate(d.rotation);
@@ -7663,7 +7743,10 @@ export class Renderer {
                 cc.getContext('2d', { willReadFrequently: true })!.drawImage(s2, 0, 0);
                 this.dustDyeCache!.set(key, cc);
                 canvas = cc;
-              } else canvas = null;   // 动态族直接用 s2 现画
+              } else {
+                canvas = null;   // 动态族直接用 s2 现画
+                this.uploadScratchBake(s2, 'dustDye', Renderer.DUST_BAKE_RING);   // ★变体①终扫:逐尘烘焙即刻上传;★R3b-1:环=池上界 6000
+              }
             } else canvas = null;
           }
           if (canvas !== null) {
@@ -10669,6 +10752,9 @@ export class Renderer {
       silCtx.fillStyle = '#000';
       silCtx.fillRect(0, 0, CW, CH);
       silCtx.globalCompositeOperation = 'source-over';
+      // ★变体①终扫:逐层烘焙即刻上传——同帧多层（拖尾 17 段+本体族）共享
+      //  _faelingSil 每层重画,markDynamic 的 flush 期刷新读末层字节=先行层全错
+      this.uploadScratchBake(silC, 'faelingSil', 256);
       ctx.globalAlpha = Math.max(0, Math.min(1, ma));
       ctx.drawImage(silC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
       ctx.globalAlpha = 1;
@@ -10685,6 +10771,7 @@ export class Renderer {
       tintCtx.globalCompositeOperation = 'destination-in';
       tintCtx.drawImage(img, sx, sy, CW, CH, 0, 0, CW, CH);
       tintCtx.globalCompositeOperation = 'source-over';
+      this.uploadScratchBake(tintC, 'faelingTint', 256);   // ★变体①终扫:逐层烘焙即刻上传
       ctx.globalCompositeOperation = 'lighter';
       ctx.drawImage(tintC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
     } else {
@@ -12406,6 +12493,9 @@ export class Renderer {
       this.ctx = savedCtx;
       sctx.setTransform(1, 0, 0, 1, 0, 0);
       sctx.globalCompositeOperation = 'source-over';
+      // ★变体①终扫:逐部件烘焙即刻上传（scratch 每部件重烤+变尺寸,flush 期刷新
+      //  读末部件字节=先行部件补差全错;环形键窗 16 ≥ 单帧部件数 ≤4,窗内不复用）
+      this.uploadScratchBake(scratch, 'mlfloor', 16);
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.globalCompositeOperation = 'lighter';
@@ -12623,6 +12713,9 @@ export class Renderer {
           sctx.fillStyle = `rgb(${cr},${cg},255)`;
           sctx.fillRect(0, 0, scratch.width, scratch.height);
           sctx.globalCompositeOperation = 'source-over';
+          // ★变体①终扫:逐段烘焙即刻上传（scratch 每段重画,flush 期刷新读末段
+          //  字节=先行段全错;键=(实体,段序) 帧内唯一/跨帧稳定=零纹理抖动）
+          this.uploadScratchBake(scratch, `bv:${e.id}`, 512);
           const [sxp, syp] = cam.worldToScreen(px, py);
           ctx.save();
           ctx.translate(sxp, syp);
@@ -14786,6 +14879,9 @@ export class Renderer {
           { sx, sy, sheetW: img.width, sheetH: img.height });
         c.putImageData(id, 0, 0);
       }
+      // ★变体①终扫:终内容烘焙即刻上传（tintSlice+染料折叠全落 wingTintScratch
+      //  共享面,同帧多次烘焙——markDynamic flush 期刷新读末次字节=先行层全错）
+      if (sc) this.uploadScratchBake(sc, 'wingTint', 128);
       return sc;
     };
     /** 纯加色 scratch（Color(255³,0)·f 族——A=0 预乘 = 纯加色，StringLine.ts 同法）：
@@ -14805,6 +14901,7 @@ export class Renderer {
       if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
         { sx, sy, sheetW: img.width, sheetH: img.height });
       sctx.putImageData(id, 0, 0);
+      this.uploadScratchBake(sc, 'wingTint', 128);   // ★变体①终扫:终内容即刻上传
       return sc;
     };
     switch (ov.kind) {
@@ -14927,6 +15024,7 @@ export class Renderer {
             }
             c38.putImageData(id38, 0, 0);
           }
+          this.uploadScratchBake(sc, 'wingTint', 128);   // ★变体①终扫:终内容即刻上传
           ctx.save();
           ctx.globalAlpha = imA;
           ctx.drawImage(sc, -(s.sw - 2) / 2, -(s.sh - 2) / 2);
@@ -14992,6 +15090,7 @@ export class Renderer {
         if (dye) this.applyDyeToImageData(id.data, s.sw, s.sh, dye,
           { sx: 0, sy: s.sy, sheetW: img.width, sheetH: img.height });
         sctx.putImageData(id, 0, 0);
+        this.uploadScratchBake(sc, 'wingTint', 128);   // ★变体①终扫:终内容即刻上传
         ctx.save();
         ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
         ctx.restore();
@@ -16271,6 +16370,9 @@ export class Renderer {
             tc.fillRect(0, 0, img.width, fh);
             tc.globalCompositeOperation = 'destination-in';
             tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
+            // ★变体①终扫:逐次烘焙即刻上传（共享单面,多玩家/多坐骑同帧多次烘焙,
+            //  markDynamic flush 期刷新读末次字节=先行玩家坐骑染面全错）
+            this.uploadScratchBake(c, 'mountTint', 64);
             const keep = ctx.globalAlpha;
             ctx.globalAlpha = keep * (127 / 255) * wash;
             ctx.drawImage(c, 0, 0, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
@@ -16300,6 +16402,7 @@ export class Renderer {
             tc.globalCompositeOperation = 'destination-in';
             tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
             tc.globalCompositeOperation = 'source-over';
+            this.uploadScratchBake(c, 'mountTint', 64);   // ★变体①终扫:终内容即刻上传
             ctx.drawImage(c, 0, 0, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
           } else {
             ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
@@ -16396,6 +16499,7 @@ export class Renderer {
                 tc.globalCompositeOperation = 'destination-in';
                 tc.drawImage(ex, 0, efr * efh, ex.width, efh, 0, 0, ex.width, efh);
                 tc.globalCompositeOperation = 'source-over';
+                this.uploadScratchBake(c, 'mountTint', 64);   // ★变体①终扫:终内容即刻上传
                 ctx.globalAlpha = ga * 0.65;                              // A×0.65（:5815）
                 ctx.drawImage(c, 0, 0, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
                 ctx.globalAlpha = ga;
@@ -18089,7 +18193,13 @@ export class Renderer {
     this._worldLowW = lw; this._worldLowH = lh;
     // ★B2b 累积态判定（帧级）
     this._accMode = 'off'; this._accGlw = null;
-    if (Renderer.bgl && Renderer.bglShim && Renderer.b2b && !this.isCpuRender()) {
+    // ★R1b-2（2026-09-27 红蓝批 β）：acc 累积态加 cloudPipe 门——acc 帧的
+    //  FBO('world')/'liqgate' 纹理句柄只允许流共管管线（swPipe）;?cloudpipe=0
+    //  逃生门下 worldCompose 自建独立上下文（newWorldCompose 旧行为保留）,acc
+    //  句柄流入即跨上下文 bindTexture=INVALID_OPERATION（世界消失+全屏最大扭曲,
+    //  09-23 同 signature）。门关=acc 整体回 B1/B2 桥接态（worldCanvas 全链,
+    //  compose 吃 canvas 上传=全量旧行为,句柄永不产生——liqgl 头注前提归真）。
+    if (Renderer.bgl && Renderer.bglShim && Renderer.b2b && Renderer.cloudPipe && !this.isCpuRender()) {
       const glw = this.acquireWorldGl();
       if (glw && !glw.unavailable) {
         glw.resize(lw, lh);
@@ -18398,8 +18508,9 @@ export class Renderer {
     //  ★B2b:worldCanvas 缺席的 acc 帧=accHandle(FBO('world')) 句柄换指（A 线
     //  compose 面零改动——句柄型入参走直采,uWorldFlip=1 朝向链）。
     if (Renderer.wfbo && Renderer.lrecon && !this.isCpuRender() && (accFbo?.tex || this.worldCanvas)) {
-      // ★R1-F10:构造口可返 null（共管管线退避窗）——null 安全,下帧 ??= 重试
-      this.worldCompose ??= this.newWorldCompose();
+      // ★R1-F10:构造口可返 null（共管管线退避窗）——null 安全,下帧 ??= 重试;
+      //  ★R1b-2:换 ensureWorldCompose（旗面错位实例整弃重建）
+      this.ensureWorldCompose();
       const wcL = this.worldCompose?.acquire() ?? null;
       // ★P0 闩位收口（2026-09-25）:rawBroken/lreconDead 是逐上下文确定性闩（RGBA8UI
       //  驱动拒收/程序编译死位,不自愈）——置位后 compose guard 每帧早退,而本分支
@@ -18666,8 +18777,9 @@ export class Renderer {
       //   驻留 FBO,扭曲 pass 直采 FBO 纹理（旧链 scene 全帧重传+GL→2D→GL 乒乓消灭）,
       //   present 单次回贴。失败/unavailable → 落回下方旧链（双路径并存,对拍期纪律）。
       if (Renderer.wfbo && !this.isCpuRender()) {
-        // ★R1-F10:构造口可返 null（共管管线退避窗）——null 安全,下帧 ??= 重试
-        this.worldCompose ??= this.newWorldCompose();
+        // ★R1-F10:构造口可返 null（共管管线退避窗）——null 安全,下帧 ??= 重试;
+        //  ★R1b-2:换 ensureWorldCompose（旗面错位实例整弃重建）
+        this.ensureWorldCompose();
         const wc = this.worldCompose?.acquire() ?? null;
         if (wc) {
           // warp 激活判定与旧链 :16925 同源（同四门:帧态/软渲染/waveQuality/旱地探针）

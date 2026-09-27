@@ -787,8 +787,15 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
         parent.ai1 = 0;
         return;
       }
+      // ★BJ347-②：仪式态克隆体可击（justHit 消费窗）——须显式清持续态
+      // （原版 flag3/flag4 每 tick 重算,本仓 dontTakeDamage 持续位需两向写）
+      e.dontTakeDamage = false;
     } else {
-      e.iframes = 2; // flag3/flag4 → dontTakeDamage(chaseable=false,:65015)
+      // ★BJ347-②：仪式窗外克隆体无敌=原版 flag3/flag4（:65211-65212,合流
+      //  dontTakeDamage=flag3 :66108,持续态）——旧 iframes=2 每 tick 刷新近似被
+      //  hurt 免疫门 pierce===1 豁免绕过（Enemy.hurt `pierce!==1 && iframes>0`,
+      //  R23b-P1 同族反模式）→ 箭/枪弹/多数随从可打仪式窗外克隆体=偏差
+      e.dontTakeDamage = true;
     }
   } else if (!e.bInit) {
     // :65047-65057 localAI[0]==0:音效 + alpha=255 + ai[0]=-1(出生显形)
@@ -857,7 +864,9 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
   // ---- ai0 == -1 出生显形(:65059-65109):420t,前段不可选中;300t 起上浮 ----
   if (e.ai0 === -1) {
     e.spawnAlpha = Math.max(0, 254 - e.ai1 * 5); // :65066 alpha -= 5/tick
-    e.iframes = 2; // flag3/flag4 → dontTakeDamage
+    // ★BJ347-②：显形窗无敌=原版 flag3/flag4 持续态(:65345-65346,合流 :66108)——
+    //  旧 iframes=2 每 tick 刷新被 hurt 免疫门 pierce===1 豁免绕过（R23b-P1 同族反模式）
+    e.dontTakeDamage = true;
     e.ai1 += 1;
     if (e.ai1 > 360) { e.vx *= 0.95; e.vy *= 0.95; }      // :65109-65111 收势阻尼
     else if (e.ai1 > 300) { e.vx = 0; e.vy = -1; }        // :65113-65115 velocity=-UnitY
@@ -869,6 +878,11 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     if (e.ai1 >= 420) { e.ai0 = 0; e.ai1 = 0; e.spawnAlpha = 0; }
     return;
   }
+  // ★BJ347-②：非显形 tick 显式清显形无敌（dontTakeDamage 持续位须两向写,
+  //  原版 flag3/flag4 每 tick 重算——战斗态/仪式态本体可击）。
+  //  ★仅真身：克隆体无敌位在本函数克隆分支内两向自洽（窗外 true/仪式窗 false）,
+  //  此处误清会覆盖克隆体窗外无敌相
+  if (isReal) e.dontTakeDamage = false;
 
   // ---- ai0 == 0 选招(:65110-65336):40t 后按 ai3 拍号取招(flag2 门控,克隆体不选) ----
   if (e.ai0 === 0) {

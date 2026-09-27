@@ -1496,6 +1496,12 @@ export class Enemy extends Entity {
     // 恒不可击（def.dontTakeDamage 提取面不含此字段,手补表同款;曾缺=可被磨死/放死音/
     // 出尸块,地牢永久威胁可被清空——2026-09-02 红蓝对抗完备性批评定谳补）
     if (id === 70 || id === 72) e.dontTakeDamage = true;
+    // ★BJ347-② 437 神秘石碑 SetDefaults(:14219) dontTakeDamage=true——恒不可击的
+    //  仪式锚（"跪拜魔法阵"本体;AI_083a 全程无解除点）。曾用 iframes=2 每 tick 刷新
+    //  近似（bossAI_lunar_misc）被 hurt 免疫门 pierce===1 豁免绕过（箭/枪弹/多数
+    //  随从可磨死 400 血石碑）→ 四守卫随碑亡消散、召唤链中止不出教主=用户实报。
+    //  手补表同款（提取面不含此字段）
+    if (id === 437) e.dontTakeDamage = true;
     // SetDefaults immortal（NPC.cs:14630 假人 488/:17715 雕像宝箱怪 690——690 的
     // 显隐态由其 AI :43873 翻 false）。DoT 直扣路径以本位守卫（GetHurtByDebuff
     // :92995 同款）——DoT/血条曾绕过 488 守卫（2026-09-02 用户实报闪烁血条）

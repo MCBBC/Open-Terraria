@@ -1278,13 +1278,9 @@ export class Dart extends Entity {
     ctx.globalAlpha = 1;
     if (whiteFilter) ctx.filter = 'none';   // 出界显式复位（save/restore 本身已还原,双保险）
     if (drawn) return;
-    // 贴图未就绪:短线兜底(方向与弹速一致)
-    ctx.strokeStyle = st.fallback ?? '#C8B89A';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(this.cx, this.cy);
-    ctx.lineTo(this.cx - this.vx * 1.6, this.cy - this.vy * 1.6);
-    ctx.stroke();
+    // ★P0-B（2026-09-27）贴图未就绪帧不画（旧「短线兜底(方向与弹速一致)」已摘）:
+    //  路径 op 在 acc 态=每弹每帧 rasterizePathOp 隔离栅格化+整幅上传（Arrow.draw
+    //  同案同判）;懒加载 1-2 帧到位自愈,原版加载期亦短暂隐形。
   }
 
   /** 537 束体三段绘制（Main.cs:32124-32156）：炮口行(0,0,w,22) origin=行中心 →
@@ -2983,7 +2979,7 @@ interface DartStyle {
   home?: { spd: number; lerp: number; range: number };   // 293 追踪(AI_051)
   noTex?: boolean;                       // 贴图空桩,纯尘埃视觉(299)
   pulse?: boolean;                       // alpha/scale 呼吸(115)
-  fallback?: string;                     // 贴图未就绪短线色
+  fallback?: string;                     // ★P0-B 2026-09-27 起退役字段（短线兜底已摘,表值留存无消费;勿再接线）
   /** DrawProjDirect 轨迹支绘前白化（Main.cs:30068 projectileColor=Lighting.GetColor
    *  格光色 → :30841-30856 Lerp(projectileColor,White,k)）——k = 本仓终值。
    *  canvas 侧以 ctx.filter brightness/saturate 近似（lerpWhiteFilter,公式同
