@@ -12052,13 +12052,20 @@ export class Renderer {
    *  覆层 Extra_29（+(0,4) 旋转，行 = localAI[3]/5）/Extra_25（+(0,214) 旋转，行 =
    *  localAI[2]/7）——localAI[0..3] 由 moonLordHeadAI 镜像 lai0-3；rotation 仅 -3
    *  永闭态写（:37767 lerp π/12，e.spin 承载），活态恒 0（spin 另载瞳角 lai0） */
-  /** 491 荷兰飞盗船（Main.cs:24263-24324 case 491 独占 1:1）：
+  /** 491 荷兰飞盗船（Main.cs:24997-25053 case 491 独占 1:1）：
    *  船体 590×534 锚 OriginFlip(208,460)（翻转取 590-208）；vector37.X 随
-   *  spriteDirection（vx<0→facing=-1→Flip）；附加件全部随 rotation 旋转：
-   *  旗 Extra40 4f@(102,-384) 底中锚 / 桨 Extra41 8f×5@(-96+34i,40) /
-   *  帆1 Extra42 4f×2@(158-106i,-302) / 帆2 Extra43 4f×2@(42-178i,-444) /
-   *  帆3 Extra44 4f@(-134,-302) / 帆4 Extra45 4f(相位差 2+num112)@(-60,-330) /
-   *  炮 NPC_492 九帧（行=ai2 瞄准帧）×4@(-122+68i,-20)。 */
+   *  spriteDirection（vx<0→facing=-1→Flip）；附加件全部随 rotation 旋转。贴图帧
+   *  一律 Texture2D.Frame(1,N) 纵切（源 y=行×帧高），XNA origin 语义换算 dst 顶左
+   *  = vector − origin（origin.x=帧宽/2 → 翻转两反相抵，dst 与朝向无关）：
+   *  旗 Extra40 Frame(1,4) 56×44，origin Size×(0.5,1) 底中 → (74,-428) /
+   *  桨 Extra41 Frame(1,8) 60×88，origin Size×(0.5,0)+(0,10) → (-126+34i,30)×5 /
+   *  帆1 Extra42 Frame(1,4) 72×160 顶中 → (122-106i,-302)×2 /
+   *  帆2 Extra43 Frame(1,4) 48×90 顶中 → (18-178i,-444)×2 /
+   *  帆3 Extra44 Frame(1,4) 52×112 顶中 → (-160,-302) /
+   *  帆4 Extra45 Frame(1,4) 142×152 相位差 (2+num132)%4 顶中 → (-131,-330) /
+   *  炮 NPC_492 Frame(1,9) 48×48，帧行=炮实体 frame.Y=num×ai[2]（FindFrame
+   *  case 492 :71941-71943；ai[2]=八向瞄准帧，炮 AI :36095-36124）×4@(-146+68i,-30)。
+   *  ★曾横切（源 x=f×帧宽）+整幅高当帧高：f>0 源矩形越界=六贴图 f≥1 全缺帧。 */
   private drawDutchman(e: Enemy, entities: unknown[]) {
     if (!this.atlas) return;
     const hull = this.atlas.ensureVImage('vanilla/NPC_491.png');
@@ -12069,45 +12076,48 @@ export class Renderer {
     const ex44 = vimg('vanilla/Extra_44.png'), ex45 = vimg('vanilla/Extra_45.png');
     const canSheet = vimg('vanilla/NPC_492.png');
     const ctx = this.ctx;
-    const num112 = Math.floor(dutchmanAnim(e) / 8);          // :24272 localAI[3]/8
+    const num112 = Math.floor(dutchmanAnim(e) / 8);          // :39287 localAI[3]/8
     const flip = e.facing === -1;                            // spriteDirection==1→Flip（vx<0）
     const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(e.cx, e.cy);
-    ctx.rotate(e.visAngle);                                  // rotation = vx*0.025
+    ctx.rotate(e.visAngle);                                  // rotation = vx*0.025（:39339；FindFrame 无 case 491=不覆盖）
     if (flip) ctx.scale(-1, 1);
-    // 船体（:24265-24271）
+    // 船体（:25001-25004）
     ctx.drawImage(hull, -208, -460, hull.width, hull.height);
-    // 旗（:24272-24276）：4 帧 56×44，底中锚 (28,176)
+    // 旗（:25007-25010）：Frame(1,4) 纵切 56×44，origin (28,44) 底中 → 顶左 (74,-428)
     if (ex40?.width) {
       const f = num112 % 4;
-      ctx.drawImage(ex40, f * 56, 0, 56, 176, 102 - 28, -384 - 176, 56, 176);
+      ctx.drawImage(ex40, 0, f * 44, 56, 44, 74, -428, 56, 44);
     }
-    // 桨（:24277-24283）：8 帧 60×88，循环 5 次
+    // 桨（:25011-25017）：Frame(1,8) 纵切 60×88，origin (30,10) → 顶左 (-126+34i,30)×5
     if (ex41?.width) {
       const f = num112 % 8;
       for (let i = 0; i < 5; i++) {
-        ctx.drawImage(ex41, f * 60, 0, 60, 88, -96 + 34 * i, 40, 60, 88);
+        ctx.drawImage(ex41, 0, f * 88, 60, 88, -126 + 34 * i, 30, 60, 88);
       }
     }
-    // 帆1/2（:24284-24297）×2；帆3（:24298-24301）；帆4（:24302-24305，相位差帧）
+    // 帆1/2（:25018-25027）×2；帆3（:25032-25035）；帆4（:25036-25039，相位差帧）
+    // Frame(1,4) 纵切，origin Size×(0.5,0) 顶中 → 顶左 = vector − (帧宽/2, 0)
     const sail = (img: ImageBitmap | HTMLImageElement | null, fw: number, fh: number, dx: number, dy: number, frame: number) => {
       if (!img?.width) return;
-      ctx.drawImage(img, (frame % 4) * fw, 0, fw, fh, dx, dy, fw, fh);
+      ctx.drawImage(img, 0, (frame % 4) * fh, fw, fh, dx, dy, fw, fh);
     };
-    for (let i = 0; i < 2; i++) sail(ex42, 72, 160, 158 - 106 * i, -302, num112 % 4);
-    for (let i = 0; i < 2; i++) sail(ex43, 48, 90, 42 - 178 * i, -444, num112 % 4);
-    sail(ex44, 52, 112, -134, -302, num112 % 4);
-    sail(ex45, 142, 152, -60, -330, 2 + num112);
-    // 炮代画（:24306-24322）：船 ai[0..3]=炮实体 id；NPC_492 Frame(1,9)=48×48/帧
+    for (let i = 0; i < 2; i++) sail(ex42, 72, 160, 122 - 106 * i, -302, num112);
+    for (let i = 0; i < 2; i++) sail(ex43, 48, 90, 18 - 178 * i, -444, num112);
+    sail(ex44, 52, 112, -160, -302, num112);
+    sail(ex45, 142, 152, -131, -330, 2 + num112);
+    // 炮代画（:25040-25056）：船 ai[0..3]=炮实体 id；NPC_492 Frame(1,9) 纵切 48×48/帧，
+    // 帧行=炮 frame.Y=num×ai[2]（FindFrame case 492 :71941；ai[2]=八向瞄准帧）——
+    // ★处方"4t/帧循环钟"经反编译证伪（FindFrame case 75=仙女 Pixie，非炮 aiStyle 75）
     if (canSheet?.width) {
       for (let i = 0; i < 4; i++) {
         const cid = [e.ai0, e.ai1, e.ai2, e.ai3][i];
         const c = (entities as Enemy[]).find((n) => n instanceof Enemy && n.id === cid && !n.dead);
         if (!c) continue;
         const row = Math.max(0, Math.min(8, Math.round(c.ai2)));
-        ctx.drawImage(canSheet, 0, row * 48, 48, 48, -122 + 68 * i - 24, -20 - 10, 48, 48);
+        ctx.drawImage(canSheet, 0, row * 48, 48, 48, -146 + 68 * i, -30, 48, 48);
       }
     }
     ctx.restore();

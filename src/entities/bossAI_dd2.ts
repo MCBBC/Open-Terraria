@@ -678,11 +678,14 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
   }
   e.visAngle = e.vx * 0.025;                    // rotation = vx*0.025（:41011）
   e.facing = e.vx === 0 ? e.facing : -sign(e.vx); // spriteDirection = -sign(vx)（:41012）
-  // ---- 船底烟尘（:41013-41024 dust 228） ----
-  if (Math.random() < 0.5) {
-    game.spawnParticles(
-      e.cx + (Math.random() - 0.5) * (e.w - 70), e.y + e.h - 10,
-      '#E06A24', 1, 0.4, { life: 40, grav: -0.02, damp: 0.94 });
+  // ---- 船底烟尘（:39343-39356 dust 228）:每 t 循环 2 次、各 50% 概率
+  //      （期望 1/t;曾 1 次×50%=量减半,烟迹稀薄） ----
+  for (let i = 0; i < 2; i++) {
+    if (Math.random() < 0.5) {
+      game.spawnParticles(
+        e.cx + (Math.random() - 0.5) * (e.w - 70), e.y + e.h - 10,
+        '#E06A24', 1, 0.4, { life: 40, grav: -0.02, damp: 0.94 });
+    }
   }
   moveAndCollide(e, game.world, e.vx, e.vy);
   void ty;
@@ -721,11 +724,15 @@ export function dutchmanCannonAI(e: Enemy, game: GameHooks, player: Player | nul
       const vy = d.y * 14 - 5;
       shootD(game, e.cx, e.cy, vx, vy, 30, 240, 300, 0.25);
     } else {
-      // 瞄准帧（8 向索引,:36054-36070 的 ai[2] 语义;渲染未接,仅保状态）
+      // 瞄准帧（8 向索引,:36095-36124 的 ai[2] 语义;消费面=FindFrame case 492
+      // frame.Y=num×ai[2](:71941) → 船代画 NPC_492 九向炮管姿态）。探测基 =
+      // Vector2.UnitY.RotatedBy(-kπ/4)×50 = (sin,cos)×50（k=0 正下,顺时针 45° 步进;
+      // spriteDirection==1 → 9-ai[2] 镜像）。★曾用 (cos,sin)×(-kπ/4)=UnitX 基,
+      // 探测方位整体偏 2 八向(90°),炮管指向错档
       let best = 0, bestD = Infinity;
       for (let k = 0; k < 8; k++) {
-        const ax = e.cx + Math.cos(k * (-Math.PI / 4)) * 50;
-        const ay = e.cy + Math.sin(k * (-Math.PI / 4)) * 50;
+        const ax = e.cx + Math.sin(k * (Math.PI / 4)) * 50;
+        const ay = e.cy + Math.cos(k * (Math.PI / 4)) * 50;
         const d = Math.hypot(ax - player.cx, ay - player.cy);
         if (d < bestD) { bestD = d; best = k; }
       }
