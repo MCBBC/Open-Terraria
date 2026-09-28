@@ -139,6 +139,10 @@ export interface ItemOpMsg {
   /** 原版 msg21→145 升格段（SyncItemsWithShimmer，NetMessage.cs:88-92/:646-651）：
    *  微光态物品 spawn 附 shimmered+shimmerTime。尾读可选（旧发送端无此段） */
   shimmered?: boolean; shimmerTime?: number;
+  /** ★BJ390（2026-09-28）词缀尾段（u8,仅非 0 携带）——原版 msg21 本就同步 prefix
+   *  （MessageBuffer.cs:1476 worldItem.Prefix(prefix) 读流内 byte）;曾缺 → 带词缀
+   *  掉落跨端（NPC 掉落自然掷/持物丢弃/微光产物）到远端洗白。尾读可选（旧端无此段） */
+  prefix?: number;
 }
 
 export interface ClientNetHooks {
@@ -815,12 +819,18 @@ export class ClientNet {
           x = r.f32(); y = r.f32(); vx = r.f32(); vy = r.f32();
           // 145 尾段（u8 shimmered + f32 shimmerTime）：条件尾读——旧端/非微光
           // 发送无此段（同 StrikeNPC fromSlot 先例）
+          let shimmered: boolean | undefined;
+          let shimmerTime: number | undefined;
           if (r.remaining >= 5) {
-            const shimmered = r.u8() !== 0;
-            const shimmerTime = r.f32();
-            this.hooks.onItemOp?.({ op, netId, key, stack, x, y, vx, vy, shimmered, shimmerTime });
-            return;
+            shimmered = r.u8() !== 0;
+            shimmerTime = r.f32();
           }
+          // ★BJ390：词缀尾段（u8,仅非 0 携带,MessageBuffer.cs:1476 同域）——
+          // 尾读可选（旧发送端 shimmer 段后无残留;新端无词缀也不写）
+          let prefix: number | undefined;
+          if (r.remaining >= 1) prefix = r.u8();
+          this.hooks.onItemOp?.({ op, netId, key, stack, x, y, vx, vy, shimmered, shimmerTime, prefix });
+          return;
         }
         this.hooks.onItemOp?.({ op, netId, key, stack, x, y, vx, vy });
         return;
@@ -1402,7 +1412,7 @@ export class ClientNet {
    *  op 0=spawn / 1=take / 2=despawn。P1.3 上行合帧：入 pending 攒批（netDropSweep
    *  每 4 tick 可能逐条几十发），tick() 冲洗时拼为单条 WS 消息；满 64 帧立即冲防延迟 */
   sendItemOp(op: 0 | 1 | 2 | 3, netId: number, key = '', stack = 0, x = 0, y = 0, vx = 0, vy = 0,
-    shimmered = false, shimmerTime = 0) {
+    shimmered = false, shimmerTime = 0, prefix = 0) {
     // op3=残余上报（他端部分拾取我们的掉落后把余量报回，形状与 spawn 同——
     // 拥有端据此更新真身，防重 assert 回灌陈旧全量）
     const w = new NetWriter(Msg.SyncItem);
@@ -1411,6 +1421,9 @@ export class ClientNet {
       w.str(key); w.u16(stack);
       w.f32(x); w.f32(y); w.f32(vx); w.f32(vy);
       if (shimmered || shimmerTime > 0) { w.u8(1); w.f32(shimmerTime); }
+      // ★BJ390：词缀尾段（原版 msg21 逐 byte 同步 prefix,MessageBuffer.cs:1476）——
+      // 仅非 0 携带,接收端按 r.remaining>=1 兼容门尾读（旧发送端流上无残留）
+      if (prefix) w.u8(prefix);
     }
     this.pendingFrames.push(w.finish());
     if (this.pendingFrames.length >= 64) this.flushPending();

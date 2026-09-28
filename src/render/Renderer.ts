@@ -3147,10 +3147,16 @@ export class Renderer {
       this.worldCtxLayer.clearRect(0, 0, lw, lh);
     }
     // FBO 现量 present 到 worldCanvas（已画内容不丢;后续 GL 段恢复 B1/B2 桥接）
+    //  ★BJ387 同族守卫:回贴 gCO 显式 source-over——ambient gCO（gco 活跃点的
+    //  accFail→degrade 链,如未来 multiply/erase 段中失败）不得泄漏进整层回贴
+    //  （GLShimExecutor.presentBatch 回贴 gCO 泄漏=旗布×墙黑块判例,2026-09-28）。
     const f = this._accGlw?.endAccumulate() ?? null;
     if (f && this.swPipe) {
       this.swPipe.present(f);
+      this.worldCtxLayer.save();
+      this.worldCtxLayer.globalCompositeOperation = 'source-over';
       this.worldCtxLayer.drawImage(this.swPipe.canvas, 0, 0);
+      this.worldCtxLayer.restore();
     }
     this.bglPathUsed = 'b2b-acc-degraded';
     this.bglPathStats['b2b-acc-degraded'] = (this.bglPathStats['b2b-acc-degraded'] || 0) + 1;
@@ -5170,8 +5176,11 @@ export class Renderer {
       const wctx = this.worldCtxLayer;
       if (!wctx) return false;
       // ★世界变换在场（render 世界段 ctx 已 translate/scale）——回贴必须身份变换
+      //  ★BJ387 同族守卫:回贴 gCO 显式 source-over（presentBatch 回贴 gCO 泄漏
+      //  =旗布×墙黑块判例;此处 ambient 虽恒 SO,同族封口防未来 gco 活跃点泄漏）
       wctx.save();
       wctx.setTransform(1, 0, 0, 1, 0, 0);
+      wctx.globalCompositeOperation = 'source-over';
       wctx.drawImage(glw.canvas, 0, 0, lw, lh);
       wctx.restore();
       this.bglPathUsed = layer === 'wall' ? 'world-gl-wall' : 'world-gl-tile';

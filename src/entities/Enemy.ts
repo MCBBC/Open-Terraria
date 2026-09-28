@@ -114,7 +114,9 @@ import {
   alienLarvaMaturationStep,
 } from './fighterFamilies';
 import { canHit, canHitLine } from '../physics/LineOfSight';
-import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../data/items';
+import { rollNaturalPrefixForVid } from '../data/vanillaPrefixes';   // ★BJ390：掉落词缀自然掷
+import { isPrefixableAccessory } from '../items/Inventory';          // ★BJ390：IsAPrefixableAccessory 等价面
 import type { ItemDrop } from './ItemDrop';
 import {
   resolveDrops, rollCoins, rollHeartsAndStars, rollTypeHearts, rollBossPotionsAndHearts,
@@ -14791,8 +14793,17 @@ export class Enemy extends Entity {
         const spawn = (id: number, n: number, px?: number, py?: number, vx0?: number, vy0?: number): ItemDrop | null => {
           const key = VANILLA_ITEM_KEY_BY_ID[id];
           if (!key) { unmapped(id); return null; }
+          // ★BJ390（2026-09-28）掉落词缀自然掷：CommonCode 三投掷口（DropItemFromNPC
+          //  :20 / DropItemLocalPerClientAndSetNPCMoneyTo0 :29 / DropItemForEachInteracting
+          //  PlayerOnThePlayer :48）NewItem 第 8 参恒 -1 → NewItem 内 item.Prefix(prefix)
+          //  （Item.cs:49735）先于初速掷（:49746-49756）——掷序=词缀→速度照抄。钱币/心星/
+          //  药水族 CanHavePrefixes=null（GetRollablePrefixes 返 null）零掷自门（Prefix
+          //  :516-518 提前 false），全量走同一通道=原版同相。骰源 = 本仓掉落族 Math.random
+          //  通道惯例（Main.rand→Math.random,killTileDropItems 同口径）。
+          const prefix = rollNaturalPrefixForVid(id, isPrefixableAccessory(ITEM_BY_KEY[key] ?? -1),
+            () => Math.random());
           const v = vx0 !== undefined ? { vx: vx0, vy: vy0 ?? 0 } : dropVelocity(rng, id);
-          const drop = game.spawnDrop(px ?? this.cx, py ?? this.cy, key, n, v.vx, v.vy);
+          const drop = game.spawnDrop(px ?? this.cx, py ?? this.cy, key, n, v.vx, v.vy, undefined, prefix || undefined);
           // 心(58)/星(184) 标记为 pickup：触碰回血/回蓝，不进背包
           if (drop) {
             if (id === 58) drop.pickup = 'heart';
@@ -14808,13 +14819,15 @@ export class Enemy extends Entity {
             // DropItemLocalPerClientAndSetNPCMoneyTo0：求值端单掷已过 → 每个交互端
             // 各得一份 instanced 副本（原版 msg90 定向;位置/初速各端同值——服务器
             // 序列化同一份 item 数据）。金钱清零在求值侧（out.zeroValue）
-            const key = VANILLA_ITEM_KEY_BY_ID[d.id];
-            if (!key) { unmapped(d.id); continue; }
+            // ★BJ390：词缀单掷一次（CommonCode.cs:29 NewItem(-1),先于初速掷）
+            const keyL = VANILLA_ITEM_KEY_BY_ID[d.id];
+            const prefixL = rollNaturalPrefixForVid(d.id,
+              isPrefixableAccessory(ITEM_BY_KEY[keyL ?? ''] ?? -1), () => Math.random());
             const v = dropVelocity(rng, d.id);
             if (lootPlayers && game.grantInstancedLoot) {
               for (const c of lootPlayers) {
                 if (!c.interacting) continue;   // npc.playerInteraction[slot]（:44）
-                game.grantInstancedLoot(c.slot, this.cx, this.cy, key, d.n, v.vx, v.vy);
+                game.grantInstancedLoot(c.slot, this.cx, this.cy, keyL ?? '', d.n, v.vx, v.vy, prefixL || undefined);
               }
             } else {
               spawn(d.id, d.n);   // 防御：MP 求值但发放钩子缺失（理论不可达）→ 世界掉落兜底

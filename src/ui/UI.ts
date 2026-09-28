@@ -132,7 +132,7 @@ function invBgDataUrl(w: number, h: number): string | null {
 }
 import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
-import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
+import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES, formatPrefixedName } from '../data/vanillaPrefixes';
 import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -254,6 +254,19 @@ function prefixDisplayName(prefix: number): string {
   if (!key) return '';
   const t = Lang.text(`Prefix.${key}`);
   return t && t !== `Prefix.${key}` ? t : key;
+}
+
+/** 词缀+物品名拼装（Lang.GetPrefixedItemName Lang.cs:225-239 → CombineFormat.Prefix）。
+ *  ★BJ390（2026-09-28）用户实报 <> 面定谳：旧实相裸拼接缺 per-language 格式——
+ *  zh-Hans 官方 "‹{PrefixName}›{ItemName}"（U+2039/203A 尖单引号无空格,用户观察的
+ *  "<>" 即此对引号）/ en-US "{PrefixName} {ItemName}"（空格）/ zh-Hant 无分隔。
+ *  tooltip 头行（Main.cs:20819 GetHoverName 首行）与世界 label（popupAffixName）
+ *  同一格式串（原版单 _prefixFormatText 全面共用） */
+function affixedItemName(prefix: number | undefined, baseName: string): string {
+  if (!prefix) return baseName;
+  const pn = prefixDisplayName(prefix);
+  if (!pn) return baseName;
+  return formatPrefixedName(pn, baseName, Lang.has('CombineFormat.Prefix') ? Lang.text('CombineFormat.Prefix') : null);
 }
 
 /** 词缀后伤害值（Item.Prefix :551：damage = round(damage × dmg)） */
@@ -728,6 +741,17 @@ export class UI {
    *  松键归零门的按钮态;Input.rightDown 会被世界交互消费不可用,自持窗口监听） */
   private uiBtnRight = false;
   private uiBtnLeft = false;
+  /** ★SW-BJ391（2026-09-28）快捷制作长按臂按住目标（HoverOverCraftingItemButton
+   *  Main.cs:42971-43036 电平面：左键按住∧仍悬停焦点行∧stackSplit≤1 → 逐拍
+   *  CraftItem((superFastStack+1)×(ShiftInUse?10:1))+:42999 门同源）。r=按住配方;
+   *  kind=压面站别（行重建换锚只认同站,防跨面偷锚——modern 网格格与详情槽同配方
+   *  双元素,详情每刷重建会 flip 锚致 :hover 误断）;el=配方行元素（:hover 逐拍复核
+   *  ——离行暂停、回行续做=原版 Draw 逐帧调用面,不清锚;maxStack-1 成品不上膛=
+   *  :42996-42998 flag5 阻断面）。 */
+  private craftHold: { el: HTMLElement; r: VanillaRecipeLike; kind: 'list' | 'fisheye' | 'mcell' | 'mdetail' } | null = null;
+  /** Shift 物理电平（ItemSlot.ShiftInUse ItemSlot.cs:300-306 PressingShift 面——
+   *  原版每拍读键态,长按中 Shift 电平逐拍生效;左/右 Shift 同 key 'Shift'） */
+  private uiBtnShift = false;
   /** 装备页追加槽引用（恶魔心 8 / 大师 9 及时装 18/19——refreshEquipExtras 显隐） */
   private equipExtraSlots: { equip: HTMLElement[]; vanity: HTMLElement[]; dye: HTMLElement[] } | null = null;
   private toastTimer: number | null = null;
@@ -767,7 +791,17 @@ export class UI {
       if (e.button === 0) this.uiBtnLeft = false;
       else if (e.button === 2) this.uiBtnRight = false;
     }, true);
-    window.addEventListener('blur', () => { this.uiBtnLeft = false; this.uiBtnRight = false; this.rcHold = null; });
+    // ★SW-BJ391：Shift 物理电平（ItemSlot.ShiftInUse 每拍读面;capture=站内
+    //   stopPropagation 不影响电平记录）
+    window.addEventListener('keydown', (e) => { if (e.key === 'Shift') this.uiBtnShift = true; }, true);
+    window.addEventListener('keyup', (e) => { if (e.key === 'Shift') this.uiBtnShift = false; }, true);
+    window.addEventListener('blur', () => {
+      this.uiBtnLeft = false;
+      this.uiBtnRight = false;
+      this.uiBtnShift = false;
+      this.rcHold = null;
+      this.craftHold = null;
+    });
     // ★2026-09-07 刀 2:背包布局 flag 运行期切换 → 面板重建(teardown+rebuild;
     // initInGame 前未建则 no-op,由下次进世界自然分派)。classic 旁路零改动
     options.onChange((d) => {
@@ -1851,6 +1885,61 @@ export class UI {
     this.stackSplit = this.stackSplit === 0 ? 30 : this.stackDelay;
   }
 
+  /** ★SW-BJ391（2026-09-28）压面合成 tick+长按臂上膛——四制作站（classic 列表行/
+   *  classic 鱼眼格/modern 网格格/modern 详情槽）共用，= HoverOverCraftingItemButton
+   *  (Main.cs:42971-43036) 压拍面 1:1：
+   *  ① 压拍合成（:43014 CraftItem(recipe, num2)）——压拍 superFastStack 恒 0（松键
+   *     归零面 :62728/:63422 已把梯全量复位）⇒ num2=(0+1)×(ShiftInUse?10:1)=1|10
+   *     两档，即本仓旧单击语义 shift×10 的正身；
+   *  ② :43013 RefreshStackSplitCooldown——压拍进 30 拍冷却（长按首段 0.5s 停顿,
+   *     之后 stackDelay 梯 7→2 逐档加速,面在 tickStackSplitMain ①）；
+   *  ③ 上膛（flag4 反面）——:42996-42998 `flag5=num|flag4`（_currentRecipeBeingCrafted
+   *     .createItem.maxStack==1 阻连做）⇒ 成品 maxStack-1（武器类）一按一做不上膛,
+   *     松键重按才再做（压拍照常合成+冷却,与原版 _currentRecipeBeingCrafted 置位
+   *     后按住期恒阻同相）。行重建换锚由各站重建体认 kind+配方身份自理。 */
+  private craftPressTick(r: VanillaRecipeLike, shift: boolean, rowEl: HTMLElement,
+    kind: 'list' | 'fisheye' | 'mcell' | 'mdetail'): void {
+    if (!this.game) return;
+    this.game.vanillaCraft(r, shift ? 10 : 1, true);        // :43014（压拍 num2 恒 1|10）
+    this.refreshStackSplitCooldown();                       // :43013
+    const iid = this.game.itemId(vanillaItemKey(r.create) ?? '');
+    // 每次压拍重根按住语境（原版压拍 _currentRecipeBeingCrafted 必置位、松键才清）：
+    // maxStack>1 上膛;maxStack-1 显式落臂（旧锚不清则压武器后回悬停旧配方行会
+    // 续做旧配方,原版 flag5 阻断面=松键才可再做）
+    this.craftHold = iid > 0 && (ITEM_DEFS[iid]?.maxStack ?? 0) > 1   // flag4 反面（:42997-42998）
+      ? { el: rowEl, r, kind }
+      : null;
+  }
+
+  /** ★SW-BJ391：快捷制作长按臂电平面（tickStackSplitMain ⑤,逐拍驱动）。
+   *  门序 = HoverOverCraftingItemButton :42986-43018：
+   *  ① flag2 电平（:42980 mouseLeft || mouseRight——本臂锚左键压面站,右键不制作）
+   *     松键/元素销毁（面板关/池重建未及物化）→ 落臂;:63422 双键全松归零面照跑;
+   *  ② :42988 guideItem.IsAir 门（guidePlaced 反查态不合成）;
+   *  ③ 悬停复核（原版=Draw 逐帧仅悬停焦点行调用本函数）——不悬停【暂停不清锚】,
+   *     回行续做=原版按住中移出再移回续做同相（focusRecipe 不随悬停迁移,flag 臂
+   *     需 fresh click 而按住中恒 false）;matches(':hover') 含子元素悬停传播;
+   *  ④ :42999 `stackSplit <= 1` 门（冷却窗内不连做——梯/递减已先行,本臂见后相）;
+   *  ⑤ 逐拍 num2=(superFastStack+1)×(ShiftInUse?10:1)（:42994-42996——Shift 电平
+   *     逐拍读,长按中途按/松 Shift 即刻变档）→ vanillaCraft(times=num2)（逐轮双门
+   *     循环体内建,料尽/光标满即停轮）+ :43013 冷却 + refreshAll（计数/材料行随拍）。 */
+  private runCraftArm(): void {
+    const ch = this.craftHold;
+    if (!ch) return;
+    if (!this.uiBtnLeft || !ch.el.isConnected) {            // flag2 电平/元素销毁
+      this.craftHold = null;
+      return;
+    }
+    if (this.guidePlaced) return;                           // :42988 guideItem.IsAir 门
+    if (!ch.el.matches(':hover')) return;                   // 离行暂停,回行续做
+    if (this.stackSplit > 1) return;                        // :42999 冷却门
+    if (!this.game) return;
+    const num2 = (this.superFastStack + 1) * (this.uiBtnShift ? 10 : 1);   // :42994-42996
+    this.game.vanillaCraft(ch.r, num2, true);               // :43014
+    this.refreshStackSplitCooldown();                       // :43013
+    this.refreshAll();
+  }
+
   /** ★SW-BJ157：stackSplit 计时面逐拍驱动（cb.onStackSplitTick,Game.frame 60Hz
    *  累加注入——暂停期照走=原版 Main.Update 面,autoPause 开包连取不冻结）。
    *  ① 加速梯（Main.cs:62728-62755 逐字）：stackSplit==0 全量复位;否则 stackCounter++
@@ -1889,13 +1978,17 @@ export class UI {
     if (this.stackSplit > 0) this.stackSplit--;                     // :63425-63427
     // ③ 取件臂电平面
     const hold = this.rcHold;
-    if (!hold) return;
-    if (!this.uiBtnRight || !this.invPanel || this.invPanel.style.display !== 'block'
-      || !hold.el.isConnected || !hold.el.matches(':hover')) {
-      this.rcHold = null;
-      return;
+    if (hold) {
+      if (!this.uiBtnRight || !this.invPanel || this.invPanel.style.display !== 'block'
+        || !hold.el.isConnected || !hold.el.matches(':hover')) {
+        this.rcHold = null;
+      } else {
+        this.runPickupArm(hold.where, hold.i, this.slotContent(hold.where, hold.i));
+      }
     }
-    this.runPickupArm(hold.where, hold.i, this.slotContent(hold.where, hold.i));
+    // ⑤ 快捷制作臂电平面（★SW-BJ391：HoverOverCraftingItemButton Main.cs:42971-43036
+    //    逐拍面——shift+左键按住配方行连做,见 runCraftArm 门序注）
+    this.runCraftArm();
   }
 
   /** ★SW-BJ157：槽位清空写回（slotContent 读面逐臂镜像——swapEquipItem :1668-1673
@@ -2646,7 +2739,7 @@ export class UI {
     //（★方案 A 阶段 5/BJ266:vanillaIdOfItemKey 键前缀反解退役,internal≡vid 恒等域）
     if ((heldDef.vid ?? -1) === 5095) this.game.lucyThrownAway();
     const drop = this.game.spawnDrop(p.cx + p.facing * 18, p.y + 6, key, this.heldStack.stack,
-      p.facing * 4 + p.vx, -2);
+      p.facing * 4 + p.vx, -2, undefined, this.heldStack.prefix);   // ★BJ390：词缀随件（DropSelectedItem Player.cs:5191 theItemWeDrop.prefix 同域）
     if (drop) drop.noGrabDelay = 100;
     this.heldStack = null;
     this.heldFrom = null;
@@ -2812,7 +2905,7 @@ export class UI {
     const isExpert = !!def && def.key.startsWith('vi_')   // ★方案 A：洞守卫（BJ265）
       && ITEM_EXPERT[String(parseInt(def.key.slice(3), 10))] === 1;
     const nameColor = this.rarityColor(rare);
-    // 词缀名前缀（Lang.GetPrefixedItemName：Prefix.{ConstName} + 物品名）
+    // 词缀名前缀（Lang.GetPrefixedItemName：CombineFormat.Prefix 格式拼装,★BJ390 <> 面）
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
     // 名称行（GetHoverName :420-427：不加粗、堆叠>1 追加 " (N)"；稀有度色）
     const stackSuffix = s.stack > 1 ? ` (${s.stack})` : '';
@@ -2834,7 +2927,7 @@ export class UI {
     const rareSpanAttrs = (rare === -12 || rare <= -13)
       ? ` class="sw-tooltip-rare" data-rare="${rare}"`
       : '';
-    let html = `<span${rareSpanAttrs} style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}${stackSuffix}</span>${variantSuffix}`;
+    let html = `<span${rareSpanAttrs} style="color:${nameColor}">${affixedItemName(s.prefix, Lang.itemNameByKey(def.key))}${stackSuffix}</span>${variantSuffix}`;
     if (s.favorited) html += ` <span style="color:#ffb347">★</span>`;
     // ---- 统计行（MouseText_DrawItemTooltip_GetLinesInfo，Main.cs:20488-20920 1:1，
     //      构建器在 ui/itemTooltip.ts）：vi_ 全量——伤害[+类型后缀]/暴击/速度档/击退档/
@@ -3303,7 +3396,8 @@ export class UI {
       const left = this.game.player.inv.add(h.id, h.stack, h.prefix, h.placeStyle, false, false, !!h.favorited);
       if (left > 0) {
         const p = this.game.player;
-        this.game.spawnDrop(p.cx, p.cy, hDef?.key ?? '', left, undefined, undefined, h.placeStyle);
+        // ★BJ390：余量词缀随行（Player.cs:7202 InventoryOverflow RequestNewItem item2.prefix 同域）
+        this.game.spawnDrop(p.cx, p.cy, hDef?.key ?? '', left, undefined, undefined, h.placeStyle, h.prefix);
       }
       this.heldStack = null;
     }
@@ -3756,8 +3850,7 @@ export class UI {
     const rv = def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1;
     const rvKind = rv >= 0 ? activeVariantOfVid(rv) : null;
     const rvLabel = rvKind ? Lang.text(VARIANT_L10N_KEY[rvKind]) : '';
-    const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
-    let html = `<b style="color:${this.rarityColor(rare)}">${prefixName}${Lang.itemNameByKey(def.key)}</b>`
+    let html = `<b style="color:${this.rarityColor(rare)}">${affixedItemName(s.prefix, Lang.itemNameByKey(def.key))}</b>`
       + (rvLabel ? ` <span style="color:#7899ec">(${rvLabel})</span>` : '');
     if (s.prefix) for (const ln of prefixLines(s.prefix)) {
       html += `<br><span style="color:${ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)'}">${ln.text}</span>`;
@@ -3929,7 +4022,8 @@ export class UI {
       const left = this.game.player.inv.add(pl.id, pl.stack, pl.prefix, pl.placeStyle, false, false, !!pl.favorited);   // ★SW-BM1 随行词缀 + ★SW-RB5a 实例样式随行 + ★SW-BP1 收藏随行
       if (left > 0) {
         const key = ITEM_DEFS[pl.id]?.key ?? '';
-        this.game.spawnDrop(this.game.player.cx, this.game.player.cy, key, left);
+        // ★BJ390：余量词缀随行（:7200-7202 同域）
+        this.game.spawnDrop(this.game.player.cx, this.game.player.cy, key, left, undefined, undefined, undefined, pl.prefix);
       }
       this.game.cb.onInventoryChanged?.();
       this.guidePlaced = null;
@@ -4191,7 +4285,8 @@ export class UI {
         const left = this.game.player.inv.add(pl.id, pl.stack, pl.prefix, pl.placeStyle, false, false, !!pl.favorited);
         if (left > 0) {
           const key = ITEM_DEFS[pl.id]?.key ?? '';
-          this.game.spawnDrop(this.game.player.cx, this.game.player.cy, key, left);
+          // ★BJ390：余量词缀随行（:7200-7202 同域）
+          this.game.spawnDrop(this.game.player.cx, this.game.player.cy, key, left, undefined, undefined, undefined, pl.prefix);
         }
         this.game.cb.onInventoryChanged?.();
       }
@@ -6484,6 +6579,9 @@ export class UI {
       // 材料源聚合后仍不可合成 = 置灰（.sw-recipe.no img/span opacity .45）——
       // SW-AV2 起与「需动用箱料」的排序垫底层解耦：垫底层行样式正常、可点击
       row.classList.toggle('no', rec.count <= 0);
+      // ★SW-BJ391 长按臂行重建换锚（craftPressTick 后每拍 refreshAll——签名变即整表
+      //   重建,臂锚随旧行销亡;同配方新行换锚,:hover 逐拍复核承位）
+      if (this.craftHold?.kind === 'list' && this.craftHold.r === rec.r) this.craftHold.el = row;
       row.addEventListener('mouseenter', (e) => {
         // 悬停预选两门（2026-08-21/24/25 定标,只动材料格不动列表）：
         // mousemove 门 150ms——滚动经停行无伴随 mousemove,不预选;
@@ -6506,7 +6604,8 @@ export class UI {
         this.hoverFocus = -1;       // 点击行即焦点，预览态退场
         // 格料先归还背包再统一扣料——防"料在格里、背包不足"假失败（同旧）
         this.returnCraftGrid();
-        game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1, true);   // 成品跟随光标
+        // ★SW-BJ391：压拍合成+长按臂上膛（HoverOverCraftingItemButton 压拍面,成品跟随光标）
+        this.craftPressTick(rec.r, (ev as MouseEvent).shiftKey, row, 'list');
         this.refreshAll();
       });
       cl.appendChild(row);
@@ -9399,9 +9498,13 @@ export class UI {
       //   (反查)已选格点按不合成,落 :43020 else-if(flag) 臂 = 仅音 12(与详情槽
       //   guidePlaced 门同源;旧缺 = 反查态点格直接开炉)
       if (this.guidePlaced) { this.game.sfx.play('menuTick', 1); return; }
-      this.game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
+      // ★SW-BJ391：压拍合成+长按臂上膛（HandleCraftSlot :526 → HoverOverCraftingItemButton）
+      this.craftPressTick(r, (ev as MouseEvent).shiftKey, slotEl, 'mcell');
       this.refreshAll();
     });
+    // ★SW-BJ391 长按臂格池重建换锚（池格驻留不重建,唯池拆建走本行;认 kind 防
+    //   同配方详情槽 flip 锚）
+    if (this.craftHold?.kind === 'mcell' && this.craftHold.r === r) this.craftHold.el = slotEl;
   }
 
   /** 详情浮层(DrawChildren :450-487):hover ?? Selected;成品槽 ctx42(scale1,
@@ -9446,9 +9549,13 @@ export class UI {
       ev.stopPropagation();
       if (!availNow) return;                              // 不可用=仅 tooltip(:460 enabled:false)
       if (this.guidePlaced) return;                       // ★刀19:反查态不合成(:42988 门,HandleCraftSlot → HoverOverCraftingItemButton 同路)
-      this.game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
+      // ★SW-BJ391：压拍合成+长按臂上膛（成品槽压拍=SW 增益面,与网格格同链）
+      this.craftPressTick(r, (ev as MouseEvent).shiftKey, slot, 'mdetail');
       this.refreshAll();
     });
+    // ★SW-BJ391 长按臂详情每刷重建换锚（detail 每刷 replaceChildren,锚随行销亡;
+    //   认 kind 防同配方网格格 flip 锚）
+    if (this.craftHold?.kind === 'mdetail' && this.craftHold.r === r) this.craftHold.el = slot;
     detail.appendChild(slot);
     // 锤图标(:464 Images/UI/Craft ×0.8 @origin+(47,13))
     const hammer = el('img') as HTMLImageElement;
@@ -9830,7 +9937,8 @@ export class UI {
       const left = g.player.inv.add(pl.id, pl.stack, pl.prefix, pl.placeStyle, false, false, !!pl.favorited);
       if (left > 0) {
         const key = ITEM_DEFS[pl.id]?.key ?? '';
-        g.spawnDrop(g.player.cx, g.player.cy, key, left);
+        // ★BJ390：余量词缀随行（:7200-7202 同域）
+        g.spawnDrop(g.player.cx, g.player.cy, key, left, undefined, undefined, undefined, pl.prefix);
       }
       g.cb.onInventoryChanged?.();
     }
@@ -10984,7 +11092,8 @@ export class UI {
         return;
       }
       if (this.guidePlaced) return;   // ★刀19:反查态不合成(HoverOverCraftingItemButton :42988 guideItem.IsAir 门)
-      this.game.vanillaCraft(rec.r, (ev as MouseEvent).shiftKey ? 10 : 1, true);
+      // ★SW-BJ391：压拍合成+长按臂上膛（点焦点=合成 :43020-43033 压拍面）
+      this.craftPressTick(rec.r, (ev as MouseEvent).shiftKey, s, 'fisheye');
       this.refreshAll();
     });
     s.style.setProperty('--slot-alpha', '1');   // 列表格距离渐隐走元素 opacity,退出脉冲
@@ -11005,6 +11114,8 @@ export class UI {
     root.appendChild(s);
     this.vinvCraftCellEls[idx] = { el: s };
     this.vinvLayoutItems.push({ el: s, pos: () => this.vinvCraftCellPos(idx) });
+    // ★SW-BJ391 长按臂格池拆建换锚（池拆→惰性物化走本行;认 kind 防跨站 flip 锚）
+    if (this.craftHold?.kind === 'fisheye' && this.craftHold.r === rec.r) this.craftHold.el = s;
     return this.vinvCraftCellEls[idx];
   }
 

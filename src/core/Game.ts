@@ -17,7 +17,7 @@ import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
 import { countDefenderMedalsAcross, spendDefenderMedalsAcross, defenderMedalSavingsOf } from '../stats/DefenderMedals';
 import { findExoticPlantSlot, rollDyeTraderReward } from '../stats/DyeTrade';
-import { PREFIX_NAMES, rollablePrefixes, rollPrefix, prefixStat, prefixValueMul } from '../data/vanillaPrefixes';
+import { PREFIX_NAMES, rollablePrefixes, rollPrefix, prefixStat, prefixValueMul, formatPrefixedName, rollNaturalPrefixForVid } from '../data/vanillaPrefixes';
 import { TILE, CHUNK, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -286,7 +286,7 @@ import { waterWaves, waveTexReady as waterWavesDiagReady } from '../render/Water
 import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit, heldItemTipWorld, popupLabelMeasure, tpMarkCoordText } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
-import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS, type InvItem } from '../items/Inventory';
+import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS, isPrefixableAccessory, type InvItem } from '../items/Inventory';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 import vanillaExpertJson from '../data/vanilla-expert.json';
 
@@ -309,13 +309,18 @@ function popupRarityColor(rare: number): string {
 }
 
 /** 词缀显示名（Item.AffixName Item.cs:1195-1203：prefix≤0 → 本名；否则
- *  Lang.GetPrefixedItemName——本仓 l10n 键 Prefix.{ConstName}，同 UI.ts 惯例） */
+ *  Lang.GetPrefixedItemName Lang.cs:225-239——CombineFormat.Prefix l10n 格式串拼装。
+ *  ★BJ390（2026-09-28）用户实报 <> 面：旧实相裸拼接（词缀名+本名）缺 per-language
+ *  格式——zh-Hans 官方格式 "‹{PrefixName}›{ItemName}"（U+2039/203A 单尖引号无空格,
+ *  用户观察的 "<>" 即此对引号）、en-US "{PrefixName} {ItemName}"（空格）、zh-Hant
+ *  无分隔。本仓 l10n 产物已带该键（tools/l10n/*.Items.json 全语种 → public/l10n） */
 function popupAffixName(prefix: number | undefined, baseName: string): string {
   if (!prefix) return baseName;
   const key = PREFIX_NAMES[String(prefix)];
   if (!key) return baseName;
   const t = Lang.text(`Prefix.${key}`);
-  return (t && t !== `Prefix.${key}` ? t : key) + baseName;
+  const prefixName = t && t !== `Prefix.${key}` ? t : key;
+  return formatPrefixedName(prefixName, baseName, Lang.has('CombineFormat.Prefix') ? Lang.text('CombineFormat.Prefix') : null);
 }
 
 /** 钱币飘字档位（PopupText.cs:233-247/:352-366）：面值 → [色, 最短寿命] */
@@ -2689,17 +2694,31 @@ export function grantStarterKit(inv: import('../items/Inventory').Inventory, dif
     ];
     kit.forEach(([key, stack], i) => {
       const id = ITEM_BY_KEY[key];
-      if (id !== undefined) inv.slots[i] = { id, stack };
+      if (id !== undefined) {
+        // ★BJ390（2026-09-28）：开局前 5 件逐件 Prefix(-1)（:1725-1733 每件
+        //  SetDefaults+Prefix 交替;火炬/绳/魔镜/钩爪 :1735-1738 仅 SetDefaults 不掷）
+        inv.slots[i] = { id, stack, ...(i <= 4 ? starterPrefixOf(id) : {}) };
+      }
     });
     const wings = ITEM_BY_KEY[VI_KEY.JOURNEY.WINGS];
-    if (wings !== undefined) inv.armor[3] = { id: wings, stack: 1 };   // :1740 armor[3].SetDefaults(4978)
+    if (wings !== undefined) inv.armor[3] = { id: wings, stack: 1, ...starterPrefixOf(wings) };   // :1740-1741 armor[3].SetDefaults(4978)+Prefix(-1)
     return;
   }
   const starter = [VI_KEY.STARTER.SHORTSWORD, VI_KEY.STARTER.PICK, VI_KEY.STARTER.AXE];
   starter.forEach((key, i) => {
     const id = ITEM_BY_KEY[key];
-    if (id !== undefined) inv.slots[i] = { id, stack: 1 };
+    if (id !== undefined) inv.slots[i] = { id, stack: 1, ...starterPrefixOf(id) };   // :1751-1756 三件各 Prefix(-1)
   });
+}
+
+/** 开局件自然词缀（UICharacterCreation SetupPlayerStatsAndInventoryBasedOnDifficulty
+ *  :1725-1756 每件 Prefix(-1)——铜短剑/镐/斧/锤/鱼杖/经典三件套/ finch 翼）。
+ *  词缀域物品掷、其余自门零掷;骰源 Main.rand→Math.random 通道（菜单期原版同源）。 */
+function starterPrefixOf(id: number): { prefix?: number } {
+  const vid = ITEM_DEFS[id]?.vid ?? -1;
+  if (vid < 0) return {};
+  const pfx = rollNaturalPrefixForVid(vid, isPrefixableAccessory(id), () => Math.random());
+  return pfx ? { prefix: pfx } : {};
 }
 
 /** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付）
@@ -3765,7 +3784,7 @@ export class Game implements GameHooks {
       if (!d.netId) {
         d.netId = makeNetId(net.mySlot, d.id);
         net.sendItemOp(0, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy,
-          d.shimmered, d.shimmerTime);
+          d.shimmered, d.shimmerTime, d.prefix ?? 0);   // ★BJ390：词缀尾段（原版 msg21 同域）
       }
       cur.set(d.netId, d);
     }
@@ -3785,7 +3804,7 @@ export class Game implements GameHooks {
         this.netDropReassertIdx = (this.netDropReassertIdx + 1) % ids.length;
         const d = cur.get(netId)!;
         net.sendItemOp(0, netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy,
-          d.shimmered, d.shimmerTime);
+          d.shimmered, d.shimmerTime, d.prefix ?? 0);   // ★BJ390：词缀尾段（原版 msg21 同域）
       }
     }
     for (const netId of this.netDropSeen.keys()) {
@@ -4065,12 +4084,14 @@ export class Game implements GameHooks {
             d.x = op.x; d.y = op.y; d.vx = op.vx; d.vy = op.vy;
             d.shimmered = op.shimmered ?? false;
             d.shimmerTime = op.shimmerTime ?? 0;
+            d.prefix = op.prefix;   // ★BJ390：词缀尾段镜像（缺省 undefined=无词缀,upsert 语义）
             return;
           }
         }
         // 残余上报不允许凭空建物（防伪造复活已消亡实体）
         if (isResidue) return;
         const d = new ItemDrop(op.x, op.y, id, Math.max(1, op.stack), op.vx, op.vy);
+        if (op.prefix) d.prefix = op.prefix;   // ★BJ390：词缀随件（worldItem.Prefix,MessageBuffer.cs:1476）
         d.netPuppet = true;
         d.netId = op.netId;
         this.entities.add(d, 'drops');
@@ -4087,6 +4108,7 @@ export class Game implements GameHooks {
       // 145 尾段：微光态镜像（缺省=非微光——发送端无尾段即清，upsert 语义）
       pup.d.shimmered = op.shimmered ?? false;
       pup.d.shimmerTime = op.shimmerTime ?? 0;
+      pup.d.prefix = op.prefix;   // ★BJ390：词缀尾段镜像（缺省=无词缀,upsert 语义）
       pup.seen = this.tickCount;
     } else {
       const pup = this.netDropPuppets.get(op.netId);
@@ -4170,22 +4192,22 @@ export class Game implements GameHooks {
   puppetDropResidue(d: ItemDrop): void {
     if (!this.net?.active || !d.netId) return;
     this.net.sendItemOp(3, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack,
-      d.x, d.y, d.vx, d.vy, d.shimmered, d.shimmerTime);
+      d.x, d.y, d.vx, d.vy, d.shimmered, d.shimmerTime, d.prefix ?? 0);   // ★BJ390：词缀尾段
   }
 
   /** per-client 掉落发放（GameHooks.grantInstancedLoot 实现；结算端=本端房主）：
    *  targetSlot=mySlot → 本地 netLocalOnly 实例（不上报 msg21,仅本端可见可拾——
    *  原版 msg90 instanced+reservedFor 语义）;访客槽 → module14 上行,服务器定向转发 */
   grantInstancedLoot(targetSlot: number, x: number, y: number, itemKey: string,
-    stack: number, vx: number, vy: number): void {
+    stack: number, vx: number, vy: number, prefix?: number): void {
     const net = this.net;
     if (!net?.active) return;
     if (targetSlot === net.mySlot) {
-      const d = this.spawnDrop(x, y, itemKey, stack, vx, vy);
+      const d = this.spawnDrop(x, y, itemKey, stack, vx, vy, undefined, prefix);   // ★BJ390：本地实例词缀随件
       if (d) d.netLocalOnly = true;
       return;
     }
-    net.sendInstancedLoot([{ targetSlot, key: itemKey, stack, x, y, vx, vy }]);
+    net.sendInstancedLoot([{ targetSlot, key: itemKey, stack, x, y, vx, vy }]);   // module14 无词缀域=登记债（协议定长布局,远程实例词缀缺失）
   }
 
   /** module14 回包（访客）：房主发放的 per-client 掉落到达——本端私有实例。
@@ -40417,7 +40439,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *   （Enemy.ts spawn 闭包）→ 替代后心族 Heal(20)/星族 +100MP 不变,Player.cs:35344-35362）
    *  ★方案 A 阶段 4（BJ265）：vid 直读（items.ts 回填后 def.vid≡键前缀反解值）；
    *   未注册键兜底保留键前缀解析（原语义:未注册 vi_ 键也命中节日替代/manastar 判定） */
-  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx?: number, vy?: number, placeStyle?: number): ItemDrop | null {
+  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx?: number, vy?: number, placeStyle?: number,
+    prefix?: number): ItemDrop | null {
     const dropVid = ITEM_DEFS[ITEM_BY_KEY[itemKey] ?? -1]?.vid
       ?? (/^vi_(\d+)_/.exec(itemKey) ? Number(/^vi_(\d+)_/.exec(itemKey)![1]) : -1);
     if (dropVid === 58 || dropVid === 184) {
@@ -40446,6 +40469,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     drop.x = x - drop.w / 2;
     drop.y = y - drop.h / 2;
     if (placeStyle !== undefined) drop.placeStyle = placeStyle;
+    // ★BJ390（2026-09-28）：词缀随件（NewItem prefix 参 Item.cs:49654 → item.Prefix(prefix)
+    //   :49735,世界件 inner.prefix 同域）——NPC 掉落自然掷/背包持物丢弃/MP msg21 全态覆写
+    //   三面同参落地;词缀域内合成/重铸面 rollPrefix 通道不在此（见 vanillaCraft/doReforge）
+    if (prefix) drop.prefix = prefix;
     // 法力斗篷之星 4143 = pickup 类(拾取 +50 魔力 + ManaHeat,Player.cs:35357-35371)
     //   （dropVid=入参 key 的 vid;节日替代仅 58/184 两 vid 触发,替代后两侧判值均≠4143,复用同相）
     if (dropVid === 4143) drop.pickup = 'manastar';
@@ -40569,7 +40596,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (const t of res.touched) {
         if (!t.netId || t.dead) continue;
         this.net!.sendItemOp(0, t.netId, ITEM_DEFS[t.itemId]?.key ?? '', t.stack,
-          t.x, t.y, t.vx, t.vy, t.shimmered, t.shimmerTime);
+          t.x, t.y, t.vx, t.vy, t.shimmered, t.shimmerTime, t.prefix ?? 0);   // ★BJ390：词缀尾段
       }
     }
     return res.freed;
@@ -47476,7 +47503,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (!def) return false;
     if ((ITEM_DEFS[cur.id]?.vid ?? -1) !== r.create) return false;      // CanStack 同型臂
     if ((cur.prefix ?? 0) !== 0) return false;                   // CanStack 词缀臂（成品 prefix=0）
-    const pool = rollablePrefixes(r.create, !!def.accessory);    // !CanHavePrefixes 臂
+    const pool = rollablePrefixes(r.create, isPrefixableAccessory(outId));    // !CanHavePrefixes 臂（★BJ392:IsAPrefixableAccessory 等价面,旧 !!def.accessory 恒 false=合成配饰成品误判可并堆）
     if (pool && pool.length) return false;
     return cur.stack + r.createStack <= (def.maxStack ?? 999);   // 有余位臂（:43046）
   }
@@ -47504,7 +47531,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     //  防蒸发在扣减函数内单点保持）→ 造一轮量 → 每轮词缀 roll → 授予（CraftItem_GrantItem）。
     //  每轮 CollectedEnoughItemsToCraft（:102 双门前腿,未折扣面）先于炼金折扣掷 ⇒
     //  空轮不烧掷（掷流序 B9 备案保持）; AZ1 去重语义（同 tick 校验与实扣同源）不重开。
-    const pool = outVid0 >= 0 ? rollablePrefixes(outVid0, !!ITEM_DEFS[outId]?.accessory) : null;
+    const pool = outVid0 >= 0 ? rollablePrefixes(outVid0, isPrefixableAccessory(outId)) : null;   // ★BJ392:旧 !!def.accessory 恒 false=合成配饰永不 roll 词缀（原版 CreateResult REC57:126-133 对可重铸成品逐件 Prefix(-1)）
     let crafted = 0;
     for (let i = 0; i < times; i++) {
       // 每轮门 1：CollectedEnoughItemsToCraft（CraftingRequests.cs:102 `i<=0 ||` 前半——
@@ -47626,7 +47653,11 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (!def) return false;
     const vid = def.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     if (vid < 0) return false;
-    return rollablePrefixes(vid, !!def.accessory) !== null;
+    // ★BJ392（2026-09-28）：accessory 判据 = IsAPrefixableAccessory（Item.cs:1151-1158）
+    //   等价面 isPrefixableAccessory（Inventory.ts）——旧 !!def.accessory 是手写效果枚举
+    //   字段（items.ts:78 'lucky_horseshoe'|'feral_claws'）,原版 vi_ 配饰全不带 → 恒 false
+    //   = 饰品在哥布林工匠不能重铸（用户实报;swapEquipItem/UI.ts:1706 同族病判例）
+    return rollablePrefixes(vid, isPrefixableAccessory(item.id)) !== null;
   }
 
   /** 执行重铸（ReforgeItemInReforgeSlot :41346-41351：ResetPrefix + Prefix(-2)）。
@@ -47638,7 +47669,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     const def = ITEM_DEFS[item.id];
     if (!def) return -1;
     const vid = def.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
-    const pool = vid >= 0 ? rollablePrefixes(vid, !!def.accessory) : null;
+    const pool = vid >= 0 ? rollablePrefixes(vid, isPrefixableAccessory(item.id)) : null;   // ★BJ392:accessory 判据同 canReforge（旧 !!def.accessory 恒 false）
     if (!pool || !pool.length) return -1;
     const cost = this.reforgeCost(item);
     if (this.coinsOwned() < cost || !this.spendCopper(cost)) return -1;

@@ -1578,10 +1578,18 @@ export class GLShimExecutor {
     }
     if (additive) glw.blendAdditive(false);
     glw.end();
-    // 回贴（B1 同式:身份变换 1:1;ADD 批 gCO='lighter'）
+    // 回贴（B1 同式:身份变换 1:1;回贴 gCO【显式置位】——★BJ387（2026-09-28 用户实报
+    // 「夜晚雨天悬停 A 驻家旗→B 驻家旗黑块」探针 _bj387-banner-hover-black 定谳）：
+    // 桥接帧旗 tint fillRect（gco='multiply' 经 shim Reflect.set 落 raw worldCtxLayer）
+    // 触发 flushForFallback→本 presentBatch 的回贴 drawImage 曾【继承 ambient
+    // gCO='multiply'】→ FBO 里刚发射的旗布/头像 quad 乘上 worldCanvas 身后墙格
+    // （cloth×wall=黑块;探针实测 presentBatch wctxGco:"multiply"+B 旗矩形逐像素
+    // 暗化 0.68）。旧码只在 additive 臂置 'lighter',SO 臂倚「ambient 恒
+    // source-over」假设——gco 活跃 flush 点（multiply fillRect 桥接回退族）不成立。
+    // 谁设谁还原判例:save/restore 已括弧,补显式 source-over 封口。）
     wctx.save();
     wctx.setTransform(1, 0, 0, 1, 0, 0);
-    if (additive) wctx.globalCompositeOperation = 'lighter';
+    wctx.globalCompositeOperation = additive ? 'lighter' : 'source-over';
     wctx.drawImage(glw.canvas, 0, 0, w, h);
     wctx.restore();
     this.stats.flushes++;

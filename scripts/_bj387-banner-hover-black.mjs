@@ -82,7 +82,7 @@ for (let i = 0; i < 15; i++) {
   if (stable && i > 2) break;
 }
 
-// ---- shim 事件影子（push 序）----
+// ---- shim 事件影子（push 序 + fillRect/bound 面 + presentBatch 的 wctx.gCO）----
 await page.evaluate(() => {
   const shim = window.__swGame.renderer.bglEntShim;
   window.__bj387 = { events: [], mm: [] };
@@ -92,14 +92,38 @@ await page.evaluate(() => {
     if (mm.length > 12) mm.shift();
   });
   if (!shim) return;
+  const log = (e) => { window.__bj387.events.push(e); };
+  const qdump = (shim) => {
+    const out = [];
+    let p = shim.head;
+    while (p && out.length < 8) { out.push(`t${p.tier}s${p.solid?1:0}@${p.dx | 0},${p.dy | 0} ${p.dw | 0}x${p.dh | 0}`); p = p.next; }
+    return out.join(' | ') || '(empty)';
+  };
   const origPush = shim.push.bind(shim);
   shim.push = function (...args) {
-    window.__bj387.events.push({
+    log({
       k: 'push', tier: args[0], solid: args[2],
       dx: args[8], dy: args[9], dw: args[10], dh: args[11],
       alpha: args[13], fr: args[14], fg: args[15], fb: args[16],
     });
     return origPush(...args);
+  };
+  // fillRect:Proxy 走 bound 表——替换表项（普查案②同款绕过面）
+  const origBoundFill = shim.bound.fillRect;
+  shim.bound.fillRect = function (x, y, w, h) {
+    log({ k: 'fillRect', x, y, w, h, gco: this.gco, acc: this.accMode, q: qdump(this) });
+    return origBoundFill(x, y, w, h);
+  };
+  const origFlush = shim.flush.bind(shim);
+  shim.flush = function () {
+    log({ k: 'flush', acc: this.accMode, q: qdump(this) });
+    return origFlush();
+  };
+  const proto = shim.constructor.prototype;
+  const origPB = proto.presentBatch;
+  proto.presentBatch = function (glw, wctx, w, h, tier, additive) {
+    log({ k: 'presentBatch', tier, additive, wctxGco: wctx.globalCompositeOperation, n: w, h });
+    return origPB.call(this, glw, wctx, w, h, tier, additive);
   };
 });
 

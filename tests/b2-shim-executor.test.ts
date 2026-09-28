@@ -987,3 +987,64 @@ describe('★浸没透明案 rasterizeDrawImage user 空间原参重放（双变
     });
   });
 });
+
+// ★BJ387（2026-09-28 用户实报「夜晚雨天悬停 A 驻家旗→B 驻家旗黑块」）判别器锁:
+// 桥接帧 gco='multiply'（drawHouseBanners 旗 tint fillRect 经 shim Reflect.set 落
+// raw worldCtxLayer）活跃点的 flushForFallback→presentBatch 回贴 drawImage 必须
+// 【显式】source-over——旧码 SO 臂继承 ambient gCO → FBO 旗布/头像 quad 乘上
+// worldCanvas 身后墙格（cloth×wall=黑块;探针 _bj387-banner-hover-black 实测
+// presentBatch wctxGco:"multiply" + B 旗矩形逐像素暗化 0.68）。修复前本断言红。
+describe('★BJ387 presentBatch 回贴 gCO 显式置位（ambient multiply 泄漏=旗布×墙黑块）', () => {
+  function mkBridgedHost() {
+    const wctx = new FakeCtx();
+    const layer = {
+      unavailable: false,
+      canvas: {} as unknown as HTMLCanvasElement,
+      isAccumOpen: (_n: string) => false,
+      resize() { /* no-op */ },
+      begin() { /* no-op */ },
+      end() { /* no-op */ },
+      blendAdditive() { /* no-op */ },
+      quadSprite() { /* no-op */ },
+      texFromRegion() { return { tex: {}, w: 8, h: 8, key: 'stub' }; },
+      texAlive() { return true; },
+    };
+    const host = {
+      acquireGl: () => (layer.unavailable ? null : (layer as never)),
+      worldCtx: () => wctx as unknown as CanvasRenderingContext2D,
+      worldW: () => 1280, worldH: () => 720,
+    };
+    return { wctx, layer, host };
+  }
+
+  it('multiply fillRect 触发的 flush:回贴 drawImage gco=source-over（黑块判别器）;raw tint fillRect gco=multiply（tint 本体面不回退）', () => {
+    const { wctx, host } = mkBridgedHost();
+    const ex = new GLShimExecutor(host as never);
+    const raw = new FakeCtx();
+    const wrap = ex.attach(raw as unknown as CanvasRenderingContext2D) as unknown as FakeCtx;
+    expect(wrap).not.toBeNull();
+    const img = mkImg(1);
+    // 旗布 quad 入队（桥接 SO 批——B 旗 cloth+head 同形状族）
+    wrap.drawImage(img, 0, 0, 34, 42, 740, 418, 34, 42);
+    // 旗 tint 的 ambient 毒化（drawHouseBanners:save→gco='multiply'→fillRect;
+    // shim set 经 Reflect.set 直落 raw——此刻 flush 的 ambient 正是 multiply）
+    wrap.globalCompositeOperation = 'multiply';
+    wrap.fillStyle = 'rgb(191,181,125)';
+    wrap.fillRect(740, 418, 34, 46);
+    // 回贴面（presentBatch 的 wctx.drawImage）gco 恒 source-over——修复前='multiply'
+    const draws = wctx.log.filter((l) => l.op === 'draw');
+    expect(draws.length).toBe(1);
+    expect(draws[0].gco).toBe('source-over');
+    // tint 本体（flush 后 raw fillRect——落 attach 的 raw ctx,非 wctx）gco 恒 multiply
+    const fills = raw.log.filter((l) => l.op === 'fill');
+    expect(fills.length).toBe(1);
+    expect(fills[0].gco).toBe('multiply');
+    expect(fills[0].args).toEqual([740, 418, 34, 46]);
+  });
+
+  it('结构锁:回贴 gCO 双臂显式置位（additive→lighter/SO→source-over,禁 ambient 继承形状）', () => {
+    const EXEC = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
+    expect(EXEC).toContain("wctx.globalCompositeOperation = additive ? 'lighter' : 'source-over';");
+    expect(EXEC).not.toMatch(/if \(additive\) wctx\.globalCompositeOperation = 'lighter';/);
+  });
+});

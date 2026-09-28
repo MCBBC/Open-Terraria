@@ -4,6 +4,7 @@
 //   （:1043-1059 四组 id 1.05/1.1/1.15/1.2）+ 各武器类可掷池（PrefixLegacy.Prefixes）
 //   + 物品类集合（PrefixLegacy.ItemSets / ItemID.Sets.CanGetPrefixes）。
 import prefixJson from './vanilla-prefix.json';
+import { itemCombat } from './vanillaItemCombat';
 
 export interface PrefixStat {
   dmg: number; kb: number; spd: number; size: number;
@@ -99,6 +100,86 @@ export function rollPrefix(pool: number[], wantBest: boolean): number {
     return rolled;
   }
   return 0;
+}
+
+// ── ★BJ390（2026-09-28）自然掷 1:1 通道（NPC 掉落/开局工具等 Prefix(-1) 消费面）──
+// 与上面 rollPrefix 的差：①掷序 = 原版 while 环逐 op（Next(4) 先于池掷先于 Next(3)）；
+// ②尾部 TryGet 四失败门（:1067-1079）掷废重进环——旧 rollPrefix 无校验,0 kb 武器
+// （吹管/星炮/雪球炮族）可吃 kb 词缀=零效果假词缀;③骰源可注入（Math.random 通道
+// /测试注入 RNG 两用）。worldgen 箱流另有流精确版 BuriedChestsPass.prefixRolls
+// （genRand 掷流对拍域,勿并）——两版同锚 Item.cs:499-625,语义互为副本。
+
+const __fr = Math.fround;
+
+/** .NET Math.Round(float32 积, MidpointRounding.ToEven) == base（银行家舍入,f32 域积）
+ *  ——与 BuriedChestsPass.netRound 同式（Item.cs:1068 `(int)Math.Round((float)damage*dmg)`） */
+export function netRoundEq(base: number, mult: number): boolean {
+  const v = __fr(__fr(base) * __fr(mult));   // (float)base * mult 在 float32 域
+  const fl = Math.floor(v);
+  const diff = v - fl;
+  let r: number;
+  if (diff > 0.5) r = fl + 1;
+  else if (diff < 0.5) r = fl;
+  else r = fl % 2 === 0 ? fl : fl + 1;       // 恰 .5 → 取偶
+  return r === base;
+}
+
+/** TryGetPrefixStatMultipliersForItem 尾部四失败门（Item.cs:1067-1079）：
+ *  damage/useAnimation/mana 乘后舍入不变（词缀无感）或 kb!=1 而物品 kb==0 → 该词缀
+ *  对该物品无效（Prefix while 环 flag=true 重掷,rolledPrefix 复位 -1）。stat 缺省
+ *  （配饰 62-80 池无乘子/数据缺件）= 恒通过（原版配饰 TryGet 四门全跳过同相） */
+export function prefixTryGetFailsForItem(rolled: number,
+  stat?: { damage: number; useAnimation: number; mana: number; kb: number }): boolean {
+  if (!stat) return false;
+  const s = prefixStat(rolled);
+  if (s.dmg !== 1 && netRoundEq(stat.damage, s.dmg)) return true;
+  if (s.spd !== 1 && netRoundEq(stat.useAnimation, s.spd)) return true;
+  if (s.mcst !== 1 && netRoundEq(stat.mana, s.mcst)) return true;
+  if (s.kb !== 1 && stat.kb === 0) return true;
+  return false;
+}
+
+/** Item.Prefix(-1) while 环 1:1（Item.cs:523-556，prefixWeWant==-1 臂）：
+ *  Next(4)==0 早退（1/4 无词缀）→ 池均匀掷 → ReducedNaturalChance 2/3 降为无词缀
+ *  （mercy,Next(3)!=0）→ TryGet 四门失败重进环（rolledPrefix 复位 -1,Next(4) 再掷
+ *  =25% 逃逸口保证终止）。返回 0 = 无词缀。rand = [0,1) 均匀源。 */
+export function rollNaturalPrefix(pool: number[], rand: () => number,
+  stat?: { damage: number; useAnimation: number; mana: number; kb: number }): number {
+  if (!pool || !pool.length) return 0;       // !CanHavePrefixes（GetRollablePrefixes null）
+  let rolled = -1;
+  for (let flag = true; flag; ) {
+    flag = false;
+    if (rolled === -1 && Math.floor(rand() * 4) === 0) rolled = 0;          // :526 Next(4)
+    if (rolled === -1) rolled = pool[Math.floor(rand() * pool.length)];     // :534 RollAPrefix
+    if (REDUCED_NATURAL.has(rolled) && Math.floor(rand() * 3) !== 0) rolled = 0;   // :538 Next(3)
+    if (prefixTryGetFailsForItem(rolled, stat)) { flag = true; rolled = -1; }      // :546 失败重掷
+  }
+  return rolled;
+}
+
+/** vid 域便捷包装：池（GetRollablePrefixes 顺序判定）+ itemCombat 面板（TryGet 校验
+ *  输入——变体世界经 activeVariantStatsOfVid 覆写,与原版 SetDefaults 后 Prefix 同相）。
+ *  isAccessory 由调用方以 isPrefixableAccessory(internalId) 判定（Inventory.ts 单源）。 */
+export function rollNaturalPrefixForVid(vid: number, isAccessory: boolean, rand: () => number): number {
+  const pool = rollablePrefixes(vid, isAccessory);
+  if (!pool || !pool.length) return 0;
+  let stat: { damage: number; useAnimation: number; mana: number; kb: number } | undefined;
+  // 惰性引 itemCombat（vanillaItemCombat 无回环依赖;运行时全域可用）
+  const st = itemCombat(vid);
+  if (st) stat = { damage: st.damage ?? 0, useAnimation: st.useAnimation ?? 0, mana: st.mana ?? 0, kb: st.knockBack ?? 0 };
+  return rollNaturalPrefix(pool, rand, stat);
+}
+
+/** 词缀名拼装（Lang.GetPrefixedItemName Lang.cs:225-239 → CombineFormat.Prefix l10n
+ *  格式串）。用户实报 <> 面（BJ390 定谳）：en-US "{PrefixName} {ItemName}"（空格无括号）、
+ *  zh-Hans "‹{PrefixName}›{ItemName}"（U+2039/203A 单尖引号、无空格——用户观察的
+ *  "<>" 即此对引号）、zh-Hant "{PrefixName}{ItemName}"（无分隔）。fmt =
+ *  Lang.text('CombineFormat.Prefix') 注入;键缺失回落裸拼接（≡zh-Hant 档,旧实相）。 */
+export function formatPrefixedName(prefixName: string, itemName: string, fmt: string | null): string {
+  if (fmt && fmt.includes('{ItemName}') && fmt.includes('{PrefixName}')) {
+    return fmt.split('{PrefixName}').join(prefixName).split('{ItemName}').join(itemName);
+  }
+  return prefixName + itemName;
 }
 
 /** 词缀显示行（Tooltip 红/绿对比行近似原版 Lang.prefix[...] ToTooltip） */

@@ -134,6 +134,24 @@ export function isAccessoryItem(id: number): boolean {
   return !!ITEM_DEFS[id]?.accessory || statOfInternal(id)?.acc !== undefined;
 }
 
+/** ★BJ392（2026-09-28）：Item.IsAPrefixableAccessory（Item.cs:1151-1158）等价面
+ *  = accessory && !vanity ——可重铸 accessory 判定（GetRollablePrefixes Item.cs:1133-1136
+ *  的 accessory 臂入室门;真值后仍须过 ItemID.Sets.CanGetPrefixes 例外表——由
+ *  rollablePrefixes(vanillaPrefixes.ts:81-85) 内置 canGetPrefixesExcluded 承担,如
+ *  216 脚镣 acc:1 但例外表成员=不可重铸,原版同相）。
+ *  本仓映射 = itemstats acc===1（功能配饰）∪ def.accessory 兜底:
+ *  · 数据实证:vanilla-itemstats acc:1（功能）336 件与 van:1 零交集、acc:0（社交）
+ *    35 件全 van:1 —— acc===1 ⟺ accessory ∧ ¬vanity;
+ *  · legacy accessory 效果字段兜底（swapEquipItem/UI.ts:1706 同族判例:曾只认 legacy
+ *    字段导致 vi_ 配饰右键一键装备静默失效——★勿再单用 !!def.accessory 当配饰谓词,
+ *    该字段是手写效果枚举 'lucky_horseshoe'|'feral_claws',原版 vi_ 配饰全不带）。 */
+export function isPrefixableAccessory(id: number): boolean {
+  const d = ITEM_DEFS[id];
+  if (!d) return false;
+  if (d.accessory) return true;
+  return statOfInternal(id)?.acc === 1;
+}
+
 export function isArmorItem(id: number): boolean {
   // ★d.armor 死前腿已移除（2026-09-02:字段全仓零写入,部位真值源=itemstats 部位表）
   return armorSlotIndexOfInternal(id) >= 0;
