@@ -28084,7 +28084,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const c = this.smartCursor.wanted
         ? { x: this.player.cx, y: this.player.cy }
         : (([wx, wy]) => ({ x: wx, y: wy }))(this.camera.screenToWorld(this.input.mouseX, this.input.mouseY));
-      this.spawnDrop(c.x, c.y, key, drop.stack);
+      // ★BJ399 普查③（2026-09-29）：提取机掉落显式 -1 自然掷（Player.cs:42402-42410
+      //  DropItemFromExtractinator `RequestNewItem(source, center, itemType, stack, -1,
+      //  ReserveForLocalPlayer)` → RequestNewItem 内 Prefix(-1) 全链）。现役转化表
+      //  产物（币/矿/宝石/琥珀/化石族）皆无词缀池=roll 恒 0 零可观测差,结构面随原版
+      //  同相（未来表扩可词缀产物即被本接线覆盖）。骰源=Math.random（mathRand 的
+      //  底层同源;掷序=产物掷后词缀掷,同原版序）。
+      const prefix = rollNaturalPrefixForVid(drop.itemType, isPrefixableAccessory(ITEM_BY_KEY[key]!), Math.random) || undefined;
+      this.spawnDrop(c.x, c.y, key, drop.stack, undefined, undefined, undefined, prefix);
     }
   }
 
@@ -28105,7 +28112,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 提取机通电产物掉落（Wiring.cs:2588 Item.NewItem 32×32 判定框中心） */
   private dropItemStackImpl(vanillaItemId: number, stack: number, px: number, py: number): void {
     const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
-    if (key && ITEM_BY_KEY[key] !== undefined) this.spawnDrop(px, py, key, stack);
+    if (key && ITEM_BY_KEY[key] !== undefined) {
+      // ★BJ399 普查④（2026-09-29）：通电自动提取机掉落显式 -1 自然掷（Wiring.cs:2589
+      //  `Item.NewItem(new EntitySource_Wiring…, itemType, stack, noBroadcast: false,
+      //  -1)`）——唯二消费面=devices.ts case 219/642（extractinatorPull 出口），与
+      //  dropFromExtractinator 同产物域=现役 roll 恒 0,结构面随原版（同上备案）。
+      //  骰源=Math.random（mathRand/extractinatorConsumeFromChest 的底层同源）。
+      const prefix = rollNaturalPrefixForVid(vanillaItemId, isPrefixableAccessory(ITEM_BY_KEY[key]!), Math.random) || undefined;
+      this.spawnDrop(px, py, key, stack, undefined, undefined, undefined, prefix);
+    }
   }
 
   /** 放置态生命水晶使用(Player.cs:29358:statLifeMax≥400 拒绝,+20 上限+回复,消耗) */

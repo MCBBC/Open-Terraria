@@ -102,7 +102,10 @@ describe('BJ378 基线:干跑对拍闸全绿', () => {
     expect(rep.tile.authority['2']).toEqual({ w: 24 });      // 宽度轴覆写（:5719）
     expect(rep.tile.authority['716']).toEqual({ h: 18 });    // :4981 组末位（旧基线唯一幸存者）
     expect(Object.keys(rep.tile.authority).length).toBe(103);
-    expect(rep.tile.exempt.map((e: { id: number }) => e.id)).toEqual([752, 405, 406]);
+    expect(rep.tile.exempt.map((e: { id: number }) => e.id)).toEqual([752]);   // ★BJ399:405/406 债清偿摘除
+    expect(rep.tile.drawAdjustLiteral['405']).toEqual({ fit: [[16, 18]], sw: [], sh: [18] });   // BJ399 件1
+    expect(rep.tile.drawAdjustLiteral['406']).toEqual({ fit: [[16, 18]], sw: [], sh: [18] });
+    expect(rep._meta.tile.rule5Debt).toEqual([]);            // ★BJ399 件1:债登记清空（机制留位）
     expect(rep._meta.tile.rule5Height18Count).toBe(53);      // HEIGHT_18 集合承载（规则⑤轴 b）
     expect(rep._meta.tile.rule5Height18Anchor).toBe(true);   // default 臂字面锚
     // 三域 findings 全零
@@ -172,14 +175,19 @@ describe('BJ378 判别面:人工注入→红(规则①②③④逐一)', () => {
     expect(status).toBe(1);
     expect(report.tile.findings.rule5.map((m: { id: number }) => m.id)).toEqual([15]);
   });
-  it('规则⑤(债登记新鲜度锚):给 405 补 case sh=18 → 债豁免 ok=false → exemptAnchorLost 硬红', () => {
+  // ★BJ399 改判（2026-09-29）：405/406 债已清偿（RULE5_DEBT 空,exemptAnchorLost 对
+  //  规则⑤无存活成员）——新鲜度锚测试改判为 case 承载轴活闸：摘 BJ399 新 case 两条
+  //  → 405/406 失承载 → tile.rule5 硬红（coverage axis a「case 摘除=capture 消失=
+  //  当拍失覆盖即红」的债位继承面）。
+  it('规则⑤(case 承载轴活闸):摘 BJ399 case 405/406 → tile.rule5=[405,406]', () => {
     const src = readFileSync(join(GAME, 'src/render/VanillaTiler.ts'), 'utf8');
-    const anchor = 'case 476: if (fit(fx, fy, 20, 18)) { a.sw = 20; a.sh = 18; } break;';
+    const anchor = '    case 405: if (fy > 0 && fit(fx, fy, 16, 18)) a.sh = 18; break;\n'
+      + '    case 406: if (fy % 54 >= 36 && fit(fx, fy, 16, 18)) a.sh = 18; break;\n';
     expect(src.includes(anchor)).toBe(true);
-    const mut = src.replace(anchor, anchor + '\n    case 405: a.sh = 18; break;');
-    const { status, out } = runInject({ 'VanillaTiler.mut.ts': mut });
+    const mut = src.replace(anchor, '');
+    const { status, report } = runInject({ 'VanillaTiler.mut.ts': mut });
     expect(status).toBe(1);
-    expect(out).toMatch(/exemptAnchorLost/);
+    expect(report.tile.findings.rule5.map((m: { id: number }) => m.id)).toEqual([405, 406]);
   });
 });
 

@@ -103,6 +103,20 @@ const pin = await page.evaluate(async () => {
 });
 L.chk('pin', pin.ok, JSON.stringify(pin));
 
+// ---- 素材预热:八贴图懒解码齐活前不入判(冷 SW_CACHE 实测 P1 缺帆/旗层=镜像差假红) ----
+const warm = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const names = ['NPC_491', 'NPC_492', 'Extra_40', 'Extra_41', 'Extra_42', 'Extra_43', 'Extra_44', 'Extra_45'];
+  const t0 = performance.now();
+  while (performance.now() - t0 < 10000) {
+    const ok = names.every((n) => (g.renderer.atlas.ensureVImage('vanilla/' + n + '.png')?.width ?? 0) > 0);
+    if (ok) { g.render(); return { ok: true, ms: Math.round(performance.now() - t0) }; }
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+  return { ok: false, why: 'images not decoded in 10s' };
+});
+L.chk('素材预热八贴图', warm.ok, JSON.stringify(warm));
+
 // ---- 数判对 P1/P2:玩家钉船心轴(相机收敛=船心,判读区不裁),仅翻 facing ----
 await page.evaluate(() => { window.__fdPlace(0, -1); });
 await pump(page, 70);                    // follow 0.15 缓动收敛(~30t <0.01px)
@@ -190,6 +204,7 @@ function extents(d, geo) {
   const y0 = Math.max(0, syL - 180), y1 = Math.min(h, syL + 80);
   const base = Math.round(2 * P1.geo.sx);
   let mm = 0, maskN = 0;
+  const colBucket = {};
   for (let y = y0; y < y1; y++) {
     for (let x = 0; x < w; x++) {
       const xm = base - (g1.x0 + x) - g1.x0;
@@ -198,11 +213,17 @@ function extents(d, geo) {
       maskN++;
       const i = (y * w + x) * 4, j = (y * P2.geo.w + xm) * 4;
       const d = Math.abs(P2.data[j] - P1.data[i]) + Math.abs(P2.data[j + 1] - P1.data[i + 1]) + Math.abs(P2.data[j + 2] - P1.data[i + 2]);
-      if (d > 24) mm++;
+      if (d > 24) {
+        mm++;
+        const b = Math.floor((x - sxL) / 40) * 40;   // 船心相对坐标分桶(40px)
+        colBucket[b] = (colBucket[b] ?? 0) + 1;
+      }
     }
   }
   const mRate = mm / Math.max(1, maskN);
+  const buckets = Object.entries(colBucket).sort((a, b) => a[0] - b[0]).map(([k, v]) => `${k}:${v}`).join(' ');
   L.chk('镜像差分 P2≈hmirror(P1)(船壳带掩码内)', mRate < Math.max(0.02, dRate * 4 + 0.01), `mm=${(100 * mRate).toFixed(2)}% 掩码=${maskN} 全域漂移=${(100 * dRate).toFixed(2)}%`);
+  L.say(`失配列分布(船心相对px:count) ${buckets}`);
   const eA = extents(A.data, A.geo), eB = extents(B.data, B.geo);
   const thr = 30 * A.geo.z;
   L.chk('不翻面态舷伸:右(玩家侧)>左', eA.right - eA.left > thr, `A right=${eA.right} left=${eA.left} 阈=${thr.toFixed(0)}`);

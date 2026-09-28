@@ -9799,8 +9799,8 @@ export class UI {
     const c = this.vinvLayoutCtx;
     if (!grid || !c) return;
     if (!this.vinvPipsUseGrid) {                      // 关格清空(Main.cs:42449 门)
-      grid.style.display = 'none';
-      grid.replaceChildren();
+      if (grid.style.display !== 'none') grid.style.display = 'none';
+      if (grid.childElementCount) grid.replaceChildren();   // ★开包 hitch 刀:稳态空网格零 DOM 调
       this.vinvCraftGridSig = '';
       return;
     }

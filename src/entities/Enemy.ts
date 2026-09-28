@@ -12025,7 +12025,16 @@ export class Enemy extends Entity {
       if (++this.ai1 >= 120) {
         // :43341-43349 奖赏：695→5663 Cattiva / 696→5664 Foxsparks（Item.NewItem）
         const key = VANILLA_ITEM_KEY_BY_ID[this.vanillaId === 696 ? 5664 : 5663];
-        if (key) game.spawnDrop(this.cx, this.y, key, 1);
+        // ★BJ399 普查⑤（2026-09-29）：救援奖赏显式 -1 自然掷（NPC.cs:43481-43489
+        //  AI_127_Pal_GiveRewerd `Item.NewItem(GetItemSource_Loot(), base.Center, vid,
+        //  1, -1)` Vector2 中心重载第 5 参=prefix）——召唤武器词缀域（5663/5664）。
+        //  骰源/形参同 BJ390 掉落族通道（isPrefixableAccessory 单源 Inventory）。
+        if (key) {
+          const vid = this.vanillaId === 696 ? 5664 : 5663;
+          const prefix = rollNaturalPrefixForVid(vid, isPrefixableAccessory(ITEM_BY_KEY[key] ?? -1),
+            () => Math.random()) || undefined;
+          game.spawnDrop(this.cx, this.y, key, 1, undefined, undefined, undefined, prefix);
+        }
         this.hp = 0; this.dead = true;             // life=0 + active=false（无死亡管线）
         return;
       }
