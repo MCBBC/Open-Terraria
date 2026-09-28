@@ -200,4 +200,135 @@ describe('C9 光照 Worker 快照对拍（worker 驱动路径 ≡ 本地路径,�
       expect([out.rx, out.ry, out.rw, out.rh]).toEqual([sc.rx, sc.ry, sc.rw, sc.rh]);
     }
   });
+
+  // ★C9d2 二期差量（2026-09-28;?lightdelta=1 灰度）:同输入多帧演化——本地全量路径 ≡
+  // 「主线程写日志+暴露带差量编码 → worker 解码重建」路径,R/G/B 逐位同;且每帧
+  // worker 侧重建切片 ≡ 同帧 fresh buildSlice（位等价硬判据,编码器/解码器两侧锁）。
+  // 演化脚本覆盖:全量锚帧/纯移动（暴露带）/写帧（原语记账格）/移动+写/静置空
+  // delta/尺寸重锚/世界边缘 px=0 折叠带（区域跳变>48 格的 plan 全量决策在
+  // tests/c9d2-light-delta 单测锁,本脚本世界 96 宽放不下合法跳变）。
+  // 衰减状态机收敛前奏:updateLightDecay 带状态记忆（sceneAirDecay/shimmerAlpha
+  // 渐进）,双注册表起点不同——恒参预热 320 拍（≥最慢步长 0.005 的收敛上界 200
+  // 拍）双側落到同一不动点后,每帧恰好各 1 次同参调用 → 1:1 演化。
+  it('差量重建 ≡ 全量（多帧演化:移动/写/重锚/边缘,逐位）', async () => {
+    // worker 侧 = 全新模块注册表
+    vi.resetModules();
+    const WP = await import('../src/lighting/LightWorkerProtocol');
+    const WE = await import('../src/lighting/LightingEngine');
+    const WF = await import('../src/lighting/FastRandom');
+    const WLT = await import('../src/lighting/lightTables');
+
+    const NEUTRAL = { waterStyle: 6, nightVision: false, blackout: false, blind: false, opts: {} };
+    for (let i = 0; i < 320; i++) {
+      // 主注册表 = 顶层导入的活绑定（resetModules 后的动态导入全是 worker 注册表,
+      // 主侧必须经顶层绑定收敛——否则 sceneSolidDecay 相位差一拍=DECAY_SOLID 差 0.0028）
+      updateLightDecay(NEUTRAL.waterStyle, NEUTRAL.nightVision, NEUTRAL.blackout, NEUTRAL.blind, NEUTRAL.opts);
+      WLT.updateLightDecay(NEUTRAL.waterStyle, NEUTRAL.nightVision, NEUTRAL.blackout, NEUTRAL.blind, NEUTRAL.opts);
+    }
+
+    // —— 本地全量路径引擎 A（主注册表,绝对坐标）——
+    const worldA = { store: buildWorld(), groundLevel: GROUND, lavaLine: LAVA, clock: { ...CLOCK }, sundialCooldown: 5, moondialCooldown: 3, weather: { raining: true } };
+    const A = new LightingEngine(worldA as unknown as LightingWorld);
+    const fkA = (A as unknown as { flicker: import('../src/lighting/SkyColor').FlickerClock }).flicker;
+    pinMaps(A);
+    A.heldLight = HELD; A.buffLights = BUFFS;
+
+    // —— 演化脚本（写面在快照装配前落 store=随当帧快照走）——
+    const stone = bySheet(1);
+    const st0 = worldA.store;
+    const frames: Array<{ rx: number; ry: number; rw?: number; write?: () => void; expectFull?: boolean; expectEmptyDelta?: boolean }> = [
+      { rx: 24, ry: 20, expectFull: true },                                        // f0 全量锚
+      { rx: 26, ry: 20 },                                                          // f1 纯移动(暴露带)
+      { rx: 26, ry: 20, write: () => {                                             // f2 静置+写
+        st0.setTile(30, 25, stone); st0.setLiquid(28, 24, 128, 1); } },
+      { rx: 28, ry: 20, write: () => {                                             // f3 移动+写
+        st0.setPaint(30, 25, 5); st0.setWall(29, 24, 1); st0.setWire(31, 26, 1);
+        st0.setHalfBrick(32, 25, true); st0.setCoat(33, 25, 2, 2); } },
+      { rx: 28, ry: 20, expectEmptyDelta: true },                                  // f4 静置空 delta
+      { rx: 31, ry: 20 }, { rx: 34, ry: 20 }, { rx: 37, ry: 20 },                  // f5-7 连续移动
+      // f8:窗口收窄（sw 56→46）→ 全量重锚;窗左沿贴 sx=0 为 f9 的 px=0 同尺寸窗铺垫
+      { rx: 16, ry: 20, rw: 14, expectFull: true },
+      { rx: 0, ry: 20, rw: 30 },                                                   // f9 px=0 折叠带（同窗 sw=46）
+      { rx: 0, ry: 20, rw: 30, expectEmptyDelta: true },                           // f10 静置
+    ];
+
+    // —— 主线程差量驱动（link + 注入编码器;bindStore 挂写日志）——
+    const link = new LightWorkerLink(new WP.LightDeltaEncoder());
+    link.bindStore(worldA.store);
+
+    // —— worker 驱动路径（fresh 图引擎 + 快照 store）——
+    const st2 = new WP.SnapshotTileStore();
+    const world2 = { store: st2, groundLevel: 0, lavaLine: 0, clock: { timeOfDay: 0.5, dayCount: 1 } };
+    const B = new WE.LightingEngine(world2 as never);
+    (B as unknown as { work: { random: unknown } }).work.random = new WF.FastRandom(12345);
+    (B as unknown as { active: { random: unknown } }).active.random = new WF.FastRandom(12345);
+    const ds = WP.createWorkerDriveState();
+
+    const fullBytesOf = (g: { sw: number; sh: number }): number => g.sw * g.sh * 17;   // 全量载荷=17B/格
+    let fulls = 0, deltas = 0;
+    for (let f = 0; f < frames.length; f++) {
+      const fr = frames[f];
+      if (fr.write) fr.write();
+      const rx = fr.rx, ry = fr.ry, rw = fr.rw ?? 24, rh = 18;
+      // —— 两侧时钟/衰减同参（每帧恰好各 1 次）——
+      pinClock(fkA);
+      updateLightDecay(DECAY_ARGS.waterStyle, DECAY_ARGS.nightVision, DECAY_ARGS.blackout, DECAY_ARGS.blind, DECAY_ARGS.opts);
+      // —— 主线程:plan → 全量切片 or 差量编码（快照在 A.compute 前=pre-tick 捕获,
+      //      与生产 send→tick 同序;后置会把 tick 后钟面喂给 worker=差一步分歧）——
+      const tiles = link.buildWorkerTiles(rx, ry, rw, rh);
+      A.setSnapshotRegion(rx, ry, rw, rh);                // 快照面（C9d 后区域走 setSnapshotRegion）
+      const cap: EngineCaptureView = {
+        rx, ry, rw, rh, world: worldA,
+        flicker: fkA, heldLight: HELD, buffLights: BUFFS,
+        perFrame: PER.map(([x, y, r, g, b]) => ({ x, y, r, g, b })),
+        decay: DECAY_ARGS,
+      };
+      let msg: Record<string, unknown>;
+      if (tiles.type.length > 0) {
+        // 全量锚帧（数组留主线程作影子——生产 send() 同款）
+        (link as unknown as { _enc: { adoptFull(t: typeof tiles): void } })._enc.adoptFull(tiles);
+        msg = { ...buildEngineSnapshot(cap, tiles, f), enc: 'full' };
+        fulls++;
+      } else {
+        const enc = (link as unknown as { _enc: import('../src/lighting/LightWorkerProtocol').LightDeltaEncoder })._enc;
+        const log = worldA.store.tileWriteLog!;
+        const out = enc.encodeDelta(worldA.store, tiles, log);
+        log.length = 0;
+        if (fr.expectEmptyDelta) expect(out.meta[0]).toBe(0);
+        else expect(out.meta.byteLength + out.data.byteLength).toBeLessThan(fullBytesOf(tiles));
+        msg = { ...buildEngineSnapshot(cap, tiles, f), enc: 'delta', delta: { dv: 1, meta: out.meta, data: out.data } };
+        deltas++;
+      }
+      A.dirty = true;                                     // 本地路径每帧全周期（与 worker 同拍）
+      for (const p of PER) A.addLight(p[0], p[1], p[2], p[3], p[4]);
+      A.compute(0);
+      // —— worker 侧:解码重建 + 全周期 ——
+      const out2 = WP.runSnapshotOnEngine(B, msg as never, ds);
+      // —— 位等价①:worker 重建切片 ≡ 同帧 fresh buildSlice ——
+      const fresh = link.buildSlice(worldA.store, rx, ry, rw, rh);
+      for (const k of ['type', 'flags', 'frameX', 'frameY', 'wall', 'liquid', 'liquidType', 'half', 'slope', 'wire', 'paint', 'paintWall', 'coat'] as const) {
+        const a = fresh[k], b = (st2 as unknown as Record<string, Uint16Array | Uint8Array>)[k];
+        expect(b.length).toBe(a.length);
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] !== b[i]) throw new Error(`f${f} ${k}[${i}] 分歧: fresh=${a[i]} decoded=${b[i]}`);
+        }
+      }
+      // —— 位等价②:worker 光照输出 ≡ 本地全量路径 ——
+      for (const [ch, a, b] of [['R', A.r, out2.R], ['G', A.g, out2.G], ['B', A.b, out2.B]] as const) {
+        expect(a.length).toBe(b.length);
+        for (let i = 0; i < a.length; i++) {
+          if (a[i] !== b[i]) {
+            const cx = rx + (i % rw), cy = ry + Math.floor(i / rw);
+            throw new Error(`f${f} ${ch}[${i}](格 ${cx},${cy}) 分歧: local=${a[i]} workerDelta=${b[i]}`);
+          }
+        }
+      }
+    }
+    expect(fulls).toBe(2);       // f0 锚 + f8 尺寸重锚（plan 全量决策锁定）
+    expect(deltas).toBe(frames.length - 2);
+    // 非平凡性（防全零伪绿）
+    expect(maxOfArr(A.r) + maxOfArr(A.g) + maxOfArr(A.b)).toBeGreaterThan(0);
+  });
 });
+
+function maxOfArr(a: Uint8Array): number { let m = 0; for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i]; return m; }

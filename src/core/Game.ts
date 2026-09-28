@@ -8078,12 +8078,28 @@ export class Game implements GameHooks {
   /** ★SW-BJ157 stackSplit 计时面 60Hz 累加器（帧率无关;暂停期照走） */
   private stackSplitAcc = 0;
   private _paintWaits: Array<{ frames: number; res: () => void }> = [];
+  /** ★wbake=1 入场视口覆盖门等待队列（whenViewportBaked;真实渲染帧驱动轮询,
+   *  与 _paintWaits 同域;旗关/未用永不入队=零开销） */
+  private _viewportWaits: Array<{ deadline: number; res: () => void }> = [];
   /** 世界首帧真实上屏等待(#三开压测批"就绪瞬间黑一下"):渲染帧完成 frames 次
    *  后 resolve——加载页/菜单幕布据此延后撤除,世界在幕布【底下】先渲染完整,
    *  切换零空窗。跳帧(frameCap 未到)不计数,只认真实渲染帧 */
   whenFirstPaint(frames = 2): Promise<void> {
     if (this._paintedFrames >= frames) return Promise.resolve();
     return new Promise((res) => this._paintWaits.push({ frames, res }));
+  }
+  /** ★wbake=1 入场视口覆盖门（2026-09-28 世界入场空白修复刃）：可视视口
+   *  （ChunkCache.animView）内 chunk 全部真对落页后 resolve;timeoutMs 保险强制
+   *  掀幕（覆盖事件异常防永久黑屏）。旗关/降级（workerAwaiting 恒空）立即
+   *  resolve=幕布语义零变化。不替代 whenFirstPaint 帧数门（其语义不动）——由
+   *  mainFlow 在 whenFirstPaint 之后链入（wbake=1 only）。
+   *  病灶:worker 烘焙路径下首烘占位=透明页区,帧数门只数渲染帧——worker 往返
+   *  慢于帧数时幕布提前掀开=全视口瓦片/墙层空白 1-2s（用户实报图36/37）。 */
+  whenViewportBaked(timeoutMs = 3000): Promise<void> {
+    if (!WBAKE_ENABLED) return Promise.resolve();
+    const cc = this.chunks;
+    if (!cc || cc.viewportCovered()) return Promise.resolve();
+    return new Promise((res) => this._viewportWaits.push({ deadline: performance.now() + timeoutMs, res }));
   }
   start() {
     if (this.running) return;
@@ -8131,6 +8147,15 @@ export class Game implements GameHooks {
         if (this._paintWaits.length) {
           this._paintWaits = this._paintWaits.filter((w) => {
             if (this._paintedFrames >= w.frames) { w.res(); return false; }
+            return true;
+          });
+        }
+        // ★入场视口覆盖门轮询（wbake=1;真实渲染帧驱动,队列空=零开销;
+        //  覆盖查询异常/超时走 deadline 保险强制掀幕）
+        if (this._viewportWaits.length) {
+          const nowMs = performance.now();
+          this._viewportWaits = this._viewportWaits.filter((w) => {
+            if ((this.chunks && this.chunks.viewportCovered()) || nowMs >= w.deadline) { w.res(); return false; }
             return true;
           });
         }
@@ -10263,8 +10288,13 @@ export class Game implements GameHooks {
         const bname = ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss';
         if (this.boss.bossFled) {
           // 离场逃走(天亮撤离/玩家死后 EncourageDespawn 消散/毁灭者黎明钻地):
-          // 非击杀——不播击败公告、不写 downed 标志(原版 EncourageDespawn 语义)
-          this.newText(Lang.text('Mods.SandboxWorld.Toast.BossFled', bname), 150, 150, 150);
+          // 非击杀——不播击败公告、不写 downed 标志(原版 EncourageDespawn 语义)。
+          // ★BJ388 件5（BJ347 登记债清偿,2026-09-28）：原版 boss 消散零 UI 反馈
+          //  （EncourageDespawn :78797 段仅 active=false,无 BroadcastChatMessage/
+          //  CombatText）——本仓曾播灰字 toast=外观级偏差,摘除。bossFled 旗保留
+          //  （记账正确性不回退:Game 端不写 downed/不记击败,渲染端 Renderer:8988
+          //  血肉墙死亡判别仍读 dead&&!bossFled）。l10n 键 SandboxWorld.Toast.
+          //  BossFled 留置为死键（l10n-audit 只查缺失不查孤儿,删除需重建产物另案）
         } else {
           // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)。
           // 击败公告（DoDeathEvents_CelebrateBossDeath NPC.cs:79822-79836）：

@@ -33,6 +33,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { dealContacts, HitCdImpl } from './proj1457';
+import { hitCritters } from './projTargets';
 import { projSprite } from './Arrow';
 
 /** extraUpdates=2 的子步折叠数（Update 主循环每拍子步数 = EU+1） */
@@ -98,6 +99,13 @@ export class OrichalcumPetal extends Entity {
       this.rotation += this.vx * 0.01;     // AI_041 :28186（每子步）
       this.x += this.vx;                   // HandleMovement（tileCollide=false 直推进）
       this.y += this.vy;
+      // ★BJ384 小动物命中面（BJ383 件2 补齐）：221 friendly penetrate=−1（SetDefaults
+      //  :3068-3080）→ critter 照伤弹不亡（:12618 flag=!friendly 恒真;:14184
+      //  penetrate>0 才递减）。几何=本体盒 AABB（hitCritters 缺省面;无 minion/sentry/
+      //  trap 位 → 仅受 dontHurtCritters 饰品门）。非 magic（无类别旗）→ 无幽灵兜帽
+      //  吸血 proc;TryDoingOnHitEffects 排除表（:15210-15220 type 221∈ON_HIT_EXCLUDED_
+      //  PROJS）只断 OnHit 自续链,不涉 Damage_PVE critter 面。
+      hitCritters(this, game);
       // Damage()（每子步结算面;pierce=-1=无限穿,dealContacts 缺省冷却窗 10t 且
       // onHit 未挂钩——命中不置弹亡）
       dealContacts(this, game, this.hitCd, 10);

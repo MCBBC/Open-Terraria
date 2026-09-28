@@ -34,7 +34,7 @@ function mkStore(w: number, h: number) {
 const mkWorld = (st: ReturnType<typeof mkStore>) => ({ store: st }) as never;
 
 describe('★shineslice 内容指纹键', () => {
-  it('同内容同键（跨格共享）;邻格帧变/漆变/动画相位变 → 新键', () => {
+  it('位键+指纹:同格同内容同键（跨帧稳定=零重传）;异格异键（零碰撞）;邻格帧变/漆变/动画相位变 → 新键', () => {
     tileAnim.tick = 0;
     const st = mkStore(16, 16);
     st.type[st.idx(8, 8)] = 211;          // 中心=叶绿素脉动矿
@@ -42,10 +42,11 @@ describe('★shineslice 内容指纹键', () => {
     const k1 = shineSliceCellKey(mkWorld(st), 8, 8, 211, 211);
     const k2 = shineSliceCellKey(mkWorld(st), 8, 8, 211, 211);
     const kOtherCell = shineSliceCellKey(mkWorld(st), 9, 8, 211, 211);
-    expect(k1).toBe(k2);                   // 幂等
-    expect(k1).toMatch(/^shineSlice:211:[0-9a-f]+$/);
-    expect(kOtherCell).not.toBe(k1);       // 邻域不同（中心/邻关系对调）→ 键异
-    // 邻格 frameX 变（blend 取帧读邻格）→ 键变
+    expect(k1).toBe(k2);                   // 跨帧幂等（稳态零上传的机制面）
+    expect(k1).toMatch(/^shineSlice:211:8:8:[0-9a-f]+$/);
+    expect(kOtherCell).not.toBe(k1);       // ★位键:异格恒异键（211 2×2 组 auto 框架
+                                           //   按绝对奇偶取组位——纯内容键曾碰撞错帧）
+    // 邻格 frameX 变（blend 取帧读邻格）→ 键变（内容变化失效面）
     st.frameX[st.idx(9, 8)] = 18;
     expect(shineSliceCellKey(mkWorld(st), 8, 8, 211, 211)).not.toBe(k1);
     // 漆变 → 键变

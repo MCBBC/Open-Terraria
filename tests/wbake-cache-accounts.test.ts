@@ -15,7 +15,8 @@ import type { World } from '../src/world/World';
 const W = 128, H = 96;
 
 type Priv = Pick<ChunkCache, 'chunks' | 'dirtyQueue' | 'markDirty' | 'dispose' | 'releasePair'
-  | 'pageCount' | 'invalidateAll' | 'flushDirty' | 'completeWorkerBake' | 'requeueWorkerBake'> & {
+  | 'pageCount' | 'invalidateAll' | 'flushDirty' | 'completeWorkerBake' | 'requeueWorkerBake'
+  | 'lastFlushCount' | 'lastFlushMs'> & {
   cellFree: number[];
   stickyCell: Map<number, number>;
   wallPages: Array<{ width: number; height: number; getContext(kind: string): unknown }>;

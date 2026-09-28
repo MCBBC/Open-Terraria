@@ -66,6 +66,8 @@ class ScriptedLink {
       showInvisibleBlocks: false,
     };
   }
+  /** ★C9d2 二期:引擎切片入口改走 buildWorkerTiles（假链同款零尺寸包,语义不变） */
+  buildWorkerTiles(): TileSlicePack { return this.buildSlice(); }
   send(msg: Omit<LightSnapshotMsg, 'op' | 'seq'>): void { this.lastSent = msg as LightSnapshotMsg; }
   dispose(): void { /* noop */ }
   /** 测试驱动：worker 算完回达（在「渲染后、下一 fixedUpdate 前」调用=最快调度） */

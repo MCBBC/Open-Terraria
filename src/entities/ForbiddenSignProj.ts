@@ -281,16 +281,21 @@ export class ForbiddenSignProj extends Entity {
       // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
       //  656 数据面 magic ⇒ 原版 Ancient Storm 本就吸血,本仓漏接）——受理位挂接,
       //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数。
-      //  ★既有位登记：localImmune 写与 hitCount++（:14245）在原版同在受理面内,
-      //  本仓 hurt 前置门已拦 dead/dontTakeDamage/localImmune,拒收残面（Enemy
-      //  iframes 残窗）仍照写=既有近似,不动（独立案）
+      //  ★BJ385 修正（BJ382 登记债清偿）：localImmune 写（:14181-14182
+      //  usesLocalNPCImmunity 支 immuneArray[victimIndex]=localNPCHitCooldown）与
+      //  hitCount++（:14245 type==656 localAI[0]++）在原版都在 StrikeNPC（:13702）
+      //  之后的受理面内——拒收跳（Damage_PVE_Inner :12634-12637 immune[owner]>0 残窗/
+      //  外层 :12589 dontTakeDamage 门）整跳 return,三写全不达。旧码 hurt 返假仍照写
+      //  =敌怪免疫残窗内虚增 30 命中帽+8t 局部窗提前拉闸,已并入受理位
+      //  （原版序 proc :13877-79 → immune 写 :14181 → localAI[0]++ :14245 →
+      //  numHits++ :14263）
       if (e.hurt(applyBannerDamageDealt(game, e, dmg), 0, 0, game, 0, crit, 0, true)) {
         ghostHealProc(game, this.projId, this.pveNumHits, e);
-        this.pveNumHits++;
+        this.localImmune.set(e.id, 8);                           //（:14181-14182）
+        this.hitCount++;                                         // localAI[0]++（:14245）
+        this.pveNumHits++;                                       //（:14263 numHits++）
+        if (this.hitCount >= 30) break;                          // 命中帽达成本拍即停
       }
-      this.localImmune.set(e.id, 8);
-      this.hitCount++;                                           // localAI[0]++（:14245）
-      if (this.hitCount >= 30) break;                            // 命中帽达成本拍即停
     }
     for (const [k, v] of this.localImmune) {
       if (v <= 1) this.localImmune.delete(k);

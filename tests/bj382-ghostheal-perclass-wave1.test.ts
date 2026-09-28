@@ -334,7 +334,7 @@ describe('BJ382 禁戒沙暴柱 656 ghostHeal proc（柱身盒接触,numHits 与
     expect(storm.hitCount).toBe(2);
   });
 
-  it('拒收不 proc 不计数（pveNumHits=0）;hitCount 既有位照跑（登记偏差,非本刀）', () => {
+  it('拒收不 proc 不计数不记帽（pveNumHits=0,hitCount=0）——★BJ385 受理位修正（BJ382 既有位登记债清偿：localImmune 写/:14245 hitCount++ 原版在 StrikeNPC :13702 后受理面内,拒收跳 :12634-12637 整跳 return 三写全不达;旧 iframes 残窗虚增帽反模式退役）', () => {
     const log: StealCall[] = [];
     const e = enemySpy(1, 79, 98);
     e.hurt = () => false;
@@ -345,7 +345,7 @@ describe('BJ382 禁戒沙暴柱 656 ghostHeal proc（柱身盒接触,numHits 与
     storm.fixedUpdate(1 / 60, game);
     expect(log.length).toBe(0);
     expect(storm.pveNumHits).toBe(0);
-    expect(storm.hitCount).toBe(1);                       // 既有位：拒收面照 ++（登记）
+    expect(storm.hitCount).toBe(0);                       // ★BJ385：拒收面不再 ++（受理位）
   });
 });
 

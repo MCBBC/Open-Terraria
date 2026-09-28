@@ -76,6 +76,13 @@ export class ChunkCache {
    *  本类随即将 bakeClient 置 null 回主线程全链（双路径纪律:旗关/降级=现状逐位）。 */
   bakeClient: import('../workers/BakeClient').BakeClient | null = null;
 
+  /** ★wbake=1 入场覆盖门账（2026-09-28 世界入场空白修复刃）：worker 占位对
+   *  （首烘/重建中,页区=透明）的 chunk key 集。get() wbake 支路建占位入账;
+   *  completeWorkerBake 真对落页/主线程重建（降级）/LRU 淘汰/dispose 出账。
+   *  viewportCovered() 消费（Game.whenViewportBaked 幕布覆盖门）——旗关恒空=
+   *  查询恒 true（幕布语义零变化）。 */
+  readonly workerAwaiting = new Set<number>();
+
   // ---- chunk atlas 页池(2026-08-18 IOSurface 张数优化) ----
   // 旧结构:每 chunk 2 张 256² canvas(稳态 35 chunk=70 张、满额 768 张),且
   // renderChunkInner 每次重烘焙【新建】画布——移动期 flushDirty 4 chunk/帧 =
@@ -258,6 +265,7 @@ export class ChunkCache {
     this.chunks.clear();
     this.dirtyQueue.length = 0;
     this.dirtySet.clear();
+    this.workerAwaiting.clear();
     this.animChunksBySheet.clear();
     this.animChunksByWall.clear();
     if (this.bakeArriveTimer) { clearTimeout(this.bakeArriveTimer); this.bakeArriveTimer = 0; }
@@ -419,6 +427,32 @@ export class ChunkCache {
     if (this.chunks.get(k) !== undefined) return;
     if (!this.world.store.inBounds(cx * CHUNK, cy * CHUNK)) return;
     this.enqueueDirty(k);
+  }
+
+  /** ★视口优先调度判定（2026-09-28 世界入场空白修复刃）：chunk 与 animView 视域
+   *  （相机视野+2 chunk 外延带,Game.fixedUpdate 每 tick 写入,Renderer 动画重烘
+   *  同源消费）相交 = 高优烘焙。animView 未置（null）= 保守低优（不抢快车道,
+   *  也不阻塞已有高优）。 */
+  inViewport(cx: number, cy: number): boolean {
+    const v = this.animView;
+    if (!v) return false;
+    const s = CHUNK * TILE;
+    const x = cx * s, y = cy * s;
+    return x + s > v.x0 && x < v.x1 && y + s > v.y0 && y < v.y1;
+  }
+
+  /** ★入场幕布覆盖门查询（2026-09-28）：可视视口内是否还有 worker 占位 chunk
+   *  （透明页区）。false = 幕布不可掀（Game.whenViewportBaked 消费）。
+   *  旗关/降级（workerAwaiting 恒空）/视域未置恒 true = 幕布语义零变化。 */
+  viewportCovered(): boolean {
+    const v = this.animView;
+    if (!v || this.workerAwaiting.size === 0) return true;
+    const s = CHUNK * TILE;
+    for (const k of this.workerAwaiting) {
+      const x = (k & 0xffff) * s, y = ((k >> 16) & 0xffff) * s;
+      if (x + s > v.x0 && x < v.x1 && y + s > v.y0 && y < v.y1) return false;
+    }
+    return true;
   }
 
   // ---- ★C3 动画格脏索引（2026-09-22）----
@@ -591,7 +625,8 @@ export class ChunkCache {
       return c;
     }
     if (this.bakeClient) {
-      this.bakeClient.request(cx, cy, this);   // 内部按 key 去重;重复请求=在飞请求 bumped
+      this.bakeClient.request(cx, cy, this, true);   // 内部按 key 去重;可视支路=高优（视口优先调度）
+      this.workerAwaiting.add(k);                    // 占位账:回包/主线程重建/淘汰出账
       const cell = this.acquireCell(k);        // 粘滞槽位:重建=旧像素,首烘=空白页区
       const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
       const slot = cell % ChunkCache.CELLS_PER_PAGE;
@@ -606,6 +641,7 @@ export class ChunkCache {
       return pair;
     }
     c = this.renderChunk(cx, cy);
+    this.workerAwaiting.delete(k);   // 降级回主线程:重建即出账（覆盖门不被死 key 拖住）
     this.chunks.set(k, c);
     this.trimLru();
     return c;
@@ -621,6 +657,7 @@ export class ChunkCache {
       this.releasePair(this.chunks.get(oldest)); // 淘汰画布同样释放,防 detached 积压
       this.chunkSheets.delete(oldest);
       this.chunkConsumed.delete(oldest);
+      this.workerAwaiting.delete(oldest);   // ★入场覆盖门:淘汰=出账（重访重建,防死 key 阻门）
       this.chunks.delete(oldest);
     }
   }
@@ -633,6 +670,7 @@ export class ChunkCache {
    *  本方法只写页画布,GL 段按既有 glDirtySlots 消费,零改动。 */
   completeWorkerBake(cx: number, cy: number, wallBmp: ImageBitmap, tileBmp: ImageBitmap,
     glowBmp: ImageBitmap | null, missing: string[], consumed: string[]): void {
+    if (!this.wallPages.length) return;   // dispose 后迟到的回包:页池已空,静默弃
     const k = ChunkCache.key(cx, cy);
     const cell = this.acquireCell(k);
     const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
@@ -656,6 +694,7 @@ export class ChunkCache {
     }
     const pair: ChunkPair = { wall: wallPage, tile: tilePage, sx: ox, sy: oy, cell, glow };
     this.chunks.set(k, pair);
+    this.workerAwaiting.delete(k);   // 真对落页=出账
     // 晚到表链登记:missing=该 chunk 烘焙时 worker 缺的表(=烤了空位,表到位后由
     // onBakeAssetArrived 精确重烘);consumed=消费过的表(表替换热补丁链同源)
     if (missing.length) this.chunkSheets.set(k, new Set(missing));

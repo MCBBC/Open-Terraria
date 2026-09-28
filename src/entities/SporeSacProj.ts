@@ -38,6 +38,8 @@
 //     （稳态 (255−80)/255≈0.686 不透明度）。penetrate −1 = 免疫梯首支内层真
 //     （:14033-14037）→ 命中写 immune[owner]=0（清窗,非 10——旧注「immune[owner]=10」
 //     假命题勘误 2026-09-18）+ 组行 :14036 → HitCdImpl 冷却 10t。
+//     ★BJ389：critter 面=hitCrittersAll 全结算（victim 循环 :12618 照伤小动物,
+//     penetrate −1 无截断无消耗——bj389 判别面;critter 一击即死=组窗跨桶无可观测差）。
 //   · 无 Kill 尘/音分支（Kill :74317 前后无 567/568 专属支）→ 静默消亡。
 // 联机面：玩家本地自持实体（远端代理不跑 fixedUpdate）,可见面偏差登记同 ChloroSporeCloud。
 import { Entity } from './Entity';
@@ -45,7 +47,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { dealContacts, HitCdImpl } from './proj1457';
-import { canBeChasedBy } from './projTargets';
+import { canBeChasedBy, hitCritters, hitCrittersAll } from './projTargets';
 import { projSprite } from './Arrow';
 
 /** 孢子云双型（567 绿 / 568 变体,567 盒 14×14、568 盒 16×16） */
@@ -227,6 +229,16 @@ export class SporeSacCloud extends Entity {
     //  keepIterating 截断（:14186-14201 penetrate 1→0 → false）= stopAfterFirstHit
     //  （同拍重叠多怪只伤桶序首个——δA bug② 同款映射,叶弹 227 先例）。
     if (!this.dying) {
+      // ★BJ384 小动物命中面（BJ383 件2 补齐）：567/568 friendly penetrate=1
+      //  （SetDefaults :6187-6202）→ critter 受击耗穿归零即亡（:14184 penetrate--
+      //  → :17312 Kill）;ai[1]==0（非寿终——本支在 !dying 门内）→ :74317-74323
+      //  迸气=burst() 同支。命中不写任何免疫窗（:14032 首支内层 penetrate!=1 假
+      //  +尾档 :14183 else 链不可达——红蓝-J3 同判）。几何=本体盒 AABB（hitCritters
+      //  缺省面;无 minion/sentry/trap 位 → 仅受 dontHurtCritters 饰品门）。桶序先
+      //  小动物（BJ383 范式——keepIterating 截断族,同拍小动物优先受理）。非 magic
+      //  → 无幽灵兜帽吸血 proc。★BJ389：迸气团 569-571（penetrate=−1,同文件下方
+      //  类）critter 面已补课（原版照伤小动物,bj389 判别面）。
+      if (hitCritters(this, game)) { this.burst(); return; }
       let hit = false;
       dealContacts(this, game, SPORE_CLOUD_PASS, 0, () => { hit = true; }, undefined, -2, true);
       if (hit) { this.burst(); return; }                            // Kill :74317（ai1==0 → 迸气）
@@ -316,11 +328,24 @@ export class SporeGasCloud extends Entity {
     // 但门位偏离原版（原版=immune[owner] 清零+组行 :14031-14037 独扛节流）;归组行
     // 语义后判别面=tests/sw-fx1-accessories「组共享 IDStatic」
     // （组表=1 次 hurt 调用,per-instance 变异面=15）。
+    // ★BJ389 小动物命中面（BJ384 登记漏网清偿——567/568 云 critter 面 BJ383 范式
+    //  同舱补课）：569-571 friendly penetrate=−1（SetDefaults :6204-6213）→ 原版
+    //  Damage() victim 循环（:12618 Damage_PVE_Inner flag=!targetNPC.friendly 对
+    //  critter 恒真）照伤小动物;:14184 penetrate>0 才递减+ :14203 无 keepIterating
+    //  截断 → 【无穿透消耗、无首靶截断】,全部命中靶各结算一次 → 结算单源=
+    //  hitCrittersAll 全结算变体（projTargets.ts;567/568 首靶即返 hitCritters 是
+    //  penetrate=1 截断族,本型不同相）。几何=AABB 缺省面（Colliding 默认矩形,
+    //  aiStyle 106 无专支）;拒收=critterRejectFlag（dontHurtCritters/MinionShot/
+    //  SentryShot 组装——569-571 无 minion/trap 位,trap 复位不适用）;critter 一击
+    //  即死 ⇒ 10t 组窗跨桶无可观测差（BJ383 判例同式,critter 支不写组行）;
+    //  numHits 本型无 proc 消费位（非 magic 非 whip → ghostHeal/sentry 不达）
+    //  ⇒ 只结算不记账,与 567/568 接线式同构。桶序先小动物（BJ383 桶序登记近似）。
     // ★红蓝-L1②（2026-09-18,拍板#1A 备案债清偿）：hitPierce=−2（BJ140 档）——免疫门
     // 照走（:12636 内环,iframes>0 拒收）+命中【不写帧】（Enemy.hurt pierce!==−2 才写
     // :14187 通用档）=净等价原版 immune[owner]=0 清窗（:14035——门已保证进此路径时
     // iframes==0,不写≡写 0）。曾缺省 0 写 iframes=10=对其它 pierce=0 兵器多开 10t
     // 全局窗（GC1 域近似偏差）——变异面=tests/sw-fx1-accessories「气团命中不开全局窗」。
+    hitCrittersAll(this, game);
     dealContacts(this, game, SPORE_GAS_IMMUNE, 10, undefined, undefined, -2);
   }
 

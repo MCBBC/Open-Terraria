@@ -65,9 +65,10 @@ async function waitClient(ms = 20000) {
 chk('wbake 客户端就绪', await waitClient());
 
 // ---- 选 chunk：玩家周界 5×5 + 地下 2 + 旗面观测 ----
+// 坐标口径：player.cx/cy = 世界像素（÷16=tile,÷256=chunk）
 const chunkList = await page.evaluate(() => {
   const g = window.__swGame;
-  const pcx = Math.floor(g.player.cx / 16), pcy = Math.floor(g.player.cy / 16);
+  const pcx = Math.floor(g.player.cx / 16 / 16), pcy = Math.floor(g.player.cy / 16 / 16);
   const list = [];
   for (let dy = -2; dy <= 2; dy++) {
     for (let dx = -2; dx <= 2; dx++) list.push([pcx + dx, pcy + dy]);
@@ -76,36 +77,70 @@ const chunkList = await page.evaluate(() => {
   const W = g.world.w, H = g.world.h;
   return list.filter(([cx, cy]) => cx >= 0 && cy >= 0 && cx * 16 < W && cy * 16 < H);
 });
+console.log(`[wbake-digest] chunk 覆盖 ${chunkList.length} 块 @${chunkList[0]}`);
 
-// ---- 双臂对拍（node 侧 md5 终裁;全量字节 base64 回传 ≈14MB）----
+// ---- 群系特化 chunk 扫描（棕榈 323 深扫描/仙人掌 80/树 5/宝石树 583-589 的
+//      深度扫描带与大表路径;稀疏采样世界 store 找命中格 → 折算 chunk）----
+const biomeChunks = await page.evaluate(async () => {
+  const m = await import('/src/data/tiles.ts');
+  const g = window.__swGame;
+  const st = g.world.store;
+  const want = new Set([323, 80, 5, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 72, 171]);
+  const found = new Map();
+  for (let y = 0; y < st.h; y += 3) {
+    for (let x = 0; x < st.w; x += 5) {
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      const d = m.TILE_DEFS[st.type[i]];
+      if (d?.vanilla && want.has(d.vanilla.sheet)) {
+        const ck = (x >> 4) + ',' + (y >> 4);
+        if (!found.has(ck)) found.set(ck, d.vanilla.sheet);
+      }
+    }
+  }
+  return [...found.entries()].slice(0, 24).map(([k, sheet]) => { const [cx, cy] = k.split(',').map(Number); return { cx, cy, sheet }; });
+});
+const extra = biomeChunks.map(b => [b.cx, b.cy]);
+console.log(`[wbake-digest] 群系特化 ${extra.length} 块（sheets: ${[...new Set(biomeChunks.map(b => b.sheet))].join(',')}）`);
+chunkList.push(...extra);
+
+// ---- 双臂对拍（node 侧 md5 终裁;全量字节 base64 回传）----
+// ★A 臂先行暖场：远区 chunk 首烘会触发主线程懒加载（fallback 烤进首烘）——
+//   烘两次中间等 1s,第二次 = 表落位后的【settled 主线程产物】;与 B 臂对拍用
+//   settled 臂（worker 侧经 missing→ship 链天然只产 settled 产物）。
 const md5s = await page.evaluate(async (chunkList) => {
   const g = window.__swGame;
   const chunks = g.chunks;
   const client = chunks.bakeClient;
   const b64 = (d) => { let s = ''; const u8 = d; for (let i = 0; i < u8.length; i += 32768) s += String.fromCharCode.apply(null, u8.subarray(i, i + 32768)); return btoa(s); };
-  const out = [];
-  for (const [cx, cy] of chunkList) {
-    // A 臂：主线程全链（cell=-1 独立目标=像素对拍通道）
+  const bakeA = (cx, cy) => {
     const mw = document.createElement('canvas'); mw.width = 256; mw.height = 256;
     const mt = document.createElement('canvas'); mt.width = 256; mt.height = 256;
     chunks.bakeChunkInto(cx, cy, mw, mt, -1);
-    const aW = mw.getContext('2d').getImageData(0, 0, 256, 256).data;
-    const aT = mt.getContext('2d').getImageData(0, 0, 256, 256).data;
-    // B 臂：worker 快照烘焙（missing → 补送 → 重试,≤6 轮）
+    return { aW: b64(mw.getContext('2d').getImageData(0, 0, 256, 256).data),
+             aT: b64(mt.getContext('2d').getImageData(0, 0, 256, 256).data) };
+  };
+  const out = [];
+  for (const [cx, cy] of chunkList) {
+    // A 臂（暖场 + settled）
+    bakeA(cx, cy);
+    await new Promise((res) => setTimeout(res, 900));
+    const a = bakeA(cx, cy);
+    // B 臂：worker 快照烘焙（missing → 补送 → 重试,≤8 轮）
     let r = null;
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       r = await client.digestBake(cx, cy);
       if (!r) break;
       if (!r.missing.length) break;
       await client.shipForTest(r.missing);
       await new Promise((res) => setTimeout(res, 350));
     }
-    if (!r || r.missing.length) { out.push({ cx, cy, aW: b64(aW), aT: b64(aT), bW: null, bT: null, missing: r?.missing ?? ['<digest-null>'] }); continue; }
+    if (!r || r.missing.length) { out.push({ cx, cy, aW: a.aW, aT: a.aT, bW: null, bT: null, missing: r?.missing ?? ['<digest-null>'] }); continue; }
     const bw = document.createElement('canvas'); bw.width = 256; bw.height = 256;
     bw.getContext('2d').drawImage(r.wall, 0, 0);
     const bt = document.createElement('canvas'); bt.width = 256; bt.height = 256;
     bt.getContext('2d').drawImage(r.tile, 0, 0);
-    out.push({ cx, cy, aW: b64(aW), aT: b64(aT), bW: b64(bw.getContext('2d').getImageData(0, 0, 256, 256).data), bT: b64(bt.getContext('2d').getImageData(0, 0, 256, 256).data), missing: [] });
+    out.push({ cx, cy, aW: a.aW, aT: a.aT, bW: b64(bw.getContext('2d').getImageData(0, 0, 256, 256).data), bT: b64(bt.getContext('2d').getImageData(0, 0, 256, 256).data), missing: [] });
   }
   return out;
 }, chunkList);

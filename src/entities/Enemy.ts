@@ -1502,6 +1502,11 @@ export class Enemy extends Entity {
     //  随从可磨死 400 血石碑）→ 四守卫随碑亡消散、召唤链中止不出教主=用户实报。
     //  手补表同款（提取面不含此字段）
     if (id === 437) e.dontTakeDamage = true;
+    // ★BJ385-④ 636 光之女皇 SetDefaults :17234 dontTakeDamage=true——出生首拍前的
+    //  无敌兜底（AI_120 :47431 `dontTakeDamage = !flag6` 每拍重算接管,bossAI_lategame
+    //  empressOfLightAI;SetDefaults 行在其前=原版 spawn 同拍语义）。657 史莱姆皇后
+    //  SetDefaults :17342-17358【无】此行=无手补项,其无敌面纯 AI 重算
+    if (id === 636) e.dontTakeDamage = true;
     // SetDefaults immortal（NPC.cs:14630 假人 488/:17715 雕像宝箱怪 690——690 的
     // 显隐态由其 AI :43873 翻 false）。DoT 直扣路径以本位守卫（GetHurtByDebuff
     // :92995 同款）——DoT/血条曾绕过 488 守卫（2026-09-02 用户实报闪烁血条）

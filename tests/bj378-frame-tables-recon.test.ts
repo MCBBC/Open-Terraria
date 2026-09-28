@@ -94,10 +94,17 @@ describe('BJ378 基线:干跑对拍闸全绿', () => {
     expect(rep.proj.authority['254']).toBe(5);
     expect(rep.proj.assignSpan).toEqual([8582, 8866]);
     expect(rep.proj.dupes).toEqual([{ id: 221, value: 3, line: 8743, prev: 3 }]);
-    // tile:GetTileDrawData 40 覆写 + 752 verbatim(4583-4584)
+    // tile:GetTileDrawData 103 覆写（★BJ389 fall-through 修正:旧 40=case 组漏记基线,
+    // 仅组末标签存活;修正后 h18 家具族 :4954-4982 全组归账）+ 752 verbatim(4583-4584)
     expect(rep.tile.authority['752']).toEqual({ w: 36, h: 38 });
-    expect(Object.keys(rep.tile.authority).length).toBe(40);
-    expect(rep.tile.exempt.map((e: { id: number }) => e.id)).toEqual([752]);
+    expect(rep.tile.authority['14']).toEqual({ h: 18 });     // fall-through 组非末位成员
+    expect(rep.tile.authority['16']).toEqual({ h: 18 });     // :4981 组首位
+    expect(rep.tile.authority['2']).toEqual({ w: 24 });      // 宽度轴覆写（:5719）
+    expect(rep.tile.authority['716']).toEqual({ h: 18 });    // :4981 组末位（旧基线唯一幸存者）
+    expect(Object.keys(rep.tile.authority).length).toBe(103);
+    expect(rep.tile.exempt.map((e: { id: number }) => e.id)).toEqual([752, 405, 406]);
+    expect(rep._meta.tile.rule5Height18Count).toBe(53);      // HEIGHT_18 集合承载（规则⑤轴 b）
+    expect(rep._meta.tile.rule5Height18Anchor).toBe(true);   // default 臂字面锚
     // 三域 findings 全零
     for (const dom of ['gore', 'proj', 'tile']) {
       for (const [k, v] of Object.entries(rep[dom].findings)) expect(v, `${dom}.${k}`).toEqual([]);
@@ -154,6 +161,25 @@ describe('BJ378 判别面:人工注入→红(规则①②③④逐一)', () => {
     const { status, report } = runInject({ 'VanillaTiler.mut.ts': mut });
     expect(status).toBe(1);
     expect(report.tile.findings.deadFit.map((m: { id: number }) => m.id)).toEqual([529]);
+  });
+  // ★BJ389 规则⑤判别面：tileHeight 覆写×grid 不整除且无承载=红（承载三轴=case
+  //  capture/HEIGHT_18 集合缺省臂/underHeightDebt 债登记——两轴各一发变异自证）。
+  it('规则⑤(HEIGHT_18 承载轴是活闸):集合摘 15 → tile.rule5=[15]（:4981 组 h18 候选失承载）', () => {
+    const src = readFileSync(join(GAME, 'src/render/VanillaTiler.ts'), 'utf8');
+    const mut = src.replace('new Set([14, 15, 16, 17,', 'new Set([14, 16, 17,');
+    expect(mut).not.toBe(src);
+    const { status, report } = runInject({ 'VanillaTiler.mut.ts': mut });
+    expect(status).toBe(1);
+    expect(report.tile.findings.rule5.map((m: { id: number }) => m.id)).toEqual([15]);
+  });
+  it('规则⑤(债登记新鲜度锚):给 405 补 case sh=18 → 债豁免 ok=false → exemptAnchorLost 硬红', () => {
+    const src = readFileSync(join(GAME, 'src/render/VanillaTiler.ts'), 'utf8');
+    const anchor = 'case 476: if (fit(fx, fy, 20, 18)) { a.sw = 20; a.sh = 18; } break;';
+    expect(src.includes(anchor)).toBe(true);
+    const mut = src.replace(anchor, anchor + '\n    case 405: a.sh = 18; break;');
+    const { status, out } = runInject({ 'VanillaTiler.mut.ts': mut });
+    expect(status).toBe(1);
+    expect(out).toMatch(/exemptAnchorLost/);
   });
 });
 

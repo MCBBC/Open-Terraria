@@ -260,12 +260,16 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
   cooldown: number,
   dirX: number,
   pen = 0,
-  /** 每次命中敌结算后的回调（Boomerang 的 Projectile.Damage 回收门 :12278-12291 用；
-   *  悠悠球/配重球的 :12467-12508 命中链也在此语义点触发——入参=命中敌） */
+  /** 每次命中敌结算后的回调（Boomerang 的 Projectile.Damage 回收门用；
+   *  悠悠球/配重球的命中链也在此语义点触发——入参=命中敌）。
+   *  ★BJ388 件1（2026-09-28）：本回调在【受理位】求值（原版 Damage_PVE_Inner 全部
+   *  命中段在免疫门 :12634-12637 之后,门拒整段静默;见函数内 vanillaGated 注） */
   onHit?: (e: unknown) => void,
-  /** 命中伤害乘区（求值于 hurt 前、按敌逐个）：悠悠球对玩家无视线时 ×0.75
-   *  （Projectile.cs:12503-12505 num12×0.75） */
-  dmgScale?: (e: unknown) => number,
+  /** 型号段伤害乘区（★BJ388 件2 改约,2026-09-28）：入参 = mul 乘区截断后的 dmg int,
+   *  返回经逐段 (int) 截断的终值——原版 dmg 在 :12970 DamageVar 已是 int,型号段
+   *  （383 宽盒 ×0.6 :13088-13089/悠悠球无视线 ×0.75 :13318/555·546 里程碑 ×2
+   *  :13428-13437）各自乘完再 (int) = 先截后乘;段序在 parry(:13627)/nano(:13688) 前 */
+  dmgScale?: (e: unknown, dmg: number) => number,
   /** 玩家级共享免疫门（NPC.immune[owner]>0 语义 = Enemy.iframes）：true 时不建
    *  逐弹私账、改按敌方全局免疫帧去重——悠悠球/配重球走此档（DefaultToYoyo
    *  不设 usesLocalNPCImmunity/localNPCHitCooldown,Projectile.cs:10155-10161;
@@ -365,6 +369,20 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       // hurt 落地置 10t）——替代逐弹 hitCd 私账（mock 敌无 iframes 字段 = 恒放行）
       if (((e as { iframes?: number }).iframes ?? 0) > 0) continue;
     } else if (!hitCd.ready(e.id, cooldown)) continue;
+    // ★BJ388 件1（BJ385 登记债清偿,2026-09-28）受理位定谳：原版 Damage_PVE_Inner 的
+    //   全部命中段——特例链 :13056-13134/aiStyle99 链 :13290-13330/555·546 里程碑
+    //   :13424-13436/StatusNPC :13637/676 反射 :13721-13725/悠悠球 per-hit 族
+    //   :13752-13870/免疫写链 :14031-14182/penetrate-- :14189-14196——全部在免疫门
+    //   :12634-12637（+外层 localNPCImmunity 门 :12596）之后 = 严格受理位,门拒整段静默。
+    //   hurt() 返假两族：头部三早退（dead :13969/iframes :13970/dontTakeDamage :13976）
+    //   = 门拒等价;血尽级联返假（realLifeHost 段 :14367/月总 :14375/猪鲨泡 :14381/
+    //   石巨人头 :14391/四塔 :14396——伤害已实扣,原版 StrikeNPC 照跑=受理）非门拒。
+    //   本环可及面：dead/dontTakeDamage 已被上方 :352/:355 前置 continue,hurtPierce==1
+    //   = flag3（:12634）免疫门豁免 → 门拒可及面仅 iframes>0（pierce!=1）。受理面谓词
+    //   = !vanillaGated（非 hurt 返真——级联返假仍受理）;onHit/dirOverride 持久副面/
+    //   676 反射/applyProjStatus 同在此平面求值（onAccepted 仍=hurt 返真,BJ382 契约不动;
+    //   其与原版受理面的级联差=登记债,见 BJ388 报告）。
+    const vanillaGated = hurtPierce !== 1 && (((e as { iframes?: number }).iframes ?? 0) > 0);
     // 暴击 = GetWeaponCrit 语义:4 基础 + 武器 item.crit + 装备/buff（Game 侧合并传入；
     // 此前全族写死 4%——Sunfury 原版 crit=7 应为 11%）。
     // ★α-H1/A3①：缺省阈值改按 projClass 投影（Projectile.Damage :12898-12912 三连掷
@@ -392,15 +410,25 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       pl.parryDamageBuffT = 0;                          // ClearBuff(198)（倒计时承载清零）
     }
     if (meleeGateHere && imbuNano) mul *= 1.05;   // GetNanoFlaskDamageBoost()=1.05f（Player.cs:44790-44792）
-    // (int) 截断 + 命中乘区（悠悠球无视线 ×0.75，:12504）。两旗皆关时 mul==1 与旧式
-    // 完全同值（舍入面零漂移）
-    const dmg = Math.trunc((crit ? self.damage * 2 : self.damage) * (dmgScale?.(e) ?? 1) * mul);
+    // (int) 截断 + 命中乘区。★BJ388 件2（BJ344 债清偿,2026-09-28）：dmgScale 改约
+    //   【DV 后逐段先截后乘】——原版 dmg 在 :12970 DamageVar 已是 int,型号段乘完
+    //   再各自 (int)（383 宽盒 ×0.6 :13088-13089/悠悠球无视线 ×0.75 :13318/555·546
+    //   里程碑 ×2 :13428-13437,段序在 parry :13627/nano :13688 之前）;旧单截式
+    //   trunc(base×scale×mul) 与 trunc(trunc(base×mul)×scale) 段间进位面 ±1 微差
+    //   （例 base×mul=13、scale=0.6：新 trunc(trunc(13.65)×0.6)=trunc(13×0.6)=7,
+    //   旧 trunc(13×0.63)=8）。crit×2 = 精确整数倍乘不涉截断位;dmgScale 未传时
+    //   与旧式逐位同值（零漂移）。
+    const dmgBase = Math.trunc((crit ? self.damage * 2 : self.damage) * mul);
+    const dmg = dmgScale ? dmgScale(e, dmgBase) : dmgBase;
     // ★BJ339：num40 = direction 缺省语义（:13652）——dirOverride 在传时强占
     //（404 球侧 direction 每拍重写 :30742-30751;未传弹保持敌相对弹位既有承载）
     // ★BJ344：回调档逐敌求值 = 原版写位在 Damage_PVE_Inner 逐敌段（:13056-13098/
     //  :13667-13678 先于 num40 读出）的同构承载
-    const kdir = (typeof dirOverride === 'function' ? dirOverride(e) : dirOverride)
-      ?? (Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX);
+    // ★BJ388 件1：dirOverride 函数档含持久副面（902 direction 翻转 :13124-13130 受理位）
+    //   ——门拒拍不求值（kdir 亦无消费面,hurt 同条件必拒 :13970）
+    const kdir = vanillaGated ? 0
+      : (typeof dirOverride === 'function' ? dirOverride(e) : dirOverride)
+        ?? (Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX);
     // ★α-H6/A5 弹幕侧：浸剂/debuff 施加搬前到【StrikeNPC 前】（原版 StatusNPC(victimIndex)
     // :13640 → armorPen add :13686 → nano :13688 → StrikeNPC :13716。ichor 池反例与
     // 挥砍侧同一案，见 Game.ts 敌怪循环 A5 注）。
@@ -445,19 +473,26 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     // 本环弹型（回旋镖 3/长矛 19,161/悠悠球 99,15）全不在 CanBeReflected 白名单,
     // 天然不触发；白名单内弹型 hurt 后即刻弹回,穿透补偿由弹型 onHit 记账面承担
     // （reflected 后敌怪环整体短路=不再消耗穿透）。
-    if ((e as { vanillaId?: number | null }).vanillaId === 676) {
+    if (!vanillaGated && (e as { vanillaId?: number | null }).vanillaId === 676) {
       tryReflectShimmerSlimeHit(me as unknown as Parameters<typeof tryReflectShimmerSlimeHit>[0],
         me.projId ?? 0, e as unknown as { vanillaId?: number | null; immortal?: boolean }, game, (me as { life?: number }).life);
     }
     // ★BJ382：受理回调在 676 反射支后 / onHit 前（原版序：StrikeNPC :13712 → 反射支
     //  :13716-19 → canGhostHeal proc 段 :13875 → numHits++ :14263）
     if (acceptedHere) onAccepted?.(e);
-    onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
+    // ★BJ388 件1：onHit 移入受理位（原版命中段全景在免疫门 :12634-12637 后,门拒整段
+    //  静默;逐调用方定谳=回旋镖回收门/悠悠球链/配重球链/锚定鱼 23 三击门/262 族回收/
+    //  481 链枷回摆/405·523 首中即亡/404 回收翻转——锚全在受理面,无一"拒收跑"同相;
+    //  血尽级联返假仍受理——vanillaGated 已排除该族,见上方定谳注）
+    if (!vanillaGated) onHit?.(e);
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;
     //   本环仅玩家弹路径可达=天然 !npcProj,同 Arrow.ts:3260 先例）
-    applyProjStatus(me.projId, e as unknown as Record<string, number>,
-      { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
+    //   ★BJ388 件1 同平面：StatusNPC(victimIndex) :13637 在免疫门后,门拒不施加
+    if (!vanillaGated) {
+      applyProjStatus(me.projId, e as unknown as Record<string, number>,
+        { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
+    }
     // ★BJ340 F-B（2026-09-25）penetrate 耗尽断环：原版 Damage_PVE 环头
     // `for (i…; i < maxNPCs & keepIterating; i++)`（:12589-12603）+ 尾档
     // `penetrate-- → 0 → keepIterating=false`（:14189-14196）——穿透计数耗尽后
@@ -989,7 +1024,9 @@ export class Boomerang extends Entity {
     //      段后 = 本 tick 自旋仍用上一 tick 符号,与原版"AI(:16880)先于移动/转向(:17120)"
     //      的节拍一致;曾恒用出生 facing → 反弹后自旋不反向）----
     if (this.ai0 !== 1) this.dir = this.vx < 0 ? -1 : 1;
-    // ---- 命中结算（同敌冷却 10t = NPC immune[owner]=10,:13172-13174）----
+    // ---- 命中结算（同敌冷却 10t = NPC immune[owner]=10,:13172-13174;★BJ388 件3：
+    //      902 免疫写 =7t（:14104-14112 immune[owner]=7 专支,先于通用 10t 档）→
+    //      hitCd 窗口随型 7t）----
     // 383/301 撞墙 localAI[0]>0 → Damage_GetHitbox(:15050-15076)：命中盒先
     // Inflate(−w/2,−h/2) 收点再 Inflate(localAI/2)——末盒 = 弹体中心 ± localAI/2 的
     // 一帧冲击盒（301=200/383=300 边长）,消费即置 −1。
@@ -1024,9 +1061,10 @@ export class Boomerang extends Entity {
         : this.projId === 902 && this.ai0 !== 0
           ? (e: unknown) => { this.dir *= -1; return this.dir; }
           : this.dir;
-    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || this.dir, this.armorPen,
+    hitEnemies(this, game, this.hitCd, this.projId === 902 ? 7 : 10,
+      Math.sign(this.vx) || this.dir, this.armorPen,
       () => this.onHitEnemy(),
-      this.projId === 383 && boomExt ? () => 0.6 : undefined, false, boomExt,
+      this.projId === 383 && boomExt ? (_e, d) => Math.trunc(d * 0.6) : undefined, false, boomExt,
       0, boomDirOverride,
       boomExt && (this.projId === 301 || this.projId === 383)
         ? (this.projId === 301 ? 1.75 : 1.5) : 1);
@@ -1440,22 +1478,30 @@ export class Boomerang extends Entity {
     }
   }
 
-  /** 命中敌回调 = Projectile.Damage 回收门 + 穿透自减（:12278-12299/:13124-13182） */
+  /** 命中敌回调 = Projectile.Damage 回收门 + 穿透自减（:13101-13114/:14104-14112/
+   *  :14189-14196）★BJ388 件1：本回调在受理位求值（hitEnemies vanillaGated 平面） */
   private onHitEnemy(): void {
     // ★BJ344 勘正（旧锚 :12278-12291/:12292-12297 系 1456 世代,1457 该域=命中玩家
     //  buff 段）：出程命中敌 → 速度反转 + ai[0]=1 = Damage_PVE_Inner :13101-13114
-    // （豁免 301/866/902/光刃族;106 的 LightDisc_Bounce 溅射 :13105-13108 视觉略）;
-    // 902/582 命中转回收 ai[0]=1 = :14104-14112（本仓 902 未接=登记缺口,只影响
-    //  出/回转段时机,不动 kdir 值面）
+    // （豁免 301/866/902/光刃族;106 的 LightDisc_Bounce 溅射 :13105-13108 视觉略）
     if (this.ai0 === 0 && !NO_HIT_RETURN_PROJ.has(this.projId)
       && !PHASEBLADE_PROJ.has(this.projId)) {
       this.vx = -this.vx; this.vy = -this.vy;
       this.ai0 = 1; this.outT = 0;
     }
+    // ★BJ388 件3（BJ344 登记缺口清偿,2026-09-28）：902 命中转回收（:14104-14112
+    //  免疫写链专支 `type==582||type==902 → targetNPC.immune[owner]=7; if (ai[0]!=1f)
+    //  { ai[0]=1f; netUpdate=true }`）——任意态命中（出程/返回）都翻 ai[0]=1 即刻转
+    //  回收,自设 7t 免疫窗（窗口面随 :1027 hitCd 7t 承载）。582 同支但 aiStyle 109
+    //  非本载体（proj1457 域）。位于通用翻转块后 = 原版序（:13101 特例链 → StrikeNPC
+    //  :13712 → :14104 免疫写链）；902 在上块被 NO_HIT_RETURN_PROJ 豁免（速度反转
+    //  不跑——返回段转向由 AI 制速承担,与原版 AI_003 同相）
+    if (this.projId === 902 && this.ai0 !== 1) this.ai0 = 1;
     // 902 返回段命中 direction 翻转已随 BJ344 F1 挪入 :984 dirOverride 回调（原版
     // 翻转 :13124-13130 在 num40 :13652 读出【前】=首中即取翻转值;旧位在 hurt 后
-    // =首中未翻错半拍,两处并存会双翻故摘除）
-    // penetrate 自减（:13175-13182）;==0 → Kill（:15866-15868）;
+    // =首中未翻错半拍,两处并存会双翻故摘除;★件1：门拒拍 dirOverride 不求值=翻转
+    // 亦静默,与 :13124 受理位同相）
+    // penetrate 自减（:14189-14196）;==0 → Kill（:15866-15868）;
     // 866 特例（:13124-13137):五击后 penetrate 复位 1、伤害归零不消失
     if (this.penetrate > 0) {
       this.penetrate--;
@@ -3548,16 +3594,26 @@ export class YoyoProj extends Entity {
     //  写回后值 = 原版 HandleMovement 后自动向读数同相）
     hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
       (e) => this.onYoyoHit(e, game),
-      (_e) => {
-        // 活跃态对玩家无视线 → 该击伤害 ×0.75（:12503-12505 num12）
+      (e, d) => {
+        // ★BJ388 件2（BJ344 债清偿,2026-09-28）：dmgScale 改约 = DV int 上的逐段
+        // 先截后乘——活跃态对玩家无视线 → (int)(dmg×0.75)（:13318,ai[0]>=0 支内
+        // localAI[0]+=40 同拍;寿命快捷烧面在 onYoyoHit）;随后 555/546 里程碑
+        // (int)(dmg×2)（:13428-13437,flag8=!immortal 假人豁免）——原版两段可同时
+        // 命中（旧单返式 0.75/2 互斥=合成缺口,同刀修）
+        let v = d;
         if (this.ai0 >= 0
-          && !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h)) return 0.75;
+          && !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h)) {
+          v = Math.trunc(v * 0.75);
+        }
         // 1457 per-hit 族伤害乘区（countUp:false 只读不加,:13424-13436）：
         // 555 Yelets 每 7 击 ×2、546 Artery 每 3 击 ×2——里程碑判定与 onYoyoHit
         // 的生成掷（countUp:true 自增）同 tick 先后求值,共享计数器读数一致
-        if (this.projId === 555 && p.yoyoHitCounter % 7 === 0) return 2;
-        if (this.projId === 546 && p.yoyoHitCounter % 3 === 0) return 2;
-        return 1;
+        if ((this.projId === 555 && p.yoyoHitCounter % 7 === 0
+          || this.projId === 546 && p.yoyoHitCounter % 3 === 0)
+          && (e as { immortal?: boolean }).immortal !== true) {
+          v = Math.trunc(v * 2);
+        }
+        return v;
       }, true, undefined, 0, this.vx < 0 ? -1 : 1);
     // ★BJ235 残影记录（UpdateTrails :17198=Damage 后同序;563 之外 mode -1 → null 短路。
     //  -2 脱离撞块杀在上方早退=原版 :17132 同相不记录）
@@ -4134,6 +4190,11 @@ const FLAIL_PARAMS: Record<number, Partial<FlailParams>> = {
   1058: { flightTicks: 16, throwSpeed: 23, spinHitCd: 10, orbitRadius: 45 },
 };
 
+/** 中心锚组成员（★BJ388 件4 定谳表,M.cs:33161 大表逐项亲读）：链球族仅此 7 型在
+ *  「vector81=盒中心+gfxOffY、origin24=贴图中心」组——404/1058/947/948 不在表,
+ *  走 :35492 通用通支锚（num153/num151/num152 式）。FlailProj.draw 按此分档 */
+const FLAIL_CENTER_ANCHOR = new Set([25, 26, 35, 63, 154, 247, 757]);
+
 /** 链贴图（DrawProj_FlailChains 1457 Main.cs:35907-35938 switch;1456 :34757-34781）：型号 → Chain_N；
  *  948 三段混排（前 4 节 Chain43 全亮 → 2 节 Chain42 → 其余 Chain41）；
  *  757 = Extra_99 六帧竖条动画链。★1058 不走本表——独立支用 Chain37
@@ -4315,12 +4376,20 @@ export class FlailProj extends Entity {
     const ctx = r.ctx;
     if (ctx) this.drawChain(ctx, r);
     // alpha 原版语义(Main.cs:28965 color *= (255-alpha)/255——越大越透明)
-    // 链球族（25/26/35/63/154/247/757）都在 :32360 中心锚组——球心=盒中心、
-    // origin=贴图中心（曾走 num145 偏置锚：球体枢轴偏移+链连接点错位）
+    // ★BJ388 件4（BJ367/344 登记债,2026-09-28 独立复核）：中心锚组 = M.cs:33161 大表
+    //  （旧注 ":32360" 系行号漂移;404/1058/947/948 均不在表）——链球族仅
+    //  {25,26,35,63,154,247,757} 在表走【盒中心+贴图中心 origin】;
+    //  1058 走 :35492 通用通支锚（404 同款,BJ367 范式;全表亲读仅 :29501 链支/:29518
+    //  Chain37/:40343 图鉴三处涉 1058,无球体专支）：num153=(30−26)/2+26/2=15、
+    //  num151=num152=0 → 贴图左上=盒左上、球体中心=盒心+(+2,+3)px（30×32 贴图对
+    //  26×26 盒）;曾按中心锚绘制=整球偏 (−2,−3)px+枢轴偏 2px（与 BJ367 404 同案）。
+    //  ★947/948 姊妹债备案（本件未落刀）：:30257 num151=4/num152=−4 → 通支锚下
+    //  球心=盒心+(−1,−1)px,本仓现同样误走中心锚,待专件。
     // spriteDirection=-1 → 水平翻转（M.cs:29827-29831 FlipHorizontally;:41479-41483
-    // 每 tick=sign(vx),1058 豁免保持出生向）;绘制 ×scale（M.cs:32360 Vector2.One×scale）
+    // 每 tick=sign(vx),1058 豁免保持出生向）;绘制 ×scale
     drawProj(r, cam, this, this.projId, this.rotation, '#E04040',
-      Math.max(0, (255 - this.alpha) / 255), 0, this.spriteDir === -1, true, this.texScale);
+      Math.max(0, (255 - this.alpha) / 255), 0, this.spriteDir === -1,
+      FLAIL_CENTER_ANCHOR.has(this.projId), this.texScale);
   }
 
   /** 链条（DrawProj_FlailChains 1457 Main.cs:35901-35990 1:1;1456 同段 :34752-34842）：
@@ -8370,11 +8439,17 @@ export class RainCloudProj extends Entity {
       //  新增 onAccepted 受理回调（严格受理位,:14263 numHits++ 在 proc 后 ⇒ 读自增前值;
       //  拒收不 proc 不计数）——本环既有调用方（回旋镖/长矛/悠悠球/连枷/破晓/水晶蛇）
       //  数据面全非 magic,ghostHealProc magic 门自动过滤零行为。
-      hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, () => { this.dropHits++; },
+      //  ★BJ385 修正（BJ382 登记债清偿）：dropHits++（penetrate--）从 onHit（命中即调
+      //  拒收亦跑=非受理位）移入 onAccepted——原版 penetrate--（:14189-14196）在
+      //  Damage_PVE_Inner 受理面内,拒收跳（:12634-12637 immune 残窗 return）不耗穿透;
+      //  旧码敌怪免疫残窗内拒收跳照虚耗穿透数=雨滴提前消亡。原版序 proc(:13877-79)
+      //  → penetrate--(:14189) → numHits++(:14263)
+      hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, undefined,
         undefined, undefined, undefined, undefined, undefined, undefined,
         (ent) => {
           ghostHealProc(game, this.projId, this.pveNumHits,
             ent as unknown as Parameters<typeof ghostHealProc>[3]);
+          this.dropHits++;                                      //（:14189 penetrate-- 受理位）
           this.pveNumHits++;                                    //（:14263 受理后自增）
         });
       if (this.dropHits >= (projectileData(this.projId)?.penetrate ?? 5)) {   // 239=5(:3213)/245=2(:3280)
@@ -8566,6 +8641,10 @@ export class CrystalSerpentProj extends Entity {
     //  aiStyle 95/friendly/ranged）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
     //  523 过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
     cutTilesBox(game, this.x, this.y, this.w, this.h);
+    // ★BJ388 件1 联动：523 = flag3 单发弹（penetrate=1 且无 usesLocalNPCImmunity/
+    //    usesIDStaticNPCImmunity,:12634 定义）→ 原版免疫门整体豁免（:12636 flag3 支,
+    //    对免疫残窗敌照结算照杀）;hurtPierce 位补 1（BJ339 轴,与 405 泡泡同档）——
+    //    否则件1 受理面门（iframes>0 静默）会让 523 穿过残窗敌不炸=偏离原版
     hitEnemies(this, game, this.hitCd, 9999, 0, this.armorPen, (ent) => {
       if (this.frostEligible) {
         // 冰霜盔甲引擎(melee||ranged 门 :11512-11515,ranged 弹在门内)
@@ -8573,7 +8652,7 @@ export class CrystalSerpentProj extends Entity {
           .equipStats.frostBurn, ent as unknown as Record<string, number>);
       }
       this.killFx(game);                           // penetrate 1 → 首中即亡(Kill 钩)
-    });
+    }, undefined, false, undefined, 1);
     if (this.dead) return;
     // ⑨ 寿终(timeLeft 3600 :789 → Kill 同钩)
     this.life--;

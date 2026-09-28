@@ -322,16 +322,25 @@ export interface HitCritterCtx {
   sentry?: boolean;
   trap?: boolean;
 }
-export function hitCritters(
-  self: { x: number; y: number; w: number; h: number },
+
+/** ★BJ384：敌对弹面单源（Damage_PVE_Inner :12631 受理式推导）——hostile-only 弹
+ *  恒不结小动物伤害（含黑化复权体:原版 Damage_PVE 受理式整段不达）。双出口共用。 */
+function critterHostileOnly(self: { projId?: number }): boolean {
+  const projId = self.projId ?? 0;
+  const pd = projId > 0 ? projectileData(projId) : null;
+  return pd?.hostile === true && pd?.friendly !== true;
+}
+
+/** ★BJ384：CanNPCBeHitByPlayerOrPlayerProjectile 拒收旗单源（Player.cs:20673-20689
+ *  组装式——hitCritters / hitCrittersAll 双出口共用）。返回 true = 普通小动物拒收
+ *  （黑化复权体 :20680-20688 仍放行）。 */
+function critterRejectFlag(
+  self: { projId?: number },
   game: GameHooks,
   ctx?: HitCritterCtx,
 ): boolean {
-  const list = (game as unknown as { critters?: () => unknown[] }).critters?.() ?? [];
-  const projId = (self as { projId?: number }).projId ?? 0;
+  const projId = self.projId ?? 0;
   const pd = projId > 0 ? projectileData(projId) : null;
-  // 敌对弹面（Damage_PVE_Inner :12631 受理式推导）——hostile-only 恒不结小动物伤害
-  if (pd?.hostile === true && pd?.friendly !== true) return false;
   // 玩家/环境双面弹（friendly 或无登记）→ :20675 flag 组装 + :20676 trap 复位
   // ★IIIII248:projScanEq = 桶窗快照 ?? 旧活读(语义面不变)
   const eq = projScanEq(game);
@@ -342,27 +351,65 @@ export function hitCritters(
     || ctx?.minion === true || ctx?.sentry === true
     || MINION_SHOT_PROJS.has(projId) || SENTRY_SHOT_PROJS.has(projId);
   if (ctx?.trap === true) flag = false;   // :20676-20679 镖陷阱族复位=可杀小动物
+  return flag;
+}
+
+/** 单靶受理结算（dead/几何/复权三门 + hurt 落地）。★SW-RB10d（F-BJ47-D,2026-09-10）
+ *  的 fromPlayer 语义注释随实现收进本单源：trap 弹 ownedBySomeone=false。 */
+function settleCritterHit(
+  game: GameHooks,
+  ctx: HitCritterCtx | undefined,
+  flag: boolean,
+  c: CritterLike,
+  hitTest: (c: CritterLike) => boolean,
+): boolean {
+  if (c.dead) return false;
+  if (!hitTest(c)) return false;
+  // :20680-20688（isCritterThatIsHostileToPlayers 复权 + CountsAsCritter∧flag 拒收）
+  if (flag && !isCritterThatIsHostileToPlayers(c)) return false;
+  (c as unknown as {
+    hurt: (d: number, kx: number, ky: number, g: GameHooks,
+      armorPen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
+  }).hurt(5, 0, 0, game, 0, false, 0, ctx?.trap !== true);
+  return true;
+}
+
+export function hitCritters(
+  self: { x: number; y: number; w: number; h: number },
+  game: GameHooks,
+  ctx?: HitCritterCtx,
+): boolean {
+  const list = (game as unknown as { critters?: () => unknown[] }).critters?.() ?? [];
+  if (critterHostileOnly(self as { projId?: number })) return false;
+  const flag = critterRejectFlag(self as { projId?: number }, game, ctx);
   for (const ent of list) {
-    const c = ent as CritterLike;
-    if (c.dead) continue;
-    if (!projOverlap(self.x, self.y, self.w, self.h, c)) continue;
-    // :20680-20688（isCritterThatIsHostileToPlayers 复权 + CountsAsCritter∧flag 拒收）
-    if (flag && !isCritterThatIsHostileToPlayers(c)) continue;
-    // ★SW-RB10d（F-BJ47-D,2026-09-10）：单参 shim 改全参——fromPlayer 语义 =
-    //  原版 Projectile.OwnedBySomeone（Projectile.cs:580-588 `!npcProj ? !trap :
-    //  false`）：npcProj 敌对弹已由上方 hostile 门拒（:12631 受理式等价）,trap 弹
-    //  （ctx.trap=true,弹 12 坠星 Projectile.cs:939 等家族）ownedBySomeone=false →
-    //  不写 lastCreatureHit（:13382）/不 addDPS（:13712 ownedBySomeone 门）/
-    //  StrikeNPC :82097 owner=255 → 无 AnyInteractions（旗杀/图鉴不计）。旧单参
-    //  shim fromPlayer=false 恒假 = 玩家弹弓/魔法箭杀鸟不进账。dmg=5 与 shim 面
-    //  等价（全 critter life=5 杀面不变;DPS 计 5 vs 原版弹伤=登记债 RB10d-D1）。
-    (c as unknown as {
-      hurt: (d: number, kx: number, ky: number, g: GameHooks,
-        armorPen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
-    }).hurt(5, 0, 0, game, 0, false, 0, ctx?.trap !== true);
-    return true;
+    if (settleCritterHit(game, ctx, flag, ent as CritterLike,
+      (c) => projOverlap(self.x, self.y, self.w, self.h, c))) return true;
   }
   return false;
+}
+
+/** ★BJ384（2026-09-28）：hitCritters 的「全结算 + 几何覆写」变体——原版 Damage()
+ *  单趟 victim 循环（:12592 `i < maxNPCs & keepIterating`）对全部命中靶各结算一次
+ *  （numHits++ :14263 无条件）。bolt 多点面（StormLightning.damageAlongBolt）等
+ *  一次性复合命中面消费：hitTest 传逐靶谓词（Colliding 全口径——AABB 交叠是缺省
+ *  等价面），返回受理命中【数】（:14263 账;布尔出口 hitCritters 保持原签名零回退）。
+ *  首靶即返语义（keepIterating=false 截断族:penetrate=1 单发）仍走 hitCritters。 */
+export function hitCrittersAll(
+  self: { x: number; y: number; w: number; h: number },
+  game: GameHooks,
+  ctx?: HitCritterCtx,
+  hitTest?: (c: CritterLike) => boolean,
+): number {
+  const list = (game as unknown as { critters?: () => unknown[] }).critters?.() ?? [];
+  if (critterHostileOnly(self as { projId?: number })) return 0;
+  const flag = critterRejectFlag(self as { projId?: number }, game, ctx);
+  const test = hitTest ?? ((c: CritterLike) => projOverlap(self.x, self.y, self.w, self.h, c));
+  let n = 0;
+  for (const ent of list) {
+    if (settleCritterHit(game, ctx, flag, ent as CritterLike, test)) n++;
+  }
+  return n;
 }
 
 /** 弹幕命中怪物:播受击音效(原版 NPC.StrikeNPC 语义——任意伤害来源都响,

@@ -36,17 +36,28 @@ export const WBAKE_ENABLED = (() => {
 })();
 
 const HANDSHAKE_MS = 3000;
+/** 低优（视口外）缓冲的每次排空上限（回包驱动）:无高优在飞 4 条/次;有高优在飞
+ *  1 条/次（保底进度——防持续视口编辑把视口外重烘永久饿死）。 */
+const LOW_DRAIN_HOT = 4;
+const LOW_DRAIN_BUSY = 1;
 
-interface Pending { cx: number; cy: number; bumped: boolean }
+interface Pending { cx: number; cy: number; bumped: boolean; hi: boolean }
 
 export class BakeClient {
   private worker: Worker | null = null;
   private ready = false;
   private dead = false;
   private nextId = 1;
-  /** 在飞/待就绪请求（key 去重 + bump 面） */
+  /** 在飞/待就绪请求（key 去重 + bump 面;hi=高优=视口内/可视支路） */
   private pending = new Map<number, Pending>();
-  private preReadyQueue: number[] = [];
+  /** 待就绪（ready 前）请求缓冲,按优先级分流——flushPreReady 时高优先派发 */
+  private preReadyHigh: number[] = [];
+  private preReadyLow: number[] = [];
+  /** ★视口优先调度（2026-09-28 入场空白修复刃）:ready 后的低优（视口外）请求
+   *  缓冲——不立即派发,由回包驱动限速排空（drainLow）。worker 单线程串行烘焙
+   *  =派发序即烘焙序:入场首波只烘可视视口 chunk,其余后台流式,视口 chunk 不再
+   *  被「终态保险全量标脏/游玩中重烘」的视口外 key 压队。 */
+  private lowHold: Array<{ k: number; at: number }> = [];
   /** missing 链:file → 等它的 chunk key 集（ship 落地后重派） */
   private awaitingByFile = new Map<string, Set<number>>();
   private shipping = new Set<string>();
@@ -83,39 +94,90 @@ export class BakeClient {
   private handshakeResolve: ((v: boolean) => void) | null = null;
 
   private async shipInitial(): Promise<void> {
+    // ★入场空白修复刃（2026-09-28）:位图化【并行】——原逐 await 串行解码,N 张表
+    // × 每张数-数十 ms 全部串入首波烘焙前的关键路径（attach→ship→flushPreReady
+    // 才派发首波）。并行后 = 最慢一张 + 调度开销;ship 消息内容/传输面零变化
+    // （表进 Map 无序语义,结果数组按完成序排列无影响）。
+    const jobs: Array<Promise<void>> = [];
     const maples: Array<{ file: string; bmp: ImageBitmap }> = [];
     const vimg: Array<{ file: string; bmp: ImageBitmap }> = [];
+    const pushImg = (file: string, src: Parameters<typeof createImageBitmap>[0],
+      out: Array<{ file: string; bmp: ImageBitmap }>) => {
+      jobs.push(createImageBitmap(src).then((bmp) => { out.push({ file, bmp }); })
+        .catch(() => { /* 降级 missing 链 */ }));
+    };
     for (const f of Object.keys(this.atlas.data.files)) {
       if (!f.startsWith('地形/')) continue;
       const src = this.atlas.images.get(f);
       if (!src) continue;
-      try { maples.push({ file: f, bmp: await createImageBitmap(src) }); } catch { /* 降级 missing 链 */ }
+      pushImg(f, src, maples);
     }
     for (const f of this.atlas.vimages.keys()) {
       if (!/^vanilla\/(Tiles|Wall)_/.test(f)) continue;
       const src = this.atlas.vimages.get(f)!;
-      try { vimg.push({ file: f, bmp: await createImageBitmap(src) }); } catch { /* 同上 */ }
+      pushImg(f, src, vimg);
     }
     const sheetList: Array<{ id: number; kind: 'blend' | 'single' | 'object'; w?: number; h?: number; bmp: ImageBitmap }> = [];
     for (const [id, e] of this.sheets) {
-      try { sheetList.push({ id, kind: e.kind, w: e.w, h: e.h, bmp: await createImageBitmap(e.canvas) }); } catch { /* 同上 */ }
+      const kind = e.kind, w = e.w, h = e.h;
+      jobs.push(createImageBitmap(e.canvas).then((bmp) => { sheetList.push({ id, kind, w, h, bmp }); })
+        .catch(() => { /* 同上 */ }));
     }
+    await Promise.all(jobs);
     this.post({ type: 'ship', id: this.nextId++, vimages: vimg, maples, sheets: sheetList },
       [...vimg.map((v) => v.bmp), ...maples.map((m) => m.bmp), ...sheetList.map((s) => s.bmp)]);
   }
 
   /** chunk 重烘请求（flushDirty/get wbake 支路调用）。pending 去重;重复请求=在飞
    *  请求标 bump（回包应用后立即重派——markDirty/invalidateAll 晚于快照派发的
-   *  陈旧窗对齐主线程路径 1 帧滞后语义）。 */
-  request(cx: number, cy: number, _cache: ChunkCache): void {
+   *  陈旧窗对齐主线程路径 1 帧滞后语义）。
+   *  ★视口优先（2026-09-28 入场空白修复刃）:forceHi=true（get 可视支路=屏上必烘）
+   *  或 chunk 与 cache.animView 视域相交（flushDirty/重派支路）=高优——ready 后
+   *  立即派发;低优进 lowHold 回包驱动排空。animView 未置（null）视为低优保守
+   *  （不入快车道,不阻塞已有高优）。 */
+  request(cx: number, cy: number, _cache: ChunkCache, forceHi = false): void {
     if (this.dead || this.disposed || !this.worker) return;
     if (!this.chunkInWorld(cx, cy)) return;   // 世界外悬空 key（flushDirty 同款守卫）
     const k = ChunkCache.key(cx, cy);
+    const hi = forceHi || this.cache.inViewport(cx, cy);
     const p = this.pending.get(k);
-    if (p) { p.bumped = true; return; }
-    this.pending.set(k, { cx, cy, bumped: false });
-    if (!this.ready) { this.preReadyQueue.push(k); return; }
-    this.dispatch(k);
+    if (p) {
+      p.bumped = true;
+      if (hi && !p.hi) this.upgrade(k, p);
+      return;
+    }
+    this.pending.set(k, { cx, cy, bumped: false, hi });
+    if (!this.ready) { (hi ? this.preReadyHigh : this.preReadyLow).push(k); return; }
+    if (hi) { this.dispatch(k); return; }
+    this.lowHold.push({ k, at: performance.now() });
+  }
+
+  /** 低优 → 高优升级（视口移入/可视支路重复请求）:尚在 lowHold → 摘出立即派发;
+   *  已在飞 → 标 hi（阻塞低优排空直至该回包落地）。 */
+  private upgrade(k: number, p: Pending): void {
+    p.hi = true;
+    const i = this.lowHold.findIndex((e) => e.k === k);
+    if (i >= 0) {
+      this.lowHold.splice(i, 1);
+      if (this.ready) this.dispatch(k);
+    }
+  }
+
+  /** 低优排空（回包驱动）:cap 见 LOW_DRAIN_*。只从 lowHold 摘已登记 pending 的
+   *  key 派发（摘到未登记 = 已被 fail 清账,静默跳过）。 */
+  private drainLow(): void {
+    if (!this.lowHold.length || !this.ready || this.dead) return;
+    const cap = this.hasHighPending() ? LOW_DRAIN_BUSY : LOW_DRAIN_HOT;
+    for (let i = 0; i < cap && this.lowHold.length; i++) {
+      const e = this.lowHold.shift()!;
+      if (!this.pending.has(e.k)) continue;
+      this.dispatch(e.k);
+    }
+  }
+
+  private hasHighPending(): boolean {
+    for (const [, p] of this.pending) { if (p.hi) return true; }
+    return false;
   }
 
   /** markDirty/invalidateAll 的在飞 bump（ChunkCache 侧直调） */
@@ -187,9 +249,18 @@ export class BakeClient {
   }
 
   private flushPreReady(): void {
-    const q = this.preReadyQueue;
-    this.preReadyQueue = [];
-    for (const k of q) this.dispatch(k);
+    // ★视口优先（2026-09-28 入场空白修复刃）:ready 达成即先派发高优（视口）队列,
+    // 低优入 lowHold 随后回包驱动排空——worker 串行烘焙下入场首波=纯视口 chunk。
+    const hi = this.preReadyHigh;
+    this.preReadyHigh = [];
+    for (const k of hi) this.dispatch(k);
+    const low = this.preReadyLow;
+    this.preReadyLow = [];
+    for (const k of low) {
+      if (this.pending.get(k)?.hi) this.dispatch(k);   // 等待期被升高优:即刻派发
+      else this.lowHold.push({ k, at: performance.now() });
+    }
+    this.drainLow();
   }
 
   private onMessage(res: BakeWorkerResponse): void {
@@ -203,6 +274,7 @@ export class BakeClient {
         this.cache.requeueWorkerBake(p.cx, p.cy);
       }
       if (++this.errStreak >= 3) this.fail(`error streak ×3 (${res.message})`);
+      else this.drainLow();
       return;
     }
     // ---- baked ----
@@ -229,6 +301,8 @@ export class BakeClient {
     this.shipMissing(res.missing);
     // 在飞期间被标脏 → 立即重派（陈旧窗=1 次往返,与主线程 markDirty→flushDirty 滞后等价）
     if (p?.bumped) this.request(res.cx, res.cy, this.cache);
+    // ★视口优先:回包驱动低优排空（无高优在飞 4 条/次,有高优在飞 1 条/次）
+    this.drainLow();
   }
 
   /** 把主线程已就位的表补送 worker（missing 需求拉取;本线程也缺的文件跳过——
@@ -281,11 +355,16 @@ export class BakeClient {
     if (this.dead) return;
     this.dead = true;
     console.warn(`[wbake] worker 不可用,降级主线程烘焙全链: ${why}`);
+    this.handshakeResolve?.(false);   // 握手挂起态先结算（防 attach await 悬挂）
     // 在飞/待就绪请求全部重入脏队（主线程路径接手,旗语义=回退现状）
     for (const [, p] of this.pending) this.cache.requeueWorkerBake(p.cx, p.cy);
-    for (const k of this.preReadyQueue) this.cache.requeueWorkerBake(k & 0xffff, (k >> 16) & 0xffff);
+    for (const k of this.preReadyHigh) this.cache.requeueWorkerBake(k & 0xffff, (k >> 16) & 0xffff);
+    for (const k of this.preReadyLow) this.cache.requeueWorkerBake(k & 0xffff, (k >> 16) & 0xffff);
+    for (const e of this.lowHold) this.cache.requeueWorkerBake(e.k & 0xffff, (e.k >> 16) & 0xffff);
     this.pending.clear();
-    this.preReadyQueue = [];
+    this.preReadyHigh = [];
+    this.preReadyLow = [];
+    this.lowHold = [];
     this.cache.bakeClient = null;
     this.terminate();
   }

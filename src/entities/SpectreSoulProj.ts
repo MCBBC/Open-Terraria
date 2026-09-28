@@ -87,11 +87,23 @@ export interface GhostHealVictimLike {
   maxHp?: number;
   def?: { lifeMax?: number };
 }
+/** ★BJ385 flag10 lifeMax>5 段单源门（Terarria1457/Projectile.cs:13712）：
+ *  flag10 = num41>0 ∧ targetNPC.lifeMax>5 ∧ friendly ∧ !hostile ∧ aiStyle≠59 ——
+ *  304 吸血鬼飞刀 vampireHeal（:13877-78）与 ghostHeal（:13879）同在 flag10 块内。
+ *  本仓 num41>0 由 applyLifeSteal floor 后拒承载;friendly/!hostile/aiStyle≠59 由
+ *  调用方路径承载;本门补 lifeMax>5 段（critter 一击致死小血量族不 proc）。
+ *  maxHp/def.lifeMax 均缺 = 容缺放行（mock 桩面零漂移;实体 Enemy 恒有 maxHp）。
+ *  BJ380 定谳于 LunarNebula.ts 私有式,BJ385 提升为域导出供三老站
+ *  （MagicProj BJ157-① / Arrow BJ167 / MissileProj BJ167）统一补门 */
+export function vanillaFlag10LifeMaxOk(e: { maxHp?: number; def?: { lifeMax?: number } }): boolean {
+  const lifeMax = e.maxHp ?? e.def?.lifeMax;
+  return lifeMax === undefined || lifeMax > 5;
+}
+
 export function ghostHealProc(game: GameHooks, projId: number, numHits: number,
   e: GhostHealVictimLike): void {
   if (!(projId > 0 && projectileData(projId)?.magic)) return;
-  const lifeMax = e.maxHp ?? e.def?.lifeMax;
-  if (lifeMax !== undefined && !(lifeMax > 5)) return;   //（:13712 flag10 lifeMax>5 段）
+  if (!vanillaFlag10LifeMaxOk(e)) return;                //（:13712 flag10 lifeMax>5 段）
   if (!spectreVictimEligible(e.vanillaId)) return;
   game.applyLifeSteal?.('ghost', e.lastStrikeDealt ?? 0, numHits,
     e.x + e.w / 2, e.y + e.h / 2, true);

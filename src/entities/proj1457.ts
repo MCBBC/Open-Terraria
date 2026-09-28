@@ -20,7 +20,7 @@ import { blueLightningSmallLongFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
-import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters, hitCrittersAll } from './projTargets';
 // ★BJ383 幽灵兜帽吸血 proc 单源（BJ382 提升至 SpectreSoulProj 域导出;per-class 二窗）
 import { ghostHealProc } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
@@ -1632,6 +1632,39 @@ export class StormLightning extends Entity {
   private damageAlongBolt(game: GameHooks, bolt: Bolt): void {
     const cd = this.sharedCd ?? this.hitCd;
     cd.tick();
+    // ★BJ384 小动物命中面（BJ383 登记债清偿——bolt 命中面 critter 桶整缺）：原版
+    //  Kill 帧 maxPenetrate=penetrate=-1 前置覆写（:71920-71921 1122 / :71957-71959
+    //  1091/1117）→ Damage() 单趟 victim 循环（:12592）【无穿透消耗、无 keepIterating
+    //  截断】,全部命中靶各结算一次（numHits++ :14263 无条件——proc ladder 消费;
+    //  critter lifeMax≤5 经 flag10 lifeMax>5 段恒不吸血,hitCrittersAll 支只入账不
+    //  proc）。几何 = Colliding aiStyle203 全口径（:15951-15965 →
+    //  StormLightningCollisionCheck :16205-16243:爆域 64×64+液体导通+MultiPointHitbox
+    //  16×16 逐点含容——critter 与敌怪同一条 Colliding 路径,逐靶谓词复用
+    //  stormBoltCollides,面与敌怪逐字同源）;结算单源 hitCrittersAll（全结算+hitTest
+    //  覆写变体,projTargets.ts）。1091 trap=true（SetDefaults :10179-10186）→ ctx.trap
+    //  复位 dontHurtCritters 门（Player.cs:20676-20679——世界落雷照杀小动物）;
+    //  critter 一击即死（life=5）⇒ 1122 IDStatic 10t 组窗跨弹无可观测差。桶序先小
+    //  动物=BJ383 桶序登记近似（原版 Main.npc 槽序交错）。
+    //  1091 comboSeed（noLightning+moreLightning 双种子）治疗支 :12795-12807 在
+    //  victim 门后逐靶生效 → critter 照治不伤不入账（同敌面 continue 语义;trap 门
+    //  :20676 复位恒放行,无饰品位差）。heal = (int)max(damage×难度乘区,lifeMax×0.1)
+    //  （:12798——乘区同 :14630 Damage_GetProjectileSpecificDamageMultiplier）。
+    if (this.projId === 1091 && this.comboSeed) {
+      const mult = lightningNpcMultiplier(mainDifficulty(game.world));
+      for (const cent of game.critters()) {
+        const c = cent as unknown as
+          { x: number; y: number; w: number; h: number; dead: boolean; hp: number; maxHp: number };
+        if (!c || c.dead) continue;
+        if (!this.stormBoltCollides(game, c.x, c.y, c.w, c.h)) continue;
+        const heal = Math.min(Math.trunc(Math.max(this.damage * mult, c.maxHp * 0.1)),
+          c.maxHp - c.hp);
+        if (heal > 0) c.hp = Math.min(c.maxHp, c.hp + heal);
+      }
+    } else {
+      this.pveNumHits += hitCrittersAll(this, game,
+        this.projId === 1091 ? { trap: true } : undefined,
+        (c) => this.stormBoltCollides(game, c.x, c.y, c.w, c.h));
+    }
     for (const ent of game.enemies()) {
       const e = ent as unknown as HitTarget & { vanillaId?: number; hp: number; maxHp: number };
       if (!e || e.dead) continue;
@@ -1647,10 +1680,26 @@ export class StormLightning extends Entity {
       // （★L1 错键修正：曾按 GameMode int 直采 {0..3}）
       if (this.projId === 1091) {
         dmg = Math.round(dmg * lightningNpcMultiplier(mainDifficulty(game.world)));
-        // noLightning+moreLightning 组合种子：NPC 伤害改治疗 10% lifeMax（:12795-12807）
+        // noLightning+moreLightning 组合种子：NPC 伤害改治疗（:12795-12807）——
+        // ★BJ389 双臂全式补齐（BJ384 登记下窗清偿）：heal = (int)max(damage×难度乘区,
+        //  lifeMax×0.1)（:12803 verbatim——乘区同 :14630 Damage_GetProjectileSpecific
+        //  DamageMultiplier 的 1091 臂 → lightningNpcMultiplier;(int) 截断=critter 面
+        //  BJ384 同式 Math.trunc）;Min(num4, lifeMax−life) 封顶（:12804）+
+        //  HealEffect(num4) 绿字（:12806,CombatText.HealLife='#64FF64'——医师治疗
+        //  precedent TownNPC nurseHealUpdate 同通道;弹【未封顶】num4=原版字面）。
+        //  realLife 重映射（:12799-12802）→ 仓内 realLifeHost（段 hp 镜像回写
+        //  Enemy.hurt :14186-14189 同式）;comboSeed 早退在免疫梯写行/numHits++ 之前
+        //  → 不 proc 不计数（BJ383 判例保持）。曾只实现 lifeMax×0.1 单臂
+        //  （无 damage×乘区臂、无难度乘区、无 realLife 重映射）。
         if (this.comboSeed) {
-          const heal = Math.min(Math.round(e.maxHp * 0.1), e.maxHp - e.hp);
-          if (heal > 0) { e.hp = Math.min(e.maxHp, e.hp + heal); }
+          const seg = e as unknown as { realLifeHost?: { dead?: boolean; hp: number; maxHp: number } | null; hp: number; maxHp: number };
+          const host = seg.realLifeHost && !seg.realLifeHost.dead ? seg.realLifeHost : seg;
+          const num4 = Math.trunc(Math.max(
+            this.damage * lightningNpcMultiplier(mainDifficulty(game.world)),
+            host.maxHp * 0.1));
+          host.hp += Math.min(num4, host.maxHp - host.hp);            // :12804 verbatim
+          if (host !== seg) seg.hp = host.hp;                         // 段 hp 镜像（:14188 同式）
+          game.addDamageNumber(e.x + e.w / 2, e.y, num4, false, '#64FF64');   // :12806 HealEffect
           continue;
         }
       }
@@ -1665,9 +1714,7 @@ export class StormLightning extends Entity {
       //  非 magic（SetDefaults :10178-10186 无 magic 行）经 ghostHealProc magic 门
       //  零行为过滤（flag10 的 !hostile 段同判）。comboSeed 治疗支 continue 在 hurt
       //  前 ⇒ 不达本位=不 proc 不计数（原版 StrikeNPC 不跑,同态）。
-      //  ★登记：bolt 命中面 critter 桶整缺——damageAlongBolt 非 dealContacts 调用方
-      //  （BJ381 债域外）;原版 bolt 伤 critter（MultiPointHitbox 进 Damage_PVE victim
-      //  循环 :12618 flag=!friendly）,下窗随 StormLightning 命中面收口补课。
+      //  ★BJ384：critter 桶已收口（上方小动物命中面——victim 循环同舱,桶序登记）。
       ghostHealProc(game, this.projId, this.pveNumHits,
         e as never as Parameters<typeof ghostHealProc>[3]);
       this.pveNumHits++;

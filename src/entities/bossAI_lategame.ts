@@ -1672,6 +1672,9 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     // 目标彻底失效:上方已强制 ai0=13,此处推进淡出自毁(:47236/:47264-47271)。
     // ★bossFled 同置——原版是静默 active=false,曾只写 dead 被 Game 记为"击败":
     // 假公告+误写 downed_636+误触 LanternNight 且零掉落(2026-08-19 终审修)
+    // ★BJ385：本早退支=原版 13 态淡出相（flag6 缺省 true → :47431 置可伤）——
+    // 早退跳过尾部重算,须在此补每拍缺省态（见 switch 尾 :47431 注）
+    e.dontTakeDamage = false;
     e.spawnAlpha = Math.min(254, e.spawnAlpha + 5);
     e.vx *= 0.95; e.vy *= 0.95;
     e.ai1 += 1;
@@ -1713,6 +1716,13 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   const num9 = dayEnrage ? 9999 : empProjDmg(45, 50, 30, 35);   // :46334
   const num10 = dayEnrage ? 9999 : empProjDmg(50, 60, 35, 40);  // :46335
 
+  // ★BJ385（BJ347 登记债清偿,R23b-P1 同族反模式退场）：flag6 = 无敌相位旗
+  //  （:46510 `bool flag6 = true` 缺省可伤;switch 内 0/8-9/10 三态置 false）——
+  //  :47431 `dontTakeDamage = !flag6` 每拍重算=全通道真持续态。旧 iframes=2
+  //  每 tick 刷新近似被 Enemy.hurt 免疫门 `pierce!==1 && iframes>0` 的单发弹
+  //  （箭/枪弹/多数随从）豁免绕过,无敌相位可被单发弹磨血=反模式
+  let flag6 = true;
+
   switch (e.ai0) {
     // ---- 0 出生(:46370-46422):velocity=(0,5) 后 0.95 阻尼,180t 渐显;全程无敌(flag6=false) ----
     case 0: {
@@ -1722,7 +1732,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         shoot(game, e.cx, e.cy - 80, 0, 0, 0, 874);
       }
       if (e.ai1 === 10) game.playSfxWav?.('Item_161', 1, e.cx, e.cy);   // :46381
-      e.iframes = 2; // :46408-46409 flag6=false → dontTakeDamage
+      flag6 = false;                       // :46561 出生相位全程无敌（:46561 flag6=false）
       e.vx *= 0.95; e.vy *= 0.95;
       e.spawnAlpha = Math.max(0, 254 - Math.floor(clamp(e.ai1 / 180, 0, 1) * 254));
       e.ai1 += 1;
@@ -1909,7 +1919,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       const side = e.ai0 === 8 ? -1 : 1; // num33 :46991
       if (e.ai1 === 20) game.playSfxWav?.('Item_160', 1, e.cx, e.cy);   // :46997
       if (e.ai1 <= 40) {
-        if (e.ai1 >= 6) e.iframes = 2; // flag6 → dontTakeDamage(:46990)
+        if (e.ai1 >= 6) flag6 = false; // :47142 flag6=false（6..40t 无敌窗）→ :47431 dontTakeDamage
         const destX = player.cx + side * -550, destY = player.cy;
         const dx = destX - e.cx, dy = destY - e.cy;
         const d = Math.hypot(dx, dy) || 1;
@@ -1930,7 +1940,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     }
     // ---- 10 半血变身(:47106-47135):90t 时传送玩家上 250 处并 ai3 0→1(进入二阶段) ----
     case 10: {
-      if (e.ai1 >= 30 && e.ai1 <= 170) e.iframes = 2; // flag6 → dontTakeDamage(:47110)
+      if (e.ai1 >= 30 && e.ai1 <= 170) flag6 = false; // :47188 flag6=false（30..170t 无敌窗）
       if (e.ai1 === 0) game.playSfxFiles?.(['Item_161'], 1, e.cx, e.cy); // :47036 状态开始音（仅此一次）
       e.vx *= 0.95; e.vy *= 0.95;
       if (e.ai1 === 90) {
@@ -2028,6 +2038,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       e.ai0 = 1; e.ai1 = 0;
       break;
   }
+  // ★BJ385 :47431 `dontTakeDamage = !flag6`——每拍重算真持续态（SetDefaults
+  //  :17234 亦静态置 true,fromVanilla 手补表同源;AI 首拍起由本式接管）。
+  //  旧 iframes=2 每 tick 刷新近似退役（见 switch 前 flag6 声明注）
+  e.dontTakeDamage = !flag6;
   // :47292 alpha 渐隐回落(0/13 态各自管控 spawnAlpha,不参与)
   if (e.ai0 !== 0 && e.ai0 !== 13) e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
   flyIntegrate(e);
@@ -2162,6 +2176,10 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
     e.ai0 = 0; e.ai1 = -100; e.ai2 = 0; e.ai3 = 0;
     la.la0 = e.maxHp;
   }
+  // ★BJ385（BJ347 登记债清偿）：flag 缺省 false（:45701 `bool flag = false`）——
+  //  :46240 `dontTakeDamage = (hide = flag)` 每拍重算 ⇒ 头置缺省可伤态（含下方
+  //  despawn 早退支;657 SetDefaults :17342-17358 无 dontTakeDamage 行,无手补表项）
+  e.dontTakeDamage = false;
   // 存活期环境音（NPC.cs:46255-46258 AI_121 头段,任何状态每 tick 掷）：
   // Next(360)==0 → PlaySound(65) = LSP.cs:1389-1408 case65 → Zombie_115/116/117
   // 均匀、Volume=num2×0.5 无 Pitch——×0.5 已在 Sfx.FILE_CASE_VOL 单点登记,
@@ -2281,8 +2299,12 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
       // 离场每帧 10 尘 4 ×0.5（:45780-45787）
       game.spawnParticles(e.cx, e.cy, Math.random() < 0.5 ? '#50A0FF' : '#E060E0', 10, 1.2, { life: 30 });
       e.ai1 += 1;
+      // ★BJ385：:45916 `if (ai[1] >= 60) flag = true`（不门落点搜索成功与否,逐字）
+      //  → :46240 dontTakeDamage=(hide=flag)。单人传送当拍 ai0→1 ⇒ 次拍头置复位
+      //  =原版一拍无敌窗同相。真持续态全通道闸,替换旧 iframes=2 每 tick 刷新
+      //  近似（Enemy.hurt 免疫门 pierce===1 单发弹豁免绕过,R23b-P1 同族反模式）
+      if (e.ai1 >= 60) e.dontTakeDamage = true;
       if (e.ai1 >= 60 && la.la1 !== 0) {
-        e.iframes = 2; // dontTakeDamage = hide(:46138)
         e.x = la.la1 - e.w / 2;
         e.y = (la.la2 as number) - e.h;
         e.vx = 0; e.vy = 0;

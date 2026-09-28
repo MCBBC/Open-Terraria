@@ -57,7 +57,14 @@ export class MedusaHeadProj extends Entity {
   /** ★BJ382：PVE 受理命中计数形状（projPveNumHits PVP 读口对齐）。volley 的原版
    *  结算载体是逐目标独立生成的 536 凝视束（每弹 numHits SetDefaults :706 起始 0
    *  ⇒ proc 恒 0 档率 0.20,逐弹独立）——本实体级字段不承载 536 逐弹账,PVP 读口
-   *  形状完备即可（535 挂首本体原版有 penetrate=-1 接触面,本仓整缺,登记债） */
+   *  形状完备即可。
+   *  ★BJ385 勘误（BJ382 登记债注销,亲读反编译定谳）："535 本体有 penetrate=-1
+   *  接触伤害面"不成立——Damage() 总闸 Damage_CanDealDamage 的排除表
+   *  【显式列出 type == 535】（Terarria1457/Projectile.cs:12463;1456 :11782 同位）,
+   *  Damage_PVE/PVP/EVP 三通道整跳 ⇒ 本体零接触伤害面,SetDefaults penetrate=-1
+   *  （:6100）是惰性数据位。原版伤害唯一载体 = AI_100 volley 逐目标 NewProjectile(536)
+   *  后【立即 Damage()】再 damage=0（:45413-45415）= 本仓 volley hurt 即时落账同相;
+   *  本体接触 proc 无此物,无 proc 可言。零修刀（★指纹全等=零修刀判据同族） */
   pveNumHits = 0;
 
   /** ★R28 接线开关：Game.ts case 'magic' 的 3269 ShouldSkipManaUse 分流已落地

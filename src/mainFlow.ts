@@ -20,6 +20,7 @@ import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas, kvSet } from './save/KvStore';
 import { makeBeforeUnloadHandler, hiddenBackstopShouldSave } from './save/UnloadGuard';   // ★BJ280 页面卸载拦截纯核
+import { WBAKE_ENABLED } from './workers/BakeClient';   // ★C4 烘焙 worker 灰度旗（入场覆盖门分支用）
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from './data/items';
 import { VI_KEY } from './data/itemKeys';
 import { parseWldToSave } from './wld/WldImport';
@@ -376,9 +377,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         // ★首帧上屏后再切画面(#三开压测批"就绪瞬间黑一下"):enterGame 先在
         // 加载页【底下】启动世界渲染,whenFirstPaint(2 帧真实上屏)后才撤幕布/
         // 进度页——切换零空窗。3s 兜底防渲染异常时永久卡加载页
+        // ★wbake=1 世界入场空白修复刃(2026-09-28):worker 烘焙路径下首烘占位=
+        // 透明页区,帧数门只数渲染帧——worker 往返慢于帧数时幕布提前掀开=全视口
+        // 瓦片/墙层空白 1-2s(用户实报图36/37)。旗开时 whenFirstPaint(4) 之后链入
+        // 「可视视口 chunk 全部落页」覆盖门(内部 3s 保险强制掀幕防永久黑屏);
+        // 旗关表达式逐字保留=幕布语义零变化。
         enterGame(g);
+        const entryGate = WBAKE_ENABLED
+          ? g.whenFirstPaint(4).then(() => g.whenViewportBaked(3000))   // 4 帧原语义不变,其后追加覆盖门
+          : g.whenFirstPaint(4); // 4 帧:tintSkyTex 首烘(~2 帧)也纳入幕布下,切换帧必亮
         void Promise.race([
-          g.whenFirstPaint(4),   // 4 帧:tintSkyTex 首烘(~2 帧)也纳入幕布下,切换帧必亮
+          entryGate,
           new Promise((r) => setTimeout(r, 3000)),
         ]).then(() => {
           ui.hideProgress();

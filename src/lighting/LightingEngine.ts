@@ -12,7 +12,8 @@ import { AREA_PADDING, globalBrightness, NON_VISIBLE_PADDING } from './lightTabl
 import { FlickerClock } from './SkyColor';
 import { LightMap } from './LightMap';
 import { PerFrameLight, ScannerWorld, TileLightScanner } from './TileLightScanner';
-import { LightWorkerLink, lightWorkerFlag, noteLightResultSkipped } from './LightWorkerLink';
+import { LightWorkerLink, lightWorkerFlag, lightWorkerStats, noteLightResultSkipped, noteLightWorkerRespawn } from './LightWorkerLink';
+import { ladderDelayMs, workerRetryEnabled } from '../workers/WorkerGovernance';   // ★看门狗治理(2026-09-28)
 import { buildEngineSnapshot, type DecayArgs, type LightResultMsg, type LightSnapshotMsg } from './LightWorkerProtocol';
 
 /** 引擎依赖的最小世界结构(World 结构兼容;单测可注入 fake) */
@@ -131,6 +132,9 @@ export class LightingEngine {
   private snapRy = 0;
   private snapRw = 0;
   private snapRh = 0;
+  /** ★C9d2 本 tick 区域是否因移动而重算（ensureRegion 置位,Game 每 tick 先于
+   *  compute 调用一次）——差量内容脏门用:dirty 由移动置位时不视为未记账写面 */
+  private regionMovedDirty = false;
   /** 本地路径发布暂存(写满后才整体换装进公共面;仅尺寸变化时重分配。worker 镜像
    *  侧数组每帧 transfer 走 → detached 后 length=0 → 每帧自动重分配,与旧
    *  runSnapshotOnEngine ⑤「每帧 new Uint8Array」分配面等价) */
@@ -165,8 +169,13 @@ export class LightingEngine {
   private perFrame: PerFrameLight[] = [];
   private liqTick = 0;
   /** ★C9 光照 Worker 门面（?lightworker=1,缺省关=null）：快照发 worker、结果回填
-   *  公共面;失联/异常 → 置 null 永久回落本地。镜像引擎在 worker 线程（LightWorker.ts） */
+   *  公共面;失联/异常 → 置 null 永久回落本地。镜像引擎在 worker 线程（LightWorker.ts）
+   *  ★看门狗治理（2026-09-28）：「永久回落」退役——阶梯重生见 _lwRespawnAt。 */
   private _lw: LightWorkerLink | null = null;
+  /** ★看门狗治理（2026-09-28）：阶梯重生排程（0=未排程;?wwretry=0 恒 0=旧终态语义）。
+   *  重生=全新 LightWorkerLink（warmup 双跑,无黑窗）+ live 门重新进场。 */
+  private _lwRespawnAt = 0;
+  private _lwFallCount = 0;
   /** ★C9：Game 每帧 updateLightDecay 实参捕获（noteDecayArgs）——lightTables 模块级
    *  衰减/shimmer 状态无外部 setter,worker 侧按同参重放 updateLightDecay 同步演化 */
   private _lwDecay: DecayArgs | null = null;
@@ -177,19 +186,36 @@ export class LightingEngine {
     world.store.onTileChanged(() => { this.dirty = true; });
     world.store.onLiquidChanged(() => { this.liquidDirty = true; });
     // ★C9：惰性建链（Worker 首帧 compute 才真正 spawn）;旗关恒 null=本地路径零分叉
-    if (lightWorkerFlag) {
-      this._lw = new LightWorkerLink();
-      // ★C9b 到达即应用（2026-09-24）：结果回填点提前到消息到达——120fps 渲染下
-      //  原起「下个 compute 才应用」会因主线程繁忙滑到下下 tick（间歇 33ms 割裂,
-      //  用户实报）。region+数组成对原子回填（与 applyPending 同逻辑,compute 内
-      //  的 applyPending 保留为兜底 no-op）。★C9d：回填收口到 applyWorkerResult
-      //  (公共面三原子写点之一);快照区域由 ensureRegion 收敛于快照面,公共面对
-      //  不再被 ensureRegion 拆开（移动抖动定谳修复,见公共面头注）。
-      this._lw.onResult = (m) => { this.applyWorkerResult(m); };
-      // ★R1b-1≡R2b-F7:applyPending 兜底支同款世代校验（过滤器注入,引擎持有
-      //  快照面是唯一校验权威——link 不知 snap 区域）
-      this._lw.pendingFilter = (m) => this.resultCoversViewport(m);
-    }
+    this._lwSpawn(world);
+  }
+
+  /** ★C9 链路装配（构造期 + 看门狗阶梯重生共用;2026-09-28 治理批提取）。
+   *  全新 LightWorkerLink=warmup 双跑语义（结果未达期本地照算,无黑窗）。
+   *  旗关恒 null=本地路径零分叉。 */
+  private _lwSpawn(world: LightingWorld): void {
+    if (!lightWorkerFlag) return;
+    this._lw = new LightWorkerLink();
+    // ★C9d2 二期:store 绑定（灰度写日志挂载+delta 帧世界直读）+ 内容脏门
+    // （未记账直写面兜底:crater/隐形翻转/联机 liquid 等显式标脏且日志空 →
+    //  全量锚帧;移动脏由 regionMoved 扣除,见 ensureRegion）
+    this._lw.bindStore(world.store);
+    // ★C9d2 内容脏门（精化）:dirty 且非移动且无点光活动且日志空 → 未记账直写面
+    //  （crater/隐形翻转等显式标脏）→ 全量锚帧。liquidDirty 不入闸:静置液体世界
+    //  Game 每帧标 liquidDirty 而零真实写（原语写走日志=精确）→ 入闸=恒全量退化
+    //  （探针实测 idle 42/100 full）;联机 netApplyLiquid 直写面漏闸 → 锚帧自愈
+    //  （登记债）。perFrame>0 说明 dirty 来自 addLight——点光与 tile 差量无关,
+    //  随快照 per 通道每帧全量走。
+    this._lw.contentDirtyGate = () => this.dirty && !this.regionMovedDirty && this.perFrame.length === 0;
+    // ★C9b 到达即应用（2026-09-24）：结果回填点提前到消息到达——120fps 渲染下
+    //  原起「下个 compute 才应用」会因主线程繁忙滑到下下 tick（间歇 33ms 割裂,
+    //  用户实报）。region+数组成对原子回填（与 applyPending 同逻辑,compute 内
+    //  的 applyPending 保留为兜底 no-op）。★C9d：回填收口到 applyWorkerResult
+    //  (公共面三原子写点之一);快照区域由 ensureRegion 收敛于快照面,公共面对
+    //  不再被 ensureRegion 拆开（移动抖动定谳修复,见公共面头注）。
+    this._lw.onResult = (m) => { this.applyWorkerResult(m); };
+    // ★R1b-1≡R2b-F7:applyPending 兜底支同款世代校验（过滤器注入,引擎持有
+    //  快照面是唯一校验权威——link 不知 snap 区域）
+    this._lw.pendingFilter = (m) => this.resultCoversViewport(m);
   }
 
   /** ★R1b-1≡R2b-F7 结果世代校验（2026-09-27）：worker 结果携带其快照区域——仅当
@@ -245,12 +271,14 @@ export class LightingEngine {
    */
   ensureRegion(camCX: number, camCY: number, viewW: number, viewH: number): void {
     const st = this.world.store;
+    this.regionMovedDirty = false;   // ★C9d2 每 tick 重评（Game 调用序:ensureRegion→compute）
     const x0 = Math.max(0, Math.floor(camCX / TILE) - Math.ceil(viewW / 2) - 1 - AREA_PADDING);
     const y0 = Math.max(0, Math.floor(camCY / TILE) - Math.ceil(viewH / 2) - 1 - AREA_PADDING);
     const x1 = Math.min(st.w - 1, Math.floor(camCX / TILE) + Math.ceil(viewW / 2) + 2 + AREA_PADDING);
     const y1 = Math.min(st.h - 1, Math.floor(camCY / TILE) + Math.ceil(viewH / 2) + 2 + AREA_PADDING);
     const rw = x1 - x0 + 1, rh = y1 - y0 + 1;
     if (rw !== this.snapRw || rh !== this.snapRh || x0 !== this.snapRx || y0 !== this.snapRy) {
+      this.regionMovedDirty = true;   // ★C9d2 移动脏（差量门扣除项）
       // 原点只在重算时原子移动(防光影相对世界平移)
       this.snapRx = x0; this.snapRy = y0;
       if (rw !== this.snapRw || rh !== this.snapRh) {
@@ -263,11 +291,23 @@ export class LightingEngine {
   /** 每帧调用。dayFactor 参数弃用(天空色改由 clock 内部推导;旧调用方签名兼容)。 */
   compute(_dayFactor: number): void {
     if (this.snapRw === 0) return;   // ★C9d:门挪到快照面(公共面可能尚无首个结果)
+    // ---- ★看门狗治理（2026-09-28）：阶梯重生分派 ----
+    // 回落态（_lw=null）下阶梯（5s/10s/20s）到期即重建链路——全新 LightWorkerLink=
+    // warmup 双跑语义（本地照常,无黑窗）,live 门重新进场。?wwretry=0 时恒不排程。
+    if (this._lw === null && this._lwRespawnAt !== 0) {
+      const nowR = performance.now();
+      if (nowR >= this._lwRespawnAt) {
+        this._lwRespawnAt = 0;
+        this._lwSpawn(this.world);
+        noteLightWorkerRespawn();
+      }
+    }
     // ---- ★C9 光照 Worker 分支（?lightworker=1）----
     // 快照（区域 ± padding tile 切片 + 时钟/天空/衰减/点光参数）发 worker,结果回填
     // 公共面。三态：warmup(结果未达)=快照+本地双跑兜底(首帧不黑屏) → live=worker
-    // only(本地 scan/blur 整段跳过,主线程拿回 7-12%) → 失联看门狗 2s/异常回执=
-    // dispose+_lw 置 null 永久回落本地(dirty 强制首帧全周期)。时钟仍在主线程 tick
+    // only(本地 scan/blur 整段跳过,主线程拿回 7-12%) → 失联看门狗（outstanding-
+    // aware,2026-09-28 治理重构）/异常回执=dispose+回落本地+阶梯重生(dirty 强制
+    // 首帧全周期)。时钟仍在主线程 tick
     // (HUD/渲染层 cursorScale/mouseTextColor 消费面照常);快照捕获 pre-tick 状态,
     // worker 侧恢复后由其 compute 的 tick 推进到同态(位级同相)。
     // ★C9b(2026-09-24)：结果应用点=消息到达瞬间(onResult),compute 内 applyPending
@@ -275,15 +315,21 @@ export class LightingEngine {
     const lw = this._lw;
     if (lw !== null) {
       if (!lw.healthy()) {
+        console.warn('[LightWorker] 看门狗回落 (' + lw.fallReason() + ',falls=' + lightWorkerStats().falls + ')');
         lw.dispose();
         this._lw = null;
         this.dirty = true;   // 回落后首帧强制全周期
-        // ★C9c-v3/v4：live 的唯一出场=看门狗级硬故障（2s 无回传/异常回执/onerror;
-        //  v4 进场简化后 lag 判据全面退役为诊断）
+        // ★C9c-v3/v4：live 的唯一出场=看门狗级硬故障（outstanding 超预算/异常回执/
+        //  onerror;v4 进场简化后 lag 判据全面退役为诊断）
         // ——诊断面出场原因标记（F5 兼容新增字段;lag 驱动出场已删不产 'lag' 值）
         this.lwLive = false; this.lwGood = 0; this.lwBad = 0;
         lightGateDiag.live = false;
         lightGateDiag.exitReason = 'watchdog';
+        // ★去永久化（2026-09-28 看门狗治理）：阶梯重生排程（5s/10s/20s;
+        //  ?wwretry=0 逃生门=旧「回落即终态」语义）
+        if (workerRetryEnabled()) {
+          this._lwRespawnAt = performance.now() + ladderDelayMs(this._lwFallCount++);
+        }
       } else {
         // ★C9c-v4：live 由门步进判定（hasResult 首个健康结果即 live;warmup 短窗期
         //  本地新鲜光优先,onResult 被 liveAuth 抑制;转 live 后到达即应用接管,
@@ -298,6 +344,11 @@ export class LightingEngine {
         if (live && this.snapCoveredByPublic()) {
           this.flicker.tick();        // HUD/渲染层闪烁消费面照常推进
           this.perFrame.length = 0;   // 点光已随快照带走(本地 processScan 不再跑)
+          // ★C9d2:live 态 dirty/liquidDirty 消费（外部只写不读,本引擎本地路径是唯一
+          //  读面;不清则差量内容脏门把历史写面当本帧写面=恒全量）。回退路径
+          //  dispose 处显式置 dirty=true,语义保持。
+          this.dirty = false;
+          this.liquidDirty = false;
           return;
         }
         // live 态大跳（传送/召回/重生/读档/离屏截图分块——快照区域跳出公共采样域
@@ -358,10 +409,11 @@ export class LightingEngine {
   }
 
   /** ★C9：组装每帧快照（区域捕获值 + 点光/时钟/天空/衰减;tile 切片由门面暂存切出）。
-   *  读表面清单见 LightWorkerProtocol 头注——快照协议的契约边界。 */
+   *  读表面清单见 LightWorkerProtocol 头注——快照协议的契约边界。
+   *  ★C9d2：切片经 buildWorkerTiles（灰度 delta 帧免 416KB 切片,全量帧池化）。 */
   private buildWorkerSnapshot(reg: { rx: number; ry: number; rw: number; rh: number }): Omit<LightSnapshotMsg, 'op' | 'seq'> {
     const lw = this._lw!;
-    const tiles = lw.buildSlice(this.world.store, reg.rx, reg.ry, reg.rw, reg.rh);
+    const tiles = lw.buildWorkerTiles(reg.rx, reg.ry, reg.rw, reg.rh);
     return buildEngineSnapshot({
       rx: reg.rx, ry: reg.ry, rw: reg.rw, rh: reg.rh,
       world: this.world,

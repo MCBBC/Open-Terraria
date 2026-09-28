@@ -25,6 +25,7 @@ import { VUI } from './vui/VUI';
 import { assetsDownloadIdle, initAssetCache, primeBootAssets, setLazyWorkerPrefetch, warmAllAssets } from './net/AssetCache';
 import { prefetchWorldGenWorker } from './workers/WorldGenClient';
 import { prefetchSaveWorker } from './workers/SaveClient';
+import { prefetchLightWaveWorkers } from './workers/WorkerGovernance';   // ★看门狗治理(2026-09-28):light/wave 脚本预热
 import { holdForAssetsReady, mountAssetBadge, warnAssetPipelineDown } from './ui/AssetDownloadUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
@@ -862,7 +863,9 @@ kvHas('sandboxworld.quicksave').then(async () => {
   //   竖条 19 帧,帧序 :52041-52060 同款 Frame(1,19,0,(帧/3+10)%19),2026-08-25
   //   用户要求替换脉冲点)
   // 懒 worker 预取钩子注入(音频门等待窗口借 SW 回填;见 WorldGenClient/SaveClient 尾注)
-  setLazyWorkerPrefetch(() => { prefetchWorldGenWorker(); prefetchSaveWorker(); });
+  // ★2026-09-28 看门狗治理:light/wave 补齐同款预热——冷模块图取>2s 曾被 warmup
+  //  看门狗按墙钟误杀且零重生路径=整会话 40% 主线程墙钟（trace 定谳,见 WorkerGovernance 头注）
+  setLazyWorkerPrefetch(() => { prefetchWorldGenWorker(); prefetchSaveWorker(); prefetchLightWaveWorkers(); });
   // ★启动幕生命周期(2026-08-25 用户要求"门后黑屏间隙铺向日葵"):向日葵幕存活至
   //   过渡页三层图挂载(首帧绘出)才交接——覆盖 音频门点击后 → loadAssets → 过渡图
   //   缓存等待 的全部无图窗口,消灭"以为故障黑屏"。z=10000:门(10001)之下、

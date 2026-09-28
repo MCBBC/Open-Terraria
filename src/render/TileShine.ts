@@ -260,12 +260,14 @@ export function parseShineBudget(search: string): number | null {
 // 【病灶】动态支逐格 stampShineCell=共享 scratch 全幅上传（40×40=6.4KB/格/帧,
 //   uploadScratchNow texRefresh）+同量 getImageData 读回（重放快照）——叶绿素
 //   农场数百脉动格在视 = MB 级/帧上传+读回。
-// 【正解】逐 (格内容,动画相位) 稳定键切片上 GPU：纹理=sprite-only 面（delta
+// 【正解】逐 (格,动画相位) 稳定键切片上 GPU：纹理=sprite-only 面（delta
 //   不烘进纹理）首见上传、稳态零上传零读回;delta=乘法 tint 走消费 rec 顶点色
 //   （BakeSnap.tint → quadSprite uTint——呼吸扫频逐帧变的是 4B 顶点色不是纹理）。
-//   键=内容指纹（shineSliceCellKey:3×3 邻域 type/flags/half/slope/帧/漆 + 帧相位
-//   +漆）→ 同型格共享同纹理（农场变体数≪格数）。与 shineCell 帽 1024 既有锁
-//   兼容=键空间共用 shineKeySeen 帽账（GLShimExecutor.uploadShineSlice 统一清扫）。
+//   键=格位+内容指纹（shineSliceCellKey:3×3 邻域 type/flags/half/slope/帧/漆 +
+//   帧相位;★位键零碰撞——211 等 2×2 组 auto 框架按绝对奇偶取组位,纯内容指纹
+//   曾在同指纹异帧格间碰撞=错帧,census 实锤后改位键+指纹双段;指纹段管内容
+//   变化失效）。与 shineCell 帽 1024 既有锁兼容=键空间共用 shineKeySeen 帽账
+//   （GLShimExecutor.uploadShineSlice 统一清扫）。
 // 【旗】?shineslice=1 显式激活,缺省关=用户明令灰度（禁转正;转正另走流程）。
 //   关=逐格上传旧链逐位不变;开但 shim 未接管（2D 会话/GL 死/窗未开）=钩子返回
 //   false,stampShineCell 落回旧乘法支=2D 原链逐位不变（宁回退不丢）。
@@ -526,19 +528,18 @@ export function setShineScratchBakeHook(fn: ((c: HTMLCanvasElement, key: string)
 
 // ---- ★shineslice 内容指纹键（同上域注）----
 //
-// 【键 = drawVanillaCell 输出的全部决定输入】动态支格（12/639 动画水晶、204/211
-// 脉动矿）经 drawVanillaCell 取帧——auto/blend 框架链按【邻格现场】算帧（非存储
-// 帧）,故稳定键必须盖 3×3 邻域;动画相位（tileAnim.tick 按 sheet rate 量化）参与
-// 键 = 「逐 (格,动画帧) 稳定」的字面兑现。同键 ⇔ 产物逐位同（drawVanillaCell 是
-// 这些输入+全局静态 atlas 的纯函数）→ 跨格/跨帧复用同纹理。
-// 【碰撞面】FNV-1a 32 位 over ~81 混入值——键空间=可见动态 shine 格变体并集
-// （农场场景 ≪1024 帽）,碰撞概率可忽略;GLShimExecutor 键含完整指纹原文,碰撞
-// 即错帧（与 shineChunkFingerprint 同族取含口径——该判例已运行一季零案）。
+// 【键 = 逐 (格,动画相位) + 内容指纹】动态支格（12/639 动画水晶、204/211 脉动矿）
+// 经 drawVanillaCell 取帧——auto/blend 框架链按【邻格现场+格位相位】算帧（非存储
+// 帧;211 等 2×2 组框架按绝对奇偶取组位——纯内容指纹会漏格位相位,首版纯内容键
+// 曾在同指纹异帧格间碰撞=错帧,census 实锤后改【格位+指纹】双段键）。位键天然
+// 零碰撞;指纹段负责【内容变化失效】（邻格改框/重漆 → 新键一次重传,旧键闲置清扫）
+// 与跨帧稳定（格与内容不变 → 键不变 → 零重传=本刀上传面正解）。动画相位
+// （tileAnim.tick 按 sheet rate 量化）参与键 = 「逐 (格,动画帧) 稳定」的字面兑现。
 const SLICE_FP_SEED = 0x811c9dc5 | 0;
 
-/** 动态 shine 格切片键（'shineSlice:<sheet>:<fp>'）。fp 混入:3×3 邻域 (type,
- *  flags,half,slope,frameX 低/高字节,frameY 低/高字节,paint) + 中心格动画相位
- *  （rate>0 时 floor(tick/rate);静态支恒 0）+ 漆。wire/coat 不混:动态支在 stamp
+/** 动态 shine 格切片键（'shineSlice:<sheet>:<x>:<y>:<fp>'）。fp 混入:3×3 邻域
+ *  (type,flags,half,slope,frameX 低/高字节,frameY 低/高字节,paint) + 中心格动画
+ *  相位（rate>0 时 floor(tick/rate);静态支恒 0）。wire/coat 不混:动态支在 stamp
  *  前已把 actuated/invisible/fullbright 格排除（bakeShineChunk/drawTileShineGrid
  *  同门）,到得了 stamp 的格 wire/coat 不改 sprite。 */
 export function shineSliceCellKey(
@@ -566,7 +567,7 @@ export function shineSliceCellKey(
   }
   const rate = TILE_ANIM_RATE[sheet] ?? 0;
   mix(rate > 0 ? Math.floor(tileAnim.tick / rate) : 0);   // 动画相位（逐帧键的字面项）
-  return `shineSlice:${sheet}:${h >>> 0}`;
+  return `shineSlice:${sheet}:${x}:${y}:${h >>> 0}`;
 }
 function stampShineCell(
   atlas: SpriteAtlas, world: World, x: number, y: number,

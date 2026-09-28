@@ -125,7 +125,9 @@ describe('BJ347 ② 教主自毁 = 非击杀消散（bossFled，NPC.cs:65272-652
     (h.player as unknown as { dead: boolean }).dead = true;
     lunaticCultistAI(cult, h.hooks, h.player);
     expect(cult.dead).toBe(true);
-    expect(cult.bossFled).toBe(true);   // ★BJ347 修刀位：非击杀消散，Game 走 BossFled 分支
+    // ★BJ347 修刀位：非击杀消散，Game 走 BossFled 分支。★BJ388 件5：分支内
+    //  灰字 toast 已摘（原版消散零 UI 反馈），旗保留=不写 downed/不记击败
+    expect(cult.bossFled).toBe(true);
   });
 
   it('仪式态克隆体随真身自毁连带清场且不置 bossFled（:65078-65087）', () => {

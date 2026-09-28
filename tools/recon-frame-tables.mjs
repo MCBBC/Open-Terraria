@@ -39,6 +39,9 @@
 //     PROJ_GRID 格积 ≤ PNG）。
 //   ④ 原版权威单帧但源 B 多帧=过配（FRAME_ROWS 键必须有权威多帧条目且行数相等；
 //     json 键必须有权威>1 条目；值漂移同轴）。
+//   ⑤ tileHeight 覆写×atlas grid 不整除=欠高候选（BJ389：h18/h20 覆写×grid16——
+//     非越界（整表直读+fit 守卫）而是欠高少画;三轴分诊=drawAdjust 承载/padOnly
+//     探测豁免/underHeightDebt 债登记,候选∉三轴=红;详见 tile 域规则⑤块）。
 //
 // era guard（docs/era-guard-family.md 处方；基线冻结+重跑 diff 非空即拒+双旗逃生）：
 //   · 缺省=干跑对拍：全量重产报告 vs tests/golden/frame-tables-recon.json 逐路径
@@ -325,7 +328,11 @@ function extractTileDrawSizes() {
     const top = switchStack[switchStack.length - 1];
     if (top && top.isTop) {
       const cl = [...line.matchAll(/case (\d+):/g)].map((m) => +m[1]);
-      if (cl.length) { curIds = cl; inTop = true; }
+      // ★BJ389 fall-through 累加修正：C# case 标签组（case A: case B: … 共享体）此前
+      //  逐行【替换】curIds=只有末位标签被记账（40 条 vs 真值 103 条——h18 家具族
+      //  :4954-4982 的 16/17/26/32/…/715 全部漏记,仅 716 存活）。改为累加,遇
+      //  break/return（仅顶 switch 层——嵌套 switch 的 break 不清组）或 default 复位。
+      if (cl.length) { curIds = [...(curIds ?? []), ...cl]; inTop = true; }
       else if (/^\t*default:/.test(line)) { curIds = null; inTop = false; }
     }
     const am = line.match(/^\s*tile(Width|Height)\s*=\s*(\d+);/);
@@ -337,9 +344,12 @@ function extractTileDrawSizes() {
         lineOf[id] = start + ln + 1;
       }
     }
+    if (curIds && top && top.isTop && /^\s*(break|return)\b/.test(line)) curIds = null;
   }
   const n = Object.keys(map).length;
-  must(n >= 30, `GetTileDrawData tileWidth/tileHeight 覆写基数 ${n} < 30（地板护栏，锚漂移）`);
+  // ★BJ389：fall-through 修正后真值 103（40 旧值=漏记基线）。TileDrawing.cs
+  //  1457↔1458 逐字节全等（md5 d1ce9177）→ 两版同值;漂移即炸强制重定谳。
+  must(n === 103, `GetTileDrawData tileWidth/tileHeight 覆写基数 ${n} ≠ 103（BJ389 fall-through 修正基线;漂移即炸重定谳）`);
   return { map, lineOf, span: [start + 1, end] };
 }
 
@@ -439,7 +449,9 @@ function parseDrawAdjust() {
   const ensure = (ids) => { for (const id of ids) cases[id] = cases[id] || { fit: [], sw: [], sh: [] }; };
   for (const line of L) {
     const cl = [...line.matchAll(/case (\d+):/g)].map((m) => +m[1]);
-    if (cl.length && depth <= 2) { curIds = cl; ensure(cl); }
+    // ★BJ389 fall-through 累加修正（同 extractTileDrawSizes）：多行 case 标签组此前
+    //  只有末行标签存活到 body 行（h20 植物家具族 case 3/24/…/84 整批漏记）。
+    if (cl.length && depth <= 2) { curIds = [...(curIds ?? []), ...cl]; ensure(curIds); }
     for (const c of line) { if (c === '{') depth++; else if (c === '}') depth--; }
     if (!curIds) continue;
     for (const m of line.matchAll(/fit\([^,]+,\s*[^,]+,\s*(\d+),\s*(\d+)\)/g)) {
@@ -448,12 +460,21 @@ function parseDrawAdjust() {
     const sm = line.match(/a\.sw\s*=\s*(\d+)/), hm = line.match(/a\.sh\s*=\s*(\d+)/);
     if (sm) for (const id of curIds) cases[id].sw.push(+sm[1]);
     if (hm) for (const id of curIds) cases[id].sh.push(+hm[1]);
+    // break 复位在本行 body 捕获【之后】（同行 case+体+break 的紧凑 case 才不失记）
+    if (/break;/.test(line)) curIds = null;
   }
   must(Object.keys(cases).length >= 80, `drawAdjust 覆盖 ${Object.keys(cases).length} < 80（地板护栏）`);
   // 752 豁免锚：case 752 + clampBand（BJ366 FNA 越界带补画）
   const body = L.join('\n');
   const c752 = /\bcase 752:\s*\{[\s\S]*?clampBand[\s\S]*?break;/.test(body);
-  return { cases, c752 };
+  // ★BJ389：HEIGHT_18 集合缺省臂（规则⑤覆盖轴 b）——集合字面 + default 臂锚双提取
+  const full = src.join('\n');
+  const h18m = full.match(/const HEIGHT_18 = new Set\(\[([^\]]*)\]\)/);
+  must(h18m, 'VanillaTiler.ts 找不到 HEIGHT_18 集合字面（规则⑤覆盖轴 b 锚漂移）');
+  const height18 = new Set([...h18m[1].matchAll(/(\d+)/g)].map((m) => +m[1]));
+  must(height18.size >= 40, `HEIGHT_18 基数 ${height18.size} < 40（地板护栏,漂移即炸）`);
+  const height18Anchor = body.includes('if (HEIGHT_18.has(sheet)) a.sh = 18;');
+  return { cases, c752, height18, height18Anchor };
 }
 function parseAtlas() {
   const j = JSON.parse(readFileSync(ATLAS_JSON, 'utf8'));
@@ -650,9 +671,9 @@ const report = { _meta: {}, gore: {}, proj: {}, tile: {} };
 // ---- tile ----
 {
   const td = extractTileDrawSizes();
-  const { cases, c752 } = parseDrawAdjust();
+  const { cases, c752, height18, height18Anchor } = parseDrawAdjust();
   const tiles = parseAtlas();
-  const findings = { vanillaOOB: [], deadFit: [], atlasGridOOB: [], atlasPngMissing: [] };
+  const findings = { vanillaOOB: [], deadFit: [], atlasGridOOB: [], atlasPngMissing: [], rule5: [] };
   const exempt = [];
   for (const [k, o] of Object.entries(td.map)) {
     const id = +k;
@@ -691,6 +712,61 @@ const report = { _meta: {}, gore: {}, proj: {}, tile: {} };
   }
   const png = {};
   for (const id of Object.keys(tiles)) png[+id] = tilePng(+id);
+  // ---- ★BJ389 规则⑤：tileHeight 覆写 × atlas grid 欠高对账（2026-09-28 定谳） ----
+  //  定谳（亲读 GetTileDrawData 对应型 + 原版绘制行为 + 表内容带逐槽探测 pngjs）：
+  //  tileHeight 覆写 = 原版【源矩形格高】（Tiles_N.png 槽位 = 内容高 + 2px 缝的打包
+  //  节奏;源矩形 = Rectangle(frameX+addFrX, frameY+addFrY, tileWidth, tileHeight)
+  //  TileDrawing.cs:1313 等）。本仓整表直读（vanilla/Tiles_N.png 全量随仓）+
+  //  SpriteAtlas.vframeAt(sh=grid[1]) 逐格切片 + VanillaTiler.drawAdjust 逐型覆写
+  //  ⇒ grid[1] < tileHeight 【不是越界】（drawAdjust fit 守卫 + VanillaTiler 源矩形
+  //  越界守卫双层兜底;对照 752=请求超 PNG 的真越界案,规则②专管）。其失败形态=
+  //  【欠高少画】(tileH − grid[1]) 行。
+  //  运行时承载面（覆盖轴,2026-09-28 普查）：
+  //   a) drawAdjust 逐型 case（h20 植物家具族 fit(16,20)/73·74·113 fit(16,32)/
+  //      442/476/561/567/579/624·700/656·701/711/726/227/81/184/529/698/751 等
+  //      ——capture sh ≥ tileH 即锚,case 摘除=capture 消失=当拍失覆盖即红）;
+  //   b) HEIGHT_18 集合缺省臂（VanillaTiler `default: if (HEIGHT_18.has(sheet))
+  //      a.sh = 18;`——h18 家具族 53 型一张集合表承载;表内容带探测实证该族多出
+  //      2 行确有内容（桌第二带/箱中缝底脚/日葵高样式/樱柳苗全槽 18 行）,集合承载
+  //      =必要承载非冗余);
+  //   c) 条件格高特例：405/406（壁炉/烟囱）原版 tileHeight 条件覆写（405 :5516-5520
+  //      =16 缺省,fy>0 才 18;406 :5450-5454=16 缺省,fy%54≥36 才 18——提取器 Math.max
+  //      记 18=条件上界）。本仓恒画 16 → 条件格欠高债（BJ389 登记,修复=drawAdjust
+  //      逐帧条件 sh,另立刀）。
+  //  触发式（对账规则五）：tileHeight 覆写 × tileH % grid[1] ≠ 0（h32×grid16 整除
+  //  =多格堆叠不在此列;宽度轴覆写不属本规则）→ 非 a/b 承载、非债登记、非 752 专案
+  //  = findings.rule5（硬闸）——未来版本新增覆写型（1459+）/承载面漂移（集合摘员/
+  //  case 摘除）即炸。
+  const RULE5_DEBT = new Set([405, 406]);
+  const adjMax = (c) => c ? {
+    sw: Math.max(0, ...c.sw, ...c.fit.map((f) => f[0])),
+    sh: Math.max(0, ...c.sh, ...c.fit.map((f) => f[1])),
+  } : null;
+  for (const [k, o] of Object.entries(td.map)) {
+    const id = +k;
+    const tileH = o.h;
+    if (tileH === undefined) continue;                       // 高度轴未覆写（宽度轴不属规则⑤）
+    const g = tiles[String(id)]?.grid;
+    if (!g || tileH % g[1] === 0) continue;                  // grid 整除（堆叠/覆盖）=结构自洽
+    if (id === 752 && c752) continue;                        // FNA clampBand 专案（规则②豁免承载）
+    const am = adjMax(cases[id]);
+    // 宽度轴：case 覆写 sw 优先（698=36/751=56/711=18——grid[0]=16/18 不足由 case 补齐）;
+    // case 未覆写宽 → grid[0] 必须自足
+    const widthOK = am && am.sw > 0 ? am.sw >= (o.w ?? 16) : g[0] >= (o.w ?? 16);
+    const caseCovered = !!am && am.sh >= tileH && widthOK;
+    const setCovered = tileH === 18 && height18.has(id) && height18Anchor;
+    const covered = caseCovered || setCovered;
+    if (RULE5_DEBT.has(id)) {
+      // 债登记（ok 锚=欠高态仍在——获承载即登记陈旧=exemptFailures 硬红强制重定谳）
+      exempt.push({ id, kind: 'rule5UnderHeightDebt', tileHeight: tileH, grid: g, ok: !covered,
+        anchor: `条件格高欠高债(BJ389):原版 405 :5516-5520/406 :5450-5454 tileHeight=16 缺省、条件帧才 18（提取器 Math.max 记上界）——本仓恒画 16,条件帧少画 2px;修复=drawAdjust 逐帧条件 sh 另立刀` });
+      continue;
+    }
+    if (!covered) {
+      findings.rule5.push({ id, tileHeight: tileH, grid: g,
+        note: '规则⑤:tileHeight 覆写×grid 不整除且无 case/HEIGHT_18 承载、无债登记' });
+    }
+  }
   report.tile = {
     authority: Object.fromEntries(Object.entries(td.map).map(([k, v]) => [+k, { w: v.w, h: v.h }]).sort((a, b) => a[0] - b[0])),
     authorityLine: Object.fromEntries(Object.entries(td.lineOf).map(([k, v]) => [+k, v])),
@@ -700,7 +776,9 @@ const report = { _meta: {}, gore: {}, proj: {}, tile: {} };
     findings,
     exempt,
   };
-  report._meta.tile = { getTileDrawDataSpan: td.span, drawAdjust752Anchor: c752 };
+  report._meta.tile = { getTileDrawDataSpan: td.span, drawAdjust752Anchor: c752,
+    rule5Debt: [...RULE5_DEBT], rule5Height18Count: height18.size,
+    rule5Height18Anchor: height18Anchor };
 }
 
 // ================= 汇总 + 闸门 =================
@@ -709,7 +787,7 @@ report._meta = {
   source: `Terarria${VER}（Gore.cs/GoreID.cs/TileDrawing.cs 读域 1457↔1458 逐字节全等 md5 3f7708af/a8018139/d1ce9177；Main.cs projFrames 块同址零杂行）`,
   generatedBy: 'tools/recon-frame-tables.mjs',
   ver: VER,
-  rules: ['①源A多帧而源B无条目=漏配', '②绘制请求源矩形超源C=越界', '③帧数×帧尺寸与源C不匹配=竖横排/尺寸错', '④源A单帧而源B多帧=过配'],
+  rules: ['①源A多帧而源B无条目=漏配', '②绘制请求源矩形超源C=越界', '③帧数×帧尺寸与源C不匹配=竖横排/尺寸错', '④源A单帧而源B多帧=过配', '⑤tileHeight覆写×grid不整除=欠高候选(BJ389三轴分诊)'],
 };
 /** findings 总数（基线无关硬闸面） */
 const findingsCount = (() => {
@@ -779,6 +857,7 @@ if (findingsBad > 0) {
       if (Array.isArray(v) && v.length) console.error(`  ${dom}.${k}: ${JSON.stringify(v.slice(0, 6))}`);
     }
   }
+  if (exemptFailures.length) console.error(`  exempt 锚失配: ${JSON.stringify(exemptFailures.slice(0, 8))}`);
   hardFail = true;
 }
 if (!existsSync(GOLDEN)) {

@@ -55,7 +55,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { canHit } from '../physics/LineOfSight';
-import { canBeChasedBy } from './projTargets';
+import { canBeChasedBy, hitCritters } from './projTargets';
 import { HitCdImpl, dealContacts } from './proj1457';
 import { cutTilesBox } from './ProjCutTiles';
 import { leafTrailInfoByte, leafCrystalShotFx } from '../fx/orchestraFx';
@@ -359,6 +359,14 @@ export class ChloroLeafShot extends Entity {
       //  双报同 Arrow 惯例）。908 同批实锤【被本刀证伪】：CanCutTiles 排除表显式
       //  `type != 908`（:15421）→ 原版 908 全程不割,SW CUT_EXCLUDE_VIDS 同位=已对齐。
       cutTilesBox(game, this.x, this.y, this.w, this.h);
+      // ★BJ384 小动物命中面（BJ383 件2 补齐）：227 friendly penetrate=1（SetDefaults
+      //  :3126-3141）→ critter 受击耗穿归零即亡（:14184 penetrate-- → :17312 Kill;
+      //  Kill 面=killWithFx 音尘 :76019-76031）。几何=本体盒 AABB（hitCritters 缺省
+      //  面,Damage() 每子步同盒 :12618 flag=!friendly 恒真;无 minion/sentry/trap 位
+      //  → 仅受 dontHurtCritters 饰品门）。桶序先小动物（BJ383 范式——keepIterating
+      //  截断族,同拍小动物优先受理=原版槽序交错的仓内登记近似）。非 magic（无类别
+      //  旗,δA bug① 同源）→ 无幽灵兜帽吸血 proc。
+      if (hitCritters(this, game)) { this.killWithFx(game); return; }
       // Damage()（每子步结算面——DamageVar/banner/SnapStrike/crit 单源经共享
       // dealContacts;pierce=1 = flag3 免疫豁免+不设帧,命中即亡 penetrate;尾参 true=
       // maxPenetrate 1 keepIterating 截断——重叠多怪同拍只伤桶序首个,δA bug②）

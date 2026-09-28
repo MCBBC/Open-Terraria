@@ -1,7 +1,7 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
 import { glStatFrame, maybeInstallGpuLoggerFromUrl, noteContextLost, noteStarveProbeFail, noteStarveProbeOk, offStarveTransition, onStarveTransition, starvedEver, starvedLock, starveSnapshot } from '../render/GLStats';
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
-import { findBannerAnchorY, houseBannerVisible } from '../world/Housing';
+import { findBannerAnchorY, houseBannerVisible, npcHousingCategory } from '../world/Housing';
 import { TILE, CHUNK } from '../core/constants';
 import { rulerLineAlpha, rulerGridFade, rulerReadoutText } from '../stats/builderAcc';   // ★SW-FX36:标尺族绘制纯公式单源
 import { TintAtlas, type TintRect } from './TintAtlas';
@@ -13446,15 +13446,25 @@ export class Renderer {
     }
   }
 
-  /** 入驻旗帜（Main.cs:40152-40236 DrawNPCHousesInWorld 1:1）：
-   *  有家非流浪城镇 NPC（bound/守卫老人除外）在家坐标上方挂 House_Banner_1
-   *  （2×2 帧 16×20：X=单/双人旗、Y=housingCategory——城镇 NPC 全 0）+ 头像
-   *  叠画（NPC_Head_{id} 24×24）。同房多 NPC 每面旗下移 26px。锚点=帧中心。
-   *  位置 = home.x*16+8，y = 首个实心格下沿+18 */
+  /** 入驻旗帜（Main.cs:41414-41537 DrawNPCHousesInWorld 1:1）：
+   *  有家非流浪城镇 NPC（bound/守卫老人除外）在家坐标上方挂旗+头像叠画
+   *  （NPC_Head_{id} 24×24）。同房多 NPC 每面旗下移 26px。锚点=帧中心。
+   *  位置 = home.x*16+8，y = 首个实心格下沿+18。
+   *  ★BJ386（2026-09-28）：纹理对齐——House_Banner_1(32×40 整幅) → 原版
+   *  Images/UI/House_Banner（AssetInitializer.cs:564）Frame(2,2) 帧 34×42
+   *  （BJ370 ④保真债收官；此前 BJ370 按 16×20 切画小 → 用户实测改 32×40 整幅，
+   *  真帧 34×42 与用户实测观感差 2px，向原版真值收口）。变体帧选：
+   *  X 列 = 房位登记门牌（TownRoomManager._roomLocationPairs :41439-41442，
+   *  SetRoom 仅 moveRoom:4773/MP 同步两处——本仓无房位登记面（Housing.ts
+   *  「本仓无 TownManager 房位面」备案债），读档后未过住房 UI 的 NPC 原版
+   *  同样无登记 → X 恒 0 列=与原版读档态同相）；Y 行 = NPC.housingCategory
+   *  （:41436/:41493-41495，0=城镇 NPC / 1=城镇宠物，npcHousingCategory 单源）。 */
   private drawHouseBanners(entities: unknown[], world: World, cam: Camera) {
     if (!this.atlas) return;
-    const cloth = this.atlas.vmisc('vanilla/House_Banner_1.png');
+    const cloth = this.atlas.vmisc('vanilla-ui/UI_House_Banner.png');
     if (!cloth) return;
+    const frameW = cloth.sw / 2, frameH = cloth.sh / 2; // Frame(2,2)：68×84 → 34×42
+    const frameX = 0; // 登记门牌列（见头注 X 面备案债）；Y 行在逐旗处取 housingCategory
     const ctx = this.ctx;
     // 准入面 = Housing.houseBannerVisible 单源（Main.cs:41422-41424 过滤;BJ259
     // 右键踢出命中与此同源,另见 houseBannerNpcAt）
@@ -13466,10 +13476,11 @@ export class Renderer {
       const g = this.houseBannerGeom(n, this.houseBannerDup(banners, n), world);
       if (!g) continue;
       const { bx, by, cy, w: rectW, h: rectH } = g;
-      // 整面旗帜绘制（House_Banner_1 = 吊杆+垂布的完整旗，32×40 ≈ 2×2.5 格；
-      // 用户对照官方原版实测旗帜约 4 格方形——此前按 Frame(2,2) 切 16×20 画小了）
-      ctx.drawImage(cloth.img, cloth.sx, cloth.sy, cloth.sw, cloth.sh,
-        bx - cloth.sw / 2, by - cloth.sh / 2, cloth.sw, cloth.sh);
+      // 旗帜绘制（原版 Main.cs:41488 value.Frame(2,2) 帧 34×42，origin=帧中心；
+      // Y 行 = housingCategory :41493-41495，城镇 NPC 0 / 城镇宠物 1）
+      const cat = npcHousingCategory(n.vanillaId);
+      ctx.drawImage(cloth.img, frameX, cat * frameH, frameW, frameH,
+        bx - frameW / 2, by - frameH / 2, frameW, frameH);
       // 头像叠画（原版 TownNPCProfiles/TypeToDefaultHeadIndex NPC.cs:7489——head 索引≠NPC id）
       const headIdx = TOWN_NPC_HEAD_INDEX[n.vanillaId];
       const head = headIdx != null ? this.atlas.vmisc(`vanilla/NPC_Head_${headIdx}.png`) : null;
@@ -13515,14 +13526,15 @@ export class Renderer {
   }
 
   /** ★BJ259：单旗几何（drawHouseBanners 与右键踢出命中共用单源）——null=不挂旗。
-   *  bx/by=旗中心世界 px；w/h=命中矩形（rectW=cloth.sw、rectH=cloth.sh+4,
+   *  bx/by=旗中心世界 px；w/h=命中矩形（★BJ386：帧化后 rectW=34、rectH=46=帧 42+4,
    *  与悬停名条矩形同面=Main.cs:41518-41526 旗布矩形语义） */
   private houseBannerGeom(n: TownNPC, dup: number, world: World): {
     bx: number; by: number; w: number; h: number; cy: number;
   } | null {
     if (!this.atlas) return null;
-    const cloth = this.atlas.vmisc('vanilla/House_Banner_1.png');
+    const cloth = this.atlas.vmisc('vanilla-ui/UI_House_Banner.png');
     if (!cloth) return null;
+    const frameW = cloth.sw / 2, frameH = cloth.sh / 2; // Frame(2,2) 帧 34×42
     const st = world.store;
     // 从 home.y-1 向上找第一格“房界”(tileSolidLike——平台算天花板候选;
     // ★isSolid 会穿层:loft 下层的旗曾挂进上层同一行,2026-08-30 主因A修复)
@@ -13533,7 +13545,7 @@ export class Renderer {
     // 平台只有半格厚，旗帜上移贴平台上表面
     const onPlatform = TILE_DEFS[st.type[st.idx(n.home!.x, cy)]]?.vanilla?.sheet === 19;
     const by = (cy + 1) * 16 + (onPlatform ? 10 : 18) + dup * 26;
-    return { bx, by, w: cloth.sw, h: cloth.sh + 4, cy };
+    return { bx, by, w: frameW, h: frameH + 4, cy };
   }
 
   /** 同房重复偏移（原版 num4：同 home 的排序在后计数 ×26）——画/命中共享 */

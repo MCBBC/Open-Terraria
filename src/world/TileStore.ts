@@ -68,6 +68,13 @@ export class TileStore {
 
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
   private listeners: Array<(x: number, y: number) => void> = [];
+  /** ★C9d2 光照差量写日志（2026-09-28;?lightdelta=1 灰度时由 LightWorkerLink.bindStore
+   *  挂载,null=零开销）:记录两次发送之间的全部 tile 通道变更格（世界索引 y*w+x）。
+   *  变更原语内置推送;原版语义直写面（Game.ts CopyPaintAndCoating 族/联机 strip/
+   *  netApplyLiquid/hardmode 渐进转化等）不 push——由引擎「内容脏门」兜底全量
+   *  （lighting.dirty∨liquidDirty 且日志空）+ 120 tick 锚帧自愈,登记债。
+   *  发送侧（LightWorkerLink.send）负责清空。 */
+  tileWriteLog: number[] | null = null;
   /** ★BJ322（2026-09-24）：多格件「裸写窗」——置位期间 setTile 跳过 listeners 派发
    *  （netReporter 照常上报）。原版 ShiftTallGate/ShiftTrapdoor 对 w×h 全格直写
    *  tile.type（WorldGen.cs:52215-52219/:51958-51964）【无任何逐格 TileFrame】，写完
@@ -310,6 +317,7 @@ export class TileStore {
       this.paint[i] = 0;
       this.coat[i] &= ~TileStore.COAT_BLOCK_MASK; // ClearBlockPaintAndCoating（Tile.cs:934-939：color/fullbright/invisible 三清，只清方块侧）
     }
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: type, fx: frameX, fy: frameY });
     // ★BJ322：suppressListeners 窗内跳过监听派发（netReporter 不受影响——联机同步面照常）
     if (!this.suppressListeners) this.listeners.forEach((fn) => fn(x, y));
@@ -320,6 +328,7 @@ export class TileStore {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
     this.half[i] = v ? 1 : 0;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetHalfBrick, x, y, v: v ? 1 : 0, fx: 0, fy: 0 });
     this.listeners.forEach((fn) => fn(x, y));
   }
@@ -329,6 +338,7 @@ export class TileStore {
     const i = this.idx(x, y);
     this.slope[i] = s;
     this.half[i] = 0; // 原版 SlopeTile 无条件 halfBrick(false)（WorldGen.cs:49174），slope=0 复位时同样
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetSlope, x, y, v: s, fx: 0, fy: 0 });
     this.listeners.forEach((fn) => fn(x, y));
   }
@@ -354,6 +364,7 @@ export class TileStore {
       this.paint[i] = 0;                          // KillTile 油漆清位
       this.coat[i] &= ~TileStore.COAT_BLOCK_MASK; // ClearBlockPaintAndCoating（Tile.cs:934-939）
     }
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
   }
 
   /** 原版 tile.active(false) 等价：仅失活（清 active 位+half/slope），**保留 type 字段**
@@ -369,6 +380,7 @@ export class TileStore {
     this.paint[i] = 0;                            // ClearBlockPaintAndCoating（Tile.cs:934-39）
     this.coat[i] &= ~TileStore.COAT_BLOCK_MASK;
     // type[i] 不动 ← 幽灵格核心语义
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: 0, fx: 0, fy: 0 });
     this.listeners.forEach((fn) => fn(x, y));
   }
@@ -393,6 +405,7 @@ export class TileStore {
       }
       if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetWall, x, y, v: wall, fx: 0, fy: 0 });
       this.listeners.forEach((fn) => fn(x, y));
+      if (this.tileWriteLog) this.tileWriteLog.push(i);
     }
   }
 
@@ -405,6 +418,7 @@ export class TileStore {
       this.paintWall[i] = 0;                    // 同 setWall 的墙漆清位
       this.coat[i] &= ~TileStore.COAT_WALL_MASK; // ClearWallPaintAndCoating（Tile.cs:941-946）
     }
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
   }
 
   /** 油漆写入（WorldGen.paintTile/paintWall 等价原语）。发 listeners：油漆改变 tile/wall
@@ -415,12 +429,16 @@ export class TileStore {
     const i = this.idx(x, y);
     if (this.paint[i] === v) return;
     this.paint[i] = v & 31;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     this.listeners.forEach((fn) => fn(x, y));
   }
 
   setPaintSilent(x: number, y: number, v: number) {
     if (!this.inBounds(x, y)) return;
-    this.paint[this.idx(x, y)] = v & 31;
+    const i = this.idx(x, y);
+    if (this.paint[i] === v) return;
+    this.paint[i] = v & 31;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
   }
 
   /** 墙漆写入（WorldGen.paintWall） */
@@ -429,12 +447,16 @@ export class TileStore {
     const i = this.idx(x, y);
     if (this.paintWall[i] === v) return;
     this.paintWall[i] = v & 31;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     this.listeners.forEach((fn) => fn(x, y));
   }
 
   setPaintWallSilent(x: number, y: number, v: number) {
     if (!this.inBounds(x, y)) return;
-    this.paintWall[this.idx(x, y)] = v & 31;
+    const i = this.idx(x, y);
+    if (this.paintWall[i] === v) return;
+    this.paintWall[i] = v & 31;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
   }
 
   /** 涂层位写入（WorldGen.paintCoatTile/paintCoatWall 等价原语的位装配侧）。
@@ -446,20 +468,26 @@ export class TileStore {
     const v = (this.coat[i] & ~mask) | (bits & mask);
     if (this.coat[i] === v) return;
     this.coat[i] = v;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     this.listeners.forEach((fn) => fn(x, y));
   }
 
   setCoatSilent(x: number, y: number, mask: number, bits: number) {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
-    this.coat[i] = (this.coat[i] & ~mask) | (bits & mask);
+    const v = (this.coat[i] & ~mask) | (bits & mask);
+    if (this.coat[i] === v) return;
+    this.coat[i] = v;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
   }
 
   /** 导线/致动位写入（Wiring 系统）。不发 listeners：导线不进 chunk 烘焙画布，
    *  走 Renderer 动态覆盖层；致动位变化才需要标脏 chunk（调用方负责） */
   setWire(x: number, y: number, bits: number) {
     if (!this.inBounds(x, y)) return;
-    this.wire[this.idx(x, y)] = bits & 63;
+    const i = this.idx(x, y);
+    this.wire[i] = bits & 63;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetWire, x, y, v: bits & 63, fx: 0, fy: 0 });
   }
 
@@ -474,6 +502,7 @@ export class TileStore {
     const b = v ? (this.wire[i] | TileStore.WIRE_ACTUATED) : (this.wire[i] & ~TileStore.WIRE_ACTUATED);
     if (this.wire[i] === b) return;
     this.wire[i] = b;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetActuated, x, y, v: v ? 1 : 0, fx: 0, fy: 0 });
     this.listeners.forEach((fn) => fn(x, y));
   }
@@ -485,6 +514,7 @@ export class TileStore {
     if (this.liquid[i] === a && this.liquidType[i] === type) return;
     this.liquid[i] = a;
     this.liquidType[i] = type;
+    if (this.tileWriteLog) this.tileWriteLog.push(i);
     this.liquidListeners.forEach((fn) => fn(x, y));
   }
 }

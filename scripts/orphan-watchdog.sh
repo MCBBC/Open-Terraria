@@ -51,7 +51,7 @@ while IFS= read -r line; do
   esac
   [ "$cpu" -gt 40 ] 2>/dev/null || continue
   [ "$et" -gt 2700 ] || continue   # 45min 年龄门槛
-  echo "$pid|$ppid$(echo "$line" | tr '\n' ' ' | cut -d' ' -f2- | sed "s/^$pid $ppid //;s/^/|/;s/^|$ppid|/;s|^|$ppid||" | cut -c1-200)"
+  echo "$pid|$ppid|$(printf '%s' "$line" | tr '\n' ' ' | tr -s ' ' | cut -c1-200)"
 done < "$CAND.raw" > "$CAND.filtered"
 
 # 复核+处置（与 v1 相同）

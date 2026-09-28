@@ -40,7 +40,7 @@ import { projSprite, projFrameImg, projFrameCount } from './Arrow';
 import { applyProjStatus } from './projStatus';
 import { noteVanillaProjImmune, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
-import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk } from './SpectreSoulProj';
 // RainbowRodHit 编排本体（收编池;L5 批 2026-08-31——79 命中/Kill 爆本地直生 +
 // broadcast 上行同用此函数）。★终零波裁决注：module8 已有 netApply 消费面
 // （Game.netApplyParticleOrchestra case RainbowRodHit → 同一 rainbowRodHitFx），
@@ -910,8 +910,11 @@ export class MagicMissileProj extends Entity {
       //    Math.round(dmg)=防前伤,治疗量按防御/旗乘差值虚高）
       //  ④出生点 = 受害者 Center（:13879 `new Vector2(targetNPC.Center.X,.Y)`;旧传
       //    弹体左上 this.x,y——治疗弹 298 起飞原点差几像素）
-      const v156 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number };
-      if (spectreVictimEligible(v156.vanillaId)) {
+      const v156 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
+        maxHp?: number; def?: { lifeMax?: number } };
+      // ★BJ385 flag10 lifeMax>5 段补门（:13712）——BJ167 老站缺段,门单源
+      //  vanillaFlag10LifeMaxOk（critter 一击致死族原版不 proc）
+      if (vanillaFlag10LifeMaxOk(v156) && spectreVictimEligible(v156.vanillaId)) {
         game.applyLifeSteal?.('ghost', v156.lastStrikeDealt ?? 0, this.pierceInit - this.pierce,
           e.cx ?? e.x + e.w / 2, e.cy ?? e.y + e.h / 2, true);
       }

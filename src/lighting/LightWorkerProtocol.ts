@@ -121,7 +121,22 @@ export interface LightSnapshotMsg {
   buffs: number[][];
   per: number[][];
   tiles: TileSlicePack;
+  /** ★C9d2 二期差量（?lightdelta=1 灰度）:undefined=legacy 全量（非灰度模式,
+   *  tile 通道走 transferable+回池）; 'full'=灰度全量锚帧（结构克隆,主线程留影子）;
+   *  'delta'=差量帧（tiles 仅几何字段,通道零长;载荷在 delta） */
+  enc?: 'full' | 'delta';
+  /** enc='delta' 载荷:meta=[跨度数,(y',x0',len)…]（u32,切片内局部坐标）,
+   *  data=每跨度逐格 17B（type/flags/frameX/frameY/wall 各 LE 2B,其余 9 通道各 1B） */
+  delta?: { dv: number; meta: Uint32Array; data: Uint8Array };
 }
+
+/** ★C9d2 worker→main tile 缓冲回池（仅 legacy 非灰度模式;transfer 往返使主线程
+ *  buildSlice 零重分配。compute 完毕后 worker 不再读 tile 通道,回传安全） */
+export interface LightPoolMsg { op: 'pool'; seq: number; tiles: TileSlicePack }
+
+/** ★C9d2 worker 侧影子缺失/尺寸失配（防御面:正常由 planFull 保证不触发）→
+ *  主线程下帧强制全量 */
+export interface LightResyncMsg { op: 'resync' }
 
 /** worker→main 结果（R/G/B transferable;rx/ry 绝对区域,主线程整体回填公共面） */
 export interface LightResultMsg {
@@ -235,10 +250,13 @@ export interface WorkerDriveState {
   off: { sx: number; sy: number };
   hourly: number;
   shimmed: boolean;
+  /** ★C9d2 差量解码器（工厂即建——resync 门在 runSnapshotOnEngine 之前消费;
+   *  legacy 帧解码器 adopt-through 不维护影子,零行为影响） */
+  deltaDec: LightDeltaDecoder;
 }
 
 export function createWorkerDriveState(): WorkerDriveState {
-  return { off: { sx: 0, sy: 0 }, hourly: 0, shimmed: false };
+  return { off: { sx: 0, sy: 0 }, hourly: 0, shimmed: false, deltaDec: new LightDeltaDecoder() };
 }
 
 /** SkyColor 模块级帧状态重放（worker 模块实例与主线程分立,setter 为唯一写口） */
@@ -282,11 +300,13 @@ function installClockShims(e: LightingEngine, fk: FlickerClock, ds: WorkerDriveS
 }
 
 /** 应用一帧快照到 worker 侧镜像引擎并跑完整 Scan→Blur→Present 周期。
- *  返回结果负载（R/G/B 为引擎新分配数组,调用方 postMessage transfer）。 */
+ *  返回结果负载（R/G/B 为引擎新分配数组,调用方 postMessage transfer）。
+ *  ★C9d2:enc='delta' 帧先经 LightDeltaDecoder 从影子差量重建完整切片再 adopt
+ *  （legacy/'full' 帧解码器 adopt-through,影子仅在灰度模式维护）。 */
 export function runSnapshotOnEngine(e: LightingEngine, m: LightSnapshotMsg, ds: WorkerDriveState): { rx: number; ry: number; rw: number; rh: number; R: Uint8Array; G: Uint8Array; B: Uint8Array } {
-  // ① tile 窗口（通道引用整体替换,零拷贝）
+  // ① tile 窗口（通道引用整体替换,零拷贝;delta 帧重建产物同面）
   const st = e.world.store as unknown as SnapshotTileStore;
-  st.adopt(m.tiles);
+  st.adopt(ds.deltaDec.decode(m));
   // ② 世界标量 rebase（行/列平移,见头注）
   e.world.groundLevel = m.groundLevel - m.tiles.sy;
   e.world.lavaLine = m.lavaLine - m.tiles.sy;
@@ -323,4 +343,274 @@ export function runSnapshotOnEngine(e: LightingEngine, m: LightSnapshotMsg, ds: 
   // ⑦ 完整周期（compute → tick → runFullCycle → scan/blur/present）
   e.compute(0);
   return { rx: m.rx, ry: m.ry, rw: m.rw, rh: m.rh, R: e.r, G: e.g, B: e.b };
+}
+
+// ---- ★C9 二期·快照差量化（2026-09-28;?lightdelta=1 缺省关,用户明令灰度） ----
+// 判据链（scripts/_c9d2-light-residual-probe.mjs 实测定谳,本机 M-series,seed 05162020）:
+//   · 全量切片 174×144=25056 格=416KB/帧=24.4MB/s@60fps（登记债 29MB/s 同口径）;
+//     buildSlice p50 0.10ms、postMessage 结构克隆 p50 0.10ms、transferable 0µs;
+//   · 【全窗 13 通道精确差扫描 p50 0.60-0.70ms——比全量路径(buildSlice+克隆 0.2ms)
+//     负收益 3×,C8-D 波场同款逐格 diff 在本域不可收】→ 差量不走扫描,走
+//     【写日志+暴露带】:世界写面全量记账（TileStore 原语内置推送）,差量格集 =
+//     新暴露带（影子窗外,无条件携带）∪ 写日志格（当前值直读世界）。
+// 正确性论证:影子=上一发送帧的世界态;两帧间世界变更 ⊆ 写日志（记账完备前提）
+// ⇒ 未记录格两帧同值 ⇒ 重叠区免比对。静置帧=空 delta;纯移动帧=暴露带
+// (~2×(sw+sh) 格 ≈ 11KB);写帧=日志格（KB 级）。全量锚帧保底:首帧/尺寸变/区域
+// 跳变>48 格/120 tick 周期/日志溢出/内容脏门（engine.dirty∨liquidDirty 且日志空=
+// 未记账直写面:crater/隐形翻转/联机 liquid 等显式标脏路径）/worker resync。
+// 记账漏记面（原版语义直写且未标脏,如 hardmode 渐进转化）→ 延迟至锚帧自愈
+// （≤120 tick）,登记债。span 载荷恒 < 全量字节（日志格数 plan 期封顶,免 C8-D
+// 式超限逃生路径）。位等价硬判据:tests/light-worker-parity（差量场景）。
+export const LIGHT_DELTA_VERSION = 1;
+export const LIGHT_DELTA_ANCHOR_EVERY = 120;
+export const LIGHT_DELTA_JUMP_TILES = 48;
+/** 写日志格数封顶（plan 期超出即判全量）——保证 span 载荷 < 全量字节 */
+export const LIGHT_DELTA_LOG_CAP = 2048;
+
+/** 13 通道键序（= span data 字节序,与 TileSlicePack 字段一一对应） */
+export const TILE_CHAN_KEYS = ['type', 'flags', 'frameX', 'frameY', 'wall', 'liquid', 'liquidType',
+  'half', 'slope', 'wire', 'paint', 'paintWall', 'coat'] as const;
+/** 每格字节数:type/frameX/frameY/wall 各 2B(LE) + 其余 9 通道各 1B */
+export const TILE_CHAN_BYTES_PER_CELL = 4 * 2 + 9;
+
+/** 切片几何（世界钳制数学与 buildSlice 同源:px/py=钳后 padding,worker 侧 InWorld
+ *  折叠精确性依赖,见文件头注——差量帧几何字段必须逐字段同式计算） */
+export function sliceGeometry(st: { w: number; h: number; showInvisibleBlocks: boolean },
+  rx: number, ry: number, rw: number, rh: number): TileSlicePack {
+  const sx = Math.max(0, rx - SNAPSHOT_PAD);
+  const sy = Math.max(0, ry - SNAPSHOT_PAD);
+  const sw = Math.min(st.w, rx + rw + SNAPSHOT_PAD) - sx;
+  const sh = Math.min(st.h, ry + rh + SNAPSHOT_PAD) - sy;
+  return { sx, sy, sw, sh, px: rx - sx, py: ry - sy,
+    type: new Uint16Array(0), flags: new Uint8Array(0),
+    frameX: new Uint16Array(0), frameY: new Uint16Array(0),
+    wall: new Uint16Array(0), liquid: new Uint8Array(0), liquidType: new Uint8Array(0),
+    half: new Uint8Array(0), slope: new Uint8Array(0), wire: new Uint8Array(0),
+    paint: new Uint8Array(0), paintWall: new Uint8Array(0), coat: new Uint8Array(0),
+    showInvisibleBlocks: st.showInvisibleBlocks };
+}
+
+/** 分配全尺寸通道组（编码器影子/解码器乒乓共用;几何字段由调用方回填） */
+export function allocSliceChannels(sw: number, sh: number): TileSlicePack {
+  const n = sw * sh;
+  return { sx: 0, sy: 0, sw, sh, px: 0, py: 0,
+    type: new Uint16Array(n), flags: new Uint8Array(n),
+    frameX: new Uint16Array(n), frameY: new Uint16Array(n),
+    wall: new Uint16Array(n), liquid: new Uint8Array(n), liquidType: new Uint8Array(n),
+    half: new Uint8Array(n), slope: new Uint8Array(n), wire: new Uint8Array(n),
+    paint: new Uint8Array(n), paintWall: new Uint8Array(n), coat: new Uint8Array(n),
+    showInvisibleBlocks: false };
+}
+
+/** ★C9d2 主线程差量编码器（LightWorkerLink 持有;灰度模式专用）。
+ *  影子窗=上一发送帧;encodeDelta 内先 rebase（copyWithin 行平移到新窗布局）,
+ *  再标暴露带+日志格 → 行扫跨度 RLE → 逐格 17B 发射（读世界真值,同步写影子）。 */
+export class LightDeltaEncoder {
+  private shadow: TileSlicePack | null = null;   // 所有权:adoptFull 后持有调用方数组
+  private frame = 0;                              // 距上次全量锚帧的 delta 帧数
+  private forceFull = true;                       // 首帧/resync 请求
+  private mark: Uint8Array = new Uint8Array(0);   // 跨度标记 scratch（窗尺寸）
+  private metaBuf = new Uint32Array(1 + 3 * 1024);
+  private dataBuf = new Uint8Array(1 << 15);
+
+  /** plan 期全量判定（引擎切片前调用——full=buildSlice 全量克隆,delta=免 416KB 切片）。
+   *  contentDirty=引擎侧「非移动内容脏」（regionMoved 已扣除;日志空时才可信——
+   *  日志非空说明 dirty 来自已记账原语写,走 delta 格集）。
+   *  lastFullReason=诊断面（F5/探针:full 触发原因,稳定可断言）。 */
+  lastFullReason = 'first';
+  planFull(reg: { sx: number; sy: number; sw: number; sh: number }, logLen: number, contentDirty: boolean): boolean {
+    const s = this.shadow;
+    const reason =
+      this.forceFull ? 'force' :
+      s === null ? 'first' :
+      logLen > LIGHT_DELTA_LOG_CAP ? 'log-overflow' :
+      (contentDirty && logLen === 0) ? 'content-dirty' :
+      s.sw !== reg.sw || s.sh !== reg.sh ? 'resize' :
+      Math.abs(reg.sx - s.sx) > LIGHT_DELTA_JUMP_TILES || Math.abs(reg.sy - s.sy) > LIGHT_DELTA_JUMP_TILES ? 'jump' :
+      this.frame >= LIGHT_DELTA_ANCHOR_EVERY ? 'anchor' : null;
+    if (reason !== null) this.lastFullReason = reason;
+    return reason !== null;
+  }
+
+  /** 全量锚帧:切片数组所有权移交影子（主线程侧结构克隆发送,数组留主线程） */
+  adoptFull(t: TileSlicePack): void {
+    this.shadow = t;
+    this.frame = 0;
+    this.forceFull = false;
+    if (this.mark.length < t.sw * t.sh) this.mark = new Uint8Array(t.sw * t.sh);
+  }
+
+  /** resync 请求（worker 影子缺失/失配防御面）→ 下帧全量 */
+  noteResync(): void { this.forceFull = true; }
+
+  /** 影子存在且几何匹配当前窗（诊断/断言面） */
+  hasShadow(sw: number, sh: number): boolean { return this.shadow !== null && this.shadow.sw === sw && this.shadow.sh === sh; }
+
+  /** 差量编码:读世界真值（st）+ 写日志（log=世界索引 y*w+x,调用后由调用方清空）,
+   *  影子同步推进到本帧窗。返回精确尺寸载荷（postMessage transfer）。
+   *  前置:planFull=false（几何匹配/日志未溢出/contentDirty 门已过）。 */
+  encodeDelta(st: { w: number; type: Uint16Array; flags: Uint8Array; frameX: Uint16Array; frameY: Uint16Array;
+    wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array; half: Uint8Array; slope: Uint8Array;
+    wire: Uint8Array; paint: Uint8Array; paintWall: Uint8Array; coat: Uint8Array },
+    g: TileSlicePack, log: readonly number[]): { meta: Uint32Array; data: Uint8Array } {
+    const s = this.shadow!;
+    const sw = g.sw, shH = g.sh, n = sw * shH;
+    const worldW = st.w;
+    // ① 影子 rebase:行平移到新窗布局（同 stride,copyWithin 行段互不相交;
+    //    暴露带区被移入陈旧值,必被跨度覆写——编码器保证)
+    const cx0 = Math.max(s.sx, g.sx), cx1 = Math.min(s.sx + s.sw, g.sx + sw);
+    const cy0 = Math.max(s.sy, g.sy), cy1 = Math.min(s.sy + s.sh, g.sy + shH);
+    if (cx1 > cx0 && cy1 > cy0 && (s.sx !== g.sx || s.sy !== g.sy)) {
+      const len = cx1 - cx0;
+      for (let wy = cy0; wy < cy1; wy++) {
+        const dstOff = (wy - g.sy) * sw + (cx0 - g.sx);
+        const srcOff = (wy - s.sy) * s.sw + (cx0 - s.sx);
+        for (const k of TILE_CHAN_KEYS) (s[k] as Uint16Array | Uint8Array).copyWithin(dstOff, srcOff, srcOff + len);
+      }
+    }
+    // ② 标记:暴露带=重叠矩形外全部格;日志格=窗内记账格
+    const mark = this.mark.length >= n ? this.mark : (this.mark = new Uint8Array(n));
+    mark.fill(0, 0, n);
+    for (let y = 0; y < shH; y++) {
+      const wy = g.sy + y;
+      const row = y * sw;
+      if (wy < cy0 || wy >= cy1) { mark.fill(1, row, row + sw); continue; }
+      if (cx0 > g.sx) mark.fill(1, row, row + (cx0 - g.sx));
+      if (cx1 < g.sx + sw) mark.fill(1, row + (cx1 - g.sx), row + sw);
+    }
+    for (let k = 0; k < log.length; k++) {
+      const idx = log[k];
+      const lx = idx % worldW - g.sx, ly = (idx / worldW | 0) - g.sy;
+      if (lx >= 0 && ly >= 0 && lx < sw && ly < shH) mark[ly * sw + lx] = 1;
+    }
+    // ③ 行扫跨度 + 逐格 17B 发射（读世界真值;同步写影子=跨度格新值）
+    let mOff = 1, dOff = 0, spans = 0;
+    const capMeta = 1 + 3 * spansMax(sw, shH);   // 数学硬上界（1 格跨度与空格交替）
+    if (this.metaBuf.length < capMeta) this.metaBuf = new Uint32Array(capMeta);
+    if (this.dataBuf.length < n * TILE_CHAN_BYTES_PER_CELL) this.dataBuf = new Uint8Array(n * TILE_CHAN_BYTES_PER_CELL);
+    const meta = this.metaBuf, data = this.dataBuf;
+    const stT = st.type, stF = st.flags, stFX = st.frameX, stFY = st.frameY, stW2 = st.wall;
+    const stL = st.liquid, stLT = st.liquidType, stH = st.half, stSl = st.slope, stWr = st.wire;
+    const stP = st.paint, stPW = st.paintWall, stC = st.coat;
+    const sT = s.type, sF = s.flags, sFX = s.frameX, sFY = s.frameY, sW2 = s.wall;
+    const sL = s.liquid, sLT = s.liquidType, sH = s.half, sSl = s.slope, sWr = s.wire;
+    const sP = s.paint, sPW = s.paintWall, sC = s.coat;
+    for (let y = 0; y < shH; y++) {
+      const row = y * sw;
+      for (let x = 0; x < sw;) {
+        while (x < sw && mark[row + x] === 0) x++;
+        if (x >= sw) break;
+        const x0 = x;
+        while (x < sw && mark[row + x] === 1) x++;
+        const len = x - x0;
+        if (mOff + 3 > meta.length || dOff + len * TILE_CHAN_BYTES_PER_CELL > data.length) return this.escalateFull();
+        meta[mOff] = y; meta[mOff + 1] = x0; meta[mOff + 2] = len; mOff += 3;
+        for (let t2 = 0; t2 < len; t2++) {
+          const si = row + x0 + t2;
+          const wi = (g.sy + y) * worldW + (g.sx + x0 + t2);
+          const vT = stT[wi]; data[dOff++] = vT & 255; data[dOff++] = vT >>> 8; sT[si] = vT;
+          const vF = stF[wi]; data[dOff++] = vF; sF[si] = vF;
+          const vFX = stFX[wi]; data[dOff++] = vFX & 255; data[dOff++] = vFX >>> 8; sFX[si] = vFX;
+          const vFY = stFY[wi]; data[dOff++] = vFY & 255; data[dOff++] = vFY >>> 8; sFY[si] = vFY;
+          const vW = stW2[wi]; data[dOff++] = vW & 255; data[dOff++] = vW >>> 8; sW2[si] = vW;
+          const vL = stL[wi]; data[dOff++] = vL; sL[si] = vL;
+          const vLT = stLT[wi]; data[dOff++] = vLT; sLT[si] = vLT;
+          const vH = stH[wi]; data[dOff++] = vH; sH[si] = vH;
+          const vSl = stSl[wi]; data[dOff++] = vSl; sSl[si] = vSl;
+          const vWr = stWr[wi]; data[dOff++] = vWr; sWr[si] = vWr;
+          const vP = stP[wi]; data[dOff++] = vP; sP[si] = vP;
+          const vPW = stPW[wi]; data[dOff++] = vPW; sPW[si] = vPW;
+          const vC = stC[wi]; data[dOff++] = vC; sC[si] = vC;
+        }
+        spans++;
+      }
+    }
+    meta[0] = spans;
+    // ④ 影子几何推进（未标记格=rebase 后重叠区原值=世界同值,记账完备前提）
+    s.sx = g.sx; s.sy = g.sy; s.sw = sw; s.sh = shH; s.px = g.px; s.py = g.py;
+    s.showInvisibleBlocks = g.showInvisibleBlocks;
+    this.frame++;
+    return { meta: meta.slice(0, mOff), data: data.slice(0, dOff) };
+  }
+
+  /** 跨度发射中途异常 → 全量重锚（影子需完整数据,返回特殊标记由调用方走全量。
+   *  常规路径不可达:plan 期几何/日志封顶已保证容量;防御面保留） */
+  private escalateFull(): { meta: Uint32Array; data: Uint8Array } {
+    this.forceFull = true;
+    return { meta: new Uint32Array(0), data: new Uint8Array(0) };
+  }
+}
+
+/** 行内最大跨度数（1 格跨度与空格交替） */
+function spansMax(sw: number, sh: number): number { return sh * ((sw >> 1) + 1); }
+
+/** ★C9d2 worker 侧差量解码器（WorkerDriveState 持有,影子/spare 乒乓零稳态分配）。
+ *  full/legacy 帧 adopt-through（legacy 不维护影子——tile 缓冲将回池 detached）;
+ *  delta 帧:重叠区自影子 .set 复制 + 跨度覆写（暴露带由跨度覆盖,编码器保证）。 */
+export class LightDeltaDecoder {
+  private shadow: TileSlicePack | null = null;
+  private spare: TileSlicePack | null = null;
+
+  /** delta 帧可解码判据（worker 壳 resync 门:影子缺失/尺寸失配 → 请求全量） */
+  readyFor(m: LightSnapshotMsg): boolean {
+    if (m.enc !== 'delta') return true;
+    return this.shadow !== null && this.shadow.sw === m.tiles.sw && this.shadow.sh === m.tiles.sh;
+  }
+
+  decode(m: LightSnapshotMsg): TileSlicePack {
+    if (m.enc !== 'delta') {
+      if (m.enc !== 'full') return m.tiles;   // legacy:纯 adopt-through（缓冲回池,不维护影子）
+      const t = m.tiles;
+      this.spare = this.shadow !== null && this.shadow.sw === t.sw && this.shadow.sh === t.sh ? this.shadow : null;
+      this.shadow = t;                        // 灰度全量锚:克隆产物即新影子
+      return t;
+    }
+    const g = m.tiles;
+    if (m.delta!.dv !== LIGHT_DELTA_VERSION) throw new Error(`light delta version mismatch: ${m.delta!.dv}`);
+    const s = this.shadow!;
+    const sw = g.sw, shH = g.sh;
+    let t = this.spare;
+    if (t === null || t.sw !== sw || t.sh !== shH) { t = allocSliceChannels(sw, shH); this.spare = t; }
+    // ① 重叠区自影子复制（跨数组按行 .set;暴露带陈旧值必被跨度覆写）
+    const cx0 = Math.max(s.sx, g.sx), cx1 = Math.min(s.sx + s.sw, g.sx + sw);
+    const cy0 = Math.max(s.sy, g.sy), cy1 = Math.min(s.sy + s.sh, g.sy + shH);
+    if (cx1 > cx0 && cy1 > cy0) {
+      const len = cx1 - cx0;
+      for (let wy = cy0; wy < cy1; wy++) {
+        const dOff = (wy - g.sy) * sw + (cx0 - g.sx);
+        const sOff = (wy - s.sy) * s.sw + (cx0 - s.sx);
+        for (const k of TILE_CHAN_KEYS) (t[k] as Uint16Array | Uint8Array).set((s[k] as Uint16Array | Uint8Array).subarray(sOff, sOff + len), dOff);
+      }
+    }
+    // ② 跨度覆写（meta=[spanCount,(y,x0,len)…],data 17B/格 LE）
+    const meta = m.delta!.meta, data = m.delta!.data;
+    const spans = meta[0];
+    let mOff = 1, dOff = 0;
+    const tT = t.type, tF = t.flags, tFX = t.frameX, tFY = t.frameY, tW2 = t.wall;
+    const tL = t.liquid, tLT = t.liquidType, tH = t.half, tSl = t.slope, tWr = t.wire;
+    const tP = t.paint, tPW = t.paintWall, tC = t.coat;
+    for (let sp = 0; sp < spans; sp++) {
+      const y = meta[mOff], x0 = meta[mOff + 1], len = meta[mOff + 2]; mOff += 3;
+      const rowBase = y * sw + x0;
+      for (let k = 0; k < len; k++) {
+        const si = rowBase + k;
+        tT[si] = data[dOff] | (data[dOff + 1] << 8); dOff += 2;
+        tF[si] = data[dOff++];
+        tFX[si] = data[dOff] | (data[dOff + 1] << 8); dOff += 2;
+        tFY[si] = data[dOff] | (data[dOff + 1] << 8); dOff += 2;
+        tW2[si] = data[dOff] | (data[dOff + 1] << 8); dOff += 2;
+        tL[si] = data[dOff++]; tLT[si] = data[dOff++];
+        tH[si] = data[dOff++]; tSl[si] = data[dOff++]; tWr[si] = data[dOff++];
+        tP[si] = data[dOff++]; tPW[si] = data[dOff++]; tC[si] = data[dOff++];
+      }
+    }
+    if (dOff !== data.length) throw new Error(`light delta payload underrun: ${dOff}/${data.length}`);
+    // ③ 几何/旗回填 + 乒乓轮转（旧影子 → spare=下帧解码目标）
+    t.sx = g.sx; t.sy = g.sy; t.px = g.px; t.py = g.py;
+    t.showInvisibleBlocks = g.showInvisibleBlocks;
+    const old = this.shadow;
+    this.shadow = t;
+    this.spare = old !== null && old.sw === sw && old.sh === shH ? old : null;
+    return t;
+  }
 }

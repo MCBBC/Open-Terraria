@@ -8,7 +8,7 @@
 //   其 Main.cs:32420-32442 的 lerp 缩放/拖尾专属分支【不在此实现】——本类只做
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
-import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk } from './SpectreSoulProj';
 import { hitCritters, hitTownNpcs, noteVanillaProjImmune, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
@@ -213,7 +213,9 @@ export class MagicProj extends Entity {
           const v156 = ent as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
             maxHp?: number; def?: { lifeMax?: number } };
           if (this.projId > 0 && projectileData(this.projId)?.magic) {
-            if (spectreVictimEligible(v156.vanillaId)) {
+            // ★BJ385 flag10 lifeMax>5 段补门（:13712）——BJ157-① 老站缺段（critter
+            // lifeMax≤5 一击致死族原版不 proc）,门单源 vanillaFlag10LifeMaxOk
+            if (vanillaFlag10LifeMaxOk(v156) && spectreVictimEligible(v156.vanillaId)) {
               game.applyLifeSteal?.('ghost', v156.lastStrikeDealt ?? 0, 0,
                 e.x + e.w / 2, e.y + e.h / 2, true);
             }

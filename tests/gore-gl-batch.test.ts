@@ -259,16 +259,20 @@ describe('★F-gore GLShimExecutor.pushGoreQuadBatch 行为锁', () => {
     expect(exec.stats.emitADD).toBe(1);          // ADD 段 rec.tier 计账
   });
 
-  it('可表达性门:ga≠1/gco 非 SO/clip/非活跃窗 → false=调用方回 2D 原链;零段=真值零入队', () => {
+  it('可表达性门:clip/filter → false=调用方回 2D 原链;ga/gco 不设门（逐件自设态,入口态无关）;零段=真值零入队;非活跃窗 false', () => {
     const { host } = mkGoreHost();
     const exec = new GLShimExecutor(host as never);
     expect(exec.attachAcc()).not.toBeNull();
     const q = () => exec.pushGoreQuadBatch([mkSeg() as never]);
-    const s = exec as unknown as { ga: number; gco: string; clipped: boolean };
-    s.ga = 0.5; expect(q()).toBe(false);
-    s.ga = 1; s.gco = 'lighter'; expect(q()).toBe(false);
-    s.gco = 'source-over'; s.clipped = true; expect(q()).toBe(false);
-    s.clipped = false;
+    const s = exec as unknown as { ga: number; gco: string; clipped: boolean; filterV: string };
+    // ★ga/gco 不设门:2D 链逐件【自设】globalAlpha/gco（drawGorePiece）,入口态既
+    //  不进 2D 输出也不进批输出（段 tier/α 全编码在 rec/顶点色）——Boss 战 gore
+    //  前常有加性特效留 'lighter' 镜像态,伪门会在目标场景整帧静默回退
+    s.ga = 0.5; s.gco = 'lighter'; expect(q()).toBe(true);
+    s.gco = 'source-over'; s.ga = 1;
+    s.clipped = true; expect(q()).toBe(false);   // clip=批不表达 → 回 2D
+    s.clipped = false; s.filterV = 'brightness(2)'; expect(q()).toBe(false);
+    s.filterV = 'none';
     expect(exec.pushGoreQuadBatch([])).toBe(true);
     const { host: h2 } = mkGoreHost();
     const exec2 = new GLShimExecutor(h2 as never);

@@ -13,7 +13,7 @@ import { applyProjStatus, applyFrostBurn, debuffWriteAllowed } from './projStatu
 import { applyThrownKillFx } from './ThrowKillFx';
 import { canBeChasedBy, hitCritters, hitPlayer, hitTownNpcs, playerCanHitEnemy, statusPlayer, noteVanillaProjImmune, tryReflectProjectile, tryReflectShimmerSlimeHit, applyBannerDamageDealt, rollGolemSentryCrit } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
-import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, spectreVictimEligible, vanillaFlag10LifeMaxOk } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { wetCollision } from './npcLiquid';   // lavaCollision 随湿段收口迁 projWetSection 共享体（2026-09-08）
@@ -2123,24 +2123,24 @@ export class Arrow extends Entity {
   private twinkleDir = 1;
   /** aiStyle5 Item_9 星啸节拍器（soundDelay = 20+rand(40)，:22166-22172） */
   private starSndCd = 0;
-  // ---- 食人鱼 190（aiStyle 39，Projectile.cs:26065-26315）专属态 ----
+  // ---- 食人鱼 190（aiStyle 39，Projectile.cs:27907-28173）专属态 ----（★BJ386 2026-09-28 全块行号按 1457 勘误，旧值系 1456 世代）
   /** 非空 = 食人鱼状态机激活（fixedUpdate 直入 piranhaStep） */
   piranha: PiranhaCtl | null = null;
-  /** alpha（SetDefaults :2517 = 255；AI :26067 每 tick −50，6t 淡入归零） */
+  /** alpha（SetDefaults :2788 = 255；AI :27909 每 tick −50，6t 淡入归零） */
   pAlpha = 255;
-  /** ai[0]：0=直飞（:26245 分支）/ 1=返回玩家（:26266 分支） */
+  /** ai[0]：0=直飞（:28103 分支）/ 1=返回玩家（:28121 分支） */
   pAi0 = 0;
-  /** ai[1]：0=未咬（命中即咬 :12447）/ >0=咬住目标 / −1=松手禁再咬（:26095） */
+  /** ai[1]：0=未咬（命中即咬 :13270-13274）/ >0=咬住目标 / −1=松手禁再咬（:27951-27954） */
   pAi1 = 0;
   /** 咬住目标（vanilla 存 npc index+1，此处直接持引用 + 每 tick 校验存活） */
   pTarget: PiranhaTarget | null = null;
-  /** localNPCImmunity 同敌冷却表（SetDefaults :2521 = 14t，:13157 命中写入） */
+  /** localNPCImmunity 同敌冷却表（SetDefaults :2791 = 14t，:14175-14178 命中写入） */
   private pHitCd = new Map<number, number>();
-  /** 帧推进计数 / 当前帧（:26301-26310：4t/帧 4 帧循环——draw 侧消费） */
+  /** 帧推进计数 / 当前帧（:28159-28168：4t/帧 4 帧循环——draw 侧消费） */
   pFrameCounter = 0;
   pFrame = 0;
   /** 姿态角（未镜像系 atan2(vy,vx)）与翻转位（spriteDirection<0）——咬住时
-   *  velocity 已清零，atan2(0,0) 会把鱼掰回 0°，故由 AI 侧在清速前记录（:26119-26143） */
+   *  velocity 已清零，atan2(0,0) 会把鱼掰回 0°，故由 AI 侧在清速前记录（:27976-28015） */
   pRot = 0;
   pFlip = false;
   /** 出生弹速（ItemCheck_Shoot num4/num5 模长 = item.shootSpeed 14）——补弹复用 */
@@ -2992,7 +2992,7 @@ export class Arrow extends Entity {
     // 翻滚态用累积角（aiStyle 2）；48/54/93/520/599 平飞期姿态锁定 atan2
     const tumbling = this.tumble && !(this.tumblePoseLock && this.age <= this.gravDelay);
     // 食人鱼姿态由 AI 侧维护（pRot/pFlip）：咬住时 velocity 清零（:26126-26129），
-    // 现算 atan2(0,0)=0 会把鱼掰回正右——原版 rotation 在清速前取目标向（:26119-26143）
+    // 现算 atan2(0,0)=0 会把鱼掰回正右——原版 rotation 在清速前取目标向（:27976-28015）
     // 信号弹同型：rotation = atan2(ai[1], ai[0])+π/2（:27497），贴壁 velocity 清零后
     // ai 向量冻结在末速——现算 atan2(0,0)=0 会把弹头掰回正上
     const ang = this.piranha ? this.pRot
@@ -3347,10 +3347,10 @@ export class Arrow extends Entity {
     // 502 朝向（:22659-22665）：spriteDirection=sign(vx)——贴图在旋转坐标系内水平镜像
     if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
-    // 食人鱼淡入（aiStyle 39 :26067-26071：alpha 255 起 −50/t，6t 归零）
+    // 食人鱼淡入（aiStyle 39 :27909-27913：alpha 255 起 −50/t，6t 归零）
     if (this.piranha) ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.pAlpha / 255));
     // 多帧行（190 食人鱼 4 帧/837 3 帧）按帧行切片防胶片压扁；单帧走整图。
-    // 食人鱼帧号由 AI 推进（:26301-26310 frameCounter≥4 推帧 4 帧循环），
+    // 食人鱼帧号由 AI 推进（:28159-28168 frameCounter≥4 推帧 4 帧循环），
     // 其余型号沿用 age/5 档
     const frames = projFrameCount(this.projId);
     const fIdx = this.piranha ? this.pFrame
@@ -8166,9 +8166,9 @@ export class Arrow extends Entity {
         const noG = Math.floor(Math.random() * 3) !== 0
           || Math.floor(Math.random() * 3) === 0;              // Next(3)!=0 || (75∧Next(3)==0)
         if (noG) { d101.vx *= 2; d101.vy *= 2; d101.scale *= 3; }
-        d101.vx *= 1.2; d101.vy *= 1.2;                        // :26251-26252 恒 ×1.2
+        d101.vx *= 1.2; d101.vy *= 1.2;                        // :26250-26251 恒 ×1.2
         d101.scale = d101.scale * 1.5 * num193;                // :26254-26257 非 188 → ×1.5×num193
-        d101.vx += this.vx; d101.vy += this.vy;                // :26259-26261 num194==75 → += 弹速
+        d101.vx += this.vx; d101.vy += this.vy;                // :26254-26262 num194==75 → += 弹速
         if (!noG) { d101.vx *= 0.5; d101.vy *= 0.5; }
         d101.noGravity = noG;
       }
@@ -9152,7 +9152,7 @@ export class Arrow extends Entity {
       const zapJelly = jellyVid !== undefined && jellyVid > 0 && ZAPPING_JELLYFISH.has(jellyVid);
       const jellyDontTake = (ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true;
       if (jellyDontTake && !zapJelly) continue;
-      if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892/CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 玩家武器无效/不追踪）
+      if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :12622/CanBeChasedBy NPC.cs :91139——睡渔夫 376 等友好 NPC 玩家武器无效/不追踪）
       const foxInf = dragonLine ? 0 : this.foxHitInflate();
       // 1457 宝石法珠 Colliding 重载（Projectile.cs:15443-15476，type 121/122/123/
       // 124/597/125/126 专属）三段（蓝队 R2-02 补）：
@@ -9222,7 +9222,7 @@ export class Arrow extends Entity {
           return;
         }
         // 出生预置局部免疫（localNPCImmunity[target]=N 窗口内不得命中该敌——
-        // Damage_PVE flag2 `usesLocalNPCImmunity && array[i] == 0` :11858 同式；
+        // Damage_PVE flag2 `usesLocalNPCImmunity && array[i] == 0` :12595 同式；
         // 花瓣 1038 = 30t，过期后照常走下方分支）
         if ((this.spawnImmuneCd.get(e.id) ?? 0) > 0) continue;
         // 376 小鬼火球 / 604 孢子云 IDStatic 共享免疫（usesIDStaticNPCImmunity——
@@ -9469,7 +9469,12 @@ export class Arrow extends Entity {
         //  块【之后】，旧注「原版 StrikeNPC 先自增」系误记——StrikeNPC(:13702)≠numHits++;
         //  首跳读 0 ⇒ 率 0.20,旧 hitSet.size 含本敌 = 首跳 0.15 off-by-one）
         if (this.projId === 304) {
-          game.applyLifeSteal?.('vampire', Math.round(dmg), this.pveNumHits, this.x, this.y);
+          // ★BJ385 flag10 lifeMax>5 段补门（:13712）——304 vampireHeal 在 flag10 块内
+          //  （:13876-13878,1456 旧注 :12879-12882 行号漂移）,BJ167 老站缺段;
+          //  门单源 vanillaFlag10LifeMaxOk（critter 一击致死族原版不 proc）
+          if (vanillaFlag10LifeMaxOk(e as unknown as { maxHp?: number; def?: { lifeMax?: number } })) {
+            game.applyLifeSteal?.('vampire', Math.round(dmg), this.pveNumHits, this.x, this.y);
+          }
         } else if (projectileData(this.projId)?.magic) {
           // ★BJ167-②③④（2026-09-19）spectre 域三小件对齐（MagicProj BJ157-① 同款习语）：
           //  ②victim 门 spectreVictimEligible——原版 Projectile.cs:13875
@@ -9484,7 +9489,8 @@ export class Arrow extends Entity {
           //    弹体左上 this.x,y——治疗弹 298 起飞原点差几像素）
           const v661 = e as unknown as { vanillaId?: number | null; lastStrikeDealt?: number;
             maxHp?: number; def?: { lifeMax?: number } };
-          if (spectreVictimEligible(v661.vanillaId)) {
+          // ★BJ385 flag10 lifeMax>5 段补门（:13712）——BJ167 老站缺段,门单源
+          if (vanillaFlag10LifeMaxOk(v661) && spectreVictimEligible(v661.vanillaId)) {
             game.applyLifeSteal?.('ghost', v661.lastStrikeDealt ?? 0, this.pveNumHits,
               e.x + e.w / 2, e.y + e.h / 2, true);
           }
@@ -9731,14 +9737,14 @@ export class Arrow extends Entity {
     return true;
   }
 
-  // ================= 食人鱼 190（aiStyle 39，Projectile.cs:26065-26315）=================
-  // 状态机 1:1：ai[0]=0 直飞咬敌（:26245）/ 1 返回玩家（:26266）；ai[1]=0 未咬可咬 /
-  // >0 咬住（Damage_PVE :12447 首咬写入 index+1）/ −1 松手禁再咬（:26095）。
+  // ================= 食人鱼 190（aiStyle 39，Projectile.cs:27907-28173）=================
+  // 状态机 1:1：ai[0]=0 直飞咬敌（:28103）/ 1 返回玩家（:28121）；ai[1]=0 未咬可咬 /
+  // >0 咬住（Damage_PVE :13270 首咬写入 index+1）/ −1 松手禁再咬（:27951-27954）。
   // 咬住伤害 = 普通 hitbox 接触走 Damage_PVE（:12595 localNPCImmunity 门 +
   // :12635-12637 全局 immune 门），localNPCHitCooldown=14t 同敌周期撕咬（:14175-14179）。
   // ★BJ344 勘误:旧锚 :11868-11871/:11905/:13157 系 1456 世代,1457 对应上行三新锚。
 
-  /** 姿态记录（:26119-26125/:26139-26143/:26252-26287 三处 rotation 赋值：
+  /** 姿态记录（:27976-27993/:27995-28015/:28103-28142 三处 rotation 赋值：
    *  vx<0 → spriteDirection=−1 + rotation=atan2(−vy,−vx)，等效 draw 的
    *  scale(−1)+rotate(π−ang) 变换——此处只存未镜像角 + 翻转位） */
   private pFace(vx: number, vy: number): void {
@@ -9892,7 +9898,7 @@ export class Arrow extends Entity {
     }
     if (--this.life < 0) { this.piranhaKill(game); return; }   // R7-5：AI 恰跑 timeLeft 次（食人鱼无 Kill 链,杀拍差一子步无观察面,备案）
     this.age++;
-    // 淡入（:26067-26071）
+    // 淡入（:27909-27913）
     this.pAlpha = Math.max(0, this.pAlpha - 50);
     const p = game.player as { cx: number; cy: number; vx?: number; vy?: number; dead?: boolean; facing?: number } | null;
     // :26072-26077 玩家失活/死亡/离主 >2000 → Kill
@@ -9919,13 +9925,13 @@ export class Arrow extends Entity {
         if (d < speed) {
           this.vx = dx; this.vy = dy;                        // :26116-26117 残差直抵
           if (d > speed / 3) {
-            this.pFace(this.vx, this.vy);                    // :26119-26125 朝目标
+            this.pFace(this.vx, this.vy);                    // :27976-27987 朝目标
             this.vx = 0; this.vy = 0;                        // :26126-26129 type 190 咬定
           }
         } else {
           const dd = d === 0 ? 0.0001 : d;                   // :26132-26136
           this.vx = dx / dd * speed; this.vy = dy / dd * speed;
-          this.pFace(this.vx, this.vy);                      // :26138-26143
+          this.pFace(this.vx, this.vy);                      // :27995-28015（★BJ386 勘误,旧值系 1456 世代）
         }
         this.x += t.vx; this.y += t.vy;                      // :26159-26161 跟随目标速度
         // :26162-26178 同主多弹排斥（<8px 逐轴 ∓4——多鱼咬同一大体型怪时散开）
@@ -9944,7 +9950,7 @@ export class Arrow extends Entity {
       } else {
         // :26190-26196 目标死亡 → 清咬
         this.pAi1 = 0; this.pTarget = null;
-        // :26197-26223 半径 3000 内视线可达最近敌（CanBeChasedBy :91070 近似 =
+        // :28055-28081 半径 3000 内视线可达最近敌（CanBeChasedBy NPC.cs :91139 近似 =
         //  存活/未无敌/可受伤；Manhattan 度量 num322）
         let best: PiranhaTarget | null = null;
         let bestScore = 3000;                                // :26205 num319
@@ -9952,14 +9958,14 @@ export class Arrow extends Entity {
         for (const ent of game.enemies()) {
           const e = ent as unknown as PiranhaTarget;
           if (e.dead || e.hp <= 0 || e.dontTakeDamage) continue;
-          if (!canBeChasedBy(e)) continue;   // friendly 门（CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 不入索敌）
+          if (!canBeChasedBy(e)) continue;   // friendly 门（CanBeChasedBy NPC.cs :91139——睡渔夫 376 等友好 NPC 不入索敌）
           const score = Math.abs(this.cx - e.cx) + Math.abs(this.cy - e.cy);
           if (score >= bestScore) continue;
           if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
           bestScore = score; best = e; bx = e.cx; by = e.cy;
         }
         if (best) {
-          // :26223-26241 转咬新目标（立即入咬住态，速度 16 直指）
+          // :28081-28099 转咬新目标（立即入咬住态，速度 16 直指）
           const dd = Math.hypot(bx - this.cx, by - this.cy) || 0.0001;
           this.vx = (bx - this.cx) / dd * 16;
           this.vy = (by - this.cy) / dd * 16;
@@ -9969,20 +9975,20 @@ export class Arrow extends Entity {
         // 未找到新目标 → pAi0 已被 :26188 段置 1 → 返回（即便仍按住）
       }
     } else if (this.pAi0 === 0) {
-      // :26245-26261 直飞：无追踪（首咬靠接触），离主 >700 → 返回
+      // :28103-28120 直飞：无追踪（首咬靠接触），离主 >700 → 返回
       if (dp > 700) this.pAi0 = 1;                           // :26247-26251
-      this.pFace(this.vx, this.vy);                          // :26252-26261
+      this.pFace(this.vx, this.vy);                          // :28110-28119
     } else {
-      // :26266-26299 返回：穿墙、速度 20 直指玩家、<70px 回收
+      // :28121-28157 返回：穿墙、速度 20 直指玩家、<70px 回收
       tileCollide = false;
-      this.pFace(this.vx, this.vy);                          // :26267-26287（保留来向姿态）
+      this.pFace(this.vx, this.vy);                          // :28124-28143（保留来向姿态）
       if (dp < 70) { this.piranhaKill(game); return; }       // :26276-26279
       const dd = dp === 0 ? 0.0001 : dp;                     // :26273 num324=20
       this.vx = dxp / dd * 20;
       this.vy = dyp / dd * 20;
-      this.x += p.vx ?? 0; this.y += p.vy ?? 0;              // :26296-26299 type 190
+      this.x += p.vx ?? 0; this.y += p.vy ?? 0;              // :28154-28157 type 190
     }
-    // :26301-26310 帧推进（4t/帧 4 帧循环；AI 侧真源，draw 消费 pFrame）
+    // :28159-28168 帧推进（4t/帧 4 帧循环；AI 侧真源，draw 消费 pFrame）
     if (++this.pFrameCounter >= 4) {
       this.pFrameCounter = 0;
       this.pFrame = (this.pFrame + 1) % 4;
@@ -10009,16 +10015,16 @@ export class Arrow extends Entity {
     // 小动物接触（Damage_PVE 对 NPC 通用：小动物 friendly=false 亦受击；
     //  penetrate=−1 弹体不消耗；非 CanBeChasedBy 目标不会成为咬住对象）
     hitCritters(this, game);
-    // 命中结算（Damage_PVE :11850 迭代 + Damage_PVE_Inner :11888）
+    // 命中结算（Damage_PVE :12572 迭代 + Damage_PVE_Inner :12615）
     for (const ent of game.enemies()) {
       const e = ent as unknown as PiranhaTarget;
       if (e.dead) continue;
       // ★dontTakeDamage 目标排除（:12600 同款——拒收命中不得耗 snapStrike/咬击冷却，最终清零补）
       if ((ent as unknown as { dontTakeDamage?: boolean }).dontTakeDamage === true) continue;
-      if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892/CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 玩家武器无效/不追踪）
+      if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :12622/CanBeChasedBy NPC.cs :91139——睡渔夫 376 等友好 NPC 玩家武器无效/不追踪）
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
-      if (this.pHitCd.has(e.id)) continue;                   // :11869 localNPCImmunity 门
+      if (this.pHitCd.has(e.id)) continue;                   // :12595 localNPCImmunity 门
       if ((e.iframes ?? 0) > 0) continue;                    // :12635-12637 npc.immune[owner] 门（★BJ344 勘误:旧锚 :11905 系 1456 世代）
       // StrikeNPC :12811（暴击链同通用弹：基 4% + spawn 注入系暴击）
       const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
@@ -10039,15 +10045,15 @@ export class Arrow extends Entity {
           victimBox: { w: e.w, h: e.h, cx: (e as { cx?: number }).cx ?? e.x + e.w / 2,
             cy: (e as { cy?: number }).cy ?? e.y + e.h / 2 },
           targeterBox: { x: this.x, y: this.y, w: this.w, h: this.h },
-          exclude: (id: number): boolean => this.pHitCd.has(id),   // localNPCImmunity 门同源表(:11869)
+          exclude: (id: number): boolean => this.pHitCd.has(id),   // localNPCImmunity 门同源表(:12595)
         });
       // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
       // fromPlayer=true 走 DPS/掉落门链；音/飘值=StrikeNPC 单点；★F1 加伤随暴击并入
       e.hurt(applyBannerDamageDealt(game, e, dmg)
         + (snapBonusPiranha ? Math.trunc(snapBonusPiranha * (crit ? 2 : 1)) : 0),
         Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
-      this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :13157 localNPCHitCooldown=14
-      if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :12447-12450 首咬 latch
+      this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :14175-14178 localNPCHitCooldown=14
+      if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :13270-13274 首咬 latch
     }
   }
 }

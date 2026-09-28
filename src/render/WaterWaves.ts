@@ -96,6 +96,8 @@
 //   旋转非 0，且洗掠强度本就 ≤0.04，影响不可辨。
 
 import { swPerf, waveAmpParam } from './perfFlags';   // ★BJ77/BJ78 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)
+import { WorkerWatchdog, ladderDelayMs, newFallsBy, workerRetryEnabled,
+  type WorkerFallReason } from '../workers/WorkerGovernance';   // ★看门狗治理(2026-09-28)
 
 /** 档位门（WaterShaderData.cs:114-118）。q: 0..3 */
 export interface WaveSourceGates {
@@ -228,13 +230,17 @@ let _wwCapture: { k: string; a: number[] }[] | null = null;
 /** ★C8 诊断计数器（探针对账:queued(capture 推入) vs posted(帧批发出) vs
  *  fields(场快照回达);falls=看门狗回落。纯读面零行为影响）。
  *  ★C8-D 追加:bytes=场消息载荷累计字节(主线程收达侧计;流量账探针消费)、
- *  fmt=三种场消息形态计数、resyncs=主线程请求重锚次数。 */
+ *  fmt=三种场消息形态计数、resyncs=主线程请求重锚次数。
+ *  ★看门狗治理(2026-09-28)追加:fallsBy=回落指纹三分类(onerror/no-result-dead/
+ *  pickup-timeout)、respawns=阶梯重生执行次数（F5 驾驶舱扩展）。 */
 const _wwStat = { camQ: 0, washQ: 0, rippleQ: 0, posted: 0, fields: 0, falls: 0,
-  bytes: 0, resyncs: 0, fmt: { full: 0, delta: 0, f32: 0 } };
+  bytes: 0, resyncs: 0, fallsBy: newFallsBy(), respawns: 0,
+  fmt: { full: 0, delta: 0, f32: 0 } };
 export function wwWorkerStats(): { on: boolean; camQ: number; washQ: number; rippleQ: number;
   posted: number; fields: number; falls: number; bytes: number; resyncs: number;
+  fallsBy: Record<WorkerFallReason, number>; respawns: number;
   fmt: { full: number; delta: number; f32: number } } {
-  return { on: waterWaves.wwActive(), ..._wwStat, fmt: { ..._wwStat.fmt } };
+  return { on: waterWaves.wwActive(), ..._wwStat, fallsBy: { ..._wwStat.fallsBy }, fmt: { ..._wwStat.fmt } };
 }
 
 // ---- ★C8-D 波场脏区增量回传（2026-09-25;三笔登记债之最大笔收偿）----
@@ -464,23 +470,53 @@ export class WaterWaveSystem {
   private _ww: Worker | null = null;
   private _wwOn = false;
   private _wwSpawned = false;
-  /** ★C8 纹理下发旗：Ripples 形状纹理是否已喂给 worker（一次性 32KB） */
+  /** ★C8 纹理下发旗：Ripples 形状纹理是否已喂给 worker（一次性 32KB；重生实例重置） */
   private _wwTexSent = false;
-  /** ★失联看门狗：最后一场快照到达时刻（0=从未到达）。2s 无回传=worker 失效
-   *  （脚本加载失败/运行时死亡/消息丢失）→ 自动terminate+回落主线程模拟
-   *  （2026-09-23 用户实报"入水无波纹"案：注入被发往死 worker=静态水面）。 */
+  /** 诊断面（看门狗退役后保留）：最后一场快照到达时刻（0=从未到达）/实例创建时刻。
+   *  ★旧「2s 无回传即杀」判据已退役（2026-09-28 看门狗治理）——墙钟回传缺席不分
+   *  「主线程忙/暂停/隐藏」与「worker 真死」，开局冷模块图取>2s 必杀（trace 定谳），
+   *  判据改由 WorkerWatchdog outstanding-aware 语义承担。 */
   private _wwLastField = 0;
   private _wwStartedAt = 0;
+  /** ★看门狗治理（2026-09-28）：outstanding-aware 心跳（每实例一个,回落即弃） +
+   *  onerror 硬证据旗 + 阶梯重生状态。_wwShadow=重生双轨（本地模拟连续+worker
+   *  预热,首场到达切主）——重生期水不静止（「宁可回落不可静态水」判例的延续）。 */
+  private _wwWd: WorkerWatchdog | null = null;
+  private _wwErrored = false;
+  private _wwFallCount = 0;
+  private _wwRespawnAt = 0;
+  private _wwShadow = false;
 
   private _wwEnsure(): void {
     if (this._wwSpawned) return;
     if (typeof document === 'undefined') { this._wwSpawned = true; return; }   // ★worker 上下文禁自嵌套（双保险）
     this._wwSpawned = true;
+    this._wwSpawnWorker(false);
+  }
+
+  /** 创建 worker 实例并进入 worker 模式。respawn=false=首建（会话开局,原 C8 语义:
+   *  worker 模式即启,冷取窗口静态水——现已由音频门 prefetch 预热缓解）;true=看门狗
+   *  回落后的阶梯重生——shadow 双轨:本地模拟保持连续（水不静止）,worker 预热至首场
+   *  到达再切主。 */
+  private _wwSpawnWorker(respawn: boolean): void {
     try {
       this._ww = new Worker(new URL('../workers/WaveWorker.ts', import.meta.url), { type: 'module' });
       this._wwStartedAt = performance.now();
-      this._ww.onerror = (e) => console.warn('[WaveWaves] worker error:', String(e.message ?? '').slice(0, 140));
-      this._ww.onmessage = (e: MessageEvent) => { _wwStat.fields++; this._wwLastField = performance.now(); this._wwApplyField(e.data); };
+      this._wwLastField = 0;
+      this._wwErrored = false;
+      this._wwWd = new WorkerWatchdog();
+      this._ww.onerror = (e) => {
+        this._wwErrored = true;   // ★onerror=硬证据（旧版仅 log,404 类死法要等满预算）
+        console.warn('[WaveWaves] worker error:', String(e.message ?? '').slice(0, 140));
+      };
+      this._ww.onmessage = (e: MessageEvent) => {
+        _wwStat.fields++;
+        this._wwLastField = performance.now();
+        this._wwWd?.onResult(this._wwLastField);   // 到达即冲账（应用/世代丢弃不影响心跳）
+        this._wwApplyField(e.data);
+        // ★重生完成判定:shadow 期首个场到达 → 切主（本地模拟退役,后续纯 worker 模式）
+        if (this._wwShadow) this._wwShadow = false;
+      };
       this._ww.postMessage({ op: 'quality', q: this.quality });
       _wwCapture = _wwCapture || [];
       // ★C8 修复（2026-09-23 探针定谳：worker 臂 washQ=206/rippleQ=9 被 capture 吞
@@ -489,8 +525,31 @@ export class WaterWaveSystem {
       //  （内存泄漏）→ 用户实报"水面有噪声波动但无实体交互波纹"（本地 sim 照跑=环境
       //  噪声在，全部实体注入被吞=交互波纹无）。旗开即切换 capture 模式。
       this._wwOn = true;
+      this._wwTexSent = false;
       this._wwTrySendTex();
-    } catch { this._ww = null; this._wwOn = false; }
+      if (respawn) { this._wwShadow = true; _wwStat.respawns++; }
+    } catch {
+      this._ww = null; this._wwOn = false; this._wwWd = null;
+      if (respawn) this._wwShadow = false;
+    }
+  }
+
+  /** ★R2-F3 注入批本地重放（回落帧不丢注入;重生 shadow 帧同款消费——先摘 capture
+   *  态再调用,防重放再入 capture 批,时序锚=F_prev）。 */
+  private _replayInj(pending: { k: string; a: number[] }[] | null): void {
+    if (!pending) return;
+    for (const inj of pending) {
+      if (inj.k === 'wash') {
+        const [cx, cy, qw, qh, fx, fy, st] = inj.a;
+        this.injectWash(cx, cy, qw, qh, fx, fy, st);
+      } else if (inj.k === 'rippleRaw') {
+        const [x, y, sx, sy, colR, colG, colA, shape, rot] = inj.a as [number, number, number, number, number, number, number, RippleShape, number];
+        queueRippleRaw(x, y, sx, sy, colR, colG, colA, shape, rot);
+      } else if (inj.k === 'camera') {
+        const [x, y, z] = inj.a;
+        this.setCamera(x, y, z);
+      }
+    }
   }
 
   /** ★C8：Ripples 形状纹理下发（worker 模块实例无 document，ensureWaveTextures
@@ -773,16 +832,30 @@ export class WaterWaveSystem {
 
   /** 每渲染帧：Update(:112-129) + PreDraw(:336-360) + 涟漪队列注入。 */
   frame(inp: WaveFrameInput): void {
+    // ★看门狗治理（2026-09-28）：阶梯重生分派——回落态下阶梯到期即重建 worker
+    //  （shadow 双轨:本地模拟保持连续,worker 预热至首场到达切主）。?wwretry=0
+    //  时 _wwRespawnAt 恒 0=旧「回落即终态」语义。
+    if (!this._wwOn && this._wwRespawnAt !== 0) {
+      const nowR = performance.now();
+      if (nowR >= this._wwRespawnAt) {
+        this._wwRespawnAt = 0;
+        if (wwWorkerFlag) this._wwSpawnWorker(true);
+      }
+    }
     // ★C8：worker 模式=注入批+帧输入发往 worker,本地模拟整段跳过（读侧由
     //  _wwApplyField 快照喂）。主线程零阻塞;模拟在 worker 线程自harmless。
+    //  ★治理批例外：_wwShadow（重生双轨）发完不早退,本地模拟继续跑（水不静止）。
     if (this._wwOn) {
-      // ★失联看门狗：2s 无场回传=worker 失效（加载失败/死亡）→ terminate+回落
-      //  本地模拟（主线程 _R 已由历史快照喂过=平滑续接）。宁可回落不可静态水。
+      // ★失联看门狗（outstanding-aware,2026-09-28 治理重构）：「发了帧且最老未答
+      //  请求年龄超预算（warmup 15s/稳态 2s）+双拍确认」才定谳失效——主线程忙/
+      //  暂停/隐藏恢复（outstanding=0）永不定谳;onerror=硬证据直杀。宁可回落不可
+      //  静态水（判例保留）,但回落不再是终态→阶梯重生。
       const now = performance.now();
-      const since = this._wwLastField === 0 ? now - this._wwStartedAt : now - this._wwLastField;
-      if (since > 2000) {
+      if (!this._wwWd!.healthy(now, this._wwErrored)) {
         _wwStat.falls++;
-        console.warn('[WaveWaves] worker 失联回落主线程模拟 (' + since.toFixed(0) + 'ms 无场回传)');
+        _wwStat.fallsBy[this._wwWd!.fallReason()]++;
+        console.warn('[WaveWaves] worker 失联回落主线程模拟 (' + this._wwWd!.fallReason()
+          + ' @' + now.toFixed(0) + ',falls=' + _wwStat.falls + ')');
         // ★R2-F3（2026-09-25 红蓝批 B）：回落帧不得丢注入批——先摘 capture 态再
         //  把已捕获批按 capture 语义本地重放（injectWash/queueRippleRaw/setCamera
         //  走正常本地路径=worker 侧逐式同源;摘态在前,防重放再入 capture 批）。
@@ -790,30 +863,28 @@ export class WaterWaveSystem {
         const pending = _wwCapture;
         _wwCapture = null;
         this._wwOn = false;
+        this._wwShadow = false;
         try { this._ww?.terminate(); } catch { /* 已死 */ }
         this._ww = null;
-        if (pending) {
-          for (const inj of pending) {
-            if (inj.k === 'wash') {
-              const [cx, cy, qw, qh, fx, fy, st] = inj.a;
-              this.injectWash(cx, cy, qw, qh, fx, fy, st);
-            } else if (inj.k === 'rippleRaw') {
-              const [x, y, sx, sy, colR, colG, colA, shape, rot] = inj.a as [number, number, number, number, number, number, number, RippleShape, number];
-              queueRippleRaw(x, y, sx, sy, colR, colG, colA, shape, rot);
-            } else if (inj.k === 'camera') {
-              const [x, y, z] = inj.a;
-              this.setCamera(x, y, z);
-            }
-          }
-        }
+        this._wwWd = null;
+        this._wwErrored = false;
+        this._replayInj(pending);
+        // ★去永久化：阶梯重生（5s/10s/20s;?wwretry=0 逃生门=旧终态语义）
+        if (workerRetryEnabled()) this._wwRespawnAt = now + ladderDelayMs(this._wwFallCount++);
         // 落回后继续走本地模拟（下方原路径）
       } else {
         this._wwTrySendTex();   // ★C8：纹理未就绪时随帧补发（一次性）
         const inj = _wwCapture || [];
         _wwCapture = [];
         _wwStat.posted++;
+        this._wwWd!.onSend(now);
         this._ww!.postMessage({ op: 'frame', inp, inj });
-        return;
+        if (!this._wwShadow) return;
+        // ★shadow 双轨（重生预热期）：已发 worker,本地模拟照跑——先把本批注入
+        //  本地重放（摘态→重放→再武装,与回落帧同款防再入语义）,随后走本地路径。
+        _wwCapture = null;
+        this._replayInj(inj);
+        _wwCapture = [];
       }
     }
     if (wwWorkerFlag) this._wwEnsure();   // 首帧惰性建（旗开即 Worker 化）
