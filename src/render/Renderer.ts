@@ -1008,7 +1008,7 @@ import {
 } from '../data/vanillaAccDrawslots';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageInto, type SM2SamplerOut, type SM2Uniforms } from '../fx/SM2Effect';
 import { drawStardewAnimation } from '../fx/StardewAnimation';
-import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, dustAxisScale } from '../fx/VanillaDust';
+import { VanillaDust, dustPremulBake, dustPmCacheTouch, dustPmCacheEvict, dustPmCacheEvictGen, dustAxisScale } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { fadingParticles, fadingAlphaFactor } from '../fx/FadingParticles';
 import type { TrailSpec } from '../fx/TrailShader';
@@ -6498,20 +6498,34 @@ export class Renderer {
   })();
   static get bglShim() { return this._bglShim; }
   static bglShimSetForTest(v: boolean): void { this._bglShim = v; }
-  /** ★F-gore（2026-09-28）gore 顶点批化总闸（?goregl=1 显式激活;缺省关=用户明令
-   *  灰度,禁转正——转正另行走流程）。关=逐件 drawImage→shim 逐 rec quadSprite
-   *  原链逐位不变（Boss 战 600 gore=600 bindTexture+drawArrays,R3b-2 候补定谳面）;
-   *  开=drawGorePieces 一次成批（连续同 (纹理行切片,tier) 运行拆段,段=单
-   *  quadBatchRgba drawArrays,600 draw call→段数级）。运行时可翻（bglSetForTest
-   *  同款页内翻面——探针 scripts/_gore-gl-ab.mjs 双臂对拍）。node/worker 恒关。 */
+  /** ★F-gore（2026-09-28）gore 顶点批化总闸——★转正（2026-09-29 用户拍板）缺省
+   *  开:Boss 战 600 gore=600 bindTexture+drawArrays→段数级单 drawArrays（批化比
+   *  60×,drawGorePieces 0.307→0.122ms）;像素 census 18px（0.001%,旋转边 AA 登记
+   *  族）。?goregl=0=逃生门（回逐件原链逐位）。node/worker 恒关（document 判死）。 */
   private static _goreGl = (() => {
     try {
       if (typeof document === 'undefined') return false;
-      return new URLSearchParams(location.search).get('goregl') === '1';
+      return new URLSearchParams(location.search).get('goregl') !== '0';
     } catch { return false; }
   })();
   static get goreGl() { return this._goreGl; }
   static goreGlSetForTest(v: boolean): void { this._goreGl = v; }
+  /** ★dustrb（2026-09-28）尘 premul 链性能刀总闸（?dustrb=1 显式激活;缺省关=
+   *  用户明令「候补性能刀全部灰度,禁转正」——转正另走对拍流程）。关=尘预乘缓存
+   *  命中 touch（delete+set 重插式 LRU）与 drawDustPremul 出口复位全保留（现行
+   *  行为逐位不变）;开=①命中改二次机会代际标记（单属性写 gen=1,替代 delete+set
+   *  ——海盗入侵 trace dustPmCacheTouch self 1198.5ms/2.91% 主线程,微基准 29.5ns
+   *  →1.3ns/op@2048;溢出逐出改 dustPmCacheEvictGen 二次机会,逐出只致同字节重烘
+   *  =像素逐位无关）②drawDustPremul 出口复位省略（9 调用点全 ctx.save/restore
+   *  包裹,restore 恢复 gCO/globalAlpha=像素无关）。运行时可翻（goreGl 同款页内
+   *  翻面——探针 scripts/_dustrb-composition.mjs 双臂对拍）。node/worker 恒关。 */
+  static dustrb = (() => {
+    try {
+      if (typeof document === 'undefined') return false;
+      return new URLSearchParams(location.search).get('dustrb') === '1';
+    } catch { return false; }
+  })();
+  static dustrbSetForTest(v: boolean): void { Renderer.dustrb = v; }
   /** ★生命水晶 shim ghost 修复（2026-09-27）：TileShine scratch→uploadScratchNow 钩
    *  一次性注册哨（setShineScratchBakeHook 只挂一次;挂点=render 的 tileShine 段）。 */
   private static _shineScratchHookSet = false;
@@ -7660,7 +7674,7 @@ export class Renderer {
    *  8bit 精度;每 帧×档 一次性烘焙,稳态运行零 getImageData。上限 2048,溢出走分代 LRU
    *  （dustPmCacheTouch/Evict：命中重插入+逐出最旧 1/4——2026-09-02 红队 finding 清偿,
    *  旧整体 clear 会让多色键周期打穿时每键重烘 1×getImageData=帧尖峰）。 */
-  private dustPmCache: Map<number, { add: HTMLCanvasElement; erase: HTMLCanvasElement; glb?: Uint8Array }> | null = null;
+  private dustPmCache: Map<number, { add: HTMLCanvasElement; erase: HTMLCanvasElement; glb?: Uint8Array; gen?: number }> | null = null;
   private dustPmBake: HTMLCanvasElement | null = null;
 
   /** 取/烘一帧的预乘对。mr/mg/mb/ma ∈0-1 = XNA Draw 的 Color 入参逐通道
@@ -7680,7 +7694,11 @@ export class Renderer {
     this.dustPmCache ??= new Map();
     const hit = this.dustPmCache.get(key);
     if (hit) {
-      dustPmCacheTouch(this.dustPmCache, key);   // LRU 访问序
+      // ★dustrb 开:命中=单属性写 gen=1（二次机会代际标记,替代 delete+set 重插——
+      //  trace 实测 touch self 2.91% 主线程而逐出几乎不触发,记账无逐出可服务;
+      //  微基准 29.5ns→1.3ns/op@2048）。关:旧 delete+set 重插逐位保留。
+      if (Renderer.dustrb) hit.gen = 1;
+      else dustPmCacheTouch(this.dustPmCache, key);   // LRU 访问序
       // ★B2 命中支同注册（bgl 运行时翻面晚于首批烘焙的旗面顺序无关性——
       //  WeakMap.set 幂等,稳态命中每尘一次 ~50ns）
       if (Renderer.bgl && hit.glb) this.bglShimReg().registerDustPair(hit.add, hit.erase, hit.glb);
@@ -7699,9 +7717,12 @@ export class Renderer {
     const eraseCtx = eraseC.getContext('2d')!;
     const eraseIm = eraseCtx.createImageData(8, 8); eraseIm.data.set(baked.erase);
     eraseCtx.putImageData(eraseIm, 0, 0);
-    const entry = { add: addC, erase: eraseC, glb: baked.gl };
+    // gen 恒入形（dustrb 开=二次机会代际位;关=未读字段零害——对象形两态恒同构）
+    const entry = { add: addC, erase: eraseC, glb: baked.gl, gen: 1 };
     if (Renderer.bgl) this.bglShimReg().registerDustPair(addC, eraseC, baked.gl);   // ★B2 尘对 GL 合并面注册
-    dustPmCacheEvict(this.dustPmCache);   // 分代 LRU:超 2048 逐最旧 1/4(非整体清空)
+    // ★dustrb 开:二次机会逐出（gen=1 降 0 保留一轮;只 miss 时触发）;关:旧分代 LRU
+    if (Renderer.dustrb) dustPmCacheEvictGen(this.dustPmCache);
+    else dustPmCacheEvict(this.dustPmCache);   // 分代 LRU:超 2048 逐最旧 1/4(非整体清空)
     this.dustPmCache.set(key, entry);
     return entry;
   }
@@ -7791,7 +7812,11 @@ export class Renderer {
 
   /** 预乘对两步绘制（须在尘变换内调用;ox/oy = origin 偏移,缺省 −4 = 原版 (4,4)）。
    *  mul = Color×k 档（同乘擦除强度与加性项——XNA 里 Color×k 逐通道含 α,如 264
-   *  拖影 GetAlpha×0.3）。出口复位 gCO/globalAlpha。 */
+   *  拖影 GetAlpha×0.3）。出口复位 gCO/globalAlpha。
+   *  ★dustrb 开:出口复位省略（每调用省 2 次 ctx 状态写——本函数全部 9 个调用点
+   *  均 ctx.save()/restore() 包裹,restore 恢复调用方 gCO/globalAlpha/变换,调用点
+   *  后续绘制与外层状态零依赖;trace drawDustPremul self 529.4ms/1.28%）。关:
+   *  旧出口复位逐位保留。调用点契约:新增调用必须 save/restore 包裹（本注为凭）。 */
   private drawDustPremul(
     ctx: CanvasRenderingContext2D, pair: { add: HTMLCanvasElement; erase: HTMLCanvasElement },
     mul = 1, ox = -4, oy = -4,
@@ -7801,8 +7826,10 @@ export class Renderer {
     ctx.drawImage(pair.erase, ox, oy);
     ctx.globalCompositeOperation = 'lighter';
     ctx.drawImage(pair.add, ox, oy);
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
+    if (!Renderer.dustrb) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    }
   }
 
   /** DrawDust 单尘（屏幕空间，经 worldToScreen + zoom）。fullbright pass 画在

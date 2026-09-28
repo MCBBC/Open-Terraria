@@ -184,8 +184,8 @@ describe('★shineslice uploadShineSlice 行为锁', () => {
 
 // ---- 结构锁（源码锚;防并行会话漂移+prelock 旧链共存面） ----
 describe('★shineslice 结构锁', () => {
-  it('TileShine:旗缺省关+切片钩+先钩后乘支+旧乘法链原样（prelock 锚共存）', () => {
-    expect(TS).toContain("new URLSearchParams(location.search).get('shineslice') === '1'");
+  it('TileShine:旗转正缺省开(node 判死 false)+切片钩+先钩后乘支+旧乘法链原样（prelock 锚共存）', () => {
+    expect(TS).toContain("new URLSearchParams(location.search).get('shineslice') !== '0'");
     expect(TS).toContain('export function shineSliceGlSetForTest(');
     expect(TS).toContain('export function setShineScratchSliceHook(');
     expect(TS).toContain('export function shineSliceCellKey(');
@@ -212,7 +212,7 @@ describe('★shineslice 结构锁', () => {
     expect(GE).toContain('this.sliceSnaps.delete(k);');
   });
 
-  it('旗缺省值快照（灰度期）——缺省必须为 false（用户明令禁转正）', () => {
+  it('旗快照:node 环境判死 false（浏览器缺省开由源锚锁定;转正语义 2026-09-29）', () => {
     expect(shineSliceGl).toBe(false);
     shineSliceGlSetForTest(true);
     expect(shineSliceGl).toBe(true);

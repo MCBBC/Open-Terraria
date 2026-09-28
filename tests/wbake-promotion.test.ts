@@ -71,8 +71,10 @@ describe('wbake 转正②：入场渲染期待冻结窗（世界时间对该玩�
     expect(method).toContain('this.lighting.compute(w.clock.dayFactor);');
   });
 
-  it('解除三路同源 endEntryFreeze：covered 终态∨deadline 保险;解除置 lighting.dirty=true（双 LightTiles 同帧出光）', () => {
-    expect(GAME).toContain('if (cc.viewportCovered() || performance.now() >= this._entryFreeze!.deadline) this.endEntryFreeze();');
+  it('解除三路同源 endEntryFreeze：covered 终态（armAt 起测帧防首帧空账陷阱）∨deadline 保险;解除置 dirty=双 LightTiles', () => {
+    expect(GAME).toContain('|| (this._paintedFrames >= fz.armAt && cc.viewportCovered())) this.endEntryFreeze();');
+    expect(GAME).toContain('armAt: this._paintedFrames + 4');
+    expect(GAME).toContain('performance.now() >= fz.deadline');
     const at = GAME.indexOf('endEntryFreeze(): void {');
     const body = GAME.slice(at, at + 300);
     expect(body).toContain('this.lighting.dirty = true;');

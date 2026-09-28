@@ -410,11 +410,35 @@ export class GLShimExecutor {
   }
 
   /** ★B2b 降级换桥（host.degradeAcc 调用）：raw 重指真 worldCtx（worldCanvas 惰性
-   *  建成后）,镜像态一次性回放（CTM/globalAlpha/gCO/smooth/stroke/lineWidth——
-   *  save 栈深度差以「当前态正确」为准:降级帧后续绘制/回放按现值续走）。 */
+   *  建成后）,镜像态一次性回放（CTM/globalAlpha/gCO/smooth/stroke/lineWidth）。
+   *  ★R3x（2026-09-28 雷击帧雨消失定谳）:raw 的 save 栈重建到镜像深度——acc 期
+   *  save 只进镜像栈（raw=null 不转发）,换桥的 raw（惰性建 worldCanvas）栈为空。
+   *  不重建则本帧后续 restore 弹镜像而 raw.restore() 对空栈 no-op → raw 停在
+   *  换桥瞬间的局部变换（镜像则弹回世界变换）→ 两栈失同步:getTransform 消费面
+   *  （雨/雪沙/液体/gore 批基 CTM）与 raw 直绘（2D 兜底/光栅化面回贴）全错位
+   *  （旧注「save 栈深度差以当前态正确为准」只保了换桥【瞬间】,漏了后续 restore
+   *  的分叉）。逐条【自底向上】「回放条目态→raw.save()」后再回放当前态,使后续
+   *  restore 双栈同步弹出。clip 不可回放（canvas 无 region 读回）=换桥既有登记。 */
   bridge(raw: CanvasRenderingContext2D): void {
     this.raw = raw;
     this.accMode = false;
+    // ① save 栈重建（自底向上;先于当前态回放——save 捕获的是回放时的现值）
+    for (const s of this.stack) {
+      raw.setTransform(s.m.a, s.m.b, s.m.c, s.m.d, s.m.e, s.m.f);
+      try {
+        raw.globalAlpha = s.ga;
+        raw.globalCompositeOperation = s.gco;
+        raw.imageSmoothingEnabled = s.smooth;
+        raw.fillStyle = s.fill;
+        raw.strokeStyle = s.stroke;
+        raw.lineWidth = s.lw;
+        raw.filter = s.filter;
+        raw.font = s.font;
+        raw.textAlign = s.align;
+      } catch { /* 非法值保 raw 现状 */ }
+      raw.save();
+    }
+    // ② 当前镜像态回放
     raw.setTransform(this.m.a, this.m.b, this.m.c, this.m.d, this.m.e, this.m.f);
     raw.globalAlpha = this.ga;
     raw.globalCompositeOperation = this.gco;
@@ -627,12 +651,23 @@ export class GLShimExecutor {
         if (typeof prop === 'string') {
           const b = bound[prop];
           if (b !== undefined) return b;
+          // ★R3x（2026-09-28 雷击帧雨消失定谳）:getTransform 双态统一回【镜像】——
+          //  旧 attach 态回 raw 现值,而换桥帧（acc 期 accFail→degradeAcc→bridge）
+          //  raw 与镜像必然分叉:acc 期世界变换只进镜像（raw=null 不转发）,bridge
+          //  把 raw 定格在【换桥瞬间】的镜像值（常是某精灵局部变换）,其后 ctx 逐层
+          //  restore 把镜像弹回世界变换,raw.restore() 对空栈 no-op 追不上 →
+          //  raw 停在局部变换。getTransform 消费面（雨 C5/雪沙 C5b/液体 liqgl/
+          //  gore F-gore 批与 bolt bake 的基 CTM）读 raw 现值 → 整批顶点按世界坐标
+          //  直发 = 全部落画布外 = 雷击降级帧雨层整批消失、下一 acc 帧复现（用户
+          //  截图 40/41 症状）。镜像=shim 自身绘制（geo decode）的唯一坐标真相,
+          //  双态回镜像=批与实体同源零分叉;同步态下镜像≡raw（快照起步+逐式同步）,
+          //  本支零行为差。
+          if (prop === 'getTransform') {
+            const m = self.m;
+            return () => new DOMMatrix([m.a, m.b, m.c, m.d, m.e, m.f]);
+          }
           if (self.accMode) {
             if (prop === 'canvas') return self.canvasStub();
-            if (prop === 'getTransform') {
-              const m = self.m;
-              return () => new DOMMatrix([m.a, m.b, m.c, m.d, m.e, m.f]);
-            }
             // ★B2b 修复（2026-09-24 用户实报「角色合成到背景墙后面」）:状态属性读
             //  必须回镜像值——undefined 会沿「gco 读→undefined→写回→后续 drawImage
             //  判非 source-over→rawDrawImage→整帧降级」链触发伪降级,降级帧叠加

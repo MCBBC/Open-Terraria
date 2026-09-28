@@ -1233,3 +1233,34 @@ export function dustPmCacheEvict<K, V>(map: Map<K, V>, max: number = DUST_PM_CAC
     if (--n <= 0) break;
   }
 }
+
+// ===================== ★dustrb 二次机会代际 LRU（?dustrb=1 灰度） ======================
+// 2026-09-28 尘 premul 链性能刀（海盗入侵 trace 立项）：旧命中重插式 touch
+// （delete+set）在尘量大时是纯开销——trace 实测 dustPmCacheTouch self 1198.5ms/
+// 39.9s = 主线程 2.91%（每命中 2 次 Map 重哈希 ≈29.5ns/op@2048,反推 ≈4 千万次/
+// trace ≈1.7 万次/帧）,而溢出逐出在该场景几乎不触发（dustPremulBake self 0.9ms=
+// miss 稀有,工作集 ≈107-150 键 « 2048 上限——LRU 记账无逐出可服务）。改时钟
+// 二次机会（second-chance FIFO）：命中=单属性写 `entry.gen = 1`（实测 1.3ns,
+// 22.7×）,零 Map 结构操作;溢出时从插入序头扫,gen=1 降 0 保留一轮、gen=0 逐出
+// ——热键仍不被分代窗口淘汰（原金标不变式保持）。像素语义：烘焙对 (img,fx,fy,
+// mR..mA) 纯确定,逐出只致同字节重烘 = 输出逐位无关。两圈上限：第一圈全降级、
+// 第二圈必逐满 target（有界,逐出仅 miss 时触发）。
+/** 命中代际标记（消费侧 `hit.gen = 1` 内联;此导出仅为策略文档锚,勿在热路径调用） */
+export const DUST_PM_GEN_HOT = 1;
+
+/** 二次机会逐出（dustrb 开时替代 dustPmCacheEvict;≤max 零操作）。
+ *  第一圈把 gen=1 降 0（保留）并逐出沿途 gen 空/0 键至 target;若一圈扫尽仍缺
+ *  （全热已全降级）,第二圈必然从最旧起逐满 target。 */
+export function dustPmCacheEvictGen<K, V extends { gen?: number }>(map: Map<K, V>, max: number = DUST_PM_CACHE_MAX): void {
+  if (map.size <= max) return;
+  const target = map.size >> 2;
+  let evicted = 0;
+  for (let lap = 0; lap < 2 && evicted < target; lap++) {
+    for (const [k, v] of map) {
+      if (evicted >= target) return;
+      if (v.gen) { v.gen = 0; continue; }   // 二次机会:本轮降级保留
+      map.delete(k);
+      evicted++;
+    }
+  }
+}

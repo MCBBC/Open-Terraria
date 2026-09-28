@@ -268,11 +268,11 @@ export function parseShineBudget(search: string): number | null {
 //   曾在同指纹异帧格间碰撞=错帧,census 实锤后改位键+指纹双段;指纹段管内容
 //   变化失效）。与 shineCell 帽 1024 既有锁兼容=键空间共用 shineKeySeen 帽账
 //   （GLShimExecutor.uploadShineSlice 统一清扫）。
-// 【旗】?shineslice=1 显式激活,缺省关=用户明令灰度（禁转正;转正另走流程）。
-//   关=逐格上传旧链逐位不变;开但 shim 未接管（2D 会话/GL 死/窗未开）=钩子返回
-//   false,stampShineCell 落回旧乘法支=2D 原链逐位不变（宁回退不丢）。
-export let shineSliceGl = typeof location !== 'undefined'
-  ? new URLSearchParams(location.search).get('shineslice') === '1' : false;
+// 【旗】★转正（2026-09-29 用户拍板）缺省开:动态 shine 逐格上传 1875KB/帧（300 格
+//   农场）→稳态 0（首见一次后键缓存+顶点色 delta）;像素 md5 逐位全等。
+//   ?shineslice=0=逃生门（回逐格上传旧链逐位）。node 恒关（document 判死）。
+export let shineSliceGl = typeof document !== 'undefined'
+  ? new URLSearchParams(location.search).get('shineslice') !== '0' : false;
 export function shineSliceGlSetForTest(v: boolean): void { shineSliceGl = v; }
 
 /** 切片接管钩（Renderer 启动期注册;返回 true=GL 侧已接管本格——调用方跳过

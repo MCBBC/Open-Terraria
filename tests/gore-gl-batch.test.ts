@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GLShimExecutor } from '../src/render/glshim/GLShimExecutor';
 import { buildGoreQuadBatch } from '../src/render/Renderer';
+import type { GoreSegSpec } from '../src/render/glshim/GLShimExecutor';
 
 const RD = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
 const GE = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
@@ -86,10 +87,11 @@ describe('★F-gore buildGoreQuadBatch 产出锁', () => {
     const base = [1, 0, 0, 1, 0, 0];
     const segs = buildGoreQuadBatch(B(base), [mkPiece({ x: 100, y: 200 })], CULL, mkGetTex());
     expect(segs).not.toBe(-1);
-    expect(segs!.length).toBe(1);
-    expect(segs![0].quads).toBe(1);
-    expect(segs![0].tier).toBe(0);
-    const v = quadVerts(segs![0], 0);
+    const arr = segs as GoreSegSpec[];
+    expect(arr.length).toBe(1);
+    expect(arr[0].quads).toBe(1);
+    expect(arr[0].tier).toBe(0);
+    const v = quadVerts(arr[0], 0);
     expect(v[0][0]).toBe(100); expect(v[0][1]).toBe(200);
     expect(v[1][0]).toBe(132); expect(v[1][1]).toBe(200);
     expect(v[2][0]).toBe(132); expect(v[2][1]).toBe(232);
@@ -109,7 +111,7 @@ describe('★F-gore buildGoreQuadBatch 产出锁', () => {
     const z = 1.25, ox = 320.5, oy = 180.25;
     const base = [z, 0, 0, z, ox, oy];
     const segs = buildGoreQuadBatch(B(base),
-      [mkPiece({ x: 555.5, y: 777.25, rotation: 0.42, scale: 1.08, alpha: 100 })], CULL, mkGetTex())!;
+      [mkPiece({ x: 555.5, y: 777.25, rotation: 0.42, scale: 1.08, alpha: 100 })], CULL, mkGetTex()) as GoreSegSpec[];
     const exp = expectRotCorners(base, 555.5 + (32 * 1.08) / 2, 777.25 + (32 * 1.08) / 2, 0.42, 1.08, 32, 32);
     const q = quadVerts(segs[0], 0);
     // 批数据=f32 存储面（Float32Array 舍入;GPU 上传域同口径）——断言侧同 fround
@@ -125,19 +127,19 @@ describe('★F-gore buildGoreQuadBatch 产出锁', () => {
     const base = B([1, 0, 0, 1, 0, 0]);
     // 3 件同 goreId 同行 → 1 段 3 quads
     let segs = buildGoreQuadBatch(base,
-      [mkPiece({ x: 1 }), mkPiece({ x: 40 }), mkPiece({ x: 80 })], CULL, mkGetTex())!;
+      [mkPiece({ x: 1 }), mkPiece({ x: 40 }), mkPiece({ x: 80 })], CULL, mkGetTex()) as GoreSegSpec[];
     expect(segs.length).toBe(1); expect(segs[0].quads).toBe(3);
     // 行变（1217 三帧族 row 0→1）→ 2 段（行切片=不同纹理条目）
     segs = buildGoreQuadBatch(base,
       [mkPiece({ goreId: 1217, frameRows: 3, row: 0 }), mkPiece({ goreId: 1217, frameRows: 3, row: 1 })],
-      CULL, mkGetTex())!;
+      CULL, mkGetTex()) as GoreSegSpec[];
     expect(segs.length).toBe(2);
     expect(segs[0].region.sy).toBe(0);
     expect(segs[1].region.sy).toBe(segs[0].region.sh);
     // ADD 火苗（16）交错 SO 块 → 3 段,段序=绘制序,tier 随件
     segs = buildGoreQuadBatch(base,
       [mkPiece({ goreId: 5 }), mkPiece({ goreId: 16, additive: true, alpha: 100 }),
-        mkPiece({ goreId: 5, x: 40 })], CULL, mkGetTex())!;
+        mkPiece({ goreId: 5, x: 40 })], CULL, mkGetTex()) as GoreSegSpec[];
     expect(segs.length).toBe(3);
     expect(segs[0].tier).toBe(0);
     expect(segs[1].tier).toBe(1);
@@ -148,17 +150,17 @@ describe('★F-gore buildGoreQuadBatch 产出锁', () => {
   it('门:dead/视区外剔除;贴图缺失/零尺寸跳过;斜切 CTM=-1 整帧回 2D;段 key=er: 同族幂等键', () => {
     const base = B([1, 0, 0, 1, 0, 0]);
     let segs = buildGoreQuadBatch(base,
-      [mkPiece({ dead: true }), mkPiece({ x: -2000 }), mkPiece({ x: 100 })], CULL, mkGetTex())!;
+      [mkPiece({ dead: true }), mkPiece({ x: -2000 }), mkPiece({ x: 100 })], CULL, mkGetTex()) as GoreSegSpec[];
     expect(segs.length).toBe(1); expect(segs[0].quads).toBe(1);
     // 贴图缺失（getTex null）跳过
     segs = buildGoreQuadBatch(base, [mkPiece({ x: 100 })],
-      CULL, () => null)!;
+      CULL, () => null) as GoreSegSpec[];
     expect(segs.length).toBe(0);
-    // 斜切 CTM=decode 不可表达（b≠0）→ -1
-    segs = buildGoreQuadBatch(B([1, 0.2, 0, 1, 0, 0]), [mkPiece({ x: 100 })], CULL, mkGetTex()) as unknown as -1;
-    expect(segs).toBe(-1);
+    // 斜切 CTM=decode 不可表达（b≠0）→ -1（独立常量承接,segs 保持数组型）
+    const sheared = buildGoreQuadBatch(B([1, 0.2, 0, 1, 0, 0]), [mkPiece({ x: 100 })], CULL, mkGetTex()) as unknown as -1;
+    expect(sheared).toBe(-1);
     // 段 key 与 resolveTex er: 键同格式（0,sy,sw,sh region;静态源 epoch=0）
-    segs = buildGoreQuadBatch(base, [mkPiece({ x: 100 })], CULL, mkGetTex())!;
+    segs = buildGoreQuadBatch(base, [mkPiece({ x: 100 })], CULL, mkGetTex()) as GoreSegSpec[];
     expect(segs[0].key).toMatch(/^er:\d+:0:0,0,32,32$/);
     expect(segs[0].region).toEqual({ sx: 0, sy: 0, sw: 32, sh: 32 });
   });
@@ -166,7 +168,7 @@ describe('★F-gore buildGoreQuadBatch 产出锁', () => {
   it('重放面同构:角点槽位 [p0x,p0y,p1x,p1y,p3x,p3y,alpha];闭包可调用（save/restore 平衡）', () => {
     const base = B([1, 0, 0, 1, 0, 0]);
     const segs = buildGoreQuadBatch(base,
-      [mkPiece({ x: 10, y: 20, rotation: 0.3, alpha: 60 })], CULL, mkGetTex())!;
+      [mkPiece({ x: 10, y: 20, rotation: 0.3, alpha: 60 })], CULL, mkGetTex()) as GoreSegSpec[];
     expect(segs.length).toBe(1);
     const calls: string[] = [];
     const fakeCtx = {
@@ -174,7 +176,7 @@ describe('★F-gore buildGoreQuadBatch 产出锁', () => {
       setTransform() { calls.push('setTransform'); }, drawImage() { calls.push('drawImage'); },
       globalAlpha: 1, globalCompositeOperation: 'source-over', imageSmoothingEnabled: true,
     };
-    segs![0].replay(fakeCtx);
+    segs![0].replay(fakeCtx as unknown as CanvasRenderingContext2D);
     expect(calls[0]).toBe('save');
     expect(calls[calls.length - 1]).toBe('restore');
     expect(calls.filter((c) => c === 'drawImage').length).toBe(1);
@@ -308,8 +310,8 @@ describe('★F-gore GLShimExecutor.pushGoreQuadBatch 行为锁', () => {
 
 // ---- 结构锁（源码锚;防并行会话漂移） ----
 describe('★F-gore 结构锁', () => {
-  it('Renderer:goregl 旗缺省关+GL 支前置+批构建+中介发射+2D 原链保留', () => {
-    expect(RD).toContain("new URLSearchParams(location.search).get('goregl') === '1'");
+  it('Renderer:goregl 旗转正缺省开（?goregl=0 逃生门;2026-09-29 用户拍板）+GL 支前置+批构建+中介发射+2D 原链保留', () => {
+    expect(RD).toContain("new URLSearchParams(location.search).get('goregl') !== '0'");
     expect(RD).toContain('static get goreGl() { return this._goreGl; }');
     expect(RD).toContain('if (Renderer.goreGl && this.tryDrawGoreGL(pieces, x0, x1, y0, y1)) {');
     expect(RD).toContain('export function buildGoreQuadBatch(');

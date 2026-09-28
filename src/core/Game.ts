@@ -3852,7 +3852,8 @@ export class Game implements GameHooks {
           const rec = this.world.furnitureItems.find(
             (r) => r.x === e.ax && r.y === e.ay && (r.kind === 'critter_anchor' || r.kind === 'kite_anchor'));
           const stored = rec?.slots[0] ?? null;
-          if (stored) this.spawnDrop(e.ax * TILE + 8, e.ay * TILE, ITEM_DEFS[stored.id].key, stored.stack);
+          // ★BJ390：存物词缀随行（furniture rec.slots 自带 prefix;锚桩域两站同式）
+          if (stored) this.spawnDrop(e.ax * TILE + 8, e.ay * TILE, ITEM_DEFS[stored.id].key, stored.stack, undefined, undefined, undefined, stored.prefix);
           if (rec) removeFurnitureAt(this.world.furnitureItems, e.ax, e.ay);
           net.sendLeashedRemove(e.netId);
           continue;
@@ -8148,7 +8149,12 @@ export class Game implements GameHooks {
   //   解冻首帧黑窗）;解冻发生在 frame() 内冻结分支头部——同一帧即恢复完整
   //   fixedUpdate,无空窗无爆发。
   // · 旗关（?wbake=0）/worker 降级（bakeClient=null 主线程同步烘焙）不开窗=零变化。
-  private _entryFreeze: { deadline: number } | null = null;
+  // · armAt（起测帧）陷阱登记：开窗首帧 workerAwaiting 必空（占位账由 render 的
+  //   get() 可视支路填充,而 render 在 frame() 模拟段之后）→ 起测帧前 covered 查询
+  //   恒 true=冻结秒退+幕布提前掀开（病灶复现）。故 covered 终态判定须等
+  //   _paintedFrames 达 begin 时 +4 帧（与 mainFlow 幕布覆盖门 whenFirstPaint(4)
+  //   后链入完全同相）才生效;deadline 保险不受此限。
+  private _entryFreeze: { deadline: number; armAt: number } | null = null;
   /** 探针/测试断言面：冻结窗是否活跃 */
   get entryFreezeActive(): boolean { return this._entryFreeze != null; }
   /** 开窗（mainFlow onWorldReady 进世界后调用）。返回是否真的开窗：
@@ -8157,7 +8163,7 @@ export class Game implements GameHooks {
     if (!WBAKE_ENABLED) return false;   // 旗关零此窗（同步烘焙幕布下完成,无空白期待窗）
     if (!this.world || !this.chunks || !this.chunks.bakeClient) return false;   // worker 路径未装配
     if (this._entryFreeze) return true;
-    this._entryFreeze = { deadline: performance.now() + timeoutMs };
+    this._entryFreeze = { deadline: performance.now() + timeoutMs, armAt: this._paintedFrames + 4 };
     this.cb.onEntryFreeze?.(true);
     return true;
   }
@@ -8184,7 +8190,11 @@ export class Game implements GameHooks {
     const viewTW = Math.ceil(cam.viewW / cam.zoom / TILE) + 2;
     const viewTH = Math.ceil(cam.viewH / cam.zoom / TILE) + 2;
     this.tickLighting(viewTW, viewTH);
-    if (cc.viewportCovered() || performance.now() >= this._entryFreeze!.deadline) this.endEntryFreeze();
+    // 终态=viewportCovered（与幕布覆盖门同源;armAt 起测帧陷阱见 _entryFreeze 注）∨
+    // deadline 保险强制解冻（防烘焙异常永久冻结）
+    const fz = this._entryFreeze!;
+    if (performance.now() >= fz.deadline
+      || (this._paintedFrames >= fz.armAt && cc.viewportCovered())) this.endEntryFreeze();
   }
   start() {
     if (this.running) return;
@@ -22681,7 +22691,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         ? critterAnchorBreakDrop(this.world.furnitureItems, x, y)
         : kiteAnchorBreakDrop(this.world.furnitureItems, x, y);
       if (stored) {
-        this.spawnDrop(x * TILE + 8, y * TILE, ITEM_DEFS[stored.id].key, stored.stack);
+        // ★BJ390：存物词缀随行（同上）
+        this.spawnDrop(x * TILE + 8, y * TILE, ITEM_DEFS[stored.id].key, stored.stack, undefined, undefined, undefined, stored.prefix);
       }
       // 联机：锚桩消散广播 Remove（= 原版 LeashedEntity.Remove :385-398 → NetModule.Remove）。
       // 房主权威链路才上行（访客破坏走 tile 层 msg17，房主锚格巡检兜底下发 Remove）；

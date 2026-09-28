@@ -111,11 +111,11 @@ const INSTALL = () => {
     const p = g.player;
     S.injected = {
       entryX: p.x, entryY: p.y, entryHp: p.hp, entryTick: g.tickCount,
-      liftY: p.y - 48, zombies: [] as number[],
+      liftY: p.y - 48, zombies: [],
     };
-    p.y = p.y - 48; p.vy = 0; p.vy = 0;
+    p.y = p.y - 48; p.vy = 0;
     for (let i = 0; i < 2; i++) {
-      const z = g.spawnNpcByVanilla ? g.spawnNpcByVanilla(3, p.x + 160 + i * 24, p.y) : null;
+      const z = g.spawnNpcByVanilla ? g.spawnNpcByVanilla(3, p.x + 240 + i * 24, p.y) : null;
       if (z) S.injected.zombies.push(z.id ?? -1);
     }
     mark('t_inject');
@@ -143,8 +143,8 @@ async function shotLoop(page, dir) {
     if (st.game) {
       const f = String(n).padStart(3, '0');
       const tag = st.freeze ? 'curtain' : (unfrozeAt === null ? 'unfroze' : 'world');
-      if (!st.freeze && unfrozeAt === null) unfrozeAt = Date.now() - t0;
       try { await page.screenshot({ path: `${dir}/${f}_${Date.now() - t0}ms_${tag}.png` }); } catch { /* 竞态 */ }
+      if (!st.freeze && unfrozeAt === null) unfrozeAt = Date.now() - t0;
       n++;
       if (unfrozeAt !== null && Date.now() - t0 > unfrozeAt + 1100) break;
       if (st.done) break;
@@ -183,7 +183,7 @@ async function runArm(query, name) {
   const dir = `${OUT}/${name}`;
   const shots = shotLoop(page, dir);
   const [W, H] = sizeDims(WSIZE);
-  await page.evaluate(({ seed, w, h }) => { void window.__swFlow.newWorld(seed, w, h); }, { seed: SEED, w, h });
+  await page.evaluate(({ seed, w, h }) => { void window.__swFlow.newWorld(seed, w, h); }, { seed: SEED, w: W, h: H });
   const S = await waitDone(page);
   const shotCount = await shots;
   const verdict = await page.evaluate(() => {
@@ -191,30 +191,43 @@ async function runArm(query, name) {
     if (!g || !S || S.timeout) return { ok: false, why: 'no game/timeout' };
     const F = S.frames;
     const fz = F.filter((f) => f.freeze);
-    const after = F.filter((f) => !f.freeze && S.timeline.t_freezeEnd !== undefined && f.t >= S.timeline.t_freezeEnd);
+    const fe = S.timeline.t_freezeEnd;
+    const after = F.filter((f) => !f.freeze && fe !== undefined && f.t >= fe);
+    const after1s = F.filter((f) => !f.freeze && fe !== undefined && f.t >= fe && f.t <= fe + 1000);
     const out = { ok: true, why: [] };
+    out.lastCovered = F.length ? F[F.length - 1].covered : null;
     out.flags = { enabled: window.__swBakeFlags?.enabled ?? null, client: !!g.chunks?.bakeClient };
     out.freezeOpen = S.freezeOpen;
     out.labelSeen = [...S.labels];
-    // ①冻结期零漂移（位置/hp/tick/敌怪）
-    if (fz.length > 2) {
-      const px = new Set(fz.map((f) => f.px)), py = new Set(fz.map((f) => f.py));
-      const hp = new Set(fz.map((f) => f.hp)), tk = new Set(fz.map((f) => f.tick));
-      out.frozen = { n: fz.length, pxUnique: px.size, pyUnique: py.size, hpUnique: hp.size, tickUnique: tk.size,
-        firstY: fz[0].py, lastY: fz[fz.length - 1].py, ticks: fz.map((f) => f.tick).filter((v, i, a) => a[i - 1] !== v) };
-      out.staticWorld = px.size === 1 && py.size === 1 && hp.size === 1 && tk.size === 1;
+    // ①冻结期零漂移（位置/hp/tick/敌怪）——按注入时刻分段:注入前/后各自恒定
+    //  （注入本身=唯一一次位置阶跃;「世界静止」指 sim 不动,不含带外注入写）
+    if (fz.length > 2 && S.injected) {
+      const tInj = S.timeline.t_inject ?? Infinity;
+      const segA = fz.filter((f) => f.t < tInj), segB = fz.filter((f) => f.t >= tInj);
+      const stat = (seg) => {
+        const px = new Set(seg.map((f) => f.px)), py = new Set(seg.map((f) => f.py));
+        const hp = new Set(seg.map((f) => f.hp)), tk = new Set(seg.map((f) => f.tick));
+        return px.size === 1 && py.size === 1 && hp.size === 1 && tk.size === 1;
+      };
+      out.frozen = { n: fz.length, nA: segA.length, nB: segB.length,
+        firstY: fz[0].py, lastY: fz[fz.length - 1].py,
+        segAStatic: segA.length ? stat(segA) : true, segBStatic: segB.length ? stat(segB) : true };
+      out.staticWorld = out.frozen.segAStatic && out.frozen.segBStatic;
       // 悬空注入保持（冻结期不被重力回落）
       out.liftHeld = out.frozen.lastY < S.injected.entryY - 40;
-      // 敌怪冻结
+      // 敌怪冻结（生成当帧可能差一帧,从宽 ≤2 值）
       const enFlat = fz.flatMap((f) => f.en).map((e) => e.join(','));
-      out.enemyFrozen = new Set(enFlat).size <= 2;   // 生成当帧可能差一帧,从宽 ≤2 值
+      out.enemyFrozen = new Set(enFlat).size <= 2;
     } else { out.staticWorld = null; out.liftHeld = null; out.enemyFrozen = null; }
-    // ②解冻恢复:落回原地面+hp 恒定+tick≈60/s
-    if (after.length > 10) {
+    // ②解冻恢复:重力恢复（从悬空位下落）+落定静止+hp 恒定（解冻后 1s 窗）+tick≈60/s
+    //  注:冻结起点=出生下落未完成,entryY 非静止位——落定判据=尾段 py 恒定（rest）
+    if (after.length > 10 && S.injected) {
       const last = after[after.length - 1];
+      const tail = after.slice(-20);
       out.recovered = {
-        yBack: Math.abs(last.py - S.injected.entryY) <= 4,
-        hpKept: after.every((f) => f.hp === S.injected.entryHp) && last.hp === S.injected.entryHp,
+        gravityResumed: Math.max(...after.map((f) => f.py)) > S.injected.liftY + 8,
+        settled: new Set(tail.map((f) => f.py)).size === 1,
+        hpKept: after1s.length > 0 && after1s.every((f) => f.hp === S.injected.entryHp) && last.hp === S.injected.entryHp,
         covered: last.covered === true,
       };
       const span = last.t - after[0].t;
@@ -254,10 +267,11 @@ for (const r of results) {
     add('旗面=开', v.flags?.enabled === true && v.flags?.client === true);
     add('冻结窗开启', v.freezeOpen === true);
     add('幕布步骤=正在渲染世界…', (v.labelSeen ?? []).some((l) => (l ?? '').includes('正在渲染世界')));
-    add('冻结期世界静止(位置/hp/tick 零漂移)', v.staticWorld === true);
+    add('冻结期世界静止(注入前后分段零漂移)', v.staticWorld === true);
     add('悬空注入保持(冻结期无重力)', v.liftHeld === true);
     add('冻结期敌怪静止', v.enemyFrozen === true);
-    add('解冻落回原地面', v.recovered?.yBack === true);
+    add('解冻重力恢复(下落)', v.recovered?.gravityResumed === true);
+    add('解冻后落定静止', v.recovered?.settled === true);
     add('解冻+1s hp 恒定(伤害全停)', v.recovered?.hpKept === true);
     add('解冻后 covered', v.recovered?.covered === true);
     add('解冻 tick≈60/s(零补步爆发)', v.tickRate !== null && v.tickRate >= 45 && v.tickRate <= 130);
@@ -266,7 +280,7 @@ for (const r of results) {
     add('旗面=关(逃生门)', v.flags?.enabled === false && v.flags?.client === false);
     add('无冻结窗', v.freezeOpen === false);
     add('步骤不切换(零变化)', (v.labelSeen ?? []).length === 0);
-    add('入场 covered', v.frames_covered ?? v.recovered?.covered ?? true);
+    add('入场 covered', v.lastCovered === true);
   }
   add('零页面异常', r.pageErrors.length === 0);
   console.log(`\n==== ${r.name} (${r.query || '无参数'}) ==== shots=${r.shotCount} → ${r.dir}`);

@@ -217,9 +217,9 @@ describe('★SW-BP1 Inventory.add favorited 随行（GetItem_FillEmptyInventoryS
     expect(srcMatch(/this\.game\.spawnDrop\(p\.cx, p\.cy, hDef\?\.key \?\? '', left, undefined, undefined, h\.placeStyle, h\.prefix\)/)).toBe(true);
     // 向导搜索面板归还（closeGuideSearch 同式）
     expect(srcMatch(/inv\.add\(pl\.id, pl\.stack, pl\.prefix, pl\.placeStyle, false, false, !!pl\.favorited\)/)).toBe(true);
-    // 合成溢出/渔获两处玩家中心落点（RB5a 债②）
+    // 合成溢出/渔获两处玩家中心落点（RB5a 债②;★BJ326 缺省翻转后显式 (0,-2) 退役=随机掷）
     expect(srcMatch(/spawnDrop\(this\.player\.cx, this\.player\.cy, outKey, left\)/, '../src/core/Game.ts')).toBe(true);
-    expect(srcMatch(/spawnDrop\(this\.player\.cx, this\.player\.cy, key, left, 0, -2\)/, '../src/core/Game.ts')).toBe(true);
+    expect(srcMatch(/spawnDrop\(this\.player\.cx, this\.player\.cy, key!, left\)/, '../src/core/Game.ts')).toBe(true);
   });
 });
 
