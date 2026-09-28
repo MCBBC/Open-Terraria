@@ -60,10 +60,7 @@
     6621
    ],
    "drawAdjust752Anchor": true,
-   "rule5Debt": [
-    405,
-    406
-   ],
+   "rule5Debt": [],
    "rule5Height18Count": 53,
    "rule5Height18Anchor": true
   },
@@ -7865,6 +7862,30 @@
     "sw": [],
     "sh": [
      20
+    ]
+   },
+   "405": {
+    "fit": [
+     [
+      16,
+      18
+     ]
+    ],
+    "sw": [],
+    "sh": [
+     18
+    ]
+   },
+   "406": {
+    "fit": [
+     [
+      16,
+      18
+     ]
+    ],
+    "sw": [],
+    "sh": [
+     18
     ]
    },
    "410": {
@@ -18835,28 +18856,6 @@
     "id": 752,
     "kind": "fnaClampBand",
     "anchor": "TileDrawing.cs:4584 tileWidth=36/tileHeight=38 vs Tiles_752.png 38×36；VanillaTiler drawAdjust case 752 钳制+clampBand（BJ365/366）"
-   },
-   {
-    "id": 405,
-    "kind": "rule5UnderHeightDebt",
-    "tileHeight": 18,
-    "grid": [
-     16,
-     16
-    ],
-    "ok": true,
-    "anchor": "条件格高欠高债(BJ389):原版 405 :5516-5520/406 :5450-5454 tileHeight=16 缺省、条件帧才 18（提取器 Math.max 记上界）——本仓恒画 16,条件帧少画 2px;修复=drawAdjust 逐帧条件 sh 另立刀"
-   },
-   {
-    "id": 406,
-    "kind": "rule5UnderHeightDebt",
-    "tileHeight": 18,
-    "grid": [
-     16,
-     16
-    ],
-    "ok": true,
-    "anchor": "条件格高欠高债(BJ389):原版 405 :5516-5520/406 :5450-5454 tileHeight=16 缺省、条件帧才 18（提取器 Math.max 记上界）——本仓恒画 16,条件帧少画 2px;修复=drawAdjust 逐帧条件 sh 另立刀"
    }
   ]
  }

@@ -175,7 +175,13 @@ export class BakeClient {
   }
 
   /** 低优排空（回包驱动）:cap 见 LOW_DRAIN_*。只从 lowHold 摘已登记 pending 的
-   *  key 派发（摘到未登记 = 已被 fail 清账,静默跳过）。 */
+   *  key 派发（摘到未登记 = 已被 fail 清账,静默跳过）。
+   *  ★混合路由帧驱动泵（2026-09-28）:视口 chunk 改主线程同步烘焙后,回包源枯竭
+   *  （视口外 dirty 是唯一 worker 负载,而 lowHold 等的正是回包）——无回包则
+   *  lowHold 永久滞留=后台流式全饿死（实机实证 worker n=0）。ChunkCache.flushDirty
+   *  每帧经 pumpLow() 补一拍（cap 不变,回包驱动拍照旧）。 */
+  pumpLow(): void { this.drainLow(); }
+
   private drainLow(): void {
     if (!this.lowHold.length || !this.ready || this.dead) return;
     const cap = this.hasHighPending() ? LOW_DRAIN_BUSY : LOW_DRAIN_HOT;

@@ -63,7 +63,7 @@ function makePair(cell = -1): ChunkPair {
 }
 
 function fakeClient() {
-  return { request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn() };
+  return { request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(), pumpLow: vi.fn(), hasPending: vi.fn(() => false) };
 }
 
 // ---- BakeClient 调度测试夹具：真 TileStore（dispatch 快照可完整构建）----

@@ -239,14 +239,7 @@ export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElemen
   const cx = c.getContext('2d')!;
   cx.imageSmoothingEnabled = false;
   cx.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
-  if (frameCache.size > 2048) {
-    // ★逐条淘汰最旧(2026-09-07 canvas哨兵 62/s 风暴定谳):整表 clear = 下帧全部
-    // 弹幕重切片重分配 = 每张新 canvas 都是新 GPU 纹理 → 全局 blit 全被拖慢
-    // (大世界弹幕种类×帧号组合破 2048 后永久抖动)。同前科:BiomeBackground
-    // tintCache "整表 clear = 下帧全量重烘雪崩"。
-    const k0 = frameCache.keys().next().value;
-    if (k0 !== undefined) frameCache.delete(k0);
-  }
+  if (frameCache.size > 2048) frameCache.clear();
   frameCache.set(key, c);
   return c;
 }
@@ -282,10 +275,7 @@ function whiteSpriteOf(
   cx.globalCompositeOperation = 'source-in';
   cx.fillStyle = '#fff';
   cx.fillRect(0, 0, w, h);
-  if (whiteSpriteCache.size > 512) {
-    const k0 = whiteSpriteCache.keys().next().value;   // ★逐条淘汰最旧(同 frameCache 2026-09-07)
-    if (k0 !== undefined) whiteSpriteCache.delete(k0);
-  }
+  if (whiteSpriteCache.size > 512) whiteSpriteCache.clear();
   whiteSpriteCache.set(key, c);
   return c;
 }
@@ -9428,17 +9418,31 @@ export class Arrow extends Entity {
         //   消费）——弹幕 damage 字段即终值，命中侧不再乘（蓝队 R2-06：命中侧
         //   Math.round 曾致 SwirlTwins 0.6/ArPenSpread 0.5 档在 x.5 处系统性 +1）
         // ★F1：snapBonus 并在 banner 采样之外、crit 随本次翻倍、防御前（Enemy.hurt 内）。
-        const hurtOk = e.hurt(applyBannerDamageDealt(game, e, dmg)
+        // ★BJ395（2026-09-28,BJ393 同族债五处清偿①）：受理面谓词 vanillaGated（读
+        //   hurt【前】iframes=门拒分类单源,WeaponProj.hitEnemies :393 同范式）。
+        //   Enemy.hurt 布尔返真=「本拍击杀/假人」（Enemy.ts:15033/:14184）非「受理」;
+        //   返假三族=①头部门拒（dead :13971 已 :9146 前置 continue/iframes :13972/
+        //   dontTakeDamage :13978——后两族经 502·localImmune 免疫支与充能水母豁免
+        //   :9154 可达 hurt 内）②血尽级联（:14369 族,伤害已实扣=原版受理）③普通
+        //   未致命命中尾档 :15037（主导族）——②③原版写梯 :14031-14183/penetrate--
+        //   :14189-14196/numHits++ :14263 照跑（免疫门 :12635-12638 后无死亡复查）。
+        //   → 受理谓词=!vanillaGated,hurt 返值不再消费（旧 hurtOk=击杀位,普通命中
+        //   下 IDStatic 清窗整面不达=under-fire）。
+        const vanillaGated = (this.pierceInit !== 1
+          && ((e as { iframes?: number }).iframes ?? 0) > 0)
+          || jellyDontTake;   // 充能水母豁免残留的 dontTakeDamage 门拒（:12600/:12686 同面）
+        e.hurt(applyBannerDamageDealt(game, e, dmg)
           + (snapBonusArrow ? Math.trunc(snapBonusArrow * (crit ? 2 : 1)) : 0),
           Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);   // 音/飘值=StrikeNPC 单点
         // ★B6D 刀②写侧（2026-09-01）：IDStatic 族结算成功即清本跳 iframes（=原版
         //   usesIDStaticNPCImmunity 支 `targetNPC.immune[owner] = 0` :14033-14036）——
         //   自己这跳设的 10t 帧不拦自己 10t 节拍再命中（节拍只由组表管）；外源 iframes
-        //   照旧被上方读门（:12635-12637 同式,本族不豁免）拦。hurt 返回 false（已死/
-        //   dontTakeDamage/免疫拒收）不写。穿透经济学不变：被拒跳不落此支、受理跳
-        //   下方照常 pierce--。与 GC1 桥（noteVanillaProjImmune→registry）双域同相：
-        //   桥管近战域表,此处清弹幕域读面 e.iframes。
-        if (hurtOk && this.idStaticGroup !== null) (e as unknown as { iframes?: number }).iframes = 0;
+        //   照旧被上方读门（:12635-12637 同式,本族不豁免）拦。★BJ395 判据勘正：旧
+        //   「hurt 返回 false（已死/dontTakeDamage/免疫拒收）不写」漏了返假②③族——
+        //   原版 IDStatic 支对每个过门命中（含普通/级联）都写 0,判据=!vanillaGated。
+        //   穿透经济学不变：被拒跳不落此支、受理跳下方照常 pierce--。与 GC1 桥
+        //   （noteVanillaProjImmune→registry）双域同相：桥管近战域表,此处清弹幕域读面。
+        if (!vanillaGated && this.idStaticGroup !== null) (e as unknown as { iframes?: number }).iframes = 0;
         // ★GC1 写方桥（清零批二波，2026-08-31；蓝队二轮 F4 校准行号 F5 补表面）：
         //  命中尾 npc.immune[owner] 统一写（Projectile.Damage :14031-14183 梯子,
         //  StrikeNPC 后原位）。face 由上方去重支记录：idStatic/local 面 = 原版写 0
@@ -9449,16 +9453,26 @@ export class Arrow extends Entity {
         //  写前现存穿透数 = this.pierce（本行之后才递减，与原版"判定用未减值"同拍）。
         //  消费面 = Game.meleeNpcImmuneGateOf（Player.cs:44598 近战三重门 immune 分量)
         //  与后续新读域。
-        noteVanillaProjImmune(game, this.projId, e.id,
-          { penetrate: this.pierce, localFace: immFaceLocal, idStaticFace: immFaceIdStatic });
+        //  ★BJ395：受理面化——原版梯子 :14031-14183 在免疫门 :12635-12638 后（门拒
+        //  整跳 return 不达梯=不写）;旧无条件写=被拒跳（502/局部免疫支外源窗、水母
+        //  豁免残留 dontTakeDamage）也登记近战域表=over-fire。
+        if (!vanillaGated) {
+          noteVanillaProjImmune(game, this.projId, e.id,
+            { penetrate: this.pierce, localFace: immFaceLocal, idStaticFace: immFaceIdStatic });
+        }
         // ★R29 幻象弓命中侧补刀（Projectile.cs:13935）：arrow 弹（type≠631）命中且
         // 630 载体在场（phantasmTime>0）→ 从玩家身体随机点补 3 枚 631 追踪矢。
         // 原版门 = projectile.arrow && type != 631 && phantasmTime > 0（本仓以
-        // VANILLA_ARROW_PROJS 全集承载 arrow 位）
-        if (!this.hostile && this.projId !== 631 && VANILLA_ARROW_PROJS.has(this.projId)) {
+        // VANILLA_ARROW_PROJS 全集承载 arrow 位）。
+        // ★BJ398 受理面化（尾段八站清扫①,:13934 在免疫门 :12636-12639 return 后=
+        // 拒收不可达;旧无条件补矢=外源残窗/水母豁免拒收跳也出 631=over-fire）
+        if (!vanillaGated && !this.hostile && this.projId !== 631 && VANILLA_ARROW_PROJS.has(this.projId)) {
           this.spawnPhantasmChase(game, { id: e.id, cx: e.x + e.w / 2, cy: e.y + e.h / 2 });
         }
-        if (this.pierceInit >= 0) this.hitSet.add(e.id);   // 无限穿透不入表（iframes 门冷却再命中）
+        // ★BJ398 受理面化（尾段八站清扫②——拒收跳不落表：502/localImmune/idStatic 支
+        // （:9233/:9238/:9225）不查全局读门,外源残窗拒收曾照 add → :9265 永久去同敌重
+        // =窗过期后永不再命中 under-fire;snapBonus exclude :9412 同面）
+        if (!vanillaGated && this.pierceInit >= 0) this.hitSet.add(e.id);   // 无限穿透不入表（iframes 门冷却再命中）
         // 502 喵刀弹命中：无特效音/无计数消亡（全库唯一 PlaySound(37) 在撞块
         // HandleMovement :16797——2026-08-13 实测复核修正：曾误接在命中链）。
         // 命中只消费 penetrate（5 NPC 上限）+ localNPCHitCooldown 同敌冷却
@@ -9468,14 +9482,16 @@ export class Arrow extends Entity {
         // numHits = 此前已受理命中数（★BJ157-② 勘误：原版 numHits++（:14263）在 proc
         //  块【之后】，旧注「原版 StrikeNPC 先自增」系误记——StrikeNPC(:13702)≠numHits++;
         //  首跳读 0 ⇒ 率 0.20,旧 hitSet.size 含本敌 = 首跳 0.15 off-by-one）
-        if (this.projId === 304) {
+        // ★BJ398 受理面化（尾段八站清扫③,:13869-13884 flag10 块在免疫门后——旧无条件
+        // proc=拒收跳也白吃吸血/ghostHurt 出弹）
+        if (!vanillaGated && this.projId === 304) {
           // ★BJ385 flag10 lifeMax>5 段补门（:13712）——304 vampireHeal 在 flag10 块内
           //  （:13876-13878,1456 旧注 :12879-12882 行号漂移）,BJ167 老站缺段;
           //  门单源 vanillaFlag10LifeMaxOk（critter 一击致死族原版不 proc）
           if (vanillaFlag10LifeMaxOk(e as unknown as { maxHp?: number; def?: { lifeMax?: number } })) {
             game.applyLifeSteal?.('vampire', Math.round(dmg), this.pveNumHits, this.x, this.y);
           }
-        } else if (projectileData(this.projId)?.magic) {
+        } else if (!vanillaGated && projectileData(this.projId)?.magic) {
           // ★BJ167-②③④（2026-09-19）spectre 域三小件对齐（MagicProj BJ157-① 同款习语）：
           //  ②victim 门 spectreVictimEligible——原版 Projectile.cs:13875
           //    `if (targetNPC.canGhostHeal | flag9)` 对 ghostHeal(:13877-79) 与
@@ -9512,14 +9528,20 @@ export class Arrow extends Entity {
         }
         // ★BJ157-②③：numHits++（:14263——吸血链/ghostHurt on-hit 段之后的命中尾位,
         //  与原版递增点同相;读点（上方吸血链）取自增前值）
-        this.pveNumHits++;
+        //  ★BJ395：受理面化（:14263 在免疫门 :12635-12638 后,门拒跳整段不达;旧无条件
+        //  自增=被拒跳虚增后续 proc 率档）
+        if (!vanillaGated) this.pveNumHits++;
         // 710 空中祸害命中撒裂片（Damage() :13165-13168 → BetsySharpnel :51075-51091，
         // 在 penetrate-- 前）：本体（ai[1]≠-1）每跳撒 5 枚 710 裂片（abShard 标不再链）
-        if (this.projId === 710 && !this.abShard) this.spawnBetsyShards(game);
+        // ★BJ398 受理面化（尾段八站清扫④,:14185-14186 BetsySharpnel 在写梯后=拒收
+        // 不可达;旧拒收跳也撒裂片=裂片弹幕 over-fire）
+        if (!vanillaGated && this.projId === 710 && !this.abShard) this.spawnBetsyShards(game);
         // 638/639/640 月总箭每跳衰减（Damage() :13221-13224 `damage = (int)(damage×0.96)`）
         // ——原版在 num12 结算后改写 damage 字段 = 本跳全额、下一跳 ×0.96（穿透 4 跳
         // 递弱）；(int) 截断、钳 ≥1
-        if (this.projId === 638 || this.projId === 639 || this.projId === 640) {
+        // ★BJ398 受理面化（尾段八站清扫⑤,1457 写梯环 :14241-14243——拒收跳不衰减,
+        // 旧拒收也 ×0.96=后续受理跳伤值被白扣）
+        if (!vanillaGated && (this.projId === 638 || this.projId === 639 || this.projId === 640)) {
           this.damage = Math.max(1, Math.trunc(this.damage * 0.96));
         }
         // ★T4（R 类清账,2026-09-02）：477 水晶镖 NPC 命中侧归巢（Projectile.Damage
@@ -9531,7 +9553,9 @@ export class Arrow extends Entity {
         //  SpawnHitVisuals/StatusNPC/StrikeNPC 之前——均不读 velocity;唯一速度
         //  消费方 knockback 已在上方 e.hurt 按【转向前】速度取号,与原版 position
         //  基方向等价不漂移;netUpdate=原版网络旗,本仓快照通道自动携带,不另写）。
-        if (this.projId === 477 && this.pierce > 1) {
+        // ★BJ398 受理面化（尾段八站清扫⑥,:13588-13614 在免疫门后=拒收不可达;旧拒收
+        // 跳也转向=弹道被白改）
+        if (!vanillaGated && this.projId === 477 && this.pierce > 1) {
           const cands477h = this.collectHomingTargets477(game, e.id);
           if (cands477h.length > 0) {
             const pick477h = cands477h[Math.floor(Math.random() * cands477h.length)];   // Main.rand.Next(num35)
@@ -9548,7 +9572,9 @@ export class Arrow extends Entity {
         // （伤÷4/hostile 翻转/速度=|原速|），penetrate++ 补偿本次穿透消耗。676 不置
         // reflectsProjectiles（1457 全量核）故 :7835 事前支对 676 恒不触发——此前整支
         // 缺 = 射微光史莱姆无反射直死（用户实报 2026-09-06））
-        if ((e as { vanillaId?: number | null }).vanillaId === 676
+        // ★BJ398 受理面化（尾段八站清扫⑦,:13721-13725 在 StrikeNPC 后=拒收不可达;
+        // 旧拒收跳也反射翻转弹体）
+        if (!vanillaGated && (e as { vanillaId?: number | null }).vanillaId === 676
           && tryReflectShimmerSlimeHit(this, this.projId,
             e as unknown as { vanillaId?: number | null; immortal?: boolean }, game, this.life)) {
           this.pierce = 1;        // ReflectProjectile penetrate=1（NPC.cs:67212）
@@ -9557,9 +9583,13 @@ export class Arrow extends Entity {
           this.hitSet.clear();    // 转敌对后本帧命中表作废（同 :7840 事前支先例）
         }
         // 穿透递减（−1 = 无限穿透不递减不消亡，修复1）
-        if (this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
+        // ★BJ395：受理面化（penetrate-- :14189-14196 在免疫门 :12635-12638 后;门拒跳
+        //  原版不达=不耗穿透——旧无条件递减=502/局部免疫支被拒跳白耗穿透数）
+        if (!vanillaGated && this.pierce > 0 && --this.pierce <= 0) { this.killNow(game); return; }
         // 451 涌流剑命中钩（Damage :14115-14121）：状态机推进（淡出→瞬移重射）
-        if (this.projId === 451) this.iwOnHit();
+        // ★BJ398 受理面化（尾段八站清扫⑧,:14115-14128 特化支在梯内=拒收不可达,
+        // PROJ_IMMUNE_NO_WRITE_TYPES 同锚;旧拒收跳也推进状态机）
+        if (!vanillaGated && this.projId === 451) this.iwOnHit();
       }
     }
     }   // 钉 514 命中专管 else 收口

@@ -155,7 +155,7 @@ describe('wbake 占位对缺口③：flushDirty 蒸发残账救回', () => {
   it('占位对∧无在飞 → 拆对重派;占位对∧在飞 → 跳过', () => {
     const cc = makeCache();
     const client = {
-      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(),
+      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(), pumpLow: vi.fn(),
       hasPending: vi.fn((k: number) => k === ChunkCache.key(6, 6)),   // (6,6) 在飞
     };
     (cc as unknown as { bakeClient: unknown }).bakeClient = client;
@@ -179,7 +179,7 @@ describe('wbake 混合路由（worker 慢路径旁路）', () => {
   it('get() 视口内 → 主线程同步烘焙（不派发 worker,即出真对）;视口外 → 占位+worker', () => {
     const cc = makeCache();
     const client = {
-      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(),
+      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(), pumpLow: vi.fn(),
       hasPending: vi.fn(() => false),
     };
     (cc as unknown as { bakeClient: unknown }).bakeClient = client;
@@ -201,7 +201,7 @@ describe('wbake 混合路由（worker 慢路径旁路）', () => {
   it('flushDirty wbake 分支：视口内脏块=同步 get;视口外=request', () => {
     const cc = makeCache();
     const client = {
-      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(),
+      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(), pumpLow: vi.fn(),
       hasPending: vi.fn(() => false),
     };
     (cc as unknown as { bakeClient: unknown }).bakeClient = client;

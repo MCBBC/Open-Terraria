@@ -13951,6 +13951,13 @@ export class Enemy extends Entity {
     //         全局窗/尾档全不可达）=不开全局窗,多云同拍连击同敌本相。
     //         （−1 已被日曜爆闪 608 反击面占用:penetrate=−1 非-IDStatic → 原版
     //         尾档真=写 10t,Game.ts:39206 依赖该支,勿混用）
+    //   -3  = usesLocalNPCImmunity 族（禁戒沙暴柱 656：SetDefaults :7059-7060
+    //         usesLocal=true+cd=8;★BJ398 2026-09-29,BJ385 登记独立决策刀）→
+    //         免疫门照走（:12636 全局窗门,flag3=false 不豁免）但命中写=
+    //         【清全局窗】immune[owner]=0（梯 :14175-14178 usesLocal 主支——
+    //         节流全归弹内局部表,局部窗由弹侧 localImmune 表承载）;旧 pierce=0
+    //         写 10t → 真敌再命中节拍 10t vs 原版 8t。与 vanillaProjImmuneTiers
+    //         .PROJ_IMMUNE_SLOW_MAGIC_TIER(=-3) 无值域交集（后者仅桥层返回域哨兵）。
     // Critter 兼容：critters 桶的调用方按 Critter.hurt(game) 单参调用；
     // 原版小动物是 Enemy 进该桶，这里把 Game 对象重映射回 game 参、伤害取固定 5
     if (typeof dmg === 'object' && dmg !== null) {
@@ -14160,7 +14167,9 @@ export class Enemy extends Entity {
       // ★BJ340 F-A（2026-09-25）:1=flag3 单发弹同样不写——命中写分支表
       // （:14032-14196）对 488 同样适用,:14176-14182 尾档 `penetrate != 1` 不达
       // =原版单发弹打假人【不改】共享窗余值（旧支写 10=无中生有新窗）
-      if (pierce !== -2 && pierce !== 1) this.iframes = 10;
+      // ★BJ398:-3=usesLocal 族清零档（梯 :14175-14178 写 immune[owner]=0,假人同梯）
+      if (pierce === -3) this.iframes = 0;
+      else if (pierce !== -2 && pierce !== 1) this.iframes = 10;
       this.hpBarT = 240;
       // ★蓝队二轮 F2①（2026-08-31）：immortal 只跳过 `life -= num` 扣血段
       // （StrikeNPC_Inner :82197-82215 的 if (!immortal) 支），num41 在 :82067 防后
@@ -14271,7 +14280,10 @@ export class Enemy extends Entity {
     // =把 404/悠悠球已建的剩余窗【擦除】（405 命中解锁共享窗=多打），与假人支写 10
     // 同为原版无的两向偏差。免疫门（:13956 `pierce !== 1` 臂）保证非单发弹进此路径
     // 时 iframes==0 → 写 10 等价原版缺省档
-    if (pierce !== -2 && pierce !== 1) this.iframes = 10;
+    // ★BJ398:-3=usesLocal 族清零档（梯 :14175-14178 usesLocal 主支写 immune[owner]=0
+    // ——节流全归弹内局部表;全局 10t 不开,后到他弹照达=原版单表跨弹语义）
+    if (pierce === -3) this.iframes = 0;
+    else if (pierce !== -2 && pierce !== 1) this.iframes = 10;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
     // 击退管线（NPC.cs:82144-82239 1:1）。武器路径（kby===0，kbx=方向×力度）：
     //   num3 = kb×resist（:82145 ★resist 先乘、五段软封顶作用在乘后值——旧实现

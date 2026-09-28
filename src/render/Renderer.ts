@@ -6530,19 +6530,19 @@ export class Renderer {
   })();
   static get goreGl() { return this._goreGl; }
   static goreGlSetForTest(v: boolean): void { this._goreGl = v; }
-  /** ★dustrb（2026-09-28）尘 premul 链性能刀总闸（?dustrb=1 显式激活;缺省关=
-   *  用户明令「候补性能刀全部灰度,禁转正」——转正另走对拍流程）。关=尘预乘缓存
-   *  命中 touch（delete+set 重插式 LRU）与 drawDustPremul 出口复位全保留（现行
-   *  行为逐位不变）;开=①命中改二次机会代际标记（单属性写 gen=1,替代 delete+set
-   *  ——海盗入侵 trace dustPmCacheTouch self 1198.5ms/2.91% 主线程,微基准 29.5ns
+  /** ★dustrb（2026-09-28）尘 premul 链性能刀总闸——★转正（2026-09-29 用户拍板）
+   *  缺省开:①命中改二次机会代际标记（单属性写 gen=1,替代 delete+set 重插——
+   *  海盗入侵 trace dustPmCacheTouch self 1198.5ms/2.91% 主线程,微基准 29.5ns
    *  →1.3ns/op@2048;溢出逐出改 dustPmCacheEvictGen 二次机会,逐出只致同字节重烘
    *  =像素逐位无关）②drawDustPremul 出口复位省略（9 调用点全 ctx.save/restore
-   *  包裹,restore 恢复 gCO/globalAlpha=像素无关）。运行时可翻（goreGl 同款页内
-   *  翻面——探针 scripts/_dustrb-composition.mjs 双臂对拍）。node/worker 恒关。 */
+   *  包裹,restore 恢复 gCO/globalAlpha=像素无关）。量化:pair 链 2.57-3.07×、
+   *  纯帧墙钟 −14%、Map 结构删 4164→0/帧。?dustrb=0=逃生门（回旧 delete+set
+   *  LRU+出口复位,现行行为逐位）。运行时可翻（goreGl 同款页内翻面——探针
+   *  scripts/_dustrb-composition.mjs 双臂对拍）。node/worker 恒关。 */
   static dustrb = (() => {
     try {
       if (typeof document === 'undefined') return false;
-      return new URLSearchParams(location.search).get('dustrb') === '1';
+      return new URLSearchParams(location.search).get('dustrb') !== '0';
     } catch { return false; }
   })();
   static dustrbSetForTest(v: boolean): void { Renderer.dustrb = v; }
@@ -12073,8 +12073,12 @@ export class Renderer {
    *  localAI[2]/7）——localAI[0..3] 由 moonLordHeadAI 镜像 lai0-3；rotation 仅 -3
    *  永闭态写（:37767 lerp π/12，e.spin 承载），活态恒 0（spin 另载瞳角 lai0） */
   /** 491 荷兰飞盗船（Main.cs:24997-25053 case 491 独占 1:1）：
-   *  船体 590×534 锚 OriginFlip(208,460)（翻转取 590-208）；vector37.X 随
-   *  spriteDirection（vx<0→facing=-1→Flip）；附加件全部随 rotation 旋转。贴图帧
+   *  船体 590×534 锚 OriginFlip(208,460)（翻转取 590-208）；翻转门随 spriteDirection
+   *  （AI 终写 facing=-sign(vx)=原版 sd，NPC.cs:41012；原版 sd==1 才 Flip，
+   *  Main.cs:23357-23361 ⇒ 翻面 ⟺ facing==1 ⟺ vx<0；底图未翻态船首在贴图【右】侧
+   *  ⇒ 船首恒指运动方向=逼进时朝玩家。★2026-09-29 定谳：旧 flip=(facing===-1) 把
+   *  sd 惯例反读（"FindFrame 覆盖 sign(vx)"前提为伪——FindFrame 对 491 无 case），
+   *  船首恒逆运动方向=船尾恒朝玩家）；附加件全部随 rotation 旋转。贴图帧
    *  一律 Texture2D.Frame(1,N) 纵切（源 y=行×帧高），XNA origin 语义换算 dst 顶左
    *  = vector − origin（origin.x=帧宽/2 → 翻转两反相抵，dst 与朝向无关）：
    *  旗 Extra40 Frame(1,4) 56×44，origin Size×(0.5,1) 底中 → (74,-428) /
@@ -12097,7 +12101,7 @@ export class Renderer {
     const canSheet = vimg('vanilla/NPC_492.png');
     const ctx = this.ctx;
     const num112 = Math.floor(dutchmanAnim(e) / 8);          // :39287 localAI[3]/8
-    const flip = e.facing === -1;                            // spriteDirection==1→Flip（vx<0）
+    const flip = e.facing === 1;                             // sd==1→FlipHorizontally（Main.cs:23357-23361；facing=AI 终写 sd=−sign(vx)，NPC.cs:41012）
     const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
     ctx.save();
     ctx.globalAlpha = alpha;

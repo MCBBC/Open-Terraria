@@ -1048,3 +1048,129 @@ describe('★BJ387 presentBatch 回贴 gCO 显式置位（ambient multiply 泄�
     expect(EXEC).not.toMatch(/if \(additive\) wctx\.globalCompositeOperation = 'lighter';/);
   });
 });
+
+// ================= ★R1b-5 样式工厂不降级（2026-09-28 雷雨 degradeAcc 逐帧定谳） =================
+// 病灶:acc 窗内 createRadialGradient 归「读值面→ensureBridged」支=一次样式工厂即
+// 整帧降级+present 回贴（StormLightning.draw proj1457:1851 辉光盘逐雷逐帧调,
+// Windows 雷雨 trace 全帧样本唯一退化栈,degradeAcc drawImage 1015ms=9.3% 稳态）。
+// 修:工厂走上下文无关真样式对象（styleCtx 产）+lighter 渐变 fillRect 走栅格化 ADD 档。
+describe('★R1b-5 样式工厂不降级 + lighter 渐变 fillRect ADD 档', () => {
+  function mkStyleCtx() {
+    const created: Array<{ kind: string; args: unknown[] }> = [];
+    const mkGrad = (kind: string, args: unknown[]) => ({
+      kind, args, stops: [] as Array<[number, string]>,
+      addColorStop(o: number, c: string) { this.stops.push([o, c]); },
+    });
+    const ctx = {
+      createRadialGradient: (...a: unknown[]) => { created.push({ kind: 'radial', args: a }); return mkGrad('radial', a); },
+      createLinearGradient: (...a: unknown[]) => { created.push({ kind: 'linear', args: a }); return mkGrad('linear', a); },
+      createPattern: (...a: unknown[]) => { created.push({ kind: 'pattern', args: a }); return { kind: 'pattern', args: a }; },
+    };
+    return { ctx: ctx as unknown as CanvasRenderingContext2D, created };
+  }
+
+  function mkAccWithStyle(styleCtx: CanvasRenderingContext2D | null) {
+    const { L, Lraw, quads } = mkFullAccLayer();
+    const raw2 = new FakeCtx();
+    let degraded = 0;
+    const ex = new GLShimExecutor({
+      acquireGl: () => ((L as { unavailable: boolean }).unavailable ? null : L),
+      worldCtx: () => raw2 as unknown as CanvasRenderingContext2D,
+      worldW: () => 128, worldH: () => 72,
+      degradeAcc: () => { degraded++; ex.bridge(raw2 as unknown as CanvasRenderingContext2D); return true; },
+      styleCtx: () => styleCtx,
+    });
+    const wrap = ex.attachAcc() as unknown as FakeCtx;
+    return { L, Lraw, quads, wrap, ex, degraded: () => degraded };
+  }
+
+  it('acc 态 createRadialGradient/createLinearGradient/createPattern 走工厂产真对象,零降级零 flush', () => {
+    const { ctx: style, created } = mkStyleCtx();
+    const { wrap, ex, degraded } = mkAccWithStyle(style);
+    const w = wrap as unknown as Record<string, (...a: unknown[]) => { addColorStop: (o: number, c: string) => void } & Record<string, unknown>>;
+    const g = w.createRadialGradient(0, 0, 1, 0, 0, 16);
+    w.createLinearGradient(0, 0, 1, 1);
+    w.createPattern(mkImg(3), 'repeat');
+    expect(created.map((c) => c.kind)).toEqual(['radial', 'linear', 'pattern']);
+    expect(degraded()).toBe(0);          // 旧码:读值面→ensureBridged→整帧降级
+    expect(ex.stats.flushes).toBe(0);    // 工厂无落笔语义,不触发 flush
+    expect(ex.stats.fallback).toBe(0);
+    g.addColorStop(0, 'rgba(255,255,255,1)');   // 真对象语义可续用
+    expect((g as unknown as { stops: Array<[number, string]> }).stops.length).toBe(1);
+    // acc 态仍活跃:后续 drawImage 正常入队（未换桥）
+    wrap.drawImage(mkImg(1), 0, 0);
+    expect(ex.stats.emitSO).toBe(1);
+    expect(degraded()).toBe(0);
+  });
+
+  it('雷雨 orb 全形态锁:radial 渐变+lighter fillRect → 栅格化 ADD 档,不降级（旧码=整帧降级）', () => {
+    const { ctx: style, created } = mkStyleCtx();
+    const { Lraw, quads, wrap, ex, degraded } = mkAccWithStyle(style);
+    const w = wrap as unknown as Record<string, (...a: unknown[]) => { addColorStop: (o: number, c: string) => void } & Record<string, unknown>>;
+    const scratch: Record<string, unknown> = {};
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => ({
+        width: 0, height: 0,
+        getContext: () => ({
+          setTransform() {}, clearRect() {},
+          fillRect(x: number, y: number) { scratch.fillArgs = [x, y]; },
+          set fillStyle(v: unknown) { scratch.fill = v; },
+          get fillStyle() { return scratch.fill; },
+          set globalAlpha(v: number) { scratch.ga = v; },
+          get globalAlpha() { return scratch.ga as number; },
+        }),
+      }),
+    };
+    try {
+      // StormLightning.draw orb 支原样形态（proj1457:1847-1856）
+      wrap.globalAlpha = 0.85;
+      w.createRadialGradient; // 存在性
+      const grd = w.createRadialGradient(0, 0, 1, 0, 0, 16);
+      grd.addColorStop(0, 'rgba(255,255,255,0.85)');
+      wrap.globalCompositeOperation = 'lighter';
+      wrap.fillStyle = grd;
+      wrap.fillRect(-16, -16, 32, 32);
+      expect(degraded()).toBe(0);          // 旧码:rasterizeFillRect 拒 lighter→ensureBridgedNow→降级
+      expect(ex.stats.fallback).toBe(0);
+      expect(ex.stats.emitADD).toBe(1);    // 渐变源走栅格化 ADD 档
+      expect(ex.stats.flushes).toBe(1);    // 即发即弃
+      expect((quads as Array<{ alpha: number; dx: number; dy: number }>).length).toBe(1);
+      expect((quads as Array<{ alpha: number }>)[0].alpha).toBe(1);   // ga 烘入 scratch,quad α 钉 1
+      expect((Lraw as { open: boolean }).open).toBe(true);            // FBO 仍开着=acc 累积态
+      expect(created.length).toBe(1);      // 渐变产自工厂 ctx
+      // 「渐变对象落 scratch fillStyle」由 R1-F4 组既有测试锁（同一 sctx.fillStyle =
+      // this.fillStyleV 行;模块级 _accScratch 跨用例复用,本测不重复锁 stub 面）
+      void scratch; void grd;
+    } finally {
+      if (prevDoc === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = prevDoc;
+    }
+  });
+
+  it('工厂不可达（无 host 注入+无 document）→回退旧降级链（宁降级不丢内容,契约保持）', () => {
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    if (prevDoc !== undefined) (globalThis as { document?: unknown }).document = undefined;
+    try {
+      const { degraded, wrap } = mkAccWithStyle(null);
+      // createLinearGradient=FakeCtx 有实现的工厂（createRadialGradient 同支同链,
+      // 回退重放落 raw 同式）——锁「工厂不可达→旧行为」契约本身
+      (wrap as unknown as Record<string, (...a: unknown[]) => unknown>).createLinearGradient(0, 0, 1, 1);
+      expect(degraded()).toBe(1);      // 回退=ensureBridged→degradeAcc（旧行为保留）
+    } finally {
+      if (prevDoc === undefined) delete (globalThis as { document?: unknown }).document;
+      else (globalThis as { document?: unknown }).document = prevDoc;
+    }
+  });
+
+  it('结构锁:样式工厂支必须先于读值面支（清单重并=雷雨逐帧降级复演）', () => {
+    const EXEC = readFileSync(join(__dirname, '../src/render/glshim/GLShimExecutor.ts'), 'utf8');
+    const factory = EXEC.indexOf("if (prop === 'createLinearGradient' || prop === 'createRadialGradient' || prop === 'createPattern')");
+    const readside = EXEC.indexOf("if (prop === 'getImageData' || prop === 'measureText'");
+    expect(factory).toBeGreaterThan(-1);
+    expect(readside).toBeGreaterThan(factory);
+    // lighter 渐变 fillRect 可达栅格化 ADD 档（回退=orb 帧降级复演）
+    expect(EXEC).toContain("if (this.clipped || (this.gco !== 'source-over' && this.gco !== 'lighter')) return false;");
+    expect(EXEC).toContain("this.push(this.gco === 'lighter' ? 1 : 0, null, false, sc, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,");
+  });
+});

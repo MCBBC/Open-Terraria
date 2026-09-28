@@ -582,6 +582,8 @@ export class ChunkCache {
         n++;
         if (performance.now() - t0 > budgetMs) break; // 快照切片超预算也至少完成 1 个
       }
+      // ★混合路由帧驱动泵:回包源枯竭后 lowHold 的帧拍补排（cap 不变,见 BakeClient.pumpLow 注）
+      this.bakeClient.pumpLow();
       this.lastFlushMs = performance.now() - t0;
       this.lastFlushCount = n;
       return;

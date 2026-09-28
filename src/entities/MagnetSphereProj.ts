@@ -92,6 +92,7 @@ interface HurtTarget {
   id?: number;
   dead?: boolean;
   x: number; y: number; w: number; h: number;
+  dontTakeDamage?: boolean;
   hurt?: (dmg: number, kbx: number, kby: number, game: GameHooks,
     armorPen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean;
 }
@@ -208,9 +209,18 @@ export class BeamBoltProj extends Entity {
         if (!(this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        if (e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(this.damage))),
+        // ★BJ395（2026-09-28,BJ393 同族债五处清偿④）：受理面谓词 vanillaGated。
+        //   pierce=1 单发 flag3（:12635）免疫门豁免 → hurt 内 iframes 拒收不可达;
+        //   dead 已 :206 前置 → 可达门拒仅 dontTakeDamage（:13978;原版外层
+        //   :12600 dontTakeDamage 门同面,本环无前置检）。Enemy.hurt 返真=「本拍
+        //   击杀/假人」（Enemy.ts:15033/:14184）,普通未致命命中尾档 :15037/血尽
+        //   级联 :14369 族返假但伤害已实扣=原版受理 → 旧布尔闸下 ghostHeal/numHits
+        //   对非致死命中整面不达（激光弹主导形态=under-fire）。
+        const vanillaGated = e.dontTakeDamage === true;
+        e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(this.damage))),
           Math.sign(e.x + e.w / 2 - this.cx) * this.knockback, 0, game,
-          this.armorPen, crit, 1, true)) {     // pierce=1 单发 flag3（:11904 语义）
+          this.armorPen, crit, 1, true);     // pierce=1 单发 flag3（:11904 语义）
+        if (!vanillaGated) {
           // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
           //  255/260 数据面 magic ⇒ 原版磁球激光/炼狱叉光束本就吸血,本仓漏接）——
           //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数

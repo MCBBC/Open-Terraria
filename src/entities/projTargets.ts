@@ -87,6 +87,14 @@ export function hitTownNpcs(
       if (!doll && projId !== 318) continue;
     }
     const kb = kbx !== 0 ? kbx : Math.sign(n.x + n.w / 2 - (self.x + self.w / 2)) * 2 || 1;
+    // ★BJ395（2026-09-28,BJ393 同族债五处清偿⑤）锚备案【原版同相,不落刀】：本站
+    //   消费对象=TownNPC.hurt（非 Enemy.hurt）——其返值契约=受理（TownNPC.ts:1535
+    //   单一受理返真点,普通命中与击杀同点;返假仅门拒两族 dead :1404/帧窗∧微光上升
+    //   :1407）,不存在 Enemy.hurt 的「普通未致命命中尾档返假 :15037/血尽级联返假
+    //   :14369 族」→ 布尔在此【就是】受理谓词,hurtOk 消费=原版同相（BJ393 五处
+    //   清单唯一备案站）。消费面对照：any=受理聚合（调用方 pierce 经济,原版
+    //   penetrate-- :14189-14196 在 Damage_PVE_Inner 受理面同理）;
+    //   onKill 由 n.dead 复核=DidNPCDie()（Projectile.cs:13703）非受理面,同相。
     if (n.hurt(dmg, kb, 0, game)) {
       if (onKill && n.dead) onKill(n);   // DidNPCDie() → OnKillNPC（见上注）
       any = true;

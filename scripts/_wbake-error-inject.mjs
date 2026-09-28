@@ -24,11 +24,14 @@ async function main() {
   await page.waitForFunction('window.__swGame?.world && window.__swGame?.chunks?.bakeClient', { timeout: 240000, polling: 500 });
   await new Promise((r) => setTimeout(r, 4000));   // 入场波排空
 
+  // 同帧同步注入（无竞态）：get() 建占位+低优请求 → upgrade 立即派发（inflight
+  // 落账）→ 注入 error 回包 → 断言拆对重派。此前两版探针的「等 inflight>0」被
+  // 回包速度甩掉（空 chunk 烘焙 ~10ms,100ms 轮询追不上）——顺带实证 pumpLow
+  // 帧驱动泵已把 lowHold→派发→回包→落页→workerAwaiting 出账全链跑通。
   const r = await page.evaluate(() => {
     const g = window.__swGame;
     const cc = g.chunks;
     const client = cc.bakeClient;
-    // 视口外 chunk：get() 建 placeholder（混合路由:animView 外=占位+worker）
     const v = cc.animView;
     const cs = 256;
     let cx = 2, cy = 2;
@@ -41,25 +44,30 @@ async function main() {
     const pair = cc.get(cx, cy);
     const phBefore = !!pair.placeholder;
     const hasPair = cc.chunks.get(k) !== undefined;
-    // 注入 error 回包（id=该 chunk 的在飞请求 id——inflight 反查表）
+    if (!phBefore) return { fatal: 'no placeholder pair created' };
+    // upgrade 立即派发（lowHold 摘出→dispatch→pending+inflight 同步落账）
+    client.upgrade(k, client.pending.get(k));
     let injectId = null;
     for (const [id, kk] of client.inflight) if (kk === k) injectId = id;
-    if (injectId === null) return { fatal: 'no inflight id for key', phBefore, hasPair };
+    if (injectId === null) return { fatal: 'no inflight id after upgrade' };
     client.onMessage({ type: 'error', id: injectId, message: 'probe-inject' });
     const pendingGone = !client.pending.has(k);
+    const inflightGone = !client.inflight.has(injectId);
     const pairAfter = cc.chunks.get(k);
     const decomposed = pairAfter === undefined;          // 占位对被拆=哨兵
     const inQueue = cc.dirtyQueue.includes(k);
     // flushDirty → 重派（视口外=worker request;pending 再现）
     cc.flushDirty();
     const redispatched = client.pending.has(k);
-    return { phBefore, hasPair, pendingGone, decomposed, inQueue, redispatched };
+    return { phBefore, hasPair, pendingGone, inflightGone, decomposed, inQueue, redispatched };
   });
+  const diag = null;
+  const r2 = r;
   await page.screenshot({ path: `${OUT}/final.png` });
   await browser.close();
-  console.log(JSON.stringify(r, null, 1));
-  const ok = !r.fatal && r.phBefore === true && r.hasPair === true && r.pendingGone === true
-    && r.decomposed === true && r.inQueue === true && r.redispatched === true && errors.length === 0;
+  console.log(JSON.stringify({ ...r, ...r2, diag }, null, 1));
+  const ok = !r2.fatal && r.phBefore === true && r.hasPair === true && r2.pendingGone === true
+    && r2.decomposed === true && r2.inQueue === true && r2.redispatched === true && errors.length === 0;
   console.log(`VERDICT: ${ok ? 'PASS' : 'FAIL'}  pageErrors=${errors.length}`);
   process.exit(ok ? 0 : 1);
 }

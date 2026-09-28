@@ -291,6 +291,7 @@ export class FallingStar extends Entity {
       if (!playerCanHitEnemy(ent, game)) continue;      // Damage_PVE_Inner :11892 friendly NPC 门
       const e = ent as unknown as {
         id: number; x: number; y: number; w: number; h: number; dead: boolean;
+        iframes?: number; dontTakeDamage?: boolean;
         hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
           pierce?: number, fromPlayer?: boolean) => boolean;
       };
@@ -306,11 +307,19 @@ export class FallingStar extends Entity {
       //  不进旗杀账/图鉴/DPS 计（仅弹 12 有 trap 行;★BJ289 勘误:星炮 197 实为
       //  shoot955——955 SetDefaults :9015-9025 无 trap 行,fromPlayer=true 杀账同相,
       //  不与 12 同 trap 面）。旧 true=反向偏差。
-      const hurtOk = e.hurt(applyBannerDamageDealt(game, e, STAR_DAMAGE),
+      // ★BJ395（2026-09-28,BJ393 同族债五处清偿②）：受理面谓词 vanillaGated（读
+      //   hurt【前】iframes,WeaponProj.hitEnemies :393 同范式）。Enemy.hurt 布尔返真=
+      //   「本拍击杀/假人」（Enemy.ts:15033/:14184）,返假含普通未致命命中尾档 :15037
+      //   与血尽级联 :14369 族（伤害已实扣=原版受理）——旧 hurtOk 闸=普通命中
+      //   under-fire（弹 12 主导命中形态整面不达 GC1 桥）。门拒可及面=iframes>0
+      //   （:13972,pierce=-1≠1 不豁免）+dontTakeDamage（:13978,环内未前置过滤;
+      //   dead 已 :297 前置）→ 谓词=!vanillaGated,hurt 返值不再消费。
+      const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
+      e.hurt(applyBannerDamageDealt(game, e, STAR_DAMAGE),
         (this.vx < 0 ? -1 : 1) * STAR_KB, 0, game, 0, false, -1, false);
-      // Damage 尾梯（:14180-14183,pen≠1 档）写 immune[owner]=10——仅实扣跳写
-      // （iframes 头门拒收跳原版不达尾梯）
-      if (hurtOk) noteVanillaProjImmune(game, 12, e.id);
+      // Damage 尾梯（:14180-14183,pen≠1 档）写 immune[owner]=10——受理跳写（原版
+      //   过门命中照写,含普通/级联;iframes 头门拒收跳不达尾梯=vanillaGated 同面）
+      if (!vanillaGated) noteVanillaProjImmune(game, 12, e.id);
     }
     // ---- ★BJ289（2026-09-23 B①）remix 敌星伤玩家面（Damage_EVP 全口径）----
     //  锚：SetDefaults :932-934 remix→hostile=true + :940 trap=true;

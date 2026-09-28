@@ -55,9 +55,9 @@ function fakeAtlas() {
     ensureVImage: (p: string) => fakeImg(p.replace('vanilla/', '').replace('.png', '')),
   };
 }
-function drawAt(phase: number, ai2s: number[] = [0, 2, 5, 8]) {
+function drawAt(phase: number, ai2s: number[] = [0, 2, 5, 8], facing: -1 | 1 = -1) {
   const ship = Enemy.fromVanilla(491, 100 * TILE, 90 * TILE)!;
-  ship.facing = -1;                       // spriteDirection=-1(vx>0 等价态)→ 不翻面
+  ship.facing = facing;                   // facing=vanilla spriteDirection:-1(vx>0 等价态)→ 不翻面
   ship.visAngle = 0.1;
   dd2LocalAI(ship)[3] = phase;            // localAI[3] 0..63 循环
   const cannons = ai2s.map((ai2, i) => {
@@ -155,6 +155,56 @@ describe('drawDutchman 六贴图纵切+锚点(Main.cs:24997-25053,phase=localAI[
       for (const d of draws(o, 'Extra_41')) expect(d.a[1]).toBe((n % 8) * 88);
       expect(draws(o, 'Extra_45')[0].a[1]).toBe(((2 + n) % 4) * 152);
     }
+  });
+});
+
+// ============ 翻转极性判别(2026-09-29 朝向定谳):原版未翻态(sd=-1)船首朝 +x ============
+// 基准:vanilla NPC_491.png(md5 0bcb71a1f1e2ceb29bfc4482069ad0d1,与 terraria-assets
+// 逐字节全等)未翻态骷髅船首在贴图【右】侧(px≈390,斜桅伸至 590),船尾舱在左。
+// 原版链:spriteDirection = -sign(vx)(NPC.cs:41012)→ sd==1 才 FlipHorizontally
+// (Main.cs:23357-23361)⇒ 翻面 ⟺ 移动向左 ⟺ 船首恒指运动方向(逼进玩家=船首朝玩家)。
+// ★旧码 flip=(facing===-1) 把 sd 惯例反读(前刃"FindFrame 覆盖 sign(vx)"前提为伪:
+//   FindFrame 对 491 无 case 不覆盖,AI 的 sd 终值直通渲染)→ 船首恒逆运动方向
+//   = 船尾恒朝玩家(与移动方向无关的恒错,即用户报修面)。
+describe('翻转极性(原版朝向对照):facing=vanilla spriteDirection,翻面 ⟺ facing==1', () => {
+  const scales = (ops: Op[]) => ops.filter((o) => o.op === 'scale');
+
+  it('facing=-1(sd=-1,vx>0 等价态,玩家在右)→ 不翻面:无 scale(-1,1),船首(+x 贴图侧)朝玩家', () => {
+    const ops = drawAt(20, [0, 2, 5, 8], -1);
+    expect(scales(ops).length).toBe(0);
+  });
+
+  it('facing=1(sd=1,vx<0 等价态,玩家在左)→ 翻面:rotate 后 scale(-1,1),船首镜像朝 -x=玩家侧', () => {
+    const ops = drawAt(20, [0, 2, 5, 8], 1);
+    expect(scales(ops).length).toBe(1);
+    expect(scales(ops)[0].a).toEqual([-1, 1]);
+  });
+
+  it('AI 全链(NPC.cs:41012→Main.cs:23357):玩家在右 vx>0 → facing=-1 且渲染不翻面(船首朝玩家)', () => {
+    const h = makeHooks(makeWorld(), { x: 140, y: 100 });
+    const ship = spawn(h, 491, 100, 90);
+    tick(h, 130, [ship]);
+    expect(ship.vx).toBeGreaterThan(5);            // 向右逼进
+    expect(ship.facing).toBe(-1);                  // spriteDirection = -sign(vx)
+    const { ctx, ops } = recCtx();
+    const fake = { atlas: fakeAtlas(), ctx } as unknown as Renderer;
+    (Renderer.prototype as unknown as { drawDutchman: (e: Enemy, es: unknown[]) => void })
+      .drawDutchman.call(fake, ship, [ship]);
+    expect(scales(ops).length).toBe(0);            // 不翻面 → 船首(+x)朝右=朝玩家
+  });
+
+  it('AI 全链:玩家在左 vx<0 → facing=1 且渲染翻面 scale(-1,1)(船首镜像朝玩家)', () => {
+    const h = makeHooks(makeWorld(), { x: 60, y: 100 });
+    const ship = spawn(h, 491, 100, 90);
+    tick(h, 130, [ship]);
+    expect(ship.vx).toBeLessThan(-5);
+    expect(ship.facing).toBe(1);
+    const { ctx, ops } = recCtx();
+    const fake = { atlas: fakeAtlas(), ctx } as unknown as Renderer;
+    (Renderer.prototype as unknown as { drawDutchman: (e: Enemy, es: unknown[]) => void })
+      .drawDutchman.call(fake, ship, [ship]);
+    expect(scales(ops).length).toBe(1);
+    expect(scales(ops)[0].a).toEqual([-1, 1]);
   });
 });
 

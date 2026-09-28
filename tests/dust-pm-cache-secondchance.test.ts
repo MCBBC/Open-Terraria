@@ -171,11 +171,11 @@ describe('dustrb 结构锁（缺省关=用户明令灰度,禁转正）', () => {
   const src = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 'utf8');
   const vdSrc = readFileSync(new URL('../src/fx/VanillaDust.ts', import.meta.url), 'utf8');
 
-  it('旗面:显式激活语义（===1）+缺省关+SetForTest 翻面钩在位', () => {
-    expect(src).toContain("new URLSearchParams(location.search).get('dustrb') === '1'");
+  it('旗面:转正缺省开（!==0 逃生门）+SetForTest 翻面钩在位（2026-09-29 用户拍板）', () => {
+    expect(src).toContain("new URLSearchParams(location.search).get('dustrb') !== '0'");
     expect(src).toContain('static dustrbSetForTest(v: boolean): void');
-    // 缺省关的负证:无 query 时 flag=false 由 IIFE 语义保证（document 判死恒关,浏览器无参恒 false）
-    expect(src).toContain('?dustrb=1 显式激活');
+    // 缺省开的负证:node/worker 判死仍在（document 判死家族）
+    expect(src).toContain("?dustrb=0=逃生门");
   });
 
   it('命中支:gen 标记与旧 touch 双支并存（旗面分派）,evict 双分派在位', () => {

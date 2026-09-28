@@ -1995,6 +1995,14 @@ export function drawAdjust(
     //   未用带（sy 最高 410>378），被末尾越界守卫静默跳过整格绘制 = 用户实报
     //   "烟囱一闪一闪/瞬间消失"真凶；同时其绝对值覆写曾使 helper 偏移整体失效。
     //   捕获报告实证：站点侧 fb/clamp 全零而视觉仍闪 ⇒ 盲区即在此。）----
+    // ★BJ399 件1（2026-09-29）条件格高半案复位（TileDrawing.cs:5516-5520/:5450-5454
+    //   verbatim——【仅】tileHeight 覆写,不触 sx/sy：addFrY 动画仍由顶层
+    //   fireplaceAddFrY/chimneyAddFrY helper 独占（2026-08-30 摘案教训=绝对 sy 覆写与
+    //   helper 相冲,本刀只补 sh 不犯同病）。壁炉 3×2 底行（fy>0）与烟囱 3×3 底行
+    //   （fy%54≥36）原版源矩形高 18（顶锚 dpy 语义=向下溢 2px 盖下格顶）——本仓
+    //   grid[1]=16 恒画 16=欠高 2px（BJ389 RULE5_DEBT 登记债,本刀清偿+债登记摘除）。
+    case 405: if (fy > 0 && fit(fx, fy, 16, 18)) a.sh = 18; break;
+    case 406: if (fy % 54 >= 36 && fit(fx, fy, 16, 18)) a.sh = 18; break;
     case 81: if (fit(fx, fy, 24, 26)) { a.sw = 24; a.sh = 26; } break;   // :4979-4983 珊瑚 24×26
     case 323: case 324: if (fit(fx, fy, 20, 20)) { a.sw = 20; a.sh = 20; } break; // :5059-5070
     // SW-BL1 2026-09-06：case 2（左装取向）tileWidth=24（:5704-5720 case 2 分支
@@ -2166,7 +2174,8 @@ export function drawAdjust(
       }
       break;
     }
-    // （case 405/406 已删：见上方 2026-08-30 移除注——chimney/fireplace 走顶层 helper）
+    // （case 405/406：sy 域已删（2026-08-30 移除注——chimney/fireplace 走顶层 helper）;
+    //   sh 条件格高半案由 BJ399 件1 复位,见上方注）
     // ★BJ118② 钟归正批（2026-09-18 全表普查）：452 气球机 animRot()→animFrameIdx(452)
     //   （原版 tileFrame[452] counter>=5 推进/15 帧回卷,Main.cs:19263——旧 tick/6 且 %8
     //   把 15 帧域砍半）;454 皮纳塔原版 tileFrame[454] 无任何写入（grep 全量零命中）

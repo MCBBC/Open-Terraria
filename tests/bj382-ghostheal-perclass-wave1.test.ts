@@ -164,6 +164,11 @@ describe('BJ382 磁球激光 255/炼狱叉 260 ghostHeal proc（BeamBoltProj ⑤
     const log: StealCall[] = [];
     const e = enemySpy(1, 81, 99, 24, 24);
     Object.assign(e, { x: 81 * TILE - 4, y: 99 * TILE - 8 });
+    // ★BJ395 夹具忠实化：255/260=pierce 1 单发 flag3（:12635 免疫门豁免）→ hurt 内
+    //  iframes 拒收不可达,真 Enemy 可达门拒唯一载体=dontTakeDamage（:13978/外层
+    //  :12600）。旧裸返假在旧布尔判据下恰被当拒收,新判据（!vanillaGated 读门位）下
+    //  拒收须以门位承载。
+    (e as { dontTakeDamage?: boolean }).dontTakeDamage = true;
     e.hurt = () => false;
     const game = makeGame(log, [e]);
     const bolt = new BeamBoltProj(80 * TILE, 100 * TILE, 6, 0, 130, 2, 255);
@@ -342,6 +347,10 @@ describe('BJ382 禁戒沙暴柱 656 ghostHeal proc（柱身盒接触,numHits 与
   it('拒收不 proc 不计数不记帽（pveNumHits=0,hitCount=0）——★BJ385 受理位修正（BJ382 既有位登记债清偿：localImmune 写/:14245 hitCount++ 原版在 StrikeNPC :13702 后受理面内,拒收跳 :12634-12637 整跳 return 三写全不达;旧 iframes 残窗虚增帽反模式退役）', () => {
     const log: StealCall[] = [];
     const e = enemySpy(1, 79, 98);
+    // ★BJ395 夹具忠实化：本测试自述拒收形态=「iframes 残窗」（:12634-12637 整跳
+    //  return）——残窗须以【调用前】iframes 值承载（真 Enemy :13972 读前值）,
+    //  旧裸返假缺载体=新判据下拒收形态不可见（tallEnemy/flakyEnemy 同式）。
+    e.iframes = 2;
     e.hurt = () => false;
     const game = makeGame(log, [e], {
       cx: 40 * TILE, cy: 50 * TILE, y: 50 * TILE, equipStats: { critMagic: 0 },

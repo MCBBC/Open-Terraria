@@ -23,7 +23,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, noteVanillaProjImmune } from './projTargets';
 import { solidTileAt } from '../physics/LineOfSight';
 import { projSprite } from './Arrow';
 import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 沙暴柱 656 proc 单源
@@ -266,6 +266,7 @@ export class ForbiddenSignProj extends Entity {
     for (const ent of game.enemies()) {
       const e = ent as unknown as {
         id: number; x: number; y: number; w: number; h: number; dead: boolean;
+        iframes?: number; dontTakeDamage?: boolean;
         hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
           pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
       };
@@ -289,8 +290,30 @@ export class ForbiddenSignProj extends Entity {
       //  =敌怪免疫残窗内虚增 30 命中帽+8t 局部窗提前拉闸,已并入受理位
       //  （原版序 proc :13877-79 → immune 写 :14181 → localAI[0]++ :14245 →
       //  numHits++ :14263）
-      if (e.hurt(applyBannerDamageDealt(game, e, dmg), 0, 0, game, 0, crit, 0, true)) {
+      // ★BJ395（2026-09-28,BJ393 同族债五处清偿③）：受理面谓词 vanillaGated——BJ385
+      //   定谳「三写在受理面」无误,但受理判据误用 hurt 布尔：Enemy.hurt 返真=「本拍
+      //   击杀/假人」（Enemy.ts:15033/:14184）,普通未致命命中尾档 :15037 与血尽级联
+      //   :14369 族（伤害已实扣=原版受理）均返假 → 旧闸下 ghostHeal/localImmune/
+      //   hitCount/numHits 四写对非致死命中整面不达（30 命中帽只由击杀驱动+656 无
+      //   8t 局部窗=under-fire）。门拒可及面=iframes>0（:13972,pierce=0 不豁免;656
+      //   走 usesLocalNPCImmunity 但全局窗门 :12635-12638 照适用,本环无前置检）+
+      //   dontTakeDamage（:13978,环内未前置过滤;dead 已 :272 前置）→ 谓词=
+      //   !vanillaGated,hurt 返值不再消费。
+      const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
+      // ★BJ398（2026-09-29,BJ385 登记独立决策刀）：pierce=-3 = Enemy.hurt 编码族新槽
+      //  =usesLocalNPCImmunity 族写档——免疫门照走（:12636 全局窗门,flag3=false 不豁免）
+      //  但命中写=【清全局窗】immune[owner]=0（梯 :14175-14178 usesLocal 主支）。旧
+      //  pierce=0 走通用档写 10t：localImmune 8t 表过期后仍被全局残窗 vanillaGated 拦
+      //  2 拍 → 真敌有效再命中节拍 10t vs 原版 8t。跨弹语义：局部窗 per-owner（每柱
+      //  独立 Map=原版每弹 localNPCImmunity 数组）;全局窗清零=后续他弹照达（单表同相）。
+      e.hurt(applyBannerDamageDealt(game, e, dmg), 0, 0, game, 0, crit, -3, true);
+      if (!vanillaGated) {
         ghostHealProc(game, this.projId, this.pveNumHits, e);
+        // GC1 桥（梯位 :14175-14178=proc :13877-79 后、localAI++ :14245 前;656 面
+        // vanillaProjImmuneFaces.ts:135 usesLocal → 桥算清零档写 0）——近战域 immune
+        // 表同拍清零（原版单表语义;Arrow.ts:9459 同式单源桥）
+        noteVanillaProjImmune(game, this.projId, e.id,
+          { penetrate: this.penetrate, localFace: true });
         this.localImmune.set(e.id, 8);                           //（:14181-14182）
         this.hitCount++;                                         // localAI[0]++（:14245）
         this.pveNumHits++;                                       //（:14263 numHits++）

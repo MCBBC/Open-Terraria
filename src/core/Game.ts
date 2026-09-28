@@ -11485,7 +11485,18 @@ export class Game implements GameHooks {
     // 仅手持期间置位 targetPan（follow 每帧重锚玩家;门关→targetPan 归零,残余滑回见
     // 下方 ★BJ103-A1 注）
     let targetPanX = 0, targetPanY = 0;   // targetPan（UpdateCameraPan 局部 :63643/1458 :63649,零向量起始）
-    if (!this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {
+    // ★BJ397（2026-09-28）：死亡态 pan 整门（原版 GetPlayerControlledCameraPan 死门
+    //  Main.cs:63711-63714 `if (localPlayer.dead) return false;`/1458 :63717-63720,两版
+    //  同文）——dead → targetPan 恒零,CurrentPan 以 36px/tick 滑回零 = 镜头锁回尸位
+    //  （相机锚 PlayerFocusedScreenPosition :63521-63523 死亡不豁免=跟尸,尸位静止
+    //  ⇒ 视口锁定;死亡观战 spectating 支在 GetObjectTrackingCameraPan :63682-63687
+    //  先于死门 :63688-63691,本仓 spectateCamPos net-only 同序）。原版门序=死门先于
+    //  noThrow/lastMouseInterface 门(:63711<:63715) ⇒ 本位 dead 门置于 uiBlocking 门
+    //  之前;JustBecameTrue 边沿状态量照走(:63707-63710 在死门之前)——本仓
+    //  _panPrevRight :11554 无条件推进同相。用户实报「死亡后还能左右移动画面」
+    //  = 手持望远镜(1299)/镜配饰枪族死亡后 pan 通道仍活（探针 _bj397-death-cam-probe:
+    //  死亡态持 1299 1.5s 镜头漂 +306px;素机死亡 dCam=0 全锁）。
+    if (!player.dead && !this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {
       const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
       const hVid = hDef ? (hDef.vid ?? -1) : -1;
       // scope 配饰佩戴判定（Player.cs:15002-15007：饰品在身 + 手持武器 useAmmo
@@ -23854,7 +23865,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const roll = first ? 0 : Math.floor(Math.random() * 5);   // Main.rand.Next(5)
     const vid = POOLS[isDemonHeart ? 'heart' : 'orb'][roll];
     const key = VANILLA_ITEM_KEY_BY_ID[vid];
-    if (key) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, 1);
+    // ★BJ399 件2（2026-09-29）破碎掉落自然掷接线：CheckOrb 战利品十发全带显式
+    //  pfix=-1（WorldGen.cs:54718-54763 `Item.NewItem(GetItemSource_FromTileBreak…,
+    //  vid, 1, noBroadcast: false, -1)`）→ NewItem 内 item.Prefix(prefix)（Item.cs
+    //  :49735,先于初速掷）=Prefix(-1) 自然掷全链（Next(4) 早退→池掷→Reduced 2/3
+    //  mercy→TryGet 四失败门重进环,Item.cs:523-556=rollNaturalPrefixForVid 同锚）。
+    //  珠/心是 Tile 被打碎 → CheckOrb 专段【物品】掉落（非 KillTile_DropItems 通用
+    //  面;31 的 tile 侧 GetItemDrops 无份）——词缀掷在 smashOrbHeart 本面接（BJ394
+    //  通用面接线不覆盖此处）。凝胶 97×100 系七参 NewItem（:54720/:54750,无 prefix
+    //  参=恒 0）→ 本仓同不掷。
+    let prefix: number | undefined;
+    if (key) {
+      const iid = ITEM_BY_KEY[key];
+      if (iid !== undefined) {
+        prefix = rollNaturalPrefixForVid(vid, isPrefixableAccessory(iid), Math.random) || undefined;
+      }
+      this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, 1, undefined, undefined, undefined, prefix);
+    }
     if (roll === 0) {
       const gelKey = VANILLA_ITEM_KEY_BY_ID[97];               // 凝胶 ×100（genRand.Next(100,101)）
       if (gelKey) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, gelKey, 100);

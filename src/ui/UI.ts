@@ -5967,9 +5967,16 @@ export class UI {
     slotEl.querySelector('.sw-glow-overlay')?.remove();
     // 槽底贴图走 --slot-bgimg（::after 纹理层消费,2026-09-02）——物品/数字不随
     // 格子半透明（半透只在 ::after 的 opacity 上）
-    slotEl.style.setProperty('--slot-bgimg', `url(sprites/vanilla/${tex}.png)`);
-    if (tint) slotEl.style.setProperty('--slot-tint', tint);
-    else slotEl.style.removeProperty('--slot-tint');
+    // ★开包 hitch 刀(2026-09-29):同值守卫(setProperty 同值仍脏化元素=整面板 recalc)
+    const bgWant = `url(sprites/vanilla/${tex}.png)`;
+    if (slotEl.style.getPropertyValue('--slot-bgimg') !== bgWant) {
+      slotEl.style.setProperty('--slot-bgimg', bgWant);
+    }
+    if (tint) {
+      if (slotEl.style.getPropertyValue('--slot-tint') !== tint) slotEl.style.setProperty('--slot-tint', tint);
+    } else if (slotEl.style.getPropertyValue('--slot-tint') !== '') {
+      slotEl.style.removeProperty('--slot-tint');
+    }
     // ★SW-FX29：glow 活态未到期 → 重绘后复铺（原版时间态逐帧驱动;仓内重绘
     // 模型下由状态承载——见 applySlotGlow 注）
     if (this.slotGlowState.has(`${where}:${i}`)) this.applySlotGlow(where, i);
@@ -6271,7 +6278,32 @@ export class UI {
     document.addEventListener('touchstart', () => {
       this.tooltip.style.display = 'none';
       cancelAnimationFrame(this.tooltipPulseRaf);
-    }, { once: true, capture: true });
+    }, { once: true, capture: true, passive: true });   // 无 preventDefault(仅隐藏 tooltip)→ passive 化(scroll-blocking 事件)
+  }
+
+  /** ★开包 hitch diff 门（2026-09-29 用户实报「开背包瞬间 120→114fps 再回 120,
+   *  内容不变也掉」定谳刀,BJ316 姐妹面:BJ316 修每帧 --invpulse 派生重算,本刀=
+   *  开包拍全量槽重刷——notifyInventoryChanged→refreshAllNow inv 循环+
+   *  paintVanillaInvSlots.paintInvSlot 同批两轮 paintSlot+paintSlotChrome,每槽
+   *  3 次 querySelector+同值 style 写=整面板 style recalc/paint 尖峰）。
+   *  指纹=内容(id/stack/prefix/favorited)+iconUrl（晚到图集/资源包热切换经
+   *  iconUiDirty/clearIconCache 换 dataURL→指纹自变=自愈,零额外失效机制;
+   *  iconUrl 本身 Map 缓存,指纹读它=零额外开销）+glow 在场位。★glow 活态恒
+   *  全绘（绕过门）:保 paintSlotChrome 头注释「display:none 期动画 cancel→
+   *  overlay 残留重开成色块」的权威重绘语义。不变=整对跳过=零 DOM 写。
+   *  仅挂 inv 族两调用点;armor/dye tint 面/热栏/宝箱循环节奏不变（同病另批）。 */
+  private _slotPaintSigs = new WeakMap<HTMLElement, string>();
+  private paintInvSlotPair(slotEl: HTMLElement, i: number, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null): void {
+    const glowOn = this.slotGlowState.has(`inv:${i}`);
+    if (!glowOn) {
+      const sig = content
+        ? `${content.id}|${content.stack}|${content.prefix ?? 0}|${content.favorited ? 1 : 0}|${iconUrl(this.game, content.id)}`
+        : '';
+      if (this._slotPaintSigs.get(slotEl) === sig) return;
+      this._slotPaintSigs.set(slotEl, sig);
+    }
+    this.paintSlot(slotEl, content);
+    this.paintSlotChrome(slotEl, 'inv', i);
   }
 
   private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null) {
@@ -6282,8 +6314,10 @@ export class UI {
     const oldCnt = slotEl.querySelector('.cnt');
     if (!content) { if (img) img.remove(); if (oldCnt) oldCnt.remove(); }
     // 类型幽灵图只在空槽显示（:2312 `item.type <= 0 || stack <= 0` 门）
+    // ★开包 hitch 刀(2026-09-29):同值守卫——写前比对,恒等值零 DOM 写
     const ghost = slotEl.querySelector('.sw-slot-ghost');
-    if (ghost) (ghost as HTMLElement).style.display = content ? 'none' : 'block';
+    const ghostWant = content ? 'none' : 'block';
+    if (ghost && (ghost as HTMLElement).style.display !== ghostWant) (ghost as HTMLElement).style.display = ghostWant;
     if (content) {
       const url = iconUrl(this.game, content.id);
       if (!img) {
@@ -6293,14 +6327,18 @@ export class UI {
       }
       if (img.getAttribute('src') !== url) img.src = url;  // 不变不动:免重解码/重光栅
       if (content.stack > 1) {
-        if (oldCnt) oldCnt.textContent = String(content.stack);
+        const stackStr = String(content.stack);
+        if (oldCnt) {
+          if (oldCnt.textContent !== stackStr) oldCnt.textContent = stackStr;
+        }
         else slotEl.appendChild(el('span', 'cnt', String(content.stack)));
       } else if (oldCnt) oldCnt.remove();
     }
     // 收藏星标（原版 Inventory_Back10 金边贴图——ItemSlot :1966-1985 favorited 分支）：
     // 贴图由 paintSlotChrome 的 --slot-bgimg 统一绘制（favorited → Back10），此处
     // 不再直写 backgroundImage——2026-09-02 槽底迁 ::after 后直写会绕过半透层
-    slotEl.title = content?.favorited ? Lang.text('Mods.SandboxWorld.Toast.Favorited') : '';
+    const favTitle = content?.favorited ? Lang.text('Mods.SandboxWorld.Toast.Favorited') : '';
+    if (slotEl.title !== favTitle) slotEl.title = favTitle;
   }
 
   /** rAF 合并版 refreshAll(2026-08-13 泄露 review):滚轮/拾取/背包变化等
@@ -6358,8 +6396,7 @@ export class UI {
     for (let i = 10; i < INV_SIZE; i++) {
       const slotEl = this.slotEl(i, 'inv');
       if (slotEl) {
-        this.paintSlot(slotEl, inv.slots[i]);
-        this.paintSlotChrome(slotEl, 'inv', i);
+        this.paintInvSlotPair(slotEl, i, inv.slots[i]);   // ★开包 hitch diff 门(2026-09-29):不变零写
       }
     }
     // ★2026-09-07 刀 2 守卫:vanilla 布局补绘——网格第 0 行(0-9,全局 slotEl 会
@@ -8189,8 +8226,7 @@ export class UI {
     const paintInvSlot = (idx: number): void => {
       const s = this.vinvSlots.get(`inv:${idx}`);
       if (!s) return;
-      this.paintSlot(s, inv.slots[idx]);
-      this.paintSlotChrome(s, 'inv', idx);
+      this.paintInvSlotPair(s, idx, inv.slots[idx]);   // ★开包 hitch diff 门(2026-09-29):不变零写
       const cur = s.style.getPropertyValue('--slot-bgimg');
       if (!cur.includes('Inventory_Back10') && cur !== backOverride) {
         s.style.setProperty('--slot-bgimg', backOverride);
@@ -9493,7 +9529,7 @@ export class UI {
       this.tooltip.style.display = 'none';
       cancelAnimationFrame(this.tooltipPulseRaf);
     });
-    slotEl.addEventListener('wheel', (e) => this.vinvModernScrollBy(e));
+    slotEl.addEventListener('wheel', (e) => this.vinvModernScrollBy(e), { passive: true });   // 同 vinvCraftWheel passive 化判(vinvModernScrollBy 无 preventDefault,滚动=translateY 自管)
     slotEl.addEventListener('mousedown', (ev) => {
       ev.stopPropagation();
       const selected = this.vinvModernSelected === r;
@@ -11121,7 +11157,11 @@ export class UI {
       (e.currentTarget as HTMLElement).style.setProperty('--slot-bgimg',
         `url(sprites/vanilla/Inventory_Back${this.vinvCraftFocusV === idx ? 14 : ''}.png)`);
     });
-    s.addEventListener('wheel', (e) => this.vinvCraftWheel(e));
+    // ★passive 化(2026-09-28 用户实报「背包变动刷 Violation」定谳刀):vinvCraftWheel
+    //   全程无 preventDefault(仅 stopPropagation,passive 合法)=滚轮纯游戏语义消费,
+    //   非滚动拦截;每格物化即新增 non-passive 监听=Chrome Violation 刷屏拍(格池
+    //   拆建 churn 面,非泄漏)→ passive 化后 Violation 消,行为零变。
+    s.addEventListener('wheel', (e) => this.vinvCraftWheel(e), { passive: true });
     root.appendChild(s);
     this.vinvCraftCellEls[idx] = { el: s };
     this.vinvLayoutItems.push({ el: s, pos: () => this.vinvCraftCellPos(idx) });
@@ -11172,22 +11212,30 @@ export class UI {
       const h2 = handle ?? this.vinvEnsureCraftCell(i);
       if (!h2) continue;   // 防御:物化失败(无 root/越界)则本拍不绘(同窗外语义)
       const el = h2.el;
+      // ★开包 hitch 刀(2026-09-29):逐式同值守卫——开包拍几何/透明度/描金不变=
+      // 零 style 写(setProperty 同值仍脏化元素);滚动/移焦拍值变照常写,像素面零差
       if (el.style.display !== '') el.style.display = '';   // 曾窗外→回窗复位(物化格复用)
-      el.style.left = `${pos.x}px`;
-      el.style.top = `${pos.y}px`;
+      const leftWant = `${pos.x}px`;
+      if (el.style.left !== leftWant) el.style.left = leftWant;
+      const topWant = `${pos.y}px`;
+      if (el.style.top !== topWant) el.style.top = topWant;
       const yOff = (i - this.vinvCraftFocusV) * 65 + this.vinvCraftGlideY;   // ★SW-FX38 吸附值(GetItemSlotColors :358-369 吃 availableRecipeY=glideY+(i−focus)·65)
       const scale = this.vinvCraftFastScroll && this.vinvCraftGlideY !== 0
         ? 0.75
         : Math.max(0.75, 100 / (Math.abs(yOff) + 100));
-      el.style.transform = `scale(${scale})`;
+      const tfWant = `scale(${scale})`;
+      if (el.style.transform !== tfWant) el.style.transform = tfWant;
       let alpha = A + 50;
       if (Math.abs(yOff) > middleY - 100) {
         alpha = 150 * (100 - (Math.abs(yOff) - (middleY - 100))) * 0.01;
       }
-      el.style.opacity = String(Math.max(0, Math.min(1, alpha / 255)));
+      const opWant = String(Math.max(0, Math.min(1, alpha / 255)));
+      if (el.style.opacity !== opWant) el.style.opacity = opWant;
       // 焦点槽描金(DrawGoldBGForCraftingMaterial 语义≈Back14 高亮 :206-213)
-      el.style.setProperty('--slot-bgimg',
-        `url(sprites/vanilla/Inventory_Back${i === this.vinvCraftFocusV ? 14 : ''}.png)`);
+      const bgWant = `url(sprites/vanilla/Inventory_Back${i === this.vinvCraftFocusV ? 14 : ''}.png)`;
+      if (el.style.getPropertyValue('--slot-bgimg') !== bgWant) {
+        el.style.setProperty('--slot-bgimg', bgWant);
+      }
     }
     this.vinvUpdateCraftMaterials();
   }
@@ -11224,7 +11272,7 @@ export class UI {
         if (iid > 0) this.showTooltipFor(iid, 'inv', { slot: { id: iid, stack: req.stack }, anchor: (e.currentTarget as HTMLElement) });
       });
       box.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
-      box.addEventListener('wheel', (e) => this.vinvCraftWheel(e));
+      box.addEventListener('wheel', (e) => this.vinvCraftWheel(e), { passive: true });   // 同鱼眼格 passive 化判(无 preventDefault)
       mats.appendChild(box);
     });
   }

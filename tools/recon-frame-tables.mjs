@@ -731,13 +731,17 @@ const report = { _meta: {}, gore: {}, proj: {}, tile: {} };
   //      =必要承载非冗余);
   //   c) 条件格高特例：405/406（壁炉/烟囱）原版 tileHeight 条件覆写（405 :5516-5520
   //      =16 缺省,fy>0 才 18;406 :5450-5454=16 缺省,fy%54≥36 才 18——提取器 Math.max
-  //      记 18=条件上界）。本仓恒画 16 → 条件格欠高债（BJ389 登记,修复=drawAdjust
-  //      逐帧条件 sh,另立刀）。
+  //      记 18=条件上界）。★BJ399 件1（2026-09-29）已清偿：drawAdjust 逐帧条件 sh
+  //      405 `fy>0`/406 `fy%54≥36`（仅 sh,不触 sy——addFrY 仍由 TileAnim helper 独占）
+  //      → case 承载轴 a 接管,债登记摘除（RULE5_DEBT 空;未来新增覆写型欠高再登记）。
   //  触发式（对账规则五）：tileHeight 覆写 × tileH % grid[1] ≠ 0（h32×grid16 整除
   //  =多格堆叠不在此列;宽度轴覆写不属本规则）→ 非 a/b 承载、非债登记、非 752 专案
   //  = findings.rule5（硬闸）——未来版本新增覆写型（1459+）/承载面漂移（集合摘员/
   //  case 摘除）即炸。
-  const RULE5_DEBT = new Set([405, 406]);
+  // ★BJ399 件1（2026-09-29）：405/406 已清偿摘除（drawAdjust case 承载接管）——
+  //  集合空=机制留位（未来新增「覆写×grid 不整除且无承载」的欠高债在此登记,
+  //  获承载即 ok=false → exemptAnchorLost 硬红强制重定谳）。
+  const RULE5_DEBT = new Set([]);
   const adjMax = (c) => c ? {
     sw: Math.max(0, ...c.sw, ...c.fit.map((f) => f[0])),
     sh: Math.max(0, ...c.sh, ...c.fit.map((f) => f[1])),
@@ -758,8 +762,10 @@ const report = { _meta: {}, gore: {}, proj: {}, tile: {} };
     const covered = caseCovered || setCovered;
     if (RULE5_DEBT.has(id)) {
       // 债登记（ok 锚=欠高态仍在——获承载即登记陈旧=exemptFailures 硬红强制重定谳）
+      // ★BJ399 勘注：登记成员自 405/406 清偿后为空,本支为机制留位（anchor 文案按
+      //   成员 id 参数化,未来登记者重写为具体行号锚）。
       exempt.push({ id, kind: 'rule5UnderHeightDebt', tileHeight: tileH, grid: g, ok: !covered,
-        anchor: `条件格高欠高债(BJ389):原版 405 :5516-5520/406 :5450-5454 tileHeight=16 缺省、条件帧才 18（提取器 Math.max 记上界）——本仓恒画 16,条件帧少画 2px;修复=drawAdjust 逐帧条件 sh 另立刀` });
+        anchor: `条件格高欠高债:原版 GetTileDrawData tile ${id} tileHeight 条件覆写,本仓 grid 恒画低值少画 2px;修复=drawAdjust 逐帧条件 sh（参照 BJ389 登记/BJ399 清偿 405 :5516-5520、406 :5450-5454 判例）` });
       continue;
     }
     if (!covered) {

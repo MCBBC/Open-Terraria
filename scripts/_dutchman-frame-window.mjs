@@ -42,7 +42,7 @@ const pin = await page.evaluate(async () => {
   if (cannons.length !== 4) return { ok: false, why: 'cannons=' + cannons.length };
   ship.fixedUpdate = () => {};
   for (const c of cannons) c.fixedUpdate = () => {};
-  ship.facing = 1;                       // 不翻面形态
+  ship.facing = -1;                      // 不翻面形态(sd=-1;2026-09-29 极性定谳:翻面⟺facing==1)
   ship.visAngle = 0; ship.vx = 0; ship.vy = 0; ship.spawnAlpha = 0;
   for (const c of cannons) c.ai2 = 0;
   // ★整船入全亮天幕:地表线下方=光照压黑(曾令船体下半/桨/炮全黑 Δ0)。玩家冻结+
@@ -199,11 +199,11 @@ for (let k = 0; k < 9; k++) {
 }
 for (let k = 1; k < 9; k++) L.chk(`炮姿态 ${k} 活性(Δ=${poseMax[k]})`, poseMax[k] > areas.cannon0 * 0.10, `阈=${Math.round(areas.cannon0 * 0.10)}`);
 
-// ---- 翻面留档(信息性) ----
-await page.evaluate(() => { const s = window.__swGame.entities.enemies.find((e) => e.vanillaId === 491); s.facing = -1; });
+// ---- 翻面留档(信息性;2026-09-29 极性定谳:翻面⟺facing==1=sd==1,Main.cs:23357-23361) ----
+await page.evaluate(() => { const s = window.__swGame.entities.enemies.find((e) => e.vanillaId === 491); s.facing = 1; });
 const flip = await capture();
 writeFileSync(join(OUT, 'flip.png'), Buffer.from(flip.url.split(',')[1], 'base64'));
-L.say('flip.png 已留档(信息性,极性不动=处方⑤)');
+L.say('flip.png 已留档(信息性,极性已按原版定谳翻转门)');
 
 await browser.close();
 console.log(L.ok ? 'ALL PASS' : 'HAS FAIL');

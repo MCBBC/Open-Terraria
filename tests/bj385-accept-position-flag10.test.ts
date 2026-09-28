@@ -65,10 +65,20 @@ describe('BJ385-① 656 runContactHits 受理位（Projectile.cs:14181/:14245 �
     let calls = 0;
     const e = {
       id, x: 30 * 16, y: 45 * 16, w: 16, h: 16, dead: false, maxHp: 100,
+      // ★BJ395 夹具忠实化（沿下方 tallEnemy 的 BJ393 件2 同式）：拒收残窗须以
+      //  【调用前】iframes 值承载（真 Enemy :13972 门拒判据读前值）——旧缺字段返假
+      //  在旧判据（hurt 返真）下恰好被当拒收,BJ395 判据（!vanillaGated 读前值）下
+      //  拒收形态不可见=夹具喂幻影守卫失明。初值随拒收相位（rejectTicks=0=无残窗
+      //  纯受理场景,残窗初值反噬首跳受理位）。
+      iframes: rejectTicks > 0 ? 2 : 0,
       hits: [] as number[],
       hurt(d: number): boolean {
         calls++;
-        if (calls <= rejectTicks) return false;   // 残窗拒收
+        if (calls <= rejectTicks) {
+          this.iframes = calls === rejectTicks ? 0 : 2;   // 末拒清窗（衰减）/中段保持残窗
+          return false;
+        }
+        this.iframes = 0;
         this.hits.push(d);
         return true;
       },
