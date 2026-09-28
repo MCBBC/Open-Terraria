@@ -201,12 +201,12 @@ function extents(d, geo) {
   const drift = mismatch(P1.data, P1b.data, P1.geo, P1b.geo);
   const dRate = drift.n / Math.max(1, drift.valid);
   // 镜像对映(船体掩码内):P1 像素 x ↔ P2 像素 2·sx−x;仅计【两态皆判为船体】的像素,
-  // 且限船壳纵带 [sy−180, sy+80](云/山雾不入;船不透明处两态皆船)——BG 底版因船体
-  // 光源全局改曝光(实测 97% 像素联动)不可作掩码,故用双态光度分类。
+  // 且限船壳纵带 [sy−120, sy+80]=船体+炮+骷髅首(云/山雾/山脊线/帆摆不入;
+  // 船不透明处两态皆船)——BG 底版因船体光源全局改曝光不可作掩码,故用双态光度分类。
   const g1 = P1.geo, w = g1.w, h = g1.h;
   const sxL = Math.round(g1.sx - g1.x0);
   const syL = Math.round(g1.sy - g1.y0);
-  const y0 = Math.max(0, syL - 180), y1 = Math.min(h, syL + 80);
+  const y0 = Math.max(0, syL - 120), y1 = Math.min(h, syL + 80);
   const base = Math.round(2 * P1.geo.sx);
   let mm = 0, maskN = 0;
   const colBucket = {};
