@@ -2763,12 +2763,84 @@ export class BookStormTwister extends Entity {
     if (!ctx) return;
     const img = projSprite(704);
     if (!img || img.width <= 0) return;
+    // ★BJ374 程序化叠层螺旋（Main.cs:33081-33160 专支 1:1——旧实现=60×60 原图
+    //  拉伸到 60×210=用户实报"完整动画帧贴图长条"）。原版把 60×60 贴图自 Bottom
+    //  向 Top 以 ~4.11-5.01px 步距逐层叠画:全局自旋 −π/20×t×side + 每层扭转
+    //  acc×2π/−20、scale=1+(n−0.35)(底 0.65→顶 1.65 喇叭形)、vx>0 时垂直镜像、
+    //  包络=前 30t 淡入/末 60t 线性淡出;棕层(160,140,100)+蓝脉冲层(140,160,255,
+    //  t%60 梯形包络,scale×0.8)。
+    const t = this.t;
+    let env = Math.min(1, t / 30);                       // num330 淡入(:33086)
+    if (t > this.life - 60) env = Math.max(0, 1 - (t - (this.life - 60)) / 60);   // :33088-33090
+    if (env <= 0) return;
+    const side = this.vx > 0 ? -1 : 1;                   // :33095 速度侧
+    const spin = -(Math.PI / 20) * t * side;             // num332 全局自旋
+    const flipV = this.vx > 0;                           // effects3(:33096)
+    const step = Math.max(4.11, 5.01 + (t / 150) * -0.9);   // num334(:33100-33103)
+    const iw = img.width, ih = img.height;
+    const bx = this.x + this.w / 2;                      // bottom.X=Center.X(:33142)
+    const by = this.y + this.h;                          // Bottom.Y
+    const ty = this.y;
+    const H = this.h;                                    // vector79.Y(:33093)
+    const ph = t % 60;
+    const glv = (a: number, b: number, x: number): number =>
+      Math.max(0, Math.min(1, (x - a) / (b - a)));       // Utils.GetLerpValue clamped
+    const blueK = ph < 30 ? glv(22, 30, ph) : glv(38, 30, ph);   // :33113-33120
+    const tint = stormTintedOf(img);
+    if (!tint) return;
     ctx.save();
-    ctx.globalAlpha = 0.9;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, this.x, this.y, this.w, this.h);
+    if (flipV) {                                         // SpriteEffects.FlipVertically
+      const midY = (by + ty) / 2;
+      ctx.translate(0, midY); ctx.scale(1, -1); ctx.translate(0, -midY);
+    }
+    let acc = 0;
+    for (let yy = Math.floor(by); yy > Math.floor(ty); yy -= step) {
+      acc += step;
+      const n = acc / H;                                 // num337 归一高度
+      const twist = acc * (Math.PI * 2) / -20 * (this.vx > 0 ? -1 : 1);   // num338
+      const k = n <= 0.5 ? n * 2 : 2 - n * 2;            // 色包络三角(:33129-33133)
+      const aL = k * 0.5 * env;                          // A=127k×0.5×env(/255≈0.249k·env;RGB=k·env——canvas 单 pass 取 0.5 折中,登记)
+      if (aL <= 0.004) continue;
+      const scl = 1 + (n - 0.35);                        // 1+num339(:33128)
+      ctx.globalAlpha = Math.min(1, aL);
+      ctx.save();
+      ctx.translate(bx, yy);
+      ctx.rotate(spin + twist);
+      ctx.scale(scl, scl);
+      ctx.drawImage(tint.brown, -iw / 2, -ih / 2);
+      if (blueK > 0) {                                   // flag38 蓝脉冲层(:33153-33157)
+        ctx.globalAlpha = Math.min(1, aL * blueK);
+        ctx.drawImage(tint.blue, -iw / 2, -ih / 2);
+      }
+      ctx.restore();
+    }
     ctx.restore();
   }
+}
+
+/** 704 叠层绘制预染色缓存（XNA color modulate=逐通道乘——棕/蓝双版;canvas 等价
+ *  =multiply+destination-in 保 alpha） */
+let stormTintCache: { brown: HTMLCanvasElement; blue: HTMLCanvasElement } | null = null;
+function stormTintedOf(img: ImageBitmap | HTMLImageElement):
+  { brown: HTMLCanvasElement; blue: HTMLCanvasElement } | null {
+  if (stormTintCache) return stormTintCache;
+  if (typeof document === 'undefined') return null;
+  const mk = (r: number, g: number, b: number): HTMLCanvasElement => {
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const cx = c.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(img as CanvasImageSource, 0, 0);
+    cx.globalCompositeOperation = 'multiply';
+    cx.fillStyle = `rgb(${r},${g},${b})`;
+    cx.fillRect(0, 0, c.width, c.height);
+    cx.globalCompositeOperation = 'destination-in';
+    cx.drawImage(img as CanvasImageSource, 0, 0);
+    return c;
+  };
+  stormTintCache = { brown: mk(160, 140, 100), blue: mk(140, 160, 255) };   // value94/:33106 color84
+  return stormTintCache;
 }
 
 // ---------------- 5065 公主之武魔法阵 950(AI_186_PrincessWeapon :43454-43573) ----------------

@@ -17,16 +17,23 @@ const RDR = readFileSync(new URL('../src/render/Renderer.ts', import.meta.url), 
 describe('★I类 bolt 烘焙共享 scratch 多雷同帧修复', () => {
   it('uploadScratchNow:bake 期立即上传到调用方稳定键+挂 pending（无 GL no-op）', () => {
     // ★P1-B:可选子区参 (rw,rh)——p1bRegionGate 分档 texRefreshRegion/整幅
-    expect(SHIM).toContain('uploadScratchNow(img: HTMLCanvasElement, key: string, rw?: number, rh?: number): void {');
+    //  ★P0 去画布化（2026-09-28 灾难链定谳）:签名扩可选 preBytes（烘焙点现成
+    //  ImageData 直挂=零拷贝支）;快照=snapBakeRegion 区域字节（旧 snapBakeBytes
+    //  每 bake createElement 一张=霜月 2441.7 canvas/秒出生风暴本体,已根治）
+    expect(SHIM).toContain('uploadScratchNow(img: HTMLCanvasElement, key: string, rw?: number, rh?: number,\n    preBytes?: ImageData): void {');
     expect(SHIM).toContain('? this.glw.texRefreshRegion(key, img, rw, rh)');
     expect(SHIM).toContain(': this.glw.texRefresh(key, img);');
     // ★N类扩账（2026-09-27 变体①终扫）:pending 单槽（1:1 消费）+bakedTexMulti
     //  帧内粘滞账（1:N 消费——女皇剑一染十层/尘族逐尘烘焙）双写;
     //  ★R1b-6:rec0 携 bake 期字节快照（重放面直画共享 scratch=末次烘焙错画的兜底）
-    expect(SHIM).toContain('const rec0 = { img, tex: e, snap: this.snapBakeBytes(img) };');
+    expect(SHIM).toContain('const rec0 = { img, tex: e, snap: preBytes ?? this.snapBakeRegion(img, rw, rh) };');
     expect(SHIM).toContain('this.bakedTexPending = rec0;');
     expect(SHIM).toContain('this.bakedTexMulti.set(img, rec0);');
     expect(SHIM).toContain('if (!this.active || !this.glw || this.glw.unavailable) return;');
+    // ★P0:快照路径零画布出生（getImageData 字节,重放经 preSnapScratch 中转）
+    expect(SHIM).toContain('private snapBakeRegion(img: HTMLCanvasElement, rw?: number, rh?: number): ImageData | null {');
+    expect(SHIM).toContain('return g.getImageData(0, 0, w, h);');
+    expect(SHIM).not.toContain('this.snapBakeBytes(');
   });
 
   it('resolveTex:preTex 直取支在前（flush 期绝不再重传共享 scratch 末次字节）', () => {
@@ -51,11 +58,11 @@ describe('★I类 bolt 烘焙共享 scratch 多雷同帧修复', () => {
     expect(PROJ).toContain('ctx.drawImage(sc, 0, 0, sx, sy, fx, fy, sx, sy);');
   });
 
-  it('Renderer 中介:uploadScratchBake 透传子区参;无 key markDynamic 旧语义保持', () => {
+  it('Renderer 中介:uploadScratchBake 透传子区参+preBytes;无 key markDynamic 旧语义保持', () => {
     expect(RDR).toContain('markWorldDynamicScratch(img: HTMLCanvasElement, key?: string): void {');
     expect(RDR).toContain('if (key) this.bglShimReg().uploadScratchNow(img, key);');
     expect(RDR).toContain('else this.bglShimReg().markDynamic(img);');
-    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number): void {');
-    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh);');
+    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): void {');
+    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);');
   });
 });

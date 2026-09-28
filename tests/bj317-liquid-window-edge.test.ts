@@ -181,8 +181,10 @@ describe('BJ317 液体绘制窗边界采样', () => {
     const renderer = readFileSync(resolve(__dirname, '../src/render/Renderer.ts'), 'utf8')
       .replace(/^\s*\/\/.*$/gm, '');
     // ★liqgl（2026-09-27）:import 面扩容（liqgl 旗/批中介/gate 发射/环复位同源引入）
+    // ★R1b-8（2026-09-27）:再扩容（混合帧足迹 2D 重放+批环溢出探针同源引入;
+    //   2026-09-28 锚随盘刷新——旧锚钉单行形态,R1b-8 换行后假红）
     expect(renderer).toContain("drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug, slopeWaveEnabled, liquidDrawWindow,");
-    expect(renderer).toContain("liqgl, emitVanillaLiquidGate, resetLiquidBatchForFrame, type LiqBatchEmit } from './VanillaLiquidRenderer'");
+    expect(renderer).toContain("liqgl, emitVanillaLiquidGate, resetLiquidBatchForFrame, replayLiquidFootQuads2D, liqRingOverflow,\n  type LiqBatchEmit } from './VanillaLiquidRenderer'");
     expect(renderer).toContain('const [tx0, ty0, tx1, ty1] = liquidDrawWindow(cam.x, cam.y, viewW, viewH, z, world.w, world.h);');
     // 三调用点全部吃解构窗口（直改任一调用点回自算坐标 = 红面）
     const callSites = renderer.match(/drawVanillaLiquids\((?:fgCtx \?\? this\.ctx|this\.ctx), this\.atlas, world\.store, world\.groundLevel, tx0, ty0, tx1, ty1/g) ?? [];

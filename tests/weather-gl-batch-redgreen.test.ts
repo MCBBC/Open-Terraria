@@ -259,9 +259,9 @@ describe('★R2b-F4 批 uv 恒锚图角（det<0 不反转 v 区间）', () => {
 describe('★R3b-1 尘族烘焙环形容量 = 尘池上界 6000', () => {
   it('结构锁:三尘烘焙点走 DUST_BAKE_RING（=VanillaDust POOL,Main.dust[6000] 上界）', () => {
     expect(RDR).toContain('private static readonly DUST_BAKE_RING = 6000;');
-    expect(RDR).toContain("this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING)");
-    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustColor', Renderer.DUST_BAKE_RING)");
-    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustDye', Renderer.DUST_BAKE_RING)");
+    expect(RDR).toContain("this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING, undefined, undefined, ida)");   // ★P0:ida 直挂零拷贝
+    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustColor', Renderer.DUST_BAKE_RING, undefined, undefined, idc)");   // ★P0:idc 直挂零拷贝
+    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustDye', Renderer.DUST_BAKE_RING, undefined, undefined, idd)");   // ★P0:idd 直挂零拷贝
     expect(VD).toContain('const POOL = 6000;');
   });
 

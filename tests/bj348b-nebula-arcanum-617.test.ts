@@ -27,9 +27,15 @@ function makeGame(w: World, dusts: DustRec[], bucket?: Arrow[]) {
     onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
     addLightAt: () => {},
     spawnDust: (_x: number, _y: number, _w: number, _h: number, type: number,
-      _sx = 0, _sy = 0, alpha = 0, _c: unknown = null, scale = 1, ng = false) => {
+      sx = 0, sy = 0, alpha = 0, _c: unknown = null, scale = 1, ng = false) => {
+      // NewDust 速度抖动语义（Dust.cs:158-159 `rand(-20,21)*0.1 + SpeedX`）——
+      // 原版发射方在 NewDust 后整体覆写 velocity/scale 抹除之；桩内先注入抖动,
+      // 令「未覆写」的实现在此红（streak 成形判据的判别力来源）
       const d: DustRec & { vx: number; vy: number; x: number; y: number; fadeIn?: number } = {
-        type, alpha, scale, noGravity: !!ng, vx: 0, vy: 0, x: 0, y: 0 };
+        type, alpha, scale, noGravity: !!ng,
+        vx: sx + (Math.floor(Math.random() * 41) - 20) * 0.1,
+        vy: sy + (Math.floor(Math.random() * 41) - 20) * 0.1,
+        x: _x + 4, y: _y + 4 };
       dusts.push(d);
       return d;
     },
@@ -219,17 +225,39 @@ describe('BJ348b 星云族回归（BJ348 面）', () => {
       expect(na.naParent).toBe(a);
       expect(Math.hypot(s.vx, s.vy)).toBeCloseTo(12, 5);   // UnitY.RotatedByRandom × 12
     }
-    // 骑乘：618 滞后于父（生成后父继续飞）——先补偿一拍把 naLastPX 追平并
-    // 停父/停子（子速度 ±12 全量位移会淹没骑乘量），再测「父移 10px → 子 x +10」
+    // 骑乘：★oldPos[1] 语义（:35483-35486 `position += proj4.position − proj4.oldPos[1]`,
+    // oldPos[1] = 父 2 update 前位）——骑乘 delta = 父【2 拍】位移。先停父/停子,
+    // 跑两拍 settle 让双缓冲排干历史速度（第 1 拍仍吐 2 拍历史 delta 14,第 2 拍吐 7）,
+    // 再测「父移 10px → 子 x +10」。
     const s0 = sparks[0]!;
-    s0.fixedUpdate(1 / 60, game);                // 补偿拍（吸收生成后父位移）
     a.vx = 0; a.vy = 0;                          // 父停（无锁敌时不被 AI 重设）
     s0.vx = 0; s0.vy = 0;                        // 子停（回拢步进 ≤0.15/拍）
+    s0.fixedUpdate(1 / 60, game);                // settle1：吐历史 2 拍 delta（14）
+    s0.fixedUpdate(1 / 60, game);                // settle2：吐历史 1 拍 delta（7）,缓冲追平
     const x1 = s0.x;
     a.x += 10;
     s0.fixedUpdate(1 / 60, game);
     expect(s0.x - x1).toBeGreaterThan(9);        // 骑乘 10 + 回拢 ≤0.15
     expect(s0.x - x1).toBeLessThan(11);
+  });
+  it('骑乘 2 拍 delta（oldPos[1] 语义）：父单拍移 10、上一拍移 6 → 骑 16', () => {
+    const dusts: DustRec[] = [];
+    const bucket: Arrow[] = [];
+    const game = makeGame(emptyWorld(), dusts, bucket);
+    const a = new Arrow(800, 1500, 0, 0, 70, 5, 617, { grav: 0, life: 3600, pierce: 3 });
+    flyFrames(a, game, 62);                      // 静止父慢速段（ai0=30/60 两掷 618）
+    const s0 = bucket.find((q) => q.projId === 618)!;
+    // 火花钉回父心（homing sign(0)=0 消漂移）+ 停速 → 骑乘量裸测
+    s0.x = a.cx - s0.w / 2; s0.y = a.cy - s0.h / 2;
+    s0.vx = 0; s0.vy = 0;
+    s0.fixedUpdate(1 / 60, game);                // 缓冲追平（父静止 delta 0）
+    a.x += 6;
+    s0.fixedUpdate(1 / 60, game);                // 吐「2 拍前 0 → 上一拍 6」delta
+    a.x += 10;
+    const x1 = s0.x;
+    s0.fixedUpdate(1 / 60, game);                // 本拍 delta = 6 + 10 = 16（+homing ≤0.3）
+    expect(s0.x - x1).toBeGreaterThan(15.5);
+    expect(s0.x - x1).toBeLessThan(16.5);
   });
   it('killNow → 176 AoE + Item_14 音 + 620×(5..8)+(5..8)（色键 86|90）+ 618 父亡即杀', () => {
     const dusts: DustRec[] = [];
@@ -277,6 +305,74 @@ describe('BJ348b 星云族回归（BJ348 面）', () => {
       const q = d.followEnt!();
       expect(q.dx).toBe(0);
       expect(q.dy).toBe(0);
+    }
+  });
+});
+
+// ★★★ 2026-09-28 streak 成形批（重锚判据：streak 可见性,非内聚度）★★★
+// 用户 ground truth：原版 618 粉色小射弹 = 沿轨迹的紫白 streak 拖尾群（bilibili 帧）。
+// 机制考古定谳（Projectile.cs:35517-35528 / :35304-35321 / :35363-35378）：
+//   原版发射方在 NewDust 后【整体覆写】velocity/scale/position——NewDust 自带的
+//   ±0.2/轴速度抖动、×0.8..1.2 scale 抖动、+4px 位置偏移被逐字抹除。弹速 ~6 时
+//   ±2/轴抖动 = ±26° 方向弥散 ×~65px 尘程 → 12px 间距的拖尾链横向散开 ~40px 断链
+//   =「粉色小射弹不成形」第一因。成功判据 = 拖尾链（同速链锁）,非尘→球内聚度。
+describe('BJ348c streak 成形：发射方 NewDust 后精确覆写（原版覆写序逐字）', () => {
+  interface FullRec { type: number; vx: number; vy: number; x: number; y: number; scale: number; noGravity: boolean; followEnt?: unknown; fadeIn?: number }
+
+  it('618 尾尘：velocity=弹速精确、scale=1.5 精确、position=弹心精确（:35520-35524 覆写序）', () => {
+    const dusts: FullRec[] = [];
+    const game = makeGame(emptyWorld(), dusts as unknown as DustRec[]);
+    const parent = new Arrow(800, 1500, 0, 0, 70, 5, 617, { grav: 0, life: 3600, pierce: 3 });
+    // 直构 618（父静止、每拍把火花【钉回父心】→ 骑乘 delta=0 + homing sign(0)=0,
+    // 弹速恒 6 直飞 = 纯链锁工况。★勿反向钉父随子：骑乘 delta 会吃到子自身位移,
+    // homing 回拉污染弹速（曾 6→5.7 伪红））
+    const s = new Arrow(800, 1500, 6, 0, 35, 0, 618, { grav: 0, life: 420, pierce: -1 });
+    (s as unknown as { naParent: Arrow | null }).naParent = parent;
+    // 骑乘缓冲初始化（对齐 617 生成路径 :6933-6936 的 naLast/naPrev=父心——直构绕过
+    // 生成路径时字段缺省 0 → 首拍骑乘 delta=父心绝对位 → homing 回拉伪步）
+    const sf = s as unknown as { naLastPX: number; naLastPY: number; naPrevPX: number; naPrevPY: number };
+    sf.naLastPX = parent.cx; sf.naLastPY = parent.cy;
+    sf.naPrevPX = parent.cx; sf.naPrevPY = parent.cy;
+    for (let i = 0; i < 40 && !s.dead; i++) {
+      s.x = parent.cx - s.w / 2; s.y = parent.cy - s.h / 2;   // 火花钉回父心
+      s.fixedUpdate(1 / 60, game);
+    }
+    const trail = dusts.filter((d) => d.type === 86);
+    expect(trail.length).toBeGreaterThanOrEqual(8);            // 40 拍 1/2 掷 − 屏盒外无
+    for (const d of trail) {
+      expect(d.vx).toBeCloseTo(6, 6);                          // = 弹速（±2 抖动被覆写抹除）
+      expect(d.vy).toBeCloseTo(0, 6);
+      expect(d.scale).toBeCloseTo(1.5, 6);                     // = 1.5 精确（×0.8..1.2 被抹除）
+      expect(d.noGravity).toBe(true);
+    }
+    // 同速链锁 = streak 本体：全链速度零弥散 → 相邻尘间距恒 ≈ 6px/掷位
+    const uniq = new Set(trail.map((d) => `${d.vx.toFixed(3)},${d.vy.toFixed(3)}`));
+    expect(uniq.size).toBe(1);
+  });
+
+  it('617 慢速段环尘：切向 |v|=6/反切向 |v|=5 精确、半径 10..21|20..31、scale 0.9+（:35363-35378 覆写序）', () => {
+    const dusts: FullRec[] = [];
+    const game = makeGame(emptyWorld(), dusts as unknown as DustRec[]);
+    const a = new Arrow(800, 1500, 0, 0, 70, 5, 617, { grav: 0, life: 3600, pierce: 3 });
+    flyFrames(a, game, 100);                     // 静止父 → 首拍即慢速段
+    const halo86 = dusts.filter((d) => d.type === 86);
+    const halo90 = dusts.filter((d) => d.type === 90);
+    const halo240 = dusts.filter((d) => d.type === 240);
+    expect(halo86.length + halo90.length).toBeGreaterThanOrEqual(20);
+    expect(halo240.length).toBeGreaterThanOrEqual(10);
+    for (const d of [...halo86, ...halo90]) {
+      expect(Math.hypot(d.vx, d.vy)).toBeCloseTo(6, 6);      // 切向×6 精确（±2 抖动被抹除）
+      const r = Math.hypot(d.x - (a.cx), d.y - (a.cy));
+      expect(r).toBeGreaterThanOrEqual(10 - 1e-6);
+      expect(r).toBeLessThanOrEqual(21 + 1e-6);              // 心−向×rand(10..21) 精确（+4 偏移被抹除）
+      expect(d.scale).toBeGreaterThanOrEqual(0.9 - 1e-6);
+      expect(d.scale).toBeLessThanOrEqual(1.9 + 1e-6);       // 0.9+rand 精确
+    }
+    for (const d of halo240) {
+      expect(Math.hypot(d.vx, d.vy)).toBeCloseTo(5, 6);      // 反切向×5 精确
+      const r = Math.hypot(d.x - (a.cx), d.y - (a.cy));
+      expect(r).toBeGreaterThanOrEqual(20 - 1e-6);
+      expect(r).toBeLessThanOrEqual(31 + 1e-6);
     }
   });
 });

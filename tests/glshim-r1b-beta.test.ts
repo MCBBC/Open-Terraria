@@ -76,7 +76,18 @@ function mkAccHost(opts: { texRefresh: (k: string) => unknown } = { texRefresh: 
 }
 
 function mkImg(id: number): CanvasImageSource {
-  return { width: 64, height: 64, __id: id } as unknown as CanvasImageSource;
+  // ★P0 去画布化:快照源=img.getContext('2d').getImageData——桩按调用序递增填值
+  //  （每 bake 独立 ImageData 对象+可辨内容;node 无 DOM,零 document 依赖）
+  let marker = (id << 4) & 0xff;
+  return {
+    width: 64, height: 64, __id: id,
+    getContext: () => ({
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({
+        width: w, height: h,
+        data: new Uint8ClampedArray(w * h * 4).fill(++marker),
+      }),
+    }),
+  } as unknown as CanvasImageSource;
 }
 
 afterEach(() => {
@@ -122,15 +133,23 @@ describe('R1b-3 acc 中途失败:前缀弃发,重放只补尾段', () => {
   });
 });
 
-describe('R1b-6 preTex 重放吃 bake 字节快照', () => {
-  it('两次 bake 同一 scratch → 重放源=各自快照（非共享 scratch 末次字节）', () => {
-    // document 桩:snapBakeBytes 的 canvas 拷贝面（node 无 DOM）
-    let tag = 0;
+describe('R1b-6 preTex 重放吃 bake 字节快照（★P0 去画布化:ImageData 区域字节）', () => {
+  it('两次 bake 同一 scratch → 重放字节=各自 bake（非共享 scratch 末次字节）,烘焙期零画布出生', () => {
+    // document 桩:仅回放中转 scratch（preSnapScratch）创建面;快照源=mkImg 自带
+    // 2D 桩（★P0:旧码每 bake createElement 一张快照画布=出生风暴本体,现零出生）
+    const putLog: unknown[] = [];
+    let created = 0;
     vi.stubGlobal('document', {
-      createElement: (_t: string) => ({
-        width: 0, height: 0, tag: ++tag,
-        getContext: () => ({ drawImage() { /* 桩 */ } }),
-      }),
+      createElement: (_t: string) => {
+        created++;
+        return {
+          width: 0, height: 0,
+          getContext: () => ({
+            putImageData: (d: unknown) => putLog.push(d),
+            drawImage() { /* 桩 */ },
+          }),
+        };
+      },
     });
     const { layer, replayCtx, host } = mkAccHost({
       texRefresh: () => ({ tex: {}, w: 64, h: 64, key: 'bake' }),   // 上传成功
@@ -141,21 +160,26 @@ describe('R1b-6 preTex 重放吃 bake 字节快照', () => {
     expect(wrap).not.toBeNull();
     const imgA = mkImg(7);                 // 共享 scratch（同 img 多次 bake）
     ex.uploadScratchNow(imgA as HTMLCanvasElement, 'bake:1');   // bake A
-    const snapA = (ex as unknown as { bakedTexMulti: Map<object, { snap: HTMLCanvasElement | null }> }).bakedTexMulti.get(imgA)!.snap;
+    const snapA = (ex as unknown as { bakedTexMulti: Map<object, { snap: ImageData | null }> }).bakedTexMulti.get(imgA)!.snap;
     wrap!.drawImage(imgA, 0, 0);           // rec1 消费 pending（preSnap=snapA）
     ex.uploadScratchNow(imgA as HTMLCanvasElement, 'bake:2');   // bake B（共享面已被覆写）
-    const snapB = (ex as unknown as { bakedTexMulti: Map<object, { snap: HTMLCanvasElement | null }> }).bakedTexMulti.get(imgA)!.snap;
+    const snapB = (ex as unknown as { bakedTexMulti: Map<object, { snap: ImageData | null }> }).bakedTexMulti.get(imgA)!.snap;
     wrap!.drawImage(imgA, 20, 20);         // rec2 消费 pending（preSnap=snapB）
     expect(snapA).toBeTruthy();
     expect(snapB).toBeTruthy();
-    expect(snapA).not.toBe(snapB);         // 每 bake 独立快照
-    // GL 中帧死亡:flush 走 2D 重放——绿判据=重放源为各自 bake 快照
+    expect(snapA).not.toBe(snapB);         // 每 bake 独立字节对象
+    expect(snapA!.data[0]).not.toBe(snapB!.data[0]);   // 内容可辨（桩递增标记）
+    expect(created).toBe(0);               // ★P0:烘焙期零画布出生（旧码=2）
+    // GL 中帧死亡:flush 走 2D 重放——绿判据=重放字节为各自 bake 快照
+    // （putImageData 进共享回放 scratch 再取样;逐 rec 顺序覆写）
     layer.unavailable = true;
     ex.flush();
     expect(replayCtx.log.length).toBe(0);          // bridge 重放走 raw
     expect(raw.log.length).toBe(2);
-    expect(raw.log[0].img).toBe(snapA);            // 旧码=imgA（共享 scratch 末次字节）
-    expect(raw.log[1].img).toBe(snapB);
+    expect(putLog[0]).toBe(snapA);                 // rec1 重放字节=bake A
+    expect(putLog[1]).toBe(snapB);                 // rec2 重放字节=bake B（旧码=共享 scratch 末次字节）
+    expect(raw.log[0].img).toBe(raw.log[1].img);   // 取样源=同一共享回放 scratch
+    expect(created).toBe(1);                       // 仅回放 scratch 一张（模块级单例复用,零逐 rec 画布）
   });
 });
 

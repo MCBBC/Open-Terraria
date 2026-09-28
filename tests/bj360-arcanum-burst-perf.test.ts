@@ -99,7 +99,15 @@ describe('BJ360 刀2：617 死亡爆生成量判别面（对拍 Projectile.Kill 
     expect(h90.length, 'd90 = 30×(:73573 α100 s1.5)').toBe(30);
     for (const d of h90) { expect(d.alpha).toBe(100); expect(d.scale).toBe(1.5); }
     expect(dusts.length, '爆裂面总尘 = 84（零 618 清场尘混入,t0 杀无在场火花）').toBe(84);
-    for (const d of dusts) expect(d.noGravity).toBe(true);
+    // ★碎片链收口刃勘正（2026-09-28）：4×d240(α100) 原版【无】noGravity 写行
+    //   （:73563-73564 仅覆 position → 重力开）；其余 80 尘 noGravity=true
+    //   （:73570/:73577/:73585/:73593）
+    for (const d of dusts.filter((q) => q.type === 240 && q.alpha === 100)) {
+      expect(d.noGravity, '4×d240 α100 无 noGravity 写行').toBe(false);
+    }
+    for (const d of dusts.filter((q) => !(q.type === 240 && q.alpha === 100))) {
+      expect(d.noGravity).toBe(true);
+    }
   });
 
   it('烟 gore×2 全落 61..63（:73604-73610 Next(61,64) 右开）', () => {

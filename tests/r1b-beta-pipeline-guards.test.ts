@@ -92,7 +92,7 @@ describe('R3b-2 boltScratch 资源面', () => {
     expect(P14).toContain('w * 2 <= cw && h * 2 <= ch');
   });
   it('bakeBolt 键改帧界环形 uploadScratchBake（实体 id 键退休）', () => {
-    expect(P14).toContain("r9.uploadScratchBake(sc, 'boltBake', 1024)");
+    expect(P14).toContain("r9.uploadScratchBake(sc, 'boltBake', 1024, sx, sy);");   // ★锚重产:P1-B 子区参（旧锚缺参=盘上陈旧红）
     expect(P14).not.toContain('boltBake:${this.id}');
   });
 });
@@ -107,9 +107,16 @@ describe('R1b-8 降级帧水扭曲 gate 缺席触发面', () => {
 });
 
 describe('R1b-6/R3b-4 shim 资源面结构锚', () => {
-  it('preTex 快照账+重放消费+frameReset/attachAcc 双点清 pending', () => {
-    expect(GSE).toContain('snapBakeBytes');
-    expect(GSE).toContain('const src: CanvasImageSource = p.preSnap ?? p.img;');
+  it('preTex 快照账+重放消费+frameReset/attachAcc 双点清 pending（★P0 去画布化重锚）', () => {
+    // ★P0 去画布化（2026-09-28 灾难链定谳）:快照=区域字节 ImageData（旧
+    //  snapBakeBytes 每 bake createElement=霜月 2441.7 canvas/秒出生风暴本体）;
+    //  重放=putImageData 进共享 preSnapScratch 后取样,src ⊆ 快照域守卫。
+    expect(GSE).toContain('snapBakeRegion');
+    expect(GSE).not.toContain('this.snapBakeBytes(');
+    expect(GSE).toContain('let src: CanvasImageSource = p.img;');
+    expect(GSE).toContain('if (sn && p.sx + p.sw <= sn.width && p.sy + p.sh <= sn.height) {');
+    expect(GSE).toContain('g.putImageData(sn, 0, 0); src = sc;');
+    expect(GSE).toContain('preSnap: ImageData | null;');
     const fr = GSE.slice(GSE.indexOf('  frameReset(): void'), GSE.indexOf('// ================= 纹理登记'));
     expect(fr).toContain('this.bakedTexPending = null');
     const aa = GSE.slice(GSE.indexOf('  attachAcc(): CanvasRenderingContext2D | null'), GSE.indexOf('  /** ★B2b 降级换桥'));

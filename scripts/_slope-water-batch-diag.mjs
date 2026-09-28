@@ -127,6 +127,24 @@ await page.evaluate(() => import('/src/render/GLSpriteLayer.ts').then((m) => {
     return origQBR.call(this, e, data, quads);
   };
 }));
+await page.evaluate(() => import('/src/render/GLSpriteLayer.ts').then((m) => {
+  const proto = m.GLSpriteLayer.prototype;
+  const origEA = proto.endAccumulate;
+  window.__fboReads = [];
+  proto.endAccumulate = function () {
+    const f = origEA.call(this);
+    try {
+      // readPixel 读当前绑定 FBO(=world);三采样点:主水体/阶梯列/天空
+      const pts = [[320, 430], [680, 400], [200, 100]];
+      const reads = pts.map(([x, y]) => {
+        const p = this.readPixel(x, y);
+        return p ? Array.from(p) : null;
+      });
+      window.__fboReads.push({ f: window.__frameNo ?? -1, reads });
+    } catch (e) { window.__fboReads.push({ err: String(e).slice(0, 80) }); }
+    return f;
+  };
+}));
 await page.evaluate(() => { window.__frameNo = 0; });
 await page.evaluate(() => window.__drive(2));
 const qbr = await page.evaluate(() => window.__qbr);
@@ -136,6 +154,10 @@ for (const q of qbr) {
   console.log(`key=${q.key} quads=${q.quads} byte0=${q.byteQ0} fbo=${q.fbo} v0=(${q.v0[0]},${q.v0[1]}) α=${JSON.stringify(q.uniqA)}`);
 }
 console.log('begin sequence:', begins.map((b) => `${b.f}:${b.name}${b.clear ? '!clear' : ''}`).join(' '));
+const fboReads = await page.evaluate(() => window.__fboReads);
+for (const r of fboReads.slice(0, 2)) {
+  console.log('worldFBO readback [water,(680,400)slope,(200,100)sky]:', JSON.stringify(r));
+}
 await page.evaluate(() => window.__drive(4));
 const out = await page.evaluate(() => window.__emits);
 console.log('emissions per 4 frames:', out.length);

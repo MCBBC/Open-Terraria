@@ -1533,6 +1533,12 @@ export class Arrow extends Entity {
       if (e.dead || !e.hurt) continue;
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.abs(ecx - this.cx) < R + e.w / 2 && Math.abs(ecy - this.cy) < R + e.h / 2) {
+        // ★爆箱局部免疫门（:12586 Damage_PVE flag2 = usesLocalNPCImmunity && array[i]==0）：
+        //   3 击终结目标在命中侧已写 immuneArray=localNPCHitCooldown=8（:14178）→ 爆箱
+        //   二次结算跳过该目标（否则第 3 击+爆箱=同目标双吃）；localNPCImmunity 每 tick
+        //   递减（:17380-17384）= 本仓 localImmuneCd（:8371 同拍递减）
+        if (this.localImmune > 0
+          && (this.localImmuneCd.get((e as unknown as { id?: number }).id ?? -1) ?? 0) > 0) continue;
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
         const snapBonusDeath = projectileSnapStrikeBonus(game,
           { projId: this.projId }, ecx, ecy, (e as unknown as { id?: number }).id ?? -1,
@@ -1543,20 +1549,39 @@ export class Arrow extends Entity {
       }
     }
     game.playSfxFiles?.(['Item_14'], 1, this.cx, this.cy);
-    for (let i = 0; i < 4; i++) {                       // 4×d240
-      game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 240, 0, 0, 100, null, 1.5, true);
+    // 爆尘散布（:73561-73594 逐尘 position = Center + 半盘向×rand×88 覆写）：UnitY 盘 =
+    //   UnitY.RotatedByRandom(π)（θ∈±π/2 → (−sinθ,cosθ) 下半盘）；速度轴盘 = UnitX.
+    //   RotatedByRandom(π).RotBy(velocity.ToRotation())（→ 角 θ+φ 全向）
+    const discY617 = (): [number, number] => {
+      const th = (Math.random() - 0.5) * Math.PI;       // RotatedByRandom(π)
+      const r = Math.random() * R;                      // NextDouble()×width/2
+      return [-Math.sin(th) * r, Math.cos(th) * r];
+    };
+    const velA617 = Math.atan2(this.vy, this.vx);       // velocity.ToRotation()
+    const discX617 = (): [number, number] => {
+      const th = (Math.random() - 0.5) * Math.PI + velA617;
+      const r = Math.random() * R;
+      return [Math.cos(th) * r, Math.sin(th) * r];
+    };
+    for (let i = 0; i < 4; i++) {                       // 4×d240（原版无 noGravity 写行 → 重力开）
+      const d240 = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 240, 0, 0, 100, null, 1.5);
+      if (d240) { const [ox, oy] = discY617(); d240.x = this.cx + ox; d240.y = this.cy + oy; }
     }
     for (let i = 0; i < 30; i++) {                      // 30 循环×(d62+d90 Crimson)
       const d62 = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 62, 0, 0, 200, null, 3.7, true);
-      if (d62) { d62.vx *= 3; d62.vy *= 3; }
-      const d90 = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 90, 0, 0, 100, null, 1.5, true);
-      if (d90) { d90.vx *= 2; d90.vy *= 2; d90.fadeIn = 1; }
+      if (d62) { const [ox, oy] = discY617(); d62.x = this.cx + ox; d62.y = this.cy + oy; d62.vx *= 3; d62.vy *= 3; }
+      const d90 = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 90, 0, 0, 100,
+        { r: 110, g: 10, b: 30, a: 255 }, 1.5, true);   // Color.Crimson×0.5（:73579；661 同值先例）
+      if (d90) {
+        const [ox, oy] = discY617(); d90.x = this.cx + ox; d90.y = this.cy + oy;
+        d90.vx *= 2; d90.vy *= 2; d90.fadeIn = 1;
+      }
     }
     for (let i = 0; i < 10; i++) {
       const dc = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 62, 0, 0, 0, null, 2.7, true);
-      if (dc) { dc.vx *= 3; dc.vy *= 3; }
+      if (dc) { const [ox, oy] = discX617(); dc.x = this.cx + ox; dc.y = this.cy + oy; dc.vx *= 3; dc.vy *= 3; }
       const dd = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 240, 0, 0, 0, null, 1.5, true);
-      if (dd) { dd.vx *= 3; dd.vy *= 3; }
+      if (dd) { const [ox, oy] = discX617(); dd.x = this.cx + ox; dd.y = this.cy + oy; dd.vx *= 3; dd.vy *= 3; }
     }
     for (let i = 0; i < 2; i++) {                       // 烟 gore 61-63（:73604-73610）
       const g = GorePiece.newGore(61 + Math.floor(Math.random() * 3), this.cx, this.cy, 0, 0);
@@ -1597,7 +1622,7 @@ export class Arrow extends Entity {
           const ox620 = (30 - -30) * Math.random() + -30;           // RandomVector2(±30)
           const oy620 = (30 - -30) * Math.random() + -30;
           const [svx620, svy620] = shardVel620(0.2, { lo: 70, n: 31 });
-          const sh620 = new Arrow(this.cx + ox620 - 2, this.cy + oy620 - 2,
+          const sh620 = new Arrow(this.cx + ox620 - 4, this.cy + oy620 - 4,
             svx620, svy620, Math.max(1, Math.trunc(this.damage * 0.65)),
             this.knockback * 0.8, 620, { grav: 0, life: 3600, pierce: 1 });
           sh620.na620Dust = tA620;
@@ -1609,7 +1634,7 @@ export class Arrow extends Entity {
           const ox620 = (30 - -30) * Math.random() + -30;
           const oy620 = (30 - -30) * Math.random() + -30;
           const [svx620, svy620] = shardVel620(0.4, { lo: 40, n: 41 });
-          const sh620 = new Arrow(this.cx + ox620 - 2, this.cy + oy620 - 2,
+          const sh620 = new Arrow(this.cx + ox620 - 4, this.cy + oy620 - 4,
             svx620, svy620, Math.max(1, Math.trunc(this.damage * 0.65)),
             this.knockback * 0.8, 620, { grav: 0, life: 3600, pierce: 1 });
           sh620.na620Dust = tB620;
@@ -2032,9 +2057,12 @@ export class Arrow extends Entity {
   // ---- 618 星璇火花（aiStyle 119 :35458-35540，617 伴生隐形伤弹）----
   /** 父 617 引用（null = 非 618 路径）；父亡即 Kill（:35475-35478） */
   naParent: Arrow | null = null;
-  /** 父中心上一 update 快照（骑乘位移 = 父位移 :35483-35486） */
+  /** 父中心 1/2 update 前快照（骑乘 = 父【2 拍】位移 :35483-35486 `position −
+   *  oldPos[1]`，oldPos[1] = 父 TrailingMode 0 缺省环滚 2 拍前位 :17199-17203） */
   private naLastPX = 0;
   private naLastPY = 0;
+  private naPrevPX = 0;
+  private naPrevPY = 0;
   /** ai[0]（≥420 停止骑乘，:35479-35481） */
   private naAi0 = 0;
   // ---- 620 星云奥秘爆裂碎片（aiStyle 29 GemStaffs type 支 :38357-38387）----
@@ -4730,6 +4758,15 @@ export class Arrow extends Entity {
     for (const [k, v] of this.spawnImmuneCd) {
       if (v <= 1) this.spawnImmuneCd.delete(k); else this.spawnImmuneCd.set(k, v - 1);
     }
+    // ★碎片链收口刃（2026-09-28）：命中侧写档同表（:14178 immuneArray[victim]=
+    //   localNPCHitCooldown → :17365-17384 同函数逐拍衰减）——localImmuneCd 此前只在
+    //   502 专支内衰减,其余 usesLocalNPCImmunity 全族（617=8t/618=20t/宝石法珠
+    //   121-126=60t/音符 77-78=30t/309=10t…）写档后恒不衰减 = 驻场/穿行弹对同敌
+    //   至多 1 击（617 三击爆炸链整段死路,只能等 600t 计时爆）。与 spawnImmuneCd
+    //   同位每 tick 恰一次（原版单数组,本仓双表拆分同衰减节拍）
+    for (const [k, v] of this.localImmuneCd) {
+      if (v <= 1) this.localImmuneCd.delete(k); else this.localImmuneCd.set(k, v - 1);
+    }
     // extraUpdates 子步循环（Projectile.cs:15331-15336）：numUpdates = extraUpdates，
     // while(numUpdates>=0) 跑完整 AI/位移/命中体——timeLeft 也在循环内逐子步消耗
     //（:15861），故弹体寿命同步缩短为 1/(N+1)。
@@ -6788,7 +6825,10 @@ export class Arrow extends Entity {
     } else if (this.naParent) {
       // ---- 618 星璇火花（aiStyle 119，Projectile.cs:35458-35540，617 伴生）----
       // 隐形伤弹（alpha 恒 255 :35533）：①父亡即 Kill（:35475-35478 proj4==null →
-      // ai[0]=420 + Kill）；②骑乘（:35483-35486 position += 父位移）；③速度向父
+      // ai[0]=420 + Kill）；②骑乘（:35483-35486 position += proj4.position −
+      // proj4.oldPos[1]——★oldPos[1] = 父 2 update 前位（TrailingMode[617]==0 缺省
+      // 环滚 :17199-17203 每拍写）→ 骑乘 delta = 父【2 拍】位移,非 1 拍;守卫
+      // `oldPos[1] != Zero`（:35482）对已年长父弹恒真 → 子弹首拍即骑）；③速度向父
       // 符号步进 ±0.15/轴、|v|>6 归一 6（:35490-35495）；④ai[0] ≥ 420 停骑乘
       // （:35479-35481 直飞到 timeLeft 420 自然亡）；⑤★BJ348 尾迹尘 d86 1/2 掷
       // （:35517-35528，vel=弹速/noGravity/scale 1.5——可见面全靠此尘）。
@@ -6796,13 +6836,14 @@ export class Arrow extends Entity {
       const parent = this.naParent;
       if (parent.dead) { this.killNow(game); return; }       //（:35475-35478）
       if (this.naAi0 < 420) {
-        this.x += parent.cx - this.naLastPX;                 //（:35483-35486 骑乘）
-        this.y += parent.cy - this.naLastPY;
+        this.x += parent.cx - this.naPrevPX;                 //（:35483-35486 骑乘,2 拍 delta）
+        this.y += parent.cy - this.naPrevPY;
         this.vx += Math.sign(parent.cx - this.cx) * 0.15;    //（:35490-35492）
         this.vy += Math.sign(parent.cy - this.cy) * 0.15;
         const s618 = Math.hypot(this.vx, this.vy);
         if (s618 > 6) { this.vx *= 6 / s618; this.vy *= 6 / s618; }   //（:35493-35495）
       }
+      this.naPrevPX = this.naLastPX; this.naPrevPY = this.naLastPY;
       this.naLastPX = parent.cx;
       this.naLastPY = parent.cy;
       // ★BJ348 尘尾（:35517-35528）：1/2 掷 → d86 弹心（NewDust 后 position=Center 钉心、
@@ -6810,12 +6851,21 @@ export class Arrow extends Entity {
       //   （GetAlpha 缺省路径 A=0），**可见面全靠此尘尾**（用户实报"射弹从球体中生成"的
       //   视觉承载）。★2026-09-28 随动补式：customData=父球 → d86 骑父球本拍位移
       //   （Dust.cs:571-581 customData=Projectile → position+=父位移,active 门）,
-      //   followEnt 闭包承载（父死 → 零位移）——尘结贴球飞行,不再沿径拖尾散开。
+      //   followEnt 闭包承载（父死 → 零位移）。
+      // ★★2026-09-28 streak 成形修复（本刃定谳）：原版在 NewDust 后【整体覆写】
+      //   dust.velocity = 弹速（:35521）与 dust.scale = 1.5f（:35524）——NewDust 自带的
+      //   ±0.2/轴速度抖动与 ×0.8..1.2 scale 抖动被原版逐字抹除;本仓旧版把弹速经
+      //   spawn 形参传入（NewDust 语义 speed+jitter）→ 尘速 = 弹速±2/轴、scale 1.2..1.8。
+      //   弹速 ~6 时 ±2/轴 = ±26° 方向弥散 ×~65px 尘程 → 相邻拖尾链横向散开 ~40px,
+      //   12px 间距链断成弥散射斑 = 用户实报"粉色小射弹不成形"的第一因。修复 = 落尘后
+      //   精确覆写 velocity/scale（对齐原版覆写序）——streak 判据（拖尾链）自此成立。
       if (Math.random() < 0.5) {
         const d618 = game.spawnDust?.(this.cx - 4, this.cy - 4, 8, 8, 86,
           this.vx, this.vy, 0, null, 1.5, true);
         if (d618) {
-          d618.x = this.cx; d618.y = this.cy;
+          d618.x = this.cx; d618.y = this.cy;                //（:35520 position=Center 覆写）
+          d618.vx = this.vx; d618.vy = this.vy;              //（:35521 velocity=弹速 覆写,杀 ±2 抖动）
+          d618.scale = 1.5;                                  //（:35524 scale=1.5 覆写,杀 ×0.8..1.2）
           d618.followEnt = () => parent.dead
             ? { dx: 0, dy: 0 }
             : { dx: parent.x - (parent.oldX ?? parent.x), dy: parent.y - (parent.oldY ?? parent.y) };
@@ -6850,16 +6900,32 @@ export class Arrow extends Entity {
         if (Math.hypot(this.vx, this.vy) > 4) {
           if (Math.floor(Math.random() * 3) === 0) {
             const [ux, uy] = unit617();
+            // ★2026-09-28 streak 成形修复（同 618 尾尘）：原版 NewDust 后逐字段覆写
+            //   position（=心−向×10..21/×30,精确无 NewDust 的 +4 系统偏移）、velocity
+            //   （切向/反切向×6|3,杀 ±2/轴抖动）、scale（0.5+rand,杀 ×0.8..1.2）
+            //   （:35304-35312 / :35313-35321）——旧版经 spawn 形参传入 = 三抖动全保
+            //   留 → 环绕晕链散焦。修复 = 落尘后精确覆写（对齐原版覆写序）。
             if (Math.random() < 0.5) {
-              const d617a = game.spawnDust?.(this.cx - ux * (10 + Math.random() * 11),
-                this.cy - uy * (10 + Math.random() * 11), 1, 1,
+              const r617a = 10 + Math.random() * 11;           // rand(10..21)
+              const d617a = game.spawnDust?.(this.cx - ux * r617a - 4,
+                this.cy - uy * r617a - 4, 1, 1,
                 Math.random() < 0.5 ? 86 : 90,
                 -uy * 6, ux * 6, 0, null, 0.5 + Math.random(), true);   // 切向 = rot(+π/2)
-              if (d617a) { d617a.fadeIn = 0.5; d617a.followEnt = ride617; }
+              if (d617a) {
+                d617a.x = this.cx - ux * r617a; d617a.y = this.cy - uy * r617a;   //（:35307 覆写）
+                d617a.vx = -uy * 6; d617a.vy = ux * 6;         //（:35308 velocity 覆写,杀 ±2 抖动）
+                d617a.scale = 0.5 + Math.random();             //（:35309 scale 覆写,杀 ×0.8..1.2）
+                d617a.fadeIn = 0.5; d617a.followEnt = ride617;
+              }
             } else {
-              const d617b = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30,
+              const d617b = game.spawnDust?.(this.cx - ux * 30 - 4, this.cy - uy * 30 - 4,
                 1, 1, 240, uy * 3, -ux * 3, 0, null, 0.5 + Math.random(), true);
-              if (d617b) { d617b.fadeIn = 0.5; d617b.followEnt = ride617; }
+              if (d617b) {
+                d617b.x = this.cx - ux * 30; d617b.y = this.cy - uy * 30;   //（:35318 覆写）
+                d617b.vx = uy * 3; d617b.vy = -ux * 3;         //（:35319 反切向覆写）
+                d617b.scale = 0.5 + Math.random();             //（:35320 覆写）
+                d617b.fadeIn = 0.5; d617b.followEnt = ride617;
+              }
             }
           }
         } else {
@@ -6871,24 +6937,42 @@ export class Arrow extends Entity {
           if (Math.floor(Math.random() * 2) === 0) {
             {
               const [uxa, uya] = unit617();
-              const da = game.spawnDust?.(this.cx - uxa * (10 + Math.random() * 11),
-                this.cy - uya * (10 + Math.random() * 11), 1, 1, 86,
+              const ra617s = 10 + Math.random() * 11;
+              const da = game.spawnDust?.(this.cx - uxa * ra617s - 4,
+                this.cy - uya * ra617s - 4, 1, 1, 86,
                 -uya * 6, uxa * 6, 0, null, s617s, true);
-              if (da) { da.fadeIn = 0.5; da.followEnt = ride617; }
+              if (da) {
+                da.x = this.cx - uxa * ra617s; da.y = this.cy - uya * ra617s;   //（:35368 覆写）
+                da.vx = -uya * 6; da.vy = uxa * 6;         //（:35369 velocity 覆写,杀 ±2 抖动）
+                da.scale = s617s;                          //（:35370 scale 覆写,杀 ×0.8..1.2）
+                da.fadeIn = 0.5; da.followEnt = ride617;
+              }
             }
             {
               const [uxb, uyb] = unit617();
-              const db = game.spawnDust?.(this.cx - uxb * (10 + Math.random() * 11),
-                this.cy - uyb * (10 + Math.random() * 11), 1, 1, 90,
+              const rb617s = 10 + Math.random() * 11;
+              const db = game.spawnDust?.(this.cx - uxb * rb617s - 4,
+                this.cy - uyb * rb617s - 4, 1, 1, 90,
                 -uyb * 6, uxb * 6, 0, { r: 220, g: 20, b: 60, a: 255 }, s617s, true);
-              if (db) { db.fadeIn = 0.5; db.followEnt = ride617; }
+              if (db) {
+                db.x = this.cx - uxb * rb617s; db.y = this.cy - uyb * rb617s;   //（:35373 覆写）
+                db.vx = -uyb * 6; db.vy = uxb * 6;         //（:35374 覆写）
+                db.scale = s617s;                          //（:35375 覆写）
+                db.fadeIn = 0.5; db.followEnt = ride617;
+              }
             }
           } else {
             const [uxc, uyc] = unit617();
-            const dc = game.spawnDust?.(this.cx - uxc * (20 + Math.random() * 11),
-              this.cy - uyc * (20 + Math.random() * 11), 1, 1, 240,
+            const rc617s = 20 + Math.random() * 11;
+            const dc = game.spawnDust?.(this.cx - uxc * rc617s - 4,
+              this.cy - uyc * rc617s - 4, 1, 1, 240,
               uyc * 5, -uxc * 5, 0, null, s617s, true);
-            if (dc) { dc.fadeIn = 0.5; dc.followEnt = ride617; }
+            if (dc) {
+              dc.x = this.cx - uxc * rc617s; dc.y = this.cy - uyc * rc617s;   //（:35377 覆写）
+              dc.vx = uyc * 5; dc.vy = -uxc * 5;           //（:35378 反切向覆写）
+              dc.scale = s617s;                            //（覆写）
+              dc.fadeIn = 0.5; dc.followEnt = ride617;
+            }
           }
         }
       }
@@ -6913,9 +6997,15 @@ export class Arrow extends Entity {
               -Math.sin(a618) * 12, Math.cos(a618) * 12,
               Math.max(1, Math.trunc(this.damage / 2)), 0, 618,
               { grav: 0, life: 420, pierce: -1 });
+            // NewProjectile(Center.X,Center.Y) 居中语义（:10238-10239 position=(X−w/2,Y−h/2)）
+            // → 618 盒(18×30)中心 = 父球心；旧码直传父心作左上 = +9/+15 恒偏
+            spark.x -= spark.w / 2;
+            spark.y -= spark.h / 2;
             spark.naParent = this;                           // ai[1] = ProjectileKey
             spark.naLastPX = this.cx;
             spark.naLastPY = this.cy;
+            spark.naPrevPX = this.cx;                        // 骑乘 2 拍 delta 基准（oldPos[1] 语义）
+            spark.naPrevPY = this.cy;
             spark.critChance = this.critChance;
             spark.armorPen = this.armorPen;
             ents617.add(spark, 'projectiles');
@@ -8368,9 +8458,8 @@ export class Arrow extends Entity {
       for (const [k, v] of this.meowHitCd) {
         if (v <= 1) this.meowHitCd.delete(k); else this.meowHitCd.set(k, v - 1);
       }
-      for (const [k, v] of this.localImmuneCd) {
-        if (v <= 1) this.localImmuneCd.delete(k); else this.localImmuneCd.set(k, v - 1);
-      }
+      // ★碎片链收口刃（2026-09-28）：localImmuneCd 递减上收到 fixedUpdate 头（与
+      //   spawnImmuneCd 同位,原版单数组公共面）——此处原 502 独占衰减删除防双衰减
     }
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);

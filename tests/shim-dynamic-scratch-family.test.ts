@@ -196,15 +196,15 @@ describe('★变体①修复锁 源级锁:各共享 scratch 烘焙点逐次上�
   it('Renderer.uploadScratchBake 助手（家族独立环形序号;★R3b-6 帧界重置+触帧账;★P1-B 子区参透传）在位', () => {
     // ★2026-09-28 锚重产:签 名扩可选子区参 (rw,rh)（bolt 链携 bbox 走 p1bRegionGate
     //  分档;不带参的家族调用点语义零变化）
-    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number): void {');
+    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): void {');   // ★P0 去画布化:preBytes 直挂
     expect(RDR).toContain('this.scratchBakeSeqs.set(fam, { n, f });');
-    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh);');
+    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);');
   });
 
   it('尘族 s1/s2 三烘焙点（dustTint/dustColor/dustDye）逐尘即刻上传;★R3b-1:环=池上界 6000', () => {
-    expect(RDR).toContain("this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING)");
-    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustColor', Renderer.DUST_BAKE_RING)");
-    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustDye', Renderer.DUST_BAKE_RING)");
+    expect(RDR).toContain("this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING, undefined, undefined, ida)");   // ★P0:ida 直挂零拷贝
+    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustColor', Renderer.DUST_BAKE_RING, undefined, undefined, idc)");   // ★P0:idc 直挂零拷贝
+    expect(RDR).toContain("this.uploadScratchBake(s2, 'dustDye', Renderer.DUST_BAKE_RING, undefined, undefined, idd)");   // ★P0:idd 直挂零拷贝
     expect(RDR).toContain('private static readonly DUST_BAKE_RING = 6000;');
   });
 

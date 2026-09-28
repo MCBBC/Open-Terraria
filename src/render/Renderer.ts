@@ -7475,8 +7475,13 @@ export class Renderer {
    *  quad 实采 scratch 左上 (0,0,rw,rh) 时按 p1bRegionGate 分档走 texRefreshRegion
    *  子区增量（boltBake=烘焙 bbox;雷暴持续期 boltScratch 恒大滞回不回落,
    *  整幅/op 收益与风险同 accScratch 族判）;不带子区参的家族调用点（尘/飞灵/
-   *  wingTint/mountTint——实采≈全幅）语义零变化。 */
-  uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number): void {
+   *  wingTint/mountTint——实采≈全幅）语义零变化。
+   *  ★P0 去画布化（2026-09-28 灾难链定谳）：可选 preBytes=烘焙点已持现成
+   *  ImageData 直挂（R1b-6 重放快照的字节源）——尘族三烘焙点的 getImageData
+   *  产物（ida/idc/idd）本就在手,直传=快照零拷贝零新分配（霜月帧数千 bake
+   *  的 canvas 出生风暴根治刀;缺省 undefined=snapBakeRegion 现取,语义同）。 */
+  uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,
+    preBytes?: ImageData): void {
     if (!Renderer.bgl || !Renderer.bglShim) return;
     const sh = this.bglShimReg();
     sh.markDynamic(img);
@@ -7490,7 +7495,7 @@ export class Renderer {
     const rec = this.scratchBakeSeqs.get(fam);
     const n = rec && rec.f === f ? rec.n + 1 : 1;
     this.scratchBakeSeqs.set(fam, { n, f });
-    sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh);
+    sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);
   }
   /** 共享 scratch 烘焙环形序号（按家族独立;★R3b-6 帧界重置+触帧账:
    *  n=帧内序号,f=最近触帧——600 帧未触家族删账防瞬态实体 id 键驻留） */
@@ -7624,7 +7629,8 @@ export class Renderer {
         c1.putImageData(ida, 0, 0);
         // ★变体①终扫:逐尘烘焙即刻上传（markDynamic 的 flush 期刷新读【末次】烘焙
         //  字节——同帧多尘异 tint 时先行尘 quad 全错拿末尘内容,I类 bolt 同病）
-        this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING);   // ★R3b-1:环=池上界 6000（旧 1024<池=同帧撞键）
+        //  ★P0 去画布化:ida=烘焙点现成 ImageData 直挂（快照零拷贝;canvas 出生风暴根治）
+        this.uploadScratchBake(s1, 'dustTint', Renderer.DUST_BAKE_RING, undefined, undefined, ida);   // ★R3b-1:环=池上界 6000（旧 1024<池=同帧撞键）
         ctx.save();
         ctx.translate(px, py);
         if (d.rotation) ctx.rotate(d.rotation);
@@ -7652,7 +7658,7 @@ export class Renderer {
               idc.data[i + 2] = idc.data[i + 2] * cp43.b;
             }
             c2.putImageData(idc, 0, 0);
-            this.uploadScratchBake(s2, 'dustColor', Renderer.DUST_BAKE_RING);   // ★变体①终扫:逐尘烘焙即刻上传;★R3b-1:环=池上界 6000
+            this.uploadScratchBake(s2, 'dustColor', Renderer.DUST_BAKE_RING, undefined, undefined, idc);   // ★变体①终扫:逐尘烘焙即刻上传;★R3b-1:环=池上界 6000;★P0:idc 直挂零拷贝
             ctx.save();
             ctx.translate(px, py);
             if (d.rotation) ctx.rotate(d.rotation);
@@ -7750,7 +7756,7 @@ export class Renderer {
                 canvas = cc;
               } else {
                 canvas = null;   // 动态族直接用 s2 现画
-                this.uploadScratchBake(s2, 'dustDye', Renderer.DUST_BAKE_RING);   // ★变体①终扫:逐尘烘焙即刻上传;★R3b-1:环=池上界 6000
+                this.uploadScratchBake(s2, 'dustDye', Renderer.DUST_BAKE_RING, undefined, undefined, idd);   // ★变体①终扫:逐尘烘焙即刻上传;★R3b-1:环=池上界 6000;★P0:idd 直挂零拷贝
               }
             } else canvas = null;
           }

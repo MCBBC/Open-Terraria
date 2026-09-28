@@ -68,8 +68,13 @@ interface QuadRec {
   preTex: TexEntry | null;
   pair: PairReg | null;               // 尘预乘对合并纹理记录
   /** ★R1b-6:bake 期字节快照（preTex 非 null 时由 uploadScratchNow 定格）——
-   *  GL 失败 replay2D 直画共享 scratch=末次烘焙字节的错画源,快照=各自 bake 内容 */
-  preSnap: HTMLCanvasElement | null;
+   *  GL 失败 replay2D 直画共享 scratch=末次烘焙字节的错画源,快照=各自 bake 内容。
+   *  ★P0 去画布化（2026-09-28 灾难链定谳）:快照由「每 bake createElement 一张
+   *  新画布」改【区域字节 ImageData】——霜月尘帧数千 bake 曾打出 531-2376
+   *  canvas/秒出生风暴（GC 432-580MB 锯齿→CONTEXT_LOST×N→GPU 压力熔断→chunk
+   *  降档+波场看门狗回落全 2D）;重放经 preSnapScratch 共享面中转（putImageData）,
+   *  稳态零画布出生零 GPU 面分配。每 bake 独立对象无池化无容量=R1b-6 语义原样。 */
+  preSnap: ImageData | null;
   /** ★UV 空间分道（2026-09-24 角色透明案定谳修正）:region=裁剪小纹理(UV=0,0,sw,sh)
    *  /full=全画布纹理(UV=sx,sy,sw,sh=页内矩形)/pair=尘对合并面(UV=0,0,w,h)。
    *  曾把页内矩形直接喂裁剪纹理 → UV 出界 CLAMP=大面积透明/常量色块（用户实报案）。 */
@@ -88,12 +93,15 @@ interface PairReg {
   add: HTMLCanvasElement;             // 吞抑标记（后随 add drawImage）
 }
 
-/** ★R1b-6 bake 快照账（uploadScratchNow 产物;pending/multi 共用值型） */
+/** ★R1b-6 bake 快照账（uploadScratchNow 产物;pending/multi 共用值型）
+ *  ★P0 去画布化:snap=区域字节 ImageData（每 bake 独立对象,无池化无容量概念
+ *  ——R1b-6「重放=各自 bake 字节」语义不变,风暴根治）;preBytes=烘焙点已持
+ *  现成 ImageData 直挂（尘族三烘焙点——零拷贝零新分配支）。 */
 interface BakeSnap {
   img: object;
   tex: TexEntry;
-  /** bake 期字节定格拷贝（重放面直画源;null=快照失败按旧链 p.img 兜底） */
-  snap: HTMLCanvasElement | null;
+  /** bake 期字节定格（重放面字节源;null=快照失败按旧链 p.img 兜底） */
+  snap: ImageData | null;
 }
 
 /** ★C5 雨批引用（2026-09-26 rain-gl 收官刀;WeatherRenderer 构建,Renderer
@@ -448,11 +456,16 @@ export class GLShimExecutor {
    *  全错）。本口在字节仍新鲜的 bake 点立即 texRefresh 到【调用方给的稳定键】
    *  （跨帧复用同纹理,零 createTexture 抖动）,挂入 pending 由下一个该 img 的
    *  acc drawImage 消费（rec.preTex=直取,resolveTex 不再重传）。
-   *  ★R1b-6:同时快照 bake 字节（一次性小 canvas 拷贝,bolt/shine/尘 tint 共用
-   *  scratch 族代价可忽略）——GL 中途失败走 replay2D 时 drawRec2D 直画 p.img=
-   *  共享 scratch 【当前】字节=末次烘焙内容（先行 quad 重放错画）;携带快照后
-   *  重放按各自 bake 内容逐位还原。preTex 纹理被层 LRU 逐出（texAlive=false →
-   *  resolveTex null → accFail 重放）同被本快照兜住。
+   *  ★R1b-6:同时快照 bake 字节——★P0 去画布化（2026-09-28 灾难链定谳）:旧实现
+   *  每 bake createElement 一张新画布,霜月尘帧数千 bake=canvas 出生风暴
+   *  （实测 2441.7/s·探针 _presnap-storm-probe;用户实报 531-2376/s→GC 432-580MB
+   *  锯齿→CONTEXT_LOST×N→GPU 压力熔断 3 次/10s→chunk 192→96→64+主画布重建→
+   *  波场看门狗 8235ms 回落全 2D）。现=【区域字节快照】:getImageData(0,0,w,h)
+   *  一次性 CPU 拷贝（尘 s1/s2/boltScratch 等 willReadFrequently 软面=纯 memcpy;
+   *  bolt 按烘焙 bbox 子区,严格小于旧整幅画布拷贝;烘焙点已持现成 ImageData 时
+   *  经 preBytes 直挂=零拷贝零新分配）——稳态零画布出生零 GPU 面分配。重放面=
+   *  putImageData 到模块级共享 scratch（preSnapScratch,滞回回落 accScratch 判例）。
+   *  快照缺失（极端:非 2D 面/读回失败）仍按旧链 p.img 兜底。
    *  ★R3b-4:shineCell 键触帧账+帽（CAP 超限清扫 600 帧未触键 dropTexture——
    *  键空间=可见 shine 格并集,相机漫游无界增长会顶替 chunk 页等活纹理）。
    *  ★P1-B（2026-09-28）:可选子区参 (rw,rh)——bake 链 quad 实采 scratch 左上
@@ -460,7 +473,8 @@ export class GLShimExecutor {
    *  boltScratch 恒大滞回不回落,整幅/op=与 bake bbox 无关的浪费;子区门同判）;
    *  不带子区参的调用点（shine/empressTint——实采≈全幅,子区无收益）保整幅链。
    *  无 GL/非 bgl 会话 no-op（2D 兜底链本就逐 bolt 即画,无此病）。 */
-  uploadScratchNow(img: HTMLCanvasElement, key: string, rw?: number, rh?: number): void {
+  uploadScratchNow(img: HTMLCanvasElement, key: string, rw?: number, rh?: number,
+    preBytes?: ImageData): void {
     if (!this.active || !this.glw || this.glw.unavailable) return;
     const regionPath = rw !== undefined && rh !== undefined && !GLShimExecutor.P1B_REGION_OFF
       && p1bRegionGate(rw, rh, img.width, img.height);
@@ -469,7 +483,7 @@ export class GLShimExecutor {
       : this.glw.texRefresh(key, img);
     if (regionPath && e) this.stats.regionUploads++;
     if (!e) return;
-    const rec0 = { img, tex: e, snap: this.snapBakeBytes(img) };
+    const rec0 = { img, tex: e, snap: preBytes ?? this.snapBakeRegion(img, rw, rh) };
     this.bakedTexPending = rec0;
     this.bakedTexMulti.set(img, rec0);
     if (key.startsWith('shineCell:')) {
@@ -494,15 +508,20 @@ export class GLShimExecutor {
   private _frameSeq = 0;
   private static SHINE_KEY_CAP = 1024;
   private static SHINE_KEY_IDLE = 600;
-  /** ★R1b-6 bake 字节快照（一次性小 canvas;bake 期字节定格,重放期直画） */
-  private snapBakeBytes(img: HTMLCanvasElement): HTMLCanvasElement | null {
-    if (typeof document === 'undefined' || img.width <= 0 || img.height <= 0) return null;
-    const c = document.createElement('canvas');
-    c.width = img.width; c.height = img.height;
-    const g = c.getContext('2d');
+  /** ★R1b-6 bake 字节快照 → ★P0 去画布化（2026-09-28 灾难链定谳,原 snapBakeBytes）:
+   *  区域字节定格=getImageData(0,0,w,h) 一次性 CPU 拷贝（快照域=消费 rec 的实采域:
+   *  无 (rw,rh)=全幅——尘 8×8/shine 40×40/empressTint 帧面;带 (rw,rh)=烘焙子区——
+   *  bolt bbox;越界钳回画面）。零画布出生（旧=每 bake createElement 一张,霜月
+   *  数千 bake/帧=出生风暴本体）。非 2D 面/零尺寸/读回失败 → null（重放退 p.img
+   *  旧链,与旧快照失败支同相）。 */
+  private snapBakeRegion(img: HTMLCanvasElement, rw?: number, rh?: number): ImageData | null {
+    if (img.width <= 0 || img.height <= 0) return null;
+    const g = typeof img.getContext === 'function' ? img.getContext('2d') : null;
     if (!g) return null;
-    g.drawImage(img, 0, 0);
-    return c;
+    const w = Math.min(rw ?? img.width, img.width);
+    const h = Math.min(rh ?? img.height, img.height);
+    if (w <= 0 || h <= 0) return null;
+    try { return g.getImageData(0, 0, w, h); } catch { return null; }
   }
 
   // ================= ctx 包装 =================
@@ -1140,7 +1159,7 @@ export class GLShimExecutor {
     dx: number, dy: number, dw: number, dh: number, rot: number, alpha: number,
     fr: number, fg: number, fb: number, flipX: boolean, flipY: boolean, smooth: boolean,
     dynamic: boolean, pair: PairReg | null, preTex: TexEntry | null = null,
-    preSnap: HTMLCanvasElement | null = null): void {
+    preSnap: ImageData | null = null): void {
     const rec = this.pool ?? ({} as QuadRec);
     this.pool = rec.next;
     rec.tier = tier; rec.solid = solid; rec.img = img;
@@ -1590,7 +1609,16 @@ export class GLShimExecutor {
       ctx.imageSmoothingEnabled = p.smooth;
       // ★R1b-6:preTex rec 重放吃 bake 期字节快照（p.img=共享 scratch,直画=
       //  末次烘焙内容错画;快照缺失（极端:快照失败）才按 p.img 兜底）
-      const src: CanvasImageSource = p.preSnap ?? p.img;
+      //  ★P0 去画布化:快照=ImageData 区域字节——putImageData 进共享回放
+      //  scratch（逐 rec 顺序覆写=安全）再取样;src 矩形 ⊆ 快照域才吃（越界=
+      //  防御支退 p.img 旧链,现调用点恒 ⊆:尘=全幅/bolt=烘焙 bbox 子区）
+      let src: CanvasImageSource = p.img;
+      const sn = p.preSnap;
+      if (sn && p.sx + p.sw <= sn.width && p.sy + p.sh <= sn.height) {
+        const sc = preSnapScratch(sn.width, sn.height);
+        const g = sc ? sc.getContext('2d') : null;
+        if (sc && g) { g.putImageData(sn, 0, 0); src = sc; }
+      }
       if (p.rot || p.flipX || p.flipY) {
         ctx.translate(p.dx + p.dw / 2, p.dy + p.dh / 2);
         if (p.rot) ctx.rotate(p.rot);
@@ -1661,4 +1689,32 @@ function accScratch(w: number, h: number): HTMLCanvasElement | null {
     if (tw < cw || th < ch) { _accScratch.width = tw; _accScratch.height = th; }
   }
   return _accScratch;
+}
+
+/** ★P0 去画布化重放中转 scratch（2026-09-28 灾难链定谳刃）：preSnap 字节快照
+ *  （ImageData）putImageData 的共享面——只被 drawRec2D 重放路径触达（GL 失败
+ *  降级帧）,稳态零创建零触碰;逐 rec 顺序 putImageData 覆写 (0,0,w,h) 后立即
+ *  drawImage 消费=单线程串行安全。滞回回落同 accScratch/R3b-2 判例（防单次
+ *  离群大快照把面永久撑大）。快照字节经 putImageData 整域替换（含 α）,取样域
+ *  (sx..sx+sw, sy..sy+sh) ⊆ 快照域由调用侧守卫。 */
+let _preSnapScratch: HTMLCanvasElement | null = null;
+const PRE_SNAP_SCRATCH_BASE = 64;
+function preSnapScratch(w: number, h: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  if (!_preSnapScratch) {
+    _preSnapScratch = document.createElement('canvas');
+    _preSnapScratch.width = PRE_SNAP_SCRATCH_BASE;
+    _preSnapScratch.height = PRE_SNAP_SCRATCH_BASE;
+  }
+  const cw = _preSnapScratch.width, ch = _preSnapScratch.height;
+  if (w > cw || h > ch) {
+    if (w > cw) _preSnapScratch.width = w;      // 涨:直接扩到需求(尺寸变化自动清屏)
+    if (h > ch) _preSnapScratch.height = h;
+    return _preSnapScratch;
+  }
+  if (w * 2 <= cw && h * 2 <= ch) {             // 滞回:需求≤当前一半才缩
+    const tw = Math.max(PRE_SNAP_SCRATCH_BASE, w), th = Math.max(PRE_SNAP_SCRATCH_BASE, h);
+    if (tw < cw || th < ch) { _preSnapScratch.width = tw; _preSnapScratch.height = th; }
+  }
+  return _preSnapScratch;
 }

@@ -202,7 +202,7 @@ describe('★P1-B ④ 源级锁:GLSpriteLayer.texRefreshRegion 三链分档+账�
   it('bolt bake 链携子区（bbox 实采域）;Renderer 中介透传', () => {
     expect(PROJ).toContain("r9.uploadScratchBake(sc, 'boltBake', 1024, sx, sy);");
     const RDR = readFileSync(join(__dirname, '../src/render/Renderer.ts'), 'utf8');
-    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number): void {');
-    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh);');
+    expect(RDR).toContain('uploadScratchBake(img: HTMLCanvasElement, fam: string, ring: number, rw?: number, rh?: number,\n    preBytes?: ImageData): void {');   // ★P0 去画布化:preBytes 直挂
+    expect(RDR).toContain('sh.uploadScratchNow(img, `${fam}:${n % ring}`, rw, rh, preBytes);');
   });
 });

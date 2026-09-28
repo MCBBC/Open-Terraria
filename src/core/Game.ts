@@ -18791,7 +18791,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               fire: () => { midSwing6152 = true; fireBloom6152(); midSwing6152 = false; },
               gate: (): boolean => {
                 const swT = this.swing?.t ?? 0, swDur = this.swing?.dur ?? 0;
-                return !(swDur > 0 && swT < swDur - winTail6152);
+                // ★BJ374 边界勘误同 3852 支：anim=swT−1（起手拍已递减）→ 静默 ⟺ swT<=dur−win
+                return !(swDur > 0 && swT <= swDur - winTail6152);
               },
             };
             // ★F-03：窗已拉伸 → 窗冷却=拉伸窗本身（旧式再 ×2.5 = 双重缩放）

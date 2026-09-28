@@ -162,7 +162,15 @@ function shimmerCornerColors(
 }
 
 /** 2D tile quad 入批环（设备空间;uv=全跨度−ε tie 补正,quadSprite 同式）。
- *  r=g=b=1 → 恒等调制;微光 tile 传四角逐通道色。 */
+ *  ★rgb 预乘 per-quad α（2026-09-28 半砖/斜坡水色差定谳单点刀）:quadBatchRgba
+ *  着色器契约 = 顶点 rgb【已预乘 quad α】（PRECIP_FS out=(c.rgb×vCol.rgb,
+ *  c.a×vCol.a) 不再乘 α;buildPrecipBatch 沙尘叠画 vCol.rgb=tint×ga=族约定）——
+ *  旧码直写未预乘白/顶点色,前景 α<1 quad 在 (ONE,1−SA) 混合下 rgb 全强入面:
+ *  out=S+dst×(1−α) ≠ 2D globalAlpha 语义 out=S×α+dst×(1−α)。探针
+ *  _slope-water-flip-ab 定谳面:前景格 wOn=[53,92,214] vs wOff=[49,61,119]
+ *  （Δ=0.5·S_texel;bg+fg 叠格 1.5·S 钳 255）=用户实报「水格子太亮像叠色/
+ *  偶发闪烁」。微光重放用色由 replayLiqRun2D 按 R2b-F3 unpre 惯例拆回。
+ *  r=g=b=1 → 恒等调制(预乘后=α);微光 tile 传四角逐通道色(预乘 gaT)。 */
 function batQuad(
   sx: number, sy: number, sw: number, shSrc: number, texW: number, texH: number,
   dx0: number, dy0: number, dw: number, dh: number, a: number,
@@ -173,10 +181,10 @@ function batQuad(
   const ua = (sx - LIQ_TIE_EPS) / texW, ub = (sx + sw - LIQ_TIE_EPS) / texW;
   const va = (sy - LIQ_TIE_EPS) / texH, vb = (sy + shSrc - LIQ_TIE_EPS) / texH;
   const D = _batRing;
-  const r0 = cols ? cols[colOff] : 1, g0 = cols ? cols[colOff + 1] : 1, b0 = cols ? cols[colOff + 2] : 1;
-  const r1 = cols ? cols[colOff + 3] : 1, g1 = cols ? cols[colOff + 4] : 1, b1 = cols ? cols[colOff + 5] : 1;
-  const r2 = cols ? cols[colOff + 6] : 1, g2 = cols ? cols[colOff + 7] : 1, b2 = cols ? cols[colOff + 8] : 1;
-  const r3 = cols ? cols[colOff + 9] : 1, g3 = cols ? cols[colOff + 10] : 1, b3 = cols ? cols[colOff + 11] : 1;
+  const r0 = (cols ? cols[colOff] : 1) * a, g0 = (cols ? cols[colOff + 1] : 1) * a, b0 = (cols ? cols[colOff + 2] : 1) * a;
+  const r1 = (cols ? cols[colOff + 3] : 1) * a, g1 = (cols ? cols[colOff + 4] : 1) * a, b1 = (cols ? cols[colOff + 5] : 1) * a;
+  const r2 = (cols ? cols[colOff + 6] : 1) * a, g2 = (cols ? cols[colOff + 7] : 1) * a, b2 = (cols ? cols[colOff + 8] : 1) * a;
+  const r3 = (cols ? cols[colOff + 9] : 1) * a, g3 = (cols ? cols[colOff + 10] : 1) * a, b3 = (cols ? cols[colOff + 11] : 1) * a;
   const x1 = dx0 + dw, y1 = dy0 + dh;
   // TRIANGLES 两三角 (p0,p1,p2)+(p0,p2,p3)（buildRainBatch 同式）
   D[o] = dx0; D[o + 1] = dy0; D[o + 2] = ua; D[o + 3] = va; D[o + 4] = r0; D[o + 5] = g0; D[o + 6] = b0; D[o + 7] = a;
@@ -192,10 +200,14 @@ function batQuad(
 }
 
 /** 批段 2D 降级重放（GLShimExecutor.replay2D 经 rec.batch.replay 调用;宁回退不丢精灵）。
- *  恒等 tile:drawImage 原参;微光 tile:drawImage+2×2 子块 multiply（顶点环内四角色
- *  重构双线性——降级帧已是灾难路径,census 有界登记:子块中心相对 quad 而非 tile）。 */
+ *  恒等 tile:drawImage 原参;微光 tile（hasCols=段内含调制 quad,flushRun 按段同质性
+ *  传入）:drawImage+2×2 子块 multiply（顶点环内四角色重构双线性——降级帧已是灾难
+ *  路径,census 有界登记:子块中心相对 quad 而非 tile）。
+ *  ★hasCols 显式旗（2026-09-28 rgb 预乘同刀）:环内 rgb 已预乘 α（batQuad 族约定）
+ *  ——旧「r!==1 即微光」启发式在预乘后会把 α<1 普通水 quad（rgb=α≠1）误判成调制
+ *  quad;段旗消除歧义。multiply 用色按 R2b-F3 unpre 惯例拆回未预乘原值。 */
 function replayLiqRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads: number,
-  tex: CanvasImageSource): void {
+  tex: CanvasImageSource, hasCols: boolean): void {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.imageSmoothingEnabled = false;
@@ -208,12 +220,13 @@ function replayLiqRun2D(ctx: CanvasRenderingContext2D, startQuad: number, quads:
     ctx.globalAlpha = D[o + 7];
     ctx.drawImage(tex, _batMeta[m], _batMeta[m + 1], _batMeta[m + 2], _batMeta[m + 3],
       D[o], D[o + 1], dw, dh);
-    const r0 = D[o + 4], g0 = D[o + 5], b0 = D[o + 6];
-    const r1 = D[o + 12], g1 = D[o + 13], b1 = D[o + 14];
-    const r2 = D[o + 20], g2 = D[o + 21], b2 = D[o + 22];
-    const r3 = D[o + 44], g3 = D[o + 45], b3 = D[o + 46];
-    if (r0 !== 1 || g0 !== 1 || b0 !== 1 || r1 !== 1 || g1 !== 1 || b1 !== 1
-      || r2 !== 1 || g2 !== 1 || b2 !== 1 || r3 !== 1 || g3 !== 1 || b3 !== 1) {
+    if (hasCols) {
+      const ga = D[o + 7];
+      const unpre = ga > 0 && ga < 1 ? 1 / ga : 1;   // ga=1 恒等;ga≤0 防御恒等（quad 本就不可见）
+      const r0 = D[o + 4] * unpre, g0 = D[o + 5] * unpre, b0 = D[o + 6] * unpre;
+      const r1 = D[o + 12] * unpre, g1 = D[o + 13] * unpre, b1 = D[o + 14] * unpre;
+      const r2 = D[o + 20] * unpre, g2 = D[o + 21] * unpre, b2 = D[o + 22] * unpre;
+      const r3 = D[o + 44] * unpre, g3 = D[o + 45] * unpre, b3 = D[o + 46] * unpre;
       // 微光调制 quad:2×2 子块 multiply（顶点色域即裁剪角域,u/v 取子块中心）
       const subW = Math.ceil(dw / 2), subH = Math.ceil(dh / 2);
       ctx.globalAlpha = 1;
@@ -1108,18 +1121,21 @@ export function drawVanillaLiquids(
   let runStart = _batN;
   let runImg: CanvasImageSource | null = null;
   let runKey = '';
+  let runCols = false;   // 本段含微光调制 quad（重放面用;段按 sheet 同质——微光表
+                         // Misc_water_14 与普通水表 0-13 文件互异,不可能混段）
   let tVisCache = -1;   // 微光 tVis 每 pass 取一次（visEffectFrames 渲染段内不变）
   const flushRun = (): void => {
     const quads = _batN - runStart;
     if (quads <= 0 || !runImg || !bat) return;
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
-    const img = runImg, s0 = runStart, nQ = quads, k = runKey;
+    const img = runImg, s0 = runStart, nQ = quads, k = runKey, cols = runCols;
     bat.emit(img, k, _batRing.subarray(s0 * LIQ_QUAD_FLOATS, _batN * LIQ_QUAD_FLOATS), nQ,
-      (raw) => replayLiqRun2D(raw, s0, nQ, img));
+      (raw) => replayLiqRun2D(raw, s0, nQ, img, cols));
     if (gateCapture && !isBackground) _fgRuns.push({ img, key: k, start: s0, quads: nQ });
     runStart = _batN;
     runImg = null;
+    runCols = false;
   };
   if (gateCapture && isBackground) {
     _footWld.a = wldT.a; _footWld.b = wldT.b; _footWld.c = wldT.c;
@@ -1229,6 +1245,7 @@ export function drawVanillaLiquids(
           if (batQuad(sx, srcY, sw, waveSrcH, tex.width, tex.height,
             sex0, sey0, sex1 - sex0, sey1 - sey0, gaT, _batCols, 0)) {
             batched = true;
+            runCols = true;
             if (doSpark) flushRun();   // sparkle=ADD quad,须在基底层批段之后（层序）
           } else {
             batOn = false;             // 帽溢出:批段收尾,本 tile 落 CPU 原链

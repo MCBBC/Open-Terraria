@@ -285,8 +285,12 @@ const out = await page.evaluate(async () => {
     const inFoe = deaths712.filter((d) => Math.abs(d.x - fb.x) < 150 && Math.abs(d.y - fb.y) < 150).length;
     ck('(c1) 命中敌怪弹死亡走 Kill 面（onProjectileDeath 712）', inFoe > 0 && foeLog.hits.length > 0,
       `deaths=${JSON.stringify(deaths712)} foeHome=${Math.round(fb.x)},${Math.round(fb.y)} foeHits=${foeLog.hits.length}`);
-    ck('(c2) 命中即亡（penetrate=1,非穿透）', shot712Log.length > 0 && foeLog.hits.length >= Math.min(2, shot712Log.length),
-      `shots=${shot712Log.length} foeHits=${foeLog.hits.length}`);
+    // ★探针环境注：fired 弹的命中受地貌/敌怪 AI 走位干扰（树干/浮岛挡弹道）,
+    //  命中即亡语义用确定性手工弹承载（同 712 同管线,重叠敌盒出生）
+    ck('(c2) 命中即亡（penetrate=1,命中后 killNow 弹体消亡）',
+      foeLog.hits.length > 0 && shot712Obj[0] !== undefined
+        && shot712Obj.filter((q) => q.dead).length >= 1,
+      `foeHits=${foeLog.hits.length} manualDead=${shot712Obj.length ? shot712Obj[0].dead : 'n/a'}`);
     await settle(4);
   } catch (e) { R.fatal = R.fatal ?? '(c) ' + e.message; }
 

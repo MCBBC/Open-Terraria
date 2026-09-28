@@ -14,6 +14,7 @@ import {
   shimmerCornerColorsForTest, liqgl, liqglSetForTest,
   type LiqBatchEmit,
 } from '../src/render/VanillaLiquidRenderer';
+import { texId } from '../src/render/texId';
 import { TILE_DEFS } from '../src/data/tiles';
 
 const VL = readFileSync(join(__dirname, '../src/render/VanillaLiquidRenderer.ts'), 'utf8');
@@ -356,3 +357,169 @@ describe('★liqgl 结构锁', () => {
 
 /** 旗缺省值快照（灰度期 false）——转正后随旗面一起翻 */
 export const liqglDefault = liqgl;
+
+// ---------- ★rgb 预乘/键维度/采样一致性锁（2026-09-28 半砖/斜坡水色差定谳刀） ----------
+// 定谳面（scripts/_slope-water-flip-ab.mjs + _slope-water-dim-core.mjs）:
+//  · 前景 α=0.5 水格 wOn=[53,92,214] vs wOff=[49,61,119] —— batQuad 直写未预乘
+//    rgb,quadBatchRgba (ONE,1−SA) 下 out=S+dst×(1−α) ≠ 2D out=S×α+dst×(1−α);
+//  · 键维度三角（img↔key↔texs entry）逐环核实无损:imgDim=[48,1360] / entry=[48,1360]
+//    / 纹理字节=sheet（diff=0）——上传/键语义本就正确,锁防回归。
+/** 普通水池 store（liquidType 1→vt 0,前景 α=0.5） */
+function makeWaterStore(): TileStore {
+  const st = new TileStore(120, 80);
+  const dirt = TILE_DEFS.findIndex((d) => d?.key === 'dirt');
+  const set = (x: number, y: number, t: number, liquid = 0, lt = 1) => {
+    const i = st.idx(x, y);
+    st.type[i] = t; st.flags[i] = t ? 1 : 0;
+    st.liquid[i] = liquid; st.liquidType[i] = lt;
+  };
+  for (let x = 0; x < 120; x++) set(x, 40, dirt);
+  for (let x = 20; x <= 60; x++) for (let y = 30; y <= 39; y++) set(x, y, 0, 255, 1);
+  return st;
+}
+
+describe('★liqgl rgb 预乘锁（quadBatchRgba 着色器契约=顶点 rgb 已预乘 quad α）', () => {
+  it('普通水 quad:12 个颜色分量逐位 === α（预乘恒等式;α<1 时 rgb 必须随 α 缩）', () => {
+    resetLiquidBatchForFrame(-1);
+    const { caps } = drawWithBatch(makeWaterStore(), false, false);
+    expect(caps.length).toBeGreaterThanOrEqual(1);
+    let quads = 0, alphaLt1 = 0;
+    for (const c of caps) {
+      for (let q = 0; q < c.quads; q++) {
+        const o = q * 48;
+        const a = c.data[o + 7];
+        expect(a).toBeGreaterThan(0); expect(a).toBeLessThanOrEqual(1);
+        if (a < 1) alphaLt1++;
+        for (let v = 0; v < 6; v++) {
+          // 非调制 quad:rgb = 1×α → 12 分量与 α 同一 f32 值（逐位,非近似）
+          expect(c.data[o + v * 8 + 4]).toBe(a);
+          expect(c.data[o + v * 8 + 5]).toBe(a);
+          expect(c.data[o + v * 8 + 6]).toBe(a);
+        }
+        quads++;
+      }
+    }
+    expect(quads).toBeGreaterThan(10);
+    expect(alphaLt1).toBeGreaterThan(0);   // 前景水 α=0.5——旧病（rgb=1 恒等）必爆红的判别面
+  });
+
+  it('微光 quad:rgb = 顶点色×gaT（预乘,R<G<B<α 域;非调制 quad 的 rgb===α 判别不串）', () => {
+    resetLiquidBatchForFrame(-1);
+    const { caps } = drawWithBatch(makeStore(), false, false);   // makeStore=微光池(lt=4→vt 3)
+    let quads = 0;
+    for (const c of caps) {
+      for (let q = 0; q < c.quads; q++) {
+        const o = q * 48;
+        const a = c.data[o + 7];
+        expect(a).toBeGreaterThan(0);
+        for (let v = 0; v < 6; v++) {
+          const r = c.data[o + v * 8 + 4], g = c.data[o + v * 8 + 5], b = c.data[o + v * 8 + 6];
+          // 微光基色域 (0.647..0.804, 0.510..0.804, 0.933..1)×gaT —— 严格小于 α（基色<1）
+          expect(r).toBeGreaterThan(0); expect(r).toBeLessThanOrEqual(a);
+          expect(g).toBeLessThanOrEqual(a);
+          expect(b).toBeLessThanOrEqual(a + 1e-6);   // B 分量基色可近 1（f32 舍入容差）
+        }
+        quads++;
+      }
+    }
+    expect(quads).toBeGreaterThan(10);
+  });
+});
+
+describe('★liqgl 键维度锁（emit 键↔img↔纹理 entry 三角）', () => {
+  it('emit 键 = liq:<texId(img)>;gate 重发射 texFromImage 收到【同一 img 实例】', () => {
+    resetLiquidBatchForFrame(-1);
+    const { caps } = drawWithBatch(makeWaterStore(), false, false);
+    expect(caps.length).toBeGreaterThanOrEqual(1);
+    for (const c of caps) {
+      expect(c.key).toBe(`liq:${texId(c.img as object)}`);
+      const img = c.img as { width: number; height: number };
+      expect(img.width).toBeGreaterThan(0);
+      expect(img.height).toBeGreaterThan(0);
+    }
+    // gate 重发射:fake glw 的 texFromImage 记录 (key,img)——执行器契约=按【发射时的
+    // 同一 img】解析纹理（entry w/h=img w/h 由 texFromImage 构造保证;键维度错位
+    // （曾疑 ensureVImage 共享页位图/错位一个 TexEntry——探针证伪）无重建空间）
+    const st = makeWaterStore();
+    const { bgCaps, fgCaps } = (() => {
+      const bgCaps: BatCap[] = [];
+      const fgCaps: BatCap[] = [];
+      const mk = (sink: BatCap[]): LiqBatchEmit => ({
+        emit(img, key, data, quads, replay) {
+          sink.push({ img, key, data: data.slice(), quads, replay });
+          return true;
+        },
+      });
+      const { ctx } = makeCtx();
+      resetLiquidBatchForFrame(21);
+      drawVanillaLiquids(ctx, fakeAtlas, st, 40, 5, 5, 110, 55, 1000, true, 0, 0,
+        undefined, false, undefined, 21, null, mk(bgCaps), true);
+      drawVanillaLiquids(ctx, fakeAtlas, st, 40, 5, 5, 110, 55, 1000, false, 0, 0,
+        undefined, true, undefined, 21, null, mk(fgCaps), true);
+      return { bgCaps, fgCaps };
+    })();
+    const resolved: Array<{ key: string; img: unknown }> = [];
+    const glw = {
+      unavailable: false,
+      begin() { /* 绑定序在前例覆盖 */ },
+      isAccumOpen(name: string) { return name === 'world'; },
+      quadSprite() { /* 足迹面 */ },
+      quadBatchRgba() { return true; },
+      texFromImage(key: string, img: { width: number; height: number }) {
+        resolved.push({ key, img });
+        return { tex: {}, key, w: img.width, h: img.height, stamp: 1, bytes: 1, mipped: false };
+      },
+      texFromRegion() { return { tex: {}, key: '', w: 16, h: 16, stamp: 1, bytes: 1, mipped: false }; },
+      texAlive() { return true; },
+      pipeFboTex() { return {} as WebGLTexture; },
+      liqGateParams() { /* 参数面 */ },
+    } as unknown as GLSpriteLayer;
+    emitVanillaLiquidGate(glw, 1280, 800);
+    expect(resolved.length).toBe(fgCaps.length);
+    for (let i = 0; i < fgCaps.length; i++) {
+      expect(resolved[i].key).toBe(fgCaps[i].key);
+      expect(resolved[i].img).toBe(fgCaps[i].img);   // 同一实例（WeakMap texId 稳定）
+    }
+    void bgCaps;
+  });
+});
+
+describe('★liqgl 两臂采样一致性锁（批化全幅 UV vs shim er: 区域纹理 NEAREST 同 texel）', () => {
+  // 批化臂:采样域 [sx−ε, sx+sw−ε)（sheet 坐标）,dst 像素 i 采 texel
+  //   floor(sx−ε+(i+0.5)·sw/dw)（整数设备矩形;B1 quadExact 逐式论证同源）。
+  // shim 臂:texFromRegion 抠 [sx,sx+sw) 成小纹理,quadSprite 采样域 [−ε, sw−ε):
+  //   texel j=clamp(floor(−ε+(i+0.5)·sw/dw),0,sw−1),sheet texel=sx+j。
+  // ε=2⁻¹²:仅【精确 tie】(采样点恰落 texel 整数) 翻档,两臂同向取 c−1 → 逐 texel 等价。
+  const EPS = 1 / 4096;
+  /** floor(x−ε) 的有理精确版:x 恰为整数 → x−1,否则 floor(x) */
+  const floorTie = (x: number): number => (Number.isInteger(x) ? x - 1 : Math.floor(x));
+  const batchTexel = (i: number, sx: number, sw: number, dw: number): number =>
+    floorTie(sx - EPS + (i + 0.5) * (sw / dw));
+  const regionTexel = (i: number, sx: number, sw: number, dw: number): number =>
+    sx + Math.min(sw - 1, Math.max(0, floorTie((i + 0.5) * (sw / dw))));
+  it('全档缩放×位置×宽度网格:两臂 NEAREST texel 序列逐位一致', () => {
+    const scales = [1, 2, 0.5, 1.25, 0.8, 1.5, 2 / 3, 3];   // 2:1 整档 tie 全像素+分数档
+    const positions = [0, 16, 32, 640];                     // sx=0（CLAMP 边）+ 带内/跨带
+    const widths = [4, 8, 16];                              // 裁剪条/半砖/整格 sw
+    for (const s of scales) {
+      for (const sx of positions) {
+        for (const sw of widths) {
+          const dw = Math.max(1, Math.round(sw / s));
+          for (let i = 0; i < dw; i++) {
+            expect(batchTexel(i, sx, sw, dw)).toBe(regionTexel(i, sx, sw, dw));
+          }
+        }
+      }
+    }
+  });
+  it('结构锚:执行器批发射恒按 (batch.key, batch.img) 解析纹理;PRECIP_FS 预乘契约不被「补乘 α」', () => {
+    // 键维度:entry 尺寸=img 尺寸由 texFromImage(key, img) 构造保证——执行器两处
+    // 发射点（flushAcc/presentBatch）必须传 batch.img 本体（禁改传缓存/区域源）
+    expect(GE.match(/glw\.texFromImage\(p\.batch\.key, p\.batch\.img as TexImageSource, false, true\)/g)?.length).toBe(2);
+    // PRECIP_FS 契约:rgb 不再乘 vCol.a（预乘在构建侧;补乘=双重预乘=暗一档）
+    expect(GS).toContain('outColor = vec4(c.rgb * vCol.rgb, c.a * vCol.a);');
+    // batQuad 预乘 + 重放 unpre 配对
+    expect(VL).toContain('const r0 = (cols ? cols[colOff] : 1) * a');
+    expect(VL).toContain('(raw) => replayLiqRun2D(raw, s0, nQ, img, cols)');
+  });
+});
