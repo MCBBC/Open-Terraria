@@ -1281,7 +1281,7 @@ export function cageBandOffset(fam: CageFamily, frame: number): { dx: number; ro
   return { dx: Math.floor(frame / fam.xband.rows) * fam.xband.stride, row: frame % fam.xband.rows };
 }
 
-export interface DrawSource { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number }
+export interface DrawSource { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number }
 
 /**
  * 笼族一格绘制（TileDrawing.cs:1670-1716 顶盖段 1:1）。
@@ -1290,7 +1290,7 @@ export interface DrawSource { img: ImageBitmap | HTMLImageElement | HTMLCanvasEl
  * @param tileTop 本格 tileTop（DRAW_Y_OFFSET 恒 2）
  */
 export function drawCageCell(
-  ctx: CanvasRenderingContext2D, atlas: { ensureVImage: (f: string) => ImageBitmap | HTMLImageElement | null },
+  ctx: import('./canvasEnv').Ctx2D, atlas: { ensureVImage: (f: string) => ImageBitmap | HTMLImageElement | null },
   fam: CageFamily, r: DrawSource, x: number, y: number, fx: number, fy: number,
   px: number, py: number, tileTop: number, sheetH: number,
 ): void {

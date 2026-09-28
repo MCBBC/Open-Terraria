@@ -26,7 +26,7 @@ interface DustRec { x: number; y: number; w: number; h: number; type: number;
   speedX: number; speedY: number; alpha: number; scale: number; vy: number; vx: number; }
 
 function makeHooks(enemies: unknown[] = [], store?: TileStore,
-  dustLog?: DustRec[], loopLog?: string[]): GameHooks {
+  dustLog?: DustRec[], loopLog?: string[], critters: unknown[] = []): GameHooks {
   const hooks = {
     world: { store: store ?? new TileStore(200, 120) } as never,
     player: {
@@ -34,7 +34,7 @@ function makeHooks(enemies: unknown[] = [], store?: TileStore,
       facing: 1, vx: 0, vy: 0,
     } as never,
     enemies: () => enemies,
-    critters: () => [],
+    critters: () => critters,
     npcs: () => [],
     spawnDrop: () => null,
     damagePlayer: (): number => 0,
@@ -207,5 +207,55 @@ describe('BJ374-④ 发射链源锚(修前五差异回归闩)', () => {
   it('右键窗长=useAnimation+1(ApplyItemAnimation :4471-4484 style5+autoReuse 补间帧)', () => {
     const s = src();
     expect(s).toMatch(/\(bsData\?\.useAnimation \?\? 25\) \+ 1/);
+  });
+});
+
+// ================= BJ381 704 小动物命中面(用户实报"龙卷风不伤小动物") =================
+// 定谳:原版 critter SetDefaults 无 friendly=true(兔 46 族 NPC.cs:9364-9373 仅
+// width/aiStyle7/lifeMax5/catchItem)⇒ Damage_PVE_Inner :12618 flag=!friendly 恒真;
+// 拒收唯 CanNPCBeHitByPlayerOrPlayerProjectile(Player.cs:20673-20689)=dontHurtCritters
+// ∪ minion/MinionShot/sentry/SentryShot——704 魔法弹全不沾 ⇒ 原版龙卷照伤小动物。
+// 本仓 critters 独立桶不入 game.enemies(),dealContacts 只扫敌桶=整缺;修=接单源
+// hitCritters(穿透弹范式 WeaponProj.ts:309/Arrow.ts:10011——不杀弹不耗穿透)。
+
+describe('BJ381 704 小动物命中面(修前整缺)', () => {
+  function mkCritter(x: number, y: number): {
+    x: number; y: number; w: number; h: number; dead: boolean;
+    hurt(dmg: number, kx: number, ky: number, _g: unknown,
+      armorPen: number, crit: boolean, pierce: number, fromPlayer: boolean): boolean;
+    calls: Array<{ dmg: number; kx: number; ky: number; armorPen: number; crit: boolean; pierce: number; fromPlayer: boolean }>;
+  } {
+    const calls: Array<{ dmg: number; kx: number; ky: number; armorPen: number; crit: boolean; pierce: number; fromPlayer: boolean }> = [];
+    const c = {
+      x, y, w: 18, h: 20, dead: false,
+      calls,
+      hurt(dmg: number, kx: number, ky: number, _g: unknown,
+        armorPen: number, crit: boolean, pierce: number, fromPlayer: boolean): boolean {
+        calls.push({ dmg, kx, ky, armorPen, crit, pierce, fromPlayer });
+        c.dead = true;                          // critter lifeMax=5 一击即死(全族)
+        return true;
+      },
+    };
+    return c;
+  }
+
+  it('重叠 critter 受击一次(5 伤/fromPlayer=true),弹体不亡(穿透−1 不消耗)', () => {
+    const t = new BookStormTwister(800, 1200, 0, 63, 9);
+    // 弹体盒首拍=(770,1095)60×210;critter 置身内 (790,1200)
+    const c = mkCritter(790, 1200);
+    const g = makeHooks([], undefined, undefined, undefined, [c]);
+    for (let i = 0; i < 3 && !t.dead; i++) t.fixedUpdate(1 / 60, g);
+    expect(c.calls.length).toBe(1);
+    expect(c.calls[0].dmg).toBe(5);               // hitCritters 定伤面(RB10d-D1 等价杀面)
+    expect(c.calls[0].fromPlayer).toBe(true);     // DPS 计/lastCreatureHit 入账
+    expect(t.dead).toBe(false);                   // penetrate=−1:命中小动物弹体不消耗
+  });
+
+  it('判别面:不重叠 critter 零受击(命中门不误伤全桶)', () => {
+    const t = new BookStormTwister(800, 1200, 0, 63, 9);
+    const c = mkCritter(1400, 1200);              // 弹体右缘 830 之外
+    const g = makeHooks([], undefined, undefined, undefined, [c]);
+    for (let i = 0; i < 5 && !t.dead; i++) t.fixedUpdate(1 / 60, g);
+    expect(c.calls.length).toBe(0);
   });
 });

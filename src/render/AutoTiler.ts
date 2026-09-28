@@ -4,6 +4,7 @@
 //   4=Specified(按 This 处理) 5=NotSpecified(按 NotThis 处理) 6=Air(仅空气)
 // m_RuleTransform: 0=Fixed 1=Rotated —— 边缘规则旋转匹配四方向（位置与精灵同转）
 import { bitmapize, type Baked } from './bitmapize';
+import { mkCanvas, type AnyCanvas } from './canvasEnv';   // ★C4:worker 侧 OffscreenCanvas 工厂
 import type { SpriteAtlas, RuleTileDef } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { hash2 } from '../core/rng';
@@ -26,9 +27,10 @@ export class AutoTiler {
     const key = `${sp.file}|${sp.sprite}|${rot}`;
     let c = this.rotCache.get(key);
     if (!c) {
-      c = document.createElement('canvas');
-      c.width = base.sw; c.height = base.sh;
-      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      const cv = mkCanvas(base.sw, base.sh);
+      if (!cv) return base;   // node 测试环境:无画布,回退底图（与旧行为无差异——旧路径同样不可用）
+      c = cv as Baked;
+      const ctx = cv.getContext('2d', { willReadFrequently: true })!;   // ★c9d2 最小修复:删重复声明（c===cv 同一 canvas,第二 const ctx 系粘贴残迹,esbuild 语法错炸全站 transform）
       ctx.imageSmoothingEnabled = false;
       ctx.translate(base.sw / 2, base.sh / 2);
       // 位置旋转 (x,y)→(-y,x)（Unity y-up 的 90° 逆时针视觉方向）
@@ -183,8 +185,8 @@ export class AutoTiler {
     const entry = this.atlas.data.files[file];
     const img = this.atlas.images.get(file);
     if (!entry || !img) return;
-    const c = document.createElement('canvas');
-    c.width = img.width; c.height = img.height;
+    const c = mkCanvas(img.width, img.height);
+    if (!c) return;
     const ctx = c.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(img, 0, 0);
     const groups: Record<string, Array<{ key: string; rect: DrawRect }>> = {};
@@ -258,9 +260,10 @@ export class AutoTiler {
   private filledRect(r: DrawRect, key: string): DrawRect {
     let c = this.filledCache.get(key);
     if (!c) {
-      c = document.createElement('canvas');
-      c.width = r.sw; c.height = r.sh;
-      const ctx = c.getContext('2d', { willReadFrequently: true })!;
+      const cv = mkCanvas(r.sw, r.sh);
+      if (!cv) return r;   // node 环境:无画布回退底图（旧行为同形）
+      c = cv as Baked;
+      const ctx = cv.getContext('2d', { willReadFrequently: true })!;
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
       const img = ctx.getImageData(0, 0, r.sw, r.sh);

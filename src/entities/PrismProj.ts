@@ -30,6 +30,7 @@ import { tintedTex } from '../render/StringLine';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
+import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 光棱 632/光束 461 proc 单源
 
 // ---- ★通用湿段定谳（2026-09-06 武器弹簇批;SetDefaults P.cs 699-10676 逐块）----
 //  受段：632 PrismProng（block :6807-6817 无 ignoreWater行）/ 461 BlasterBeam
@@ -91,6 +92,10 @@ export class PrismProng extends Entity {
   private hitCd = new Map<number, number>();
   dead = false;
   lightRGB: [number, number, number] | null = null;
+  /** ★BJ382：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
+   *  :14263 受理后自增 ⇒ proc（:13877-79）读自增前值,首跳 0 档率 0.20;拒收不计数。
+   *  字段名对齐 SpectreSoulProj.projPveNumHits 读口（PVP 反馈 BJ157-④ 单源） */
+  pveNumHits = 0;
   /** ★1458 蓝空过载淡出快照（Main.cs:32832-32838 消费,draw 侧无 game 句柄故
    *  fixedUpdate 每 tick 采样 owner slowMagicUse） */
   private slowFade = false;
@@ -200,7 +205,13 @@ export class PrismProng extends Entity {
           const crit = Math.random() < this.critChance;
           let dmg = crit ? this.damage * 2 : this.damage;
           if (charge >= 180) dmg *= 3;                     // 满充 ×3（:30379-30381）
-          e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+          // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
+          //  632 数据面 magic ⇒ 原版棱镜光棱本就吸血,本仓漏接）——受理位挂接,
+          //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
+          if (e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true)) {   // fromPlayer=DPS 计
+            ghostHealProc(game, this.projId, this.pveNumHits, e as never as Parameters<typeof ghostHealProc>[3]);
+            this.pveNumHits++;
+          }
           // 同敌免疫窗（Damage_PVE_Inner :14058 `type==632 → immune[owner]=
           // GetSlowMagicUseTime(5)`）：常态 5t,蓝空过载（slowMagicUse）×2.5=12t
           // （缺省 5——旧桩 player 无此方法时行为不变）
@@ -534,6 +545,10 @@ export class BlasterBeam extends Entity {
   private hitCd = new Map<number, number>();
   dead = false;
   lightRGB: [number, number, number] | null = [0.5, 0.2, 0.5];
+  /** ★BJ382：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
+   *  :14263 受理后自增 ⇒ proc（:13877-79）读自增前值;拒收不计数。
+   *  字段名对齐 SpectreSoulProj.projPveNumHits 读口（PVP 反馈 BJ157-④ 单源） */
+  pveNumHits = 0;
   // ---- ★通用湿段（:16903-17113;ProjWetFlags 共享体——461 block :5319-5330 无
   //  ignoreWater 行 = 受段;阻尼 N/A 见文件头定谳注：aiStyle 84 锚定束,AI 直写位 +
   //  tileCollide=false :5328 + UpdatePosition :20549 早退表内）----
@@ -603,7 +618,13 @@ export class BlasterBeam extends Entity {
         if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
         const crit = Math.random() < this.critChance;
         const dmg = crit ? this.damage * 2 : this.damage;
-        e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+        // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
+        //  461 数据面 magic ⇒ 原版充能爆破炮光束本就吸血,本仓漏接）——受理位挂接,
+        //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
+        if (e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true)) {   // fromPlayer=DPS 计
+          ghostHealProc(game, this.projId, this.pveNumHits, e as never as Parameters<typeof ghostHealProc>[3]);
+          this.pveNumHits++;
+        }
         this.hitCd.set(e.id, 5);
         break;
       }

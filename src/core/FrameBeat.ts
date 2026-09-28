@@ -1,5 +1,6 @@
 /**
- * ★确定性节拍对齐引擎(2026-09-28 调度面修复刃)——帧模式 subtle 档的渲染调度。
+ * ★确定性节拍对齐引擎(2026-09-28 调度面修复刃;同日热修刃:废除 60Hz 网格地板,
+ * 目标周期=用户 frameCap——subtle 只对齐不钳速)——帧模式 subtle 档的渲染调度。
  *
  * vanilla 锚(1457 亲读,勿凭记忆改):
  *  - FrameSkipMode 三态:Main.cs:17129-17137——Off/Subtle=可变步+垂直同步;On=IsFixedTimeStep(60Hz)+垂直同步。
@@ -8,6 +9,14 @@
  *  - improvedSubtleFrameSkip(1457 默认 true,Main.cs:67615-67616):EndDraw 忙等钳 60Hz present
  *    网格(Main.cs:62624-62644)——Update 每循环照跑、【无绘制抑制】,整个 Update+Draw+Present
  *    周期被钉在 60Hz 网格上(火焰时钟案已实证"原版绘制周期≡60Hz tick")。
+ *  ★网格地板否决注(2026-09-28 热修刃,防未来"忠实原版"改回去):原版把 present 钉
+ *    60Hz 网格的理由是其【逻辑与呈现同帧】——Update 就跑在同一循环里,不钳 60 游戏
+ *    速度直接随刷新率漂移,钳 60 是保游戏速度的手段,非节拍美学。本仓逻辑 fixedUpdate
+ *    恒 60Hz 与渲染帧率解耦,60 网格地板在本架构下没有任何速度语义,只剩两条实害:
+ *    ①静默覆盖用户 frameCap(cap=120/不设限被压回 60=用户实报"设 120 依然 60");
+ *    ②60 拍跳整拍放大(自由 120 下轻微迟到的帧,在 60 拍下变 33ms 整拍空档=掉帧
+ *    更显眼)。故 TARGET【不取】max(1000/60,·):subtle 的价值=确定性对齐(帧序计数
+ *    落拍,帧距恒定消摆动),不改变用户选择的速率——只对齐,不钳速。
  *
  * 本引擎 = improvedSubtle 语义的 rAF 移植:**帧序计数落拍,非忙等**。rAF 时代 present
  * 由浏览器合成器掌控,只能选 vsync 的整数倍——"每 k 个 vsync 渲一次"(k=拍)且 k 恒定
@@ -17,28 +26,45 @@
  * "高于 60fps 仍有卡一下感"的节拍摆动源。
  *
  * 拍选择(状态机全输入显式,内部不读墙钟——事件序列决定论,可单测):
- *  - 目标周期 TARGET = max(1000/60[原版 present 网格], frameCap>0 ? 1000/frameCap : 0):
- *    subtle 恒 ≤60fps(原版网格=节拍地板),frameCap 只是天花板;cap=0 与 cap≥60 行为
- *    一致(网格地板绑定),cap<60 才往下压拍。
- *  - minK = ceil(TARGET/vsync):拍=vsync 整数倍(60Hz 屏 1;90Hz 2;120Hz 2;144Hz 3;240Hz 4)。
+ *  - 目标周期 TARGET = frameCap>0 ? 1000/frameCap : 1×vsync 间隔(热修刃语义):
+ *    cap=120@120Hz 与 cap=0 均拍=1 vsync(全速确定拍);cap=60@120Hz 拍 2(60fps 拍);
+ *    cap<60 由 cap 压拍。60Hz 网格地板已废(否决注见上)。
+ *  - minK = ceil(TARGET/vsync):拍=vsync 整数倍(cap=0/cap≥屏率 1;cap60@120Hz 2;
+ *    cap30@120Hz 4;cap30@60Hz 2)。
  *  - 容量预算 budget(k)=k×vsync(渲染帧成本落在预算内,滑一个 vsync 也保持均匀相位的
  *    一致性;成本贴/超预算=相位随机翻转=摆动)。降拍立即:单帧成本>预算 → k+1;
  *    p95>预算 → 逐级扫到首个能容纳的 k。
- *  - 滞回升拍:k>minK 且 p95<0.8×budget(k−1)【持续 2s】→ k−1(一步);条件破即弃——
- *    降快升慢防档位震荡。
+ *  - 滞回升拍:k>minK 且 p50<budget(k−1)【连续 2 半窗=60 渲染帧】→ k−1(一步);条件破
+ *    即弃——降快升慢防档位震荡。
+ *  ★升拍 p50 制(v3 语义注,2026-09-28 热修刃;三级演化最终形态=①进场简化 v4
+ *    afterWorldLoad resetSampling ②出场看门狗=降拍三路立即(单帧超预算/p95 超预算/
+ *    连续失拍)③升拍 p50 制本刀):判据史=「p95<0.8×budget(k−1) 持续 2s」(设计二,错——
+ *    本仓稳态帧耗 8-12ms,顶格要求 p95<6.7ms 永不可达=降拍后钉 60,用户实报
+ *    cap120+subtle 进世界回不到 120)→「p50<budget(k−1) 连续 2 半窗」(本刀)。理论根基:
+ *    beat 对齐下超预算帧只是【顺延到下一 vsync】(present 恒落 vsync 网格=对齐 60Hz
+ *    节拍)不是失稳——节拍摆动只来自未对齐自由漂移,已被帧序对齐机制消灭;故中位数
+ *    帧耗装得下即升,偶发超预算帧=k=1 下跳一拍=对齐 60 无感;p95 超标【仅】驱动降拍
+ *    (持续过载保护)。防抖:升拍需判据连续 2 半窗满足(轻于旧 2s 墙钟)+降拍立即,
+ *    组合=准稳态——预算边缘震荡会话(边界①形态 p50 8.2/p95 12)在 k=1/2 间有界摆动,
+ *    观感与 k=2 同但保留升回 120 的通路;匀称恒超载(render-bound,p50>budget)恒不升
+ *    =正确(render-bound 本就该降拍,见上一刀备注)。
  *  - 失拍吸附:渲染帧距>(k+0.7)×vsync=失拍(渲染节拍滑了 ≥1 个 vsync)。序数计数天然
  *    【不追赶中途】——失拍后下一渲染仍落在下一拍(不插补.render,防连锁迟到);单次失拍
  *    只作余量警示(弃升拍保持),连续 2 次=容量不足 → 降拍。
  */
 
-/** 原版 present 网格(60Hz;improvedSubtle EndDraw 钳值 TARGET_FRAME_TIME×599/600 的整数网格) */
+/** 原版 present 网格常数(60Hz;improvedSubtle EndDraw 钳值 TARGET_FRAME_TIME×599/600)。
+ *  ★热修刃(2026-09-28)起【不再作拍地板】(否决注见头注):仅作 vsync 估计先验初值
+ *  与测试对照常数 */
 export const GRID_MS = 1000 / 60;
 /** 拍上限(vsync 整数倍的最深降级;60Hz 屏即 10fps——成本 p95>100ms 时渲染已死,兜底不再降) */
 export const BEAT_K_MAX = 6;
-/** 升拍需持续余量的时长(任务处方:2s) */
-export const UPGRADE_HOLD_MS = 2000;
-/** 升拍余量系数(任务处方:预算×0.8) */
-export const UPGRADE_HEADROOM = 0.8;
+/** 升拍判据窗粒度(成本样本数;半窗=30 渲染帧——判据连续满足以半窗为拍记程,
+ *  轻于旧 p95 制的 2s 墙钟:k=2@120Hz 下 2 半窗=60 渲染帧≈1s) */
+export const UPGRADE_WIN_SAMPLES = 30;
+/** 升拍需【连续】满足判据的窗数(任务处方 N=2~3 取 2;判据破即清零重计——与降拍
+ *  立即组合=准稳态,防升拍后立即降拍的震荡面失稳) */
+export const UPGRADE_HOLD_WINDOWS = 2;
 /** 失拍判定:帧距 >(k+MISS_SLACK)×vsync(0.7=滑过 1 拍尚容 ±0.3 拍 rAF 抖动) */
 export const MISS_SLACK = 0.7;
 /** vsync 周期样本窗(截尾均值估计;rAF 回调间隔) */
@@ -77,16 +103,21 @@ export class FrameBeat {
   private lastRenderAt = -1;
   /** 上次渲染帧距(beginRender 时记;endRender 作失拍判定) */
   private lastGap = 0;
-  private holdSince: number | null = null;
+  /** 升拍判据连续满足计数(渲染帧数;达 UPGRADE_WIN_SAMPLES×UPGRADE_HOLD_WINDOWS 即升一级;
+   *  判据破/失拍/任何拍变更即清零——v3 p50 制的防抖面,替代旧 holdSince 墙钟) */
+  private upHoldN = 0;
   private missStreak = 0;
 
-  /** 目标周期:原版 60Hz 网格地板与 frameCap 天花板取大(subtle 恒≤60fps) */
+  /** 目标周期:用户 frameCap 天花板;cap=0(不设限)=1×vsync(拍=每 vsync 渲一次)。
+   *  ★热修刃(2026-09-28):废除首版 60Hz 网格地板 max(GRID_MS,·)——原版网格地板是
+   *  "逻辑=呈现同帧"架构下的速度保全手段,本仓逻辑 60Hz 解耦后只剩"静默覆盖用户
+   *  设置"一条实害(cap=120/0 被压回 60=用户实报);subtle 只对齐不钳速(否决注见头注) */
   targetMs(cap = this.cap): number {
-    return Math.max(GRID_MS, cap > 0 ? 1000 / cap : 0);
+    return cap > 0 ? 1000 / cap : this.vsyncPeriod;
   }
 
   /** 拍地板:最小 k 使 k×vsync ≥ (1−容差)×目标周期(整数倍折算+估计噪声容差;
-   *  60Hz 屏拍 1;90Hz 2;120Hz 2;144Hz 3;240Hz 4;cap<60 时由 cap 压大) */
+   *  cap=0/cap≥屏率 → 拍 1(全速);cap60@120Hz 拍 2;cap30@120Hz 拍 4;cap30@60Hz 拍 2) */
   minK(vsyncPeriod = this.vsyncPeriod, cap = this.cap): number {
     return Math.max(1, Math.ceil((this.targetMs(cap) * (1 - FLOOR_TOL)) / vsyncPeriod));
   }
@@ -96,7 +127,15 @@ export class FrameBeat {
     return k * vsyncPeriod;
   }
 
-  /** 渲染帧成本滚动 p95(空窗=0) */
+  /** 渲染帧成本滚动 p50(中位数,空窗=0)——【升拍判据基】(v3 p50 制:中位数帧耗
+   *  装得下上一级拍预算即升,见头注;偶发超预算帧由 beat 对齐顺延吸收) */
+  costP50(): number {
+    if (this.costWin.length === 0) return 0;
+    const s = [...this.costWin].sort((a, b) => a - b);
+    return s[Math.floor(0.5 * (s.length - 1))];
+  }
+
+  /** 渲染帧成本滚动 p95(空窗=0)——【降拍判据基】(持续过载保护,见头注) */
   costP95(): number {
     if (this.costWin.length === 0) return 0;
     const s = [...this.costWin].sort((a, b) => a - b);
@@ -187,23 +226,22 @@ export class FrameBeat {
       // 任何拍变更:相位重锚+记账复位(旧拍成本样本对新拍预算失义;不追赶中途)
       this.ordinal = 0;
       this.missStreak = 0;
-      this.holdSince = null;
+      this.upHoldN = 0;
     } else {
-      // 单次失拍=余量警示:升拍保持即弃(拍可信度存疑,重计 2s)
-      if (this.missStreak > 0) this.holdSince = null;
-      // 滞回升拍(一步):k>地板 且 p95<0.8×budget(k−1) 持续 2s;条件破即弃
-      if (this.k > floor && this.costP95() < UPGRADE_HEADROOM * this.budget(this.k - 1)) {
-        if (this.holdSince === null) {
-          this.holdSince = now;
-        } else if (now - this.holdSince >= UPGRADE_HOLD_MS) {
+      // 单次失拍=余量警示:升拍保持即弃(拍可信度存疑,重计连续窗)
+      if (this.missStreak > 0) this.upHoldN = 0;
+      // 滞回升拍(一步):k>地板 且 p50<budget(k−1) 连续 2 半窗(60 渲染帧);条件破即弃
+      // (v3 p50 制见头注:p95 只管降拍,升拍看中位数容量;防抖=连续窗计数,轻于旧 2s)
+      if (this.k > floor && this.costP50() < this.budget(this.k - 1)) {
+        if (++this.upHoldN >= UPGRADE_WIN_SAMPLES * UPGRADE_HOLD_WINDOWS) {
           this.k--;
           this.lastReason = 'upgrade';
           this.ordinal = 0;          // 相位重锚:升拍后不追赶中途
-          this.holdSince = now;      // 下一级重新计 2s
+          this.upHoldN = 0;          // 下一级重新计窗
           this.missStreak = 0;
         }
       } else {
-        this.holdSince = null;
+        this.upHoldN = 0;
       }
       // 连续失拍=容量不足 → 降拍(单次失拍只弃升拍保持,不降档;连续 2 次=拍持续
       // 滑动——覆盖"成本贴预算内但合成器侧持续掉拍"的口径)
@@ -212,7 +250,7 @@ export class FrameBeat {
         this.lastReason = 'miss-streak';
         this.ordinal = 0;
         this.missStreak = 0;
-        this.holdSince = null;
+        this.upHoldN = 0;
       }
     }
   }
@@ -227,7 +265,7 @@ export class FrameBeat {
   resetSampling(): void {
     this.costWin.length = 0;
     this.missStreak = 0;
-    this.holdSince = null;
+    this.upHoldN = 0;
     this.lastGap = 0;
     this.lastRenderAt = -1;
     this.ordinal = 0;
@@ -236,10 +274,11 @@ export class FrameBeat {
   }
 
   /** 诊断快照(探针/调试面板) */
-  snapshot(): { k: number; vsync: number; p95: number; target: number; reason: BeatReason; miss: number } {
+  snapshot(): { k: number; vsync: number; p50: number; p95: number; target: number; reason: BeatReason; miss: number } {
     return {
       k: this.k,
       vsync: Math.round(this.vsyncPeriod * 100) / 100,
+      p50: Math.round(this.costP50() * 100) / 100,
       p95: Math.round(this.costP95() * 100) / 100,
       target: Math.round(this.targetMs() * 100) / 100,
       reason: this.lastReason,

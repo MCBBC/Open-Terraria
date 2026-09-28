@@ -44,6 +44,10 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { dealContacts, ID_STATIC_482_TABLE } from './proj1457';
+// ★BJ383 小动物命中面 + 幽灵兜帽吸血 proc（BJ381 登记债清偿;482=proj1457 dealContacts
+//  第 12 调用方——「其余 11 个」含本文件）
+import { hitCritters } from './projTargets';
+import { ghostHealProc } from './SpectreSoulProj';
 import { vanillaNpc } from '../data/vanillaNpcs';
 import { PLATFORMS_SHEETS } from '../data/tiles';
 import { limitPointToPlayerReachableArea } from './PlayerReachableArea';   // ★BJ290 件3 单源化
@@ -163,6 +167,9 @@ export class ClingerStaffWallProj extends Entity {
   /** SetDefaults timeLeft=18000（:5583）——逐 tick 递减，0 即 Kill；同主新墙在场时提前自亡
    *  （原版 Projectile.timeLeft 为 public 字段，同型比对消费端按真值读） */
   timeLeft = 18000;
+  /** ★BJ383：PVE 受理命中计数（原版 Projectile.numHits :14263;proc 读自增前值;
+   *  critter 受理命中亦入账——同 :14263 无条件递增） */
+  pveNumHits = 0;
 
   constructor(x: number, y: number, wallTopY: number, wallH: number, damage: number, knockback: number) {
     super();
@@ -217,9 +224,20 @@ export class ClingerStaffWallProj extends Entity {
       d.x += 6;                  // position.X += 6f（:32503）
       d.y -= 2;                  // position.Y -= 2f（:32503）
     }
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：482 friendly penetrate=−1（:5579）→
+    //  原版 critter 入墙照伤弹不亡（:12618 flag=!friendly;:14184 penetrate>0 才递减）;
+    //  受理命中入 numHits 账（:14263 无条件;critter lifeMax=5 经 flag10 lifeMax>5 段
+    //  恒不吸血——只入账不 proc）。critter 一击即死 ⇒ IDStatic 10t 窗语义无可观测差。
+    if (hitCritters(this, game)) this.pveNumHits++;
     // 命中面：usesIDStaticNPCImmunity+10t 全场同型表（penetrate=-1 ⇒ hitPierce=-2 清窗档，
     // SporeGasCloud 判例）；damageAdj = :12983 蠕形减半（DamageVar 后/banner/暴击前）
-    dealContacts(this, game, ID_STATIC_482_TABLE, 10, undefined, undefined, -2, false, halveWormDamage);
+    dealContacts(this, game, ID_STATIC_482_TABLE, 10, (t) => {
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;482 magic :5584）
+      //  ——proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数。
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        t as never as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
+    }, undefined, -2, false, halveWormDamage);
   }
 
   /** 原版 alpha=255 → GetAlpha 默认支全透明（Projectile.cs:80595 GetAlpha 尾默认

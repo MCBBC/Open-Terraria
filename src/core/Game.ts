@@ -281,6 +281,7 @@ import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bes
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
+import { BakeClient, WBAKE_ENABLED } from '../workers/BakeClient';   // ★C4 烘焙 worker（?wbake=1 灰度）
 import { waterWaves, waveTexReady as waterWavesDiagReady } from '../render/WaterWaves';
 import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha, wormholeHeadHit, heldItemTipWorld, popupLabelMeasure, tpMarkCoordText } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
@@ -6856,6 +6857,18 @@ export class Game implements GameHooks {
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     // atlas 传入 = 烘焙懒取自注册(晚到自动重烘,见 ChunkCache 构造器注释)
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler, this.atlas);
+    // ★C4（2026-09-28）：烘焙 worker 装配（?wbake=1 灰度,缺省关=零装配,主线程
+    // 烘焙全链逐位现状）。装配后 flushDirty/get 的烘焙分派走 worker（进世界
+    // 「终态保险全量标脏」级联与游玩中重烘出主线程）;握手/请求失败自锁死降级
+    // （BakeClient.fail → 在飞重入脏队 + bakeClient=null）。旗关时此分支整体
+    // 不进,零行为面。
+    if (WBAKE_ENABLED) {
+      const client = new BakeClient(this.chunks, this.atlas!, this.assets.tileSheets);
+      this.chunks.bakeClient = client;
+      void client.attach().then((ok) => {
+        if (!ok) { client.dispose(); this.chunks.bakeClient = null; }
+      });
+    }
     // 懒加载晚到的【图块/墙表】→ 精确重烘:出生点子集预载后,远行遇到新类型时
     // vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正。
     // 必须按文件名过滤——图标/NPC/弹幕贴图不进 chunk。修正走 ChunkCache 的
@@ -7987,6 +8000,7 @@ export class Game implements GameHooks {
     Sfx.mpProbe = null;   // 失焦闸 MP 豁免探针随实例摘除（构造期接线）
     this.input.destroy();
     this.lighting?.dispose();   // ★C9：光照 Worker 链拆除（?lightworker=1 时防跨世界 worker 泄漏双跑）
+    this.chunks?.bakeClient?.dispose();   // ★C4:烘焙 worker 链拆除（防跨世界泄漏,C9 同款纪律）
     this.chunks?.dispose();
     this.renderer.dispose();
     this.renderer.canvas.remove();
@@ -8260,7 +8274,10 @@ export class Game implements GameHooks {
     //    claim,0 步进帧不空窗;BJ320 清零拍位归一(逻辑 tick 头+暂停拍)不受影响。
     //    旧"0 步进帧跳绘"即节拍摆动源之一(累计器相位随 rAF 抖动随机游走,渲染
     //    落点不规律=用户实报"高于 60fps 仍卡一下")。
-    //  三态差异归位:Subtle=60Hz 节拍对齐(≤60fps,frameCap 只能再往下压);
+    //  三态差异归位:Subtle=确定性节拍对齐(拍=用户 frameCap,不设限=拍 1 vsync;
+    //    容量不足逐级降拍——只对齐不钳速,60Hz 网格地板已废(2026-09-28 热修刃:
+    //    原版钳 60 是"逻辑=呈现同帧"架构的速度保全,本仓逻辑 60Hz 解耦后只静默覆盖
+    //    用户 frameCap),FrameBeat.ts 头注否决注);
     //    Off/On=跟随 rAF 自由绘制(On 的 IsFixedTimeStep/Off 的累计器门在 1457
     //    :17129-17137/:17182-17197,本仓逻辑恒 60Hz 定步累加器已覆盖,两态同效)。
     // ★SW-BJ72 2026-09-14：余辉验证+指针图标上下文改挂【绘制拍】逐帧（原版

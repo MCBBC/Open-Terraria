@@ -20,7 +20,9 @@ import { blueLightningSmallLongFx } from '../fx/orchestraFx';
 import { ParticleOrchestraType } from '../net/syncModules';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit, playerCanHitEntity } from '../physics/LineOfSight';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCritters } from './projTargets';
+// ★BJ383 幽灵兜帽吸血 proc 单源（BJ382 提升至 SpectreSoulProj 域导出;per-class 二窗）
+import { ghostHealProc } from './SpectreSoulProj';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { GorePiece } from './GorePiece';
 import { damageVarRoll } from '../stats/DamageVar';
@@ -565,6 +567,14 @@ export class ChloroClaymoreBlade extends Entity {
     // 挥击共享命中表。★观测面注：本弹伤害盒=玩家中心 16×16（Center=RRP−velocity
     // :42781）——敌怪须与玩家盒重叠才进结算,此时四探针几何上恒通（墙无法插入
     // 玩家自身盒内）,LOS 段对 1126 实际不可达,接线为 1:1 保真非观测差异
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：1126 friendly penetrate=−1（:10552）
+    //  → 原版 critter 照伤弹不亡（Damage_PVE_Inner :12618 flag=!friendly 恒真;
+    //  :14184 penetrate>0 才递减）。桶序先小动物（MagicProj 形态同构）。
+    //  ★登记：critter 面无 ownerHitCheck 门（hitCritters 单源无 gate 参）——对与
+    //  刃盒重叠的小动物,距离300+LOS 几何上恒通（刃=玩家手持位,同上观测面注）,
+    //  观测面等价。非 magic（SetDefaults :10545-10556 无 magic 行）→ 无幽灵兜帽
+    //  吸血,不接 proc。
+    hitCritters(this, game);
     dealContacts(this, game, this.hitCd, -1, undefined,
       { maxDist: 300, sharedHits: this.sharedMeleeHits ?? undefined,
         los: ownerMeleeWeaponLOS(game) });
@@ -718,6 +728,10 @@ export class ChloroSaberStab extends Entity {
     // 溅花尘/音由共享体 wetSplashStepShared 承载,不自写。ignoreWater 按数据面传（1127 缺行
     // =不豁免;数据驱动防未来 id 复用本类）。
     this.wetSectionStep(game);
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：1127 经 DefaultToShortsword
+    //  （:10775-10788）friendly penetrate=−1 → 原版 critter 照伤弹不亡（:12618/
+    //  :14184 同 1126 判）。非 magic → 无幽灵兜帽吸血,不接 proc。
+    hitCritters(this, game);
     dealContacts(this, game, this.hitCd, -1);
   }
 
@@ -836,7 +850,14 @@ export class ChloroSporeCloud extends Entity {
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.vx = 0; this.vy = 0; }
     // ★L2②：ai[1]>=1 尾孢子 CanDealDamage=false → 不进 Damage()（零接触伤、零
     //   CritTimer 消费）;仅砸地大云（ai[1]==0）按 IDStatic 30t 共享窗结算
-    if (this.ai1 < 1) dealContacts(this, game, this.hitCd, 30);
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：1128 friendly penetrate=−1（:10576）
+    //  → critter 照伤弹不亡;尾孢子 CanDealDamage 门同盖 critter 面（Damage() 整跳
+    //  ⇒ 挂同支内）。critter 一击即死（life=5）⇒ IDStatic 窗语义无可观测差。
+    //  非 magic → 无幽灵兜帽吸血,不接 proc。
+    if (this.ai1 < 1) {
+      hitCritters(this, game);
+      dealContacts(this, game, this.hitCd, 30);
+    }
     if (this.t % 3 === 0) {
       game.spawnParticles(this.cx, this.cy, '#32C864', 1, 0.6, { life: 24, grav: -0.02, damp: 0.94 });
     }
@@ -912,6 +933,12 @@ export class ChloroBladeSlam extends Entity {
       { maxDist: 1000 };
     if (p && p.cx != null && p.cy != null) gate.los = ownerMeleeWeaponLOS(game);
     cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（Damage() 内旁路先于结算,:12519/:15276;排除表无 1129）
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：1129 friendly penetrate=−1（:10595）
+    //  → critter 照伤弹不亡。桶序先小动物。★登记：critter 面无 ownerHitCheck 门
+    //  （hitCritters 单源无 gate 参）——爆盒可远至 1000px,LOS 遮挡格内小动物原版
+    //  被距/LOS 门拒、本面照结（罕见边角,下窗随 ownerHitCheck 收口一并补）。
+    //  非 magic → 无幽灵兜帽吸血,不接 proc。
+    hitCritters(this, game);
     dealContacts(this, game, this.hitCd, -1, undefined, gate);
     if (this.t === 1) {
       game.spawnParticles(this.cx, this.cy, '#32C864', 16, 3.4, { life: 26, grav: -0.03, damp: 0.93 });
@@ -952,6 +979,9 @@ export class PetalstormShot extends Entity {
   private rot = 0;
   private scl = 0.5;
   private hitCd = new HitCdImpl();
+  /** ★BJ383：PVE 受理命中计数（原版 Projectile.numHits;:14263 每受理命中 ++,
+   *  吸血 proc 读自增前值——ghostHeal ladder 0.20−numHits×0.05,Projectile.cs:12079） */
+  pveNumHits = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, phase: number) {
     super();
@@ -1019,7 +1049,18 @@ export class PetalstormShot extends Entity {
     }
     // penetrate=1（:10422）——首次伤害结算即 Kill（原注释漏了总数帽）。
     // ★命中结算全周期有效（原版碰撞循环每拍跑,非仅相 2）
-    dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; });
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：penetrate=1 → critter 受击耗穿
+    //  归零即亡（:14184 递减 → :17312 Kill;走 die()=Kill 尘面 :72202）。
+    if (hitCritters(this, game)) { this.die(game); return; }
+    dealContacts(this, game, this.hitCd, -1, (t) => {
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;1116 magic
+      //  :10425）——proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
+      //  （immune/cd 门 continue 在 onHit 前）。
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        t as never as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
+      this.dead = true;                                       // penetrate=1 → Kill
+    });
   }
 
   /** HandleMovement tileCollide 段（:18181-18191 type==1116 支）：TileCollision 解算把被
@@ -1124,6 +1165,9 @@ export class StormLightning extends Entity {
   private t = 0;
   private hitCd = new HitCdImpl();
   private sharedCd: HitCdImpl | IdStaticSharedTable | null;
+  /** ★BJ383：PVE 受理命中计数（原版 Projectile.numHits :14263;proc 读自增前值。
+   *  现役弹型 1091/1117/1122 中仅 1117/1122 magic（ghostHealProc magic 门过滤 1091） */
+  pveNumHits = 0;
   /** ai[0] 目标锁（≥0=NPC 桶序；1091 玩家目标=布尔,单玩家足够——原版 ai[0]=-2-idx） */
   private targetIdx = -1;
   /** 1091 玩家目标态（:40419-40438 num3=14 半径+localAI[2] 5 次豁免计数） */
@@ -1615,6 +1659,18 @@ export class StormLightning extends Entity {
       // + 催化指环 6185（StatusNPC :11192-11196,玩家弹命中 398 300t）
       applyProjStatus(this.projId, ent as unknown as Record<string, number>,
         { catalystBand: ((game.player as unknown as { equipStats?: { catalystBand?: boolean } } | null)?.equipStats?.catalystBand) === true });
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;1117/1122 数据面
+      //  magic ⇒ 原版本就吸血）——proc 先于 :14263 numHits++（读自增前值）;拒收不
+      //  proc 不计数（cd.ready/stormBoltCollides continue 在本位前）。1091 hostile∧
+      //  非 magic（SetDefaults :10178-10186 无 magic 行）经 ghostHealProc magic 门
+      //  零行为过滤（flag10 的 !hostile 段同判）。comboSeed 治疗支 continue 在 hurt
+      //  前 ⇒ 不达本位=不 proc 不计数（原版 StrikeNPC 不跑,同态）。
+      //  ★登记：bolt 命中面 critter 桶整缺——damageAlongBolt 非 dealContacts 调用方
+      //  （BJ381 债域外）;原版 bolt 伤 critter（MultiPointHitbox 进 Damage_PVE victim
+      //  循环 :12618 flag=!friendly）,下窗随 StormLightning 命中面收口补课。
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        e as never as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
     }
   }
 
@@ -2106,7 +2162,18 @@ export class GlacierFangShot extends Entity {
     const lk = glacierFangLightK(this.charge);
     game.addLightAt?.(this.cx, this.cy, 0.2 * lk, 0.5 * lk, 0.8 * lk);
     // ★R34-③：释放穿透档 penetrate=(int)Remap(num5,0,1,1,3)（:37651）——命中总数帽
-    dealContacts(this, game, this.hitCd, -1, () => {
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：释放态 penetrate=1..3 档 → critter
+    //  受击耗一档（:14184 递减,归零 :17312 Kill;未耗尽弹体续飞）。hits 即 numHits
+    //  单计数（:14263 critter 受理命中亦入账——吸血 proc ladder 依赖同一计数）。
+    if (hitCritters(this, game)) {
+      this.hits++;
+      if (this.hits >= this.penTier) { this.dead = true; return; }   // keepIterating=false
+    }
+    dealContacts(this, game, this.hitCd, -1, (t) => {
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;1115 magic
+      //  :10469）——hits 读自增前值（:14263 numHits++ 在 proc 后 ⇒ 首跳 0 档率 0.20）。
+      ghostHealProc(game, this.projId, this.hits,
+        t as never as Parameters<typeof ghostHealProc>[3]);
       this.hits++;
       if (this.hits >= this.penTier) this.dead = true;          // penetrate 耗尽 → Kill
     });
@@ -2320,6 +2387,8 @@ export class ThunderBoltShot extends Entity {
   private frameCounter = 0;
   private alpha = 255;             // SetDefaults alpha=255 → 渐显
   private hitCd = new HitCdImpl();
+  /** ★BJ383：PVE 受理命中计数（原版 Projectile.numHits :14263;proc 读自增前值） */
+  pveNumHits = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
     super();
@@ -2376,7 +2445,20 @@ export class ThunderBoltShot extends Entity {
       if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
     }
     cutTilesBox(game, this.x, this.y, this.w, this.h);         // CutTiles（:12517/:15276;排除表无 731）
-    dealContacts(this, game, this.hitCd, 10);                  // 缺省免疫窗（非 local 表族）
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：penetrate 缺省 1（SetDefaults
+    //  :7696-7706 无 penetrate 行=字段缺省 :366）→ critter 受击耗穿归零即亡
+    //  （:14184 → :17312 Kill;走 die()=Kill 面 :77055 音+尘）。
+    //  ★登记：敌面 hit-death（penetrate 归零 Kill）与 flag3 单发免疫豁免
+    //  （maxPenetrate==1 :12635 免疫门旁路+不写窗）本仓未建模（缺省免疫窗 10t 近似,
+    //  弹体命中后续航）——BJ381 债域仅 critter 面,敌面下窗独立定谳。
+    if (hitCritters(this, game)) { this.die(game); return; }
+    dealContacts(this, game, this.hitCd, 10, (t) => {
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;731 magic :7701）——proc 先于
+      //  :14263 numHits++（读自增前值）;拒收不 proc 不计数。
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        t as never as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
+    });                                                        // 缺省免疫窗（非 local 表族）
   }
 
   /** Kill（:77055-77069）：SoundID 0 + 尘 226×15(oldV×0.5,⅔ noGravity/scale×1.5/vel×0.5) */
@@ -2560,6 +2642,8 @@ export class LaserMachinegunLaser extends Entity {
   private alpha = 255;
   private localAI0 = 0;
   private hitCd = new HitCdImpl();
+  /** ★BJ383：PVE 受理命中计数（原版 Projectile.numHits :14263;proc 读自增前值） */
+  pveNumHits = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
     super();
@@ -2583,7 +2667,18 @@ export class LaserMachinegunLaser extends Entity {
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
       if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) { this.die(game); return; }
     }
-    dealContacts(this, game, this.hitCd, 10);
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：penetrate 缺省 1（SetDefaults
+    //  :5117-5127 无 penetrate 行=字段缺省 :366）→ critter 受击耗穿归零即亡
+    //  （:14184 → :17312 Kill;走 die()=Kill 尘面 :74946）。
+    //  ★登记：敌面 hit-death/flag3 单发免疫豁免未建模（同 731,缺省免疫窗近似）。
+    if (hitCritters(this, game)) { this.die(game); return; }
+    dealContacts(this, game, this.hitCd, 10, (t) => {
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;440 magic :5125）——proc 先于
+      //  :14263 numHits++（读自增前值）;拒收不 proc 不计数。
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        t as never as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
+    });
   }
 
   private die(game: GameHooks): void {
@@ -2637,6 +2732,9 @@ export class BookStormTwister extends Entity {
   private life = 300;            // ai[0] 帽 300（localAI[0]≥16 → 285,简化取 300 登记）
   private localAI0 = 0;
   private hitCd = new HitCdImpl();
+  /** ★BJ383：PVE 受理命中计数（原版 Projectile.numHits :14263;proc 读自增前值;
+   *  critter 受理命中亦入账——同 :14263 无条件递增） */
+  pveNumHits = 0;
   /** 循环轨句柄(:71434-71447 soundDelay==0 首拍起播,localAI[1] 存 SlotId)——
    *  GameHooks.startLoopSfx 返回面的结构化类型(与 types.ts :169 同构) */
   private loop: { stop(): void; setVolume(v: number): void; readonly playing: boolean; readonly dead: boolean } | null = null;
@@ -2755,7 +2853,28 @@ export class BookStormTwister extends Entity {
         }
       }
     }
-    dealContacts(this, game, this.hitCd, -1);                   // localNPCHitCooldown=−1
+    // ★BJ381 小动物命中面（用户实报"龙卷风不伤小动物"定谳=整缺,非原版本相）：
+    //  原版小动物 SetDefaults 无 friendly=true（兔 46/鸟 47 族 NPC.cs:9364-9373 仅
+    //  width/aiStyle7/lifeMax5/catchItem）⇒ friendly 弹命中门 Damage_PVE_Inner
+    //  :12618 `flag = !targetNPC.friendly` 对 critter 恒真;拒收唯
+    //  CanNPCBeHitByPlayerOrPlayerProjectile（Player.cs:20673-20689）= dontHurtCritters
+    //  ∪ minion/MinionShot/sentry/SentryShot——704 魔法弹全不沾（:7454-7463 SetDefaults
+    //  无 minion 旗）⇒ 原版龙卷照伤小动物（实际弹伤,critter lifeMax=5 即死）。
+    //  本仓双桶架构 critters 独立桶不入 game.enemies()（projTargets.playerCanHitEnemy
+    //  头注）,dealContacts 只扫敌桶 → 漏;接仓内单源 hitCritters（穿透弹范式=
+    //  WeaponProj.ts:309/Arrow.ts:10011 不杀不耗穿透;5 定伤=critter 全 lifeMax5 杀面
+    //  等价,RB10d-D1 登记债）。非 minion/sentry/trap ⇒ 无 ctx。
+    // ★BJ383：critter 受理命中亦入 numHits 账（:14263 无条件递增,proc ladder 依赖。
+    //  critter lifeMax=5 经 flag10 lifeMax>5 段恒不吸血——hitCritters 支只入账不 proc）
+    if (hitCritters(this, game)) this.pveNumHits++;
+    dealContacts(this, game, this.hitCd, -1, (t) => {
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79 Damage() 通用 on-hit 段;704 magic :7454）
+      //  ——与 BJ381 hitCritters 命中面共存:critter 支不 proc（见上）,敌面受理位
+      //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数。
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        t as never as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
+    });                                                         // localNPCHitCooldown=−1
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -2766,9 +2885,22 @@ export class BookStormTwister extends Entity {
     // ★BJ374 程序化叠层螺旋（Main.cs:33081-33160 专支 1:1——旧实现=60×60 原图
     //  拉伸到 60×210=用户实报"完整动画帧贴图长条"）。原版把 60×60 贴图自 Bottom
     //  向 Top 以 ~4.11-5.01px 步距逐层叠画:全局自旋 −π/20×t×side + 每层扭转
-    //  acc×2π/−20、scale=1+(n−0.35)(底 0.65→顶 1.65 喇叭形)、vx>0 时垂直镜像、
-    //  包络=前 30t 淡入/末 60t 线性淡出;棕层(160,140,100)+蓝脉冲层(140,160,255,
-    //  t%60 梯形包络,scale×0.8)。
+    //  acc×2π/−20、scale=1+(n−0.35)(底 0.65→顶 1.65 喇叭形)、包络=前 30t 淡入/
+    //  末 60t 线性淡出;棕层(160,140,100)+蓝脉冲层(140,160,255,t%60 梯形包络)。
+    //  ★BJ376 三修（用户实报 vx>0 时龙卷"一整条"定谳=整柱镜像倒挂+α 2× 过浓）:
+    //  ①SpriteEffects.FlipVertically=【逐层纹理】垂直翻转(EntitySpriteDraw 每调
+    //    独立 effects :33096/:33152/:33157,层位置/层序不动)——旧实现整柱 y 镜像
+    //    =层序倒挂+旋转方向镜像→喇叭形反成宽底窄顶 merged 条;修=每层
+    //    scale(scl,∓scl)。
+    //  ②蓝脉冲层缩放=(1+num339)×0.8 且画在棕层【下】(:33153-33157 先蓝后棕)
+    //    ——旧版同缩放且后画。
+    //  ③★BJ379 重修（用户实报"过于透明"定谳）:XNA Color*= rgb+a 全乘,预乘
+    //    AlphaBlend 下 rgb 贡献=tex.rgb×tint×f 全幅、α=(127k×0.5)×env=0.249f 只进
+    //    遮盖项 dst×(1−0.249f)（Main.cs:33135-33141）;canvas source-over 的
+    //    globalAlpha 会把 rgb 再乘一遍 α → BJ376 单遍实现 rgb∝f²（f=1 时 0.249
+    //    vs 原版 0.627,中低段 5×+ 暗）=过透根因;旧 0.5"折中"实为对该 f² 的补偿。
+    //    修=尘系 add/erase 同范式两遍:destination-out(raw 贴图,α=0.249f)+lighter
+    //    (预染色桶 rgb×f,α=1),与原版混合式逐项同构。
     const t = this.t;
     let env = Math.min(1, t / 30);                       // num330 淡入(:33086)
     if (t > this.life - 60) env = Math.max(0, 1 - (t - (this.life - 60)) / 60);   // :33088-33090
@@ -2786,61 +2918,89 @@ export class BookStormTwister extends Entity {
     const glv = (a: number, b: number, x: number): number =>
       Math.max(0, Math.min(1, (x - a) / (b - a)));       // Utils.GetLerpValue clamped
     const blueK = ph < 30 ? glv(22, 30, ph) : glv(38, 30, ph);   // :33113-33120
-    const tint = stormTintedOf(img);
-    if (!tint) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    if (flipV) {                                         // SpriteEffects.FlipVertically
-      const midY = (by + ty) / 2;
-      ctx.translate(0, midY); ctx.scale(1, -1); ctx.translate(0, -midY);
-    }
     let acc = 0;
     for (let yy = Math.floor(by); yy > Math.floor(ty); yy -= step) {
       acc += step;
       const n = acc / H;                                 // num337 归一高度
       const twist = acc * (Math.PI * 2) / -20 * (this.vx > 0 ? -1 : 1);   // num338
       const k = n <= 0.5 ? n * 2 : 2 - n * 2;            // 色包络三角(:33129-33133)
-      const aL = k * 0.5 * env;                          // A=127k×0.5×env(/255≈0.249k·env;RGB=k·env——canvas 单 pass 取 0.5 折中,登记)
-      if (aL <= 0.004) continue;
+      const fB = k * env;                                // 棕层 rgb/α 公因子
+      if (fB <= 0.004) continue;
       const scl = 1 + (n - 0.35);                        // 1+num339(:33128)
-      ctx.globalAlpha = Math.min(1, aL);
       ctx.save();
       ctx.translate(bx, yy);
       ctx.rotate(spin + twist);
-      ctx.scale(scl, scl);
-      ctx.drawImage(tint.brown, -iw / 2, -ih / 2);
       if (blueK > 0) {                                   // flag38 蓝脉冲层(:33153-33157)
-        ctx.globalAlpha = Math.min(1, aL * blueK);
-        ctx.drawImage(tint.blue, -iw / 2, -ih / 2);
+        ctx.save();
+        ctx.scale(scl * 0.8, flipV ? -scl * 0.8 : scl * 0.8);   // (1+num339)×0.8
+        stormLayerDraw(ctx, img, 1, fB * blueK, iw, ih);
+        ctx.restore();
       }
+      ctx.scale(scl, flipV ? -scl : scl);                // ★逐层纹理翻转(非整柱镜像)
+      stormLayerDraw(ctx, img, 0, fB, iw, ih);
       ctx.restore();
     }
     ctx.restore();
   }
 }
 
-/** 704 叠层绘制预染色缓存（XNA color modulate=逐通道乘——棕/蓝双版;canvas 等价
- *  =multiply+destination-in 保 alpha） */
-let stormTintCache: { brown: HTMLCanvasElement; blue: HTMLCanvasElement } | null = null;
-function stormTintedOf(img: ImageBitmap | HTMLImageElement):
-  { brown: HTMLCanvasElement; blue: HTMLCanvasElement } | null {
-  if (stormTintCache) return stormTintCache;
-  if (typeof document === 'undefined') return null;
-  const mk = (r: number, g: number, b: number): HTMLCanvasElement => {
-    const c = document.createElement('canvas');
-    c.width = img.width; c.height = img.height;
-    const cx = c.getContext('2d')!;
-    cx.imageSmoothingEnabled = false;
-    cx.drawImage(img as CanvasImageSource, 0, 0);
-    cx.globalCompositeOperation = 'multiply';
-    cx.fillStyle = `rgb(${r},${g},${b})`;
-    cx.fillRect(0, 0, c.width, c.height);
-    cx.globalCompositeOperation = 'destination-in';
-    cx.drawImage(img as CanvasImageSource, 0, 0);
-    return c;
-  };
-  stormTintCache = { brown: mk(160, 140, 100), blue: mk(140, 160, 255) };   // value94/:33106 color84
-  return stormTintCache;
+/** 704 叠层预染色桶缓存（★BJ379:XNA 预乘 rgb 贡献=tex.rgb×tint×f 全幅——桶烘焙
+ *  rgb×f（multiply+destination-in 保 alpha）+lighter α=1 全量加;遮盖项由
+ *  stormLayerDraw 的 destination-out 遍承担。旧"固定预染色+globalAlpha=0.249f"
+ *  单遍把 rgb 折两遍∝f²=用户实报"过于透明"根因,已废。桶距 1/48≈±1LSB 级;懒烘焙
+ *  上限 2 色×48 桶 60×60 小面（无 LRU 需求,帧内只触达 ~45 桶）。node(无 document)
+ *  返回原图=测试替身（色彩面浏览器恒烘焙） */
+const STORM_TINT_COLORS: ReadonlyArray<readonly [number, number, number]> =
+  [[160, 140, 100], [140, 160, 255]];                  // value94(:33106)/color84(:33107)
+const STORM_TINT_BUCKETS = 48;
+const STORM_A = (127 * 0.5) / 255;                     // A=127k→×0.5(:33140)→/255
+const stormTintBuckets = new Map<string, { src: CanvasImageSource; f: number }>();
+function stormTintBucket(img: ImageBitmap | HTMLImageElement, which: 0 | 1, f: number):
+  { src: CanvasImageSource; f: number } | null {
+  if (!(f > 0)) return null;
+  if (typeof document === 'undefined') return { src: img as CanvasImageSource, f };
+  const q = Math.max(1, Math.min(STORM_TINT_BUCKETS, Math.round(f * STORM_TINT_BUCKETS)));
+  const key = `${which}:${q}`;
+  const hit = stormTintBuckets.get(key);
+  if (hit) return hit;
+  const [r, g, b] = STORM_TINT_COLORS[which];
+  const fv = q / STORM_TINT_BUCKETS;
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const cx = c.getContext('2d')!;
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(img as CanvasImageSource, 0, 0);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${Math.round(r * fv)},${Math.round(g * fv)},${Math.round(b * fv)})`;
+  cx.fillRect(0, 0, c.width, c.height);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(img as CanvasImageSource, 0, 0);
+  const entry = { src: c as CanvasImageSource, f: fv };
+  stormTintBuckets.set(key, entry);
+  return entry;
+}
+
+/** 704 单层两遍绘制（★BJ379:XNA 预乘 AlphaBlend 精确模拟——out=src.rgb+dst×(1−src.a),
+ *  Main.cs:33135-33141:rgb=tex.rgb×tint×f 全幅、src.a=tex.a×0.249f）:
+ *  ①destination-out(raw 贴图,α=STORM_A×f)=dst×(1−src.a) 遮盖衰减（raw 贴图自带
+ *    tex.a 模板,省烘焙）;
+ *  ②lighter(预染色桶,α=1)=+src.rgb（桶已携 f 全幅,不得再折 α——单遍
+ *    source-over+globalAlpha 即 BJ376 rgb∝f² 过透根因）。
+ *  与尘系 dustPremulPair add/erase 同范式;60×60 小面,每层 2 draw 可负担。 */
+function stormLayerDraw(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement,
+  which: 0 | 1, f: number, iw: number, ih: number): void {
+  if (!(f > 0.004)) return;
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.globalAlpha = Math.min(1, STORM_A * f);
+  ctx.drawImage(img as CanvasImageSource, -iw / 2, -ih / 2);
+  const bk = stormTintBucket(img, which, f);
+  if (bk) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(bk.src, -iw / 2, -ih / 2);
+  }
 }
 
 // ---------------- 5065 公主之武魔法阵 950(AI_186_PrincessWeapon :43454-43573) ----------------
@@ -2866,6 +3026,9 @@ export class PrincessMagicCircle extends Entity {
   opacity = 1;
   scl = 0.4;
   private hitCd = new HitCdImpl();
+  /** ★BJ383：PVE 受理命中计数（原版 Projectile.numHits :14263;proc 读自增前值;
+   *  critter 受理命中亦入账——同 :14263 无条件递增） */
+  pveNumHits = 0;
 
   constructor(x: number, y: number, damage: number, knockback: number) {
     super();
@@ -2920,7 +3083,17 @@ export class PrincessMagicCircle extends Entity {
       }
     }
     cutTilesBox(game, this.x, this.y, this.w, this.h);          // CutTiles（:12517/:15276;两门排除表均无 950）
-    dealContacts(this, game, this.hitCd, 10);                   // 缺省免疫窗
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：950 friendly penetrate=−1（SetDefaults
+    //  :8966-8975 显式行）→ critter 照伤弹不亡;受理命中入 numHits 账（:14263 无条件;
+    //  critter lifeMax=5 恒不吸血,只入账）。
+    if (hitCritters(this, game)) this.pveNumHits++;
+    dealContacts(this, game, this.hitCd, 10, (t) => {
+      // ★BJ383 幽灵兜帽吸血 proc（:13877-79;950 magic :8969）——proc 先于
+      //  :14263 numHits++（读自增前值）;拒收不 proc 不计数。
+      ghostHealProc(game, this.projId, this.pveNumHits,
+        t as never as Parameters<typeof ghostHealProc>[3]);
+      this.pveNumHits++;
+    });                                                         // 缺省免疫窗
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -2991,6 +3164,10 @@ export class TitaniumStormShard extends Entity {
     const ty = p.cy + Math.sin(this.orbitAngle) * radius * 0.05;
     this.x += (tx - this.w / 2 - this.x) * 0.3;                // Lerp 0.3（:46170）
     this.y += (ty - this.h / 2 - this.y) * 0.3;
+    // ★BJ383 小动物命中面（BJ381 登记债清偿）：908 friendly penetrate=1（:8636）→
+    //  critter 受击耗穿归零即亡（:14184 → :17312 Kill）。非 magic（SetDefaults
+    //  :8628-8638 无 magic 行）→ 无幽灵兜帽吸血,不接 proc。
+    if (hitCritters(this, game)) { this.dead = true; return; }
     dealContacts(this, game, this.hitCd, -1, () => { this.dead = true; });   // penetrate=1
   }
 

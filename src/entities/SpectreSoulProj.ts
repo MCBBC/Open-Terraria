@@ -64,6 +64,39 @@ export function projPveNumHits(pr: unknown): number {
   return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
+/** ★BJ382（2026-09-28）ghostHeal proc 单源习语——BJ380 定谳于 LunarNebula.ts（私有），
+ *  per-class 补课批（239/245/255/260/461/632/535/656/856）提升为本域导出，逐弹类
+ *  接线沿同式（proc 先于 numHits++；拒收不 proc 不计数）。
+ *  定谳（Terarria1457/Terraria/Projectile.cs）：原版吸血链在 Projectile.Damage()
+ *  通用 on-hit 段【无弹号白名单】——
+ *    :13712 flag10 = num41>0 ∧ targetNPC.lifeMax>5 ∧ friendly ∧ !hostile ∧ aiStyle≠59
+ *    :13875 if (targetNPC.canGhostHeal | flag9)
+ *    :13877 if (Main.player[owner].ghostHeal && !moonLeech) ghostHeal(num41, victimCenter)
+ *  实参口径（BJ157-① MagicProj 习语 + BJ167-②③④ 实参）：
+ *    dmg = num41 等位（Enemy.lastStrikeDealt,防后实扣,入口清零 Enemy.ts:13959）
+ *    numHits = 自增前受理命中数（:14263 numHits++ 在 proc 块【后】⇒ 首跳 0 档率 0.20）
+ *    出生点 = 受害者 Center（:13879 new Vector2(targetNPC.Center.X,.Y)）
+ *  victim 门 = spectreVictimEligible（canGhostHeal=false 族 384/387/388/523,
+ *  NPC.cs:6270 缺省 true）;flag10 的 lifeMax>5 段按 maxHp/def.lifeMax 容缺核对;
+ *  旗标门（setBonus.ghostHeal/月噬/预算池 70|80/非魔法扣预算不回复 :12090-12093）
+ *  由 Game.applyLifeSteal 单源自证。 */
+export interface GhostHealVictimLike {
+  x: number; y: number; w: number; h: number;
+  vanillaId?: number | null;
+  lastStrikeDealt?: number;
+  maxHp?: number;
+  def?: { lifeMax?: number };
+}
+export function ghostHealProc(game: GameHooks, projId: number, numHits: number,
+  e: GhostHealVictimLike): void {
+  if (!(projId > 0 && projectileData(projId)?.magic)) return;
+  const lifeMax = e.maxHp ?? e.def?.lifeMax;
+  if (lifeMax !== undefined && !(lifeMax > 5)) return;   //（:13712 flag10 lifeMax>5 段）
+  if (!spectreVictimEligible(e.vanillaId)) return;
+  game.applyLifeSteal?.('ghost', e.lastStrikeDealt ?? 0, numHits,
+    e.x + e.w / 2, e.y + e.h / 2, true);
+}
+
 // ---- 预算池（Player.ghostDmg,Player.cs:991/:24652-24660 1:1）----
 // ★GB2 平移（GC 契约，2026-08-31）：唯一真源 = 本地玩家实例字段 player.ghostDmg
 // （Player.fixedUpdate 每拍 −6.6666665，原版 Player.Update :24654 同位）。本模块

@@ -129,7 +129,7 @@ export function dollUsesMaleTables(): boolean {
 //  背景一起压暗（House_Banner 的矩形乘法仅因其布面不透明才成立;纸娃娃帧透明区
 //  占大半）。乘色按 16 级量化入缓存键（lightAt 平滑渐变会击穿缓存;量化后每假人
 //  实际变体≈个位数）。node 环境无 document → 原样返回（测试面只锁纯函数）。
-type BakedLike = HTMLCanvasElement | ImageBitmap;
+type BakedLike = HTMLCanvasElement | OffscreenCanvas | ImageBitmap;   // ★C4:+OffscreenCanvas（bitmapize Baked 联合加宽的波及面;主线程 doll 路径实不变）
 const DOLL_TINT_CACHE = new WeakMap<BakedLike, Map<string, HTMLCanvasElement>>();
 export function dollLightTint(
   src: BakedLike, sx: number, sy: number, sw: number, sh: number, rgb: [number, number, number],

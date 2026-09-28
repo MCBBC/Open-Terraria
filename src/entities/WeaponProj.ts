@@ -25,7 +25,7 @@ import { ConfettiBurstProj } from './meleeOnHitProjs';
 import { GorePiece } from './GorePiece';   // AI_189 壳 gore 61-63 生成通道（GorePiece 引擎池）
 import { ProjGhostRing, projTrailingMode, drawRainbowChain, drawHslMidpointTrail } from './projGhostTrail';   // ★BJ235 1089/563 残影
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
-import { ghostHurtOnHit, playerHasGhostHurt } from './SpectreSoulProj';
+import { ghostHurtOnHit, playerHasGhostHurt, ghostHealProc } from './SpectreSoulProj';   // ★BJ382 雨滴 239/245 proc 单源
 // Spawn_PaladinsHammerShockwave 编排本体（收编池;L5 批 2026-08-31——301 撞墙本地
 // 直生 + broadcast 上行同用此函数）
 import { paladinsHammerShockwaveFx } from '../fx/orchestraFx';
@@ -303,6 +303,11 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
    *  :13086,本仓=boomBox 冲击盒非空拍）：301 ×1.75（:13060）/383 ×1.5（:13088）。
    *  缺省 1 = 既有调用方零漂移 */
   kbScale = 1,
+  /** ★BJ382（2026-09-28）受理回调（Enemy.hurt 返真 = 原版 immune 门未拒——
+   *  Damage_PVE_Inner 受理面）。与 onHit（命中即调,拒收亦跑=既有语义承载）分立：
+   *  严格受理位 = 原版 ghostHeal proc（:13877-79）/numHits++（:14263）所在段——
+   *  239/245 雨滴在此挂 ghostHealProc。缺省 undefined = 既有调用方零漂移 */
+  onAccepted?: (e: unknown) => void,
 ): void {
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
@@ -434,7 +439,7 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //   加伤并入写成同行表达式,勿再折行拆散 applyBannerDamageDealt 前缀）
     // ★BJ339：pierce 位 = hurtPierce（0 缺省档写敌免疫 10t / 1 flag3 单发不写窗——
     //  :14176-14182 `penetrate != 1` 分支的门,405 泡泡=1）
-    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放）——hurt 内原版管线;音/飘值=单点
+    const acceptedHere = e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放）——hurt 内原版管线;音/飘值=单点
     // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——StrikeNPC
     // 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :320 事前支恒不触发）。
     // 本环弹型（回旋镖 3/长矛 19,161/悠悠球 99,15）全不在 CanBeReflected 白名单,
@@ -444,6 +449,9 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
       tryReflectShimmerSlimeHit(me as unknown as Parameters<typeof tryReflectShimmerSlimeHit>[0],
         me.projId ?? 0, e as unknown as { vanillaId?: number | null; immortal?: boolean }, game, (me as { life?: number }).life);
     }
+    // ★BJ382：受理回调在 676 反射支后 / onHit 前（原版序：StrikeNPC :13712 → 反射支
+    //  :13716-19 → canGhostHeal proc 段 :13875 → numHits++ :14263）
+    if (acceptedHere) onAccepted?.(e);
     onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     // + 催化指环 6185（StatusNPC :11192-11196 `!npcProj && catalystBand` → 398 300t 任意命中;
@@ -8123,6 +8131,10 @@ export class RainCloudProj extends Entity {
   private sweepT = 0;    // localAI[0](10t 同型计数)
   private hitCd = new HitCooldown();
   private dropHits = 0;  // 雨滴 penetrate 5 计数
+  /** ★BJ382：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
+   *  :14263 受理后自增 ⇒ proc（:13877-79）读自增前值,首跳 0 档率 0.20;拒收不计数。
+   *  字段名对齐 SpectreSoulProj.projPveNumHits 读口（PVP 反馈 BJ157-④ 单源） */
+  pveNumHits = 0;
 
   // ---- ★通用湿段（Projectile.cs:16895-17113 共享体;2026-09-08 红队接入面 F5 清偿）----
   //  域 id = {237,243}（SetDefaults :3187-3194/:3257-3264：28×28 aiStyle45
@@ -8353,7 +8365,18 @@ export class RainCloudProj extends Entity {
       moveAndCollide(body, game.world, this.vx, this.vy);
       this.x = body.x; this.y = body.y;
       if (body.hitWall || body.collideY || body.hitHead) { this.killDrop(game); return; }
-      hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, () => { this.dropHits++; });
+      // ★BJ382（2026-09-28）：雨滴 239/245 幽灵兜帽吸血 proc（Projectile.cs:13877-79
+      //  Damage() 通用 on-hit 段,数据面 magic=true ⇒ 原版雨云雨滴本就吸血）。挂共享环
+      //  新增 onAccepted 受理回调（严格受理位,:14263 numHits++ 在 proc 后 ⇒ 读自增前值;
+      //  拒收不 proc 不计数）——本环既有调用方（回旋镖/长矛/悠悠球/连枷/破晓/水晶蛇）
+      //  数据面全非 magic,ghostHealProc magic 门自动过滤零行为。
+      hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, () => { this.dropHits++; },
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        (ent) => {
+          ghostHealProc(game, this.projId, this.pveNumHits,
+            ent as unknown as Parameters<typeof ghostHealProc>[3]);
+          this.pveNumHits++;                                    //（:14263 受理后自增）
+        });
       if (this.dropHits >= (projectileData(this.projId)?.penetrate ?? 5)) {   // 239=5(:3213)/245=2(:3280)
         this.killDrop(game);                             // penetrate==0 → Kill(:17313) → 尘
         return;

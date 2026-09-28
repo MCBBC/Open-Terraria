@@ -48,6 +48,7 @@ import { canHit } from '../physics/LineOfSight';
 import { playerCanHitEnemy, hitCritters, applyBannerDamageDealt } from './projTargets';
 import { projectileSnapStrikeBonus } from '../stats/SnapStrike';
 import { cutTilesBox } from './ProjCutTiles';
+import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 星璇之音 856 proc 单源
 import { stellarTuneFx } from '../fx/orchestraFx';   // ★2026-09-01 Spawn_StellarTune 本体（:3675-3705）
 import { ParticleOrchestraType } from '../net/syncModules';
 
@@ -105,16 +106,18 @@ function stellarStrike(
       pierce?: number, fromPlayer?: boolean) => boolean },
   damage: number, kx: number, game: GameHooks, armorPen: number, critChance: number,
   proj?: { hostile?: boolean; projId?: number },
-): void {
+): boolean {
   // ★焰爆石+拍击石弹幕双支位（Projectile.cs:13439-13446；F3/F1 收编升级 2026-08-31
   //   蓝队四轮）：直击与 Kill 爆裂共用的唯一结算口——弹 856 数据面 magic
   //   （resolveProjClass 单源）→ 原版同样不触发，接线为站位补齐（kind1 门 melee|ranged
   //   过滤/kind0 门 ranged 过滤,未来分流时自动生效）。返回 num14 加伤随暴击并入实伤参。
+  //   ★BJ382 返回值改为受理位（Enemy.hurt 返真）——调用点按 :14263 受理面挂
+  //   ghostHeal proc / numHits++。
   const critGuitar = Math.random() < critChance;
   const snapBonusGuitar = projectileSnapStrikeBonus(game, proj ?? null,
     e.x + e.w / 2, e.y + e.h / 2, e.id,
     { victimBox: { w: e.w, h: e.h, cx: e.x + e.w / 2, cy: e.y + e.h / 2 } });
-  e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
+  return e.hurt(applyBannerDamageDealt(game, e, Math.max(1, damage))
     + (snapBonusGuitar ? Math.trunc(snapBonusGuitar * (critGuitar ? 2 : 1)) : 0),
     kx, 0, game, armorPen,
     critGuitar, 0, true);          // StrikeNPC 单点（Enemy.hurt 同构）
@@ -255,6 +258,11 @@ export class SparkleGuitarProj extends Entity {
   private t = 0;
   private life = 90;                               // AI num=90（:47428）
   private hitOnce = new Set<number>();             // localNPCHitCooldown=-1 ⇒ 终生每敌一次
+  /** ★BJ382：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
+   *  :14263 受理后自增 ⇒ proc（:13877-79）读自增前值。直击受理 1 跳（0 档）→ Kill
+   *  爆裂轮 =【同一弹对象】的 Damage() :72840,numHits 累积 ⇒ 爆裂首跳 1 档率 0.15
+   *  （直击已受理时）;寿尽爆裂（未直击）首跳仍 0 档。PVP 读口 projPveNumHits 形状 */
+  pveNumHits = 0;
   /** 上一帧锚定的玩家引用快照（原版直读 Main.player[owner].Center——每拍现查） */
   constructor(x: number, y: number, vx: number, vy: number, public damage: number,
     aimX: number, aimY: number) {
@@ -348,9 +356,15 @@ export class SparkleGuitarProj extends Entity {
         //   :373 → Vector2 重载 :383 → Point 纯整型链 :388；F2 归位,canHitLine 系系别错挂已废）
         const blocked = !canHit(game.world.store, this.x, this.y, this.w, this.h,
           p.x, p.y, p.w, p.h);
-        stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
+        // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
+        //  856 数据面 magic ⇒ 原版星璇之音本就吸血,本仓漏接）——受理位挂接,proc 先于
+        //  :14263 numHits++（读自增前值）;拒收不 proc 不计数
+        if (stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
           stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
-          { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
+          { hostile: false, projId: this.projId })) {   // ★焰爆石 kind1 类门入参
+          ghostHealProc(game, this.projId, this.pveNumHits, e);
+          this.pveNumHits++;
+        }
         // ★F6 命中尾显式清窗（:14169 usesLocalNPCImmunity 支 immune[owner]=0）——
         //   近战桥留下的全局窗在本弹命中面被覆盖清零（noteNpcPlayerImmune(id,0) 出表）
         sparkImmuneWindowClear(e, game);
@@ -406,9 +420,13 @@ export class SparkleGuitarProj extends Entity {
       if (!sparkImmuneWindowOpen(e, game)) continue;
       if (this.hitOnce.has(e.id)) continue;        // flag2（:12598 usesLocalNPCImmunity array[i]==0）
       this.hitOnce.add(e.id);
-      stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
+      // ★BJ382：爆裂轮同链 proc（:72840 Damage() 同一弹对象,numHits 累积读自增前值）
+      if (stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
         stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
-        { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
+        { hostile: false, projId: this.projId })) {   // ★焰爆石 kind1 类门入参
+        ghostHealProc(game, this.projId, this.pveNumHits, e);
+        this.pveNumHits++;
+      }
       sparkImmuneWindowClear(e, game);
     }
   }

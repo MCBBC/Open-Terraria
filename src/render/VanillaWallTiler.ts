@@ -122,8 +122,8 @@ export class VanillaWallTiler {
     return false;
   }
 
-  /** 绘制一格墙（源 32×32，目标以格为中心的 2×2 格大小） */
-  draw(ctx: CanvasRenderingContext2D, st: TileStore, x: number, y: number, wallId: number, truncates: number[], px: number, py: number): void {
+  /** 绘制一格墙（源 32×32，目标以格为中心的 2×2 格大小）。★C4 ctx 加宽（worker OffscreenCanvas 同源烘焙） */
+  draw(ctx: import('./canvasEnv').Ctx2D, st: TileStore, x: number, y: number, wallId: number, truncates: number[], px: number, py: number): void {
     const img = this.wallImg(wallId);
     if (!img) return;
     // 掩码：N=1 W=2 E=4 S=8

@@ -162,6 +162,7 @@ const out = await page.evaluate(async () => {
     // 杀掉上一发
     for (const q of g.entities.projectiles) if (q.projId === 704) q.dead = true;
     for (let i = 0; i < 3; i++) { pinP(grounded); g.fixedUpdate(1 / 60); }
+    for (let i = 0; i < 45; i++) { await new Promise((r) => requestAnimationFrame(r)); pinP(grounded); }   // 相机稳住
     const savedDust = g.spawnDust;
     if (variant === 'D') g.spawnDust = () => null;
     ref = grab({ cx: anchor.cx, cy: anchor.cy });

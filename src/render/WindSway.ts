@@ -13,6 +13,7 @@
 // 架构：摆动图块从 ChunkCache 烘焙中摘除（swayBakeSkip），由 Renderer 在 tile 层之后
 // 逐帧动态绘制（等价原版 AddSpecialPoint 特殊绘制路径）。光照合成在其后，自动受光。
 import { TILE } from '../core/constants';
+import { mkCanvas, type AnyCanvas } from './canvasEnv';   // ★C4:worker 同源（工厂化+返回类型加宽）
 import { TILE_DEFS, IS_A_DRIP_TILE_SHEETS, SWAYS_IN_WIND_BASIC_SHEETS, VINE_THREADS_SHEETS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, scanTreeType, treeTrunkPaintStyle, palmTreePaintStyle,
   type TreeStyleData } from './VanillaTiler';
@@ -312,20 +313,19 @@ export function isAlchemyPlantHarvestable(style: number, y: number): boolean {
 /** 摆动件油漆染色格缓存：(type,fx,fy,paint) → 16×16 染色画布。帧定内容
  *  （auto/blend 邻居变化会重写 frameX/Y → 键变化自然失效）；scratch 画格 +
  *  tintRegion 逐像素（与烘焙油漆 pass 同源，TileTint 共享模块）。 */
-const swayTintCache = new Map<string, HTMLCanvasElement | null>();
+const swayTintCache = new Map<string, AnyCanvas | null>();
 function tintedSwayCell(
   atlas: SpriteAtlas, st: TileStore, rec: SwayRec, x: number, y: number, type: number,
   fx: number, fy: number, paint: number, trees?: TreeStyleData,
   /** 树油漆 style（GetTreeBiome/GetPalmTreeBiome 派生；r33-shader 补——此前恒 0，
    *  腐地/丛林/雪原/神圣/血腥树与绿洲棕榈涂漆时特判组选错 = 全落 style0 组） */
   style = 0,
-): HTMLCanvasElement | null {
+): AnyCanvas | null {
   const key = `${type}|${fx}|${fy}|${paint}|${style}`;
   const hit = swayTintCache.get(key);
   if (hit !== undefined) return hit;
-  if (typeof document === 'undefined') return null;
-  const c = document.createElement('canvas');
-  c.width = TILE; c.height = TILE;
+  const c = mkCanvas(TILE, TILE);   // ★C4:工厂化（worker 荧光补画同源;node=null）
+  if (!c) { swayTintCache.set(key, null); return null; }
   const cctx = c.getContext('2d', { willReadFrequently: true });
   if (!cctx) return null;
   // 格内容画进 scratch（取帧的邻居查找用真实 st/x/y，仅 dest 落 scratch 原点）
@@ -350,7 +350,7 @@ function tintedSwayCell(
 export function tintedSwayCellForGlow(
   atlas: SpriteAtlas, st: TileStore, x: number, y: number, type: number,
   fx: number, fy: number, paint: number, trees?: TreeStyleData,
-): HTMLCanvasElement | null {
+): AnyCanvas | null {
   const rec = SWAY_REC.get(type);
   if (!rec) return null;
   return tintedSwayCell(atlas, st, rec, x, y, type, fx, fy, paint, trees);

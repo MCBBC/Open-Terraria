@@ -49,7 +49,7 @@ export interface ResourcesData {
   rules: Record<string, RuleTileDef>;
 }
 
-export interface DrawRect { img: ImageBitmap | ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number; }
+export interface DrawRect { img: ImageBitmap | ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number; }
 
 // ---- 原版素材命名空间（vanilla.json，TEdit 数据驱动） ----
 

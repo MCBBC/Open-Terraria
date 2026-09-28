@@ -33,6 +33,8 @@
 //   Main.screenPosition（相机态），提取器编译为结构化网格域，运行时以
 //   setGoreScreen 注入的相机快照求值（玩家深度门 playerDeepHell 同源）。
 //   落叶(SpecialAI 3)/滴水族不出自 HitEffect，由 render/NatureParticles 独占。
+//   ★BJ377 勘误：SpecialAI3 中 1007/1008（智慧巨著风暴碎块）出自 AI_145/BookProj
+//   掷流，属本类且走 updateLeaf 相位物理——见 LEAF_TYPES 注。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { moveAndCollide } from '../physics/TileCollision';
@@ -55,12 +57,38 @@ const SHRINK_TYPES = new Set([11, 12, 13, 61, 62, 63, 99, 220, 221, 222, 375, 37
 const isDampRibbon = (t: number) => t >= 276 && t <= 282;
 /** GoreID.Sets.SpecialAI==1（GoreID.cs:9）：帆降 */
 const SAIL_TYPES = new Set([860, 892, 893, 1014, 1015, 1016]);
-/** 多帧行数（NewGore :1391-1398：1201/1208→4、1217/1218→3；表内仅 1218 实际出现） */
-const FRAME_ROWS: Record<number, number> = { 1201: 4, 1208: 4, 1217: 3, 1218: 3, 1225: 3 };
+/** GoreID.Sets.SpecialAI==3 落叶族中【出自武器 AI/Gore 掷流】的两型（GoreID.cs:9
+ *  1007→3/1008→3；1007=智慧巨著风暴漩涡、1008=同族尾带——AI_145 :71545-71575 与
+ *  :25762 SelectRandom(1007,1008,1008) 掷出）。同组其余（910-925/1113-1121/
+ *  1248-1255/1257/1278）=树木落叶,由 render/NatureParticles 独占（★BJ377 勘误:
+ *  本文件头注曾断言 SpecialAI3 全族"不出自 HitEffect"=漏 1007/1008,帧表+相位
+ *  物理双缺 → 整张竖条贴图画出） */
+const LEAF_TYPES = new Set([1007, 1008]);
+/** 多帧行数（NewGore :1391-1398：1201/1208→4、1217/1218→3、1225→3）。
+ *  ★BJ377 补 1007/1008→8：SpecialAI==3 支 Frame=SpriteFrame(1,8)（:1416-1424）——
+ *  Gore_1007.png=14×144 / Gore_1008.png=10×112 竖排 8 帧图集，旧表漏配=每片碎块
+ *  整张竖条画出（旋转长条,用户实报"原版是切好的小图"定谳） */
+const FRAME_ROWS: Record<number, number> = { 1201: 4, 1208: 4, 1217: 3, 1218: 3, 1225: 3, 1007: 8, 1008: 8 };
 /** GoreID.Sets.DisappearSpeed（GoreID.cs:11，默认 1） */
 const DISAPPEAR_SPEED: Record<number, number> = { 1007: 3, 1008: 10, 1024: 7, 1025: 7, 1026: 7 };
 /** GoreID.Sets.DisappearSpeedAlpha（GoreID.cs:13，默认 1） */
 const DISAPPEAR_ALPHA: Record<number, number> = { 1007: 3, 1008: 10, 1024: 7, 1025: 7, 1026: 7, 1218: 3 };
+/** ★BJ377 落叶支探针（Gore_UpdateLeaf :1115-1140）：液面/地面格查询 */
+type GoreStore = import('../world/TileStore').TileStore;
+const liquidAtGore = (st: GoreStore, px: number, py: number): number => {
+  const tx = Math.floor(px / 16), ty = Math.floor(py / 16);
+  if (!st.inBounds(tx, ty)) return 0;
+  const i = st.idx(tx, ty);
+  return st.liquid[i] > 0 ? st.liquidType[i] : 0;      // 1水 2岩浆 3蜂蜜 4微光
+};
+const solidAtGore = (st: GoreStore, px: number, py: number): boolean => {
+  const tx = Math.floor(px / 16), ty = Math.floor(py / 16);
+  return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+};
+/** Main.WindForVisuals ≈ weather.windSpeedCurrent（Game.ts:26346 同源换算） */
+const windForVisuals = (game: GameHooks): number => game.world.weather?.windSpeedCurrent ?? 0;
+/** Main.worldSurface × 16（World.groundLevel=地表行） */
+const surfaceRowPx = (game: GameHooks): number => game.world.groundLevel * 16;
 const vanishSpeed = (t: number) => DISAPPEAR_SPEED[t] ?? 1;
 const vanishAlpha = (t: number) => DISAPPEAR_ALPHA[t] ?? 1;
 
@@ -416,6 +444,16 @@ export class GorePiece extends Entity {
     }
     // :1391-1398 多帧族（Frame=SpriteFrame(1,rows)，行 0 起；1218 首帧随机行在 Update 内）
     if (FRAME_ROWS[t]) g.row = 0;
+    // :1416-1424 SpecialAI==3（1007/1008 段）：初速整体覆写为 ((rand-0.5)*1,
+    // rand*2π)——vy 兼作相位累加器,调用方传入初速被原版弃用（AI_145 的 vx×1.5 只
+    // 保留其 spawn 后追加 velocity.X += proj.vx 一项）;Frame=SpriteFrame(1,8)
+    // 随机起始行 + frameCounter=rand(8)
+    if (LEAF_TYPES.has(t)) {
+      g.vx = (Math.random() - 0.5) * 1;
+      g.vy = Math.random() * Math.PI * 2;
+      g.row = irand(8);
+      g.frameCounter = irand(8);
+    }
     // :1423-1425 SpecialAI==1（帆降）：初速整体覆写为 ((rand-0.5)*3, rand*2π)——
     // vy 兼作相位累加器，Gore_UpdateSail 据此走圆弧下落
     if (SAIL_TYPES.has(t)) {
@@ -475,6 +513,7 @@ export class GorePiece extends Entity {
       return;
     }
 
+    if (LEAF_TYPES.has(t)) { this.updateLeaf(game); return; }
     if (SAIL_TYPES.has(t)) { this.updateSail(game); return; }
 
     // 气泡族（411-430，Gore.cs:856-931 独占块）：整块替换物理链与碰撞/时档尾段
@@ -570,6 +609,82 @@ export class GorePiece extends Entity {
     this.rotation = Math.atan2(body.vy, body.vx) + Math.PI;
     if (this.timeLeft > 0) this.timeLeft -= vanishSpeed(t);
     else this.alpha += vanishAlpha(t);
+    if (this.alpha >= 255) this.kill();
+  }
+
+  /**
+   * Gore_UpdateLeaf（Gore.cs:1104-1230）——SpecialAI==3 相位落叶物理,1007/1008
+   * 专属（910-925 等树木落叶由 NatureParticles 独占同源移植）。帧推进=Update
+   * :687-697（8 tick 一换且相位 vy>0.2,CurrentRow 在 4 帧组内循环）。vy<0=滑移支
+   * （风推+液体滞留,无重力）,否则下落支（vy 兼相位累加器,UnitY.RotatedBy(vy)
+   * 弧摆;地表上加视觉风 ×4;vector 锚补偿 vector2=(−4,0) 与 vector4 二次推进均
+   * 按反编译原样照录）。近似登记：液面判定按整格液位（原版对格内液位/16 裁矩形
+   * 相交）;TileCollision+Slope 走 moveAndCollide 探针盒同源管线;消失速率
+   * 1007=3/3、1008=10/10（DisappearSpeed/Alpha 表已在本文件）。
+   */
+  private updateLeaf(game: GameHooks): void {
+    const st = game.world.store;
+    // 帧推进（Gore.Update :687-697）：8 tick 一换且相位 vy>0.2（下落支）,
+    // CurrentRow 在 4 帧组内循环（0-3 / 4-7 各自绕圈,每片两段独立动画）
+    if (++this.frameCounter >= 8 && this.vy > 0.2) {
+      this.frameCounter = 0;
+      const group = Math.floor(this.row / 4);
+      if (++this.row >= 4 + group * 4) this.row = group * 4;
+    }
+    const ax = this.x + 4, ay = this.y;                  // vector=position+(4,0)（:1106-1108）
+    if (this.vy < 0) {
+      // ---- 滑移支（:1109-1150）----
+      const liq = liquidAtGore(st, ax + 1.5, ay + 7.5);  // value=(vector.X,Y+6,3,3) 盒心
+      if (liq === 2) {
+        // 岩浆消亡（:1130-1134）：5×尘 31
+        for (let i = 0; i < 5; i++) game.spawnDust?.(this.x, this.y, 3, 3, 31, 0, -0.2, 0, null, 1);
+        this.kill();
+        return;
+      }
+      let moveX = this.vx;
+      const inLiquid = liq > 0;
+      if (inLiquid) {
+        moveX = liq === 3 ? 0 : windForVisuals(game);    // 蜂蜜停/水随风（:1135-1139）
+        if (this.y > surfaceRowPx(game)) moveX = 0;      // 地下静止（:1140-1142）
+      } else if (!solidAtGore(st, ax, ay + 16)) {
+        this.vy = 0.1;                                   // 无地面 → 转下落相位（:1136-1140）
+        this.timeLeft = 0;
+        this.alpha = Math.min(255, this.alpha + 20);
+      }
+      const body = { x: ax, y: ay, w: 3, h: 3, vx: moveX, vy: -0.2, onGround: false, hitWall: false, hitHead: false };
+      moveAndCollide(body, game.world, moveX, -0.2);     // vector3=(vx,−0.2) 盒 3px（:1115-1118）
+      if (inLiquid) this.rotation = Math.atan2(body.vy, body.vx) + Math.PI / 2;   // :1143
+      moveX = body.vx * 0.94;                            // :1145
+      // :1146-1148 双臂：干地（!flag）恒归零（落地 1 拍止滑）;液内仅 |X|<0.01 归零
+      //   （水随风漂移保留）——★BJ379 补 !flag 臂（旧单臂=干地 0.94ⁿ 长滑移）
+      if (!inLiquid || (moveX > -0.01 && moveX < 0.01)) moveX = 0;
+      this.vx = moveX;
+      this.x += this.vx;                                 // position.X += velocity.X（:1149）
+      if (this.timeLeft > 0) this.timeLeft -= vanishSpeed(this.goreId);
+      else this.alpha += vanishAlpha(this.goreId);
+      if (this.alpha >= 255) this.kill();
+      return;
+    }
+    // ---- 下落支（:1151-1226）----
+    this.vy += Math.PI / 180;                            // :1151
+    let mx = -Math.sin(this.vy);                         // UnitY.RotatedBy(vy).X ×1（:1152）
+    let my = Math.abs(Math.cos(this.vy));                // .Y 取 |·| ×1
+    if (this.y < surfaceRowPx(game)) mx += windForVisuals(game) * 4;   // :1154-1157
+    const body = { x: ax, y: ay, w: 4, h: 4, vx: mx, vy: my, onGround: false, hitWall: false, hitHead: false };
+    moveAndCollide(body, game.world, mx, my);            // TileCollision+Slope 盒 4px（:1159-1164）
+    if (body.vx !== mx || body.vy !== my) this.vy = -1;  // 碰撞改速 → 回滑移支（:1190-1191）
+    this.x = body.x - 4;                                 // 锚补偿 vector2=(−4,0)（:1165）
+    this.y = body.y;
+    // 液面：片心探针入液 → 回滑移支;岩浆 → 消亡（:1197-1204,整格液位近似）
+    const frameH = this.texH / (FRAME_ROWS[this.goreId] ?? 1);
+    const liq2 = liquidAtGore(st, this.x + this.texW / 2, this.y + frameH / 2 + 6);
+    if (liq2 === 2) { this.kill(); return; }
+    if (liq2 > 0) this.vy = -1;
+    this.x += body.vx;                                   // position += vector4（:1206）
+    this.y += body.vy;
+    this.rotation = Math.atan2(body.vy, body.vx) + Math.PI / 2;   // :1219
+    if (this.timeLeft > 0) this.timeLeft -= vanishSpeed(this.goreId);
+    else this.alpha += vanishAlpha(this.goreId);
     if (this.alpha >= 255) this.kill();
   }
 

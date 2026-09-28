@@ -387,7 +387,7 @@ const dukePairCache = new Map<string, { add: HTMLCanvasElement; erase: HTMLCanva
 const DUKE_PAIR_CACHE_MAX = 160;
 
 export function duke370PremulPair(
-  src: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+  src: HTMLImageElement | HTMLCanvasElement | ImageBitmap | OffscreenCanvas,
   rect: { sx: number; sy: number; sw: number; sh: number },
   mR: number, mG: number, mB: number, mA: number,
   tag: string,
@@ -433,7 +433,7 @@ export function drawDukePremulPair(
 
 /** 染色帧烘焙缓存（key 含 vid/贴图/变体/量化色）。multiply+destination-in。 */
 export function dukeBake(
-  atlas: SpriteAtlas, texKey: string, tex: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+  atlas: SpriteAtlas, texKey: string, tex: HTMLImageElement | HTMLCanvasElement | ImageBitmap | OffscreenCanvas,
   frame: { sx: number; sy: number; sw: number; sh: number },
   tint: [number, number, number], variant: string,
 ): HTMLCanvasElement | null {

@@ -106,6 +106,7 @@ import type { Camera } from './Camera';
 import { swPerf, searchHasParam } from './perfFlags';   // ★BJ77 零语义优化层总闸(★转正缺省开;?swperf=0=豁免口回退旧行为逐位)+★BJ94 D1 渲染循环 has 缓存读取面
 import { GLShimCensus } from './glshim/GLShimCensus';   // ★B0 census 仪具(?b0shadow=1 激活,缺省零触碰)
 import { GLShimExecutor } from './glshim/GLShimExecutor';   // ★B2 shim 执行器（实体/弹/尘族 drawImage→GL quad 桥;riding ?bgl=1）
+import type { GoreSegSpec } from './glshim/GLShimExecutor'; // ★F-gore 批段规格（buildGoreQuadBatch 产出面）
 import { useStyleFlipsForGravity, flipItemLocationAndRotationForGravity, heldItemOriginFlipY, drawPlayerItemPosDy, holdStyleFlipsForGravity } from './heldItemGrav';
 import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -248,6 +249,8 @@ import { frameMergesWith } from './TileMergeFamily';
 import { wallAnimRate } from './VanillaWallTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
 import { drawTileShineGrid, drawTileShineAdditive, setShineScratchBakeHook } from './TileShine';
+import { setShineScratchSliceHook, shineSliceGl } from './TileShine';   // ★shineslice 切片钩+旗
+import { texId, texEpoch } from './texId';   // ★F-gore 批段纹理幂等键（er: 同族）
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -264,6 +267,199 @@ import { drawMartianProbeBeams, drawCoriteTrail, drawDreadnautilusFlash,
 import { GLWorldLight } from './GLWorldLight';
 import { GLWorldCompose, type WorldTexSrc } from './GLWorldCompose';   // ★A2 光照×扭曲 FBO 链(?wfbo=1 激活,失败落回旧链)
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
+
+// ===================== ★F-gore 顶点批（2026-09-28,R3b-2 候补清算） =====================
+// 【病灶】gore 逐件 drawGorePiece→shim 逐 rec quadSprite=每件 1 bindTexture+
+//   1 drawArrays（Boss 战全量在屏=600 draw call/帧,R3b-2 trace-x-ray 定谳候补）。
+// 【本刀】?goregl=1（缺省关,用户明令灰度）:逐件形态（贴图行切片+旋转+α+加性档）
+//   折进顶点批——连续同 (纹理行切片,tier) 运行拆段,段=单 quadBatchRgba drawArrays
+//   （PRECIP 着色器 stride 8 复用,零新着色器）;发射序=2D 绘制序逐一同相（C1 排序
+//   判例:不重排,只在运行边界断段,flushAcc 逐 rec tier 换档既有链保 SO/ADD 交错序）。
+// 【几何 census 口径】两支均按 shim 现行路径复刻:rot=0∧scale=1 支=decode 轴对齐
+//   分支逐式（b=c=0 时 fround 链恒等）;旋转/缩放支=镜像算子 fround 链（translate/
+//   rotate/scale 同式）+decode 旋转分支（hypot/atan2/det/guard 全同）+VERT_SRC 角点
+//   式 CPU 复算——与被替换的逐件 quadSprite 路径同源同精度（±f32 舍入,census 有界,
+//   雨批 buildRainBatch 同族登记口径）。α 折顶点色 (ga,ga,ga,ga)=quadSprite 白
+//   tint×ga 逐式（PRECIP FS rgb×vCol.rgb/a×vCol.a → tex_p×ga 恒等）。
+// 【降级】批段 rec.replay=逐件 2D 直画闭包（角点仿射直构,雨批 replayRainBatch2D
+//   同式）;构建面不可表达（斜切 CTM/guard 失败）→ -1 整帧回 2D 逐件原链。
+const GORE_STRIDE = 8;                        // x,y,u,v,r,g,b,a（quadBatchRgba 通道）
+const GORE_MAX_QUADS = 600;                   // =Main.gore 池容量（Gore.cs:1328-1340,渲染侧恒 ≤）
+const GORE_TIE_EPS = 1 / 4096;                // quadSprite 同款 tie 补正（QUAD_TIE_EPS 同值）
+const goreBatchData = new Float32Array(GORE_MAX_QUADS * 6 * GORE_STRIDE);
+/** 重放面单槽:每件 [p0x,p0y,p1x,p1y,p3x,p3y,alpha]（角点+α;sw/sh/源行在段规格里） */
+const goreReplay = new Float32Array(GORE_MAX_QUADS * 7);
+const grnd = Math.fround;
+
+/** gore 顶点批构建（drawGorePieces GL 支/结构锁测试共用;buildRainBatch 判例同位）。
+ *  逐件把 2D 路径的 translate/rotate/scale/drawImage 折成设备空间四角+uv+α;
+ *  返回段数组（发射序=绘制序）;-1=存在不可批面（斜切 CTM/decode guard 失败/
+ *  容量溢出）→ 调用方整帧回 2D 原链。@param base 绘制点 CTM（shim 窗内=镜像矩阵,
+ *  与 2D 链捕获同源——雨批 tryDrawRainGL 同式 getTransform） */
+export function buildGoreQuadBatch(
+  base: { a: number; b: number; c: number; d: number; e: number; f: number },
+  pieces: readonly { goreId: number; x: number; y: number; rotation: number; scale: number;
+    alpha: number; additive: boolean; row: number; frameRows: number; dead: boolean }[],
+  cull: { x0: number; x1: number; y0: number; y1: number },
+  getTex: (goreId: number, frameRows: number) => { img: CanvasImageSource & { width: number; height: number };
+    sw: number; sh: number } | null,
+  maxQuads = GORE_MAX_QUADS,
+): GoreSegSpec[] | -1 {
+  const ba = base.a, bb = base.b, bc = base.c, bd = base.d, be = base.e, bf = base.f;
+  const axisAligned = bb === 0 && bc === 0;
+  let n = 0;
+  let nReplay = 0;
+  /** 段累积态（连续同 (img,sy,tier) 运行） */
+  let curImg: CanvasImageSource | null = null;
+  let curSy = -1, curSw = 0, curSh = 0, curTier = -1;
+  let segStart = 0;
+  const segs: GoreSegSpec[] = [];
+  const closeSeg = (): void => {
+    if (!curImg || n <= segStart) return;
+    const start = segStart, count = n - segStart;
+    const img = curImg, sy = curSy, sw = curSw, sh = curSh, tier = (curTier === 1 ? 1 : 0) as 0 | 1;
+    segs.push({
+      img,
+      key: `er:${texId(img)}:${texEpoch(img)}:0,${sy},${sw},${sh}`,
+      region: { sx: 0, sy, sw, sh },
+      data: goreBatchData.subarray(start * 6 * GORE_STRIDE, n * 6 * GORE_STRIDE),
+      quads: count,
+      tier,
+      replay: (ctx: CanvasRenderingContext2D) => {
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalCompositeOperation = tier === 1 ? 'lighter' : 'source-over';
+        for (let i = start; i < start + count; i++) {
+          const o = i * 7;
+          ctx.globalAlpha = goreReplay[o + 6];
+          // 角点仿射直构（雨批 replayRainBatch2D 同式:图像空间 (0..sw,0..sh) → 设备四边形）
+          ctx.setTransform(
+            (goreReplay[o + 2] - goreReplay[o]) / sw, (goreReplay[o + 3] - goreReplay[o + 1]) / sw,
+            (goreReplay[o + 4] - goreReplay[o]) / sh, (goreReplay[o + 5] - goreReplay[o + 1]) / sh,
+            goreReplay[o], goreReplay[o + 1]);
+          ctx.drawImage(img as CanvasImageSource, 0, sy, sw, sh, 0, 0, sw, sh);
+        }
+        ctx.restore();
+      },
+    });
+    curImg = null;
+    segStart = n;
+  };
+  /** 角点→顶点数据+重放面（VERT_SRC 同构:rot=0 轴对齐直出,旋转支 center+R·halfExt） */
+  const emitQuad = (dx: number, dy: number, dw: number, dh: number, rot: number,
+    u0: number, v0: number, u1: number, v1: number, ga: number): boolean => {
+    if (n >= maxQuads) return false;
+    let p0x: number, p0y: number, p1x: number, p1y: number, p2x: number, p2y: number,
+      p3x: number, p3y: number;
+    if (rot === 0) {
+      p0x = dx; p0y = dy;
+      p1x = dx + dw; p1y = dy;
+      p2x = dx + dw; p2y = dy + dh;
+      p3x = dx; p3y = dy + dh;
+    } else {
+      const cc = Math.cos(rot), cs = Math.sin(rot);
+      const hx = dw / 2, hy = dh / 2;
+      const cx = dx + hx, cy = dy + hy;
+      p0x = cx + cc * -hx - cs * -hy; p0y = cy + cs * -hx + cc * -hy;
+      p1x = cx + cc * hx - cs * -hy; p1y = cy + cs * hx + cc * -hy;
+      p2x = cx + cc * hx - cs * hy; p2y = cy + cs * hx + cc * hy;
+      p3x = cx + cc * -hx - cs * hy; p3y = cy + cs * -hx + cc * hy;
+    }
+    // 6 顶点（TRIANGLES:(p0,p1,p2)+(p0,p2,p3);α 折 rgba 四通道=quadSprite 白 tint×ga 同式）
+    let o = n * 6 * GORE_STRIDE;
+    const D = goreBatchData;
+    D[o] = p0x; D[o + 1] = p0y; D[o + 2] = u0; D[o + 3] = v0;
+    D[o + 4] = ga; D[o + 5] = ga; D[o + 6] = ga; D[o + 7] = ga;
+    D[o += 8] = p1x; D[o + 1] = p1y; D[o + 2] = u1; D[o + 3] = v0;
+    D[o + 4] = ga; D[o + 5] = ga; D[o + 6] = ga; D[o + 7] = ga;
+    D[o += 8] = p2x; D[o + 1] = p2y; D[o + 2] = u1; D[o + 3] = v1;
+    D[o + 4] = ga; D[o + 5] = ga; D[o + 6] = ga; D[o + 7] = ga;
+    D[o += 8] = p0x; D[o + 1] = p0y; D[o + 2] = u0; D[o + 3] = v0;
+    D[o + 4] = ga; D[o + 5] = ga; D[o + 6] = ga; D[o + 7] = ga;
+    D[o += 8] = p2x; D[o + 1] = p2y; D[o + 2] = u1; D[o + 3] = v1;
+    D[o + 4] = ga; D[o + 5] = ga; D[o + 6] = ga; D[o + 7] = ga;
+    D[o += 8] = p3x; D[o + 1] = p3y; D[o + 2] = u0; D[o + 3] = v1;
+    D[o + 4] = ga; D[o + 5] = ga; D[o + 6] = ga; D[o + 7] = ga;
+    const ro = nReplay * 7;
+    goreReplay[ro] = p0x; goreReplay[ro + 1] = p0y;
+    goreReplay[ro + 2] = p1x; goreReplay[ro + 3] = p1y;
+    goreReplay[ro + 4] = p3x; goreReplay[ro + 5] = p3y;
+    goreReplay[ro + 6] = ga;
+    nReplay++;
+    n++;
+    return true;
+  };
+  for (const p of pieces) {
+    if (p.dead) continue;
+    if (p.x < cull.x0 || p.x > cull.x1 || p.y < cull.y0 || p.y > cull.y1) continue;
+    const tex = getTex(p.goreId, p.frameRows);
+    // 2D 同门（drawGorePiece 早退）+零尺寸防御（sh=0 时 uv 除零,2D 路径为 no-op draw）
+    if (!tex || !(tex.img.width > 0) || !(tex.sw > 0) || !(tex.sh > 0)) continue;
+    const sw = tex.sw, sh = tex.sh;
+    const sy = p.row * sh;
+    const tier = p.additive ? 1 : 0;
+    const ga = Math.max(0, (255 - p.alpha) / 255);
+    // 段边界（img 身份+源行+tier 任一变即断段——发射序不变,运行边界即纹理/档边界）
+    if (curImg !== tex.img || curSy !== sy || curTier !== tier) {
+      closeSeg();
+      curImg = tex.img; curSy = sy; curSw = sw; curSh = sh; curTier = tier;
+    }
+    // uv 全跨度−ε（quadSprite region 语义同式:ua=(sx−ε)/w;切片纹理=行切片本体）
+    const u0 = -GORE_TIE_EPS / sw, u1 = (sw - GORE_TIE_EPS) / sw;
+    const v0 = -GORE_TIE_EPS / sh, v1 = (sh - GORE_TIE_EPS) / sh;
+    if (p.rotation === 0 && p.scale === 1) {
+      // 直绘支（Main.cs:21706-21742 原点=贴图左上;decode 轴对齐分支逐式）
+      if (!axisAligned) return -1;   // 斜切 CTM=decode null→2D 回退（同门）
+      const x0d = grnd(ba * p.x) + be, x1d = grnd(ba * (p.x + sw)) + be;
+      const y0d = grnd(bd * p.y) + bf, y1d = grnd(bd * (p.y + sh)) + bf;
+      const dx = Math.min(x0d, x1d), dy = Math.min(y0d, y1d);
+      const dw = Math.abs(x1d - x0d), dh = Math.abs(y1d - y0d);
+      // flipX/flipY=decode 轴支同式（镜像世界 CTM——生产面 det>0 恒不触发,防御面）
+      const fu0 = ba < 0 ? u1 : u0, fu1 = ba < 0 ? u0 : u1;
+      const fv0 = bd < 0 ? v1 : v0, fv1 = bd < 0 ? v0 : v1;
+      if (!emitQuad(dx, dy, dw, dh, 0, fu0, fv0, fu1, fv1, ga)) return -1;
+    } else {
+      // 旋转/缩放支（镜像算子 fround 链 translate(cx,cy)·rotate(θ)·scale(s)
+      //  +decode 旋转分支+VERT_SRC 角点式;guard 与 decode 全同）
+      const cx = p.x + (sw * p.scale) / 2, cy = p.y + (sh * p.scale) / 2;
+      const e1 = grnd(grnd(ba * cx) + grnd(grnd(bc * cy) + be));
+      const f1 = grnd(grnd(bb * cx) + grnd(grnd(bd * cy) + bf));
+      let a = ba, b = bb, c = bc, d = bd;
+      if (p.rotation) {
+        const co = grnd(Math.cos(p.rotation)), si = grnd(Math.sin(p.rotation));
+        a = grnd(grnd(ba * co) + grnd(bc * si));
+        b = grnd(grnd(bb * co) + grnd(bd * si));
+        c = grnd(grnd(bc * co) - grnd(ba * si));
+        d = grnd(grnd(bd * co) - grnd(bb * si));
+      }
+      if (p.scale !== 1) {
+        a = grnd(a * p.scale); b = grnd(b * p.scale);
+        c = grnd(c * p.scale); d = grnd(d * p.scale);
+      }
+      // decode 旋转分支（GLShimExecutor.decode verbatim 式）
+      const lu = Math.hypot(a, b), lv = Math.hypot(c, d);
+      if (lu === 0 || lv === 0) return -1;
+      const dot = a * c + b * d;
+      if (Math.abs(dot) > 1e-4 * lu * lv) return -1;   // 斜切=不可表达（decode 同门）
+      const det = a * d - b * c;
+      const hw = sw / 2, hh = sh / 2;
+      const cxA = grnd(grnd(a * -hw) + grnd(c * -hh)) + e1;
+      const cyA = grnd(grnd(b * -hw) + grnd(d * -hh)) + f1;
+      const cxC = grnd(grnd(a * hw) + grnd(c * hh)) + e1;
+      const cyC = grnd(grnd(b * hw) + grnd(d * hh)) + f1;
+      const dxR = grnd((cxA + cxC) / 2) - sw * lu / 2;   // g.dx（decode 同式,f64 尾）
+      const dyR = grnd((cyA + cyC) / 2) - sh * lv / 2;   // g.dy
+      const dwR = sw * lu, dhR = sh * lv;                 // g.dw/g.dh
+      const rotR = Math.atan2(b, a);                      // g.rot
+      const fu0 = u0, fu1 = u1;
+      const fv0 = det < 0 ? v1 : v0, fv1 = det < 0 ? v0 : v1;   // R2-F1:det<0=局部 V 轴镜像
+      if (!emitQuad(dxR, dyR, dwR, dhR, rotR, fu0, fv0, fu1, fv1, ga)) return -1;
+    }
+  }
+  closeSeg();
+  return segs;
+}
 
 /** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制。
  *  ★smooth 恒 false:主循环 :1623 等处关闭的 imageSmoothingEnabled 跨帧残留,
@@ -3433,6 +3629,14 @@ export class Renderer {
     if (!shim?.active) return false;
     return shim.pushQuadBatchRgba(img, key, data, quads, replay);
   }
+  /** ★F-gore 批中介（2026-09-28;emitRainQuadBatch 同构多段形态）:drawGorePieces
+   *  顶点批段的发射口——pushGoreQuadBatch 通道（段序=绘制序原位入队）。无活跃窗
+   *  （纯 2D 帧/逃生门/GL 死）返回 false=调用方走 2D 逐件原链。 */
+  emitGoreQuadBatch(segs: GoreSegSpec[]): boolean {
+    const shim = this.bglEntShim;
+    if (!shim?.active) return false;
+    return shim.pushGoreQuadBatch(segs);
+  }
   /** ★liqgl 批可用性预检（pass 级 all-or-nothing 判据;ga/gco 由调用方过归一后
    *  pushQuadBatchRgba 同门复核） */
   liqBatchAvail(): boolean {
@@ -5074,6 +5278,9 @@ export class Renderer {
       if (!Renderer._shineScratchHookSet) {
         Renderer._shineScratchHookSet = true;
         setShineScratchBakeHook((c, key) => this.markWorldDynamicScratch(c, key));
+        // ★shineslice（2026-09-28）:切片接管钩（返回 true=GL 侧已吃本格——
+        //  stampShineCell 跳过 delta 乘法支;false=2D 乘法烘焙原链逐位不变）
+        setShineScratchSliceHook((c, key, tint) => this.markWorldDynamicScratch(c, key, tint));
       }
       drawTileShineGrid(ctx, this.atlas, world, chunks, cam, viewW, viewH, z,
         { zz: z * wK, ox: Math.round(lw / 2), oy: Math.round(lh / 2), camRX, camRY },
@@ -6282,6 +6489,20 @@ export class Renderer {
   })();
   static get bglShim() { return this._bglShim; }
   static bglShimSetForTest(v: boolean): void { this._bglShim = v; }
+  /** ★F-gore（2026-09-28）gore 顶点批化总闸（?goregl=1 显式激活;缺省关=用户明令
+   *  灰度,禁转正——转正另行走流程）。关=逐件 drawImage→shim 逐 rec quadSprite
+   *  原链逐位不变（Boss 战 600 gore=600 bindTexture+drawArrays,R3b-2 候补定谳面）;
+   *  开=drawGorePieces 一次成批（连续同 (纹理行切片,tier) 运行拆段,段=单
+   *  quadBatchRgba drawArrays,600 draw call→段数级）。运行时可翻（bglSetForTest
+   *  同款页内翻面——探针 scripts/_gore-gl-ab.mjs 双臂对拍）。node/worker 恒关。 */
+  private static _goreGl = (() => {
+    try {
+      if (typeof document === 'undefined') return false;
+      return new URLSearchParams(location.search).get('goregl') === '1';
+    } catch { return false; }
+  })();
+  static get goreGl() { return this._goreGl; }
+  static goreGlSetForTest(v: boolean): void { this._goreGl = v; }
   /** ★生命水晶 shim ghost 修复（2026-09-27）：TileShine scratch→uploadScratchNow 钩
    *  一次性注册哨（setShineScratchBakeHook 只挂一次;挂点=render 的 tileShine 段）。 */
   private static _shineScratchHookSet = false;
@@ -7341,6 +7562,14 @@ export class Renderer {
     // 视区外剔除（扩半贴图防边缘闪断）
     const x0 = cam.x - viewW / 2 - 64, x1 = cam.x + viewW / 2 + 64;
     const y0 = cam.y - viewH / 2 - 64, y1 = cam.y + viewH / 2 + 64;
+    // ★F-gore（2026-09-28,?goregl=1 缺省关）:顶点批支前置——shim 窗活跃且可表达
+    //  → 一次成批按调用点原位入队并 return（发射序=2D 绘制序逐一同相）;旗关/
+    //  纯 2D 帧/构建面不可表达/发射门拒=落下方 2D 逐件原链（宁回退不丢精灵,
+    //  雨批 tryDrawRainGL 判例同位）。
+    if (Renderer.goreGl && this.tryDrawGoreGL(pieces, x0, x1, y0, y1)) {
+      ctx.globalAlpha = 1;   // 2D 链 :7562 出口态同款（save/restore 后显式归一）
+      return;
+    }
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (const p of pieces) {
@@ -7350,6 +7579,36 @@ export class Renderer {
     }
     ctx.restore();
     ctx.globalAlpha = 1;
+  }
+
+  /** ★F-gore GL 支（drawGorePieces 批化;tryDrawRainGL 判例同构）:逐件形态折顶点批
+   *  → Renderer.emitGoreQuadBatch 中介入队。返回 false=不可批（无执行器窗/构建
+   *  -1/门拒）→ 调用方走 2D 逐件原链。构建为纯面（零 ctx 触碰）,回退帧零副作用。 */
+  private tryDrawGoreGL(pieces: GorePiece[], x0: number, x1: number, y0: number, y1: number): boolean {
+    const shim = this.bglEntShim;
+    if (!shim?.active) return false;
+    const atlas = this.atlas;
+    if (!atlas) return false;
+    // 基 CTM：shim 窗内=执行器镜像矩阵（getTransform 返回镜像,雨批同源逐帧一次捕获）
+    const bt = this.ctx.getTransform();
+    // 纹理源解析（drawGorePiece 同式:行高=floor(img.height/rows),行切片 (0,row*sh,sw,sh)）
+    const texCache = new Map<number, { img: CanvasImageSource & { width: number; height: number };
+      sw: number; sh: number } | null>();
+    const getTex = (goreId: number, rows: number) => {
+      let t = texCache.get(goreId);
+      if (t === undefined) {
+        const img = atlas.ensureVImage(`vanilla/Gore_${goreId}.png`) as (CanvasImageSource & { width: number; height: number }) | null;
+        t = img && img.width > 0
+          ? { img, sw: img.width, sh: Math.floor(img.height / rows) }
+          : null;
+        texCache.set(goreId, t);
+      }
+      return t;
+    };
+    const segs = buildGoreQuadBatch(bt, pieces, { x0, x1, y0, y1 }, getTex);
+    if (segs === -1) return false;
+    if (segs.length === 0) return true;   // 零活件=两路径等价零绘制（雨批同款）
+    return this.emitGoreQuadBatch(segs);
   }
 
   private drawGorePiece(ctx: CanvasRenderingContext2D, p: GorePiece, z: number) {
@@ -7454,12 +7713,24 @@ export class Renderer {
    *  ★I类(2026-09-27):带 key=改走【bake 期立即上传】（uploadScratchNow）——
    *  共享 boltScratch 同帧多次烘焙（1 实体 ≤7 bolts、ArcSurge ≤13×3 发）时
    *  flush 期重传全部读到末次烘焙字节=先行 bolt quad 错拿内容;key 须按
-   *  (实体,bolt 序号) 稳定（跨帧同键重传,零 createTexture 抖动）。 */
-  markWorldDynamicScratch(img: HTMLCanvasElement, key?: string): void {
+   *  (实体,bolt 序号) 稳定（跨帧同键重传,零 createTexture 抖动）。
+   *  ★shineslice（2026-09-28）:第三形态 (key,tint) 同给=TileShine 切片接管请求,
+   *  旗开且 shim 在场走 uploadShineSlice 并返回接管成败（旧两形态恒 false——
+   *  hook 面返回值语义零改动）。 */
+  markWorldDynamicScratch(img: HTMLCanvasElement, key?: string,
+    tint?: readonly [number, number, number]): boolean {
     if (Renderer.bgl && Renderer.bglShim) {
-      if (key) this.bglShimReg().uploadScratchNow(img, key);
-      else this.bglShimReg().markDynamic(img);
+      // ★shineslice（2026-09-28）:带 tint 的键=TileShine 切片接管请求——旗开且
+      //  shim 在场时走 uploadShineSlice（首见上传/稳态零传,delta 走 quad tint）,
+      //  接管失败（窗未开/GL 死）返回 false=调用方落回 2D 乘法烘焙原链。
+      if (key && tint) {
+        if (shineSliceGl) return this.bglShimReg().uploadShineSlice(img, key, tint);
+        return false;
+      }
+      if (key) { this.bglShimReg().uploadScratchNow(img, key); return false; }
+      this.bglShimReg().markDynamic(img);
     }
+    return false;
   }
 
   /** ★变体①终扫（2026-09-27）:共享 scratch 逐次烘焙的 bolt 判例上传口——

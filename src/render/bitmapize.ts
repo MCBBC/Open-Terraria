@@ -4,12 +4,19 @@
 // = 零持久面,与 vimages 350 张同形态)。竞态守卫:仍是同一对象才替换;失败
 // 静默保持 canvas(形态等价,只是多一张后备)。
 
-/** 适合放进烘焙缓存的值形态(升格前后同一表内共存) */
-export type Baked = HTMLCanvasElement | ImageBitmap;
+/** 适合放进烘焙缓存的值形态(升格前后同一表内共存)。
+ *  ★C4（2026-09-28）：+OffscreenCanvas——烘焙 worker 侧（AutoTiler 旋转/填补件）
+ *  合成件为 OffscreenCanvas 形态；worker 全局无 HTMLCanvasElement 构造器，
+ *  bitmapize 的 instanceof 门必须 typeof 守卫（ReferenceError 防）。 */
+export type Baked = HTMLCanvasElement | OffscreenCanvas | ImageBitmap;
 
 export function bitmapize(map: Map<string, Baked>, key: string): void {
   const c = map.get(key);
-  if (!(c instanceof HTMLCanvasElement) || typeof createImageBitmap !== 'function') return;
+  if (typeof HTMLCanvasElement !== 'undefined'
+    && !(c instanceof HTMLCanvasElement)) return;
+  if (typeof HTMLCanvasElement === 'undefined'
+    && !(typeof OffscreenCanvas !== 'undefined' && c instanceof OffscreenCanvas)) return;
+  if (typeof createImageBitmap !== 'function' || !c) return;
   createImageBitmap(c).then((b) => {
     if (map.get(key) === c) map.set(key, b);
   }).catch(() => { /* 保持 canvas */ });

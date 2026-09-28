@@ -118,7 +118,13 @@ export class NatureParticles {
     const row = Math.floor(Math.random() * 8);
     this.leaves.push({
       x, y,
-      vx: (Math.random() - 0.5) * 4, vy: Math.random() * Math.PI * 2, // NewGore 初速 :1423
+      // ★BJ386（2026-09-28）：初速 ×4→×1 勘误。原版链：EmitTreeLeaves(:8024)→
+      // NewGoreDirect(:1301)→NewGore :1346-1348 先赋调用方速+踢击，但 SpecialAI==3
+      // 树叶族在 Gore.cs:1413 被直接赋值覆写为 (rand−0.5)×1f∈[-0.5,0.5)——调用方
+      // [-2,2] 随机向量与 NewGore 踢击对树叶全作废；SW 调用方 emitTreeLeaves 只传
+      // 位置不传速，漂移在常数不在调用方（BJ379 曾错锚 :1423 = 下一分支 num2==1
+      // 行，该族是 ×3f 且非树叶）。1456/1457 同位同值（:1413）。
+      vx: (Math.random() - 0.5) * 1, vy: Math.random() * Math.PI * 2,
       row, rowGroup: Math.floor(row / 4), rowCounter: Math.floor(Math.random() * 8), // :1425-1428
       col: paint,                                     // CurrentColumn = tile.color()（:8027）
       alpha: 0, timeLeft: 900,

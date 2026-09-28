@@ -24,6 +24,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+import { ghostHealProc } from './SpectreSoulProj';   // ★BJ380 ghostHeal proc 单源（★BJ382 提升至 SpectreSoulProj 域导出）
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -36,9 +37,10 @@ type EnemyLike = {
 
 const TAU = Math.PI * 2;
 
-/** 通用命中（音效 + hurt + 飘字） */
-function strike(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean, kb: number, kdir: number, pen: number): void {
-  e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
+/** 通用命中（音效 + hurt + 飘字）→ 返回受理位（Enemy.hurt：dead/iframe/dontTakeDamage
+ *  拒收 false——原版对应 npc.immune[owner] 门整跳 Damage_PVE_Inner,无 numHits++） */
+function strike(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean, kb: number, kdir: number, pen: number): boolean {
+  return e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
 }
 
 // ================= 星云烈焰弹 634/635（AI_001 :51577-51762） =================
@@ -51,6 +53,11 @@ export class NebulaBlazeBolt extends Entity {
   critChance = 0.04;
   armorPen = 0;
   dead = false;
+  /** ★BJ380：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
+   *  :14263 自增在 ghostHeal proc(:13877-79)【后】⇒ proc 读自增前值,首跳 0 档率 0.20;
+   *  受理=hurt 返真,拒收弹不计数）。字段名对齐 SpectreSoulProj.projPveNumHits 读口
+   *  （PVP 反馈 BJ157-④ 单源,Game.ts:4642 对 634/635 friendly 弹已消费本字段） */
+  pveNumHits = 0;
   /** 点光：634 (0.7,0.1,0.5) / 635 (0.4,0.6,0.9)（:51584/:51597） */
   lightRGB: [number, number, number] | null;
 
@@ -287,8 +294,11 @@ export class NebulaBlazeBolt extends Entity {
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
-      strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - this.cx) || 1, this.armorPen);
+      if (strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+        Math.sign((e.x + e.w / 2) - this.cx) || 1, this.armorPen)) {
+        ghostHealProc(game, this.projId, this.pveNumHits, e);   // ★BJ380 :13877-79（读自增前值）
+        this.pveNumHits++;                                      //（:14263 受理后自增）
+      }
       this.burst(game, e.id);
       return;
     }
@@ -310,8 +320,11 @@ export class NebulaBlazeBolt extends Entity {
       if (e.dead || e.id === skipId) continue;
       if (!(ex - 25 < e.x + e.w && ex + 25 > e.x && ey - 25 < e.y + e.h && ey + 25 > e.y)) continue;
       const crit = Math.random() < this.critChance;
-      strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - ex) || 1, this.armorPen);
+      if (strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+        Math.sign((e.x + e.w / 2) - ex) || 1, this.armorPen)) {
+        ghostHealProc(game, this.projId, this.pveNumHits, e);   // ★BJ380 Kill 内 Damage()（:68745）同链
+        this.pveNumHits++;
+      }
     }
     // 尘爆（40 彩 + 20 底）——vector30 = (rot−π/2)向 ×|vel|×3
     const pool = game.vanillaDust;
@@ -373,6 +386,10 @@ export class LunarFlareStar extends Entity {
   critChance = 0.04;
   armorPen = 0;
   dead = false;
+  /** ★BJ380：PVE 受理命中计数（Projectile.numHits 同相——:14263 受理后自增,proc 读
+   *  自增前值;645 接触转爆在原版 Damage 内 :14255-14259 ⇒ 转爆拍已计一次。字段名
+   *  对齐 SpectreSoulProj.projPveNumHits PVP 读口） */
+  pveNumHits = 0;
 
   /** ai[1]：鼠标世界 Y 线（过线开 tileCollide）/ −1 = 爆炸相 */
   private ai1: number;
@@ -477,8 +494,11 @@ export class LunarFlareStar extends Entity {
         if (e.dead || this.hitSet.has(e.id)) continue;
         if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         const crit = Math.random() < this.critChance;
-        strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-          Math.sign((e.x + e.w / 2) - this.ecx) || 1, this.armorPen);
+        if (strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+          Math.sign((e.x + e.w / 2) - this.ecx) || 1, this.armorPen)) {
+          ghostHealProc(game, this.projId, this.pveNumHits, e);   // ★BJ380 :13877-79（爆炸相首敌 0 档率 0.20）
+          this.pveNumHits++;
+        }
         this.hitSet.add(e.id);
       }
       if (this.ai0 >= 126) {                         // 7×MaxUpdates(6)×3

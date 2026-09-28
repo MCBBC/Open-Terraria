@@ -8,6 +8,10 @@
 //     两侧同分布;g.render 包装采集真实渲染帧时点。
 //  条件:cap=60(缺省档)与 cap=30(门限骑线场景);headless=60Hz 虚拟 vsync,
 //  SW_HEADED=1 时有头跑(ProMotion 真机 120Hz 可复现用户实报场景)。
+//  ★热修刃扩展(2026-09-28 同日):cap=120/0 条件+「网格地板 shim」旧侧(修前
+//  FrameBeat.targetMs 公式复刻,仅此一处语义差,状态机同构)——红判别器:cap120@120Hz
+//  旧 k=2 恒 60fps(红)/新 k=1 恒 120fps 拍对齐(绿),p50 应随 cap 走(8.3 而非 16.7)。
+//  headless=60Hz 虚拟 vsync 下 cap120 两态同形(只验无回归);120Hz 判别须 SW_HEADED=1。
 import puppeteer from 'puppeteer-core';
 
 const ORIGIN = process.env.SW_ORIGIN ?? 'http://localhost:5239';
@@ -74,10 +78,16 @@ await page.evaluate(() => {
   const u = () => (mod.seed = (mod.seed * 48271) % 2147483647) / 2147483647;
   // 帧耗抖动注入(两侧同分布;busy-wait 占主线程=真实帧成本)
   const origFrame = g.frame.bind(g);
+  // 帧耗形态:std=基础 4ms+25% 尖峰 12ms(重场景);light=基础 2ms+25% 尖峰 2ms
+  // (≤4ms<8.3 预算,120 可持续——cap120 红绿判别须轻载,重载两态都降 k=2 无判别力)
+  mod.costKind = 'std';
+  mod.costTarget = () => (mod.costKind === 'light'
+    ? 2 + (u() < 0.25 ? 2 : 0)
+    : 4 + (u() < 0.25 ? 8 : 0));
   g.frame = (now) => {
     const t0 = performance.now();
     origFrame(now);
-    const target = 4 + (u() < 0.25 ? 8 : 0);
+    const target = mod.costTarget();
     while (performance.now() - t0 < target) { /* busy */ }
   };
   // 真实渲染帧观测(旧仿真:suppress 帧跳渲染体=计时等价)
@@ -111,10 +121,16 @@ await page.evaluate(() => {
     };
   };
   mod.realBeat = g.beat;
+  // ★热修刃 A/B:修前(网格地板)targetMs shim——实例 own-property 覆写原型方法,
+  //  delete 即回落现行实现。复刻修前公式 max(1000/60, 1000/cap)(仅此一处语义差)。
+  mod.installGridFloor = () => {
+    mod.realBeat.targetMs = (cap = mod.realBeat.cap) => Math.max(1000 / 60, cap > 0 ? 1000 / cap : 0);
+  };
+  mod.uninstallGridFloor = () => { delete mod.realBeat.targetMs; };
 });
 
-const runCondition = async (label, cap, useOld) => {
-  await page.evaluate(async (cap, useOld) => {
+const runCondition = async (label, cap, mode = 'new', costKind = 'std') => {
+  await page.evaluate(async (cap, mode, costKind) => {
     const { options } = await import('/src/core/Options.ts');
     await options.set('frameCap', cap);
     const g = window.__swGame;
@@ -122,13 +138,16 @@ const runCondition = async (label, cap, useOld) => {
     mod.seed = 12345;                     // 每条件同种子(旧/新同分布)
     mod.stamps.length = 0;
     mod.suppress = false;
-    if (useOld) mod.installOld(cap);
+    mod.costKind = costKind;
+    if (mode === 'passive') mod.installOld(cap);
     else {
       g.beat = mod.realBeat;
+      mod.uninstallGridFloor();          // 先摘 shim 回落现行 targetMs
+      if (mode === 'gridfloor') mod.installGridFloor();  // 修前网格地板语义(热修前复刻)
       g.beat.resetSampling?.();          // 与进世界/切档后的干净采样面对齐(afterWorldLoad 同源)
       mod.suppress = false;
     }
-  }, cap, useOld);
+  }, cap, mode, costKind);
   await new Promise((r) => setTimeout(r, 600));   // 等 saveTimer/门稳定
   await page.evaluate((runMs) => {
     const mod = window.__fb;
@@ -163,10 +182,17 @@ const runCondition = async (label, cap, useOld) => {
 };
 
 const results = [];
-results.push(await runCondition('cap60-old(修前被动门+SuppressDraw)', 60, true));
-results.push(await runCondition('cap60-new(修后节拍对齐)', 60, false));
-results.push(await runCondition('cap30-old', 30, true));
-results.push(await runCondition('cap30-new', 30, false));
+results.push(await runCondition('cap60-old(初版被动门+SuppressDraw)', 60, 'passive'));
+results.push(await runCondition('cap60-new(节拍对齐,cap=60 语义不变)', 60, 'new'));
+results.push(await runCondition('cap30-old', 30, 'passive'));
+results.push(await runCondition('cap30-new', 30, 'new'));
+// ★热修刃红绿判别(轻载:2-4ms<8.3 预算,120 可持续;120Hz 判别须 SW_HEADED=1 ProMotion)
+results.push(await runCondition('cap120-old(网格地板 shim:恒 60=红)', 120, 'gridfloor', 'light'));
+results.push(await runCondition('cap120-new(拍=1 vsync:恒 120=绿)', 120, 'new', 'light'));
+results.push(await runCondition('cap0-old(网格地板 shim)', 0, 'gridfloor', 'light'));
+results.push(await runCondition('cap0-new(拍=1 vsync)', 0, 'new', 'light'));
+// ★重场景(帧耗 4/12 抖动):新码容量降拍到可持续拍(可逆),非硬 60 钉死
+results.push(await runCondition('cap120-new(重场景 4/12 抖动:容量降拍)', 120, 'new', 'std'));
 
 console.log('=== DIGEST SUMMARY ===');
 for (const r of results) {

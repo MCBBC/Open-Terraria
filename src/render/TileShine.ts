@@ -71,7 +71,7 @@ import { ChunkCache, type ChunkPair } from './ChunkCache';
 import { TileStore } from '../world/TileStore';
 import { drawVanillaCell, chestLidPoseAt, chestPoseSheet } from './VanillaTiler';
 import { frameMergesWith } from './TileMergeFamily';
-import { isDynamicAnimSheet, tileAnim } from './TileAnim';
+import { isDynamicAnimSheet, tileAnim, TILE_ANIM_RATE } from './TileAnim';
 import { getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
 import { tintRegion } from './TileTint';
 import type { Camera } from './Camera';
@@ -253,6 +253,35 @@ export function parseShineBudget(search: string): number | null {
   if (raw === null) return null;
   const v = Math.floor(Number(raw));
   return Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+// ---- ★shineslice（2026-09-28 登记债清算）:动态 shine 切片上 GPU ----
+//
+// 【病灶】动态支逐格 stampShineCell=共享 scratch 全幅上传（40×40=6.4KB/格/帧,
+//   uploadScratchNow texRefresh）+同量 getImageData 读回（重放快照）——叶绿素
+//   农场数百脉动格在视 = MB 级/帧上传+读回。
+// 【正解】逐 (格内容,动画相位) 稳定键切片上 GPU：纹理=sprite-only 面（delta
+//   不烘进纹理）首见上传、稳态零上传零读回;delta=乘法 tint 走消费 rec 顶点色
+//   （BakeSnap.tint → quadSprite uTint——呼吸扫频逐帧变的是 4B 顶点色不是纹理）。
+//   键=内容指纹（shineSliceCellKey:3×3 邻域 type/flags/half/slope/帧/漆 + 帧相位
+//   +漆）→ 同型格共享同纹理（农场变体数≪格数）。与 shineCell 帽 1024 既有锁
+//   兼容=键空间共用 shineKeySeen 帽账（GLShimExecutor.uploadShineSlice 统一清扫）。
+// 【旗】?shineslice=1 显式激活,缺省关=用户明令灰度（禁转正;转正另走流程）。
+//   关=逐格上传旧链逐位不变;开但 shim 未接管（2D 会话/GL 死/窗未开）=钩子返回
+//   false,stampShineCell 落回旧乘法支=2D 原链逐位不变（宁回退不丢）。
+export let shineSliceGl = typeof location !== 'undefined'
+  ? new URLSearchParams(location.search).get('shineslice') === '1' : false;
+export function shineSliceGlSetForTest(v: boolean): void { shineSliceGl = v; }
+
+/** 切片接管钩（Renderer 启动期注册;返回 true=GL 侧已接管本格——调用方跳过
+ *  delta 乘法支,2D 面保 sprite-only、乘法由 GL quad tint 承担）。非 shim 会话
+ *  内部自判返回 false（2D 烘焙原链）。 */
+let shineScratchSliceHook:
+  ((c: HTMLCanvasElement, key: string, tint: readonly [number, number, number]) => boolean) | null = null;
+export function setShineScratchSliceHook(
+  fn: ((c: HTMLCanvasElement, key: string, tint: readonly [number, number, number]) => boolean) | null,
+): void {
+  shineScratchSliceHook = fn;
 }
 
 /** 模块装载期解析（?glband 先例：渲染模块直读 location；Node/vitest 无 location=0=缺省路径）。 */
@@ -494,6 +523,51 @@ let shineScratchBakeHook: ((c: HTMLCanvasElement, key: string) => void) | null =
 export function setShineScratchBakeHook(fn: ((c: HTMLCanvasElement, key: string) => void) | null): void {
   shineScratchBakeHook = fn;
 }
+
+// ---- ★shineslice 内容指纹键（同上域注）----
+//
+// 【键 = drawVanillaCell 输出的全部决定输入】动态支格（12/639 动画水晶、204/211
+// 脉动矿）经 drawVanillaCell 取帧——auto/blend 框架链按【邻格现场】算帧（非存储
+// 帧）,故稳定键必须盖 3×3 邻域;动画相位（tileAnim.tick 按 sheet rate 量化）参与
+// 键 = 「逐 (格,动画帧) 稳定」的字面兑现。同键 ⇔ 产物逐位同（drawVanillaCell 是
+// 这些输入+全局静态 atlas 的纯函数）→ 跨格/跨帧复用同纹理。
+// 【碰撞面】FNV-1a 32 位 over ~81 混入值——键空间=可见动态 shine 格变体并集
+// （农场场景 ≪1024 帽）,碰撞概率可忽略;GLShimExecutor 键含完整指纹原文,碰撞
+// 即错帧（与 shineChunkFingerprint 同族取含口径——该判例已运行一季零案）。
+const SLICE_FP_SEED = 0x811c9dc5 | 0;
+
+/** 动态 shine 格切片键（'shineSlice:<sheet>:<fp>'）。fp 混入:3×3 邻域 (type,
+ *  flags,half,slope,frameX 低/高字节,frameY 低/高字节,paint) + 中心格动画相位
+ *  （rate>0 时 floor(tick/rate);静态支恒 0）+ 漆。wire/coat 不混:动态支在 stamp
+ *  前已把 actuated/invisible/fullbright 格排除（bakeShineChunk/drawTileShineGrid
+ *  同门）,到得了 stamp 的格 wire/coat 不改 sprite。 */
+export function shineSliceCellKey(
+  world: World, x: number, y: number, sheet: number, type: number,
+): string {
+  const st = world.store;
+  let h = SLICE_FP_SEED;
+  const mix = (v: number): void => {
+    h = ((h ^ (v & 255)) * 0x01000193) | 0;
+    h = ((h ^ ((v >>> 8) & 255)) * 0x01000193) | 0;
+  };
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if (!st.inBounds(nx, ny)) { mix(0); continue; }   // 界外=哨兵 0（取帧侧界外语义同）
+      const i = st.idx(nx, ny);
+      mix(st.type[i]);
+      mix(st.flags[i]);
+      mix(st.half[i] ? 1 : 0);
+      mix(st.slope[i]);
+      mix(st.frameX[i] & 255); mix(st.frameX[i] >>> 8);
+      mix(st.frameY[i] & 255); mix(st.frameY[i] >>> 8);
+      mix(st.paint[i]);
+    }
+  }
+  const rate = TILE_ANIM_RATE[sheet] ?? 0;
+  mix(rate > 0 ? Math.floor(tileAnim.tick / rate) : 0);   // 动画相位（逐帧键的字面项）
+  return `shineSlice:${sheet}:${h >>> 0}`;
+}
 function stampShineCell(
   atlas: SpriteAtlas, world: World, x: number, y: number,
   sheet: number, frame: 'auto' | 'style' | 'blend', fw: number, fh: number,
@@ -545,8 +619,19 @@ function stampShineCell(
   const dG = additiveFlat ? SHINE_ADDITIVE : delta[1];
   const dB = additiveFlat ? SHINE_ADDITIVE : delta[2];
   if (dR <= 0 && dG <= 0 && dB <= 0) return;
-  s.globalCompositeOperation = 'multiply';
   const q = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 255);
+  // ★shineslice:先钩后乘——接管=true 时 scratch 保 sprite-only（delta 不烘进
+  //  面）,乘法由消费 rec 顶点色承担（uploadShineSlice→BakeSnap.tint→quadSprite
+  //  uTint,键=内容指纹）;false（旗关/2D 会话/GL 死）=下方旧链逐位不变。
+  if (dynamicDest && shineSliceGl) {
+    if (shineScratchSliceHook?.(sc,
+      shineSliceCellKey(world, x, y, sheet, type),
+      [q(dR) / 255, q(dG) / 255, q(dB) / 255])) {
+      dest.drawImage(sc, dx, dy, dw, dh);
+      return;
+    }
+  }
+  s.globalCompositeOperation = 'multiply';
   s.fillStyle = `rgb(${q(dR)},${q(dG)},${q(dB)})`;
   s.fillRect(0, 0, SCR, SCR);
   s.globalCompositeOperation = 'destination-in';

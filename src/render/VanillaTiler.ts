@@ -3,6 +3,7 @@
 // 位序（与游戏 neighborMask 不同！）：U=1 L=2 R=4 D=8 UL=16 UR=32 DL=64 DR=128
 // 变体选择 (x*7 + y*11) % 3；无条目/越界回退默认帧 (1,1)
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
+import { mkCanvas, ctx2d, type Ctx2D, type AnyCanvas } from './canvasEnv';   // ★C4:worker 同源烘焙（OffscreenCanvas 工厂+ctx 联合）
 import { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS, PLATFORMS_SHEETS, NOT_REALLY_SOLID_SHEETS, DONT_DRAW_TILE_SLOPES_SHEETS, HAS_SLOPE_FRAMES_SHEETS, BLOCKS_STAIRS_SHEETS, IGNORES_NEARBY_HALFBRICKS_SHEETS, ALL_BLOCKS_WITH_SMOOTH_BORDERS_SHEETS } from '../data/tiles';
@@ -523,9 +524,11 @@ function frameHasContent(r: DrawRect): boolean {
   if (hit !== undefined) return hit;
   let ok = false;
   try {
-    const c = document.createElement('canvas');
-    c.width = r.sw; c.height = r.sh;
-    const cx = c.getContext('2d', { willReadFrequently: true })!;
+    const c = mkCanvas(r.sw, r.sh);   // ★C4:工厂化(worker OffscreenCanvas;node=null→按有内容处理)
+    if (!c) { frameContentCache.set(key, true); return true; }
+
+    const cx = ctx2d(c, { willReadFrequently: true });
+    if (!cx) { frameContentCache.set(key, true); return true; }
     cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
     const d = cx.getImageData(0, 0, r.sw, r.sh).data;
     let n = 0;
@@ -636,7 +639,7 @@ export interface TreeStyleData {
 /** 634 灰烬树 glowmask 叠画（原版 DrawTrees :8291-8300/:8336-8345：顶 Glow_316 / 枝 Glow_317，
  *  与主贴图同矩形同变换白色彩——须在调用方的 save/restore 内执行） */
 function drawTreeGlow(
-  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  ctx: Ctx2D, atlas: SpriteAtlas,
   sheet: number, anchor: number, sx: number, sy: number, sw: number, sh: number,
   dx: number, dy: number, dw = sw, dh = sh,
 ): void {
@@ -648,7 +651,7 @@ function drawTreeGlow(
 }
 
 export function drawTreeCell(
-  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  ctx: Ctx2D, atlas: SpriteAtlas,
   st: TileStore, x: number, y: number, fx: number, fy: number, px: number, py: number,
   sheet = 5,
   foliageOnly = false,
@@ -998,7 +1001,7 @@ export function cactusFrameAt(st: TileStore, x: number, y: number, type: number)
 }
 
 export function drawCactusCell(
-  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  ctx: Ctx2D, atlas: SpriteAtlas,
   st: TileStore, x: number, y: number, type: number, px: number, py: number,
 ): void {
   const { col: ux, row: uy } = cactusFrameAt(st, x, y, type);
@@ -1023,7 +1026,7 @@ export function drawCactusCell(
  *  位段解码，变体在装饰贴图内 66px 步长、串灯 130px×帧号（4 帧循环，
  *  Main.cs:18609-18618 counter>16 推进）。*/
 function drawXmasTreeCell(
-  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  ctx: Ctx2D, atlas: SpriteAtlas,
   st: TileStore, x: number, y: number, px: number, py: number,
 ): void {
   const cell = xmasCell(st, x, y);
@@ -1063,7 +1066,7 @@ function drawXmasTreeCell(
  *  层序：后轨 → 前轨 → 下行装饰(36/37, 画在下一格) → 挡板(39 普通 / 38 弹性, 画在上一格)。
  *  加速轨道（type 2）随 boosterAnimFrame() 滚动帧行（Main.cs:18734-18741） */
 function drawMinecartTrackCell(
-  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  ctx: Ctx2D, atlas: SpriteAtlas,
   x: number, y: number, px: number, py: number, fx: number, fy: number,
 ): void {
   const back = fy === 0xFFFF ? -1 : fy;
@@ -1091,7 +1094,7 @@ function drawMinecartTrackCell(
  *  直接用存储帧会让 2 格宽家具两格都画锚点帧（重复左侧贴图）。
  *  style 模式改为：若本格帧偏移为 0，向左/上扫描同类同物体格子，
  *  按到锚点的格距重算帧偏移（锚点=左侧或上方最近格） */
-export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+export function drawVanillaCell(  ctx: Ctx2D, atlas: SpriteAtlas,
   sheet: number, frame: 'auto' | 'style' | 'blend', fw: number, fh: number,
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
@@ -1644,7 +1647,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
  * slope3(左低右高)/4(右低左高):8 条 2px 竖条,源行偏移 2i(取帧中段),
  * 目标 y=0;补顶部 16×2 整条。
  */
-function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number }, slope: number, px: number, py: number): void {
+function drawSlopedFrame(ctx: Ctx2D, r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number }, slope: number, px: number, py: number): void {
   const fx = r.sx, fy = r.sy;
   for (let i = 0; i < 8; i++) {
     let num19: number; // 源X/目标X
@@ -1817,7 +1820,7 @@ function vectorOffset(sheet: number, fx: number, fy: number, slope: number): [nu
  *  复刻原版方块的光影质感(顶受光/底背光/悬空边缘显轮廓)。RGB 解码:
  *  r = fx>>8、g = fx&255、b = fy&255(写入端 ||1 防 0,0) */
 function drawPixelBlock(
-  ctx: CanvasRenderingContext2D, st: TileStore, x: number, y: number,
+  ctx: Ctx2D, st: TileStore, x: number, y: number,
   fx: number, fy: number, px: number, py: number,
 ): void {
   const r = fx >> 8, g = fx & 255, b = fy & 255;
@@ -2269,23 +2272,23 @@ export function shardGlowTint(clockSec: number, x: number, y: number): [number, 
   return [Math.floor(r * 0.3), Math.floor(g * 0.3), Math.floor(b * 0.3), Math.floor(255 / 2 * 0.3)];
 }
 
-const shardTintCache = new Map<string, HTMLCanvasElement>();
+const shardTintCache = new Map<string, AnyCanvas>();
 const shardTintImgIds = new WeakMap<object, number>();
 let shardTintNextId = 1;
 const SHARD_TINT_CACHE_CAP = 512;
 
 /** 辉光带染色副本缓存（键=图像身份|源矩形|tint——tint 随 hue 量化连续变化,LRU 淘汰;
  *  逐像素 = XNA SpriteBatch 调制语义 texel×tint/255,α 同乘后 source-over 合成等价） */
-function shardTintedCopy(r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
-  tint: [number, number, number, number]): HTMLCanvasElement | null {
+function shardTintedCopy(r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number },
+  tint: [number, number, number, number]): AnyCanvas | null {
   let imgId = shardTintImgIds.get(r.img as object);
   if (imgId === undefined) { imgId = shardTintNextId++; shardTintImgIds.set(r.img as object, imgId); }
   const key = `${imgId}|${r.sx}|${r.sy}|${tint[0]},${tint[1]},${tint[2]}`;
   const hit = shardTintCache.get(key);
   if (hit) { shardTintCache.delete(key); shardTintCache.set(key, hit); return hit; }
-  const c = document.createElement('canvas');
-  c.width = r.sw; c.height = r.sh;
-  const cx = c.getContext('2d', { willReadFrequently: true });
+  const c = mkCanvas(r.sw, r.sh);   // ★C4:工厂化（worker OffscreenCanvas 同源）
+  if (!c) return null;
+  const cx = ctx2d(c, { willReadFrequently: true });
   if (!cx) return null;
   cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
   const im = cx.getImageData(0, 0, r.sw, r.sh);
@@ -2315,8 +2318,8 @@ function shardTintedCopy(r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasEl
  *  → !flag3 尾画）——16×18 核心叠域 4 副本互叠+基底盖顶 source-over 不可交换
  *  （Δ≈(1-αB)⁴ 序差 ×(基底−tint) 色差,非 0）。本仓曾反序（先基底后副本）→ 微弱
  *  色差,已按原版序调正。导出仅供绘序金标测试（记录 ctx 桩）。 */
-export function drawShardCell(ctx: CanvasRenderingContext2D,
-  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+export function drawShardCell(ctx: Ctx2D,
+  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number },
   sx: number, sy: number, dx: number, dy: number, x: number, y: number, fx: number): void {
   if (fx >= 324 && sy + 72 + r.sh <= r.img.height && sy + 72 >= 0) {   // 辉光带越界防御
     const tint = shardGlowTint(shardGlowClock(), x, y);
@@ -2348,8 +2351,8 @@ export function drawShardCell(ctx: CanvasRenderingContext2D,
  *  悬空画暗条——用户实报"半砖放平台上出现黑条"同根）。
  *  auto/共享尾两条同体分支合并走本函数（此前两份手写已漂移出同 bug）。 */
 function drawHalfBrickCell(
-  ctx: CanvasRenderingContext2D,
-  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+  ctx: Ctx2D,
+  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number },
   st: { idx(x: number, y: number): number; h: number; flags: Uint8Array; type: Uint16Array; half: Uint8Array },
   x: number, y: number, type: number, px: number, py: number,
 ): void {
@@ -2371,8 +2374,8 @@ function drawHalfBrickCell(
  *  用素材表预制衔接帧(90/126/144/148/156 列)替代整帧,抹平 8px 高差。
  *  返回 true = 已绘制(调用方 return) */
 function drawHalfBrickSeam(
-  ctx: CanvasRenderingContext2D,
-  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+  ctx: Ctx2D,
+  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas; sx: number; sy: number; sw: number; sh: number },
   st: TileStore, x: number, y: number, sheet: number, px: number, py: number,
 ): boolean {
   if (DONT_DRAW_SLOPES.has(sheet) || IGNORES_NEARBY_HALFBRICK.has(sheet) || NOT_REALLY_SOLID.has(sheet)) return false;

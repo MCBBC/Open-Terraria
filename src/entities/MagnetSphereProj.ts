@@ -67,6 +67,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { canHitPoint } from '../physics/LineOfSight';
 import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { magnetSphereBoltTrailFx, heatRayTrailFx } from '../fx/orchestraFx';
+import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 激光弹 255/260 proc 单源
 import { TILE } from '../core/constants';
 
 /** 悬停球 254（ProjectileID.MagnetSphereBall） */
@@ -114,6 +115,10 @@ export class BeamBoltProj extends Entity {
   /** 本机拥有（owner==myPlayer 门：发束广播/伤害结算仅拥有者端） */
   local = true;
   readonly projId: number;
+  /** ★BJ382：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
+   *  :14263 受理后自增 ⇒ proc（:13877-79）读自增前值;255/260 单发 flag3 首跳恒 0 档。
+   *  字段名对齐 SpectreSoulProj.projPveNumHits 读口（PVP 反馈 BJ157-④ 单源） */
+  pveNumHits = 0;
   /** timeLeft（SetDefaults :3388 255→100 / 260→200;逐子步 −1） */
   private tl: number;
   /** 子步龄（vanilla localAI[0],跨子步累计;锚记录/发束门读数） */
@@ -203,9 +208,15 @@ export class BeamBoltProj extends Entity {
         if (!(this.x < e.x + e.w && this.x + this.w > e.x
           && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-        e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(this.damage))),
+        if (e.hurt(applyBannerDamageDealt(game, ent, Math.max(1, Math.trunc(this.damage))),
           Math.sign(e.x + e.w / 2 - this.cx) * this.knockback, 0, game,
-          this.armorPen, crit, 1, true);       // pierce=1 单发 flag3（:11904 语义）
+          this.armorPen, crit, 1, true)) {     // pierce=1 单发 flag3（:11904 语义）
+          // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
+          //  255/260 数据面 magic ⇒ 原版磁球激光/炼狱叉光束本就吸血,本仓漏接）——
+          //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
+          ghostHealProc(game, this.projId, this.pveNumHits, e);
+          this.pveNumHits++;
+        }
         this.killBeam(game);
         break;
       }

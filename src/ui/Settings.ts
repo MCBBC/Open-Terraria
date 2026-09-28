@@ -544,10 +544,12 @@ export class SettingsPanel {
         // 文案=原版 LegacyMenu.247/248/249 拆「标签|档名」(IngameOptions.cs:964
         // Lang.menu[247+FrameSkipMode],枚举 Off/On/Subtle=Enums/FrameSkipMode.cs;
         // zh 跳帧/关/开/隐蔽,en Frame Skip/Off/On/Subtle;2026-09-28 用户令对齐原版)。
-        // ★语义锚(2026-09-28 调度面修复刃后,Game.ts start() beat 门定谳):Subtle=
-        // 确定性节拍对齐(原版 improvedSubtleFrameSkip 默认路径,EndDraw 钳 60Hz present
-        // 网格 Main.cs:62624-62644 的 rAF 帧序计数移植——渲染恒 ≤60fps,高刷屏帧距
-        // 恒定;旧"0 步进帧 SuppressDraw"译法已退役);Off/On=自由渲染照画(逻辑 tick
+        // ★语义锚(2026-09-28 调度面修复刃+同日热修刃,Game.ts start() beat 门定谳):Subtle=
+        // 确定性节拍对齐(原版 improvedSubtleFrameSkip 默认路径 EndDraw present 网格的
+        // rAF 帧序计数移植——拍=用户 frameCap,不设限=拍 1 vsync,只对齐不钳速,帧距
+        // 恒定;60Hz 网格地板已废:原版钳 60 是"逻辑=呈现同帧"的速度保全,本仓逻辑
+        // 60Hz 解耦后只静默覆盖用户 frameCap,FrameBeat.ts 头注否决注;旧"0 步进帧
+        // SuppressDraw"译法已退役);Off/On=自由渲染照画(逻辑 tick
         // 恒 60Hz;On 的 XNA 固定时间步差异 Main.cs:17133-17137 无 Web 对应物,同效),
         // off 档=用户明令逃生门。文案与原版逐字对齐,语义归位后无需改动。
         this.modeRow(

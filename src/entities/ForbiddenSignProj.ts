@@ -26,6 +26,7 @@ import type { Camera } from '../render/Camera';
 import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
 import { solidTileAt } from '../physics/LineOfSight';
 import { projSprite } from './Arrow';
+import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 沙暴柱 656 proc 单源
 import type { TileStore } from '../world/TileStore';
 
 const TILE = 16;
@@ -140,6 +141,10 @@ export class ForbiddenSignProj extends Entity {
   ai0 = 0;
   /** localAI[0]：PVE 命中计数（Damage_PVE_Inner :14245 每 settled 命中 ++;≥30 停伤） */
   hitCount = 0;
+  /** ★BJ382：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
+   *  :14263 受理后自增 ⇒ proc（:13877-79）读自增前值,首跳 0 档率 0.20;拒收不计数。
+   *  独立于 ：14245 localAI[0]（本类 hitCount 命中帽）;PVP 读口 projPveNumHits 形状 */
+  pveNumHits = 0;
   /** usesLocalNPCImmunity :7057 / localNPCHitCooldown=8 :7058 → 每敌 8t 局部免疫窗 */
   private localImmune = new Map<number, number>();
   private soundPlayed = false;
@@ -273,7 +278,16 @@ export class ForbiddenSignProj extends Entity {
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const dmg = crit ? this.damage * 2 : this.damage;
-      e.hurt(applyBannerDamageDealt(game, e, dmg), 0, 0, game, 0, crit, 0, true);
+      // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
+      //  656 数据面 magic ⇒ 原版 Ancient Storm 本就吸血,本仓漏接）——受理位挂接,
+      //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数。
+      //  ★既有位登记：localImmune 写与 hitCount++（:14245）在原版同在受理面内,
+      //  本仓 hurt 前置门已拦 dead/dontTakeDamage/localImmune,拒收残面（Enemy
+      //  iframes 残窗）仍照写=既有近似,不动（独立案）
+      if (e.hurt(applyBannerDamageDealt(game, e, dmg), 0, 0, game, 0, crit, 0, true)) {
+        ghostHealProc(game, this.projId, this.pveNumHits, e);
+        this.pveNumHits++;
+      }
       this.localImmune.set(e.id, 8);
       this.hitCount++;                                           // localAI[0]++（:14245）
       if (this.hitCount >= 30) break;                            // 命中帽达成本拍即停

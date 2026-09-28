@@ -138,3 +138,31 @@ describe('墓地环境云雾（AmbientWindSystem.Update + Gore.cs:111-202）', (
     expect(c.alpha).toBeGreaterThanOrEqual(a0);
   });
 });
+
+// ★BJ386（2026-09-28）：落叶初速判别面——Gore.cs:1413 SpecialAI==3 直接赋值覆写
+// velocity=(rand−0.5)×1f∈[-0.5,0.5)（调用方 NewGoreDirect 传入 [-2,2] 与踢击被覆写
+// 作废；BJ379 曾注锚 :1423 = 下一分支 num2==1 行）。修复前常数 ×4 → |vx|∈[-2,2)。
+describe('BJ386 落叶初速（Gore.cs :1413 SpecialAI==3 覆写 ×1）', () => {
+  it('spawnLeaf 横速分布 = (rand−0.5)×1：|vx|<0.5 且采样覆盖区间两端（非旧 ×4）', () => {
+    const np = new NatureParticles();
+    np.maxLeaves = 4000; // 绕开 220 池上限做分布采样
+    for (let i = 0; i < 3000; i++) np.spawnLeaf(0, 0, 910);
+    expect(np.leaves.length).toBe(3000);
+    let min = Infinity, max = -Infinity;
+    for (const l of np.leaves) {
+      expect(Math.abs(l.vx)).toBeLessThan(0.5); // 原版区间界（×4 时必爆）
+      if (l.vx < min) min = l.vx;
+      if (l.vx > max) max = l.vx;
+    }
+    // 3000 样本应近似铺满 [-0.5,0.5)：两端触达 90% 区间以上（旧 ×4 同样可通过此条，
+    // 上界断言才是判别主面；本条防缩水为 ±0.1 级误修）
+    expect(max - min).toBeGreaterThan(0.9);
+    // vy 相位面不受本次刀影响：[0,2π)
+    for (const l of np.leaves) expect(l.vy).toBeGreaterThanOrEqual(0);
+  });
+  it('树叶族门（LEAF_GORES）外 gore 不入池——覆写只作用于 SpecialAI==3 族', () => {
+    const np = new NatureParticles();
+    np.spawnLeaf(0, 0, 706); // 滴水族非叶
+    expect(np.leaves.length).toBe(0);
+  });
+});

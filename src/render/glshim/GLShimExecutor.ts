@@ -96,12 +96,17 @@ interface PairReg {
 /** ★R1b-6 bake 快照账（uploadScratchNow 产物;pending/multi 共用值型）
  *  ★P0 去画布化:snap=区域字节 ImageData（每 bake 独立对象,无池化无容量概念
  *  ——R1b-6「重放=各自 bake 字节」语义不变,风暴根治）;preBytes=烘焙点已持
- *  现成 ImageData 直挂（尘族三烘焙点——零拷贝零新分配支）。 */
+ *  现成 ImageData 直挂（尘族三烘焙点——零拷贝零新分配支）。
+ *  ★shineslice（2026-09-28）:tint=quad 乘法色（delta 字节/255）——切片路径
+ *  纹理=sprite-only 面（delta 不烘进纹理）,乘法由消费 rec 的顶点色承担
+ *  （flushAcc/presentBatch 对非 solid rec 直通 uTint;白=零开销 null 同旧）。 */
 interface BakeSnap {
   img: object;
   tex: TexEntry;
   /** bake 期字节定格（重放面字节源;null=快照失败按旧链 p.img 兜底） */
   snap: ImageData | null;
+  /** ★shineslice:本 bake 消费 rec 的乘法 tint（缺省 undefined=白,零行为差） */
+  tint?: readonly [number, number, number];
 }
 
 /** ★C5 雨批引用（2026-09-26 rain-gl 收官刀;WeatherRenderer 构建,Renderer
@@ -118,6 +123,28 @@ interface RainBatchRef {
   /** ★C5b（2026-09-27）雪沙批面：true=stride 8（x,y,u,v,r,g,b,a——第 4 分量逐
    *  quad α,沙尘叠画 180/255）走 quadBatchRgba;缺省 false=雨条 stride 7 原通道。 */
   rgba?: boolean;
+  /** ★F-gore（2026-09-28）批段=裁剪小纹理：img 的 (sx,sy,sw,sh) 行切片经
+   *  texFromRegion 建键（region 语义 UV=0,0,sw,sh,与 resolveTex er: 键同族——
+   *  逐件 quadSprite 路径与批路径共享同一条目）;缺省=全幅 texFromImage（雨）。 */
+  region?: { sx: number; sy: number; sw: number; sh: number };
+}
+
+/** ★F-gore 批段规格（Renderer.buildGoreQuadBatch 产出,pushGoreQuadBatch 消费）。
+ *  gore 逐件形态（贴图+旋转+α+加性档）折进顶点批,段=「连续同 (纹理行切片,tier)
+ *  运行」——发射序=2D 绘制序逐一同相（C1 排序判例:不重排,只在运行边界断段）,
+ *  单段一次 quadBatchRgba drawArrays。 */
+export interface GoreSegSpec {
+  img: CanvasImageSource;
+  /** GL 纹理幂等键（=resolveTex er:texId:ep:sx,sy,sw,sh 同格式,两路径共享条目） */
+  key: string;
+  region: { sx: number; sy: number; sw: number; sh: number };
+  /** 顶点数据（共享槽的 subarray 视图;6 顶点/quad×8 float,rgb=a=ga 折入） */
+  data: Float32Array;
+  quads: number;
+  /** 0=SO 1=ADD（gore 16/17 火苗 'lighter' 档）——blend 切换由 rec.tier 驱动 */
+  tier: 0 | 1;
+  /** 降级帧 2D 逐件回放闭包（宁回退不丢精灵;角点仿射直构,雨批同式） */
+  replay: (ctx: CanvasRenderingContext2D) => void;
 }
 
 export interface ShimExecStats {
@@ -498,6 +525,45 @@ export class GLShimExecutor {
       }
     }
   }
+
+  /** ★shineslice（2026-09-28 登记债清算:TileShine 动态支逐格 6.4KB/格/帧上传+
+   *  同量 getImageData 读回——叶绿素农场数百格在视=MB 级/帧）:动态 shine 格
+   *  【逐 (格内容,动画相位) 稳定键】切片上 GPU。首见=_texFromRegion 幂等键建
+   *  纹理（40×40 sprite-only 面,6.4KB 一次）+字节快照缓存;稳态命中=零上传
+   *  零读回（纹理在驻留表+快照在账,直挂 pending 由下一笔同 img drawImage 消费）;
+   *  delta 不烘进纹理——走 BakeSnap.tint → 消费 rec 顶点色 → quadSprite uTint
+   *  （乘法在 GPU 逐 quad 施加,呼吸扫频零重传）。键=内容指纹（TileShine 侧
+   *  3×3 邻域+帧相位）→ 同型格共享同纹理（变体数≪格数）;纹理被 LRU 逐出/
+   *  清扫后 texFromRegion 由当前 scratch 幂等重建（内容键=当前字节即正确字节）。
+   *  键空间与 shineCell 旧族共用 SHINE_KEY_CAP/SHINE_KEY_IDLE 帽账（1024/600 帧
+   *  ——全前缀统一清扫,纹理+快照同摘）。返回 false=未接slice（调用方回 2D
+   *  烘焙原链:delta 仍烘进 scratch）。 */
+  uploadShineSlice(img: HTMLCanvasElement, key: string,
+    tint: readonly [number, number, number]): boolean {
+    if (!this.active || !this.glw || this.glw.unavailable) return false;
+    const e = this.glw.texFromRegion(key, img, 0, 0, img.width, img.height);
+    if (!e) return false;
+    const fresh = !this.shineKeySeen.has(key);
+    let snap = this.sliceSnaps.get(key);
+    if (snap === undefined) {
+      snap = fresh ? this.snapBakeRegion(img) : null;   // 首见才读回（稳态零 getImageData）
+      this.sliceSnaps.set(key, snap);
+    }
+    const rec0: BakeSnap = { img, tex: e, snap, tint };
+    this.bakedTexPending = rec0;
+    this.bakedTexMulti.set(img, rec0);
+    this.shineKeySeen.set(key, this._frameSeq);
+    if (this.shineKeySeen.size > GLShimExecutor.SHINE_KEY_CAP) {
+      for (const [k, fr] of this.shineKeySeen) {
+        if (this._frameSeq - fr > GLShimExecutor.SHINE_KEY_IDLE) {
+          this.shineKeySeen.delete(k);
+          this.sliceSnaps.delete(k);
+          this.glw.dropTexture(k);   // 重访由 texFromRegion 重建,幂等
+        }
+      }
+    }
+    return true;
+  }
   private bakedTexPending: BakeSnap | null = null;
   /** ★N类（2026-09-27 变体①终扫）:bake 期上传的 1:N 消费账（img→最近 bake 纹理
    *  +字节快照）。帧界清空（frameReset）——跨帧残留=陈旧 preTex 直取,故必须随帧
@@ -505,6 +571,10 @@ export class GLShimExecutor {
   private bakedTexMulti = new Map<object, BakeSnap>();
   /** bake 字节快照共享账（img→{tex,snap}） */
   private shineKeySeen = new Map<string, number>();
+  /** ★shineslice（2026-09-28）:切片键→首见字节快照（重放面字节源;键空间与
+   *  shineKeySeen 同账同帽,清扫同步摘除）。稳态命中零上传零读回的另一半——
+   *  纹理侧 texFromRegion 幂等（首见才传）,本账负责「重放字节也只取一次」。 */
+  private sliceSnaps = new Map<string, ImageData | null>();
   private _frameSeq = 0;
   private static SHINE_KEY_CAP = 1024;
   private static SHINE_KEY_IDLE = 600;
@@ -969,7 +1039,7 @@ export class GLShimExecutor {
     this.push(tier, null, false, img, sx, sy, sw, sh,
       geo.dx, geo.dy, geo.dw, geo.dh, geo.rot, this.ga,
       1, 1, 1, geo.flipX !== flipNegX, geo.flipY !== flipNegY, this.smooth,
-      this.dynamicSrc.has(img), null, pre?.tex ?? null, pre?.snap ?? null);
+      this.dynamicSrc.has(img), null, pre?.tex ?? null, pre?.snap ?? null, pre?.tint);
   }
 
   /** fillRect→纯色 quad（白纹理 tint+α;平色 ±1LSB census 登记）。
@@ -1159,13 +1229,16 @@ export class GLShimExecutor {
     dx: number, dy: number, dw: number, dh: number, rot: number, alpha: number,
     fr: number, fg: number, fb: number, flipX: boolean, flipY: boolean, smooth: boolean,
     dynamic: boolean, pair: PairReg | null, preTex: TexEntry | null = null,
-    preSnap: ImageData | null = null): void {
+    preSnap: ImageData | null = null,
+    tint?: readonly [number, number, number]): void {
     const rec = this.pool ?? ({} as QuadRec);
     this.pool = rec.next;
     rec.tier = tier; rec.solid = solid; rec.img = img;
     rec.sx = sx; rec.sy = sy; rec.sw = sw; rec.sh = sh;
     rec.dx = dx; rec.dy = dy; rec.dw = dw; rec.dh = dh;
-    rec.rot = rot; rec.alpha = alpha; rec.fr = fr; rec.fg = fg; rec.fb = fb;
+    // ★shineslice:tint 覆写（缺省=入参 fr/fg/fb——solid 面色/图像面恒白,零行为差）
+    rec.rot = rot; rec.alpha = alpha;
+    rec.fr = tint ? tint[0] : fr; rec.fg = tint ? tint[1] : fg; rec.fb = tint ? tint[2] : fb;
     rec.flipX = flipX; rec.flipY = flipY; rec.smooth = smooth;
     rec.dynamic = dynamic; rec.pair = pair; rec.next = null;
     rec.preTex = preTex;                // ★I类:池复用卫生（恒显式置位,防陈旧纹理驻留）
@@ -1214,6 +1287,30 @@ export class GLShimExecutor {
     this.push(0, null, false, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
       1, 1, 1, false, false, false, false, null);
     this.tail!.batch = { img, key, data, quads, replay, rgba: true };
+    return true;
+  }
+
+  /** ★F-gore 批入队（2026-09-28;pushQuadBatchRgba 同族,多段形态）：gore 顶点批
+   *  按「连续同 (纹理行切片,tier) 运行」拆段,逐段一条 rec【按调用序】原位入队
+   *  （保序:段序=2D 绘制序逐一同相,C1 排序判例——不重排,flush 期顺序混合进
+   *  累积 FBO;ADD 段 blend 切换由 rec.tier 驱动,flushAcc 逐 rec 换档既有链）。
+   *  【门与 pushQuadBatch 的差异=有据】ga/gco 入口态不设门：2D 链逐件【自设】
+   *  globalAlpha/gco（drawGorePiece :7574-7575）,入口态既不进 2D 输出也不进批
+   *  输出（段 tier/α 全编码在 rec/顶点色）;Boss 战常在 gore 前有加性特效把镜像
+   *  gco 留在 'lighter'——伪门会在目标场景整帧静默回退。clip/filter 真门保留
+   *  （批不表达裁剪/源级滤镜）→ 违反即回 2D 逐件原链（宁回退不丢）。
+   *  空 segs/全零 quads=真值零入队（与 2D 零绘制等价）。 */
+  pushGoreQuadBatch(segs: readonly GoreSegSpec[]): boolean {
+    if (!this.active || !this.glw || this.glw.unavailable) return false;
+    if (this.clipped || this.filterV !== 'none') return false;
+    for (const s of segs) {
+      if (s.quads <= 0) continue;       // 零活件段=不占 rec（与 2D 跳过等价）
+      const tier: 0 | 1 = s.tier === 1 ? 1 : 0;
+      this.push(tier, null, false, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+        1, 1, 1, false, false, false, false, null);
+      this.tail!.batch = { img: s.img, key: s.key, data: s.data, quads: s.quads,
+        replay: s.replay, rgba: true, region: s.region };
+    }
     return true;
   }
 
@@ -1297,8 +1394,14 @@ export class GLShimExecutor {
       // ★C5 雨批发射（单 drawArrays;纹理惰性解析幂等键——层重建/LRU 逐出自愈;
       //  发射失败=accFail 降级换桥+队列余量 2D 重放,宁回退不丢精灵）
       //  ★C5b：rgba 面（雪沙 stride 8）走 quadBatchRgba 分支
+      //  ★F-gore：region 面（gore 行切片裁剪纹理）走 texFromRegion——与 resolveTex
+      //  er: 键同族幂等键,逐件 quadSprite 路径与批路径共享条目;段 blend 已由
+      //  rec.tier 驱动的上方换档链设好（SO 基态/ADD (ONE,ONE)）。
       if (p.batch) {
-        const e = glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
+        const rg = p.batch.region;
+        const e = rg
+          ? glw.texFromRegion(p.batch.key, p.batch.img as TexImageSource, rg.sx, rg.sy, rg.sw, rg.sh)
+          : glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
         if (!e) { this.dropEmittedPrefix(p); this.accFail('tex'); return; }
         const ok = p.batch.rgba
           ? glw.quadBatchRgba(e, p.batch.data, p.batch.quads)
@@ -1320,7 +1423,13 @@ export class GLShimExecutor {
       const usx = p.texKind === 'full' ? p.sx : 0;
       const usy = p.texKind === 'full' ? p.sy : 0;
       const o = QOPTS;
-      o.alpha = p.alpha; o.tint = null;
+      o.alpha = p.alpha;
+      // ★shineslice:非白 tint 直通（delta 乘法;白=零开销 null 同旧。QOPTS/TINT3
+      //  单槽复用判例——quadSprite 同步读入 uniform,单线程消费即弃）
+      if (p.fr !== 1 || p.fg !== 1 || p.fb !== 1) {
+        TINT3[0] = p.fr; TINT3[1] = p.fg; TINT3[2] = p.fb;
+        o.tint = TINT3;
+      } else o.tint = null;
       o.rot = p.rot; o.flipX = p.flipX; o.flipY = p.flipY; o.smooth = p.smooth;
       glw.quadSprite(e, usx, usy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh, o);
     }
@@ -1435,7 +1544,11 @@ export class GLShimExecutor {
       } else if (p.batch) {
         // ★C5 雨批（bridge SO 批;纹理解析失败=本批整体 2D 重放,同上门）
         // ★C5b：rgba 面（雪沙 stride 8）走 quadBatchRgba 分支
-        const e = glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
+        // ★F-gore：region 面（gore 行切片）走 texFromRegion（flushAcc 同款）
+        const rg = p.batch.region;
+        const e = rg
+          ? glw.texFromRegion(p.batch.key, p.batch.img as TexImageSource, rg.sx, rg.sy, rg.sw, rg.sh)
+          : glw.texFromImage(p.batch.key, p.batch.img as TexImageSource, false, true);
         const ok = e && (p.batch.rgba
           ? glw.quadBatchRgba(e, p.batch.data, p.batch.quads)
           : glw.quadBatch(e, p.batch.data, p.batch.quads));
@@ -1453,7 +1566,12 @@ export class GLShimExecutor {
         const usx = p.texKind === 'full' ? p.sx : 0;
         const usy = p.texKind === 'full' ? p.sy : 0;
         const o = QOPTS;
-        o.alpha = p.alpha; o.tint = null;
+        o.alpha = p.alpha;
+        // ★shineslice:非白 tint 直通（flushAcc 同款单槽复用）
+        if (p.fr !== 1 || p.fg !== 1 || p.fb !== 1) {
+          TINT3[0] = p.fr; TINT3[1] = p.fg; TINT3[2] = p.fb;
+          o.tint = TINT3;
+        } else o.tint = null;
         o.rot = p.rot; o.flipX = p.flipX; o.flipY = p.flipY; o.smooth = p.smooth;
         glw.quadSprite(e, usx, usy, p.sw, p.sh, p.dx, p.dy, p.dw, p.dh, o);
       }
@@ -1619,6 +1737,28 @@ export class GLShimExecutor {
         const g = sc ? sc.getContext('2d') : null;
         if (sc && g) { g.putImageData(sn, 0, 0); src = sc; }
       }
+      // ★shineslice:tinted rec 重放=sprite×delta 乘法在共享中转面重烘
+      //  （stampShineCell 乘法支尾段同式 multiply+destination-in——降级帧像素
+      //  =2D 原链;第二共享面持有乘法产物,preSnapScratch 继续持 sprite 蒙版源;
+      //  只被本降级支触达,滞回回落同 preSnapScratch 判例）
+      if ((p.fr !== 1 || p.fg !== 1 || p.fb !== 1) && p.sx === 0 && p.sy === 0) {
+        const w = (src as { width: number }).width, h = (src as { height: number }).height;
+        const tsc = tintReplayScratch(w, h);
+        const tg = tsc ? tsc.getContext('2d') : null;
+        if (tsc && tg) {
+          tg.setTransform(1, 0, 0, 1, 0, 0);
+          tg.globalCompositeOperation = 'source-over';
+          tg.clearRect(0, 0, w, h);
+          tg.drawImage(src, 0, 0);
+          tg.globalCompositeOperation = 'multiply';
+          tg.fillStyle = `rgb(${Math.round(p.fr * 255)},${Math.round(p.fg * 255)},${Math.round(p.fb * 255)})`;
+          tg.fillRect(0, 0, w, h);
+          tg.globalCompositeOperation = 'destination-in';
+          tg.drawImage(src, 0, 0);
+          tg.globalCompositeOperation = 'source-over';
+          src = tsc;
+        }
+      }
       if (p.rot || p.flipX || p.flipY) {
         ctx.translate(p.dx + p.dw / 2, p.dy + p.dh / 2);
         if (p.rot) ctx.rotate(p.rot);
@@ -1717,4 +1857,30 @@ function preSnapScratch(w: number, h: number): HTMLCanvasElement | null {
     if (tw < cw || th < ch) { _preSnapScratch.width = tw; _preSnapScratch.height = th; }
   }
   return _preSnapScratch;
+}
+
+/** ★shineslice tinted rec 降级重放第二中转面（2026-09-28）:持 sprite×delta 乘法
+ *  产物——preSnapScratch 同刻持 sprite 蒙版源（destination-in 的源不能与产物同面,
+ *  putImageData 直写会绕过 gCO）。只被 replay2D 的 tinted 支触达（GL 失败降级帧）,
+ *  稳态零创建零触碰;滞回回落/preSnapScratch 判例同款。 */
+let _tintReplayScratch: HTMLCanvasElement | null = null;
+const TINT_REPLAY_SCRATCH_BASE = 64;
+function tintReplayScratch(w: number, h: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  if (!_tintReplayScratch) {
+    _tintReplayScratch = document.createElement('canvas');
+    _tintReplayScratch.width = TINT_REPLAY_SCRATCH_BASE;
+    _tintReplayScratch.height = TINT_REPLAY_SCRATCH_BASE;
+  }
+  const cw = _tintReplayScratch.width, ch = _tintReplayScratch.height;
+  if (w > cw || h > ch) {
+    if (w > cw) _tintReplayScratch.width = w;
+    if (h > ch) _tintReplayScratch.height = h;
+    return _tintReplayScratch;
+  }
+  if (w * 2 <= cw && h * 2 <= ch) {
+    const tw = Math.max(TINT_REPLAY_SCRATCH_BASE, w), th = Math.max(TINT_REPLAY_SCRATCH_BASE, h);
+    if (tw < cw || th < ch) { _tintReplayScratch.width = tw; _tintReplayScratch.height = th; }
+  }
+  return _tintReplayScratch;
 }

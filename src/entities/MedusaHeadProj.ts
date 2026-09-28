@@ -28,6 +28,7 @@ import type { Player } from './Player';
 import { projSprite, projFrameCount } from './Arrow';
 import { canBeChasedBy, applyBannerDamageDealt } from './projTargets';
 import { canHitLine } from '../physics/LineOfSight';
+import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 凝视束 proc 单源
 import { itemCombat } from '../data/vanillaItemCombat';
 import { prefixStat } from '../data/vanillaPrefixes';
 
@@ -53,6 +54,11 @@ export class MedusaHeadProj extends Entity {
   /** 暴击加成百分点（critChance=0 时按 (4+critBonus)/100 兜底,同 Arrow 命中环） */
   private critBonus: number;
   dead = false;
+  /** ★BJ382：PVE 受理命中计数形状（projPveNumHits PVP 读口对齐）。volley 的原版
+   *  结算载体是逐目标独立生成的 536 凝视束（每弹 numHits SetDefaults :706 起始 0
+   *  ⇒ proc 恒 0 档率 0.20,逐弹独立）——本实体级字段不承载 536 逐弹账,PVP 读口
+   *  形状完备即可（535 挂首本体原版有 penetrate=-1 接触面,本仓整缺,登记债） */
+  pveNumHits = 0;
 
   /** ★R28 接线开关：Game.ts case 'magic' 的 3269 ShouldSkipManaUse 分流已落地
    *  （:11310 medusaFree——上游不再扣蓝）→ 置 false,退款/预付两机制全部旁路 */
@@ -187,7 +193,14 @@ export class MedusaHeadProj extends Entity {
       const tcx = t.x + t.w / 2, tcy = t.y + t.h / 2;
       angSum += Math.atan2(tcy - hy, tcx - hx);
       const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
-      t.hurt(applyBannerDamageDealt(game, t, crit ? this.damage * 2 : this.damage), 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79）——原版 volley 结算载体 =
+      //  逐目标 NewProjectile(536) 后立即 Damage()（AI_100 :45420-45435,束为纯视觉
+      //  载体 damage=0）;536 数据面 magic（vanilla-projectiles.json）⇒ 原版本就吸血,
+      //  本仓漏接。每目标一发独立 536 ⇒ numHits 前值恒 0（逐弹 SetDefaults :706 起始 0,
+      //  同拍三跳全 0 档）;proc 在 :14263 numHits++ 前、拒收不 proc 不计数
+      if (t.hurt(applyBannerDamageDealt(game, t, crit ? this.damage * 2 : this.damage), 0, 0, game, this.armorPen, crit, 0, true)) {   // fromPlayer=DPS 计
+        ghostHealProc(game, 536, 0, t);
+      }
       this.beams.push({ x2: tcx, y2: tcy, age: 0, mag: 1 });
     }
     // ---- 4 条随机向散逸束（:45439-45446：1/4 全圆随机,其余 UnitX.RotatedByRandom(π)
