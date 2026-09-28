@@ -110,8 +110,11 @@ describe('BJ394-件1 vanillaCraft roll 通道迁移（CraftingRequests.cs:122-13
   it('源码钉：vanillaCraft 用 rollNaturalPrefixForVid+pool 门（CreateResult :126-129 同构）', () => {
     const game = readFileSync('src/core/Game.ts', 'utf8');
     expect(game).toMatch(/r\.createStack <= 1 && pool && pool\.length\s*\n\s*\? \(rollNaturalPrefixForVid\(outVid0, isPrefixableAccessory\(outId\), Math\.random\) \|\| undefined\)/);
-    expect(game).not.toMatch(/rollPrefix\(pool, false\)/);   // 旧通道退役（-2 重铸面除外）
-    expect(game).toMatch(/item\.prefix = rollPrefix\(pool, true\)/);   // doReforge（BJ392 域,勿回退）
+    expect(game).not.toMatch(/rollPrefix\(pool, false\)/);   // 旧通道退役
+    // ★BJ400（2026-09-29）：doReforge -2 重铸面迁 rollReforgePrefix（TryGet 门补装,
+    //  BJ394 登记债清偿）——旧 rollPrefix(pool,true) 无门通道全退役
+    expect(game).not.toMatch(/rollPrefix\(pool, true\)/);
+    expect(game).toMatch(/item\.prefix = rollReforgePrefix\(pool, Math\.random, stat\)/);
   });
 });
 

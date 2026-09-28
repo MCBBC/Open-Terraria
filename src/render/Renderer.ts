@@ -5702,8 +5702,10 @@ export class Renderer {
     //    原实现挂 13 段整帧自绘 = HUD/文字全被去饱和，与需求冲突已挪此。
     //    immuneAlpha ramp → grayscale 滤镜自绘主画布（此时画布=世界+光照,HUD 未画）。
     //    原版无此全屏效果（GetDeathAlpha 只作用于死亡 UI 文字）=本仓视觉增强；
-    //    filter 不支持的环境静默跳过）
-    if (player.dead && player.immuneAlpha > 0 && 'filter' in ctx) {
+    //    filter 不支持的环境静默跳过。★BJ400（2026-09-29）：硬核幽灵相豁免——
+    //    ghost 态原版世界画面无任何死亡滤镜（Ghost() :6714 起=自由飞行视界）,
+    //    幽灵飞行期维持灰化=与原版幽灵视界相悖的 enhance 残留）
+    if (player.dead && player.immuneAlpha > 0 && !player.isGhostPhase(world) && 'filter' in ctx) {
       const k = (Math.min(255, player.immuneAlpha) / 255) * 0.85;   // 上限 85% 灰度
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -20,15 +20,17 @@ import { Game } from '../src/core/Game';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 
-// ---- 确定性 top-tier 词缀——只劫 rollPrefix 掷点,其余透传原模块(B13 同款) ----
+// ---- 确定性 top-tier 词缀——只劫 rollReforgePrefix 掷点,其余透传原模块(B13 同款) ----
+// ★BJ400（2026-09-29）：doReforge 掷点迁 rollReforgePrefix（TryGet 门,Prefix(-2) 1:1）,
+//   hook 点随迁;hook 直返 pick 不走 TryGet（本测锚冷却面非掷面,掷面判别在 bj400 测试）
 const rollHook = vi.hoisted(() => ({ pick: null as null | ((pool: number[]) => number) }));
 vi.mock('../src/data/vanillaPrefixes', async (importOriginal) => {
   const m = await importOriginal<typeof import('../src/data/vanillaPrefixes')>();
-  const origRoll = m.rollPrefix;
+  const origReforge = m.rollReforgePrefix;
   return {
     ...m,
-    rollPrefix: (pool: number[], wantBest: boolean) =>
-      rollHook.pick ? rollHook.pick(pool) : origRoll(pool, wantBest),
+    rollReforgePrefix: (pool: number[], rand: () => number, stat?: Parameters<typeof origReforge>[2]) =>
+      rollHook.pick ? rollHook.pick(pool) : origReforge(pool, rand, stat),
   };
 });
 beforeEach(() => { rollHook.pick = null; });
@@ -51,9 +53,18 @@ async function findReforgable() {
     if (!Number.isFinite(vid) || vid <= 0) continue;
     const pool = pfx.rollablePrefixes(vid, false);
     if (pool && pool.length >= 3) {
-      const bestMul = Math.max(...pool.map(pfx.prefixValueMul));
-      const top = pool.find((q) => pfx.prefixValueMul(q) === bestMul)!;
-      const sub = pool.find((q) => pfx.prefixValueMul(q) !== bestMul)!;   // 非最优档样本
+      // ★BJ400：doReforge bestVal 现按 TryGet 门过滤（BestPrefixValue :1094 同构）,
+      //   top/sub 亦须取【TryGet 通过档】——0kb 武器的 kb 档被 gate 排除后不再入档
+      const { itemCombat } = await import('../src/data/vanillaItemCombat');
+      const st = itemCombat(vid);
+      const stat = st
+        ? { damage: st.damage ?? 0, useAnimation: st.useAnimation ?? 0, mana: st.mana ?? 0, kb: st.knockBack ?? 0 }
+        : undefined;
+      const pass = pool.filter((q) => !pfx.prefixTryGetFailsForItem(q, stat));
+      if (pass.length < 2) continue;
+      const bestMul = Math.max(...pass.map(pfx.prefixValueMul));
+      const top = pass.find((q) => pfx.prefixValueMul(q) === bestMul)!;
+      const sub = pass.find((q) => pfx.prefixValueMul(q) !== bestMul)!;   // 非最优档样本
       return { id, vid, pool, top, sub };
     }
   }
