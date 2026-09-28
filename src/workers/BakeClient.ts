@@ -55,6 +55,12 @@ export class BakeClient {
   private nextId = 1;
   /** 在飞/待就绪请求（key 去重 + bump 面;hi=高优=视口内/可视支路） */
   private pending = new Map<number, Pending>();
+  /** ★在飞请求 id→chunk key 反查表（2026-09-28 占位对账本缺口修复刃）：worker
+   *  error 回包只带请求 id 不带 cx/cy——旧实现直接 pending.get(res.id) 用 id 查
+   *  chunk key 键域错位恒 miss → pending 残留+不重派,该 chunk 后续 request 全落
+   *  bump 分支=永无新请求,占位对永挂透明页区（用户实报丛林基地部分区块暗棕色块
+   *  根因之一）。dispatch 登记回包清账;fail/dispose 整表清。 */
+  private inflight = new Map<number, number>();
   /** 待就绪（ready 前）请求缓冲,按优先级分流——flushPreReady 时高优先派发 */
   private preReadyHigh: number[] = [];
   private preReadyLow: number[] = [];
@@ -191,6 +197,12 @@ export class BakeClient {
     if (p) p.bumped = true;
   }
 
+  /** chunk 是否有在途请求（pending 去重全集=在飞+待就绪+lowHold 缓冲;
+   *  ChunkCache.flushDirty 蒸发占位对救回判定消费——占位对无在途=残账必拆） */
+  hasPending(k: number): boolean {
+    return this.pending.has(k);
+  }
+
   /** chunk 与世界相交判定（flushDirty 双角守卫同式） */
   private chunkInWorld(cx: number, cy: number): boolean {
     const st = this.cache.world?.store;
@@ -244,9 +256,12 @@ export class BakeClient {
       envWind: renderEnv.wind, envWorldSurface: renderEnv.worldSurface, envRemix: renderEnv.remix,
       plates428: [...plates428Pressed],
     });
+    const id = this.nextId++;
+    this.inflight.set(id, k);   // error 回包按 id 反查（见 inflight 注）
     try {
-      this.post({ type: 'bake', id: this.nextId++, snap }, snapshotBuffers(snap));
+      this.post({ type: 'bake', id, snap }, snapshotBuffers(snap));
     } catch (e) {
+      this.inflight.delete(id);
       this.pending.delete(k);
       this.cache.requeueWorkerBake(p.cx, p.cy);
       console.warn('[wbake] 快照派发失败,回退主线程:', e);
@@ -273,10 +288,13 @@ export class BakeClient {
     if (res.type === 'fatal') { this.fail(res.message); return; }
     if (res.type === 'error') {
       // 单请求失败:该 key 回主线程队列;连续 3 错=worker 态可疑,整体锁死降级
-      const p = this.pending.get(res.id);
-      if (p) {
-        this.pending.delete(res.id);
-        this.cache.requeueWorkerBake(p.cx, p.cy);
+      // ★inflight 反查（id→chunk key）——旧实现 pending.get(res.id) 键域错位恒 miss
+      const fk = this.inflight.get(res.id);
+      this.inflight.delete(res.id);
+      if (fk !== undefined) {
+        const p = this.pending.get(fk);
+        this.pending.delete(fk);
+        if (p) this.cache.requeueWorkerBake(p.cx, p.cy);
       }
       if (++this.errStreak >= 3) this.fail(`error streak ×3 (${res.message})`);
       else this.drainLow();
@@ -291,6 +309,7 @@ export class BakeClient {
       dw({ wall: res.wall, tile: res.tile, glow: res.glow, missing: res.missing });
       return;
     }
+    this.inflight.delete(res.id);
     const k = ChunkCache.key(res.cx, res.cy);
     const p = this.pending.get(k);
     this.pending.delete(k);
@@ -370,6 +389,7 @@ export class BakeClient {
     this.preReadyHigh = [];
     this.preReadyLow = [];
     this.lowHold = [];
+    this.inflight.clear();
     this.cache.bakeClient = null;
     this.terminate();
   }
@@ -388,5 +408,6 @@ export class BakeClient {
     this.worker = null;
     this.ready = false;
     this.handshakeResolve = null;
+    this.inflight.clear();
   }
 }

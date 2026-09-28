@@ -3901,6 +3901,26 @@ export class Renderer {
       starve: starveSnapshot(),
     };
   }
+  /** ★R1b-5 F5 诊断面（2026-09-28 雷雨 degradeAcc 逐帧定谳）:acc 累积窗健康账。
+   *  flags=开窗四旗+CPU 态（全真才可能 acc）;used/stats=路径分布——
+   *  'b2b-acc'=健康累积帧,'b2b-acc*degraded*'（含分窗尾标）=帧内降级
+   *  （健康会话恒 0/只在真 GL 故障帧零星出现;逐帧恒增=降级常态化病灶）;
+   *  worldCanvasCreations=降级惰性建面（acc 稳态恒 0）;shim.fallback/replays=
+   *  acc 窗内不可直译算子回退/GL 失败重放（>0 即降级链真实发生过）。 */
+  accDiag(): Record<string, unknown> {
+    return {
+      flags: {
+        bgl: Renderer.bgl, bglShim: Renderer.bglShim, b2b: Renderer.b2b,
+        cloudPipe: Renderer.cloudPipe, cpu: this.isCpuRender(),
+      },
+      used: this.bglPathUsed,
+      stats: { ...this.bglPathStats },
+      worldCanvasCreations: this.b2bWorldCanvasCreations,
+      shim: this.bglEntShim
+        ? { fallback: this.bglEntShim.stats.fallback, replays: this.bglEntShim.stats.replays, draws: this.bglEntShim.stats.draws }
+        : null,
+    };
+  }
   /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
    *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
    *  释放最旧一半,恢复后续跑;连续丢失连续收缩(下限 64) */

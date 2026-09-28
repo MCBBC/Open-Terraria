@@ -34,6 +34,12 @@ export interface ChunkPair {
    *  的等价物（全屏乘光管线无逐格顶点色通道，叠层是仓内最小侵入实现）。
    *  undefined = 本 chunk 无荧光涂层格（零开销路径）。 */
   glow?: HTMLCanvasElement;
+  /** ★wbake 占位对标记（2026-09-28 占位对账本缺口修复刃）：get() worker 支路建的
+   *  「页区=旧像素/透明」临时对。真对（renderChunk/completeWorkerBake 落页）不置。
+   *  消费面：requeueWorkerBake（单请求失败/降级 fail 重入队时占位对必须拆对——
+   *  占位对无在飞请求即永挂透明=用户实报丛林基地部分区块暗棕色块根因）与
+   *  flushDirty wbake 分支（蒸发占位对救回）。 */
+  placeholder?: boolean;
 }
 
 // ---- 油漆逐像素着色：tintRegion 迁至共享模块 render/TileTint（2026-08-23：摆动件
@@ -421,10 +427,16 @@ export class ChunkCache {
   }
 
   /** ★C4:worker 降级/单请求失败时把 chunk 重新入脏队（主线程路径接手）。
-   *  仅当该 chunk 确实待重建（无真对）才入队——占位对情形 get() 已在飞。 */
+   *  ★占位对账本缺口修复刃（2026-09-28）：占位对（placeholder 标记）必须【拆对
+   *  入队】——该情形只发生在请求已蒸发（单请求 error 回包/降级 fail/dispatch 抛）
+   *  之后,占位对既无在飞请求也不在脏队,LRU 不淘汰（静态场景）=透明页区永久滞留
+   *  （旧实现「占位对情形 get() 已在飞」注释对失败路径不成立）。真对不入队语义
+   *  不变（内容有效）;哨兵/无对语义不变。 */
   requeueWorkerBake(cx: number, cy: number): void {
     const k = ChunkCache.key(cx, cy);
-    if (this.chunks.get(k) !== undefined) return;
+    const cur = this.chunks.get(k);
+    if (cur !== undefined && !cur.placeholder) return;   // 真对:无需重建
+    if (cur?.placeholder) this.chunks.set(k, undefined as unknown as ChunkPair);   // 拆对（stickyCell 保留=原位重烘）
     if (!this.world.store.inBounds(cx * CHUNK, cy * CHUNK)) return;
     this.enqueueDirty(k);
   }
@@ -551,12 +563,22 @@ export class ChunkCache {
         const k = this.dirtyQueue.shift()!;
         this.dirtySet.delete(k);
         const cx = k & 0xffff, cy = (k >> 16) & 0xffff;
-        if (this.chunks.get(k) !== undefined) continue; // 占位对已由 get() 建立且请求已在飞
+        const cur = this.chunks.get(k);
+        if (cur !== undefined) {
+          // 占位对:在飞=正常等待(跳过);无在飞=请求已蒸发的残账,拆对救回
+          // (★旧实现无条件跳过——蒸发占位对永挂透明=丛林基地色块根因之一)
+          if (!cur.placeholder || this.bakeClient.hasPending(k)) continue;
+          this.chunks.set(k, undefined as unknown as ChunkPair);
+        }
         if (!this.world.store.inBounds(cx * CHUNK, cy * CHUNK)
           && !this.world.store.inBounds(cx * CHUNK + CHUNK - 1, cy * CHUNK + CHUNK - 1)) {
           continue; // 世界外/已淘汰的悬空 key:静默出队(防永久滞留)
         }
-        this.bakeClient.request(cx, cy, this);
+        // ★混合路由（worker 慢路径旁路,2026-09-28）:视口内 chunk 主线程同步烘焙
+        //  （实测 0.47ms/块 vs worker 波次 7-26ms——传送/入场视口全换时 worker 串行
+        //  往返=1-2s 空白根因,用户实报）;视口外保持 worker 异步(后台流式)。
+        if (this.inViewport(cx, cy)) this.get(cx, cy);
+        else this.bakeClient.request(cx, cy, this);
         n++;
         if (performance.now() - t0 > budgetMs) break; // 快照切片超预算也至少完成 1 个
       }
@@ -610,10 +632,14 @@ export class ChunkCache {
   }
 
   /** 取 chunk 双层画布（惰性生成，LRU 淘汰最久未用）。
-   *  ★C4 wbake 支路：未生成/待重建时不做主线程同步烘焙——改发 worker 请求并返回
-   *  「占位对」（cell 取自粘滞槽位:待重建=旧像素原位显示到回包覆写,首烘=空白透明,
-   *  背后墙层/生物群系背景透出=与逐块渐进装载同观感,无黑块）。回包由
-   *  completeWorkerBake 原位落页换真对。 */
+   *  ★C4 wbake 支路 + ★混合路由（2026-09-28 worker 慢路径旁路）：视口【外】的
+   *  未生成/待重建 chunk 改发 worker 请求并返回「占位对」（cell 取自粘滞槽位:
+   *  待重建=旧像素原位显示到回包覆写,首烘=空白透明,背后墙层/生物群系背景透出
+   *  =与逐块渐进装载同观感,无黑块）。回包由 completeWorkerBake 原位落页换真对。
+   *  视口【内】chunk 走主线程同步烘焙（renderChunk 0.47ms/块,worker 波次 7-26ms
+   *  的 15-50× 慢路径不再拦视口出图——传送 1-2s 空白根治）,且真对即落=
+   *  workerAwaiting 不入账（覆盖门立即可满足,幕布语义不变）。animView 未置
+   *  （null）=保守占位+worker（与视口优先调度同口径）。 */
   get(cx: number, cy: number): ChunkPair {
     const k = ChunkCache.key(cx, cy);
     let c = this.chunks.get(k);
@@ -624,8 +650,8 @@ export class ChunkCache {
       this.chunks.set(k, c);
       return c;
     }
-    if (this.bakeClient) {
-      this.bakeClient.request(cx, cy, this, true);   // 内部按 key 去重;可视支路=高优（视口优先调度）
+    if (this.bakeClient && !this.inViewport(cx, cy)) {
+      this.bakeClient.request(cx, cy, this, false);  // 内部按 key 去重;视口外=低优（后台流式）
       this.workerAwaiting.add(k);                    // 占位账:回包/主线程重建/淘汰出账
       const cell = this.acquireCell(k);        // 粘滞槽位:重建=旧像素,首烘=空白页区
       const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
@@ -634,14 +660,14 @@ export class ChunkCache {
       const pair: ChunkPair = {
         wall: this.wallPages[page], tile: this.tilePages[page],
         sx: (slot % ChunkCache.PAGE_COLS) * S, sy: Math.floor(slot / ChunkCache.PAGE_COLS) * S,
-        cell,
+        cell, placeholder: true,
       };
       this.chunks.set(k, pair);
       this.trimLru();
       return pair;
     }
     c = this.renderChunk(cx, cy);
-    this.workerAwaiting.delete(k);   // 降级回主线程:重建即出账（覆盖门不被死 key 拖住）
+    this.workerAwaiting.delete(k);   // 重建即出账（覆盖门不被死 key 拖住）
     this.chunks.set(k, c);
     this.trimLru();
     return c;

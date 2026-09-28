@@ -986,6 +986,14 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         used: g.renderer?.opresentUsed ?? null,
         stats: g.renderer?.opresentStats ?? null,
       },
+      // ★R1b-5 诊断面（2026-09-28 雷雨 degradeAcc 逐帧定谳）:acc 累积窗健康账——
+      //  flags=开窗四旗+cpu（全真才可能 acc）;stats['b2b-acc']=健康累积帧,
+      //  'b2b-acc*degraded*'>0=帧内降级（逐帧恒增=降级常态化病灶,修复后应恒 0/
+      //  只在真 GL 故障帧零星出现）;worldCanvasCreations=降级建面（acc 稳态恒 0）;
+      //  shim.fallback/replays=acc 窗内不可直译算子回退与 GL 失败重放
+      acc: typeof (g.renderer as { accDiag?: () => unknown })?.accDiag === 'function'
+        ? (g.renderer as { accDiag: () => unknown }).accDiag()
+        : null,
       // ★A1 诊断面（2026-09-25 滤镜链入管线）:used=上帧滤镜链路径（'pipe'=
       //  GLPipeline FBO 乒乓（缺省）/'pingpong'=旧 GL→2D→GL 乒乓（?sfxgl=0 逃生门/
       //  管线失败回落）/'2d'=2D 近似/'-'=本帧无滤镜）;stats=全会话分布——pipe

@@ -674,6 +674,18 @@ export class SettingsPanel {
           () => Lang.text(d.playWhenUnfocused ? 'UI.PlayWhenUnfocusedOn' : 'UI.PlayWhenUnfocusedOff'),
           () => void options.set('playWhenUnfocused', !d.playWhenUnfocused),
         ),
+        // ★后台继续运行（2026-09-28 用户需求:后台挂机——切后台 rAF 停发=世界冻结
+        // 的 Web 缺口;原版无对应物=Web 便利档,缺省开）。消费=Game.onPumpMsg 泵门
+        // （document.hidden ∧ 本开关 ∧ 失焦播放 ∧ !paused → fixedUpdate 驱动+跳过
+        // 渲染;回前台无缝）。与失焦播放独立并存——两开关都开才后台活,行序紧随
+        // 失焦播放（同域相邻）。已知代价=后台挂机即真实 CPU 消耗（用户目的本身）;
+        // Chrome 高负载后台页节流提示可忽略
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.BackgroundRun'),
+          () => String(d.backgroundRun),
+          () => Lang.menu(d.backgroundRun ? 69 : 70),
+          () => void options.set('backgroundRun', !d.backgroundRun),
+        ),
         // 显示说明书按钮（说明书勾"不再显示"后在此重开；manualHidden 落盘）
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.ShowManual'),

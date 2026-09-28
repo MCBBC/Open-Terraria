@@ -307,10 +307,13 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
    *  :13086,本仓=boomBox 冲击盒非空拍）：301 ×1.75（:13060）/383 ×1.5（:13088）。
    *  缺省 1 = 既有调用方零漂移 */
   kbScale = 1,
-  /** ★BJ382（2026-09-28）受理回调（Enemy.hurt 返真 = 原版 immune 门未拒——
-   *  Damage_PVE_Inner 受理面）。与 onHit（命中即调,拒收亦跑=既有语义承载）分立：
-   *  严格受理位 = 原版 ghostHeal proc（:13877-79）/numHits++（:14263）所在段——
-   *  239/245 雨滴在此挂 ghostHealProc。缺省 undefined = 既有调用方零漂移 */
+  /** ★BJ382（2026-09-28）受理回调（原版 ghostHeal proc（:13877-79）/penetrate--
+   *  （:14189-14196）/numHits++（:14263）所在段=免疫门 :12634-12637 后受理面）。
+   *  ★BJ393 件2 判据勘正：旧「hurt 返真」实为击杀位（Enemy.hurt 布尔=死亡管线跑完
+   *  才返真,普通命中/血尽级联返假 Enemy.ts:15037/:14369 族）——现改 !vanillaGated
+   *  （非门拒即受理,与 onHit/applyProjStatus 同平面）。239/245 雨滴在此挂
+   *  ghostHealProc+dropHits++（penetrate--）+pveNumHits++（numHits++）。
+   *  缺省 undefined = 既有调用方零漂移 */
   onAccepted?: (e: unknown) => void,
 ): void {
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
@@ -374,14 +377,19 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //   :13424-13436/StatusNPC :13637/676 反射 :13721-13725/悠悠球 per-hit 族
     //   :13752-13870/免疫写链 :14031-14182/penetrate-- :14189-14196——全部在免疫门
     //   :12634-12637（+外层 localNPCImmunity 门 :12596）之后 = 严格受理位,门拒整段静默。
-    //   hurt() 返假两族：头部三早退（dead :13969/iframes :13970/dontTakeDamage :13976）
-    //   = 门拒等价;血尽级联返假（realLifeHost 段 :14367/月总 :14375/猪鲨泡 :14381/
-    //   石巨人头 :14391/四塔 :14396——伤害已实扣,原版 StrikeNPC 照跑=受理）非门拒。
-    //   本环可及面：dead/dontTakeDamage 已被上方 :352/:355 前置 continue,hurtPierce==1
-    //   = flag3（:12634）免疫门豁免 → 门拒可及面仅 iframes>0（pierce!=1）。受理面谓词
-    //   = !vanillaGated（非 hurt 返真——级联返假仍受理）;onHit/dirOverride 持久副面/
-    //   676 反射/applyProjStatus 同在此平面求值（onAccepted 仍=hurt 返真,BJ382 契约不动;
-    //   其与原版受理面的级联差=登记债,见 BJ388 报告）。
+    //   ★BJ393 件2 勘正（hurt 返假全路径亲读+实机探针复核,三分非两分）：hurt() 布尔
+    //   返真 =「本拍击杀/假人」（Enemy.ts:15033/:14184）——返假三族：①头部三早退
+    //   （dead :13971/iframes :13972/dontTakeDamage :13978）=门拒等价;②血尽级联转换
+    //   （realLifeHost 段 :14369/月总 :14377/猪鲨泡 :14383/石巨人头 :14393/四塔
+    //   :14398——伤害已实扣,原版 StrikeNPC 照跑=受理）;③普通未致命命中尾档
+    //   Enemy.ts:15037（BJ388 二分漏掉的支配族——vid15 hp150→144 实扣返 false,
+    //   旧 acceptedHere 谓词恒假）非门拒。②③原版均受理（proc/penetrate--/numHits++
+    //   无死亡·active 复查,flag10 锚 num41>0）。本环可及面：dead/dontTakeDamage 已被
+    //   上方 :352/:355 前置 continue,hurtPierce==1 = flag3（:12634）免疫门豁免 →
+    //   门拒可及面仅 iframes>0（pierce!=1）。受理面谓词 = !vanillaGated（非门拒即
+    //   受理）——onHit/dirOverride 持久副面/676 反射/applyProjStatus/onAccepted
+    //   （★BJ393 判据改,BJ382「hurt 返真」契约退役=其与原版受理面的差单已落）
+    //   统一在此平面求值。
     const vanillaGated = hurtPierce !== 1 && (((e as { iframes?: number }).iframes ?? 0) > 0);
     // 暴击 = GetWeaponCrit 语义:4 基础 + 武器 item.crit + 装备/buff（Game 侧合并传入；
     // 此前全族写死 4%——Sunfury 原版 crit=7 应为 11%）。
@@ -467,7 +475,15 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     //   加伤并入写成同行表达式,勿再折行拆散 applyBannerDamageDealt 前缀）
     // ★BJ339：pierce 位 = hurtPierce（0 缺省档写敌免疫 10t / 1 flag3 单发不写窗——
     //  :14176-14182 `penetrate != 1` 分支的门,405 泡泡=1）
-    const acceptedHere = e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放）——hurt 内原版管线;音/飘值=单点
+    //  ★BJ393 件2（2026-09-28 级联差定谳后落刀）：hurt 布尔返真 =「本拍击杀」（死亡管线
+    //   跑完 Enemy.ts:15033/假人 488 :14184）非「受理」——返假三族：①头部门拒（dead
+    //   :13971/iframes :13972/dontTakeDamage :13978）②血尽级联转换（realLifeHost 段
+    //   :14369/月总 :14377/猪鲨泡 :14383/石巨人头 :14393/四塔 :14398）③【普通未致命命中
+    //   尾档 :15037】（BJ388 二分漏掉的支配族——实机探针:vid15 hp150→144 实扣返 false）。
+    //   ②③原版均=受理（StrikeNPC :13702 照跑,proc/penetrate--/numHits++ :13875-13880/
+    //   :14189-14196/:14263 无死亡·active 复查,flag10 锚 num41>0=伤害已实扣）。
+    //   故受理面谓词 = !vanillaGated（非门拒即受理）;hurt 返值不再消费（回调判据唯一化）。
+    e.hurt(applyBannerDamageDealt(game, e, dmg) + (snapBonusHitEnemies ? Math.trunc(snapBonusHitEnemies * (crit ? 2 : 1)) : 0), kdir * self.knockback * kbScale, 0, game, pen, crit, hurtPierce, true); // 裸 kb（0.65 自造已摘;★BJ344 ×kbScale=num5 相位/宽盒缩放）——hurt 内原版管线;音/飘值=单点
     // ★SW-BJ62 微光史莱姆 676 命中后反射（Damage_PVE_Inner :13721-13725——StrikeNPC
     // 后弹回玩家+penetrate++；676 不置 reflectsProjectiles 故 :320 事前支恒不触发）。
     // 本环弹型（回旋镖 3/长矛 19,161/悠悠球 99,15）全不在 CanBeReflected 白名单,
@@ -479,7 +495,10 @@ export function hitEnemies(   // exported：tests/combat-stitch-final（A3①③
     }
     // ★BJ382：受理回调在 676 反射支后 / onHit 前（原版序：StrikeNPC :13712 → 反射支
     //  :13716-19 → canGhostHeal proc 段 :13875 → numHits++ :14263）
-    if (acceptedHere) onAccepted?.(e);
+    //  ★BJ393 件2：判据 acceptedHere→!vanillaGated——原版 proc/penetrate--/numHits++
+    //  全在受理面（免疫门后无死亡复查）,旧「hurt 返真」实为击杀位=普通命中/级联返假
+    //  两族不 proc 不耗穿（唯一接线 239/245 雨滴实害:吸血近零+穿透数永不消耗）,见上注
+    if (!vanillaGated) onAccepted?.(e);
     // ★BJ388 件1：onHit 移入受理位（原版命中段全景在免疫门 :12634-12637 后,门拒整段
     //  静默;逐调用方定谳=回旋镖回收门/悠悠球链/配重球链/锚定鱼 23 三击门/262 族回收/
     //  481 链枷回摆/405·523 首中即亡/404 回收翻转——锚全在受理面,无一"拒收跑"同相;
@@ -4383,8 +4402,15 @@ export class FlailProj extends Entity {
     //  Chain37/:40343 图鉴三处涉 1058,无球体专支）：num153=(30−26)/2+26/2=15、
     //  num151=num152=0 → 贴图左上=盒左上、球体中心=盒心+(+2,+3)px（30×32 贴图对
     //  26×26 盒）;曾按中心锚绘制=整球偏 (−2,−3)px+枢轴偏 2px（与 BJ367 404 同案）。
-    //  ★947/948 姊妹债备案（本件未落刀）：:30257 num151=4/num152=−4 → 通支锚下
-    //  球心=盒心+(−1,−1)px,本仓现同样误走中心锚,待专件。
+    //  ★947/948 姊妹债定谳+勘正（BJ393 件1,2026-09-28 亲读收案）：:33161 大表确无
+    //  947/948 → :35492 通用通支锚,且 :30257 有同款特例 num151=4/num152=−4（与
+    //  :30252 的 25/26/35/63/154 族同式）→ 贴图左上=盒左上+(−4,−4)、球心=盒心
+    //  +(−1,−1)px（26×26 贴图对 20×20 盒,num153=13;Main.cs 全文 947/948 仅此一处,
+    //  DrawProjDirect :33161→:35492 无 aiStyle15 早退支=通用尾绘可达）。本仓刀面=
+    //  件4 集合门（947/948 不在 FLAIL_CENTER_ANCHOR → 已走通用支）+ PROJ_DRAW_OFFSET
+    //  [4,−4]（off143=4/off144=−4,066d742b 2026-08-17 入表）→ 现行绘制已=原版锚
+    //  （translate=(盒左+9,盒上+10)、origin=(13,14)）,旧注「本仓现同样误走中心锚」
+    //  系件4 落刀前状态,判别面锁 tests/bj393-weaponproj-anchor-accept.test.ts。
     // spriteDirection=-1 → 水平翻转（M.cs:29827-29831 FlipHorizontally;:41479-41483
     // 每 tick=sign(vx),1058 豁免保持出生向）;绘制 ×scale
     drawProj(r, cam, this, this.projId, this.rotation, '#E04040',
@@ -8444,6 +8470,12 @@ export class RainCloudProj extends Entity {
       //  Damage_PVE_Inner 受理面内,拒收跳（:12634-12637 immune 残窗 return）不耗穿透;
       //  旧码敌怪免疫残窗内拒收跳照虚耗穿透数=雨滴提前消亡。原版序 proc(:13877-79)
       //  → penetrate--(:14189) → numHits++(:14263)
+      //  ★BJ393 件2（2026-09-28 级联差单刀落）：onAccepted 判据 acceptedHere→!vanillaGated
+      //  ——旧「hurt 返真」实为击杀位（Enemy.hurt 布尔返真=死亡管线跑完,普通未致命
+      //  命中尾档 :15037/血尽级联 :14369 族返假）→ 实机雨滴吸血近零、穿透数除击杀外
+      //  永不消耗。现=受理面（非门拒即 proc/耗穿/计数,与原版 :13875-13880/:14189/
+      //  :14263 无死亡复查同相;门拒 iframes 残窗跳仍静默=BJ385 判别面保形;
+      //  血尽级联（毁灭者体节致命拍）proc/耗穿/回收照跑=判别面 bj393 锁）。
       hitEnemies(this, game, this.hitCd, 10, 0, this.armorPen, undefined,
         undefined, undefined, undefined, undefined, undefined, undefined,
         (ent) => {

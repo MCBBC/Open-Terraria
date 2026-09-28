@@ -684,7 +684,12 @@ describe('VanillaDust：拴绳批逐型分支（43/15/267/278/6）', () => {
     const d58 = vd.spawn(0, 0, 5, 5, 58)!;
     expect(VanillaDust.alphaOf(d58)).toEqual({ rgb: 1, a: 0 });
     const d15 = vd.spawn(0, 0, 5, 5, 15, 0, 0, 150)!;      // 亮色族默认档（画在合成后）
-    expect(VanillaDust.alphaOf(d15)).toEqual({ rgb: 105 / 255, a: 105 / 255 });
+    // ★2026-09-28 定谳收口（dustrb 刀顺带）：1457 Dust.cs GetAlpha :2753-2755——
+    //   `if (type == 15 || type == 274 || type == 20 || …) num = (num + 3f) / 4f;`
+    //   15 ∈ (num+3)/4 亮度比值档（BJ342 ND5 全表补缺成员,α150 → rgb=(105/255+3)/4
+    //   ≈0.853,a=num=105/255）。旧期望 rgb=105/255=num 是雪沙刃 WIP 期 BJ342 补表前
+    //   的过时口径（「15/57/274 走默认档」旧注已作废,见 VanillaDust case 15 注）。
+    expect(VanillaDust.alphaOf(d15)).toEqual({ rgb: (105 / 255 + 3) / 4, a: 105 / 255 });
   });
 });
 

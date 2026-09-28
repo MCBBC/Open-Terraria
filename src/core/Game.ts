@@ -527,6 +527,7 @@ import { createBrickBoxForWallOfFlesh, clearUnbreakableWallsJob, startHardmodeJo
 import { framePlatformSweep } from '../world/gen/vanilla/FinalCleanupPass';
 import { ChatInput } from '../ui/ChatInput';
 import { canvasWatchStats } from '../render/CanvasWatch';
+import { pumpGate, pumpAccumulate, BG_PUMP_MAX_TICKS } from './BackgroundPumpCore';   // ★后台 tick 泵纯核(2026-09-28;worker 条目=../workers/BackgroundPump.ts 零依赖纯泵)
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -5953,6 +5954,16 @@ export class Game implements GameHooks {
     document.addEventListener('visibilitychange', this.onVisibilityChange);
     window.addEventListener('blur', this.onWindowBlur);
     window.addEventListener('focus', this.onWindowFocus);
+    // ★后台 tick 泵装配（2026-09-28 用户需求:后台挂机——切后台 rAF 停发=世界冻结,
+    // 「失焦不暂停」只管游戏自身失焦暂停管不了浏览器 rAF）:250ms 纯泵 worker
+    // （专用 worker 定时器不被 rAF 绑架也不受后台 intensive throttling,光照/波场
+    // worker 后台持续产出 trace 实证同源）。handler 四门现场重判零副作用（见
+    // onPumpMsg 注）。spawn 失败=旧行为（前台正常,后台冻结,不阻断启动）;destroy
+    // terminate+槽位归零（BJ328 纪律）
+    try {
+      this.pumpWorker = new Worker(new URL('../workers/BackgroundPump.ts', import.meta.url), { type: 'module' });
+      this.pumpWorker.onmessage = this.onPumpMsg;
+    } catch { this.pumpWorker = null; }
     // MP 失焦豁免探针（④）：原版 PauseSounds/UpdateFocus 的 netMode==0 门
     // （FocusHelper.cs:97-107/:139-141）——联机失焦 sfx 不停、游戏不暂停；
     // destroy 摘除防闭包钉死旧 Game
@@ -8026,6 +8037,13 @@ export class Game implements GameHooks {
     window.removeEventListener('blur', this.onWindowBlur);
     window.removeEventListener('focus', this.onWindowFocus);
     Sfx.mpProbe = null;   // 失焦闸 MP 豁免探针随实例摘除（构造期接线）
+    // ★后台泵拆除（2026-09-28）:terminate+槽位归零——onPumpMsg 闭包捕 this=Game,
+    // 不摘则死 Game 整图（含 World TileStore）被存活 worker 钉住（BJ318 同审计面）
+    if (this.pumpWorker) {
+      this.pumpWorker.onmessage = null;
+      this.pumpWorker.terminate();
+      this.pumpWorker = null;
+    }
     this.input.destroy();
     this.lighting?.dispose();   // ★C9：光照 Worker 链拆除（?lightworker=1 时防跨世界 worker 泄漏双跑）
     this.chunks?.bakeClient?.dispose();   // ★C4:烘焙 worker 链拆除（防跨世界泄漏,C9 同款纪律）
@@ -8184,9 +8202,11 @@ export class Game implements GameHooks {
     cam.follow(this.player.cx, this.player.cy);
     cam.easeZoom();
     cam.clamp();
-    cc.flushDirty();
     const hw = cam.viewW / 2 / cam.zoom + 2 * CHUNK * TILE, hh = cam.viewH / 2 / cam.zoom + 2 * CHUNK * TILE;
+    // ★animView 先于 flushDirty（2026-09-28 混合路由:视口内 chunk 主线程同步烘焙
+    //  的判定面=animView——置位在后会让首帧冻结派发全落 worker 低优慢路径）
     cc.animView = { x0: cam.x - hw, y0: cam.y - hh, x1: cam.x + hw, y1: cam.y + hh };
+    cc.flushDirty();
     const viewTW = Math.ceil(cam.viewW / cam.zoom / TILE) + 2;
     const viewTH = Math.ceil(cam.viewH / cam.zoom / TILE) + 2;
     this.tickLighting(viewTW, viewTH);
@@ -8196,6 +8216,101 @@ export class Game implements GameHooks {
     if (performance.now() >= fz.deadline
       || (this._paintedFrames >= fz.armAt && cc.viewportCovered())) this.endEntryFreeze();
   }
+
+  // ═══ 后台 tick 泵（★2026-09-28 用户需求:后台挂机）═══
+  // 问题:主循环=rAF 驱动,标签页切后台 rAF 停发 → fixedUpdate 停 → 世界冻结,无法
+  // 后台挂机（「失焦不暂停」只管游戏自身失焦暂停,管不了浏览器 rAF;Mac/Windows
+  // 差异=标签可见性,非平台）。方案:BackgroundPump worker（250ms setInterval,后台
+  // 照跑）泵消息;主线程 handler 四门现场重判通过 → 只跑 fixedUpdate（真实流逝
+  // dt=performance.now 差;单泵 ≤30 tick 高钳,累计不爆发）+跳过 render（幕布/特效
+  // 全停,回前台渲染当前态无缝）;前台=rAF 原路径零变化。
+  //
+  // ★单一时间权威（交接的根）:泵路径与 rAF 路径共用 lastTime——谁消费谁更新（泵
+  // 跑 tick 后 lastTime=now,rAF 同式）。双向交接无缝:后台→前台首个 rAF 只见
+  // ≤~250ms dt（泵刚更新过;elapsed 0.25s 钳+每帧 ≤5 步钳平滑）;前台→后台首个泵
+  // 同理。门拒=严格零副作用（不碰 lastTime/不碰累计器）——前台收到的泵消息绝对
+  // 无痕（泵发出时后台、处理时已回前台的可见性翻转竞态,以【处理时刻】
+  // document.hidden 为准）。
+  //
+  // ★两设置真值表（backgroundRun「后台继续运行」∧ playWhenUnfocused「失焦不暂停」
+  // 独立并存——都要开才后台活;缺省 backgroundRun=on/playWhenUnfocused=off=旧行为）:
+  //   backgroundRun  playWhenUnfocused  paused   → 后台行为
+  //   off            *                  *        → 泵消息忽略=旧行为（回前台首帧大
+  //                                                  dt 由既有 elapsed 0.25s 钳兜住）
+  //   on             off                *        → 失焦自暂停（applyFocusPause 置
+  //                                                  paused）→ 泵尊重暂停不跑=冻结
+  //   on             on                 false    → 泵驱动 fixedUpdate（世界实时推进）
+  //   on             on                 true     → 泵不越权（手动/autoPause 暂停=
+  //                                                  用户选择;失焦自暂停同源 paused）
+  // ★worker 生态后台安全:泵 250ms 节拍下 fixedUpdate 尾段 tickLighting 持续发光照
+  // 请求/收结果（outstanding-aware 看门狗 lastResultAt 节拍 ≪2s 线,永不误杀）;波场
+  // worker 请求只在渲染相发出,后台无渲染=outstanding 恒 0=无证据永不定谳（治理批
+  // 语义）;光照 live 门唯一出场=看门狗级硬故障,后台零影响。
+  // ★已知代价登记:后台挂机=真实 CPU 消耗（用户目的本身）;Chrome 高负载后台页可能
+  // 出现节流提示（可忽略）。MP 客户端同门（两开关都开→后台续跑,host 后台挂机=
+  // 房间世界继续活的自然收益）。诊断面:recLog('perf') bgPumpStart/bgPump/bgPumpEnd
+  // （激活次数/累计 tick/后台段时长,20s 心跳防刷环）。
+  private pumpWorker: Worker | null = null;
+  /** 后台泵累计 tick（诊断/探针断言面;跨后台段累加） */
+  bgPumpTicks = 0;
+  /** 后台泵激活次数（诊断面） */
+  bgPumpActivations = 0;
+  /** 泵路径异常熔断闩:fixedUpdate 在泵路径首抛即停（防 4 次/秒错误风暴;rAF 链
+   *  回前台会同帧撞同一异常走既有帧循环熔断,泵侧不复跑） */
+  private _bgPumpDead = false;
+  /** 当前后台段锚（0=无活跃段;visible 边沿重开/收段,见 onVisibilityChange） */
+  private _bgPumpSegStart = 0;
+  private _bgPumpSegTicks0 = 0;
+  private _bgPumpSegAct0 = 0;
+  private _bgPumpLastBeat = 0;
+  private onPumpMsg = (ev: MessageEvent): void => {
+    if (this._bgPumpDead) return;
+    // 严格 no-op 门（处理时刻现场重判;任一不满足=return 零副作用——前台收到的
+    // 泵消息不碰 lastTime/累计器/tickCount）
+    if (!pumpGate({
+      running: this.running, world: !!this.world, hidden: document.hidden,
+      backgroundRun: options.data.backgroundRun,
+      playWhenUnfocused: options.data.playWhenUnfocused,
+      paused: this.paused,
+    })) return;
+    try {
+      const now = performance.now();
+      const dtMs = now - this.lastTime;
+      this.lastTime = now;   // ★单一时间权威:谁消费谁更新
+      if (this._bgPumpSegStart === 0) {
+        // 页面在泵首拍前已隐藏的边沿（visibilitychange 未捕到,如读档于后台页）
+        this._bgPumpSegStart = now;
+        this._bgPumpSegTicks0 = this.bgPumpTicks;
+        this._bgPumpSegAct0 = this.bgPumpActivations;
+      }
+      this.bgPumpActivations++;
+      if (this._entryFreeze) { this.entryFreezeTick(); return; }   // 冻结窗:泵只驱动冻结帧面（相机收敛+烘焙派发+光照,wbake API 复用=与 rAF 冻结帧同源;deadline 后台照常解冻）
+      const { acc, steps } = pumpAccumulate(this.acc, dtMs / 1000, FIXED_DT, BG_PUMP_MAX_TICKS);
+      this.acc = acc;
+      for (let i = 0; i < steps; i++) this.fixedUpdate(FIXED_DT);
+      this.bgPumpTicks += steps;   // 钳满余量已由 pumpAccumulate 归零=累计不爆发
+      // 自动保存墙钟（frame() 同款语义;DoUpdate_AutoSave Main.cs:19589 暂停不停表
+      // ——后台挂机长会话不丢进度;BJ280 隐藏兜底已实证隐藏态存档全链可完成）
+      const mpClient = !!this.net?.active && !this.net.policy.isHost;
+      if (this.cb.onAutoSave && options.data.autoSave && !mpClient) {
+        if (!this._autoSaveAt) this._autoSaveAt = now;
+        else if (now - this._autoSaveAt > options.data.autoSaveIntervalMin * 60000) {
+          this._autoSaveAt = now;
+          this.cb.onAutoSave();
+        }
+      } else {
+        this._autoSaveAt = 0;
+      }
+      if (now - this._bgPumpLastBeat > 20000) {
+        this._bgPumpLastBeat = now;
+        this.recLog('perf', { ev: 'bgPump', ticks: this.bgPumpTicks, act: this.bgPumpActivations, ms: Math.round(dtMs) });
+      }
+    } catch (err) {
+      this._bgPumpDead = true;
+      console.error('[Game] 后台泵 tick 异常,泵已停（rAF 链不受影响;回前台首帧走既有帧循环熔断）:', err);
+      this.recLog('perf', { ev: 'bgPumpError', msg: String(err).slice(0, 200) });
+    }
+  };
   start() {
     if (this.running) return;
     this.running = true;
@@ -8480,8 +8595,29 @@ export class Game implements GameHooks {
   private _visHidden = false;
   private _winBlurred = false;
   private onVisibilityChange = () => {
+    const wasHidden = this._visHidden;
     this._visHidden = document.hidden;
     this.applyFocusPause();
+    // ★后台泵交接诊断（recLog perf;2026-09-28）:hidden 边沿开段（世界在场才记,
+    // 菜单期零输出）;visible 边沿收段汇总（后台段 tick 数/激活数/时长）——后台
+    // 挂机出问题有迹可循。前台零泵时段零输出（tick 无增量不记 End）。
+    if (!wasHidden && this._visHidden) {
+      this._bgPumpSegStart = performance.now();
+      this._bgPumpSegTicks0 = this.bgPumpTicks;
+      this._bgPumpSegAct0 = this.bgPumpActivations;
+      this._bgPumpLastBeat = performance.now();
+      if (this.world) this.recLog('perf', { ev: 'bgPumpStart' });
+    } else if (wasHidden && !this._visHidden) {
+      const dTicks = this.bgPumpTicks - this._bgPumpSegTicks0;
+      if (this._bgPumpSegStart !== 0 && dTicks > 0) {
+        this.recLog('perf', {
+          ev: 'bgPumpEnd', ticks: dTicks,
+          act: this.bgPumpActivations - this._bgPumpSegAct0,
+          ms: Math.round(performance.now() - this._bgPumpSegStart),
+        });
+      }
+      this._bgPumpSegStart = 0;
+    }
   };
   private onWindowBlur = () => {
     this._winBlurred = true;
@@ -10396,8 +10532,8 @@ export class Game implements GameHooks {
           //  （EncourageDespawn :78797 段仅 active=false,无 BroadcastChatMessage/
           //  CombatText）——本仓曾播灰字 toast=外观级偏差,摘除。bossFled 旗保留
           //  （记账正确性不回退:Game 端不写 downed/不记击败,渲染端 Renderer:8988
-          //  血肉墙死亡判别仍读 dead&&!bossFled）。l10n 键 SandboxWorld.Toast.
-          //  BossFled 留置为死键（l10n-audit 只查缺失不查孤儿,删除需重建产物另案）
+          //  血肉墙死亡判别仍读 dead&&!bossFled）。l10n 孤儿键 SandboxWorld.Toast.
+          //  BossFled 已随 BJ394 从 tools/l10n-custom 摘除并重建产物（build-l10n）
         } else {
           // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)。
           // 击败公告（DoDeathEvents_CelebrateBossDeath NPC.cs:79822-79836）：
@@ -22223,7 +22359,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!dropId) return;
     const key = VANILLA_ITEM_KEY_BY_ID[dropId];
     if (!key) return;
-    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack);
+    // ★BJ394（2026-09-28）KillTile_DropItems 词缀掷接线（WorldGen.cs:64468/:64472
+    //  `noPrefix ? -4 : -1` → Item.NewItem prefix=-1 自然掷全链）。GetItemDrops
+    //  （:64477-66612）全量普查可词缀且无 noPrefix 压制者仅两 vid：tile 61 fx==162 →
+    //  223 Nature's Gift（:66171-66174,配饰池 19,无 noPrefix→原版真掷）与 tile 50
+    //  fx==90 → 165 Water Bolt（:66175-66182,魔法池;165 掷接在 1×1 通用帧表路径）。
+    //  noPrefix=true 压制档照录零刀（本仓 tile 掉落链本就不掷=自洽）：703 seg9→223
+    //  （:65486）/707 fx90→165（:66185-66189）/700→5114（:65493-65496）;426 Breaker
+    //  Blade 系 case 4 火把 default `426+num`（num≥1 恒≥427）=普查 false positive。
+    //  植物族其余掉落（331/208/195/150/183/194/4564/…）皆无词缀池=零 roll 同相。
+    //  223 仅 sheet 61 臂掷——sheet 703 的 223=压制档
+    let prefix: number | undefined;
+    if (dropId === 223 && sheet === 61) {
+      const iid223 = ITEM_BY_KEY[key];
+      if (iid223 !== undefined) {
+        prefix = rollNaturalPrefixForVid(223, isPrefixableAccessory(iid223), Math.random) || undefined;
+      }
+    }
+    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack, undefined, undefined, undefined, prefix);
   }
 
   /** KillTile_ShouldDropSeeds（WorldGen.cs:66232）：1/2 且玩家背包有吹管(281)/
@@ -22664,7 +22817,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const fbr = furnitureTryBreak(this.world.furnitureItems, fKind, fax, fay, type);
       if (fbr.result === 'pop') {
         if (fbr.item) {
-          this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack);
+          // ★BJ394：存物词缀随行（原版 334 帧 Item.NewItem 第 8 参=帧编码 prefix
+          //  :64147-64151 / TE 族 result.DropItem() 掉真 Item 实例——存物 prefix 原样落）
+          this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack, undefined, undefined, undefined, fbr.item.prefix);
         }
         this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 4, 1.2);
         return;
@@ -22676,7 +22831,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  :64151）+ CheckWeaponsRack :46855 架体 2699 同击;两段式 early-return 是 471
       //  TE 专属（:64186-64192）。此处先弹武器,再落 object 路径碎架 + def.drop 2699。
       if (fbr.item) {
-        this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack);
+        // ★BJ394：存物词缀随行（同上——原版 334 存物 prefix 编在 frameX2 :64151 传 NewItem）
+        this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack, undefined, undefined, undefined, fbr.item.prefix);
       }
     }
     // 锚桩 724 / 风筝桩 723（KillTile_DropItems :63739-63744 DropItemForTileBreak，
@@ -22848,6 +23004,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // else 支 → vanillaStyleDrops.echoResourceDropVid 帧段直查,失撑链同接）
       let dropKey = multiTileDropKey(def, vanillaPlaceableTileKeys());
       let dropCount = 1;   // 488 倒木木头 Next(10,21) 等非 1 档覆写
+      let dropPrefix: number | undefined;   // ★BJ394：tile 50 水书 165 自然掷（-1 面）
       // ★样式还原（审计补 A ⚠️2，2026-08-22 批）：GetItemDrop_* 21 族按帧掉真物品——
       // 原 R10 兜底对多 style 族恒掉 style0 档（桌 14 恒掉木桌/椅 15 恒掉木椅/宝箱
       // 21 恒掉金箱…）。原版语义：这些族 KillTile 在共享 no-drop 表，掉落全走
@@ -22863,6 +23020,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // S2/D-7 接档（2026-08-23）：哨兵 -1=原版显式无掉落档（假容器 441/468 的
         // GetItemDrop_FakeChests -1 档）——压 place_v_/def.drop 兜底,与 0「无表族」区分
         else if (sv < 0) dropKey = '';
+        // ★BJ394（2026-09-28）：tile 50 书架水书帧 fx==90→165 Water Bolt（KillTile
+        // case 50 :66175-66182 无 noPrefix→-1 自然掷,魔法池）——707 BooksEcho 帧表
+        // 同 165 但原版 noPrefix=true（:66187）→ 仅 sheet 50 掷（1:1 保留原版不对称）
+        if (def.vanilla?.sheet === 50 && sv === 165) {
+          const iid165 = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[165] ?? ''];
+          if (iid165 !== undefined) {
+            dropPrefix = rollNaturalPrefixForVid(165, isPrefixableAccessory(iid165), Math.random) || undefined;
+          }
+        }
       }
       // D-8：活板门/高门 386/387/388/389 掉落翻正（CheckTrapDoor 1457 :52050/
       // CheckTallGate :52111——杀段两态恒掉关闭态物品 3239/3240）
@@ -22928,7 +23094,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         dropKey = ev > 0 ? (VANILLA_ITEM_KEY_BY_ID[ev] ?? '') : '';
       }
       // ★SW-BJ40：掉落坐标 = Check* 触发格（dropX/dropY，见上）——非锚格
-      if (dropKey) this.spawnDrop(dropX * TILE + 8, dropY * TILE, dropKey, dropCount);
+      if (dropKey) this.spawnDrop(dropX * TILE + 8, dropY * TILE, dropKey, dropCount, undefined, undefined, undefined, dropPrefix);
       // 告示牌族（Main.tileSign {55,85,425,573}，Main.cs:9990-9993）破坏 → 注销
       // 牌面文本登记（WorldGen.cs:43733 Sign.KillSign，帧检分支）
       if (framedSheet === 55 || framedSheet === 85 || framedSheet === 425 || framedSheet === 573) {
@@ -23169,7 +23335,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  递归毁格仍掉 def.drop,FTW 灰烬连锁掉 172 即此漏）。补门=尾段与头部同门。
       if (!noItem && sv > 0) {
         const sk = VANILLA_ITEM_KEY_BY_ID[sv];
-        if (sk) this.spawnDrop(x * TILE + 8, y * TILE + 8, sk, 1);
+        if (sk) {
+          // ★BJ394：sheet 50 水书档（fx==90→165）此站同掷（-1 自然掷;707 压制档不掷,
+          // 与上方帧表站同判据——表共享,失撑链经此站时口径一致）
+          let prefix165: number | undefined;
+          if (def.vanilla?.sheet === 50 && sv === 165) {
+            const iid165 = ITEM_BY_KEY[sk];
+            if (iid165 !== undefined) {
+              prefix165 = rollNaturalPrefixForVid(165, isPrefixableAccessory(iid165), Math.random) || undefined;
+            }
+          }
+          this.spawnDrop(x * TILE + 8, y * TILE + 8, sk, 1, undefined, undefined, undefined, prefix165);
+        }
       } else if (!noItem && def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
       // place_v_ 兜底与 object 支 multiTileDropKey 同语义（:808 注）：判据=存在真实
       // 原版放置物品——无门时 no-drop 组 1×1 件（藤/滴落饰/苔叶块等）也走此支,虽然
@@ -26679,8 +26856,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const r = furniturePlaceSingle(list, kind, ax, ay, held, vid);
         if (r.ok) {
           // 占位旧物先弹出（TryPlacing :91-93 result.DropItem → 世界掉落）
+          // ★BJ394：换出存物词缀随行（result.DropItem 掉真 Item 实例,prefix 原样）
           if (r.replaced) {
-            this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[r.replaced.id].key, r.replaced.stack);
+            this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[r.replaced.id].key, r.replaced.stack, undefined, undefined, undefined, r.replaced.prefix);
           }
           this.player.inv.removeHeld(1);
           this.cb.onInventoryChanged();
@@ -26697,15 +26875,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (!this.player.inv.slots[sel]) {
           this.player.inv.slots[sel] = { id: taken.item.id, stack: taken.item.stack, prefix: taken.item.prefix };
         } else {
-          const left = this.player.inv.add(taken.item.id, taken.item.stack);
-          if (left > 0) this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[taken.item.id].key, left);
+          // ★BJ394：入包/溢出两路词缀随行（原版 GetItem 收真 Item 实例,prefix 原样）
+          const left = this.player.inv.add(taken.item.id, taken.item.stack, taken.item.prefix);
+          if (left > 0) this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[taken.item.id].key, left, undefined, undefined, undefined, taken.item.prefix);
         }
         this.cb.onInventoryChanged();
       }
     } else {
       const popped = furniturePopSingle(list, kind, ax, ay);
       if (popped) {
-        this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[popped.id].key, popped.stack);
+        // ★BJ394：取出存物词缀随行（OnPlayerInteraction else → KillTile(fail:true) →
+        //  KillTile_DropItems :63703 提前 return 掉真 Item 实例,prefix 原样）
+        this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[popped.id].key, popped.stack, undefined, undefined, undefined, popped.prefix);
       }
     }
     this.input.rightDown = false;
@@ -47638,11 +47819,18 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       if (consumeMaterials(this.player.inv, r, 1, this._alchemyTable, this._craftSourcesCache()) <= 0) break;
       crafted++;
       // 每轮 CreateResult（CraftingRequests.cs:122-131）：createStack<=1 → Prefix(-1)
-      // 逐件 roll（RB4a 债②;1/4 无词缀+Reduced 池降档,rollPrefix(pool,false) 同构;
-      // 批量/多件产出与无词缀域不 roll——原版 stack>1 不进分支）。多轮单件产出物在
-      // 桌面 toCursor 流被每轮光标门拦停（光标持词缀件不可再并堆,Main.cs:43052 同构）,
-      // 逐件 roll 的可观测面 = 直入背包路径与后续单击（与原版一致）
-      const prefix = r.createStack <= 1 && pool && pool.length ? rollPrefix(pool, false) : undefined;
+      // 逐件 roll（RB4a 债②;批量/多件产出与无词缀域不 roll——原版 stack>1 不进分支）。
+      // ★BJ394（2026-09-28）迁 BJ390 rollNaturalPrefixForVid＝Item.cs:523-556 自然掷
+      // 全链（Next(4) 早退→池掷→Reduced 2/3 mercy→TryGet 四失败门重进环 :1067-1079）
+      // ——原版制作链与 NPC 掉落同走 Prefix(-1) 全链,旧 rollPrefix(pool,false) 无四门
+      // （0kb 吹管族 281 等可吃 kb 词缀=零效果假词缀）且掷序偏离（先池掷后 1/4 门）。
+      // pool 门保留≡CanHavePrefixes（CreateResult 先 Clone 后 Prefix,GetRollablePrefixes
+      // null → Prefix 返 false 零词缀）;isPrefixableAccessory 判定沿 BJ392。多轮单件
+      // 产出物在桌面 toCursor 流被每轮光标门拦停（光标持词缀件不可再并堆,Main.cs:43052
+      // 同构）,逐件 roll 的可观测面 = 直入背包路径与后续单击（与原版一致）
+      const prefix = r.createStack <= 1 && pool && pool.length
+        ? (rollNaturalPrefixForVid(outVid0, isPrefixableAccessory(outId), Math.random) || undefined)
+        : undefined;
       // R14-B4：钱币互转配方（REC57:15121-15147,71↔72↔73↔74）产物走 NoCoinMerge
       // （CraftItem_GrantItem → GetItem(ReturnItemShowAsNewNoCoinMerge),GetItemSettings.cs:25
       // 禁 DoCoins）——曾直接 inv.add 跑 doCoins 把 100 铜瞬时合回 1 银=净变化零的死合成。

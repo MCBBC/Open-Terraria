@@ -29,6 +29,8 @@ const famNames = new Set([
   'PerformAnimationFrame', 'FireIdleCallback', 'MessageLoop::RunTask', 'ResourceFetch',
 ]);
 const fam = new Map(); // name -> [ts,dur][]
+const loopSpans = []; // FunctionCall(loop) [ts, ts+dur]
+const rafSpans = [];  // FireAnimationFrame [ts, ts+dur]
 const gpuTex = new Map(); // w×h -> count
 const gpuNameTop = new Map();
 let gpuPidSet = new Set();
@@ -64,6 +66,8 @@ function onEvent(ev) {
         if (!fam.has(name)) fam.set(name, []);
         fam.get(name).push([ev.ts || 0, (ev.ts || 0) + (ev.dur || 0)]);
         if (name === 'Commit') commitMain.push([ev.ts || 0, (ev.ts || 0) + (ev.dur || 0)]);
+        if (name === 'FunctionCall' && ev.args?.data?.functionName === 'loop') loopSpans.push([ev.ts || 0, (ev.ts || 0) + (ev.dur || 0)]);
+        if (name === 'FireAnimationFrame') rafSpans.push([ev.ts || 0, (ev.ts || 0) + (ev.dur || 0)]);
       }
     }
     return;
@@ -175,6 +179,29 @@ if (main) {
     if (r) console.log(`${fn}: self=${(r.self / 1000).toFixed(1)}ms incl=${(r.incl / 1000).toFixed(1)}ms nodes=${r.n}`);
     else console.log(`${fn}: ABSENT`);
   }
+  console.log('=== TOP 60 self ===');
+  for (const [fn, r] of [...byFn.entries()].sort((a, b) => b[1].self - a[1].self).slice(0, 60)) {
+    console.log(`${fn}: self=${(r.self / 1000).toFixed(1)}ms incl=${(r.incl / 1000).toFixed(1)}ms n=${r.n}`);
+  }
+  // emitTileParticles 家族 2s 桶时间线
+  if (main.ts.length) {
+    const tMin = main.ts[0], tMax = main.ts[main.ts.length - 1];
+    const nB = Math.max(1, Math.ceil((tMax - tMin) / 2e6));
+    const buckets = Array.from({ length: nB }, () => ({ emit: 0, orch: 0, torch: 0, drawImage: 0, prog: 0, frames: 0 }));
+    for (let j = 0; j < main.ids.length; j++) {
+      const nd = main.nodes.get(main.ids[j]);
+      if (!nd) continue;
+      const dt = j + 1 < main.ts.length ? Math.max(0, main.ts[j + 1] - main.ts[j]) : 0;
+      const bi = Math.min(nB - 1, Math.floor((main.ts[j] - tMin) / 2e6));
+      if (nd.fn === 'emitTileParticles') buckets[bi].emit += dt;
+      else if (nd.fn === 'emitTileOrchestraAmbient') buckets[bi].orch += dt;
+      else if (nd.fn === 'emitTorchSparks') buckets[bi].torch += dt;
+      else if (nd.fn === 'drawImage') buckets[bi].drawImage += dt;
+      else if (nd.fn === '(program)') buckets[bi].prog += dt;
+    }
+    console.log('=== 2s timeline (self ms/bucket) ===');
+    buckets.forEach((b, i) => console.log(`t=${i * 2}s: emit=${(b.emit / 1000).toFixed(1)} orch=${(b.orch / 1000).toFixed(1)} torch=${(b.torch / 1000).toFixed(1)} drawImage=${(b.drawImage / 1000).toFixed(1)} program=${(b.prog / 1000).toFixed(1)}`));
+  }
   // emitTileParticles 直接子节点
   for (const [id, nd] of main.nodes) {
     if (nd.fn === 'emitTileParticles') {
@@ -251,6 +278,39 @@ if (main) {
   const allM = mergeIv(allMerged);
   const allOv = intersect(progIv, allM);
   console.log(`ALL families union coverage of (program): ${(allOv / 1000).toFixed(1)}ms (${(allOv / progTotal * 100).toFixed(1)}%); residual=${((progTotal - allOv) / 1000).toFixed(1)}ms`);
+
+  // (program) 位置分类：Commit 内 / FunctionCall(loop) 内 / rAF 回调内但 FunctionCall 外 / 三者外
+  const inIv = (ivs, s, e) => {
+    let lo = 0, hi = ivs.length - 1;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (ivs[mid][0] <= s) lo = mid + 1; else hi = mid - 1; }
+    for (let k = Math.max(0, hi); k < Math.min(ivs.length, hi + 3); k++) {
+      if (ivs[k][0] <= s && e <= ivs[k][1]) return true;
+    }
+    return false;
+  };
+  const loopM = mergeIv(loopSpans.slice().sort((a, b) => a[0] - b[0]));
+  const rafM = mergeIv(rafSpans.slice().sort((a, b) => a[0] - b[0]));
+  const commitIvs = (fam.get('Commit') || []).slice().sort((a, b) => a[0] - b[0]);
+  let cCommit = 0, cInLoop = 0, cRafOnly = 0, cOut = 0, cCommitAndLoop = 0;
+  for (const [s, e] of progIv) {
+    const dur = e - s;
+    const inC = inIv(commitIvs, s, e);
+    const inL = inIv(loopM, s, e);
+    const inR = inIv(rafM, s, e);
+    if (inC) { cCommit += dur; if (inL) cCommitAndLoop += dur; }
+    else if (inL) cInLoop += dur;
+    else if (inR) cRafOnly += dur;
+    else cOut += dur;
+  }
+  console.log(`(program) 分类: Commit内=${(cCommit / 1000).toFixed(1)}ms (其中与loop重叠=${(cCommitAndLoop / 1000).toFixed(1)}ms) | loop(JS执行窗)内非Commit=${(cInLoop / 1000).toFixed(1)}ms | rAF窗内非loop非Commit=${(cRafOnly / 1000).toFixed(1)}ms | 三者之外=${(cOut / 1000).toFixed(1)}ms`);
+  // loop span vs rAF span 尾差
+  let tailSum = 0, tailN = 0;
+  for (const [rs, re] of rafM) {
+    let lastLoopEnd = 0;
+    for (const [ls, le] of loopM) { if (ls >= rs - 2000 && le <= re + 2000) lastLoopEnd = Math.max(lastLoopEnd, le); }
+    if (lastLoopEnd) { tailSum += Math.max(0, re - lastLoopEnd); tailN++; }
+  }
+  console.log(`rAF 回调尾差(loop 结束→回调结束): n=${tailN} sum=${(tailSum / 1000).toFixed(1)}ms mean=${tailN ? (tailSum / tailN / 1000).toFixed(2) : 0}ms`);
 
   // Commit 明细分位
   const ds = commitMain.map((x) => x[1]).sort((a, b) => a - b);

@@ -132,7 +132,7 @@ function invBgDataUrl(w: number, h: number): string | null {
 }
 import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
-import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES, formatPrefixedName } from '../data/vanillaPrefixes';
+import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES, formatPrefixedName, rollNaturalPrefixForVid } from '../data/vanillaPrefixes';
 import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -150,7 +150,7 @@ import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, happinessPct, type NpcButtonId, type ShopEntry, type ShopCellHover, type HappinessInfo } from './NpcDialog';   // ★SW-FX32:happinessPct/ShopCellHover 内嵌货架共用
 import type { DialoguePortraitPayload } from '../data/npcPortraits';
 import { UISfx } from '../vui/UISfx';
-import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot, ACC_ARMOR_START, VANITY_ARMOR_START, ARMOR_SLOTS } from '../items/Inventory';
+import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf, ammoSlotAccepts, canFillEmptyAmmoSlot, ACC_ARMOR_START, VANITY_ARMOR_START, ARMOR_SLOTS, isPrefixableAccessory } from '../items/Inventory';
 import { chestSettingsAllowsVault, lootAllFromContainer, quickStackIntoContainer } from '../stats/QuickStacking';   // ★SW-BJ46 quickStackIntoContainer=ChestUI.QuickStack 纯函数（bank MoveCoins 前置/两遍语义/匹配域在内）
 import {
   slotContext, planAlternateClick, chestCanTakeJustCheck, canTakeToPersonalInventory,
@@ -2520,8 +2520,19 @@ export class UI {
       if (!key) return;                       // vanilla.json 缺条目防御（bagItemIdRegistered 可查）
       const iid = ITEM_BY_KEY[key];
       if (iid === undefined) return;
-      const left = inv.add(iid, n ?? 1);
-      if (left > 0) game.spawnDrop(px, py, key, left); // 溢出落地（GetOrDropItem 尾 RequestNewItem(base.Center) :7202 velocity=null→随机,BJ326）
+      // ★BJ394（2026-09-28）QuickSpawnItem 族词缀掷（Player.cs:7174-7184 int 重载恒
+      //  `Prefix(-1)` :7180——SetDefaults 后、stack 前掷,自然掷全链含 TryGet 四门;
+      //  不可词缀物 pool null → 0 同相）。OpenPresent :7035/OpenLegacyPresent :7156/
+      //  OpenBossBag :7206(151 掷)/OpenFishingCrate :8052/OpenShadowLockbox :9396/
+      //  OpenLockBox :9416/OpenHerbBag :9453/OpenCanofWorms :9529/OpenOyster :9543/
+      //  OpenChilletEgg :9577/OpenGoodieBag+CostumeSet :9588/:9564 全族 int 重载=本
+      //  give 单口覆盖;掷位随 give 调用序=原版 QuickSpawnItem 在支内逐件的掷序同相。
+      //  渔夫奖励 GetAnglerReward* 走 Item 重载（:57112 GiftRecieved,不掷）→
+      //  grantAnglerRewards 无词缀=原版同相;钓鱼捕获 Projectile.cs:54904 同 Item
+      //  重载不掷（PullBobber GiveItemToPlayer :73234 同）=两域照旧零刀
+      const prefix = rollNaturalPrefixForVid(id, isPrefixableAccessory(iid), Math.random) || undefined;
+      const left = inv.add(iid, n ?? 1, prefix);
+      if (left > 0) game.spawnDrop(px, py, key, left, undefined, undefined, undefined, prefix); // 溢出落地（GetOrDropItem 尾 RequestNewItem(base.Center) :7202 velocity=null→随机,BJ326）
     }, {
       hardMode: !!game.world.flags.hardMode,   // OpenPresent :6654 硬模式门读档
       remixWorld: !!game.world.seedFlags?.remix,

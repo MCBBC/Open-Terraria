@@ -304,6 +304,14 @@ export interface OptionsData {
    *  Game.render 每帧按本开关注入 renderer.fpsReadout）。设置行=Settings game 组
    *  渲染帧率上限行后（帧率族相邻） */
   fpsDisplay: boolean;
+  /** ★后台继续运行（2026-09-28 用户需求:后台挂机——切后台 rAF 停发=世界冻结的
+   *  Web 缺口;原版无对应物=Web 便利档,缺省开）。消费=Game.onPumpMsg 泵门四条件
+   *  之一（document.hidden ∧ 本开关 ∧ playWhenUnfocused ∧ !paused → fixedUpdate
+   *  驱动+跳过渲染）。与失焦播放独立并存——两开关都开才后台活（失焦播放关=失焦
+   *  即自暂停,泵尊重暂停）。off=泵消息忽略=旧行为（回前台首帧大 dt 由既有
+   *  elapsed 0.25s 钳兜住）。已知代价=后台挂机即真实 CPU 消耗（用户目的本身）;
+   *  Chrome 高负载后台页节流提示可忽略 */
+  backgroundRun: boolean;
 }
 
 const KEY = 'sandboxworld.options';
@@ -391,6 +399,7 @@ export class OptionsStore {
     craftingGridControl: 'modern',           // ★SW-FX41 缺省回切原版缺省 Modern(Player.cs:363;FX30 偏差备案清偿)
     inventoryLayout: 'vanilla',             // ★SW-FX39(2026-09-11)缺省转正(原版布局;旧自创退 ?invlayout=legacy 回退旗)
     fpsDisplay: false,                      // ★BJ305 帧率显示缺省关（用户明令新功能）
+    backgroundRun: true,                    // ★后台继续运行缺省开（2026-09-28 用户需求后台挂机;与 playWhenUnfocused 组合门见 Game 泵域注）
   };
   loaded = false;
   /** ★红队 F1(2026-09-08):?invlayout= 会话覆盖生效中——set() 序列化时把
@@ -585,6 +594,8 @@ export class OptionsStore {
       }
       // ★BJ305 帧率显示：坏值回缺省「关」（布尔卫门,同 playWhenUnfocused 等家族判式）
       if (typeof this.data.fpsDisplay !== 'boolean') this.data.fpsDisplay = false;
+      // ★后台继续运行（2026-09-28）：坏值回缺省「开」（布尔卫门同族）
+      if (typeof this.data.backgroundRun !== 'boolean') this.data.backgroundRun = true;
       this.persistedLayout = this.data.inventoryLayout;
     } catch { /* 无存档用默认 */ }
     // URL 会话覆盖在 try 外执行:kvGet 拒绝(隐私模式)时覆盖仍生效(红队 F7)

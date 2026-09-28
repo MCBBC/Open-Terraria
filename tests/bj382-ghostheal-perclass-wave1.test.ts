@@ -32,7 +32,7 @@ function enemySpy(id: number, tx: number, ty: number, w = 24, h = 24,
   vanillaId: number | null = 15) {
   return {
     id, x: tx * TILE, y: ty * TILE, w, h, dead: false, vanillaId, maxHp: 100,
-    lastStrikeDealt: 0, attempts: 0,
+    lastStrikeDealt: 0, attempts: 0, iframes: 0,
     hurt(this: { lastStrikeDealt: number; attempts: number }, dmg: number): boolean {
       this.attempts++;
       this.lastStrikeDealt = Math.max(0, dmg - DEFENSE);
@@ -110,6 +110,11 @@ describe('BJ382 雨滴 239/245 ghostHeal proc（aiDrop → hitEnemies onAccepted
     const log: StealCall[] = [];
     const e = enemySpy(99, 79, 98);                       // id 避让模块级共享免疫表（本文件前案已写 id1）
     e.hurt = () => { e.attempts++; return false; };
+    // ★BJ393 件2 夹具忠实化：hurt 返假在真 Enemy 合同里两族异义（门拒 iframes 残窗 vs
+    //  血尽级联/普通命中受理形态 Enemy.ts:14369/:15037）——本测模拟「immune 门整跳」,
+    //  补 iframes=10 使 mock 与真门同相（hitEnemies vanillaGated 读字段,BJ382 时无此
+    //  判据=mock 缺字段恰好掩盖;判据改 !vanillaGated 后缺字段返假会被正确读作受理）
+    e.iframes = 10;
     const game = makeGame(log, [e]);
     const rain = new RainCloudProj(80 * TILE, 97 * TILE, 0, 5, 130, 0, 239);
     rain.critChance = 0;

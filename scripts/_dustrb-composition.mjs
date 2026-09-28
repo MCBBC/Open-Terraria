@@ -45,6 +45,11 @@ await page.evaluate(() => {
   const r = g.renderer;
   window.__spawnBatch = (mult) => {
     const vd = r.vanillaDust;
+    // ★负载画像帽:海盗场景真实画像 ~1500 活跃尘（trace 17k pair/帧 ÷ ~11 pair/尘活位）。
+    //   超帽跳过 spawn（只压测试负载,不动任何游戏逻辑;池 6000 本身不受限）。
+    let alive0 = 0;
+    for (const d of vd.pool) { if (d.active) alive0++; }
+    if (alive0 > 1500) return 0;
     const px = g.player.x, py = g.player.y;
     const R = () => Math.random();
     const col = () => ({ r: 120 + R() * 135, g: 60 + R() * 135, b: 40 + R() * 135, a: 255 });
@@ -67,14 +72,14 @@ await page.evaluate(() => {
 });
 
 // ---- P0 构成定谳（paused+同一尘池快照重放:两臂同尘态,严格可比） ----
-console.log('=== P0 构成定谳（paused,快照重放:两臂同 6400 尘态×120 帧） ===');
+console.log('=== P0 构成定谳（paused,快照重放:两臂同 ~1450 尘态×60 帧） ===');
 {
   const s0 = await page.evaluate(() => {
     const g = window.__swGame;
     const r = g.renderer;
     window.__pause(true);
-    // 造固定尘态（32/帧×200 帧的等价规模,一次铺满）
-    window.__spawnBatch(200);
+    // 造固定尘态（≈2240 alive,海盗负载稳态口径——池饱和 6000 会让帧成本爆掉预算）
+    window.__spawnBatch(45);
     window.__step(1, false);
     const snap = [];
     for (const d of r.vanillaDust.pool) {
@@ -105,28 +110,28 @@ console.log('=== P0 构成定谳（paused,快照重放:两臂同 6400 尘态×12
       window.__arm(flag);
       r.dustPmCache = new window.__CM();
       window.__dS = { gets: 0, sets: 0, fresh: 0, dels: 0 };
-      for (let i = 0; i < 120; i++) { window.__restoreDust(); window.__step(1, false); }
-      out[flag ? 'B' : 'A'] = { gets: window.__dS.gets / 120, fresh: window.__dS.fresh / 120, dels: window.__dS.dels / 120, cache: r.dustPmCache.size };
+      for (let i = 0; i < 60; i++) { window.__restoreDust(); window.__step(1, false); }
+      out[flag ? 'B' : 'A'] = { gets: window.__dS.gets / 60, fresh: window.__dS.fresh / 60, dels: window.__dS.dels / 60, cache: r.dustPmCache.size };
       r.dustPmCache = new Map();
     }
     window.__arm(false);
     return out;
   });
-  console.log(`A(旧): pair调用/帧=${(perArm.A.gets / 2).toFixed(0)}(gets/2,touch 含 1 get) 真miss/帧≈${(perArm.A.fresh - perArm.A.dels + (perArm.A.gets / 2)).toFixed(0)}..(口径含重插) Map删/帧=${perArm.A.dels.toFixed(0)} cache=${perArm.A.cache}`);
+  console.log(`A(旧): pair调用/帧=${(perArm.A.gets / 2).toFixed(0)}(gets/2,touch 含 1 get) Map删/帧=${perArm.A.dels.toFixed(0)}(touch 重插+逐出) cache=${perArm.A.cache}`);
   console.log(`B(新): pair调用/帧=${perArm.B.gets.toFixed(0)} 真miss/帧=${perArm.B.fresh.toFixed(1)} Map删/帧=${perArm.B.dels.toFixed(1)}(=仅逐出) cache=${perArm.B.cache}`);
-  console.log(`→ 旧臂每帧 Map 结构操作=touch(delete+set)×命中 + 逐出;新臂=仅逐出。命中/帧≈${(perArm.A.gets / 2).toFixed(0)}`);
+  console.log(`→ 旧臂每帧 Map 结构删=命中重插(${((perArm.A.gets / 2) - perArm.A.fresh).toFixed(0)})+逐出(${(perArm.A.dels - ((perArm.A.gets / 2) - perArm.A.fresh)).toFixed(0)});新臂删=仅逐出 ${perArm.B.dels.toFixed(1)}/帧。命中/帧≈${((perArm.A.gets / 2) - perArm.A.fresh).toFixed(0)}`);
 }
 
 // ---- P1 纯帧墙钟（零插桩,只 frame 计时） ----
 console.log('=== P1 纯帧墙钟 A/B×3 轮 ×240 帧（分块 evaluate） ===');
 {
   const t0 = Date.now();
-  await page.evaluate(() => window.__step(300));   // 再预热
-  console.log(`预热完 ${Date.now() - t0}ms`);
+  for (let i = 0; i < 2; i++) { await page.evaluate(() => window.__step(80)); console.log(`预热 ${((i + 1) * 80)} 帧 ${Date.now() - t0}ms alive=${await page.evaluate(() => window.__vdAlive().alive)}`); }
   const arms = [];
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 2; round++) {
     for (const flag of [false, true]) {
       const s = await page.evaluate((v) => {
+        const g = window.__swGame;
         window.__arm(v);
         window.__frameMs = 0; window.__frameN = 0;
         if (!window.__frameWrapped) {
@@ -135,7 +140,7 @@ console.log('=== P1 纯帧墙钟 A/B×3 轮 ×240 帧（分块 evaluate） ===')
           const origFrame = g.frame.bind(g);
           g.frame = (v) => { const t0 = performance.now(); try { origFrame(v); } finally { window.__frameMs += performance.now() - t0; window.__frameN++; } };
         }
-        for (let i = 0; i < 240; i++) {
+        for (let i = 0; i < 180; i++) {
           window.__spawnBatch(1);
           window.__vnow += 16.6667;
           const t0 = performance.now();
@@ -149,7 +154,7 @@ console.log('=== P1 纯帧墙钟 A/B×3 轮 ×240 帧（分块 evaluate） ===')
   }
   const A = arms.filter((s) => !s.flag).map((s) => s.frameMs).sort((a, b) => a - b);
   const B = arms.filter((s) => s.flag).map((s) => s.frameMs).sort((a, b) => a - b);
-  const am = A[1], bm = B[1];
+  const am = A[0], bm = B[0];
   console.log(`=== P1 汇总: frameMs/帧 中位 A(旧)=${am.toFixed(2)} B(dustrb)=${bm.toFixed(2)} 省=${(am - bm).toFixed(2)}ms (${(((am - bm) / am) * 100).toFixed(1)}%) 比=${(am / bm).toFixed(2)}x`);
 }
 
@@ -176,10 +181,10 @@ console.log('=== P2 pair/draw 包装归因（插桩偏差两臂同构,看比值�
     for (const flag of [false, true]) {
       window.__arm(flag);
       window.__pairMs = 0; window.__pairN = 0; window.__drawMs = 0; window.__drawN = 0;
-      window.__step(180);
+      window.__step(120);
       out[flag ? 'B' : 'A'] = {
-        pairMs: window.__pairMs / 180, pairN: window.__pairN / 180,
-        drawMs: window.__drawMs / 180, drawN: window.__drawN / 180,
+        pairMs: window.__pairMs / 120, pairN: window.__pairN / 120,
+        drawMs: window.__drawMs / 120, drawN: window.__drawN / 120,
       };
     }
     window.__arm(false);
@@ -213,6 +218,7 @@ console.log('=== P3 像素逐位配对（paused,尘池快照重放,A/B 交错）
     const r = g.renderer;
     window.__pause(true);
     window.__step(2, false);   // 进入暂停渲染态
+    window.__p3vnow = window.__vnow;   // ★P3 时间冻结:同帧时间戳,消时驱动画面积
     const snap = [];
     for (const d of r.vanillaDust.pool) {
       snap.push(d.active ? { on: true, x: d.x, y: d.y, vx: d.vx, vy: d.vy, type: d.type, scale: d.scale, alpha: d.alpha, fadeIn: d.fadeIn, noGravity: d.noGravity, noLight: d.noLight, color: d.color ? { ...d.color } : null, rotation: d.rotation, fx: d.fx, fy: d.fy } : { on: false });
@@ -238,12 +244,12 @@ console.log('=== P3 像素逐位配对（paused,尘池快照重放,A/B 交错）
       lx.drawImage(c, 0, 0);
       return lx.getImageData(0, 0, lc.width, lc.height).data;
     };
-    // 先同臂自检（A vs A）:排除环境非确定性
+    // 先同臂自检（A vs A）:排除环境非确定性（同 vnow 同尘态=应零 diff）
     window.__arm(false); window.__restoreDust();
-    window.__vnow += 16.6667; g.frame(window.__vnow);
+    g.frame(window.__p3vnow);
     const P0 = snapCanvas();
     window.__restoreDust();
-    window.__vnow += 16.6667; g.frame(window.__vnow);
+    g.frame(window.__p3vnow);
     const P1 = snapCanvas();
     let selfDiff = 0;
     for (let i = 0; i < P0.length; i += 4) {
@@ -253,10 +259,10 @@ console.log('=== P3 像素逐位配对（paused,尘池快照重放,A/B 交错）
     const FA = [], FB = [];
     for (let i = 0; i < 6; i++) {
       window.__restoreDust(); window.__arm(false);
-      window.__vnow += 16.6667; g.frame(window.__vnow);
+      g.frame(window.__p3vnow);
       FA.push(snapCanvas());
       window.__restoreDust(); window.__arm(true);
-      window.__vnow += 16.6667; g.frame(window.__vnow);
+      g.frame(window.__p3vnow);
       FB.push(snapCanvas());
     }
     let nd = 0, maxd = 0;

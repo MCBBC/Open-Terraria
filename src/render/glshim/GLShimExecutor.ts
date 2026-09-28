@@ -40,6 +40,12 @@ export interface ShimHost {
    *  返回 false=无法降级（调用方弃队列）。触发面=acc 窗内 GL 死亡/
    *  不可栅格化算子（strokeRect 之外的落笔长尾）。 */
   degradeAcc?(): boolean;
+  /** ★R1b-5（2026-09-28 雷雨 degradeAcc 逐帧定谳,可选）：样式工厂 ctx——
+   *  acc 态 createLinearGradient/createRadialGradient/createPattern 用它产
+   *  真样式对象（CanvasGradient/Pattern 是上下文无关的普通样式对象,可跨 ctx
+   *  使用）。缺省=执行器自建 1×1 离屏 ctx（真浏览器恒可达;node 测试无 document
+   *  时由 host 注入 FakeCtx 面或回退旧降级链）。 */
+  styleCtx?(): CanvasRenderingContext2D | null;
 }
 
 /** 单 quad 记录（池化;同时携带 2D 重放面——flush 遇 GL 失败逐条原样回放） */
@@ -700,10 +706,32 @@ export class GLShimExecutor {
               bound[prop] = fn;
               return fn;
             }
-            if (prop === 'getImageData' || prop === 'createPattern' || prop === 'createLinearGradient'
-              || prop === 'createRadialGradient' || prop === 'measureText' || prop === 'isPointInPath'
+            if (prop === 'createLinearGradient' || prop === 'createRadialGradient' || prop === 'createPattern') {
+              // ★R1b-5（2026-09-28 雷雨 degradeAcc 逐帧定谳）:样式工厂不再降级——
+              //  旧码把 createRadialGradient/createLinearGradient/createPattern 归入
+              //  「读值面→ensureBridged」支=acc 窗内一次样式工厂即【整帧降级】+
+              //  present 回贴重放（degradeAcc 每帧 drawImage 1015ms=9.3% 稳态,
+              //  Trace-20260928T184502 全帧样本唯一退化栈 draw@proj1457:1851）。而
+              //  CanvasGradient/CanvasPattern 是【上下文无关】的普通样式对象（spec:
+              //  opaque 工厂产物,addColorStop 后可跨 ctx 使用）→ 工厂 ctx 产真对象,
+              //  fillStyle/strokeStyle 镜像收全值（R1-F4）,落笔由 rasterizeFillRect
+              //  （渐变/图案）·rasterizePathOp（fill/stroke）·bridge 回放原样消费=
+              //  零降级零像素差。工厂不可达（node 无 document 且 host 未注入）→
+              //  回退旧降级链（宁降级不丢内容）。
+              return (...args: unknown[]) => {
+                const sc = self.styleCtx();
+                if (!sc) {
+                  self.ensureBridged();
+                  const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown>;
+                  return r[prop](...args);
+                }
+                const f = (sc as unknown as Record<string, (...a: unknown[]) => unknown>)[prop];
+                return f.apply(sc, args);
+              };
+            }
+            if (prop === 'getImageData' || prop === 'measureText' || prop === 'isPointInPath'
               || prop === 'clip' || prop === 'drawFocusIfNeeded') {
-              // 读值面/样式工厂:acc 态无落笔语义,降级后委托（防御性）
+              // 读值面/真裁剪:acc 态无落笔/无读回语义,降级后委托（防御性）
               return (...args: unknown[]) => { self.ensureBridged(); const r = self.raw as unknown as Record<string, (...a: unknown[]) => unknown>; return r[prop](...args); };
             }
             return undefined;
@@ -736,6 +764,23 @@ export class GLShimExecutor {
       this._stub = { width: w, height: h };
     }
     return this._stub;
+  }
+
+  /** ★R1b-5 样式工厂 ctx（acc 态 createLinearGradient/RadialGradient/Pattern 产真对象）：
+   *  host 注入优先（测试/复用面）;缺省自建 1×1 离屏（惰性单例——执行器单实例,
+   *  全会话一画布;1×1 零 GPU 面,梯度对象本身无 GPU 资源）。 */
+  private _styleCv: HTMLCanvasElement | null = null;
+  private _styleCtx2d: CanvasRenderingContext2D | null = null;
+  private styleCtx(): CanvasRenderingContext2D | null {
+    if (this.host.styleCtx) return this.host.styleCtx();
+    if (!this._styleCtx2d) {
+      if (typeof document === 'undefined') return null;
+      this._styleCv = document.createElement('canvas');
+      this._styleCv.width = 1;
+      this._styleCv.height = 1;
+      this._styleCtx2d = this._styleCv.getContext('2d');
+    }
+    return this._styleCtx2d;
   }
 
   /** acc 态未知算子收口：优先降级换桥再委托真 ctx（宁降级不丢内容）。
@@ -1190,10 +1235,15 @@ export class GLShimExecutor {
   }
 
   /** ★B2b acc fillRect 隔离栅格化（fillStyle 渐变/图案/非解析色——直译不出,
-   *  栅格化到 scratch 保像素恒等;失败返 false → 调用方降级）。 */
+   *  栅格化到 scratch 保像素恒等;失败返 false → 调用方降级）。
+   *  ★R1b-5（2026-09-28 雷雨定谳续刀）:'lighter' 可隔离——纯加算在【透明 scratch】
+   *  上栅格化出源贡献（ga 烘入面,上传预乘=cs·αs）,ADD(ONE,ONE) quad 加进累积面
+   *  =2D lighter 逐位同构（dust add 面/tier-1 既有判例;ray-orb StormLightning
+   *  draw :1851-1856 辉光盘=createRadialGradient+lighter fillRect 同帧即此形态,
+   *  旧码在此降级整帧）。multiply 等改面算子仍不可隔离 → 整帧降级。 */
   private rasterizeFillRect(x: number, y: number, w: number, h: number): boolean {
-    // multiply 等改面算子不可隔离（见 rasterizeOp 注）→ 整帧降级
-    if (this.clipped || this.gco !== 'source-over') return false;
+    // multiply 等改面算子不可隔离（见 rasterizeOp 注）→ 整帧降级;lighter=源栅格化
+    if (this.clipped || (this.gco !== 'source-over' && this.gco !== 'lighter')) return false;
     const { a, b, c, d, e, f } = this.m;
     const xs = [a * x + c * y + e, a * (x + w) + c * y + e, a * x + c * (y + h) + e, a * (x + w) + c * (y + h) + e];
     const ys = [b * x + d * y + f, b * (x + w) + d * y + f, b * x + d * (y + h) + f, b * (x + w) + d * (y + h) + f];
@@ -1213,7 +1263,8 @@ export class GLShimExecutor {
     try { sctx.fillStyle = this.fillStyleV as string | CanvasGradient | CanvasPattern; } catch { return false; }
     sctx.fillRect(x, y, w, h);
     this.markDynamic(sc);
-    this.push(0, null, false, sc, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,
+    // ★R1b-5:gco='lighter' → ADD 档（源贡献加进累积面）;SO → 基档
+    this.push(this.gco === 'lighter' ? 1 : 0, null, false, sc, 0, 0, sx, sy, fx, fy, sx, sy, 0, 1,
       1, 1, 1, false, false, false, true, null);
     this.flush();
     return true;

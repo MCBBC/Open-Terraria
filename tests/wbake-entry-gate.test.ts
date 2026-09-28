@@ -118,17 +118,21 @@ describe('入场空白修复刃①：ChunkCache 视域判定与覆盖查询', ()
     expect(cc.viewportCovered()).toBe(true);
   });
 
-  it('get() wbake 占位 → workerAwaiting 入账 → 视口内未覆盖;视口外不阻塞', () => {
+  it('get() wbake 占位 → workerAwaiting 入账（★混合路由后仅视口【外】支路）;视口内=同步烘焙真对', () => {
     const cc = makeCache();
     const client = fakeClient();
     cc.bakeClient = client;
+    // ★2026-09-28 混合路由：视口内 chunk 主线程同步烘焙（0.47ms/块,worker 波次
+    //  7-26ms 15-50× 慢路径不再拦视口出图=传送 1-2s 空白根治）——真对即落不入
+    //  workerAwaiting。占位支路仅剩视口外（后台流式语义不变）。
     cc.animView = { x0: 0, y0: 0, x1: 256, y1: 256 };   // 只视口 (0,0) 一块
     const p = cc.get(0, 0);
-    expect(p.cell).toBe(0);                              // 占位对（粘滞槽位）
-    expect(client.request).toHaveBeenCalledWith(0, 0, expect.anything(), true); // 可视支路=高优
-    expect(cc.workerAwaiting.has(ChunkCache.key(0, 0))).toBe(true);
-    expect(cc.viewportCovered()).toBe(false);            // 视口内占位=未覆盖
-    // 视口外占位不阻塞覆盖门
+    expect(p.cell).toBe(0);                              // 真对（同步烘焙,粘滞槽位）
+    expect(p.placeholder).toBeFalsy();
+    expect(client.request).not.toHaveBeenCalled();       // 不派发 worker
+    expect(cc.workerAwaiting.has(ChunkCache.key(0, 0))).toBe(false);
+    expect(cc.viewportCovered()).toBe(true);             // 真对在场=覆盖
+    // 视口外占位不阻塞覆盖门（现状语义保持）
     const client2 = fakeClient();
     cc.bakeClient = client2;
     cc.animView = { x0: 4096, y0: 4096, x1: 8192, y1: 8192 };
@@ -137,19 +141,26 @@ describe('入场空白修复刃①：ChunkCache 视域判定与覆盖查询', ()
     expect(cc.viewportCovered()).toBe(true);
   });
 
-  it('completeWorkerBake 出账 → 覆盖;markDirty 重占位再入账', () => {
+  it('completeWorkerBake 出账 → 覆盖;markDirty 重占位再入账（★混合路由:占位=视口外烘中/animView 移入窗）', () => {
     const cc = makeCache();
     cc.bakeClient = fakeClient();
-    cc.animView = { x0: 0, y0: 0, x1: 256, y1: 256 };
+    // 视口外支路建占位（后台流式;animView 置于别处——null 时 viewportCovered 恒 true）
+    cc.animView = { x0: 4096, y0: 4096, x1: 8192, y1: 8192 };
     cc.get(0, 0);
+    expect((cc.chunks.get(ChunkCache.key(0, 0)) as ChunkPair).placeholder).toBe(true);
+    // animView 移入占位 chunk（相机平移竞态窗）→ 未覆盖
+    cc.animView = { x0: 0, y0: 0, x1: 256, y1: 256 };
     expect(cc.viewportCovered()).toBe(false);
     cc.completeWorkerBake(0, 0, {} as ImageBitmap, {} as ImageBitmap, null, [], []);
     expect(cc.workerAwaiting.size).toBe(0);
     expect(cc.viewportCovered()).toBe(true);
-    // 运行期编辑 → 占位重建 → 再次未覆盖 → 回包再覆盖
+    // 运行期编辑 → 哨兵+入队（★混合路由下视口内 flushDirty/get 走同步烘焙=无占位窗）
     cc.markDirty(0, 0);
+    cc.animView = null;                        // 保守占位支路（inViewport 恒 false）
     cc.get(0, 0);
-    expect(cc.viewportCovered()).toBe(false);
+    expect(cc.viewportCovered()).toBe(true);   // animView 未置=覆盖查询恒 true（守卫语义）
+    cc.animView = { x0: 0, y0: 0, x1: 256, y1: 256 };
+    expect(cc.viewportCovered()).toBe(false);  // 重建占位未落
     cc.completeWorkerBake(0, 0, {} as ImageBitmap, {} as ImageBitmap, null, [], []);
     expect(cc.viewportCovered()).toBe(true);
   });

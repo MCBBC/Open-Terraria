@@ -327,8 +327,10 @@ describe('SW-AZ1 结构锁', () => {
     // 逐轮循环：每轮 consumeMaterials(times=1)（校验不过返 0 = 零扣,R14-B2 单点保持）
     expect(game).toMatch(/consumeMaterials\(this\.player\.inv, r, 1, this\._alchemyTable, this\._craftSourcesCache\(\)\) <= 0\) break;/);
     expect(game).not.toMatch(/r\.createStack \* times/);
-    // 每轮 CreateResult 词缀 roll（CreateResult CRQ57:126-133 `stack<=1 → Prefix(-1)`）
-    expect(game).toMatch(/r\.createStack <= 1 && pool && pool\.length \? rollPrefix\(pool, false\) : undefined;/);
+    // 每轮 CreateResult 词缀 roll（CreateResult CRQ57:122-131 `stack<=1 → Prefix(-1)`）
+    // ★BJ394（2026-09-28）：迁移后钉 rollNaturalPrefixForVid（Item.cs:523-556 自然掷
+    // 全链+TryGet 四门）;旧 rollPrefix(pool,false) 无四门已退役（重铸 -2 面除外）
+    expect(game).toMatch(/r\.createStack <= 1 && pool && pool\.length\s*\n\s*\? \(rollNaturalPrefixForVid\(outVid0, isPrefixableAccessory\(outId\), Math\.random\) \|\| undefined\)/);
     // 双门逐轮：CollectedEnough（CraftingRequests.cs:102 前腿）+ CursorHasSpace（Main.cs:43032）
     expect(game).toMatch(/i > 0 && !collectedEnoughForCraft\(r, this\.player\.inv, this\._craftSourcesCache\(\)\)\) break;/);
     expect(game).toMatch(/toCursor && i > 0 && !this\.cursorCanTakeCraftResult\(r\)\) break;/);
@@ -411,6 +413,9 @@ describe('SW-AZ1 item1 行为面（Game 壳端到端）', () => {
     g.player = {
       cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
       facing: 1, useTime: 0, attackSpeedMult: 1,
+      // ★BJ394 补桩：overlapsEntity→emptyTileEntitiesRect 玩家占位门读 isGhostPhase
+      // （Game.ts 玩家门族,他套件同款桩）——本桩锁基态 false
+      isGhostPhase: () => false,
       buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
       // ★SW-FX44：SW-BJ59 后 Game.tryPlace 尾 useTime 走 paintTileSpeed→placeSpeedTileRaw
       // 委托面（Game:22294→Player:3213）——桩锁基态 1（Player.cs:2453 基 1f,无增益）

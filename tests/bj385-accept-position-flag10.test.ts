@@ -109,10 +109,21 @@ describe('BJ385-① 239/245 aiDrop dropHits 受理位（Projectile.cs:14189 ∈ 
     let calls = 0;
     const e = {
       id, x: cx - 8, y: cy, w: 16, h: 800, dead: false, maxHp: 100,
+      // ★BJ393 件2 夹具忠实化：真 Enemy 的门拒=【调用前】iframes>0（:13972 读前值,
+      //  受理态 iframes==0）——判据 !vanillaGated 读的就是前值,残窗须以初值承载;
+      //  旧缺字段返假在旧判据（hurt 返真）下恰好被当拒收,新判据下=级联受理形态。
+      iframes: 2,
       hits: [] as number[],
       hurt(d: number): boolean {
         calls++;
-        if (calls <= rejectTicks) return false;   // 残窗拒收
+        // ★BJ393 件2 夹具忠实化：门拒判据=【调用前】iframes>0（真 Enemy :13972 读前值）。
+        //  残窗 2t=33ms < 167ms 结算间隔（共享表节流）→ 末次拒收跳须清窗（时间性衰减的
+        //  真实承载）,否则首次受理跳前值仍>0=vanillaGated 误吞首跳受理位（hits 3≠2）。
+        if (calls <= rejectTicks) {
+          this.iframes = calls === rejectTicks ? 0 : 2;   // 末拒清窗（衰减）/中段保持残窗
+          return false;
+        }
+        this.iframes = 0;
         this.hits.push(d);
         return true;
       },
