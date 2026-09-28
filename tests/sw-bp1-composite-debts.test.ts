@@ -213,7 +213,8 @@ describe('★SW-BP1 Inventory.add favorited 随行（GetItem_FillEmptyInventoryS
     expect(srcMatch(/favorited \? \{ favorited: true \} : \{\}/, '../src/items/Inventory.ts')).toBe(true);
     // 关包归位（dropItemCheck → GetOrDropItem 整对象回包 + RequestNewItem(base.Center)）
     expect(srcMatch(/inv\.add\(h\.id, h\.stack, h\.prefix, h\.placeStyle, false, false, !!h\.favorited\)/)).toBe(true);
-    expect(srcMatch(/this\.game\.spawnDrop\(p\.cx, p\.cy, hDef\?\.key \?\? '', left, 0, -2, h\.placeStyle\)/)).toBe(true);
+    // ★BJ326 速度翻转（undefined,undefined=随机掷）+★BJ390 词缀随行尾参
+    expect(srcMatch(/this\.game\.spawnDrop\(p\.cx, p\.cy, hDef\?\.key \?\? '', left, undefined, undefined, h\.placeStyle, h\.prefix\)/)).toBe(true);
     // 向导搜索面板归还（closeGuideSearch 同式）
     expect(srcMatch(/inv\.add\(pl\.id, pl\.stack, pl\.prefix, pl\.placeStyle, false, false, !!pl\.favorited\)/)).toBe(true);
     // 合成溢出/渔获两处玩家中心落点（RB5a 债②）

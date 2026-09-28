@@ -383,6 +383,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         // 「可视视口 chunk 全部落页」覆盖门(内部 3s 保险强制掀幕防永久黑屏);
         // 旗关表达式逐字保留=幕布语义零变化。
         enterGame(g);
+        // ★wbake 转正批（2026-09-28 用户拍板「可以转正」+保护令）：渲染期待冻结窗——
+        // wbake worker 路径下视口未 covered 期间世界模拟整体冻结（怪/弹幕/生成/伤害
+        // 全停,防怪物伤害/悬空掉落/误操作;语义=「渲染未完成则世界时间对该玩家暂停」,
+        // vanilla 无此机制=wbake 特有 UX）。开窗成功 → 加载页步骤切「正在渲染世界」
+        // （UX 要求①;进度条保持读档终态,窗≤3s）。游玩时长经 onEntryFreeze 回调同步
+        // 暂停/续走（冻结期不计费,SW-BJ5 口径）。旗关/worker 降级返回 false=零变化。
+        if (g.beginEntryFreeze(3000)) {
+          ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.RenderingWorld'), 1);
+        }
         const entryGate = WBAKE_ENABLED
           ? g.whenFirstPaint(4).then(() => g.whenViewportBaked(3000))   // 4 帧原语义不变,其后追加覆盖门
           : g.whenFirstPaint(4); // 4 帧:tintSkyTex 首烘(~2 帧)也纳入幕布下,切换帧必亮
@@ -390,6 +399,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           entryGate,
           new Promise((r) => setTimeout(r, 3000)),
         ]).then(() => {
+          g.endEntryFreeze();   // 冻结终态兜底（正常先由 viewportCovered 解除;幂等）
           ui.hideProgress();
           stopMenu();   // 撤菜单幕布+清 VUI 加载页(世界已上屏,零空窗)
           // SW-BN2 2026-09-07（用户令#3）：欢迎语键位标注改【活绑表驱动】——曾硬编码
@@ -406,6 +416,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           maybeDev(g); applyAppearance(g); maybeShowWelcomeAnnounce();
         });
       },
+      // ★wbake 转正批：冻结窗开/关沿 → 游玩时长计费暂停/续走（原版 UpdatePlayTimer
+      // 「非暂停不计」口径,PlayerFileData.cs:147-206;SW-BJ5 计费域）。三路解除
+      // （覆盖终态/3s 保险/幕布 race 兜底）全部经 Game.endEntryFreeze 单点触发。
+      // 已知边界：冻结窗内 visibilitychange 回前台会先把秒表续走（resume 幂等序）,
+      // 残窗 (<3s) 照计——与失焦折算语义同构,登记不修。
+      onEntryFreeze: (open) => { if (open) play.pause(Date.now()); else play.resume(Date.now()); },
       onInventoryChanged: () => { g.prefetchInvProjectiles(); g.prefetchInvPlaceableSheets(); ui.refreshAll(); },
       onCraftCursorGlow: (itemId) => ui.markCursorGlow(itemId),
       // 合成成品上光标（CraftItem_GrantItem Main.cs:43329）——余量由 Game 落包/掉落

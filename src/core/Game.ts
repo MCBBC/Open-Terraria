@@ -2752,6 +2752,11 @@ export function hairRestylePriceRaw(hairChanged: boolean, colorChanged: boolean,
 
 export interface GameCallbacks {
   onWorldReady: () => void;
+  /** ★wbake 转正批（2026-09-28）：入场渲染期待冻结窗开/关沿。open=true=窗开启
+   *  （mainFlow 侧据此暂停游玩时长计费,原版 UpdatePlayTimer「非暂停不计」口径,
+   *  PlayerFileData.cs:147-206;SW-BJ5 计费域）;false=窗解除（含覆盖终态/3s 保险/
+   *  mainFlow 兜底三路,全部经此单点回调）。旗关/降级不开窗=回调不触发。 */
+  onEntryFreeze?: (open: boolean) => void;
   onInventoryChanged: () => void;
   /** ★批III② 合成完成光标辉光（CraftingEffects.GlowPulse :18-23——成品上光标时
    *  _mouseItemGlow=1;本仓成品入包,UI 侧拾取同型即亮。可选=测试/无 UI 兼容 */
@@ -6879,11 +6884,11 @@ export class Game implements GameHooks {
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     // atlas 传入 = 烘焙懒取自注册(晚到自动重烘,见 ChunkCache 构造器注释)
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler, this.atlas);
-    // ★C4（2026-09-28）：烘焙 worker 装配（?wbake=1 灰度,缺省关=零装配,主线程
-    // 烘焙全链逐位现状）。装配后 flushDirty/get 的烘焙分派走 worker（进世界
-    // 「终态保险全量标脏」级联与游玩中重烘出主线程）;握手/请求失败自锁死降级
-    // （BakeClient.fail → 在飞重入脏队 + bakeClient=null）。旗关时此分支整体
-    // 不进,零行为面。
+    // ★C4（2026-09-28）：烘焙 worker 装配（当日灰度,★同日转正——WBAKE_ENABLED
+    // 缺省开,?wbake=0 逃生门关=零装配,主线程烘焙全链逐位现状）。装配后
+    // flushDirty/get 的烘焙分派走 worker（进世界「终态保险全量标脏」级联与游玩中
+    // 重烘出主线程）;握手/请求失败自锁死降级（BakeClient.fail → 在飞重入脏队 +
+    // bakeClient=null）。旗关时此分支整体不进,零行为面。
     if (WBAKE_ENABLED) {
       const client = new BakeClient(this.chunks, this.atlas!, this.assets.tileSheets);
       this.chunks.bakeClient = client;
@@ -8123,6 +8128,64 @@ export class Game implements GameHooks {
     if (!cc || cc.viewportCovered()) return Promise.resolve();
     return new Promise((res) => this._viewportWaits.push({ deadline: performance.now() + timeoutMs, res }));
   }
+
+  // ---- ★wbake 转正批：入场渲染期待冻结窗（2026-09-28 用户拍板「可以转正」+保护令）----
+  // 语义 =「渲染未完成则世界时间对该玩家暂停」的最小面：wbake worker 烘焙路径下,
+  // 视口未 covered 期间【世界模拟整体冻结】（怪/弹幕/生成/伤害全停）,游戏循环只跑
+  // 渲染+光照+烘焙派发——防怪物伤害/悬空掉落/误操作（用户明令）。设计决策登记：
+  // · vanilla 无此机制（wbake=0 同步烘焙在幕布下完成,无此窗）= 本仓 wbake 特有 UX;
+  // · 冻结实现 = frame() 侧跳过 fixedUpdate 累计器整段（非逐系统插门）,流逝实时间
+  //   每冻结帧丢弃（this.acc=0）——解冻零补步（≤5 钳补步也不发生）;
+  // · 光照不冻：tickLighting（fixedUpdate 尾段抽方法,单源复用）每冻结帧照跑
+  //   ensureRegion+衰减+compute——掀幕时世界已照亮,无「解冻全黑再渐亮」观感;
+  // · 冻结期时钟停：tickCount/w.clock/GTW/tileAnim.tick 全不推进,worker 烘焙快照
+  //   用冻结钟=自洽（BakeProtocol 无需特判）;游玩时长经 cb.onEntryFreeze 暂停计费;
+  // · 音频/UI 不冻（BGM/环境音斜坡/加载页动画照走——冻结感=「世界暂停」非卡死）;
+  // · 解除三路同源 endEntryFreeze：①终态=viewportCovered（与幕布覆盖门同源判定,
+  //   每冻结帧 entryFreezeTick 复查）②deadline 保险强制解冻（防烘焙异常永久冻结）
+  //   ③mainFlow 幕布 race 兜底（掀幕瞬间必已解冻）。解除时置 lighting.dirty=true
+  //   =解冻首拍 runFullCycle 同帧全重扫（vanilla 双 LightTiles 同帧出光对齐,防
+  //   解冻首帧黑窗）;解冻发生在 frame() 内冻结分支头部——同一帧即恢复完整
+  //   fixedUpdate,无空窗无爆发。
+  // · 旗关（?wbake=0）/worker 降级（bakeClient=null 主线程同步烘焙）不开窗=零变化。
+  private _entryFreeze: { deadline: number } | null = null;
+  /** 探针/测试断言面：冻结窗是否活跃 */
+  get entryFreezeActive(): boolean { return this._entryFreeze != null; }
+  /** 开窗（mainFlow onWorldReady 进世界后调用）。返回是否真的开窗：
+   *  旗关/无世界/无 chunk/worker 未装配（含降级后 bakeClient=null）=false。 */
+  beginEntryFreeze(timeoutMs = 3000): boolean {
+    if (!WBAKE_ENABLED) return false;   // 旗关零此窗（同步烘焙幕布下完成,无空白期待窗）
+    if (!this.world || !this.chunks || !this.chunks.bakeClient) return false;   // worker 路径未装配
+    if (this._entryFreeze) return true;
+    this._entryFreeze = { deadline: performance.now() + timeoutMs };
+    this.cb.onEntryFreeze?.(true);
+    return true;
+  }
+  /** 解冻（幂等）。dirty=true = 解冻首拍双 LightTiles 同帧出光对齐（见类注）。 */
+  endEntryFreeze(): void {
+    if (!this._entryFreeze) return;
+    this._entryFreeze = null;
+    this.lighting.dirty = true;
+    this.cb.onEntryFreeze?.(false);
+  }
+  /** 冻结帧维护（frame() 冻结分支调用,每渲染帧一次）：相机收敛+视域账本+烘焙
+   *  派发+光照,末位复查解除。animView 必须先于 viewportCovered 复查置位
+   *  （fixedUpdate 不跑,唯一写点在此——否则视域未置恒 covered=冻结秒退+幕布
+   *  提前掀开=入场空白病灶复现）。advanceAnim 刻意不跑（tileAnim.tick 冻结）。 */
+  private entryFreezeTick(): void {
+    const cc = this.chunks!;
+    const cam = this.camera;
+    cam.follow(this.player.cx, this.player.cy);
+    cam.easeZoom();
+    cam.clamp();
+    cc.flushDirty();
+    const hw = cam.viewW / 2 / cam.zoom + 2 * CHUNK * TILE, hh = cam.viewH / 2 / cam.zoom + 2 * CHUNK * TILE;
+    cc.animView = { x0: cam.x - hw, y0: cam.y - hh, x1: cam.x + hw, y1: cam.y + hh };
+    const viewTW = Math.ceil(cam.viewW / cam.zoom / TILE) + 2;
+    const viewTH = Math.ceil(cam.viewH / cam.zoom / TILE) + 2;
+    this.tickLighting(viewTW, viewTH);
+    if (cc.viewportCovered() || performance.now() >= this._entryFreeze!.deadline) this.endEntryFreeze();
+  }
   start() {
     if (this.running) return;
     this.running = true;
@@ -8269,7 +8332,15 @@ export class Game implements GameHooks {
     // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）
     (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
     let steps = 0;
-    if (!this.paused) {
+    if (this._entryFreeze) {
+      // ★wbake 转正批：入场渲染期待冻结窗（语义/设计决策见 _entryFreeze 声明处类注）。
+      // 世界模拟整段跳过（只跑渲染+光照+烘焙派发,entryFreezeTick 内自维护）;流逝
+      // 实时间每帧丢弃=解冻零补步。wheelDelta 同暂停窗补重锚（幻象切槽防滞留,
+      // FX51 同款理由——endFrame 不跑,增量会滞留到解冻首拍）。
+      this.acc = 0;
+      this.input.resetWheelAccumulators();
+      this.entryFreezeTick();
+    } else if (!this.paused) {
       // 配饰格难度门镜像（Inventory.gateExpert/gateMaster——旅程滑杆改档下帧生效）
       const invGates = this.player.inv;
       invGates.gateExpert = this.world.isExpert;
@@ -11377,6 +11448,170 @@ export class Game implements GameHooks {
     natureParticles.updateDrips(this.world.groundLevel * TILE);
     // 墓地环境云雾（AmbientWindSystem.Update：ZoneGraveyard 门 + 玩家中心 120×30 工作区）
     natureParticles.updateAmbientWind(!!this.scene?.zoneGraveyard, windSway.wind, player.cx, player.cy);
+    // ★wbake 转正批（2026-09-28）：光照段抽方法 tickLighting（下方）——冻结窗
+    //   entryFreezeTick 单源复用（渲染期待期光照继续收敛,掀幕已照亮）;原位调用
+    //   =fixedUpdate 每逻辑 tick 语义零变化。
+    this.tickLighting(viewTW, viewTH);
+
+    // ---- 粒子与飘字 ----
+    this.flushInvNotify();
+    // 锤整形闩维护（Player.poundRelease :46010 释放置位面——TryPoundingTile 消费、
+    // 瞄准非锤目标复位，见 tryMine 锤段）
+    if (this.input && !this.input.mouseHeld) this.hammerPoundRelease = true;
+    // 世界运行时演化（原版 WorldGen.UpdateWorld 1:1，见 src/world/evolution/）：
+    // 草蔓延/藤蔓/仙人掌/药草/苔藓/蛛网/贝壳/困难模式邪恶神圣蔓延+水晶叶绿
+    // ---- 肉山死亡困难模式转换分步驱动（PR-async）：≤2.5ms/tick 预算,
+    //      终态与同步版逐位一致（hardmode-async 测试锁）,瓦片渐进呈现为登记偏差。
+    //      ★位于 evolution.update() 之前——原版同 tick 序=死亡(实体段)→转换→
+    //      UpdateWorld 蔓延采样,首 tick 采样即见已转化瓦片 ----
+    // ---- 世界变换分步驱动（PR-async 终版,用户裁定 2026-09-03:期间确保 60fps,
+    //      完成后自动存档）——预算 8ms:帧 ≈ 8(job)+ ~5(游戏逻辑)+渲染 ≈ 14-15ms
+    //      < 16.7 ⇒ 转换期全程 ≥60fps;墙钟 ≈ 3-4s(渐进蔓延=设计的可视反馈);
+    //      单 job 异常 fail-open(shift 丢弃,半程状态保留) ----
+    if (this.worldJobs.length) {
+      const wjT0 = performance.now();
+      let completed = false;
+      try {
+        do { if (this.worldJobs[0].step()) { this.worldJobs.shift(); completed = true; } }
+        while (this.worldJobs.length && performance.now() - wjT0 < 8);
+        if (completed)
+          console.log(`[worldjobs] 世界变换全部完成:累计 job 段见逐帧日志,自动存档触发`);
+      } catch (e) {
+        // ★防御：generator 中途异常若放任,job 残留 ⇒ 逐帧重掷异常风暴(比原版
+        //   一次性同步失败更糟)。fail-open=丢弃 job 保留半程转化,世界可玩;
+        //   转换内容是幂等映射表,重进世界也不会再触发(F2 门)——如实登记即可。
+        console.error('[worldjobs] job aborted:', e);
+        this.worldJobs.shift();
+      }
+      // ★转换完成 → 自动存档（用户裁定）：cb.onAutoSave = 流程层 doSave(true)
+      //  (静默档,同原版 DoUpdate_AutoSave 语义)——此刻世界已是完整转化态
+      if (completed) this.cb.onAutoSave?.();
+    }
+    this.evolution.update();
+    this.torchGod.update();
+    // 火把神药水 buff 376 效果端（Player.UpdateBuffs :10594-10596 → TorchGodsFlavor
+    // :39529 每 tick 1/10 扫屏 → 弹 1084 自动转换异群系群系炬，2026-08-22 补 C 批）
+    if (this.player.buffs.has(BuffType.TorchGodPotion)) this.torchGodsFlavor();
+    // ---- 幸运度时序（Player.UpdateLuckFactors :28656-28670：瓢虫/钱币/碎镜衰减）----
+    const pl = this.player.luckState;
+    pl.lanternsUp = LanternNight.lanternsUp;   // RecalculateLuck :28679（每帧读边）
+    pl.update();
+    // ---- 吸血预算回充（Player.cs:24196-24216：专家 +0.5/t 钳 70；普通 +0.6/t 钳 80）----
+    // 专家判定读**世界难度** Main.expertMode（Main.cs:2775：GameMode 1/2）——
+    // 角色难度（软/中/硬核）只管死亡惩罚，不参与此处（曾错接 appearance.difficulty）
+    {
+      const expert = w.isExpert;
+      this.player.lifeSteal = Math.min(expert ? 70 : 80, this.player.lifeSteal + (expert ? 0.5 : 0.6));
+    }
+    // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
+    if (this.tickCount % 120 === 0 && this.entities.critters.length < 8) {
+      this.spawnCritter();
+    }
+    // 怪物碾压小动物：任意敌人身体接触即杀死（不视为交战）
+    if (this.tickCount % 4 === 0 && this.entities.critters.length) {
+      for (const cent of this.entities.critters) {
+        const c = cent as Enemy;
+        if (c.dead) continue;
+        for (const eent of this.entities.enemies) {
+          const e = eent as Enemy;
+          if (c.x < e.x + e.w && c.x + c.w > e.x && c.y < e.y + e.h && c.y + c.h > e.y) {
+            (c as unknown as import('../entities/projTargets').CritterLike).hurt(this);
+            break;
+          }
+        }
+      }
+    }
+    // （僵尸环境呻吟已退役 2026-08-18:自制版只认 legacy key 全不命中原版路径怪;
+    //  1:1 版 = Enemy.ambientSoundTick 的 CHATTER_SOUNDS 表,1/1000 帧逐怪掷骰）
+    // 火把火苗：视内点燃火把随机飘出火星（火点在格顶上方 20px 精灵的火焰处）
+    this.emitTorchSparks();
+    this.emitTileParticles();
+    // 粒子运动律 = 原版 Dust.UpdateDust(Dust.cs:423+):position += velocity,
+    // 重力/阻尼由发射参数(≈原版的按尘型设 noGravity/velocity 衰减)决定,
+    // 【零地形碰撞】——全文件 Collision.* 仅十余个特定尘型的分支条件,不进
+    // 物理步进。旧自制 bounce/settle 反弹停驻物理 2026-08-19 用户裁定退役
+    // ("直接对齐原版,不要自制");它曾是主线程 42.7% 自耗时冠军(trace 16:12,
+    // 逐粒子 isSolid)。下落碎屑穿地与原版一致(寿命 ~0.7s×重力 0.05 级只落
+    // 2-3 格,视觉与"落地"无差)
+    for (const p of this.particles) {
+      p.life--;
+      p.vx += p.ax ?? 0;        // 加速度通道（原版编排粒子 AccelerationPerFrame,先加速后位移）
+      p.vy += p.ay ?? 0;
+      p.vy += particleGravDefault(p); // ★F3 缺省重力契约（见函数注:ax/ay 在位=编排粒子全责轨迹）
+      if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; } // 原版阻尼 0.93/0.97 族,发射端按型给
+      p.x += p.vx;
+      p.y += p.vy;
+    }
+    // 就地压缩(2026-08 审计 G9:此前每 tick 两个 filter 新数组)
+    // ★IIIII248:死亡对象回池(压缩语义=compactByLife 同式保序就地收敛)
+    {
+      let w = 0;
+      const list = this.particles;
+      for (let r = 0; r < list.length; r++) {
+        const q = list[r];
+        if (q.life > 0) list[w++] = q;
+        else this.releaseParticle(q);
+      }
+      list.length = w;
+    }
+    // 飘字更新 1:1（CombatText.Update:131-206）。label 类（物品名）走旧轨迹;
+    // 数字类:alpha 0.6~1 闪烁 → 速度演化（dot 加重力,暴击双重衰减）→ 寿命内
+    // scale 生长（原版 Update :163-165 dot 与普通同链 +0.1×TargetScale 无封顶——
+    //  旧 0.5/t+0.8 封顶是 monospace 时代自造近似,位图字体对齐时一并归位）→
+    //  寿命归零后 scale 收缩至 0.1 才消亡（暴击每 t 先 +0.07 补偿=净 -0.03,收尾更久,且 alphaDir=-1 淡出）
+    let wn = 0;
+    // numActive（UpdateItemText :760-772）：num 在循环内逐个 ++、循环结束才写回 →
+    // 本帧 Update 读到的是【上一帧写回终值】= 上一帧帧首活跃数（含上一帧内死去
+    // 的条目——红队R3③帧窗修正:旧"本帧帧首幸存者"快照少算死者,重钉档位偏小）。
+    // 快照语义 = 帧尾写回本帧帧首计数、次帧头消费（与原版循环后写回时序等价）
+    const labelActiveCount = this.popupNumActivePrev;
+    let labelActiveNow = 0;
+    for (const d of this.dmgNumbers) if (d.label) labelActiveNow++;
+    this.popupNumActivePrev = labelActiveNow;
+    for (let di = 0; di < this.dmgNumbers.length; di++) {
+      const d = this.dmgNumbers[di];
+      if (d.label) {
+        // ---- PopupText.Update label 支（:651-748）1:1——本体抽为模块级纯函数
+        // popupLabelStep（文件尾,tests/popup-antioverlap.test.ts 直测）----
+        if (popupLabelStep(d, this.dmgNumbers, di, labelActiveCount)) this.dmgNumbers[wn++] = d;
+        continue;
+      }
+      d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.05;
+      if (d.alpha <= 0.6) d.alphaDir = 1;
+      if (d.alpha >= 1) { d.alpha = 1; d.alphaDir = -1; }
+      if (d.dot) d.vy += 0.15;
+      else { d.vy *= 0.92; if (d.crit) d.vy *= 0.92; }
+      d.vx = (d.vx ?? 0) * 0.93;
+      d.x += d.vx;
+      d.y += d.vy;
+      // 原版先 lifeTime-- 再判 ≤0（:162-163）:寿命 1→0 那一 tick 即进收缩期
+      d.life--;
+      if (d.life > 0) {
+        if (d.crit) d.rotation = (d.rotation ?? 0) + (d.vx < 0 ? 0.001 : -0.001);
+        if (d.dot) d.scale = Math.min(1, (d.scale ?? 0) + 0.1);
+        else d.scale = Math.min(1, (d.scale ?? 0) + 0.1);
+        this.dmgNumbers[wn++] = d;
+      } else {
+        d.scale = (d.scale ?? 1) - 0.1;
+        if (d.crit) { d.alphaDir = -1; d.scale += 0.07; }
+        if ((d.scale ?? 1) >= 0.1) this.dmgNumbers[wn++] = d; // 收缩期保留,scale<0.1 消亡
+      }
+    }
+    this.dmgNumbers.length = wn;
+
+    inp.endFrame();
+
+    // 挥剑命中判定（实体更新后）
+    this.postUpdate();
+  }
+
+  /** ★wbake 转正批（2026-09-28）：光照段自 fixedUpdate 抽方法（ensureRegion→衰减→
+   *  手持/buff/弹幕/掉落/实体/gore 点光→compute 全段原样搬移,单源双消费：
+   *  ①fixedUpdate 每逻辑 tick（原位零变化）②冻结窗 entryFreezeTick 每渲染帧——
+   *  渲染期待期光照必须继续收敛,掀幕时世界已照亮（防「解冻全黑再渐亮」）。 */
+  private tickLighting(viewTW: number, viewTH: number): void {
+    const w = this.world;
+    const player = this.player;
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
     // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
     // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
@@ -11784,157 +12019,6 @@ export class Game implements GameHooks {
       if (l && this.world.store.inBounds(l.tx, l.ty)) this.lighting.addLight(l.tx, l.ty, l.r, l.g, l.b);
     }
     this.lighting.compute(w.clock.dayFactor);
-
-    // ---- 粒子与飘字 ----
-    this.flushInvNotify();
-    // 锤整形闩维护（Player.poundRelease :46010 释放置位面——TryPoundingTile 消费、
-    // 瞄准非锤目标复位，见 tryMine 锤段）
-    if (this.input && !this.input.mouseHeld) this.hammerPoundRelease = true;
-    // 世界运行时演化（原版 WorldGen.UpdateWorld 1:1，见 src/world/evolution/）：
-    // 草蔓延/藤蔓/仙人掌/药草/苔藓/蛛网/贝壳/困难模式邪恶神圣蔓延+水晶叶绿
-    // ---- 肉山死亡困难模式转换分步驱动（PR-async）：≤2.5ms/tick 预算,
-    //      终态与同步版逐位一致（hardmode-async 测试锁）,瓦片渐进呈现为登记偏差。
-    //      ★位于 evolution.update() 之前——原版同 tick 序=死亡(实体段)→转换→
-    //      UpdateWorld 蔓延采样,首 tick 采样即见已转化瓦片 ----
-    // ---- 世界变换分步驱动（PR-async 终版,用户裁定 2026-09-03:期间确保 60fps,
-    //      完成后自动存档）——预算 8ms:帧 ≈ 8(job)+ ~5(游戏逻辑)+渲染 ≈ 14-15ms
-    //      < 16.7 ⇒ 转换期全程 ≥60fps;墙钟 ≈ 3-4s(渐进蔓延=设计的可视反馈);
-    //      单 job 异常 fail-open(shift 丢弃,半程状态保留) ----
-    if (this.worldJobs.length) {
-      const wjT0 = performance.now();
-      let completed = false;
-      try {
-        do { if (this.worldJobs[0].step()) { this.worldJobs.shift(); completed = true; } }
-        while (this.worldJobs.length && performance.now() - wjT0 < 8);
-        if (completed)
-          console.log(`[worldjobs] 世界变换全部完成:累计 job 段见逐帧日志,自动存档触发`);
-      } catch (e) {
-        // ★防御：generator 中途异常若放任,job 残留 ⇒ 逐帧重掷异常风暴(比原版
-        //   一次性同步失败更糟)。fail-open=丢弃 job 保留半程转化,世界可玩;
-        //   转换内容是幂等映射表,重进世界也不会再触发(F2 门)——如实登记即可。
-        console.error('[worldjobs] job aborted:', e);
-        this.worldJobs.shift();
-      }
-      // ★转换完成 → 自动存档（用户裁定）：cb.onAutoSave = 流程层 doSave(true)
-      //  (静默档,同原版 DoUpdate_AutoSave 语义)——此刻世界已是完整转化态
-      if (completed) this.cb.onAutoSave?.();
-    }
-    this.evolution.update();
-    this.torchGod.update();
-    // 火把神药水 buff 376 效果端（Player.UpdateBuffs :10594-10596 → TorchGodsFlavor
-    // :39529 每 tick 1/10 扫屏 → 弹 1084 自动转换异群系群系炬，2026-08-22 补 C 批）
-    if (this.player.buffs.has(BuffType.TorchGodPotion)) this.torchGodsFlavor();
-    // ---- 幸运度时序（Player.UpdateLuckFactors :28656-28670：瓢虫/钱币/碎镜衰减）----
-    const pl = this.player.luckState;
-    pl.lanternsUp = LanternNight.lanternsUp;   // RecalculateLuck :28679（每帧读边）
-    pl.update();
-    // ---- 吸血预算回充（Player.cs:24196-24216：专家 +0.5/t 钳 70；普通 +0.6/t 钳 80）----
-    // 专家判定读**世界难度** Main.expertMode（Main.cs:2775：GameMode 1/2）——
-    // 角色难度（软/中/硬核）只管死亡惩罚，不参与此处（曾错接 appearance.difficulty）
-    {
-      const expert = w.isExpert;
-      this.player.lifeSteal = Math.min(expert ? 70 : 80, this.player.lifeSteal + (expert ? 0.5 : 0.6));
-    }
-    // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
-    if (this.tickCount % 120 === 0 && this.entities.critters.length < 8) {
-      this.spawnCritter();
-    }
-    // 怪物碾压小动物：任意敌人身体接触即杀死（不视为交战）
-    if (this.tickCount % 4 === 0 && this.entities.critters.length) {
-      for (const cent of this.entities.critters) {
-        const c = cent as Enemy;
-        if (c.dead) continue;
-        for (const eent of this.entities.enemies) {
-          const e = eent as Enemy;
-          if (c.x < e.x + e.w && c.x + c.w > e.x && c.y < e.y + e.h && c.y + c.h > e.y) {
-            (c as unknown as import('../entities/projTargets').CritterLike).hurt(this);
-            break;
-          }
-        }
-      }
-    }
-    // （僵尸环境呻吟已退役 2026-08-18:自制版只认 legacy key 全不命中原版路径怪;
-    //  1:1 版 = Enemy.ambientSoundTick 的 CHATTER_SOUNDS 表,1/1000 帧逐怪掷骰）
-    // 火把火苗：视内点燃火把随机飘出火星（火点在格顶上方 20px 精灵的火焰处）
-    this.emitTorchSparks();
-    this.emitTileParticles();
-    // 粒子运动律 = 原版 Dust.UpdateDust(Dust.cs:423+):position += velocity,
-    // 重力/阻尼由发射参数(≈原版的按尘型设 noGravity/velocity 衰减)决定,
-    // 【零地形碰撞】——全文件 Collision.* 仅十余个特定尘型的分支条件,不进
-    // 物理步进。旧自制 bounce/settle 反弹停驻物理 2026-08-19 用户裁定退役
-    // ("直接对齐原版,不要自制");它曾是主线程 42.7% 自耗时冠军(trace 16:12,
-    // 逐粒子 isSolid)。下落碎屑穿地与原版一致(寿命 ~0.7s×重力 0.05 级只落
-    // 2-3 格,视觉与"落地"无差)
-    for (const p of this.particles) {
-      p.life--;
-      p.vx += p.ax ?? 0;        // 加速度通道（原版编排粒子 AccelerationPerFrame,先加速后位移）
-      p.vy += p.ay ?? 0;
-      p.vy += particleGravDefault(p); // ★F3 缺省重力契约（见函数注:ax/ay 在位=编排粒子全责轨迹）
-      if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; } // 原版阻尼 0.93/0.97 族,发射端按型给
-      p.x += p.vx;
-      p.y += p.vy;
-    }
-    // 就地压缩(2026-08 审计 G9:此前每 tick 两个 filter 新数组)
-    // ★IIIII248:死亡对象回池(压缩语义=compactByLife 同式保序就地收敛)
-    {
-      let w = 0;
-      const list = this.particles;
-      for (let r = 0; r < list.length; r++) {
-        const q = list[r];
-        if (q.life > 0) list[w++] = q;
-        else this.releaseParticle(q);
-      }
-      list.length = w;
-    }
-    // 飘字更新 1:1（CombatText.Update:131-206）。label 类（物品名）走旧轨迹;
-    // 数字类:alpha 0.6~1 闪烁 → 速度演化（dot 加重力,暴击双重衰减）→ 寿命内
-    // scale 生长（原版 Update :163-165 dot 与普通同链 +0.1×TargetScale 无封顶——
-    //  旧 0.5/t+0.8 封顶是 monospace 时代自造近似,位图字体对齐时一并归位）→
-    //  寿命归零后 scale 收缩至 0.1 才消亡（暴击每 t 先 +0.07 补偿=净 -0.03,收尾更久,且 alphaDir=-1 淡出）
-    let wn = 0;
-    // numActive（UpdateItemText :760-772）：num 在循环内逐个 ++、循环结束才写回 →
-    // 本帧 Update 读到的是【上一帧写回终值】= 上一帧帧首活跃数（含上一帧内死去
-    // 的条目——红队R3③帧窗修正:旧"本帧帧首幸存者"快照少算死者,重钉档位偏小）。
-    // 快照语义 = 帧尾写回本帧帧首计数、次帧头消费（与原版循环后写回时序等价）
-    const labelActiveCount = this.popupNumActivePrev;
-    let labelActiveNow = 0;
-    for (const d of this.dmgNumbers) if (d.label) labelActiveNow++;
-    this.popupNumActivePrev = labelActiveNow;
-    for (let di = 0; di < this.dmgNumbers.length; di++) {
-      const d = this.dmgNumbers[di];
-      if (d.label) {
-        // ---- PopupText.Update label 支（:651-748）1:1——本体抽为模块级纯函数
-        // popupLabelStep（文件尾,tests/popup-antioverlap.test.ts 直测）----
-        if (popupLabelStep(d, this.dmgNumbers, di, labelActiveCount)) this.dmgNumbers[wn++] = d;
-        continue;
-      }
-      d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.05;
-      if (d.alpha <= 0.6) d.alphaDir = 1;
-      if (d.alpha >= 1) { d.alpha = 1; d.alphaDir = -1; }
-      if (d.dot) d.vy += 0.15;
-      else { d.vy *= 0.92; if (d.crit) d.vy *= 0.92; }
-      d.vx = (d.vx ?? 0) * 0.93;
-      d.x += d.vx;
-      d.y += d.vy;
-      // 原版先 lifeTime-- 再判 ≤0（:162-163）:寿命 1→0 那一 tick 即进收缩期
-      d.life--;
-      if (d.life > 0) {
-        if (d.crit) d.rotation = (d.rotation ?? 0) + (d.vx < 0 ? 0.001 : -0.001);
-        if (d.dot) d.scale = Math.min(1, (d.scale ?? 0) + 0.1);
-        else d.scale = Math.min(1, (d.scale ?? 0) + 0.1);
-        this.dmgNumbers[wn++] = d;
-      } else {
-        d.scale = (d.scale ?? 1) - 0.1;
-        if (d.crit) { d.alphaDir = -1; d.scale += 0.07; }
-        if ((d.scale ?? 1) >= 0.1) this.dmgNumbers[wn++] = d; // 收缩期保留,scale<0.1 消亡
-      }
-    }
-    this.dmgNumbers.length = wn;
-
-    inp.endFrame();
-
-    // 挥剑命中判定（实体更新后）
-    this.postUpdate();
   }
 
   // ================= 物品使用：挖掘 / 放置 / 攻击 / 使用 =================

@@ -169,8 +169,8 @@ describe('BJ326-④ 静态闸（缺省翻转钉死+固定面 keep-list census）
       .map((l) => l.replace(/\/\/.*$/, ''))
       .filter((l) => l.includes('spawnDrop('));
 
-  it('spawnDrop 签名=vx?/vy?（缺省 undefined→随机掷,旧 (0,-2) 缺省翻转钉死）', () => {
-    expect(game).toMatch(/spawnDrop\(x: number, y: number, itemKey: string, count = 1, vx\?: number, vy\?: number, placeStyle\?: number\)/);
+  it('spawnDrop 签名=vx?/vy?（缺省 undefined→随机掷,旧 (0,-2) 缺省翻转钉死;★BJ390 尾参 placeStyle?+prefix? 顺延钉死）', () => {
+    expect(game).toMatch(/spawnDrop\(x: number, y: number, itemKey: string, count = 1, vx\?: number, vy\?: number, placeStyle\?: number,\s*\n\s*prefix\?: number\)/);
     expect(game).not.toMatch(/spawnDrop\(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2/);
     expect(game).toContain('dropVelocity(new RNG(');   // 掷块在位
     expect(game).toContain('drop.x = x - drop.w / 2'); // 件 2 中心锚回退在位
@@ -189,8 +189,8 @@ describe('BJ326-④ 静态闸（缺省翻转钉死+固定面 keep-list census）
     expect(lines.filter((l) => /,\s*0,\s*-1\)/.test(l)).length).toBe(0);
   });
 
-  it('UI 丢弃面=DropSelectedItem 显式速度保持（Player.cs:5191 (4·dir+vel.X,-2)）', () => {
+  it('UI 丢弃面=DropSelectedItem 显式速度保持（Player.cs:5191 (4·dir+vel.X,-2);★BJ390 词缀随行尾参）', () => {
     const ui = readFileSync('src/ui/UI.ts', 'utf8');
-    expect(ui).toMatch(/p\.facing \* 4 \+ p\.vx, -2\)/);
+    expect(ui).toMatch(/p\.facing \* 4 \+ p\.vx, -2, undefined, this\.heldStack\.prefix\)/);
   });
 });

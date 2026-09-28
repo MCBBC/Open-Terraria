@@ -53,6 +53,7 @@ export interface GameHooks {
   grantInstancedLoot?(
     targetSlot: number, x: number, y: number, itemKey: string,
     stack: number, vx: number, vy: number,
+    prefix?: number,   // ★BJ390：本地实例词缀随件（module14 远端臂无词缀域=登记债）
   ): void;
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];

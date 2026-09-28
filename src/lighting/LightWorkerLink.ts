@@ -29,14 +29,18 @@ export const lightWorkerFlag = (() => {
   } catch { return true; }
 })();
 
-/** ★C9d2 二期快照差量化（2026-09-28）：缺省关——用户明令灰度。?lightdelta=1 显式启用
- *  （仅 lightworker 开时有消费方;旗关时引擎无链路,本旗无效果）。
- *  关:全量切片 transferable+回池（Layer 1,杀结构克隆+分配churn）;
+/** ★C9d2 二期快照差量化（2026-09-28）：★转正（2026-09-29 用户拍板）缺省开——
+ *  位等价证据（11 帧演化场景 worker 重建切片≡fresh buildSlice 13 通道逐位+光照输出
+ *  逐位）+快照 24.4MB/s→0.6MB/s（41×）+主线程残部 200µs→~0.01ms。?lightdelta=0=
+ *  逃生门（回全量切片 transferable 链,Layer 1 仍生效）。仅 lightworker 开时有消费方;
+ *  旗关时引擎无链路,本旗无效果。关:全量切片 transferable+回池（Layer 1）;
  *  开:差量帧免 416KB 切片（写日志+暴露带编码,全量锚帧结构克隆留影子）。
- *  设计/判据链见 LightWorkerProtocol「C9 二期」段与探针 _c9d2-light-residual-probe。 */
+ *  设计/判据链见 LightWorkerProtocol「C9 二期」段与探针 _c9d2-light-residual-probe。
+ *  node/worker 上下文恒关（document 判死,fork bomb 判例家族）。 */
 export const lightDeltaFlag = (() => {
   try {
-    return typeof document !== 'undefined' && new URLSearchParams(location.search).get('lightdelta') === '1';
+    if (typeof document === 'undefined') return false;
+    return new URLSearchParams(location.search).get('lightdelta') !== '0';
   } catch { return false; }
 })();
 

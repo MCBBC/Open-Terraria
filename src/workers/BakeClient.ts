@@ -1,4 +1,5 @@
-// ★C4 烘焙 worker 客户端（2026-09-28;?wbake=1 灰度,缺省关,禁转正）。
+// ★C4 烘焙 worker 客户端（2026-09-28;当日灰度,★同日转正——用户拍板「可以转正」,
+// 见下方 WBAKE_ENABLED 与 tests/wbake-promotion.test.ts 旗面锁）。
 //
 // 职责：spawn/握手 BakeWorker、随包烘焙素材（ImageBitmap 副本,transfer）、
 // 快照请求派发（flushDirty/get 支路调用,按 chunk key 去重+bump）、回包消费
@@ -20,18 +21,22 @@ import { buildBakeSnapshot, snapshotBuffers, type BakeWorkerResponse } from './B
 // createImageBitmap 为浏览器全局（worker/主线程均可用;node 测试环境 undefined
 // → attach 探测失败=降级主线程路径）。
 
-/** ?wbake=1 显式开启（缺省关——用户明令:候补清单旗灰度,确认+性能评估后才转正）。
+/** ★wbake 转正（2026-09-28 用户拍板「可以转正」）：缺省【开】;?wbake=0 逃生门
+ *  显式关（旗关=主线程同步烘焙全链零变化,首烘在幕布下完成,无空白期待窗）。
+ *  其余旗值（'1'/空/未知）一律开。node/测试环境恒关判死（无 location,worker
+ *  路径不可达,语义与灰度期一致）。
  *  探针断言面:window.__swBakeFlags.enabled（只读）。 */
 export const WBAKE_ENABLED = (() => {
   try {
-    if (typeof location === 'undefined') return false;   // node/测试环境:缺省关
+    if (typeof location === 'undefined') return false;   // node/测试环境:恒关判死
+    const flag = new URLSearchParams(location.search).get('wbake') ?? '';
     if (typeof window !== 'undefined') {
       (window as unknown as { __swBakeFlags?: { enabled: boolean; flag: string } }).__swBakeFlags = {
         get enabled() { return WBAKE_ENABLED; },
-        flag: new URLSearchParams(location.search).get('wbake') ?? '',
+        flag,
       };
     }
-    return new URLSearchParams(location.search).get('wbake') === '1';
+    return flag !== '0';                                 // 逃生门:?wbake=0
   } catch { return false; }
 })();
 
