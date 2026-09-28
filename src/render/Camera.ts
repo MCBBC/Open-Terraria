@@ -43,8 +43,17 @@ export class Camera {
   constructor(public worldW: number, public worldH: number) {}
 
   follow(targetX: number, targetY: number) {
-    this.x += (targetX - this.x) * 0.15;
-    this.y += (targetY - this.y) * 0.15;
+    // ★BJ400（2026-09-29）pan 硬锚分解（BJ397 定谳:旧码缓动吃 CurrentPan 污染位,
+    //  稳态偏移 = target/0.15 ≈ 6.67× 原版——原版相机=玩家锚+CurrentPan【硬锚叠加】
+    //  Main.cs:63541 PlayerFocusedScreenPosition,pan 本体动力学由 UpdateCameraPan
+    //  :63634-63669 的 36px/t MoveTowards 承载,不经任何缓动）。本点先把 x/y 分解
+    //  出无 pan 锚（x−panX）再缓动,follow 后 x=纯锚;CurrentPan 由 Game 相机段
+    //  advancePan 推进后经施加点重组合（x+=panX）。pan=0 时 bx=x 逐位恒等
+    //  =99% 帧零行为差。锚缓动 0.15 本身=本仓登记自创模型（BJ103-A1b 窗外维持）。
+    const bx = this.x - this.panX;
+    const by = this.y - this.panY;
+    this.x = bx + (targetX - bx) * 0.15;
+    this.y = by + (targetY - by) * 0.15;
   }
 
   clamp() {
@@ -61,7 +70,11 @@ export class Camera {
   // Main.cs:63634-63675/1458 :63640-63681,两版逐字同文——本轮 sed 区间 diff 实证）。
   // CurrentPan（Main.cs:554）= 玩家受控镜头平移的持续偏移量（世界 px）,每 tick 以
   // Utils.MoveTowards（Utils.cs:1862-1870）趋近 targetPan;施加点 = screenPosition 组合
-  // （PlayerFocusedScreenPosition Main.cs:63523）。本仓 Camera 每世界重建
+  // （PlayerFocusedScreenPosition Main.cs:63523）。
+  // ★BJ400（2026-09-29）：组合语义收紧为【硬锚叠加】——x/y 在施加点前必须是无 pan
+  // 纯锚（follow/advanceTeleportLerp 内部分解）,施加点（Game 相机段 x+=panX）重组合,
+  // 稳态偏移=targetPan 逐像素同原版;旧「缓动吃 pan 污染位」模型稳态 6.67× 已废
+  // （BJ397 定谳）。本仓 Camera 每世界重建
   // （Game fixedUpdate 构造点）= WorldGen.cs:6952 CurrentPan=Zero 的进图复位同相。
   panX = 0; panY = 0;
   /** maxPanSpeed 玩家受控档恒值（Main.cs:63652 `float maxPanSpeed = 36f`;手柄支
@@ -131,14 +144,19 @@ export class Camera {
       this.teleportLerp += ((this.teleportLerpTimer - this.teleportLerpTimeToggle) / 3 + 1) * 0.001;
       if (this.teleportLerp > 1) this.teleportLerp = 1;
     }
-    if (Math.hypot(hardX - this.x, hardY - this.y) - playerSpeed < 0.25) {
+    // ★BJ400：与 follow 同款 pan 分解——滑行窗若带非零 CurrentPan（滑行期持镜 pan
+    //  通道仍活）,旧码 pan 经 lerp 缓动累积;分解后本点产出纯锚,pan 由施加点统一
+    //  重组合（pan=0 时逐位恒等,bj103-a1b 既有断言域）
+    const bx = this.x - this.panX;
+    const by = this.y - this.panY;
+    if (Math.hypot(hardX - bx, hardY - by) - playerSpeed < 0.25) {
       this.teleportLerp = 0;
       this.x = hardX;
       this.y = hardY;
       return;
     }
-    this.x += (hardX - this.x) * this.teleportLerp;
-    this.y += (hardY - this.y) * this.teleportLerp;
+    this.x = bx + (hardX - bx) * this.teleportLerp;
+    this.y = by + (hardY - by) * this.teleportLerp;
   }
 
   /** CameraModifierStack（Main.instance.CameraModifiers，Terraria.Graphics.CameraModifiers

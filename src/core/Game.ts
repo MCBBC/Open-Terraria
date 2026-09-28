@@ -17,7 +17,7 @@ import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
 import { countDefenderMedalsAcross, spendDefenderMedalsAcross, defenderMedalSavingsOf } from '../stats/DefenderMedals';
 import { findExoticPlantSlot, rollDyeTraderReward } from '../stats/DyeTrade';
-import { PREFIX_NAMES, rollablePrefixes, rollPrefix, prefixStat, prefixValueMul, formatPrefixedName, rollNaturalPrefixForVid } from '../data/vanillaPrefixes';
+import { PREFIX_NAMES, rollablePrefixes, prefixStat, prefixValueMul, formatPrefixedName, rollNaturalPrefixForVid, rollReforgePrefix, prefixTryGetFailsForItem } from '../data/vanillaPrefixes';
 import { TILE, CHUNK, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -11554,7 +11554,11 @@ export class Game implements GameHooks {
     // 等价承载（:10570 注,不双平滑）→ CurrentPan 仅玩家受控支置位。
     if (this.camera.advancePan(targetPanX, targetPanY)) this.blackFadeCameraTeleport();
     // CurrentPan 施加（PlayerFocusedScreenPosition :63523 组合项;follow 已重锚玩家,
-    // 叠加在 clamp 之前——原版 ClampScreenPositionToWorld :63615 亦在组合之后）
+    // 叠加在 clamp 之前——原版 ClampScreenPositionToWorld :63615 亦在组合之后）。
+    // ★BJ400（2026-09-29）：本点=x=纯锚+CurrentPan 的【硬锚重组合】——follow/
+    // advanceTeleportLerp 已内部分解出无 pan 锚（Camera.ts BJ400 注）,故叠加不
+    // 再经 0.15 缓动回吸累积（旧模型稳态偏移=target/0.15≈6.67× 原版,BJ397 定谳;
+    // 修后稳态=targetPan 逐像素,pan 动力学=36px/t MoveTowards 原版承载）
     this.camera.x += this.camera.panX;
     this.camera.y += this.camera.panY;
     this.camera.clamp();
@@ -23858,8 +23862,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // 战利品五档（首破固定 0 档;item id 走 VANILLA_ITEM_KEY_BY_ID 反查）
     const POOLS: Record<'orb' | 'heart', number[]> = {
-      orb: [96, 64, 162, 115, 111],        // 腐化：火枪/暗影珠/堕落荆棘/刺球/阳炎之怒
-      heart: [800, 1256, 802, 3062, 1290], // 猩红：下作恶者/猩红之心/腐叉/…
+      orb: [96, 64, 162, 115, 111],        // 腐化：火枪 96/毒荆棘 Vilethorn 64/血腥獠牙 Ball O' Hurt 162/暗影珠(pet) 115/星辰能量带 111
+      heart: [800, 1256, 802, 3062, 1290], // 猩红：葬送者 Undertaker 800/猩红法杖 Crimson Rod 1256/腐烂之叉 802/猩红之心(pet) 3062/恐慌项链 1290
     };
     const first = !this.world.flags.shadowOrbSmashed;
     const roll = first ? 0 : Math.floor(Math.random() * 5);   // Main.rand.Next(5)
@@ -23872,8 +23876,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  mercy→TryGet 四失败门重进环,Item.cs:523-556=rollNaturalPrefixForVid 同锚）。
     //  珠/心是 Tile 被打碎 → CheckOrb 专段【物品】掉落（非 KillTile_DropItems 通用
     //  面;31 的 tile 侧 GetItemDrops 无份）——词缀掷在 smashOrbHeart 本面接（BJ394
-    //  通用面接线不覆盖此处）。凝胶 97×100 系七参 NewItem（:54720/:54750,无 prefix
-    //  参=恒 0）→ 本仓同不掷。
+    //  通用面接线不覆盖此处）。池内词缀域实测：96/800 枪弓池、64/1256 魔法池、
+    //  802/162 近战池、111/1290 配饰池 19（isPrefixableAccessory 位）、115/3062
+    //  宠物无池=roll 恒 0（原版 Prefix null 池提前 false 同相）。
+    //  火枪弹 97×100 系七参 NewItem（:54720/:54750,无 prefix 参=恒 0）→ 本仓同不掷。
     let prefix: number | undefined;
     if (key) {
       const iid = ITEM_BY_KEY[key];
@@ -23883,7 +23889,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, 1, undefined, undefined, undefined, prefix);
     }
     if (roll === 0) {
-      const gelKey = VANILLA_ITEM_KEY_BY_ID[97];               // 凝胶 ×100（genRand.Next(100,101)）
+      const gelKey = VANILLA_ITEM_KEY_BY_ID[97];               // 火枪弹 Musket Ball ×100（genRand.Next(100,101)）
       if (gelKey) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, gelKey, 100);
     }
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
@@ -40789,7 +40795,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (placeStyle !== undefined) drop.placeStyle = placeStyle;
     // ★BJ390（2026-09-28）：词缀随件（NewItem prefix 参 Item.cs:49654 → item.Prefix(prefix)
     //   :49735,世界件 inner.prefix 同域）——NPC 掉落自然掷/背包持物丢弃/MP msg21 全态覆写
-    //   三面同参落地;词缀域内合成/重铸面 rollPrefix 通道不在此（见 vanillaCraft/doReforge）
+    //   三面同参落地;词缀域内合成/重铸面 rollPrefix 通道不在此（合成=vanillaCraft
+    //   rollNaturalPrefixForVid;重铸=doReforge rollReforgePrefix,★BJ400 迁移）
     if (prefix) drop.prefix = prefix;
     // 法力斗篷之星 4143 = pickup 类(拾取 +50 魔力 + ManaHeat,Player.cs:35357-35371)
     //   （dropVid=入参 key 的 vid;节日替代仅 58/184 两 vid 触发,替代后两侧判值均≠4143,复用同相）
@@ -47998,14 +48005,27 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     if (!pool || !pool.length) return -1;
     const cost = this.reforgeCost(item);
     if (this.coinsOwned() < cost || !this.spendCopper(cost)) return -1;
+    // ★BJ400（2026-09-29）重铸掷补 TryGet 门（BJ394 登记债清偿）：原版 Prefix(-2)
+    //   重铸保底面同走 TryGet 门（Item.cs:523-556 while 环 -2 臂——:529 rolledPrefix
+    //   恒复位 -1 → :532 RollAPrefix → :1067-1079 TryGet 四失败门掷废重进环 +
+    //   :551-554 rolled==0 重掷）——旧 rollPrefix(pool,true) 无门=0kb 武器（吹管/
+    //   星炮/雪球炮族）可掷 kb 假词缀。stat 读法与 BJ390 rollNaturalPrefixForVid
+    //   同源（itemCombat 面板=ResetPrefix 后基面板;本仓 item 域无词缀增量模型同相）
+    const st = itemCombat(vid);
+    const stat = st
+      ? { damage: st.damage ?? 0, useAnimation: st.useAnimation ?? 0, mana: st.mana ?? 0, kb: st.knockBack ?? 0 }
+      : undefined;
+    item.prefix = rollReforgePrefix(pool, Math.random, stat);
     // 最优档判定（Item.cs:505-576 Prefix(-2,out rolledPrefixIsTopTier)）：
-    //   num = BestPrefixValue()（Item.cs:1083-1099 可掷池内 value 乘积最大值）、
-    //   num2 = 掷中词缀的 value 乘积（TryGetPrefixStatMultipliersForItem 尾公式），
-    //   rolledPrefixIsTopTier = num2 == num。本仓 prefixValueMul
-    //   （vanillaPrefixes.ts:39-43）与原版尾部公式同构——同一词缀 id 同式计算,
-    //   浮点恒等使 === 判定成立（数据面自带 tier 档位,无需稀有度色近似）
-    const bestVal = pool.reduce((mx, pfx) => Math.max(mx, prefixValueMul(pfx)), 0);
-    item.prefix = rollPrefix(pool, true);
+    //   num = BestPrefixValue()（Item.cs:1083-1099 可掷池内【TryGet 通过者】的 value
+    //   乘积最大值——:1094 TryGet 失败不进 Max,★过滤不可省:0kb 武器的 kb 词缀
+    //   乘积再高也掷不出,不滤则 topTier 恒 false）、num2 = 掷中词缀的 value 乘积
+    //   （TryGetPrefixStatMultipliersForItem 尾公式），rolledPrefixIsTopTier =
+    //   num2 == num。本仓 prefixValueMul（vanillaPrefixes.ts:39-43）与原版尾部
+    //   公式同构——同一词缀 id 同式计算,浮点恒等使 === 判定成立（数据面自带
+    //   tier 档位,无需稀有度色近似）
+    const bestVal = pool.reduce((mx, pfx) =>
+      prefixTryGetFailsForItem(pfx, stat) ? mx : Math.max(mx, prefixValueMul(pfx)), 0);
     const topTier = prefixValueMul(item.prefix) === bestVal;
     if (out) out.topTier = topTier;
     if (topTier) {

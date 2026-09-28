@@ -4856,6 +4856,17 @@ export class Player extends Entity {
       // 初速掷骰用独立标记：Game.damagePlayer 接触死路径会先直置 dead（Game.ts:15360）
       // ——不能拿 !dead 当 init 门；首 tick 只掷不推进（原版 KillMe 在 Hurt 中段置 dead，
       // 物理自下一 tick UpdateDead 起）
+      // ★BJ400（2026-09-29）硬核幽灵自由飞行面（BJ397 邻接发现反向偏差立案）：
+      //   原版 Player.Update :24938-24942 `if (ghost) { Ghost(); return; }` 先于
+      //   dead 分支 :24943——ghost=true 起 UpdateDead 整体停摆（散飞冻结）,Ghost()
+      //   （Player.cs:6714-6850）接管=自由飞行。旧码 hp≤0 早退贯穿 ghost 相=幽灵
+      //   冻结原地（仅 ghostFrame 帧动画）=反向偏差。isGhostPhase=dead∧difficulty 2
+      //   ∧respawnTimer≤0（hardcore 不重生,Game.respawnPlayer hardcoreDead 拒）,
+      //   计时到点即入幽灵相。
+      if (this.isGhostPhase(game.world)) {
+        this.ghostFlight(game);
+        return;
+      }
       if (!this._deathPartsInit) {
         this._deathPartsInit = true;
         this.initDeathParts();          // KillMe :38287-38298 三段初速
@@ -10333,7 +10344,9 @@ export class Player extends Entity {
 
   /** UpdateDead（Player.cs:16878-16888）：三段 pos += vel / rot += vel.X×0.1（翻滚）/
    *  vel.Y += 0.1（重力）/ vel.X ×= 0.99（水平阻尼）。immuneAlpha 的 +2 钳 255 由
-   *  Game 死亡分支执行（同一段逻辑，不重复）。ghost 态帧推进（Ghost() :6444-6450） */
+   *  Game 死亡分支执行（同一段逻辑，不重复）。★BJ400：ghost 态帧推进块迁入下方
+   *  ghostFlight（原版该推进在 Ghost() :6802-6818 内,UpdateDead 无此链;ghost 相
+   *  起 UpdateDead 整体停摆=本函数不再被调） */
   private updateDeathParts(game: GameHooks): void {
     for (const seg of [this.deadParts.head, this.deadParts.body, this.deadParts.legs]) {
       seg.px += seg.vx;
@@ -10342,12 +10355,69 @@ export class Player extends Entity {
       seg.vy += 0.1;
       seg.vx *= 0.99;
     }
-    if (this.isGhostPhase(game.world)) {
-      if (++this.ghostFrameCounter >= 8) {
-        this.ghostFrameCounter = 0;
-        this.ghostFrame = (this.ghostFrame + 1) % 4;
-      }
+  }
+
+  /** Ghost()（Player.cs:6714-6850）1:1——硬核幽灵自由飞行（Update :24938 ghost 分支
+   *  先于 dead 分支接管,UpdateDead 停摆；BJ400 落刀）。
+   *  移动语义：controlUp||controlJump 上升 / controlDown 下降 / controlLeft∧!Right、
+   *  controlRight∧!Left 平移（独立左右电平,同按=阻尼臂——inputLeft/inputRight
+   *  单源,Wisp 211 同款）；反向 0.9 阻尼、加速度 0.2、速度帽 7、死区 |v|纵≤0.1/
+   *  横≤0.2 内归零。`position += velocity` 无 tile 碰撞（穿墙=原版本相）;
+   *  UpdateNetOffset(fallThrough:true,ignorePlats:true)（:6849）=联机净位域不移植。
+   *  世界界钳 640px（:6821-6847）：X 越界 vx=0；顶界 vy<−0.1 → −0.1（慢漂 quirk
+   *  照抄,非归零）；底界 vy=0。ghostFrameCounter 每 8t 推进 ghostFrame %4
+   *  （:6802-6818,自 updateDeathParts 迁入）。immune=false/immuneAlpha=0/
+   *  ResetEffects/ResetVisibleAccessories（:6717-6720）=效果/绘制面,本仓死亡相
+   *  已冻结等效;immuneAlpha 本仓另承载死亡 UI 淡入驱动,清零会盲死亡文字
+   *  =登记偏离不照抄（Game 死亡分支 ramp 保持）。spectating=-1（:6716）由
+   *  canDeathSpectate 排 ghost 相 + handleSpectatingControls 收观战等效承载。 */
+  private ghostFlight(game: GameHooks): void {
+    const num = 7, num2 = 0.2;   // 速度帽/加速度（:6731-6732）
+    const up = this.inputUp || this.inputJump;
+    const down = this.inputDown;
+    const left = this.inputLeft, right = this.inputRight;
+    if (up) {                                              // :6734-6745
+      if (this.vy > 0) this.vy *= 0.9;
+      this.vy -= num2;
+      if (this.vy < -num) this.vy = -num;
+    } else if (down) {                                     // :6746-6754
+      if (this.vy < 0) this.vy *= 0.9;
+      this.vy += num2;
+      if (this.vy > num) this.vy = num;
+    } else if (this.vy < -0.1 || this.vy > 0.1) {          // :6755-6758
+      this.vy *= 0.9;
+    } else {
+      this.vy = 0;                                         // :6759-6761
     }
+    if (left && !right) {                                  // :6762-6772
+      if (this.vx > 0) this.vx *= 0.9;
+      this.vx -= num2;
+      if (this.vx < -num) this.vx = -num;
+    } else if (right && !left) {                           // :6773-6782
+      if (this.vx < 0) this.vx *= 0.9;
+      this.vx += num2;
+      if (this.vx > num) this.vx = num;
+    } else if (this.vx < -num2 || this.vx > num2) {        // :6783-6786
+      this.vx *= 0.9;
+    } else {
+      this.vx = 0;                                         // :6787-6789
+    }
+    this.x += this.vx;                                     // :6790 position += velocity（无碰撞）
+    this.y += this.vy;
+    if (this.vx < 0) this.facing = -1;                     // :6792-6797 direction
+    else if (this.vx > 0) this.facing = 1;
+    if (++this.ghostFrameCounter >= 8) {                   // :6802-6818
+      this.ghostFrameCounter = 0;
+      this.ghostFrame = (this.ghostFrame + 1) % 4;
+    }
+    // 世界界钳（:6821-6847；leftWorld/topWorld=0,rightWorld=store.w×16,bottomWorld
+    // =store.h×16——bordersMovement 的最小世界豁免门 Ghost() 无,1:1 照抄）
+    const B = 640;                                         // num3 = 640
+    const wPx = game.world.store.w * TILE, hPx = game.world.store.h * TILE;
+    if (this.x < B) { this.x = B; this.vx = 0; }
+    if (this.x > wPx - B - this.w) { this.x = wPx - B - this.w; this.vx = 0; }
+    if (this.y < B) { this.y = B; if (this.vy < -0.1) this.vy = -0.1; }
+    if (this.y > hPx - B - this.h) { this.y = hPx - B - this.h; this.vy = 0; }
   }
 
   /** UpdateSunScorch（Player.cs:28144-28189 一比一）：暴露判定 → counter 推进 →

@@ -66,7 +66,8 @@ const pin = await page.evaluate(async () => {
   // 摆位:船心 X0=出生 x、天幕高度=当前玩家 cy−700(出生位);玩家=相机收敛点。
   // side=±1:玩家在船旁 ±420(船心上方 80)→ 相机收敛后船心屏位 640∓420(视觉对);
   // side=0:玩家钉船心轴上 → 相机收敛=船心(640)判读区 ±400 全不裁(镜像数判对)。
-  const X0 = ship.cx, skyY = g.player.cy - 700;
+  // ★全坐标取整:镜像对映按整像素计账,分数船位/相机会给全域半像素边差(实测 27%)。
+  const X0 = Math.round(ship.cx), skyY = Math.round(g.player.cy - 700);
   window.__fdPlace = (side, facing) => {
     ship.x = X0 - ship.w / 2; ship.y = skyY - ship.h / 2;
     const p = g.player;
@@ -93,6 +94,9 @@ const pin = await page.evaluate(async () => {
   const scratch = document.createElement('canvas');
   const sctx = scratch.getContext('2d', { willReadFrequently: true });
   window.__fdShot = async () => {
+    // ★相机钉整数收敛点:follow 目标=玩家心(整数),残差 0.02px 的浮动轴令镜像对映
+    //   逐边缘 1px 错位(实测全舷边缘线红)。钉死后 follow 加 0 恒稳。
+    g.camera.x = Math.round(g.player.cx); g.camera.y = Math.round(g.player.cy);
     const geo = window.__fdGeo(), cv = g.renderer.canvas;
     await window.__fdWaitFrame(window.__fdFlag.n + 1);
     sctx.canvas.width = geo.w; sctx.canvas.height = geo.h;
@@ -200,6 +204,7 @@ function extents(d, geo) {
   // 且限船壳纵带 [sy−180, sy+80](云/山雾不入;船不透明处两态皆船)——BG 底版因船体
   // 光源全局改曝光(实测 97% 像素联动)不可作掩码,故用双态光度分类。
   const g1 = P1.geo, w = g1.w, h = g1.h;
+  const sxL = Math.round(g1.sx - g1.x0);
   const syL = Math.round(g1.sy - g1.y0);
   const y0 = Math.max(0, syL - 180), y1 = Math.min(h, syL + 80);
   const base = Math.round(2 * P1.geo.sx);
@@ -224,6 +229,32 @@ function extents(d, geo) {
   const buckets = Object.entries(colBucket).sort((a, b) => a[0] - b[0]).map(([k, v]) => `${k}:${v}`).join(' ');
   L.chk('镜像差分 P2≈hmirror(P1)(船壳带掩码内)', mRate < Math.max(0.02, dRate * 4 + 0.01), `mm=${(100 * mRate).toFixed(2)}% 掩码=${maskN} 全域漂移=${(100 * dRate).toFixed(2)}%`);
   L.say(`失配列分布(船心相对px:count) ${buckets}`);
+  // 失配可视化 BMP(红=失配,暗灰=掩码内匹配,浅灰=掩码外):P2 镜像贴回 P1 坐标系
+  {
+    const W = w, H = h, rowSize = (W * 3 + 3) & ~3, dataSize = rowSize * H, fileSize = 54 + dataSize;
+    const buf = Buffer.alloc(fileSize);
+    buf.write('BM', 0); buf.writeUInt32LE(fileSize, 2); buf.writeUInt32LE(54, 10);
+    buf.writeUInt32LE(40, 14); buf.writeInt32LE(W, 18); buf.writeInt32LE(H, 22);
+    buf.writeUInt16LE(1, 26); buf.writeUInt16LE(24, 28); buf.writeUInt32LE(dataSize, 34);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const xm = base - (g1.x0 + x) - g1.x0;
+        const inBand = y >= y0 && y < y1 && xm >= 0 && xm < w;
+        const masked = inBand && shipPx(P1.data, g1, x, y) && shipPx(P2.data, P2.geo, xm, y);
+        let bad = false;
+        if (masked) {
+          const i = (y * w + x) * 4, j = (y * P2.geo.w + xm) * 4;
+          const d = Math.abs(P2.data[j] - P1.data[i]) + Math.abs(P2.data[j + 1] - P1.data[i + 1]) + Math.abs(P2.data[j + 2] - P1.data[i + 2]);
+          bad = d > 24;
+        }
+        const o = 54 + (H - 1 - y) * rowSize + x * 3;
+        buf[o] = bad ? 0 : masked ? 80 : 200;     // B
+        buf[o + 1] = bad ? 0 : masked ? 80 : 200; // G
+        buf[o + 2] = bad ? 255 : masked ? 80 : 200; // R
+      }
+    }
+    writeFileSync(join(OUT, 'mirror-diff.bmp'), buf);
+  }
   const eA = extents(A.data, A.geo), eB = extents(B.data, B.geo);
   const thr = 30 * A.geo.z;
   L.chk('不翻面态舷伸:右(玩家侧)>左', eA.right - eA.left > thr, `A right=${eA.right} left=${eA.left} 阈=${thr.toFixed(0)}`);

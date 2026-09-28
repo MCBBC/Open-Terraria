@@ -87,8 +87,10 @@ export function rollablePrefixes(vid: number, isAccessory: boolean): number[] | 
   return null;
 }
 
-/** 掷词缀（Item.Prefix 主干）：
- *  wantBest=true → Prefix(-2)（保底出词缀，等概率不挑档——原版 -2 仅重掷直到非 0）
+/** 掷词缀（Item.Prefix 主干）：★BJ400（2026-09-29）起 -2 臂退役至下方
+ *  rollReforgePrefix（doReforge 唯一生产消费点已迁），本函数仅存 -1 臂形态
+ *  供测试对照（旧通道缺陷实证件）——生产链一律走 rollNaturalPrefixForVid
+ *  （自然掷）与 rollReforgePrefix（重铸掷）两支 1:1 通道。
  *  wantBest=false → Prefix(-1)（1/4 概率无词缀；ReducedNaturalChance 池成员 2/3 概率降为无词缀）
  *  返回 0 = 无词缀 */
 export function rollPrefix(pool: number[], wantBest: boolean): number {
@@ -168,6 +170,29 @@ export function rollNaturalPrefixForVid(vid: number, isAccessory: boolean, rand:
   const st = itemCombat(vid);
   if (st) stat = { damage: st.damage ?? 0, useAnimation: st.useAnimation ?? 0, mana: st.mana ?? 0, kb: st.knockBack ?? 0 };
   return rollNaturalPrefix(pool, rand, stat);
+}
+
+// ── ★BJ400（2026-09-29）重铸 -2 臂 1:1 通道（doReforge 保底掷,BJ394 登记债清偿）──
+// Item.Prefix(-2) while 环（Item.cs:523-556,prefixWeWant==-2 臂;1458 同构零差）：
+// :529 `prefixWeWant < -1` 每轮把 rolledPrefix 复位 -1（⇒ :526 Next(4) 早退臂死码）,
+// 之后 RollAPrefix（:1140-1150 池均匀掷）→ TryGet 四失败门（:1067-1079）掷废重进环
+// （rolledPrefix 复位 -1）+ :551-554 `prefixWeWant==-2 && rolledPrefix==0` 重进环
+// （保底出词缀,池无 0 时恒不触发= belt-and-braces 照抄）。与 BJ390 rollNaturalPrefix
+// 同锚异臂：无 1/4 无词缀早退、无 ReducedNaturalChance 降档、-4 面不适用。
+// 终止性=原版同构：任一可掷池恒含无条件过门档（size-only 1/2/7 族或配饰全档,
+// vanilla-prefix.json pools 普查实证）,几何收敛无守卫（BJ390 同款不加 guard）。
+export function rollReforgePrefix(pool: number[], rand: () => number,
+  stat?: { damage: number; useAnimation: number; mana: number; kb: number }): number {
+  if (!pool || !pool.length) return 0;       // !CanHavePrefixes（GetRollablePrefixes null）
+  let rolled = -1;
+  for (let flag = true; flag; ) {
+    flag = false;
+    rolled = pool[Math.floor(rand() * pool.length)];                     // :532-535 RollAPrefix
+    if (rolled === 0 || prefixTryGetFailsForItem(rolled, stat)) {        // :551-554 零词缀 + :546 TryGet 门
+      flag = true;                                                       // 掷废重进环（rolledPrefix 复位 -1）
+    }
+  }
+  return rolled;
 }
 
 /** 词缀名拼装（Lang.GetPrefixedItemName Lang.cs:225-239 → CombineFormat.Prefix l10n
