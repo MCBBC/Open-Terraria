@@ -136,12 +136,15 @@ describe('BJ338-件1 静态闸（Game.ts/TorchGod.ts 掉落锚逐字钉死）', 
 
   it('件1.4 提取机：鼠标世界坐标/智能光标→玩家中心（旧 (tx*16+24,(ty-1)*16) 缺席）', () => {
     const i = game.indexOf('private dropFromExtractinator');
-    const body = i >= 0 ? game.slice(i, i + 900) : '';
+    // ★BJ399 注释接线后函数体 1213 字符——窗口 900→1400 防 spawnDrop 行落窗外
+    const body = i >= 0 ? game.slice(i, i + 1400) : '';
     expect(body).toContain('private dropFromExtractinator(drop: ExtractDrop): void');
     expect(body).toContain('const c = this.smartCursor.wanted');
     expect(body).toContain('? { x: this.player.cx, y: this.player.cy }');
     expect(body).toContain('this.camera.screenToWorld(this.input.mouseX, this.input.mouseY)');
-    expect(body).toContain('this.spawnDrop(c.x, c.y, key, drop.stack);');
+    // ★BJ399 普查③接线后 spawnDrop 尾随词缀掷实参（Player.cs:42402-42410 Prefix(-1)）——
+    //  本钉意图=坐标锚面（智能光标→玩家中心/鼠标世界坐标），实参面随 BJ399 同步。
+    expect(body).toContain('this.spawnDrop(c.x, c.y, key, drop.stack, undefined, undefined, undefined, prefix);');
     expect(body).not.toContain('tx * TILE + 24');
   });
 

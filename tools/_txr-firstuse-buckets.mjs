@@ -213,7 +213,6 @@ const sessionUrls = new Map(); // sk -> Set(url basename)
 
 // worker 命名
 const wkName = new Map();
-for (const sk, of = 0, urls of []) void 0;
 for (const [sk, urls] of sessionUrls) {
   const s = sessions.get(sk);
   const joined = [...urls].join(',');

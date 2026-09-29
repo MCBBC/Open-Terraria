@@ -205,9 +205,10 @@ export class BeamBoltProj extends Entity {
       // ★X2-D3（2026-09-29）critter 面：255 penetrate 缺省 1（SetDefaults :3380-3389
       //  无行,:366 字段缺省）/260 penetrate=1（:3443-3452）→ critter 受击 :14189-14196
       //  递减归零 → :17312 Kill = 铺束同相（敌怪首中即亡同款）;桶序先小动物（BJ383
-      //  桶序登记近似）。原版 Damage() victim 循环（:12618）critter 恒在内,本仓独立
-      //  桶不被扫到=激光弹对小动物零受击。
-      if (hitCritters(this, game)) { this.killBeam(game); break; }
+      //  桶序登记近似）;:14263 numHits++ 对 critter 受理命中同达 → 入账。原版
+      //  Damage() victim 循环（:12618）critter 恒在内,本仓独立桶不被扫到=激光弹对
+      //  小动物零受击。
+      if (hitCritters(this, game)) { this.pveNumHits++; this.killBeam(game); break; }
       for (const ent of game.enemies()) {
         const e = ent as HurtTarget;
         if (e.dead || !e.hurt) continue;

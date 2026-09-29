@@ -7,8 +7,10 @@
 //   45/48/84/100/127/167,均 ≠59）⇒ 原版全部吃吸血,无弹类例外;本仓逐类漏接,本文件
 //   锁接线 + 实参口径（BJ157-②③④ 同款）。单源 = SpectreSoulProj.ghostHealProc
 //   （BJ382 自 LunarNebula 私有版提升为域导出,LunarNebula 行为面不变）。
-// spy 面：hurt 萰 StrikeNPC——lastStrikeDealt = 防后实扣（num41 等位）;拒收（false）
-//   = 原版 immune 门整跳 → 无 proc 无 numHits++。
+// spy 面：hurt 萰 StrikeNPC——lastStrikeDealt = 防后实扣（num41 等位）。★X2-D1 勘误
+//   （2026-09-29）：hurt 返假两族异义——门拒（iframes 残窗 :13972/dontTakeDamage
+//   :13978）无 proc 无 numHits++;血尽级联/普通未致命（无门位返假）原版仍受理
+//   （proc :13877-79/numHits++ :14263 无死亡复查）→ 照 proc 照计数（判据=!vanillaGated）。
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -409,7 +411,7 @@ describe('BJ382 星璇之音 856 ghostHeal proc（直击受理 + Kill 爆裂轮�
     expect(g.pveNumHits).toBe(2);
   });
 
-  it('拒收不 proc 不计数（爆裂轮跳过已标免疫敌）', () => {
+  it('拒收（门拒形态 iframes>0,hurt false）不 proc 不计数（爆裂轮跳过已标免疫敌）——★X2-D1 夹具忠实化', () => {
     const log: StealCall[] = [];
     const game = makeGame(log, [], {
       cx: 70 * TILE, cy: 100 * TILE, x: 70 * TILE - 11, y: 100 * TILE - 22, w: 22, h: 44,
@@ -419,10 +421,33 @@ describe('BJ382 星璇之音 856 ghostHeal proc（直击受理 + Kill 爆裂轮�
     g.fixedUpdate(1 / 60, game);
     const a = enemySpyPx(1, g.cx - 16, g.cy - 16, 32, 32);
     a.hurt = () => false;
+    // ★X2-D1 夹具忠实化：hurt 返假两族异义——856 hurt 传 pierce=0 → iframes 门可达,
+    //  门拒形态须以【调用前】iframes 值承载（真 Enemy :13972 读前值）。
+    a.iframes = 5;
     const g2 = { ...game, enemies: () => [a] } as unknown as GameHooks;
     g2.applyLifeSteal = game.applyLifeSteal;
     g.fixedUpdate(1 / 60, g2);
     expect(log.length).toBe(0);
     expect(g.pveNumHits).toBe(0);
+  });
+
+  it('受理（普通未致命形态,hurt 返假无门位）照 proc 照计数（直击 a 0 档 + 爆裂 b 1 档）——★X2-D1 判别面', () => {
+    const log: StealCall[] = [];
+    const game = makeGame(log, [], {
+      cx: 70 * TILE, cy: 100 * TILE, x: 70 * TILE - 11, y: 100 * TILE - 22, w: 22, h: 44,
+    });
+    const g = new SparkleGuitarProj(80 * TILE, 100 * TILE, 50, 0, 130, 80 * TILE, 100 * TILE);
+    g.critChance = 0;
+    g.fixedUpdate(1 / 60, game);
+    const a = enemySpyPx(1, g.cx - 16, g.cy - 16, 32, 32);
+    const b = enemySpyPx(2, g.cx + 40, g.cy - 24, 48, 48); // 爆裂盒（弹心±64）内,直击未触
+    a.hurt = () => false;                                 // 血尽级联/普通未致命形态（无门位）
+    b.hurt = () => false;
+    const g2 = { ...game, enemies: () => [a, b] } as unknown as GameHooks;
+    g2.applyLifeSteal = game.applyLifeSteal;
+    g.fixedUpdate(1 / 60, g2);
+    expect(log.length).toBe(2);                           // 直击受理 + 爆裂轮受理（返假≠拒收）
+    expect(log.map((c) => c.numHits)).toEqual([0, 1]);    // 同弹 numHits 累积
+    expect(g.pveNumHits).toBe(2);
   });
 });

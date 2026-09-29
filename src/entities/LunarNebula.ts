@@ -37,8 +37,11 @@ type EnemyLike = {
 
 const TAU = Math.PI * 2;
 
-/** 通用命中（音效 + hurt + 飘字）→ 返回受理位（Enemy.hurt：dead/iframe/dontTakeDamage
- *  拒收 false——原版对应 npc.immune[owner] 门整跳 Damage_PVE_Inner,无 numHits++） */
+/** 通用命中（音效 + hurt + 飘字）。★X2-D1 勘误（2026-09-29）：Enemy.hurt 布尔返真=
+ *  「本拍击杀/假人」（Enemy.ts:15033/:14184）【非】受理位——返假三族=门拒（dead:13971/
+ *  iframes:13972/dontTakeDamage:13978）+血尽级联（:14369 族,伤害已实扣=原版受理）+
+ *  普通未致命尾档（:15037）。受理面谓词=调用侧 !vanillaGated（读门位）,本返回值
+ *  不再消费（BJ393 判据,击杀位契约退役） */
 function strike(game: GameHooks, e: EnemyLike, dmg: number, crit: boolean, kb: number, kdir: number, pen: number): boolean {
   return e.hurt(dmg, kdir * kb, 0, game, pen, crit, 0, true);   // 音/飘值=单点;fromPlayer=DPS 计
 }
@@ -55,8 +58,9 @@ export class NebulaBlazeBolt extends Entity {
   dead = false;
   /** ★BJ380：PVE 受理命中计数（原版 Projectile.numHits——SetDefaults :706 起始 0;
    *  :14263 自增在 ghostHeal proc(:13877-79)【后】⇒ proc 读自增前值,首跳 0 档率 0.20;
-   *  受理=hurt 返真,拒收弹不计数）。字段名对齐 SpectreSoulProj.projPveNumHits 读口
-   *  （PVP 反馈 BJ157-④ 单源,Game.ts:4642 对 634/635 friendly 弹已消费本字段） */
+   *  ★X2-D1 勘误：受理=非门拒（!vanillaGated,读门位）非 hurt 返真——门拒（iframes/
+   *  dontTakeDamage）不计数,血尽级联/普通未致命返假照计数）。字段名对齐
+   *  SpectreSoulProj.projPveNumHits 读口（PVP 反馈 BJ157-④ 单源） */
   pveNumHits = 0;
   /** 点光：634 (0.7,0.1,0.5) / 635 (0.4,0.6,0.9)（:51584/:51597） */
   lightRGB: [number, number, number] | null;
@@ -293,8 +297,9 @@ export class NebulaBlazeBolt extends Entity {
     //  =飞行盒对小动物零受击。penetrate 缺省 1（SetDefaults :6818-6841 无 penetrate
     //  行,:366 字段缺省）→ :14189-14196 递减归零 → :17312 Kill = burst 同相（敌怪
     //  首中即爆同款）。桶序先小动物（BJ383 桶序登记近似）;critter lifeMax≤5 经
-    //  flag10 lifeMax>5 段（:13712）恒不吸血 → 只入账不 proc（BJ383 判例）。
-    if (hitCritters(this, game)) { this.burst(game); return; }
+    //  flag10 lifeMax>5 段（:13712）恒不吸血 → 只入账不 proc（BJ383 判例）;
+    //  :14263 numHits++ 对 critter 受理命中同达 → 入账（1115 先例同式）。
+    if (hitCritters(this, game)) { this.pveNumHits++; this.burst(game); return; }
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;

@@ -26,7 +26,7 @@ import { deviceTable, type DeviceCtx } from '../src/world/wiring/devices';
 import {
   echoResourceDropVid, styleDropVidOfFrames, coinBandVid,
 } from '../src/data/vanillaStyleDrops';
-import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../src/data/items';
 import { Game } from '../src/core/Game';
 
 // ============ A. kind4 长矛方向表（Wiring.cs:1859-1888 case 4） ============
@@ -257,7 +257,10 @@ describe('breakTile object 分支 Echo 资源组掉落（挖掉路;无放置物�
     place2x2(w, 'v_702_life_fruit_replica', 20, 10, 1);
     g.breakTile(20, 10, false);
     expect(drops.length).toBe(1);
-    expect(drops[0].key).toBe(VANILLA_ITEM_KEY_BY_ID[1291]);
+    // ★方案A批次A后 1291 掉落走桥接批 snake 权威键，VANILLA_ITEM_KEY_BY_ID[1291]
+    //  指 Pascal 别名键（items.ts 构建段设计内，同 def 双键别名）——断言按 def
+    //  下标归一（消费端按 vid 归一口径），键字符串形态不钉死。
+    expect(ITEM_BY_KEY[drops[0].key]).toBe(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[1291]]);
     expect(st.get(21, 11)).toBe(0);
   });
 

@@ -113,6 +113,11 @@ function stellarStrike(
   //   过滤/kind0 门 ranged 过滤,未来分流时自动生效）。返回 num14 加伤随暴击并入实伤参。
   //   ★BJ382 返回值改为受理位（Enemy.hurt 返真）——调用点按 :14263 受理面挂
   //   ghostHeal proc / numHits++。
+  //   ★X2-D1 勘误（2026-09-29,BJ393 判据推广）：上注「返真=受理位」系陈旧语——
+  //   Enemy.hurt 布尔返真=「本拍击杀/假人」（Enemy.ts:15033/:14184）,返假三族中
+  //   血尽级联（:14369 族）/普通未致命尾档（:15037）原版仍受理（proc/numHits++ 无
+  //   死亡复查）→ 受理面谓词=调用侧 !vanillaGated（读门位 iframes/dontTakeDamage）,
+  //   本返回值不再消费（击杀位契约退役）。
   const critGuitar = Math.random() < critChance;
   const snapBonusGuitar = projectileSnapStrikeBonus(game, proj ?? null,
     e.x + e.w / 2, e.y + e.h / 2, e.id,

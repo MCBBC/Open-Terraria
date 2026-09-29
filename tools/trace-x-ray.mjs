@@ -18,6 +18,10 @@
 //   --incl fn1,fn2,...   覆盖 inclusive 观察名单（缺省见 INCL_WATCH_DEFAULT）
 //   --tune id=value      覆盖签名阈值（id 见 SIGNATURE_DEFAULTS,如 --tune shmSlowLprFrame=20）
 //   --force-stream       强制流式状态机路径（<16MB 文件缺省整读,用于交叉验证）
+//   --include-recorder   不剔除录制器伪影帧（缺省:与 StartProfiling 窗/预热窗重叠的渲染帧
+//                        标 recorderArtifact 并排除出帧距/fps/慢帧统计——094306 判例 280ms
+//                        "巨帧"=CpuProfiler::StartProfiling 启动成本,非游戏卡顿;此旗只关剔除,
+//                        recorder 段与逐帧标记仍在）
 //   --schema             打印 digest schema 消费契约后退出
 //   --quiet              只写文件不打 stdout
 //   diff <a.digest.json> <b.digest.json> [--out diff.json]   两份 digest 并排差分
@@ -50,11 +54,24 @@
 //     分母微差,v2 span 口径 14.44%——三代口径都登记,差 ≤0.3pp)/ MinorGC 5.93/s 逐位命中
 //   （lrecon 2616 帧 = 配套 debug-report 游戏内计数器 render.composePath.stats.lrecon,
 //     trace 内不存在该信号——工具诚实不报,勿找）
+//
+// ═══════════════ 录制器干扰项过滤（2026-09-29 批,登记债落刀）═════════════════════════════
+//   DevTools/CDP 开 CPU 采样时,trace 里每个 isolate 有一条 CpuProfiler::StartProfiling X
+//   事件——它本身就是"启动成本"(堆遍历 safepoint,首启实测 250-820ms),落在游戏帧里会被
+//   误读成巨帧。两案判例:
+//   Trace-20260929T094306（腐化案）: t=+305ms gap=279.9ms"巨帧"宿主=音频 rAF 回调 step
+//     （src/core/Audio.ts startLoop）内被 StartProfiling 279.5ms 打断;健康画像=p99 17.6ms
+//     /94.3fps。修:该帧标 recorderArtifact 剔除,帧距统计恢复无巨帧;音频 step 进标签词表。
+//   worker 空闲采样伪影: Windows 侧 trace（203039 等）worker 线程 idle 样本落在 (program)
+//     而非 (idle)——(program) 占 86-100% 而 named JS 自耗 <5% 的线程实为空闲,曾把
+//     ServiceWorker (program) 99.98% 误读成"饱和"。修:worker 行加 idleSamplingSuspect/
+//     programSelfPct/namedSelfPct,busyPctOfSpan 恒以 named 自耗为准(本就排除伪根,现以
+//     字段+签名值显式化)。
 import fs from 'node:fs';
 import path from 'node:path';
 
 export const TOOL_NAME = 'trace-x-ray';
-export const TOOL_VERSION = '1.0.0';
+export const TOOL_VERSION = '1.1.0';
 export const SCHEMA_NAME = 'trace-x-ray.digest';
 export const SCHEMA_VERSION = 1;
 
@@ -90,6 +107,13 @@ const TAG_HUD = ['mmHudBlit'];
 const TAG_LIQ = ['drawVanillaLiquids', 'drawLiquidBehindTilesOnly'];
 const TAG_ATLAS = ['atlasIcon', 'atlasIconForKey', 'sheetOf', 'sheetOf$1'];
 const TAG_LIGHT = ['exportTo', 'blurLine', 'surfaceSky', 'compositeLight'];
+// 音频域 rAF 回调（src/core/Audio.ts startLoop 的 step;腐化案 094306 的 280ms"巨帧"宿主
+// 就是它——此前不在标签词表,slowest 分解全 0,读不出宿主只能另写一次性普查脚本）。
+// ★必须配合「父节点=伪根」门控:游戏主循环子树内也有同名 step(Liquid.step 等),
+//  无门控会把游戏帧样本误标 audio。词表可扩展(其它 Game/Audio 域 rAF 根回调)。
+const TAG_AUDIO = ['step'];
+// rAF 根回调的父节点形态（profile 树中 rAF 回调挂在伪根下）
+const RAF_ROOT_PARENT = new Set(['(root)', '(program)', '(idle)', '']);
 // 静默降级桶嫌疑名单（签名 SILENT_DEGRADE_BUCKET 消费）
 const DEGRADE_FNS = ['degradeAcc', 'ensureBridged', 'finishAccFrame'];
 
@@ -126,6 +150,7 @@ export const SIGNATURE_DEFAULTS = {
   stallP99WarnMs: { v: 33, explain: '帧距 p99 告警线(ms)' },
   stallP99AlarmMs: { v: 50, explain: '帧距 p99 风暴线' },
   mainBusyPct: { v: 98, explain: '主线程 RunTask busy 占比超过此 % = 极端饱和（游戏 rAF 满载属常态）' },
+  recorderWarmupMs: { v: 500, explain: '录制启动采样收敛预热窗(ms);首次 CpuProfiler::StartProfiling 事件结束后此窗内的渲染帧一并标 recorderArtifact（094306 判例:280ms"巨帧"=StartProfiling 启动成本,预热窗同理剔除）' },
 };
 
 // ─────────────────────────── 流式状态机（战役 tracelib.mjs 逐字演化,恒定内存） ───────────────────────────
@@ -284,6 +309,7 @@ function makeAccumulator(opts) {
     postMsgByThread: new Map(),
     profiles: new Map(),       // sessionKey -> session
     mainSessionKeys: [],
+    startProfiling: [],        // [ts,dur,tidKey]×n — CpuProfiler::StartProfiling X（每 isolate 一条;录制器干扰项过滤的数据源）
     pinnedResolved: pinnedTid,
     seenRendererMain: new Map(),// 'pid:tid' -> events（钉定复核用）
     chunkShapes: new Map(),
@@ -409,6 +435,12 @@ function makeAccumulator(opts) {
       return;
     }
     if (name === 'FireAnimationFrame') { acc.fires.push(ts || 0, ev.dur || 0, ev.tid); return; }
+    // 录制器会话检测:Profiler.start 在每个 isolate 上落一条 X 事件,dur=启动成本本身
+    // （首启 250-820ms 堆遍历 safepoint;任意线程,主线程那条就是"巨帧"真身——094306 判例）
+    if (name === 'CpuProfiler::StartProfiling' && ev.ph === 'X') {
+      acc.startProfiling.push(ts || 0, ev.dur || 0, tidKey);
+      return;
+    }
 
     if (!acc.pinnedResolved || tidKey !== acc.pinnedResolved) return;
 
@@ -497,28 +529,65 @@ function buildDigest(tracePath, acc, opts, meta) {
   // ── 渲染帧锚（主线程 rAF dur≥阈值 + 相邻去重） ──
   const minAnchor = opts.minAnchorDur ?? 3000;
   const anchors = [];
+  const anchorDur = [];
   {
     const mainTid = mainTh ? mainTh.tid : -1;
     const list = [];
     for (let i = 0; i < acc.fires.length; i += 3) {
-      if (acc.fires[i + 2] === mainTid && acc.fires[i + 1] >= minAnchor) list.push(acc.fires[i]);
+      if (acc.fires[i + 2] === mainTid && acc.fires[i + 1] >= minAnchor) list.push([acc.fires[i], acc.fires[i + 1]]);
     }
-    list.sort((a, b) => a - b);
+    list.sort((a, b) => a[0] - b[0]);
     let last = -1e18;
-    for (const ts of list) if (ts - last > 1500) { anchors.push(ts); last = ts; }
+    for (const [ts, dur] of list) if (ts - last > 1500) { anchors.push(ts); anchorDur.push(dur); last = ts; }
   }
   const nA = anchors.length;
+
+  // ── 录制器会话与伪影窗（每 isolate 一条 StartProfiling;首次带采样收敛预热窗） ──
+  const includeRecorder = !!opts.includeRecorder;
+  const warmupUs = (opts.tune && opts.tune.recorderWarmupMs !== undefined ? +opts.tune.recorderWarmupMs : SIGNATURE_DEFAULTS.recorderWarmupMs.v) * 1000;
+  const recSessions = [];
+  for (let i = 0; i < acc.startProfiling.length; i += 3) recSessions.push({ ts: acc.startProfiling[i], dur: acc.startProfiling[i + 1], tidKey: acc.startProfiling[i + 2] });
+  recSessions.sort((a, b) => a.ts - b.ts);
+  const recWindows = recSessions.map((s, idx) => ({
+    ts: s.ts, end: s.ts + s.dur + (idx === 0 ? warmupUs : 0), warmup: idx === 0 ? warmupUs : 0, isFirst: idx === 0,
+  }));
+  // 帧伪影判定:gap 区间 (prev,cur) 或锚执行窗 [cur,cur+dur) 与任一伪影窗相交
+  // （094306 判例:280ms 巨帧=宿主帧被打断,下一锚的 gap 区间吞下整个 StartProfiling 窗）
+  const frameArtifactHit = (i, w) => {
+    const a = anchors[i];
+    const prev = i ? anchors[i - 1] : a;
+    return (Math.max(prev, w.ts) < Math.min(a, w.end)) || (Math.max(a, w.ts) < Math.min(a + anchorDur[i], w.end));
+  };
+  const artifact = new Uint8Array(nA);
+  for (let i = 0; i < nA; i++) for (const w of recWindows) if (frameArtifactHit(i, w)) { artifact[i] = 1; break; }
+  let nArt = 0;
+  for (let i = 0; i < nA; i++) nArt += artifact[i];
+  // 伪影窗并集 ∩ trace span（fps 有效分母扣减项;无会话时=0,统计口径与旧版逐位一致）
+  let artifactUnionUs = 0;
+  {
+    const cl = recWindows.map((w) => [Math.max(w.ts, acc.tmin), Math.min(w.end, acc.tmax)]).filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+    let cs = 0, ce = 0, first = true;
+    for (const [s, e] of cl) {
+      if (first || s > ce) { if (!first) artifactUnionUs += ce - cs; cs = s; ce = e; first = false; }
+      else if (e > ce) ce = e;
+    }
+    if (!first) artifactUnionUs += ce - cs;
+  }
+
   const gaps = [];
-  for (let i = 1; i < nA; i++) gaps.push((anchors[i] - anchors[i - 1]) / 1000);
+  for (let i = 1; i < nA; i++) {
+    if (includeRecorder || !artifact[i]) gaps.push((anchors[i] - anchors[i - 1]) / 1000);
+  }
   const gsorted = r2(gaps);
   const loopFrames = acc.loopFrames.slice().sort((a, b) => a.ts - b.ts);
   const renderLoop = loopFrames.filter((f) => f.dur >= 1500).length;
 
   // ── 逐帧桶（标签/上传/LPR/GC 归帧;窗口 100ms,战役口径） ──
-  const TAGS = ['game', 'bolt', 'rain', 'raster', 'present', 'trail', 'hud', 'liquid', 'light', 'atlas', 'other', '(root)', '(program)', '(idle)', '(garbage collector)'];
+  const TAGS = ['game', 'bolt', 'rain', 'raster', 'present', 'trail', 'hud', 'liquid', 'light', 'atlas', 'audio', 'other', '(root)', '(program)', '(idle)', '(garbage collector)'];
   const TAG_IDX = new Map(TAGS.map((t, i) => [t, i]));
   const BOLT_SET = new Set(TAG_BOLT), RAIN_SET = new Set(TAG_RAIN), RASTER_SET = new Set(TAG_RASTER), TRAIL_SET = new Set(TAG_TRAIL);
   const PRESENT_SET = new Set(TAG_PRESENT), HUD_SET = new Set(TAG_HUD), LIQ_SET = new Set(TAG_LIQ), ATLAS_SET = new Set(TAG_ATLAS), LIGHT_SET = new Set(TAG_LIGHT);
+  const AUDIO_SET = new Set(TAG_AUDIO);
   const texUploadFns = new Set(['texImage2D', 'texSubImage2D', 'createTexture']);
   const fw = [];
   for (let i = 0; i < nA; i++) {
@@ -572,18 +641,32 @@ function buildDigest(tracePath, acc, opts, meta) {
     if (mainSessions.includes(s)) continue;
     const th = acc.threads.get(s.tidKey);
     const byFn = new Map();
-    let workerBusyUs = 0; // 非闲置自耗(排除 (idle)/(program)/(garbage collector);采样墙钟含 idle 不可直接用)
+    let workerBusyUs = 0;    // 非闲置自耗(排除 (idle)/(program)/(garbage collector)/(root);★busyPctOfSpan 恒以此 named 自耗为分子——空闲采样伪影修正口径)
+    let workerNamedUs = 0, workerProgUs = 0, workerIdleUs = 0;
     for (const [id, us] of s.selfUs) {
       const nd = s.nodes.get(id);
       if (!nd) continue;
       const k = nd.fn + '|' + (nd.url || '').split('/').pop();
       byFn.set(k, (byFn.get(k) || 0) + us);
-      if (nd.fn !== '(idle)' && nd.fn !== '(program)' && nd.fn !== '(garbage collector)' && nd.fn !== '(root)') workerBusyUs += us;
+      if (nd.fn === '(idle)') workerIdleUs += us;
+      else if (nd.fn === '(program)') workerProgUs += us;
+      else if (nd.fn !== '(garbage collector)' && nd.fn !== '(root)') { workerNamedUs += us; workerBusyUs += us; }
     }
+    // 空闲采样伪影(Windows 侧判例:worker idle 样本落 (program) 而非 (idle)——
+    // ServiceWorker busy 实 0% 但 (program) 99.98%;203039 判例 DedicatedWorker (program) 86-96%)。
+    // 判据:有 named JS 但 (program) 占主导(>50% 采样墙钟)且 named 自耗 <5% → 线程实为空闲,
+    // (program) 份额是采样伪影;busyPctOfSpan 以 named 为准(本就如此,现以字段显式化防再误读)。
+    const wWall = s.wallUs || 1;
+    const idleSamplingSuspect = s.samples >= 10 && workerNamedUs > 0
+      && workerProgUs / wWall > 0.5 && workerNamedUs / wWall < 0.05;
     workerRowsOut.push({
       pid: s.pid, tid: s.tid, name: th ? th.name : '?',
       samples: s.samples, sampledWallMs: round(s.wallUs / 1000, 1),
       busyPctOfSpan: spanUs ? round((workerBusyUs / spanUs) * 100, 1) : 0,
+      namedSelfPct: round((workerNamedUs / wWall) * 100, 2),
+      programSelfPct: round((workerProgUs / wWall) * 100, 2),
+      idleSelfPct: round((workerIdleUs / wWall) * 100, 2),
+      idleSamplingSuspect,
       top: [...byFn.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
         .map(([k, us]) => ({ fn: k.split('|')[0], url: k.split('|')[1] || '', selfMs: round(us / 1000, 1), shareOfSampledPct: s.wallUs ? round((us / s.wallUs) * 100, 2) : 0 })),
     });
@@ -643,6 +726,9 @@ function buildDigest(tracePath, acc, opts, meta) {
         if (LIQ_SET.has(nd.fn)) { found = 'liquid'; break; }
         if (LIGHT_SET.has(nd.fn)) { found = 'light'; break; }
         if (ATLAS_SET.has(nd.fn)) { found = 'atlas'; break; }
+        // 音频域 rAF 根回调（step 等):须父节点=伪根——游戏主循环子树内同名 step(Liquid.step)
+        // 的父链是游戏帧,不打此门会把游戏样本误标 audio（094306 判例:280ms 巨帧宿主漏标）
+        if (AUDIO_SET.has(nd.fn) && RAF_ROOT_PARENT.has(s.nodes.get(nd.p)?.fn ?? undefined)) { found = 'audio'; break; }
         if (nd.fn === '(program)' || nd.fn === '(root)' || nd.fn === '(idle)' || nd.fn === '(garbage collector)') { found = nd.fn; break; }
         cur = nd.p;
       }
@@ -762,18 +848,20 @@ function buildDigest(tracePath, acc, opts, meta) {
       .map(([k, v]) => ({ fn: k, selfMs: round(v / 1000, 1) })),
   })).sort((a, b) => b.selfMs - a.selfMs);
 
-  // ── 时间线（2s 桶 fps + 标签和） ──
+  // ── 时间线（2s 桶 fps + 标签和;伪影帧缺省不入桶,录制窗内出现空洞=诚实信号） ──
   const tlMap = new Map();
   for (let i = 0; i < nA; i++) {
+    if (!includeRecorder && artifact[i]) continue;
     const f = fw[i];
     const b = Math.floor((anchors[i] - acc.tmin) / 2e6);
     let e = tlMap.get(b);
-    if (!e) { e = { fps: 0, maxGapMs: 0, gameMs: 0, lightMs: 0, rainMs: 0, boltMs: 0, rasterMs: 0, presentMs: 0, texUploadMs: 0, drawImageMs: 0, lpr: 0, gcN: 0 }; tlMap.set(b, e); }
+    if (!e) { e = { fps: 0, maxGapMs: 0, gameMs: 0, lightMs: 0, rainMs: 0, boltMs: 0, rasterMs: 0, presentMs: 0, audioMs: 0, texUploadMs: 0, drawImageMs: 0, lpr: 0, gcN: 0 }; tlMap.set(b, e); }
     e.fps++;
     e.maxGapMs = Math.max(e.maxGapMs, f.gap);
     e.gameMs += f.tags[TAG_IDX.get('game')]; e.lightMs += f.tags[TAG_IDX.get('light')];
     e.rainMs += f.tags[TAG_IDX.get('rain')]; e.boltMs += f.tags[TAG_IDX.get('bolt')];
     e.rasterMs += f.tags[TAG_IDX.get('raster')]; e.presentMs += f.tags[TAG_IDX.get('present')];
+    e.audioMs += f.tags[TAG_IDX.get('audio')];
     e.texUploadMs += f.texUploadUs; e.drawImageMs += f.drawImageUs;
     e.lpr += f.lpr; e.gcN += f.gcN;
   }
@@ -781,20 +869,24 @@ function buildDigest(tracePath, acc, opts, meta) {
     t: +(b * 2).toFixed(1), fps: e.fps, maxGapMs: round(e.maxGapMs, 1),
     gameMs: round(e.gameMs / 1000, 1), lightMs: round(e.lightMs / 1000, 1), rainMs: round(e.rainMs / 1000, 1),
     boltMs: round(e.boltMs / 1000, 1), rasterMs: round(e.rasterMs / 1000, 1), presentMs: round(e.presentMs / 1000, 1),
+    audioMs: round(e.audioMs / 1000, 1),
     texUploadMs: round(e.texUploadMs / 1000, 1), drawImageMs: round(e.drawImageMs / 1000, 1),
     lpr: e.lpr, gcN: e.gcN,
   }));
 
-  // 最慢 10 帧（带标签分解）
+  // 最慢 10 帧（带标签分解;伪影帧缺省剔除,--include-recorder 时保留并带 recorderArtifact 标记）
   const slowest = fw.map((f, i) => ({ i, f }))
+    .filter(({ i }) => includeRecorder || !artifact[i])
     .sort((a, b) => b.f.gap - a.f.gap).slice(0, 10)
     .map(({ i, f }) => ({
       tMs: round((anchors[i] - acc.tmin) / 1000, 1), gapMs: round(f.gap, 1),
       gameMs: round(f.tags[TAG_IDX.get('game')] / 1000, 1), lightMs: round(f.tags[TAG_IDX.get('light')] / 1000, 1),
       rainMs: round(f.tags[TAG_IDX.get('rain')] / 1000, 1), boltMs: round(f.tags[TAG_IDX.get('bolt')] / 1000, 1),
       rasterMs: round(f.tags[TAG_IDX.get('raster')] / 1000, 1), presentMs: round(f.tags[TAG_IDX.get('present')] / 1000, 1),
+      audioMs: round(f.tags[TAG_IDX.get('audio')] / 1000, 1),
       texUploadMs: round(f.texUploadUs / 1000, 1), drawImageMs: round(f.drawImageUs / 1000, 1),
       lpr: f.lpr, gcMs: round(f.gcMs / 1000, 1), gcN: f.gcN,
+      recorderArtifact: !!artifact[i] || undefined,
     }));
 
   // ── GC 汇总 ──
@@ -876,10 +968,18 @@ function buildDigest(tracePath, acc, opts, meta) {
   }
 
   // ── frames 面板 ──
+  // fps/帧距统计口径:缺省剔除 recorderArtifact 帧;分母同步扣伪影窗并集(有效 span),
+  // 剔除不掉有效帧时与旧版逐位一致。--include-recorder = 全帧口径(仅标记不剔除)。
+  const countedAnchors = includeRecorder ? nA : nA - nArt;
+  const effSpanS = includeRecorder || !nArt ? spanS : round(Math.max(spanS - artifactUnionUs / 1e6, 0), 2);
+  const fpsDenom = includeRecorder || !nArt ? spanS : effSpanS;
   const frames = {
     method: `FireAnimationFrame@CrRendererMain dur>=${minAnchor}us dedup>1500us`,
     anchors: nA,
-    fps: spanS ? round(nA / spanS, 1) : 0,
+    countedFrames: countedAnchors,
+    recorderArtifactFrames: nArt,
+    effSpanS,
+    fps: fpsDenom ? round(countedAnchors / fpsDenom, 1) : 0,
     gap: {
       p50: round(pctOf(gsorted, 0.5), 2), p75: round(pctOf(gsorted, 0.75), 2), p90: round(pctOf(gsorted, 0.9), 2),
       p95: round(pctOf(gsorted, 0.95), 2), p99: round(pctOf(gsorted, 0.99), 2), p999: round(pctOf(gsorted, 0.999), 2),
@@ -947,15 +1047,20 @@ function buildDigest(tracePath, acc, opts, meta) {
     acc.ctxLost > T.contextLostStorm.v ? 'alarm' : acc.ctxLost > T.contextLostWarn.v ? 'warn' : 'off',
     acc.ctxLost, { warn: T.contextLostWarn.v, storm: T.contextLostStorm.v },
     `contextlost 类事件 ${acc.ctxLost} 次;>${T.contextLostStorm.v} = 上下文丢失风暴（GL 资源反复重建）。` + T.contextLostWarn.explain);
-  // 4. worker 数异常
+  // 4. worker 数异常（idleSuspect 只展示不定罪:空闲采样伪影是仪器口径问题,非游戏异常）
   {
     const dworkers = threads.filter((t) => /DedicatedWorker/i.test(t.name));
     const busy = workerRowsOut.filter((w) => w.busyPctOfSpan > T.workerBusyPct.v);
+    const idleSuspect = workerRowsOut.filter((w) => w.idleSamplingSuspect);
     const hit = dworkers.length > T.workerCountMax.v || busy.length > 0;
     push('WORKER_ANOMALY', hit, dworkers.length > T.workerCountMax.v * 2 ? 'alarm' : 'warn',
-      { dedicatedWorkers: dworkers.length, busyWorkers: busy.map((w) => `${w.name}(${w.busyPctOfSpan}%)`) },
+      {
+        dedicatedWorkers: dworkers.length,
+        busyWorkers: busy.map((w) => `${w.name}(${w.busyPctOfSpan}%)`),
+        idleSuspectWorkers: idleSuspect.map((w) => `${w.name}(${w.busyPctOfSpan}% named,(program)${w.programSelfPct}% 采样伪影)`),
+      },
       { max: T.workerCountMax.v, busyPct: T.workerBusyPct.v },
-      `DedicatedWorker ${dworkers.length} 个（阈值 ${T.workerCountMax.v}）。` + T.workerBusyPct.explain);
+      `DedicatedWorker ${dworkers.length} 个（阈值 ${T.workerCountMax.v}）。busyPctOfSpan 恒以 named 自耗为准——(program) 主导且 named<5% 的 worker 已标 idleSamplingSuspect（空闲采样伪影,勿读成饱和）。` + T.workerBusyPct.explain);
   }
   // 5. 静默降级桶
   push('SILENT_DEGRADE_BUCKET', degradeShare > T.degradeSelfSharePct.v, 'warn',
@@ -982,6 +1087,39 @@ function buildDigest(tracePath, acc, opts, meta) {
     push('MAIN_SATURATED', busy > T.mainBusyPct.v, 'warn', busy, T.mainBusyPct.v,
       `主线程 RunTask busy 占比 ${busy}% > ${T.mainBusyPct.v}%（饱和;鲜有 idle;游戏 rAF 满载属常态,阈值 97 只报极端）。` + T.mainBusyPct.explain);
   }
+  // 9. 录制器伪影（帧与 StartProfiling 窗/预热窗重叠——仪器启动成本,非游戏卡顿;
+  //    命中帧已自动从帧距/fps/慢帧统计剔除,--include-recorder 可关闭剔除仅留标记）
+  push('RECORDING_ARTIFACT', nArt > 0, 'warn',
+    { recorderSessions: recSessions.length, artifactFrames: nArt, excludedFromStats: !includeRecorder, artifactUnionMs: round(artifactUnionUs / 1000, 1) },
+    { warmupMs: T.recorderWarmupMs.v },
+    `录制器干扰：CPU 采样启动（CpuProfiler::StartProfiling,${recSessions.length} 个 isolate 会话）及其 ${T.recorderWarmupMs.v}ms 采样收敛预热窗与 ${nArt} 个渲染帧重叠——这些帧承载的是仪器启动成本（堆遍历 safepoint,首启实测 250-820ms）,不是游戏卡顿` +
+    (includeRecorder ? '。--include-recorder 生效:未剔除,仅带 recorderArtifact 标记。' : '，已自动从帧距/fps/慢帧统计剔除。') + T.recorderWarmupMs.explain);
+
+  // ── recorder 段（录制器会话窗/时长/重叠帧清单——登记债落刀:腐化案 280ms 巨帧=StartProfiling 启动成本） ──
+  const recorder = {
+    detected: recSessions.length > 0,
+    warmupMs: round(warmupUs / 1000, 0),
+    excludedFromStats: !includeRecorder,
+    artifactFrames: nArt,
+    artifactUnionMs: round(artifactUnionUs / 1000, 1),
+    sessions: recSessions.map((s, idx) => {
+      const th = acc.threads.get(s.tidKey);
+      const w = recWindows[idx];
+      const list = [];
+      for (let i = 0; i < nA; i++) if (frameArtifactHit(i, w)) {
+        list.push({ tMs: round((anchors[i] - acc.tmin) / 1000, 1), gapMs: round(i ? (anchors[i] - anchors[i - 1]) / 1000 : 0, 1) });
+      }
+      return {
+        pid: th ? th.pid : null, tid: th ? th.tid : null, tidKey: s.tidKey, name: th ? th.name : '?',
+        startRelMs: round((s.ts - acc.tmin) / 1000, 1),
+        durMs: round(s.dur / 1000, 2),
+        isFirst: w.isFirst,
+        windowRelMs: [round((w.ts - acc.tmin) / 1000, 1), round((w.end - acc.tmin) / 1000, 1)],
+        overlapFrames: list.length,
+        overlapFrameList: list,
+      };
+    }),
+  };
 
   // ── digest 组装 ──
   return {
@@ -1000,6 +1138,7 @@ function buildDigest(tracePath, acc, opts, meta) {
     main: mainKey
       ? { pid: mainTh.pid, tid: mainTh.tid, name: mainTh.name, note: null }
       : { pid: null, tid: null, name: null, note: '未探测到 CrRendererMain（非 renderer trace 或格式漂移）' },
+    recorder,
     threads,
     frames,
     profile: {
@@ -1088,13 +1227,21 @@ export function renderMd(d) {
   L.push(`span=${d.time.spanS}s events=${d.source.events.toLocaleString()}(${d.source.parseMode}, ${d.source.scanMs}ms) 主线程=${d.main.pid}:${d.main.tid}${d.main.note ? `（${d.main.note}）` : ''}`);
   L.push('');
   L.push(`## 帧锚（${d.frames.method}）`);
-  L.push(`anchors=${d.frames.anchors} fps=${d.frames.fps} | gap p50/p90/p99/max = ${d.frames.gap.p50}/${d.frames.gap.p90}/${d.frames.gap.p99}/${d.frames.gap.max}ms | >16ms=${d.frames.count16ms} >33ms=${d.frames.count33ms} >50ms=${d.frames.count50ms} >100ms=${d.frames.count100ms} dropped=${d.frames.droppedFrames}`);
+  L.push(`anchors=${d.frames.anchors}${d.frames.recorderArtifactFrames ? `（伪影剔除后计帧=${d.frames.countedFrames},有效span=${d.frames.effSpanS}s）` : ''} fps=${d.frames.fps} | gap p50/p90/p99/max = ${d.frames.gap.p50}/${d.frames.gap.p90}/${d.frames.gap.p99}/${d.frames.gap.max}ms | >16ms=${d.frames.count16ms} >33ms=${d.frames.count33ms} >50ms=${d.frames.count50ms} >100ms=${d.frames.count100ms} dropped=${d.frames.droppedFrames}`);
+  if (d.frames.recorderArtifactFrames) L.push(`★录制伪影帧 ${d.frames.recorderArtifactFrames} 个已${d.recorder?.excludedFromStats === false ? '标记（--include-recorder,未剔除）' : '剔除出统计'}（StartProfiling 启动成本,非游戏卡顿）`);
   L.push(`loop 帧: render=${d.frames.loop.render} skip=${d.frames.loop.skip}`);
   if (d.frames.drawFrame) L.push(`DrawFrame@${d.frames.drawFrame.name}: n=${d.frames.drawFrame.n} gapP50=${d.frames.drawFrame.gapP50Ms}ms P90=${d.frames.drawFrame.gapP90Ms}ms`);
   if (d.frames.slowest.length) {
     L.push('');
     L.push('最慢帧 top10（t=相对毫秒）:');
-    for (const s of d.frames.slowest) L.push(`  t=${s.tMs}s gap=${s.gapMs}ms game=${s.gameMs} light=${s.lightMs} rain=${s.rainMs} bolt=${s.boltMs} raster=${s.rasterMs} tex上传=${s.texUploadMs} drawImage=${s.drawImageMs} lpr=${s.lpr} gc=${s.gcMs}ms/${s.gcN}`);
+    for (const s of d.frames.slowest) L.push(`  t=${s.tMs}s gap=${s.gapMs}ms game=${s.gameMs} light=${s.lightMs} rain=${s.rainMs} bolt=${s.boltMs} raster=${s.rasterMs} audio=${s.audioMs} tex上传=${s.texUploadMs} drawImage=${s.drawImageMs} lpr=${s.lpr} gc=${s.gcMs}ms/${s.gcN}${s.recorderArtifact ? ' [录制伪影]' : ''}`);
+  }
+  if (d.recorder && d.recorder.detected) {
+    L.push('');
+    L.push(`## 录制器（${d.recorder.sessions.length} 个 StartProfiling 会话,伪影帧=${d.recorder.artifactFrames},伪影窗并集=${d.recorder.artifactUnionMs}ms）`);
+    for (const s of d.recorder.sessions) {
+      L.push(`  ${s.name}(${s.tidKey}) t=+${s.startRelMs}ms dur=${s.durMs}ms 伪影窗=+${s.windowRelMs[0]}..${s.windowRelMs[1]}ms 重叠帧=${s.overlapFrames}${s.isFirst ? '（含预热窗）' : ''}`);
+    }
   }
   L.push('');
   L.push('## 标签自耗（ms）: ' + JSON.stringify(d.profile.tagSelfMs));
@@ -1126,7 +1273,9 @@ export function renderMd(d) {
   if (d.workers.length) {
     L.push('');
     L.push('## Worker');
-    for (const w of d.workers.slice(0, 6)) L.push(`  ${w.name}(${w.pid}:${w.tid}) samples=${w.samples} wall=${w.sampledWallMs}ms top=${w.top.slice(0, 3).map((t) => `${t.fn}:${t.selfMs}ms`).join(', ')}`);
+    for (const w of d.workers.slice(0, 6)) {
+      L.push(`  ${w.name}(${w.pid}:${w.tid}) samples=${w.samples} wall=${w.sampledWallMs}ms busy=${w.busyPctOfSpan}% named=${w.namedSelfPct}% (program)=${w.programSelfPct}%${w.idleSamplingSuspect ? ' [IDLE-SUSPECT:空闲采样伪影,勿读成饱和]' : ''} top=${w.top.slice(0, 3).map((t) => `${t.fn}:${t.selfMs}ms`).join(', ')}`);
+    }
   }
   L.push('');
   L.push(`postMessage 事件: ${d.postMessage.events}${d.postMessage.note ? `（${d.postMessage.note}）` : ''} | contextlost: ${d.contextLostEvents}`);
@@ -1154,19 +1303,33 @@ const SCHEMA_DOC = `digest schema（${SCHEMA_NAME} v${SCHEMA_VERSION}）— 后�
   source                   {path,bytes,events,parseBad,parseMode:whole-read|stream,scanMs}
   time                     {spanS,t0Us}  — span=全部事件 ts 跨度
   main                     {pid,tid,name,note} — CrRendererMain 探测结果;note 非空=探测异常
+  recorder                 录制器干扰项面(2026-09-29 批新增;无会话时 detected=false 全零):
+    detected / warmupMs    是否有 StartProfiling 会话 / 采样收敛预热窗长度(ms,--tune recorderWarmupMs)
+    excludedFromStats      伪影帧是否已剔除出帧统计(--include-recorder 时 false)
+    artifactFrames         被标 recorderArtifact 的渲染帧数(与任一伪影窗重叠:gap 区间或锚执行窗)
+    artifactUnionMs        伪影窗并集 ∩ trace span 的时长(ms;fps 有效分母扣减项)
+    sessions[]             {pid,tid,tidKey,name,startRelMs,durMs,isFirst,windowRelMs:[起,止],
+                            overlapFrames,overlapFrameList[]{tMs,gapMs}} — 每 isolate 一会话;
+                            isFirst=首次 Profiling(带预热窗);windowRelMs 含预热窗
   threads[]                {pid,tid,name,process,role:main|worker|compositor|other,events,busyMs,busyPct}
                            ★busyPct 仅主线程有值(调度器顶层 RunTask 口径;X 裸和含嵌套会 >100%),
                              其他线程 null;worker 饱和度看 workers[].busyPctOfSpan(排除 idle 采样)
   frames                   帧锚面:
     method                 锚定义自述（可复现口径）
-    anchors / fps          锚数与平均 fps
-    gap{p50,p75,p90,p95,p99,p999,max}  帧距分位(ms)
-    count16ms/count33ms/count50ms/count100ms  超阈帧距计数
+    anchors                锚总数(含伪影帧)
+    countedFrames          计入统计的帧数(缺省=anchors-伪影帧;--include-recorder 时=anchors)
+    recorderArtifactFrames 伪影帧数(StartProfiling 窗/预热窗重叠)
+    effSpanS               有效 span(=spanS-伪影窗并集;无伪影时=spanS)
+    fps                    平均 fps(分子=countedFrames,分母=无伪影?spanS:effSpanS)
+    gap{p50,p75,p90,p95,p99,p999,max}  帧距分位(ms;缺省剔除伪影帧的 gap)
+    count16ms/count33ms/count50ms/count100ms  超阈帧距计数(同上口径)
     droppedFrames          DroppedFrame 瞬时事件数
     loop{n,render,skip}    FunctionCall{loop} dur>=1500µs=render
     drawFrame              合成器 DrawFrame 辅助帧距 {tid,name,n,gapP50Ms,gapP90Ms,gapMaxMs}|null
-    timeline[]             2s 桶 {t,fps,maxGapMs,gameMs,lightMs,rainMs,boltMs,rasterMs,presentMs,texUploadMs,drawImageMs,lpr,gcN}
-    slowest[]              最慢 10 帧逐标签分解
+    timeline[]             2s 桶 {t,fps,maxGapMs,gameMs,lightMs,rainMs,boltMs,rasterMs,presentMs,audioMs,texUploadMs,drawImageMs,lpr,gcN}
+                           ★伪影帧缺省不入桶——录制窗内出现空洞=诚实信号
+    slowest[]              最慢 10 帧逐标签分解(含 audioMs;--include-recorder 时伪影帧带
+                           recorderArtifact:true 保留,缺省被剔除)
   profile                  CPU profile 重组面:
     sessions/chunks/samples/sampledWallMs;chunkShapes=ProfileChunk data 形状计数(格式漂移哨兵)
     perThread[]            {pid,tid,name,samples,sampledWallMs,gameRootInclMs,top[]{fn,url,line,selfMs,shareOfSampledPct}}
@@ -1182,21 +1345,33 @@ const SCHEMA_DOC = `digest schema（${SCHEMA_NAME} v${SCHEMA_VERSION}）— 后�
     lazyPixelRef           {total,perRenderFrame,maxPerFrame} — 真实绘制 op 计数(真实事件,非采样)
     commit                 {n,meanUs,p50Us,p90Us,maxUs} — 主线程 X 'Commit'
     paintOps[]             主线程绘制类 X 事件 {name,n,meanUs,p50Us,p90Us,maxUs}
-  workers[]                DedicatedWorker/ServiceWorker {pid,tid,name,samples,sampledWallMs,busyPctOfSpan,top[]}
+  workers[]                DedicatedWorker/ServiceWorker {pid,tid,name,samples,sampledWallMs,busyPctOfSpan,
+                           namedSelfPct,programSelfPct,idleSelfPct,idleSamplingSuspect,top[]}
+                           ★busyPctOfSpan 恒以 named 自耗为分子(span 分母)——(program) 不算 busy。
+                           idleSamplingSuspect=true = 空闲采样伪影(有 named JS 但 (program)>50% 采样墙钟
+                           且 named<5%;Windows 侧 worker idle 样本落 (program) 而非 (idle),
+                           ServiceWorker 判例 busy 实 0% 但 (program) 99.98%)——勿读成饱和
   postMessage              {events,byThread,note} — 本战役 trace 不记录该事件(=0 非缺陷)
   contextLostEvents        contextlost 类事件计数
   signatures[]             {id,hit,severity:warn|alarm,value,threshold,explain}
     id: SHM_SLOW_PATH | UPLOAD_STORM | CONTEXTLOST_STORM | WORKER_ANOMALY |
-        SILENT_DEGRADE_BUCKET | GC_PRESSURE | FRAME_STALL | MAIN_SATURATED
+        SILENT_DEGRADE_BUCKET | GC_PRESSURE | FRAME_STALL | MAIN_SATURATED | RECORDING_ARTIFACT
 口径注意:
   - shareOfSampledPct 一律以主线程采样墙钟(正 delta 和)为分母(sw-pass5 口径),不是 trace span
   - inclusive 是跨节点求和(v2 口径),比真实单调用栈 inclusive 偏大,只用于相对比较
   - 值单位: frames/gc/api 均 ms 或 ms/s;canvas.commit/paintOps 为 µs
+  - 录制器伪影(--include-recorder 语义,2026-09-29 批):trace 内 CpuProfiler::StartProfiling X 事件
+    =采样启动成本(首启 250-820ms),其窗+首次会话后 500ms 预热窗重叠的渲染帧标 recorderArtifact
+    并缺省剔除出 frames.fps/gap 分位/超阈计数/slowest/timeline(分母同步扣伪影窗并集);
+    --include-recorder 只关剔除(全帧口径,标记仍在)。profile 采样聚合(api/tagSelf/GC)不受影响。
+    WORKER_ANOMALY.value.idleSuspectWorkers 只展示不定罪(仪器口径问题)。
+    schemaVersion 1 内追加(2026-09-29):recorder 段/frames.countedFrames·recorderArtifactFrames·
+    effSpanS/timeline.audioMs/slowest.audioMs·recorderArtifact/workers.*Pct·idleSamplingSuspect
 `;
 
 // ─────────────────────────── CLI ───────────────────────────
 
-const USAGE = `用法: node --max-old-space-size=8192 tools/trace-x-ray.mjs <trace.json> [...] [--out PATH] [--md] [--probe fn1,fn2] [--top N]
+const USAGE = `用法: node --max-old-space-size=8192 tools/trace-x-ray.mjs <trace.json> [...] [--out PATH] [--md] [--probe fn1,fn2] [--top N] [--include-recorder]
       node tools/trace-x-ray.mjs diff <a.digest.json> <b.digest.json> [--out diff.json]
       node tools/trace-x-ray.mjs --schema   # digest 消费契约
 详见文件头注。`;
@@ -1208,6 +1383,7 @@ function parseArgs(argv) {
     if (a === '--md') opts.md = true;
     else if (a === '--quiet') opts.quiet = true;
     else if (a === '--force-stream') opts.forceStream = true;
+    else if (a === '--include-recorder') opts.includeRecorder = true;
     else if (a === '--out') opts.out = argv[++i];
     else if (a === '--top') opts.top = parseInt(argv[++i], 10);
     else if (a === '--main-tid') opts.mainTid = argv[++i];

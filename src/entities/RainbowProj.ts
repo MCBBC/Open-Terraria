@@ -106,7 +106,8 @@ export class RainbowSegment extends Entity {
       //  usesIDStaticNPCImmunity → flag3 假 :12635 免疫门照适用=pierce 0 承载）。
       const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
       if (!vanillaGated) {
-        ghostHealProc(game, this.projId, this.pveNumHits, e);
+        ghostHealProc(game, this.projId, this.pveNumHits,
+          e as never as Parameters<typeof ghostHealProc>[3]);
         this.pveNumHits++;
       }
     }
