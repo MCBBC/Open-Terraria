@@ -140,6 +140,7 @@ function bjShell(w: World, px = 30 * TILE, py = 30 * TILE) {
   };
   g.player = {
     cx: px, cy: py, x: px - 6, y: py - 14, w: 12, h: 28,
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     snowballLauncherInteractionCooldown: 0,
     buffs: { apply: (t: BuffType, d: number) => buffs.push([t, d]) },
     inv: { slots: [] as Array<{ id: number; stack: number } | null> },

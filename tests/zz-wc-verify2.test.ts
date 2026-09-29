@@ -1,4 +1,8 @@
+// ★刀 I 定谳+隔离（2026-09-29）:液体域一次性取证仪（见 zz-wc-count2.test.ts 头注）。
+//   waterCheck/settle 全同步循环阻塞 worker → testTimeout 永不触发 → 全量套件末段挂死。
+//   缺省 skip,SW_WC_FORENSIC=1 显式启用;非删除（归属原取证会话,登记不清理）。
 import { it } from 'vitest';
+const itForensic = it.runIf(process.env.SW_WC_FORENSIC === '1');
 import { readFileSync, openSync, writeSync, closeSync } from 'node:fs';
 import { parseWldToSave } from '../src/wld/WldImport';
 import { loadSaveData } from '../src/save/SaveFile';
@@ -8,7 +12,7 @@ const LOG = openSync('/tmp/wc-verify2.log', 'w');
 const log = (s: string) => { writeSync(LOG, s + '\n'); };
 const mem = () => { const m = process.memoryUsage(); return `heap=${Math.round(m.heapUsed/1e6)}MB rss=${Math.round(m.rss/1e6)}MB`; };
 
-it('wc-verify2', async () => {
+itForensic('wc-verify2', async () => {
   const b = readFileSync('/Users/vinlic/Downloads/天真的钴最高点.wld');
   const { world } = loadSaveData(parseWldToSave(new Uint8Array(b)).save);
   log(`T1 loaded ${mem()}`);

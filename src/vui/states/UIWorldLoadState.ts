@@ -270,6 +270,19 @@ export class UIWorldLoadState extends UIState {
   /** 最近一次显示键（undefined 文案=粘滞沿用,不触发重翻译/换行计算） */
   private lastLabelKey: string | undefined = '';
 
+  /** ★wbake 转正·步骤归位（2026-09-29 用户令「把这个 step 挂在进度条的一项 step,
+   *  而不是直接出一个遮罩」）：渲染期待窗把步骤行（header,"加载背景图 - 100%" 同位）
+   *  接管为给定文案（「正在渲染世界…」）。后缀百分比抑制（suffixMode=false——等待
+   *  态无水位可读,基串原样上屏）;双进度杆保持读档终态不动;掀幕 stopMenu 清页=
+   *  步骤随之消失。种子三重奏照常覆写（drunk 乱码/蜜蜂/FTW 反写对本页一切文字
+   *  生效,UIWorldLoad.DrawSelf 同构）;abortQueued 优先级仍最高（取消中文案不被
+   *  接管覆写）。读档页（无 seedText）seedFlags=null=纯基串。 */
+  showRenderStep(text: string): void {
+    this.baseText = text;
+    this.suffixMode = false;
+    this.refreshHeaderText();
+  }
+
   /** ★IIIII215b 头部文字逐帧合成（UIWorldLoad.DrawSelf :93-116 序）：
    *  基串(原样/带后缀) → ① drunk 乱码 → ② 蜜蜂整替 → ③ FTW 反写。
    *  ★IIIII229（⑥ 217 章 M2）：三重奏**顺序 if 化**——vanilla :93/:104/:108 为三顺序

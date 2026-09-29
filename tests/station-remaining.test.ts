@@ -225,7 +225,10 @@ describe('i18n 键（tools/l10n-custom → public/l10n）', () => {
       const pack = JSON.parse(readFileSync(`${here}../public/l10n/${cult}.json`, 'utf8')) as {
         Mods: Record<string, string>;
       };
-      for (const k of ['Title', 'Hint', 'Placeholder', 'Save']) {
+      // ★刀 I 定谳（2026-09-29）:'Save' 键已死——保存钮 08-30 da1965e2 起走
+      //   Lang.inter(47)（UI.ts:1146）,Sign.Save 零消费;9545b31c 产物清扫正确落盘。
+      //   Title/Hint/Placeholder 仍活（UI.ts:1128/1135/1140 消费,l10n-audit 724 键全中）。
+      for (const k of ['Title', 'Hint', 'Placeholder']) {
         const v = pack.Mods[`SandboxWorld.Sign.${k}`];
         expect(typeof v, `${cult} Sign.${k}`).toBe('string');
         expect((v ?? '').length, `${cult} Sign.${k}`).toBeGreaterThan(0);

@@ -215,8 +215,10 @@ export enum BuffType {
   //      AddBuff(165,120) Projectile.cs:38797-38802；效果 Player.cs:9985-9991）----
   DryadsWard = 106,    // 树妖祝福(165)：lifeRegen+6(3 HP/s)/防御+8/thorns<1 时+0.5
   // ---- The Constant 饥饿链（Player.cs:11636 UpdateHungerBuffs + :11743
-  //      UpdateStarvingState；BuffID 332/333/334 均在 debuff 表 Main.cs:8856-8858，
-  //      且都在护士不可移除排除表 BuffID.cs:32 → 不进本仓 DEBUFFS（护士不可清））----
+  //      UpdateStarvingState；BuffID 332/333/334 均在 debuff 表 Main.cs:8856-8858（1457
+  //      重排 :9059-9061），且都在护士不可移除排除表 BuffID.cs:32 → 入 DEBUFFS
+  //      （★BJ405 补全批：右键门 `!debuff[b]` 需要分类位;护士面经 isNurseLockedBuff
+  //      过滤依旧不计价不清除,旧「不进 DEBUFFS」决策随第三消费面退役）----
   NeutralHunger = 108, // 稍饿(332)：无敌数值效果——倒计时态（18000t=5min；
                        //   remix（don't dig up）×constant 组合 28800t=8min，:11701/:11760）
   Hunger = 109,        // 饥饿(333)：防-2/全系暴击-2/全系伤-5%/近战速-5%/召唤击退-0.5/
@@ -1026,14 +1028,18 @@ const VAMPIRE_ON_FIRE_HP_S = -50;
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
   campfireAccum = 0;
-  /** 本仓已实装的 debuff 集（Main.debuff 表 ∩ BuffType：环境伤害/控速/DoT 族——
-   *  魔力眩晕 94 亦在原版 debuff 表，护士可清）。
+  /** 本仓已实装的 debuff 集 = Main.debuff 全表 ∩ 已实装（Main.cs:9004-9079 写位
+   *  76 项;环境伤害/控速/DoT/正面伪 debuff/光环短钉族全按原表归位——魔力眩晕 94
+   *  亦在原版 debuff 表，护士可清）。
+   *  消费面三处：① debuffCount（护士计价）② clearDebuffs（护士清除）
+   *  ③ buffRightClickRemovable（★BJ405 右键取消门 ≡ TryRemovingBuff `!debuff[b]`
+   *  Main.cs:44109——Main.debuff 全表机械对拍锁 tests/buff-rightclick-bj405）。
    *  ★ NurseCannotRemoveDebuff 排除表（BuffID.cs:32 = {28,34,87,89,21,86,199,332,
    *  333,334,165,146,48,158,157,350,215,147,321,43}）消费面已接：
    *  debuffCount/clearDebuffs 经 NURSE_CANNOT_REMOVE_VANILLA 反查 vanilla id 过滤
    *  （护士不计价也不清除该表成员——狼人 28/人鱼 34 等正面伪 debuff、篝火/水蜡烛等
-   *  短钉光环、药水病 21、DD2 巨魔唾液期内 NoBuilding 199 等）。本集成员与此表仍
-   *  零交集（回归锁 tests/finalzero-game-domain），未来入集的排除表成员自动被滤。 */
+   *  短钉光环、药水病 21、DD2 巨魔唾液期内 NoBuilding 199 等）；该表成员已按原表
+   *  入集（右键面需要分类位）,护士面过滤在先零扰动。 */
   static readonly DEBUFFS = new Set<BuffType>([
     BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
     BuffType.Chilled, BuffType.Weak, BuffType.Slow, BuffType.ManaSickness, BuffType.Poisoned,
@@ -1054,6 +1060,54 @@ export class BuffState {
     // 终零波补档两条（2026-09-01；均不在护士排除表 → 可计价/可清除）
     BuffType.Dazed,      // 眩晕(160)——美杜莎之首 PvP 命中族（Main.cs:9005）
     BuffType.OgreSpit,   // 分泌物(197)——DD2 巨魔喷吐团消亡近身 900t(:74097)
+    // ---- ★BJ405 补全批（2026-09-29）：Main.debuff 全表 1:1 对拍补档（1457
+    //  Main.cs:9004-9079 写位 76 项 × 已实装 35 项缺档,机械对拍见
+    //  tests/buff-rightclick-bj405「表审计」）。动机 = 本集新增第三消费面：右键
+    //  取消门 buffRightClickRemovable ≡ TryRemovingBuff `!debuff[b]`（Main.cs:44109）。
+    //  护士面零扰动：debuffCount/clearDebuffs 的 isNurseLockedBuff 过滤在先,
+    //  排除表成员（{28,34,87,89,21,86,199,332,333,334,165,146,48,158,157,350,215,
+    //  147,321,43} BuffID.cs:32）入集后依旧不计价不清除。槽位驱逐面更贴原版：
+    //  AddBuff_ActuallyTryToAddTheBuff 驱逐首选 `!Main.debuff` 槽（:5317-5351）,
+    //  debuff 标记成员本就不该被驱逐。
+    //  A 组｜正面伪 debuff/光环短钉族（全在护士排除表 → 护士双滤不变）：
+    BuffType.Werewolf,          // 狼人(28)——月相变身,变形态右键不可解（原版同）
+    BuffType.Merfolk,           // 人鱼(34)——入水变身,同上
+    BuffType.Resistance,        // 药水病(21)——喝药冷却,原版标记 debuff 禁右键
+    BuffType.Campfire,          // 篝火(87)——篝火光环短钉（AddBuff(id,2)/t 族）
+    BuffType.WaterCandle,       // 水蜡烛(86)——刷怪光环
+    BuffType.HeartLamp,         // 心灯(89)——回血光环
+    BuffType.Sunflower,         // 向日葵(146)——心情光环
+    BuffType.PeaceCandle,       // 和平蜡烛(157)——减刷怪光环
+    BuffType.StarInBottle,      // 瓶中星(158)——落星光环
+    BuffType.ShadowCandle,      // 暗影蜡烛(350)——1457 刷怪光环
+    BuffType.CatBast,           // 猫堡垒(215)——摆件光环
+    BuffType.BrainOfConfusionBuff, // 混乱之脑(321)——大师伪反伤 buff（护士排除表内）
+    BuffType.MonsterBanner,     // 旗帜(147)——战旗增益,右键不可解（原版同,旗杆光环每帧重挂）
+    BuffType.NeutralHunger,     // 稍饿(332)——The Constant 饥饿链（右键/护士均不可解）
+    BuffType.Hunger,            // 饥饿(333)——同上
+    BuffType.Starving,          // 极饿(334)——同上
+    //  B 组｜控制/减益缺档（不在护士排除表 → 护士可计价可清除 = 原版语义）：
+    BuffType.Frozen,            // 冻结(47)——控制系（Warmth 在场时长÷2 的另一端）
+    BuffType.Tipsy,             // 醉酒(25)——麦酒
+    BuffType.ChaosState,        // 混沌态(88)——传送勺冷却惩罚
+    BuffType.MoonLeech,         // 月蛭(145)
+    BuffType.Obstructed,        // 阻碍(163)——石巨人拳头
+    BuffType.WindPushed,        // 强风吹(194)——大风天推挤
+    BuffType.WitheredArmor,     // 枯萎护甲(195)——DD2
+    BuffType.Horrified,         // 恐惧(37)——肉山逃战
+    BuffType.TheTongue,         // 血舌(38)——肉山拖拽
+    BuffType.Rabies,            // 狂犬病(148)
+    BuffType.Stinky,            // 恶臭(120)——臭屁瓶
+    BuffType.Lovestruck,        // 热恋(119)——热恋药水
+    BuffType.Shimmered,         // 微光浸没(353)——微光池（Player.ts:4670 每帧续钉）
+    BuffType.GelBalloonBuff,    // 凝胶气球(320)
+    //  C 组｜1457 敌弹 debuff 家族（enum 注「仅 StatusNPC 侧」已过时——凡在
+    //  BUFF_DEFS 在册即可入 BuffState 出栏,分类按 Main.debuff 全表归位）：
+    BuffType.PotentAcid,        // 强酸(395)
+    BuffType.ChlorophyteSpore,  // 叶绿孢子(397)——玩家侧 DoT（ENV_DOTS 在册）
+    BuffType.AcceleratePoisons, // 促毒(398)——催化腕带
+    BuffType.BlueLightning,     // 蓝电(399)
+    BuffType.RedLightning,      // 红电(400)
   ]);
   /** 活跃 debuff 计数（Main.GetNurseHealCost Main.cs:40752-40762 的 +100/个 段：
    *  `debuff[t] && buffTime>60 && !BuffID.Sets.NurseCannotRemoveDebuff[t]`） */
@@ -1674,4 +1728,22 @@ export class BuffState {
   get arrowDmgMult(): number {
     return this.active.has(BuffType.Archery) ? 1.1 : 1;
   }
+}
+
+/** 右键取消门 ≡ Main.TryRemovingBuff（Main.cs:44093-44117）首行
+ *  `if (!debuff[b] && b != 60 && b != 151)`——debuff 表成员与 60 水晶叶
+ *  （LeafCrystal,套装标志位钉 18000t）/151 吸魂（SoulDrain,魂镰自持）右键
+ *  零反应（不删、不响、无任何视觉伴随）;其余（含全部随从伴生 buff——64/125/126/
+ *  133/134/135/139/140/182/188/216/325/335/355 等全族不在 Main.debuff 表
+ *  Main.cs:9004-9079）DelBuff + SoundID 12 → 随从族消散链见 Game.maintainMinionBuffs
+ *  BJ405 注（buff 槽 = 召唤活体凭证,删除即取消召唤）。原版坐骑支（:44100-44103
+ *  mount.CheckBuff→TryDismount 顶替 DelBuff）本仓不可达——坐骑 buff 不入
+ *  BuffState 不出 buff 栏（Mounts.ts:2162 单一真源模型,BJ405-D1 登记）。
+ *  宠物支 = CheckBuffHideMisc hideMisc 翻转（UI 宠物通道块 t===null 分支承接,
+ *  togglePetSlot 内自带 Sound 12）。无 vanillaBuff 映射的自造 buff 按非 debuff
+ *  可右键（=原版"表外默认 false"同判）。判别锁：tests/buff-rightclick-bj405 */
+export function buffRightClickRemovable(t: BuffType): boolean {
+  if (BuffState.DEBUFFS.has(t)) return false;
+  const vb = BUFF_DEFS[t]?.vanillaBuff;
+  return vb !== 60 && vb !== 151;
 }

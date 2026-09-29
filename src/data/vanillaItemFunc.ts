@@ -11,6 +11,9 @@ export interface ItemFunc {
   ammo?: number; useAmmo?: number; notAmmo?: number;
   shoot?: number; channel?: number; holdStyle?: number; torch?: number;
   useStyle?: number; knockBack?: number; autoReuse?: number;
+  /** Item.noUseGraphic（Item.cs:170 缺省 false;json 已有键,类型补列——★清偿刀 H①
+   *  5451/5738 holdStyle 7 双件皆 1,静持不画的消费面锚） */
+  noUseGraphic?: number;
   fishingPole?: number;  // 钓竿力度（9 支；抛竿入口判定）
   useTime?: number;     // 数据表当前未提取（Game.ts:12113 用 ?? 15 兜底）；提取器补键后即生效
   bait?: number;        // 鱼饵力度（29 种；消耗率 1/(1+bait/6)）

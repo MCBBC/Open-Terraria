@@ -71,6 +71,7 @@ function placeShell(w: World) {
   g.playSfxFile = () => {};
   g.playSfxFiles = () => {};
   g.player = {
+    placeSpeedTileRaw: () => 1,   // ★刀I补桩(SW-BJ59 委托面;桩 buff/equipStats 空 ⇒ 恒 1,同族五文件判例)
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1,
     buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},

@@ -33,4 +33,16 @@ describe('sw-shell-put-nonfatal 存储失败不吞响应', () => {
   it('504 offline 兜底保留(真离线语义不丢)', () => {
     expect(swSrc()).toContain("return new Response('', { status: 504, statusText: 'offline' });");
   });
+
+  it('★文档不入冷启动 assetish 早退支(2026-09-29 首访陈旧码根因锁)', () => {
+    const src = swSrc();
+    // 病史:assetish 折入 isDocPath → SW 重启窗口(currentVersion='')文档走 serveAsset
+    // 资产 cache-first → 端出缓存旧 index.html → 整页旧代码(两阶段复现实验坐实:
+    // HEAD 版首航旧 chunk+刷新才新)。修=文档在早退支前独立成支,恒网络优先。
+    expect(src).not.toMatch(/const assetish = [^\n]*isDocPath/);
+    expect(src).toContain('文档永不入本早退支');
+    // 独立文档支在 assetish 早退支之前(分支序:文档先于资产冷启动兜底)
+    expect(src.indexOf('if (isDocPath(req, path)) {')).toBeGreaterThan(-1);
+    expect(src.indexOf('if (isDocPath(req, path)) {')).toBeLessThan(src.indexOf('if (assetish && !currentVersion)'));
+  });
 });

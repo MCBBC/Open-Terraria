@@ -49,6 +49,7 @@ function shell(w: World, o: { smart?: boolean; plays?: string[]; dusts?: number[
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
   g.player = {
     placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     // 站位：目标行 y=20 在射程盒内（inTileRange,原版 IsTargetTileInItemRange）
     cx: 10 * TILE + 8, cy: 16 * TILE + 8, x: 10 * TILE + 2, y: 16 * TILE, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1, dead: false, gfxOffY: 0,

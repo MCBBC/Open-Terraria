@@ -111,7 +111,38 @@ export const PROTO_MAGIC = 'SW1';
  *       enchant 域 (flags>>1)&15 仅近战支消费。服务器 room.ts flags 整字节透传,
  *       新旧 server 零改动。降级矩阵：旧发端（无位）→
  *       新收端=基伤本地掷（=改动前行为,逐位）;新发端→旧收端=对已掷值再掷（±15%
- *       重卷,有界漂移,无权威/崩溃面）。 */
+ *       重卷,有界漂移,无权威/崩溃面）。
+ *    k) ★X4 清偿刀D（2026-09-29,MP netCameraTarget 面,增量通道不升版不改既有序）：
+ *       msg13 flagBits[5]=hasCameraTarget + 帧尾追加 [f32 camX, f32 camY]（世界 px,
+ *       位置序恒跟在 v7 team 段后）。原版锚=netCameraTarget 是原版 msg13
+ *       （PlayerUpdate）第 4 控制字节 bitsByte24[5] 位 + 条件尾随 Vector2
+ *       （NetMessage.cs:487/:507-509 写,MessageBuffer.cs:1049 读）;本仓 flag 字节为
+ *       bitsByte22/24/26 合并字节,取空闲 bit5 与原版 [5] 位同位呼应。发送面=
+ *       相机目标（GetObjectTrackingCameraPan 三域:观战 Main.cs:63682-63687/无人机
+ *       DroneCameraTracker.TryTracking :63692-63694/高尔夫 LocalGolfState
+ *       :63696-63699）+ 发送门 HasValue 翻转∨位移>160px（Main.cs:63671-63676）。
+ *       消费面=服务器实体 AOI 过滤中心（原版唯一读者 NPC.StreamUpdatesToNearbyPlayers
+ *       的 ReportedCameraPosition=netCameraTarget??position,NPC.cs:91765/Player.cs:
+ *       3896-3905——本仓等价位 room.ts msg23/27 逐接收端过滤）。降级矩阵（双向）：
+ *       新 client 发 → 旧 server 读 team 后重打包剥尾,但 flag 位原样过墙 → 新收端
+ *       remaining<8 拒读=camTarget null（AOI 退回 avatar 位=改动前行为,零崩溃）;
+ *       旧 client 发 → 无位无段 → 新收端 null 同前;新 server 对旧帧零字节差
+ *       （remaining 门读不到段=不重编码）。
+ *    l) ★X4 清偿刀G（2026-09-29,MP 弹幕快照 1020/1105 面,增量通道不升版不改既有序）：
+ *       msg27 kind=11（帕鲁机件 DroneBase 1020/1105——详 msg27 kind 表内注）。
+ *       定谳锚=原版这两弹的 MP 语义【owner 权威输入+全端分布式物理】：owner 端
+ *       LocalInputCache 打包入 ai[0]（Projectile.cs:41679-41687/:38794-38824）、变化
+ *       即 netUpdate=true 走 Msg27（ai[0]/ai[1]+pos+vel,NetMessage.cs:777-828 写/
+ *       MessageBuffer.cs:1701-1744 读 ai[] 直赋）;AI 本体在 owner 门【外】,非 owner
+ *       端照跑（输入取自快照 ai[0]、姿态取自 ai[1]）——即「操控输入经快照同步+
+ *       各端本地模拟」,非主机权威逐拍推流。本仓等价实现=kind11 真类重建+傀儡本地
+ *       AI 照跑+ai0/rotation/位置随快照硬重锚（DroneProjs.ts netDroneSync）+
+ *       输入翻转绕过位移差分门强制出快照（netProjLast.ai0 差分位）。两通道独立性
+ *       定谳：netCameraTarget（msg13 注k）=服务器 AOI 过滤中心,让无人机飞出的画面
+ *       仍在本端 AOI 视野内（否则服务器把弹幕快照滤掉）;kind11 快照=弹幕状态同步
+ *       本体——AOI 为快照的【配送面】,快照为 AOI 视野内的【货】,互不承载。降级
+ *       矩阵：新端发→旧 server 白名单（>10）剥条=该弹不显影零崩溃;旧 client 发→
+ *       无此 kind 不产出;新 server 对旧 kind 零字节差。 */
 export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
@@ -135,7 +166,10 @@ export const enum Msg {
   PlayerState = 13,   // C→S→广播（v2 对齐原版 msg13）：{u8 slot, u8 ctrlBits, u8 flagBits,
                       //   u8 selectedItem, f32 x, f32 y, [f32 vx, f32 vy 若 flagBits[2]]}
                       //   ctrlBits: [0]up [1]down [2]left [3]right [4]jump [5]useItem [6]direction
-                      //   flagBits: [2]hasVelocity [6]ghost(死亡)。position=碰撞盒左上（原版语义）
+                      //   flagBits: [2]hasVelocity [5]hasCameraTarget(注k) [6]ghost(死亡) [7]hostile
+                      //   尾段（位置序,均 remaining 门）：[u8 team 0-5（v7）]
+                      //   [f32 camX, f32 camY 若 flagBits[5]（注k,netCameraTarget 面）]
+                      //   position=碰撞盒左上（原版语义）
   PlayerActive = 14,  // S→C 广播 {slot, active, name}
   TileBatch = 17,     // C→S→广播 {count, ops[]}（tile 操作批量，对齐 msg17 语义）
   SetTime = 18,       // S→C {timeOfDay, dayCount}
@@ -178,6 +212,16 @@ export const enum Msg {
                        //    10=RainCloudProj 移动云（2026-09-03 增量通道：tag=`projId,anchorX,
                        //    anchorY`、aux=击退×100——仅 237/243 过网，238/244/239/245 各端本地
                        //    AI 衍生勿过网防双生成；降级矩阵同 9=switch 落空该弹不显影零崩溃）
+                       //    11=帕鲁机件双弹 DroneBase（★清偿刀G 2026-09-29 增量通道：1020
+                       //    JimsDrone/1105 RemoteControlCar 真类重建+傀儡本地 AI 照跑——原版
+                       //    MP 语义=owner 端输入字节打进 ai[0]、变化即 netUpdate=true
+                       //    （Projectile.cs:41679-41687/:38794-38824）,Msg27 携 ai[0]/ai[1]
+                       //    +pos+vel（NetMessage.cs:777-828/MessageBuffer.cs:1701-1744 ai[]
+                       //    直赋）,全端 AI 本体照跑;localAI[0..2] 不同步各端自持。tag=
+                       //    `projId,rotMilli`（ai[1] 千分位量化）、aux=ai0 输入字节（≙ai[0],
+                       //    0..63）、不携 bit6/bit7（damage=0 无结算面）。降级矩阵同 9/10=
+                       //    新端发→旧 server（白名单>10）剥条/旧 client switch 落空该弹不
+                       //    显影零崩溃;旧端发→无此 kind 不产出）
                        //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起 kind0/2/3 携带
                        //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP；
                        //    bit6(0x40)=pvp——v7 玩家 PvP 弹：pvpAllowed 房内 hostile 玩家的

@@ -109,6 +109,7 @@ function mkShell(seed = 7): { g: GShell; w: World; rec: Rec } {
     buffs: { has: () => false }, equipStats: {},
     inv: {
       selected: 0, slots: new Array(60).fill(null),
+      isItemSlotUnlockedAndUsable: () => false,   // ★刀I补桩(9545b31c 单点门):无 armor 表,谓词 false=无配饰(避免裸 armor 读)
       heldItem: () => ({ id: -1, stack: 9 }), removeHeld: () => {}, removeAt: () => {}, countOf: () => 0,
     },
   };

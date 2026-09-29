@@ -176,7 +176,11 @@ describe('SW-FX10 债⑪ 热键锁 HbLock', () => {
     // mouseup 臂：锁定+关包 → 该格既不选中也不拾取（整格无动作,点击本体透传世界）
     expect(uiSrc).toMatch(/if \(from\.where === 'inv' && from\.i < 10 && !panelOpen\) \{\s*\n\s*if \(this\.game\.player\.hbLocked\) return;/);
     // mousedown 臂：passthrough 槽不 stopPropagation（事件达 window）
-    expect(uiSrc).toMatch(/if \(s\.dataset\.swWorldPassthrough === '1'\) return;\n\s*e\.stopPropagation\(\);/);
+    // ★清偿刀 F 2026-09-29 重锚：BJ328/BJ335 起 mousedown 臂宿主元素改经
+    // e.currentTarget 取（词法自引 `s` 闭包环 = BJ328 堆快照定谳泄漏源）——
+    // 断言意图（豁免格早退先于 stopPropagation）不变,只随形态重锚 `host && …`。
+    // 守卫 `host &&` 保留：测试 shim 直调 handler 无 currentTarget（UI.ts 注）
+    expect(uiSrc).toMatch(/if \(host && host\.dataset\.swWorldPassthrough === '1'\) return;\n\s*e\.stopPropagation\(\);/);
     // domTargets 豁免：data-sw-world-passthrough="1" 子树不算 UI 目标
     // （dataset 守卫 = 真实 Element 恒有 dataset,closest 桩夹具无 dataset 走旧路径）
     expect(domSrc).toMatch(/if \(e\?\.dataset && e\.closest\?\.\('\[data-sw-world-passthrough="1"\]'\)\) return false;/);

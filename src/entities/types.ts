@@ -265,6 +265,11 @@ export interface GameHooks {
   broadcastParticleOrchestra?(type: number, x: number, y: number, moveX?: number, moveY?: number, uniqueInfo?: number): void;
   /** 原版 Dust 池（翅膀尘埃批引入；Game 本体实例化，缺省 = 不生成） */
   vanillaDust?: import('../fx/VanillaDust').VanillaDust;
+  /** 无人机相机跟拍登记（DroneCameraTracker.Track——AI_195/AI_205 owner==myPlayer
+   *  支逐帧调用 Projectile.cs:41688/:38825;清偿刀 A：I 刀出膛位代行退役,Track 归位
+   *  AI 逐帧面）。proj 须满足 render/DroneCameraTracker.DroneCameraTrackable 结构面
+   *  （projId/dead/cx/cy/ownerPlayer——DroneBase 实形满足）;缺省 = 无相机通道。 */
+  droneCameraTrack?(proj: import('../render/DroneCameraTracker').DroneCameraTrackable): void;
   /** 世界坐标光源（翅膀 28 的 Bottom 微光等实体侧 AddLight） */
   addLightAt?(x: number, y: number, r: number, g: number, b: number): void;
   /** 读侧光照采样（0-255 RGB；翅膀 49 Heroicis 光照门消费）——区域外 [0,0,0] */
@@ -275,9 +280,11 @@ export interface GameHooks {
    *  oldVx/oldVy = 消亡时速度——碎镜 1085 的 Kill 特效链消费；
    *  flags = 弹体态补充：hostile（Damage() 结算方向）/ ai0（92 坠星代际链）/
    *  kb+arpen（41 狱炎箭 64×64 重结算的击退/穿甲，取自弹体）/
-   *  sc（弹体 SetDefaults scale——R27：95 诅咒之焰 Kill 尘 scale×scale 消费） */
+   *  sc（弹体 SetDefaults scale——R27：95 诅咒之焰 Kill 尘 scale×scale 消费）/
+   *  ownerLocal（★清偿刀G：Kill owner==Main.myPlayer 门的等价投影,Projectile.cs
+   *  :71983——1020 成就 TO_INFINITY_AND_BEYOND 只认本地自有弹;傀儡显式 false） */
   onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number, oldVx?: number, oldVy?: number, dmg?: number,
-    flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number; sc?: number }): void;
+    flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number; sc?: number; ownerLocal?: boolean }): void;
   /** 粉末云实效（净化粉 proj 10 / 邪恶粉 11 / 猩红粉 463，Projectile.cs:22399-22533
    *  AI_006 每帧回调）：命中盒内逐格 WorldGen.Convert + Damage_TryUsingPowders（:13646）
    *  NPC 转化。Game 实现（evolution.convert + bound 税务官 Transform 链） */
@@ -324,7 +331,7 @@ export interface GameHooks {
    *  收门段 Volume=scale 消费)；Game 实现 = Sfx.startTrackedLoop，缺省无循环音） */
   startTrackedLoop?(
     name: string, vol: number, x: number, y: number,
-  ): { stop(): void; setPos(px: number, py: number): void; setVolume?(v: number): void } | null;
+  ): { stop(): void; setPos(px: number, py: number): void; setVolume?(v: number): void; setPitch?(p: number): void } | null;
   /** channel 蓄力期手持动画续期（Player.ItemCheck channel 分支 itemAnimation 钉满——
    *  手持法杖全程举向鼠标不脱落；GlacierFangShot/PrismProj 蓄力态逐 tick 调用） */
   refreshChannelItem?(aim?: number): void;

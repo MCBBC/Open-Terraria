@@ -100,6 +100,13 @@ function mkAccHost(exRef: { current: ShimExec | null }, bridgeRaw: FakeCtx) {
       texRefreshSizes.push([img.width, img.height]);
       return { tex: {}, w: img.width, h: img.height, key: _key };
     },
+    // ★刀I补桩(P1-B 子区增量 24e6e76b):本文件判据=「上传笔数」(零上传/被观测),
+    //   子区上传也是上传 → 并入同一账本,零上传判据语义不变
+    texRefreshRegion(_key: string, img: { width: number; height: number }, _w: number, _h: number) {
+      texRefreshCalls++;
+      texRefreshSizes.push([img.width, img.height]);
+      return { tex: {}, w: img.width, h: img.height, key: _key };
+    },
     texAlive() { return true; },
   };
   return {

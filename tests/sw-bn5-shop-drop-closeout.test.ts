@@ -141,7 +141,7 @@ function mkMineGame(): { g: HG; st: World['store']; w: World; parts: Array<{ n: 
   g.mining = null;
   g.hardnessCache = 0;
   g.hammerPoundRelease = false;
-  g.player = { buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, usedAmbrosia: false, equipStats: {}, inv: { removeHeld: () => true } };
+  g.player = { buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, usedAmbrosia: false, equipStats: {}, inv: { removeHeld: () => true }, isGhostPhase: () => false };   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
   g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.inTileRange = () => true;
   g.spawnParticles = (...a: unknown[]) => { parts.push({ n: a[3] as number }); };
@@ -198,7 +198,7 @@ describe('★SW-BN5 换墙面 ReplaceWall 音/尘（WorldGen.cs:63050-63053）',
     g.cb = { onInventoryChanged: () => {} };
     g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
     g.inTileRange = () => true;
-    g.player = { buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, usedAmbrosia: false, equipStats: {}, inv: { removeHeld: () => true }, useTime: 0 };
+    g.player = { buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, usedAmbrosia: false, equipStats: {}, inv: { removeHeld: () => true }, useTime: 0, isGhostPhase: () => false };   // ★刀I补桩
     g.spawnParticles = (...a: unknown[]) => { parts.push({ n: a[3] as number }); };
     g.spawnDrop = (x: number, y: number, key: string, n: number) => { drops.push({ x, y, key, n }); return null; };
     g.recLog = () => {};
@@ -231,7 +231,7 @@ describe('★SW-BN5 爆炸清墙面 per-wall 音/尘并存（Projectile.cs:80488
     g.recLog = () => {};
     g.spawnDrop = (_x: unknown, _y: unknown, key: string, n: number) => { drops.push({ key, n }); return null; };
     g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
-    g.player = { cx: -500, cy: -500, x: -510, y: -521, w: 12, h: 28, facing: 1, buffs: { has: () => false }, equipStats: {}, hp: 100, luck: 0 };
+    g.player = { cx: -500, cy: -500, x: -510, y: -521, w: 12, h: 28, facing: 1, buffs: { has: () => false }, equipStats: {}, hp: 100, luck: 0, isGhostPhase: () => false };   // ★刀I补桩
     return { g, st: w.store, w, drops, parts, sfx };
   }
 
@@ -431,6 +431,7 @@ function shell(w: World, heldDef: (typeof ITEM_DEFS)[number]): Shell {
   const slots: unknown[] = new Array(50).fill(null);
   slots[5] = { id: iidOf(TITANIUM_PICK), stack: 1 };
   g.player = {
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1, usedAmbrosia: false,
     buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 },

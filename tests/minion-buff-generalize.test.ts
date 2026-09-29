@@ -246,10 +246,11 @@ describe('③ 维护链（:10149-10575 ownedProjectileCounts 等价）', () => {
     }
   });
 
-  it('离役移除：24 族逐个——弹亡（dead）→ 次 tick DelBuff', () => {
+  it('离役移除：24 族逐个——弹亡（dead）→ 次 tick DelBuff（★BJ405 授予面前置：原版维护支只扫现存槽,凭证先于维护）', () => {
     for (const o of ORACLE) {
       const pl = new Player(60 * 16, 90 * 16, new Inventory());
       const t = buffTypeByVanilla(o.buff)!;
+      pl.buffs.apply(t, 10);                       // ★BJ405：召唤授予（ItemCheck AddBuff 语义）前置
       const m = new MinionProj(60 * 16, 90 * 16, o.projs[0], 10, 2, false, 0, false, () => pl);
       maintain(pl, [m]);
       expect(pl.buffs.has(t), `${o.name} 前置在役`).toBe(true);
@@ -259,18 +260,20 @@ describe('③ 维护链（:10149-10575 ownedProjectileCounts 等价）', () => {
     }
   });
 
-  it('多型族任一型在役即维持：蜘蛛 391/海盗 394/双子 388/矮人 192（projs 数组语义）', () => {
+  it('多型族任一型在役即维持：蜘蛛 391/海盗 394/双子 388/矮人 192（projs 数组语义；★BJ405 授予前置）', () => {
     for (const [staff, proj] of [[2551, 391], [2584, 394], [2535, 388], [1157, 192]] as const) {
       const o = ORACLE.find((x) => x.staff === staff)!;
       const pl = new Player(60 * 16, 90 * 16, new Inventory());
+      pl.buffs.apply(buffTypeByVanilla(o.buff)!, 10);
       const m = new MinionProj(60 * 16, 90 * 16, proj, 10, 2, false, 0, false, () => pl);
       maintain(pl, [m]);
       expect(pl.buffs.has(buffTypeByVanilla(o.buff)!), `staff ${staff} 变体弹 ${proj}`).toBe(true);
     }
   });
 
-  it('异族弹不互认：在场 373（黄蜂）只维持 125,其余 23 族+1457 四件 buff 不被错误续起', () => {
+  it('异族弹不互认：在场 373（黄蜂）只维持 125,其余 23 族+1457 四件 buff 不被错误续起（★BJ405 起兼无凭证复活锁）', () => {
     const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.HornetMinion, 10);     // ★BJ405：授予前置
     const m = new MinionProj(60 * 16, 90 * 16, 373, 10, 2, false, 0, false, () => pl);
     maintain(pl, [m]);
     expect(pl.buffs.has(BuffType.HornetMinion)).toBe(true);
@@ -284,8 +287,9 @@ describe('③ 维护链（:10149-10575 ownedProjectileCounts 等价）', () => {
     }
   });
 
-  it('216 雀宝宝重生支（:10369-10385）：弹缺 + 背包有 4281 + 空槽 → 直生 759（基伤 7）+ buff 续', () => {
+  it('216 雀宝宝重生支（:10369-10385）：弹缺 + 背包有 4281 + 空槽 → 直生 759（基伤 7）+ buff 续（★BJ405 授予前置=原版槽位分支前置）', () => {
     const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.BabyBird, 10);        // ★BJ405：重生支在 buff 槽循环体内——槽在才可重生
     pl.inv.add(4281, 1);
     const { spawned } = maintain(pl, []);
     expect(spawned).toHaveLength(1);
@@ -296,6 +300,7 @@ describe('③ 维护链（:10149-10575 ownedProjectileCounts 等价）', () => {
 
   it('216 无杖不重生：背包无 4281 → 不生成且 DelBuff（:10383-10385）', () => {
     const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.BabyBird, 10);        // ★BJ405 授予前置
     const { spawned } = maintain(pl, []);
     expect(spawned).toHaveLength(0);
     expect(pl.buffs.has(BuffType.BabyBird)).toBe(false);
@@ -303,6 +308,8 @@ describe('③ 维护链（:10149-10575 ownedProjectileCounts 等价）', () => {
 
   it('216 满槽不重生：4281 在包但随从槽满（黄蜂占 1/1）→ 不生成且 DelBuff（numMinions<maxMinions 门）', () => {
     const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.BabyBird, 10);        // ★BJ405 授予前置
+    pl.buffs.apply(BuffType.HornetMinion, 10);
     pl.inv.add(4281, 1);
     const hornet = new MinionProj(60 * 16, 90 * 16, 373, 10, 2, false, 0, false, () => pl);
     const { spawned } = maintain(pl, [hornet]);
@@ -318,6 +325,7 @@ describe('③ 维护链（:10149-10575 ownedProjectileCounts 等价）', () => {
 describe('④ 互斥驱逐 → 伴生 buff 撤除', () => {
   it('同型驱逐：召 373（黄蜂杖）清在场 373 → 次 tick 125 撤（MinionSacrificable 门内）', () => {
     const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.HornetMinion, 10);                  // ★BJ405 授予前置
     const old = new MinionProj(60 * 16, 90 * 16, 373, 10, 2, false, 0, false, () => pl);
     maintain(pl, [old]);
     expect(pl.buffs.has(BuffType.HornetMinion)).toBe(true);
@@ -329,6 +337,8 @@ describe('④ 互斥驱逐 → 伴生 buff 撤除', () => {
 
   it('帕鲁跨代互清：召 1112 清在场 1093（:52340-52350 同族）→ 385 撤、389 不受牵连', () => {
     const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.PalworldMinionCattiva, 20);         // ★BJ405 授予前置
+    pl.buffs.apply(BuffType.PalworldMinionTrustyCattiva, 20);
     const cattiva1456 = new MinionProj(60 * 16, 90 * 16, 1093, 20, 2, false, 0, false, () => pl);
     const trusty = new MinionProj(60 * 16, 90 * 16, 1112, 20, 2, false, 0, false, () => pl);
     maintain(pl, [cattiva1456, trusty]);
@@ -345,6 +355,8 @@ describe('④ 互斥驱逐 → 伴生 buff 撤除', () => {
 
   it('驱逐保护：625 龙头（:51017 豁免）超限不被杀 → 188 维持不误撤', () => {
     const pl = new Player(60 * 16, 90 * 16, new Inventory());
+    pl.buffs.apply(BuffType.StardustDragonMinion, 10);          // ★BJ405 授予前置
+    pl.buffs.apply(BuffType.HornetMinion, 10);
     const head = new MinionProj(60 * 16, 90 * 16, 625, 40, 2, false, 0, false, () => pl);
     const other = new MinionProj(60 * 16, 90 * 16, 373, 10, 2, false, 0, false, () => pl);
     maintain(pl, [head, other]);

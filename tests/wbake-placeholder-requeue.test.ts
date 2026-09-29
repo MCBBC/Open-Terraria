@@ -34,6 +34,9 @@ type Priv = {
   requeueWorkerBake(cx: number, cy: number): void;
   get(cx: number, cy: number): ChunkPair;
   flushDirty(maxN?: number, budgetMs?: number): void;
+  viewportCovered(): boolean;
+  beginBakeBudget(): void;
+  bakeBudgetMs: number;
   completeWorkerBake(cx: number, cy: number, w: unknown, t: unknown, g: unknown,
     missing: string[], consumed: string[]): void;
   dispose(): void;
@@ -198,8 +201,57 @@ describe('wbake 混合路由（worker 慢路径旁路）', () => {
     expect(client.request).toHaveBeenCalledWith(20, 20, expect.anything(), false);
   });
 
-  it('flushDirty wbake 分支：视口内脏块=同步 get;视口外=request', () => {
+  it('★帧内烘焙预算：超限=预算占位对（无 worker 请求,渐进过渡）;重置后跨帧摊真对', () => {
     const cc = makeCache();
+    const client = {
+      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(),
+      hasPending: vi.fn(() => false), pumpLow: vi.fn(),
+    };
+    (cc as unknown as { bakeClient: unknown }).bakeClient = client;
+    (cc as unknown as { animView: { x0: number; y0: number; x1: number; y1: number } | null }).animView
+      = { x0: 0, y0: 0, x1: 512, y1: 512 };
+    (cc as unknown as { bakeBudgetMs: number }).bakeBudgetMs = 0;   // 预算窗耗尽态（0>=0 恒超限=首块即占位）
+    const p = cc.get(0, 0);
+    expect(p.placeholder).toBe(true);                  // 预算占位对
+    expect(client.request).not.toHaveBeenCalled();     // 无 worker 请求（区别于视口外占位）
+    expect((cc as unknown as { workerAwaiting: Set<number> }).workerAwaiting.size).toBe(0);
+    expect(cc.viewportCovered()).toBe(true);           // 渐进块不阻塞幕布
+    // 下一帧预算窗重置 → 渲染循环 get() 原位续摊 = 真对（跨帧摊,总时长无回退）
+    (cc as unknown as { beginBakeBudget(): void }).beginBakeBudget();
+    (cc as unknown as { bakeBudgetMs: number }).bakeBudgetMs = 8;
+    const q = cc.get(0, 0);
+    expect(q.placeholder).toBeFalsy();                 // 预算内重烘真对
+    expect(q.cell).toBe(p.cell);                       // 粘滞槽位原位
+    expect(client.request).not.toHaveBeenCalled();
+  });
+
+  it('★帧内预算：占位重建分支同样受限（超限=占位保持,预算内=原位重烘）', () => {
+    const cc = makeCache();
+    const client = {
+      request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(),
+      hasPending: vi.fn(() => false), pumpLow: vi.fn(),
+    };
+    (cc as unknown as { bakeClient: unknown }).bakeClient = client;
+    (cc as unknown as { animView: { x0: number; y0: number; x1: number; y1: number } | null }).animView
+      = { x0: 8192, y0: 8192, x1: 12288, y1: 12288 };
+    // 视口外建 worker 占位对 → 模拟其请求蒸发（hasPending=false）→ 预算超限时
+    // 渲染循环 get() 不重建（下帧摊）——蒸发占位对由 flushDirty 救回链兜底
+    cc.get(20, 20);
+    (cc as unknown as { bakeBudgetMs: number }).bakeBudgetMs = 0;   // 预算窗耗尽态（0<0 恒假=不重建）
+    const k = ChunkCache.key(20, 20);
+    const c = cc.chunks.get(k) as ChunkPair;
+    const r = cc.get(20, 20);
+    expect(r.placeholder).toBe(true);                  // 超限=占位保持
+    expect(r.cell).toBe(c.cell);
+    (cc as unknown as { beginBakeBudget(): void }).beginBakeBudget();
+    (cc as unknown as { bakeBudgetMs: number }).bakeBudgetMs = 8;
+    (cc as unknown as { animView: { x0: number; y0: number; x1: number; y1: number } | null }).animView
+      = { x0: 20 * 256, y0: 20 * 256, x1: 20 * 256 + 256, y1: 20 * 256 + 256 };   // 移入视口
+    const r2 = cc.get(20, 20);
+    expect(r2.placeholder).toBeFalsy();                // 预算内重建真对
+  });
+
+  it('flushDirty wbake 分支：视口内脏块=同步 get;视口外=request', () => {    const cc = makeCache();
     const client = {
       request: vi.fn(), bump: vi.fn(), noteFileArrived: vi.fn(), dispose: vi.fn(), pumpLow: vi.fn(),
       hasPending: vi.fn(() => false),

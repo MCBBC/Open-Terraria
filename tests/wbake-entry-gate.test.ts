@@ -306,4 +306,13 @@ describe('入场空白修复刃③：幕布覆盖门（源锚+旗关零变化）
     expect(CACHE).toContain('viewportCovered(): boolean');
     expect(CACHE).toContain('inViewport(cx: number, cy: number): boolean');
   });
+
+  it('★帧内烘焙预算锚（28fps 追加修复项）:bakeBudgetMs/beginBakeBudget 帧头重置在位', () => {
+    const CACHE = readFileSync(new URL('../src/render/ChunkCache.ts', import.meta.url), 'utf8');
+    expect(CACHE).toContain('bakeBudgetMs = 8;');
+    expect(CACHE).toContain('beginBakeBudget(): void { this._bakeSpent = 0; }');
+    expect(CACHE).toContain('if (this.bakeClient && this._bakeSpent >= this.bakeBudgetMs)');
+    // Game.frame() 头部重置（fixedUpdate+render 同帧共窗）
+    expect(GAME).toContain('this.chunks?.beginBakeBudget();');
+  });
 });

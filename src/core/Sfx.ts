@@ -58,6 +58,10 @@ export type SfxName =
   | 'item8'       // SoundID.Item8（TeleportEffect style 7 恶魔海螺落点音,Main.cs:13542;★SW-RB10a 补）
   | 'bombFuse'    // SoundID.BombFuse = CreateTrackable("fuse")（SoundID.cs:1153，引信嘶声循环 0.2 音量）
   | 'conch'       // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
+  | 'jimsDrone'   // SoundID.JimsDrone = CreateTrackable("Drone").WithVolume(0.1)（SoundID.cs:1060）
+                  //   AI_195 四轴竞速无人机引擎循环轨（Projectile.cs:41706-41708,清偿刀 A）
+  | 'rcCar'       // SoundID.RCCar = CreateTrackable("rccar").WithVolume(0.015)（:1062）
+                  //   AI_205 墙上飞车引擎循环轨（Projectile.cs:38995-38997,清偿刀 A）
   | 'dd2PortalLoop'   // DD2_EtherianPortalIdleLoop（SoundID.cs:984 无 WithVolume→基量 1;
                       //   NPC.cs:41409/:41458 GetActiveSound 空 → PlayTrackedSound 重建的
                       //   常驻循环轨——startTrackedLoop 距离衰减通道,终清波接入）
@@ -168,6 +172,10 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   item8: ['Item_8'],   // ★SW-RB10a：TeleportEffect case 7（恶魔海螺/地狱款贝壳手机落点）
   bombFuse: ['Fuse'],   // Content/Sounds/Custom/fuse.xnb → Fuse.wav（自提取，1.42s 循环）
   conch: ['Item_64'],
+  // ---- 帕鲁机件引擎循环轨（清偿刀 A 2026-09-29；Sounds/ 提取拍平,Drone/rccar 素材
+  //   已在库——sfx-wiring-golden 经 vanilla-soundtracks JimsDrone/RCCar 轨别名覆盖）----
+  jimsDrone: ['Drone'],   // SoundID.JimsDrone（WithVolume 0.1,SoundID.cs:1060）
+  rcCar: ['rccar'],       // SoundID.RCCar（WithVolume 0.015,:1062）
   // ---- DD2 跟踪循环轨（Sounds/Custom 提取拍平；startTrackedLoop 距离衰减+声像通道）----
   dd2PortalLoop: ['dd2_etherian_portal_idle_loop'],
   dd2KoboldIgniteLoop: ['dd2_kobold_ignite_loop'],
@@ -1175,6 +1183,7 @@ export class Sfx {
    *  跟随弹体）。缓冲未就绪返回 null（调用方下 tick 重试即可）。 */
   startTrackedLoop(name: SfxName, vol: number, x: number, y: number): {
     stop(): void; setPos(px: number, py: number): void; setVolume?(v: number): void;
+    setPitch?(p: number): void;
   } | null {
     if (this.suppress) return null;          // 载入期静音门（见字段注释）
     const list = WAV_MAP[name];
@@ -1192,8 +1201,11 @@ export class Sfx {
     // 收门段 Volume=scale / 天气轨同构)——乘在基量上,与位置衰减 atten 相互独立
     let vmul = 1;
     let lx = x, ly = y;
+    // ★清偿刀 A（2026-09-29）：终钳 min(1,·) = 原版 DetermineIntendedVolume 尾
+    //  Clamp(num,0,1)（ActiveSound.cs:160）——既有消费者 vmul≤1 时无感（幂等）,
+    //  AI_195/205 引擎轨透传原值 num4（0..25）时接住近场超 1 面等原版钳口。
     const applyAt = (px: number, py: number) => {
-      g.gain.value = this.atten(vol * vmul, px, py) * this.master;
+      g.gain.value = Math.min(1, this.atten(vol * vmul, px, py) * this.master);
       if (panner) panner.pan.value = this.panOf(px, py);
     };
     // `panner` 在下方声明——applyAt 仅在句柄返回后被调用(TDZ 安全)
@@ -1227,8 +1239,17 @@ export class Sfx {
         applyAt(px, py);
       },
       setVolume: (v: number) => {
-        vmul = Math.max(0, Math.min(1, v));
+        // ★清偿刀 A：上钳 1→10——ActiveSound.Volume 原文无钳（ActiveSound.cs:15 裸
+        //  字段,数值钳在 DetermineIntendedVolume 终口=上方 applyAt）,AI_195/205 引擎
+        //  轨 Volume=num4（0..100 档）透传需要 >1 域;既有 0..1 消费者逐值不变。
+        vmul = Math.max(0, Math.min(10, v));
         applyAt(lx, ly);
+      },
+      // ★清偿刀 A：ActiveSound.Update 逐帧 `Sound.Pitch = Pitch`（ActiveSound.cs:140,
+      //  绝对覆写语义）——AI_195/205 引擎轨 Pitch = Clamp(Remap(推力档,0,100,−1,1)
+      //  + bump, −1, 1)（Projectile.cs:41711/:39001）;XNA Pitch → 播放率 2^pitch。
+      setPitch: (p: number) => {
+        src.playbackRate.value = 2 ** p;
       },
     };
   }

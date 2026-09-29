@@ -270,8 +270,12 @@ export function parseShineBudget(search: string): number | null {
 //   （GLShimExecutor.uploadShineSlice 统一清扫）。
 // 【旗】★转正（2026-09-29 用户拍板）缺省开:动态 shine 逐格上传 1875KB/帧（300 格
 //   农场）→稳态 0（首见一次后键缓存+顶点色 delta）;像素 md5 逐位全等。
-//   ?shineslice=0=逃生门（回逐格上传旧链逐位）。node 恒关（document 判死）。
-export let shineSliceGl = typeof document !== 'undefined'
+//   ?shineslice=0=逃生门（回逐格上传旧链逐位）。node 恒关（location 判活——
+//   ★刀I 定谳 2026-09-29:document 判死会被测试桩的裸 document 全局（pixel-art 等
+//   捕 fillStyle 用）误判活 → node 下 location.search ReferenceError（7 处红:
+//   pixel-art/bj314-arc-tint-cache）。守卫改判 location,与 AudioGate/AssetCache
+//   同判据;浏览器面语义零变。）
+export let shineSliceGl = typeof location !== 'undefined'
   ? new URLSearchParams(location.search).get('shineslice') !== '0' : false;
 export function shineSliceGlSetForTest(v: boolean): void { shineSliceGl = v; }
 

@@ -131,7 +131,7 @@ import {
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
-import { spawnNpcDeathGore, GorePiece } from './GorePiece';
+import { spawnNpcDeathGore, GorePiece, newLovestruckHeart } from './GorePiece';
 import { spawnNpcHitDust, spawnNpcDeathDust } from './NpcHitDust';   // ★BJ254 HitEffect 尘查表
 import { hslToRgb } from '../player/Appearance';
 import { globalTimeWrappedHourly } from '../core/GameTime';   // ★BJ330 GTW 单源（661 光皇蝴蝶点光相位）
@@ -2631,7 +2631,22 @@ export class Enemy extends Entity {
     // 原版 TargetClosest :78569 应用——不再对 vx 做周期翻转（旧近似已移除）
     if (this.confusedT > 0) this.confusedT -= dt;
     if (this.stinkyT > 0) this.stinkyT -= dt;   // stinky(120) 存量倒数（AI 转向 GAP 见字段注）
-    if (this.lovestruckT > 0) this.lovestruckT -= dt;   // 119 纯展示位倒数（B1 批）
+    // buff 119 Lovestruck 递减（:93099-93102 lowerBuffTime→:93181 置位 loveStruck,
+    // 递减后 >0 即本 tick 在位;119 纯展示位倒数,B1 批）+ 头爱心 gore 331——
+    // ★清偿刀 F 2026-09-29：原版 UpdateNPC_BuffApplyVFX（:92455-92466）由 :91488
+    // UpdateNPC 对【全体】NPC 调用,敌怪与城镇 NPC 同式同环——刀B 只落了 TownNPC 侧,
+    // 本补 Enemy 桶。发射式单源 = GorePiece.newLovestruckHeart（公式/掷序/调用侧
+    // 三连 ×0.4/vy−0.6/sticky=false 全注在那边;视觉掷 = Math.random 纯演出面）。
+    // canDisplayBuffs（:6206 缺省 true/:8519 ResetEffects 复位）false 面 = 石巨人
+    // 四件 245-248（:18042-18052 SetDefaults）→ 本方法头 :92265 整环早退,敌怪侧
+    // 须自门（城镇侧恒真无需门）。
+    if (this.lovestruckT > 0) {
+      this.lovestruckT -= dt;
+      const vid0 = this.vanillaId;
+      if (!(vid0 === 245 || vid0 === 246 || vid0 === 247 || vid0 === 248)) {
+        newLovestruckHeart(this.x, this.y, this.w, this.h);
+      }
+    }
     if (this.gelBalloonT > 0) this.gelBalloonT -= dt;   // 320 滴落展示位倒数（B1 批）
     // ---- 1457 新 debuff VFX（UpdateNPC_BuffApplyVFX :92263-92330 + A-5 孢子云
     //      :92878-92894）。原版走 Dust/ParticleOrchestrator,本仓以 spawnParticles

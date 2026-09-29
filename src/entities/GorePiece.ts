@@ -997,3 +997,30 @@ export function spawnNpcDeathGore(
   };
   return spawnDeathGore(src, (p) => add.add!(p, 'props'), ctx);
 }
+
+/** Lovestruck(119) 头爱心 gore 331 发射（NPC.UpdateNPC_BuffApplyVFX :92455-92466）
+ *  ——★清偿刀 F 2026-09-29 单源化：原 :91488 UpdateNPC 对【全体】NPC 调用本 VFX
+ *  环（城镇/敌怪同式同环;canDisplayBuffs=false 仅石巨人四件 245-248 :18042-18052,
+ *  由调用侧自门——TownNPC 恒真,Enemy 桶门见 Enemy.ts）。原 TownNPC 刀B 内联实现
+ *  提取至此,Enemy 桶同源复用。掷序按原版实参求值序（:92455-92459 语句序）：
+ *  Next(5)==0 门 → 单位向 Next(-10,11)×2 → NewGore 实参左→右 位x(Next(width+1))/
+ *  位y(Next(height+1))/速(Next(3,6)×0.33)/档(Next(40,121)×0.01) → Gore.NewGore
+ *  内扰动(:1347-1348,本源 newGore 内自带) → 调用侧 ×0.4 → vy−0.6;sticky=false
+ *  (:92464-92466)。视觉掷 = Math.random（TownNPC 头注豁免清单成员,纯演出面）;
+ *  单位向零和兜底防 Normalize NaN（原版 Normalize 零向=不动,本仓防线）。
+ *  返回 gore 便于判别测试;无掷中/池满返回 null。 */
+export function newLovestruckHeart(x: number, y: number, w: number, h: number): GorePiece | null {
+  if (Math.random() >= 1 / 5) return null;
+  let ux = Math.floor(Math.random() * 21) - 10, uy = Math.floor(Math.random() * 21) - 10;
+  if (ux === 0 && uy === 0) uy = 1;            // Normalize 零向防线（刀B 同式）
+  const ul = Math.hypot(ux, uy);
+  const px = Math.floor(Math.random() * (w + 1));
+  const py = Math.floor(Math.random() * (h + 1));
+  const spd = (Math.floor(Math.random() * 3) + 3) * 0.33;              // Next(3,6)×0.33
+  const g = GorePiece.newGore(331, x + px, y + py,
+    (ux / ul) * 0.66 * spd, (uy / ul) * spd,
+    (Math.floor(Math.random() * 81) + 40) * 0.01);                     // Next(40,121)×0.01
+  if (!g) return null;
+  g.sticky = false; g.vx *= 0.4; g.vy = g.vy * 0.4 - 0.6;              // :92464-92466
+  return g;
+}

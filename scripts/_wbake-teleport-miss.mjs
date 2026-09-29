@@ -99,7 +99,7 @@ const INSTALL = () => {
     return row;
   };
 
-  // 逐帧采样器（浅采样每帧;深采样每 6 帧——getImageData 开销面）
+  // 逐帧采样器（浅采样每帧;深采样每 6 帧——getImageData 开销面;帧界结算 bake 耗时）
   window.__tpStartSampler = () => {
     const raf = () => {
       const S = window.__tpSess.cur;
@@ -107,7 +107,11 @@ const INSTALL = () => {
       if (S && !S.done && g?.world) {
         const deep = S.frames.length % 6 === 0;
         const row = window.__tpSample(deep);
-        if (row) S.frames.push(row);
+        if (row) {
+          row.bakeMs = Math.round((window.__tpBakeAcc || 0) * 10) / 10;
+          window.__tpBakeAcc = 0;
+          S.frames.push(row);
+        }
         const now = performance.now() - S.t0;
         if (now > (window.__tpSess.segMs || 4500)) S.done = true;
       }
@@ -117,15 +121,19 @@ const INSTALL = () => {
   };
   window.__tpStartSampler();
 
-  // ChunkCache 烘焙计数（主线程烘=混合路由消费面）
+  // ChunkCache 烘焙计数 + 单帧 bake 耗时聚合（帧内预算判别器:巨帧 376ms→≤预算+单块）
   import('/src/render/ChunkCache.ts').then((m) => {
     const proto = m.ChunkCache.prototype;
     if (proto.__tpPatched) return;
     proto.__tpPatched = true;
+    window.__tpBakeAcc = 0;
     const origBake = proto.bakeChunkInto;
     proto.bakeChunkInto = function (cx, cy, ...a) {
+      const t0 = performance.now();
+      const r = origBake.apply(this, [cx, cy, ...a]);
       window.__tpSess.mainBake++;
-      return origBake.apply(this, [cx, cy, ...a]);
+      window.__tpBakeAcc += performance.now() - t0;
+      return r;
     };
   });
   // BakeClient：worker 回包 ms/missing/error 计数
@@ -232,7 +240,7 @@ async function runArm(arm) {
   await new Promise((r) => setTimeout(r, 4800));
   const t1 = await page.evaluate(() => window.__tpSess.segs.find((s) => s.name === 'teleport-jungle'));
   const shotN1 = await shotP1;
-  segs.push({ name: 't1-jungle', jungle, frames: t1.frames.filter((f, i) => i < 4 || f.ph !== t1.frames[i - 1]?.ph || f.transparent !== t1.frames[i - 1]?.transparent || f.flat !== t1.frames[i - 1]?.flat).slice(0, 30), deep: t1.frames.filter((f) => f.bad), workerMissing: t1.workerMissing, ms: t1.ms });
+  segs.push({ name: 't1-jungle', jungle, frames: t1.frames.filter((f, i) => i < 4 || f.ph !== t1.frames[i - 1]?.ph || f.transparent !== t1.frames[i - 1]?.transparent || f.flat !== t1.frames[i - 1]?.flat).slice(0, 30), deep: t1.frames.filter((f) => f.bad), workerMissing: t1.workerMissing, ms: t1.ms, bakeSeries: t1.frames.map((f) => f.bakeMs ?? 0) });
 
   // 段2：传送回出生点（反向全换视口）
   const shotP2 = shots(page, `${dir}/t2-return`, 'r', 1400);
@@ -250,7 +258,7 @@ async function runArm(arm) {
   await new Promise((r) => setTimeout(r, 4800));
   const t2 = await page.evaluate(() => window.__tpSess.segs.find((s) => s.name === 'teleport-return'));
   const shotN2 = await shotP2;
-  segs.push({ name: 't2-return', frames: t2.frames.filter((f, i) => i < 4 || f.ph !== t2.frames[i - 1]?.ph || f.transparent !== t2.frames[i - 1]?.transparent || f.flat !== t2.frames[i - 1]?.flat).slice(0, 30), deep: t2.frames.filter((f) => f.bad), workerMissing: t2.workerMissing, ms: t2.ms });
+  segs.push({ name: 't2-return', frames: t2.frames.filter((f, i) => i < 4 || f.ph !== t2.frames[i - 1]?.ph || f.transparent !== t2.frames[i - 1]?.transparent || f.flat !== t2.frames[i - 1]?.flat).slice(0, 30), deep: t2.frames.filter((f) => f.bad), workerMissing: t2.workerMissing, ms: t2.ms, bakeSeries: t2.frames.map((f) => f.bakeMs ?? 0) });
 
   const worker = await page.evaluate(() => ({
     ...window.__tpSess.worker,
@@ -278,5 +286,21 @@ for (const arm of ARMS) {
 const fs = await import('node:fs');
 fs.writeFileSync(`${OUT}/summary.json`, JSON.stringify(results, null, 1));
 console.log(`\nsummary → ${OUT}/summary.json`);
-const ok = results.every((r) => !r.error && r.pageErrors.length === 0);
+// ---- 帧内预算判别器（28fps 追加修复项）:传送段单帧 bake 最大耗时 + 覆盖完成时长 ----
+let budgetOk = true;
+for (const r of results) {
+  if (r.error || !['1', 's0'].includes(r.arm)) continue;
+  const segs = JSON.parse(fs.readFileSync(`${r.dir}/segs.json`, 'utf8'));
+  for (const s of segs) {
+    if (!String(s.name).startsWith('teleport')) continue;
+    const bakes = (s.bakeSeries || []).filter((v) => v > 0);
+    const maxBake = bakes.length ? Math.max(...bakes) : 0;
+    const firstFull = (s.frames || []).find((f) => f.nopair === 0 && f.t > 0);
+    const coveredMs = firstFull ? firstFull.t : -1;
+    console.log(`[budget] arm=${r.arm} seg=${s.name}: 单帧bake max=${maxBake}ms  覆盖完成=${coveredMs}ms`);
+    if (maxBake > 12) { console.log(`  FAIL 单帧 bake 超 12ms 预算上界`); budgetOk = false; }
+    if (coveredMs > 1200) { console.log(`  FAIL 覆盖完成 >1.2s（渐进摊显著变差）`); budgetOk = false; }
+  }
+}
+const ok = results.every((r) => !r.error && r.pageErrors.length === 0) && budgetOk;
 process.exit(ok ? 0 : 1);

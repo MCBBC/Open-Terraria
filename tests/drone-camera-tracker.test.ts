@@ -256,13 +256,16 @@ describe('⑤ Game.ts 接线源锚（Main.cs:63677-63699 优先序 1:1）', () =
     expect(gameSrc).toContain('if (!player.dead && !this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()');
   });
 
-  it('出膛位 Track 接线在 5451/5738 spawn 支内（Projectile.cs:38825/:41688 过渡代行位）', () => {
+  it('★清偿刀 A（2026-09-29）Track 归位：出膛位代行退役——spawn 支【无】track 调用，'
+    + 'Game.droneCameraTrack 钩子承载（AI_195/205 owner==myPlayer 支逐帧,P.cs:41688/:38825）', () => {
     const iSpawn = gameSrc.indexOf('if (pmVid === 5451 || pmVid === 5738) {');
-    const iTrack = gameSrc.indexOf('this.camera.droneTracker.track(mech);');
-    const iAdd = gameSrc.indexOf("this.entities.add(mech, 'projectiles');");
-    const iSwing = gameSrc.indexOf('this.useSwing(heldDef, pa5);');
     expect(iSpawn).toBeGreaterThan(-1);
-    expect(iTrack).toBeGreaterThan(iAdd);
-    expect(iTrack).toBeLessThan(iSwing);
+    // 过渡代行行已退役：spawn 支到 useSwing 之间不得再直调 tracker.track(mech)
+    const iSwing = gameSrc.indexOf('this.useSwing(heldDef, pa5);');
+    const spawnSeg = gameSrc.slice(iSpawn, iSwing);
+    expect(spawnSeg).not.toContain('droneTracker.track(');
+    // 归位面：Game.droneCameraTrack 方法（转接 camera.droneTracker.track）在位
+    expect(gameSrc).toContain('droneCameraTrack(proj');
+    expect(gameSrc).toContain('this.camera.droneTracker.track(proj)');
   });
 });

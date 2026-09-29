@@ -51,6 +51,7 @@ function shell(w: World, drops: Array<[string, number]>, heldVid = 0): Shell {
     buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
     inv: {
       selected: 0, slots: new Array(50).fill(null),
+      isItemSlotUnlockedAndUsable: () => false,   // ★刀I补桩(9545b31c 单点门):无 armor 表,谓词 false=无配饰
       heldItem: () => (heldVid ? { id: heldItemIdOf(heldVid), stack: 5 } : null),
       removeAt: () => {},
       removeHeld: () => {},   // SW-AZ1:手持消耗统一入口

@@ -44,7 +44,7 @@ function deathShell(w: World, drops: Array<[string, number, number]>) {
   const g = Object.create(Game.prototype) as unknown as Record<string, unknown>;
   g.world = w;
   g.chunks = { markDirtyArea: () => {} };
-  g.player = { cx: 20 * 16, cy: 10 * 16 };
+  g.player = { cx: 20 * 16, cy: 10 * 16, isGhostPhase: () => false };   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
   g.spawnDrop = (x: number, y: number, key: string) => { drops.push([key, x, y]); return null; };
   return g as unknown as { onProjectileDeath: (p: number, x: number, y: number, w?: number, h?: number, ovx?: number, ovy?: number) => void };
 }
@@ -111,6 +111,7 @@ function placeShell(w: World, drops: Array<[string, number]>, heldVid: number) {
   g.smartCursor = { lockedContinuity: null, showing: false, x: 0, y: 0 };
   g.player = {
     placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1,
     // ★SW-BJ12：pickSpeedMult（块换镐段冷却）读面补齐

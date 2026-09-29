@@ -251,11 +251,30 @@ self.addEventListener('fetch', (e) => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   if (req.method !== 'GET') return;
   const path = url.pathname;
-  const assetish = ASSET_RE.test(path) || SHELL_RE.test(path) || path.startsWith('/l10n/') ||
-    isDocPath(req, path);
+  const assetish = ASSET_RE.test(path) || SHELL_RE.test(path) || path.startsWith('/l10n/');
   // ★SW 重启后 currentVersion=''——此窗口的资产请求放行=裸奔 404(prune)。
   //  兜底:caches.keys() 的唯一 sw-assets-v* 名 = 当前版本(单版本不变式),
   //  async 恢复一次后所有请求走 serveAsset 快路径。
+  // ★2026-09-29 修「构建/发版后首访=上一版代码,刷新一次才新」:文档原被折进
+  //  assetish(isDocPath)→SW 重启窗口走 serveAsset=资产 cache-first——文档被
+  //  端出缓存旧 index.html→旧 chunk→整页旧代码;页面 init 带回版本号后刷新
+  //  才落回 ② 网络优先。修=文档永不入本早退支,恒走 ② 网络优先(离线才回缓存)。
+  if (isDocPath(req, path)) {
+    e.respondWith((async () => {
+      const ver = await recoverVersion();
+      const cache = ver ? await caches.open(CACHE_PREFIX + ver).catch(() => null) : null;
+      try {
+        const res = await fetch(req);
+        if (res && res.ok && cache) cache.put(req, res.clone()).catch(() => {});
+        return res;
+      } catch (err) {
+        const hit = cache ? await cache.match(req, { ignoreVary: true }).catch(() => null) : null;
+        if (hit) return hit;
+        throw err;
+      }
+    })());
+    return;
+  }
   if (assetish && !currentVersion) {
     e.respondWith((async () => {
       const ver = await recoverVersion();

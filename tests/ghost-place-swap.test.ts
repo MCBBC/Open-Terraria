@@ -47,7 +47,7 @@ function defOf(vid: number) {
 interface Shell {
   world: World;
   player: { inv: { slots: unknown[]; selected: number; removeAt(): void; heldItem(): unknown;
-    removeHeld(): void } }   // ★SW-FX44：removeHeld 为 SW-AZ1 镜像臂夹具既有字段,类型面补齐（清 tsc 基线）
+    removeHeld(): void; isItemSlotUnlockedAndUsable(slot: number): boolean } }   // ★SW-FX44：removeHeld 为 SW-AZ1 镜像臂夹具既有字段,类型面补齐（清 tsc 基线）;刀I:+9545b31c 单点门谓词
     & Record<string, unknown>;   // 其余运动学/状态字段由各用例自由携带
   tryPlace(tx: number, ty: number, def: (typeof ITEM_DEFS)[number]): void;
 }
@@ -74,6 +74,7 @@ function shell(w: World, drops: Array<[string, number]>, heldVid: number, withPi
   g.player = {
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1,
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据;本文件主题=幽灵「格」非幽灵「相」)
     // ★SW-BJ12：pickSpeedMult（块换镐段冷却）读面补齐——wellFedTier/hungerPickSpeed
     buffs: { has: () => false, wellFedTier: 0, hungerPickSpeed: 0 }, equipStats: {},
     // ★SW-FX44：SW-BJ59 后 Game.tryPlace 尾 useTime 走 paintTileSpeed→placeSpeedTileRaw
@@ -82,6 +83,7 @@ function shell(w: World, drops: Array<[string, number]>, heldVid: number, withPi
     inv: {
       selected: 0,
       slots: withPick ? [{ id: iidOf(PICK_V), stack: 1 }] : new Array(50).fill(null),
+      isItemSlotUnlockedAndUsable: () => false,   // ★刀I补桩(9545b31c 单点门):无 armor 表,谓词 false=无配饰
       heldItem: () => (heldVid ? { id: iidOf(heldVid), stack: 5 } : null),
       removeAt: () => {},
       removeHeld: () => {},   // SW-AZ1：手持消耗统一入口（镜像臂,桩恒成功）
@@ -582,7 +584,7 @@ describe('特效发射器幽灵格门', () => {
     g.lighting = { lightAt: () => [255, 255, 255] };    // 满光（num43=255/30=8 满档）
     g.particles = [] as unknown[];
     g.recLog = () => {};
-    g.player = { inv: { selected: 0, slots: [], heldItem: () => null } };
+    g.player = { inv: { selected: 0, slots: [], isItemSlotUnlockedAndUsable: () => false, heldItem: () => null } };   // ★刀I补桩(9545b31c)
     return g;
   }
 

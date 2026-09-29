@@ -86,8 +86,24 @@ export class ChunkCache {
    *  （首烘/重建中,页区=透明）的 chunk key 集。get() wbake 支路建占位入账;
    *  completeWorkerBake 真对落页/主线程重建（降级）/LRU 淘汰/dispose 出账。
    *  viewportCovered() 消费（Game.whenViewportBaked 幕布覆盖门）——旗关恒空=
-   *  查询恒 true（幕布语义零变化）。 */
+   *  查询恒 true（幕布语义零变化）。★预算占位对不入账（无 worker 请求,渐进
+   *  过渡块不阻塞幕布/冻结窗——预算摊完即真对）。 */
   readonly workerAwaiting = new Set<number>();
+
+  // ---- ★帧内烘焙预算（2026-09-29 Windows 28fps 取证追加修复项）----
+  // 渲染期 get() 可视 miss/占位重建的同步烘焙【不受】flushDirty.budgetMs 管
+  // （那只管 flushDirty 自身出队——渲染循环逐块 get() 是另一条入口=缺口本体）。
+  // 传送/换页 ~800 块×0.47ms 一次打穿=单帧 376ms 巨帧（trace 实证 411ms 巨帧
+  // +30-411ms 帧族）,反复触发 FrameBeat 降拍+清零升拍窗=钉 28fps 直接推手。
+  // 修=帧内预算（缺省 8ms）:超限块建「预算占位对」（placeholder 标记、无 worker
+  // 请求、不入 workerAwaiting）跨帧摊——占位过渡=渐进加载 UX;每帧渲染循环 get()
+  // 预算内自动续摊至全真对。旗关/降级（bakeClient=null）不经预算=现状逐位。
+  // Game.frame() 头部 beginBakeBudget() 重置（fixedUpdate+render 同帧共窗——
+  // flushDirty 混合分支的 get() 同步烘与本预算共账,总摊注一致）。
+  bakeBudgetMs = 8;
+  private _bakeSpent = 0;
+  /** 渲染帧头重置（Game.frame() 调用;每帧烘焙预算窗起点） */
+  beginBakeBudget(): void { this._bakeSpent = 0; }
 
   // ---- chunk atlas 页池(2026-08-18 IOSurface 张数优化) ----
   // 旧结构:每 chunk 2 张 256² canvas(稳态 35 chunk=70 张、满额 768 张),且
@@ -646,6 +662,20 @@ export class ChunkCache {
     const k = ChunkCache.key(cx, cy);
     let c = this.chunks.get(k);
     if (c) {
+      // ★预算占位对（无在飞请求）:本帧预算内原位重烘=跨帧摊;超限=占位过渡
+      // （渐进加载 UX,下帧渲染循环 get() 预算内自动续摊）。worker 占位对有在飞
+      // 请求（hasPending）=等回包,不在此分支。
+      if (c.placeholder && this.bakeClient && !this.bakeClient.hasPending(k)
+        && this._bakeSpent < this.bakeBudgetMs) {
+        const t0 = performance.now();
+        const rebuilt = this.renderChunk(cx, cy);
+        this._bakeSpent += performance.now() - t0;
+        this.workerAwaiting.delete(k);
+        this.chunks.delete(k);
+        this.chunks.set(k, rebuilt);   // 重插 Map 尾=LRU recency 刷新
+        this.trimLru();
+        return rebuilt;
+      }
       // LRU:命中即刷新 recency(delete+set 移到 Map 尾部)。渲染循环每帧都 get
       // 可视 chunk,故屏上 chunk 永远最新、不会被误淘汰
       this.chunks.delete(k);
@@ -668,7 +698,25 @@ export class ChunkCache {
       this.trimLru();
       return pair;
     }
+    // ★帧内预算:超限且 worker 路径在（旗关/降级不经预算=现状逐位）→ 预算占位对
+    // （无 worker 请求、不入 workerAwaiting、不进 dirtyQueue——渲染循环下帧自动摊）
+    if (this.bakeClient && this._bakeSpent >= this.bakeBudgetMs) {
+      const cell = this.acquireCell(k);        // 粘滞槽位（下帧原位重烘）
+      const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
+      const slot = cell % ChunkCache.CELLS_PER_PAGE;
+      const S = CHUNK * TILE;
+      const pair: ChunkPair = {
+        wall: this.wallPages[page], tile: this.tilePages[page],
+        sx: (slot % ChunkCache.PAGE_COLS) * S, sy: Math.floor(slot / ChunkCache.PAGE_COLS) * S,
+        cell, placeholder: true,
+      };
+      this.chunks.set(k, pair);
+      this.trimLru();
+      return pair;
+    }
+    const t0 = performance.now();
     c = this.renderChunk(cx, cy);
+    if (this.bakeClient) this._bakeSpent += performance.now() - t0;   // 混合路由 only（旗关不计账）
     this.workerAwaiting.delete(k);   // 重建即出账（覆盖门不被死 key 拖住）
     this.chunks.set(k, c);
     this.trimLru();

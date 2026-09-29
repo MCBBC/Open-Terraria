@@ -77,6 +77,7 @@ function shell(w: World, o: { smart?: boolean; showing?: boolean; scx?: number; 
   for (const s of o.extraSlots ?? []) slots.push(s);
   g.player = {
     placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     // 站位行 33：目标行 30 ∈ inTileRange 盒（y=tileReach 3 外扩 → [30,37]）且玩家盒
     // (528..556) 与目标格 (480..496) 不相交——实体门夹具需重叠时显式改写 player
     cx: 20 * TILE + 8, cy: 33 * TILE + 8, x: 20 * TILE + 2, y: 33 * TILE, w: 12, h: 28,
@@ -306,7 +307,7 @@ describe('SW-BJ10 渲染线：SquareTileFrame 平台面（TileFrameImportant 平
     const g = Object.create(Game.prototype) as unknown as Record<string, any>;
     g.world = world;
     g.chunks = { markDirtyArea: () => {} };
-    g.player = { cx: 8 * TILE, cy: 8 * TILE, x: 8 * TILE - 10, y: 8 * TILE - 21, w: 20, h: 42, equipStats: {} };
+    g.player = { cx: 8 * TILE, cy: 8 * TILE, x: 8 * TILE - 10, y: 8 * TILE - 21, w: 20, h: 42, equipStats: {}, isGhostPhase: () => false };   // ★刀I补桩
     g.tickCount = 100;
     g.lastMineHitTick = -999;
     g.hammerPoundRelease = true;
@@ -352,7 +353,7 @@ describe('SW-BJ10 渲染线：SquareTileFrame 平台面（TileFrameImportant 平
     const g = Object.create(Game.prototype) as unknown as Record<string, any>;
     g.world = world;
     g.chunks = { markDirtyArea: () => {} };
-    g.player = { cx: 30 * TILE, cy: 30 * TILE, x: 30 * TILE - 10, y: 30 * TILE - 21, w: 20, h: 42, equipStats: {} };
+    g.player = { cx: 30 * TILE, cy: 30 * TILE, x: 30 * TILE - 10, y: 30 * TILE - 21, w: 20, h: 42, equipStats: {}, isGhostPhase: () => false };   // ★刀I补桩
     g.tickCount = 100;
     g.lastMineHitTick = -999;
     g.hammerPoundRelease = true;

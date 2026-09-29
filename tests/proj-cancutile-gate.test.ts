@@ -45,7 +45,7 @@ function projGame() {
     _staffHarvestBonus: boolean;
   };
   g.world = world;
-  g.player = { inv: { armor: {}, accSlotMax: 8, heldItem: () => null } };
+  g.player = { inv: { armor: {}, accSlotMax: 8, isItemSlotUnlockedAndUsable: () => true, heldItem: () => null } };   // ★刀I补桩(9545b31c):armor 空表语义不变
   g.breakTile = vi.fn();
   g.smashPot = vi.fn();
   g._staffHarvestBonus = false;

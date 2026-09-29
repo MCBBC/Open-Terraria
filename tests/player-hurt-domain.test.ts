@@ -74,6 +74,7 @@ function mkShell(opts?: { net?: boolean }) {
   };
   g.player = p;
   g.world = w;
+  g.golfState = { tryGetCameraTrackingPosition: () => null };   // ★刀I补桩(golf 相机支 b9879f33:hurt 域无关高尔夫,null=无跟踪)
   g._bannerNpcs = new Set<number>();                 // bannerNpcActive 真身读此集合
   g.sfx = { play: vi.fn(), playWavFile: vi.fn() };   // playSfxWav 真身的 this.sfx 面
   g.remotePlayerProxies = [];
@@ -617,6 +618,8 @@ describe('★F2 死亡管线单点：settlePlayerDeath 幂等 + 软核 DropCoins
     const drops: Array<{ key: string; stack: number }> = [];
     g.player = p;
     g.world = w;
+    g.golfState = { tryGetCameraTrackingPosition: () => null };   // ★刀I补桩(golf 相机支 b9879f33:respawnPlayer→startCameraTransitionForPlayerTeleport 读面,null=无跟踪)
+    g.camera = { panX: 0, panY: 0, x: 0, y: 0, viewW: 1e9, viewH: 1e9, startTeleportLerp: () => {} };   // ★刀I补桩(BJ103 传送相机单源:大 viewW ⇒ 走近距滑行支,黑幕支不触)
     g.spawnDrop = vi.fn((_x: number, _y: number, key: string, stack: number): null => {
       drops.push({ key, stack });
       return null;

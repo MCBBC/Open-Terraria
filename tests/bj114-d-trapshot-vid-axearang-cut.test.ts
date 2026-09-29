@@ -81,6 +81,7 @@ function cutGame(tiles: Map<number, number>, acc5309: boolean) {
     inv: {
       armor: acc5309 ? { 3: { id: BOOK_IID } } : {},   // ★方案 A:运行时反查,
       accSlotMax: 8,
+      isItemSlotUnlockedAndUsable: () => true,   // ★刀I补桩(9545b31c 单点门):旧界 8 全开同义,BOOK 3 槽可扫
       heldItem: () => null,
     },
   };
@@ -128,6 +129,7 @@ function emGame(tiles: Map<number, number>, acc5309: boolean) {
     inv: {
       armor: acc5309 ? { 3: { id: BOOK_IID } } : {},   // ★方案 A:运行时反查,
       accSlotMax: 8,
+      isItemSlotUnlockedAndUsable: () => true,   // ★刀I补桩(9545b31c 单点门):旧界 8 全开同义
       heldItem: () => null,
     },
     buffs: new Set(),                       // hitEnemies 快照读（hitEnemies :305-313）

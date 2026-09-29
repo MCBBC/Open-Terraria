@@ -167,6 +167,7 @@ function shell(w: World, o: ShellOpts = {}) {
   ];
   g.player = {
     placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     ...P, cx: P.x + 6, cy: P.y + 14, facing: 1, useTime: 0, attackSpeedMult: 1,
     dead: false, gfxOffY: 0, buffs: { has: () => false }, equipStats: {},
     actuationRodLock: false, actuationRodLockSetting: false, grappleAnchorTiles: () => [],

@@ -81,9 +81,14 @@ describe('wbake 转正②：入场渲染期待冻结窗（世界时间对该玩�
     expect(body).toContain('this.cb.onEntryFreeze?.(false);');
   });
 
-  it('mainFlow：开窗即切「正在渲染世界」步骤;幕布 race 兜底先解冻再掀幕（源锚）', () => {
+  it('mainFlow：开窗即把「正在渲染世界」步骤挂上加载页步骤行（★2026-09-29 用户令归位——不再另出 DOM 遮罩）;幕布 race 兜底先解冻再掀幕（源锚）', () => {
     expect(MAINFLOW).toContain('if (g.beginEntryFreeze(3000)) {');
     expect(MAINFLOW).toContain("Lang.text('Mods.SandboxWorld.Progress.RenderingWorld')");
+    // ★新形态锁（步骤归位+HUD 抑制专锁文件 tests/wbake-curtain-step-hud.test.ts）：
+    //   步骤走 VUI 加载页 showRenderStep,旧 .sw-progress 全屏遮罩形态判死
+    expect(MAINFLOW).toContain('load instanceof UIWorldLoadState');
+    expect(MAINFLOW).toContain('load.showRenderStep(renderStep)');
+    expect(MAINFLOW).not.toContain("ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.RenderingWorld'), 1)");
     expect(MAINFLOW).toContain('g.endEntryFreeze();');
     // 入场门链与 3s race 兜底原样保留（wbake-entry-gate 锁同域复核）
     expect(MAINFLOW).toContain('const entryGate = WBAKE_ENABLED');

@@ -58,7 +58,7 @@ function shell(w: World, drops: Drop[]): Game & Record<string, unknown> {
     x: 5 * 16, y: 5 * 16,                  // 盒左上（BJ249 几何域:238 召王距离基准=玩家 position）
     cx: 5 * 16 + 8, cy: 5 * 16 + 8,        // 缺省远距（50 格召王门外）
     equipStats: {},
-    inv: { accSlotMax: 0, armor: [], heldItem: () => null },
+    inv: { accSlotMax: 0, armor: [], isItemSlotUnlockedAndUsable: () => false, heldItem: () => null },   // ★刀I补桩(9545b31c):旧界0=无配饰,谓词 false 同义(同 BJ249 判例)
   } as never;
   return g;
 }

@@ -328,6 +328,7 @@ describe('applyMoonLordLightFloor(Main.cs:24345/24417/24479/24486)', () => {
     const fake = {
       ctx: mainCtx,
       mlFloorScratch: scratch,
+      uploadScratchBake: () => {},   // ★刀I补桩(变体①终扫 6a1e0117:逐部件烘焙即刻上传;本测试断言 ctx op 序列,上传面 no-op)
       fullbright: !!opts.fullbright,
       isBehindTilesEnemy: () => !!opts.behind,
       drawMoonLordCore: () => draws.push('398'),

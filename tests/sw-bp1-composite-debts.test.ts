@@ -80,6 +80,7 @@ function shell(w: World): Shell {
   g.spawnDrop = () => {};
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
   g.player = {
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     // 站位：目标带 y=19..21 / x=3..12 在射程盒内（inTileRange）
     cx: 8 * TILE + 8, cy: 16 * TILE + 8, x: 8 * TILE + 2, y: 16 * TILE, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1, dead: false, gfxOffY: 0,

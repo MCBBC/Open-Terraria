@@ -51,6 +51,7 @@ import { ParticleOrchestraType } from '../net/syncModules';
 import { RNG } from '../core/rng';
 import { visEffectFrames, mouseTextColorApprox, CHECK_ACTIVE_HALF_X, CHECK_ACTIVE_HALF_Y, type Enemy } from './Enemy';
 import { spawnVanillaEnemy } from './bossAI';
+import { newLovestruckHeart } from './GorePiece';   // ★清偿刀 F：Lovestruck 头爱心 331 单源（城镇/敌怪共用,GorePiece.ts 尾）
 import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
 import { COMBAT_TEXT_DAMAGED_FRIENDLY, COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT } from '../fx/CombatTextColors';
@@ -63,6 +64,9 @@ import { COMBAT_TEXT_DAMAGED_FRIENDLY, COMBAT_TEXT_DAMAGED_FRIENDLY_CRIT } from 
 //   - lightRGB 光源数值抖动（160/209/681 AddLight / 683 相位，纯光照）
 //   - shimmerRiseUpdate 微光演出尘（308/309/ShimmerBlock 视觉）
 //   - tipsy 醉酒金尘（:92349 气泡视觉）
+//   - lovestruck 头爱心 gore 331（:92455-92466 视觉掷,2026-09-29 刀B 批——
+//     Main.rand.Next(5)==0 门 + 爱心位/速/档三掷,纯演出;★清偿刀 F 单源化:
+//     Math.random 现居 GorePiece.newLovestruckHeart,城镇/敌怪共用）
 //   - __DOORDBG 诊断插桩采样门（永久旗控调试面）
 // 战斗/状态机判定掷骰（巫师连发表与散布/开门 Next(10)/随机坐椅 rand(300)/社交链/
 // 入攻击态掷门等）一律禁直呼 Math.random。
@@ -1629,6 +1633,21 @@ export class TownNPC extends Entity {
 
   get tipsy(): boolean { return this.tipsyNow; }
 
+  /** buff 119 Lovestruck 剩余【秒】（2026-09-29 刀B：TownNPC buff 承载最小面）。
+   *  单位与 Enemy.lovestruckT 同族 = applyBuffTicks 写入口径（ticks/60,SUPPORTED
+   *  [119]='lovestruckT' 单一写入面——本字段即 projStatus.ts 119 映射的城镇 NPC
+   *  承载位,此前 TownNPC 无此字段,ThrowKillFx.applyAura 圈支对城镇 NPC 写空）。
+   *  唯一施加源 = 爱情药水 2352→弹 370 消亡 80px 圈（Projectile.cs:78947-78956
+   *  NPC 循环 AddBuff(119,1800t) → ThrowKillFx.applyAura 对 enemies/critters/
+   *  npcs 三桶统一,applyBuffTicks 内 max 合并）。每 tick 递减 = UpdateNPC
+   *  :91484 UpdateNPC_BuffSetFlags(lowerBuffTime :93099-93102)→:93181 置位
+   *  loveStruck（:91483 FlagsReset :93295 复位——本仓递减后 >0 即本 tick 在位）。
+   *  消费:①头爱心 gore 331（UpdateNPC_BuffApplyVFX :92455-92466,fixedUpdate
+   *  同步 block）②幸福价 ×0.9（ShopHelper.cs:103-106——vanillaHappiness
+   *  .computeHappiness 在 remix/368/453/37/宠物提前 return 门【之前】乘,消费点
+   *  = Game.computeShopHappiness 快照进 dialogHappiness.priceMul） */
+  lovestruckT = 0;
+
   /** GetMagicAuraColor（★对抗修复批⑤ A11 行号考古：真锚 NPC.cs:53466 起,旧注
    *  ":53317-53332"/NPCID ":4853" 系错引——表定义体在 NPCID.cs:4859）1:1：
    *  NPCID.Sets.MagicAuraColor 五人恰好 = AttackType-2 魔法攻击族（54 裁缝/108 巫师/
@@ -1867,6 +1886,16 @@ export class TownNPC extends Entity {
       }
     } else {
       this.tipsyNow = false;   // :93333 整段重置
+    }
+    // buff 119 Lovestruck 递减（:93099-93102 lowerBuffTime→:93181 置位 loveStruck,
+    // 递减后 >0 即本 tick 在位）+ 头爱心 gore 331——★清偿刀 F 2026-09-29 单源化：
+    // 发射式 = GorePiece.newLovestruckHeart（UpdateNPC_BuffApplyVFX :92455-92466,
+    // 公式/掷序/调用侧三连全注在那边）。原版 :91488 该 VFX 环对【全体】NPC 调用
+    // ——Enemy 桶同源复用;canDisplayBuffs 对城镇 NPC 恒 true（false 只在石巨人
+    // 四件 245-248 :18042-18052）。视觉掷 = Math.random 豁免成员（头注清单）
+    if (this.lovestruckT > 0) {
+      this.lovestruckT -= dt;
+      newLovestruckHeart(this.x, this.y, this.w, this.h);
     }
     // ★BJ259：踢出冷却递减（NPC.UpdateNPC :91434-91437 `if (lookForHomeTimeout > 0)
     //  lookForHomeTimeout--;` 每 tick 字面）

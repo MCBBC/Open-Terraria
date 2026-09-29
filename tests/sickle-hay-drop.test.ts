@@ -189,7 +189,7 @@ function mowHarness(weedInternal: number) {
       frameX: new Uint16Array(256 * 256),
     },
   };
-  game.player = { inv: { armor: {}, accSlotMax: 8 } };   // accessoryVanillaIds 空=无 natureGuard
+  game.player = { inv: { armor: {}, accSlotMax: 8, isItemSlotUnlockedAndUsable: () => true } };   // accessoryVanillaIds 空=无 natureGuard（★刀I补桩 9545b31c 单点门;armor 空表语义不变）
   game.swingTileCutSet = new Set();
   game.breakTile = vi.fn(() => { dead.v = true; });      // 破坏成功 → 格死
   game.smashPot = vi.fn();

@@ -177,7 +177,7 @@ function mkHammerGame(w = 40, h = 20) {
   const world = { store, w, h, flags: {}, chests: [] } as unknown as World;
   const g = Object.create(Game.prototype) as unknown as Record<string, any>;
   g.world = world;
-  g.player = { cx: 8 * TILE, cy: 8 * TILE, x: 8 * TILE - 10, y: 8 * TILE - 21, w: 20, h: 42, equipStats: {} };
+  g.player = { cx: 8 * TILE, cy: 8 * TILE, x: 8 * TILE - 10, y: 8 * TILE - 21, w: 20, h: 42, equipStats: {}, isGhostPhase: () => false };   // ★刀I补桩
   g.tickCount = 100;
   g.lastMineHitTick = -999;
   g.hammerPoundRelease = true;
@@ -293,6 +293,7 @@ function shell(w: World, item: ItemDef, o: { smart?: boolean } = {}) {
   g.achievements = { notifyTileDestroyed: () => {}, handleMining: () => {} };
   g.player = {
     placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     cx: 10 * TILE + 8, cy: 16 * TILE + 8, x: 10 * TILE + 2, y: 16 * TILE, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1, dead: false, gfxOffY: 0,
     buffs: { has: () => false }, equipStats: {},

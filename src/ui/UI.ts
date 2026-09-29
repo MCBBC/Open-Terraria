@@ -4,6 +4,7 @@ import { getPass, runPassOnImageData, defaultUniforms } from '../fx/SM2Effect';
 import { options } from '../core/Options';
 import { bindsOf, keybindActionLabel, keybindCodeLabel, type KeybindAction } from '../core/Keybinds';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { itemFuncOfVid } from '../data/vanillaItemFunc';   // ★清偿刀 C：槽位 CD 谓词单源（potion/healMana）
 // ★BJ154:isFunctionalTileItem/vanillaItemCreateTile 消费随池构建摘入 itemSearch.ts
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
@@ -166,7 +167,7 @@ import { assembleTooltipLines, buildTooltipBody, materialVids } from './itemTool
 import { hudTier, safeInsets } from './HudScale';
 import { bindHint } from './bindHint';
 import { tryItemSwapVid } from '../render/CursorItemIcon';
-import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, BUFF_NO_TIME_DISPLAY, BUFF_TEXT_PROJECTILE_COUNTER, buffName, buffDesc, bannerBuffNames, buffRightClickRemovable } from '../stats/Buffs';
 import { mainDifficulty, GDL, mainMasterMode, roundCSf32Mul } from '../stats/ScaleStats'; // ★SW-FX21 +mainMasterMode（BossBag 右键上下文）
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
@@ -428,14 +429,160 @@ export function slotGhostFrame(where: SlotWhere, i: number): number {
 
 /** 空槽幽灵帧元素（ItemSlot.Draw :2451-2482：TextureAssets.Extra[54] 3×7 图集，
  *  帧号由 context/slot 映射（slotGhostFrame 同源表）；帧格 34px 取 32px（:2479-2480
- *  rectangle.Width/Height -= 2 右下内缩）,α=0.35（:2478 num19）,槽心居中） */
+ *  rectangle.Width/Height -= 2 右下内缩）,α=0.35（:2478 num19）,槽心居中）。
+ *  ★清偿刀 H②：α=0.35×itemFade（:2481 `White × (num19 × itemFade)`）——经槽元
+ *  --sw-ifade 乘区（paintSlotChrome 写值,缺省 1=本刀前同观感） */
 function makeSlotGhostEl(frame: number): HTMLElement {
   const g = el('div', 'sw-slot-ghost');
   const col = frame % 3, row = Math.floor(frame / 3);
   g.style.cssText = `position:absolute; inset:0; margin:auto; width:32px; height:32px;`
     + `background:url(sprites/vanilla/Extra_54.png) ${-col * 34}px ${-row * 34}px;`
-    + `opacity:0.35; image-rendering:pixelated; pointer-events:none;`;
+    + `opacity:calc(0.35 * var(--sw-ifade, 1)); image-rendering:pixelated; pointer-events:none;`;
   return g;
+}
+
+/** misc 逐槽语境（slotGhostFrame 头注同源:0-4=宠物/光源/矿车/坐骑/抓钩 →
+ *  context 19/20/18/17/16——slotContext('misc') 代表值 16 的逐槽展开,★清偿刀 H②
+ *  GetDimSlotForMouseItem 装配用） */
+const MISC_SLOT_CONTEXTS = [19, 20, 18, 17, 16] as const;
+
+/** ★清偿刀 C（2026-09-29）槽位 CD 覆盖基建——原版 ItemSlot.cs:2693-2725「冷却覆盖
+ *  贴图」族 1:1（本仓整套缺,连药水冷却的槽位覆盖也没有,U 刀债②）。四个分支逐字锚：
+ *  ①context 13 + item.potion（:2702-2707）——CoolDown 贴图槽心居中,
+ *    α = item.GetAlpha(color) × potionDelay/potionDelayTime。potionDelay = buff 21
+ *    剩余（Player.cs:11807-11809 逐 tick 同步,非 Debug 门）;potionDelayTime 每 tick
+ *    重算 = Item.potionDelay(3600,Item.cs:89) ×贤者石 0.75（Player.cs:25674-25683,
+ *    PhilosopherStoneDurationMultiplier）。GetAlpha 对 potion 族（item.alpha=0）=
+ *    lightColor 原样（Item.cs:49329-49343 default 支）——关包快捷栏 lightColor =
+ *    (255,255,255,75+150×scale)（Main.cs:44351-44352）:选中 scale1→A=225,未选
+ *    0.75→A=187（:44340-44348 稳态,±0.05/帧缓动本仓无建模）。
+ *  ②context 13 + item.healMana>0（:2708-2713）——α = GetAlpha × Remap(
+ *    manaPotionDelay,300,0,1,0)（Utils.Remap :345-348,GetLerpValue clamp）。★定谳：
+ *    manaPotionDelay 非零写支全在 DebugOptions.ManaPotionDelay 门内（Player.cs:10408-
+ *    10411 同步/:52577-52581 饮用;DebugOptions.cs:28 缺省 false）→ 原版常规局恒 0 =
+ *    本支【死支】（α≡0 不显）。本仓无 DebugOptions 通道 → 计时源恒 0,分支照建,
+ *    谓词/公式全 1:1（测试可注入点亮）。
+ *  ③context 34 CreativeInfiniteLocked（:2714-2718）——α = GetAlpha × 0.5 定值
+ *    （旅程创造锁格）。本仓无该槽面 → 分支在纯函数在位,消费面缺=边界声明。
+ *  ④(context 10|18) + item.expertOnly ∧ !Main.expertMode（:2720-2725）——α =
+ *    Color.White × itemFade。10=EquipAccessory/18=EquipMinecart（ItemSlot.Context
+ *    :57/:73）;itemFade = GetDimSlotForMouseItem（:1336-1397,持物不可装备时 0.5）
+ *    ——★清偿刀 H② 起接入真值（getDimSlotForMouseItem,本文件同层）。expertMode ≙
+ *    gateExpert∨gateMaster（清偿刀 U 口径）。1457 全树零 expertOnly=true 赋值
+ *    （Item.cs:129/:48960 外无）
+ *    → 原版内容零触发=模组物品建模门（U/X 刀同判）。
+ *  贴图 = Images\CoolDown（AssetInitializer.cs:780 TextureAssets.Cd;32×32,
+ *  public/sprites/vanilla/CoolDown.png 在库）。几何 = position+52s/2−32s/2 =
+ *  盒内 (10,10) 32px（:2704 同式,FX43 图标盒 61.5% 同源锚 :2747-2751）;绘序在
+ *  物品图标+堆叠数【之后】（:2681/:2702）= 槽内最顶层。 */
+/** Utils.Remap（Utils.cs:345-348 Lerp(toMin,toMax,GetLerpValue(fromMin,fromMax,v,clamped))） */
+function remapF(v: number, fromMin: number, fromMax: number, toMin: number, toMax: number): number {
+  const t = Math.min(1, Math.max(0, (v - fromMin) / (fromMax - fromMin)));
+  return toMin + (toMax - toMin) * t;
+}
+
+export interface SlotCooldownInput {
+  context: number;
+  vid: number;
+  /** Item.potion（ItemFunc.potion;vanilla-itemfunc.json 提取面） */
+  potion: boolean;
+  /** Item.healMana（ItemFunc.healMana） */
+  healMana: number;
+  /** Item.expertOnly（ITEM_DEFS[].expertOnly,U 刀数据面:1457 零真值,模组建模门） */
+  expertOnly: boolean;
+  /** Player.potionDelay（buff 21 剩余 tick） */
+  potionDelayTicks: number;
+  /** Player.potionDelayTime（:25675 每 tick 重算 3600×pStone0.75） */
+  potionDelayTimeTicks: number;
+  /** Player.manaPotionDelay（DebugOptions.ManaPotionDelay=false → 恒 0,死支） */
+  manaPotionDelayTicks: number;
+  /** Main.expertMode ≙ gateExpert∨gateMaster */
+  expertMode: boolean;
+  /** GetDimSlotForMouseItem itemFade（★清偿刀 H② 起真值——getDimSlotForMouseItem;
+   *  持物不可装备 0.5/其余 1） */
+  itemFade: number;
+}
+
+/** 槽位 CD 覆盖 α（分支序=原版 Draw 内 if 序:2702→2708→2714→2720。①②可同拍
+ *  双真（恢复药水 potion∧healMana>0）——原版两次 Draw 叠画;②死支 α≡0,故先到先
+ *  返回=可观测同相（注:①以 potionDelay/potionDelayTime 为准与 227 分档无关） */
+export function slotCooldownAlpha(inp: SlotCooldownInput): number {
+  if (inp.context === 13 && inp.potion) {
+    return inp.potionDelayTimeTicks > 0 ? inp.potionDelayTicks / inp.potionDelayTimeTicks : 0;
+  }
+  if (inp.context === 13 && inp.healMana > 0) {
+    return remapF(inp.manaPotionDelayTicks, 300, 0, 1, 0);
+  }
+  if (inp.context === 34) {
+    return 0.5;
+  }
+  if ((inp.context === 10 || inp.context === 18) && inp.expertOnly && !inp.expertMode) {
+    return inp.itemFade;
+  }
+  return 0;
+}
+
+// ---- ★清偿刀 H②（2026-09-29）GetDimSlotForMouseItem 持物变暗面 1:1 ----
+// 原版 ItemSlot.cs:1336-1397：ItemSlot.Draw 头逐帧调（:2334-2336）——
+//   `float itemFade = 1f; GetDimSlotForMouseItem(context, slot, Main.mouseItem,
+//   out itemFade); color2 *= itemFade;`——鼠标拖拽物（Main.mouseItem）进不了
+//   目标槽时该槽整面变暗（α×0.5）。消费点全谱（本刀接线,括号=仓内承载）：
+//   · 槽底 color2（:2336→:2339 绘）——eqdock/vinv ::after opacity × fade;
+//   · 空槽类型幽灵图（:2481 `White × (0.35 × itemFade)`）——.sw-slot-ghost calc;
+//   · 物品图标（:2499 DrawItemIcon(…, itemFade) → :2880 `color * itemFade`）——
+//     .sw-slot img opacity × fade;
+//   · 共享配装角标（:2465/:2733 `White × (0.7 × num17)`——num17=itemFade 在
+//     `itemFade *= 0.6`【前】的快照）+共享件幽灵（:2467 图标 α=itemFade×0.6）——
+//     .sw-share-frame/.sw-share-ghost calc;
+//   · CD 覆盖 context 10/18 expertOnly（:2724 `white * itemFade`）——
+//     slotCooldownAlpha 的 itemFade 入参（tickSlotCooldownOverlays 接线）。
+//   堆叠数字/槽号【不】变暗（:2680/:2698 用基色,无 itemFade 乘）——仓内 .cnt/
+//   .sw-slot-num 不挂乘区同相。眼钮/勾选框（Main.cs:42118-42155,非 ItemSlot.Draw
+//   域）不变暗。
+export interface DimSlotInput {
+  /** ItemSlot.Context（slotContext 装配;misc 逐槽 19/20/18/17/16 见 MISC_SLOT_CONTEXTS） */
+  context: number;
+  /** Player.IsItemSlotUnlockedAndUsable(slot)（context 8-12 解锁臂;仓内同源
+   *  Inventory.isItemSlotUnlockedAndUsable——清偿刀 P 已证 :1348/:1357 同判） */
+  slotUnlocked: boolean;
+  /** 光标持物能否入该槽（原版逐 context 谓词的正面值;仓内=放置域同源判定
+   *  armorAcceptsDrag/dyeAccepts/miscAccepts——Z/P/X 刀 1:1 面,否定即变暗） */
+  mouseFitsSlot: boolean;
+}
+
+/** GetDimSlotForMouseItem 1:1（ItemSlot.cs:1336-1397 switch 逐支）。checkItem.IsAir
+ *  早退支（:1337-1339 itemFade=1）由装配侧 heldStack 判空承载。缺省支=背包 0/钱币 1/
+ *  弹药 2/箱 3/4/32/垃圾桶 6/向导 7/快捷栏 13/商店 15∉原版 switch（持物拖过永不暗）;
+ *  展示娃娃 23/24/25/38 与帽架 26/27/矿车 39 本仓无槽面（边界声明,语义在库可后续接）。 */
+export function getDimSlotForMouseItem(inp: DimSlotInput): number {
+  switch (inp.context) {
+    case 8:    // EquipArmor（:1348）
+    case 9:    // EquipArmorVanity（:1348）
+    case 10:   // EquipAccessory（:1348）
+    case 11:   // EquipAccessoryVanity（:1348）
+      return (!inp.slotUnlocked || !inp.mouseFitsSlot) ? 0.5 : 1;
+    case 12:   // EquipDye（:1357——同带解锁臂）
+      return (!inp.slotUnlocked || !inp.mouseFitsSlot) ? 0.5 : 1;
+    case 16:   // EquipGrapple（:1361）
+    case 17:   // EquipMount（:1363）
+    case 18:   // EquipMinecart（:1365）
+    case 19:   // EquipPet（:1367）
+    case 20:   // EquipLight（:1369）
+    case 33:   // EquipMiscDye（:1359——无解锁臂,同 25/27）
+      return inp.mouseFitsSlot ? 1 : 0.5;
+    default:
+      return 1;
+  }
+}
+
+/** 槽位 CD 覆盖层元素（CoolDown.png 32×32,槽内 (10,10) 32px = inset 19.2%/61.538%,
+ *  同 FX43 图标盒几何;z-index 3 压过 img/.cnt（原版绘序 CD 最后）,眼钮 z5 不让） */
+function makeSlotCdEl(): HTMLElement {
+  const c = el('div', 'sw-slot-cd');
+  c.style.cssText = 'position:absolute; inset:19.2%; width:61.538%; height:61.538%; margin:auto;'
+    + 'background:url(sprites/vanilla/CoolDown.png) 0 0 / 100% 100%;'
+    + 'image-rendering:pixelated; pointer-events:none; display:none; z-index:3;';
+  return c;
 }
 
 /** 向导材料槽（context 7）幽灵帧号（ItemSlot.cs:2451 case 7 → num15=18 → col=0,row=6
@@ -465,13 +612,18 @@ const CSS = `
   background:var(--slot-tint, rgb(220,220,220)); mix-blend-mode:multiply; }
 .sw-hotbar .sw-slot::before { display:none; } /* 快捷栏 Back14/20 贴图自带 alpha 语义 */
 .sw-slot:hover { filter:brightness(1.15); }
-/* 图标 inset/尺寸按槽盒百分比（15.4%=8/52、69.2%=36/52）——随 --slot 缩放不变形 */
-.sw-slot img { position:absolute; inset:15.4%; width:69.2%; height:69.2%; image-rendering:pixelated; }
+/* 图标 inset/尺寸按槽盒百分比（15.4%=8/52、69.2%=36/52）——随 --slot 缩放不变形。
+ * ★清偿刀 H②：图标 α=itemFade（ItemSlot.cs:2499 DrawItemIcon→:2880 color*itemFade;
+ *  装备族拖拽不可入槽件时槽元 --sw-ifade=0.5,inv/chest 语境不装配恒 1=原同观感） */
+.sw-slot img { position:absolute; inset:15.4%; width:69.2%; height:69.2%; image-rendering:pixelated; opacity:var(--sw-ifade, 1); }
 /* 垃圾桶槽（44/52=0.846 比例）：图标居中（inset 4 会贴右下角偏 4px,2026-08-21 用户报） */
 .sw-slot.sw-trash { width:calc(var(--slot) * 0.846); height:calc(var(--slot) * 0.846); }
 .sw-slot.sw-trash img:not(.sw-trash-icon) { inset:9.1%; width:81.8%; height:81.8%; }
 .sw-slot .cnt { position:absolute; left:4px; bottom:0; font-size:11px; font-weight:bold; color:#fff;
   text-shadow:1px 1px 0 #000; transform-origin:left bottom; }   /* 11px = 热键栏数字号（.sw-slot-num 同款） */
+/* ★清偿刀 C 槽位 CD 覆盖层（CoolDown.png;几何/绘序见 makeSlotCdEl 注）——
+ *  opacity 由 tickSlotCooldownOverlays 逐帧写（dataset.cd 同值守卫） */
+.sw-slot-cd { will-change: opacity; }
 /* Loadout 三色（ItemSlot.LoadoutSlotColors :322-340，×inventoryBack 灰 = multiply）：
  * 切换瞬间白闪（GetColorByLoadout :2546：Remap(dt,0,30,0.5,0)³ lerp→白） */
 @keyframes sw-loadout-flash { 0% { background:rgb(255 255 255 / 0.5); }
@@ -605,13 +757,15 @@ const CSS = `
    在纹理层【内部】合成——不透明白灰叠半透底=加性发白（第七批同根因）,故禁用
    ::before 乘色、纹理层内自乘 */
 .sw-eqdock .sw-slot { background-image:none; isolation:isolate; }
+/* ★清偿刀 H②：槽底 α ×itemFade（ItemSlot.cs:2336 color2×fade）——fade 缺省 1
+   与原值逐槽同域;装备族拖拽不可入槽件时 paintSlotChrome 写 0.5 */
 .sw-eqdock .sw-slot::after { content:''; position:absolute; inset:0; z-index:-1;
   background-image: linear-gradient(var(--slot-tint, rgb(220,220,220)), var(--slot-tint, rgb(220,220,220))), var(--slot-bgimg, url(sprites/vanilla/Inventory_Back20.png));
   background-size: 100% 100%, 100% 100%;
   background-blend-mode: multiply, normal;
-  opacity: var(--slot-alpha, 0.575); }
+  opacity: calc(var(--slot-alpha, 0.575) * var(--sw-ifade, 1)); }
 .sw-eqdock .sw-slot::before { background:transparent; mix-blend-mode:normal; }
-.sw-eqdock .sw-slot:hover::after { opacity:1; }
+.sw-eqdock .sw-slot:hover::after { opacity: calc(1 * var(--sw-ifade, 1)); }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 /* will-change+transform 移动(2026-08-18):left/top 每帧触发布局+所在层整体
    重记录——压力窗口期层内 Inventory_Back 背景等被逐出解码位图就反复
@@ -680,6 +834,12 @@ const CSS = `
   flex-direction:column; align-items:center; justify-content:center; color:#e8e4f0; }
 .sw-progress .bar { width:320px; height:14px; background:#2a2440; border:1px solid #6a5a8a; border-radius:7px; margin-top:14px; overflow:hidden; }
 .sw-progress .fill { height:100%; width:0%; background:linear-gradient(90deg,#6a8ae0,#8ad0e0); transition:width 0.2s; }
+/* ★幕布期 HUD 抑制（2026-09-29 用户报「加载幕布期热键栏/Shift 提示穿透」）：
+   enterGame 建 HUD 到掀幕 stopMenu 之间,幕布（menuBg 画布 z0 + 透明 VUI 加载页
+   z300）盖不住 .sw-root(z10) 的 DOM HUD 树=热键栏/键位提示浮在幕布上。
+   visibility（非 display）保布局零重排,掀幕摘类=同帧无缝重现（禁闪烁）。
+   .sw-progress 豁免：wld 导入/联机流的 DOM 加载页即幕布本体,抑制期须保持可见。 */
+.sw-root.sw-hud-suppressed > *:not(.sw-progress) { visibility:hidden; }
 `;
 
 export interface CompatEntry { id: number; name: string | null; count: number; action: string }
@@ -1263,6 +1423,15 @@ export class UI {
     this.root.querySelector('.sw-progress')?.remove();
   }
 
+  /** ★幕布期 HUD 抑制（2026-09-29）：加载幕布期（enterGame 建 HUD → stopMenu 掀幕）
+   *  隐藏 .sw-root 全部 HUD（热键栏/键位提示/背包/buff 树等）——幕布层序盖不住
+   *  DOM HUD（详见 CSS sw-hud-suppressed 注）。on=true 挂类/on=false 摘类（幂等,
+   *  旗关路径从未挂=摘除零变化）;visibility 语义=布局不变、掀幕同帧放行无闪烁。
+   *  仅 .sw-progress 豁免（导入/联机流 DOM 加载页即幕布本体）。 */
+  setHudSuppressed(on: boolean) {
+    this.root.classList.toggle('sw-hud-suppressed', on);
+  }
+
   // ============ HUD ============
 
   buildHud(game: Game) {
@@ -1505,6 +1674,8 @@ export class UI {
     // 配饰/时装三件/染料/宠物/光源/矿车/坐骑/抓钩各帧;背包/钱币/弹药槽原版无映射
     const ghostFrame = slotGhostFrame(where, i);
     if (ghostFrame >= 0) s.appendChild(makeSlotGhostEl(ghostFrame));
+    // ★清偿刀 C：槽位 CD 覆盖层（ItemSlot.cs:2702-2725;tickSlotCooldownOverlays 驱动）
+    s.appendChild(makeSlotCdEl());
     s.addEventListener('mousedown', (e) => {
       // ★BJ328（2026-09-24）：本闭包族【禁止词法自引宿主元素】——曾捕 `s`（dataset
       //  探针 + rcHold el 槽），监听器注册 ↔ 闭包上下文 ↔ 宿主元素构成跨组件环，
@@ -5363,14 +5534,21 @@ export class UI {
       icon.style.opacity = '0.4';
       this.hideBuffTooltip();
     });
-    // 右键取消（TryRemovingBuff L42793+：非 debuff → DelBuff + SoundID 12；
-    //  宠物 buff 走 CheckBuffHideMisc 收宠，不走 buffs.remove——其不在 BuffState 里）
+    // 右键取消（TryRemovingBuff Main.cs:44093-44117 → buffRightClickRemovable 门）：
+    //  `!debuff[b] && b != 60 && b != 151` 才 DelBuff + SoundID 12——debuff 表成员
+    //  （147 旗帜/332-334 饥饿链/87 篝火/157 和平蜡烛/158 星瓶/21 药水病/28 狼人等）
+    //  与 60 水晶叶/151 吸魂静默拒绝（不删不响,1:1）。★BJ405：随从伴生 buff 全族
+    //  过门照删——消散由 Game.maintainMinionBuffs 槽位门接管（buff 槽=召唤活体凭证,
+    //  删除即取消召唤,次 tick 在役随从 m.dead）。宠物 buff 走 CheckBuffHideMisc
+    //  收宠（togglePetSlot 内自带 Sound 12）,不走 buffs.remove。
+    //  坐骑支（mount.CheckBuff→TryDismount :44100-44103）本仓不可达（坐骑 buff 不出栏,
+    //  BJ405-D1 登记）。门判别锁：tests/buff-rightclick-bj405
     block.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       this.hideBuffTooltip();   // 右键后块可能消失/上移，先收气泡
       if (!this.game) return;
       if (t === null) this.game.togglePetSlot(petSlot);
-      else {
+      else if (buffRightClickRemovable(t)) {
         this.game.player.buffs.remove(t);
         this.game.sfx.play('menuTick');
       }
@@ -5425,7 +5603,141 @@ export class UI {
    *  击杀随从后旧计数与图标滞留 ≤1s。此轻通道只维持两帧动态面，不碰图标/tooltip：
    *  ① buff 键集合变更 → 即时整刷（随从召唤/死亡/药水到期的图标生灭当帧跟手）；
    *  ② 计数族（BuffTextHandlers）逐帧更新 "xN" 文本，值不变时零 DOM 写。 */
+  /** 槽位 CD 覆盖元素缓存（key=`${where}:${i}`;槽面重建后 isConnected 失效自愈） */
+  private slotCdEls = new Map<string, HTMLElement | null>();
+
+  private slotCdEl(where: SlotWhere, i: number): HTMLElement | null {
+    const key = `${where}:${i}`;
+    const cached = this.slotCdEls.get(key);
+    if (cached && cached.isConnected) return cached;
+    const host = this.slotEl(i, where);
+    if (!host) { this.slotCdEls.set(key, null); return null; }
+    const cd = host.querySelector<HTMLElement>('.sw-slot-cd');
+    this.slotCdEls.set(key, cd);
+    return cd;
+  }
+
+  /** 同值守卫写（★BJ328/开包 hitch 同族纪律:同值不写;sig 兼 display+opacity） */
+  private setSlotCd(cd: HTMLElement | null, on: boolean, alpha: number): void {
+    if (!cd) return;
+    const sig = on ? alpha.toFixed(3) : '';
+    if (cd.dataset.cd === sig) return;
+    cd.dataset.cd = sig;
+    if (on) {
+      cd.style.display = 'block';
+      cd.style.opacity = alpha.toFixed(3);
+    } else {
+      cd.style.display = 'none';
+    }
+  }
+
+  /** ★清偿刀 C（2026-09-29）槽位 CD 覆盖逐帧驱动（tickBuffLive 头调用=Game.ts:11513
+   *  onBuffsFrame 60Hz 通道,在 tickBuffLive 自身早退门【之前】——开包态也要维持
+   *  装备页覆盖面）。消费面全表（ItemSlot.cs:2693-2725）：
+   *  · 关包快捷栏 0-9（context 13,Main.cs:44374）= 药水 CD 消费面①;开包时快捷栏
+   *    整体早退（:44324）+面板行 context 0（:41748）→ 无覆盖——slotContext('inv',i,
+   *    panelOpen) 单源同判。关包 lightColor.A 因子（:44351）:选中 225/255,未选 187/255
+   *    （稳态 scale 0.75/1;±0.05/帧缓动本仓未建模）。vinv 网格 0-9 行与隐藏快捷栏同
+   *    data 键（:7514 注）——开包时本循环只达隐藏面（display:none 无害同值守卫）,
+   *    可见网格格 context 0 恒无覆盖=原版同相。
+   *  · 装备页配饰 3-9（context 10）/矿车 misc[2]（context 18）= expertOnly 消费面②
+   *    （misc 逐槽语境 19/20/18/17/16——slotGhostFrame 同源表,槽位刀映射 16 代表值
+   *    不含 18,故此处逐槽枚举）;α=White×itemFade（★H②起 itemFade=getDimSlotForMouseItem
+   *    真值——持物不可装备 0.5,context 10/18 才消费）。
+   *  · context 34 旅程锁格：本仓无槽面,分支在纯函数（边界声明）。
+   *  计时源：potionDelay = BuffType.Resistance 剩余秒×60（buff 21 逐 tick 同步
+   *  Player.cs:11807-11809 同构;Buffs.active 存秒）;potionDelayTime = 3600×
+   *  pStone?0.75（:25674-25683,每 tick 重算语义在读取侧同值复算）;manaPotionDelay
+   *  恒 0（DebugOptions.ManaPotionDelay=false,死支——见 slotCooldownAlpha 注②）。
+   *  开销：≤22 格纯读+同值守卫写（BJ270/开包 hitch 纪律）;无覆盖时 sig='' 幂等。 */
+  /** ★清偿刀 H② GetDimSlotForMouseItem 装配（ItemSlot.cs:2334-2336 Draw 头逐帧取
+   *  Main.mouseItem 算 itemFade;本仓重绘模型下 heldStack 变更必经 refreshAll →
+   *  paintSlotChrome 同拍重算,tick 通道消费 context 10/18 CD 面）。checkItem.IsAir
+   *  早退（:1337-1339）=heldStack 判空。context 0/1/2/13（inv 族）/3/4/32（chest）
+   *  ∉原版 switch → 恒 1（不装配不写 CSS 变量）。misc 逐槽语境 = MISC_SLOT_CONTEXTS。 */
+  private slotItemFadeFor(where: SlotWhere, i: number): number {
+    if (where === 'inv' || where === 'chest') return 1;
+    const held = this.heldStack;
+    if (!held) return 1;
+    const inv = this.game.player.inv;
+    const context = where === 'misc'
+      ? (MISC_SLOT_CONTEXTS[i] ?? 16)
+      : slotContext(where, i, true);   // chest 已早退;panelOpen 只影响 inv 族=无关
+    const unlocked = inv.isItemSlotUnlockedAndUsable(i);   // :1348/:1357 解锁臂（P 刀同源）
+    let fits: boolean;
+    if (where === 'armor') fits = this.armorAcceptsDrag(i, held.id);       // CanEquipInArmorSlot 面
+    else if (where === 'dye' || where === 'miscDye') fits = inv.dyeAccepts(held.id);   // dye>0 面
+    else fits = inv.miscAccepts(i, held.id);                               // 16-20 分类面
+    return getDimSlotForMouseItem({ context, slotUnlocked: unlocked, mouseFitsSlot: fits });
+  }
+
+  private tickSlotCooldownOverlays(): void {
+    const g = this.game;
+    if (!g || !g.player) return;
+    const p = g.player;
+    const inv = p.inv;
+    const panelOpen = !!this.invPanel && this.invPanel.style.display === 'block';
+    const expertMode = !!(inv.gateExpert || inv.gateMaster);
+    const potionDelayTicks = (p.buffs.active.get(BuffType.Resistance) ?? 0) * 60;
+    const timing = {
+      potionDelayTicks,
+      potionDelayTimeTicks: p.equipStats.pStone ? 2700 : 3600,
+      manaPotionDelayTicks: 0,
+      expertMode,
+      itemFade: 1,
+    };
+    for (let i = 0; i < 10; i++) {
+      const cd = this.slotCdEl('inv', i);
+      if (!cd) continue;
+      const content = inv.slots[i];
+      let alpha = 0;
+      if (content) {
+        const f = itemFuncOfVid(ITEM_DEFS[content.id]?.vid ?? -1);
+        alpha = slotCooldownAlpha({
+          ...timing,
+          context: slotContext('inv', i, panelOpen),
+          vid: ITEM_DEFS[content.id]?.vid ?? -1,
+          potion: !!f?.potion,
+          healMana: f?.healMana ?? 0,
+          expertOnly: ITEM_DEFS[content.id]?.expertOnly === true,
+        });
+        if (alpha > 0 && !panelOpen) {
+          alpha *= (i === inv.selected ? 225 : 187) / 255;   // Main.cs:44351 lightColor.A 稳态
+        }
+      }
+      this.setSlotCd(cd, content != null && alpha > 0, alpha);
+    }
+    // 装备页（context 10/18 仅这两族有 CD 分支;8/9/11/12/16/17/19/20/33 原版无）
+    const equipFaces: Array<[SlotWhere, number, number]> = [
+      ['armor', 3, 10], ['armor', 4, 10], ['armor', 5, 10], ['armor', 6, 10],
+      ['armor', 7, 10], ['armor', 8, 10], ['armor', 9, 10],
+      ['misc', 2, 18],
+    ];
+    for (const [where, i, ctx] of equipFaces) {
+      const cd = this.slotCdEl(where, i);
+      if (!cd) continue;
+      const content = this.slotContent(where, i);
+      let alpha = 0;
+      if (content) {
+        alpha = slotCooldownAlpha({
+          ...timing,
+          // ★清偿刀 H②：α=White×itemFade（:2724）——itemFade 真值接入
+          // （inv 族循环 context 13/0/1/2 ∉ GetDimSlotForMouseItem switch,恒 1）
+          itemFade: this.slotItemFadeFor(where, i),
+          context: ctx,
+          vid: ITEM_DEFS[content.id]?.vid ?? -1,
+          potion: false,
+          healMana: 0,
+          expertOnly: ITEM_DEFS[content.id]?.expertOnly === true,
+        });
+      }
+      this.setSlotCd(cd, content != null && alpha > 0, alpha);
+    }
+  }
+
   tickBuffLive(): void {
+    // ★清偿刀 C：槽位 CD 覆盖逐帧面（须在本函数早退门之前——开包态装备页覆盖仍要维持）
+    this.tickSlotCooldownOverlays();
     // ★SW-FX10 债④：开包但页2(buff 列在显)不再整帧早退——列内块同样需要随从
     //  计数/生灭即时面；其余开包态(块整体不可见)照旧零开销
     const invOpen = this.invPanel?.style.display === 'block';
@@ -6085,6 +6397,18 @@ export class UI {
     // 权威重绘：清掉残留的 glow 色层（面板 display:none 期间动画被 cancel 而非
     // end——overlay 会以基础样式（不透明）卡死在槽上，重开面板即一排色块）
     slotEl.querySelector('.sw-glow-overlay')?.remove();
+    // ★清偿刀 H② GetDimSlotForMouseItem 持物变暗（ItemSlot.cs:2334-2336 槽底
+    //  color2×fade/:2481 幽灵 0.35×fade/:2499 图标×fade/:2733 角标 0.7×fade）——
+    //  槽元写 --sw-ifade,四元素 CSS calc 消费（.sw-slot img/.sw-slot-ghost/
+    //  .sw-share-ghost/.sw-share-frame/eqdock·vinv ::after）;仅装备族装配
+    //  （inv/chest 语境 ∉ 原版 switch）。同值守卫（BJ270 hitch 纪律）;
+    //  heldStack 变更必经 refreshAll → 本函数重算,无滞留面。
+    if (where !== 'inv' && where !== 'chest') {
+      const fadeWant = String(this.slotItemFadeFor(where, i));
+      if (slotEl.style.getPropertyValue('--sw-ifade') !== fadeWant) {
+        slotEl.style.setProperty('--sw-ifade', fadeWant);
+      }
+    }
     // 槽底贴图走 --slot-bgimg（::after 纹理层消费,2026-09-02）——物品/数字不随
     // 格子半透明（半透只在 ::after 的 opacity 上）
     // ★开包 hitch 刀(2026-09-29):同值守卫(setProperty 同值仍脏化元素=整面板 recalc)
@@ -6130,8 +6454,11 @@ export class UI {
     let ghost = g;
     if (!ghost) {
       ghost = el('div', 'sw-share-ghost');
+      // ★清偿刀 H②：图标 α=itemFade×0.6（ItemSlot.cs:2465-2467 `itemFade *= 0.6`
+      //  后 :2499 DrawItemIcon 淡显;槽元 --sw-ifade 承载 fade 乘区）
       ghost.style.cssText = 'position:absolute; inset:15.4%; width:69.2%; height:69.2%;'
-        + 'background:center/contain no-repeat; image-rendering:pixelated; pointer-events:none; opacity:0.6;';
+        + 'background:center/contain no-repeat; image-rendering:pixelated; pointer-events:none;'
+        + ' opacity:calc(0.6 * var(--sw-ifade, 1));';
       slotEl.appendChild(ghost);
     }
     ghost.style.display = shared ? 'block' : 'none';
@@ -6144,8 +6471,10 @@ export class UI {
     let frame = f;
     if (!frame) {
       frame = el('div', 'sw-share-frame');
+      // ★清偿刀 H②：角标 α=0.7×num17（:2733,num17=itemFade 在 ×0.6【前】快照
+      //  =槽元 --sw-ifade 原值）
       frame.style.cssText = 'position:absolute; inset:0; background-position:0 0; background-size:100% 100%;'
-        + 'image-rendering:pixelated; pointer-events:none; opacity:0.7;';
+        + 'image-rendering:pixelated; pointer-events:none; opacity:calc(0.7 * var(--sw-ifade, 1));';
       slotEl.appendChild(frame);
     }
     frame.style.display = 'block';
@@ -7590,6 +7919,14 @@ export class UI {
    important 级联序压过普通规则,更低层 mcraft hover 规则永远赢不回）。收窄后豁免槽
    hover 保持定 α,普通槽（动画域）hover 全亮不变 */
 .sw-vinv .sw-slot:not([style*="--slot-alpha"]):hover::after { opacity:1 !important; }
+/* ★清偿刀 H② GetDimSlotForMouseItem 持物变暗（ItemSlot.cs:2336 槽底 color2×fade）。
+   vinv 槽底 α 由 BJ316 呼吸动画驱动——变暗经【专用关键帧】乘入两端值
+   （0.706/0.941 × fade）,动画照常呼吸不冻结;选择器键=槽元 --sw-ifade
+   （paintSlotChrome 仅装备族装配,inv/chest/mcraft 等语境无属性不命中=零影响）。
+   hover 支同乘 fade（important 级联序同上,fade=1 时与上支逐值同域）。 */
+@keyframes sw-vinv-pulse-dim { from { opacity:calc(0.706 * var(--sw-ifade, 1)); } to { opacity:calc(0.941 * var(--sw-ifade, 1)); } }
+.sw-vinv .sw-slot[style*="--sw-ifade"]::after { animation-name:sw-vinv-pulse-dim; }
+.sw-vinv .sw-slot[style*="--sw-ifade"]:hover::after { opacity:calc(1 * var(--sw-ifade, 1)) !important; }
 .sw-vinv .sw-slot::before { background:transparent; mix-blend-mode:normal; }
 /* ★FX43(2026-09-16)modern 合成窗(.sw-mcraft)槽视觉面 1:1——
    ①格/成品/材料槽层 α 定值(ItemSlot.cs ctx41/42/43 InventoryBack18 × (10,58,74)@162;

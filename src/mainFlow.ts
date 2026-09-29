@@ -390,7 +390,25 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         // （UX 要求①;进度条保持读档终态,窗≤3s）。游玩时长经 onEntryFreeze 回调同步
         // 暂停/续走（冻结期不计费,SW-BJ5 口径）。旗关/worker 降级返回 false=零变化。
         if (g.beginEntryFreeze(3000)) {
-          ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.RenderingWorld'), 1);
+          // ★步骤归位+HUD 幕布抑制（2026-09-29 用户令：「把这个 step 挂在进度条的
+          //   一项 step,而不是直接出一个遮罩」+「加载幕布期热键栏/Shift 提示不该
+          //   出现」）。两刀都只在冻结窗开启沿落（旗关/worker 降级 beginEntryFreeze
+          //   =false 整段不进 = wbake=0 逐字节零变化）：
+          //  ·步骤文字走【VUI 加载页步骤行】（setProgress 的 header 同位接管,
+          //    双进度杆保持读档终态不动;掀幕 stopMenu 清页=步骤随之消失）——不再
+          //    另出 .sw-progress 全屏 DOM 遮罩（旧形态在 VUI 页 z300 底下再压一层
+          //    85% 暗罩+居中文字=文字浮在进度条装饰上的怪异叠层,用户实报）。
+          //    无 VUI 加载页的流（wld 导入/联机,DOM .sw-progress 即其本流加载页）
+          //    沿用原位更新语义（该 DOM 页此时就是"进度条"本体,非多余遮罩）。
+          //  ·enterGame→initInGame 已建 HUD 树（.sw-root z10）,而幕布=menuBg 画布
+          //    （z0,盖游戏画布）+透明 VUI 页（z300）——盖不住 DOM HUD=热键栏/键位
+          //    提示浮在幕布上（用户实报②）。挂抑制类（visibility 保布局零重排）,
+          //    掀幕同帧摘除=世界+UI 同帧无缝出现（禁闪烁）。
+          const renderStep = Lang.text('Mods.SandboxWorld.Progress.RenderingWorld');
+          const load = VUI.ui.current;
+          if (load instanceof UIWorldLoadState) load.showRenderStep(renderStep);
+          else ui.showProgress(renderStep, 1);
+          ui.setHudSuppressed(true);
         }
         const entryGate = WBAKE_ENABLED
           ? g.whenFirstPaint(4).then(() => g.whenViewportBaked(3000))   // 4 帧原语义不变,其后追加覆盖门
@@ -402,6 +420,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           g.endEntryFreeze();   // 冻结终态兜底（正常先由 viewportCovered 解除;幂等）
           ui.hideProgress();
           stopMenu();   // 撤菜单幕布+清 VUI 加载页(世界已上屏,零空窗)
+          ui.setHudSuppressed(false);   // ★掀幕同帧放行 HUD（开启沿挂载;幂等,旗关=无类可摘零变化）
           // SW-BN2 2026-09-07（用户令#3）：欢迎语键位标注改【活绑表驱动】——曾硬编码
           // "A/D 移动，空格跳跃，E 背包，Esc 暂停"，缺省表对齐原版后 E/背包含义反转
           // 即刻陈旧。四段标签全部经 keybindHintLabel 现读 bindsOf（重绑跟随）；

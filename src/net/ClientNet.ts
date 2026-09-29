@@ -92,6 +92,15 @@ export interface RemotePlayerState {
   pvpDefense: number | null;
   /** msg13 flagBits[0]（原版 bitsByte26[0]）:躺床态 */
   sleeping: boolean;
+  /** ★X4 清偿刀D（2026-09-29）：msg13 flagBits[5]+尾段 f32×2（PROTO 注 k）——
+   *  netCameraTarget 镜像（原版 Player.netCameraTarget,Player.cs:1607;接收位
+   *  MessageBuffer.cs:1049）。null=无相机目标（原版 Vector2? 空）。远端相机目标
+   *  （观战/无人机跟拍/高尔夫跟球三域,同源 GetObjectTrackingCameraPan）。
+   *  接收应用面=本存储位（原版同相:客户端对远端 netCameraTarget 无本地消费,
+   *  唯一读者在服务器——NPC.StreamUpdatesToNearbyPlayers 的 ReportedCameraPosition,
+   *  NPC.cs:91765;本仓等价活消费=room.ts msg23/27 逐接收端 AOI 过滤中心）。
+   *  旧 server 剥尾/旧 client 未发 → null（AOI 退回 avatar 位=改动前行为） */
+  camTarget: { x: number; y: number } | null;
 }
 
 /** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制；v4 尾部 maxPlayers；
@@ -511,6 +520,7 @@ export class ClientNet {
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
               hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
               deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
+              camTarget: null,
             };
             this.players.set(slot, p);
           } else if (!p.active) {
@@ -557,6 +567,14 @@ export class ClientNet {
         if (flag & 4) { vx = r.f32(); vy = r.f32(); } // flagBits[2] = hasVelocity
         // v7 尾部：u8 team（hostile 在 flagBits[7]）
         const team = r.remaining > 0 ? Math.max(0, Math.min(5, r.u8())) : 0;
+        // ★刀D 尾部：flagBits[5]+f32×2（原版接收位 MessageBuffer.cs:1049——
+        // bitsByte7[5] ? ReadVector2 : null）。remaining>=8 门：旧 server 中继剥尾
+        // 但 flag 位原样过墙 → 位在段不在=拒读（不错位不越界）;NaN 防毒（S6 族）
+        let camTarget: { x: number; y: number } | null = null;
+        if ((flag & 32) && r.remaining >= 8) {
+          const cx0 = r.f32(), cy0 = r.f32();
+          if (Number.isFinite(cx0) && Number.isFinite(cy0)) camTarget = { x: cx0, y: cy0 };
+        }
         const hostile = !!(flag & 128);
         let p = this.players.get(slot);
         if (!p) {
@@ -568,6 +586,7 @@ export class ClientNet {
             fresh: true, active: true, lastFresh: performance.now(),
             hostile, team, hp: 100, maxHp: 100, sleeping: false,
             deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0, pvpImmuneT: 0, pvpDefense: null,
+            camTarget,
           };
           this.players.set(slot, p);
         }
@@ -581,6 +600,7 @@ export class ClientNet {
         p.sleeping = !!(flag & 1);   // flagBits[0]（原版 bitsByte26[0] sleeping.isSleeping）
         p.dead = !!(flag & 64);           // flagBits[6] = ghost
         p.hostile = hostile; p.team = team;
+        p.camTarget = camTarget;          // ★刀D：netCameraTarget 镜像（逐包覆写,原版同相）
         p.fresh = true;                   // Game 侧注入 netOffset 后清零
         return;
       }
@@ -1103,19 +1123,29 @@ export class ClientNet {
     this.lastSentDead = p.dead;
     this.lastSentHostile = this.game.player.hostile;
     this.lastSentTeam = this.game.player.team;
-    // flagBits: [0]sleeping(原版 bitsByte26[0]) [2]hasVelocity [6]ghost [7]hostile(v7)；v7 尾部追加 u8 team(0-5)
+    // flagBits: [0]sleeping(原版 bitsByte26[0]) [2]hasVelocity [5]hasCameraTarget(刀D,注k)
+    // [6]ghost [7]hostile(v7)；尾部 u8 team(0-5) + [f32 camX,camY 若 flagBits[5]]
     const gp = this.game.player as unknown as { hostile: boolean; team: number };
     this.lastSentSleep = (p as unknown as { sleeping: boolean }).sleeping;
+    const cam = this.pendingCamTarget;
     const flag = 4 | ((p as unknown as { sleeping: boolean }).sleeping ? 1 : 0)
-      | (p.dead ? 64 : 0) | (gp.hostile ? 128 : 0);
-    this.send(new NetWriter(Msg.PlayerState)
+      | (p.dead ? 64 : 0) | (gp.hostile ? 128 : 0)
+      | (cam ? 32 : 0);
+    // ★刀D 尾段（位置序在 team 段后,PROTO 注 k）：原版 msg13 在 bitsByte24[5] 置位后
+    // 条件写 Vector2 netCameraTarget（NetMessage.cs:507-509,世界 px 坐标）。
+    // 接收端 remaining>=8 门：旧 server 中继剥尾但 flag 位原样过墙 → 位在段不在=拒读不错位
+    const w = new NetWriter(Msg.PlayerState)
       .u8(this.mySlot)
       .u8(ctrl).u8(flag)
       .u8(sel)
       .f32(p.x).f32(p.y)
       .f32(p.vx).f32(p.vy)
-      .u8(Math.max(0, Math.min(5, gp.team)))
-      .finish());
+      .u8(Math.max(0, Math.min(5, gp.team)));
+    if (cam) w.f32(cam.x).f32(cam.y);
+    this.send(w.finish());
+    // 原版 OnControlsSynced（Player.cs:55090-55092）：每次 msg13 序列化尾
+    // lastSyncedNetCameraTarget = netCameraTarget——发送门比较基准随之刷新
+    this.lastSyncedCamTarget = cam;
   }
 
   /** PvP 姿态变化即时上报（msg13 心跳之外快速通道：hostile/team 翻转立刻同步） */
@@ -1235,6 +1265,28 @@ export class ClientNet {
   private lastSentSleep = false;   // msg13 flagBits[0] 躺床位(变化即时发)
   private lastSentHostile = false;
   private lastSentTeam = 0;
+
+  // ---- ★X4 清偿刀D：netCameraTarget 面（原版 Player.netCameraTarget/lastSyncedNetCameraTarget,
+  //      Player.cs:1607-1608;写位 Main.UpdateCameraPan :63633-63650,发送门 :63671-63676）----
+  /** 本拍相机目标（Game.fixedUpdate 相机段以 GetObjectTrackingCameraPan 三域结果
+   *  调用 notifyCameraTarget 写入;null=无跟踪——原版 UpdateCameraPan 头每帧先置 null 同相） */
+  private pendingCamTarget: { x: number; y: number } | null = null;
+  /** 最近一次随 msg13 上行的相机目标（原版 OnControlsSynced :55090-55092 在每次 msg13
+   *  序列化时 lastSyncedNetCameraTarget=netCameraTarget——本仓在 sendPlayerState 构帧位同相记账） */
+  private lastSyncedCamTarget: { x: number; y: number } | null = null;
+
+  /** netCameraTarget 写+发送门（原版 Main.cs:63671-63676 每帧在 UpdateCameraPan 尾执行）：
+   *  门 = HasValue 翻转 ∨ 双有值且位移>160px → 立即 SendData(13)（bypass 全部节流,
+   *  原版语义;≤160px 的增量随常规 msg13 心跳/控制位即时包携带,位与值每包恒新鲜）。
+   *  单机零影响:net 未激活直接返回（原版 netMode==0 下 SendData 内部早退同相）。 */
+  notifyCameraTarget(t: { x: number; y: number } | null): void {
+    if (!this.active) return;
+    this.pendingCamTarget = t;
+    const flipped = (t === null) !== (this.lastSyncedCamTarget === null);
+    const moved = t !== null && this.lastSyncedCamTarget !== null
+      && Math.hypot(t.x - this.lastSyncedCamTarget.x, t.y - this.lastSyncedCamTarget.y) > 160;
+    if (flipped || moved) this.sendPlayerState(true);
+  }
 
   // ================= 箱子同步（msg31/32，服务器权威） =================
 

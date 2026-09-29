@@ -232,7 +232,10 @@ describe('★变体①修复锁 源级锁:各共享 scratch 烘焙点逐次上�
 
   it('shim:frameReset 清粘滞账+resolveTex 纪元命中判定+纪元键在位', () => {
     expect(SHIM).toContain('this.bakedTexMulti.clear();');
-    expect(SHIM).toContain('if (hit && hit.ep === ep && glw.texAlive(hit.e)) {');
+    // ★刀 I 重锚（2026-09-29）:liqpolish 微抛光刀（9545b31c）把 resolveTex 命中卫兵
+    //   改双支 = texCheck 批检（liqpolish 开）/texAlive（旧链逐位,?liqpolish=0 豁免）;
+    //   旧单支 pin 已失真,语义面（ep 纪元参与命中判定）未变。
+    expect(SHIM).toContain('if (hit && hit.ep === ep && (liqpolish ? glw.texCheck(hit.e) : glw.texAlive(hit.e))) {');
     expect(SHIM).toContain('const key = `er:${id}:${ep}:${p.sx},${p.sy},${p.sw},${p.sh}`;');
   });
 

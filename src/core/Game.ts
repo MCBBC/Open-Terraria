@@ -414,6 +414,7 @@ import { tileFrameCapture } from '../debug/TileFrameCapture';
 import { Dart, TrapShot, TowerBolt, DART_STYLE, type TrapShotKind, prefetchTrapProjectiles } from '../entities/Dart';
 import { cutTilesBox } from '../entities/ProjCutTiles';   // ★SW-BJ102 债①：explodeAt 爆炸面 CutTiles（弹域单源复用）
 import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE, BULLET_KILL_SFX } from '../entities/Arrow';
+import { JimsDroneProj, RemoteControlCarProj, DroneBase } from '../entities/DroneProjs';   // ★清偿刀 A：ai195/205 本体 AI；刀G：MP 快照基类
 import { XenoBubbleProj, xenoBubbleCount, xenoBubbleVelocity } from '../entities/XenoBubbleProj';
 import { ElectroSphereProj } from '../entities/ElectroSphereProj';
 import { MagnetSphereProj, BeamBoltProj, HEAT_RAY_BOLT, MAGNET_SPHERE_BALL } from '../entities/MagnetSphereProj';
@@ -2955,8 +2956,21 @@ export const MINION_BUFFS: ReadonlyArray<{ buff: number; staff: number; projs: n
 
 /** 随从伴生 buff 维护核（UpdateBuffs :10149-10575 逐 buff 分支泛化 1:1，含 1457
  *  Palworld 四件 :10408-10439）：ownedProjectileCounts（UpdateProjectileCaches :12271
- *  逐在场弹计数）>0 → buffTime[j]=18000 直写，否则 DelBuff——净语义 = buff 在场 ⟺
- *  对应随从在场（弹被驱逐/玩家死亡 → 弹亡 → 次 tick buff 撤）。
+ *  逐在场弹计数）>0 → buffTime[j]=18000 直写，否则 DelBuff。
+ *  ★BJ405（2026-09-29 用户实报「右键取消不了召唤,其它 buff 都能右键取消」）：
+ *  原版维护支的分支键 =「buff 槽存在」（UpdateBuffs 循环体逐【现存】槽
+ *  `else if (buffType[j]==64)` 分派,Player.cs:10184-10295）——槽没了整支不进：
+ *  无 18000 续写、无雀宝宝重生、更无重新授予。右键 TryRemovingBuff（Main.cs:
+ *  44093-44117,随从伴生 buff 全族不在 Main.debuff 表 :9004-9079 → 过 `!debuff[b]`
+ *  门照走 DelBuff）后,伴生旗（slime/hornetMinion/impMinion…）被 ResetEffects
+ *  （Player.cs:18738-18739）每帧清掉而 buff 槽循环不再置真 → 随从 AI 停刷
+ *  `timeLeft=2`（Projectile.cs:66101-66104 黄蜂 373/小鬼 375/59436 史莱姆 266 等
+ *  同构面）→ ≤2t 自灭。净语义 = **buff 槽是召唤的"活体凭证"：右键删除即取消召唤**。
+ *  本仓随从无 timeLeft 面 → 同语义同拍 m.dead=true（原版 2t≈33ms 延迟不可感,净
+ *  可观察行为同相：图标即消、随从瞬散;龙族 625 头亡 → parentRef 链断逐段自灭,
+ *  MinionProj.ts:1265）。旧实现 buffs.set 无条件 upsert 恰好是复活键 = 病灶——
+ *  旧注「净语义 = buff 在场 ⟺ 对应随从在场」的双向不变式与原版单向槽位语义相悖,
+ *  即本实报根因。→ 判别锁 tests/buff-rightclick-bj405.test.ts + minion-buff-generalize。
  *  例外：216 雀宝宝弹缺时先试重生（背包有 4281 + 空随从槽 → NewProjectile(base.Top,
  *  item.shoot, item.damage, item.knockBack) 直生 :10369-10385），重生不成才 DelBuff。
  *  spawn 回调 = 实体入列（Game 传 entities.add；测试可注入收集器） */
@@ -2973,8 +2987,20 @@ export function maintainMinionBuffs(
   for (const { buff, projs } of MINION_BUFFS) {
     const bt = BUFF_BY_VANILLA.get(buff);
     if (bt === undefined) continue;
+    // ★BJ405 槽位门：buff 槽不在（右键取消/尚未授予）= 原版维护支整体不进——
+    // 在役随从失去活体凭证 → 同拍直杀（见函数注的 timeLeft 桥建模）
     const inService = projs.some((p) => (owned.get(p) ?? 0) > 0);
+    if (!player.buffs.has(bt)) {
+      if (inService) {
+        for (const e of projectiles) {
+          const m = e as MinionProj;
+          if (m instanceof MinionProj && !m.dead && projs.includes(m.projId)) m.dead = true;
+        }
+      }
+      continue;
+    }
     // 216 重生支（UpdateBuffs :10369-10385）：弹缺 + 背包有雀杖 4281 + 空随从槽
+    //（原版分支在 buff 槽循环体内 → 槽不在不重生,BJ405 同一门）
     if (!inService && buff === 216 && !player.dead && player.inv.countOf(4281) > 0) {
       const usedSlots = projectiles
         .filter((e) => e instanceof MinionProj && !(e as MinionProj).dead && !(e as MinionProj).sentry
@@ -3581,7 +3607,10 @@ export class Game implements GameHooks {
    *  发射端快照 aux 高位段携带（见 netProjBroadcast kind0/kind1 位），结算端掷骰用 */
   private netProjPuppets = new Map<number, { p: Entity; seen: number; pvp?: boolean; ownerSlot?: number; pvpImmuneT?: number; kind7?: number; enchant?: number; ownerMeleeCrit?: number }>();
   private netNpcLast = new Map<number, { x: number; y: number; hp: number; t: number }>();
-  private netProjLast = new Map<number, { x: number; y: number; t: number }>();
+  /** ★刀G：ai0=帕鲁机件（DroneBase 1020/1105）上次快照的输入字节——原版 owner 门
+   *  `ai[0] != num → netUpdate = true`（Projectile.cs:41683-41686/:38817-38820）的
+   *  差分投影：输入翻转绕过位移/时间差分门强制出快照（非 DroneBase 恒 undefined） */
+  private netProjLast = new Map<number, { x: number; y: number; t: number; ai0?: number }>();
   private netDropSeen = new Map<number, ItemDrop>();
   /** 掉落 re-assert 轮转（R4-1，对照 1457 Main.cs:65543-65553 服务器 60t 轮转 1 槽
    *  重发 SyncItem）：游标 + 上拍时刻 */
@@ -3642,7 +3671,9 @@ export class Game implements GameHooks {
 
   /** 双向：本地弹幕快照（15Hz 变化驱动；kind: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot
    *  4=MagicProj；v6 增 5=DukeSharknadoBolt 6=龙卷 7=MLDeathray 8=LunarOrb；
-   *  2026-08-31 增 9=SparkleGuitar（真类重建）——见 netMakeProj） */
+   *  2026-08-31 增 9=SparkleGuitar（真类重建）；2026-09-29 刀G 增 11=帕鲁机件
+   *  DroneBase 1020/1105（真类重建+傀儡本地 AI 照跑,输入字节 ai0 随快照同步）——
+   *  见 netMakeProj 与 DroneProjs.ts 头注 MP 快照面） */
   private netProjBroadcast() {
     const net = this.net!;
     const snaps: ProjSnap[] = [];
@@ -3665,8 +3696,15 @@ export class Game implements GameHooks {
       }
       // ★Z-F4：强制上线通道——本拍被 spawnFriendlyProj 标记的实体绕过差分门
       const forced = this.netProjForce.delete(p.id);
-      if (!forced && Math.abs(p.x - last.x) < 1 && Math.abs(p.y - last.y) < 1 && this.tickCount - last.t < 60) continue;
+      // ★刀G：输入字节翻转强制出快照（原版 owner 门 netUpdate=true 同相——
+      //  AI_195/205 ai[0] 变化即 SendData(27),与位移无关：无人机贴墙顶住时
+      //  位移门永不放行,纯靠 60t 兜底会吞掉操控输入的即时性）
+      const drone = p instanceof JimsDroneProj || p instanceof RemoteControlCarProj
+        ? (p as unknown as import('../entities/DroneProjs').DroneBase) : null;
+      const ai0Flip = drone !== null && last.ai0 !== undefined && drone.ai0 !== last.ai0;
+      if (!forced && !ai0Flip && Math.abs(p.x - last.x) < 1 && Math.abs(p.y - last.y) < 1 && this.tickCount - last.t < 60) continue;
       last.x = p.x; last.y = p.y; last.t = this.tickCount;
+      if (drone) last.ai0 = drone.ai0;
       let kind = -1, tag = '', dmg = Math.max(-32768, Math.min(32767, Math.round(p.damage ?? 0))), aux = 0;
       let exVx: number | undefined, exVy: number | undefined; // v6：meta 通道的角度方向覆写
       // ★FR3-F（二轮蓝队）分派序前置：856 真类重建支必须先于 projId!==undefined 的
@@ -3748,6 +3786,21 @@ export class Game implements GameHooks {
         // 同相;PROJ_FRAMES[254]=5 帧切片 + GA case 254 加算白淡出（BJ236 面）远端
         // 自带。撞墙反弹/发弹/激光不重建（拥有者端权威,激光=尘-only 上述备案）。
         kind = 0; tag = String(MAGNET_SPHERE_BALL);   // 无 bit6：球本体零玩家结算面（ClingerStaffWallProj 同惯例）
+      }
+      else if (p instanceof JimsDroneProj || p instanceof RemoteControlCarProj) {
+        // kind11 帕鲁机件双弹（★清偿刀G 2026-09-29）：1020/1105 真类重建+傀儡本地 AI
+        // 照跑——原版 MP 语义=owner 端把输入字节打进 ai[0]、变化即 netUpdate=true
+        // （Projectile.cs:41679-41687/:38794-38824）,Msg27 携 ai[0]/ai[1]+pos+vel
+        // （NetMessage.cs:777-828 写/MessageBuffer.cs:1701-1744 读 ai[] 直赋）,全端
+        // AI 本体照跑（非 owner 端不等快照,本地模拟+快照重锚）。此前漏分类：DroneBase
+        // projId 恒有值 → 被下方通判抢进 kind1 → 访客端重建成回旋镖（误分类债,本支
+        // 必须保持先于 projId 通判——MagicProj/RainCloudProj 拦截同先例）。
+        // tag=`projId,rotMilli`（ai[1] 千分位）+ aux=ai0（输入字节,净值域 0..63）。
+        // 不携 bit6/bit7：两弹 SetDefaults 无 damage 行（damage=0）无玩家结算面。
+        // ★netProjPuppets meta 的 enchant/ownerMeleeCrit 会从 aux 误读（&15 / >>4）,
+        // 但只被 PvP 支消费而 pvp=恒 false——死数据,无害（kind9 aux=相位先例同构）。
+        const dr = p as unknown as import('../entities/DroneProjs').DroneBase;
+        kind = 11; tag = dr.netTag; aux = dr.netAux;
       }
       else if (p.projId !== undefined) {
         kind = 1; tag = String(p.projId);
@@ -4282,6 +4335,14 @@ export class Game implements GameHooks {
       if ((s.kind & 0x3f) === 9 && pup.p instanceof SparkleGuitarProj) {
         (pup.p as SparkleGuitarProj).netPhaseApply(s.aux / 1000);
       }
+      // ★刀G kind11：帕鲁机件傀儡——ai0/rotation/位置硬重锚（原版 Msg27 接收面
+      //  MessageBuffer.cs:1735-1744 `proj2.ai[]=array; proj2.position=position4`
+      //  直赋语义;傀儡本地 AI 照跑,快照=重锚非插值——同 kind10 确定性 AI 先例）。
+      //  必须在上方 vx/vy 透传之后调（重锚序=原版 position→velocity 同拍面）
+      else if ((s.kind & 0x3f) === 11 && pup.p instanceof DroneBase) {
+        const rotMilli = Number(s.tag.split(',')[1]);
+        (pup.p as DroneBase).netDroneSync(s.aux, Number.isFinite(rotMilli) ? rotMilli / 1000 : 0, s.x, s.y);
+      }
       pup.seen = this.tickCount;
     }
   }
@@ -4321,6 +4382,27 @@ export class Game implements GameHooks {
         // netPuppet 早退——同 kind5-8 Boss 弹先例），过锚亡 → 类内 Kill 钩本地衍生
         // 238/244 → 239/245 全本地，不过网不双生成
         return RainCloudProj.fromNet(s.x, s.y, s.vx, s.vy, s.dmg, s.aux || 0, s.tag);
+      case 11: {
+        // kind11 帕鲁机件双弹（★清偿刀G 2026-09-29）：快照=盒左上（DroneBase ctor 入参
+        // =中心,此处换算同 kind9 M3 先例）;tag=`projId,rotMilli` 解包（畸形 tag 兜底
+        // 1020,rotMilli 缺失=0 角）。傀儡不置 ownerPlayer（isMine=false→跳过 owner 门,
+        // AI 本体照跑=原版非 owner 端同相）;快照初值 ai0/rotation 在 netApplyProjSnaps
+        // kind11 支经 netDroneSync 落位。ownerDeadProbe=Main.player[owner].dead 的镜像
+        // 读口（msg13 ghost 位;原版 AI 头 :41660-41663/:38776-38779 各端读 owner 死亡）。
+        // ★x,y 需按弹径换算中心：1020 12×12 → +6,1105 26×26 → +13（SetDefaults
+        // :9661-9667/:10296-10304;DroneBase ctor 内 projectileData 同源）
+        const [pid, rotMilli] = s.tag.split(',').map(Number);
+        const drone1020 = pid !== 1105;   // 缺省 1020（畸形 tag 兜底）
+        const half = drone1020 ? 6 : 13;
+        const d = drone1020
+          ? new JimsDroneProj(s.x + half, s.y + half, s.vx, s.vy)
+          : new RemoteControlCarProj(s.x + half, s.y + half, s.vx, s.vy);
+        d.netOwnerSlot = s.netId >>> 24;
+        d.ownerDeadProbe = (slot) => this.net?.players.get(slot)?.dead === true;
+        if (Number.isFinite(rotMilli)) d.rotation = rotMilli / 1000;
+        if (Number.isFinite(s.aux)) d.ai0 = s.aux & 63;
+        return d;
+      }
       // ---- v6：Boss 锚定弹体——重建真类，本地跑确定性 AI（锚=msg23 傀儡）。
       // 终审 M3：Bolt/Orb 构造函数按**中心**坐标入参，快照是左上角——须换算，
       // 否则访客端整体偏移 (-w/2,-h/2) 且快照不写 x/y 无法自纠 ----
@@ -8433,6 +8515,10 @@ export class Game implements GameHooks {
 
   private frame(now: number) {
     const dtMs = now - this.lastTime;
+    // ★帧内烘焙预算窗起点（2026-09-29 28fps 追加修复项）:fixedUpdate（flushDirty
+    //  混合分支 get() 同步烘）与 render（渲染循环 get() miss/占位重建）同帧共窗,
+    //  渲染期 miss-bake 不再单帧打穿（巨帧 376ms→≤~8ms+单块溢出,ChunkCache.bakeBudgetMs）
+    this.chunks?.beginBakeBudget();
     this.frameDts.push(dtMs);
     // 帧冻结取证(2026-09-01 用户报"按住的键断一下"):>100ms 的渲染帧停顿在
     // 游戏内观感恰是"移动/智能选取断一下"(rAF 停摆=逻辑不步进,角色原地定住),
@@ -11537,6 +11623,13 @@ export class Game implements GameHooks {
     const droneCam = !player.dead ? this.camera.droneTracker.tryTracking(this.player, player.inv) : null;
     const camTX = specCam ? specCam.x : (droneCam ? droneCam.x : (golfCam ? golfCam.x : player.cx));
     const camTY = specCam ? specCam.y : (droneCam ? droneCam.y : (golfCam ? golfCam.y : player.cy));
+    // ★X4 清偿刀D（2026-09-29）：netCameraTarget 写+发送门（原版 UpdateCameraPan
+    // Main.cs:63650 置 LocalPlayer.netCameraTarget=trackedPosition + :63671-63676
+    // 门 HasValue 翻转∨位移>160px → SendData(13)）。trackedPosition=本处三域并集
+    // （specCam??droneCam??golfCam——GetObjectTrackingCameraPan 同源同序）；无跟踪
+    // =null（原版 :63636 每帧头置 null 同相）。门内实现在 ClientNet.notifyCameraTarget。
+    // 单机零影响：net 未激活直接早退；SP 相机跟随路径零触碰。
+    this.net?.notifyCameraTarget(specCam ?? droneCam ?? golfCam);
     if (this.camera.teleportLerp > 0) {
       this.camera.advanceTeleportLerp(camTX, camTY, Math.hypot(player.vx, player.vy));
     } else {
@@ -14336,35 +14429,49 @@ export class Game implements GameHooks {
         return;
       }
     }
-    // 帕鲁机件 5451 吉姆无人机/5738 遥控车（ItemCheck_Shoot :49511-49522 共用支）：
-    // 先 Kill 场内所有同型同主弹,再生成一只（单实例替换语义）——combatWeapon 已显式
-    // 退出 'shot' 兜底（R35 清单⑤）;ai195/205 本体行为另批登记,现以惯性 Arrow 承载
+    // 帕鲁机件 5451 吉姆无人机/5738 遥控车（★清偿刀 A 2026-09-29：ai195/205 本体 AI
+    //  实装于 entities/DroneProjs.ts,惯性 Arrow 载体退役）——物品面三站：
+    //  ①场内有同型同主弹 → 本拍点击 = 收回（ItemCheck_TryDestroyingDrones
+    //    Player.cs:45630-45655 逐只 projectile.Kill() + releaseUseItem=false:不摆手/
+    //    不置 useTime;43852-43858 flag 门使再射不可能,行为面=点击切换）；
+    //  ②场内无 → 出膛（ItemCheck_Shoot :49513-49522 先清残只再 NewProjectile;
+    //    damage=0——两件 SetDefaults 均无 damage 行,shootSpeed 9/1,itemCombat 表）；
+    //  ③Track 不在此处——原版 Track 调用点在 AI owner==myPlayer 支（P.cs:41688/:38825）,
+    //    本仓 AI fixedUpdate 逐帧 track（droneCameraTrack 钩子）;I 刀出膛位代行退役
+    //    （updateUse(:10155) 先于 entities.update(:10183)=出生拍 AI 即跑,零空窗）。
     {
       const pmVid = heldDef ? (heldDef.vid ?? -1) : -1;
       if (pmVid === 5451 || pmVid === 5738) {
+        const shootId5 = pmVid === 5451 ? 1020 : 1105;
+        // TryDestroyingDrones（:45632-45655）：controlUseItem && ItemTimeIsZero &&
+        // !mouseInterface → 逐只 Kill（本仓 useTime==0 ≙ ItemTimeIsZero 同位）
+        const liveDrone = (m: import('../entities/Entity').Entity):
+          m is import('../entities/DroneProjs').DroneBase =>
+          !m.dead && (m as { ownerPlayer?: unknown }).ownerPlayer === this.player
+          && (m as { projId?: number }).projId === shootId5;
+        if (this.player.useTime === 0 && this.entities.projectiles.some(liveDrone)) {
+          for (const m of this.entities.projectiles) {
+            if (liveDrone(m)) m.killNow(this);          // projectile.Kill()（:45639-45642）
+          }
+          this.input.mouseDown = false;
+          return;
+        }
         if (this.player.useTime === 0) {
           const pc5 = itemCombat(pmVid);
-          const shootId5 = pc5?.shoot ?? (pmVid === 5451 ? 1020 : 1105);
-          for (const m of this.entities.projectiles) {
-            if (!(m instanceof Arrow) || m.dead || m.ownerPlayer !== this.player) continue;
-            if (m.projId !== shootId5) continue;
-            m.dead = true;                              // projectile.Kill()（:49516-49519）
+          for (const m of this.entities.projectiles) {   // :49514-49519 先清残只
+            if (liveDrone(m)) m.killNow(this);
           }
           const [pmx, pmy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
           const pa5 = Math.atan2(pmy - this.player.cy, pmx - this.player.cx);
           const spd5 = pc5?.shootSpeed ?? 1;
-          const mech = new Arrow(this.player.cx, this.player.cy,
-            Math.cos(pa5) * spd5, Math.sin(pa5) * spd5,
-            pc5?.damage ?? 1, pc5?.knockBack ?? 0, shootId5, { grav: 0, pierce: 1 });
+          const mech = shootId5 === 1020
+            ? new JimsDroneProj(this.player.cx, this.player.cy,
+              Math.cos(pa5) * spd5, Math.sin(pa5) * spd5)
+            : new RemoteControlCarProj(this.player.cx, this.player.cy,
+              Math.cos(pa5) * spd5, Math.sin(pa5) * spd5);
           mech.ownerPlayer = this.player;
           this.entities.add(mech, 'projectiles');
-          // ★X4 清偿刀I：DroneCameraTracker 通道出膛位——原版 Track 调用点在
-          //  AI_195/AI_205 owner==myPlayer 支（Projectile.cs:38825/:41688）,本仓两 AI
-          //  未实装（ai195/205 本体行为另批登记,见上注）,过渡期由本 spawn 支代行
-          //  （单实例替换语义下与逐帧 Track 观测等价:Track 幂等覆写）。AI 批落地后
-          //  由其逐帧 Track 接管（双写无害,幂等）;装备门 remoteVisionForDrone 在
-          //  TryTracking 侧（无 5452 FPV 眼镜不跟拍,原版同相）。
-          this.camera.droneTracker.track(mech);
+          this.netProjForce.add(mech.id);   // ★刀G：出生即时上线（Z-F4 通道,原版 NewProjectile 内联 SendData(27) 同相）
           this.useSwing(heldDef, pa5);
           this.player.useTime = Math.max(1, pc5?.useAnimation ?? 20);
           this.playUseSound(pmVid, 'tink');
@@ -39638,6 +39745,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return computeHappiness({
       npcVanillaId: npc.vanillaId,
       remixWorld: !!w.seedFlags?.remix,   // Main.remixWorld（ProcessMood :107 提前 return 门）★清偿刀 H
+      loveStruck: npc.lovestruckT > 0,    // npc.loveStruck（ProcessMood :103-106 门前 ×0.9）★清偿刀 B
       homeless: !home,
       distFromHome: home ? Math.hypot(cx - home.x, cy - home.y) : 0,
       playerInCorrupt: !!sc?.zoneCorrupt, playerInCrimson: !!sc?.zoneCrimson, playerInDungeon: !!sc?.zoneDungeon,
@@ -41769,15 +41877,53 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0, oldVx = 0, oldVy = 0, dmg = 0,
-    flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number; sc?: number }) {
-    // ---- 成就：TO_INFINITY_AND_BEYOND（Projectile.Kill 内 Projectile.cs:71979-71983：
-    // type==1020（吉姆无人机 Kwad Racer Drone,item 5451 的 shoot 弹）消亡时
-    // `position.Y - height <= 640f && owner == Main.myPlayer` → 直调
-    // Main.Achievements.GetCondition("TO_INFINITY_AND_BEYOND","Do").Complete()。
-    // 本仓 1020 = 惯性 Arrow 载体（ai195 本体行为另批登记）,消亡单口 = Arrow kill
-    // → onProjectileDeath；owner 门：载体仅本地使用点生成,联机镜像不同步此弹（登记）
-    if (projId === 1020 && y - h <= 640) {
-      this.achievements.completeFlag('TO_INFINITY_AND_BEYOND', 'Do');
+    flags?: { hostile?: boolean; ai0?: number; kb?: number; arpen?: number; sc?: number; ownerLocal?: boolean }) {
+    // ---- 帕鲁机件 Kill 面（★清偿刀 A 2026-09-29；Projectile.cs:71979-72030
+    // `else if (type == 1020 || type == 1105)` 支 1:1；本仓载体=DroneProjs 实体
+    // （惯性 Arrow 载体退役）,消亡单口不变=onProjectileDeath）：
+    //   · 1020 成就 TO_INFINITY_AND_BEYOND"Do"：`position.Y - height <= 640 &&
+    //     owner == Main.myPlayer`（:71981-71985;★刀G：owner 门经 flags.ownerLocal
+    //     显式承接——kind11 傀儡消亡不触发本端成就,单机缺省 undefined 零影响）；
+    //   · 循环音停：1020 Kill 显式 GetActiveSound(localAI[2]).Stop()（:71986）/
+    //     1105 经 LoopedPlayCondition 失活——实体 killNow 统一停轨（同相归口）；
+    //   · 音 Item62 @position（:71987,弹盒左上锚）；
+    //   · 尘/gore（:71989-72028）：31×15（α100/scale0.8/fadeIn0/vel×0.5）+ 5×对尘
+    //     228（scale2.5 noGrav vel×2.5 / scale1.1 noGrav vel×2）+ 226×3（scale1.1
+    //     noGrav vel×2）+ gore 61-63 四角各 20% 独立掷（vel×0.2/scale×0.65/
+    //     vel += (±0.5,±0.5)——NewGore 内建抖动 :1348-1349 后乘）。 ----
+    if (projId === 1020 || projId === 1105) {
+      // ★刀G：成就门补 owner==myPlayer 投影（原版 :71981-71985
+      //  `position.Y - height <= 640 && owner == Main.myPlayer`——此前无人机恒本地,
+      //  门恒真未显式;联机傀儡接入后 killNow 携 ownerLocal=false 不触发本端成就;
+      //  旧调用面 flags 缺省 undefined ≠ false = 单机零影响）
+      if (projId === 1020 && y - h <= 640 && flags?.ownerLocal !== false) {
+        this.achievements.completeFlag('TO_INFINITY_AND_BEYOND', 'Do');
+      }
+      this.playSfxFiles(['Item_62'], 1, x, y);
+      const vd = this.vanillaDust;
+      if (vd) {
+        for (let i = 0; i < 15; i++) {
+          const d = vd.spawn(x, y, w, h, 31, 0, 0, 100, null, 0.8);
+          if (d) { d.fadeIn = 0; d.vx *= 0.5; d.vy *= 0.5; }
+        }
+        for (let i = 0; i < 5; i++) {
+          const d1 = vd.spawn(x, y, w, h, 228, 0, 0, 100, null, 2.5);
+          if (d1) { d1.noGravity = true; d1.vx *= 2.5; d1.vy *= 2.5; }
+          const d2 = vd.spawn(x, y, w, h, 228, 0, 0, 100, null, 1.1);
+          if (d2) { d2.noGravity = true; d2.vx *= 2; d2.vy *= 2; }
+        }
+        for (let i = 0; i < 3; i++) {
+          const d = vd.spawn(x, y, w, h, 226, 0, 0, 100, null, 1.1);
+          if (d) { d.noGravity = true; d.vx *= 2; d.vy *= 2; }
+        }
+      }
+      for (const sx of [-1, 1]) {
+        for (const sy of [-1, 1]) {
+          if (Math.random() >= 0.2) continue;             // Main.rand.Next(5)==0
+          const g = GorePiece.newGore(61 + (Math.random() * 3 | 0), x, y, 0, 0, 0.65);
+          if (g) { g.vx = g.vx * 0.2 + sx * 0.5; g.vy = g.vy * 0.2 + sy * 0.5; }
+        }
+      }
     }
     // ---- 三地球仪 Kill 三重掷（孤儿武器 B3 波 工单4；Projectile.cs:75111-75131）：
     // Item107 音 @position + 尘 13 ×15（vy=-2,scale1.5）+ owner 本机/netMode!=1 → 掷：
@@ -45231,6 +45377,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** PlayTrackedLoopedSound 实现（GameHooks.startTrackedLoop——AI_016 引信嘶声） */
   startTrackedLoop(name: string, vol: number, x: number, y: number) {
     return this.sfx.startTrackedLoop(name as SfxName, vol, x, y);
+  }
+
+  /** 无人机相机跟拍登记（GameHooks.droneCameraTrack——DroneCameraTracker.Track,
+   *  DroneCameraTracker.cs:11-15;调用点=AI_195/AI_205 owner==myPlayer 支逐帧
+   *  Projectile.cs:41688/:38825。清偿刀 A：I 刀出膛位代行退役,Track 归位 AI 逐帧面
+   *  ——updateUse 先于 entities.update 同拍执行,出生拍 AI 即首 Track,零空窗）。 */
+  droneCameraTrack(proj: Parameters<NonNullable<import('../entities/types').GameHooks['droneCameraTrack']>>[0]) {
+    this.camera.droneTracker.track(proj);
   }
 
   /** 常驻循环轨按 wav 文件（GameHooks.startLoopSfx——吸血鬼炽灼音环
@@ -50127,9 +50281,18 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       // R3 移动续传：跨条带（200×20）边界时向服务器请求周围 strip。
       // 观战期取相机位（= RemoteClient.CheckSection 的观战段等价 :17118——
       // 条带跟随观战目标而非自身 avatar）
+      // ★X4 清偿刀D（2026-09-29）：条带锚扩展到相机目标全三域（specCam??droneCam??
+      // golfCam——原版 section 请求按屏幕走,Main.screenPosition 即相机;无人机/高尔夫
+      // 跟拍镜头到哪条带到哪,与 spectate 同一等价扩展）。密度 bounded：%30 + 条带键
+      // 变更门不变。无人机/高尔夫跟拍时无人机/球体弹幕同步面已由 room.ts msg27
+      // entityAoiCenter 覆盖,此处补齐 tile 条带面。
       const specCam0 = this.spectateCamPos();
-      const camX = specCam0 ? specCam0.x : this.player.cx;
-      const camY = specCam0 ? specCam0.y : this.player.cy;
+      const droneCam0 = !this.player.dead
+        ? this.camera.droneTracker.tryTracking(this.player, this.player.inv) : null;
+      const golfCam0 = !this.player.dead ? this.golfState.tryGetCameraTrackingPosition() : null;
+      const camA0 = specCam0 ?? droneCam0 ?? golfCam0;
+      const camX = camA0 ? camA0.x : this.player.cx;
+      const camY = camA0 ? camA0.y : this.player.cy;
       if (this.tickCount % 30 === 0 && this.net.gameWorld) {
         const sx = Math.floor(camX / 16 / 200);
         const sy = Math.floor(camY / 16 / 20);

@@ -116,6 +116,7 @@ function shell(w: World, opts: {
   for (const [vid, slot] of opts.picks ?? []) slots[slot] = { id: iidOf(vid), stack: 1 };
   g.player = {
     placeSpeedTileRaw: () => 1,   // ★SW-BJ59 后桩须携法(旧 Game 内联已迁 Player 委托;桩 buff/equipStats 空 ⇒ 恒 1)
+    isGhostPhase: () => false,   // ★刀I补桩(BJ343 EmptyTile 玩家臂判据)
     cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28,
     facing: 1, useTime: 0, attackSpeedMult: 1, usedAmbrosia: false,
     // pickSpeedMult 读面：wellFedTier/hungerPickSpeed（pickSpeed 加法减量链）

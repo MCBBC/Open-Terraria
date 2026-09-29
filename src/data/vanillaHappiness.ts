@@ -1,6 +1,7 @@
 // NPC 快乐度 → 商店价格系数 + 心情报告（ShopHelper.cs 1:1）。
 // 公式（_currentPriceAdjustment 初值 1.0，ProcessMood :99-180）：
-//   ① loveStruck 魅Love药水 ×0.9（未实装略）；
+//   ① loveStruck 魅Love药水 ×0.9（ShopHelper.cs:103-106——2026-09-29 刀B 已接，
+//      TownNPC.lovestruckT 载体,门前乘区）;
 //   ② 无家/离家>120 tile（:111-118）/玩家在腐化·猩红·地牢（:119-122）→ 价格置 1000
 //      （不提前返回！后续拥挤/偏好/关系照常连乘，末尾 LimitAndRoundMultiplier
 //       :182-187 钳 [0.75,1.5] → 实际生效 1.5）；
@@ -125,6 +126,11 @@ export interface HappinessInput {
   npcVanillaId: number;
   /** Main.remixWorld（don't dig up 种子）——ProcessMood :107 提前 return 门（幸福价恒 1f） */
   remixWorld?: boolean;
+  /** NPC 身上 Lovestruck buff（119,爱情药水弹 370 消亡 80px 圈授予 1800t）——
+   *  本仓载体 = TownNPC.lovestruckT（秒,applyBuffTicks 119 映射写入;2026-09-29
+   *  刀B 批）。ProcessMood :103-106 在提前 return 门【之前】×0.9——remix/旅行商
+   *  368/骷髅商 453/老人 37/城镇宠物也吃此乘区（无报告行、不走钳制/取整） */
+  loveStruck?: boolean;
   /** NPC 无家（homeless） */
   homeless: boolean;
   /** NPC 当前中心 tile 距家 tile 距离 */
@@ -191,17 +197,23 @@ export function computeHappiness(inp: HappinessInput): HappinessResult {
   const line = (sub: string, extra?: Partial<HappinessReportLine>) => {
     report.push({ key: `${npcMoodCategory(inp.npcVanillaId, inp.altTexture2)}.${sub}`, ...extra });
   };
-  // remix(Dig Up)/旅行商(368)/骷髅商(453)/城镇宠物/IsNotReallyTownNPC(老人37)——1.0 且无报告
-  // （ShopHelper.ProcessMood :107-110 `Main.remixWorld || 368 || 453 || IsTownPet ||
-  // IsNotReallyTownNPC` 提前 return）。注意 :103-106 loveStruck ×0.9 在此门前——
-  // 本仓 TownNPC 无 Lovestruck 载体（Enemy.lovestruckT 不覆盖 TownNPC）=登记债,门前恒 1
+  // ★loveStruck ×0.9（ShopHelper.cs:103-106）——在提前 return 门【之前】（原版
+  //  语句序 :103-106 先于 :107-110）：remix/旅行商368/骷髅商453/老人37/城镇宠物
+  //  恋爱中同样 ×0.9,且提前 return 跳过 LimitAndRoundMultiplier（0.9 本身可精确
+  //  表示,钳/圆等价——结构差异登记为门序断言,见 townnpc-lovestruck 测试）
+  if (inp.loveStruck) mul *= 0.9;
+  // remix(Dig Up)/旅行商(368)/骷髅商(453)/城镇宠物/IsNotReallyTownNPC(老人37)——
+  // 门前乘区保留、报告行不产（ShopHelper.ProcessMood :107-110 `Main.remixWorld ||
+  // 368 || 453 || IsTownPet || IsNotReallyTownNPC` 提前 return）。
   // ★2026-08-30 补漏：注释声称含城镇宠物但条件表漏排（ShopHelper.cs:104-110 含
   // IsTownPet 分支）——潜伏债已清（宠物因永无家被 canShowHomelessText 遮蔽才无表象）
   // ★清偿刀 H（2026-09-29）：补 remixWorld 门（本仓 seedFlags.remix 已有世界态,
   //  同源 World.ts:265 IsItDay）——remix 世界城镇 NPC 幸福价恒 1f
+  // ★清偿刀 B（2026-09-29）：loveStruck 门前 ×0.9 已接（上方）——TownNPC
+  //  .lovestruckT 载体（X4-债10 清偿）
   if (inp.remixWorld || inp.npcVanillaId === 368 || inp.npcVanillaId === 453
     || inp.npcVanillaId === 37 || TOWN_PET_VIDS.has(inp.npcVanillaId)) {
-    return { priceMul: 1, report: [] };
+    return { priceMul: mul, report: [] };
   }
   // 无家 / 离家 >120 / 危险群系 → 置 1000（:111-122；末尾钳回 1.5）
   const ruined = inp.homeless || inp.distFromHome > 120;

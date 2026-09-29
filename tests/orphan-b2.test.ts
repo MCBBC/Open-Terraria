@@ -57,7 +57,7 @@ function mkProtoGame(opts?: { px?: number; py?: number }) {
   const g = Object.create(Game.prototype) as unknown as Record<string, any>;
   g.world = world;
   g.player = {
-    inv: { slots: [] },
+    inv: { slots: [], isItemSlotUnlockedAndUsable: () => false },   // ★刀I补桩(9545b31c 单点门):无 armor 表,谓词 false=无配饰
     cx: opts?.px ?? (40 * TILE), cy: opts?.py ?? (90 * TILE),
     x: (opts?.px ?? (40 * TILE)) - 10, y: (opts?.py ?? (90 * TILE)) - 21, w: 20, h: 42,
     dead: false, facing: 1,

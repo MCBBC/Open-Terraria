@@ -78,6 +78,9 @@ function mkAccHost(exRef: { current: GLShimExecutor | null }, bridgeRaw: FakeCtx
     texRefresh(_key: string, img: { width: number; height: number }) {
       return { tex: {}, w: img.width, h: img.height, key: _key };
     },
+    texRefreshRegion(_key: string, img: { width: number; height: number }, _w: number, _h: number) {   // ★刀I补桩(P1-B 子区增量 24e6e76b;隔离栅格化族同入口,返回同一 entry 形状)
+      return { tex: {}, w: img.width, h: img.height, key: _key };
+    },
     texAlive() { return true; },
   };
   return {
