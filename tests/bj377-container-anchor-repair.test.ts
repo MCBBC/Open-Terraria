@@ -53,9 +53,14 @@ function mkCorruptWorld(): World {
   // ③ 局部残箱（右下格存证,其余被挖）：锚污染成 21（fx0=432→467 style12）
   st.setTileSilent(10, 20, CHEST21, 432, 0);
   st.setTileSilent(11, 21, CHEST2, 450, 18);
-  // ④ 反证箱（右邻 467 但帧不合污染签名）：不得修
-  st.setTileSilent(20, 20, CHEST21, 432, 0);
-  st.setTileSilent(21, 20, CHEST2, 999, 0);
+  // ④ 反证箱（混合态：右邻 467 帧全等=证据 + 下邻 467 帧不合=反证）：不得修
+  //  ★X5 新债#1（清偿刀C 2026-09-29）夹具改判别力补强：旧构造=右邻帧不合、无正证据态
+  //  ——摘反证支（repairIndexFrames.ts tryFamily `else return false`）变异后仍因
+  //  「无证据」拒不修,变异存活=反证支零判别力。改混合态（右邻全等证据+下邻反证）
+  //  后:原版=证据遇反证即弃修;变异=证据成立整件误修 → 红。X5 红队已用此形态补证。
+  st.setTileSilent(20, 20, CHEST21, 432, 0);   // 锚污染（467 style12 带基 432）
+  st.setTileSilent(21, 20, CHEST2, 450, 0);    // 右邻：帧全等锚签名 (432+18,0)=证据
+  st.setTileSilent(20, 21, CHEST2, 999, 18);   // 下邻：同族帧不合=反证（保守弃修）
   // ⑤ 未注册污染锚：不得修
   st.setTileSilent(30, 20, CHEST21, 360, 0);
   // ⑥ 合法 21 木箱（fx0=0）：零扰动
@@ -107,8 +112,10 @@ describe('BJ377 容器锚存量批修（saveGame→loadSaveData 全链）', () =
     // ③ 局部残箱：右下格存证 → 修
     expect(T(10, 20)).toBe(CHEST2);
     expect(F(10, 20)).toEqual([432, 0]);
-    // ④ 反证（同族格帧不合）→ 不修
+    // ④ 混合态反证（有全等证据但遇帧不合反证）→ 不修（变异判别面：摘反证支 → 本断言红）
     expect(T(20, 20)).toBe(CHEST21);
+    expect(F(21, 20)).toEqual([450, 0]);   // 证据格零扰动
+    expect(F(20, 21)).toEqual([999, 18]);  // 反证格零扰动
     // ⑤ 未注册 → 不修
     expect(T(30, 20)).toBe(CHEST21);
     // ⑥⑦⑧⑨ 合法箱零扰动

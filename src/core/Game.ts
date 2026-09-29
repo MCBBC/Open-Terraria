@@ -5177,7 +5177,9 @@ export class Game implements GameHooks {
    *  ResetBadgerHatTime 清零（Main.cs:64703）。运行时态不落盘（原版不入 WorldFile） */
   private eocKilledToday = false;
   private wofKilledToday = false;
-  /** 已记 TabletDestroyed 账的石碑（CultistRitual.TabletDestroyed，NPC.cs:38881——
+  /** 已记 TabletDestroyed 账的石碑（CultistRitual.TabletDestroyed，NPC.cs:37206——
+   *  ★X5 新债#4 勘误（清偿刀C 2026-09-29,旧注引 :38881 系 velocity 段无关行,亲读
+   *  NPC.cs:37206=召出 439 同帧调用点;ai[0]=-1 置位 :37183）——
    *  石碑 ai0==-1 边沿去重；实体死亡随 WeakSet 自动回收） */
   private _cultistTabletDone = new WeakSet<Enemy>();
   /** 倒木重扫延迟旗：breakTile 头部置位，下一 tick updateTime 前消费——
@@ -5968,6 +5970,12 @@ export class Game implements GameHooks {
     // （FocusHelper.cs:97-107/:139-141）——联机失焦 sfx 不停、游戏不暂停；
     // destroy 摘除防闭包钉死旧 Game
     Sfx.mpProbe = () => !!this.net?.active;
+    // ★后台泵音频豁免探针（2026-09-29 后台 SFX 通道）：pumpGate 四门同口径现场
+    // 读（running/world/!paused+两开关）——世界后台照跑时 sfx ctx 不随失焦挂起、
+    // 环境面（QuietAmbientSounds）不归零（消费面见 Sfx.bgAudioProbe 注）。探针
+    // false（任一开关关/暂停=用户选择/菜单/停机）=旧行为失焦静音。destroy 摘除
+    Sfx.bgAudioProbe = () => this.running && !!this.world && !this.paused
+      && options.data.backgroundRun && options.data.playWhenUnfocused;
     // ---- 行为录制接线（长按 F5 录制窗；详见 debug/BehaviorRecorder 头注）----
     // tick/世界元信息源（构造期闭包读运行时字段，换世界自动跟随）
     // 音效录制双通道（audioRec.sfx/bgm）与主行为环共用同一 tick/世界闭包
@@ -8037,6 +8045,7 @@ export class Game implements GameHooks {
     window.removeEventListener('blur', this.onWindowBlur);
     window.removeEventListener('focus', this.onWindowFocus);
     Sfx.mpProbe = null;   // 失焦闸 MP 豁免探针随实例摘除（构造期接线）
+    Sfx.bgAudioProbe = null;   // 后台泵音频豁免探针随实例摘除（mpProbe 同款生命周期）
     // ★后台泵拆除（2026-09-28）:terminate+槽位归零——onPumpMsg 闭包捕 this=Game,
     // 不摘则死 Game 整图（含 World TileStore）被存活 worker 钉住（BJ318 同审计面）
     if (this.pumpWorker) {
@@ -8289,6 +8298,23 @@ export class Game implements GameHooks {
       this.acc = acc;
       for (let i = 0; i < steps; i++) this.fixedUpdate(FIXED_DT);
       this.bgPumpTicks += steps;   // 钳满余量已由 pumpAccumulate 归零=累计不爆发
+      // ★后台音频 pass（2026-09-29 用户报「后台泵模式雨声/怪物声等音效消失」定谳三因：
+      //  ①sfx ctx 失焦挂起 setAudioSuspension→bgAudioProbe 豁免;②ambientQuiet 失焦
+      //  归零→同探针放行;③环境 cue 斜坡（雨声/风声）住 frame() rAF 相→本 pass 补）。
+      //  公式与 frame() audioAcc 块逐行同构（elapsed 钳 0.25 + FIXED_DT 步进 + 余量
+      //  跨拍携带零清零=原版 UpdateAudio Main.cs:17222 无条件执行同位）;钳用
+      //  BG_PUMP_MAX_TICKS（泵 250ms=15 tick,前台 5 钳会欠步进斜坡脱拍）。族②怪物
+      //  环境声（Enemy.ambientSoundTick）与族③一次性事件住 fixedUpdate,泵步进即
+      //  触发;本 pass 只补住渲染帧相的 cue 斜坡。能到此=pumpGate 全开=bgAudioProbe
+      //  真（同口径）,ctx 已放行+环境因子回 1——三因在此闭环。audioAcc 与 frame()
+      //  共用同一累计器:两相互斥（泵门要求 hidden、前台 rAF 才跑 frame）零双计
+      this.audioAcc += Math.min(dtMs / 1000, 0.25);
+      let asteps = 0;
+      while (this.audioAcc >= FIXED_DT && asteps < BG_PUMP_MAX_TICKS) {
+        this.driveAmbientCues();
+        this.audioAcc -= FIXED_DT;
+        asteps++;
+      }
       // 自动保存墙钟（frame() 同款语义;DoUpdate_AutoSave Main.cs:19589 暂停不停表
       // ——后台挂机长会话不丢进度;BJ280 隐藏兜底已实证隐藏态存档全链可完成）
       const mpClient = !!this.net?.active && !this.net.policy.isHost;
@@ -8490,9 +8516,10 @@ export class Game implements GameHooks {
     // 环境音 cue 斜坡步进（★差异对齐 2026-08-24）：原版 UpdateAudio 在 XNA 固定
     // 60Hz Update 内无条件执行（Main.cs:17222 DoUpdate 主流程，gamePaused 不门控）
     // ——暂停照走（下矿即暂停时风声渐熄继续）、与渲染帧率解耦（高刷屏不双倍斜坡）。
-    // 独立累加器 + ≤5 步钳（切 tab 回来防追帧风暴）。★已知边界：隐藏标签页 rAF
-    // 停转=斜坡冻结，但在播源节点继续发声（Web 后台音频放行,全仓循环轨同此,
-    // 非 cue 层独有;原版失焦停机+XACT 引擎暂停无 Web 对应物,登记未接）
+    // 独立累加器 + ≤5 步钳（切 tab 回来防追帧风暴）。★后台接续（2026-09-29 后台
+    // SFX 通道,原「隐藏标签页 rAF 停转=斜坡冻结」登记债已清偿）：隐藏标签页由
+    // 后台泵 onPumpMsg 的音频 pass 以同公式消费本累计器（见其注）——斜坡在后台
+    // 按真实流逝继续;放行面=bgAudioProbe（pumpGate 同口径）
     if (this.world) {
       this.audioAcc += elapsed;
       let asteps = 0;
@@ -9385,6 +9412,15 @@ export class Game implements GameHooks {
     //      死亡观战（UpdateDead 尾 :16920-16924）在 spectatingSlot=-1（自尸镜头）
     //      时同样接管——原版不看 spectating 值无条件跑（死亡玩家本无移动输入，
     //      下方冻结段不适用）----
+    // ★X4 清偿刀C（2026-09-29）幽灵相 spectatingSlot 清零（vanilla Ghost()
+    //  Player.cs:6714-6716,`spectating = -1` 在 :6716）：硬核幽灵相清观战目标——
+    //  canDeathSpectate 已排 ghost 相（Player.ts:10593 isGhostPhase 门）但
+    //  spectatingSlot>=0 支独立存活 → MP 硬核死亡观战中入幽灵相后镜头仍跟代理
+    //  （spectateCamPos :4771 只看 spectatingSlot）、观战键位照走。清零后 camera
+    //  回自机=spectating=-1 同相。单机 spectatingSlot 恒 -1 零影响;MP 边缘修。
+    //  直写字段不清 msg150（原版 :6716 也是裸赋值,不走 SetOrRequestSpectating）;
+    //  置于 handleSpectatingControls 之前=清后不再重取目标,亦先于本 tick 相机消费。
+    if (this.spectatingSlot >= 0 && this.player.isGhostPhase(this.world)) this.spectatingSlot = -1;
     if (this.spectatingSlot >= 0 || this.canDeathSpectate()) this.handleSpectatingControls();
     if (this.spectatingSlot >= 0) {
       player.inputX = 0;
@@ -10447,7 +10483,8 @@ export class Game implements GameHooks {
     //        delay/recheck 每帧按 dayRate 递减，双零掷 TrySpawning(dungeonX/Y)）；
     //        delay 随存档（WF:1340/:2192 → World.cultistDelay，缺省 86400=delayStart），
 //        TabletDestroyed 账在下方
-    //        石碑 ai0==-1 边沿捕获（NPC.cs:38881）
+    //        石碑 ai0==-1 边沿捕获（NPC.cs:37183 置位/:37206 TabletDestroyed——
+    //        ★X5 新债#4 勘误:旧引 :38881 系 AI velocity 段无关行）
     //      · MysticLogFairiesEvent.UpdateTime（:64433）——已接：倒木桩夜放仙女
     //        （StartNight 开闸 + 扫桩在 DUSK 块）
     //      · CreditsRollEvent.UpdateTime（:64432）——月总死亡制作名单倒计时递减，
@@ -10462,7 +10499,9 @@ export class Game implements GameHooks {
     creditsRoll.updateTime();
     // CultistRitual.UpdateTime（Main.cs:64427 每帧位）。房主权威——访客不跑世界事件计时
     if (!this.net || this.net.policy.isHost) {
-      // TabletDestroyed 账（NPC.cs:38881）：石碑召出 439 的同一帧置 delay=43200。
+      // TabletDestroyed 账（NPC.cs:37206,★X5 新债#4 勘误:旧引 :38881 无关行;
+      // 亲读 :37206=`CultistRitual.TabletDestroyed()` 恰在 NewNPC(439) 后）：
+      // 石碑召出 439 的同一帧置 delay=43200。
       // 前置门先判（石碑只可能出现在 hardMode+石巨人+骷髅王之后的世界）省一次全实体扫；
       // 原版调用点在 AI_083a 内部，此处以石碑 ai0==-1（"已召邪教徒"标记）边沿等价
       // 捕获，每块石碑只记一次（WeakSet 去重）
@@ -11496,7 +11535,15 @@ export class Game implements GameHooks {
     //  _panPrevRight :11554 无条件推进同相。用户实报「死亡后还能左右移动画面」
     //  = 手持望远镜(1299)/镜配饰枪族死亡后 pan 通道仍活（探针 _bj397-death-cam-probe:
     //  死亡态持 1299 1.5s 镜头漂 +306px;素机死亡 dCam=0 全锁）。
-    if (!player.dead && !this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {
+    // ★X4 清偿刀C（2026-09-29）坐骑持物禁 pan 门（Main.cs:63724-63727,1458 :63730-63733
+    //  两版同文）——`mount.Active ∧ MountID.Sets.DontHoldItems[mount.Type]` → return false。
+    //  DontHoldItems{55 Rat,56 Bat,61 Pixie}（MountID.cs:29 CreateBoolSet,BJ401 建表
+    //  entities/Mounts.ts 单源复用）= 三乘骑态宠物骑乘中禁持物品 ⇒ pan 通道整门关闭
+    //  （门序=:63724 在 noThrow/lastMouseInterface 门 :63715 之后、GetPanControlValues
+    //  :63728 之前 ⇒ 本仓并入外层 if 尾项,先于 panMode!==1 行 :63721-63723 等价面之后
+    //  语义同序）。病灶=骑三坐骑持镜（望远镜 1299/镜配饰枪族）可 pan,原版不 pan。
+    //  手柄 48f 档（:63772 PlayerInput.UsingGamepad 支内）维持登记债不建模（BJ397 债②同域）。
+    if (!player.dead && !this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.() && !(player.ridingMount && (MOUNT_SETS.DontHoldItems?.[player.mount.type] ?? false))) {
       const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
       const hVid = hDef ? (hDef.vid ?? -1) : -1;
       // scope 配饰佩戴判定（Player.cs:15002-15007：饰品在身 + 手持武器 useAmmo
@@ -22376,11 +22423,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!key) return;
     // ★BJ394（2026-09-28）KillTile_DropItems 词缀掷接线（WorldGen.cs:64468/:64472
     //  `noPrefix ? -4 : -1` → Item.NewItem prefix=-1 自然掷全链）。GetItemDrops
-    //  （:64477-66612）全量普查可词缀且无 noPrefix 压制者仅两 vid：tile 61 fx==162 →
-    //  223 Nature's Gift（:66171-66174,配饰池 19,无 noPrefix→原版真掷）与 tile 50
-    //  fx==90 → 165 Water Bolt（:66175-66182,魔法池;165 掷接在 1×1 通用帧表路径）。
-    //  noPrefix=true 压制档照录零刀（本仓 tile 掉落链本就不掷=自洽）：703 seg9→223
-    //  （:65486）/707 fx90→165（:66185-66189）/700→5114（:65493-65496）;426 Breaker
+    //  （:64477-66612）全量普查可词缀且无 noPrefix 压制者【三 vid】（★X1 勘误
+    //  2026-09-29:原普查「仅两 vid」漏 case 624）:tile 61 fx==162 →
+    //  223 Nature's Gift（:66151,配饰池 19,无 noPrefix→原版真掷）与 tile 50
+    //  fx==90 → 165 Water Bolt（:66176,魔法池;165 掷接在 1×1 通用帧表路径）与
+    //  tile 624 → 5114 Abigail's Flower（:64961-64963 无 noPrefix=真掷召唤池,
+    //  掷站=breakTileBody 尾段 def.drop 支）。noPrefix=true 压制档照录零刀（此口
+    //  不掷≠不可词缀）：703 seg9→223（:65485-65486）/707 fx90→165（:66186-66187）/
+    //  700→5114（:64964-64967）;656/701→5333 无 noPrefix 但池 null=moot;426 Breaker
     //  Blade 系 case 4 火把 default `426+num`（num≥1 恒≥427）=普查 false positive。
     //  植物族其余掉落（331/208/195/150/183/194/4564/…）皆无词缀池=零 roll 同相。
     //  223 仅 sheet 61 臂掷——sheet 703 的 223=压制档
@@ -23362,7 +23412,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
           this.spawnDrop(x * TILE + 8, y * TILE + 8, sk, 1, undefined, undefined, undefined, prefix165);
         }
-      } else if (!noItem && def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
+      } else if (!noItem && def.drop) {
+        // ★BJ394 件2 补刀（2026-09-29 X1 红蓝）：case 624（WorldGen.cs:64961-64963）
+        //  dropItem=5114 **无 noPrefix** → :64468 `noPrefix ? -4 : -1` 自然掷（召唤池
+        //  rollablePrefixes(5114,false)=PrefixesForSummons）——BJ394 普查「仅两 vid」被
+        //  证伪,本站 def.drop 兜底零掷=漏第三 vid（破破坏的放置 Abigail 花应掷词缀）。
+        //  **分流防反向陷阱**：case 700（:64964-64967）同掉 5114 但 noPrefix=true→-4
+        //  压制（v_700_abigails_flower_replica 同走本支,sheet===624 门分桶,勿全 5114
+        //  开掷=707 书架同款反向陷阱）。656/701→5333（:64968-64973）虽无 noPrefix,
+        //  但 5333 池 null 不可词缀=掷亦 0,moot（非第 4/5 面）。
+        let prefix624: number | undefined;
+        if (def.vanilla?.sheet === 624 && typeof def.drop === 'number' && def.drop === 5114) {
+          const iid5114 = ITEM_BY_KEY[VI(5114)];
+          if (iid5114 !== undefined) {
+            prefix624 = rollNaturalPrefixForVid(5114, isPrefixableAccessory(iid5114), Math.random) || undefined;
+          }
+        }
+        this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1, undefined, undefined, undefined, prefix624);
+      }
       // place_v_ 兜底与 object 支 multiTileDropKey 同语义（:808 注）：判据=存在真实
       // 原版放置物品——无门时 no-drop 组 1×1 件（藤/滴落饰/苔叶块等）也走此支,虽然
       // spawnDrop 未知键静默 null 无实害,语义上与"真无掉落"相悖（2026-08-24 终审对齐）
@@ -28412,6 +28479,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     } finally {
       st.suppressListeners = false;
+    }
+    // ★X4 清偿刀C（2026-09-29）BJ361 同族三站补派发①：窗后对【写入域】3×3 逐格
+    //  补派发（TileStore.notifyChanged,BJ361 原语）——BJ322 立窗时只治 Door 四站,
+    //  本站漏接 = 导线/右击开关宝石锁 frameY 0↔54 带贴图切换后 chunk 烘焙缓存不失效
+    //  （ChunkCache mark 主通道 ChunkCache.ts:300）→ 贴图不变化;LightingEngine dirty
+    //  不置（LightingEngine.ts:186）→ 灯光不更新。域=写入 3×3（inBounds 守卫与写入
+    //  循环逐格同构;窗【后】派发=整件已完整,挪进窗内=半写态派发,BJ361 M2b 教训;
+    //  Door.shiftTallGate :243 同范式）。
+    for (let ix = ax; ix < ax + 3; ix++) {
+      for (let iy = ay; iy < ay + 3; iy++) {
+        if (!st.inBounds(ix, iy)) continue;
+        st.notifyChanged(ix, iy);
+      }
     }
     if (gem !== -1 && wasOn) {
       const key = VANILLA_ITEM_KEY_BY_ID[gem];
@@ -47966,17 +48046,24 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     return true;
   }
 
-  // ---- 重铸（哥布林工匠，Main.cs:41024-41042 + ReforgeItemInReforgeSlot :41346） ----
+  // ---- 重铸（哥布林工匠，DrawInventory Main.cs:41710 费用段 :42295-42312 + ReforgeItemInReforgeSlot :42618） ----
 
-  /** 重铸费用 = value × stack ÷ 3 × 折扣（:41026-41032 discountAvailable 0.8）。
+  /** 重铸费用 = value×stack → ×0.8 折扣先行 → ÷3（★BJ392 勘误 2026-09-29：阶序按
+   *  Main.cs:42297-42303——num55=value*stack → discountAvailable `(long)(num55*0.8)`
+   *  （:42299-42301,floor）→ PriceAdjustment → `/=3`（:42303）;旧注释 :41026-41032 系
+   *  1456 陈锚（1457 该域为 NPC 头像绘制段）。旧实现 ÷3 先行再 ×0.8=
+   *  floor(floor(V/3)×0.8) 与原版 floor(V×0.8/3) 阶序错位（V=50000:13332≠13333）。
+   *  PriceAdjustment（哥布林幸福价 :42302）未建模=登记债,勿臆造。
    *  vi_ 物品注册期 value=1 占位——权威值查 vanilla-itemvalue.json（extract-itemrare.mjs） */
   reforgeCost(item: { id: number; stack: number }): number {
     const def = ITEM_DEFS[item.id];
     if (!def) return 0;
     const vid = def.vid ?? -1;   // ★BJ283 parseInt 兜底退役(方案 A ⑥等价定谳)
     const value = (vid >= 0 ? ITEM_VALUE[String(vid)] : undefined) ?? def.value ?? 0;
-    const cost = Math.max(1, Math.floor((value * item.stack) / 3));
-    return this.player.equipStats.discount ? Math.max(1, Math.floor(cost * 0.8)) : cost;
+    let cost = value * item.stack;
+    if (this.player.equipStats.discount) cost = Math.floor(cost * 0.8);   // 折扣先行（:42299-42301）
+    cost = Math.floor(cost / 3);                                          // ÷3 后行（:42303）
+    return Math.max(1, cost);   // num60<1→1 兜底（:42309-42312）
   }
 
   /** 该物品能否重铸（Item.CanHavePrefixes → GetRollablePrefixes != null） */

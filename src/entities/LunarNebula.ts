@@ -23,7 +23,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
-import { canBeChasedBy, playerCanHitEnemy } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, hitCritters, hitCrittersAll } from './projTargets';
 import { ghostHealProc } from './SpectreSoulProj';   // ★BJ380 ghostHeal proc 单源（★BJ382 提升至 SpectreSoulProj 域导出）
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { projectileWetSection, projWaterDragFactor } from './projWetSection';
@@ -288,15 +288,32 @@ export class NebulaBlazeBolt extends Entity {
     //  aiStyle 1/friendly/magic）;中央割 !e.dead 门=死亡拍整缺 → BJ260 前置习语。
     //  两型均过两道门（CanCutTiles :15407 两表均无;Damage_CanDealDamage :12461 无）。
     cutTilesBox(game, this.x, this.y, this.w, this.h);
+    // ★X2-D3（2026-09-29）小动物命中面：原版 Damage() 单趟 victim 循环
+    //  （Projectile.cs:12618）对 Main.npc 全体——critter 恒在内,本仓独立桶不被扫到
+    //  =飞行盒对小动物零受击。penetrate 缺省 1（SetDefaults :6818-6841 无 penetrate
+    //  行,:366 字段缺省）→ :14189-14196 递减归零 → :17312 Kill = burst 同相（敌怪
+    //  首中即爆同款）。桶序先小动物（BJ383 桶序登记近似）;critter lifeMax≤5 经
+    //  flag10 lifeMax>5 段（:13712）恒不吸血 → 只入账不 proc（BJ383 判例）。
+    if (hitCritters(this, game)) { this.burst(game); return; }
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
-      if (strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - this.cx) || 1, this.armorPen)) {
-        ghostHealProc(game, this.projId, this.pveNumHits, e);   // ★BJ380 :13877-79（读自增前值）
+      // ★X2-D1（2026-09-29,BJ393 判据推广）：受理面谓词 !vanillaGated——Enemy.hurt
+      //  返真=「本拍击杀」（Enemy.ts:15033）,返假三族=门拒（dead:13971/iframes:13972/
+      //  dontTakeDamage:13978）+血尽级联（:14369 族,伤害已实扣=原版受理）+普通未致命
+      //  尾档（:15037）。原版 proc（:13877-79）/numHits++（:14263）在受理面无死亡复查
+      //  → 门拒不 proc 不计数,非门拒（血尽/普通未致命）照 proc 照计数。strike 传
+      //  pierce=0 → 门拒可及面=iframes>0 ∪ dontTakeDamage（dead 已上方前置）。
+      //  旧「strike 返真」=击杀位判据对非致死命中整面不 proc（吸血 under-fire）,退役。
+      strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+        Math.sign((e.x + e.w / 2) - this.cx) || 1, this.armorPen);
+      const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
+        || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      if (!vanillaGated) {
+        ghostHealProc(game, this.projId, this.pveNumHits, e);   // :13877-79（读自增前值）
         this.pveNumHits++;                                      //（:14263 受理后自增）
       }
       this.burst(game, e.id);
@@ -313,6 +330,12 @@ export class NebulaBlazeBolt extends Entity {
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
     game.playSfxFiles(['Item_14'], 1, this.x, this.y);
     const ex = this.cx, ey = this.cy;
+    // ★X2-D3（2026-09-29）Kill 内 Damage() critter 面（:73242-73251 maxPenetrate=
+    //  penetrate=-1 → :14194 不递减/:17312 不亡不截断）——critter 与敌怪同一 victim
+    //  循环,爆盒 50×50 居中全结算入账（hitCrittersAll 全结算变体;刚被飞行盒命中的
+    //  小动物已死,单源 dead 门跳过;不 skipId——敌怪 skipId 只护敌桶）。
+    this.pveNumHits += hitCrittersAll(this, game, undefined,
+      (c) => ex - 25 < c.x + c.w && ex + 25 > c.x && ey - 25 < c.y + c.h && ey + 25 > c.y);
     // Damage()：盒 50×50、penetrate −1——对全Overlap敌各结算一次
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
@@ -320,9 +343,14 @@ export class NebulaBlazeBolt extends Entity {
       if (e.dead || e.id === skipId) continue;
       if (!(ex - 25 < e.x + e.w && ex + 25 > e.x && ey - 25 < e.y + e.h && ey + 25 > e.y)) continue;
       const crit = Math.random() < this.critChance;
-      if (strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-        Math.sign((e.x + e.w / 2) - ex) || 1, this.armorPen)) {
-        ghostHealProc(game, this.projId, this.pveNumHits, e);   // ★BJ380 Kill 内 Damage()（:68745）同链
+      // ★X2-D1（同飞行盒站注）：受理面谓词 !vanillaGated——Kill 内 Damage()（:73251）
+      //  同链,门拒不 proc 不计数,血尽级联/普通未致命返假照 proc 照计数
+      strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+        Math.sign((e.x + e.w / 2) - ex) || 1, this.armorPen);
+      const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
+        || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      if (!vanillaGated) {
+        ghostHealProc(game, this.projId, this.pveNumHits, e);   // Kill 内 Damage()（:73251）同链
         this.pveNumHits++;
       }
     }
@@ -488,15 +516,26 @@ export class LunarFlareStar extends Entity {
         645, !!projectileData(645)?.ignoreWater);
       this.alphaI = Math.max(0, this.alphaI - 10);
       if (++this.frameCtr >= 18) { this.frameCtr = 0; this.frame++; }
+      // ★X2-D3（2026-09-29）爆炸相 critter 面：盒 140×140（SetDefaults :6955-6967
+      //  penetrate=-1+usesLocalNPCImmunity+cd-1）——critter 同 victim 循环逐靶一次
+      //  （localNPCHitCooldown=-1 ⇒ immuneArray 写 -1;critter 一击即死,单源 dead 门
+      //  承载同相去重）。盒已回写锚定（this.w/h=140,this.x/y=锚−70）→ 默认几何重叠。
+      //  critter lifeMax≤5 → flag10 lifeMax>5 段（:13712）恒不吸血 → 只入账不 proc。
+      this.pveNumHits += hitCrittersAll(this, game);
       for (const ent of game.enemies()) {
         if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as EnemyLike;
         if (e.dead || this.hitSet.has(e.id)) continue;
         if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         const crit = Math.random() < this.critChance;
-        if (strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
-          Math.sign((e.x + e.w / 2) - this.ecx) || 1, this.armorPen)) {
-          ghostHealProc(game, this.projId, this.pveNumHits, e);   // ★BJ380 :13877-79（爆炸相首敌 0 档率 0.20）
+        // ★X2-D1（同 634 飞行盒站注）：受理面谓词 !vanillaGated——门拒不 proc 不计数,
+        //  血尽级联（:14369 族）/普通未致命尾档（:15037）返假照 proc 照计数
+        strike(game, e, crit ? this.damage * 2 : this.damage, crit, this.knockback,
+          Math.sign((e.x + e.w / 2) - this.ecx) || 1, this.armorPen);
+        const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
+          || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+        if (!vanillaGated) {
+          ghostHealProc(game, this.projId, this.pveNumHits, e);   // :13877-79（爆炸相首敌 0 档率 0.20）
           this.pveNumHits++;
         }
         this.hitSet.add(e.id);
@@ -540,6 +579,10 @@ export class LunarFlareStar extends Entity {
       return;
     }
     if (!st.inBounds(tx, ty)) { this.killDust(game); return; }
+    // ★X2-D3（2026-09-29）飞行盒（10×10）critter 接触 → 转爆炸：:14255-14259
+    //  `type == 645 && ai[1] != -1f` 转爆相支对全体受理 victim 生效（critter 恒在
+    //  victim 循环 :12618）;与敌怪面同构=本仓飞行相零伤转爆承载,伤害面在爆炸相。
+    if (hitCritters(this, game)) { this.explodeNow(); return; }
     // 命中敌 → 转爆炸（:16706-16710，非 Kill）
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）

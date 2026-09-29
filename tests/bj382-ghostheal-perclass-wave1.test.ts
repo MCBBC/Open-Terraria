@@ -253,7 +253,7 @@ describe('BJ382 充能爆破炮光束 461 ghostHeal proc（BlasterBeam 线碰撞
     expect(beam.pveNumHits).toBe(2);
   });
 
-  it('拒收不 proc 不计数', () => {
+  it('拒收（门拒形态 iframes>0,hurt false）不 proc 不计数——★X2-D1 夹具忠实化', () => {
     const log: StealCall[] = [];
     const game = makeGame(log, []);
     const cb = new ChargedBlaster(1, 0, 130, 2, () => true, () => ({ x: 0, y: 0 }), () => true);
@@ -264,11 +264,34 @@ describe('BJ382 充能爆破炮光束 461 ghostHeal proc（BlasterBeam 线碰撞
     const bcx = cb.cx + cb.dirX * 16, bcy = cb.cy;
     const a = enemySpyPx(1, bcx + 48 - 24, bcy - 24, 48, 48);
     a.hurt = () => false;
+    // ★X2-D1 夹具忠实化：hurt 返假两族异义（门拒 iframes 残窗 vs 血尽级联/普通
+    //  未致命受理形态）——461 hurt 传 pierce=0 → iframes 门可达,门拒形态须以
+    //  【调用前】iframes 值承载（真 Enemy :13972 读前值）。
+    a.iframes = 5;
     const g2 = { ...game, enemies: () => [a] } as unknown as GameHooks;
     g2.applyLifeSteal = game.applyLifeSteal;
     beam.fixedUpdate(1 / 60, g2);
     expect(log.length).toBe(0);
     expect(beam.pveNumHits).toBe(0);
+  });
+
+  it('受理（普通未致命形态,hurt 返假无门位）照 proc 照计数——★X2-D1 判别面', () => {
+    const log: StealCall[] = [];
+    const game = makeGame(log, []);
+    const cb = new ChargedBlaster(1, 0, 130, 2, () => true, () => ({ x: 0, y: 0 }), () => true);
+    cb.x = 80 * TILE; cb.y = 99 * TILE;
+    const beam = new BlasterBeam(130, 2);
+    beam.parent = cb;
+    beam.critChance = 0;
+    const bcx = cb.cx + cb.dirX * 16, bcy = cb.cy;
+    const a = enemySpyPx(1, bcx + 48 - 24, bcy - 24, 48, 48);
+    a.hurt = () => false;                                 // 血尽级联/普通未致命形态（无门位）
+    const g2 = { ...game, enemies: () => [a] } as unknown as GameHooks;
+    g2.applyLifeSteal = game.applyLifeSteal;
+    beam.fixedUpdate(1 / 60, g2);
+    expect(log.length).toBe(1);                           // 非门拒=受理 → proc 照达
+    expect(log[0].numHits).toBe(0);
+    expect(beam.pveNumHits).toBe(1);
   });
 });
 

@@ -4,10 +4,13 @@
 //     Prefix(-1)` :128 = Item.cs:523-556 自然掷全链,与 NPC 掉落同链;旧 rollPrefix
 //     无 TryGet 四门=0kb 吹管族可吃 kb 词缀假词缀+掷序偏离）;
 //   件 2 KillTile_DropItems 砖破面接线——WorldGen.cs:64468/:64472 `noPrefix ? -4 : -1`
-//     （GetItemDrops :64477-66612 全量普查：可词缀且无 noPrefix 压制者仅 tile 61
-//     fx==162→223 Nature's Gift（:66171-66174）与 tile 50 fx==90→165 Water Bolt
-//     （:66175-66182）;压制档 703 seg9→223（:65486）/707 fx90→165（:66187）/
-//     700→5114（:65493）noPrefix=true→本仓 tile 掉落链本就不掷=自洽零刀;426 系
+//     （GetItemDrops :64477-66612 全量普查：可词缀且无 noPrefix 压制者【三 vid】：tile 61
+//     fx==162→223 Nature's Gift（:66151）与 tile 50 fx==90→165 Water Bolt（:66176）与
+//     tile 624→5114 Abigail's Flower（:64961-64963 无 noPrefix=真掷召唤池——★X1 红蓝
+//     2026-09-29 勘误:BJ394 原普查「仅两 vid」漏此面,已补 breakTileBody 尾段 def.drop
+//     掷站）;压制档 703 seg9→223（:65485-65486）/707 fx90→165（:66186-66187）/
+//     700→5114（:64964-64967）noPrefix=true→压制不掷;656/701→5333（:64968-64973）无
+//     noPrefix 但 5333 池 null 不可词缀=moot;426 系
 //     case 4 火把 default `426+num`（num≥1 恒≥427）=普查 false positive）+
 //     存物词缀随行（334 帧 Item.NewItem 第 8 参=帧编码 prefix :64147-64151 / TE 族
 //     result.DropItem() 真实例——本仓 pop/换件/取出三面原样随行）;
@@ -123,7 +126,7 @@ describe('BJ394-件1 vanillaCraft roll 通道迁移（CraftingRequests.cs:122-13
 describe('BJ394-件2 砖破面自然掷（WorldGen.cs:64468 noPrefix?-4:-1）+存物词缀随行', () => {
   const NATURES_GIFT = 223;   // 配饰（tile 61 fx==162,无 noPrefix→原版真掷）
   const WATER_BOLT = 165;     // 魔法（tile 50 fx==90,无 noPrefix→原版真掷）
-  const ABIGAIL = 5114;       // tile 700,noPrefix=true→压制档（本仓不掷=同相）
+  const ABIGAIL = 5114;       // tile 624 无 noPrefix=真掷召唤池（★X1 补）;tile 700 noPrefix=true→压制档
 
   it('普查代表 ①：223 配饰判定+配饰池 19 掷出池内词缀（tile 61 面→rollNaturalPrefixForVid 同参）', () => {
     const iid = iidOf(NATURES_GIFT);
@@ -153,9 +156,17 @@ describe('BJ394-件2 砖破面自然掷（WorldGen.cs:64468 noPrefix?-4:-1）+�
     }
   });
 
-  it('压制档 ③：5114/703:223/707:165 原版 noPrefix=true→本仓零掷=同相（备案面只锚池真值）', () => {
+  it('5114 双面（★X1 勘误 2026-09-29）：tile 624 无 noPrefix=真掷召唤池;tile 700 noPrefix=true→压制档', () => {
     // 池真值备案：压制档不是「不可词缀」,是「此口不掷」（非配饰位 5114 仍属召唤池）
     expect(rollablePrefixes(ABIGAIL, false)).toEqual(PREFIX_POOLS.PrefixesForSummons);
+    // 624 面：rollNaturalPrefixForVid(5114,false)（=掷站同参）3000 掷产出召唤池内词缀
+    //   （WorldGen.cs:64961-64963 case 624 无 noPrefix → :64468 prefix=-1 自然掷）
+    let nonzero = 0;
+    for (let i = 0; i < 3000; i++) {
+      const r = rollNaturalPrefixForVid(ABIGAIL, false, seeded(i * 3571 + 7));
+      if (r !== 0) { nonzero++; expect(PREFIX_POOLS.PrefixesForSummons).toContain(r); }
+    }
+    expect(nonzero).toBeGreaterThan(1000);   // 实测 1860/3000（TryGet 门后自然率）
   });
 
   it('源码钉：两掷站条件精确（sheet 61 的 223 / sheet 50 的 165）,存物词缀四面随行', () => {
@@ -164,6 +175,11 @@ describe('BJ394-件2 砖破面自然掷（WorldGen.cs:64468 noPrefix?-4:-1）+�
     expect(game).toMatch(/if \(dropId === 223 && sheet === 61\) \{[\s\S]{0,200}rollNaturalPrefixForVid\(223, isPrefixableAccessory\(iid223\), Math\.random\)/);
     // 帧表站 165 掷——条件含 sheet===50（707 的 165=压制档不掷）
     expect(game).toMatch(/if \(def\.vanilla\?\.sheet === 50 && sv === 165\) \{/);
+    // ★X1 补（2026-09-29）：624 掷站=breakTileBody 尾段 def.drop 支,sheet===624 门分桶
+    //   （case 624 :64961-64963 无 noPrefix=真掷;case 700 :64964-64967 同 5114 但
+    //   noPrefix=true 压制——gate 只键 624,700 面零掷=同相）
+    expect(game).toMatch(/if \(def\.vanilla\?\.sheet === 624 && typeof def\.drop === 'number' && def\.drop === 5114\) \{/);
+    expect([...game.matchAll(/rollNaturalPrefixForVid\(5114,/g)].length).toBe(1);   // 唯一 5114 掷站=700 恒压制
     // 存物随行四面：pop / 334 破架带出 / 换件 replaced / 单槽取出 popped（+取出溢出/taken 溢出）
     expect(game.matchAll(/fbr\.item\.prefix\)/g) ? [...game.matchAll(/fbr\.item\.prefix\)/g)].length : 0).toBeGreaterThanOrEqual(2);
     expect(game).toContain('r.replaced.prefix');
@@ -216,13 +232,13 @@ describe('BJ394-件3 QuickSpawnItem 族词缀普查（Player.cs:7174-7184 int �
 // ────────────────────────────── 件 4：l10n 孤儿键 ──────────────────────────────
 
 describe('BJ394-件4 SandboxWorld.Toast.BossFled 孤儿键摘除（BJ388 登记债）', () => {
-  it('源文件（tools/l10n-custom）与产物（public/l10n）双侧零 BossFled', () => {
-    for (const p of [
-      '../tools/l10n-custom/zh-Hans.json',
-      '../tools/l10n-custom/en-US.json',
-      'public/l10n/zh-Hans.json',
-      'public/l10n/en-US.json',
-    ]) {
+  it('源文件（tools/l10n-custom）与产物（public/l10n）双侧零 BossFled——★X1 补（2026-09-29）扩全 12 语言', () => {
+    // 12 语言清单与 tools/l10n-custom/ 实际文件名一一对齐（X1 勘误:BJ394 件4 原只查
+    //   zh-Hans/en-US 双语,其余 10 语言 custom+产物仍残留 BossFled,已摘除+重建）
+    const langs = ['de-DE', 'en-US', 'es-ES', 'fr-FR', 'it-IT', 'ja-JP', 'ko-KR', 'pl-PL', 'pt-BR', 'ru-RU', 'zh-Hans', 'zh-Hant'];
+    const paths: string[] = [];
+    for (const l of langs) { paths.push(`../tools/l10n-custom/${l}.json`, `public/l10n/${l}.json`); }
+    for (const p of paths) {
       const doc = JSON.parse(readFileSync(p, 'utf8'));
       const hit = Object.keys(doc).filter((k) => k.includes('BossFled')
         || (doc[k] && typeof doc[k] === 'object' && Object.keys(doc[k]).some((k2) => k2.includes('BossFled'))));

@@ -1038,6 +1038,15 @@ export class Sfx {
    *  照跑、sfx 不停。Game 构造期接线（可读 net 态 `() => !!this.net?.active`，
    *  ClientNet.active），destroy 摘除；null=未接（单机语义） */
   static mpProbe: (() => boolean) | null = null;
+  /** ★后台泵音频豁免探针（2026-09-29 后台 SFX 通道）：pumpGate 四门同口径
+   *  （running/world/!paused + backgroundRun/playWhenUnfocused 两开关,Game 构造期
+   *  接线、destroy 摘除,mpProbe 同款生命周期;null=未接=旧行为）。
+   *  消费面三处：①setAudioSuspension——后台泵模式下 sfx ctx 不随失焦挂起
+   *  （PauseSounds :97-107 的 Web 泵豁免臂——世界后台照跑时音效随世界延续）；
+   *  ②ensure() gateBlocked——同放行 resume；③ambientQuiet()——QuietAmbientSounds
+   *  :109 的后台放行臂（环境 cue/循环轨/ambient 一次性族按冻结视口延续,雨在下=
+   *  雨声在）。探针 false（暂停=用户选择/菜单/停机/任一开关关）=旧行为失焦静音 */
+  static bgAudioProbe: (() => boolean) | null = null;
 
   /** 各 AudioContext 创建点登记(Sfx.ensure / AudioSystem.audio)。kind 分闸类别
    *  （③）。★闸监听挂首个 ctx 登记处（幂等，④）——boot 期 BGM ctx 先于任何
@@ -1056,16 +1065,20 @@ export class Sfx {
 
   /** 失焦闸总开关：inactive=true 落闸,false 续播(ResumeAll)。分类别（③）：
    *  'music' ctx 仅开关关时挂起（AllowMusic :85-95 失焦放行仅音乐——开关开=后台听歌）；
-   *  'sfx' ctx 恒挂起（PauseSounds :97-107 与开关无关）,MP 豁免（mpProbe,④）；
-   *  ambient 层在 sfx ctx 上随 suspend 静音,MP 豁免时由 ambientQuiet() 归零
-   *  （QuietAmbientSounds :109 无 netMode 门）。resume 被拒(iOS 低电量模式/无手势
-   *  历史)时挂下一次 pointerdown 重试——AudioSystem.armUnlock 手势兜底同款 */
+   *  'sfx' ctx 恒挂起（PauseSounds :97-107 与开关无关）,MP 豁免（mpProbe,④）,
+   *  ★后台泵豁免（bgAudioProbe,2026-09-29 后台 SFX 通道）——世界后台照跑
+   *  （pumpGate 全开）时音效随世界延续,失焦挂起只对「世界冻住」的失焦生效；
+   *  ambient 层在 sfx ctx 上随 suspend 静音,泵/MP 豁免时由 ambientQuiet() 承接
+   *  （MP 期仍归零=QuietAmbientSounds :109 无 netMode 门;泵期放行见其注）。
+   *  resume 被拒(iOS 低电量模式/无手势历史)时挂下一次 pointerdown 重试——
+   *  AudioSystem.armUnlock 手势兜底同款 */
   static setAudioSuspension(inactive: boolean): void {
     const musicContinue = options.data.playWhenUnfocused;   // AllowAudioUnfocused :23
     for (const [c, kind] of Sfx.ctxRegistry) {
       if (inactive) {
         if (kind === 'music' && musicContinue) continue;
         if (kind === 'sfx' && (Sfx.mpProbe?.() ?? false)) continue;
+        if (kind === 'sfx' && (Sfx.bgAudioProbe?.() ?? false)) continue;
         if (c.state === 'running') void c.suspend().catch(() => {});
       } else if (c.state === 'suspended') {
         void c.resume().catch(() => {
@@ -1102,9 +1115,13 @@ export class Sfx {
   /** 失焦环境静音因子（QuietAmbientSounds FocusHelper.cs:109 → LegacySoundPlayer.cs
    *  :422 `num2 *= ambientVolume × (Quiet?0:1)`，无 netMode 门）：未激活=0。
    *  单机下 sfx ctx 已 suspend（因子冗余但同语义）；MP 豁免下 ctx 仍在跑，
-   *  ambient 轨靠本因子归零（一次性 ambient 族与环境循环层两处消费） */
+   *  ambient 轨靠本因子归零（一次性 ambient 族与环境循环层两处消费）。
+   *  ★后台泵豁免（2026-09-29 后台 SFX 通道）：bgAudioProbe 开（pumpGate 全开=世界
+   *  后台照跑）时因子回 1——雨声/风声 cue、暴风雪循环轨、ambient 一次性族
+   *  （鸟鸣/小动物声,AMBIENT_FILES 族）按冻结视口延续;探针 false=旧行为归零 */
   private ambientQuiet(): number {
-    return Sfx.isAppInactive() ? 0 : 1;
+    if (!Sfx.isAppInactive()) return 1;
+    return (Sfx.bgAudioProbe?.() ?? false) ? 1 : 0;
   }
 
   private ensure(silent = false): AudioContext | null {
@@ -1116,9 +1133,11 @@ export class Sfx {
       Sfx.registerAudioContext(this.ctx);
     }
     // ★失焦闸配合（①③）：未激活期间禁止自动 resume(否则网络回调等触发的 ensure
-    //   会拆闸)。sfx ctx 单机恒停（PauseSounds 与开关无关）、MP 豁免;BGM ctx 的
+    //   会拆闸)。sfx ctx 单机恒停（PauseSounds 与开关无关）、MP 豁免、后台泵豁免
+    //   （bgAudioProbe——世界后台照跑时泵路径触发的 ensure 放行 resume）;BGM ctx 的
     //   放行面在 Audio.audio()（AllowMusic :85-95 取开关）。node 单测无事件源=可见
-    const gateBlocked = Sfx.isAppInactive() && !(Sfx.mpProbe?.() ?? false);
+    const gateBlocked = Sfx.isAppInactive() && !(Sfx.mpProbe?.() ?? false)
+      && !(Sfx.bgAudioProbe?.() ?? false);
     if (this.ctx.state === 'suspended' && !gateBlocked) this.ctx.resume().catch(() => {});
     this.warmup();
     return this.ctx;

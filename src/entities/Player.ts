@@ -10369,8 +10369,12 @@ export class Player extends Entity {
    *  （:6802-6818,自 updateDeathParts 迁入）。immune=false/immuneAlpha=0/
    *  ResetEffects/ResetVisibleAccessories（:6717-6720）=效果/绘制面,本仓死亡相
    *  已冻结等效;immuneAlpha 本仓另承载死亡 UI 淡入驱动,清零会盲死亡文字
-   *  =登记偏离不照抄（Game 死亡分支 ramp 保持）。spectating=-1（:6716）由
-   *  canDeathSpectate 排 ghost 相 + handleSpectatingControls 收观战等效承载。 */
+   *  =登记偏离不照抄（Game 死亡分支 ramp 保持）。spectating=-1（:6716）清观战
+   *  目标面★X4 清偿刀C（2026-09-29）已接：Game.fixedUpdate 观战控制站头
+   *  `spectatingSlot>=0 ∧ isGhostPhase → spectatingSlot=-1`（直写字段,同 :6716
+   *  裸赋值不走 SetOrRequestSpectating）——旧注「canDeathSpectate 排 ghost 相+
+   *  handleSpectatingControls 收观战等效承载」不成立（spectatingSlot>=0 支独立
+   *  存活,MP 硬核死亡观战中入幽灵相镜头仍跟代理）,该注作废。 */
   private ghostFlight(game: GameHooks): void {
     const num = 7, num2 = 0.2;   // 速度帽/加速度（:6731-6732）
     const up = this.inputUp || this.inputJump;

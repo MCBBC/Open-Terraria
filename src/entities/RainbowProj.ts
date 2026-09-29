@@ -17,7 +17,8 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll } from './projTargets';
+import { ghostHealProc } from './SpectreSoulProj';   // ★X2-D2 251 彩虹段 proc 单源（与其他 magic 弹同构）
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——
@@ -34,6 +35,8 @@ export function _setRainbowClock(fn: (() => number) | null): void {
 
 export class RainbowSegment extends Entity {
   w = 14; h = 14;
+  /** 原版弹 id（SetDefaults :3337-3351——ghostHealProc magic 数据面/湿段消费） */
+  readonly projId = 251;
   damage: number;
   knockback: number;
   critChance = 0.04;
@@ -48,6 +51,10 @@ export class RainbowSegment extends Entity {
   dead = false;
   /** 弹体点光（SetDefaults light 0.3） */
   lightRGB: [number, number, number] | null = [0.3, 0.3, 0.3];
+  /** ★X2-D2：PVE 受理命中计数（原版 Projectile.numHits——:14263 受理后自增 ⇒ proc
+   *  （:13877-79）读自增前值;251 penetrate=-1+IDStatic 10t 共享窗 → 同敌 10t 至多一跳,
+   *  单段无同拍多靶 ⇒ 每跳前值恒 0 档率 0.20。字段名对齐 projPveNumHits PVP 读口） */
+  pveNumHits = 0;
 
   constructor(x: number, y: number, dirX: number, dirY: number, damage: number, knockback: number) {
     super();
@@ -73,9 +80,15 @@ export class RainbowSegment extends Entity {
       const t0 = nowMs();
       for (const [k, v] of segImmuneUntil) if (v <= t0) segImmuneUntil.delete(k);
     }
+    // ★X2-D3（2026-09-29）critter 面：251 penetrate=-1（SetDefaults :3341）不耗穿不亡,
+    //  Damage() victim 循环（:12618）critter 恒在内——盒 14×14 重叠全结算入账
+    //  （hitCrittersAll 全结算变体）。IDStatic 10t 共享窗（:12598-12600 flag2 per-NPC
+    //  index）对 critter 由一击即死承载（life=5,单源 dead 门天然去重）;critter
+    //  lifeMax≤5 → flag10 lifeMax>5 段（:13712）恒不吸血 → 只入账不 proc。
+    this.pveNumHits += hitCrittersAll(this, game);
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; iframes?: number; dontTakeDamage?: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const until = segImmuneUntil.get(e.id) ?? 0;
@@ -84,6 +97,18 @@ export class RainbowSegment extends Entity {
       const crit = Math.random() < this.critChance;
       const dmg = crit ? this.damage * 2 : this.damage;
       e.hurt(applyBannerDamageDealt(game, e, dmg), Math.sign(this.x - e.x) * this.knockback, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      // ★X2-D2（2026-09-29）：251 幽灵兜帽吸血 proc 接线——原版 Damage() 通用 on-hit
+      //  段 :13712 flag10（251 magic/friendly/aiStyle46≠59）→ :13875 canGhostHeal 门 →
+      //  :13877-79 ghostHeal(num41, victimCenter)。本弹自有 hurt 面此前无接线=漏。
+      //  ★X2-D1（BJ393 判据推广）：受理面谓词 !vanillaGated——门拒（iframes>0
+      //  :13972/dontTakeDamage :13978,dead 已上方前置）不 proc 不计数;血尽级联
+      //  （:14369 族）/普通未致命尾档（:15037）返假照 proc 照计数（251
+      //  usesIDStaticNPCImmunity → flag3 假 :12635 免疫门照适用=pierce 0 承载）。
+      const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
+      if (!vanillaGated) {
+        ghostHealProc(game, this.projId, this.pveNumHits, e);
+        this.pveNumHits++;
+      }
     }
   }
 

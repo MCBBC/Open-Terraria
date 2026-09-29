@@ -25,7 +25,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
-import { playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, hitCrittersAll } from './projTargets';
 import { tintedTex } from '../render/StringLine';
 // ★通用湿段（Projectile.cs:16903-17113 全体弹共用段;2026-09-06 武器弹簇接入批）
 import { projectileWetSection } from './projWetSection';
@@ -193,9 +193,25 @@ export class PrismProng extends Entity {
     if (charge > 30) {
       const thick = 22 * this.prongScale;
       const steps = Math.max(1, Math.floor(this.beamLen / 12));
+      // ★X2-D3（2026-09-29）critter 束线面：原版 Damage() victim 循环（:12618）critter
+      //  恒在内,束线 Colliding 几何（厚 22×scale 步进盒）对 critter 与敌怪同一支——
+      //  本仓逐字同构敌怪面。penetrate=-1（SetDefaults :6807-6815）→ 不耗穿不亡;
+      //  同敌 5t 免疫窗（:14056-14058 GetSlowMagicUseTime(5) 写档）对 critter 由一击
+      //  即死承载（life=5）;critter lifeMax≤5 → flag10 lifeMax>5 段（:13712）恒不吸血
+      //  → 只入账不 proc（BJ383 判例）。单源 settleCritterHit 语义=hurt 调用即受理
+      //  （critter 残存 iframes 内重扫重复入账边角=BJ383/384 各站同面,登记）。
+      this.pveNumHits += hitCrittersAll(this, game, undefined, (c) => {
+        for (let s2 = 1; s2 <= steps; s2++) {
+          const d = s2 * 12;
+          if (d > this.beamLen) break;
+          const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
+          if (bx < c.x + c.w && bx + thick > c.x && by < c.y + c.h && by + thick > c.y) return true;
+        }
+        return false;
+      });
       for (const ent of game.enemies()) {
         if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-        const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; iframes?: number; dontTakeDamage?: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || this.hitCd.has(e.id)) continue;
         for (let s2 = 1; s2 <= steps; s2++) {
           const d = s2 * 12;
@@ -208,7 +224,15 @@ export class PrismProng extends Entity {
           // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
           //  632 数据面 magic ⇒ 原版棱镜光棱本就吸血,本仓漏接）——受理位挂接,
           //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
-          if (e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true)) {   // fromPlayer=DPS 计
+          //  ★X2-D1（2026-09-29,BJ393 判据推广）：受理面谓词 !vanillaGated——Enemy.hurt
+          //  返真=「本拍击杀」（Enemy.ts:15033）,返假三族=门拒（dead:13971/iframes:13972/
+          //  dontTakeDamage:13978）+血尽级联（:14369 族）+普通未致命尾档（:15037）;
+          //  原版 proc/numHits++ 在受理面无死亡复查 → 门拒（iframes>0,dontTakeDamage
+          //  ——pierce=0 承载,dead 已上方前置）不 proc 不计数,非门拒照 proc 照计数。
+          //  旧「hurt 返真」=击杀位判据对非致死命中整面不 proc（吸血 under-fire）,退役。
+          e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+          const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
+          if (!vanillaGated) {
             ghostHealProc(game, this.projId, this.pveNumHits, e as never as Parameters<typeof ghostHealProc>[3]);
             this.pveNumHits++;
           }
@@ -607,9 +631,20 @@ export class BlasterBeam extends Entity {
     }
     const thick = 22;
     const steps = Math.max(1, Math.floor(this.beamLen / 12));
+    // ★X2-D3（2026-09-29）critter 束线面（同 632 站注）：penetrate=-1（SetDefaults
+    //  :5319-5328）→ 不耗穿不亡;几何与敌怪面逐字同构（厚 22 步进盒）。
+    this.pveNumHits += hitCrittersAll(this, game, undefined, (c) => {
+      for (let s2 = 1; s2 <= steps; s2++) {
+        const d = s2 * 12;
+        if (d > this.beamLen) break;
+        const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
+        if (bx < c.x + c.w && bx + thick > c.x && by < c.y + c.h && by + thick > c.y) return true;
+      }
+      return false;
+    });
     for (const ent of game.enemies()) {
       if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; iframes?: number; dontTakeDamage?: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       for (let s2 = 1; s2 <= steps; s2++) {
         const d = s2 * 12;
@@ -621,7 +656,11 @@ export class BlasterBeam extends Entity {
         // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
         //  461 数据面 magic ⇒ 原版充能爆破炮光束本就吸血,本仓漏接）——受理位挂接,
         //  proc 先于 :14263 numHits++（读自增前值）;拒收不 proc 不计数
-        if (e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true)) {   // fromPlayer=DPS 计
+        //  ★X2-D1（同 632 站注）：受理面谓词 !vanillaGated——门拒（iframes>0/
+        //  dontTakeDamage）不 proc 不计数,血尽级联/普通未致命返假照 proc 照计数
+        e.hurt(applyBannerDamageDealt(game, e, dmg), this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+        const vanillaGated = (e.iframes ?? 0) > 0 || e.dontTakeDamage === true;
+        if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e as never as Parameters<typeof ghostHealProc>[3]);
           this.pveNumHits++;
         }

@@ -205,7 +205,15 @@ export class MedusaHeadProj extends Entity {
       //  载体 damage=0）;536 数据面 magic（vanilla-projectiles.json）⇒ 原版本就吸血,
       //  本仓漏接。每目标一发独立 536 ⇒ numHits 前值恒 0（逐弹 SetDefaults :706 起始 0,
       //  同拍三跳全 0 档）;proc 在 :14263 numHits++ 前、拒收不 proc 不计数
-      if (t.hurt(applyBannerDamageDealt(game, t, crit ? this.damage * 2 : this.damage), 0, 0, game, this.armorPen, crit, 0, true)) {   // fromPlayer=DPS 计
+      //  ★X2-D1（2026-09-29,BJ393 判据推广）：受理面谓词 !vanillaGated——Enemy.hurt
+      //  返真=「本拍击杀」（Enemy.ts:15033）,返假三族=门拒（dead:13971/iframes:13972/
+      //  dontTakeDamage:13978）+血尽级联（:14369 族）+普通未致命尾档（:15037）;
+      //  原版 proc/numHits++ 在受理面无死亡复查 → 门拒不 proc 不计数,非门拒照 proc。
+      //  旧「hurt 返真」=击杀位判据对非致死命中整面不 proc（吸血 under-fire）,退役。
+      t.hurt(applyBannerDamageDealt(game, t, crit ? this.damage * 2 : this.damage), 0, 0, game, this.armorPen, crit, 0, true);   // fromPlayer=DPS 计
+      const vanillaGated = ((t as { iframes?: number }).iframes ?? 0) > 0
+        || (t as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      if (!vanillaGated) {
         ghostHealProc(game, 536, 0, t);
       }
       this.beams.push({ x2: tcx, y2: tcy, age: 0, mag: 1 });

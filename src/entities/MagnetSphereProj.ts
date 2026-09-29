@@ -65,7 +65,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { projectileWetSection, projWaterDragFactor, type ProjWetFlags } from './projWetSection';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHitPoint } from '../physics/LineOfSight';
-import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt } from './projTargets';
+import { canBeChasedBy, playerCanHitEnemy, applyBannerDamageDealt, hitCritters } from './projTargets';
 import { magnetSphereBoltTrailFx, heatRayTrailFx } from '../fx/orchestraFx';
 import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 激光弹 255/260 proc 单源
 import { TILE } from '../core/constants';
@@ -202,6 +202,12 @@ export class BeamBoltProj extends Entity {
         break;
       }
       // ⑤Damage()（:17184 逐子步;首相交怪 → 单发 flag3 → Kill 铺束）
+      // ★X2-D3（2026-09-29）critter 面：255 penetrate 缺省 1（SetDefaults :3380-3389
+      //  无行,:366 字段缺省）/260 penetrate=1（:3443-3452）→ critter 受击 :14189-14196
+      //  递减归零 → :17312 Kill = 铺束同相（敌怪首中即亡同款）;桶序先小动物（BJ383
+      //  桶序登记近似）。原版 Damage() victim 循环（:12618）critter 恒在内,本仓独立
+      //  桶不被扫到=激光弹对小动物零受击。
+      if (hitCritters(this, game)) { this.killBeam(game); break; }
       for (const ent of game.enemies()) {
         const e = ent as HurtTarget;
         if (e.dead || !e.hurt) continue;

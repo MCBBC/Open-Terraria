@@ -125,6 +125,12 @@ describe('BJ392 饰品重铸可达（用户实报:饰品在哥布林工匠不能
     const cost = (g.reforgeCost as (i: { id: number; stack: number }) => number)(item);
     expect(cost).toBe(16666);
 
+    // ★BJ392 X1 补（2026-09-29）：折扣先行阶序（Main.cs:42297-42303——×0.8 在 ÷3 前）
+    //   floor(floor(50000×0.8)/3)=13333;旧 ÷3 先行=floor(16666×0.8)=13332（阶序错位实证）
+    Object.defineProperty(g.player, 'equipStats', { get: () => ({ discount: true }), configurable: true });
+    expect((g.reforgeCost as (i: { id: number; stack: number }) => number)(item)).toBe(13333);
+    delete (g.player as { equipStats?: unknown }).equipStats;   // 摘影→回原型 getter（不污后续 doReforge 面）
+
     // 最优档掷中 → topTier=true + best_reforge 音（Main.cs:42620-42626）
     const pool = pfx.PREFIX_POOLS.PrefixesForAccessories;
     const bestVal = Math.max(...pool.map(pfx.prefixValueMul));

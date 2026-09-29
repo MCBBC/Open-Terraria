@@ -359,9 +359,18 @@ export class SparkleGuitarProj extends Entity {
         // ★BJ382：幽灵兜帽吸血 proc（Projectile.cs:13877-79 Damage() 通用 on-hit 段;
         //  856 数据面 magic ⇒ 原版星璇之音本就吸血,本仓漏接）——受理位挂接,proc 先于
         //  :14263 numHits++（读自增前值）;拒收不 proc 不计数
-        if (stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
+        //  ★X2-D1（2026-09-29,BJ393 判据推广）：受理面谓词 !vanillaGated——Enemy.hurt
+        //  返真=「本拍击杀」（Enemy.ts:15033）,返假三族=门拒（dead:13971 前置已滤/
+        //  iframes:13972/dontTakeDamage:13978）+血尽级联（:14369 族,伤害已实扣=原版
+        //  受理）+普通未致命尾档（:15037）;原版 proc/numHits++ 在受理面无死亡复查 →
+        //  门拒不 proc 不计数,非门拒照 proc 照计数。旧「hurt 返真」=击杀位判据对非
+        //  致死命中整面不 proc（吸血 under-fire）,退役。
+        stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
           stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
-          { hostile: false, projId: this.projId })) {   // ★焰爆石 kind1 类门入参
+          { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
+        const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
+          || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+        if (!vanillaGated) {
           ghostHealProc(game, this.projId, this.pveNumHits, e);
           this.pveNumHits++;
         }
@@ -421,9 +430,14 @@ export class SparkleGuitarProj extends Entity {
       if (this.hitOnce.has(e.id)) continue;        // flag2（:12598 usesLocalNPCImmunity array[i]==0）
       this.hitOnce.add(e.id);
       // ★BJ382：爆裂轮同链 proc（:72840 Damage() 同一弹对象,numHits 累积读自增前值）
-      if (stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
+      //  ★X2-D1（同直击站注）：受理面谓词 !vanillaGated——门拒不 proc 不计数,
+      //  血尽级联/普通未致命返假照 proc 照计数
+      stellarStrike(e, modifyStellarTuneDamage(this.damage, blocked),
         stellarHitDir(this.vx) * this.knockback, game, this.armorPen, this.critChance,
-        { hostile: false, projId: this.projId })) {   // ★焰爆石 kind1 类门入参
+        { hostile: false, projId: this.projId });   // ★焰爆石 kind1 类门入参
+      const vanillaGated = ((e as { iframes?: number }).iframes ?? 0) > 0
+        || (e as { dontTakeDamage?: boolean }).dontTakeDamage === true;
+      if (!vanillaGated) {
         ghostHealProc(game, this.projId, this.pveNumHits, e);
         this.pveNumHits++;
       }

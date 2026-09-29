@@ -28,7 +28,7 @@ function enemySpy(id: number, tx: number, ty: number, w = 24, h = 24,
   vanillaId: number | null = 15) {
   return {
     id, x: tx * TILE, y: ty * TILE, w, h, dead: false, vanillaId, maxHp: 100,
-    lastStrikeDealt: 0, attempts: 0,
+    lastStrikeDealt: 0, attempts: 0, iframes: 0,
     hurt(this: { lastStrikeDealt: number; attempts: number }, dmg: number): boolean {
       this.attempts++;
       this.lastStrikeDealt = Math.max(0, dmg - DEFENSE);
@@ -132,11 +132,16 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
     expect(log.length).toBe(0);
   });
 
-  it('拒收（hurt false）不 proc 不计数：numHits++ 仅受理面（原版 immune 门整跳）', () => {
+  it('拒收（门拒形态 iframes>0,hurt false）不 proc 不计数：numHits++ 仅受理面（原版 immune 门整跳）——★X2-D1 夹具忠实化', () => {
     const log: StealCall[] = [];
     const e = enemySpy(1, 81, 100);
     let attempts = 0;
     e.hurt = () => { attempts++; return false; };
+    // ★X2-D1 夹具忠实化（2026-09-29）：hurt 返假在真 Enemy 合同里两族异义——门拒
+    //  （iframes 残窗 :13972 读【调用前】值）vs 受理（血尽级联 :14369/普通未致命
+    //  :15037）。本测模拟门拒 → 补 iframes 残窗承载（判据改 !vanillaGated 后,
+    //  缺字段裸返假会被正确读作受理——见下案）。
+    e.iframes = 10;
     const game = makeGame(log, [e]);
     const bolt = new NebulaBlazeBolt(80 * TILE, 100 * TILE, 0, 0, 130, 3, 634);
     bolt.critChance = 0;
@@ -145,6 +150,21 @@ describe('BJ380 星云烈焰 634/635 ghostHeal proc（Projectile.cs:13877-79）'
     expect(attempts).toBe(1);
     expect(log.length).toBe(0);
     expect(bolt.pveNumHits).toBe(0);
+  });
+
+  it('受理（普通未致命形态,hurt 返假无门位）照 proc 照计数（:14263 无死亡复查）——★X2-D1 判别面', () => {
+    const log: StealCall[] = [];
+    const e = enemySpy(1, 81, 100);
+    e.hurt = () => false;                                 // 血尽级联/普通未致命形态（无 iframes/dontTakeDamage 门位）
+    const game = makeGame(log, [e]);
+    const bolt = new NebulaBlazeBolt(80 * TILE, 100 * TILE, 0, 0, 130, 3, 634);
+    bolt.critChance = 0;
+    bolt.fixedUpdate(1, game);
+    expect(bolt.dead).toBe(true);
+    expect(log.length).toBe(1);                           // 非门拒=受理 → proc 照达
+    expect(log[0].kind).toBe('ghost');
+    expect(log[0].numHits).toBe(0);
+    expect(bolt.pveNumHits).toBe(1);                      // :14263 受理后自增
   });
 });
 

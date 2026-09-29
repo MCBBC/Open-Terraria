@@ -956,7 +956,7 @@ import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { ICE_SLIP_IDS, FROZEN_SLIME_ID } from '../entities/Player';
-import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA, fairyQueenHslToRgb } from '../entities/Mounts';
+import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS, MOUNT_DATA, MOUNT_PLAYER_SIZE, fairyQueenHslToRgb } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
@@ -1193,10 +1193,18 @@ function applyPlayerMountRotation(ctx: CanvasRenderingContext2D, r: PlayerMountR
  *  贴图行内自身完成，坐骑贴图不随帧上下浮动；随帧浮动的是玩家精灵 = 玩家层
  *  translate 的 −mOff，Renderer 骑姿抬升段）。
  *  本仓玩家盒恒 42、底锚换算：feetY − (42+heightBoost)/2 + yOffset。
+ *  ★BJ402 委派缩盒支（mountedH 实参）：变身坐骑（55/56/61,Mount.cs:6309-6328
+ *  PlayerSize 委派）上坐后 mounted 盒高 = 委派值（61 妖精 14 / 55 鼠 14 / 56 蝠 18），
+ *  非 42+heightBoost——此时原版锚 = feetY − 委派h/2 + yOffset。缺省（非委派）
+ *  仍旧式,史莱姆 heightBoost 批零回退。曾漏该支 → 妖精贴图整体上浮 14px、
+ *  F3 实锤盒(8×14)与贴图分离、拖尾尘(正确锚在盒心)看起来脱离妖精本体
+ *  （用户实报 2026-09-29,探针 91 粒尘咬盒心 |Δ|≤3.4px=尘无病,病在贴图锚）。
  *  曾把 Mount.Draw 的 num2 字面 +PlayerOffset 直抄而漏抄 PlayerDrawSet:430 的
  *  预减项 → 史莱姆坐骑整贴图下坠 playerOffset(20-22px)、史莱姆半埋地里/鞍位
  *  错到玩家脚踝（用户实报 2026-09-17）。 */
-export function mountTextureAnchorY(feetY: number, heightBoost: number | undefined, yOffset: number | undefined): number {
+export function mountTextureAnchorY(feetY: number, heightBoost: number | undefined, yOffset: number | undefined,
+  mountedH?: number): number {
+  if (mountedH != null) return feetY - mountedH / 2 + (yOffset ?? 0);
   return feetY - (42 + (heightBoost ?? 0)) / 2 + (yOffset ?? 0);
 }
 
@@ -6292,7 +6300,8 @@ export class Renderer {
    *    {InputTrigger_Jump}→SPACE）@ 提示位；门=player.respawnSkipUi（全门同跳过逻辑）；
    *    淡入 num4=Remap(frames,0,60,0,1)、滑移 num3=Remap(num4,0,1,70,20)·num4
    *  - 重生倒计时（Game.RespawnInSuffix {0}=秒数，scale 0.7）@ 提示位 +40
-   *    （原版 num 共用：提示滑移带动倒计时同步下移，门关时 slide=0）
+   *    （原版 num 共用：提示滑移带动倒计时同步下移，门关时 slide=0;
+   *    ★X4 清偿刀C 补 respawnTimer>1 门 Main.cs:46140=末秒/幽灵相不画）
    *  - 文字色 = GetDeathAlpha（Player.cs:54848：r+α0.9 g+α0.5 b+α0.5 a+α0.4——
    *    immuneAlpha +2/tick 缓升，红黑渐显）
    *  - 灰化：已移除遮罩方案——整帧色调去饱和在 render() 尾段（遗照式，见彼处注） */
@@ -6349,12 +6358,20 @@ export class Renderer {
       this._respawnSkipFrames = 0;                                     // :46137 else 归零
     }
     // 重生倒计时（原版 num=-60+70=+10，scale 0.7；★位置随提示滑移联动——num 共用）
-    const secs = 1 + Math.floor(player.respawnTimer / 60);
-    ctx.font = `bold 24px ${PIXEL_FONT_FAMILY}, monospace`;   // ★FX35 族名勘误(见上)
-    const cd = Lang.text('Game.RespawnInSuffix', String(secs));
-    const cdY = viewH / 2 + (player.respawnSkipUi ? 26 + slide + 40 : 36);
-    ctx.strokeText(cd, cx, cdY);
-    ctx.fillText(cd, cx, cdY);
+    // ★X4 清偿刀C（2026-09-29）respawnTimer>1 门（vanilla Main.cs:46140
+    //  `if (player[myPlayer].respawnTimer > 1)` 门住 :46143-46144 倒计时行；
+    //  任务单引 Player.cs:46144 系归档笔误,该行即本 DrawInterface_35_YouDied 域）：
+    //  倒计时仅 >1 才画——=1 末秒不画（幽灵相 respawnTimer≤0 常驻「重生倒计时：1秒」
+    //  病灶即缺此门）。「你被杀死了…」文字可见性（:46089 无门恒画,照原版=幽灵相仍
+    //  显示 vs 幽灵相隐没）=需用户拍板,登记不动（registered-debts-x-waves.md #2）。
+    if (player.respawnTimer > 1) {
+      const secs = 1 + Math.floor(player.respawnTimer / 60);
+      ctx.font = `bold 24px ${PIXEL_FONT_FAMILY}, monospace`;   // ★FX35 族名勘误(见上)
+      const cd = Lang.text('Game.RespawnInSuffix', String(secs));
+      const cdY = viewH / 2 + (player.respawnSkipUi ? 26 + slide + 40 : 36);
+      ctx.strokeText(cd, cx, cdY);
+      ctx.fillText(cd, cx, cdY);
+    }
     ctx.restore();
   }
   /** Game 每帧注入：本次死亡掉落钱数（LocalPlayer.lostCoins） */
@@ -16687,8 +16704,11 @@ export class Renderer {
         const anchorX = p.x + p.w / 2 + xOff;
         // 锚 Y = mountedCenter + YOffset（PlayerOffset 两处相消——净式见
         // mountTextureAnchorY 头注；勿再 +mnt.playerOffset：那是 Mount.Draw num2
-        // 的字面项，PlayerDrawSet.cs:430 已在 Position.Y 预减同值）
-        const anchorY = mountTextureAnchorY(p.y + p.h, d.heightBoost, d.yOffset);
+        // 的字面项，PlayerDrawSet.cs:430 已在 Position.Y 预减同值）。
+        // ★BJ402：委派缩盒坐骑（55/56/61）实盒高 = 委派值,锚用实盒半径
+        // （Mount.cs:6309-6328 上坐即缩盒；非委派 undefined 走 42+heightBoost 旧式）
+        const anchorY = mountTextureAnchorY(p.y + p.h, d.heightBoost, d.yOffset,
+          MOUNT_PLAYER_SIZE[mnt.type]?.[1]);
         ctx.save();
         // ---- 机身倾斜（Mount.cs Hover 尾段 :3468-3521 写 player.fullRotation）：
         //      原版 mount 贴图与玩家本体同在 PlayerDrawSet 绘制缓存里，TransformDrawData

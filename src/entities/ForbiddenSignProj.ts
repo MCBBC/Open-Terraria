@@ -23,7 +23,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { playerCanHitEnemy, applyBannerDamageDealt, noteVanillaProjImmune } from './projTargets';
+import { playerCanHitEnemy, applyBannerDamageDealt, noteVanillaProjImmune, hitCrittersAll } from './projTargets';
 import { solidTileAt } from '../physics/LineOfSight';
 import { projSprite } from './Arrow';
 import { ghostHealProc } from './SpectreSoulProj';   // ★BJ382 沙暴柱 656 proc 单源
@@ -263,6 +263,19 @@ export class ForbiddenSignProj extends Entity {
     if (this.damage <= 0) return;                                // damage=0 停伤（30 帽后）
     const es = game.player.equipStats;
     const crit = Math.random() < (es.critMagic ?? 0) / 100;   // ★BJ175 桩面 ?? 防御（缺省 0）
+    // ★X2-D3（2026-09-29）critter 面：原版 Damage() victim 循环（:12618）critter 恒在
+    //  内,本仓独立桶不被扫到=柱身对小动物零受击。656 penetrate=-1（SetDefaults
+    //  :7050-7060）→ 不耗穿不亡;:14245 localAI[0]++（30 命中帽）与 :14263 numHits++
+    //  对 critter 受理命中同达（同一 victim 循环）→ hitCount/pveNumHits 同步入账。
+    //  critter 一击即死（life=5）→ localImmune 8t 窗对 critter 无观察面（单源 dead 门
+    //  天然去重）;critter lifeMax≤5 → flag10 lifeMax>5 段（:13712）恒不吸血 → 不 proc
+    //  （BJ383 判例）。单源 settleCritterHit 语义=hurt 调用即受理（BJ383/384 各站同面）。
+    //  桶序先小动物（BJ383 桶序登记近似,原版 Main.npc 槽序交错）;帽沿敌怪面同款于
+    //  逐受理检查（critter 先入账可致本拍提前达 30=敌面 break,与原版槽序交错的
+    //  概率性等价,登记）。
+    const critterHits = hitCrittersAll(this, game);
+    this.hitCount += critterHits;
+    this.pveNumHits += critterHits;
     for (const ent of game.enemies()) {
       const e = ent as unknown as {
         id: number; x: number; y: number; w: number; h: number; dead: boolean;

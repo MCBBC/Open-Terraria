@@ -155,6 +155,19 @@ export function flipBlock(
   } finally {
     st.suppressListeners = false;
   }
+  // ★X4 清偿刀C（2026-09-29）BJ361 同族三站补派发②：窗后对【写入域】逐格补派发
+  //  （TileStore.notifyChanged,BJ361 原语）——BJ322 立窗时只治了 Door 四站,本站漏接
+  //  = 灯族/吊灯等约 15 器件档（deviceTable flipBlock 消费点 :686/:699/:702/:705/
+  //  :708/:892/:908/:985/:988/:991/:1022/:1033/:1042）导线开关贴图不变化,且
+  //  LightingEngine dirty 不置（LightingEngine.ts:186 onTileChanged 订阅）=灯光不更新。
+  //  域=写入 tilesW×tilesH 块（inBounds 守卫与写入循环逐格同构,补派发在窗【后】
+  //  ——挪进窗内=半写态派发,BJ361 M2b 判别面教训;Door.shiftTallGate :243 同范式）。
+  for (let ix = ox; ix < ox + tilesW; ix++) {
+    for (let iy = oy; iy < oy + tilesH; iy++) {
+      if (!st.inBounds(ix, iy)) continue;
+      st.notifyChanged(ix, iy);
+    }
+  }
 }
 
 /** 单格帧翻转(火把/蜡烛等)。★BJ322：裸写窗同 flipBlock（原版 ToggleCandle/
@@ -171,6 +184,10 @@ export function flipCell(w: Wiring, x: number, y: number, delta: number): void {
   } finally {
     st.suppressListeners = false;
   }
+  // ★X4 清偿刀C（2026-09-29）BJ361 同族三站补派发③：窗后写入格补派发（同 flipBlock
+  //  注）——火把 66/蜡烛族 δ=18（deviceTable :655/:683/:741/:1045 消费）漏接站,
+  //  贴图不变化+LightingEngine dirty 不置。单格域,窗【后】派发。
+  st.notifyChanged(x, y);
 }
 
 // ============ 器件态机族：八音盒 / 喷泉 / 天塔柱（原版"帧带 = 开关态"系统） ============

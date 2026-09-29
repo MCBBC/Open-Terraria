@@ -2121,6 +2121,10 @@ export class GlacierFangShot extends Entity {
   /** ★R34-③：penetrate=(int)Remap(charge/60,0,1,1,3)（:37651）命中总数帽（1..3 档） */
   private penTier = 1;
   private hits = 0;
+  /** ★X2-D4（2026-09-29）：PVP 读口写位（projPveNumHits 单源读 pveNumHits,原读恒 0 档
+   *  =计数域在 hits）。写位与 hits 同面同步自增（受理位 :14263 numHits++ 等位,critter
+   *  受理命中亦入账）;hits 现语义（proc ladder 实参+penTier 帽判）不动。 */
+  pveNumHits = 0;
   private hitCd = new HitCdImpl();
   /** Projectile.timeLeft 等价（蓄力期每拍重置 300 :37596；释放后 300 递减归零
    *  Kill=释放冰矛 5 秒寿命——曾无上限,开阔天空永不消亡=无限堆积,用户实报） */
@@ -2214,6 +2218,7 @@ export class GlacierFangShot extends Entity {
     //  单计数（:14263 critter 受理命中亦入账——吸血 proc ladder 依赖同一计数）。
     if (hitCritters(this, game)) {
       this.hits++;
+      this.pveNumHits++;                                     // ★X2-D4 写位（与 hits 同面）
       if (this.hits >= this.penTier) { this.dead = true; return; }   // keepIterating=false
     }
     dealContacts(this, game, this.hitCd, -1, (t) => {
@@ -2222,6 +2227,7 @@ export class GlacierFangShot extends Entity {
       ghostHealProc(game, this.projId, this.hits,
         t as never as Parameters<typeof ghostHealProc>[3]);
       this.hits++;
+      this.pveNumHits++;                                     // ★X2-D4 写位（与 hits 同面）
       if (this.hits >= this.penTier) this.dead = true;          // penetrate 耗尽 → Kill
     });
   }
@@ -2994,16 +3000,54 @@ export class BookStormTwister extends Entity {
 }
 
 /** 704 叠层预染色桶缓存（★BJ379:XNA 预乘 rgb 贡献=tex.rgb×tint×f 全幅——桶烘焙
- *  rgb×f（multiply+destination-in 保 alpha）+lighter α=1 全量加;遮盖项由
- *  stormLayerDraw 的 destination-out 遍承担。旧"固定预染色+globalAlpha=0.249f"
- *  单遍把 rgb 折两遍∝f²=用户实报"过于透明"根因,已废。桶距 1/48≈±1LSB 级;懒烘焙
- *  上限 2 色×48 桶 60×60 小面（无 LRU 需求,帧内只触达 ~45 桶）。node(无 document)
- *  返回原图=测试替身（色彩面浏览器恒烘焙） */
+ *  rgb×f+lighter α=1 全量加;遮盖项由 stormLayerDraw 的 destination-out 遍承担。
+ *  旧"固定预染色+globalAlpha=0.249f"单遍把 rgb 折两遍∝f²=用户实报"过于透明"根因,已废。
+ *  ★BJ403（用户实报"半透区黑斑"定谳）:BJ379 桶用 multiply+destination-in 烘焙,
+ *  destination-in 把桶 α 还原成【raw tex.a】,lighter α=1 每层把 tex.a 全额累进
+ *  dst.α——XNA 加算项 src.a=tex.a×STORM_A×f(≤0.249f,Main.cs:33135-33141 tint.A)。
+ *  ~45 层叠加 ⇒ 半透区(texel a=26/77/102 占大头)α 饱和 1、rgb 仅 ΣP(小) = 黑斑。
+ *  =尘系"add.A 恒 255"黑方块家族第三发(VanillaDust.ts dustPremulBake 2026-09-03
+ *  黑方块/09-04 水花黑十字判例:"修=add.A 钉 e=texA×cA")。修=桶改 ImageData 字节级
+ *  烘焙(stormAddBake 纯函数):rgb=预乘全幅 aR=tex.rgb×tex.a×tint×f、α=e=tex.a×
+ *  STORM_A×f(与 erase 遍同源同值=混合式两项共用 tint.A 的结构语义)。
+ *  存面约束:canvas 预乘面 rgb≤α ⇒ 亮 texel(aR>e,tint/63.5≈2.5×)不可表——存面
+ *  α 取 max(e,aR,aG,aB)(尘系同款):rgb 恒逐字节精确,α 仅亮点位过冲到 rgb 本值
+ *  (≤0.627f;暗 texel 恒 α=e 精确)。边界登记:龙卷亮臂比原版更实(α 过冲≤2.5×e),
+ *  不黑不暗——本体暗 texel 占大头恒精确。桶距 1/48≈±1LSB 级;懒烘焙上限 2 色×48 桶
+ *  60×60 小面（无 LRU 需求,帧内只触达 ~45 桶）。node(无 document)返回原图=测试替身
+ *  （色彩面浏览器恒烘焙） */
 const STORM_TINT_COLORS: ReadonlyArray<readonly [number, number, number]> =
   [[160, 140, 100], [140, 160, 255]];                  // value94(:33106)/color84(:33107)
 const STORM_TINT_BUCKETS = 48;
 const STORM_A = (127 * 0.5) / 255;                     // A=127k→×0.5(:33140)→/255
 const stormTintBuckets = new Map<string, { src: CanvasImageSource; f: number }>();
+/** ★BJ403 加算面字节级烘焙（尘系 dustPremulBake 同范式;tests/bj403-storm-addbake.test.ts
+ *  直测）:入参 tex=straight RGBA 字节（raw 贴图 getImageData 产物）,mR/mG/mB=tint×fv
+ *  （0..255 浮点）,mE=255×STORM_A×fv——出参 straight RGBA 存面字节:
+ *  aR=tex.rgb×tex.a×mR/65025（预乘全幅=XNA 加算 src.rgb）、e=tex.a×mE/255（XNA 加算
+ *  src.a=遮盖遍同源）。存面 α=max(e,aR,aG,aB):rgb 逐字节精确可表,α 亮点位过冲。 */
+export function stormAddBake(
+  tex: Uint8ClampedArray, mR: number, mG: number, mB: number, mE: number,
+): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(tex.length);
+  for (let i = 0; i < tex.length; i += 4) {
+    const tA = tex[i + 3];
+    if (tA === 0) continue;
+    const aR = (tex[i] * tA * mR) / 65025;
+    const aG = (tex[i + 1] * tA * mG) / 65025;
+    const aB = (tex[i + 2] * tA * mB) / 65025;
+    const e = (tA * mE) / 255;
+    const m = Math.max(e, aR, aG, aB);
+    if (m <= 0) continue;
+    out[i] = (aR * 255) / m;
+    out[i + 1] = (aG * 255) / m;
+    out[i + 2] = (aB * 255) / m;
+    out[i + 3] = m;
+  }
+  return out;
+}
+/** raw 贴图 straight ImageData 缓存（每 img 一次 getImageData;桶烘焙消费） */
+const stormTexData = new WeakMap<object, Uint8ClampedArray>();
 function stormTintBucket(img: ImageBitmap | HTMLImageElement, which: 0 | 1, f: number):
   { src: CanvasImageSource; f: number } | null {
   if (!(f > 0)) return null;
@@ -3014,16 +3058,22 @@ function stormTintBucket(img: ImageBitmap | HTMLImageElement, which: 0 | 1, f: n
   if (hit) return hit;
   const [r, g, b] = STORM_TINT_COLORS[which];
   const fv = q / STORM_TINT_BUCKETS;
+  let tex = stormTexData.get(img);
+  if (!tex) {
+    const s = document.createElement('canvas');
+    s.width = img.width; s.height = img.height;
+    const sc = s.getContext('2d', { willReadFrequently: true })!;
+    sc.imageSmoothingEnabled = false;
+    sc.drawImage(img as CanvasImageSource, 0, 0);
+    tex = sc.getImageData(0, 0, img.width, img.height).data;
+    stormTexData.set(img, tex);
+  }
   const c = document.createElement('canvas');
   c.width = img.width; c.height = img.height;
   const cx = c.getContext('2d')!;
-  cx.imageSmoothingEnabled = false;
-  cx.drawImage(img as CanvasImageSource, 0, 0);
-  cx.globalCompositeOperation = 'multiply';
-  cx.fillStyle = `rgb(${Math.round(r * fv)},${Math.round(g * fv)},${Math.round(b * fv)})`;
-  cx.fillRect(0, 0, c.width, c.height);
-  cx.globalCompositeOperation = 'destination-in';
-  cx.drawImage(img as CanvasImageSource, 0, 0);
+  const im = cx.createImageData(img.width, img.height);
+  im.data.set(stormAddBake(tex, r * fv, g * fv, b * fv, 255 * STORM_A * fv));
+  cx.putImageData(im, 0, 0);
   const entry = { src: c as CanvasImageSource, f: fv };
   stormTintBuckets.set(key, entry);
   return entry;
@@ -3035,7 +3085,10 @@ function stormTintBucket(img: ImageBitmap | HTMLImageElement, which: 0 | 1, f: n
  *    tex.a 模板,省烘焙）;
  *  ②lighter(预染色桶,α=1)=+src.rgb（桶已携 f 全幅,不得再折 α——单遍
  *    source-over+globalAlpha 即 BJ376 rgb∝f² 过透根因）。
- *  与尘系 dustPremulPair add/erase 同范式;60×60 小面,每层 2 draw 可负担。 */
+ *  与尘系 dustPremulPair add/erase 同范式;60×60 小面,每层 2 draw 可负担。
+ *  ★BJ403:②的桶 α 曾=raw tex.a（destination-in 还原）未被 tint.A 折——lighter
+ *  每层把 tex.a 全额累进 dst.α ⇒ 半透区 α 饱和=黑斑（尘系黑方块家族第三发）;
+ *  桶已改 stormAddBake 字节级烘焙（α=e=texA×cA 与本遍 erase 同源同值）。 */
 function stormLayerDraw(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement,
   which: 0 | 1, f: number, iw: number, ih: number): void {
   if (!(f > 0.004)) return;

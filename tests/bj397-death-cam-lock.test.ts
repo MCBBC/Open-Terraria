@@ -37,7 +37,9 @@ const playerSrc = read('src/entities/Player.ts');
 // ============================================================
 describe('BJ397 死亡态 pan 整门（Main.cs:63711-63714 GetPlayerControlledCameraPan dead 门）', () => {
   it('Game.fixedUpdate pan 门首项 = !player.dead（死门先于 uiBlocking/mouseInterface 门,原版门序 :63711<:63715）', () => {
-    const gate = gameSrc.indexOf('if (!player.dead && !this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()) {');
+    // ★X4 清偿刀C（2026-09-29）：门尾并入坐骑持物禁 pan 门（Main.cs:63724-63727
+    //  mount.Active ∧ DontHoldItems{55,56,61}）——门序不破（dead 仍为首项）
+    const gate = gameSrc.indexOf('if (!player.dead && !this.input.uiBlocking && !this.inpOverDomUi() && !this.uiHeldItemRef?.()');
     expect(gate).toBeGreaterThan(-1);
     // 门序断言：该行必须落在 targetPan 声明与 panNum 档位面之间（=pan 通道唯一入口门）
     const decl = gameSrc.indexOf('let targetPanX = 0, targetPanY = 0;');
@@ -47,6 +49,8 @@ describe('BJ397 死亡态 pan 整门（Main.cs:63711-63714 GetPlayerControlledCa
     // 门序细化：player.dead 在 uiBlocking 之前（原版死门先于 noThrow/lastMouseInterface）
     const line = gameSrc.slice(gate, gameSrc.indexOf('\n', gate));
     expect(line.indexOf('!player.dead')).toBeLessThan(line.indexOf('!this.input.uiBlocking'));
+    // 坐骑门在位且为外层 if 尾项（:63724 在 GetPanControlValues :63728 之前的门序）
+    expect(line).toContain("MOUNT_SETS.DontHoldItems?.[player.mount.type]");
   });
 
   it('死门锚注在位（63711-63714 双版行号 + 探针物证背书）', () => {
