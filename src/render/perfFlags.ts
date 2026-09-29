@@ -102,11 +102,12 @@ export function searchHasResetForTest(): void { _spHasSearchKey = null; _spHasCa
 //   D. texAlive 按 flush 代际批检（GLSpriteLayer.texCheck/texGen;LRU 逐出窗语义
 //      保持——逐出点必 bump 代际,判别器=逐出注入下守卫仍拦得住,见
 //      tests/liqpolish-guard.test.ts）。
-// `?liqpolish=1` 显式激活（缺省关=现行行为逐位）;对拍全绿后转正翻缺省（liqgl 先例）。
+// ★转正（2026-09-29 用户拍板）缺省开:?liqpolish=0=逃生门（回逐列构造旧链,现行
+//  行为逐位）。node/测试环境恒关（构造期判死——perfFlags 族惯例）。
 export let liqpolish = (() => {
   try {
     if (typeof location === 'undefined') return false;
-    return new URLSearchParams(location.search).get('liqpolish') === '1';
+    return new URLSearchParams(location.search).get('liqpolish') !== '0';
   } catch { return false; }
 })();
 
