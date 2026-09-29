@@ -25,7 +25,7 @@ import { VUI } from './vui/VUI';
 import { assetsDownloadIdle, initAssetCache, primeBootAssets, setLazyWorkerPrefetch, warmAllAssets } from './net/AssetCache';
 import { prefetchWorldGenWorker } from './workers/WorldGenClient';
 import { prefetchSaveWorker } from './workers/SaveClient';
-import { prefetchLightWaveWorkers } from './workers/WorkerGovernance';   // ★看门狗治理(2026-09-28):light/wave 脚本预热
+import { prefetchLightWaveWorkers } from './workers/lightWavePrefetch';   // ★2026-09-29 拆出 WorkerGovernance(见该文件头注);light/wave 脚本预热
 import { holdForAssetsReady, mountAssetBadge, warnAssetPipelineDown } from './ui/AssetDownloadUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';

@@ -47871,7 +47871,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
       // 逐件 roll（RB4a 债②;批量/多件产出与无词缀域不 roll——原版 stack>1 不进分支）。
       // ★BJ394（2026-09-28）迁 BJ390 rollNaturalPrefixForVid＝Item.cs:523-556 自然掷
       // 全链（Next(4) 早退→池掷→Reduced 2/3 mercy→TryGet 四失败门重进环 :1067-1079）
-      // ——原版制作链与 NPC 掉落同走 Prefix(-1) 全链,旧 rollPrefix(pool,false) 无四门
+      // ——原版制作链与 NPC 掉落同走 Prefix(-1) 全链,旧 rollPrefix 无四门直掷
       // （0kb 吹管族 281 等可吃 kb 词缀=零效果假词缀）且掷序偏离（先池掷后 1/4 门）。
       // pool 门保留≡CanHavePrefixes（CreateResult 先 Clone 后 Prefix,GetRollablePrefixes
       // null → Prefix 返 false 零词缀）;isPrefixableAccessory 判定沿 BJ392。多轮单件
@@ -48008,7 +48008,7 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     // ★BJ400（2026-09-29）重铸掷补 TryGet 门（BJ394 登记债清偿）：原版 Prefix(-2)
     //   重铸保底面同走 TryGet 门（Item.cs:523-556 while 环 -2 臂——:529 rolledPrefix
     //   恒复位 -1 → :532 RollAPrefix → :1067-1079 TryGet 四失败门掷废重进环 +
-    //   :551-554 rolled==0 重掷）——旧 rollPrefix(pool,true) 无门=0kb 武器（吹管/
+    //   :551-554 rolled==0 重掷）——旧 rollPrefix 直掷通道无门=0kb 武器（吹管/
     //   星炮/雪球炮族）可掷 kb 假词缀。stat 读法与 BJ390 rollNaturalPrefixForVid
     //   同源（itemCombat 面板=ResetPrefix 后基面板;本仓 item 域无词缀增量模型同相）
     const st = itemCombat(vid);

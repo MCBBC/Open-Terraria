@@ -14748,6 +14748,13 @@ export class Renderer {
     mnt: import('../entities/Mounts').MountInstance | null): void {
     const ad = p.equipStats.accDraw;
     if (!this.atlas || (ad.back <= 0 && ad.balloon <= 0)) return;
+    // ★BJ401：变身坐骑（MountID.Sets.PlayerIsHidden={52,54,55,56,61}）披风/气球整隐。
+    // 原版两族染色 = colorArmorBody（PlayerDrawLayers.cs:632 BackAcc / :1160+:1168
+    // Balloons），PlayerDrawSet hideEntirePlayer（:1694-1697）与
+    // hideEntirePlayerExceptHelmetsAndFaceAccessories（:1689-1693）两支都把它染成
+    // Color.Transparent → 骑乘期不可见（61 妖精 = AdjustmentsForPixieMount
+    // PlayerDrawSet.cs:1910-1914，用户实报"妖精形态身上还带着装备"）。
+    if (mnt && MOUNT_SETS.PlayerIsHidden?.[mnt.type]) return;
     const bodyRow = accRows.body;
     // 披风（back）：坐姿隐藏（UpdateVisibleAccessory :36473-36475 sitting → back=-1）
     if (ad.back > 0 && !p.sitting) {
@@ -14793,6 +14800,16 @@ export class Renderer {
     headFaceHandled = false): void {
     const ad = p.equipStats.accDraw;
     if (!this.atlas) return;
+    // ★BJ401：变身坐骑整隐族（52/55/56/61 = hideEntirePlayer，PlayerDrawSet.cs:
+    //  1825-1914 AdjustmentsFor{Wolf,Rat,Bat,Pixie}Mount → :1694-1697 身前配饰
+    //  染色族 colorArmorBody/Legs/Head/Neck/Shield... 全 Color.Transparent →
+    //  骑乘期不可见；61 妖精=本刀目标，用户实报"妖精形态身上还带着装备
+    //  （盾牌等）"——盾 25_Shield :3055-3127 染 colorArmorBody 同隐）。
+    //  54 迅猛龙除外：hideEntirePlayerExceptHelmetsAndFaceAccessories
+    //  （:1689-1693）保留 colorArmorHead → 脸饰照画（原版 CanDrawOnVelociraptorMount
+    //  门 :2823/:2843，本仓无该表维持现画法，登记）；54 的身前非脸族本仓仍画
+    //  （陈旧偏差，非本刀口径，登记不动）。
+    if (mnt && MOUNT_SETS.PlayerIsHidden?.[mnt.type] && mnt.type !== 54) return;
     const atlas = this.atlas;
     const bodyRow = accRows.body;
     const legRow = accRows.legs;
@@ -15789,8 +15806,14 @@ export class Renderer {
         if (hs === 4 && p.gravDir === -1) staticHoldStyle = 0;
         holdStyleRaw = hs;
         // 变身坐骑（PlayerIsHidden）原版由 AdjustmentsForWolfMount 改锚续画手持物——
-        // 此处原锚近似续画（不隐藏，登记锚点偏差）
-        if (staticHoldStyle) {
+        // ★BJ401：DontHoldItems={55,56,61}（MountID.cs:29 CreateBoolSet）三骑禁持：
+        // 原版 Mount.UpdateEffects case 55/56/61 置 IsAllowedToHoldItems=false +
+        // noItems=true（Mount.cs:5195-5200，61 支 :5197-5199），DrawPlayer_27_HeldItem
+        // 头门 `!IsAllowedToHoldItems`（PlayerDrawLayers.cs:3149-3152）整层跳过 =
+        // 手持物不画。52 狼/54 迅猛龙不在表内照画（狼改锚续画,下方 mountHeldAnchor）。
+        // 旧注"不隐藏，登记"系只对狼成立,曾把 61 妖精的手持物也照画（用户实报面之一）。
+        if (staticHoldStyle
+          && !(p.ridingMount && (MOUNT_SETS.DontHoldItems?.[p.mount.type] ?? false))) {
           // ★手持帧规格同 drawUseItem（GetItemDrawFrame :41901-41903）：IsFood 取
           // 竖 3 帧条第 2 行（atlasIcon 切的是掉落物顶行 → 从 vicon 原条重切）
           // ★BJ348b-2：3476 静持贴图 = Extra_64 旋转球帧（case 3476 专支 return

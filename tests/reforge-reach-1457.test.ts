@@ -24,15 +24,15 @@ import { Game } from '../src/core/Game';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 
-// ---- 确定性掷点钩（sw-fx60 同款：只劫 rollPrefix,其余透传） ----
+// ---- 确定性掷点钩（★BJ400 劫点迁 rollReforgePrefix:doReforge 掷面 TryGet 门化,其余透传） ----
 const rollHook = vi.hoisted(() => ({ pick: null as null | ((pool: number[]) => number) }));
 vi.mock('../src/data/vanillaPrefixes', async (importOriginal) => {
   const m = await importOriginal<typeof import('../src/data/vanillaPrefixes')>();
-  const origRoll = m.rollPrefix;
+  const origReforge = m.rollReforgePrefix;
   return {
     ...m,
-    rollPrefix: (pool: number[], wantBest: boolean) =>
-      rollHook.pick ? rollHook.pick(pool) : origRoll(pool, wantBest),
+    rollReforgePrefix: (pool: number[], rand: () => number, stat?: Parameters<typeof origReforge>[2]) =>
+      rollHook.pick ? rollHook.pick(pool) : origReforge(pool, rand, stat),
   };
 });
 beforeEach(() => { rollHook.pick = null; });

@@ -169,7 +169,8 @@ describe('BJ165 ③ 锤悬停应答面(原版缺口补齐)+钱不足静默判例
     const enterStart = body.indexOf("hammer.addEventListener('mouseenter'");
     const enterBody = body.slice(enterStart, body.indexOf("});", enterStart));
     expect(enterBody).toContain("this.game.sfx.play('menuTick', 1)");
-    expect(enterBody).toContain("this.showBuffTooltip(hammer, Lang.inter(19), '')");
+    // ★00:12 并行批把第一参改 e.currentTarget（悬停目标同物,语义不变）——锚随码迁
+    expect(enterBody).toContain("this.showBuffTooltip((e.currentTarget as HTMLElement), Lang.inter(19), '')");
   });
 
   it('悬停出 = hideBuffTooltip 对称(:42383 mouseReforge=false 支)', () => {

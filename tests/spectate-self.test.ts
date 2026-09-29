@@ -40,6 +40,11 @@ interface Shell {
   spectateKeyExits(code: string): boolean;
   handleSpectatingControls(): void;
   respawnPlayer(): void;
+  // ★BJ400（2026-09-29）respawnPlayer → startCameraTransitionForPlayerTeleport 链面桩
+  golfState: { tryGetCameraTrackingPosition(): unknown };
+  camera: { panX: number; panY: number; viewW: number; viewH: number; startTeleportLerp(...a: unknown[]): unknown };
+  renderer: { blackFadeIn: number };
+  placePlayerAtSpawn: ReturnType<typeof vi.fn>;
 }
 
 /** 组装原型壳：mySlot=3，players 槽位表（{slot: {active, dead}}） */
@@ -78,6 +83,13 @@ function shell(opts: {
   g.lastStripReq = '';
   g.lostCoins = 0;
   g.playSfxFile = vi.fn();
+  // ★BJ400（2026-09-29）测点补桩：respawnPlayer → startCameraTransitionForPlayerTeleport
+  //  ①跟踪镜头支读 golfState（BJ103-A1/BJ98 债①既有消费）——壳缺此桩曾致 respawnPlayer
+  //  测试 TypeError（ golfState undefined,与 BJ400 三件无关的邻接缝）。
+  g.golfState = { tryGetCameraTrackingPosition: () => null } as never;
+  g.camera = { panX: 0, panY: 0, viewW: 1920, viewH: 1080, startTeleportLerp: vi.fn() } as never;
+  g.renderer = { blackFadeIn: 0 } as never;
+  g.placePlayerAtSpawn = vi.fn();
   return g;
 }
 

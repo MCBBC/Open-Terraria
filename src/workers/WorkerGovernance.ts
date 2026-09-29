@@ -30,8 +30,6 @@
 // ②去永久化：回落 → 阶梯重生 5s/10s/20s（封顶续 20s）,?wwretry=0 逃生门。重生=
 //   全新 worker 实例（light 走 warmup 双跑语义无黑窗;wave 走 shadow 双轨本地连续）。
 // ③指纹：falls 细分 onerror/no-result-dead/pickup-timeout,入 F5 驾驶舱。
-import { LIGHT_WORKER_ENTRY_URL, WAVE_WORKER_ENTRY_URL } from './workerEntryUrls';
-
 /** 回落原因三分类（F5 fallsBy 消费面） */
 export type WorkerFallReason = 'onerror' | 'no-result-dead' | 'pickup-timeout';
 export type WorkerFallsBy = Record<WorkerFallReason, number>;
@@ -127,20 +125,6 @@ export function newFallsBy(): WorkerFallsBy {
   return { onerror: 0, 'no-result-dead': 0, 'pickup-timeout': 0 };   // 键=WorkerFallReason 值（fallsBy[reason]++ 直配）
 }
 
-/**
- * ★进场时序补丁（2026-09-28 根因定谳的+1 刀）：light/wave worker 脚本经 SW 预热。
- * prefetchWorldGenWorker/prefetchSaveWorker 既有判例——借音频门等待窗口 spawn+
- * 3s terminate,脚本请求经 SW cache-first 落缓存,真正 ensureWorker 时秒开;
- * light/wave 从未拿到同款预热=开局冷取>2s 被 warmup 看门狗误杀的触发链。
- * 必须走 new Worker(new URL) 模式（vite 才会构建产物;同源条目与生产 spawn
- * 解析到同一 chunk=同一 HTTP 资产,预热即暖生产链路）。主线程专用。
- */
-export function prefetchLightWaveWorkers(): void {
-  try {
-    if (typeof document === 'undefined') return;
-    const w1 = new Worker(LIGHT_WORKER_ENTRY_URL, { type: 'module' });
-    setTimeout(() => { try { w1.terminate(); } catch { /* 已死 */ } }, 3000);
-    const w2 = new Worker(WAVE_WORKER_ENTRY_URL, { type: 'module' });
-    setTimeout(() => { try { w2.terminate(); } catch { /* 已死 */ } }, 3000);
-  } catch { /* 预热失败不阻断启动 */ }
-}
+// ★prefetchLightWaveWorkers 已迁 src/workers/lightWavePrefetch.ts（2026-09-29 拆出:
+//   本模块被 LightingEngine.ts:16 import,worker-URL 字面量留在这里会把 LightWorker
+//   的 bundle 闭包接回 Wave/Light 入口=vite「Circular worker imports」拒构建）。
