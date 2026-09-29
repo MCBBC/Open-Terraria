@@ -1,26 +1,39 @@
 // 制作组名单演出渲染（CreditsRollSky）—— Terraria.GameContent.Skies/CreditsRollSky.cs
-// 消费侧 1:1（IIIII232）。本仓无 SkyManager 全屏天空管线，演出以独立 overlay canvas
-// 承载（同 BestiaryPanel 的 DOM 覆盖惯例）：锚点 = 屏幕中心（AnchorPositionOnScreen
-// = Main.ScreenSize/2，CreditsRollSky.Draw）；透明度斜坡 1/120 每帧（Update :22-26，
-// gameMenu 1/15——本仓无名单菜单态，恒 1/120）；_currentTime 每帧 +1，≥ endTime 或
-// !CanPlayCreditsRoll → Deactivate（_wantsToBeSeen=false）→ opacity 归零后 isActive=false。
+// 消费侧 1:1（IIIII232 装配；★BJ409 归位渲染层/时钟/比例）。
+//
+// ★BJ409 定谳（2026-09-29 用户实报"城镇 NPC 悬空排成数排站在半空"）三根因：
+//  ① 段时间窗门缺失——原版 Segments.AnimationSegmentWithActions.Draw 消费端
+//     （Segments.cs:244-245 NPCSegment / :397 SpriteSegment）有硬窗门
+//     `TimeInAnimation < _targetTime || > _targetTime+DedicatedTimeNeeded → 不画`，
+//     本仓 npc/spr 分支只靠动作链首 Fade(255)/Fade(0) 隐身，而 blankState 初值
+//     （alphaNpc=0 可见 / opacity=1 可见）在段开场（local<0）时不吃动作 → 全剧
+//     348 段所有 NPC/画板从第 0 帧起全部常驻（探针实测 t=100 时 64/64 npc + 30/30
+//     spr 泄漏）＝"几排 NPC 整齐悬空排排站"的第一根因。修 = 1:1 补窗门。
+//  ② 渲染层错位——原版 CreditsRollSky 是 SkyManager 深度 1 天空，经
+//     DrawRemainingDepth（Main.cs:60564/:53484 背景段收尾）绘制：全部背景层之后、
+//     世界内容之前 → 被墙/tile 遮挡（在室内/洞穴看不见，露天=挂在天空的背景板）。
+//     本仓曾挂 DOM 顶层画布（z-index 60）= 盖住世界/HUD。修 = Renderer 在
+//     drawLanternsNear/drawPartyBalloonsNear 同槽（该位=本仓已判例的
+//     DrawRemainingDepth 等价位）调 drawCreditsRollSky；DOM 画布拆除。
+//  ③ 时钟/比例——原版 _currentTime 在 SkyManager.Instance.Update（Main.cs:17317
+//     每 Main.Update 帧）推进、演出锚=Main.ScreenSize/2、精灵 1:1 屏幕像素
+//     （zoom1=16px/tile 世界比例）。本仓曾 overlay 自有 rAF（120Hz 屏 2×速）+
+//     固定 scale=2（巨人比例）。修 = tick 挂 Game 60Hz 固定档（creditsRoll
+//     .updateTime 同帧位）、scale=相机 zoom（与世界同比例）。
+//  另:composer 侧同批修——收场群像 AddEmote 窗/侧（见 creditsRollComposer.ts
+//  BJ409 注）与 bg/道具画板 origin 折叠（Size*(0.5,1)+(ox,oy) 语义）。
 //
 // 段求值 = creditsRollComposer 时间线逐帧无状态重放（Actions.cs ApplyTo 闭式函数，
 // 动作按数组序串行施加、运行态在帧内逐段传递——与 ProcessActions 的重放序一致）。
 // 资产 = public/sprites/vanilla/{NPC_,Extra_,Projectile_}*.png（既有抽取管线资产）；
-// emote 气泡 = Extra_48（EmoteSegment :479-500，8×N 帧表 34×28）。
+// emote 气泡 = Extra_48（EmoteSegment :464-495，8×N 帧表 34×28）。
 // 字体 = Fusion Pixel（UIFont 注入）近似 FontAssets.DeathText ×0.7（原版位图字库）。
 // 登记债见 docs/worldgen/content-parity-vs-vanilla-2026-08-16.md 本批章（玩家形象段、
-// item 喷洒段、NPC 变体/AlternativeTexture 形象）。
+// item 喷洒段、NPC 变体/AlternativeTexture/派对帽形象、ShowItem 手持物）。
 
-import { getCreditsRollFill, invalidateCreditsRollFill, type Act } from '../world/creditsRollComposer';
+import { getCreditsRollFill, invalidateCreditsRollFill, type Act, type Anim, type Seg } from '../world/creditsRollComposer';
 import { VANILLA_NPCS } from '../data/vanillaNpcs';
 import { Lang } from '../i18n/Lang';
-
-const CSS = `
-.sw-credits { position: fixed; inset: 0; pointer-events: none; z-index: 60;
-  image-rendering: pixelated; }
-`;
 
 /** Extra_48 气泡帧 34×28（272×1092 → 8 列×39 行） */
 const EMOTE_FW = 34;
@@ -47,6 +60,15 @@ interface EvalState {
 }
 
 const clamp = (v: number, lo: number, hi: number): number => v < lo ? lo : v > hi ? hi : v;
+
+/** ★BJ409①：段时间窗门（Segments.cs:244-245 NPCSegment / :397 SpriteSegment 消费端
+ *  硬窗 1:1）——`TimeInAnimation < _targetTime || > _targetTime+DedicatedTimeNeeded
+ *  → 不画`。npc/spr 段渲染端必经此门（此前缺门 + blankState 初值可见 = 全剧段
+ *  从第 0 帧起全部常驻,= 用户实报"NPC 悬空排排站"第一根因） */
+export function inSegWindow(seg: Extract<Seg, { acts: Anim }>, t: number): boolean {
+  const local = t - seg.t;
+  return local >= 0 && local <= seg.acts.time;
+}
 
 /** Anim 动作链求值（Actions.cs ApplyTo 逐条重放；delay 由 Then/With 预分配）。
  *  gravity/rotor/move 的位移在求值期直接累计（vanilla position += 闭式项，
@@ -142,14 +164,9 @@ export interface CreditsRollOverlayDeps {
   /** Main.CanPlayCreditsRoll（Main.cs:3223-3232）：!gameMenu && hasCreditsSceneMusicBox
    *  ∪ gameMenu&&menuMode==3000 ∪ IsEventOngoing——由装配侧注入（musicBoxStyle===85） */
   canPlay(): boolean;
-  /** 渲染倍率（原版 1×@1080p；本仓跟随 UI 视感取 2） */
-  scale?: number;
 }
 
-export class CreditsRollOverlay {
-  private cv: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private raf = 0;
+class CreditsRollOverlay {
   private t = 0;                    // CreditsRollSky._currentTime
   private opacity = 0;              // CreditsRollSky._opacity
   private active = false;           // isActive
@@ -160,33 +177,24 @@ export class CreditsRollOverlay {
   private failed = new Map<string, number>();
   private static readonly FAILED_TTL_MS = 10000;   // ★RB15c:readonly 收紧
   private walkPhase = new Map<object, number>();   // 走路动画相位（段对象键）
-  private scale: number;
 
-  constructor(private root: HTMLElement, private deps: CreditsRollOverlayDeps) {
-    const style = document.createElement('style');
-    style.textContent = CSS;
-    document.head.appendChild(style);
-    this.cv = document.createElement('canvas');
-    this.cv.className = 'sw-credits';
-    this.ctx = this.cv.getContext('2d') as CanvasRenderingContext2D;
-    this.resize();
-    root.appendChild(this.cv);
-    this.scale = deps.scale ?? 2;
+  constructor(private deps: CreditsRollOverlayDeps) {
     Lang.onChange(() => invalidateCreditsRollFill());
-    this.raf = requestAnimationFrame(this.frame);
   }
 
-  destroy(): void {
-    cancelAnimationFrame(this.raf);
-    this.cv.remove();
+  /** CreditsRollSky.Update（:35-66）——Game 60Hz 固定档每 tick 调
+   *  （原版 = SkyManager.Instance.Update，Main.cs:17317 每 Main.Update 帧） */
+  tick(): void {
+    const playing = this.deps.canPlay();
+    if (playing && !this.active) this.activate();
+    if (!this.active) return;
+    this.t++;                                   // _currentTime++（每 Update）
+    this.opacity = clamp(this.opacity + (1 / 120) * (this.wants ? 1 : -1), 0, 1);
+    if (this.opacity === 0 && !this.wants) this.active = false;
+    if (!playing || this.t >= getCreditsRollFill(true).endTime) this.wants = false;
   }
 
-  private resize(): void {
-    this.cv.width = window.innerWidth;
-    this.cv.height = window.innerHeight;
-  }
-
-  /** CreditsRollSky.Activate（:104-113） */
+  /** CreditsRollSky.Activate（:110-119） */
   private activate(): void {
     this.active = true;
     this.wants = true;
@@ -221,35 +229,21 @@ export class CreditsRollOverlay {
   }
   private pend = new Map<string, Array<(s: SheetImg | null) => void>>();
 
-  private frame = (): void => {
-    this.raf = requestAnimationFrame(this.frame);
-
-    // ---- CreditsRollSky.Update（:20-46）----
-    const playing = this.deps.canPlay();
-    if (playing && !this.active) this.activate();
-    if (this.active) {
-      this.t++;                                   // _currentTime++（每帧）
-      this.opacity = clamp(this.opacity + (1 / 120) * (this.wants ? 1 : -1), 0, 1);
-      if (this.opacity === 0 && !this.wants) this.active = false;
-      if (!playing || this.t >= getCreditsRollFill(true).endTime) this.wants = false;
-    }
-    if (window.innerWidth !== this.cv.width || window.innerHeight !== this.cv.height) this.resize();
-    const ctx = this.ctx;
-    ctx.clearRect(0, 0, this.cv.width, this.cv.height);
+  /** CreditsRollSky.Draw（:68-95）：锚 = Main.ScreenSize/2（屏中心）、DisplayOpacity
+   *  斜坡；S = 相机 zoom（原版背景段 1:1 屏幕像素 ≙ 世界比例）。由 Renderer 在
+   *  DrawRemainingDepth 等价槽调用（背景层之后/世界内容之前=被墙 tile 遮挡） */
+  drawInto(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, S: number): void {
     if (!this.active || this.opacity <= 0) return;
-    this.draw(ctx, this.t, this.opacity);
-  };
-
-  private draw(ctx: CanvasRenderingContext2D, t: number, displayOpacity: number): void {
+    const t = this.t;
+    const displayOpacity = this.opacity;
     const fill = getCreditsRollFill(true);
-    const ax = this.cv.width / 2;
-    const ay = this.cv.height / 2;   // AnchorPositionOnScreen = ScreenSize/2
-    const S = this.scale;
+    const ax = viewW / 2;
+    const ay = viewH / 2;   // AnchorPositionOnScreen = ScreenSize/2
     const globalTime = (performance.now() / 1000) % 3600;
 
     for (const seg of fill.segments) {
       if (seg.k === 'text') {
-        // LocalizedTextSegment.Draw（:22-64）：±250 帧淡入出、0.75px/帧上滚
+        // LocalizedTextSegment.Draw（:40-65）：±250 帧淡入出、0.75px/帧上滚
         const num3 = clamp((t - (seg.peak - 250)) / 250, 0, 1)
           * clamp((t - (seg.peak + 250)) / (-250), 0, 1);
         if (num3 <= 0) continue;
@@ -271,7 +265,7 @@ export class CreditsRollOverlay {
         continue;
       }
       if (seg.k === 'emote') {
-        // EmoteSegment.Draw（:463-500）：pop/收口气泡 + 表情图标（20t 双帧循环）
+        // EmoteSegment.Draw（:464-495）：pop/收口气泡 + 表情图标（20t 双帧循环）
         const num = t - seg.t;
         if (num < 0 || num >= seg.dur) continue;
         const vx = seg.vel?.x ?? 0, vy = seg.vel?.y ?? 0;
@@ -296,7 +290,7 @@ export class CreditsRollOverlay {
           if (!flag) {
             if ((seg.id === 87 || seg.id === 89) && flip) {
               flip = false;
-              ex += 4 * S;                        // :488-492 翻面修正
+              ex += 4 * S;                        // :486-491 翻面修正
             }
             const fcol = (seg.id % 4) * 2 + Math.floor((num % 20) / 10);
             const frow = Math.floor(seg.id / 4) + 1;
@@ -307,6 +301,8 @@ export class CreditsRollOverlay {
       }
       if (seg.k === 'npc') {
         const local = t - seg.t;
+        // ★BJ409①：段窗门 1:1（Segments.cs:244-245）——窗外（未开场/已收场）不画
+        if (!inSegWindow(seg, t)) continue;
         const st: EvalState = blankState();
         evalActs(seg.acts.acts, local, st, true);
         if (!(st.alphaNpc < 255)) continue;          // DrawNPCDirect alpha<255 门
@@ -324,7 +320,8 @@ export class CreditsRollOverlay {
           const frames = VANILLA_NPCS[String(seg.type)]?.frames ?? 1;
           const fh = s.h / frames;
           const fw = s.w;
-          // 城镇 NPC 原生朝左；direction 1（右）→ 水平翻转
+          // 城镇 NPC 原生朝左；direction 1（右）→ 水平翻转（Main.cs:23356-23359
+          // spriteDirection==1 → FlipHorizontally）
           const flip = st.look >= 0;
           ctx.save();
           ctx.globalAlpha = (1 - st.alphaNpc / 255) * displayOpacity;
@@ -336,6 +333,8 @@ export class CreditsRollOverlay {
         continue;
       }
       if (seg.k === 'spr') {
+        // ★BJ409①：段窗门 1:1（Segments.cs:397）——同 npc 分支
+        if (!inSegWindow(seg, t)) continue;
         const local = t - seg.t;
         const st = blankState();
         evalActs(seg.acts.acts, local, st, false);
@@ -352,19 +351,22 @@ export class CreditsRollOverlay {
           } else if (st.frame) {
             [col, row] = st.frame;
           }
+          // origin：原版 DrawData origin——originBottom 系 = Size*(0.5,1)+(ox,oy)
+          // （ox/oy = BJ409⑤ 新增场；center 系 = Size()/2）
+          const originX = fw / 2 + (seg.ox ?? 0);
+          const originY = (seg.originBottom ? fh : fh / 2) + (seg.oy ?? 0);
           ctx.save();
           ctx.globalAlpha = st.opacity * displayOpacity;
           ctx.translate(ax + (seg.dx + st.dx) * S, ay + (seg.dy + st.dy) * S);
           if (st.rot) ctx.rotate(st.rot);
           if (seg.flip) ctx.scale(-1, 1);
-          const originY = seg.originBottom ? fh : fh / 2;
-          ctx.drawImage(s.img, col * fw, row * fh, fw, fh, -fw * S / 2, -originY * S, fw * S, fh * S);
+          ctx.drawImage(s.img, col * fw, row * fh, fw, fh, -originX * S, -originY * S, fw * S, fh * S);
           ctx.restore();
         });
         continue;
       }
-      // k==='player'：PlayerSegment（:170-206）——本仓缺独立玩家烘焙口，时序保留
-      // （登记债：形象不渲染，不影响 timeline/endTime）
+      // k==='player'：PlayerSegment（Segments.cs:170-206）——本仓缺独立玩家烘焙口，
+      // 时序保留（登记债：形象不渲染，不影响 timeline/endTime）
     }
   }
 }
@@ -397,17 +399,30 @@ function hslToRgb(h: number, s: number, l: number): [number, number, number] {
   ];
 }
 
-// ---- 单例装配 ----
+// ---- 单例装配 + 渲染/模拟消费口 ----
 
 let overlay: CreditsRollOverlay | null = null;
 
-/** 装配演出 overlay（mainFlow createFlow 一次）；canPlay 由装配侧注入
+/** 装配演出（mainFlow createFlow 一次；root 形参保留=旧 DOM 宿主位,BJ409 起演出
+ *  画进 Renderer 世界画布,不再自建 canvas）。canPlay 由装配侧注入
  *  （musicBoxStyle===85 → hasCreditsSceneMusicBox ∪ creditsRoll.isEventOngoing） */
-export function mountCreditsRollOverlay(root: HTMLElement,
+export function mountCreditsRollOverlay(_root: HTMLElement,
   deps: CreditsRollOverlayDeps): CreditsRollOverlay {
-  if (overlay) return overlay;
-  overlay = new CreditsRollOverlay(root, deps);
+  if (!overlay) overlay = new CreditsRollOverlay(deps);
   return overlay;
+}
+
+/** CreditsRollSky.Update 消费口——Game 60Hz 固定档调（creditsRoll.updateTime 同帧位；
+ *  原版 = Main.cs:17317 SkyManager.Instance.Update 每 Main.Update 帧） */
+export function tickCreditsRollSky(): void {
+  overlay?.tick();
+}
+
+/** CreditsRollSky.Draw 消费口——Renderer 背景段 DrawRemainingDepth 等价位调
+ *  （drawLanternsNear/drawPartyBalloonsNear 同槽）。S = 相机 zoom。 */
+export function drawCreditsRollSky(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+  zoom: number): void {
+  overlay?.drawInto(ctx, viewW, viewH, zoom);
 }
 
 /** 探针/测试钩子：当前演出时间线（懒构建） */
@@ -415,3 +430,6 @@ export function creditsRollSegmentsForProbe(): { count: number; endTime: number 
   const fill = getCreditsRollFill(true);
   return { count: fill.segments.length, endTime: fill.endTime };
 }
+
+// ---- 类型再出口（测试消费） ----
+export type { Seg };

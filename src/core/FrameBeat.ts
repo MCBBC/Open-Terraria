@@ -125,6 +125,15 @@
  *    0/600;交换代价=降拍线/失拍阈/minK 全面积移位+多个 v6 绿测试依赖回声豁免。
  *    估计器去回声须先有锁相+饱和双 regime 真流金标,另立新证据再动(案①豁免已是
  *    其前置安全网)。
+ * ★v7.1 瞬态簇豁免(2026-09-29 用户实报"开背包/开地图必大降帧"定谳后;判别器级,
+ *   零结构变更):失拍降档改【双门】(连续性×持续量)——missStreak≥4(原 2)且簇内
+ *   滞时累计≥200ms 才降。机理:开图/开包=1-5 帧瞬态大帧簇(布局/烘焙/上传),
+ *   120Hz 下每帧超阈 ~10-40ms、簇总滞时 ~50-150ms=【有界】瞬态,不构成容量失稳,
+ *   不该触发需 60 渲染帧才能爬回的降档(旧码连续 2 失拍即降=用户实报的"联锁下降");
+ *   真容量失稳的滞时【无界】,~0.2-0.4s 内必触双门——检测延迟代价可忽略;单帧大
+ *   hitch(GC/IO ~200ms)滞时 ~186ms 仍不降=同语义(单 hitch 不定容量)。红判别器
+ *   OldAlignedMissBeat 同步复刻旧降档门(missDowngradeDue 覆写),案①红→绿对照面
+ *   保持完整。
  */
 
 /** 原版 present 网格常数(60Hz;improvedSubtle EndDraw 钳值 TARGET_FRAME_TIME×599/600)。
@@ -159,6 +168,15 @@ export const MISS_SLACK = 0.7;
 export const MISS_GRID_TOL_REL = 0.2;
 /** 失拍对齐豁免带(绝对下限 ms;vsync 估计偏小时保持豁免带不塌缩) */
 export const MISS_GRID_TOL_MS = 2;
+/** 失拍降档连续门(v7.1 瞬态簇豁免):连续失拍达此次数才有降档资格——原 2 在
+ *  120Hz 下只等于 ~17ms 的持续失稳,开图/开包瞬态大帧簇(1-5 帧)即误触;4 仍只
+ *  是 ~33ms@120Hz 的检测延迟,真容量失稳(无界滞时)照样覆盖 */
+export const MISS_STREAK_DOWNGRADE = 4;
+/** 失拍降档持续门(v7.1):簇内滞时累计(Σ(gap−失拍阈),逐失拍帧累加、断拍即清)
+ *  达此毫秒才降——有界瞬态簇(开图/开包 ~50-150ms 总滞时)被此门吸收;标定:
+ *  120Hz 开包最坏簇 5×(38−14.2)≈119ms<200 不降;30fps 持续负载 excess ~19ms/拍
+ *  → ~11 拍(~0.37s)触门,检测代价可忽略 */
+export const MISS_STALL_BUDGET_MS = 200;
 /** vsync 周期样本窗(截尾均值估计;rAF 回调间隔) */
 const VSYNC_WIN = 31;
 /** 渲染帧成本样本窗(p95) */
@@ -201,6 +219,9 @@ export class FrameBeat {
    *  判据破/失拍/任何拍变更即清零——v3 p50 制的防抖面,替代旧 holdSince 墙钟) */
   private upHoldN = 0;
   private missStreak = 0;
+  /** 簇内滞时累计(v7.1 持续门):Σ(gap−失拍阈) 逐失拍帧累加,断拍/拍变更/降档即清
+   *  ——与 missStreak 同生命周期(有界瞬态簇吸收面,见 MISS_STALL_BUDGET_MS 注) */
+  private missStallMs = 0;
   /** 入场结算护栏(v7 案②):>0 期间 capacityBreach 恒 false——降拍判据须 costWin
    *  全窗(60 渲染帧)证据才允许动作。构造/resetSampling 各挂满一次(入世界首簇重帧
    *  是 reset 之后的过期证据,不得以薄窗驱动扫拍;floor/miss-streak 不受此护栏) */
@@ -325,6 +346,13 @@ export class FrameBeat {
     this.ordinal = 0;
   }
 
+  /** 失拍降档双门(v7.1 瞬态簇豁免;protected hook=红判别器旧侧复刻点):连续性
+   *  (missStreak≥MISS_STREAK_DOWNGRADE)×持续量(滞时累计≥MISS_STALL_BUDGET_MS)
+   *  同时成立才降。旧语义(连续 2 即降)由 OldAlignedMissBeat 覆写复刻=案①红面。 */
+  protected missDowngradeDue(): boolean {
+    return this.missStreak >= MISS_STREAK_DOWNGRADE && this.missStallMs >= MISS_STALL_BUDGET_MS;
+  }
+
   /** 渲染结束:now=渲染帧完成时刻(performance.now,与 rAF 时间戳同源)。跑拍状态机 */
   endRender(now: number): void {
     const cost = this.lastRenderAt >= 0 ? now - this.lastRenderAt : 0;
@@ -336,9 +364,15 @@ export class FrameBeat {
     const prevK = this.k;
 
     // 失拍记账(帧距在 beginRender 记)——序数计数天然吸附下一拍,这里只做容量诊断。
-    // 对齐顺延豁免见 isCapacityMiss(v7 案①:落 n×vsync 网格的长帧距=锁相节奏非失稳)
-    if (this.isCapacityMiss(this.lastGap, vsync)) this.missStreak++;
-    else this.missStreak = 0;
+    // 对齐顺延豁免见 isCapacityMiss(v7 案①:落 n×vsync 网格的长帧距=锁相节奏非失稳);
+    // 滞时累计=双门之持续量(v7.1,见 missDowngradeDue/MISS_STALL_BUDGET_MS 注)
+    if (this.isCapacityMiss(this.lastGap, vsync)) {
+      this.missStreak++;
+      this.missStallMs += Math.max(0, this.lastGap - (this.k + MISS_SLACK) * vsync);
+    } else {
+      this.missStreak = 0;
+      this.missStallMs = 0;
+    }
 
     // 降拍(v6 帧率优先制,唯一成本判据):持续中位超支超过【下一更低档】预算×1.1 →
     // 逐级扫到首个能容纳的拍。帧率优先政策(用户明令,见头注 v6):v5 旧线"中位刚超
@@ -359,6 +393,7 @@ export class FrameBeat {
       // 任何拍变更:相位重锚+记账复位(旧拍成本样本对新拍预算失义;不追赶中途)
       this.ordinal = 0;
       this.missStreak = 0;
+      this.missStallMs = 0;
       this.upHoldN = 0;
     } else {
       // 单次失拍=余量警示:升拍保持即弃(拍可信度存疑,重计连续窗)
@@ -377,13 +412,14 @@ export class FrameBeat {
       } else {
         this.upHoldN = 0;
       }
-      // 连续失拍=容量不足 → 降拍(单次失拍只弃升拍保持,不降档;连续 2 次=拍持续
-      // 滑动——覆盖"成本贴预算内但合成器侧持续掉拍"的口径)
-      if (this.missStreak >= 2 && this.k < BEAT_K_MAX) {
+      // 连续失拍+滞时双门=容量不足 → 降拍(单次失拍只弃升拍保持,不降档;v7.1
+      // 瞬态簇豁免——有界大帧簇不降,真持续失稳 ~0.2-0.4s 内必触,见头注)
+      if (this.missDowngradeDue() && this.k < BEAT_K_MAX) {
         this.k++;
         this.lastReason = 'miss-streak';
         this.ordinal = 0;
         this.missStreak = 0;
+        this.missStallMs = 0;
         this.upHoldN = 0;
       }
     }
@@ -399,6 +435,7 @@ export class FrameBeat {
   resetSampling(): void {
     this.costWin.length = 0;
     this.missStreak = 0;
+    this.missStallMs = 0;
     this.upHoldN = 0;
     this.lastGap = 0;
     this.lastRenderAt = -1;

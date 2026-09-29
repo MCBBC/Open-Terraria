@@ -957,8 +957,10 @@ export function queryRoom(st: TileStore, x: number, y: number,
 
 /**
  * 住房查询 + 打分合并入口（PerformHousingCheck 两次 MoveTownNPC 的合并语义）：
- * 合格且未被占用且未腐化 → reason='ok'；占用/腐化取自 scoreRoom（RoomScore
- * score=-1=occupied、roomEvil=evil）。供查询 UI 与分配共用。
+ * 合格且未被占用且站位分>0 → reason='ok'；否决位唯一=score≤0（★BJ406：roomEvil
+ * 非否决位,只是 score≤0 时的文案档——原版三门 QuickFindHome cs:5692/SpawnTownNPC
+ * cs:5357/MoveTownNPC cs:4722-4747 皆以 hiScore>0 为唯一受理条件）。占用取自
+ * scoreRoom（RoomScore score=-1=occupied）。供查询 UI 与分配共用。
  * ★★对抗修复批④2026-09-01（C-F5 臭虫否决链落地）：门序对齐 MoveTownNPC 原序——
  * RoomNeeds（queryRoom 内 requireFurniture 档）→ 臭虫否决（cs:4696-4718）→
  * ScoreRoom 占用/邪恶/站位。宠物豁免面：`IsTownPet[type]`（NPCID.cs:4446 全集
@@ -982,10 +984,19 @@ export function housingCheckAt(
   }
   const s = scoreRoom(st, q.room, occupied, askingNpcId);
   if (s.score < 0) return { ...q, room: q.room, reason: 'occupied', score: -1 };
-  if (s.roomEvil) return { ...q, room: q.room, reason: 'evil', score: s.score };
-  // ★C-F8：走到这里四件套必齐（floodRoom requireFurniture 已过）——score≤0 且
-  // hasStandingSpace=false = 无可用站位（杂务挤占/头顶压分全负），单列数据位
+  // ★BJ406（2026-09-23 用户实报「腐化环境房屋仍可入住」定谳刀）：原版唯一否决位 =
+  // hiScore<=0（MoveTownNPC cs:4722-4747 stopOnFail 支 / QuickFindHome cs:5692 /
+  // SpawnTownNPC cs:5357 三门同文）；roomEvil 只是 hiScore<=0 时的【文案选择器】
+  // （cs:4730 → inter[42]「This room is corrupted」）。邪恶罚分已内含于站位分
+  // base=50−evilNet（cs:5815-5824：净值<50 清零、≥300 经 num2<=-250 整房作废），
+  // 故 evilNet∈[50,300) 且装饰充足（站位分>0）的「腐化带房」原版照常受理——
+  // 旧实现 roomEvil 恒否决 = 比原版严一格（score>0 的腐化带房手动分配被拒、原版
+  // 放行）。对齐原文：'evil' 档只在 score<=0 时报（文案序 占用→腐化→无站位→缺件
+  // =cs:4726-4741 原序,与 housingQuery 消费序一致）。
   if (s.score <= 0) {
+    if (s.roomEvil) return { ...q, room: q.room, reason: 'evil', score: s.score };
+    // ★C-F8：走到这里四件套必齐（floodRoom requireFurniture 已过）——score≤0 且
+    // hasStandingSpace=false = 无可用站位（杂务挤占/头顶压分全负），单列数据位
     return { ...q, room: q.room, reason: s.hasStandingSpace ? 'needs' : 'standing', score: 0 };
   }
   return { ...q, reason: 'ok', score: s.score };

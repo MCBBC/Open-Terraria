@@ -26,7 +26,7 @@
 //  饱和回声债),est→帧耗使 budget(k+1) 线被回声豁免——那是估计器债不是判据缺陷。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { FrameBeat, GRID_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS } from '../src/core/FrameBeat';
+import { FrameBeat, GRID_MS, UPGRADE_WIN_SAMPLES, UPGRADE_HOLD_WINDOWS, UPGRADE_HEADROOM, DOWNGRADE_MARGIN, MISS_SLACK, MISS_GRID_TOL_REL, MISS_GRID_TOL_MS, MISS_STREAK_DOWNGRADE, MISS_STALL_BUDGET_MS } from '../src/core/FrameBeat';
 
 const GAME = readFileSync(new URL('../src/core/Game.ts', import.meta.url), 'utf8');
 const BEAT = readFileSync(new URL('../src/core/FrameBeat.ts', import.meta.url), 'utf8');
@@ -93,8 +93,16 @@ class OldV5Breach extends FrameBeat {
  *  即判失拍,把 vsync 锁相交付下的物理 n-vsync 对齐节奏(如 k=1+帧耗 9-15 的 2-vsync
  *  网格)误判为容量失稳 → miss-streak 降拍(而 k=1/k=2 realized 同值=纯噪声降档)。 */
 class OldAlignedMissBeat extends FrameBeat {
+  private oldStreak = 0;
   override isCapacityMiss(gap: number, vsync: number): boolean {
-    return gap > (this.k + MISS_SLACK) * vsync;      // 旧判据语义:无对齐豁免
+    const miss = gap > (this.k + MISS_SLACK) * vsync;   // 旧判据语义:无对齐豁免
+    this.oldStreak = miss ? this.oldStreak + 1 : 0;
+    return miss;
+  }
+  /** 旧降档门复刻(v7.1 前:连续 2 即降,无滞时门)——红面完整性:案①对照须整条
+   *  旧判据链(失拍判定+降档门)都为旧侧,否则红面失真 */
+  override missDowngradeDue(): boolean {
+    return this.oldStreak >= 2;
   }
 }
 
@@ -624,7 +632,7 @@ describe('失拍吸附(不追赶中途)', () => {
     expect(next).toBeLessThan(3 * HZ120 + 3);      // ≤3 拍(无跨槽跳过)
   });
 
-  it('连续失拍:容量不足 → 降拍(miss-streak)', () => {
+  it('连续失拍:容量不足 → 降拍(miss-streak)——★v7.1 双门下须持续形态(12 帧失拍,滞时累计越 200ms 门)', () => {
     const beat = new FrameBeat();
     let grid = 0;
     let busy = 0;
@@ -633,7 +641,7 @@ describe('失拍吸附(不追赶中途)', () => {
     for (let i = 0; i < 220; i++) {
       while (grid <= prevT) grid += HZ120;
       let t = Math.max(grid, busy);
-      if (i >= 100 && i < 103) t += 30;        // 停滞小段:连续失拍恰好 2 次→降一级(3 回调止盈防级联)
+      if (i >= 100 && i < 112) t += 50;        // 持续停滞段:12 帧连续失拍——v7.1 双门(连续≥4×滞时≥200ms)在 k=1 第 5 拍、k=2 第 6 拍各降一级
       prevT = t;
       beat.observeVsync(t, 60);
       if (beat.shouldRender(t)) {
@@ -685,9 +693,11 @@ describe('失拍吸附(不追赶中途)', () => {
     expect(neo.rendered).toBe(600);                // 每回调皆渲(k=1 全速)
   });
 
-  it('★v7 案①对齐豁免不庇护深滑:stall 帧距落 n=k+2 倍点照旧计失拍(连续失拍看门狗不失明)', () => {
-    // 30ms stall 在网格走查驱动器下帧距恰量化到 4×8.33(k=2 时 n=k+2)——全倍点豁免
-    // 会把连续失拍看门狗打瞎;单拍豁免(n=k+1)下仍两次连续失拍 → miss-streak 降拍。
+  it('★v7 案①对齐豁免不庇护深滑:stall 帧距落 n≥k+2 倍点照旧计失拍(连续失拍看门狗不失明;★v7.1 双门下持续形态)', () => {
+    // 30ms stall 在网格走查驱动器下帧距恰量化到网格倍点(k=2 时 n=k+2)——全倍点豁免
+    // 会把连续失拍看门狗打瞎;单拍豁免(n=k+1)下深滑照旧计失拍。v7.1 双门后看门狗
+    // 须持续形态驱动(12 帧 +50ms)——瞬态簇(5 帧)已被豁免测单独锁死,本测锁深滑
+    // 持续失稳仍降拍。
     const beat = new FrameBeat();
     let grid = 0;
     let busy = 0;
@@ -696,7 +706,7 @@ describe('失拍吸附(不追赶中途)', () => {
     for (let i = 0; i < 220; i++) {
       while (grid <= prevT) grid += HZ120;
       let t = Math.max(grid, busy);
-      if (i >= 100 && i < 103) t += 30;
+      if (i >= 100 && i < 112) t += 50;
       prevT = t;
       beat.observeVsync(t, 60);
       if (beat.shouldRender(t)) {
@@ -708,6 +718,41 @@ describe('失拍吸附(不追赶中途)', () => {
     }
     expect(beat.k).toBe(3);
     expect(beat.lastReason).toBe('miss-streak');
+  });
+
+  it('★v7.1 瞬态簇豁免(红→绿):开图/开包形大帧簇(5 连续失拍,簇滞时 ~104ms 有界)零降拍;持续失稳(15 连续,无界)照旧降拍', () => {
+    // 用户实报:开背包/开地图=1-5 帧瞬态大帧(布局/烘焙/上传),120Hz 下每帧超阈
+    // ~10-40ms、簇总滞时 ~50-150ms=有界 → 不该触发需 60 渲染帧爬回的降档。
+    // 双门判别:连续门(≥4)单独会被 5 帧簇穿透,滞时门(≥200ms)是吸收面;
+    // 持续失稳滞时无界 → 双门必触。
+    // ★驱动器=回调锁定(头注"饱和回声债"教训:busy 耦合喂 observeVsync 会让
+    //   连续 stall 污染估计→失拍判定自失明)——回调恒网格点喂估计,渲染延迟
+    //   经 lastBusy 复利(簇内帧距≈35ms)但估计面诚实。
+    const drive = (stallLen: number) => {
+      const beat = new FrameBeat();
+      let lastBusy = -1;
+      const reasons: string[] = [];
+      for (let i = 0; i < 220; i++) {
+        const cb = i * HZ120;
+        beat.observeVsync(cb, 120);
+        let t = Math.max(cb, lastBusy);
+        if (i >= 100 && i < 100 + stallLen) t += 30;   // 簇帧延迟(经 lastBusy 复利→帧距≈35ms)
+        if (beat.shouldRender(t)) {
+          beat.beginRender(t);
+          lastBusy = t + 5;
+          beat.endRender(t + 5);
+          if (beat.lastReason === 'miss-streak') reasons.push('miss-streak');
+        }
+      }
+      return { beat, reasons };
+    };
+    const burst = drive(5);    // 连续门 5≥4 过,滞时门 5×(35−14.2)≈104<200 拦下=瞬态豁免
+    expect(burst.beat.k).toBe(1);
+    expect(burst.reasons).toEqual([]);
+    const sustained = drive(15);   // 无界持续:10 拍累计 ~208ms 越门 → 降拍
+    expect(sustained.reasons.length).toBeGreaterThan(0);
+    expect(sustained.beat.k).toBeGreaterThan(1);
+    expect(sustained.beat.lastReason).toBe('miss-streak');
   });
 });
 
@@ -947,7 +992,7 @@ describe('三档语义锁(源锚)', () => {
     expect(BEAT).toContain('★v6 降档边界=帧率优先');              // v6 注在头注(结构冻结令仍有效)
   });
 
-  it('常数处方锁(任务给定,防漂移;★v3 p50 制:半窗粒度 30×连续 2 窗=60 渲染帧,轻于旧 2s 墙钟;★v5:升拍余量 0.9;★v6:降档余量 1.1=帧率优先线;★v7:失拍对齐豁免带 0.2/2ms)', () => {
+  it('常数处方锁(任务给定,防漂移;★v3 p50 制:半窗粒度 30×连续 2 窗=60 渲染帧,轻于旧 2s 墙钟;★v5:升拍余量 0.9;★v6:降档余量 1.1=帧率优先线;★v7:失拍对齐豁免带 0.2/2ms;★v7.1:失拍降档双门 4×200ms=瞬态簇豁免)', () => {
     expect(UPGRADE_WIN_SAMPLES).toBe(30);
     expect(UPGRADE_HOLD_WINDOWS).toBe(2);
     expect(UPGRADE_HEADROOM).toBe(0.9);
@@ -955,6 +1000,8 @@ describe('三档语义锁(源锚)', () => {
     expect(MISS_SLACK).toBe(0.7);
     expect(MISS_GRID_TOL_REL).toBe(0.2);
     expect(MISS_GRID_TOL_MS).toBe(2);
+    expect(MISS_STREAK_DOWNGRADE).toBe(4);
+    expect(MISS_STALL_BUDGET_MS).toBe(200);
     expect(GRID_MS).toBeCloseTo(1000 / 60);
   });
 });

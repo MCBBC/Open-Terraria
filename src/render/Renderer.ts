@@ -7,6 +7,7 @@ import { rulerLineAlpha, rulerGridFade, rulerReadoutText } from '../stats/builde
 import { TintAtlas, type TintRect } from './TintAtlas';
 import { tintedTex } from './StringLine';
 import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
+import { drawCreditsRollSky } from '../ui/CreditsRollOverlay';   // ★BJ409:名单演出=SkyManager 深度1天空,背景段 DrawRemainingDepth 等价位绘制
 
 /** ★「落脚贴合」开关(2026-08-30 用户拍板):人形/常规族贴图按首帧扫描上移,
  *  鞋底与碰撞盒底线对齐。刻意偏离反编译中心锚定数学——parity 对账跑批前
@@ -4965,6 +4966,12 @@ export class Renderer {
       // 前景】之后的最末尾——曾画在云前=云盖灯/气球,用户实报）
       this.sky.drawLanternsNear(ctx, viewW, viewH, cam.x, cam.y, 16.7);
       this.sky.drawPartyBalloonsNear(ctx, viewW, viewH, cam.x, 16.7);
+      // ★BJ409：通关名单演出（CreditsRollSky）同槽归位——原版=SkyManager 深度 1
+      // 天空,经 DrawRemainingDepth（Main.cs:60564/:53484 背景段收尾）绘制：全部
+      // 背景层之后、世界内容之前 → 被墙/tile 遮挡（室内/洞穴不可见,露天=挂在
+      // 天空的背景板）。此前挂 DOM 顶层画布=盖住世界/HUD（用户实报"NPC 悬空
+      // 排排站"错层面）。拍照重渲不烘（原版 DrawCapture 无此层,同 BJ372 判例）。
+      if (!this._capturePass) drawCreditsRollSky(ctx, viewW, viewH, z);
     }
 
     // 1.55 AmbientSky 天空实体（SkyManager「Ambience」层：群系背景之上、世界实体之下；
@@ -20513,8 +20520,18 @@ export class Renderer {
         //      不中→实机黑盒）：end() 前读中心 1px；CPU 迷雾/像素同点不黑而合成黑
         //      = GL 侧失效（纹理逐出/驱动 guard-band/上下文半死等）→ 连续 3 帧
         //      本开图会话改走 2D 兜底（CPU 直画不受 GPU 状态影响，自愈）----
+        //      ★v7.1 配套读回节拍（2026-09-29）：1px readPixels=规范级管线
+        //      flush+CPU 同步,开图/缩放期每帧一读=每帧全管线排空税（Windows
+        //      用户实报"开图/缩放大帧"的每帧项）。降频 1/4：哨兵守的是持续性
+        //      恒黑（连续 3【次读回】全黑）,4 帧节拍下最坏 12 帧判死——持久性
+        //      故障（纹理逐出/上下文半死）不因节拍漏判,瞬态黑本由连续 3 门吸收。
+        //      跳读帧不清 _mapGlBlack 计数（连续=按读回计,非按帧）。
         {
-          const probe = gl.readPixel((viewW / 2) | 0, (viewH / 2) | 0) ?? new Uint8Array([255, 255, 255, 255]);
+          this._fmGlProbeTick = (this._fmGlProbeTick + 1) & 3;
+          const probe = this._fmGlProbeTick === 0
+            ? (gl.readPixel((viewW / 2) | 0, (viewH / 2) | 0) ?? new Uint8Array([255, 255, 255, 255]))
+            : null;
+          if (probe) {
           const glBlack = probe[0] < 8 && probe[1] < 8 && probe[2] < 10;
           // CPU 侧同点：视口中心世界 tile 的迷雾是否已探索（探索区发黑才可能是
           // 正常内容；未探索区黑=迷雾,不触发）
@@ -20528,6 +20545,7 @@ export class Renderer {
             this._mapGlBlack = 0;
             console.warn('[drawFullMap] GL 合成中心恒黑但该点已探索——切 2D 兜底(本次开图会话)',
               { probe: this._mapGlLastProbe, zoom: fm.zoom, wtx, wty });
+          }
           }
         }
         gl.end();
@@ -20766,6 +20784,9 @@ export class Renderer {
   /** 连续黑帧计数 + 最近一次探针结果（F5 报告消费） */
   private _mapGlBlack = 0;
   _mapGlLastProbe: [number, number, number, number] = [0, 0, 0, 0];
+  /** 哨兵读回节拍（v7.1 配套）：1px readPixels=管线 flush 同步,4 帧一读降频
+   *  （连续 3 次读回判死语义不变——连续按读回计,跳读帧不清 _mapGlBlack） */
+  private _fmGlProbeTick = 0;
 
   /** 全屏地图钻地龟图标层（★1457 DigtoiseMapLayer.cs:9-29 1:1）：
    *  本地玩家的钻地龟随从弹（1098 PalworldDigtoise/1123 PalworldTrustyDigtoise，

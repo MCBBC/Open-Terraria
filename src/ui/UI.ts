@@ -158,7 +158,7 @@ function invBgDataUrl(w: number, h: number): string | null {
 }
 import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
-import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES, formatPrefixedName, rollNaturalPrefixForVid } from '../data/vanillaPrefixes';
+import { prefixStat, prefixValueMul, PREFIX_NAMES, formatPrefixedName, rollNaturalPrefixForVid } from '../data/vanillaPrefixes';   // ★BJ407：prefixLines 消费面收编入 buildTooltipHtml（itemTooltip.ts 自带 import）
 import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS, accGroupClash, accPairConflicts } from '../data/vanillaEquip';   // ★清偿刀 Z：互斥组谓词单源提至数据层（本文件原模块内私有）
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -3179,21 +3179,27 @@ export class UI {
     return rare;
   }
 
-  /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行/商店格位）——slot 传
-   *  合成槽内容（stack 1 无词缀/收藏），anchor 传气泡定位锚元素；shopCell = 商店
-   *  格位悬停（SW-BJ22：context 15 HoverItem.buy 语义 → tooltip 价格行走买入价） */
-  private showTooltipFor(i: number, where: SlotWhere, override?: { slot?: { id: number; stack: number; prefix?: number }; anchor?: HTMLElement; shopCell?: { price: number; medal?: number } }) {
-    let s = (override?.slot ?? this.slotContent(where, i)) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
-    // LoadoutShare 空槽悬停（ItemSlot.MouseHover IS57:3174-3178）：装备/染料格空槽
-    // 悬停时共享件代打（GetSharedLoadoutItem → GetEffectiveArmor/Dye）——tooltip
-    // 全文 + "共享自配装N"行随下方 R4-15 行族自然接上。曾缺 = 空槽早退无任何提示
-    //（★override 判据按【内容覆写】位算——仅锚定位的 override 不抑制共享代打）
-    if (!s && !override?.slot && (where === 'armor' || where === 'dye')) {
-      const inv = this.game!.player.inv;
-      const from = inv.effectiveSharedFrom(i, where === 'dye');
-      if (from !== null) s = (where === 'dye' ? inv.loadouts[from].dye[i] : inv.loadouts[from].armor[i]) ?? null;
-    }
-    if (!s) { this.tooltip.style.display = 'none'; return; }
+  /** ★BJ407（2026-09-29）tooltip 内容装配单源：名行（稀有度色/×N/★/变体后缀）+
+   *  收藏/共享行族 + GetLinesInfo 全载荷行（组装器 ui/itemTooltip.ts）。消费面 =
+   *  showTooltipFor（背包/箱/装备/商店/搜索行）∪ showReforgeTooltip（重铸槽）——
+   *  原版语义：重铸槽悬停与物品栏悬停同一 MouseText 管线（Main.cs:42389-42391
+   *  ItemSlot.Handle/Draw(ref reforgeItem, 5) → ItemSlot.MouseHover :3168-3190
+   *  Main.HoverItem = item.Clone()+tooltipContext,context 5 不在置位 switch 内
+   *  =无 wornArmor/social/buy 特化 → MouseText_DrawItemTooltip 全载荷）,前缀差分
+   *  链门 = item.prefix > 0（Main.cs:21224）,62-80 配饰硬编码档同块（:21355-21460）
+   *  ——原版无「重铸槽降级 tooltip」概念。本仓旧 showReforgeTooltip 自装「名行+
+   *  prefixLines」贫面两层缺：①GetLinesInfo 全载荷行（静态 ItemTooltip.* 如鲨牙
+   *  项链「盔甲穿透力增加5」/可装备/材料/研究/套装…）②PREFIX_FIXED_ROWS 62-80
+   *  硬编码差分行（仅 GetLinesInfo 组装内产出）——Violent(80) 等 tier-only 词缀
+   *  stat 表全乘子 1 档,prefixLines 零行 → 饰品重铸槽悬停只剩名行（BJ407 用户
+   *  实报）;武器（Legendary 等乘子词缀）恰有差分行故「看似正常」（基伤害行族
+   *  同样整缺）。 */
+  private buildTooltipHtml(
+    s: { id: number; stack: number; favorited?: boolean; prefix?: number },
+    where: SlotWhere, i: number,
+    /** override 透传（本装配面只消费 shopCell;slot/anchor 由调用方定位面持有） */
+    override?: { shopCell?: { price: number; medal?: number } },
+  ): string {
     const def = ITEM_DEFS[s.id];
     // ★SW-BJ116-b（2026-09-18,债刀-3）：稀有度判定链单源委托 tooltipRareOf
     //  （基表→变体→词缀档位移→expert 覆写,逐域锚见方法头）——本面行为零变化
@@ -3241,8 +3247,9 @@ export class UI {
     };
     const gp = g.player;
     const tps = gp ? {
-      dmgMult: { melee: gp.damageMult('melee'), ranged: gp.damageMult('ranged'), magic: gp.damageMult('magic'), summon: gp.damageMult('summon') },
-      crit: { melee: gp.critChance('melee'), ranged: gp.critChance('ranged'), magic: gp.critChance('magic') },
+      // ★BJ407：?. 桩域中性快照（真 player 恒有方法,实行为零变化;重铸槽同管依赖此面）
+      dmgMult: { melee: gp.damageMult?.('melee') ?? 1, ranged: gp.damageMult?.('ranged') ?? 1, magic: gp.damageMult?.('magic') ?? 1, summon: gp.damageMult?.('summon') ?? 1 },
+      crit: { melee: gp.critChance?.('melee') ?? 0, ranged: gp.critChance?.('ranged') ?? 0, magic: gp.critChance?.('magic') ?? 0 },
       manaCostMul: gp.equipStats?.manaCostMul ?? 1,
       kbGlove: !!gp.equipStats?.kbGlove,
       kbBuff: !!gp.buffs?.has?.(BuffType.Titan),      // 泰坦 108 → kbBuff（:20812 近战击退×1.5）
@@ -3381,7 +3388,25 @@ export class UI {
     // lineColors[k] *= mouseTextColor/255 只乘文字色，DrawInvBG 面板色不变）
     // ★首行 br 必须保留（2026-08-21 用户报"参数拼在名称后"）：曾 replace(/^<br>/,'')
     //   把首个换行剥掉 → "铜短剑5 伤害"拼行；原版名称行后即换行（:20488 行链）
-    this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}<span style="display:none"></span>${linesHtml}</div>`;
+    return `<div class="sw-tooltip-lines">${html}<span style="display:none"></span>${linesHtml}</div>`;
+  }
+
+  /** 槽位悬停详情气泡。override：非槽位锚点（道具搜索结果行/商店格位）——slot 传
+   *  合成槽内容（stack 1 无词缀/收藏），anchor 传气泡定位锚元素；shopCell = 商店
+   *  格位悬停（SW-BJ22：context 15 HoverItem.buy 语义 → tooltip 价格行走买入价） */
+  private showTooltipFor(i: number, where: SlotWhere, override?: { slot?: { id: number; stack: number; prefix?: number }; anchor?: HTMLElement; shopCell?: { price: number; medal?: number } }) {
+    let s = (override?.slot ?? this.slotContent(where, i)) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
+    // LoadoutShare 空槽悬停（ItemSlot.MouseHover IS57:3174-3178）：装备/染料格空槽
+    // 悬停时共享件代打（GetSharedLoadoutItem → GetEffectiveArmor/Dye）——tooltip
+    // 全文 + "共享自配装N"行随下方 R4-15 行族自然接上。曾缺 = 空槽早退无任何提示
+    //（★override 判据按【内容覆写】位算——仅锚定位的 override 不抑制共享代打）
+    if (!s && !override?.slot && (where === 'armor' || where === 'dye')) {
+      const inv = this.game!.player.inv;
+      const from = inv.effectiveSharedFrom(i, where === 'dye');
+      if (from !== null) s = (where === 'dye' ? inv.loadouts[from].dye[i] : inv.loadouts[from].armor[i]) ?? null;
+    }
+    if (!s) { this.tooltip.style.display = 'none'; return; }
+    this.tooltip.innerHTML = this.buildTooltipHtml(s, where, i, override);
     this.tooltip.style.display = 'block';
     this.startTooltipPulse();
     // 定位：锚槽右侧（原版跟鼠标+toolTipDistance；槽锚定确定性更好），屏幕钳制
@@ -4135,28 +4160,19 @@ export class UI {
     this.refreshAll();
   }
 
-  /** 重铸槽 tooltip（词缀前后对比行）。★SW-BJ116-b（2026-09-18,债刀-3）：稀有度链
-   *  单源委托 tooltipRareOf——曾缺③词缀档位移（Item.Prefix :588-614,reforge 落词缀
-   *  时已烘入 Item.rare 字段;MouseText_DrawItemTooltip :20511 直读 hoverItem.rare=
-   *  位移后值,重铸槽悬停=同一消费面）：Legendary/Godly/Mythical(pv≥1.2) 名色档 +2、
-   *  Quick/Agile(+1)、Awful(≤0.8) −2、Lazy(−1)——旧基表值整缺=重铸台悬停名色与
-   *  背包悬停同名件不同色（例:75 坠落星 Legendary 档原版 rgb(255,200,150),旧渲染
-   *  1 档 rgb(150,150,255)）。序与 showTooltipFor 全同（基表→变体→位移→expert） */
+  /** 重铸槽 tooltip（ctx5,classic modal 槽 ∪ vinv 槽两入口）。★BJ407（2026-09-29）：
+   *  内容装配单源委托 buildTooltipHtml——原版重铸槽悬停=与物品栏同一 MouseText
+   *  管线（Main.cs:42389-42391 ItemSlot.Handle/Draw(ref reforgeItem, 5) →
+   *  ItemSlot.MouseHover :3168-3190 → MouseText_DrawItemTooltip;context 5 无特化）,
+   *  行集与物品栏同物全等（饰品含静态 ItemTooltip 行/可装备/材料/62-80 前缀差分行;
+   *  旧自装「名行+prefixLines」贫面两层缺=BJ407 病灶,锚见 buildTooltipHtml 头注）。
+   *  词缀档位移名色经 tooltipRareOf 同链保持（SW-BJ116-b 面零变化,where='inv' 无
+   *  wornArmor/social/buy 特化=ctx5 同相）。定位/烘底序=SW-TT1 同族②（清位→量宽→
+   *  钳制→终布局后烘底,BJ176 三面哨兵锁定本方法体） */
   private showReforgeTooltip(): void {
     const s = this.reforgeItem;
     if (!s) return;
-    const def = ITEM_DEFS[s.id];
-    const rare = this.tooltipRareOf(def, s.prefix);
-    // 变体名后缀（同 showTooltipFor）
-    const rv = def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1;
-    const rvKind = rv >= 0 ? activeVariantOfVid(rv) : null;
-    const rvLabel = rvKind ? Lang.text(VARIANT_L10N_KEY[rvKind]) : '';
-    let html = `<b style="color:${this.rarityColor(rare)}">${affixedItemName(s.prefix, Lang.itemNameByKey(def.key))}</b>`
-      + (rvLabel ? ` <span style="color:#7899ec">(${rvLabel})</span>` : '');
-    if (s.prefix) for (const ln of prefixLines(s.prefix)) {
-      html += `<br><span style="color:${ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)'}">${ln.text}</span>`;
-    }
-    this.tooltip.innerHTML = html;
+    this.tooltip.innerHTML = this.buildTooltipHtml({ id: s.id, stack: s.stack, prefix: s.prefix }, 'inv', -1);
     this.tooltip.style.display = 'block';
     // ★SW-TT1 同族②（2026-09-19 实报「重铸格 tooltip 背景平铺成多块气泡」）：本路径
     //   此前从不烘底——元素一直带着上一次物品气泡的固有尺寸底图，重铸文本更宽时

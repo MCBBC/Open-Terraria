@@ -124,11 +124,30 @@ describe('终零波 B2：spawner 消费面（NPC.cs:1052-1053 !skyMob && noGroun
 
 // ===========================================================================
 describe('终零波 C1：护士排除表（BuffID.Sets.NurseCannotRemoveDebuff BuffID.cs:32）', () => {
-  it('结构不变量：DEBUFFS 任一成员的 vanilla id 不在排除表（原「零交集」论断长期有效）', () => {
+  // ★BJ405（2026-09-29）重构：DEBUFFS 第三消费面 = 右键取消门（TryRemovingBuff
+  // `!debuff[b]` Main.cs:44109）后,分类位必须按 Main.debuff 全表归位——排除表成员
+  // （狼人 28/篝火 87/旗帜 147/饥饿链 332-334 等）在原版本就是 Main.debuff 成员,
+  // 「零交集」结构论断退役;护士正确性改由行为锁承接（本测试）：
+  // debuffCount 不计价 + clearDebuffs 不清除 = 原版 GetNurseHealCost :40752 /
+  // NPCChatText_DoNurseHeal :40822 的 `!NurseCannotRemoveDebuff[t]` 双滤。
+  it('行为不变量：入集的排除表成员——debuffCount 不计价、clearDebuffs 不清除', () => {
+    const lockedMembers = [...BuffState.DEBUFFS].filter((bt) => isNurseLockedBuff(vanillaIdOfBuff(bt)));
+    expect(lockedMembers.length, 'BJ405 后排除表成员确有入集（分类位归位的前提）').toBeGreaterThan(0);
+    const bs = new BuffState();
+    for (const bt of lockedMembers) bs.active.set(bt, 120);
+    expect(bs.debuffCount(), '护士计价滤除排除表成员').toBe(0);
+    bs.clearDebuffs();
+    for (const bt of lockedMembers) {
+      expect(bs.active.has(bt), `排除表成员 ${String(bt)} 不应被护士清除`).toBe(true);
+    }
+  });
+  it('入集排除表成员的 vanilla id 全部对得上排除表（反漂移）', () => {
     for (const bt of BuffState.DEBUFFS) {
       const vid = vanillaIdOfBuff(bt);
-      expect(isNurseLockedBuff(vid),
-        `DEBUFFS 成员 ${String(bt)} (vanilla ${vid}) 落进护士排除表`).toBe(false);
+      if (isNurseLockedBuff(vid)) {
+        expect(NURSE_CANNOT_REMOVE_VANILLA.has(vid),
+          `DEBUFFS 成员 ${String(bt)} (vanilla ${vid}) 应在排除表`).toBe(true);
+      }
     }
   });
   it('全表 20 id 对拍（28,34,87,89,21,86,199,332,333,334,165,146,48,158,157,350,215,147,321,43）', () => {

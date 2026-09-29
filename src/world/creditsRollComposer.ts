@@ -82,7 +82,7 @@ export type Seg =
   | { k: 'text'; peak: number; text: string; ax: number; ay: number }
   | { k: 'npc'; t: number; type: number; dx: number; dy: number; acts: Anim }
   | { k: 'spr'; t: number; tex: string; dx: number; dy: number; flip?: boolean;
-      originBottom: boolean; frames?: number; acts: Anim }
+      originBottom: boolean; frames?: number; ox?: number; oy?: number; acts: Anim }
   | { k: 'emote'; t: number; id: number; dur: number; dx: number; dy: number;
       flip?: boolean; vel?: Vec }
   | { k: 'player'; t: number; dx: number; dy: number; acts: Anim };
@@ -131,23 +131,26 @@ function enter(an: Anim, look?: number): Anim {
   return an;
 }
 
-/** SpriteSegment 捷径。originBottom=true → origin (w/2,h)（原文 Size*(0.5,1) 系）；
+/** SpriteSegment 捷径。originBottom=true → origin (w/2+ox, h+oy)（原文
+ *  Size*(0.5,1)+(ox,oy) 系；★BJ409⑤ ox/oy 归位为 origin 加项——此前把 (ox,oy)
+ *  折进位置且取纯底 origin = 双重错位：底边 vanilla=P.y−oy vs 旧=P.y+oy）；
  *  false → origin (w/2,h/2)（原文 source=null 系）。frames = Frame(1,n) 纵向帧数 */
 function spr(out: Seg[], t: number, tex: string, anchor: Vec, dx: number, dy: number,
-  opts: { flip?: boolean; frames?: number; originBottom?: boolean } | undefined,
+  opts: { flip?: boolean; frames?: number; originBottom?: boolean; ox?: number; oy?: number } | undefined,
   build: (an: Anim) => void): Anim {
   const an = new Anim();
   build(an);
   out.push({ k: 'spr', t, tex, dx: anchor.x + dx, dy: anchor.y + dy,
-    flip: opts?.flip, frames: opts?.frames, originBottom: opts?.originBottom ?? true, acts: an });
+    flip: opts?.flip, frames: opts?.frames, originBottom: opts?.originBottom ?? true,
+    ox: opts?.ox, oy: opts?.oy, acts: an });
   return an;
 }
 
-/** 背景画板（Extra_2xx 512²）：位置 = sceneAnchor + _backgroundOffset + (ox,oy)
- *  （原文 DrawData origin = Size*(0.5,1)+(ox,oy)，ox 常为场景 X 修正 num2、oy=-42）*/
+/** 背景画板（Extra_2xx）：位置 = sceneAnchor + _backgroundOffset（原文 verbatim）；
+ *  origin = Size*(0.5,1)+(ox,oy)（ox 常为场景 X 修正 num2、oy=-42）★BJ409⑤ */
 function bg(out: Seg[], tex: string, t: number, anchor: Vec, ox: number, oy: number,
   build?: (an: Anim) => void): Anim {
-  return spr(out, t, tex, anchor, BG_OFFSET.x + ox, BG_OFFSET.y + oy, { originBottom: true },
+  return spr(out, t, tex, anchor, BG_OFFSET.x, BG_OFFSET.y, { originBottom: true, ox, oy },
     build ?? ((an) => {
       an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 60 });
     }));
@@ -303,12 +306,18 @@ function spawnWaveNpc(out: Seg[], startTime: number, anchor: Vec, type: number,
       .then({ a: 'wait', d: 90 - num5 });
     an.then({ a: 'fade', per: 3, dur: 85 });          // :310 Fade(3,85)
     if (type === 663) {
-      // AddEmote(..., blinkTime=num5, emoteId 17, lookDirection)（:311-313）
-      emote(out, 17, startTime, totalSceneTime - num5, anchor, sx * 26, sy * 24, look === 1, look === 1);
+      // AddEmote(pos, fromTime, duration, blinkTime=num5, 17, lookDirection)
+      // （:311-313）→ EmoteSegment(17, fromTime+duration-blinkTime, 60, pos+RIGHT,
+      // flip=direction==1)——★BJ409④ 窗/侧归位：目标帧=收场前 num5 帧的 60t 气泡
+      // （此前误用 [start, start+dur-num5) 长窗）+ 偏移恒 RIGHT（原文
+      // AddEmote 硬编码 _emoteBubbleOffsetWhenOnRight,方向经 flip 表达）
+      emote(out, 17, startTime + totalSceneTime - num5, 60, anchor, sx * 26, sy * 24, false, look === 1);
     }
     if (emoteId >= 0) {
-      // AddEmote(..., duration2, num10, num9)（:314-316）——flip = num9==1
-      emote(out, emoteId, startTime, duration2, anchor, sx * 26, sy * 24, num9 === 1, num9 === 1);
+      // AddEmote(pos, fromTime, duration2, 0, num10, num9)（:314-316）→
+      // EmoteSegment(num10, fromTime+duration2, 60, pos+RIGHT, flip=num9==1)
+      // ★BJ409④ 同上（此前误用 [start, start+duration2) 长窗）
+      emote(out, emoteId, startTime + duration2, 60, anchor, sx * 26, sy * 24, false, num9 === 1);
     }
   });
 }
@@ -318,7 +327,11 @@ function princessAndEveryone(out: Seg[], startTime: number, anchorIn: Vec): numb
   const num3 = 240;
   const num4 = 400;
   const num5 = num4 + num3;                               // 640 场景总长
-  spr(out, startTime, 'Extra_241', anchor, 0, -92, { originBottom: true }, (an) => {
+  // 背景画板（:200-204）：位置 = sceneAnchorPosition（verbatim,无附加偏移）；
+  // origin = Size*(0.5,1)+(0,-92) → 底边恰在 anchor.y（=人群脚线）。
+  // ★BJ409⑤ 此前误折成位置 (0,-92)+纯底 origin = 底边抬高 92px（画板悬空,
+  // 群像脚下无台）
+  spr(out, startTime, 'Extra_241', anchor, 0, 0, { originBottom: true, oy: -92 }, (an) => {
     an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 51 })
       .then({ a: 'wait', d: num5 }).then({ a: 'fade', target: 0, dur: 85 });
   });
@@ -594,7 +607,10 @@ function playDryadSayingByeToTavernKeep(out: Seg[], startTime: number, anchorIn:
     enter(an, 1).then({ a: 'move', vx: -1, vy: 0, d: 120 });
   });
   spr(out, startTime, 'Extra_240', anchor, num4, 2, { frames: 8 }, (an) => {
-    an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 51 });
+    an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 51 })
+      // :429 门板.Then(SetFrameSequence(num-startTime=770, 8 帧, 5))——窗延伸兼
+      // 8 帧弹跳动画（★BJ409⑥ 此前漏装=门段窗 0,酒馆门整场不可见）
+      .then({ a: 'framesFor', frames: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7]], tpf: 5, d: 770 });
   });
   num += dry.time;
   const num6 = 90;
@@ -902,7 +918,7 @@ function playSkeletonMerchantSearchesThroughBones(out: Seg[], startTime: number,
   const skel = npc(out, startTime, 453, anchor, num4, 0, (an) => {
     enter(an, 1).then({ a: 'move', vx: 1, vy: 0, d: 60 });
   });
-  const bone = spr(out, startTime, 'Extra_227', anchor, num3, 2, { originBottom: false }, (an) => {
+  const bone = spr(out, startTime, 'Extra_227', anchor, num3, 2, { originBottom: true }, (an) => {
     an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 51 }).then({ a: 'wait', d: 60 });
   });
   num += skel.time;
@@ -912,7 +928,7 @@ function playSkeletonMerchantSearchesThroughBones(out: Seg[], startTime: number,
   bone.then({ a: 'wait', d: num5 });
   bg1.then({ a: 'wait', d: num5 });
   num += num5;
-  const chest = spr(out, num, 'Extra_228', anchor, num3 - 10, 4, { flip: true, frames: 14, originBottom: false }, (an) => {
+  const chest = spr(out, num, 'Extra_228', anchor, num3 - 10, 4, { flip: true, frames: 14, originBottom: true }, (an) => {
     an.then({ a: 'frames', frames: [[0, 1], [0, 2], [0, 3], [0, 4]], tpf: 5 });
   });
   skel.then({ a: 'wait', d: 20 }).with({ a: 'fade', target: 255 });
@@ -1074,7 +1090,7 @@ function playWitchDoctorGoingToHisPeople(out: Seg[], startTime: number, anchorIn
     enter(an).then({ a: 'wait', d: 120 });
   });
   const liana = spr(out, startTime, 'NPC_199', anchor, num3 * 3 - 20 + 120, 4,
-    { frames: 8, originBottom: false }, (an) => {
+    { frames: 8, originBottom: true }, (an) => {
       an.then({ a: 'frame', x: 0, y: 3 }).then({ a: 'fade', target: 0 })
         .with({ a: 'fade', target: 1, dur: 25 })
         .then({ a: 'gravity', v0: { x: -1, y: 0 }, g: { x: 0, y: 0 }, rot: 0, d: 120 })
@@ -1146,16 +1162,19 @@ function playSteampunkerRepairingCyborg(out: Seg[], startTime: number, anchorIn:
   const num2 = 30;
   anchor.x += num2;
   const num3 = 60;
-  const bg1 = spr(out, num, 'Extra_232', anchor, BG_OFFSET.x + num2, BG_OFFSET.y - 42, { originBottom: true }, (an) => {
+  // ★BJ409⑤：两块背景画板 origin = Size*(0.5,1)+(num2,-42)、位置 verbatim
+  // _backgroundOffset（:470-481）；齿轮/机械臂 origin = Size*(0.5,1) 系底锚
+  // （:483-492——此前误标 originBottom:false=中心锚,半高悬空）
+  const bg1 = spr(out, num, 'Extra_232', anchor, BG_OFFSET.x, BG_OFFSET.y, { originBottom: true, ox: num2, oy: -42 }, (an) => {
     an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 60 }).then({ a: 'wait', d: 60 });
   });
-  const bg2 = spr(out, num, 'Extra_233', anchor, BG_OFFSET.x + num2, BG_OFFSET.y - 42, { originBottom: true }, (an) => {
+  const bg2 = spr(out, num, 'Extra_233', anchor, BG_OFFSET.x, BG_OFFSET.y, { originBottom: true, ox: num2, oy: -42 }, (an) => {
     an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 60 }).then({ a: 'wait', d: 60 });
   });
-  const gear = spr(out, num, 'Extra_230', anchor, 0, 4, { frames: 21, originBottom: false }, (an) => {
+  const gear = spr(out, num, 'Extra_230', anchor, 0, 4, { frames: 21, originBottom: true }, (an) => {
     an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 60 }).then({ a: 'wait', d: 60 });
   });
-  const arm = spr(out, num, 'Extra_229', anchor, num3, 4, { frames: 2, originBottom: false }, (an) => {
+  const arm = spr(out, num, 'Extra_229', anchor, num3, 4, { frames: 2, originBottom: true }, (an) => {
     an.then({ a: 'fade', target: 0 }).with({ a: 'fade', target: 1, dur: 60 }).then({ a: 'wait', d: 60 });
   });
   num += gear.time;

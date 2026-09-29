@@ -5,6 +5,7 @@
 //   + 物品类集合（PrefixLegacy.ItemSets / ItemID.Sets.CanGetPrefixes）。
 import prefixJson from './vanilla-prefix.json';
 import { itemCombat } from './vanillaItemCombat';
+import whipsJson from './vanilla-whips.json';
 
 export interface PrefixStat {
   dmg: number; kb: number; spd: number; size: number;
@@ -159,17 +160,48 @@ export function rollNaturalPrefix(pool: number[], rand: () => number,
   return rolled;
 }
 
-/** vid 域便捷包装：池（GetRollablePrefixes 顺序判定）+ itemCombat 面板（TryGet 校验
- *  输入——变体世界经 activeVariantStatsOfVid 覆写,与原版 SetDefaults 后 Prefix 同相）。
- *  isAccessory 由调用方以 isPrefixableAccessory(internalId) 判定（Inventory.ts 单源）。 */
+// ── ★BJ408（2026-09-29）TryGet 门 stat 面：itemCombat 提取器盲区回填（鞭系）──
+// vanilla-itemcombat.json 提取器只解析 case 内字面赋值;18 把鞭的全部数值都在
+// DefaultToWhip(实参) 形参链（Item.cs:47811-47826）里 → combat 表仅落 noUseGraphic
+// 一键（普查实证：5688/4672/5473-5480/5074/4911-4914/4678-4680 全缺 damage/
+// knockBack/useTime/useAnimation）。Prefix 链 TryGet 四门（Item.cs:1067-1079）读
+// damage/useAnimation/knockBack 真值——零值 stat 把鞭子前缀池（全 18 把 ∈
+// SwordsHammersAxesPicks → PrefixesForSwords,1457 PrefixLegacy.cs 对拍全等）压缩到
+// size-only 四档（Large/Massive/Tiny/Small）：重铸「最佳」误判「巨大」（用户实报
+// 私有物 5480）;自然掷（rollNaturalPrefixForVid）同病。回填源 = vanilla-whips.json
+// （已过 1457 recon 闸门 DRIFT=0;census 判据 = Player.cs:49150 鞭 use 分支 18 id
+// 全等 + Item.cs DefaultToWhip 各 case 实参）。★只回填前缀链读取面（本函数）,
+// 不动 itemCombat TABLE——shoot/useTime 等字段的外溢消费面（发射链/使用节奏/
+// tooltip）不属本刀,登记债（同族残余:弓/魔法 25 件 damage 缺提=另行立案）。
+const WHIPS = whipsJson as unknown as Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }>;
+
+/** Prefix 链 TryGet 四门输入（Item.cs:1067-1079 读 damage/useAnimation/mana/knockBack
+ *  = SetDefaults 后基面板）。非鞭 = itemCombat 原样;鞭系 = DefaultToWhip 形参回填
+ *  （vanilla-whips.json dmg/anim/kb;mana 鞭恒 0）。无条目返回 undefined（TryGet 全门
+ *  跳过,原版 0 面板同相）。rollNaturalPrefixForVid / Game.doReforge（roll+bestVal）
+ *  三面同本函数单源——掷域与最优档判定恒同相。 */
+export function prefixCombatStatForVid(
+  vid: number,
+): { damage: number; useAnimation: number; mana: number; kb: number } | undefined {
+  const st = itemCombat(vid);
+  const w = WHIPS[String(vid)];
+  if (!st && !w) return undefined;
+  return {
+    damage: st?.damage ?? w?.dmg ?? 0,
+    useAnimation: st?.useAnimation ?? w?.anim ?? 0,
+    mana: st?.mana ?? 0,
+    kb: st?.knockBack ?? w?.kb ?? 0,
+  };
+}
+
+/** vid 域便捷包装：池（GetRollablePrefixes 顺序判定）+ prefixCombatStatForVid 面板
+ * （TryGet 校验输入——变体世界经 activeVariantStatsOfVid 覆写,与原版 SetDefaults 后
+ *  Prefix 同相）。isAccessory 由调用方以 isPrefixableAccessory(internalId) 判定
+ * （Inventory.ts 单源）。 */
 export function rollNaturalPrefixForVid(vid: number, isAccessory: boolean, rand: () => number): number {
   const pool = rollablePrefixes(vid, isAccessory);
   if (!pool || !pool.length) return 0;
-  let stat: { damage: number; useAnimation: number; mana: number; kb: number } | undefined;
-  // 惰性引 itemCombat（vanillaItemCombat 无回环依赖;运行时全域可用）
-  const st = itemCombat(vid);
-  if (st) stat = { damage: st.damage ?? 0, useAnimation: st.useAnimation ?? 0, mana: st.mana ?? 0, kb: st.knockBack ?? 0 };
-  return rollNaturalPrefix(pool, rand, stat);
+  return rollNaturalPrefix(pool, rand, prefixCombatStatForVid(vid));
 }
 
 // ── ★BJ400（2026-09-29）重铸 -2 臂 1:1 通道（doReforge 保底掷,BJ394 登记债清偿）──

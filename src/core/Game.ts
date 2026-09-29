@@ -17,7 +17,7 @@ import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
 import { countDefenderMedalsAcross, spendDefenderMedalsAcross, defenderMedalSavingsOf } from '../stats/DefenderMedals';
 import { findExoticPlantSlot, rollDyeTraderReward } from '../stats/DyeTrade';
-import { PREFIX_NAMES, rollablePrefixes, prefixStat, prefixValueMul, formatPrefixedName, rollNaturalPrefixForVid, rollReforgePrefix, prefixTryGetFailsForItem } from '../data/vanillaPrefixes';
+import { PREFIX_NAMES, rollablePrefixes, prefixStat, prefixValueMul, formatPrefixedName, rollNaturalPrefixForVid, rollReforgePrefix, prefixTryGetFailsForItem, prefixCombatStatForVid } from '../data/vanillaPrefixes';
 import { TILE, CHUNK, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -126,6 +126,7 @@ import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorl
 import { LanternNight } from '../world/LanternNight';
 import { creditsRoll } from '../world/CreditsRoll';   // IIII232 制作组名单事件
 import { getCreditsRollFill } from '../world/creditsRollComposer';
+import { tickCreditsRollSky } from '../ui/CreditsRollOverlay';   // ★BJ409:CreditsRollSky.Update 消费口（60Hz 固定档）
 import {
   setFireFlyChance, cultistRitualUpdateTime, cultistTabletDestroyed, cultistWorldClear,
   mysticLogs, type CultistHost, type FairyHost,
@@ -10610,6 +10611,11 @@ export class Game implements GameHooks {
     // 与 :64427-:64434 链同域——原文 UpdateTime 注释"纯客户端演出数值→不适用"系
     // 未实装登记，本批接）——remaining = Clamp(remaining-1, 0, 28800)，无运行条件门
     creditsRoll.updateTime();
+    // ★BJ409：CreditsRollSky.Update（原版 = Main.cs:17317 SkyManager.Instance.Update
+    // 每 Main.Update 帧）——演出时钟 _currentTime++/透明度斜坡随本 60Hz 固定档推进
+    // （此前挂 overlay 自有 rAF=随显示器刷新率漂移,120Hz 屏 2×速）。渲染端在
+    // Renderer 背景段 DrawRemainingDepth 等价位（drawCreditsRollSky）。
+    tickCreditsRollSky();
     // CultistRitual.UpdateTime（Main.cs:64427 每帧位）。房主权威——访客不跑世界事件计时
     if (!this.net || this.net.policy.isHost) {
       // TabletDestroyed 账（NPC.cs:37206,★X5 新债#4 勘误:旧引 :38881 无关行;
@@ -48391,11 +48397,12 @@ private static readonly BOULDER_SUPPORT_SHEETS = BOULDERS_SHEETS;
     //   恒复位 -1 → :532 RollAPrefix → :1067-1079 TryGet 四失败门掷废重进环 +
     //   :551-554 rolled==0 重掷）——旧 rollPrefix 直掷通道无门=0kb 武器（吹管/
     //   星炮/雪球炮族）可掷 kb 假词缀。stat 读法与 BJ390 rollNaturalPrefixForVid
-    //   同源（itemCombat 面板=ResetPrefix 后基面板;本仓 item 域无词缀增量模型同相）
-    const st = itemCombat(vid);
-    const stat = st
-      ? { damage: st.damage ?? 0, useAnimation: st.useAnimation ?? 0, mana: st.mana ?? 0, kb: st.knockBack ?? 0 }
-      : undefined;
+    //   同源（prefixCombatStatForVid=SetDefaults 后基面板;本仓 item 域无词缀增量
+    //   模型同相）。★BJ408（2026-09-29）：改读 prefixCombatStatForVid——鞭系
+    //   itemCombat 仅落 noUseGraphic（DefaultToWhip 形参链提取盲区）,零值 stat 把
+    //   TryGet 门压成 size-only 四档,「私有物」重铸最佳误判「巨大」;自然掷/重铸掷/
+    //   bestVal 三面同函数单源（vanillaPrefixes.ts BJ408 块）。
+    const stat = prefixCombatStatForVid(vid);
     item.prefix = rollReforgePrefix(pool, Math.random, stat);
     // 最优档判定（Item.cs:505-576 Prefix(-2,out rolledPrefixIsTopTier)）：
     //   num = BestPrefixValue()（Item.cs:1083-1099 可掷池内【TryGet 通过者】的 value
